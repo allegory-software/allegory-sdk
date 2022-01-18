@@ -1,0 +1,43 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	local C="$C
+	-DHAVE_STDINT_H
+	-DHAVE_ZLIB
+	-DHAVE_WZAES
+	-DHAVE_PKCRYPT
+	-DMZ_ZIP_SIGNING
+	src/mz_crypt.c
+	src/mz_os.c
+	src/mz_strm.c
+	src/mz_strm_buf.c
+	src/mz_strm_mem.c
+	src/mz_strm_pkcrypt.c
+	src/mz_strm_split.c
+	src/mz_strm_wzaes.c
+	src/mz_strm_zlib.c
+	src/mz_zip.c
+	src/mz_zip_rw.c
+	"
+	${X}gcc -c -msse3 -msse4.1 -O3 $C -Isrc -I../zlib/src
+	${X}gcc *.o -shared -o ../../bin/$P/$D -L../../bin/$P -lz $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	C="src/mz_os_win32.c src/mz_strm_os_win32.c src/mz_crypt_win32.c
+	-D_WIN32_WINNT=0x601 -DWINVER=0x601" P=windows L="-s -static-libgcc -lcrypt32" \
+	D=minizip2.dll A=minizip2.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx64 C="-arch x86_64 src/mz_crypt_apple.c src/mz_strm_os_posix.c src/mz_os_posix.c" \
+	L="-arch x86_64 -install_name @rpath/libminizip2.dylib
+		-framework CoreFoundation -framework Security -liconv" \
+	D=libminizip2.dylib A=libminizip2.a build
+else
+	C="-fPIC src/mz_crypt_openssl.c src/mz_strm_os_posix.c src/mz_os_posix.c" \
+	P=linux L="-s -static-libgcc -Wl,--unresolved-symbols=report-all -lssl -lcrypto" \
+	D=libminizip2.so A=libminizip2.a build
+fi

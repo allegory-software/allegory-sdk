@@ -1,0 +1,29 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c src/*.c src/compat/*.c -Isrc -I../bearssl/src/inc -O2 -fPIC $C \
+		-Wall -D_GNU_SOURCE -D_POSIX_SOURCE
+	${X}gcc *.o -g -shared -o ../../bin/$P/$D -L../../bin/$P -lbearssl $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows C="-D_WIN32_WINNT=0x601 -DWINVER=0x601" \
+	L="-s -static-libgcc -lws2_32 -Wl,-Bstatic -lpthread" \
+	D=tls_bearssl.dll A=tls_bearssl.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx64 C="-arch x86_64 mz_crypt_apple.c mz_strm_os_posix.c mz_os_posix.c" \
+	L="-arch x86_64 -install_name @rpath/libminizip2.dylib
+		-framework CoreFoundation -framework Security -liconv" \
+	D=libminizip2.dylib A=libminizip2.a build
+else
+	C="
+	-DHAVE_STRSEP
+	-DHAVE_STPCPY
+	-DHAVE_EXPLICIT_BZERO
+	" P=linux L="-s -static-libgcc" \
+	D=libtls_bearssl.so A=libtls_bearssl.a build
+fi

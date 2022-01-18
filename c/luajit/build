@@ -1,0 +1,59 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+set -e
+cd src/src || exit 1
+
+build() {
+
+	local CFLAGS="$CFLAGS \
+	-msse4.2 \
+	-DALLEGORY_BUILD \
+	-DLUAJIT_ENABLE_GC64 \
+	-DLUAJIT_ENABLE_LUA52COMPAT \
+	-DLUA_PATH_DEFAULT='\"$LUA_PATH_DEFAULT\"'  \
+	-DLUA_CPATH_DEFAULT='\"$LUA_CPATH_DEFAULT\"' \
+	"
+
+	local bindir=../../../../bin/$P
+
+	make clean
+	make HOST_CC=gcc amalg Q=" " CFLAGS="$CFLAGS"
+
+	[ "$X0" ] || X0=$X; cp -f $X0 "$bindir/$X"
+	[ "$D0" ] || D0=$D; cp -f $D0 "$bindir/$D"
+
+	local J=$bindir/../../lua/jit
+	mkdir -p $J
+	cp -f jit/*.lua $J/
+	rm -f $J/dis_mips*.lua
+	rm -f $J/dis_arm*.lua
+	rm -f $J/dis_ppc.lua
+	rm -f $J/dis_x86.lua
+	cp -f jit/vmdef.lua $J/vmdef_$P.lua
+	cp -f ../../vmdef.lua $J/vmdef.lua
+
+	[ "$OSTYPE" = "msys" ] && {
+		make clean
+		make HOST_CC=gcc amalg Q=" " BUILDMODE=static CFLAGS="$CFLAGS"
+	}
+
+	cp -f libluajit.a $bindir/$A
+
+	make clean
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	export LUA_PATH_DEFAULT="!\\\\..\\\\..\\\\lua\\\\?.lua"
+	export LUA_CPATH_DEFAULT="!\\\\clib\\\\?.dll"
+	P=windows LDFLAGS=-static-libgcc \
+	X=luajit.exe D=lua51.dll A=luajit.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	echo NYI
+else
+	export LUA_PATH_DEFAULT="!/../../lua/?.lua"
+	export LUA_CPATH_DEFAULT="!/clib/?.so"
+	P=linux CFLAGS="-pthread" \
+	LDFLAGS="-pthread -s -static-libgcc -Wl,--disable-new-dtags -Wl,-rpath,'\$\$ORIGIN'" \
+	X=luajit D=libluajit.so A=libluajit.a build
+fi
