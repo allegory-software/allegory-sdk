@@ -1,0 +1,30 @@
+#go@ plink d10 sdk/c/pillow_simd/build
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -O3 -mavx2 -c -Isrc/src/libImaging -I. $C \
+		-DHAVE_PROTOTYPES \
+		-DSTDC_HEADERS \
+		-DSIZEOF_SHORT=2 \
+		-DSIZEOF_INT=4 \
+		-DSIZEOF_LONG_LONG=8 \
+		src/src/libImaging/Resample.c \
+		src/src/libImaging/Storage.c \
+		src/src/libImaging/Copy.c \
+		src/src/libImaging/Palette.c \
+		Python.c
+	${X}gcc *.o -shared -o ../../bin/$P/$D $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc" D=pillow_simd.dll A=pillow_simd.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx64 C="-arch x86_64 -DSIZEOF_LONG=8" L="-arch x86_64 -install_name @rpath/libboxblur.dylib" \
+	D=libpillow_simd.dylib A=libpillow_simd.a build
+else
+	P=linux C=-fPIC L="-s -static-libgcc -DSIZEOF_LONG=8" D=libpillow_simd.so A=libpillow_simd.a build
+fi

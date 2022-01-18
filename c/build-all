@@ -1,0 +1,14 @@
+bearssl/build
+blake2/build
+cjson/build
+ldecnumber/build
+libjpeg/build
+libspng/build
+libtls_bearssl/build
+lpeglabel/build
+luajit/build
+lz4/build
+minizip2/build
+sha2/build
+xxhash/build
+zlib/build

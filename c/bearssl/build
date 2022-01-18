@@ -1,0 +1,22 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c -g src/src/*/*.c -W -Wall -O2 -fPIC -Isrc/src -Isrc/inc
+	${X}gcc -g *.o -shared -o ../../bin/$P/$D -L../../bin/$P $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	C="-D_WIN32_WINNT=0x601 -DWINVER=0x601" P=windows L="-s -static-libgcc" \
+	D=bearssl.dll A=bearssl.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx64 C="-arch x86_64 mz_crypt_apple.c mz_strm_os_posix.c mz_os_posix.c" \
+	L="-arch x86_64 -install_name @rpath/libminizip2.dylib
+		-framework CoreFoundation -framework Security -liconv
+	" D=libminizip2.dylib A=libminizip2.a build
+else
+	P=linux L="-s -static-libgcc" D=libbearssl.so A=libbearssl.a build
+fi

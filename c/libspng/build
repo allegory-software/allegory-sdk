@@ -1,0 +1,19 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c -O3 -DSPNG_SSE=4 $C src/spng/*.c premultiply.c -Isrc/spng -I../zlib/src
+	${X}gcc *.o -shared -o ../../bin/$P/$D -L../../bin/$P -lz $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc" D=spng.dll A=spng.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	echo NYI
+else
+	P=linux C="-fPIC -U_FORTIFY_SOURCE" L="-s -static-libgcc" \
+	D=libspng.so A=libspng.a build
+fi

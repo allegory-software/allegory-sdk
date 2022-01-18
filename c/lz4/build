@@ -1,0 +1,19 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c -O3 -std=c99 -pedantic $C src/lib/lz4*.c -I. -I../xxhash
+	${X}gcc *.o -shared -lxxhash -o ../../bin/$P/$D $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc -L../../bin/windows" D=lz4.dll A=lz4.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	echo NYI
+else
+	P=linux C="-fPIC" L="-s -static-libgcc -L../../bin/linux" \
+	D=liblz4.so A=liblz4.a build
+fi

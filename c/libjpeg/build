@@ -1,0 +1,31 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	src_dir="$PWD/src"
+	rm -rf "$B"
+	mkdir -p "$B"
+	cd "$B" || exit 1
+	cmake -G "$M" "$src_dir"
+	make clean
+	make jpeg
+	strip "$B/$DI"
+	cp -f "$B/$DI" "$src_dir/../../../bin/$P/$D"
+	make jpeg-static
+	cp -f "$B/$AI" "$src_dir/../../../bin/$P/$A"
+	make clean
+	cd "$src_dir"
+	rm -rf "$B"
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	B="$PWD/out" M="MSYS Makefiles" \
+	DI=libjpeg-62.dll D=jpeg.dll AI=libjpeg.a A=jpeg.a \
+	P=windows build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	echo NYI
+else
+	B="$HOME/libjpegturbo-out" M="Unix Makefiles" \
+	DI=libjpeg.so D=libjpeg.so AI=libjpeg.a A=libjpeg.a \
+	P=linux build
+fi

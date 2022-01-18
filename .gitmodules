@@ -1,0 +1,42 @@
+[submodule "c/luajit/src"]
+	path = c/luajit/src
+	url = git@github.com:allegory-software/allegory-sdk-luajit.git
+[submodule "c/zlib/src"]
+	path = c/zlib/src
+	url = git@github.com:allegory-software/allegory-sdk-zlib
+[submodule "c/xxhash/src"]
+	path = c/xxhash/src
+	url = git@github.com:allegory-software/allegory-sdk-xxhash.git
+[submodule "c/blake2/src"]
+	path = c/blake2/src
+	url = git@github.com:allegory-software/allegory-sdk-libb2.git
+[submodule "c/cjson/src"]
+	path = c/cjson/src
+	url = git@github.com:allegory-software/allegory-sdk-lua-cjson.git
+[submodule "c/ldecNumber/src"]
+	path = c/ldecnumber/src
+	url = git@github.com:allegory-software/allegory-sdk-ldecnumber.git
+[submodule "c/libjpeg/src"]
+	path = c/libjpeg/src
+	url = git@github.com:allegory-software/allegory-sdk-libjpeg-turbo.git
+[submodule "c/libspng/src"]
+	path = c/libspng/src
+	url = git@github.com:allegory-software/allegory-sdk-libspng.git
+[submodule "c/lpeglabel/src"]
+	path = c/lpeglabel/src
+	url = git@github.com:allegory-software/allegory-sdk-lpeglabel.git
+[submodule "c/minizip2/src"]
+	path = c/minizip2/src
+	url = git@github.com:allegory-software/allegory-sdk-minizip-ng.git
+[submodule "c/bearssl/src"]
+	path = c/bearssl/src
+	url = git@github.com:allegory-software/allegory-sdk-bearssl.git
+[submodule "c/libtls_bearssl/src"]
+	path = c/libtls_bearssl/src
+	url = git@github.com:allegory-software/allegory-sdk-libtls-bearssl.git
+[submodule "c/lz4/src"]
+	path = c/lz4/src
+	url = git@github.com:allegory-software/allegory-sdk-lz4.git
+[submodule "c/pillow_simd/src"]
+	path = c/pillow_simd/src
+	url = git@github.com:capr/pillow-simd.git

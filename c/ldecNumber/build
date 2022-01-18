@@ -1,0 +1,30 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+files="
+src/decNumber/decContext.c
+src/decNumber/decNumber.c
+src/decNumber/decPacked.c
+src/decNumber/decimal128.c
+src/decNumber/decimal32.c
+src/decNumber/decimal64.c
+src/ldecNumber.c
+"
+
+build() {
+	${X}gcc -c -O2 $C $files -Isrc -Isrc/decNumber -I../lua-headers
+	${X}gcc *.o -shared -o ../../bin/$P/clib/$D $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc -L../../bin/windows -llua51" \
+	D=ldecnumber.dll A=ldecnumber.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	echo NYI
+else
+	P=linux C="-fPIC" L="-s -static-libgcc -L../../bin/linux -lluajit" \
+	D=ldecnumber.so A=libldecnumber.a build
+fi
