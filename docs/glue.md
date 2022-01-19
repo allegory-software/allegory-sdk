@@ -586,16 +586,8 @@ objects only and always!
 ### `glue.weaktuples([narg]) -> f(...) -> t`
 
 Create a tuple space, which is a function that returns the same identity `t`
-for the same list of arguments. It is implemented as:
+for the same list of arguments.
 
-```lua
-local tuple_mt = {__call = glue.unpack}
-function glue.tuples(...)
-	return glue.memoize(function(...)
-		return setmetatable(glue.pack(...), tuple_mt)
-	end, ...)
-end
-```
 Tuples are immutable lists that can be used as table keys because they have
 value semantics since the tuple constructor returns the same identity for
 the exact same list of identities.

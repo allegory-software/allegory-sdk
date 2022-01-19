@@ -673,7 +673,7 @@ function glue.collect(n,...)
 	end
 end
 
---closures -------------------------------------------------------------------
+--caching --------------------------------------------------------------------
 
 --no-op filters.
 function glue.pass(...) return ... end
