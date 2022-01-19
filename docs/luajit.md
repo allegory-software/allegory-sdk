@@ -6,7 +6,8 @@ This is OpenResty's LuaJIT 2.1 fork, which means the base language is
 extensions:
 
   * [LuaJIT's bit, ffi and jit modules](http://luajit.org/extensions.html#modules)
-  * [LuaJIT's extensions from Lua 5.2](http://luajit.org/extensions.html#lua52),
+  * [LuaJIT's extensions](http://luajit.org/extensions.html#lua52)
+    from [Lua 5.2](http://www.lua.org/manual/5.2/manual.html),
     including those enabled with `DLUAJIT_ENABLE_LUA52COMPAT`
   * [LuaJIT's string.buffer module](https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html)
   * [OpenResty's extensions](https://github.com/openresty/luajit2#openresty-extensions)
