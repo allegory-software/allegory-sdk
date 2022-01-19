@@ -222,75 +222,12 @@ Count the keys in a table, optionally up to `maxn`.
 
 Switch table keys with values.
 
-#### Examples
-
-Extract a rfc850 date from a string. Use lookup tables for weekdays and months.
-
-```lua
-local weekdays = glue.index{'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'}
-local months = glue.index{'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'}
-
---weekday "," SP 2DIGIT "-" month "-" 2DIGIT SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP "GMT"
---eg. Sunday, 06-Nov-94 08:49:37 GMT
-function rfc850date(s)
-   local w,d,mo,y,h,m,s = s:match'([A-Za-z]+), (%d+)%-([A-Za-z]+)%-(%d+) (%d+):(%d+):(%d+) GMT'
-   d,y,h,m,s = tonumber(d),tonumber(y),tonumber(h),tonumber(m),tonumber(s)
-   w = assert(weekdays[w])
-   mo = assert(months[mo])
-   if y then y = y + (y > 50 and 1900 or 2000) end
-   return {wday = w, day = d, year = y, month = mo, hour = h, min = m, sec = s}
-end
-
-for k,v in pairs(rfc850date'Sunday, 06-Nov-94 08:49:37 GMT') do
-   print(k,v)
-end
-```
-
-Output
-
-	day	6
-	sec	37
-	wday	1
-	min	49
-	year	1994
-	month	11
-	hour	8
-
-
-Copy-paste a bunch of defines from a C header file and create an inverse
-lookup table to find the name of a value at runtime.
-
-```lua
---from ibase.h
-info_end_codes = {
-   isc_info_end             = 1,  --normal ending
-   isc_info_truncated       = 2,  --receiving buffer too small
-   isc_info_error           = 3,  --error, check status vector
-   isc_info_data_not_ready  = 4,  --data not available for some reason
-   isc_info_svc_timeout     = 64, --timeout expired
-}
-info_end_code_names = glue.index(info_end_codes)
-print(info_end_code_names[64])
-```
-
-Output
-
-	isc_info_svc_timeout
-
 ------------------------------------------------------------------------------
 
 ### `glue.keys(t[,sorted|cmp]) -> dt` <br> `glue.sortedkeys(t[,cmp]) -> dt`
 
 Make an array of all the keys of `t`, optionally sorted. The second arg
 can be `true`, `'asc'`, `'desc'` or a comparison function.
-
-#### Examples
-
-An API expects an array of things but you have them as keys in a table because
-you are indexing something on them.
-
-For instance, you have a table of the form `{socket = thread}` but
-`socket.select` wants an array of sockets.
 
 ------------------------------------------------------------------------------
 
@@ -308,29 +245,6 @@ Update a table with elements of other tables, overwriting any existing keys.
 
   * falsey arguments are skipped.
 
-#### Examples
-
-Create an options table by merging the options received as an argument
-(if any) over the default options.
-
-```lua
-function f(opts)
-   opts = glue.update({}, default_opts, opts)
-end
-```
-
-Shallow table copy:
-
-```lua
-t = glue.update({}, t)
-```
-
-Static multiple inheritance:
-
-```lua
-C = glue.update({}, A, B)
-```
-
 ------------------------------------------------------------------------------
 
 ### `glue.merge(dt,t1,...) -> dt`
@@ -338,14 +252,6 @@ C = glue.update({}, A, B)
 Update a table with elements of other tables skipping on any existing keys.
 
   * falsey arguments are skipped.
-
-#### Examples
-
-Normalize a data object with default values:
-
-```lua
-glue.merge(t, defaults)
-```
 
 ------------------------------------------------------------------------------
 
@@ -492,18 +398,6 @@ the elements.
   * captures are allowed in sep and they are returned after the element,
     except for the last element for which they don't match (by definition).
 
-#### Examples
-
-```lua
-for s in glue.gsplit('Spam eggs spam spam and ham', '%s*spam%s*') do
-   print('"'..s..'"')
-end
-
-> "Spam eggs"
-> ""
-> "and ham"
-```
-
 ------------------------------------------------------------------------------
 
 ### `glue.names('name1 ...') -> {'name1', ...}`
@@ -634,27 +528,6 @@ Iterate an iterator and collect its i'th return value of every step into an arra
 
   * i defaults to 1
 
-#### Examples
-
-Implementation of `keys()` and `values()` in terms of `collect()`
-
-```lua
-keys = function(t) return glue.collect(pairs(t)) end
-values = function(t) return glue.collect(2,pairs(t)) end
-```
-
-Collecting string matches:
-
-```lua
-s = 'a,b,c,'
-t = glue.collect(s:gmatch'(.-),')
-for i=1,#t do print(t[i]) end
-
-> a
-> b
-> c
-```
-
 ------------------------------------------------------------------------------
 
 ## Stubs
@@ -752,36 +625,6 @@ Set a table to inherit attributes from a parent table, or clear inheritance.
 
 If the table has no metatable and inheritance has to be set, not cleared,
 then make it one.
-
-#### Examples
-
-Logging mixin:
-
-```lua
-AbstractLogger = glue.inherit({}, function(t,k) error('abstract '..k) end)
-NullLogger = glue.inherit({log = function() end}, AbstractLogger)
-PrintLogger = glue.inherit({log = function(self,...) print(...) end}, AbstractLogger)
-
-HttpRequest = glue.inherit({
-   perform = function(self, url)
-      self:log('Requesting', url, '...')
-      ...
-   end
-}, NullLogger)
-
-LoggedRequest = glue.inherit({log = PrintLogger.log}, HttpRequest)
-
-LoggedRequest:perform'http://lua.org/'
-
-> Requesting	http://lua.org/	...
-```
-
-Defining a module in Lua 5.2
-
-```lua
-_ENV = glue.inherit({},_G)
-...
-```
 
 To get the effect of static (single or multiple) inheritance, use `glue.update`.
 
@@ -1200,12 +1043,10 @@ local foobar = glue.readfile(glue.bin .. '/' .. file_near_this_script)
 
 #### Caveats
 
-This only works if glue itself can already be found and required
-(chicken/egg problem). Also, the path is relative to the current directory,
-so this stops working as soon as the current directory is changed.
-Also, depending on how the process was started, this information might be
-missing or wrong since it's set by the parent process. Better use
-[fs].exedir which has none of these problems.
+The path is relative to the current directory, so this stops working as soon
+as the current directory is changed. Also, depending on how the LuaJIT process
+was started, this information might be missing or wrong since it's set by the
+parent process. Better use `fs.exedir` which has none of these problems.
 
 ------------------------------------------------------------------------------
 
@@ -1314,7 +1155,7 @@ Convert the address of a pointer into a Lua number (or possibly string
 on 64bit platforms). This is useful for:
 
   * hashing on pointer values (i.e. using pointers as table keys)
-  * moving pointers in and out of Lua states when using [luastate]
+  * moving pointers in and out of Lua states when using [luastate](luastate.md)
 
 ### `glue.ptr([ctype,]number|string) -> ptr`
 
