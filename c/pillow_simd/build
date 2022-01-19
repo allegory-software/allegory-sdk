@@ -1,4 +1,3 @@
-#go@ plink d10 sdk/c/pillow_simd/build
 #!/bin/sh
 cd "${0%build}" || exit 1
 
