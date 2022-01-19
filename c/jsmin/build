@@ -1,0 +1,19 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c -O2 $C *.c -I. -I../lua-headers -Wall -pedantic
+	${X}gcc *.o -shared -o ../../bin/$P/clib/$D -L../../bin/$P $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc -llua51" D=jsmin.dll A=jsmin.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx64 C="-arch x86_64" L="-arch x86_64 -undefined dynamic_lookup" \
+	D=jsmin.so A=jsmin.a build
+else
+	P=linux C=-fPIC L="-s -static-libgcc" D=jsmin.so A=libjsmin.a build
+fi
