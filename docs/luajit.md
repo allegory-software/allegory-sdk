@@ -52,11 +52,11 @@ the more reliable `fs.exedir` if you can have [fs] as a dependency.
 
 ### Finding Lua modules
 
-`!\..\..\?.lua;!\..\..\?\init.lua` was added to the default `package.path`
-in `luaconf.h`. This allows Lua modules to be found regardless of what
-the current directory is, making the distribution portable.
+`package.path` was modified to `!\..\..\?.lua` (set in `luaconf.h`).
+This allows Lua modules to be found regardless of what the current directory
+is, making the distribution portable.
 
-The default `package.cpath` was also modified from `!\?.dll` to `!\clib\?.dll`.
+The default `package.cpath` was also modified to `!\clib\?.dll`.
 This is to distinguish between Lua/C modules and other binary dependencies
 and avoid name clashes on Windows where shared libraries are not prefixed
 with `lib`.
@@ -65,15 +65,8 @@ The `!` symbol was implemented for Linux and OSX too.
 
 #### The current directory
 
-Lua modules (including Lua/C modules) are searched for in the current
-directory ___first___ (on any platform), so the isolation from the host
-system is not absolute.
-
-This is the Lua's default setting and although it's arguably a security risk,
-it's convenient for when you want to have a single Lua module tree, possibly
-added to the system PATH, to be shared between many apps. In this case,
-starting luajit in the directory of the app makes the app's modules
-accessible automatically.
+Lua modules (including Lua/C modules) are **not** searched for in the current
+directory, unlike standard Lua behavior.
 
 ### Finding shared libraries
 
@@ -89,9 +82,9 @@ Linux binaries are built with `rpath=$ORIGIN` which makes ldd look for
 shared objects in the directory of the exe first.
 
 `-Wl,--disable-new-dtags` was also used so that it's `RPATH` not `RUNPATH`
-that is being set, which makes `dlopen()` work the same from dynamically
-loaded code too (this enables eg. `terralib.linklibrary` to link against
-libraries by name alone). I'm biting my tongue so hard here...
+that is being set, which makes `dlopen()` work the same when called from
+dynamically loaded code too (this enables eg. `terralib.linklibrary` to link
+against libraries by name alone). I'm biting my tongue so hard here...
 
 #### OSX
 

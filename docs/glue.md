@@ -910,7 +910,7 @@ the functionality of `__index` while `__index` is being used for getters.
 ### `glue.canopen(file[, mode]) -> filename | nil`
 
 Checks whether a file exists and it's available for reading or writing.
-The `mode` arg is the same as for [io.open] and defaults to 'rb'.
+The `mode` arg is the same as for `io.open` and defaults to 'rb'.
 
 ------------------------------------------------------------------------------
 
@@ -983,7 +983,7 @@ apparently time didn't exist before UNIX. At least they don't suffer from
 Y2038 so that's that.
 
 __NOTE:__ `os.time()` has second accuracy (so those timestamps are integers).
-For sub-second accuracy use the [time] module.
+For sub-second accuracy use the [time](time.md) module.
 
 ------------------------------------------------------------------------------
 
@@ -1192,8 +1192,6 @@ foo.baz(...) -- foo_extra was now loaded automatically
 Get the script's directory. This allows finding files in the script's
 directory regardless of the directory that Lua is started in.
 
-For executables created with [bundle], this is the executable's directory.
-
 #### Example
 
 ```lua
@@ -1371,7 +1369,7 @@ unfamiliar new names/semantics, even when those would be more clear.
 
 ## Semantics
 
-Follow the general [API design](PROGRAMMING.md) rules.
+Follow the general [API design](../PROGRAMMING.md) rules.
 
 ### Objects vs glue
 
@@ -1407,12 +1405,6 @@ a self-contained DSL with radically different syntax and semantics than the
 surrounding code. Eg. it's easier to read a Lua string pattern or an embedded
 SQL string than it is to read expressions involving `bind` and `compose`
 which force you to simulate the equivalent Lua syntax in your head.
-
-Sugars like "message %s" % arg are the good ones: % is odd enough to put after
-a string constant that it has an idiomatic quality, and its semantics is
-self-evident by reading the format string literal, even for someone who never
-heard of python's `%` operator. Also, a prefix notation is generally more
-readable than a function call.
 
 ## Implementation
 
