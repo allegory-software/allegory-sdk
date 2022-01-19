@@ -40,3 +40,6 @@
 [submodule "c/pillow_simd/src"]
 	path = c/pillow_simd/src
 	url = git@github.com:capr/pillow-simd.git
+[submodule "c/expat/src"]
+	path = c/expat/src
+	url = git@github.com:allegory-software/allegory-sdk-expat.git
