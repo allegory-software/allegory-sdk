@@ -145,9 +145,9 @@ cover different parts of the API.
 
 The list of currently supported pthreads implementations are:
 
-  * winpthreads 0.5.0 from Mingw-w64 4.9.2 (tested on WinXP 32bit and 64bit)
-  * libpthread from GNU libc (tested on Ubuntu 10.04, x86 and x64)
-  * libpthread from OSX (tested on OSX 10.9 with 32bit and 64bit binaries)
+  * winpthreads 9.0.0 from Mingw-w64 (tested on Windows 10 64bit)
+  * libpthread from GNU libc (tested on Ubuntu 10.04 x64)
+  * libpthread from OSX (tested on OSX 10.9 64bit)
 
 Only functionality that is common _to all_ of the above is available.
 Winpthreads dumbs down the API the most (no process-shared objects,
