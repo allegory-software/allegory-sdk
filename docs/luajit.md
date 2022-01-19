@@ -11,12 +11,13 @@ extensions:
     including those enabled with `DLUAJIT_ENABLE_LUA52COMPAT`
   * [LuaJIT's string.buffer module](https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html)
   * [OpenResty's extensions](https://github.com/openresty/luajit2#openresty-extensions)
-  * `package.exedir` module which returns the full path of the directory of the executable.
-  * `package.exepath` module which returns the full path of the executable.
-  * `LUA_PATH` and `LUA_CPATH` supports `'!'` in Linux and OSX too.
-  * `LUA_CPATH_DEFAULT` and `LUA_PATH_DEFAULT` were modified as described below.
-  * the `terra` module is loaded when running `.t` files from the command line.
-  * `SONAME` is not set in `libluajit.so`.
+  * our own extensions:
+    * `package.exedir` module which returns the full path of the directory of the executable.
+    * `package.exepath` module which returns the full path of the executable.
+    * `LUA_PATH` and `LUA_CPATH` supports `'!'` in Linux and OSX too.
+  * our own customizations:
+    * `package.path` and `package.cpath` were modified as described below.
+    * `SONAME` is not set in `libluajit.so`.
 
 ## What is included
 
