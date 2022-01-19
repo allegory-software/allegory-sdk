@@ -12,7 +12,7 @@ build() {
 if [ "$OSTYPE" = "msys" ]; then
 	P=windows L="-s -static-libgcc" D=md5.dll A=md5.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
-	P=osx64 C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libmd5.dylib" \
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libmd5.dylib" \
 	D=libmd5.dylib A=libmd5.a build
 else
 	P=linux C="-fPIC" L="-s -static-libgcc" D=libmd5.so A=libmd5.a build

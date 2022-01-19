@@ -14,7 +14,7 @@ if [ "$OSTYPE" = "msys" ]; then
 	P=windows D=cjson.dll A=cjson.a \
 	L="-s -static-libgcc -L../../bin/windows -llua51" build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
-	P=osx64 D=cjson.so A=libcjson.a C="-arch x86_64" \
+	P=osx D=cjson.so A=libcjson.a C="-arch x86_64" \
 	L="-arch x86_64 -undefined dynamic_lookup -Wno-static-in-inline" build
 else
 	P=linux C=-fPIC L="-s -static-libgcc" D=cjson.so A=libcjson.a build

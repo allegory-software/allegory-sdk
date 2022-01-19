@@ -12,7 +12,7 @@ build() {
 if [ "$OSTYPE" = "msys" ]; then
 	P=windows L="-s -static-libgcc" D=sha2.dll A=sha2.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
-	P=osx64 C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libsha2.dylib" \
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libsha2.dylib" \
 	D=libsha2.dylib A=libsha2.a build
 else
 	P=linux C="-fPIC -include _memcpy.h" L="-s -static-libgcc" \

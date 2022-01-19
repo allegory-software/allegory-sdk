@@ -19,7 +19,7 @@ if [ "$OSTYPE" = "msys" ]; then
 	C="-fno-asynchronous-unwind-tables" P=windows L="-s -static-libgcc" \
 	D=xxhash.dll A=xxhash.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
-	P=osx64 C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libxxhash.dylib" \
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libxxhash.dylib" \
 	D=libxxhash.dylib A=libxxhash.a build
 else
 	P=linux C="-fPIC" L="-s -static-libgcc" D=libxxhash.so A=libxxhash.a build

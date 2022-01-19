@@ -12,7 +12,7 @@ build() {
 if [ "$OSTYPE" = "msys" ]; then
 	P=windows L="-s -static-libgcc" D=cpu_supports.dll A=cpu_supports.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
-	P=osx64 C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libcpu_supports.dylib" \
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libcpu_supports.dylib" \
 	D=libcpu_supports.dylib A=libcpu_supports.a build
 else
 	P=linux C="-fPIC" L="-s -static-libgcc" D=libcpu_supports.so A=libcpu_supports.a build
