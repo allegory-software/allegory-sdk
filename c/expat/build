@@ -1,0 +1,22 @@
+#go@ plink d10 sdk/c/expat/build
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c -O2 $C src/expat/lib/*.c -Isrc/expat/lib -I.
+	${X}gcc *.o -shared -o ../../bin/$P/$D $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc" D=expat.dll A=expat.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx C="-arch x86_64 -DHAVE_ARC4RANDOM_BUF" \
+	L="-arch x86_64 -install_name @rpath/libexpat.dylib" \
+	D=libexpat.dylib A=libexpat.a build
+else
+	P=linux C="-fPIC -DHAVE_GETRANDOM" L="-s -static-libgcc" \
+	D=libexpat.so A=libexpat.a build
+fi
