@@ -3,142 +3,142 @@
 	JavaScript "assorted lengths of wire" library.
 	Written by Cosmin Apreutesei. Public domain.
 
-	types:
-		isobject(e)
-		isarray(a)
-		isobj(t)
-		isstr(s)
-		isnum(n)
-		isbool(b)
-		isfunc(f)
-	logic:
-		or(x, z)
-		strict_or(x, z)
-		repl(x, v, z)
-	math:
-		inf
-		floor(x) ceil(x) round(x)
-		abs(x)
-		min(x, y) max(x, y)
-		sqrt(x)
-		ln(x)
-		random()
-		PI sin(x) cos(x) tan(x) rad deg
-		clamp(x, x0, x1)
-		sign(x)
-		strict_sign(x)
-		lerp(x, x0, x1, y0, y1)
-		num(s, z)
-		mod(a, b)
-		nextpow2(x)
-		x.dec([decimals])
-		x.base([base], [digits])
-	callback stubs:
-		noop
-		return_true
-		return_false
-		return_arg
-		assert_false
-	error handling:
-		print(...)
-		warn(...)
-		debug(...)
-		trace()
-		assert(v, err, ...) -> v
-		stacktrace()
-	extending built-in objects:
-		property(cls, prop, descriptor | get,set)
-		method(cls, method, func)
-		override(cls, method, func)
-		alias(cls, new_name, old_name)
-		override_property_setter(cls, prop, set)
-	strings:
-		s.subst('{0} {1}', a0, a1, ...)
-		s.starts(s)
-		s.ends(s)
-		s.upper()
-		s.lower()
-		s.display_name()
-		s.cat(sep, ...)
-		s.names() -> a
-	arrays:
-		empty_array
-		a.extend(a1)
-		a.set(a1)
-		a.insert(i, v)
-		a.remove(i) -> v
-		a.remove_value(v) -> i
-		a.remove_values(cond)
-		a.last
-		a.binsearch(v, cmp, i1, i2)
-		a.each(f)
-		a.tokeys([v]) -> t
-	hash maps:
-		obj()
-		set()
-		map()
-		empty
-		keys(t)
-		assign(dt, t1, ...)
-		assign_opt(dt, t1, ...)
-		attr(t, k[, cons])
-		memoize(f)
-	typed arrays:
-		[dyn_][f32|i8|u8|i16|u16|i32|u32]arr(arr|[...]|capacity, [nc]) -> [dyn]arr
-			.set(in_arr, [offset=0], [len], [in_offset=0])
-			.invalidate([offset=0], [len])
-			.grow(cap, [preserve_contents=true], [pow2=true])
-			.grow_type(arr_type|max_index|[...]|arr, [preserve_contents=true])
-			.setlen(len)
-	timestamps:
-		time() -> ts
-		time(y, m, d, H, M, s, ms) -> ts
-		time(date_str) -> ts
-		[day|month|year|week](ts[, offset]) -> ts
-		days(delta_ts) -> ds
-		[year|month|week_day|month_day|hours|minutes|seconds]_of(ts)
-		set_[year|month|month_day|hours|minutes|seconds](ts)
-		locale
-		weekday_name (ts, ['long'])
-		month_name   (ts, ['long'])
-		month_year   (ts, ['long'])
-		week_start_offset()
-	time formatting:
-		ds.duration() -> s
-		ts.timeago() -> s
-	file size formatting:
-		x.filesize(x, [mag], [dec]) -> s
-	colors:
-		hsl_to_rgb(h, s, L) -> '#rrggbb'
-	geometry:
-		point_around(cx, cy, r, angle) -> [x, y]
-	timers:
-		runafter(t, f)
-		runevery(t, f)
-		clock()
-		timer(f)
-	serialization:
-		json_arg(s) -> t
-		json(t) -> s
-	clipboard:
-		copy_to_clipboard(text, done_func)
-	local storage:
-		save(key, s)
-		load(key) -> s
-	url decoding, encoding and updating:
-		url_arg(s) -> t
-		url(t) -> s
-	ajax requests:
-		ajax({
-			url: s,
-			upload: json|s, ...,
-			success: f(json|res),
-			fail: f(error, 'http'|'timeout'|'network'|'abort'[, status, msg, content]),
-			done: f('success'|'fail', ...),
-			...
-		}) -> req
-		get(url, success, [error], [opt]) -> req
-		post(url, data, [success], [error], [opt]) -> req
+TYPE CHECKING
+	isobject(e)
+	isarray(a)
+	isobj(t)
+	isstr(s)
+	isnum(n)
+	isbool(b)
+	isfunc(f)
+LOGIC
+	or(x, z)
+	strict_or(x, z)
+	repl(x, v, z)
+MATH
+	inf
+	floor(x) ceil(x) round(x)
+	abs(x)
+	min(x, y) max(x, y)
+	sqrt(x)
+	ln(x)
+	random()
+	PI sin(x) cos(x) tan(x) rad deg
+	clamp(x, x0, x1)
+	sign(x)
+	strict_sign(x)
+	lerp(x, x0, x1, y0, y1)
+	num(s, z)
+	mod(a, b)
+	nextpow2(x)
+	x.dec([decimals])
+	x.base([base], [digits])
+CALLBACK STUBS
+	noop
+	return_true
+	return_false
+	return_arg
+	assert_false
+ERRORS
+	print(...)
+	warn(...)
+	debug(...)
+	trace()
+	assert(v, err, ...) -> v
+	stacktrace()
+EXTENDING BUILT-IN OBJECTS
+	property(cls, prop, descriptor | get,set)
+	method(cls, method, func)
+	override(cls, method, func)
+	alias(cls, new_name, old_name)
+	override_property_setter(cls, prop, set)
+STRINGS
+	s.subst('{0} {1}', a0, a1, ...)
+	s.starts(s)
+	s.ends(s)
+	s.upper()
+	s.lower()
+	s.display_name()
+	s.cat(sep, ...)
+	s.names() -> a
+ARRAYS
+	empty_array
+	a.extend(a1)
+	a.set(a1)
+	a.insert(i, v)
+	a.remove(i) -> v
+	a.remove_value(v) -> i
+	a.remove_values(cond)
+	a.last
+	a.binsearch(v, cmp, i1, i2)
+	a.each(f)
+	a.tokeys([v]) -> t
+HASH MAPS
+	obj()
+	set()
+	map()
+	empty
+	keys(t)
+	assign(dt, t1, ...)
+	assign_opt(dt, t1, ...)
+	attr(t, k[, cons])
+	memoize(f)
+TYPED ARRAYS
+	[dyn_][f32|i8|u8|i16|u16|i32|u32]arr(arr|[...]|capacity, [nc]) -> [dyn]arr
+		.set(in_arr, [offset=0], [len], [in_offset=0])
+		.invalidate([offset=0], [len])
+		.grow(cap, [preserve_contents=true], [pow2=true])
+		.grow_type(arr_type|max_index|[...]|arr, [preserve_contents=true])
+		.setlen(len)
+TIME
+	time() -> ts
+	time(y, m, d, H, M, s, ms) -> ts
+	time(date_str) -> ts
+	[day|month|year|week](ts[, offset]) -> ts
+	days(delta_ts) -> ds
+	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts)
+	set_[year|month|month_day|hours|minutes|seconds](ts)
+	locale
+	weekday_name (ts, ['long'])
+	month_name   (ts, ['long'])
+	month_year   (ts, ['long'])
+	week_start_offset()
+	ds.duration() -> s
+	ts.timeago() -> s
+FILE SIZE FORMATTING
+	x.kbytes(x, [dec], [mag]) -> s
+colors:
+	hsl_to_rgb(h, s, L) -> '#rrggbb'
+geometry:
+	point_around(cx, cy, r, angle) -> [x, y]
+timers:
+	runafter(t, f)
+	runevery(t, f)
+	clock()
+	timer(f)
+serialization:
+	json_arg(s) -> t
+	json(t) -> s
+clipboard:
+	copy_to_clipboard(text, done_func)
+local storage:
+	save(key, s)
+	load(key) -> s
+url decoding, encoding and updating:
+	url_arg(s) -> t
+	url(t) -> s
+ajax requests:
+	ajax({
+		url: s,
+		upload: json|s, ...,
+		success: f(json|res),
+		fail: f(error, 'http'|'timeout'|'network'|'abort'[, status, msg, content]),
+		done: f('success'|'fail', ...),
+		...
+	}) -> req
+	get(url, success, [error], [opt]) -> req
+	post(url, data, [success], [error], [opt]) -> req
+
 */
 
 // types ---------------------------------------------------------------------
@@ -981,12 +981,11 @@ method(Number, 'timeago', function() {
 {
 let suffix = [' B', ' KB', ' MB', ' GB', ' TB']
 let magnitudes = {KB: 1, MB: 2, GB: 3}
-method(Number, 'filesize', function(x, mag, dec) {
+method(Number, 'kbytes', function(x, dec, mag) {
 	dec = dec || 0
 	let i = mag ? magnitudes[mag] : floor(ln(x) / ln(1024))
 	let z = x / 1024**i
-	let s = z.dec(dec) + suffix[i]
-	return s
+	return z.dec(dec) + suffix[i]
 })
 }
 

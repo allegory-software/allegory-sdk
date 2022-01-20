@@ -4390,16 +4390,12 @@ component('x-lookup-dropdown', function(e) {
 	let filesize = assign({}, number)
 	field_types.filesize = filesize
 
-	let suffix = [' B', ' KB', ' MB', ' GB', ' TB']
-	let magnitudes = {KB: 1, MB: 2, GB: 3}
 	filesize.format = function(x) {
 		let mag = this.filesize_magnitude
 		let dec = this.filesize_decimals || 0
 		let min = this.filesize_min || 1/10**dec
-		let i = mag ? magnitudes[mag] : floor(ln(x) / ln(1024))
-		let z = x / 1024**i
-		let s = z.dec(dec) + suffix[i]
-		return z < min ? span({class: 'x-dba-insignificant-size'}, s) : s
+		let s = x.kbytes(dec, mag)
+		return x < min ? span({class: 'x-dba-insignificant-size'}, s) : s
 	}
 
 	// datetimes
