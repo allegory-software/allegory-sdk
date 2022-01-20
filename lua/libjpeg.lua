@@ -55,9 +55,8 @@ jpg:load([opt]) -> bmp
 
 Format Conversions
 
-| source formats | destination formats |
-| ycc8 g8        | rgb8 bgr8 rgba8 bgra8 argb8 abgr8 rgbx8 bgrx8 xrgb8 xbgr8 g8
-| ycck8          | cmyk8
+ * ycc8 g8  => rgb8 bgr8 rgba8 bgra8 argb8 abgr8 rgbx8 bgrx8 xrgb8 xbgr8 g8
+ * ycck8    => cmyk8
 
 NOTE: As can be seen, not all conversions are possible with libjpeg-turbo,
 so always check the image's `format` field to get the actual format. Use
@@ -73,12 +72,12 @@ libjpeg.save(opt)
 	the source bitmap and an output write function, and possibly other options:
 
 	* bitmap       : a [bitmap] in an accepted format.
-	* write        : write data to a sink of the form `write(buf, size) -> true | nil,err`.
+	* write        : write function write(buf, size) -> true | nil,err.
 	* finish       : optional function to be called after all the data is written.
 	* format       : output format (see list of supported formats above).
 	* quality      : you know what that is (0..100).
 	* progressive  : make it progressive (false).
-	* dct_method   : 'accurate'`, `'fast'`, `'float' ('accurate').
+	* dct_method   : 'accurate', 'fast', 'float' ('accurate').
 	* optimize_coding : optimize Huffmann tables.
 	* smoothing    : smoothing factor (0..100).
 	* write_buffer_size : internal buffer size (4096).
@@ -372,7 +371,7 @@ local function open(opt)
 		} or nil
 	end
 
-	local ok, err = pcall(load_header)
+	local ok, err = glue.pcall(load_header)
 	if not ok then
 		free()
 		return nil, err
@@ -470,7 +469,7 @@ local function open(opt)
 end
 
 local function save(opt)
-	return glue.fcall(function(finally)
+	return glue.fpcall(function(finally)
 
 		--create the state object
 		local cinfo = ffi.new'jpeg_compress_struct'
@@ -565,6 +564,7 @@ local function save(opt)
 
 		--finish the compression, optionally adding additional scans
 		C.jpeg_finish_compress(cinfo)
+
 	end)
 end
 jit.off(save, true) --can't call error() from callbacks called from C.
