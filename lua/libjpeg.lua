@@ -417,7 +417,7 @@ local function open(opt)
 		bmp.data = ffi.new('uint8_t[?]', bmp.size)
 		bmp.bottom_up = opt.accept and opt.accept.bottom_up
 
-		local rows = rows_buffer(bmp.h, bmp.bottom_up, bmp.data, bmp.stride)
+		bmp.rows = rows_buffer(bmp.h, bmp.bottom_up, bmp.data, bmp.stride)
 
 		--decompress the image
 		while C.jpeg_input_complete(cinfo) == 0 do
@@ -441,7 +441,7 @@ local function open(opt)
 				--read several scanlines at once, depending on the size of the output buffer
 				local i = cinfo.output_scanline
 				local n = math.min(bmp.h - i, cinfo.rec_outbuf_height)
-				while C.jpeg_read_scanlines(cinfo, rows + i, n) < n do
+				while C.jpeg_read_scanlines(cinfo, bmp.rows + i, n) < n do
 					fill_input_buffer()
 				end
 			end
@@ -558,7 +558,7 @@ local function save(opt)
 
 		--make row pointers from the bitmap buffer
 		local bmp = opt.bitmap
-		local rows = rows_buffer(bmp.h, bmp.bottom_up, bmp.data, bmp.stride)
+		local rows = bmp.rows or rows_buffer(bmp.h, bmp.bottom_up, bmp.data, bmp.stride)
 
 		--compress rows
 		C.jpeg_write_scanlines(cinfo, rows, bmp.h)
