@@ -263,7 +263,7 @@ let v2_class = class v extends Array {
 		let x = this[0]
 		let y = this[1]
 		if (arg.is_mat3) {
-			var m = arg
+			let m = arg
 			this[0] = m[0] * x + m[3] * y + m[6]
 			this[1] = m[1] * x + m[4] * y + m[7]
 		} else
@@ -1680,7 +1680,7 @@ let mat4_type = function(super_class, super_args) {
 			let x2 = x + x
 			let y2 = y + y
 			let z2 = z + z
-			var xx = x * x2
+			let xx = x * x2
 			let xy = x * y2
 			let xz = x * z2
 			let yy = y * y2

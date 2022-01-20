@@ -3,11 +3,11 @@
 	Model-driven tree-grid widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	Widgets:
+WIDGETS
 
-		grid
-		grid_dropdown
-		row_form
+	grid
+	grid_dropdown
+	row_form
 
 */
 

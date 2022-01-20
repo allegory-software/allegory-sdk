@@ -972,7 +972,7 @@ method(Number, 'duration', function() {
 })
 
 method(Number, 'timeago', function() {
-	var d = time() - this
+	let d = time() - this
 	return (d > -1 ? S('time_ago', '{0} ago') : S('in_time', 'in {0}')).subst(abs(d).duration())
 })
 

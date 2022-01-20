@@ -3,14 +3,14 @@
 	Model-driven widget listbox widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	Widgets:
+WIDGETS
 
-		listbox
-		list_dropdown
-		enum_dropdown
-		select_button
-		color_dropdown
-		icon_dropdown
+	listbox
+	list_dropdown
+	enum_dropdown
+	select_button
+	color_dropdown
+	icon_dropdown
 
 */
 

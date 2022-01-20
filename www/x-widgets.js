@@ -3,24 +3,25 @@
 	X-WIDGETS: Web Components in JavaScript.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	Widgets:
+WIDGETS
 
-		tooltip
-		button
-		menu
-		widget_placeholder
-		pagelist
-		split
-		slides
-		toaster
-		action_band
-		dialog
-		toolbox
-		pagenav
-		richtext
+	tooltip
+	button
+	menu
+	widget_placeholder
+	pagelist
+	split
+	slides
+	toaster
+	action_band
+	dialog
+	toolbox
+	pagenav
+	richtext
 
-	Globals
-		notify(text, ['search'|'info'|'error'], [timeout])
+GLOBALS
+
+	notify(text, ['search'|'info'|'error'], [timeout])
 
 */
 

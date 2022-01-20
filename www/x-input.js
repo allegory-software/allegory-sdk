@@ -3,29 +3,29 @@
 	Model-driven single-value input widgets.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	Widgets:
+WIDGETS
 
-		checkbox
-		radiogroup
-		textedit
-		textarea
-		passedit
-		spinedit
-		tagsedit
-		placeedit
-		googlemaps
-		slider
-		calendar
-		date_dropdown
-		dateedit
-		richedit
-		image
-		sql_editor
-		chart
-		mu
-		switcher
-		input
-		form
+	checkbox
+	radiogroup
+	textedit
+	textarea
+	passedit
+	spinedit
+	tagsedit
+	placeedit
+	googlemaps
+	slider
+	calendar
+	date_dropdown
+	dateedit
+	richedit
+	image
+	sql_editor
+	chart
+	mu
+	switcher
+	input
+	form
 
 */
 
