@@ -53,7 +53,8 @@ FILE ATTRIBUTES
 	fs.is(path, [type], [deref]) -> t|f           check if file exists or is of a certain type
 FILESYSTEM OPS
 	fs.mkdir(path, [recursive], [perms])          make directory
-	fs.cd([path]) -> path                         get/set current directory
+	fs.cwd([path]) -> path                        get/set current working directory
+	fs.cd([path]) -> path                         get/set current working directory
 	fs.remove(path, [recursive])                  remove file or directory (recursively)
 	fs.move(path, newpath, [opt])                 rename/move file on the same filesystem
 SYMLINKS & HARDLINKS
@@ -65,6 +66,7 @@ COMMON PATHS
 	fs.tmpdir() -> path                           get temporary directory
 	fs.exepath() -> path                          get the full path of the running executable
 	fs.exedir() -> path                           get the directory of the running executable
+	fs.scriptdir() -> path                        get the directory of the main script
 LOW LEVEL
 	fs.wrap_handle(HANDLE) -> f                   wrap opened HANDLE (Windows)
 	fs.wrap_fd(fd) -> f                           wrap opened file descriptor

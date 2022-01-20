@@ -386,6 +386,7 @@ end
 local ERANGE = 34
 
 function getcwd()
+	initial_cwd()
 	while true do
 		local buf, sz = cbuf(256)
 		if C.getcwd(buf, sz) == nil then
@@ -398,6 +399,7 @@ function getcwd()
 		return ffi.string(buf)
 	end
 end
+initial_cwd = memoize(getcwd)
 
 function rmfile(path)
 	return check(C.unlink(path) == 0)

@@ -735,6 +735,7 @@ function rmdir(path)
 end
 
 function chdir(path)
+	initial_cwd()
 	return checknz(C.SetCurrentDirectoryW(wcs(path)))
 end
 
@@ -746,6 +747,7 @@ function getcwd()
 	if not sz then return nil, err end
 	return mbs(buf, sz)
 end
+initial_cwd = memoize(getcwd)
 
 function rmfile(path)
 	return checknz(C.DeleteFileW(wcs(path)))
@@ -761,9 +763,8 @@ local move_bits = {
 }
 
 --NOTE: MoveFileExW is atomic if both files are on the same NTFS volume.
---TODO: Alternative implementation: call SetFileInformationByHandle with
---FILE_RENAME_INFO and ReplaceIfExists which is atomic and also works on
---open handles which is even more atomic :)
+--TODO: implement this for file handles too: call SetFileInformationByHandle
+--with FILE_RENAME_INFO and ReplaceIfExists.
 local default_move_opt = 'replace_existing write_through' --posix
 function fs.move(oldpath, newpath, opt)
 	return checknz(C.MoveFileExW(

@@ -36,6 +36,7 @@ local uintptr_ct  = ffi.typeof'uintptr_t'
 local u8p = glue.u8p
 local readall = glue.readall
 
+memoize = glue.memoize
 assert = glue.assert
 buffer = glue.buffer
 update = glue.update
@@ -358,13 +359,14 @@ function fs.remove(dirfile, recursive)
 	end
 end
 
-function fs.cd(path)
+function fs.cwd(path)
 	if path then
 		return chdir(path)
 	else
 		return getcwd()
 	end
 end
+fs.cd = fs.cwd
 
 --symlinks -------------------------------------------------------------------
 
@@ -402,6 +404,10 @@ end
 function fs.exedir()
 	return path.dir(fs.exepath())
 end
+
+fs.scriptdir = memoize(function()
+	return path.normalize((path.combine(initial_cwd(), glue.bin)))
+end)
 
 --file attributes ------------------------------------------------------------
 
