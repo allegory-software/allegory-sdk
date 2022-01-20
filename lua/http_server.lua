@@ -1,3 +1,18 @@
+--[=[
+
+	HTTP 1.1 1 coroutine-based async server (based on sock.lua, sock_libtls.lua).
+	Written by Cosmin Apreutesei. Public Domain.
+
+	Features, https, gzip compression, persistent connections, pipelining,
+	resource limits, multi-level debugging, cdata-buffer-based I/O.
+
+server:new(opt) -> server   | Create a server object
+
+	libs            required: pass 'sock sock_libtls zlib'
+	listen          {host=, port=, tls=t|f, tls_options=}
+	tls_options     options to pass to sock_libtls.
+
+]=]
 
 if not ... then require'http_server_test'; return end
 

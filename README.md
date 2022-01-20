@@ -27,7 +27,7 @@ to see what's missing, broken or wanted.
 
  * Operating Systems: **Debian 10**, **Windows 10**
  * Browsers: **Desktop Chrome**, **Desktop Firefox** (Safari planned)
- * Architectures: x86-64
+ * CPUs: x86-64 with SSE 4.2 (AVX2 used if found).
 
 # Binaries
 
@@ -52,7 +52,7 @@ scripts for new libraries.
   * [coro](lua/coro.lua)               - Symmetric coroutines for yielding accross iterators
   * [errors](lua/errors.lua)           - Structured exceptions for writing network protocols
   * [logging](lua/logging.lua)         - Logging to files and network
-  * [lpeglabel](lua/lpeglabel.lua)     - PEG (Parsing Expression Grammars) parser
+  * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser
   * [$](lua/$.lua)                     - "Drop all your tools on the floor" library
 * __OS APIs__
   * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep (Windows, Linux, OSX)
@@ -103,23 +103,37 @@ scripts for new libraries.
   * [color](lua/color.lua)             - Color parser and RGB-HSL converters
   * [boxblur](lua/boxblur.lua)         - Fast image blur on CPU
 * __Templating__
-  * [mustache](lua/mustache.lua)       - Logic-less templates
+  * [mustache](lua/mustache.lua)       - Logic-less templates (server-side)
 * __Data Structures__
-  * [heap](lua/heap.lua)
-  * [queue](lua/queue.lua)
-  * [linkedlist](lua/linkedlist.lua)
-  * [lrucache](lua/lrucache.lua)
+  * [heap](lua/heap.lua)               - Priority Queue
+  * [queue](lua/queue.lua)             - Ring Buffer
+  * [linkedlist](lua/linkedlist.lua)   - Linked List
+  * [lrucache](lua/lrucache.lua)       - LRU Cache
 * __Math__
-  * [ldecnumber](lua/ldecnumber.lua)   - Fixed-precision decimal numbers math
-* __Web Development__
+  * [ldecnumber](c/ldecNumber/ldecnumber.txt) - Fixed-precision decimal numbers math
+* __Web / Server side__
   * [webb](lua/webb.lua)               - Procedural web framework
+* __Web / Client side__
+  * [X-Widgets Orientation Guide](X-WIDGETS.md)
   * [glue.js](www/glue.js)             - JS standard utilities
   * [divs.js](www/divs.js)             - DOM API and mechanism for web components
-  * [mustache.js](www/mustache.js)     - Mustache templates
-* __Web Components__
-  * [x-widgets.js](lua/x-widgets.lua)  - Data-bound widgets
+  * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
+  * [x-widgets.js](www/x-widgets.js)   - Web components & layouting widgets
+  * [x-nav.js](www/x-widgets.js)       - Model mixin for data-driven widgets
+  * [x-grid.js](www/x-grid.js)         - Nav-based virtual tree-grid widget
+  * [x-listbox.js](www/x-listbox.js)   - Nav-based listbox widget
+  * [x-input.js](www/x-input.js)       - Nav-based single-value (scalar) widgets
+  * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
+* _Web / Client side / 3D__
+  * [3d.js](www/3d.js)                 - 3D math lib (fast, complete, consistent)
+  * [eaercut.js](www/earcut.js)        - Ear-clipping algorithm for polygon triangulation
+  * [gl.js](www/gl.js)                 - WebGL 2 procedural wrapper
+  * [gl-renderer.js](www/gl-renderer.js) - WebGL 2 renderer for a 3D model editor
+* _Web / Client side / Support libs__
+  * [mustache.js](www/mustache.js)     - Logic-less templates (client-side)
+  * [purify.js](www/purify.js)         - HTML sanitizer
 * __Support Libs__
-  * [jsmin](lua/jsmin.lua)             - Minify JavaScript code
+  * [jsmin](c/jsmin/jsmin.txt)         - Minify JavaScript code
   * [linebuffer](lua/linebuffer.lua)   - Line buffer for text-based network protocols
 
 # Contributing code

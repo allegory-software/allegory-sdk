@@ -18,16 +18,14 @@ extensions:
   * our own customizations:
     * `package.path` and `package.cpath` were modified as described below.
     * `SONAME` is not set in `libluajit.so`.
+  * built with `-msse4.2` so that it hashes strings with hardware CRC32.
+  * built with `-pthread` so that pthread.lua can be used.
 
 ## What is included
 
-LuaJIT binaries (frontend, static library, dynamic library).
-
-Comes bundled with the `luajit` command, which is a simple shell script that
-finds and loads the appropriate luajit executable for your platform/arch so
-that typing `./luajit` (that's `luajit` on Windows) always works.
-
-LuaJIT was compiled using its original makefile.
+Comes with the `luajit` command, which is a simple shell script that finds
+and loads the appropriate luajit executable for your platform/arch so that
+typing `./luajit` (that's `luajit` on Windows) always works.
 
 ## Making portable apps
 
@@ -43,12 +41,8 @@ a location relative to the app's directory. This means at least three things:
 The solutions for the first two problems are platform-specific and
 are described below. As for the third problem, you can use `package.exedir`.
 
-> To get the location of the _running script_, as opposed to that of the
-executable, use `glue.bin`.
-
-> If you choose to use a LuaJIT binary of your own that doesn't have
-`package.exedir`, you can extract the exe's path from `arg[-n]` or use
-the more reliable `fs.exedir` if you can have [fs] as a dependency.
+To get the location of the _running script_, as opposed to that of the
+executable, use `glue.bin`, or better yet `fs.scriptdir()`.
 
 ### Finding Lua modules
 
@@ -62,6 +56,9 @@ and avoid name clashes on Windows where shared libraries are not prefixed
 with `lib`.
 
 The `!` symbol was implemented for Linux and OSX too.
+
+To enable Lua to look for modules in the main script's directory,
+use `glue.luapath(fs.scriptdir())`.
 
 #### The current directory
 
@@ -83,8 +80,7 @@ shared objects in the directory of the exe first.
 
 `-Wl,--disable-new-dtags` was also used so that it's `RPATH` not `RUNPATH`
 that is being set, which makes `dlopen()` work the same when called from
-dynamically loaded code too (this enables eg. `terralib.linklibrary` to link
-against libraries by name alone). I'm biting my tongue so hard here...
+dynamically loaded code too.
 
 #### OSX
 
@@ -94,15 +90,5 @@ dynamic loader look for dylibs in the directory of the exe first.
 #### The current directory
 
 The current directory is _not used_ for finding shared libraries
-on Linux and OSX. It's only used on Windows, but has lower priority
+on Linux and OSX. It's only used on Windows, but it has lower priority
 than the exe's directory.
-
-### Finding Terra modules
-
-The luajit executable was modified to call `require'terra'` before trying
-to run `.t` files at the command line. Also, it loads `.t` files by calling
-`_G.loadfile` instead of the C function `lua_loadfile`.
-
-`_G.loadfile` is overriden to load `.t` files as Terra source code.
-
-`package.terrapath` is set to match `package.path`.

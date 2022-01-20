@@ -1,7 +1,7 @@
 
 # X-Widgets
 
-Model-driven web components in pure JavaScript
+Model-driven web components in pure JavaScript.
 
 This library is designed primarily for data-dense business-type apps
 with a focus on data entry and data navigation.
@@ -89,7 +89,6 @@ publishes everything directly as globals.
 * `divs.js` is intended to be used as the primary/only DOM manipulation API
 and as such it extends built-in classes directly with new methods and
 properties, instead of wrapping them.
-
 
 * this lib only uses `===` when it's actually necessary.
 * this lib uses both `var` and `let` as needed.

@@ -1,5 +1,7 @@
 --[=[
 
+local ldecnumber = require'ldecnumber'
+
 	Decimal arithmetic based on IBM's decNumber.
 
 EXAMPLE

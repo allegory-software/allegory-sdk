@@ -1,6 +1,52 @@
+--[=[
 
--- HTTP 1.1 client & server protocol in Lua.
--- Written by Cosmin Apreutesei. Public Domain.
+	HTTP 1.1 client & server protocol
+	Written by Cosmin Apreutesei. Public Domain.
+
+	This module only implements the protocol. For a working HTTP client
+	see http_client.lua, for a server see http_server.lua.
+
+	GZip compression can be enabled with http.zlib = require'zlib'.
+	All functions return nil,err on I/O errors.
+
+http:new(opt) -> http
+
+	Create a HTTP protocol object that should be used on a single freshly open
+	HTTP or HTTPS connection to either perform HTTP requests on it (as client)
+	or to read-in HTTP requests and send-out responses (as server).
+
+		tcp               the I/O API (required)
+		port              if client: server's port (optional)
+		https             if client: `true` if using TLS (optional)
+		max_line_size     change the HTTP line size limit
+
+Client-side API --------------------------------------------------------------
+
+http:make_request(opt) -> req                | Make a HTTP request object.
+
+	host                    vhost name
+	max_line_size           change the HTTP line size limit
+	close                   close the connection after replying
+	content, content_size   body: string, read function or buffer
+	compress                false: don't compress body
+
+http:send_request(req) -> true | nil,err     | Send a request.
+http:read_response(req) -> res | nil,err     | Receive server's response.
+
+Server-side API --------------------------------------------------------------
+
+http:read_request(receive_content) -> req    | Receive a client's request.
+http:make_response(req, opt) -> res          | Make a HTTP response object.
+
+		close                   close the connection (and tell client to)
+		content, content_size   body: string, read function or cdata buffer
+		compress                false: don't compress body
+		allowed_methods         allowed methods: {method->true} (optional)
+		content_type            content type (optional)
+
+http:send_response(res) -> true | nil,err    | Send a response.
+
+]=]
 
 if not ... then require'http_server_test'; return end
 

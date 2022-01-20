@@ -1,5 +1,4 @@
-
-// https://github.com/mapbox/earcut (v2.2.2)
+// https://raw.githubusercontent.com/mapbox/earcut/v2.2.3/src/earcut.js
 
 (function() {
 
