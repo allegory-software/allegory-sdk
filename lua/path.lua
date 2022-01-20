@@ -11,28 +11,28 @@
 	are no longer than 259 bytes and which don't contain any control characters
 	(code 0-31) or the symbols `<>:"|%?*\`.
 
-	path.platform -> 'win'|'unix'                       | get current platform
-	path.default_sep([pl]) -> '\'|'/'                   | get the default separator for a platform
-	path.dev_alias(s) -> s|nil                          | check if a path is a Windows device alias
-	path.type(s, [pl]) -> type                          | get the path type
-	path.parse(s, [pl]) -> type, path[, drv|srv]        | break down a path to its basic parts
-	path.format(type, path, [drv|srv], pl) -> s         | put together a path from parsed parts
-	path.isabs(s, [pl]) -> is_abs, is_empty, is_valid   | check if path is absolute, empty and valid
-	path.endsep(s, [pl], [sep], [dsep]) -> s, ok        | get/add/remove the ending separator
-	path.sep(s, [pl], [sep], ...) -> s                  | detect/set the path separator
-	path.long(s, [pl], [long]) -> s|nil                 | get/set a Windows long absolute path
-	path.file(s, [pl]) -> s                             | get the last component of a path
-	path.nameext(s, [pl]) -> name, ext                  | split `path.file()` into name and extension
-	path.ext(s, [pl]) -> s                              | return only the extension from `path.nameext()`
-	path.dir(s, [pl]) -> s|nil                          | get the path without the last component
-	path.gsplit(s, [pl], [full]) ->iter() -> s, sep     | iterate over path's components
-	path.normalize(s, [pl], [opt]) -> s                 | normalize a path in various ways
-	path.commonpath(s1, s2, [pl]) -> s|nil              | get the common prefix of two paths
-	path.depth(s, [pl]) -> n                            | get the number of non-empty path components
-	path.combine(s1, s2, [pl], [sep], [dsep]) -> s|nil  | combine two paths if possible
-	path.abs(dir, s, [pl], [sep], [dsep]) -> s|nil,err  | convert relative path to absolute
-	path.rel(s, pwd, [pl], [sep], [dsep]) -> s|nil      | convert absolute path to relative
-	path.filename(s, [pl], [repl]) -> s|nil,err,code    | validate/make-valid filename
+	path.platform -> 'win'|'unix'                       get current platform
+	path.default_sep([pl]) -> '\'|'/'                   get the default separator for a platform
+	path.dev_alias(s) -> s|nil                          check if a path is a Windows device alias
+	path.type(s, [pl]) -> type                          get the path type
+	path.parse(s, [pl]) -> type, path[, drv|srv]        break down a path to its basic parts
+	path.format(type, path, [drv|srv], pl) -> s         put together a path from parsed parts
+	path.isabs(s, [pl]) -> is_abs, is_empty, is_valid   check if path is absolute, empty and valid
+	path.endsep(s, [pl], [sep], [dsep]) -> s, ok        get/add/remove the ending separator
+	path.sep(s, [pl], [sep], ...) -> s                  detect/set the path separator
+	path.long(s, [pl], [long]) -> s|nil                 get/set a Windows long absolute path
+	path.file(s, [pl]) -> s                             get the last component of a path
+	path.nameext(s, [pl]) -> name, ext                  split `path.file()` into name and extension
+	path.ext(s, [pl]) -> s                              return only the extension from `path.nameext()`
+	path.dir(s, [pl]) -> s|nil                          get the path without the last component
+	path.gsplit(s, [pl], [full]) ->iter() -> s, sep     iterate over path's components
+	path.normalize(s, [pl], [opt]) -> s                 normalize a path in various ways
+	path.commonpath(s1, s2, [pl]) -> s|nil              get the common prefix of two paths
+	path.depth(s, [pl]) -> n                            get the number of non-empty path components
+	path.combine(s1, s2, [pl], [sep], [dsep]) -> s|nil  combine two paths if possible
+	path.abs(dir, s, [pl], [sep], [dsep]) -> s|nil,err  convert relative path to absolute
+	path.rel(s, pwd, [pl], [sep], [dsep]) -> s|nil      convert absolute path to relative
+	path.filename(s, [pl], [repl]) -> s|nil,err,code    validate/make-valid filename
 
 	`pl` stands for platform and defaults to path.platform.
 
@@ -395,32 +395,21 @@ function path.gsplit(s, pl, full)
 	end
 end
 
-local function iif(a, b, c)
-	if a == b then
-		return c
-	else
-		return a
-	end
+local function repl(x, v, r)
+	if x == v then return r else return x end
 end
 
 --[[
 Normalize a path. `opt` can contain:
 
- * `dot_dirs`     : remove `.` dirs.
- * `dot_dot_dirs` : remove unnecessary `..` dirs.
-    * this changes where the path points to if there are symlinks on the path!
- * `sep`, `default_sep`, `empty_names` : args to pass to path.sep().
-   * defaults to false.
-   * use `'leave'` to avoid normalizing the separators.
- * `endsep` : sep arg to pass to path.endsep()
-   * defaults to false.
-	* use 'leave' to avoid removing any end separator.
- * `long`   : `long` arg to pass to path.long().
-   * defaults to 'auto'.
-	* use 'leave' to avoid converting between short and long paths.
+ * dot_dirs     : keep `.` dirs (false).
+ * dot_dot_dirs : keep unnecessary `..` dirs (true).
+   WARNING: removing `..` breaks the path if there are symlinks involved!
+ * sep (false), default_sep, empty_names : args for path.sep(). use 'leave' to skip.
+ * endsep (false) : sep arg for path.endsep(). use 'leave' to skip.
+ * long ('auto')  : long arg for path.long(). use 'leave' to skip.
 
-NOTE: If normalization results in the empty relative path '', then '.'
-is returned instead.
+If normalization results in the empty relative path '', then '.' is returned.
 ]]
 function path.normalize(s, pl, opt)
 	opt = opt or {}
@@ -433,7 +422,7 @@ function path.normalize(s, pl, opt)
 		if s == '.' and not opt.dot_dirs then
 			--skip adding the `.` dir and the separator following it
 			lastsep = sep
-		elseif s == '..' and not opt.dot_dot_dirs and #t > 0 then
+		elseif s == '..' and opt.dot_dot_dirs ~= false and #t > 0 then
 			--find the last dir past any `.` dirs, in case opt.dot_dirs = true.
 			local i = #t-1
 			while t[i] == '.' do
@@ -470,19 +459,19 @@ function path.normalize(s, pl, opt)
 	p = table.concat(t)
 
 	if opt.sep ~= 'leave' then
-		p = set_sep(p, win, iif(opt.sep, nil, false),
+		p = set_sep(p, win, repl(opt.sep, nil, false),
 			opt.default_sep, opt.empty_names)
 	end
 
 	if opt.endsep ~= 'leave' then
-		p = set_endsep(type, p, win, iif(opt.endsep, nil, false),
+		p = set_endsep(type, p, win, repl(opt.endsep, nil, false),
 			opt.default_sep) or p
 	end
 
 	s = path.format(type, p, drive, pl)
 
 	if win and opt.long ~= 'leave' then
-		s = path.long(s, pl, iif(opt.long, nil, 'auto'))
+		s = path.long(s, pl, repl(opt.long, nil, 'auto'))
 	end
 
 	return s
@@ -559,7 +548,7 @@ combinations are between anything except between `dev_alias` and `rel` paths,
 between `abs_nodrive` and `rel_drive`, and between `rel_drive` and `abs`
 or `abs_long`. When the paths can only be combined in one way, paths can be
 given in any order. The separator with which paths are combined is either
-`sep` or if `sep` is nil it's detected and if that fails `dsep` or the
+`sep` or if `sep` is nil it's detected and if that fails `default_sep` or the
 default separator is used.
 ]]
 local function combinable(type1, type2)
