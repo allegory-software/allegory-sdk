@@ -1,0 +1,4 @@
+terra {
+  global: pillow_*;
+  local: *;
+};
