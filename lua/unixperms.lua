@@ -1,6 +1,26 @@
+--[=[
 
---UNIX permissions string parser and formatter.
---Written by Cosmin Apreutesei. Public Domain.
+	UNIX permissions string parser and formatter.
+	Written by Cosmin Apreutesei. Public Domain.
+
+	unixperms.parse(s[, base]) -> mode, is_relative
+
+		Parse a unix permissions string and return its binary value. The string
+		can be an octal number beginning with a `'0'`, or a specification of form
+		`'[ugo]*[-+=]?[rwxsStT]+ ...'`. `is_relative` is `true` if the permissions
+		do not modify the entire mask of the `base`, eg. `'+x'` (i.e. `'ugo+x'`) says
+		"add the execute bit for all" and it's thus a relative spec, while `'rx'`
+		(i.e. `'ugo=rx'`) says "set the read and execute bits for all" and it's thus
+		an absolute spec. `base` defaults to `0`. If `s` is not a string, `s, false`
+		is returned.
+
+	unixperms.format(mode[, opt]) -> s
+
+		Format a unix permissions binary value to a string. `opt` can be `'l[ong]'`
+		(which turns `0555` into `'r-xr-xr-x'`) or `'o[ctal]'` (which turns `0555`
+		into `'0555'`). default is `'o'`.
+
+]=]
 
 local bit = require'bit'
 
@@ -145,9 +165,7 @@ local function format(mode, style)
 		or style:find'^l' and long(mode)
 end
 
---unit test
-
-if not ... then
+if not ... then --unit test --------------------------------------------------
 
 	local function test(s, octal, base, rel2)
 		local m1, rel1 = parse(s, base)

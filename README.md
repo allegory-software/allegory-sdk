@@ -45,82 +45,82 @@ scripts for new libraries.
 # Documentation
 
 * __Runtime__
-  * [LuaJIT](docs/luajit.md)           - custom build of LuaJIT
+  * [LuaJIT](RUNTIME.md)               - custom build of LuaJIT
 * __Standard Library__
-  * [glue](docs/glue.md)               - "Assorted lengths of wire" library
-  * [pp](docs/pp.md)                   - Pretty printer and serializer
-  * [coro](docs/coro.md)               - Symmetric coroutines for yielding accross iterators
-  * [errors](docs/errors.md)           - Structured exceptions for writing network protocols
-  * [logging](docs/logging.md)         - Logging to files and network
-  * [lpeglabel](docs/lpeglabel.md)     - PEG (Parsing Expression Grammars) parser
-  * [$](docs/$.md)                     - "Drop all your tools on the floor" library
+  * [glue](lua/glue.lua)               - "Assorted lengths of wire" library
+  * [pp](lua/pp.lua)                   - Pretty printer and serializer
+  * [coro](lua/coro.lua)               - Symmetric coroutines for yielding accross iterators
+  * [errors](lua/errors.lua)           - Structured exceptions for writing network protocols
+  * [logging](lua/logging.lua)         - Logging to files and network
+  * [lpeglabel](lua/lpeglabel.lua)     - PEG (Parsing Expression Grammars) parser
+  * [$](lua/$.lua)                     - "Drop all your tools on the floor" library
 * __OS APIs__
-  * [time](docs/time.md)               - Wall clock, monotonic clock, sleep (Windows, Linux, OSX)
-  * [fs](docs/fs.md)                   - Filesystem API with mmapping and symlinks (Windows, Linux, OSX)
-  * [proc](docs/proc.md)               - Async processes with I/O redirection (Windows, Linux)
-  * [pthread](docs/pthread.md)         - Low-level threads (Linux, Windows, OSX)
-  * [luastate](docs/luastate.md)       - Create Lua interpreters to use with OS threads
-  * [thread](docs/thread.md)           - High-level threads API based on pthread and luastate
-  * [path](docs/path.md)               - File path manipulation
-  * [unixperms](docs/unixperms.md)     - Unix permissons parser
+  * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep (Windows, Linux, OSX)
+  * [fs](lua/fs.lua)                   - Filesystem API with mmapping and symlinks (Windows, Linux, OSX)
+  * [proc](lua/proc.lua)               - Async processes with I/O redirection (Windows, Linux)
+  * [pthread](lua/pthread.lua)         - Low-level threads (Linux, Windows, OSX)
+  * [luastate](lua/luastate.lua)       - Create Lua interpreters to use with OS threads
+  * [thread](lua/thread.lua)           - High-level threads API based on pthread and luastate
+  * [path](lua/path.lua)               - File path manipulation
+  * [unixperms](lua/unixperms.lua)     - Unix permissons parser
 * __Networking__
-  * [sock](docs/sock.md)               - Async sockets (Windows/IOCP, Linux/epoll)
-  * [resolver](docs/resolver.md)       - Async DNS resolver
-  * [connpool](docs/connpool.md)       - Connection pools
-  * [http_client](docs/http_client.md) - HTTP 1.1 async client for high-volume web scraping
-  * [http_server](docs/http_server.md) - HTTP 1.1 async server with TLS, gzip, etc.
-  * [uri](docs/uri.md)                 - URI manipulation
+  * [sock](lua/sock.lua)               - Async sockets (Windows/IOCP, Linux/epoll)
+  * [resolver](lua/resolver.lua)       - Async DNS resolver
+  * [connpool](lua/connpool.lua)       - Connection pools
+  * [http_client](lua/http_client.lua) - HTTP 1.1 async client for high-volume web scraping
+  * [http_server](lua/http_server.lua) - HTTP 1.1 async server with TLS, gzip, etc.
+  * [uri](lua/uri.lua)                 - URI manipulation
 * __Data Exchange__
-  * [base64](docs/base64.md)           - Base64 encoding & decoding
-  * [cjson](docs/cjson.md)             - JSON encoding & decoding
-  * [msgpack](docs/msgpack.md)         - MessagePack encoding & decoding
-  * [expat](docs/expat.md)             - XML decoding
-  * [genx](docs/genx.md)               - XML encoding
-  * [csv](docs/csv.md)                 - CSV parsing
-  * [xlsxwriter](docs/xlsxwriter.md)   - XLSX generation
+  * [base64](lua/base64.lua)           - Base64 encoding & decoding
+  * [cjson](lua/cjson.lua)             - JSON encoding & decoding
+  * [msgpack](lua/msgpack.lua)         - MessagePack encoding & decoding
+  * [expat](lua/expat.lua)             - XML decoding
+  * [genx](lua/genx.lua)               - XML encoding
+  * [csv](lua/csv.lua)                 - CSV parsing
+  * [xlsxwriter](lua/xlsxwriter.lua)   - XLSX generation
 * __Hashing__
-  * [xxhash](docs/xxhash.md)           - xxHash non-cryptographic 32, 64 and 128 bit hash
-  * [blake2](docs/blake2.md)           - BLAKE2 cryptographic hash
-  * [sha1](docs/sha1.md)               - SHA1 hash
-  * [sha2](docs/sha2.md)               - SHA2 hash
-  * [md5](docs/md5.md)                 - MD5 hash
-  * [hmac](docs/hmac.md)               - HMAC signing
+  * [xxhash](lua/xxhash.lua)           - xxHash non-cryptographic 32, 64 and 128 bit hash
+  * [blake2](lua/blake2.lua)           - BLAKE2 cryptographic hash
+  * [sha1](lua/sha1.lua)               - SHA1 hash
+  * [sha2](lua/sha2.lua)               - SHA2 hash
+  * [md5](lua/md5.lua)                 - MD5 hash
+  * [hmac](lua/hmac.lua)               - HMAC signing
 * __Compression__
-  * [zlib](docs/zlib.md)               - DEFLATE, ZLIB and GZIP compression & decompression
-  * [minizip2](docs/minizip2.md)       - ZIP file reading, creating and updating
+  * [zlib](lua/zlib.lua)               - DEFLATE, ZLIB and GZIP compression & decompression
+  * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating
 * __Databases__
-  * [sqlpp](docs/sqlpp.md)             - SQL preprocessor
-  * [mysql](docs/mysql.md)             - MySQL async driver
-  * [tarantool](docs/tarantool.md)     - Tarantool async driver
-  * [schema](docs/schema.md)           - Database schema diff'ing and migrations
+  * [sqlpp](lua/sqlpp.lua)             - SQL preprocessor
+  * [mysql](lua/mysql.lua)             - MySQL async driver
+  * [tarantool](lua/tarantool.lua)     - Tarantool async driver
+  * [schema](lua/schema.lua)           - Database schema diff'ing and migrations
 * __Image Formats__
-  * [libjpeg](docs/libjpeg.md)         - JPEG async decoding & encoding
-  * [libspng](docs/libspng.md)         - PNG decoding & encoding
-  * [bmp](docs/bmp.md)                 - BMP decoding & encoding
-  * [bitmap](docs/bitmap.md)           - Bitmap conversions & effects
+  * [libjpeg](lua/libjpeg.lua)         - JPEG async decoding & encoding
+  * [libspng](lua/libspng.lua)         - PNG decoding & encoding
+  * [bmp](lua/bmp.lua)                 - BMP decoding & encoding
+  * [bitmap](lua/bitmap.lua)           - Bitmap conversions & effects
 * __2D Graphics__
-  * [cairo](docs/cairo.md)             - 2D vector graphics
-  * [color](docs/color.md)             - Color parser and RGB-HSL converters
-  * [boxblur](docs/boxblur.md)         - Fast image blur on CPU
+  * [cairo](lua/cairo.lua)             - 2D vector graphics
+  * [color](lua/color.lua)             - Color parser and RGB-HSL converters
+  * [boxblur](lua/boxblur.lua)         - Fast image blur on CPU
 * __Templating__
-  * [mustache](docs/mustache.md)       - Logic-less templates
+  * [mustache](lua/mustache.lua)       - Logic-less templates
 * __Data Structures__
-  * [heap](docs/heap.md)
-  * [queue](docs/queue.md)
-  * [linkedlist](docs/linkedlist.md)
-  * [lrucache](docs/lrucache.md)
+  * [heap](lua/heap.lua)
+  * [queue](lua/queue.lua)
+  * [linkedlist](lua/linkedlist.lua)
+  * [lrucache](lua/lrucache.lua)
 * __Math__
-  * [ldecnumber](docs/ldecnumber.md)   - Fixed-precision decimal numbers math
+  * [ldecnumber](lua/ldecnumber.lua)   - Fixed-precision decimal numbers math
 * __Web Development__
-  * [webb](docs/webb.md)               - Procedural web framework
+  * [webb](lua/webb.lua)               - Procedural web framework
   * [glue.js](www/glue.js)             - JS standard utilities
   * [divs.js](www/divs.js)             - DOM API and mechanism for web components
   * [mustache.js](www/mustache.js)     - Mustache templates
 * __Web Components__
-  * [x-widgets.js](docs/x-widgets.md)  - Data-bound widgets
+  * [x-widgets.js](lua/x-widgets.lua)  - Data-bound widgets
 * __Support Libs__
-  * [jsmin](docs/jsmin.md)             - Minify JavaScript code
-  * [linebuffer](docs/linebuffer.md)   - Line buffer for text-based network protocols
+  * [jsmin](lua/jsmin.lua)             - Minify JavaScript code
+  * [linebuffer](lua/linebuffer.lua)   - Line buffer for text-based network protocols
 
 # Contributing code
 

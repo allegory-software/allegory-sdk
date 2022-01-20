@@ -1,6 +1,63 @@
+--[=[
 
---libspng LuaJIT binding.
---Written by Cosmin Apreutesei. Public Domain.
+	PNG encoding and decoding with libspng (not yieldable).
+	Written by Cosmin Apreutesei. Public Domain.
+
+	spng.open(opt | read) -> png   open a PNG image for decoding
+	  read(buf, len) -> len|0|nil  the read function (can't yield)
+	png.format, png.w, png.h       PNG file native format and dimensions
+	png.interlaced                 PNG file is interlaced
+	png.indexed                    PNG file is palette-based
+
+	png:load([opt]) -> bmp         load the image into a bitmap
+	  opt.accept            : {FORMAT->true}
+	    FORMAT: bgra8, rgba8, rgba16, rgb8, g8, ga8, ga16.
+	  opt.bottom_up         : bottom-up bitmap (false).
+	  opt.stride_aligned    : align stride to 4 bytes (false).
+	  opt.gamma             : decode and apply gamma (only for RGB(A) output; false).
+	  opt.premultiply_alpha : premultiply the alpha channel (true).
+
+	png:free()                     free the image
+
+	spng.save(opt)                 encode a bitmap into a PNG image
+
+spng.open(opt) -> png
+
+	Open a PNG image and read its header. The supplied read function cannot
+	yield and must signal I/O errors by returning `nil`. It will only be asked
+	to read a positive number of bytes and it can return less bytes than asked,
+	including zero which signals EOF.
+
+	TIP: Use `tcp:recvall_read()` from sock.lua to read from a TCP socket.
+	TIP: Use `f:buffered_read()` from fs.lua to read from a file.
+
+png:load(opt) -> bmp
+
+	If no `accept` option is given or no conversion is possible, the image
+	is returned in the native format, transparency not decoded, gamma not
+	decoded palette not expanded. To avoid this from happening, accept at
+	least one RGB(A) output format (see [1]).
+
+	[1]: https://github.com/randy408/libspng/blob/master/docs/decode.md#supported-format-flag-combinations
+
+	The returned bitmap has:
+
+		* standard bitmap fields: format, bottom_up, stride, data, size, w, h.
+		* partial: image wasn't fully read (read_error contains the error).
+
+spng.save(opt)
+
+	Encode a bitmap as PNG. `opt` is a table containing at least the source
+	bitmap and an output write function, and possibly other options:
+
+	bitmap  : a bitmap in an accepted format:
+		'g1', 'g2', 'g4', 'g8', 'g16', 'ga8', 'ga16',
+		'rgb8', 'rgba8', 'bgra8', 'rgba16', 'i1', 'i2', 'i4', 'i8'`.
+	write   : write data to a sink of form `write(buf, len) -> true | nil,err`
+	(cannot yield).
+	chunks  : list of PNG chunks to encode.
+
+]=]
 
 if not ... then require'libspng_demo'; return end
 

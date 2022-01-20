@@ -1,5 +1,13 @@
+--[=[
 
---xxhash binding
+	XXHASH: extremely fast non-cryptographic hash.
+	Written by Cosmin Apreutesei. Public Domain.
+
+	xxhash.hash32|64|128(data[, len[, seed]]) -> hash
+
+		Compute a 32|64|128 bit hash.
+
+]=]
 
 local ffi = require'ffi'
 local bit = require'bit'
@@ -59,7 +67,7 @@ end
 
 ffi.metatype('XXH3_state_t', st_meta)
 
-if not ... then
+if not ... then --self-test
 	local st = M.hash128_digest()
 	st:update('abcd')
 	st:update('1324')
@@ -68,4 +76,3 @@ if not ... then
 end
 
 return M
-

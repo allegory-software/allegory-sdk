@@ -1,6 +1,90 @@
+--[=[
 
---libjpeg ffi binding.
---Written by Cosmin Apreutesei. Public domain.
+	JPEG encoding and decoding (based on libjpeg-turbo).
+	Written by Cosmin Apreutesei. Public domain.
+
+	Supports progressive loading, yielding from the reader function,
+	partial loading, fractional scaling and multiple pixel formats.
+
+	libjpeg.open(opt | read) -> jpg   open a JPEG image for decoding
+	  read(buf, len) -> len|0|nil     read function (can yield)
+	  partial_loading                 load broken images partially (true)
+	  warning                         f(msg, level) for non-fatal errors
+	  read_buffer                     the read buffer to use (optional)
+	  read_buffer_size                size of read_buffer
+	jpg.format, jpg.w, jpg.h          JPEG file native format and dimensions
+	jpg.progressive                   JPEG file is progressive
+	jpg.jfif                          JFIF marker (see code)
+	jpg.adobe                         Adobe marker (see code)
+	jpg:load([opt]) -> bmp            load the image into a bitmap
+	  accept.FORMAT                   specify one or more accepted formats (*)
+	  accept.bottom_up                output bitmap should be upside-down (false).
+	  accept.stride_aligned           row stride should be a multiple of 4 (false).
+	  scale_num, scale_denom          scale down the image by scale_num/scale_denom.
+	    the only supported scaling ratios are M/8 with all M from 1 to 16,
+		 or any reduced fraction thereof (such as 1/2, 3/4, etc.). Smaller scaling ratios permit significantly faster decoding since
+	  fewer pixels need be processed and a simpler IDCT method can be used.
+	  * `dct_method`: `'accurate'`, `'fast'`, `'float'` (default is `'accurate'`)
+	  * `fancy_upsampling`: `true/false` (default is `false`); use a fancier
+	  upsampling method.
+	  * `block_smoothing`: `true/false` (default is `false`); smooth out large
+	  pixels of early progression stages for progressive JPEGs.
+	jpg.partial                       JPEG file is truncated (see after loading)
+	jpg:free()                        free the image
+	libjpeg.save(opt)                 compress a bitmap into a JPEG image
+
+libjpeg.open(opt | read) -> jpg
+
+	Open a JPEG image and read its header. The supplied read function can yield
+	and it can signal I/O errors by returning `nil, err`. It will only be asked
+	to read a positive number of bytes and it can return less bytes than asked,
+	including zero which signals EOF.
+
+	Unknown JPEG formats are opened but the `format` field is missing.
+
+	Arithmetic decoding doesn't work with suspended I/O and we need that to
+	allow the read callback to yield (browsers don't support arithmetic
+	decoding either for the same reason).
+
+	TIP: Wrap `tcp:read()` from sock.lua to read from a TCP socket.
+	TIP: Use `f:buffered_read()` from fs.lua to read from a file.
+
+jpg:load([opt]) -> bmp
+
+	Load the image, returning a bitmap object.
+
+Format Conversions
+
+| source formats | destination formats |
+| ycc8 g8        | rgb8 bgr8 rgba8 bgra8 argb8 abgr8 rgbx8 bgrx8 xrgb8 xbgr8 g8
+| ycck8          | cmyk8
+
+NOTE: As can be seen, not all conversions are possible with libjpeg-turbo,
+so always check the image's `format` field to get the actual format. Use
+bitmap.lua to further convert the image if necessary.
+
+For more info on the decoding process and options read the [libjpeg-turbo doc].
+
+NOTE: the number of bits per channel in the output bitmap is always 8.
+
+libjpeg.save(opt)
+
+	Encode a bitmap as JPEG. `opt` is a table containing at least
+	the source bitmap and an output write function, and possibly other options:
+
+	* bitmap       : a [bitmap] in an accepted format.
+	* write        : write data to a sink of the form `write(buf, size) -> true | nil,err`.
+	* finish       : optional function to be called after all the data is written.
+	* format       : output format (see list of supported formats above).
+	* quality      : you know what that is (0..100).
+	* progressive  : make it progressive (false).
+	* dct_method   : 'accurate'`, `'fast'`, `'float' ('accurate').
+	* optimize_coding : optimize Huffmann tables.
+	* smoothing    : smoothing factor (0..100).
+	* write_buffer_size : internal buffer size (4096).
+	* write_buffer : internal buffer (default is to internally allocate one).
+
+]=]
 
 if not ... then
 	--require'libjpeg_test'

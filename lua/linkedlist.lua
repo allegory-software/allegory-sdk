@@ -1,6 +1,27 @@
+--[=[
 
---Doubly-linked lists in Lua.
---Written by Cosmin Apreutesei. Public Domain.
+	Doubly-linked lists of Lua values.
+	Written by Cosmin Apreutesei. Public Domain.
+
+	In this implementation items must be Lua tables for which fields `_prev`
+	and `_next` are reserved for linking.
+
+	list() -> list                          create a new list
+	list:clear()                            clear the list
+	list:insert_first(t)                    add an item at beginning of the list
+	list:insert_last(t)                     add an item at the end of the list
+	list:insert_after([anchor, ]t)          add an item after another item (or at the end)
+	list:insert_before([anchor, ]t)         add an item before another item (or at the beginning)
+	list:remove(t) -> t                     remove a specific item (and return it)
+	list:removel_last() -> t                remove and return the last item, if any
+	list:remove_first() -> t                remove and return the first item, if any
+	list:next([current]) -> t               next item after some item (or first item)
+	list:prev([current]) -> t               previous item after some item (or last item)
+	list:items() -> iterator<item>          iterate items
+	list:reverse_items() -> iterator<item>  iterate items in reverse
+	list:copy() -> new_list                 copy the list
+
+]=]
 
 if not ... then require'linkedlist_test'; return end
 

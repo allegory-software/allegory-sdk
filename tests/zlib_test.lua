@@ -3,27 +3,27 @@ local glue = require'glue'
 local ffi = require'ffi'
 require'unit'
 
-test(zlib.version():match'^1.2.7', '1.2.7')
+test(zlib.version():match'^1.2.11', '1.2.11')
 test(zlib.uncompress(zlib.compress('aaa'), nil, 1024), 'aaa')
 
 test(glue.tohex(zlib.adler32'The game done changed.'), '587507ba')
 test(glue.tohex(zlib.crc32'Game\'s the same, just got more fierce.'), '2c40120a')
 
 local function gztest(file, content)
-	local gz = zlib.open(file)
+	local gz = assert(zlib.open(file))
 	test(gz:read(#content), content)
 	test(#gz:read(1), 0)
 	test(gz:eof(), true)
 	gz:close()
 end
 
-local gz = zlib.open('media/gzip/test1.txt.gz', 'w')
+local gz = assert(zlib.open('gzip_test/test1.txt.gz', 'w'))
 test(gz:write'The game done changed.', #'The game done changed.')
 gz:close()
 
-gztest('media/gzip/test.txt.gz', 'The game done changed.')
-gztest('media/gzip/test1.txt.gz', 'The game done changed.')
-os.remove('media/gzip/test1.txt.gz')
+gztest('gzip_test/test.txt.gz', 'The game done changed.')
+gztest('gzip_test/test1.txt.gz', 'The game done changed.')
+os.remove('gzip_test/test1.txt.gz')
 
 local function gen(n)
 	local t = {}

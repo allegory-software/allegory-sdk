@@ -1,4 +1,18 @@
---md5 hash and digest
+--[=[
+
+	MD5 hash and digest.
+
+	md5.sum(s[, #s]) -> s   compute the MD5 hash of a string or buffer.
+	md5.digest() -> digest  get a closure that can consume data chunks.
+	digest(s[, size])       digest a string
+	digest(cdata, size)     digest a cdata buffer
+	digest() -> s           return the hash
+
+	The functions return the binary representation of the hash.
+	To get the hex representation, use glue.tohex().
+
+]=]
+
 local ffi = require "ffi"
 local C = ffi.load'md5'
 

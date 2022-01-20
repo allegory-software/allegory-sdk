@@ -1,6 +1,138 @@
+--[=[
 
---POSIX threads binding for Linux, OSX and Windows.
---Written by Cosmin Apreutesei. Public Domain.
+	POSIX threads binding for Linux (glibc only!), OSX and Windows (winpthreads).
+	Written by Cosmin Apreutesei. Public Domain.
+
+THREADS
+	pthread.new(func_ptr[, attrs]) -> th          create and start a new thread
+	th:equal(other_th) -> true | false            check if two threads are equal
+	th:join() -> status                           wait for a thread to finish
+	th:detach()                                   detach a thread
+	th:priority(new_priority)                     set thread priority
+	th:priority() -> priority                     get thread priority
+	pthread.min_priority() -> priority            get min. priority
+	pthread.max_priority() -> priority            get max. priority
+	pthread.yield()                               relinquish control to the scheduler
+
+MUTEXES
+	pthread.mutex([mattrs]) -> mutex              create a mutex
+	mutex:free()                                  free a mutex
+	mutex:lock()                                  lock a mutex
+	mutex:unlock()                                unlock a mutex
+	mutex:trylock() -> true | false               lock a mutex or return false
+
+CONDITION VARIABLES
+	pthread.cond() -> cond                        create a condition variable
+	cond:free()                                   free the condition variable
+	cond:broadcast()                              broadcast
+	cond:signal()                                 signal
+	cond:wait(mutex[, timeout]) -> true | false   wait with optional timeout (*)
+
+READ/WRITE LOCKS
+	pthread.rwlock() -> rwlock                    create a r/w lock
+	rwlock:free()                                 free a r/w lock
+	rwlock:writelock()                            lock for writing
+	rwlock:readlock()                             lock for reading
+	rwlock:trywritelock() -> true | false         try to lock for writing
+	rwlock:tryreadlock() -> true | false          try to lock for reading
+	rwlock:unlock()                               unlock the r/w lock
+
+> (*) timeout is an os.time() or `time.time()` timestamp, not a time period.
+
+NOTE: All functions raise errors but error messages are not included
+and error codes are platform specific. Use `c/precompile errno.h | grep CODE`
+to search for specific codes.
+
+pthread.new(func_ptr[, attrs]) -> th
+
+	Create and start a new thread and return the thread object.
+
+	`func_ptr` is a C callback declared as: `void *(*func_ptr)(void *arg)`.
+	Its return value is returned by `th:join()`.
+
+	The optional attrs table can have the fields:
+
+  * `detached = true` - start detached (not very useful with Lua states)
+  * `priority = n` - thread priority; must be between pthread.min_priority()
+  and pthread.max_priority() -- in Linux these are both 0.
+  * `stackaddr = n` - stack address.
+  * `stacksize = n` - stack size in bytes (OS restrictions apply).
+
+
+pthread.mutex([mattrs]) -> mutex
+
+	Create a mutex. The optional mattrs table can have the fields:
+
+	* `type = 'normal' | 'recursive' | 'errorcheck'`:
+		* 'normal' (default) - non-recursive mutex: locks are not counted
+		and not owned, so double-locking as well as unlocking by a
+		different thread results in undefined behavior.
+		* 'recursive' - recursive mutex: locks are counted and owned, so
+		double-locking is allowed as long as done by the same thread.
+		* 'errorcheck' - non-recursive mutex with error checking, so
+		double-locking and unlocking by a different thread results
+		in an error being raised.
+
+IMPLEMENTATION NOTES ---------------------------------------------------------
+
+IMPORTANT: Build your LuaJIT binary with `-pthread`!
+
+POSIX is a standard indifferent to binary compatibility, resulting in each
+implementation having a different ABI. Moreso, different implementations
+only cover a subset of the API.
+
+Only functionality that is common _to all_ supported platforms is available.
+Winpthreads dumbs down the API the most (no process-shared objects,
+no real-time extensions, etc.), but OSX too (no timed waits, no semaphores,
+no barriers, etc.) and even Linux (setting priority levels needs root access).
+Functions that don't make sense with Lua (pthread_once) or are stubs
+in one or more implementations (pthread_setconcurrency) or are unsafe
+to use with Lua states (killing, cancelation) were also dropped. All in all
+you get a pretty thin library with just the basics covered.
+The good news is that this is really all you need for most apps.
+A more comprehensive but still portable threading library would have to
+be implemented on top of native synchronization primitives.
+
+Next are a few tips to get a rough idea of the portability situation.
+
+To find out (part of) the truth about API coverage, you can start by
+checking the exported symbols on the pthreads library on each platform
+and compare them:
+
+	On Linux:
+
+		c/syms /lib/libpthread.so.0 | \
+			grep '^pthread' > pthread_syms_linux.txt
+
+	On OSX:
+
+		(c/syms /usr/lib/libpthread.dylib
+		c/syms /usr/lib/system/libsystem_pthread.dylib) | \
+			grep '^pthread' > pthread_syms_osx.txt
+
+	On Windows:
+
+		c/syms bin\mingw64\libwinpthread-1.dll | \
+			grep ^^pthread > pthread_syms_mingw.txt
+
+	Compare the results (the first column tells the number of platforms
+	that a symbol was found on):
+
+		sort pthread_syms_* | uniq -c | sort -nr
+
+To find out the differences in ABI and supported flags, you can preprocess
+the headers on different platforms and compare them:
+
+	c/precompile pthread.h sched.h semaphore.h > pthread_h_<platform>.lua
+
+The above will use gcc to preprocess the headers and generate a
+(very crude, mind you) Lua cdef template file that you can use
+as a starting point for a binding and/or to check ABI differences.
+
+Next step is to look at the source code for winpthreads and find out what
+is really implemented (and how).
+
+]=]
 
 if not ... then return require'pthread_test' end
 
@@ -9,6 +141,7 @@ local lib = ffi.os == 'Windows' and 'libwinpthread-1' or 'pthread'
 local C = ffi.load(lib)
 local H = {} --header namespace
 local M = {C = C, H = H}
+assert(ffi.abi'64bit')
 
 if ffi.os == 'Linux' then
 

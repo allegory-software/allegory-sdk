@@ -1,6 +1,42 @@
+--[=[
 
---Path manipulation for Windows and UNIX paths.
---Written by Cosmin Apreutesei. Public Domain.
+	Path manipulation for Windows and UNIX paths.
+	Written by Cosmin Apreutesei. Public Domain.
+
+	Parses all Windows path formats including long paths (`\\?\`),
+	device paths (`\\.\`) and UNC paths.
+
+	The only paths that are portable between Windows and UNIX (Linux, OSX)
+	without translation are relative paths using forward slashes only which
+	are no longer than 259 bytes and which don't contain any control characters
+	(code 0-31) or the symbols `<>:"|%?*\`.
+
+	path.platform -> 'win'|'unix'                       | get current platform
+	path.default_sep([pl]) -> '\'|'/'                   | get the default separator for a platform
+	path.dev_alias(s) -> s|nil                          | check if a path is a Windows device alias
+	path.type(s, [pl]) -> type                          | get the path type
+	path.parse(s, [pl]) -> type, path[, drv|srv]        | break down a path to its basic parts
+	path.format(type, path, [drv|srv], pl) -> s         | put together a path from parsed parts
+	path.isabs(s, [pl]) -> is_abs, is_empty, is_valid   | check if path is absolute, empty and valid
+	path.endsep(s, [pl], [sep], [dsep]) -> s, ok        | get/add/remove the ending separator
+	path.sep(s, [pl], [sep], ...) -> s                  | detect/set the path separator
+	path.long(s, [pl], [long]) -> s|nil                 | get/set a Windows long absolute path
+	path.file(s, [pl]) -> s                             | get the last component of a path
+	path.nameext(s, [pl]) -> name, ext                  | split `path.file()` into name and extension
+	path.ext(s, [pl]) -> s                              | return only the extension from `path.nameext()`
+	path.dir(s, [pl]) -> s|nil                          | get the path without the last component
+	path.gsplit(s, [pl], [full]) ->iter() -> s, sep     | iterate over path's components
+	path.normalize(s, [pl], [opt]) -> s                 | normalize a path in various ways
+	path.commonpath(s1, s2, [pl]) -> s|nil              | get the common prefix of two paths
+	path.depth(s, [pl]) -> n                            | get the number of non-empty path components
+	path.combine(s1, s2, [pl], [sep], [dsep]) -> s|nil  | combine two paths if possible
+	path.abs(dir, s, [pl], [sep], [dsep]) -> s|nil,err  | convert relative path to absolute
+	path.rel(s, pwd, [pl], [sep], [dsep]) -> s|nil      | convert absolute path to relative
+	path.filename(s, [pl], [repl]) -> s|nil,err,code    | validate/make-valid filename
+
+	`pl` stands for platform and defaults to path.platform.
+
+]=]
 
 if not ... then require'path_test'; return end
 
@@ -34,9 +70,18 @@ function path.dev_alias(s)
 	return s and dev_aliases[s] and s
 end
 
---get the path type which can be: 'abs', 'abs_long', 'abs_nodrive',
---  'rel', 'rel_drive', 'unc', 'unc_long', 'global', 'dev', 'dev_alias'.
---NOTE: the empty path ('') comes off as type 'rel'.
+--get the path type which can be:
+--	* 'abs'          `C:\path` or `/path`             Windows or UNIX
+--	* 'rel'          `a/b`                            Windows and UNIX
+--	* 'abs_long'     `\\?\C:\path`                    Windows
+--	* 'abs_nodrive'  `\path`                          Windows
+--	* 'rel_drive'    `C:a\b`                          Windows
+--	* 'unc'          `\\server\share\path`            Windows
+--	* 'unc_long'     `\\?\UNC\server\share\path`      Windows
+--	* 'global'       `\\?\path`                       Windows
+--	* 'dev'          `\\.\path`                       Windows
+--	* 'dev_alias'    `CON`, `c:\path\nul.txt`, etc.   Windows
+--NOTE: The empty path ('') comes off as type 'rel'.
 function path.type(s, pl)
 	if win(pl) then
 		if s:find'^\\\\' then
@@ -65,9 +110,10 @@ function path.type(s, pl)
 	end
 end
 
---split a path into its local path component and, depending on the path
---type, the drive letter or server name.
---NOTE: UNC paths are not validated and can have and empty server or path.
+--Split a path into its local path component (i.e. the part containing only
+--directories and files, eg. `\path` for `C:\path` or for `\\server\path`)
+--and, depending on the path type, the drive letter or server name.
+--UNC paths are not validated and can have an empty server or share path.
 function path.parse(s, pl)
 	local type = path.type(s, pl)
 	if win(pl) then
@@ -95,7 +141,7 @@ function path.parse(s, pl)
 	end
 end
 
---put together a path from its broken-down components.
+--put together a path from its broken-down components (no validation).
 function path.format(type, path, drive, pl)
 	if win(pl) and type == 'abs' or type == 'rel_drive' then
 		return drive .. ':' .. path
@@ -114,8 +160,8 @@ function path.format(type, path, drive, pl)
 	end
 end
 
---check if a path is an absolute path or not, if it's empty or not,
---and if it's valid or not. NOTE: absolute paths for which their local path
+--Check if a path is an absolute path or not, if it's empty (i.e. root) or not,
+--and if it's valid or not. Absolute paths for which their local path
 --is '' are actually invalid (currently only UNC paths can be invalid and
 --still parse); for those paths the third return value will be false.
 local function isabs(type, p, win)
@@ -147,7 +193,25 @@ local function detect_sep(p, win)
 	end
 end
 
---get/add/remove ending separator.
+--[[
+Get/add/remove an ending separator of a path.
+
+`sep` can be:
+
+	* `nil` or missing: the ending separator is returned (`nil` is returned
+	  if the path has no ending separator).
+	* `true`, `'\\'`, `'/'`: the path is returned with an ending separator
+	  added (`true` means use path's own separator if it has one and failing
+	  that, use `dsep` or the default platform separator).
+	* `false` or `''`: the path without its ending separator is returned.
+
+`success` is `false` if trying to add or remove the ending separator from
+an empty path (note that even when that happens, the path can still be
+concatenated directly to a relative path and result in a valid path).
+
+Multiple consecutive separators are treated as one in that they are returned
+together and are replaced together.
+]]
 local function set_endsep(type, p, win, sep, default_sep)
 	local _, isempty = isabs(type, p, win)
 	if isempty then --refuse to change empty paths
@@ -175,9 +239,25 @@ function path.endsep(s, pl, sep, default_sep)
 	end
 end
 
---detect or set a path's separator (for Windows paths only).
---NOTE: setting '\' on a UNIX path may result in an invalid path because
---`\` is a valid character in UNIX filenames!
+--[[
+Detect or set a path's separator (for Windows paths only).
+
+`sep` can be:
+
+	* `nil`   : detect
+	* `true`  : set to `default_sep`
+	* `false` : set to `default_sep` but only if both `\` and `/` are found
+	            in the path, i.e. unify.
+	* `'\\'` or `'/'` : set specifically
+	* `nil` when `empty_names` is explicitly `false`: collapse duplicate
+	  separators only.
+
+`default_sep` defaults to the platform separator. Unless `empty_names` is `true`,
+consecutive separators are collapsed into the first one.
+
+Setting the separator as `\` on a UNIX path may result in an invalid path
+because `\` is a valid character in UNIX filenames.
+]]
 local function set_sep(p, win, sep, default_sep, empty_names)
 	local dsep = default_sep or (win and '\\' or '/')
 	if sep == true then --set to default
@@ -206,6 +286,14 @@ function path.sep(s, pl, sep, default_sep, empty_names)
 	end
 end
 
+--[[
+Get/set a Windows long absolute path (one starting with `\\?\C:\`). If
+`long` is `nil`, returns whether the path is a long or short Windows absolute
+path (returns `nil` for all other kinds of paths). Otherwise it converts the
+path, in which case `long` can be `true` (convert to long path), `false`
+(convert to short path) or `'auto'` (convert to long style if too long,
+or to short style if short enough).
+]]
 function path.long(s, pl, long)
 	local type, p, drive = path.parse(s, pl)
 	local is_long = type == 'abs_long' or type == 'unc_long'
@@ -234,14 +322,22 @@ function path.long(s, pl, long)
 	return s
 end
 
---get the last path component of a path.
---if the path ends in a separator then the empty string is returned.
+--Get the last path component of a path.
+--Returns `''` if the path is empty or ends with a separator.
 function path.file(s, pl)
 	local _, p = path.parse(s, pl)
 	return p:match(win(pl) and '[^\\/]*$' or '[^/]*$')
 end
 
---get the filename without extension and the extension from a path.
+--[[
+Split a path's last component into the name and extension parts like so:
+
+	* a.txt'     -> 'a', 'txt'
+	* '.bashrc'  -> '.bashrc', nil
+	* 'a'        -> 'a', nil
+	* 'a.'       -> 'a', ''
+
+]]
 function path.nameext(s, pl)
 	local patt = win(pl) and '^(.-)%.([^%.\\/]*)$' or '^(.-)%.([^%./]*)$'
 	local file = path.file(s, pl)
@@ -256,8 +352,10 @@ function path.ext(s, pl)
 	return (select(2, path.nameext(s, pl)))
 end
 
---get a path without basename and separator. if the path ends with
---a separator then the whole path without the separator is returned.
+--Get a path without the last component and separator. If the path ends with
+--a separator then it returns the whole path without the separator. Multiple
+--consecutive separators are treated as one. Returns `nil` for `''`, `'.'`,
+--`'C:'`, `'/'`, `'C:\\'` and `\\server\`. Returns `'.'` for simple filenames.
 function path.dir(s, pl)
 	local type, p, drive = path.parse(s, pl)
 	if p == '' or p == '.' then --current dir has no dir
@@ -273,7 +371,14 @@ function path.dir(s, pl)
 	return s == '' and '.' or s --fix '' as '.'
 end
 
---iterate over a path's components and separators.
+--[[
+Iterate over a path's components (that is excluding prefixes like `\\server`
+or `C:`) and separators. Pass `true` to the `full` arg to iterate over the
+whole unparsed path. For absolute paths, the first iteration is
+`'', <root_separator>`. Empty names are not iterated. Instead, consecutive
+separators are returned together. Concatenating all the iterated path
+components and separators always results in the exact original path.
+]]
 function path.gsplit(s, pl, full)
 	local win = win(pl)
 	local p = full and s or select(2, path.parse(s, pl))
@@ -298,11 +403,25 @@ local function iif(a, b, c)
 	end
 end
 
--- remove `.` dirs (opt.dot_dirs)
--- remove unnecessary `..` dirs (opt.dot_dot_dirs)
--- normalize separator (opt.sep, opt.default_sep, opt.empty_names)
--- add/remove ending separator (opt.endsep)
--- convert between long and short Windows path encodings (opt.long)
+--[[
+Normalize a path. `opt` can contain:
+
+ * `dot_dirs`     : remove `.` dirs.
+ * `dot_dot_dirs` : remove unnecessary `..` dirs.
+    * this changes where the path points to if there are symlinks on the path!
+ * `sep`, `default_sep`, `empty_names` : args to pass to path.sep().
+   * defaults to false.
+   * use `'leave'` to avoid normalizing the separators.
+ * `endsep` : sep arg to pass to path.endsep()
+   * defaults to false.
+	* use 'leave' to avoid removing any end separator.
+ * `long`   : `long` arg to pass to path.long().
+   * defaults to 'auto'.
+	* use 'leave' to avoid converting between short and long paths.
+
+NOTE: If normalization results in the empty relative path '', then '.'
+is returned instead.
+]]
 function path.normalize(s, pl, opt)
 	opt = opt or {}
 	local win = win(pl)
@@ -369,9 +488,19 @@ function path.normalize(s, pl, opt)
 	return s
 end
 
---get the common base path (including the end separator if it's common)
---between two paths.
---BUG: the case-insensitive comparison doesn't work with utf8 paths!
+--[[
+Get the common path prefix of two paths, including the end separator if both
+paths share it, or `nil` if the paths don't have anything in common.
+
+Note that `path.commonpath('C:', 'C:\\', 'win') == nil` because the paths are
+of different type even if they look like they share a common prefix.
+
+BUG: The case-insensitive comparison for Windows doesn't work with
+paths with non-ASCII characters because it's made with `string.lower()`.
+Proper lowercase your paths before using this function, or patch
+`string.lower()` to support utf8 lowercasing. This is not an issue if both
+paths are in the original letter case (eg. they come from the same API).
+]]
 function path.commonpath(s1, s2, pl)
 	local win = win(pl)
 	local t1, p1, d1 = path.parse(s1, pl)
@@ -410,6 +539,8 @@ function path.commonpath(s1, s2, pl)
 	return path.format(t, p, d, pl)
 end
 
+--Get the number of non-empty path components, excluding prefixes
+--like `C:\`, `\\server\`, etc.
 local function depth(p, win)
 	local n = 0
 	for _ in p:gmatch(win and '()[^\\/]+' or '()[^/]+') do
@@ -422,7 +553,15 @@ function path.depth(s, pl)
 	return depth(p, win(pl))
 end
 
---combine two paths if possible.
+--[[
+Combine two paths if possible (return `nil, err` if not). Supported
+combinations are between anything except between `dev_alias` and `rel` paths,
+between `abs_nodrive` and `rel_drive`, and between `rel_drive` and `abs`
+or `abs_long`. When the paths can only be combined in one way, paths can be
+given in any order. The separator with which paths are combined is either
+`sep` or if `sep` is nil it's detected and if that fails `dsep` or the
+default separator is used.
+]]
 local function combinable(type1, type2)
 	if type2 == 'rel' then             -- any + c/d -> any/c/d
 		return type1 ~= 'dev_alias'
@@ -464,11 +603,12 @@ function path.combine(s1, s2, pl, sep, default_sep)
 	end
 end
 
---transform a relative path into an absolute path given a base dir.
+--Convert a relative path into an absolute path given a base dir.
 path.abs = path.combine
 
---transform an absolute path into a relative path which is relative to `pwd`.
---the ending separator is preserved.
+--Convert an absolute path into a relative path which is relative to `pwd`.
+--Returns `nil` if the paths are of different types or don't have a base path
+--in common. The ending (back)slash is preserved if present.
 function path.rel(s, pwd, pl, sep, default_sep)
 	local prefix = path.commonpath(s, pwd, pl)
 	if not prefix then return nil end
@@ -488,9 +628,15 @@ function path.rel(s, pwd, pl, sep, default_sep)
 	return path.format(type, p3, drive, pl)
 end
 
---validate/make-valid a filename
---NOTE: repl can be a function(match, err) -> repl_str.
---NOTE: if repl isn't itself escaped then duplicate filenames can result.
+--[[
+Validate a filename or apply a replacement function on it in order to make it
+valid. `repl` can be a `function(match, err) -> repl_str` that receives the
+problematic match and an error code indicating the problem which can be one
+of '', '.', '..', 'dev_alias', 'char', 'length', 'evil' and it should return
+a replacement string or `false/nil` if it cannot do the replacement
+(`'evil'` errors should generally be replaced with `''`).
+--NOTE: If repl isn't itself escaped then duplicate filenames can result.
+]]
 function path.filename(s, pl, repl, break_on_err)
 	local win = win(pl)
 

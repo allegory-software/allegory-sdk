@@ -26,9 +26,9 @@ with them dependencies beforehand.
 Note that the standard Lua `module` function is replaced with a function with
 entirely different semantics (see glue for that).
 
-__TIP__: Run the script standalone with `luajit $.lua` to get a listing
-of all the symbols (which you can then paste into your editor config file
-for syntax highlighting).
+TIP: Run the script standalone with `luajit $.lua` to get a listing of all
+the symbols (which you can then paste into your editor config file for
+syntax highlighting).
 
 ]]
 

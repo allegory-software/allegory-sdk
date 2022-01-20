@@ -1,10 +1,22 @@
+--[=[
 
---Base64 encoding & decoding in Lua
---Written by Cosmin Apreutesei. Public Domain.
+	Base64 encoding & decoding.
+	Written by Cosmin Apreutesei. Public Domain.
 
---Original code from:
---https://github.com/kengonakajima/luvit-base64/issues/1
---http://lua-users.org/wiki/BaseSixtyFour
+	Original code from:
+		https://github.com/kengonakajima/luvit-base64/issues/1
+		http://lua-users.org/wiki/BaseSixtyFour
+
+b64.[encode|decode](s[, size], [outbuf], [outbuf_size]) -> outbuf, len
+
+	Encode/decode string or cdata buffer.
+	Returns a cdata buffer that you can convert to string with ffi.string().
+
+b64.url[encode|decode](s) -> s
+
+	Encode/decode URL based on RFC4648 Section 5 / RFC7515 Section 2 (JSON Web Signature).
+
+]=]
 
 local base64 = {}
 

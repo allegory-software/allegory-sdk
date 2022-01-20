@@ -1,6 +1,32 @@
+--[[
 
---LZ4 binding for LZ4 1.7.1 API.
---Written by Cosmin Apreutesei. Public Domain.
+	LZ4: extremely fast compression. LZ4 1.7.1 API.
+	Written by Cosmin Apreutesei. Public Domain.
+
+BUFFER API
+	lz4.compress(src, [#src], dst, [#dst], [accel], [level], [state], [filldest]) -> #dst
+	lz4.decompress(src, [#src] | true, dst, [#dst], [outlen]) -> #dst
+
+STREAM API
+	lz4.compress_stream([hc]) -> cs
+	lz4.decompress_stream() -> ds
+	cs:compress(src, [#src], dst, [#dst], [accel/level]) -> #dst
+	ds:decompress(src, [#src] | true, dst, [#dst])
+
+DICTIONARIES
+	cs:load_dict(dict, [#dict])
+	cs:save_dict(dict, #dict)
+	ds:set_dict(dict, [#dict])
+	cs|ds:free()
+	cs|ds:reset()
+
+MISC
+	lz4.sizeof_state() -> bytes
+	lz4.sizeof_state_hc() -> bytes
+	lz4.compress_bound() -> bytes
+	lz4.version() -> n
+
+]]
 
 local ffi = require'ffi'
 
@@ -307,4 +333,3 @@ if not ... then
 	--local n = s:compress(src, srclen, dst, dstlen)
 	s:free()
 end
-

@@ -3,22 +3,34 @@
 	File and TCP logging with capped disk & memory usage.
 	Written by Cosmin Apreutesei. Public domain.
 
+LOGGING
 	logging.log(severity, module, event, fmt, ...)
 	logging.note(module, event, fmt, ...)
 	logging.dbg(module, event, fmt, ...)
 	logging.warnif(module, event, condition, fmt, ...)
 	logging.logerror(module, event, fmt, ...)
-
+UTILS
 	logging.args(...) -> ...
 	logging.printargs(...) -> ...
-
-	logging.env <- 'dev' | 'prod', etc.
-	logging.deploy <- app deployment name
-	logging.filter <- {severity->true}
-	logging.censor.name <- f(severity, module, event, msg)
-
+CONFIG
+	logging.deploy            app deployment name (logged to server)
+	logging.env               app deployment type: 'dev', 'prod', etc.
+	logging.quiet             do not log anything to stderr (false)
+	logging.verbose           log `note` messages to stderr (true)
+	logging.debug             log `debug` messages to stderr (false)
+	logging.flush             flush stderr after each message (false)
+	logging.max_disk_size     max disk size occupied by logging (16M)
+	logging.queue_size        queue size for when the server is slow (10000)
+	logging.timeout           timeout (5)
+	logging.filter.severity = true    |filter out messages of a specific severity
+	logging.censor.name <- f(severity, module, ev, msg)  |set a function for censoring secrets in logs
+INIT
 	logging:tofile(logfile, max_disk_size)
 	logging:toserver(host, port, queue_size, timeout)
+
+Logging is done to stderr by default. To start logging to a file, call
+logging:tofile(). To start logging to a server, call logging:toserver().
+You can call both.
 
 ]]
 

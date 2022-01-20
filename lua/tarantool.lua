@@ -1,6 +1,72 @@
+--[=[
 
---Tarantool client for LuaJIT.
---Written by Cosmin Apreutesei. Public Domain.
+	Tarantool client for Tarantool 2.8 (based on sock and msgpack).
+	Written by Cosmin Apreutesei. Public Domain.
+
+	Features: streams, prepared statements, UUID & DECIMAL types.
+
+CONECTING
+	tarantool.connect(opt) -> tt          connect to server
+	  opt.host                            host (`'127.0.0.1'`)
+	  opt.port                            port (`3301`)
+	  opt.user                            user (optional)
+	  opt.password                        password (optional)
+	  opt.timeout                         timeout (`2`)
+	  opt.tcp                             tcp object (`sock.tcp()`)
+	  opt.clock                           clock function (`sock.clock`)
+	  opt.mp                              msgpack instance to use (optional)
+	tt:stream() -> tt                     create a stream
+
+SELECTING
+	tt:select(space,[index],[key],[sopt]) -> tuples  select tuples from a space
+	  sopt.limit                          limit (`4GB-1`)
+	  sopt.offset                         offset (`0`)
+	  sopt.iterator                       iterator
+
+UPDATING
+	tt:insert(space, tuple)               insert a tuple in a space
+	tt:replace(space, tuple)              insert or update a tuple in a space
+	tt:delete(space, key)                 delete tuples from a space
+	tt:update(space, index, key, oplist)  update tuples in bulk
+		https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_space/update/
+	tt:upsert(space, index, key, oplist)  insert or update tuples in bulk
+		https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_space/upsert/
+
+LUA RPC
+	tt:eval(expr, ...) -> ...             eval Lua expression on the server
+	tt:call(fn, ...) -> ...               call Lua function on the server
+
+SQL QUERIES
+	tt:exec(sql, params, [xopt]) -> rows  execute SQL statement
+
+SQL PREPARED STATEMENTS
+	tt:prepare(sql) -> st                 prepare SQL statement
+	st:exec(params, [xopt]) -> rows       exec prepared statement
+	st:free()                             unprepare statement
+	st.fields                             field list with field info
+	st.params                             param list with param info
+
+MISC
+	tt:ping()                             ping
+	tt:clear_metadata_cache()             clear `space` and `index` names
+	tt.mp                                 msgpack instance used
+
+What the args mean:
+
+	* `space` and `index` can be given by name or number. Resolved names are
+	  cached so you need to call `tt:clear_metadata_cache()` if you know that
+	  a space or index got renamed or removed (but not when new ones are created).
+	  If you're using SQL exclusively, you don't have to worry about this.
+	* `tuple` is an array of values.
+	* `key` can be a string or an array of values.
+	* `oplist` is an array of update operations of form `{op, field, value}`.
+	* `params` in `tt:exec()` must always be an array, even when you're using
+	  named params in the query. `st:exec()` doesn't have that limitation and
+	  requires you to put `'?'` params in the array part and the named params in
+	  the hash part of the params table.
+	* there's no valid `xopt` options yet.
+
+]=]
 
 if not ... then require'tarantool_test'; return end
 

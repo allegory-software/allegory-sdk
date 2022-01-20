@@ -1,7 +1,90 @@
+--[=[
 
---MySQL client protocol in Lua.
---Written by Cosmin Apreutesei. Public domain.
---Original code by Yichun Zhang (agentzh). BSD license.
+	Async MySQL client protocol.
+	Written by Cosmin Apreutesei. Public domain.
+	Original code by Yichun Zhang (agentzh). BSD license.
+
+	Field metadata is consistent with sqlpp.lua, schema.lua and x-nav.js.
+	No compression or fancy auth supported.
+
+CONNECTING
+
+	mysql.connect(opt) -> ok | nil,err,[errcode],[sqlstate]
+
+		host       : server's IP address (required).
+		port       : server's port (optional, defaults to 3306).
+		user       : user name (optional).
+		password   : password (optional).
+		db         : the database to set as current database (optional).
+		charset    : the character set used for the connection (required if no collation).
+		collation  : the collation used for the connection (required if no charset).
+		max_packet_size: max reply packet size (defaults to 16 MB).
+		ssl        : enable SSL (false). returns 'no_ssl' if disabled by server.
+		ssl_verify : check server's SSL certificate (false).
+		to_lua     : value converter `f(v, col) -> v` (defaults to `mysql.to_lua`).
+
+	cn:close()         Close connection.
+	cn:closed()        Check if the connection was closed.
+	cn.server_ver      Get server version.
+
+QUERYING
+
+	cn:send_query(sql) -> bytes | nil,err
+
+		Execute query. Must be followed by one or more calls to read_result().
+
+	cn:read_result([opt]) -> res,nil|'again',cols | nil,err,errcode,sqlstate
+
+		Read in the next result returned from the server. 'again' signals
+		that more results are coming in which case read_result() must be called
+		again until all results are received. For non-select queries the result
+		is a table with insert_id, affected_rows, etc.
+
+		compact : return {{v1,...},...} instead of {{col->val},...}.
+			NOTE: unless you set `null_value`, the rows in compact mode will
+			be sparse arrays so `ipairs(row)` and `#row` won't work on them!
+		to_array    : return an array of values for single-column results.
+		null_value  : value to use for `null` (defaults to `nil`).
+		field_attrs : supply extra field attributes. It can also be a function
+			which will be called as `f(cn, fields, opt)` as soon as field
+			metadata is received but before rows are received (so you can set
+			a custom `mysql_to_lua` converter for particular fields).
+
+	cn:query(query, [opt]) -> res,nil|'again',cols | nil,err,errcode,sqlstate
+
+		Calls `send_query()` followed by a single call to `read_result()`.
+
+PREPARED STATEMENTS
+
+	cn:prepare(query, [opt]) -> stmt
+
+		Prepare a statement.
+			cursor: 'read_only', 'update', 'scrollabe', 'none' (default: 'none').
+
+	stmt:exec(params...)
+
+		Execute a statement. Call cn:read_result() to get results.
+
+	stmt:free()             Free statement.
+
+ESCAPING
+
+	mysql.esc_utf8(s) -> s
+
+		Escape string to be used inside SQL string literals. Only works on
+		connections for which the charset is ASCII or an ASCII superset (ascii, utf8).
+
+	cn:esc(s) -> s
+
+		Escape string to be used inside SQL string literals.
+
+NOTE: Decimals with up to 15 digits of precision and 64 bit integers are
+converted to Lua numbers by default. That limits the useful range of integer
+types to 15 significant digits. If you have other needs, provide your own
+`to_lua` which can be set at module or connection level, per query in
+`field_attrs`, or in a schema column definition with attribute `mysql_to_lua`.
+
+]=]
 
 if not ... then require'mysql_test'; return end
 
@@ -1075,7 +1158,7 @@ function mysql.connect(opt)
 	local use_ssl = opt.ssl or ssl_verify
 	local buf = send_buffer(64)
 	if use_ssl then
-		checkp(self, band(capabilities, CLIENT_SSL) ~= 0, 'SSL disabled on server')
+		checkp(self, band(capabilities, CLIENT_SSL) ~= 0, 'no_ssl')
 		set_u32(buf, bor(client_flags, CLIENT_SSL))
 		set_u32(buf, self.max_packet_size)
 		set_u8(buf, collation)

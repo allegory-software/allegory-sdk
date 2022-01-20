@@ -1,6 +1,13 @@
+--[=[
 
---Line buffer for text-based network protocols.
---Written by Cosmin Apreutesei. Public Domain.
+	Line buffer for text-based network protocols.
+	Written by Cosmin Apreutesei. Public Domain.
+
+	Allows reading from a socket an unknown amount of bytes into a memory
+	buffer, and consuming the data from the buffer line by line.
+	It is used to simplify the impl. of line-based network protocols like HTTP.
+
+]=]
 
 if not ... then require'linebuffer_test'; return end
 

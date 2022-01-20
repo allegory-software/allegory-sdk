@@ -1,6 +1,45 @@
+--[=[
 
---BLAKE2 ffi binding.
---Writen by Cosmin Apreutesei. Public Domain.
+	BLAKE2 fast cryptographic hash.
+	Writen by Cosmin Apreutesei. Public Domain.
+
+	blake2.blake2?(s, [size], [key], [#out]) -> s   hash a string
+	blake2.blake2?(cdata, size, [key]) -> s         hash a buffer
+	blake2.blake2?_digest([key, [#out] | opt_t]) -> digest     get a hash state
+	digest[:update](s, [size])                      digest a string
+	digest[:update](cdata, size)                    digest a buffer
+	digest[:final]() -> s                           finalize and get the hash
+	digest:final_to_buffer(buf)                     finalize and get the hash into a buffer
+	digest:length() -> n                            get the hash byte length
+	digest:reset()                                  prepare for another digestion
+
+`?` is either `s`, `b`, `sp` or `bp` for each variant of the BLAKE2 algorithm.
+The hash is returned raw in a Lua string. To get it as hex use glue.tohex().
+The optional `key` arg is for keyed hashing (up to 64 bytes for BLAKE2b,
+up to 32 bytes for BLAKE2s).
+The optional #out arg is for reducing the length of the output hash.
+
+The constructors blake2s_digest and blake2b_digest can take a table
+in place of the `key` arg in which more options can be specified:
+
+  salt         : salt for randomized hashing (up to 16 bytes for BLAKE2b, up to 8 bytes for BLAKE2s).
+  personal     : personalization string (up to 16 bytes for BLAKE2b, up to 8 bytes for BLAKE2s).
+  fanout       : fanout (1; 0..255, 0 if unlimited, 1 in sequential mode).
+  depth        : maximal depth of tree (1; 1..255, 255 if unlimited, 1 in sequential mode).
+  leaf_length  : maximal byte length of leaf (0; 0 to 2^32-1, 0 if unlimited or in sequential mode).
+  node_offset  : node offset (0; 0 to 2^64-1 for BLAKE2b, 0 to 2^48-1 for BLAKE2s,
+  0 for the first, leftmost, leaf, or in sequential mode).
+  node_depth   : node depth (0; 0..255, 0 for leaves, or in sequential mode).
+  inner_length : inner digest length (0; 0..64 for BLAKE2b, 0..32 for BLAKE2s, 0 in sequential mode).
+  key          : key string for keyed hashing (up to 64 bytes for BLAKE2b, up to 32 bytes for BLAKE2s).
+  hash_length  : optional, for reducing the length of the output hash.
+
+NOTE: the `salt` and `personal` options are zero-padded so 'foo' is
+the same value as 'foo\0' or 'foo\0\0' with them (not so with `key`).
+
+See section 2.10 in BLAKE2 specification for a review of tree hashing.
+
+]=]
 
 local ffi = require'ffi'
 local C = ffi.load'blake2'

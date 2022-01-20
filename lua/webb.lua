@@ -3,7 +3,24 @@
 	webb | main module
 	Written by Cosmin Apreutesei. Public Domain.
 
-Exports
+Webb is a procedural web framework for http_server.
+
+FEATURES
+
+	* filesystem decoupling with virtual files and actions
+	* action-based routing with multi-language URLs
+	* http error responses via exceptions
+	* file serving with cache control
+	* output buffering stack
+	* rendering with mustache templates, php-like templates and Lua scripts
+	* multi-langage html with server-side language filtering
+	* online js and css bundling and minification
+	* email sending with popular email sending providers
+	* standalone operation without a web server for debugging and offline scripts
+	* SQL query module with implicit connection pool
+	* SPA module with client-side action-based routing
+
+EXPORTS
 
 	glue
 	pp
@@ -202,19 +219,6 @@ STANDALONE OPERATION
 	webb.run(f, ...)                        run a function in a webb context.
 	webb.request(req | arg1,...)            make a request without a http server.
 
-API DOCS ---------------------------------------------------------------------
-
-	once(f)
-
-Memoize function for current request.
-
-	webb.env([t]) -> t
-
-Per-request shared environment. Inherits _G. Scripts run with `include()`
-and `run()` run in this environment by default. If the `t` argument is given,
-an inherited environment is created.
-
-
 ]==]
 
 local ffi = require'ffi'
@@ -401,6 +405,8 @@ function once(f)
 end
 
 --per-request shared environment to use in all app code.
+--Inherits _G. Scripts run with `include()` and `run()` run in this environment
+--by default. If the `t` argument is given, an inherited environment is created.
 function webb.env(t)
 	local env = cx.env
 	if not env then
