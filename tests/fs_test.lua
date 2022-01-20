@@ -626,6 +626,7 @@ function test.paths()
 	print('tmpdir ', fs.tmpdir())
 	print('exepath', fs.exepath())
 	print('exedir' , fs.exedir())
+	print('scriptdir', fs.scriptdir())
 end
 
 --file attributes ------------------------------------------------------------
