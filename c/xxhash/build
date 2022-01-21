@@ -1,10 +1,6 @@
 #!/bin/sh
 cd "${0%build}" || exit 1
 
-# DynASM 1.4.0 from https://github.com/LuaJIT/LuaJIT (MIT License)
-# The encoder part written in C was not modified.
-# The Lua part was modified to support Lua mode (see docs for details).
-
 build() {
 	${X}gcc -c -O3 $C -DXXH_SSE2 -msse2 src/*.c -Isrc \
 		-std=c99 -Wall -Wextra -Wshadow -Wcast-qual -Wcast-align \
