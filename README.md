@@ -54,22 +54,24 @@ scripts for new libraries.
   * [logging](lua/logging.lua)         - Logging to files and network
   * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser
   * [$](lua/$.lua)                     - "Drop all your tools on the floor" library
-* __OS APIs__
-  * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep (Windows, Linux, OSX)
-  * [fs](lua/fs.lua)                   - Filesystem API with mmapping and symlinks (Windows, Linux, OSX)
-  * [proc](lua/proc.lua)               - Async processes with I/O redirection (Windows, Linux)
-  * [pthread](lua/pthread.lua)         - Low-level threads (Linux, Windows, OSX)
+* __Platform APIs__
+  * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep
+  * [fs](lua/fs.lua)                   - Filesystems, pipes, memory mapping
+  * [proc](lua/proc.lua)               - Async process execution with I/O redirection
+  * [path](lua/path.lua)               - Path manipulation
+  * [unixperms](lua/unixperms.lua)     - Unix permissons parser
+* __Multi-threading__
+  * [pthread](lua/pthread.lua)         - Low-level threads
   * [luastate](lua/luastate.lua)       - Create Lua interpreters to use with OS threads
   * [thread](lua/thread.lua)           - High-level threads API based on pthread and luastate
-  * [path](lua/path.lua)               - File path manipulation
-  * [unixperms](lua/unixperms.lua)     - Unix permissons parser
 * __Networking__
-  * [sock](lua/sock.lua)               - Async sockets (Windows/IOCP, Linux/epoll)
-  * [resolver](lua/resolver.lua)       - Async DNS resolver
+  * [sock](lua/sock.lua)               - Sockets + async scheduler for sockets & pipes
+  * [resolver](lua/resolver.lua)       - DNS resolver
   * [connpool](lua/connpool.lua)       - Connection pools
-  * [http_client](lua/http_client.lua) - HTTP 1.1 async client for high-volume web scraping
-  * [http_server](lua/http_server.lua) - HTTP 1.1 async server with TLS, gzip, etc.
+  * [http_client](lua/http_client.lua) - HTTP(s) 1.1 client for high-volume web scraping
+  * [http_server](lua/http_server.lua) - HTTP(s) 1.1 server
   * [uri](lua/uri.lua)                 - URI manipulation
+  * [ipv6](lua/ipv6.lua)               - IPv6 conversion routines
 * __Data Exchange__
   * [base64](lua/base64.lua)           - Base64 encoding & decoding
   * [cjson](lua/cjson.lua)             - JSON encoding & decoding
@@ -79,29 +81,26 @@ scripts for new libraries.
   * [csv](lua/csv.lua)                 - CSV parsing
   * [xlsxwriter](lua/xlsxwriter.lua)   - XLSX generation
 * __Hashing__
-  * [xxhash](lua/xxhash.lua)           - xxHash non-cryptographic 32, 64 and 128 bit hash
-  * [blake2](lua/blake2.lua)           - BLAKE2 cryptographic hash
+  * [xxhash](lua/xxhash.lua)           - xxHash fast non-cryptographic hash (32/64/128bit)
+  * [blake2](lua/blake2.lua)           - BLAKE2 fast cryptographic hash
   * [sha1](lua/sha1.lua)               - SHA1 hash
   * [sha2](lua/sha2.lua)               - SHA2 hash
   * [md5](lua/md5.lua)                 - MD5 hash
   * [hmac](lua/hmac.lua)               - HMAC signing
 * __Compression__
-  * [zlib](lua/zlib.lua)               - DEFLATE, ZLIB and GZIP compression & decompression
+  * [zlib](lua/zlib.lua)               - DEFLATE, ZLIB, GZIP (based on zlib-ng)
   * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating
 * __Databases__
   * [sqlpp](lua/sqlpp.lua)             - SQL preprocessor
   * [mysql](lua/mysql.lua)             - MySQL async driver
   * [tarantool](lua/tarantool.lua)     - Tarantool async driver
   * [schema](lua/schema.lua)           - Database schema diff'ing and migrations
-* __Image Formats__
-  * [libjpeg](lua/libjpeg.lua)         - JPEG async decoding & encoding
+* __Raster Images__
+  * [libjpeg](lua/libjpeg.lua)         - JPEG decoding & encoding
   * [libspng](lua/libspng.lua)         - PNG decoding & encoding
   * [bmp](lua/bmp.lua)                 - BMP decoding & encoding
-  * [bitmap](lua/bitmap.lua)           - Bitmap conversions & effects
-* __2D Graphics__
-  * [cairo](lua/cairo.lua)             - 2D vector graphics
-  * [color](lua/color.lua)             - Color parser and RGB-HSL converters
-  * [boxblur](lua/boxblur.lua)         - Fast image blur on CPU
+  * [bitmap](lua/bitmap.lua)           - Bitmap conversions
+  * [pillow](lua/pillow.lua)           - Image resizing
 * __Templating__
   * [mustache](lua/mustache.lua)       - Logic-less templates (server-side)
 * __Data Structures__
