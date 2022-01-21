@@ -30,7 +30,7 @@ int    pillow_image_height (Imaging im) { return im->ysize; }
 char*  pillow_image_mode   (Imaging im) { return im->mode; }
 char** pillow_image_rows   (Imaging im) { return im->image; }
 
-Imaging pillow_resample(Imaging im, int w, int h, int filter) {
-	float box[4] = {0, 0, w, h};
+Imaging pillow_resample(Imaging im, int w, int h, int cx, int cy, int cw, int ch, int filter) {
+	float box[4] = {cx, cy, cw, ch};
 	return ImagingResample(im, w, h, filter, box);
 }

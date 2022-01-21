@@ -10,7 +10,7 @@ local function resize_image(src_path, dst_path, max_w, max_h)
 	local f = assert(fs.open(src_path, 'r'))
 	local read = f:buffered_read()
 	local img = assert(libjpeg.open{read = read})
-	local w, h = glue.fitbox(img.w, img.h, max_w, max_h)
+	local w, h = glue.fitbox(img.w, img.h, max_w or img.w, max_h or img.h)
 	local sn = math.ceil(glue.clamp(math.max(w / img.w, h / img.h) * 8, 1, 8))
 	bmp = assert(img:load{
 		accept = {rgba8 = true},
@@ -20,9 +20,9 @@ local function resize_image(src_path, dst_path, max_w, max_h)
 	f:close()
 
 	--resize.
-	local w, h = glue.fitbox(bmp.w, bmp.h, max_w, max_h)
+	local w, h = glue.fitbox(bmp.w, bmp.h, max_w or bmp.w, max_h or bmp.h)
 	local img1 = pil.image(bmp)
-	local img2 = img1:resize(w, h, 'lanczos')
+	local img2 = img1:resize(w, h, 'lanczos') --, 100, 100, -100, -100)
 	img1:free()
 	local bmp = img2:bitmap()
 	pr(bmp)
@@ -44,5 +44,6 @@ end
 
 resize_image(
 	'pillow_test/birds.jpg',
-	'pillow_test/birds-small.jpg',
-	345, 234)
+	'pillow_test/birds-small.jpg'
+	, 1/0, 400
+	)
