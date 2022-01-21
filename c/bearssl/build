@@ -14,9 +14,9 @@ if [ "$OSTYPE" = "msys" ]; then
 	D=bearssl.dll A=bearssl.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
 	P=osx C="-arch x86_64 mz_crypt_apple.c mz_strm_os_posix.c mz_os_posix.c" \
-	L="-arch x86_64 -install_name @rpath/libminizip2.dylib
+	L="-arch x86_64 -install_name @rpath/libbearssl.dylib
 		-framework CoreFoundation -framework Security -liconv
-	" D=libminizip2.dylib A=libminizip2.a build
+	" D=libbearssl.dylib A=libbearssl.a build
 else
 	P=linux L="-s -static-libgcc" D=libbearssl.so A=libbearssl.a build
 fi
