@@ -10,6 +10,7 @@ test(uri.format{scheme = 'http', host = 'dude.com', args = {b='2 3',a='1'}}, 'ht
 test(uri.format{scheme = 'http', host = 'dude.com', path = '/redirect',
 		args={a='1',url='http://dude.com/redirect?a=1&url=http://dude.com/redirect?a=1&url=https://dude.com/'}},
 	'http://dude.com/redirect?a=1&url=http%3a%2f%2fdude.com%2fredirect%3fa=1%26url=http%3a%2f%2fdude.com%2fredirect%3fa=1%26url=https%3a%2f%2fdude.com%2f')
+
 local function revtest(s, t, missing_t, missing_pt)
 	local pt = uri.parse(s)
 	local s2 = uri.format(pt)
@@ -41,6 +42,7 @@ revtest('s://u:p@h/p?q=#f', {scheme='s',user='u',pass='p',host='h',path='/p',que
 revtest('?q=', {query='q=',args={q=''}}, {args={q='','q',''}})
 revtest('#f', {fragment='f'})
 revtest('?q=&q#f', {query='q=&q',args={'q','','q',true},fragment='f'}, {args={q=true,'q','','q',true}})
+
 test(uri.parse'?a=1&b=2&c=&d&f=hidden&f=visible&g=a=1%26b=2', {
 				query='a=1&b=2&c=&d&f=hidden&f=visible&g=a=1&b=2',
 				args={a='1',b='2',c='',d=true,f='visible',g='a=1&b=2',
