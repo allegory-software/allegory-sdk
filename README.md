@@ -123,7 +123,7 @@ scripts for new libraries.
   * [x-listbox.js](www/x-listbox.js)   - Nav-based listbox widget
   * [x-input.js](www/x-input.js)       - Nav-based single-value (scalar) widgets
   * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
-* _Web / Client side / 3D__
+* __Web / Client side / 3D__
   * [3d.js](www/3d.js)                 - 3D math lib (fast, complete, consistent)
   * [eaercut.js](www/earcut.js)        - Ear-clipping algorithm for polygon triangulation
   * [gl.js](www/gl.js)                 - WebGL 2 procedural wrapper
