@@ -76,8 +76,8 @@ scripts for new libraries.
   * [base64](lua/base64.lua)           - Base64 encoding & decoding
   * [cjson](lua/cjson.lua)             - JSON encoding & decoding
   * [msgpack](lua/msgpack.lua)         - MessagePack encoding & decoding
-  * [expat](lua/expat.lua)             - XML decoding
-  * [genx](lua/genx.lua)               - XML encoding
+  * [expat](lua/expat.lua)             - XML parsing
+  * [genx](lua/genx.lua)               - XML formatting
   * [csv](lua/csv.lua)                 - CSV parsing
   * [xlsxwriter](lua/xlsxwriter.lua)   - XLSX generation
 * __Hashing__

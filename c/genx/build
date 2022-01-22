@@ -1,0 +1,19 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c -O2 $C genx.c charProps.c -Wall -pedantic
+	${X}gcc *.o -shared -o ../../bin/$P/$D $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc" D=genx.dll A=genx.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libgenx.dylib" \
+	D=libgenx.dylib A=libgenx.a build
+else
+	P=linux C=-fPIC L="-s -static-libgcc" D=libgenx.so A=libgenx.a build
+fi
