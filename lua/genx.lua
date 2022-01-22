@@ -4,31 +4,30 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 FEATURES
-
 	* does all necessary XML escaping.
 	* prevents generating text that isn't well-formed.
 	* generates namespace prefixes.
 	* produces Canonical XML, suitable for use with digital signatures.
 
 LIMITATIONS
-
 	* only UTF8 encoding supported
 	* no empty element tags
 	* no <!DOCTYPE> declarations (write it yourself before calling w:start_doc())
 	* no pretty-printing (add linebreaks and indentation yourself with w:text())
 
+API
 	genx.new() -> w                           Create a new genx writer.
 	w:free()                                  Free the genx writer.
 	w:start_doc(file)                         Start an XML document on a Lua file object
 	w:start_doc(write)                        Start an XML document on write([s[, size]])
 	w:end_doc()                               Flush pending updates and release the file handle
 	w:ns(uri[, prefix]) -> ns                 Declare a namespace for reuse.
-	w:element(name[, ns | uri,prefix]) -> elem   Declare an element for reuse.
+	w:tag(name[, ns | uri,prefix]) -> elem    Declare an element for reuse.
 	w:attr(name[, ns | uri,prefix]) -> attr   Declare an attribute for reuse.
 	w:comment(s)                              Add a comment to the current XML stream.
 	w:pi(target, text)                        Add a PI to the current XML stream.
-	w:start_element(elem | name [, ns | uri,prefix])   Start a new XML element.
-	w:end_element()                           End the current element.
+	w:start_tag(elem | name [, ns | uri,prefix])   Start a new XML element.
+	w:end_tag()                               End the current element.
 	w:add_attr(attr, val[, ns | uri,prefix])  Add an attribute to the current element.
 																Attributes are sorted by name in the output stream.
 	w:add_ns(ns | [uri,prefix])               Add a namespace to the current element.
@@ -119,7 +118,7 @@ ffi.metatype('genxWriter_rec', {__index = {
 		return checkh(w, statusP, C.genxDeclareNamespace(w, uri, prefix, statusP))
 	end,
 
-	element = function(w, name, ns, statusP)
+	tag = function(w, name, ns, statusP)
 		statusP = statusP or ffi.new'genxStatus[1]'
 		return checkh(w, statusP, C.genxDeclareElement(w, ns, name, statusP))
 	end,
@@ -133,12 +132,12 @@ ffi.metatype('genxWriter_rec', {__index = {
 
 	pi = nzcaller(C.genxPI),
 
-	start_element = function(w, e, ns, prefix)
+	start_tag = function(w, e, ns, prefix)
 		if type(ns) == 'string' then
 			ns = w:ns(ns, prefix)
 		end
 		if type(e) == 'string' then
-			e = w:element(e, ns)
+			e = w:tag(e, ns)
 		end
 		checknz(w, C.genxStartElement(e))
 	end,
@@ -162,7 +161,7 @@ ffi.metatype('genxWriter_rec', {__index = {
 
 	unset_default_namespace = nzcaller(C.genxUnsetDefaultNamespace),
 
-	end_element = nzcaller(C.genxEndElement),
+	end_tag = nzcaller(C.genxEndElement),
 
 	text = function(w, s, sz)
 		checknz(w, C.genxAddCountedText(w, s, sz or #s))
