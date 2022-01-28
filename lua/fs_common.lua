@@ -406,7 +406,8 @@ function fs.exedir()
 end
 
 fs.scriptdir = memoize(function()
-	return path.normalize((path.combine(initial_cwd(), glue.bin)))
+	local s = path.combine(initial_cwd(), glue.bin)
+	return s and path.normalize(s) or glue.bin
 end)
 
 --file attributes ------------------------------------------------------------

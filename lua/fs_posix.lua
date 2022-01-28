@@ -386,7 +386,6 @@ end
 local ERANGE = 34
 
 function getcwd()
-	initial_cwd()
 	while true do
 		local buf, sz = cbuf(256)
 		if C.getcwd(buf, sz) == nil then
@@ -481,6 +480,8 @@ else
 	end
 
 end
+
+fs.exepath = memoize(fs.exepath)
 
 --file attributes ------------------------------------------------------------
 

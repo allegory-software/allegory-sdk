@@ -932,6 +932,7 @@ function fs.exepath()
 	end
 	return mbs(buf, sz)
 end
+fs.exepath = memoize(fs.exepath)
 
 --file attributes ------------------------------------------------------------
 
