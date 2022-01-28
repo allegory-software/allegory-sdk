@@ -12,35 +12,6 @@ local winapi = require'winapi'
 require'winapi.process'
 require'winapi.thread'
 
---see https://docs.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way
---You will lose precious IQ points if you read that. Lose enough of them
---and you might get a job at Microsoft!
-function M.esc_win(s) --escape for putting inside double-quoted string
-	s = tostring(s)
-	if not s:find'[\\"]' then
-		return s
-	end
-	s = s:gsub('(\\*)"', function(s) return s:rep(2)..'\\"' end)
-	s = s:gsub('\\+$', function(s) return s:rep(2) end)
-	return s
-end
-
-function M.quote_path_win(s)
-	if s:find'%s' then
-		s = '"'..s..'"'
-	end
-	return s
-end
-
-function M.quote_arg_win(s)
-	s = tostring(s)
-	if not s:find'[ \t\n\v"^&<>|]' then
-		return s
-	else
-		return '"'..M.esc_win(s)..'"'
-	end
-end
-
 function M.env(k, v)
 	if k then
 		if v ~= nil then

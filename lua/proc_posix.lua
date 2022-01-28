@@ -6,19 +6,6 @@ assert(ffi.os == 'Linux' or ffi.os == 'OSX', 'platform not Linux or OSX')
 local M = {}
 local proc = {type = 'process', debug_prefix = 'P'}
 
-function M.esc_unix(s) --escape for putting inside double-quoted string
-	return tostring(s):gsub('[$`\\!]', '\\%1')
-end
-
-function M.quote_arg_unix(s)
-	s = tostring(s)
-	if not s:find'[^a-zA-Z0-9._+:@%%/%-=]' then
-		return s
-	else
-		return '"'..M.esc_unix(s)..'"'
-	end
-end
-
 ffi.cdef[[
 extern char **environ;
 int setenv(const char *name, const char *value, int overwrite);

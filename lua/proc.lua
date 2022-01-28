@@ -94,13 +94,30 @@ processes. In Linux it isn't. IOW autkill inheritance is not portable.
 if not ... then require'proc_test'; return end
 
 local ffi = require'ffi'
-local current_platform = ffi.os == 'Windows' and 'win' or 'unix'
+local current_platform = ffi.os == 'Windows' and 'win' or 'posix'
 local M = require('proc_'..current_platform)
 
 local function extend(dt, t)
 	if not t then return dt end
 	local j = #dt
 	for i=1,#t do dt[j+i]=t[i] end
+end
+
+--see https://docs.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way
+--You will lose precious IQ points if you read that. Lose enough of them
+--and you might get a job at Microsoft!
+function M.esc_win(s) --escape for putting inside double-quoted string
+	s = tostring(s)
+	if not s:find'[\\"]' then
+		return s
+	end
+	s = s:gsub('(\\*)"', function(s) return s:rep(2)..'\\"' end)
+	s = s:gsub('\\+$', function(s) return s:rep(2) end)
+	return s
+end
+
+function M.esc_unix(s) --escape for putting inside double-quoted string
+	return tostring(s):gsub('[$`\\!]', '\\%1')
 end
 
 function M.esc(s, platform)
@@ -110,6 +127,31 @@ function M.esc(s, platform)
 		or platform == 'unix' and M.esc_unix
 	assert(esc, 'invalid platform')
 	return esc(s)
+end
+
+function M.quote_path_win(s)
+	if s:find'%s' then
+		s = '"'..s..'"'
+	end
+	return s
+end
+
+function M.quote_arg_win(s)
+	s = tostring(s)
+	if not s:find'[ \t\n\v"^&<>|]' then
+		return s
+	else
+		return '"'..M.esc_win(s)..'"'
+	end
+end
+
+function M.quote_arg_unix(s)
+	s = tostring(s)
+	if not s:find'[^a-zA-Z0-9._+:@%%/%-=]' then
+		return s
+	else
+		return '"'..M.esc_unix(s)..'"'
+	end
 end
 
 function M.quote_arg(s, platform)
