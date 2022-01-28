@@ -74,9 +74,9 @@ coro.resume(...) -> true, ... | false, err, traceback
 	Behaves like standard coroutine.resume(). Adds a traceback as the third
 	return value in case of error.
 
-coro.current() -> thread, is_main
+coro.running() -> thread, is_main
 
-	Behaves like standard coroutine.current() (from Lua 5.2 / LuaJIT 2).
+	Behaves like standard coroutine.running() (from Lua 5.2 / LuaJIT 2).
 
 coro.status(thread) -> status
 
@@ -107,6 +107,11 @@ WHY IT WORKS
 	control to the main thread which does the resuming. Since the calling
 	thread is now suspended, it can later be resumed from any other thread.
 
+TODO
+
+	* errors in safewrap() should be re-raised in the caller thread.
+
+
 ]=]
 
 if not ... then require'coro_test'; return end
@@ -135,8 +140,9 @@ end
 
 local function unprotect(thread, ok, ...)
 	if not ok then
-		local s = debug.traceback(thread, (...))
-		s = s:gsub('stack traceback:', tostring(thread)..' stack traceback:')
+		local e, s = ...
+		s = tostring(e)..'\n'..
+			s:gsub('stack traceback:', tostring(thread)..' stack traceback:')
 		error(s, 2)
 	end
 	return ...
@@ -175,7 +181,7 @@ local function check(thread, ok, ...)
 	if not ok then
 		--the coroutine finished with an error. pass the error back to the
 		--caller thread, or to the main thread if there's no caller thread.
-		return go(callers[thread] or main, ok, ..., debug.traceback()) --tail call
+		return go(callers[thread] or main, ok, ..., debug.traceback(thread)) --tail call
 	end
 	return go(...) --tail call: loop over the next transfer request.
 end
@@ -235,26 +241,26 @@ function coro.wrap(f)
 end
 
 function coro.safewrap(f)
-	local calling_thread, yielding_thread
+	local ct --calling thread
+	local yt --yielding thread
 	local function yield(...)
-		yielding_thread = current
-		return coro.transfer(calling_thread, ...)
+		yt = current
+		return coro.transfer(ct, ...)
 	end
 	local function finish(...)
-		yielding_thread = nil
-		return coro.transfer(calling_thread, ...)
+		callers[yt] = nil
+		yt = nil
+		return coro.transfer(ct, ...)
 	end
 	local function wrapper(...)
 		return finish(f(yield, ...))
 	end
-	local thread = coro.create(wrapper)
-	yielding_thread = thread
-	local create_thread = current
+	yt = coro.create(wrapper)
 	return function(...)
-		calling_thread = current
-		assert(yielding_thread, 'cannot resume dead coroutine')
-		return coro.transfer(yielding_thread, ...)
-	end, thread
+		ct = current
+		assert(yt, 'cannot resume dead coroutine')
+		return coro.transfer(yt, ...)
+	end, yt
 end
 
 function coro.install()
