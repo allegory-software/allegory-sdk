@@ -13,14 +13,8 @@
 
 ]=]
 
-local ffi = require "ffi"
+local ffi = require'ffi'
 local C = ffi.load'md5'
-
-if not ... then
-	require'md5_test'
-	require'md5_hmac_test'
-	return
-end
 
 ffi.cdef[[
 typedef struct {
@@ -53,16 +47,8 @@ local function sum(data, size)
 	local d = digest(); d(data, size); return d()
 end
 
-local md5 = {
+return {
 	digest = digest,
 	sum = sum,
 	C = C,
 }
-
-function md5.hmac(message, key)
-   local hmac = require'hmac'
-   md5.hmac = hmac.new(sum, 64)
-   return md5.hmac(message, key)
-end
-
-return md5
