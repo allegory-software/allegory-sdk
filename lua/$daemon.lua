@@ -11,7 +11,8 @@
 		env       app environment ('dev').
 		log_host  log server host.
 		log_port  log server port.
-	app_dir      app directory (exe dir for bundled apps, or Lua source dir).
+	app_dir      app directory.
+	bin_dir      app bin directory.
 	var_dir      r/w persistent data dir (app_dir).
 	tmp_dir      r/w persistent temp dir (app_dir/tmp/app_name).
 	cmd          {name->f} place to add command-line handlers.
@@ -44,10 +45,16 @@ end
 
 --init -----------------------------------------------------------------------
 
+using_mgit = false
+
 --for strict mode...
 app_name, cmd, wincmd, lincmd, help = nil
+app_dir = app_dir
+bin_dir = bin_dir
 var_dir = var_dir
 tmp_dir = tmp_dir
+www_dir = www_dir
+libwww_dir = libwww_dir
 
 function daemon(app_name)
 
@@ -64,18 +71,28 @@ function daemon(app_name)
 	package.loaded[app_name] = app
 
 	--cd to app_dir so that we can use relative paths for everything.
-	app_dir = exedir
-	if not package.loaded.bundle_loader then
-		--standalone luajit exe. files are in luapower dir at ../..
-		app_dir = indir(indir(app_dir, '..'), '..')
+	app_dir = fs.scriptdir()
+	if package.loaded.bundle_loader then
+		bin_dir = bin_dir or app_dir
+	elseif using_mgit then
+		app_dir = app_dir or indir(indir(fs.exedir(), '..'), '..')
+		bin_dir = bin_dir or fs.exedir()
+	else
+		bin_dir = bin_dir or indir(app_dir, 'bin/'..(win and 'windows' or 'linux'))
 	end
-	var_dir = var_dir or path.normalize(indir(app_dir, app_name..'-var'))
-	tmp_dir = tmp_dir or path.normalize(indir(indir(app_dir, 'tmp'), app_name))
+	var_dir = var_dir or indir(app_dir, app_name..'-var')
+	tmp_dir = tmp_dir or indir(app_dir, app_name..'-tmp')
+	www_dir = www_dir or indir(app_dir, app_name..'-www')
+	libwww_dir = libwww_dir or indir(app_dir, 'sdk/www')
 
 	app.conf = {
 		app_name = app_name,
+		app_dir  = app_dir,
+		bin_dir  = bin_dir,
 		var_dir  = var_dir,
 		tmp_dir  = tmp_dir,
+		www_dir  = www_dir,
+		libwww_dir = libwww_dir,
 	}
 
 	--require an optional config file.
