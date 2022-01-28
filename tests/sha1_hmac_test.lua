@@ -1,4 +1,4 @@
-local hmac = require'sha1'.hmac
+local hmac = require'hmac'.sha1
 local fromhex = require'glue'.fromhex
 
 local function eq(a, b)

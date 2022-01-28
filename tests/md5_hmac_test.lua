@@ -1,4 +1,4 @@
-local hmac = require'md5'.hmac
+local hmac = require'hmac'.md5
 local glue = require'glue'
 local unit = require'unit'
 

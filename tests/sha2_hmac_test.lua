@@ -1,7 +1,7 @@
-local sha2 = require'sha2'
-local hmac256 = sha2.sha256_hmac
-local hmac384 = sha2.sha384_hmac
-local hmac512 = sha2.sha512_hmac
+local hmac = require'hmac'
+local hmac256 = hmac.sha256
+local hmac384 = hmac.sha384
+local hmac512 = hmac.sha512
 local glue = require'glue'
 
 --from http://tools.ietf.org/html/rfc4231
@@ -58,6 +58,7 @@ for k,test in ipairs(tests) do
 end
 
 
+local sha2 = require'sha2'
 local b64 = require'base64'
 
 --per amazon aws example
