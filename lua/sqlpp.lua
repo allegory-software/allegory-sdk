@@ -1239,6 +1239,7 @@ function sqlpp.new(init)
 					end
 				end
 			end
+			opt = update({}, opt)
 			opt.field_attrs = update_field_attrs
 		end
 		return opt
