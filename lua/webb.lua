@@ -639,7 +639,8 @@ local function default_outfunc(s, len)
 		return
 	end
 	if not cx.http_out then
-		cx.http_out = cx.req:respond(cx.res, true)
+		cx.res.want_out_function = true
+		cx.http_out = cx.req:respond(cx.res)
 	end
 	s = type(s) ~= 'cdata' and tostring(s) or s
 	cx.http_out(s, len)
@@ -1003,6 +1004,10 @@ local function wwwdir()
 	return config'www_dir' or config('www_dir', config('app_name')..'-www')
 end
 
+local function libwwwdir()
+	return config'libwww_dir'
+end
+
 local function vardir()
 	return config'var_dir' or config('var_dir', config('app_name')..'-var')
 end
@@ -1017,8 +1022,8 @@ function wwwpath(file, type)
 	--look into www dir
 	local abs_path = indir(wwwdir(), file)
 	if fs.is(abs_path, type) then return abs_path end
-	--look into luapower dir
-	local abs_path = indir('.', file)
+	--look into the "lib" www dir
+	local abs_path = libwwwdir() and indir(libwwwdir(), file)
 	if fs.is(abs_path, type) then return abs_path end
 	return nil, file..' not found'
 end
