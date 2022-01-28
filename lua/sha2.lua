@@ -60,7 +60,7 @@ void SHA512_Final(uint8_t[SHA512_DIGEST_LENGTH], SHA512_CTX*);
 
 local function digest_function(Context, Init, Update, Final, DIGEST_LENGTH)
 	return function()
-		local ctx = ffi.new(Context)
+		local ctx = Context()
 		local result = ffi.new('uint8_t[?]', DIGEST_LENGTH)
 		Init(ctx)
 		return function(data, size)
@@ -68,7 +68,7 @@ local function digest_function(Context, Init, Update, Final, DIGEST_LENGTH)
 				Update(ctx, data, size or #data)
 			else
 				Final(result, ctx)
-				return ffi.string(result, ffi.sizeof(result))
+				return ffi.string(result, DIGEST_LENGTH)
 			end
 		end
 	end
