@@ -49,25 +49,27 @@ Config options
 
 LibTLS rationale
 
-	The LibTLS API is originally from LibreSSL, but it also has an implementation
-	for BearSSL called `libtls_bearssl`, which is our underlying TLS library.
-	The LibTLS API allows yielding in I/O, it's simpler and more consistent
-	compared to OpenSSL, and works on user-provided I/O. And if it turns out that
-	BearSSL is not enough, it can be replaced with LibreSSL without code changes.
+	LibTLS is a simple TLS API with implementations over multiple backends:
+
+		* BearSSL  - libtls-bearssl (what we ship)
+		* LibreSSL - built-in
+		* OpenSSL  - LibreTLS
 
 BearSSL limitations
 
 	* no TLS sessions (BearSSL has them but they aren't wrapped yet).
-	* No TLS 1.3 -- [waiting for final spec](https://bearssl.org/tls13.html).
-	* No CRL or OCSP (see below).
+	* No TLS 1.3 -- waiting for final spec, see https://bearssl.org/tls13.html.
 	* No DHE by design (use ECDHE).
+	* No CRL or OCSP (see below).
 
-A word on certificate revocation solutions
+A word on certificate revocation
 
-	Certificate revocation is one big elephant in the TLS room. CRL is long
-	deprecated, but OCSP is no better as it introduces latency, leaks information
-	and is ineffective in MITM scenarios. Mozilla's CRLite seems to be the only
-	solution that doesn't have these problems, but we haven't implemented that yet.
+	Certificate revocation is one big elephant in the TLS room: CRL solves
+	nothing while OCSP ties your server availability to your CA's availability
+	and leaks users' browsing history as a bonus. OCSP stapling is the right
+	answer in theory but is currently unenforceable. CRLite pushes the problem
+	to the client which now has to download CRL diffs every few hours from
+	Mozilla, which makes Mozilla a giant SPF, kinda like say, the jQuery CDN.
 
 ]=]
 
@@ -106,6 +108,7 @@ end
 local read_cb = ffi.cast('tls_read_cb', function(tls, buf, sz, i)
 	sz = tonumber(sz)
 	i = tonumber(i)
+	assert(i >= 1 and i <= bufs_n, i)
 	local r_buf, r_sz = r_bufs[2*i], r_bufs[2*i+1]
 	if not r_buf then
 		r_bufs[2*i] = buf
@@ -122,6 +125,7 @@ end)
 local write_cb = ffi.cast('tls_write_cb', function(tls, buf, sz, i)
 	sz = tonumber(sz)
 	i = tonumber(i)
+	assert(i >= 1 and i <= bufs_n, i)
 	local w_buf, w_sz = w_bufs[2*i], w_bufs[2*i+1]
 	if not w_buf then
 		w_bufs[2*i] = buf
@@ -219,7 +223,7 @@ function M.server_stcp(tcp, opt)
 	if not tls then
 		return nil, err
 	end
-	local buf_slot = alloc_buf_slot()
+	local buf_slot = alloc_buf_slot() --for close()
 	return wrap_stcp(server_stcp, tcp, tls, buf_slot)
 end
 
@@ -240,10 +244,6 @@ end
 function stcp:closed()
 	return self._closed or false
 end
-
---function stcp:shutdown(mode, expires)
---	return self:close(expires)
---end
 
 function stcp:shutdown(mode)
 	return self.tcp:shutdown(mode)
