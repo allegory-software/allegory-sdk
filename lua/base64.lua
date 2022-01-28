@@ -7,10 +7,9 @@
 		https://github.com/kengonakajima/luvit-base64/issues/1
 		http://lua-users.org/wiki/BaseSixtyFour
 
-b64.[encode|decode](s[, size], [outbuf], [outbuf_size]) -> outbuf, len
+b64.[encode|decode][_tobuffer](s[, size], [outbuf], [outbuf_size]) -> outbuf, len
 
-	Encode/decode string or cdata buffer.
-	Returns a cdata buffer that you can convert to string with ffi.string().
+	Encode/decode string or cdata buffer to a string or buffer.
 
 b64.url[encode|decode](s) -> s
 
@@ -45,7 +44,7 @@ for j=0,63,1 do
 	end
 end
 
-function base64.encode(s, sn, dbuf, dn)
+function base64.encode_tobuffer(s, sn, dbuf, dn)
 
 	local sn = sn or #s
 	local min_dn = math.ceil(sn / 3) * 4
@@ -98,11 +97,11 @@ function base64.encode(s, sn, dbuf, dn)
 		dp[di] = EQ
 	end
 
-	if dbuf then
-		return dp, min_dn
-	else
-		return ffi.string(dp, dn)
-	end
+	return dp, min_dn
+end
+
+function base64.encode(...)
+	return ffi.string(base64.encode_tobuffer(...))
 end
 
 --decode ---------------------------------------------------------------------
@@ -115,7 +114,7 @@ b64i[EQ] = 0
 
 local block = u8a(4)
 
-function base64.decode(s, sn, dbuf, dn)
+function base64.decode_tobuffer(s, sn, dbuf, dn)
 	sn = sn or #s
    local sp = ffi.cast(u8p, s)
 
@@ -167,6 +166,10 @@ function base64.decode(s, sn, dbuf, dn)
 		::skip::
 	end
 	return dp, j
+end
+
+function base64.decode(...)
+	return ffi.string(base64.decode_tobuffer(...))
 end
 
 function base64.urlencode(s)
