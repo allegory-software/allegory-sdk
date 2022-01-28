@@ -7,28 +7,19 @@ need and makes a lot of symbols global. Think of it as emptying all your
 tool boxes on the floor before you start a job. Some people feel more
 efficient doing it like that, others hate it, wacha gonna do.
 
-Libraries don't use this module in an attempt to lower dependency count,
-avoid polluting the global namespace and improve code readability. Apps
-don't care about all that and would rather establish a base vocabulary
-to use everywhere, so this module can be useful when building an app,
-less so when making a library.
+Use this in app code, don't use in library code. This module not only adds
+new globals, but also replaces a few standard Lua functions:
 
-What libraries usually do instead of loading this module:
+	* module() is replaced with glue.module() with entirely different semantics.
+	* os.time(), os.date() and os.clock() get sub-second accuracy.
 
- * require the ffi module every goddamn time (and maybe the bit module).
- * copy-paste a few tools from [glue](glue.md) to avoid bringing in the whole kitchen.
- * put used symbols into locals (also for speed when code is interpreted).
+Alternatives to some `glue` functions:
 
-All that is wasted effort on an app, where you already established your
-dependencies so anyone who wants to work on your code needs to be familiar
-with them dependencies beforehand.
+	* If you use `fs`, use fs.scriptdir() instead of glue.bin.
+	* If you use `errors`, use errors.pcall() instead of glue.pcall().
 
-Note that the standard Lua `module` function is replaced with a function with
-entirely different semantics (see glue for that).
-
-TIP: Run the script standalone with `luajit $.lua` to get a listing of all
-the symbols (which you can then paste into your editor config file for
-syntax highlighting).
+TIP: Run the script standalone with `luajit $.lua` which prints all symbols
+to be pasted into your editor config file for syntax highlighting.
 
 ]]
 
@@ -40,8 +31,6 @@ glue    = require'glue'
 errors  = require'errors'
 time    = require'time'
 pp      = require'pp'
-exedir  = require'package.exedir'
-exepath = require'package.exepath'
 
 isstr  = glue.isstr
 isnum  = glue.isnum
