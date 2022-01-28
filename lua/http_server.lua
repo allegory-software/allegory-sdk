@@ -1,6 +1,6 @@
 --[=[
 
-	HTTP 1.1 1 coroutine-based async server (based on sock.lua, sock_libtls.lua).
+	HTTP 1.1 coroutine-based async server (based on sock.lua, sock_libtls.lua).
 	Written by Cosmin Apreutesei. Public Domain.
 
 	Features, https, gzip compression, persistent connections, pipelining,
@@ -78,13 +78,13 @@ server.request_finish = glue.noop --request finalizer stub
 function server:log(tcp, severity, module, event, fmt, ...)
 	local logging = self.logging
 	if not logging or logging.filter[severity] then return end
-	local s = fmt and _(fmt, logging.args(...)) or ''
+	local s = type(fmt) == 'string' and _(fmt, logging.args(...)) or fmt or ''
 	logging.log(severity, module, event, '%-4s %s', tcp, s)
 end
 
 function server:check(tcp, ret, ...)
 	if ret then return ret end
-	return self:log(tcp, 'ERROR', 'htsrv', ...)
+	self:log(tcp, 'ERROR', 'htsrv', ...)
 end
 
 function server:new(t)
@@ -99,7 +99,7 @@ function server:new(t)
 		self.logging = require'logging'
 	end
 
-	local function handler(ctcp, listen_opt)
+	local function handler(stcp, ctcp, listen_opt)
 
 		local http = self.http:new({
 			debug = self.debug,
@@ -112,14 +112,10 @@ function server:new(t)
 
 		while not ctcp:closed() do
 
-			local req, err = http:read_request()
-			if not req then
-				local eof = errors.is(err, 'socket') and err.message == 'eof'
-				self:check(ctcp, eof, 'read_request', '%s', err)
-				break
-			end
+			local req = assert(http:read_request())
 
-			local finished, out_func, sending_response
+			local finished, out, sending_response
+			local res_ok, res_err
 
 			local function send_response(opt)
 				if opt.content == nil then
@@ -127,21 +123,27 @@ function server:new(t)
 				end
 				sending_response = true
 				local res = http:build_response(req, opt, self:time())
-				local ok, err = http:send_response(res)
-				self:check(ctcp, ok, 'send_response', '%s', err)
+				res_ok, res_err = http:send_response(res)
 				finished = true
 			end
 
 			function req.respond(req, opt)
 				if opt.want_out_function then
-					out_func = self.cowrap(function(yield)
+					local protected_out = self.cowrap(function(yield)
 						opt.content = yield
 						send_response(opt)
 					end)
-					out_func()
-					return out_func
+					function out(s, len)
+						protected_out(s, len)
+						if finished then
+							assert(res_ok, res_err)
+						end
+					end
+					out()
+					return out
 				else
 					send_response(opt)
+					assert(res_ok, res_err)
 				end
 			end
 
@@ -159,7 +161,7 @@ function server:new(t)
 
 			req.thread = self.currentthread()
 
-			local ok, err = errors.catch(nil, self.respond, req)
+			local ok, err = errors.pcall(self.respond, req)
 			self:request_finish(req)
 
 			if not ok then
@@ -167,16 +169,17 @@ function server:new(t)
 					assert(not sending_response, 'response already sent')
 					req:respond(err)
 				elseif not sending_response then
-					self:check(ctcp, false, 'respond', '%s', err)
+					self:check(tcp, false, 'respond', '%s', err)
 					req:respond{status = 500}
 				else
-					error(_('respond() error:\n%s', err))
+					error(err)
 				end
 			elseif not finished then --eof not signaled.
-				if out_func then
-					out_func() --eof
+				if out then
+					out() --eof
 				else
-					send_response({})
+					send_response{}
+					assert(res_ok, res_err)
 				end
 			end
 
@@ -215,7 +218,7 @@ function server:new(t)
 		if t.tls then
 			local opt = glue.update(self.tls_options, t.tls_options)
 			local stcp, err = self.stcp(tcp, opt)
-			if self:check(tcp, stcp, 'stcp', '%s', err) then
+			if not self:check(tcp, stcp, 'stcp', '%s', err) then
 				tcp:close()
 				goto continue
 			end
@@ -229,10 +232,10 @@ function server:new(t)
 				return
 			end
 			self.thread(function()
-				self:log(ctcp, 'note', 'htsrv', 'accept')
-				local ok, err = glue.pcall(handler, ctcp, t)
-				self:log(ctcp, 'note', 'htsrv', 'closed')
-				self:check(ctcp, ok, 'handler', '%s', err)
+				self:log(tcp, 'note', 'htsrv', 'accept', '%s', ctcp)
+				local ok, err = errors.pcall(handler, tcp, ctcp, t)
+				self:check(ctcp, ok or errors.is(err, 'tcp'), 'handler', '%s', err)
+				self:log(tcp, 'note', 'htsrv', 'closed', '%s', ctcp)
 				ctcp:close()
 			end)
 		end

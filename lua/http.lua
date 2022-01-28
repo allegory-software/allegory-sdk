@@ -62,14 +62,19 @@ local http = {type = 'http_connection', debug_prefix = 'H'}
 
 --error handling -------------------------------------------------------------
 
-local check_io, checkp, check, protect = errors.tcp_protocol_errors'http'
+local check_io, checkp, _check, protect = errors.tcp_protocol_errors'http'
 
 http.check_io = check_io
 http.checkp = checkp
-http.check = check
 
 function http:protect(method)
-	self[method] = protect(self[method])
+	local function oncaught(err)
+		if self.debug and self.debug.errors then
+			self:log('ERROR', 'http', method, '%s', err)
+			self.logged = true
+		end
+	end
+	self[method] = protect(self[method], oncaught)
 end
 
 --low-level I/O API ----------------------------------------------------------
@@ -159,8 +164,8 @@ end
 function http:read_request_line()
 	local method, uri, http_version =
 		self:read_line():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
-	self:dp('<-', '%s %s HTTP/%s', method, uri, http_version)
-	self:check(method and (http_version == '1.0' or http_version == '1.1'), 'invalid request line')
+	self:dp('<=', '%s %s HTTP/%s', method, uri, http_version)
+	self:checkp(method and (http_version == '1.0' or http_version == '1.1'), 'invalid request line')
 	return http_version, method, uri
 end
 
@@ -181,7 +186,7 @@ function http:read_status_line()
 		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
 	self:dp('<=', '%s %s %s', status, status_message, http_version)
 	status = tonumber(status)
-	self:check(http_version and status, 'invalid status line')
+	self:checkp(http_version and status, 'invalid status line')
 	return http_version, status, status_message
 end
 
@@ -229,7 +234,7 @@ function http:read_headers(rawheaders)
 	line = self:read_line()
 	while line ~= '' do --headers end up with a blank line
 		name, value = line:match'^([^:]+):%s*(.*)'
-		self:check(name, 'invalid header')
+		self:checkp(name, 'invalid header')
 		name = name:lower() --header names are case-insensitive
 		line = self:read_line()
 		while line:find'^%s' do --unfold any folded values
@@ -279,7 +284,7 @@ function http:read_chunks(write_content)
 		chunk_num = chunk_num + 1
 		local line = self:read_line()
 		local len = tonumber(string.gsub(line, ';.*', ''), 16) --len[; extension]
-		self:check(len, 'invalid chunk size')
+		self:checkp(len, 'invalid chunk size')
 		total = total + len
 		self:dp('<<', '%7d bytes; chunk %d', len, chunk_num)
 		if len == 0 then --last chunk (trailers not supported)
@@ -572,7 +577,7 @@ function http:read_response(req)
 	local receive_content = req.receive_content
 	if self:should_redirect(req, res) then
 		receive_content = nil --ignore the body (it's not the body we want)
-		res.redirect_location = self:check(res.headers['location'], 'no location')
+		res.redirect_location = self:checkp(res.headers['location'], 'no location')
 		res.receive_content = req.receive_content
 	end
 
