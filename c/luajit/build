@@ -1,3 +1,4 @@
+#go@ sh build
 #!/bin/sh
 cd "${0%build}" || exit 1
 
@@ -18,7 +19,7 @@ build() {
 	local bindir=../../../../bin/$P
 
 	make clean
-	make HOST_CC=gcc amalg Q=" " CFLAGS="$CFLAGS"
+	make HOST_CC=gcc amalg Q=" " LDFLAGS="$LDFLAGS" CFLAGS="$CFLAGS"
 
 	[ "$X0" ] || X0=$X; cp -f $X0 "$bindir/$X"
 	[ "$D0" ] || D0=$D; cp -f $D0 "$bindir/$D"
@@ -34,7 +35,7 @@ build() {
 
 	[ "$OSTYPE" = "msys" ] && {
 		make clean
-		make HOST_CC=gcc amalg Q=" " BUILDMODE=static CFLAGS="$CFLAGS"
+		make HOST_CC=gcc amalg Q=" " BUILDMODE=static LDFLAGS="$LDFLAGS" CFLAGS="$CFLAGS"
 	}
 
 	cp -f libluajit.a $bindir/$A
@@ -45,7 +46,7 @@ build() {
 if [ "$OSTYPE" = "msys" ]; then
 	export LUA_PATH_DEFAULT="!\\\\..\\\\..\\\\lua\\\\?.lua"
 	export LUA_CPATH_DEFAULT="!\\\\clib\\\\?.dll"
-	P=windows LDFLAGS=-static-libgcc \
+	P=windows LDFLAGS="-s -static-libgcc" \
 	X=luajit.exe D=lua51.dll A=luajit.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
 	echo NYI
