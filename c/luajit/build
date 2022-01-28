@@ -29,7 +29,6 @@ build() {
 	rm -f $J/dis_mips*.lua
 	rm -f $J/dis_arm*.lua
 	rm -f $J/dis_ppc.lua
-	rm -f $J/dis_x86.lua
 	cp -f jit/vmdef.lua $J/vmdef_$P.lua
 	cp -f ../../vmdef.lua $J/vmdef.lua
 
