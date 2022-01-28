@@ -25,13 +25,17 @@ hmac.sha512(message, key) -> HMAC-SHA512 hash      Compute HMAC-SHA512
 local ffi = require'ffi'
 local bit = require'bit'
 
-local function string_xor(s1, s2)
-	assert(#s1 == #s2, 'strings must be of equal length')
-	local buf = ffi.new('uint8_t[?]', #s1)
-	for i=1,#s1 do
-		buf[i-1] = bit.bxor(s1:byte(i,i), s2:byte(i,i))
+local u8p = ffi.typeof'uint8_t*'
+local u8a = ffi.typeof'uint8_t[?]'
+local xor = bit.bxor
+local function str_xor(s, c, n)
+	assert(#s == n)
+	local p = ffi.cast(u8p, s)
+	local b = u8a(n)
+	for i = 0, n-1 do
+		b[i] = xor(p[i], c)
 	end
-	return ffi.string(buf, #s1)
+	return ffi.string(b, n)
 end
 
 --any hash function works, md5, sha256, etc.
@@ -41,8 +45,8 @@ local function compute(key, message, hash, blocksize, opad, ipad)
 		key = hash(key) --keys longer than blocksize are shortened
    end
    key = key .. string.rep('\0', blocksize - #key) --keys shorter than blocksize are zero-padded
-   opad = opad or string_xor(key, string.rep(string.char(0x5c), blocksize))
-   ipad = ipad or string_xor(key, string.rep(string.char(0x36), blocksize))
+	opad = opad or str_xor(key, 0x5c, blocksize)
+   ipad = ipad or str_xor(key, 0x36, blocksize)
 	return hash(opad .. hash(ipad .. message)), opad, ipad --opad and ipad can be cached for the same key
 end
 
@@ -60,41 +64,9 @@ local hmac = {
 }
 
 return glue.autoload(hmac, {
-	md5    = function() hmac.md5    = require'md5'.hmac end,
-	sha1   = function() hmac.sha1   = require'sha1'.hmac end,
-	sha256 = function() hmac.sha256 = require'sha2'.sha256_hmac end,
-	sha384 = function() hmac.sha384 = require'sha2'.sha384_hmac end,
-	sha512 = function() hmac.sha512 = require'sha2'.sha512_hmac end,
+	md5    = function() hmac.md5    = hmac.new(require'md5' .sum   ,  64) end,
+	sha1   = function() hmac.sha1   = hmac.new(require'sha1'.sha1  ,  64) end,
+	sha256 = function() hmac.sha256 = hmac.new(require'sha2'.sha256,  64) end,
+	sha384 = function() hmac.sha384 = hmac.new(require'sha2'.sha384, 128) end,
+	sha512 = function() hmac.sha512 = hmac.new(require'sha2'.sha512, 128) end,
 })
-
---[[
-
---TODO: check if this implementation from sha1.lua is faster.
-
--- Precalculate replacement tables.
-local xor_with_0x5c = {}
-local xor_with_0x36 = {}
-
-for i = 0, 0xff do
-   xor_with_0x5c[schar(i)] = schar(byte_xor(0x5c, i))
-   xor_with_0x36[schar(i)] = schar(byte_xor(0x36, i))
-end
-
--- 512 bits.
-local BLOCK_SIZE = 64
-
-function sha1.hmac(key, text)
-   if #key > BLOCK_SIZE then
-      key = sha1.binary(key)
-   end
-
-   local key_xord_with_0x36 = key:gsub('.', xor_with_0x36) .. srep(schar(0x36), BLOCK_SIZE - #key)
-   local key_xord_with_0x5c = key:gsub('.', xor_with_0x5c) .. srep(schar(0x5c), BLOCK_SIZE - #key)
-
-   return sha1.sha1(key_xord_with_0x5c .. sha1.binary(key_xord_with_0x36 .. text))
-end
-
-function sha1.hmac_binary(key, text)
-   return hex_to_binary(sha1.hmac(key, text))
-end
-]]
