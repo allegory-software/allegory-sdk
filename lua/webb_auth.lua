@@ -837,7 +837,6 @@ end
 --self-test ------------------------------------------------------------------
 
 if not ... then
-	require'sp'
 	if false then
 		webb.run(auth_create_tables)
 	else
