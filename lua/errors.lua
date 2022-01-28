@@ -17,7 +17,7 @@ recovery or logging. They're most useful in network protocols.
 	errors.catch([classes], f, ...) -> true,... | false,e  pcall `f` and catch errors
 	errors.pcall(f, ...) -> ...             pcall that stores traceback in `e.traceback`
 	errors.check(v, ...) -> v | raise(...)  assert with specifying an error class
-	errors.protect(classes, f) -> protected_f     turn raising `f` into a `nil,e` function
+	errors.protect(classes, f, [oncaught]) -> protected_f     turn raising `f` into a `nil,e` function
 	eclass:__call(...) -> e                 error class constructor
 	eclass:__tostring() -> s                to make `error(e)` work
 	eclass.addtraceback                     add a traceback to errors
@@ -144,9 +144,7 @@ end
 local function pass(classes, ok, ...)
 	if ok then return true, ... end
 	local e = ...
-	if not classes then --catch-all
-		return false, e
-	elseif iserrorof(e, classes) then
+	if iserrorof(e, classes) then
 		return false, e
 	end
 	lua_error(e, 3)
@@ -157,7 +155,7 @@ local function onerror(e)
 			e.traceback = debug.traceback(e.message, 2)
 		end
 	else
-		return debug.traceback(e, 2)
+		return debug.traceback('\n'..tostring(e), 2)
 	end
 	return e
 end
@@ -173,13 +171,14 @@ local function check(class, v, ...)
 	raise(class, ...)
 end
 
-local function pass(ok, ...)
+local function pass(oncaught, ok, ...)
 	if ok then return ... end
+	if oncaught then oncaught(...) end
 	return nil, ...
 end
-local function protect(classes, f)
+local function protect(classes, f, oncaught)
 	return function(...)
-		return pass(catch(classes, f, ...))
+		return pass(oncaught, catch(classes, f, ...))
 	end
 end
 
@@ -232,8 +231,7 @@ confusion about when to raise and when not to or forgetting to handle an error).
 Your connection object must have a `tcp` field with a tcp:close() method
 that will be called by check_io() and checkp() (but not check()) on failure.
 
-protect() only protects from errors raised by check*().
-Other Lua errors pass through.
+protect() only catches errors raised by check*(), other Lua errors pass through.
 
 ]=]
 
@@ -275,8 +273,8 @@ errors.tcp_protocol_errors = function(protocol)
 
 	local classes = {[tcp_error]=1, [protocol_error]=1, [content_error]=1}
 
-	local function protect(f)
-		return errors.protect(classes, f)
+	local function protect(f, oncaught)
+		return errors.protect(classes, f, oncaught)
 	end
 
 	return check_io, checkp, check, protect
