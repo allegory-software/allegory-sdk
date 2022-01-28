@@ -1485,7 +1485,7 @@ end
 
 --pcall with traceback, which is lost with standard pcall. LuaJIT and Lua 5.2 only.
 local function pcall_error(e)
-	return debug.traceback('\n'..tostring(e))
+	return debug.traceback('\n'..tostring(e), 2)
 end
 function glue.pcall(f, ...)
 	return xpcall(f, pcall_error, ...)
