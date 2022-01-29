@@ -142,8 +142,8 @@ is _much more important_ than the nitty-gritty details and it's too often missin
 ## FFI Declarations
 
 Put cdefs in a separate `foo_h.lua` file because it may contain types that
-other modules (especially Terra modules) might need. If this is unlikely
-and the API is small, embed the cdefs in the main module file directly.
+other modules might need. If this is unlikely and the API is small, embed
+the cdefs in the main module file directly.
 
 Add a comment on top of your `foo_h.lua` file describing the origin
 (which files? which version?) and process (cpp? by hand?) used for generating
@@ -159,7 +159,7 @@ is to be found. This allows for more freedom on how to deploy libraries.
 Below is a list of Lua idioms that may not be immediately apparent to the
 casual code reader. It's ok and even encouraged to use these instead of
 making library functions for them. More complicated patterns belong
-to the [glue](docs/glue.md) library.
+to the [glue](lua/glue.lua) library.
 
 | Idiom | Decription |
 | :---  | :---       |
@@ -348,12 +348,12 @@ end
 
 ### Reference semantics vs value semantics
 
-The result of a[i] for an array of structs is a reference type,
+The result of `a[i]` for an array of structs is a reference type,
 not a copy of the struct object. This is different than with arrays
 of scalars which have value semantics (scalars being immutable).
 This shows when trying to implement data structures that generalize
 on the element type. Because value semantics cannot be assumed,
-you can't just use a[i] to pop a value out or for swapping values
+you can't just use `a[i]` to pop a value out or for swapping values
 (the idiom `a[i], a[j] = a[j], a[i]` doesn't work anymore).
 
 ### Callbacks and JIT
@@ -365,15 +365,13 @@ can turn into a "99% is worse than 0%" situation, because you might forget
 to disable the jit for a particular callback-triggering function only to get
 a crash in production.
 
-There is no way that I know of to disable these jit barriers.
+There is currently no way to disable these jit barriers.
 
 ### Callbacks and passing structs by value
 
 Currently, passing structs by value or returning structs by value is not
 supported with callbacks. This is generally not a problem, as most APIs
-don't do that, with the notable exception of OSX APIs which do that _a lot_.
-[cbframe] can be used as a workaround if you only have a few functions to fix,
-but it's not a general solution yet.
+don't do that.
 
 ### CData finalizer call order
 
@@ -421,16 +419,6 @@ local function double_isnan(p)
 	        bor(q.lo, band(q.hi, 0xfffff)) ~= 0
 end
 ```
-
-### LuaJIT memory restrictions
-
-LuaJIT must be in the lowest 2G of address space on x64. This applies to all
-GC-managed memory, including `ffi.new` allocations. Use malloc, mmap, etc.
-to access all memory without restrictions. Keep the low 2G of your address
-space free for LuaJIT (this might be hard depending on how you integrate
-LuaJIT in your app). If you use malloc to allocate memory instead of ffi.new,
-watch out for problems with finalization order: finalization and freeing
-are the same thing now.
 
 ## LuaJIT tricks
 
@@ -572,105 +560,4 @@ pass it around.
 
 Never mutate received arguments except on constructors, where you should
 accept an `options` arg and convert that into the constructed object.
-
-------------------------------------------------------------------------------
-
-# Creating and adding new modules to the SDK
-
-There are 6 types of modules that are currently recognized:
-
-  * __Lua module__: written in Lua
-  * __Terra module__: written in Terra
-  * __Lua/C module__: written in C using the Lua C API (*)
-  * __Lua+ffi module__: written in Lua using the LuaJIT ffi extension (*)
-  * __C module__: binary dependency or support library for other module (*)
-  * __other__: none of the above: media/support files, etc.
-
-(*) binaries and C source code must be included.
-
-## Directory layout
-
-	lua/foo.lua               main module
-	lua/foo_bar.lua           submodule, for small libraries
-	lua/foo/bar.lua           submodule, for large libraries
-	lua/foo_h.lua             ffi.cdef module (ffi.load is in foo.lua, not here)
-	tests/foo_test.lua        test program: for tests that can be automated
-	tests/foo_demo.lua        demo program: anything goes
-	docs/foo.md               main doc in Github-flavored markdown
-	docs/foo_bar.md           submodule doc: optional, for large submodules
-
-C libs must also include their source code, build scripts and binaries:
-
-	c/foo/*                              C sources
-	c/foo/WHAT                           WHAT file (see below)
-	c/foo/build-PLATFORM.sh              build scripts
-	bin/PLATFORM/*.dll|.so|.dylib|.a     binaries
-
-## The docs
-
-Take your time to write a good, short tagline. This is important for figuring
-out what the module does when browsing the module list.
-
-The `platforms` line is only needed for Lua modules that are platform-specific
-but do not have a C component (very rare case). In all other cases, do not
-specify any platforms.
-
-You don't have to make a doc for each submodule if you don't have much to
-say on it, a single doc matching the main module name would suffice.
-
-## The WHAT file
-
-The WHAT file is for libraries that have a C component (i.e. Lua/C, C
-and Lua+ffi modules that bind 3rd-party C libs), and it's used to describe
-that C component (pure Lua modules don't need a WHAT file). It should look
-like this:
-
-	cairo 1.12.16 from http://cairographics.org/releases/ (MPL/LGPL license)
-	requires: pixman, freetype, zlib, libpng
-
-The first line should contain "`<name> <version> from <browse-url>
-(<license>)`". The second line should contain "`requires: package1, package2,
-...`" and should only list the binary dependencies of the library, if there
-are any. After the first two lines and an empty line, you can type in
-additional notes, whatever, they aren't parsed. In the rare case that a
-dependency is only available on some platforms, specify the platforms after
-the dependency name like this: `pthread (linux64 mingw64)`.
-
-The WHAT file can also be used to describe Lua modules that are forks such
-that their main development happens somewhere else.
-
-## The License
-
-  * add a copyright / license line to the header of each module.
-  * put the full license file in csrc/foo/LICENSE|COPYING[.*]
-
-## Versioning
-
-All modules should work together from the master branch at any time.
-Each module has to keep up with the others. If you introduce breaking
-changes on a module, you have to upgrade all its dependants before commiting.
-Work on a dev/work branch until you can do so.
-
-Before submitting a pull request, please consider:
-
-  * what name you plan to use for your module
-  * how your module relates to other modules
-
-Choosing a good name is important if you want people to find your module
-and understand (from the name alone) what it does. Likewise, it's a good idea
-to be sure that your module is doing something new or at least different
-(and hopefully better) than something already in the SDK.
-
-Ideally, your module has:
-
-  * __distinction__ - focused problem domain
-  * __completeness__ - exhaustive of the problem domain
-  * __API documentation__ - so it can be browsed online
-  * __test and/or demo__ - so it can be seen to work
-  * __a non-viral license__ - so it doesn't impose restrictions on _other_ modules
-
-Of course, not all modules can qualify on all fronts. In any case, if your
-module is too specialized to be added to the SDK or you simply don't want
-to mix it in with the others, remember that you can always fork the SDK
-and extend it any way you want for your specific needs.
 

@@ -39,7 +39,7 @@ versioned to follow the main repo.
 
 # Building
 
-See our [Building Guide](BUILDING.md) which also teaches how create build
+See our [Building Guide](c/README.md) which also teaches how create build
 scripts for new libraries.
 
 # Documentation
@@ -80,6 +80,7 @@ scripts for new libraries.
   * [genx](lua/genx.lua)               - XML formatting
   * [csv](lua/csv.lua)                 - CSV parsing
   * [xlsxwriter](lua/xlsxwriter.lua)   - XLSX generation
+  * [multipart](lua/multipart.lua)     - Multipart MIME encoding
 * __Hashing__
   * [xxhash](lua/xxhash.lua)           - xxHash fast non-cryptographic hash (32/64/128bit)
   * [blake2](lua/blake2.lua)           - BLAKE2 fast cryptographic hash

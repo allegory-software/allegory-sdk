@@ -1,5 +1,5 @@
 
-# Building the C libraries from the `c` folder
+# Building the C libraries
 
 __NOTE:__ Binaries for supported platforms are already included, so
 rebuilding them is not necesssary unless you want to.
@@ -13,11 +13,11 @@ C sources are included as git submodules so you need to clone them first:
 Building is based on bash scripts most of which invoke gcc directly.
 To (re)build a library, type:
 
-	$ sh c/<lib>/build
+	$ sh <lib>/build
 
 To (re)build all libraries, type:
 
-	$ sh c/build-all
+	$ sh build-all
 
 ## Building on Windows for Windows
 
@@ -199,10 +199,10 @@ In some cases it's going to be more complicated than that.
 After compilation, check your builds against the minimum supported platforms.
 Also, you may want to check the following:
 
-  * on Linux, run `c/check-glibc-symvers` to check that you don't have
-  any symbols that require GLIBC > 2.7. Also run `c/check-other-symvers`
+  * on Linux, run `./check-glibc-symvers` to check that you don't have
+  any symbols that require GLIBC > 2.7. Also run `./check-other-symvers`
   to check for other dependencies that contain versioned symbols.
-  * on OSX, run `c/check-osx-rpath` to check that all library paths
+  * on OSX, run `./check-osx-rpath` to check that all library paths
   contain the `@rpath/` prefix.
 
 ## Backwards compatibility
@@ -224,7 +224,7 @@ potentially incompatible with an older Linux. Because whoever introduced
 that "feature" didn't bother to make a linker option to select the minimum
 GLIBC version when linking, the only option left is to build on the _oldest_
 Linux which can still run a _recent enough gcc_ (good luck),  and check
-the symvers on the compiled binaries with `c/check-glibc-symvers`.
+the symvers on the compiled binaries with `./check-glibc-symvers`.
 
 ### OSX
 
