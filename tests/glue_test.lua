@@ -220,9 +220,9 @@ assert(not t2.a)
 
 --i/o ------------------------------------------------------------------------
 
-assert(glue.canopen(glue.bin..'/glue_test.lua'))
-assert(glue.readfile(glue.bin..'/glue_test.lua'):match'glue', 'glue')
-assert(glue.readfile(glue.bin..'/glue_test.lua'):match'glue', 'glue')
+assert(glue.canopen('glue_test.lua'))
+assert(glue.readfile('glue_test.lua'):match'glue', 'glue')
+assert(glue.readfile('glue_test.lua'):match'glue', 'glue')
 
 test(select(2,pcall(glue.assert,false,'bad %s','dog')), 'bad dog')
 test(select(2,pcall(glue.assert,false,'bad dog %s')), 'bad dog %s')
