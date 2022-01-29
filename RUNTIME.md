@@ -5,21 +5,23 @@ This is OpenResty's LuaJIT 2.1 fork, which means the base language is
 [Lua 5.1](http://www.lua.org/manual/5.1/manual.html) plus the following
 extensions:
 
-  * [LuaJIT's bit, ffi and jit modules](http://luajit.org/extensions.html#modules)
-  * [LuaJIT's extensions](http://luajit.org/extensions.html#lua52)
-    from [Lua 5.2](http://www.lua.org/manual/5.2/manual.html),
-    including those enabled with `DLUAJIT_ENABLE_LUA52COMPAT`
-  * [LuaJIT's string.buffer module](https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html)
-  * [OpenResty's extensions](https://github.com/openresty/luajit2#openresty-extensions)
-  * our own customizations:
-    * `package.path` and `package.cpath` looks only in the SDK for modules.
-    * built with `-msse4.2` so that it hashes strings with hardware CRC32.
-    * built with `-pthread` so that pthread.lua can be used.
+ * [LuaJIT's bit, ffi and jit modules](http://luajit.org/extensions.html#modules)
+ * [LuaJIT's extensions](http://luajit.org/extensions.html#lua52)
+   from [Lua 5.2](http://www.lua.org/manual/5.2/manual.html),
+   including those enabled with `DLUAJIT_ENABLE_LUA52COMPAT`
+ * [LuaJIT's string.buffer module](https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html)
+ * [OpenResty's extensions](https://github.com/openresty/luajit2#openresty-extensions)
+
+## How was it built?
+
+ * `package.path` and `package.cpath` looks only in the SDK for modules.
+ * built with `-msse4.2` so that it hashes strings with hardware CRC32.
+ * built with `-pthread` so that pthread.lua can be used.
 
 ## How to run Lua scripts with it
 
-  $ path-to-sdk/bin/linux/luajit        myapp.lua
-  > path-to-sdk\bin\windows\luajit.exe  myapp.lua
+	$ path-to-sdk/bin/linux/luajit        myapp.lua
+	> path-to-sdk\bin\windows\luajit.exe  myapp.lua
 
 ## How to make portable apps with it
 
