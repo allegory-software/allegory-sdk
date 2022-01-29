@@ -1,6 +1,6 @@
 --[[
 
-## `require'$'`
+	$ | drop all the tools on the floor
 
 Loads the minimum amount of modules that every Lua application seems to
 need and makes a lot of symbols global. Think of it as emptying all your
@@ -22,8 +22,6 @@ TIP: Run the script standalone with `luajit $.lua` which prints all symbols
 to be pasted into your editor config file for syntax highlighting.
 
 ]]
-
---drop all the tools on the floor
 
 ffi     = require'ffi'
 bit     = require'bit'
