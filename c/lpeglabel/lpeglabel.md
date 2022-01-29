@@ -1,5 +1,5 @@
 
-## `local lpeg = require'lpeglabel'
+## local lpeg = require'lpeglabel
 
 LPegLabel is a conservative extension of the
 [LPeg](http://www.inf.puc-rio.br/~roberto/lpeg)

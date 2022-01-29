@@ -1,6 +1,6 @@
 --[[
 
-	$ | drop all the tools on the floor
+	$ | drop all tools on the floor
 
 Loads the minimum amount of modules that every Lua application seems to
 need and makes a lot of symbols global. Think of it as emptying all your

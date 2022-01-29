@@ -163,4 +163,4 @@ end
 workbook:close()
 ```
 
-![](/files/luapower/xlsxwriter/_images/working_with_dates_and_times02.png)
+![](_images/working_with_dates_and_times02.png)

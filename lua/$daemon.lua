@@ -75,7 +75,7 @@ function daemon(app_name)
 	if package.loaded.bundle_loader then
 		bin_dir = bin_dir or app_dir
 	elseif using_mgit then
-		app_dir = app_dir or indir(indir(fs.exedir(), '..'), '..')
+		app_dir = app_dir or path.normalize(indir(fs.exedir(), '../..'))
 		bin_dir = bin_dir or fs.exedir()
 	else
 		bin_dir = bin_dir or indir(app_dir, 'bin/'..(win and 'windows' or 'linux'))
@@ -83,7 +83,7 @@ function daemon(app_name)
 	var_dir = var_dir or indir(app_dir, app_name..'-var')
 	tmp_dir = tmp_dir or indir(app_dir, app_name..'-tmp')
 	www_dir = www_dir or indir(app_dir, app_name..'-www')
-	libwww_dir = libwww_dir or indir(app_dir, 'sdk/www')
+	libwww_dir = libwww_dir or path.normalize(indir(app_dir, 'sdk/www'))
 
 	app.conf = {
 		app_name = app_name,

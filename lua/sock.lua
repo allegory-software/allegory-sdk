@@ -1,8 +1,8 @@
 --[=[
 
 	Portable async socket API for Windows (IOCP) and Linux (epoll).
-	TLS support in sock_libtls.lua.
 	Written by Cosmin Apreutesei. Public Domain.
+	TLS support in sock_libtls.lua.
 
 ADDRESS LOOKUP
 	sock.addr(...) -> ai                       look-up a hostname

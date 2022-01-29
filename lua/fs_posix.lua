@@ -1,5 +1,5 @@
 
---portable filesystem API for LuaJIT / Linux & OSX backend
+--Portable filesystem API for LuaJIT | Linux+OSX backend
 --Written by Cosmin Apreutesei. Public Domain.
 
 if not ... then require'fs_test'; return end

@@ -8,7 +8,7 @@ This converted the required data into an Excel file but it looked a
 little bare. In order to make the information clearer we would like to
 add some simple formatting, like this:
 
-![](/files/luapower/xlsxwriter/_images/tutorial02.png)
+![](_images/tutorial02.png)
 
 The differences here are that we have added **Item** and **Cost** column
 headers in a bold font, we have formatted the currency in the second

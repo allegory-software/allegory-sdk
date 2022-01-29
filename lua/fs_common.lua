@@ -1,5 +1,5 @@
 
---portable filesystem API for LuaJIT / common code
+--Portable filesystem API for LuaJIT | common code
 --Written by Cosmin Apreutesei. Public Domain.
 
 if not ... then require'fs_test'; return end

@@ -65,21 +65,22 @@ scripts for new libraries.
   * [luastate](lua/luastate.lua)       - Create Lua interpreters to use with OS threads
   * [thread](lua/thread.lua)           - High-level threads API based on pthread and luastate
 * __Networking__
-  * [sock](lua/sock.lua)               - Sockets + async scheduler for sockets & pipes
-  * [resolver](lua/resolver.lua)       - DNS resolver
+  * [sock](lua/sock.lua)               - Sockets & async scheduler for sockets & pipes
+  * [sock_libtls](lua/sock_libtls.lua) - TLS-encrypted async TCP sockets
+  * [resolver](lua/resolver.lua)       - Async DNS resolver
   * [connpool](lua/connpool.lua)       - Connection pools
-  * [http_client](lua/http_client.lua) - HTTP(s) 1.1 client for high-volume web scraping
-  * [http_server](lua/http_server.lua) - HTTP(s) 1.1 server
+  * [http_client](lua/http_client.lua) - Async HTTP(s) 1.1 client for high-volume web scraping
+  * [http_server](lua/http_server.lua) - Async HTTP(s) 1.1 server
   * [uri](lua/uri.lua)                 - URI manipulation
   * [ipv6](lua/ipv6.lua)               - IPv6 conversion routines
 * __Data Exchange__
   * [base64](lua/base64.lua)           - Base64 encoding & decoding
-  * [cjson](lua/cjson.lua)             - JSON encoding & decoding
+  * [cjson](c/cjson/cjson.txt)         - JSON encoding & decoding
   * [msgpack](lua/msgpack.lua)         - MessagePack encoding & decoding
   * [expat](lua/expat.lua)             - XML parsing
   * [genx](lua/genx.lua)               - XML formatting
   * [csv](lua/csv.lua)                 - CSV parsing
-  * [xlsxwriter](lua/xlsxwriter.lua)   - XLSX generation
+  * [xlsxwriter](lua/xlsxwriter.md)    - Excel 2007+ XLSX file generation
   * [multipart](lua/multipart.lua)     - Multipart MIME encoding
 * __Hashing__
   * [xxhash](lua/xxhash.lua)           - xxHash fast non-cryptographic hash (32/64/128bit)
@@ -135,6 +136,7 @@ scripts for new libraries.
 * __Support Libs__
   * [jsmin](c/jsmin/jsmin.txt)         - Minify JavaScript code
   * [linebuffer](lua/linebuffer.lua)   - Line buffer for text-based network protocols
+  * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
 
 # Contributing code
 

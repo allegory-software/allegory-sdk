@@ -2,6 +2,8 @@
 local ffi = require'ffi'
 local server  = require'http_server'
 ffi.tls_libname = 'tls_bearssl'
+local logging = require'logging'
+logging.debug = true
 
 --local webb_respond = require'http_server_webb'
 
@@ -13,6 +15,7 @@ local server = server:new{
 			addr = '127.0.0.1',
 			port = 80,
 		},
+		--[[
 		{
 			--host = 'localhost',
 			addr = '127.0.0.1',
@@ -27,11 +30,13 @@ local server = server:new{
 				},
 			},
 		},
+		]]
 	},
 	debug = {
 		protocol = true,
 		--stream = true,
-		tracebacks = true,
+		--tracebacks = true,
+		errors = true,
 	},
 	respond = function(req, thread)
 		local read_body = req:read_body'reader'

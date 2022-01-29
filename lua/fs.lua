@@ -1,6 +1,6 @@
 --[=[
 
-	Portable filesystem API (Windows, Linux and OSX).
+	Portable filesystem API for Windows, Linux and OSX.
 	Written by Cosmin Apreutesei. Public Domain.
 
 FEATURES

@@ -43,3 +43,7 @@ worksheet:write(3, 0, 123.456)
 
 workbook:close()
 ```
+
+## Documentation
+
+Full documentation in [docs](docs/).
