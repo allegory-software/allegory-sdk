@@ -114,8 +114,12 @@ scripts for new libraries.
   * [ldecnumber](c/ldecNumber/ldecnumber.txt) - Fixed-precision decimal numbers math
 * __Web / Server side__
   * [webb](lua/webb.lua)               - Procedural web framework
+  * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
+  * [webb_query](lua/webb_query.lua)   - SQL database access
+  * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
+  * [webb_spa](lua/webb_spa.lua)       - Single-page app support
 * __Web / Client side__
-  * [X-Widgets Orientation Guide](X-WIDGETS.md)
+  * [X-Widgets Guide](X-WIDGETS.md)
   * [glue.js](www/glue.js)             - JS standard utilities
   * [divs.js](www/divs.js)             - DOM API and mechanism for web components
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)

@@ -3,8 +3,8 @@
 
 Model-driven web components in pure JavaScript.
 
-This library is designed primarily for data-dense business-type apps
-with a focus on data entry and data navigation.
+This set of components is designed primarily for data-dense business-type
+apps with a focus on data entry and data navigation.
 
 These types of apps have higher information density, higher signal-to-noise
 ratio, faster loading times and lower operational latencies than the usual
@@ -15,7 +15,7 @@ a keyboard and a mouse ("keyboard & mouse"-first apps).
 
 ## Components
 
-The highlight of the library is the virtual [grid widget][x-grid.js]
+The highlight of the library is the virtual [grid widget][www/x-grid.js]
 which can *load, scroll, sort and filter 100K items instantly on any modern
 computer or phone*, can act as a tree-grid or as a vertical grid, has
 inline editing, drag & drop moving of columns and rows and many other
@@ -100,11 +100,11 @@ properties, instead of wrapping them.
 w3c people found that it's in our best interest to deprecate.
 * this libs uses tabs, not spaces.
 
-[glue.js]:            ../www/glue.js
-[divs.js]:            ../www/divs.js
-[x-grid.js]:          ../www/x-grid.js
-[x-nav.js]:           ../www/x-nav.js
-[x-input.js]:         ../www/x-input.js
-[3d.js]:              ../www/3d.js
-[gl.js]:              ../www/gl.js
-[gl-renderer.js]:     ../www/gl-renderer.js
+[glue.js]:            www/glue.js
+[divs.js]:            www/divs.js
+[x-grid.js]:          www/x-grid.js
+[x-nav.js]:           www/x-nav.js
+[x-input.js]:         www/x-input.js
+[3d.js]:              www/3d.js
+[gl.js]:              www/gl.js
+[gl-renderer.js]:     www/gl-renderer.js

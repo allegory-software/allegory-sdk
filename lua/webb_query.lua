@@ -1,6 +1,6 @@
 --[==[
 
-	webb | mysql query function
+	webb | SQL database access
 	Written by Cosmin Apreutesei. Public Domain.
 
 PREPROCESSOR

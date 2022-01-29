@@ -1,7 +1,5 @@
 
-require'webb_query'
-
-function webb.lang_schema()
+return function()
 
 	tables.lang = {
 		lang                , lang, pk,
@@ -537,4 +535,3 @@ function webb.lang_schema()
 
 end
 
-return webb.lang_schema
