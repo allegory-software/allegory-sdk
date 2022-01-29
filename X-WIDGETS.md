@@ -43,7 +43,7 @@ or more rows/cells and can push them to a server (aka 3-way binding).
 
 There is no installation step and no offline preprocessing or packing tools
 are used or necessary for the JavaScript libraries. Just make sure you
-load them in order (see [xapp.lua](lua/xapp.lua)).
+load them in order (see [xapp.lua](lua/xapp.lua) for that).
 
 ## Styling
 

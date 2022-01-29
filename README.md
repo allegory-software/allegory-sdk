@@ -113,6 +113,8 @@ scripts for new libraries.
   * [lrucache](lua/lrucache.lua)       - LRU Cache
 * __Math__
   * [ldecnumber](c/ldecNumber/ldecnumber.txt) - Fixed-precision decimal numbers math
+* __Support Libs__
+  * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
 * __Web / Server side__
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
@@ -131,15 +133,10 @@ scripts for new libraries.
   * [x-listbox.js](www/x-listbox.js)   - Nav-based listbox widget
   * [x-input.js](www/x-input.js)       - Nav-based single-value (scalar) widgets
   * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
-* __Web / Client side / 3D__
-  * [3d.js](www/3d.js)                 - 3D math lib (fast, complete, consistent)
-  * [gl.js](www/gl.js)                 - WebGL2 procedural wrapper
-  * [earcut.js](www/earcut.js)         - Polygon triangulation
 * __Web / Client side / Support libs__
   * [mustache.js](www/mustache.js)     - Logic-less templates (client-side)
   * [purify.js](www/purify.js)         - HTML sanitizer
-* __Support Libs__
-  * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
+  * [markdown-it.js](www/markdown-it.js) - Markdown parser
 
 # Contributing code
 
