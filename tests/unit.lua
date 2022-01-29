@@ -1,18 +1,9 @@
+
 local glue = require'glue'
 local pp = require'pp'
+local fs = require'fs'
 
-local function declare(global)
-	local mt = getmetatable(_G)
-	local decl = mt and mt.__declared
-	if decl then decl[global] = true end
-end
-
-declare'test'
-declare'testmatch'
-declare'ptest'
-declare'timediff'
-declare'fps'
-declare'dir'
+assert(fs.cd(fs.exedir()..'/../../tests'))
 
 local function tostr(s)
 	return pp.format(s)
