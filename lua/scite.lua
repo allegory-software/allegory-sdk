@@ -8,7 +8,8 @@ function pr(...)
 	return ...
 end
 
---pp = require'pp'
---require'terra'
-glue = require'glue'
---pr = terralib.printraw
+local glue = require'glue'
+local fs = require'fs'
+local tests_dir = fs.exedir()..'/../../tests'
+glue.luapath(tests_dir)
+fs.cd(tests_dir)
