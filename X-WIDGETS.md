@@ -42,8 +42,8 @@ or more rows/cells and can push them to a server (aka 3-way binding).
 ## Installation
 
 There is no installation step and no offline preprocessing or packing tools
-are used or necessary for the JavaScript libraries. Just make sure you
-load them in order (see [xapp.lua](lua/xapp.lua) for that).
+are used or necessary. Just make sure you load both the js and css files
+in order (see [xapp.lua](lua/xapp.lua) for that).
 
 ## Styling
 
