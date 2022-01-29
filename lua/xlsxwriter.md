@@ -46,4 +46,4 @@ workbook:close()
 
 ## Documentation
 
-Full documentation in the [xlswriter](xlswriter/) folder.
+Full documentation in the [lua/xlswriter](../..//tree/dev/lua/xlswriter) folder.
