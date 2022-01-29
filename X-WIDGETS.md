@@ -15,7 +15,7 @@ a keyboard and a mouse ("keyboard & mouse"-first apps).
 
 ## Components
 
-The highlight of the library is the virtual [grid widget][www/x-grid.js]
+The highlight of the library is the virtual [grid widget][x-grid.js]
 which can *load, scroll, sort and filter 100K items instantly on any modern
 computer or phone*, can act as a tree-grid or as a vertical grid, has
 inline editing, drag & drop moving of columns and rows and many other
