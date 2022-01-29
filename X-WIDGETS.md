@@ -55,9 +55,8 @@ the widgets without disturbing the styles of non x-widget components.
 ## Security
 
 Strings are never rendered directly as HTML to avoid accidentally creating
-XSS holes. For formatting rich text safely, use templates.
-[mustache.js][mustache.js] is a good option for this and it also has
-a server-side Lua implementation.
+XSS holes. For formatting rich text safely, use templates. Mustache is a good
+option for this and it also has a server-side implementation.
 
 ## Coding style
 

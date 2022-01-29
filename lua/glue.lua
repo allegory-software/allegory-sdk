@@ -1,6 +1,6 @@
 --[=[
 
-	Lua glue: "assorted lengths of wire" library.
+	Lua "assorted lengths of wire" library.
 	Written by Cosmin Apreutesei. Public domain.
 
 	Glue is a collection of "hand tools" necessary in any good dynamic language.

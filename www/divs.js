@@ -301,8 +301,8 @@ method(Element, 'positionally_contains', function(e) {
 The "lifecycle management" part of this is basically poor man's web components.
 The reason we're reinventing web components in this inefficient way via DOM
 querying is because the actual web components API built into the browser is
-unusable. Needless to say, all DOM changing needs to be done through this API
-exclusively for components to work.
+unusable. Needless to say, all DOM manipulation needs to be done through this
+API exclusively for components to work.
 
 */
 
