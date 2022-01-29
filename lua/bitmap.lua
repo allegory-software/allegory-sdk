@@ -1094,4 +1094,14 @@ return glue.autoload({
 	formats = formats,
 	converters = conv,
 	rgb2g = rgb2g,
+}, {
+	dither    = 'bitmap_dither',
+	invert    = 'bitmap_effects',
+	grayscale = 'bitmap_effects',
+	convolve  = 'bitmap_effects',
+	sharpen   = 'bitmap_effects',
+	mirror    = 'bitmap_effects',
+	blend     = 'bitmap_blend',
+	blend_op  = 'bitmap_blend',
+	resize    = 'bitmap_resize',
 })

@@ -103,7 +103,7 @@ scripts for new libraries.
   * [libspng](lua/libspng.lua)         - PNG decoding & encoding
   * [bmp](lua/bmp.lua)                 - BMP decoding & encoding
   * [bitmap](lua/bitmap.lua)           - Bitmap conversions
-  * [pillow](lua/pillow.lua)           - Image resizing
+  * [pillow](lua/pillow.lua)           - Image resizing (SIMD-aided)
 * __Templating__
   * [mustache](lua/mustache.lua)       - Logic-less templates (server-side)
 * __Data Structures__
