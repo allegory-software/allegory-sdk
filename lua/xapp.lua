@@ -3,6 +3,14 @@
 	webb | x-widgets-based apps
 	Written by Cosmin Apreutesei. Public Domain.
 
+	local app = require'xapp'(app)          create the app objet
+		app.conf = {k->v}                    webb config
+		app.font = 'opensans'                load OpenSans fonts
+		app.fullscreen
+		app.spa(action) -> t
+		app.server_options
+		app.respond()
+
 ]==]
 
 local ffi = require'ffi'

@@ -21,6 +21,7 @@ WIDGETS
 
 GLOBALS
 
+	component(tag[, category], cons)
 	notify(text, ['search'|'info'|'error'], [timeout])
 
 */
@@ -79,7 +80,7 @@ let attr_val_opt = function(e) {
 	return opt
 }
 
-// component(tag, cons) -> create({option: value}) -> element.
+// component(tag[, category], cons) -> create({option: value}) -> element.
 function component(tag, category, cons) {
 
 	if (!isstr(category)) {

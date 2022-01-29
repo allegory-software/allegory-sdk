@@ -2,7 +2,7 @@
 # generates a test CA to be put in the browser.
 # generates a server certificates signed by the CA to configure http servers with.
 
-usage() { echo "USAGE: mgit cert $1"; exit; }
+usage() { echo "USAGE: sh cert $1"; exit; }
 
 do_ca() {
 	openssl genrsa -out test-ca.key 2048
@@ -29,4 +29,3 @@ EOF
 cmd="$1"; shift
 [ "$cmd" ] || usage "ca | server HOST"
 "do_$cmd" "$@"
-

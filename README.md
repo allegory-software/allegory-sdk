@@ -26,7 +26,7 @@ to see what's missing, broken or wanted.
 # Compatibility
 
  * Operating Systems: **Debian 10**, **Windows 10**
- * Browsers: **Desktop Chrome**, **Desktop Firefox** (Safari planned)
+ * Browsers: Desktop **Chrome**, **Firefox**, **Edget** (Safari planned)
  * CPUs: x86-64 with SSE 4.2 (AVX2 used if found).
 
 # Binaries
@@ -59,7 +59,7 @@ scripts for new libraries.
   * [fs](lua/fs.lua)                   - Filesystems, pipes, memory mapping
   * [proc](lua/proc.lua)               - Async process execution with I/O redirection
   * [path](lua/path.lua)               - Path manipulation
-  * [unixperms](lua/unixperms.lua)     - Unix permissons parser
+  * [unixperms](lua/unixperms.lua)     - Unix permissons string parser
 * __Multi-threading__
   * [pthread](lua/pthread.lua)         - Low-level threads
   * [luastate](lua/luastate.lua)       - Create Lua interpreters to use with OS threads
@@ -67,8 +67,9 @@ scripts for new libraries.
 * __Networking__
   * [sock](lua/sock.lua)               - Sockets & async scheduler for sockets & pipes
   * [sock_libtls](lua/sock_libtls.lua) - TLS-encrypted async TCP sockets
-  * [resolver](lua/resolver.lua)       - Async DNS resolver
+  * [linebuffer](lua/linebuffer.lua)   - Line buffer for text-based network protocols
   * [connpool](lua/connpool.lua)       - Connection pools
+  * [resolver](lua/resolver.lua)       - Async DNS resolver
   * [http_client](lua/http_client.lua) - Async HTTP(s) 1.1 client for high-volume web scraping
   * [http_server](lua/http_server.lua) - Async HTTP(s) 1.1 server
   * [uri](lua/uri.lua)                 - URI manipulation
@@ -118,8 +119,9 @@ scripts for new libraries.
   * [webb_query](lua/webb_query.lua)   - SQL database access
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
   * [webb_spa](lua/webb_spa.lua)       - Single-page app support
+  * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
 * __Web / Client side__
-  * [X-Widgets](X-WIDGETS.md)          - Overview of all JavaScript libraries
+  * [X-Widgets](X-WIDGETS.md)          - Overview of the web components suite
   * [glue.js](www/glue.js)             - JS standard utilities
   * [divs.js](www/divs.js)             - DOM API and mechanism for web components
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
@@ -131,15 +133,12 @@ scripts for new libraries.
   * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
 * __Web / Client side / 3D__
   * [3d.js](www/3d.js)                 - 3D math lib (fast, complete, consistent)
-  * [eaercut.js](www/earcut.js)        - Ear-clipping algorithm for polygon triangulation
-  * [gl.js](www/gl.js)                 - WebGL 2 procedural wrapper
-  * [gl-renderer.js](www/gl-renderer.js) - WebGL 2 renderer for a 3D model editor
+  * [gl.js](www/gl.js)                 - WebGL2 procedural wrapper
+  * [earcut.js](www/earcut.js)         - Polygon triangulation
 * __Web / Client side / Support libs__
   * [mustache.js](www/mustache.js)     - Logic-less templates (client-side)
   * [purify.js](www/purify.js)         - HTML sanitizer
 * __Support Libs__
-  * [jsmin](c/jsmin/jsmin.txt)         - Minify JavaScript code
-  * [linebuffer](lua/linebuffer.lua)   - Line buffer for text-based network protocols
   * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
 
 # Contributing code
