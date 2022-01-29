@@ -134,7 +134,7 @@ scripts for new libraries.
   * [eaercut.js](www/earcut.js)        - Ear-clipping algorithm for polygon triangulation
   * [gl.js](www/gl.js)                 - WebGL 2 procedural wrapper
   * [gl-renderer.js](www/gl-renderer.js) - WebGL 2 renderer for a 3D model editor
-* _Web / Client side / Support libs__
+* __Web / Client side / Support libs__
   * [mustache.js](www/mustache.js)     - Logic-less templates (client-side)
   * [purify.js](www/purify.js)         - HTML sanitizer
 * __Support Libs__
