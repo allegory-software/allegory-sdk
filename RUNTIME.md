@@ -12,7 +12,7 @@ extensions:
  * [LuaJIT's string.buffer module](https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html)
  * [OpenResty's extensions](https://github.com/openresty/luajit2#openresty-extensions)
 
-## How was it built?
+## How it was built
 
  * `package.path` and `package.cpath` looks only in the SDK for modules.
  * built with `-msse4.2` so that it hashes strings with hardware CRC32.
