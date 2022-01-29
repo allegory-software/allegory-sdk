@@ -3,6 +3,7 @@ blake2/build
 cjson/build
 cpu_supports/build
 expat/build
+genx/build
 jsmin/build
 ldecNumber/build
 libjpeg/build
@@ -12,7 +13,7 @@ lpeglabel/build
 luajit/build
 lz4/build
 md5/build
-minizip-ng/build
+minizip2/build
 pillow_simd/build
 sha2/build
 xxhash/build
