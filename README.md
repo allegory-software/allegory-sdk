@@ -128,7 +128,7 @@ scripts for new libraries.
   * [divs.js](www/divs.js)             - DOM API and mechanism for web components
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
   * [x-widgets.js](www/x-widgets.js)   - Web components & layouting widgets
-  * [x-nav.js](www/x-widgets.js)       - Model mixin for data-driven widgets
+  * [x-nav.js](www/x-nav.js)           - Model mixin for data-driven widgets
   * [x-grid.js](www/x-grid.js)         - Nav-based virtual tree-grid widget
   * [x-listbox.js](www/x-listbox.js)   - Nav-based listbox widget
   * [x-input.js](www/x-input.js)       - Nav-based single-value (scalar) widgets
