@@ -116,6 +116,7 @@ MODULES
 	glue.autoload(t, submodules) -> M               autoload table keys from submodules
 	glue.autoload(t, key, module|loader) -> t       autoload table keys from submodules
 	glue.bin                                        get the script's directory
+	glue.scriptname                                 get the script's name
 	glue.luapath(path [,index [,ext]])              insert a path in package.path
 	glue.cpath(path [,index])                       insert a path in package.cpath
 ALLOCATION
@@ -140,6 +141,8 @@ TIP: Extend the Lua string namespace with glue.update(string, glue.string)
 so you can use all glue string functions as string methods, eg. s:trim().
 
 ]=]
+
+if not ... then require'glue_test'; return end
 
 local glue = {}
 
@@ -1705,9 +1708,13 @@ end
 --portable way to get script's directory, based on arg[0].
 --NOTE: the path is not absolute, but relative to the current directory!
 --NOTE: for bundled executables, this returns the executable's directory.
-local dir = rawget(_G, 'arg') and arg[0]
-	and arg[0]:gsub('[/\\]?[^/\\]+$', '') or '' --remove file name
+local arg0 = rawget(_G, 'arg') and arg[0]
+local dir = arg0 and arg0:gsub('[/\\]?[^/\\]+$', '') or '' --remove file name
 glue.bin = dir == '' and '.' or dir
+
+--portable way to get script's name without Lua file extension, based on arg[0].
+--NOTE: for bundled executables, this returns the executable's name.
+glue.scriptname = arg0 and arg0:gsub('%.lua$', ''):match'[^/\\]+$'
 
 --portable way to add more paths to package.path, at any place in the list.
 --negative indices count from the end of the list like string.sub().
