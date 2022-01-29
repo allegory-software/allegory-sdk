@@ -119,7 +119,7 @@ scripts for new libraries.
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
   * [webb_spa](lua/webb_spa.lua)       - Single-page app support
 * __Web / Client side__
-  * [X-Widgets Guide](X-WIDGETS.md)
+  * [X-Widgets](X-WIDGETS.md)          - Overview of all JavaScript libraries
   * [glue.js](www/glue.js)             - JS standard utilities
   * [divs.js](www/divs.js)             - DOM API and mechanism for web components
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
