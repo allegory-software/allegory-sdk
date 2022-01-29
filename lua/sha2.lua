@@ -21,6 +21,12 @@ To get the hex representation, use glue.tohex().
 
 ]=]
 
+if not ... then
+	require'sha2_test'
+	require'sha2_hmac_test'
+	return
+end
+
 local ffi = require'ffi'
 local C = ffi.load'sha2'
 
@@ -80,7 +86,7 @@ local function hash_function(digest_function)
 	end
 end
 
-local M = {C = C}
+local M = {C = C} --pin C!
 
 M.sha256_digest = digest_function(ffi.typeof'SHA256_CTX', C.SHA256_Init, C.SHA256_Update, C.SHA256_Final, C.SHA256_DIGEST_LENGTH)
 M.sha384_digest = digest_function(ffi.typeof'SHA384_CTX', C.SHA384_Init, C.SHA384_Update, C.SHA384_Final, C.SHA384_DIGEST_LENGTH)
