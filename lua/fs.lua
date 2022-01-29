@@ -55,6 +55,7 @@ FILESYSTEM OPS
 	fs.mkdir(path, [recursive], [perms])          make directory
 	fs.cwd([path]) -> path                        get/set current working directory
 	fs.cd([path]) -> path                         get/set current working directory
+	fs.initial_cwd() -> path                      get the cwd that process started with
 	fs.remove(path, [recursive])                  remove file or directory (recursively)
 	fs.move(path, newpath, [opt])                 rename/move file on the same filesystem
 SYMLINKS & HARDLINKS
@@ -63,9 +64,10 @@ SYMLINKS & HARDLINKS
 	fs.readlink(path) -> path                     dereference a symlink recursively
 COMMON PATHS
 	fs.homedir() -> path                          get current user's home directory
-	fs.tmpdir() -> path                           get temporary directory
+	fs.tmpdir() -> path                           get the temporary directory
 	fs.exepath() -> path                          get the full path of the running executable
 	fs.exedir() -> path                           get the directory of the running executable
+	fs.appdir([appname]) -> path                  get the current user's app data dir
 	fs.scriptdir() -> path                        get the directory of the main script
 LOW LEVEL
 	fs.wrap_handle(HANDLE) -> f                   wrap opened HANDLE (Windows)
@@ -408,7 +410,7 @@ fs.move(path, newpath, [opt])
 
 	This operation is atomic on all platforms.
 
-Symlinks & hardlinks ---------------------------------------------------------
+Symlinks & Hardlinks ---------------------------------------------------------
 
 fs.mksymlink(symlink, path, is_dir)
 

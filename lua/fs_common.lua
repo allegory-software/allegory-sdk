@@ -401,12 +401,12 @@ end
 
 --common paths ---------------------------------------------------------------
 
-function fs.exedir()
+fs.exedir = memoize(function()
 	return path.dir(fs.exepath())
-end
+end)
 
 fs.scriptdir = memoize(function()
-	local s = path.combine(initial_cwd(), glue.bin)
+	local s = path.combine(fs.initial_cwd(), glue.bin)
 	return s and path.normalize(s) or glue.bin
 end)
 
