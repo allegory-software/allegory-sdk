@@ -8,7 +8,7 @@ sha = {
 	SHA512 = function(s) return glue.tohex(sha2.sha512(s)) end,
 }
 
-for file in io.popen('ls '..glue.bin..'/sha2_test/*.dat'):lines() do
+for file in io.popen('ls sha2_test/*.dat'):lines() do
 	local s = glue.readfile(file, 'rb')
 	local hashes = {}
 	do
