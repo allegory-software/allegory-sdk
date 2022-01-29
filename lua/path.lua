@@ -11,7 +11,8 @@
 	are no longer than 259 bytes and which don't contain any control characters
 	(code 0-31) or the symbols `<>:"|%?*\`.
 
-	path.platform -> 'win'|'unix'                       get current platform
+	path.platform -> 'win'|'unix'                       get the current platform
+	path.platform_sep -> '\'|'/'                        get the path separator for this plaform
 	path.default_sep([pl]) -> '\'|'/'                   get the default separator for a platform
 	path.dev_alias(s) -> s|nil                          check if a path is a Windows device alias
 	path.type(s, [pl]) -> type                          get the path type
@@ -43,7 +44,8 @@ if not ... then require'path_test'; return end
 local path = {}
 setmetatable(path, path)
 
-path.platform = package.config:sub(1, 1) == '\\' and 'win' or 'unix'
+path.platform_sep = package.config:sub(1, 1)
+path.platform = path.platform_sep and 'win' or 'unix'
 
 local function win(pl) --check if pl (or current platform) is Windows
 	if pl == nil then pl = path.platform end
@@ -194,16 +196,14 @@ local function detect_sep(p, win)
 end
 
 --[[
-Get/add/remove an ending separator of a path.
+Get/add/remove an ending separator of a path. `sep` can be:
 
-`sep` can be:
-
-	* `nil` or missing: the ending separator is returned (`nil` is returned
-	  if the path has no ending separator).
-	* `true`, `'\\'`, `'/'`: the path is returned with an ending separator
-	  added (`true` means use path's own separator if it has one and failing
-	  that, use `dsep` or the default platform separator).
-	* `false` or `''`: the path without its ending separator is returned.
+* nil or missing  : the ending separator is returned (nil is returned
+                    if the path has no ending separator).
+* true, '\\', '/' : the path is returned with an ending separator added
+                    (true means use path's own separator if it has one and
+                    failing that, use dsep or the default platform separator).
+* false or ''     : the path without its ending separator is returned.
 
 `success` is `false` if trying to add or remove the ending separator from
 an empty path (note that even when that happens, the path can still be
@@ -244,13 +244,11 @@ Detect or set a path's separator (for Windows paths only).
 
 `sep` can be:
 
-	* `nil`   : detect
-	* `true`  : set to `default_sep`
-	* `false` : set to `default_sep` but only if both `\` and `/` are found
-	            in the path, i.e. unify.
-	* `'\\'` or `'/'` : set specifically
-	* `nil` when `empty_names` is explicitly `false`: collapse duplicate
-	  separators only.
+	* nil   : detect.
+	* true  : set to default_sep.
+	* false : set to default_sep if both `\` and `/` are found in the path.
+	* '\\' or '/' : set specifically.
+	* nil when empty_names is explicitly false: collapse duplicate separators only.
 
 `default_sep` defaults to the platform separator. Unless `empty_names` is `true`,
 consecutive separators are collapsed into the first one.
