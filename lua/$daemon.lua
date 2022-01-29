@@ -1,6 +1,6 @@
 --[[
 
-	Daemon API.
+	Scaffold/boilerplate for writing server apps.
 	Written by Cosmin Apreutesei. Public Domain.
 
 	daemon(app_name) -> app

@@ -1,19 +1,27 @@
 
 # The Allegory SDK
 
-The **Allegory SDK** is a self-contained programming environment for developing
-**web apps** on **Linux** and **Windows** using **LuaJIT** and **JavaScript**.
+The **Allegory SDK** is a self-contained cross-platform low-code programming
+environment for developing web-based **database-driven business apps** in
+**LuaJIT** and **JavaScript**.
 
-The server-side stack is written entirely in Lua including networking and scheduling
-and contains a web server as a library, a procedural web framework, database
-connectors for MySQL and Tarantool, an async DNS resolver, a http client
-and more, all leveraging Lua's powerful coroutines, made even more powerful
-with symmetric coroutines, and using epoll and IOCP for I/O multiplexing.
+The server-side stack is written entirely in Lua and contains:
 
-On the client side, a collection of **web components** written in plain
-JavaScript, including a **data-bound virtual editable tree-grid widget**,
-complete the picture for developing **SAAS database-driven business apps**,
-the primary use case of the SDK.
+ * a powerful scheduler based on [symmetric coroutines](https://stackoverflow.com/questions/41891989).
+ * scalable I/O multiplexing based on epoll and IOCP.
+ * a programmable web-server-as-a-library.
+ * an async DNS resolver.
+ * a fully-featured http client.
+ * async clients for MySQL and Tarantool.
+ * low-level and high-level APIs for OS threads.
+ * and a lot more, see full list of modules below.
+
+The client-side stack is written from scratch in JavaScript and contains:
+
+* a virtual editable tree-grid widget, snappy a 100K records.
+* a collection of data-bound widgets for data entry, navigation and reporting.
+* layouting widgets for split-pane layouts.
+* a mechanism for web components better than the native one.
 
 # Status
 
@@ -45,15 +53,16 @@ scripts for new libraries.
 # Documentation
 
 * __Runtime__
-  * [LuaJIT](RUNTIME.md)               - custom build of LuaJIT
+  * [LuaJIT](RUNTIME.md)               - Custom build of LuaJIT
 * __Standard Library__
   * [glue](lua/glue.lua)               - "Assorted lengths of wire" library
   * [pp](lua/pp.lua)                   - Pretty printer and serializer
   * [coro](lua/coro.lua)               - Symmetric coroutines for yielding accross iterators
   * [errors](lua/errors.lua)           - Structured exceptions for writing network protocols
   * [logging](lua/logging.lua)         - Logging to files and network
-  * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser
-  * [$](lua/$.lua)                     - "Drop all your tools on the floor" library
+  * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser with labels
+  * [$](lua/$.lua), [$log](lua/$log.lua), [$fs](lua/$fs.lua), [$sock](lua/$sock.lua) - "Drop your tools on the floor" modules
+  * [$daemon](lua/$daemon)             - Scaffold/boilerplate for writing server apps
 * __Platform APIs__
   * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep
   * [fs](lua/fs.lua)                   - Filesystems, pipes, memory mapping
@@ -76,7 +85,7 @@ scripts for new libraries.
   * [ipv6](lua/ipv6.lua)               - IPv6 conversion routines
 * __Data Exchange__
   * [base64](lua/base64.lua)           - Base64 encoding & decoding
-  * [cjson](c/cjson/cjson.txt)         - JSON encoding & decoding
+  * [cjson](c/cjson/cjson.txt)         - Fast JSON encoding & decoding
   * [msgpack](lua/msgpack.lua)         - MessagePack encoding & decoding
   * [expat](lua/expat.lua)             - XML parsing
   * [genx](lua/genx.lua)               - XML formatting
@@ -84,28 +93,28 @@ scripts for new libraries.
   * [xlsxwriter](lua/xlsxwriter.md)    - Excel 2007+ XLSX file generation
   * [multipart](lua/multipart.lua)     - Multipart MIME encoding
 * __Hashing__
-  * [xxhash](lua/xxhash.lua)           - xxHash fast non-cryptographic hash (32/64/128bit)
-  * [blake2](lua/blake2.lua)           - BLAKE2 fast cryptographic hash
+  * [xxhash](lua/xxhash.lua)           - Fast non-cryptographic hash (based on [xxHash](https://cyan4973.github.io/xxHash/))
+  * [blake2](lua/blake2.lua)           - Fast cryptographic hash (based on [BLAKE2](https://www.blake2.net/))
   * [sha1](lua/sha1.lua)               - SHA1 hash
   * [sha2](lua/sha2.lua)               - SHA2 hash
   * [md5](lua/md5.lua)                 - MD5 hash
   * [hmac](lua/hmac.lua)               - HMAC signing
 * __Compression__
-  * [zlib](lua/zlib.lua)               - DEFLATE, ZLIB, GZIP (based on zlib-ng)
-  * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating
+  * [zlib](lua/zlib.lua)               - DEFLATE, ZLIB, GZIP (based on [zlib-ng](https://github.com/zlib-ng/zlib-ng))
+  * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating (based on [minizip-ng](https://github.com/zlib-ng/minizip-ng))
 * __Databases__
   * [sqlpp](lua/sqlpp.lua)             - SQL preprocessor
   * [mysql](lua/mysql.lua)             - MySQL async driver
   * [tarantool](lua/tarantool.lua)     - Tarantool async driver
   * [schema](lua/schema.lua)           - Database schema diff'ing and migrations
 * __Raster Images__
-  * [libjpeg](lua/libjpeg.lua)         - JPEG decoding & encoding
-  * [libspng](lua/libspng.lua)         - PNG decoding & encoding
+  * [libjpeg](lua/libjpeg.lua)         - Fast JPEG decoding & encoding (based on [libjpeg-turbo](https://libjpeg-turbo.org/))
+  * [libspng](lua/libspng.lua)         - Fast PNG decoding & encoding (based on [libspng](https://libspng.org/))
   * [bmp](lua/bmp.lua)                 - BMP decoding & encoding
   * [bitmap](lua/bitmap.lua)           - Bitmap conversions
-  * [pillow](lua/pillow.lua)           - Image resizing (SIMD-aided)
+  * [pillow](lua/pillow.lua)           - Fast image resizing (based on [Pillow-SIMD](https://github.com/uploadcare/pillow-simd#pillow-simd))
 * __Templating__
-  * [mustache](lua/mustache.lua)       - Logic-less templates (server-side)
+  * [mustache](lua/mustache.lua)       - Logic-less templates (see https://mustache.github.io/)
 * __Data Structures__
   * [heap](lua/heap.lua)               - Priority Queue
   * [queue](lua/queue.lua)             - Ring Buffer
