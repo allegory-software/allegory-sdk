@@ -46,4 +46,4 @@ workbook:close()
 
 ## Documentation
 
-Full documentation in [docs](docs/).
+Full documentation in the [xlswriter](xlswriter/) folder.
