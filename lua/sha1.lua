@@ -11,6 +11,12 @@ sha1.sha1(s) -> s
 
 ]]
 
+if not ... then
+	require'sha1_test'
+	require'sha1_hmac_test'
+	return
+end
+
 local band = bit.band
 local bor = bit.bor
 local bxor = bit.bxor

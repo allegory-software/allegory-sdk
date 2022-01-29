@@ -13,6 +13,12 @@
 
 ]=]
 
+if not ... then
+	require'md5_test'
+	require'md5_hmac_test'
+	return
+end
+
 local ffi = require'ffi'
 local C = ffi.load'md5'
 
