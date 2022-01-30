@@ -2,7 +2,7 @@
 cd "${0%build}" || exit 1
 
 build() {
-	${X}gcc -c -g src/src/*/*.c -W -Wall -O2 -fPIC -Isrc/src -Isrc/inc
+	${X}gcc -c -g src/src/*/*.c -W -Wall -Wno-unknown-pragmas -O2 -fPIC -Isrc/src -Isrc/inc
 	${X}gcc -g *.o -shared -o ../../bin/$P/$D -L../../bin/$P $L
 	rm -f      ../../bin/$P/$A
 	${X}ar rcs ../../bin/$P/$A *.o

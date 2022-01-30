@@ -1,20 +1,7 @@
-bearssl/build
-blake3/build
-cjson/build
-cpu_supports/build
-expat/build
-genx/build
-jsmin/build
-ldecNumber/build
-libjpeg/build
-libspng/build
-libtls_bearssl/build
-lpeglabel/build
-luajit/build
-lz4/build
-md5/build
-minizip2/build
-pillow_simd/build
-sha2/build
-xxhash/build
-zlib-ng/build
+#!/bin/sh
+for d in *; do
+	if [ -f "$d/build" ]; then
+		echo "$d:"
+		$d/build
+	fi
+done

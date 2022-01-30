@@ -20,7 +20,8 @@ build() {
 	src/mz_zip.c
 	src/mz_zip_rw.c
 	"
-	${X}gcc -c -msse3 -msse4.1 -O3 $C -Isrc -I../zlib-ng/src
+	${X}gcc -c -msse3 -msse4.1 -O3 $C -Isrc \
+		-DZLIB_COMPAT -I../zlib-ng/src -I../zlib-ng
 	${X}gcc *.o -shared -o ../../bin/$P/$D -L../../bin/$P -lz $L
 	rm -f      ../../bin/$P/$A
 	${X}ar rcs ../../bin/$P/$A *.o
