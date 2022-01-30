@@ -7,8 +7,7 @@ environment for developing web-based **database-driven business apps** in
 
 The server-side stack is written entirely in Lua and contains:
 
- * a powerful scheduler based on [symmetric coroutines](https://stackoverflow.com/questions/41891989).
- * scalable I/O multiplexing based on epoll and IOCP.
+ * a coroutine-based scheduler for epoll and IOCP multiplexing.
  * a programmable web-server-as-a-library.
  * an async DNS resolver.
  * a fully-featured http client.
@@ -57,7 +56,7 @@ scripts for new libraries.
 * __Standard Library__
   * [glue](lua/glue.lua)               - "Assorted lengths of wire" library
   * [pp](lua/pp.lua)                   - Pretty printer and serializer
-  * [coro](lua/coro.lua)               - Symmetric coroutines for yielding accross iterators
+  * [coro](lua/coro.lua)               - [Symmetric coroutines](https://stackoverflow.com/questions/41891989) for cross-yielding
   * [errors](lua/errors.lua)           - Structured exceptions for writing network protocols
   * [logging](lua/logging.lua)         - Logging to files and network
   * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser with labels
