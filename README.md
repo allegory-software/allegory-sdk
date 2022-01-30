@@ -61,7 +61,7 @@ scripts for new libraries.
   * [logging](lua/logging.lua)         - Logging to files and network
   * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser with labels
   * [$](lua/$.lua), [$log](lua/$log.lua), [$fs](lua/$fs.lua), [$sock](lua/$sock.lua) - "Drop your tools on the floor" modules
-  * [$daemon](lua/$daemon)             - Scaffold/boilerplate for writing server apps
+  * [$daemon](lua/$daemon.lua)         - Scaffold/boilerplate for writing server apps
 * __Platform APIs__
   * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep
   * [fs](lua/fs.lua)                   - Filesystems, pipes, memory mapping
