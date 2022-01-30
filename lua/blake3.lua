@@ -3,14 +3,14 @@
 	BLAKE3 fast cryptographic hash.
 	Writen by Cosmin Apreutesei. Public Domain.
 
-	blake3.new([key[, size]]) -> b3                 get a hash state
-	blake3.derive_key(context[, size]) -> b3        get a hash state in key derivation mode
-	blake3.hash(s, [key], [out[, outsz]]) -> s      hash a string
-	b3:update(s[, size]) -> b3                      digest a string or buffer
-	b3:finalize([buf[, sz]]) -> s                   finalize and get the hash
-	b3:finalize_tobuffer([buf[, sz]]) -> buf, sz    finalize and get the hash into a buffer
-	b3:length() -> n                                get the hash byte length
-	b3:reset() -> b3                                prepare for another digestion
+	blake3.new([key[, sz]]) -> b3                 get a hash state
+	blake3.derive_key(context[, sz]) -> b3        get a hash state in key derivation mode
+	blake3.hash(s, [sz], [key], [out[, outsz]]) -> s   hash a string
+	b3:update(s[, sz]) -> b3                      digest a string or buffer
+	b3:finalize([buf[, sz]]) -> s                 finalize and get the hash
+	b3:finalize_tobuffer([buf[, sz]]) -> buf, sz  finalize and get the hash into a buffer
+	b3:length() -> n                              get the hash byte length
+	b3:reset() -> b3                              prepare for another digestion
 
 ]=]
 
@@ -106,8 +106,8 @@ end
 
 ffi.metatype(blake3_hasher, {__index = b3})
 
-function M.hash(s, key, out, outsz)
-	return M.new(key):update(s):finalize(out, outsz)
+function M.hash(s, sz, key, out, outsz)
+	return M.new(key):update(s, sz):finalize(out, outsz)
 end
 
 return M

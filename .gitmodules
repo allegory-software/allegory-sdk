@@ -7,9 +7,6 @@
 [submodule "c/xxhash/src"]
 	path = c/xxhash/src
 	url = git@github.com:allegory-software/allegory-sdk-xxhash.git
-[submodule "c/blake2/src"]
-	path = c/blake2/src
-	url = git@github.com:allegory-software/allegory-sdk-libb2.git
 [submodule "c/blake3"]
 	path = c/blake3/src
 	url = git@github.com:allegory-software/allegory-sdk-blake3.git
