@@ -234,6 +234,7 @@ local path = require'path'
 local mustache = require'mustache'
 local xxhash = require'xxhash'
 local prettycjson = require'prettycjson'
+local box2d = require'box2d'
 
 local concat = table.concat
 local remove = table.remove
@@ -1405,14 +1406,6 @@ end
 
 --image processing -----------------------------------------------------------
 
-local function box2d_fit(w, h, bw, bh)
-	if w / h > bw / bh then
-		return bw, bw * h / w
-	else
-		return bh * w / h, bh
-	end
-end
-
 function resize_image(src_path, dst_path, max_w, max_h)
 
 	local cairo = require'cairo'
@@ -1429,7 +1422,7 @@ function resize_image(src_path, dst_path, max_w, max_h)
 			local read = f:buffered_read()
 			local img = assert(libjpeg.open{read = read})
 			finally(function() img:free() end)
-			local w, h = box2d_fit(img.w, img.h, max_w, max_h)
+			local w, h = box2d.fit(img.w, img.h, max_w, max_h)
 			local sn = math.ceil(glue.clamp(math.max(w / img.w, h / img.h) * 8, 1, 8))
 			bmp = assert(img:load{
 				accept = {bgra8 = true},
@@ -1441,7 +1434,7 @@ function resize_image(src_path, dst_path, max_w, max_h)
 		end
 
 		--scale down, if necessary.
-		local w, h = box2d_fit(bmp.w, bmp.h, max_w, max_h)
+		local w, h = box2d.fit(bmp.w, bmp.h, max_w, max_h)
 		if w < bmp.w or h < bmp.h then
 			local src_sr = cairo.image_surface(bmp)
 			local dst_sr = cairo.image_surface('bgra8', w, h)

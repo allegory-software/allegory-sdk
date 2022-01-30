@@ -49,10 +49,12 @@ versioned to follow the main repo.
 See our [Building Guide](c/README.md) which also teaches how create build
 scripts for new libraries.
 
-# Documentation
+# Runtime
 
-* __Runtime__
   * [LuaJIT](RUNTIME.md)               - Custom build of LuaJIT
+
+# Modules
+
 * __Standard Library__
   * [glue](lua/glue.lua)               - "Assorted lengths of wire" library
   * [pp](lua/pp.lua)                   - Pretty printer and serializer
@@ -121,6 +123,7 @@ scripts for new libraries.
   * [lrucache](lua/lrucache.lua)       - LRU Cache
 * __Math__
   * [ldecnumber](c/ldecNumber/ldecnumber.txt) - Fixed-precision decimal numbers math
+  * [box2d](lua/box2d.lua)             - 2D rectangle math
 * __Support Libs__
   * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
 * __Web / Server side__
