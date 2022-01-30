@@ -146,13 +146,13 @@ scripts for new libraries.
   * [purify.js](www/purify.js)         - HTML sanitizer
   * [markdown-it.js](www/markdown-it.js) - Markdown parser
 
-# Contributing code
+# Contributing
 
 The SDK is open to contributions for fixing bugs and improving the existing
 modules. We also accept new modules but we take the liberty to chose what to
 include if we are to take resonsibility for maintaining them.
 
-Before contributing code to the repo, it might be helpful to read our
+Before issuing a pull request, it might be helpful to read our
 [Programming Guide](PROGRAMMING.md) which contains:
 
  * The Lua coding style guide,
