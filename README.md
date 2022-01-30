@@ -12,7 +12,7 @@ The server-side stack is written entirely in Lua and contains:
  * an async DNS resolver.
  * a fully-featured http client.
  * async connectors for MySQL and Tarantool.
- * low-level and high-level APIs for OS threads.
+ * OS threads APIs, low-level and high-level.
  * and a lot more, see full list of modules below.
 
 The client-side stack is written from scratch in JavaScript and contains:
