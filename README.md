@@ -94,7 +94,7 @@ scripts for new libraries.
   * [multipart](lua/multipart.lua)     - Multipart MIME encoding
 * __Hashing__
   * [xxhash](lua/xxhash.lua)           - Fast non-cryptographic hash (based on [xxHash](https://cyan4973.github.io/xxHash/))
-  * [blake2](lua/blake2.lua)           - Fast cryptographic hash (based on [BLAKE2](https://www.blake2.net/))
+  * [blake3](lua/blake3.lua)           - Fast secure hash & MAC (based on [BLAKE3](https://github.com/BLAKE3-team/BLAKE3))
   * [sha1](lua/sha1.lua)               - SHA1 hash
   * [sha2](lua/sha2.lua)               - SHA2 hash
   * [md5](lua/md5.lua)                 - MD5 hash

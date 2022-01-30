@@ -1,0 +1,26 @@
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc $C -c -O3 -Wall -Wextra -std=c11 -pedantic -Isrc/c \
+		src/c/blake3.c \
+		src/c/blake3_dispatch.c \
+		src/c/blake3_portable.c \
+		src/c/blake3_sse2_x86-64_$S.S \
+		src/c/blake3_sse41_x86-64_$S.S \
+		src/c/blake3_avx2_x86-64_$S.S \
+		src/c/blake3_avx512_x86-64_$S.S
+	${X}gcc *.o -shared -o ../../bin/$P/$D $L
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	S=windows_gnu P=windows L="-s -static-libgcc" D=blake3.dll A=blake3.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	S=unix P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libblake3.dylib" \
+	D=libblake3.dylib A=libblake3.a build
+else
+	S=unix P=linux C="-fPIC" L="-s -static-libgcc" D=libblake3.so A=libblake3.a build
+fi

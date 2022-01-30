@@ -49,3 +49,6 @@
 [submodule "c/zlib-ng/src"]
 	path = c/zlib-ng/src
 	url = git@github.com:allegory-software/allegory-sdk-zlib-ng.git
+[submodule "c/blake3/src"]
+	path = c/blake3/src
+	url = git@github.com:allegory-software/allegory-sdk-blake3.git
