@@ -98,6 +98,7 @@ local errors = {
 	[0x0b7] = 'already_exists'  , --ERROR_ALREADY_EXISTS, CreateDirectoryW
 	[0x10B] = 'not_found'       , --ERROR_DIRECTORY, FindFirstFileW
 	[0x06D] = 'eof'             , --ERROR_BROKEN_PIPE ReadFile, WriteFile
+	[0x522] = 'access_denied'   , --ERROR_PRIVILEGE_NOT_HELD, CreateSymbolicLinkW
 }
 
 local mmap_errors = { --CreateFileMappingW, MapViewOfFileEx
@@ -808,7 +809,7 @@ function fs.mksymlink(link_path, target_path, is_dir)
 		wcs(link_path),
 		wcs(target_path, nil, wbuf),
 		flags
-	))
+	) == 1 and 1 or 0) --(MSDN is wrong on this one)
 end
 
 function fs.mkhardlink(link_path, target_path)
