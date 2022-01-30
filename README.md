@@ -157,8 +157,7 @@ Before issuing a pull request, it might be helpful to read our
 
  * The Lua coding style guide,
  * Notes on programming for LuaJIT,
- * Notes on Lua API design,
- * Notes on contributing code.
+ * Notes on Lua API design.
 
 # License
 
