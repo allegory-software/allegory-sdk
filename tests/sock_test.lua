@@ -184,10 +184,10 @@ local function test_timers()
 	os.exit()
 end
 
-test_timers()
+--test_timers()
 
 --test_addr()
---test_sockopt()
+test_sockopt()
 --test_http()
 
 if ffi.os == 'Windows' then

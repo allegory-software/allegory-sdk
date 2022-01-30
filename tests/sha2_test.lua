@@ -34,6 +34,7 @@ for file in io.popen('ls sha2_test/*.dat'):lines() do
 
 	for k,v in pairs(hashes) do
 		local h = sha[k](s)
-		print(file, k..'x', #s, h == v and 'ok' or h .. ' ~= ' .. v)
+		--print(file, k..'x', #s, h == v and 'ok' or h .. ' ~= ' .. v)
+		assert(h == v)
 	end
 end

@@ -45,10 +45,10 @@ tests = {
 }
 
 local function asserteq(test, a,b)
-	print(test, a == b and 'ok' or glue.tohex(a) .. ' ~= ' .. glue.tohex(b))
+	--print(test, a == b and 'ok' or glue.tohex(a) .. ' ~= ' .. glue.tohex(b))
+	assert(a == b)
 end
 for k,test in ipairs(tests) do
-	print('test '..k)
 	assert(#test.hmac256 == 32)
 	asserteq(256, hmac256(test.data, test.key), test.hmac256)
 	assert(#test.hmac384 == 48)

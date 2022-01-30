@@ -25,7 +25,6 @@ local function resize_image(src_path, dst_path, max_w, max_h)
 	local img2 = img1:resize(w, h, 'lanczos') --, 100, 100, -100, -100)
 	img1:free()
 	local bmp = img2:bitmap()
-	pr(bmp)
 
 	--save.
 	local f = assert(fs.open(dst_path, 'w'))
@@ -38,8 +37,6 @@ local function resize_image(src_path, dst_path, max_w, max_h)
 		quality = 90,
 	})
 	f:close()
-
-	print'done'
 end
 
 resize_image(

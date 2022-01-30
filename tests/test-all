@@ -1,4 +1,3 @@
-#go@ sh *
 #!/bin/sh
 cd "${0%test-all}" || exit 1
 
@@ -6,5 +5,5 @@ cd "${0%test-all}" || exit 1
 
 for f in *_test.lua; do
 	echo "$f"
-	../bin/$P/luajit -e"AUTO=1; require'glue'.luapath'.'" "$f"
+	AUTO=1 ../bin/$P/luajit -e"require'glue'.luapath'.'" "$f"
 done
