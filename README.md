@@ -11,7 +11,7 @@ The server-side stack is written entirely in Lua and contains:
  * a programmable web-server-as-a-library.
  * an async DNS resolver.
  * a fully-featured http client.
- * async clients for MySQL and Tarantool.
+ * async connectors for MySQL and Tarantool.
  * low-level and high-level APIs for OS threads.
  * and a lot more, see full list of modules below.
 
