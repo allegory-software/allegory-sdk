@@ -42,7 +42,7 @@ end
 local function test_specs()
 	local failed = 0
 	local total = 0
-	local dir = 'media/mustache'
+	local dir = 'mustache_test'
 	for file in fs.dir(dir) do
 		local path = dir..'/'..file
 		local doc

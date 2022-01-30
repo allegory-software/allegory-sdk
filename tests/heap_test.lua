@@ -87,6 +87,7 @@ local function bench(type, h, size, valgen)
 end
 
 local function benchmark()
+	if os.getenv'AUTO' then return end
 	local size = 100000
 	local function ngen(h) return math.random(1, size) end
 	bench('Lua values',  heap.valueheap{}, size, ngen)

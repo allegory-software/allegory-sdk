@@ -1,0 +1,10 @@
+#go@ sh *
+#!/bin/sh
+cd "${0%test-all}" || exit 1
+
+[ "$OSTYPE" = "msys" ] && P=windows || P=linux
+
+for f in *_test.lua; do
+	echo "$f"
+	../bin/$P/luajit -e"AUTO=1; require'glue'.luapath'.'" "$f"
+done

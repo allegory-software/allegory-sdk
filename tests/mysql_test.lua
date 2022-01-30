@@ -16,7 +16,7 @@ sock.run(function()
 	})
 
 	assert(conn:query[[
-	create table if not exists test (
+	create table if not exists mysql_test (
 		f1 decimal(20, 6),
 		f2 tinyint(1),
 		f2b tinyint unsigned,
@@ -79,7 +79,7 @@ sock.run(function()
 	--pp(conn:query'select * from val where val = 1')
 	local stmt = assert(conn:prepare
 		--'select cast(123 as tinyint) union select cast(123 as tinyint)')
-		'select * from test')
+		'select * from mysql_test')
 		-- ('select min_price from vari where val = ?'))
 	assert(stmt:exec())
 	local rows, _, cols = conn:read_result({datetime_format = '*t'})
@@ -97,9 +97,10 @@ sock.run(function()
 	})
 	assert(stmt:free())
 
+	assert(conn:query'drop table mysql_test')
+
 	conn:close()
 
 	assert(conn:closed())
 
 end)
-

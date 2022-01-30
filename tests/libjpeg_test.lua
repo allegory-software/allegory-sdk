@@ -3,8 +3,8 @@ local ffi = require'ffi'
 local fs = require'fs'
 
 local function test_load_save()
-	local infile = 'media/jpeg/progressive.jpg'
-	local outfile = 'media/jpeg/temp.jpg'
+	local infile = 'jpeg_test/progressive.jpg'
+	local outfile = 'jpeg_test/test.jpg'
 	local f = assert(fs.open(infile))
 	local img = assert(libjpeg.open(function(buf, sz)
 		return assert(f:read(buf, sz))

@@ -57,7 +57,7 @@ local function dump(z)
 end
 
 local z = assert(zip.open{
-	file = 'media/zip/test-aes.zip',
+	file = 'zip_test/test-aes.zip',
 	password = '123',
 	--sign_required = true, --TODO: test signing
 })
@@ -80,7 +80,7 @@ assert(z:extract_all'tmp/minizip-test')
 z:close()
 
 local z = zip.open{
-	file = 'media/zip/test-aes2.zip',
+	file = 'zip_test/test-aes2.zip',
 	mode = 'w',
 	password = '321',
 	--Total Commander cannot see this!
@@ -94,7 +94,7 @@ z:close()
 
 assert(fs.remove('tmp/minizip-test', true))
 
-local z = zip.open('media/zip/test-aes2.zip', 'r', '321')
+local z = zip.open('zip_test/test-aes2.zip', 'r', '321')
 
 dump(z)
 
@@ -103,5 +103,5 @@ z:extract_all'tmp/minizip-test'
 z:close()
 
 assert(fs.remove('tmp/minizip-test', true))
-
-print'done'
+fs.remove'zip_test/test-aes2.zip'
+fs.remove'tmp'

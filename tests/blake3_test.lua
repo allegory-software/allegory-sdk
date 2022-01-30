@@ -25,4 +25,3 @@ for _,t in ipairs(tests.cases) do
 	b2:reset()
 	b3:reset()
 end
-print'done'

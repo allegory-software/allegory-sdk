@@ -1,8 +1,6 @@
 local genx = require'genx'
 local ffi = require'ffi'
 
-print('version', genx.version())
-
 local w = genx.new()
 
 local ns1 = w:ns('ns1', 'pns1')
@@ -18,9 +16,10 @@ w:end_tag()
 w:end_doc()
 print()
 
+local t = {}
 w:start_doc(function(s, sz)
 	s = s and (sz and ffi.string(s, sz) or ffi.string(s)) or '\n!EOF\n'
-	io.write(s)
+	t[#t+1] = s
 end)
 
 w:start_tag('html')
@@ -47,3 +46,12 @@ w:end_tag()
 w:end_doc()
 
 w:free()
+
+local s = table.concat(t)
+assert(s == [[
+<html xmlns:g="ns2" xmlns:pns1="ns1">
+	<head a="va" b="vb">hello</head>
+	<pns1:body a1="v1" a2="v2">hey</pns1:body>
+</html>
+!EOF
+]])

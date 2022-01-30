@@ -1,9 +1,10 @@
 local expat = require'expat'
 local pp = require'pp'
 
-local callbacks = setmetatable({}, {__index = function(t,k) return function(...) print(k,...) end end})
-expat.parse({path='../c/expat/src/expat/doc/xmlwf.xml'}, callbacks)
-pp(expat.treeparse{path='../c/expat/src/expat/doc/xmlwf.xml'})
+--TODO:
+--local callbacks = setmetatable({}, {__index = function(t,k) return function(...) print(k,...) end end})
+--expat.parse({path='../c/expat/src/expat/doc/xmlwf.xml'}, callbacks)
+--pp(expat.treeparse{path='../c/expat/src/expat/doc/xmlwf.xml'})
 
 function soaptest(xmlsrc)
 	local xmlsoap = expat.treeparse({

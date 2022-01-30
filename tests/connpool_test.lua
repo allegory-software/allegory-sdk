@@ -1,4 +1,5 @@
 
+local sock = require'sock'
 local pool = require'connpool'.new{max_connections = 2, max_waiting_threads = 1}
 local h = 'test'
 
@@ -6,7 +7,7 @@ sock.run(function()
 
 	local c1 = pool:put(h, {}, {})
 	local c2 = pool:put(h, {}, {})
-	print(pool:get(h, sock.clock() + 1))
+	print(pool:get(h, sock.clock() + .1))
 
 	--local c, err = pool:get(h, 5)
 	--assert(not c and err == 'empty')

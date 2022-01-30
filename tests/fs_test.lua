@@ -435,20 +435,23 @@ local function mksymlink_file(f1, f2)
 
 	time.sleep(0.1)
 
-	assert(fs.mksymlink(f1, f2))
-	assert(fs.is(f1, 'symlink'))
-
-	local f = assert(fs.open(f1))
-	assert(f:read(buf, 1))
-	assert(buf[0] == ('X'):byte(1))
-	assert(f:close())
+	local ok,err = fs.mksymlink(f1, f2)
+	if ok then
+		assert(fs.is(f1, 'symlink'))
+		local f = assert(fs.open(f1))
+		assert(f:read(buf, 1))
+		assert(buf[0] == ('X'):byte(1))
+		assert(f:close())
+	else
+		fs.remove(f1)
+		fs.remove(f2)
+		assert(ok, err)
+	end
 end
 
 function test.mksymlink_file()
 	local f1 = prefix..'fs_test_symlink_file'
 	local f2 = prefix..'fs_test_symlink_file_target'
-	fs.remove(f1)
-	fs.remove(f2)
 	mksymlink_file(f1, f2)
 	assert(fs.is(f1, 'symlink'))
 	assert(fs.remove(f1))
@@ -463,11 +466,16 @@ function test.mksymlink_dir()
 	fs.remove(dir)
 	assert(fs.mkdir(dir))
 	assert(fs.mkdir(dir..'/test_dir'))
-	assert(fs.mksymlink(link, dir, true))
-	assert(fs.is(link..'/test_dir', 'dir'))
-	assert(fs.remove(link..'/test_dir'))
-	assert(fs.remove(link))
-	assert(fs.remove(dir))
+	local ok,err = fs.mksymlink(link, dir, true)
+	if ok then
+		assert(fs.is(link..'/test_dir', 'dir'))
+		assert(fs.remove(link..'/test_dir'))
+		assert(fs.remove(link))
+		assert(fs.remove(dir))
+	else
+		assert(fs.remove(dir, true))
+	end
+	assert(ok,err)
 end
 
 function test.readlink_file()
@@ -488,18 +496,23 @@ function test.readlink_dir()
 	fs.remove(d2)
 	assert(fs.mkdir(d2))
 	assert(fs.mkdir(d2..'/test_dir'))
-	assert(fs.mksymlink(d1, d2, true))
-	assert(fs.is(d1, 'symlink'))
-	local t = {}
-	for d in fs.dir(d1) do
-		t[#t+1] = d
+	local ok,err = fs.mksymlink(d1, d2, true)
+	if ok then
+		assert(fs.is(d1, 'symlink'))
+		local t = {}
+		for d in fs.dir(d1) do
+			t[#t+1] = d
+		end
+		assert(#t == 1)
+		assert(t[1] == 'test_dir')
+		assert(fs.remove(d1..'/test_dir'))
+		assert(fs.readlink(d1) == d2)
+		assert(fs.remove(d1))
+		assert(fs.remove(d2))
+	else
+		assert(fs.remove(d2, true))
 	end
-	assert(#t == 1)
-	assert(t[1] == 'test_dir')
-	assert(fs.remove(d1..'/test_dir'))
-	assert(fs.readlink(d1) == d2)
-	assert(fs.remove(d1))
-	assert(fs.remove(d2))
+	assert(ok,err)
 end
 
 --TODO: readlink() with relative symlink chain
@@ -897,7 +910,8 @@ end
 
 function test.map_file_exec()
 	--TODO: test by exec'ing some code in the memory.
-	local map = assert(fs.map{file = 'bin/mingw64/luajit.exe', access = 'x'})
+	local exe = win and '../bin/windows/luajit.exe' or '../bin/linux/luajit'
+	local map = assert(fs.map{file = exe, access = 'x'})
 	assert(ffi.string(map.addr, 2) == 'MZ')
 	map:free()
 end
@@ -944,8 +958,7 @@ end
 function test.map_invalid_address()
 	local map, err = fs.map{
 		size = fs.pagesize() * 1,
-		addr = ffi.os == 'Windows' and fs.pagesize()  --TODO: test not robust
-			or ffi.cast('uintptr_t', -fs.pagesize()),  --TODO: test not robust
+		addr = -fs.pagesize(),
 	}
 	assert(not map and err == 'out_of_mem')
 end
@@ -969,11 +982,13 @@ end
 function test.map_readonly_too_short_zero()
 	local map, err = fs.map{file = zerosize_file()}
 	assert(not map and err == 'file_too_short')
+	os.remove'fs_test_zerosize'
 end
 
 function test.map_write_too_short_zero()
 	local map, err = fs.map{file = zerosize_file(), access = 'w'}
 	assert(not map and err == 'file_too_short')
+	os.remove'fs_test_zerosize'
 end
 
 function test.map_disk_full()
@@ -1022,15 +1037,21 @@ end
 local name = ...
 if not name or name == 'fs_test' then
 	--run all tests in the order in which they appear in the code.
+	local n,m = 0, 0
 	for i,k in ipairs(test) do
 		if not k:find'^_' then
 			print('test '..k)
 			local ok, err = xpcall(test[k], debug.traceback)
 			if not ok then
 				print(err)
+				n=n+1
+			else
+				m=m+1
 			end
 		end
 	end
+	print(string.format('ok: %d, failed: %d', m, n))
+	os.exit(n > 0 and 1 or 0)
 elseif test[name] then
 	test[name](select(2, ...))
 else

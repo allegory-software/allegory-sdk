@@ -108,7 +108,7 @@ local function linebuffer_fuzz_test()
 	assert(s2 == s)
 end
 
-for i = 1, 10000 do
+for i = 1, os.getenv'AUTO' and 20 or 1000 do
 	print(i)
 	linebuffer_fuzz_test()
 end
