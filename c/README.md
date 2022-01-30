@@ -8,16 +8,16 @@ rebuilding them is not necesssary unless you want to.
 
 C sources are included as git submodules so you need to clone them first:
 
-	$ git submodule update --init --recursive
+	git submodule update --init --recursive
 
 Building is based on bash scripts most of which invoke gcc directly.
 To (re)build a library, type:
 
-	$ sh <lib>/build
+	sh <lib>/build
 
 To (re)build all libraries, type:
 
-	$ sh build-all
+	sh build-all
 
 ## Building on Windows for Windows
 
@@ -166,4 +166,4 @@ In some cases it's going to be more complicated than that.
   (if the package has a clean and simple makefile that doesn't add more
   dependencies to the toolchain, use that instead)
 
-After compilation, check your builds against the minimum supported platforms.
+After compilation, check that your builds work on your oldest platforms.
