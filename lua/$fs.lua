@@ -5,6 +5,7 @@
 	indir(dir, file)
 	exists(file)
 	checkexists(file)
+	chdir(dir)
 	rm(path)
 	mv(old_path, new_path)
 	mkdir(path)
@@ -41,6 +42,10 @@ end
 
 function checkexists(file)
 	check('fs', 'exists', exists(file), 'file missing: %s', file)
+end
+
+function chdir(dir)
+	check('fs', 'chdir', 'could not change dir to: %s', dir)
 end
 
 function rm(path)
