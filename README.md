@@ -33,7 +33,7 @@ to see what's missing, broken or wanted.
 # Compatibility
 
  * Operating Systems: **Debian 10**, **Windows 10**
- * Browsers: Desktop **Chrome**, **Firefox**, **Edget** (Safari planned)
+ * Browsers: Desktop **Chrome**, **Firefox**, **Edge** (Safari planned)
  * CPUs: x86-64 with SSE 4.2 (AVX2 used if found).
 
 # Binaries
@@ -113,7 +113,7 @@ scripts for new libraries.
   * [bitmap](lua/bitmap.lua)           - Bitmap conversions
   * [pillow](lua/pillow.lua)           - Fast image resizing (based on [Pillow-SIMD](https://github.com/uploadcare/pillow-simd#pillow-simd))
 * __Templating__
-  * [mustache](lua/mustache.lua)       - Logic-less templates (see https://mustache.github.io/)
+  * [mustache](lua/mustache.lua)       - Logic-less [templates](https://mustache.github.io/) on server-side
 * __Data Structures__
   * [heap](lua/heap.lua)               - Priority Queue
   * [queue](lua/queue.lua)             - Ring Buffer
@@ -142,7 +142,7 @@ scripts for new libraries.
   * [x-input.js](www/x-input.js)       - Nav-based single-value (scalar) widgets
   * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
 * __Web / Client side / Support libs__
-  * [mustache.js](www/mustache.js)     - Logic-less templates (client-side)
+  * [mustache.js](www/mustache.js)     - Logic-less [templates](https://mustache.github.io/) on client-side
   * [purify.js](www/purify.js)         - HTML sanitizer
   * [markdown-it.js](www/markdown-it.js) - Markdown parser
 
