@@ -17,7 +17,7 @@
 	path = c/cjson/src
 	url = git@github.com:allegory-software/allegory-sdk-lua-cjson.git
 [submodule "c/ldecNumber/src"]
-	path = c/ldecnumber/src
+	path = c/ldecNumber/src
 	url = git@github.com:allegory-software/allegory-sdk-ldecnumber.git
 [submodule "c/libjpeg/src"]
 	path = c/libjpeg/src
