@@ -25,6 +25,6 @@ if [ "$OSTYPE" = "msys" ]; then
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
 	echo NYI
 else
-	P=linux C="-fPIC" L="-s -static-libgcc -L../../bin/linux -lluajit" \
+	P=linux C="-fPIC" L="-s -static-libgcc -L../../bin/linux" \
 	D=ldecnumber.so A=libldecnumber.a build
 fi
