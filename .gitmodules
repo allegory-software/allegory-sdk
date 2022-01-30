@@ -10,6 +10,9 @@
 [submodule "c/blake2/src"]
 	path = c/blake2/src
 	url = git@github.com:allegory-software/allegory-sdk-libb2.git
+[submodule "c/blake3"]
+	path = c/blake3/src
+	url = git@github.com:allegory-software/allegory-sdk-blake3.git
 [submodule "c/cjson/src"]
 	path = c/cjson/src
 	url = git@github.com:allegory-software/allegory-sdk-lua-cjson.git
