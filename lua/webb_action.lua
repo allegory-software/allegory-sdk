@@ -182,9 +182,9 @@ local function plain_file_handler(path)
 		f:close()
 		error(err)
 	end
-	setheader('content-length', file_size)
 
 	return function()
+		set_content_size(file_size)
 		local filebuf_size = math.min(file_size, 65536)
 		local filebuf = ffi.new('char[?]', filebuf_size)
 		while true do
@@ -237,7 +237,7 @@ end
 local mime_type_filters = {
 	['text/html']        = html_filter,
 	['application/json'] = json_filter,
-	['text/javascript']  = js_filter,
+	['application/javascript']  = js_filter,
 }
 
 --routing logic --------------------------------------------------------------
