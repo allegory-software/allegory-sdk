@@ -635,8 +635,8 @@ function out_buffering()
 	return cx.outfunc ~= nil
 end
 
-local function default_outfunc(s, len)
-	if s == nil or s == '' or len == 0 then
+local function default_outfunc(s, sz)
+	if s == nil or s == '' or sz == 0 then
 		return
 	end
 	if not cx.http_out then
@@ -644,28 +644,38 @@ local function default_outfunc(s, len)
 		cx.http_out = cx.req:respond(cx.res)
 	end
 	s = type(s) ~= 'cdata' and tostring(s) or s
-	cx.http_out(s, len)
+	cx.http_out(s, sz)
 end
 
 function stringbuffer(t)
 	t = t or {}
+	local geni = {} --{i1,...}
+	local genf = {} --{f1,...}
 	return function(...)
 		local n = select('#',...)
 		if n == 0 then --flush it
+			for i,ti in ipairs(geni) do
+				t[ti] = genf[i]()
+			end
 			return concat(t)
 		else
-			local s, len = ...
-			if s == nil or s == '' or len == 0 then
+			local s, sz = ...
+			if s == nil or s == '' or sz == 0 then
 				return
 			end
 			if type(s) == 'cdata' then
-				assert(len)
-				s = ffi.string(s, len)
+				assert(sz)
+				s = ffi.string(s, sz)
+				add(t, s)
+			elseif type(s) == 'function' then --content generator
+				add(t, true) --placeholder
+				add(geni, #t)
+				add(genf, s)
 			else
-				assert(not len)
+				assert(not sz)
 				s = tostring(s)
+				add(t, s)
 			end
-			t[#t+1] = s
 		end
 	end
 end
@@ -687,9 +697,9 @@ function pop_out()
 	return s
 end
 
-function out(s, len)
+function out(s, sz)
 	local outfunc = cx.outfunc or default_outfunc
-	outfunc(s, len)
+	outfunc(s, sz)
 end
 
 local function pass_record(...)
@@ -997,7 +1007,7 @@ function fileext(s)
 end
 
 --make a path by combining dir and file.
-function indir(dir, file)
+local function indir(dir, file)
 	return assert(path.combine(dir, file))
 end
 
@@ -1408,7 +1418,7 @@ end
 
 function resize_image(src_path, dst_path, max_w, max_h)
 
-	local cairo = require'cairo'
+	local use_cairo = false
 
 	glue.fcall(function(finally)
 
@@ -1425,7 +1435,7 @@ function resize_image(src_path, dst_path, max_w, max_h)
 			local w, h = box2d.fit(img.w, img.h, max_w, max_h)
 			local sn = math.ceil(glue.clamp(math.max(w / img.w, h / img.h) * 8, 1, 8))
 			bmp = assert(img:load{
-				accept = {bgra8 = true},
+				accept = {[use_cairo and 'bgra8' or 'rgba8'] = true},
 				scale_num = sn,
 				scale_denom = 8,
 			})
@@ -1436,18 +1446,38 @@ function resize_image(src_path, dst_path, max_w, max_h)
 		--scale down, if necessary.
 		local w, h = box2d.fit(bmp.w, bmp.h, max_w, max_h)
 		if w < bmp.w or h < bmp.h then
-			local src_sr = cairo.image_surface(bmp)
-			local dst_sr = cairo.image_surface('bgra8', w, h)
-			local cr = dst_sr:context()
-			local sx = w / bmp.w
-			local sy = h / bmp.h
-			cr:scale(sx, sy)
-			cr:source(src_sr)
-			cr:paint()
-			cr:free()
-			src_sr:free()
-			bmp = dst_sr:bitmap()
-			finally(function() dst_sr:free() end)
+
+			webb.note('webb', 'resize', '%s %d,%d -> %d,%d %d%%', filename(src_path),
+				bmp.w, bmp.h, w, h, w / bmp.w * 100)
+
+			if use_cairo then
+
+				local cairo = require'cairo'
+
+				local src_sr = cairo.image_surface(bmp)
+				local dst_sr = cairo.image_surface('bgra8', w, h)
+				local cr = dst_sr:context()
+				local sx = w / bmp.w
+				local sy = h / bmp.h
+				cr:scale(sx, sy)
+				cr:source(src_sr)
+				cr:paint()
+				cr:free()
+				src_sr:free()
+				bmp = dst_sr:bitmap()
+				finally(function() dst_sr:free() end)
+
+			else
+
+				local pil = require'pillow'
+
+				local src_img = pil.image(bmp)
+				local dst_img = src_img:resize(w, h)
+				src_img:free()
+				bmp = dst_img:bitmap()
+				finally(function() dst_img:free() end)
+
+			end
 		end
 
 		--encode back.
@@ -1458,8 +1488,8 @@ function resize_image(src_path, dst_path, max_w, max_h)
 			mkdirs(tmp_path)
 			local f = assert(fs.open(tmp_path, 'w'))
 			finally(function() if f then f:close() end end)
-			local function write(buf, len)
-				assert(f:write(buf, len) == len)
+			local function write(buf, sz)
+				return assert(f:write(buf, sz))
 			end
 			assert(libjpeg.save{
 				bitmap = bmp,
@@ -1525,9 +1555,9 @@ function webb.run(f, ...)
 		log(...)
 	end
 	local thread = coroutine.running()
-	function cx.outfunc(s, len)
+	function cx.outfunc(s, sz)
 		if type(s) == 'cdata' then
-			s = ffi.string(s, len)
+			s = ffi.string(s, sz)
 		end
 		io.stdout:write(s)
 		io.stdout:flush()
