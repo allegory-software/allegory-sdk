@@ -40,7 +40,7 @@ CALLBACK STUBS
 	return_arg
 	assert_false
 ERRORS
-	print(...)
+	pr[int](...)
 	warn(...)
 	debug(...)
 	trace()
@@ -235,6 +235,7 @@ function return_arg(arg) { return arg; }
 // error handling ------------------------------------------------------------
 
 print = console.log
+pr = console.log
 warn  = print
 debug = print
 trace = console.trace

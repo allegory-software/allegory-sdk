@@ -649,13 +649,15 @@ end
 
 function stringbuffer(t)
 	t = t or {}
-	local geni = {} --{i1,...}
-	local genf = {} --{f1,...}
+	local geni --{i1,...}
+	local genf --{f1,...}
 	return function(...)
 		local n = select('#',...)
 		if n == 0 then --flush it
-			for i,ti in ipairs(geni) do
-				t[ti] = genf[i]()
+			if geni then
+				for i,ti in ipairs(geni) do
+					t[ti] = genf[i]()
+				end
 			end
 			return concat(t)
 		else
@@ -668,6 +670,10 @@ function stringbuffer(t)
 				s = ffi.string(s, sz)
 				add(t, s)
 			elseif type(s) == 'function' then --content generator
+				if not geni then
+					geni = {}
+					genf = {}
+				end
 				add(t, true) --placeholder
 				add(geni, #t)
 				add(genf, s)
