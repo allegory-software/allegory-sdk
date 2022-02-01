@@ -9,4 +9,9 @@ jsmin.minify(s) -> s
 	Minify JavaScript string and return it as a string.
 	Raises an error if JavaScript has basic syntax errors in it.
 
+WARNING: JsMin is not a guaranteed-correct parser and it will fail on some
+inputs, notably regex literals after which a newline is significant.
+Because of that, and because the size of minified & gzipped js only goes down
+about 30% of the gzipped size, jsmin is not enabled by default in webb.
+
 ]=]

@@ -56,7 +56,7 @@ function MarkdownItIndentedTable(md) {
 
     // |3| Determine whether second row is valid header separator
     let hasHeader = false
-    const VALID_HEADER_RE = /^[-:][-:\s]*$/
+    const VALID_HEADER_RE = (/^[-:][-:\s]*$/)
     const secondLine = lines[1] && lines[1].trimRight()
 
     // |3.1| Must only have '-', ':', and ' ' characters
