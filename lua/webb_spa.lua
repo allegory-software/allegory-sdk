@@ -97,9 +97,9 @@ end
 
 local function sepbuffer(sep)
 	local buf = stringbuffer()
-	return function(s)
+	return function(s, sz)
 		if s then
-			buf(s)
+			buf(s, sz)
 			buf(sep)
 		else
 			return buf()
