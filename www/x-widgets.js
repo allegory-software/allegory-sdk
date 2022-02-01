@@ -3049,7 +3049,7 @@ component('x-md', function(e) {
 	md = md || markdownit()
 		.use(MarkdownItIndentedTable)
 
-	e.unsafe_html = md.render_string(e.html)
+	e.unsafe_html = md.render(e.html)
 
 })}
 
