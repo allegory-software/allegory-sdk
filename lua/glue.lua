@@ -663,6 +663,7 @@ function glue.string.outdent(s, newindent)
 		end
 		t[#t+1] = s
 	end
+	indent = indent or ''
 	if indent == '' and newindent == '' then
 		return s
 	end
