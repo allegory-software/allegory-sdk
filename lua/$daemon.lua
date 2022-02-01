@@ -70,20 +70,15 @@ function daemon(app_name)
 	--require it at runtime don't try to load it again.
 	package.loaded[app_name] = app
 
-	--cd to app_dir so that we can use relative paths for everything.
 	app_dir = fs.scriptdir()
-	if package.loaded.bundle_loader then
-		bin_dir = bin_dir or app_dir
-	elseif using_mgit then
-		app_dir = app_dir or path.normalize(indir(fs.exedir(), '../..'))
-		bin_dir = bin_dir or fs.exedir()
-	else
-		bin_dir = bin_dir or indir(app_dir, 'bin/'..(win and 'windows' or 'linux'))
-	end
-	var_dir = var_dir or indir(app_dir, app_name..'-var')
-	tmp_dir = tmp_dir or indir(app_dir, app_name..'-tmp')
-	www_dir = www_dir or indir(app_dir, app_name..'-www')
-	libwww_dir = libwww_dir or path.normalize(indir(app_dir, 'sdk/www'))
+	bin_dir = bin_dir or indir(app_dir, 'bin', win and 'windows' or 'linux')
+	var_dir = var_dir or indir(app_dir, 'var')
+	tmp_dir = tmp_dir or indir(app_dir, 'tmp')
+	www_dir = www_dir or indir(app_dir, 'www')
+	libwww_dir = libwww_dir or indir(app_dir, 'sdk', 'www')
+
+	--make require() see Lua modules from the app dir.
+	glue.luapath(app_dir)
 
 	app.conf = {
 		app_name = app_name,
@@ -144,12 +139,13 @@ function daemon(app_name)
 			return app
 		end
 
-		check('fs', 'cd', fs.cd(app_dir), 'could not change dir to %s', app_dir)
 		mkdir(var_dir)
 		mkdir(tmp_dir)
 
-		--set up logging.
+		--cd to app_dir so that we can use relative paths for everything.
+		chdir(app_dir)
 
+		--set up logging.
 		logging.deploy  = app.conf.deploy
 		logging.env     = app.conf.env
 		logging.verbose = app_name
