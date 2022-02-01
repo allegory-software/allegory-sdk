@@ -100,7 +100,8 @@ Use Lua's naming conventions `foo_bar` and `foobar` instead of `FooBar` or `fooB
   * `x` is for generic math quantities
   * `s` is for strings
   * `c` is for 1-char strings
-  * `f` and `func` are for functions
+  * `f` is for files
+  * `f`, `fn`, `func` are for functions
   * `o` is for objects
   * `ret` is for return values
   * `ok, ret` is what you get out of `pcall`
@@ -109,7 +110,7 @@ Use Lua's naming conventions `foo_bar` and `foobar` instead of `FooBar` or `fooB
   * `x, y, w, h` is for rectangles
   * `t0`, `t1` is for timestamps
   * `err` is for errors
-  * `t0` or `t_` is for avoiding a name clash with `t`
+  * `t0`, `i0`, etc. is for "previous value of"
 
 ### Abbreviations
 
