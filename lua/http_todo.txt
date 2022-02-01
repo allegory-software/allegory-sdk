@@ -1,9 +1,5 @@
 
-- http_client: cookies
-
 - http_client: should_retry(io_err), max_retries
-
-- close all connections after loop exits.
 
 ------------------------------------------------------------------------------
 
@@ -11,6 +7,7 @@
 
 - client ranges:
 	Range: bytes=i-j
+
 - server ranges:
 	send Accept-Ranges: bytes
 	read Range: bytes=i-j (j is index of last byte!)
@@ -21,10 +18,4 @@
 - caching: Vary, ETags, If-match, If-None-Match, If-Range,
 	If-Unmodified-Since, last-modified, if-modified-since,
 	Expires, Last-Modified, Cache-Control
-
-- http_client: obey Retry-After on 503, 429 or 301
-
-------------------------------------------------------------------------------
-
-- http_server: static file handler
 
