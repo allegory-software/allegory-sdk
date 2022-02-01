@@ -102,8 +102,9 @@ ARG PARSING
 
 OUTPUT
 
-	outall(s)                               output a single value
-	out(s)                                  output one more non-nil value
+	set_content_size(sz)                    set content size to avoid chunked encoding
+	outall(s[, sz])                         output a single value
+	out(s[, sz])                            output one more non-nil value
 	push_out([f])                           push output function or buffer
 	pop_out() -> s                          pop output function and flush it
 	stringbuffer([t]) -> f(s1,...)/f()->s   create a string buffer
@@ -622,11 +623,17 @@ end
 
 --output API -----------------------------------------------------------------
 
-function outall(s)
+function set_content_size(sz)
+	cx.res.content_size = sz
+end
+
+function outall(s, sz)
 	if cx.http_out or out_buffering() then
-		out(s)
+		out(s, sz)
 	else
-		cx.res.content = s ~= nil and tostring(s) or ''
+		s = s == nil and '' or type(s) == 'cdata' and s or tostring(s)
+		cx.res.content = s
+		cx.res.content_size = sz
 		cx.req:respond(cx.res)
 	end
 end
