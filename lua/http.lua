@@ -274,6 +274,8 @@ function http:set_body_headers(headers, content, content_size, close)
 		elseif not close then
 			headers['transfer-encoding'] = 'chunked'
 		end
+	else
+		assert(false, type(content))
 	end
 end
 
@@ -784,22 +786,22 @@ function http:new(t)
 		end
 
 		glue.override(self.tcp, 'recv', function(inherited, self, buf, ...)
-			local sz, err, errcode = inherited(self, buf, ...)
-			if not sz then return nil, err, errcode end
+			local sz, err = inherited(self, buf, ...)
+			if not sz then return nil, err end
 			ds('<', ffi.string(buf, sz))
 			return sz
 		end)
 
-		glue.override(self.tcp, 'send', function(inherited, self, buf, ...)
-			local sz, err, errcode = inherited(self, buf, ...)
-			if not sz then return nil, err, errcode end
-			ds('>', ffi.string(buf, sz))
-			return sz
+		glue.override(self.tcp, 'send', function(inherited, self, buf, sz, ...)
+			local ok, err = inherited(self, buf, sz, ...)
+			if not ok then return nil, err end
+			ds('>', ffi.string(buf, sz or #buf))
+			return ok
 		end)
 
 		glue.override(self.tcp, 'close', function(inherited, self, ...)
-			local ok, err, errcode = inherited(self, ...)
-			if not ok then return nil, err, errcode  end
+			local ok, err = inherited(self, ...)
+			if not ok then return nil, err  end
 			ds('CC')
 			return ok
 		end)
