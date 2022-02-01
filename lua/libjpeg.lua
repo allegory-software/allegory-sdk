@@ -86,8 +86,8 @@ libjpeg.save(opt)
 ]=]
 
 if not ... then
-	--require'libjpeg_test'
-	require'libjpeg_demo'
+	require'libjpeg_test'
+	--require'libjpeg_demo'
 	return
 end
 
@@ -236,6 +236,42 @@ local function rows_buffer(h, bottom_up, data, stride)
 	return rows
 end
 
+--jit-off all callback-calling functions
+local function jpeg_read_header(cinfo, require_image)
+	return C.jpeg_read_header(cinfo, require_image)
+end
+jit.off(jpeg_read_header)
+
+local function jpeg_start_decompress(cinfo)
+	return C.jpeg_start_decompress(cinfo)
+end
+jit.off(jpeg_start_decompress)
+
+local function jpeg_input_complete(cinfo)
+	return C.jpeg_input_complete(cinfo)
+end
+jit.off(jpeg_input_complete)
+
+local function jpeg_consume_input(cinfo)
+	return C.jpeg_consume_input(cinfo)
+end
+jit.off(jpeg_consume_input)
+
+local function jpeg_read_scanlines(cinfo, scan_lines, max_lines)
+	return C.jpeg_read_scanlines(cinfo, scan_lines, max_lines)
+end
+jit.off(jpeg_read_scanlines)
+
+local function jpeg_finish_output(cinfo)
+	return C.jpeg_finish_output(cinfo)
+end
+jit.off(jpeg_finish_output)
+
+local function jpeg_finish_decompress(cinfo)
+	return C.jpeg_finish_decompress(cinfo)
+end
+jit.off(jpeg_finish_decompress)
+
 local function open(opt)
 
 	--normalize args
@@ -349,7 +385,7 @@ local function open(opt)
 
 	local function load_header()
 
-		while C.jpeg_read_header(cinfo, 1) == C.JPEG_SUSPENDED do
+		while jpeg_read_header(cinfo, 1) == C.JPEG_SUSPENDED do
 			fill_input_buffer()
 		end
 
@@ -397,7 +433,7 @@ local function open(opt)
 		cinfo.buffered_image = 1 --multi-scan reading
 
 		--start decompression, which fills the info about the output image
-		while C.jpeg_start_decompress(cinfo) == 0 do
+		while jpeg_start_decompress(cinfo) == 0 do
 			fill_input_buffer()
 		end
 
@@ -419,12 +455,12 @@ local function open(opt)
 		bmp.rows = rows_buffer(bmp.h, bmp.bottom_up, bmp.data, bmp.stride)
 
 		--decompress the image
-		while C.jpeg_input_complete(cinfo) == 0 do
+		while jpeg_input_complete(cinfo) == 0 do
 
 			--read all the scanlines of the current scan
 			local ret
 			repeat
-				ret = C.jpeg_consume_input(cinfo)
+				ret = jpeg_consume_input(cinfo)
 				if ret == C.JPEG_SUSPENDED then
 					fill_input_buffer()
 				end
@@ -440,7 +476,7 @@ local function open(opt)
 				--read several scanlines at once, depending on the size of the output buffer
 				local i = cinfo.output_scanline
 				local n = math.min(bmp.h - i, cinfo.rec_outbuf_height)
-				while C.jpeg_read_scanlines(cinfo, bmp.rows + i, n) < n do
+				while jpeg_read_scanlines(cinfo, bmp.rows + i, n) < n do
 					fill_input_buffer()
 				end
 			end
@@ -450,13 +486,13 @@ local function open(opt)
 				opt.render_scan(bmp, last_scan, cinfo.output_scan_number)
 			end
 
-			while C.jpeg_finish_output(cinfo) == 0 do
+			while jpeg_finish_output(cinfo) == 0 do
 				fill_input_buffer()
 			end
 
 		end
 
-		while C.jpeg_finish_decompress(cinfo) == 0 do
+		while jpeg_finish_decompress(cinfo) == 0 do
 			fill_input_buffer()
 		end
 
@@ -567,7 +603,7 @@ local function save(opt)
 
 	end)
 end
-jit.off(save, true) --can't call error() from callbacks called from C.
+jit.off(save, true)
 
 return {
 	open = open,
