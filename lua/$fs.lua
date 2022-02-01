@@ -2,14 +2,15 @@
 
 	$ | filesystem ops
 
-	indir(dir, file)
+	indir(dir, ...)
 	exists(file)
 	checkexists(file)
 	chdir(dir)
 	rm(path)
 	mv(old_path, new_path)
 	mkdir(path)
-	load(path, default)
+	load(path, [default])
+	reload(path, [default])
 	save(path, s, [mode])
 	cp(src_file, dst_file)
 	touch(file, mtime, btime, silent)
@@ -30,8 +31,9 @@ path = require'path'
 proc = require'proc'
 
 --make a path by combining dir and file.
-function indir(dir, file)
-	return check('fs', 'indir', path.combine(dir, file))
+function indir(dir, file, ...)
+	if not file then return dir end
+	return check('fs', 'indir', indir(path.combine(dir, file), ...))
 end
 
 function exists(file)
@@ -74,6 +76,24 @@ end
 function load(path, default) --load a file into a string.
 	if default ~= nil and not exists(path) then return default end
 	return check('fs', 'load', readfile(path))
+end
+
+local load_cache = {} --{path -> {mtime, contents}}
+function reload(path, default)
+	local mt, err = mtime(path)
+	if not mt and err == 'not_found' then
+		load_cache[path] = nil
+	end
+	if mt then
+		local t = load_cache[path]
+		if t and t[1] >= mt then
+			return t[2]
+		end
+	end
+	local s = load(path, default)
+	local t = attr(load_cache, path)
+	t[1], t[2] = mt, s
+	return s
 end
 
 function save(path, s, mode) --save a string or a Lua value to a file.
