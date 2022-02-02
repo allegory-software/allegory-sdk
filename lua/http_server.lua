@@ -199,6 +199,8 @@ function server:new(t)
 
 	self.sockets = {}
 
+	assert(self.listen and #self.listen > 0, 'listen option is missing or empty')
+
 	for i,t in ipairs(self.listen) do
 		if t.addr == false then
 			goto continue
