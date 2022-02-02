@@ -107,7 +107,6 @@ function lincmd.start()
 		C.umask(0)
 		local sid = C.setsid()
 		assert(sid >= 0)
-		chdir'/'
 		C.close(0)
 		C.close(1)
 		C.close(2)
@@ -129,6 +128,7 @@ function lincmd.stop()
 	end
 	say'OK.'
 	rm(pidfile())
+	return 0
 end
 
 function lincmd.restart()
