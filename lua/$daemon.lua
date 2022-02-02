@@ -1,24 +1,26 @@
---[[
+	--[[
 
 	Scaffold/boilerplate for writing server apps.
 	Written by Cosmin Apreutesei. Public Domain.
 
 	daemon(app_name) -> app
 
-	app_name     app codename (the name of your main Lua module).
-	APP_conf.lua optional app config file loaded by the daemon() call.
-		deploy    app deployment name.
-		env       app environment ('dev').
-		log_host  log server host.
-		log_port  log server port.
-	app_dir      app directory.
-	bin_dir      app bin directory.
-	var_dir      r/w persistent data dir (app_dir).
-	tmp_dir      r/w persistent temp dir (app_dir/tmp/app_name).
-	cmd          {name->f} place to add command-line handlers.
-	wincmd       add Windows-only commands here.
-	lincmd       add Linux-only commands here.
-	help         {cmd->s} help line for command.
+	app_name       app codename (the name of your main Lua module).
+	APP_conf.lua   optional app config file loaded by the daemon() call.
+		deploy      app deployment name.
+		env         app environment ('dev').
+		log_host    log server host.
+		log_port    log server port.
+	app_dir        app directory.
+	bin_dir        app bin directory.
+	var_dir        r/w persistent data dir.
+	tmp_dir        r/w persistent temp dir.
+	www_dir        app www directory.
+	libwww_dir     shared www directory.
+	cmd            {name->f} place to add command-line handlers.
+	wincmd         add Windows-only commands here.
+	lincmd         add Linux-only commands here.
+	help           {cmd->s} help line for command.
 
 	say(s)
 	sayn(s)
@@ -29,26 +31,121 @@
 require'$fs'
 require'$log'
 
-function say(s)
-	io.stderr:write(s..'\n')
+local app = {}
+cmd = {}
+wincmd = setmetatable({}, {__index = cmd})
+lincmd = setmetatable({}, {__index = cmd})
+help = {}
+
+--tools ----------------------------------------------------------------------
+
+function say(fmt, ...)
+	io.stderr:write((fmt and fmt:format(...) or '')..'\n')
 	io.stderr:flush()
 end
 
-function sayn(s)
-	io.stderr:write(s)
+function sayn(fmt, ...)
+	io.stderr:write((fmt and fmt:format(...) or ''))
 end
 
-function die(s)
-	say('ABORT: '..s)
+function die(fmt, ...)
+	say(fmt and ('ABORT: '..fmt):format(...) or 'ABORT')
 	os.exit(1)
+end
+
+--daemonize (Linux only) -----------------------------------------------------
+
+ffi.cdef[[
+int setsid(void);
+int fork(void);
+unsigned int umask(unsigned int mask);
+int close(int fd);
+]]
+
+local function pidfile()
+	return indir(var_dir, app_name..'.pid')
+end
+
+local function findpid(pid, cmd)
+	local s = readfile(_('/proc/%s/cmdline', pid))
+	return s and s:find(cmd, 1, true) and true or false
+end
+
+local function running()
+	local pid = tonumber((readfile(pidfile())))
+	if not pid then return false end
+	return findpid(pid, arg[0]), pid
+end
+
+function lincmd.running()
+	return running() and 0 or 1
+end
+
+function lincmd.status()
+	local is_running, pid = running()
+	if is_running then
+		say('Running. PID: %d', pid)
+	else
+		say 'Not running.'
+	end
+end
+
+function lincmd.start()
+	local is_running, pid = running()
+	if is_running then
+		say('Already running. PID: %d', pid)
+		return 1
+	elseif pid then
+		say'Stale pid file found.'
+	end
+	local pid = C.fork()
+	assert(pid >= 0)
+	if pid > 0 then --parent process
+		save(pidfile(), tostring(pid))
+		say('Started. PID: %d', pid)
+	else --child process
+		C.umask(0)
+		local sid = C.setsid()
+		assert(sid >= 0)
+		chdir'/'
+		C.close(0)
+		C.close(1)
+		C.close(2)
+		lincmd.run()
+	end
+end
+
+function lincmd.stop()
+	local is_running, pid = running()
+	if not is_running then
+		say'Not running.'
+		return 1
+	end
+	say('Killing PID %d...', pid)
+	exec('kill %d', pid)
+	if running() then
+		say'Failed.'
+		return 1
+	end
+	say'OK.'
+	rm(pidfile())
+end
+
+function lincmd.restart()
+	if lincmd.stop() == 0 then
+		lincmd.start()
+	end
+end
+
+function cmd.tail()
+	local logfile = indir(var_dir, app_name..'.log')
+	exec('tail -f %s', logfile)
 end
 
 --init -----------------------------------------------------------------------
 
-using_mgit = false
-
 --for strict mode...
-app_name, cmd, wincmd, lincmd, help = nil
+app_name = app_name
 app_dir = app_dir
 bin_dir = bin_dir
 var_dir = var_dir
@@ -59,12 +156,6 @@ libwww_dir = libwww_dir
 function daemon(app_name)
 
 	_G.app_name = assert(app_name)
-
-	local app = {}
-	cmd = {}
-	wincmd = {}
-	lincmd = {}
-	help = {}
 
 	--consider this module loaded so that other app submodules that
 	--require it at runtime don't try to load it again.
@@ -165,11 +256,9 @@ function daemon(app_name)
 				env('VERBOSE', 1) --propagate verbosity to sub-processes.
 			else
 				if s == '--help' then s = 'help' end
-				local c = s and s:gsub('-', '_')
-				f = c and cmd[c]
-					or (Windows and wincmd[c])
-					or (Linux   and lincmd[c])
-					or cmd.help
+				local c = s and s:gsub('-', '_') or 'help'
+				f = (Windows and wincmd[c])
+					or (Linux and lincmd[c])
 				break
 			end
 		end
