@@ -121,7 +121,7 @@ function lincmd.stop()
 		say'Not running.'
 		return 1
 	end
-	say('Killing PID %d...', pid)
+	sayn('Killing PID %d...', pid)
 	exec('kill %d', pid)
 	if running() then
 		say'Failed.'
