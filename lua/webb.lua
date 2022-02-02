@@ -1048,7 +1048,7 @@ function wwwpath(file, type)
 	if fs.is(abs_path, type) then return abs_path end
 	--look into the "lib" www dir
 	local abs_path = libwwwdir() and indir(libwwwdir(), file)
-	if fs.is(abs_path, type) then return abs_path end
+	if abs_path and fs.is(abs_path, type) then return abs_path end
 	return nil, file..' not found'
 end
 
@@ -1650,6 +1650,7 @@ function webb.server(opt)
 end
 
 if not ... then
+
 	--because we're gonna load `webb_action` which loads back `webb`.
 	package.loaded.webb = true
 
