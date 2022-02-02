@@ -181,8 +181,8 @@ end
 function exec(fmt, ...) --exec/wait program without redirecting its stdout/stderr.
 	local cmd = fmt:format(...)
 	note('fs', 'exec', '%s', cmd)
-	local ok, err = os.execute(cmd)
-	return check('fs', 'exec', ok, 'could not exec `%s`: %s', cmd, err)
+	local exitcode, err = os.execute(cmd)
+	return check('fs', 'exec', exitcode, 'could not exec `%s`: %s', cmd, err)
 end
 
 function readpipe(fmt, ...) --exec/wait program and get its stdout into a string.
