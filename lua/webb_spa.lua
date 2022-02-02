@@ -16,6 +16,7 @@ API
 	fontfile(file)                      add one or more font files to the preload list
 	css(s)                              add css code to inline.css
 	js(s)                               add js code to inline.js
+	html(s)                             add inline html code to the SPA body
 
 	page_title([title], [body]) -> s    set/infer page title
 
