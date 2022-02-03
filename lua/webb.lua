@@ -49,9 +49,11 @@ THREADING
 
 	newthread(f) -> thread                  create thread
 	thread(f, ...) -> thread                create and resume thread
+	currentthread() -> thread               get currently running thread
 	resume(thread, ...) -> ...              resume thread
 	suspend() -> ...                        suspend thread
 	transfer(thread, ...) -> ...            transfer to thread
+	threadenv[thread]                       thread environment table
 	onthreadfinish(thread, f)               add a thread finalizer
 
 ITERATORS
@@ -164,12 +166,6 @@ FILESYSTEM
 	varfile[_cached](file[,parse]) -> s     get var file contents
 
 	readfile[_cached](file[,parse]) -> s    (cached) readfile for small static files
-	fileext(s) -> s                         get file extension (in lowercase)
-	mkdirs(file) -> file | nil              make dirs for file path
-	fileexists(file, [type]) -> file | nil  check if file exists
-	filemtime(file, [type]) -> mtime        get file mtime
-	filename(filepath) -> file              get file name from full path
-	filedir(filepath) -> dir                get dir name from full path
 
 MUSTACHE TEMPLATES
 
@@ -259,21 +255,6 @@ errors.errortype'http_response'.__tostring = function(self)
 	return s
 end
 
-function readfile(file, parse)
-	parse = parse or glue.pass
-	local s, err = glue.readfile(file)
-	if not s then return nil, err end
-	return parse(s)
-end
-
-function writefile(file, s, mode)
-	webb.note('fs', 'writefile', '%s (%s %s)', file,
-		mode or 'w', type(s) == 'string' and #s..' bytes' or type(s))
-	local ok, err = glue.writefile(file, s, mode)
-	if ok then return ok end
-	webb.logerror('fs', 'writefile', 'failed writing file %s: %s', file, err)
-end
-
 --threads and webb context switching -----------------------------------------
 
 --request context for current thread.
@@ -293,18 +274,20 @@ local cx do
 	end
 end
 
-threadenv      = sock.threadenv
+--from $sock
 
---from $sock.lua
+threadenv      = sock.threadenv
 newthread      = sock.newthread
 thread         = sock.thread
+currentthread  = sock.currentthread
 resume         = sock.resume
 suspend        = sock.suspend
 transfer       = sock.transfer
+onthreadfinish = sock.onthreadfinish
+
 cowrap         = sock.cowrap
 yield          = sock.yield
-currentthread  = sock.currentthread
-onthreadfinish = sock.onthreadfinish
+
 sleep_until    = sock.sleep_until
 sleep          = sock.sleep
 sleep_job      = sock.sleep_job
@@ -995,11 +978,26 @@ end
 
 --filesystem API -------------------------------------------------------------
 
+function readfile(file, parse)
+	parse = parse or glue.pass
+	local s, err = glue.readfile(file)
+	if not s then return nil, err end
+	return parse(s)
+end
+
+function writefile(file, s, mode)
+	webb.note('fs', 'writefile', '%s (%s %s)', file,
+		mode or 'w', type(s) == 'string' and #s..' bytes' or type(s))
+	local ok, err = glue.writefile(file, s, mode)
+	if ok then return ok end
+	webb.logerror('fs', 'writefile', 'failed writing file %s: %s', file, err)
+end
+
 do
 local cache = {} --{file -> {mtime=, contents=}}
 function readfile_cached(file, parse)
 	local cached = cache[file]
-	local mtime = filemtime(file)
+	local mtime = fs.attr(file, 'mtime')
 	if not mtime then --file was removed
 		cache[file] = nil
 		return nil, 'not_found'
@@ -1013,10 +1011,6 @@ function readfile_cached(file, parse)
 	end
 	return s
 end
-end
-
-function fileext(s)
-	return path.ext(s)
 end
 
 --make a path by combining dir and file.
@@ -1109,28 +1103,10 @@ end
 function outwwwfile(file) outfile(wwwpath(file)) end
 function outwwwfile_cached(file) outfile_cached(wwwpath(file)) end
 
-function mkdirs(file)
+local function mkdirs(file)
 	local dir = assert(path.dir(file))
-	if path.dir(dir) then --because mkdir'c:/' gives access denied.
-		assert(fs.mkdir(dir, true))
-	end
+	assert(fs.mkdir(dir, true))
 	return file
-end
-
-function fileexists(file, type)
-	return fs.is(file, type)
-end
-
-function filemtime(file, type)
-	return fs.attr(file, 'mtime')
-end
-
-function filename(file)
-	return path.file(file)
-end
-
-function filedir(file)
-	return path.dir(file)
 end
 
 --mustache html templates ----------------------------------------------------
@@ -1437,7 +1413,7 @@ function resize_image(src_path, dst_path, max_w, max_h)
 
 		--decode.
 		local bmp
-		local src_ext = fileext(src_path)
+		local src_ext = path.ext(src_path)
 		if src_ext == 'jpg' or src_ext == 'jpeg' then
 			local libjpeg = require'libjpeg'
 			local f = assert(fs.open(src_path, 'r'), 'not_found')
@@ -1460,7 +1436,7 @@ function resize_image(src_path, dst_path, max_w, max_h)
 		local w, h = box2d.fit(bmp.w, bmp.h, max_w, max_h)
 		if w < bmp.w or h < bmp.h then
 
-			webb.note('webb', 'resize', '%s %d,%d -> %d,%d %d%%', filename(src_path),
+			webb.note('webb', 'resize', '%s %d,%d -> %d,%d %d%%', path.file(src_path),
 				bmp.w, bmp.h, w, h, w / bmp.w * 100)
 
 			if use_cairo then
@@ -1494,7 +1470,7 @@ function resize_image(src_path, dst_path, max_w, max_h)
 		end
 
 		--encode back.
-		local dst_ext = fileext(dst_path)
+		local dst_ext = path.ext(dst_path)
 		if dst_ext == 'jpg' or dst_ext == 'jpeg' then
 			local libjpeg = require'libjpeg'
 			local tmp_path = dst_path..'.tmp'
@@ -1658,3 +1634,5 @@ if not ... then
 	webb.request('')
 
 end
+
+return webb

@@ -23,8 +23,8 @@
 	path.sep(s, [pl], [sep], ...) -> s                  detect/set the path separator
 	path.long(s, [pl], [long]) -> s|nil                 get/set a Windows long absolute path
 	path.file(s, [pl]) -> s                             get the last component of a path
-	path.nameext(s, [pl]) -> name, ext                  split `path.file()` into name and extension
-	path.ext(s, [pl]) -> s                              return only the extension from `path.nameext()`
+	path.nameext(s, [pl]) -> name, ext                  split `path.file(s)` into name and extension
+	path.ext(s, [pl]) -> s                              return only the extension from `path.nameext(s)`
 	path.dir(s, [pl]) -> s|nil                          get the path without the last component
 	path.gsplit(s, [pl], [full]) ->iter() -> s, sep     iterate over path's components
 	path.normalize(s, [pl], [opt]) -> s                 normalize a path in various ways

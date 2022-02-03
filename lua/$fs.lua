@@ -2,15 +2,20 @@
 
 	$ | filesystem ops
 
-	indir(dir, ...)
-	exists(file)
+	indir(dir, ...) -> path
+	filedir(file) -> dir
+	filename(file) -> name
+	filenameext(file) -> name, ext
+	fileext(file) -> ext
+	exists(file) -> t|f
 	checkexists(file)
 	chdir(dir)
 	rm(path)
 	mv(old_path, new_path)
-	mkdir(path)
-	load(path, [default])
+	mkdir(dir) -> dir
+	mkdirs(file) -> file
 	reload(path, [default])
+	load(path, [default])
 	save(path, s, [mode])
 	cp(src_file, dst_file)
 	touch(file, mtime, btime, silent)
@@ -35,6 +40,11 @@ function indir(dir, file, ...)
 	if not file then return dir end
 	return check('fs', 'indir', indir(path.combine(dir, file), ...))
 end
+
+function filedir(file) return path.dir(file) end
+function filename(file) return path.file(file) end
+function filenameext(file) return path.nameext(file) end
+function fileext(file) return path.ext(file) end
 
 function exists(file)
 	local is, err = fs.is(file)
@@ -63,23 +73,37 @@ function mv(old_path, new_path)
 	check('fs', 'mv', ok, 'could not move file %s -> %s: %s', old_path, new_path, err)
 end
 
-function mkdir(path)
-	local ok, err = fs.mkdir(path, true)
-	if ok and err ~= 'already_exists' then
-		note('fs', 'mkdir', '%s', path)
+function mkdir(dir)
+	if path.dir(dir) then --because mkdir'c:/' gives access denied.
+		local ok, err = fs.mkdir(dir, true)
+		if ok and err ~= 'already_exists' then
+			note('fs', 'mkdir', '%s', dir)
+		end
+		check('fs', 'mkdir', ok, 'could not create dir %s: %s', dir, err)
 	end
-	check('fs', 'mkdir', ok, 'could not create dir %s: %s', path, err)
-	return path
+	return dir
 end
 
---NOTE: shamelessly changing built-in load() that we never use.
-function load(path, default) --load a file into a string.
+function mkdirs(file)
+	mkdir(assert(path.dir(file)))
+	return file
+end
+
+function readfile(file, parse)
+	parse = parse or glue.pass
+	local s, err = glue.readfile(file)
+	if not s then return nil, err end
+	return parse(s)
+end
+
+function reload(path, default) --load a file into a string.
 	if default ~= nil and not exists(path) then return default end
 	return check('fs', 'load', readfile(path))
 end
 
+--NOTE: shamelessly changing built-in load() that we never use.
 local load_cache = {} --{path -> {mtime, contents}}
-function reload(path, default)
+function load(path, default)
 	local mt, err = mtime(path)
 	if not mt and err == 'not_found' then
 		load_cache[path] = nil

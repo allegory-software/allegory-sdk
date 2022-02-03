@@ -7,6 +7,7 @@
 require'$'
 sock = require'sock'
 
+threadenv      = sock.threadenv
 newthread      = sock.newthread
 thread         = sock.thread
 resume         = sock.resume

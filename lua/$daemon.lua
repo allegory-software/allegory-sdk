@@ -17,7 +17,7 @@
 	tmp_dir        r/w persistent temp dir.
 	www_dir        app www directory.
 	libwww_dir     shared www directory.
-	cmd            {name->f} place to add command-line handlers.
+	cmd            {name->f} add command-line handlers here.
 	wincmd         add Windows-only commands here.
 	lincmd         add Linux-only commands here.
 	help           {cmd->s} help line for command.
