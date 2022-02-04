@@ -17,41 +17,14 @@
 	tmp_dir        r/w persistent temp dir.
 	www_dir        app www directory.
 	libwww_dir     shared www directory.
-	cmd            {name->f} add command-line handlers here.
-	wincmd         add Windows-only commands here.
-	lincmd         add Linux-only commands here.
-	help           {cmd->s} help line for command.
-
-	say(s)
-	sayn(s)
-	die(s)
 
 ]]
 
 require'$fs'
 require'$log'
+require'$cmd'
 
 local app = {}
-cmd = {}
-wincmd = setmetatable({}, {__index = cmd})
-lincmd = setmetatable({}, {__index = cmd})
-help = {}
-
---tools ----------------------------------------------------------------------
-
-function say(fmt, ...)
-	io.stderr:write((fmt and fmt:format(...) or '')..'\n')
-	io.stderr:flush()
-end
-
-function sayn(fmt, ...)
-	io.stderr:write((fmt and fmt:format(...) or ''))
-end
-
-function die(fmt, ...)
-	say(fmt and ('ABORT: '..fmt):format(...) or 'ABORT')
-	os.exit(1)
-end
 
 --daemonize (Linux only) -----------------------------------------------------
 
@@ -80,6 +53,7 @@ end
 function lincmd.running()
 	return running() and 0 or 1
 end
+cmdhelp.running = 'Check if the server is running'
 
 function lincmd.status()
 	local is_running, pid = running()
@@ -89,6 +63,7 @@ function lincmd.status()
 		say 'Not running.'
 	end
 end
+cmdhelp.status = 'Server status'
 
 function lincmd.start()
 	local is_running, pid = running()
@@ -113,6 +88,7 @@ function lincmd.start()
 		lincmd.run()
 	end
 end
+cmdhelp.start = 'Start the server'
 
 function lincmd.stop()
 	local is_running, pid = running()
@@ -130,17 +106,20 @@ function lincmd.stop()
 	rm(pidfile())
 	return 0
 end
+cmdhelp.stop = 'Stop the server'
 
 function lincmd.restart()
 	if lincmd.stop() == 0 then
 		lincmd.start()
 	end
 end
+cmdhelp.restart = 'Restart the server'
 
 function cmd.tail()
 	local logfile = indir(var_dir, app_name..'.log')
 	exec('tail -f %s', logfile)
 end
+cmdhelp.tail = 'tail -f the log file'
 
 --init -----------------------------------------------------------------------
 
@@ -187,30 +166,6 @@ function daemon(app_name)
 		update(app.conf, opt)
 	end
 
-	local wrapped = {help=1, start=1}
-	function cmd.help(extra)
-		if extra then
-			for k,v in sortedpairs(cmd) do
-				if not wrapped[k] then
-					say(fmt('   %-33s %s', k:gsub('_', '-'), help[k] or ''))
-				end
-			end
-			return
-		end
-		say''
-		say(' USAGE: '..app_name..' [OPTIONS] COMMAND ...')
-		say''
-		for k,v in sortedpairs(cmd) do
-			print(fmt('   %-33s %s', k:gsub('_', '-'), help[k] or ''))
-		end
-		say''
-		say' OPTIONS:'
-		say''
-		say'   -v       verbose'
-		say'   --debug  debug'
-		say''
-	end
-
 	function app:run_cmd(f, ...) --stub
 		local exit_code = f(...)
 		self:finish()
@@ -241,31 +196,7 @@ function daemon(app_name)
 		logging.env     = app.conf.env
 		logging.verbose = app_name
 
-		local i = 1
-		local f
-		while true do
-			local s = select(i, ...)
-			i = i + 1
-			if s == '-v' then
-				logging.verbose = true
-				env('VERBOSE', 1) --propagate verbosity to sub-processes.
-			elseif s == '--debug' then
-				logging.verbose = true
-				logging.debug = true
-				env('DEBUG', 1) --propagate debug to sub-processes.
-				env('VERBOSE', 1) --propagate verbosity to sub-processes.
-			else
-				if s == '--help' then s = 'help' end
-				local c = s and s:gsub('-', '_') or 'help'
-				f = (Windows and wincmd[c])
-					or (Linux and lincmd[c])
-				break
-			end
-		end
-
-		--inherit debug and verbosity from parent process.
-		if repl(env'DEBUG'  , '', nil) then logging.debug   = true end
-		if repl(env'VERBOSE', '', nil) then logging.verbose = true end
+		local f, i = cmdhandle(...)
 
 		local logfile = indir(var_dir, app_name..'.log')
 		logging:tofile(logfile)
