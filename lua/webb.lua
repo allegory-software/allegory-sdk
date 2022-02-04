@@ -1473,8 +1473,11 @@ function resize_image(src_path, dst_path, max_w, max_h)
 		local dst_ext = path.ext(dst_path)
 		if dst_ext == 'jpg' or dst_ext == 'jpeg' then
 			local libjpeg = require'libjpeg'
+			mkdirs(dst_path)
+
+			--local saver = save(dst_path, yield)
+
 			local tmp_path = dst_path..'.tmp'
-			mkdirs(tmp_path)
 			local f = assert(fs.open(tmp_path, 'w'))
 			finally(function() if f then f:close() end end)
 			local function write(buf, sz)
@@ -1487,11 +1490,12 @@ function resize_image(src_path, dst_path, max_w, max_h)
 			})
 			f:close()
 			f = nil
-			local ok, err = glue.replacefile(tmp_path, dst_path)
+			local ok, err = fs.move(tmp_path, dst_path)
 			if not ok then
 				os.remove(tmp_path)
-				assertf(false, 'glue.replacefile(%s, %s): %s', tmp_path, dst_path, err)
+				assertf(false, 'fs.move(%s, %s): %s', tmp_path, dst_path, err)
 			end
+
 		else
 			assert(false)
 		end
