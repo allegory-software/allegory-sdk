@@ -20,7 +20,7 @@ PREPROCESSOR
 EXECUTION
 
 	db([ns]) -> db                                 get a sqlpp connection
-	create_db([ns])                                create database
+	[db:]create_db([ns])                           create database
 	[db:]query([opt,]sql, ...) -> rows             query and return rows in a table
 	[db:]first_row([opt,]sql, ...) -> t            query and return first row or value
 	[db:]each_row([opt,]sql, ...) -> iter          query and iterate rows
@@ -164,9 +164,9 @@ for method, name in pairs{
 	--query execution
 	query=1, first_row=1, each_row=1, each_row_vals=1, each_group=1,
 	atomic=1,
+	--schema reflection
+	dbs=1, db_exists=1, table_def=1,
 	--ddl
-	db_exists=1,
-	table_def=1,
 	drop_table=1, drop_tables=1, table_exists=1,
 	add_column=1, rename_column=1, drop_column=1,
 	add_check=1, readd_check=1, drop_check=1,
