@@ -35,6 +35,7 @@ isnum  = glue.isnum
 isint  = glue.isint
 istab  = glue.istab
 isfunc = glue.isfunc
+iscdata = glue.iscdata
 
 floor       = math.floor
 ceil        = math.ceil
@@ -177,10 +178,8 @@ timeago = glue.timeago
 
 kbytes = glue.kbytes
 
-canopen     = glue.canopen
 readfile    = glue.readfile
 writefile   = glue.writefile
-replacefile = glue.replacefile
 readpipe    = glue.readpipe
 
 fpcall = glue.fpcall
