@@ -15,8 +15,9 @@
 	mkdir(dir) -> dir
 	mkdirs(file) -> file
 	reload(path, [default])
-	load(path, [default])
-	save(path, s, [mode])
+	[try]load(path, [default])
+	[try]save(path, s[, sz])
+	saver(path) -> write(s[, sz]) -> ok, err
 	cp(src_file, dst_file)
 	touch(file, mtime, btime, silent)
 	chmod(file, perms)
@@ -114,17 +115,77 @@ function load(path, default)
 			return t[2]
 		end
 	end
-	local s = load(path, default)
+	local s = reload(path, default)
 	local t = attr(load_cache, path)
 	t[1], t[2] = mt, s
 	return s
 end
 
-function save(path, s, mode) --save a string or a Lua value to a file.
-	note('fs', 'save', '%s (%s %s)', path,
-		mode or 'w', isstr(s) and #s..' bytes' or type(s))
-	local ok, err = glue.writefile(path, s, mode)
-	check('fs', 'save', ok, 'could not save file %s: %s', path, err)
+--write a Lua value, array of strings or function results to a file atomically.
+function trysave(file, s, sz)
+
+	local s = (istab(s) or isfunc(s) or iscdata(s)) and s or (s ~= nil and tostring(s)) or ''
+	note('fs', 'save', '%s (%s)', file, iscdata(s) and kbytes(sz)
+		or isstr(s) and kbytes(s) or '#'..type(s))
+
+	local tmpfile = file..'.tmp'
+	local f, err = fs.open(tmpfile, 'w')
+	if not f then
+		return false, _('could not open file %s: %s', tmpfile, err)
+	end
+
+	local ok, err = true
+	if istab(s) then
+		for i = 1, #s do
+			ok, err = f:write(s[i])
+			if not ok then break end
+		end
+	elseif isfunc(s) then
+		local read = s
+		while true do
+			ok, err, sz = xpcall(read, debug.traceback)
+			if not ok or err == nil then break end
+			ok, err = f:write(err, sz)
+			if not ok then break end
+		end
+	elseif s ~= '' then --cdata or stringable Lua value
+		ok, err = f:write(s, sz)
+	end
+	f:close()
+
+	if not ok then
+		local err_msg = 'could not write to file %s: %s'
+		local ok, rm_err = fs.remove(tmpfile)
+		if not ok then
+			err_msg = err_msg..'\nremoving it also failed: %s'
+		end
+		return false, _(err_msg, tmpfile, err, rm_err)
+	end
+
+	local ok, err = fs.move(tmpfile, file)
+	if not ok then
+		local err_msg = 'could not move file %s -> %s: %s'
+		local ok, rm_err = fs.remove(tmpfile)
+		if not ok then
+			err_msg = err_msg..'\nremoving it also failed: %s'
+		end
+		return false, _(err_msg, tmpfile, file, err, rm_err)
+	end
+
+	return true
+end
+
+function saver(file)
+	local write = coroutine.wrap(function()
+		return trysave(file, coroutine.yield)
+	end)
+	local ok, err = write()
+	if not ok then return false, err end
+	return write
+end
+
+function save(file, s)
+	check('fs', 'save', trysave(file, s))
 end
 
 function cp(src_file, dst_file)
