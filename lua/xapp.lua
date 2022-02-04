@@ -107,10 +107,10 @@ return function(app)
 
 	--cmdline -----------------------------------------------------------------
 
-	function cmd.run()
+	cmd_server('run', 'Run server in foreground', function()
 		local server = webb.server(app.server_options)
 		server.start()
-	end
+	end)
 
 	function app:run_cmd(f, ...)
 		return webb.run(function(...)

@@ -28,6 +28,8 @@ local app = {}
 
 --daemonize (Linux only) -----------------------------------------------------
 
+cmd_server = cmdsection'SERVER CONTROL'
+
 ffi.cdef[[
 int setsid(void);
 int fork(void);
@@ -50,22 +52,20 @@ local function running()
 	return findpid(pid, arg[0]), pid
 end
 
-function lincmd.running()
+cmd_server(Linux, 'running', 'Check if the server is running', function()
 	return running() and 0 or 1
-end
-cmdhelp.running = 'Check if the server is running'
+end)
 
-function lincmd.status()
+cmd_server(Linux, 'status', 'Show server status', function()
 	local is_running, pid = running()
 	if is_running then
 		say('Running. PID: %d', pid)
 	else
 		say 'Not running.'
 	end
-end
-cmdhelp.status = 'Server status'
+end)
 
-function lincmd.start()
+cmd_server(Linux, 'start', 'Start the server', function()
 	local is_running, pid = running()
 	if is_running then
 		say('Already running. PID: %d', pid)
@@ -85,12 +85,11 @@ function lincmd.start()
 		C.close(0)
 		C.close(1)
 		C.close(2)
-		lincmd.run()
+		cmdhandle('run')()
 	end
-end
-cmdhelp.start = 'Start the server'
+end)
 
-function lincmd.stop()
+cmd_server(Linux, 'stop', 'Stop the server', function()
 	local is_running, pid = running()
 	if not is_running then
 		say'Not running.'
@@ -105,21 +104,18 @@ function lincmd.stop()
 	say'OK.'
 	rm(pidfile())
 	return 0
-end
-cmdhelp.stop = 'Stop the server'
+end)
 
-function lincmd.restart()
+cmd_server('restart', 'Restart the server', function()
 	if lincmd.stop() == 0 then
 		lincmd.start()
 	end
-end
-cmdhelp.restart = 'Restart the server'
+end)
 
-function cmd.tail()
+cmd_server('tail', 'tail -f the log file', function()
 	local logfile = indir(var_dir, app_name..'.log')
 	exec('tail -f %s', logfile)
-end
-cmdhelp.tail = 'tail -f the log file'
+end)
 
 --init -----------------------------------------------------------------------
 
