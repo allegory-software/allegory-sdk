@@ -12,6 +12,7 @@ TYPE CHECKING
 	glue.isint                                      is integer (includes 1/0 and -1/0)
 	glue.istab                                      is table
 	glue.isfunc                                     is function
+	glue.iscdata                                    is cdata
 MATH
 	glue.round(x[, p]) -> y                         round x to nearest integer or multiple of p (half up)
 	glue.snap(x[, p]) -> y                          synonym for glue.round
@@ -87,7 +88,7 @@ OBJECTS
 	glue.gettersandsetters([getters], [setters], [super]) -> mt  create a metatable that supports virtual properties
 OS
 	glue.win                                        true if platform is Windows
-FILE & PIPE I/O
+FILE & PIPE I/O (DEPRECATED)
 	glue.canopen(filename[, mode]) -> filename | nil            check if a file exists and can be opened
 	glue.readfile(filename[, format][, open]) -> s | nil, err   read the contents of a file into a string
 	glue.readpipe(cmd[,format][, open]) -> s | nil, err         read the output of a command into a string
@@ -159,6 +160,7 @@ glue.isnum  = function(x) return type(x) == 'number' end
 glue.isint  = function(x) return type(x) == 'number' and floor(x) == x end
 glue.istab  = function(x) return type(x) == 'table'  end
 glue.isfunc = function(f) return type(f) == 'function' end
+glue.iscdata = function(f) return type(f) == 'cdata' end
 
 --math -----------------------------------------------------------------------
 
