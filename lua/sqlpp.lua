@@ -1480,7 +1480,7 @@ function sqlpp.new(init)
 			end
 			for _,sql in ipairs(sqls) do
 				if opt.dry then
-					print(sql)
+					print(sql..';')
 				else
 					self:query(qopt, sql)
 				end
