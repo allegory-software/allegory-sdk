@@ -1194,6 +1194,7 @@ glue.win = package.config:sub(1,1) == '\\'
 --i/o ------------------------------------------------------------------------
 
 --check if a file exists and can be opened for reading or writing.
+--DEPRECATED in favor of fs.is(name, 'file') where available.
 function glue.canopen(name, mode)
 	local f = io.open(name, mode or (glue.win and 'rb' or 'r'))
 	if f then f:close() end
@@ -1222,6 +1223,7 @@ the old file atomically. The operation can still fail under many circumstances
 like if `newpath` is a directory or if the files are in different filesystems
 or if `oldpath` is missing or locked, etc. For consistent behavior across OSes,
 both paths should be either absolute paths or simple filenames without a path.
+DEPRECATED in favor of fs.move() where available.
 ]]
 if jit then
 
@@ -1272,6 +1274,7 @@ end
 --write a string, number, array of strings or function results to a file.
 --uses binary mode by default. atomic by default by writing to a temp file.
 --`format` can be 't' (text mode - Windows) or 'a' or 'at' for appending.
+--DEPRECATED in favor of fs.save() where available.
 function glue.writefile(filename, s, mode, tmpfile)
 	local append = mode == 'a' or mode == 'at'
 	if tmpfile == nil and not append then
