@@ -380,7 +380,7 @@ function rmdir(path)
 end
 
 function chdir(path)
-	fs.initial_cwd()
+	fs.startcwd()
 	return check(C.chdir(path) == 0)
 end
 
@@ -399,7 +399,7 @@ function getcwd()
 		return ffi.string(buf)
 	end
 end
-fs.initial_cwd = memoize(getcwd)
+fs.startcwd = memoize(getcwd)
 
 function rmfile(path)
 	return check(C.unlink(path) == 0)

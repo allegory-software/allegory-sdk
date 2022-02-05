@@ -736,7 +736,7 @@ function rmdir(path)
 end
 
 function chdir(path)
-	fs.initial_cwd()
+	fs.startcwd()
 	return checknz(C.SetCurrentDirectoryW(wcs(path)))
 end
 
@@ -748,7 +748,7 @@ function getcwd()
 	if not sz then return nil, err end
 	return mbs(buf, sz)
 end
-fs.initial_cwd = memoize(getcwd)
+fs.startcwd = memoize(getcwd)
 
 function rmfile(path)
 	return checknz(C.DeleteFileW(wcs(path)))

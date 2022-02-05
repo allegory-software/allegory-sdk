@@ -53,9 +53,8 @@ FILE ATTRIBUTES
 	fs.is(path, [type], [deref]) -> t|f           check if file exists or is of a certain type
 FILESYSTEM OPS
 	fs.mkdir(path, [recursive], [perms])          make directory
-	fs.cwd([path]) -> path                        get/set current working directory
-	fs.cd([path]) -> path                         get/set current working directory
-	fs.initial_cwd() -> path                      get the cwd that process started with
+	fs.cd|cwd|chdir([path]) -> path               get/set current working directory
+	fs.startcwd() -> path                         get the cwd that process started with
 	fs.remove(path, [recursive])                  remove file or directory (recursively)
 	fs.move(path, newpath, [opt])                 rename/move file on the same filesystem
 SYMLINKS & HARDLINKS
@@ -395,7 +394,7 @@ fs.mkdir(path, [recursive], [perms])
 	NOTE: In recursive mode, if the directory already exists this function
 	returns `true, 'already_exists'`.
 
-fs.cd([path]) -> path
+fs.cd|cwd|chdir([path]) -> path
 
 	Get/set current directory.
 

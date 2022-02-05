@@ -367,6 +367,7 @@ function fs.cwd(path)
 	end
 end
 fs.cd = fs.cwd
+fs.chdir = fs.cd
 
 --symlinks -------------------------------------------------------------------
 
@@ -406,7 +407,7 @@ fs.exedir = memoize(function()
 end)
 
 fs.scriptdir = memoize(function()
-	local s = path.combine(fs.initial_cwd(), glue.bin)
+	local s = path.combine(fs.startcwd(), glue.bin)
 	return s and path.normalize(s) or glue.bin
 end)
 
