@@ -7,7 +7,8 @@ if not ... then require'fs_test'; return end
 local ffi = require'ffi'
 local bit = require'bit'
 local bor, band, bnot, shl = bit.bor, bit.band, bit.bnot, bit.lshift
-setfenv(1, require'fs_common')
+package.loaded.fs_posix = true --prevent recursive loading from fs module.
+setfenv(1, require'fs'.backend)
 
 local C = ffi.C
 
