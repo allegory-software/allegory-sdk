@@ -146,72 +146,11 @@ function load(path, default)
 	return s
 end
 
---write a Lua value, array of strings or function results to a file atomically.
-function trysave(file, s, sz)
-
-	local s = (istab(s) or isfunc(s) or iscdata(s)) and s or (s ~= nil and tostring(s)) or ''
-	note('fs', 'save', '%s (%s)', file, iscdata(s) and kbytes(sz)
-		or isstr(s) and kbytes(s) or '#'..type(s))
-
-	local tmpfile = file..'.tmp'
-	mkdirs(tmpfile)
-	local f, err = fs.open(tmpfile, 'w')
-	if not f then
-		return false, _('could not open file %s: %s', tmpfile, err)
-	end
-
-	local ok, err = true
-	if istab(s) then
-		for i = 1, #s do
-			ok, err = f:write(s[i])
-			if not ok then break end
-		end
-	elseif isfunc(s) then
-		local read = s
-		while true do
-			ok, err, sz = xpcall(read, debug.traceback)
-			if not ok or err == nil then break end
-			ok, err = f:write(err, sz)
-			if not ok then break end
-		end
-	elseif s ~= '' then --cdata or stringable Lua value
-		ok, err = f:write(s, sz)
-	end
-	f:close()
-
-	if not ok then
-		local err_msg = 'could not write to file %s: %s'
-		local ok, rm_err = fs.remove(tmpfile)
-		if not ok then
-			err_msg = err_msg..'\nremoving it also failed: %s'
-		end
-		return false, _(err_msg, tmpfile, err, rm_err)
-	end
-
-	local ok, err = fs.move(tmpfile, file)
-	if not ok then
-		local err_msg = 'could not move file %s -> %s: %s'
-		local ok, rm_err = fs.remove(tmpfile)
-		if not ok then
-			err_msg = err_msg..'\nremoving it also failed: %s'
-		end
-		return false, _(err_msg, tmpfile, file, err, rm_err)
-	end
-
-	return true
-end
-
-function saver(file)
-	local write = coroutine.wrap(function()
-		return trysave(file, coroutine.yield)
-	end)
-	local ok, err = write()
-	if not ok then return false, err end
-	return write
-end
+trysave = fs.save
+saver = fs.saver
 
 function save(file, s)
-	check('fs', 'save', trysave(file, s))
+	check('fs', 'save', fs.save(file, s))
 end
 
 function cp(src_file, dst_file)
