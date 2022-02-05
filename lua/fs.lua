@@ -1295,6 +1295,8 @@ vfile.buffered_read = file.buffered_read
 
 --hi-level APIs --------------------------------------------------------------
 
+fs.abort = {} --error signal to pass to save()'s reader function.
+
 --write a Lua value, array of values or function results to a file atomically.
 function fs.save(file, s, sz)
 
@@ -1314,20 +1316,29 @@ function fs.save(file, s, sz)
 	end
 
 	local ok, err = true
-	if istab(s) then
+	if type(s) == 'table' then --table of stringables
 		for i = 1, #s do
-			ok, err = f:write(s[i])
+			ok, err = f:write(tostring(s[i]))
 			if not ok then break end
 		end
-	elseif isfunc(s) then
+	elseif type(s) == 'function' then --reader of buffers or stringables
 		local read = s
 		while true do
-			ok, err, sz = xpcall(read, debug.traceback)
-			if not ok or err == nil then break end
-			ok, err = f:write(err, sz)
+			local s, sz
+			ok, s, sz = xpcall(read, debug.traceback)
+			if not ok then err = s; break end
+			if s == nil or s == '' then break end
+			if s == fs.abort then ok = false; break end
+			if type(s) ~= 'cdata' then
+				s = tostring(s)
+			end
+			ok, err = f:write(s, sz)
 			if not ok then break end
 		end
-	elseif s ~= '' then --cdata or stringable Lua value
+	elseif s ~= nil and s ~= '' then --buffer or stringable
+		if type(s) ~= 'cdata' then
+			s = tostring(s)
+		end
 		ok, err = f:write(s, sz)
 	end
 	f:close()
