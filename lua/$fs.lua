@@ -9,7 +9,10 @@
 	fileext(file) -> ext
 	exists(file) -> t|f
 	checkexists(file)
+	startcwd()
+	cwd()
 	chdir(dir)
+	run_indir(dir, fn)
 	rm(path)
 	mv(old_path, new_path)
 	mkdir(dir) -> dir
@@ -57,8 +60,30 @@ function checkexists(file)
 	check('fs', 'exists', exists(file), 'file missing: %s', file)
 end
 
-function chdir(dir)
-	check('fs', 'chdir', 'could not change dir to: %s', dir)
+function startcwd(dir)
+	local cwd, err = fs.startcwd()
+	return check('fs', 'startcwd', cwd, 'startcwd() failed: %s', err)
+end
+function cwd(dir)
+	local cwd, err = fs.cwd()
+	return check('fs', 'cwd', 'cwd', 'could not get current directory: %s', err)
+end
+
+local function chdir(dir)
+	local dir, err = fs.chdir(dir)
+	return check('fs', 'chdir', dir, 'could not set current directory to %s: %s', dir, err)
+end
+_G.chdir = chdir
+
+function run_indir(dir, fn, ...)
+	local cwd = cwd()
+	chdir(dir)
+	local function pass(ok, ...)
+		chdir(cwd)
+		if ok then return ... end
+		error(..., 2)
+	end
+	pass(errors.pcall(fn, ...))
 end
 
 function rm(path)
@@ -129,6 +154,7 @@ function trysave(file, s, sz)
 		or isstr(s) and kbytes(s) or '#'..type(s))
 
 	local tmpfile = file..'.tmp'
+	mkdirs(tmpfile)
 	local f, err = fs.open(tmpfile, 'w')
 	if not f then
 		return false, _('could not open file %s: %s', tmpfile, err)
