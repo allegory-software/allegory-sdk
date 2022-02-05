@@ -7,8 +7,10 @@
 	sayn(s)
 	die(s)
 
-	cmdsection(name) -> section
-	section([active], 'cmd ARGS...', 'help line'[, 'long descr.'], function(...) end)
+	cmdsection(name) -> section                    create a cmdline section
+	section([active, ]cmdargs, help[, descr], fn)  add a command to a section
+	cmd    ([active, ]cmdargs, help[, descr], fn)  add a command to the misc section
+	cmdhandle(...) -> fn, argi                     process cmdline
 
 ]=]
 
@@ -35,40 +37,48 @@ end
 
 local cmds = {}
 
+local function addcmdalias(self, name, cmd, isalias)
+	assertf(not self[name], 'cmdline command already defined: %s', name)
+	if not isalias then
+		rawset(self, #self + 1, cmd)
+	end
+	rawset(self, name, cmd)
+	cmds[name] = cmd.fn
+end
 local function addcmd(self, active, s, helpline, help, fn)
-	if active == false then return end
+	if not active then return end
 	if isstr(active) then --shift active arg
 		active, s, helpline, help, fn = true, active, s, helpline, help
 	end
 	if isfunc(help) or istab(help) then --shift help arg
 		help, fn = nil, help
 	end
-	local name, shortname, cmd, args
 	if istab(fn) then --alias
-		name, cmd = s, fn
+		addcmdalias(self, s, fn)
 	else
 		assertf(isfunc(fn), 'cmdline function missing for %s', s)
-		name, args = s:match'^([^%s]+)(.*)'
+		local name, args = s:match'^([^%s]+)(.*)'
 		name = assert(name, 'cmdline command name missing'):gsub('-', '_'):lower()
-		helpname = name
-		if name:find'%[' then
-			shortname = name:match'^(.-)%['
-			name = name:gsub('[%[%]]', '')
+		local args = repl(args:trim(), '')
+		if not args then
+			args = {}
+			for i = 1, debug.getinfo(fn).nparams do
+				args[i] = debug.getlocal(fn, i):gsub('_', '-'):upper()
+			end
+			if debug.getinfo(fn, 'u').isvararg then
+				add(args, '...')
+			end
+			args = #args > 0 and cat(args, ' ') or nil
 		end
-		assertf(not self[name], 'cmdline command already defined: %s', name)
-		args = repl(args:trim(), '')
-		cmd = {name = helpname, args = args, fn = fn, helpline = helpline, help = help}
+		local cmd = {name = name, args = args, fn = fn, helpline = helpline, help = help}
+		if name:find('|', 1, true) then
+			for i,name in ipairs(names(name, '|')) do
+				addcmdalias(self, name, cmd, i > 1)
+			end
+		else
+			addcmdalias(self, name, cmd)
+		end
 	end
-	rawset(self, #self + 1, cmd)
-	rawset(self, name, cmd)
-	cmds[name] = fn
-	if shortname then
-		rawset(cmds, shortname, fn)
-	end
-end
-
-local function newcmd(self, s, fn)
-	addcmd(self, s, nil, fn)
 end
 
 local cmdsections = {}
@@ -77,7 +87,7 @@ function cmdsection(name)
 	local key = name:upper()
 	local s = cmdsections[key]
 	if not s then
-		s = setmetatable({}, {name = name, __newindex = newcmd, __call = addcmd})
+		s = setmetatable({}, {name = name, __call = addcmd})
 		cmdsections[key] = s
 		add(cmdsections, s)
 	end
@@ -89,16 +99,6 @@ cmd = cmdsection'MISC'
 cmd('help', 'Show this screen', function()
 	local function helpline(cmd)
 		local args = cmd.args
-		if not args then
-			args = {}
-			for i = 1, debug.getinfo(cmd.fn).nparams do
-				args[i] = debug.getlocal(cmd.fn, i):gsub('_', '-'):upper()
-			end
-			if debug.getinfo(cmd.fn, 'u').isvararg then
-				add(args, '...')
-			end
-			args = #args > 0 and cat(args, ' ')
-		end
 		local name = cmd.name:gsub('_', '-')
 		local args = args and ' '..args or ''
 		say(fmt('   %-33s %s', name..args, cmd.helpline or ''))
