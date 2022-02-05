@@ -52,7 +52,7 @@ ARRAYS
 STRINGS
 	glue.gsplit(s,sep[,start[,plain]]) -> iter() -> e[,captures...]   split a string by a pattern
 	glue.split(s,sep[,start[,plain]]) -> {s1,...}   split a string by a pattern
-	glue.names('name1 ...') -> {'name1', ...}       split a string by whitespace
+	glue.names('name1 ...'[, sep]) -> {'name1', ...} split a string by whitespace or a separator
 	glue.capitalize(s) -> s                         capitalize the first letter of every word in string
 	glue.lines(s, [opt], [init]) -> iter() -> s, i, j, k   iterate the lines of a string
 	glue.outdent(s, [indent]) -> s, indent          outdent/reindent text based on first line's indentation
@@ -589,12 +589,12 @@ end
 
 --split a string by whitespace. unlike glue.split(s, '%s+'), it ignores
 --any resulting empty elements; also, non-string args pass through.
-function glue.string.names(s)
+function glue.string.names(s, sep)
 	if type(s) ~= 'string' then
 		return s
 	end
 	local t = {}
-	for s in s:gmatch'[^%s]+' do
+	for s in s:gmatch(sep and '%s*([^'..glue.esc(sep)..']+)%s*' or '[^%s]+') do
 		t[#t+1] = s
 	end
 	return t
@@ -1717,7 +1717,9 @@ glue.bin = dir == '' and '.' or dir
 
 --portable way to get script's name without Lua file extension, based on arg[0].
 --NOTE: for bundled executables, this returns the executable's name.
-glue.scriptname = arg0 and arg0:gsub('%.lua$', ''):match'[^/\\]+$'
+glue.scriptname = arg0
+	and (glue.win and arg0:gsub('%.exe$', '') or arg0)
+		:gsub('%.lua$', ''):match'[^/\\]+$'
 
 --portable way to add more paths to package.path, at any place in the list.
 --negative indices count from the end of the list like string.sub().
