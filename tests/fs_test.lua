@@ -912,7 +912,11 @@ function test.map_file_exec()
 	--TODO: test by exec'ing some code in the memory.
 	local exe = win and '../bin/windows/luajit.exe' or '../bin/linux/luajit'
 	local map = assert(fs.map{file = exe, access = 'x'})
-	assert(ffi.string(map.addr, 2) == 'MZ')
+	if win then
+		assert(ffi.string(map.addr, 2) == 'MZ')
+	else
+		assert(ffi.string(ffi.cast('char*', map.addr)+1, 3) == 'ELF')
+	end
 	map:free()
 end
 
