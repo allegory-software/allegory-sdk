@@ -257,6 +257,7 @@ local assertf = glue.assert
 local memoize = glue.memoize
 local _ = string.format
 local format = string.format
+local indir = function(...) return assert(path.indir(...)) end
 
 _G.glue = glue
 _G.pp = pp
@@ -1027,11 +1028,6 @@ function readfile_cached(file, parse)
 end
 end
 
---make a path by combining dir and file.
-local function indir(dir, file)
-	return assert(path.combine(assert(dir), file))
-end
-
 local function wwwdir()
 	return config'www_dir'
 		or config('www_dir', indir(config'app_dir', 'www'))
@@ -1039,7 +1035,7 @@ end
 
 local function libwwwdir()
 	return config'libwww_dir'
-		or config('libwww_dir', indir(indir(config'app_dir', 'sdk'), 'www'))
+		or config('libwww_dir', indir(config'app_dir', 'sdk', 'www'))
 end
 
 local function vardir()
@@ -1610,8 +1606,19 @@ end
 function webb.server(opt)
 	local server = require'http_server'
 	local host       = config('host', 'localhost')
-	local http_addr  = config('http_addr', '127.0.0.1')
-	local https_addr = config('https_addr', false)
+	local http_addr  = config('http_addr', '*')
+	local https_addr = config('https_addr', '*')
+	local crt_file = config'https_crt_file' or varpath(host..'.crt')
+	local key_file = config'https_key_file' or varpath(host..'.key')
+	if https_addr and host == 'localhost'
+		and not config'https_crt_file'
+		and not config'https_key_file'
+		and not exists(crt_file)
+		and not exists(key_file)
+	then
+		crt_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.crt')
+		key_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.key')
+	end
 	return server:new(update({
 		libs = 'zlib sock '..(config'https_addr' and 'sock_libtls' or ''),
 		listen = {
@@ -1621,8 +1628,8 @@ function webb.server(opt)
 				port = config'https_port',
 				tls = true,
 				tls_options = {
-					cert_file = config('https_cert_file', varpath(host..'.crt')),
-					key_file  = config('https_key_file' , varpath(host..'.key')),
+					cert_file = crt_file,
+					key_file  = key_file,
 				},
 			},
 			{
