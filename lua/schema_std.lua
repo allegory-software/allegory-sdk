@@ -121,6 +121,10 @@ return function()
 	types.ctime     = {datetime, not_null, mysql_default = current_timestamp}
 	types.mtime     = {datetime, not_null, mysql_default = current_timestamp, mysql_on_update = current_timestamp}
 
+	types.ctime.text = function() return S('ctime_text', 'Created At') end
+	types.mtime.text = function() return S('mtime_text', 'Last Modified At') end
+	types.atime.text = function() return S('atime_text', 'Last Accessed At') end
+
 	types.money     = {dec, digits = 15, decimals = 3} -- 999 999 999 999 . 999     (fits in a double)
 	types.qty       = {dec, digits = 15, decimals = 6} --     999 999 999 . 999 999 (fits in a double)
 	types.percent   = {dec, digits =  8, decimals = 2} --         999 999 . 99

@@ -3,9 +3,9 @@
 	$ | command-line scripts
 	Written by Cosmin Apreutesei. Public Domain.
 
-	say(s)
-	sayn(s)
-	die(s)
+	say(fmt,...)
+	sayn(fmt,...)
+	die(fmt,...)
 
 CMDLINE
 
@@ -106,7 +106,7 @@ cmd('help', 'Show this screen', function()
 		say(fmt('   %-33s %s', name..args, cmd.helpline or ''))
 	end
 	say''
-	say(' USAGE: '..app_name..' [OPTIONS] COMMAND ...')
+	say(' USAGE: %s %s [OPTIONS] COMMAND ...', arg[-1], arg[0])
 	for _,section in ipairs(cmdsections) do
 		say''
 		say(getmetatable(section).name)

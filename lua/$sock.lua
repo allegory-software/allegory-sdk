@@ -2,6 +2,10 @@
 
 	$ | networking
 
+EXPORTS
+
+	sock
+
 ]]
 
 require'$'

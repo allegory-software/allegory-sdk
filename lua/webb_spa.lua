@@ -1,13 +1,7 @@
 --[==[
 
-	webb | single-page apps | server-side API
+	webb | single-page apps
 	Written by Cosmin Apreutesei. Public Domain.
-
-CONFIG
-
-	config('page_title_suffix')         suffix for <title>
-	config('js_mode')                   'bundle' | 'ref' | 'separate'
-	config('css_mode')                  'bundle' | 'ref' | 'separate'
 
 API
 
@@ -18,16 +12,7 @@ API
 	js(s)                               add js code to inline.js
 	html(s)                             add inline html code to the SPA body
 
-	page_title([title], [body]) -> s    set/infer page title
-
-	spa(t)                              single-page app html action
-		t.head: s                        content for <head>
-		t.body: s                        content for <body>
-		t.title: s                       content for <title> (optional)
-		t.client_action: t|f             should run client-side action or not
-
-
-INTERNAL API
+DEFINES
 
 	action['config.js']                 expose required config() values
 	action['strings.js']                load strings.<lang>.js
@@ -35,25 +20,32 @@ INTERNAL API
 	action['all.css']                   output of cssfile() calls
 	action['inline.js']                 output of js() calls
 	action['inline.css']                output of css() calls
+	action['404.html']                  SPA response
 
-	config'aliases'                     for href() and find_action()
-	config'page_title_suffix'           for pagetitle()
+LOADS
+
+	glue, divs, webb_spa, purify, mustache
+
+CONFIG
+
+	config'js_mode'                     'bundle' | 'ref' | 'separate'
+	config'css_mode'                    'bundle' | 'ref' | 'separate'
+
+	config'body_classes'                css classes for <body>
+	config'body_attrs'                  attributes for <body>
+	config'head'                        content for <head>
+	config'page_title_suffix'           title suffix, both client-side & server-side
+	config'infer_page_title'            server-side page title inferring f(body) -> s
+	config'favicon_href'                favicon url
+	config'client_action'               enable client routing (true).
+	config'aliases'                     aliases for client-side routing; defined in webb_action.
 
 	config'facebook_app_id'             for webb.auth.facebook.js
 	config'google_client_id'            for webb.auth.google.js
 	config'analytics_ua'                for webb.analytics.js
 
-LOADS
-
-	glue.js
-	divs.js
-	webb_spa.js
-	purify.js
-	mustache.js
-
 ]==]
 
-require'webb'
 require'webb_action'
 
 local format = string.format
@@ -137,6 +129,10 @@ end
 
 html = sepbuffer'\n'
 
+cssfile[[
+divs.css
+]]
+
 jsfile[[
 glue.js
 divs.js
@@ -196,7 +192,7 @@ local spa_template = [[
 <head>
 	<meta charset=utf-8>
 	<title>{{title}}{{title_suffix}}</title>
-	{{#favicon}}<link rel="icon" href="{{favicon}}">{{/favicon}}
+	{{#favicon_href}}<link rel="icon" href="{{favicon_href}}">{{/favicon_href}}
 {{{preload}}}
 {{{all_css}}}
 {{{all_js}}}
@@ -212,27 +208,26 @@ local spa_template = [[
 </html>
 ]]
 
-function page_title(title, body)
-	return title
+local function page_title(infer, body)
+	return infer and infer(body)
 		--infer it from the name of the action
 		or args(1):gsub('[-_]', ' ')
 end
 
-function spa(p)
+action['404.html'] = function(action)
 	local t = {}
 	t.lang = lang()
 	t.body = filter_lang(html(), lang())
-	t.body_classes = p.body_classes
-	t.body_attrs = p.body_attrs
-	t.head = p.head
-	t.title = page_title(p.title, t.body)
+	t.body_classes = config'body_classes'
+	t.body_attrs = config'body_attrs'
+	t.head = config'head'
+	t.title = page_title(config'infer_page_title', t.body)
 	t.title_suffix = config('page_title_suffix', ' - '..host())
-	t.favicon = p.favicon or config'favicon'
-	t.client_action = p.client_action or false
-	t.all_js  = record(jslist , 'all.js' , p.js_mode  or config('js_mode' , 'separate'))
-	t.all_css = record(csslist, 'all.css', p.css_mode or config('css_mode', 'separate'))
+	t.favicon_href = config'favicon_href'
+	t.client_action = config('client_action', true)
+	t.all_js  = record(jslist , 'all.js' , config('js_mode' , 'separate'))
+	t.all_css = record(csslist, 'all.css', config('css_mode', 'separate'))
 	t.preload = record(preloadlist)
-
 	local buf = stringbuffer()
 	for _,name in ipairs(template()) do
 		buf(mustache_wrap(template(name), name))

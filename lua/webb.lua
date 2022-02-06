@@ -13,7 +13,7 @@ FEATURES
 	* file serving with cache control
 	* output buffering stack
 	* rendering with mustache templates, php-like templates and Lua scripts
-	* multi-langage html with server-side language filtering
+	* multi-language html with server-side language filtering
 	* online js and css bundling and minification
 	* email sending with popular email sending providers
 	* standalone operation without a web server for debugging and offline scripts
@@ -22,17 +22,16 @@ FEATURES
 
 EXPORTS
 
-	glue
-	pp
-
-CONFIG
-
-	config'base_url'                        optional, for absurl()
+	glue pp mustache
 
 CONFIG API
 
 	config(name[, default_val]) -> val      get/set config value
 	config{name->val}                       set multiple config values
+	with_config(conf, f, ...) -> ...        run f with custom config table
+
+LABELED STRING TRANSLATION
+
 	S_texts(lang, ext) -> s                 get internationalized strings
 	update_S_texts(lang, ext, t)            update internationalized strings
 	S(id, en_s, ...) -> s                   get internationalized string (stub)
@@ -161,7 +160,6 @@ FILESYSTEM
 	wwwfiles([filter]) -> {name->true}      list www files
 	out[www]file[_cached](file[,parse])     buffered output of www file
 	varpath(file) -> path                   get var subpath (no check that it exists)
-	tmppath(file) -> path                   get tmp subpath (no check that it exists)
 	varfile.filename <- s|f(filename)       set virtual file contents
 	varfile[_cached](file[,parse]) -> s     get var file contents
 
@@ -215,6 +213,24 @@ STANDALONE OPERATION
 
 	webb.run(f, ...)                        run a function in a webb context.
 	webb.request(req | arg1,...)            make a request without a http server.
+
+CONFIG
+
+	config'app_name'                        required, app name
+	config'app_dir'                         required, app dir
+	config'main_module'                     optional, main module / respond function
+	config'www_dir'                         optional, static files dir
+	config'libwww_dir'                      optional, shared www dir
+	config'var_dir'                         optional, persistent state dir
+	config'http_addr'                       optional, HTTP listen IP address
+	config'http_port'                       optional, HTTP listen port
+	config'https_addr'                      optional, HTTPS listen addr
+	config'https_port'                      optional, HTTPS listen port
+	config'https_cert_file'                 optional, SSL crt file
+	config'https_key_file'                  optional, SSL key file
+	config'base_url'                        optional, fixed base URL for absurl()
+	config'host'                            optional, host when `Host` header missing
+	config'ns'                              optional, nameserver IPs
 
 ]==]
 
@@ -502,16 +518,15 @@ function post(v)
 end
 
 function upload(file)
-	return glue.fcall(function(finally)
+	return glue.fcall(function(finally, except)
 		webb.note('webb', 'upload', '%s', file)
-		local f = assert(fs.open(file..'.tmp', 'w'))
-		finally(function() f:close() end)
+		local write_protected = assert(fs.saver(file))
+		except(function() write_protected(fs.abort) end)
 		local function write(buf, sz)
-			assert(f:write(buf, sz))
+			assert(write_protected(buf, sz))
 		end
 		cx.req:read_body(write)
-		assert(f:close())
-		assert(fs.move(file..'.tmp', file))
+		write()
 		return file
 	end)
 end
@@ -873,10 +888,9 @@ end
 
 function absurl(path)
 	path = path or ''
-	return config'base_url' or
-		scheme()..'://'..host()..
-			(((scheme'https' and port(443)) or
-			  (scheme'http' and port(80))) and '' or ':'..port())..path
+	local port = (scheme'https' and port(443) or scheme'http' and port(80))
+		and '' or ':'..port()
+	return (config'base_url' or scheme()..'://'..host()..port)..path
 end
 
 function slug(id, s)
@@ -1015,23 +1029,22 @@ end
 
 --make a path by combining dir and file.
 local function indir(dir, file)
-	return assert(path.combine(dir, file))
+	return assert(path.combine(assert(dir), file))
 end
 
 local function wwwdir()
-	return config'www_dir' or config('www_dir', config('app_name')..'-www')
+	return config'www_dir'
+		or config('www_dir', indir(config'app_dir', 'www'))
 end
 
 local function libwwwdir()
 	return config'libwww_dir'
+		or config('libwww_dir', indir(indir(config'app_dir', 'sdk'), 'www'))
 end
 
 local function vardir()
-	return config'var_dir' or config('var_dir', config('app_name')..'-var')
-end
-
-local function tmpdir()
-	return config'tmp_dir' or config('tmp_dir', indir('tmp', config('app_name')))
+	return config'var_dir'
+		or config('var_dir', indir(config'app_dir', 'var'))
 end
 
 function wwwpath(file, type)
@@ -1047,7 +1060,6 @@ function wwwpath(file, type)
 end
 
 function varpath(file) return indir(vardir(), file) end
-function tmppath(file) return indir(tmpdir(), file) end
 
 local function file_object(findfile, readfile) --{filename -> content | handler(filename)}
 	return setmetatable({}, {
@@ -1102,12 +1114,6 @@ end
 
 function outwwwfile(file) outfile(wwwpath(file)) end
 function outwwwfile_cached(file) outfile_cached(wwwpath(file)) end
-
-local function mkdirs(file)
-	local dir = assert(path.dir(file))
-	assert(fs.mkdir(dir, true))
-	return file
-end
 
 --mustache html templates ----------------------------------------------------
 
@@ -1409,27 +1415,40 @@ function resize_image(src_path, dst_path, max_w, max_h)
 
 	local use_cairo = false
 
-	glue.fcall(function(finally)
+	glue.fcall(function(finally, except)
+
+		local src_ext = path.ext(src_path)
+		local dst_ext = path.ext(dst_path)
+		assert(src_ext == 'jpg' or src_ext == 'jpeg' or src_ext == 'png')
+		assert(dst_ext == 'jpg' or dst_ext == 'jpeg' or dst_ext == 'png')
 
 		--decode.
-		local bmp
-		local src_ext = path.ext(src_path)
-		if src_ext == 'jpg' or src_ext == 'jpeg' then
-			local libjpeg = require'libjpeg'
+		local bmp do
 			local f = assert(fs.open(src_path, 'r'), 'not_found')
 			finally(function() f:close() end)
-			local read = f:buffered_read()
-			local img = assert(libjpeg.open{read = read})
-			finally(function() img:free() end)
-			local w, h = box2d.fit(img.w, img.h, max_w, max_h)
-			local sn = math.ceil(glue.clamp(math.max(w / img.w, h / img.h) * 8, 1, 8))
-			bmp = assert(img:load{
-				accept = {[use_cairo and 'bgra8' or 'rgba8'] = true},
-				scale_num = sn,
-				scale_denom = 8,
-			})
-		else
-			assert(false)
+
+			if src_ext == 'jpg' or src_ext == 'jpeg' then
+
+				local libjpeg = require'libjpeg'
+
+				local read = f:buffered_read()
+				local img = assert(libjpeg.open{read = read})
+				finally(function() img:free() end)
+
+				local w, h = box2d.fit(img.w, img.h, max_w, max_h)
+				local sn = math.ceil(glue.clamp(math.max(w / img.w, h / img.h) * 8, 1, 8))
+				bmp = assert(img:load{
+					accept = {[use_cairo and 'bgra8' or 'rgba8'] = true},
+					scale_num = sn,
+					scale_denom = 8,
+				})
+
+			elseif src_ext == 'png' then
+
+				local libspng = require'libspng'
+				error'NYI'
+
+			end
 		end
 
 		--scale down, if necessary.
@@ -1470,35 +1489,28 @@ function resize_image(src_path, dst_path, max_w, max_h)
 		end
 
 		--encode back.
-		local dst_ext = path.ext(dst_path)
+		local write_protected = assert(fs.saver(dst_path))
+		except(function() write_protected(fs.abort) end)
+		local function write(buf, sz)
+			return assert(write_protected(buf, sz))
+		end
 		if dst_ext == 'jpg' or dst_ext == 'jpeg' then
+
 			local libjpeg = require'libjpeg'
-			mkdirs(dst_path)
 
-			--local saver = save(dst_path, yield)
-
-			local tmp_path = dst_path..'.tmp'
-			local f = assert(fs.open(tmp_path, 'w'))
-			finally(function() if f then f:close() end end)
-			local function write(buf, sz)
-				return assert(f:write(buf, sz))
-			end
 			assert(libjpeg.save{
 				bitmap = bmp,
 				write = write,
 				quality = 90,
 			})
-			f:close()
-			f = nil
-			local ok, err = fs.move(tmp_path, dst_path)
-			if not ok then
-				os.remove(tmp_path)
-				assertf(false, 'fs.move(%s, %s): %s', tmp_path, dst_path, err)
-			end
 
-		else
-			assert(false)
+		elseif dst_ext == 'png' then
+
+			local libspng = require'libspng'
+			error'NYI'
+
 		end
+		write()
 
 	end)
 
@@ -1609,8 +1621,8 @@ function webb.server(opt)
 				port = config'https_port',
 				tls = true,
 				tls_options = {
-					cert_file = config('https_cert_file', host..'.crt'),
-					key_file  = config('https_key_file' , host..'.key'),
+					cert_file = config('https_cert_file', varpath(host..'.crt')),
+					key_file  = config('https_key_file' , varpath(host..'.key')),
 				},
 			},
 			{
