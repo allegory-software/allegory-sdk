@@ -53,6 +53,11 @@
 		- `pos_col` and `parent_col` are set to hidden by default.
 		- on client-side, `id_col` is set to pk if pk is single-column.
 
+DEFINES
+
+	action['rowset.json']               named rowsets action
+	action['xrowset.events']            rowset-refresh push-notifications
+
 ]]
 
 require'webb_action'
