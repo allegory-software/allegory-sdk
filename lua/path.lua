@@ -32,6 +32,7 @@
 	path.depth(s, [pl]) -> n                            get the number of non-empty path components
 	path.combine(s1, s2, [pl], [sep], [dsep]) -> s|nil  combine two paths if possible
 	path.abs(dir, s, [pl], [sep], [dsep]) -> s|nil,err  convert relative path to absolute
+	path.indir(dir, ...) -> path                        combine path with one or more components
 	path.rel(s, pwd, [pl], [sep], [dsep]) -> s|nil      convert absolute path to relative
 	path.filename(s, [pl], [repl]) -> s|nil,err,code    validate/make-valid filename
 
@@ -592,6 +593,14 @@ end
 
 --Convert a relative path into an absolute path given a base dir.
 path.abs = path.combine
+
+--make a path by combining dir with one or more path components.
+function path.indir(dir, file, ...)
+	if not file then return dir end
+	local p, err = path.combine(dir, file)
+	if not p then return nil, err end
+	return path.indir(p, ...)
+end
 
 --Convert an absolute path into a relative path which is relative to `pwd`.
 --Returns `nil` if the paths are of different types or don't have a base path

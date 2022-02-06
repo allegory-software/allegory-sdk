@@ -47,16 +47,15 @@ fs = require'fs'
 path = require'path'
 proc = require'proc'
 
---make a path by combining dir with one or more path components.
-function indir(dir, file, ...)
-	if not file then return dir end
-	return check('fs', 'indir', indir(path.combine(dir, file), ...))
+function indir(...)
+	local path, err = path.indir(...)
+	if path then return path end
+	check('fs', 'indir', nil, 'indir(%s) failed: %s', cat(imap(pack(...), tostring), ', '), err)
 end
-
-function filedir(file) return path.dir(file) end
-function filename(file) return path.file(file) end
-function filenameext(file) return path.nameext(file) end
-function fileext(file) return path.ext(file) end
+filedir = path.dir
+filename = path.file
+filenameext = path.nameext
+fileext = path.ext
 
 function exists(file)
 	local is, err = fs.is(file)
