@@ -1,3 +1,21 @@
+--[==[
+
+	webb | x-module.js persistence
+
+DEFINES
+
+	rowset.rowsets
+
+	action.xmodule_next_id
+	action['xmodule_layer.json']
+	action['sql_rowset.json']
+
+CALLS
+
+	xmodule_layer_file(layer)
+	xmodule_layer(layer)
+
+]==]
 
 require'xrowset'
 local path = require'path'
@@ -44,7 +62,6 @@ function action.xmodule_next_id(module)
 	outall(module..id)
 end
 
-
 action['xmodule_layer.json'] = function(layer)
 	layer = checkarg(str_arg(layer))
 	checkarg(layer:find'^[%w_%-]+$')
@@ -68,4 +85,3 @@ action['sql_rowset.json'] = function(id, ...)
 	end
 	outall(sql_rowset(rs):respond())
 end
-

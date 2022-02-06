@@ -2,7 +2,11 @@
 
 	$ | filesystem ops
 
+EXPORTS
+
 	fs path proc
+
+FILESYSTEM API (NOT ASYNC)
 
 	indir(dir, ...) -> path
 	filedir(file) -> dir
@@ -29,6 +33,8 @@
 	mtime(file)
 	dir(path, patt, min_mtime, create, desc, order_by)
 	gen_id(name[, start]) -> n
+
+PROCESS API (NOT ASYNC!)
 
 	exec(fmt,...)
 	readpipe(fmt,...) -> s

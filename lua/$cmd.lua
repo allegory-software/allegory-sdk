@@ -1,4 +1,4 @@
---[=[
+--[==[
 
 	$ | command-line scripts
 	Written by Cosmin Apreutesei. Public Domain.
@@ -7,17 +7,19 @@
 	sayn(s)
 	die(s)
 
+CMDLINE
+
 	cmdsection(name) -> section                    create a cmdline section
 	section([active, ]cmdargs, help[, descr], fn)  add a command to a section
 	cmd    ([active, ]cmdargs, help[, descr], fn)  add a command to the misc section
-	cmdhandle(...) -> fn, argi                     process cmdline
+	cmdaction(...) -> fn, arg_i                    process cmdline & get the cmd action handler
 
-]=]
+]==]
 
 require'$'
 require'$log'
 
---print vocabulary -----------------------------------------------------------
+--printing -------------------------------------------------------------------
 
 function say(fmt, ...)
 	io.stderr:write((fmt and fmt:format(...) or '')..'\n')
@@ -121,7 +123,7 @@ cmd('help', 'Show this screen', function()
 	say''
 end)
 
-function cmdhandle(...)
+function cmdaction(...)
 
 	local i = 1
 	local f

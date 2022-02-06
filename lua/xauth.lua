@@ -1,14 +1,27 @@
+--[==[
+
+	webb | xapp authentication UI
+	Written by Cosmin Apreutesei. Public Domain.
+
+DEFINES
+
+	template.sign_in_dialog
+	template.sign_in_email
+
+	action['x-auth.css']
+	action['login.json']
+	action['sign_in_email.json']
+	action['sign_in_phone.json']
+
+]==]
 
 require'webb_spa'
 require'webb_auth'
-require'xrowset_sql'
 
 jsfile'x-auth.js'
 cssfile'x-auth.css'
 
 Sfile'webb_auth.lua'
-Sfile'xrowset.lua'
-Sfile'xrowset_sql.lua'
 Sfile'x-auth.js'
 Sfile'xauth.lua'
 

@@ -22,8 +22,8 @@ CONFIG
 
 	config('auth_token_lifetime', 3600)       forgot-password token lifetime
 	config('auth_token_maxcount', 2)          max unexpired tokens allowed
-	config('auth_code_lifetime', 300)         forgot-password token lifetime
-	config('auth_code_maxcount', 6)           max unexpired tokens allowed
+	config('auth_code_lifetime', 300)         one-time auth code lifetime
+	config('auth_code_maxcount', 6)           max unexpired auth codes allowed
 
 	webb.auth_schema                          auth schema
 
@@ -858,4 +858,4 @@ if not ... then
 	end
 end
 
-return webb.auth_schema
+return webb.auth_schema --so you can call schema:import'webb_auth'

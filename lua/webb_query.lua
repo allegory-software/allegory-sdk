@@ -5,8 +5,6 @@
 
 PREPROCESSOR
 
-	sqlpp                                          sqlpp instance, for extending.
-
 	sqlval(s) -> s                                 quote string to SQL literal
 	sqlname(s) -> s                                quote string to SQL identifier
 	sqlparams(s, t) -> s                           quote query with :name placeholders.
@@ -16,6 +14,9 @@ PREPROCESSOR
 	sql_default                                    placeholder for "default value" in params
 	qsubst(typedef)                                create a substitution definition
 	qmacro.<name> = f(args...)                     create a macro definition
+
+	sqlpp([ns])                                    get the sqlpp instance, for extending.
+	sqlpps.ENGINE                                  get the sqlpp instance, for extending.
 
 EXECUTION
 
@@ -106,6 +107,10 @@ local conn_opt = glue.memoize(function(ns)
 	t.schema     = pconfig(ns, 'db_schema')
 	return t
 end)
+
+function sqlpp(ns)
+	return conn_opt(ns).sqlpp
+end
 
 function db(ns, without_current_db)
 	ns = ns or false

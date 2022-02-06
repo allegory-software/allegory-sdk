@@ -2,6 +2,8 @@
 
 	$ | logging and error checking.
 
+LOGGING API
+
 	log(severity, module, event, fmt, ...)
 	note(module, event, fmt, ...)
 	dbg(module, event, fmt, ...)
@@ -10,6 +12,10 @@
 
 	logargs(...) -> ...
 	logprintargs(...) -> ...
+
+	pr(...)
+
+CONFIG
 
 	logging.env <- 'dev' | 'prod', etc.
 	logging.filter <- {severity->true}

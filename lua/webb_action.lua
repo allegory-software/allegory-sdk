@@ -29,7 +29,7 @@ CONFIG
 
 DEFINES
 
-	webb.main
+	config'aliases'                       used by webb_spa.lua
 
 TODO
 
@@ -378,8 +378,4 @@ function fileaction(path)
 	local ext = fileext(path)
 	local handler = plain_file_handler(path)
 	return run_action(true, path, handler, ext)
-end
-
-function webb.main()
-	checkfound(action(unpack(args())))
 end
