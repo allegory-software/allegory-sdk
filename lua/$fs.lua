@@ -2,6 +2,8 @@
 
 	$ | filesystem ops
 
+	fs path proc
+
 	indir(dir, ...) -> path
 	filedir(file) -> dir
 	filename(file) -> name
@@ -20,7 +22,7 @@
 	reload(path, [default])
 	[try]load(path, [default])
 	[try]save(path, s[, sz])
-	saver(path) -> write(s[, sz]) -> ok, err
+	saver(path) -> write(s[, sz] | nil | fs.abort) -> ok, err
 	cp(src_file, dst_file)
 	touch(file, mtime, btime, silent)
 	chmod(file, perms)
@@ -39,7 +41,7 @@ fs = require'fs'
 path = require'path'
 proc = require'proc'
 
---make a path by combining dir and file.
+--make a path by combining dir with one or more path components.
 function indir(dir, file, ...)
 	if not file then return dir end
 	return check('fs', 'indir', indir(path.combine(dir, file), ...))
