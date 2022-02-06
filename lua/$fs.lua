@@ -86,10 +86,16 @@ function run_indir(dir, fn, ...)
 	pass(errors.pcall(fn, ...))
 end
 
-function rm(path)
+function tryrm(path)
 	note('fs', 'rm', '%s', path)
 	local ok, err = fs.remove(path)
-	if err == 'not_found' then ok = true end
+	if ok then return ok end
+	return ok, err
+end
+
+function rm(path)
+	local ok, err = tryrm(path)
+	if not ok and err == 'not_found' then ok = true end
 	check('fs', 'rm', ok, 'could not remove file %s: %s', path, err)
 end
 
