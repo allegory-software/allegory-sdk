@@ -27,6 +27,10 @@ CONFIG
 	config('404_png_action' , '404.png' ) 404 action for image/png
 	config('404_jpeg_action', '404.jpg' ) 404 action for image/jpeg
 
+DEFINES
+
+	webb.main
+
 TODO
 
 	* cascaded actions: html.m.lua, html.m.lp, etc.
@@ -376,3 +380,6 @@ function fileaction(path)
 	return run_action(true, path, handler, ext)
 end
 
+function webb.main()
+	checkfound(action(unpack(args())))
+end

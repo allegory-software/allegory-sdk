@@ -177,17 +177,17 @@ and it didn't keep the baggage while doing so. That being said, we're all
 engineers here, we don't have language affectations. We're just happy to use
 a language with stackful coroutines, real closures with full lexical scoping,
 hash maps, a garbage collector, a better ffi than we could ever ask for,
-and an overall non-opinionated design that doesn't pretend to have found
-the one true way of doing things like so many other languages today do.
+and an overall non-opinionated design that doesn't pretend to know better
+than its user.
 
 Q: Why not OpenResty?
 
 A: We actually used OpenResty in the past, nothing wrong with it. It's
-probably even faster (we haven't checked). It definitely has more features.
-Nginx is however quite large, not nearly as hackable as our pure-Lua server,
-it wants to control the main loop and manage threads all by itself, and its
-configuration directives are inevitably byzantine and undebuggable by trying
-to do declaratively what is better done procedurally.
+probably even faster. It definitely has more features. Nginx is however quite
+large, not nearly as hackable as our pure-Lua server, it wants to control
+the main loop and manage threads all by itself, and its configuration
+directives are inevitably byzantine and undebuggable by trying to do
+declaratively what is sometimes better done procedurally.
 
 ------------------------------------------------------------------------------
 <sup>Allegory SDK (c) 2020 Allegory Software SRL</sup>
