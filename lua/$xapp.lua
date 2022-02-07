@@ -83,8 +83,8 @@ return function(app_name, ...)
 	app.schema:import'schema_lang'
 	app.schema:import(webb.auth_schema)
 
-	sqlpps.mysql    .define_symbol('current_timestamp', schema.env.current_timestamp)
-	sqlpps.tarantool.define_symbol('current_timestamp', schema.env.current_timestamp)
+	sqlpps.mysql    .define_symbol('current_timestamp', app.schema.env.current_timestamp)
+	sqlpps.tarantool.define_symbol('current_timestamp', app.schema.env.current_timestamp)
 
 	config('db_schema', app.schema)
 
