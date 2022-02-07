@@ -40,7 +40,7 @@ do
 
 	function M.bool_to_lua(v) --`to_lua` for the `bool` type stored as `tinyint`.
 		if v == nil then return nil end
-		return v ~= 0
+		return tonumber(v) ~= 0
 	end
 
 	function M.date_to_sql(v)
