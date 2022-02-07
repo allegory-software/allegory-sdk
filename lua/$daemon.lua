@@ -193,13 +193,14 @@ function daemon(app_name, ...)
 	end
 
 	--process cmdline options and get the cmdline action.
-	local cmd_fn, arg_i = cmdaction(...)
+	local arg_i = cmdoptions(...)
 
 	function app:run(...)
 		if ... == app.name then --caller module loaded with require()
 			return app
 		end
 		self:init()
+		local cmd_fn = cmdaction(arg_i, ...)
 		return self:run_cmd(cmd_fn, select(arg_i, ...))
 	end
 

@@ -123,10 +123,9 @@ cmd('help', 'Show this screen', function()
 	say''
 end)
 
-function cmdaction(...)
+function cmdoptions(...)
 
 	local i = 1
-	local f
 	while true do
 		local s = select(i, ...)
 		i = i + 1
@@ -139,9 +138,6 @@ function cmdaction(...)
 			env('DEBUG', 1) --propagate debug to sub-processes.
 			env('VERBOSE', 1) --propagate verbosity to sub-processes.
 		else
-			if s == '--help' then s = 'help' end
-			local c = s and s:gsub('-', '_') or 'help'
-			f = cmds[c] or cmds.help
 			break
 		end
 	end
@@ -150,6 +146,12 @@ function cmdaction(...)
 	if repl(env'DEBUG'  , '', nil) then logging.debug   = true end
 	if repl(env'VERBOSE', '', nil) then logging.verbose = true end
 
-	return f, i
+	return i
 end
 
+function cmdaction(arg_i, ...)
+	local s = select(arg_i-1, ...)
+	if s == '--help' then s = 'help' end
+	local c = s and s:gsub('-', '_')
+	return cmds[c] or cmds.help
+end
