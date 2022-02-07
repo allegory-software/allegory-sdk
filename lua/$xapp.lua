@@ -33,9 +33,23 @@ local schema = require'schema'
 ffi.tls_libname = 'tls_bearssl'
 
 cmd_server('run', 'Run server in foreground', function()
-	local server = webb.server()
+	local server = webb.server{
+		debug = keys(names(config('http_debug', ''))),
+	}
 	server.start()
 end)
+
+function load_opensans()
+	css[[
+	body {
+		font-family: opensans, Arial, sans-serif;
+	}
+	]]
+	fontfile'OpenSans-Regular.ttf'
+	fontfile'OpenSans-SemiBold.ttf'
+	fontfile'OpenSansCondensed-Light.ttf'
+	fontfile'OpenSansCondensed-Bold.ttf'
+end
 
 return function(app_name, ...)
 
@@ -59,18 +73,6 @@ return function(app_name, ...)
 	config('body_classes', 'x-container')
 
 	Sfile(app.name..'.lua')
-
-	if app.conf.opensans then
-		css[[
-		body {
-			font-family: opensans, Arial, sans-serif;
-		}
-		]]
-		fontfile'OpenSans-Regular.ttf'
-		fontfile'OpenSans-SemiBold.ttf'
-		fontfile'OpenSansCondensed-Light.ttf'
-		fontfile'OpenSansCondensed-Bold.ttf'
-	end
 
 	app.schema = schema.new()
 
