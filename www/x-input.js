@@ -172,6 +172,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 			e.class('invalid', e.invalid)
 			e.do_update_errors(changes.errors[0], ev)
 		}
+		// state_changed events are only fired in standalone mode!
+		if (e.owns_field)
+			e.fire('state_changed', changes)
 	}
 
 	function bind_nav(nav, col, on) {
@@ -287,9 +290,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		},
 		function(errors) {
 			if (e.row && e.field) {
-				e.begin_set_state(row)
-				e.set_cell_state(col, 'errors', errors)
-				e.end_set_state()
+				e.nav.begin_set_state(e.row)
+				e.nav.set_cell_state(e.col, 'errors', errors)
+				e.nav.end_set_state()
 			}
 		},
 	)
