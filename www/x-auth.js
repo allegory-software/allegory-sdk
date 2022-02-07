@@ -131,7 +131,7 @@ component('x-settings-button', function(e) {
 
 // sign-in form --------------------------------------------------------------
 
-let sign_in_dialog = memoize(function() {
+sign_in_dialog = memoize(function() {
 
 	let e = unsafe_html(render('sign_in_dialog', window.sign_in_options))
 
@@ -144,10 +144,15 @@ let sign_in_dialog = memoize(function() {
 	e.email_edit.field = {not_null: true}
 	e.code_edit.field = {not_null: true}
 
+	e.email_edit.on('state_changed', function(changes) {
+		if (changes.input_val)
+			e.email_button.disabled = e.email_edit.invalid
+	})
+
 	e.email_button.action = function() {
 		let d = sign_in_dialog()
 		e.email_button.post(href('/sign-in-email.json'), {
-			email: e.email_edit.val,
+			email: e.email_edit.input_val,
 		}, function() {
 			sign_in_code()
 		}, function(err) {
@@ -160,7 +165,7 @@ let sign_in_dialog = memoize(function() {
 		let d = sign_in_dialog()
 		call_login({
 				type: 'code',
-				code: e.code_edit.val,
+				code: e.code_edit.input_val,
 			},
 			e.code_button,
 			function() {
