@@ -352,12 +352,9 @@ local function userinfo(usr)
 			active = 1 and usr = ?
 		]], usr)
 	if not t then return {} end
-	t.anonymous = t.anonymous == 1
-	t.emailvalid = t.emailvalid == 1
 	t.haspass = tonumber(t.haspass) == 1
 	t.roles = glue.index(glue.names(t.roles) or {})
 	t.admin = t.roles.admin
-	t.phonevalid = t.phonevalid == 1
 	return t
 end
 
@@ -416,7 +413,7 @@ local function pass_hash(pass)
 	--TODO: build & bind OpenWall's bcrypt or use libsodium's pwhash here.
 	--This scheme only protects the passwords against dictionary attacks
 	--if the attacker doesn't know the secret, so don't store the secret.
-	local token = hmac.sha256(token, salt)
+	local token = hmac.sha256(pass, salt)
 	return glue.tohex(token) --64 bytes
 end
 
