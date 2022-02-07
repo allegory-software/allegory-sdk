@@ -4691,8 +4691,11 @@ component('x-lookup-dropdown', function(e) {
 	let email = {}
 	field_types.email = email
 
-	email.validator_email = function() {
-
+	email.validator_email = function(field) {
+		return {
+			validate: function(val) { return val == null || val.includes('@') },
+			message: S('validation_email', 'This does not appear to be a valid email.'),
+		}
 	}
 
 	// button
