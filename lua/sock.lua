@@ -45,6 +45,7 @@ SOCKETS
 	udp:sendto(host, port, s|buf, [len], [expires], [af]) -> len  send a datagram to an address
 	udp:recvnext(buf, maxlen, [expires], [flags]) -> len, sa      receive the next datagram
 	tcp:shutdown('r'|'w'|'rw', [expires])      send FIN
+	s:debug([protocol], [debug_fn])            log the I/O stream and close
 
 SCHEDULING
 	sock.newthread(func[, name]) -> co         create a coroutine for async I/O
@@ -2107,6 +2108,39 @@ function M.runevery(interval, f)
 		end
 	end)
 	return job
+end
+
+--debug API ------------------------------------------------------------------
+
+function socket:debug(protocol, dbg)
+
+	dbg = dbg or require'logging'.dbg
+
+	local function ds(event, s)
+		dbg(protocol or '', event, '%-4s %5s %s', self, s and #s or '', s)
+	end
+
+	glue.override(self, 'recv', function(inherited, self, buf, ...)
+		local sz, err = inherited(self, buf, ...)
+		if not sz then return nil, err end
+		ds('<', ffi.string(buf, sz))
+		return sz
+	end)
+
+	glue.override(self, 'send', function(inherited, self, buf, sz, ...)
+		local ok, err = inherited(self, buf, sz, ...)
+		if not ok then return nil, err end
+		ds('>', ffi.string(buf, sz or #buf))
+		return ok
+	end)
+
+	glue.override(self, 'close', function(inherited, self, ...)
+		local ok, err = inherited(self, ...)
+		if not ok then return nil, err  end
+		ds('CC')
+		return ok
+	end)
+
 end
 
 --hi-level APIs --------------------------------------------------------------
