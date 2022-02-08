@@ -126,7 +126,7 @@ function multipart.new(multipart_type, write, boundary)
 	--NOTE: gmail will show these as attachments.
 	function m:add_inline_file(cid, filename, content_type, contents)
 		self:add_part{
-			content_id = '<@'..cid..'>',
+			content_id = '<'..cid..'>',
 			content_disposition = {'inline', filename = filename},
 			content_transfer_encoding = 'base64',
 			content_type = content_type,
