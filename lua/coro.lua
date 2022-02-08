@@ -78,6 +78,10 @@ coro.running() -> thread, is_main
 
 	Behaves like standard coroutine.running() (from Lua 5.2 / LuaJIT 2).
 
+coro.main -> thread
+
+	Returns the main thread.
+
 coro.status(thread) -> status
 
 	Behaves like standard coroutine.status()
@@ -124,11 +128,11 @@ local yield = coroutine.yield
 local cocreate = coroutine.create
 local costatus = coroutine.status
 
-local coro = {}
 local callers = setmetatable({}, {__mode = 'k'}) --{thread -> caller_thread}
 local main, is_main = coroutine.running()
 assert(is_main, 'coro must be loaded from the main thread')
 local current = main
+local coro = {main = main}
 
 local function assert_thread(thread, level)
 	if type(thread) ~= 'thread' then
