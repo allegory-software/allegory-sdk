@@ -55,12 +55,15 @@ function client:connect(t)
 	self.host_addr = check(self, self:resolve(self.host))
 	self.tcp = check(self, self.create_tcp())
 
-	--debugging
+	--logging & debugging
+
+	local logging = (self.logging == true or (self.debug and self.logging = nil)
+		and require'logging') or self.logging
+	local log = logging and logging.log
 
 	local function mprotect(method)
 		local oncaught
-		if self.debug and self.debug.errors then
-			local log = self.log or require'logging'.log
+		if log and self.debug and self.debug.errors then
 			function oncaught(err)
 				log('ERROR', 'smtp', method, '%s', err)
 			end
@@ -73,12 +76,11 @@ function client:connect(t)
 	end
 
 	if self.debug and self.debug.stream then
-		self.tcp:debug'smtp'
+		self.tcp:debug('smtp', log)
 	end
 
 	local dp = glue.noop
-	if self.debug and self.debug.protocol then
-		local log = self.log or require'logging'.log
+	if log and self.debug and self.debug.protocol then
 		function dp(...)
 			return log('', 'smtp', ...)
 		end
@@ -121,7 +123,10 @@ function client:connect(t)
 	function self:_connect()
 		set_timeout(self.connect_timeout)
 		check_io(self, self.tcp:connect(self.host_addr, self.port, expires))
-		dp('connect', '%s %s', self.tcp, err or '')
+		dp('connect', '%s', self.tcp)
+		if self.tls then
+			self.tcp = check_io(self, self.create_stcp(self.tcp, self.host, self.tls_options))
+		end
 		check_reply'2..'
 		send_line('EHLO %s', self.domain)
 		check_reply'2..'
@@ -132,9 +137,11 @@ function client:connect(t)
 	mprotect'_connect'
 
 	function self:sendmail(req)
-		dp('sendmail', '%s from=%s to=%s subj="%s" msg#=%s', self.tcp,
-			req.from, req.to, req.headers and req.headers.subject,
-			glue.kbytes(#req.message))
+		if log then
+			log('note', 'smtp', 'sendmail', '%s from=%s to=%s subj="%s" msg#=%s',
+				self.tcp, req.from, req.to, req.headers and req.headers.subject,
+				glue.kbytes(#req.message))
+		end
 		set_timeout(self.sendmail_timeout)
 		send_line('MAIL FROM: %s', req.from)
 		check_reply'2..'
