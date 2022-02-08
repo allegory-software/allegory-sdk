@@ -7,7 +7,7 @@
 		https://github.com/kengonakajima/luvit-base64/issues/1
 		http://lua-users.org/wiki/BaseSixtyFour
 
-b64.[encode|decode][_tobuffer](s[, size], [outbuf], [outbuf_size]) -> outbuf, len
+b64.[encode|decode][_tobuffer](s, [size], [outbuf], [outbuf_size], [max_line]) -> outbuf, len
 
 	Encode/decode string or cdata buffer to a string or buffer.
 
@@ -16,6 +16,8 @@ b64.url[encode|decode](s) -> s
 	Encode/decode URL based on RFC4648 Section 5 / RFC7515 Section 2 (JSON Web Signature).
 
 ]=]
+
+if not ... then require'base64_test'; return end
 
 local base64 = {}
 
@@ -44,17 +46,19 @@ for j=0,63,1 do
 	end
 end
 
-function base64.encode_tobuffer(s, sn, dbuf, dn)
+function base64.encode_tobuffer(s, sn, dbuf, dn, max_line)
 
 	local sn = sn or #s
 	local min_dn = math.ceil(sn / 3) * 4
+	local newlines = max_line and math.ceil(min_dn / max_line) or 0
+	min_dn = min_dn + newlines * 2 --CRLF per MIME
 	local dn = dn or min_dn
 	assert(dn >= min_dn, 'buffer too small')
 	local dp  = dbuf and ffi.cast(u8p, dbuf) or u8a(min_dn)
 	local sp  = ffi.cast(u8p, s)
 	local dpw = ffi.cast(u16p, dp)
 	local si = 0
-	local di = 0
+	local di, li = 0, 0
 
 	while sn > 2 do
 		local n = sp[si]
@@ -64,10 +68,18 @@ function base64.encode_tobuffer(s, sn, dbuf, dn)
 		n = bor(n, sp[si+2])
 		local c1 = shr(n, 12)
 		local c2 = band(n, 0x00000fff)
-		dpw[di  ] = b64digits[c1]
-		dpw[di+1] = b64digits[c2]
+
+		dpw[di] = b64digits[c1]
+		di = di + 1
+		li = li + 2
+		if li == max_line then dpw[di] = 0x0a0d; di = di + 1; li = 0 end
+
+		dpw[di] = b64digits[c2]
+		di = di + 1
+		li = li + 2
+		if li == max_line then dpw[di] = 0x0a0d; di = di + 1; li = 0 end
+
 		sn = sn - 3
-		di = di + 2
 		si = si + 3
 	end
 
@@ -95,7 +107,15 @@ function base64.encode_tobuffer(s, sn, dbuf, dn)
 			di = di + 1
 		end
 		dp[di] = EQ
+		di = di + 1
 	end
+
+	if max_line and di < min_dn then
+		dp[di  ] = 0x0d
+		dp[di+1] = 0x0a
+		di = di + 2
+	end
+	assert(di == min_dn)
 
 	return dp, min_dn
 end

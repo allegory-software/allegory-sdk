@@ -22,3 +22,7 @@ assert(decode(encode'x') == 'x')
 assert(decode(encode'xx') == 'xx')
 assert(decode'.!@#$%^&*( \n\r\t' == '')
 
+local function encln(s, n) return encode(s:rep(n), nil, nil, nil, 76) end
+assert(encln('.', 1) == 'Lg==\r\n')
+assert(encln('.', 76/4*3) == ('Li4u'):rep(76/4)..'\r\n')
+assert(encln('.', 76/4*3+1) == ('Li4u'):rep(76/4)..'\r\nLg==\r\n')
