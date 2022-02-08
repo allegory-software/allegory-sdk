@@ -748,15 +748,6 @@ http:protect'send_response'
 
 --instantiation --------------------------------------------------------------
 
-function http:log(severity, module, event, fmt, ...)
-	local logging = self.logging
-	if not logging or logging.filter[severity] then return end
-	local S = self.tcp or '-'
-	local dt = clock() - self.start_time
-	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
-end
-
 function http:new(t)
 
 	local self = glue.object(self, {}, t)
@@ -765,47 +756,29 @@ function http:new(t)
 		self.tracebacks = true --for tcp_protocol_errors.
 	end
 
-	if self.debug and (self.logging == nil or self.logging == true) then
-		self.logging = require'logging'
+	local logging = (self.logging == true or (self.debug and self.logging == nil)
+		and require'logging') or self.logging
+	local log = logging and logging.log
+	self.log = glue.noop
+	if log then
+		function self:log(severity, module, event, fmt, ...)
+			if logging.filter[severity] then return end
+			local S = self.tcp or '-'
+			local dt = clock() - self.start_time
+			local s = fmt and _(fmt, logging.args(...)) or ''
+			log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
+		end
 	end
 
-	if self.debug and self.debug.protocol then
-
+	self.dp = glue.noop
+	if log and self.debug and self.debug.protocol then
 		function self:dp(...)
 			return self:log('', 'http', ...)
 		end
-
-	else
-		self.dp = glue.noop
 	end
 
-	if self.debug and self.debug.stream then
-
-		local function ds(event, s)
-			self:log('', 'http', event, '%5s %s', s and #s or '', s or '')
-		end
-
-		glue.override(self.tcp, 'recv', function(inherited, self, buf, ...)
-			local sz, err = inherited(self, buf, ...)
-			if not sz then return nil, err end
-			ds('<', ffi.string(buf, sz))
-			return sz
-		end)
-
-		glue.override(self.tcp, 'send', function(inherited, self, buf, sz, ...)
-			local ok, err = inherited(self, buf, sz, ...)
-			if not ok then return nil, err end
-			ds('>', ffi.string(buf, sz or #buf))
-			return ok
-		end)
-
-		glue.override(self.tcp, 'close', function(inherited, self, ...)
-			local ok, err = inherited(self, ...)
-			if not ok then return nil, err  end
-			ds('CC')
-			return ok
-		end)
-
+	if log and self.debug and self.debug.stream then
+		self.tcp:debug('http', log)
 	end
 
 	self:create_linebuffer()

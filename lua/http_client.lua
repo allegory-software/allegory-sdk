@@ -74,7 +74,6 @@ end
 
 local client = {
 	type = 'http_client', http = http,
-	loadfile = glue.readfile,
 	max_conn = 50,
 	max_conn_per_target = 20,
 	max_pipelined_requests = 10,
@@ -108,10 +107,6 @@ function client:bind_libs(libs)
 			self.currentthread = sock.currentthread
 		elseif lib == 'sock_libtls' then
 			local socktls = require'sock_libtls'
-			self.stcp          = socktls.client_stcp
-			self.stcp_config   = socktls.config
-		elseif lib == 'sock_libtls1' then
-			local socktls = require'sock_libtls1'
 			self.stcp          = socktls.client_stcp
 			self.stcp_config   = socktls.config
 		elseif lib == 'zlib' then
