@@ -24,7 +24,7 @@ local client = {
 	port = 587,
 	connect_timeout = 5,
 	sendmail_timeout = 60,
-	domain = 'localhost', --client's domain
+	domain = 'localhost', --client's domain (useless)
 	max_line_size = 8192,
 	xmailer = 'allegory-sdk smtp client',
 }
@@ -131,8 +131,10 @@ function client:connect(t)
 		check_reply'2..'
 		send_line('EHLO %s', self.domain)
 		check_reply'2..'
-		send_line('AUTH PLAIN %s', b64('\0' .. self.user .. '\0' .. self.pass))
-		check_reply'2..'
+		if self.user then
+			send_line('AUTH PLAIN %s', b64('\0' .. self.user .. '\0' .. self.pass))
+			check_reply'2..'
+		end
 		return self
 	end
 	mprotect'_connect'

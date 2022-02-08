@@ -169,7 +169,6 @@ function multipart.mail(msg)
 		end
 	end
 	local req = {headers = {}}
-	req.domain = msg.domain or msg.from:gsub('^[^@]+', '')
 	req.from = msg.from
 	req.to   = msg.to
 	req.headers.from    = msg.from

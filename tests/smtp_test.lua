@@ -18,7 +18,6 @@ sock.run(function()
 			stream = true,
 		},
 		logging = true,
-		domain = 'localhost',
 		host = 'mail.bpnpart.com',
 		port = 587,
 		--port = 465, tls = true,
