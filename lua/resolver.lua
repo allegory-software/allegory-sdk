@@ -57,7 +57,6 @@ r:reverse_lookup(address,[timeout]) -> hostnames
 
 local ffi      = require'ffi'
 local bit      = require'bit'
-local clock    = require'time'.clock
 local time     = require'time'.time
 local errors   = require'errors'
 local glue     = require'glue'
@@ -715,7 +714,8 @@ end
 if not ... then
 
 	local pp = require'pp'
-	math.randomseed(clock())
+	local time = require'time'
+	math.randomseed(time.clock())
 
 	local r = assert(rs.new{
 		servers = {
