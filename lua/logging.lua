@@ -10,6 +10,8 @@ LOGGING
 	logging.warnif(module, event, condition, fmt, ...)
 	logging.logerror(module, event, fmt, ...)
 UTILS
+	logging.arg(v) -> s
+	logging.printarg(v) -> s
 	logging.args(...) -> ...
 	logging.printargs(...) -> ...
 CONFIG
@@ -202,7 +204,12 @@ function logging.name(obj, name)
 	names[obj] = name
 end
 
-logging.name(coroutine.running(), 'TM')
+do
+	local main, is_main = coroutine.running()
+	if is_main then
+		logging.name(main, 'TM')
+	end
+end
 
 local function debug_type(v)
 	return type(v) == 'table' and v.type or type(v)
@@ -281,6 +288,8 @@ local function debug_arg(for_printing, v)
 		return v
 	end
 end
+logging.arg       = function(v) return debug_arg(false, v) end
+logging.printarg  = function(v) return debug_arg(true , v) end
 
 local function logging_args_func(for_printing)
 	return function(...)
