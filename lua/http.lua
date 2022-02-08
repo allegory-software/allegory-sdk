@@ -748,6 +748,19 @@ http:protect'send_response'
 
 --instantiation --------------------------------------------------------------
 
+function http:log(severity, module, event, fmt, ...)
+	local logging = self.logging
+	if not logging or logging.filter[severity] then return end
+	local S = self.tcp or '-'
+	local dt = clock() - self.start_time
+	local s = fmt and _(fmt, logging.args(...)) or ''
+	logging.log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
+end
+
+function http:dp(...)
+	return self:log('', 'http', ...)
+end
+
 function http:new(t)
 
 	local self = glue.object(self, {}, t)
@@ -756,29 +769,18 @@ function http:new(t)
 		self.tracebacks = true --for tcp_protocol_errors.
 	end
 
-	local logging = (self.logging == true or (self.debug and self.logging == nil)
-		and require'logging') or self.logging
-	local log = logging and logging.log
-	self.log = glue.noop
-	if log then
-		function self:log(severity, module, event, fmt, ...)
-			if logging.filter[severity] then return end
-			local S = self.tcp or '-'
-			local dt = clock() - self.start_time
-			local s = fmt and _(fmt, logging.args(...)) or ''
-			log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
-		end
+	self.logging = (self.logging == true or self.debug and self.logging == nil)
+		and require'logging' or self.logging
+
+	if not self.logging then
+		self.log = glue.noop
+	end
+	if not (self.logging and self.debug and self.debug.protocol) then
+		self.dp = glue.noop
 	end
 
-	self.dp = glue.noop
-	if log and self.debug and self.debug.protocol then
-		function self:dp(...)
-			return self:log('', 'http', ...)
-		end
-	end
-
-	if log and self.debug and self.debug.stream then
-		self.tcp:debug('http', log)
+	if self.logging and self.debug and self.debug.stream then
+		self.tcp:debug('http', self.logging.log)
 	end
 
 	self:create_linebuffer()

@@ -57,9 +57,13 @@ function client:connect(t)
 
 	--logging & debugging
 
-	local logging = (self.logging == true or (self.debug and self.logging = nil)
-		and require'logging') or self.logging
-	local log = logging and logging.log
+	if self.debug and self.debug.tracebacks then
+		self.tracebacks = true --for tcp_protocol_errors.
+	end
+
+	self.logging = (self.logging == true or self.debug and self.logging == nil)
+		and require'logging' or self.logging
+	local log = self.logging and self.logging.log
 
 	local function mprotect(method)
 		local oncaught
@@ -71,11 +75,7 @@ function client:connect(t)
 		self[method] = protect(self[method], oncaught)
 	end
 
-	if self.debug and self.debug.tracebacks then
-		self.tracebacks = true --for tcp_protocol_errors.
-	end
-
-	if self.debug and self.debug.stream then
+	if log and self.debug and self.debug.stream then
 		self.tcp:debug('smtp', log)
 	end
 

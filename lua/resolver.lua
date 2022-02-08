@@ -344,10 +344,15 @@ local rs = {} --resolver class
 rs.libs = 'sock'
 rs.max_cache_entries = 1e5
 
+local function threadname(thread)
+	local logging = require'logging'
+	return logging.arg(thread or coroutine.running())
+end
+
 function rs:_dbg(ns, q, ...)
 	print(
 		'resolver.lua:'..debug.getinfo(3).currentline..':',
-		require'coro'.name(),
+		threadname(),
 		ns and glue.count(ns.queue) or '',
 		q and q.name:sub(1, 7) or '',
 		q and q.i or '',
@@ -359,11 +364,11 @@ function rs:dbg(ns, q, ...)
 end
 
 function rs:dbgr(ns, q, t, ...)
-	self:_dbg(ns, q, '=>', require'coro'.name(t), ...)
+	self:_dbg(ns, q, '=>', threadname(t), ...)
 end
 
 function rs:dbgt(ns, q, ...)
-	self:_dbg(ns, q, '->', require'coro'.name(q.thread), ...)
+	self:_dbg(ns, q, '->', threadname(q.thread), ...)
 end
 
 function rs:dbgs(ns, q, ...)
@@ -658,7 +663,7 @@ local function rs_query(rs, qname, qtype, timeout)
 				rs:dbgr(ns, q, lt, '{...}')
 				rs.resume(lt, res)
 			end
-		end, rs.debug and 'N'..i..'-'..require'coro'.name()))
+		end, rs.debug and 'N'..i..'-'..threadname()))
 	end
 	rs:dbgs()
 	return rs.suspend() -- the first thread to finish will resume us.
@@ -727,7 +732,7 @@ if not ... then
 			--{host = '8.8.4.4', port = 53},
 		},
 		--tcp_only = true,
-		--debug = true,
+		debug = true,
 	})
 
 	local function lookup(q)

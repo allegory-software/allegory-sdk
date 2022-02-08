@@ -591,12 +591,10 @@ function client:new(t)
 		self:bind_libs(self.libs)
 	end
 
-	if self.debug and (self.logging == nil or self.logging == true) then
-		self.logging = require'logging'
-	end
+	self.logging = (self.logging == true or self.debug and self.logging == nil)
+		and require'logging' or self.logging
 
-	if self.debug then
-
+	if self.logging and self.debug then
 		local function pass(target, rc, ...)
 			self:dp(target, '', ('<'):rep(1+rc)..('-'):rep(30-rc))
 			return ...
@@ -607,7 +605,6 @@ function client:new(t)
 			self:dp(target, '', ('>'):rep(1+rc)..('-'):rep(30-rc))
 			return pass(target, rc, inherited(self, t, ...))
 		end)
-
 	else
 		self.dp = glue.noop
 	end
