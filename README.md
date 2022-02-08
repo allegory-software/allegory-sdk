@@ -82,6 +82,7 @@ scripts for new libraries.
   * [resolver](lua/resolver.lua)       - Async DNS resolver
   * [http_client](lua/http_client.lua) - Async HTTP(s) 1.1 client for high-volume web scraping
   * [http_server](lua/http_server.lua) - Async HTTP(s) 1.1 server
+  * [smtp](lua/smtp.lua)               - Async SMTP(s) client
   * [uri](lua/uri.lua)                 - URI manipulation
   * [ipv6](lua/ipv6.lua)               - IPv6 conversion routines
 * __Data Exchange__

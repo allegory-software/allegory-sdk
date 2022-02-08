@@ -45,7 +45,7 @@ SOCKETS
 	udp:sendto(host, port, s|buf, [len], [expires], [af]) -> len  send a datagram to an address
 	udp:recvnext(buf, maxlen, [expires], [flags]) -> len, sa      receive the next datagram
 	tcp:shutdown('r'|'w'|'rw', [expires])      send FIN
-	s:debug([protocol], [debug_fn])            log the I/O stream and close
+	s:debug([protocol], [log])                 log the I/O stream and close
 
 SCHEDULING
 	sock.newthread(func[, name]) -> co         create a coroutine for async I/O
@@ -2112,12 +2112,12 @@ end
 
 --debug API ------------------------------------------------------------------
 
-function socket:debug(protocol, dbg)
+function socket:debug(protocol, log)
 
-	dbg = dbg or require'logging'.dbg
+	log = log or require'logging'.log
 
 	local function ds(event, s)
-		dbg(protocol or '', event, '%-4s %5s %s', self, s and #s or '', s)
+		log('', protocol or '', event, '%-4s %5s %s', self, s and #s or '', s)
 	end
 
 	glue.override(self, 'recv', function(inherited, self, buf, ...)
