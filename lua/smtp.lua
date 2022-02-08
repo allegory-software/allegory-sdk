@@ -26,6 +26,7 @@ local client = {
 	sendmail_timeout = 60,
 	domain = 'localhost', --client's domain
 	max_line_size = 8192,
+	xmailer = 'allegory-sdk smtp client',
 }
 
 local check_io, checkp, check, protect = errors.tcp_protocol_errors'smtp'
@@ -98,8 +99,8 @@ function client:connect(t)
 	end
 	local readline = linebuffer(read, '\r\n', self.max_line_size).readline
 
-	local function send(buf, sz)
-		check_io(self, self.tcp:send(buf, sz, expires))
+	local function send(s)
+		check_io(self, self.tcp:send(s, nil, expires))
 	end
 
 	local function send_line(fmt, s)
@@ -154,17 +155,18 @@ function client:connect(t)
 		check_reply'3..'
 		local ht = glue.update({}, req.headers)
 		ht.date = os.date('!%a, %d %b %Y %H:%M:%S -0000')
-		ht['x-mailer'] = 'allegory-sdk smtp client'
-		ht['mime-version'] = '1.0'
+		ht.x_mailer = self.xmailer
+		ht.mime_version = '1.0'
 		local t = {}
 		for k,v in glue.sortedpairs(ht) do
-			t[#t+1] = k:lower() .. ': ' .. tostring(v)
+			t[#t+1] = k:gsub('_', '-'):lower() .. ': ' .. tostring(v)
 		end
 		t[#t+1] = ''
 		t[#t+1] = ''
 		local headers = table.concat(t, '\r\n')
 		send(headers)
-		send(req.message:gsub('^%.', '..'):gsub('\n%.', '..'))
+		local data = req.message:gsub('^%.', '..'):gsub('\n%.', '..')
+		send(data)
 		send'\r\n.\r\n'
 		check_reply'2..'
 		return self
