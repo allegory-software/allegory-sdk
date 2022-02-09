@@ -91,13 +91,17 @@ component('x-settings-button', function(e) {
 				set_night_mode(v)
 			})
 
-			let sign_in_button, logout_button
+			let user_email, sign_in_button, logout_button
 			if (!usr || usr.anonymous) {
 				sign_in_button = button({
 					text: S('button_text_sign_in', 'Sign-In'),
 					action: () => { tt.close(); sign_in(); },
 				})
 			} else {
+				user_email = textedit({
+					label: 'Email',
+					val: usr.email,
+				})
 				logout_button = button({
 					text: S('button_text_log_out', 'Log out'),
 					bare: true,
@@ -110,6 +114,7 @@ component('x-settings-button', function(e) {
 					display: flex;
 					flex-flow: column;
 				`},
+				user_email,
 				night_mode,
 				sign_in_button,
 				logout_button,
@@ -117,7 +122,7 @@ component('x-settings-button', function(e) {
 
 			tt = tooltip({
 				classes: 'x-settings-tooltip',
-				target: e, side: 'bottom', align: 'end',
+				target: e, side: 'bottom', align: 'start',
 				text: settings_form,
 				close_button: true,
 				autoclose: true,

@@ -35,6 +35,10 @@ wwwfile['x-auth.css'] = [[
 
 }
 
+.x-settings-tooltip .x-tooltip-content {
+	min-width: 400px;
+}
+
 .x-settings-button > .x-button-icon {
 	font-size: 1.2em;
 }

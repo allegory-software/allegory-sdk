@@ -726,6 +726,8 @@ function login(auth, switch_user)
 			switch_user(susr, usr)
 			if anonymous_usr(susr) then
 				delete_user(susr)
+				session().id = nil
+				session().usr = nil
 			end
 		end
 		save_usr(usr)

@@ -56,7 +56,7 @@ function action.xmodule_next_id(module)
 	local file = varpath(_('x-%s-next-id', module))
 	local id = tonumber(assert(readfile(file) or '1'))
 	if method'post' then
-		writefile(file, tostring(id + 1))
+		save(file, tostring(id + 1))
 	end
 	setmime'txt'
 	outall(module..id)
@@ -67,7 +67,7 @@ action['xmodule_layer.json'] = function(layer)
 	checkarg(layer:find'^[%w_%-]+$')
 	local file = xmodule_layer_file(layer)
 	if method'post' then
-		writefile(file, json(post(), '\t'))
+		save(file, json(post(), '\t'))
 	else
 		outall(readfile(file) or '{}')
 	end
