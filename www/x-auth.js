@@ -3,6 +3,10 @@
 	User settings dropdown and sign-in dialog.
 	Written by Cosmin Apreutesei. Public Domain.
 
+CSS
+
+	.x-auth-signed-in       mark elements that must be visible only when signed-in.
+
 */
 
 {
@@ -133,7 +137,7 @@ component('x-settings-button', function(e) {
 
 // sign-in form --------------------------------------------------------------
 
-sign_in_dialog = memoize(function() {
+let sign_in_dialog = memoize(function() {
 
 	let e = unsafe_html(render('sign_in_dialog', window.sign_in_options))
 
@@ -228,9 +232,21 @@ let call_login = function(upload, notify_widget, success, fail) {
 			usr = usr1
 			print('usr_changed', usr)
 			broadcast('usr_changed', usr)
+
 			if (window.xmodule)
 				xmodule.set_layer('user', 'user', 'user-'+usr.usr)
-			if (success) success()
+
+			if (success)
+				success()
+
+			let signed_in = usr && !usr.anonymous
+
+			for (let e of $('.x-auth-signed-in'))
+				e.show(signed_in)
+
+			if (!signed_in && config('auto_sign_in'))
+				exec('/sign-in')
+
 		},
 		fail: function(err) {
 			notify(err, 'error')
@@ -240,6 +256,8 @@ let call_login = function(upload, notify_widget, success, fail) {
 }
 
 function init_auth() {
+	for (let e of $('.x-auth-signed-in'))
+		e.hide()
 	init_settings_nav()
 	call_login()
 }
