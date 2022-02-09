@@ -22,6 +22,8 @@ CONFIG
 require'webb_spa'
 require'webb_auth'
 
+client_config'auto_sign_in'
+
 jsfile'x-auth.js'
 cssfile'x-auth.css'
 
