@@ -2517,8 +2517,6 @@ function nav_widget(e) {
 
 		e.set_cell_state(field, 'input_val', val, cur_val)
 		e.set_cell_state(field, 'errors'   , errors)
-		if (cell_modified)
-			e.set_cell_state(field, 'val', val)
 		e.set_row_state('has_errors', row_has_errors)
 		e.set_row_state('modified'  , row_modified, false)
 
@@ -3767,7 +3765,7 @@ function nav_widget(e) {
 		let drow = []
 		for (let fi = 0; fi < e.all_fields.length; fi++) {
 			let field = e.all_fields[fi]
-			let v = e.cell_val(row, field)
+			let v = e.cell_input_val(row, field)
 			if (v !== field.default && !field.nosave)
 				drow[fi] = v
 		}
@@ -3787,7 +3785,7 @@ function nav_widget(e) {
 	e.serialize_row_vals = function(row) {
 		let vals = obj()
 		for (let field of e.all_fields) {
-			let v = e.cell_val(row, field)
+			let v = e.cell_input_val(row, field)
 			if (v !== field.default && !field.nosave)
 				vals[field.name] = v
 		}

@@ -86,4 +86,6 @@ hr {
 [b] { font-weight: bold; }
 [i] { font-style: italic; }
 
-[vflex] { display: flex; flex-flow: column; }
+[flex]     { display: flex; flex-flow: row; }
+[flexwrap] { display: flex; flex-flow: row wrap; }
+[vflex]    { display: flex; flex-flow: column; }

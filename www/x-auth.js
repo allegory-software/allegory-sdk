@@ -154,7 +154,7 @@ sign_in_dialog = memoize(function() {
 	e.email_button.action = function() {
 		let d = sign_in_dialog()
 		e.email_button.post(href('/sign-in-email.json'), {
-			email: e.email_edit.val,
+			email: e.email_edit.input_val,
 		}, function() {
 			sign_in_code()
 		}, function(err) {
@@ -167,7 +167,7 @@ sign_in_dialog = memoize(function() {
 		let d = sign_in_dialog()
 		call_login({
 				type: 'code',
-				code: e.code_edit.val,
+				code: e.code_edit.input_val,
 			},
 			e.code_button,
 			function() {
