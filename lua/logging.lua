@@ -250,7 +250,7 @@ local pp_skip = {
 	__mode = 1,
 }
 local function pp_filter(v, k, t)
-	if type(v) == 'function' then return end --skip methods.
+	if type(v) == 'function' then return ':'..k end --non-serializable.
 	if getmetatable(t) == t and pp_skip[k] then return end --skip inherits.
 	return true
 end
