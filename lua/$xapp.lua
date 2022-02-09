@@ -21,6 +21,7 @@ require'xapp'
 require'webb_query'
 require'xrowset_sql'
 require'xmodule'
+require'xusers'
 
 require'http'        .logging = logging
 require'http_client' .logging = logging
