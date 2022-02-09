@@ -70,8 +70,8 @@ pp.write(write, v, options...)
 	* `onerror` - enable error handling eg. `function(err_type, v, depth)
 	   error(err_type..': '..tostring(v)) end` (default is to add a comment).
 	* `sort_keys` - sort keys to get deterministic output (default is `true`).
-	* `filter` - filter keys, values or key/value combinations:
-	  `filter(v[, k]) -> true|false`
+	* `filter` - filter and/or translate values.
+	  `filter(v[, k]) -> passes, v`
 
 	Defaults result in diff'able human-readable output that is good for both
 	serialization and for inspecting.
@@ -303,7 +303,8 @@ end
 local function pretty(v, write, depth, wwrapper, indent,
 	parents, quote, line_term, onerror, sort_keys, filter)
 
-	if not filter(v) then return end
+	local ok, v = filter(v)
+	if not ok then return end
 
 	if is_serializable(v) then
 
@@ -336,7 +337,8 @@ local function pretty(v, write, depth, wwrapper, indent,
 		local maxn = 0
 		for k,v in ipairs(t) do
 			maxn = maxn + 1
-			if filter(v, k, t) then
+			local ok, v = filter(v, k, t)
+			if ok then
 				if first then
 					first = false
 				else
@@ -353,29 +355,32 @@ local function pretty(v, write, depth, wwrapper, indent,
 
 		local pairs = sort_keys ~= false and sortedpairs or pairs
 		for k,v in pairs(t, parents) do
-			if not is_array_index_key(k, maxn) and filter(v, k, t) then
-				if first then
-					first = false
-				else
-					write','
-				end
-				if indent then
-					write(line_term)
-					write(indent:rep(depth))
-				end
-				if is_stringable(k) then
-					k = tostring(k)
-				end
-				if is_identifier(k) then
-					write(k); write'='
-				else
-					write'['
-					pretty(k, write, depth + 1, wwrapper, indent,
+			if not is_array_index_key(k, maxn) then
+				local ok, v = filter(v, k, t)
+				if ok then
+					if first then
+						first = false
+					else
+						write','
+					end
+					if indent then
+						write(line_term)
+						write(indent:rep(depth))
+					end
+					if is_stringable(k) then
+						k = tostring(k)
+					end
+					if is_identifier(k) then
+						write(k); write'='
+					else
+						write'['
+						pretty(k, write, depth + 1, wwrapper, indent,
+							parents, quote, line_term, onerror, sort_keys, filter)
+						write']='
+					end
+					pretty(v, write, depth + 1, wwrapper, indent,
 						parents, quote, line_term, onerror, sort_keys, filter)
-					write']='
 				end
-				pretty(v, write, depth + 1, wwrapper, indent,
-					parents, quote, line_term, onerror, sort_keys, filter)
 			end
 		end
 
@@ -394,7 +399,7 @@ local function pretty(v, write, depth, wwrapper, indent,
 	end
 end
 
-local function nofilter(v) return true end
+local function nofilter(v) return true, v end
 
 local function args(opt, ...)
 	local
@@ -450,7 +455,7 @@ local pp_skip = {
 local function filter(v, k, t) --don't show methods and inherited objects.
 	if type(v) == 'function' then return end --skip methods.
 	if getmetatable(t) == t and pp_skip[k] then return end --skip inherits.
-	return true
+	return true, v
 end
 local function pp(...)
 	local n = select('#',...)
