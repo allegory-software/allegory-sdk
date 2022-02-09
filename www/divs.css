@@ -1,3 +1,20 @@
+/*
+
+	divs.css | css reset, divs.js requirements, html inline styling
+
+HTML INLINE STYLING
+
+	[nowrap]         fitted text with ellipsis
+	[gray]           gray text
+	[small]          small text
+	[tight]          tight lines
+	[b] [i]          bold, italic
+
+	[flex]           horizontal flexbox
+	[flexwrap]       horizontal flexbox with auto-wrapping
+	[vflex]          vertical flexbox
+
+*/
 
 /* reset ------------------------------------------------------------------ */
 
@@ -18,14 +35,15 @@ html {
 body {
 	width: 100%;
 	height: 100%;
-	overflow: auto;
 	/*
 	For document-style UIs use `overflow-y: scroll` to avoid the annoying
 	horizontal shifting of a centered page that happens between pages that fit
 	the height of the window and those that don't. For split-screen-style UIs
-	OTOH use `overflow-y: auto` because they use full-screen splitters that
-	do the scrolling instead so the body itself should never have to scroll.
+	use `overflow-y: auto` or `hidden` instead because they use full-screen
+	splitters that do the scrolling instead so the body itself should never
+	have to scroll. We use `auto` by default to detect content overflow bugs.
 	*/
+	overflow: auto;
 	/* overflow-y: scroll; */
 }
 
@@ -40,12 +58,9 @@ hr {
 	border-top-style: solid;
 }
 
-[hidden] { display: none !important; } /* because css `display` overrides it! */
+/* divs.js requirements --------------------------------------------------- */
 
-.popup {
-	position: absolute !important;
-	white-space: nowrap; /* expand width to fit contents for `absolute` elements. I know... */
-}
+[hidden] { display: none !important; } /* because css `display` overrides it! */
 
 [disabled] {
 	opacity: .5;
@@ -56,6 +71,11 @@ hr {
 [disabled] *
 {
 	cursor: default !important;
+}
+
+.popup {
+	position: absolute !important;
+	white-space: nowrap; /* expand width to fit contents for `absolute` elements. I know... */
 }
 
 .modal-dialog {

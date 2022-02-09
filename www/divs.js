@@ -4,10 +4,13 @@
 	Written by Cosmin Apreutesei. Public domain.
 
 	Dependencies:
-		glue.js.
+		glue.js
 
-	CSS Requirements:
-		[hidden] { display: none !important; }
+	CSS Requirements (see divs.js):
+		[hidden]
+		[disabled]
+		.popup
+		.modal-dialog
 
 	Init requirements:
 		init_components()
@@ -941,8 +944,6 @@ method(Window, 'rect', function() {
 })
 
 // common style wrappers -----------------------------------------------------
-
-// NOTE: requires `[hidden] { display: none !important; }` in CSS.
 
 method(Element, 'show', function(v, ev) {
 	v = v !== false

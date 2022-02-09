@@ -1,3 +1,14 @@
+/*
+
+	x-widgets.css | x-widgets layouting and default styling
+
+LAYOUTING
+
+	.x-flex                         tells inside input boxes to stretch.
+	.x-container                    tells inside .x-stretched widgets to remove
+	                                their margins & border.
+
+*/
 
 /* variables -------------------------------------------------------------- */
 
@@ -109,6 +120,8 @@
 	--x-item-border-width          : 1px; /* needed to show rows with errors */
 
 }
+
+/* reset ------------------------------------------------------------------ */
 
 a {
 	color: var(--x-fg-link);
