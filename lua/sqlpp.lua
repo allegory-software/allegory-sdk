@@ -1544,6 +1544,7 @@ function sqlpp.new(init)
 		return repl(ret.insert_id, 0, nil)
 	end
 	function cmd:insert_row(tbl, vals, col_map)
+		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map)
 		local tdef = self:table_def(tbl)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields)
@@ -1559,6 +1560,7 @@ function sqlpp.new(init)
 		return pass(self:query({parse = false}, sql))
 	end
 	function cmd:insert_or_update_row(tbl, vals, col_map)
+		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map)
 		local tdef = self:table_def(tbl)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields)
@@ -1572,6 +1574,7 @@ function sqlpp.new(init)
 	end
 
 	function cmd:update_row(tbl, vals, col_map, security_filter)
+		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map)
 		local tdef = self:table_def(tbl)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields)
@@ -1588,6 +1591,7 @@ function sqlpp.new(init)
 	end
 
 	function cmd:delete_row(tbl, vals, col_map, security_filter)
+		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map)
 		local tdef = self:table_def(tbl)
 		local where_sql = where_sql(self, vals, col_map, tdef.pk, tdef.fields, security_filter)
@@ -1601,6 +1605,7 @@ function sqlpp.new(init)
 	--You do the math for the other rows, they should be consecutive even
 	--while other inserts are happening at the same time but I'm not sure.
 	function cmd:insert_rows(tbl, rows, col_map, compact)
+		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map)
 		if #rows == 0 then
 			return
