@@ -2517,6 +2517,8 @@ function nav_widget(e) {
 
 		e.set_cell_state(field, 'input_val', val, cur_val)
 		e.set_cell_state(field, 'errors'   , errors)
+		if (cell_modified)
+			e.set_cell_state(field, 'val', val)
 		e.set_row_state('has_errors', row_has_errors)
 		e.set_row_state('modified'  , row_modified, false)
 

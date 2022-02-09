@@ -669,6 +669,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 /* all inputs ------------------------------------------------------------- */
 
+.x-flex {
+	/* without a x-flex parent, input boxes self-size to a fixed size. */
+}
+
 .x-input-widget {
 	/* layout self & content */
 	display: inline-flex; /* baseline-align in an inline context */
@@ -741,11 +745,21 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* checkbox --------------------------------------------------------------- */
 
 .x-markbox {
-	/* styling */
+	/* self sizing */
+	width: var(--x-width-input);
+
+/* styling */
 	border-width: 1px;
 	border-style: dashed;
 	border-color: transparent;
 	border-radius: 0;
+}
+
+.x-flex > .x-markbox,
+.x-flex > .x-input > .x-markbox
+{
+	width: auto;
+	min-width: 0;
 }
 
 .x-markbox > .x-focus-box {

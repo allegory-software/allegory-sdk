@@ -13,6 +13,10 @@ DEFINES
 	action['sign_in_email.json']
 	action['sign_in_phone.json']
 
+CONFIG
+
+	noreply_email              email
+
 ]==]
 
 require'webb_spa'
@@ -36,7 +40,7 @@ wwwfile['x-auth.css'] = [[
 }
 
 .x-settings-tooltip .x-tooltip-content {
-	min-width: 400px;
+	min-width: 300px;
 }
 
 .x-settings-button > .x-button-icon {

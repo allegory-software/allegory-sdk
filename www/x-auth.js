@@ -110,10 +110,7 @@ component('x-settings-button', function(e) {
 				})
 			}
 
-			let settings_form = div({style: `
-					display: flex;
-					flex-flow: column;
-				`},
+			let settings_form = div({vflex: '', class: 'x-flex'},
 				user_email,
 				night_mode,
 				sign_in_button,
@@ -157,7 +154,7 @@ sign_in_dialog = memoize(function() {
 	e.email_button.action = function() {
 		let d = sign_in_dialog()
 		e.email_button.post(href('/sign-in-email.json'), {
-			email: e.email_edit.input_val,
+			email: e.email_edit.val,
 		}, function() {
 			sign_in_code()
 		}, function(err) {
@@ -170,7 +167,7 @@ sign_in_dialog = memoize(function() {
 		let d = sign_in_dialog()
 		call_login({
 				type: 'code',
-				code: e.code_edit.input_val,
+				code: e.code_edit.val,
 			},
 			e.code_button,
 			function() {
