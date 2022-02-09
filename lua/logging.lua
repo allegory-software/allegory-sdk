@@ -250,14 +250,13 @@ local pp_skip = {
 	__mode = 1,
 }
 local function pp_filter(v, k, t)
+	if type(v) == 'function' then return true, debug_id(v) end
 	if getmetatable(t) == t and pp_skip[k] then return end --skip inherits.
-	return true
+	return true, v
 end
 local function pp_onerror(err, v)
 	if err == 'cycle' then return '(cycle)' end
-	if err == 'unserializable' then
-		return '#'..(type(v) == 'function' and 'fn' or type(v))
-	end
+	if err == 'unserializable' then return '#'..type(v) end
 end
 local pp_opt = {
 	filter = pp_filter,
