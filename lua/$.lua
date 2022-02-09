@@ -219,7 +219,7 @@ function check(errorclass, event, v, ...)
 	assert(type(event) == 'string')
 	local e = errors.new(errorclass, ...)
 	if not e.logged then
-		logerror(e.classname, event, e.message)
+		logerror(e.classname, event, '%s', e.message)
 		e.logged = true --prevent duplicate logging of the error on a catch-all handler.
 	end
 	raise(e)
