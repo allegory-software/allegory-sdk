@@ -7,18 +7,21 @@ Webb is a procedural web framework for http_server.
 
 FEATURES
 
-	* filesystem decoupling with virtual files and actions
-	* action-based routing with multi-language URLs
-	* http error responses via exceptions
-	* file serving with cache control
-	* output buffering stack
-	* rendering with mustache templates, php-like templates and Lua scripts
-	* multi-language html with server-side language filtering
-	* online js and css bundling and minification
-	* email sending with popular email sending providers
-	* standalone operation without a web server for debugging and offline scripts
-	* SQL query module with implicit connection pool
-	* SPA module with client-side action-based routing
+  * implicit request context but single shared Lua state for all requests
+  * filesystem decoupling with virtual files and actions (single-file webb apps)
+  * standalone operation without a web server for debugging and offline scripts
+  * output buffering stack
+  * file serving with cache control
+  * http error responses via exceptions
+  * rendering with mustache templates, php-like templates and Lua scripts
+  * multi-language html with server-side language filtering
+  * online js and css bundling and minification
+  * multipart email sending via SMTP
+
+  * webb_action : action-based routing module with multi-language URLs
+  * webb_query  : SQL query module with implicit connection pool
+  * webb_spa    : SPA module with client-side action-based routing
+  * webb_auth   : Session-based authentication module
 
 EXPORTS
 
@@ -216,21 +219,30 @@ STANDALONE OPERATION
 
 CONFIG
 
-	config'app_name'                        required, app name
-	config'app_dir'                         required, app dir
-	config'main_module'                     optional, main module / respond function
-	config'www_dir'                         optional, static files dir
-	config'libwww_dir'                      optional, shared www dir
-	config'var_dir'                         optional, persistent state dir
-	config'http_addr'                       optional, HTTP listen IP address
-	config'http_port'                       optional, HTTP listen port
-	config'https_addr'                      optional, HTTPS listen addr
-	config'https_port'                      optional, HTTPS listen port
-	config'https_cert_file'                 optional, SSL crt file
-	config'https_key_file'                  optional, SSL key file
-	config'base_url'                        optional, fixed base URL for absurl()
-	config'host'                            optional, host when `Host` header missing
-	config'ns'                              optional, nameserver IPs
+	app_name         <required>            app name
+	app_dir          <required>            app dir
+	main_module      app_name              main module / respond function
+	www_dir          APP_DIR/www           static files dir
+	libwww_dir       APP_DIR/sdk/www       shared www dir
+	var_dir          APP_DIR/var           persistent state dir
+	http_addr        *                     HTTP listen IP address
+	http_port        80                    HTTP listen port
+	https_addr       *                     HTTPS listen addr
+	https_port       443                   HTTPS listen port
+	https_crt_file   VAR_DIR/HOST.crt      SSL crt file
+	https_key_file   VAR_DIR/HOST.key      SSL key file
+	base_url         SCHEME://HOST[:PORT]  fixed base URL for absurl()
+	host             tcp.local_addr        when `Host` header missing
+	ns               1.1.1.1 8.8.8.8       nameserver IPs
+	ca_file          VAR_DIR/cacert.pem    CA file for HTTPS and SMTPS clients
+	smtp_host        127.0.0.1             SMTP host
+	smtp_port        587                   SMTP port
+	smtp_user        <required>            SMTP auth user
+	smtp_pass        <required>            SMTP auth password
+	smtp_tls         false                 true to use TLS with SMTP
+	noreply_email    noreply@HOST
+	http_debug       nil                   'protocol stream errors tracebacks'
+	smtp_debug       nil                   'protocol stream errors tracebacks'
 
 ]==]
 
@@ -258,6 +270,8 @@ local memoize = glue.memoize
 local _ = string.format
 local format = string.format
 local indir = function(...) return assert(path.indir(...)) end
+local index = glue.index
+local names = glue.names
 
 _G.glue = glue
 _G.pp = pp
@@ -1602,6 +1616,7 @@ function webb.server(opt)
 	end
 	return server:new(update({
 		libs = 'zlib sock '..(config'https_addr' and 'sock_libtls' or ''),
+		debug = config'http_debug' and index(names(config'http_debug' or '')),
 		listen = {
 			{
 				host = host,

@@ -33,9 +33,7 @@ local schema = require'schema'
 ffi.tls_libname = 'tls_bearssl'
 
 cmd_server('run', 'Run server in foreground', function()
-	local server = webb.server{
-		debug = config'http_debug' and index(names(config'http_debug' or '')),
-	}
+	local server = webb.server()
 	server.start()
 end)
 
