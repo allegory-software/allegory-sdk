@@ -34,7 +34,7 @@ ffi.tls_libname = 'tls_bearssl'
 
 cmd_server('run', 'Run server in foreground', function()
 	local server = webb.server{
-		debug = index(names(config('http_debug', ''))),
+		debug = config'http_debug' and index(names(config'http_debug' or '')),
 	}
 	server.start()
 end)

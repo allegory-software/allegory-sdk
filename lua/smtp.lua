@@ -171,11 +171,14 @@ function client:connect(t)
 		send(data)
 		send'\r\n.\r\n'
 		check_reply'2..'
-		return self
+		return true
 	end
 	mprotect'sendmail'
 
 	function self:close()
+		if self.tcp:closed() then
+			return true
+		end
 		dp('close', '%s', self.tcp)
 		set_timeout(self.connect_timeout)
 		send_line'QUIT'

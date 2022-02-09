@@ -196,7 +196,7 @@ FILE CONCATENATION LISTS
 
 MAIL SENDING
 
-	sendmail(from, rcpt, subj, msg, html)   send email
+	sendmail{from=, to=, subject=, text=, html=, attachments=, inlines=}
 
 IMAGE PROCESSING
 
@@ -921,7 +921,7 @@ local function checkfunc(code, default_err)
 		http_error{
 			status = code,
 			headers = {['content-type'] = 'application/json'},
-			content = json{error = err or default_err},
+			content = json{error = tostring(err or default_err)},
 		}
 	end
 end
@@ -1380,36 +1380,39 @@ end
 --mail sending ---------------------------------------------------------------
 
 local function strip_name(email)
-	return '<'..(email:match'<(.-)>' or email)..'>'
+	return email:match'<(.-)>' or email
 end
+function sendmail(opt)
 
-function sendmail(from, rcpt, subj, msg, html)
-	--TODO: integrate a few "transactional" email providers here.
-	webb.note('webb', 'sendmail', 'from=%s rcpt=%s subj=%s', from, rcpt, subj)
-	do return end
-	return send{
-		from = strip_name(from),
-		rcpt = {
-			strip_name(rcpt),
-			strip_name(from),
+	local smtp = require'smtp'
+	local multipart = require'multipart'
+
+	local smtp = check500(smtp:connect{
+		logging = true,
+		debug = config'smtp_debug' and index(names(config'smtp_debug' or '')),
+		host  = config('smtp_host', '127.0.0.1'),
+		port  = config('smtp_port', 587), --TODO: 465
+		tls   = config('smtp_tls', false), --TODO: true
+		user  = config'smtp_user',
+		pass  = config'smtp_pass',
+		tls_options = {
+			ca_file = config('ca_file', varpath'cacert.pem'),
+			loadfile = glue.readfile,
 		},
-		headers = {
-			from = from,
-			to = rcpt,
-			subject = subj,
-			['content-type'] = html and 'text/html' or 'text/plain'
-		},
-		body = msg,
-		server = config('smtp_host', '127.0.0.1'),
-		port   = config('smtp_port', 25),
-	}
+	})
+
+	local req = update({}, opt)
+	req.from = strip_name(opt.from)
+	req.to = strip_name(opt.to)
+	req = multipart.mail(req)
+
+	check500(smtp:sendmail(req))
+	check500(smtp:close())
 end
 
 --image processing -----------------------------------------------------------
 
 function resize_image(src_path, dst_path, max_w, max_h)
-
-	local use_cairo = false
 
 	glue.fcall(function(finally, except)
 
@@ -1434,7 +1437,7 @@ function resize_image(src_path, dst_path, max_w, max_h)
 				local w, h = box2d.fit(img.w, img.h, max_w, max_h)
 				local sn = math.ceil(glue.clamp(math.max(w / img.w, h / img.h) * 8, 1, 8))
 				bmp = assert(img:load{
-					accept = {[use_cairo and 'bgra8' or 'rgba8'] = true},
+					accept = {rgba8 = true},
 					scale_num = sn,
 					scale_denom = 8,
 				})
@@ -1454,34 +1457,14 @@ function resize_image(src_path, dst_path, max_w, max_h)
 			webb.note('webb', 'resize', '%s %d,%d -> %d,%d %d%%', path.file(src_path),
 				bmp.w, bmp.h, w, h, w / bmp.w * 100)
 
-			if use_cairo then
+			local pil = require'pillow'
 
-				local cairo = require'cairo'
+			local src_img = pil.image(bmp)
+			local dst_img = src_img:resize(w, h)
+			src_img:free()
+			bmp = dst_img:bitmap()
+			finally(function() dst_img:free() end)
 
-				local src_sr = cairo.image_surface(bmp)
-				local dst_sr = cairo.image_surface('bgra8', w, h)
-				local cr = dst_sr:context()
-				local sx = w / bmp.w
-				local sy = h / bmp.h
-				cr:scale(sx, sy)
-				cr:source(src_sr)
-				cr:paint()
-				cr:free()
-				src_sr:free()
-				bmp = dst_sr:bitmap()
-				finally(function() dst_sr:free() end)
-
-			else
-
-				local pil = require'pillow'
-
-				local src_img = pil.image(bmp)
-				local dst_img = src_img:resize(w, h)
-				src_img:free()
-				bmp = dst_img:bitmap()
-				finally(function() dst_img:free() end)
-
-			end
 		end
 
 		--encode back.
@@ -1542,7 +1525,6 @@ end
 --standalone operation -------------------------------------------------------
 
 function webb.run(f, ...)
-	local note = require'logging'.note
 	if cx then
 		return f(...)
 	end
@@ -1584,7 +1566,6 @@ function webb.run(f, ...)
 end
 
 function webb.request(...)
-	local note = require'logging'.note
 	require'webb_action'
 	webb.run(function(arg1, ...)
 		local req = type(arg1) == 'table' and arg1 or {args = {arg1,...}}

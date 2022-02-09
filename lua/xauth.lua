@@ -6,7 +6,7 @@
 DEFINES
 
 	template.sign_in_dialog
-	template.sign_in_email
+	template.sign_in_email_html|text
 
 	action['x-auth.css']
 	action['login.json']
@@ -93,11 +93,20 @@ template.sign_in_dialog = [[
 </x-dialog>
 ]]
 
-template.sign_in_email = [[
+template.sign_in_email_text = [[
 
 Your sign-in code:
 
 {{code}}
+
+]]
+
+template.sign_in_email_html = [[
+
+<p>Your sign-in code:</p>
+
+<h1>{{code}}</h1>
+
 
 ]]
 
@@ -113,10 +122,10 @@ action['sign_in_email.json'] = function()
 	local email = allow(json_str_arg(params.email),
 		S('email_required', 'Email address required'))
 	local code = allow(gen_auth_code('email', email))
-	log('SIGN-IN', 'email=%s code=%s', email, code)
 	local subj = S('sign_in_email_subject', 'Your sign-in code')
-	local msg = render('sign_in_email', {code = code, host = host()})
-	sendmail(noreply, email, subj, msg)
+	local text = render('sign_in_email_text', {code = code, host = host()})
+	local html = render('sign_in_email_html', {code = code, host = host()})
+	sendmail{from = noreply, to = email, subject = subj, text = text, html = html}
 	return {ok = true}
 end
 
@@ -126,7 +135,6 @@ action['sign_in_phone.json'] = function()
 	local code = allow(gen_auth_code('phone', phone))
 	local msg = S('sign_in_sms_message',
 		'Your sign-in code for {1} is: {0}', code, host())
-	log('SIGN-IN', 'phone=%s code=%s', phone, code)
 	sendsms(phone, msg)
 	return {ok = true}
 end
