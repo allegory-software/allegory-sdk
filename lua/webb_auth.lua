@@ -166,11 +166,11 @@ function webb.auth_schema()
 	tables.usr = {
 		usr         , idpk    ,
 		anonymous   , bool1   ,
-		email       , email   ,
+		email       , email   , uk,
 		emailvalid  , bool0   ,
 		pass        , hash    ,
-		facebookid  , name    ,
-		googleid    , name    ,
+		facebookid  , name    , uk,
+		googleid    , name    , uk,
 		gimgurl     , url     , --google image url
 		active      , bool1   ,
 		title       , name    ,
@@ -204,6 +204,17 @@ function webb.auth_schema()
 		ctime       , ctime  ,
 	}
 
+end
+
+function create_sadmin()
+	local sadmin_email = config'sadmin_email'
+		or config'host' and 'admin@'..config'host'
+	query([[
+	replace into usr
+		(anonymous, email, emailvalid, roles)
+	values
+		(0, ?, 1, 'sadmin')
+	]], sadmin_email)
 end
 
 local function fullname(firstname, lastname)

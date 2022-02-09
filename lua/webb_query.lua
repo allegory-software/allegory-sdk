@@ -153,6 +153,7 @@ function create_db(ns)
 	local dbname = dbname(ns)
 	db:create_db(dbname)
 	db:use(dbname)
+	return db
 end
 
 function sqlpps.mysql.fk_message_remove()
