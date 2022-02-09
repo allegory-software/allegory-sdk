@@ -3457,7 +3457,6 @@ component('x-form', 'Containers', function(e) {
 	function area_name(item) {
 		let s = item.attr('area') || item.col || item.attr('col') || item.id
 		if (!s) return
-		s = s.slice(0, 3)
 		if (names[s]) {
 			let x = num(names[s][2]) || 1
 			do { s = s.slice(0, 2) + (x + 1) } while (names[s])
