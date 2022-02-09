@@ -192,7 +192,8 @@ let sign_in_dialog_modal = function() {
 
 let sign_in = function() {
 	let d = sign_in_dialog_modal()
-	d.email_edit.errors = null
+	d.email_edit.val = null
+	d.code_edit.val = null
 	d.slides.slide(0)
 }
 
@@ -248,4 +249,3 @@ let sign_out = function() {
 }
 
 }
-
