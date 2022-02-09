@@ -250,12 +250,24 @@ local pp_skip = {
 	__mode = 1,
 }
 local function pp_filter(v, k, t)
-	if type(v) == 'function' then return ':'..k end --non-serializable.
 	if getmetatable(t) == t and pp_skip[k] then return end --skip inherits.
 	return true
 end
-local pp_opt = {filter = pp_filter}
-local pp_opt_compact = {filter = pp_filter, indent = false}
+local function pp_onerror(err, v)
+	if err == 'cycle' then return '(cycle)' end
+	if err == 'unserializable' then
+		return '#'..(type(v) == 'function' and 'fn' or type(v))
+	end
+end
+local pp_opt = {
+	filter = pp_filter,
+	onerror = pp_onerror,
+}
+local pp_opt_compact = {
+	filter = pp_filter,
+	onerror = pp_onerror,
+	indent = false,
+}
 local function pp_compact(v)
 	local s = pp.format(v, pp_opt)
 	return #s < 50 and pp.format(v, pp_opt_compact) or s
