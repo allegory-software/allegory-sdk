@@ -206,15 +206,15 @@ function webb.auth_schema()
 
 end
 
-function create_sadmin()
-	local sadmin_email = config'sadmin_email'
+function create_sadmin(email)
+	email = email or config'sadmin_email'
 		or config'host' and 'admin@'..config'host'
 	query([[
 	replace into usr
 		(anonymous, email, emailvalid, roles)
 	values
-		(0, ?, 1, 'sadmin')
-	]], sadmin_email)
+		(0, ?, 1, 'sadmin admin')
+	]], email)
 end
 
 local function fullname(firstname, lastname)
