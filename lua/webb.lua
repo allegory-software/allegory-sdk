@@ -132,11 +132,12 @@ URL ENCODING
 RESPONSE
 
 	http_error(res)                         raise a http error
-	redirect(url[, status])                 exit with "302 moved temporarily"
-	checkfound(ret, err) -> ret             exit with "404 not found"
-	checkarg(ret, err) -> ret               exit with "400 bad request"
-	allow(ret, err) -> ret                  exit with "403 forbidden"
-	check_etag(s)                           exit with "304 not modified"
+	redirect(url[, status])                 exit with "302 Moved temporarily"
+	checkfound(ret, err) -> ret             exit with "404 Not found"
+	checkarg(ret, err) -> ret               exit with "400 Bad request"
+	check500(ret, err) -> ret               exit with "500 Server error"
+	allow(ret, err) -> ret                  exit with "403 Forbidden"
+	check_etag(s)                           exit with "304 Not modified"
 	onrequestfinish(f)                      add a request finalizer
 	setconnectionclose()                    close the connection after this request.
 
@@ -943,7 +944,6 @@ checkfound = checkfunc(404, 'Not found')
 checkarg   = checkfunc(400, 'Invalid argument')
 allow      = checkfunc(403, 'Not allowed')
 check500   = checkfunc(500, 'Server error')
-check200   = checkfunc(200, 'OK')
 
 function check_etag(s)
 	if not method'get' then return s end
