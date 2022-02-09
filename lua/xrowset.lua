@@ -20,6 +20,7 @@
 		can_add_rows     : f             allow adding new rows
 		can_remove_rows  : f             allow removing rows
 		can_change_rows  : f             allow editing existing rows
+		allow            : f|'r1 ...'    allow only if current user has a matching role
 
 	Field attributes sent to client:
 		name             : 'col'         name for use in code
@@ -322,6 +323,11 @@ function virtual_rowset(init, ...)
 	end
 
 	function rs:respond()
+		if type(rs.allow) == 'function' then
+			allow(rs.allow())
+		elseif type(rs.allow) == 'string' then
+			allow(admin(rs.allow))
+		end
 		local filter = json_arg(args'filter') or {}
 		local params = {}
 		--params are prefixed so that they can be used in col_maps.
