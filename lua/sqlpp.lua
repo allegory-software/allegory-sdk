@@ -891,19 +891,19 @@ function sqlpp.new(init)
 				if d.uks and d.uks.remove then
 					for uk_name in sortedpairs(d.uks.remove) do
 						P('alter  table %-16s drop %-16s %s',
-							N(tbl_name), 'key', N(uk_name))
+							N(old_tbl_name), 'key', N(uk_name))
 					end
 				end
 
 				if d.ixs and d.ixs.remove then
 					for ix_name in sortedpairs(d.ixs.remove) do
-						P('drop index %-16s on %-16s', N(ix_name), N(tbl_name))
+						P('drop index %-16s on %-16s', N(ix_name), N(old_tbl_name))
 					end
 				end
 				if d.checks and d.checks.remove then
 					for ck_name in sortedpairs(d.checks.remove) do
 						P('alter  table %-16s drop %-16s %s',
-							N(tbl_name), 'check', N(ck_name))
+							N(old_tbl_name), 'check', N(ck_name))
 					end
 				end
 
@@ -925,7 +925,7 @@ function sqlpp.new(init)
 
 				if d.add_pk then
 					P('alter  table %-16s add %s', N(new_tbl_name),
-						self:sqlpk(d.add_pk, tbl_name))
+						self:sqlpk(d.add_pk, new_tbl_name))
 				end
 
 				if d.uks and d.uks.add then
