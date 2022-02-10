@@ -11,11 +11,13 @@ LOADS
 
 require'webb_spa'
 require'xrowset'
+require'xmodule'
 
 js[[
 
 on_dom_load(function() {
 	init_components()
+	init_root_widget()
 	init_auth()
 	init_action()
 })
