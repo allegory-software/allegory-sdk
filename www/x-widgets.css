@@ -717,7 +717,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-editbox.with-label > .x-focus-box {
 	line-height: initial;    /* prevent inheriting it */
-	padding-top: calc(var(--x-min-height-input) - 2em);
+	padding-top: calc(var(--x-min-height-input) - 2.2em);
 }
 
 /* input info button */

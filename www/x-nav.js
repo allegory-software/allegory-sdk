@@ -33,6 +33,15 @@ rowset attributes:
 	can_remove_rows
 	can_change_rows
 
+sources of field attributes, in precedence order:
+
+	e.prop_col_attrs          : {COL -> {attr->val}}
+	e.col_attrs               : {COL -> {attr->val}}
+	window.rowset_field_attrs : {ROWSET_NAME.COL -> {attr->val}}
+	e.rowset.fields           : [{attr->val},...]
+	window.field_types        : {type -> {attr->val}}
+	window.all_field_types    : {attr->val}
+
 field attributes:
 
 	identification:
@@ -370,9 +379,6 @@ server-side properties:
 		e.sql_where_row_update
 		e.sql_schema
 		e.sql_db
-
-field_types : {type -> {attr->val}}
-rowset_field_attrs : {ROWSET_NAME.COL -> {attr->val}}
 
 --------------------------------------------------------------------------- */
 

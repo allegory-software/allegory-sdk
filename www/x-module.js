@@ -18,8 +18,10 @@ function init_xmodule(opt) {
 
 	xm.root_widget = null
 
+	// TODO: these are not used yet. are they needed?
 	xm.slots = opt.slots || {} // {name -> {color:, }}
 	xm.modules = opt.modules || {} // {name -> {icon:, }}
+
 	xm.layers = {} // {name -> {name:, props: {id -> {k -> v}}}}
 	xm.instances = {} // {id -> [e1,...]}
 	xm.selected_module = null
