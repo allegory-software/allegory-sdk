@@ -44,7 +44,7 @@ end
 --xmodule --------------------------------------------------------------------
 
 function xmodule_layer_file(layer)
-	return varpath(_('x-%s.json', layer))
+	return varpath(_('xm-%s.json', layer))
 end
 
 function xmodule_layer(layer)
