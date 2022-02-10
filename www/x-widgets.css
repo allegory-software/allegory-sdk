@@ -2149,7 +2149,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-content: start;
 	align-items: start;
 
-	grid-template-columns : repeat(auto-fit, minmax(0, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
 	grid-gap: var(--x-form-margin);
 
 	/* this enables scrolling within children (it's like Harry Potter in here) */
