@@ -577,6 +577,8 @@ component('x-checkbox', 'Input', function(e) {
 		e.label_box.contenteditable = v
 		if (!v)
 			e.label = e.label_box.innerText
+		if (!v && xmodule)
+			xmodule.save()
 	}
 
 	e.on('pointerdown', function(ev) {
