@@ -47,6 +47,8 @@ function init_xmodule(opt) {
 		xm.set_root_widget(root_id && component.create(root_id), false)
 	}
 
+	window.init_root_widget = init_root_widget
+
 	xm.set_root_widget = function(root_widget, noupdate) {
 		xm.root_container = opt.root_container
 			&& $(opt.root_container)[0] || document.body
@@ -335,10 +337,7 @@ function init_xmodule(opt) {
 		return widget_select_editor(xm.instances, e => e.isnav, ...options)
 	}
 
-	on_dom_load(function() {
-		init_prop_layers()
-		init_root_widget()
-	})
+	init_prop_layers()
 
 }
 
