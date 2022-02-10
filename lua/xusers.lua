@@ -37,7 +37,7 @@ rowset.users = sql_rowset{
 	order_by = 'active desc, ctime desc',
 	insert_row = function(self, row)
 		row.anonymous = false
-		row.usr = insert_row('usr', row, [[
+		insert_row('usr', row, [[
 			active emailvalid email title name phonevalid phone sex birthday
 			newsletter roles note anonymous
 		]])
