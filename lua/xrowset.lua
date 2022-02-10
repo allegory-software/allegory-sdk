@@ -128,7 +128,7 @@ function virtual_rowset(init, ...)
 			for k in pairs(f) do
 				local v = f[k]
 				if client_field_attrs[k] then
-					if type(v) == 'function' then
+					if type(v) == 'function' then --value getter/generator
 						v = v()
 					end
 					client_field[k] = v
@@ -441,8 +441,14 @@ local function get_ids()
 		ids = {}
 		for file in pairs(files) do
 			local ext = fileext(file)
-			assert(ext == 'lua' or ext == 'js')
-			local s = assert(readfile(file))
+			local s
+			if ext == 'js' then
+				s = assert(wwwfile(file))
+			elseif ext == 'lua' then
+				s = assertf(readfile(indir(config'app_dir', file))
+						or readfile(indir(config'app_dir', 'sdk', 'lua', file)),
+							'file not found: %s', file)
+			end
 			for id, en_s in s:gmatch"[^%w_]S%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
 				local ext_id = ext..':'..id
 				local t = ids[ext_id]
