@@ -250,7 +250,7 @@ local pp_skip = {
 	__mode = 1,
 }
 local function pp_filter(v, k, t)
-	if type(v) == 'function' then return true, debug_id(v) end
+	if type(v) == 'function' then return true, '#'..debug_id(v) end --TODO
 	if getmetatable(t) == t and pp_skip[k] then return end --skip inherits.
 	return true, v
 end
