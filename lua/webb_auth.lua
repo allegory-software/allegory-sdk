@@ -153,7 +153,7 @@ require'webb'
 require'webb_query'
 require'webb_action'
 require'schema'
-require'sha2'
+require'sha2' --TODO: replace with blake3 MAC
 local hmac = require'hmac'
 local glue = require'glue'
 
@@ -210,10 +210,15 @@ function create_sadmin(email)
 	email = email or config'sadmin_email'
 		or config'host' and 'admin@'..config'host'
 	query([[
-	replace into usr
-		(anonymous, email, emailvalid, roles)
-	values
-		(0, ?, 1, 'sadmin admin')
+		insert into usr
+			(anonymous, email, emailvalid, roles)
+		values
+			(0, ?, 1, 'sadmin admin') as new
+		on duplicate key update
+			anonymous  = new.anonymous,
+			email      = new.email,
+			emailvalid = new.emailvalid,
+			roles      = new.roles
 	]], email)
 end
 
