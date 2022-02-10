@@ -59,6 +59,9 @@ QUERY EXECUTION
 	cmd:each_row_vals([opt], sql, ...)-> iter    query and iterate rows unpacked
 	cmd:each_group(col, [opt], sql, ...) -> iter query, group by col and iterate groups
 	cmd:prepare([opt], sql, ...) -> stmt         prepare query
+		opt.field_attrs <- {k->v}                 field attributes
+		opt.field_attrs <- f(cmd, fields, opt)    field attributes getter/generator
+		opt.parse                                 `false` to skip preprocessing
 	stmt:exec(...) -> rows, cols                 execute prepared query
 	stmt:first_row(...) -> rows, cols            query and return the first row
 	stmt:each_row(...) -> iter                   query and iterate rows
@@ -1023,7 +1026,7 @@ function sqlpp.new(init)
 			srows[ri] = srow
 			for i,as_col in ipairs(as_cols) do
 				local v = row[as_col]
-				if type(v) == 'function' then --self-generating value.
+				if type(v) == 'function' then --value getter/generator
 					v = v()
 				end
 				pad_dirs[i] = type(v) == 'number' and 'l' or 'r'
