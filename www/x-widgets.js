@@ -18,6 +18,7 @@ WIDGETS
 	toolbox
 	pagenav
 	richtext
+	binder
 
 GLOBALS
 
@@ -3336,3 +3337,23 @@ function richtext_widget_editing(e) {
 }
 
 }
+
+// ---------------------------------------------------------------------------
+// binder widget
+// ---------------------------------------------------------------------------
+
+component('x-binder', 'Containers', function(e) {
+
+	e.classes = 'x-container x-stretched'
+
+	let content = e.at[0]
+	e.clear()
+
+	e.property('content_bound', () => !!content.parent, function(on) {
+		if (on)
+			e.add(content)
+		else
+			content.remove()
+	})
+
+})
