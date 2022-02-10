@@ -44,7 +44,7 @@ Sfile[[
 webb.lua
 webb_query.lua
 webb_spa.lua
-webb_xapp.lua
+xapp.lua
 x-widgets.js
 x-nav.js
 x-input.js

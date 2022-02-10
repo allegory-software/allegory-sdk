@@ -21,6 +21,7 @@ CONFIG
 
 require'webb_spa'
 require'webb_auth'
+require'xrowset_sql'
 
 client_config'auto_sign_in'
 
@@ -58,6 +59,10 @@ wwwfile['x-auth.css'] = [[
 .sign-in-slides .x-button {
 	//margin: .25em 0;
 }
+
+]]
+
+template.user_settings_form = [[
 
 ]]
 
@@ -148,3 +153,55 @@ action['sign_in_phone.json'] = function()
 	sendsms(phone, msg)
 	return {ok = true}
 end
+
+rowset.users = sql_rowset{
+	allow = 'admin',
+	select = [[
+		select
+			usr         ,
+			active      ,
+			emailvalid  ,
+			email       ,
+			title       ,
+			name        ,
+			phonevalid  ,
+			phone       ,
+			facebookid  ,
+			googleid    ,
+			gimgurl     ,
+			sex         ,
+			birthday    ,
+			newsletter  ,
+			roles       ,
+			note        ,
+			clientip    ,
+			atime       ,
+			ctime       ,
+			mtime
+		from
+			usr
+	]],
+	field_attrs = {
+		note     = {hidden = true},
+		clientip = {hidden = true},
+	},
+	where_all = 'anonymous = 0',
+	pk = 'usr',
+	order_by = 'active desc, ctime desc',
+	insert_row = function(self, row)
+		row.anonymous = false
+		insert_row('usr', row, [[
+			active emailvalid email title name phonevalid phone sex birthday
+			newsletter roles note anonymous
+		]])
+	end,
+	update_row = function(self, row)
+		update_row('usr', row, [[
+			active emailvalid email title name phonevalid phone sex birthday
+			newsletter roles note
+		]])
+	end,
+	delete_row = function(self, row)
+		delete_row('usr', row)
+	end,
+}
