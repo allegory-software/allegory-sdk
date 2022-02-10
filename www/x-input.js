@@ -573,12 +573,13 @@ component('x-checkbox', 'Input', function(e) {
 
 	// widget editing ---------------------------------------------------------
 
-	e.set_widget_editing = function(v) {
-		e.label_box.contenteditable = v
-		if (!v)
+	e.set_widget_editing = function(on) {
+		e.label_box.contenteditable = on
+		if (!on) {
 			e.label = e.label_box.innerText
-		if (!v && xmodule)
-			xmodule.save()
+			if (window.xmodule)
+				xmodule.save()
+		}
 	}
 
 	e.on('pointerdown', function(ev) {

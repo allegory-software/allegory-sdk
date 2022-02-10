@@ -1571,6 +1571,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			let s = title_div.textContent
 			e.set_prop(`col.${editing_field.name}.text`, s)
 			editing_field = null
+			if (window.xmodule)
+				xmodule.save()
 		}
 	}
 
