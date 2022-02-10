@@ -371,6 +371,8 @@ method(Element, 'bind', function(on) {
 		this.bound = on
 		this.fire('bind', on)
 	}
+	// bind children after the bound event to allow components to remove their
+	// children inside the bind event handler before them getting bound.
 	this.bind_children(on)
 })
 
