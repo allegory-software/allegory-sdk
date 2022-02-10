@@ -2924,7 +2924,7 @@ function nav_widget(e) {
 				if (!from_server) {
 					let fi = 0
 					for (let field of e.all_fields) {
-						let val = row[fi++]
+						let val = row[fi]
 						if (val === undefined) {
 							val = field.client_default
 							if (isfunc(val)) // name generator etc.
@@ -2933,6 +2933,7 @@ function nav_widget(e) {
 								val = field.default
 							row[fi] = val
 						}
+						fi++
 					}
 				}
 
