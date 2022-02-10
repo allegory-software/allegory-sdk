@@ -1525,52 +1525,68 @@ function sqlpp.new(init)
 		return sql
 	end
 
-	local function set_sql(self, vals, col_map, fields)
+	local function set_sql(self, vals, col_map, fields, exclude_col)
 		local t = {}
 		for _, field in ipairs(fields) do
-			local val_name = col_map[field.col]
-			if val_name then
-				local v = vals[val_name]
-				if v ~= nil then
-					add(t, self:sqlname(field.col)..' = '..self:sqlval(v, field))
+			if field.col ~= exclude_col then
+				local val_name = col_map[field.col]
+				if val_name then
+					local v = vals[val_name]
+					if v ~= nil then
+						add(t, self:sqlname(field.col)..' = '..self:sqlval(v, field))
+					end
 				end
 			end
 		end
 		return #t > 0 and cat(t, ',\n\t')
 	end
 
-	local function pass(ret, ...)
-		if not ret then return nil, ... end
-		return repl(ret.insert_id, 0, nil)
+	local function auto_increment_col(tdef)
+		local ai_col = tdef.auto_increment_col
+		if ai_col == nil then
+			for i,f in ipairs(tdef.fields) do
+				if f.auto_increment then
+					tdef.auto_increment_col = f.col
+					return f.col
+				end
+			end
+			tdef.auto_increment_col = false
+			return false
+		else
+			return ai_col or nil
+		end
 	end
-	function cmd:insert_row(tbl, vals, col_map)
+
+	function cmd:insert_row(tbl, vals, col_map, or_update)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
-		local col_map = col_map_arg(col_map)
 		local tdef = self:table_def(tbl)
-		local set_sql = set_sql(self, vals, col_map, tdef.fields)
+		local ai_col = auto_increment_col(tdef)
+		local col_map = col_map_arg(col_map)
+		local set_sql = set_sql(self, vals, col_map, tdef.fields, ai_col)
 		local sql
 		if not set_sql then --no fields, special syntax.
 			sql = fmt('insert into %s values ()', self:sqlname(tbl))
 		else
-			sql = fmt(outdent[[
-				insert into %s set
-					%s
-			]], self:sqlname(tbl), set_sql)
-		end
-		return pass(self:query({parse = false}, sql))
-	end
-	function cmd:insert_or_update_row(tbl, vals, col_map)
-		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
-		local col_map = col_map_arg(col_map)
-		local tdef = self:table_def(tbl)
-		local set_sql = set_sql(self, vals, col_map, tdef.fields)
-		local sql = fmt(outdent[[
+			sql = fmt(outdent(or_update and [[
 				insert into %s set
 					%s
 				on duplicate key update
 					%s
-			]], self:sqlname(tbl), set_sql, set_sql)
-		return pass(self:query({parse = false}, sql))
+			]] or [[
+				insert into %s set
+					%s
+			]]), self:sqlname(tbl), set_sql, set_sql)
+		end
+		local id = repl(self:query({parse = false}, sql).insert_id, 0, nil)
+		if id then
+			assert(ai_col)
+			vals[col_map[ai_col] or ai_col] = id
+		end
+		return id, ret
+	end
+
+	function cmd:insert_or_update_row(tbl, vals, col_map)
+		return cmd:insert_row(tbl, vals, col_map, true)
 	end
 
 	function cmd:update_row(tbl, vals, col_map, security_filter)
@@ -1628,7 +1644,7 @@ function sqlpp.new(init)
 			values
 				%s
 		]], self:sqlname(tbl), cols_sql, rows_sql)
-		return pass(self:query({parse = false}, sql))
+		return self:query({parse = false}, sql)
 	end
 
 	function cmd:copy_table(tbl, dst_cmd)
