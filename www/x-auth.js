@@ -27,7 +27,7 @@ let init_settings_nav = function() {
 	}
 
 	let nav = bare_nav({
-		id: 'user_settings_nav',
+		id: config('app_name')+'_user_settings_nav',
 		static_rowset: {
 			fields: [
 				{
@@ -85,7 +85,7 @@ component('x-settings-button', function(e) {
 		} else {
 
 			let night_mode = checkbox({
-				nav_id: 'user_settings_nav',
+				nav_id: config('app_name')+'_user_settings_nav',
 				col: 'night_mode',
 				button_style: 'toggle',
 				autoclose: true,
@@ -213,6 +213,10 @@ flap.sign_in = function(on) {
 		d.close()
 }
 
+flap.signed_in = function(on) {
+	//
+}
+
 action.sign_in = function() {
 	setflaps('sign_in')
 	sign_in()
@@ -221,6 +225,13 @@ action.sign_in = function() {
 action.sign_in_code = function() {
 	setflaps('sign_in')
 	sign_in_code()
+}
+
+let signed_in = function(on, check_auto_sign_in) {
+	for (let e of $('.x-auth-signed-in-binder'))
+		e.content_bound = on
+	if (!on && check_auto_sign_in && config('auto_sign_in'))
+		exec('/sign-in')
 }
 
 let call_login = function(upload, notify_widget, success, fail) {
@@ -234,18 +245,13 @@ let call_login = function(upload, notify_widget, success, fail) {
 			broadcast('usr_changed', usr)
 
 			if (window.xmodule)
-				xmodule.set_layer('user', 'user', 'user-'+usr.usr)
+				xmodule.set_layer(config('app_name'), 'user',
+					config('app_name') + '-user-'+usr.usr)
 
 			if (success)
 				success()
 
-			let signed_in = usr && !usr.anonymous
-
-			for (let e of $('.x-auth-signed-in'))
-				e.show(signed_in)
-
-			if (!signed_in && config('auto_sign_in'))
-				exec('/sign-in')
+			signed_in(usr && !usr.anonymous, true)
 
 		},
 		fail: function(err) {
@@ -256,8 +262,7 @@ let call_login = function(upload, notify_widget, success, fail) {
 }
 
 function init_auth() {
-	for (let e of $('.x-auth-signed-in'))
-		e.hide()
+	signed_in(false, false)
 	init_settings_nav()
 	call_login()
 }
