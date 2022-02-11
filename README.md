@@ -101,6 +101,7 @@ scripts for new libraries.
   * [sha2](lua/sha2.lua)               - SHA2 hash
   * [md5](lua/md5.lua)                 - MD5 hash
   * [hmac](lua/hmac.lua)               - HMAC signing
+  * [bcrypt](lua/bcrypt.lua)           - Password hashing
 * __Compression__
   * [zlib](lua/zlib.lua)               - DEFLATE, ZLIB, GZIP (based on [zlib-ng](https://github.com/zlib-ng/zlib-ng))
   * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating (based on [minizip-ng](https://github.com/zlib-ng/minizip-ng))
