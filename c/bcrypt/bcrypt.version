@@ -1,0 +1,4 @@
+bcrypt {
+  global: crypt; crypt_gensalt;
+  local: *;
+};

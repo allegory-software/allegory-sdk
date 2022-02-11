@@ -1,0 +1,21 @@
+#go@ sh build
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+build() {
+	${X}gcc -c -O2 $C -fomit-frame-pointer -funroll-loops \
+		src/crypt_blowfish.c src/crypt_gensalt.c src/wrapper.c -Isrc
+	${X}gcc *.o -shared -o ../../bin/$P/$D $L	-Wl,--version-script=bcrypt.version
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc" D=bcrypt1.dll A=bcrypt.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libbcrypt.dylib" \
+	D=libbcrypt.dylib A=libbcrypt.a build
+else
+	P=linux C="-fPIC" L="-s -static-libgcc" D=libbcrypt.so A=libbcrypt.a build
+fi
