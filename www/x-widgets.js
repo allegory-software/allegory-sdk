@@ -18,7 +18,7 @@ WIDGETS
 	toolbox
 	pagenav
 	richtext
-	binder
+	if
 
 GLOBALS
 
@@ -48,8 +48,9 @@ publishes:
 calls:
 	e.init()
 fires:
-	^document.'widget_bind' (on)
-	^document.'ID.bind' (on)
+	^window.'widget_bind' (e, on)
+	^window.'ID.bind' (e, on)
+	^window.'ID.init' (e)
 --------------------------------------------------------------------------- */
 
 {
@@ -117,8 +118,8 @@ function component(tag, category, cons) {
 
 				this.fire('bind', true)
 				if (this.id) {
-					document.fire('widget_bind', this, true)
-					document.fire(this.id+'.bind', this, true)
+					window.fire('widget_bind', this, true)
+					window.fire(this.id+'.bind', this, true)
 				}
 
 				if (DEBUG_ATTACH_TIME) {
@@ -136,8 +137,8 @@ function component(tag, category, cons) {
 
 				this.fire('bind', false)
 				if (this.id) {
-					document.fire('widget_bind', this, false)
-					document.fire(this.id+'.bind', this, false)
+					window.fire('widget_bind', this, false)
+					window.fire(this.id+'.bind', this, false)
 				}
 
 			}
@@ -195,7 +196,7 @@ function component(tag, category, cons) {
 		e.init()
 
 		if (e.id)
-			document.fire(e.id+'.init', e)
+			window.fire(e.id+'.init', e)
 	}
 
 	bind_component(tag, initialize)
@@ -427,7 +428,7 @@ let component_props = function(e, iprops) {
 			}
 			function bind(on) {
 				e[REF] = on ? resolve(e[ID]) : null
-				document.on('widget_bind', widget_bind, on)
+				window.on('widget_bind', widget_bind, on)
 			}
 			function id_changed(id1, id0) {
 				if (e.bound)
@@ -3347,12 +3348,10 @@ function richtext_widget_editing(e) {
 }
 
 // ---------------------------------------------------------------------------
-// binder widget
+// "if" widget for conditional binding of its child widget
 // ---------------------------------------------------------------------------
 
-component('x-binder', 'Containers', function(e) {
-
-	e.classes = 'x-container x-stretched'
+component('x-if', 'Containers', function(e) {
 
 	let content = e.at[0]
 	e.clear()
