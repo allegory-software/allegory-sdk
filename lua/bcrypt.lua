@@ -3,6 +3,8 @@
 	bcrypt binding.
 	Written by Cosmin Apreutesei. Public Domain.
 
+	bcrypt.crypt(password, secret, [rounds]) -> hash
+
 ]]
 
 local ffi = require'ffi'
@@ -16,8 +18,8 @@ char *crypt_gensalt(const char *prefix, unsigned long count,
 
 local bcrypt = {}
 
-function bcrypt.crypt(key, secret)
-	local salt = C.crypt_gensalt('$2a$', 12, secret, #secret)
+function bcrypt.crypt(key, secret, rounds)
+	local salt = C.crypt_gensalt('$2a$', rounds or 12, secret, #secret)
 	assert(salt ~= nil, 'secret too short')
 	return ffi.string(C.crypt('abcd', salt))
 end
