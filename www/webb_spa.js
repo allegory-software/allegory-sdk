@@ -174,15 +174,15 @@ let url_changed = function(ev) {
 	if (ignore_url_changed)
 		return
 	let opt = ev && ev.detail || empty
-	document.fire('url_changed', opt)
+	fire('url_changed', opt)
 	let handler = action_handler(current_url())
 	if (handler)
 		handler(opt)
 	else
-		document.fire('action_not_found', opt)
+		fire('action_not_found', opt)
 }
 
-document.on('action_not_found', function() {
+on('action_not_found', function() {
 	if (location.pathname == '/') {
 		setflaps('action_not_found')
 		return // no home action
@@ -207,7 +207,7 @@ let abort_exec = function() {
 
 let check_exec = function() {
 	exec_aborted = false
-	document.fire('before_exec', abort_exec)
+	fire('before_exec', abort_exec)
 	return !exec_aborted
 }
 
