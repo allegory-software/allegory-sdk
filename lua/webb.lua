@@ -400,9 +400,7 @@ local files = {}
 local ids --{id->{files=,n=,en_s}}
 
 function Sfile(filenames)
-	for _,file in ipairs(names(filenames)) do
-		files[file] = true
-	end
+	update(files, index(names(filenames)))
 	ids = nil
 end
 
@@ -435,33 +433,21 @@ function Sfile_ids()
 	return ids
 end
 
+--using a different file for js strings so that strings.js only sends
+--js strings to the client for client-side translation.
 local function s_file(lang, ext)
 	return varpath(format('%s-s-%s%s.lua', config'app_name', lang,
 		ext == 'lua' and '' or '-'..ext))
 end
 
-local function load_s_file(file)
-	local f = loadfile(file)
-	return f and f()
-end
-
-local function save_s_file(file, t)
-	save(file, 'return '..pp.format(t, '\t'))
-end
-
-local lua_texts = {} --{lang->{id->text}}
-local js_texts  = {} --{lang->{id->text}}
-
 --TODO: invalidate this cache based on file's mtime but don't check too often.
-function S_texts(lang, ext)
-	local texts = ext == 'lua' and lua_texts or js_texts
-	local t = texts[lang]
-	if not t then
-		local file = s_file(lang, ext)
-		t = load_s_file(file) or {}
-		texts[lang] = t
-	end
-	return t
+S_texts = memoize(function(lang, ext)
+	local f = loadfile(s_file(lang, ext))
+	return f and f() or {}
+end)
+
+local function save_S_texts(lang, ext, t)
+	save(s_file(lang, ext), 'return '..pp.format(t, '\t'))
 end
 
 function update_S_texts(lang, ext, t)
@@ -469,8 +455,7 @@ function update_S_texts(lang, ext, t)
 	for k,v in pairs(t) do
 		texts[k] = v or nil
 	end
-	local file = s_file(lang, ext)
-	save_s_file(file, texts)
+	save_S_texts(lang, ext, texts)
 end
 
 function S(id, en_s, ...)
