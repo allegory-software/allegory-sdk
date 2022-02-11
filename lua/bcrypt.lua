@@ -3,7 +3,7 @@
 	bcrypt binding.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	bcrypt.crypt(password, [rounds]) -> hash
+	bcrypt.hash(password, [rounds]) -> hash
 	bcrypt.verify(password, hash) -> true|false
 
 ]]
@@ -20,7 +20,7 @@ char *crypt_gensalt(const char *prefix, unsigned long count,
 
 local bcrypt = {}
 
-function bcrypt.crypt(key, rounds)
+function bcrypt.hash(key, rounds)
 	local secret = glue.random_string(16)
 	local salt = C.crypt_gensalt('$2a$', rounds or 10, secret, #secret)
 	assert(salt ~= nil, 'secret too short')
@@ -33,7 +33,8 @@ end
 
 if not ... then
 	math.randomseed(require'time'.clock())
-	local hash = bcrypt.crypt('dude')
+	local hash = bcrypt.hash('dude')
+	print(#hash, hash) --60 bytes
 	assert(bcrypt.verify('dude', hash))
 end
 

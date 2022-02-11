@@ -13,21 +13,23 @@ SESSIONS
 	gen_auth_code('email', email) -> code     generate a one-time short-lived auth code
 	gen_auth_code('phone', phone) -> code     generate a one-time short-lived auth code
 
+SCHEMA
+
+	webb.auth_schema                         auth schema
+
 CONFIG
 
-	config('secret')                          secret to encrypt sessions and passwords
-	config('session_cookie_name', 'session')  name of the session cookie
-	config('session_cookie_secure_flag',true) set Secure flag to cookie
-	config('auto_create_user', true)          auto-create an anonymous users
+	secret                       <required>  secret to encrypt sessions and passwords
+	session_cookie_name          'session'   name of the session cookie
+	session_cookie_secure_flag   true        set Secure flag to cookie
+	auto_create_user             true        auto-create an anonymous users
 
-	config('auth_token_lifetime', 3600)       forgot-password token lifetime
-	config('auth_token_maxcount', 2)          max unexpired tokens allowed
-	config('auth_code_lifetime', 300)         one-time auth code lifetime
-	config('auth_code_maxcount', 6)           max unexpired auth codes allowed
+	auth_token_lifetime          3600        forgot-password token lifetime
+	auth_token_maxcount          2           max unexpired tokens allowed
+	auth_code_lifetime           300         one-time auth code lifetime
+	auth_code_maxcount           6           max unexpired auth codes allowed
 
-	webb.auth_schema                          auth schema
-
-API DOCS
+API DOC
 
 	login([auth][, switch_user]) -> usr | nil, err, errcode
 
@@ -149,13 +151,22 @@ anonymous then that user is also deleted afterwards.
 
 ]==]
 
-require'webb'
 require'webb_query'
-require'webb_action'
 require'schema'
 require'sha2' --TODO: replace with blake3 MAC
 local hmac = require'hmac'
+local bcrypt = require'bcrypt'
 local glue = require'glue'
+
+local function fullname(firstname, lastname)
+	return (glue.catargs('', firstname, lastname) or ''):trim()
+end
+
+local function token_hash(pass)
+	local salt = webb.secret()
+	local token = hmac.sha256(pass, salt)
+	return glue.tohex(token) --64 bytes
+end
 
 --schema ---------------------------------------------------------------------
 
@@ -220,10 +231,6 @@ function create_sadmin(email)
 			emailvalid = new.emailvalid,
 			roles      = new.roles
 	]], email)
-end
-
-local function fullname(firstname, lastname)
-	return (glue.catargs('', firstname, lastname) or ''):trim()
 end
 
 --config ---------------------------------------------------------------------
@@ -424,21 +431,12 @@ end
 
 --password authentication ----------------------------------------------------
 
-local function pass_hash(pass)
-	local salt = webb.secret()
-	--TODO: build & bind OpenWall's bcrypt or use libsodium's pwhash here.
-	--This scheme only protects the passwords against dictionary attacks
-	--if the attacker doesn't know the secret, so don't store the secret.
-	local token = hmac.sha256(pass, salt)
-	return glue.tohex(token) --64 bytes
-end
-
 local function email_pass_usr(email, pass)
-	sleep(0.2) --slow down brute-forcing
-	return first_row([[
-		select usr from usr where
-			active = 1 and email = ? and pass = ?
-		]], email, pass_hash(pass))
+	local u = first_row([[
+		select usr, pass from usr where
+			active = 1 and email = ?
+		]], email, bcrypt.hash(pass))
+	return u and bcrypt.verify(pass, u.pass) and u.usr or nil
 end
 
 local function email_usr(email)
@@ -498,7 +496,7 @@ function auth.pass(auth)
 				pass = ?
 			where
 				usr = ?
-			]], email, pass_hash(pass), usr)
+			]], email, bcrypt.hash(pass), usr)
 		clear_userinfo_cache(usr)
 		return usr
 	end
@@ -531,7 +529,7 @@ local function register_token(usr, token, validates, token_lifetime, token_maxco
 			(token, usr, expires, validates, ctime)
 		values
 			(?, ?, from_unixtime(?), ?, from_unixtime(?))
-		]], pass_hash(token), usr, expires, validates, now)
+		]], token_hash(token), usr, expires, validates, now)
 
 	return true
 end
@@ -549,7 +547,7 @@ function gen_auth_token(email)
 			'email_not_found'
 	end
 
-	local token = pass_hash(random_string(32))
+	local token = token_hash(random_string(32))
 	local ok, err = register_token(usr, token, 'email', token_lifetime, token_maxcount)
 	webb.note('auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
 	return ok and token or nil, err
@@ -579,7 +577,7 @@ function gen_auth_code(validates, s)
 		assert(false)
 	end
 
-	local code = pass_hash(random_string(64)):gsub('[a-f]', ''):sub(1, 6)
+	local code = token_hash(random_string(64)):gsub('[a-f]', ''):sub(1, 6)
 	assert(#code == 6)
 	local ok, err = register_token(usr, code, validates, code_lifetime, code_maxcount)
 	webb.note('auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
@@ -596,7 +594,7 @@ local function token_usr(token)
 			inner join usr u on u.usr = ut.usr
 		where
 			u.active = 1 and ut.expires > now() and ut.token = ?
-		]], pass_hash(token))
+		]], token_hash(token))
 	if not t then return end
 	return t.usr, t.validates
 end
@@ -622,7 +620,7 @@ local function auth_token(token, auth)
 
 	--remove the token because it's single use, and also to allow
 	--the user to keep forgetting his password as much as he wants.
-	query('delete from usrtoken where token = ?', pass_hash(token))
+	query('delete from usrtoken where token = ?', token_hash(token))
 
 	return usr
 end
@@ -818,7 +816,7 @@ function auth.update(auth)
 		end
 	end
 
-	pass = pass and pass_hash(pass)
+	pass = pass and bcrypt.hash(pass)
 
 	query([[
 		update usr set
