@@ -3,10 +3,8 @@
 	webb | action-based routing with multi-language support
 	Written by Cosmin Apreutesei. Public Domain.
 
-ACTION ALIASES
+MULTI-LANGUAGE ACTIONS & LINKS
 
-	lang([s]) -> s                        get/set current language
-	default_lang() -> s                   get default language
 	alias(name_en, name, lang)            set an action alias for a language
 	href(s|t[, target_lang]) -> s         translate page URL based on alias
 	setlinks(s) -> s                      html filter to translate URLs
@@ -21,7 +19,6 @@ ACTIONS
 
 CONFIG
 
-	config('lang', 'en')                  default language
 	config('root_action', 'en')           name of the '/' (root) action
 	config('404_html_action', '404.html') 404 action for text/html
 	config('404_png_action' , '404.png' ) 404 action for image/png
@@ -41,25 +38,6 @@ TODO
 require'webb'
 
 --multi-language actions & links ---------------------------------------------
-
-function default_lang()
-	return config('lang', 'en')
-end
-
-function lang(s)
-	if s then cx().lang = s end
-	return cx().lang or args'lang' or default_lang()
-end
-
-function S(id, en_s, ...)
-	local t = S_texts(lang(), 'lua')
-	local s = t[id] or en_s or ''
-	if select('#', ...) > 0 then
-		return glue.subst(s, ...)
-	else
-		return s
-	end
-end
 
 --[[
 It is assumed that action names are always in english even if they actually
@@ -81,7 +59,7 @@ local function action_name(action)
 end
 
 function alias(en_action, alias_action, alias_lang)
-	local default_lang = config('lang', 'en')
+	local default_lang = config('default_lang', 'en')
 	alias_lang = alias_lang or default_lang
 	alias_action = action_name(alias_action)
 	en_action = action_name(en_action)
@@ -111,7 +89,7 @@ function href(s, target_lang)
 	if not action then
 		return url(s)
 	end
-	local default_lang = config('lang', 'en')
+	local default_lang = config('default_lang', 'en')
 	local target_lang = target_lang or (t.args and t.args.lang) or lang()
 	local is_root = segs[2] == ''
 	if is_root then
@@ -138,7 +116,7 @@ local function find_action(action, ...)
 		local alias = aliases[action_name(action)] --look for a regional alias
 		if alias then
 			if not args'lang' then --?lang= has priority
-				lang(alias.lang)
+				setlang(alias.lang)
 			end
 			action = alias.action
 		end

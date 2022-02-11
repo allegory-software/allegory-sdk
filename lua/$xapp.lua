@@ -75,8 +75,8 @@ return function(app_name, ...)
 	app.schema.env.S = S
 
 	app.schema:import'schema_std'
-	app.schema:import'schema_lang'
-	app.schema:import(webb.auth_schema)
+	app.schema:import'webb_lang'
+	app.schema:import'webb_auth'
 
 	sqlpps.mysql    .define_symbol('current_timestamp', app.schema.env.current_timestamp)
 	sqlpps.tarantool.define_symbol('current_timestamp', app.schema.env.current_timestamp)

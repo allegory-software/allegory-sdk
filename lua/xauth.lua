@@ -3,19 +3,23 @@
 	webb | xapp authentication UI
 	Written by Cosmin Apreutesei. Public Domain.
 
-DEFINES
+TEMPLATES
 
-	template.sign_in_dialog
-	template.sign_in_email_html|text
+	user_settings_form
+	sign_in_dialog
+	sign_in_email_html
+	sign_in_email_text
 
-	action['x-auth.css']
-	action['login.json']
-	action['sign_in_email.json']
-	action['sign_in_phone.json']
+ACTIONS
+
+	x-auth.css
+	login.json
+	sign_in_email.json
+	sign_in_phone.json
 
 CONFIG
 
-	noreply_email              email
+	noreply_email         no-reply@HOST         sender of auth emails
 
 ]==]
 
@@ -28,9 +32,11 @@ client_config'auto_sign_in'
 jsfile'x-auth.js'
 cssfile'x-auth.css'
 
-Sfile'webb_auth.lua'
-Sfile'x-auth.js'
-Sfile'xauth.lua'
+Sfile[[
+webb_auth.lua
+x-auth.js
+xauth.lua
+]]
 
 wwwfile['x-auth.css'] = [[
 
@@ -63,7 +69,26 @@ wwwfile['x-auth.css'] = [[
 ]]
 
 template.user_settings_form = [[
-
+<script>
+	night_mode_checkbox.on('val_changed', function(v) {
+		set_night_mode(v)
+	})
+	sign_out_button.action = () => { tt.close(); sign_out(); }
+	sign_in_button.action = () => { tt.close(); sign_in(); }
+</script>
+<x-binder vflex class="x-flex x-auth-signed-in-binder">
+	<x-form nav_id=care_user_settings_nav>
+		<x-textedit col=email></x-textedit>
+		<x-checkbox id=night_mode_checkbox col=night_mode button_style=toggle></x-checkbox>
+		<x-button id=sign_out_button bare icon="fa fa-sign-out-alt">
+			<t lang=en>Log out</t>
+		</x-button>
+</x-binder>
+<x-binder vflex class="x-flex x-auth-signed-out-binder">
+	<x-button id=sign_in_button>
+		<t lang=en>Sign-In</t>
+	</x-button>
+</x-binder>
 ]]
 
 template.sign_in_dialog = [[
@@ -121,7 +146,6 @@ template.sign_in_email_html = [[
 <p>Your sign-in code:</p>
 
 <h1>{{code}}</h1>
-
 
 ]]
 

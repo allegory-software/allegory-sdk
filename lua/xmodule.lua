@@ -2,13 +2,15 @@
 
 	webb | x-module.js persistence
 
-DEFINES
+ROWSETS
 
 	rowset.rowsets
 
-	action.xmodule_next_id
-	action['xmodule_layer.json']
-	action['sql_rowset.json']
+ACTIONS
+
+	xmodule_next_id
+	xmodule_layer.json
+	sql_rowset.json
 
 CALLS
 
@@ -18,6 +20,8 @@ CALLS
 ]==]
 
 require'xrowset'
+require'webb_action'
+
 local path = require'path'
 local fs = require'fs'
 local _ = string.format

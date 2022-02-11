@@ -24,10 +24,18 @@ GLOBALS
 
 	component(tag[, category], cons)
 	notify(text, ['search'|'info'|'error'], [timeout])
+	set_theme(theme|null)
 
 */
 
 DEBUG_ATTACH_TIME = false
+
+function set_theme(theme) {
+	on_dom_load(function() {
+		document.body.attr('theme', theme)
+		document.fire('theme_changed', theme)
+	})
+}
 
 /* ---------------------------------------------------------------------------
 // creating & setting up web components
@@ -3348,12 +3356,14 @@ component('x-binder', 'Containers', function(e) {
 
 	let content = e.at[0]
 	e.clear()
+	e.hide()
 
 	e.property('content_bound', () => !!content.parent, function(on) {
 		if (on)
 			e.add(content)
 		else
 			content.remove()
+		e.show(on)
 	})
 
 })

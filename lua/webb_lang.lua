@@ -1,5 +1,14 @@
+--[==[
 
-return function()
+	webb | language/country/currency support
+	Written by Cosmin Apreutesei. Public Domain.
+
+]==]
+
+require'webb_query'
+require'schema'
+
+function webb.lang_schema()
 
 	tables.lang = {
 		lang                , lang, pk,
@@ -535,3 +544,17 @@ return function()
 
 end
 
+local langs = glue.memoize(function()
+	local t = {}
+	for i,row in each_row'select * from lang' do
+		t[row.lang] = row
+	end
+	return t
+end)
+
+function webb.langinfo(lang, k)
+	local t = langs()[lang]
+	return t and t[k]
+end
+
+return webb.lang_schema --so you can call schema:import'webb_lang'

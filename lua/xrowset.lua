@@ -54,10 +54,10 @@
 		- `pos_col` and `parent_col` are set to hidden by default.
 		- on client-side, `id_col` is set to pk if pk is single-column.
 
-DEFINES
+ACTIONS
 
-	action['rowset.json']               named rowsets action
-	action['xrowset.events']            rowset-refresh push-notifications
+	rowset.json               named rowsets action
+	xrowset.events            rowset-refresh push-notifications
 
 ]]
 
@@ -334,7 +334,7 @@ function virtual_rowset(init, ...)
 		--:old variants are added too for update where sql.
 		for k,v in pairs{
 			['param:lang'        ] = lang(),
-			['param:default_lang'] = default_lang(),
+			['param:default_lang'] = config('default_lang', 'en'),
 			['param:filter'      ] = filter,
 		} do
 			params[k] = v
@@ -421,94 +421,3 @@ action['xrowset.events'] = function()
 		out(events)
 	end
 end
-
---S translation rowset -------------------------------------------------------
-
-do
-
-local files = {}
-local ids --{id->{files=,n=,en_s}}
-
-function Sfile(filenames)
-	for _,file in ipairs(names(filenames)) do
-		files[file] = true
-	end
-	ids = nil
-end
-
-local function get_ids()
-	if not ids then
-		ids = {}
-		for file in pairs(files) do
-			local ext = fileext(file)
-			local s
-			if ext == 'js' then
-				s = assert(wwwfile(file))
-			elseif ext == 'lua' then
-				s = assertf(readfile(indir(config'app_dir', file))
-						or readfile(indir(config'app_dir', 'sdk', 'lua', file)),
-							'file not found: %s', file)
-			end
-			for id, en_s in s:gmatch"[^%w_]S%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
-				local ext_id = ext..':'..id
-				local t = ids[ext_id]
-				if not t then
-					t = {files = file, n = 1, en_s = en_s}
-					ids[ext_id] = t
-				else
-					t.files = t.files .. ' ' .. file
-					t.n = t.n + 1
-				end
-			end
-		end
-	end
-	return ids
-end
-
-rowset.S = virtual_rowset(function(self, ...)
-
-	self.fields = {
-		{name = 'ext'},
-		{name = 'id'},
-		{name = 'en_text'},
-		{name = 'text'},
-		{name = 'files'},
-		{name = 'occurences', type = 'number', max_w = 30},
-	}
-	self.pk = 'ext id'
-	self.cols = 'id en_text text'
-	function self:load_rows(rs, params)
-		rs.rows = {}
-		local lang = lang()
-		for ext_id, t in pairs(get_ids()) do
-			local ext, id = ext_id:match'^(.-):(.*)$'
-			local s = S_texts(lang, ext)[id]
-			add(rs.rows, {ext, id, t.en_s, s, t.files, t.n})
-		end
-	end
-
-	local function update_key(vals)
-		local ext  = checkarg(json_str_arg(vals['ext:old']))
-		local id   = checkarg(json_str_arg(vals['id:old']))
-		local lang = checkarg(json_str_arg(vals['param:lang']))
-		return ext, id, lang
-	end
-
-	function self:update_row(vals)
-		local ext, id, lang = update_key(vals)
-		local text = json_str_arg(vals.text)
-		update_S_texts(lang, ext, {[id] = text or false})
-	end
-
-	function self:load_row(vals)
-		local ext, id, lang = update_key(vals)
-		local t = get_ids()[ext..':'..id]
-		if not t then return end
-		local s = S_texts(lang, ext)[id]
-		return {ext, id, t.en_s, s, t.files, t.n}
-	end
-
-end)
-
-end --files
-

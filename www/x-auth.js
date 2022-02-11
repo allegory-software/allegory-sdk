@@ -11,11 +11,6 @@ CSS
 
 {
 
-function set_night_mode(v) {
-	document.body.attr('theme', v ? 'dark' : null)
-	document.fire('theme_changed', v ? 'dark' : null)
-}
-
 let init_settings_nav = function() {
 
 	init_settings_nav = noop
@@ -23,7 +18,7 @@ let init_settings_nav = function() {
 	let set = {}
 
 	set.night_mode = function(v) {
-		set_night_mode(v)
+		set_theme(v ? 'dark' : null)
 	}
 
 	let nav = bare_nav({
@@ -88,11 +83,10 @@ component('x-settings-button', function(e) {
 				nav_id: config('app_name')+'_user_settings_nav',
 				col: 'night_mode',
 				button_style: 'toggle',
-				autoclose: true,
 			})
 
 			night_mode.on('val_changed', function(v) {
-				set_night_mode(v)
+				set_theme(v ? 'dark' : null)
 			})
 
 			let user_email, sign_in_button, logout_button

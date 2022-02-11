@@ -33,11 +33,20 @@ CONFIG API
 	config{name->val}                       set multiple config values
 	with_config(conf, f, ...) -> ...        run f with custom config table
 
-LABELED STRING TRANSLATION
+MULTI-LANGUAGE SUPPORT
 
-	S_texts(lang, ext) -> s                 get internationalized strings
-	update_S_texts(lang, ext, t)            update internationalized strings
-	S(id, en_s, ...) -> s                   get internationalized string (stub)
+	lang([k])                               get lang or property of current request
+	setlang(lang)                           set lang of current request
+	webb.langinfo_table[lang] -> {k->v}     static language property table
+	webb.langinfo(lang, k) -> s             get language property (stub)
+
+MULTI-LANGUAGE STRINGS IN SOURCE CODE
+
+	S(id, en_s, ...) -> s                   get string in current language
+	S_texts(lang, ext) -> s                 get stored translated strings
+	update_S_texts(lang, ext, t)            update stored translated strings
+	Sfile'file1 ...'                        register source code file
+	Sfile_ids() -> {id->{file=,n=,en_s=}    parse source code files for S() calls
 
 REQUEST CONTEXT
 
@@ -190,7 +199,7 @@ LUA SCRIPTS
 
 HTML FILTERS
 
-	filter_lang(s, lang) -> s               filter <t> tags and :lang attrs
+	filter_lang(s, lang) -> s               filter <t> tags and foo:lang attrs
 	filter_comments(s) -> s                 filter <!-- --> comments
 
 FILE CONCATENATION LISTS
@@ -244,6 +253,7 @@ CONFIG
 	noreply_email    noreply@HOST
 	http_debug       nil                   'protocol stream errors tracebacks'
 	smtp_debug       nil                   'protocol stream errors tracebacks'
+	default_lang     'en'                  default language
 
 ]==]
 
@@ -357,9 +367,74 @@ do
 	end
 end
 
---multi-language strings -----------------------------------------------------
+--multi-language support -----------------------------------------------------
+
+webb.langinfo_table = {
+	en = {
+		rtl = false,
+		en_name = 'English',
+		name = 'English',
+		decimal_separator = ',',
+		thousands_separator = '.',
+	},
+}
+function webb.langinfo(lang, k) --stub, see webb_lang.lua
+	return webb.langinfo_table[lang]
+end
+
+function lang(k)
+	local lang = cx.lang or args'lang' or config('default_lang', 'en')
+	if k then return webb.langinfo(lang, k) end
+	return lang
+end
+
+function setlang(s)
+	cx.lang = s
+end
+
+--multi-language strings in source code files --------------------------------
 
 do
+
+local files = {}
+local ids --{id->{files=,n=,en_s}}
+
+function Sfile(filenames)
+	for _,file in ipairs(names(filenames)) do
+		files[file] = true
+	end
+	ids = nil
+end
+
+function Sfile_ids()
+	if not ids then
+		ids = {}
+		for file in pairs(files) do
+			local ext = fileext(file)
+			local s
+			if ext == 'js' then
+				s = assert(wwwfile(file))
+			elseif ext == 'lua' then
+				s = assertf(readfile(indir(config'app_dir', file))
+						or readfile(indir(config'app_dir', 'sdk', 'lua', file)),
+							'file not found: %s', file)
+			end
+			for id, en_s in s:gmatch"[^%w_]S%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
+				local ext_id = ext..':'..id
+				local t = ids[ext_id]
+				if not t then
+					t = {files = file, n = 1, en_s = en_s}
+					ids[ext_id] = t
+				else
+					t.files = t.files .. ' ' .. file
+					t.n = t.n + 1
+				end
+			end
+		end
+	end
+	return ids
+end
+
 local function s_file(lang, ext)
 	return varpath(format('%s-s-%s%s.lua', config'app_name', lang,
 		ext == 'lua' and '' or '-'..ext))
@@ -371,12 +446,13 @@ local function load_s_file(file)
 end
 
 local function save_s_file(file, t)
-	writefile(file, 'return '..pp.format(t, '\t'))
+	save(file, 'return '..pp.format(t, '\t'))
 end
 
 local lua_texts = {} --{lang->{id->text}}
 local js_texts  = {} --{lang->{id->text}}
 
+--TODO: invalidate this cache based on file's mtime but don't check too often.
 function S_texts(lang, ext)
 	local texts = ext == 'lua' and lua_texts or js_texts
 	local t = texts[lang]
@@ -397,7 +473,9 @@ function update_S_texts(lang, ext, t)
 	save_s_file(file, texts)
 end
 
-function S(_, s, ...) --stub, reimplemented in `webb_action`
+function S(id, en_s, ...)
+	local t = S_texts(lang(), 'lua')
+	local s = t[id] or en_s or ''
 	if select('#', ...) > 0 then
 		return glue.subst(s, ...)
 	else
@@ -405,7 +483,7 @@ function S(_, s, ...) --stub, reimplemented in `webb_action`
 	end
 end
 
-end
+end --do
 
 --per-request environment ----------------------------------------------------
 
@@ -1014,14 +1092,6 @@ function readfile(file, parse)
 	return parse(s)
 end
 
-function writefile(file, s, mode)
-	webb.note('fs', 'writefile', '%s (%s %s)', file,
-		mode or 'w', type(s) == 'string' and #s..' bytes' or type(s))
-	local ok, err = glue.writefile(file, s, mode)
-	if ok then return ok end
-	webb.logerror('fs', 'writefile', 'failed writing file %s: %s', file, err)
-end
-
 do
 local cache = {} --{file -> {mtime=, contents=}}
 function readfile_cached(file, parse)
@@ -1308,7 +1378,7 @@ end
 function filter_lang(s, lang)
 	local lang0 = lang
 
-	--replace <t class=lang>
+	--replace <t class=lang> which can also be hidden via CSS with this syntax.
 	s = s:gsub('<t class=([^>]+)>(.-)</t>', function(lang, html)
 		assert(not html:find('<t class=', 1, true), html)
 		if lang ~= lang0 then return '' end
