@@ -180,7 +180,7 @@ function init_xmodule(opt) {
 		}
 	}
 
-	document.on('widget_bind', function(e, on) {
+	window.on('widget_bind', function(e, on) {
 		xm.bind_instance(e, on)
 		document.fire('widget_tree_changed')
 	})
