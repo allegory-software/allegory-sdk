@@ -1,4 +1,3 @@
-#go@ sh build
 #!/bin/sh
 cd "${0%build}" || exit 1
 

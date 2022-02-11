@@ -1,4 +1,4 @@
-terra {
+pillow_simd {
   global: pillow_*;
   local: *;
 };
