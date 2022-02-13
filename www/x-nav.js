@@ -4714,7 +4714,7 @@ component('x-lookup-dropdown', function(e) {
 		let field = this
 		return button(assign_opt({
 			tabindex: null, // don't steal focus from the grid when clicking.
-			style: 'flex: 1', // TODO: what we want is class `x-stretched`.
+			style: 'flex: 1',
 			action: function() {
 				field.action.call(this, val, row, field)
 			},
