@@ -18,7 +18,7 @@ WIDGETS
 	toolbox
 	pagenav
 	richtext
-	if
+	if setglobal
 
 GLOBALS
 
@@ -1834,8 +1834,6 @@ component('x-context-menu', function(e) {
 
 component('x-widget-placeholder', function(e) {
 
-	e.class('x-stretched')
-
 	serializable_widget(e)
 	selectable_widget(e)
 	contained_widget(e)
@@ -2004,8 +2002,6 @@ widget_items_widget = function(e) {
 
 component('x-pagelist', 'Containers', function(e) {
 
-	e.class('x-stretched')
-
 	selectable_widget(e)
 	editable_widget(e)
 	contained_widget(e)
@@ -2022,7 +2018,7 @@ component('x-pagelist', 'Containers', function(e) {
 	e.selection_bar = div({class: 'x-pagelist-selection-bar'})
 	e.add_button = div({class: 'x-pagelist-tab x-pagelist-add-button fa fa-plus', tabindex: 0})
 	e.header = div({class: 'x-pagelist-header'}, e.selection_bar, e.add_button)
-	e.content = div({class: 'x-pagelist-content x-container x-flex'})
+	e.content = div({class: 'x-pagelist-content x-container'})
 	e.add(e.header, e.content)
 
 	function add_item(item) {
@@ -2398,8 +2394,6 @@ component('x-pagelist', 'Containers', function(e) {
 
 component('x-split', 'Containers', function(e) {
 
-	e.class('x-stretched')
-
 	serializable_widget(e)
 	selectable_widget(e)
 	contained_widget(e)
@@ -2408,8 +2402,8 @@ component('x-split', 'Containers', function(e) {
 	let html_item2 = e.at[1]
 	e.clear()
 
-	e.pane1 = div({class: 'x-split-pane x-container x-flex'})
-	e.pane2 = div({class: 'x-split-pane x-container x-flex'})
+	e.pane1 = div({class: 'x-split-pane x-container'})
+	e.pane2 = div({class: 'x-split-pane x-container'})
 	e.sizer = div({class: 'x-split-sizer'})
 	e.add(e.pane1, e.sizer, e.pane2)
 
@@ -3009,8 +3003,6 @@ component('x-progress', function() {
 
 component('x-slides', 'Containers', function(e) {
 
-	e.class('x-stretched')
-
 	serializable_widget(e)
 	selectable_widget(e)
 	contained_widget(e)
@@ -3040,7 +3032,7 @@ component('x-slides', 'Containers', function(e) {
 	e.slide = function(i) {
 		e.selected_index = i
 		if (e.selected_item)
-			e.selected_item.focus_first_input_element()
+			e.selected_item.focus_first_input_element('.x-input-widget')
 	}
 
 	return {items: html_items}
@@ -3130,8 +3122,6 @@ component('x-pagenav', function(e) {
 // ---------------------------------------------------------------------------
 
 component('x-richtext', function(e) {
-
-	e.class('x-stretched')
 
 	selectable_widget(e)
 	contained_widget(e)
@@ -3357,12 +3347,42 @@ component('x-if', 'Containers', function(e) {
 	e.clear()
 	e.hide()
 
-	e.property('content_bound', () => !!content.parent, function(on) {
+	e.prop('global', {store: 'var', attr: true})
+
+	e.cond = function(v) {
+		return !!v
+	}
+
+	function apply(v) {
+		let on = e.cond(v)
 		if (on)
 			e.add(content)
 		else
 			content.remove()
 		e.show(on)
+	}
+
+	function bind_global(k, on) {
+		if (!k) return
+		window.on('global_changed_'+k, apply, on)
+	}
+
+	e.set_global = function(k1, k0) {
+		bind_global(k0, false)
+		bind_global(k1, true)
+		apply(window[k1])
+	}
+
+	e.on('bind', function(on) {
+		bind_global(e.global, on)
+		apply(window[e.global])
 	})
 
 })
+
+function setglobal(k, v) {
+	let v0 = window[k]
+	window[k] = v
+	fire('global_changed', k, v, v0)
+	fire('global_changed_'+k, v, v0)
+}
