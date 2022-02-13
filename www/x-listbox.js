@@ -20,7 +20,7 @@ WIDGETS
 
 function listbox_widget(e) {
 
-	e.class('x-listbox x-stretched')
+	e.class('x-listbox')
 
 	val_widget(e, true)
 	nav_widget(e)

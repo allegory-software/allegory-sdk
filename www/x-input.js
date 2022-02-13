@@ -1412,10 +1412,10 @@ component('x-tagsedit', 'Input', function(e) {
 
 	e.class('x-editbox')
 
-	e.props.field_type.default = 'tags'
-
 	val_widget(e)
 	input_widget(e)
+
+	e.props.field_type.default = 'tags'
 
 	let S_expand = S('expand', 'expand') + ' (Enter)'
 	let S_condense = S('condense', 'condense') + ' (Enter)'
@@ -1425,27 +1425,42 @@ component('x-tagsedit', 'Input', function(e) {
 	e.expand_button = div({class: 'x-tagsedit-button-expand fa fa-caret-up',
 		title: S_expand,
 	})
-	e.add(e.expand_button, e.input, e.label_box)
+	e.tags_box = div({class: 'x-tagsedit-tags-box'})
+	e.focus_box = div({class: 'x-focus-box'}, e.input, e.label_box, e.tags_box, e.expand_button)
+	e.add(e.focus_box)
+
+	e.prop('format', {store: 'var', type: 'enum', enum_values: ['names', 'json'], default: 'json', attr: true})
+
+	function input_val_slice() {
+		let v = e.input_val
+		if (v == null)
+			return []
+		else if (e.format == 'names')
+			return v.names()
+		else
+			return v.slice()
+	}
+
+	function set_val(v, ev) {
+		if (!v.length)
+			v = null
+		else if (e.format == 'names')
+			v = v.remove_duplicates().join(' ')
+		e.set_val(v, ev)
+	}
 
 	function update_tags() {
 
-		let v = e.input_val
-		let empty = !(v && v.length)
+		let v = input_val_slice()
+		let empty = !v.length
 
 		if (empty && e.expanded) {
 			e.expanded = false
 			return
 		}
 
-		let i = e.len - 3
-		while (i >= 1)
-			e.at[i--].remove()
-
-		if (e.bubble)
-			e.bubble.content.clear()
-
+		e.tags_box.clear()
 		if (v) {
-			let i = 1
 			for (let tag of v) {
 				let s = T(tag).textContent
 				let xb = div({
@@ -1458,23 +1473,22 @@ component('x-tagsedit', 'Input', function(e) {
 				}, tag, xb)
 				xb.on('pointerdown', tag_xbutton_pointerdown)
 				tag_e.on('pointerdown', tag_pointerdown)
-				if (e.expanded)
-					e.bubble.content.add(tag_e)
-				else
-					e.insert(i++, tag_e)
+				e.tags_box.add(tag_e)
 			}
 		}
 
-		if (e.expanded)
+		if (e.expanded) {
+			e.bubble.content.add(e.tags_box)
 			e.bubble.popup()
+		} else {
+			e.focus_box.insert(2, e.tags_box)
+		}
 
 		e.class('empty', empty)
 	}
 
 	e.do_update_val = function(v, ev) {
 		let by_user = ev && ev.input == e
-		if (by_user)
-			was_expanded = false
 		update_tags()
 		if (empty && by_user)
 			e.input.focus()
@@ -1487,12 +1501,13 @@ component('x-tagsedit', 'Input', function(e) {
 	// expanded bubble.
 
 	e.set_expanded = function(expanded) {
-		if (!(e.input_val && e.input_val.length))
+		if (!input_val_slice().length)
 			expanded = false
 		e.class('expanded', expanded)
 		e.expand_button.switch_class('fa-caret-up', 'fa-caret-down', expanded)
 		if (expanded && !e.bubble)
-			e.bubble = tooltip({classes: 'x-tagsedit-bubble', target: e, side: 'top', align: 'left'})
+			e.bubble = tooltip({classes: 'x-tagsedit-bubble', target: e,
+					side: 'top', align: 'left'})
 		update_tags()
 		if (e.bubble)
 			e.bubble.show(expanded)
@@ -1507,9 +1522,9 @@ component('x-tagsedit', 'Input', function(e) {
 	// controller
 
 	function tag_pointerdown() {
-		let v = e.input_val.slice()
-		let tag = v.remove(this.index - (e.expanded ? 0 : 1))
-		e.set_val(v, {input: e})
+		let v = input_val_slice()
+		let tag = v.remove(this.index)
+		set_val(v, {input: e})
 		e.input.value = tag
 		e.focus()
 		e.input.select()
@@ -1517,24 +1532,16 @@ component('x-tagsedit', 'Input', function(e) {
 	}
 
 	function tag_xbutton_pointerdown() {
-		let v = e.input_val.slice()
-		v.remove(this.parent.index - (e.expanded ? 0 : 1))
-		e.set_val(v, {input: e})
+		let v = input_val_slice()
+		v.remove(this.parent.index)
+		set_val(v, {input: e})
 		return false
 	}
 
 	focusable_widget(e, e.input)
 
-	let was_expanded
-
 	e.input.on('blur', function() {
-		was_expanded = e.expanded
 		e.expanded = false
-	})
-
-	e.input.on('focus', function() {
-		if (was_expanded)
-			e.expanded = true
 	})
 
 	e.on('pointerdown', function(ev) {
@@ -1550,19 +1557,18 @@ component('x-tagsedit', 'Input', function(e) {
 			if (s) {
 				s = s.trim()
 				if (s) {
-					let v = e.input_val && e.input_val.slice() || []
+					let v = input_val_slice()
 					v.push(s)
-					e.set_val(v, {input: e})
+					set_val(v, {input: e})
 				}
 				e.input.value = null
 			} else {
-				was_expanded = false
 				e.expanded = !e.expanded
 			}
 			return false
 		}
 		if (key == 'Backspace' && !e.input.value) {
-			e.set_val(e.input_val && e.input_val.slice(0, -1), {input: e})
+			set_val(input_val_slice().slice(0, -1), {input: e})
 			return false
 		}
 	})
@@ -1755,7 +1761,6 @@ component('x-googlemaps', 'Input', function(e) {
 
 	val_widget(e)
 
-	e.class('x-stretched')
 	e.classes = 'fa fa-map-marked-alt'
 
 	e.props.field_type.default = 'place'
@@ -2311,8 +2316,6 @@ component('x-dateedit', 'Input', function(e) {
 
 component('x-richedit', 'Input', function(e) {
 
-	e.class('x-stretched')
-
 	e.content_box = div({class: 'x-richtext-content'})
 	e.focus_box = div({class: 'x-focus-box'}, e.content_box)
 	e.add(e.focus_box)
@@ -2345,7 +2348,6 @@ component('x-richedit', 'Input', function(e) {
 
 component('x-image', 'Input', function(e) {
 
-	e.class('x-stretched')
 	e.title = ''
 	e.class('empty fa fa-camera')
 
@@ -2524,8 +2526,6 @@ component('x-mu-row', 'Input', function(e) {
 
 component('x-sql-editor', 'Input', function(e) {
 
-	e.class('x-stretched')
-
 	val_widget(e)
 
 	e.do_update_val = function(v, ev) {
@@ -2566,8 +2566,6 @@ component('x-sql-editor', 'Input', function(e) {
 // ---------------------------------------------------------------------------
 
 component('x-chart', 'Input', function(e) {
-
-	e.class('x-stretched')
 
 	contained_widget(e)
 	serializable_widget(e)
@@ -3267,8 +3265,6 @@ component('x-mu', function(e) {
 
 component('x-switcher', 'Containers', function(e) {
 
-	e.class('x-stretched x-container')
-
 	serializable_widget(e)
 	selectable_widget(e)
 	contained_widget(e)
@@ -3370,7 +3366,6 @@ component('x-input', 'Input', function(e) {
 				type: type,
 				nav: e.nav,
 				col: e.col,
-				classes: 'x-stretched',
 			}, input.widget_type_options[type])
 			each_widget_prop(function(k, v) { opt[k] = v })
 			e.widget = component.create(opt)
@@ -3446,9 +3441,6 @@ input.widget_type_options = {
 
 component('x-form', 'Containers', function(e) {
 
-	e.class('x-stretched')
-	e.class('x-flex')
-
 	serializable_widget(e)
 	selectable_widget(e)
 	editable_widget(e)
@@ -3483,7 +3475,7 @@ component('x-form', 'Containers', function(e) {
 		let n = clamp(floor(r.w / 150), 1, 12)
 		for (let i = 1; i <= 12; i++)
 			e.class('maxcols'+i, i <= n)
-		e.class('compact', n < 2)
+		e.class('compact', r.w < 200)
 	})
 
 	e.on('bind', function(on) {
@@ -3492,11 +3484,27 @@ component('x-form', 'Containers', function(e) {
 	})
 
 	e.set_nav = function(nav) {
-		for (let item of e.items)
-			item.nav = nav
+		for (let ce of e.$('.x-input-widget, .x-input'))
+			ce.nav = nav
 	}
 	e.prop('nav', {store: 'var', private: true})
 	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav', attr: true})
+
+	// clicking on blank areas of the form focuses the last focused input element.
+	let last_focused_input
+	e.on('focusin', function() {
+		last_focused_input = e.focused_element
+	})
+	e.on('pointerdown', function(ev) {
+		if (ev.target != e)
+			return
+		if (!e.hasfocus)
+			if (last_focused_input)
+				last_focused_input.focus()
+			else
+				e.focus_first_input_element('.x-input-widget')
+		return false
+	})
 
 	return {items: html_items}
 

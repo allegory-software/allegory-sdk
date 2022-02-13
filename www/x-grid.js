@@ -25,8 +25,6 @@ calls:
 
 component('x-grid', 'Input', function(e, is_val_widget) {
 
-	e.class('x-stretched')
-
 	if (is_val_widget !== false)
 		val_widget(e, true)
 	nav_widget(e)

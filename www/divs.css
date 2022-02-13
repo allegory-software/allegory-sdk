@@ -91,7 +91,7 @@ hr {
 	z-index: 100; /* show over 10 levels of popups */
 }
 
-/* general vocabulary ----------------------------------------------------- */
+/* vocabulary for inline styling in html ---------------------------------- */
 
 [nowrap] {
 	white-space: nowrap;

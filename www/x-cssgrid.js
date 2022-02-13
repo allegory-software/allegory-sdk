@@ -5,8 +5,6 @@
 
 component('x-cssgrid', 'Containers', function(e) {
 
-	e.class('x-stretched')
-
 	serializable_widget(e)
 	selectable_widget(e)
 	editable_widget(e)
