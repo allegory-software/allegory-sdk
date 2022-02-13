@@ -73,6 +73,8 @@ ARRAYS
 	a.binsearch(v, cmp, i1, i2)
 	a.each(f)
 	a.tokeys([v]) -> t
+	a.uniq_sorted()
+	a.remove_duplicates()
 HASH MAPS
 	obj()
 	set()
@@ -436,6 +438,7 @@ method(Array, 'remove_values', function(cond) {
 		i++
 	}
 	this.length = j
+	return this
 })
 
 method(Array, 'clear', function() {
@@ -494,6 +497,19 @@ method(Array, 'tokeys', function(v) {
 	for (let k of this)
 		t[k] = v
 	return t
+})
+
+method(Array, 'uniq_sorted', function() {
+	return this.remove_values(function(v, i, a) {
+		return i && v == a[i-1]
+	})
+})
+
+// NOTE: O(n^3)
+method(Array, 'remove_duplicates', function() {
+	return this.remove_values(function(v, i, a) {
+		return a.indexOf(v) != i
+	})
 })
 
 // hash maps -----------------------------------------------------------------
