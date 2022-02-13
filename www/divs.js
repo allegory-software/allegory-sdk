@@ -106,7 +106,7 @@
 		e.focused
 		e.hasfocus
 		e.focusables()
-		e.focus_first_input_element()
+		e.focus_first_input_element([extra_selectors])
 		e.effectively_disabled
 		e.effectively_hidden
 	text editing:
@@ -983,8 +983,8 @@ method(Element, 'focusables', function() {
 	return t
 })
 
-method(Element, 'focus_first_input_element', function() {
-	for (let e of this.$('input, select, textarea, .x-input-widget'))
+method(Element, 'focus_first_input_element', function(extra_selectors) {
+	for (let e of this.$('input, select, textarea'+(extra_selectors ? ', '+extra_selectors : '')))
 		if (!e.effectively_hidden && !e.effectively_disabled) {
 			e.focus()
 			break
