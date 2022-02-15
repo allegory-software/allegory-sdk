@@ -169,11 +169,18 @@ body {
 }
 
 .x-container { /* for inner divs that hold stretched widgets */
-	display: flex;
+	display: grid;  /* layout content: use grid because grid-in-flex is buggy */
+	min-width : 0;  /* container can't overflow its container */
+	min-height: 0;  /* container can't overflow its container */
+	overflow: auto; /* emergency-scroll */
 }
 
 .x-if, .x-switcher { /* purely-logical containers */
 	display: contents; /* don't disturb the layouting */
+}
+
+.x-widget:focus-visible {
+	outline: none; /* disable browser auto-focus-ring heuristic BS */
 }
 
 /* widget editing --------------------------------------------------------- */
@@ -646,10 +653,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	flex-flow: column;
 }
 
-.x-input-widget:focus-visible { /* disable browser auto-focus-ring heuristic */
-	outline: none;
-}
-
 .x-input-widget[readonly] {
 	opacity: .8;
 }
@@ -663,11 +666,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-widget:focus-within > .x-focus-box {
-	border-color: var(--x-border-focused);
+	/* TODO: border-color: var(--x-border-focused); */
+	border-color: transparent;
 	box-shadow  : var(--x-shadow-focused);
 	outline: 2px solid var(--x-outline-focused);
 	outline-offset: 0px;
-	border-color: transparent;
 }
 
 .x-widget.with-label > .x-focus-box {
@@ -826,8 +829,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	margin-left: 0;
 	margin-right: 0;
 	margin: 0;
-	padding-left  : 0 var(--x-padding-x-input);
-	padding-right : 0 var(--x-padding-x-input);
+	padding-left  : var(--x-padding-x-input);
+	padding-right : var(--x-padding-x-input);
 }
 
 .x-radiogroup.invalid > .x-markbox,
@@ -853,11 +856,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-editbox > .x-focus-box {
-	flex: 1; /* stretch-to-fill */
-
 	/* layout content */
 	display: inline-flex;    /* the only way to get variable-width inputs */
-	align-items: center;     /* ...that are baseline-aligned (see mode=inline) */
+	align-items: baseline;   /* ...that are baseline-aligned */
+	padding-left  : calc(var(--x-item-border-width) + var(--x-padding-x-input));
+	padding-right : calc(var(--x-item-border-width) + var(--x-padding-x-input));
 	overflow: hidden;        /* label can overflow */
 }
 
@@ -872,8 +875,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-editbox-input { /* for editbox's input-box and value-box */
 	margin: 0;
 	border: 0;
-	padding-left    : var(--x-padding-x-input);
-	padding-right   : var(--x-padding-x-input);
+	padding: 0;
 	padding-top     : var(--x-padding-y-input);
 	padding-bottom  : var(--x-padding-y-input);
 	font-size: inherit;
@@ -906,7 +908,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-editbox.with-label[mode=inline] > .x-focus-box {
 	border-radius: 0;
-	align-items: baseline;
 }
 
 .x-editbox-label {
@@ -915,8 +916,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	position: absolute;
 	top: 0; /* fixate to top so we only have to set the top padding */
 	font-size: var(--x-font-size-input-label-empty);
-	padding-left   : var(--x-padding-x-input);
-	padding-right  : var(--x-padding-x-input);
 	padding-top    : var(--x-padding-y1-input-il-label-empty);
 	opacity: 1;
 	animation: x-editbox-label-unfocused .1s;
@@ -1046,7 +1045,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	/* layout self */
 	flex: 1; /* stretch horizontally */
 	width: auto;
-	padding-left  : var(--x-padding-x-input);
 	padding-right : .25em;
 
 	/* layout content */
@@ -1063,8 +1061,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-editbox-value.null { color: var(--x-fg-disabled); }
 
 .x-dropdown-button {
-	padding-left : var(--x-padding-x-input);
-	padding-right: var(--x-padding-x-input);
+	padding-left : .5em;
 
 	border-left-style: inherit;
 	border-left-color: inherit;
@@ -1084,9 +1081,9 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 */
 
 .x-dropdown-more-button {
-	margin-left         : calc(0px - var(--x-padding-x-input));
-	padding-left        : var(--x-padding-x-input);
-	padding-right       : var(--x-padding-x-input);
+	margin-left   : calc(0px - var(--x-padding-x-input));
+	padding-left  : var(--x-padding-x-input);
+	padding-right : var(--x-padding-x-input);
 	align-self: stretch;
 	display: flex;
 	align-items: center;
@@ -1278,16 +1275,16 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-content: flex-start;
 	overflow: hidden;
 
-	padding-left : var(--x-padding-x-input);
-	padding-right: var(--x-padding-x-input);
+	padding-left : .5em;
+	padding-right: .5em;
 }
 
 /* avoiding !important because the web is a piece of shit. */
 .x-tagsedit-input.x-tagsedit-input.x-tagsedit-input.x-tagsedit-input {
 	min-width: 0;
 	width: 3em;
-	padding: 2px calc(.25em + 2px); /* reset */
-	height: auto;                   /* reset */
+	padding: 2px 0; /* reset */
+	height: auto; /* reset */
 	flex: 1 1 auto;
 	line-height: 1;
 }
@@ -1574,7 +1571,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-editbox.x-calendar-sel-year {
-	min-width: 6em;
+	width: 7em;
+	margin-left: .5em;
+}
+
+.x-calendar-sel-year {
+
 }
 
 .x-editbox.x-calendar-sel-month {
@@ -1768,10 +1770,9 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-pagelist[tabs_side=right ] > .x-pagelist-header { border-left-width   : 1px; }
 
 .x-pagelist-content {
-	display: grid;
-	flex: 1;
 	min-height: 0;  /* don't let the content make the pagelist itself overflow */
 	overflow: auto;
+	flex: 1; /* stretch-to-fill */
 }
 
 .x-pagelist[tabs_side=top   ],
@@ -1865,10 +1866,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-split[orientation=vertical].resize { flex-direction: column; cursor: ns-resize; }
 
 .x-split-pane {
-	display: grid;    /* because forms overflow with flex */
-	min-width : 0;    /* content can't overflow the split-view */
-	min-height: 0;    /* content can't overflow the split-view */
-	overflow: auto;
 }
 
 .x-split-pane-auto {
@@ -2052,20 +2049,23 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* form ------------------------------------------------------------------- */
 
 .x-form {
-
+	/* layout self */
 	flex: 1;
-	padding: 2px;
 
 	/* layout items */
+	padding: 2px;
 	display: grid;
 	align-content: start;
 	align-items: start;
 
-	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
 	grid-gap: 2px;
 
 	/* this enables scrolling within children (it's like Harry Potter in here) */
 	overflow: auto;
+}
+
+.x-form[templated] {
+	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
 }
 
 .x-form h1,
@@ -2298,6 +2298,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 	opacity: 0;
 	transition: opacity .5s;
+	visibility: hidden;
 }
 
 .x-slide:not(.x-slide-selected),
@@ -2307,6 +2308,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-slide-selected {
+	visibility: visible;
 	opacity: 1;
 	pointer-events: all;
 	transition: opacity .5s;
@@ -2616,7 +2618,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-widget.grid-editor > .x-focus-box {
 	border-radius: 0;
 	border: 0;
-	padding: var(--x-item-border-width);
 	background-color: var(--x-bg-grid-editor);
 }
 
