@@ -117,13 +117,13 @@ return function()
 	types.url       = {str, size = 2048, maxlen = 2048, ascii_bin}
 	types.b64key    = {str, size = 8192, maxlen = 8192, ascii_bin}
 
-	types.atime     = {datetime, not_null, mysql_default = current_timestamp}
-	types.ctime     = {datetime, not_null, mysql_default = current_timestamp}
-	types.mtime     = {datetime, not_null, mysql_default = current_timestamp, mysql_on_update = current_timestamp}
+	types.atime     = {datetime, not_null, mysql_default = current_timestamp, readonly = true}
+	types.ctime     = {datetime, not_null, mysql_default = current_timestamp, readonly = true}
+	types.mtime     = {datetime, not_null, mysql_default = current_timestamp, readonly = true, mysql_on_update = current_timestamp}
 
-	types.ctime.text = function() return S('ctime_text', 'Created At') end
-	types.mtime.text = function() return S('mtime_text', 'Last Modified At') end
-	types.atime.text = function() return S('atime_text', 'Last Accessed At') end
+	types.ctime.text = Sf('ctime_text', 'Created At')
+	types.mtime.text = Sf('mtime_text', 'Last Modified At')
+	types.atime.text = Sf('atime_text', 'Last Accessed At')
 
 	types.money     = {dec, digits = 15, decimals = 3} -- 999 999 999 999 . 999     (fits in a double)
 	types.qty       = {dec, digits = 15, decimals = 6} --     999 999 999 . 999 999 (fits in a double)
