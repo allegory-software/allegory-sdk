@@ -1455,11 +1455,8 @@ end
 
 --size formatting ------------------------------------------------------------
 
-local suffixes = {'k', 'M', 'G', 'T'}
+local suffixes = {[0] = 'b', 'k', 'M', 'G', 'T', 'P', 'E'}
 function glue.kbytes(x, decimals)
-	if x > -1024 and x < 1024 then
-		return tostring(x)
-	end
 	local base = ln(x) / ln(1024)
 	local suffix = suffixes[floor(base)] or ''
 	local fmt = decimals and decimals ~= 0 and '%.'..decimals..'f%s' or '%.0f%s'
