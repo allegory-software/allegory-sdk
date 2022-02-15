@@ -62,7 +62,7 @@ function client_config(name, default)
 end
 
 client_config'app_name'
-client_config'lang'
+client_config'default_lang'
 client_config'aliases'
 client_config'root_action'
 client_config'templates_action'
@@ -77,7 +77,7 @@ action['config.js'] = function()
 	local cjson = require'cjson'
 
 	--initialize some required config values with defaults.
-	config('lang', 'en')
+	config('default_lang', 'en')
 	config('root_action', 'en')
 	config('page_title_suffix', ' - '..host())
 
@@ -207,12 +207,12 @@ local spa_template = [[
 {{{all_css}}}
 {{{all_js}}}
 {{{head}}}
+	{{{templates}}}
 	<script>
 		var client_action = {{client_action}}
 	</{{undefined}}script>
 </head>
 <body {{body_attrs}} class="{{body_classes}}">
-	<div style="display: none;">{{{templates}}}</div>
 {{{body}}}
 </body>
 </html>
@@ -225,6 +225,7 @@ local function page_title(infer, body)
 end
 
 action['404.html'] = function(action)
+	login() --sets lang from user profile
 	local t = {}
 	t.lang = lang()
 	t.body = filter_lang(html(), lang())
