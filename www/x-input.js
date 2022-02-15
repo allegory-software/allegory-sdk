@@ -697,7 +697,7 @@ function editbox_widget(e, opt) {
 	e.class('x-dropdown', has_picker)
 
 	if (has_input)
-		e.input = tag(opt && opt.input_tag || 'input', {class: 'x-editbox-input'})
+		e.input = tag(opt && opt.input_tag || 'input', {autocomplete: 'off', class: 'x-editbox-input'})
 	else
 		e.val_box = div({class: 'x-editbox-input x-editbox-value'})
 
