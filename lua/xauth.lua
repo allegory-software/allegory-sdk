@@ -66,67 +66,68 @@ wwwfile['x-auth.css'] = [[
 	//margin: .25em 0;
 }
 
+#care_user_settings_form {
+	grid-template-areas:
+		"email"
+		"night_mode"
+		"auth_sign_out_button"
+		"auth_sign_in_button"
+}
+
 ]]
 
 template.user_settings_form = [[
-<script>
-	night_mode_checkbox.on('val_changed', function(v) {
-		set_night_mode(v)
-	})
-	sign_out_button.action = () => { tt.close(); sign_out(); }
-	sign_in_button.action = () => { tt.close(); sign_in(); }
-</script>
-<x-binder vflex class="x-flex x-auth-signed-in-binder">
-	<x-form nav_id=care_user_settings_nav>
+<x-if global=signed_in>
+	<x-form id=care_user_settings_form nav_id=care_user_settings_nav>
 		<x-textedit col=email></x-textedit>
-		<x-checkbox id=night_mode_checkbox col=night_mode button_style=toggle></x-checkbox>
-		<x-button id=sign_out_button bare icon="fa fa-sign-out-alt">
-			<t lang=en>Log out</t>
+		<x-checkbox col=night_mode button_style=toggle></x-checkbox>
+		<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
+			<t s=log_out>Log out</t>
 		</x-button>
-</x-binder>
-<x-binder vflex class="x-flex x-auth-signed-out-binder">
-	<x-button id=sign_in_button>
-		<t lang=en>Sign-In</t>
-	</x-button>
-</x-binder>
+</x-if>
+<x-if global=signed_out>
+	<x-form id=care_user_settings_form nav_id=care_user_settings_nav>
+	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
+</x-if>
 ]]
 
 template.sign_in_dialog = [[
-<x-dialog>
+<x-dialog cancelable=false>
 	<content>
 		{{#logo}}
 			<img class=sign-in-logo src="{{logo}}">
 		{{/logo}}
 		<x-slides class=sign-in-slides>
 
-			<div vflex class="x-flex">
+			<x-form>
 				<div class=x-dialog-heading>
 					Sign-in
 				</div>
-				<p small>
-				The security of your account is important to us.
-				That is why instead of having you set up a hard-to-remember password,
-				we will send you a one-time activation code every time
-				you need to sign in.
-				</p>
-				<x-textedit class=sign-in-email-edit field_type=email label="Email address"></x-textedit>
+				<p small s=sign_in_greet><t s=sign_in_greet>
+					The security of your account is important to us.
+					That is why instead of having you set up a hard-to-remember password,
+					we will send you a one-time activation code every time
+					you need to sign in.
+				</t></p>
+				<x-list-dropdown class=sign-in-lang-dropdown label=Language val_col=lang display_col=name rowset_name=pick_lang></x-list-dropdown>
+				<x-textedit class=sign-in-email-edit field_type=email label="Email address" focusfirst></x-textedit>
 				<x-button primary class=sign-in-email-button>E-mail me a sign-in code</x-button>
-			</div>
+			</x-form>
 
-			<div vflex class="x-flex">
+			<x-form>
 				<div class=x-dialog-heading>
 					Enter code
 				</div>
-				<p small>
-				An e-mail was sent to you with a 6-digit sign-in code.
-				Enter the code below to sign-in.
-				<br>
-				If you haven't received an email even after
-				a few minutes, please <a href="/sign-in">try again</a>.
-				</p>
-				<x-textedit class=sign-in-code-edit field_type=sign_in_code label="6-digit sign-in code"></x-textedit>
+				<p small><t label=sign_in_email_sent>
+					An e-mail was sent to you with a 6-digit sign-in code.
+					Enter the code below to sign-in.
+					<br>
+					If you haven't received an email even after
+					a few minutes, please <a href="/sign-in">try again</a>.
+				</t></p>
+				<x-textedit class=sign-in-code-edit field_type=sign_in_code label="6-digit sign-in code" focusfirst></x-textedit>
 				<x-button primary class=sign-in-code-button>Sign-in</x-button>
-			</div>
+			</x-form>
 
 		</x-slides>
 	</content>
