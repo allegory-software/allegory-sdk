@@ -96,7 +96,7 @@ let url_action = function(t) {
 // is not the default language.
 function href(url_s, target_lang) {
 	let t = url_arg(url_s)
-	let default_lang = config('lang')
+	let default_lang = config('default_lang')
 	target_lang = target_lang || t.args.lang || lang()
 	let action = url_action(t)
 	if (action === undefined)
@@ -109,8 +109,10 @@ function href(url_s, target_lang) {
 	if (lang_action) {
 		if (!(is_root && target_lang == default_lang))
 			t.segments[1] = lang_action
-	} else if (target_lang != default_lang) {
-		t.args.lang = target_lang
+	} else {
+		if (target_lang != default_lang) {
+			t.args.lang = target_lang
+		}
 	}
 	return url(t)
 }
@@ -136,7 +138,7 @@ let action_handler = function(url_s) {
 			handler = function() {
 				let main = window.main || document.body
 				if (main)
-					main.render(act)
+					main.unsafe_html = render(act)
 			}
 		} else if (static_template(act)) {
 			handler = function() {
@@ -182,7 +184,7 @@ let url_changed = function(ev) {
 		fire('action_not_found', opt)
 }
 
-on('action_not_found', function() {
+on('action_not_found', function(opt) {
 	if (location.pathname == '/') {
 		setflaps('action_not_found')
 		return // no home action
@@ -213,6 +215,10 @@ let check_exec = function() {
 
 function exec(url, opt) {
 	opt = opt || {}
+	if (opt.refresh) {
+		window.location = href(url)
+		return
+	}
 	opt.prev_url = current_url()
 	if (!check_exec())
 		return
