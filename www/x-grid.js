@@ -34,7 +34,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	stylable_widget(e)
 
 	// geometry
-	e.cell_h = 26
+	e.cell_h = num(body.css('font-size')) * 2
 	e.auto_w = false
 	e.auto_h = false
 	e.header_w = 120            // vertical grid
