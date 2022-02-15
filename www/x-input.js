@@ -698,7 +698,6 @@ function editbox_widget(e, opt) {
 
 	if (has_input)
 		e.input = tag(opt && opt.input_tag || 'input', {
-			type: 'search',
 			autocomplete: 'off',
 			class: 'x-editbox-input',
 		})
