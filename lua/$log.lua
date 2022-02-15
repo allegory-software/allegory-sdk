@@ -36,8 +36,9 @@ logerror = logging.logerror
 logargs  = logging.args
 logprintargs = logging.printargs
 
+local lua_print = print
 function pr(...)
-	print(logprintargs(...))
+	lua_print(logprintargs(...))
 	io.stdout:flush()
 	return ...
 end
