@@ -40,9 +40,9 @@ require'webb'
 --multi-language actions & links ---------------------------------------------
 
 --[[
-It is assumed that action names are always in english even if they actually
+It is assumed that action names are always in English even if they actually
 request a page in the default language which can configured to be different
-than english. Action name translation is done automatically provided that
+than English. Action name translation is done automatically provided that
 1) all links are passed through href(), 2) routing is done by calling
 action(req, unpack(args())) which calls find_action() and 3) action names are
 translated in different languages with alias(). Using action aliases is
@@ -59,15 +59,15 @@ local function action_name(action)
 end
 
 function alias(en_action, alias_action, alias_lang)
-	local default_lang = config('default_lang', 'en')
+	local default_lang = default_lang()
 	alias_lang = alias_lang or default_lang
 	alias_action = action_name(alias_action)
 	en_action = action_name(en_action)
 	aliases[alias_action] = {lang = alias_lang, action = en_action}
-	--if the default language is not english and we're making
+	--If the default language is not English and we're making
 	--an alias for the default language, then we can safely assign
-	--the english action name for the english language, whereas before
-	--we would use the english action name for the default language.
+	--the English action name for the English language, whereas before
+	--we would use the English action name for the default language.
 	if default_lang ~= 'en' and alias_lang == default_lang then
 		if not aliases[en_action] then --user can override this
 			aliases[en_action] = {lang = 'en', action = en_action}
@@ -89,7 +89,7 @@ function href(s, target_lang)
 	if not action then
 		return url(s)
 	end
-	local default_lang = config('default_lang', 'en')
+	local default_lang = default_lang()
 	local target_lang = target_lang or (t.args and t.args.lang) or lang()
 	local is_root = segs[2] == ''
 	if is_root then
@@ -347,6 +347,9 @@ local function run_action(fallback, action, handler, ext, ...)
 end
 
 setmetatable(actions, {__call = function(self, action, ...)
+	if args'lang' then
+		setlang(args'lang')
+	end
 	local handler, ext = action_handler(find_action(action, ...))
 	return run_action(true, action, handler, ext, ...)
 end})
