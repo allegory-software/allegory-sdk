@@ -29,6 +29,10 @@ local schema = require'schema'
 
 ffi.tls_libname = 'tls_bearssl'
 
+Sfile[[
+schema_std.lua
+]]
+
 cmd_server('run', 'Run server in foreground', function()
 	local server = webb.server()
 	server.start()
@@ -72,7 +76,7 @@ return function(app_name, ...)
 	app.schema = schema.new()
 
 	app.schema.env.null = null
-	app.schema.env.S = S
+	app.schema.env.Sf = Sf
 
 	app.schema:import'schema_std'
 	app.schema:import'webb_lang'
