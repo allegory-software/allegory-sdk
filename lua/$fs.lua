@@ -163,6 +163,7 @@ trysave = fs.save
 saver = fs.saver
 
 function save(file, s)
+	note('fs', 'save', '%s (%s)', file, kbytes(#s))
 	check('fs', 'save', fs.save(file, s))
 end
 
