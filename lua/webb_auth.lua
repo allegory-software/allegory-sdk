@@ -5,13 +5,14 @@
 
 SESSIONS
 
-	login([auth][, switch_user]) -> usr       login
+	login([auth][, switch_user]) -> usr       login and set lang (if not set)
 	usr([field|'*']) -> val | t | usr         get current user field(s) or id
 	admin([role]) -> t|f                      user has admin rights or role
 	touch_usr()                               update user's atime
 	gen_auth_token(email) -> token            generate a one-time long-lived auth token
 	gen_auth_code('email', email) -> code     generate a one-time short-lived auth code
 	gen_auth_code('phone', phone) -> code     generate a one-time short-lived auth code
+	create_user([email], [roles]) -> usr      create an authenicable user with assigned roles
 
 SCHEMA
 
@@ -23,6 +24,7 @@ CONFIG
 	session_cookie_name          'session'   name of the session cookie
 	session_cookie_secure_flag   true        set Secure flag to cookie
 	auto_create_user             true        auto-create an anonymous users
+	dev_email                    'dev@HOST'  dev (i.e. super-admin) email
 
 	auth_token_lifetime          3600        forgot-password token lifetime
 	auth_token_maxcount          2           max unexpired tokens allowed
@@ -173,6 +175,7 @@ end
 function webb.auth_schema()
 
 	import'schema_std'
+	import'webb_lang'
 
 	tables.usr = {
 		usr         , idpk    ,
@@ -193,6 +196,8 @@ function webb.auth_schema()
 		newsletter  , bool0   ,
 		roles       , text    ,
 		note        , text    ,
+		lang        , lang    , weak_fk,
+		theme       , name    ,
 		clientip    , name    , --when it was created
 		atime       , atime   , --last access time
 		ctime       , ctime   , --creation time
@@ -217,20 +222,19 @@ function webb.auth_schema()
 
 end
 
-function create_sadmin(email)
-	email = email or config'sadmin_email'
-		or config'host' and 'admin@'..config'host'
+function create_user(email, roles)
+	email = email or config'dev_email' or config'host' and 'dev@'..config'host'
 	query([[
 		insert into usr
 			(anonymous, email, emailvalid, roles)
 		values
-			(0, ?, 1, 'sadmin admin') as new
+			(0, ?, 0, ?) as new
 		on duplicate key update
 			anonymous  = new.anonymous,
 			email      = new.email,
 			emailvalid = new.emailvalid,
 			roles      = new.roles
-	]], email)
+	]], email, roles or 'dev admin')
 end
 
 --config ---------------------------------------------------------------------
@@ -368,7 +372,9 @@ local function userinfo(usr)
 			name,
 			phone,
 			phonevalid,
-			gimgurl
+			gimgurl,
+			lang,
+			theme
 		from
 			usr
 		where
@@ -380,6 +386,7 @@ local function userinfo(usr)
 	t.admin = t.roles.admin
 	return t
 end
+userinfo = once(userinfo)
 
 local function clear_userinfo_cache(usr)
 	--
@@ -396,13 +403,13 @@ local function anonymous_usr(usr)
 end
 
 local function create_user()
-	sleep(0.1) --make filling it up a bit harder
+	sleep(0.1) --make flooding up the table a bit slower
 	local usr = query([[
 		insert into usr
-			(clientip, atime, ctime, mtime)
+			(clientip, lang, atime, ctime, mtime)
 		values
-			(?, now(), now(), now())
-	]], client_ip()).insert_id
+			(?, ?, now(), now(), now())
+	]], client_ip(), lang()).insert_id
 	session().usr = usr
 	return usr
 end
@@ -745,6 +752,7 @@ function login(auth, switch_user)
 			end
 		end
 		save_usr(usr)
+		setlang(userinfo(usr).lang, 'if_not_set')
 	end
 	return usr, err, errcode
 end
