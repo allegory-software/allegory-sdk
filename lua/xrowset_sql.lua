@@ -138,7 +138,7 @@ function sql_rowset(...)
 			update(rs, sql, ...)
 		end
 
-		rs.delay_init_fields = true
+		rs.manual_init_fields = true
 
 		--the rowset's pk cannot be reliably inferred so it must be user-supplied.
 

@@ -125,12 +125,8 @@ function virtual_rowset(init, ...)
 			update(f, rs.field_attrs and rs.field_attrs[f.name])
 
 			local client_field = {}
-			for k in pairs(f) do
-				local v = f[k]
+			for k,v in pairs(f) do
 				if client_field_attrs[k] then
-					if type(v) == 'function' then --value getter/generator
-						v = v()
-					end
 					client_field[k] = v
 				end
 			end
@@ -142,9 +138,21 @@ function virtual_rowset(init, ...)
 		if not rs.delete_row then rs.can_remove_rows = false end
 	end
 
+	local function update_client_fields()
+		for i,f in ipairs(rs.client_fields) do
+			for k,v in pairs(f) do
+				local v = rs.fields[i][k]
+				if type(v) == 'function' then --value getter/generator
+					f[k] = v()
+				end
+			end
+		end
+	end
+
 	function rs:load(param_values)
 		local res = {}
 		rs:load_rows(res, param_values)
+		update_client_fields()
 		merge(res, {
 			can_add_rows = rs.can_add_rows,
 			can_remove_rows = rs.can_remove_rows,
@@ -334,7 +342,7 @@ function virtual_rowset(init, ...)
 		--:old variants are added too for update where sql.
 		for k,v in pairs{
 			['param:lang'        ] = lang(),
-			['param:default_lang'] = config('default_lang', 'en'),
+			['param:default_lang'] = default_lang(),
 			['param:filter'      ] = filter,
 		} do
 			params[k] = v
@@ -354,7 +362,7 @@ function virtual_rowset(init, ...)
 	end
 
 	init(rs, ...)
-	if not rs.delay_init_fields then
+	if not rs.manual_init_fields then
 		rs:init_fields()
 	end
 
