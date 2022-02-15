@@ -42,8 +42,7 @@
 		$(sel) -> ea
 		E(sel|e)
 		ea.each(f)
-		root
-		body
+		root, body, head
 	dom tree de/serialization:
 		e.html -> s
 		[unsafe_]html(s) -> e
@@ -106,9 +105,9 @@
 		e.focused
 		e.hasfocus
 		e.focusables()
-		e.focus_first_input_element([extra_selectors])
 		e.effectively_disabled
 		e.effectively_hidden
+		e.focus_first()
 	text editing:
 		input.select_range(i, j)
 		e.select(i, j)
@@ -862,6 +861,7 @@ function on_dom_load(fn) {
 function init_components() {
 	root = document.documentElement
 	body = document.body
+	head = document.head
 	root.init_child_components()
 	root.init_component()
 	root.bind(true)
@@ -959,40 +959,61 @@ method(Element, 'hide', function(ev) {
 
 // common state wrappers -----------------------------------------------------
 
-property(Element, 'hovered', {get: function() {
+property(Element, 'hovered', function() {
 	return this.matches(':hover')
-}})
+})
 
-property(Element, 'focused_element', {get: function() {
+property(Element, 'focused_element', function() {
 	return this.querySelector(':focus')
-}})
+})
 
-property(Element, 'focused', {get: function() {
+property(Element, 'focused', function() {
 	return document.activeElement == this
-}})
+})
 
-property(Element, 'hasfocus', {get: function() {
+property(Element, 'hasfocus', function() {
 	return this.contains(document.activeElement)
-}})
+})
+
+property(Element, 'effectively_focusable', function() {
+	let t = this.tag, e = this
+	return (
+			t == 'button' || t == 'input' || t == 'select' || t == 'textarea'
+			|| ((t == 'a' || t == 'area') && this.hasattr('href'))
+			|| (e.hasattr('tabindex') && e.attr('tabindex') != '-1')
+		) && !e.effectively_hidden && !e.effectively_disabled
+})
 
 method(Element, 'focusables', function() {
 	let t = []
-	for (let e of this.$('button, a[href] area[href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+	let sel = 'button, a[href] area[href], input, select, textarea, '
+		+ '[tabindex]:not([tabindex="-1"])'
+	for (let e of this.$(sel)) {
 		if (!e.effectively_hidden && !e.effectively_disabled)
 			t.push(e)
+	}
 	return t
 })
 
-method(Element, 'focus_first_input_element', function(extra_selectors) {
-	for (let e of this.$('input, select, textarea'+(extra_selectors ? ', '+extra_selectors : '')))
-		if (!e.effectively_hidden && !e.effectively_disabled) {
-			e.focus()
-			break
-		}
+method(Element, 'focus_first', function() {
+	if (this.effectively_focusable) {
+		this.focus()
+		return true
+	}
+	let e = this.$1('[focusfirst]')
+	if (e && e.focus_first())
+		return true
+	e = this.focusables()[0]
+	if (e) {
+		e.focus()
+		return true
+	}
+	return false
 })
 
 property(Element, 'effectively_disabled', {get: function() {
-	return this.bool_attr('disabled') || (this.parent && this.parent.effectively_disabled)
+	return this.bool_attr('disabled')
+		|| (this.parent && this.parent.effectively_disabled) || false
 }})
 
 property(Element, 'effectively_hidden', {get: function() {
@@ -1003,9 +1024,9 @@ property(Element, 'effectively_hidden', {get: function() {
 		return true
 	if (css.visibility == 'hidden')
 		return true
-	if (num(css.opacity) == 0)
+	if (!this.parent)
 		return true
-	if (this.parent && this.parent.effectively_hidden)
+	if (this.parent.effectively_hidden)
 		return true
 	return false
 }})
@@ -1553,7 +1574,6 @@ method(Element, 'modal', function(on) {
 	if (on == false) {
 		if (e.dialog) {
 			e.class('modal', false)
-			e.on('modal', false)
 			e.dialog.remove()
 			e.dialog = null
 		}
@@ -1563,8 +1583,7 @@ method(Element, 'modal', function(on) {
 		e.class('modal')
 		dialog.popup_level = 10 // make popups aware of our level.
 		document.body.add(dialog)
-		e.on('modal', true)
-		e.focus()
+		dialog.focus_first()
 	}
 	return e
 })
