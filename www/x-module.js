@@ -118,6 +118,10 @@ function init_xmodule(opt) {
 	xm.init_instance = function(e, opt) {
 		let pv
 		opt.id = opt.id || e.id
+		if (!opt.id)
+			delete opt.id
+			// ^^ because `e.id = ''` sets the id attribute instead of removing it.
+			// && because `e.id = null` sets the id to 'null' so we can't win.
 		if (opt.id == '<new>') {
 			assert(e.type)
 			assert(opt.module)
@@ -147,6 +151,7 @@ function init_xmodule(opt) {
 	function update_instance(e) {
 		if (e.xmodule_generation == generation)
 			return
+		assert(e.id)
 		e.xmodule_generation = generation
 		e.xoff()
 		e.begin_update()
@@ -169,6 +174,7 @@ function init_xmodule(opt) {
 	}
 
 	xm.bind_instance = function(e, on) {
+		assert(e.id)
 		if (on) {
 			attr(xm.instances, e.id, Array).push(e)
 			update_instance(e)
