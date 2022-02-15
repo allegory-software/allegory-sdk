@@ -37,9 +37,14 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	e.cell_h = 26
 	e.auto_w = false
 	e.auto_h = false
-	e.auto_cols_w = true        // horizontal grid
 	e.header_w = 120            // vertical grid
 	e.cell_w = 120              // vertical grid
+
+	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: true}) // horizontal grid
+
+	e.set_auto_cols_w = function() {
+		e.update({sizes: true})
+	}
 
 	// keyboard behavior
 	e.auto_jump_cells = true    // jump to next/prev cell on caret limits
@@ -703,22 +708,16 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	// inline editing ---------------------------------------------------------
 
 	// when: input created, column width or height changed.
-	let bw, bh
 	function update_editor(x, y, indent) {
 		if (!e.editor) return
 		let ri = e.focused_row_index
 		let fi = e.focused_field_index
 		let field = e.fields[fi]
 		let hcell = e.header.at[fi]
-		if (bw == null) {
-			let css = e.cells.at[0].css()
-			bw = num(css['border-right-width'])
-			bh = num(css['border-bottom-width'])
-		}
 		let iw = field_has_indent(field)
 			? indent_offset(or(indent, row_indent(e.rows[ri]))) : 0
 
-		let w = cell_w(fi) - bw - iw
+		let w = cell_w(fi) - iw
 
 		x = or(x, cell_x(ri, fi) + iw)
 		y = or(y, cell_y(ri, fi))
@@ -748,7 +747,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				// measure cell unclipped width.
 				cell.style['min-width'] = null
 				cell.style['width'    ] = null
-				cell_text_w = cell.rect().w - bw - iw
+				cell_text_w = cell.rect().w - iw
 				cell.style['min-width'] = cell_min_w
 				cell.style['width'    ] = cell_w
 			}
@@ -2067,6 +2066,15 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				e.vertical = item.checked
 			},
 		})
+
+		items.push({
+			text: S('auto_stretch_columns', 'Auto-stretch columns'),
+			checked: e.auto_cols_w,
+			action: function(item) {
+				e.auto_cols_w = item.checked
+			},
+		})
+
 
 		if (e.can_change_header_visibility)
 			items.push({
