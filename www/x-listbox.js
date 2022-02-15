@@ -431,7 +431,7 @@ component('x-list-dropdown', function(e) {
 
 		let lb = component.create(assign_opt(opt, {
 			type: 'listbox',
-			id: e.id && e.id + '.picker',
+			id: e.id && e.id + '.picker' || null,
 			val_col: e.val_col,
 			display_col: e.display_col,
 			items: e.items,
