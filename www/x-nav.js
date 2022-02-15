@@ -262,6 +262,7 @@ updating cells:
 	publishes:
 		e.set_cell_state(field, val, default_val)
 		e.set_cell_val()
+		e.commit_cell_val()
 		e.reset_cell_val()
 	calls:
 		e.validator_NAME(field) -> {validate: f(v) -> true|false, message: text}
@@ -2563,6 +2564,10 @@ function nav_widget(e) {
 			update_indices('val_changed', row, field, val)
 
 		e.end_set_state()
+	}
+
+	e.commit_cell_val = function(row, col, ev) {
+		e.reset_cell_val(row, col, e.cell_input_val(row, col), ev)
 	}
 
 	// responding to val changes ----------------------------------------------

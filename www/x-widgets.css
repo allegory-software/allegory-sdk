@@ -114,6 +114,7 @@
 	--x-bg-grid-editor             : var(--x-bg-popup);
 
 	--x-item-border-width          : 1px; /* needed to show rows with errors */
+	--x-grid-cell-line-height      : 1.4em;
 
 }
 
@@ -679,7 +680,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-editbox.with-label > .x-focus-box {
 	line-height: initial;    /* prevent inheriting it */
-	padding-top: calc(var(--x-min-height-input) - 2.2em);
+	padding-top: calc(var(--x-min-height-input) - 2.0em);
 }
 
 /* input info button */
@@ -2484,9 +2485,21 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-grid-cell {
 	position: absolute; /* positioned in code */
 	overflow: hidden;
-	display: flex;       /* because vertical-align doesn't work with `position: absolute` */
-	align-items: center; /* works as `vertical-align: middle` */
+	display: flex;      /* because vertical-align doesn't work with `position: absolute` */
+	align-items: baseline; /* to align edited text with icons and tagsedit labels at baseline */
+	line-height: var(--x-grid-cell-line-height); /* line heights between text and icons must match */
 	background-color: var(--x-bg); /* make opaque because it overflows other cells on hover */
+}
+
+.x-grid-cell .fa,
+.x-grid-cell .fa,
+.x-grid-cell .fas,
+.x-grid-cell .far,
+.x-grid-cell .fal,
+.x-grid-cell .fad,
+.x-grid-cell .fab
+{
+	line-height: inherit; /* for matching baseline with text of different fonts */
 }
 
 .x-grid-cell:hover,
@@ -2617,7 +2630,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-widget.grid-editor > .x-focus-box {
 	border-radius: 0;
 	border: 0;
+	padding-top: var(--x-item-border-width); /* compensate, since we removed the border */
 	background-color: var(--x-bg-grid-editor);
+}
+
+.x-widget.grid-editor > .x-focus-box > .x-editbox-input {
+	line-height: var(--x-grid-cell-line-height);
 }
 
 .x-widget.grid-editor > .x-focus-box,

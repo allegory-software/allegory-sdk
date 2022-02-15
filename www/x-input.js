@@ -1844,7 +1844,7 @@ component('x-slider', 'Input', function(e) {
 
 	e.do_update_val = function(v) {
 		let input_p = progress_for(v)
-		let val_p = progress_for(e.val)
+		let val_p = progress_for(e.input_val)
 		let diff = input_p != val_p
 		update_thumb(e.val_thumb, val_p, diff)
 		update_thumb(e.input_thumb, input_p)
@@ -2129,7 +2129,7 @@ component('x-calendar', 'Input', function(e) {
 		update_weekview(start_week, d)
 		update_ym(d)
 		return this.capture_pointer(ev, null, function() {
-			set_ts(d + daytime(as_ts(e.val)))
+			set_ts(d + daytime(as_ts(e.input_val)))
 			e.fire('val_picked') // picker protocol
 			return false
 		})
@@ -2138,7 +2138,7 @@ component('x-calendar', 'Input', function(e) {
 	e.sel_month.on('val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
-		let t = as_ts(e.val)
+		let t = as_ts(e.input_val)
 		let ct
 		if (t != null) {
 			t = set_month(t, v)
@@ -2155,7 +2155,7 @@ component('x-calendar', 'Input', function(e) {
 	e.sel_year.on('val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
-		let t = as_ts(e.val)
+		let t = as_ts(e.input_val)
 		if (t != null) {
 			t = set_year(t, v)
 			ct = week(month(t))
@@ -2171,7 +2171,7 @@ component('x-calendar', 'Input', function(e) {
 	e.sel_hour.on('val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
-		let t = as_ts(e.val)
+		let t = as_ts(e.input_val)
 		if (t != null) {
 			t = set_hours(t, v)
 			set_ts(t)
@@ -2181,7 +2181,7 @@ component('x-calendar', 'Input', function(e) {
 	e.sel_minute.on('val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
-		let t = as_ts(e.val)
+		let t = as_ts(e.input_val)
 		if (t != null) {
 			t = set_minutes(t, v)
 			set_ts(t)
@@ -2191,7 +2191,7 @@ component('x-calendar', 'Input', function(e) {
 	e.sel_second.on('val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
-		let t = as_ts(e.val)
+		let t = as_ts(e.input_val)
 		if (t != null) {
 			t = set_seconds(t, v)
 			set_ts(t)
@@ -2199,7 +2199,7 @@ component('x-calendar', 'Input', function(e) {
 	})
 
 	e.weekview.on('wheel', function(ev, dy) {
-		let t = as_ts(e.val)
+		let t = as_ts(e.input_val)
 		let ct = or(week(start_week, dy), week(month(or(t, time()))))
 		update_weekview(ct, t)
 		update_ym(focused_month(ct))
