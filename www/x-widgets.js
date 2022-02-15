@@ -18,7 +18,8 @@ WIDGETS
 	toolbox
 	pagenav
 	richtext
-	if setglobal
+	if
+	setglobal
 
 GLOBALS
 
@@ -1258,10 +1259,13 @@ component('x-tooltip', function(e) {
 	e.content.on('pointerdown', function(ev) {
 		if (ev.target != this)
 			return // clicked inside the tooltip.
+
+		// TODO: generalize this behavior of focusing an element by clicking on empty space.
 		let first_focusable = this.focusables()[0]
 		if (!first_focusable)
 			return
 		first_focusable.focus()
+
 		return false
 	})
 
@@ -1375,10 +1379,13 @@ component('x-button', 'Input', function(e) {
 	e.prop('text', {store: 'var', default: 'OK', slot: 'lang'})
 
 	e.do_after('init', function() {
-		if (html_text != null && html_text != e.text)
+		if (html_text != null && html_text != e.text) {
+			e.xoff()
 			e.text = html_text
-		else
+			e.xon()
+		} else {
 			e.set_text(e.text) // set default
+		}
 	})
 
 	e.set_icon = function(v) {
@@ -2122,6 +2129,7 @@ component('x-pagelist', 'Containers', function(e) {
 	e.prop('can_add_items'   , {store: 'var', type: 'bool', default: false})
 	e.prop('can_remove_items', {store: 'var', type: 'bool', default: false})
 	e.prop('can_move_items'  , {store: 'var', type: 'bool', default: true})
+
 	e.prop('auto_focus_first_item', {store: 'var', type: 'bool', default: true})
 
 	function prop_changed(te, k, v) {
@@ -2156,11 +2164,8 @@ component('x-pagelist', 'Containers', function(e) {
 			e.widget_editing = true
 			return
 		}
-		if (!e.widget_editing && focus_tab != false && e.auto_focus_first_item) {
-			let ff = [...e.content.focusables()].filter(e => e.isinput)[0]
-			if (ff)
-				ff.focus()
-		}
+		if (!e.widget_editing && focus_tab != false && e.auto_focus_first_item)
+			e.focus_first()
 	}
 
 	e.property('selected_index',
@@ -2629,7 +2634,7 @@ component('x-toaster', function(e) {
 	function notify(...args) {
 		t = t || toaster({classes: 'x-notify-toaster'})
 		t.post(...args)
-		print('NOTIFY', args[0])
+		console.log('NOTIFY', args[0])
 	}
 }
 
@@ -2711,10 +2716,8 @@ component('x-action-band', 'Input', function(e) {
 
 component('x-dialog', function(e) {
 
-	focusable_widget(e)
-
 	e.prop('heading', {store: 'var', attr: true}) // because title is taken
-	e.prop('xbutton', {store: 'var', type: 'bool', attr: true, default: true})
+	e.prop('cancelable', {store: 'var', type: 'bool', attr: true, default: true})
 
 	e.init = function() {
 
@@ -2742,7 +2745,7 @@ component('x-dialog', function(e) {
 
 		e.add(e.header, e.content, e.footer)
 
-		if (e.xbutton) {
+		if (e.cancelable) {
 			e.x_button = div({class: 'x-dialog-xbutton fa fa-times'})
 			e.x_button.on('click', function() {
 				e.cancel()
@@ -2791,6 +2794,8 @@ component('x-dialog', function(e) {
 	}
 
 	e.cancel = function() {
+		if (!e.cancelable)
+			return
 		let cancel_btn = e.$1('x-button[cancel]')
 		if (cancel_btn)
 			cancel_btn.activate()
@@ -3029,10 +3034,15 @@ component('x-slides', 'Containers', function(e) {
 
 	e.property('selected_item', () => e.items[e.selected_index])
 
-	e.slide = function(i) {
+	e.slide = function(i, onfinish) {
 		e.selected_index = i
-		if (e.selected_item)
-			e.selected_item.focus_first_input_element('.x-input-widget')
+		if (e.selected_item) {
+			e.selected_item.focus_first()
+			if (onfinish)
+				e.selected_item.once('transitionend', function() {
+					onfinish(e, this)
+				})
+		}
 	}
 
 	return {items: html_items}
@@ -3364,7 +3374,7 @@ component('x-if', 'Containers', function(e) {
 
 	function bind_global(k, on) {
 		if (!k) return
-		window.on('global_changed_'+k, apply, on)
+		window.on(k+'_changed', apply, on)
 	}
 
 	e.set_global = function(k1, k0) {
@@ -3383,6 +3393,6 @@ component('x-if', 'Containers', function(e) {
 function setglobal(k, v) {
 	let v0 = window[k]
 	window[k] = v
-	fire('global_changed', k, v, v0)
-	fire('global_changed_'+k, v, v0)
+	broadcast('global_changed', k, v, v0)
+	broadcast(k+'_changed', v, v0)
 }
