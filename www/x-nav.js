@@ -4545,7 +4545,7 @@ component('x-lookup-dropdown', function(e) {
 
 	// booleans
 
-	let bool = {align: 'center', min_w: 28, max_w: 28}
+	let bool = {align: 'center', min_w: 28, max_w: 56}
 	field_types.bool = bool
 
 	bool.true_text = () => div({class: 'fa fa-check'})
