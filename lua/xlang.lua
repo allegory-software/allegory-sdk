@@ -91,17 +91,20 @@ rowset.S_schema_attrs = virtual_rowset(function(self, ...)
 	self.allow = 'admin'
 
 	self.fields = {
-		{name = 'attr'},
-		{name = 'info'},
+		{name = 'attr', },
+		{name = 'info', hidden = true},
 	}
 	self.pk = 'attr'
 
 	local rows = {
-		{'text', 'The name of field as it appears in grid headers'},
-		{'info', 'The long description of the field'},
+		{'text', Sf('field_attr_info_text', 'The name of field as it appears in grid headers')},
+		{'info', Sf('field_attr_info_info', 'The long description of the field')},
 	}
 	function self:load_rows(rs)
-		rs.rows = rows
+		rs.rows = {}
+		for i,row in ipairs(rows) do
+			rs.rows[i] = {row[1], row[2]()}
+		end
 	end
 
 	valid_attrs = glue.imap(rows, 1)

@@ -98,7 +98,7 @@ component('x-settings-button', function(e) {
 				target: e, side: 'bottom', align: 'start',
 				text: settings_form,
 				close_button: true,
-				autoclose: false,
+				autoclose: true,
 			})
 		}
 	})

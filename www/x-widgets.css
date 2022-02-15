@@ -2552,7 +2552,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-grid-header-cell.col-moving,
 .x-grid-cell.col-moving {
-	background-color: #eee;
 	opacity: .7;
 	z-index: 1; /* hover/focused = 1, moving = 1 */
 }
