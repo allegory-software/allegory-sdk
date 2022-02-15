@@ -36,6 +36,8 @@ INSTANCING
 	sqlpp.new(engine) -> spp                     create a preprocessor instance
 	spp.connect(options) -> cmd                  connect to a database
 	spp.use(rawconn) -> cmd                      use an existing connection
+	cmd:use(db, [schema])                        switch current database
+	cmd:close()                                  close connection
 
 SQL FORMATTING
 	cmd:sqlname(s) -> s                          format name: `'foo.bar'` -> `'`foo`.`bar`'`
@@ -79,7 +81,7 @@ SCHEMA REFLECTION
 	cmd:table_def(['[DB.]TABLE']) -> t           get table definition from `cmd.schemas.DB`
 	cmd:extract_schema([db]) -> sc               extract db [schema]
 	spp.empty_schema() -> sc                     create an empty [schema]
-	cmd.schema.DB = sc                           set schema manually for a database
+	cmd.schemas.DB = sc                          set schema manually for a database
 
 DDL COMMANDS
 	cmd:create_db(name, [charset], [collation])  create database
