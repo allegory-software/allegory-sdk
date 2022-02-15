@@ -35,16 +35,18 @@ CONFIG API
 
 MULTI-LANGUAGE SUPPORT
 
-	lang([k])                               get lang or property of current request
-	setlang(lang)                           set lang of current request
-	webb.langinfo_table[lang] -> {k->v}     static language property table
-	webb.langinfo(lang, k) -> s             get language property (stub)
+	lang([k])                               get lang or lang property for current request
+	setlang(lang, [if_not_set])             set lang of current request
+	default_lang()                          get the default lang
+	webb.langinfo[lang] -> {k->v}           static language property table
 
 MULTI-LANGUAGE STRINGS IN SOURCE CODE
 
-	S(id, en_s, ...) -> s                   get string in current language
+	S(id, en_s, ...) -> s                   get Lua string in current language
+	Sf(id, en_s) -> f(...) -> s             create a getter for a string in current language
+	S_for(ext, id, en_s, ...) -> s          get Lua/JS/HTML string in current language
 	S_texts(lang, ext) -> s                 get stored translated strings
-	update_S_texts(lang, ext, t)            update stored translated strings
+	update_S_texts(lang, ext, {id->s})      update stored translated strings
 	Sfile'file1 ...'                        register source code file
 	Sfile_ids() -> {id->{file=,n=,en_s=}    parse source code files for S() calls
 
@@ -369,7 +371,7 @@ end
 
 --multi-language support -----------------------------------------------------
 
-webb.langinfo_table = {
+webb.langinfo = {
 	en = {
 		rtl = false,
 		en_name = 'English',
@@ -378,18 +380,24 @@ webb.langinfo_table = {
 		thousands_separator = '.',
 	},
 }
-function webb.langinfo(lang, k) --stub, see webb_lang.lua
-	return webb.langinfo_table[lang]
+local function langinfo(lang, k)
+	local t = webb.langinfo[lang]
+	return t and k and t[k] or t
+end
+
+function default_lang()
+	return config('default_lang', 'en')
 end
 
 function lang(k)
-	local lang = cx.lang or args'lang' or config('default_lang', 'en')
-	if k then return webb.langinfo(lang, k) end
-	return lang
+	local lang = cx.lang or default_lang()
+	if not k then return lang end
+	return assert(langinfo(lang, k))
 end
 
-function setlang(s)
-	cx.lang = s
+function setlang(lang, if_not_set)
+	if if_not_set and cx.lang then return end
+	cx.lang = lang and langinfo(lang) and lang or default_lang()
 end
 
 --multi-language strings in source code files --------------------------------
@@ -402,6 +410,35 @@ local ids --{id->{files=,n=,en_s}}
 function Sfile(filenames)
 	update(files, index(names(filenames)))
 	ids = nil
+end
+
+function Sfile_template(ids, file, s)
+
+	local function add_id(id, en_s)
+		local ext_id ='html:'..id
+		local t = ids[ext_id]
+		if not t then
+			t = {files = file, n = 1, en_s = en_s}
+			ids[ext_id] = t
+		else
+			t.files = t.files .. ' ' .. file
+			t.n = t.n + 1
+		end
+	end
+
+	--<t s=ID>EN_S</t>
+	for id, en_s in s:gmatch'<t%s+s=([%w_%-]+).->(.-)</t>' do
+		add_id(id, en_s)
+	end
+
+	--replace attr:s:ID="EN_S" and attr:s:ID=EN_S
+	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=(%b"")' do
+		en_s = en_s:sub(2, -2)
+		add_id(id, en_s)
+	end
+	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=([^%s>]*)' do
+		add_id(id, en_s)
+	end
 end
 
 function Sfile_ids()
@@ -417,7 +454,7 @@ function Sfile_ids()
 						or readfile(indir(config'app_dir', 'sdk', 'lua', file)),
 							'file not found: %s', file)
 			end
-			for id, en_s in s:gmatch"[^%w_]S%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
+			for id, en_s in s:gmatch"[^%w_]Sf?%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
 				local ext_id = ext..':'..id
 				local t = ids[ext_id]
 				if not t then
@@ -428,6 +465,13 @@ function Sfile_ids()
 					t.n = t.n + 1
 				end
 			end
+		end
+		for i,k in ipairs(template()) do
+			local s = template(k)
+			if type(s) == 'function' then --template getter/generator
+				s = s()
+			end
+			Sfile_template(ids, k, s)
 		end
 	end
 	return ids
@@ -441,10 +485,10 @@ local function s_file(lang, ext)
 end
 
 --TODO: invalidate this cache based on file's mtime but don't check too often.
-S_texts = memoize(function(lang, ext)
+S_texts = function(lang, ext)
 	local f = loadfile(s_file(lang, ext))
 	return f and f() or {}
-end)
+end
 
 local function save_S_texts(lang, ext, t)
 	save(s_file(lang, ext), 'return '..pp.format(t, '\t'))
@@ -458,13 +502,31 @@ function update_S_texts(lang, ext, t)
 	save_S_texts(lang, ext, texts)
 end
 
-function S(id, en_s, ...)
-	local t = S_texts(lang(), 'lua')
-	local s = t[id] or en_s or ''
+function S_for(ext, id, en_s, ...)
+	local lang = lang()
+	local t = S_texts(lang, ext)
+	local s = t[id]
+	if not s then
+		local dlang = default_lang()
+		if dlang ~= 'en' and dlang ~= lang then
+			s = S_texts(dlang, ext)
+		end
+	end
+	s = s or en_s or ''
 	if select('#', ...) > 0 then
 		return glue.subst(s, ...)
 	else
 		return s
+	end
+end
+
+function S(...)
+	return S_for('lua', ...)
+end
+
+function Sf(id, en_s)
+	return function(...)
+		return S_for('lua', id, en_s, ...)
 	end
 end
 
@@ -1166,7 +1228,7 @@ function wwwfiles(filter)
 			t[name] = true
 		end
 	end
-	for name, d in fs.dir'.' do
+	for name, d in fs.dir(libwwwdir()) do
 		if not name then
 			break
 		end
@@ -1240,6 +1302,19 @@ local load_templates = memoize(function()
 			template[name] = s
 		end
 	end
+	--[[
+	--TODO: static templates
+	for i,file in ipairs(glue.keys(wwwfiles'%.html')) do
+		local s = wwwfile(file)
+		local _, i = mustache_unwrap(s, template, file)
+		if i == 0 then --must be without the <script> tag
+			local name = file:gsub('%.html%.mu$', '')
+			name = underscores(name)
+			check_template(name, file)
+			template[name] = s
+		end
+	end
+	]]
 end)
 
 local function template_call(template, name)
@@ -1249,7 +1324,7 @@ local function template_call(template, name)
 	else
 		name = underscores(name)
 		local s = assertf(template[name], 'template not found: %s', name)
-		if type(s) == 'function' then
+		if type(s) == 'function' then --template getter/generator
 			s = s()
 		end
 		return s
@@ -1361,22 +1436,39 @@ end
 --html filters ---------------------------------------------------------------
 
 function filter_lang(s, lang)
+
 	local lang0 = lang
 
-	--replace <t class=lang> which can also be hidden via CSS with this syntax.
-	s = s:gsub('<t class=([^>]+)>(.-)</t>', function(lang, html)
-		assert(not html:find('<t class=', 1, true), html)
-		if lang ~= lang0 then return '' end
-		return html
+	if config('lang_filter', false) == 'explicit' then
+
+		local function repl_lang(lang)
+			if lang ~= lang0 then return '' end
+			return false
+		end
+
+		--replace <t lang=LANG> which can also be hidden via CSS with this syntax.
+		s = s:gsub('<t%s+lang=(%w%w).->.-</t>', repl_lang)
+
+		--replace attr:LANG="TEXT" and attr:LANG=TEXT
+		s = s:gsub('%s[%w_%:%-]+%:(%a%a)=%b""'   , repl_lang)
+		s = s:gsub('%s[%w_%:%-]+%:(%a%a)=[^%s>]*', repl_lang)
+
+	end
+
+	--replace `<t s=ID>EN_S</t>` with `S(ID, EN_S)`.
+	s = s:gsub('<t%s+s=([%w_%-]+).->(.-)</t>', function(id, en_s)
+		return S_for('html', id, en_s)
 	end)
 
-	--replace attr:lang="val" and attr:lang=val
-	local function repl_attr(attr, lang, val)
-		if lang ~= lang0 then return '' end
-		return attr .. val
+	--replace attr:s:ID="EN_S" and attr:s:ID=EN_S
+	local function repl_quoted_attr(attr, id, en_s)
+		return attr .. '="' .. S_for('html', id, en_s:sub(2, -2)) .. '"'
 	end
-	s = s:gsub('(%s[%w_%:%-]+)%:(%a?%a?)(=%b"")', repl_attr)
-	s = s:gsub('(%s[%w_%:%-]+)%:(%a?%a?)(=[^%s>]*)', repl_attr)
+	local function repl_attr(attr, id, en_s)
+		return attr .. '="' .. S_for('html', id, en_s) .. '"'
+	end
+	s = s:gsub('(%s[%w_%-]+)%:s%:([%w_%-]+)=(%b"")', repl_quoted_attr)
+	s = s:gsub('(%s[%w_%-]+)%:s%:([%w_%-]+)=([^%s>]*)', repl_attr)
 
 	return s
 end
