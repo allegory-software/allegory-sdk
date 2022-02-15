@@ -762,7 +762,7 @@ function editbox_widget(e, opt) {
 		assert(!(on && !e.bound))
 		if (on) {
 			e.spicker = e.create_spicker({
-				id: e.id && e.id + '.spicker',
+				id: e.id ? e.id + '.spicker' : null,
 				dropdown: e,
 				nav: e.nav,
 				col: e.col,
@@ -985,7 +985,7 @@ function editbox_widget(e, opt) {
 		}
 
 		e.set_text_min_w = function(w) {
-			;(e.input || e.val_box).min_w = w
+			e.focus_box.min_w = w
 		}
 
 	}
@@ -1036,7 +1036,7 @@ function editbox_widget(e, opt) {
 			if (on) {
 				assert(!e.picker)
 				e.picker = e.create_picker({
-					id: e.id && e.id + '.picker',
+					id: e.id ? e.id + '.picker' : null,
 					dropdown: e,
 					nav: e.nav,
 					col: e.col,
@@ -1422,7 +1422,7 @@ component('x-tagsedit', 'Input', function(e) {
 
 	e.input = tag('input', {class: 'x-editbox-input x-tagsedit-input'})
 	e.label_box = div({class: 'x-editbox-label x-tagsedit-label'})
-	e.expand_button = div({class: 'x-tagsedit-button-expand fa fa-caret-up',
+	e.expand_button = div({class: 'x-tagsedit-button-expand fa fa-caret-down',
 		title: S_expand,
 	})
 	e.tags_box = div({class: 'x-tagsedit-tags-box'})
@@ -1504,7 +1504,7 @@ component('x-tagsedit', 'Input', function(e) {
 		if (!input_val_slice().length)
 			expanded = false
 		e.class('expanded', expanded)
-		e.expand_button.switch_class('fa-caret-up', 'fa-caret-down', expanded)
+		e.expand_button.switch_class('fa-caret-down', 'fa-caret-up', expanded)
 		if (expanded && !e.bubble)
 			e.bubble = tooltip({classes: 'x-tagsedit-bubble', target: e,
 					side: 'top', align: 'left'})
@@ -3329,7 +3329,7 @@ component('x-switcher', 'Containers', function(e) {
 
 	e.create_item = function(vals) {
 		let id = e.format_item_id(vals)
-		let item = id && component.create(assign_opt({id: id}, e.item_create_options(vals))) || null
+		let item = id ? component.create(assign_opt({id: id}, e.item_create_options(vals))) : null
 	}
 
 	e.do_update = function() {
@@ -3447,11 +3447,11 @@ component('x-form', 'Containers', function(e) {
 	contained_widget(e)
 	let html_items = widget_items_widget(e)
 
-	// generate a 3-letter value for `grid-area` based on item's `col` attr or `id`.
 	let names = {}
 	function area_name(item) {
 		let s = item.attr('area') || item.col || item.attr('col') || item.id
-		if (!s) return
+		if (!s)
+			return ''
 		if (names[s]) {
 			let x = num(names[s][2]) || 1
 			do { s = s.slice(0, 2) + (x + 1) } while (names[s])
@@ -3502,7 +3502,7 @@ component('x-form', 'Containers', function(e) {
 			if (last_focused_input)
 				last_focused_input.focus()
 			else
-				e.focus_first_input_element('.x-input-widget')
+				e.focus_first()
 		return false
 	})
 
