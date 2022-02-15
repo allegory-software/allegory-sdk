@@ -236,10 +236,10 @@ function return_arg(arg) { return arg; }
 
 // error handling ------------------------------------------------------------
 
-print = console.log
-pr = console.log
-warn  = print
-debug = print
+print = null
+pr    = console.log
+warn  = console.log
+debug = console.log
 trace = console.trace
 
 function assert(ret, err, ...args) {
