@@ -787,7 +787,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		}
 
 		 if (field.type == 'bool') {
-			let val = e.cell_val(row, field)
+			let val = e.cell_input_val(row, field)
 			e.set_cell_val(row, field, !val, {input: e})
 			return true
 		}
