@@ -933,39 +933,50 @@ function set_seconds(t, x) {
 	return _d.valueOf() / 1000
 }
 
-locale = navigator.language
-
 {
-	let wd = {short: obj(), long: obj()}
+	let weekday_names = memoize(function(locale) {
+		let wd = {short: obj(), long: obj()}
+		for (let i = 0; i < 7; i++) {
+			_d.setTime(1000 * 3600 * 24 * (3 + i))
+			for (let how of ['short', 'long'])
+				wd[how][i] = _d.toLocaleDateString(locale, {weekday: how, timeZone: 'UTC'})
+		}
+		return wd
+	})
 
-	for (let i = 0; i < 7; i++) {
-		_d.setTime(1000 * 3600 * 24 * (3 + i))
-		for (let how of ['short', 'long'])
-			wd[how][i] = _d.toLocaleDateString(lang() || locale, {weekday: how, timeZone: 'UTC'})
-	}
-
-	function weekday_name(t, how) {
+	function weekday_name(t, how, locale) {
 		if (t == null) return null
 		_d.setTime(t * 1000)
-		return wd[how || 'short'][_d.getDay()]
+		return weekday_names(locale || navigator.language)[how || 'short'][_d.getDay()]
 	}
 
-	function month_name(t, how) {
+	function month_name(t, how, locale) {
 		if (t == null) return null
 		_d.setTime(t * 1000)
-		return _d.toLocaleDateString(locale, {month: how || 'short'})
+		return _d.toLocaleDateString(locale || navigator.language, {month: how || 'short'})
 	}
 
-	function month_year(t, how) {
+	function month_year(t, how, locale) {
 		if (t == null) return null
 		_d.setTime(t * 1000)
-		return _d.toLocaleDateString(locale, {month: how || 'short', year: 'numeric'})
+		return _d.toLocaleDateString(locale || navigator.language, {month: how || 'short', year: 'numeric'})
 	}
 }
 
-// no way to get OS locale in JS in 2020. I hate the web.
-function week_start_offset() {
-	return locale.starts('en') ? 0 : 1
+{
+let wso = { // fri:0, sat:1, sun:2
+	mv:0,
+	ae:1,af:1,bh:1,dj:1,dz:1,eg:1,iq:1,ir:1,jo:1,kw:1,ly:1,om:1,qa:1,sd:1,sy:1,
+	ag:2,as:2,au:2,bd:2,br:2,bs:2,bt:2,bw:2,bz:2,ca:2,cn:2,co:2,dm:2,do:2,et:2,
+	gt:2,gu:2,hk:2,hn:2,id:2,il:2,in:2,jm:2,jp:2,ke:2,kh:2,kr:2,la:2,mh:2,mm:2,
+	mo:2,mt:2,mx:2,mz:2,ni:2,np:2,pa:2,pe:2,ph:2,pk:2,pr:2,pt:2,py:2,sa:2,sg:2,
+	sv:2,th:2,tt:2,tw:2,um:2,us:2,ve:2,vi:2,ws:2,ye:2,za:2,zw:2,
+}
+function week_start_offset(lang) {
+	return (wso[lang] || 3) - 2
+}
+pr(week_start_offset('us'))
+pr(week_start_offset('ro'))
 }
 
 // time formatting -----------------------------------------------------------
