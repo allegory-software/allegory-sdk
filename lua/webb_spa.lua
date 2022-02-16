@@ -198,7 +198,7 @@ end
 
 local spa_template = [[
 <!DOCTYPE html>
-<html lang="{{lang}}">
+<html lang={{lang}} country={{country}}>
 <head>
 	<meta charset=utf-8>
 	<title>{{title}}{{title_suffix}}</title>
@@ -228,6 +228,7 @@ action['404.html'] = function(action)
 	login() --sets lang from user profile
 	local t = {}
 	t.lang = lang()
+	t.country = country()
 	t.body = filter_lang(html(), lang())
 	t.body_classes = config'body_classes'
 	t.body_attrs = config'body_attrs'

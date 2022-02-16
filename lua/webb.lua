@@ -33,12 +33,17 @@ CONFIG API
 	config{name->val}                       set multiple config values
 	with_config(conf, f, ...) -> ...        run f with custom config table
 
-MULTI-LANGUAGE SUPPORT
+MULTI-LANGUAGE & MULTI-COUNTRY SUPPORT
 
 	lang([k])                               get lang or lang property for current request
 	setlang(lang, [if_not_set])             set lang of current request
 	default_lang()                          get the default lang
 	webb.langinfo[lang] -> {k->v}           static language property table
+
+	country([k])                            get country or country property for current request
+	setcountry(country, [if_not_set])       set country of current request
+	default_country()                       get the default country
+	webb.countryinfo[country] -> {k->v}     static country property table
 
 MULTI-LANGUAGE STRINGS IN SOURCE CODE
 
@@ -369,7 +374,7 @@ do
 	end
 end
 
---multi-language support -----------------------------------------------------
+--multi-language support with stubs ------------------------------------------
 
 webb.langinfo = {
 	en = {
@@ -398,6 +403,35 @@ end
 function setlang(lang, if_not_set)
 	if if_not_set and cx.lang then return end
 	cx.lang = lang and langinfo(lang) and lang or default_lang()
+end
+
+webb.countryinfo = {
+	US = {
+		lang = 'en',
+		currency = 'USD',
+		imperial_system = true,
+		week_start_offset = 0,
+		en_name = 'United States',
+	},
+}
+local function countryinfo(country, k)
+	local t = webb.countryinfo[country]
+	return t and k and t[k] or t
+end
+
+function default_country()
+	return config('default_country', 'US')
+end
+
+function country(k)
+	local country = cx.country or default_country()
+	if not k then return country end
+	return assert(countryinfo(country, k))
+end
+
+function setcountry(country, if_not_set)
+	if if_not_set and cx.country then return end
+	cx.country = country and countryinfo(country) and country or default_country()
 end
 
 --multi-language strings in source code files --------------------------------
