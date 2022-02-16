@@ -11,7 +11,6 @@ CONFIG API
 
 	config(name[, default]) -> value       for global config options
 	S(name, [default], ...args) -> s       for internationalized strings
-	lang()                                 current language
 
 ACTIONS
 
@@ -72,10 +71,6 @@ function S(name, en_s, ...args) {
 		return s.subst(...args)
 	else
 		return s
-}
-
-function lang() {
-	return document.documentElement.lang
 }
 
 // actions -------------------------------------------------------------------
