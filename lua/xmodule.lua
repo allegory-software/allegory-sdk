@@ -28,7 +28,7 @@ local _ = string.format
 
 --rowsets --------------------------------------------------------------------
 
-local rowsets = virtual_rowset(function(rs)
+rowset.rowsets = virtual_rowset(function(rs)
 	rs.fields = {
 		{name = 'name'}
 	}
@@ -40,10 +40,6 @@ local rowsets = virtual_rowset(function(rs)
 		end
 	end
 end)
-
-function rowset.rowsets()
-	return rowsets:respond()
-end
 
 --xmodule --------------------------------------------------------------------
 

@@ -3,10 +3,17 @@
 	webb | xapp language/country/currency setting UI
 	Written by Cosmin Apreutesei. Public Domain.
 
+API
+
+	update_S_schema_texts()
+
 ROWSETS
 
-	S                  used by translation UIs
-	lang               used by the language chooser
+	S                  translation UI: labeled strings from source code
+	S_schema_attrs     translation UI: list translatable field attributes
+	S_schema_fields    translation UI: translate schema & rowset fields
+	lang               used for setting supported languages
+	pick_lang          used for choosing the current language
 
 ]==]
 
@@ -26,12 +33,12 @@ rowset.S = virtual_rowset(function(self, ...)
 	self.allow = 'admin'
 
 	self.fields = {
-		{name = 'ext'},
-		{name = 'id'},
-		{name = 'en_text', text = text_in_english},
-		{name = 'text', text = text_in_current_language},
-		{name = 'files'},
-		{name = 'occurences', type = 'number', max_w = 30},
+		{name = 'ext'       , readonly = true , },
+		{name = 'id'        , readonly = true , },
+		{name = 'en_text'   , readonly = true , text = text_in_english},
+		{name = 'text'      , readonly = false, text = text_in_current_language},
+		{name = 'files'     , readonly = true , },
+		{name = 'occurences', readonly = true , type = 'number', max_w = 30},
 	}
 	self.pk = 'ext id'
 	self.cols = 'id en_text text'
@@ -121,11 +128,12 @@ rowset.S_schema_fields = virtual_rowset(function(self, ...)
 	self.allow = 'admin'
 
 	self.fields = {
-		{name = 'table'},
-		{name = 'col', text = 'Column'},
-		{name = 'attr'},
-		{name = 'en_text', text = text_in_english},
-		{name = 'text', text = text_in_current_language},
+		{name = 'type'   , readonly = true , },
+		{name = 'table'  , readonly = true , },
+		{name = 'col'    , readonly = true , text = 'Column'},
+		{name = 'attr'   , readonly = true , },
+		{name = 'en_text', readonly = true , text = text_in_english},
+		{name = 'text'   , readonly = false, text = text_in_current_language},
 	}
 
 	self.pk = 'table col attr'
@@ -133,16 +141,26 @@ rowset.S_schema_fields = virtual_rowset(function(self, ...)
 	function self:load_rows(rs, params)
 		local attrs = params['param:filter']
 		rs.rows = {}
+		local function add_row(texts, tbl_type, tbl_name, fld, col, attr)
+			local en_text = fld['en_'..attr]
+			if type(en_text) == 'function' then --getter/generator
+				en_text = en_text()
+			end
+			local text = texts[tbl_type..'.'..tbl_name..'.'..col]
+			table.insert(rs.rows, {tbl_type, tbl_name, col, attr, en_text, text})
+		end
 		for i,attr in ipairs(attrs) do
 			local texts = S_schema_texts(lang(), attr)
 			for tbl_name, tbl in glue.sortedpairs(db_schema().tables) do
 				for i, fld in ipairs(tbl.fields) do
-					local en_text = fld['en_'..attr]
-					if type(en_text) == 'function' then --getter/generator
-						en_text = en_text()
+					add_row(texts, 'table', tbl_name, fld, fld.col, attr)
+				end
+			end
+			for rs_name, rs in glue.sortedpairs(rowset) do
+				if rs.client_fields then
+					for i, fld in ipairs(rs.client_fields) do
+						add_row(texts, 'rowset', rs_name, fld, fld.name, attr)
 					end
-					local text = texts[tbl_name..'.'..fld.col]
-					table.insert(rs.rows, {tbl_name, fld.col, attr, en_text, text})
 				end
 			end
 		end
@@ -178,24 +196,37 @@ local function S_col(tbl_col, attr)
 	return texts[tbl_col]
 end
 
+local function update_S_texts(tbl, fld, col, attr)
+	local en_text = fld[attr]
+	fld['en_'..attr] = en_text
+	local tbl_col = tbl..'.'..col
+	fld[attr] = function()
+		local s = S_col(tbl_col, attr)
+		if s then
+			return s
+		end
+		s = en_text
+		if type(s) == 'function' then
+			s = s()
+		end
+		return s
+	end
+end
+
 function update_S_schema_texts()
 	local sc = db_schema()
 	for _,attr in ipairs(valid_attrs) do
-		for tbl_name, tbl in glue.sortedpairs(db_schema().tables) do
+		for tbl_name, tbl in pairs(db_schema().tables) do
 			for _,fld in ipairs(tbl.fields) do
-				local en_text = fld[attr]
-				fld['en_'..attr] = en_text
-				local tbl_col = tbl_name..'.'..fld.col
-				fld[attr] = function()
-					local s = S_col(tbl_col, attr)
-					if s then
-						return s
-					end
-					s = en_text
-					if type(s) == 'function' then
-						s = s()
-					end
-					return s
+				update_S_texts('table.'..tbl_name, fld, fld.col, attr)
+			end
+		end
+		for rs_name, rs in pairs(rowset) do
+			break
+			pr(rs_name, rs)
+			if rs.client_fields then
+				for _,fld in ipairs(rs.client_fields) do --virtual rowset
+					update_S_texts('rowset.'..rs_name, fld, fld.name, attr)
 				end
 			end
 		end
@@ -215,8 +246,13 @@ rowset.lang = sql_rowset{
 	]],
 	pk = 'lang',
 	field_attrs = {
-		lang = {w = 40},
+		lang    = {w = 40, readonly = true},
+		en_name = {readonly = true},
+		name    = {readonly = true},
 	},
+	update_row = function(self, row)
+		update_row('lang', row, 'supported')
+	end,
 }
 
 rowset.pick_lang = sql_rowset{
