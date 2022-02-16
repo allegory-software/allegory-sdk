@@ -162,10 +162,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		if (changes.input_val) {
 			e.do_update_val(changes.input_val[0], ev)
 			e.class('modified', e.nav.cell_modified(row, field))
-		}
-		if (changes.val) {
-			e.class('modified', e.nav.cell_modified(row, field))
-			e.fire('val_changed', changes.val[0], ev)
+			e.fire('input_val_changed', changes.input_val[0], ev)
 		}
 		if (changes.errors) {
 			e.invalid = e.nav.cell_has_errors(row, field)
@@ -256,8 +253,21 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 	function get_val() {
 		let row = e.row
-		return e.field && row ? e.nav.cell_val(row, e.field) : null
+		return row && e.field ? e.from_val(e.nav.cell_val(row, e.field)) : null
 	}
+	function get_input_val() {
+		let row = e.row
+		return row && e.field ? e.from_val(e.nav.cell_input_val(row, e.field)) : null
+	}
+
+	e.reset_val = function(v, ev) {
+		v = e.to_val(v)
+		if (v === undefined)
+			v = null
+		if (e.row && e.field)
+			e.nav.reset_cell_val(e.row, e.field, v, ev)
+	}
+
 	let initial_val
 	e.set_val = function(v, ev) {
 		v = e.to_val(v)
@@ -269,19 +279,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 			initial_val = v
 	}
 	e.property('val', get_val, e.set_val)
-
-	e.reset_val = function(v, ev) {
-		v = e.to_val(v)
-		if (v === undefined)
-			v = null
-		if (e.row && e.field)
-			e.nav.reset_cell_val(e.row, e.field, v, ev)
-	}
-
-	e.property('input_val', function() {
-		let row = e.row
-		return row && e.field ? e.from_val(e.nav.cell_input_val(e.row, e.field)) : null
-	})
+	e.property('input_val', get_input_val)
 
 	e.property('errors',
 		function() {
@@ -1345,7 +1343,7 @@ component('x-spinedit', 'Input', function(e) {
 
 	}
 
-	let multiple = () => or(1 / 10 ** e.field.decimals, 1)
+	let multiple = () => or(1 / 10 ** (e.field.decimals || 0), 1)
 
 	// controller
 
@@ -1378,7 +1376,7 @@ component('x-spinedit', 'Input', function(e) {
 	}
 	let start_incrementing_timer
 	function add_events(button, sign) {
-		button.on('pointerdown', function() {
+		button.on('pointerdown', function(ev) {
 			if (start_incrementing_timer || increment_timer)
 				return
 			e.input.focus()
@@ -1926,6 +1924,7 @@ component('x-calendar', 'Input', function(e) {
 
 	e.sel_month = list_dropdown({
 		classes: 'x-calendar-sel-month',
+		picker_classes: 'x-calendar-sel-month-picker',
 		items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
 		field: {
 			format: format_month,
@@ -2138,7 +2137,7 @@ component('x-calendar', 'Input', function(e) {
 		})
 	})
 
-	e.sel_month.on('val_changed', function(v, ev) {
+	e.sel_month.on('input_val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
 		let t = as_ts(e.input_val)
@@ -2148,14 +2147,14 @@ component('x-calendar', 'Input', function(e) {
 			ct = week(month(t))
 			set_ts(t)
 		} else {
-			let y = e.sel_year.val
+			let y = e.sel_year.input_val
 			let m = v
 			ct = y != null && m != null ? week(time(y, m)) : null
 		}
 		update_weekview(ct, t)
 	})
 
-	e.sel_year.on('val_changed', function(v, ev) {
+	e.sel_year.on('input_val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
 		let t = as_ts(e.input_val)
@@ -2165,13 +2164,13 @@ component('x-calendar', 'Input', function(e) {
 			set_ts(t)
 		} else {
 			let y = v
-			let m = e.sel_month.val
+			let m = e.sel_month.input_val
 			ct = y != null && m != null ? week(time(y, m)) : null
 		}
 		update_weekview(ct, t)
 	})
 
-	e.sel_hour.on('val_changed', function(v, ev) {
+	e.sel_hour.on('input_val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
 		let t = as_ts(e.input_val)
@@ -2181,7 +2180,7 @@ component('x-calendar', 'Input', function(e) {
 		}
 	})
 
-	e.sel_minute.on('val_changed', function(v, ev) {
+	e.sel_minute.on('input_val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
 		let t = as_ts(e.input_val)
@@ -2191,7 +2190,7 @@ component('x-calendar', 'Input', function(e) {
 		}
 	})
 
-	e.sel_second.on('val_changed', function(v, ev) {
+	e.sel_second.on('input_val_changed', function(v, ev) {
 		if (!(ev && ev.input))
 			return
 		let t = as_ts(e.input_val)
@@ -2219,7 +2218,7 @@ component('x-calendar', 'Input', function(e) {
 			case 'PageUp'     : m = -1; break
 			case 'PageDown'   : m =  1; break
 		}
-		let t = as_ts(e.val)
+		let t = as_ts(e.input_val)
 		if (d) {
 			let dt = daytime(t) || 0
 			set_ts(or(day(t, d), day(time())) + dt, true)
@@ -2261,13 +2260,13 @@ component('x-calendar', 'Input', function(e) {
 
 
 	e.pick_near_val = function(delta, ev) {
-		let dt = daytime(as_ts(e.val)) || 0
-		set_ts(day(or(as_ts(e.val), time()), delta) + dt)
+		let dt = daytime(as_ts(e.input_val)) || 0
+		set_ts(day(or(as_ts(e.input_val), time()), delta) + dt)
 		e.fire('val_picked', ev)
 	}
 
 	e.on('dropdown_opened', function() {
-		update_view(as_ts(e.val))
+		update_view(as_ts(e.input_val))
 	})
 
 })
@@ -2615,7 +2614,7 @@ component('x-chart', 'Input', function(e) {
 			let slice = {}
 			let sum = 0
 			for (let row of group)
-				sum += e.nav.cell_val(row, e.sum_col)
+				sum += e.nav.cell_input_val(row, e.sum_col)
 			slice.sum = sum
 			slice.label = cat_sum_label('x-chart-label', e.cat_cols, group.key_vals, group[0], sum)
 			slices.push(slice)
@@ -3076,7 +3075,7 @@ component('x-chart', 'Input', function(e) {
 			return
 		nav.on('reset'               , redraw, on)
 		nav.on('rows_changed'        , redraw, on)
-		nav.on('cell_val_changed'    , redraw, on)
+		nav.on('cell_state_changed'  , redraw, on)
 		nav.on('display_vals_changed', redraw, on)
 	}
 
@@ -3237,7 +3236,7 @@ component('x-mu', function(e) {
 		if (nav) {
 			nav.on('focused_row_changed'     , update, on)
 			nav.on('focused_row_val_changed' , update, on)
-			nav.on('cell_val_changed'        , update, on)
+			nav.on('cell_state_changed'      , update, on)
 			nav.on('reset'                   , update, on)
 		}
 		if (reload !== false)
