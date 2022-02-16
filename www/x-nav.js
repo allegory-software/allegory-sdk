@@ -262,7 +262,6 @@ updating cells:
 	publishes:
 		e.set_cell_state(field, val, default_val)
 		e.set_cell_val()
-		e.commit_cell_val()
 		e.reset_cell_val()
 	calls:
 		e.validator_NAME(field) -> {validate: f(v) -> true|false, message: text}
@@ -2566,10 +2565,6 @@ function nav_widget(e) {
 		e.end_set_state()
 	}
 
-	e.commit_cell_val = function(row, col, ev) {
-		e.reset_cell_val(row, col, e.cell_input_val(row, col), ev)
-	}
-
 	// responding to val changes ----------------------------------------------
 
 	e.do_update_val = function(v, ev) {
@@ -4115,7 +4110,8 @@ function nav_widget(e) {
 
 	e.pick_near_val = function(delta, ev) {
 		if (e.focus_cell(true, true, delta, 0, ev))
-			e.fire('val_picked', ev)
+			if (!ev || ev.pick !== false)
+				e.fire('val_picked', ev)
 	}
 
 	e.set_display_col = function() {
@@ -4550,7 +4546,7 @@ component('x-lookup-dropdown', function(e) {
 
 	// booleans
 
-	let bool = {align: 'center', min_w: 28, max_w: 56}
+	let bool = {align: 'center', min_w: 28}
 	field_types.bool = bool
 
 	bool.true_text = () => div({class: 'fa fa-check'})
