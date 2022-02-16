@@ -61,6 +61,11 @@ STRINGS
 	s.display_name()
 	s.cat(sep, ...)
 	s.names() -> a
+MULTI-LANGUAGE STUBS
+	S(id, default)                         get labeled string in current language
+	lang()                                 get current language
+	country()                              get current country
+	href(url, [lang])                      rewrite URL for (current) language
 ARRAYS
 	empty_array
 	a.extend(a1)
@@ -101,10 +106,10 @@ TIME
 	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts)
 	set_[year|month|month_day|hours|minutes|seconds](ts)
 	locale
-	weekday_name (ts, ['long'])
-	month_name   (ts, ['long'])
-	month_year   (ts, ['long'])
-	week_start_offset()
+	weekday_name (ts, ['long'], [locale])
+	month_name   (ts, ['long'], [locale])
+	month_year   (ts, ['long'], [locale])
+	week_start_offset([country])
 	ds.duration() -> s
 	ts.timeago() -> s
 FILE SIZE FORMATTING
@@ -379,8 +384,20 @@ if (!window.S)
 	function S(label, msg) { return msg }
 
 // stub for getting current language.
-if (!window.lang)
-	function lang() { return document.documentElement.lang }
+if (!window.lang) {
+	let nav_lang = navigator.language.substring(0, 2)
+	function lang() {
+		return document.documentElement.lang || nav_lang
+	}
+}
+
+// stub for getting current country.
+if (!window.country) {
+	let nav_country = navigator.language.substring(3, 5)
+	function country() {
+		return document.documentElement.attr('country') || nav_country
+	}
+}
 
 // stub for rewriting links to current language.
 if (!window.href)
@@ -865,14 +882,14 @@ function year(t, offset) {
 }
 
 // get the time at the start of the week of a given time, plus/minus a number of weeks.
-function week(t, offset) {
+function week(t, offset, country) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
 	_d.setUTCSeconds(0)
 	_d.setUTCMinutes(0)
 	_d.setUTCHours(0)
-	let days = -_d.getUTCDay() + week_start_offset()
+	let days = -_d.getUTCDay() + week_start_offset(country)
 	if (days > 0) days -= 7
 	_d.setUTCDate(_d.getUTCDate() + days + (offset || 0) * 7)
 	return _d.valueOf() / 1000
@@ -947,7 +964,8 @@ function set_seconds(t, x) {
 	function weekday_name(t, how, locale) {
 		if (t == null) return null
 		_d.setTime(t * 1000)
-		return weekday_names(locale || navigator.language)[how || 'short'][_d.getDay()]
+		let wd = _d.getDay()
+		return weekday_names(locale || navigator.language)[how || 'short'][wd]
 	}
 
 	function month_name(t, how, locale) {
@@ -964,16 +982,16 @@ function set_seconds(t, x) {
 }
 
 {
-let wso = { // fri:0, sat:1, sun:2
-	mv:0,
-	ae:1,af:1,bh:1,dj:1,dz:1,eg:1,iq:1,ir:1,jo:1,kw:1,ly:1,om:1,qa:1,sd:1,sy:1,
-	ag:2,as:2,au:2,bd:2,br:2,bs:2,bt:2,bw:2,bz:2,ca:2,cn:2,co:2,dm:2,do:2,et:2,
-	gt:2,gu:2,hk:2,hn:2,id:2,il:2,in:2,jm:2,jp:2,ke:2,kh:2,kr:2,la:2,mh:2,mm:2,
-	mo:2,mt:2,mx:2,mz:2,ni:2,np:2,pa:2,pe:2,ph:2,pk:2,pr:2,pt:2,py:2,sa:2,sg:2,
-	sv:2,th:2,tt:2,tw:2,um:2,us:2,ve:2,vi:2,ws:2,ye:2,za:2,zw:2,
+let wso = { // fri:1, sat:2, sun:3
+	MV:1,
+	AE:2,AF:2,BH:2,DJ:2,DZ:2,EG:2,IQ:2,IR:2,JO:2,KW:2,LY:2,OM:2,QA:2,SD:2,SY:2,
+	AG:3,AS:3,AU:3,BD:3,BR:3,BS:3,BT:3,BW:3,BZ:3,CA:3,CN:3,CO:3,DM:3,DO:3,ET:3,
+	GT:3,GU:3,HK:3,HN:3,ID:3,IL:3,IN:3,JM:3,JP:3,KE:3,KH:3,KR:3,LA:3,MH:3,MM:3,
+	MO:3,MT:3,MX:3,MZ:3,NI:3,NP:3,PA:3,PE:3,PH:3,PK:3,PR:3,PT:3,PY:3,SA:3,SG:3,
+	SV:3,TH:3,TT:3,TW:3,UM:3,US:3,VE:3,VI:3,WS:3,YE:3,ZA:3,ZW:3,
 }
-function week_start_offset(country) {
-	return (wso[country] || 3) - 2
+function week_start_offset(country1) {
+	return (wso[country1 || country()] || 4) - 3
 }
 }
 
