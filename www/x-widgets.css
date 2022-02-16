@@ -16,7 +16,7 @@
 	--x-shadow-focused-button         :  0px  0px  0px  1px var(--x-border-focused-button);
 	--x-shadow-focused-button-primary :  0px  0px  0px  1px var(--x-border-focused-button-primary);
 	--x-shadow-popup                  :  2px  2px  2px      #000000aa; /* sharply angled shadow */
-	--x-shadow-popup2                 :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
+	--x-shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 	--x-shadow-button                 :  0px  0px  8px  0px #00000011;
 	--x-shadow-tooltip                :  2px  2px  9px      #00000044;
 	--x-shadow-dialog                 :  2px  2px 10px      #00000088;
@@ -49,6 +49,7 @@
 	--x-fg-inverted     : #fff;  /* text on inverted backgrounds */
 	--x-bg              : #fff;  /* bg for regions that need to be opaque */
 	--x-bg-popup        : #fff;  /* bg for popups and inline grid editors */
+	--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
 	--x-fg-disabled     : #00000066;  /* faded text on light bg */
 	--x-fg-disabled-inverted : #ffffff66;  /* faded text on dark colored bg with the same color as bg */
 	--x-border-light    : #00000033;  /* normal borders */
@@ -1038,7 +1039,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* look focused even though it's the picker that's focused. */
 .x-dropdown.open > .x-focus-box {
 	border-color : var(--x-border-focused);
-	box-shadow   : var(--x-shadow-popup2), var(--x-shadow-focused);
 }
 
 .x-editbox-value {
@@ -1131,7 +1131,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	z-index: 3; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
 
 	border-color: var(--x-border-focused);
-	box-shadow  : var(--x-shadow-popup2), var(--x-shadow-focused);
+	box-shadow  : var(--x-shadow-popup-picker), var(--x-shadow-focused);
 }
 
 /* passedit --------------------------------------------------------------- */
@@ -1572,16 +1572,24 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-editbox.x-calendar-sel-year {
-	width: 7em;
+	width: 8em;
 	margin-left: .5em;
 }
 
-.x-calendar-sel-year {
+.x-calendar-sel-year > .x-focus-box {
+	justify-content: space-between;
+}
 
+.x-calendar-sel-year > .x-focus-box > .x-editbox-input {
+	max-width: 2.5em;
 }
 
 .x-editbox.x-calendar-sel-month {
 	min-width: 5em;  /* limit shrinking */
+}
+
+.x-widget.picker.x-calendar-sel-month-picker {
+	background-color: var(--x-bg-popup2);
 }
 
 .x-calendar-sel-day:empty::before,
@@ -3029,6 +3037,7 @@ x-prop-inspector .x-grid-cell:not(.modified) {
 	--x-bg                   : #0d1117;
 	--x-fg-info              : var(--x-fg-inverted);
 	--x-bg-popup             : #1d2532;
+	--x-bg-popup2            : #11161e;
 	--x-fg-disabled          : #ffffff66;
 	--x-fg-disabled-inverted : var(--x-fg-disabled);
 	--x-border-light         : #ffffff22;
