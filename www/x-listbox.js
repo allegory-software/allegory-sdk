@@ -432,6 +432,7 @@ component('x-list-dropdown', function(e) {
 		let lb = component.create(assign_opt(opt, {
 			type: 'listbox',
 			id: e.id && e.id + '.picker' || null,
+			classes: e.picker_classes,
 			val_col: e.val_col,
 			display_col: e.display_col,
 			items: e.items,
@@ -445,11 +446,15 @@ component('x-list-dropdown', function(e) {
 		// the listbox is serving as the picker for the dropdown,
 		// update the display value in the dropdown.
 		function update(...args) {
-			e.do_update_val(e.val)
+			e.do_update_val(e.input_val)
 		}
 		lb.on('focused_row_cell_state_changed', update)
 		lb.on('focused_row_state_changed', update)
 		lb.on('display_vals_changed', update)
+
+		lb.on('wheel', function(ev, dy) {
+			lb.pick_near_val(dy, {input: e, pick: false})
+		})
 
 		return lb
 	}
