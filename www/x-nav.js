@@ -4473,6 +4473,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	datetime.from_text = function(s) {
+		if (s == '') return null
 		let t = this.to_time(s)
 		return t != null ? this.from_time(t) : s
 	}
@@ -4540,7 +4541,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	timestamp.validator_date = field => ({
-		validate : v => isnum(v) && v === v,
+		validate : v => v == null || (isnum(v) && v === v),
 		message  : S('validation_date', 'Date must be valid'),
 	})
 
@@ -4555,7 +4556,7 @@ component('x-lookup-dropdown', function(e) {
 	bool.null_text = () => div({class: 'fa fa-square'})
 
 	bool.validator_bool = field => ({
-		validate : v => isbool(v),
+		validate : v => v == null || isbool(v),
 		message  : S('validation_boolean', 'Value must be true or false'),
 	})
 
