@@ -386,7 +386,7 @@ local function userinfo(usr)
 	t.admin = t.roles.admin
 	return t
 end
-userinfo = once(userinfo)
+--userinfo = userinfo
 
 local function clear_userinfo_cache(usr)
 	--
