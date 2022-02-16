@@ -1916,7 +1916,7 @@ component('x-calendar', 'Input', function(e) {
 	focusable_widget(e)
 
 	function format_month(v) {
-		return month_name(time(0, v), 'short')
+		return month_name(time(0, v), 'short', lang())
 	}
 
 	e.sel_day = div({class: 'x-calendar-sel-day'})
@@ -2032,6 +2032,11 @@ component('x-calendar', 'Input', function(e) {
 
 	let start_week
 
+	let glue_week = window.week
+	function week(t, offset) {
+		return glue_week(t, offset, country())
+	}
+
 	function focused_month(t) {
 		return month(week(t, 2))
 	}
@@ -2063,7 +2068,7 @@ component('x-calendar', 'Input', function(e) {
 			for (let weekday = 0; weekday < 7; weekday++) {
 				if (!week) {
 					let th = tag('th', {class: 'x-calendar-weekday'},
-						d != null ? weekday_name(day(d, weekday)) : '???')
+						d != null ? weekday_name(day(d, weekday), 'short', lang()) : '???')
 					tr.add(th)
 				} else {
 					let s, n
