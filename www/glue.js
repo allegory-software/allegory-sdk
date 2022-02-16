@@ -972,11 +972,9 @@ let wso = { // fri:0, sat:1, sun:2
 	mo:2,mt:2,mx:2,mz:2,ni:2,np:2,pa:2,pe:2,ph:2,pk:2,pr:2,pt:2,py:2,sa:2,sg:2,
 	sv:2,th:2,tt:2,tw:2,um:2,us:2,ve:2,vi:2,ws:2,ye:2,za:2,zw:2,
 }
-function week_start_offset(lang) {
-	return (wso[lang] || 3) - 2
+function week_start_offset(country) {
+	return (wso[country] || 3) - 2
 }
-pr(week_start_offset('us'))
-pr(week_start_offset('ro'))
 }
 
 // time formatting -----------------------------------------------------------
