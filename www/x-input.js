@@ -1919,7 +1919,10 @@ component('x-calendar', 'Input', function(e) {
 	focusable_widget(e)
 
 	function format_month(v) {
-		return month_name(time(0, v), 'short', lang())
+		return div({class: 'x-calendar-month-box'},
+			span({class: 'x-calendar-month-num'}, v),
+			span({class: 'x-calendar-month-name'}, month_name(time(0, v), 'short', lang()))
+		)
 	}
 
 	e.sel_day = div({class: 'x-calendar-sel-day'})

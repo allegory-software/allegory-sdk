@@ -1594,6 +1594,20 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	background-color: var(--x-bg-popup2);
 }
 
+.x-calendar-month-box {
+	display: flex;
+}
+
+.x-calendar-month-num {
+	min-width: 1.25em;
+	text-align: right;
+	margin-right: .75em;
+}
+
+.x-calendar-month-name {
+	min-width: 3em;
+}
+
 .x-calendar-sel-day:empty::before,
 .x-calendar-sel-day-suffix:empty::before,
 .x-calendar-day:empty::before
