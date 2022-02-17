@@ -206,9 +206,12 @@ rowset.users = sql_rowset{
 		from
 			usr
 	]],
+	cols = 'usr email title name roles active birthday newsletter atime ctime mtime',
 	field_attrs = {
-		note     = {hidden = true},
-		clientip = {hidden = true},
+		note     = {hidden = true  },
+		clientip = {hidden = true  },
+		name     = {not_null = true},
+		email    = {not_null = true},
 	},
 	where_all = 'anonymous = 0',
 	pk = 'usr',

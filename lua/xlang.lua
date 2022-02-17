@@ -259,8 +259,7 @@ rowset.pick_lang = sql_rowset{
 	select = [[
 		select
 			lang,
-			name,
-			en_name
+			concat(name, ' (', en_name, ')') as name
 		from lang
 	]],
 	where_all = 'supported = 1',
