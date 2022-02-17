@@ -1262,7 +1262,7 @@ relatively positioned and styled popups that are also painted last i.e.
 on top of everything, so we have to choose between popups that are
 well-positioned but most probably clipped or obscured by other elements,
 or popups that stay on top but have to be manually positioned and styled,
-and kept in sync with the position of their target. We chosethe latter
+and kept in sync with the position of their target. We choose the latter
 since we have a lot of implicit "stacking contexts" (read: abstraction
 leaks of the graphics engine) and we try to auto-update the popup position
 the best we can, but there will be cases where you'll have to call popup()
@@ -1408,7 +1408,8 @@ let popup_state = function(e) {
 		}
 		e.fire('popup_bind', on, target)
 
-		pr(e, target, on)
+		// FIXME: logout bug with double-unbind !!
+		// pr(e, target, on)
 
 		// changes in target size updates the popup position.
 		if (target.detect_resize) {
