@@ -443,6 +443,8 @@ function input_widget(e) {
 	e.do_after('do_update', function() {
 		update_info()
 		let s = !e.nolabel && (e.label || (e.field && e.field.text)) || null
+		if (s != null && e.field && e.field.not_null && e.label_show_star != false)
+			s = s + ' *'
 		e.class('with-label', !!s)
 		e.label_box.set(!e.nolabel ? s || e.create_label_placeholder() : null)
 	})
@@ -484,6 +486,7 @@ component('x-checkbox', 'Input', function(e) {
 	e.checked_val = true
 	e.unchecked_val = false
 
+	e.label_show_star = false
 	e.icon_box = span({class: 'x-markbox-icon x-checkbox-icon far fa-square'})
 	e.label_box = span({class: 'x-markbox-label x-checkbox-label'})
 	e.focus_box = div({class: 'x-focus-box'}, e.icon_box, e.label_box)
