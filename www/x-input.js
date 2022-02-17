@@ -1987,7 +1987,7 @@ component('x-calendar', 'Input', function(e) {
 	})
 
 	e.header = div({class: 'x-calendar-header'},
-		e.sel_day, e.sel_day_suffix, e.sel_month, e.sel_year)
+		div({class: 'x-calendar-sel-day-box'}, e.sel_day, e.sel_day_suffix), e.sel_month, e.sel_year)
 
 	e.weekview = tag('table', {class: 'x-calendar-weekview x-focusable-items',
 		tabindex: 0})

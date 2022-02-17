@@ -4085,7 +4085,7 @@ function nav_widget(e) {
 				+ (sn > 1 ? ' ' + sn + ' ' + nrows(sn) : '')
 			b.buttons.delete.attr('danger', '')
 			b.buttons.reload.disabled = cn || !e.rowset_url
-			let s = ', '.cat(
+			let s = '\n'.cat(
 				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
 				an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
 				un > 0 ? un + ' ' + nrows(un) + ' ' + S('modified', 'modified') : null,
@@ -4563,7 +4563,7 @@ component('x-lookup-dropdown', function(e) {
 
 	datetime.to_text = function(v) {
 		let t = this.to_time(v)
-		return t ? t.format_date(locale(), this.has_time) : ''
+		return t ? t.date(locale(), this.has_time) : ''
 	}
 
 	datetime.from_text = function(s) {

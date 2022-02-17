@@ -113,7 +113,7 @@ TIME & DATE
 	week_start_offset([country])
 	ds.duration() -> s
 	ts.timeago() -> s
-	ts.format_date([locale]) -> s
+	ts.date([locale]) -> s
 	s.parse_date([locale]) -> ts
 FILE SIZE FORMATTING
 	x.kbytes(x, [dec], [mag]) -> s
@@ -937,7 +937,7 @@ function set_year(t, x) {
 function set_month(t, x) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
-	_d.setUTCMonth(x)
+	_d.setUTCMonth(x - 1)
 	return _d.valueOf() / 1000
 }
 
@@ -1105,7 +1105,7 @@ method(String, 'parse_date', function(locale1, validate) {
 	return date_parser(locale1 || locale())(this, validate)
 })
 
-method(Number, 'format_date', function(locale1, with_time) {
+method(Number, 'date', function(locale1, with_time) {
 	return date_formatter(locale1 || locale())(this, with_time)
 })
 

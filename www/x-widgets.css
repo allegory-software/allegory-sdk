@@ -1556,6 +1556,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	background-color: var(--x-bg-error);
 }
 
+.x-calendar-sel-day-box {
+	min-width: 4.5em;
+	display: flex;
+}
+
 .x-calendar-sel-day {
 	font-size: 300%;
 }
@@ -1586,10 +1591,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	max-width: 2.5em;
 }
 
-.x-editbox.x-calendar-sel-month {
-	min-width: 5em;  /* limit shrinking */
-}
-
 .x-widget.picker.x-calendar-sel-month-picker {
 	background-color: var(--x-bg-popup2);
 }
@@ -1602,10 +1603,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	min-width: 1.25em;
 	text-align: right;
 	margin-right: .75em;
+	color: var(--x-fg-disabled);
 }
 
 .x-calendar-month-name {
-	min-width: 3em;
+	min-width: 2.5em;
 }
 
 .x-calendar-sel-day:empty::before,
@@ -2709,6 +2711,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	font-size: 95%;
 	color: var(--x-fg-label);
 	margin-left: .5em;
+	white-space: pre-wrap;
 }
 
 /* grid as picker */
