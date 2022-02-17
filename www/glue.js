@@ -1071,6 +1071,8 @@ let date_formatter = memoize(function(locale) {
 	Si = i++;
 	return function(t, with_time) {
 		_d.setTime(t * 1000)
+		// if this is slow, see
+		//   http://git.musl-libc.org/cgit/musl/tree/src/time/__secs_to_tm.c?h=v0.9.15
 		let y = _d.getUTCFullYear()
 		let m = _d.getUTCMonth() + 1
 		let d = _d.getUTCDate()
