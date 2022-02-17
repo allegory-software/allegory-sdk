@@ -163,7 +163,7 @@ gettersandsetters = glue.gettersandsetters
 
 pr = pr or pp --pp's printer is good, $log's printer is even better.
 
-trace = function() print(debug.traceback()) end
+trace = function() pr(debug.traceback()) end
 traceback = debug.traceback
 
 time.install() --replace os.date, os.time and os.clock.

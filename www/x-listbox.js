@@ -454,6 +454,7 @@ component('x-list-dropdown', function(e) {
 
 		lb.on('wheel', function(ev, dy) {
 			lb.pick_near_val(dy, {input: e, pick: false})
+			return false
 		})
 
 		return lb

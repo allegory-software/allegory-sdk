@@ -370,7 +370,7 @@ let non_null = (s) => s != null
 function catargs(sep, ...args) {
 	return args.filter(non_null).join(sep)
 }
-method(String, 'cat', catargs)
+method(String, 'cat', function(...args) { return catargs(this, ...args) })
 }
 
 method(String, 'names', function() {

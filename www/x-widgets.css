@@ -32,8 +32,9 @@
 	--x-padding-y-button            : .4em;
 	--x-padding-x-button            : 1.2em;
 	--x-padding-x-button-icon       : .4em;
-	--x-padding-x-input             : .5em;  /* x-padding for inputs and grid cells */
-	--x-padding-y-input             : .25em; /* y-padding for inputs and grid cells */
+	--x-padding-x-input             : .5em; /* x-padding for inputs and grid cells */
+	--x-padding-y-input-top         : .4em; /* y-padding for inputs and grid cells */
+	--x-padding-y-input-bottom      : .3em; /* y-padding for inputs and grid cells */
 	--x-padding-y1-input-il-label-empty : .35em;  /* shift label to focus-box middle */
 	--x-padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
 	--x-padding-y2-input-il-dropdown-button : .5em;
@@ -115,7 +116,7 @@
 	--x-bg-grid-editor             : var(--x-bg-popup);
 
 	--x-item-border-width          : 1px; /* needed to show rows with errors */
-	--x-grid-cell-line-height      : 1.4em;
+	--x-grid-cell-line-height      : 1.2em;
 
 }
 
@@ -386,6 +387,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-button.text-empty { /* icon-only */
 	padding-left  : var(--x-padding-x-button-icon);
 	padding-right : var(--x-padding-x-button-icon);
+	align-items: center; /* no more baseline to align icon to */
 }
 
 .x-button:not(.text-empty) > .x-button-icon {
@@ -681,7 +683,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-editbox.with-label > .x-focus-box {
 	line-height: initial;    /* prevent inheriting it */
-	padding-top: calc(var(--x-min-height-input) - 2.0em);
+	padding-top: calc(var(--x-min-height-input) - 2.1em);
 }
 
 /* input info button */
@@ -878,8 +880,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	margin: 0;
 	border: 0;
 	padding: 0;
-	padding-top     : var(--x-padding-y-input);
-	padding-bottom  : var(--x-padding-y-input);
+	padding-top     : var(--x-padding-y-input-top);
+	padding-bottom  : var(--x-padding-y-input-bottom);
 	font-size: inherit;
 	font-family: inherit;
 	width: 100%;             /* stretch horizontally */
@@ -1431,8 +1433,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	/* sizing */
 	padding-left   : var(--x-padding-x-input);
 	padding-right  : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input);
-	padding-bottom : var(--x-padding-y-input);
+	padding-top    : var(--x-padding-y-input-top);
+	padding-bottom : var(--x-padding-y-input-bottom);
 	/* behavior */
 	cursor: default;
 	position: relative; /* for item moving */
@@ -2412,8 +2414,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	/* sizing & styling */
 	padding-left   : var(--x-padding-x-input);
 	padding-right  : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input);
-	padding-bottom : var(--x-padding-y-input);
+	padding-top    : var(--x-padding-y-input-top);
+	padding-bottom : var(--x-padding-y-input-bottom);
 	border: var(--x-item-border-width) solid #00000000;
 	border-right-color: var(--x-faint);
 	min-width: 20px;
@@ -2676,6 +2678,22 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-grid-action-band {
 	border-top: 1px solid var(--x-border-light);
 	background-color: var(--x-bg);
+}
+
+.x-grid-action-band-reload-button {
+	font-size: 90%;
+	color: var(--x-fg-label);
+}
+
+.x-grid-action-band-reload-button > .x-button-icon {
+	padding-top: .2em;
+}
+
+.x-grid-action-band-info {
+	display: flex;
+	align-items: center;
+	font-size: 95%;
+	color: var(--x-fg-label);
 }
 
 /* grid as picker */

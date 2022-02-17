@@ -733,7 +733,6 @@ function sqlpp.new(init)
 
 		local function P(...) add(dt, _(...)) end
 		local function N(s) return self:sqlname(s) end
-		local function TN(s) return self:sqlname(s) end
 		local BODY = spp.engine..'_body'
 
 		local fk_bin = {} --{fk->true}
@@ -802,6 +801,19 @@ function sqlpp.new(init)
 			end
 		end
 
+		local function add_or_update_rows(tbl)
+			if not tbl.rows then return end
+			local t = {}
+			for _, field in ipairs(tbl.fields) do
+				add(t, N(field.col)..' = new.'..N(field.col))
+			end
+			local set_sql = cat(t, ',\n\t')
+			P('insert into %s values\n%s\non duplicate key update\n%s',
+				N(tbl_name),
+				self:sqlrows(tbl.rows, {n = #tbl.fields, indent = '\t'}),
+				set_sql)
+		end
+
 		--add new tables.
 		if diff.tables and diff.tables.add then
 			for tbl_name, tbl in sortedpairs(diff.tables.add) do
@@ -825,11 +837,7 @@ function sqlpp.new(init)
 						P('create %s', self:sqlix(ix_name, ix, tbl_name))
 					end
 				end
-				if tbl.rows then
-					P('insert into %s values\n%s',
-						self:sqlname(tbl_name), self:sqlrows(tbl.rows,
-							{n = #tbl.fields, indent = '\t'}))
-				end
+				add_or_update_rows(tbl)
 			end
 		end
 
@@ -960,6 +968,8 @@ function sqlpp.new(init)
 					end
 				end
 
+				pr(d)
+				--add_or_update_rows(tbl)
 			end
 		end
 

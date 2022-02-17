@@ -2668,7 +2668,7 @@ component('x-action-band', 'Input', function(e) {
 			let spec = new Set(s)
 			let bname = name.replaceAll('-', '_').replace(/[^\w]/g, '')
 			let btn = e.buttons && e.buttons[bname]
-			let btn_sets_text
+			let btn_sets_text = true
 			if (!(isnode(btn))) {
 				if (typeof btn == 'function')
 					btn = {action: btn}

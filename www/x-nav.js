@@ -423,7 +423,7 @@ function nav_widget(e) {
 	e.prop('can_exit_row_on_errors'  , {store: 'var', type: 'bool', default: false, hint: 'allow changing row on validation errors'})
 	e.prop('exit_edit_on_lost_focus' , {store: 'var', type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
 	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false})
-	e.prop('action_band_visible'     , {store: 'var', type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto'})
+	e.prop('action_band_visible'     , {store: 'var', type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true})
 
 	// init -------------------------------------------------------------------
 
@@ -1381,7 +1381,7 @@ function nav_widget(e) {
 
 		let sel_rows_changed = map_keys_different(old_selected_rows, e.selected_rows)
 		if (sel_rows_changed)
-			e.fire('selected_rows_changed')
+			selected_rows_changed()
 
 		let qs_changed = !!ev.quicksearch_text
 		if (qs_changed) {
@@ -1450,7 +1450,12 @@ function nav_widget(e) {
 			}
 		e.update({state: true})
 		if (sel_rows_size_before != e.selected_rows.size)
-			e.fire('selected_rows_changed')
+			selected_rows_changed()
+	}
+
+	function selected_rows_changed() {
+		e.fire('selected_rows_changed')
+		action_band_update_info()
 	}
 
 	e.is_row_selected = function(row) {
@@ -2471,9 +2476,9 @@ function nav_widget(e) {
 		return false
 	}
 
-	function cells_modified(row) {
+	function cells_modified(row, exclude_field) {
 		for (let field of e.all_fields)
-			if (e.cell_modified(row, field) && !e.cell_has_errors(row, field))
+			if (field != exclude_field && e.cell_modified(row, field) && !e.cell_has_errors(row, field))
 				return true
 	}
 
@@ -2516,7 +2521,7 @@ function nav_widget(e) {
 		let invalid = !errors.passed
 		let row_has_errors = invalid ? true : undefined
 		let cell_modified = !invalid && val !== cur_val
-		let row_modified = cell_modified || cells_modified(row)
+		let row_modified = cell_modified || cells_modified(row, field)
 
 		// update state fully without firing change events.
 		e.begin_set_state(row, ev)
@@ -3133,6 +3138,11 @@ function nav_widget(e) {
 	}
 
 	e.remove_selected_rows = function(ev) {
+		if (ev && ev.input)
+			if (!confirm(S('remove_selected_rows_confirmation',
+					'Are you sure you want to remove {0} selected rows?',
+						e.selected_rows.size))
+			) return false
 		return e.remove_rows(e.selected_rows.keys(), ev)
 	}
 
@@ -3994,13 +4004,24 @@ function nav_widget(e) {
 	}
 
 	e.show_action_band = function(on) {
-		if (e.action_band_visible == 'no')
+		if (on && e.action_band_visible == 'no')
 			return
 		if (on && !e.action_band) {
 			e.action_band = action_band({
 				classes: 'x-grid-action-band',
-				layout: 'cancel:cancel save:ok',
+				layout: 'reload delete info < > cancel:cancel save:ok',
 				buttons: {
+					'reload': button({
+						classes: 'x-grid-action-band-reload-button',
+						icon: 'fa fa-sync',
+						text: '',
+						bare: true,
+						action: () => e.reload(),
+					}),
+					'delete': function() {
+						e.remove_selected_rows({input: e, refocus: true})
+					},
+					'info': div({class: 'x-grid-action-band-info'}),
 					'cancel': function() {
 						e.exit_edit({cancel: true})
 						e.revert_changes()
@@ -4012,8 +4033,47 @@ function nav_widget(e) {
 			})
 			e.add(e.action_band)
 		}
-		if (e.action_band)
-			e.action_band.show(on)
+		if (e.action_band) {
+			action_band_update_info()
+			e.action_band.show(e.action_band_visible == 'always' || on)
+		}
+	}
+
+	function nrows(n) {
+		return n != 1 ? S('rows', 'rows') : S('row', 'row')
+	}
+
+	function count_changed_rows(attr) {
+		let c = e.changed_rows
+		if (!c) return 0
+		let n = 0
+		for (let row of c)
+			if (row[attr])
+				n++
+		return n
+	}
+
+	function action_band_update_info() {
+		let b = e.action_band
+		if (!b) return
+		let sn = e.selected_rows.size
+		let an = count_changed_rows('is_new' )
+		let dn = count_changed_rows('removed')
+		let cn = e.changed_rows ? e.changed_rows.size - an - dn : 0
+		b.buttons.save.disabled = !cn
+		b.buttons.cancel.disabled = !cn
+		b.buttons.delete.disabled = !sn
+		b.buttons.delete.set(S('delete', 'Delete')
+			+ ' ' + (sn > 1 ? sn + ' ' : '') + nrows(sn))
+		b.buttons.delete.attr('danger', '')
+		b.buttons.reload.disabled = cn || !e.rowset_url
+		let s = ', '.cat(
+			sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
+			an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
+			cn > 0 ? cn + ' ' + nrows(cn) + ' ' + S('modified', 'modified') : null,
+			dn > 0 ? dn + ' ' + nrows(dn) + ' ' + S('deleted' , 'deleted' ) : null
+		)
+		b.buttons.info.set(s)
 	}
 
 	// quick-search -----------------------------------------------------------
@@ -4413,7 +4473,7 @@ component('x-lookup-dropdown', function(e) {
 
 	datetime.has_time = true // for x-calendar
 
-	datetime.to_time = function(s) {
+	datetime.to_time = function(s, validate) {
 		if (s == null || s == '')
 			return null
 		s = s.trim()
@@ -4424,13 +4484,26 @@ component('x-lookup-dropdown', function(e) {
 		let dm = s.match(/^(\d\d\d\d)[^\d:]+(\d+)[^\d:]+(\d+)$/)
 		if (!dm)
 			return null
-
-		if (this.has_time && tm)
-			return time(
-				num(dm[1]), num(dm[2]), num(dm[3]),
-				num(tm[2]), num(tm[3]), num(tm[4]))
-		else
-			return time(num(dm[1]), num(dm[2]), num(dm[3]))
+		let y = num(dm[1])
+		let m = num(dm[2])
+		let d = num(dm[3])
+		if (this.has_time && tm) {
+			let H = num(tm[2])
+			let M = num(tm[3])
+			let S = num(tm[4])
+			let t = time(y, m, d, H, M, S)
+			if (validate)
+				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
+						|| hour_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
+					return null
+			return t
+		} else {
+			let t = time(y, m, d)
+			if (validate)
+				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d)
+					return null
+			return t
+		}
 	}
 
 	let a = []
@@ -4474,7 +4547,7 @@ component('x-lookup-dropdown', function(e) {
 
 	datetime.from_text = function(s) {
 		if (s == '') return null
-		let t = this.to_time(s)
+		let t = this.to_time(s, true)
 		return t != null ? this.from_time(t) : s
 	}
 
@@ -4499,7 +4572,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	datetime.validator_date = field => ({
-		validate : (v, row, field) => v == null || field.to_time(v) != null,
+		validate : (v, row, field) => v == null || field.to_time(v, true) != null,
 		message  : S('validation_date', 'Date must be valid'),
 	})
 
@@ -4507,7 +4580,6 @@ component('x-lookup-dropdown', function(e) {
 
 	let date = assign({}, datetime)
 	field_types.date = date
-
 	date.has_time = false
 
 	// timestamps
