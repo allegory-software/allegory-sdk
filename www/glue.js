@@ -84,6 +84,7 @@ HASH MAPS
 	obj()
 	set()
 	map()
+	m.first_key
 	empty
 	keys(t)
 	assign(dt, t1, ...)
@@ -345,7 +346,10 @@ method(String, 'subst', function(...args) {
 		args = args[0]
 	if (isobject(args[0]))
 		args = args[0]
-	return this.replace(/{(\w+)}/g, (match, s) => args[s])
+	return this.replace(/{(\w+)\:(\w+)\:(\w+)}/g, function(match, s, singular, plural) {
+		let v = num(args[s])
+		return v != null ? v + ' ' + (v > 1 ? plural : singular) : s
+	}).replace(/{(\w+\:)}/g, (match, s) => args[s])
 })
 
 alias(String, 'starts', 'startsWith')
@@ -534,6 +538,11 @@ method(Array, 'remove_duplicates', function() {
 obj = () => Object.create(null)
 set = (iter) => new Set(iter)
 map = (iter) => new Map(iter)
+
+property(Map, 'first_key', function() {
+	for (let [k] of this)
+		return k
+})
 
 empty = obj()
 

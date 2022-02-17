@@ -3138,9 +3138,12 @@ function nav_widget(e) {
 	}
 
 	e.remove_selected_rows = function(ev) {
-		if (ev && ev.input)
-			if (!confirm(S('remove_selected_rows_confirmation',
-					'Are you sure you want to remove {0} selected rows?',
+		let sn = e.selected_rows.size
+		if (!sn)
+			return false
+		if (ev && ev.input && (sn > 1 || !e.selected_rows.first_key.is_new))
+			if (!confirm(S('delete_selected_records_confirmation',
+					'Are you sure you want to delete {0:record:records}?',
 						e.selected_rows.size))
 			) return false
 		return e.remove_rows(e.selected_rows.keys(), ev)
@@ -4009,7 +4012,7 @@ function nav_widget(e) {
 		if (on && !e.action_band) {
 			e.action_band = action_band({
 				classes: 'x-grid-action-band',
-				layout: 'reload delete info < > cancel:cancel save:ok',
+				layout: 'reload insert delete info < > cancel:cancel save:ok',
 				buttons: {
 					'reload': button({
 						classes: 'x-grid-action-band-reload-button',
@@ -4018,17 +4021,37 @@ function nav_widget(e) {
 						bare: true,
 						action: () => e.reload(),
 					}),
-					'delete': function() {
-						e.remove_selected_rows({input: e, refocus: true})
-					},
+					'insert': button({
+						icon: 'fa fa-plus',
+						text: S('add', 'Add'),
+						action: function() {
+							e.insert_row(1, {input: e, at_focused_row: true, focus_it: true})
+						},
+					}),
+					'delete': button({
+						icon: 'fa fa-minus',
+						text: S('delete', 'Delete'),
+						action: function() {
+							e.remove_selected_rows({input: e, refocus: true})
+						},
+					}),
 					'info': div({class: 'x-grid-action-band-info'}),
-					'cancel': function() {
-						e.exit_edit({cancel: true})
-						e.revert_changes()
-					},
-					'save': function() {
-						e.save()
-					},
+					'cancel': button({
+						cancel: true,
+						text: S('cancel', 'Cancel'),
+						action: function() {
+							e.exit_edit({cancel: true})
+							e.revert_changes()
+						},
+					}),
+					'save': button({
+						icon: 'fa fa-cloud-upload-alt',
+						text: S('save', 'Save'),
+						primary: true,
+						action: function() {
+							e.save()
+						},
+					}),
 				}
 			})
 			e.add(e.action_band)
@@ -4040,7 +4063,7 @@ function nav_widget(e) {
 	}
 
 	function nrows(n) {
-		return n != 1 ? S('rows', 'rows') : S('row', 'row')
+		return n != 1 ? S('records', 'records') : S('record', 'record')
 	}
 
 	function count_changed_rows(attr) {
@@ -4063,8 +4086,8 @@ function nav_widget(e) {
 		b.buttons.save.disabled = !cn
 		b.buttons.cancel.disabled = !cn
 		b.buttons.delete.disabled = !sn
-		b.buttons.delete.set(S('delete', 'Delete')
-			+ ' ' + (sn > 1 ? sn + ' ' : '') + nrows(sn))
+		b.buttons.delete.text = S('delete', 'Delete')
+			+ (sn > 1 ? ' ' + sn + ' ' + nrows(sn) : '')
 		b.buttons.delete.attr('danger', '')
 		b.buttons.reload.disabled = cn || !e.rowset_url
 		let s = ', '.cat(

@@ -2694,6 +2694,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-items: center;
 	font-size: 95%;
 	color: var(--x-fg-label);
+	margin-left: .5em;
 }
 
 /* grid as picker */
