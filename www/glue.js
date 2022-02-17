@@ -351,7 +351,7 @@ method(String, 'subst', function(...args) {
 	return this.replace(/{(\w+)\:(\w+)\:(\w+)}/g, function(match, s, singular, plural) {
 		let v = num(args[s])
 		return v != null ? v + ' ' + (v > 1 ? plural : singular) : s
-	}).replace(/{(\w+\:)}/g, (match, s) => args[s])
+	}).replace(/{([\w\:]+)}/g, (match, s) => args[s])
 })
 
 alias(String, 'starts', 'startsWith')
@@ -387,7 +387,13 @@ method(String, 'names', function() {
 
 // stub for getting message strings that can be translated multiple languages.
 if (!window.S)
-	function S(label, msg) { return msg }
+	function S(name, en_s, ...args) {
+		return en_s.subst(...args)
+	}
+
+function Sf(...args) {
+	return () => S(...args)
+}
 
 // stub for getting current language.
 if (!window.lang) {

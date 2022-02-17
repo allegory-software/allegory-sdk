@@ -4488,7 +4488,7 @@ component('x-lookup-dropdown', function(e) {
 		return x < min ? span({class: 'x-dba-insignificant-size'}, s) : s
 	}
 
-	// datetimes
+	// datetimes in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
 	let datetime = {align: 'right'}
 	field_types.datetime = datetime
@@ -4563,13 +4563,12 @@ component('x-lookup-dropdown', function(e) {
 
 	datetime.to_text = function(v) {
 		let t = this.to_time(v)
-		let s = this.from_time(t)
-		return s ? s : ''
+		return t ? t.format_date(locale(), this.has_time) : ''
 	}
 
 	datetime.from_text = function(s) {
 		if (s == '') return null
-		let t = this.to_time(s, true)
+		let t = s.parse_date(locale(), true)
 		return t != null ? this.from_time(t) : s
 	}
 
