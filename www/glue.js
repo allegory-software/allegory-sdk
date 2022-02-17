@@ -98,7 +98,7 @@ TYPED ARRAYS
 		.grow(cap, [preserve_contents=true], [pow2=true])
 		.grow_type(arr_type|max_index|[...]|arr, [preserve_contents=true])
 		.setlen(len)
-TIME
+TIME & DATE
 	time() -> ts
 	time(y, m, d, H, M, s, ms) -> ts
 	time(date_str) -> ts
@@ -113,6 +113,8 @@ TIME
 	week_start_offset([country])
 	ds.duration() -> s
 	ts.timeago() -> s
+	ts.format_date([locale]) -> s
+	s.parse_date([locale]) -> ts
 FILE SIZE FORMATTING
 	x.kbytes(x, [dec], [mag]) -> s
 colors:
@@ -402,6 +404,8 @@ if (!window.country) {
 		return document.documentElement.attr('country') || nav_country
 	}
 }
+
+locale = memoize(function() { return lang() + '-' + country() })
 
 // stub for rewriting links to current language.
 if (!window.href)
@@ -960,33 +964,33 @@ function set_seconds(t, x) {
 }
 
 {
-	let weekday_names = memoize(function(locale) {
+	let weekday_names = memoize(function(locale1) {
 		let wd = {short: obj(), long: obj()}
 		for (let i = 0; i < 7; i++) {
 			_d.setTime(1000 * 3600 * 24 * (3 + i))
 			for (let how of ['short', 'long'])
-				wd[how][i] = _d.toLocaleDateString(locale, {weekday: how, timeZone: 'UTC'})
+				wd[how][i] = _d.toLocaleDateString(locale1 || locale(), {weekday: how, timeZone: 'UTC'})
 		}
 		return wd
 	})
 
-	function weekday_name(t, how, locale) {
+	function weekday_name(t, how, locale1) {
 		if (t == null) return null
 		_d.setTime(t * 1000)
 		let wd = _d.getDay()
-		return weekday_names(locale || navigator.language)[how || 'short'][wd]
+		return weekday_names(locale1 || locale())[how || 'short'][wd]
 	}
 
-	function month_name(t, how, locale) {
+	function month_name(t, how, locale1) {
 		if (t == null) return null
 		_d.setTime(t * 1000)
-		return _d.toLocaleDateString(locale || navigator.language, {month: how || 'short'})
+		return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short'})
 	}
 
-	function month_year(t, how, locale) {
+	function month_year(t, how, locale1) {
 		if (t == null) return null
 		_d.setTime(t * 1000)
-		return _d.toLocaleDateString(locale || navigator.language, {month: how || 'short', year: 'numeric'})
+		return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short', year: 'numeric'})
 	}
 }
 
@@ -1002,6 +1006,101 @@ let wso = { // fri:1, sat:2, sun:3
 function week_start_offset(country1) {
 	return (wso[country1 || country()] || 4) - 3
 }
+}
+
+{
+let date_parts = memoize(function(locale) {
+	let dtf = new Intl.DateTimeFormat(locale)
+	return dtf.formatToParts(0)
+})
+let date_parser = memoize(function(locale) {
+	let yi, mi, di
+	let i = 1
+	for (let p of date_parts(locale)) {
+		if (p.type == 'day'  ) di = i++
+		if (p.type == 'month') mi = i++
+		if (p.type == 'year' ) yi = i++
+	}
+	let t1_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)\s*:\s*([\.\d]+)$/
+	let t2_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)$/
+	let d_re  = /^(\d+)[^\d]+(\d+)[^\d]+(\d+)$/
+	return function(s, validate) {
+		s = s.trim()
+		let tm = t1_re.exec(s) || t2_re.exec(s)
+		s = tm ? tm[1] : s
+		let dm = d_re.exec(s)
+		if (!dm)
+			return null
+		let y = num(dm[yi])
+		let m = num(dm[mi])
+		let d = num(dm[di])
+		if (tm) {
+			let H = num(tm[2])
+			let M = num(tm[3])
+			let S = num(tm[4])
+			let t = time(y, m, d, H, M, S)
+			if (validate)
+				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
+						|| hour_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
+					return null
+			return t
+		} else {
+			let t = time(y, m, d)
+			if (validate)
+				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d)
+					return null
+			return t
+		}
+	}
+})
+let date_formatter = memoize(function(locale) {
+	let a = []
+	let yi, mi, di, Hi, Mi, Si
+	let dd, md
+	let i = 0
+	for (let p of date_parts(locale)) {
+		if (p.type == 'day'    ) { dd = p.value.length; di = i++; }
+		if (p.type == 'month'  ) { md = p.value.length; mi = i++; }
+		if (p.type == 'year'   ) yi = i++
+		if (p.type == 'literal') a[i++] = p.value
+	}
+	let a1 = a.slice()
+	a1[i++] = ' '
+	Hi = i++; a1[i++] = ':'
+	Mi = i++; a1[i++] = ':'
+	Si = i++;
+	return function(t, with_time) {
+		_d.setTime(t * 1000)
+		let y = _d.getUTCFullYear()
+		let m = _d.getUTCMonth() + 1
+		let d = _d.getUTCDate()
+		if (m < 10 && md > 1) m = '0'+m
+		if (d < 10 && dd > 1) d = '0'+d
+		if (with_time) {
+			a1[yi] = y
+			a1[mi] = m
+			a1[di] = d
+			a1[Hi] = _d.getUTCHours()
+			a1[Mi] = _d.getUTCMinutes()
+			a1[Si] = _d.getUTCSeconds()
+			return a1.join('')
+		} else {
+			a[yi] = y
+         a[mi] = m
+         a[di] = d
+			return a.join('')
+		}
+	}
+})
+
+method(String, 'parse_date', function(locale1, validate) {
+	return date_parser(locale1 || locale())(this, validate)
+})
+
+method(Number, 'format_date', function(locale1, with_time) {
+	return date_formatter(locale1 || locale())(this, with_time)
+})
+
 }
 
 // time formatting -----------------------------------------------------------
