@@ -43,11 +43,11 @@ do
 		return tonumber(v) ~= 0
 	end
 
-	function M.date_to_sql(v)
+	function M.date_to_sql(v, field, spp)
 		if type(v) == 'number' then --timestamp
 			return format('from_unixtime(%0.17g)', v)
 		end
-		return v
+		return spp:sqlval(v)
 	end
 
 	function M.default(v) --TODO: this only works for numbers and string constants.

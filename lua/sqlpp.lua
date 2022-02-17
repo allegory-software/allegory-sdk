@@ -415,7 +415,7 @@ function sqlpp.new(init)
 		if v == nil then
 			return 'null'
 		elseif to_sql then
-			return to_sql(v, field)
+			return to_sql(v, field, self)
 		elseif type(v) == 'number' then
 			return self:sqlnumber(v)
 		elseif type(v) == 'string' then
