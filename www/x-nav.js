@@ -1455,7 +1455,7 @@ function nav_widget(e) {
 
 	function selected_rows_changed() {
 		e.fire('selected_rows_changed')
-		action_band_update_info()
+		update_action_band()
 	}
 
 	e.is_row_selected = function(row) {
@@ -3327,7 +3327,7 @@ function nav_widget(e) {
 			if (e.save_row_move_on == 'input')
 				e.save()
 			else
-				e.show_action_band(true)
+				update_action_band()
 
 			e.update({rows: true})
 
@@ -3378,9 +3378,9 @@ function nav_widget(e) {
 		let refocus = refocus_state('val')
 		force_unfocus_focused_cell()
 
-		e.show_action_band(false)
 		e.changed_rows = null // Set(row)
 		rows_moved = false
+		update_action_band()
 
 		init_all()
 
@@ -3509,17 +3509,16 @@ function nav_widget(e) {
 		else if (e.changed_rows.has(row))
 			return
 		e.changed_rows.add(row)
-		e.show_action_band(true)
+		update_action_band()
 	}
 
 	function row_unchanged(row) {
 		if (!e.changed_rows)
 			return
 		e.changed_rows.delete(row)
-		if (!e.changed_rows.size) {
+		if (!e.changed_rows.size)
 			e.changed_rows = null
-			e.show_action_band(false)
-		}
+		update_action_band()
 	}
 
 	function pack_changes() {
@@ -3643,10 +3642,6 @@ function nav_widget(e) {
 			slow: save_slow,
 			slow_timeout: e.slow_timeout,
 			on_row_saved: ev && ev.on_row_saved,
-			notify: e.action_band && [
-				e.action_band.buttons.save,
-				e.action_band.buttons.cancel
-			]
 		})
 		rows_moved = false
 		add_request(req)
@@ -3668,7 +3663,7 @@ function nav_widget(e) {
 				if (e.validate_row(row))
 					some_valid = true
 			if (!some_valid) {
-				notify(S('save_nothing', 'No valid rows to save'))
+				notify(S('save_nothing', 'No valid records to save'))
 				return
 			}
 		}
@@ -3742,7 +3737,7 @@ function nav_widget(e) {
 
 		e.changed_rows = null
 		rows_moved = false
-		e.show_action_band(false)
+		update_action_band()
 
 		e.end_update()
 	}
@@ -3772,7 +3767,7 @@ function nav_widget(e) {
 
 		e.changed_rows = null
 		rows_moved = false
-		e.show_action_band(false)
+		update_action_band()
 
 		e.end_update()
 	}
@@ -4003,13 +3998,32 @@ function nav_widget(e) {
 	// action bar -------------------------------------------------------------
 
 	e.set_action_band_visible = function(v) {
-		e.show_action_band(v == 'always' || (v == 'auto' && e.changed_rows))
+		update_action_band()
 	}
 
-	e.show_action_band = function(on) {
-		if (on && e.action_band_visible == 'no')
+	function nrows(n) {
+		return n != 1 ? S('records', 'records') : S('record', 'record')
+	}
+
+	function count_changed_rows(attr) {
+		let c = e.changed_rows
+		if (!c) return 0
+		let n = 0
+		for (let row of c)
+			if (row[attr])
+				n++
+		return n
+	}
+
+	function update_action_band() {
+
+		if (e.action_band_visible == 'no')
 			return
-		if (on && !e.action_band) {
+
+		if (e.action_band_visible == 'auto' && !e.changed_rows && !e.action_band)
+			return
+
+		if (!e.action_band) {
 			e.action_band = action_band({
 				classes: 'x-grid-action-band',
 				layout: 'reload insert delete info < > cancel:cancel save:ok',
@@ -4056,47 +4070,32 @@ function nav_widget(e) {
 			})
 			e.add(e.action_band)
 		}
-		if (e.action_band) {
-			action_band_update_info()
-			e.action_band.show(e.action_band_visible == 'always' || on)
-		}
-	}
 
-	function nrows(n) {
-		return n != 1 ? S('records', 'records') : S('record', 'record')
-	}
-
-	function count_changed_rows(attr) {
-		let c = e.changed_rows
-		if (!c) return 0
-		let n = 0
-		for (let row of c)
-			if (row[attr])
-				n++
-		return n
-	}
-
-	function action_band_update_info() {
 		let b = e.action_band
-		if (!b) return
-		let sn = e.selected_rows.size
-		let an = count_changed_rows('is_new' )
-		let dn = count_changed_rows('removed')
-		let cn = e.changed_rows ? e.changed_rows.size - an - dn : 0
-		b.buttons.save.disabled = !cn
-		b.buttons.cancel.disabled = !cn
-		b.buttons.delete.disabled = !sn
-		b.buttons.delete.text = S('delete', 'Delete')
-			+ (sn > 1 ? ' ' + sn + ' ' + nrows(sn) : '')
-		b.buttons.delete.attr('danger', '')
-		b.buttons.reload.disabled = cn || !e.rowset_url
-		let s = ', '.cat(
-			sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
-			an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
-			cn > 0 ? cn + ' ' + nrows(cn) + ' ' + S('modified', 'modified') : null,
-			dn > 0 ? dn + ' ' + nrows(dn) + ' ' + S('deleted' , 'deleted' ) : null
-		)
-		b.buttons.info.set(s)
+		if (b) {
+			let sn = e.selected_rows.size
+			let an = count_changed_rows('is_new' )
+			let dn = count_changed_rows('removed')
+			let cn = e.changed_rows ? e.changed_rows.size : 0
+			let un = cn - an - dn
+			b.buttons.save  .disabled = !cn
+			b.buttons.cancel.disabled = !cn
+			b.buttons.delete.disabled = !sn
+			b.buttons.delete.text = S('delete', 'Delete')
+				+ (sn > 1 ? ' ' + sn + ' ' + nrows(sn) : '')
+			b.buttons.delete.attr('danger', '')
+			b.buttons.reload.disabled = cn || !e.rowset_url
+			let s = ', '.cat(
+				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
+				an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
+				un > 0 ? un + ' ' + nrows(un) + ' ' + S('modified', 'modified') : null,
+				dn > 0 ? dn + ' ' + nrows(dn) + ' ' + S('deleted' , 'deleted' ) : null
+			)
+			b.buttons.info.set(s)
+
+			b.show(e.action_band_visible != 'auto' || e.changed_rows)
+		}
+
 	}
 
 	// quick-search -----------------------------------------------------------
