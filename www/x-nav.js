@@ -4563,7 +4563,7 @@ component('x-lookup-dropdown', function(e) {
 
 	datetime.to_text = function(v) {
 		let t = this.to_time(v)
-		return t ? t.date(locale(), this.has_time) : ''
+		return t != null ? t.date(locale(), this.has_time) : ''
 	}
 
 	datetime.from_text = function(s) {
@@ -4577,12 +4577,8 @@ component('x-lookup-dropdown', function(e) {
 	datetime.max = datetime.to_time('9999-12-31 23:59:59')
 
 	datetime.format = function(s) {
-		s = s || ''
-		if (!this.has_time)
-			s = s.slice(0, 10)
-		else if (!this.has_seconds)
-			s = s.slice(0, 16)
-		return s
+		if (s == null) return ''
+		return this.to_time(s).date(this.has_time, this.has_seconds)
 	}
 
 	datetime.editor = function(...opt) {
