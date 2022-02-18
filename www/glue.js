@@ -1075,23 +1075,34 @@ let date_formatter = memoize(function(locale) {
 	Hi = i++; a1[i++] = ':'
 	Mi = i++; a1[i++] = ':'
 	Si = i++;
-	return function(t, with_time) {
-		_d.setTime(t * 1000)
+	let a2 = a1.slice(0, -2) // without seconds
+	return function(t, with_time, with_seconds) {
 		// if this is slow, see
 		//   http://git.musl-libc.org/cgit/musl/tree/src/time/__secs_to_tm.c?h=v0.9.15
+		_d.setTime(t * 1000)
 		let y = _d.getUTCFullYear()
 		let m = _d.getUTCMonth() + 1
 		let d = _d.getUTCDate()
+		let H = _d.getUTCHours()
+		let M = _d.getUTCMinutes()
+		let S = _d.getUTCSeconds()
 		if (m < 10 && md > 1) m = '0'+m
 		if (d < 10 && dd > 1) d = '0'+d
-		if (with_time) {
+		if (with_seconds) {
 			a1[yi] = y
 			a1[mi] = m
 			a1[di] = d
-			a1[Hi] = _d.getUTCHours()
-			a1[Mi] = _d.getUTCMinutes()
-			a1[Si] = _d.getUTCSeconds()
+			a1[Hi] = H
+			a1[Mi] = M
+			a1[Si] = S
 			return a1.join('')
+		} else if (with_time) {
+			a2[yi] = y
+			a2[mi] = m
+			a2[di] = d
+			a2[Hi] = H
+			a2[Mi] = M
+			return a2.join('')
 		} else {
 			a[yi] = y
          a[mi] = m
