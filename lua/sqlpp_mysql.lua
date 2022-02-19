@@ -94,7 +94,7 @@ local function init_spp(spp, cmd)
 		end
 		return index(self:assert(self:rawquery([[
 			select lower(word) from information_schema.keywords where reserved = 1
-		]], {compact = true})))
+		]], {to_array = true})))
 	end
 
 	--SQL formatting ----------------------------------------------------------
