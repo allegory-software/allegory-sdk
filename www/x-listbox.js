@@ -74,6 +74,7 @@ function listbox_widget(e) {
 		let field = assign({format: (val, row) => format_item(row, val)}, e.item_field)
 		if (e.rowset)
 			e.rowset.fields[0] = field
+		e.reload()
 	}
 
 	e.set_items = function(items) {
@@ -96,8 +97,6 @@ function listbox_widget(e) {
 		}
 
 		update_item_field()
-
-		e.reload()
 	}
 
 	e.set_item_field = update_item_field
@@ -470,9 +469,10 @@ component('x-enum-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 
-	e.on('bind_field', function(on) {
-		if (e.picker)
-			e.picker.items = on ? e.field.enum_values : null
+	e.override('create_picker', function(inherited, opt) {
+		opt.item_field = e.field
+		opt.items = e.field.enum_values
+		return inherited(opt)
 	})
 
 	e.val_col = 0
