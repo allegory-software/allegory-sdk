@@ -98,10 +98,12 @@ TIME
 	glue.time([utc, ][t]) -> ts                     like os.time() with optional UTC and date args
 	glue.time([utc, ][y, [m], [d], [h], [min], [s], [isdst]]) -> ts  like os.time() with optional UTC and date args
 	glue.utc_diff([t]) -> seconds                   seconds to UTC
+	glue.sunday([utc, ]t, [weeks]) -> t             time at last Sunday before t
 	glue.day([utc, ][ts], [plus_days]) -> ts        timestamp at day's beginning from ts
 	glue.month([utc, ][ts], [plus_months]) -> ts    timestamp at month's beginning from ts
 	glue.year([utc, ][ts], [plus_years]) -> ts      timestamp at year's beginning from ts
 	glue.timeago(ts[, from_ts]) -> s                format relative time
+	glue.week_start_offset(country) -> n            week start offset for a country (0 for Sunday)
 SIZES
 	glue.kbytes(x [,decimals]) -> s                 format byte size in k/M/G/T-bytes
 2D BOXES
@@ -1393,7 +1395,7 @@ function glue.time(utc, y, m, d, h, M, s, isdst)
 	end
 end
 
---get the time at the start of the week of a given time, plus/minus a number of weeks.
+--get the time at last sunday before a given time, plus/minus a number of weeks.
 function glue.sunday(utc, t, offset)
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, t, offset = false, utc, t
@@ -1451,6 +1453,18 @@ end
 function glue.timeago(time, from_time)
 	local s = os.difftime(from_time or os.time(), time)
 	return string.format(s > 0 and '%s ago' or 'in %s', rel_time(math.abs(s)))
+end
+
+local wso = { -- fri=1, sat=2, sun=3
+	MV=1,
+	AE=2,AF=2,BH=2,DJ=2,DZ=2,EG=2,IQ=2,IR=2,JO=2,KW=2,LY=2,OM=2,QA=2,SD=2,SY=2,
+	AG=3,AS=3,AU=3,BD=3,BR=3,BS=3,BT=3,BW=3,BZ=3,CA=3,CN=3,CO=3,DM=3,DO=3,ET=3,
+	GT=3,GU=3,HK=3,HN=3,ID=3,IL=3,IN=3,JM=3,JP=3,KE=3,KH=3,KR=3,LA=3,MH=3,MM=3,
+	MO=3,MT=3,MX=3,MZ=3,NI=3,NP=3,PA=3,PE=3,PH=3,PK=3,PR=3,PT=3,PY=3,SA=3,SG=3,
+	SV=3,TH=3,TT=3,TW=3,UM=3,US=3,VE=3,VI=3,WS=3,YE=3,ZA=3,ZW=3,
+}
+function glue.week_start_offset(country) --sun=0, mon=1, sat=-1, fri=-2
+	return (wso[country] or 4) - 3
 end
 
 --size formatting ------------------------------------------------------------
