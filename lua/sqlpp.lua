@@ -392,6 +392,12 @@ function sqlpp.new(init)
 		return tostring(v)
 	end
 
+	cmd.allow_quoting = false
+
+	function cmd:check_allow_quoting(s)
+		assertf(self.allow_quoting, 'use of reserved word: "%s"', s)
+	end
+
 	--NOTE: don't use dots in db names, table names and column names!
 	cmd.sqlname_quote = '"'
 	function cmd:sqlname(s)
@@ -402,11 +408,11 @@ function sqlpp.new(init)
 			return s
 		end
 		if not s:find('.', 1 , true) then
-			return self:needs_quoting(s) and q..s..q or s
+			return self:needs_quoting(s) and self:check_allow_quoting(s) and q..s..q or s
 		end
 		self:needs_quoting() --avoid yield accross C-call boundary :rolleyes:
 		return s:gsub('[^%.]+', function(s)
-			return self:needs_quoting(s) and q..trim(s)..q or s
+			return self:needs_quoting(s) and self:check_allow_quoting(s) and q..trim(s)..q or s
 		end)
 	end
 
@@ -968,7 +974,7 @@ function sqlpp.new(init)
 					end
 				end
 
-				pr(d)
+				--pr(d)
 				--add_or_update_rows(tbl)
 			end
 		end
