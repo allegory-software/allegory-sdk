@@ -113,19 +113,21 @@ local function guess_name_col(tdef)
 end
 
 local function lookup_rowset(tbl)
-	local rs = 'lookup_'..tbl
-	if not rowset[rs] then
+	local rs_name = 'lookup_'..tbl
+	local rs = rowset[rs_name]
+	if not rs then
 		local tdef = table_def(tbl)
 		local name_col = guess_name_col(tdef)
 		local t = glue.extend({name_col}, tdef.pk)
 		local cols = concat(glue.imap(t, sqlname), ', ')
-		rowset[rs] = sql_rowset{
+		rs = sql_rowset{
 			select = format('select %s from %s', cols, tbl),
 			pk = concat(tdef.pk, ' '),
 			name_col = name_col,
 		}
+		rowset[rs_name] = rs
 	end
-	return rs, rs.name_col
+	return rs_name, rs.name_col
 end
 
 function sql_rowset(...)
