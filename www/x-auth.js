@@ -3,83 +3,97 @@
 	User settings dropdown and sign-in dialog.
 	Written by Cosmin Apreutesei. Public Domain.
 
-DEFINES GLOBALS
+GLOBALS
 
 	init_auth()
 	sign_out()
 
-USES CSS
+ACTIONS
 
-	.x-auth-signed-in       mark elements that must be bound only when signed-in.
-	.x-auth-signed-out      mark elements that must be bound only when signed-out.
+	sign-in
+	sign-in-code
+
 */
 
 {
 
-let settings_nav
-
-let init_settings_nav = function() {
-
-	init_settings_nav = noop
+let init_usr_nav = function() {
 
 	let set = {}
 
-	set.night_mode = function(v) {
-		set_theme(v ? 'dark' : null)
+	set.theme = set_theme
+
+	set.lang = function(v, ev) {
+		if (ev && ev.input)
+			location.reload()
+	}
+
+	function set_val(k, v, ev) {
+		if (set[k])
+			set[k](v, ev)
 	}
 
 	let nav = bare_nav({
-		id: config('app_name')+'_user_settings_nav',
-		static_rowset: {
-			fields: [
-				{
-					name: 'email',
-					readonly: true,
-					text: S('email_address', 'E-mail address'),
-				},
-				{
-					name: 'night_mode', type: 'bool', default: false,
-					text: S('night_mode', 'Night Mode'),
-				},
-			],
-		},
-		row_vals: [{
-			night_mode: false,
-			email: window.usr && usr.email,
-		}],
-		props: {row_vals: {slot: 'user'}},
+		id: 'usr_nav',
+		rowset_name: 'usr',
 		save_row_on: 'input',
 	})
-	document.head.add(nav)
 
-	function set_all() {
-		for (let field of nav.all_fields) {
-			let set_val = set[field.name]
-			if (set_val)
-				set_val(nav.cell_val(nav.focused_row, field))
-		}
-	}
+	nav.on('reset', function() {
 
-	nav.on('reset', set_all)
+		let usr = this.row_state_map(this.rows[0], 'val')
+		pr('login', usr.usr, usr.email)
+		setglobal('usr', usr)
 
-	nav.on('focused_row_cell_state_changed', function(row, field, changes) {
-		if (changes.val) {
-			let set_val = set[field.name]
-			if (set_val)
-				set_val(changes.val[0])
-		}
+		if (window.xmodule)
+			xmodule.set_layer(config('app_name'), 'user',
+				config('app_name') + '-user-'+usr.usr)
+
+		signed_in(usr && !usr.anonymous, true)
+
+		for (let field of nav.all_fields)
+			set_val(field.name, nav.cell_val(nav.rows[0], field))
 	})
 
-	nav.on('saved', function() {
-		if (!window.xmodule)
-			return
-		xmodule.save()
+	nav.on('load_fail', function(err) {
+		signed_in(false, true)
 	})
 
-	set_all()
+	nav.on('cell_state_changed', function(row, field, changes, ev) {
+		if (changes.val)
+			set_val(field.name, changes.val[0], ev)
+	})
+
+	head.add(nav)
 }
 
-component('x-settings-button', function(e) {
+let login = function(upload, notify_widget, success, fail) {
+	usr_nav.reload({
+		upload: upload,
+		notify: notify_widget,
+		success: success,
+		fail: fail,
+		// async: false,
+	})
+}
+
+let signed_in = function(signed_in, check_auto_sign_in) {
+	setglobal('signed_in', signed_in)
+	setglobal('signed_out', !signed_in)
+	if (!signed_in && check_auto_sign_in && config('auto_sign_in'))
+		exec('/sign-in')
+}
+
+function init_auth() {
+	signed_in(false, false)
+	init_usr_nav()
+}
+
+function sign_out() {
+	login({type: 'logout'})
+}
+
+component('x-usr-button', function(e) {
 
 	button.construct(e)
 
@@ -92,11 +106,11 @@ component('x-settings-button', function(e) {
 		if (tt && tt.target) {
 			tt.close()
 		} else {
-			let settings_form = unsafe_html(render('user_settings_form'))
+			let usr_form = unsafe_html(render('usr_form'))
 			tt = tooltip({
-				classes: 'x-settings-tooltip',
+				classes: 'x-usr-tooltip',
 				target: e, side: 'bottom', align: 'start',
-				text: settings_form,
+				text: usr_form,
 				close_button: true,
 				autoclose: true,
 			})
@@ -125,7 +139,7 @@ let sign_in_dialog = memoize(function() {
 
 	e.lang_dropdown.on('state_changed', function(changes) {
 		if (changes.input_val) {
-			exec('/sign-in?lang='+changes.input_val[0], {refresh: true})
+			exec('/sign-in', {lang: changes.input_val[0], refresh: true})
 		}
 	})
 
@@ -148,7 +162,7 @@ let sign_in_dialog = memoize(function() {
 
 	e.code_button.action = function() {
 		let d = sign_in_dialog()
-		call_login({
+		login({
 				type: 'code',
 				code: e.code_edit.input_val,
 			},
@@ -200,50 +214,6 @@ action.sign_in = function() {
 action.sign_in_code = function() {
 	setflaps('sign_in')
 	sign_in_code()
-}
-
-let signed_in = function(on, check_auto_sign_in) {
-	setglobal('signed_in', on)
-	setglobal('signed_out', !on)
-	if (!on && check_auto_sign_in && config('auto_sign_in'))
-		exec('/sign-in')
-}
-
-let call_login = function(upload, notify_widget, success, fail) {
-	ajax({
-		url: href('/login.json'),
-		upload: upload || empty,
-		notify: notify_widget,
-		success: function(usr1) {
-
-			pr('login', usr1.usr, usr1.email)
-			setglobal('usr', usr1)
-
-			if (window.xmodule)
-				xmodule.set_layer(config('app_name'), 'user',
-					config('app_name') + '-user-'+usr.usr)
-
-			if (success)
-				success()
-
-			signed_in(usr && !usr.anonymous, true)
-
-		},
-		fail: function(err) {
-			notify(err, 'error')
-			if (fail) fail(err)
-		},
-	})
-}
-
-function init_auth() {
-	signed_in(false, false)
-	init_settings_nav()
-	call_login()
-}
-
-function sign_out() {
-	call_login({type: 'logout'})
 }
 
 on('auth_sign_in_button.init', function(e) {

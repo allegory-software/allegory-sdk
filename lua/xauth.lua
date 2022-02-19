@@ -5,7 +5,8 @@
 
 TEMPLATES
 
-	user_settings_form
+	usr_nav
+	usr_form
 	sign_in_dialog
 	sign_in_email_html
 	sign_in_email_text
@@ -44,15 +45,15 @@ wwwfile['x-auth.css'] = [[
 	margin: 1em 0;
 }
 
-.x-settings-button {
+.x-usr-button {
 
 }
 
-.x-settings-tooltip .x-tooltip-content {
+.x-usr-tooltip .x-tooltip-content {
 	min-width: 300px;
 }
 
-.x-settings-button > .x-button-icon {
+.x-usr-button > .x-button-icon {
 	font-size: 1.2em;
 }
 
@@ -66,27 +67,29 @@ wwwfile['x-auth.css'] = [[
 	//margin: .25em 0;
 }
 
-#care_user_settings_form {
+#usr_form {
 	grid-template-areas:
 		"email"
-		"night_mode"
+		"lang"
+		"theme"
 		"auth_sign_out_button"
 		"auth_sign_in_button"
 }
 
 ]]
 
-template.user_settings_form = [[
+template.usr_form = [[
 <x-if global=signed_in>
-	<x-form id=care_user_settings_form nav_id=care_user_settings_nav>
-		<x-textedit col=email></x-textedit>
-		<x-checkbox col=night_mode button_style=toggle></x-checkbox>
+	<x-form id=usr_form nav_id=usr_nav>
+		<x-input col=email ></x-input>
+		<x-lookup-dropdown col=lang  ></x-lookup-dropdown>
+		<x-enum-dropdown col=theme></x-enum-dropdown>
 		<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
 			<t s=log_out>Log out</t>
 		</x-button>
 </x-if>
 <x-if global=signed_out>
-	<x-form id=care_user_settings_form nav_id=care_user_settings_nav>
+	<x-form id=usr_form nav_id=usr_nav>
 	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
 </x-if>
 ]]
@@ -149,12 +152,6 @@ template.sign_in_email_html = [[
 <h1>{{code}}</h1>
 
 ]]
-
-action['login.json'] = function()
-	local auth = post()
-	allow(login(auth))
-	return usr'*'
-end
 
 action['sign_in_email.json'] = function()
 	local params = post()
@@ -233,3 +230,50 @@ rowset.users = sql_rowset{
 		delete_row('usr', row)
 	end,
 }
+
+rowset.usr = sql_rowset{
+	allow = function()
+		return login(post())
+	end,
+	select = [[
+		select
+			usr         ,
+			anonymous   ,
+			emailvalid  ,
+			email       ,
+			title       ,
+			name        ,
+			phonevalid  ,
+			phone       ,
+			sex         ,
+			birthday    ,
+			newsletter  ,
+			roles       ,
+			lang        ,
+			country     ,
+			theme       ,
+			atime       ,
+			ctime       ,
+			mtime
+		from
+			usr
+	]],
+	field_attrs = {
+		theme = {
+			type = 'enum',
+			enum_values = {'dark', 'default'},
+			enum_texts = {dark = 'Dark', default = 'Default'},
+		},
+		lang = {
+			lookup_rowset_name = 'pick_lang',
+			--lookup_col   = 'lang',
+			--display_col  = 'name',
+		},
+	},
+	where_all = 'usr = $usr()',
+	pk = 'usr',
+	update_row = function(self, row)
+		update_row('usr', row, 'lang country theme')
+	end,
+}
+
