@@ -33,7 +33,7 @@ MATH
 	nextpow2(x)
 	x.dec([decimals])
 	x.base([base], [digits])
-CALLBACK STUBS
+CALLBACKS
 	noop
 	return_true
 	return_false
@@ -113,7 +113,7 @@ TIME & DATE
 	week_start_offset([country])
 	ds.duration() -> s
 	ts.timeago() -> s
-	ts.date([locale]) -> s
+	ts.date([locale], [with_time], [with_seconds]) -> s
 	s.parse_date([locale]) -> ts
 FILE SIZE FORMATTING
 	x.kbytes(x, [dec], [mag]) -> s
@@ -138,14 +138,7 @@ url decoding, encoding and updating:
 	url_arg(s) -> t
 	url(t) -> s
 ajax requests:
-	ajax({
-		url: s,
-		upload: json|s, ...,
-		success: f(json|res),
-		fail: f(error, 'http'|'timeout'|'network'|'abort'[, status, msg, content]),
-		done: f('success'|'fail', ...),
-		...
-	}) -> req
+	ajax(opt) -> req
 	get(url, success, [error], [opt]) -> req
 	post(url, data, [success], [error], [opt]) -> req
 
@@ -1368,7 +1361,8 @@ function url(t) {
 		opt.pass
 		opt.async (true)
 		opt.dont_send (false)
-		opt.notify: widget to send 'load' events to
+		opt.notify: widget to send 'load' events to.
+		opt.notify_error: error notify function: f(message, 'error').
 
 	req.send()
 	req.abort()
@@ -1380,6 +1374,8 @@ function url(t) {
 	^fail(error, 'timeout'|'network'|'abort')
 	^fail(error, 'http', status, message, content)
 	^done('success' | 'fail', ...)
+
+	ajax.notify_error: default error notify function (to be set by user).
 
 */
 function ajax(req) {
@@ -1495,10 +1491,11 @@ function ajax(req) {
 		if (name == 'done')
 			fire(arg1, ...rest)
 
-		if (name == 'fail' && arg1 && window.notify)
-			window.notify(arg1, 'error')
+		if (name == 'fail' && arg1)
+			(req.notify_error || ajax.notify_error || noop)(arg1, ...rest)
 
 		req.fire(name, arg1, ...rest)
+
 		if (req[name])
 			req[name](arg1, ...rest)
 
