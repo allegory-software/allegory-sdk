@@ -32,6 +32,7 @@
 		hidden           : t             not visible by default
 		readonly         : f             cannot be changed
 		enum_values      : ['foo',...]   enum values
+		enum_texts       : ['bla',...]   enum texts in current language
 		not_null         : t             can't be null
 		min              : n             min allowed value
 		max              : n             max allowed value
@@ -84,7 +85,7 @@ end
 local client_field_attrs = {
 	internal=1, hidden=1, readonly=1,
 	name=1, type=1, text=1, hint=1, default=1,
-	enum_values=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
+	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	lookup_rowset_name=1, lookup_col=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, max_char_w=1,
 	icon=1, bare=1,
@@ -348,17 +349,23 @@ function virtual_rowset(init, ...)
 			params[k] = v
 			params[k..':old'] = v
 		end
-		if method'post' then
-			local changes = post()
-			for _,row_change in ipairs(changes.rows) do
-				if row_change.values then
-					update(row_change.values, params)
-				end
+		local post = post()
+		local method = post and post.exec and post.exec or 'load'
+		local method = checkfound(rs['exec_'..method], 'command not found')
+		return method(rs, params, post)
+	end
+
+	function rs:exec_load(params, post)
+		return rs:load(params, post)
+	end
+
+	function rs:exec_save(params, post)
+		for _,row_change in ipairs(post.changes.rows) do
+			if row_change.values then
+				update(row_change.values, params)
 			end
-			return rs:apply_changes(changes)
-		else
-			return rs:load(params)
 		end
+		return rs:apply_changes(post.changes)
 	end
 
 	init(rs, ...)
