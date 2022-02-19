@@ -3372,6 +3372,13 @@ component('x-input', 'Input', function(e) {
 		return types && types[0] || 'textedit'
 	}
 
+	e.create_editor = function(field, ...opt) {
+		return component.create(...opt)
+		return e.field.editor({
+			can_select_widget: false,
+		}, ...opt)
+	}
+
 	function bind_field(on) {
 		if (on) {
 			let type = widget_type(e.widget_type)
@@ -3381,7 +3388,7 @@ component('x-input', 'Input', function(e) {
 				col: e.col,
 			}, input.widget_type_options[type])
 			each_widget_prop(function(k, v) { opt[k] = v })
-			e.widget = component.create(opt)
+			e.widget = e.create_editor(e.field, opt)
 			e.set(e.widget)
 		} else {
 			if (e.widget) {
@@ -3433,6 +3440,7 @@ component('x-input', 'Input', function(e) {
 
 })
 
+// TODO: use field.editor constructor instead of this!
 input.widget_types = {
 	number    : ['spinedit', 'slider'],
 	bool      : ['checkbox'],
