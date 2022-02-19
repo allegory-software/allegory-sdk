@@ -569,4 +569,12 @@ webb.countryinfo = setmetatable({}, {__index = function(t, k)
 	return supported_countries()[k]
 end})
 
+qmacro.lang = function()
+	return sqlval(lang())
+end
+
+qmacro.default_lang = function()
+	return sqlval(default_lang())
+end
+
 return webb.lang_schema --so you can call schema:import'webb_lang'
