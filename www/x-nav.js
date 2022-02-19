@@ -250,13 +250,13 @@ row adding, removing, moving:
 
 cell values & state:
 	publishes:
-		e.cell_state()
-		e.cell_val()
-		e.cell_input_val()
-		e.cell_errors()
-		e.cell_has_errors()
-		e.cell_modified()
-		e.cell_vals()
+		e.cell_state(row, col, key, [default_val])
+		e.cell_val(row, col)
+		e.cell_input_val(row, col)
+		e.cell_errors(row, col)
+		e.cell_has_errors(row, col)
+		e.cell_modified(row, col)
+		e.cell_vals(row, col)
 
 updating cells:
 	publishes:
@@ -339,7 +339,7 @@ saving:
 		action_band_visible : auto      : auto | always | no
 	publishes:
 		e.can_save_changes()
-		e.save()
+		e.save([ev])
 
 loading & saving from/to memory:
 	config
@@ -2542,7 +2542,7 @@ function nav_widget(e) {
 				row_unchanged(row)
 			if (ev && ev.input) // from UI
 				if (must_save('input'))
-					e.save()
+					e.save(ev)
 		}
 
 	}
@@ -2696,7 +2696,7 @@ function nav_widget(e) {
 
 		if (!cancel) // from UI
 			if (must_save('exit_edit'))
-				e.save()
+				e.save(ev)
 
 		return true
 	}
@@ -2721,7 +2721,7 @@ function nav_widget(e) {
 			if (must_save('exit_row')) {
 				if (e.can_exit_row_on_errors) {
 					// async save: errors can come later, meanwhile we exit the row.
-					e.save()
+					e.save(ev)
 				} else {
 					// sync save: refuse to exit the row now, but carry a future
 					// focus_cell() call in ev.on_row_saved to be executed when/if
@@ -3003,7 +3003,7 @@ function nav_widget(e) {
 		if (rows_added && !from_server)
 			if (ev.input) // from UI
 				if (e.save_new_row_on == 'insert')
-					e.save()
+					e.save(ev)
 
 		e.end_update()
 
@@ -3126,7 +3126,7 @@ function nav_widget(e) {
 
 		if (marked_rows.size)
 			if (e.save_row_remove_on == 'input')
-				e.save()
+				e.save(ev)
 
 		e.end_update()
 
@@ -3325,7 +3325,7 @@ function nav_widget(e) {
 
 			rows_moved = true
 			if (e.save_row_move_on == 'input')
-				e.save()
+				e.save(ev)
 			else
 				update_action_band()
 
@@ -3416,7 +3416,8 @@ function nav_widget(e) {
 		return s
 	}
 
-	e.reload = function(allow_diff_merge) {
+	e.reload = function(opt) {
+		opt = opt || empty
 		if (!e.bound) {
 			e.update({reload: true})
 			return
@@ -3438,21 +3439,29 @@ function nav_widget(e) {
 				col: e.focused_field && e.focused_field.name,
 				focused: e.hasfocus,
 			}
+
 		let req = ajax({
 			url: rowset_url(),
+			upload: opt.upload,
 			progress: load_progress,
-			success: load_success,
-			fail: load_fail,
+			success: opt.success,
+			fail: opt.fail,
 			done: load_done,
 			slow: load_slow,
 			slow_timeout: e.slow_timeout,
+			dont_send: true,
+			notify: opt.notify,
+			notify_error: opt.notify_error,
+			allow_diff_merge: opt.allow_diff_merge,
 		})
+		req.on('success', load_success)
+		req.on('fail', load_fail)
 		add_request(req)
-		req.allow_diff_merge = allow_diff_merge
 		e.load_request = req
 		e.load_request_start_clock = clock()
 		e.loading = true
 		loading(true)
+		req.send()
 	}
 
 	e.abort_loading = function() {
@@ -3568,7 +3577,8 @@ function nav_widget(e) {
 		return [changes, source_rows]
 	}
 
-	function apply_result(result, source_rows, on_row_saved) {
+	function apply_result(result, source_rows, ev) {
+		let on_row_saved = ev && ev.on_row_saved || noop
 		e.begin_update()
 
 		let rows_to_remove = []
@@ -3583,7 +3593,7 @@ function nav_widget(e) {
 				let errors = isstr(rt.error) ? [{message: rt.error, passed: false}] : undefined
 				let has_errors = !!row_failed
 
-				e.begin_set_state(row)
+				e.begin_set_state(row, ev)
 
 				e.set_row_state('has_errors', has_errors)
 				e.set_row_state('errors'    , errors)
@@ -3608,10 +3618,8 @@ function nav_widget(e) {
 					notify_errors(row)
 				} else {
 					row_unchanged(row)
-					if (on_row_saved) {
-						on_row_saved()
-						on_row_saved = noop
-					}
+					on_row_saved()
+					on_row_saved = noop
 				}
 			}
 		}
@@ -3634,14 +3642,14 @@ function nav_widget(e) {
 			return
 		let req = ajax({
 			url: rowset_url(),
-			upload: changes,
+			upload: {exec: 'save', changes: changes},
 			source_rows: source_rows,
 			success: save_success,
 			fail: save_fail,
 			done: save_done,
 			slow: save_slow,
 			slow_timeout: e.slow_timeout,
-			on_row_saved: ev && ev.on_row_saved,
+			ev: ev,
 		})
 		rows_moved = false
 		add_request(req)
@@ -3695,7 +3703,7 @@ function nav_widget(e) {
 	}
 
 	function save_success(result) {
-		apply_result(result, this.source_rows, this.on_row_saved)
+		apply_result(result, this.source_rows, this.ev)
 		e.fire('saved')
 	}
 
@@ -3795,6 +3803,13 @@ function nav_widget(e) {
 				rows.push(drow)
 			}
 		return rows
+	}
+
+	e.row_state_map = function(row, key) {
+		let t = obj()
+		for (let field of e.all_fields)
+			t[field.name] = e.cell_state(row, field, key)
+		return t
 	}
 
 	e.serialize_row_vals = function(row) {
@@ -4649,8 +4664,8 @@ component('x-lookup-dropdown', function(e) {
 		message  : S('validation_boolean', 'Value must be true or false'),
 	})
 
-	bool.format = function(val) {
-		return val ? this.true_text : this.false_text
+	bool.format = function(v) {
+		return v ? this.true_text : this.false_text
 	}
 
 	bool.editor = function(...opt) {
@@ -4667,9 +4682,15 @@ component('x-lookup-dropdown', function(e) {
 	enm.editor = function(...opt) {
 		return list_dropdown(assign({
 			items: this.enum_values,
+			format: enm.format,
 			mode: 'fixed',
 			val_col: 0,
 		}, ...opt))
+	}
+
+	enm.format = function(v) {
+		let s = this.enum_texts ? this.enum_texts[v] : undefined
+		return s !== undefined ? s : v
 	}
 
 	// tag lists
@@ -4827,7 +4848,7 @@ function init_rowset_events() {
 		if (navs)
 			for (let nav of navs)
 				if (!nav.load_request)
-					nav.reload(true)
+					nav.reload({allow_diff_merge: true})
 	}
 }
 }
