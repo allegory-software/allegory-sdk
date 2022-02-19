@@ -115,12 +115,11 @@ local function find_action(action, ...)
 	else
 		local alias = aliases[action_name(action)] --look for a regional alias
 		if alias then
-			if not args'lang' then --?lang= has priority
-				setlang(alias.lang)
-			end
+			setlang(alias.lang)
 			action = alias.action
 		end
 	end
+	setlang(args'lang') --?lang= has priority over lang set by alias.
 	return action, ...
 end
 
@@ -347,9 +346,6 @@ local function run_action(fallback, action, handler, ext, ...)
 end
 
 setmetatable(actions, {__call = function(self, action, ...)
-	if args'lang' then
-		setlang(args'lang')
-	end
 	local handler, ext = action_handler(find_action(action, ...))
 	return run_action(true, action, handler, ext, ...)
 end})
