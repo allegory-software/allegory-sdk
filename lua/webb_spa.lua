@@ -225,7 +225,9 @@ local function page_title(infer, body)
 end
 
 action['404.html'] = function(action)
-	login() --sets lang from user profile
+	if _G.login then
+		login() --sets lang from user profile.
+	end
 	local t = {}
 	t.lang = lang()
 	t.country = country()
