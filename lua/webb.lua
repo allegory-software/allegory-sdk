@@ -36,7 +36,7 @@ CONFIG API
 MULTI-LANGUAGE & MULTI-COUNTRY SUPPORT
 
 	lang([k])                               get lang or lang property for current request
-	setlang(lang, [if_not_set])             set lang of current request
+	setlang(lang)                           set lang of current request
 	default_lang()                          get the default lang
 	webb.langinfo[lang] -> {k->v}           static language property table
 
@@ -400,9 +400,9 @@ function lang(k)
 	return assert(langinfo(lang, k))
 end
 
-function setlang(lang, if_not_set)
-	if if_not_set and cx.lang then return end
-	cx.lang = lang and langinfo(lang) and lang or default_lang()
+function setlang(lang)
+	if not lang or not langinfo(lang) then return end --missing or invalid lang: ignore.
+	cx.lang = lang
 end
 
 webb.countryinfo = {
