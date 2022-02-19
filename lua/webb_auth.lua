@@ -104,7 +104,7 @@ AUTH OBJECT
 
 {type = 'pass', action = 'create', email = , pass = }
 
-	create a user and login to it.
+	create a user with a password and login to it.
 	errors:
 		'email_taken' - email already used on another account.
 
@@ -155,19 +155,12 @@ anonymous then that user is also deleted afterwards.
 
 require'webb_query'
 require'schema'
-require'sha2' --TODO: replace with blake3 MAC
-local hmac = require'hmac'
+local blake3 = require'blake3'
 local bcrypt = require'bcrypt'
 local glue = require'glue'
 
 local function fullname(firstname, lastname)
 	return (glue.catargs('', firstname, lastname) or ''):trim()
-end
-
-local function token_hash(pass)
-	local salt = webb.secret()
-	local token = hmac.sha256(pass, salt)
-	return glue.tohex(token) --64 bytes
 end
 
 --schema ---------------------------------------------------------------------
@@ -197,6 +190,7 @@ function webb.auth_schema()
 		roles       , text    ,
 		note        , text    ,
 		lang        , lang    , weak_fk,
+		country     , country , weak_fk,
 		theme       , name    ,
 		clientip    , name    , --when it was created
 		atime       , atime   , --last access time
@@ -237,20 +231,25 @@ function create_user(email, roles)
 	]], email, roles or 'dev admin')
 end
 
+qmacro.usr = function()
+	return sqlval(usr())
+end
+
 --config ---------------------------------------------------------------------
 
-webb.secret = glue.memoize(function()
+local webb_secret = glue.memoize(function()
 	local s = assert(config'secret', 'secret not configured')
 	assert(#s >= 32, 'secret too short')
 	return s
 end)
 
---session cookie -------------------------------------------------------------
-
-local function session_hash(sid)
-	local secret = webb.secret()
-	return glue.tohex(hmac.sha256(sid, secret))
+local function secret_hash(s)
+	local secret = webb_secret()
+	local token = blake3.hash(s, nil, secret)
+	return glue.tohex(token) --64 bytes
 end
+
+--session cookie -------------------------------------------------------------
 
 local function save_session(sess)
 	local secure_flag = config('session_cookie_secure_flag', true)
@@ -278,11 +277,12 @@ local function save_session(sess)
 					token = ?
 			]], sess.usr, sess.expires, sess.id)
 		end
-		local sig = session_hash(sess.id)
+		local sig = secret_hash(sess.id)
 		setheader('set-cookie', {
 			[session_cookie_name] = {
 				value = '1|'..sess.id..'|'..sig,
 				attrs = {
+					Path = '/',
 					Domain = host(),
 					Expires = sess.expires,
 					Secure = secure_flag,
@@ -296,6 +296,7 @@ local function save_session(sess)
 			[session_cookie_name] = {
 				value = '0',
 				attrs = {
+					Path = '/',
 					Expires = 0,
 					Secure = secure_flag,
 					HttpOnly = true,
@@ -313,10 +314,10 @@ local function load_session()
 	ver = tonumber(ver); if not ver then return end
 	if ver == 1 then
 		local sid, sig = s:match'^(.-)|(.*)$'; if not sid then return end
-		if session_hash(sid) ~= sig then return end
+		if secret_hash(sid) ~= sig then return end
 		local usr = first_row([[
 			select usr from sess where token = ? and expires > now()
-		]], sid)
+			]], sid)
 		if not usr then return end
 		return {id = sid, usr = usr}
 	end
@@ -536,7 +537,7 @@ local function register_token(usr, token, validates, token_lifetime, token_maxco
 			(token, usr, expires, validates, ctime)
 		values
 			(?, ?, from_unixtime(?), ?, from_unixtime(?))
-		]], token_hash(token), usr, expires, validates, now)
+		]], secret_hash(token), usr, expires, validates, now)
 
 	return true
 end
@@ -554,7 +555,7 @@ function gen_auth_token(email)
 			'email_not_found'
 	end
 
-	local token = token_hash(random_string(32))
+	local token = secret_hash(random_string(32))
 	local ok, err = register_token(usr, token, 'email', token_lifetime, token_maxcount)
 	webb.note('auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
 	return ok and token or nil, err
@@ -584,7 +585,7 @@ function gen_auth_code(validates, s)
 		assert(false)
 	end
 
-	local code = token_hash(random_string(64)):gsub('[a-f]', ''):sub(1, 6)
+	local code = secret_hash(random_string(64)):gsub('[a-f]', ''):sub(1, 6)
 	assert(#code == 6)
 	local ok, err = register_token(usr, code, validates, code_lifetime, code_maxcount)
 	webb.note('auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
@@ -601,7 +602,7 @@ local function token_usr(token)
 			inner join usr u on u.usr = ut.usr
 		where
 			u.active = 1 and ut.expires > now() and ut.token = ?
-		]], token_hash(token))
+		]], secret_hash(token))
 	if not t then return end
 	return t.usr, t.validates
 end
@@ -627,7 +628,7 @@ local function auth_token(token, auth)
 
 	--remove the token because it's single use, and also to allow
 	--the user to keep forgetting his password as much as he wants.
-	query('delete from usrtoken where token = ?', token_hash(token))
+	query('delete from usrtoken where token = ?', secret_hash(token))
 
 	return usr
 end
@@ -752,7 +753,7 @@ function login(auth, switch_user)
 			end
 		end
 		save_usr(usr)
-		setlang(userinfo(usr).lang, 'if_not_set')
+		setlang(userinfo(usr).lang) --user lang has priority over action lang.
 	end
 	return usr, err, errcode
 end
