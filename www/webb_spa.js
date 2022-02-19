@@ -15,11 +15,14 @@ CONFIG API
 ACTIONS
 
 	href(url, [lang]) -> url               traslate a URL
-	current_url() -> url
+	current_url() -> url                   current URL in the URL bar
 	e.sethref([url])                       hook an action to a link
 	e.sethrefs()                           hook actions to all links
 	page_loading() -> t|f                  was current page loaded or exec()'ed?
 	exec(url[, opt])                       change the tab URL
+		opt.lang                            set a specific language
+		opt.refresh                         exec server action instead of client action
+		opt.samepace                        replace entry in history instead of adding
 	back()                                 go back to last URL in history
 	setscroll([top])                       set scroll to last position or reset
 	settitle([title])                      set title to <h1> contents or arg
@@ -211,17 +214,16 @@ let check_exec = function() {
 function exec(url, opt) {
 	opt = opt || {}
 	if (opt.refresh) {
-		window.location = href(url)
+		window.location = href(url, opt.lang)
 		return
 	}
-	opt.prev_url = current_url()
 	if (!check_exec())
 		return
 	_save_scroll_state(window.scrollY)
-	url = href(url)
-	if (opt.samepage)
+	url = href(url, opt.lang)
+	if (opt.samepage) {
 		history.replaceState(null, null, url)
-	else {
+	} else {
 		if (window.location.href == (new URL(url, document.baseURI)).href)
 			return
 		history.pushState(null, null, url)
