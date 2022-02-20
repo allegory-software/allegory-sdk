@@ -1121,8 +1121,8 @@ function nav_widget(e) {
 	}
 
 	e.can_change_val = function(row, field) {
-		return can_change_rows()
-			&& (!row || (row.can_change != false && !row.removed))
+		return ((row && row.is_new) || can_change_rows())
+			&& (!row || ((row.is_new || row.can_change != false) && !row.removed))
 			&& (!field || !field.readonly)
 	}
 
