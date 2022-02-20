@@ -373,7 +373,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding-top    : var(--x-padding-y-button);
 	padding-bottom : var(--x-padding-y-button);
 	font-weight: bold;
-	line-height: normal;
+	line-height: 1em;
 
 	/* behavior */
 	user-select: none; /* make drag-select skip over button labels */
@@ -469,6 +469,35 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-action-band > .x-button {
 	margin: var(--x-margin);
+}
+
+.x-action-band > .x-button > .x-button-text {
+	white-space: nowrap;
+}
+
+/* ---- tight width ---- */
+
+.x-action-band.tight > .x-button > .x-button-text {
+	display: none;
+}
+
+.x-action-band.tight > .x-button { /* same as .text-empty */
+	padding-left  : var(--x-padding-x-button-icon);
+	padding-right : var(--x-padding-x-button-icon);
+	align-items: center; /* no more baseline to align icon to */
+}
+
+.x-action-band.tight > .x-button:not([bare]) > .x-button-icon { /* same as .text-empty */
+	margin-right: .25em;
+	margin-left : .25em;
+}
+
+.x-action-band.noinfo > .x-grid-action-band-info {
+	display: none;
+}
+
+.x-action-band:not(.tight) > .x-dialog-button-cancel > .x-button-icon {
+	display: none;
 }
 
 /* tooltip ---------------------------------------------------------------- */

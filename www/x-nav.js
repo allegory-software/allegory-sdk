@@ -4045,12 +4045,14 @@ function nav_widget(e) {
 						classes: 'x-grid-action-band-reload-button',
 						icon: 'fa fa-sync',
 						text: '',
+						title: S('reload', 'Reload all items'),
 						bare: true,
 						action: () => e.reload(),
 					}),
 					'insert': button({
 						icon: 'fa fa-plus',
 						text: S('add', 'Add'),
+						title: S('add_new_item', 'Add a new item'),
 						action: function() {
 							e.insert_row(1, {input: e, at_focused_row: true, focus_it: true})
 						},
@@ -4058,6 +4060,7 @@ function nav_widget(e) {
 					'delete': button({
 						icon: 'fa fa-minus',
 						text: S('delete', 'Delete'),
+						title: S('delete_focused_item', 'Delete focused item'),
 						action: function() {
 							e.remove_selected_rows({input: e, refocus: true})
 						},
@@ -4065,7 +4068,9 @@ function nav_widget(e) {
 					'info': div({class: 'x-grid-action-band-info'}),
 					'cancel': button({
 						cancel: true,
+						icon: 'fa fa-rotate-left',
 						text: S('cancel', 'Cancel'),
+						title: S('discard_changes', 'Discard changes'),
 						action: function() {
 							e.exit_edit({cancel: true})
 							e.revert_changes()
@@ -4074,12 +4079,17 @@ function nav_widget(e) {
 					'save': button({
 						icon: 'fa fa-cloud-upload-alt',
 						text: S('save', 'Save'),
+						title: S('save_changes', 'Save changes'),
 						primary: true,
 						action: function() {
 							e.save()
 						},
 					}),
 				}
+			})
+			e.action_band.on('resize', function(r) {
+				this.class('noinfo', this.parent.cw < 300)
+				this.class('tight', this.parent.cw < 600)
 			})
 			e.add(e.action_band)
 		}
@@ -4094,9 +4104,10 @@ function nav_widget(e) {
 			b.buttons.save  .disabled = !cn
 			b.buttons.cancel.disabled = !cn
 			b.buttons.delete.disabled = !sn
-			b.buttons.delete.text = S('delete', 'Delete')
-				+ (sn > 1 ? ' ' + sn + ' ' + nrows(sn) : '')
-			b.buttons.delete.attr('danger', '')
+			let ds = S('delete', 'Delete') + (sn > 1 ? ' ' + sn + ' ' + nrows(sn) : '')
+			b.buttons.delete.text = ds
+			b.buttons.delete.title = sn > 1 ? ds : S('delete_focused_item', 'Delete focused item')
+			b.buttons.delete.bool_attr('danger', true)
 			b.buttons.reload.disabled = cn || !e.rowset_url
 			let s = '\n'.cat(
 				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
