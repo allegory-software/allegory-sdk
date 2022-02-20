@@ -76,13 +76,17 @@ local sortedpairs = glue.sortedpairs
 
 --usage in sql:
 	-- single-key: foo in (:param:filter)
-	-- multi-key : $filter(foo <=> :foo and bar <=> :bar, :param:filter)
-function qmacro.filter(expr, filter)
+	-- multi-key : $filter("foo <=> :foo and bar <=> :bar", :param:filter)
+function qmacro.filter(self, expr, filter)
 	local t = {}
 	for i,vals in ipairs(filter) do
 		t[i] = sqlparams(expr, vals)
 	end
 	return concat(t, ' or ')
+end
+
+function qmacro.xx()
+	-- $filter("foo <=> :foo and bar <=> :bar", :param:filter)
 end
 
 local rowset_type = {
