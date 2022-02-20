@@ -18,7 +18,7 @@ rowset:
 	needs:
 		e.rowset
 	publishes:
-		e.reset()
+		e.reset([ev])
 	calls:
 		^reset()
 
@@ -328,7 +328,7 @@ loading from server:
 		e.load_overlay(on)
 		^load_progress(p, loaded, total)
 		^load_slow(on)
-		^load_fail(err, type, status, message, body)
+		^load_fail(err, type, status, message, body, req)
 
 saving:
 	config:
@@ -3366,7 +3366,7 @@ function nav_widget(e) {
 
 	// loading ----------------------------------------------------------------
 
-	e.reset = function() {
+	e.reset = function(ev) {
 
 		if (!e.bound)
 			return
@@ -3388,7 +3388,7 @@ function nav_widget(e) {
 		e.update({fields: true, rows: true})
 		refocus()
 		e.end_update()
-		e.fire('reset')
+		e.fire('reset', ev)
 
 	}
 
@@ -3424,7 +3424,7 @@ function nav_widget(e) {
 		}
 		if (!e.rowset_url || e.param_vals === false) {
 			// client-side rowset or param vals not available: reset it.
-			e.reset()
+			e.reset(opt.event)
 			return
 		}
 		if (requests && requests.size && !e.load_request) {
@@ -3484,7 +3484,7 @@ function nav_widget(e) {
 
 	function load_fail(err, type, status, message, body) {
 		e.do_update_load_fail(true, err, type, status, message, body)
-		return e.fire('load_fail', err, type, status, message, body)
+		return e.fire('load_fail', err, type, status, message, body, this)
 	}
 
 	e.prop('focus_state', {store: 'var', slot: 'user'})
@@ -3493,7 +3493,7 @@ function nav_widget(e) {
 		if (this.allow_diff_merge && e.diff_merge(rs))
 			return
 		e.rowset = rs
-		e.reset()
+		e.reset(this.event)
 		if (e.focus_state != null && e.pk_fields) {
 			let fs = json_arg(e.focus_state)
 			e.focus_find_cell(e.pk_fields, fs.pk_vals, fs.col)
