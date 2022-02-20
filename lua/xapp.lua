@@ -53,7 +53,7 @@ x-grid.js
 x-module.js
 ]]
 
-fontfile'fa-solid-900.ttf'
+fontfile'fa-solid-900.woff2'
 
 require'xauth'
 require'xlang'
