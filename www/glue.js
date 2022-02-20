@@ -1491,10 +1491,10 @@ function ajax(req) {
 		if (name == 'done')
 			fire(arg1, ...rest)
 
-		if (name == 'fail' && arg1)
-			(req.notify_error || ajax.notify_error || noop)(arg1, ...rest)
 
-		req.fire(name, arg1, ...rest)
+		if (req.fire(name, arg1, ...rest))
+			if (name == 'fail' && arg1)
+				(req.notify_error || ajax.notify_error || noop)(arg1, ...rest)
 
 		if (req[name])
 			req[name](arg1, ...rest)
