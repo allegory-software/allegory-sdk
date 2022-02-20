@@ -39,6 +39,7 @@ logprintargs = logging.printargs
 function pr(...)
 	for i=1,select('#',...) do
 		io.stderr:write(logging.printarg((select(i,...))))
+		io.stderr:write'\t'
 	end
 	io.stderr:write'\n'
 	io.stderr:flush()
