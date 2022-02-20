@@ -33,6 +33,7 @@ DEBUG_ATTACH_TIME = false
 
 function set_theme(theme) {
 	on_dom_load(function() {
+		theme = repl(theme, 'default', null)
 		document.body.attr('theme', theme)
 		document.fire('theme_changed', theme)
 	})
@@ -1297,7 +1298,8 @@ component('x-tooltip', function(e) {
 			return
 		if (too_soon())
 			return
-		e.close()
+		pr('HERE')
+		//e.close()
 	}
 
 	// clicking outside the tooltip closes the tooltip, even if the click did something.
@@ -1320,7 +1322,7 @@ component('x-tooltip', function(e) {
 			return
 		if (!e.autoclose)
 			return
-		e.close()
+		//e.close()
 	}
 
 })
@@ -2636,6 +2638,7 @@ component('x-toaster', function(e) {
 		t.post(...args)
 		console.log('NOTIFY', args[0])
 	}
+	ajax.notify_error = (err) => notify(err, 'error')
 }
 
 // ---------------------------------------------------------------------------
