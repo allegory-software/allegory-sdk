@@ -67,6 +67,7 @@ client_config'aliases'
 client_config'root_action'
 client_config'templates_action'
 client_config'page_title_suffix'
+client_config'session_cookie_name'
 client_config'facebook_app_id'
 client_config'analytics_ua'
 client_config'google_client_id'
@@ -76,10 +77,11 @@ action['config.js'] = function()
 
 	local cjson = require'cjson'
 
-	--initialize some required config values with defaults.
-	config('default_lang', 'en')
-	config('root_action', 'en')
-	config('page_title_suffix', ' - '..host())
+	--required config values must be initialized.
+	assert(config'default_lang')
+	assert(config'root_action')
+	assert(config'page_title_suffix')
+	assert(config'session_cookie_name')
 
 	for i,k in ipairs(client_configs) do
 		local v = config(k)
