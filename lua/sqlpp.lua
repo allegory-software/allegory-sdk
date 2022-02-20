@@ -106,7 +106,7 @@ EXTENDING THE PREPROCESSOR
 	spp.keyword.KEYWORD -> symbol                get a symbol for a keyword
 	spp.keywords[SYMBOL] = keyword               set a keyword for a symbol
 	spp.subst'NAME text...'                      create a substitution for `$NAME`
-	function spp.macro.NAME(...) end             create a macro to be used as `$NAME(...)`
+	function spp.macro.NAME(self, ...) end       create a macro to be used as `$NAME(...)`
 
 ## Preprocessor
 
@@ -178,7 +178,7 @@ This enables using JSON null values as SQL parameters.
 
 Create an unquoted text substitution for `$NAME`.
 
-### `function spp.macro.NAME(...) end`
+### `function spp.macro.NAME(self, ...) end`
 
 Create a macro to be used as `$NAME(...)`. Param args are expanded before
 macros.
@@ -470,8 +470,13 @@ function sqlpp.new(init)
 		local k = arg:match'^:([%w_][%w_%:]*)'
 		if k then --unparsed param expansion.
 			return t[k]
-		else --parsed param expansion.
-			return self:sqlparams(arg, t)
+		else
+			local s = arg:match'^"([^"]+)"$'
+			if s then --verbatim arg, see $filter()
+				return s
+			else --parsed param expansion.
+				return self:sqlparams(arg, t)
+			end
 		end
 	end
 
