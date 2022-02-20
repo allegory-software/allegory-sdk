@@ -3440,20 +3440,14 @@ function nav_widget(e) {
 				focused: e.hasfocus,
 			}
 
-		let req = ajax({
+		let req = ajax(assign_opt({
 			url: rowset_url(),
-			upload: opt.upload,
 			progress: load_progress,
-			success: opt.success,
-			fail: opt.fail,
 			done: load_done,
 			slow: load_slow,
 			slow_timeout: e.slow_timeout,
 			dont_send: true,
-			notify: opt.notify,
-			notify_error: opt.notify_error,
-			allow_diff_merge: opt.allow_diff_merge,
-		})
+		}, e.reload_ajax_options, opt))
 		req.on('success', load_success)
 		req.on('fail', load_fail)
 		add_request(req)
@@ -3490,7 +3484,7 @@ function nav_widget(e) {
 
 	function load_fail(err, type, status, message, body) {
 		e.do_update_load_fail(true, err, type, status, message, body)
-		e.fire('load_fail', err, type, status, message, body)
+		return e.fire('load_fail', err, type, status, message, body)
 	}
 
 	e.prop('focus_state', {store: 'var', slot: 'user'})
