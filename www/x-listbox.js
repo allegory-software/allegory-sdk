@@ -450,6 +450,7 @@ component('x-list-dropdown', function(e) {
 		lb.on('focused_row_cell_state_changed', update)
 		lb.on('focused_row_state_changed', update)
 		lb.on('display_vals_changed', update)
+		lb.on('reset', update)
 
 		lb.on('wheel', function(ev, dy) {
 			lb.pick_near_val(dy, {input: e, pick: false})
