@@ -55,8 +55,11 @@ let init_usr_nav = function() {
 			set_val(field.name, nav.cell_val(nav.rows[0], field))
 	})
 
-	nav.on('load_fail', function(err) {
-		signed_in(false, true)
+	nav.on('load_fail', function(err, type, status) {
+		if (type == 'http' && status == 403) { // forbidden
+			signed_in(false, true)
+			return false // prevent notify toaster.
+		}
 	})
 
 	nav.on('cell_state_changed', function(row, field, changes, ev) {
@@ -67,13 +70,12 @@ let init_usr_nav = function() {
 	head.add(nav)
 }
 
-let login = function(upload, notify_widget, success, fail) {
+let login = function(upload, notify, success, fail) {
 	usr_nav.reload({
 		upload: upload,
-		notify: notify_widget,
+		notify: notify,
 		success: success,
 		fail: fail,
-		// async: false,
 	})
 }
 
