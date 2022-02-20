@@ -11,10 +11,10 @@ build() {
 }
 
 if [ "$OSTYPE" = "msys" ]; then
-	P=windows L="-s -static-libgcc" D=bcrypt1.dll A=bcrypt.a build
+	P=windows L="-s -static-libgcc" D=bcrypt1.dll A=bcrypt1.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
-	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libbcrypt.dylib" \
-	D=libbcrypt.dylib A=libbcrypt.a build
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libbcrypt1.dylib" \
+	D=libbcrypt1.dylib A=libbcrypt1.a build
 else
-	P=linux C="-fPIC" L="-s -static-libgcc" D=libbcrypt.so A=libbcrypt.a build
+	P=linux C="-fPIC" L="-s -static-libgcc" D=libbcrypt1.so A=libbcrypt1.a build
 fi
