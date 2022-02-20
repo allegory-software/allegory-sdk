@@ -78,10 +78,11 @@ action['config.js'] = function()
 	local cjson = require'cjson'
 
 	--required config values must be initialized.
-	assert(config'default_lang')
-	assert(config'root_action')
-	assert(config'page_title_suffix')
-	assert(config'session_cookie_name')
+	--NOTE: these must match the real defaults that are set in their places of usage.
+	config('default_lang', 'en')
+	config('root_action', 'en')
+	config('page_title_suffix', ' - '..host())
+	config('session_cookie_name', 'session')
 
 	for i,k in ipairs(client_configs) do
 		local v = config(k)
