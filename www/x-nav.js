@@ -3364,6 +3364,10 @@ function nav_widget(e) {
 				req.abort()
 	}
 
+	e.requests_pending = function() {
+		return !!(requests && requests.size)
+	}
+
 	// loading ----------------------------------------------------------------
 
 	e.reset = function(ev) {
@@ -4841,7 +4845,7 @@ function init_rowset_events() {
 		let navs = rowset_navs[rowset_name]
 		if (navs)
 			for (let nav of navs)
-				if (!nav.load_request)
+				if (!nav.requests_pending())
 					nav.reload({allow_diff_merge: true})
 	}
 }
