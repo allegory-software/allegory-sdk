@@ -28,8 +28,6 @@ require'webb_spa'
 require'webb_auth'
 require'xrowset_sql'
 
-client_config'auto_sign_in'
-
 jsfile'x-auth.js'
 cssfile'x-auth.css'
 

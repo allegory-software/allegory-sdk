@@ -1499,10 +1499,6 @@ function ajax(req) {
 		if (req[name])
 			req[name](arg1, ...rest)
 
-		req.fire('event', name, arg1, ...rest)
-		if (req.event)
-			req.event(name, arg1, ...rest)
-
 		if (req.notify instanceof EventTarget)
 			req.notify.fire('load', name, arg1, ...rest)
 		else if (isarray(req.notify)) // multiple targets
