@@ -285,7 +285,7 @@ local function save_session(sess)
 					Path = '/',
 					Domain = host(),
 					Expires = sess.expires,
-					Secure = secure_flag,
+					Secure = secure_flag or nil,
 					HttpOnly = true,
 				},
 			},
