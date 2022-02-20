@@ -820,7 +820,7 @@ function sqlpp.new(init)
 			end
 			local set_sql = cat(t, ',\n\t')
 			P('insert into %s values\n%s\non duplicate key update\n%s',
-				N(tbl_name),
+				N(tbl.name),
 				self:sqlrows(tbl.rows, {n = #tbl.fields, indent = '\t'}),
 				set_sql)
 		end
