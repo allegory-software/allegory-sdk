@@ -79,7 +79,7 @@ local noop = glue.noop
 rowset = {}
 
 action['rowset.json'] = function(name)
-	return checkfound(rowset[name])()
+	return checkfound(rowset[name])(name)
 end
 
 local client_field_attrs = {
@@ -328,10 +328,15 @@ function virtual_rowset(init, ...)
 			add(res.rows, rt)
 		end
 
+		if #res.rows > 0 then
+			rowset_changed(rs.name)
+		end
+
 		return res
 	end
 
-	function rs:respond()
+	function rs:respond(rowset_name)
+		rs.name = rowset_name
 		if type(rs.allow) == 'function' then
 			allow(rs.allow())
 		elseif type(rs.allow) == 'string' then
