@@ -6,12 +6,8 @@
 GLOBALS
 
 	init_auth()
+	sign_in()
 	sign_out()
-
-ACTIONS
-
-	sign-in
-	sign-in-code
 
 */
 
@@ -39,9 +35,26 @@ let init_usr_nav = function() {
 		save_row_on: 'input',
 	})
 
-	nav.on('reset', function() {
+	nav.on('reset', function(event) {
+
+		if (event == 'logout') {
+			// logout has created an anonymous user + session for us.
+			// refresh the page to wipe out any sensitive information in it.
+			location.reload()
+			return
+		}
+
+		if (event == 'login') {
+			// reload in order to reset lang & country from user settings.
+			location.reload()
+			return
+		}
+
+		// first-time load by init_auth(): init the app with the signed-in user.
+		// the user can be anonymous or not, we're doing the same thing.
 
 		let usr = this.row_state_map(this.rows[0], 'val')
+
 		pr('login', usr.usr, usr.email)
 		setglobal('usr', usr)
 
@@ -49,17 +62,47 @@ let init_usr_nav = function() {
 			xmodule.set_layer(config('app_name'), 'user',
 				config('app_name') + '-user-'+usr.usr)
 
-		signed_in(usr && !usr.anonymous, true)
+		set_signed_in(!usr.anonymous)
 
 		for (let field of nav.all_fields)
 			set_val(field.name, nav.cell_val(nav.rows[0], field))
 	})
 
-	nav.on('load_fail', function(err, type, status) {
-		if (type == 'http' && status == 403) { // forbidden
-			signed_in(false, true)
-			return false // prevent notify toaster.
+	nav.on('load_fail', function(err, type, status, satus_message, body, req) {
+
+		let event = req.event
+		let forbidden = type == 'http' && status == 403
+
+		if (event == 'logout') {
+			if (forbidden) {
+				// normal logout without the server creating an anonymous user.
+				// refresh the page to wipe out any sensitive information in it.
+				location.reload()
+				return false // prevent showing the error via notify().
+			} else {
+				// other error. the error is shown and the logout button is
+				// re-enabled to let the user retry.
+				return
+			}
 		}
+
+		if (event == 'login') {
+			// login error (forbidden or not). the error is shown and the login
+			// button is re-enabled to let the user retry.
+			return
+		}
+
+		if (forbidden) {
+			// first-time load by init_auth(): session login failed: sign-in.
+			sign_in()
+			return false // prevent showing the error via notify().
+		}
+
+		// other type of error: let the error be notified, don't take any action.
+		// if this happens on app load, you get a blank screen.
+
+		// TODO: x-if an oops page with a reload button.
+
 	})
 
 	nav.on('cell_state_changed', function(row, field, changes, ev) {
@@ -70,29 +113,33 @@ let init_usr_nav = function() {
 	head.add(nav)
 }
 
-let login = function(upload, notify, success, fail) {
-	usr_nav.reload({
-		upload: upload,
-		notify: notify,
-		success: success,
-		fail: fail,
-	})
-}
-
-let signed_in = function(signed_in, check_auto_sign_in) {
+let set_signed_in = function(signed_in) {
 	setglobal('signed_in', signed_in)
 	setglobal('signed_out', !signed_in)
-	if (!signed_in && check_auto_sign_in && config('auto_sign_in'))
-		exec('/sign-in')
 }
 
 function init_auth() {
-	signed_in(false, false)
+	set_signed_in(false)
 	init_usr_nav()
 }
 
-function sign_out() {
-	login({type: 'logout'})
+function sign_out(opt) {
+
+	// tell the server to remove the session from the db.
+	if (false)
+	usr_nav.reload(assign_opt({
+		upload: {type: 'logout'},
+		event: 'logout',
+	}, opt))
+
+	// delete the session cookie before the server responds (it might not respond).
+	document.cookie = config('session_cookie_name') + '=; Max-Age=0'
+
+	// at this point it would be safe to just refresh the page and not wait
+	// for the server to log us out (the server will garbage-collect the
+	// session eventually anyway). we're only doing it in case there's any
+	// logout logic on the server that needs to happen.
+
 }
 
 component('x-usr-button', function(e) {
@@ -119,6 +166,14 @@ component('x-usr-button', function(e) {
 		}
 	})
 
+})
+
+on('auth_sign_in_button.init', function(e) {
+	e.on('activate', function() { sign_in() })
+})
+
+on('auth_sign_out_button.init', function(e) {
+	e.on('activate', function() { sign_out({notify: e}) })
 })
 
 // sign-in form --------------------------------------------------------------
@@ -155,7 +210,8 @@ let sign_in_dialog = memoize(function() {
 		e.email_button.post(href('/sign-in-email.json'), {
 			email: e.email_edit.input_val,
 		}, function() {
-			sign_in_code()
+			d.code_edit.errors = null
+			d.slides.slide(1)
 		}, function(err) {
 			e.email_edit.errors = [{message: err, passed: false}]
 			e.email_edit.focus()
@@ -164,66 +220,29 @@ let sign_in_dialog = memoize(function() {
 
 	e.code_button.action = function() {
 		let d = sign_in_dialog()
-		login({
+		usr_nav.reload({
+			upload: {
 				type: 'code',
 				code: e.code_edit.input_val,
 			},
-			e.code_button,
-			function() {
-				if (location.pathname.starts('/sign-in'))
-					exec('/')
-				else
-					e.close()
-			},
-			function(err) {
+			notify: e.code_button,
+			event: 'login',
+			fail: function(err) {
 				e.code_edit.errors = [{message: err, passed: false}]
 				e.code_edit.focus()
-			}
-		)
+			},
+		})
 	}
 
 	return e
 })
 
-let sign_in_dialog_modal = function() {
-	return sign_in_dialog().modal()
-}
-
 function sign_in() {
-	let d = sign_in_dialog_modal()
+	let d = sign_in_dialog()
 	d.email_edit.val = null
 	d.code_edit.val = null
 	d.slides.slide(0)
+	d.modal()
 }
-
-let sign_in_code = function() {
-	let d = sign_in_dialog_modal()
-	d.code_edit.errors = null
-	d.slides.slide(1)
-}
-
-flap.sign_in = function(on) {
-	let d = sign_in_dialog()
-	if (!on && d)
-		d.close()
-}
-
-action.sign_in = function() {
-	setflaps('sign_in')
-	sign_in()
-}
-
-action.sign_in_code = function() {
-	setflaps('sign_in')
-	sign_in_code()
-}
-
-on('auth_sign_in_button.init', function(e) {
-	e.on('activate', function() { sign_in() })
-})
-
-on('auth_sign_out_button.init', function(e) {
-	e.on('activate', function() { sign_out() })
-})
 
 }
