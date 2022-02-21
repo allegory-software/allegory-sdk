@@ -168,7 +168,7 @@ function component(tag, category, cons) {
 		// - constructor args.
 		let opt = assign_opt(obj(), ...args)
 		component_props(e, opt.props)
-		e.isinstance = true   // because you can have non-widget instances.
+		e.isinstance = true   // because we can have non-widget instances.
 		e.iswidget = true     // to diff from normal html elements.
 		e.type = type         // for serialization.
 		e.init = noop         // init point after all props are set.
