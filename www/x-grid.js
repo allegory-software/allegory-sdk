@@ -1041,6 +1041,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 	function ht_row_move(mx, my, hit) {
 		if (!e.can_move_rows) return
+		if (e.rowset && !e.rowset.can_move_rows) return
 		if (e.focused_row_index != hit.cell.ri) return
 		if ( horiz && abs(hit.my - my) < 8) return
 		if (!horiz && abs(hit.mx - mx) < 8) return

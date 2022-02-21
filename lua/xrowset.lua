@@ -21,6 +21,7 @@
 		can_add_rows     : f             allow adding new rows
 		can_remove_rows  : f             allow removing rows
 		can_change_rows  : f             allow editing existing rows
+		can_move_rows    : f             allos changing rows' position in the rowset
 		allow            : f|'r1 ...'    allow only if current user has a matching role
 
 	Field attributes sent to client:
@@ -112,6 +113,7 @@ function virtual_rowset(init, ...)
 			if not pos_field.w then
 				pos_field.w = 40
 			end
+			rs.can_move_rows = true
 		end
 
 		rs.client_fields = {}
@@ -164,6 +166,7 @@ function virtual_rowset(init, ...)
 			can_add_rows = rs.can_add_rows,
 			can_remove_rows = rs.can_remove_rows,
 			can_change_rows = rs.can_change_rows,
+			can_move_rows = rs.can_move_rows,
 			fields = rs.client_fields,
 			pk = rs.pk,
 			pos_col = rs.pos_col,

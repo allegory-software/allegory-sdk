@@ -33,8 +33,7 @@ function listbox_widget(e) {
 	e.display_col = 0
 	e.xon()
 
-	e.prop('orientation'   , {store: 'var', type: 'enum', enum_values: ['vertical', 'horizontal'], default: 'vertical', attr: true})
-	e.prop('can_move_items', {store: 'var', type: 'bool', default: true})
+	e.prop('orientation', {store: 'var', type: 'enum', enum_values: ['vertical', 'horizontal'], default: 'vertical', attr: true})
 
 	// embedded template: doesn't work if the listbox itself is declared in a template.
 	let item_template = e.$('script[type="text/x-mustache"]')[0]
@@ -237,7 +236,7 @@ function listbox_widget(e) {
 
 		function item_pointermove(ev, mx, my) {
 			if (!dragging) {
-				dragging = e.can_move_items
+				dragging = e.can_move_rows && (!e.rowset || e.rowset.can_move_rows)
 					&& (e.axis == 'x' ? abs(down_mx - mx) > 4 : abs(down_my - my) > 4)
 				if (dragging) {
 					e.class('moving')
@@ -405,7 +404,7 @@ function listbox_widget(e) {
 		e.xoff()
 		e.auto_focus_first_cell = false
 		e.can_select_multiple = false
-		e.can_move_items = false
+		e.can_move_rows = false
 		e.xon()
 	}
 
@@ -490,7 +489,7 @@ component('x-select-button', function(e) {
 	listbox.construct(e)
 
 	e.orientation = 'horizontal'
-	e.can_move_items = false
+	e.can_move_rows = false
 	e.auto_focus_first_cell = false
 	e.can_select_multiple = false
 
