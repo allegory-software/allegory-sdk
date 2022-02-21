@@ -504,8 +504,8 @@ function nav_widget(e) {
 
 	// fields utils -----------------------------------------------------------
 
-	let fld     = col => isstr(col) ? assert(e.all_fields[col]) : col
-	let fldname = col => isstr(col) ? col : col.name
+	let fld     = col => isstr(col) || isnum(col) ? assert(e.all_fields[col]) : col
+	let fldname = col => fld(col).name
 	let colsarr = cols => isstr(cols) ? cols.names() : cols
 
 	let is_not_null = v => v != null
@@ -4668,10 +4668,32 @@ component('x-lookup-dropdown', function(e) {
 		return this.has_seconds ? t : t.slice(0, 5)
 	}
 
+	// formats: h m | h m s | hhmm | hhmmss
 	let time_from_text = function(s) {
-		let t = s.replaceAll(/[^0-9]/g, '')
-		if (t.length != (this.has_seconds ? 6 : 4)) return
-		return t.slice(0, 2)+':'+t.slice(2, 4)+(this.has_seconds ? ':'+t.slice(4, 6) : '')
+		let m = s.match(/\d+/g)
+		if (!m)
+			return
+		let H, M, S
+		if (m.length == 1) { // hhmm | hhmmss
+			if (m[0].length != 6 && m[0].length != 4)
+				return
+			H = num(m[0].slice(0, 2))
+			M = num(m[0].slice(2, 4))
+			S = num(m[0].slice(4, 6), 0)
+		} else { // h m | h m s
+			if (m.length != 3 && m.length != 2)
+				return
+			H = num(m[0])
+			M = num(m[1])
+			S = num(m[2], 0)
+		}
+		if (H > 23) return
+		if (M > 59) return
+		if (S > 59) return
+		if (!this.has_seconds && S)
+			return
+		return H.base(10, 2) + ':' + M.base(10, 2)
+			+ ':' + (this.has_seconds ? S.base(10, 2) : '00')
 	}
 
 	td.from_text = function(s) {
@@ -4686,8 +4708,8 @@ component('x-lookup-dropdown', function(e) {
 	td.validator_time = field => ({
 		validate : v => v == null || time_from_text(v),
 		message  : field.has_seconds
-			? S('validate_time_seconds', 'Time must have the format HH:MM:SS')
-			: S('validate_time', 'Time must have the format HH:MM')
+			? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
+			: S('validate_time', 'Time must look like H:M or HHMM')
 	})
 
 	td.editor = function(...opt) {
