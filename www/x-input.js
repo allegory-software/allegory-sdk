@@ -2344,14 +2344,6 @@ component('x-timepicker', 'Input', function(e) {
 		},
 	})
 
-	function set_val() {
-		let h = e.sel_h.input_val
-		let m = e.sel_m.input_val
-		let s = e.sel_s.input_val
-		let t = h != null && m != null && s != null ? h + ':' + m + ':' + s : null
-		e.set_val(t, {input: e})
-	}
-
 	e.set_button = button({
 		text: S('set', 'Set'),
 		classes: 'x-timepicker-button-set',
@@ -2361,22 +2353,22 @@ component('x-timepicker', 'Input', function(e) {
 		},
 	})
 
-	function gen_sel(classes, max, step) {
-		let a = []
-		for (let i = 0; i < max; i += step)
-			a.push(i.base(10, 2))
-		return listbox({
-			classes: 'x-timepicker-sel ' + classes,
-			items: a,
-			max_h: 200,
-			val_col: 0,
-		})
-	}
-
 	e.on('bind_field', function(on) {
 		if (!on) return
 
 		e.clear()
+
+		function gen_sel(classes, max, step) {
+			let a = []
+			for (let i = 0; i < max; i += step)
+				a.push(i.base(10, 2))
+			return listbox({
+				classes: 'x-timepicker-sel ' + classes,
+				items: a,
+				max_h: 200,
+				val_col: 0,
+			})
+		}
 
 		e.sel_h = gen_sel('x-timepicker-sel-h', 24, or(e.field.hour_step  , 1))
 		e.sel_m = gen_sel('x-timepicker-sel-m', 60, or(e.field.minute_step, 1))
@@ -2388,6 +2380,15 @@ component('x-timepicker', 'Input', function(e) {
 
 		e.bool_attr('has_seconds', e.field.has_seconds || null)
 
+		function set_val(_, ev) {
+			if (!(ev && ev.input))
+				return // called by update_view()
+			let h = e.sel_h.input_val
+			let m = e.sel_m.input_val
+			let s = e.sel_s.input_val
+			let t = h != null && m != null && s != null ? h + ':' + m + ':' + s : null
+			e.set_val(t, {input: e})
+		}
 		e.sel_h.on('input_val_changed', set_val)
 		e.sel_m.on('input_val_changed', set_val)
 		e.sel_s.on('input_val_changed', set_val)
@@ -2400,10 +2401,9 @@ component('x-timepicker', 'Input', function(e) {
 	})
 
 	function update_view(t) {
-		let ev = {input: e}
-		e.sel_h.set_val(hh(t), ev)
-		e.sel_m.set_val(mm(t), ev)
-		e.sel_s.set_val(ss(t), ev)
+		e.sel_h.set_val(hh(t))
+		e.sel_m.set_val(mm(t))
+		e.sel_s.set_val(ss(t))
 		e.sel_h.scroll_to_focused_cell(true)
 		e.sel_m.scroll_to_focused_cell(true)
 		e.sel_s.scroll_to_focused_cell(true)
@@ -2412,7 +2412,7 @@ component('x-timepicker', 'Input', function(e) {
 	e.do_update_val = function(v, ev) {
 		assert(e.bound)
 		if (ev && ev.input == e)
-			return
+			return // called by set_val()
 		update_view(v)
 	}
 
