@@ -426,6 +426,8 @@ component('x-list-dropdown', function(e) {
 
 	nav_dropdown_widget(e)
 
+	e.val_col = 0
+
 	e.create_picker = function(opt) {
 
 		let lb = component.create(assign_opt(opt, {
@@ -470,14 +472,13 @@ component('x-enum-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 
+	e.val_col = 0
+
 	e.override('create_picker', function(inherited, opt) {
 		opt.item_field = e.field
 		opt.items = e.field.enum_values
 		return inherited(opt)
 	})
-
-	e.val_col = 0
-
 })
 
 // ---------------------------------------------------------------------------
@@ -512,7 +513,9 @@ function colors_listbox(...opt) {
 }
 
 component('x-color-dropdown', function(e) {
+
 	list_dropdown.construct(e)
+
 	e.picker = colors_listbox()
 	e.val_col = 'color'
 	e.display_col = 'color'
@@ -563,7 +566,9 @@ function icons_listbox(...opt) {
 }
 
 component('x-icon-dropdown', function(e) {
+
 	list_dropdown.construct(e)
+
 	e.picker = icons_listbox()
 	e.val_col = 'icon'
 	e.display_col = 'icon'
