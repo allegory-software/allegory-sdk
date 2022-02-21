@@ -49,6 +49,7 @@ wwwfile['x-auth.css'] = [[
 
 .x-usr-tooltip .x-tooltip-content {
 	min-width: 300px;
+	margin-top: 1em;
 }
 
 .x-usr-button > .x-button-icon {
@@ -69,9 +70,18 @@ wwwfile['x-auth.css'] = [[
 	grid-template-areas:
 		"email"
 		"lang"
+		"country"
 		"theme"
 		"auth_sign_out_button"
 		"auth_sign_in_button"
+}
+
+#auth_sign_out_button,
+#auth_sign_in_button {
+	padding-top    : .5em;
+	padding-bottom : .5em;
+	margin-top     : .5em;
+	margin-bottom  : .5em;
 }
 
 ]]
@@ -80,7 +90,8 @@ template.usr_form = [[
 <x-if global=signed_in>
 	<x-form id=usr_form nav_id=usr_nav>
 		<x-input col=email ></x-input>
-		<x-lookup-dropdown col=lang  ></x-lookup-dropdown>
+		<x-lookup-dropdown col=lang     ></x-lookup-dropdown>
+		<x-lookup-dropdown col=country  ></x-lookup-dropdown>
 		<x-enum-dropdown col=theme></x-enum-dropdown>
 		<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
 			<t s=log_out>Log out</t>
@@ -264,12 +275,11 @@ rowset.usr = sql_rowset{
 		},
 		lang = {
 			lookup_rowset_name = 'pick_lang',
-			--lookup_col   = 'lang',
-			--display_col  = 'name',
 		},
 	},
 	where_all = 'usr = $usr()',
 	pk = 'usr',
+	rw_cols = 'lang country theme',
 	update_row = function(self, row)
 		update_row('usr', row, 'lang country theme')
 	end,
