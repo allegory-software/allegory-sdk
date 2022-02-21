@@ -248,7 +248,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 	// model ------------------------------------------------------------------
 
-	e.to_val = function(v) { return v; }
+	e.to_val   = function(v) { return v; }
 	e.from_val = function(v) { return v; }
 
 	e.property('row', () => e.nav && e.nav.focused_row)
@@ -1051,10 +1051,8 @@ function editbox_widget(e, opt) {
 				e.picker.class('picker', true)
 				e.picker.on('val_picked', picker_val_picked)
 				e.picker.on('keydown'   , picker_keydown)
-				e.picker.bind(true)
 			} else if (e.picker) {
 				e.picker.popup(false)
-				e.picker.bind(false)
 				e.picker = null
 			}
 			document.on('pointerdown'     , document_pointerdown, on)
@@ -1102,8 +1100,11 @@ function editbox_widget(e, opt) {
 						e.fire('lost_focus') // grid editor protocol
 				}
 			}
-			if (focus)
+			if (focus) {
 				e.focus()
+				if (e.input)
+					e.input.select_range(0, -1)
+			}
 		}
 
 		function picker_val_picked(ev) {
@@ -2330,65 +2331,87 @@ component('x-timepicker', 'Input', function(e) {
 	val_widget(e)
 	focusable_widget(e)
 
+	let hh = t => t.slice(0, 2)
+	let mm = t => t.slice(3, 5)
+	let ss = t => t.slice(6, 8)
+
+	e.cancel_button = button({
+		classes: 'x-timepicker-button-cancel',
+		cancel: true,
+		text: S('cancel', 'Cancel'),
+		action: function() {
+			e.dropdown.cancel(true)
+		},
+	})
+
+	function set_val() {
+		let t = e.sel_h.input_val + ':' + e.sel_m.input_val + ':' + e.sel_s.input_val
+		e.set_val(t, {input: e})
+	}
+
+	e.set_button = button({
+		text: S('set', 'Set'),
+		classes: 'x-timepicker-button-set',
+		primary: true,
+		action: function() {
+			e.fire('val_picked') // picker protocol
+		},
+	})
+
 	function gen_sel(classes, max, step) {
 		let a = []
 		for (let i = 0; i < max; i += step)
 			a.push(i.base(10, 2))
 		return listbox({
-			classes: classes,
+			classes: 'x-timepicker-sel ' + classes,
 			items: a,
 			max_h: 200,
+			val_col: 0,
 		})
 	}
 
-	e.cancel_button = button({
-		cancel: true,
-		text: S('cancel', 'Cancel'),
-		action: function() {
-			// TODO
-		},
-	})
-
-	let fval = function(lb) {
-		return lb.cell_input_val(lb.focused_row, lb.focused_field)
-	}
-
-	e.set_button = button({
-		text: S('set', 'Set'),
-		primary: true,
-		action: function() {
-			let h = fval(e.sel_hour)
-			let m = fval(e.sel_min)
-			let s = e.sel_sec && fval(e.sel_sec)
-			let v = h + ':' + m + (e.sel_sec ? ':' + s : '')
-			e.set_val(v, {input: e})
-			e.fire('val_picked') // picker protocol
-		},
-	})
-
 	e.on('bind_field', function(on) {
 		if (!on) return
-		let hs = e.field.has_seconds
+
 		e.clear()
-		e.sel_hour = gen_sel('x-timepicker-sel-hour'  , 24, or(e.field.hour_step  , 1))
-		e.sel_min  = gen_sel('x-timepicker-sel-minute', 60, or(e.field.minute_step, 1))
-		e.sel_sec  = hs && gen_sel('x-timepicker-sel-second', 60, or(e.field.second_step, 1))
-		e.bool_attr('has_seconds', hs || null)
-		if (hs)
-			e.add(
-				div({class: 'x-timepicker-heading'}, S('hour', 'Hour')),
-				div({class: 'x-timepicker-heading'}, S('minute', 'Minute')),
-				div({class: 'x-timepicker-heading'}, S('second', 'Second')),
-				e.sel_hour, e.sel_min, e.sel_sec,
-				e.cancel_button, e.set_button
-			)
-		else
-			e.add(
-				div({class: 'x-timepicker-heading'}, S('hour', 'Hour')),
-				div({class: 'x-timepicker-heading'}, S('minute', 'Minute')),
-				e.sel_hour, e.sel_min,
-				e.cancel_button, e.set_button
-			)
+
+		e.sel_h = gen_sel('x-timepicker-sel-h', 24, or(e.field.hour_step  , 1))
+		e.sel_m = gen_sel('x-timepicker-sel-m', 60, or(e.field.minute_step, 1))
+		e.sel_s = gen_sel('x-timepicker-sel-s', 60, or(e.field.second_step, 1))
+
+		let hh = div({class: 'x-timepicker-heading x-timepicker-heading-h'}, S('hour'  , 'Hour'))
+		let hm = div({class: 'x-timepicker-heading x-timepicker-heading-m'}, S('minute', 'Minute'))
+		let hs = div({class: 'x-timepicker-heading x-timepicker-heading-s'}, S('second', 'Second'))
+
+		e.bool_attr('has_seconds', e.field.has_seconds || null)
+
+		e.sel_h.on('input_val_changed', set_val)
+		e.sel_m.on('input_val_changed', set_val)
+		e.sel_s.on('input_val_changed', set_val)
+
+		e.add(
+			hh, hm, hs,
+			e.sel_h, e.sel_m, e.sel_s,
+			e.cancel_button, e.set_button
+		)
+	})
+
+	function update_view(t) {
+		e.sel_h.set_val(hh(t), {input: e})
+		e.sel_m.set_val(mm(t), {input: e})
+		e.sel_s.set_val(ss(t), {input: e})
+	}
+
+	e.do_update_val = function(v, ev) {
+		assert(e.bound)
+		if (ev && ev.input == e)
+			return
+		update_view(v)
+	}
+
+	e.on('dropdown_opened', function() {
+		update_view(e.input_val)
+		runafter(0, () => e.sel_h.focus())
 	})
 
 })
