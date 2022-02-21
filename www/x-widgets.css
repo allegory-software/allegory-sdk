@@ -1431,6 +1431,46 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	height: 100%;
 }
 
+/* time picker ------------------------------------------------------------ */
+
+.x-timepicker {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+}
+
+.x-timepicker[has_seconds] {
+	grid-template-columns: 1fr 1fr 1fr;
+}
+
+.x-timepicker .x-button {
+	margin: .5em;
+	font-size: 90%;
+}
+
+.x-timepicker .x-listbox {
+	overflow: auto;
+}
+
+.x-timepicker-heading {
+	margin: .5em;
+	font-size: 90%;
+	color: var(--x-fg-disabled);
+}
+
+.x-timepicker-sel-minute {
+	border-left: 1px solid var(--x-border-light);
+}
+
+/* timeofday edit --------------------------------------------------------- */
+
+.x-timeofdayedit .x-editbox-input {
+	text-align: center;
+}
+
+.x-timeofdayedit .x-timeofdayedit-timepicker-button {
+	margin-left: -2em;
+}
+
 /* input ------------------------------------------------------------------ */
 
 .x-input {
