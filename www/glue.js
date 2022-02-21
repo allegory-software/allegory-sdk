@@ -58,6 +58,7 @@ STRINGS
 	s.ends(s)
 	s.upper()
 	s.lower()
+	s.num(z)
 	s.display_name()
 	s.cat(sep, ...)
 	s.names() -> a
@@ -351,6 +352,10 @@ alias(String, 'starts', 'startsWith')
 alias(String, 'ends'  , 'endsWith')
 alias(String, 'upper' , 'toUpperCase')
 alias(String, 'lower' , 'toLowerCase')
+
+String.prototype.num = function(z) {
+	return num(this, z)
+}
 
 {
 let upper = function(s) {
