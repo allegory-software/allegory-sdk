@@ -18,6 +18,8 @@ WIDGETS
 	calendar
 	date_dropdown
 	dateedit
+	timepicker
+	timeofdayedit
 	richedit
 	image
 	sql_editor
@@ -2319,6 +2321,105 @@ component('x-dateedit', 'Input', function(e) {
 
 	e.create_dropdown_button = function() {
 		return e.calendar_button
+	}
+
+})
+
+component('x-timepicker', 'Input', function(e) {
+
+	val_widget(e)
+	focusable_widget(e)
+
+	function gen_sel(classes, max, step) {
+		let a = []
+		for (let i = 0; i < max; i += step)
+			a.push(i.base(10, 2))
+		return listbox({
+			classes: classes,
+			items: a,
+			max_h: 200,
+		})
+	}
+
+	e.cancel_button = button({
+		cancel: true,
+		text: S('cancel', 'Cancel'),
+		action: function() {
+			// TODO
+		},
+	})
+
+	let fval = function(lb) {
+		return lb.cell_input_val(lb.focused_row, lb.focused_field)
+	}
+
+	e.set_button = button({
+		text: S('set', 'Set'),
+		primary: true,
+		action: function() {
+			let h = fval(e.sel_hour)
+			let m = fval(e.sel_min)
+			let s = e.sel_sec && fval(e.sel_sec)
+			let v = h + ':' + m + (e.sel_sec ? ':' + s : '')
+			e.set_val(v, {input: e})
+			e.fire('val_picked') // picker protocol
+		},
+	})
+
+	e.on('bind_field', function(on) {
+		if (!on) return
+		let hs = e.field.has_seconds
+		e.clear()
+		e.sel_hour = gen_sel('x-timepicker-sel-hour'  , 24, or(e.field.hour_step  , 1))
+		e.sel_min  = gen_sel('x-timepicker-sel-minute', 60, or(e.field.minute_step, 1))
+		e.sel_sec  = hs && gen_sel('x-timepicker-sel-second', 60, or(e.field.second_step, 1))
+		e.bool_attr('has_seconds', hs || null)
+		if (hs)
+			e.add(
+				div({class: 'x-timepicker-heading'}, S('hour', 'Hour')),
+				div({class: 'x-timepicker-heading'}, S('minute', 'Minute')),
+				div({class: 'x-timepicker-heading'}, S('second', 'Second')),
+				e.sel_hour, e.sel_min, e.sel_sec,
+				e.cancel_button, e.set_button
+			)
+		else
+			e.add(
+				div({class: 'x-timepicker-heading'}, S('hour', 'Hour')),
+				div({class: 'x-timepicker-heading'}, S('minute', 'Minute')),
+				e.sel_hour, e.sel_min,
+				e.cancel_button, e.set_button
+			)
+	})
+
+})
+
+// ---------------------------------------------------------------------------
+// time-of-day edit
+// ---------------------------------------------------------------------------
+
+component('x-timeofdayedit', 'Input', function(e) {
+
+	editbox_widget(e, {picker: true})
+
+	e.create_picker = timepicker
+
+	e.timepicker_button = button({
+		classes: 'x-timeofdayedit-timepicker-button',
+		icon: 'fa fa-clock',
+		text: '',
+		bare: true,
+		focusable: false,
+		title: S('button_pick_from_time_picker', 'Pick from time picker'),
+	})
+
+	e.timepicker_button.on('activate', function() {
+		e.toggle(true)
+	})
+
+	e.timepicker_button.set_open = noop
+
+	e.create_dropdown_button = function() {
+		return e.timepicker_button
 	}
 
 })
