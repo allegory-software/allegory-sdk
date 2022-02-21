@@ -89,28 +89,6 @@ function qmacro.xx()
 	-- $filter("foo <=> :foo and bar <=> :bar", :param:filter)
 end
 
-local rowset_type = {
-	bool        = 'bool',
-	tinyint     = 'number',
-	smallint    = 'number',
-	mediumint   = 'number',
-	int         = 'number',
-	bigint      = 'number',
-	float       = 'number',
-	double      = 'number',
-	decimal     = 'number',
-	year        = 'number',
-	enum        = 'enum',
-	timestamp   = 'datetime',
-	datetime    = 'datetime',
-	date        = 'date',
-	time        = 'time',
-	blob        = 'file',
-	tinyblob    = 'file',
-	mediumblob  = 'file',
-	longblob    = 'file',
-}
-
 local function guess_name_col(tdef)
 	if tdef.name_col then return tdef.name_col end
 	if tdef.fields.name then return 'name' end
@@ -195,7 +173,6 @@ function sql_rowset(...)
 		local load_opt = {
 			compact = true,
 			null_value = null,
-			get_table_defs = true,
 			field_attrs = rs.field_attrs,
 		}
 
@@ -228,14 +205,6 @@ function sql_rowset(...)
 
 			rs.fields = fields
 			for i,f in ipairs(fields) do
-				f.sqltype = f.type
-				f.type = rowset_type[f.type]
-				if f.sqltype == 'tinyint' and f.digits == 1 then --only for origin columns!
-					f.type = 'bool'
-				end
-				if not f.col or f.auto_increment then
-					f.readonly = true
-				end
 				if f.ref_table then
 					f.lookup_rowset_name, f.display_col = lookup_rowset(f.ref_table)
 					f.lookup_col = f.ref_col
