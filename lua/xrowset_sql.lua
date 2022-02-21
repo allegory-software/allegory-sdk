@@ -75,8 +75,8 @@ local memoize = glue.memoize
 local sortedpairs = glue.sortedpairs
 
 --usage in sql:
-	-- single-key: foo in (:param:filter)
-	-- multi-key : $filter("foo <=> :foo and bar <=> :bar", :param:filter)
+	-- single-key : `foo in (:param:filter)`
+	-- multi-key  : `$filter("foo <=> :foo and bar <=> :bar", :param:filter)`
 function qmacro.filter(self, expr, filter)
 	local t = {}
 	for i,vals in ipairs(filter) do
@@ -85,8 +85,17 @@ function qmacro.filter(self, expr, filter)
 	return concat(t, ' or ')
 end
 
-function qmacro.xx()
-	-- $filter("foo <=> :foo and bar <=> :bar", :param:filter)
+--usage in sql: `$andor_filter(:param:filter)`
+function qmacro.andor_filter(self, filter)
+	local t = {}
+	for i,vals in ipairs(filter) do
+		local tt = {}
+		for k,v in sortedpairs(vals) do
+			add(tt, sqlname(k) .. ' <=> ' .. sqlval(v))
+		end
+		t[i] = concat(tt, ' and ')
+	end
+	return concat(t, ' or ')
 end
 
 local function guess_name_col(tdef)
@@ -102,8 +111,9 @@ local function lookup_rowset(tbl)
 		local name_col = guess_name_col(tdef)
 		local t = glue.extend({name_col}, tdef.pk)
 		local cols = concat(glue.imap(t, sqlname), ', ')
+		local order_by = tdef.pos_col or concat(tdef.pk, ' ')
 		rs = sql_rowset{
-			select = format('select %s from %s', cols, tbl),
+			select = format('select %s from %s %s', cols, tbl, order_by),
 			pk = concat(tdef.pk, ' '),
 			name_col = name_col,
 		}
