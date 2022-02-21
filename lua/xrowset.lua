@@ -11,6 +11,7 @@
 		cols             : 'col1 ...'    default visible columns list
 		hide_cols        : 'col1 ...'    columns hidden by default
 		ro_cols          : 'col1 ...'    read-only columns
+		rw_cols          : 'col1 ...'    read-write columns
 		pos_col          : 'col'         pos column for manual ordering of rows
 		id_col           : 'col'         id column for tree-building
 		parent_col       : 'col'         parent column for tree-building
@@ -100,6 +101,7 @@ function virtual_rowset(init, ...)
 
 		local hide_cols = index(names(rs.hide_cols) or empty)
 		local   ro_cols = index(names(rs.  ro_cols) or empty)
+		local   rw_cols = rs.rw_cols and index(names(rs.rw_cols))
 
 		if rs.pos_col == nil and rs.fields.pos then
 			rs.pos_col = 'pos'
@@ -119,6 +121,9 @@ function virtual_rowset(init, ...)
 				or f.name == rs.parent_col
 			then
 				f.hidden = true
+			end
+			if rw_cols and not rw_cols[f.name] then
+				f.readonly = true
 			end
 			if ro_cols[f.name] then
 				f.readonly = true
