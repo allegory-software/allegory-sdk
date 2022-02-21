@@ -171,8 +171,8 @@ function listbox_widget(e) {
 				item.class('selected', e.selected_rows.get(e.rows[i]))
 			}
 
-		if (opt.scroll_to_cell)
-			e.scroll_to_cell(...opt.scroll_to_cell)
+		if (opt.scroll_to_focused_cell)
+			e.scroll_to_focused_cell()
 	}
 
 	e.do_update_cell_state = function(ri, fi, prop, val) {

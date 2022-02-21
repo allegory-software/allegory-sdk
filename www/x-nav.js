@@ -1402,7 +1402,7 @@ function nav_widget(e) {
 
 		if (ev.make_visible != false)
 			if (e.focused_row)
-				e.update({scroll_to_cell: [e.focused_row_index, e.focused_field_index]})
+				e.update({scroll_to_focused_cell: true})
 
 		e.end_update()
 
@@ -1411,9 +1411,11 @@ function nav_widget(e) {
 
 	e.scroll_to_cell = noop
 
-	e.scroll_to_focused_cell = function() {
+	e.scroll_to_focused_cell = function(fallback_to_first_cell) {
 		if (e.focused_row_index != null)
 			e.scroll_to_cell(e.focused_row_index, e.focused_field_index)
+		else if (fallback_to_first_cell)
+			e.scroll_to_cell(0, 0)
 	}
 
 	e.focus_next_cell = function(cols, ev) {
@@ -4697,7 +4699,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	td.from_text = function(s) {
-		let t = time_from_text(s)
+		let t = time_from_text.call(this, s)
 		return t != null ? t : s
 	}
 
@@ -4706,7 +4708,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	td.validator_time = field => ({
-		validate : v => v == null || time_from_text(v),
+		validate : v => v == null || time_from_text.call(field, v),
 		message  : field.has_seconds
 			? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
 			: S('validate_time', 'Time must look like H:M or HHMM')

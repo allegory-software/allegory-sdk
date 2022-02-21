@@ -2331,9 +2331,9 @@ component('x-timepicker', 'Input', function(e) {
 	val_widget(e)
 	focusable_widget(e)
 
-	let hh = t => t.slice(0, 2)
-	let mm = t => t.slice(3, 5)
-	let ss = t => t.slice(6, 8)
+	let hh = t => t && t.slice(0, 2)
+	let mm = t => t && t.slice(3, 5)
+	let ss = t => t && t.slice(6, 8)
 
 	e.cancel_button = button({
 		classes: 'x-timepicker-button-cancel',
@@ -2345,7 +2345,10 @@ component('x-timepicker', 'Input', function(e) {
 	})
 
 	function set_val() {
-		let t = e.sel_h.input_val + ':' + e.sel_m.input_val + ':' + e.sel_s.input_val
+		let h = e.sel_h.input_val
+		let m = e.sel_m.input_val
+		let s = e.sel_s.input_val
+		let t = h != null && m != null && s != null ? h + ':' + m + ':' + s : null
 		e.set_val(t, {input: e})
 	}
 
@@ -2397,9 +2400,13 @@ component('x-timepicker', 'Input', function(e) {
 	})
 
 	function update_view(t) {
-		e.sel_h.set_val(hh(t), {input: e})
-		e.sel_m.set_val(mm(t), {input: e})
-		e.sel_s.set_val(ss(t), {input: e})
+		let ev = {input: e}
+		e.sel_h.set_val(hh(t), ev)
+		e.sel_m.set_val(mm(t), ev)
+		e.sel_s.set_val(ss(t), ev)
+		e.sel_h.scroll_to_focused_cell(true)
+		e.sel_m.scroll_to_focused_cell(true)
+		e.sel_s.scroll_to_focused_cell(true)
 	}
 
 	e.do_update_val = function(v, ev) {
