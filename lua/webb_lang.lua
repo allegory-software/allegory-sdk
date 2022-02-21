@@ -287,6 +287,7 @@ function webb.lang_schema()
 		week_start_offset, int8, not_null, --Sun:0, Mon:1, Sat:-1, Fri:-2
 		en_name     , name, not_null,
 	}
+	tables.country.name_col = 'en_name'
 
 	--https://en.wikipedia.org/wiki/List_of_ISO_3166_country_codes
 	--https://wiki.openstreetmap.org/wiki/Nominatim/Country_Codes
