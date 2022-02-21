@@ -4658,6 +4658,42 @@ component('x-lookup-dropdown', function(e) {
 		message  : S('validation_date', 'Date must be valid'),
 	})
 
+	// MySQL time
+
+	let td = {align: 'center'}
+	field_types.timeofday = td
+
+	td.to_text = function(t) {
+		if (t == null) return ''
+		return this.has_seconds ? t : t.slice(0, 5)
+	}
+
+	let time_from_text = function(s) {
+		let t = s.replaceAll(/[^0-9]/g, '')
+		if (t.length != (this.has_seconds ? 6 : 4)) return
+		return t.slice(0, 2)+':'+t.slice(2, 4)+(this.has_seconds ? ':'+t.slice(4, 6) : '')
+	}
+
+	td.from_text = function(s) {
+		let t = time_from_text(s)
+		return t != null ? t : s
+	}
+
+	td.format = function(t) {
+		return this.to_text(t)
+	}
+
+	td.validator_time = field => ({
+		validate : v => v == null || time_from_text(v),
+		message  : field.has_seconds
+			? S('validate_time_seconds', 'Time must have the format HH:MM:SS')
+			: S('validate_time', 'Time must have the format HH:MM')
+	})
+
+	td.editor = function(...opt) {
+		return timeofdayedit(...opt)
+	}
+
 	// booleans
 
 	let bool = {align: 'center', min_w: 28}
