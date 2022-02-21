@@ -72,7 +72,7 @@ return function()
 	current_timestamp = {'current_timestamp'}
 
 	flags.not_null   = {not_null = true}
-	flags.autoinc    = {auto_increment = true}
+	flags.autoinc    = {auto_increment = true, readonly = true}
 	flags.ascii_ci   = {charset = ascii, collation = 'ascii_ci'  , mysql_collation = 'ascii_general_ci'  , tarantool_collation = 'unicode_ci'}
 	flags.ascii_bin  = {charset = ascii, collation = 'ascii_bin' , mysql_collation = 'ascii_bin'         , tarantool_collation = 'binary'}
 	flags.utf8_ci    = {charset = utf8 , collation = 'utf8_ci'   , mysql_collation = 'utf8mb4_0900_as_ci', tarantool_collation = 'unicode_ci'}
