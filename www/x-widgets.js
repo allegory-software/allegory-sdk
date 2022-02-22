@@ -1689,20 +1689,17 @@ component('x-menu', function(e) {
 
 	// navigation
 
-	function next_item(menu, down, tr) {
-		tr = tr && (down ? tr.next : tr.prev)
-		return tr || (down ? menu.first : menu.last)
-	}
-	function next_valid_item(menu, down, tr, disabled) {
+	function next_valid_item(menu, down, tr) {
 		let i = menu.children.length
 		while (i--) {
-			tr = next_item(menu, down != false, tr)
-			if (tr && tr.focusable != false && (disabled || tr.disabled))
+			tr = tr && (down != false ? tr.next : tr.prev)
+			tr = tr || (down != false ? menu.first : menu.last)
+			if (tr && tr.focusable != false && !tr.hasclass('disabled'))
 				return tr
 		}
 	}
-	function select_next_item(menu, down, tr0, disabled) {
-		select_item(menu, next_valid_item(menu, down, tr0, disabled))
+	function select_next_item(menu, down, tr0) {
+		select_item(menu, next_valid_item(menu, down, tr0))
 	}
 
 	function activate_submenu(tr) {
@@ -1761,7 +1758,7 @@ component('x-menu', function(e) {
 		if (key == 'ArrowLeft') {
 			if (this.parent_menu) {
 				this.parent_menu.focus()
-				hide_submenu(this.parent)
+				hide_submenu(this.parent.parent)
 			}
 			return false
 		}
@@ -1785,7 +1782,7 @@ component('x-menu', function(e) {
 		if (key == 'Escape') {
 			if (this.parent_menu) {
 				this.parent_menu.focus()
-				hide_submenu(this.parent)
+				hide_submenu(this.parent.parent)
 			} else
 				e.close(true)
 			return false
