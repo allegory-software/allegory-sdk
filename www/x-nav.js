@@ -1218,9 +1218,22 @@ function nav_widget(e) {
 	}
 
 	e.allow_move_rows = function(in_general) {
-		return (e.rowset ? e.rowset.can_move_rows : e.can_move_rows)
-			&& (in_general || (!e.order_by && !e.is_filtered && e.selected_rows.size > 0))
-			|| false
+		if (!(e.rowset ? e.rowset.can_move_rows : e.can_move_rows))
+			return false
+		if (in_general)
+			return true
+		if (e.order_by || e.is_filtered || !e.selected_rows.size)
+			return false
+		return true
+	}
+
+	e.allow_move_rows_error = function() {
+		if (e.order_by)
+			return S('cannot_move_records_sorted', 'Cannot move records while they are sorted')
+		if (e.is_filtered)
+			return S('cannot_move_records_filtered', 'Cannot move records while they are filtered')
+		if (!e.selected_rows.size)
+			return S('no_records_selected', 'No records selected')
 	}
 
 	e.can_actually_add_rows = can_add_rows
@@ -4179,7 +4192,6 @@ function nav_widget(e) {
 					'move_up'   : button({
 						icon: 'fa fa-angle-up',
 						text: S('move_up', 'Move up'),
-						title: S('move_record_up', 'Move record up in list (you can also drag it into position)'),
 						hidden: true,
 						action: function() {
 							e.move_selected_rows_up()
@@ -4188,7 +4200,6 @@ function nav_widget(e) {
 					'move_down' : button({
 						icon: 'fa fa-angle-down',
 						text: S('move_down', 'Move Down'),
-						title: S('move_record_down', 'Move record down in list (you can also drag it into position)'),
 						hidden: true,
 						action: function() {
 							e.move_selected_rows_down()
@@ -4247,8 +4258,17 @@ function nav_widget(e) {
 			let can_move   = e.allow_move_rows(false)
 			b.buttons.move_up   .show(allow_move)
 			b.buttons.move_down .show(allow_move)
-			b.buttons.move_up   .disabled = !can_move
-			b.buttons.move_down .disabled = !can_move
+
+			if (allow_move) {
+				b.buttons.move_up   .disabled = !can_move
+				b.buttons.move_down .disabled = !can_move
+				b.buttons.move_up   .title = can_move
+					? S('move_record_up', 'Move record up in list (you can also drag it into position)')
+					: e.allow_move_rows_error()
+				b.buttons.move_down .title = can_move
+					? S('move_record_down', 'Move record down in list (you can also drag it into position)')
+					: e.allow_move_rows_error()
+			}
 
 			let s = '\n'.cat(
 				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
