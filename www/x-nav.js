@@ -406,7 +406,7 @@ function nav_widget(e) {
 	e.prop('can_add_rows'            , {store: 'var', type: 'bool', default: true})
 	e.prop('can_remove_rows'         , {store: 'var', type: 'bool', default: true})
 	e.prop('can_change_rows'         , {store: 'var', type: 'bool', default: true})
-	e.prop('can_move_rows'           , {store: 'var', type: 'bool', default: true})
+	e.prop('can_move_rows'           , {store: 'var', type: 'bool', default: false})
 	e.prop('can_sort_rows'           , {store: 'var', type: 'bool', default: true})
 	e.prop('can_focus_cells'         , {store: 'var', type: 'bool', default: true , hint: 'can focus individual cells vs entire rows'})
 	e.prop('auto_advance_row'        , {store: 'var', type: 'bool', default: false, hint: 'jump row on horizontal navigation limits'})
@@ -1126,7 +1126,12 @@ function nav_widget(e) {
 			&& (!field || !field.readonly)
 	}
 
+	function can_move_rows() {
+		return (e.rowset ? e.rowset.can_move_rows : e.can_move_rows) || false
+	}
+
 	e.can_actually_add_rows = can_add_rows
+	e.can_actually_move_rows = can_move_rows
 
 	// navigation and selection -----------------------------------------------
 
@@ -2596,16 +2601,25 @@ function nav_widget(e) {
 
 	e.create_editor = function(field, ...opt) {
 		if (!field.editor_instance) {
-			e.editor = field.editor({
-				// TODO: use original id as template but
-				// load/save to this id after instantiation.
-				//id: e.id && e.id+'.editor.'+field.name,
-				nav: e,
-				col: field.name,
-				can_select_widget: false,
-				nolabel: true,
-				infomode: 'hidden',
-			}, ...opt)
+			if (
+					field.lookup_nav_id
+				|| field.lookup_rowset_id
+				|| field.lookup_rowset_name
+				|| field.lookup_rowset_url
+				|| field.lookup_rowset
+			)
+				e.editor = lookup_dropdown(...opt)
+			else
+				e.editor = field.editor({
+					// TODO: use original id as template but
+					// load/save to this id after instantiation.
+					//id: e.id && e.id+'.editor.'+field.name,
+					nav: e,
+					col: field.name,
+					can_select_widget: false,
+					nolabel: true,
+					infomode: 'hidden',
+				}, ...opt)
 			if (!e.editor)
 				return
 			field.editor_instance = e.editor
@@ -4039,37 +4053,54 @@ function nav_widget(e) {
 			return
 
 		if (!e.action_band) {
+
 			e.action_band = action_band({
 				classes: 'x-grid-action-band',
-				layout: 'reload insert delete info < > cancel:cancel save:ok',
+				layout: 'reload insert delete move_up move_down info < > cancel:cancel save:ok',
 				buttons: {
 					'reload': button({
 						classes: 'x-grid-action-band-reload-button',
 						icon: 'fa fa-sync',
 						text: '',
-						title: S('reload', 'Reload all items'),
+						title: S('reload', 'Reload all records'),
 						bare: true,
 						action: () => e.reload(),
 					}),
 					'insert': button({
 						icon: 'fa fa-plus',
 						text: S('add', 'Add'),
-						title: S('add_new_item', 'Add a new item'),
+						title: S('add_new_record', 'Add a new record (Insert key)'),
 						action: function() {
 							e.insert_row(1, {input: e, at_focused_row: true, focus_it: true})
 						},
 					}),
 					'delete': button({
+						danger: true,
 						icon: 'fa fa-minus',
-						text: S('delete', 'Delete'),
-						title: S('delete_focused_item', 'Delete focused item'),
 						action: function() {
 							e.remove_selected_rows({input: e, refocus: true})
 						},
 					}),
+					'move_up'   : button({
+						icon: 'fa fa-angle-up',
+						text: S('move_up', 'Move up'),
+						title: S('move_record_up', 'Move record up in list (you can also drag it into position)'),
+						hidden: true,
+						action: function() {
+
+						},
+					}),
+					'move_down' : button({
+						icon: 'fa fa-angle-down',
+						text: S('move_down', 'Move Down'),
+						title: S('move_record_down', 'Move record down in list (you can also drag it into position)'),
+						hidden: true,
+						action: function() {
+
+						},
+					}),
 					'info': div({class: 'x-grid-action-band-info'}),
 					'cancel': button({
-						cancel: true,
 						icon: 'fa fa-rotate-left',
 						text: S('cancel', 'Cancel'),
 						title: S('discard_changes', 'Discard changes'),
@@ -4081,7 +4112,7 @@ function nav_widget(e) {
 					'save': button({
 						icon: 'fa fa-cloud-upload-alt',
 						text: S('save', 'Save'),
-						title: S('save_changes', 'Save changes'),
+						title: S('save_changes', 'Save changes (Esc or Enter keys)'),
 						primary: true,
 						action: function() {
 							e.save()
@@ -4090,27 +4121,36 @@ function nav_widget(e) {
 				}
 			})
 			e.action_band.on('resize', function(r) {
-				this.class('noinfo', this.parent.cw < 300)
-				this.class('tight', this.parent.cw < 600)
+				this.class('noinfo', this.parent.cw < 380)
+				this.class('tight' , this.parent.cw < 815)
 			})
 			e.add(e.action_band)
 		}
 
 		let b = e.action_band
 		if (b) {
+
 			let sn = e.selected_rows.size
 			let an = count_changed_rows('is_new' )
 			let dn = count_changed_rows('removed')
 			let cn = e.changed_rows ? e.changed_rows.size : 0
 			let un = cn - an - dn
+
+			b.buttons.reload.disabled = cn || !e.rowset_url
+
 			b.buttons.save  .disabled = !cn
 			b.buttons.cancel.disabled = !cn
+
 			b.buttons.delete.disabled = !sn
-			let ds = S('delete', 'Delete') + (sn > 1 ? ' ' + sn + ' ' + nrows(sn) : '')
+			let ds = sn > 1 ? S('delete_records', 'Delete {0} {1}', sn, nrows(sn)) : S('delete', 'Delete')
 			b.buttons.delete.text = ds
-			b.buttons.delete.title = sn > 1 ? ds : S('delete_focused_item', 'Delete focused item')
-			b.buttons.delete.bool_attr('danger', true)
-			b.buttons.reload.disabled = cn || !e.rowset_url
+			b.buttons.delete.title =
+				(sn > 1 ? ds : S('delete_focused_record', 'Delete focused record'))
+				+ ' (' + S('delete_key', 'Delete key') + ')'
+
+			b.buttons.move_up   .show(can_move_rows())
+			b.buttons.move_down .show(can_move_rows())
+
 			let s = '\n'.cat(
 				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
 				an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
@@ -4444,16 +4484,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	all_field_types.editor = function(...opt) {
-		if (
-			   this.lookup_nav_id
-			|| this.lookup_rowset_id
-			|| this.lookup_rowset_name
-			|| this.lookup_rowset_url
-			|| this.lookup_rowset
-		)
-			return lookup_dropdown(...opt)
-		else
-			return textedit(...opt)
+		return textedit(...opt)
 	}
 
 	all_field_types.to_text = function(v) {

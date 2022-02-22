@@ -475,7 +475,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-action-band > .x-button > .x-button-text {
-	white-space: nowrap;
+	white-space: nowrap !important;
 }
 
 /* ---- tight width ---- */
@@ -1794,7 +1794,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-menu-tr.focused > :not(.x-menu-table) {
-	// alternative (sleeker but less accessible): background-color: var(--x-faint);
 	background-color: var(--x-item-bg-unfocused-selected);
 	color: var(--x-item-fg-unfocused-selected);
 }
