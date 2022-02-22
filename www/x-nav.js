@@ -2603,6 +2603,16 @@ function nav_widget(e) {
 
 	e.create_editor = function(field, ...opt) {
 		if (!field.editor_instance) {
+			let base_opt = {
+				// TODO: use original id as template but
+				// load/save to this id after instantiation.
+				//id: e.id && e.id+'.editor.'+field.name,
+				nav: e,
+				col: field.name,
+				can_select_widget: false,
+				nolabel: true,
+				infomode: 'hidden',
+			}
 			if (
 					field.lookup_nav_id
 				|| field.lookup_rowset_id
@@ -2610,18 +2620,9 @@ function nav_widget(e) {
 				|| field.lookup_rowset_url
 				|| field.lookup_rowset
 			)
-				e.editor = lookup_dropdown(...opt)
+				e.editor = lookup_dropdown(base_opt, ...opt)
 			else
-				e.editor = field.editor({
-					// TODO: use original id as template but
-					// load/save to this id after instantiation.
-					//id: e.id && e.id+'.editor.'+field.name,
-					nav: e,
-					col: field.name,
-					can_select_widget: false,
-					nolabel: true,
-					infomode: 'hidden',
-				}, ...opt)
+				e.editor = field.editor(base_opt, ...opt)
 			if (!e.editor)
 				return
 			field.editor_instance = e.editor
@@ -2771,6 +2772,7 @@ function nav_widget(e) {
 			|| field.lookup_rowset_name
 			|| field.lookup_rowset_url
 		) {
+			// TODO: cache and share these.
 			ln = bare_nav({
 				rowset      : field.lookup_rowset,
 				rowset_id   : field.lookup_rowset_id,
@@ -3302,7 +3304,7 @@ function nav_widget(e) {
 
 		state.rows = move_rows
 
-		state.finish = function(insert_ri, parent_row, ev) {
+		state.finish = function(insert_ri, parent_row) {
 
 			e.rows.splice(insert_ri, 0, ...move_rows)
 
@@ -3353,6 +3355,14 @@ function nav_widget(e) {
 
 		}
 
+		state.finish_up = function() {
+			state.finish(move_ri1 - 1, parent_row)
+		}
+
+		state.finish_down = function() {
+			state.finish(move_ri1 + 1, parent_row)
+		}
+
 		return state
 	}
 
@@ -3362,8 +3372,12 @@ function nav_widget(e) {
 		return move_rows_state(focused_ri, selected_ri, ev)
 	}
 
-	e.move_rows = function(ri, n, insert_ri, parent_row, ev) {
-		return move_rows_state(ri, ri + n - 1, ev).finish(insert_ri, parent_row, ev)
+	e.move_selected_rows_up = function(ev) {
+		e.start_move_selected_rows(ev).finish_up()
+	}
+
+	e.move_selected_rows_down = function(ev) {
+		e.start_move_selected_rows(ev).finish_down()
 	}
 
 	// ajax requests ----------------------------------------------------------
@@ -4089,7 +4103,7 @@ function nav_widget(e) {
 						title: S('move_record_up', 'Move record up in list (you can also drag it into position)'),
 						hidden: true,
 						action: function() {
-
+							e.move_selected_rows_up()
 						},
 					}),
 					'move_down' : button({
@@ -4098,7 +4112,7 @@ function nav_widget(e) {
 						title: S('move_record_down', 'Move record down in list (you can also drag it into position)'),
 						hidden: true,
 						action: function() {
-
+							e.move_selected_rows_down()
 						},
 					}),
 					'info': div({class: 'x-grid-action-band-info'}),

@@ -1298,10 +1298,10 @@ component('x-passedit', 'Input', function(e) {
 
 component('x-spinedit', 'Input', function(e) {
 
-	editbox_widget(e)
+	e.props.align = {default: 'right'}
+	e.props.field_type = {default: 'number'}
 
-	e.props.align.default = 'right'
-	e.props.field_type.default = 'number'
+	editbox_widget(e)
 
 	e.prop('button_style'    , {store: 'var', type: 'enum', enum_values: ['plus-minus', 'up-down', 'left-right'], default: 'plus-minus', attr: true})
 	e.prop('button_placement', {store: 'var', type: 'enum', enum_values: ['each-side', 'left', 'right'], default: 'each-side', attr: true})
@@ -1419,10 +1419,10 @@ component('x-tagsedit', 'Input', function(e) {
 
 	e.class('x-editbox')
 
+	e.props.field_type = {default: 'tags'}
+
 	val_widget(e)
 	input_widget(e)
-
-	e.props.field_type.default = 'tags'
 
 	let S_expand = S('expand', 'expand') + ' (Enter)'
 	let S_condense = S('condense', 'condense') + ' (Enter)'
@@ -1696,9 +1696,9 @@ component('x-tagsedit', 'Input', function(e) {
 
 component('x-placeedit', 'Input', function(e) {
 
-	editbox_widget(e)
+	e.props.field_type = {default: 'place'}
 
-	e.props.field_type.default = 'place'
+	editbox_widget(e)
 
 	e.pin_ct = span()
 	e.add(e.pin_ct)
@@ -1766,11 +1766,11 @@ component('x-placeedit', 'Input', function(e) {
 
 component('x-googlemaps', 'Input', function(e) {
 
+	e.props.field_type = {default: 'place'}
+
 	val_widget(e)
 
 	e.classes = 'fa fa-map-marked-alt'
-
-	e.props.field_type.default = 'place'
 
 	e.map = google_maps_iframe()
 	e.map.class('x-googlemaps-iframe')
@@ -1791,6 +1791,8 @@ component('x-googlemaps', 'Input', function(e) {
 
 component('x-slider', 'Input', function(e) {
 
+	e.props.field_type = {default: 'number'}
+
 	focusable_widget(e)
 
 	e.prop('from', {store: 'var', default: 0})
@@ -1805,8 +1807,6 @@ component('x-slider', 'Input', function(e) {
 	// model
 
 	val_widget(e)
-
-	e.props.field_type.default = 'number'
 
 	let inh_do_update = e.do_update
 	e.do_update = function() {
@@ -2291,7 +2291,7 @@ component('x-calendar', 'Input', function(e) {
 
 component('x-date-dropdown', 'Input', function(e) {
 	e.create_picker = calendar
-	e.props.field_type.default = 'date'
+	e.props.field_type = {default: 'date'}
 	editbox_widget(e, {input: false, picker: true})
 })
 

@@ -514,9 +514,6 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	}
 
 	function update_cell_val(cell, row, field, input_val) {
-		if (cell.input_val === input_val)
-			return
-		cell.input_val = input_val
 		let display_val = e.cell_display_val_for(row, field, input_val, cell.display_val)
 		if (cell.display_val !== display_val) {
 			cell.display_val = display_val
@@ -1365,7 +1362,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			if (e.editor)
 				e.editor.class('row-moving', false)
 
-			state.finish(hit_ri, hit_parent_row, {input: e})
+			state.finish(hit_ri, hit_parent_row)
 		}
 
 		// post-init
