@@ -1035,9 +1035,9 @@ function nav_widget(e) {
 		if (!init_param_vals())
 			return
 		if (!e.rowset_url) { // re-filter and re-focus.
+			e.begin_update()
 			force_unfocus_focused_cell()
 			init_rows()
-			e.begin_update()
 			e.update({rows: true})
 			e.focus_cell()
 			e.end_update()
@@ -2839,8 +2839,9 @@ function nav_widget(e) {
 		if (!e.exit_edit(ev))
 			return false
 		if (!cancel) { // from UI
-			if (!e.validate_row(row, 'exit_row'))
-				return false
+			if ((row.modified || row.is_new) && !row.removed)
+				if (!e.validate_row(row, 'exit_row'))
+					return false
 			if (must_save('exit_row')) {
 				if (e.can_exit_row_on_errors) {
 					// async save: errors can come later, meanwhile we exit the row.
@@ -3503,6 +3504,8 @@ function nav_widget(e) {
 
 		abort_all_requests()
 
+		e.begin_update()
+
 		let refocus = refocus_state('val')
 		force_unfocus_focused_cell()
 
@@ -3512,9 +3515,9 @@ function nav_widget(e) {
 
 		init_all()
 
-		e.begin_update()
 		e.update({fields: true, rows: true})
 		refocus()
+
 		e.end_update()
 		e.fire('reset', ev)
 
