@@ -397,7 +397,98 @@ function map_keys_different(m1, m2) {
 	return false
 }
 
-rowset_navs = {} // {rowset_name -> set(nav)}
+// ref-counted garbage-collected shared bare navs for lookup rowsets.
+{
+let max_unused_nav_count = 20
+let max_unused_row_count =  1000000
+let max_unused_val_count = 10000000
+
+let shared_navs = obj() // {rowset_name: nav:}
+
+let prefix = (p, s) => s ? p + ':' + s : null
+
+let gclist = []
+let oldest_last = function(nav1, nav2) {
+	let t1 = nav1.last_used_time
+	let t2 = nav2.last_used_time
+	return t1 == t2 ? 0 : (t1 < t2 ? 1 : -1) // reverse order
+}
+let gc = function() {
+	gclist.clear()
+	let nav_count = 0
+	let row_count = 0
+	let val_count = 0
+	for (let name in shared_navs) {
+		let nav = shared_navs[name]
+		if (!nav.rc) {
+			nav_count += 1
+			row_count += nav.all_rows.length
+			val_count += nav.all_rows.length * nav.all_fields.length
+			gclist.push(nav)
+		}
+	}
+	if (  nav_count > max_unused_nav_count
+		|| row_count > max_unused_row_count
+		|| val_count > max_unused_val_count
+	) {
+		gclist.sort(oldest_last)
+
+		while (
+			   nav_count > max_unused_nav_count
+			|| row_count > max_unused_row_count
+			|| val_count > max_unused_val_count
+		) {
+			let nav = gclist.pop()
+
+			delete shared_navs[name]
+			nav.remove()
+
+			nav_count -= 1
+			row_count -= nav.all_rows.length
+			val_count -= nav.all_rows.length * nav.all_fields.length
+		}
+	}
+}
+
+function shared_nav(id, opt) {
+
+	let name = prefix('id', id)
+		|| prefix('rowset_id', opt.rowset_id)
+		|| prefix('rowset_name', opt.rowset_name)
+		|| prefix('rowset_url', opt.rowset_url)
+
+	if (!name) { // anonymous i.e. not shareable
+		let ln = bare_nav(opt)
+		ln.ref = function() { head.add(this) }
+		ln.unref = function() { this.remove() }
+		return ln
+	}
+
+	let ln = shared_navs[name]
+	if (!ln) {
+		if (id) {
+			ln = component.create(id)
+			ln.id = null // not saving prop vals into the original.
+		} else {
+			ln = bare_nav(opt)
+		}
+		ln.rc = 0
+		ln.ref = function() {
+			if (!this.rc++)
+				if (!this.parent) {
+					gc()
+					head.add(this)
+				}
+		}
+		ln.unref = function() {
+			if (!--this.rc)
+				this.last_used_time = time()
+		}
+		shared_navs[name] = ln
+	}
+	return ln
+}
+}
 
 function nav_widget(e) {
 
@@ -2763,40 +2854,28 @@ function nav_widget(e) {
 	// get/set cell display val -----------------------------------------------
 
 	function init_field_own_lookup_nav(field) {
-		let ln = field.lookup_nav
-		if (ln) // linked lookup nav (not owned).
+		if (field.lookup_nav) // linked lookup nav (not owned).
 			return
-		if (
-				field.lookup_rowset
+		if (  field.lookup_rowset
 			|| field.lookup_rowset_id
 			|| field.lookup_rowset_name
 			|| field.lookup_rowset_url
 		) {
-			// TODO: cache and share these.
-			ln = bare_nav({
+			field.lookup_nav = shared_nav(field.lookup_nav_id, {
 				rowset      : field.lookup_rowset,
 				rowset_id   : field.lookup_rowset_id,
 				rowset_name : field.lookup_rowset_name,
 				rowset_url  : field.lookup_rowset_url,
 			})
-		} else {
-			let ln_id = field.lookup_nav_id
-			if (ln_id) {
-				ln = component.create(ln_id)
-				ln.id = null // not saving prop vals into the original.
-			}
-		}
-		if (ln) {
-			field.lookup_nav = ln
 			field.own_lookup_nav = true
-			e.add(ln)
+			field.lookup_nav.ref()
 		}
 	}
 
 	function free_field_own_lookup_nav(field) {
 		if (!field.own_lookup_nav)
 			return
-		field.lookup_nav.remove()
+		field.lookup_nav.unref()
 		field.lookup_nav = null
 		field.own_lookup_nav = null
 	}
@@ -4956,6 +5035,8 @@ component('x-lookup-dropdown', function(e) {
 }
 
 // reload push-notifications -------------------------------------------------
+
+rowset_navs = {} // {rowset_name -> set(nav)}
 
 {
 let es
