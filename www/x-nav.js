@@ -1126,12 +1126,13 @@ function nav_widget(e) {
 			&& (!field || !field.readonly)
 	}
 
-	function can_move_rows() {
-		return (e.rowset ? e.rowset.can_move_rows : e.can_move_rows) || false
+	e.allow_move_rows = function(in_general) {
+		return (e.rowset ? e.rowset.can_move_rows : e.can_move_rows)
+			&& (in_general || (!e.order_by && !e.is_filtered && e.selected_rows.size > 0))
+			|| false
 	}
 
 	e.can_actually_add_rows = can_add_rows
-	e.can_actually_move_rows = can_move_rows
 
 	// navigation and selection -----------------------------------------------
 
@@ -2079,6 +2080,7 @@ function nav_widget(e) {
 		sort_rows(true)
 		e.update({vals: true, state: true, sort_order: true})
 		e.scroll_to_focused_cell()
+		update_action_band()
 	}
 	e.prop('order_by', {store: 'var', slot: 'user'})
 
@@ -4148,8 +4150,12 @@ function nav_widget(e) {
 				(sn > 1 ? ds : S('delete_focused_record', 'Delete focused record'))
 				+ ' (' + S('delete_key', 'Delete key') + ')'
 
-			b.buttons.move_up   .show(can_move_rows())
-			b.buttons.move_down .show(can_move_rows())
+			let allow_move = e.allow_move_rows(true)
+			let can_move   = e.allow_move_rows(false)
+			b.buttons.move_up   .show(allow_move)
+			b.buttons.move_down .show(allow_move)
+			b.buttons.move_up   .disabled = !can_move
+			b.buttons.move_down .disabled = !can_move
 
 			let s = '\n'.cat(
 				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
