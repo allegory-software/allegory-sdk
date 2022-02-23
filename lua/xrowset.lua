@@ -240,15 +240,15 @@ function virtual_rowset(init, ...)
 							local ok, row = catch('db', rs.load_row, rs, row.values)
 							if ok then
 								if not row then
-									rt.error = S('inserted_row_not_found',
-										'Inserted row could not be loaded back')
+									rt.error = S('inserted_record_not_found',
+										'Inserted record could not be loaded back')
 								else
 									rt.values = row
 								end
 							else
 								local err = row
 								rt.error = db_error(err,
-									S('load_inserted_row_error',
+									S('load_inserted_record_error',
 										'Error on loading back inserted row'))
 							end
 						end
@@ -256,7 +256,7 @@ function virtual_rowset(init, ...)
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
 						else
-							rt.error = db_error(err, S('insert_error', 'Error on inserting row'))
+							rt.error = db_error(err, S('insert_error', 'Error on inserting record'))
 						end
 					end
 				else
@@ -280,23 +280,23 @@ function virtual_rowset(init, ...)
 							if ok then
 								if not row then
 									rt.remove = true
-									rt.error = S('updated_row_not_found',
-										'Updated row could not be loaded back')
+									rt.error = S('updated_record_not_found',
+										'Updated record could not be loaded back')
 								else
 									rt.values = row
 								end
 							else
 								local err = row
 								rt.error = db_error(err,
-									S('load_updated_row_error',
-										'Error on loading back updated row'))
+									S('load_updated_record_error',
+										'Error on loading back updated record'))
 							end
 						end
 					else
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
 						else
-							rt.error = db_error(err, S('update_error', 'Error on updating row'))
+							rt.error = db_error(err, S('update_error', 'Error on updating record'))
 						end
 					end
 				else
@@ -312,19 +312,19 @@ function virtual_rowset(init, ...)
 							local ok, row = catch('db', rs.load_row, rs, row.values)
 							if ok then
 								if row then
-									rt.error = S('removed_row_found',
-										'Removed row is still in db')
+									rt.error = S('removed_record_found',
+										'Removed record is still in db')
 								end
 							else
 								local err = row
 								rt.error = db_error(err,
-									S('load_removed_row_error',
-										'Error on loading back removed row'))
+									S('load_removed_record_error',
+										'Error on loading back removed record'))
 							end
 						end
 					else
 						rt.error = db_error(err,
-							S('delete_error', 'Error on removing row'))
+							S('delete_error', 'Error on removing record'))
 					end
 				else
 					rt.error = err or true
