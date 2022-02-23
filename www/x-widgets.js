@@ -1294,12 +1294,11 @@ component('x-tooltip', function(e) {
 			return
 		if (e.target && e.target.contains(ev.target)) // clicked inside the anchor.
 			return
-		if (e.contains(ev.target)) // clicked inside the tooltip.
+		if (e.positionally_contains(ev.target)) // clicked inside the tooltip.
 			return
 		if (too_soon())
 			return
-		pr('HERE')
-		//e.close()
+		e.close()
 	}
 
 	// clicking outside the tooltip closes the tooltip, even if the click did something.
@@ -1316,13 +1315,15 @@ component('x-tooltip', function(e) {
 
 	// focusing out of the document (to the titlebar etc.) closes the tooltip.
 	function document_focusout(ev) {
+		// pr(ev)
+		// trace()
 		if (!e.autoclose)
 			return
 		if (ev.relatedTarget)
 			return
 		if (!e.autoclose)
 			return
-		//e.close()
+		e.close()
 	}
 
 })
@@ -3365,9 +3366,10 @@ component('x-if', 'Containers', function(e) {
 
 	function apply(v) {
 		let on = e.cond(v)
-		if (on)
-			e.add(content)
-		else
+		if (on) {
+			if (content.parent != e)
+				e.add(content)
+		} else
 			content.remove()
 		e.show(on)
 	}
@@ -3385,7 +3387,8 @@ component('x-if', 'Containers', function(e) {
 
 	e.on('bind', function(on) {
 		bind_global(e.global, on)
-		apply(window[e.global])
+		if (on)
+			apply(window[e.global])
 	})
 
 })
