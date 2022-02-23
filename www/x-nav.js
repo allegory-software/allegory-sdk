@@ -2647,16 +2647,16 @@ function nav_widget(e) {
 		// fire change events in no particular order, now that the state is fully updated.
 		e.end_set_state()
 
+		if (row_modified)
+			row_changed(row)
+		else if (!row.is_new)
+			row_unchanged(row)
+
 		// save rowset if necessary.
-		if (!invalid) {
-			if (row_modified)
-				row_changed(row)
-			else if (!row.is_new)
-				row_unchanged(row)
+		if (!invalid)
 			if (ev && ev.input) // from UI
 				if (must_save('input'))
 					e.save(ev)
-		}
 
 	}
 
@@ -2839,9 +2839,8 @@ function nav_widget(e) {
 		if (!e.exit_edit(ev))
 			return false
 		if (!cancel) { // from UI
-			if ((row.modified || row.is_new) && !row.removed)
-				if (!e.validate_row(row, 'exit_row'))
-					return false
+			if (!e.validate_row(row, 'exit_row'))
+				return false
 			if (must_save('exit_row')) {
 				if (e.can_exit_row_on_errors) {
 					// async save: errors can come later, meanwhile we exit the row.
@@ -4741,14 +4740,17 @@ component('x-lookup-dropdown', function(e) {
 	datetime.from_num = datetime.from_time
 
 	datetime.to_text = function(v) {
-		let t = this.to_time(v)
-		return t != null ? t.date(locale(), this.has_time) : ''
+		if (v == null) return ''
+		let t = this.to_time(v, true)
+		if (t == null) return v
+		return t.date(locale(), this.has_time)
 	}
 
 	datetime.from_text = function(s) {
 		if (s == '') return null
 		let t = s.parse_date(locale(), true)
-		return t != null ? this.from_time(t) : s
+		if (t == null) return s
+		return this.from_time(t)
 	}
 
 	// range of MySQL DATETIME type
@@ -4757,7 +4759,9 @@ component('x-lookup-dropdown', function(e) {
 
 	datetime.format = function(s) {
 		if (s == null) return ''
-		return this.to_time(s).date(this.has_time, this.has_seconds)
+		let t = this.to_time(s, true)
+		if (t == null) return s
+		return t.date(this.has_time, this.has_seconds)
 	}
 
 	datetime.editor = function(...opt) {
