@@ -276,7 +276,7 @@ local function add_fk(self, tbl, cols, ref_tbl_name, ondelete, onupdate, fld)
 	local cols = check_cols('fk', tbl, cols)
 	cols.desc = imap(cols, return_false)
 	local fk = {name = k, table = tbl.name, cols = cols,
-		ref_table = ref_tbl_name, ondelete = ondelete, onupdate = onupdate}
+		ref_table = ref_tbl_name, ondelete = ondelete, onupdate = onupdate or 'cascade'}
 	fks[k] = fk
 	local ref_tbl =
 		ref_tbl_name == tbl.name and tbl --self-reference
@@ -327,10 +327,12 @@ do
 		self.env = env
 		self.loaded = {}
 
-		function env.import  (...) self:import      (...) end
-		function env.add_fk  (...) self:add_fk      (...) end
-		function env.trigger (...) self:add_trigger (...) end
-		function env.proc    (...) self:add_proc    (...) end
+		function env.import       (...) self:import       (...) end
+		function env.add_fk       (...) self:add_fk       (...) end
+		function env.add_child_fk (...) self:add_child_fk (...) end
+		function env.add_weak_fk  (...) self:add_weak_fk  (...) end
+		function env.trigger      (...) self:add_trigger  (...) end
+		function env.proc         (...) self:add_proc     (...) end
 
 		return self
 	end
@@ -389,13 +391,21 @@ local function fk_func(force_ondelete, force_onupdate)
 		end
 	end
 end
-schema.env.fk       = fk_func(nil, 'cascade')
-schema.env.child_fk = fk_func('cascade', 'cascade')
-schema.env.weak_fk  = fk_func('set null', 'cascade')
+schema.env.fk       = fk_func()
+schema.env.child_fk = fk_func'cascade'
+schema.env.weak_fk  = fk_func'set null'
 
 function schema:add_fk(tbl, cols, ...)
 	local tbl = assertf(self.tables[tbl], 'unknown table `%s`', tbl)
 	add_fk(self, tbl, names(cols), ...)
+end
+
+function schema:add_child_fk(tbl, cols, ref_tbl)
+	self:add_fk(tbl, cols, ref_tbl, 'cascade')
+end
+
+function schema:add_weak_fk(tbl, cols, ref_tbl)
+	self:add_fk(tbl, cols, ref_tbl, 'set null')
 end
 
 local function ix_func(T)

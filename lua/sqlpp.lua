@@ -685,7 +685,7 @@ function sqlpp.new(init)
 	function cmd:sqlfk(name, fk)
 		assertf(fk.ref_cols, 'fk not resolved: %s', name)
 		local ondelete = fk.ondelete or 'no action'
-		local onupdate = fk.onupdate or 'cascade'
+		local onupdate = fk.onupdate or 'no action'
 		local a1 = ondelete ~= 'no action' and ' on delete '..ondelete or ''
 		local a2 = onupdate ~= 'no action' and ' on update '..onupdate or ''
 		return _('constraint %-20s foreign key (%s) references %s (%s)%s%s',
@@ -1502,6 +1502,7 @@ function sqlpp.new(init)
 			end
 		else
 			if opt.dry then
+				diff:pp()
 				print'\n/******** BEGIN SYNC SCHEMA ********/\n'
 			end
 			for _,sql in ipairs(sqls) do
