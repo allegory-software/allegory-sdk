@@ -263,6 +263,7 @@ updating cells:
 		e.set_cell_state(field, val, default_val)
 		e.set_cell_val()
 		e.reset_cell_val()
+		e.revert_cell()
 	calls:
 		e.validator_NAME(field) -> {validate: f(v) -> true|false, message: text}
 		e.validate_val()
@@ -284,6 +285,7 @@ updating row state:
 	publishes:
 		e.set_row_state(key, val, default_val)
 		e.set_row_is_new()
+		e.revert_row()
 	calls:
 		e.do_update_row_state(ri, changes, ev)
 
@@ -2789,6 +2791,15 @@ function nav_widget(e) {
 			return errors.must_allow_exit_edit
 	}
 
+	e.revert_cell = function(row, field) {
+		e.reset_cell_val(row, field, e.cell_val(row, field))
+	}
+
+	e.revert_row = function(row) {
+		for (let field of e.all_fields)
+			e.revert_cell(row, field)
+	}
+
 	e.exit_edit = function(ev) {
 		if (!e.editor)
 			return true
@@ -2798,7 +2809,7 @@ function nav_widget(e) {
 		let field = e.focused_field
 
 		if (cancel)
-			e.reset_cell_val(row, field, e.cell_val(row, field))
+			e.revert_cell(row, field)
 		else
 			if (!can_exit_edit(row, field))
 				return false
@@ -2901,6 +2912,7 @@ function nav_widget(e) {
 			field.lookup_nav_reset = function() {
 				field.lookup_fields = ln.flds(field.lookup_col || ln.pk_fields)
 				field.display_field = ln.fld(field.display_col || ln.name_col)
+				field.align = field.display_field && field.display_field.align
 				e.fire('display_vals_changed')
 				e.fire('display_vals_changed_for_'+field.name)
 			}
@@ -3854,15 +3866,14 @@ function nav_widget(e) {
 
 		let rows_to_remove = []
 		for (let row of e.changed_rows) {
-			if (row.is_new)
+			if (row.is_new) {
 				rows_to_remove.push(row)
-			else if (row.removed) {
+			} else if (row.removed) {
 				e.begin_set_state(row)
 				e.set_row_state('removed', false, false)
 				e.end_set_state()
 			} else if (row.modified) {
-				for (let field of e.all_fields)
-					e.reset_cell_val(row, field, e.cell_val(row, field))
+				e.revert_row(row)
 			}
 		}
 		e.remove_rows(rows_to_remove, {from_server: true, refocus: true})

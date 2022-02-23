@@ -1915,9 +1915,14 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				e.quicksearch('')
 				return false
 			}
-			if (e.editor && e.exit_edit_on_escape) {
-				if (e.exit_edit())
-					e.focus()
+			if (e.editor) {
+				if (e.exit_edit_on_escape) {
+					if (e.exit_edit())
+						e.focus()
+					return false
+				}
+			} else if (e.focused_row && e.focused_field) {
+				e.revert_cell(e.focused_row, e.focused_field)
 				return false
 			}
 		}
