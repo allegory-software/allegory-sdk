@@ -1095,7 +1095,8 @@ function editbox_widget(e, opt) {
 					e.cancel_val = null
 					e.picker.hide()
 					e.fire('closed')
-					e.picker.fire('dropdown_closed')
+					if (e.picker)
+						e.picker.fire('dropdown_closed')
 					if (!focus)
 						e.fire('lost_focus') // grid editor protocol
 				}
@@ -1158,7 +1159,7 @@ function editbox_widget(e, opt) {
 
 		function picker_keydown(key) {
 			if (key == 'Escape') {
-				e.cancel(true)
+				e.cancel()
 			}
 		}
 
@@ -1230,10 +1231,10 @@ function editbox_widget(e, opt) {
 	e.open   = function(focus) { e.set_open(true, focus) }
 	e.close  = function(focus) { e.set_open(false, focus) }
 	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
-	e.cancel = function(focus, ev) {
+	e.cancel = function() {
 		if (e.isopen)
-			e.set_val(e.cancel_val, ev)
-		e.close(focus)
+			e.set_val(e.cancel_val, {input: this})
+		e.close(true)
 	}
 
 }
@@ -2340,7 +2341,7 @@ component('x-timepicker', 'Input', function(e) {
 		cancel: true,
 		text: S('cancel', 'Cancel'),
 		action: function() {
-			e.dropdown.cancel(true)
+			e.dropdown.cancel()
 		},
 	})
 
