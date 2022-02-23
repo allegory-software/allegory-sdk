@@ -156,14 +156,6 @@ function create_db(ns)
 	return db
 end
 
-function sqlpps.mysql.fk_message_remove()
-	return S('fk_message_remove', 'Cannot remove {foreign_entity}: remove any associated {entity} first.')
-end
-
-function sqlpps.mysql.fk_message_set()
-	return S('fk_message_set', 'Cannot set {entity}: {foreign_entity} not found in database.')
-end
-
 for method, name in pairs{
 	--preprocessor
 	sqlval=1, sqlrows=1, sqlname=1, sqlparams=1, sqlquery=1,
