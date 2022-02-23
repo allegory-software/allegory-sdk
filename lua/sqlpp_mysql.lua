@@ -544,16 +544,10 @@ local function init_spp(spp, cmd)
 	end
 
 	spp.errno[1062] = function(self, err)
-		local pri = err.message:find"for key '.-%.PRIMARY'"
+		local pri = err.message:find"'.-%.PRIMARY'"
+		local s = err.message:match"'(.-)'"
+		err.message = _(S('error_duplicate_entry', 'Duplicate entry "%s"'), s)
 		err.code = pri and 'pk' or 'uk'
-	end
-
-	function spp.fk_message_remove()
-		return 'Cannot remove {foreign_entity}: remove any associated {entity} first.'
-	end
-
-	function spp.fk_message_set()
-		return 'Cannot set {entity}: {foreign_entity} not found in database.'
 	end
 
 	local function fk_message(self, err, op)
@@ -562,8 +556,13 @@ local function init_spp(spp, cmd)
 		local t = {}
 		t.entity = (def.text or def.name):lower()
 		t.foreign_entity = (fdef.text or fdef.name):lower()
-		local s = (op == 'remove' and spp.fk_message_remove or spp.fk_message_set)()
-		return subst(s, t)
+		if op == 'remove' then
+			return S('cannot_remove_because_fk',
+				'Cannot remove {foreign_entity}: remove any associated {entity} first.', t)
+		else
+			return S('cannot_set_because_fk',
+				'Cannot set {entity}: {foreign_entity} not found in database.', t)
+		end
 	end
 
 	local function dename(s)
