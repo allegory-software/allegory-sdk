@@ -1408,9 +1408,6 @@ let popup_state = function(e) {
 		}
 		e.fire('popup_bind', on, target)
 
-		// FIXME: logout bug with double-unbind !!
-		// pr(e, target, on)
-
 		// changes in target size updates the popup position.
 		if (target.detect_resize) {
 			target.detect_resize()

@@ -331,9 +331,10 @@ function override_property_setter(cls, prop, set) {
 // strings -------------------------------------------------------------------
 
 // usage:
-//		'{1} of {0}'.subst(total, current)
-//		'{1} of {0}'.subst([total, current])
-//		'{current} of {total}'.subst({'current': current, 'total': total})
+//	 '{1} of {0}'.subst(total, current)
+//	 '{1} of {0}'.subst([total, current])
+//	 '{1} of {0:foo:foos}'.subst([total, current])
+//	 '{current} of {total}'.subst({'current': current, 'total': total})
 
 method(String, 'subst', function(...args) {
 	if (!args.length)
