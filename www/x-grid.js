@@ -853,7 +853,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		let rem_cls = []
 		if (changes.is_new    ) { (changes.is_new     [0] ? add_cls : rem_cls).push('new')        }
 		if (changes.removed   ) { (changes.removed    [0] ? add_cls : rem_cls).push('removed')    }
-		if (changes.has_errors) { (changes.has_errors [0] ? add_cls : rem_cls).push('has-errors') }
+		if (changes.has_errors) { (changes.has_errors [0] ? add_cls : rem_cls).push('row-has-errors') }
 		if (add_cls || rem_cls)
 			each_cell_of_row(ri, function(cell) {
 				for (let k of add_cls) cell.classList.add(k)

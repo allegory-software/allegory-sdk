@@ -501,21 +501,32 @@ function nav_widget(e) {
 	e.prop('can_change_rows'         , {store: 'var', type: 'bool', default: true})
 	e.prop('can_move_rows'           , {store: 'var', type: 'bool', default: false})
 	e.prop('can_sort_rows'           , {store: 'var', type: 'bool', default: true})
-	e.prop('can_focus_cells'         , {store: 'var', type: 'bool', default: true , hint: 'can focus individual cells vs entire rows'})
+	e.prop('can_focus_cells'         , {store: 'var', type: 'bool', default: true , hint: 'allow focusing individual cells vs entire rows'})
+	e.prop('can_select_multiple'     , {store: 'var', type: 'bool', default: true , hint: 'allow selecting multiple cells or rows'})
+	e.prop('can_select_non_siblings' , {store: 'var', type: 'bool', default: true , hint: 'allow multi-selecting rows of different parents'})
+
 	e.prop('auto_advance_row'        , {store: 'var', type: 'bool', default: false, hint: 'jump row on horizontal navigation limits'})
-	e.prop('can_select_multiple'     , {store: 'var', type: 'bool', default: true})
-	e.prop('can_select_non_siblings' , {store: 'var', type: 'bool', default: true})
 	e.prop('auto_focus_first_cell'   , {store: 'var', type: 'bool', default: true , hint: 'focus first cell automatically after loading'})
 	e.prop('auto_edit_first_cell'    , {store: 'var', type: 'bool', default: false, hint: 'automatically enter edit mode after loading'})
 	e.prop('stay_in_edit_mode'       , {store: 'var', type: 'bool', default: true , hint: 're-enter edit mode after navigating'})
+
+	e.prop('save_on_add_row'         , {store: 'var', type: 'bool', default: false})
+	e.prop('save_on_remove_row'      , {store: 'var', type: 'bool', default: true })
+	e.prop('save_on_typing'          , {store: 'var', type: 'bool', default: false})
+	e.prop('save_on_pick_value'      , {store: 'var', type: 'bool', default: false})
+	e.prop('save_on_exit_edit'       , {store: 'var', type: 'bool', default: false})
+	e.prop('save_on_exit_row'        , {store: 'var', type: 'bool', default: true })
+
 	e.prop('save_row_on'             , {store: 'var', type: 'enum', default: 'exit_edit', enum_values: ['input', 'exit_edit', 'exit_row', 'manual']})
 	e.prop('save_new_row_on'         , {store: 'var', type: 'enum', default: 'exit_row' , enum_values: ['input', 'exit_edit', 'exit_row', 'manual', 'insert']})
 	e.prop('save_row_remove_on'      , {store: 'var', type: 'enum', default: 'input'    , enum_values: ['input', 'exit_row', 'manual']})
 	e.prop('save_row_move_on'        , {store: 'var', type: 'enum', default: 'input'    , enum_values: ['input', 'manual']})
+
 	e.prop('can_exit_edit_on_errors' , {store: 'var', type: 'bool', default: true , hint: 'allow exiting edit mode on validation errors'})
 	e.prop('can_exit_row_on_errors'  , {store: 'var', type: 'bool', default: false, hint: 'allow changing row on validation errors'})
+
 	e.prop('exit_edit_on_lost_focus' , {store: 'var', type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
-	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false})
+	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
 	e.prop('action_band_visible'     , {store: 'var', type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true})
 
 	// init -------------------------------------------------------------------
@@ -532,10 +543,6 @@ function nav_widget(e) {
 		init_row_validators()
 	}
 
-	function force_unfocus_focused_cell() {
-		assert(e.focus_cell(false, false, 0, 0, {cancel: true}))
-	}
-
 	e.on('bind', function(on) {
 		bind_param_nav(on)
 		bind_rowset_name(e.rowset_name, on)
@@ -544,7 +551,7 @@ function nav_widget(e) {
 			e.update({reload: true})
 		} else {
 			abort_all_requests()
-			force_unfocus_focused_cell()
+			e.unfocus_focused_cell({cancel: true})
 			init_all()
 		}
 	})
@@ -1038,7 +1045,7 @@ function nav_widget(e) {
 			return
 		if (!e.rowset_url) { // re-filter and re-focus.
 			e.begin_update()
-			force_unfocus_focused_cell()
+			e.unfocus_focused_cell({cancel: true})
 			init_rows()
 			e.update({rows: true})
 			e.focus_cell()
@@ -1541,6 +1548,10 @@ function nav_widget(e) {
 	e.focus_find_cell = function(lookup_cols, lookup_vals, col) {
 		let fi = fld(col) && fld(col).index
 		e.focus_cell(e.row_index(e.lookup(lookup_cols, lookup_vals)[0]), fi)
+	}
+
+	e.unfocus_focused_cell = function(ev) {
+		return e.focus_cell(false, false, 0, 0, ev)
 	}
 
 	e.is_last_row_focused = function() {
@@ -2480,7 +2491,7 @@ function nav_widget(e) {
 				return rows.length < 1
 			},
 			message: S('validation_unique', '{0} must be unique')
-				.subst(e.pk_fields && e.pk_fields.map(field => field.text) || ''),
+				.subst(e.pk_fields && e.pk_fields.map(field => field.text).join(' + ') || ''),
 			must_allow_exit_edit: e.pk_fields && e.pk_fields.length > 1 || null,
 			must_not_allow_exit_row: true,
 		}
@@ -2968,8 +2979,9 @@ function nav_widget(e) {
 					return ln.cell_display_val(row, field.display_field)
 			}
 			return field.lookup_failed_display_val(v)
-		} else
+		} else {
 			return field.format(v, row, v0)
+		}
 	}
 
 	e.cell_display_val = function(row, field) {
@@ -3015,17 +3027,17 @@ function nav_widget(e) {
 		let ri1 = at_row ? e.row_index(at_row) : e.rows.length
 		let set_cell_val = from_server ? e.reset_cell_val : e.set_cell_val
 
-		e.begin_update()
-
 		// request to focus the new row implies being able to exit the
 		// 0focused row first. if that's not possible, the insert is aborted.
 		if (ev.focus_it) {
 			ev.was_editing  = !!e.editor
-			ev.editor_state = ev.editor_state || e.editor && e.editor.editor_state()
+			ev.editor_state = ev.editor_state || e.editor && e.editor.state && e.editor.editor_state()
 			ev.focus_editor = e.editor && e.editor.hasfocus
 			if (!e.focus_cell(false, false))
 				return 0
 		}
+
+		e.begin_update()
 
 		let rows_added, rows_updated
 		let added_rows = set()
@@ -3536,7 +3548,7 @@ function nav_widget(e) {
 		e.begin_update()
 
 		let refocus = refocus_state('val')
-		force_unfocus_focused_cell()
+		e.unfocus_focused_cell({cancel: true})
 
 		e.changed_rows = null // Set(row)
 		rows_moved = false
