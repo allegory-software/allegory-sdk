@@ -1198,7 +1198,9 @@ function editbox_widget(e, opt) {
 		} else {
 
 			// use the entire surface of the dropdown to close the popup.
-			e.on('pointerdown', function() {
+			e.on('pointerdown', function(ev) {
+				if (ev.target == e.input)
+					return // prevent selecting the text when clicking on it.
 				e.close(true)
 			})
 
