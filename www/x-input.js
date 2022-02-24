@@ -756,6 +756,15 @@ function editbox_widget(e, opt) {
 			bind_spicker(on)
 		})
 
+		e.on('keydown', function(key, shift, ctrl) {
+			if (key == 'Escape' && !e.hasclass('grid-editor')) {
+				if (e.field && e.row) {
+					e.nav.revert_cell(e.row, e.field)
+					return false
+				}
+			}
+		})
+
 	}
 
 	// suggestion picker ------------------------------------------------------
