@@ -1209,7 +1209,10 @@ function glue.readfile(name, mode, open)
 	local f, err = open(name, mode=='t' and 'r' or (glue.win and 'rb' or 'r'))
 	if not f then return nil, err end
 	local s, err = f:read'*a'
-	if s == nil then return nil, err end
+	if s == nil then
+		f:close()
+		return nil, err
+	end
 	f:close()
 	return s
 end
