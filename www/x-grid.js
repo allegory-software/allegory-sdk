@@ -47,7 +47,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	}
 
 	// keyboard behavior
-	e.auto_jump_cells = true    // jump to next/prev cell on caret limits
+	e.auto_jump_cells = true    // jump to next/prev cell on caret limits with Ctrl.
 	e.tab_navigation = false    // disabled as it prevents jumping out of the grid.
 	e.advance_on_enter = 'next_row' // false|'next_row'|'next_cell'
 	e.prop('exit_edit_on_escape'           , {store: 'var', type: 'bool', default: true})
@@ -1822,7 +1822,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		}
 
 		// insert with the arrow down key on the last focusable row.
-		if (key == down_arrow) {
+		if (key == down_arrow && !shift) {
 			if (e.save_new_row_on != 'insert') { // not really compatible behavior...
 				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
 					if (e.insert_rows(1, {
