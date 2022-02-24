@@ -1588,11 +1588,12 @@ method(Element, 'modal', function(on) {
 	return e
 })
 
-// tab focus trapping on popups ----------------------------------------------
+// tab cycling within the app, popups & modauls ------------------------------
 
 document.on('keydown', function(key, shift, ctrl, alt, ev) {
 	if (key == 'Tab') {
 		let popup = ev.target.closest('.popup, .modal')
+		popup = popup || document.body // TODO: make this configurable.
 		if (!popup)
 			return
 		let focusables = popup.focusables()
@@ -1805,3 +1806,4 @@ setInterval(function() {
 		e.set(t.timeago())
 	}
 }, 60 * 1000)
+
