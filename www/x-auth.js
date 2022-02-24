@@ -149,6 +149,7 @@ component('x-usr-button', function(e) {
 	e.bare = true
 	e.text = ''
 	e.icon = 'fa fa-user-circle'
+	e.tabindex = -1
 
 	let tt
 	e.on('activate', function() {
@@ -163,6 +164,7 @@ component('x-usr-button', function(e) {
 				close_button: true,
 				autoclose: true,
 			})
+			tt.focus_first()
 		}
 	})
 
