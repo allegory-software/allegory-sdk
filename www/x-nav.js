@@ -1509,8 +1509,9 @@ function nav_widget(e) {
 		if (row_changed || sel_rows_changed || field_changed || qs_changed)
 			e.update({state: true})
 
-		if (enter_edit && ri != null && fi != null)
+		if (enter_edit && ri != null && fi != null) {
 			e.update({enter_edit: [ev.editor_state, focus_editor || false]})
+		}
 
 		if (ev.make_visible != false)
 			if (e.focused_row)
@@ -2593,17 +2594,20 @@ function nav_widget(e) {
 
 	function cells_modified(row, exclude_field) {
 		for (let field of e.all_fields)
-			if (field != exclude_field && e.cell_modified(row, field) && !e.cell_has_errors(row, field))
+			if (field != exclude_field && e.cell_modified(row, field))
 				return true
 	}
 
-	e.row_is_user_modified = function(row) {
+	e.row_is_user_modified = function(row, including_invalid_values) {
 		if (!row.modified)
 			return false
 		for (let field of e.all_fields)
-			if (field !== e.pos_field && field !== e.parent_field)
+			if (field !== e.pos_field && field !== e.parent_field) {
 				if (e.cell_modified(row, field))
 					return true
+				if (including_invalid_values && e.cell_has_errors(row, field))
+					return true
+			}
 		return false
 	}
 
@@ -3013,6 +3017,16 @@ function nav_widget(e) {
 
 		e.begin_update()
 
+		// request to focus the new row implies being able to exit the
+		// 0focused row first. if that's not possible, the insert is aborted.
+		if (ev.focus_it) {
+			ev.was_editing  = !!e.editor
+			ev.editor_state = ev.editor_state || e.editor && e.editor.editor_state()
+			ev.focus_editor = e.editor && e.editor.hasfocus
+			if (!e.focus_cell(false, false))
+				return 0
+		}
+
 		let rows_added, rows_updated
 		let added_rows = set()
 
@@ -3131,7 +3145,7 @@ function nav_widget(e) {
 
 		e.end_update()
 
-		return added_rows.length
+		return added_rows.size
 	}
 
 	e.insert_row = function(row_vals, ev) {
@@ -3161,6 +3175,16 @@ function nav_widget(e) {
 	e.remove_rows = function(rows_to_remove, ev) {
 
 		ev = ev || empty
+
+		if (!rows_to_remove.length)
+			return false
+
+		if (ev && ev.confirm && (rows_to_remove.length > 1 || !rows_to_remove[0].is_new))
+			if (!confirm(S('delete_records_confirmation',
+					'Are you sure you want to delete {0:record:records}?',
+						rows_to_remove.size))
+			) return false
+
 		let from_server = ev.from_server || !e.can_save_changes()
 
 		e.begin_update()
@@ -3262,15 +3286,9 @@ function nav_widget(e) {
 	}
 
 	e.remove_selected_rows = function(ev) {
-		let sn = e.selected_rows.size
-		if (!sn)
+		if (!e.selected_rows.size)
 			return false
-		if (ev && ev.input && (sn > 1 || !e.selected_rows.first_key.is_new))
-			if (!confirm(S('delete_selected_records_confirmation',
-					'Are you sure you want to delete {0:record:records}?',
-						e.selected_rows.size))
-			) return false
-		return e.remove_rows(e.selected_rows.keys(), ev)
+		return e.remove_rows([...e.selected_rows.keys()], ev)
 	}
 
 	function same_fields(rs) {
@@ -4186,14 +4204,20 @@ function nav_widget(e) {
 						title: S('reload', 'Reload all records'),
 						bare: true,
 						action: () => e.reload(),
+						tabindex: -1,
 					}),
 					'insert': button({
 						icon: 'fa fa-plus',
 						text: S('add', 'Add'),
 						title: S('add_new_record', 'Add a new record (Insert key)'),
 						action: function() {
-							e.insert_row(1, {input: e, at_focused_row: true, focus_it: true})
+							e.insert_row(1, {
+								input: e,
+								at_focused_row: true,
+								focus_it: true,
+							})
 						},
+						tabindex: -1,
 					}),
 					'delete': button({
 						danger: true,
@@ -4201,6 +4225,7 @@ function nav_widget(e) {
 						action: function() {
 							e.remove_selected_rows({input: e, refocus: true})
 						},
+						tabindex: -1,
 					}),
 					'move_up'   : button({
 						icon: 'fa fa-angle-up',
@@ -4209,6 +4234,7 @@ function nav_widget(e) {
 						action: function() {
 							e.move_selected_rows_up()
 						},
+						tabindex: -1,
 					}),
 					'move_down' : button({
 						icon: 'fa fa-angle-down',
@@ -4217,6 +4243,7 @@ function nav_widget(e) {
 						action: function() {
 							e.move_selected_rows_down()
 						},
+						tabindex: -1,
 					}),
 					'info': div({class: 'x-grid-action-band-info'}),
 					'cancel': button({
@@ -4227,6 +4254,7 @@ function nav_widget(e) {
 							e.exit_edit({cancel: true})
 							e.revert_changes()
 						},
+						tabindex: -1,
 					}),
 					'save': button({
 						icon: 'fa fa-cloud-upload-alt',
@@ -4236,6 +4264,7 @@ function nav_widget(e) {
 						action: function() {
 							e.save()
 						},
+						tabindex: -1,
 					}),
 				}
 			})

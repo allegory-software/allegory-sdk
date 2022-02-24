@@ -1823,11 +1823,16 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 		// insert with the arrow down key on the last focusable row.
 		if (key == down_arrow) {
-			if (e.save_new_row_on != 'insert') // not really compatible behavior...
-				if (e.is_last_row_focused() && e.can_actually_add_rows())
-					if (e.focus_cell(false, false))
-						if (e.insert_rows(1, {input: e, focus_it: true}))
-							return false
+			if (e.save_new_row_on != 'insert') { // not really compatible behavior...
+				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
+					if (e.insert_rows(1, {
+						input: e,
+						focus_it: true,
+					})) {
+						return false
+					}
+				}
+			}
 		}
 
 		// remove last row with the arrow up key if not edited.
@@ -1835,8 +1840,12 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			if (e.is_last_row_focused() && e.focused_row) {
 				let row = e.focused_row
 				if (row.is_new && !e.row_is_user_modified(row)) {
-					if (e.remove_selected_rows({input: e, refocus: true}))
+					let editing = !!e.editor
+					if (e.remove_row(row, {input: e, refocus: true})) {
+						if (editing)
+							e.enter_edit('select_all')
 						return false
+					}
 				}
 			}
 		}
@@ -1922,21 +1931,30 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 					return false
 				}
 			} else if (e.focused_row && e.focused_field) {
-				e.revert_cell(e.focused_row, e.focused_field)
+				let row = e.focused_row
+				if (row.is_new && !e.row_is_user_modified(row, true))
+					e.remove_row(row, {input: e, refocus: true})
+				else
+					e.revert_cell(row, e.focused_field)
 				return false
 			}
 		}
 
 		// insert key: insert row
-		if (key == 'Insert')
-			if (e.exit_focused_row())
-				if (e.insert_rows(1, {input: e, at_focused_row: true, focus_it: true}))
-					return false
+		if (key == 'Insert') {
+			if (e.insert_rows(1, {
+				input: e,
+				at_focused_row: true,
+				focus_it: true,
+			})) {
+				return false
+			}
+		}
 
 		if (!e.editor && key == 'Delete') {
 
-			// delete: toggle-delete active row
-			if (!ctrl && e.remove_selected_rows({input: e, refocus: true, toggle: true}))
+			// delete: toggle-delete selected rows
+			if (!ctrl && e.remove_selected_rows({input: e, refocus: true, toggle: true, confirm: true}))
 				return false
 
 			// ctrl_delete: set selected cells to null.
@@ -2036,7 +2054,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			icon: 'fa fa-trash',
 			disabled: !(e.selected_rows.size && e.can_remove_row()),
 			action: function() {
-				e.remove_selected_rows({input: e, refocus: true})
+				e.remove_selected_rows({input: e, refocus: true, confirm: true})
 			},
 		})
 
