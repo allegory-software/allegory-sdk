@@ -359,8 +359,7 @@ function listbox_widget(e) {
 		}
 
 		if (key == 'Enter') {
-			if (e.focused_row)
-				e.fire('val_picked', {input: e}) // picker protocol
+			e.fire('val_picked', {input: e}) // picker protocol
 			return false
 		}
 
