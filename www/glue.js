@@ -842,6 +842,7 @@ _d = new Date() // public temporary date object.
 // NOTE: months start at 1, and seconds can be fractionary.
 function time(y, m, d, H, M, s) {
 	if (isnum(y)) {
+		_d.setTime(0) // necessary to reset the time first!
 		_d.setUTCFullYear(y)
 		_d.setUTCMonth(or(m, 1) - 1)
 		_d.setUTCDate(or(d, 1))
