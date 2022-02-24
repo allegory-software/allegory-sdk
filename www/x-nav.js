@@ -1210,7 +1210,7 @@ function nav_widget(e) {
 			&& (!e.rowset || e.rowset.can_add_rows != false)
 	}
 
-	function can_remove_rows() {
+	e.can_actually_remove_rows = function() {
 		return e.can_remove_rows
 			&& (!e.rowset || e.rowset.can_remove_rows != false)
 	}
@@ -1414,8 +1414,8 @@ function nav_widget(e) {
 		if (e.focused_field != null)
 			e.last_focused_col = e.focused_field.name
 
-		if (e.val_field && row) {
-			let val = e.cell_val(row, e.val_field)
+		if (e.val_field) {
+			let val = row ? e.cell_val(row, e.val_field) : null
 			e.set_val(val, assign({input: e}, ev))
 		}
 
@@ -3165,7 +3165,7 @@ function nav_widget(e) {
 	}
 
 	e.can_remove_row = function(row, ev) {
-		if (!can_remove_rows())
+		if (!e.can_actually_remove_rows())
 			return false
 		if (!row)
 			return true
@@ -3548,7 +3548,7 @@ function nav_widget(e) {
 		e.begin_update()
 
 		let refocus = refocus_state('val')
-		e.unfocus_focused_cell({cancel: true})
+		e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
 
 		e.changed_rows = null // Set(row)
 		rows_moved = false

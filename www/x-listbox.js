@@ -375,10 +375,8 @@ function listbox_widget(e) {
 
 		// delete key: delete row
 		if (key == 'Delete') {
-			if (!e.can_remove_rows) {
-				// TODO: either one should set the other
-				e.set_val(null, {input: e})
-				e.focus_cell(false, false, 0, 0, {input: e})
+			if (!e.can_actually_remove_rows()) {
+				e.unfocus_focused_cell({input: e, cancel: true})
 				return false
 			}
 			if (e.remove_selected_rows({input: e, refocus: true, toggle: true}))

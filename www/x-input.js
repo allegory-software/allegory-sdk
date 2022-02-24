@@ -275,7 +275,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		v = e.to_val(v)
 		if (v === undefined)
 			v = null
-		if (e.nav && e.field)
+		if (e.field && e.row)
 			e.nav.set_cell_val(e.row, e.field, v, ev)
 		else
 			initial_val = v
