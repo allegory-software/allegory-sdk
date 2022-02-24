@@ -1346,7 +1346,7 @@ let popup_state = function(e) {
 			e.popup_target = target
 		}
 		if (target)
-			runafter(0, update)
+			raf(update)
 	}
 
 	function init() {
