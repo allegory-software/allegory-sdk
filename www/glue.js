@@ -1434,6 +1434,15 @@ function ajax(req) {
 		return req
 	}
 
+	req.send_async = function() {
+		return new Promise(function(resolve, reject) {
+			on('done', function(...args) {
+				resolve(args)
+			})
+			req.send()
+		})
+	}
+
 	// NOTE: only Firefox fires progress events on non-200 responses.
 	xhr.onprogress = function(ev) {
 		if (ev.loaded > 0)
@@ -1497,7 +1506,6 @@ function ajax(req) {
 	function fire(name, arg1, ...rest) {
 		if (name == 'done')
 			fire(arg1, ...rest)
-
 
 		if (req.fire(name, arg1, ...rest))
 			if (name == 'fail' && arg1)
