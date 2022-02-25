@@ -55,7 +55,7 @@ function row_widget(e, enabled_without_nav) {
 	e.do_update = function() {
 		let row = e.row
 		e.xoff()
-		e.disabled = !enabled_without_nav
+		e.disable('no_nav', !enabled_without_nav)
 		e.readonly = e.nav && !e.nav.can_change_val(row)
 		e.xon()
 		e.do_update_row(row)
@@ -319,11 +319,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	e.do_update = function() {
 		let row = e.row
 		let field = e.field
-		let disabled = !(enabled_without_nav || (row && field))
 		let readonly = e.nav && !e.nav.can_change_val(row, field)
-		e.bool_attr('disabled', disabled || null) // for non-focusables
 		e.xoff()
-		e.disabled = disabled || (readonly && !e.set_readonly)
+		e.disable('read_only', readonly && !e.set_readonly)
 		e.readonly = readonly
 		e.xon()
 
@@ -2142,8 +2140,8 @@ component('x-calendar', 'Input', function(e) {
 
 	// controller
 
-	function set_ts(t, update_view_too) {
-		e.set_val(as_dt(t), {input: e})
+	function set_ts(t, update_view_too, val_picked) {
+		e.set_val(as_dt(t), {input: e, val_picked: val_picked})
 		if (update_view_too)
 			update_view(t)
 	}
@@ -2157,7 +2155,7 @@ component('x-calendar', 'Input', function(e) {
 		update_weekview(start_week, d)
 		update_ym(d)
 		return this.capture_pointer(ev, null, function() {
-			set_ts(d + daytime(as_ts(e.input_val)))
+			set_ts(d + daytime(as_ts(e.input_val)), null, true)
 			e.fire('val_picked') // picker protocol
 			return false
 		})

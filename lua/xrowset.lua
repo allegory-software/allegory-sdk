@@ -88,7 +88,7 @@ local client_field_attrs = {
 	internal=1, hidden=1, readonly=1,
 	name=1, type=1, text=1, hint=1, default=1,
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
-	lookup_rowset_name=1, lookup_col=1, display_col=1, name_col=1,
+	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, max_char_w=1,
 	hour_step=1, minute_step=1, second_step=1, has_seconds=1,
 	icon=1, bare=1,

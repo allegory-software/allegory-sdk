@@ -167,13 +167,19 @@ function component(tag, category, cons) {
 		// - constructor return value.
 		// - constructor args.
 		let opt = assign_opt(obj(), ...args)
+
 		component_props(e, opt.props)
+
 		e.isinstance = true   // because we can have non-widget instances.
 		e.iswidget = true     // to diff from normal html elements.
 		e.type = type         // for serialization.
 		e.init = noop         // init point after all props are set.
 		e.class('x-widget')
+
+		disablable_widget(e)
+
 		let cons_opt = construct(e)
+
 		opt = assign_opt(attr_val_opt(e), cons_opt, opt)
 
 		e.initialized = false // setter barrier to delay init to e.init().
@@ -1080,22 +1086,73 @@ function serializable_widget(e) {
 }
 
 /* ---------------------------------------------------------------------------
-// focusable widget mixin
+// disablable widget mixin
 // ---------------------------------------------------------------------------
 publishes:
-	e.tabindex
 	e.disabled
-	e.focusable
+	e.disable(reason, disabled)
 
 NOTE: The `disabled` state is a concerted effort located in multiple places:
 	- mouse events are blocked in divs.js.
 	- forcing the default cursor on the element and its children is done in css.
 	- showing the element with 50% transparency is done in css.
-	- keyboard focusing is disabled here.
+	- keyboard focusing is disabled in focusable_widget().
 
-NOTE: To disable a non-focusable but clickable element it's enough to set its
-attr `disabled` but note that `:hover` and `:active` will still work so
-make sure to add `:not([disabled])` in css on those selectors.
+NOTE: `:hover` and `:active` still apply to a disabled widget so make sure
+to add `:not([disabled])` in css on those selectors.
+
+NOTE: for non-widgets setting the `disabled` attr is enough to disable them.
+--------------------------------------------------------------------------- */
+
+function disablable_widget(e) {
+
+	e.on('bind', function(on) {
+		// each disabled ancestor is a reason for this widget to be disabled.
+		if (on) {
+			let p = this.parent
+			while (p) {
+				if (p.disabled)
+					this.disable(p, true)
+				p = p.parent
+			}
+		} else {
+			let p = this.parent
+			while (p) {
+				this.disable(p, false)
+				p = p.parent
+			}
+		}
+	})
+
+	e.set_disabled = function(disabled) {
+		// add/remove this widget as a reason for the child widget to be disabled.
+		for (let ce of this.$('.x-widget'))
+			ce.disable(this, disabled)
+	}
+
+	e.prop('disabled', {store: 'var', type: 'bool', attr: true, default: false})
+
+	let df
+	e.disable = function(reason, disabled) {
+		if (disabled) {
+			df = df || set()
+			df.add(reason)
+			e.disabled = true
+		} else if (df) {
+			df.delete(reason)
+			if (!df.size) {
+				e.disabled = false
+			}
+		}
+	}
+}
+
+/* ---------------------------------------------------------------------------
+// focusable widget mixin
+// ---------------------------------------------------------------------------
+publishes:
+	e.tabindex
+	e.focusable
 --------------------------------------------------------------------------- */
 
 function focusable_widget(e, fe) {
@@ -1113,6 +1170,12 @@ function focusable_widget(e, fe) {
 			e.blur()
 	}
 
+	let set_disabled = e.set_disabled
+	e.set_disabled = function(disabled) {
+		set_disabled.call(this, disabled)
+		do_update()
+	}
+
 	e.set_tabindex = do_update
 	e.prop('tabindex', {store: 'var', type: 'number', default: 0})
 
@@ -1122,9 +1185,6 @@ function focusable_widget(e, fe) {
 		focusable = v
 		do_update()
 	})
-
-	e.set_disabled = do_update
-	e.prop('disabled', {store: 'var', type: 'bool', attr: true})
 
 	let inh_focus = e.focus
 	e.focus = function() {
@@ -1500,7 +1560,7 @@ component('x-button', 'Input', function(e) {
 	// ajax notifications -----------------------------------------------------
 
 	e.on('load', function(ev, ...args) {
-		e.disabled = ev != 'done'
+		e.disable('loading', ev != 'done')
 		if (e.load_spin)
 			e.icon_box.class('fa-spin', ev == 'start')
 	})

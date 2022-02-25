@@ -408,7 +408,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		let rs = e.filter_rowset(field)
 		let dd = grid_dropdown({
 			lookup_rowset : e.rowset,
-			lookup_col    : 1,
+			lookup_cols   : 1,
 			classes       : 'x-grid-filter-dropdown',
 			mode          : 'fixed',
 			grid: {
@@ -1626,22 +1626,20 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		} else {
 			hit.state = null
 			e.class('col-resize', false)
-			if (!e.disabled) {
-				if (e.widget_editing) {
-					if (ht_col_drag(mx, my, hit, ev)) {
-						hit.state = 'col_drag'
-					}
-				} else if (ht_header_resize(mx, my, hit)) {
-					hit.state = 'header_resize'
-					e.class('col-resize', true)
-				} else if (ht_col_resize(mx, my, hit)) {
-					hit.state = 'col_resize'
-					md_col_resize(mx, my, hit)
-				} else if (ht_col_drag(mx, my, hit, ev)) {
+			if (e.widget_editing) {
+				if (ht_col_drag(mx, my, hit, ev)) {
 					hit.state = 'col_drag'
-				} else if (ht_row_drag(mx, my, hit, ev)) {
-					hit.state = 'row_drag'
 				}
+			} else if (ht_header_resize(mx, my, hit)) {
+				hit.state = 'header_resize'
+				e.class('col-resize', true)
+			} else if (ht_col_resize(mx, my, hit)) {
+				hit.state = 'col_resize'
+				md_col_resize(mx, my, hit)
+			} else if (ht_col_drag(mx, my, hit, ev)) {
+				hit.state = 'col_drag'
+			} else if (ht_row_drag(mx, my, hit, ev)) {
+				hit.state = 'row_drag'
 			}
 			if (hit.state)
 				return false

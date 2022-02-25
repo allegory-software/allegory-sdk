@@ -217,7 +217,7 @@ function sql_rowset(...)
 			for i,f in ipairs(fields) do
 				if f.ref_table then
 					f.lookup_rowset_name, f.display_col = lookup_rowset(f.ref_table)
-					f.lookup_col = f.ref_col
+					f.lookup_cols = f.ref_col
 				end
 			end
 			rs:init_fields()

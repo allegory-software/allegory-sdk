@@ -91,7 +91,7 @@ field attributes:
 		lookup_rowset[_name]|[_id][_url]: rowset to look up values of this field into.
 		lookup_nav     : nav to look up values of this field into.
 		lookup_nav_id  : nav id for creating lookup_nav.
-		lookup_col     : field in lookup_nav that matches this field.
+		lookup_cols    : field(s) in lookup_nav that matches this field.
 		display_col    : field in lookup_nav to use as display_val of this field.
 		lookup_failed_display_val : f(v) -> s; what to use when lookup fails.
 
@@ -302,8 +302,6 @@ editing:
 		can_change_rows
 		auto_edit_first_cell
 		stay_in_edit_mode
-		can_exit_edit_on_errors
-		can_exit_row_on_errors
 		exit_edit_on_lost_focus
 	publishes:
 		e.editor
@@ -521,9 +519,6 @@ function nav_widget(e) {
 	e.prop('save_new_row_on'         , {store: 'var', type: 'enum', default: 'exit_row' , enum_values: ['input', 'exit_edit', 'exit_row', 'manual', 'insert']})
 	e.prop('save_row_remove_on'      , {store: 'var', type: 'enum', default: 'input'    , enum_values: ['input', 'exit_row', 'manual']})
 	e.prop('save_row_move_on'        , {store: 'var', type: 'enum', default: 'input'    , enum_values: ['input', 'manual']})
-
-	e.prop('can_exit_edit_on_errors' , {store: 'var', type: 'bool', default: true , hint: 'allow exiting edit mode on validation errors'})
-	e.prop('can_exit_row_on_errors'  , {store: 'var', type: 'bool', default: false, hint: 'allow changing row on validation errors'})
 
 	e.prop('exit_edit_on_lost_focus' , {store: 'var', type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
 	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
@@ -1025,11 +1020,10 @@ function nav_widget(e) {
 		}
 		// check if new param vals are the same as the old ones to avoid
 		// reloading the rowset if the params didn't really change.
-		if (pv1 === pv0)
-			return
-		if (isarray(pv1) && isarray(pv0) && json(pv1) == json(pv0))
+		if (pv1 === pv0 || isarray(pv1) && isarray(pv0) && json(pv1) == json(pv0))
 			return
 		e.param_vals = pv1
+		e.disable('no_param_vals', pv1 === false)
 		return true
 	}
 
@@ -2492,8 +2486,6 @@ function nav_widget(e) {
 			},
 			message: S('validation_unique', '{0} must be unique')
 				.subst(e.pk_fields && e.pk_fields.map(field => field.text).join(' + ') || ''),
-			must_allow_exit_edit: e.pk_fields && e.pk_fields.length > 1 || null,
-			must_not_allow_exit_row: true,
 		}
 	}
 
@@ -2506,8 +2498,6 @@ function nav_widget(e) {
 			errors.passed = false
 			errors.must_allow_exit_edit =
 				or(errors.must_allow_exit_edit, validator.must_allow_exit_edit)
-			errors.must_not_allow_exit_row =
-				or(errors.must_not_allow_exit_row, validator.must_not_allow_exit_row)
 		}
 	}
 
@@ -2550,7 +2540,6 @@ function nav_widget(e) {
 		if (row.has_errors == false)
 			return true
 
-		let can_exit_row = e.can_exit_row_on_errors
 		let row_has_errors = false
 
 		e.begin_set_state(row)
@@ -2568,11 +2557,8 @@ function nav_widget(e) {
 					errors = e.validate_val(field, val, row)
 					e.set_cell_state(field, 'errors', errors)
 				}
-				if (!errors.passed) {
+				if (!errors.passed)
 					row_has_errors = true
-					if (errors.must_not_allow_exit_row)
-						can_exit_row = false
-				}
 			}
 		}
 
@@ -2582,11 +2568,8 @@ function nav_widget(e) {
 			let error = validator.validate(row)
 			add_validator_error(error, row_errors, validator)
 		}
-		if (!row_errors.passed) {
+		if (!row_errors.passed)
 			row_has_errors = true
-			if (row_errors.must_not_allow_exit_row)
-				can_exit_row = false
-		}
 
 		e.set_row_state('has_errors', row_has_errors)
 		e.set_row_state('errors'    , row_errors)
@@ -2595,11 +2578,10 @@ function nav_widget(e) {
 
 		if (!row_has_errors)
 			return true
-		if (purpose == 'exit_row')
-			if (can_exit_row)
-				return true
-			else
-				notify_errors(row)
+		if (purpose == 'exit_row') {
+			notify_errors(row)
+			return true
+		}
 		return false
 	}
 
@@ -2672,6 +2654,8 @@ function nav_widget(e) {
 		// save rowset if necessary.
 		if (!invalid)
 			if (ev && ev.input) // from UI
+				if (e.save_on_typing && ev.typing
+					|| e.save_on_pick_value && ev.value_picked)
 				if (must_save('input'))
 					e.save(ev)
 
@@ -2796,16 +2780,6 @@ function nav_widget(e) {
 		return true
 	}
 
-	function can_exit_edit(row, field) {
-		let errors = e.cell_errors(row, field)
-		if (!errors || errors.passed)
-			return true
-		else if (e.can_exit_edit_on_errors)
-			return true
-		else
-			return errors.must_allow_exit_edit
-	}
-
 	e.revert_cell = function(row, field) {
 		e.reset_cell_val(row, field, e.cell_val(row, field))
 	}
@@ -2825,9 +2799,6 @@ function nav_widget(e) {
 
 		if (cancel)
 			e.revert_cell(row, field)
-		else
-			if (!can_exit_edit(row, field))
-				return false
 
 		if (!e.fire('exit_edit', e.focused_row_index, e.focused_field_index, cancel))
 			if (!cancel)
@@ -2867,19 +2838,8 @@ function nav_widget(e) {
 		if (!cancel) { // from UI
 			if (!e.validate_row(row, 'exit_row'))
 				return false
-			if (must_save('exit_row')) {
-				if (e.can_exit_row_on_errors) {
-					// async save: errors can come later, meanwhile we exit the row.
-					e.save(ev)
-				} else {
-					// sync save: refuse to exit the row now, but carry a future
-					// focus_cell() call in ev.on_row_saved to be executed when/if
-					// the row is saved successfuly.
-					assert(ev.on_row_saved)
-					e.save(ev)
-					return false
-				}
-			}
+			if (must_save('exit_row'))
+				e.save(ev)
 		}
 		return true
 	}
@@ -2925,7 +2885,7 @@ function nav_widget(e) {
 			return
 		if (on && !field.lookup_nav_reset) {
 			field.lookup_nav_reset = function() {
-				field.lookup_fields = ln.flds(field.lookup_col || ln.pk_fields)
+				field.lookup_fields = ln.flds(field.lookup_cols || ln.pk_fields)
 				field.display_field = ln.fld(field.display_col || ln.name_col)
 				field.align = field.display_field && field.display_field.align
 				e.fire('display_vals_changed')
@@ -2945,7 +2905,7 @@ function nav_widget(e) {
 		if (field.lookup_nav_reset) {
 			ln.on('reset'       , field.lookup_nav_reset, on)
 			ln.on('rows_changed', field.lookup_nav_display_vals_changed, on)
-			for (let col of field.lookup_col.names())
+			for (let col of field.lookup_cols.names())
 				ln.on('cell_state_changed_for_'+col,
 				field.lookup_nav_cell_state_changed, on)
 			ln.on('cell_state_changed_for_'+(field.display_col || ln.name_col),
@@ -2957,10 +2917,10 @@ function nav_widget(e) {
 		let s = field.null_text
 		if (!field.null_lookup_col)
 			return s
-		let lf = e.all_fields[field.null_lookup_col]      ; if (!lf || !lf.lookup_col) return s
+		let lf = e.all_fields[field.null_lookup_col]      ; if (!lf || !lf.lookup_cols) return s
 		let ln = lf.lookup_nav                            ; if (!ln) return s
 		let nfv = e.cell_val(row, lf)
-		let ln_row = ln.lookup(lf.lookup_col, [nfv])[0]   ; if (!ln_row) return s
+		let ln_row = ln.lookup(lf.lookup_cols, [nfv])[0]  ; if (!ln_row) return s
 		let dcol = or(field.null_display_col, field.name)
 		let df = ln.all_fields[dcol]                      ; if (!df) return s
 		return ln.cell_display_val(ln_row, df)
@@ -3816,11 +3776,13 @@ function nav_widget(e) {
 			slow: save_slow,
 			slow_timeout: e.slow_timeout,
 			ev: ev,
+			dont_send: true,
 		})
 		rows_moved = false
 		add_request(req)
 		set_save_state(source_rows, req)
 		e.fire('saving', true)
+		req.send()
 	}
 
 	e.can_save_changes = function() {
@@ -3851,7 +3813,7 @@ function nav_widget(e) {
 			on_row_saved()
 		} else if (e.rowset_url) {
 			if (e.changed_rows)
-				save_to_server(ev)
+				await save_to_server(ev)
 		} else  {
 			e.commit_changes()
 			on_row_saved()
@@ -4120,7 +4082,7 @@ function nav_widget(e) {
 			oe = null
 		}
 		e.xoff()
-		e.disabled = on
+		e.disable('loading', on)
 		e.xon()
 		if (!on)
 			return
@@ -4564,7 +4526,7 @@ component('x-lookup-dropdown', function(e) {
 			opt.rowset_url  = e.field.lookup_rowset_url
 		}
 
-		opt.val_col     = e.field.lookup_col
+		opt.val_col     = e.field.lookup_cols
 		opt.display_col = e.field.display_col
 		opt.theme       = e.theme
 
@@ -4647,7 +4609,7 @@ component('x-lookup-dropdown', function(e) {
 
 	all_field_types.validator_lookup = field => (field.lookup_nav && {
 		validate : v => v == null
-			|| field.lookup_nav.lookup(field.lookup_col, [v]).length > 0,
+			|| field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
 		message  : S('validation_lookup',
 			'Value must be in the list of allowed values.'),
 	})
