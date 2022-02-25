@@ -3813,7 +3813,7 @@ function nav_widget(e) {
 			on_row_saved()
 		} else if (e.rowset_url) {
 			if (e.changed_rows)
-				await save_to_server(ev)
+				save_to_server(ev)
 		} else  {
 			e.commit_changes()
 			on_row_saved()
