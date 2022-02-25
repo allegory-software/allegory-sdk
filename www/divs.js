@@ -585,12 +585,12 @@ method(Element, 'do_after', function(method, func) {
 
 /* events & event wrappers ---------------------------------------------------
 
-NOTE: these wrappers block mouse events on any target with attr `disabled`.
-`pointer-events: none` is not a solution because it makes click-through popups.
+NOTE: these wrappers block mouse events on any target that has attr `disabled`
+or that has any ancestor with attr `disabled`. `pointer-events: none` is not
+a solution because it makes click-through popups.
 
 NOTE: preventing focusing is a matter of not-setting/removing attr `tabindex`
 except for input elements that must have an explicit `tabindex=-1`.
-
 */
 
 {
