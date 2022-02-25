@@ -2393,10 +2393,11 @@ component('x-timepicker', 'Input', function(e) {
 		function set_val(_, ev) {
 			if (!(ev && ev.input))
 				return // called by update_view()
-			let h = e.sel_h.input_val
-			let m = e.sel_m.input_val
-			let s = e.sel_s.input_val
+			let h = e.sel_h.input_val || '00'
+			let m = e.sel_m.input_val || '00'
+			let s = e.sel_s.input_val || '00'
 			let t = h != null && m != null && s != null ? h + ':' + m + ':' + s : null
+			pr(h, m, s, t)
 			e.set_val(t, {input: e})
 		}
 		e.sel_h.on('input_val_changed', set_val)
