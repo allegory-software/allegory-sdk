@@ -21,8 +21,10 @@ JSON `null` is converted to cjson.null.
 
 ### Tables
 
-By default, empty tables are encoded as [] instead of {}.
-This can be changed with cjson.encode_empty_table_as_array(false).
+By default, empty tables are encoded as {}. This can be changed with
+cjson.encode_empty_table_as_object(false). Alternatively, cjson.empty_array
+can be used to encode empty arrays and cjson.array_mt metatable can be set
+on tables to encode the array part of the table (up to #t) as array.
 
 By default, Lua CJSON will reject JSON with arrays and/or objects nested
 more than 1000 levels deep. This can be changed with cjson.decode_max_depth(depth).
@@ -34,7 +36,7 @@ By default, numbers incompatible with the JSON specification
 with cjson.decode_invalid_numbers(false).
 
 By default, Lua CJSON encodes numbers with 14 significant digits. This can
-be changed with cjson.encode_number_precision(precision).
+be changed to up to 16 digits with cjson.encode_number_precision(precision).
 
 ### Sparse arrays
 

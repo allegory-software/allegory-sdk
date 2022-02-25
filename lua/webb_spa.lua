@@ -75,8 +75,6 @@ client_config'google_client_id'
 --pass required config values to the client
 action['config.js'] = function()
 
-	local cjson = require'cjson'
-
 	--required config values must be initialized.
 	--NOTE: these must match the real defaults that are set in their places of usage.
 	config('default_lang', 'en')

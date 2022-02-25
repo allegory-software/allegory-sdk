@@ -25,7 +25,7 @@ FEATURES
 
 EXPORTS
 
-	glue pp mustache
+	glue pp
 
 CONFIG API
 
@@ -270,7 +270,7 @@ local pp = require'pp'
 local uri = require'uri'
 local errors = require'errors'
 local sock = require'sock'
-local cjson = require'cjson'
+local cjson = require'cjson'.new()
 local b64 = require'base64'.encode
 local fs = require'fs'
 local path = require'path'
@@ -1127,7 +1127,8 @@ end
 
 --json API -------------------------------------------------------------------
 
-cjson.encode_sparse_array(false, 0, 0) --encode all sparse arrays
+cjson.encode_sparse_array(false, 0, 0) --encode all sparse arrays.
+cjson.encode_empty_table_as_object(false) --encode empty tables as arrays.
 
 null = cjson.null
 
