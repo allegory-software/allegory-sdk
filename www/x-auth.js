@@ -32,7 +32,7 @@ let init_usr_nav = function() {
 	let nav = bare_nav({
 		id: 'usr_nav',
 		rowset_name: 'usr',
-		save_row_on: 'input',
+		save_on_input: true,
 	})
 
 	nav.on('reset', function(event) {

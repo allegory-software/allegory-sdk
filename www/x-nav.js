@@ -332,10 +332,12 @@ loading from server:
 
 saving:
 	config:
-		save_row_on         : exit_edit : input | exit_edit | exit_row | manual
-		save_new_row_on     : exit_row  : input | exit_edit | exit_row | manual | insert
-		save_row_remove_on  : input     : input | exit_row  | manual
-		save_row_move_on    : input     : input | manual
+		e.save_on_add_row         false
+		e.save_on_remove_row      true
+		e.save_on_input           false
+		e.save_on_exit_edit       false
+		e.save_on_exit_row        true
+		e.save_on_move_row        true
 		action_band_visible : auto      : auto | always | no
 	publishes:
 		e.can_save_changes()
@@ -343,7 +345,7 @@ saving:
 
 loading & saving from/to memory:
 	config
-		save_row_states
+		e.save_row_states
 	needs:
 		e.static_rowset
 		e.row_vals
@@ -510,15 +512,9 @@ function nav_widget(e) {
 
 	e.prop('save_on_add_row'         , {store: 'var', type: 'bool', default: false})
 	e.prop('save_on_remove_row'      , {store: 'var', type: 'bool', default: true })
-	e.prop('save_on_typing'          , {store: 'var', type: 'bool', default: false})
-	e.prop('save_on_pick_value'      , {store: 'var', type: 'bool', default: false})
+	e.prop('save_on_input'           , {store: 'var', type: 'bool', default: false})
 	e.prop('save_on_exit_edit'       , {store: 'var', type: 'bool', default: false})
 	e.prop('save_on_exit_row'        , {store: 'var', type: 'bool', default: true })
-
-	e.prop('save_row_on'             , {store: 'var', type: 'enum', default: 'exit_edit', enum_values: ['input', 'exit_edit', 'exit_row', 'manual']})
-	e.prop('save_new_row_on'         , {store: 'var', type: 'enum', default: 'exit_row' , enum_values: ['input', 'exit_edit', 'exit_row', 'manual', 'insert']})
-	e.prop('save_row_remove_on'      , {store: 'var', type: 'enum', default: 'input'    , enum_values: ['input', 'exit_row', 'manual']})
-	e.prop('save_row_move_on'        , {store: 'var', type: 'enum', default: 'input'    , enum_values: ['input', 'manual']})
 
 	e.prop('exit_edit_on_lost_focus' , {store: 'var', type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
 	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
@@ -2527,13 +2523,15 @@ function nav_widget(e) {
 	}
 
 	function notify_errors(row) {
+		let a = []
 		for (let err of (row.errors || empty_array))
 			if (!err.passed && err.message)
-				e.notify('error', err.message)
+				ap.push(err.message)
 		for (let f of e.all_fields)
 			for (let err of (e.cell_errors(row, f) || empty_array))
 				if (!err.passed && err.message)
-					e.notify('error', err.message)
+					a.push(f.text + ': ' + err.message)
+		e.notify('error', a.join('\n'))
 	}
 
 	e.validate_row = function(row, purpose) {
@@ -2604,13 +2602,6 @@ function nav_widget(e) {
 		return false
 	}
 
-	function must_save(when) {
-		let row = e.focused_row
-		if (!row) return
-		let opt = row.is_new ? e.save_new_row_on : e.save_row_on
-		return opt == when
-	}
-
 	e.set_cell_val = function(row, col, val, ev) {
 
 		let field = fld(col)
@@ -2654,9 +2645,7 @@ function nav_widget(e) {
 		// save rowset if necessary.
 		if (!invalid)
 			if (ev && ev.input) // from UI
-				if (e.save_on_typing && ev.typing
-					|| e.save_on_pick_value && ev.value_picked)
-				if (must_save('input'))
+				if (or(e.save_on_input, field.save_on_input))
 					e.save(ev)
 
 	}
@@ -2815,7 +2804,7 @@ function nav_widget(e) {
 			e.focus()
 
 		if (!cancel) // from UI
-			if (must_save('exit_edit'))
+			if (e.save_on_exit_edit)
 				e.save(ev)
 
 		return true
@@ -2838,7 +2827,7 @@ function nav_widget(e) {
 		if (!cancel) { // from UI
 			if (!e.validate_row(row, 'exit_row'))
 				return false
-			if (must_save('exit_row'))
+			if (e.save_on_exit_row)
 				e.save(ev)
 		}
 		return true
@@ -3112,7 +3101,7 @@ function nav_widget(e) {
 
 		if (rows_added && !from_server)
 			if (ev.input) // from UI
-				if (e.save_new_row_on == 'insert')
+				if (e.save_on_add_row)
 					e.save(ev)
 
 		e.end_update()
@@ -3245,7 +3234,7 @@ function nav_widget(e) {
 			e.update({state: rows_changed, rows: !!removed_rows.size})
 
 		if (marked_rows.size)
-			if (e.save_row_remove_on == 'input')
+			if (e.save_on_remove_row)
 				e.save(ev)
 
 		e.end_update()
@@ -3438,7 +3427,7 @@ function nav_widget(e) {
 			update_pos_field(old_parent_row, parent_row)
 
 			rows_moved = true
-			if (e.save_row_move_on == 'input')
+			if (e.save_on_move_row)
 				e.save(ev)
 			else
 				update_action_band()

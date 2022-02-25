@@ -1821,7 +1821,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 		// insert with the arrow down key on the last focusable row.
 		if (key == down_arrow && !shift) {
-			if (e.save_new_row_on != 'insert') { // not really compatible behavior...
+			if (!e.save_on_add_row) { // not really compatible behavior...
 				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
 					if (e.insert_rows(1, {
 						input: e,
