@@ -699,6 +699,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-style: dotted;
 	border-color: var(--x-border-light);
 	border-radius: var(--x-border-radius-input);
+	background-color: var(--x-bg-input);
 }
 
 .x-widget:focus-within > .x-focus-box {
@@ -2536,6 +2537,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding-bottom : var(--x-padding-y-input-bottom);
 	border: var(--x-item-border-width) solid #00000000;
 	border-right-color: var(--x-faint);
+	border-bottom-color: var(--x-faint);
 	min-width: 20px;
 }
 
@@ -3231,6 +3233,7 @@ body:not([theme=dark]) [theme=dark] {
 
 [theme=dark] .x-focus-box {
 	background-color: #060606;
+	border-color: transparent;
 }
 
 [theme=dark]::-webkit-scrollbar,
