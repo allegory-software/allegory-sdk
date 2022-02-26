@@ -346,17 +346,18 @@ function http:chained_decoder(write, encodings)
 	return write
 end
 
---TODO: avoid string creation
 function http:zlib_encoder(format, content, content_size)
 	assert(self.zlib, 'zlib not loaded')
-	if type(content) == 'string' then
-		return self.zlib.deflate(content, '', nil, format)
-	elseif type(content) == 'cdata' then
-		local s = ffi.string(content, content_size)
-		return self.zlib.deflate(s, '', nil, format)
-	elseif type(content) == 'function' then
+	if    type(content) == 'string'
+		or type(content) == 'function'
+		or type(content) == 'cdata'
+	then
+		if type(content) == 'cdata' then
+			assert(content_size)
+			content = glue.buffer_reader(content, content_size)
+		end
 		return (self.cowrap(function(yield)
-			self.zlib.deflate(content, yield, nil, format)
+			return self.zlib.deflate(content, yield, nil, format)
 		end))
 	else
 		assert(false, type(content))
