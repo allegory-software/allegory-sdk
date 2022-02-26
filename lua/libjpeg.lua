@@ -11,7 +11,7 @@
 	  partial_loading                 load broken images partially (true)
 	  warning                         f(msg, level) for non-fatal errors
 	  read_buffer                     the read buffer to use (optional)
-	  read_buffer_size                size of read_buffer
+	  read_buffer_size                size of read_buffer (64K)
 	jpg.format, jpg.w, jpg.h          JPEG file native format and dimensions
 	jpg.progressive                   JPEG file is progressive
 	jpg.jfif                          JFIF marker (see code)
@@ -80,7 +80,7 @@ libjpeg.save(opt)
 	* dct_method   : 'accurate', 'fast', 'float' ('accurate').
 	* optimize_coding : optimize Huffmann tables.
 	* smoothing    : smoothing factor (0..100).
-	* write_buffer_size : internal buffer size (4096).
+	* write_buffer_size : internal buffer size (64K).
 	* write_buffer : internal buffer (default is to internally allocate one).
 
 ]=]
@@ -318,14 +318,14 @@ local function open(opt)
 
 	--create the buffer filling function for suspended I/O
 	local partial_loading = opt.partial_loading ~= false
-	local sz   = opt.read_buffer_size or 4096
+	local sz   = opt.read_buffer_size or 64 * 1024
 	local buf  = opt.read_buffer or ffi.new('char[?]', sz)
 	local bytes_to_skip = 0
 
 	--create a skip buffer if the reader doesn't support seeking.
 	local skip_buf_sz, skip_buf = 1/0
 	if opt.skip_buffer ~= false then
-		skip_buf_sz = opt.skip_buffer_size or 4096
+		skip_buf_sz = opt.skip_buffer_size or 64 * 1024
 		skip_buf    = opt.skip_buffer or ffi.new('char[?]', skip_buf_sz)
 	end
 
@@ -528,7 +528,7 @@ local function save(opt)
 		local finish = opt.finish or glue.pass
 
 		--create the dest. buffer
-		local sz = opt.write_buffer_size or 4096
+		local sz = opt.write_buffer_size or 64 * 1024
 		local buf = opt.write_buffer or ffi.new('char[?]', sz)
 
 		--create destination callbacks
