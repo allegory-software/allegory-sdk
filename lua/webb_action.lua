@@ -167,7 +167,7 @@ local function plain_file_handler(path)
 	return function()
 		set_content_size(file_size)
 		local filebuf_size = math.min(file_size, 65536)
-		local filebuf = ffi.new('char[?]', filebuf_size)
+		local filebuf = glue.u8a(filebuf_size)
 		while true do
 			local len, err = f:read(filebuf, filebuf_size)
 			if not len then

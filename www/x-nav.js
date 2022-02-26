@@ -2645,7 +2645,7 @@ function nav_widget(e) {
 		// save rowset if necessary.
 		if (!invalid)
 			if (ev && ev.input) // from UI
-				if (or(e.save_on_input, field.save_on_input))
+				if (e.save_on_input)
 					e.save(ev)
 
 	}

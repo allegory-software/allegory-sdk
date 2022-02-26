@@ -44,6 +44,15 @@
 		min_w            : px            min grid column width
 		max_w            : px            max grid column width
 		max_char_w       : n             max grid column width in characters
+		hour_step        : n             for the time picker
+		minute_step      : n             for the time picker
+		second_step      : n             for the time picker
+		has_seconds      : f             time has seconds
+
+		lookup_rowset_name:              lookup rowset name
+		lookup_cols      :               lookup rowset cols
+		display_col      :               lookup display col
+		name_col         :               default display col when used as lookup rowset
 
 	Methods to implement:
 		- load_rows(result, params)
@@ -91,7 +100,6 @@ local client_field_attrs = {
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, max_char_w=1,
 	hour_step=1, minute_step=1, second_step=1, has_seconds=1,
-	icon=1, bare=1,
 }
 
 function virtual_rowset(init, ...)

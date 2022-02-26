@@ -2562,6 +2562,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-grid-header-cell-table {
 	width: 100%;               /* expand to fit column width */
 	table-layout: fixed;       /* don't expand based on content */
+	border-collapse: collapse; /* kill additional table borders */
 }
 
 .x-grid-header-title-td {
