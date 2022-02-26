@@ -463,6 +463,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	filter: contrast(.4);
 }
 
+/* attention animation */
+
+@keyframes x-attention {
+	from { transform: scale(1.5); outline: 5px solid var(--x-fg); outline-offset: 5px; }
+}
+
 /* action band ------------------------------------------------------------ */
 
 .x-action-band {
@@ -1364,16 +1370,16 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	color: var(--x-fg-disabled-inverted);
 }
 
-.x-tagsedit-tag:hover {
+.x-tagsedit:not([disabled]) > .x-tagsedit-tag:hover {
 	cursor: pointer;
 	background-color: var(--x-smoke);
 }
 
-.x-tagsedit-tag:hover > .x-tagsedit-tag-xbutton {
+.x-tagsedit:not([disabled]) > .x-tagsedit-tag:hover > .x-tagsedit-tag-xbutton {
 	color: inherit;
 }
 
-.x-tagsedit.invalid > .x-tagsedit-tag:hover > .x-tagsedit-tag-xbutton {
+.x-tagsedit:not([disabled]).invalid > .x-tagsedit-tag:hover > .x-tagsedit-tag-xbutton {
 	color: var(--x-fg-error);
 }
 
@@ -1473,7 +1479,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	position: relative; /* for item moving */
 }
 
-.x-listbox-item:hover {
+.x-listbox:not([disabled]) > .x-listbox-item:hover {
 	background-color: var(--x-faint);
 }
 
@@ -1691,7 +1697,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 {
 	display: none;
 }
-
 
 .x-timepicker[has_seconds] {
 	grid-template-columns: 1fr 1fr 1fr;

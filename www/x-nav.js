@@ -544,6 +544,7 @@ function nav_widget(e) {
 			abort_all_requests()
 			e.unfocus_focused_cell({cancel: true})
 			init_all()
+			disable_all(false)
 		}
 	})
 
@@ -2587,6 +2588,7 @@ function nav_widget(e) {
 		for (let field of e.all_fields)
 			if (field != exclude_field && e.cell_modified(row, field))
 				return true
+		return false
 	}
 
 	e.row_is_user_modified = function(row, including_invalid_values) {
@@ -2666,6 +2668,10 @@ function nav_widget(e) {
 		e.set_cell_state(field, 'val'      , val)
 		e.set_cell_state(field, 'errors'   , undefined)
 		e.set_row_state('has_errors', undefined)
+		e.set_row_state('modified'  , cells_modified(row, field), false)
+
+		if (!row.modified)
+			row_unchanged(row)
 
 		if (val !== cur_val)
 			update_indices('val_changed', row, field, val)
@@ -2734,7 +2740,36 @@ function nav_widget(e) {
 		return false
 	}
 
+	function clicked_on_disabled(ev) {
+		if (ev.type != 'pointerdown')
+			return
+		if (e.positionally_contains(ev.target))
+			return // clicked inside the grid
+		if (e.action_band) {
+
+			let save_btn = e.action_band.buttons.save
+			if (!save_btn.disabled) {
+				save_btn.style.animation = 'none'
+				raf(function() {
+					save_btn.style.animation = 'x-attention .5s'
+				})
+			}
+
+			let cancel_btn = e.action_band.buttons.cancel
+			if (!cancel_btn.disabled) {
+				cancel_btn.style.animation = 'none'
+				raf(function() {
+					cancel_btn.style.animation = 'x-attention .5s'
+				})
+			}
+		}
+	}
+
+	let all_disabled = false
 	function disable_all(disabled) {
+		disabled = !!disabled
+		if (all_disabled == disabled)
+			return
 
 		// skip set: self and all its children.
 		let skip = set()
@@ -2750,8 +2785,9 @@ function nav_widget(e) {
 			if (!skip.has(ce))
 				ce.disable('grid_enter_edit', disabled)
 
+		document.on('stopped_event', clicked_on_disabled, disabled)
+		all_disabled = disabled
 	}
-
 
 	e.enter_edit = function(editor_state, focus, cell) {
 		let row = e.focused_row
@@ -2784,8 +2820,6 @@ function nav_widget(e) {
 
 		if (focus != false)
 			e.editor.focus()
-
-		disable_all(true)
 
 		return true
 	}
@@ -2827,8 +2861,6 @@ function nav_widget(e) {
 		if (!cancel) // from UI
 			if (e.save_on_exit_edit)
 				e.save(ev)
-
-		disable_all(false)
 
 		return true
 	}
@@ -4261,14 +4293,14 @@ function nav_widget(e) {
 			e.add(e.action_band)
 		}
 
+		let sn = e.selected_rows.size
+		let an = count_changed_rows('is_new' )
+		let dn = count_changed_rows('removed')
+		let cn = e.changed_rows ? e.changed_rows.size : 0
+		let un = cn - an - dn
+
 		let b = e.action_band
 		if (b) {
-
-			let sn = e.selected_rows.size
-			let an = count_changed_rows('is_new' )
-			let dn = count_changed_rows('removed')
-			let cn = e.changed_rows ? e.changed_rows.size : 0
-			let un = cn - an - dn
 
 			b.buttons.reload.disabled = cn || !e.rowset_url
 
@@ -4308,6 +4340,8 @@ function nav_widget(e) {
 
 			b.show(e.action_band_visible != 'auto' || e.changed_rows)
 		}
+
+		disable_all(!!cn)
 
 	}
 
