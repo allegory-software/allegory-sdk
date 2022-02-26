@@ -264,6 +264,7 @@ property(Element, 'index', {
 function iselem(e) { return e instanceof Element }
 function isnode(e) { return e instanceof Node }
 
+// NOTE: spec says the search is depth-first and we use that.
 alias(Element         , '$', 'querySelectorAll')
 alias(DocumentFragment, '$', 'querySelectorAll')
 function $(s) { return document.querySelectorAll(s) }
@@ -859,9 +860,9 @@ function on_dom_load(fn) {
 }
 
 function init_components() {
-	root = document.documentElement
-	body = document.body
-	head = document.head
+	root = document.documentElement  // for debugging, don't use in code.
+	body = document.body // for debugging, don't use in code.
+	head = document.head // for debugging, don't use in code.
 	root.init_child_components()
 	root.init_component()
 	root.bind(true)
