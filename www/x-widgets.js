@@ -1130,7 +1130,18 @@ function disablable_widget(e) {
 			ce.disable(this, disabled)
 	}
 
-	e.prop('disabled', {store: 'var', type: 'bool', attr: true, default: false})
+	e.property('disabled',
+		function() {
+			return this.hasattr('disabled')
+		},
+		function(disabled) {
+			disabled = !!disabled
+			let disabled0 = this.hasattr('disabled')
+			if (disabled0 == disabled)
+				return
+			this.bool_attr('disabled', disabled || null)
+			e.set_disabled(disabled, disabled0)
+		})
 
 	let df
 	e.disable = function(reason, disabled) {
