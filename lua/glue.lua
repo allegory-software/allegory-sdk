@@ -2013,7 +2013,7 @@ end
 function glue.readall(read, self, ...)
 	local get, put, collect = glue.dynarray_loader()
 	while true do
-		local buf, sz = get(4096)
+		local buf, sz = get(16 * 1024)
 		local len, err = read(self, buf, sz, ...)
 		if not len then return nil, err, collect() end --short read
 		if len == 0 then return collect() end --eof
