@@ -4293,7 +4293,6 @@ function nav_widget(e) {
 		let sn = e.selected_rows.size
 		let an = count_changed_rows('is_new' )
 		let dn = count_changed_rows('removed')
-		let en = count_changed_rows('has_errors')
 		let cn = e.changed_rows ? e.changed_rows.size : 0
 		let un = cn - an - dn
 
@@ -4339,7 +4338,7 @@ function nav_widget(e) {
 			b.show(e.action_band_visible != 'auto' || e.changed_rows)
 		}
 
-		disable_all(!!cn || !!en)
+		disable_all(!!cn)
 
 	}
 
