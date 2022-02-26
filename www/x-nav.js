@@ -2627,7 +2627,6 @@ function nav_widget(e) {
 		let row_has_errors = invalid ? true : undefined
 		let cell_modified = !invalid && val !== cur_val
 		let row_modified = cell_modified || cells_modified(row, field)
-		let row_has_errors_changed = row_has_errors !== row.has_errors
 
 		// update state fully without firing change events.
 		e.begin_set_state(row, ev)
@@ -2644,8 +2643,6 @@ function nav_widget(e) {
 			row_changed(row)
 		else if (!row.is_new)
 			row_unchanged(row)
-		else if (row_has_errors_changed)
-			update_action_band()
 
 		// save rowset if necessary.
 		if (!invalid)
@@ -2759,6 +2756,8 @@ function nav_widget(e) {
 		disabled = !!disabled
 		if (all_disabled == disabled)
 			return
+		if (e.hidden)
+			return // bare nav
 
 		// skip set: self, all its parents and all its children.
 		let skip = set()
@@ -2767,8 +2766,16 @@ function nav_widget(e) {
 				skip.add(pe)
 			pe = pe.parent
 		}
-		for (let ce of e.$('.x-widget'))
+		for (let ce of e.$('.x-widget:not([hidden])'))
 			skip.add(ce)
+
+		if (e.editor)
+			for (let ce of document.body.$(':scope > .x-widget.popup:not([hidden])'))
+				if (e.editor.positionally_contains(ce)) {
+					skip.add(ce)
+					for (let cce of ce.$('.x-widget:not([hidden])'))
+						skip.add(cce)
+				}
 
 		for (let ce of document.body.$('.x-widget')) {
 			if (skip.has(ce))
