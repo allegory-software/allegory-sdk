@@ -198,7 +198,7 @@ end
 
 local function inflate_deflate(init)
 	return function(read, write, bufsize, ...)
-		bufsize = bufsize or 16384
+		bufsize = bufsize or 64 * 1024
 
 		local strm, flate = init(...)
 
