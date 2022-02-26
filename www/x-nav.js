@@ -2759,7 +2759,7 @@ function nav_widget(e) {
 		if (e.hidden)
 			return // bare nav
 
-		// skip set: self, all its parents and all its children.
+		// skip set: self, all its parents, all its children and all its popups.
 		let skip = set()
 		let pe = e; while (pe) {
 			if (pe.iswidget)
@@ -2768,14 +2768,12 @@ function nav_widget(e) {
 		}
 		for (let ce of e.$('.x-widget:not([hidden])'))
 			skip.add(ce)
-
-		if (e.editor)
-			for (let ce of document.body.$(':scope > .x-widget.popup:not([hidden])'))
-				if (e.editor.positionally_contains(ce)) {
-					skip.add(ce)
-					for (let cce of ce.$('.x-widget:not([hidden])'))
-						skip.add(cce)
-				}
+		for (let ce of document.body.$(':scope > .x-widget.popup'))
+			if (e.positionally_contains(ce)) {
+				skip.add(ce)
+				for (let cce of ce.$('.x-widget'))
+					skip.add(cce)
+			}
 
 		for (let ce of document.body.$('.x-widget')) {
 			if (skip.has(ce))
@@ -2828,8 +2826,8 @@ function nav_widget(e) {
 		return true
 	}
 
-	e.revert_cell = function(row, field) {
-		e.reset_cell_val(row, field, e.cell_val(row, field))
+	e.revert_cell = function(row, field, ev) {
+		e.reset_cell_val(row, field, e.cell_val(row, field), ev)
 	}
 
 	e.revert_row = function(row) {

@@ -757,7 +757,7 @@ function editbox_widget(e, opt) {
 		e.on('keydown', function(key, shift, ctrl) {
 			if (key == 'Escape' && !e.hasclass('grid-editor')) {
 				if (e.field && e.row) {
-					e.nav.revert_cell(e.row, e.field)
+					e.nav.revert_cell(e.row, e.field, {input: e})
 					return false
 				}
 			}
@@ -2113,8 +2113,8 @@ component('x-calendar', 'Input', function(e) {
 	}
 
 	function update_ym(t) {
-		e.sel_month.val = month_of(t)
-		e.sel_year .val =  year_of(t)
+		e.sel_month.reset_val(month_of(t))
+		e.sel_year .reset_val( year_of(t))
 	}
 
 	function update_hms(t) {
@@ -2412,9 +2412,9 @@ component('x-timepicker', 'Input', function(e) {
 	})
 
 	function update_view(t) {
-		e.sel_h.set_val(hh(t))
-		e.sel_m.set_val(mm(t))
-		e.sel_s.set_val(ss(t))
+		e.sel_h.reset_val(hh(t))
+		e.sel_m.reset_val(mm(t))
+		e.sel_s.reset_val(ss(t))
 		e.sel_h.scroll_to_focused_cell(true)
 		e.sel_m.scroll_to_focused_cell(true)
 		e.sel_s.scroll_to_focused_cell(true)
