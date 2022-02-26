@@ -38,6 +38,7 @@ FILE I/O
 	f:buffered_read([bufsize]) -> read(buf, sz)   get a buffered read function
 OPEN FILE ATTRIBUTES
 	f:attr([attr]) -> val|t                       get/set attribute(s) of open file
+	f:size() -> n                                 get file size
 DIRECTORY LISTING
 	fs.dir(dir, [dot_dirs]) -> d, next            directory contents iterator
 	d:next() -> name, d                           call the iterator explicitly
@@ -302,7 +303,7 @@ f:buffered_read([bufsize]) -> read(buf, sz)
 
 	Returns a `read(buf, sz) -> read_sz` function which reads ahead from file
 	in order to lower the number of syscalls. `bufsize` specifies the buffer's
-	size (default is `4096`).
+	size (default is 64K).
 
 Open file attributes ---------------------------------------------------------
 
@@ -752,9 +753,14 @@ end
 
 --returns a read(buf, maxsz) -> sz function which reads ahead from file.
 function file.buffered_read(f, bufsize)
-	local ptr_ct = ffi.typeof'uint8_t*'
-	local buf_ct = ffi.typeof'uint8_t[?]'
-	local bufsize = bufsize or 4096
+	local ptr_ct = glue.u8p
+	local buf_ct = glue.u8a
+	local o1, err = f:size()
+	local o0, err = f:seek'cur'
+	if not (o0 and o1) then
+		return function() return nil, err end
+	end
+	local bufsize = math.min(bufsize or 64 * 1024, o1 - o0)
 	local buf = buf_ct(bufsize)
 	local ofs, len = 0, 0
 	local eof = false
@@ -860,7 +866,7 @@ function file:readall(expires)
 		local offset, err = self:seek(); if not offset then return nil, err end
 		local sz = size - offset
 		if sz == 0 then return nil, 0 end
-		local buf = ffi.new(u8a, sz)
+		local buf = u8a(sz)
 		local n, err = self:read(buf, sz)
 		if not n then return nil, err end
 		if n < sz then return nil, 'partial', buf, n end
@@ -1016,6 +1022,10 @@ function file.attr(f, attr)
 	else
 		return file_attr_get(f, attr)
 	end
+end
+
+function file.size(f)
+	return f:attr'size'
 end
 
 local function attr_args(attr, deref)
