@@ -2734,6 +2734,25 @@ function nav_widget(e) {
 		return false
 	}
 
+	function disable_all(disabled) {
+
+		// skip set: self and all its children.
+		let skip = set()
+		let pe = e; while (pe) {
+			if (pe.iswidget)
+				skip.add(pe)
+			pe = pe.parent
+		}
+		for (let ce of e.$('.x-widget'))
+			skip.add(ce)
+
+		for (let ce of document.body.$('.x-widget'))
+			if (!skip.has(ce))
+				ce.disable('grid_enter_edit', disabled)
+
+	}
+
+
 	e.enter_edit = function(editor_state, focus, cell) {
 		let row = e.focused_row
 		let field = e.focused_field
@@ -2765,6 +2784,8 @@ function nav_widget(e) {
 
 		if (focus != false)
 			e.editor.focus()
+
+		disable_all(true)
 
 		return true
 	}
@@ -2806,6 +2827,8 @@ function nav_widget(e) {
 		if (!cancel) // from UI
 			if (e.save_on_exit_edit)
 				e.save(ev)
+
+		disable_all(false)
 
 		return true
 	}
@@ -4456,7 +4479,7 @@ global_val_nav = function() {
 			rows: [[]],
 		},
 	})
-	root.add(nav)
+	document.head.add(nav)
 	nav.focus_cell(true, false)
 	return nav
 }
