@@ -2627,6 +2627,7 @@ function nav_widget(e) {
 		let row_has_errors = invalid ? true : undefined
 		let cell_modified = !invalid && val !== cur_val
 		let row_modified = cell_modified || cells_modified(row, field)
+		let row_has_errors_changed = row_has_errors !== row.has_errors
 
 		// update state fully without firing change events.
 		e.begin_set_state(row, ev)
@@ -2643,6 +2644,8 @@ function nav_widget(e) {
 			row_changed(row)
 		else if (!row.is_new)
 			row_unchanged(row)
+		else if (row_has_errors_changed)
+			update_action_band()
 
 		// save rowset if necessary.
 		if (!invalid)
@@ -2746,22 +2749,8 @@ function nav_widget(e) {
 		if (e.positionally_contains(ev.target))
 			return // clicked inside the grid
 		if (e.action_band) {
-
-			let save_btn = e.action_band.buttons.save
-			if (!save_btn.disabled) {
-				save_btn.style.animation = 'none'
-				raf(function() {
-					save_btn.style.animation = 'x-attention .5s'
-				})
-			}
-
-			let cancel_btn = e.action_band.buttons.cancel
-			if (!cancel_btn.disabled) {
-				cancel_btn.style.animation = 'none'
-				raf(function() {
-					cancel_btn.style.animation = 'x-attention .5s'
-				})
-			}
+			e.action_band.buttons.save.draw_attention()
+			e.action_band.buttons.cancel.draw_attention()
 		}
 	}
 
@@ -2771,7 +2760,7 @@ function nav_widget(e) {
 		if (all_disabled == disabled)
 			return
 
-		// skip set: self and all its children.
+		// skip set: self, all its parents and all its children.
 		let skip = set()
 		let pe = e; while (pe) {
 			if (pe.iswidget)
@@ -2781,9 +2770,17 @@ function nav_widget(e) {
 		for (let ce of e.$('.x-widget'))
 			skip.add(ce)
 
-		for (let ce of document.body.$('.x-widget'))
-			if (!skip.has(ce))
-				ce.disable('grid_enter_edit', disabled)
+		for (let ce of document.body.$('.x-widget')) {
+			if (skip.has(ce))
+				continue
+			if (ce.iswidget) {
+				if (e.nav && ce.nav == e)
+					continue
+				if (e.edit_group && ce.edit_group == e.edit_group)
+					continue
+				ce.disable('other_nav_changed', disabled)
+			}
+		}
 
 		document.on('stopped_event', clicked_on_disabled, disabled)
 		all_disabled = disabled
@@ -4296,18 +4293,19 @@ function nav_widget(e) {
 		let sn = e.selected_rows.size
 		let an = count_changed_rows('is_new' )
 		let dn = count_changed_rows('removed')
+		let en = count_changed_rows('has_errors')
 		let cn = e.changed_rows ? e.changed_rows.size : 0
 		let un = cn - an - dn
 
 		let b = e.action_band
 		if (b) {
 
-			b.buttons.reload.disabled = cn || !e.rowset_url
+			b.buttons.reload.disable('nav_state', cn || !e.rowset_url)
 
-			b.buttons.save  .disabled = !cn
-			b.buttons.cancel.disabled = !cn
+			b.buttons.save  .disable('nav_state', !cn)
+			b.buttons.cancel.disable('nav_state', !cn)
 
-			b.buttons.delete.disabled = !sn
+			b.buttons.delete.disable('nav_state', !sn)
 			let ds = sn > 1 ? S('delete_records', 'Delete {0} {1}', sn, nrows(sn)) : S('delete', 'Delete')
 			b.buttons.delete.text = ds
 			b.buttons.delete.title =
@@ -4320,8 +4318,8 @@ function nav_widget(e) {
 			b.buttons.move_down .show(allow_move)
 
 			if (allow_move) {
-				b.buttons.move_up   .disabled = !can_move
-				b.buttons.move_down .disabled = !can_move
+				b.buttons.move_up   .disable('nav_state', !can_move)
+				b.buttons.move_down .disable('nav_state', !can_move)
 				b.buttons.move_up   .title = can_move
 					? S('move_record_up', 'Move record up in list (you can also drag it into position)')
 					: e.allow_move_rows_error()
@@ -4341,7 +4339,7 @@ function nav_widget(e) {
 			b.show(e.action_band_visible != 'auto' || e.changed_rows)
 		}
 
-		disable_all(!!cn)
+		disable_all(!!cn || !!en)
 
 	}
 
@@ -4682,7 +4680,7 @@ component('x-lookup-dropdown', function(e) {
 	let number = {align: 'right', min: 0, max: 1/0, decimals: 0}
 	field_types.number = number
 
-	number.validator_number = field => ({
+	number.validator_number = field => (field.decimals && {
 		validate : v => v == null || (isnum(v) && v === v),
 		message  : S('validation_number', 'Value must be a number'),
 	})
@@ -4710,6 +4708,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	number.format = function(x) {
+		x = num(x)
 		return x != null ? x.dec(this.decimals) : ''
 	}
 

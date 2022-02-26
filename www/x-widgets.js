@@ -1584,6 +1584,15 @@ component('x-button', 'Input', function(e) {
 		return post(url, upload, success, fail, assign({notify: e}, opt))
 	}
 
+	// "drawing attention" animation ------------------------------------------
+
+	e.draw_attention = function() {
+		if (e.disabled)
+			return
+		e.style.animation = 'none'
+		raf(function() { e.style.animation = 'x-attention .5s' })
+	}
+
 })
 
 // ---------------------------------------------------------------------------
