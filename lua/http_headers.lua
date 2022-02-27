@@ -721,9 +721,25 @@ local function kvlist(kvt)
 end
 
 --{name,k1=v1,...} -> name[; k1=v1 ...]
-local function params(known)
+local function params(attrs)
 	return function(s)
-		return s
+		if type(s) == 'table' then
+			local t = {assert(s[1])}
+			for k,v in pairs(s) do
+				if k ~= 1 then
+					if attrs[k] then
+						v = attrs[k](v)
+					end
+					t[#t+1] = ';'
+					t[#t+1] = k
+					t[#t+1] = '='
+					t[#t+1] = v
+				end
+			end
+			return concat(t)
+		else
+			return s
+		end
 	end
 end
 
@@ -732,21 +748,22 @@ end
 local format = {}
 headers.format = format
 
+local function qstring(s) --quoted-string RFC 7230
+	return '"'..s:gsub('([\\"])', '\\%1')..'"'
+end
+
 --{from=,to=,size=} -> bytes=<from>-<to>
 function format.range(v)
+	--TODO:
 end
 
 --{from=,to=,total=,size=} -> bytes <from>-<to>/<total>
 function format.content_range(v)
-
+	--TODO:
 end
 
 function format.host(t)
 	return t.host .. (t.port and ':' .. t.port or '')
-end
-
-local function q(s)
-	return s:find'[ %,%;]")' and '"'..s..'"' or s
 end
 
 function format.cookie(t)
@@ -754,7 +771,7 @@ function format.cookie(t)
 	for k,v in pairs(t) do
 		assert(token(k), 'invalid cookie name')
 		assert(cookie_value(v), 'invalid cookie value')
-		dt[#dt+1] = _('%s=%s', k, q(v))
+		dt[#dt+1] = _('%s=%s', k, v)
 	end
 	return #dt > 0 and concat(dt, ';')
 end
@@ -784,7 +801,7 @@ function format.set_cookie(t)
 			end
 		end
 		local attrs = #t > 0 and ';'..concat(t, ';') or ''
-		dt[#dt+1] = _('%s=%s%s', k, q(v), attrs)
+		dt[#dt+1] = _('%s=%s%s', k, v, attrs)
 	end
 	return dt --return as table so it can be sent unfolded.
 end
@@ -837,7 +854,7 @@ format.x_forwarded_for = nil --client1 proxy1 proxy2
 format.accept_ranges = ci --"bytes"
 format.age = int --seconds
 format.allow = uppercaseklist --methods
-format.content_disposition = params{filename = nil} --attachment; ...
+format.content_disposition = params{filename = qstring} --attachment; ...
 format.content_encoding = cilist
 format.content_language = cilist
 format.content_location = url
