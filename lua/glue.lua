@@ -111,9 +111,9 @@ SIZES
 ERRORS
 	glue.assert(v [,message [,format_args...]]) -> v     assert with error message formatting
 	glue.protect(func) -> protected_func                 wrap an error-raising function
-	glue.pcall(f, ...) -> true, ... | false, traceback   pcall with traceback
-	glue.fpcall(f, ...) -> result | nil, traceback       coding with finally and except (protected)
-	glue.fcall(f, ...) -> result                         coding with finally and except
+	glue.pcall(f, ...) -> true, ... | false, traceback                pcall with traceback
+	glue.fpcall(f, finally, onerror, ...) -> result | nil, traceback  pcall with finally/onerror
+	glue.fcall(f, finally, onerror, ...) -> result                    same but re-raises
 MODULES
 	glue.module([name, ][parent]) -> M              create a module
 	glue.autoload(t, submodules) -> M               autoload table keys from submodules
@@ -1531,11 +1531,11 @@ end
 --[[
 Pcall with finally and except "clauses":
 
-	local ret,err = fpcall(function(finally, except)
+	local ret,err = fpcall(function(finally, onerror, ...)
 		local foo = getfoo()
 		finally(function() foo:free() end)
-		except(function(err) io.stderr:write(err, '\n') end)
-	end)
+		onerror(function(err) io.stderr:write(err, '\n') end)
+	end, ...)
 
 NOTE: a bit bloated at 2 tables and 4 closures. Can we reduce the overhead?
 NOTE: LuaJIT and Lua 5.2 only from using a xpcall message handler.

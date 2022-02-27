@@ -1315,14 +1315,14 @@ function fs.save(file, s, sz)
 	local dir = path.dir(tmpfile)
 	if path.dir(dir) then --because mkdir'c:/' gives access denied.
 		local ok, err = fs.mkdir(dir, true)
-		if not ok and err ~= 'already_exists' then
-			return false, _('could not create dir %s: %s', dir, err)
+		if not ok then
+			return false, _('could not create dir %s:\n\t%s', dir, err)
 		end
 	end
 
 	local f, err = fs.open(tmpfile, 'w')
 	if not f then
-		return false, _('could not open file %s: %s', tmpfile, err)
+		return false, _('could not open file %s:\n\t%s', tmpfile, err)
 	end
 
 	local ok, err = true
@@ -1354,20 +1354,20 @@ function fs.save(file, s, sz)
 	f:close()
 
 	if not ok then
-		local err_msg = 'could not write to file %s: %s'
+		local err_msg = 'could not write to file %s:\n\t%s'
 		local ok, rm_err = fs.remove(tmpfile)
 		if not ok then
-			err_msg = err_msg..'\nremoving it also failed: %s'
+			err_msg = err_msg..'\nremoving it also failed:\n\t%s'
 		end
 		return false, _(err_msg, tmpfile, err, rm_err)
 	end
 
 	local ok, err = fs.move(tmpfile, file)
 	if not ok then
-		local err_msg = 'could not move file %s -> %s: %s'
+		local err_msg = 'could not move file %s -> %s:\n\t%s'
 		local ok, rm_err = fs.remove(tmpfile)
 		if not ok then
-			err_msg = err_msg..'\nremoving it also failed: %s'
+			err_msg = err_msg..'\nremoving it also failed:\n\t%s'
 		end
 		return false, _(err_msg, tmpfile, file, err, rm_err)
 	end
