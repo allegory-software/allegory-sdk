@@ -70,7 +70,8 @@ MULTI-LANGUAGE STUBS
 ARRAYS
 	empty_array
 	a.extend(a1)
-	a.set(a1)
+	a.set(a1) -> s
+	s.addset(s2) -> s
 	a.insert(i, v)
 	a.remove(i) -> v
 	a.remove_value(v) -> i
@@ -551,6 +552,12 @@ map = (iter) => new Map(iter)
 property(Map, 'first_key', function() {
 	for (let [k] of this)
 		return k
+})
+
+method(Set, 'addset', function(s) {
+	for (let k of s)
+		this.add(k)
+	return this
 })
 
 empty = obj()

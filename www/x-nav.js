@@ -2743,8 +2743,10 @@ function nav_widget(e) {
 	function clicked_on_disabled(ev) {
 		if (ev.type != 'pointerdown')
 			return
+		if (!ev.target.effectively_disabled)
+			return
 		if (e.positionally_contains(ev.target))
-			return // clicked inside the grid
+			return // disabled but inside self
 		if (e.action_band) {
 			e.action_band.buttons.save.draw_attention()
 			e.action_band.buttons.cancel.draw_attention()
@@ -2759,33 +2761,41 @@ function nav_widget(e) {
 		if (e.hidden)
 			return // bare nav
 
-		// skip set: self, all its parents, all its children and all its popups.
+		let all_widgets = document.body.$('.x-widget:not([hidden])')
 		let skip = set()
+		// self
+		skip.add(e)
+		// same nav, same edit group
+		for (let ce of all_widgets) {
+			if (e.nav && ce.nav == e)
+				skip.add(ce)
+			if (e.edit_group && ce.edit_group == e.edit_group)
+				skip.add(ce)
+		}
+		// children of skips
+		let skip_all = set(skip)
+		for (let se of skip) {
+			for (let ce of se.$('.x-widget:not([hidden])'))
+				skip_all.add(ce)
+		}
+		// popups of skips and of their children
+		let skip_popups = set()
+		for (let ce of $('.x-widget.popup'))
+			for (let se of skip_all)
+				if (se.positionally_contains(ce))
+					skip_popups.add(ce)
+		skip_all.addset(skip_popups)
+		// parents of self
 		let pe = e; while (pe) {
 			if (pe.iswidget)
-				skip.add(pe)
+				skip_all.add(pe)
 			pe = pe.parent
 		}
-		for (let ce of e.$('.x-widget:not([hidden])'))
-			skip.add(ce)
-		for (let ce of document.body.$(':scope > .x-widget.popup'))
-			if (e.positionally_contains(ce)) {
-				skip.add(ce)
-				for (let cce of ce.$('.x-widget'))
-					skip.add(cce)
-			}
-
-		for (let ce of document.body.$('.x-widget')) {
-			if (skip.has(ce))
-				continue
-			if (ce.iswidget) {
-				if (e.nav && ce.nav == e)
-					continue
-				if (e.edit_group && ce.edit_group == e.edit_group)
-					continue
+		// finally, disable the rest
+		for (let ce of all_widgets)
+			if (!skip_all.has(ce)) {
 				ce.disable('other_nav_changed', disabled)
 			}
-		}
 
 		document.on('stopped_event', clicked_on_disabled, disabled)
 		all_disabled = disabled

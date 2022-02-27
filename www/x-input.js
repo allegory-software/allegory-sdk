@@ -1379,32 +1379,24 @@ component('x-spinedit', 'Input', function(e) {
 
 	let increment
 	function increment_val_again() {
-		if (!increment) return
+		if (!e.matches(':active'))
+			return // prevent infinite loop if mouse capture fails.
 		let v = e.input_val + increment
 		let r = v % multiple()
 		e.set_val(v - r, {input: e})
 		e.input.select_range(0, -1)
+		increment_timer(.1)
 	}
-	let increment_timer
-	function start_incrementing() {
-		increment_val_again()
-		increment_timer = setInterval(increment_val_again, 100)
-	}
-	let start_incrementing_timer
+	let increment_timer = timer(increment_val_again)
 	function add_events(button, sign) {
 		button.on('pointerdown', function(ev) {
-			if (start_incrementing_timer || increment_timer)
-				return
 			e.input.focus()
 			increment = multiple() * sign
 			increment_val_again()
-			start_incrementing_timer = runafter(.5, start_incrementing)
+			increment_timer(.5)
 			return this.capture_pointer(ev, null, function() {
-				clearTimeout(start_incrementing_timer)
-				clearInterval(increment_timer)
-				start_incrementing_timer = null
-				increment_timer = null
-				increment = 0
+				increment_timer()
+				return false
 			})
 		})
 	}
