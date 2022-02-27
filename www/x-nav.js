@@ -3570,8 +3570,11 @@ function nav_widget(e) {
 
 	}
 
-	function rowset_url() {
-		let s = href(e.rowset_url)
+	function rowset_url(format) {
+		let u = e.rowset_url
+		if (format)
+			u = u.replace('.json', '.'+format)
+		let s = href(u)
 		if (e.param_vals) {
 			let u = url_arg(s)
 			u.args = u.args || obj()
@@ -3625,7 +3628,7 @@ function nav_widget(e) {
 			slow: load_slow,
 			slow_timeout: e.slow_timeout,
 			dont_send: true,
-		}, e.reload_ajax_options, opt))
+		}, opt))
 		req.on('success', load_success)
 		req.on('fail', load_fail)
 		add_request(req)
@@ -3634,6 +3637,10 @@ function nav_widget(e) {
 		e.loading = true
 		loading(true)
 		req.send()
+	}
+
+	e.download_xlsx = function() {
+		get(rowset_url('xlsx'))
 	}
 
 	e.abort_loading = function() {

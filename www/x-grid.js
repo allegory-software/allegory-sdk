@@ -2048,6 +2048,15 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		})
 
 		items.push({
+			text: S('download_as_xlsx', 'Download as XLSX'),
+			icon: 'fa-solid fa-file-excel',
+			action: function() {
+				e.download_xlsx()
+			},
+			separator: true,
+		})
+
+		items.push({
 			text: S('remove_selected_rows', 'Remove selected rows'),
 			icon: 'fa fa-trash',
 			disabled: !(e.selected_rows.size && e.can_remove_row()),
