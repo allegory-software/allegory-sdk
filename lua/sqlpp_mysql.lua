@@ -201,6 +201,7 @@ local function init_spp(spp, cmd)
 		elseif mt == 'date' or mt == 'datetime' or mt == 'timestamp' then
 			dt.type = 'date'
 			dt.has_time = type ~= 'date' or nil
+			dt.has_seconds = dt.has_time
 		elseif mt == 'enum' then
 			dt.type = 'enum'
 			dt.enum_values = parse_values(t.column_type)
