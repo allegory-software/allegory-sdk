@@ -4603,7 +4603,6 @@ component('x-lookup-dropdown', function(e) {
 
 	number
 	filesize
-	datetime
 	date
 	timestamp
 	time
@@ -4736,121 +4735,63 @@ component('x-lookup-dropdown', function(e) {
 		return x < min ? span({class: 'x-dba-insignificant-size'}, s) : s
 	}
 
-	// datetimes in SQL standard format `YYYY-MM-DD hh:mm:ss`
+	// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
-	let datetime = {align: 'right'}
-	field_types.datetime = datetime
+	let date = {align: 'right'}
+	field_types.date = date
 
-	datetime.has_time = true // for x-calendar
-
-	datetime.to_time = function(s, validate) {
+	date.to_time = function(s, validate) {
 		if (s == null || s == '')
 			return null
-		s = s.trim()
-		let tm =
-			   s.match(/(.*?)\s*(\d+)\s*:\s*(\d+)\s*:\s*([\.\d]+)$/)
-			|| s.match(/(.*?)\s*(\d+)\s*:\s*(\d+)$/)
-		s = tm ? tm[1] : s
-		let dm = s.match(/^(\d\d\d\d)[^\d:]+(\d+)[^\d:]+(\d+)$/)
-		if (!dm)
-			return null
-		let y = num(dm[1])
-		let m = num(dm[2])
-		let d = num(dm[3])
-		if (this.has_time && tm) {
-			let H = num(tm[2])
-			let M = num(tm[3])
-			let S = num(tm[4])
-			let t = time(y, m, d, H, M, S)
-			if (validate)
-				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
-						|| hour_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
-					return null
-			return t
-		} else {
-			let t = time(y, m, d)
-			if (validate)
-				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d)
-					return null
-			return t
-		}
+		return s.trim().parse_date('SQL', validate)
 	}
 
 	let a = []
-	datetime.from_time = function(t) {
+	date.from_time = function(t) {
 		if (t == null)
 			return null
-		_d.setTime(t * 1000)
-		let y = _d.getUTCFullYear()
-		let m = _d.getUTCMonth() + 1
-		let d = _d.getUTCDate()
-		let H = _d.getUTCHours()
-		let M = _d.getUTCMinutes()
-		let S = _d.getUTCSeconds()
-		a.length = 0
-		a[0] = y.base(10, 4)
-		a[1] = '-'
-		a[2] = m.base(10, 2)
-		a[3] = '-'
-		a[4] = d.base(10, 2)
-		if (this.has_time) {
-			a[5] = ' '
-			a[6] = H.base(10, 2)
-			a[7] = ':'
-			a[8] = M.base(10, 2)
-			if (this.has_seconds) {
-				a[9] = ':'
-				a[10] = S.base(10, 2)
-			}
-		}
-		return a.join('')
+		return t.date('SQL', this.has_time, this.has_seconds)
 	}
 
-	datetime.to_num   = datetime.to_time
-	datetime.from_num = datetime.from_time
+	date.to_num   = date.to_time
+	date.from_num = date.from_time
 
-	datetime.to_text = function(v) {
+	date.to_text = function(v) {
 		if (v == null) return ''
 		let t = this.to_time(v, true)
 		if (t == null) return v
-		return t.date(locale(), this.has_time)
+		return t.date(null, this.has_time)
 	}
 
-	datetime.from_text = function(s) {
+	date.from_text = function(s) {
 		if (s == '') return null
-		let t = s.parse_date(locale(), true)
+		let t = s.parse_date(null, true)
 		if (t == null) return s
 		return this.from_time(t)
 	}
 
 	// range of MySQL DATETIME type
-	datetime.min = datetime.to_time('1000-01-01 00:00:00')
-	datetime.max = datetime.to_time('9999-12-31 23:59:59')
+	date.min = date.to_time('1000-01-01 00:00:00')
+	date.max = date.to_time('9999-12-31 23:59:59')
 
-	datetime.format = function(s) {
+	date.format = function(s) {
 		if (s == null) return ''
 		let t = this.to_time(s, true)
 		if (t == null) return s
-		return t.date(this.has_time, this.has_seconds)
+		return t.date(null, this.has_time, this.has_seconds)
 	}
 
-	datetime.editor = function(...opt) {
+	date.editor = function(...opt) {
 		return dateedit(assign({
 			align: 'right',
 			mode: 'fixed',
 		}, ...opt))
 	}
 
-	datetime.validator_date = field => ({
+	date.validator_date = field => ({
 		validate : (v, row, field) => v == null || field.to_time(v, true) != null,
 		message  : S('validation_date', 'Date must be valid'),
 	})
-
-	// dates
-
-	let date = assign({}, datetime)
-	field_types.date = date
-	date.has_time = false
 
 	// timestamps
 
@@ -4866,12 +4807,12 @@ component('x-lookup-dropdown', function(e) {
 	timestamp.from_num = return_arg
 
 	timestamp.to_text = function(t) {
-		let s = datetime.from_time(t)
+		let s = date.from_time(t)
 		return s ? s : ''
 	}
 
 	timestamp.from_text = function(s) {
-		let t = datetime.to_time(s)
+		let t = date.to_time(s)
 		return t != null ? t : s
 	}
 
