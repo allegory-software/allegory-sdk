@@ -62,8 +62,12 @@ return function(app_name, ...)
 		end, ...)
 	end
 
-	config('app_name', app.name)
-	config('app_dir' , app.dir)
+	config('app_name'   , app.name)
+	config('app_dir'    , app.dir)
+	config('www_dir'    , app.wwwdir)
+	config('libwww_dir' , app.libwwwdir)
+	config('var_dir'    , app.vardir)
+	config('tmp_dir'    , app.tmpdir)
 
 	config('main_module', function()
 		checkfound(action(unpack(args())))
