@@ -16,20 +16,9 @@ function Xmlwriter:new (instance)
   return instance
 end
 
-----
--- Create the XML writer filehandle for the object.
---
-function Xmlwriter:_set_xml_writer(filename)
-  self.fh = assert(io.open(filename, "w"))
-  self.internal_fh = true
-end
-
-----
--- Set an externally created filehandle. Mainly for testing.
---
-function Xmlwriter:_set_filehandle(filehandle)
-  self.fh = filehandle
-  self.internal_fh = false
+local function write(self, s) self[#self+1] = s end
+function Xmlwriter:_set_xml_writer()
+  self.fh = {write = write}
 end
 
 ----
@@ -42,32 +31,14 @@ end
 ----
 -- Close the XML filehandle if we created it.
 --
-function Xmlwriter:_xml_close()
-  if self.internal_fh then
-    self.fh:close()
-  end
-end
+function Xmlwriter:_xml_close() end
 
 ----
 -- Return all of the data in the current filehandle.
 --
 function Xmlwriter:_get_data()
-  self.fh:seek('set', 0)
-  return self.fh:read('*a')
+  return table.concat(self.fh)
 end
-
-----
--- Return all of the data in the current filehandle as an iterator.
---Used by the ZipWriter module.
---
-function Xmlwriter:_get_xml_reader()
-  self.fh:seek('set', 0)
-  return function()
-           local buffer = self.fh:read(4096)
-           if buffer then return buffer end
-         end
-end
-
 
 ----
 -- Write the XML declaration.

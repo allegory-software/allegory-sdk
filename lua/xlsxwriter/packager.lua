@@ -145,15 +145,9 @@ end
 -- Add the components to the zip file.
 --
 function Packager:_add_to_zip(writer)
-
-  writer:_set_filehandle(io.tmpfile())
+  writer:_set_xml_writer()
   writer:_assemble_xml_file()
-
-  self.zip:add_file(writer.filename)
-  for s in writer:_get_xml_reader() do
-    self.zip:write(s)
-  end
-  self.zip:close_file()
+  self.zip:add_memfile(writer.filename, writer:_get_data())
 end
 
 ----
