@@ -388,10 +388,6 @@ webb.langinfo = {
 		thousands_separator = '.',
 	},
 }
-local function langinfo(lang, k)
-	local t = webb.langinfo[lang]
-	return t and k and t[k] or t
-end
 
 function default_lang()
 	return config('default_lang', 'en')
@@ -400,11 +396,14 @@ end
 function lang(k)
 	local lang = cx.lang or default_lang()
 	if not k then return lang end
-	return assert(langinfo(lang, k))
+	local t = assert(webb.langinfo[lang])
+	local v = t[k]
+	assert(v ~= nil)
+	return v
 end
 
 function setlang(lang)
-	if not lang or not langinfo(lang) then return end --missing or invalid lang: ignore.
+	if not lang or not webb.langinfo[lang] then return end --missing or invalid lang: ignore.
 	cx.lang = lang
 end
 
@@ -415,12 +414,9 @@ webb.countryinfo = {
 		imperial_system = true,
 		week_start_offset = 0,
 		en_name = 'United States',
+		date_format = 'mm-dd-yyyy',
 	},
 }
-local function countryinfo(country, k)
-	local t = webb.countryinfo[country]
-	return t and k and t[k] or t
-end
 
 function default_country()
 	return config('default_country', 'US')
@@ -429,7 +425,10 @@ end
 function country(k)
 	local country = cx.country or default_country()
 	if not k then return country end
-	return assert(countryinfo(country, k))
+	local t = assert(webb.countryinfo[country])
+	local v = t[k]
+	assert(v ~= nil)
+	return v
 end
 
 function setcountry(country, if_not_set)
