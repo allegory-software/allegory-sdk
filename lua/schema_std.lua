@@ -7,6 +7,7 @@ if not ... then require'schema_test'; return end
 local M = {}
 do
 	local schema = require'schema'
+	local mysql = require'mysql'
 	local glue = require'glue'
 	local cat = table.concat
 	local names = glue.names
@@ -56,12 +57,7 @@ do
 		end
 	end
 
-	function M.datetime_to_timestamp(v, col)
-		if v == nil then return nil end
-		local patt = '^(%d+)-(%d+)-(%d+) (%d+):(%d+):(%d+)'
-		local y, m, d, H, M, s = v:match(patt)
-		return os.time{year = y, month = m, day = d, hour = H, minute = M, second = s}
-	end
+	M.datetime_to_timestamp = mysql.datetime_to_timestamp
 
 end
 
@@ -100,9 +96,11 @@ return function()
 	types.blob      = {type = 'binary', mysql_type = 'mediumblob', size = 0xffffff, tarantool_type = 'string', tarantool_collation = 'none'}
 	types.time      = {int52, type = 'time', tarantool_type = 'number'}
 	types.timeofday = {type = 'timeofday', mysql_type = 'time', tarantool_type = 'number'}
-	types.date      = {type = 'date', mysql_type = 'date', mysql_to_sql = date_to_sql, tarantool_type = 'number'}
-	types.datetime  = {type = 'date', has_time = true, mysql_type = 'datetime', tarantool_type = 'number', mysql_to_tarantool = datetime_to_timestamp}
-	types.timestamp = {datetime, mysql_type = 'timestamp'}
+	types.date      = {type = 'date', mysql_type = 'date', mysql_to_sql = date_to_sql, tarantool_type = 'number', mysql_to_tarantool = datetime_to_timestamp}
+	types.datetime  = {date, has_time = true, has_seconds = false}
+	types.datetimes = {date, has_time = true, has_seconds = true}
+	types.timestamp = {date, has_time = true, mysql_type = 'timestamp'}
+	types.timestamps= {date, has_time = true, mysql_type = 'timestamp', has_seconds = true}
 
 	types.id        = {uint}
 	types.idpk      = {id, pk, autoinc}
