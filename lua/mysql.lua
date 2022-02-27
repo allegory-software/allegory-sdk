@@ -78,6 +78,10 @@ ESCAPING
 
 		Escape string to be used inside SQL string literals.
 
+CONVERSION
+
+	mysql.datetime_to_timestamp('yyyy-mm-dd HH:MM:SS', [utc=true]) -> t
+
 NOTE: Decimals with up to 15 digits of precision and 64 bit integers are
 converted to Lua numbers by default. That limits the useful range of integer
 types to 15 significant digits. If you have other needs, provide your own
@@ -109,6 +113,7 @@ local u8a = glue.u8a
 local index = glue.index
 local repl = glue.repl
 local update = glue.update
+local time = glue.time
 
 local check_io, checkp, _, protect = errors.tcp_protocol_errors'mysql'
 
@@ -1016,11 +1021,13 @@ local function get_field_packet(buf)
 		elseif mysql_type == 'timestamp' then
 			col.type = 'date'
 			col.has_time = true
+			col.has_seconds = true
 		elseif mysql_type == 'date' then
 			col.type = 'date'
 		elseif mysql_type == 'datetime' then
 			col.type = 'date'
 			col.has_time = true
+			col.has_seconds = true
 		elseif mysql_type == 'binary' then
 			col.padded = true
 		end
@@ -1534,6 +1541,13 @@ function conn:esc(s)
 	--MBCS that are not ASCII supersets need decoding for correct quoting.
 	assert(self.charset_is_ascii_superset, 'NYI')
 	return esc_utf8(s)
+end
+
+function mysql.datetime_to_timestamp(v, utc)
+	if v == nil then return nil end
+	local patt = '^(....)-(..)-(..) (..):(..):(..)'
+	local y, m, d, H, M, S = v:match(patt)
+	return time(utc ~= false, y, m, d, H, M, S)
 end
 
 return mysql
