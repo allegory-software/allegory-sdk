@@ -60,6 +60,7 @@ strict_sign = glue.strict_sign
 nextpow2    = glue.nextpow2
 repl        = glue.repl
 
+num         = tonumber
 concat      = table.concat
 cat         = table.concat
 catargs     = glue.catargs
