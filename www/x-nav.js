@@ -3640,7 +3640,10 @@ function nav_widget(e) {
 	}
 
 	e.download_xlsx = function() {
-		get(rowset_url('xlsx'))
+		let link = tag('a', {href: rowset_url('xlsx'), style: 'display: none'})
+		document.body.add(link)
+		link.click()
+		link.remove()
 	}
 
 	e.abort_loading = function() {
