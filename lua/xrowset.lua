@@ -358,13 +358,13 @@ function virtual_rowset(init, ...)
 
 	local function download_as_xlsx(rs_name, rs)
 		setheader('content-disposition', {'attachment', filename = rs_name..'.xlsx'})
-		local file = tmppath('rowset_'..rs_name..'.xlsx')
+		local file = tmppath('rowset-{name}-{request_id}.xlsx', {name = rs_name})
 		local wb = require'xlsxwriter.workbook'
 		local wb = assert(wb:new(file))
 		glue.fcall(function(finally, onerror)
 			onerror(function()
 				if wb then wb:close() end
-				--rm(file)
+				fs.remove(file)
 			end)
 			local ws = wb:add_worksheet()
 			local bold = wb:add_format({bold = true})

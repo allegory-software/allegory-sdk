@@ -60,6 +60,7 @@ REQUEST CONTEXT
 	once(f, ...)                            memoize for current request
 	cx() -> t                               get per-request shared context
 	cx().fake -> t|f                        context is fake (we're on cmdline)
+	cx().request_id                         unique request id (for naming temp files)
 	webb.setcx(thread, t)                   set per-request shared context
 	webb.env([t]) -> t                      per-request shared environment
 
@@ -185,7 +186,7 @@ FILESYSTEM
 	varfile.filename <- s|f(filename)       set virtual file contents
 	varfile[_cached](file[,parse]) -> s     get var file contents
 	readfile[_cached](file[,parse]) -> s    (cached) readfile for small static files
-	tmppath([file]) -> dir                  make and return the tmp dir or a sub dir
+	tmppath([pattern], [t]) -> path         make a tmp file path
 
 MUSTACHE TEMPLATES
 
@@ -1264,12 +1265,13 @@ local function tmpdir()
 		or config('tmp_dir', indir(config'app_dir', 'tmp'))
 end
 
-function tmppath(file)
-	local dir = indir(tmpdir(), path.dir(file))
-	if path.dir(dir) then --because mkdir'c:/' gives access denied.
-		assert(fs.mkdir(dir, true))
-	end
-	return assert(path.abs(tmpdir(), file))
+function tmppath(patt, t)
+	assert(not patt:find'[\\/]') --no subdirs
+	mkdir(tmpdir(), true)
+	t = t or {}
+	t.request_id = cx.request_id
+	local file = glue.subst(patt, t)
+	return path.abs(tmpdir(), file)
 end
 
 function wwwpath(file, type)
@@ -1757,8 +1759,11 @@ end
 
 --webb.server respond function -----------------------------------------------
 
+local next_request_id = 1
+
 function webb.respond(req)
-	webb.setcx(req.thread, {req = req, res = {headers = {}}})
+	webb.setcx(req.thread, {req = req, res = {headers = {}}, request_id = next_request_id})
+	next_request_id = next_request_id + 1
 	webb.note('webb', 'request', '%s %s', req.method, uri.unescape(req.uri))
 	local main = assert(config('main_module', config'app_name'))
 	local main = type(main) == 'string' and require(main) or main
@@ -1789,7 +1794,8 @@ function webb.run(f, ...)
 	local http = {tcp = tcp}
 	local req = {http = http, uri = '/'}
 	req.headers = {}
-	local cx = {req = req, res = {}, fake = true}
+	local cx = {req = req, res = {}, fake = true, request_id = next_request_id}
+	next_request_id = next_request_id + 1
 	function http:log(...)
 		log(...)
 	end

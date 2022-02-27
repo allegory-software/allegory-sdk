@@ -2048,7 +2048,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		})
 
 		items.push({
-			text: S('download_as_xlsx', 'Download as XLSX'),
+			text: S('download_as_xlsx_file', 'Download as Excel file'),
 			icon: 'fa-solid fa-file-excel',
 			action: function() {
 				e.download_xlsx()
