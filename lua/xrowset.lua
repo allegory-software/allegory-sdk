@@ -90,7 +90,11 @@ local noop = glue.noop
 rowset = {}
 
 action['rowset.json'] = function(name)
-	return checkfound(rowset[name])(name)
+	return checkfound(rowset[name])(name, 'json')
+end
+
+action['rowset.xlsx'] = function(name)
+	return checkfound(rowset[name])(name, 'xlsx')
 end
 
 local client_field_attrs = {
@@ -352,7 +356,37 @@ function virtual_rowset(init, ...)
 		return res
 	end
 
-	function rs:respond(rowset_name)
+	local function download_as_xlsx(rs_name, rs)
+		setheader('content-disposition', {'attachment', filename = rs_name..'.xlsx'})
+		local file = tmppath('rowset_'..rs_name..'.xlsx')
+		local wb = require'xlsxwriter.workbook'
+		local wb = assert(wb:new(file))
+		glue.fcall(function(finally, onerror)
+			onerror(function()
+				if wb then wb:close() end
+				--rm(file)
+			end)
+			local ws = wb:add_worksheet()
+			local bold = wb:add_format({bold = true})
+			for i,field in ipairs(rs.fields) do
+				ws:write(0, i, field.name, bold)
+				--ws:set_column('A:A', 20)
+			end
+			for i,row in ipairs(rs.rows) do
+				for j=1,#rs.fields do
+					local v = row[j]
+					if v == null then v = nil end
+					ws:write(i, j, v)
+				end
+			end
+			wb:close()
+			wb = nil
+			outfile(file)
+			rm(file)
+		end)
+	end
+
+	function rs:respond(rowset_name, out_format)
 		rs.name = rowset_name
 		if type(rs.allow) == 'function' then
 			allow(rs.allow())
@@ -374,7 +408,15 @@ function virtual_rowset(init, ...)
 		local post = post()
 		local method = post and post.exec and post.exec or 'load'
 		local method = checkfound(rs['exec_'..method], 'command not found')
-		return method(rs, params, post)
+		local rs = method(rs, params, post)
+
+		if out_format == 'json' then
+			return rs
+		elseif out_format == 'xlsx' then
+			download_as_xlsx(rowset_name, rs)
+		else
+			assert(false)
+		end
 	end
 
 	function rs:exec_load(params, post)
