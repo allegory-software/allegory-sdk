@@ -43,10 +43,11 @@
 		w                : px            default grid column width
 		min_w            : px            min grid column width
 		max_w            : px            max grid column width
-		max_char_w       : n             max grid column width in characters
+		display_width    : c             display width in characters
 		hour_step        : n             for the time picker
 		minute_step      : n             for the time picker
 		second_step      : n             for the time picker
+		has_time         : t             date type has time
 		has_seconds      : f             time has seconds
 
 		lookup_rowset_name:              lookup rowset name
@@ -77,6 +78,7 @@ require'webb_action'
 
 local glue = require'glue'
 local errors = require'errors'
+local xlsx_workbook = require'xlsxwriter.workbook'
 
 local catch = errors.catch
 local raise = errors.raise
@@ -86,6 +88,8 @@ local names = glue.names
 local index = glue.index
 local empty = glue.empty
 local noop = glue.noop
+local time = glue.time
+local capitalize = glue.capitalize
 
 rowset = {}
 
@@ -102,8 +106,8 @@ local client_field_attrs = {
 	name=1, type=1, text=1, hint=1, default=1,
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
-	w=1, min_w=1, max_w=1, max_char_w=1,
-	hour_step=1, minute_step=1, second_step=1, has_seconds=1,
+	w=1, min_w=1, max_w=1, display_width=1,
+	hour_step=1, minute_step=1, second_step=1, has_time=1, has_seconds=1,
 }
 
 function virtual_rowset(init, ...)
@@ -359,8 +363,7 @@ function virtual_rowset(init, ...)
 	local function download_as_xlsx(rs_name, rs)
 		setheader('content-disposition', {'attachment', filename = rs_name..'.xlsx'})
 		local file = tmppath('rowset-{name}-{request_id}.xlsx', {name = rs_name})
-		local wb = require'xlsxwriter.workbook'
-		local wb = assert(wb:new(file))
+		local wb = assert(xlsx_workbook:new(file))
 		glue.fcall(function(finally, onerror)
 			onerror(function()
 				if wb then wb:close() end
@@ -368,15 +371,32 @@ function virtual_rowset(init, ...)
 			end)
 			local ws = wb:add_worksheet()
 			local bold = wb:add_format({bold = true})
+			local d    = wb:add_format({num_format = country('date_format')})
+			local dt   = wb:add_format({num_format = country('date_format')..' hh:mm'})
+			local dts  = wb:add_format({num_format = country('date_format')..' hh:mm:ss'})
 			for i,field in ipairs(rs.fields) do
-				ws:write(0, i, field.name, bold)
-				--ws:set_column('A:A', 20)
+				ws:write(0, i-1, field.text or capitalize(field.name), bold)
+				local w = field.display_width
+				w = field.hidden and 1 or w and math.min(32, w)
+				local fmt
+				if field.type == 'date' then
+					fmt = field.has_time and (field.has_seconds and dts or dt) or d
+				end
+				if w or fmt then
+					ws:set_column(i-1, i-1, w, fmt)
+				end
 			end
 			for i,row in ipairs(rs.rows) do
-				for j=1,#rs.fields do
+				for j,field in ipairs(rs.fields) do
 					local v = row[j]
-					if v == null then v = nil end
-					ws:write(i, j, v)
+					if v ~= null then
+						if field.type == 'date' then
+							v = v:gsub(' ', 'T')
+							ws:write_date_string(i, j-1, v)
+						else
+							ws:write(i, j-1, v)
+						end
+					end
 				end
 			end
 			wb:close()
