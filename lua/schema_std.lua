@@ -75,9 +75,11 @@ return function()
 	flags.utf8_ai_ci = {charset = utf8 , collation = 'utf8_ai_ci', mysql_collation = 'utf8mb4_0900_ai_ci', tarantool_collation = 'unicode_ci'}
 	flags.utf8_bin   = {charset = utf8 , collation = 'utf8_bin'  , mysql_collation = 'utf8mb4_0900_bin'  , tarantool_collation = 'binary'}
 
-	types.bool      = {type = 'bool', mysql_type = 'tinyint', size = 1, unsigned = true, decimals = 0, mysql_to_lua = bool_to_lua, tarantool_type = 'boolean', mysql_to_tarantool = bool_to_lua}
+	types.bool      = {type = 'bool', mysql_type = 'tinyint', size = 1, unsigned = true, decimals = 0,
+		mysql_to_lua = bool_to_lua, tarantool_type = 'boolean', mysql_to_tarantool = bool_to_lua}
 	types.bool0     = {bool , not_null, default = false, mysql_default = '0', tarantool_default = false}
 	types.bool1     = {bool , not_null, default = true , mysql_default = '1', tarantool_default = true}
+
 	types.int8      = {type = 'number', size = 1, decimals = 0, mysql_type = 'tinyint'  , min = -(2^ 7-1), max = 2^ 7, tarantool_type = 'integer'}
 	types.int16     = {type = 'number', size = 2, decimals = 0, mysql_type = 'smallint' , min = -(2^15-1), max = 2^15, tarantool_type = 'integer'}
 	types.int       = {type = 'number', size = 4, decimals = 0, mysql_type = 'int'      , min = -(2^31-1), max = 2^31, tarantool_type = 'integer'}
@@ -86,21 +88,25 @@ return function()
 	types.uint16    = {int16, unsigned = true, min = 0, max = 2^16-1}
 	types.uint      = {int  , unsigned = true, min = 0, max = 2^32-1}
 	types.uint52    = {int52, unsigned = true, min = 0, max = 2^52-1}
+
 	types.double    = {type = 'number' , size = 8, mysql_type = 'double', tarantool_type = 'number'}
 	types.float     = {type = 'number' , size = 4, mysql_type = 'float' , tarantool_type = 'number'}
+
 	types.dec       = {type = 'decimal', mysql_type = 'decimal', tarantool_type = 'number'}
-	types.str       = {type = 'text'  , mysql_type = 'varchar', tarantool_type = 'string'}
+
+	types.str       = {type = 'text'  , mysql_type = 'varchar', tarantool_type = 'string'} --incomplete type!
 	types.bin       = {type = 'binary', mysql_type = 'varbinary', tarantool_type = 'string'}
 	types.text      = {str, mysql_type = 'text', size = 0xffff, maxlen = 0xffff, utf8_bin}
 	types.chr       = {str, mysql_type = 'char', padded = true}
 	types.blob      = {type = 'binary', mysql_type = 'mediumblob', size = 0xffffff, tarantool_type = 'string', tarantool_collation = 'none'}
+
 	types.time      = {int52, type = 'time', tarantool_type = 'number'}
 	types.timeofday = {type = 'timeofday', mysql_type = 'time', tarantool_type = 'number'}
 	types.date      = {type = 'date', mysql_type = 'date', mysql_to_sql = date_to_sql, tarantool_type = 'number', mysql_to_tarantool = datetime_to_timestamp}
-	types.datetime  = {date, has_time = true, has_seconds = false}
-	types.datetimes = {date, has_time = true, has_seconds = true}
-	types.timestamp = {date, has_time = true, mysql_type = 'timestamp'}
-	types.timestamps= {date, has_time = true, mysql_type = 'timestamp', has_seconds = true}
+	types.datetime  = {date, mysql_type = 'datetime', has_time = true, has_seconds = false}
+	types.datetimes = {datetime, has_seconds = true}
+	types.timestamp = {date, mysql_type = 'timestamp', has_time = true}
+	types.timestamps= {date, mysql_type = 'timestamp', has_time = true, has_seconds = true}
 
 	types.id        = {uint}
 	types.idpk      = {id, pk, autoinc}
