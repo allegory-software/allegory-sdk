@@ -80,7 +80,7 @@ ESCAPING
 
 CONVERSION
 
-	mysql.datetime_to_timestamp('yyyy-mm-dd HH:MM:SS', [utc=true]) -> t
+	mysql.datetime_to_timestamp(sql_datetime_string) -> t
 
 NOTE: Decimals with up to 15 digits of precision and 64 bit integers are
 converted to Lua numbers by default. That limits the useful range of integer
@@ -1543,11 +1543,16 @@ function conn:esc(s)
 	return esc_utf8(s)
 end
 
-function mysql.datetime_to_timestamp(v, utc)
+function mysql.datetime_to_timestamp(v) --'yyyy-mm-dd HH:SS:MM'
 	if v == nil then return nil end
-	local patt = '^(....)-(..)-(..) (..):(..):(..)'
-	local y, m, d, H, M, S = v:match(patt)
-	return time(utc ~= false, y, m, d, H, M, S)
+	local y = tonumber(v:sub( 1,  4))
+	local m = tonumber(v:sub( 6,  7))
+	local d = tonumber(v:sub( 9, 10))
+	local H = tonumber(v:sub(12, 13))
+	local M = tonumber(v:sub(15, 16))
+	local S = tonumber(v:sub(18, 19))
+	return time(true, y, m, d, H, M, S)
 end
+assert(mysql.datetime_to_timestamp'2000-01-02 03:04:05' == time(true, 2000, 1, 2, 3, 4, 5))
 
 return mysql
