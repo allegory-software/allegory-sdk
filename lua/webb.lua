@@ -134,6 +134,8 @@ OUTPUT
 	setmime(ext)                            set content-type based on file extension
 	setcompress(on)                         enable or disable compression
 	outprint(...)                           like Lua's print but uses out()
+	outfile(file, [parse])                  output a file's contents
+	outfile_function(file) -> f()|nil       return an outfile function if the file exists
 
 HTML ENCODING
 
@@ -182,8 +184,8 @@ FILESYSTEM
 	varpath(file) -> path                   get var subpath (no check that it exists)
 	varfile.filename <- s|f(filename)       set virtual file contents
 	varfile[_cached](file[,parse]) -> s     get var file contents
-
 	readfile[_cached](file[,parse]) -> s    (cached) readfile for small static files
+	tmppath([file]) -> dir                  make and return the tmp dir or a sub dir
 
 MUSTACHE TEMPLATES
 
@@ -896,8 +898,55 @@ function record(f, ...)
 	return pass_record(f(...))
 end
 
+function outfile_function(path)
+
+	local f = fs.open(path, 'r')
+	if not f then
+		return
+	end
+
+	local mtime, err = f:attr'mtime'
+	if not mtime then
+		f:close()
+		error(err)
+	end
+	check_etag(tostring(mtime))
+
+	local file_size, err = f:attr'size'
+	if not file_size then
+		f:close()
+		error(err)
+	end
+
+	return function()
+		set_content_size(file_size)
+		local filebuf_size = math.min(file_size, 65536)
+		local filebuf = glue.u8a(filebuf_size)
+		while true do
+			local len, err = f:read(filebuf, filebuf_size)
+			if not len then
+				f:close()
+				error(err)
+			elseif len == 0 then
+				f:close()
+				break
+			else
+				local ok, err = pcall(out, filebuf, len)
+				if not ok then
+					f:close()
+					error(err)
+				end
+			end
+		end
+		assert(f:closed())
+	end
+end
+
 local function _outfile(readfile, path, parse)
-	out(readfile(path, parse)) --TODO: make it buffered
+	if not parse then
+		return assert(outfile_function(path))()
+	end
+	out(readfile(path, parse))
 end
 function outfile(path, parse) return _outfile(readfile, path, parse) end
 function outfile_cached(path, parse) return _outfile(readfile_cached, path, parse) end
@@ -931,6 +980,7 @@ mime_types = {
 	tar  = 'application/x-tar',
 	mp3  = 'audio/mpeg',
 	events = 'text/event-stream',
+	xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 }
 
 function setmime(ext)
@@ -1209,6 +1259,19 @@ local function vardir()
 		or config('var_dir', indir(config'app_dir', 'var'))
 end
 
+local function tmpdir()
+	return config'tmp_dir'
+		or config('tmp_dir', indir(config'app_dir', 'tmp'))
+end
+
+function tmppath(file)
+	local dir = indir(tmpdir(), path.dir(file))
+	if path.dir(dir) then --because mkdir'c:/' gives access denied.
+		assert(fs.mkdir(dir, true))
+	end
+	return assert(path.abs(tmpdir(), file))
+end
+
 function wwwpath(file, type)
 	assert(file)
 	if file:find('..', 1, true) then return end --TODO: use path module for this
@@ -1273,9 +1336,6 @@ function wwwfiles(filter)
 	end
 	return t
 end
-
-function outwwwfile(file) outfile(wwwpath(file)) end
-function outwwwfile_cached(file) outfile_cached(wwwpath(file)) end
 
 --mustache html templates ----------------------------------------------------
 

@@ -139,50 +139,6 @@ function redirect(url, ...)
 	return webb_redirect(href(url), ...)
 end
 
---serving plain files --------------------------------------------------------
-
-local ffi = require'ffi'
-local fs = require'fs'
-
-local function plain_file_handler(path)
-
-	local f = fs.open(path, 'r')
-	if not f then
-		return
-	end
-
-	local mtime, err = f:attr'mtime'
-	if not mtime then
-		f:close()
-		error(err)
-	end
-	check_etag(tostring(mtime))
-
-	local file_size, err = f:attr'size'
-	if not file_size then
-		f:close()
-		error(err)
-	end
-
-	return function()
-		set_content_size(file_size)
-		local filebuf_size = math.min(file_size, 65536)
-		local filebuf = glue.u8a(filebuf_size)
-		while true do
-			local len, err = f:read(filebuf, filebuf_size)
-			if not len then
-				f:close()
-				error(err)
-			elseif len == 0 then
-				f:close()
-				break
-			else
-				out(filebuf, len)
-			end
-		end
-	end
-end
-
 --output filters -------------------------------------------------------------
 
 local function html_filter(handler, ...)
@@ -265,7 +221,7 @@ local function action_handler(action, ...)
 			handler = wwwfile[file] and wwwfile(file)
 			if not handler then
 				local path = wwwpath(file)
-				handler = path and assert(plain_file_handler(path))
+				handler = path and assert(outfile_function(path))
 			end
 		end
 		if handler then
@@ -353,6 +309,6 @@ action = actions
 
 function fileaction(path)
 	local ext = fileext(path)
-	local handler = plain_file_handler(path)
+	local handler = outfile_function(path)
 	return run_action(true, path, handler, ext)
 end
