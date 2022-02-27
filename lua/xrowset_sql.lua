@@ -24,7 +24,6 @@
 		type             : field type.
 		min, max         : numeric range (integers).
 		decimals         : number of decimals (integers and decimals).
-		max_char_w       : max length in characters in the current result set.
 	Additionally, for fields that can be traced back to their origin table:
 		enum_values      : enum values.
 		default          : default value.

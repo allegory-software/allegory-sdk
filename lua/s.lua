@@ -56,8 +56,10 @@ function M.set_current_lang(lang) current_lang = lang end --stub
 function M.lang(k)
 	local lang = M.get_current_lang() or M.default_lang()
 	if not k then return lang end
-	local t = M.langinfo[lang]
-	return assert(t and t[k])
+	local t = assert(M.langinfo[lang])
+	local v = t[k]
+	assert(v ~= nil)
+	return v
 end
 
 function M.setlang(lang)
@@ -85,8 +87,10 @@ function M.set_current_country(country) current_country = country end --stub
 function country(k)
 	local country = M.get_current_country() or M.default_country()
 	if not k then return country end
-	local t = M.countryinfo[country]
-	return assert(t and t[k])
+	local t = assert(M.countryinfo[country])
+	local v = t[k]
+	assert(v ~= nil)
+	return v
 end
 
 function setcountry(country)
