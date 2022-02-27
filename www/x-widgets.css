@@ -466,7 +466,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* attention animation */
 
 @keyframes x-attention {
-	from { transform: scale(1.5); outline: 5px solid var(--x-fg); outline-offset: 5px; }
+	from {
+		transform: scale(1.2);
+		outline: 2px solid var(--x-fg);
+		outline-offset: 2px;
+	}
 }
 
 /* action band ------------------------------------------------------------ */
