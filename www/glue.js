@@ -1016,6 +1016,10 @@ function week_start_offset(country1) {
 
 {
 let date_parts = memoize(function(locale) {
+	if (locale == 'SQL') { // yyyy-mm-dd
+		let m = {type: 'literal', value: '-'}
+		return [{type: 'year'}, m, {type: 'month', value: 'xx'}, m, {type: 'day', value: 'xx'}]
+	}
 	let dtf = new Intl.DateTimeFormat(locale)
 	return dtf.formatToParts(0)
 })
@@ -1047,7 +1051,7 @@ let date_parser = memoize(function(locale) {
 			let t = time(y, m, d, H, M, S)
 			if (validate)
 				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
-						|| hour_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
+						|| hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
 					return null
 			return t
 		} else {
@@ -1089,6 +1093,9 @@ let date_formatter = memoize(function(locale) {
 		if (m < 10 && md > 1) m = '0'+m
 		if (d < 10 && dd > 1) d = '0'+d
 		if (with_seconds) {
+			if (H < 10) H = '0'+H
+			if (M < 10) M = '0'+M
+			if (S < 10) S = '0'+S
 			a1[yi] = y
 			a1[mi] = m
 			a1[di] = d
@@ -1097,6 +1104,8 @@ let date_formatter = memoize(function(locale) {
 			a1[Si] = S
 			return a1.join('')
 		} else if (with_time) {
+			if (H < 10) H = '0'+H
+			if (M < 10) M = '0'+M
 			a2[yi] = y
 			a2[mi] = m
 			a2[di] = d
@@ -1116,8 +1125,8 @@ method(String, 'parse_date', function(locale1, validate) {
 	return date_parser(locale1 || locale())(this, validate)
 })
 
-method(Number, 'date', function(locale1, with_time) {
-	return date_formatter(locale1 || locale())(this, with_time)
+method(Number, 'date', function(locale1, with_time, with_seconds) {
+	return date_formatter(locale1 || locale())(this, with_time, with_seconds)
 })
 
 }
