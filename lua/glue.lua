@@ -1152,6 +1152,7 @@ function glue.canopen(name, mode)
 end
 
 --read a file into a string (in binary mode by default).
+--DEPRECATED in favor of fs.load(file) where available.
 function glue.readfile(name, mode, open)
 	open = open or io.open
 	local f, err = open(name, mode=='t' and 'r' or (glue.win and 'rb' or 'r'))
