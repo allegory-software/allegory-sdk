@@ -88,8 +88,9 @@ MEMORY MAPPING
 	fs.aligned_size(bytes[, dir]) -> bytes        next/prev page-aligned size
 	fs.aligned_addr(ptr[, dir]) -> ptr            next/prev page-aligned address
 HI-LEVEL APIs
-	fs.save(path, v | buf,sz | t | read)          atomic save value/buffer/array/read-results
-	fs.saver(path) -> f(v | buf,sz | t | read)    atomic save writer function
+	fs.load[_tobuffer](path) -> buf,len           read file to string or buffer
+	fs.save(path, v | buf,len | t | read)         atomic save value/buffer/array/read-results
+	fs.saver(path) -> f(v | buf,len | t | read)   atomic save writer function
 
 The `deref` arg is true by default, meaning that by default, symlinks are
 followed recursively and transparently where this option is available.
@@ -299,9 +300,9 @@ f:truncate(size, [opt])
 		written. Those bytes are only written on subsequent write calls that skip
 		over the reserved area, otherwise there's no overhead.
 
-f:buffered_read([bufsize]) -> read(buf, sz)
+f:buffered_read([bufsize]) -> read(buf, len)
 
-	Returns a `read(buf, sz) -> read_sz` function which reads ahead from file
+	Returns a `read(buf, len) -> readlen` function which reads ahead from file
 	in order to lower the number of syscalls. `bufsize` specifies the buffer's
 	size (default is 64K).
 
@@ -735,7 +736,7 @@ function fs.isfile(f)
 	return type(f) == 'table' and rawget(f, '__index') == file
 end
 
---returns a read(buf, maxsz) -> sz function which reads ahead from file.
+--returns a read(buf, sz) -> len function which reads ahead from file.
 function file.buffered_read(f, bufsize)
 	local ptr_ct = glue.u8p
 	local buf_ct = glue.u8a
@@ -1290,6 +1291,25 @@ vfile.buffered_read = file.buffered_read
 --hi-level APIs --------------------------------------------------------------
 
 fs.abort = {} --error signal to pass to save()'s reader function.
+
+function fs.load_tobuffer(file)
+	local f, err = fs.open(file)
+	if not f then
+		return nil, err
+	end
+	local buf, len = fs:readall()
+	if not buf then
+		f:close()
+		return nil, err
+	end
+	return buf, len
+end
+
+function fs.load(file)
+	local buf, len = fs.load_tobuffer(file)
+	if not buf then return nil, len end
+	return ffi.string(buf, len)
+end
 
 --write a Lua value, array of values or function results to a file atomically.
 function fs.save(file, s, sz)
