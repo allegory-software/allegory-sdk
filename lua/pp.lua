@@ -436,8 +436,8 @@ local function to_openfile(f, v, ...)
 end
 
 local function to_file(file, v, ...)
-	local glue = require'glue'
-	return glue.writefile(file, coroutine.wrap(function(...)
+	local glue = require'fs'
+	return fs.save(file, coroutine.wrap(function(...)
 		coroutine.yield'return '
 		to_sink(coroutine.yield, v, ...)
 	end, ...))
