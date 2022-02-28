@@ -74,11 +74,8 @@ STUBS
 	glue.pass(...) -> ...                           does nothing, returns back all arguments
 	glue.noop(...)                                  does nothing, returns nothing
 CACHING
-	glue.memoize(f, [narg], [weak]) -> f            memoize pattern
-	glue.memoize_multiret(f, [narg], [weak]) -> f   memoize for multiple-return-value functions
-	glue.tuples([narg], [weak]) -> f(...) -> t      create a tuple space
-	glue.weaktuples([narg]) -> f(...) -> t          create a weak tuple space
-	glue.tuple(...) -> t                            create a tuple in a global weak tuple space
+	glue.memoize(f, [narg]) -> f                    limited memoize pattern
+	glue.tuples(narg) -> f(...) -> t                create an n-tuple space
 OBJECTS
 	glue.inherit(t, parent) -> t                    set or clear inheritance
 	glue.object([super][, t], ...) -> t             create a class or object
@@ -876,176 +873,133 @@ function glue.collect(n,...)
 	end
 end
 
---caching --------------------------------------------------------------------
+--stubs ----------------------------------------------------------------------
 
---no-op filters.
 function glue.pass(...) return ... end
 function glue.noop() return end
 
---[[
-Special attention is given to the vararg part of the function, if any. For
-instance, for a function f(x, y, ...), calling f(1) is considered to be
-the same as calling f(1, nil), but calling f(1, nil) is not the same as
-calling f(1, nil, nil). The optional narg argument fixates the function to
-always take exactly narg args regardless of how the function was defined.
+--caching --------------------------------------------------------------------
 
-The optional `weak` arg makes the cache of returned values weak and is
-useful for caching objects that are pinned elsewere without leaking memory.
-Using this flag requires that the function to be memoized returns heap
-objects only and always!
-]]
+local P = {}
+glue.poison = P --use it for cache invalidation on a key prefix.
 
---TODO: selective cache invalidation on a key prefix.
-
---memoize for 0, 1, 2-arg and vararg and 1 retval functions.
-local weakvals_meta = {__mode = 'v'}
-local function weakvals(weak)
-	return weak and setmetatable({}, weakvals_meta) or {}
-end
-local function memoize0(fn) --for strict no-arg functions
-	local v, stored
-	return function()
-		if not stored then
-			v = fn(); stored = true
+--memoize for functions with 0,1,2,3-arg and 1-retval.
+local function memoize0(fn)
+	local v
+	return function(k1)
+		if k1 == P then
+			v = nil
+			return
 		end
-		return v
-	end
-end
-local nilkey = {}
-local nankey = {}
-local function memoize1(fn, weak) --for strict single-arg functions
-	local cache = weakvals(weak)
-	return function(arg)
-		local k = arg == nil and nilkey or arg ~= arg and nankey or arg
-		local v = cache[k]
 		if v == nil then
-			v = fn(arg)
-			cache[k] = v == nil and nilkey or v
-		else
-			if v == nilkey then v = nil end
+			v = fn()
 		end
 		return v
 	end
 end
-local function memoize2(fn, weak) --for strict two-arg functions
-	local cache = weakvals(weak)
-	local pins = weak and weakvals(weak)
-	return function(a1, a2)
-		local k1 = a1 ~= a1 and nankey or a1 == nil and nilkey or a1
-		local cache2 = cache[k1]
-		if cache2 == nil then
-			cache2 = weakvals(weak)
-			cache[k1] = cache2
+local function memoize1(fn)
+	local t1
+	return function(k1, k2)
+		if k1 == P then
+			t1 = nil
+			return
 		end
-		local k2 = a2 ~= a2 and nankey or a2 == nil and nilkey or a2
-		local v = cache2[k2]
+		if k2 == P then
+			if t1 and t1[k1] then t1[k1] = nil end
+			return
+		end
+		t1 = t1 or {}
+		local v = t1[k1]
 		if v == nil then
-			v = fn(a1, a2)
-			cache2[k2] = v == nil and nilkey or v
-			if weak then --pin weak chained table to the return value.
-				assert(type(v) == 'table')
-				pins[cache2] = v
-			end
-		else
-			if v == nilkey then v = nil end
+			v = fn(k1)
+			t1[k1] = v
 		end
 		return v
 	end
 end
-local function memoize_vararg(fn, weak, minarg, maxarg)
-	local cache = weakvals(weak)
-	local values = weakvals(weak)
-	local pins = weak and weakvals(weak)
-	local pinstack = {}
-	local inside
-	return function(...)
-		assert(not inside) --recursion not supported because of the pinstack.
-		local inside = true
-		local key = cache
-		local narg = min(max(select('#',...), minarg), maxarg)
-		for i = 1, narg do
-			local a = select(i,...)
-			local k = a ~= a and nankey or a == nil and nilkey or a
-			local t = key[k]
-			if not t then
-				t = weakvals(weak)
-				key[k] = t
-			end
-			if weak and i < narg then --collect to-be-pinned weak chained tables.
-				pinstack[i] = t
-			end
-			key = t
+local function memoize2(fn)
+	local t1
+	return function(k1, k2, k3)
+		if k1 == P then
+			t1 = nil
+			return
 		end
-		local v = values[key]
+		if k2 == P then
+			if t1 then t1[k1] = nil end
+			return
+		end
+		if k3 == P then
+			if t1 and t1[k1] then t1[k1][k2] = nil end
+			return
+		end
+		t1 = t1 or {}
+		local t2 = t1[k1]
+		if not t2 then
+			t2 = {}
+			t1[k1] = t2
+		end
+		local v = t2[k2]
 		if v == nil then
-			v = fn(...)
-			values[key] = v == nil and nilkey or v
-			if weak then --pin weak chained tables to the return value.
-				for i = narg-1, 1, -1 do
-					assert(type(v) == 'table')
-					pins[pinstack[i]] = v
-					pinstack[i] = nil
-				end
-			end
+			v = fn(k1, k2)
+			t2[k2] = v
 		end
-		if v == nilkey then v = nil end
-		inside = false
 		return v
 	end
 end
-local memoize_narg = {[0] = memoize0, memoize1, memoize2}
-local function choose_memoize_func(func, narg, weak)
-	if type(narg) == 'function' then
-		return choose_memoize_func(narg, nil, weak)
-	elseif narg then
-		local memoize_narg = (not (narg == 0 and weak)) and memoize_narg[narg]
-		if memoize_narg then
-			return memoize_narg
-		else
-			return memoize_vararg, narg, narg
+local function memoize3(fn)
+	local t1
+	return function(k1, k2, k3, k4)
+		if k1 == P then
+			t1 = nil
+			return
 		end
-	else
+		if k2 == P then
+			if t1 then t1[k1] = nil end
+			return
+		end
+		if k3 == P then
+			if t1 and t1[k1] then t1[k1][k2] = nil end
+			return
+		end
+		if k4 == P then
+			if t1 and t1[k1] and t1[k1][k2] then t1[k1][k2][k3] = nil end
+			return
+		end
+		t1 = t1 or {}
+		local t2 = t1[k1]
+		if not t2 then
+			t2 = {}
+			t1[k1] = t2
+		end
+		local t3 = t2[k2]
+		if not t3 then
+			t3 = {}
+			t2[k2] = t3
+		end
+		local v = t3[k3]
+		if v == nil then
+			v = fn(k1, k2, k3)
+			t3[k3] = v
+		end
+		return v
+	end
+end
+local memoize_narg = {[0] = memoize0, memoize1, memoize2, memoize3}
+function glue.memoize(func, narg)
+	if not narg then
 		local info = debug.getinfo(func, 'u')
-		if info.isvararg then
-			return memoize_vararg, info.nparams, 1/0
-		else
-			return choose_memoize_func(func, info.nparams, weak)
-		end
+		assert(not info.isvararg, 'memoize for vararg functions is NYI')
+		narg = info.nparams
 	end
-end
-function glue.memoize(func, narg, weak)
-	local memoize, minarg, maxarg = choose_memoize_func(func, narg, weak)
-	return memoize(func, weak, minarg, maxarg)
+	local memoize = memoize_narg[narg]
+	glue.assert(memoize, 'memoize for %d-arg functions is NYI', narg)
+	return memoize(func)
 end
 
---memoize for functions with multiple return values.
-function glue.memoize_multiret(func, narg, weak)
-	local memoize, minarg, maxarg = choose_memoize_func(func, narg, weak)
-	local function wrapper(...)
-		return glue.pack(func(...))
-	end
-	local func = memoize(wrapper, weak, minarg, maxarg)
-	return function(...)
-		return glue.unpack(func(...))
-	end
-end
-
---[[
-A tuple space is a function that generates tuples. Tuples are immutable lists
-that can be used as table keys because they have value semantics: the tuple
-space returns the same identity for the same list of input identities.
-
-A tuple can be expanded to get its input identities by calling it: t() -> ...
-
-IMPLEMENTATION: Tuple elements are indexed internally with a hash tree.
-Creating a tuple thus takes N hash lookups and M table creations, where N+M
-is the number of elements in the tuple. Lookup time depends on how dense the
-tree is on the search path, which depends on how many existing tuples share
-a first sequence of elements with the tuple being created. In particular,
-creating tuples out of all permutations of a certain set of values hits the
-worst case for lookup time, but creates the minimum amount of tables relative
-to the number of tuples.
-]]
+-- A tuple space is a function that generates tuples. Tuples are immutable lists
+-- that can be used as table keys because they have value semantics: the tuple
+-- space returns the same identity for the same list of input identities.
+-- A tuple can be expanded to get its input identities by calling it: t() -> ...
 local tuple_mt = {__call = glue.unpack}
 function tuple_mt:__tostring()
 	local t = {}
@@ -1061,18 +1015,10 @@ function tuple_mt:__pwrite(write, write_value) --integration with the pp module.
 	end
 	write')'
 end
-function glue.tuples(...)
+function glue.tuples(narg)
 	return glue.memoize(function(...)
 		return setmetatable(glue.pack(...), tuple_mt)
-	end, ...)
-end
-function glue.weaktuples(narg)
-	return glue.tuples(narg, true)
-end
-local tspace
-function glue.tuple(...)
-	tspace = tspace or glue.weaktuples()
-	return tspace(...)
+	end, narg)
 end
 
 --objects --------------------------------------------------------------------
