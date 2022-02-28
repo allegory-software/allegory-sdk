@@ -699,39 +699,23 @@ local function table_flags(t, masks, strict)
 end
 
 --turn 'opt1 +opt2 -opt3' -> {opt1=true, opt2=true, opt3=false}
-local function string_flags(s, masks, strict)
+local string_flags = memoize(function(strict, masks, s)
 	local t = {}
 	for s in s:gmatch'[^ ,]+' do
 		local m,s = s:match'^([%+%-]?)(.*)$'
 		t[s] = m ~= '-'
 	end
-	return table_flags(t, masks, strict)
-end
+	return {table_flags(t, masks, strict)}
+end)
 
 --set one or more bits of a value without affecting other bits.
 function setbits(bits, mask, over)
 	return over and bit.bor(bits, bit.band(over, bit.bnot(mask))) or bits
 end
 
---cache tuple(options_string, masks_table) -> bits, mask
-local cache = {}
-local function getcache(s, masks)
-	cache[masks] = cache[masks] or {}
-	local t = cache[masks][s]
-	if not t then return end
-	return t[1], t[2]
-end
-local function setcache(s, masks, bits, mask)
-	cache[masks][s] = {bits, mask}
-end
-
 function flags(arg, masks, cur_bits, strict)
 	if type(arg) == 'string' then
-		local bits, mask = getcache(arg, masks)
-		if not bits then
-			bits, mask = string_flags(arg, masks, strict)
-			setcache(arg, masks, bits, mask)
-		end
+		local bits, mask = unpack(string_flags(strict or false, masks, arg))
 		return setbits(bits, mask, cur_bits)
 	elseif type(arg) == 'table' then
 		local bits, mask = table_flags(arg, masks, strict)
