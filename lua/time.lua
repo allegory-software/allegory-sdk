@@ -51,10 +51,12 @@ if ffi.os == 'Windows' then
 	assert(C.time_QueryPerformanceFrequency(t) ~= 0)
 	local inv_qpf = 1 / tonumber(t[0]) --precision loss in e-10
 
+	local t0 = 0
 	function M.clock()
 		assert(C.time_QueryPerformanceCounter(t) ~= 0)
-		return tonumber(t[0]) * inv_qpf
+		return tonumber(t[0]) * inv_qpf - t0
 	end
+	t0 = M.clock()
 
 	function M.sleep(s)
 		C.time_Sleep(s * 1000)
@@ -107,10 +109,12 @@ elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
 			return tos(t)
 		end
 
+		local t0 = 0
 		function M.clock()
 			assert(clock_gettime(CLOCK_MONOTONIC, t) == 0)
-			return tos(t)
+			return tos(t) - t0
 		end
+		t0 = M.clock()
 
 	elseif ffi.os == 'OSX' then
 
@@ -142,9 +146,11 @@ elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
 		local timebase = ffi.new'time_mach_timebase_info_data_t'
 		assert(C.time_mach_timebase_info(timebase) == 0)
 		local scale = tonumber(timebase.numer) / tonumber(timebase.denom) / 1e9
+		local t0
 		function M.clock()
-			return tonumber(C.time_mach_absolute_time()) * scale
+			return tonumber(C.time_mach_absolute_time()) * scale - t0
 		end
+		t0 = M.clock()
 
 	end --OSX
 
@@ -174,11 +180,7 @@ function M.install()
 	end
 
 	--replace os.clock() with a more accurate version...
-	local clock = M.clock
-	local t0 = clock()
-	function os.clock()
-		return clock() - t0
-	end
+	os.clock = M.clock
 
 end
 
