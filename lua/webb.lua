@@ -57,12 +57,14 @@ MULTI-LANGUAGE STRINGS IN SOURCE CODE
 
 REQUEST CONTEXT
 
-	once(f, ...)                            memoize for current request
 	cx() -> t                               get per-request shared context
+	cx().conn -> t                          get per-connection shared context
 	cx().fake -> t|f                        context is fake (we're on cmdline)
 	cx().request_id                         unique request id (for naming temp files)
 	webb.setcx(thread, t)                   set per-request shared context
 	webb.env([t]) -> t                      per-request shared environment
+	once(f, ...)                            memoize for current request
+	once_per_conn(f, ...)                   memoize for current connection
 
 THREADING
 
@@ -577,6 +579,18 @@ function once(f)
 		if not mf then
 			mf = memoize(f)
 			cx[f] = mf
+		end
+		return mf(...)
+	end
+end
+
+--per-connection memoization.
+function once_per_conn(f)
+	return function(...)
+		local mf = cx.conn[f]
+		if not mf then
+			mf = memoize(f)
+			cx.conn[f] = mf
 		end
 		return mf(...)
 	end
@@ -1761,7 +1775,12 @@ end
 local next_request_id = 1
 
 function webb.respond(req)
-	webb.setcx(req.thread, {req = req, res = {headers = {}}, request_id = next_request_id})
+	webb.setcx(req.thread, {
+		req = req,
+		res = {headers = {}},
+		request_id = next_request_id,
+		conn = attr(req.http, '_webb_cx'),
+	})
 	next_request_id = next_request_id + 1
 	webb.note('webb', 'request', '%s %s', req.method, uri.unescape(req.uri))
 	local main = assert(config('main_module', config'app_name'))
@@ -1793,7 +1812,13 @@ function webb.run(f, ...)
 	local http = {tcp = tcp}
 	local req = {http = http, uri = '/'}
 	req.headers = {}
-	local cx = {req = req, res = {}, fake = true, request_id = next_request_id}
+	local cx = {
+		req = req,
+		res = {},
+		fake = true,
+		request_id = next_request_id,
+		conn = {},
+	}
 	next_request_id = next_request_id + 1
 	function http:log(...)
 		log(...)
