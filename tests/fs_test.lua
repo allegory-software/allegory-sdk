@@ -594,11 +594,12 @@ function test.times_set()
 	local f = assert(fs.open(testfile, 'w'))
 
 	--TODO: futimes() on OSX doesn't use tv_usec
-	local frac = osx and 0 or 1/2
-	local btime = os.time() - 7200 - frac
-	local mtime = os.time() - 3600 - frac
-	local ctime = os.time() - 2800 - frac
-	local atime = os.time() - 1800 - frac
+	local frac = (osx or win) and 0 or 1/2
+	local t = math.floor(os.time())
+	local btime = t - 7200 - frac
+	local mtime = t - 3600 - frac
+	local ctime = t - 2800 - frac
+	local atime = t - 1800 - frac
 
 	assert(f:attr{btime = btime, mtime = mtime, ctime = ctime, atime = atime})
 	local btime1 = f:attr'btime' --OSX has it but can't be changed currently
