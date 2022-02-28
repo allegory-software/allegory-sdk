@@ -218,7 +218,7 @@ function component(tag, category, cons) {
 	create.type = type
 	create.construct = construct
 
-	attr(component.categories, category, Array).push(create)
+	attr(component.categories, category, array).push(create)
 	component.types[type] = create
 	window[type] = create
 

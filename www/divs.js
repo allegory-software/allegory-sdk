@@ -731,7 +731,7 @@ let log_add_event = function(target, name, f, capture) {
 	if (target.initialized === null) // skip handlers added in the constructor.
 		return
 	capture = !!capture
-	let ft = attr(attr(attr(etrack, name, Map), target, Map), capture, Map)
+	let ft = attr(attr(attr(etrack, name, map), target, map), capture, map)
 	if (!ft.has(f))
 		ft.set(f, stacktrace())
 	else

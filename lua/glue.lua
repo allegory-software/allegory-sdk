@@ -38,7 +38,7 @@ TABLES
 	glue.sortedpairs(t [,cmp]) -> iter() -> k, v    like pairs() but in key order
 	glue.update(dt, t1, ...) -> dt                  merge tables - overwrites keys
 	glue.merge(dt, t1, ...) -> dt                   merge tables - no overwriting
-	glue.attr(t, k1 [,v])[k2] = v                   autofield pattern
+	glue.attr(t, k[, cons, ...])                    autofield pattern
 ARRAYS
 	glue.extend(dt, t1, ...) -> dt                  extend an array
 	glue.append(dt, v1, ...) -> dt                  append non-nil values to an array
@@ -339,13 +339,15 @@ function glue.merge(dt,...)
 end
 
 --`attr(t, k1)[k2] = v` is like `t[k1][k2] = v` with auto-creating `t[k1]` .
-function glue.attr(t, k, v0)
+function glue.attr(t, k, cons, ...)
 	local v = t[k]
 	if v == nil then
-		if v0 == nil then
-			v0 = {}
+		if cons == nil then
+			v = {}
+		else
+			v = cons(...)
+			assert(v ~= nil)
 		end
-		v = v0
 		t[k] = v
 	end
 	return v

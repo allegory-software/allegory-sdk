@@ -55,7 +55,7 @@ let init_usr_nav = function() {
 
 		let usr = this.row_state_map(this.rows[0], 'val')
 
-		pr('login', usr.usr, usr.email)
+		pr('login', usr.usr, usr.email, usr.roles.names().join(','))
 		setglobal('usr', usr)
 
 		if (window.xmodule)

@@ -68,6 +68,7 @@ MULTI-LANGUAGE STUBS
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
 ARRAYS
+	array(...)
 	empty_array
 	a.extend(a1)
 	a.set(a1) -> s
@@ -84,8 +85,8 @@ ARRAYS
 	a.remove_duplicates()
 HASH MAPS
 	obj()
-	set()
-	map()
+	set(iter)
+	map(iter)
 	m.first_key
 	empty
 	keys(t)
@@ -548,6 +549,7 @@ method(Array, 'remove_duplicates', function() {
 obj = () => Object.create(null)
 set = (iter) => new Set(iter)
 map = (iter) => new Map(iter)
+array = (...args) => new Array(...args)
 
 property(Map, 'first_key', function() {
 	for (let [k] of this)
@@ -578,10 +580,10 @@ function assign_opt(dt, ...ts) {
 }
 
 function attr(t, k, cons) {
-	cons = cons || Object
+	cons = cons || obj
 	let v = (t instanceof Map) ? t.get(k) : t[k]
 	if (v === undefined) {
-		v = new cons()
+		v = cons()
 		if (t instanceof Map)
 			t.set(k, v)
 		else

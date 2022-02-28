@@ -351,18 +351,18 @@ runevery       = sock.runevery
 
 do
 	local conf = {}
-	function config(var, default)
-		if type(var) == 'table' then
-			for var, val in pairs(var) do
-				config(var, val)
+	function config(k, default)
+		if type(k) == 'table' then
+			for k, v in pairs(v) do
+				config(k, v)
 			end
 		else
-			local val = conf[var]
-			if val == nil then
-				val = default
-				conf[var] = val
+			local v = conf[k]
+			if v == nil then
+				v = default
+				conf[k] = v
 			end
-			return val
+			return v
 		end
 	end
 
@@ -573,12 +573,12 @@ end --do
 --per-request memoization.
 function once(f)
 	return function(...)
-		local ret = cx[f]
-		if not ret then
-			ret = f(...)
-			cx[f] = ret
+		local mf = cx[f]
+		if not mf then
+			mf = memoize(f)
+			cx[f] = mf
 		end
-		return ret
+		return mf(...)
 	end
 end
 

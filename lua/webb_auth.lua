@@ -358,7 +358,7 @@ local function authenticate(a)
 	end
 end
 
-local function userinfo(usr)
+local function _userinfo(usr)
 	if not usr then return {} end
 	local t = first_row([[
 		select
@@ -387,10 +387,10 @@ local function userinfo(usr)
 	t.admin = t.roles.admin
 	return t
 end
---userinfo = userinfo
+local userinfo = once(_userinfo)
 
 local function clear_userinfo_cache(usr)
-	--
+	cx()[_userinfo] = nil
 end
 
 --session-cookie authentication ----------------------------------------------

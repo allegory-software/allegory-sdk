@@ -176,7 +176,7 @@ function init_xmodule(opt) {
 	xm.bind_instance = function(e, on) {
 		assert(e.id)
 		if (on) {
-			attr(xm.instances, e.id, Array).push(e)
+			attr(xm.instances, e.id, array).push(e)
 			update_instance(e)
 		} else {
 			let t = xm.instances[e.id]

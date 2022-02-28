@@ -568,7 +568,7 @@ function nav_widget(e) {
 
 	function bind_rowset_name(name, on) {
 		if (on) {
-			attr(rowset_navs, name, Set).add(e)
+			attr(rowset_navs, name, set).add(e)
 			init_rowset_events()
 		} else {
 			let navs = rowset_navs[name]
