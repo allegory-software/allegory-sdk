@@ -51,7 +51,7 @@ local t = {k0 = {v0 = 1}}
 test(glue.attr(t, 'k0').v0, 1) --existing key
 glue.attr(t, 'k').v = 1
 test(t.k, {v = 1}) --created key
-glue.attr(t, 'k2', 'v2')
+glue.attr(t, 'k2', function() return 'v2' end)
 test(t.k2, 'v2') --custom value
 
 --lists ----------------------------------------------------------------------
@@ -263,28 +263,49 @@ local f = glue.memoize(function(x) n = n + 1; return x and 2*x; end)
 for i=1,100 do
 	test(f(2), 4)
 	test(f(3), 6)
-	test(f(0/0), 0/0)
-	test(f(), nil) --no distinction between 0 args and 1 nil arg!
-	test(f(nil), nil)
+	test(f(3), 6)
+	--test(f(0/0), 0/0)
+	--test(f(), nil) --no distinction between 0 args and 1 nil arg!
+	--test(f(nil), nil)
 end
-test(n, 4)
+test(n, 2)
 local n = 0
 local f = glue.memoize(function(x, y) n = n + 1; return x and y and x + y; end)
 for i=1,100 do
 	test(f(3,2), 5)
 	test(f(2,3), 5)
-	test(f(nil,3), nil)
-	test(f(3,nil), nil)
-	test(f(nil,nil), nil)
-	test(f(), nil)     --no distinction between missing args and nil args!
-	test(f(nil), nil)  --same here, this doesn't increment the count!
-	test(f(0/0), nil)
-	test(f(nil, 0/0), nil)
-	test(f(0/0, 1), 0/0)
-	test(f(1, 0/0), 0/0)
-	test(f(0/0, 0/0), 0/0)
+	test(f(2,3), 5)
+	--test(f(nil,3), nil)
+	--test(f(3,nil), nil)
+	--test(f(nil,nil), nil)
+	--test(f(), nil)     --no distinction between missing args and nil args!
+	--test(f(nil), nil)  --same here, this doesn't increment the count!
+	--test(f(0/0), nil)
+	--test(f(nil, 0/0), nil)
+	--test(f(0/0, 1), 0/0)
+	--test(f(1, 0/0), 0/0)
+	--test(f(0/0, 0/0), 0/0)
 end
-test(n, 10)
+test(n, 2)
+local n = 0
+local f = glue.memoize(function(x, y, z) n = n + 1; return x + y + z; end)
+for i=1,100 do
+	test(f(3,2,1), 6)
+	test(f(2,3,0), 5)
+	test(f(2,3,0), 5)
+	--test(f(nil,3), nil)
+	--test(f(3,nil), nil)
+	--test(f(nil,nil), nil)
+	--test(f(), nil)     --no distinction between missing args and nil args!
+	--test(f(nil), nil)  --same here, this doesn't increment the count!
+	--test(f(0/0), nil)
+	--test(f(nil, 0/0), nil)
+	--test(f(0/0, 1), 0/0)
+	--test(f(1, 0/0), 0/0)
+	--test(f(0/0, 0/0), 0/0)
+end
+test(n, 2)
+if false then --vararg memoize is NYI
 local n = 0
 local f = glue.memoize(function(x, ...)
 	n = n + 1
@@ -306,94 +327,6 @@ local n = 0
 local f = glue.memoize(function(x, y, z) n = n + 1; return x + y + z + n end)
 test(f(1, 1, 1), 4)
 test(f(1, 1, 1, 1), 4) --arg#4 ignored even though using memoize_vararg()
-
---tuples ---------------------------------------------------------------------
-
-local tuple = glue.tuple
-
-local function collectall()
-	local after = collectgarbage'count'
-	repeat
-		local before = after
-		collectgarbage()
-		after = collectgarbage'count'
-	until after >= before
-end
-
-do
---test: leaf index found but has no tuple.
-local t1 = tuple('a','b','c')
-local t2 = tuple('a','b')
-assert(t1 ~= t2)
-
---test: nil and nan values.
-local ab = 'a'..string.char(string.byte('b')) --because constants are not collected
-local e0 = tuple(ab)             assert(e0() == ab)
-local e1 = tuple(ab,nil,1)       assert(e1(2) == nil); assert(e1(3) == 1)
-local e2 = tuple(ab,nil,2)       assert(e2(2) == nil); assert(e2(3) == 2)
-local e3 = tuple(ab,nil,2,nil)   assert(select('#', e3()) == 4)
-local e4 = tuple(ab,0/0,2,nil)   assert(e4(2) ~= e4(2))
-local a,b,c,d = e4()
-assert(a==ab and b~=b and c==2 and d==nil)
-
---test: anchoring of index tables (insufficient).
-ab = nil
-collectall()
-local ab = 'a'..'b'
-assert(e0 == tuple(ab))
-assert(e1 == tuple(ab,nil,1))
-assert(e2 == tuple(ab,nil,2))
-assert(e2 ~= tuple(ab,nil,2,nil))
-assert(e3 == tuple(ab,nil,2,nil))
-assert(e4 == tuple(ab,0/0,2,nil))
-
---test: tostring()
-assert(tostring(e0) == '(ab)')
-assert(tostring(tuple('b', 1, 'd')) == '(b, 1, d)')
-if jit then --only luajit has 'nan' for 0/0
-	assert(tostring(e4) == '(ab, nan, 2, nil)')
-end
-
---test: anchoring of index tables.
-local t = {}
-for i=1,20 do
-	for j = 1,20 do
-		t[tuple(i, j)] = true
-	end
-end
-collectall()
-for i=1,20 do
-	for j = 1,20 do
-		assert(t[tuple(i, j)])
-	end
-end
-
---test: tuple spaces and wrapping.
-local tuple = glue.tuples(nil, true)
-local t1 = tuple(1, 2, 3)
-collectall()
-assert(tuple(1, 2, 3) == t1)
-
---test: weak tuple spaces don't leak.
-local function testleaks(weak, s)
-	local tuple = glue.tuples(nil, weak)
-	local before = collectgarbage'count'
-	for i=1,10^5 do
-		local a = math.floor(i / 53512) % 23
-		local b = math.floor(i / 1439) % 17
-		local c = math.floor(i / 197) % 16
-		local d = math.floor(i / 16) % 19
-		local e = i % 10
-		tuple(a, b, c, d, e)
-	end
-	collectall()
-	local after = collectgarbage'count'
-	return (after - before) --the memory leak in KB
-end
-collectall()
-local leak = testleaks(true, 'weak'); assert(leak < 1000)
-local leak = testleaks(false, 'strong'); assert(leak > 10000)
-
 end
 
 --modules --------------------------------------------------------------------
