@@ -109,12 +109,11 @@ local conn_opt = glue.memoize(function(ns)
 end)
 
 function sqlpp(ns)
-	return conn_opt(ns).sqlpp
+	return conn_opt(ns or false).sqlpp
 end
 
 function db(ns, without_current_db)
-	ns = ns or false
-	local opt = conn_opt(ns)
+	local opt = conn_opt(ns or false)
 	local key = opt.pool_key
 	local thread = currentthread()
 	local env = attr(threadenv, thread)
