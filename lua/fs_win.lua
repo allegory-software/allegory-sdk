@@ -1119,8 +1119,7 @@ local function is_symlink(bits, reparse_tag)
 end
 
 local function filetype(bits, reparse_tag)
-	return
-		is_symlink(bits, reparse_tag) and 'symlink'
+	return is_symlink(bits, reparse_tag) and 'symlink'
 		or band(bits, attr_bits.directory) ~= 0 and 'dir'
 		or band(bits, attr_bits.device   ) ~= 0 and 'dev'
 		or 'file'
@@ -1153,31 +1152,18 @@ local function file_set_basic_info(f, binfo)
 end
 
 local binfo_getters = {
-	type = function(binfo) return filetype(binfo.FileAttributes) end,
-	btime = function(binfo)
-		return timestamp(binfo.CreationTime.QuadPart)
-	end,
-	atime = function(binfo)
-		return timestamp(binfo.LastAccessTime.QuadPart)
-	end,
-	mtime = function(binfo)
-		return timestamp(binfo.LastWriteTime.QuadPart) end,
-	ctime = function(binfo)
-		return timestamp(binfo.ChangeTime.QuadPart)
-	end,
+	type  = function(binfo) return filetype(binfo.FileAttributes) end,
+	btime = function(binfo) return timestamp(binfo.CreationTime.QuadPart) end,
+	atime = function(binfo) return timestamp(binfo.LastAccessTime.QuadPart) end,
+	mtime = function(binfo) return timestamp(binfo.LastWriteTime.QuadPart) end,
+	ctime = function(binfo) return timestamp(binfo.ChangeTime.QuadPart) end,
 }
 
 local info_getters = {
-	volume = function(info)
-		return info.dwVolumeSerialNumber
-	end,
-	size = function(info)
-		return filesize(info.nFileSizeHigh, info.nFileSizeLow)
-	end,
-	nlink = function(info) return info.nNumberOfLinks end,
-	id = function(info)
-		return join_uint64(info.nFileIndexHigh, info.nFileIndexLow)
-	end,
+	volume = function(info) return info.dwVolumeSerialNumber end,
+	size   = function(info) return filesize(info.nFileSizeHigh, info.nFileSizeLow) end,
+	nlink  = function(info) return info.nNumberOfLinks end,
+	id     = function(info) return join_uint64(info.nFileIndexHigh, info.nFileIndexLow) end,
 }
 
 local function file_attr_get_all(f)
@@ -1496,12 +1482,12 @@ BOOL VirtualProtect(
 	PDWORD lpflOldProtect);
 ]]
 
-local PAGE_READONLY                = 0x0002
-local PAGE_READWRITE               = 0x0004
-local PAGE_WRITECOPY               = 0x0008 --no file auto-grow with this!
-local PAGE_EXECUTE_READ            = 0x0020
-local PAGE_EXECUTE_READWRITE       = 0x0040
-local PAGE_EXECUTE_WRITECOPY       = 0x0080
+local PAGE_READONLY           = 0x0002
+local PAGE_READWRITE          = 0x0004
+local PAGE_WRITECOPY          = 0x0008 --no file auto-grow with this!
+local PAGE_EXECUTE_READ       = 0x0020
+local PAGE_EXECUTE_READWRITE  = 0x0040
+local PAGE_EXECUTE_WRITECOPY  = 0x0080
 
 local function protect_flag(write, exec, copy)
 	return exec and (
