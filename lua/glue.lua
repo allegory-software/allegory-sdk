@@ -137,6 +137,16 @@ FFI HELPERS
 	glue.setbit(val, mask, bitval) -> val           set the value of a single bit from an integer
 	glue.bor(flags, bits, [strict]) -> mask         bit.bor() that takes a string or table
 
+BETTER ALTERNATIVES FROM OTHER MODULES
+
+	* fs.scriptdir()    glue.bin()
+	* fs.is()           glue.canopen()
+	* fs.load()         glue.readfile()
+	* fs.save()         glue.writefile()
+	* fs.move()         glue.replacefile()
+	* errors.pcall()    glue.pcall()
+	* proc.exec()       glue.readpipe()
+
 TIP: Extend the Lua string namespace with glue.update(string, glue.string)
 so you can use all glue string functions as string methods, eg. s:trim().
 
@@ -1144,7 +1154,7 @@ glue.win = package.config:sub(1,1) == '\\'
 --i/o ------------------------------------------------------------------------
 
 --check if a file exists and can be opened for reading or writing.
---DEPRECATED in favor of fs.is(name, 'file') where available.
+--DEPRECATED in favor of fs.is(name) where available.
 function glue.canopen(name, mode)
 	local f = io.open(name, mode or (glue.win and 'rb' or 'r'))
 	if f then f:close() end
