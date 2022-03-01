@@ -129,10 +129,8 @@ collect = glue.collect
 noop     = glue.noop
 pass     = glue.pass
 
-memoize    = glue.memoize
-tuple      = glue.tuple
-tuples     = glue.tuples
-weaktuples = glue.weaktuples
+memoize = glue.memoize
+tuples  = glue.tuples
 
 assertf  = glue.assert
 
