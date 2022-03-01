@@ -231,7 +231,7 @@ do
 
 	function config:set(t1)
 
-		local loadfile = t1.loadfile
+		local loadfile = assert(t1.loadfile)
 		local t = {}
 		for k,v in pairs(t1) do t[k] = v end
 		load_files(t, loadfile)

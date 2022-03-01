@@ -22,9 +22,9 @@
 ]=]
 
 local glue = require'glue'
+local b64 = require'base64'.encode
 local _ = string.format
 local sortedpairs = glue.sortedpairs
-local b64 = require'base64'.encode
 
 local multipart = {utf8_headers = {subject=1}}
 
@@ -181,6 +181,8 @@ end
 
 if not ... then
 
+	local fs = require'fs'
+
 	local req = multipart.mail{
 		from = 'thedude@dude.com',
 		text = 'Hello Dude!',
@@ -189,12 +191,12 @@ if not ... then
 			{
 				cid = 'img1',
 				filename = 'progressive.jpg',
-				contents = glue.readfile'../tests/jpeg_test/progressive.jpg',
+				contents = fs.load'../tests/jpeg_test/progressive.jpg',
 			},
 			{
 				cid = 'img2',
 				filename = 'birds.jpg',
-				contents = glue.readfile'../tests/pillow_test/birds.jpg',
+				contents = fs.load'../tests/pillow_test/birds.jpg',
 			},
 		},
 		attachments = {

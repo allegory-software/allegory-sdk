@@ -8,15 +8,10 @@ tool boxes on the floor before you start a job. Some people feel more
 efficient doing it like that, others hate it, wacha gonna do.
 
 Use this in app code, don't use in library code. This module not only adds
-new globals, but also replaces a few standard Lua functions:
+new globals and string methods, but also replaces a few standard Lua functions:
 
 	* module() is replaced with glue.module() with entirely different semantics.
 	* os.time(), os.date() and os.clock() get sub-second accuracy.
-
-Alternatives to some `glue` functions:
-
-	* If you use `fs`, use fs.scriptdir() instead of glue.bin.
-	* If you use `errors`, use errors.pcall() instead of glue.pcall().
 
 TIP: Run the script standalone with `luajit $.lua` which prints all symbols
 to be pasted into your editor config file for syntax highlighting.
@@ -177,10 +172,6 @@ timeago = glue.timeago
 
 kbytes = glue.kbytes
 
-readfile    = glue.readfile
-writefile   = glue.writefile
-readpipe    = glue.readpipe
-
 fpcall = glue.fpcall
 fcall  = glue.fcall
 
@@ -189,10 +180,10 @@ env = os.getenv
 
 freelist = glue.freelist
 
-i8p = glue.i8p
-i8a = glue.i8a
-u8p = glue.u8p
-u8a = glue.u8a
+i8p  = glue.i8p
+i8a  = glue.i8a
+u8p  = glue.u8p
+u8a  = glue.u8a
 i32p = glue.i32p
 i32a = glue.i32a
 u32p = glue.u32p

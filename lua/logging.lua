@@ -350,8 +350,7 @@ local function log(self, severity, module, event, fmt, ...)
 			}
 		end
 	end
-	if
-		not self.quiet
+	if not self.quiet
 		and (severity ~= '' or self.debug)
 		and (severity ~= 'note' or (self.verbose == true or self.verbose == module))
 	then

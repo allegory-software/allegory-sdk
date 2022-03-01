@@ -1067,7 +1067,7 @@ function getpage(arg1, post_data)
 		local http_client = require'http_client'
 
 		getpage_client = http_client:new(update({
-			libs = 'sock sock_libtls zlib',
+			libs = 'sock fs zlib sock_libtls',
 			resolve = function(_, host) return resolve(host) end,
 		}, opt))
 
@@ -1233,7 +1233,7 @@ end
 
 function readfile(file, parse)
 	parse = parse or glue.pass
-	local s, err = glue.readfile(file)
+	local s, err = fs.load(file)
 	if not s then return nil, err end
 	return parse(s)
 end
@@ -1668,7 +1668,7 @@ function sendmail(opt)
 		pass  = config'smtp_pass',
 		tls_options = {
 			ca_file = config('ca_file', varpath'cacert.pem'),
-			loadfile = glue.readfile,
+			loadfile = fs.load,
 		},
 	})
 
@@ -1887,7 +1887,7 @@ function webb.server(opt)
 		key_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.key')
 	end
 	return server:new(update({
-		libs = 'zlib sock '..(config'https_addr' and 'sock_libtls' or ''),
+		libs = 'sock fs zlib '..(config'https_addr' and 'sock_libtls' or ''),
 		debug = config'http_debug' and index(names(config'http_debug' or '')),
 		listen = {
 			{

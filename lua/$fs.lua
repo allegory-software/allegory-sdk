@@ -13,8 +13,8 @@ FILESYSTEM API (NOT ASYNC)
 	filename(file) -> name
 	filenameext(file) -> name, ext
 	fileext(file) -> ext
-	exists(file) -> t|f
-	checkexists(file)
+	exists(file, [type]) -> t|f
+	checkexists(file, [type])
 	startcwd()
 	cwd()
 	chdir(dir)
@@ -57,14 +57,14 @@ filename = path.file
 filenameext = path.nameext
 fileext = path.ext
 
-function exists(file)
-	local is, err = fs.is(file)
+function exists(file, type)
+	local is, err = fs.is(file, type)
 	check('fs', 'exists', not err, 'could not check file %s: %s', file, err)
 	return is
 end
 
-function checkexists(file)
-	check('fs', 'exists', exists(file), 'file missing: %s', file)
+function checkexists(file, type)
+	check('fs', 'exists', exists(file, type), 'file missing: %s', file)
 end
 
 function startcwd(dir)
@@ -128,12 +128,8 @@ function mkdirs(file)
 	return file
 end
 
-function readfile(file, parse)
-	parse = parse or glue.pass
-	local s, err = glue.readfile(file)
-	if not s then return nil, err end
-	return parse(s)
-end
+readfile_tobuffer = fs.load_tobuffer
+readfile = fs.load
 
 function reload(path, default) --load a file into a string.
 	if default ~= nil and not exists(path) then return default end
@@ -163,6 +159,9 @@ trysave = fs.save
 saver = fs.saver
 
 function save(file, s)
+	if type(s) == 'table' then
+		pp.save(file, s)
+	end
 	note('fs', 'save', '%s (%s)', file, kbytes(#s))
 	check('fs', 'save', fs.save(file, s))
 end
@@ -198,7 +197,7 @@ function chmod(file, perms)
 end
 
 function mtime(file)
-	return fs.attr(file, 'mtime')
+	return fs.attr(file, 'mtime', not win)
 end
 
 function dir(path, patt, min_mtime, create, desc, order_by)

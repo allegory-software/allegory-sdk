@@ -28,7 +28,7 @@ local push = table.insert
 local server = {
 	type = 'http_server', http = http,
 	tls_options = {
-		loadfile = glue.readfile,
+		loadfile = glue.readfile, --stub
 		protocols = 'tlsv1.2',
 		ciphers = [[
 			ECDHE-ECDSA-AES256-GCM-SHA384
@@ -63,6 +63,9 @@ function server:bind_libs(libs)
 			self.stcp          = socktls.server_stcp
 		elseif lib == 'zlib' then
 			self.http.zlib = require'zlib'
+		elseif lib == 'fs' then
+			self.loadfile = require'fs'.load
+			self.tls_options.loadfile = self.loadfile
 		else
 			assert(false)
 		end

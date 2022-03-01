@@ -82,9 +82,10 @@ local client = {
 	max_cookie_length = 8192,
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
+	loadfile = glue.readfile, --stub
 	tls_options = {
 		ca_file = 'cacert.pem',
-		loadfile = glue.readfile,
+		loadfile = glue.readfile, --stub
 	},
 }
 
@@ -111,6 +112,9 @@ function client:bind_libs(libs)
 			self.stcp_config   = socktls.config
 		elseif lib == 'zlib' then
 			self.http.zlib = require'zlib'
+		elseif lib == 'fs' then
+			self.loadfile = require'fs'.load
+			self.tls_options.loadfile = self.loadfile
 		else
 			assert(false)
 		end
@@ -469,7 +473,7 @@ function client:save_cookies(file)
 end
 
 function client:load_cookies(file)
-	local s, err = glue.readfile(file)
+	local s, err = self.loadfile(file)
 	if not s then return nil, err end
 	local f, err = loadstring('return '..s, file)
 	if not f then return nil, err end

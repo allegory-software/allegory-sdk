@@ -4,6 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 	daemon() -> app
+
 	app.name       app name: the name of the Lua script without file extension.
 	app.dir        app directory.
 	app.bindir     app bin directory.
