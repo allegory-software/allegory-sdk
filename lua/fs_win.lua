@@ -1257,15 +1257,16 @@ local file_attr_data_get = {
 }
 local file_attr_data
 function fs_attr_get(path, k, deref)
-	if not deref then
-		local file_attr_get = file_attr_data_get[k]
-		if file_attr_get then
-			--doesn't require opening the file, but no symlink dereferencing either.
-			file_attr_data = file_attr_data or ffi.new'WIN32_FILE_ATTRIBUTE_DATA'
-			local ok, err = checknz(C.GetFileAttributesExW(wcs(path),
-				C.GetFileExInfoStandard, file_attr_data))
-			if not ok then return nil, err end
-			return file_attr_get(file_attr_data)
+	local get = file_attr_data_get[k]
+	if get then --get the attr directly without opening the file.
+		file_attr_data = file_attr_data or ffi.new'WIN32_FILE_ATTRIBUTE_DATA'
+		local ok, err = checknz(C.GetFileAttributesExW(wcs(path),
+			C.GetFileExInfoStandard, file_attr_data))
+		if not ok then return nil, err end
+		if deref and file_attr_data_get.type(file_attr_data) == 'symlink' then
+			--for symlinks we have to either open the file or resolve the link.
+		else
+			return get(file_attr_data)
 		end
 	end
 	local opt = deref and open_opt or open_opt_symlink

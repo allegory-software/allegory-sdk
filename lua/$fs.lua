@@ -197,7 +197,7 @@ function chmod(file, perms)
 end
 
 function mtime(file)
-	return fs.attr(file, 'mtime', not win)
+	return fs.attr(file, 'mtime')
 end
 
 function dir(path, patt, min_mtime, create, desc, order_by)
