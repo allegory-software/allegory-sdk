@@ -127,6 +127,8 @@ end)
 
 function daemon(app_name, ...)
 
+	local arg_i = cmdoptions(...) --process cmdline options.
+
 	assert(not app.name, 'daemon() already called')
 
 	randomseed(clock()) --mainly for resolver.
@@ -154,15 +156,16 @@ function daemon(app_name, ...)
 
 	--cd to app.dir so that we can use relative paths for everything if we want to.
 	chdir(app.dir)
-	function chdir(dir)
+	function fs.chdir(dir)
 		error'chdir() not allowed'
 	end
 
 	--load an optional config file.
 	do
-		local conf_fn = loadfile(app.conffile)
+		local conf_s = load(app.conffile)
 		app.conf = {}
-		if conf_fn then
+		if conf_s then
+			local conf_fn = assert(loadstring(conf_s))
 			setfenv(conf_fn, app.conf)
 			conf_fn()
 		end
@@ -171,7 +174,7 @@ function daemon(app_name, ...)
 	--set up logging.
 	logging.deploy  = app.conf.deploy
 	logging.env     = app.conf.env
-	logging.verbose = app.name --show app's notes only.
+	logging.verbose = logging.verbose or app.name --show app's notes only.
 
 	logging:tofile(app.logfile)
 
@@ -191,9 +194,6 @@ function daemon(app_name, ...)
 	function app:finish()
 		logging:toserver_stop()
 	end
-
-	--process cmdline options and get the cmdline action.
-	local arg_i = cmdoptions(...)
 
 	function app:run(...)
 		if ... == app.name then --caller module loaded with require()
