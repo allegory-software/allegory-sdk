@@ -135,7 +135,9 @@ end
 
 function fs.open(path, opt)
 	opt = opt or 'r'
+	local openmode
 	if type(opt) == 'string' then
+		openmode = opt
 		opt = assert(str_opt[opt], 'invalid mode %s', opt)
 	end
 	local flags = flags(opt.flags or 'rdonly', o_bits)
@@ -154,6 +156,7 @@ function fs.open(path, opt)
 		end
 	end
 	f.shm = opt.shm and true or false
+	fs.log('', 'open', '%s %s %s', f, openmode or '?', path)
 	return f
 end
 
@@ -171,6 +174,7 @@ function file.close(f)
 	local ok = C.close(f.fd) == 0
 	if not ok then return check(false) end
 	f.fd = -1
+	fs.log('', 'close', '%s', f)
 	return true
 end
 
@@ -211,7 +215,10 @@ function fs.pipe(path, mode)
 	if path then
 		local fd = C.mkfifo(path, mode)
 		if fd == -1 then return check() end
-		return fs.wrap_fd(fd, opt.async, true)
+		local f, err = fs.wrap_fd(fd, opt.async, true)
+		if not f then return nil, err end
+		fs.log('', 'pipe', '%s %s', f, path)
+		return f
 	else --unnamed pipe
 		local fds = ffi.new'int[2]'
 		local ok = C.pipe(fds) == 0
@@ -223,6 +230,7 @@ function fs.pipe(path, mode)
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
 		end
+		fs.log('', 'pipe', 'r=%s w=%s %s %s', rf, wf, opt.async and 'async' or 'sync', mode)
 		return rf, wf
 	end
 end
@@ -372,17 +380,26 @@ int unlink(const char *pathname);
 int rename(const char *oldpath, const char *newpath);
 ]]
 
+local function logpath(severity, event, path, ok, err)
+	fs.log(severity, event, '%s', path)
+	if not ok then return false, err end
+	return true
+end
+
 function mkdir(path, perms)
-	return check(C.mkdir(path, perms or 0x1ff) == 0)
+	local ok, err = check(C.mkdir(path, perms or 0x1ff) == 0)
+	fs.log('', '', '%s %s', path, perms)
+	if not ok then return false, err end
+	return true
 end
 
 function rmdir(path)
-	return check(C.rmdir(path) == 0)
+	return logpath('', 'rmdir', path, check(C.rmdir(path) == 0))
 end
 
 function chdir(path)
 	fs.startcwd()
-	return check(C.chdir(path) == 0)
+	return logpath('', 'chdir', path, check(C.chdir(path) == 0))
 end
 
 local ERANGE = 34
@@ -403,11 +420,14 @@ end
 fs.startcwd = memoize(getcwd)
 
 function rmfile(path)
-	return check(C.unlink(path) == 0)
+	return logpath('note', 'rmfile', path, check(C.unlink(path) == 0))
 end
 
 function fs.move(oldpath, newpath)
-	return check(C.rename(oldpath, newpath) == 0)
+	local ok, err = check(C.rename(oldpath, newpath) == 0)
+	fs.log('', 'move', 'old: %s\nnew:%s', path1, path2)
+	if not ok then return false, err end
+	return true
 end
 
 --hardlinks & symlinks -------------------------------------------------------
@@ -418,12 +438,20 @@ int symlink(const char *oldpath, const char *newpath);
 ssize_t readlink(const char *path, char *buf, size_t bufsize);
 ]]
 
+local function logmklink(event, link_path, target_path, ok, err)
+	fs.log('', event, 'link:   %s\ntarget:  %s', link_path, target_path)
+	if not ok then return false, err end
+	return true
+end
+
 function fs.mksymlink(link_path, target_path)
-	return check(C.symlink(target_path, link_path) == 0)
+	return logmklink('mksymlink', link_path, target_path,
+		check(C.symlink(target_path, link_path) == 0))
 end
 
 function fs.mkhardlink(link_path, target_path)
-	return check(C.link(target_path, link_path) == 0)
+	return logmklink('mkhardlink', link_path, target_path,
+		check(C.link(target_path, link_path) == 0))
 end
 
 local EINVAL = 22

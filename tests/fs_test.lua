@@ -251,11 +251,11 @@ end
 
 function test.cd_mkdir_remove()
 	local testdir = 'fs_test_dir'
-	local cd = assert(fs.cd())
+	local cd = assert(fs.cwd())
 	assert(fs.mkdir(testdir)) --relative paths should work
-	assert(fs.cd(testdir))   --relative paths should work
-	assert(fs.cd(cd))
-	assert(fs.cd() == cd)
+	assert(fs.chdir(testdir))   --relative paths should work
+	assert(fs.chdir(cd))
+	assert(fs.cwd() == cd)
 	assert(fs.remove(testdir)) --relative paths should work
 end
 
@@ -353,7 +353,7 @@ function test.remove_file()
 end
 
 function test.cd_not_found()
-	local ok, err = fs.cd'fs_test_nonexistent/nonexistent'
+	local ok, err = fs.chdir'fs_test_nonexistent/nonexistent'
 	assert(not ok)
 	assert(err == 'not_found')
 end
@@ -647,24 +647,32 @@ end
 
 function test.attr()
 	local testfile = 'fs_test.lua'
-	local attr = assert(fs.attr(testfile, false))
-	assert(attr.type == 'file')
-	assert(attr.size > 10000)
-	assert(attr.atime)
-	assert(attr.mtime)
-	assert(linux and attr.ctime or attr.btime)
-	assert(not win or attr.archive)
-	if not win then
-		assert(attr.inode)
-		assert(attr.uid >= 0)
-		assert(attr.gid >= 0)
-		assert(attr.perms >= 0)
-		assert(attr.nlink >= 1)
-		assert(attr.perms > 0)
-		assert(attr.blksize > 0)
-		assert(attr.blocks > 0)
-		assert(attr.dev >= 0)
+	local function test(attr)
+		assert(attr.type == 'file')
+		assert(attr.size > 10000)
+		assert(attr.atime)
+		assert(attr.mtime)
+		assert(linux and attr.ctime or attr.btime)
+		assert(not win or attr.archive)
+		if not win then
+			assert(attr.inode)
+			assert(attr.uid >= 0)
+			assert(attr.gid >= 0)
+			assert(attr.perms >= 0)
+			assert(attr.nlink >= 1)
+			assert(attr.perms > 0)
+			assert(attr.blksize > 0)
+			assert(attr.blocks > 0)
+			assert(attr.dev >= 0)
+		end
 	end
+	local attr = assert(fs.attr(testfile, false))
+	test(attr)
+	assert(fs.attr(testfile, 'type' , false) == attr.type)
+	assert(fs.attr(testfile, 'atime', false) == attr.atime)
+	assert(fs.attr(testfile, 'mtime', false) == attr.mtime)
+	assert(fs.attr(testfile, 'btime', false) == attr.btime)
+	assert(fs.attr(testfile, 'size' , false) == attr.size)
 end
 
 function test.attr_set()

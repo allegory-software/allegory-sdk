@@ -372,7 +372,9 @@ end
 
 function fs.open(path, opt)
 	opt = opt or 'r'
+	local openmode
 	if type(opt) == 'string' then
+		openmode = opt
 		opt = assert(str_opt[opt], 'invalid option %s', opt)
 	end
 	local async = opt.async or opt.read_async or opt.write_async
@@ -401,6 +403,7 @@ function fs.open(path, opt)
 			return nil, err
 		end
 	end
+	fs.log('', 'open', '%s %s %s', f, openmode or '?', path)
 	return f
 end
 
@@ -418,6 +421,7 @@ function file.close(f)
 	local ok, err = checknz(C.CloseHandle(f.handle))
 	if not ok then return false, err end
 	f.handle = INVALID_HANDLE_VALUE
+	fs.log('', 'close', '%s', f)
 	return true
 end
 
@@ -427,7 +431,7 @@ function fs.wrap_handle(h, read_async, write_async, is_pipe_end)
 		handle = h,
 		s = h, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
-		debug_prefix = is_pipe_end and 'p' or 'f',
+		debug_prefix = is_pipe_end and 'P' or 'F',
 		_read_async  = read_async  and true or false,
 		_write_async = write_async and true or false,
 		__index = file,
@@ -539,11 +543,14 @@ function fs.pipe(path, opt)
 		))
 		if not h then return nil, err end
 
-		return fs.wrap_handle(h,
+		local f, err = fs.wrap_handle(h,
 				opt.async or opt.read_async,
 				opt.async or opt.write_async,
 				true
 			)
+		if not f then return nil, err end
+		fs.log('', 'pipe', '%s %s', f, path)
+		return f
 
 	else --unnamed pipe, return both ends
 
@@ -580,6 +587,7 @@ function fs.pipe(path, opt)
 				return nil, err
 			end
 
+			fs.log('', 'pipe', 'r=%s w=%s async', rf, wf)
 			return rf, wf
 
 		else --non-overlapped anon pipe, use native CreatePipe().
@@ -596,6 +604,8 @@ function fs.pipe(path, opt)
 			local wf = fs.wrap_handle(hs[1], nil, nil, true)
 			if opt.inheritable or opt.read_inheritable  then rf:set_inheritable(true) end
 			if opt.inheritable or opt.write_inheritable then wf:set_inheritable(true) end
+
+			fs.log('', 'pipe', 'r=%s w=%s sync', rf, wf)
 			return rf, wf
 
 		end
@@ -728,17 +738,23 @@ BOOL MoveFileExW(
 );
 ]]
 
+local function logpath(severity, event, path, ok, err)
+	fs.log(severity, event, '%s', path)
+	if not ok then return false, err end
+	return true
+end
+
 function mkdir(path)
-	return checknz(C.CreateDirectoryW(wcs(path), nil))
+	return logpath('', 'mkdir', path, checknz(C.CreateDirectoryW(wcs(path), nil)))
 end
 
 function rmdir(path)
-	return checknz(C.RemoveDirectoryW(wcs(path)))
+	return logpath('', 'rmdir', path, checknz(C.RemoveDirectoryW(wcs(path))))
 end
 
 function chdir(path)
 	fs.startcwd()
-	return checknz(C.SetCurrentDirectoryW(wcs(path)))
+	return logpath('', 'chdir', path, checknz(C.SetCurrentDirectoryW(wcs(path))))
 end
 
 function getcwd()
@@ -752,7 +768,7 @@ end
 fs.startcwd = memoize(getcwd)
 
 function rmfile(path)
-	return checknz(C.DeleteFileW(wcs(path)))
+	return logpath('note', 'rmfile', path, checknz(C.DeleteFileW(wcs(path))))
 end
 
 local move_bits = {
@@ -769,11 +785,14 @@ local move_bits = {
 --with FILE_RENAME_INFO and ReplaceIfExists.
 local default_move_opt = 'replace_existing write_through' --posix
 function fs.move(oldpath, newpath, opt)
-	return checknz(C.MoveFileExW(
+	local ok, err = checknz(C.MoveFileExW(
 		wcs(oldpath),
 		wcs(newpath, nil, wbuf),
 		flags(opt or default_move_opt, move_bits, nil, true)
 	))
+	fs.log('', 'move', 'old: %s\nnew: %s', path1, path2)
+	if not ok then return false, err end
+	return true
 end
 
 --symlinks & hardlinks -------------------------------------------------------
@@ -804,21 +823,36 @@ BOOL DeviceIoControl(
 
 local SYMBOLIC_LINK_FLAG_DIRECTORY = 0x1
 
+local function logmklink(event, link_path, target_path, is_dir, ok, err)
+	fs.log('', event, 'link:   %s (%s)\ntarget:  %s',
+		link_path, is_dir and 'dir' or 'file', target_path)
+	if not ok then return false, err end
+	return true
+end
+
 function fs.mksymlink(link_path, target_path, is_dir)
 	local flags = is_dir and SYMBOLIC_LINK_FLAG_DIRECTORY or 0
-	return checknz(C.CreateSymbolicLinkW(
-		wcs(link_path),
-		wcs(target_path, nil, wbuf),
-		flags
-	) == 1 and 1 or 0) --(MSDN is wrong on this one)
+	return logmklink('mksymlink', link_path, target_path, is_dir,
+			checknz(
+				C.CreateSymbolicLinkW(
+					wcs(link_path),
+					wcs(target_path, nil, wbuf),
+					flags
+				) == 1 and 1 or 0 --(MSDN is wrong on this one)
+			)
+		)
 end
 
 function fs.mkhardlink(link_path, target_path)
-	return checknz(C.CreateHardLinkW(
-		wcs(link_path),
-		wcs(target_path, nil, wbuf),
-		nil
-	))
+	return logmklink('mkhardlink', link_path, target_path, false,
+		checknz(
+			C.CreateHardLinkW(
+				wcs(link_path),
+				wcs(target_path, nil, wbuf),
+				nil
+			)
+		)
+	)
 end
 
 do
@@ -1012,11 +1046,19 @@ typedef enum {
     GetFileExInfoStandard
 } GET_FILEEX_INFO_LEVELS;
 
-DWORD GetFinalPathNameByHandleW(
-	HANDLE hFile,
-	LPWSTR lpszFilePath,
-	DWORD  cchFilePath,
-	DWORD  dwFlags
+typedef struct _WIN32_FILE_ATTRIBUTE_DATA {
+	DWORD    dwFileAttributes;
+	FILETIME ftCreationTime;
+	FILETIME ftLastAccessTime;
+	FILETIME ftLastWriteTime;
+	DWORD    nFileSizeHigh;
+	DWORD    nFileSizeLow;
+} WIN32_FILE_ATTRIBUTE_DATA, *LPWIN32_FILE_ATTRIBUTE_DATA;
+
+BOOL GetFileAttributesExW(
+	LPCWSTR lpFileName,
+	GET_FILEEX_INFO_LEVELS fInfoLevelId,
+	LPWIN32_FILE_ATTRIBUTE_DATA lpFileInformation
 );
 ]]
 
@@ -1219,7 +1261,27 @@ local open_opt_symlink = {
 	flags = 'backup_semantics open_reparse_point',
 	attrs = 'reparse_point',
 }
+
+local file_attr_data_get = {
+	type  = function(ad) return filetype(ad.dwFileAttributes) end,
+	atime = function(ad) return ft_timestamp(ad.ftLastAccessTime) end,
+	mtime = function(ad) return ft_timestamp(ad.ftLastWriteTime) end,
+	btime = function(ad) return ft_timestamp(ad.ftCreationTime) end,
+	size  = function(ad) return filesize(ad.nFileSizeHigh, ad.nFileSizeLow) end,
+}
+local file_attr_data
 function fs_attr_get(path, k, deref)
+	if not deref then
+		local file_attr_get = file_attr_data_get[k]
+		if file_attr_get then
+			--doesn't require opening the file, but no symlink dereferencing either.
+			file_attr_data = file_attr_data or ffi.new'WIN32_FILE_ATTRIBUTE_DATA'
+			local ok, err = checknz(C.GetFileAttributesExW(wcs(path),
+				C.GetFileExInfoStandard, file_attr_data))
+			if not ok then return nil, err end
+			return file_attr_get(file_attr_data)
+		end
+	end
 	local opt = deref and open_opt or open_opt_symlink
 	return with_open_file(path, opt, file_attr_get, k)
 end

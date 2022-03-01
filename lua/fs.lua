@@ -54,7 +54,8 @@ FILE ATTRIBUTES
 	fs.is(path, [type], [deref]) -> t|f           check if file exists or is of a certain type
 FILESYSTEM OPS
 	fs.mkdir(path, [recursive], [perms])          make directory
-	fs.cd|cwd|chdir([path]) -> path               get/set current working directory
+	fs.cwd() -> path                              get current working directory
+	fs.chdir(path)                                set current working directory
 	fs.startcwd() -> path                         get the cwd that process started with
 	fs.remove(path, [recursive])                  remove file or directory (recursively)
 	fs.move(path, newpath, [opt])                 rename/move file on the same filesystem
@@ -669,6 +670,12 @@ function check_errno(ret, errno, xtra_errors)
 	return ret, err
 end
 
+function fs.log(severity, ...)
+	local logging = fs.logging
+	if not logging then return end
+	logging.log(severity, 'fs', ...)
+end
+
 --flags arg parsing ----------------------------------------------------------
 
 --turn a table of boolean options into a bit mask.
@@ -947,15 +954,8 @@ function fs.remove(dirfile, recursive)
 	end
 end
 
-function fs.cwd(path)
-	if path then
-		return chdir(path)
-	else
-		return getcwd()
-	end
-end
-fs.cd = fs.cwd
-fs.chdir = fs.cd
+function fs.cwd() return getcwd() end
+function fs.chdir(dir) return chdir(dir) end
 
 --symlinks -------------------------------------------------------------------
 
