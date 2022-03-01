@@ -85,7 +85,7 @@ OBJECTS
 	glue.gettersandsetters([getters], [setters], [super]) -> mt  create a metatable that supports virtual properties
 OS
 	glue.win                                        true if platform is Windows
-FILE & PIPE I/O (DEPRECATED)
+FILE & PIPE I/O
 	glue.canopen(filename[, mode]) -> filename | nil            check if a file exists and can be opened
 	glue.readfile(filename[, format][, open]) -> s | nil, err   read the contents of a file into a string
 	glue.readpipe(cmd[,format][, open]) -> s | nil, err         read the output of a command into a string
@@ -136,16 +136,6 @@ FFI HELPERS
 	glue.getbit(val, mask) -> true|false            get the value of a single bit from an integer
 	glue.setbit(val, mask, bitval) -> val           set the value of a single bit from an integer
 	glue.bor(flags, bits, [strict]) -> mask         bit.bor() that takes a string or table
-
-BETTER ALTERNATIVES FROM OTHER MODULES
-
-	* fs.scriptdir()    glue.bin()
-	* fs.is()           glue.canopen()
-	* fs.load()         glue.readfile()
-	* fs.save()         glue.writefile()
-	* fs.move()         glue.replacefile()
-	* errors.pcall()    glue.pcall()
-	* proc.exec()       glue.readpipe()
 
 TIP: Extend the Lua string namespace with glue.update(string, glue.string)
 so you can use all glue string functions as string methods, eg. s:trim().
@@ -1154,7 +1144,7 @@ glue.win = package.config:sub(1,1) == '\\'
 --i/o ------------------------------------------------------------------------
 
 --check if a file exists and can be opened for reading or writing.
---DEPRECATED in favor of fs.is(name) where available.
+--TIP: use fs.is(name) instead if available.
 function glue.canopen(name, mode)
 	local f = io.open(name, mode or (glue.win and 'rb' or 'r'))
 	if f then f:close() end
@@ -1162,7 +1152,7 @@ function glue.canopen(name, mode)
 end
 
 --read a file into a string (in binary mode by default).
---DEPRECATED in favor of fs.load(file) where available.
+--TIP: use fs.load(file) instead if available.
 function glue.readfile(name, mode, open)
 	open = open or io.open
 	local f, err = open(name, mode=='t' and 'r' or (glue.win and 'rb' or 'r'))
@@ -1177,6 +1167,7 @@ function glue.readfile(name, mode, open)
 end
 
 --read the output of a command into a string.
+--TIP: use proc.exec() instead if available.
 function glue.readpipe(cmd, mode, open)
 	return glue.readfile(cmd, mode, open or io.popen)
 end
@@ -1187,7 +1178,7 @@ the old file atomically. The operation can still fail under many circumstances
 like if `newpath` is a directory or if the files are in different filesystems
 or if `oldpath` is missing or locked, etc. For consistent behavior across OSes,
 both paths should be either absolute paths or simple filenames without a path.
-DEPRECATED in favor of fs.move() where available.
+TIP: use fs.move() instead if available.
 ]]
 if jit then
 
@@ -1238,7 +1229,7 @@ end
 --write a string, number, array of strings or function results to a file.
 --uses binary mode by default. atomic by default by writing to a temp file.
 --`format` can be 't' (text mode - Windows) or 'a' or 'at' for appending.
---DEPRECATED in favor of fs.save() where available.
+--TIP: use fs.save() instead if available.
 function glue.writefile(filename, s, mode, tmpfile)
 	local append = mode == 'a' or mode == 'at'
 	if tmpfile == nil and not append then
@@ -1466,6 +1457,7 @@ function glue.assert(v, err, ...)
 end
 
 --pcall with traceback, which is lost with standard pcall. LuaJIT and Lua 5.2 only.
+--TIP: use errors.pcall() instead if available.
 local function pcall_error(e)
 	return debug.traceback('\n'..tostring(e), 2)
 end
