@@ -2527,7 +2527,7 @@ function nav_widget(e) {
 		let a = []
 		for (let err of (row.errors || empty_array))
 			if (!err.passed && err.message)
-				ap.push(err.message)
+				a.push(err.message)
 		for (let f of e.all_fields)
 			for (let err of (e.cell_errors(row, f) || empty_array))
 				if (!err.passed && err.message)
