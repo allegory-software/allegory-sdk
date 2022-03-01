@@ -1297,7 +1297,7 @@ function fs.load_tobuffer(file)
 	if not f then
 		return nil, err
 	end
-	local buf, len = fs:readall()
+	local buf, len = f:readall()
 	if not buf then
 		f:close()
 		return nil, err
