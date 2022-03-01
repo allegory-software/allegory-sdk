@@ -627,7 +627,7 @@ end
 
 function trace(event, s, ...)
 	if not event then
-		print(debug.traceback())
+		dbg('trace', '%s', debug.traceback())
 		return
 	end
 	dbg(event, '%4.2f '..s, 0, ...)
