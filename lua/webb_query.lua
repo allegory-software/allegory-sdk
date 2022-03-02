@@ -155,7 +155,7 @@ function create_db(ns)
 	return db
 end
 
-for method, name in pairs{
+for method in pairs{
 	--preprocessor
 	sqlval=1, sqlrows=1, sqlname=1, sqlparams=1, sqlquery=1,
 	--query execution
@@ -176,8 +176,7 @@ for method, name in pairs{
 	--mdl
 	insert_row=1, insert_or_update_row=1, update_row=1, delete_row=1,
 } do
-	name = type(name) == 'string' and name or method
-	_G[name] = function(...)
+	_G[method] = function(...)
 		local db = db()
 		return db[method](db, ...)
 	end
