@@ -90,6 +90,7 @@ DDL COMMANDS
 
 MDL COMMANDS
 	cmd:insert_row(tbl, vals, col_map)           insert a row
+	cmd:insert_or_update_row(tbl, vals, col_map) insert or update row
 	cmd:insert_rows(tbl, rows, col_map, compact) insert rows with one query
 	cmd:update_row(tbl, vals, col_map, [filter]) update row
 	cmd:delete_row(tbl, vals, col_map, [filter]) delete row
