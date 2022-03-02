@@ -54,6 +54,33 @@ test(t.k, {v = 1}) --created key
 glue.attr(t, 'k2', function() return 'v2' end)
 test(t.k2, 'v2') --custom value
 
+--test: attrs_clear removes chain of empty tables.
+local t = {}
+glue.attrs(t, 3, nil, 'a', 'b', 'd')
+glue.attrs(t, 2, nil, 'x', 'c')
+glue.attrs_clear(t, 'a', 'b', 'd')
+test(t, {x={c={}}})
+
+--test: tuple with fixed number of elements (tests memoize implicitly).
+local tuple = glue.tuples(3)
+local t = tuple()
+assert(t == tuple(nil))
+assert(t == tuple(nil, nil))
+assert(t == tuple(nil, nil, nil))
+
+--test: tuple with variable number of elements (tests memoize implicitly).
+local tuple = glue.tuples()
+local t1 = tuple()
+local t2 = tuple(nil)
+local t3 = tuple(nil, nil)
+local t4 = tuple(nil, nil, nil)
+assert(t1 ~= t2)
+assert(t1 ~= t3)
+assert(t1 ~= t4)
+assert(t2 ~= t3)
+assert(t2 ~= t4)
+assert(t3 ~= t4)
+
 --lists ----------------------------------------------------------------------
 
 test(glue.extend({5,6,8}, {1,2}, {'b','x'}), {5,6,8,1,2,'b','x'})

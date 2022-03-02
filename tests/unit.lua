@@ -3,7 +3,7 @@ local glue = require'glue'
 local pp = require'pp'
 local fs = require'fs'
 
-assert(fs.cd(fs.exedir()..'/../../tests'))
+assert(fs.chdir(fs.exedir()..'/../../tests'))
 
 local function tostr(s)
 	return pp.format(s)
