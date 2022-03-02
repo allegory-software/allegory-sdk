@@ -38,7 +38,14 @@ TABLES
 	glue.sortedpairs(t [,cmp]) -> iter() -> k, v    like pairs() but in key order
 	glue.update(dt, t1, ...) -> dt                  merge tables - overwrites keys
 	glue.merge(dt, t1, ...) -> dt                   merge tables - no overwriting
-	glue.attr(t, k[, cons, ...])                    autofield pattern
+	glue.attr(t, k, [f, ...]) -> v                  autofield pattern for one key
+	glue.attrs(t, N, [f], k1, ..., kN) -> v         autofield pattern for a chain of keys
+	glue.attrs_find(t, k1, ..., kN) -> v            t[k1]...[kN]
+	glue.attrs_clear(t, k1, ..., kN)                remove value at the end of key chain
+CACHING
+	glue.memoize(f,[cache],[minarg],[maxarg]) -> mf,cache   memoize pattern (fixarg or vararg)
+	glue.tuples([narg],[space]) -> tuple(...)->t,space      create a tuple space (fixarg or vararg)
+	glue.cache(f,[minarg],[maxarg]) -> mf, clear
 ARRAYS
 	glue.extend(dt, t1, ...) -> dt                  extend an array
 	glue.append(dt, v1, ...) -> dt                  append non-nil values to an array
@@ -73,9 +80,6 @@ ITERATORS
 STUBS
 	glue.pass(...) -> ...                           does nothing, returns back all arguments
 	glue.noop(...)                                  does nothing, returns nothing
-CACHING
-	glue.memoize(f, [narg]) -> f                    limited memoize pattern
-	glue.tuples(narg) -> f(...) -> t                create an n-tuple space
 OBJECTS
 	glue.inherit(t, parent) -> t                    set or clear inheritance
 	glue.object([super][, t], ...) -> t             create a class or object
@@ -150,7 +154,9 @@ local min, max, floor, ceil, ln, random =
 	math.min, math.max, math.floor, math.ceil, math.log, math.random
 local insert, remove, sort, concat = table.insert, table.remove, table.sort, table.concat
 local char = string.char
-local type, select, unpack, pairs, rawget = type, select, unpack, pairs, rawget
+local
+	type, select, unpack, pairs, next, rawget, assert, setmetatable, getmetatable =
+	type, select, unpack, pairs, next, rawget, assert, setmetatable, getmetatable
 
 --types ----------------------------------------------------------------------
 
@@ -335,8 +341,11 @@ function glue.merge(dt,...)
 	return dt
 end
 
---`attr(t, k1)[k2] = v` is like `t[k1][k2] = v` with auto-creating `t[k1]` .
+local NIL = {}
+
+--`attr(t, k1)[k2] = v` is like `t[k1][k2] = v` with auto-creating `t[k1]`.
 function glue.attr(t, k, cons, ...)
+	if k == nil then k = NIL end
 	local v = t[k]
 	if v == nil then
 		if cons == nil then
@@ -348,6 +357,171 @@ function glue.attr(t, k, cons, ...)
 		t[k] = v
 	end
 	return v
+end
+
+function glue.attrs(t, n, cons, ...)
+	for i = 1, n do
+		local k = select(i,...)
+		if k == nil then k = NIL end
+		local v = t[k]
+		if i < n then
+			if v == nil then
+				v = {}
+				t[k] = v
+			end
+			t = v
+		else
+			if v == nil then
+				if cons then
+					v = cons(...)
+					assert(v ~= nil)
+				else
+					v = {}
+				end
+				t[k] = v
+			end
+			return v
+		end
+	end
+end
+
+function glue.attrs_find(t, ...)
+	for i = 1, select('#', ...) do
+		local k = select(i,...)
+		if k == nil then k = NIL end
+		local v = t[k]
+		if v == nil then return nil end
+		t = v
+	end
+	return t
+end
+
+function glue.attrs_clear(t, ...)
+	local n = select('#', ...)
+	if n == 0 then
+		for k,v in pairs(t) do
+			t[k] = nil
+		end
+		return
+	end
+	local empty_t, empty_k
+	--^^ first t[k] that will be pointing at a chain of empty tables after
+	--the value is removed, so they can be safely removed with t[k] = nil.
+	local t0, k0
+	for i = 1, n do
+		local k = select(i, ...)
+		if k == nil then k = NIL end
+		local v = t[k]
+		if v == nil then
+			break
+		end
+		if next(t) == k and next(t, k) == nil then --k is the only key left in t.
+			if not empty_t then
+				empty_t, empty_k = t0, k0
+			end
+		else
+			empty_t, empty_k = nil
+		end
+		if i < n then
+			t0, k0 = t, k
+			t = v
+		else
+			t[k] = nil
+			if empty_t then
+				empty_t[empty_k] = nil
+			end
+		end
+	end
+end
+
+local attrs, attrs_clear = glue.attrs, glue.attrs_clear
+
+local NOARG = {} --special arg for zero-arg functions or calls.
+
+--with fixarg functions we store the memoized value in the leaf node directly.
+local function memoize_fixarg(f, n, cache)
+	cache = cache or {}
+	if n == 0 then
+		return function()
+			return attrs(cache, 1, f, NOARG)
+		end, cache
+	else
+		return function(...)
+			return attrs(cache, n, f, ...)
+		end, cache
+	end
+end
+
+--with vararg functions we can't just store the memoized value in the
+--leaf node because any leaf node can become a key node on future calls.
+local VAL   = {} --special key to store the memozied value in the leaf node.
+local function memoize_vararg(f, minarg, maxarg, cache)
+	cache = cache or {}
+	return function(...)
+		local n = min(max(select('#', ...), minarg), maxarg)
+		local t = n == 0
+			and attrs(cache, 1, nil, NOARG)
+			 or attrs(cache, n, nil, ...)
+		local v = t[VAL]
+		if v == nil then
+			v = f(...)
+			assert(v ~= nil)
+			t[VAL] = v
+		end
+		return v
+	end, cache
+end
+
+--tuples are interned value lists that can be used as table keys to achieve
+--multi-key indexing because they have value semantics: a tuple space returns
+--the same tuple object for the same combination of values.
+local tuple_mt = {__call = glue.unpack}
+function tuple_mt:__tostring()
+	local t = {}
+	for i=1,self.n do
+		t[i] = tostring(self[i])
+	end
+	return string.format('(%s)', concat(t, ', '))
+end
+function glue.tuples(n, space)
+	space = space or {}
+	local function gen_tuple(...)
+		return setmetatable({n = select('#', ...), ...}, tuple_mt)
+	end
+	if n then --fixarg: use the leaf node itself as the tuple object.
+		assert(n >= 1)
+		return memoize_fixarg(gen_tuple, n, space)
+	else --vararg: put the tuple in the special VAL key of the value-table.
+		return memoize_vararg(gen_tuple, 0, 1/0, space)
+	end
+end
+function glue.istuple(t)
+	return getmetatable(t) == tuple_mt
+end
+
+local POISON = {}
+glue.poison = POISON
+
+function glue.memoize(f, cache, minarg, maxarg)
+	if not minarg then
+		local info = debug.getinfo(f, 'u')
+		if info.isvararg then
+			minarg, maxarg = info.nparams, 1/0
+		else
+			minarg, maxarg = info.nparams, info.nparams
+		end
+	end
+	cache = cache or {}
+	local mf = minarg ~= maxarg
+		and memoize_vararg(f, minarg, maxarg, cache)
+		 or memoize_fixarg(f, minarg, cache)
+	return function(...)
+		if ... == POISON then
+			attrs_clear(cache_t, select(2, ...))
+		else
+			return mf(...)
+		end
+	end, cache, minarg, maxarg
 end
 
 --lists ----------------------------------------------------------------------
@@ -877,149 +1051,6 @@ end
 
 function glue.pass(...) return ... end
 function glue.noop() return end
-
---caching --------------------------------------------------------------------
-
-local P = {}
-glue.poison = P --use it for cache invalidation on a key prefix.
-
---memoize for functions with 0,1,2,3-arg and 1-retval.
-local function memoize0(fn)
-	local v
-	return function(k1)
-		if k1 == P then
-			v = nil
-			return
-		end
-		if v == nil then
-			v = fn()
-		end
-		return v
-	end
-end
-local function memoize1(fn)
-	local t1
-	return function(k1, k2)
-		if k1 == P then
-			t1 = nil
-			return
-		end
-		if k2 == P then
-			if t1 and t1[k1] then t1[k1] = nil end
-			return
-		end
-		t1 = t1 or {}
-		local v = t1[k1]
-		if v == nil then
-			v = fn(k1)
-			t1[k1] = v
-		end
-		return v
-	end
-end
-local function memoize2(fn)
-	local t1
-	return function(k1, k2, k3)
-		if k1 == P then
-			t1 = nil
-			return
-		end
-		if k2 == P then
-			if t1 then t1[k1] = nil end
-			return
-		end
-		if k3 == P then
-			if t1 and t1[k1] then t1[k1][k2] = nil end
-			return
-		end
-		t1 = t1 or {}
-		local t2 = t1[k1]
-		if not t2 then
-			t2 = {}
-			t1[k1] = t2
-		end
-		local v = t2[k2]
-		if v == nil then
-			v = fn(k1, k2)
-			t2[k2] = v
-		end
-		return v
-	end
-end
-local function memoize3(fn)
-	local t1
-	return function(k1, k2, k3, k4)
-		if k1 == P then
-			t1 = nil
-			return
-		end
-		if k2 == P then
-			if t1 then t1[k1] = nil end
-			return
-		end
-		if k3 == P then
-			if t1 and t1[k1] then t1[k1][k2] = nil end
-			return
-		end
-		if k4 == P then
-			if t1 and t1[k1] and t1[k1][k2] then t1[k1][k2][k3] = nil end
-			return
-		end
-		t1 = t1 or {}
-		local t2 = t1[k1]
-		if not t2 then
-			t2 = {}
-			t1[k1] = t2
-		end
-		local t3 = t2[k2]
-		if not t3 then
-			t3 = {}
-			t2[k2] = t3
-		end
-		local v = t3[k3]
-		if v == nil then
-			v = fn(k1, k2, k3)
-			t3[k3] = v
-		end
-		return v
-	end
-end
-local memoize_narg = {[0] = memoize0, memoize1, memoize2, memoize3}
-function glue.memoize(func, narg)
-	if not narg then
-		local info = debug.getinfo(func, 'u')
-		assert(not info.isvararg, 'memoize for vararg functions is NYI')
-		narg = info.nparams
-	end
-	local memoize = memoize_narg[narg]
-	glue.assert(memoize, 'memoize for %d-arg functions is NYI', narg)
-	return memoize(func)
-end
-
--- A tuple space is a function that generates tuples. Tuples are immutable lists
--- that can be used as table keys because they have value semantics: the tuple
--- space returns the same identity for the same list of input identities.
--- A tuple can be expanded to get its input identities by calling it: t() -> ...
-local tuple_mt = {__call = glue.unpack}
-function tuple_mt:__tostring()
-	local t = {}
-	for i=1,self.n do
-		t[i] = tostring(self[i])
-	end
-	return string.format('(%s)', concat(t, ', '))
-end
-function tuple_mt:__pwrite(write, write_value) --integration with the pp module.
-	write'tuple('; write_value(self[1])
-	for i=2,self.n do
-		write','; write_value(self[i])
-	end
-	write')'
-end
-function glue.tuples(narg)
-	return glue.memoize(function(...)
-		return setmetatable(glue.pack(...), tuple_mt)
-	end, narg)
-end
 
 --objects --------------------------------------------------------------------
 
