@@ -45,7 +45,8 @@ TABLES
 CACHING
 	glue.memoize(f,[cache],[minarg],[maxarg]) -> mf,cache   memoize pattern (fixarg or vararg)
 	glue.tuples([narg],[space]) -> tuple(...)->t,space      create a tuple space (fixarg or vararg)
-	glue.cache(f,[minarg],[maxarg]) -> mf, clear
+	glue.poison                                     value to use as arg#1 on a memoized function to clear the cache
+
 ARRAYS
 	glue.extend(dt, t1, ...) -> dt                  extend an array
 	glue.append(dt, v1, ...) -> dt                  append non-nil values to an array
@@ -350,11 +351,11 @@ function glue.attr(t, k, cons, ...)
 	if v == nil then
 		if cons == nil then
 			v = {}
+			t[k] = v
 		else
 			v = cons(...)
-			assert(v ~= nil)
+			t[k] = v == nil and NIL or v
 		end
-		t[k] = v
 	end
 	return v
 end
@@ -374,11 +375,13 @@ function glue.attrs(t, n, cons, ...)
 			if v == nil then
 				if cons then
 					v = cons(...)
-					assert(v ~= nil)
+					t[k] = v == nil and NIL or v
 				else
 					v = {}
+					t[k] = v
 				end
-				t[k] = v
+			elseif v == NIL then
+				v = nil
 			end
 			return v
 		end
@@ -499,6 +502,8 @@ function glue.istuple(t)
 	return getmetatable(t) == tuple_mt
 end
 
+--special value to use as arg#1 on a memoized function to clear the cache
+--on a prefix of arguments.
 local POISON = {}
 glue.poison = POISON
 
