@@ -914,17 +914,13 @@ end
 
 function outfile_function(path)
 
+	local mtime = assert(fs.attr(path, 'mtime'))
+	check_etag(tostring(mtime))
+
 	local f = fs.open(path, 'r')
 	if not f then
 		return
 	end
-
-	local mtime, err = f:attr'mtime'
-	if not mtime then
-		f:close()
-		error(err)
-	end
-	check_etag(tostring(mtime))
 
 	local file_size, err = f:attr'size'
 	if not file_size then
