@@ -1109,13 +1109,13 @@ end
 We call these method overriding hooks. Check it out:
 	glue.before   (foo, 'bar', f)  # foo.bar method patched to call f(self, ...) first
 	glue.after    (foo, 'bar', f)  # foo.bar method patched to call f(self, ...) last
-	glue.override (foo, 'bar', f)  # foo.bar(...) returns f(self, inherited, ...)
+	glue.override (foo, 'bar', f)  # foo.bar(...) returns f(inherited, self, ...)
 or:
 	Foo.before = glue.before    # Foo class got new ability
 	Foo.after  = glue.after     # Foo class got new ability
 	foo:before  ('bar', f)      # foo.bar method patched to call f(self, ...) first
 	foo:after   ('bar', f)      # foo.bar method patched to call f(self, ...) last
-	foo:override('bar', f)      # foo.bar(...) returns f(self, inherited, ...)
+	foo:override('bar', f)      # foo.bar(...) returns f(inherited, self, ...)
 ]]
 local function install(self, combine, method_name, hook)
 	rawset(self, method_name, combine(self[method_name], hook))
