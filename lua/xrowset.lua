@@ -67,6 +67,10 @@
 		- `pos_col` and `parent_col` are set to hidden by default.
 		- on client-side, `id_col` is set to pk if pk is single-column.
 
+API
+	rowset_changed(rowset_name)
+	table_changed(table_name, exclude_rowset_name)
+
 ACTIONS
 
 	rowset.json               named rowsets action
@@ -109,6 +113,8 @@ local client_field_attrs = {
 	w=1, min_w=1, max_w=1, display_width=1,
 	hour_step=1, minute_step=1, second_step=1, has_time=1, has_seconds=1,
 }
+
+local rowset_tables = {} --{table -> {rowset->true}}
 
 function virtual_rowset(init, ...)
 
@@ -156,6 +162,10 @@ function virtual_rowset(init, ...)
 				end
 			end
 			rs.client_fields[i] = client_field
+
+			if f.table then
+				glue.attr(rowset_tables, f.table)[rs.name] = true
+			end
 		end
 
 		if not rs.insert_row then rs.can_add_rows    = false end
@@ -518,5 +528,16 @@ action['xrowset.events'] = function()
 		local events = table.concat(t)
 		assert(not out_buffering())
 		out(events)
+	end
+end
+
+function table_changed(table_name, exclude_rowset_name)
+	local rowsets = rowset_tables[table_name]
+	if rowsets then
+		for rowset_name in pairs(rowsets) do
+			if rowset_name ~= exclude_rowset_name then
+				rowset_changed(rowset_name)
+			end
+		end
 	end
 end

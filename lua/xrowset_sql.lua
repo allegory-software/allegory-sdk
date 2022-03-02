@@ -256,5 +256,22 @@ function sql_rowset(...)
 		make_atomic(rs.update_row)
 		make_atomic(rs.delete_row)
 
+		local function pass(tbl, ...)
+			table_changed(tbl, rs.name)
+			return ...
+		end
+
+		function rs:insert_into(tbl, ...)
+			return pass(tbl, insert_row(tbl, ...))
+		end
+
+		function rs:update_into(tbl, ...)
+			return pass(tbl, update_row(tbl, ...))
+		end
+
+		function rs:delete_from(tbl, ...)
+			return pass(tbl, delete_row(tbl, ...))
+		end
+
 	end, ...)
 end
