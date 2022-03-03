@@ -13,6 +13,7 @@ SESSIONS
 	gen_auth_code('email', email) -> code     generate a one-time short-lived auth code
 	gen_auth_code('phone', phone) -> code     generate a one-time short-lived auth code
 	create_user([email], [roles]) -> usr      create an authenicable user with assigned roles
+	clear_userinfo_cache([usr])               clear usr table cache
 
 SCHEMA
 
@@ -33,21 +34,21 @@ CONFIG
 
 API DOC
 
-	login([auth][, switch_user]) -> usr | nil, err, errcode
+	login([auth][, switch_user]) -> usr | nil, err
 
 	Login using an auth object (see below).
 
-usr() -> usr | nil, err, errcode
+usr() -> usr | nil, err
 
 	Get the current user id. Same as calling `login()` without args but
 	caches the usr so it can be called multiple times without actually
 	performing the login.
 
-usr(field) -> v | nil, err, errcode
+usr(field) -> v | nil, err
 
 	Get the value of a a specific field from the user info.
 
-usr'*' -> t | nil, err, errcode
+usr'*' -> t | nil, err
 
 	Get full user info.
 
@@ -228,7 +229,7 @@ function create_user(email, roles)
 			email      = new.email,
 			emailvalid = new.emailvalid,
 			roles      = new.roles
-	]], email, roles or 'dev admin')
+		]], email, roles or 'dev admin')
 end
 
 qmacro.usr = function()
@@ -251,6 +252,32 @@ end
 
 --session cookie -------------------------------------------------------------
 
+local function load_session()
+	local cookies = headers('cookie'); if not cookies then return end
+	local session_cookie_name = config('session_cookie_name', 'session')
+	local s = cookies[session_cookie_name]; if not s then return end
+	local ver, s = s:match'^(%d)|(.*)$'; if not ver then return end
+	ver = tonumber(ver); if not ver then return end
+	if ver == 1 then
+		local sid, sig = s:match'^(.-)|(.*)$'; if not sid then return end
+		if secret_hash(sid) ~= sig then return end
+		local usr = first_row([[
+			select usr from sess
+			where token = ?
+				and expires > now()
+			]], sid)
+		if not usr then return end
+		return {id = sid, usr = usr}
+	end
+end
+local session = once(function()
+	return load_session() or {}
+end)
+
+local function session_usr()
+	return session().usr
+end
+
 local function save_session(sess)
 	local secure_flag = config('session_cookie_secure_flag', true)
 	local session_cookie_name = config('session_cookie_name', 'session')
@@ -263,7 +290,7 @@ local function save_session(sess)
 					(token, expires, usr)
 				values
 					(?, from_unixtime(?), ?)
-			]],
+				]],
 				sess.id,
 				sess.expires,
 				sess.usr
@@ -275,7 +302,7 @@ local function save_session(sess)
 					expires = from_unixtime(?)
 				where
 					token = ?
-			]], sess.usr, sess.expires, sess.id)
+				]], sess.usr, sess.expires, sess.id)
 		end
 		local sig = secret_hash(sess.id)
 		setheader('set-cookie', {
@@ -292,6 +319,8 @@ local function save_session(sess)
 		})
 	elseif sess.id then --logout
 		query('delete from sess where token = ?', sess.id)
+		sess.id = nil
+		sess.usr = nil
 		setheader('set-cookie', {
 			[session_cookie_name] = {
 				value = '0',
@@ -306,38 +335,11 @@ local function save_session(sess)
 	end
 end
 
-local function load_session()
-	local cookies = headers('cookie'); if not cookies then return end
-	local session_cookie_name = config('session_cookie_name', 'session')
-	local s = cookies[session_cookie_name]; if not s then return end
-	local ver, s = s:match'^(%d)|(.*)$'; if not ver then return end
-	ver = tonumber(ver); if not ver then return end
-	if ver == 1 then
-		local sid, sig = s:match'^(.-)|(.*)$'; if not sid then return end
-		if secret_hash(sid) ~= sig then return end
-		local usr = first_row([[
-			select usr from sess where token = ? and expires > now()
-			]], sid)
-		if not usr then return end
-		return {id = sid, usr = usr}
-	end
-end
-local session = once(function()
-	return load_session() or {}
-end)
-
-local function session_usr()
-	return session().usr
-end
-
-local clear_usr_cache --fw. decl
-
 local function save_usr(usr)
 	local sess = session()
 	if not sess.id or sess.usr ~= usr then
 		sess.usr = usr
 		save_session(sess)
-		clear_usr_cache()
 	end
 end
 
@@ -348,18 +350,20 @@ local auth = {} --auth.<type>(auth) -> usr, can_create
 local function authenticate(a)
 	assert(type(a) == 'nil' or type(a) == 'table')
 	webb.dbg('auth', 'auth', '%s', pp.format(a, false))
-	local usr, err, errcode = auth[a and a.type or 'session'](a)
+	local usr, err = auth[a and a.type or 'session'](a)
 	if usr then
 		webb.note('auth', 'auth-ok', 'usr=%d', usr)
 		return usr
 	else
-		webb.note('auth', 'auth-fail', '%s %s', errcode, err)
-		return nil, err, errcode
+		webb.note('auth', 'auth-fail', '%s', err)
+		return nil, err
 	end
 end
 
-local function _userinfo(usr)
-	if not usr then return {} end
+local userinfo = memoize(function(usr)
+	if not usr then
+		return {roles = {}}
+	end
 	local t = first_row([[
 		select
 			usr,
@@ -386,11 +390,10 @@ local function _userinfo(usr)
 	t.roles = glue.index(glue.names(t.roles) or {})
 	t.admin = t.roles.admin
 	return t
-end
-local userinfo = once(_userinfo)
+end)
 
-local function clear_userinfo_cache(usr)
-	cx()[_userinfo] = nil
+function clear_userinfo_cache(usr)
+	userinfo(glue.poison, usr)
 end
 
 --session-cookie authentication ----------------------------------------------
@@ -741,7 +744,7 @@ end
 
 function login(auth, switch_user)
 	switch_user = switch_user or glue.pass
-	local usr, err, errcode = authenticate(auth)
+	local usr, err = authenticate(auth)
 	if usr then
 		local susr = valid_usr(session_usr())
 		if susr and usr ~= susr then
@@ -755,13 +758,13 @@ function login(auth, switch_user)
 		save_usr(usr)
 		setlang(userinfo(usr).lang) --user lang has priority over action lang.
 	end
-	return usr, err, errcode
+	return usr, err
 end
 
 function usr(attr)
-	local usr, err, errcode = login()
+	local usr, err = login()
 	if not usr then
-		return nil, err, errcode
+		return nil, err
 	end
 	if attr == '*' then
 		return userinfo(usr)
@@ -770,10 +773,6 @@ function usr(attr)
 	else
 		return usr
 	end
-end
-
-function clear_usr_cache() --local, fw. declared
-	--
 end
 
 function admin(role)
