@@ -291,6 +291,7 @@ local function debug_arg(for_printing, v)
 			if v:find('\n', 1, true) then --multiline, make room for it.
 				v = v:gsub('\r\n', '\n')
 				v = glue.outdent(v)
+				v = v:gsub('\t', '   ')
 				v = '\n\n'..v..'\n'
 			end
 			--avoid messing up the terminal when tailing logs.
@@ -319,6 +320,8 @@ logging.printargs = logging_args_func(true)
 
 local function log(self, severity, module, event, fmt, ...)
 	if self.filter[severity] then return end
+	if self.filter[module  ] then return end
+	if self.filter[event   ] then return end
 	local env = logging.env and logging.env:upper():sub(1, 1) or 'D'
 	local time = time()
 	local date = os.date('%Y-%m-%d %H:%M:%S', time)
