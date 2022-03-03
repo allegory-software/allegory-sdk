@@ -2474,9 +2474,7 @@ function nav_widget(e) {
 
 	e.validator_pk = function() {
 		return {
-			validate: e.pk && function(val, row, field) {
-				if (!e.pk_fields.includes(field))
-					return true // don't check if it's not a pk field that's being changed.
+			validate: e.pk && function(row) {
 				let rows = e.lookup(e.pk, e.cell_input_vals(row, e.pk)).filter(row1 => row1 != row)
 				return rows.length < 1
 			},
@@ -2514,7 +2512,9 @@ function nav_widget(e) {
 		return row.can_have_children != false
 	}
 
-	function notify_errors() {
+	function notify_errors(ev) {
+		if (!(ev && ev.notify_errors))
+			return
 		let a = []
 		for (let row of e.changed_rows) {
 			for (let err of (row.errors || empty_array))
@@ -2852,6 +2852,15 @@ function nav_widget(e) {
 		let had_focus = e.hasfocus
 
 		e.editor.off('lost_focus', editor_lost_focus)
+
+		// TODO: remove these hacks once that popups can hide themselves
+		// automatically when their target is changing its effective visibility.
+		// For now this is good enough.
+		if (e.editor.close_spicker)
+			e.editor.close_spicker()
+		if (e.editor.close)
+			e.editor.close()
+
 		e.editor.hide()
 		e.editor = null
 
@@ -3802,8 +3811,7 @@ function nav_widget(e) {
 
 		e.end_update()
 
-		if (ev && ev.notify_errors)
-			notify_errors()
+		notify_errors(ev)
 	}
 
 	function set_save_state(rows, req) {
@@ -3816,8 +3824,7 @@ function nav_widget(e) {
 			return
 		let [changes, source_rows] = pack_changes()
 		if (!source_rows.length) {
-			if (ev && ev.notify_errors)
-				notify_errors()
+			notify_errors(ev)
 			return
 		}
 		let req = ajax({
@@ -4273,7 +4280,7 @@ function nav_widget(e) {
 						title: S('save_changes', 'Save changes (Esc or Enter keys)'),
 						primary: true,
 						action: function() {
-							e.save()
+							e.save({notify_errors: true})
 						},
 						tabindex: -1,
 					}),
