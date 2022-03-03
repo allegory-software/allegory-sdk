@@ -422,7 +422,7 @@ function input_widget(e) {
 		}
 		if (e.info_button) {
 			e.info_tooltip.text = info
-			e.info_button.show(e.infomode == 'button' && !!info)
+			e.info_button.hidden = !(e.infomode == 'button' && !!info)
 		}
 
 		if (info && e.infomode == 'under' && !e.info_box) {
@@ -431,7 +431,7 @@ function input_widget(e) {
 		}
 		if (e.info_box) {
 			e.info_box.set(info)
-			e.info_box.show(e.infomode == 'under' && !!info)
+			e.info_box.hidden = !(e.infomode == 'under' && !!info)
 		}
 
 	}
@@ -810,11 +810,11 @@ function editbox_widget(e, opt) {
 			if (e.spicker_w)
 				e.spicker.auto_w = false
 			e.spicker.w = e.spicker_w
-			e.spicker.show()
+			e.spicker.hidden = false
 			e.spicker.popup(e, 'bottom', e.align)
 		} else {
 			e.spicker_cancel_val = null
-			e.spicker.hide()
+			e.spicker.hidden = true
 		}
 	}
 
@@ -1042,6 +1042,11 @@ function editbox_widget(e, opt) {
 				e.picker.col = v
 		}
 
+		function popup_picker(show) {
+			e.picker.show(show)
+			e.picker.popup(e, 'bottom', e.align == 'right' ? 'end' : 'start')
+		}
+
 		function bind_picker(on) {
 			if (!e.create_picker)
 				return
@@ -1058,6 +1063,7 @@ function editbox_widget(e, opt) {
 				e.picker.class('picker', true)
 				e.picker.on('val_picked', picker_val_picked)
 				e.picker.on('keydown'   , picker_keydown)
+				popup_picker(false)
 			} else if (e.picker) {
 				e.picker.popup(false)
 				e.picker = null
@@ -1082,7 +1088,7 @@ function editbox_widget(e, opt) {
 
 		// opening & closing the picker
 
-		e.set_open = function(open, focus, hidden) {
+		e.set_open = function(open, focus) {
 			if (e.isopen != open) {
 				e.class('open', open)
 				e.dropdown_button.switch_class('down', 'up', open)
@@ -1094,13 +1100,12 @@ function editbox_widget(e, opt) {
 					if (e.picker_w)
 						e.picker.auto_w = false
 					e.picker.w = e.picker_w
-					e.picker.show(!hidden)
-					e.picker.popup(e, 'bottom', e.align == 'right' ? 'end' : 'start')
+					popup_picker(true)
 					e.fire('opened')
 					e.picker.fire('dropdown_opened')
 				} else {
 					e.cancel_val = null
-					e.picker.hide()
+					popup_picker(false)
 					e.fire('closed')
 					if (e.picker)
 						e.picker.fire('dropdown_closed')
@@ -1157,7 +1162,6 @@ function editbox_widget(e, opt) {
 		// scrolling through values with the wheel with the picker closed.
 
 		e.on('wheel', function(ev, dy) {
-			e.set_open(true, false, true)
 			e.picker.pick_near_val(dy, {input: e})
 			return false
 		})
@@ -1519,7 +1523,7 @@ component('x-tagsedit', 'Input', function(e) {
 					side: 'top', align: 'left'})
 		update_tags()
 		if (e.bubble)
-			e.bubble.show(expanded)
+			e.bubble.hidden = !expanded
 		e.expand_button.title = expanded ? S_condense : S_expand
 	}
 	e.prop('expanded', {store: 'var', private: true})
@@ -1842,7 +1846,7 @@ component('x-slider', 'Input', function(e) {
 	// view
 
 	function update_thumb(thumb, p, show) {
-		thumb.show(show)
+		thumb.hidden = !show
 		thumb.style.left = (p * 100)+'%'
 	}
 
@@ -2005,9 +2009,9 @@ component('x-calendar', 'Input', function(e) {
 
 	e.on('bind_field', function(on) {
 		if (on) {
-			e.time_box.show(e.field.has_time || false)
+			e.time_box.hidden = !(e.field.has_time || false)
 			for (let ce of [e.time_box.last.prev, e.time_box.last])
-				ce.show(e.field.has_seconds || false)
+				ce.hidden = !(e.field.has_seconds || false)
 		}
 	})
 
@@ -2529,15 +2533,15 @@ component('x-image', 'Input', function(e) {
 		img2.class('loaded', false)
 		e.img1 = img2
 		e.img2 = img1
-		e.img1.show()
-		e.img2.show()
+		e.img1.hidden = false
+		e.img2.hidden = false
 	}
 	e.img1.on('load', img_load)
 	e.img2.on('load', img_load)
 
 	function img_error(ev) {
-		e.img1.hide()
-		e.img2.hide()
+		e.img1.hidden = true
+		e.img2.hidden = true
 		e.class('empty fa fa-camera', true)
 		e.overlay.class('transparent', false)
 		e.download_btn.bool_attr('disabled', true)
@@ -2559,8 +2563,8 @@ component('x-image', 'Input', function(e) {
 		e.bool_attr('disabled', e.disabled || null)
 		e.img1.attr('src', format_url() || '')
 		e.img1.class('loaded', false)
-		e.upload_btn.show(!e.disabled && e.allow_upload)
-		e.download_btn.show(!e.disabled && e.allow_download)
+		e.upload_btn.hidden = e.disabled || !e.allow_upload
+		e.download_btn.hidden = e.disabled || !e.allow_download
 	}
 
 	e.prop('url_format'        , {store: 'var', attr: true})
@@ -3166,12 +3170,12 @@ component('x-chart', 'Input', function(e) {
 				tt.py = y1 + pad_y1
 				tt.pw = x2 - x1
 				tt.ph = y2 - y1
-				tt.show()
+				tt.hidden = false
 				tt.end_update()
 				return
 			}
 			if (tt)
-				tt.hide()
+				tt.hidden = true
 		}
 
 	}
