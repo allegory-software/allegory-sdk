@@ -1278,7 +1278,7 @@ component('x-tooltip', function(e) {
 			e.xbutton.on('pointerup', close)
 			e.body.add(e.xbutton)
 		} else if (e.xbutton) {
-			e.xbutton.show(e.close_button)
+			e.xbutton.hidden = !e.close_button
 		}
 		let icon_classes = e.icon_visible && tooltip.icon_classes[e.kind]
 		e.icon_box.attr('class', icon_classes ? ('x-tooltip-icon ' + icon_classes) : null)
@@ -1424,7 +1424,7 @@ component('x-button', 'Input', function(e) {
 
 	e.icon_box = span({class: 'x-button-icon'})
 	e.text_box = span({class: 'x-button-text'})
-	e.icon_box.hide()
+	e.icon_box.hidden = true
 	e.add(e.icon_box, e.text_box)
 
 	e.prop('href', {store:'var', attr: true})
@@ -1467,7 +1467,7 @@ component('x-button', 'Input', function(e) {
 			e.icon_box.attr('class', 'x-button-icon '+v)
 		else
 			e.icon_box.set(v)
-		e.icon_box.show(!!v)
+		e.icon_box.hidden = !v
 	}
 	e.prop('icon', {store: 'var', type: 'icon'})
 
@@ -1724,7 +1724,7 @@ component('x-menu', function(e) {
 	}
 
 	function update_check(tr) {
-		tr.check_box.show(tr.item.checked != null)
+		tr.check_box.hidden = tr.item.checked == null
 		tr.check_box.style.visibility = tr.item.checked ? null : 'hidden'
 	}
 
@@ -2111,7 +2111,7 @@ component('x-pagelist', 'Containers', function(e) {
 	function add_item(item) {
 		if (!item._tab) {
 			let xbutton = div({class: 'x-pagelist-xbutton fa fa-times'})
-			xbutton.hide()
+			xbutton.hidden = true
 			let title_box = div({class: 'x-pagelist-title'})
 			let tab = div({class: 'x-pagelist-tab', tabindex: 0}, title_box, xbutton)
 			tab.title_box = title_box
@@ -2176,7 +2176,7 @@ component('x-pagelist', 'Containers', function(e) {
 	}
 
 	function update_tab_state(tab, select) {
-		tab.xbutton.show(select && (e.can_remove_items || e.widget_editing) || false)
+		tab.xbutton.hidden = !(select && (e.can_remove_items || e.widget_editing))
 		tab.title_box.contenteditable = select && (e.widget_editing || e.renaming)
 	}
 
@@ -2195,13 +2195,13 @@ component('x-pagelist', 'Containers', function(e) {
 		b.y = cr ? (cr.y - hr.y) + (st ? cr.h - br.h : 0) : 0
 		b.w =  horiz ? (cr ? cr.w : 0) : null
 		b.h = !horiz ? (cr ? cr.h : 0) : null
-		b.show(!!tab)
+		b.hidden = !tab
 	}
 
 	e.do_update = function() {
 		if (e.selected_tab)
 			update_tab_state(e.selected_tab, true)
-		e.add_button.show(e.can_add_items || e.widget_editing)
+		e.add_button.hidden = !(e.can_add_items || e.widget_editing)
 		update_selection_bar()
 	}
 
@@ -2514,7 +2514,7 @@ component('x-split', 'Containers', function(e) {
 		e.auto_pane.class('x-split-pane-auto')
 		e.auto_pane.class('x-split-pane-fixed', false)
 		e.class('resizeable', e.resizeable)
-		e.sizer.show(e.resizeable)
+		e.sizer.hidden = !e.resizeable
 		e.fixed_pane[horiz ? 'h' : 'w'] = null
 		e.fixed_pane[horiz ? 'w' : 'h'] = e.fixed_size
 		e.auto_pane.w = null
@@ -2814,14 +2814,14 @@ component('x-dialog', function(e) {
 		if (e.heading != null) {
 			let heading = div({class: 'x-dialog-heading'}, e.heading)
 			e.header.add(heading)
-			e.header.show()
+			e.header.hidden = false
 		}
 
 		if (e.buttons || e.buttons_layout) {
 			e.footer.set(action_band({
 				layout: e.buttons_layout, buttons: e.buttons
 			}))
-			e.footer.show()
+			e.footer.hidden = false
 		}
 
 		e.add(e.header, e.content, e.footer)
@@ -2957,7 +2957,7 @@ component('x-toolbox', function(e) {
 
 	e.init = function() {
 		e.content_box.set(e.content)
-		e.hide()
+		e.hidden = true
 		e.bind(true)
 	}
 
@@ -3060,7 +3060,7 @@ component('x-toolbox', function(e) {
 	})
 
 	e.xbutton.on('pointerup', function() {
-		e.hide()
+		e.hidden = true
 		return false
 	})
 
@@ -3415,7 +3415,7 @@ function richtext_widget_editing(e) {
 
 	e.set_editing = function(v) {
 		e.content_box.contentEditable = v
-		e.actionbar.show(v)
+		e.actionbar.hidden = !v
 	}
 	e.prop('editing', {store: 'var', private: true})
 
@@ -3451,7 +3451,7 @@ component('x-if', 'Containers', function(e) {
 				e.add(content)
 		} else
 			content.remove()
-		e.show(on)
+		e.hide(!on)
 	}
 
 	function bind_global(k, on) {
