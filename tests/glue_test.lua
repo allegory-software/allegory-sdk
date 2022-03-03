@@ -233,8 +233,9 @@ test(glue.ends('ax', 'a'), false)
 test(glue.collect(('abc'):gmatch('.')), {'a','b','c'})
 test(glue.collect(2,ipairs{5,7,2}), {5,7,2})
 
---metamethods ----------------------------------------------------------------
+--objects --------------------------------------------------------------------
 
+--inherit
 local t0 = {a = 1, b = 2}
 local t1 = glue.inherit({}, t0)
 local t2 = glue.inherit({}, t1)
@@ -244,6 +245,20 @@ t0.b = 3
 assert(t2.b == 3)
 glue.inherit(t1)
 assert(not t2.a)
+
+--overide
+local o = {}
+function o:x(a)
+	assert(a == 5)
+	return 7
+end
+o.override = glue.override
+o:override('x', function(inherited, self)
+	local seven = inherited(self, 5)
+	assert(seven == 7)
+	return 8
+end)
+assert(o:x() == 8)
 
 --i/o ------------------------------------------------------------------------
 
