@@ -97,9 +97,9 @@
 		r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
 		r.contains(x, y)
 	element visibility:
-		e.show([on][, ev])
-		e.hide([ev])
-	element state:
+		e.hide([reason, ][on])
+		e.show([reason, ][on])
+		element state:
 		e.hovered
 		e.focused_element
 		e.focused
@@ -946,19 +946,48 @@ method(Window, 'rect', function() {
 	return new DOMRect(0, 0, this.innerWidth, this.innerHeight)
 })
 
-// common style wrappers -----------------------------------------------------
+// common state wrappers -----------------------------------------------------
 
-method(Element, 'show', function(v, ev) {
-	v = v !== false
-	this.hidden = !v
-	if (ev && ev.layout_changed)
+method(Element, 'hide', function(reason, on) {
+	if (reason == null || isbool(reason)) { // hide([on])
+		assert(on === undefined)
+		on = reason
+		reason = null
+	}
+	on = on != false
+	let was_hidden = this.hidden
+	if (on) {
+		if (reason)
+			attr(this, '_hidden_because', set).add(reason)
+		else
+			this._hidden = true
+		this.hidden = true
+	} else {
+		if (reason) {
+			if (this._hidden_because)
+				this._hidden_because.delete(reason)
+		} else {
+			if (this._hidden)
+				this._hidden = false
+		}
+		if (!this._hidden && !(this._hidden_because && this._hidden_because.size))
+			this.hidden = false
+	}
+	if (was_hidden == on)
+		return
+	if (this.effectively_hidden != on)
 		document.fire('layout_changed')
 })
-method(Element, 'hide', function(ev) {
-	this.show(false, ev)
-})
 
-// common state wrappers -----------------------------------------------------
+method(Element, 'show', function(reason, on) {
+	if (reason == null || isbool(reason)) { // show([on])
+		assert(on === undefined)
+		this.hide(reason == false)
+		reason = null
+	} else {
+		this.hide(reason, on == false)
+	}
+})
 
 property(Element, 'hovered', function() {
 	return this.matches(':hover')
@@ -1031,7 +1060,6 @@ property(Element, 'effectively_hidden', {get: function() {
 		return true
 	return false
 }})
-
 
 // text editing --------------------------------------------------------------
 
@@ -1389,7 +1417,6 @@ let popup_state = function(e) {
 				}
 			}
 			e.class('popup')
-			e.style.visibility = 'hidden'
 			document.body.add(e)
 			if (e.local_z == null) // get local z-index from css on first bind.
 				e.local_z = num(e.css('z-index'), 0)
@@ -1428,7 +1455,6 @@ let popup_state = function(e) {
 
 		// layout changes update the popup position.
 		document.on('layout_changed', update, on)
-
 	}
 
 	function layout(w, h) {
@@ -1555,7 +1581,6 @@ let popup_state = function(e) {
 		if (e.popup_target_updated)
 			e.popup_target_updated(target, side)
 
-		e.style.visibility = null
 	}
 
 	return s
