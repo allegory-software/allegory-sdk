@@ -482,7 +482,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				e.cells.add(cell)
 			}
 		}
-		e.empty_rt.show(!e.rows.length)
+		e.empty_rt.hidden = e.rows.length > 0
 	}
 
 	e.do_update_cell_val = function(cell, row, field, input_val, display_val) {
@@ -529,7 +529,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		cell.fi = fi
 
 		if (!row) {
-			cell.hide()
+			cell.hidden = true
 			return
 		}
 
@@ -545,7 +545,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		cell.class('disabled', e.is_cell_disabled(row, field))
 		cell.class('new', row.is_new)
 		cell.class('removed', row.removed)
-		cell.class('row-has-errors', row.has_errors)
+		cell.class('row-has-errors', row.errors && !row.errors.passed)
 		cell.class('modified', e.cell_modified(row, field))
 
 		if (field_has_indent(field)) {
@@ -576,7 +576,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		cell.class('row-focused', row_focused)
 		cell.class('selected', selected)
 
-		cell.show()
+		cell.hidden = false
 	}
 
 	function update_cell(cell, ri, fi) {
@@ -684,8 +684,9 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			return header_visible
 		},
 		function(v) {
-			header_visible = !!v
-			e.header.show(!!v)
+			v = !!v
+			header_visible = v
+			e.header.hidden = !v
 			e.update({sizes: true})
 		}
 	)
@@ -851,9 +852,12 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			return
 		let add_cls = []
 		let rem_cls = []
-		if (changes.is_new    ) { (changes.is_new     [0] ? add_cls : rem_cls).push('new')        }
-		if (changes.removed   ) { (changes.removed    [0] ? add_cls : rem_cls).push('removed')    }
-		if (changes.has_errors) { (changes.has_errors [0] ? add_cls : rem_cls).push('row-has-errors') }
+		if (changes.is_new ) { ;(changes.is_new [0] ? add_cls : rem_cls).push('new')     }
+		if (changes.removed) { ;(changes.removed[0] ? add_cls : rem_cls).push('removed') }
+		if (changes.errors ) {
+			let err = changes.errors[0]
+			;(err && !err.passed ? add_cls : rem_cls).push('row-has-errors')
+		}
 		if (add_cls || rem_cls)
 			each_cell_of_row(ri, function(cell) {
 				for (let k of add_cls) cell.classList.add(k)
@@ -1447,7 +1451,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		align_x: 'center',
 		align_y: 'center',
 	})
-	e.empty_rt.hide()
+	e.empty_rt.hidden = true
 	e.cells_view.add(e.empty_rt)
 
 	let barrier
@@ -1897,7 +1901,9 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			} else if (!e.editor) {
 				e.enter_edit('click')
 				return false
-			} else if (!e.exit_edit_on_enter || e.exit_edit()) {
+			} else {
+				if (e.exit_edit_on_enter)
+					e.exit_edit()
 				if (e.advance_on_enter == 'next_row')
 					e.focus_cell(true, true, 1, 0, {
 						input: e,
@@ -1924,8 +1930,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			}
 			if (e.editor) {
 				if (e.exit_edit_on_escape) {
-					if (e.exit_edit())
-						e.focus()
+					e.exit_edit()
+					e.focus()
 					return false
 				}
 			} else if (e.focused_row && e.focused_field) {
@@ -2263,8 +2269,6 @@ component('x-row-form', function(e) {
 			e.reset_cell_val(row, field, changes.val[0])
 		else if (changes.input_val)
 			e.set_cell_val(row, field, changes.input_val[0])
-		if (changes.error)
-			e.set_cell_error(row, field, changes.error[0])
 	}
 
 	function col_attr_changed(col, attr, val) {
