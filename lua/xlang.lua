@@ -243,7 +243,7 @@ rowset.lang = sql_rowset{
 			name,
 			supported
 		from lang
-	]],
+		]],
 	pk = 'lang',
 	field_attrs = {
 		lang    = {w = 40, readonly = true},
@@ -261,7 +261,7 @@ rowset.pick_lang = sql_rowset{
 			lang,
 			concat(name, ' (', en_name, ')') as name
 		from lang
-	]],
+		]],
 	where_all = 'supported = 1',
 	pk = 'lang',
 }
