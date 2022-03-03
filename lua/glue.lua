@@ -522,7 +522,7 @@ function glue.memoize(f, cache, minarg, maxarg)
 		 or memoize_fixarg(f, minarg, cache)
 	return function(...)
 		if ... == POISON then
-			attrs_clear(cache_t, select(2, ...))
+			attrs_clear(cache, select(2, ...))
 		else
 			return mf(...)
 		end
