@@ -181,7 +181,7 @@ function cssgrid_widget_editing(e) {
 
 	function exit_editing() {
 		bind(false)
-		e.add_button.hide()
+		e.add_button.hidden = true
 		remove_guides_for('x')
 		remove_guides_for('y')
 	}
@@ -362,7 +362,7 @@ function cssgrid_widget_editing(e) {
 
 	e.add_button = button({classes: 'x-cssgrid-add-button', text: 'add...'})
 	e.add_button.can_select_widget = false
-	e.add_button.hide()
+	e.add_button.hidden = true
 	e.add(e.add_button)
 	e.add_button.on('click', function() {
 		let item = widget_placeholder({module: e.module})
