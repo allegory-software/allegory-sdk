@@ -2039,7 +2039,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			icon: 'fa fa-save',
 			disabled: !e.changed_rows,
 			action: function() {
-				e.save()
+				e.save({notify_errors: true})
 			},
 		})
 
