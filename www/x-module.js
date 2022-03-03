@@ -1019,17 +1019,17 @@ function show_toolboxes(on) {
 		prop_layers_tb = prop_layers_toolbox({
 			popup_y: 2, w: 262, h: 225,
 		})
-		prop_layers_tb.show(true, {layout_changed: true})
+		prop_layers_tb.show()
 
 		props_tb = props_toolbox({
 			popup_y: 230, w: 262, h: 397,
 		}, {header_w: 80})
-		props_tb.show(true, {layout_changed: true})
+		props_tb.show()
 
 		tree_tb = widget_tree_toolbox({
 			popup_y: 630, w: 262, h: 311,
 		})
-		tree_tb.show(true, {layout_changed: true})
+		tree_tb.show()
 	} else {
 
 		prop_layers_tb.inspector.reset_to_default()
