@@ -1154,7 +1154,11 @@ local function checkfunc(code, default_err)
 		if ret then return ret end
 		http_error{
 			status = code,
-			headers = {['content-type'] = 'application/json'},
+			headers = {
+				['content-type'] = 'application/json',
+				--allow logout() to remove cookie while raising 403.
+				['set-cookie'] = cx.res.headers['set-cookie'],
+			},
 			content = json{error = tostring(err or default_err)},
 		}
 	end
