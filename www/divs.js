@@ -97,8 +97,8 @@
 		r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
 		r.contains(x, y)
 	element visibility:
-		e.hide([reason, ][on])
-		e.show([reason, ][on])
+		e.hide([on])
+		e.show([on])
 		element state:
 		e.hovered
 		e.focused_element
@@ -948,45 +948,17 @@ method(Window, 'rect', function() {
 
 // common state wrappers -----------------------------------------------------
 
-method(Element, 'hide', function(reason, on) {
-	if (reason == null || isbool(reason)) { // hide([on])
-		assert(on === undefined)
-		on = reason
-		reason = null
-	}
+method(Element, 'hide', function(on) {
 	on = on != false
-	let was_hidden = this.hidden
-	if (on) {
-		if (reason)
-			attr(this, '_hidden_because', set).add(reason)
-		else
-			this._hidden = true
-		this.hidden = true
-	} else {
-		if (reason) {
-			if (this._hidden_because)
-				this._hidden_because.delete(reason)
-		} else {
-			if (this._hidden)
-				this._hidden = false
-		}
-		if (!this._hidden && !(this._hidden_because && this._hidden_because.size))
-			this.hidden = false
-	}
-	if (was_hidden == on)
+	if (this.hidden == on)
 		return
+	this.hidden = on
 	if (this.effectively_hidden != on)
 		document.fire('layout_changed')
 })
 
-method(Element, 'show', function(reason, on) {
-	if (reason == null || isbool(reason)) { // show([on])
-		assert(on === undefined)
-		this.hide(reason == false)
-		reason = null
-	} else {
-		this.hide(reason, on == false)
-	}
+method(Element, 'show', function(on) {
+	this.hide(on == false)
 })
 
 property(Element, 'hovered', function() {
