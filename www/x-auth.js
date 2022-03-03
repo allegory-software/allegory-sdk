@@ -124,22 +124,10 @@ function init_auth() {
 }
 
 function sign_out(opt) {
-
-	// tell the server to remove the session from the db.
-	if (false)
 	usr_nav.reload(assign_opt({
 		upload: {type: 'logout'},
 		event: 'logout',
 	}, opt))
-
-	// delete the session cookie before the server responds (it might not respond).
-	document.cookie = config('session_cookie_name') + '=; Max-Age=0'
-
-	// at this point it would be safe to just refresh the page and not wait
-	// for the server to log us out (the server will garbage-collect the
-	// session eventually anyway). we're only doing it in case there's any
-	// logout logic on the server that needs to happen.
-
 }
 
 component('x-usr-button', function(e) {
