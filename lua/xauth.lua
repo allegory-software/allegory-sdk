@@ -224,19 +224,22 @@ rowset.users = sql_rowset{
 	order_by = 'active desc, ctime desc',
 	insert_row = function(self, row)
 		row.anonymous = false
-		insert_row('usr', row, [[
+		self:insert_into('usr', row, [[
 			active emailvalid email title name phonevalid phone sex birthday
 			newsletter roles note anonymous
 		]])
+		clear_userinfo_cache(row.usr)
 	end,
 	update_row = function(self, row)
-		update_row('usr', row, [[
+		self:update_into('usr', row, [[
 			active emailvalid email title name phonevalid phone sex birthday
 			newsletter roles note
 		]])
+		clear_userinfo_cache(row.usr)
 	end,
 	delete_row = function(self, row)
-		delete_row('usr', row)
+		self:delete_from('usr', row)
+		clear_userinfo_cache(row.usr)
 	end,
 }
 
