@@ -547,6 +547,17 @@ method(Element, 'move', function(pe, i0) {
 		pe.insertBefore(this, pe.at[max(0, or(i0, 1/0))])
 })
 
+// util to convert an array to a html bullet list.
+{
+let ul = function(a, ul_tag, ul_attrs, only_if_many) {
+	if (only_if_many && a.length < 2)
+		return a[0] || ''
+	return tag(ul_tag, ul_attrs, ...a.map(s => tag('li', 0, s)))
+}
+Array.prototype.ul = function(attrs, only_if_many) { return ul(this, 'ul', attrs, only_if_many) }
+Array.prototype.ol = function(attrs, only_if_many) { return ul(this, 'ol', attrs, only_if_many) }
+}
+
 /* instance method overriding for components ---------------------------------
 
 NOTE: unlike global override(), e.override() cannot override built-in methods.
