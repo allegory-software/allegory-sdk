@@ -228,18 +228,18 @@ rowset.users = sql_rowset{
 			active emailvalid email title name phonevalid phone sex birthday
 			newsletter roles note anonymous
 		]])
-		clear_userinfo_cache(row.usr)
+		clear_userinfo_cache(row['usr:old'])
 	end,
 	update_row = function(self, row)
 		self:update_into('usr', row, [[
 			active emailvalid email title name phonevalid phone sex birthday
 			newsletter roles note
 		]])
-		clear_userinfo_cache(row.usr)
+		clear_userinfo_cache(row['usr:old'])
 	end,
 	delete_row = function(self, row)
 		self:delete_from('usr', row)
-		clear_userinfo_cache(row.usr)
+		clear_userinfo_cache(row['usr:old'])
 	end,
 }
 
@@ -285,6 +285,7 @@ rowset.usr = sql_rowset{
 	rw_cols = 'lang country theme',
 	update_row = function(self, row)
 		update_row('usr', row, 'lang country theme')
+		clear_userinfo_cache(row['usr:old'])
 	end,
 }
 
