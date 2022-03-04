@@ -1208,18 +1208,29 @@ function nav_widget(e) {
 			&& (!e.rowset || e.rowset.can_remove_rows != false)
 	}
 
-	function can_change_rows() {
-		return e.can_change_rows
-			&& (!e.rowset || e.rowset.can_change_rows != false)
-	}
-
 	e.can_change_val = function(row, field) {
-		return ((row && row.is_new) || can_change_rows())
-			&& (!row || ((row.is_new || row.can_change != false) && !row.removed))
-			&& (!field || !field.readonly)
+		if (row) {
+			if (row.removed)
+				return false
+			if (!row.is_new) {
+				if (!e.can_change_rows)
+					return false
+				if (row.can_change == false)
+					return false
+				if (e.rowset && e.rowset.can_change_rows == false)
+					return false
+			}
+		} else {
+			if (!e.can_change_rows && !e.can_add_rows)
+				return false
+		}
+		if (field)
+			if (field.readonly)
+				return false
+		return true
 	}
 
-	e.allow_move_rows = function(in_general) {
+	e.can_actually_move_rows = function(in_general) {
 		if (!(e.rowset ? e.rowset.can_move_rows : e.can_move_rows))
 			return false
 		if (in_general)
@@ -1229,7 +1240,7 @@ function nav_widget(e) {
 		return true
 	}
 
-	e.allow_move_rows_error = function() {
+	e.can_actually_move_rows_error = function() {
 		if (e.order_by)
 			return S('cannot_move_records_sorted', 'Cannot move records while they are sorted')
 		if (e.is_filtered)
@@ -1370,11 +1381,6 @@ function nav_widget(e) {
 		let editable = (ev.editable || enter_edit) && !ev.focus_non_editable_if_not_found
 		let expand_selection = ev.expand_selection && e.can_select_multiple
 		let invert_selection = ev.invert_selection && e.can_select_multiple
-		let focus_again = !ev.cancel && function() {
-				e.focus_cell(ri, fi, rows, cols, assign(obj(), ev, {
-					cancel: true, // avoid doing this again on the rebound.
-				}))
-			}
 
 		let opt = assign({editable: editable}, ev)
 
@@ -2591,6 +2597,9 @@ function nav_widget(e) {
 
 		let field = fld(col)
 
+		if (field.readonly)
+			return
+
 		if (field.nosave) {
 			e.reset_cell_val(row, field, val, ev)
 			return
@@ -2794,31 +2803,34 @@ function nav_widget(e) {
 		all_disabled = disabled
 	}
 
-	e.enter_edit = function(editor_state, focus, cell) {
+	e.enter_edit = function(editor_state, focus) {
 		let row = e.focused_row
 		let field = e.focused_field
 		if (!row || !field)
 			return
-		if (e.editor)
-			return true
 
-		if (!e.can_focus_cell(row, field, true))
-			return false
+		if (!e.editor) {
 
-		if (editor_state == 'click')
-			if (e.do_cell_click(e.focused_row_index, e.focused_field_index))
+			if (!e.can_focus_cell(row, field, true))
 				return false
 
-		if (editor_state == 'click')
-			editor_state = 'select_all'
+			if (editor_state == 'click')
+				if (e.do_cell_click(e.focused_row_index, e.focused_field_index))
+					return false
 
-		e.create_editor(field)
-		if (!e.editor)
-			return false
+			if (editor_state == 'click')
+				editor_state = 'select_all'
 
-		e.do_update_cell_editing(e.focused_row_index, e.focused_field_index, true)
+			e.create_editor(field)
 
-		e.editor.on('lost_focus', editor_lost_focus)
+			if (!e.editor)
+				return false
+
+			e.do_update_cell_editing(e.focused_row_index, e.focused_field_index, true)
+
+			e.editor.on('lost_focus', editor_lost_focus)
+
+		}
 
 		if (e.editor.enter_editor)
 			e.editor.enter_editor(editor_state)
@@ -4314,8 +4326,8 @@ function nav_widget(e) {
 				(sn > 1 ? ds : S('delete_focused_record', 'Delete focused record'))
 				+ ' (' + S('delete_key', 'Delete key') + ')'
 
-			let allow_move = e.allow_move_rows(true)
-			let can_move   = e.allow_move_rows(false)
+			let allow_move = e.can_actually_move_rows(true)
+			let can_move   = e.can_actually_move_rows(false)
 			b.buttons.move_up   .show(allow_move)
 			b.buttons.move_down .show(allow_move)
 
@@ -4324,10 +4336,10 @@ function nav_widget(e) {
 				b.buttons.move_down .disable('nav_state', !can_move)
 				b.buttons.move_up   .title = can_move
 					? S('move_record_up', 'Move record up in list (you can also drag it into position)')
-					: e.allow_move_rows_error()
+					: e.can_actually_move_rows_error()
 				b.buttons.move_down .title = can_move
 					? S('move_record_down', 'Move record down in list (you can also drag it into position)')
-					: e.allow_move_rows_error()
+					: e.can_actually_move_rows_error()
 			}
 
 			let s = '\n'.cat(
