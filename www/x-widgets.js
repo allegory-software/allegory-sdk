@@ -1295,7 +1295,7 @@ component('x-tooltip', function(e) {
 	}
 
 	e.set_text = function(s) {
-		e.content.set(isarray(s) ? s.ul(true) : s, 'pre-wrap')
+		e.content.set(s, 'pre-wrap')
 		e.update({reset_timer: true})
 	}
 
@@ -2715,7 +2715,7 @@ component('x-toaster', function(e) {
 	function notify(...args) {
 		t = t || toaster({classes: 'x-notify-toaster'})
 		t.post(...args)
-		console.log('NOTIFY', args[0])
+		console.log('NOTIFY', iselem(args[0]) ? args[0].textContent : args[0])
 	}
 	ajax.notify_error = (err) => notify(err, 'error')
 }
