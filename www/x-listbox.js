@@ -236,7 +236,7 @@ function listbox_widget(e) {
 
 		function item_pointermove(ev, mx, my) {
 			if (!dragging) {
-				dragging = e.allow_move_rows()
+				dragging = e.can_actually_move_rows()
 					&& (e.axis == 'x' ? abs(down_mx - mx) > 4 : abs(down_my - my) > 4)
 				if (dragging) {
 					e.class('moving')
