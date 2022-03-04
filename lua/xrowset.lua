@@ -98,11 +98,11 @@ local capitalize = glue.capitalize
 rowset = {}
 
 action['rowset.json'] = function(name)
-	return checkfound(rowset[name])(name, 'json')
+	return checkfound(rowset[checkarg(name)])(name, 'json')
 end
 
 action['rowset.xlsx'] = function(name)
-	return checkfound(rowset[name])(name, 'xlsx')
+	return checkfound(rowset[checkarg(name)])(name, 'xlsx')
 end
 
 local client_field_attrs = {

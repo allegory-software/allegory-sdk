@@ -4253,7 +4253,7 @@ function nav_widget(e) {
 						text: S('add', 'Add'),
 						title: S('add_new_record', 'Add a new record (Insert key)'),
 						action: function() {
-							e.insert_row(1, {
+							e.insert_rows(1, {
 								input: e,
 								at_focused_row: true,
 								focus_it: true,
@@ -4304,6 +4304,7 @@ function nav_widget(e) {
 						title: S('save_changes', 'Save changes (Esc or Enter keys)'),
 						primary: true,
 						action: function() {
+							e.exit_edit()
 							e.save({notify_errors: true})
 						},
 						tabindex: -1,

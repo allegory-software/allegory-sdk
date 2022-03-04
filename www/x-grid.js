@@ -2092,6 +2092,9 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		if (!e.enable_context_menu)
 			return
 
+		if (e.disabled)
+			return
+
 		if (e.context_menu) {
 			e.context_menu.close()
 			e.context_menu = null
@@ -2114,6 +2117,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			icon: 'fa fa-save',
 			disabled: !e.changed_rows,
 			action: function() {
+				e.exit_edit()
 				e.save({notify_errors: true})
 			},
 		})
