@@ -104,7 +104,7 @@ end
 
 local function lookup_rowset(tbl)
 	local rs_name = 'lookup_'..tbl
-	local rs = rowset[rs_name]
+	local rs = rawget(rowset, rs_name)
 	if not rs then
 		local tdef = table_def(tbl)
 		local name_col = guess_name_col(tdef)
@@ -116,10 +116,18 @@ local function lookup_rowset(tbl)
 			pk = concat(tdef.pk, ' '),
 			name_col = name_col,
 		}
-		rowset[rs_name] = rs
+		rawset(rowset, rs_name, rs)
 	end
 	return rs_name, rs.name_col
 end
+
+setmetatable(rowset, {__index = function(self, rs_name)
+	if glue.starts(rs_name, 'lookup_') then
+		local tbl = checkfound(rs_name:match'lookup_(.+)')
+		lookup_rowset(tbl)
+		return rawget(rowset, rs_name)
+	end
+end})
 
 function sql_rowset(...)
 

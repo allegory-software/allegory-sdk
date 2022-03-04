@@ -1386,13 +1386,13 @@ component('x-tooltip', function(e) {
 
 	// focusing out of the document (to the titlebar etc.) closes the tooltip.
 	function document_focusout(ev) {
-		// pr(ev)
-		// trace()
 		if (!e.autoclose)
 			return
 		if (ev.relatedTarget)
 			return
 		if (!e.autoclose)
+			return
+		if (e.positionally_contains(ev.target))
 			return
 		e.close()
 	}
