@@ -311,9 +311,10 @@ end
 --stateless pairs() that iterate elements in key order.
 function glue.sortedpairs(t, cmp)
 	local kt = glue.keys(t, cmp or true)
-	local i = 0
+	local i, n = 0, #kt
 	return function()
 		i = i + 1
+		if i > n then return end
 		return kt[i], t[kt[i]]
 	end
 end
