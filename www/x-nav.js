@@ -2518,21 +2518,27 @@ function nav_widget(e) {
 		return row.can_have_children != false
 	}
 
+	e.row_errors = function(row, a) {
+		a = a || []
+		for (let err of (row.errors || empty_array))
+			if (!err.passed && err.message)
+				a.push(err.message)
+		for (let f of e.all_fields)
+			for (let err of (e.cell_errors(row, f) || empty_array))
+				if (!err.passed && err.message)
+					a.push(f.text + ': ' + err.message)
+		return a
+	}
+
 	function notify_errors(ev) {
 		if (!(ev && ev.notify_errors))
 			return
-		let a = []
-		for (let row of e.changed_rows) {
-			for (let err of (row.errors || empty_array))
-				if (!err.passed && err.message)
-					a.push(err.message)
-			for (let f of e.all_fields)
-				for (let err of (e.cell_errors(row, f) || empty_array))
-					if (!err.passed && err.message)
-						a.push(f.text + ': ' + err.message)
-		}
-		if (a.length)
-			e.notify('error', a.join('\n'))
+		let errs = []
+		for (let row of e.changed_rows)
+			e.row_errors(row, errs)
+		if (!errs.length)
+			return
+		e.notify('error', errs.ul({class: 'x-error-list'}, true))
 	}
 
 	e.validate_row = function(row) {

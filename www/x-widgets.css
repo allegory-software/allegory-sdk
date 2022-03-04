@@ -687,6 +687,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-tooltip[kind=cursor] > .x-tooltip-tip { display: none; }
 
 .x-error-list {
+	margin: 0;
 	padding-inline-start: 1em;
 	text-align: start;
 }

@@ -610,6 +610,31 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		update_quicksearch_cell()
 	})
 
+	// row error tooltip ------------------------------------------------------
+
+	let error_tooltip_visible
+	e.do_error_tooltip_check = function() {
+		if (!error_tooltip_visible) return false
+		if (!(e.hasfocus || e.hovered)) return false
+		if (e.editor) return false
+		return true
+	}
+
+	function update_row_error_tooltip(row) {
+		if (!e.error_tooltip) {
+			if (!e.changed_rows)
+				return // don't create it until needed.
+			e.error_tooltip = tooltip({kind: 'error', target: e,
+				check: e.do_error_tooltip_check})
+		}
+		error_tooltip_visible = row && row.errors && !row.errors.passed
+		if (error_tooltip_visible) {
+			e.error_tooltip.text = e.row_errors(row)
+				.ul({class: 'x-error-list'}, true)
+		}
+		e.error_tooltip.update()
+	}
+
 	// quicksearch highlight --------------------------------------------------
 
 	let qs_div
@@ -1041,7 +1066,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	// row moving -------------------------------------------------------------
 
 	function ht_row_move(mx, my, hit) {
-		if (!e.allow_move_rows()) return
+		if (!e.can_actually_move_rows()) return
 		if (e.focused_row_index != hit.cell.ri) return
 		if ( horiz && abs(hit.my - my) < 8) return
 		if (!horiz && abs(hit.mx - mx) < 8) return
@@ -1656,8 +1681,14 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			return
 		if (!hit.state)
 			pointermove(ev, mx, my)
-		if (!hit.state)
+
+		if (!hit.state) {
+			if (e.editor) {
+				e.enter_edit('select_all')
+				return false
+			}
 			return
+		}
 
 		e.focus()
 
@@ -1955,7 +1986,10 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			}
 		}
 
-		if (!e.editor && key == 'Delete') {
+		if (key == 'Delete') {
+
+			if (e.editor && e.editor.input_val == null)
+				e.exit_edit({cancel: true})
 
 			// delete: toggle-delete selected rows
 			if (!ctrl && e.remove_selected_rows({input: e, refocus: true, toggle: true, confirm: true}))

@@ -1295,7 +1295,7 @@ component('x-tooltip', function(e) {
 	}
 
 	e.set_text = function(s) {
-		e.content.set(s, 'pre-wrap')
+		e.content.set(isarray(s) ? s.ul(true) : s, 'pre-wrap')
 		e.update({reset_timer: true})
 	}
 
@@ -1303,7 +1303,7 @@ component('x-tooltip', function(e) {
 	function reset_timeout_timer() {
 		let t = e.timeout
 		if (t == 'auto')
-			t = clamp((e.text || '').length / (tooltip.reading_speed / 60), 1, 10)
+			t = clamp((e.content.textContent).length / (tooltip.reading_speed / 60), 1, 10)
 		else
 			t = num(t)
 		remove_timer(t)
@@ -2660,7 +2660,7 @@ component('x-toaster', function(e) {
 	e.spacing = 6
 
 	function update_stack() {
-		let py = 0
+		let py = e.spacing
 		for (let t of e.tooltips) {
 			t.py = py
 			py += t.rect().h + e.spacing
@@ -2683,6 +2683,7 @@ component('x-toaster', function(e) {
 			align: e.align,
 			timeout: strict_or(timeout, e.timeout),
 			check: popup_check,
+			close_button: true,
 		})
 		t.on('popup_bind', function(on) {
 			if (!on) {
