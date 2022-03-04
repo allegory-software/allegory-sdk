@@ -23,9 +23,6 @@ PROCEDURAL API
 	box2d.fit(w, h, bw, bh) -> w, h
 	box2d.hit(x0, y0, x, y, w, h) -> t|f
 	box2d.hit_edges(x0, y0, d, x, y, w, h) -> hit, left, top, right, bottom
-	box2d.snap_edges(d, x, y, w, h, rectangles[, opaque]) -> x, y, w, h
-	box2d.snap_pos(d, x, y, w, h, rectangles[, opaque]) -> x, y, w, h
-	box2d.snapped_edges(d, x1, y1, w1, h1, x2, y2, w2, h2[, opaque]) -> snapped, left, top, right, bottom
 	box2d.overlapping(x1, y1, w1, h1, x2, y2, w2, h2) -> t|f
 	box2d.clip(x, y, w, h, x0, y0, w0, h0) -> x1, y1, w1, h1
 	box2d.bounding_box(x1, y1, w1, h1, x2, y2, w2, h2) -> x, y, w, h
@@ -47,9 +44,6 @@ OOP API
 	box:fit(parent_box, halign, valign) -> box     enlarge/shrink-to-fit and align
 	box:hit(x0, y0) -> t|f                 hit test
 	box:hit_edges(x0, y0, d) -> hit, left, top, right, bottom   hit test for edges
-	box:snap_edges(d, boxes) -> box        snap the edges to a list of boxes
-	box:snap_pos(d, boxes) -> box          snap the position
-	box:snapped_edges(d) -> ...            snap edges at distance d
 	box:overlapping(box) -> t|f            overlapping test
 	box:clip(box) -> box                   clip box to fit inside another box
 	box:join(box)                          make box the bounding box of itself and another box
@@ -186,6 +180,11 @@ end
 
 --box intersection
 
+--intersect two positive 1D segments
+local function intersect_segs(ax1, ax2, bx1, bx2)
+	return max(ax1, bx1), min(ax2, bx2)
+end
+
 local function clip(x1, y1, w1, h1, x2, y2, w2, h2)
 	--intersect on each dimension
 	local x1, x2 = intersect_segs(x1, x1+w1, x2, x2+w2)
@@ -283,20 +282,6 @@ function box:hit_edges(x0, y0, d)
 	return hit_edges(x0, y0, d, self())
 end
 
-function box:snap_edges(d, rectangles)
-	local x, y, w, h = self()
-	return new(snap_edges(d, x, y, w, h, rectangles))
-end
-
-function box:snap_pos(d, rectangles)
-	local x, y, w, h = self()
-	return new(snap_pos(d, x, y, w, h, rectangles))
-end
-
-function box:snapped_edges(d)
-	return snapped_edges(d, self())
-end
-
 function box:overlapping(box)
 	return overlapping(self.x, self.y, self.w, self.h, box:rect())
 end
@@ -327,10 +312,6 @@ local box_module = {
 	--hit testing
 	hit = hit,
 	hit_edges = hit_edges,
-	--snapping
-	snap_edges = snap_edges,
-	snap_pos = snap_pos,
-	snapped_edges = snapped_edges,
 	--overlapping
 	overlapping = overlapping,
 	--clipping
