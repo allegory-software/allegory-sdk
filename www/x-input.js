@@ -566,8 +566,8 @@ component('x-checkbox', 'Input', function(e) {
 			e.toggle({input: e})
 			return false
 		}
-		if (key == 'Delete') {
-			e.val = null
+		if (key == 'Delete' && e.input_val != null) {
+			e.set_val(null, {input: e})
 			return false
 		}
 	})
@@ -1199,7 +1199,7 @@ function editbox_widget(e, opt) {
 					}
 				}
 
-				if (key == 'Delete') {
+				if (key == 'Delete' && e.input_val != null) {
 					e.set_val(null, {input: e})
 					return false
 				}
