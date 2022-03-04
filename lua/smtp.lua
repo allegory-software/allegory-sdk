@@ -124,7 +124,7 @@ function client:connect(t)
 	function self:_connect()
 		set_timeout(self.connect_timeout)
 		check_io(self, self.tcp:connect(self.host_addr, self.port, expires))
-		dp('connect', '%s', self.tcp)
+		dp('connect', '%s %s %s', self.tcp, self.host_addr, self.port)
 		if self.tls then
 			self.tcp = check_io(self, self.create_stcp(self.tcp, self.host, self.tls_options))
 		end
