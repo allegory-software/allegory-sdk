@@ -348,8 +348,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 				check: e.do_error_tooltip_check})
 		}
 		if (e.invalid) {
-			e.error_tooltip.text = errors.filter(err => !err.passed)
-				.map(err => err.message).ul({class: 'x-error-list'})
+			e.error_tooltip.text = errors
+				.filter(err => !err.passed)
+				.map(err => err.message)
 				.ul({class: 'x-error-list'}, true)
 		}
 		e.error_tooltip.update()

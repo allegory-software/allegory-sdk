@@ -317,6 +317,29 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		e.cells_view.scroll_to_view_rect(null, null, x, y, w, h)
 	}
 
+	function row_rect(row) { // relative to cells_ct
+		let ri = e.row_index(row)
+		if (horiz) {
+			let x = 0
+			let y = cell_y(ri, 0)
+			let w = e.cells_ct.cw
+			let h = e.cell_h
+			return domrect(x, y, w, h)
+		} else {
+			assert(false, 'NYI')
+			return domrect(x, y, w, h)
+		}
+	}
+
+	function row_visible_rect(row) { // relative to cells_ct
+		let r = row_rect(row)
+		let c = e.cells_ct.rect()
+		let v = e.cells_view.rect()
+		v.x -= c.x
+		v.x -= c.y
+		return r.clip(v)
+	}
+
 	// ri/fi to visible cell --------------------------------------------------
 
 	function cell_index(ri, fi) {
@@ -367,6 +390,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				e.update({sizes: true})
 			w0 = w1
 			h0 = h1
+
+			update_row_error_tooltip()
 		}
 
 		// detect w/h changes from resizing made with css 'resize: both'.
@@ -612,27 +637,43 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 	// row error tooltip ------------------------------------------------------
 
-	let error_tooltip_visible
+	let error_tooltip_row
 	e.do_error_tooltip_check = function() {
-		if (!error_tooltip_visible) return false
-		if (!(e.hasfocus || e.hovered)) return false
+		if (!error_tooltip_row) return false
 		if (e.editor) return false
-		return true
+		if (e.hasfocus) return true
+		return false
 	}
 
-	function update_row_error_tooltip(row) {
+	function update_row_error_tooltip() {
+		if (!e.error_tooltip) return
+		if (!error_tooltip_row) return
+		let r = row_visible_rect(error_tooltip_row)
+		e.error_tooltip.px = r.x
+		e.error_tooltip.py = r.y
+		e.error_tooltip.pw = r.w
+		e.error_tooltip.ph = r.h
+	}
+
+	function update_row_error_tooltip_row(row) {
 		if (!e.error_tooltip) {
-			if (!e.changed_rows)
-				return // don't create it until needed.
-			e.error_tooltip = tooltip({kind: 'error', target: e,
+			if (!row)
+				return
+			e.error_tooltip = tooltip({kind: 'error',
+				target: e.cells_ct,
 				check: e.do_error_tooltip_check})
 		}
-		error_tooltip_visible = row && row.errors && !row.errors.passed
-		if (error_tooltip_visible) {
+		error_tooltip_row = row && row.errors && !row.errors.passed ? row : null
+		if (error_tooltip_row) {
 			e.error_tooltip.text = e.row_errors(row)
 				.ul({class: 'x-error-list'}, true)
+			update_row_error_tooltip()
 		}
 		e.error_tooltip.update()
+	}
+
+	e.do_focus_row = function(row) {
+		update_row_error_tooltip_row(row)
 	}
 
 	// quicksearch highlight --------------------------------------------------
