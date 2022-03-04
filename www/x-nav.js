@@ -201,6 +201,7 @@ focusing and selection:
 			opt.must_move
 			opt.must_not_move_row
 			opt.must_not_move_col
+		e.do_focus_row(row, row0)
 		^focused_row_changed(row, row0, ev)
 		^selected_rows_changed()
 
@@ -934,8 +935,7 @@ function nav_widget(e) {
 	// visible cols list ------------------------------------------------------
 
 	e.set_cols = function() {
-		if (!e.exit_edit())
-			return
+		e.exit_edit()
 		init_fields()
 		e.update({fields: true})
 	}
@@ -1360,6 +1360,8 @@ function nav_widget(e) {
 		return [last_valid_ri, last_valid_fi]
 	}
 
+	e.do_focus_row = noop // stub
+
 	e.focus_cell = function(ri, fi, rows, cols, ev) {
 		ev = ev || empty
 
@@ -1491,8 +1493,10 @@ function nav_widget(e) {
 		e.selected_row = expand_selection ? e.rows[ri0] : null
 		e.selected_field = expand_selection ? e.fields[fi0] : null
 
-		if (row_changed)
+		if (row_changed) {
+			e.do_focus_row(row, row0)
 			e.fire('focused_row_changed', row, row0, ev)
+		}
 
 		let sel_rows_changed = map_keys_different(old_selected_rows, e.selected_rows)
 		if (sel_rows_changed)
@@ -2532,6 +2536,8 @@ function nav_widget(e) {
 
 	function notify_errors(ev) {
 		if (!(ev && ev.notify_errors))
+			return
+		if (!e.changed_rows)
 			return
 		let errs = []
 		for (let row of e.changed_rows)
