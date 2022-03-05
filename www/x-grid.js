@@ -336,7 +336,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		let c = e.cells_ct.rect()
 		let v = e.cells_view.rect()
 		v.x -= c.x
-		v.x -= c.y
+		v.y -= c.y
 		return r.clip(v)
 	}
 
@@ -391,7 +391,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			w0 = w1
 			h0 = h1
 
-			update_row_error_tooltip()
+			update_row_error_tooltip_position()
 		}
 
 		// detect w/h changes from resizing made with css 'resize: both'.
@@ -645,7 +645,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		return false
 	}
 
-	function update_row_error_tooltip() {
+	function update_row_error_tooltip_position() {
 		if (!e.error_tooltip) return
 		if (!error_tooltip_row) return
 		let r = row_visible_rect(error_tooltip_row)
@@ -659,15 +659,15 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		if (!e.error_tooltip) {
 			if (!row)
 				return
-			e.error_tooltip = tooltip({kind: 'error',
+			e.error_tooltip = tooltip({classes: 'xxx', kind: 'error',
 				target: e.cells_ct,
 				check: e.do_error_tooltip_check})
 		}
-		error_tooltip_row = row && row.errors && !row.errors.passed ? row : null
+		let row_errors = row && e.row_errors(row)
+		error_tooltip_row = row_errors && row_errors.length > 0 ? row : null
 		if (error_tooltip_row) {
-			e.error_tooltip.text = e.row_errors(row)
-				.ul({class: 'x-error-list'}, true)
-			update_row_error_tooltip()
+			e.error_tooltip.text = row_errors.ul({class: 'x-error-list'}, true)
+			update_row_error_tooltip_position()
 		}
 		e.error_tooltip.update()
 	}

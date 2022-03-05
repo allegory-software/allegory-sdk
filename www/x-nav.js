@@ -2522,15 +2522,16 @@ function nav_widget(e) {
 		return row.can_have_children != false
 	}
 
-	e.row_errors = function(row, a) {
+	e.row_errors = function(row, include_cell_errors, a) {
 		a = a || []
 		for (let err of (row.errors || empty_array))
 			if (!err.passed && err.message)
 				a.push(err.message)
-		for (let f of e.all_fields)
-			for (let err of (e.cell_errors(row, f) || empty_array))
-				if (!err.passed && err.message)
-					a.push(f.text + ': ' + err.message)
+		if (include_cell_errors)
+			for (let f of e.all_fields)
+				for (let err of (e.cell_errors(row, f) || empty_array))
+					if (!err.passed && err.message)
+						a.push(f.text + ': ' + err.message)
 		return a
 	}
 
@@ -2541,7 +2542,7 @@ function nav_widget(e) {
 			return
 		let errs = []
 		for (let row of e.changed_rows)
-			e.row_errors(row, errs)
+			e.row_errors(row, true, errs)
 		if (!errs.length)
 			return
 		e.notify('error', errs.ul({class: 'x-error-list'}, true))
