@@ -1257,9 +1257,12 @@ component('x-tooltip', function(e) {
 		e.popup(e.target, e.side, e.align, e.px, e.py, e.pw, e.ph)
 	}
 
+	e.popup_target_visible = function(target) {
+		return !!(!e.check || e.check(target))
+	}
+
 	e.popup_target_updated = function(target, side) {
-		let visible = !!(!e.check || e.check(target))
-		e.class('visible', visible)
+		e.class('visible', !e.hidden)
 		e.attr('side', side)
 	}
 
