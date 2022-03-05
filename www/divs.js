@@ -1307,7 +1307,7 @@ to update the popup's position manually. We simply don't have an observer
 for tracking changes to an element's position on screen or relative to
 another element.
 
-`popup_target_updated` hook allows changing/animating popup's visibility
+`popup_target_visible` hook allows changing/animating popup's visibility
 based on target's hover state or focused state.
 
 */
@@ -1465,7 +1465,7 @@ let popup_state = function(e) {
 		document.on('layout_changed', update, on)
 	}
 
-	function layout(w, h) {
+	function layout(w, h, side, align) {
 
 		let tr = target.rect()
 
@@ -1524,7 +1524,13 @@ let popup_state = function(e) {
 	}
 
 	function update() {
-		if (!(target && target.isConnected) || e.hidden)
+		if (!target || !target.isConnected)
+			return
+
+		if (e.popup_target_visible)
+			e.show(!!e.popup_target_visible(target))
+
+		if (e.hidden || target.effectively_hidden)
 			return
 
 		if (fixed == null)
@@ -1534,7 +1540,9 @@ let popup_state = function(e) {
 		let w = er.w
 		let h = er.h
 
-		let [x0, y0] = layout(w, h)
+		let side1 = side
+		let align1 = align
+		let [x0, y0] = layout(w, h, side1, align1)
 
 		// if popup doesn't fit the screen, first try to change its side
 		// or alignment and relayout, and if that didn't work, its offset.
@@ -1550,30 +1558,30 @@ let popup_state = function(e) {
 		let out_y2 = y0 + h > (bh - d)
 
 		let re
-		if (side == 'bottom' && out_y2) {
-			re = 1; side = 'top'
-		} else if (side == 'top' && out_y1) {
-			re = 1; side = 'bottom'
-		} else if (side == 'right' && out_x2) {
-			re = 1; side = 'left'
-		} else if (side == 'top' && out_x1) {
-			re = 1; side = 'bottom'
+		if (side1 == 'bottom' && out_y2) {
+			re = 1; side1 = 'top'
+		} else if (side1 == 'top' && out_y1) {
+			re = 1; side1 = 'bottom'
+		} else if (side1 == 'right' && out_x2) {
+			re = 1; side1 = 'left'
+		} else if (side1 == 'top' && out_x1) {
+			re = 1; side1 = 'bottom'
 		}
 
 		let vert =
-			   side == 'bottom'
-			|| side == 'top'
-			|| side == 'inner-bottom'
-			|| side == 'inner-top'
+			   side1 == 'bottom'
+			|| side1 == 'top'
+			|| side1 == 'inner-bottom'
+			|| side1 == 'inner-top'
 
-		if (align == 'end' && ((vert && out_x2) || (!vert && out_y2))) {
-			re = 1; align = 'start'
-		} else if (align == 'start' && ((vert && out_x1) || (!vert && out_y1))) {
-			re = 1; align = 'end'
+		if (align1 == 'end' && ((vert && out_x2) || (!vert && out_y2))) {
+			re = 1; align1 = 'start'
+		} else if (align1 == 'start' && ((vert && out_x1) || (!vert && out_y1))) {
+			re = 1; align1 = 'end'
 		}
 
 		if (re)
-			[x0, y0] = layout(w, h)
+			[x0, y0] = layout(w, h, side1, align1)
 
 		// if nothing else works, adjust the offset to fit the screen.
 		let ox2 = max(0, x0 + w - (bw - d))
@@ -1587,7 +1595,7 @@ let popup_state = function(e) {
 		e.y = fixed ? y0 : window.scrollY + y0
 
 		if (e.popup_target_updated)
-			e.popup_target_updated(target, side)
+			e.popup_target_updated(target, side1, align1)
 
 	}
 
