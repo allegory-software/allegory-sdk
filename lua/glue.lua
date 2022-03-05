@@ -60,7 +60,7 @@ ARRAYS
 STRINGS
 	glue.gsplit(s,sep[,start[,plain]]) -> iter() -> e[,captures...]   split a string by a pattern
 	glue.split(s,sep[,start[,plain]]) -> {s1,...}   split a string by a pattern
-	glue.names('name1 ...'[, sep]) -> {'name1', ...} split a string by whitespace or a separator
+	glue.names('name1 ...') -> {'name1', ...}       split a string by whitespace
 	glue.capitalize(s) -> s                         capitalize the first letter of every word in string
 	glue.lines(s, [opt], [init]) -> iter() -> s, i, j, k   iterate the lines of a string
 	glue.outdent(s, [indent]) -> s, indent          outdent/reindent text based on first line's indentation
@@ -770,12 +770,12 @@ end
 
 --split a string by whitespace. unlike glue.split(s, '%s+'), it ignores
 --any resulting empty elements; also, non-string args pass through.
-function glue.string.names(s, sep)
+function glue.string.names(s)
 	if type(s) ~= 'string' then
 		return s
 	end
 	local t = {}
-	for s in glue.trim(s):gmatch(sep and '[^'..glue.esc(sep)..']+' or '[^%s]+') do
+	for s in glue.trim(s):gmatch'[^%s]+' do
 		t[#t+1] = s
 	end
 	return t

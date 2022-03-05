@@ -61,7 +61,7 @@ STRINGS
 	s.num(z)
 	s.display_name()
 	s.cat(sep, ...)
-	s.names() -> a
+	s.names([sep]) -> a
 MULTI-LANGUAGE STUBS
 	S(id, default)                         get labeled string in current language
 	lang()                                 get current language
@@ -384,8 +384,8 @@ method(String, 'esc', function() {
 	return this.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // $& means the whole matched string
 })
 
-method(String, 'names', function(sep) {
-	return this.trim().split(sep ? RegExp('[^'+sep.esc()+']') : /\s+/)
+method(String, 'names', function() {
+	return this.trim().split(/\s+/)
 })
 
 // multi-language stubs replaced in webb_spa.js ------------------------------
