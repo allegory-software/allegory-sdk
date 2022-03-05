@@ -208,12 +208,12 @@ function sql_rowset(...)
 		local user_methods = {}
 		assert(rs.select_none, 'select_none missing')
 		local apply_changes = rs.apply_changes
-		function rs:apply_changes(changes)
+		function rs:apply_changes(...)
 			if configure then
 				local _, fields = query(rs.select_none)
 				configure(fields)
 			end
-			return apply_changes(self, changes)
+			return apply_changes(self, ...)
 		end
 
 		--[[local]] function configure(fields)
@@ -264,21 +264,21 @@ function sql_rowset(...)
 		make_atomic(rs.update_row)
 		make_atomic(rs.delete_row)
 
-		local function pass(tbl, ...)
-			table_changed(tbl, rs.name)
+		local function pass(self, tbl, ...)
+			self:table_changed(tbl)
 			return ...
 		end
 
 		function rs:insert_into(tbl, ...)
-			return pass(tbl, insert_row(tbl, ...))
+			return pass(self, tbl, insert_row(tbl, ...))
 		end
 
 		function rs:update_into(tbl, ...)
-			return pass(tbl, update_row(tbl, ...))
+			return pass(self, tbl, update_row(tbl, ...))
 		end
 
 		function rs:delete_from(tbl, ...)
-			return pass(tbl, delete_row(tbl, ...))
+			return pass(self, tbl, delete_row(tbl, ...))
 		end
 
 	end, ...)

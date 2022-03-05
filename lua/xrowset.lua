@@ -56,20 +56,20 @@
 		name_col         :               default display col when used as lookup rowset
 
 	Methods to implement:
-		- load_rows(result, params)
-		- insert_row(vals)
-		- update_row(vals)
-		- delete_row(vals)
-		- load_row(vals)
+		load_rows(result, params)
+		insert_row(vals)
+		update_row(vals)
+		delete_row(vals)
+		load_row(vals)
+
+	Methods to call:
+		rowset_changed(rowset_name)
+		table_changed(table_name)
 
 	Sets by default:
 		- `can_[add|change|remove]_rows` are set to false on missing row update methods.
 		- `pos_col` and `parent_col` are set to hidden by default.
 		- on client-side, `id_col` is set to pk if pk is single-column.
-
-API
-	rowset_changed(rowset_name)
-	table_changed(table_name, exclude_rowset_name)
 
 ACTIONS
 
@@ -85,15 +85,9 @@ local errors = require'errors'
 local xlsx_workbook = require'xlsxwriter.workbook'
 
 local catch = errors.catch
-local raise = errors.raise
-
 local update = glue.update
 local names = glue.names
 local index = glue.index
-local empty = glue.empty
-local noop = glue.noop
-local time = glue.time
-local capitalize = glue.capitalize
 
 rowset = {}
 
@@ -115,6 +109,7 @@ local client_field_attrs = {
 }
 
 local rowset_tables = {} --{table -> {rowset->true}}
+local push_rowset_changed_events --fw. decl.
 
 function virtual_rowset(init, ...)
 
@@ -123,8 +118,8 @@ function virtual_rowset(init, ...)
 
 	function rs.init_fields(rs)
 
-		local hide_cols = index(names(rs.hide_cols) or empty)
-		local   ro_cols = index(names(rs.  ro_cols) or empty)
+		local hide_cols = index(names(rs.hide_cols) or glue.empty)
+		local   ro_cols = index(names(rs.  ro_cols) or glue.empty)
 		local   rw_cols = rs.rw_cols and index(names(rs.rw_cols))
 
 		if rs.pos_col == nil and rs.fields.pos then
@@ -251,19 +246,34 @@ function virtual_rowset(init, ...)
 		end
 	end
 
-	function rs:apply_changes(changes)
+	function rs:rowset_changed(rowset_name)
+		self.changed_rowsets[rowset_name] = true
+	end
+
+	function rs:table_changed(table_name)
+		local rowsets = rowset_tables[table_name]
+		if rowsets then
+			for rowset_name in pairs(rowsets) do
+				self:rowset_changed(rowset_name)
+			end
+		end
+	end
+
+	function rs:apply_changes(changes, update_id)
 
 		local res = {rows = {}}
+		local self = glue.object(rs)
+		self.changed_rowsets = {}
 
 		for _,row in ipairs(changes.rows) do
 			local rt = {type = row.type}
 			if row.type == 'new' then
 				local can, err, field_errors = rs:can_add_row(row.values)
 				if can ~= false then
-					local ok, err = catch('db', rs.insert_row, rs, row.values)
+					local ok, err = catch('db', rs.insert_row, self, row.values)
 					if ok then
 						if rs.load_row then
-							local ok, row = catch('db', rs.load_row, rs, row.values)
+							local ok, row = catch('db', rs.load_row, self, row.values)
 							if ok then
 								if not row then
 									rt.error = S('inserted_record_not_found',
@@ -292,7 +302,7 @@ function virtual_rowset(init, ...)
 			elseif row.type == 'update' then
 				local can, err, field_errors = rs:can_change_row(row.values)
 				if can ~= false then
-					local ok, err = catch('db', rs.update_row, rs, row.values)
+					local ok, err = catch('db', rs.update_row, self, row.values)
 					if ok then
 						if rs.load_row then
 							--copy :foo:old to :foo so we can select the row back.
@@ -302,7 +312,7 @@ function virtual_rowset(init, ...)
 									row.values[k1] = v
 								end
 							end
-							local ok, row = catch('db', rs.load_row, rs, row.values)
+							local ok, row = catch('db', rs.load_row, self, row.values)
 							if ok then
 								if not row then
 									rt.remove = true
@@ -332,10 +342,10 @@ function virtual_rowset(init, ...)
 			elseif row.type == 'remove' then
 				local can, err, field_errors = rs:can_remove_row(row.values)
 				if can ~= false then
-					local ok, err = catch('db', rs.delete_row, rs, row.values)
+					local ok, err = catch('db', rs.delete_row, self, row.values)
 					if ok then
 						if rs.load_row then
-							local ok, row = catch('db', rs.load_row, rs, row.values)
+							local ok, row = catch('db', rs.load_row, self, row.values)
 							if ok then
 								if row then
 									rt.error = S('removed_record_found',
@@ -364,8 +374,9 @@ function virtual_rowset(init, ...)
 		end
 
 		if #res.rows > 0 then
-			rowset_changed(rs.name)
+			self:rowset_changed(rs.name)
 		end
+		push_rowset_changed_events(self.changed_rowsets, update_id)
 
 		return res
 	end
@@ -385,7 +396,7 @@ function virtual_rowset(init, ...)
 			local dt   = wb:add_format({num_format = country('date_format')..' hh:mm'})
 			local dts  = wb:add_format({num_format = country('date_format')..' hh:mm:ss'})
 			for i,field in ipairs(rs.fields) do
-				ws:write(0, i-1, field.text or capitalize(field.name), bold)
+				ws:write(0, i-1, field.text or glue.capitalize(field.name), bold)
 				local w = field.display_width
 				w = field.hidden and 1 or w and math.min(32, w)
 				local fmt
@@ -459,7 +470,7 @@ function virtual_rowset(init, ...)
 				update(row_change.values, params)
 			end
 		end
-		return rs:apply_changes(post.changes)
+		return rs:apply_changes(post.changes, post.update_id)
 	end
 
 	init(rs, ...)
@@ -475,11 +486,17 @@ end
 --reload push-notifications --------------------------------------------------
 
 local waiting_events_threads = {}
-local changed_rowsets = {}
+local changed_rowsets = {} --{cx()->{rowset->'update_id1 ...'}}
 
-function rowset_changed(rowset_name)
-	for _, rowsets in pairs(changed_rowsets) do
-		rowsets[rowset_name] = true
+--[[local]] function push_rowset_changed_events(rowsets, update_id)
+	for rowset_name in pairs(rowsets) do
+		for _, rowsets in pairs(changed_rowsets) do
+			if not rowsets[rowset_name] then
+				rowsets[rowset_name] = update_id
+			else
+				rowsets[rowset_name] = rowsets[rowset_name] .. ' ' .. update_id
+			end
+		end
 	end
 	for thread in pairs(waiting_events_threads) do
 		resume(thread)
@@ -521,23 +538,12 @@ action['xrowset.events'] = function()
 			end
 		end
 		local t = {}
-		for rowset_name in pairs(rowsets) do
-			t[#t+1] = 'data: '..rowset_name..'\n\n'
+		for rowset_name, update_ids in pairs(rowsets) do
+			t[#t+1] = 'data: '..rowset_name..' '..update_ids..'\n\n'
 			rowsets[rowset_name] = nil
 		end
 		local events = table.concat(t)
 		assert(not out_buffering())
 		out(events)
-	end
-end
-
-function table_changed(table_name, exclude_rowset_name)
-	local rowsets = rowset_tables[table_name]
-	if rowsets then
-		for rowset_name in pairs(rowsets) do
-			if rowset_name ~= exclude_rowset_name then
-				rowset_changed(rowset_name)
-			end
-		end
 	end
 end

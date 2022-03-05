@@ -3625,22 +3625,44 @@ function nav_widget(e) {
 	}
 
 	e.reload = function(opt) {
+
 		opt = opt || empty
+
 		if (!e.bound) {
 			e.update({reload: true})
 			return
 		}
+
 		if (!e.rowset_url || e.param_vals === false) {
 			// client-side rowset or param vals not available: reset it.
 			e.reset(opt.event)
 			return
 		}
+
+		// ignore rowset-changed event if coming exclusively from our update operations.
+		if (opt.update_ids) {
+			let ignore
+			for (let update_id of opt.update_ids) {
+				if (update_ids.has(update_id)) {
+					pr('ignred reload request with update_id', update_id)
+					update_ids.delete(update_id)
+					ignore = true
+				} else {
+					ignore = false
+				}
+			}
+			if (ignore)
+				return
+		}
+
 		if (requests && requests.size && !e.load_request) {
 			e.notify('error',
 				S('error_load_while_saving', 'Cannot reload while saving is in progress.'))
 			return
 		}
+
 		e.abort_loading()
+
 		if (e.focused_row && e.pk_fields)
 			e.focus_state = {
 				pk_vals: e.cell_vals(e.focused_row, e.pk_fields),
@@ -3843,6 +3865,8 @@ function nav_widget(e) {
 			row.save_request = req
 	}
 
+	let update_ids = set()
+
 	function save_to_server(ev) {
 		if (!e.changed_rows)
 			return
@@ -3851,9 +3875,11 @@ function nav_widget(e) {
 			notify_errors(ev)
 			return
 		}
+		let update_id = floor(random() * 2**52).base(36)
+		update_ids.add(update_id)
 		let req = ajax({
 			url: rowset_url(),
-			upload: {exec: 'save', changes: changes},
+			upload: {exec: 'save', changes: changes, update_id: update_id},
 			source_rows: source_rows,
 			success: save_success,
 			fail: save_fail,
@@ -5098,12 +5124,13 @@ function init_rowset_events() {
 	if (es) return
 	es = new EventSource('/xrowset.events')
 	es.onmessage = function(ev) {
-		let rowset_name = ev.data
+		let a = ev.data.names()
+		let rowset_name = a.shift()
 		let navs = rowset_navs[rowset_name]
 		if (navs)
 			for (let nav of navs)
 				if (!nav.requests_pending())
-					nav.reload({allow_diff_merge: true})
+					nav.reload({allow_diff_merge: true, update_ids: a})
 	}
 }
 }
