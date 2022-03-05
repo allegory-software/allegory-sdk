@@ -3597,28 +3597,31 @@ function nav_widget(e) {
 
 	}
 
+	// compress param_vals into a value array for single-key pks.
+	function param_vals_filter() {
+		if (!e.param_vals)
+			return
+		let cols = []
+		for (let [col, param] of param_map(e.params))
+			cols.push(col)
+		if (cols.length == 1) {
+			let col = cols[0]
+			return json(e.param_vals.map(vals => vals[col]))
+		} else {
+			return json(e.param_vals)
+		}
+	}
+
 	function rowset_url(format) {
 		let u = e.rowset_url
 		if (format)
 			u = u.replace('.json', '.'+format)
 		let s = href(u)
-		if (e.param_vals) {
+		let filter = param_vals_filter()
+		if (filter) {
 			let u = url_arg(s)
 			u.args = u.args || obj()
-
-			// compress param_vals into a value array for single-key pks.
-			let param_vals
-			let cols = []
-			for (let [col, param] of param_map(e.params))
-				cols.push(col)
-			if (cols.length == 1) {
-				let col = cols[0]
-				param_vals = e.param_vals.map(vals => vals[col])
-			} else {
-				param_vals = e.param_vals
-			}
-
-			u.args.filter = json(param_vals)
+			u.args.filter = filter
 			s = url(u)
 		}
 		return s
@@ -3656,6 +3659,8 @@ function nav_widget(e) {
 			if (ignore)
 				return
 			if (saving)
+				return
+			if (opt.if_filter != param_vals_filter())
 				return
 			pr('reloading', e.rowset_name)
 		}
@@ -5130,11 +5135,11 @@ function init_rowset_events() {
 	es = new EventSource('/xrowset.events')
 	es.onmessage = function(ev) {
 		let a = ev.data.names()
-		let rowset_name = a.shift()
+		let [rowset_name, filter] = a.shift().replaceAll(':', ' ').names()
 		let navs = rowset_navs[rowset_name]
 		if (navs)
 			for (let nav of navs)
-				nav.reload({allow_diff_merge: true, update_ids: a})
+				nav.reload({allow_diff_merge: true, update_ids: a, if_filter: filter})
 	}
 }
 }

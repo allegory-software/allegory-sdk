@@ -246,7 +246,8 @@ function virtual_rowset(init, ...)
 		end
 	end
 
-	function rs:rowset_changed(rowset_name)
+	function rs:rowset_changed(rowset_name, filter)
+		if filter then rowset_name = rowset_name..':'..filter end
 		self.changed_rowsets[rowset_name] = true
 	end
 
@@ -374,7 +375,7 @@ function virtual_rowset(init, ...)
 		end
 
 		if #res.rows > 0 then
-			self:rowset_changed(rs.name)
+			self:rowset_changed(rs.name, args'filter')
 		end
 		push_rowset_changed_events(self.changed_rowsets, update_id)
 
