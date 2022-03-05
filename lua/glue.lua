@@ -775,7 +775,7 @@ function glue.string.names(s, sep)
 		return s
 	end
 	local t = {}
-	for s in s:gmatch(sep and '%s*([^'..glue.esc(sep)..']+)%s*' or '[^%s]+') do
+	for s in glue.trim(s):gmatch(sep and '[^'..glue.esc(sep)..']+' or '[^%s]+') do
 		t[#t+1] = s
 	end
 	return t

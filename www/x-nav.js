@@ -3639,23 +3639,28 @@ function nav_widget(e) {
 			return
 		}
 
+		let saving = requests && requests.size && !e.load_request
+
 		// ignore rowset-changed event if coming exclusively from our update operations.
 		if (opt.update_ids) {
 			let ignore
 			for (let update_id of opt.update_ids) {
 				if (update_ids.has(update_id)) {
-					pr('ignred reload request with update_id', update_id)
 					update_ids.delete(update_id)
-					ignore = true
+					if (ignore == null)
+						ignore = true
 				} else {
 					ignore = false
 				}
 			}
 			if (ignore)
 				return
+			if (saving)
+				return
+			pr('reloading', e.rowset_name)
 		}
 
-		if (requests && requests.size && !e.load_request) {
+		if (saving) {
 			e.notify('error',
 				S('error_load_while_saving', 'Cannot reload while saving is in progress.'))
 			return
@@ -5129,8 +5134,7 @@ function init_rowset_events() {
 		let navs = rowset_navs[rowset_name]
 		if (navs)
 			for (let nav of navs)
-				if (!nav.requests_pending())
-					nav.reload({allow_diff_merge: true, update_ids: a})
+				nav.reload({allow_diff_merge: true, update_ids: a})
 	}
 }
 }

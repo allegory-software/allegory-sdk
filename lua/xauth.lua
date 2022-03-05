@@ -69,6 +69,7 @@ wwwfile['x-auth.css'] = [[
 #usr_form {
 	grid-template-areas:
 		"email"
+		"name"
 		"lang"
 		"country"
 		"theme"
@@ -90,6 +91,7 @@ template.usr_form = [[
 <x-if global=signed_in>
 	<x-form id=usr_form nav_id=usr_nav>
 		<x-input col=email ></x-input>
+		<x-input col=name  ></x-input>
 		<x-lookup-dropdown col=lang     ></x-lookup-dropdown>
 		<x-lookup-dropdown col=country  ></x-lookup-dropdown>
 		<x-enum-dropdown col=theme></x-enum-dropdown>
@@ -282,9 +284,9 @@ rowset.usr = sql_rowset{
 	},
 	where_all = 'usr = $usr()',
 	pk = 'usr',
-	rw_cols = 'lang country theme',
+	rw_cols = 'name lang country theme',
 	update_row = function(self, row)
-		update_row('usr', row, 'lang country theme')
+		self:update_into('usr', row, 'name lang country theme')
 		clear_userinfo_cache(row['usr:old'])
 	end,
 }

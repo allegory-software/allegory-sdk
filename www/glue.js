@@ -380,8 +380,12 @@ function catargs(sep, ...args) {
 method(String, 'cat', function(...args) { return catargs(this, ...args) })
 }
 
-method(String, 'names', function() {
-	return this.trim().split(/\s+/)
+method(String, 'esc', function() {
+	return this.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // $& means the whole matched string
+})
+
+method(String, 'names', function(sep) {
+	return this.trim().split(sep ? RegExp('[^'+sep.esc()+']') : /\s+/)
 })
 
 // multi-language stubs replaced in webb_spa.js ------------------------------
