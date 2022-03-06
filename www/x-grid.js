@@ -241,7 +241,6 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		}
 
 		vrn = min(vrn, e.rows.length)
-
 	}
 
 	function update_cell_sizes(col_resizing) {
@@ -320,13 +319,16 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	function row_rect(row) { // relative to cells_ct
 		let ri = e.row_index(row)
 		if (horiz) {
-			let x = 0
+			let x = cell_x(ri, 0)
 			let y = cell_y(ri, 0)
 			let w = e.cells_ct.cw
 			let h = e.cell_h
 			return domrect(x, y, w, h)
 		} else {
-			assert(false, 'NYI')
+			let x = cell_x(ri, 0)
+			let y = cell_y(ri, 0)
+			let w = e.cell_w
+			let h = e.cells_ct.ch
 			return domrect(x, y, w, h)
 		}
 	}
@@ -390,8 +392,6 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				e.update({sizes: true})
 			w0 = w1
 			h0 = h1
-
-			update_row_error_tooltip_position()
 		}
 
 		// detect w/h changes from resizing made with css 'resize: both'.
@@ -496,7 +496,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		let n = vrn * (moving ? 2 : 1)
 		for (let i = 0; i < n; i++) {
 			for (let fi = 0, n = e.fields.length; fi < n; fi++) {
-				let classes = 'x-grid-cell x-item x-container'
+				let classes = 'x-grid-cell x-item x-container x-grid-'+(horiz ? 'h' : 'v')
 				if (moving && i >= vrn)
 					classes += ' row-moving'
 				if (fi == 0)
@@ -631,8 +631,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		update_scroll()
 		if (vri1 != last_vri1)
 			update_cells()
-		update_editor()
 		update_quicksearch_cell()
+		update_row_error_tooltip_position()
 	})
 
 	// row error tooltip ------------------------------------------------------
@@ -653,13 +653,14 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		e.error_tooltip.py = r.y
 		e.error_tooltip.pw = r.w
 		e.error_tooltip.ph = r.h
+		e.error_tooltip.side = horiz ? 'top' : 'right'
 	}
 
 	function update_row_error_tooltip_row(row) {
 		if (!e.error_tooltip) {
 			if (!row)
 				return
-			e.error_tooltip = tooltip({classes: 'xxx', kind: 'error',
+			e.error_tooltip = tooltip({kind: 'error',
 				target: e.cells_ct,
 				check: e.do_error_tooltip_check})
 		}
@@ -884,6 +885,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			update_cell_sizes(opt.col_resizing)
 		if (opt_rows || opt.vals || opt.state)
 			update_cells()
+		if (opt_sizes || opt.sort_order)
+			update_row_error_tooltip_position()
 		if (opt_rows || opt.state)
 			update_quicksearch_cell()
 		if (opt.val)
@@ -1720,18 +1723,17 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 		if (e.widget_editing)
 			return
+
 		if (!hit.state)
 			pointermove(ev, mx, my)
 
+		e.focus()
+
 		if (!hit.state) {
-			if (e.editor) {
-				e.enter_edit('select_all')
-				return false
-			}
+			if (ev.target == e.cells_view) // clicked on empty space.
+				e.exit_edit()
 			return
 		}
-
-		e.focus()
 
 		if (hit.state == 'header_resize') {
 			hit.state = 'header_resizing'

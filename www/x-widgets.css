@@ -255,15 +255,26 @@ don't show a focus outline on the entire widget, but only show an inside
 	background-color: var(--x-bg-new-modified);
 }
 
-.x-item.row-has-errors {
-	border-top-color: var(--x-bg-error);
+.x-item.row-has-errors.x-grid-h {
+	border-top-color   : var(--x-bg-error);
 	border-bottom-color: var(--x-bg-error);
 }
-.x-item.row-has-errors.x-grid-cell-first {
+.x-item.row-has-errors.x-grid-h.x-grid-cell-first {
 	border-left-color: var(--x-bg-error);
 }
-.x-item.row-has-errors.x-grid-cell-last {
+.x-item.row-has-errors.x-grid-h.x-grid-cell-last {
 	border-right-color: var(--x-bg-error);
+}
+
+.x-item.row-has-errors.x-grid-v {
+	border-left-color : var(--x-bg-error);
+	border-right-color: var(--x-bg-error);
+}
+.x-item.row-has-errors.x-grid-v.x-grid-cell-first {
+	border-top-color: var(--x-bg-error);
+}
+.x-item.row-has-errors.x-grid-v.x-grid-cell-last {
+	border-bottom-color: var(--x-bg-error);
 }
 
 .x-focusable-items .x-item:not(.focused).selected:not(.invalid) {
@@ -1479,6 +1490,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding-right  : var(--x-padding-x-input);
 	padding-top    : var(--x-padding-y-input-top);
 	padding-bottom : var(--x-padding-y-input-bottom);
+	border: var(--x-item-border-width) solid transparent; /* to match grid row height */
 	/* behavior */
 	cursor: default;
 	position: relative; /* for item moving */
@@ -2649,7 +2661,9 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	width: auto !important;
 }
 
-.x-grid-cell:hover {
+.x-grid-cell:hover,
+.x-grid-cell:active
+{
 	outline: 1px dotted var(--x-fg-label);
 	outline-offset: -1px;
 }
