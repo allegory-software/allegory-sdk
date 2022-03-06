@@ -1451,6 +1451,7 @@ let popup_state = function(e) {
 		}
 
 		// allow popup_update() to change popup visibility on target hover.
+		// NOTE: this doesn't work for inner alignments, it will flicker!
 		target.on('pointerenter', update, on)
 		target.on('pointerleave', update, on)
 

@@ -649,11 +649,10 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		if (!e.error_tooltip) return
 		if (!error_tooltip_row) return
 		let r = row_visible_rect(error_tooltip_row)
-		e.error_tooltip.px = r.x
-		e.error_tooltip.py = r.y
-		e.error_tooltip.pw = r.w
-		e.error_tooltip.ph = r.h
+		e.error_tooltip.begin_update()
+		e.error_tooltip.target_rect = r
 		e.error_tooltip.side = horiz ? 'top' : 'right'
+		e.error_tooltip.end_update()
 	}
 
 	function update_row_error_tooltip_row(row) {
@@ -666,11 +665,14 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		}
 		let row_errors = row && e.row_errors(row)
 		error_tooltip_row = row_errors && row_errors.length > 0 ? row : null
+		e.error_tooltip.begin_update()
 		if (error_tooltip_row) {
 			e.error_tooltip.text = row_errors.ul({class: 'x-error-list'}, true)
 			update_row_error_tooltip_position()
+		} else {
+			e.error_tooltip.update()
 		}
-		e.error_tooltip.update()
+		e.error_tooltip.end_update()
 	}
 
 	e.do_focus_row = function(row) {
@@ -990,6 +992,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	function ht_col_resize_vert(mx, my, max_h, hit) {
 		if (my >= max_h)
 			return
+		if (mx > e.cell_w + 5)
+			return // only allow dragging the first row otherwise it's confusing.
 		let x = ((mx + 5) % e.cell_w) - 5
 		if (!(x >= -5 && x <= 5))
 			return
@@ -1713,6 +1717,10 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				hit.state = 'col_drag'
 			} else if (ht_row_drag(mx, my, hit, ev)) {
 				hit.state = 'row_drag'
+				let row = e.rows[hit.cell.ri]
+				update_row_error_tooltip_row(row)
+			} else {
+				update_row_error_tooltip_row(null)
 			}
 			if (hit.state)
 				return false

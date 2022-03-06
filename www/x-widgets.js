@@ -1252,6 +1252,17 @@ component('x-tooltip', function(e) {
 	e.prop('timeout'     , {store: 'var'})
 	e.prop('close_button', {store: 'var', type: 'bool'})
 
+	e.property('target_rect',
+		function() {
+			return domrect(e.px, e.py, e.pw, e.ph)
+		}, function(r) {
+			e.px = r.x
+			e.py = r.y
+			e.pw = r.w
+			e.ph = r.h
+		}
+	)
+
 	e.init = function() {
 		e.update({reset_timer: true})
 		e.popup(e.target, e.side, e.align, e.px, e.py, e.pw, e.ph)
