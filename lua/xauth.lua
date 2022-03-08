@@ -87,13 +87,16 @@ wwwfile['x-auth.css'] = [[
 
 ]]
 
-template.usr_form = [[
+function template.usr_form()
+	return render_string([[
 <x-if global=signed_in>
 	<x-form id=usr_form nav_id=usr_nav>
 		<x-input col=email ></x-input>
 		<x-input col=name  ></x-input>
+		{{#multilang}}
 		<x-lookup-dropdown col=lang     ></x-lookup-dropdown>
 		<x-lookup-dropdown col=country  ></x-lookup-dropdown>
+		{{/multilang}}
 		<x-enum-dropdown col=theme></x-enum-dropdown>
 		<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
 			<t s=log_out>Log out</t>
@@ -103,7 +106,8 @@ template.usr_form = [[
 	<x-form id=usr_form nav_id=usr_nav>
 	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
 </x-if>
-]]
+]], {multilang = multilang()})
+end
 
 template.sign_in_dialog = [[
 <x-dialog cancelable=false>
@@ -263,8 +267,10 @@ rowset.usr = sql_rowset{
 			birthday    ,
 			newsletter  ,
 			roles       ,
+			#if multilang()
 			lang        ,
 			country     ,
+			#endif
 			theme       ,
 			atime       ,
 			ctime       ,
@@ -284,9 +290,9 @@ rowset.usr = sql_rowset{
 	},
 	where_all = 'usr = $usr()',
 	pk = 'usr',
-	rw_cols = 'name lang country theme',
+	rw_cols = 'name theme lang country',
 	update_row = function(self, row)
-		self:update_into('usr', row, 'name lang country theme')
+		self:update_into('usr', row, 'name theme lang country')
 		clear_userinfo_cache(row['usr:old'])
 	end,
 }
