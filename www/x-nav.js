@@ -645,7 +645,7 @@ function nav_widget(e) {
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
 		let rt = e.rowset_name && rowset_field_attrs[e.rowset_name+'.'+name]
-		let type = f.type || (ct && ct.type) || (rt && rt.type)
+		let type = rt && rt.type || ct && ct.type || f.type
 		let tt = field_types[type]
 		let att = all_field_types
 
@@ -654,6 +654,8 @@ function nav_widget(e) {
 		for (let k in convert_field_attr)
 			field[k] = convert_field_attr[k](field, field[k], f)
 
+		if (field.type == 'button')
+			pr(field, rt)
 	}
 
 	function set_field_attr(field, k, v) {
