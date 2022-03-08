@@ -63,6 +63,11 @@ return function(app_name, ...)
 		end, ...)
 	end
 
+	--pass all APP.conf options to webb.
+	for k,v in pairs(app.conf) do
+		config(k, v)
+	end
+
 	config('app_name'   , app.name)
 	config('app_dir'    , app.dir)
 	config('www_dir'    , app.wwwdir)
@@ -84,7 +89,6 @@ return function(app_name, ...)
 	app.schema.env.Sf = Sf
 
 	app.schema:import'schema_std'
-	app.schema:import'webb_lang'
 	app.schema:import'webb_auth'
 
 	sqlpps.mysql    .define_symbol('current_timestamp', app.schema.env.current_timestamp)
@@ -92,9 +96,8 @@ return function(app_name, ...)
 
 	config('db_schema', app.schema)
 
-	--pass all other app conf options to webb.
-	for k,v in pairs(app.conf) do
-		config(k, v)
+	if config('multilang', true) then
+		require'xlang'
 	end
 
 	return app

@@ -5,7 +5,7 @@
 
 LOADS
 
-	x-widgets, fontawesome, markdown-it, xauth, xlang
+	x-widgets, fontawesome, markdown-it, xauth
 
 ]==]
 
@@ -56,4 +56,3 @@ x-module.js
 fontfile'fa-solid-900.woff2'
 
 require'xauth'
-require'xlang'
