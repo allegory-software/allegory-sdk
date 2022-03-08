@@ -71,6 +71,9 @@
 		- `pos_col` and `parent_col` are set to hidden by default.
 		- on client-side, `id_col` is set to pk if pk is single-column.
 
+GLOBALS
+	rowset_changed(rowset_name, [update_id])
+
 ACTIONS
 
 	rowset.json               named rowsets action
@@ -489,15 +492,20 @@ end
 local waiting_events_threads = {}
 local changed_rowsets = {} --{cx()->{rowset->'update_id1 ...'}}
 
+function rowset_changed(rowset_name, update_id)
+	update_id = update_id or 'server'
+	for _, rowsets in pairs(changed_rowsets) do
+		if not rowsets[rowset_name] then
+			rowsets[rowset_name] = update_id
+		else
+			rowsets[rowset_name] = rowsets[rowset_name] .. ' ' .. update_id
+		end
+	end
+end
+
 --[[local]] function push_rowset_changed_events(rowsets, update_id)
 	for rowset_name in pairs(rowsets) do
-		for _, rowsets in pairs(changed_rowsets) do
-			if not rowsets[rowset_name] then
-				rowsets[rowset_name] = update_id
-			else
-				rowsets[rowset_name] = rowsets[rowset_name] .. ' ' .. update_id
-			end
-		end
+		rowset_changed(rowset_name, update_id)
 	end
 	for thread in pairs(waiting_events_threads) do
 		resume(thread)
