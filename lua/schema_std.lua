@@ -61,11 +61,15 @@ do
 
 end
 
+local current_timestamp_symbol = setmetatable({'current_timestamp'}, {
+	__tostring = function() return 'current timestamp' end,
+})
+
 return function()
 
 	import(M)
 
-	current_timestamp = {'current_timestamp'}
+	current_timestamp = current_timestamp_symbol
 
 	flags.not_null   = {not_null = true}
 	flags.autoinc    = {auto_increment = true, readonly = true}
@@ -74,6 +78,7 @@ return function()
 	flags.utf8_ci    = {charset = utf8 , collation = 'utf8_ci'   , mysql_collation = 'utf8mb4_0900_as_ci', tarantool_collation = 'unicode_ci'}
 	flags.utf8_ai_ci = {charset = utf8 , collation = 'utf8_ai_ci', mysql_collation = 'utf8mb4_0900_ai_ci', tarantool_collation = 'unicode_ci'}
 	flags.utf8_bin   = {charset = utf8 , collation = 'utf8_bin'  , mysql_collation = 'utf8mb4_0900_bin'  , tarantool_collation = 'binary'}
+	flags.str        = {type = 'text'  , mysql_type = 'varchar', tarantool_type = 'string'}
 
 	types.bool      = {type = 'bool', mysql_type = 'tinyint', size = 1, unsigned = true, decimals = 0,
 		mysql_to_lua = bool_to_lua, tarantool_type = 'boolean', mysql_to_tarantool = bool_to_lua}
@@ -94,30 +99,32 @@ return function()
 
 	types.dec       = {type = 'decimal', mysql_type = 'decimal', tarantool_type = 'number'}
 
-	types.str       = {type = 'text'  , mysql_type = 'varchar', tarantool_type = 'string'} --incomplete type!
 	types.bin       = {type = 'binary', mysql_type = 'varbinary', tarantool_type = 'string'}
 	types.text      = {str, mysql_type = 'text', size = 0xffff, maxlen = 0xffff, utf8_bin}
 	types.chr       = {str, mysql_type = 'char', padded = true}
 	types.blob      = {type = 'binary', mysql_type = 'mediumblob', size = 0xffffff, tarantool_type = 'string', tarantool_collation = 'none'}
 
-	types.time      = {int52, type = 'time', tarantool_type = 'number'}
 	types.timeofday = {type = 'timeofday', mysql_type = 'time', tarantool_type = 'number'}
 	types.date      = {type = 'date', mysql_type = 'date', mysql_to_sql = date_to_sql, tarantool_type = 'number', mysql_to_tarantool = datetime_to_timestamp}
-	types.datetime  = {date, mysql_type = 'datetime', has_time = true, has_seconds = false}
-	types.datetimes = {datetime, has_seconds = true}
-	types.timestamp = {date, mysql_type = 'timestamp', has_time = true}
-	types.timestamps= {date, mysql_type = 'timestamp', has_time = true, has_seconds = true}
+	types.datetime  = {date, mysql_type = 'datetime', has_time = true}
+	types.datetime_s= {datetime, has_seconds = true}
+	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `time` instead.
+	--types.timestamp   = {date, mysql_type = 'timestamp', has_time = true}
+	--types.timestamp_s = {date, mysql_type = 'timestamp', has_time = true, has_seconds = true}
+	types.time      = {double, type = 'time', tarantool_type = 'number'}
+	types.time_s    = {double, type = 'time', tarantool_type = 'number', has_seconds = true}
+	types.time_ms   = {double, type = 'time', tarantool_type = 'number', has_seconds = true, has_ms = true}
 
 	types.id        = {uint}
 	types.idpk      = {id, pk, autoinc}
 	types.bigid     = {uint52}
 	types.bigidpk   = {bigid, pk, autoinc}
 
-	types.name      = {str, size = 256, maxlen = 64, utf8_ai_ci}
+	types.name      = {str, size = 256, maxlen = 64, utf8_ci}
 	types.strid     = {str, size =  64, maxlen = 64, ascii_ci}
 	types.strpk     = {strid, pk}
 	types.email     = {str, size =  512, maxlen =  128, utf8_ci}
-	types.hash      = {str, size =   64, maxlen =   64, ascii_bin} --enough for tohex(hmac.sha256())
+	types.hash      = {str, size =   64, maxlen =   64, ascii_bin} --enough for tohex(256-bit-hash)
 	types.url       = {str, size = 2048, maxlen = 2048, ascii_bin}
 	types.b64key    = {str, size = 8192, maxlen = 8192, ascii_bin}
 

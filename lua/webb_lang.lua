@@ -15,8 +15,8 @@ function webb.lang_schema()
 		rtl                 , bool0,
 		en_name             , name, not_null, uk(en_name),
 		name                , name, not_null, uk(name),
-		decimal_separator   , str, {maxlen = 4, size = 16}, utf8_bin, not_null, default ',',
-		thousands_separator , str, {maxlen = 4, size = 16}, utf8_bin, not_null, default '.',
+		decimal_separator   , {str, maxlen = 4, size = 16, utf8_bin, not_null, default ','},
+		thousands_separator , {str, maxlen = 4, size = 16, utf8_bin, not_null, default '.'},
 		supported           , bool0,
 	}
 
@@ -285,7 +285,7 @@ function webb.lang_schema()
 		currency    , currency, fk,
 		imperial_system, bool0,
 		week_start_offset, int8, not_null, --Sun:0, Mon:1, Sat:-1, Fri:-2
-		date_format , str, {size = 10, maxlen = 10}, ascii_bin, not_null,
+		date_format , {str, size = 10, maxlen = 10, ascii_bin, not_null},
 		en_name     , name, not_null,
 	}
 
