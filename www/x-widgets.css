@@ -1113,7 +1113,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-editbox-value:empty::before {
-	content: '\200b'; /* zwsp */
+	content: '\200b'; /* zwsp to force line height */
 }
 
 .x-editbox-value.null { color: var(--x-fg-disabled); }
@@ -1677,7 +1677,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-calendar-sel-day-suffix:empty::before,
 .x-calendar-day:empty::before
 {
-	content: '\200b'; /* zwsp */
+	content: '\200b'; /* zwsp to force line height */
 }
 
 .x-calendar-sel-hms {
@@ -2654,6 +2654,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	line-height: inherit; /* for matching baseline with text of different fonts */
 }
 
+.x-grid-cell > .x-button[bare] {
+	padding: 0; /* no space for padding */
+}
+
 .x-grid-cell:hover,
 .x-grid-cell.focused {
 	overflow: visible;
@@ -2687,6 +2691,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding: 0 4px;
 	height: 100%;
 	color: var(--x-fg-disabled);
+}
+
+.x-grid-cell-indent:empty::before {
+	content: '\200b'; /* zwsp to force line height */
 }
 
 .x-grid-cell-indent:hover::before {
