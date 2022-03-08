@@ -45,12 +45,12 @@ int close(int fd);
 ]]
 
 local function findpid(pid, cmd)
-	local s = readfile(_('/proc/%s/cmdline', pid))
+	local s = load(_('/proc/%s/cmdline', pid), false)
 	return s and s:find(cmd, 1, true) and true or false
 end
 
 local function running()
-	local pid = tonumber((readfile(app.pidfile)))
+	local pid = tonumber((load(app.pidfile, false)))
 	if not pid then return false end
 	return findpid(pid, arg[0]), pid
 end
@@ -163,7 +163,7 @@ function daemon(app_name, ...)
 
 	--load an optional config file.
 	do
-		local conf_s = load(app.conffile)
+		local conf_s = load(app.conffile, false)
 		app.conf = {}
 		if conf_s then
 			local conf_fn = assert(loadstring(conf_s))
