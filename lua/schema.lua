@@ -137,7 +137,7 @@ local function resolve_type(self, fld, t, i, n, fld_ct, allow_types, allow_flags
 		local k = t[i]
 		local v = k
 		if isstr(v) then --type name, flag name or next field
-			v = allow_types and self.types[k] or allow_flags and self.flags[k]
+			v = allow_types and self.types[k] or allow_flags and self.flags[k] or nil
 			if not v and allow_unknown then --next field
 				return i
 			end
@@ -159,6 +159,10 @@ local function resolve_type(self, fld, t, i, n, fld_ct, allow_types, allow_flags
 end
 
 local function parse_cols(self, t, dt, loc1, fld_ct)
+	local dt_i = #dt + 1
+	if t.after_col then
+		dt_i = dt[t.after_col].col_pos + 1
+	end
 	local i = 1
 	while i <= #t do --[out], field_name, type_name, flag_name|{attr->val}, ...
 		if i == 1 and not isstr(t[1]) then --aka for renaming the table.
@@ -178,15 +182,16 @@ local function parse_cols(self, t, dt, loc1, fld_ct)
 		assertf(isstr(col), 'column name expected for `%s`, got %s', loc1, type(col))
 		i = i + 1
 		local fld = {col = col, mode = mode}
-		if fld_ct.is_table then
-			local col_pos = #dt + 1
-			fld.col_pos = col_pos
-			fld.col_in_front = col_pos > 1 and dt[col_pos-1].col
-		end
-		add(dt, fld)
+		table.insert(dt, dt_i, fld); dt_i = dt_i + 1
 		dt[col] = fld
-		i = resolve_type(self, fld, t, i, i , fld_ct, true, false)
-		i = resolve_type(self, fld, t, i, #t, fld_ct, false, true, true)
+		i = resolve_type(self, fld, t, i, i , fld_ct, true , false , false)
+		i = resolve_type(self, fld, t, i, #t, fld_ct, false, true  , true )
+	end
+	if fld_ct.is_table then
+		for i, fld in ipairs(dt) do
+			fld.col_pos = i
+			fld.col_in_front = i > 1 and dt[i-1].col
+		end
 	end
 end
 
@@ -333,6 +338,7 @@ do
 		function env.add_weak_fk  (...) self:add_weak_fk  (...) end
 		function env.trigger      (...) self:add_trigger  (...) end
 		function env.proc         (...) self:add_proc     (...) end
+		function env.add_cols     (...) self:add_cols     (...) end
 
 		return self
 	end
@@ -494,8 +500,16 @@ function schema:add_proc(name, args, ...)
 	self.procs[name] = p
 end
 
-function schema:add_cols(...)
-	--TODO:
+function schema:add_cols(tbl_name, t)
+	local nt = names(tbl_name)
+	local tbl_name = nt[1]
+	if nt[2] then
+		assert(nt[2] == 'after')
+		t.after_col = assert(nt[3])
+	else
+		assert(#nt == 1)
+	end
+	self.tables[tbl_name].add_cols(t)
 end
 
 function schema:check_refs()
