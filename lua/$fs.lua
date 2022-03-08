@@ -23,8 +23,7 @@ FILESYSTEM API (NOT ASYNC)
 	mv(old_path, new_path)
 	mkdir(dir) -> dir
 	mkdirs(file) -> file
-	reload(path, [default])
-	[try]load(path, [default])
+	load(path, [default])
 	[try]save(path, s[, sz])
 	saver(path) -> write(s[, sz] | nil | fs.abort) -> ok, err
 	cp(src_file, dst_file)
@@ -68,17 +67,15 @@ function checkexists(file, type)
 end
 
 function startcwd(dir)
-	local cwd, err = fs.startcwd()
-	return check('fs', 'startcwd', cwd, 'startcwd() failed: %s', err)
+	return assert(fs.startcwd())
 end
+
 function cwd(dir)
-	local cwd, err = fs.cwd()
-	return check('fs', 'cwd', 'cwd', 'could not get current directory: %s', err)
+	return assert(fs.cwd())
 end
 
 local function chdir(dir)
-	local dir, err = fs.chdir(dir)
-	return check('fs', 'chdir', dir, 'could not set current directory to %s: %s', dir, err)
+	return assert(fs.chdir(dir))
 end
 _G.chdir = chdir
 
@@ -93,33 +90,22 @@ function run_indir(dir, fn, ...)
 	pass(errors.pcall(fn, ...))
 end
 
-function tryrm(path)
-	note('fs', 'rm', '%s', path)
-	local ok, err = fs.remove(path)
-	if ok then return ok end
-	return ok, err
-end
+tryrm = fs.remove
 
 function rm(path)
-	local ok, err = tryrm(path)
+	local ok, err = fs.remove(path)
 	if not ok and err == 'not_found' then ok = true end
 	check('fs', 'rm', ok, 'could not remove file %s: %s', path, err)
 end
 
 function mv(old_path, new_path)
-	note('fs', 'mv', '1. %s ->\n2. %s', old_path, new_path)
 	local ok, err = fs.move(old_path, new_path)
 	check('fs', 'mv', ok, 'could not move file %s -> %s: %s', old_path, new_path, err)
 end
 
 function mkdir(dir)
-	if path.dir(dir) then --because mkdir'c:/' gives access denied.
-		local ok, err = fs.mkdir(dir, true)
-		if ok and err ~= 'already_exists' then
-			note('fs', 'mkdir', '%s', dir)
-		end
-		check('fs', 'mkdir', ok, 'could not create dir %s: %s', dir, err)
-	end
+	local ok, err = fs.mkdir(dir, true)
+	check('fs', 'mkdir', ok, 'could not create dir %s: %s', dir, err)
 	return dir
 end
 
@@ -131,28 +117,10 @@ end
 readfile_tobuffer = fs.load_tobuffer
 readfile = fs.load
 
-function reload(path, default) --load a file into a string.
+function load(path, default) --load a file into a string.
 	if default ~= nil and not exists(path) then return default end
-	return check('fs', 'load', readfile(path))
-end
-
---NOTE: shamelessly changing built-in load() that we never use.
-local load_cache = {} --{path -> {mtime, contents}}
-function load(path, default)
-	local mt, err = mtime(path)
-	if not mt and err == 'not_found' then
-		load_cache[path] = nil
-	end
-	if mt then
-		local t = load_cache[path]
-		if t and t[1] >= mt then
-			return t[2]
-		end
-	end
-	local s = reload(path, default)
-	local t = attr(load_cache, path)
-	t[1], t[2] = mt, s
-	return s
+	local s, err = fs.load(path)
+	return check('fs', 'load', s, 'could not load file %s: %s', path, err)
 end
 
 trysave = fs.save
