@@ -874,6 +874,9 @@ end
 
 function fs.mkdir(dir, recursive, ...)
 	if recursive then
+		if win and not path.dir(dir) then --because mkdir'c:/' gives access denied.
+			return true
+		end
 		dir = path.normalize(dir) --avoid creating `dir` in `dir/..` sequences
 		local t = {}
 		while true do
