@@ -169,7 +169,6 @@ end
 function webb.auth_schema()
 
 	import'schema_std'
-	import'webb_lang'
 
 	tables.usr = {
 		usr         , idpk    ,
@@ -177,23 +176,21 @@ function webb.auth_schema()
 		email       , email   , uk,
 		emailvalid  , bool0   ,
 		pass        , hash    ,
-		facebookid  , name    , uk,
-		googleid    , name    , uk,
+		facebookid  , strid   , uk,
+		googleid    , strid   , uk,
 		gimgurl     , url     , --google image url
 		active      , bool1   ,
 		title       , name    ,
 		name        , name    ,
-		phone       , name    ,
+		phone       , strid   ,
 		phonevalid  , bool0   ,
 		sex         , enum'M F',
 		birthday    , date    ,
 		newsletter  , bool0   ,
 		roles       , text    ,
 		note        , text    ,
-		lang        , lang    , weak_fk,
-		country     , country , weak_fk,
-		theme       , name    ,
-		clientip    , name    , --when it was created
+		theme       , strid   ,
+		clientip    , strid   , --when it was created
 		atime       , atime   , --last access time
 		ctime       , ctime   , --creation time
 		mtime       , mtime   , --last modification time
@@ -203,7 +200,7 @@ function webb.auth_schema()
 		token       , hash   , not_null, pk,
 		usr         , id     , not_null, child_fk,
 		expires     , time   , not_null,
-		clientip    , name   , --when it was created
+		clientip    , strid  , --when it was created
 		ctime       , ctime  ,
 	}
 
@@ -214,6 +211,17 @@ function webb.auth_schema()
 		validates   , enum'email phone', not_null,
 		ctime       , ctime  ,
 	}
+
+	if _G.multilang() then
+
+		import'webb_lang'
+
+		add_cols('usr after note', {
+			lang        , lang    , weak_fk,
+			country     , country , weak_fk,
+		})
+
+	end
 
 end
 
@@ -378,7 +386,10 @@ local userinfo = memoize(function(usr)
 			phone,
 			phonevalid,
 			gimgurl,
+			#if multilang()
 			lang,
+			country,
+			#endif
 			theme
 		from
 			usr
@@ -409,11 +420,15 @@ end
 local function create_user()
 	sleep(0.1) --make flooding up the table a bit slower
 	local usr = query([[
-		insert into usr
-			(clientip, lang, atime, ctime, mtime)
-		values
-			(?, ?, now(), now(), now())
-	]], client_ip(), lang()).insert_id
+		insert into usr set
+			clientip = :clientip,
+			#if multilang()
+			lang = :lang,
+			#endif
+			atime = now(),
+			ctime = now(),
+			mtime = now()
+	]], {clientip = client_ip(), lang = lang()}).insert_id
 	session().usr = usr
 	return usr
 end
