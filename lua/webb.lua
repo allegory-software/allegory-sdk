@@ -38,6 +38,7 @@ MULTI-LANGUAGE & MULTI-COUNTRY SUPPORT
 	lang([k])                               get lang or lang property for current request
 	setlang(lang)                           set lang of current request
 	default_lang()                          get the default lang
+	multilang()                             check if the app is multilanguage
 	webb.langinfo[lang] -> {k->v}           static language property table
 
 	country([k])                            get country or country property for current request
@@ -436,6 +437,10 @@ end
 function setcountry(country, if_not_set)
 	if if_not_set and cx.country then return end
 	cx.country = country and countryinfo(country) and country or default_country()
+end
+
+function multilang()
+	return config('multilang', true)
 end
 
 --multi-language strings in source code files --------------------------------
