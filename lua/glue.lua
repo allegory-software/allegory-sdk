@@ -99,7 +99,7 @@ FILE & PIPE I/O
 TIME
 	glue.time([utc, ][t]) -> ts                     like os.time() with optional UTC and date args
 	glue.time([utc, ][y, [m], [d], [h], [min], [s], [isdst]]) -> ts  like os.time() with optional UTC and date args
-	glue.utc_diff([t]) -> seconds                   seconds to UTC
+	glue.utc_diff(t) -> seconds                     seconds from local time t to UTC
 	glue.sunday([utc, ]t, [weeks]) -> t             time at last Sunday before t
 	glue.day([utc, ][ts], [plus_days]) -> ts        timestamp at day's beginning from ts
 	glue.month([utc, ][ts], [plus_months]) -> ts    timestamp at month's beginning from ts
@@ -1341,7 +1341,6 @@ end
 
 --compute timestamp diff. to UTC because os.time() has no option for UTC.
 function glue.utc_diff(t)
-	t = t or os.time()
    local ld = os.date('*t', t)
 	ld.isdst = false --adjust for DST.
 	local ud = os.date('!*t', t)
@@ -1368,21 +1367,19 @@ function glue.time(utc, y, m, d, h, M, s, isdst)
 		if utc == nil then utc = t.utc end
 		y, m, d, h, M, s, isdst = t.year, t.month, t.day, t.hour, t.min, t.sec, t.isdst
 	end
+	local t
 	if not y then
-		return os.time()
+		t = os.time()
 	else
 		s = s or 0
-		local t = os.time{year = y, month = m or 1, day = d or 1, hour = h or 0,
+		t = os.time{year = y, month = m or 1, day = d or 1, hour = h or 0,
 			min = M or 0, sec = s, isdst = isdst}
 		if not t then return nil end
 		t = t + s - floor(s)
-		local d = 0
-		if utc then
-			d = glue.utc_diff(t)
-			if not d then return nil end
-		end
-		return t + s - floor(s) + d
 	end
+	local d = not utc and 0 or glue.utc_diff(t)
+	if not d then return nil end
+	return t + d
 end
 
 --get the time at last sunday before a given time, plus/minus a number of weeks.
@@ -1440,8 +1437,11 @@ local function rel_time(s)
 end
 
 --format relative time, eg. `3 hours ago` or `in 2 weeks`.
-function glue.timeago(time, from_time)
-	local s = os.difftime(from_time or os.time(), time)
+function glue.timeago(utc, time, from_time)
+	if type(utc) ~= 'boolean' then --shift arg#1
+		utc, time, from_time = false, utc, time
+	end
+	local s = os.difftime(from_time or glue.time(utc), time)
 	return string.format(s > 0 and '%s ago' or 'in %s', rel_time(math.abs(s)))
 end
 
