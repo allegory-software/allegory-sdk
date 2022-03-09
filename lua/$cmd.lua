@@ -74,7 +74,7 @@ local function addcmd(self, active, s, helpline, help, fn)
 		end
 		local cmd = {name = name, args = args, fn = fn, helpline = helpline, help = help}
 		if name:find('|', 1, true) then
-			for i,name in ipairs(names(name, '|')) do
+			for i,name in ipairs(names(name:gsub('|', ' '))) do
 				addcmdalias(self, name, cmd, i > 1)
 			end
 		else
