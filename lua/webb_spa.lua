@@ -65,12 +65,8 @@ client_config'app_name'
 client_config'default_lang'
 client_config'aliases'
 client_config'root_action'
-client_config'templates_action'
 client_config'page_title_suffix'
 client_config'session_cookie_name'
-client_config'facebook_app_id'
-client_config'analytics_ua'
-client_config'google_client_id'
 
 --pass required config values to the client
 action['config.js'] = function()
