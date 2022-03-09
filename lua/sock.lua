@@ -2220,7 +2220,7 @@ function M.newthread(f)
 			threadenv[thread] = nil
 			local finish = env.__finish
 			if finish then
-				finish(thread)
+				finish(thread, ok, err)
 			end
 		end
 		if not ok then
@@ -2265,6 +2265,37 @@ end
 
 M.currentthread = currentthread
 M.yield = coro.yield
+
+function M.threadset()
+	local ts = {}
+	local n = 0
+	local errs
+	local wait_thread = currentthread()
+	function ts:thread(f, ...)
+		return thread(function(...)
+			n = n + 1
+			local ok, err = glue.pcall(f, ...)
+			if not ok then
+				errs = errs or setmetatable({}, {__tostring = function(self)
+					return table.concat(self)
+				end})
+				errs[#errs+1] = err
+				errs[currentthread()] = err
+			end
+			n = n - 1
+			if n == 0 then
+				transfer(wait_thread)
+			end
+		end, ...)
+	end
+	function ts:wait()
+		if n == 0 then return true end
+		wait_thread = currentthread()
+		M.suspend()
+		return not errs, errs
+	end
+	return ts
+end
 
 local stop = false
 local running = false
