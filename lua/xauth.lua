@@ -87,7 +87,7 @@ wwwfile['x-auth.css'] = [[
 
 ]]
 
-function template.usr_form()
+template.usr_form = function()
 	return render_string([[
 <x-if global=signed_in>
 	<x-form id=usr_form nav_id=usr_nav>
@@ -109,7 +109,8 @@ function template.usr_form()
 ]], {multilang = multilang()})
 end
 
-template.sign_in_dialog = [[
+template.sign_in_dialog = function()
+	return render_string([[
 <x-dialog cancelable=false>
 	<content>
 		{{#logo}}
@@ -127,7 +128,9 @@ template.sign_in_dialog = [[
 					we will send you a one-time activation code every time
 					you need to sign in.
 				</t></p>
+				{{#multilang}}
 				<x-list-dropdown class=sign-in-lang-dropdown label=Language val_col=lang display_col=name rowset_name=pick_lang></x-list-dropdown>
+				{{/multilang}}
 				<x-textedit class=sign-in-email-edit field_type=email label="Email address" focusfirst></x-textedit>
 				<x-button primary class=sign-in-email-button>E-mail me a sign-in code</x-button>
 			</x-form>
@@ -150,7 +153,8 @@ template.sign_in_dialog = [[
 		</x-slides>
 	</content>
 </x-dialog>
-]]
+]], {multilang = multilang(), logo = config'sign_in_logo'})
+end
 
 template.sign_in_email_text = [[
 

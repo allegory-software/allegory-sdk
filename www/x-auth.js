@@ -171,7 +171,7 @@ on('auth_sign_out_button.init', function(e) {
 
 let sign_in_dialog = memoize(function() {
 
-	let e = unsafe_html(render('sign_in_dialog', window.sign_in_options))
+	let e = unsafe_html(render('sign_in_dialog'))
 
 	e.lang_dropdown = e.$1('.sign-in-lang-dropdown')
 	e.slides        = e.$1('.sign-in-slides')
@@ -183,13 +183,14 @@ let sign_in_dialog = memoize(function() {
 	e.email_edit.field = {not_null: true}
 	e.code_edit.field = {not_null: true}
 
-	e.lang_dropdown.val = lang()
-
-	e.lang_dropdown.on('state_changed', function(changes) {
-		if (changes.input_val) {
-			exec('/sign-in', {lang: changes.input_val[0], refresh: true})
-		}
-	})
+	if (e.lang_dropdown) {
+		e.lang_dropdown.val = lang()
+		e.lang_dropdown.on('state_changed', function(changes) {
+			if (changes.input_val) {
+				exec('/sign-in', {lang: changes.input_val[0], refresh: true})
+			}
+		})
+	}
 
 	e.email_edit.on('state_changed', function(changes) {
 		if (changes.input_val)
