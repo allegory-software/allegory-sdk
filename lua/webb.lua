@@ -1068,8 +1068,10 @@ function getpage(arg1, post_data)
 		local http_client = require'http_client'
 
 		getpage_client = http_client:new(update({
-			libs = 'sock fs zlib sock_libtls',
 			resolve = function(_, host) return resolve(host) end,
+			tls_options = {
+				ca_file = config('ca_file', varpath'cacert.pem'),
+			},
 		}, opt))
 
 	end
@@ -1674,7 +1676,6 @@ function sendmail(opt)
 		pass  = config'smtp_pass',
 		tls_options = {
 			ca_file = config('ca_file', varpath'cacert.pem'),
-			loadfile = fs.load,
 		},
 	})
 
@@ -1893,7 +1894,6 @@ function webb.server(opt)
 		key_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.key')
 	end
 	return server:new(update({
-		libs = 'sock fs zlib '..(config'https_addr' and 'sock_libtls' or ''),
 		debug = config'http_debug' and index(names(config'http_debug' or '')),
 		listen = {
 			{

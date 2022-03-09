@@ -73,6 +73,7 @@ local pull = function(t)
 end
 
 local client = {
+	libs = 'sock fs zlib sock_libtls',
 	type = 'http_client', http = http,
 	max_conn = 50,
 	max_conn_per_target = 20,
@@ -82,10 +83,8 @@ local client = {
 	max_cookie_length = 8192,
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
-	loadfile = glue.readfile, --stub
 	tls_options = {
 		ca_file = 'cacert.pem',
-		loadfile = glue.readfile, --stub
 	},
 }
 

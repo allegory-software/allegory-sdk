@@ -26,9 +26,9 @@ local attr = glue.attr
 local push = table.insert
 
 local server = {
+	libs = 'sock fs zlib sock_libtls',
 	type = 'http_server', http = http,
 	tls_options = {
-		loadfile = glue.readfile, --stub
 		protocols = 'tlsv1.2',
 		ciphers = [[
 			ECDHE-ECDSA-AES256-GCM-SHA384
