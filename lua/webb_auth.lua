@@ -134,16 +134,6 @@ AUTH OBJECT
 	errors:
 		'invalid_code' - code was not found or expired.
 
-{type = 'facebook', access_token = }
-
-	login using facebook authentication. user's fields `email`, `facebookid`,
-	`name`, and `gender` are also updated.
-
-{type = 'google', access_token = }
-
-	login using google authentication. user's fields `email`, `googleid`,
-	`gimgurl` and `name` are also updated.
-
 USER SWITCHING
 
 Regardless of how the user is authenticated, the session cookie is
@@ -176,9 +166,6 @@ function webb.auth_schema()
 		email       , email   , uk,
 		emailvalid  , bool0   ,
 		pass        , hash    ,
-		facebookid  , strid   , uk,
-		googleid    , strid   , uk,
-		gimgurl     , url     , --google image url
 		active      , bool1   ,
 		title       , name    ,
 		name        , name    ,
@@ -379,13 +366,10 @@ local userinfo = memoize(function(usr)
 			email,
 			emailvalid,
 			if(pass is not null, 1, 0) as haspass,
-			googleid,
-			facebookid,
 			roles,
 			name,
 			phone,
 			phonevalid,
-			gimgurl,
 			#if multilang()
 			lang,
 			country,
@@ -418,6 +402,7 @@ local function anonymous_usr(usr)
 end
 
 local function create_user()
+	allow(config('allow_create_user', true))
 	sleep(0.1) --make flooding up the table a bit slower
 	local usr = query([[
 		insert into usr set
@@ -657,102 +642,6 @@ end
 
 function auth.code(auth)
 	return auth_token(json_str_arg(auth.code))
-end
-
---facebook authentication ----------------------------------------------------
-
-local function facebook_usr(facebookid)
-	return first_row('select usr from usr where facebookid = ?', facebookid)
-end
-
-local function facebook_graph_request(url, args)
-	local res = getpage('https://graph.facebook.com'..url, {args = args})
-	if res and res.status == 200 then
-		local t = json_arg(res.body)
-		if t and not t.error then
-			return t
-		end
-	end
-	webb.note('auth', 'facebook', 'facebook_graph_request: %s %s -> %s',
-		url, pp.format(args), pp.format(res))
-end
-
-function auth.facebook(auth)
-	--get info from facebook
-	local t = facebook_graph_request('/v2.1/me',
-		{access_token = json_str_arg(auth.access_token)})
-	if not t then return end
-
-	--grab a usr
-	local usr =
-		facebook_usr(t.id)
-		or anonymous_usr(session_usr())
-		or create_user()
-
-	--deanonimize user and update its info
-	query([[
-		update usr set
-			anonymous = 0,
-			emailvalid = 1,
-			email = ?,
-			facebookid = ?,
-			name = ?,
-			gender = ?
-		where
-			usr = ?
-		]], t.email, t.id, fullname(t.first_name, t.last_name), t.gender, usr)
-	clear_userinfo_cache(usr)
-
-	return usr
-end
-
---google authentication ------------------------------------------------------
-
-local function google_usr(googleid)
-	return first_row('select usr from usr where googleid = ?', googleid)
-end
-
-local function google_api_request(url, args)
-	local res = getpage('https://content.googleapis.com'..url, {args = args})
-	if res and res.status == 200 then
-		return json(res.body)
-	end
-	webb.note('auth', 'google', 'google_api_request: %s %s -> %s',
-		url, pp.format(args), pp.format(res))
-end
-
-function auth.google(auth)
-	--get info from google
-	local t = google_api_request('/plus/v1/people/me',
-		{access_token = json_str_arg(auth.access_token)})
-	if not t then return end
-
-	--grab a usr
-	local usr =
-		google_usr(t.id)
-		or anonymous_usr(session_usr())
-		or create_user()
-
-	--deanonimize user and update its info
-	query([[
-		update usr set
-			anonymous = 0,
-			emailvalid = 1,
-			email = ?,
-			googleid = ?,
-			gimgurl = ?,
-			name = ?
-		where
-			usr = ?
-		]],
-		t.emails and t.emails[1] and t.emails[1].value,
-		t.id,
-		t.image and t.image.url,
-		t.name and fullname(t.name.givenName, t.name.familyName),
-		usr)
-	clear_userinfo_cache(usr)
-
-	return usr
 end
 
 --authentication logic -------------------------------------------------------
