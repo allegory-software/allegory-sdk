@@ -895,6 +895,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			inh_do_update()
 		if (opt.enter_edit)
 			e.enter_edit(...opt.enter_edit)
+		if (opt_rows || opt.vals || opt.state || opt.changes)
+			e.update_action_band()
 		if (opt.scroll_to_focused_cell)
 				e.scroll_to_focused_cell()
 	}

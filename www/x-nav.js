@@ -1200,7 +1200,7 @@ function nav_widget(e) {
 
 	// editing utils ----------------------------------------------------------
 
-	function can_add_rows() {
+	e.can_actually_add_rows = function() {
 		return e.can_add_rows
 			&& (!e.rowset || e.rowset.can_add_rows != false)
 	}
@@ -1250,8 +1250,6 @@ function nav_widget(e) {
 		if (!e.selected_rows.size)
 			return S('no_records_selected', 'No records selected')
 	}
-
-	e.can_actually_add_rows = can_add_rows
 
 	// navigation and selection -----------------------------------------------
 
@@ -1583,7 +1581,6 @@ function nav_widget(e) {
 
 	function selected_rows_changed() {
 		e.fire('selected_rows_changed')
-		update_action_band()
 	}
 
 	e.is_row_selected = function(row) {
@@ -2200,7 +2197,6 @@ function nav_widget(e) {
 		sort_rows(true)
 		e.update({vals: true, state: true, sort_order: true})
 		e.scroll_to_focused_cell()
-		update_action_band()
 	}
 	e.prop('order_by', {store: 'var', slot: 'user'})
 
@@ -2642,7 +2638,7 @@ function nav_widget(e) {
 		e.set_row_state('errors'   , undefined)
 		e.set_row_state('modified' , row_modified, false)
 
-		// fire change events in no particular order, now that the state is fully updated.
+		// fire change events now that the state is fully updated.
 		e.end_set_state()
 
 		if (row_modified)
@@ -3045,7 +3041,7 @@ function nav_widget(e) {
 	e.insert_rows = function(row_vals, ev) {
 		ev = ev || empty
 		let from_server = ev.from_server
-		if (!from_server && !can_add_rows())
+		if (!from_server && !e.can_actually_add_rows())
 			return 0
 		let row_num
 		if (isarray(row_vals)) {
@@ -3516,8 +3512,6 @@ function nav_widget(e) {
 			rows_moved = true
 			if (e.save_on_move_row)
 				e.save(ev)
-			else
-				update_action_band()
 
 			e.update({rows: true})
 
@@ -3588,7 +3582,6 @@ function nav_widget(e) {
 
 		e.changed_rows = null // set(row)
 		rows_moved = false
-		update_action_band()
 
 		init_all()
 
@@ -3762,16 +3755,16 @@ function nav_widget(e) {
 		else if (e.changed_rows.has(row))
 			return
 		e.changed_rows.add(row)
-		update_action_band()
+		e.update({changes: true})
 	}
 
 	function row_unchanged(row) {
-		if (!e.changed_rows)
+		if (!e.changed_rows || !e.changed_rows.has(row))
 			return
 		e.changed_rows.delete(row)
 		if (!e.changed_rows.size)
 			e.changed_rows = null
-		update_action_band()
+		e.update({changes: true})
 	}
 
 	function pack_changes() {
@@ -3903,6 +3896,7 @@ function nav_widget(e) {
 			dont_send: true,
 		})
 		rows_moved = false
+		e.update({changes: true})
 		add_request(req)
 		set_save_state(source_rows, req)
 		e.fire('saving', true)
@@ -3979,7 +3973,7 @@ function nav_widget(e) {
 
 		e.changed_rows = null
 		rows_moved = false
-		update_action_band()
+		e.update({changes: true})
 
 		e.end_update()
 	}
@@ -4009,7 +4003,7 @@ function nav_widget(e) {
 
 		e.changed_rows = null
 		rows_moved = false
-		update_action_band()
+		e.update({changes: true})
 
 		e.end_update()
 	}
@@ -4247,7 +4241,7 @@ function nav_widget(e) {
 	// action bar -------------------------------------------------------------
 
 	e.set_action_band_visible = function(v) {
-		update_action_band()
+		e.update({changes: true})
 	}
 
 	function nrows(n) {
@@ -4264,7 +4258,7 @@ function nav_widget(e) {
 		return n
 	}
 
-	function update_action_band() {
+	e.update_action_band = function() {
 
 		if (e.action_band_visible == 'no')
 			return
@@ -4276,7 +4270,7 @@ function nav_widget(e) {
 
 			e.action_band = action_band({
 				classes: 'x-grid-action-band',
-				layout: 'reload insert delete move_up move_down info < > cancel:cancel save:ok',
+				layout: 'reload add delete move_up move_down info < > cancel:cancel save:ok',
 				buttons: {
 					'reload': button({
 						classes: 'x-grid-action-band-reload-button',
@@ -4287,7 +4281,7 @@ function nav_widget(e) {
 						action: () => e.reload(),
 						tabindex: -1,
 					}),
-					'insert': button({
+					'add': button({
 						icon: 'fa fa-plus',
 						text: S('add', 'Add'),
 						title: S('add_new_record', 'Add a new record (Insert key)'),
@@ -4368,8 +4362,7 @@ function nav_widget(e) {
 
 			b.buttons.reload.disable('nav_state', cn || !e.rowset_url)
 
-			b.buttons.save  .disable('nav_state', !cn)
-			b.buttons.cancel.disable('nav_state', !cn)
+			b.buttons.add.disable('nav_state', !e.can_actually_add_rows())
 
 			b.buttons.delete.disable('nav_state', !sn)
 			let ds = sn > 1 ? S('delete_records', 'Delete {0} {1}', sn, nrows(sn)) : S('delete', 'Delete')
@@ -4382,7 +4375,6 @@ function nav_widget(e) {
 			let can_move   = e.can_actually_move_rows(false)
 			b.buttons.move_up   .show(allow_move)
 			b.buttons.move_down .show(allow_move)
-
 			if (allow_move) {
 				b.buttons.move_up   .disable('nav_state', !can_move)
 				b.buttons.move_down .disable('nav_state', !can_move)
@@ -4401,6 +4393,9 @@ function nav_widget(e) {
 				dn > 0 ? dn + ' ' + nrows(dn) + ' ' + S('deleted' , 'deleted' ) : null
 			)
 			b.buttons.info.set(s)
+
+			b.buttons.save  .disable('nav_state', !cn)
+			b.buttons.cancel.disable('nav_state', !cn)
 
 			b.show(e.action_band_visible != 'auto' || e.changed_rows)
 		}

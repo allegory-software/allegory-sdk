@@ -3511,7 +3511,6 @@ component('x-input', 'Input', function(e) {
 	}
 
 	e.create_editor = function(field, ...opt) {
-		return component.create(...opt)
 		return e.field.editor({
 			can_select_widget: false,
 		}, ...opt)

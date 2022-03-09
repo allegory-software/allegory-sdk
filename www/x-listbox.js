@@ -170,6 +170,9 @@ function listbox_widget(e) {
 				item.class('selected', e.selected_rows.get(e.rows[i]))
 			}
 
+		if (opt.state || opt.changes)
+			e.update_action_band()
+
 		if (opt.scroll_to_focused_cell)
 			e.scroll_to_focused_cell()
 	}
