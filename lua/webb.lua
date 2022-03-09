@@ -1155,8 +1155,9 @@ function redirect(uri)
 end
 
 local function checkfunc(code, default_err)
-	return function(ret, err)
+	return function(ret, err, ...)
 		if ret then return ret end
+		err = format(tostring(err), ...)
 		http_error{
 			status = code,
 			headers = {
