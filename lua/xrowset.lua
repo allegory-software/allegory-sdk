@@ -204,20 +204,15 @@ function virtual_rowset(init, ...)
 		return res
 	end
 
-	function rs:validate_field(name, val)
-		local validate = rs.validators and rs.validators[name]
-		if validate then
-			return validate(val)
-		end
-	end
-
 	function rs:validate_fields(values)
 		local errors
-		for k,v in sortedpairs(values) do --TODO: get these pre-sorted in UI order!
-			local err = rs:validate_field(k, v)
-			if type(err) == 'string' then
-				errors = errors or {}
-				errors[k] = err
+		for i,fld in ipairs(rs.fields) do
+			if fld.validate then
+				local err = fld.validate(rs, val, fld)
+				if type(err) == 'string' then
+					errors = errors or {}
+					errors[fld.name] = err
+				end
 			end
 		end
 		return errors
