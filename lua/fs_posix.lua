@@ -135,10 +135,8 @@ end
 
 function fs.open(path, opt)
 	opt = opt or 'r'
-	local openmode
 	if type(opt) == 'string' then
-		openmode = opt
-		opt = assert(str_opt[opt], 'invalid mode %s', opt)
+		opt = assert(str_opt[opt], 'invalid open mode %s', opt)
 	end
 	local flags = flags(opt.flags or 'rdonly', o_bits)
 	flags = bor(flags, opt.async and O_NONBLOCK or 0)
@@ -156,7 +154,9 @@ function fs.open(path, opt)
 		end
 	end
 	f.shm = opt.shm and true or false
-	fs.log('', 'open', '%s %s %s', f, openmode or '?', path)
+	local r = band(flags, o_bits.rdonly) == o_bits.rdonly
+	local w = band(flags, o_bits.wronly) == o_bits.wronly
+	fs.log('', 'open', '%-4s %s%s %s', f, r, w, path)
 	return f
 end
 
@@ -217,7 +217,7 @@ function fs.pipe(path, mode)
 		if fd == -1 then return check() end
 		local f, err = fs.wrap_fd(fd, opt.async, true)
 		if not f then return nil, err end
-		fs.log('', 'pipe', '%s %s', f, path)
+		fs.log('', 'pipe', '%-4s %s', f, path)
 		return f
 	else --unnamed pipe
 		local fds = ffi.new'int[2]'
@@ -381,15 +381,15 @@ int rename(const char *oldpath, const char *newpath);
 ]]
 
 local function logpath(severity, event, path, ok, err)
-	fs.log(severity, event, '%s', path)
 	if not ok then return false, err end
+	fs.log(severity, event, '%s', path)
 	return true
 end
 
 function mkdir(path, perms)
 	local ok, err = check(C.mkdir(path, perms or 0x1ff) == 0)
-	fs.log('', 'mkdir', '%s %s', path, perms)
 	if not ok then return false, err end
+	fs.log('', 'mkdir', '%s %s', path, perms)
 	return true
 end
 
@@ -425,8 +425,8 @@ end
 
 function fs.move(oldpath, newpath)
 	local ok, err = check(C.rename(oldpath, newpath) == 0)
-	fs.log('', 'move', 'old: %s\nnew:%s', oldpath, newpath)
 	if not ok then return false, err end
+	fs.log('', 'move', 'old: %s\nnew:%s', oldpath, newpath)
 	return true
 end
 
@@ -439,8 +439,8 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize);
 ]]
 
 local function logmklink(event, link_path, target_path, ok, err)
-	fs.log('', event, 'link:   %s\ntarget:  %s', link_path, target_path)
 	if not ok then return false, err end
+	fs.log('', event, 'link:   %s\ntarget:  %s', link_path, target_path)
 	return true
 end
 

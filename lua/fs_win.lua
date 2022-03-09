@@ -6,7 +6,7 @@ if not ... then require'fs_test'; return end
 
 local ffi = require'ffi'
 local bit = require'bit'
-local bor, band, shl = bit.bor, bit.band, bit.lshift
+local bor, band, shl = bor, bit.band, bit.lshift
 package.loaded.fs_posix = true --prevent recursive loading from fs module.
 setfenv(1, require'fs'.backend)
 
@@ -372,10 +372,8 @@ end
 
 function fs.open(path, opt)
 	opt = opt or 'r'
-	local openmode
 	if type(opt) == 'string' then
-		openmode = opt
-		opt = assert(str_opt[opt], 'invalid option %s', opt)
+		opt = assert(str_opt[opt], 'invalid open mode %s', opt)
 	end
 	local async = opt.async or opt.read_async or opt.write_async
 	assert(not async or opt.is_pipe_end, 'only pipes can be async')
@@ -403,7 +401,9 @@ function fs.open(path, opt)
 			return nil, err
 		end
 	end
-	fs.log('', 'open', '%s %s %s', f, openmode or '?', path)
+	local r = band(access, access_bits.read ) == access_bits.read  and 'r' or ''
+	local w = band(access, access_bits.write) == access_bits.write and 'w' or ''
+	fs.log('', 'open', '%-4s %s%s %s', f, r, w, path)
 	return f
 end
 
@@ -549,7 +549,7 @@ function fs.pipe(path, opt)
 				true
 			)
 		if not f then return nil, err end
-		fs.log('', 'pipe', '%s %s', f, path)
+		fs.log('', 'pipe', '%-4s %s', f, path)
 		return f
 
 	else --unnamed pipe, return both ends
@@ -739,8 +739,8 @@ BOOL MoveFileExW(
 ]]
 
 local function logpath(severity, event, path, ok, err)
-	fs.log(severity, event, '%s', path)
 	if not ok then return false, err end
+	fs.log(severity, event, '%s', path)
 	return true
 end
 
@@ -790,8 +790,8 @@ function fs.move(oldpath, newpath, opt)
 		wcs(newpath, nil, wbuf),
 		flags(opt or default_move_opt, move_bits, nil, true)
 	))
-	fs.log('', 'move', 'old: %s\nnew: %s', oldpath, newpath)
 	if not ok then return false, err end
+	fs.log('', 'move', 'old: %s\nnew: %s', oldpath, newpath)
 	return true
 end
 
@@ -824,9 +824,9 @@ BOOL DeviceIoControl(
 local SYMBOLIC_LINK_FLAG_DIRECTORY = 0x1
 
 local function logmklink(event, link_path, target_path, is_dir, ok, err)
+	if not ok then return false, err end
 	fs.log('', event, 'link:   %s (%s)\ntarget:  %s',
 		link_path, is_dir and 'dir' or 'file', target_path)
-	if not ok then return false, err end
 	return true
 end
 
