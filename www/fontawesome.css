@@ -235,25 +235,6 @@
   -webkit-animation-timing-function: var(--fa-animation-timing, steps(8));
           animation-timing-function: var(--fa-animation-timing, steps(8)); }
 
-@media (prefers-reduced-motion: reduce) {
-  .fa-beat,
-  .fa-bounce,
-  .fa-fade,
-  .fa-beat-fade,
-  .fa-flip,
-  .fa-pulse,
-  .fa-shake,
-  .fa-spin,
-  .fa-spin-pulse {
-    -webkit-animation-delay: -1ms;
-            animation-delay: -1ms;
-    -webkit-animation-duration: 1ms;
-            animation-duration: 1ms;
-    -webkit-animation-iteration-count: 1;
-            animation-iteration-count: 1;
-    transition-delay: 0s;
-    transition-duration: 0s; } }
-
 @-webkit-keyframes fa-beat {
   0%, 90% {
     -webkit-transform: scale(1);
