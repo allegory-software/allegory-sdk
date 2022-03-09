@@ -146,8 +146,6 @@ alias(Element, 'hasattr', 'hasAttribute')
 // setting `true` gets back 'true' while `false` and `undefined` gets back `null`.
 // To store `true`, `false` and `null`, use bool_attr().
 method(Element, 'attr', function(k, v) {
-	// dispatching on argc sucks but distinguishing get vs set based on
-	// `v === undefined` is even more error-prone.
 	if (arguments.length < 2)
 		return this.getAttribute(k)
 	else if (v == null || v === false)
@@ -159,8 +157,6 @@ method(Element, 'attr', function(k, v) {
 // NOTE: storing `false` explicitly allows setting the value `false` on
 // props whose default value is `true`.
 method(Element, 'bool_attr', function(k, v) {
-	// dispatching on argc sucks but distinguishing get vs set based on
-	// `v === undefined` is even more error-prone.
 	if (arguments.length < 2)
 		return repl(repl(this.getAttribute(k), '', true), 'false', false)
 	else if (v == null)
