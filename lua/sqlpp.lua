@@ -411,7 +411,7 @@ function sqlpp.new(init)
 		if not s:find('.', 1 , true) then
 			return self:needs_quoting(s) and self:check_allow_quoting(s) and q..s..q or s
 		end
-		self:needs_quoting() --avoid yield accross C-call boundary :rolleyes:
+		self:needs_quoting'x' --avoid yield accross C-call boundary :rolleyes:
 		return s:gsub('[^%.]+', function(s)
 			return self:needs_quoting(s) and self:check_allow_quoting(s) and q..trim(s)..q or s
 		end)
@@ -495,7 +495,7 @@ function sqlpp.new(init)
 	--named params & positional args substitution -----------------------------
 
 	function cmd:sqlparams(sql, vals)
-		self:needs_quoting() --avoid yield accross C-call boundary :rolleyes:
+		self:needs_quoting'x' --avoid yield accross C-call boundary :rolleyes:
 		local names = {}
 		return sql:gsub('::([%w_]+)', function(k) -- ::col, ::table, etc.
 				add(names, k)
@@ -507,7 +507,7 @@ function sqlpp.new(init)
 	end
 
 	function cmd:sqlargs(sql, vals) --not used
-		self:needs_quoting() --avoid yield accross C-call boundary :rolleyes:
+		self:needs_quoting'x' --avoid yield accross C-call boundary :rolleyes:
 		local i = 0
 		return (sql:gsub('%?%?', function() -- ??
 				i = i + 1
@@ -528,7 +528,7 @@ function sqlpp.new(init)
 
 	local function sqlquery(self, prepare, sql, ...)
 
-		self:needs_quoting() --avoid yield accross C-call boundary :rolleyes:
+		self:needs_quoting'x' --avoid yield accross C-call boundary :rolleyes:
 
 		local args, params = args_params(...)
 
@@ -1426,7 +1426,7 @@ function sqlpp.new(init)
 			rt = self:get_reserved_words()
 			t.reserved_words = rt
 		end
-		return rt[s]
+		return (s:find'[^0-9a-zA-Z$_]' or rt[s]) and true or false
 	end
 
 	local function strip_ticks(s)
