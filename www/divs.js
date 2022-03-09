@@ -148,6 +148,7 @@ alias(Element, 'hasattr', 'hasAttribute')
 method(Element, 'attr', function(k, v) {
 	// dispatching on argc sucks but distinguishing get vs set based on
 	// `v === undefined` is even more error-prone.
+	// THINK: break this into attr() and setattr() ?
 	if (arguments.length < 2)
 		return this.getAttribute(k)
 	else if (v == null || v === false)
@@ -161,6 +162,7 @@ method(Element, 'attr', function(k, v) {
 method(Element, 'bool_attr', function(k, v) {
 	// dispatching on argc sucks but distinguishing get vs set based on
 	// `v === undefined` is even more error-prone.
+	// THINK: break this into battr() and setbattr() ?
 	if (arguments.length < 2)
 		return repl(repl(this.getAttribute(k), '', true), 'false', false)
 	else if (v == null)
@@ -191,7 +193,8 @@ property(Element, 'tag', function() { return this.tagName.lower() })
 // element css class list manipulation ---------------------------------------
 
 method(Element, 'class', function(names, enable) {
-	if (arguments.length < 2) // this is why dispatching on argc sucks.
+	// THINK: break this into class() and setclass() ?
+	if (arguments.length < 2)
 		enable = true
 	if (names.includes(' ')) {
 		for (let name of names.names())
@@ -985,7 +988,11 @@ function domrect(...args) { return new DOMRect(...args) }
 // common state wrappers -----------------------------------------------------
 
 method(Element, 'hide', function(on) {
-	on = on != false
+	// THINK: break this into hide() and hide_if() ?
+	if (!arguments.length)
+		on = true
+	else
+		on = !!on
 	if (this.hidden == on)
 		return
 	this.hidden = on
@@ -994,7 +1001,10 @@ method(Element, 'hide', function(on) {
 })
 
 method(Element, 'show', function(on) {
-	this.hide(on == false)
+	// THINK: break this into show() and show_if() ?
+	if (!arguments.length)
+		on = true
+	this.hide(!on)
 })
 
 property(Element, 'hovered', function() {
