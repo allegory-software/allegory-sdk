@@ -48,13 +48,13 @@ function xmodule_layer_file(layer)
 end
 
 function xmodule_layer(layer)
-	local s = readfile(xmodule_layer_file(layer))
+	local s = load(xmodule_layer_file(layer), false)
 	return s and json(s)
 end
 
 function action.xmodule_next_id(module)
 	local file = varpath(_('x-%s-next-id', module))
-	local id = tonumber(assert(readfile(file) or '1'))
+	local id = tonumber(load(file, '1'))
 	if method'post' then
 		save(file, tostring(id + 1))
 	end
@@ -69,7 +69,7 @@ action['xmodule_layer.json'] = function(layer)
 	if method'post' then
 		save(file, json(post(), '\t'))
 	else
-		outall(readfile(file) or '{}')
+		outall(load(file, '{}'))
 	end
 end
 
