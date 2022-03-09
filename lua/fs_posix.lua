@@ -388,7 +388,7 @@ end
 
 function mkdir(path, perms)
 	local ok, err = check(C.mkdir(path, perms or 0x1ff) == 0)
-	fs.log('', '', '%s %s', path, perms)
+	fs.log('', 'mkdir', '%s %s', path, perms)
 	if not ok then return false, err end
 	return true
 end
@@ -425,7 +425,7 @@ end
 
 function fs.move(oldpath, newpath)
 	local ok, err = check(C.rename(oldpath, newpath) == 0)
-	fs.log('', 'move', 'old: %s\nnew:%s', path1, path2)
+	fs.log('', 'move', 'old: %s\nnew:%s', oldpath, newpath)
 	if not ok then return false, err end
 	return true
 end

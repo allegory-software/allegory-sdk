@@ -126,7 +126,6 @@ local coroutine = coroutine
 local resume = coroutine.resume
 local yield = coroutine.yield
 local cocreate = coroutine.create
-local costatus = coroutine.status
 
 local callers = setmetatable({}, {__mode = 'k'}) --{thread -> caller_thread}
 local main, is_main = coroutine.running()
@@ -175,10 +174,7 @@ function coro.running()
 	return current, current == main
 end
 
-function coro.status(thread)
-	assert_thread(thread, 2)
-	return costatus(thread)
-end
+coro.status = coroutine.status
 
 local go --fwd. decl.
 local function check(thread, ok, ...)

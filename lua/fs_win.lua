@@ -790,7 +790,7 @@ function fs.move(oldpath, newpath, opt)
 		wcs(newpath, nil, wbuf),
 		flags(opt or default_move_opt, move_bits, nil, true)
 	))
-	fs.log('', 'move', 'old: %s\nnew: %s', path1, path2)
+	fs.log('', 'move', 'old: %s\nnew: %s', oldpath, newpath)
 	if not ok then return false, err end
 	return true
 end
