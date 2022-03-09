@@ -80,13 +80,15 @@ ESCAPING
 
 CONVERSION
 
-	mysql.datetime_to_timestamp(sql_datetime_string) -> t
+	mysql.datetime_to_timestamp(sql_datetime_string[, utc]) -> t
 
 NOTE: Decimals with up to 15 digits of precision and 64 bit integers are
 converted to Lua numbers by default. That limits the useful range of integer
 types to 15 significant digits. If you have other needs, provide your own
-`to_lua` which can be set at module or connection level, per query in
-`field_attrs`, or in a schema column definition with attribute `mysql_to_lua`.
+converter function which can be set as either:
+	- mysql.to_lua,
+	- query_options.field_attrs.FIELD_NAME.mysql_to_lua,
+	- schema.TABLE.COL.mysql_to_lua.
 
 ]=]
 
@@ -1543,7 +1545,7 @@ function conn:esc(s)
 	return esc_utf8(s)
 end
 
-function mysql.datetime_to_timestamp(v) --'yyyy-mm-dd HH:SS:MM'
+function mysql.datetime_to_timestamp(v, utc) --'yyyy-mm-dd HH:SS:MM'
 	if v == nil then return nil end
 	local y = tonumber(v:sub( 1,  4))
 	local m = tonumber(v:sub( 6,  7))
@@ -1551,8 +1553,8 @@ function mysql.datetime_to_timestamp(v) --'yyyy-mm-dd HH:SS:MM'
 	local H = tonumber(v:sub(12, 13))
 	local M = tonumber(v:sub(15, 16))
 	local S = tonumber(v:sub(18, 19))
-	return time(true, y, m, d, H, M, S)
+	return time(utc or false, y, m, d, H, M, S)
 end
-assert(mysql.datetime_to_timestamp'2000-01-02 03:04:05' == time(true, 2000, 1, 2, 3, 4, 5))
+assert(mysql.datetime_to_timestamp'2000-01-02 03:04:05' == time(2000, 1, 2, 3, 4, 5))
 
 return mysql
