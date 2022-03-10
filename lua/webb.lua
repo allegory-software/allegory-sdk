@@ -181,15 +181,16 @@ JSON ENCODING/DECODING
 FILESYSTEM
 
 	wwwpath(file, [type]) -> path           get www subpath (and check if exists)
-	wwwfile[_cached](file[,parse]) -> s     get www file contents
+	wwwfile(file, [default]) -> s           get www file contents
 	wwwfile.filename <- s|f(filename)       set virtual www file contents
 	wwwfiles([filter]) -> {name->true}      list www files
-	out[www]file[_cached](file[,parse])     buffered output of www file
 	varpath(file) -> path                   get var subpath (no check that it exists)
 	varfile.filename <- s|f(filename)       set virtual file contents
-	varfile[_cached](file[,parse]) -> s     get var file contents
-	readfile[_cached](file[,parse]) -> s    (cached) readfile for small static files
+	varfile(file, [default]) -> s           get var file contents
 	tmppath([pattern], [t]) -> path         make a tmp file path
+	outfile(file)                           output a file with mtime-based etag checking
+	webb.loadfile(file, [default]) -> s     get a file's contents into a string
+	webb.savefile(file, s)                  save a string to a file
 
 MUSTACHE TEMPLATES
 
@@ -491,11 +492,10 @@ function Sfile_ids()
 			local ext = fileext(file)
 			local s
 			if ext == 'js' then
-				s = assert(wwwfile(file))
+				s = wwwfile(file)
 			elseif ext == 'lua' then
-				s = assertf(readfile(indir(config'app_dir', file))
-						or readfile(indir(config'app_dir', 'sdk', 'lua', file)),
-							'file not found: %s', file)
+				s = webb.loadfile(indir(config'app_dir', file), false)
+						or webb.loadfile(indir(config'app_dir', 'sdk', 'lua', file))
 			end
 			for id, en_s in s:gmatch"[^%w_]Sf?%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
 				local ext_id = ext..':'..id
@@ -529,12 +529,12 @@ end
 
 --TODO: invalidate this cache based on file's mtime but don't check too often.
 S_texts = function(lang, ext)
-	local f = loadfile(s_file(lang, ext))
+	local f = webb.loadfile(s_file(lang, ext))
 	return f and f() or {}
 end
 
 local function save_S_texts(lang, ext, t)
-	save(s_file(lang, ext), 'return '..pp.format(t, '\t'))
+	webb.savefile(s_file(lang, ext), 'return '..pp.format(t, '\t'))
 end
 
 function update_S_texts(lang, ext, t)
@@ -922,7 +922,7 @@ function outfile_function(path)
 	local mtime = assert(fs.attr(path, 'mtime'))
 	check_etag(tostring(mtime))
 
-	local f = fs.open(path, 'r')
+	local f = fs.open(path)
 	if not f then
 		return
 	end
@@ -957,14 +957,9 @@ function outfile_function(path)
 	end
 end
 
-local function _outfile(readfile, path, parse)
-	if not parse then
-		return assert(outfile_function(path))()
-	end
-	out(readfile(path, parse))
+function outfile(path)
+	assert(outfile_function(path))()
 end
-function outfile(path, parse) return _outfile(readfile, path, parse) end
-function outfile_cached(path, parse) return _outfile(readfile_cached, path, parse) end
 
 function setheader(name, val)
 	cx.res.headers[name] = val
@@ -1239,31 +1234,25 @@ end
 
 --filesystem API -------------------------------------------------------------
 
-function readfile(file, parse)
-	parse = parse or glue.pass
-	local s, err = fs.load(file)
-	if not s then return nil, err end
-	return parse(s)
-end
-
-do
-local cache = {} --{file -> {mtime=, contents=}}
-function readfile_cached(file, parse)
-	local cached = cache[file]
-	local mtime = fs.attr(file, 'mtime')
-	if not mtime then --file was removed
-		cache[file] = nil
-		return nil, 'not_found'
+function webb.loadfile(path, default) --load a file into a string.
+	local s, err = fs.load(path)
+	if not s and err == 'not_found' and default ~= nil then
+		return default
 	end
-	local s
-	if not cached or cached.mtime < mtime then
-		s = readfile(file, parse)
-		cache[file] = {mtime = mtime, contents = s}
-	else
-		s = cached.contents
+	if not s then
+		webb.logerror('webb', 'load', '%s\n%s', path, err)
+		error(err, 2)
 	end
 	return s
 end
+
+function webb.savefile(file, s)
+	webb.note('webb', 'save', '%s (%s)', file, kbytes(#s))
+	local ok, err = fs.save(file, s)
+	if not ok then
+		webb.logerror('webb', 'save', '%s', err)
+		error(err, 2)
+	end
 end
 
 local function wwwdir()
@@ -1309,9 +1298,9 @@ end
 
 function varpath(file) return indir(vardir(), file) end
 
-local function file_object(findfile, readfile) --{filename -> content | handler(filename)}
+local function file_object(findfile) --{filename -> content | handler(filename)}
 	return setmetatable({}, {
-		__call = function(self, file, parse)
+		__call = function(self, file, default)
 			local f = self[file]
 			if type(f) == 'function' then
 				return f()
@@ -1319,15 +1308,13 @@ local function file_object(findfile, readfile) --{filename -> content | handler(
 				return f
 			else
 				local file = findfile(file)
-				return file and readfile(file, parse)
+				return file and webb.loadfile(file, default)
 			end
 		end,
 	})
 end
-wwwfile        = file_object(wwwpath, readfile)
-wwwfile_cached = file_object(wwwpath, readfile_cached)
-varfile        = file_object(varpath, readfile)
-varfile_cached = file_object(varpath, readfile_cached)
+wwwfile = file_object(wwwpath)
+varfile = file_object(varpath)
 
 function wwwfiles(filter)
 	if type(filter) == 'string' then

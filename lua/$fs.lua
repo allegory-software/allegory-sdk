@@ -42,6 +42,7 @@ PROCESS API (NOT ASYNC!)
 ]]
 
 require'$'
+require'$log'
 fs = require'fs'
 path = require'path'
 proc = require'proc'
@@ -49,7 +50,7 @@ proc = require'proc'
 function indir(...)
 	local path, err = path.indir(...)
 	if path then return path end
-	check('fs', 'indir', nil, 'indir(%s) failed: %s', cat(imap(pack(...), tostring), ', '), err)
+	check('fs', 'indir', nil, '%s\n%s', cat(imap(pack(...), tostring), ', '), err)
 end
 filedir = path.dir
 filename = path.file
@@ -58,12 +59,12 @@ fileext = path.ext
 
 function exists(file, type)
 	local is, err = fs.is(file, type)
-	check('fs', 'exists', not err, 'could not check file %s: %s', file, err)
+	check('fs', 'exists', not err, '%s\n%s', file, err)
 	return is
 end
 
 function checkexists(file, type)
-	check('fs', 'exists', exists(file, type), 'file missing: %s', file)
+	check('fs', 'exists', exists(file, type), '%s', file)
 end
 
 function startcwd(dir)
@@ -74,10 +75,10 @@ function cwd(dir)
 	return assert(fs.cwd())
 end
 
-local function chdir(dir)
-	return assert(fs.chdir(dir))
+function chdir(dir)
+	local ok, err = fs.chdir(dir)
+	check('fs', 'chdir', ok, '%s\n%s', dir, err)
 end
-_G.chdir = chdir
 
 function run_indir(dir, fn, ...)
 	local cwd = cwd()
@@ -95,17 +96,17 @@ tryrm = fs.remove
 function rm(path)
 	local ok, err = fs.remove(path)
 	if not ok and err == 'not_found' then ok = true end
-	check('fs', 'rm', ok, 'could not remove file %s: %s', path, err)
+	check('fs', 'rm', ok, '%s\n%s', path, err)
 end
 
-function mv(old_path, new_path)
-	local ok, err = fs.move(old_path, new_path)
-	check('fs', 'mv', ok, 'could not move file %s -> %s: %s', old_path, new_path, err)
+function mv(oldpath, newpath)
+	local ok, err = fs.move(oldpath, newpath)
+	check('fs', 'mv', ok, 'old: %s\nnew: %s\nerror: %s', oldpath, newpath, err)
 end
 
 function mkdir(dir)
 	local ok, err = fs.mkdir(dir, true)
-	check('fs', 'mkdir', ok, 'could not create dir %s: %s', dir, err)
+	check('fs', 'mkdir', ok, '%s\n%s', dir, err)
 	return dir
 end
 
@@ -114,13 +115,21 @@ function mkdirs(file)
 	return file
 end
 
-readfile_tobuffer = fs.load_tobuffer
-readfile = fs.load
+function load_tobuffer(path, default_buf, default_len) --load a file into a cdata buffer.
+	local buf, len = fs.load_tobuffer(path)
+	if not buf and len == 'not_found' and default_buf ~= nil then
+		return default_buf, default_len
+	end
+	check('fs', 'load', buf, '%s\n%s', path, len)
+	return buf, len
+end
 
 function load(path, default) --load a file into a string.
-	if default ~= nil and not exists(path) then return default end
 	local s, err = fs.load(path)
-	return check('fs', 'load', s, 'could not load file %s: %s', path, err)
+	if not s and err == 'not_found' and default ~= nil then
+		return default
+	end
+	return check('fs', 'load', s, '%s\n%s', path, err)
 end
 
 trysave = fs.save

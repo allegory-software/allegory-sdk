@@ -12,10 +12,9 @@ MULTI-LANGUAGE ACTIONS & LINKS
 ACTIONS
 
 	action(name, args...) -> t|f          execute action as http response
-	fileaction(path) -> t|f               serve a plain file
 	execaction(name, args...) -> ret...|true    execute action internally
 
-	function action.NAME(args) end        set an inline action handler
+	function action.NAME(args) end        define a Lua action handler
 
 CONFIG
 
@@ -307,8 +306,3 @@ setmetatable(actions, {__call = function(self, action, ...)
 end})
 action = actions
 
-function fileaction(path)
-	local ext = fileext(path)
-	local handler = outfile_function(path)
-	return run_action(true, path, handler, ext)
-end
