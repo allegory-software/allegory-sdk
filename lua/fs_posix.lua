@@ -154,8 +154,8 @@ function fs.open(path, opt)
 		end
 	end
 	f.shm = opt.shm and true or false
-	local r = band(flags, o_bits.rdonly) == o_bits.rdonly
-	local w = band(flags, o_bits.wronly) == o_bits.wronly
+	local r = band(flags, o_bits.rdonly) == o_bits.rdonly and 'r' or ''
+	local w = band(flags, o_bits.wronly) == o_bits.wronly and 'w' or ''
 	fs.log('', 'open', '%-4s %s%s %s', f, r, w, path)
 	return f
 end
