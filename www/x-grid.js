@@ -2045,7 +2045,9 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				e.exit_edit({cancel: true})
 
 			// delete: toggle-delete selected rows
-			if (!ctrl && e.remove_selected_rows({input: e, refocus: true, toggle: true, confirm: true}))
+			if (!ctrl && !e.editor && e.remove_selected_rows({
+						input: e, refocus: true, toggle: true, confirm: true
+					}))
 				return false
 
 			// ctrl_delete: set selected cells to null.

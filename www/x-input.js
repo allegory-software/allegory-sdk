@@ -721,7 +721,7 @@ function editbox_widget(e, opt) {
 
 	e.do_update_val = function(v, ev) {
 		if (e.input) {
-			if (ev && ev.typing)
+			if (ev && ev.input == e && ev.typing)
 				return
 			let s = e.to_text(v)
 			let maxlen = e.field && e.field.maxlen

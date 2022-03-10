@@ -204,14 +204,17 @@ function virtual_rowset(init, ...)
 		return res
 	end
 
-	function rs:validate_fields(values)
+	function rs:validate_fields(values, only_present_values)
 		local errors
 		for i,fld in ipairs(rs.fields) do
 			if fld.validate then
-				local err = fld.validate(rs, val, fld)
-				if type(err) == 'string' then
-					errors = errors or {}
-					errors[fld.name] = err
+				local val = values[fld.name]
+				if val ~= nil or only_present_values then
+					local err = fld.validate(val, fld, rs)
+					if type(err) == 'string' then
+						errors = errors or {}
+						errors[fld.name] = err
+					end
 				end
 			end
 		end
@@ -234,7 +237,7 @@ function virtual_rowset(init, ...)
 		if rs.can_change_rows == false then
 			return false, 'updating rows is not allowed'
 		end
-		local errors = rs:validate_fields(values)
+		local errors = rs:validate_fields(values, true)
 		if errors then return false, nil, errors end
 	end
 
