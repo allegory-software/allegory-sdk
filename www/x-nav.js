@@ -2782,6 +2782,15 @@ function nav_widget(e) {
 			if (e.edit_group && ce.edit_group == e.edit_group)
 				skip.add(ce)
 		}
+		// skip parents of skipped
+		let skip_parents = set()
+		for (let pe of skip) {
+			while (pe) {
+				if (pe.iswidget)
+					skip_parents.add(pe)
+				pe = pe.parent
+			}
+		}
 		// skip children of skipped
 		let skip_all = set(skip)
 		for (let se of skip) {
@@ -2795,12 +2804,7 @@ function nav_widget(e) {
 				if (se.positionally_contains(ce))
 					skip_popups.add(ce)
 		skip_all.addset(skip_popups)
-		// skip parents of self
-		let pe = e; while (pe) {
-			if (pe.iswidget)
-				skip_all.add(pe)
-			pe = pe.parent
-		}
+		skip_all.addset(skip_parents)
 		// finally, disable the rest
 		disabled_widgets = []
 		for (let ce of all_widgets) {

@@ -2205,19 +2205,21 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	flex: 1;
 
 	/* layout items */
+	display: flex;
+	flex-flow: column;
 	padding: 2px;
-	display: grid;
 	align-content: start;
-	align-items: start;
 
-	grid-gap: 2px;
+	grid-gap: 2px; /* works on both flex and grid */
 
 	/* this enables scrolling within children (it's like Harry Potter in here) */
 	overflow: auto;
 }
 
-.x-form[templated] {
+.x-form[grid] {
+	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+	align-items: start;
 }
 
 .x-form h1,
