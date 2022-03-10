@@ -529,7 +529,7 @@ end
 
 --TODO: invalidate this cache based on file's mtime but don't check too often.
 S_texts = function(lang, ext)
-	local f = webb.loadfile(s_file(lang, ext))
+	local f = webb.loadfile(s_file(lang, ext), false)
 	return f and f() or {}
 end
 

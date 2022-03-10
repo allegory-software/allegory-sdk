@@ -1468,7 +1468,7 @@ function sqlpp.new(init)
 
 	function cmd:create_db(name, charset, collation)
 		return self:assert(self:query(outdent[[
-			create database if not exists ::name
+			create database if not exists `{name}`
 				#if charset
 				character set {charset}
 				#endif
@@ -1483,7 +1483,7 @@ function sqlpp.new(init)
 	end
 
 	function cmd:drop_db(name)
-		return self:query('drop database if exists ??', name)
+		return self:query('drop database if exists `{name}`', {name = name})
 	end
 
 	function cmd:sync_schema(src, opt)

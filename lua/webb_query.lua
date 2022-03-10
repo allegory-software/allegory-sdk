@@ -88,8 +88,8 @@ local function pconfig(ns, k, default)
 end
 
 function dbname(ns)
-	local default = assert(config'app_name')..(ns and '_'..ns or '')
-	return pconfig(ns, 'db_name', default)
+	return pconfig(ns, 'db_name')
+		or pconfig(ns, 'db_name', assert(config'app_name')..(ns and '_'..ns or ''))
 end
 
 local conn_opt = glue.memoize(function(ns)
