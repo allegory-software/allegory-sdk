@@ -823,16 +823,19 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 	}
 
-	e.do_after('create_editor', function(field, ...opt) {
-		if (!e.editor)
-			return
-		e.editor.class('grid-editor')
-		if (!e.editor.parent)
-			e.cells_ct.add(e.editor)
-		update_editor()
-	})
+	let create_editor = e.create_editor
+	e.create_editor = function(field, opt) {
+		let editor = create_editor.call(e, field, opt)
+		if (editor && opt && opt.embedded) {
+			editor.class('grid-editor')
+			e.cells_ct.add(editor)
+		}
+		return editor
+	}
 
 	e.do_update_cell_editing = function(ri, fi, editing) {
+		if (editing)
+			update_editor()
 		let cell = e.cells.at[cell_index(ri, fi)]
 		if (cell)
 			cell.class('editing', editing)

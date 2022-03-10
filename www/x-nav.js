@@ -801,7 +801,8 @@ function nav_widget(e) {
 
 	function init_tree_field() {
 		let rs = e.rowset || empty
-		e.tree_field = e.all_fields[or(
+		e.tree_field = e.parent_field
+			&& e.all_fields[or(
 				or(e.tree_col, e.name_col),
 				or(rs.tree_col, rs.name_col)
 			)]
@@ -2703,35 +2704,30 @@ function nav_widget(e) {
 
 	e.do_cell_click = noop
 
-	e.create_editor = function(field, ...opt) {
-		if (!field.editor_instance) {
-			let base_opt = {
-				// TODO: use original id as template but
-				// load/save to this id after instantiation.
-				//id: e.id && e.id+'.editor.'+field.name,
-				nav: e,
-				col: field.name,
-				can_select_widget: false,
-				nolabel: true,
-				infomode: 'hidden',
-			}
-			if (
-					field.lookup_nav_id
-				|| field.lookup_rowset_id
-				|| field.lookup_rowset_name
-				|| field.lookup_rowset_url
-				|| field.lookup_rowset
-			)
-				e.editor = lookup_dropdown(base_opt, ...opt)
-			else
-				e.editor = field.editor(base_opt, ...opt)
-			if (!e.editor)
-				return
-			field.editor_instance = e.editor
-		} else {
-			e.editor = field.editor_instance
-			e.editor.show()
-		}
+	e.create_editor = function(field, opt) {
+
+		let embed = opt && opt.embedded
+		opt = assign_opt({
+			// TODO: use original id as template but
+			// load/save to this id after instantiation.
+			//id: e.id && e.id+'.editor.'+field.name,
+			nav: e,
+			col: field.name,
+			can_select_widget: embed,
+			nolabel: embed,
+			infomode: embed ? 'hidden' : null,
+		}, opt)
+
+		if (
+				field.lookup_nav_id
+			|| field.lookup_rowset_id
+			|| field.lookup_rowset_name
+			|| field.lookup_rowset_url
+			|| field.lookup_rowset
+		)
+			return lookup_dropdown(opt)
+
+		return field.editor(opt)
 	}
 
 	e.cell_clickable = function(row, field) {
@@ -2836,7 +2832,13 @@ function nav_widget(e) {
 			if (editor_state == 'click')
 				editor_state = 'select_all'
 
-			e.create_editor(field)
+			if (!field.editor_instance) {
+				e.editor = e.create_editor(field, {embedded: true})
+				field.editor_instance = e.editor
+			} else {
+				e.editor = field.editor_instance
+				e.editor.show()
+			}
 
 			if (!e.editor)
 				return false
@@ -4726,8 +4728,8 @@ component('x-lookup-dropdown', function(e) {
 		return String(v)
 	}
 
-	all_field_types.editor = function(...opt) {
-		return textedit(...opt)
+	all_field_types.editor = function(opt) {
+		return textedit(opt)
 	}
 
 	all_field_types.to_text = function(v) {
@@ -4737,6 +4739,15 @@ component('x-lookup-dropdown', function(e) {
 	all_field_types.from_text = function(s) {
 		s = s.trim()
 		return s !== '' ? s : null
+	}
+
+	// passwords
+
+	let pwd = {}
+	field_types.password = pwd
+
+	pwd.editor = function(opt) {
+		return passedit(opt)
 	}
 
 	// numbers
@@ -4754,10 +4765,10 @@ component('x-lookup-dropdown', function(e) {
 		message  : S('validation_integer', 'Value must be an integer'),
 	})
 
-	number.editor = function(...opt) {
-		return spinedit(assign({
+	number.editor = function(opt) {
+		return spinedit(assign_opt({
 			button_placement: 'left',
-		}, ...opt))
+		}, opt))
 	}
 
 	number.from_text = function(s) {
@@ -4835,11 +4846,11 @@ component('x-lookup-dropdown', function(e) {
 		return t.date(null, this.has_time, this.has_seconds)
 	}
 
-	date.editor = function(...opt) {
-		return dateedit(assign({
+	date.editor = function(opt) {
+		return dateedit(assign_opt({
 			align: 'right',
-			mode: 'fixed',
-		}, ...opt))
+			mode: opt.embedded ? 'fixed' : null,
+		}, opt))
 	}
 
 	date.validator_date = field => ({
@@ -4936,8 +4947,8 @@ component('x-lookup-dropdown', function(e) {
 			: S('validate_time', 'Time must look like H:M or HHMM')
 	})
 
-	td.editor = function(...opt) {
-		return timeofdayedit(...opt)
+	td.editor = function(opt) {
+		return timeofdayedit(opt)
 	}
 
 	// booleans
@@ -4959,10 +4970,10 @@ component('x-lookup-dropdown', function(e) {
 		return v ? this.true_text : this.false_text
 	}
 
-	bool.editor = function(...opt) {
-		return checkbox(assign({
-			center: true,
-		}, ...opt))
+	bool.editor = function(opt) {
+		return checkbox(assign_opt({
+			center: opt.embedded,
+		}, opt))
 	}
 
 	// enums
@@ -4970,13 +4981,13 @@ component('x-lookup-dropdown', function(e) {
 	let enm = {}
 	field_types.enum = enm
 
-	enm.editor = function(...opt) {
-		return list_dropdown(assign({
+	enm.editor = function(opt) {
+		return list_dropdown(assign_opt({
 			items: this.enum_values,
 			format: enm.format,
-			mode: 'fixed',
+			mode: opt.embedded ? 'fixed' : null,
 			val_col: 0,
-		}, ...opt))
+		}, opt))
 	}
 
 	enm.format = function(v) {
@@ -4989,10 +5000,10 @@ component('x-lookup-dropdown', function(e) {
 	let tags = {}
 	field_types.tags = tags
 
-	tags.editor = function(...opt) {
-		return tagsedit(assign({
-			mode: 'fixed',
-		}, ...opt))
+	tags.editor = function(opt) {
+		return tagsedit(assign_opt({
+			mode: opt.embedded ? 'fixed' : null,
+		}, opt))
 	}
 
 	tags.convert = function(v) {
@@ -5010,10 +5021,10 @@ component('x-lookup-dropdown', function(e) {
 		return div({class: 'x-item-color', style: 'background-color: '+color}, '\u00A0')
 	}
 
-	color.editor = function(...opt) {
-		return color_dropdown(assign({
-			mode: 'fixed',
-		}, ...opt))
+	color.editor = function(opt) {
+		return color_dropdown(assign_opt({
+			mode: opt.embedded ? 'fixed' : null,
+		}, opt))
 	}
 
 	// icons
@@ -5025,10 +5036,10 @@ component('x-lookup-dropdown', function(e) {
 		return div({class: 'fa '+icon})
 	}
 
-	icon.editor = function(...opt) {
-		return icon_dropdown(assign({
-			mode: 'fixed',
-		}, ...opt))
+	icon.editor = function(opt) {
+		return icon_dropdown(assign_opt({
+			mode: opt.embedded ? 'fixed' : null,
+		}, opt))
 	}
 
 	// columns
@@ -5067,8 +5078,8 @@ component('x-lookup-dropdown', function(e) {
 		return span(0, pin, isobject(v) ? v.description : v || '')
 	}
 
-	place.editor = function(...opt) {
-		return placeedit(...opt)
+	place.editor = function(opt) {
+		return placeedit(opt)
 	}
 
 	// url

@@ -1056,7 +1056,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-button.x-editbox-copy-to-clipboard-button {
 	margin: 0;
-	padding: 0 .5em;
+	margin-right: calc(0px - var(--x-padding-x-input));
 	border-left: 1px solid var(--x-smoke);
 	border-radius: 0;
 }
@@ -1238,6 +1238,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-spinedit.with-label > .x-spinedit-button.fa-minus
 {
 	align-self: baseline;
+}
+
+/* dateedit --------------------------------------------------------------- */
+
+.x-dateedit-calendar-button {
+	margin-left: calc(0px - var(--x-padding-x-input));
 }
 
 /* slider ----------------------------------------------------------------- */

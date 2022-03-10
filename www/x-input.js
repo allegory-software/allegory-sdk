@@ -865,30 +865,30 @@ function editbox_widget(e, opt) {
 
 	// copy-to-clipboard button -----------------------------------------------
 
-	e.set_copy_to_clipboard_button = function(v) {
-		if (v && !e.clipboard_button) {
-			function copy_to_clipboard_action() {
-				copy_to_clipboard(e.to_text(e.input_val), function() {
-					notify(S('copied_to_clipboard', 'Copied to clipboard'), 'info')
-				})
-			}
-			e.clipboard_button = button({
+	e.set_copy = function(v) {
+		if (v && !e.copy_button) {
+			e.copy_button = button({
 				classes: 'x-editbox-copy-to-clipboard-button',
 				icon: 'far fa-clipboard',
 				text: '',
 				bare: true,
 				focusable: false,
 				title: S('copy_to_clipboard', 'Copy to clipboard'),
-				action: copy_to_clipboard_action,
+				action: function() {
+					copy_to_clipboard(e.to_text(e.input_val), function() {
+						notify(S('copied_to_clipboard',
+							'{0} copied to clipboard', e.field.text), 'info')
+					})
+				},
 			})
-			e.focus_box.add(e.clipboard_button)
-		} else if (!v && e.clipboard_button) {
-			e.clipboard_button.remove()
-			e.clipboard_button = null
+			e.focus_box.add(e.copy_button)
+		} else if (!v && e.copy_button) {
+			e.copy_button.remove()
+			e.copy_button = null
 		}
 	}
 
-	e.prop('copy_to_clipboard_button', {store: 'var', type: 'bool', attr: true})
+	e.prop('copy', {store: 'var', type: 'bool', attr: true})
 
 	// more button ------------------------------------------------------------
 
@@ -3504,26 +3504,16 @@ component('x-input', 'Input', function(e) {
 
 	e.prop('widget_type', {store: 'var', type: 'enum', enum_values: []})
 
-	function widget_type(type) {
-		if (type) return type
-		let types = input.widget_types[e.field.type]
-		return types && types[0] || 'textedit'
-	}
-
-	e.create_editor = function(field, ...opt) {
-		return e.field.editor({
-			can_select_widget: false,
-		}, ...opt)
+	e.create_editor = function(field, opt) {
+		return e.nav.create_editor(field, opt)
 	}
 
 	function bind_field(on) {
 		if (on) {
-			let type = widget_type(e.widget_type)
-			let opt = assign_opt({
-				type: type,
-				nav: e.nav,
-				col: e.col,
-			}, input.widget_type_options[type])
+			let opt = {
+				can_select_widget: false,
+				embedded: false,
+			}
 			each_widget_prop(function(k, v) { opt[k] = v })
 			e.widget = e.create_editor(e.field, opt)
 			e.set(e.widget)
@@ -3555,6 +3545,8 @@ component('x-input', 'Input', function(e) {
 			if (k.starts('widget.')) {
 				let v = e.get_prop(k)
 				k = k.replace(/^widget\./, '')
+				if (v === '')
+					v = true
 				f(k, v)
 			}
 		}
@@ -3576,22 +3568,6 @@ component('x-input', 'Input', function(e) {
 	})
 
 })
-
-// TODO: use field.editor constructor instead of this!
-input.widget_types = {
-	number    : ['spinedit', 'slider'],
-	bool      : ['checkbox'],
-	datetime  : ['dateedit'],
-	date      : ['dateedit'],
-	enum      : ['enum_dropdown'],
-	image     : ['image'],
-	tags      : ['tagsedit'],
-	place     : ['placeedit', 'googlemaps'],
-}
-
-input.widget_type_options = {
-	tagsedit: {mode: 'fixed'},
-}
 
 // ---------------------------------------------------------------------------
 // form
