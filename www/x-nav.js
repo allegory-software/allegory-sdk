@@ -2461,6 +2461,8 @@ function nav_widget(e) {
 
 	function init_field_validators(field) {
 		field.validators = []
+		if (field.readonly)
+			return
 		for (let k in field) {
 			if (k.starts('validator_')) {
 				let v = field[k](field)
