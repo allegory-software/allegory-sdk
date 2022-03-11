@@ -225,6 +225,7 @@ rowset.users = sql_rowset{
 		clientip = {hidden = true  },
 		name     = {not_null = true},
 		email    = {not_null = true},
+		roles    = {type = 'tags'},
 	},
 	where_all = 'anonymous = 0',
 	pk = 'usr',
