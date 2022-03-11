@@ -1078,8 +1078,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 textarea.x-editbox-input {
 	resize: none;
 	padding-right: var(--x-padding-x-input);
-	white-space: pre;
-	overflow-wrap: normal;
 	overflow-y: overlay;
 	overflow-x: overlay;
 	cursor: auto;
@@ -1091,6 +1089,11 @@ textarea.x-editbox-input {
 
 .x-textarea[mono] > .x-focus-box > .x-editbox-input {
 	font-family: monospace;
+}
+
+.x-textarea[nowrap] {
+	white-space: pre;
+	overflow-wrap: normal;
 }
 
 /* dropdown --------------------------------------------------------------- */

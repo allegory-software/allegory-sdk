@@ -85,6 +85,12 @@ wwwfile['x-auth.css'] = [[
 	margin-bottom  : .5em;
 }
 
+.sign-in-email-button,
+.sign-in-code-button
+{
+	margin-top: .5em;
+}
+
 ]]
 
 template.usr_form = function()
