@@ -410,8 +410,6 @@ let max_unused_val_count = 10000000
 
 let shared_navs = obj() // {rowset_name: nav:}
 
-let prefix = (p, s) => s ? p + ':' + s : null
-
 let gclist = []
 let oldest_last = function(nav1, nav2) {
 	let t1 = nav1.last_used_time
@@ -454,6 +452,8 @@ let gc = function() {
 		}
 	}
 }
+
+let prefix = (p, s) => s ? p + ':' + s : null
 
 function shared_nav(id, opt) {
 
@@ -570,17 +570,19 @@ function nav_widget(e) {
 	e.prop('row_states', {store: 'var', slot: 'app'})
 
 	function bind_rowset_name(name, on) {
-		if (on) {
-			attr(rowset_navs, name, set).add(e)
+		if (on)
 			init_rowset_events()
-		} else {
-			let navs = rowset_navs[name]
-			if (navs) {
-				navs.delete(e)
-				if (!navs.size)
-					delete rowset_navs[name]
+		if (name)
+			if (on) {
+				attr(rowset_navs, name, set).add(e)
+			} else {
+				let navs = rowset_navs[name]
+				if (navs) {
+					navs.delete(e)
+					if (!navs.size)
+						delete rowset_navs[name]
+				}
 			}
-		}
 	}
 
 	e.set_rowset_name = function(v, v0) {
@@ -654,8 +656,6 @@ function nav_widget(e) {
 		for (let k in convert_field_attr)
 			field[k] = convert_field_attr[k](field, field[k], f)
 
-		if (field.type == 'button')
-			pr(field, rt)
 	}
 
 	function set_field_attr(field, k, v) {

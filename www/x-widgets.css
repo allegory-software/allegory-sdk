@@ -776,6 +776,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	opacity: initial;
 }
 
+.x-container > .x-input-widget > .x-focus-box {
+	border-width: 0;
+}
+
 /* checkbox --------------------------------------------------------------- */
 
 .x-markbox {
@@ -1066,6 +1070,20 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 /* textarea --------------------------------------------------------------- */
+
+.x-textarea > .x-focus-box {
+	padding-right: 0;
+}
+
+textarea.x-editbox-input {
+	resize: none;
+	padding-right: var(--x-padding-x-input);
+	white-space: pre;
+	overflow-wrap: normal;
+	overflow-y: overlay;
+	overflow-x: overlay;
+	cursor: auto;
+}
 
 .x-textarea > .x-focus-box > .x-editbox-input {
 	align-self: stretch;
@@ -1930,7 +1948,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-pagelist-content {
 	min-height: 0;  /* don't let the content make the pagelist itself overflow */
 	overflow: auto;
-	flex: 1; /* stretch-to-fill */
+	flex: 1 0 0;    /* stretch to fill container but not more */
 }
 
 .x-pagelist[tabs_side=top   ],
@@ -2621,7 +2639,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-grid-cells-view {
 	/* layout self */
-	flex: 1 0 0;               /* grow to fill container but ignore overflow */
+	flex: 1 0 0;               /* stretch to fill container but not more */
 	min-height: 0;
 	/* layout content */
 	display: grid;
@@ -3244,7 +3262,7 @@ x-prop-inspector .x-grid-cell:not(.modified) {
 
 	--x-stroke-dialog-xbutton       : #000000cc;
 
-	--x-bg-pagelist-bar: var(--x-fg);
+	--x-bg-pagelist-bar: #ccc;
 
 	--x-selected-widget-outline-color         : #aaa;
 	--x-selected-widget-outline-color-focused : var(--x-markbox-icon-color);
