@@ -63,7 +63,7 @@ let init_usr_nav = function() {
 			xmodule.set_layer(config('app_name'), 'user',
 				config('app_name') + '-user-'+usr.usr)
 
-		set_signed_in(!usr.anonymous)
+		set_signed_in(!usr.anonymous, !!usr.anonymous)
 
 		for (let field of nav.all_fields)
 			set_val(field.name, nav.cell_val(nav.rows[0], field))
@@ -114,13 +114,13 @@ let init_usr_nav = function() {
 	head.add(nav)
 }
 
-let set_signed_in = function(signed_in) {
+let set_signed_in = function(signed_in, signed_out) {
 	setglobal('signed_in', signed_in)
-	setglobal('signed_out', !signed_in)
+	setglobal('signed_out', signed_out)
 }
 
 function init_auth() {
-	set_signed_in(false)
+	set_signed_in(false, false)
 	init_usr_nav()
 }
 
