@@ -155,14 +155,14 @@ mustache.js
 
 local function jslist(cataction, mode)
 	if mode == 'bundle' then
-		out(format('	<script src="%s"></script>', href('/'..cataction)))
+		out(format('	<script src="%s" defer></script>', href('/'..cataction)))
 	elseif mode == 'embed' then
 		out'<script>'
 		outcatlist(cataction..'.cat')
 		out'</script>\n'
 	elseif mode == 'separate' then
 		for i,file in ipairs(catlist_files(wwwfile(cataction..'.cat'))) do
-			out(format('\t<script src="%s"></script>\n', href('/'..file)))
+			out(format('	<script src="%s" defer></script>\n', href('/'..file)))
 		end
 	else
 		assert(false)
