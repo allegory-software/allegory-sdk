@@ -45,7 +45,7 @@ int close(int fd);
 ]]
 
 local function findpid(pid, cmd)
-	local s = load(_('/proc/%s/cmdline', pid), false)
+	local s = load(_('/proc/%s/cmdline', pid), false, true)
 	return s and s:find(cmd, 1, true) and true or false
 end
 
@@ -86,13 +86,13 @@ cmd_server(Linux, 'start', 'Start the server', function()
 		C.umask(0)
 		local sid = C.setsid()
 		assert(sid >= 0)
+		local run = cmdaction(2, 'run')
 		C.close(0)
 		C.close(1)
 		C.close(2)
-		local run = cmdhandle('run')
 		local ok, err = xpcall(run, debug.traceback)
 		rm(app.pidfile)
-		assert(ok, err)
+		os.exit(ok and 0 or 1)
 	end
 end)
 

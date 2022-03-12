@@ -12,7 +12,8 @@ CMDLINE
 	cmdsection(name) -> section                    create a cmdline section
 	section([active, ]cmdargs, help[, descr], fn)  add a command to a section
 	cmd    ([active, ]cmdargs, help[, descr], fn)  add a command to the misc section
-	cmdaction(...) -> fn, arg_i                    process cmdline & get the cmd action handler
+	cmdoptions(...) -> arg_i                       process cmdline options and get cmd arg_i
+	cmdaction(arg_i, ...) -> fn                    get the cmd action handler
 
 ]==]
 
