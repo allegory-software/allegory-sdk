@@ -30,7 +30,7 @@ MEMORY STREAMS
 FILE I/O
 	f:read(buf, len) -> readlen                   read data from file
 	f:readn(buf, n) -> true                       read exactly n bytes
-	f:readall() -> buf, len                       read until EOF into a buffer
+	f:readall([expires], [ignore_file_size]) -> buf, len    read until EOF into a buffer
 	f:write(s | buf,len) -> true                  write data to file
 	f:flush()                                     flush buffers
 	f:seek([whence] [, offset]) -> pos            get/set the file pointer
@@ -852,22 +852,20 @@ function file:readn(buf, sz, expires)
 end
 
 local u8a = ffi.typeof'uint8_t[?]'
-function file:readall(expires)
-	if self.type == 'file' then
-		local size, err = self:attr'size'; if not size then return nil, err end
-		local offset, err = self:seek(); if not offset then return nil, err end
-		local sz = size - offset
-		if sz == 0 then return nil, 0 end
-		local buf = u8a(sz)
-		local n, err = self:read(buf, sz)
-		if not n then return nil, err end
-		if n < sz then return nil, 'partial', buf, n end
-		return buf, n
-	elseif self.type == 'pipe' then
+function file:readall(expires, ignore_file_size)
+	if self.type == 'pipe' or ignore_file_size then
 		return readall(self.read, self, expires)
-	else
-		assert(false)
 	end
+	assert(self.type == 'file')
+	local size, err = self:attr'size'; if not size then return nil, err end
+	local offset, err = self:seek(); if not offset then return nil, err end
+	local sz = size - offset
+	if sz == 0 then return nil, 0 end
+	local buf = u8a(sz)
+	local n, err = self:read(buf, sz)
+	if not n then return nil, err end
+	if n < sz then return nil, 'partial', buf, n end
+	return buf, n
 end
 
 --filesystem operations ------------------------------------------------------
@@ -1295,18 +1293,18 @@ vfile.buffered_read = file.buffered_read
 
 fs.abort = {} --error signal to pass to save()'s reader function.
 
-function fs.load_tobuffer(file)
+function fs.load_tobuffer(file, ignore_file_size)
 	local f, err = fs.open(file)
 	if not f then
 		return nil, err
 	end
-	local buf, len = f:readall()
+	local buf, len = f:readall(nil, ignore_file_size)
 	f:close()
 	return buf, len
 end
 
-function fs.load(file)
-	local buf, len = fs.load_tobuffer(file)
+function fs.load(file, ignore_file_size)
+	local buf, len = fs.load_tobuffer(file, ignore_file_size)
 	if not buf then return nil, len end
 	return ffi.string(buf, len)
 end

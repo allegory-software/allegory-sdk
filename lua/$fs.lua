@@ -115,8 +115,8 @@ function mkdirs(file)
 	return file
 end
 
-function load_tobuffer(path, default_buf, default_len) --load a file into a cdata buffer.
-	local buf, len = fs.load_tobuffer(path)
+function load_tobuffer(path, default_buf, default_len, ignore_file_size) --load a file into a cdata buffer.
+	local buf, len = fs.load_tobuffer(path, ignore_file_size)
 	if not buf and len == 'not_found' and default_buf ~= nil then
 		return default_buf, default_len
 	end
@@ -124,8 +124,8 @@ function load_tobuffer(path, default_buf, default_len) --load a file into a cdat
 	return buf, len
 end
 
-function load(path, default) --load a file into a string.
-	local s, err = fs.load(path)
+function load(path, default, ignore_file_size) --load a file into a string.
+	local s, err = fs.load(path, ignore_file_size)
 	if not s and err == 'not_found' and default ~= nil then
 		return default
 	end
