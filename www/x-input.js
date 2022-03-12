@@ -382,7 +382,8 @@ function input_widget(e) {
 
 	e.class('x-input-widget')
 
-	e.prop('nolabel' , {store: 'var', type: 'bool'})
+	e.prop('label'   , {store: 'var', slot: 'lang', attr: true})
+	e.prop('nolabel' , {store: 'var', type: 'bool', attr: true})
 	e.prop('align'   , {store: 'var', type: 'enum', enum_values: ['left', 'right'], default: 'left', attr: true})
 	e.prop('mode'    , {store: 'var', type: 'enum', enum_values: ['default', 'inline'], default: 'default', attr: true})
 	e.prop('info'    , {store: 'var', slot: 'lang', attr: true})
@@ -439,9 +440,18 @@ function input_widget(e) {
 		return div({class: 'x-input-placeholder'})
 	}
 
+	e.caption = function() {
+		return e.label || e.attr('label') || (e.field && e.field.text) || null
+	}
+
+	e.set_label = function() {
+		e.update()
+		e.fire('caption_changed')
+	}
+
 	e.do_after('do_update', function() {
 		update_info()
-		let s = !e.nolabel && (e.label || (e.field && e.field.text)) || null
+		let s = !e.nolabel && (e.label || e.attr('label') || (e.field && e.field.text)) || null
 		if (s != null && e.field && e.field.not_null && e.label_show_star != false)
 			s = s + ' *'
 		e.class('with-label', !!s)

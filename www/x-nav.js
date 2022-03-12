@@ -758,6 +758,15 @@ function nav_widget(e) {
 		e.update({fields: true})
 	}
 
+	function check_field(col) {
+		if (col == null) return
+		if (!e.bound) return
+		let f = e.all_fields[col]
+		if (!f)
+			warn(col+' not selected for rowset '+e.rowset_name)
+		return f
+	}
+
 	function init_all_fields() {
 
 		if (e.all_fields)
@@ -777,58 +786,50 @@ function nav_widget(e) {
 		e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
 		e.pk_fields = flds(e.pk)
 		init_find_row()
-		e.id_field = rs.id_col
-			? e.all_fields[rs.id_col]
-			: (e.pk_fields && e.pk_fields.length == 1 ? e.pk_fields[0] : null)
-		e.parent_field = e.id_field && e.all_fields[rs.parent_col]
-		init_tree_field()
-
-		e.val_field = e.all_fields[e.val_col]
-		e.pos_field = e.all_fields[rs.pos_col]
-
-		if (rs.pos_col && !e.pos_field)
-			warn('pos col "'+rs.pos_col+'" not selected for rowset '+e.rowset_name)
-
+		e.id_field = check_field(rs.id_col)
+		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
+			e.id_field = e.pk_fields[0]
+		e.parent_field = e.id_field && check_field(rs.parent_col)
+		e.val_field = check_field(e.val_col)
+		e.pos_field = check_field(rs.pos_col)
+		e.name_field = check_field(or(e.name_col, rs.name_col))
+		if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
+			e.name_field = e.pk_fields[0]
+		e.display_field = check_field(e.display_col) || e.name_field
+		if (e.parent_field)
+			e.tree_field = check_field(or(e.tree_col, rs.tree_col)) || e.name_field
+		if (e.tree_field && e.tree_field.hidden)
+			e.tree_field = null
+		e.quicksearch_field = check_field(e.quicksearch_col)
 		for (let field of e.all_fields)
 			init_field_validators(field)
-
 		init_fields()
-
 		init_all_rows()
 	}
 
 	// `*_col` properties
 
-	function init_tree_field() {
-		let rs = e.rowset || empty
-		e.tree_field = e.parent_field
-			&& e.all_fields[or(
-				or(e.tree_col, e.name_col),
-				or(rs.tree_col, rs.name_col)
-			)]
-	}
-
 	e.set_val_col = function(v) {
-		e.val_field = e.all_fields[v]
+		if (!e.bound) return
+		init_all_fields()
 	}
 	e.prop('val_col', {store: 'var', type: 'col'})
 
 	e.set_tree_col = function() {
-		init_tree_field(e)
-		init_fields()
-		e.update({rows: true})
+		if (!e.bound) return
+		init_all_fields()
 	}
 	e.prop('tree_col', {store: 'var', type: 'col'})
 
 	e.set_name_col = function(v) {
-		e.name_field = e.all_fields[v]
-		if (!e.tree_col)
-			e.set_tree_col()
+		if (!e.bound) return
+		init_all_fields()
 	}
 	e.prop('name_col', {store: 'var', type: 'col'})
 
 	e.set_quicksearch_col = function(v) {
-		e.quicksearch_field = e.all_fields[v]
+		if (!e.bound) return
+		e.quicksearch_field = check_field(v)
 		reset_quicksearch()
 		e.update({state: true})
 	}
@@ -896,10 +897,8 @@ function nav_widget(e) {
 		e.fields = []
 		if (e.all_fields.length)
 			for (let col of cols_array()) {
-				let field = e.all_fields[col]
-				if (!field)
-					warn('col not found', col)
-				else if (!field.internal)
+				let field = check_field(col)
+				if (field && !field.internal)
 					e.fields.push(field)
 			}
 		update_field_index()
@@ -945,7 +944,7 @@ function nav_widget(e) {
 	e.prop('cols', {store: 'var', slot: 'user'})
 
 	function visible_col(col) {
-		let field = e.all_fields[col]
+		let field = check_field(col)
 		return field && !field.internal
 	}
 
@@ -1026,6 +1025,7 @@ function nav_widget(e) {
 			return
 		e.param_vals = pv1
 		e.disable('no_param_vals', pv1 === false)
+		e.fire('caption_changed')
 		return true
 	}
 
@@ -1133,6 +1133,33 @@ function nav_widget(e) {
 			m.set(col, param)
 		}
 		return m
+	}
+
+	// label & caption --------------------------------------------------------
+
+	e.prop('label', {store: 'var', slot: 'lang', attr: true})
+
+	e.set_label = function() {
+		e.fire('caption_changed')
+	}
+
+	e.caption = function() {
+		let label = e.label || e.attr('label') || '{0}'
+		let view = e.param_vals && e.param_nav.selected_rows_caption() || ''
+		return label.subst(view)
+	}
+
+	e.row_caption = function(row) {
+		return e.row_display_val(row)
+	}
+
+	e.selected_rows_caption = function() {
+		if (!e.selected_rows)
+			return S('no_rows_selected', 'No rows selected')
+		let caps = []
+		for (let [row, sel_fields] of e.selected_rows)
+			caps.push(e.row_caption(row))
+		return caps.join(', ')
 	}
 
 	// all rows in load order -------------------------------------------------
@@ -2896,6 +2923,7 @@ function nav_widget(e) {
 		e.editor = null
 
 		e.do_update_cell_editing(e.focused_row_index, e.focused_field_index, false)
+
 		if (had_focus)
 			e.focus()
 
@@ -2966,7 +2994,7 @@ function nav_widget(e) {
 		if (on && !field.lookup_nav_reset) {
 			field.lookup_nav_reset = function() {
 				field.lookup_fields = ln.flds(field.lookup_cols || ln.pk_fields)
-				field.display_field = ln.fld(field.display_col || ln.name_col)
+				field.display_field = ln.fld(field.display_col || ln.name_field)
 				field.align = field.display_field && field.display_field.align
 				e.fire('display_vals_changed')
 				e.fire('display_vals_changed_for_'+field.name)
@@ -2982,14 +3010,17 @@ function nav_widget(e) {
 			if (ln.rowset)
 				field.lookup_nav_reset()
 		}
+		// TODO: this is all wrong!
 		if (field.lookup_nav_reset) {
 			ln.on('reset'       , field.lookup_nav_reset, on)
 			ln.on('rows_changed', field.lookup_nav_display_vals_changed, on)
 			for (let col of field.lookup_cols.names())
 				ln.on('cell_state_changed_for_'+col,
 				field.lookup_nav_cell_state_changed, on)
-			ln.on('cell_state_changed_for_'+(field.display_col || ln.name_col),
-				field.lookup_nav_cell_state_changed, on)
+			let display_field = ln.fld(field.display_col || ln.name_field)
+			if (display_field)
+				ln.on('cell_state_changed_for_'+display_field.name,
+					field.lookup_nav_cell_state_changed, on)
 		}
 	}
 
@@ -4489,7 +4520,7 @@ function nav_widget(e) {
 		}
 		if (!row)
 			return
-		let field = e.all_fields[e.display_col]
+		let field = e.display_field
 		if (!field)
 			return 'no display field'
 		return e.cell_display_val(row, field)

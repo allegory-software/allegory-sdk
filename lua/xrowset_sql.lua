@@ -145,7 +145,6 @@ function sql_rowset(...)
 
 		rs.pk = names(rs.pk)
 		assert(rs.pk and #rs.pk > 0, 'pk missing')
-		table.sort(rs.pk)
 
 		--static query generation (just stitching together user-supplied parts).
 

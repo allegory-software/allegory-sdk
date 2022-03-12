@@ -848,10 +848,6 @@ function cssgrid_item_widget(e) {
 }
 
 function contained_widget(e) {
-
-	e.get_label = function() { return this.attr('label') }
-	e.prop('label', {slot: 'lang', attr: true})
-
 	cssgrid_item_widget(e)
 }
 
@@ -2119,6 +2115,10 @@ component('x-tabs', 'Containers', function(e) {
 			update_tab_title(this._tab)
 	}
 
+	function item_caption_changed() {
+		update_tab_title(this._tab)
+	}
+
 	function add_item(item) {
 		if (!item._tab) {
 			let xbutton = div({class: 'x-tabs-xbutton fa fa-times'})
@@ -2136,7 +2136,7 @@ component('x-tabs', 'Containers', function(e) {
 			tab.item = item
 			item._tab = tab
 			item.on('bind', item_bound, true)
-			update_tab_title(tab)
+			item.on('caption_changed', item_caption_changed)
 		}
 		item._tab.x = null
 		e.header.add(item._tab)
@@ -2182,10 +2182,14 @@ component('x-tabs', 'Containers', function(e) {
 		inh_replace_child_widget(old_widget, new_widget)
 	}
 
+	function item_caption(item) {
+		return item.caption ? item.caption() : item.attr('label')
+	}
+
 	function update_tab_title(tab) {
-		let label = tab.item.label || tab.item.attr('label')
-		tab.title_box.set(label, 'pre-wrap')
-		tab.title_box.title = tab.item.label
+		let caption = item_caption(tab.item)
+		tab.title_box.set(caption, 'pre-wrap')
+		tab.title_box.title = tab.title_box.textContent
 		update_selection_bar()
 	}
 
@@ -2239,15 +2243,9 @@ component('x-tabs', 'Containers', function(e) {
 		update_selection_bar()
 	}
 
-	function prop_changed(te, k, v) {
-		if (k == 'label' && te._tab && te._tab.parent == e.header)
-			update_tab_title(te._tab)
-	}
-
 	e.on('bind', function(on) {
 		if (on)
 			select_default_tab()
-		document.on('prop_changed', prop_changed, on)
 		document.on('layout_changed', update_selection_bar, on)
 	})
 
@@ -2288,12 +2286,12 @@ component('x-tabs', 'Containers', function(e) {
 	// selected-item persistent property --------------------------------------
 
 	function format_item(item) {
-		return item.label || item.id
+		return item_caption(item) || item.id
 	}
 
 	function format_id(id) {
 		let item = e.items.find(item => item.id == id)
-		return item && item.label || id
+		return item && item_caption(item) || id
 	}
 
 	function item_select_editor(...opt) {
@@ -2342,7 +2340,7 @@ component('x-tabs', 'Containers', function(e) {
 	}
 
 	function item_slug(item) {
-		let s = item.slug || item.label || ''
+		let s = item.slug || item_caption(item) || ''
 		return s.replace(/[\- ]/g, '-').lower()
 	}
 

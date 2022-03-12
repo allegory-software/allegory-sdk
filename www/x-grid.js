@@ -824,11 +824,15 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	}
 
 	e.do_update_cell_editing = function(ri, fi, editing) {
+
 		if (editing)
 			update_editor()
+
 		let cell = e.cells.at[cell_index(ri, fi)]
 		if (cell)
 			cell.class('editing', editing)
+
+		e.focusable = !editing
 	}
 
 	e.do_cell_click = function(ri, fi) {
