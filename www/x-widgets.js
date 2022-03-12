@@ -2272,7 +2272,7 @@ component('x-tabs', 'Containers', function(e) {
 			return
 		}
 		if (!e.widget_editing && focus_tab != false && e.auto_focus_first_item)
-			e.focus_first()
+			tab.item.focus_first()
 	}
 
 	e.property('selected_index',
@@ -2375,7 +2375,7 @@ component('x-tabs', 'Containers', function(e) {
 			ev.stopPropagation()
 			return
 		}
-		select_tab(this)
+		select_tab(this, true)
 		if (ev.ctrlKey)
 			return // bubble-up to enter editing mode.
 		this.focus()
@@ -2415,7 +2415,7 @@ component('x-tabs', 'Containers', function(e) {
 
 			dragging = false
 		}
-		select_tab(this, true)
+		select_tab(this)
 		update_selection_bar()
 	}
 
