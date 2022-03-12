@@ -243,20 +243,11 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		vrn = min(vrn, e.rows.length)
 	}
 
-	function update_cell_sizes(col_resizing) {
-		update_scroll()
-		if (horiz)
-			update_cell_widths_horiz(col_resizing)
-		else
-			update_cell_widths_vert()
-		update_editor()
-		update_resize_guides()
-	}
-
 	let vri1, vri2
 	let scroll_x, scroll_y
 
 	function update_scroll() {
+		let last_vri1 = vri1
 		let sy = e.cells_view.scrollTop
 		let sx = e.cells_view.scrollLeft
 		sx =  horiz ? sx : clamp(sx, 0, max(0, cells_w - cells_view_w))
@@ -273,6 +264,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			vri1 = floor(sx / e.cell_w)
 		}
 		vri2 = vri1 + vrn
+		return vri1 != last_vri1
 	}
 
 	function cell_x(vri, fi) {
@@ -627,9 +619,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	})
 
 	e.cells_view.on('scroll', function() {
-		let last_vri1 = vri1
-		update_scroll()
-		if (vri1 != last_vri1)
+		if (update_scroll())
 			update_cells()
 		update_quicksearch_cell()
 		update_row_error_tooltip_position()
@@ -640,7 +630,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	let error_tooltip_row
 	e.do_error_tooltip_check = function() {
 		if (!error_tooltip_row) return false
-		if (e.editor) return false
+		if (e.editor && e.editor.do_error_tooltip_check()) return false
 		if (e.hasfocus) return true
 		return false
 	}
@@ -886,9 +876,18 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		}
 		if (opt_rows)
 			create_cells()
-		if (opt_sizes)
-			update_cell_sizes(opt.col_resizing)
-		if (opt_rows || opt.vals || opt.state)
+		let opt_cells = opt_rows || opt.vals || opt.state
+		if (opt_sizes) {
+			if (update_scroll())
+				opt_cells = true
+			if (horiz)
+				update_cell_widths_horiz(opt.col_resizing)
+			else
+				update_cell_widths_vert()
+			update_editor()
+			update_resize_guides()
+		}
+		if (opt_cells)
 			update_cells()
 		if (opt_sizes || opt.sort_order)
 			update_row_error_tooltip_position()
