@@ -14,14 +14,13 @@ require'xrowset'
 require'xmodule'
 
 js[[
-
 on_dom_load(function() {
+	init_xmodule({layers: []})
 	init_components()
 	init_root_widget()
 	init_auth()
 	init_action()
 })
-
 ]]
 
 cssfile[[
