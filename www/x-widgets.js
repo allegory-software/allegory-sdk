@@ -2188,7 +2188,7 @@ component('x-tabs', 'Containers', function(e) {
 
 	function update_tab_title(tab) {
 		let caption = item_caption(tab.item)
-		tab.title_box.set(caption, 'pre-wrap')
+		tab.title_box.set(caption)
 		tab.title_box.title = tab.title_box.textContent
 		update_selection_bar()
 	}
