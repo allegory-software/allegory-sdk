@@ -62,7 +62,9 @@
 	components:
 		bind_component(tag, initializer, [selector])
 		e.bind(t|f)
-		^bind (on)
+		e.do_bind()
+		e.do_move()
+		^bind(on)
 		e.bound -> t|f
 		e.property(name, [get],[set] | descriptor)
 		e.override(method, f)
@@ -76,16 +78,16 @@
 		e.fire    (name, ...args)
 		e.fireup  (name, ...args)
 		broadcast (name, ...args)
-		~[right]click       (ev, nclicks, mx, my)
-		~[right]pointerdown (ev, mx, my)
-		~[right]pointerup   (ev, mx, my)
-		~pointermove        (ev, mx, my)
-		~wheel              (ev, dy, mx, my)
-		~keydown            (key, shift, ctrl, alt, ev)
-		~keyup              (key, shift, ctrl, alt, ev)
-		~keypress           (key, shift, ctrl, alt, ev)
-		~stopped_event      (stopped_ev, ev)
-		~layout_changed()
+		^[right]click       (ev, nclicks, mx, my)
+		^[right]pointerdown (ev, mx, my)
+		^[right]pointerup   (ev, mx, my)
+		^pointermove        (ev, mx, my)
+		^wheel              (ev, dy, mx, my)
+		^keydown            (key, shift, ctrl, alt, ev)
+		^keyup              (key, shift, ctrl, alt, ev)
+		^keypress           (key, shift, ctrl, alt, ev)
+		^stopped_event      (stopped_ev, ev)
+		^layout_changed()
 		e.capture_pointer(ev, on_pointermove, on_pointerup)
 		DEBUG_EVENTS = false
 		on_dom_load(fn)
@@ -368,7 +370,8 @@ method(Element, 'bind', function(on) {
 		this.fire('bind', on)
 	}
 	// bind children after the bound event to allow components to remove their
-	// children inside the bind event handler before them getting bound.
+	// children inside the bind event handler before them getting bound, and
+	// also so that children see a bound parent when they are getting bound.
 	this.bind_children(on)
 })
 
@@ -533,14 +536,20 @@ method(Element, 'replace', function(e0, s) {
 	return this
 })
 
-// move element to a new parent/index without rebinding.
-method(Element, 'move', function(pe, i0) {
+// move element to a new parent and/or index without rebinding, unless
+// the widget requires rebinding by returning false from `.do_move()`.
+method(Element, 'move', function(pe, i) {
 	assert(this.isConnected)
 	pe = pe || this.parent
+	let must_unbind = this.do_move && !this.do_move(pe, i)
+	if (must_unbind)
+		this.bind(false)
 	if (pe == this.parent) // change index preserving current scroll.
-		this.index == or(i0, 1/0)
+		this.index == or(i, 1/0)
 	else // change parent and index.
-		pe.insertBefore(this, pe.at[max(0, or(i0, 1/0))])
+		pe.insertBefore(this, pe.at[max(0, or(i, 1/0))])
+	if (must_unbind)
+		this.bind(true)
 })
 
 // util to convert an array to a html bullet list.
@@ -677,13 +686,15 @@ callers.pointerdown = function(ev, f) {
 method(EventTarget, 'capture_pointer', function(ev, move, up) {
 	move = or(move, return_false)
 	up   = or(up  , return_false)
+	let mx0 = ev.clientX
+	let my0 = ev.clientY
 	function wrap_move(ev, mx, my) {
-		return move.call(this, ev, mx, my)
+		return move.call(this, ev, mx, my, mx0, my0)
 	}
 	function wrap_up(ev, mx, my) {
 		this.off('pointermove', wrap_move)
 		this.off('pointerup'  , wrap_up)
-		return up.call(this, ev, mx, my)
+		return up.call(this, ev, mx, my, mx0, my0)
 	}
 	this.on('pointermove', wrap_move)
 	this.on('pointerup'  , wrap_up)
