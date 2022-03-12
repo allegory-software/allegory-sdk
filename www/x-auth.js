@@ -63,7 +63,8 @@ let init_usr_nav = function() {
 			xmodule.set_layer(config('app_name'), 'user',
 				config('app_name') + '-user-'+usr.usr)
 
-		set_signed_in(!usr.anonymous, !!usr.anonymous)
+		let signed_in = usr.anonymous == false
+		set_signed_in(signed_in, !signed_in)
 
 		for (let field of nav.all_fields)
 			set_val(field.name, nav.cell_val(nav.rows[0], field))
@@ -230,11 +231,14 @@ let sign_in_dialog = memoize(function() {
 })
 
 function sign_in() {
+	set_signed_in(false, true)
 	let d = sign_in_dialog()
 	d.email_edit.val = null
 	d.code_edit.val = null
 	d.slides.slide(0)
 	d.modal()
+	// adding this dynamically to prevent loading the background needlessly.
+	$1('.modal-dialog').class('sign-in-splash-img')
 }
 
 }

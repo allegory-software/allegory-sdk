@@ -2590,6 +2590,8 @@ function nav_widget(e) {
 		for (let field of e.all_fields) {
 			if (field.readonly)
 				continue
+			if (!(row.is_new || e.cell_modified(row, field)))
+				continue
 			let errors = e.cell_errors(row, field)
 			if (errors && !errors.client_side)
 				errors = null // server-side errors must be cleared.
@@ -3015,11 +3017,9 @@ function nav_widget(e) {
 			ln.on('reset'       , field.lookup_nav_reset, on)
 			ln.on('rows_changed', field.lookup_nav_display_vals_changed, on)
 			for (let col of field.lookup_cols.names())
-				ln.on('cell_state_changed_for_'+col,
-				field.lookup_nav_cell_state_changed, on)
-			let display_field = ln.fld(field.display_col || ln.name_field)
-			if (display_field)
-				ln.on('cell_state_changed_for_'+display_field.name,
+				ln.on('cell_state_changed_for_'+col, field.lookup_nav_cell_state_changed, on)
+			if (field.display_field)
+				ln.on('cell_state_changed_for_'+field.display_field.name,
 					field.lookup_nav_cell_state_changed, on)
 		}
 	}
