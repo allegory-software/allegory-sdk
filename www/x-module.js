@@ -800,7 +800,7 @@ component('x-widget-tree', function(e) {
 		grid: 'table',
 		cssgrid: 'th',
 		split: 'columns',
-		pagelist: 'sitemap',
+		tabs: 'sitemap',
 	}
 	function type_icon(type) {
 		let icon = type_icons[type]

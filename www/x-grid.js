@@ -2389,7 +2389,6 @@ component('x-row-form', function(e) {
 
 component('x-grid-profile', function(e) {
 
-	pagelist_item_widget(e)
-
+	tabs_item_widget(e)
 
 })

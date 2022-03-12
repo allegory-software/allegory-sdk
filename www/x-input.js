@@ -50,7 +50,7 @@ function row_widget(e, enabled_without_nav) {
 	contained_widget(e)
 	serializable_widget(e)
 
-	e.isinput = true // auto-focused when pagelist items are changed.
+	e.isinput = true // auto-focused when tabs items are changed.
 
 	e.do_update = function() {
 		let row = e.row
@@ -123,7 +123,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	contained_widget(e)
 	serializable_widget(e)
 
-	e.isinput = true // auto-focused when pagelist items are changed.
+	e.isinput = true // auto-focused when tabs items are changed.
 
 	// nav dynamic binding ----------------------------------------------------
 
@@ -382,7 +382,6 @@ function input_widget(e) {
 
 	e.class('x-input-widget')
 
-	e.prop('label'   , {store: 'var', slot: 'lang'})
 	e.prop('nolabel' , {store: 'var', type: 'bool'})
 	e.prop('align'   , {store: 'var', type: 'enum', enum_values: ['left', 'right'], default: 'left', attr: true})
 	e.prop('mode'    , {store: 'var', type: 'enum', enum_values: ['default', 'inline'], default: 'default', attr: true})

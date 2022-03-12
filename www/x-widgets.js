@@ -9,8 +9,8 @@ WIDGETS
 	button
 	menu
 	widget_placeholder
-	pagelist
-	split
+	tabs
+	split vsplit
 	slides
 	toaster
 	action_band
@@ -814,25 +814,6 @@ function editable_widget(e) {
 }
 
 // ---------------------------------------------------------------------------
-// pagelist item widget mixin
-// ---------------------------------------------------------------------------
-
-function pagelist_item_widget(e) {
-
-	e.props.title = {name: 'title', slot: 'lang', default: ''}
-
-	override_property_setter(e, 'title', function(inherited, v) {
-		if (!v) v = ''
-		let v0 = e.title
-		inherited.call(this, v)
-		if (v === v0)
-			return
-		document.fire('prop_changed', e, 'title', v, v0, 'lang')
-	})
-
-}
-
-// ---------------------------------------------------------------------------
 // cssgrid item widget mixin
 // ---------------------------------------------------------------------------
 
@@ -867,7 +848,10 @@ function cssgrid_item_widget(e) {
 }
 
 function contained_widget(e) {
-	pagelist_item_widget(e)
+
+	e.get_label = function() { return this.attr('label') }
+	e.prop('label', {slot: 'lang', attr: true})
+
 	cssgrid_item_widget(e)
 }
 
@@ -2098,10 +2082,10 @@ widget_items_widget = function(e) {
 }
 
 // ---------------------------------------------------------------------------
-// pagelist
+// tabs
 // ---------------------------------------------------------------------------
 
-component('x-pagelist', 'Containers', function(e) {
+component('x-tabs', 'Containers', function(e) {
 
 	selectable_widget(e)
 	editable_widget(e)
@@ -2111,23 +2095,36 @@ component('x-pagelist', 'Containers', function(e) {
 
 	e.prop('tabs_side', {store: 'var', type: 'enum', enum_values: ['top', 'bottom', 'left', 'right'], default: 'top', attr: true})
 
+	e.prop('can_rename_items', {store: 'var', type: 'bool', default: false})
+	e.prop('can_add_items'   , {store: 'var', type: 'bool', default: false})
+	e.prop('can_remove_items', {store: 'var', type: 'bool', default: false})
+	e.prop('can_move_items'  , {store: 'var', type: 'bool', default: true})
+
+	e.prop('auto_focus_first_item', {store: 'var', type: 'bool', default: true})
+
+	e.prop('header_width', {store: 'var', type: 'number'})
+
+	e.selection_bar = div({class: 'x-tabs-selection-bar'})
+	e.add_button = div({class: 'x-tabs-tab x-tabs-add-button fa fa-plus', tabindex: 0})
+	e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.add_button)
+	e.content = div({class: 'x-tabs-content x-container'})
+	e.add(e.header, e.content)
+
 	e.set_header_width = function(v) {
 		e.header.w = v
 	}
-	e.prop('header_width', {store: 'var', type: 'number'})
 
-	e.selection_bar = div({class: 'x-pagelist-selection-bar'})
-	e.add_button = div({class: 'x-pagelist-tab x-pagelist-add-button fa fa-plus', tabindex: 0})
-	e.header = div({class: 'x-pagelist-header'}, e.selection_bar, e.add_button)
-	e.content = div({class: 'x-pagelist-content x-container'})
-	e.add(e.header, e.content)
+	function item_bound(on) {
+		if (on)
+			update_tab_title(this._tab)
+	}
 
 	function add_item(item) {
 		if (!item._tab) {
-			let xbutton = div({class: 'x-pagelist-xbutton fa fa-times'})
+			let xbutton = div({class: 'x-tabs-xbutton fa fa-times'})
 			xbutton.hidden = true
-			let title_box = div({class: 'x-pagelist-title'})
-			let tab = div({class: 'x-pagelist-tab', tabindex: 0}, title_box, xbutton)
+			let title_box = div({class: 'x-tabs-title'})
+			let tab = div({class: 'x-tabs-tab', tabindex: 0}, title_box, xbutton)
 			tab.title_box = title_box
 			tab.xbutton = xbutton
 			tab.on('pointerdown' , tab_pointerdown)
@@ -2138,6 +2135,7 @@ component('x-pagelist', 'Containers', function(e) {
 			xbutton.on('pointerdown', xbutton_pointerdown)
 			tab.item = item
 			item._tab = tab
+			item.on('bind', item_bound, true)
 			update_tab_title(tab)
 		}
 		item._tab.x = null
@@ -2169,6 +2167,7 @@ component('x-pagelist', 'Containers', function(e) {
 		tab.remove()
 		item.remove()
 		item._tab = null
+		item.on('bind', item_bound, false)
 	}
 
 	// widget placeholder protocol.
@@ -2184,8 +2183,9 @@ component('x-pagelist', 'Containers', function(e) {
 	}
 
 	function update_tab_title(tab) {
-		tab.title_box.set(tab.item.title, 'pre-wrap')
-		tab.title_box.title = tab.item.title
+		let label = tab.item.label || tab.item.attr('label')
+		tab.title_box.set(label, 'pre-wrap')
+		tab.title_box.title = tab.item.label
 		update_selection_bar()
 	}
 
@@ -2197,18 +2197,38 @@ component('x-pagelist', 'Containers', function(e) {
 	function update_selection_bar() {
 		let tab = e.selected_tab
 		let b = e.selection_bar
-		let sl = e.tabs_side == 'left'
-		let sr = e.tabs_side == 'right'
-		let st = e.tabs_side == 'top'
-		let sb = e.tabs_side == 'bottom'
-		let horiz = st || sb
 		let hr = e.header.rect()
 		let cr = tab && tab.at[0].rect()
 		let br = b.rect()
-		b.x = cr ? (cr.x - hr.x) + (sr ? cr.w - br.w : 0) : 0
-		b.y = cr ? (cr.y - hr.y) + (st ? cr.h - br.h : 0) : 0
-		b.w =  horiz ? (cr ? cr.w : 0) : null
-		b.h = !horiz ? (cr ? cr.h : 0) : null
+		if (e.tabs_side == 'left') {
+			b.x1 = null
+			b.x2 = 0
+			b.y1 = cr ? cr.y - hr.y : 0
+			b.y2 = null
+			b.w  = null
+			b.h  = cr ? cr.h : 0
+		} else if (e.tabs_side == 'right') {
+			b.x1 = 0
+			b.x2 = null
+			b.y1 = cr ? cr.y - hr.y : 0
+			b.y2 = null
+			b.w  = null
+			b.h  = cr ? cr.h : 0
+		} else if (e.tabs_side == 'top') {
+			b.x1 = cr ? cr.x - hr.x : 0
+			b.x2 = null
+			b.y1 = null
+			b.y2 = 0
+			b.w  = cr ? cr.w : 0
+			b.h  = null
+		} else if (e.tabs_side == 'bottom') {
+			b.x1 = cr ? cr.x - hr.x : 0
+			b.x2 = null
+			b.y1 = 0
+			b.y2 = null
+			b.w  = cr ? cr.w : 0
+			b.h  = null
+		}
 		b.hidden = !tab
 	}
 
@@ -2219,15 +2239,8 @@ component('x-pagelist', 'Containers', function(e) {
 		update_selection_bar()
 	}
 
-	e.prop('can_rename_items', {store: 'var', type: 'bool', default: false})
-	e.prop('can_add_items'   , {store: 'var', type: 'bool', default: false})
-	e.prop('can_remove_items', {store: 'var', type: 'bool', default: false})
-	e.prop('can_move_items'  , {store: 'var', type: 'bool', default: true})
-
-	e.prop('auto_focus_first_item', {store: 'var', type: 'bool', default: true})
-
 	function prop_changed(te, k, v) {
-		if (k == 'title' && te._tab && te._tab.parent == e.header)
+		if (k == 'label' && te._tab && te._tab.parent == e.header)
 			update_tab_title(te._tab)
 	}
 
@@ -2275,12 +2288,12 @@ component('x-pagelist', 'Containers', function(e) {
 	// selected-item persistent property --------------------------------------
 
 	function format_item(item) {
-		return item.title || item.id
+		return item.label || item.id
 	}
 
 	function format_id(id) {
 		let item = e.items.find(item => item.id == id)
-		return item && item.title || id
+		return item && item.label || id
 	}
 
 	function item_select_editor(...opt) {
@@ -2322,14 +2335,14 @@ component('x-pagelist', 'Containers', function(e) {
 		let parent = e.parent
 		let i = 0
 		while (parent && parent.iswidget) {
-			i += parent.hasclass('x-pagelist')
+			i += parent.hasclass('x-tabs')
 			parent = parent.parent
 		}
 		return i
 	}
 
 	function item_slug(item) {
-		let s = item.slug || item.title
+		let s = item.slug || item.label || ''
 		return s.replace(/[\- ]/g, '-').lower()
 	}
 
@@ -2469,7 +2482,7 @@ component('x-pagelist', 'Containers', function(e) {
 
 	function update_title() {
 		if (e.selected_tab)
-			e.selected_tab.item.title = e.selected_tab.title_box.innerText
+			e.selected_tab.item.label = e.selected_tab.title_box.innerText
 		e.update()
 	}
 
@@ -2930,9 +2943,7 @@ component('x-toolbox', function(e) {
 	e.resize_overlay = div({class: 'x-toolbox-resize-overlay'})
 	e.add(e.titlebar, e.content_box, e.resize_overlay)
 
-	e.get_text = () => e.title_box.textContent
-	e.set_text = function(v) { e.title_box.set(v) }
-	e.prop('text', {slot: 'lang'})
+	e.set_label = function(v) { e.title_box.set(v) }
 
 	e.prop('side'  , {store: 'var', type: 'enum', enum_values: ['left', 'right'], default: 'right'})
 	e.prop('px'    , {store: 'var', type: 'number', slot: 'user'})
