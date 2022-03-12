@@ -3012,7 +3012,6 @@ function nav_widget(e) {
 			if (ln.rowset)
 				field.lookup_nav_reset()
 		}
-		// TODO: this is all wrong!
 		if (field.lookup_nav_reset) {
 			ln.on('reset'       , field.lookup_nav_reset, on)
 			ln.on('rows_changed', field.lookup_nav_display_vals_changed, on)
