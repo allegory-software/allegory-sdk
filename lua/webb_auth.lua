@@ -418,15 +418,15 @@ local function create_user()
 	return usr
 end
 
-local function auto_create_user()
-	if not config('auto_create_user', true) then
-		return nil
-	end
-	return create_user()
-end
-
 function auth.session()
-	return valid_usr(session_usr()) or auto_create_user()
+	local usr = valid_usr(session_usr())
+	if not usr then
+		if not config('auto_create_user', true) then
+			return nil, 'session auth failed'
+		end
+		return create_user()
+	end
+	return usr
 end
 
 function auth.logout()

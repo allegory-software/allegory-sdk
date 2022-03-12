@@ -91,6 +91,11 @@ wwwfile['x-auth.css'] = [[
 	margin-top: .5em;
 }
 
+.sign-in-splash-img {
+	background-image: url("https://source.unsplash.com/random/1920x1080?abstract");
+	background-position: center;
+}
+
 ]]
 
 template.usr_form = function()
