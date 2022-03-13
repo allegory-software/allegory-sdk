@@ -1468,10 +1468,14 @@ component('x-button', 'Input', function(e) {
 	e.prop('primary', {store: 'var', type: 'bool', attr: true})
 	e.prop('bare'   , {store: 'var', type: 'bool', attr: true})
 	e.prop('danger' , {store: 'var', type: 'bool', attr: true})
+	e.prop('confirm', {store: 'var', attr: true})
 
 	e.activate = function() {
 		if (e.effectively_hidden || e.effectively_disabled)
 			return
+		if (e.confirm)
+			if (!confirm(e.confirm))
+				return
 		if (e.href) {
 			exec(e.href)
 			return
