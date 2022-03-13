@@ -347,7 +347,7 @@ local function log(self, severity, module, event, fmt, ...)
 		end
 		if self.logtoserver then
 			self:logtoserver{
-				deploy = logging.deploy, env = logging.env, time = time,
+				deploy = self.deploy, env = logging.env, time = time,
 				severity = severity, module = module, event = event,
 				message = msg,
 			}
@@ -373,12 +373,22 @@ local function logerror(self, module, event, ...)
 	log(self, 'ERROR', module, event, ...)
 end
 
+local function logvar(self, k, v)
+	if self.logtoserver then
+		self:logtoserver{
+			deploy = self.deploy, env = logging.env, time = time(),
+			event = 'set', k = k, v = v,
+		}
+	end
+end
+
 local function init(self)
 	self.log      = function(...) return log      (self, ...) end
 	self.note     = function(...) return note     (self, ...) end
 	self.dbg      = function(...) return dbg      (self, ...) end
 	self.warnif   = function(...) return warnif   (self, ...) end
 	self.logerror = function(...) return logerror (self, ...) end
+	self.logvar   = function(...) return logvar   (self, ...) end
 	return self
 end
 
