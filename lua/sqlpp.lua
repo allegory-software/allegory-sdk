@@ -447,7 +447,7 @@ function sqlpp.new(init)
 	end
 
 	function cmd:binval(v, field)
-		local to_bin = field and field.to_bin
+		local to_bin = field and field.TO_BIN
 		if to_bin then
 			return to_bin(v)
 		else

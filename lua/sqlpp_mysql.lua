@@ -101,6 +101,7 @@ local function init_spp(spp, cmd)
 
 	spp.engine = 'mysql'
 	spp.TO_SQL = 'mysql_to_sql'
+	spp.TO_BIN = 'mysql_to_bin'
 
 	function cmd:sqltype(fld)
 		local mt = fld.mysql_type
