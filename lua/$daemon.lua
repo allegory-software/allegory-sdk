@@ -181,6 +181,16 @@ function daemon(app_name, ...)
 
 	if app.conf.log_host and app.conf.log_port then
 		logging:toserver(app.conf.log_host, app.conf.log_port)
+
+		--heartbeat logging.
+		local stop_live
+		thread(function()
+			while not stop_live do
+				logging.logvar('live', time())
+				sleep(1)
+			end
+		end)
+
 	end
 
 	function app:run_cmd(f, ...) --stub
@@ -193,6 +203,7 @@ function daemon(app_name, ...)
 
 	--if you override run_cmd() then you have to call this!
 	function app:finish()
+		stop_live = true
 		logging:toserver_stop()
 	end
 
