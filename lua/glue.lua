@@ -104,7 +104,7 @@ TIME
 	glue.day([utc, ][ts], [plus_days]) -> ts        timestamp at day's beginning from ts
 	glue.month([utc, ][ts], [plus_months]) -> ts    timestamp at month's beginning from ts
 	glue.year([utc, ][ts], [plus_years]) -> ts      timestamp at year's beginning from ts
-	glue.timeago(ts[, from_ts]) -> s                format relative time
+	glue.timeago([utc, ]ts[, from_ts]) -> s         format relative time
 	glue.week_start_offset(country) -> n            week start offset for a country (0 for Sunday)
 SIZES
 	glue.kbytes(x [,decimals]) -> s                 format byte size in k/M/G/T-bytes
@@ -1346,7 +1346,7 @@ function glue.utc_diff(t)
 	local ud = os.date('!*t', t)
 	local lt = os.time(ld)
 	local ut = os.time(ud)
-	return lt and ut and os.difftime(lt, ut)
+	return lt and ut and lt - ut
 end
 
 --[[
@@ -1439,9 +1439,9 @@ end
 --format relative time, eg. `3 hours ago` or `in 2 weeks`.
 function glue.timeago(utc, time, from_time)
 	if type(utc) ~= 'boolean' then --shift arg#1
-		utc, time, from_time = false, utc, time
+		utc, time, from_time = false, utc, time, from_time
 	end
-	local s = os.difftime(from_time or glue.time(utc), time)
+	local s = (from_time or glue.time(utc)) - time
 	return string.format(s > 0 and '%s ago' or 'in %s', rel_time(math.abs(s)))
 end
 
