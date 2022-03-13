@@ -49,9 +49,9 @@
 			- `:COL:old`  : the column's old value.
 
 	Field methods to implement:
-		to_lua(v)        : convert value for select result sets.
-		to_sql(v)        : convert value for update queries (SQL statements).
-		to_bin(v)        : convert value for update queries (prepared statements).
+		mysql_to_lua(v)  : convert value for select result sets.
+		mysql_to_sql(v)  : convert value for update queries (SQL statements).
+		mysql_to_bin(v)  : convert value for update queries (prepared statements).
 
 ]]
 

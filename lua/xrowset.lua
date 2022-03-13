@@ -87,6 +87,7 @@ local glue = require'glue'
 local errors = require'errors'
 local xlsx_workbook = require'xlsxwriter.workbook'
 
+local add = table.insert
 local catch = errors.catch
 local update = glue.update
 local names = glue.names
@@ -164,6 +165,9 @@ function virtual_rowset(init, ...)
 			if f.table then
 				glue.attr(rowset_tables, f.table)[rs.name] = true
 			end
+			if f.compute then
+				add(glue.attr(rs, 'computed_fields'), f)
+			end
 		end
 
 		if not rs.insert_row then rs.can_add_rows    = false end
@@ -182,9 +186,26 @@ function virtual_rowset(init, ...)
 		end
 	end
 
+	local function update_computed_fields(res)
+		if not rs.computed_fields then return end
+		local current_row
+		local function get_val(_, k)
+			local field = assert(rs.fields[k])
+			return current_row[field.index]
+		end
+		local vals = setmetatable({}, {__index = get_val})
+		for i,row in ipairs(res.rows) do
+			current_row = row
+			for i,f in ipairs(rs.computed_fields) do
+				row[f.index] = f.compute(self, vals)
+			end
+		end
+	end
+
 	function rs:load(param_values)
 		local res = {}
 		rs:load_rows(res, param_values)
+		update_computed_fields(res)
 		update_client_fields()
 		merge(res, {
 			can_add_rows = rs.can_add_rows,
