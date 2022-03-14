@@ -133,7 +133,7 @@ function cmdoptions(...)
 		if s == '-v' then
 			logging.verbose = true
 			env('VERBOSE', 1) --propagate verbosity to sub-processes.
-		elseif s == '--debug' then
+		elseif s == '--debug' or s == '-vv' then
 			logging.verbose = true
 			logging.debug = true
 			env('DEBUG', 1) --propagate debug to sub-processes.

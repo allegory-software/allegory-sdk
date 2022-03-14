@@ -1807,7 +1807,7 @@ function webb.fakecx()
 	req.headers = {}
 	local cx = {
 		req = req,
-		res = {},
+		res = {headers = {}},
 		fake = true,
 		request_id = next_request_id,
 		conn = {},

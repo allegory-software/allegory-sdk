@@ -16,6 +16,8 @@
 
 	cmd_server     cmdline section for server control
 
+	exit(app:run(...))    run the daemon app with cmdline args
+
 FILES
 
 	APP.conf       config file loaded at start-up. its globals go in app.conf.
