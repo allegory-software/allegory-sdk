@@ -1343,11 +1343,11 @@ end
 local function sleep(job, timeout)
 	return sleep_until(job, clock() + timeout)
 end
-local function wakeup(thread, ...)
+local function wakeup(job, ...)
 	if not recv_expires_heap:remove(job) then
 		return false
 	end
-	M.resume(job.thread, ...)
+	M.resume(job.recv_thread, ...)
 	return true
 end
 function M.sleep_job()
