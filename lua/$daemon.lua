@@ -30,6 +30,7 @@ FILES
 require'$fs'
 require'$log'
 require'$cmd'
+require'$sock'
 
 local app = {}
 
@@ -179,15 +180,17 @@ function daemon(app_name, ...)
 
 	logging:tofile(app.logfile)
 
+	local stop_heartbeat, heartbeat_sleep_job
+
 	if app.conf.log_host and app.conf.log_port then
 		logging:toserver(app.conf.log_host, app.conf.log_port)
 
 		--heartbeat logging.
-		local stop_live
 		thread(function()
-			while not stop_live do
+			heartbeat_sleep_job = sleep_job(1)
+			while not stop_heartbeat do
 				logging.logvar('live', time())
-				sleep(1)
+				heartbeat_sleep_job:sleep(1)
 			end
 		end)
 
@@ -199,11 +202,14 @@ function daemon(app_name, ...)
 		return exit_code
 	end
 
-	function app:init() end --stub
+	function app:init(cmd, ...) end --stub
 
 	--if you override run_cmd() then you have to call this!
 	function app:finish()
-		stop_live = true
+		stop_heartbeat = true
+		if heartbeat_sleep_job then
+			heartbeat_sleep_job:wakeup()
+		end
 		logging:toserver_stop()
 	end
 
@@ -211,8 +217,8 @@ function daemon(app_name, ...)
 		if ... == app.name then --caller module loaded with require()
 			return app
 		end
-		self:init()
-		local cmd_fn = cmdaction(arg_i, ...)
+		local cmd_fn, cmd_name = cmdaction(arg_i, ...)
+		self:init(cmd_name, select(arg_i, ...))
 		return self:run_cmd(cmd_fn, select(arg_i, ...))
 	end
 
