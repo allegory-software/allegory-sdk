@@ -633,9 +633,6 @@ local uint64_ct   = ffi.typeof'uint64_t'
 local void_ptr_ct = ffi.typeof'void*'
 local uintptr_ct  = ffi.typeof'uintptr_t'
 
-local u8p = glue.u8p
-local readall = glue.readall
-
 memoize = glue.memoize
 assert = glue.assert
 buffer = glue.buffer
@@ -854,7 +851,7 @@ end
 local u8a = ffi.typeof'uint8_t[?]'
 function file:readall(expires, ignore_file_size)
 	if self.type == 'pipe' or ignore_file_size then
-		return readall(self.read, self, expires)
+		return glue.readall(self.read, self, expires)
 	end
 	assert(self.type == 'file')
 	local size, err = self:attr'size'; if not size then return nil, err end

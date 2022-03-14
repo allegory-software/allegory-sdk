@@ -401,9 +401,10 @@ function fs.open(path, opt)
 			return nil, err
 		end
 	end
-	local r = band(access, access_bits.read ) == access_bits.read  and 'r' or ''
-	local w = band(access, access_bits.write) == access_bits.write and 'w' or ''
-	fs.log('', 'open', '%-4s %s%s %s', f, r, w, path)
+	local getbit = glue.getbit
+	local r = getbit(access, access_bits.read ) or getbit(access, access_bits.generic_read)
+	local w = getbit(access, access_bits.write) or getbit(access, access_bits.generic_write)
+	fs.log('', 'open', '%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
 	return f
 end
 
