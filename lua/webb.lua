@@ -238,7 +238,9 @@ HTTP SERVER INTEGRATION
 
 STANDALONE OPERATION
 
+	webb.fakecx() -> cx                     make a fake webb context.
 	webb.run(f, ...)                        run a function in a webb context.
+	webb.thread(f, ...)                     run a function in a thread in a webb context.
 	webb.request(req | arg1,...)            make a request without a http server.
 
 CONFIG
@@ -1797,12 +1799,9 @@ end
 
 --standalone operation -------------------------------------------------------
 
-function webb.run(f, ...)
-	if cx then
-		return f(...)
-	end
+function webb.fakecx()
+	assert(not cx)
 	local tcp = {}
-	tcp.istlssocket = true
 	local http = {tcp = tcp}
 	local req = {http = http, uri = '/'}
 	req.headers = {}
@@ -1817,7 +1816,6 @@ function webb.run(f, ...)
 	function http:log(...)
 		log(...)
 	end
-	local thread = coroutine.running()
 	function cx.outfunc(s, sz)
 		if type(s) == 'cdata' then
 			s = ffi.string(s, sz)
@@ -1834,10 +1832,26 @@ function webb.run(f, ...)
 		else
 			assert(false)
 		end
-		print('http_error', err.status, err.content)
-		os.exit(1)
+		error(json(err))
 	end
-	webb.setcx(thread, cx)
+	return cx
+end
+
+function webb.thread(f, ...)
+	return thread(function(...)
+		local thread = coroutine.running()
+		webb.setcx(thread, webb.fakecx())
+		f(...)
+		webb.setcx(thread, nil)
+	end, ...)
+end
+
+function webb.run(f, ...)
+	if cx then
+		return f(...)
+	end
+	local thread = coroutine.running()
+	webb.setcx(thread, webb.fakecx())
 	local function pass(...)
 		webb.setcx(thread, nil)
 		return ...
