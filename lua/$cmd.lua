@@ -13,7 +13,7 @@ CMDLINE
 	section([active, ]cmdargs, help[, descr], fn)  add a command to a section
 	cmd    ([active, ]cmdargs, help[, descr], fn)  add a command to the misc section
 	cmdoptions(...) -> arg_i                       process cmdline options and get cmd arg_i
-	cmdaction(arg_i, ...) -> fn                    get the cmd action handler
+	cmdaction(arg_i, ...) -> fn, action_name       get the cmd action handler
 
 ]==]
 
@@ -154,5 +154,5 @@ function cmdaction(arg_i, ...)
 	local s = select(arg_i-1, ...)
 	if s == '--help' then s = 'help' end
 	local c = s and s:gsub('-', '_')
-	return cmds[c] or cmds.help
+	return cmds[c] or cmds.help, cmds[c] and c or 'help'
 end
