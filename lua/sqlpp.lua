@@ -1521,7 +1521,14 @@ function sqlpp.new(init)
 
 	--MDL commands ------------------------------------------------------------
 
-	local function col_map_arg(s)
+	local function col_map_arg(s, vals)
+		if s == nil then --no col_map: create an implicit one.
+			local t = {}
+			for k in pairs(vals) do
+				t[k] = k
+			end
+			return t
+		end
 		if type(s) ~= 'string' then
 			return s or empty
 		end
@@ -1539,9 +1546,12 @@ function sqlpp.new(init)
 	local function where_sql(self, vals, col_map, pk, fields, security_filter)
 		local t = {}
 		for i, col in ipairs(pk) do
-			local val_name = col..':old'
-			local val_name = col_map[val_name] or val_name
-			local v = vals[val_name]
+			local v = vals[i] --pk vals in the array part (easier for manual calls).
+			if v == nil then
+				local val_name = col..':old'
+				local val_name = col_map[val_name] or val_name
+				v = vals[val_name]
+			end
 			local field = fields[col]
 			if i > 1 then add(t, ' and ') end
 			add(t, self:sqlname(col)..' = '..self:sqlval(v, field))
@@ -1589,7 +1599,7 @@ function sqlpp.new(init)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local tdef = self:table_def(tbl)
 		local ai_col = auto_increment_col(tdef)
-		local col_map = col_map_arg(col_map)
+		local col_map = col_map_arg(col_map, vals)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields, ai_col)
 		local sql
 		if not set_sql then --no fields, special syntax.
@@ -1619,7 +1629,7 @@ function sqlpp.new(init)
 
 	function cmd:update_row(tbl, vals, col_map, security_filter)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
-		local col_map = col_map_arg(col_map)
+		local col_map = col_map_arg(col_map, vals)
 		local tdef = self:table_def(tbl)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields)
 		if not set_sql then
@@ -1636,7 +1646,7 @@ function sqlpp.new(init)
 
 	function cmd:delete_row(tbl, vals, col_map, security_filter)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
-		local col_map = col_map_arg(col_map)
+		local col_map = col_map_arg(col_map, vals)
 		local tdef = self:table_def(tbl)
 		local where_sql = where_sql(self, vals, col_map, tdef.pk, tdef.fields, security_filter)
 		local sql = fmt(outdent[[
@@ -1650,7 +1660,7 @@ function sqlpp.new(init)
 	--while other inserts are happening at the same time but I'm not sure.
 	function cmd:insert_rows(tbl, rows, col_map, compact)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
-		local col_map = col_map_arg(col_map)
+		local col_map = col_map_arg(assert(col_map))
 		if #rows == 0 then
 			return
 		end
