@@ -225,6 +225,7 @@ function daemon(app_name, ...)
 		stop_heartbeat(cmd_name)
 		self:finish(cmd_name)
 		assert(ok, exit_code)
+		return exit_code
 	end
 
 	return app
