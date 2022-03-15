@@ -333,7 +333,9 @@ local function log(self, severity, module, event, fmt, ...)
 	local entry = _('%s %s %-6s %-6s %-8s %-4s %s\n',
 		env, date, severity, module or '', (event or ''):sub(1, 8),
 		debug_arg(false, (coroutine.running())), msg or '')
-	if severity ~= '' then --debug messages are transient
+	if (severity ~= '' or self.debug)
+		and (severity ~= 'note' or (self.verbose == true or self.verbose == module))
+	then
 		if self.logtofile then
 			self:logtofile(entry)
 		end
@@ -344,13 +346,10 @@ local function log(self, severity, module, event, fmt, ...)
 				message = msg,
 			}
 		end
-	end
-	if not self.quiet
-		and (severity ~= '' or self.debug)
-		and (severity ~= 'note' or (self.verbose == true or self.verbose == module))
-	then
-		io.stderr:write(entry)
-		io.stderr:flush()
+		if not self.quiet then
+			io.stderr:write(entry)
+			io.stderr:flush()
+		end
 	end
 	self._logging = false
 end
