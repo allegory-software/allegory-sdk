@@ -315,7 +315,6 @@ logging.args      = logging_args_func(false)
 logging.printargs = logging_args_func(true)
 
 local function log(self, severity, module, event, fmt, ...)
-	if self._logging then return end --re-entry barrier
 	if self.filter[severity] then return end
 	if self.filter[module  ] then return end
 	if self.filter[event   ] then return end
@@ -342,22 +341,25 @@ local function log(self, severity, module, event, fmt, ...)
 		local entry = _('%s %s %-6s %-6s %-8s %-4s %s\n',
 			env, date, severity, module or '', (event or ''):sub(1, 8),
 			debug_arg(false, (coroutine.running())), msg or '')
-		if self.logtofile then
-			self:logtofile(entry)
-		end
-		if self.logtoserver then
-			self:logtoserver{
-				deploy = self.deploy, env = logging.env, time = time,
-				severity = severity, module = module, event = event,
-				message = msg,
-			}
+		if not self._logging then
+			self._logging = true
+			if self.logtofile then
+				self:logtofile(entry)
+			end
+			if self.logtoserver then
+				self:logtoserver{
+					deploy = self.deploy, env = logging.env, time = time,
+					severity = severity, module = module, event = event,
+					message = msg,
+				}
+			end
+			self._logging = false
 		end
 		if not self.quiet then
 			io.stderr:write(entry)
 			io.stderr:flush()
 		end
 	end
-	self._logging = false
 end
 local function note (self, ...) log(self, 'note', ...) end
 local function dbg  (self, ...) log(self, '', ...) end
