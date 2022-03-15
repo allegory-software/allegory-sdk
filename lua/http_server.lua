@@ -218,7 +218,6 @@ function server:new(t)
 			self:check(tcp, false, 'listen', '("%s", %s): %s', addr, port, err)
 			goto continue
 		end
-		self:log(tcp, 'note', 'htsrv', 'LISTEN', '%s:%d', addr, port)
 
 		if t.tls then
 			local opt = glue.update(self.tls_options, t.tls_options)
@@ -237,10 +236,8 @@ function server:new(t)
 				return
 			end
 			self.thread(function()
-				self:log(tcp, 'note', 'htsrv', 'accept', '%s', ctcp)
 				local ok, err = errors.pcall(handler, tcp, ctcp, t)
 				self:check(ctcp, ok or errors.is(err, 'tcp'), 'handler', '%s', err)
-				self:log(tcp, 'note', 'htsrv', 'closed', '%s', ctcp)
 				ctcp:close()
 			end)
 		end

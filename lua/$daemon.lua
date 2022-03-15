@@ -95,7 +95,7 @@ cmd_server(Linux, 'start', 'Start the server', function()
 		C.close(2)
 		local ok, exit_code = pcall(run)
 		rm(app.pidfile)
-		os.exit(ok and (exit_code or 0) or 1)
+		exit(ok and (exit_code or 0) or 1)
 	end
 end)
 
@@ -224,7 +224,7 @@ function daemon(app_name, ...)
 		logging:toserver_stop()
 		stop_heartbeat(cmd_name)
 		self:finish(cmd_name)
-		return ok and (exit_code or 0) or 1
+		assert(ok, exit_code)
 	end
 
 	return app

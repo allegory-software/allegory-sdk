@@ -1133,7 +1133,7 @@ do
 	end
 
 	function tcp:connect(host, port, expires, addr_flags, ...)
-		if not self._bound then
+		if not self.bound_addr then
 			--ConnectEx requires binding first.
 			local ok, err = self:bind(...)
 			if not ok then return nil, err end
@@ -1420,7 +1420,7 @@ end, EINPROGRESS)
 function socket:connect(host, port, expires, addr_flags, ...)
 	local ai, ext_ai = self:addr(host, port, addr_flags)
 	if not ai then return nil, ext_ai end
-	if not self._bound then
+	if not self.bound_addr then
 		local ok, err = self:bind(...)
 		if not ok then
 			if not ext_ai then ai:free() end
