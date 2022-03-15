@@ -2073,7 +2073,7 @@ function M.sleep(timeout)
 	M.sleep_job():sleep(timeout)
 end
 
-local CANCEL = function() end
+local CANCEL = {}
 local function cancel_sleep(job)
 	job:wakeup(CANCEL)
 end

@@ -18,7 +18,7 @@ CONFIG
 	logging.deploy            app deployment name (logged to server)
 	logging.env               app deployment type: 'dev', 'prod', etc.
 	logging.quiet             do not log anything to stderr (false)
-	logging.verbose           log `note` messages to stderr (true)
+	logging.verbose           log `note` messages to stderr (false)
 	logging.debug             log `debug` messages to stderr (false)
 	logging.flush             flush stderr after each message (false)
 	logging.max_disk_size     max disk size occupied by logging (16M)
@@ -47,7 +47,7 @@ local _ = string.format
 
 local logging = {
 	quiet = false,
-	verbose = true,
+	verbose = false,
 	debug = false,
 	flush = false, --too slow (but you can tail)
 	censor = {},
@@ -319,9 +319,11 @@ logging.args      = logging_args_func(false)
 logging.printargs = logging_args_func(true)
 
 local function log(self, severity, module, event, fmt, ...)
+	if self._logging then return end --re-entry barrier
 	if self.filter[severity] then return end
 	if self.filter[module  ] then return end
 	if self.filter[event   ] then return end
+	self._logging = true
 	local env = logging.env and logging.env:upper():sub(1, 1) or 'D'
 	local time = time()
 	local date = os.date('%Y-%m-%d %H:%M:%S', time)
@@ -360,6 +362,7 @@ local function log(self, severity, module, event, fmt, ...)
 		io.stderr:write(entry)
 		io.stderr:flush()
 	end
+	self._logging = false
 end
 local function note (self, ...) log(self, 'note', ...) end
 local function dbg  (self, ...) log(self, '', ...) end

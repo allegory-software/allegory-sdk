@@ -73,6 +73,7 @@ cmd_server(Linux, 'status', 'Show server status', function()
 end)
 
 cmd_server(Linux, 'start', 'Start the server', function()
+	local run = assert(cmdaction(2, 'run'), 'cmdline action "run" not defined')
 	local is_running, pid = running()
 	if is_running then
 		say('Already running. PID: %d', pid)
@@ -89,13 +90,12 @@ cmd_server(Linux, 'start', 'Start the server', function()
 		C.umask(0)
 		local sid = C.setsid()
 		assert(sid >= 0)
-		local run = cmdaction(2, 'run')
 		C.close(0)
 		C.close(1)
 		C.close(2)
-		local ok, err = xpcall(run, debug.traceback)
+		local ok, exit_code = pcall(run)
 		rm(app.pidfile)
-		os.exit(ok and 0 or 1)
+		os.exit(ok and (exit_code or 0) or 1)
 	end
 end)
 
@@ -178,50 +178,53 @@ function daemon(app_name, ...)
 	--set up logging.
 	logging.deploy  = app.conf.deploy
 	logging.env     = app.conf.env
-	logging.verbose = logging.verbose or app.name --show app's notes only.
 
 	logging:tofile(app.logfile)
 
-	local stop_heartbeat, heartbeat_sleep_job
+	local start_heartbeat, stop_heartbeat do
+		local stop, sleeper
+		function start_heartbeat(cmd)
+			if cmd ~= 'run' then return end
+			thread(function()
+				sleeper = sleep_job(1)
+				while not stop do
+					logging.logvar('live', time())
+					sleeper:sleep(1)
+				end
+			end)
+		end
+		function stop_heartbeat(cmd)
+			if cmd ~= 'run' then return end
+			stop = true
+			if sleeper then
+				sleeper:wakeup()
+			end
+		end
+	end
 
 	if app.conf.log_host and app.conf.log_port then
 		logging:toserver(app.conf.log_host, app.conf.log_port)
-
-		--heartbeat logging.
-		thread(function()
-			heartbeat_sleep_job = sleep_job(1)
-			while not stop_heartbeat do
-				logging.logvar('live', time())
-				heartbeat_sleep_job:sleep(1)
-			end
-		end)
-
 	end
 
-	function app:run_cmd(f, ...) --stub
-		local exit_code = f(...)
-		self:finish()
-		return exit_code
+	function app:run_cmd(cmd_name, cmd_fn, ...) --stub
+		return cmd_fn(...)
 	end
 
 	function app:init(cmd, ...) end --stub
-
-	--if you override run_cmd() then you have to call this!
-	function app:finish()
-		stop_heartbeat = true
-		if heartbeat_sleep_job then
-			heartbeat_sleep_job:wakeup()
-		end
-		logging:toserver_stop()
-	end
+	function app:finish(cmd) end --stub
 
 	function app:run(...)
 		if ... == app.name then --caller module loaded with require()
 			return app
 		end
 		local cmd_fn, cmd_name = cmdaction(arg_i, ...)
+		start_heartbeat(cmd_name)
 		self:init(cmd_name, select(arg_i, ...))
-		return self:run_cmd(cmd_fn, select(arg_i, ...))
+		local ok, exit_code = pcall(self.run_cmd, self, cmd_name, cmd_fn, select(arg_i, ...))
+		logging:toserver_stop()
+		stop_heartbeat(cmd_name)
+		self:finish(cmd_name)
+		return ok and (exit_code or 0) or 1
 	end
 
 	return app

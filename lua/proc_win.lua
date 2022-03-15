@@ -154,8 +154,8 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 
 	local is_in_job = autokill and winapi.IsProcessInJob(winapi.GetCurrentProcess(), nil)
 
-	if _G.note then
-		note('proc', 'exec', '%s', cmd)
+	if _G.dbg then
+		dbg('proc', 'exec', '%s', cmd)
 	end
 
 	local pi, err, errcode = winapi.CreateProcess(

@@ -322,12 +322,12 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		if out_wf then check(C.dup2(out_wf.fd, 1) >= 0) end
 		if err_wf then check(C.dup2(err_wf.fd, 2) >= 0) end
 
-		if _G.note then
+		if _G.dbg then
 			local t = {cmd}
 			for i,arg in ipairs(args) do
 				t[#t+1] = M.quote_arg_unix(arg)
 			end
-			note('proc', 'exec', '%s', table.concat(t, ' '))
+			dbg('proc', 'exec', '%s', table.concat(t, ' '))
 		end
 
 		C.execvpe(cmd, arg_ptr, env_ptr)

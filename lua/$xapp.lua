@@ -55,11 +55,14 @@ return function(app_name, ...)
 
 	local app = daemon(app_name, ...)
 
-	function app:run_cmd(f, ...)
+	function app:run_cmd(cmd_name, cmd_fn, ...)
 		return webb.run(function(...)
-			local exit_code = f(...)
-			self:finish()
-			return exit_code
+			local ok, err = pcall(cmd_fn, ...)
+			if not ok then --check500, assert, etc.
+				webb.logerror('webb', 'run', '%s', err)
+				return 1
+			end
+			return err --exit_code
 		end, ...)
 	end
 

@@ -99,6 +99,10 @@ end
 
 cmd = cmdsection'MISC'
 
+local function usage()
+	say(' USAGE: %s %s [OPTIONS] COMMAND ...', arg[-1], arg[0])
+end
+
 cmd('help', 'Show this screen', function()
 	local function helpline(cmd)
 		local args = cmd.args
@@ -107,7 +111,7 @@ cmd('help', 'Show this screen', function()
 		say(fmt('   %-33s %s', name..args, cmd.helpline or ''))
 	end
 	say''
-	say(' USAGE: %s %s [OPTIONS] COMMAND ...', arg[-1], arg[0])
+	usage()
 	for _,section in ipairs(cmdsections) do
 		say''
 		say(getmetatable(section).name)
@@ -120,6 +124,7 @@ cmd('help', 'Show this screen', function()
 	say' OPTIONS'
 	say''
 	say'   -v         verbose'
+	say'   -q         quiet'
 	say'   --debug    debug'
 	say''
 end)
@@ -133,6 +138,9 @@ function cmdoptions(...)
 		if s == '-v' then
 			logging.verbose = true
 			env('VERBOSE', 1) --propagate verbosity to sub-processes.
+		elseif s == '-q' then
+			logging.quiet = true
+			env('QUIET', 1)
 		elseif s == '--debug' or s == '-vv' then
 			logging.verbose = true
 			logging.debug = true
@@ -153,6 +161,14 @@ end
 function cmdaction(arg_i, ...)
 	local s = select(arg_i-1, ...)
 	if s == '--help' then s = 'help' end
-	local c = s and s:gsub('-', '_')
-	return cmds[c] or cmds.help, cmds[c] and c or 'help'
+	local c = s and s:gsub('-', '_') or 'help'
+	if cmds[c] then
+		return cmds[c], c
+	else
+		local function invalid_usage()
+			say(' ERROR: Unknown command: %s', s)
+			usage()
+		end
+		return invalid_usage, 'usage'
+	end
 end

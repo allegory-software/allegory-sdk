@@ -1832,7 +1832,7 @@ function webb.fakecx()
 		else
 			assert(false)
 		end
-		error(json(err))
+		error(json_arg(err.content).error)
 	end
 	return cx
 end
@@ -1841,8 +1841,11 @@ function webb.thread(f, ...)
 	return thread(function(...)
 		local thread = coroutine.running()
 		webb.setcx(thread, webb.fakecx())
-		f(...)
+		local ok, err = errors.pcall(f, ...)
 		webb.setcx(thread, nil)
+		if not ok then
+			webb.logerror('webb', 'thread', '%s', err)
+		end
 	end, ...)
 end
 
