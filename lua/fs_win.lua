@@ -422,7 +422,7 @@ function file.close(f)
 	local ok, err = checknz(C.CloseHandle(f.handle))
 	if not ok then return false, err end
 	f.handle = INVALID_HANDLE_VALUE
-	fs.log('', 'close', '%s', f)
+	fs.log('', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
 	return true
 end
 
@@ -436,6 +436,7 @@ function fs.wrap_handle(h, read_async, write_async, is_pipe_end)
 		_read_async  = read_async  and true or false,
 		_write_async = write_async and true or false,
 		__index = file,
+		w = 0, r = 0,
 	}
 	setmetatable(f, f)
 
@@ -681,7 +682,9 @@ function file.read(f, buf, sz, expires)
 	else
 		local ok, err = mask_eof(checknz(C.ReadFile(f.handle, buf, sz, dwbuf, nil)))
 		if not ok then return nil, err end
-		return tonumber(dwbuf[0])
+		local r = tonumber(dwbuf[0])
+		f.r = f.r + r
+		return r
 	end
 end
 
@@ -692,7 +695,9 @@ function file._write(f, buf, sz, expires)
 	else
 		local ok, err = checknz(C.WriteFile(f.handle, buf, sz or #buf, dwbuf, nil))
 		if not ok then return nil, err end
-		return tonumber(dwbuf[0])
+		local w = tonumber(dwbuf[0])
+		f.w = f.w + w
+		return w
 	end
 end
 

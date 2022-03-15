@@ -65,16 +65,12 @@ function logging:tofile(logfile, max_size)
 
 	local f, size
 
-	local function check(event, ret, err)
-		if ret then return ret end
-		self.log('', 'log', event, '%s', err)
-		if f then f:close(); f = nil end
-	end
-
 	local function open()
 		if f then return true end
-		f = check('open', fs.open(logfile, 'a')); if not f then return end
-		size = check('size', f:attr'size'); if not f then return end
+		f = fs.open(logfile, 'a')
+		if not f then return end
+		size = f:attr'size'
+		if not f then return end
 		return true
 	end
 
@@ -83,7 +79,7 @@ function logging:tofile(logfile, max_size)
 	local function rotate(len)
 		if max_size and size + len > max_size / 2 then
 			f:close(); f = nil
-			if not check('move', fs.move(logfile, logfile0)) then return end
+			if not fs.move(logfile, logfile0) then return end
 			if not open() then return end
 		end
 		return true
@@ -93,8 +89,8 @@ function logging:tofile(logfile, max_size)
 		if not open() then return end
 		if not rotate(#s + 1) then return end
 		size = size + #s + 1
-		if not check('write', f:write(s)) then return end
-		if self.flush and not check('flush', f:flush()) then return end
+		if not f:write(s) then return end
+		if self.flush and not f:flush() then return end
 	end
 
 	return self
@@ -110,15 +106,10 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	local tcp
 
-	local function check(event, ret, err)
+	local function check_io(ret, err)
 		if ret then return ret end
-		self.log('', 'log', event, '%s', err)
-	end
-
-	local function check_io(event, ret, err)
-		if ret then return ret end
-		check(event, ret, err)
 		if tcp then tcp:close(); tcp = nil end
+		return ret, err
 	end
 
 	local reconn_sleeper
@@ -126,11 +117,11 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	local function connect()
 		if tcp then return tcp end
-		tcp = check('sock.tcp', sock.tcp())
+		tcp = sock.tcp()
 		if not tcp then return end
 		while not stop do
 			local exp = timeout and clock() + timeout
-			if check('connect', tcp:connect(host, port, exp)) then
+			if tcp:connect(host, port, exp) then
 				return true
 			end
 			--wait because 'connection_refused' error comes instantly on Linux.
@@ -157,7 +148,7 @@ function logging:toserver(host, port, queue_size, timeout)
 					lenbuf[0] = #s
 					local len = ffi.string(lenbuf, ffi.sizeof(lenbuf))
 					local exp = timeout and clock() + timeout
-					if check_io('send', tcp:send(len..s, nil, exp)) then
+					if check_io(tcp:send(len..s, nil, exp)) then
 						queue:pop()
 					end
 				end
@@ -167,12 +158,12 @@ function logging:toserver(host, port, queue_size, timeout)
 				send_thread_suspended = false
 			end
 		end
-		check_io('stop', nil, 'stopped')
+		check_io()
 		self.logtoserver = nil
 	end)
 
 	function self:logtoserver(msg)
-		if not check('push', queue:push(msg)) then
+		if not queue:push(msg) then
 			queue:pop()
 			queue:push(msg)
 		end
@@ -183,7 +174,6 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	function self:toserver_stop()
 		stop = true
-		check('stop', nil, 'stopping')
 		if send_thread_suspended then
 			sock.resume(send_thread)
 		elseif reconn_sleeper then

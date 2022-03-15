@@ -349,6 +349,12 @@ end
 local currentthread = coro.running
 local transfer = coro.transfer
 
+function M.log(severity, ...)
+	local logging = M.logging
+	if not logging then return end
+	logging.log(severity, 'sock', ...)
+end
+
 --getaddrinfo() --------------------------------------------------------------
 
 ffi.cdef[[
@@ -935,7 +941,10 @@ end
 function socket:close()
 	if not self.s then return true end
 	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
-	return check(C.closesocket(s) == 0)
+	local ok, err = check(C.closesocket(s) == 0)
+	if not ok then return false, err end
+	M.log('', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
+	return true
 end
 
 function socket:closed()
@@ -1134,7 +1143,10 @@ do
 		local o, job = overlapped(self, return_true, expires)
 		local ok = ConnectEx(self.s, ai.addr, ai.addrlen, nil, 0, nil, o) == 1
 		if not ext_ai then ai:free() end
-		return check_pending(ok, job)
+		local ok, err = check_pending(ok, job)
+		if not ok then return false, err end
+		M.log('', 'connect', '%s %s', self, ai:tostring())
+		return true
 	end
 
 	function udp:connect(host, port, expires, addr_flags)
@@ -1142,7 +1154,9 @@ do
 		if not ai then return nil, ext_ai end
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
 		if not ext_ai then ai:free() end
-		return check(ok)
+		if not ok then return check(ok) end
+		M.log('', 'connect', '%s %s', self, ai:tostring())
+		return true
 	end
 
 	local accept_buf_ct = ffi.typeof[[
@@ -1156,17 +1170,22 @@ do
 	local accept_buf = accept_buf_ct()
 	local sa_len = ffi.sizeof(accept_buf) / 2
 	function tcp:accept(expires)
-		local client_s, err = M.tcp(self._af, self._pr)
-		if not client_s then return nil, err end
+		local s, err = M.tcp(self._af, self._pr)
+		if not s then return nil, err end
 		local o, job = overlapped(self, return_true, expires)
-		local ok = AcceptEx(self.s, client_s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
+		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
 		local ok, err = check_pending(ok, job)
 		if not ok then return nil, err end
-		client_s.remote_addr = accept_buf.remote_addr:addr():tostring()
-		client_s.remote_port = accept_buf.remote_addr:port()
-		client_s. local_addr = accept_buf. local_addr:addr():tostring()
-		client_s. local_port = accept_buf. local_addr:port()
-		return client_s
+		local ra = accept_buf.remote_addr:addr():tostring()
+		local rp = accept_buf.remote_addr:port()
+		local la = accept_buf. local_addr:addr():tostring()
+		local lp = accept_buf. local_addr:port()
+		M.log('', 'accept', '%-4s %-4s %s:%s -> %s:%s', self, s, ra, rp, la, lp)
+		s.remote_addr = ra
+		s.remote_port = rp
+		s. local_addr = la
+		s. local_port = lp
+		return s
 	end
 
 	local pchar_t = ffi.typeof'char*'
@@ -1182,7 +1201,10 @@ do
 		wsabuf.len = len
 		local o, job = overlapped(self, io_done, expires)
 		local ok = C.WSASend(self.s, wsabuf, 1, nil, 0, o, nil) == 0
-		return check_pending(ok, job)
+		local w, err = check_pending(ok, job)
+		if not w then return nil, err end
+		self.w = self.w + w
+		return w
 	end
 
 	function tcp:_send(buf, len, expires)
@@ -1202,7 +1224,10 @@ do
 		local o, job = overlapped(self, io_done, expires)
 		flagsbuf[0] = 0
 		local ok = C.WSARecv(self.s, wsabuf, 1, nil, flagsbuf, o, nil) == 0
-		return check_pending(ok, job)
+		local r, err = check_pending(ok, job)
+		if not r then return nil, err end
+		self.r = self.r + r
+		return r
 	end
 
 	function udp:sendto(host, port, buf, len, expires, flags, addr_flags)
@@ -1270,6 +1295,7 @@ int recv(int s, char *buf, int len, int flags);
 int recvfrom(int s, char *buf, int len, int flags, struct sockaddr *from, int *fromlen);
 int send(int s, const char *buf, int len, int flags);
 int sendto(int s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen);
+int getsockname(int sockfd, struct sockaddr *restrict addr, int *restrict addrlen);
 // for async pipes
 ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
@@ -1308,7 +1334,10 @@ function socket:close()
 	if not self.s then return true end
 	M._unregister(self)
 	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
-	return check(C.close(s) == 0)
+	local ok, err = check(C.close(s) == 0)
+	if not ok then return false, err end
+	M.log('', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
+	return true
 end
 
 function socket:closed()
@@ -1403,6 +1432,7 @@ function socket:connect(host, port, expires, addr_flags, ...)
 		if not ext_ai then ai:free() end
 		return nil, err
 	end
+	M.log('', 'connect', '')
 	return true
 end
 
@@ -1421,8 +1451,27 @@ do
 		if not s then return nil, err end
 		local s = wrap_socket(tcp, s, self._st, self._af, self._pr)
 		local ok, err = M._register(s)
-		if not ok then return nil, err end
-		return s, accept_buf
+		if not ok then
+			s:close()
+			return nil, err
+		end
+		local ra = accept_buf:addr():tostring()
+		local rp = accept_buf:port()
+		--get local addr
+		nbuf[0] = accept_buf_size
+		local ok, err = check(C.getsockname(s.s, accept_buf, nbuf) == 0)
+		if not ok then
+			s:close()
+			return nil, err
+		end
+		local la = accept_buf:addr():tostring()
+		local lp = accept_buf:port()
+		M.log('', 'accept', '%-4s %-4s %s:%s -> %s:%s', self, s, ra, rp, la, lp)
+		s.remote_addr = ra
+		s.remote_port = rp
+		s. local_addr = la
+		s. local_port = lp
+		return s
 	end
 end
 
@@ -1707,13 +1756,16 @@ int bind(SOCKET s, const sockaddr*, int namelen);
 ]]
 
 function socket:bind(host, port, addr_flags)
-	assert(not self._bound)
+	assert(not self.bound_addr)
 	local ai, ext_ai = self:addr(host or '*', port or 0, addr_flags)
 	if not ai then return nil, ext_ai end
 	local ok, err = check(C.bind(self.s, ai.addr, ai.addrlen) == 0)
+	local ba = ok and ai.addr:addr():tostring()
+	local bp = ok and ai.addr:port()
 	if not ext_ai then ai:free() end
 	if not ok then return false, err end
-	self._bound = true
+	self.bound_addr = ba
+	self.bound_port = bp
 	if Linux then
 		--epoll_ctl() must be called after bind() for some reason.
 		return M._register(self)
@@ -1732,15 +1784,14 @@ function tcp:listen(backlog, host, port, addr_flags)
 	if type(backlog) ~= 'number' then
 		backlog, host, port = 1/0, backlog, host
 	end
-	if not self._bound then
+	if not self.bound_addr then
 		local ok, err = self:bind(host, port, addr_flags)
-		if not ok then
-			return nil, err
-		end
+		if not ok then return nil, err end
 	end
 	backlog = glue.clamp(backlog or 1/0, 0, 0x7fffffff)
 	local ok = C.listen(self.s, backlog) == 0
 	if not ok then return check() end
+	M.log('', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
 	return true
 end
 
@@ -2146,7 +2197,7 @@ end
 --hi-level APIs --------------------------------------------------------------
 
 --[[local]] function wrap_socket(class, s, st, af, pr)
-	local s = {s = s, __index = class, _st = st, _af = af, _pr = pr}
+	local s = {s = s, __index = class, _st = st, _af = af, _pr = pr, r = 0, w = 0}
 	return setmetatable(s, s)
 end
 function M.tcp(...) return create_socket(tcp, 'tcp', ...) end

@@ -119,6 +119,7 @@ function fs.wrap_fd(fd, async, is_pipe_end)
 		type = is_pipe_end and 'pipe' or 'file',
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		__index = file,
+		w = 0, r = 0,
 	}
 	setmetatable(f, f)
 
@@ -174,7 +175,7 @@ function file.close(f)
 	local ok = C.close(f.fd) == 0
 	if not ok then return check(false) end
 	f.fd = -1
-	fs.log('', 'close', '%s', f)
+	fs.log('', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
 	return true
 end
 
@@ -260,9 +261,11 @@ function file.read(f, buf, sz, expires)
 		local sock = require'sock'
 		return sock._file_async_read(f, buf, sz, expires)
 	else
-		local szread = C.read(f.fd, buf, sz)
-		if szread == -1 then return check() end
-		return tonumber(szread)
+		local r = C.read(f.fd, buf, sz)
+		if r == -1 then return check() end
+		r = tonumber(r)
+		f.r = f.r + r
+		return r
 	end
 end
 
@@ -271,9 +274,11 @@ function file._write(f, buf, sz, expires)
 		local sock = require'sock'
 		return sock._file_async_write(f, buf, sz, expires)
 	else
-		local szwr = C.write(f.fd, buf, sz or #buf)
-		if szwr == -1 then return check() end
-		return tonumber(szwr)
+		local w = C.write(f.fd, buf, sz or #buf)
+		if w == -1 then return check() end
+		w = tonumber(w)
+		f.w = f.w + w
+		return w
 	end
 end
 

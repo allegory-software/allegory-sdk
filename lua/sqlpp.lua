@@ -24,7 +24,7 @@ Preprocessor features
 
 Backends & writing your own
 
-	SQLpp currently supports mysql and tarantool clients.
+	SQLpp currently supports MySQL and Tarantool clients.
 
 	Writing a backend for your favorite RDBMS is easy. At the minimum you have
 	to show sqlpp how to connect to your engine and how to quote strings,
@@ -111,7 +111,7 @@ EXTENDING THE PREPROCESSOR
 
 ## Preprocessor
 
-### `sqlpp.new() -> spp`
+### sqlpp.new() -> spp
 
 Create a preprocessor instance. Modules can be loaded into the instance
 with `spp.import()`.
@@ -120,14 +120,14 @@ The preprocessor doesn't work all by itself, it needs a database-specific
 module to implement the particulars of your database engine. Currently only
 the MySQL engine is implemented in the module `sqlpp_mysql`.
 
-### `spp.connect(options) -> cmd` <br> `spp.use(rawconn) -> cmd`
+### spp.connect(options) -> cmd` <br> `spp.use(rawconn) -> cmd
 
 Make a command API based on a low-level query execution API.
 Options are passed-through to the connector. Additional option:
 
  * `schema`: set a [schema] for the chosen database.
 
-### `cmd:sqlquery(sql, ...) -> sql, names`
+### cmd:sqlquery(sql, ...) -> sql, names
 
 Preprocess a SQL query, including hashtag conditionals, macro substitutions,
 quoted and unquoted param substitutions, symbol substitutions and removing
@@ -157,29 +157,26 @@ Notes on value expansion:
   as it does with string literals (OTOH this allows you to parametrize
   optimizer hints).
 
-### `spp.keyword.KEYWORD -> symbol`
+### spp.define_symbol(sql, [sym]) -> sym
+### spp.symbol_for.SQL -> sym
 
-Get a symbol object for a keyword. Symbols are used to encode special SQL
-values in parameter values, for instance using `spp.keyword.default`
+Define a symbol object for an SQL keyword. Symbols are used to encode
+special SQL values in queries, for instance using `spp.symbol_for.default`
 as a parameter value will be substituted by the keyword `default`.
-
-### `spp.keywords[SYMBOL] = keyword`
 
 Set a keyword to be substituted for a symbol object. Since symbols can be
 any Lua objects, you can add a symbol from an external library to be used
 directly in SQL parameters. For instance:
 
-```lua
-pp.keywords[require'cjson'.null] = 'null'
-```
+	spp.define_symbol('null', require'cjson'.null)
 
 This enables using JSON null values as SQL parameters.
 
-### `spp.subst'NAME text...'`
+### spp.subst'NAME text...'
 
 Create an unquoted text substitution for `$NAME`.
 
-### `function spp.macro.NAME(self, ...) end`
+### function spp.macro.NAME(self, ...) end
 
 Create a macro to be used as `$NAME(...)`. Param args are expanded before
 macros.
@@ -207,13 +204,14 @@ cmd.schemas[cmd.db] = cmd:extract_schema()
 Extend the preprocessor with a module, available to all preprocessor
 instances to be loaded with `spp.import()`.
 
-### `spp.import(name)`
+### spp.import(name)
 
 Load a module into the preprocessor instance.
 
 ## Modules
 
-### `require'sqlpp_mysql'` <br> `spp.import'mysql'`
+### require'sqlpp_mysql
+### spp.import'mysql'
 
 Load the MySQL module into an sqlpp instance.
 
