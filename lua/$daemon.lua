@@ -86,16 +86,18 @@ cmd_server(Linux, 'start', 'Start the server', function()
 	if pid > 0 then --parent process
 		save(app.pidfile, tostring(pid))
 		say('Started. PID: %d', pid)
+		os.exit(0)
 	else --child process
 		C.umask(0)
-		local sid = C.setsid()
+		local sid = C.setsid() --prevent killing the child when parent is killed.
 		assert(sid >= 0)
-		C.close(0)
-		C.close(1)
-		C.close(2)
+		logging.quiet = true
+		io.stdin:close()
+		io.stdout:close()
+		io.stderr:close()
 		local ok, exit_code = pcall(run)
 		rm(app.pidfile)
-		exit(ok and (exit_code or 0) or 1)
+		os.exit(ok and (exit_code or 0) or 1)
 	end
 end)
 
@@ -126,6 +128,10 @@ cmd_server('tail', 'tail -f the log file', function()
 	exec('tail -f %s', app.logfile)
 end)
 
+local run_server
+cmd_server('run', 'Run server in foreground', function()
+	run_server()
+end)
 
 --init -----------------------------------------------------------------------
 
@@ -179,12 +185,9 @@ function daemon(app_name, ...)
 	logging.deploy  = app.conf.deploy
 	logging.env     = app.conf.env
 
-	logging:tofile(app.logfile)
-
 	local start_heartbeat, stop_heartbeat do
 		local stop, sleeper
-		function start_heartbeat(cmd)
-			if cmd ~= 'run' then return end
+		function start_heartbeat()
 			thread(function()
 				sleeper = sleep_job(1)
 				while not stop do
@@ -193,8 +196,7 @@ function daemon(app_name, ...)
 				end
 			end)
 		end
-		function stop_heartbeat(cmd)
-			if cmd ~= 'run' then return end
+		function stop_heartbeat()
 			stop = true
 			if sleeper then
 				sleeper:wakeup()
@@ -202,8 +204,17 @@ function daemon(app_name, ...)
 		end
 	end
 
-	if app.conf.log_host and app.conf.log_port then
-		logging:toserver(app.conf.log_host, app.conf.log_port)
+	function run_server() --fw. declared.
+		if app.conf.log_host and app.conf.log_port then
+			logging:tofile(app.logfile)
+			logging.flush = logging.debug
+			logging:toserver(app.conf.log_host, app.conf.log_port)
+			start_heartbeat()
+		end
+		app:run_server()
+		stop_heartbeat()
+		logging:toserver_stop()
+		logging:tofile_stop()
 	end
 
 	function app:run_cmd(cmd_name, cmd_fn, ...) --stub
@@ -218,14 +229,7 @@ function daemon(app_name, ...)
 			return app
 		end
 		local cmd_fn, cmd_name = cmdaction(arg_i, ...)
-		start_heartbeat(cmd_name)
-		self:init(cmd_name, select(arg_i, ...))
-		local ok, exit_code = pcall(self.run_cmd, self, cmd_name, cmd_fn, select(arg_i, ...))
-		logging:toserver_stop()
-		stop_heartbeat(cmd_name)
-		self:finish(cmd_name)
-		assert(ok, exit_code)
-		return exit_code
+		return self:run_cmd(cmd_name, cmd_fn, select(arg_i, ...))
 	end
 
 	return app

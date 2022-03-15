@@ -90,7 +90,13 @@ function logging:tofile(logfile, max_size)
 		if not rotate(#s + 1) then return end
 		size = size + #s + 1
 		if not f:write(s) then return end
-		if self.flush and not f:flush() then return end
+		if self.flush then f:flush() end
+	end
+
+	function self:tofile_stop()
+		if not f then return end
+		f:close()
+		f = nil
 	end
 
 	return self
@@ -330,12 +336,12 @@ local function log(self, severity, module, event, fmt, ...)
 			msg = '\n\n'..msg..'\n'
 		end
 	end
-	local entry = _('%s %s %-6s %-6s %-8s %-4s %s\n',
-		env, date, severity, module or '', (event or ''):sub(1, 8),
-		debug_arg(false, (coroutine.running())), msg or '')
 	if (severity ~= '' or self.debug)
 		and (severity ~= 'note' or (self.verbose == true or self.verbose == module))
 	then
+		local entry = _('%s %s %-6s %-6s %-8s %-4s %s\n',
+			env, date, severity, module or '', (event or ''):sub(1, 8),
+			debug_arg(false, (coroutine.running())), msg or '')
 		if self.logtofile then
 			self:logtofile(entry)
 		end

@@ -35,11 +35,6 @@ Sfile[[
 schema_std.lua
 ]]
 
-cmd_server('run', 'Run server in foreground', function()
-	local server = webb.server()
-	server.start()
-end)
-
 function load_opensans()
 	css[[
 	body {
@@ -55,6 +50,11 @@ end
 return function(app_name, ...)
 
 	local app = daemon(app_name, ...)
+
+	function app:run_server()
+		local server = webb.server()
+		server.start()
+	end
 
 	function app:run_cmd(cmd_name, cmd_fn, ...)
 		return webb.run(function(...)
