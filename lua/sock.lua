@@ -1142,10 +1142,13 @@ do
 		if not ai then return nil, ext_ai end
 		local o, job = overlapped(self, return_true, expires)
 		local ok = ConnectEx(self.s, ai.addr, ai.addrlen, nil, 0, nil, o) == 1
-		if not ext_ai then ai:free() end
 		local ok, err = check_pending(ok, job)
-		if not ok then return false, err end
-		M.log('', 'connect', '%s %s', self, ai:tostring())
+		if not ok then
+			if not ext_ai then ai:free() end
+			return false, err
+		end
+		M.log('', 'connect', '%-4s %s', self, ai:tostring())
+		if not ext_ai then ai:free() end
 		return true
 	end
 
@@ -1155,7 +1158,7 @@ do
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		M.log('', 'connect', '%s %s', self, ai:tostring())
+		M.log('', 'connect', '%-4s %s', self, ai:tostring())
 		return true
 	end
 
@@ -1424,15 +1427,16 @@ function socket:connect(host, port, expires, addr_flags, ...)
 		local ok, err = self:bind(...)
 		if not ok then
 			if not ext_ai then ai:free() end
-			return nil, err
+			return false, err
 		end
 	end
 	local len, err = connect(self, expires, ai)
 	if not len then
 		if not ext_ai then ai:free() end
-		return nil, err
+		return false, err
 	end
-	M.log('', 'connect', '')
+	M.log('', 'connect', '%-4s %s', self, ai:tostring())
+	if not ext_ai then ai:free() end
 	return true
 end
 
