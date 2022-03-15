@@ -95,6 +95,9 @@ cmd_server(Linux, 'start', 'Start the server', function()
 		io.stdin:close()
 		io.stdout:close()
 		io.stderr:close()
+		C.close(0)
+		C.close(1)
+		C.close(2)
 		local ok, exit_code = pcall(run)
 		rm(app.pidfile)
 		os.exit(ok and (exit_code or 0) or 1)
@@ -205,15 +208,18 @@ function daemon(app_name, ...)
 	end
 
 	function run_server() --fw. declared.
-		if app.conf.log_host and app.conf.log_port then
-			logging:tofile(app.logfile)
-			logging.flush = logging.debug
+		logging:tofile(app.logfile)
+		logging.flush = logging.debug
+		local logtoserver = app.conf.log_host and app.conf.log_port
+		if logtoserver then
 			logging:toserver(app.conf.log_host, app.conf.log_port)
 			start_heartbeat()
 		end
 		app:run_server()
-		stop_heartbeat()
-		logging:toserver_stop()
+		if logtoserver then
+			stop_heartbeat()
+			logging:toserver_stop()
+		end
 		logging:tofile_stop()
 	end
 

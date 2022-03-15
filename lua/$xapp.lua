@@ -57,6 +57,9 @@ return function(app_name, ...)
 	end
 
 	function app:run_cmd(cmd_name, cmd_fn, ...)
+		if cmd_name == 'run' then
+			return cmd_fn(...)
+		end
 		return webb.run(function(...)
 			local ok, err = pcall(cmd_fn, ...)
 			if not ok then --check500, assert, etc.
