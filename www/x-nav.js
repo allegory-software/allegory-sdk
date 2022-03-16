@@ -3261,6 +3261,9 @@ function nav_widget(e) {
 		if (!rows_to_remove.length)
 			return false
 
+		if (!from_server && !e.can_actually_remove_rows())
+			return false
+
 		if (ev && ev.confirm && (rows_to_remove.length > 1 || !rows_to_remove[0].is_new))
 			if (!confirm(S('delete_records_confirmation',
 					'Are you sure you want to delete {0:record:records}?',

@@ -154,6 +154,14 @@ function virtual_rowset(init, ...)
 			end
 			update(f, rs.field_attrs and rs.field_attrs[f.name])
 
+			if f.table then
+				glue.attr(rowset_tables, f.table)[rs.name] = true
+			end
+			if f.compute then
+				add(glue.attr(rs, 'computed_fields'), f)
+				f.readonly = true
+			end
+
 			local client_field = {}
 			for k,v in pairs(f) do
 				if client_field_attrs[k] then
@@ -161,13 +169,6 @@ function virtual_rowset(init, ...)
 				end
 			end
 			rs.client_fields[i] = client_field
-
-			if f.table then
-				glue.attr(rowset_tables, f.table)[rs.name] = true
-			end
-			if f.compute then
-				add(glue.attr(rs, 'computed_fields'), f)
-			end
 		end
 
 		if not rs.insert_row then rs.can_add_rows    = false end

@@ -122,8 +122,8 @@ cmd_server(Linux, 'stop', 'Stop the server', function()
 end)
 
 cmd_server(Linux, 'restart', 'Restart the server', function()
-	if lincmd.stop() == 0 then
-		lincmd.start()
+	if cmd.stop() == 0 then
+		cmd.start()
 	end
 end)
 
