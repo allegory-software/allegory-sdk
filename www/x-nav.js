@@ -3261,6 +3261,8 @@ function nav_widget(e) {
 		if (!rows_to_remove.length)
 			return false
 
+		let from_server = ev.from_server || !e.can_save_changes()
+
 		if (!from_server && !e.can_actually_remove_rows())
 			return false
 
@@ -3269,8 +3271,6 @@ function nav_widget(e) {
 					'Are you sure you want to delete {0:record:records}?',
 						rows_to_remove.size))
 			) return false
-
-		let from_server = ev.from_server || !e.can_save_changes()
 
 		e.begin_update()
 

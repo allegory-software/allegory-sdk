@@ -2084,6 +2084,9 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			return false
 		}
 
+		if (ctrl && key == 's')
+			e.save()
+
 	})
 
 	// printable characters: enter quick edit mode.

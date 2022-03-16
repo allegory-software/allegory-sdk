@@ -72,8 +72,12 @@ cmd_server(Linux, 'status', 'Show server status', function()
 	end
 end)
 
+local run_server
+cmd_server('run', 'Run server in foreground', function()
+	run_server()
+end)
+
 cmd_server(Linux, 'start', 'Start the server', function()
-	local run = assert(cmdaction(2, 'run'), 'cmdline action "run" not defined')
 	local is_running, pid = running()
 	if is_running then
 		say('Already running. PID: %d', pid)
@@ -98,9 +102,9 @@ cmd_server(Linux, 'start', 'Start the server', function()
 		C.close(0)
 		C.close(1)
 		C.close(2)
-		local ok, exit_code = pcall(run)
+		local ok = pcall(run_server)
 		rm(app.pidfile)
-		os.exit(ok and (exit_code or 0) or 1)
+		os.exit(ok and 0 or 1)
 	end
 end)
 
@@ -129,11 +133,6 @@ end)
 
 cmd_server('tail', 'tail -f the log file', function()
 	exec('tail -f %s', app.logfile)
-end)
-
-local run_server
-cmd_server('run', 'Run server in foreground', function()
-	run_server()
 end)
 
 --init -----------------------------------------------------------------------
@@ -226,9 +225,6 @@ function daemon(app_name, ...)
 	function app:run_cmd(cmd_name, cmd_fn, ...) --stub
 		return cmd_fn(...)
 	end
-
-	function app:init(cmd, ...) end --stub
-	function app:finish(cmd) end --stub
 
 	function app:run(...)
 		if ... == app.name then --caller module loaded with require()
