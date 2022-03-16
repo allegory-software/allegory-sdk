@@ -459,11 +459,19 @@ function input_widget(e) {
 	})
 
 	e.on('keydown', function(key) {
+
 		if (key == 'F1') {
 			if (e.info_button)
 				e.info_button.activate()
 			return false
 		}
+
+		if (ctrl && key == 's') {
+			if (e.nav)
+				e.nav.save()
+			return false
+		}
+
 	})
 
 	e.on('pointerdown', function(ev) {
