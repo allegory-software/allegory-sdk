@@ -12,12 +12,18 @@
 	p:status() -> active|finished|killed|forgotten  process status
 	p:exit_code() -> code | nil,status              get process exit code
 	p:forget()                                      close process handles
+
 	proc.env(k) -> v                                get env. var
 	proc.env(k, v)                                  set env. var
 	proc.env(k, false)                              delete env. var
 	proc.env() -> env                               get all env. vars
-	proc.esc(s, ['win'|'unix']) -> s                escape string (but not quote)
-	proc.quote_arg(s, ['win'|'unix']) -> s          quote as cmdline arg
+
+	proc.esc(s, [platform]) -> s                    escape string (but not quote)
+	proc.quote_arg(s, [platform]) -> s              quote as cmdline arg
+	proc.quote_arg[_PLATFORM](s) -> s               quote as cmdline arg
+	proc.quote_args(platform, ...) -> s             quote as cmdline args
+	proc.quote_args[_PLATFORM](...) -> s            quote as cmdline args
+	proc.quote_vars({k->v}, [format], [platform]) -> s   quote as var assignments
 
 proc.exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
 
@@ -162,6 +168,25 @@ function M.quote_arg(s, platform)
 	assert(quote_arg, 'invalid platform')
 	return quote_arg(s)
 end
+
+function M.quote_vars(vars, format, platform)
+	local t = {}
+	for k,v in sortedpairs(vars) do
+		t[#t+1] = string.format(format or '%s=%s\n', k, M.quote_arg(v, platform))
+	end
+	return table.concat(t)
+end
+
+function M.quote_args(platform, ...)
+	local t = {}
+	for i=1,select('#',...) do
+		local v = select(i,...)
+		t[i] = M.quote_arg(v, platform)
+	end
+	return table.concat(t, ' ')
+end
+function M.quote_args_win (...) return M.quote_args('win', ...) end
+function M.quote_args_unix(...) return M.quote_args('unix', ...) end
 
 --cmd|{cmd,arg1,...}, env, ...
 --{cmd=cmd|{cmd,arg1,...}, env=, ...}
