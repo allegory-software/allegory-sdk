@@ -116,13 +116,17 @@ cmd_server(Linux, 'stop', 'Stop the server', function()
 	end
 	sayn('Killing PID %d...', pid)
 	exec('kill %d', pid)
-	if running() then
-		say'Failed.'
-		return 1
+	for i=1,10 do
+		if not running() then
+			say'OK.'
+			rm(app.pidfile)
+			return 0
+		end
+		sayn'.'
+		sleep(.1)
 	end
-	say'OK.'
-	rm(app.pidfile)
-	return 0
+	say'Failed.'
+	return 1
 end)
 
 cmd_server(Linux, 'restart', 'Restart the server', function()
