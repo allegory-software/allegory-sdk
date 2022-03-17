@@ -271,28 +271,25 @@ function sqlpp.new(init)
 		::next_string::
 		local i1 = s:find("'", i, true)
 		if i1 then --string literal start
-			local i2
 			local j = i1 + 1
 			::again::
-			local j1 = s:find("\\'", j, true) --skip over \'
-			if j1 then
-				j = j1 + 2
-				goto again
-			end
-			local j1 = s:find("''", j, true) --skip over ''
-			if j1 then
-				j = j1 + 2
-				goto again
-			end
-			i2 = s:find("'", j, true) --string literal end
+			local i2 = s:find("'", j, true) --potential string literal end
 			if i2 then
-				add(t, s:sub(i, i1 - 1))
-				add(repl, s:sub(i1, i2))
-				add(t, mark(#repl))
-				i = i2 + 1
-				goto next_string
+				if i2 > j and s:sub(i2-1, i2-1) == '\\' then --skip over \'
+					j = i2 + 1
+					goto again
+				elseif s:sub(i2+1, i2+1) == "'" then --skip over ''
+					j = i2 + 2
+					goto again
+				else
+					add(t, s:sub(i, i1 - 1))
+					add(repl, s:sub(i1, i2))
+					add(t, mark(#repl))
+					i = i2 + 1
+					goto next_string
+				end
 			else
-				error'string literal not closed'
+				error('string literal not closed:\n\n'..s)
 			end
 		else
 			add(t, s:sub(i))
