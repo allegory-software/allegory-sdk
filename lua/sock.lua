@@ -2279,7 +2279,7 @@ function M.newthread(f)
 			end
 		end
 		if not ok then
-			error(err, 2)
+			M.log('ERROR', 'thread', '%s', err)
 		end
 		return transfer(poll_thread)
 	end)
