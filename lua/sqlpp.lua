@@ -1619,7 +1619,7 @@ function sqlpp.new(init)
 	end
 
 	function cmd:insert_or_update_row(tbl, vals, col_map)
-		return cmd:insert_row(tbl, vals, col_map, true)
+		return self:insert_row(tbl, vals, col_map, true)
 	end
 
 	function cmd:update_row(tbl, vals, col_map, security_filter)

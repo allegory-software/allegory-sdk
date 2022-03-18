@@ -96,7 +96,7 @@ LOGGING
 
 	webb.dbg      (module, event, fmt, ...)
 	webb.note     (module, event, fmt, ...)
-	webb.warnif   (module, event, fmt, ...)
+	webb.warnif   (module, event, cond, fmt, ...)
 	webb.logerror (module, event, fmt, ...)
 
 REQUEST

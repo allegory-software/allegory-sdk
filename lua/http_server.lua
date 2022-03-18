@@ -159,7 +159,7 @@ function server:new(t)
 				else
 					assert(false)
 				end
-				errors.raise('http_response', err)
+				errors.raise(3, 'http_response', err)
 			end
 
 			req.thread = self.currentthread()
