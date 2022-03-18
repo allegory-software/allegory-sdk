@@ -13,7 +13,7 @@ recovery or logging. They're most useful in network protocols.
 	eclass(...) -> e                        create an error object
 	errors.new(classname,... | e) -> e      create/wrap/pass-through an error object
 	errors.is(v[, classes]) -> true|false   check an error object type
-	errors.raise(classname,... | e)         (create and) raise an error
+	errors.raise([level, ]classname,... | e)  (create and) raise an error
 	errors.catch([classes], f, ...) -> true,... | false,e  pcall `f` and catch errors
 	errors.pcall(f, ...) -> ...             pcall that stores traceback in `e.traceback`
 	errors.check(v, ...) -> v | raise(...)  assert with specifying an error class
@@ -137,8 +137,12 @@ function error:__tostring()
 	return s
 end
 
-local function raise(...)
-	lua_error((newerror(...)))
+local function raise(level, ...)
+	if type(level) == 'number' then
+		lua_error(newerror(...), level)
+	else
+		lua_error((newerror(level, ...)))
+	end
 end
 
 local function pass(classes, ok, ...)
