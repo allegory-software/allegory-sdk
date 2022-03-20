@@ -458,7 +458,7 @@ function input_widget(e) {
 		e.label_box.set(!e.nolabel ? s || e.create_label_placeholder() : null)
 	})
 
-	e.on('keydown', function(key) {
+	e.on('keydown', function(key, shift, ctrl) {
 
 		if (key == 'F1') {
 			if (e.info_button)

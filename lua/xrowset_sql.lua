@@ -102,11 +102,11 @@ local function guess_name_col(tdef)
 	if tdef.fields.name then return 'name' end
 end
 
-local function lookup_rowset(tbl)
+function lookup_rowset(tbl)
 	local rs_name = 'lookup_'..tbl
 	local rs = rawget(rowset, rs_name)
 	if not rs then
-		local tdef = table_def(tbl)
+		local tdef = checkfound(table_def(tbl))
 		local name_col = guess_name_col(tdef)
 		local t = glue.extend({name_col}, tdef.pk)
 		local cols = concat(glue.imap(t, sqlname), ', ')

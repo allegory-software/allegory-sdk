@@ -2141,6 +2141,7 @@ component('x-tabs', 'Containers', function(e) {
 			item._tab = tab
 			item.on('bind', item_bound, true)
 			item.on('caption_changed', item_caption_changed)
+			update_tab_title(tab)
 		}
 		item._tab.x = null
 		e.header.add(item._tab)
@@ -3474,12 +3475,16 @@ component('x-if', 'Containers', function(e) {
 
 	function apply(v) {
 		let on = e.cond(v)
+		let was_hidden = content.effectively_hidden
 		if (on) {
 			if (content.parent != e)
 				e.add(content)
-		} else
+		} else {
 			content.remove()
-		e.hide(!on)
+		}
+		e.show(on)
+		if (content.effectively_hidden != was_hidden)
+			document.fire('layout_changed')
 	}
 
 	function bind_global(k, on) {

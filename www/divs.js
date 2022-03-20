@@ -999,8 +999,6 @@ method(Element, 'hide', function(on) {
 	if (this.hidden == on)
 		return
 	this.hidden = on
-	if (this.effectively_hidden != on)
-		document.fire('layout_changed')
 })
 
 method(Element, 'show', function(on) {

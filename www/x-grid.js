@@ -76,7 +76,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		e.class('x-vgrid', !horiz)
 		e.update({fields: true, rows: true})
 	}
-	e.prop('vertical', {type: 'bool'})
+	e.prop('vertical', {type: 'bool', attr: true})
 
 	e.header       = div({class: 'x-grid-header'})
 	e.cells        = div({class: 'x-grid-cells'})
