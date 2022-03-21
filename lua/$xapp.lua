@@ -61,7 +61,7 @@ return function(app_name, ...)
 			return cmd_fn(cmd_name, ...)
 		end
 		return webb.run(function(...)
-			local ok, err = pcall(cmd_fn, cmd_name, ...)
+			local ok, err = errors.pcall(cmd_fn, cmd_name, ...)
 			if not ok then --check500, assert, etc.
 				webb.logerror('webb', 'run', '%s', err)
 				return 1

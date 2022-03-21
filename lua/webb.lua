@@ -32,6 +32,7 @@ CONFIG API
 	config(name[, default_val]) -> val      get/set config value
 	config{name->val}                       set multiple config values
 	with_config(conf, f, ...) -> ...        run f with custom config table
+	config_host(host, ip)                   add a static entry for resolve()
 
 MULTI-LANGUAGE & MULTI-COUNTRY SUPPORT
 
@@ -1041,8 +1042,19 @@ end
 
 --dns resolver ---------------------------------------------------------------
 
+local hosts = {localhost = '127.0.0.1'}
+function config_host(host, ip)
+	hosts[host] = ip
+end
+
 local resolver
 function resolve(host)
+	host = glue.trim(host)
+	if host:find'^%d+%.%d+%.%d+%.%d$' then --ip4
+		return host
+	end
+	local ip = hosts[host]
+	if ip then return ip end
 	resolver = resolver or require'resolver'.new{
 		servers = config('ns', {
 			'1.1.1.1', --cloudflare
@@ -1081,20 +1093,22 @@ function getpage(arg1, post_data)
 
 	local u = type(arg1) == 'string' and uri.parse(arg1) or arg1.url and opt(arg1.url)
 
-	local res, req, err_class = getpage_client:request(update({
+	local opt = update({
 		host = u and u.host,
 		uri = u and u.path,
 		https = (u and u.scheme and u.scheme or scheme()) == 'https',
 		method = post_data and 'POST',
-		headers = headers,
 		content = post_data,
 		receive_content = 'string',
 		debug = {protocol = true, stream = false},
 		--close = true,
-	}, opt))
+	}, opt)
+	opt.headers = update(headers, opt.headers)
+
+	local res, req = getpage_client:request(opt)
 
 	if not res then
-		return nil, req, err_class
+		return nil, req
 	end
 
 	local s = res.content
@@ -1841,7 +1855,7 @@ function webb.thread(f, ...)
 	return thread(function(...)
 		local thread = coroutine.running()
 		webb.setcx(thread, webb.fakecx())
-		local ok, err = errors.pcall(f, ...)
+		local ok, err = glue.pcall(f, ...)
 		webb.setcx(thread, nil)
 		if not ok then
 			webb.logerror('webb', 'thread', '%s', err)

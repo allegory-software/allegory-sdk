@@ -249,20 +249,24 @@ end
 
 function client:connect_now(target)
 	local host, port, client_ip = target()
-	local tcp, err, errcode = self.tcp()
-	if not tcp then return nil, err, errcode end
+	local tcp, err = self.tcp()
+	if not tcp then return nil, err end
 	if client_ip then
-		local ok, err, errcode = tcp:bind(client_ip)
-		if not ok then return nil, err, errcode end
+		local ok, err = tcp:bind(client_ip)
+		if not ok then return nil, err end
 	end
 	self:inc_conn_count(target)
 	local dt = target.connect_timeout
 	local expires = dt and time.clock() + dt or nil
-	local ok, err, errcode = tcp:connect(self:resolve(host), port, expires)
+	local ip, err = self:resolve(host)
+	if not ip then
+		return nil, 'lookup failed for "'..host..'": '..tostring(err)
+	end
+	local ok, err = tcp:connect(ip, port, expires)
 	self:dp(target, '+CO', '%s %s', tcp, err or '')
 	if not ok then
 		self:dec_conn_count(target)
-		return nil, err, errcode
+		return nil, err
 	end
 	local function pass(closed, ...)
 		if not closed then
@@ -276,10 +280,10 @@ function client:connect_now(target)
 		return pass(tcp:closed(), inherited(tcp, ...))
 	end)
 	if target.http_args.https then
-		local stcp, err, errcode = self.stcp(tcp, host, self:stcp_options(host, port))
+		local stcp, err = self.stcp(tcp, host, self:stcp_options(host, port))
 		self:dp(target, ' TLS', '%s %s %s', stcp, http, err or '')
 		if not stcp then
-			return nil, err, errcode
+			return nil, err
 		end
 		tcp = stcp
 	end
