@@ -19,6 +19,7 @@ FILESYSTEM API (NOT ASYNC)
 	cwd()
 	chdir(dir)
 	run_indir(dir, fn)
+	searchpaths(paths, file, [type]) -> abs_path
 	rm(path)
 	mv(old_path, new_path)
 	mkdir(dir) -> dir
@@ -89,6 +90,15 @@ function run_indir(dir, fn, ...)
 		error(..., 2)
 	end
 	pass(errors.pcall(fn, ...))
+end
+
+function searchpaths(paths, file, type)
+	for _,path in ipairs(paths) do
+		local abs_path = indir(path, file)
+		if fs.is(abs_path, type) then
+			return abs_path
+		end
+	end
 end
 
 tryrm = fs.remove
@@ -218,6 +228,8 @@ function dir(path, patt, min_mtime, create, desc, order_by)
 	end
 end
 
+--proc -----------------------------------------------------------------------
+
 function exec(fmt, ...) --exec/wait program without redirecting its stdout/stderr.
 	local cmd = fmt:format(...)
 	note('fs', 'exec', '%s', cmd)
@@ -255,4 +267,3 @@ function gen_id(name, start)
 	note ('fs', 'gen_id', '%s: %d', name, n)
 	return n
 end
-

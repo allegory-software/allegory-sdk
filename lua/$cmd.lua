@@ -12,8 +12,7 @@ CMDLINE
 	cmdsection(name) -> section                    create a cmdline section
 	section([active, ]cmdargs, help[, descr], fn)  add a command to a section
 	cmd    ([active, ]cmdargs, help[, descr], fn)  add a command to the misc section
-	cmdoptions(...) -> arg_i                       process cmdline options and get cmd arg_i
-	cmdaction(arg_i, ...) -> fn, action_name       get the cmd action handler
+	cmdaction(...) -> fn, action_name              process cmdline options
 
 ]==]
 
@@ -129,11 +128,24 @@ cmd('help', 'Show this screen', function()
 	say''
 end)
 
-function cmdoptions(...)
+local function run_cmd(c, ...)
+	local fn = cmds[c]
+	if fn then
+		return fn(...)
+	else
+		local function invalid_usage()
+			say(' ERROR: Unknown command: %s', s)
+			usage()
+		end
+		return invalid_usage, 'usage'
+	end
+end
 
-	local i = 1
+function cmdaction(...)
+
+	local i, s = 1
 	while true do
-		local s = select(i, ...)
+		s = select(i, ...)
 		i = i + 1
 		if s == '-v' then
 			logging.verbose = true
@@ -155,20 +167,9 @@ function cmdoptions(...)
 	if repl(env'DEBUG'  , '', nil) then logging.debug   = true end
 	if repl(env'VERBOSE', '', nil) then logging.verbose = true end
 
-	return i
-end
-
-function cmdaction(arg_i, ...)
-	local s = select(arg_i-1, ...)
 	if s == '--help' then s = 'help' end
 	local c = s and s:gsub('-', '_') or 'help'
-	if cmds[c] then
-		return cmds[c], c
-	else
-		local function invalid_usage()
-			say(' ERROR: Unknown command: %s', s)
-			usage()
-		end
-		return invalid_usage, 'usage'
-	end
+
+	local args = pack(select(i, ...))
+	return c, args, run_cmd
 end

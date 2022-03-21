@@ -3,7 +3,7 @@
 	$ | daemon apps
 	Written by Cosmin Apreutesei. Public Domain.
 
-	daemon() -> app
+	daemon(app_name, cmdline_args...) -> app
 
 	app.name       app name: the name of the Lua script without file extension.
 	app.dir        app directory.
@@ -17,6 +17,8 @@
 	cmd_server     cmdline section for server control
 
 	exit(app:run(...))    run the daemon app with cmdline args
+
+	config(name[, default]) -> val
 
 FILES
 
@@ -143,7 +145,7 @@ end)
 
 function daemon(app_name, ...)
 
-	local arg_i = cmdoptions(...) --process cmdline options.
+	local cmd_name, cmd_args, cmd_fn = cmdaction(...) --process cmdline options.
 
 	assert(not app.name, 'daemon() already called')
 
@@ -227,15 +229,14 @@ function daemon(app_name, ...)
 	end
 
 	function app:run_cmd(cmd_name, cmd_fn, ...) --stub
-		return cmd_fn(...)
+		return cmd_fn(cmd_name, ...)
 	end
 
-	function app:run(...)
-		if ... == app.name then --caller module loaded with require()
+	function app:run()
+		if cmd_name == app.name then --caller module loaded with require()
 			return app
 		end
-		local cmd_fn, cmd_name = cmdaction(arg_i, ...)
-		return self:run_cmd(cmd_name, cmd_fn, select(arg_i, ...))
+		return self:run_cmd(cmd_name, cmd_fn, unpack(cmd_args))
 	end
 
 	return app

@@ -58,10 +58,10 @@ return function(app_name, ...)
 
 	function app:run_cmd(cmd_name, cmd_fn, ...)
 		if cmd_name == 'run' then
-			return cmd_fn(...)
+			return cmd_fn(cmd_name, ...)
 		end
 		return webb.run(function(...)
-			local ok, err = pcall(cmd_fn, ...)
+			local ok, err = pcall(cmd_fn, cmd_name, ...)
 			if not ok then --check500, assert, etc.
 				webb.logerror('webb', 'run', '%s', err)
 				return 1
