@@ -343,12 +343,12 @@ end
 local auth = {} --auth.<type>(auth) -> usr, can_create
 
 local function authenticate(a)
-	a = a or {type = 'session'}
-	if type(a) ~= 'table' or not auth[a.type] then
+	local auth = auth[a and type(a) == 'table' and a.type or 'session']
+	if not auth then
 		return nil, 'invalid argument'
 	end
 	webb.dbg('auth', 'auth', '%s', pp.format(a, false))
-	local usr, err = auth[a.type](a)
+	local usr, err = auth(a)
 	if usr then
 		webb.note('auth', 'auth-ok', 'usr=%d', usr)
 		return usr
