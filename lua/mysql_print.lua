@@ -97,7 +97,7 @@ local function cell_align(current_align, cell_value)
 	return 'left'
 end
 
-function print_result(rows, cols, minsize)
+function print_result(rows, cols, minsize, print)
 	local fs = {}
 	for i,col in ipairs(cols) do
 		fs[i] = col.name
@@ -112,7 +112,7 @@ function print_result(rows, cols, minsize)
 		end
 		rs[i] = t
 	end
-	print_table(fs, rs, aligns, minsize)
+	print_table(fs, rs, aligns, minsize, print)
 end
 
 return {

@@ -54,6 +54,7 @@ DDL
 DEBUGGING
 
 	pqr(rows, cols)                                pretty-print query result
+	outpqr(rows, cols)                             same but using out()
 
 ]==]
 
@@ -62,7 +63,7 @@ sqlpps = {}
 sqlpps.mysql     = require'sqlpp'.new'mysql'
 sqlpps.tarantool = require'sqlpp'.new'tarantool'
 local default_port = {mysql = 3306, tarantool = 3301}
-local pool = require'connpool'.new{log = webb.log}
+local pool = require'connpool'.new{log = webb.log, logging = true}
 local mysql_print = require'mysql_print'
 
 sql_default = {'default'}
@@ -184,4 +185,8 @@ end
 
 function pqr(rows, cols)
 	return mysql_print.result(rows, cols)
+end
+
+function outpqr(rows, cols)
+	mysql_print.result(rows, cols, nil, outprint)
 end

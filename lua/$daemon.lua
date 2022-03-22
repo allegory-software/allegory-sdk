@@ -213,6 +213,7 @@ function daemon(app_name, ...)
 	end
 
 	function run_server() --fw. declared.
+		app.server_running = true
 		logging:tofile(app.logfile)
 		logging.flush = logging.debug
 		local logtoserver = app.conf.log_host and app.conf.log_port

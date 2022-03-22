@@ -624,7 +624,8 @@ end
 
 --logging --------------------------------------------------------------------
 
-function webb.log      (...) cx.req.http:log(...) end
+log = log or glue.noop
+function webb.log      (...) if cx then cx.req.http:log(...) else log(...) end end
 function webb.dbg      (...) webb.log(''     , ...) end
 function webb.note     (...) webb.log('note' , ...) end
 function webb.logerror (...) webb.log('ERROR', ...) end
@@ -1100,7 +1101,7 @@ function getpage(arg1, post_data)
 		method = post_data and 'POST',
 		content = post_data,
 		receive_content = 'string',
-		debug = {protocol = true, stream = false},
+		--debug = {protocol = true, stream = false},
 		--close = true,
 	}, opt)
 	opt.headers = update(headers, opt.headers)
@@ -1116,7 +1117,7 @@ function getpage(arg1, post_data)
 	if ct and ct.media_type == mime_types.json then
 		s = json_arg(s)
 	end
-	return s
+	return s, res
 end
 
 --html encoding --------------------------------------------------------------
@@ -1856,10 +1857,10 @@ function webb.thread(f, ...)
 		local thread = coroutine.running()
 		webb.setcx(thread, webb.fakecx())
 		local ok, err = glue.pcall(f, ...)
-		webb.setcx(thread, nil)
 		if not ok then
 			webb.logerror('webb', 'thread', '%s', err)
 		end
+		webb.setcx(thread, nil)
 	end, ...)
 end
 
