@@ -57,6 +57,10 @@ coro.ptransfer(thread[, ...]) -> ok, ... | nil, err
 
 	Protected transfer: a variant of `coro.transfer()` that doesn't raise.
 
+return coro.finish(thread, ...)
+
+	Finish the coroutine by transferring control to another thread.
+
 coro.install() -> old_coroutine_module
 
 	Replace `_G.coroutine` with `coro` and return the old coroutine module.
@@ -92,7 +96,7 @@ coro.wrap(f) -> wrapper
 
 	Behaves like standard coroutine.wrap()
 
-coro.safewrap(f) -> wrapper
+coro.safewrap(f) -> wrapper, thread
 
 	Behaves like coroutine.wrap() except that the wrapped function receives
 	a custom `yield()` function as its first argument which always yields back
@@ -151,8 +155,17 @@ local function unprotect(thread, ok, ...)
 	return ...
 end
 
+local FIN = {}
+function coro.finish(thread, ...)
+	return FIN, thread, ...
+end
+
 --the coroutine ends by transferring control to the caller (or finish) thread.
 local function finish(thread, ...)
+	if ... == FIN then --called coro.finish()
+		callers[thread] = select(2, ...)
+		return finish(thread, select(3, ...))
+	end
 	local caller = callers[thread]
 	if not caller then
 		error('coroutine ended without transferring control', 3)
