@@ -4,7 +4,7 @@ local bit = require'bit'
 assert(ffi.os == 'Windows', 'platform not Windows')
 
 local M = {}
-local proc = {type = 'process', debug_prefix = 'P'}
+local proc = {type = 'process', debug_prefix = 'p'}
 
 --TODO: move relevant ctypes here and get rid of the winapi dependency
 --(not worth it unless you are really really bored).
@@ -154,10 +154,6 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 
 	local is_in_job = autokill and winapi.IsProcessInJob(winapi.GetCurrentProcess(), nil)
 
-	if _G.dbg then
-		dbg('proc', 'exec', '%s', cmd)
-	end
-
 	local pi, err, errcode = winapi.CreateProcess(
 		cmd, env, dir, si, inherit_handles,
 			autokill
@@ -189,6 +185,9 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 	self.id                 = pi.dwProcessId
 	self.main_thread_id     = pi.dwThreadId
 
+	M.log('', 'proc', 'exec', '%s', cmd)
+	M.live(self, cmd)
+
 	return self
 end
 
@@ -203,6 +202,7 @@ function proc:forget()
 		self.id = false
 		self.main_thread_handle = false
 		self.main_thread_id = false
+		M.live(self, nil)
 	end
 end
 

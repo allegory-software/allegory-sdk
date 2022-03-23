@@ -9,6 +9,8 @@ LOGGING
 	logging.dbg(module, event, fmt, ...)
 	logging.warnif(module, event, condition, fmt, ...)
 	logging.logerror(module, event, fmt, ...)
+	logging.logvar(k, v)
+	logging.live(e, [fmt, ...] | nil)
 UTILS
 	logging.arg(v) -> s
 	logging.printarg(v) -> s
@@ -128,6 +130,7 @@ function logging:toserver(host, port, queue_size, timeout)
 		while not stop do
 			local exp = timeout and clock() + timeout
 			if tcp:connect(host, port, exp) then
+				self:live(tcp, 'connected logging %s:%d', host, port)
 				return true
 			end
 			--wait because 'connection_refused' error comes instantly on Linux.
@@ -143,7 +146,7 @@ function logging:toserver(host, port, queue_size, timeout)
 	local queue = queue.new(queue_size or 1/0)
 	local send_thread_suspended = true
 
-	local send_thread = sock.newthread(function()
+	local send_thread = sock.thread(function()
 		send_thread_suspended = false
 		local lenbuf = glue.u32a(1)
 		while not stop do
@@ -222,22 +225,28 @@ local function debug_prefix(v)
 		or prefixes[debug_type(v)] or debug_type(v)
 end
 
-local ids_db = {} --{type->{last_id=,[obj]->id}}
-
+local ids_db = {} --{type->{last_id=,live=,[obj]->id}}
+local mode_k = {__mode = 'k'}
 local function debug_id(v)
-	local type = debug_type(v)
-	local ids = ids_db[type]
+	local ty = debug_type(v)
+	local ids = ids_db[ty]
 	if not ids then
-		ids = setmetatable({}, {__mode = 'k'})
-		ids_db[type] = ids
+		ids = setmetatable({
+			live_count = 0,
+			live = setmetatable({}, mode_k),
+		}, mode_k)
+		ids_db[ty] = ids
 	end
 	local id = ids[v]
 	if not id then
-		id = (ids.last_id or 0) + 1
-		ids.last_id = id
+		id = type(v) == 'table' and v.debug_id
+		if not id then
+			id = (ids.last_id or 0) + 1
+			ids.last_id = id
+		end
 		ids[v] = id
 	end
-	return debug_prefix(v)..id
+	return debug_prefix(v)..id, ids
 end
 
 local pp_skip = {
@@ -319,9 +328,8 @@ local function log(self, severity, module, event, fmt, ...)
 	if self.filter[module  ] then return end
 	if self.filter[event   ] then return end
 	self._logging = true
-	local env = logging.env and logging.env:upper():sub(1, 1) or 'D'
+	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
 	local time = time()
-	local date = os.date('%Y-%m-%d %H:%M:%S', time)
 	local msg = fmt and _(fmt, self.args(...))
 	if next(self.censor) then
 		for _,censor in pairs(self.censor) do
@@ -335,12 +343,12 @@ local function log(self, severity, module, event, fmt, ...)
 			msg = '\n\n'..msg..'\n'
 		end
 	end
-	if (severity ~= '' or self.debug)
-		and (severity ~= 'note' or (self.verbose == true or self.verbose == module))
-	then
-		local entry = _('%s %s %-6s %-6s %-8s %-4s %s\n',
-			env, date, severity, module or '', (event or ''):sub(1, 8),
-			debug_arg(false, (coroutine.running())), msg or '')
+	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
+		local entry = (self.logtofile or not self.quiet)
+			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
+				env, os.date('%Y-%m-%d %H:%M:%S', time), severity,
+				module or '', (event or ''):sub(1, 8),
+				debug_arg(false, (coroutine.running())), msg or '')
 		if not self._logging then
 			self._logging = true
 			if self.logtofile then
@@ -382,6 +390,24 @@ local function logvar(self, k, v)
 	end
 end
 
+local function live(self, o, fmt, ...)
+	local id, ids = debug_id(o)
+	local was_live = ids.live[id] ~= nil
+	if fmt then
+		if not was_live then
+			ids.live_count = ids.live_count + 1
+		end
+	elseif was_live then
+		ids.live_count = ids.live_count - 1
+	end
+	ids.live[id] = fmt and _(fmt, self.args(...)) or nil
+end
+
+local function liveadd(self, o, fmt, ...)
+	local id, ids = debug_id(o)
+	ids.live[id] = assert(ids.live[id]) .. ' ' .. _(fmt, self.args(...))
+end
+
 local function init(self)
 	self.log      = function(...) return log      (self, ...) end
 	self.note     = function(...) return note     (self, ...) end
@@ -389,7 +415,21 @@ local function init(self)
 	self.warnif   = function(...) return warnif   (self, ...) end
 	self.logerror = function(...) return logerror (self, ...) end
 	self.logvar   = function(...) return logvar   (self, ...) end
+	self.live     = function(...) return live     (self, ...) end
+	self.liveadd  = function(...) return liveadd  (self, ...) end
 	return self
+end
+
+function logging.printlive(custom_print)
+	local print = custom_print or print
+	for type, ids in pairs(ids_db) do
+		print(_('%-12s: %d', type, ids.live_count))
+		local t = {}; for k in pairs(ids.live) do t[#t+1] = k end
+		table.sort(t)
+		for i,id in ipairs(t) do
+			print(_('  %-4s: %s', id, ids.live[id]))
+		end
+	end
 end
 
 init(logging)
@@ -406,11 +446,11 @@ if not ... then
 
 	local logging = logging.new()
 
-	sock.thread(function()
+	sock.resume(sock.thread(function()
 		sock.sleep(5)
 		logging:toserver_stop()
 		print'told to stop'
-	end)
+	end))
 
 	sock.run(function()
 

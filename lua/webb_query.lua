@@ -29,6 +29,8 @@ EXECUTION
 	[db:]each_group(col, [opt,]sql, ...) -> iter   query, group rows and and iterate groups
 	[db:]atomic(func)                              execute func in transaction
 
+	release_dbs()                                  release db connections back into the pool
+
 DDL
 
 	[db:]db_exists(dbname) -> t|f                  check if db exists
@@ -113,6 +115,17 @@ function sqlpp(ns)
 	return conn_opt(ns or false).sqlpp
 end
 
+function release_dbs()
+	local thread = currentthread()
+	local env = threadenv[thread]
+	local dbs = env and env.dbs
+	if not dbs then return end
+	for _,db in pairs(dbs) do
+		db:release()
+		dbs[db] = nil
+	end
+end
+
 function db(ns, without_current_db)
 	local opt = conn_opt(ns or false)
 	local key = opt.pool_key
@@ -122,11 +135,22 @@ function db(ns, without_current_db)
 	if not dbs then
 		dbs = {}
 		env.dbs = dbs
-		onthreadfinish(thread, function()
+		local function release_dbs()
 			for _,db in pairs(dbs) do
 				db:release()
+				dbs[db] = nil
 			end
-		end)
+		end
+		local cx = cx()
+		if cx and thread == cx.req.thread then
+			--browsers keep multiple connections open, and even keep them
+			--open for a while after closing the last browser window(!), and
+			--we don't want to hold on to pooled resources like db connections
+			--on idle http connections, so we're releasing them after each request.
+			onrequestfinish(release_dbs)
+		else
+			onthreadfinish(thread, release_dbs)
+		end
 	end
 	local db, err = dbs[key]
 	if not db then
@@ -143,6 +167,8 @@ function db(ns, without_current_db)
 			else
 				assert(nil, err)
 			end
+		else
+			dbs[key] = db
 		end
 	end
 	return db

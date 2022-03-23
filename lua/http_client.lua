@@ -98,10 +98,9 @@ function client:bind_libs(libs)
 			local sock = require'sock'
 			self.tcp           = sock.tcp
 			self.cowrap        = sock.cowrap
-			self.newthread     = sock.newthread
+			self.thread        = sock.thread
 			self.suspend       = sock.suspend
 			self.resume        = sock.resume
-			self.thread        = sock.thread
 			self.start         = sock.start
 			self.sleep         = sock.sleep
 			self.currentthread = sock.currentthread

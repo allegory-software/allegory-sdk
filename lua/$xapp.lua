@@ -20,6 +20,7 @@ require'$sock'
 require'xapp'
 
 require'fs'          .logging = logging
+require'proc'        .logging = logging
 require'sock'        .logging = logging
 require'http'        .logging = logging
 require'http_client' .logging = logging

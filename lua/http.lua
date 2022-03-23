@@ -325,7 +325,7 @@ function http:zlib_decoder(format, write)
 	assert(self.zlib, 'zlib not loaded')
 	local decode = self.cowrap(function(yield)
 		self.zlib.inflate(yield, write, nil, format)
-	end)
+	end, 'http-zlib-decode %s', self.tcp)
 	decode()
 	return decode
 end
@@ -358,7 +358,7 @@ function http:zlib_encoder(format, content, content_size)
 		end
 		return (self.cowrap(function(yield)
 			return self.zlib.deflate(content, yield, nil, format)
-		end))
+		end, 'http-zlib-encode %s', self.tcp))
 	else
 		assert(false, type(content))
 	end
@@ -439,7 +439,7 @@ function http:read_body(headers, write, from_server, close, state)
 		return (self.cowrap(function(yield)
 			self:read_body_to_writer(headers, yield, from_server, close, state)
 			return nil, 'eof'
-		end))
+		end, 'http-read-body %s', self.tcp))
 	else
 		self:read_body_to_writer(headers, write, from_server, close, state)
 		return true --signal that content was read.
@@ -453,7 +453,7 @@ http.client_request_class = creq
 
 function http:build_request(t, cookies)
 	local req = glue.object(creq,
-		{http = self, type = 'http_request', debug_prefix = 'R'})
+		{http = self, type = 'http_request', debug_prefix = '>'})
 
 	req.http_version = t.http_version or '1.1'
 	req.method = t.method or 'GET'

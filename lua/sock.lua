@@ -26,7 +26,7 @@ SOCKETS
 	sock.tcp([family][, protocol]) -> tcp      make a TCP socket
 	sock.udp([family][, protocol]) -> udp      make a UDP socket
 	sock.raw([family][, protocol]) -> raw      make a raw socket
-	s:type() -> s                              socket type: 'tcp', ...
+	s:socktype() -> s                          socket type: 'tcp', ...
 	s:family() -> s                            address family: 'inet', ...
 	s:protocol() -> s                          protocol: 'tcp', 'icmp', ...
 	s:close()                                  send FIN and/or RST and free socket
@@ -48,11 +48,10 @@ SOCKETS
 	s:debug([protocol], [log])                 log the I/O stream and close
 
 SCHEDULING
-	sock.newthread(func[, name]) -> co         create a coroutine for async I/O
+	sock.thread(func[, fmt, ...]) -> co        create a coroutine for async I/O
 	sock.resume(thread, ...) -> ...            resume thread
 	sock.yield(...) -> ...                     safe yield (see [coro])
 	sock.suspend(...) -> ...                   suspend thread
-	sock.thread(func, ...) -> co               create thread and resume
 	sock.cowrap(f) -> wrapper                  see coro.safewrap()
 	sock.currentthread() -> co                 see coro.running()
 	sock.transfer(co, ...) -> ...              see coro.transfer()
@@ -84,7 +83,7 @@ or unrecoverable OS failure). Some error messages are normalized
 across platforms, like 'access_denied' and 'address_already_in_use'
 so they can be used in conditionals.
 
-I/O functions only work inside threads created with `sock.newthread()`.
+I/O functions only work inside threads created with `sock.thread()`.
 
 The optional `expires` arg controls the timeout of the operation and must be
 a `sock.clock()`-relative value (which is in seconds). If the expiration clock
@@ -235,7 +234,7 @@ SCHEDULING -------------------------------------------------------------------
 	Scheduling is based on synchronous coroutines provided by [coro](coro.md) which
 	allows coroutine-based iterators that perform socket I/O to be written.
 
-sock.newthread(func) -> co
+sock.thread(func[, fmt, ...]) -> co
 
 	Create a coroutine for performing async I/O. The coroutine must be resumed
 	to start. When the coroutine finishes, the control is transfered to
@@ -353,6 +352,18 @@ function M.log(severity, ...)
 	local logging = M.logging
 	if not logging then return end
 	logging.log(severity, 'sock', ...)
+end
+
+function M.live(...)
+	local logging = M.logging
+	if not logging then return end
+	logging.live(...)
+end
+
+function M.liveadd(...)
+	local logging = M.logging
+	if not logging then return end
+	logging.liveadd(...)
 end
 
 --getaddrinfo() --------------------------------------------------------------
@@ -580,7 +591,7 @@ do
 
 	ffi.metatype(addrinfo_ct, {__index = ai})
 
-	function socket:type     () return socket_type_map[self._st] end
+	function socket:socktype () return socket_type_map[self._st] end
 	function socket:family   () return family_map     [self._af] end
 	function socket:protocol () return protocol_map   [self._pr] end
 
@@ -927,20 +938,23 @@ do
 			return check()
 		end
 
-		local socket = wrap_socket(class, s, st, af, pr)
+		local s = wrap_socket(class, s, st, af, pr)
+		M.live(s, socktype)
 
-		local ok, err = M._register(socket)
+		local ok, err = M._register(s)
 		if not ok then
+			s:close()
 			return nil, err
 		end
 
-		return socket
+		return s
 	end
 end
 
 function socket:close()
 	if not self.s then return true end
 	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
+	M.live(s, nil)
 	local ok, err = check(C.closesocket(s) == 0)
 	if not ok then return false, err end
 	M.log('', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
@@ -1147,7 +1161,9 @@ do
 			if not ext_ai then ai:free() end
 			return false, err
 		end
-		M.log('', 'connect', '%-4s %s', self, ai:tostring())
+		local ip = ai:tostring()
+		M.log('', 'connect', '%-4s %s', self, ip)
+		M.live(self, 'connected %s', ip)
 		if not ext_ai then ai:free() end
 		return true
 	end
@@ -1174,6 +1190,7 @@ do
 	local sa_len = ffi.sizeof(accept_buf) / 2
 	function tcp:accept(expires)
 		local s, err = M.tcp(self._af, self._pr)
+		M.live(s, 'accept %s', self)
 		if not s then return nil, err end
 		local o, job = overlapped(self, return_true, expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
@@ -1183,11 +1200,16 @@ do
 		local rp = accept_buf.remote_addr:port()
 		local la = accept_buf. local_addr:addr():tostring()
 		local lp = accept_buf. local_addr:port()
-		M.log('', 'accept', '%-4s %-4s %s:%s -> %s:%s', self, s, ra, rp, la, lp)
+		self.n = self.n + 1
+		s.i = self.n
+		M.log('', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+			s, self, s.i, la, lp, ra, rp, self.n)
+		M.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
 		s. local_port = lp
+		s.listen_socket = self
 		return s
 	end
 
@@ -1330,16 +1352,22 @@ local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
 	if s == -1 then
 		return check()
 	end
-	return wrap_socket(class, s, st, af, pr)
+	local s = wrap_socket(class, s, st, af, pr)
+	M.live(s, socktype)
+	return s
 end
 
 function socket:close()
 	if not self.s then return true end
 	M._unregister(self)
+	if self.listen_socket then
+		self.listen_socket.n = self.listen_socket.n - 1
+	end
 	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
 	local ok, err = check(C.close(s) == 0)
 	if not ok then return false, err end
-	M.log('', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
+	M.log('', 'close', '%-4s r:%d w:%d%s', self, self.r, self.w,
+		self.n and ' live:'..self.n)
 	return true
 end
 
@@ -1435,7 +1463,9 @@ function socket:connect(host, port, expires, addr_flags, ...)
 		if not ext_ai then ai:free() end
 		return false, err
 	end
-	M.log('', 'connect', '%-4s %s', self, ai:tostring())
+	local ip = ai:tostring()
+	M.log('', 'connect', '%-4s %s', self, ip)
+	M.live(self, 'connect %s', ip)
 	if not ext_ai then ai:free() end
 	return true
 end
@@ -1454,6 +1484,7 @@ do
 		local s, err = tcp_accept(self, expires)
 		if not s then return nil, err end
 		local s = wrap_socket(tcp, s, self._st, self._af, self._pr)
+		M.live(s, 'accept %s', this)
 		local ok, err = M._register(s)
 		if not ok then
 			s:close()
@@ -1470,7 +1501,11 @@ do
 		end
 		local la = accept_buf:addr():tostring()
 		local lp = accept_buf:port()
-		M.log('', 'accept', '%-4s %-4s %s:%s -> %s:%s', self, s, ra, rp, la, lp)
+		self.n = self.n + 1
+		s.i = self.n
+		M.log('', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:',
+			s, self, s.i, la, lp, ra, rp, n)
+		M.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1796,6 +1831,8 @@ function tcp:listen(backlog, host, port, addr_flags)
 	local ok = C.listen(self.s, backlog) == 0
 	if not ok then return check() end
 	M.log('', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
+	M.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
+	self.n = 0 --live client connection count
 	return true
 end
 
@@ -2133,26 +2170,26 @@ local function cancel_sleep(job)
 	job:wakeup(CANCEL)
 end
 
-function M.runat(t, f)
+function M.runat(t, f, ...)
 	local job = M.sleep_job()
 	job.cancel = cancel_sleep
-	M.thread(function()
+	M.resume(M.thread(function()
 		if job:sleep_until(t) == CANCEL then
 			return
 		end
 		f()
-	end)
+	end, ...))
 	return job
 end
 
-function M.runafter(timeout, f)
-	return M.runat(clock() + timeout, f)
+function M.runafter(timeout, f, ...)
+	return M.runat(clock() + timeout, f, ...)
 end
 
-function M.runevery(interval, f)
+function M.runevery(interval, f, ...)
 	local job = M.sleep_job()
 	job.cancel = cancel_sleep
-	M.thread(function()
+	M.resume(M.thread(function()
 		while true do
 			if job:sleep(interval) == CANCEL then
 				return
@@ -2161,7 +2198,7 @@ function M.runevery(interval, f)
 				return
 			end
 		end
-	end)
+	end, ...))
 	return job
 end
 
@@ -2264,7 +2301,7 @@ function M.onthreadfinish(thread, f)
 	glue.after(env, '__finish', f)
 end
 
-function M.newthread(f)
+function M.thread(f, fmt, ...)
 	--wrap f so that it terminates in current poll_thread.
 	local thread
 	thread = coro.create(function(...)
@@ -2281,22 +2318,41 @@ function M.newthread(f)
 		if not ok then
 			M.log('ERROR', 'thread', '%s', err)
 		end
+		M.live(thread, nil)
 		return transfer(poll_thread)
 	end)
+	if fmt then
+		M.live(thread, fmt, ...)
+	else
+		M.live(thread, traceback())
+	end
 	return thread
 end
 
-function M.cowrap(f)
-	return coro.safewrap(function(...)
+function M.cowrap(f, fmt, ...)
+	local finish
+	local wrapper, thread = coro.safewrap(function(...)
 		M.save_thread_context(currentthread())
-		return f(...)
+		return finish(f(...))
 	end)
+	function finish(...)
+		M.live(thread, nil)
+		return ...
+	end
+	if fmt then
+		M.live(thread, fmt, ...)
+	else
+		M.live(thread, traceback())
+	end
+	return wrapper, thread
 end
 
 function M.transfer(thread, ...)
 	assert(not waiting[thread], 'attempt to resume a thread that is waiting on I/O')
 	return restore(transfer(thread, ...))
 end
+
+M.cofinish = coro.finish
 
 function M.suspend(...)
 	return restore(transfer(poll_thread, ...))
@@ -2314,10 +2370,6 @@ function M.resume(thread, ...)
 	return resume_pass(real_poll_thread, M.transfer(thread, ...))
 end
 
-function M.thread(f, ...)
-	return M.resume(M.newthread(f), ...)
-end
-
 M.currentthread = currentthread
 M.yield = coro.yield
 
@@ -2327,7 +2379,7 @@ function M.threadset()
 	local errs
 	local wait_thread = currentthread()
 	function ts:thread(f, ...)
-		return thread(function(...)
+		return M.thread(function(...)
 			n = n + 1
 			local ok, err = glue.pcall(f, ...)
 			if not ok then
@@ -2385,7 +2437,7 @@ function M.run(f, ...)
 		local function wrapper(...)
 			ret = glue.pack(f(...))
 		end
-		M.thread(wrapper, ...)
+		M.resume(M.thread(wrapper, 'sock-run'), ...)
 		assert(M.start())
 		return ret and glue.unpack(ret)
 	end

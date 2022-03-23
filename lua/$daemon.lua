@@ -196,13 +196,13 @@ function daemon(app_name, ...)
 	local start_heartbeat, stop_heartbeat do
 		local stop, sleeper
 		function start_heartbeat()
-			thread(function()
+			resume(thread(function()
 				sleeper = sleep_job(1)
 				while not stop do
 					logging.logvar('live', time())
 					sleeper:sleep(1)
 				end
-			end)
+			end, 'logging-heartbeat'))
 		end
 		function stop_heartbeat()
 			stop = true

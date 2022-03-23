@@ -557,10 +557,9 @@ local function bind_libs(self, libs)
 			self.udp = sock.udp
 			self.addr = sock.addr
 			--scheduling
-			self.newthread = sock.newthread
+			self.thread = sock.thread
 			self.suspend = sock.suspend
 			self.resume = sock.resume
-			self.thread = sock.thread
 			self.transfer = sock.transfer
 			self.currentthread = sock.currentthread
 			self.start = sock.start
@@ -602,7 +601,7 @@ local function create_resolver(opt)
 		local udp = assert(rs.udp())
 		assert(udp:connect(ai))
 		local ns = {ai = ai, udp = udp, tcp_only = tcp_only, queue = {}}
-		ns.scheduler = rs.newthread(function()
+		ns.scheduler = rs.thread(function()
 			schedule(rs, ns)
 		end, 'N'..i)
 		rs.nst[i] = ns
@@ -635,7 +634,7 @@ local function rs_query(rs, qname, qtype, timeout)
 	local lookup_thread = rs.currentthread()
 	local queries_left = #rs.nst
 	for i,ns in ipairs(rs.nst) do
-		rs.resume(rs.newthread(function()
+		rs.resume(rs.thread(function()
 			local t = glue.update({name = qname, type = qtype, timeout = timeout}, t)
 			local q = glue.object(q, t)
 			local res, err, errcode = ns_query(rs, ns, q) --suspends inside the first send().
@@ -773,7 +772,7 @@ if not ... then
  		'www.openresty.org',
 		'www.lua.org',
 	} do
-		r.resume(r.newthread(lookup, 'L'..i), s)
+		r.resume(r.thread(lookup, 'L'..i), s)
 	end
 
 	r.start()

@@ -11,12 +11,12 @@ EXPORTS
 require'$'
 sock = require'sock'
 
-threadenv      = sock.threadenv
-newthread      = sock.newthread
 thread         = sock.thread
+threadenv      = sock.threadenv
 resume         = sock.resume
 suspend        = sock.suspend
 transfer       = sock.transfer
+cofinish       = sock.cofinish
 cowrap         = sock.cowrap
 yield          = sock.yield
 currentthread  = sock.currentthread

@@ -392,7 +392,8 @@ function fs.open(path, opt)
 	local f, err = fs.wrap_handle(h,
 		opt.async or opt.read_async,
 		opt.async or opt.write_async,
-		opt.is_pipe_end)
+		opt.is_pipe_end,
+		path)
 	if not f then return nil, err end
 	if opt.seek_end then
 		local pos, err = f:seek('end', 0)
@@ -423,10 +424,11 @@ function file.close(f)
 	if not ok then return false, err end
 	f.handle = INVALID_HANDLE_VALUE
 	fs.log('', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	fs.live(f, nil)
 	return true
 end
 
-function fs.wrap_handle(h, read_async, write_async, is_pipe_end)
+function fs.wrap_handle(h, read_async, write_async, is_pipe_end, path)
 
 	local f = {
 		handle = h,
@@ -439,6 +441,7 @@ function fs.wrap_handle(h, read_async, write_async, is_pipe_end)
 		w = 0, r = 0,
 	}
 	setmetatable(f, f)
+	fs.live(f, path or '')
 
 	if read_async or write_async then
 		local sock = require'sock'
@@ -548,7 +551,7 @@ function fs.pipe(path, opt)
 		local f, err = fs.wrap_handle(h,
 				opt.async or opt.read_async,
 				opt.async or opt.write_async,
-				true
+				true, path
 			)
 		if not f then return nil, err end
 		fs.log('', 'pipe', '%-4s %s', f, path)
@@ -602,8 +605,8 @@ function fs.pipe(path, opt)
 			)
 			local ok, err = checknz(C.CreatePipe(hs, hs+1, sa, 0))
 			if not ok then return nil, err end
-			local rf = fs.wrap_handle(hs[0], nil, nil, true)
-			local wf = fs.wrap_handle(hs[1], nil, nil, true)
+			local rf = fs.wrap_handle(hs[0], nil, nil, true, 'pipe.r')
+			local wf = fs.wrap_handle(hs[1], nil, nil, true, 'pipe.w')
 			if opt.inheritable or opt.read_inheritable  then rf:set_inheritable(true) end
 			if opt.inheritable or opt.write_inheritable then wf:set_inheritable(true) end
 

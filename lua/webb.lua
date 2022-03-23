@@ -70,8 +70,7 @@ REQUEST CONTEXT
 
 THREADING
 
-	newthread(f) -> thread                  create thread
-	thread(f, ...) -> thread                create and resume thread
+	thread(f[, fmt, ...]) -> thread         create thread
 	currentthread() -> thread               get currently running thread
 	resume(thread, ...) -> ...              resume thread
 	suspend() -> ...                        suspend thread
@@ -241,7 +240,7 @@ STANDALONE OPERATION
 
 	webb.fakecx() -> cx                     make a fake webb context.
 	webb.run(f, ...)                        run a function in a webb context.
-	webb.thread(f, ...)                     run a function in a thread in a webb context.
+	webb.thread(f[, fmt,...]) -> co         make a thread with a webb context.
 	webb.request(req | arg1,...)            make a request without a http server.
 
 CONFIG
@@ -336,7 +335,6 @@ end
 --from $sock
 
 threadenv      = sock.threadenv
-newthread      = sock.newthread
 thread         = sock.thread
 currentthread  = sock.currentthread
 resume         = sock.resume
@@ -1793,7 +1791,7 @@ function webb.respond(req)
 		conn = attr(req.http, '_webb_cx'),
 	})
 	next_request_id = next_request_id + 1
-	webb.note('webb', 'request', '%s %s', req.method, uri.unescape(req.uri))
+	webb.dbg('webb', 'request', '%s %s', req.method, uri.unescape(req.uri))
 	local main = assert(config('main_module', config'app_name'))
 	local main = type(main) == 'string' and require(main) or main
 	if type(main) == 'table' then
@@ -1854,7 +1852,7 @@ end
 
 function webb.thread(f, ...)
 	return thread(function(...)
-		local thread = coroutine.running()
+		local thread = currentthread()
 		webb.setcx(thread, webb.fakecx())
 		local ok, err = glue.pcall(f, ...)
 		if not ok then
@@ -1868,7 +1866,7 @@ function webb.run(f, ...)
 	if cx then
 		return f(...)
 	end
-	local thread = coroutine.running()
+	local thread = currentthread()
 	webb.setcx(thread, webb.fakecx())
 	local function pass(...)
 		webb.setcx(thread, nil)

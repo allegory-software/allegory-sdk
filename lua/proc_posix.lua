@@ -4,7 +4,7 @@ local bit = require'bit'
 assert(ffi.os == 'Linux' or ffi.os == 'OSX', 'platform not Linux or OSX')
 
 local M = {}
-local proc = {type = 'process', debug_prefix = 'P'}
+local proc = {type = 'process', debug_prefix = 'p'}
 
 ffi.cdef[[
 extern char **environ;
@@ -322,14 +322,6 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		if out_wf then check(C.dup2(out_wf.fd, 1) >= 0) end
 		if err_wf then check(C.dup2(err_wf.fd, 2) >= 0) end
 
-		if _G.dbg then
-			local t = {cmd}
-			for i,arg in ipairs(args) do
-				t[#t+1] = M.quote_arg_unix(arg)
-			end
-			dbg('proc', 'exec', '%s', table.concat(t, ' '))
-		end
-
 		C.execvpe(cmd, arg_ptr, env_ptr)
 
 		--if we got here then exec failed.
@@ -360,11 +352,24 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 
 		self.id = pid
 
+		if M.logging then
+			local t = {cmd}
+			for i,arg in ipairs(args) do
+				t[#t+1] = M.quote_arg_unix(arg)
+			end
+			local s = table.concat(t, ' ')
+			M.log('', 'proc', 'exec', '%s', s)
+			M.live(self, s)
+		end
+
 		return self
 	end
 end
 
 function proc:forget()
+	if self.id then
+		M.live(self, nil)
+	end
 	if self.stdin  then assert(self.stdin :close()) end
 	if self.stdout then assert(self.stdout:close()) end
 	if self.stderr then assert(self.stderr:close()) end

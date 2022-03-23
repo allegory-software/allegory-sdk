@@ -111,7 +111,7 @@ function file.make_async(f)
 	return true
 end
 
-function fs.wrap_fd(fd, async, is_pipe_end)
+function fs.wrap_fd(fd, async, is_pipe_end, path)
 
 	local f = {
 		fd = fd,
@@ -122,6 +122,7 @@ function fs.wrap_fd(fd, async, is_pipe_end)
 		w = 0, r = 0,
 	}
 	setmetatable(f, f)
+	fs.live(f, path or '')
 
 	if async then
 		local ok, err = f:make_async()
@@ -145,7 +146,7 @@ function fs.open(path, opt)
 	local open = opt.open or C.open
 	local fd = open(path, flags, mode)
 	if fd == -1 then return check() end
-	local f, err = fs.wrap_fd(fd, opt.async, opt.is_pipe_end)
+	local f, err = fs.wrap_fd(fd, opt.async, opt.is_pipe_end, path)
 	if not f then return nil, err end
 	if opt.seek_end then
 		local pos, err = f:seek('end', 0)
@@ -176,6 +177,7 @@ function file.close(f)
 	if not ok then return check(false) end
 	f.fd = -1
 	fs.log('', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	fs.live(f, nil)
 	return true
 end
 
@@ -216,7 +218,7 @@ function fs.pipe(path, mode)
 	if path then
 		local fd = C.mkfifo(path, mode)
 		if fd == -1 then return check() end
-		local f, err = fs.wrap_fd(fd, opt.async, true)
+		local f, err = fs.wrap_fd(fd, opt.async, true, path)
 		if not f then return nil, err end
 		fs.log('', 'pipe', '%-4s %s', f, path)
 		return f
@@ -224,8 +226,8 @@ function fs.pipe(path, mode)
 		local fds = ffi.new'int[2]'
 		local ok = C.pipe(fds) == 0
 		if not ok then return check() end
-		local rf, err1 = fs.wrap_fd(fds[0], opt.async or opt.read_async, true)
-		local wf, err2 = fs.wrap_fd(fds[1], opt.async or opt.write_async, true)
+		local rf, err1 = fs.wrap_fd(fds[0], opt.async or opt.read_async , true, 'pipe.r')
+		local wf, err2 = fs.wrap_fd(fds[1], opt.async or opt.write_async, true, 'pipe.w')
 		if not (rf and wf) then
 			if rf then assert(rf:close()) end
 			if wf then assert(wf:close()) end

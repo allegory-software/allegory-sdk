@@ -350,10 +350,10 @@ local function authenticate(a)
 	webb.dbg('auth', 'auth', '%s', pp.format(a, false))
 	local usr, err = auth(a)
 	if usr then
-		webb.note('auth', 'auth-ok', 'usr=%d', usr)
+		webb.dbg('auth', 'auth-ok', 'usr=%d', usr)
 		return usr
 	else
-		webb.note('auth', 'auth-fail', '%s', err)
+		webb.dbg('auth', 'auth-fail', '%s', err)
 		return nil, err
 	end
 end

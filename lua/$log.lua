@@ -9,6 +9,8 @@ LOGGING API
 	dbg(module, event, fmt, ...)
 	warnif(module, event, condition, fmt, ...)
 	logerror(module, event, fmt, ...)
+	loglive(e, [fmt, ...] | nil)
+	logliveadd(e, fmt, ...)
 
 	logargs(...) -> ...
 	logprintargs(...) -> ...
@@ -28,12 +30,14 @@ CONFIG
 require'$'
 logging = require'logging'
 
-log      = logging.log
-note     = logging.note
-dbg      = logging.dbg
-warnif   = logging.warnif
-logerror = logging.logerror
-logargs  = logging.args
+log          = logging.log
+note         = logging.note
+dbg          = logging.dbg
+warnif       = logging.warnif
+logerror     = logging.logerror
+loglive      = logging.live
+logliveadd   = logging.liveadd
+logargs      = logging.args
 logprintargs = logging.printargs
 
 function pr(...)

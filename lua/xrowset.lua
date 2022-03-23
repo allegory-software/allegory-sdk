@@ -536,7 +536,7 @@ action['xrowset.events'] = function()
 	setheader('cache-control', 'no-cache')
 	setconnectionclose()
 	local waiting_thread
-	thread(function()
+	resume(thread(function()
 		--hack to wait for client to close the connection so we can wake up
 		--the sending thread if suspended and finish it so the server can
 		--clean up the accept thread. this works because the client shouldn't
@@ -545,9 +545,9 @@ action['xrowset.events'] = function()
 		local buf = glue.u8a(1)
 		local sz, err = assert(tcp:recv(buf, 1) == 0) --clean close
 		if waiting_thread then
-			transfer(waiting_thread, 'closed')
+			return cofinish(waiting_thread, 'closed')
 		end
-	end)
+	end, 'xrowset.events-wait'))
 	local rowsets = {}
 	local key = cx()
 	changed_rowsets[key] = rowsets

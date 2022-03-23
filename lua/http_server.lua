@@ -51,10 +51,9 @@ function server:bind_libs(libs)
 		if lib == 'sock' then
 			local sock = require'sock'
 			self.tcp           = sock.tcp
-			self.cowrap        = sock.cowrap
-			self.newthread     = sock.newthread
-			self.resume        = sock.resume
 			self.thread        = sock.thread
+			self.resume        = sock.resume
+			self.cowrap        = sock.cowrap
 			self.start         = sock.start
 			self.sleep         = sock.sleep
 			self.currentthread = sock.currentthread
@@ -135,7 +134,7 @@ function server:new(t)
 					local protected_out = self.cowrap(function(yield)
 						opt.content = yield
 						send_response(opt)
-					end)
+					end, 'http-server-out %s', ctcp)
 					function out(s, len)
 						protected_out(s, len)
 						if finished then
@@ -219,7 +218,8 @@ function server:new(t)
 			goto continue
 		end
 
-		if t.tls then
+		local tls = t.tls
+		if tls then
 			local opt = glue.update(self.tls_options, t.tls_options)
 			local stcp, err = self.stcp(tcp, opt)
 			if not self:check(tcp, stcp, 'stcp', '%s', err) then
@@ -228,25 +228,31 @@ function server:new(t)
 			end
 			tcp = stcp
 		end
+		sock.liveadd(tcp, tls and 'https' or 'http')
 		push(self.sockets, tcp)
 
 		function accept_connection()
 			local ctcp, err = tcp:accept()
-			if not self:check(tcp, ctcp, 'accept',' %s', err) then
+			if not self:check(tcp, ctcp, 'accept', '%s', err) then
 				return
 			end
-			self.thread(function()
+			local ra = ctcp.remote_addr
+			local rp = ctcp.remote_port
+			local la = ctcp. local_addr
+			local lp = ctcp. local_port
+			sock.liveadd(ctcp, tls and 'https' or 'http')
+			self.resume(self.thread(function()
 				local ok, err = errors.pcall(handler, tcp, ctcp, t)
 				self:check(ctcp, ok or errors.is(err, 'tcp'), 'handler', '%s', err)
 				ctcp:close()
-			end)
+			end, 'http-server-client %s', ctcp))
 		end
 
-		self.thread(function()
+		self.resume(self.thread(function()
 			while not stop do
 				accept_connection()
 			end
-		end)
+		end, 'http-server %s', tcp))
 
 		::continue::
 	end

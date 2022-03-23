@@ -161,7 +161,7 @@ function M.new(opt)
 			end)
 			function c:release()
 				add(free, c)
-				note'release'
+				dbg'release'
 				check_waitlist()
 			end
 			return c

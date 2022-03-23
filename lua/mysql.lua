@@ -1199,6 +1199,9 @@ function mysql.connect(opt)
 	self.db = opt.db
 	self.user = opt.user
 
+	sock.liveadd(tcp, 'mysql user=%s db=%s %s', opt.user or '', opt.db or '',
+		sock.currentthread())
+
 	return self
 end
 conn.connect = protect(conn.connect)
@@ -1221,7 +1224,8 @@ function conn:closed()
 end
 
 local function send_query(self, query)
-	mysql.dbg('query', '%s', query)
+	local severity = query:find'^%s*select%s+' and '' or 'note'
+	mysql.log(severity, 'query', '%s', query)
 	assert(self.state == 'ready')
 	self.packet_no = -1
 	local buf = send_buffer(1 + #query)

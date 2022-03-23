@@ -673,6 +673,12 @@ function fs.log(severity, ...)
 	logging.log(severity, 'fs', ...)
 end
 
+function fs.live(...)
+	local logging = fs.logging
+	if not logging then return end
+	logging.live(...)
+end
+
 --flags arg parsing ----------------------------------------------------------
 
 --turn a table of boolean options into a bit mask.

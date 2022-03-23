@@ -109,6 +109,18 @@ local function extend(dt, t)
 	for i=1,#t do dt[j+i]=t[i] end
 end
 
+function M.log(severity, ...)
+	local logging = M.logging
+	if not logging then return end
+	logging.log(severity, 'proc', ...)
+end
+
+function M.live(...)
+	local logging = M.logging
+	if not logging then return end
+	logging.live(...)
+end
+
 --see https://docs.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way
 --You will lose precious IQ points if you read that. Lose enough of them
 --and you might get a job at Microsoft!
