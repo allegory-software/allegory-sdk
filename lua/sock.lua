@@ -1162,7 +1162,7 @@ do
 			return false, err
 		end
 		local ip = ai:tostring()
-		M.log('', 'connect', '%-4s %s', self, ip)
+		M.log('', 'connected', '%-4s %s', self, ip)
 		M.live(self, 'connected %s', ip)
 		if not ext_ai then ai:free() end
 		return true
@@ -1174,7 +1174,7 @@ do
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		M.log('', 'connect', '%-4s %s', self, ai:tostring())
+		M.log('', 'connected', '%-4s %s', self, ai:tostring())
 		return true
 	end
 
@@ -1464,8 +1464,8 @@ function socket:connect(host, port, expires, addr_flags, ...)
 		return false, err
 	end
 	local ip = ai:tostring()
-	M.log('', 'connect', '%-4s %s', self, ip)
-	M.live(self, 'connect %s', ip)
+	M.log('', 'connected', '%-4s %s', self, ip)
+	M.live(self, 'connected %s', ip)
 	if not ext_ai then ai:free() end
 	return true
 end
@@ -1503,8 +1503,8 @@ do
 		local lp = accept_buf:port()
 		self.n = self.n + 1
 		s.i = self.n
-		M.log('', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:',
-			s, self, s.i, la, lp, ra, rp, n)
+		M.log('', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+			s, self, s.i, la, lp, ra, rp, self.n)
 		M.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
