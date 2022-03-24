@@ -327,7 +327,6 @@ local function log(self, severity, module, event, fmt, ...)
 	if self.filter[severity] then return end
 	if self.filter[module  ] then return end
 	if self.filter[event   ] then return end
-	self._logging = true
 	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
 	local time = time()
 	local msg = fmt and _(fmt, self.args(...))
@@ -349,19 +348,15 @@ local function log(self, severity, module, event, fmt, ...)
 				env, os.date('%Y-%m-%d %H:%M:%S', time), severity,
 				module or '', (event or ''):sub(1, 8),
 				debug_arg(false, (coroutine.running())), msg or '')
-		if not self._logging then
-			self._logging = true
-			if self.logtofile then
-				self:logtofile(entry)
-			end
-			if self.logtoserver then
-				self:logtoserver{
-					deploy = self.deploy, env = logging.env, time = time,
-					severity = severity, module = module, event = event,
-					message = msg,
-				}
-			end
-			self._logging = false
+		if self.logtofile then
+			self:logtofile(entry)
+		end
+		if self.logtoserver then
+			self:logtoserver{
+				deploy = self.deploy, env = logging.env, time = time,
+				severity = severity, module = module, event = event,
+				message = msg,
+			}
 		end
 		if not self.quiet then
 			io.stderr:write(entry)
