@@ -130,7 +130,7 @@ function logging:toserver(host, port, queue_size, timeout)
 		while not stop do
 			local exp = timeout and clock() + timeout
 			if tcp:connect(host, port, exp) then
-				self:live(tcp, 'connected logging %s:%d', host, port)
+				self.live(tcp, 'connected logging %s:%d', host, port)
 				return true
 			end
 			--wait because 'connection_refused' error comes instantly on Linux.
