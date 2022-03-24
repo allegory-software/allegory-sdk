@@ -358,7 +358,7 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 				t[#t+1] = M.quote_arg_unix(arg)
 			end
 			local s = table.concat(t, ' ')
-			M.log('', 'proc', 'exec', '%s', s)
+			M.log('', 'exec', '%s', s)
 			M.live(self, s)
 		end
 

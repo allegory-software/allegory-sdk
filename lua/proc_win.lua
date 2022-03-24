@@ -185,7 +185,7 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 	self.id                 = pi.dwProcessId
 	self.main_thread_id     = pi.dwThreadId
 
-	M.log('', 'proc', 'exec', '%s', cmd)
+	M.log('', 'exec', '%s', cmd)
 	M.live(self, cmd)
 
 	return self

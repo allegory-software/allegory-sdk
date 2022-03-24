@@ -72,7 +72,7 @@ by calling `kill()`.
 
 The only way to safely redirect both stdin and stdout of child processes
 without potentially causing deadlocks is to use async pipes and perform
-the writes and the reads in separate [sock](sock.md) threads.
+the writes and the reads in separate sock threads.
 
 Don't forget to close the stdin file when you're done with it to signal
 end-of-input to the child process.

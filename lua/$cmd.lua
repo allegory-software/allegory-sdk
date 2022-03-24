@@ -133,11 +133,8 @@ local function run_cmd(c, ...)
 	if fn then
 		return fn(...)
 	else
-		local function invalid_usage()
-			say(' ERROR: Unknown command: %s', s)
-			usage()
-		end
-		return invalid_usage, 'usage'
+		say(' ERROR: Unknown command: %s', c)
+		usage()
 	end
 end
 
