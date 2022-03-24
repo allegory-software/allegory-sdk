@@ -153,7 +153,7 @@ function logging:toserver(host, port, queue_size, timeout)
 			local msg = queue:peek()
 			if msg then
 				if connect() then
-					local s = pp.format(msg)
+					local s = pp.format(msg, false)
 					lenbuf[0] = #s
 					local len = ffi.string(lenbuf, ffi.sizeof(lenbuf))
 					local exp = timeout and clock() + timeout
