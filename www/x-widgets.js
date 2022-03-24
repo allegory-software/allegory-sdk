@@ -2566,6 +2566,7 @@ component('x-split', 'Containers', function(e) {
 	// resizing ---------------------------------------------------------------
 
 	let hit, hit_x, mx0, w0, resizing, resist
+	let resist_threshold = 0
 
 	e.on('pointermove', function(ev, rmx, rmy) {
 		if (resizing) {
@@ -2581,7 +2582,7 @@ component('x-split', 'Containers', function(e) {
 				w = ex2 - mx + hit_x - sw
 			}
 
-			resist = resist && abs(mx - mx0) < 20
+			resist = resist && abs(mx - mx0) < resist_threshold
 			if (resist)
 				w = w0 + (w - w0) * .2 // show resistance
 

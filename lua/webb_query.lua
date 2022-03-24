@@ -120,9 +120,9 @@ function release_dbs()
 	local env = threadenv[thread]
 	local dbs = env and env.dbs
 	if not dbs then return end
-	for _,db in pairs(dbs) do
+	for key, db in pairs(dbs) do
 		db:release()
-		dbs[db] = nil
+		dbs[key] = nil
 	end
 end
 
@@ -136,9 +136,9 @@ function db(ns, without_current_db)
 		dbs = {}
 		env.dbs = dbs
 		local function release_dbs()
-			for _,db in pairs(dbs) do
+			for key, db in pairs(dbs) do
 				db:release()
-				dbs[db] = nil
+				dbs[key] = nil
 			end
 		end
 		local cx = cx()
