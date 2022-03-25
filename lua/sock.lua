@@ -1367,7 +1367,7 @@ function socket:close()
 	local ok, err = check(C.close(s) == 0)
 	if not ok then return false, err end
 	M.log('', 'close', '%-4s r:%d w:%d%s', self, self.r, self.w,
-		self.n and ' live:'..self.n)
+		self.n and ' live:'..self.n or '')
 	return true
 end
 
