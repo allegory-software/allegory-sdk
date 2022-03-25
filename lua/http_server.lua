@@ -164,7 +164,7 @@ function server:new(t)
 			req.thread = self.currentthread()
 
 			local ok, err = errors.pcall(self.respond, req)
-			self:request_finish(req)
+			self.request_finish(req)
 
 			if not ok then
 				if errors.is(err, 'http_response') then
@@ -252,7 +252,7 @@ function server:new(t)
 			while not stop do
 				accept_connection()
 			end
-		end, 'http-server %s', tcp))
+		end, 'http-listen %s', tcp))
 
 		::continue::
 	end

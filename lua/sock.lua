@@ -2330,9 +2330,9 @@ function M.thread(f, fmt, ...)
 end
 
 function M.cowrap(f, fmt, ...)
-	local finish
-	local wrapper, thread = coro.safewrap(function(...)
-		M.save_thread_context(currentthread())
+	local finish, wrapper, thread
+	wrapper, thread = coro.safewrap(function(...)
+		M.save_thread_context(thread)
 		return finish(f(...))
 	end)
 	function finish(...)

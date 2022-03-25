@@ -233,7 +233,7 @@ IMAGE PROCESSING
 HTTP SERVER INTEGRATION
 
 	webb.respond(req)                       webb.server response handler
-	webb.request_finish()
+	webb.request_finish(req)
 	webb.server([opt]) -> server
 
 STANDALONE OPERATION
@@ -1800,10 +1800,10 @@ function webb.respond(req)
 	main()
 end
 
-function webb.request_finish()
+function webb.request_finish(req)
 	local f = cx.request_finish
 	if f then f() end
-	webb.setcx(cx.req.thread, nil)
+	webb.setcx(req.thread, nil)
 end
 
 function onrequestfinish(f)

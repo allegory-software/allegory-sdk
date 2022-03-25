@@ -357,7 +357,7 @@ function http:zlib_encoder(format, content, content_size)
 			content = glue.buffer_reader(content, content_size)
 		end
 		return (self.cowrap(function(yield)
-			return self.zlib.deflate(content, yield, nil, format)
+			self.zlib.deflate(content, yield, nil, format)
 		end, 'http-zlib-encode %s', self.tcp))
 	else
 		assert(false, type(content))
