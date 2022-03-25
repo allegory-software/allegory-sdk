@@ -224,18 +224,19 @@ You should distinguish between multiple types of errors:
 - Request or response content validation errors, which can be user-corrected
   so mustn't raise and mustn't close the connection. Use `check()` for those.
 - I/O errors, i.e. network failures which can be temporary and thus make the
-  call retriable, so they must be distinguishable from other types of errors.
-  Use `check_io()` for those. On the call side then check the error class for
-  implementing retries.
+  request retriable (in a new connection, this one must be closed), so they
+  must be distinguishable from other types of errors. Use `check_io()` for
+  those. On the call side then check the error class for implementing retries.
 
 Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
 confusion about when to raise and when not to or forgetting to handle an error).
 
 Your connection object must have a `tcp` field with a tcp:close() method
-that will be called by check_io() and checkp() (but not check()) on failure.
+to be called by check_io() and checkp() (but not by check()) on failure.
 
-protect() only catches errors raised by check*(), other Lua errors pass through.
+Note that protect() only catches errors raised by check*(), other Lua errors
+pass through and the connection isn't closed either.
 
 ]=]
 

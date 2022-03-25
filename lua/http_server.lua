@@ -119,10 +119,7 @@ function server:new(t)
 			local finished, out, sending_response
 			local res_ok, res_err
 
-			local function send_response(opt)
-				if opt.content == nil then
-					opt.content = ''
-				end
+			local function send_response(opt) --not allowed to break.
 				sending_response = true
 				local res = http:build_response(req, opt, self:time())
 				res_ok, res_err = http:send_response(res)

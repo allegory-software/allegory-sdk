@@ -22,7 +22,7 @@ http:new(opt) -> http
 
 Client-side API --------------------------------------------------------------
 
-http:make_request(opt) -> req                | Make a HTTP request object.
+http:build_request(opt) -> req               | Make a HTTP request object.
 
 	host                    vhost name
 	max_line_size           change the HTTP line size limit
@@ -36,7 +36,7 @@ http:read_response(req) -> res | nil,err     | Receive server's response.
 Server-side API --------------------------------------------------------------
 
 http:read_request(receive_content) -> req    | Receive a client's request.
-http:make_response(req, opt) -> res          | Make a HTTP response object.
+http:build_response(req, opt) -> res         | Make a HTTP response object.
 
 		close                   close the connection (and tell client to)
 		content, content_size   body: string, read function or cdata buffer
@@ -620,8 +620,8 @@ end
 http:protect'read_request_body'
 
 local function content_size(opt)
-	return type(opt.content) == 'string' and #opt.content
-		or opt.content_size
+	local content = opt.content or ''
+	return type(content) == 'string' and #content or opt.content_size
 end
 
 local function no_body(res, status)
@@ -729,7 +729,7 @@ function http:build_response(req, opt, time)
 	end
 
 	res.content, res.content_size =
-		self:encode_content(opt.content, opt.content_size, content_encoding)
+		self:encode_content(opt.content or '', opt.content_size, content_encoding)
 
 	res.headers['date'] = time
 
