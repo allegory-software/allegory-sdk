@@ -2036,8 +2036,8 @@ textarea.x-editbox-input {
 .x-split[orientation=horizontal] { flex-direction: row; }
 .x-split[orientation=vertical] { flex-direction: column; }
 
-.x-split[orientation=horizontal].resize { flex-direction: row; cursor: ew-resize; }
-.x-split[orientation=vertical].resize { flex-direction: column; cursor: ns-resize; }
+.x-split[orientation=horizontal].resize { cursor: ew-resize; }
+.x-split[orientation=vertical].resize { cursor: ns-resize; }
 
 .x-split-pane {
 }

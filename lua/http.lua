@@ -325,7 +325,7 @@ function http:zlib_decoder(format, write)
 	assert(self.zlib, 'zlib not loaded')
 	local decode = self.cowrap(function(yield)
 		self.zlib.inflate(yield, write, nil, format)
-	end, 'http-zlib-decode %s', self.tcp)
+	end, 'http-gzip-decode %s', self.tcp)
 	decode()
 	return decode
 end
@@ -358,7 +358,7 @@ function http:zlib_encoder(format, content, content_size)
 		end
 		return (self.cowrap(function(yield)
 			self.zlib.deflate(content, yield, nil, format)
-		end, 'http-zlib-encode %s', self.tcp))
+		end, 'http-gzip-encode %s', self.tcp))
 	else
 		assert(false, type(content))
 	end
