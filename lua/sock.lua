@@ -30,6 +30,8 @@ SOCKETS
 	s:family() -> s                            address family: 'inet', ...
 	s:protocol() -> s                          protocol: 'tcp', 'icmp', ...
 	s:close()                                  send FIN and/or RST and free socket
+	s:closed() -> t|f                          check if the socket is closed
+	s:onclose(fn)                              exec fn after the socket is closed
 	s:bind([host], [port], [af])               bind socket to an address
 	s:setopt(opt, val)                         set socket option (`'so_*'` or `'tcp_*'`)
 	s:getopt(opt) -> val                       get socket option
@@ -963,6 +965,16 @@ end
 
 function socket:closed()
 	return not self.s
+end
+
+function socket:onclose(fn)
+	local close = self.close
+	function self:close()
+		local ok, err = close(self)
+		fn()
+		if not ok then return false, err end
+		return true
+	end
 end
 
 local expires_heap = heap.valueheap{
