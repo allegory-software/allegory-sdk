@@ -419,17 +419,17 @@ function logging.printlive(custom_print)
 	collectgarbage()
 	local print = custom_print or print
 	local types = {}
-	for type in pairs(ids_db) do
-		types[#types+1] = type
+	for ty in pairs(ids_db) do
+		types[#types+1] = ty
 	end
 	table.sort(types)
-	for _,type in ipairs(types) do
-		local ids = ids_db[type]
+	for _,ty in ipairs(types) do
+		local ids = ids_db[ty]
 		local live = ids.live
-		print(('%-12s: %d'):format(type, ids.live_count))
+		print(('%-12s: %d'):format(ty, ids.live_count))
 		local ids, obs = {}, {}
 		for o in pairs(live) do
-			ids[#ids+1] = debug_arg(o)
+			ids[#ids+1] = debug_arg(true, o)
 			obs[#obs+1] = o
 		end
 		table.sort(ids)
