@@ -104,6 +104,11 @@ function logging:tofile(logfile, max_size)
 	return self
 end
 
+logging.rpc = {}
+
+function logging.rpc:set_debug   (v) self.debug   = v end
+function logging.rpc:set_verbose (v) self.verbose = v end
+
 function logging:toserver(host, port, queue_size, timeout)
 
 	local sock = require'sock'
@@ -131,6 +136,23 @@ function logging:toserver(host, port, queue_size, timeout)
 			local exp = timeout and clock() + timeout
 			if tcp:connect(host, port, exp) then
 				self.live(tcp, 'connected logging %s:%d', host, port)
+				local lenbuf = glue.u32a(1)
+				local msgbuf = glue.buffer()
+				local plenbuf = ffi.cast(glue.u8p, lenbuf)
+				sock.resume(sock.thread(function()
+					while not stop do
+						local len = check_io(tcp:recvn(plenbuf, 4))
+						if not len then break end
+						local len = lenbuf[0]
+						local buf = msgbuf(len)
+						if not check_io(tcp:recvn(buf, len)) then break end
+						local s = ffi.string(buf, len)
+						local f = loadstring('return '..s)
+						local cmd_args = type(f) == 'function' and f()
+						local f = type(cmd_args) == 'table' and self.rpc[cmd_args[1]]
+						if f then f(unpack(cmd_args, 2)) end
+					end
+				end, 'logging-rpc'))
 				return true
 			end
 			--wait because 'connection_refused' error comes instantly on Linux.
@@ -169,7 +191,7 @@ function logging:toserver(host, port, queue_size, timeout)
 		end
 		check_io()
 		self.logtoserver = nil
-	end)
+	end, 'logging-send')
 
 	function self:logtoserver(msg)
 		if not queue:push(msg) then
