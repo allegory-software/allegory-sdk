@@ -427,14 +427,15 @@ function logging.printlive(custom_print)
 		local ids = ids_db[ty]
 		local live = ids.live
 		print(('%-12s: %d'):format(ty, ids.live_count))
-		local ids, obs = {}, {}
+		local ids, ss = {}, {}
 		for o in pairs(live) do
-			ids[#ids+1] = debug_arg(true, o)
-			obs[#obs+1] = o
+			local id = debug_arg(true, o)
+			ids[#ids+1] = id
+			ss[id] = live[o]
 		end
 		table.sort(ids)
-		for i,id in ipairs(ids) do
-			print(('  %-4s: %s'):format(id, live[obs[i]]))
+		for _,id in ipairs(ids) do
+			print(('  %-4s: %s'):format(id, ss[id]))
 		end
 	end
 end
