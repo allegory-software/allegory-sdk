@@ -130,12 +130,12 @@ function server:new(t)
 				if opt.want_out_function then
 					local protected_out = self.cowrap(function(yield)
 						opt.content = yield
-						send_response(opt)
+						send_response(opt) --bugs in here break the server.
 					end, 'http-server-out %s', ctcp)
 					function out(s, len)
 						protected_out(s, len)
 						if finished then
-							assert(res_ok, res_err)
+							assert(res_ok, res_err) --out() breaks user's code
 						end
 					end
 					out()
@@ -176,8 +176,10 @@ function server:new(t)
 			elseif not finished then --eof not signaled.
 				if out then
 					out() --eof
+					assert(finished)
 				else
 					send_response{}
+					assert(finished)
 					assert(res_ok, res_err)
 				end
 			end
