@@ -53,13 +53,20 @@ coro.transfer(thread[, ...]) -> ...
 	resumed into) must finish by transferring control to another coroutine
 	(or to the main thread) otherwise an error is raised.
 
-coro.ptransfer(thread[, ...]) -> ok, ... | nil, err
+coro.ptransfer(thread[, ok, ...]) -> ok, ... | nil, err
 
-	Protected transfer: a variant of `coro.transfer()` that doesn't raise.
+	Protected transfer: a low-level variant of `coro.transfer()` that doesn't
+	raise, and which can raise an error into the waiting target thread.
 
 return coro.finish(thread, ...)
 
 	Finish the coroutine by transferring control to another thread.
+
+
+return coro.pfinish(thread, ok, ...)
+
+	Finish the coroutine by transferring control to another thread, possibly
+	raising an error in that thread analogous to ptransfer.
 
 coro.install() -> old_coroutine_module
 
@@ -117,8 +124,8 @@ WHY IT WORKS
 
 TODO
 
-	* errors in safewrap() should be re-raised in the caller thread.
-
+	* test that errors in safewrap() are re-raised in the caller thread.
+	* test that safewrap() are re-raised in the caller thread.
 
 ]=]
 
@@ -126,24 +133,20 @@ if not ... then require'coro_test'; return end
 
 --Tip: don't be deceived by the small size of this code.
 
-local coroutine = coroutine
-local resume = coroutine.resume
-local yield = coroutine.yield
-local cocreate = coroutine.create
+local
+	type, tostring, select, assert, error =
+	type, tostring, select, assert, error
+
+local traceback = debug.traceback
+local resume    = coroutine.resume
+local yield     = coroutine.yield
+local cocreate  = coroutine.create
 
 local callers = setmetatable({}, {__mode = 'k'}) --{thread -> caller_thread}
 local main, is_main = coroutine.running()
 assert(is_main, 'coro must be loaded from the main thread')
 local current = main
 local coro = {main = main}
-
-local function assert_thread(thread, level)
-	if type(thread) ~= 'thread' then
-		local err = string.format('coroutine expected but %s given', type(thread))
-		error(err, level)
-	end
-	return thread
-end
 
 local function unprotect(thread, ok, ...)
 	if not ok then
@@ -156,13 +159,16 @@ local function unprotect(thread, ok, ...)
 end
 
 local FIN = {}
+function coro.pfinish(thread, ok, ...)
+	return FIN, thread, ok, ...
+end
 function coro.finish(thread, ...)
-	return FIN, thread, ...
+	return FIN, thread, true, ...
 end
 
 --the coroutine ends by transferring control to the caller (or finish) thread.
-local function finish(thread, ...)
-	if ... == FIN then --called coro.finish()
+local function finish(thread, ok, ...)
+	if ... == FIN then --called coro.[p]finish()
 		callers[thread] = select(2, ...)
 		return finish(thread, select(3, ...))
 	end
@@ -171,12 +177,12 @@ local function finish(thread, ...)
 		error('coroutine ended without transferring control', 3)
 	end
 	callers[thread] = nil
-	return caller, true, ...
+	return caller, ok, ...
 end
 function coro.create(f)
 	local thread
 	thread = cocreate(function(ok, ...)
-		return finish(thread, f(...))
+		return finish(thread, true, f(...))
 	end)
 	--uncomment to debug transfers (require'$log' first):
 	--pr('C', thread, 'by', current)
@@ -194,7 +200,13 @@ local function check(thread, ok, ...)
 	if not ok then
 		--the coroutine finished with an error. pass the error back to the
 		--caller thread, or to the main thread if there's no caller thread.
-		return go(callers[thread] or main, ok, ..., debug.traceback(thread)) --tail call
+		local caller = callers[thread]
+		if caller then
+			callers[thread] = nil
+		else
+			caller = main
+		end
+		return go(caller, ok, ..., traceback(thread)) --tail call
 	end
 	return go(...) --tail call: loop over the next transfer request.
 end
@@ -208,25 +220,28 @@ function go(thread, ok, ...)
 	return check(thread, resume(thread, ok, ...)) --tail call
 end
 
-local function ptransfer(thread, ...)
-	assert_thread(thread, 3)
+local function ptransfer(thread, ok, ...)
+	if type(thread) ~= 'thread' then
+		error('coroutine expected, got: '..type(thread), 2)
+	end
 	assert(thread ~= current, 'trying to transfer to the running thread')
 	if current ~= main then
 		--we're inside a coroutine: signal the transfer request by yielding.
-		return yield(thread, true, ...)
+		return yield(thread, ok, ...)
 	else
 		--we're in the main thread: start the scheduler.
-		return go(thread, true, ...) --tail call
+		return go(thread, ok, ...) --tail call
 	end
 end
 
-coro.ptransfer = ptransfer
-
-function coro.transfer(thread, ...)
+local function transfer(thread, ...)
 	--uncomment to debug transfers (require'$log' first):
 	--pr(current, '>', thread, ...)
-	return unprotect(thread, ptransfer(thread, ...))
+	return unprotect(thread, ptransfer(thread, true, ...))
 end
+
+coro.ptransfer = ptransfer
+coro.transfer = transfer
 
 local function remove_caller(thread, ...)
 	callers[thread] = nil
@@ -236,14 +251,14 @@ function coro.resume(thread, ...)
 	assert(thread ~= current, 'trying to resume the running thread')
 	assert(thread ~= main, 'trying to resume the main thread')
 	callers[thread] = current
-	return remove_caller(thread, ptransfer(thread, ...))
+	return remove_caller(thread, ptransfer(thread, true, ...))
 end
 
 function coro.yield(...)
 	assert(current ~= main, 'yielding from the main thread')
 	local caller = callers[current]
 	assert(caller, 'yielding from a non-resumed thread')
-	return coro.transfer(caller, ...)
+	return transfer(caller, ...)
 end
 
 function coro.wrap(f)
@@ -258,21 +273,25 @@ function coro.safewrap(f)
 	local yt --yielding thread
 	local function yield(...)
 		yt = current
-		return coro.transfer(ct, ...)
+		return transfer(ct, ...)
 	end
-	local function finish(...)
-		callers[yt] = nil
+	local function finish(ok, ...)
+		callers[current] = ct
 		yt = nil
-		return coro.transfer(ct, ...)
+		if not ok then
+			error(..., 2) --caught by resume()
+		end
+		return ...
 	end
+	local pcall = pcall
 	local function wrapper(...)
-		return finish(f(yield, ...))
+		return finish(pcall(f, yield, ...))
 	end
 	yt = coro.create(wrapper)
 	return function(...)
 		ct = current
 		assert(yt, 'cannot resume dead coroutine')
-		return coro.transfer(yt, ...)
+		return transfer(yt, ...)
 	end, yt
 end
 

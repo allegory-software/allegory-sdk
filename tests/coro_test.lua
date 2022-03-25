@@ -163,7 +163,7 @@ test('error() in thread is reported to the parent thread', function()
 	assert(err:find'!err!')
 end)
 
-test('error() in safewrap thread is reported to the parent thread', function()
+test('error() in safewrap thread is reported to the caller thread', function()
 	local ok, err = coroutine.resume(coroutine.create(function()
 		local f = coroutine.safewrap(function(yield)
 			error'!err!'
