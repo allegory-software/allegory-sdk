@@ -387,7 +387,7 @@ end
 
 local function live(self, o, fmt, ...)
 	local id, ids = debug_id(o)
-	local was_live = ids.live[id] ~= nil
+	local was_live = ids.live[o] ~= nil
 	if fmt then
 		if not was_live then
 			ids.live_count = ids.live_count + 1
@@ -395,12 +395,12 @@ local function live(self, o, fmt, ...)
 	elseif was_live then
 		ids.live_count = ids.live_count - 1
 	end
-	ids.live[id] = fmt and _(fmt, self.args(...)) or nil
+	ids.live[o] = fmt and _(fmt, self.args(...)) or nil
 end
 
 local function liveadd(self, o, fmt, ...)
 	local id, ids = debug_id(o)
-	ids.live[id] = assert(ids.live[id]) .. ' ' .. _(fmt, self.args(...))
+	ids.live[o] = assert(ids.live[o]) .. ' ' .. _(fmt, self.args(...))
 end
 
 local function init(self)
@@ -416,13 +416,25 @@ local function init(self)
 end
 
 function logging.printlive(custom_print)
+	collectgarbage()
 	local print = custom_print or print
-	for type, ids in pairs(ids_db) do
-		print(_('%-12s: %d', type, ids.live_count))
-		local t = {}; for k in pairs(ids.live) do t[#t+1] = k end
-		table.sort(t)
-		for i,id in ipairs(t) do
-			print(_('  %-4s: %s', id, ids.live[id]))
+	local types = {}
+	for type in pairs(ids_db) do
+		types[#types+1] = type
+	end
+	table.sort(types)
+	for _,type in ipairs(types) do
+		local ids = ids_db[type]
+		local live = ids.live
+		print(('%-12s: %d'):format(type, ids.live_count))
+		local ids, obs = {}, {}
+		for o in pairs(live) do
+			ids[#ids+1] = debug_arg(o)
+			obs[#obs+1] = o
+		end
+		table.sort(ids)
+		for i,id in ipairs(ids) do
+			print(('  %-4s: %s'):format(id, live[obs[i]]))
 		end
 	end
 end
