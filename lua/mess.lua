@@ -16,10 +16,10 @@ SERVER
 	server:stop()
 
 CLIENT
-	mess.connect(host, port[, expires]) -> channel
+	mess.connect(host, port, [expires], [tcp_opt]) -> channel
 
 CHANNEL
-	channel:send(msg[, expires]) -> ok | false,err
+	channel:send(msg, [expires]) -> ok | false,err
 	channel:recv([expires]) -> ok,msg | nil,err
 
 	channel:recvall(onmessage, [onerror])
@@ -136,8 +136,9 @@ function M.listen(host, port, onaccept, onerror, server_name)
 	return server
 end
 
-function M.connect(host, port, exp)
+function M.connect(host, port, exp, tcp_opt)
 	local tcp = assert(sock.tcp())
+	glue.update(tcp, tcp_opt)
 	local ok, err = tcp:connect(host, port, exp)
 	if not ok then return nil, err end
 	return M.protocol(tcp)
@@ -166,7 +167,7 @@ if not ... then
 	local mess = M
 	local pp = require'pp'
 	local logging = require'logging'
-	--sock.logging = logging
+	sock.logging = logging
 	logging.verbose = true
 	logging.debug = true
 
@@ -186,8 +187,8 @@ if not ... then
 
 		local chan = mess.connect('127.0.0.1', '1234')
 		assert(chan:send{a = 3, b = 5})
-		chan:close()
 		assert(chan:send{a = 4, b = 6})
+		chan:close()
 
 	end))
 

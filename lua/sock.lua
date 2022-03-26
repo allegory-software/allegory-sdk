@@ -377,6 +377,10 @@ function M.liveadd(...)
 	logging.liveadd(...)
 end
 
+socket.log     = M.log
+socket.live    = M.live
+socket.liveadd = M.liveadd
+
 --getaddrinfo() --------------------------------------------------------------
 
 ffi.cdef[[
@@ -968,7 +972,7 @@ function socket:close()
 	M.live(s, nil)
 	local ok, err = check(C.closesocket(s) == 0)
 	if not ok then return false, err end
-	M.log('', 'sock', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
+	self.log('', 'sock', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
 	return true
 end
 
@@ -1183,8 +1187,8 @@ do
 			return false, err
 		end
 		local ip = ai:tostring()
-		M.log('', 'sock', 'connected', '%-4s %s', self, ip)
-		M.live(self, 'connected %s', ip)
+		self.log('', 'sock', 'connectd', '%-4s %s', self, ip)
+		self.live(self, 'connected %s', ip)
 		if not ext_ai then ai:free() end
 		return true
 	end
@@ -1195,7 +1199,7 @@ do
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		M.log('', 'sock', 'connected', '%-4s %s', self, ai:tostring())
+		self.log('', 'sock', 'connected', '%-4s %s', self, ai:tostring())
 		return true
 	end
 
@@ -1223,9 +1227,9 @@ do
 		local lp = accept_buf. local_addr:port()
 		self.n = self.n + 1
 		s.i = self.n
-		M.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		M.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1389,7 +1393,7 @@ function socket:close()
 	end
 	local ok, err = check(C.close(s) == 0)
 	if not ok then return false, err end
-	M.log('', 'sock', 'close', '%-4s r:%d w:%d%s', self, self.r, self.w,
+	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
 		self.n and ' live:'..self.n or '')
 	return true
 end
@@ -1487,8 +1491,8 @@ function socket:connect(host, port, expires, addr_flags, ...)
 		return false, err
 	end
 	local ip = ai:tostring()
-	M.log('', 'sock', 'connected', '%-4s %s', self, ip)
-	M.live(self, 'connected %s', ip)
+	self.log('', 'sock', 'connectd', '%-4s %s', self, ip)
+	self.live(self, 'connected %s', ip)
 	if not ext_ai then ai:free() end
 	return true
 end
@@ -1547,9 +1551,9 @@ do
 		local lp = accept_buf:port()
 		self.n = self.n + 1
 		s.i = self.n
-		M.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		M.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1876,8 +1880,8 @@ function tcp:listen(backlog, host, port, addr_flags)
 	backlog = glue.clamp(backlog or 1/0, 0, 0x7fffffff)
 	local ok = C.listen(self.s, backlog) == 0
 	if not ok then return check() end
-	M.log('', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
-	M.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
+	self.log('', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
+	self.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0 --live client connection count
 	return true
 end

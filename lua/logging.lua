@@ -132,7 +132,10 @@ function logging:toserver(host, port, queue_size, timeout)
 		if chan then return chan end
 		while not stop do
 			local exp = timeout and clock() + timeout
-			chan = mess.connect(host, port, exp)
+			local function log_locally(...)
+				print(...)
+			end
+			chan = mess.connect(host, port, exp, {log = log_locally})
 
 			if chan then
 
