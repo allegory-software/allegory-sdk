@@ -123,7 +123,7 @@ function logging:toserver(host, port, queue_size, timeout)
 	local stop
 
 	local function check_io(ret, ...)
-		if stop or not ret or not chan then return end
+		if ret then return ret, ... end
 		if chan then chan:close() end
 		chan = nil
 	end
@@ -133,7 +133,7 @@ function logging:toserver(host, port, queue_size, timeout)
 		while not stop do
 			local exp = timeout and clock() + timeout
 			local function log_locally(...)
-				print(...)
+				self.logto(false, false, ...)
 			end
 			chan = mess.connect(host, port, exp, {log = log_locally})
 
@@ -340,7 +340,7 @@ end
 logging.args      = logging_args_func(false)
 logging.printargs = logging_args_func(true)
 
-local function log(self, severity, module, event, fmt, ...)
+local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 	if self.filter[severity] then return end
 	if self.filter[module  ] then return end
 	if self.filter[event   ] then return end
@@ -365,10 +365,10 @@ local function log(self, severity, module, event, fmt, ...)
 				env, os.date('%Y-%m-%d %H:%M:%S', time), severity,
 				module or '', (event or ''):sub(1, 8),
 				debug_arg(false, (coroutine.running())), msg or '')
-		if self.logtofile then
+		if tofile and self.logtofile then
 			self:logtofile(entry)
 		end
-		if self.logtoserver then
+		if toserver and self.logtoserver then
 			self:logtoserver{
 				deploy = self.deploy, env = logging.env, time = time,
 				severity = severity, module = module, event = event,
@@ -381,16 +381,14 @@ local function log(self, severity, module, event, fmt, ...)
 		end
 	end
 end
-local function note (self, ...) log(self, 'note', ...) end
-local function dbg  (self, ...) log(self, '', ...) end
+local function log      (self, ...) logto(self, true, true, ...) end
+local function note     (self, ...) log(self, 'note', ...) end
+local function dbg      (self, ...) log(self, '', ...) end
+local function logerror (self, ...) log(self, 'ERROR', ...) end
 
 local function warnif(self, module, event, cond, ...)
 	if not cond then return end
 	log(self, 'WARN', module, event, ...)
-end
-
-local function logerror(self, module, event, ...)
-	log(self, 'ERROR', module, event, ...)
 end
 
 local function logvar(self, k, v)
@@ -421,6 +419,7 @@ local function liveadd(self, o, fmt, ...)
 end
 
 local function init(self)
+	self.logto    = function(...) return logto    (self, ...) end
 	self.log      = function(...) return log      (self, ...) end
 	self.note     = function(...) return note     (self, ...) end
 	self.dbg      = function(...) return dbg      (self, ...) end

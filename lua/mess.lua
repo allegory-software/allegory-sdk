@@ -55,11 +55,11 @@ function M.protocol(tcp)
 	local buf = buffer.new()
 	chan.send = protect(function(self, msg, exp)
 		buf:reset()
-		local plen = buf:reserve(4)
+		buf:reserve(4)
 		buf:commit(4)
 		buf:encode(msg)
 		local p, len = buf:ref()
-		cast(u32p, plen)[0] = len - 4
+		cast(u32p, p)[0] = len - 4
 		check_io(self, tcp:send(p, len, exp))
 		return true
 	end)
@@ -70,7 +70,7 @@ function M.protocol(tcp)
 		local plen = buf:reserve(4)
 		check_io(self, tcp:recvn(plen, 4))
 		local len = cast(u32p, plen)[0]
-		checkp(self, len <= self.maxlen, 'message too big')
+		checkp(self, len <= self.maxlen, 'message too big: %d', len)
 		local p = buf:reset():reserve(len)
 		check_io(self, tcp:recvn(p, len))
 		buf:commit(len)
@@ -108,7 +108,7 @@ function M.listen(host, port, onaccept, onerror, server_name)
 		tcp:close()
 	end
 
-	local onaccept = wrapfn('onaccept', onaccept, onerror, server)
+	local onaccept = wrapfn('accept', onaccept, onerror, server)
 	sock.resume(sock.thread(function()
 		while not stop do
 			local ctcp, err, retry = tcp:accept()
@@ -149,12 +149,12 @@ function channel:onclose(fn) return self.tcp:onclose(fn) end
 function channel:closed() return self.tcp:closed() end
 
 function channel:recvall(onmessage, onerror)
-	local onmessage = wrapfn('onmessage', onmessage, onerror, self)
+	local onmessage = wrapfn('recvall', onmessage, onerror, self)
 	while not self:closed() do
 		local ok, msg = self:recv()
 		if not ok then
 			if not errors.is(msg, 'tcp') then
-				sock.log('ERROR', 'mess', 'recv', '%s', err)
+				sock.log('ERROR', 'mess', 'recv', '%s', msg)
 			end
 		else
 			onmessage(self, msg)
@@ -186,8 +186,9 @@ if not ... then
 	sock.resume(sock.thread(function()
 
 		local chan = mess.connect('127.0.0.1', '1234')
-		assert(chan:send{a = 3, b = 5})
-		assert(chan:send{a = 4, b = 6})
+		for i = 1, 100 do
+			assert(chan:send{a = i, b = 2*i, i = tostring(i)})
+		end
 		chan:close()
 
 	end))

@@ -358,6 +358,7 @@ function M.log(severity, module, event, fmt, ...)
 	if not logging then
 		if severity == 'ERROR' then
 			io.stderr:write(fmt:format(...))
+			io.stderr:write'\n'
 			io.stderr:flush()
 		end
 		return
@@ -380,6 +381,34 @@ end
 socket.log     = M.log
 socket.live    = M.live
 socket.liveadd = M.liveadd
+
+function socket:close()
+	if not self.s then return true end
+	assert(M._unregister(self))
+	if self.listen_socket then
+		self.listen_socket.n = self.listen_socket.n - 1
+	end
+	local ok, err = self:_close()
+	self.s = nil --unsafe to close twice no matter the error.
+	if not ok then return false, err end
+	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
+		self.n and ' live:'..self.n or '')
+	return true
+end
+
+function socket:closed()
+	return not self.s
+end
+
+function socket:onclose(fn)
+	local close = self.close
+	function self:close()
+		local ok, err = close(self)
+		fn()
+		if not ok then return false, err end
+		return true
+	end
+end
 
 --getaddrinfo() --------------------------------------------------------------
 
@@ -966,28 +995,8 @@ do
 	end
 end
 
-function socket:close()
-	if not self.s then return true end
-	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
-	M.live(s, nil)
-	local ok, err = check(C.closesocket(s) == 0)
-	if not ok then return false, err end
-	self.log('', 'sock', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
-	return true
-end
-
-function socket:closed()
-	return not self.s
-end
-
-function socket:onclose(fn)
-	local close = self.close
-	function self:close()
-		local ok, err = close(self)
-		fn()
-		if not ok then return false, err end
-		return true
-	end
+function socket:_close()
+	return check(C.closesocket(self.s) == 0)
 end
 
 local expires_heap = heap.valueheap{
@@ -1384,22 +1393,8 @@ local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
 	return s
 end
 
-function socket:close()
-	if not self.s then return true end
-	assert(M._unregister(self))
-	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
-	if self.listen_socket then
-		self.listen_socket.n = self.listen_socket.n - 1
-	end
-	local ok, err = check(C.close(s) == 0)
-	if not ok then return false, err end
-	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
-		self.n and ' live:'..self.n or '')
-	return true
-end
-
-function socket:closed()
-	return not self.s
+function socket:_close()
+	return check(C.close(self.s) == 0)
 end
 
 local EAGAIN      = 11
