@@ -372,7 +372,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 			self:logtoserver{
 				deploy = self.deploy, env = logging.env, time = time,
 				severity = severity, module = module, event = event,
-				message = msg:trim(),
+				message = msg:gsub('^\n\n', ''),
 			}
 		end
 		if not self.quiet then
