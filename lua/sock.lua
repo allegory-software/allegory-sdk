@@ -1382,8 +1382,8 @@ end
 
 function socket:close()
 	if not self.s then return true end
+	assert(M._unregister(s))
 	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
-	M._unregister(self)
 	if self.listen_socket then
 		self.listen_socket.n = self.listen_socket.n - 1
 	end
