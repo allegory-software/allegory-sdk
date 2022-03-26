@@ -117,6 +117,11 @@ wwwfile['all.js.cat'] = function()
 	return jsfile() .. ' inline.js' --append inline code at the end
 end
 
+htmlfile = sepbuffer'\n'
+wwwfile['all.html.cat'] = function()
+	return htmlfile() .. ' inline.html'
+end
+
 local fontfiles = {}
 function fontfile(file)
 	for file in file:gmatch'[^%s]+' do
@@ -135,6 +140,9 @@ wwwfile['inline.js'] = function()
 end
 
 html = sepbuffer'\n'
+wwwfile['inline.html'] = function()
+	return html()
+end
 
 cssfile[[
 divs.css
@@ -228,7 +236,9 @@ action['404.html'] = function(action)
 	local t = {}
 	t.lang = lang()
 	t.country = country()
-	t.body = filter_lang(html(), lang())
+
+	local html = record(outcatlist, 'all.html.cat')
+	t.body = filter_lang(html, lang())
 	t.body_classes = config'body_classes'
 	t.body_attrs = config'body_attrs'
 	t.head = config'head'
