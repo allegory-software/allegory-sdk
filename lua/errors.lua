@@ -238,6 +238,13 @@ to be called by check_io() and checkp() (but not by check()) on failure.
 Note that protect() only catches errors raised by check*(), other Lua errors
 pass through and the connection isn't closed either.
 
+Note that the sock API does not currently distinguish usage errors from
+network errors, so calling eg. `check_io(self, self.tcp:connect())` will
+catch usage errors as network errors. This must be fixed in sock, eg. with
+a third return value `retry` indicating that the error is a network error,
+then we can make check_io() take that into account and call check()
+internally if `retry` is false.
+
 ]=]
 
 local tcp_error = errors.errortype'tcp'

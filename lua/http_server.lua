@@ -222,14 +222,17 @@ function server:new(t)
 		push(self.sockets, tcp)
 
 		function accept_connection()
-			local ctcp, err = tcp:accept()
+			local ctcp, err, retry = tcp:accept()
 			if not self:check(tcp, ctcp, 'accept', '%s', err) then
+				if retry then
+					--temporary network error. let it retry but pause a little
+					--to avoid killing the CPU while the error persists.
+					sleep(.2)
+				else
+					self:stop()
+				end
 				return
 			end
-			local ra = ctcp.remote_addr
-			local rp = ctcp.remote_port
-			local la = ctcp. local_addr
-			local lp = ctcp. local_port
 			sock.liveadd(ctcp, tls and 'https' or 'http')
 			self.resume(self.thread(function()
 				local ok, err = errors.pcall(handler, tcp, ctcp, t)

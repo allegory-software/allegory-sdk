@@ -179,10 +179,13 @@ tcp:listen([backlog, ]host, port, [af])
 	(in which case `host` and `port` args are ignored). The `backlog` defaults
 	to `1/0` which means "use the maximum allowed".
 
-tcp:accept([expires]) -> ctcp
+tcp:accept([expires]) -> ctcp | nil,err,[retry]
 
 	Accept a client connection. The connection socket has additional fields:
 	`remote_addr`, `remote_port`, `local_addr`, `local_port`.
+
+	A third return value indicates that the error is a network error and thus
+	the call be retried.
 
 tcp:recvn(buf, len, [expires]) -> buf, len
 
@@ -350,10 +353,16 @@ end
 local currentthread = coro.running
 local transfer = coro.transfer
 
-function M.log(severity, ...)
+function M.log(severity, module, event, fmt, ...)
 	local logging = M.logging
-	if not logging then return end
-	logging.log(severity, 'sock', ...)
+	if not logging then
+		if severity == 'ERROR' then
+			io.stderr:write(fmt:format(...))
+			io.stderr:flush()
+		end
+		return
+	end
+	logging.log(severity, module, event, fmt, ...)
 end
 
 function M.live(...)
@@ -959,7 +968,7 @@ function socket:close()
 	M.live(s, nil)
 	local ok, err = check(C.closesocket(s) == 0)
 	if not ok then return false, err end
-	M.log('', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
+	M.log('', 'sock', 'close', '%-4s r:%d w:%d', self, self.r, self.w)
 	return true
 end
 
@@ -1174,7 +1183,7 @@ do
 			return false, err
 		end
 		local ip = ai:tostring()
-		M.log('', 'connected', '%-4s %s', self, ip)
+		M.log('', 'sock', 'connected', '%-4s %s', self, ip)
 		M.live(self, 'connected %s', ip)
 		if not ext_ai then ai:free() end
 		return true
@@ -1186,7 +1195,7 @@ do
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		M.log('', 'connected', '%-4s %s', self, ai:tostring())
+		M.log('', 'sock', 'connected', '%-4s %s', self, ai:tostring())
 		return true
 	end
 
@@ -1214,7 +1223,7 @@ do
 		local lp = accept_buf. local_addr:port()
 		self.n = self.n + 1
 		s.i = self.n
-		M.log('', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		M.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
 		M.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
@@ -1245,6 +1254,7 @@ do
 	end
 
 	function tcp:_send(buf, len, expires)
+		if not self.s then return nil, 'closed' end
 		len = len or #buf
 		if len == 0 then return 0 end --mask-out null-writes
 		return socket_send(self, buf, len, expires)
@@ -1255,6 +1265,7 @@ do
 	end
 
 	function socket:recv(buf, len, expires)
+		if not self.s then return nil, 'closed' end
 		assert(len > 0)
 		wsabuf.buf = buf
 		wsabuf.len = len
@@ -1353,7 +1364,7 @@ function check(ret)
 	if ret then return ret end
 	local err = ffi.errno()
 	local msg = error_classes[err]
-	return ret, msg or str(C.strerror(err))
+	return ret, msg or str(C.strerror(err)), err
 end
 
 local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
@@ -1371,14 +1382,14 @@ end
 
 function socket:close()
 	if not self.s then return true end
+	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
 	M._unregister(self)
 	if self.listen_socket then
 		self.listen_socket.n = self.listen_socket.n - 1
 	end
-	local s = self.s; self.s = nil --unsafe to close twice no matter the error.
 	local ok, err = check(C.close(s) == 0)
 	if not ok then return false, err end
-	M.log('', 'close', '%-4s r:%d w:%d%s', self, self.r, self.w,
+	M.log('', 'sock', 'close', '%-4s r:%d w:%d%s', self, self.r, self.w,
 		self.n and ' live:'..self.n or '')
 	return true
 end
@@ -1476,13 +1487,23 @@ function socket:connect(host, port, expires, addr_flags, ...)
 		return false, err
 	end
 	local ip = ai:tostring()
-	M.log('', 'connected', '%-4s %s', self, ip)
+	M.log('', 'sock', 'connected', '%-4s %s', self, ip)
 	M.live(self, 'connected %s', ip)
 	if not ext_ai then ai:free() end
 	return true
 end
 
 do
+	--see man accept(2); get error codes with `sh c/precompile errno.h`.
+	local ENETDOWN      = 100
+	local EPROTO        =  71
+	local ENOPROTOOPT   =  92
+	local EHOSTDOWN     = 112
+	local ENONET        =  64
+	local EHOSTUNREACH  = 113
+	local EOPNOTSUPP    =  95
+	local ENETUNREACH   = 101
+
 	local nbuf = ffi.new'int[1]'
 	local accept_buf = sockaddr_ct()
 	local accept_buf_size = ffi.sizeof(accept_buf)
@@ -1493,8 +1514,19 @@ do
 	end, EWOULDBLOCK)
 
 	function tcp:accept(expires)
-		local s, err = tcp_accept(self, expires)
-		if not s then return nil, err end
+		local s, err, errno = tcp_accept(self, expires)
+		local retry =
+			   errno == ENETDOWN
+			or errno == EPROTO
+			or errno == ENOPROTOOPT
+			or errno == EHOSTDOWN
+			or errno == ENONET
+			or errno == EHOSTUNREACH
+			or errno == EOPNOTSUPP
+			or errno == ENETUNREACH
+		if not s then
+			return nil, err, retry
+		end
 		local s = wrap_socket(tcp, s, self._st, self._af, self._pr)
 		M.live(s, 'accept %s', this)
 		local ok, err = M._register(s)
@@ -1515,7 +1547,7 @@ do
 		local lp = accept_buf:port()
 		self.n = self.n + 1
 		s.i = self.n
-		M.log('', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		M.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
 		M.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
@@ -1533,6 +1565,7 @@ local socket_send = make_async(true, function(self, buf, len, flags)
 end, EWOULDBLOCK)
 
 function tcp:_send(buf, len, expires, flags)
+	if not self.s then return nil, 'closed' end
 	len = len or #buf
 	if len == 0 then return 0 end --mask-out null-writes
 	return socket_send(self, expires, buf, len, flags)
@@ -1547,6 +1580,7 @@ local socket_recv = make_async(false, function(self, buf, len, flags)
 end, EWOULDBLOCK)
 
 function socket:recv(buf, len, expires, flags)
+	if not self.s then return nil, 'closed' end
 	assert(len > 0)
 	return socket_recv(self, expires, buf, len, flags)
 end
@@ -1842,7 +1876,7 @@ function tcp:listen(backlog, host, port, addr_flags)
 	backlog = glue.clamp(backlog or 1/0, 0, 0x7fffffff)
 	local ok = C.listen(self.s, backlog) == 0
 	if not ok then return check() end
-	M.log('', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
+	M.log('', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
 	M.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0 --live client connection count
 	return true
@@ -2328,10 +2362,10 @@ function M.thread(f, fmt, ...)
 			end
 		end
 		if not ok then
-			M.log('ERROR', 'thread', '%s', err)
+			M.log('ERROR', 'sock', 'thread', '%s', err)
 		end
 		M.live(thread, nil)
-		return transfer(poll_thread)
+		return coro.finish(poll_thread)
 	end)
 	if fmt then
 		M.live(thread, fmt, ...)
