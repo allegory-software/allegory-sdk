@@ -9,7 +9,7 @@
 		- raising & catching errors in event handlers
 
 SERVER
-	mess.listen(host, port, onaccept, [onerror]) -> server
+	mess.listen(host, port, onaccept, [onerror], [server_name]) -> server
 	onaccept(server, channel)
 	onerror(server, error)
 
@@ -92,12 +92,13 @@ local function wrapfn(event, fn, onerror, self)
 	end
 end
 
-function M.listen(host, port, onaccept, onerror)
+function M.listen(host, port, onaccept, onerror, server_name)
 
+	server_name = server_name or 'mess'
 	local tcp = assert(sock.tcp())
 	assert(tcp:setopt('reuseaddr', true))
 	assert(tcp:listen(host, port))
-	sock.liveadd(tcp, 'mess')
+	sock.liveadd(tcp, server_name)
 
 	local server = {tcp = tcp}
 
@@ -122,15 +123,15 @@ function M.listen(host, port, onaccept, onerror)
 					check_io(server, nil, err)
 				end
 			end
-			sock.liveadd(ctcp, 'mess')
+			sock.liveadd(ctcp, server_name)
 			sock.resume(sock.thread(function()
 				local chan = M.protocol(ctcp)
 				onaccept(server, chan)
 				ctcp:close()
-			end, 'mess-accepted %s', ctcp))
+			end, server_name..'-accepted %s', ctcp))
 			::skip::
 		end
-	end, 'mess-listen %s', tcp))
+	end, server_name..'-listen %s', tcp))
 
 	return server
 end

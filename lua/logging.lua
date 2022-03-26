@@ -26,7 +26,7 @@ CONFIG
 	logging.max_disk_size     max disk size occupied by logging (16M)
 	logging.queue_size        queue size for when the server is slow (10000)
 	logging.timeout           timeout (5)
-	logging.filter.severity = true    |filter out messages of a specific severity
+	logging.filter.NAME = true    filter out messages of specific severity/module/event
 	logging.censor.name <- f(severity, module, ev, msg)  |set a function for censoring secrets in logs
 INIT
 	logging:tofile(logfile, max_disk_size)
@@ -113,50 +113,47 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	local sock = require'sock'
 	local queue = require'queue'
+	local mess = require'mess'
 
 	queue_size = queue_size or logging.queue_size
 	timeout = timeout or logging.timeout
 
-	local tcp
-
-	local function check_io(ret, err)
-		if ret then return ret end
-		if tcp then tcp:close(); tcp = nil end
-		return ret, err
-	end
-
+	local chan
 	local reconn_sleeper
 	local stop
 
+	local function check_io(ret, ...)
+		if stop or not ret or not chan then return end
+		if chan then chan:close() end
+		chan = nil
+	end
+
 	local function connect()
-		if tcp then return tcp end
-		tcp = sock.tcp()
-		if not tcp then return end
+		if chan then return chan end
 		while not stop do
 			local exp = timeout and clock() + timeout
-			if tcp:connect(host, port, exp) then
-				self.live(tcp, 'connected logging %s:%d', host, port)
-				local lenbuf = glue.u32a(1)
-				local msgbuf = glue.buffer()
-				local plenbuf = ffi.cast(glue.u8p, lenbuf)
+			chan = mess.connect(host, port, exp)
+
+			if chan then
+
+				--create RPC thread/loop
+				self.liveadd(chan.tcp, 'logging')
 				sock.resume(sock.thread(function()
 					while not stop do
-						local len = check_io(tcp:recvn(plenbuf, 4))
-						if not len then break end
-						local len = lenbuf[0]
-						local buf = msgbuf(len)
-						if not check_io(tcp:recvn(buf, len)) then break end
-						local s = ffi.string(buf, len)
-						local f = loadstring('return '..s)
-						local cmd_args = type(f) == 'function' and f()
-						local f = type(cmd_args) == 'table' and self.rpc[cmd_args[1]]
-						if f then f(unpack(cmd_args, 2)) end
+						local ok, cmd_args = check_io(chan:recv())
+						if not ok then break end
+						if type(cmd_args) == 'table' then
+							local f = self.rpc[cmd_args[1]]
+							if f then f(glue.unpack(cmd_args, 2)) end
+						end
 					end
-				end, 'logging-rpc'))
+				end, 'logging-rpc %s', chan.tcp))
+
 				return true
 			end
+
 			--wait because 'connection_refused' error comes instantly on Linux.
-			if not stop and exp > clock() + 0.1 then
+			if not stop and exp > clock() + 0.2 then
 				reconn_sleeper = sock.sleep_job()
 				reconn_sleeper:sleep_until(exp)
 				reconn_sleeper = nil
@@ -170,16 +167,11 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	local send_thread = sock.thread(function()
 		send_thread_suspended = false
-		local lenbuf = glue.u32a(1)
 		while not stop do
 			local msg = queue:peek()
 			if msg then
 				if connect() then
-					local s = pp.format(msg, false)
-					lenbuf[0] = #s
-					local len = ffi.string(lenbuf, ffi.sizeof(lenbuf))
-					local exp = timeout and clock() + timeout
-					if check_io(tcp:send(len..s, nil, exp)) then
+					if check_io(chan:send(msg)) then
 						queue:pop()
 					end
 				end
@@ -189,7 +181,6 @@ function logging:toserver(host, port, queue_size, timeout)
 				send_thread_suspended = false
 			end
 		end
-		check_io()
 		self.logtoserver = nil
 	end, 'logging-send')
 
@@ -205,6 +196,7 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	function self:toserver_stop()
 		stop = true
+		check_io()
 		if send_thread_suspended then
 			sock.resume(send_thread)
 		elseif reconn_sleeper then
@@ -435,6 +427,27 @@ local function init(self)
 	self.live     = function(...) return live     (self, ...) end
 	self.liveadd  = function(...) return liveadd  (self, ...) end
 	return self
+end
+
+function logging.livelist()
+	collectgarbage()
+	local t = {}
+	for type, ids in pairs(ids_db) do
+		for o, s in pairs(ids.live) do
+			local id = debug_arg(true, o)
+			t[#t+1] = {type, id, s}
+		end
+	end
+	return t
+end
+
+function logging.rpc:get_live()
+	if self.logtoserver then
+		self:logtoserver{
+			deploy = self.deploy, env = logging.env, time = time(),
+			event = 'live', live = self.livelist()
+		}
+	end
 end
 
 function logging.printlive(custom_print)
