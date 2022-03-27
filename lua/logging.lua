@@ -437,11 +437,12 @@ end
 
 function logging.livelist()
 	collectgarbage()
-	local t = {}
+	local t = {cols = 3, o_type = 0, o_id = 1, o_descr = 2}
 	for type, ids in pairs(ids_db) do
 		for o, s in pairs(ids.live) do
-			local id = debug_arg(true, o)
-			t[#t+1] = {type, id, s}
+			t[#t+1] = type
+			t[#t+1] = debug_arg(true, o)
+			t[#t+1] = s
 		end
 	end
 	return t
