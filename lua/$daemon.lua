@@ -214,7 +214,7 @@ function daemon(app_name, ...)
 
 	function run_server() --fw. declared.
 		app.server_running = true
-		setenv('TZ', ':/etc/localtime', 0)
+		proc.env('TZ', ':/etc/localtime', 0)
 		--^^avoid having os.date() stat /etc/localtime.
 		logging:tofile(app.logfile)
 		logging.flush = logging.debug
