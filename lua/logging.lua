@@ -151,7 +151,7 @@ function logging:toserver(host, port, queue_size, timeout)
 						if not ok then break end
 						if type(cmd_args) == 'table' then
 							local f = self.rpc[cmd_args[1]]
-							if f then f(glue.unpack(cmd_args, 2)) end
+							if f then f(self, glue.unpack(cmd_args, 2)) end
 						end
 					end
 				end, 'logging-rpc %s', chan.tcp))
@@ -447,13 +447,8 @@ function logging.livelist()
 	return t
 end
 
-function logging.rpc:get_live()
-	if self.logtoserver then
-		self:logtoserver{
-			deploy = self.deploy, env = logging.env, time = time(),
-			event = 'live', live = self.livelist()
-		}
-	end
+function logging.rpc:get_livelist()
+	self.logvar('livelist', self.livelist())
 end
 
 function logging.printlive(custom_print)
