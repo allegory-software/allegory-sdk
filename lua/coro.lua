@@ -31,7 +31,7 @@ RATIONALE
 	 transfering of control from inside standard-behaving coroutines.
 	 * `coro.safewrap()` is added which allows cross-yielding.
 
-coro.create(f) -> thread
+coro.create(f, [fmt, ...]) -> thread
 
 	Create a coroutine which can be started with either `coro.resume()` or
 	with `coro.transfer()`.
@@ -103,10 +103,10 @@ coro.wrap(f) -> wrapper
 
 	Behaves like standard coroutine.wrap()
 
-coro.safewrap(f) -> wrapper, thread
+coro.safewrap(f, [fmt, ...]) -> wrapped, thread
 
 	Behaves like coroutine.wrap() except that the wrapped function receives
-	a custom `yield()` function as its first argument which always yields back
+	a custom `yield` function as its first argument which always yields back
 	to the calling thread even when called from a different thread. This allows
 	cross-yielding i.e. yielding past multiple levels of nested coroutines
 	which enables unrestricted inversion-of-control.
@@ -122,11 +122,6 @@ WHY IT WORKS
 	control to the main thread which does the resuming. Since the calling
 	thread is now suspended, it can later be resumed from any other thread.
 
-TODO
-
-	* test that errors in safewrap() are re-raised in the caller thread.
-	* test that safewrap() are re-raised in the caller thread.
-
 ]=]
 
 if not ... then require'coro_test'; return end
@@ -134,8 +129,8 @@ if not ... then require'coro_test'; return end
 --Tip: don't be deceived by the small size of this code.
 
 local
-	type, tostring, select, assert, error =
-	type, tostring, select, assert, error
+	type, tostring, select, assert, error, pcall =
+	type, tostring, select, assert, error, pcall
 
 local traceback = debug.traceback
 local resume    = coroutine.resume
@@ -148,12 +143,25 @@ assert(is_main, 'coro must be loaded from the main thread')
 local current = main
 local coro = {main = main}
 
+function coro.thread_id(thread)
+	local logging = coro.logging
+	if logging then return logging.arg(thread) end
+	return tostring(thread)
+end
+
+function coro.live(thread, ...)
+	local logging = coro.logging
+	if logging then return logging.live(thread, ...) end
+end
+
 local function unprotect(thread, ok, ...)
 	if not ok then
-		local e, s = ...
-		s = tostring(e)..'\n'..
-			s:gsub('stack traceback:', tostring(thread)..' stack traceback:')
-		error(s, 2)
+		local e, trace = ...
+		if type(e) == 'string' and trace then
+			e = e..'\n'..trace:gsub('stack traceback:',
+				coro.thread_id(thread)..' stack traceback:')
+		end
+		error(e, 2)
 	end
 	return ...
 end
@@ -172,20 +180,27 @@ local function finish(thread, ok, ...)
 		callers[thread] = select(2, ...)
 		return finish(thread, select(3, ...))
 	end
+	coro.live(thread, nil)
 	local caller = callers[thread]
 	if not caller then
-		error('coroutine ended without transferring control', 3)
+		return main, false, 'coroutine ended without transferring control'
 	end
 	callers[thread] = nil
 	return caller, ok, ...
 end
-function coro.create(f)
+function coro.create(f, fmt, ...)
 	local thread
 	thread = cocreate(function(ok, ...)
+		if not ok then --ptransferred into with an error.
+			error(..., 2)
+		end
 		return finish(thread, true, f(...))
 	end)
-	--uncomment to debug transfers (require'$log' first):
-	--pr('C', thread, 'by', current)
+	if fmt then
+		coro.live(thread, fmt, ...)
+	else
+		coro.live(thread, traceback())
+	end
 	return thread
 end
 
@@ -200,13 +215,14 @@ local function check(thread, ok, ...)
 	if not ok then
 		--the coroutine finished with an error. pass the error back to the
 		--caller thread, or to the main thread if there's no caller thread.
+		coro.live(thread, nil)
 		local caller = callers[thread]
 		if caller then
 			callers[thread] = nil
 		else
 			caller = main
 		end
-		return go(caller, ok, ..., traceback(thread)) --tail call
+		return go(caller, false, ..., traceback(thread)) --tail call
 	end
 	return go(...) --tail call: loop over the next transfer request.
 end
@@ -235,8 +251,6 @@ local function ptransfer(thread, ok, ...)
 end
 
 local function transfer(thread, ...)
-	--uncomment to debug transfers (require'$log' first):
-	--pr(current, '>', thread, ...)
 	return unprotect(thread, ptransfer(thread, true, ...))
 end
 
@@ -268,7 +282,7 @@ function coro.wrap(f)
 	end
 end
 
-function coro.safewrap(f)
+function coro.safewrap(f, fmt, ...)
 	local ct --calling thread
 	local yt --yielding thread
 	local function yield(...)
@@ -276,21 +290,28 @@ function coro.safewrap(f)
 		return transfer(ct, ...)
 	end
 	local function finish(ok, ...)
-		callers[current] = ct
+		local ft = ct
 		yt = nil
+		ct = nil
+		coro.live(current, nil)
 		if not ok then
-			error(..., 2) --caught by resume()
+			return ft, false, ..., traceback(current)
+		else
+			return ft, true, ...
 		end
-		return ...
 	end
-	local pcall = pcall
-	local function wrapper(...)
+	local function wrapper(ok, ...)
 		return finish(pcall(f, yield, ...))
 	end
-	yt = coro.create(wrapper)
+	yt = cocreate(wrapper)
+	if fmt then
+		coro.live(yt, fmt, ...)
+	else
+		coro.live(yt, traceback())
+	end
 	return function(...)
-		ct = current
 		assert(yt, 'cannot resume dead coroutine')
+		ct = current
 		return transfer(yt, ...)
 	end, yt
 end

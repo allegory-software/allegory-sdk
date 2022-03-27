@@ -1,6 +1,8 @@
 local coroutine = require'coro'
 local main = coroutine.running()
 
+coroutine.logging = require'logging'
+
 local function test(descr, f)
 	local ok, err = xpcall(f, debug.traceback)
 	print((ok and 'ok:   ' or 'fail: ') .. descr)
@@ -212,7 +214,7 @@ test('error() in transferred thread is raised in the main thread', function()
 		end)
 		coroutine.transfer(thread)
 		assert(false) --not reaching here, transfer() didn't set a caller.
-	end))
+	end), true)
 	assert(not ok)
 	assert(err:find'here')
 	assert(traceback)
