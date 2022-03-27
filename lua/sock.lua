@@ -1224,8 +1224,8 @@ do
 	local sa_len = ffi.sizeof(accept_buf) / 2
 	function tcp:accept(expires)
 		local s, err = M.tcp(self._af, self._pr)
-		M.live(s, 'accept %s', self)
 		if not s then return nil, err end
+		M.live(s, 'accept %s', self)
 		local o, job = overlapped(self, return_true, expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
 		local ok, err = check_pending(ok, job)
