@@ -1088,7 +1088,7 @@ do
 		local job = expires_heap:peek()
 		local timeout = job and math.max(0, job.expires - clock()) or 1/0
 
-		local timeout_ms = math.max(timeout * 1000, 0)
+		local timeout_ms = math.max(timeout * 1000, 100)
 		--we're going infinite after 0x7fffffff for compat. with Linux.
 		if timeout_ms > 0x7fffffff then timeout_ms = INFINITE end
 
@@ -1747,7 +1747,7 @@ do
 			if not socket then
 				break
 			end
-			if math.abs(t - socket[EXPIRES]) <= .05 then --arbitrary threshold.
+			if socket[EXPIRES] - t <= .05 then --arbitrary threshold.
 				assert(heap:pop())
 				socket[EXPIRES] = nil
 				local thread = socket[THREAD]
@@ -1779,7 +1779,7 @@ do
 		local expires = math.min(sx or 1/0, rx or 1/0)
 		local timeout = expires < 1/0 and math.max(0, expires - clock()) or 1/0
 
-		local timeout_ms = math.max(timeout * 1000, 0)
+		local timeout_ms = math.max(timeout * 1000, 100)
 		if timeout_ms > 0x7fffffff then timeout_ms = -1 end --infinite
 
 		local n = C.epoll_wait(M.epoll_fd(), events, maxevents, timeout_ms)
