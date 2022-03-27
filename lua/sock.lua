@@ -1229,7 +1229,10 @@ do
 		local o, job = overlapped(self, return_true, expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
 		local ok, err = check_pending(ok, job)
-		if not ok then return nil, err end
+		if not ok then
+			s:close()
+			return nil, err
+		end
 		local ra = accept_buf.remote_addr:addr():tostring()
 		local rp = accept_buf.remote_addr:port()
 		local la = accept_buf. local_addr:addr():tostring()
