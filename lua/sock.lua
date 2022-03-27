@@ -2375,21 +2375,10 @@ function M.thread(f, fmt, ...)
 end
 
 function M.cowrap(f, fmt, ...)
-	local finish, wrapper, thread
-	wrapper, thread = coro.safewrap(function(...)
-		M.save_thread_context(thread)
-		return finish(f(...))
-	end)
-	function finish(...)
-		M.live(thread, nil)
-		return ...
-	end
-	if fmt then
-		M.live(thread, fmt, ...)
-	else
-		M.live(thread, traceback())
-	end
-	return wrapper, thread
+	return coro.safewrap(function(...)
+		M.save_thread_context(currentthread())
+		return f(...)
+	end, fmt, ...)
 end
 
 function M.transfer(thread, ...)
