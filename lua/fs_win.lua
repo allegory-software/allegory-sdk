@@ -591,8 +591,9 @@ function fs.pipe(path, opt)
 				return nil, err
 			end
 
-			f.log = opt.log or fs.log
-			f.log('', 'fs', 'pipe', 'r=%s w=%s async', rf, wf)
+			rf.log = opt.log or fs.log
+			wf.log = opt.log or fs.log
+			rf.log('', 'fs', 'pipe', 'r=%s w=%s async', rf, wf)
 			return rf, wf
 
 		else --non-overlapped anon pipe, use native CreatePipe().
