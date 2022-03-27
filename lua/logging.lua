@@ -67,9 +67,13 @@ function logging:tofile(logfile, max_size)
 
 	local f, size
 
+	local function log_locally(...)
+		self.logto(false, false, ...)
+	end
+
 	local function open()
 		if f then return true end
-		f = fs.open(logfile, 'a')
+		f = fs.open(logfile, {mode = 'a', log = log_locally})
 		if not f then return end
 		size = f:attr'size'
 		if not f then return end
