@@ -19,15 +19,6 @@ require'$daemon'
 require'$sock'
 require'xapp'
 
-require'fs'          .logging = logging
-require'proc'        .logging = logging
-require'sock'        .logging = logging
-require'http'        .logging = logging
-require'http_client' .logging = logging
-require'http_server' .logging = logging
-require'mysql'       .logging = logging
-require'tarantool'   .logging = logging
-
 local schema = require'schema'
 
 ffi.tls_libname = 'tls_bearssl'
