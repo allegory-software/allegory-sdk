@@ -1224,8 +1224,10 @@ do
 	local sa_len = ffi.sizeof(accept_buf) / 2
 	function tcp:accept(expires)
 		local s, err = M.tcp(self._af, self._pr)
-		if not s then return nil, err end
-		M.live(s, 'accept %s', self)
+		if not s then
+			return nil, err
+		end
+		M.live(s, 'wait-accept %s', self) --only shows in Windows.
 		local o, job = overlapped(self, return_true, expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
 		local ok, err = check_pending(ok, job)
@@ -1530,7 +1532,6 @@ do
 			return nil, err, retry
 		end
 		local s = wrap_socket(tcp, s, self._st, self._af, self._pr)
-		M.live(s, 'accept %s', this)
 		local ok, err = M._register(s)
 		if not ok then
 			s:close()
