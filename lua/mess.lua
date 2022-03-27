@@ -95,12 +95,15 @@ end
 function M.listen(host, port, onaccept, onerror, server_name)
 
 	server_name = server_name or 'mess'
+
 	local tcp = assert(sock.tcp())
-	assert(tcp:setopt('reuseaddr', true))
-	assert(tcp:listen(host, port))
-	sock.liveadd(tcp, server_name)
 
 	local server = {tcp = tcp}
+
+	check_io(server, tcp:setopt('reuseaddr', true))
+	check_io(server, tcp:listen(host, port))
+
+	sock.liveadd(tcp, server_name)
 
 	local stop
 	function server:stop()
@@ -140,7 +143,10 @@ function M.connect(host, port, exp, tcp_opt)
 	local tcp = assert(sock.tcp())
 	glue.update(tcp, tcp_opt)
 	local ok, err = tcp:connect(host, port, exp)
-	if not ok then return nil, err end
+	if not ok then
+		tcp:close()
+		return nil, err
+	end
 	return M.protocol(tcp)
 end
 
