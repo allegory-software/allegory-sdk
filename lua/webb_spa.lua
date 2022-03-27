@@ -19,8 +19,10 @@ ACTIONS
 	strings.js       load strings.<lang>.js
 	all.js           output of jsfile() calls
 	all.css          output of cssfile() calls
+	_all.html        output of htmlfile() calls
 	inline.js        output of js() calls
 	inline.css       output of css() calls
+	_inline.html     output of html() calls
 	404.html         SPA response
 
 LOADS
@@ -118,8 +120,8 @@ wwwfile['all.js.cat'] = function()
 end
 
 htmlfile = sepbuffer'\n'
-wwwfile['all.html.cat'] = function()
-	return htmlfile() .. ' inline.html'
+wwwfile['_all.html.cat'] = function()
+	return htmlfile() .. ' _inline.html'
 end
 
 local fontfiles = {}
@@ -140,7 +142,7 @@ wwwfile['inline.js'] = function()
 end
 
 html = sepbuffer'\n'
-wwwfile['inline.html'] = function()
+wwwfile['_inline.html'] = function()
 	return html()
 end
 
@@ -237,7 +239,7 @@ action['404.html'] = function(action)
 	t.lang = lang()
 	t.country = country()
 
-	local html = record(outcatlist, 'all.html.cat')
+	local html = record(outcatlist, '_all.html.cat')
 	t.body = filter_lang(html, lang())
 	t.body_classes = config'body_classes'
 	t.body_attrs = config'body_attrs'
