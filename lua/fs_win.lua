@@ -370,11 +370,8 @@ local function sec_attr(inheritable)
 	return sa
 end
 
-function fs.open(path, opt)
-	opt = opt or 'r'
-	if type(opt) == 'string' then
-		opt = assert(str_opt[opt], 'invalid open mode %s', opt)
-	end
+function fs.open(path, mode_opt)
+	local opt = open_opt(mode_opt, str_opt)
 	local async = opt.async or opt.read_async or opt.write_async
 	assert(not async or opt.is_pipe_end, 'only pipes can be async')
 	local access   = flags(opt.access or 'read', access_bits, nil, true)
@@ -405,7 +402,8 @@ function fs.open(path, opt)
 	local getbit = glue.getbit
 	local r = getbit(access, access_bits.read ) or getbit(access, access_bits.generic_read)
 	local w = getbit(access, access_bits.write) or getbit(access, access_bits.generic_write)
-	fs.log('', 'open', '%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
+	f.log = opt.log or fs.log
+	f.log('', 'fs', 'open', '%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
 	return f
 end
 
@@ -423,7 +421,7 @@ function file.close(f)
 	local ok, err = checknz(C.CloseHandle(f.handle))
 	if not ok then return false, err end
 	f.handle = INVALID_HANDLE_VALUE
-	fs.log('', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	f.log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
 	fs.live(f, nil)
 	return true
 end
@@ -554,7 +552,8 @@ function fs.pipe(path, opt)
 				true, path
 			)
 		if not f then return nil, err end
-		fs.log('', 'pipe', '%-4s %s', f, path)
+		f.log = opt.log or fs.log
+		f.log('', 'fs', 'pipe', '%-4s %s', f, path)
 		return f
 
 	else --unnamed pipe, return both ends
@@ -592,7 +591,8 @@ function fs.pipe(path, opt)
 				return nil, err
 			end
 
-			fs.log('', 'pipe', 'r=%s w=%s async', rf, wf)
+			f.log = opt.log or fs.log
+			f.log('', 'fs', 'pipe', 'r=%s w=%s async', rf, wf)
 			return rf, wf
 
 		else --non-overlapped anon pipe, use native CreatePipe().
@@ -610,7 +610,9 @@ function fs.pipe(path, opt)
 			if opt.inheritable or opt.read_inheritable  then rf:set_inheritable(true) end
 			if opt.inheritable or opt.write_inheritable then wf:set_inheritable(true) end
 
-			fs.log('', 'pipe', 'r=%s w=%s sync', rf, wf)
+			rf.log = opt.log or fs.log
+			wf.log = opt.log or fs.log
+			rf.log('', 'fs', 'pipe', 'r=%s w=%s sync', rf, wf)
 			return rf, wf
 
 		end
@@ -749,7 +751,7 @@ BOOL MoveFileExW(
 
 local function logpath(severity, event, path, ok, err)
 	if not ok then return false, err end
-	fs.log(severity, event, '%s', path)
+	fs.log(severity, 'fs', event, '%s', path)
 	return true
 end
 
@@ -800,7 +802,7 @@ function fs.move(oldpath, newpath, opt)
 		flags(opt or default_move_opt, move_bits, nil, true)
 	))
 	if not ok then return false, err end
-	fs.log('', 'move', 'old: %s\nnew: %s', oldpath, newpath)
+	fs.log('', 'fs', 'move', 'old: %s\nnew: %s', oldpath, newpath)
 	return true
 end
 
@@ -834,7 +836,7 @@ local SYMBOLIC_LINK_FLAG_DIRECTORY = 0x1
 
 local function logmklink(event, link_path, target_path, is_dir, ok, err)
 	if not ok then return false, err end
-	fs.log('', event, 'link:   %s (%s)\ntarget:  %s',
+	fs.log('', 'fs', event, 'link:   %s (%s)\ntarget:  %s',
 		link_path, is_dir and 'dir' or 'file', target_path)
 	return true
 end

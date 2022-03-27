@@ -667,10 +667,10 @@ function check_errno(ret, errno, xtra_errors)
 	return ret, err
 end
 
-function fs.log(severity, ...)
+function fs.log(...)
 	local logging = fs.logging
 	if not logging then return end
-	logging.log(severity, 'fs', ...)
+	logging.log(...)
 end
 
 function fs.live(...)
@@ -744,6 +744,14 @@ end
 
 function fs.isfile(f)
 	return type(f) == 'table' and rawget(f, '__index') == file
+end
+
+function open_opt(mode_opt, str_opt)
+	mode_opt = mode_opt or 'r'
+	local opt = type(mode_opt) == 'table' and mode_opt or nil
+	local mode = type(mode_opt) == 'string' and mode_opt or opt and opt.mode
+	local mopt = mode and assert(str_opt[mode], 'invalid open mode: %s', mode)
+	return opt and mopt and update({}, mopt, opt) or opt or mopt
 end
 
 --returns a read(buf, sz) -> len function which reads ahead from file.

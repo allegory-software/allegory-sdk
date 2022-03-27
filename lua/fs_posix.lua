@@ -135,11 +135,8 @@ function fs.wrap_fd(fd, async, is_pipe_end, path)
 	return f
 end
 
-function fs.open(path, opt)
-	opt = opt or 'r'
-	if type(opt) == 'string' then
-		opt = assert(str_opt[opt], 'invalid open mode %s', opt)
-	end
+function fs.open(path, mode_opt)
+	local opt = open_opt(mode_opt, str_opt)
 	local flags = flags(opt.flags or 'rdonly', o_bits)
 	flags = bor(flags, opt.async and O_NONBLOCK or 0)
 	local mode = parse_perms(opt.perms)
@@ -158,7 +155,8 @@ function fs.open(path, opt)
 	f.shm = opt.shm and true or false
 	local r = band(flags, o_bits.rdonly) == o_bits.rdonly and 'r' or ''
 	local w = band(flags, o_bits.wronly) == o_bits.wronly and 'w' or ''
-	fs.log('', 'open', '%-4s %s%s %s', f, r, w, path)
+	f.log = opt.log or fs.log
+	f.log('', 'fs', 'open', '%-4s %s%s %s', f, r, w, path)
 	return f
 end
 
@@ -176,7 +174,7 @@ function file.close(f)
 	local ok = C.close(f.fd) == 0
 	if not ok then return check(false) end
 	f.fd = -1
-	fs.log('', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	f.log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
 	fs.live(f, nil)
 	return true
 end
@@ -208,8 +206,7 @@ int pipe(int[2]);
 int mkfifo(const char *pathname, mode_t mode);
 ]]
 
-function fs.pipe(path, mode)
-	local opt
+function fs.pipe(path, mode, opt)
 	if type(path) == 'table' then
 		path, mode, opt = path.path, path.mode, path
 	end
@@ -220,7 +217,8 @@ function fs.pipe(path, mode)
 		if fd == -1 then return check() end
 		local f, err = fs.wrap_fd(fd, opt.async, true, path)
 		if not f then return nil, err end
-		fs.log('', 'pipe', '%-4s %s', f, path)
+		f.log = opt.log or fs.log
+		f.log('', 'fs', 'pipe', '%-4s %s', f, path)
 		return f
 	else --unnamed pipe
 		local fds = ffi.new'int[2]'
@@ -233,7 +231,9 @@ function fs.pipe(path, mode)
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
 		end
-		fs.log('', 'pipe', 'r=%s w=%s %s %s', rf, wf, opt.async and 'async' or 'sync', mode)
+		rf.log = opt.log or fs.log
+		wf.log = opt.log or fs.log
+		rf.log('', 'fs', 'pipe', 'r=%s w=%s %s %s', rf, wf, opt.async and 'async' or 'sync', mode)
 		return rf, wf
 	end
 end
@@ -389,14 +389,14 @@ int rename(const char *oldpath, const char *newpath);
 
 local function logpath(severity, event, path, ok, err)
 	if not ok then return false, err end
-	fs.log(severity, event, '%s', path)
+	fs.log(severity, 'fs', event, '%s', path)
 	return true
 end
 
 function mkdir(path, perms)
 	local ok, err = check(C.mkdir(path, perms or 0x1ff) == 0)
 	if not ok then return false, err end
-	fs.log('', 'mkdir', '%s %s', path, perms)
+	fs.log('', 'fs', 'mkdir', '%s %s', path, perms)
 	return true
 end
 
@@ -433,7 +433,7 @@ end
 function fs.move(oldpath, newpath)
 	local ok, err = check(C.rename(oldpath, newpath) == 0)
 	if not ok then return false, err end
-	fs.log('', 'move', 'old: %s\nnew:%s', oldpath, newpath)
+	fs.log('', 'fs', 'move', 'old: %s\nnew:%s', oldpath, newpath)
 	return true
 end
 
@@ -447,7 +447,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize);
 
 local function logmklink(event, link_path, target_path, ok, err)
 	if not ok then return false, err end
-	fs.log('', event, 'link:   %s\ntarget:  %s', link_path, target_path)
+	fs.log('', 'fs', event, 'link:   %s\ntarget:  %s', link_path, target_path)
 	return true
 end
 
