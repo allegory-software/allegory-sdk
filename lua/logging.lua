@@ -455,9 +455,9 @@ end
 function logging.rpc:get_procinfo()
 	local t = proc.info()
 	self.logvar('procinfo', {
+		clock = clock(),
 		utime = t.utime,
 		stime = t.stime,
-		starttime = t.starttime,
 		rss   = t.rss,
 		vsize = t.vsize,
 		state = t.state,

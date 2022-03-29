@@ -1110,7 +1110,7 @@ function nav_widget(e) {
 		bind_param_nav_cols(nav0, e.params, false)
 		bind_param_nav_cols(nav1, e.params, true)
 		if (init_param_vals())
-			e.reload()
+			e.update({reload: true})
 	}
 	e.prop('param_nav', {store: 'var', private: true})
 	e.prop('param_nav_id', {store: 'var', bind_id: 'param_nav', type: 'nav',
@@ -3697,7 +3697,7 @@ function nav_widget(e) {
 				return
 			if (saving)
 				return
-			if (opt.if_filter != param_vals_filter())
+			if (opt.if_filter && opt.if_filter != param_vals_filter())
 				return
 			pr('reloading', e.rowset_name)
 		}

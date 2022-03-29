@@ -5,6 +5,7 @@
 
 	time.time() -> ts    wall clock time with ~100us precision
 	time.clock() -> ts   monotonic time in seconds with ~1us precision
+	time.startclock      system clock when this module was loaded
 	time.sleep(s)        sleep with sub-second precision (~10-100ms)
 	time.install()       increase accuracy of `os.date()` and `os.time()`
 
@@ -57,6 +58,7 @@ if ffi.os == 'Windows' then
 		return tonumber(t[0]) * inv_qpf - t0
 	end
 	t0 = M.clock()
+	M.startclock = t0
 
 	function M.sleep(s)
 		C.time_Sleep(s * 1000)
@@ -115,6 +117,7 @@ elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
 			return tos(t) - t0
 		end
 		t0 = M.clock()
+		M.startclock = t0
 
 	elseif ffi.os == 'OSX' then
 
