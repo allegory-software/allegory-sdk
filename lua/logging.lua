@@ -453,6 +453,7 @@ function logging.rpc:get_livelist()
 end
 
 function logging.rpc:get_procinfo()
+	local proc = require'proc'
 	local t = proc.info()
 	self.logvar('procinfo', {
 		clock = clock(),
