@@ -153,7 +153,7 @@ local function format_number(v)
 	elseif v == floor(v) and v >= -2^31 and v <= 2^31-1 then
 		return string_format('%d', v) --printing with %d is faster
 	else
-		return string_format('%0.17g', v)
+		return string_format('%0.15g', v)
 	end
 end
 
@@ -436,7 +436,7 @@ local function to_openfile(f, v, ...)
 end
 
 local function to_file(file, v, ...)
-	local glue = require'fs'
+	local fs = require'fs'
 	return fs.save(file, coroutine.wrap(function(...)
 		coroutine.yield'return '
 		to_sink(coroutine.yield, v, ...)

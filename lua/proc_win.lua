@@ -258,4 +258,12 @@ function proc:status() --finished | killed | active | forgotten
 	return code and 'finished' or err
 end
 
+function M.info(pid)
+	return {} --NYI
+end
+
+function proc:info()
+	return M.info(self.pid)
+end
+
 return M

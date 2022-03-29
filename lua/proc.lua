@@ -48,6 +48,11 @@ proc.exec_luafile(opt | script,...) -> p
 	unless otherwise specified. The arguments and options are the same as for
 	`exec()`, except that `cmd` must be a Lua file instead of an executable file.
 
+proc.info([pid]) -> t
+proc:info() -> t
+
+	Get process info. On Linux, it parses `/proc/PID/stat`. Windows is NYI.
+
 --NOTES ----------------------------------------------------------------------
 
 #### Env vars

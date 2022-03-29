@@ -407,7 +407,7 @@ end
 local function live(self, o, fmt, ...)
 	local id, ids = debug_id(o)
 	local was_live = ids.live[o] ~= nil
-	if fmt then
+	if fmt ~= nil then
 		if not was_live then
 			ids.live_count = ids.live_count + 1
 		end
@@ -450,6 +450,23 @@ end
 
 function logging.rpc:get_livelist()
 	self.logvar('livelist', self.livelist())
+end
+
+function logging.rpc:get_procinfo()
+	local t = proc.info()
+	self.logvar('procinfo', {
+		utime = t.utime,
+		stime = t.stime,
+		starttime = t.starttime,
+		rss   = t.rss,
+		vsize = t.vsize,
+		state = t.state,
+		num_threads = t.num_threads,
+	})
+end
+
+function logging.rpc:get_osinfo()
+	self.logvar('osinfo', proc.osinfo())
 end
 
 function logging.printlive(custom_print)

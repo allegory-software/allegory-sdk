@@ -350,7 +350,7 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		if out_wf then assert(out_wf:close()) end
 		if err_wf then assert(err_wf:close()) end
 
-		self.id = pid
+		self.pid = pid
 
 		if M.logging then
 			local t = {cmd}
@@ -367,20 +367,20 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 end
 
 function proc:forget()
-	if self.id then
+	if self.pid then
 		M.live(self, nil)
 	end
 	if self.stdin  then assert(self.stdin :close()) end
 	if self.stdout then assert(self.stdout:close()) end
 	if self.stderr then assert(self.stderr:close()) end
-	self.id = false
+	self.pid = false
 end
 
 function proc:kill()
-	if not self.id then
+	if not self.pid then
 		return nil, 'forgotten'
 	end
-	return check(C.kill(self.id, SIGKILL) ~= 0)
+	return check(C.kill(self.pid, SIGKILL) ~= 0)
 end
 
 function proc:exit_code()
@@ -389,11 +389,11 @@ function proc:exit_code()
 	elseif self._killed then
 		return nil, 'killed'
 	end
-	if not self.id then
+	if not self.pid then
 		return nil, 'forgotten'
 	end
 	local status = int(1)
-	local pid = C.waitpid(self.id, status, WNOHANG)
+	local pid = C.waitpid(self.pid, status, WNOHANG)
 	if pid < 0 then
 		return check()
 	end
@@ -410,7 +410,7 @@ function proc:exit_code()
 end
 
 function proc:wait(expires)
-	if not self.id then
+	if not self.pid then
 		return nil, 'forgotten'
 	end
 	while self:status() == 'active' and self._clock() < (expires or 1/0) do
@@ -427,6 +427,118 @@ end
 function proc:status() --finished | killed | active | forgotten
 	local x, err = self:exit_code()
 	return x and 'finished' or err
+end
+
+--process state --------------------------------------------------------------
+
+local USER_HZ do
+	ffi.cdef'long int sysconf(int name);'
+	local _SC_CLK_TCK = 2
+	USER_HZ = tonumber(ffi.C.sysconf(2))
+	assert(USER_HZ ~= -1)
+end
+
+local parse_stat do
+	local state_name = {
+		R = 'running',
+		S = 'sleeping', -- in an interruptible wait
+		D = 'waiting', --in uninterruptible disk sleep
+		Z = 'zombie',
+		T = 'stopped',
+		t = 'tracing stop',
+		X = 'dead',
+	}
+	local N = {'(%d+)', tonumber}
+	local T = {'(%d+)', function(s) return tonumber(s) / USER_HZ end}
+	local t = {
+		'pid'        , N,
+		'comm'       , {'%((.-)%)', function(s) return s end},
+		'state'      , {'(.)', function(s) return state_name[s] end},
+		'ppid'       , N,
+		'pgrp'       , N,
+		'session'    , N,
+		'tty_nr'     , N,
+		'tpgid'      , N,
+		'flags'      , N,
+		'minflt'     , N,
+		'cminflt'    , N,
+		'majflt'     , N,
+		'cmajflt'    , N,
+		'utime'      , T,
+		'stime'      , T,
+		'cutime'     , T,
+		'cstime'     , T,
+		'priority'   , N,
+		'nice'       , N,
+		'num_threads', N,
+		'itrealvalue', N,
+		'starttime'  , T,
+		'vsize'      , N,
+		'rss'        , {'(%d+)', function(s) return tonumber(s) * require'fs'.pagesize() end},
+		'rsslim'     , N,
+	}
+	local nt, pt, dt = {}, {}, {}
+	for i = 1, #t, 2 do
+		local name, p = t[i], t[i+1]
+		nt[#nt+1] = name
+		pt[#pt+1] = p[1]
+		dt[#dt+1] = p[2]
+	end
+	local patt = table.concat(pt, '%s+')
+	local function pass(...)
+		local t = {}
+		for i=1,select('#',...) do
+			t[nt[i]] = dt[i]((select(i,...)))
+		end
+		return t
+	end
+	function parse_stat(s)
+		return pass(s:match(patt))
+	end
+end
+function M.info(pid)
+	local fs = require'fs'
+	local s, err = fs.load(('/proc/%s/stat'):format(pid or 'self'), true)
+	if not s then return nil, err end
+	return parse_stat(s)
+end
+
+function proc:info()
+	return M.info(self.pid)
+end
+
+function M.osinfo()
+	local fs = require'fs'
+
+	local s, err = fs.load('/proc/meminfo', true)
+	if not s then return nil, err end
+	local total = tonumber(s:match'MemTotal:%s*(%d+) kB')
+	local avail = tonumber(s:match'MemAvailable:%s*(%d+) kB')
+	total = total and total * 1024
+	avail = avail and avail * 1024
+
+	local s, err = fs.load('/proc/stat', true)
+	if not s then return nil, err end
+	local cputimes = {}
+	for cpu, user, nice, sys, idle in s:gmatch'cpu(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)' do
+		cpu     = tonumber(cpu)
+		user    = tonumber(user)  / USER_HZ
+		nice    = tonumber(nice)  / USER_HZ
+		sys     = tonumber(sys)   / USER_HZ
+		idle    = tonumber(idle)  / USER_HZ
+		cputimes[cpu+1] = {user = user, nice = nice, sys = sys, idle = idle}
+	end
+
+	local s, err = fs.load('/proc/uptime', true)
+	if not s then return nil, err end
+	local uptime = tonumber(s:match'^%d+')
+
+	return {
+		mem_total = total,   --in bytes
+		mem_avail = avail,   --in bytes
+		uptime    = uptime,  --in seconds
+		cputimes  = cputimes, --per-cpu times
+	}
 end
 
 return M

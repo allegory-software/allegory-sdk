@@ -89,7 +89,7 @@ MEMORY MAPPING
 	fs.aligned_size(bytes[, dir]) -> bytes        next/prev page-aligned size
 	fs.aligned_addr(ptr[, dir]) -> ptr            next/prev page-aligned address
 HI-LEVEL APIs
-	fs.load[_tobuffer](path) -> buf,len           read file to string or buffer
+	fs.load[_tobuffer](path, [ignore_fsize]) -> buf,len  read file to string or buffer
 	fs.save(path, v | buf,len | t | read)         atomic save value/buffer/array/read-results
 	fs.saver(path) -> f(v | buf,len | t | read)   atomic save writer function
 
