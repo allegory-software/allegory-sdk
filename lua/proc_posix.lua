@@ -448,8 +448,8 @@ local parse_stat do
 		t = 'tracing stop',
 		X = 'dead',
 	}
-	local N = {'(%d+)', tonumber}
-	local T = {'(%d+)', function(s) return tonumber(s) / USER_HZ end}
+	local N = {'(-?%d+)', tonumber}
+	local T = {'(-?%d+)', function(s) return tonumber(s) / USER_HZ end}
 	local t = {
 		'pid'        , N,
 		'comm'       , {'%((.-)%)', function(s) return s end},
@@ -474,7 +474,7 @@ local parse_stat do
 		'itrealvalue', N,
 		'starttime'  , T,
 		'vsize'      , N,
-		'rss'        , {'(%d+)', function(s) return tonumber(s) * require'fs'.pagesize() end},
+		'rss'        , {'(-?%d+)', function(s) return tonumber(s) * require'fs'.pagesize() end},
 		'rsslim'     , N,
 	}
 	local nt, pt, dt = {}, {}, {}
