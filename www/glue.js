@@ -1174,10 +1174,10 @@ method(Number, 'timeago', function() {
 {
 let suffix = [' B', ' KB', ' MB', ' GB', ' TB']
 let magnitudes = {KB: 1, MB: 2, GB: 3}
-method(Number, 'kbytes', function(x, dec, mag) {
+method(Number, 'kbytes', function(dec, mag) {
 	dec = dec || 0
-	let i = mag ? magnitudes[mag] : floor(ln(x) / ln(1024))
-	let z = x / 1024**i
+	let i = mag ? magnitudes[mag] : floor(ln(this) / ln(1024))
+	let z = this / 1024**i
 	return z.dec(dec) + suffix[i]
 })
 }
