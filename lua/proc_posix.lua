@@ -498,7 +498,7 @@ local parse_stat do
 end
 function M.info(pid)
 	local fs = require'fs'
-	local s, err = fs.load(('/proc/%s/stat'):format(pid or 'self'), true)
+	local s, err = fs.load(('/proc/%d/stat'):format(pid or C.getpid()), true)
 	if not s then return nil, err end
 	return parse_stat(s)
 end
