@@ -59,6 +59,7 @@
 		tag(s, [attrs], te1,...)
 		div(...)
 		span(...)
+		[].join_nodes([separator])
 	components:
 		bind_component(tag, initializer, [selector])
 		e.bind(t|f)
@@ -435,6 +436,22 @@ function tag(tag, attrs, ...children) {
 
 div  = (...a) => tag('div' , ...a)
 span = (...a) => tag('span', ...a)
+
+Array.prototype.join_nodes = function(sep, parent_node) {
+
+	if (sep == null && !parent_node && this.filter(e => isstr(e)).length == this.length)
+		return this.join(sep)
+
+	parent_node = parent_node || span()
+	let not_first
+	for (let e of this) {
+		if (sep != null && not_first)
+			parent_node.add(TC(sep))
+		parent_node.add(TC(e))
+		not_first = true
+	}
+	return parent_node
+}
 
 method(Node, 'clone', function() {
 	return this.cloneNode(true)
