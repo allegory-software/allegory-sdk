@@ -3513,3 +3513,7 @@ function setglobal(k, v) {
 	broadcast('global_changed', k, v, v0)
 	broadcast(k+'_changed', v, v0)
 }
+
+// container widget with `display: content`. useful to group together
+// an invisible widget like an x-nav with a visible one to make a tab.
+component('x-ct', 'Containers', noop)
