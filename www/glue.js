@@ -22,6 +22,7 @@ MATH
 	min(x, y) max(x, y)
 	sqrt(x)
 	ln(x)
+	log10(x)
 	random()
 	PI sin(x) cos(x) tan(x) rad deg
 	clamp(x, x0, x1)
@@ -179,6 +180,7 @@ min = Math.min
 max = Math.max
 sqrt = Math.sqrt
 ln = Math.log
+log10 = Math.log10
 random = Math.random
 sign = Math.sign
 
