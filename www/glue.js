@@ -181,6 +181,7 @@ max = Math.max
 sqrt = Math.sqrt
 ln = Math.log
 log10 = Math.log10
+logbase = (x, base) => ln(x) / ln(base)
 random = Math.random
 sign = Math.sign
 
@@ -1178,7 +1179,7 @@ let suffix = [' B', ' KB', ' MB', ' GB', ' TB']
 let magnitudes = {KB: 1, MB: 2, GB: 3}
 method(Number, 'kbytes', function(dec, mag) {
 	dec = dec || 0
-	let i = mag ? magnitudes[mag] : floor(ln(this) / ln(1024))
+	let i = mag ? magnitudes[mag] : clamp(floor(logbase(this, 1024)), 0, suffix.length-1)
 	let z = this / 1024**i
 	return z.dec(dec) + suffix[i]
 })
