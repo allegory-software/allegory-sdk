@@ -2410,7 +2410,6 @@ component('x-timepicker', 'Input', function(e) {
 			let m = e.sel_m.input_val || '00'
 			let s = e.sel_s.input_val || '00'
 			let t = h != null && m != null && s != null ? h + ':' + m + ':' + s : null
-			pr(h, m, s, t)
 			e.set_val(t, {input: e})
 		}
 		e.sel_h.on('input_val_changed', set_val)
@@ -2741,6 +2740,28 @@ component('x-chart', 'Input', function(e) {
 
 	// model ------------------------------------------------------------------
 
+	function compute_step_and_range(wanted_n, min_sum, max_sum, scale_base, scales) {
+		scale_base = scale_base || 10
+		scales = scales || [1, 2, 2.5, 5]
+		let d = max_sum - min_sum
+		let min_scale_exp = floor((d ? logbase(d, scale_base) : 0) - 2)
+		let max_scale_exp = floor((d ? logbase(d, scale_base) : 0) + 2)
+		let n0, step
+		for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
+			for (let scale of scales) {
+				let step1 = scale_base ** scale_exp * scale
+				let n = d / step1
+				if (n0 == null || abs(n - wanted_n) < n0) {
+					n0 = n
+					step = step1
+				}
+			}
+		}
+		min_sum = floor (min_sum / step) * step
+		max_sum = ceil  (max_sum / step) * step
+		return [step, min_sum, max_sum]
+	}
+
 	function compute_sums(sum_fld, row_group) {
 		let n = 0
 		let fi = sum_fld.val_index
@@ -2776,6 +2797,9 @@ component('x-chart', 'Input', function(e) {
 		if (!cols)
 			return
 
+		// all_split_groups : [split_group1, ...]   list of superimposed graphs (cgs)
+		// split_group      : [row_group1, ...]     one graph: list of x-axis row groups (xgs)
+		// row_group        : [row1, ...]           one row group: one sum point.
 		let all_split_groups = []
 		for (let sum_fld of sum_flds) {
 			let split_groups = e.split_cols
@@ -2792,11 +2816,11 @@ component('x-chart', 'Input', function(e) {
 
 	function sum_label(cls, text, sum) {
 		let sum_fld = e.nav.flds(e.sum_cols)[0]
-		let label = div({class: cls})
-		label.add(text)
-		label.add(tag('br'))
-		label.add(e.nav.cell_display_val_for(null, sum_fld, sum))
-		return label
+		let a = []
+		if (text)
+			a.push(text)
+		a.push(e.nav.cell_display_val_for(null, sum_fld, sum))
+		return a.join_nodes(tag('br'), cls && div({class: cls}))
 	}
 
 	function pie_slices() {
@@ -2833,11 +2857,7 @@ component('x-chart', 'Input', function(e) {
 		}
 		if (other_slice) {
 			other_slice.size = other_slice.sum / slices.total
-			other_slice.label = div({class: 'x-chart-label'},
-				e.other_text,
-				tag('br'),
-				e.nav.cell_display_val_for(null, e.nav.flds(e.sum_cols)[0], other_slice.sum)
-			)
+			other_slice.label = sum_label('x-chart-label', e.other_text, other_slice.sum)
 			big_slices.push(other_slice)
 		}
 		return big_slices
@@ -2929,7 +2949,7 @@ component('x-chart', 'Input', function(e) {
 		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .5, .6)
 	}
 
-	function render_line_or_columns(columns, rotate) {
+	function render_line_or_columns(columns, rotate, dots) {
 
 		let groups = row_groups()
 		if (!groups)
@@ -2943,18 +2963,20 @@ component('x-chart', 'Input', function(e) {
 		let pad_y1 = num(css['padding-top'   ])
 		let pad_y2 = num(css['padding-bottom'])
 
-		let canvas = tag('canvas', {
-			class: 'x-chart-canvas',
+		canvas = tag('canvas', {
+			class : 'x-chart-canvas',
+			width : r.w - pad_x1 - pad_x2,
+			height: r.h - pad_y1 - pad_y2,
 		})
-
 		e.set(canvas)
-		canvas.width  = canvas.offsetWidth
-		canvas.height = canvas.offsetHeight
 
 		let cx = canvas.getContext('2d')
 
 		let w = canvas.width
 		let h = canvas.height
+
+		// compute vertical range.
+		// compute horizontal labels.
 
 		let xgs = map() // {x_key -> xg}
 		let min_xv =  1/0
@@ -2987,28 +3009,13 @@ component('x-chart', 'Input', function(e) {
 
 		// compute min, max and step of y-axis markers so that 1) the step is
 		// on a module and the spacing between lines is the closest to an ideal.
-		let y_step, y_step_decimals
+		let y_step
 		{
 			let y_spacing = rotate ? 80 : 40 // wanted space between y-axis markers
 			let target_n = round(h / y_spacing) // wanted number of y-axis markers
-			let d = max_sum - min_sum
-			let min_scale_exp = floor(log10(d) - 2)
-			let max_scale_exp = floor(log10(d) + 2)
-			let modules = [1, 2, 2.5, 5]
-			let n0
-			for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
-				for (let module of modules) {
-					let step = 10 ** scale_exp * module
-					let n = d / step
-					if (n0 == null || abs(n - target_n) < n0) {
-						n0 = n
-						y_step = step
-						y_step_decimals = max(0, -scale_exp + 1)
-					}
-				}
-			}
-			min_sum = floor(min_sum / y_step) * y_step
-			max_sum = ceil(max_sum / y_step) * y_step
+			let sum_fld = e.nav.flds(e.sum_cols)[0]
+			;[y_step, min_sum, max_sum] =
+				compute_step_and_range(target_n, min_sum, max_sum, sum_fld.scale_base, sum_fld.scales)
 		}
 
 		cx.font = css['font-size'] + ' ' + css.font
@@ -3050,36 +3057,48 @@ component('x-chart', 'Input', function(e) {
 		let label_color    = css.getPropertyValue('--x-fg-label')
 		cx.fillStyle   = label_color
 		cx.strokeStyle = ref_line_color
+
+		let min_w = 20                      // min element width
+		let n = xgs.size                    // given number of elements
+		let max_n = max(1, floor(w / max(w / n, min_w))) // max number of elements
+		let [step] = compute_step_and_range(min(n, max_n), 0, n)
+
+		let i = 0
 		for (let xg of xgs.values()) {
-			// draw x-axis label.
-			let text = T(xg.text).textContent // TODO: draw the element as overlay
-			let m = cx.measureText(text)
-			cx.save()
-			if (rotate) {
-				let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
-				let x = round(xg.x + text_h / 2)
-				let y = h + m.width
-				cx.translate(x, y)
-				cx.rotate(rad * -90)
-			} else {
-				let x = xg.x - m.width / 2
-				let y = round(h)
-				cx.translate(x, y)
+			if (i % step == 0) {
+				// draw x-axis label.
+				// TODO: draw the element as a html overlay
+				let text = isnode(xg.text) ? xg.text.textContent : xg.text
+				let m = cx.measureText(text)
+				cx.save()
+				if (rotate) {
+					let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
+					let x = round(xg.x + text_h / 2)
+					let y = h + m.width
+					cx.translate(x, y)
+					cx.rotate(rad * -90)
+				} else {
+					let x = xg.x - m.width / 2
+					let y = round(h)
+					cx.translate(x, y)
+				}
+				cx.fillText(text, 0, 0)
+				cx.restore()
+				// draw x-axis center line marker.
+				cx.beginPath()
+				cx.moveTo(xg.x + .5, h - py2 + 0.5)
+				cx.lineTo(xg.x + .5, h - py2 + 4.5)
+				cx.stroke()
 			}
-			cx.fillText(text, 0, 0)
-			cx.restore()
-			// draw x-axis center line marker.
-			cx.beginPath()
-			cx.moveTo(xg.x + .5, h - py2 + 0.5)
-			cx.lineTo(xg.x + .5, h - py2 + 4.5)
-			cx.stroke()
+			i++
 		}
 
 		// draw y-axis labels & reference lines.
 		for (let sum = min_sum; sum <= max_sum; sum += y_step) {
 			// draw y-axis label.
 			let y = round(lerp(sum, min_sum, max_sum, h - py2, 0))
-			let s = sum.dec(y_step_decimals)
+			let s = sum_label(null, null, sum)
+			s = isnode(s) ? s.textContent : s
 			let m = cx.measureText(s)
 			let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
 			cx.save()
@@ -3164,11 +3183,13 @@ component('x-chart', 'Input', function(e) {
 				cx.stroke()
 
 				// draw a dot on each line cusp.
-				cx.fillStyle = cx.strokeStyle
-				for (let xg of cg) {
-					cx.beginPath()
-					cx.arc(xg.x, xg.y, 3, 0, 2*PI)
-					cx.fill()
+				if (dots) {
+					cx.fillStyle = cx.strokeStyle
+					for (let xg of cg) {
+						cx.beginPath()
+						cx.arc(xg.x, xg.y, 3, 0, 2*PI)
+						cx.fill()
+					}
 				}
 
 			}
@@ -3226,7 +3247,7 @@ component('x-chart', 'Input', function(e) {
 				})
 				tt.side = rotate ? 'right' : 'top'
 				tt.begin_update()
-				tt.text = sum_label('x-chart-tooltip-label', cg.key_cols, cg.key_vals, xg, xg.sum)
+				tt.text = sum_label('x-chart-tooltip-label', TC(xg.text), xg.sum)
 				let tm = cx.getTransform()
 				let p1 = new DOMPoint(x    , y    ).matrixTransform(tm)
 				let p2 = new DOMPoint(x + w, y + h).matrixTransform(tm)
@@ -3250,9 +3271,10 @@ component('x-chart', 'Input', function(e) {
 
 	}
 
-	render.line = render_line_or_columns
-	render.column = function() { render_line_or_columns(true) }
-	render.bar = function() { render_line_or_columns(true, true) }
+	render.line           = function() { render_line_or_columns() }
+	render.line_with_dots = function() { render_line_or_columns(false, false, true) }
+	render.column         = function() { render_line_or_columns(true) }
+	render.bar            = function() { render_line_or_columns(true, true) }
 
 	e.do_update = function() {
 		pointermove = noop
@@ -3283,8 +3305,10 @@ component('x-chart', 'Input', function(e) {
 	e.on('bind', function(on) {
 		bind_nav(e.nav, on)
 		document.on('layout_changed', redraw, on)
-		if (!on && tt)
+		if (!on && tt) {
 			tt.close()
+			tt = null
+		}
 	})
 
 	e.on('resize', redraw)
@@ -3314,7 +3338,8 @@ component('x-chart', 'Input', function(e) {
 	e.prop('other_text', {store: 'var', default: 'Other', attr: true})
 	e.prop('shape', {
 		store: 'var', type: 'enum',
-		enum_values: ['pie', 'stack', 'line', 'area', 'column', 'bar', 'stackbar', 'bubble', 'scatter'],
+		enum_values: ['pie', 'stack', 'line', 'line_with_dots', 'area',
+			'column', 'bar', 'stackbar', 'bubble', 'scatter'],
 		default: 'pie', attr: true,
 	})
 

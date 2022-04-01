@@ -3122,14 +3122,13 @@ textarea.x-editbox-input {
 /* charts ----------------------------------------------------------------- */
 
 .x-chart {
+	flex: 1 0 0;  /* stretch to fill container but not more */
 	padding: 1em;
-	height: 100%;
-	display: grid;
+	overflow: hidden;
 }
 
 .x-chart-canvas {
-	width: 100%;
-	height: 100%;
+	position: absolute;
 }
 
 .x-chart-pie {
