@@ -145,8 +145,8 @@ rows:
 indexing:
 	publishes:
 		e.index_tree(cols, range_defs)
-		e.lookup(cols, [v1, ...]) -> [row1, ...]
-		e.row_group(cols, range_defs) -> [row1, ...]
+		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
+		e.row_groups(col_groups, range_defs) -> [row1, ...]
 
 master-detail:
 	needs:
@@ -602,13 +602,21 @@ function nav_widget(e) {
 	// fields utils -----------------------------------------------------------
 
 	let fld     = col => isstr(col) || isnum(col) ? assert(e.all_fields[col]) : col
+	let optfld  = col => isstr(col) || isnum(col) ? e.all_fields[col] : col
 	let fldname = col => fld(col).name
 	let colsarr = cols => isstr(cols) ? cols.names() : cols
 
-	let is_not_null = v => v != null
 	function flds(cols) {
-		let fields = cols && colsarr(cols).map(fld).filter(is_not_null)
-		return fields && fields.length ? fields : null
+		let fields = cols && colsarr(cols).map(fld)
+		assert(fields && fields.length)
+		return fields
+	}
+
+	let is_not_null = v => v != null
+	function optflds(cols) {
+		let ca = cols && colsarr(cols)
+		let fields = ca && ca.map(optfld).filter(is_not_null)
+		return fields && fields.length && fields.length == ca.length ? fields : null
 	}
 
 	e.fldnames = function(cols) {
@@ -624,6 +632,8 @@ function nav_widget(e) {
 
 	e.fld = fld
 	e.flds = flds
+	e.optfld = optfld
+	e.optflds = optflds
 
 	// fields array matching 1:1 to row contents ------------------------------
 
@@ -784,7 +794,7 @@ function nav_widget(e) {
 				init_field(rs.fields[fi], fi)
 
 		e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
-		e.pk_fields = flds(e.pk)
+		e.pk_fields = optflds(e.pk)
 		init_find_row()
 		e.id_field = check_field(rs.id_col)
 		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
@@ -1655,31 +1665,34 @@ function nav_widget(e) {
 
 	// vlookup ----------------------------------------------------------------
 
-	// cols: 'col1 ...' | fi | field | [col1|field1,...], [v1, ...]
+	// cols: 'col1 ...' | fi | field | [col1|field1,...]
 	function create_index(cols, range_defs) {
 
 		let idx = obj()
 
-		let tree // Map(f1_val->Map(f2_val->[row1,...]))
+		let tree // map(f1_val->map(f2_val->[row1,...]))
 		let cols_arr = colsarr(cols) // [col1,...]
 		let fis // [val_index1, ...]
 
-		let range_val = return_arg
-		let range_text = return_arg
 		if (range_defs) {
+
 			let range_val_funcs = obj() // {col->f}
 			let range_text_funcs = obj() // {col->text}
+
 			for (let col in range_defs) {
 				let range = range_defs[col]
 				let freq = range.freq
+				let unit = range.unit
 				let range_val
 				let range_text
+				if (unit && freq == null)
+					freq = 1
 				if (freq) {
 					let offset = range.offset || 0
-					if (!range.unit) {
-						range_val  = v => floor((v - offset) / freq) + offset
-						range_text = v => v + ' .. ' + (v + freq - 1)
-					} else if (range.unit == 'month') {
+					if (!unit) {
+						range_val  = v => (floor((v - offset) / freq) + offset) * freq
+						range_text = v => freq != 1 ? v + ' .. ' + (v + freq - 1) : v
+					} else if (unit == 'month') {
 						freq = floor(freq)
 						if (freq > 1) {
 							range_val  = v => month(v, offset) // TODO
@@ -1688,7 +1701,7 @@ function nav_widget(e) {
 							range_val  = v => month(v, offset)
 							range_text = v => month_year(v)
 						}
-					} else if (range.unit == 'year') {
+					} else if (unit == 'year') {
 						freq = floor(freq)
 						if (freq > 1) {
 							range_val  = v => year(v, offset) // TODO
@@ -1703,7 +1716,7 @@ function nav_widget(e) {
 				range_text_funcs[col] = range_text
 			}
 
-			range_val = function(v, i) {
+			function range_val(v, i) {
 				if (v != null) {
 					let f = range_val_funcs[cols_arr[i]]
 					v = f ? f(v) : v
@@ -1711,14 +1724,18 @@ function nav_widget(e) {
 				return v
 			}
 
-			range_text = function(v, i) {
-				if (v != null) {
-					let f = range_text_funcs[cols_arr[i]]
-					v = f ? f(v) : v
-				}
-				return v
+			function range_text(v, i, row) {
+				let f = range_text_funcs[cols_arr[i]]
+				return f ? f(v) : e.cell_display_val(row, fld(cols_arr[i]))
 			}
 
+		} else {
+
+			var range_val = return_arg
+
+			function range_text(v, i, row) {
+				return e.cell_display_val(row, fld(cols_arr[i]))
+			}
 		}
 
 		function add_row(row) {
@@ -1731,7 +1748,7 @@ function nav_widget(e) {
 				if (!t1) {
 					t1 = fi == last_fi ? [] : map()
 					t0.set(v, t1)
-					t1.text = range_text(v, i)
+					t1.text = range_text(v, i, row)
 				}
 				t0 = t1
 				i++
@@ -1837,58 +1854,62 @@ function nav_widget(e) {
 
 	// groups -----------------------------------------------------------------
 
-	e.row_group = function(cols, range_defs) {
-		let fields = flds(cols)
+	function row_groups_one_level(cols, range_defs) {
+		let fields = optflds(cols)
 		if (!fields)
 			return
-		let rows = set()
+		let groups = set()
 		for (let row of e.all_rows) {
 			let group_vals = e.cell_vals(row, fields)
-			let group_rows = e.lookup(cols, group_vals, range_defs)
-			rows.add(group_rows)
-			group_rows.key_vals = group_vals
+			let group = e.lookup(cols, group_vals, range_defs)
+			groups.add(group)
+			group.key_vals = group_vals
 		}
-		return rows
+		return groups
 	}
 
-	function flatten(t, path, depth, f, arg1, arg2) {
+	function flatten(t, path, text_path, depth, add_group, arg1, arg2) {
 		let path_pos = path.length
 		for (let [k, t1] of t) {
 			path[path_pos] = k
+			text_path[path_pos] = t1.text
 			if (depth)
-				flatten(t1, path, depth-1, f, arg1, arg2)
+				flatten(t1, path, text_path, depth-1, add_group, arg1, arg2)
 			else
-				f(t1, path, arg1, arg2)
+				add_group(t1, path, text_path, arg1, arg2)
 		}
 		path.remove(path_pos)
 	}
 
-	e.row_groups = function(group_cols, range_defs) {
-		let all_cols = group_cols.replaceAll(',', ' ')
-		let fields = flds(all_cols)
+	// group_cols: 'col1 col2 > col3 col4 > ...'
+	e.row_groups = function(group_cols, range_defs, group_text_sep) {
+		group_text_sep = or(group_text_sep, ' / ')
+		let col_groups = group_cols.split(/\s*>\s*/)
+		if (col_groups.length == 1)
+			return row_groups_one_level(group_cols, range_defs)
+		let all_cols = group_cols.replaceAll('>', ' ')
+		let fields = optflds(all_cols)
 		if (!fields)
 			return
 		let tree = e.index_tree(all_cols, range_defs)
-
-		let col_groups = group_cols.split(/\s*,\s*/)
 		let root_group = []
 		let depth = col_groups[0].names().length-1
-		function add_group(t, path, parent_group, parent_group_level) {
+		function add_group(t, path, text_path, parent_group, parent_group_level) {
 			let group = []
 			group.key_cols = col_groups[parent_group_level]
 			group.key_vals = path.slice()
-			group.text = t.text
+			group.text = text_path.join_nodes(group_text_sep)
 			parent_group.push(group)
 			let level = parent_group_level + 1
 			let col_group = col_groups[level]
 			if (col_group) { // more group levels down...
 				let depth = col_group.names().length-1
-				flatten(t, [], depth, add_group, group, level)
+				flatten(t, [], [], depth, add_group, group, level)
 			} else { // last group level, t is the array of rows.
 				group.push(...t)
 			}
 		}
-		flatten(tree, [], depth, add_group, root_group, 0)
+		flatten(tree, [], [], depth, add_group, root_group, 0)
 		return root_group
 	}
 
@@ -4578,10 +4599,10 @@ function nav_widget(e) {
 }
 
 // ---------------------------------------------------------------------------
-// view-less nav with manual lifetime management.
+// view-less nav
 // ---------------------------------------------------------------------------
 
-component('x-bare-nav', function(e) {
+component('x-nav', function(e) {
 
 	nav_widget(e)
 
@@ -4600,6 +4621,8 @@ component('x-bare-nav', function(e) {
 	}
 
 })
+
+bare_nav = nav // synonim, better use this in js code (but use x-nav in html).
 
 // ---------------------------------------------------------------------------
 // global one-row nav for all standalone (i.e. not bound to a nav) widgets.
