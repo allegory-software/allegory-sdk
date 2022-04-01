@@ -2739,50 +2739,83 @@ component('x-chart', 'Input', function(e) {
 	serializable_widget(e)
 	selectable_widget(e)
 
-	// view -------------------------------------------------------------------
+	// model ------------------------------------------------------------------
 
-	let render = {} // {shape->func}
-	let pointermove
-
-	function slice_color(i, n) {
-		return hsl_to_rgb(((i / n) * 360 - 120) % 180, .8, .7)
+	function compute_sums(sum_fld, row_group) {
+		let n = 0
+		let fi = sum_fld.val_index
+		for (let row of row_group)
+			n += row[fi]
+		row_group.sum = n
 	}
 
-	function cat_sum_label(cls, cols, vals, row, sum) {
-		let label = div({class: cls})
-		let i = 0
-		for (let field of e.nav.flds(cols)) {
-			let v = vals[i]
-			let text = e.nav.cell_display_val_for(row, field, v)
-			if (i == 1)
-				label.add('/')
-			label.add(text)
-			i++
+	function row_groups() {
+		let sum_flds = e.nav && e.nav.optflds(e.sum_cols)
+		if (!sum_flds)
+			return
+		let cols = []
+		let defs
+		for (let col of e.group_cols.trim().split(/\s+/)) {  // col[/offset][/unit][/freq]
+			let freq, offset, unit
+			col = col.replace(/\/[^\/]+$/, k => { freq   = k.substring(1).num(); return '' })
+			col = col.replace(/\/[^\/]+$/, k => { unit   = k.substring(1); return '' })
+			col = col.replace(/\/[^\/]+$/, k => { offset = k.substring(1).num(); return '' })
+			if (!col)
+				return
+			cols.push(col)
+			if (freq != null || offset != null || unit != null) {
+				defs = defs || {}
+				defs[col] = {
+					freq   : freq,
+					offset : offset,
+					unit   : unit,
+				}
+			}
 		}
+		cols = cols.join(' ')
+		if (!cols)
+			return
+
+		let all_split_groups = []
+		for (let sum_fld of sum_flds) {
+			let split_groups = e.split_cols
+				? e.nav.row_groups(e.split_cols+'>'+cols, defs)
+				: [e.nav.row_groups(cols, defs)]
+			for (let split_group of split_groups)
+				for (let row_group of split_group)
+					compute_sums(sum_fld, row_group)
+			all_split_groups.extend(split_groups)
+		}
+		all_split_groups.group_cols = cols
+		return all_split_groups
+	}
+
+	function sum_label(cls, text, sum) {
+		let sum_fld = e.nav.flds(e.sum_cols)[0]
+		let label = div({class: cls})
+		label.add(text)
 		label.add(tag('br'))
-		label.add(e.nav.cell_display_val_for(row, e.nav.fld(e.sum_col), sum))
+		label.add(e.nav.cell_display_val_for(null, sum_fld, sum))
 		return label
 	}
 
 	function pie_slices() {
 
-		let cat_groups = e.nav
-			&& e.nav.flds(e.cat_cols) != null
-			&& e.nav.fld(e.sum_col) != null
-			&& e.nav.row_group(e.cat_cols, range_defs())
-
-		if (!cat_groups)
+		let groups = row_groups()
+		if (!groups)
+			return
+		let group_cols = groups.group_cols
+		groups = groups[0] // TODO: draw multiple pies for each split group
+		if (!groups)
 			return
 
 		let slices = []
 		slices.total = 0
-		for (let group of cat_groups) {
+		for (let group of groups) {
 			let slice = {}
-			let sum = 0
-			for (let row of group)
-				sum += e.nav.cell_input_val(row, e.sum_col)
+			let sum = group.sum
 			slice.sum = sum
-			slice.label = cat_sum_label('x-chart-label', e.cat_cols, group.key_vals, group[0], sum)
+			slice.label = sum_label('x-chart-label', group.text, sum)
 			slices.push(slice)
 			slices.total += sum
 		}
@@ -2803,11 +2836,21 @@ component('x-chart', 'Input', function(e) {
 			other_slice.label = div({class: 'x-chart-label'},
 				e.other_text,
 				tag('br'),
-				e.nav.cell_display_val_for(null, e.nav.fld(e.sum_col), other_slice.sum)
+				e.nav.cell_display_val_for(null, e.nav.flds(e.sum_cols)[0], other_slice.sum)
 			)
 			big_slices.push(other_slice)
 		}
 		return big_slices
+	}
+
+	// view -------------------------------------------------------------------
+
+	let render = {} // {shape->func}
+	let tt
+	let pointermove
+
+	function slice_color(i, n) {
+		return hsl_to_rgb(((i / n) * 360 - 120) % 180, .8, .7)
 	}
 
 	render.stack = function() {
@@ -2888,10 +2931,7 @@ component('x-chart', 'Input', function(e) {
 
 	function render_line_or_columns(columns, rotate) {
 
-		let groups = e.nav
-			&& e.nav.fld(e.sum_col) != null
-			&& e.nav.row_groups(e.cat_cols, range_defs())
-
+		let groups = row_groups()
 		if (!groups)
 			return
 
@@ -2905,32 +2945,27 @@ component('x-chart', 'Input', function(e) {
 
 		let canvas = tag('canvas', {
 			class: 'x-chart-canvas',
-			width : r.w - pad_x1 - pad_x2,
-			height: r.h - pad_y1 - pad_y2,
 		})
+
 		e.set(canvas)
+		canvas.width  = canvas.offsetWidth
+		canvas.height = canvas.offsetHeight
+
 		let cx = canvas.getContext('2d')
 
 		let w = canvas.width
 		let h = canvas.height
 
-		let xgs = new Map() // {x_key -> xg}
+		let xgs = map() // {x_key -> xg}
 		let min_xv =  1/0
 		let max_xv = -1/0
-		let min_sum =  1/0
-		let max_sum = -1/0
-		let sum_fi = e.nav.fld(e.sum_col).val_index
+		let min_sum = or(e.min_sum,  1/0)
+		let max_sum = or(e.max_sum, -1/0)
 
 		for (let cg of groups) {
 			for (let xg of cg) {
 
-				let sum = 0
-				for (let row of xg) {
-					let v = row[sum_fi]
-					sum += v
-				}
-
-				xg.sum = sum
+				let sum = xg.sum
 
 				min_sum = min(min_sum, sum)
 				max_sum = max(max_sum, sum)
@@ -2950,12 +2985,31 @@ component('x-chart', 'Input', function(e) {
 			max_xv += w / 2
 		}
 
-		let max_n = rotate ? 5 : 10 // max number of y-axis markers
-		let min_p = round((max_sum - min_sum) / max_n)
-		let y_step_decimals = 0
-		let y_step = ceil(min_p / 10) * 10
-		min_sum = floor(min_sum / y_step) * y_step
-		max_sum = ceil(max_sum / y_step) * y_step
+		// compute min, max and step of y-axis markers so that 1) the step is
+		// on a module and the spacing between lines is the closest to an ideal.
+		let y_step, y_step_decimals
+		{
+			let y_spacing = rotate ? 80 : 40 // wanted space between y-axis markers
+			let target_n = round(h / y_spacing) // wanted number of y-axis markers
+			let d = max_sum - min_sum
+			let min_scale_exp = floor(log10(d) - 2)
+			let max_scale_exp = floor(log10(d) + 2)
+			let modules = [1, 2, 2.5, 5]
+			let n0
+			for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
+				for (let module of modules) {
+					let step = 10 ** scale_exp * module
+					let n = d / step
+					if (n0 == null || abs(n - target_n) < n0) {
+						n0 = n
+						y_step = step
+						y_step_decimals = max(0, -scale_exp + 1)
+					}
+				}
+			}
+			min_sum = floor(min_sum / y_step) * y_step
+			max_sum = ceil(max_sum / y_step) * y_step
+		}
 
 		cx.font = css['font-size'] + ' ' + css.font
 
@@ -2966,7 +3020,7 @@ component('x-chart', 'Input', function(e) {
 		let px1 = 40
 		let px2 = 30
 		let py1 = round(rotate ? line_h + 5 : 10)
-		let py2 = line_h
+		let py2 = line_h * 1.5
 
 		w -= px1 + px2
 		h -= py1 + py2
@@ -2998,7 +3052,8 @@ component('x-chart', 'Input', function(e) {
 		cx.strokeStyle = ref_line_color
 		for (let xg of xgs.values()) {
 			// draw x-axis label.
-			let m = cx.measureText(xg.text)
+			let text = T(xg.text).textContent // TODO: draw the element as overlay
+			let m = cx.measureText(text)
 			cx.save()
 			if (rotate) {
 				let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
@@ -3011,7 +3066,7 @@ component('x-chart', 'Input', function(e) {
 				let y = round(h)
 				cx.translate(x, y)
 			}
-			cx.fillText(xg.text, 0, 0)
+			cx.fillText(text, 0, 0)
 			cx.restore()
 			// draw x-axis center line marker.
 			cx.beginPath()
@@ -3153,8 +3208,6 @@ component('x-chart', 'Input', function(e) {
 				return [hit_cg, hit_xg, hit_xg.x, hit_xg.y, 0, 0]
 		}
 
-		let tt
-
 		pointermove = function(ev, mx, my) {
 			let r = canvas.rect()
 			mx -= r.x
@@ -3167,13 +3220,13 @@ component('x-chart', 'Input', function(e) {
 				let [cg, xg, x, y, w, h] = hit
 				tt = tt || tooltip({
 					target: e,
-					side: rotate ? 'right' : 'top',
 					align: 'center',
 					kind: 'info',
 					classes: 'x-chart-tooltip',
 				})
+				tt.side = rotate ? 'right' : 'top'
 				tt.begin_update()
-				tt.text = cat_sum_label('x-chart-tooltip-label', cg.key_cols, cg.key_vals, xg, xg.sum)
+				tt.text = sum_label('x-chart-tooltip-label', cg.key_cols, cg.key_vals, xg, xg.sum)
 				let tm = cx.getTransform()
 				let p1 = new DOMPoint(x    , y    ).matrixTransform(tm)
 				let p2 = new DOMPoint(x + w, y + h).matrixTransform(tm)
@@ -3212,24 +3265,6 @@ component('x-chart', 'Input', function(e) {
 
 	// config -----------------------------------------------------------------
 
-	function range_defs() {
-		let defs
-		for (let col of e.cat_cols.split(/[\s,]+/)) {
-			let freq   = e['cat_cols.'+col+'.range_freq'  ]
-			let offset = e['cat_cols.'+col+'.range_offset']
-			let unit   = e['cat_cols.'+col+'.range_unit'  ]
-			if (freq != null || offset != null || unit != null) {
-				defs = defs || {}
-				defs[col] = {
-					freq   : freq,
-					offset : offset,
-					unit   : unit,
-				}
-			}
-		}
-		return defs
-	}
-
 	function redraw() {
 		e.update()
 	}
@@ -3248,7 +3283,11 @@ component('x-chart', 'Input', function(e) {
 	e.on('bind', function(on) {
 		bind_nav(e.nav, on)
 		document.on('layout_changed', redraw, on)
+		if (!on && tt)
+			tt.close()
 	})
+
+	e.on('resize', redraw)
 
 	e.set_nav = function(nav1, nav0) {
 		assert(nav1 != e)
@@ -3260,39 +3299,19 @@ component('x-chart', 'Input', function(e) {
 	e.prop('nav', {store: 'var', private: true})
 	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav'})
 
-	e.set_sum_col         = redraw
+	e.set_split_cols      = redraw
+	e.set_group_cols      = redraw
+	e.set_sum_cols        = redraw
 	e.set_other_threshold = redraw
 	e.set_other_text      = redraw
 
-	e.set_cat_cols = function(cat_cols, cat_cols0) {
-		if (cat_cols0)
-			for (let col of cat_cols0.names()) {
-				delete e.props['cat_col.'+col+'.range_freq'  ]
-				delete e.props['cat_col.'+col+'.range_offset']
-				delete e.props['cat_col.'+col+'.range_unit'  ]
-			}
-		if (cat_cols)
-			for (let col of cat_cols.names()) {
-				e.props['cat_col.'+col+'.range_freq'  ] = {name: 'cat_col.'+col+'.range_freq'  , type: 'number'}
-				e.props['cat_col.'+col+'.range_offset'] = {name: 'cat_col.'+col+'.range_offset', type: 'number'}
-				e.props['cat_col.'+col+'.range_unit'  ] = {name: 'cat_col.'+col+'.range_unit'  , type: 'enum', enum_values: ['month', 'year']}
-			}
-		redraw()
-	}
-
-	e.set_prop = function(k, v) {
-		let v0 = e[k]
-		e[k] = v
-		if (v !== v0 && k.starts('cat_col.')) {
-			redraw()
-			document.fire('prop_changed', e, k, v, v0, null)
-		}
-	}
-
-	e.prop('sum_col' , {store: 'var', type: 'col', col_nav: () => e.nav})
-	e.prop('cat_cols', {store: 'var', type: 'col', col_nav: () => e.nav})
-	e.prop('other_threshold', {store: 'var', type: 'number', default: .05, decimals: null})
-	e.prop('other_text', {store: 'var', default: 'Other'})
+	e.prop('split_cols', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('group_cols', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('sum_cols'  , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('min_sum'   , {store: 'var', type: 'number', attr: true})
+	e.prop('max_sum'   , {store: 'var', type: 'number', attr: true})
+	e.prop('other_threshold', {store: 'var', type: 'number', default: .05, decimals: null, attr: true})
+	e.prop('other_text', {store: 'var', default: 'Other', attr: true})
 	e.prop('shape', {
 		store: 'var', type: 'enum',
 		enum_values: ['pie', 'stack', 'line', 'area', 'column', 'bar', 'stackbar', 'bubble', 'scatter'],

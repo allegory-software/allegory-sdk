@@ -178,7 +178,7 @@ body {
 	overflow: auto; /* emergency-scroll */
 }
 
-.x-if, .x-switcher { /* purely-logical containers */
+.x-if, .x-switcher, .x-ct { /* purely-logical containers */
 	display: contents; /* don't disturb the layouting */
 }
 
@@ -3125,6 +3125,11 @@ textarea.x-editbox-input {
 	padding: 1em;
 	height: 100%;
 	display: grid;
+}
+
+.x-chart-canvas {
+	width: 100%;
+	height: 100%;
 }
 
 .x-chart-pie {
