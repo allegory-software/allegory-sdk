@@ -439,7 +439,11 @@ span = (...a) => tag('span', ...a)
 
 Array.prototype.join_nodes = function(sep, parent_node) {
 
-	if (sep == null && !parent_node && this.filter(e => isstr(e)).length == this.length)
+	if (
+		(sep == null || this.length < 2) // no sep or sep won't be added
+		&& !parent_node // no container
+		&& this.filter(e => isstr(e)).length == this.length // all strings
+	)
 		return this.join(sep)
 
 	parent_node = parent_node || span()
