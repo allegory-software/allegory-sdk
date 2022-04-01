@@ -1,3 +1,4 @@
 /.mgit
 /bin/*/
 /tests/*.log
+test.*

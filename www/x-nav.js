@@ -4858,6 +4858,9 @@ component('x-lookup-dropdown', function(e) {
 		return x < min ? span({class: 'x-dba-insignificant-size'}, s) : s
 	}
 
+	filesize.scale_base = 1024
+	filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
+
 	// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
 	let date = {align: 'right'}
