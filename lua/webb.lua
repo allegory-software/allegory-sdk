@@ -632,16 +632,16 @@ function webb.warnif   (module, event, cond, ...)
 	webb.log('WARN', module, event, ...)
 end
 
-function trace(event, s, ...)
+function webb.trace(event, s, ...)
 	if not event then
-		dbg('trace', '%s', debug.traceback())
+		webb.dbg('webb', 'trace', '%s', debug.traceback())
 		return
 	end
-	dbg(event, '%4.2f '..s, 0, ...)
+	webb.dbg('webb', event, '%4.2f '..s, 0, ...)
 	local t0 = time()
 	return function(event, s, ...)
 		local dt = time() - t0
-		dbg(event, '%4.2f '..s, dt, ...)
+		webb.dbg('webb', event, '%4.2f '..s, dt, ...)
 	end
 end
 
@@ -669,11 +669,17 @@ function cookie(name)
 end
 
 function args(v)
-	local args = cx.args
+	local args, argc = cx.args, cx.argc
 	if not args then
 		local u = uri.parse(cx.req.uri)
 		args = u.segments
 		remove(args, 1)
+		argc = #args
+		for i = 1, argc do
+			if args[i] == '' then
+				args[i] = nil
+			end
+		end
 		if u.args then
 			for i = 1, #u.args, 2 do
 				local k,v = u.args[i], u.args[i+1]
@@ -681,11 +687,12 @@ function args(v)
 			end
 		end
 		cx.args = args
+		cx.argc = argc
 	end
 	if v then
 		return args[v]
 	else
-		return args
+		return args, 1, argc
 	end
 end
 
