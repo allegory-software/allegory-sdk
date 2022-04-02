@@ -228,7 +228,7 @@ local spa_template = [[
 local function page_title(infer, body)
 	return infer and infer(body)
 		--infer it from the name of the action
-		or args(1):gsub('[-_]', ' ')
+		or (args(1) or ''):gsub('[-_]', ' ')
 end
 
 action['404.html'] = function(action)

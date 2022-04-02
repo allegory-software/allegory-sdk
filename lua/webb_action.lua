@@ -109,7 +109,7 @@ end
 --given a list of path elements, find the action they point to
 --and change the current language if necessary.
 local function find_action(action, ...)
-	if action == '' then --root action in current language
+	if not action then --root action in current language
 		action = config('root_action', 'en')
 	else
 		local alias = aliases[action_name(action)] --look for a regional alias
