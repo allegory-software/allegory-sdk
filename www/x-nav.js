@@ -47,6 +47,9 @@ field attributes:
 	identification:
 		name           : field name (defaults to field's numeric index)
 		type           : for choosing a field preset.
+			number bool enum tags date timestamp timeofday duration
+			password filesize place url phone email color icon button
+			col
 
 	rendering:
 		text           : field name for display purposes (auto-generated default).
@@ -63,29 +66,46 @@ field attributes:
 		client_default : default value/generator that new rows are initialized with.
 		default        : default value that the server sets for new rows.
 		readonly       : prevent editing.
-		editor         : f({nav:, col:}, ...opt) -> editor instance
+		editor         : f({nav:, col:, embedded: t|f}) -> editor instance
 		from_text      : f(s) -> v
 		to_text        : f(v) -> s
-		enum_values    : [v1, ...]
-		enum_texts     : [t1, ...]
+
+		enum_values    : enum type: [v1, ...]
+		enum_texts     : enum type: [t1, ...]
 
 	validation:
 		not_null       : don't allow null (false).
 		validator_*    : f(field) -> {validate: f(v) -> true|false, message: text}
 		convert        : f(v) -> v
+		maxlen         : max text length (256).
+
 		min            : min value (0).
 		max            : max value (inf).
-		maxlen         : max text length (256).
-		decimals       : max number of decimals.
+		to_num(v)      : convert to number if possible (then min/max applies).
+		from_num(x)    : convert from number if possible (then min/max applies).
+
+		decimals       : max number of decimals (0).
 
 	formatting:
 		align          : 'left'|'right'|'center'
 		format         : f(v, row) -> s
 		attr           : custom value for html attribute `field`, for styling
-		true_text      : display value for boolean true
-		false_text     : display value for boolean false
 		null_text      : display value for null
 		empty_text     : display value for ''
+
+		true_text      : display value for boolean true
+		false_text     : display value for boolean false
+
+		filesize_magnitude : filesize type, see kbytes()
+		filesize_decimals  : filesize type, see kbytes()
+		filesize_min       : filesize type, see kbytes()
+
+		has_time       : date type (false), timestamp type (true)
+		has_seconds    : date type (false), timeofday type (false)
+
+		duration_format: duration type: 'days'|'seconds'|null ('seconds')
+
+		button_options : button type: options to pass to button()
 
 	vlookup:
 		lookup_rowset[_name]|[_id][_url]: rowset to look up values of this field into.
@@ -4713,26 +4733,7 @@ component('x-lookup-dropdown', function(e) {
 
 /* ---------------------------------------------------------------------------
 // field type definitions
-// ---------------------------------------------------------------------------
-
-	number
-	filesize
-	date
-	timestamp
-	time
-	bool
-	enum
-	color
-	icon
-	email
-	phone
-	image
-	tags
-	place
-	phone
-	email
-
-*/
+// ------------------------------------------------------------------------ */
 
 {
 	field_prop_attrs = {
@@ -5014,11 +5015,11 @@ component('x-lookup-dropdown', function(e) {
 
 	// duration
 
-	let d = {align: 'center'}
+	let d = {align: 'right', duration_format: 'days'}
 	field_types.duration = d
 
 	d.format = function(d) {
-		return d.duration(true)
+		return d.duration(this.duration_format)
 	}
 
 	// booleans

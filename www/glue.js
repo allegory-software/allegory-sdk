@@ -115,7 +115,7 @@ TIME & DATE
 	month_name   (ts, ['long'], [locale])
 	month_year   (ts, ['long'], [locale])
 	week_start_offset([country])
-	ds.duration() -> s
+	ds.duration(['days'|'seconds']) -> s
 	ts.timeago() -> s
 	ts.date([locale], [with_time], [with_seconds]) -> s
 	s.parse_date([locale]) -> ts
@@ -1149,24 +1149,37 @@ method(Number, 'date', function(locale1, with_time, with_seconds) {
 
 // time formatting -----------------------------------------------------------
 
-method(Number, 'duration', function(precise) {
-	let d = this
-	if (d > 2 * 365 * 24 * 3600)
-		return S('n_years', '{0} years', d / (365 * 24 * 3600).dec())
-	else if (d > 2 * 30.5 * 24 * 3600)
-		return S('n_months', '{0} months', (d / (30.5 * 24 * 3600)).dec())
-	else if (d > 1.5 * 24 * 3600)
-		return S('n_days', '{0} days', (d / (24 * 3600)).dec())
-	else if (d > 2 * 3600)
-		return S('n_hours', '{0} hours', (d / 3600).dec())
-	else if (d > 2 * 60)
-		return S('n_minutes', '{0} minutes', (d / 60).dec())
-	else if (d >= 60)
-		return S('one_minute', '1 minute')
-	else if (precise)
-		return S('n_seconds', '{0} seconds', d.dec())
-	else
-		return S('seconds', 'seconds')
+method(Number, 'duration', function(opt) {
+	let s = this
+	if (opt == 'days') {
+		let d = floor(s / (24 * 3600))
+		s -= d * 24 * 3600
+		let h = floor(s / 3600)
+		s -= h * 3600
+		let m = floor(s / 60)
+		s -= m * 60
+		if (d) return S('duration_dhms', '{0}d{1}h{2}m{3}s', d, h, m, s)
+		if (h) return S('duration_hms' ,     '{0}h{1}m{2}s',    h, m, s)
+		if (m) return S('duration_ms'  ,         '{0}m{1}s',       m, s)
+		if (s) return S('duration_s'   ,             '{0}s',          s)
+	} else {
+		if (s > 2 * 365 * 24 * 3600)
+			return S('n_years', '{0} years', s / (365 * 24 * 3600).dec())
+		else if (s > 2 * 30.5 * 24 * 3600)
+			return S('n_months', '{0} months', (s / (30.5 * 24 * 3600)).dec())
+		else if (s > 1.5 * 24 * 3600)
+			return S('n_days', '{0} days', (s / (24 * 3600)).dec())
+		else if (s > 2 * 3600)
+			return S('n_hours', '{0} hours', (s / 3600).dec())
+		else if (s > 2 * 60)
+			return S('n_minutes', '{0} minutes', (s / 60).dec())
+		else if (s >= 60)
+			return S('one_minute', '1 minute')
+		else if (opt == 'seconds')
+			return S('n_seconds', '{0} seconds', s.dec())
+		else
+			return S('seconds', 'seconds')
+	}
 })
 
 method(Number, 'timeago', function() {
