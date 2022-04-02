@@ -3290,7 +3290,7 @@ function nav_widget(e) {
 		if (ev && ev.confirm && (rows_to_remove.length > 1 || !rows_to_remove[0].is_new))
 			if (!confirm(S('delete_records_confirmation',
 					'Are you sure you want to delete {0:record:records}?',
-						rows_to_remove.size))
+						rows_to_remove.length))
 			) return false
 
 		e.begin_update()
@@ -5010,6 +5010,15 @@ component('x-lookup-dropdown', function(e) {
 
 	td.editor = function(opt) {
 		return timeofdayedit(opt)
+	}
+
+	// duration
+
+	let d = {align: 'center'}
+	field_types.duration = d
+
+	d.format = function(d) {
+		return d.duration(true)
 	}
 
 	// booleans

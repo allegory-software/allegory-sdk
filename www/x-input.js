@@ -77,6 +77,7 @@ function row_widget(e, enabled_without_nav) {
 		nav.on('reset', row_changed, on)
 		nav.on('col_text_changed', row_changed, on)
 		nav.on('col_info_changed', row_changed, on)
+		e.fire('bind_nav', nav, on)
 	}
 
 	e.set_nav = function(nav1, nav0) {
@@ -88,6 +89,10 @@ function row_widget(e, enabled_without_nav) {
 	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav', attr: true})
 
 	e.property('row', () => e.nav && e.nav.focused_row)
+
+	e.val = function(col) {
+		return e.nav && e.nav.cell_val(e.row, col)
+	}
 
 }
 
@@ -357,6 +362,202 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	}
 
 }
+
+// ---------------------------------------------------------------------------
+// button
+// ---------------------------------------------------------------------------
+
+component('x-button', 'Input', function(e) {
+
+	row_widget(e, true)
+	focusable_widget(e)
+	editable_widget(e)
+
+	let html_text = unsafe_html(e.html)
+	e.clear()
+
+	e.icon_box = span({class: 'x-button-icon'})
+	e.text_box = span({class: 'x-button-text'})
+	e.icon_box.hidden = true
+	e.add(e.icon_box, e.text_box)
+
+	e.prop('href', {store:'var', attr: true})
+	e.set_href = function(s) {
+		if (s) {
+			if (!e.link) { // make a link for google bot to follow.
+				let noscript = tag('noscript')
+				e.add(noscript)
+				e.link = tag('a')
+				e.link.set(TC(e.text))
+				e.link.title = e.title
+				noscript.set(e.link)
+			}
+			e.link.href = s
+		} else if (e.link) {
+			e.link.href = null
+		}
+	}
+
+	e.set_text = function(s) {
+		e.text_box.set(s, 'pre-wrap')
+		e.class('text-empty', !s)
+		if (e.link)
+			e.link.set(TC(e.text))
+	}
+	e.prop('text', {store: 'var', default: 'OK', slot: 'lang'})
+
+	e.do_after('init', function() {
+		if (html_text != null && html_text != e.text) {
+			e.xoff()
+			e.text = html_text
+			e.xon()
+		} else {
+			e.set_text(e.text) // set default
+		}
+	})
+
+	e.set_icon = function(v) {
+		if (isstr(v))
+			e.icon_box.attr('class', 'x-button-icon '+v)
+		else
+			e.icon_box.set(v)
+		e.icon_box.hidden = !v
+	}
+	e.prop('icon', {store: 'var', type: 'icon'})
+
+	e.prop('primary', {store: 'var', type: 'bool', attr: true})
+	e.prop('bare'   , {store: 'var', type: 'bool', attr: true})
+	e.prop('danger' , {store: 'var', type: 'bool', attr: true})
+	e.prop('confirm', {store: 'var', attr: true})
+
+	e.activate = function() {
+		if (e.effectively_hidden || e.effectively_disabled)
+			return
+		if (e.confirm)
+			if (!confirm(e.confirm))
+				return
+		if (e.href) {
+			exec(e.href)
+			return
+		}
+		// action can be set directly or can be a global with a maching name.
+		if (e.action)
+			e.action()
+		let action_name = e.action_name || (e.id && e.id+'_action')
+		let action = window[action_name]
+		if (action)
+			action.call(e)
+		e.fire('activate')
+	}
+
+	function set_active(on) {
+		e.class('active', on)
+		e.fire('active', on)
+		if (!on)
+			e.activate()
+	}
+
+	e.on('keydown', function keydown(key, shift, ctrl) {
+		if (e.widget_editing) {
+			if (key == 'Enter') {
+				if (ctrl) {
+					e.text_box.insert_at_caret('<br>')
+					return
+				} else {
+					e.widget_editing = false
+					return false
+				}
+			}
+			return
+		}
+		if (key == ' ' || key == 'Enter') {
+			set_active(true)
+			return false
+		}
+	})
+
+	e.on('keyup', function keyup(key) {
+		if (e.hasclass('active')) {
+			// ^^ always match keyups with keydowns otherwise we might catch
+			// a keyup from someone else's keydown, eg. a dropdown menu item
+			// could've been selected by pressing Enter which closed the menu
+			// and focused this button back and that Enter's keyup got here.
+			if (key == ' ' || key == 'Enter') {
+				set_active(false)
+			}
+			return false
+		}
+	})
+
+	e.on('pointerdown', function(ev) {
+		if (e.widget_editing)
+			return
+		e.focus()
+		set_active(true)
+		return this.capture_pointer(ev, null, function() {
+			set_active(false)
+		})
+	})
+
+	// widget editing ---------------------------------------------------------
+
+	e.set_widget_editing = function(v) {
+		e.text_box.contenteditable = v
+		if (!v)
+			e.text = e.text_box.innerText
+	}
+
+	e.on('pointerdown', function(ev) {
+		if (e.widget_editing && ev.target != e.text_box) {
+			e.text_box.focus()
+			e.text_box.select_all()
+			return this.capture_pointer(ev)
+		}
+	})
+
+	function prevent_bubbling(ev) {
+		if (e.widget_editing)
+			ev.stopPropagation()
+	}
+	e.text_box.on('pointerdown', prevent_bubbling)
+	e.text_box.on('click', prevent_bubbling)
+
+	e.text_box.on('blur', function() {
+		e.widget_editing = false
+	})
+
+	// ajax notifications -----------------------------------------------------
+
+	e.on('load', function(ev, ...args) {
+		e.disable('loading', ev != 'done')
+		if (e.load_spin)
+			e.icon_box.class('fa-spin', ev == 'start')
+	})
+
+	e.load = function(url, success, fail, opt) {
+		return get(url, success, fail, assign({notify: e}, opt))
+	}
+
+	e.post = function(url, upload, success, fail, opt) {
+		return post(url, upload, success, fail, assign({notify: e}, opt))
+	}
+
+	// "drawing attention" animation ------------------------------------------
+
+	e.draw_attention = function() {
+		if (e.disabled)
+			return
+		e.style.animation = 'none'
+		raf(function() { e.style.animation = 'x-attention .5s' })
+	}
+
+	// row changing -----------------------------------------------------------
+
+	e.do_update_row = function(row) {
+		e.disabled = e.nav && !row
+	}
+
+})
 
 /* ---------------------------------------------------------------------------
 // input-box widget mixin
