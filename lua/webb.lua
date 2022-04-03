@@ -170,7 +170,7 @@ SOCKETS
 
 HTTP REQUESTS
 
-	getpage(url,post_data | opt) -> req     make a HTTP request
+	getpage(url,[upload] | opt) -> req      make a HTTP request
 
 JSON ENCODING/DECODING
 
@@ -703,7 +703,7 @@ function post(v)
 	local post = cx.post
 	if not post then
 		local s = cx.req:read_body'string'
-		local ct = headers'content-type'
+		local ct = cx.req.headers.content_type
 		if ct then
 			if ct.media_type == 'application/x-www-form-urlencoded' then
 				post = uri.parse_args(s)
@@ -1075,7 +1075,7 @@ end
 
 local getpage_client
 
-function getpage(arg1, post_data)
+function getpage(arg1, upload)
 	local opt = type(arg1) == 'table' and arg1
 
 	if not getpage_client then
@@ -1091,9 +1091,10 @@ function getpage(arg1, post_data)
 
 	end
 
+	upload = upload or opt and opt.upload
 	local headers = {}
-	if type(post_data) ~= 'string' then
-		post_data = json(post_data)
+	if type(upload) ~= 'string' then
+		upload = json(upload)
 		headers.content_type = mime_types.json
 	end
 
@@ -1103,8 +1104,8 @@ function getpage(arg1, post_data)
 		host = u and u.host,
 		uri = u and u.path,
 		https = (u and u.scheme and u.scheme or scheme()) == 'https',
-		method = post_data and 'POST',
-		content = post_data,
+		method = upload and 'POST',
+		content = upload,
 		receive_content = 'string',
 		--debug = {protocol = true, stream = false},
 		--close = true,
@@ -1180,7 +1181,7 @@ local function checkfunc(code, default_err)
 		http_error{
 			status = code,
 			headers = {
-				['content-type'] = 'application/json',
+				['content-type'] = mime_types.json,
 				--allow logout() to remove cookie while raising 403.
 				['set-cookie'] = cx.res.headers['set-cookie'],
 			},

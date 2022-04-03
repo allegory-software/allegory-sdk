@@ -314,7 +314,6 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		end
 
 		check(close_fd(errno_r_fd))
-		errno_r_fd = nil
 
 		check(not dir or C.chdir(dir) == 0)
 
