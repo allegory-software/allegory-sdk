@@ -1265,10 +1265,10 @@ do
 		wsabuf.len = len
 		local o, job = overlapped(self, io_done, expires)
 		local ok = C.WSASend(self.s, wsabuf, 1, nil, 0, o, nil) == 0
-		local w, err = check_pending(ok, job)
-		if not w then return nil, err end
-		self.w = self.w + w
-		return w
+		local n, err = check_pending(ok, job)
+		if not n then return nil, err end
+		self.w = self.w + n
+		return n
 	end
 
 	function tcp:_send(buf, len, expires)
@@ -1305,7 +1305,10 @@ do
 		local o, job = overlapped(self, io_done, expires)
 		local ok = C.WSASendTo(self.s, wsabuf, 1, nil, flags or 0, ai.addr, ai.addrlen, o, nil) == 0
 		if not ext_ai then ai:free() end
-		return check_pending(ok, job)
+		local n, err = check_pending(ok, job)
+		if not n then return nil, err end
+		self.w = self.w + n
+		return n
 	end
 
 	local int_buf_ct = ffi.typeof'int[1]'
@@ -1321,22 +1324,27 @@ do
 		if not job.sa_len_buf then job.sa_len_buf = int_buf_ct() end
 		job.sa_len_buf[0] = sa_buf_len
 		local ok = C.WSARecvFrom(self.s, wsabuf, 1, nil, flagsbuf, job.sa, job.sa_len_buf, o, nil) == 0
-		local len, err = check_pending(ok, job)
-		if not len then return nil, err end
+		local n, err = check_pending(ok, job)
+		if not n then return nil, err end
 		assert(job.sa_len_buf[0] <= sa_buf_len) --not truncated
-		return len, job.sa
+		self.r = self.r + n
+		return n, job.sa
 	end
 
 	function M._file_async_read(f, read_overlapped, buf, sz, expires)
 		local o, job = overlapped(f, io_done, expires)
 		local ok = read_overlapped(f, o, buf, sz)
-		return check_pending(ok, job)
+		local n, err = check_pending(ok, job)
+		if not n then return nil, err end
+		return n
 	end
 
 	function M._file_async_write(f, write_overlapped, buf, sz, expires)
 		local o, job = overlapped(f, io_done, expires)
 		local ok = write_overlapped(f, o, buf, sz)
-		return check_pending(ok, job)
+		local n, err = check_pending(ok, job)
+		if not n then return nil, err end
+		return n
 	end
 
 end
@@ -1442,11 +1450,20 @@ function M.sleep_job()
 end
 end
 
-local function make_async(for_writing, func, wait_errno)
+local function make_async(for_writing, returns_n, func, wait_errno)
 	return function(self, expires, ...)
 		::again::
 		local ret = func(self, ...)
-		if ret >= 0 then return ret end
+		if ret >= 0 then
+			if returns_n then
+				if for_writing then
+					self.w = self.w + ret
+				else
+					self.r = self.r + ret
+				end
+			end
+			return ret
+		end
 		if ffi.errno() == wait_errno then
 			if for_writing then
 				self.send_expires = expires
@@ -1471,7 +1488,7 @@ local function make_async(for_writing, func, wait_errno)
 	end
 end
 
-local connect = make_async(true, function(self, ai)
+local connect = make_async(true, false, function(self, ai)
 	return C.connect(self.s, ai.addr, ai.addrlen)
 end, EINPROGRESS)
 
@@ -1512,7 +1529,7 @@ do
 	local accept_buf = sockaddr_ct()
 	local accept_buf_size = ffi.sizeof(accept_buf)
 
-	local tcp_accept = make_async(false, function(self)
+	local tcp_accept = make_async(false, false, function(self)
 		nbuf[0] = accept_buf_size
 		return C.accept4(self.s, accept_buf, nbuf, SOCK_NONBLOCK)
 	end, EWOULDBLOCK)
@@ -1563,7 +1580,7 @@ end
 
 local MSG_NOSIGNAL = Linux and 0x4000 or nil
 
-local socket_send = make_async(true, function(self, buf, len, flags)
+local socket_send = make_async(true, true, function(self, buf, len, flags)
 	return C.send(self.s, buf, len, flags or MSG_NOSIGNAL)
 end, EWOULDBLOCK)
 
@@ -1578,7 +1595,7 @@ function udp:send(buf, len, expires, flags)
 	return socket_send(self, expires, buf, len or #buf, flags)
 end
 
-local socket_recv = make_async(false, function(self, buf, len, flags)
+local socket_recv = make_async(false, true, function(self, buf, len, flags)
 	return C.recv(self.s, buf, len, flags or 0)
 end, EWOULDBLOCK)
 
@@ -1588,7 +1605,7 @@ function socket:recv(buf, len, expires, flags)
 	return socket_recv(self, expires, buf, len, flags)
 end
 
-local udp_sendto = make_async(true, function(self, ai, buf, len, flags)
+local udp_sendto = make_async(true, true, function(self, ai, buf, len, flags)
 	return C.sendto(self.s, buf, len, flags or 0, ai.addr, ai.addrlen)
 end, EWOULDBLOCK)
 
@@ -1607,7 +1624,7 @@ do
 	local src_buf_len = ffi.sizeof(src_buf)
 	local src_len_buf = ffi.new'int[1]'
 
-	local udp_recvnext = make_async(false, function(self, buf, len, flags)
+	local udp_recvnext = make_async(false, true, function(self, buf, len, flags)
 		src_len_buf[0] = src_buf_len
 		return C.recvfrom(self.s, buf, len, flags or 0, src_buf, src_len_buf)
 	end, EWOULDBLOCK)
@@ -1621,11 +1638,11 @@ do
 	end
 end
 
-local file_write = make_async(true, function(self, buf, len)
+local file_write = make_async(true, true, function(self, buf, len)
 	return tonumber(C.write(self.fd, buf, len))
 end, EAGAIN)
 
-local file_read = make_async(false, function(self, buf, len)
+local file_read = make_async(false, true, function(self, buf, len)
 	return tonumber(C.read(self.fd, buf, len))
 end, EAGAIN)
 
@@ -2373,7 +2390,7 @@ function M.thread(f, fmt, ...)
 	if fmt then
 		M.live(thread, fmt, ...)
 	else
-		M.live(thread, traceback())
+		M.live(thread, debug.traceback())
 	end
 	return thread
 end
