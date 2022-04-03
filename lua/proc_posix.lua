@@ -187,7 +187,7 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		env_ptr[m] = nil
 	end
 
-	local self = setmetatable({async = async}, {__index = proc})
+	local self = setmetatable({async = async, cmd = cmd, args = args}, {__index = proc})
 
 	if async then
 		local sock = require'sock'
@@ -318,9 +318,13 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 
 		check(not dir or C.chdir(dir) == 0)
 
-		if inp_rf then check(C.dup2(inp_rf.fd, 0) >= 0) end
-		if out_wf then check(C.dup2(out_wf.fd, 1) >= 0) end
-		if err_wf then check(C.dup2(err_wf.fd, 2) >= 0) end
+		if inp_wf then check(inp_wf:close()) end
+		if out_rf then check(out_rf:close()) end
+		if err_rf then check(err_rf:close()) end
+
+		if inp_rf then check(C.dup2(inp_rf.fd, 0) == 0) end
+		if out_wf then check(C.dup2(out_wf.fd, 1) == 1) end
+		if err_wf then check(C.dup2(err_wf.fd, 2) == 2) end
 
 		C.execvpe(cmd, arg_ptr, env_ptr)
 
@@ -353,11 +357,7 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		self.pid = pid
 
 		if M.logging then
-			local t = {cmd}
-			for i,arg in ipairs(args) do
-				t[#t+1] = M.quote_arg_unix(arg)
-			end
-			local s = table.concat(t, ' ')
+			local s = M.quote_args(nil, cmd, unpack(args))
 			M.log('', 'exec', '%s', s)
 			M.live(self, s)
 		end

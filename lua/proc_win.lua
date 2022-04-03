@@ -52,7 +52,7 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 	local out_rf, out_wf
 	local err_rf, err_wf
 
-	local self = setmetatable({async = async}, {__index = proc})
+	local self = setmetatable({async = async, cmd = cmd}, {__index = proc})
 
 	local function close_all()
 		if self.stdin then
@@ -264,6 +264,10 @@ end
 
 function proc:info()
 	return M.info(self.pid)
+end
+
+function M.osinfo()
+	return {} --NYI
 end
 
 return M
