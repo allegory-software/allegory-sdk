@@ -144,6 +144,10 @@ io.stderr:write'Error3\n'
 time.sleep(.1)
 print'Hello3'
 time.sleep(.1)
+print'Waiting for EOF'
+assert(io.stdin:read('*a') == '\n')
+assert(io.stdin:read('*a') == '') --eof
+print'Exiting'
 os.exit(123)
 ]]))
 
@@ -161,15 +165,15 @@ os.exit(123)
 		}))
 
 		if p.stdin then
-			sock.thread(function()
+			sock.resume(sock.thread(function()
 				local s = '1234\n'
 				assert(p.stdin:write(s))
 				p.stdin:close()
-			end)
+			end))
 		end
 
 		if p.stdout then
-			sock.thread(function()
+			sock.resume(sock.thread(function()
 				local buf = char_vla(sz)
 				while true do
 					local len = assert(p.stdout:read(buf, sz))
@@ -180,11 +184,11 @@ os.exit(123)
 						break
 					end
 				end
-			end)
+			end))
 		end
 
 		if p.stderr then
-			sock.thread(function()
+			sock.resume(sock.thread(function()
 				local buf = char_vla(sz)
 				while true do
 					local len = assert(p.stderr:read(buf, sz))
@@ -195,7 +199,7 @@ os.exit(123)
 						break
 					end
 				end
-			end)
+			end))
 		end
 
 		print('Process finished. Exit code:', p:wait(1/0))
@@ -250,8 +254,8 @@ function test.esc()
 	end
 end
 
-test.env()
-test.esc()
+--test.env()
+--test.esc()
 --test.pipe()
 test.pipe_async()
 --test.autokill()
