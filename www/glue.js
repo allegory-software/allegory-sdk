@@ -1220,31 +1220,14 @@ let h2rgb = function(m1, m2, h) {
 
 let hex = x => round(255 * x).base(16, 2)
 
-function hsl_to_rgb(h, s, L) {
+function hsl_to_rgb(h, s, L, a) {
 	h = h / 360
 	let m2 = L <= .5 ? L*(s+1) : L+s-L*s
 	let m1 = L*2-m2
 	return '#' +
 		hex(h2rgb(m1, m2, h+1/3)) +
 		hex(h2rgb(m1, m2, h)) +
-		hex(h2rgb(m1, m2, h-1/3))
-}
-
-function hex3(x) {
-	return x != null && (
-		((x >> 16) & 0xff).base(16, 2) +
-		((x >>  8) & 0xff).base(16, 2) +
-		( x        & 0xff).base(16, 2)
-	)
-}
-
-function hex4(x) {
-	return x != null && (
-		((x >> 24) & 0xff).base(16, 2) +
-		((x >> 16) & 0xff).base(16, 2) +
-		((x >>  8) & 0xff).base(16, 2) +
-		( x        & 0xff).base(16, 2)
-	)
+		hex(h2rgb(m1, m2, h-1/3)) + (a ? hex(a) : '')
 }
 
 }
