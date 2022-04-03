@@ -3146,11 +3146,11 @@ component('x-chart', 'Input', function(e) {
 		pie.style['background-image'] = 'conic-gradient(' + s.join(',') + ')'
 	}
 
-	function line_color(i, n) {
-		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .5, .6)
+	function line_color(i, n, alpha) {
+		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .5, .6, alpha)
 	}
 
-	function render_line_or_columns(columns, rotate, dots) {
+	function render_line_or_columns(columns, rotate, dots, area) {
 
 		let groups = row_groups()
 		if (!groups)
@@ -3372,13 +3372,21 @@ component('x-chart', 'Input', function(e) {
 
 				// draw the line.
 				cx.beginPath()
-				let first
+				let x0, x
 				for (let xg of cg) {
-					if (!first) {
-						cx.moveTo(xg.x, xg.y)
-						first = true
+					x = xg.x
+					if (x0 == null) {
+						x0 = x
+						cx.moveTo(x + .5, xg.y + .5)
 					} else
-						cx.lineTo(xg.x, xg.y)
+						cx.lineTo(x + .5, xg.y + .5)
+				}
+				if (area) {
+					cx.lineTo(x  + .5, h - py2 + .5)
+					cx.lineTo(x0 + .5, h - py2 + .5)
+					cx.closePath()
+					cx.fillStyle = line_color(cgi, groups.length, .5)
+					cx.fill()
 				}
 				cx.strokeStyle = color
 				cx.stroke()
@@ -3472,10 +3480,12 @@ component('x-chart', 'Input', function(e) {
 
 	}
 
-	render.line           = function() { render_line_or_columns() }
-	render.line_with_dots = function() { render_line_or_columns(false, false, true) }
-	render.column         = function() { render_line_or_columns(true) }
-	render.bar            = function() { render_line_or_columns(true, true) }
+	render.line      = function() { render_line_or_columns() }
+	render.line_dots = function() { render_line_or_columns(false, false, true) }
+	render.area      = function() { render_line_or_columns(false, false, false, true) }
+	render.area_dots = function() { render_line_or_columns(false, false, true, true) }
+	render.column    = function() { render_line_or_columns(true) }
+	render.bar       = function() { render_line_or_columns(true, true) }
 
 	e.do_update = function() {
 		pointermove = noop
@@ -3539,7 +3549,7 @@ component('x-chart', 'Input', function(e) {
 	e.prop('other_text', {store: 'var', default: 'Other', attr: true})
 	e.prop('shape', {
 		store: 'var', type: 'enum',
-		enum_values: ['pie', 'stack', 'line', 'line_with_dots', 'area',
+		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots',
 			'column', 'bar', 'stackbar', 'bubble', 'scatter'],
 		default: 'pie', attr: true,
 	})
