@@ -233,7 +233,7 @@ function fs.pipe(path, mode, opt)
 		end
 		rf.log = opt.log or fs.log
 		wf.log = opt.log or fs.log
-		rf.log('', 'fs', 'pipe', 'r=%s w=%s %s %s', rf, wf, opt.async and 'async' or 'sync', mode)
+		rf.log('', 'fs', 'pipe', 'r=%s w=%s %s %o', rf, wf, opt.async and 'async' or 'sync', mode)
 		return rf, wf
 	end
 end
@@ -263,11 +263,11 @@ function file.read(f, buf, sz, expires)
 		local sock = require'sock'
 		return sock._file_async_read(f, buf, sz, expires)
 	else
-		local r = C.read(f.fd, buf, sz)
-		if r == -1 then return check() end
-		r = tonumber(r)
-		f.r = f.r + r
-		return r
+		local n = C.read(f.fd, buf, sz)
+		if n == -1 then return check() end
+		n = tonumber(n)
+		f.r = f.r + n
+		return n
 	end
 end
 
@@ -276,11 +276,11 @@ function file._write(f, buf, sz, expires)
 		local sock = require'sock'
 		return sock._file_async_write(f, buf, sz, expires)
 	else
-		local w = C.write(f.fd, buf, sz or #buf)
-		if w == -1 then return check() end
-		w = tonumber(w)
-		f.w = f.w + w
-		return w
+		local n = C.write(f.fd, buf, sz or #buf)
+		if n == -1 then return check() end
+		n = tonumber(n)
+		f.w = f.w + n
+		return n
 	end
 end
 

@@ -688,9 +688,9 @@ function file.read(f, buf, sz, expires)
 	else
 		local ok, err = mask_eof(checknz(C.ReadFile(f.handle, buf, sz, dwbuf, nil)))
 		if not ok then return nil, err end
-		local r = tonumber(dwbuf[0])
-		f.r = f.r + r
-		return r
+		local n = tonumber(dwbuf[0])
+		f.r = f.r + n
+		return n
 	end
 end
 
@@ -701,9 +701,9 @@ function file._write(f, buf, sz, expires)
 	else
 		local ok, err = checknz(C.WriteFile(f.handle, buf, sz or #buf, dwbuf, nil))
 		if not ok then return nil, err end
-		local w = tonumber(dwbuf[0])
-		f.w = f.w + w
-		return w
+		local n = tonumber(dwbuf[0])
+		f.w = f.w + n
+		return n
 	end
 end
 

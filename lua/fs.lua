@@ -1241,6 +1241,8 @@ function fs.open_buffer(buf, sz, mode)
 		mode = mode,
 		_buffer = buf, --anchor it
 		__index = vfile,
+		w = 0,
+		r = 0,
 	}
 	return setmetatable(f, f)
 end
@@ -1262,6 +1264,7 @@ function vfile.read(f, buf, sz)
 	sz = min(max(0, sz), max(0, f.size - f.offset))
 	ffi.copy(buf, f.buffer + f.offset, sz)
 	f.offset = f.offset + sz
+	f.r = f.r + sz
 	return sz
 end
 
@@ -1275,6 +1278,7 @@ function vfile.write(f, buf, sz)
 	sz = min(max(0, sz), max(0, f.size - f.offset))
 	ffi.copy(f.buffer + f.offset, buf, sz)
 	f.offset = f.offset + sz
+	f.w = f.w + sz
 	return sz
 end
 
