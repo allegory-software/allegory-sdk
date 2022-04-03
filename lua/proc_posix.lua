@@ -318,9 +318,9 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 
 		check(not dir or C.chdir(dir) == 0)
 
-		if inp_wf then check(inp_wf:close()) end
-		if out_rf then check(out_rf:close()) end
-		if err_rf then check(err_rf:close()) end
+		if inp_wf then check(close_fd(inp_wf.fd)) end
+		if out_rf then check(close_fd(out_rf.fd)) end
+		if err_rf then check(close_fd(err_rf.fd)) end
 
 		if inp_rf then check(C.dup2(inp_rf.fd, 0) == 0) end
 		if out_wf then check(C.dup2(out_wf.fd, 1) == 1) end

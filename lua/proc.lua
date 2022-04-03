@@ -105,8 +105,9 @@ processes. In Linux it isn't. IOW autkill inheritance is not portable.
 if not ... then require'proc_test'; return end
 
 local ffi = require'ffi'
-local current_platform = ffi.os == 'Windows' and 'win' or 'posix'
-local M = require('proc_'..current_platform)
+local win = ffi.os == 'Windows'
+local current_platform = win and 'win' or 'unix'
+local M = require('proc_'..(win and 'win' or 'posix'))
 
 local function extend(dt, t)
 	if not t then return dt end
