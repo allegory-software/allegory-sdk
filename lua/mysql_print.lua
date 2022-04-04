@@ -83,15 +83,18 @@ local function invert_table(fields, rows, minsize)
 	return ft, rt
 end
 
-local function format_cell(v)
-	if v == null then
+local function format_cell(v, col)
+	if v == null or v == nil then
 		return 'NULL'
+	elseif col.to_text then
+		return col.to_text(v, col)
 	else
 		return tostring(v)
 	end
 end
 
-local function cell_align(current_align, cell_value)
+local function cell_align(current_align, cell_value, field)
+	if field and field.align then return field.align end
 	if current_align == 'left' then return 'left' end
 	if type(cell_value) == 'number' or type(cell_value) == 'cdata' then return 'right' end
 	return 'left'
@@ -107,8 +110,8 @@ function print_result(rows, cols, minsize, print)
 	for i,row in ipairs(rows) do
 		local t = {}
 		for j=1,#fs do
-			t[j] = format_cell(row[j])
-			aligns[j] = cell_align(aligns[j], row[j])
+			t[j] = format_cell(row[j], cols[j])
+			aligns[j] = cell_align(aligns[j], row[j], cols[j])
 		end
 		rs[i] = t
 	end

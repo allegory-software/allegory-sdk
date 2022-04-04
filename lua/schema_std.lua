@@ -4,11 +4,17 @@
 
 if not ... then require'schema_test'; return end
 
+local glue = require'glue'
+local mysql = require'mysql'
+
+local glue_kbytes = glue.kbytes
+local glue_timeago = glue.timeago
+local glue_duration = glue.duration
+local datetime_to_timestamp = mysql.datetime_to_timestamp
+
 local M = {}
 do
 	local schema = require'schema'
-	local mysql = require'mysql'
-	local glue = require'glue'
 	local cat = table.concat
 	local names = glue.names
 	local format = string.format
@@ -56,8 +62,6 @@ do
 			return {default = v, mysql_default = tostring(v), tarantool_default = v}
 		end
 	end
-
-	M.datetime_to_timestamp = mysql.datetime_to_timestamp
 
 end
 
@@ -125,7 +129,7 @@ return function()
 	types.strpk     = {strid, pk}
 	types.email     = {str, size =  512, maxlen =  128, utf8_ci}
 	types.hash      = {str, size =   64, maxlen =   64, ascii_bin} --enough for tohex(256-bit-hash)
-	types.url       = {str, size = 2048, maxlen = 2048, ascii_bin}
+	types.url       = {str, type = 'url', size = 2048, maxlen = 2048, ascii_bin}
 	types.b64key    = {str, size = 8192, maxlen = 8192, ascii_bin}
 
 	types.atime     = {datetime, not_null, mysql_default = current_timestamp, readonly = true}
@@ -145,5 +149,8 @@ return function()
 	types.lang      = {chr, size = 2, maxlen = 2, ascii_ci}
 	types.currency  = {chr, size = 3, maxlen = 3, ascii_ci}
 	types.country   = {chr, size = 2, maxlen = 2, ascii_ci}
+	types.timeago   = {datetime_s, to_text = function(d) return glue_timeago(datetime_to_timestamp(d)) end}
+	types.filesize  = {uint52, type = 'filesize', to_text = function(n) return glue_kbytes(n) end}
+	types.duration  = {uint, type = 'duration', to_text = function(n) return glue_duration(n, 'days') end}
 
 end
