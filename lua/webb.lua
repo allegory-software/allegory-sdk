@@ -177,6 +177,9 @@ JSON ENCODING/DECODING
 	json_arg(s) -> t                        decode JSON
 	json(t) -> s                            encode JSON
 	null                                    value to encode json `null`
+	json_array(t) -> t                      mark t to be encoded as a json array
+	pack_json(...) -> t                     like pack() but nils become null
+	unpack_json(t) -> ...                   like unpack() but nulls become nil
 
 FILESYSTEM
 
@@ -703,7 +706,7 @@ function post(v)
 	local post = cx.post
 	if not post then
 		local s = cx.req:read_body'string'
-		local ct = cx.req.headers.content_type
+		local ct = cx.req.headers['content-type']
 		if ct then
 			if ct.media_type == 'application/x-www-form-urlencoded' then
 				post = uri.parse_args(s)
@@ -1095,7 +1098,7 @@ function getpage(arg1, upload)
 	local headers = {}
 	if type(upload) ~= 'string' then
 		upload = json(upload)
-		headers.content_type = mime_types.json
+		headers['content-type'] = mime_types.json
 	end
 
 	local u = type(arg1) == 'string' and uri.parse(arg1) or arg1.url and opt(arg1.url)
@@ -1221,6 +1224,32 @@ cjson.encode_sparse_array(false, 0, 0) --encode all sparse arrays.
 cjson.encode_empty_table_as_object(false) --encode empty tables as arrays.
 
 null = cjson.null
+
+function json_array(t)
+	return setmetatable(t or {}, cjson.array_mt)
+end
+
+function pack_json(...)
+	local t = json_array{...}
+	for i=1,select('#',...) do
+		if t[i] == nil then
+			t[i] = null
+		end
+	end
+	return t
+end
+
+function unpack_json(t)
+	local dt = {}
+	for i=1,#t do
+		if t[i] == null then
+			dt[i] = nil
+		else
+			dt[i] = t[i]
+		end
+	end
+	return unpack(dt, 1, #t)
+end
 
 --TODO: add option to cjson to avoid this crap.
 local function repl_nulls(t, null_val)
