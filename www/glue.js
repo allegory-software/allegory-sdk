@@ -1406,6 +1406,8 @@ function url(t) {
 	^done('success' | 'fail', ...)
 
 	ajax.notify_error: default error notify function (to be set by user).
+	ajax.notify_notify: default notify function for json results containing
+	  a field called `notify` (to be set by user).
 
 */
 function ajax(req) {
@@ -1420,7 +1422,7 @@ function ajax(req) {
 	xhr.open(method, url(req.url), async, req.user, req.pass)
 
 	let upload = req.upload
-	if (isobj(upload)) {
+	if (isobj(upload) || isarray(upload)) {
 		upload = json(upload)
 		xhr.setRequestHeader('content-type', 'application/json')
 	}
@@ -1530,16 +1532,18 @@ function ajax(req) {
 		if (name == 'done')
 			fire(arg1, ...rest)
 
-		if (req.fire(name, arg1, ...rest))
+		if (req.fire(name, arg1, ...rest)) {
 			if (name == 'fail' && arg1)
 				(req.notify_error || ajax.notify_error || noop)(arg1, ...rest)
+			if (name == 'success' && isobject(arg1) && isstr(arg1.notify))
+				(req.notify_notify || ajax.notify_notify || noop)(arg1.notify, arg1.notify_kind)
+		}
 
 		if (req[name])
 			req[name](arg1, ...rest)
 
-		if (req.notify instanceof EventTarget)
-			req.notify.fire('load', name, arg1, ...rest)
-		else if (isarray(req.notify)) // multiple targets
+		let notify = req.notify instanceof EventTarget ? [req.notify] : req.notify
+		if (isarray(req.notify))
 			for (target of req.notify)
 				target.fire('load', name, arg1, ...rest)
 
@@ -1570,6 +1574,7 @@ function ajax(req) {
 function get(url, success, fail, opt) {
 	return ajax(assign({
 		url: url,
+		method: 'GET',
 		success: success,
 		fail: fail,
 	}, opt))
@@ -1578,6 +1583,7 @@ function get(url, success, fail, opt) {
 function post(url, upload, success, fail, opt) {
 	return ajax(assign({
 		url: url,
+		method: 'POST',
 		upload: upload,
 		success: success,
 		fail: fail,

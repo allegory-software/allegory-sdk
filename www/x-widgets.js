@@ -2556,7 +2556,8 @@ component('x-toaster', function(e) {
 		t.post(...args)
 		console.log('NOTIFY', iselem(args[0]) ? args[0].textContent : args[0])
 	}
-	ajax.notify_error = (err) => notify(err, 'error')
+	ajax.notify_error  = (err) => notify(err, 'error')
+	ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 }
 
 // ---------------------------------------------------------------------------
