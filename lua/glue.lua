@@ -104,6 +104,7 @@ TIME
 	glue.day([utc, ][ts], [plus_days]) -> ts        timestamp at day's beginning from ts
 	glue.month([utc, ][ts], [plus_months]) -> ts    timestamp at month's beginning from ts
 	glue.year([utc, ][ts], [plus_years]) -> ts      timestamp at year's beginning from ts
+	glue.duration(s['days'|'seconds']) -> s         format a duration in seconds
 	glue.timeago([utc, ]ts[, from_ts]) -> s         format relative time
 	glue.week_start_offset(country) -> n            week start offset for a country (0 for Sunday)
 SIZES
@@ -1418,21 +1419,36 @@ function glue.year(utc, t, offset)
 	return glue.time(false, d.year + (offset or 0))
 end
 
-local function rel_time(s)
-	if s > 2 * 365 * 24 * 3600 then
-		return ('%d years'):format(floor(s / (365 * 24 * 3600)))
-	elseif s > 2 * 30.5 * 24 * 3600 then
-		return ('%d months'):format(floor(s / (30.5 * 24 * 3600)))
-	elseif s > 1.5 * 24 * 3600 then
-		return ('%d days'):format(floor(s / (24 * 3600)))
-	elseif s > 2 * 3600 then
-		return ('%d hours'):format(floor(s / 3600))
-	elseif s > 2 * 60 then
-		return ('%d minutes'):format(floor(s / 60))
-	elseif s > 60 then
-		return '1 minute'
+function glue.duration(s, opt)
+	if opt == 'days' then
+		local d = floor(s / (24 * 3600))
+		local s = s - d * 24 * 3600
+		local h = floor(s / 3600)
+		local s = s - h * 3600
+		local m = floor(s / 60)
+		local s = s - m * 60
+		if d ~= 0 then return ('%dd%dh%dm%ds'):format(d, h, m, s) end
+		if h ~= 0 then return (   '%dh%dm%ds'):format(h, m, s) end
+		if m ~= 0 then return (      '%dm%ds'):format(m, s) end
+		if s ~= 0 then return (         '%ds'):format(s) end
 	else
-		return 'seconds'
+		if s > 2 * 365 * 24 * 3600 then
+			return ('%d years'):format(floor(s / (365 * 24 * 3600)))
+		elseif s > 2 * 30.5 * 24 * 3600 then
+			return ('%d months'):format(floor(s / (30.5 * 24 * 3600)))
+		elseif s > 1.5 * 24 * 3600 then
+			return ('%d days'):format(floor(s / (24 * 3600)))
+		elseif s > 2 * 3600 then
+			return ('%d hours'):format(floor(s / 3600))
+		elseif s > 2 * 60 then
+			return ('%d minutes'):format(floor(s / 60))
+		elseif s > 60 then
+			return '1 minute'
+		elseif opt == 'seconds' then
+			return ('%d seconds'):format(s)
+		else
+			return 'seconds'
+		end
 	end
 end
 
@@ -1442,7 +1458,7 @@ function glue.timeago(utc, time, from_time)
 		utc, time, from_time = false, utc, time, from_time
 	end
 	local s = (from_time or glue.time(utc)) - time
-	return string.format(s > 0 and '%s ago' or 'in %s', rel_time(math.abs(s)))
+	return string.format(s > 0 and '%s ago' or 'in %s', glue.duration(math.abs(s)))
 end
 
 local wso = { -- fri=1, sat=2, sun=3

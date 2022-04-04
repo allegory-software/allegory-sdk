@@ -169,6 +169,7 @@ day    = glue.day
 sunday = glue.sunday
 month  = glue.month
 year   = glue.year
+duration = glue.duration
 timeago = glue.timeago
 
 kbytes = glue.kbytes
