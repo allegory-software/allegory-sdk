@@ -199,7 +199,9 @@ function M.quote_args(platform, ...)
 	local t = {}
 	for i=1,select('#',...) do
 		local v = select(i,...)
-		t[i] = M.quote_arg(v, platform)
+		if not v then --nil and false args are skipped. pass '' to inject empty args.
+			t[#t+1] = M.quote_arg(v, platform)
+		end
 	end
 	return table.concat(t, ' ')
 end

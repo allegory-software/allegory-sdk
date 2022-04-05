@@ -118,10 +118,13 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		if #t > 1 then
 			args = {}
 			for i = 2, #t do
-				args[i-1] = t[i]
+				if t[i] then --false args are skipped! pass '' to inject empty args.
+					args[#args+1] = t[i]
+				end
 			end
 		end
 	else
+		--TODO: implement unquote_args() instead of just splitting by space.
 		for s in t:gmatch'[^%s]+' do
 			if not cmd then
 				cmd = s

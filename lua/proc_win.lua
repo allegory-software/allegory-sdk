@@ -43,7 +43,9 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 		local t = {}
 		t[1] = M.quote_path_win(cmd[1])
 		for i = 2, #cmd do
-			t[i] = M.quote_arg_win(cmd[i])
+			if cmd[i] then --false args are skipped. pass '' to inject empt args.
+				t[#t+1] = M.quote_arg_win(cmd[i])
+			end
 		end
 		cmd = table.concat(t, ' ')
 	end
