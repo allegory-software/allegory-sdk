@@ -3,6 +3,7 @@
 --Written by Cosmin Apreutesei. Public Domain.
 
 local null = require'cjson'.null
+local cat = table.concat
 
 local function ellipsis(s,n)
 	return #s > n and (s:sub(1,n-3) .. '...') or s
@@ -32,49 +33,73 @@ local function fit(s,n,al)
 	return align[al or 'left'](s,n)
 end
 
-local function print_table(fields, rows, aligns, minsize, print)
-	print = print or _G.print
-	minsize = minsize or 0
+local function print_table(opt)
+	local rows    = opt.rows
+	local cols    = opt.cols
+	local aligns  = opt.aligns
+	local minsize = opt.minsize or 0
+	local sumdefs = opt.sums
+	local print   = opt.print or _G.print
+
 	local max_sizes = {}
 	for i=1,#rows do
-		for j=1,#fields do
-			max_sizes[j] = math.max(max_sizes[j] or minsize, #rows[i][j])
+		for j=1,#cols do
+			local sd = sumdefs and sumdefs[cols[j]]
+			max_sizes[j] = math.max(max_sizes[j] or minsize,
+				#rows[i][j], #cols[j], sd and #sd[1] or 0, sd and #sd[2] or 0)
 		end
 	end
 
-	local totalsize = 0
-	for j=1,#fields do
-		max_sizes[j] = math.max(max_sizes[j] or minsize, #fields[j])
-		totalsize = totalsize + max_sizes[j] + 3
+	local function fits(j, s)
+		return fit(s, max_sizes[j], aligns and aligns[j]) .. ' | '
+	end
+
+	local function hr(j)
+		return ('-'):rep(max_sizes[j]) .. ' + '
 	end
 
 	print()
-	local s, ps = '', ''
-	for j=1,#fields do
-		s = s .. fit(fields[j], max_sizes[j], 'center') .. ' | '
-		ps = ps .. ('-'):rep(max_sizes[j]) .. ' + '
+	local t, p = {}, {}
+	for j=1,#cols do
+		t[j] = fits(j, cols[j])
+		p[j] = hr(j)
 	end
-	print(s)
-	print(ps)
+	print(cat(t))
+	print(cat(p))
 
+	local t = {}
 	for i=1,#rows do
 		local s = ''
-		for j=1,#fields do
-			local val = rows[i][j]
-			s = s .. fit(val, max_sizes[j], aligns and aligns[j]) .. ' | '
+		for j=1,#cols do
+			t[j] = fits(j, rows[i][j])
 		end
-		print(s)
+		print(cat(t))
 	end
+
+	if sumdefs then
+		local sums, sumops, p = {}, {}, {}
+		for j=1,#cols do
+			local sd = sumdefs[cols[j]]
+			p[j] = hr(j)
+			sumops[j] = fits(j, sd and sd[1] or '')
+			sums  [j] = fits(j, sd and sd[2] or '')
+		end
+		print(cat(p))
+		print(cat(sumops))
+		print(cat(sums))
+		print(cat(p))
+	end
+
 	print()
 end
 
-local function invert_table(fields, rows, minsize)
+local function invert_table(cols, rows, minsize)
 	local ft, rt = {'field'}, {}
 	for i=1,#rows do
 		ft[i+1] = tostring(i)
 	end
-	for j=1,#fields do
-		local row = {fields[j]}
+	for j=1,#cols do
+		local row = {cols[j]}
 		for i=1,#rows do
 			row[i+1] = rows[i][j]
 		end
@@ -83,11 +108,11 @@ local function invert_table(fields, rows, minsize)
 	return ft, rt
 end
 
-local function format_cell(v, col)
+local function format_cell(v, field)
 	if v == null or v == nil then
 		return 'NULL'
-	elseif col.to_text then
-		return col.to_text(v, col)
+	elseif field.to_text then
+		return field.to_text(v, field)
 	else
 		return tostring(v)
 	end
@@ -100,22 +125,67 @@ local function cell_align(current_align, cell_value, field)
 	return 'left'
 end
 
-function print_result(rows, cols, minsize, print)
-	local fs = {}
-	for i,col in ipairs(cols) do
-		fs[i] = col.name
+function print_result(opt)
+	local rows    = opt.rows
+	local fields  = opt.fields
+	local minsize = opt.minsize
+	local sums    = opt.sums
+
+	local cols = {}
+	local colindex = {}
+	for i, field in ipairs(fields) do
+		cols[i] = field.name
+		colindex[field.name] = i
 	end
-	local rs = {}
-	local aligns = {} --deduced from values
+
+	local textrows = {}
+	local aligns = {}
 	for i,row in ipairs(rows) do
 		local t = {}
-		for j=1,#fs do
-			t[j] = format_cell(row[j], cols[j])
-			aligns[j] = cell_align(aligns[j], row[j], cols[j])
+		for j=1,#cols do
+			t[j] = format_cell(row[j], fields[j])
+			aligns[j] = cell_align(aligns[j], row[j], fields[j])
 		end
-		rs[i] = t
+		textrows[i] = t
 	end
-	print_table(fs, rs, aligns, minsize, print)
+
+	local sumpairs = {}
+	if opt.sums then
+		local function to_number(s) return tonumber(s) end
+		local function from_number(n) return tostring(n) end
+		for col, op in pairs(opt.sums) do
+			local n
+			local j = colindex[col]
+			local field = fields[j]
+			local to_number   = field.to_number   or to_number
+			local from_number = field.from_number or from_number
+			for i,row in ipairs(rows) do
+				local v = row[j]
+				if v ~= nil then
+					local x = to_number(v, field)
+					if op == 'sum' or op == 'avg' then
+						n = (n or 0) + x
+					elseif op == 'min' then
+						n = math.min(n or 1/0, x)
+					elseif op == 'max' then
+						n = math.max(n or -1/0, x)
+					end
+				end
+			end
+			if n then
+				if op == 'avg' then
+					n = n / #rows
+				end
+				local v = from_number(n, field)
+				sumpairs[col] = {op, format_cell(v, field)}
+			end
+		end
+	end
+
+	print_table{
+		rows = textrows, cols = cols, aligns = aligns,
+		minsize = minsize, sums = sumpairs, print = opt.print,
+	}
 end
 
 return {
@@ -125,4 +195,3 @@ return {
 	table = print_table,
 	result = print_result,
 }
-
