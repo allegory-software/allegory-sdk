@@ -11,6 +11,14 @@ local glue_kbytes = glue.kbytes
 local glue_timeago = glue.timeago
 local glue_duration = glue.duration
 local datetime_to_timestamp = mysql.datetime_to_timestamp
+local timestamp_to_datetime = mysql.timestamp_to_datetime
+local time_to_seconds = mysql.time_to_seconds
+local seconds_to_time = mysql.seconds_to_time
+
+local datetime_to_timestamp = function(s) return datetime_to_timestamp(s) end
+local timestamp_to_datetime = function(t) return timestamp_to_datetime(t) end
+local time_to_seconds       = function(t) return time_to_seconds(t) end
+local seconds_to_time       = function(s) return seconds_to_time(s) end
 
 local M = {}
 do
@@ -108,8 +116,16 @@ return function()
 	types.chr       = {str, mysql_type = 'char', padded = true}
 	types.blob      = {type = 'binary', mysql_type = 'mediumblob', size = 0xffffff, tarantool_type = 'string', tarantool_collation = 'none'}
 
-	types.timeofday = {type = 'timeofday', mysql_type = 'time', tarantool_type = 'number'}
-	types.date      = {type = 'date', mysql_type = 'date', mysql_to_sql = date_to_sql, tarantool_type = 'number', mysql_to_tarantool = datetime_to_timestamp}
+	types.timeofday = {type = 'timeofday', mysql_type = 'time', tarantool_type = 'number',
+		to_number   = time_to_seconds,
+		from_number = seconds_to_time,
+	}
+	types.date      = {type = 'date', mysql_type = 'date', tarantool_type = 'number',
+		mysql_to_sql       = date_to_sql,
+		mysql_to_tarantool = datetime_to_timestamp,
+		to_number          = datetime_to_timestamp,
+		from_number        = timestamp_to_datetime,
+	}
 	types.datetime  = {date, mysql_type = 'datetime', has_time = true}
 	types.datetime_s= {datetime, has_seconds = true}
 	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `time` instead.
