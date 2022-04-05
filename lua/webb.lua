@@ -900,6 +900,7 @@ function stringbuffer(t)
 end
 
 function push_out(f)
+	trace()
 	cx.outfunc = f or stringbuffer()
 	if not cx.outfuncs then
 		cx.outfuncs = {}
@@ -908,7 +909,7 @@ function push_out(f)
 end
 
 function pop_out()
-	if not cx.outfunc then return end
+	assert(cx.outfunc, 'pop_out() with nothing to pop')
 	local s = cx.outfunc()
 	local outfuncs = cx.outfuncs
 	remove(outfuncs)
@@ -1078,8 +1079,10 @@ end
 
 local getpage_client
 
-function getpage(arg1, upload)
+function getpage(arg1, upload, receive_content)
 	local opt = type(arg1) == 'table' and arg1
+	upload = upload or opt and opt.upload
+	receive_content = receive_content or opt and opt.receive_content
 
 	if not getpage_client then
 
@@ -1094,7 +1097,6 @@ function getpage(arg1, upload)
 
 	end
 
-	upload = upload or opt and opt.upload
 	local headers = {}
 	if type(upload) ~= 'string' then
 		upload = json(upload)
@@ -1109,7 +1111,7 @@ function getpage(arg1, upload)
 		https = (u and u.scheme and u.scheme or scheme()) == 'https',
 		method = upload and 'POST',
 		content = upload,
-		receive_content = 'string',
+		receive_content = receive_content or 'string',
 		--debug = {protocol = true, stream = false},
 		--close = true,
 	}, opt)

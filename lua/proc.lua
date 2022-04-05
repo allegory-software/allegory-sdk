@@ -199,7 +199,7 @@ function M.quote_args(platform, ...)
 	local t = {}
 	for i=1,select('#',...) do
 		local v = select(i,...)
-		if not v then --nil and false args are skipped. pass '' to inject empty args.
+		if v then --nil and false args are skipped. pass '' to inject empty args.
 			t[#t+1] = M.quote_arg(v, platform)
 		end
 	end

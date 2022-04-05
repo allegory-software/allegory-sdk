@@ -99,7 +99,7 @@ end
 cmd = cmdsection'MISC'
 
 local function usage()
-	say(' USAGE: %s %s [OPTIONS] COMMAND ...', arg[-1], arg[0])
+	say(' USAGE: %s [OPTIONS] COMMAND ...', arg[0]:match'([^/\\]+)%.lua$')
 end
 
 cmd('help', 'Show this screen', function()

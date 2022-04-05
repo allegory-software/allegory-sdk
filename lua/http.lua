@@ -440,7 +440,7 @@ function http:read_body(headers, write, from_server, close, state)
 			self:read_body_to_writer(headers, yield, from_server, close, state)
 			return nil, 'eof'
 		end, 'http-read-body %s', self.tcp))
-	else
+	else --function or nil
 		self:read_body_to_writer(headers, write, from_server, close, state)
 		return true --signal that content was read.
 	end
@@ -451,40 +451,40 @@ end
 local creq = {}
 http.client_request_class = creq
 
-function http:build_request(t, cookies)
+function http:build_request(opt, cookies)
 	local req = glue.object(creq,
 		{http = self, type = 'http_request', debug_prefix = '>'})
 
-	req.http_version = t.http_version or '1.1'
-	req.method = t.method or 'GET'
-	req.uri = t.uri or '/'
+	req.http_version = opt.http_version or '1.1'
+	req.method = opt.method or 'GET'
+	req.uri = opt.uri or '/'
 
 	req.headers = {}
 
-	assert(t.host, 'host missing') --required, even for HTTP/1.0.
+	assert(opt.host, 'host missing') --required, even for HTTP/1.0.
 	local default_port = self.https and 443 or 80
 	local port = self.port ~= default_port and self.port or nil
-	req.headers['host'] = {host = t.host, port = port}
+	req.headers['host'] = {host = opt.host, port = port}
 
-	req.close = t.close or req.http_version == '1.0'
+	req.close = opt.close or req.http_version == '1.0'
 	if req.close then
 		req.headers['connection'] = 'close'
 	end
 
-	if self.zlib then
+	if opt.compress ~= false and self.zlib then
 		req.headers['accept-encoding'] = 'gzip, deflate'
 	end
 
 	req.headers['cookie'] = cookies
 
-	req.content, req.content_size = t.content or '', t.content_size
+	req.content, req.content_size = opt.content or '', opt.content_size
 
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
-	glue.update(req.headers, t.headers)
+	glue.update(req.headers, opt.headers)
 
-	req.receive_content = t.receive_content
-	req.request_timeout = t.request_timeout
-	req.reply_timeout   = t.reply_timeout
+	req.receive_content = opt.receive_content
+	req.request_timeout = opt.request_timeout
+	req.reply_timeout   = opt.reply_timeout
 
 	return req
 end
