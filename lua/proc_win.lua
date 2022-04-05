@@ -42,8 +42,8 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 	if type(cmd) == 'table' then
 		local t = {}
 		t[1] = M.quote_path_win(cmd[1])
-		for i = 2, #cmd do
-			if cmd[i] then --false args are skipped. pass '' to inject empt args.
+		for i = 2, cmd.n or #cmd do
+			if cmd[i] then --nil and false args are skipped. pass '' to inject empt args.
 				t[#t+1] = M.quote_arg_win(cmd[i])
 			end
 		end

@@ -117,8 +117,8 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		cmd = t[1]
 		if #t > 1 then
 			args = {}
-			for i = 2, #t do
-				if t[i] then --false args are skipped! pass '' to inject empty args.
+			for i = 2, t.n or #t do
+				if t[i] then --nil and false args are skipped! pass '' to inject empty args.
 					args[#args+1] = t[i]
 				end
 			end
