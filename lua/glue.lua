@@ -1430,7 +1430,7 @@ function glue.duration(s, opt)
 		if d ~= 0 then return ('%dd%dh%dm%ds'):format(d, h, m, s) end
 		if h ~= 0 then return (   '%dh%dm%ds'):format(h, m, s) end
 		if m ~= 0 then return (      '%dm%ds'):format(m, s) end
-		if s ~= 0 then return (         '%ds'):format(s) end
+		if true   then return (         '%ds'):format(s) end
 	else
 		if s > 2 * 365 * 24 * 3600 then
 			return ('%d years'):format(floor(s / (365 * 24 * 3600)))
