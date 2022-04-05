@@ -8,7 +8,7 @@
 	cookie jars, multi-level debugging, caching, cdata-buffer-based I/O.
 	In short, your dream library for web scraping.
 
-	client:new(opt) -> client            create a client object
+	http_client:new(opt) -> client       create a client object
 	client:request(opt) -> req, res      make a HTTP request
 	client:close_all()                   close all connections
 
@@ -355,11 +355,10 @@ end
 function client:read_response_now(http, req)
 	http.reading_response = true
 	self:dp(http.target, '+READ_RS', '%s.%s.%s', http.target, http, req)
-	local res, err, errtype, errcode = http:read_response(req)
-	self:dp(http.target, '-READ_RS', '%s.%s.%s %s %s %s',
-		http.target, http, req, err or '', errtype or '', errcode or '')
+	local res, err = http:read_response(req)
+	self:dp(http.target, '-READ_RS', '%s.%s.%s %s', http.target, http, req, err or '')
 	http.reading_response = false
-	return res, err, errtype
+	return res, err
 end
 
 --redirects ------------------------------------------------------------------
@@ -528,8 +527,8 @@ function client:request(t)
 		self.suspend()
 	end
 
-	local res, err, errtype = self:read_response_now(http, req)
-	if not res then return nil, err, errtype end
+	local res, err = self:read_response_now(http, req)
+	if not res then return nil, err, req end
 
 	self:store_cookies(target, req, res)
 
@@ -554,12 +553,12 @@ function client:request(t)
 		local t = self:redirect_request_args(t, req, res)
 		local max_redirects = target.max_redirects or self.max_redirects
 		if t.redirect_count >= max_redirects then
-			return nil, 'too many redirects', req
+			return nil, 'too many redirects', req, res
 		end
 		return self:request(t)
 	end
 
-	return res, req
+	return res, true, req
 end
 
 --downloading CA file --------------------------------------------------------
