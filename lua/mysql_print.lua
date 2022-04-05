@@ -42,11 +42,13 @@ local function print_table(opt)
 	local print   = opt.print or _G.print
 
 	local max_sizes = {}
+	for j=1,#cols do
+		max_sizes[j] = math.max(max_sizes[j] or minsize,
+			#cols[j], sd and #sd[1] or 0, sd and #sd[2] or 0)
+	end
 	for i=1,#rows do
 		for j=1,#cols do
-			local sd = sumdefs and sumdefs[cols[j]]
-			max_sizes[j] = math.max(max_sizes[j] or minsize,
-				#rows[i][j], #cols[j], sd and #sd[1] or 0, sd and #sd[2] or 0)
+			max_sizes[j] = math.max(max_sizes[j], #rows[i][j])
 		end
 	end
 
@@ -149,8 +151,9 @@ function print_result(opt)
 		textrows[i] = t
 	end
 
-	local sumpairs = {}
+	local sumdefs
 	if opt.sums then
+		sumdefs = {}
 		local function to_number(s) return tonumber(s) end
 		local function from_number(n) return tostring(n) end
 		for col, op in pairs(opt.sums) do
@@ -172,19 +175,20 @@ function print_result(opt)
 					end
 				end
 			end
+			local v
 			if n then
 				if op == 'avg' then
 					n = n / #rows
 				end
-				local v = from_number(n, field)
-				sumpairs[col] = {op, format_cell(v, field)}
+				v = from_number(n, field)
 			end
+			sumdefs[col] = {op, format_cell(v, field)}
 		end
 	end
 
 	print_table{
 		rows = textrows, cols = cols, aligns = aligns,
-		minsize = minsize, sums = sumpairs, print = opt.print,
+		minsize = minsize, sums = sumdefs, print = opt.print,
 	}
 end
 

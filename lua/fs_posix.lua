@@ -433,7 +433,7 @@ end
 function fs.move(oldpath, newpath)
 	local ok, err = check(C.rename(oldpath, newpath) == 0)
 	if not ok then return false, err end
-	fs.log('', 'fs', 'move', 'old: %s\nnew:%s', oldpath, newpath)
+	fs.log('', 'fs', 'move', 'old: %s\nnew: %s', oldpath, newpath)
 	return true
 end
 
