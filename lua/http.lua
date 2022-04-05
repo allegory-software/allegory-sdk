@@ -563,7 +563,7 @@ function http:read_response(req)
 	local dt = req.reply_timeout
 	self.read_expires = dt and clock() + dt or nil
 
-	res.http_version, res.status = self:read_status_line()
+	res.http_version, res.status, res.status_message = self:read_status_line()
 
 	while res.status == 100 do --ignore any 100-continue messages
 		self:read_headers(res.rawheaders)
