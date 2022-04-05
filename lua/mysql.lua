@@ -81,6 +81,9 @@ ESCAPING
 CONVERSION
 
 	mysql.datetime_to_timestamp(sql_datetime_string[, utc]) -> t
+	mysql.timestamp_to_datetime(t[, utc]) -> sql_datetime_string
+	mysql.time_to_seconds(sql_time_string) -> s
+	mysql.seconds_to_time(s) -> sql_time_string
 
 NOTE: Decimals with up to 15 digits of precision and 64 bit integers are
 converted to Lua numbers by default. That limits the useful range of integer
@@ -1560,5 +1563,21 @@ function mysql.datetime_to_timestamp(v, utc) --'yyyy-mm-dd HH:SS:MM'
 	return time(utc or false, y, m, d, H, M, S)
 end
 assert(mysql.datetime_to_timestamp'2000-01-02 03:04:05' == time(2000, 1, 2, 3, 4, 5))
+
+function mysql.timestamp_to_datetime(t, utc) --'yyyy-mm-dd HH:SS:MM'
+	local d = os.date(utc and '!*t' or '*t', t)
+	return format('%04d-%02d-%02d %02d:%02d:%02d',
+		d.year, d.month, d.day, d.hour, d.min, d.sec)
+end
+
+function mysql.time_to_seconds(v)
+	if v == nil then return nil end
+	local h, m, s = v:match'^(%d+):(%d+):(%d+)'
+	return tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
+end
+
+function mysql.seconds_to_time(s)
+	return format('%02d:%02d:%02d', floor(s / 3600), floor(s / 60), s)
+end
 
 return mysql
