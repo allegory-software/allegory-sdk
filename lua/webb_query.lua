@@ -209,10 +209,10 @@ for method in pairs{
 	end
 end
 
-function pqr(rows, cols)
-	return mysql_print.result(rows, cols)
+function pqr(rows, cols, sums)
+	return mysql_print.result{rows = rows, fields = cols, sums = sums}
 end
 
-function outpqr(rows, cols)
-	mysql_print.result(rows, cols, nil, outprint)
+function outpqr(rows, cols, sums)
+	mysql_print.result{rows = rows, fields = cols, sums = sums, print = outprint}
 end
