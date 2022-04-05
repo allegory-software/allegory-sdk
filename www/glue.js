@@ -1161,7 +1161,7 @@ method(Number, 'duration', function(opt) {
 		if (d) return S('duration_dhms', '{0}d{1}h{2}m{3}s', d, h, m, s)
 		if (h) return S('duration_hms' ,     '{0}h{1}m{2}s',    h, m, s)
 		if (m) return S('duration_ms'  ,         '{0}m{1}s',       m, s)
-		if (s) return S('duration_s'   ,             '{0}s',          s)
+		if (1) return S('duration_s'   ,             '{0}s',          s)
 	} else {
 		if (s > 2 * 365 * 24 * 3600)
 			return S('n_years', '{0} years', s / (365 * 24 * 3600).dec())
