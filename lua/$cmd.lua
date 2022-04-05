@@ -168,5 +168,10 @@ function cmdaction(...)
 	local c = s and s:gsub('-', '_') or 'help'
 
 	local args = pack(select(i, ...))
+	for i = i, select('#',...) do
+		if args[i] == '' then
+			args[i] = nil
+		end
+	end
 	return c, args, run_cmd
 end
