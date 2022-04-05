@@ -676,9 +676,9 @@ function args(v)
 	if not args then
 		local u = uri.parse(cx.req.uri)
 		args = u.segments
-		remove(args, 1)
+		remove(args, 1) -- /a/b -> a/b
 		argc = #args
-		for i = 1, argc do
+		for i = 1, argc do  -- a//b -> 'a',nil,'b'
 			if args[i] == '' then
 				args[i] = nil
 			end
@@ -1115,18 +1115,17 @@ function getpage(arg1, upload)
 	}, opt)
 	opt.headers = update(headers, opt.headers)
 
-	local res, req = getpage_client:request(opt)
+	local res, err, req = getpage_client:request(opt)
 
 	if not res then
-		return nil, req
+		return nil, err, req
 	end
 
-	local s = res.content
 	local ct = res.headers['content-type']
 	if ct and ct.media_type == mime_types.json then
-		s = json_arg(s)
+		res.content = json_arg(res.content)
 	end
-	return s, res
+	return res.content, res, req
 end
 
 --html encoding --------------------------------------------------------------
