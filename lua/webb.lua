@@ -272,6 +272,7 @@ CONFIG
 	noreply_email    noreply@HOST
 	http_debug       nil                   'protocol stream errors tracebacks'
 	smtp_debug       nil                   'protocol stream errors tracebacks'
+	getpage_debug    nil                   'protocol stream errors tracebacks'
 	default_lang     'en'                  default language
 
 ]==]
@@ -900,7 +901,6 @@ function stringbuffer(t)
 end
 
 function push_out(f)
-	trace()
 	cx.outfunc = f or stringbuffer()
 	if not cx.outfuncs then
 		cx.outfuncs = {}
@@ -1112,8 +1112,7 @@ function getpage(arg1, upload, receive_content)
 		method = upload and 'POST',
 		content = upload,
 		receive_content = receive_content or 'string',
-		--debug = {protocol = true, stream = false},
-		--close = true,
+		debug = config'getpage_debug' and index(names(config'getpage_debug' or '')),
 	}, opt)
 	opt.headers = update(headers, opt.headers)
 

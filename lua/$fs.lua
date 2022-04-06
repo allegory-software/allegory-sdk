@@ -188,6 +188,11 @@ function mtime(file)
 end
 
 function dir(path, patt, min_mtime, create, desc, order_by)
+	if type(path) == 'table' then
+		local t = path
+		path, patt, min_mtime, create, desc, order_by =
+			t.path, t.find, t.min_mtime, t.create, t.desc, t.order_by
+	end
 	local t = {}
 	local create = create or function(file) return {} end
 	for file, d in fs.dir(path) do
@@ -198,6 +203,7 @@ function dir(path, patt, min_mtime, create, desc, order_by)
 		then
 			local f = create(file)
 			if f then
+				f.name  = file
 				f.file  = indir(path, file)
 				f.mtime = d:attr'mtime'
 				f.btime = d:attr'btime'

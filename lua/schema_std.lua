@@ -168,5 +168,8 @@ return function()
 	types.timeago   = {datetime_s, to_text = function(d) return glue_timeago(datetime_to_timestamp(d)) end}
 	types.filesize  = {uint52, type = 'filesize', to_text = function(n) return glue_kbytes(n) end}
 	types.duration  = {uint, type = 'duration', to_text = function(n) return glue_duration(n, 'days') end}
+	types.secret_key  = {b64key, type = 'secret_key'}
+	types.public_key  = {b64key, type = 'public_key'}
+	types.private_key = {b64key, type = 'private_key'}
 
 end

@@ -49,6 +49,7 @@ field attributes:
 		type           : for choosing a field preset.
 			number bool enum tags date timestamp timeofday duration
 			password filesize place url phone email color icon button
+			secret_key public_key private_key
 			col
 
 	rendering:
@@ -5204,6 +5205,32 @@ component('x-lookup-dropdown', function(e) {
 				field.action.call(this, val, row, field)
 			},
 		}, this.button_options))
+	}
+
+	// public_key, secret_key, private_key
+
+	field_types.secret_key = {
+		editor: function(opt) {
+			return textedit(assign_opt({
+				attrs: {mono: true},
+			}, opt))
+		},
+	}
+
+	field_types.public_key = {
+		editor: function(opt) {
+			return textarea(assign_opt({
+				attrs: {mono: true},
+			}, opt))
+		},
+	}
+
+	field_types.private_key = {
+		editor: function(opt) {
+			return textarea(assign_opt({
+				attrs: {mono: true},
+			}, opt))
+		},
 	}
 
 }

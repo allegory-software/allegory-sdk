@@ -958,6 +958,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	text-align: right;
 }
 
+.x-editbox[mono] > .x-focus-box > .x-editbox-input {
+	font-family: monospace;
+}
+
 .x-editbox.modified.modified > .x-focus-box { /* specificity over .x-widget.grid-editor */
 	/* background-color: var(--x-bg-modified); */
 }
@@ -1071,8 +1075,13 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 /* textarea --------------------------------------------------------------- */
 
+.x-textarea {
+	flex: 1;
+}
+
 .x-textarea > .x-focus-box {
 	padding-right: 0;
+	flex: 1;
 }
 
 textarea.x-editbox-input {
@@ -1085,10 +1094,6 @@ textarea.x-editbox-input {
 
 .x-textarea > .x-focus-box > .x-editbox-input {
 	align-self: stretch;
-}
-
-.x-textarea[mono] > .x-focus-box > .x-editbox-input {
-	font-family: monospace;
 }
 
 .x-textarea[nowrap] {
