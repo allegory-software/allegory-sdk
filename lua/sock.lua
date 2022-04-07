@@ -59,10 +59,12 @@ SCHEDULING
 	sock.transfer(co, ...) -> ...              see coro.transfer()
 	sock.onthreadfinish(co, f)                 run `f` when thread finishes
 	sock.threadenv[thread] <-> env             get/set thread environment
+
 	sock.poll()                                poll for I/O
 	sock.start()                               keep polling until all threads finish
 	sock.stop()                                stop polling
 	sock.run(f, ...) -> ...                    run a function inside a sock thread
+
 	sock.sleep_until(t)                        sleep without blocking until sock.clock() value
 	sock.sleep(s)                              sleep without blocking for s seconds
 	sock.sleep_job() -> sj                     make an interruptible sleep job
@@ -73,6 +75,10 @@ SCHEDULING
 	sock.runafter(s, f) -> sjt                 run `f` after `s` seconds
 	sock.runevery(s, f) -> sjt                 run `f` every `s` seconds
 	sjt:cancel()                               cancel timer
+
+	sock.threadset() -> ts
+	ts:thread(f, [fmt, ...]) -> co
+	ts:wait() -> {{ok=,ret=,thread=},...}
 
 MULTI-THREADING
 	sock.iocp([iocp_h]) -> iocp_h              get/set IOCP handle (Windows)
@@ -320,10 +326,11 @@ sock.epoll_fd([epfd]) -> epfd
 local ffi = require'ffi'
 local bit = require'bit'
 
-local glue  = require'glue'
-local heap  = require'heap'
-local coro  = require'coro'
-local clock = require'time'.clock
+local glue   = require'glue'
+local heap   = require'heap'
+local coro   = require'coro'
+local clock  = require'time'.clock
+local errors = require'errors'
 
 local push = table.insert
 local pop  = table.remove
@@ -2372,7 +2379,7 @@ function M.thread(f, fmt, ...)
 	local thread
 	thread = coro.create(function(...)
 		M.save_thread_context(thread)
-		local ok, err = glue.pcall(f, ...) --last chance to get stacktrace.
+		local ok, err = errors.pcall(f, ...)
 		local env = threadenv[thread]
 		if env then
 			threadenv[thread] = nil
@@ -2384,14 +2391,8 @@ function M.thread(f, fmt, ...)
 		if not ok then
 			M.log('ERROR', 'sock', 'thread', '%s', err)
 		end
-		M.live(thread, nil)
 		return coro.finish(poll_thread)
 	end)
-	if fmt then
-		M.live(thread, fmt, ...)
-	else
-		M.live(thread, debug.traceback())
-	end
 	return thread
 end
 
@@ -2428,22 +2429,39 @@ end
 M.currentthread = currentthread
 M.yield = coro.yield
 
+local function rets_tostring(rets)
+	local t = {}
+	local logarg = M.logging and M.logging.arg or tostring
+	for i,ret in ipairs(rets) do
+		local args = table.concat(glue.imap(ret, logarg), ', ')
+		t[i] = logarg(ret.thread) .. ': '..args
+	end
+	return table.concat(t, '\n')
+end
+local rets_mt = {__tostring = rets_tostring}
+
 function M.threadset()
 	local ts = {}
 	local n = 0
-	local errs
+	local all_ok = true
+	local rets = {}
+	setmetatable(rets, rets_mt)
 	local wait_thread = currentthread()
+	local function pass(ret, ok, ...)
+		local n = select('#',...)
+		for i=1,n do
+			ret[i] = select(i,...)
+		end
+		ret.ok = ok
+		ret.n = n
+		rets[#rets+1] = ret
+		if not ok then all_ok = false end
+	end
 	function ts:thread(f, ...)
 		return M.thread(function(...)
 			n = n + 1
-			local ok, err = glue.pcall(f, ...)
-			if not ok then
-				errs = errs or setmetatable({}, {__tostring = function(self)
-					return table.concat(self)
-				end})
-				errs[#errs+1] = err
-				errs[currentthread()] = err
-			end
+			local ret = {thread = currentthread()}
+			pass(ret, errors.pcall(f, ...))
 			n = n - 1
 			if n == 0 then
 				transfer(wait_thread)
@@ -2451,10 +2469,11 @@ function M.threadset()
 		end, ...)
 	end
 	function ts:wait()
-		if n == 0 then return true end
-		wait_thread = currentthread()
-		M.suspend()
-		return not errs, errs
+		if n ~= 0 then
+			wait_thread = currentthread()
+			M.suspend()
+		end
+		return all_ok, rets
 	end
 	return ts
 end
