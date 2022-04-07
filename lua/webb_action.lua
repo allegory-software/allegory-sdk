@@ -149,10 +149,8 @@ end
 
 local function json_filter(handler, ...)
 	local s = handler(...)
-	if type(s) == 'table' then
+	if s ~= nil then
 		s = json(s)
-	end
-	if s then
 		check_etag(s)
 		outall(s)
 	end

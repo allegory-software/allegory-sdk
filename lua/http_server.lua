@@ -162,7 +162,7 @@ function server:new(t)
 					assert(not sending_response, 'response already sent')
 					req:respond(err)
 				elseif not sending_response then
-					self:check(tcp, false, 'respond', '%s', err)
+					self:check(ctcp, false, 'respond', '%s', err)
 					req:respond{status = 500}
 				else
 					error(err)

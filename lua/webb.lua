@@ -1180,7 +1180,7 @@ end
 local function checkfunc(code, default_err)
 	return function(ret, err, ...)
 		if ret then return ret end
-		err = err and format(tostring(err), ...) or default_err
+		err = err and format(err, ...) or default_err
 		http_error{
 			status = code,
 			headers = {
@@ -1189,13 +1189,14 @@ local function checkfunc(code, default_err)
 				['set-cookie'] = cx.res.headers['set-cookie'],
 			},
 			content = json{error = err},
+			message = err,
 		}
 	end
 end
-checkfound = checkfunc(404, 'Not found')
-checkarg   = checkfunc(400, 'Invalid argument')
-allow      = checkfunc(403, 'Not allowed')
-check500   = checkfunc(500, 'Server error')
+checkfound = checkfunc(404, 'not found')
+checkarg   = checkfunc(400, 'invalid argument')
+allow      = checkfunc(403, 'not allowed')
+check500   = checkfunc(500, 'internal error')
 
 function check_etag(s)
 	if not method'get' then return s end
@@ -1873,7 +1874,7 @@ function webb.fakecx()
 		io.stdout:write(s)
 		io.stdout:flush()
 	end
-	function req:raise(status, content)
+	function req.raise(req, status, content) --copied verbatim from http_server.
 		local err
 		if type(status) == 'number' then
 			err = {status = status, content = content}
@@ -1882,7 +1883,7 @@ function webb.fakecx()
 		else
 			assert(false)
 		end
-		error(json_arg(err.content).error)
+		errors.raise(3, 'http_response', err)
 	end
 	return cx
 end
@@ -1891,7 +1892,7 @@ function webb.thread(f, ...)
 	return thread(function(...)
 		local thread = currentthread()
 		webb.setcx(thread, webb.fakecx())
-		local ok, err = glue.pcall(f, ...)
+		local ok, err = errors.pcall(f, ...)
 		if not ok then
 			webb.logerror('webb', 'thread', '%s', err)
 		end
