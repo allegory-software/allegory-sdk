@@ -168,6 +168,7 @@ glue.isint  = function(x) return type(x) == 'number' and floor(x) == x end
 glue.istab  = function(x) return type(x) == 'table'  end
 glue.isfunc = function(f) return type(f) == 'function' end
 glue.iscdata = function(f) return type(f) == 'cdata' end
+glue.isthread = function(f) return type(f) == 'thread' end
 
 --math -----------------------------------------------------------------------
 

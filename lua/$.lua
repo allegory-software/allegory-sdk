@@ -31,6 +31,7 @@ isint  = glue.isint
 istab  = glue.istab
 isfunc = glue.isfunc
 iscdata = glue.iscdata
+isthread = glue.isthread
 
 floor       = math.floor
 ceil        = math.ceil

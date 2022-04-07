@@ -12,6 +12,8 @@ LOGGING API
 	loglive(e, [fmt, ...] | nil)
 	logliveadd(e, fmt, ...)
 
+	logarg(v) -> s
+	logprintarg(v) -> s
 	logargs(...) -> ...
 	logprintargs(...) -> ...
 
@@ -37,6 +39,8 @@ warnif       = logging.warnif
 logerror     = logging.logerror
 loglive      = logging.live
 logliveadd   = logging.liveadd
+logarg       = logging.arg
+logprintarg  = logging.printarg
 logargs      = logging.args
 logprintargs = logging.printargs
 

@@ -249,7 +249,7 @@ local function virttype(v)
 	return is_stringable(v) and 'string' or type(v)
 end
 
-local type_order = {boolean = 1, number = 2, string = 3, table = 4}
+local type_order = {boolean=1, number=2, string=3, table=4, thread=5, cdata=6, ['function']=7}
 local function cmp_func(t, parents)
 	local function cmp(a, b)
 		local ta, tb = virttype(a), virttype(b)
