@@ -1270,7 +1270,7 @@ local function read_result(self, opt)
 	local cols = recv_field_packets(self, field_count, opt and opt.field_attrs, opt)
 
 	local compact         = opt and opt.compact
-	local to_array        = opt and opt.to_array and #cols == 1
+	local to_array        = opt and opt.to_array ~= false and #cols == 1
 	local null_value      = opt and opt.null_value      or self.null_value
 	local datetime_format = opt and opt.datetime_format or self.datetime_format
 	local date_format     = opt and opt.date_format     or self.date_format

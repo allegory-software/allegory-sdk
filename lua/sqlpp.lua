@@ -1314,21 +1314,21 @@ function sqlpp.new(init)
 		end
 	end
 	function cmd:first_row(...)
-		return pass(self:exec_with_options({to_array=1}, ...))
+		return pass(self:exec_with_options(...))
 	end
 
 	function cmd:each_group(col, ...)
-		local rows = self:exec_with_options(nil, ...)
+		local rows = self:exec_with_options({to_array=false}, ...)
 		return spp.each_group(col, rows)
 	end
 
 	function cmd:each_row(...)
-		local rows = self:exec_with_options({to_array=1}, ...)
+		local rows = self:exec_with_options(...)
 		return ipairs(rows)
 	end
 
 	function cmd:each_row_vals(...)
-		local rows, cols = self:exec_with_options({compact=1, to_array=1}, ...)
+		local rows, cols = self:exec_with_options({compact=1}, ...)
 		local i, n, cn = 1, #rows, #cols
 		return function()
 			if i > n then return end
@@ -1380,7 +1380,7 @@ function sqlpp.new(init)
 			end
 
 			function stmt:exec(...)
-				return self:exec_with_options(nil, ...)
+				return self:exec_with_options(...)
 			end
 
 			return stmt, param_names
@@ -1400,12 +1400,11 @@ function sqlpp.new(init)
 	--schema reflection -------------------------------------------------------
 
 	function cmd:dbs()
-		return self:exec_with_options({to_array=1}, 'show databases')
+		return self:exec_with_options'show databases'
 	end
 
 	function cmd:tables(db)
-		return self:exec_with_options({to_array=1},
-			'show tables from ??', db or self.db)
+		return self:exec_with_options('show tables from ??', db or self.db)
 	end
 
 	local server_caches = {}

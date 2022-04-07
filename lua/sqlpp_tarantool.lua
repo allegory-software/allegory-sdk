@@ -47,7 +47,7 @@ local function init_spp(spp, cmd)
 			local rows, cols = cn:exec(sql)
 			if not rows then return nil, cols end
 			if cols then --it's a select
-				if opt.to_array and #cols == 1 then
+				if opt.to_array ~= false and #cols == 1 then
 					rows = imap(rows, first_elem)
 				elseif not opt.compact then
 					local crows = rows
@@ -146,9 +146,9 @@ local function init_spp(spp, cmd)
 	function cmd:tables(db)
 		db = db or self.db
 		if db ~= self.db then return {} end
-		return (self:exec_with_options({to_array = 1}, [[
+		return (self:exec_with_options[[
 			select lower("name") from "_vspace" where "name" <> lower("name")
-		]]))
+		]])
 	end
 
 	local function parse_values(s)
