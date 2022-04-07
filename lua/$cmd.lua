@@ -22,11 +22,13 @@ require'$log'
 --printing -------------------------------------------------------------------
 
 function say(fmt, ...)
+	if logging.quiet then return end
 	io.stderr:write((fmt and fmt:format(...) or '')..'\n')
 	io.stderr:flush()
 end
 
 function sayn(fmt, ...)
+	if logging.quiet then return end
 	io.stderr:write((fmt and fmt:format(...) or ''))
 end
 

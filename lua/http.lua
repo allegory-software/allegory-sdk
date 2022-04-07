@@ -482,9 +482,17 @@ function http:build_request(opt, cookies)
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
 	glue.update(req.headers, opt.headers)
 
-	req.receive_content = opt.receive_content
 	req.request_timeout = opt.request_timeout
 	req.reply_timeout   = opt.reply_timeout
+
+	local write = opt.receive_content
+	if type(write) == 'function' then
+		local user_write = write
+		function write(buf, sz)
+			return user_write(req, buf, sz)
+		end
+	end
+	req.receive_content = write
 
 	return req
 end
@@ -557,7 +565,8 @@ end
 local cres = {}
 
 function http:read_response(req)
-	local res = glue.object(cres, {})
+	local res = glue.object(cres, {request = req})
+	req.response = res
 	res.rawheaders = {}
 
 	local dt = req.reply_timeout

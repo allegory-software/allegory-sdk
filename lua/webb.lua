@@ -1124,7 +1124,7 @@ function getpage(arg1, upload, receive_content)
 
 	local ct = res.headers['content-type']
 	if ct and ct.media_type == mime_types.json then
-		res.content = json_arg(res.content)
+		res.content = json_arg(res.content, null)
 	end
 	return res.content, res, req
 end
@@ -1181,15 +1181,16 @@ local function checkfunc(code, default_err)
 	return function(ret, err, ...)
 		if ret then return ret end
 		err = err and format(err, ...) or default_err
+		local ct = cx and cx.res.content_type
 		http_error{
 			status = code,
+			content_type = ct,
 			headers = {
-				['content-type'] = mime_types.json,
 				--allow logout() to remove cookie while raising 403.
 				['set-cookie'] = cx.res.headers['set-cookie'],
 			},
-			content = json{error = err},
-			message = err,
+			content = ct == mime_types.json and json{error = err} or tostring(err),
+			message = err, --for tostring()
 		}
 	end
 end

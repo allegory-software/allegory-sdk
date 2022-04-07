@@ -1024,6 +1024,15 @@ function glue.catargs(sep, ...)
 	end
 end
 
+function glue.catall(...)
+	for i=1,select('#',...) do
+		if not select(i,...) then
+			return nil
+		end
+	end
+	return glue.catargs('', ...)
+end
+
 --publish the string submodule in the glue namespace.
 glue.update(glue, glue.string)
 
