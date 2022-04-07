@@ -9,7 +9,7 @@
 
 CMDLINE
 
-	cmdsection(name) -> section                    create a cmdline section
+	cmdsection(name, [wrap_fn]) -> section         create a cmdline section
 	section([active, ]cmdargs, help[, descr], fn)  add a command to a section
 	cmd    ([active, ]cmdargs, help[, descr], fn)  add a command to the misc section
 	cmdaction(...) -> fn, action_name              process cmdline options
@@ -74,6 +74,8 @@ local function addcmd(self, active, s, helpline, help, fn)
 			end
 			args = #args > 0 and cat(args, ' ') or nil
 		end
+		local wrap = getmetatable(self).wrap
+		if wrap then fn = wrap(fn) end
 		local cmd = {name = name, args = args, fn = fn, helpline = helpline, help = help}
 		if name:find('|', 1, true) then
 			for i,name in ipairs(names(name:gsub('|', ' '))) do
@@ -87,11 +89,11 @@ end
 
 local cmdsections = {}
 
-function cmdsection(name)
+function cmdsection(name, wrap)
 	local key = name:upper()
 	local s = cmdsections[key]
 	if not s then
-		s = setmetatable({}, {name = name, __call = addcmd})
+		s = setmetatable({}, {name = name, wrap = wrap, __call = addcmd})
 		cmdsections[key] = s
 		add(cmdsections, s)
 	end
