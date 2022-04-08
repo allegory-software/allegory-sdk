@@ -3,25 +3,24 @@
 	Circular buffer (aka fixed-sized FIFO queue) of Lua values.
 	Written by Cosmin Apreutesei. Public domain.
 
-	Allows removing a value at any position from the queue.
-	For a cdata ringbuffer, look at fs.mirror_map().
+	* Allows removing a value at any position from the queue.
+	* For a cdata ringbuffer, look at fs.mirror_buffer().
+	* Implemented as an array, not a linked list, so remove(v) is O(n).
+	* INDEX is a special key that if given will make find() and remove() O(1).
 
 	queue.new(size) -> q           create a queue
 	q:size()                       get queue capacity
 	q:count()                      get queue item count
 	q:full() -> t|f                check if the queue is full
 	q:empty() -> t|f               check if the queue is empty
-	q:push(v)                      push a value
-	q:pop() -> v                   pop a value (nil if empty)
+	q:push(v)                      push a value to head
+	q:pop() -> v|nil               pop a value from tail (nil if empty)
 	q:peek() -> v                  get value from the top without popping
 	q:items() -> iter() -> v       iterate values
-	q:remove_at(i)                 remove value at index `i`
+	q:item_at(i) -> v|nil          get item at index i in 1..q:count()
 	q:remove(v) -> t|f             remove value (return `true` if found)
-	q:find(v) -> t|f               find value
 
 ]=]
-
---Allows removing a value at any position from the queue.
 
 local function new(size, INDEX)
 
@@ -81,7 +80,12 @@ local function new(size, INDEX)
 		end
 	end
 
-	function q:remove_at(i)
+	function q:item_at(i)
+		if not (i >= 1 and i <= n) then return nil end
+		return t[mi(tail + i - 1)]
+	end
+
+	local function remove_at(i)
 		assert(n > 0)
 		local from_head = true
 		if tail <= head then --queue not wrapped around (has one segment).
@@ -106,26 +110,27 @@ local function new(size, INDEX)
 		n = n - 1
 	end
 
-	function q:remove(v)
-		local i = self:find(v)
-		if not i then return false end
-		self:remove_at(i)
-		return true
-	end
-
+	local find
 	if INDEX ~= nil then
-		function q:find(v)
+		function find(v)
 			return v[INDEX]
 		end
 	else
-		function q:find(v)
+		function find(v)
 			for i = 1, n do
-				local i = mi(tail + i - 1)
-				if t[i] == v then
-					return i
+				local mi = mi(tail + i - 1)
+				if t[mi] == v then
+					return mi
 				end
 			end
 		end
+	end
+
+	function q:remove(v)
+		local mi = find(v)
+		if not mi then return false end
+		remove_at(mi)
+		return true
 	end
 
 	return q
