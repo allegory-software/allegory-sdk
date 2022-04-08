@@ -197,6 +197,7 @@ focusing and selection:
 		e.last_focused_col
 		e.selected_rows: map(row -> true|Set(field))
 		e.focus_cell(ri|true|false|0, fi|true|false|0, rows, cols, ev)
+			ev.input
 			ev.cancel
 			ev.unfocus_if_not_found
 			ev.was_editing
@@ -1471,7 +1472,7 @@ function nav_widget(e) {
 		if (e.focused_field != null)
 			e.last_focused_col = e.focused_field.name
 
-		if (e.val_field) {
+		if (e.val_field && ev.input) {
 			let val = row ? e.cell_val(row, e.val_field) : null
 			e.set_val(val, assign({input: e}, ev))
 		}
@@ -3140,7 +3141,7 @@ function nav_widget(e) {
 		let set_cell_val = from_server ? e.reset_cell_val : e.set_cell_val
 
 		// request to focus the new row implies being able to exit the
-		// 0focused row first. if that's not possible, the insert is aborted.
+		// focused row first. if that's not possible, the insert is aborted.
 		if (ev.focus_it) {
 			ev.was_editing  = !!e.editor
 			ev.editor_state = ev.editor_state || e.editor && e.editor.state && e.editor.editor_state()
@@ -3336,7 +3337,7 @@ function nav_widget(e) {
 
 				e.row_and_each_child_row(row, function(row) {
 					if (e.focused_row == row)
-						assert(e.focus_cell(false, false, 0, 0, {cancel: true}))
+						assert(e.focus_cell(false, false, 0, 0, {cancel: true, input: e}))
 					row_unchanged(row)
 					e.selected_rows.delete(row)
 					removed_rows.add(row)
@@ -3387,8 +3388,8 @@ function nav_widget(e) {
 			e.fire('rows_removed', removed_rows)
 
 			if (top_row_index != null) {
-				if (!e.focus_cell(top_row_index, true))
-					e.focus_cell(top_row_index, true, -0, 0)
+				if (!e.focus_cell(top_row_index, true, null, null, {input: e}))
+					e.focus_cell(top_row_index, true, -0, 0, {input: e})
 			}
 
 		}
