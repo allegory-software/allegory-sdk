@@ -125,12 +125,13 @@ for i,k in ipairs{
 	keywords[k] = true
 end
 
+local function metamethod(t, m)
+	local mt = getmetatable(t)
+	return mt and type(mt) == 'table' and rawget(mt, m)
+end
+
 local function is_stringable(v)
-	if type(v) == 'table' then
-		return getmetatable(v) and getmetatable(v).__tostring and true or false
-	else
-		return type(v) == 'string'
-	end
+	return metamethod(v, '__tostring') and true or type(v) == 'string'
 end
 
 local function is_identifier(v)
@@ -310,13 +311,13 @@ local function pretty(v, write, depth, wwrapper, indent,
 
 		write_value(v, write, quote)
 
-	elseif getmetatable(v) and getmetatable(v).__pwrite then
+	elseif metamethod(v, '__pwrite') then
 
 		wwrapper = wwrapper or function(v)
 			pretty(v, write, -1, wwrapper, nil,
 				parents, quote, line_term, onerror, sort_keys, filter)
 		end
-		getmetatable(v).__pwrite(v, write, wwrapper)
+		metamethod(v, '__pwrite')(v, write, wwrapper)
 
 	elseif type(v) == 'table' then
 
