@@ -24,6 +24,7 @@ require'http_client' .logging = logging
 require'http_server' .logging = logging
 require'mysql'       .logging = logging
 require'tarantool'   .logging = logging
+require'connpool'    .logging = logging
 
 local schema = require'schema'
 
