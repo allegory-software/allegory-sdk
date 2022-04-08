@@ -126,31 +126,34 @@ function release_dbs()
 	end
 end
 
+--NOTE: browsers keep multiple connections open, and even keep them
+--open for a while after closing the last browser window(!), and
+--we don't want to hold on to pooled resources like db connections
+--on idle http connections, so we're releasing them after each request.
+
 function db(ns, without_current_db)
 	local opt = conn_opt(ns or false)
 	local key = opt.pool_key
 	local thread = currentthread()
-	local env = attr(threadenv, thread)
+	local cx = cx()
+	local env, onfinish
+	if cx and thread == cx.req.thread then --request thread
+		env = cx
+		onfinish = onrequestfinish
+	else --user thread
+		env = attr(threadenv, thread)
+		onfinish = onthreadfinish
+	end
 	local dbs = env.dbs
 	if not dbs then
-		dbs = {}
-		env.dbs = dbs
+		dbs = {}; env.dbs = dbs
 		local function release_dbs()
 			for key, db in pairs(dbs) do
 				db:release()
 				dbs[key] = nil
 			end
 		end
-		local cx = cx()
-		if cx and thread == cx.req.thread then
-			--browsers keep multiple connections open, and even keep them
-			--open for a while after closing the last browser window(!), and
-			--we don't want to hold on to pooled resources like db connections
-			--on idle http connections, so we're releasing them after each request.
-			onrequestfinish(release_dbs)
-		else
-			onthreadfinish(thread, release_dbs)
-		end
+		onfinish(release_dbs)
 	end
 	local db, err = dbs[key]
 	if not db then
