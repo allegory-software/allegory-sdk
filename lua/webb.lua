@@ -704,26 +704,27 @@ function post(v)
 	if not method'post' then
 		return
 	end
-	local post = cx.post
-	if not post then
-		local s = cx.req:read_body'string'
-		local ct = cx.req.headers['content-type']
-		if ct then
-			if ct.media_type == 'application/x-www-form-urlencoded' then
-				post = uri.parse_args(s)
-			elseif ct.media_type == 'application/json' then --prevent ENCTYPE CORS
-				post = json_arg(s)
-			end
+	local s = cx.post
+	if not s then
+		s = cx.req:read_body'string'
+		if s == '' then
+			s = nil
 		else
-			if s == '' then s = nil end
-			post = s
+			local ct = cx.req.headers['content-type']
+			if ct then
+				if ct.media_type == 'application/x-www-form-urlencoded' then
+					s = uri.parse_args(s)
+				elseif ct.media_type == 'application/json' then --prevent ENCTYPE CORS
+					s = json_arg(s)
+				end
+			end
 		end
-		cx.post = post
+		cx.post = s
 	end
-	if v and type(post) == 'table' then
-		return post[v]
+	if v and type(s) == 'table' then
+		return s[v]
 	else
-		return post
+		return s
 	end
 end
 
