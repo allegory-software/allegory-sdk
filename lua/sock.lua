@@ -2374,7 +2374,7 @@ function M.onthreadfinish(thread, f)
 	glue.after(env, '__finish', f)
 end
 
-function M.thread(f, fmt, ...)
+function M.thread(f, ...)
 	--wrap f so that it terminates in current poll_thread.
 	local thread
 	thread = coro.create(function(...)
@@ -2392,15 +2392,15 @@ function M.thread(f, fmt, ...)
 			M.log('ERROR', 'sock', 'thread', '%s', err)
 		end
 		return coro.finish(poll_thread)
-	end)
+	end, ...)
 	return thread
 end
 
-function M.cowrap(f, fmt, ...)
+function M.cowrap(f, ...)
 	return coro.safewrap(function(...)
 		M.save_thread_context(currentthread())
 		return f(...)
-	end, fmt, ...)
+	end, ...)
 end
 
 function M.transfer(thread, ...)
