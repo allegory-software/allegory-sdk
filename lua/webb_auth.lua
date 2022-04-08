@@ -247,6 +247,35 @@ end
 
 --session cookie -------------------------------------------------------------
 
+--TODO: session cache and userinfo cache are never garbage-collected!
+
+local session_cache = {}
+
+local function session_cache_get(sid, time)
+	local t = session_cache[sid]
+	if not t then return nil end
+	local usr, expires = t[1], t[2]
+	if expires <= time then
+		session_cache[sid] = nil
+		return nil
+	end
+	return usr
+end
+
+local function session_cache_update(sid, usr, expires)
+	if not usr then
+		session_cache[sid] = nil
+	else
+		local t = session_cache[sid]
+		if t then
+			t[1], t[2] = usr, expires
+		else
+			t = {usr, expires}
+			session_cache[sid] = t
+		end
+	end
+end
+
 local function load_session()
 	local cookies = headers('cookie'); if not cookies then return end
 	local session_cookie_name = config('session_cookie_name', 'session')
@@ -256,12 +285,16 @@ local function load_session()
 	if ver == 1 then
 		local sid, sig = s:match'^(.-)|(.*)$'; if not sid then return end
 		if secret_hash(sid) ~= sig then return end
-		local usr = first_row([[
-			select usr from sess
-			where token = ?
-				and expires > now()
-			]], sid)
-		if not usr then return end
+		local now = time()
+		local usr, expires = session_cache_get(sid, now)
+		if not usr then
+			usr, expires = first_row_vals([[
+				select usr, expires
+				from sess where token = ? and expires > ?
+				]], sid, now)
+			if not usr then return end
+			session_cache_update(sid, usr, expires)
+		end
 		return {id = sid, usr = usr}
 	end
 end
@@ -299,6 +332,7 @@ local function save_session(sess)
 					token = ?
 				]], sess.usr, sess.expires, sess.id)
 		end
+		session_cache_update(sess.id, sess.usr, sess.expires)
 		local sig = secret_hash(sess.id)
 		setheader('set-cookie', {
 			[session_cookie_name] = {
@@ -314,8 +348,8 @@ local function save_session(sess)
 		})
 	elseif sess.id then --logout
 		query('delete from sess where token = ?', sess.id)
+		session_cache_update(sess.id)
 		sess.id = nil
-		sess.usr = nil
 		setheader('set-cookie', {
 			[session_cookie_name] = {
 				value = '0',
@@ -358,6 +392,8 @@ local function authenticate(a)
 	end
 end
 
+local weak_vals_mt = {__mode = 'v'}
+
 local userinfo = memoize(function(usr)
 	if not usr then
 		return {roles = {}}
@@ -387,6 +423,7 @@ local userinfo = memoize(function(usr)
 	t.haspass = tonumber(t.haspass) == 1
 	t.roles = glue.index(glue.names(t.roles) or {})
 	t.admin = t.roles.admin
+	t.sessions = setmetatable({}, weak_vals_mt)
 	return t
 end)
 

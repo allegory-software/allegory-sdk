@@ -160,6 +160,7 @@ function print_result(opt)
 			local n
 			local j = colindex[col]
 			local field = fields[j]
+			if not field then error('sum col not found: '..col) end
 			local to_number   = field.to_number   or to_number
 			local from_number = field.from_number or from_number
 			for i,row in ipairs(rows) do

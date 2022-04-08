@@ -158,12 +158,13 @@ function server:new(t)
 			self.request_finish(req)
 
 			if not ok then
-				if errors.is(err, 'http_response') then
-					assert(not sending_response, 'response already sent')
-					req:respond(err)
-				elseif not sending_response then
-					self:check(ctcp, false, 'respond', '%s', err)
-					req:respond{status = 500}
+				if not sending_response then
+					if errors.is(err, 'http_response') then
+						req:respond(err)
+					else
+						self:check(ctcp, false, 'respond', '%s', err)
+						req:respond{status = 500}
+					end
 				else
 					error(err)
 				end
