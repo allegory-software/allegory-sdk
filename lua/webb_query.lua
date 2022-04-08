@@ -24,6 +24,7 @@ EXECUTION
 	[db:]create_db([ns])                           create database
 	[db:]query([opt,]sql, ...) -> rows             query and return rows in a table
 	[db:]first_row([opt,]sql, ...) -> t            query and return first row or value
+	[db:]first_row_vals([opt,]sql, ...) -> v1,...  query and return the first row unpacked
 	[db:]each_row([opt,]sql, ...) -> iter          query and iterate rows
 	[db:]each_row_vals([opt,]sql, ...) -> iter     query and iterate rows unpacked
 	[db:]each_group(col, [opt,]sql, ...) -> iter   query, group rows and and iterate groups
@@ -189,7 +190,7 @@ for method in pairs{
 	--preprocessor
 	sqlval=1, sqlrows=1, sqlname=1, sqlparams=1, sqlquery=1,
 	--query execution
-	query=1, first_row=1, each_row=1, each_row_vals=1, each_group=1,
+	query=1, first_row=1, first_row_vals=1, each_row=1, each_row_vals=1, each_group=1,
 	atomic=1,
 	--schema reflection
 	dbs=1, db_exists=1, table_def=1,

@@ -57,6 +57,7 @@ SQL PREPROCESSING
 QUERY EXECUTION
 	cmd:query([opt], sql, ...) -> rows, cols     query with preprocessing
 	cmd:first_row([opt], sql, ...) -> rows, cols query and return the first row
+	cmd:first_row_vals([opt], sql, ...) -> v1,... query and return the first row unpacked
 	cmd:each_row([opt], sql, ...) -> iter        query and iterate rows
 	cmd:each_row_vals([opt], sql, ...)-> iter    query and iterate rows unpacked
 	cmd:each_group(col, [opt], sql, ...) -> iter query, group by col and iterate groups
@@ -1315,6 +1316,15 @@ function sqlpp.new(init)
 	end
 	function cmd:first_row(...)
 		return pass(self:exec_with_options(...))
+	end
+
+	function cmd:first_row_vals(...)
+		local rows, cols = self:exec_with_options({compact=1}, ...)
+		if #cols == 1 then
+			return rows[1]
+		else
+			return unpack(rows[1] or empty, 1, #cols)
+		end
 	end
 
 	function cmd:each_group(col, ...)
