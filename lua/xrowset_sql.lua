@@ -165,7 +165,7 @@ function sql_rowset(...)
 		--query wrappers.
 
 		local function query(...)
-			return db(rs.db):query(...)
+			return db(rs.db):query({to_array = false}, ...)
 		end
 
 		--see if we can make a static load_row().
