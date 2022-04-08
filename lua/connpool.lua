@@ -69,12 +69,6 @@ function M.new(opt)
 	local pools = {}
 	local servers = {}
 
-	local logging = opt and opt.logging
-	local log_ = opt.log or logging and logging.log
-	local log = log and function(severity, ev, ...)
-		log_(severity, 'cnpool', ev, ...)
-	end or glue.noop
-
 	local function pool(key)
 		local pool = servers[key]
 		if pool then
@@ -88,11 +82,12 @@ function M.new(opt)
 		local limit = all_limit
 		local waitlist_limit = all_waitlist_limit
 
-		local log = logging and function(severity, ev, s)
-			log(severity, ev, '%s n=%d free=%d %s', key, n, #free, s or '')
+		local logging_log = M.logging and M.logging.log
+		local log = logging_log and function(severity, ev, s)
+			logging_log(severity, 'cnpool', ev, '%s n=%d free=%d %s', key, n, #free, s or '')
 		end or glue.noop
-		local dbg  = logging and function(ev, s) log(''    , ev, s) end or glue.noop
-		local note = logging and function(ev, s) log('note', ev, s) end or glue.noop
+		local dbg  = logging_log and function(ev, s) log(''    , ev, s) end or glue.noop
+		local note = logging_log and function(ev, s) log('note', ev, s) end or glue.noop
 
 		function pool:setlimits(opt)
 			limit = opt.max_connections or limit
@@ -117,6 +112,7 @@ function M.new(opt)
 			if sleeper:sleep_until(expires) then
 				return true
 			else
+				q:remove(sleeper)
 				return nil, 'timeout'
 			end
 		end
