@@ -715,11 +715,12 @@ function post(v)
 				post = json_arg(s)
 			end
 		else
+			if s == '' then s = nil end
 			post = s
 		end
 		cx.post = post
 	end
-	if v then
+	if v and type(post) == 'table' then
 		return post[v]
 	else
 		return post
