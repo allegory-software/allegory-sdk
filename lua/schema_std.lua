@@ -129,6 +129,8 @@ return function()
 	types.datetime  = {date, mysql_type = 'datetime', has_time = true}
 	types.datetime_s= {datetime, has_seconds = true}
 	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `time` instead.
+	--The downside is that you have to use from_unixtime() in queries to do date
+	--calculations or for pretty-printing eg. when debugging.
 	--types.timestamp   = {date, mysql_type = 'timestamp', has_time = true}
 	--types.timestamp_s = {date, mysql_type = 'timestamp', has_time = true, has_seconds = true}
 	types.time      = {double, type = 'time', tarantool_type = 'number'}
@@ -167,7 +169,7 @@ return function()
 	types.country   = {chr, size = 2, maxlen = 2, ascii_ci}
 	types.timeago   = {datetime_s, to_text = function(d) return glue_timeago(datetime_to_timestamp(d)) end}
 	types.filesize  = {uint52, type = 'filesize', to_text = function(n) return glue_kbytes(n) end}
-	types.duration  = {uint, type = 'duration', to_text = function(n) return glue_duration(n, 'days') end}
+	types.duration  = {double, type = 'duration', to_text = function(n) return glue_duration(n, 'days') end}
 	types.secret_key  = {b64key, type = 'secret_key'}
 	types.public_key  = {b64key, type = 'public_key'}
 	types.private_key = {b64key, type = 'private_key'}

@@ -206,6 +206,8 @@ function virtual_rowset(init, ...)
 	function rs:load(param_values)
 		local res = {}
 		rs:load_rows(res, param_values)
+		assert(res.rows[1] == nil or type(res.rows[1]) == 'table',
+			'first row not a table')
 		update_computed_fields(res)
 		update_client_fields()
 		merge(res, {

@@ -56,8 +56,8 @@ DDL
 
 DEBUGGING
 
-	pqr(rows, cols)                                pretty-print query result
-	outpqr(rows, cols)                             same but using out()
+	pqr(rows, fields)                              pretty-print query result
+	outpqr(rows, fields)                           same but using out()
 
 ]==]
 
@@ -213,10 +213,10 @@ for method in pairs{
 	end
 end
 
-function pqr(rows, cols, sums)
-	return mysql_print.result{rows = rows, fields = cols, sums = sums}
+function pqr(rows, fields, sums)
+	return mysql_print.result{rows = rows, fields = fields, sums = sums}
 end
 
-function outpqr(rows, cols, sums)
-	mysql_print.result{rows = rows, fields = cols, sums = sums, print = outprint}
+function outpqr(rows, fields, sums)
+	mysql_print.result{rows = rows, fields = fields, sums = sums, print = outprint}
 end
