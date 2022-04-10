@@ -13,11 +13,13 @@
 	q:count()                      get queue item count
 	q:full() -> t|f                check if the queue is full
 	q:empty() -> t|f               check if the queue is empty
-	q:push(v)                      push a value to head
-	q:pop() -> v|nil               pop a value from tail (nil if empty)
-	q:peek() -> v                  get value from the top without popping
+	q:push(v)                      add a value to the end of the queue
+	q:pop() -> v|nil               remove the first value from the queue (nil if empty)
+	q:peek() -> v|nil              get the first value without popping
+	q:first() -> v|nil             get the first value without popping
+	q:last() -> v|nil              get the last value wihtout popping
 	q:items() -> iter() -> v       iterate values
-	q:item_at(i) -> v|nil          get item at index i in 1..q:count()
+	q:item_at(i) -> v|nil          get item at index i in 1..q:count() from tail
 	q:remove(v) -> t|f             remove value (return `true` if found)
 
 ]=]
@@ -67,6 +69,14 @@ local function new(size, INDEX)
 			return nil
 		end
 		return t[tail]
+	end
+	q.first = q.peek
+
+	function q:last()
+		if n == 0 then
+			return nil
+		end
+		return t[head]
 	end
 
 	function q:items()

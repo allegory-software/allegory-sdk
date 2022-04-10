@@ -25,6 +25,7 @@ FILES
 	APP.conf       config file loaded at start-up. its globals go in app.conf.
 	---------------------------------------------------------------------------
 	deploy         app deployment name.
+	machine        app machine name.
 	env            app environment ('dev').
 	log_host       log server host.
 	log_port       log server port.
@@ -196,6 +197,7 @@ function daemon(app_name, ...)
 
 	--set up logging.
 	logging.deploy  = app.conf.deploy
+	logging.machine = app.conf.machine
 	logging.env     = app.conf.env
 
 	local start_heartbeat, stop_heartbeat do

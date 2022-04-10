@@ -18,6 +18,7 @@ UTILS
 	logging.printargs(...) -> ...
 CONFIG
 	logging.deploy            app deployment name (logged to server)
+	logging.machine           app machine name (logged to server)
 	logging.env               app deployment type: 'dev', 'prod', etc.
 	logging.quiet             do not log anything to stderr (false)
 	logging.verbose           log `note` messages to stderr (false)
@@ -398,7 +399,8 @@ end
 local function logvar(self, k, v)
 	if self.logtoserver then
 		self:logtoserver{
-			deploy = self.deploy, env = logging.env, time = time(),
+			deploy = self.deploy, machine = self.machine,
+			env = logging.env, time = time(),
 			event = 'set', k = k, v = v,
 		}
 	end
@@ -467,7 +469,14 @@ function logging.rpc:get_procinfo()
 end
 
 function logging.rpc:get_osinfo()
-	self.logvar('osinfo', proc.osinfo())
+	local t = proc.osinfo()
+	self.logvar('osinfo', {
+		clock     = clock(),
+		uptime    = t.uptime,
+		mem_total = t.mem_total,
+		mem_avail = t.mem_avail,
+		cputimes  = t.cputimes,
+	})
 end
 
 function logging.printlive(custom_print)
