@@ -140,18 +140,6 @@ function server:new(t)
 				end
 			end
 
-			function req.raise(req, status, content)
-				local err
-				if type(status) == 'number' then
-					err = {status = status, content = content}
-				elseif type(status) == 'table' then
-					err = status
-				else
-					assert(false)
-				end
-				errors.raise(3, 'http_response', err)
-			end
-
 			req.thread = self.currentthread()
 
 			local ok, err = errors.pcall(self.respond, req)

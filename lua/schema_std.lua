@@ -143,7 +143,8 @@ return function()
 	types.bigidpk   = {bigid, pk, autoinc}
 
 	types.name      = {str, size = 256, maxlen = 64, utf8_ci}
-	types.strid     = {str, size =  64, maxlen = 64, ascii_ci}
+	types.strid     = {str, size =   64, maxlen =   64, ascii_ci}
+	types.longstrid = {str, size = 2048, maxlen = 2048, ascii_bin}
 	types.strpk     = {strid, pk}
 	types.email     = {str, size =  512, maxlen =  128, utf8_ci}
 	types.hash      = {str, size =   64, maxlen =   64, ascii_bin} --enough for tohex(256-bit-hash)

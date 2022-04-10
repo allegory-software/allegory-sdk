@@ -851,7 +851,40 @@ function sqlpp.new(init)
 
 		--update tables.
 		if diff.tables and diff.tables.update then
+
+
 			for old_tbl_name, d in sortedpairs(diff.tables.update) do
+
+				--remove constraints, indexes and triggers.
+
+				if d.remove_pk then
+					P('alter  table %-16s drop primary key', N(old_tbl_name))
+				end
+
+				if d.uks and d.uks.remove then
+					for uk_name in sortedpairs(d.uks.remove) do
+						P('alter  table %-16s drop %-16s %s',
+							N(old_tbl_name), 'key', N(uk_name))
+					end
+				end
+
+				if d.ixs and d.ixs.remove then
+					for ix_name in sortedpairs(d.ixs.remove) do
+						P('drop index %-16s on %-16s', N(ix_name), N(old_tbl_name))
+					end
+				end
+				if d.checks and d.checks.remove then
+					for ck_name in sortedpairs(d.checks.remove) do
+						P('alter  table %-16s drop %-16s %s',
+							N(old_tbl_name), 'check', N(ck_name))
+					end
+				end
+
+				if d.triggers and d.triggers.remove then
+					for tg_name, tg in sortedpairs(d.triggers.remove) do
+						if tg[BODY] then P('drop trigger %-16s', N(tg_name)) end
+					end
+				end
 
 				if d.fields then
 
@@ -902,37 +935,6 @@ function sqlpp.new(init)
 					end
 
 				end --d.fields
-
-				--remove constraints, indexes and triggers.
-
-				if d.remove_pk then
-					P('alter  table %-16s drop primary key', N(old_tbl_name))
-				end
-
-				if d.uks and d.uks.remove then
-					for uk_name in sortedpairs(d.uks.remove) do
-						P('alter  table %-16s drop %-16s %s',
-							N(old_tbl_name), 'key', N(uk_name))
-					end
-				end
-
-				if d.ixs and d.ixs.remove then
-					for ix_name in sortedpairs(d.ixs.remove) do
-						P('drop index %-16s on %-16s', N(ix_name), N(old_tbl_name))
-					end
-				end
-				if d.checks and d.checks.remove then
-					for ck_name in sortedpairs(d.checks.remove) do
-						P('alter  table %-16s drop %-16s %s',
-							N(old_tbl_name), 'check', N(ck_name))
-					end
-				end
-
-				if d.triggers and d.triggers.remove then
-					for tg_name, tg in sortedpairs(d.triggers.remove) do
-						if tg[BODY] then P('drop trigger %-16s', N(tg_name)) end
-					end
-				end
 
 				--rename table before adding constraints back.
 

@@ -403,7 +403,7 @@ function default_lang()
 end
 
 function lang(k)
-	local lang = cx.lang or default_lang()
+	local lang = cx and cx.lang or default_lang()
 	if not k then return lang end
 	local t = assert(webb.langinfo[lang])
 	local v = t[k]
@@ -1170,8 +1170,17 @@ end
 
 --response API ---------------------------------------------------------------
 
-function http_error(...)
-	cx.req:raise(...)
+
+function http_error(status, content) --status,[content] | http_response
+	local err
+	if type(status) == 'number' then
+		err = {status = status, content = content}
+	elseif type(status) == 'table' then
+		err = status
+	else
+		assert(false)
+	end
+	errors.raise(3, 'http_response', err)
 end
 
 function redirect(uri)
@@ -1189,7 +1198,7 @@ local function checkfunc(code, default_err)
 			content_type = ct,
 			headers = {
 				--allow logout() to remove cookie while raising 403.
-				['set-cookie'] = cx.res.headers['set-cookie'],
+				['set-cookie'] = cx and cx.res.headers['set-cookie'],
 			},
 			content = ct == mime_types.json and json{error = err} or tostring(err),
 			message = err, --for tostring()
@@ -1876,17 +1885,6 @@ function webb.fakecx()
 		end
 		io.stdout:write(s)
 		io.stdout:flush()
-	end
-	function req.raise(req, status, content) --copied verbatim from http_server.
-		local err
-		if type(status) == 'number' then
-			err = {status = status, content = content}
-		elseif type(status) == 'table' then
-			err = status
-		else
-			assert(false)
-		end
-		errors.raise(3, 'http_response', err)
 	end
 	return cx
 end
