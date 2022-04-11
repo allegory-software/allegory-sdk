@@ -169,7 +169,7 @@ return function()
 	types.currency  = {chr, size = 3, maxlen = 3, ascii_ci}
 	types.country   = {chr, size = 2, maxlen = 2, ascii_ci}
 	types.timeago   = {datetime_s, to_text = function(d) return glue_timeago(datetime_to_timestamp(d)) end}
-	types.filesize  = {uint52, type = 'filesize', to_text = function(n) return glue_kbytes(n) end}
+	types.filesize  = {uint52, type = 'filesize', to_text = function(n, field) return glue_kbytes(n, field.filesize_decimals, field.filesize_magnitude) end}
 	types.duration  = {double, type = 'duration', to_text = function(n) return glue_duration(n, 'days') end}
 	types.secret_key  = {b64key, type = 'secret_key'}
 	types.public_key  = {b64key, type = 'public_key'}

@@ -49,6 +49,9 @@
 		second_step      : n             for the time picker
 		has_time         : t             date type has time
 		has_seconds      : f             time has seconds
+		filesize_decimals:               decimals, for filesize type (0)
+		filesize_magnitude:              magnitude for filesize type
+		filesize_min     :               threshold for not making it gray
 
 		lookup_rowset_name:              lookup rowset name
 		lookup_cols      :               lookup rowset cols
@@ -110,6 +113,7 @@ local client_field_attrs = {
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, display_width=1,
 	hour_step=1, minute_step=1, second_step=1, has_time=1, has_seconds=1,
+	filesize_decimals=1, filesize_magnitude=1, filesize_min=1,
 }
 
 local rowset_tables = {} --{table -> {rowset->true}}
@@ -187,18 +191,23 @@ function virtual_rowset(init, ...)
 		end
 	end
 
+	rs.compute_row_vals = glue.noop
+
+	local repl = glue.repl
+
 	local function update_computed_fields(res)
 		if not rs.computed_fields then return end
 		local current_row
 		local function get_val(_, k)
-			local field = assert(rs.fields[k])
-			return current_row[field.index]
+			local field = rs.fields[k]
+			return field and current_row[field.index]
 		end
 		local vals = setmetatable({}, {__index = get_val})
 		for i,row in ipairs(res.rows) do
 			current_row = row
+			rs:compute_row_vals(vals)
 			for i,f in ipairs(rs.computed_fields) do
-				row[f.index] = f.compute(self, vals)
+				row[f.index] = repl(f.compute(self, vals), nil, null)
 			end
 		end
 	end

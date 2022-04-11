@@ -1190,13 +1190,13 @@ method(Number, 'timeago', function() {
 // file size formatting ------------------------------------------------------
 
 {
-let suffix = [' B', ' KB', ' MB', ' GB', ' TB']
-let magnitudes = {KB: 1, MB: 2, GB: 3}
+let suffixes = ['B', 'K', 'M', 'G', 'T', 'P', 'E']
+let magnitudes = {K: 1, M: 2, G: 3, T: 4, P: 5, E: 6}
 method(Number, 'kbytes', function(dec, mag) {
 	dec = dec || 0
-	let i = mag ? magnitudes[mag] : clamp(floor(logbase(this, 1024)), 0, suffix.length-1)
+	let i = mag ? magnitudes[mag] : clamp(floor(logbase(this, 1024)), 0, suffixes.length-1)
 	let z = this / 1024**i
-	return z.dec(dec) + suffix[i]
+	return z.dec(dec) + suffixes[i]
 })
 }
 
