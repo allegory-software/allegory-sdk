@@ -1706,3 +1706,10 @@ function fs.mirror_buffer(size, addr)
 	return nil, 'max_tries'
 
 end
+
+--free space reporting -------------------------------------------------------
+
+function fs.space(path)
+	return nil, 'NYI'
+end
+

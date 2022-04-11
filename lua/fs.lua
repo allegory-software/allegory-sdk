@@ -88,6 +88,8 @@ MEMORY MAPPING
 	fs.pagesize() -> bytes                        get allocation granularity
 	fs.aligned_size(bytes[, dir]) -> bytes        next/prev page-aligned size
 	fs.aligned_addr(ptr[, dir]) -> ptr            next/prev page-aligned address
+FILESYSTEM INFO
+	fs.info(path) -> {size=, free=}               get free/total disk space for a path
 HI-LEVEL APIs
 	fs.load[_tobuffer](path, [ignore_fsize]) -> buf,len  read file to string or buffer
 	fs.save(path, v | buf,len | t | read)         atomic save value/buffer/array/read-results

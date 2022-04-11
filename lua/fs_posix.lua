@@ -1240,4 +1240,51 @@ function fs.mirror_buffer(size, addr)
 	error'NYI'
 end
 
+end --if osx
+
+if linux then
+
+--free space reporting -------------------------------------------------------
+
+ffi.cdef[[
+int statfs(const char *path, struct statfs *buf);
+typedef long int __fsword_t;
+typedef unsigned long int fsblkcnt_t;
+typedef struct { int __val[2]; } fsid_t;
+typedef unsigned long int fsfilcnt_t;
+struct statfs {
+	__fsword_t f_type;    /* Type of filesystem (see below) */
+	__fsword_t f_bsize;   /* Optimal transfer block size */
+	fsblkcnt_t f_blocks;  /* Total data blocks in filesystem */
+	fsblkcnt_t f_bfree;   /* Free blocks in filesystem */
+	fsblkcnt_t f_bavail;  /* Free blocks available to
+									 unprivileged user */
+	fsfilcnt_t f_files;   /* Total inodes in filesystem */
+	fsfilcnt_t f_ffree;   /* Free inodes in filesystem */
+	fsid_t     f_fsid;    /* Filesystem ID */
+	__fsword_t f_namelen; /* Maximum length of filenames */
+	__fsword_t f_frsize;  /* Fragment size (since Linux 2.6) */
+	__fsword_t f_flags;   /* Mount flags of filesystem (since Linux 2.6.36) */
+	__fsword_t f_spare[4]; /* Padding bytes reserved for future use */
+};
+]]
+local statfs_ct = ffi.typeof'struct statfs'
+local statfs_buf
+local function statfs(path)
+	statfs_buf = statfs_buf or statfs_ct()
+	local ok, err = check(ffi.C.statfs(path, statfs_buf) == 0)
+	if not ok then return nil, err end
+	return statfs_buf
+end
+
+function fs.info(path)
+	local buf, err = statfs(path)
+	if not buf then return nil, err end
+	local t = {}
+	t.size = tonumber(buf.f_blocks * buf.f_bsize)
+	t.free = tonumber(buf.f_bfree  * buf.f_bsize)
+	return t
+end
+
 end --if linux
+
