@@ -206,6 +206,10 @@ function glue.lerp(x, x0, x1, y0, y1)
 	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
 end
 
+function glue.logbase(x, base)
+	return ln(x) / ln(base)
+end
+
 function glue.nextpow2(x)
 	return max(0, 2^(ceil(ln(x) / ln(2))))
 end
@@ -1485,12 +1489,14 @@ end
 
 --size formatting ------------------------------------------------------------
 
-local suffixes = {[0] = 'b', 'k', 'M', 'G', 'T', 'P', 'E'}
-function glue.kbytes(x, decimals)
-	local base = ln(x) / ln(1024)
-	local suffix = suffixes[floor(base)] or ''
-	local fmt = decimals and decimals ~= 0 and '%.'..decimals..'f%s' or '%.0f%s'
-	return (fmt):format(1024^(base - floor(base)), suffix)
+local suffixes = {[0] = 'B', 'K', 'M', 'G', 'T', 'P', 'E'}
+local magnitudes = glue.index(suffixes)
+local clamp, ln1024 = glue.clamp, ln(1024)
+function glue.kbytes(x, dec, mag)
+	local i = mag and magnitudes[mag] or clamp(floor(ln(x) / ln1024), 0, #suffixes-1)
+	local z = x / 1024^i
+	local fmt = dec and dec ~= 0 and '%.'..dec..'f%s' or '%.0f%s'
+	return (fmt):format(z, suffixes[i])
 end
 
 --2D boxes -------------------------------------------------------------------

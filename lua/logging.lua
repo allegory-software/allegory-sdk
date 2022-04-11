@@ -469,13 +469,16 @@ function logging.rpc:get_procinfo()
 end
 
 function logging.rpc:get_osinfo()
-	local t = proc.osinfo()
+	local pt = proc.osinfo()
+	local ft = fs.info'/'
 	self.logvar('osinfo', {
 		clock     = clock(),
-		uptime    = t.uptime,
-		mem_total = t.mem_total,
-		mem_avail = t.mem_avail,
-		cputimes  = t.cputimes,
+		uptime    = pt and pt.uptime,
+		cputimes  = pt and pt.cputimes,
+		mem_size  = pt and pt.mem_size,
+		mem_free  = pt and pt.mem_free,
+		hdd_size  = ft and ft.size,
+		hdd_free  = ft and ft.free,
 	})
 end
 

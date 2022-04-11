@@ -269,7 +269,7 @@ function proc:info()
 end
 
 function M.osinfo()
-	return {} --NYI
+	return nil, 'NYI'
 end
 
 return M

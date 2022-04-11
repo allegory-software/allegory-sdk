@@ -536,10 +536,10 @@ function M.osinfo()
 	local uptime = tonumber(s:match'^%d+')
 
 	return {
-		mem_total = total,   --in bytes
-		mem_avail = avail,   --in bytes
-		uptime    = uptime,  --in seconds
-		cputimes  = cputimes, --per-cpu times
+		mem_size = total,   --in bytes
+		mem_free = avail,   --in bytes
+		uptime   = uptime,  --in seconds
+		cputimes = cputimes, --per-cpu times
 	}
 end
 
