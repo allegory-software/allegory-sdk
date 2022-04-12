@@ -3178,12 +3178,14 @@ component('x-chart', 'Input', function(e) {
 
 		// compute vertical range.
 		// compute horizontal labels.
-
 		let xgs = map() // {x_key -> xg}
 		let min_xv =  1/0
 		let max_xv = -1/0
-		let min_sum = or(e.min_sum,  1/0)
-		let max_sum = or(e.max_sum, -1/0)
+		let min_sum_fld = e.nav && e.nav.optfld(e.min_sum_col)
+		let max_sum_fld = e.nav && e.nav.optfld(e.max_sum_col)
+		let row0 = e.nav && e.nav.all_rows[0]
+		let min_sum = or(min_sum_fld && row0 ? e.nav.cell_val(row0, min_sum_fld) : e.min_sum,  1/0)
+		let max_sum = or(max_sum_fld && row0 ? e.nav.cell_val(row0, max_sum_fld) : e.max_sum, -1/0)
 
 		for (let cg of groups) {
 			for (let xg of cg) {
@@ -3540,11 +3542,13 @@ component('x-chart', 'Input', function(e) {
 	e.set_other_threshold = redraw
 	e.set_other_text      = redraw
 
-	e.prop('split_cols', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('group_cols', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('sum_cols'  , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('min_sum'   , {store: 'var', type: 'number', attr: true})
-	e.prop('max_sum'   , {store: 'var', type: 'number', attr: true})
+	e.prop('split_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('group_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('sum_cols'   , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('min_sum'    , {store: 'var', type: 'number', attr: true})
+	e.prop('max_sum'    , {store: 'var', type: 'number', attr: true})
+	e.prop('min_sum_col', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('max_sum_col', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
 	e.prop('other_threshold', {store: 'var', type: 'number', default: .05, decimals: null, attr: true})
 	e.prop('other_text', {store: 'var', default: 'Other', attr: true})
 	e.prop('shape', {
