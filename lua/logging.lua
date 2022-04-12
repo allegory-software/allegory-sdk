@@ -178,7 +178,7 @@ function logging:toserver(host, port, queue_size, timeout)
 		while not stop do
 			local msg = queue:peek()
 			if msg then
-				if connect() then
+				if connect() and chan then
 					if check_io(chan:send(msg)) then
 						queue:pop()
 					end
@@ -219,7 +219,9 @@ function logging:toserver_stop() end
 
 logging.filter = {}
 
-local names = setmetatable({}, {__mode = 'k'}) --{[obj]->name}
+local mode_k = {__mode = 'k'}
+
+local names = setmetatable({}, mode_k) --{[obj]->name}
 
 function logging.name(obj, name)
 	names[obj] = name
@@ -248,14 +250,16 @@ local function debug_prefix(v)
 end
 
 local ids_db = {} --{type->{last_id=,live=,[obj]->id}}
-local mode_k = {__mode = 'k'}
 local function debug_id(v)
 	local ty = debug_type(v)
 	local ids = ids_db[ty]
 	if not ids then
 		ids = setmetatable({
 			live_count = 0,
-			live = setmetatable({}, mode_k),
+			live = {} --setmetatable({}, mode_k)
+			-- ^^ TODO: put this back after making sure all objects are freed
+			-- explicitly and not left dangling (mostly to ensure that thread
+			-- finish events get triggered).
 		}, mode_k)
 		ids_db[ty] = ids
 	end
@@ -457,28 +461,22 @@ end
 function logging.rpc:get_procinfo()
 	local proc = require'proc'
 	local t = proc.info()
-	self.logvar('procinfo', {
-		clock = clock(),
-		utime = t.utime,
-		stime = t.stime,
-		rss   = t.rss,
-		vsize = t.vsize,
-		state = t.state,
-		num_threads = t.num_threads,
-	})
-end
-
-function logging.rpc:get_osinfo()
 	local pt = proc.osinfo()
 	local ft = fs.info'/'
-	self.logvar('osinfo', {
-		clock     = clock(),
-		uptime    = pt and pt.uptime,
-		cputimes  = pt and pt.cputimes,
-		mem_size  = pt and pt.mem_size,
-		mem_free  = pt and pt.mem_free,
-		hdd_size  = ft and ft.size,
-		hdd_free  = ft and ft.free,
+	self.logvar('procinfo', {
+		clock    = clock(),
+		utime    = t and t.utime,
+		stime    = t and t.stime,
+		rss      = t and t.rss,
+		vsize    = t and t.vsize,
+		state    = t and t.state,
+		num_threads = t and t.num_threads,
+		uptime   = pt and pt.uptime,
+		cputimes = pt and pt.cputimes,
+		ram_size = pt and pt.ram_size,
+		ram_free = pt and pt.ram_free,
+		hdd_size = ft and ft.size,
+		hdd_free = ft and ft.free,
 	})
 end
 
