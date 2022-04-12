@@ -1907,7 +1907,7 @@ function nav_widget(e) {
 	e.row_groups = function(group_cols, range_defs, group_text_sep) {
 		group_text_sep = or(group_text_sep, ' / ')
 		let col_groups = group_cols.split(/\s*>\s*/)
-		if (col_groups.length == 1)
+		if (col_groups.length == 1 && false) // TODO: enable this optimization again?
 			return row_groups_one_level(group_cols, range_defs)
 		let all_cols = group_cols.replaceAll('>', ' ')
 		let fields = optflds(all_cols)
