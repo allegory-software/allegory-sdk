@@ -33,6 +33,7 @@
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
 		readonly         : f             cannot be changed
+		align            : 'left'|'right'|'center' cell alignment
 		enum_values      : ['foo',...]   enum values
 		enum_texts       : ['bla',...]   enum texts in current language
 		not_null         : t             can't be null
@@ -108,7 +109,7 @@ end
 
 local client_field_attrs = {
 	internal=1, hidden=1, readonly=1,
-	name=1, type=1, text=1, hint=1, default=1,
+	name=1, type=1, text=1, hint=1, default=1, align=1,
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, display_width=1,
@@ -205,7 +206,7 @@ function virtual_rowset(init, ...)
 		local vals = setmetatable({}, {__index = get_val})
 		for i,row in ipairs(res.rows) do
 			current_row = row
-			rs:compute_row_vals(vals)
+			rs:compute_row_vals(vals) --TODO: error-prone API becaue we're reusing vals.
 			for i,f in ipairs(rs.computed_fields) do
 				row[f.index] = repl(f.compute(self, vals), nil, null)
 			end
@@ -554,7 +555,10 @@ action['xrowset.events'] = function()
 		--send anything anymore so recv() should only return on close.
 		local tcp = cx().req.http.tcp
 		local buf = glue.u8a(1)
-		local sz, err = assert(tcp:recv(buf, 1) == 0) --clean close
+		while tcp:recv(buf, 1) == 1 do
+			--this shouldn't happen, but sometimes we do get data on this pipe.
+			--we should figure out why but for now it doesn't break anything.
+		end
 		if waiting_thread then
 			return cofinish(waiting_thread, 'closed')
 		end

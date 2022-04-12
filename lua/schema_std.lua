@@ -92,7 +92,7 @@ return function()
 	flags.utf8_bin   = {charset = utf8 , collation = 'utf8_bin'  , mysql_collation = 'utf8mb4_0900_bin'  , tarantool_collation = 'binary'}
 	flags.str        = {type = 'text'  , mysql_type = 'varchar', tarantool_type = 'string'}
 
-	types.bool      = {type = 'bool', mysql_type = 'tinyint', size = 1, unsigned = true, decimals = 0,
+	types.bool      = {type = 'bool', mysql_type = 'tinyint', size = 1, unsigned = true, decimals = 0, w = 20,
 		mysql_to_lua = bool_to_lua, tarantool_type = 'boolean', mysql_to_tarantool = bool_to_lua}
 	types.bool0     = {bool , not_null, default = false, mysql_default = '0', tarantool_default = false}
 	types.bool1     = {bool , not_null, default = true , mysql_default = '1', tarantool_default = true}
@@ -126,7 +126,7 @@ return function()
 		to_number          = datetime_to_timestamp,
 		from_number        = timestamp_to_datetime,
 	}
-	types.datetime  = {date, mysql_type = 'datetime', has_time = true}
+	types.datetime  = {date, mysql_type = 'datetime', has_time = true, w = 80}
 	types.datetime_s= {datetime, has_seconds = true}
 	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `time` instead.
 	--The downside is that you have to use from_unixtime() in queries to do date
@@ -137,7 +137,7 @@ return function()
 	types.time_s    = {double, type = 'time', tarantool_type = 'number', has_seconds = true}
 	types.time_ms   = {double, type = 'time', tarantool_type = 'number', has_seconds = true, has_ms = true}
 
-	types.id        = {uint}
+	types.id        = {uint, w = 40}
 	types.idpk      = {id, pk, autoinc}
 	types.bigid     = {uint52}
 	types.bigidpk   = {bigid, pk, autoinc}
