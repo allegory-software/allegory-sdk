@@ -396,6 +396,7 @@ function socket:close()
 		self.listen_socket.n = self.listen_socket.n - 1
 	end
 	local ok, err = self:_close()
+	M.live(self, nil)
 	self.s = nil --unsafe to close twice no matter the error.
 	if not ok then return false, err end
 	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
