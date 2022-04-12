@@ -1158,6 +1158,7 @@ method(Number, 'duration', function(opt) {
 		s -= h * 3600
 		let m = floor(s / 60)
 		s -= m * 60
+		s = round(s)
 		if (d) return S('duration_dhms', '{0}d{1}h{2}m{3}s', d, h, m, s)
 		if (h) return S('duration_hms' ,     '{0}h{1}m{2}s',    h, m, s)
 		if (m) return S('duration_ms'  ,         '{0}m{1}s',       m, s)
@@ -1204,7 +1205,6 @@ method(Number, 'kbytes', function(dec, mag) {
 
 {
 
-// hsl is in (0..360, 0..1, 0..1); rgb is #rrggbb
 let h2rgb = function(m1, m2, h) {
 	if (h < 0) h = h+1
 	if (h > 1) h = h-1
@@ -1220,6 +1220,7 @@ let h2rgb = function(m1, m2, h) {
 
 let hex = x => round(255 * x).base(16, 2)
 
+// hsla is in (0..360, 0..1, 0..1, 0..1); rgb is #rrggbb
 function hsl_to_rgb(h, s, L, a) {
 	h = h / 360
 	let m2 = L <= .5 ? L*(s+1) : L+s-L*s

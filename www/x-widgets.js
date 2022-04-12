@@ -1605,7 +1605,11 @@ component('x-menu', function(e) {
 				item.checked = !item.checked
 				update_check(tr)
 			}
-			return !item.action || item.action(item) != false
+			if (!item.action)
+				return true
+			if (item.confirm && !confirm(item.confirm))
+				return false
+			return item.action(item) != false
 		}
 	}
 
