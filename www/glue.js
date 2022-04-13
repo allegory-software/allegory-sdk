@@ -69,11 +69,10 @@ MULTI-LANGUAGE STUBS
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
 ARRAYS
-	array(...)
+	array(...) -> a
 	empty_array
-	a.extend(a1)
 	a.set(a1) -> s
-	s.addset(s2) -> s
+	a.extend(a1)
 	a.insert(i, v)
 	a.remove(i) -> v
 	a.remove_value(v) -> i
@@ -85,10 +84,12 @@ ARRAYS
 	a.uniq_sorted()
 	a.remove_duplicates()
 HASH MAPS
-	obj()
-	set(iter)
-	map(iter)
+	obj() -> o
+	set(iter) -> m
+	s.addset(s2) -> s
+	map(iter) -> m
 	m.first_key
+	m.toarray() -> a
 	empty
 	keys(t)
 	assign(dt, t1, ...)
@@ -126,8 +127,9 @@ colors:
 geometry:
 	point_around(cx, cy, r, angle) -> [x, y]
 timers:
-	runafter(t, f)
-	runevery(t, f)
+	runafter(t, f) -> tm
+	runevery(t, f) -> tm
+	runagainevery(t, f) -> tm
 	clock()
 	timer(f)
 serialization:
@@ -567,6 +569,10 @@ method(Set, 'addset', function(s) {
 	for (let k of s)
 		this.add(k)
 	return this
+})
+
+method(Set, 'toarray', function() {
+	return Array.from(this)
 })
 
 empty = obj()
@@ -1248,7 +1254,7 @@ function point_around(cx, cy, r, angle) {
 
 function runafter(t, f) { return setTimeout(f, t * 1000) }
 function runevery(t, f) { return setInterval(f, t * 1000) }
-
+function runagainevery(t, f) { f(); return runevery(t, f) }
 function clock() { return performance.now() / 1000 }
 
 function timer(f) {
