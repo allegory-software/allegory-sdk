@@ -165,9 +165,9 @@ rows:
 
 indexing:
 	publishes:
-		e.index_tree(cols, range_defs)
-		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
-		e.row_groups(col_groups, range_defs) -> [row1, ...]
+		e.index_tree(cols, [range_defs], [filtered])
+		e.lookup(cols, vals, [range_defs], [filtered]) -> [row1, ...]
+		e.row_groups(col_groups, [range_defs], [filtered], [group_text_sep]) -> [row1, ...]
 
 master-detail:
 	needs:
@@ -1688,7 +1688,7 @@ function nav_widget(e) {
 	// vlookup ----------------------------------------------------------------
 
 	// cols: 'col1 ...' | fi | field | [col1|field1,...]
-	function create_index(cols, range_defs) {
+	function create_index(cols, range_defs, filtered) {
 
 		let idx = obj()
 
@@ -1781,7 +1781,7 @@ function nav_widget(e) {
 		idx.rebuild = function() {
 			fis = cols_arr.map(fld).map(f => f.val_index)
 			tree = map()
-			for (let row of e.all_rows)
+			for (let row of (filtered ? e.rows : e.all_rows))
 				add_row(row)
 		}
 
@@ -1832,23 +1832,25 @@ function nav_widget(e) {
 
 	let indices = obj() // {cache_key->index}
 
-	function index(cols, range_defs) {
+	function index(cols, range_defs, filtered) {
 		cols = e.fldnames(cols)
-		let cache_key = range_defs ? cols+' '+json(range_defs) : cols
+		let cache_key = cols
+		if (range_defs) cache_key = cache_key+' '+json(range_defs)
+		if (filtered) cache_key = cache_key + ' filtered'
 		let index = indices[cache_key]
 		if (!index) {
-			index = create_index(cols, range_defs)
+			index = create_index(cols, range_defs, filtered)
 			indices[cache_key] = index
 		}
 		return index
 	}
 
-	e.index_tree = function(cols, range_defs) {
-		return index(cols, range_defs).tree()
+	e.index_tree = function(cols, range_defs, filtered) {
+		return index(cols, range_defs, filtered).tree()
 	}
 
-	e.lookup = function(cols, v, range_defs) {
-		return index(cols, range_defs).lookup(v)
+	e.lookup = function(cols, v, range_defs, filtered) {
+		return index(cols, range_defs, filtered).lookup(v)
 	}
 
 	function update_indices(method, ...args) {
@@ -1876,14 +1878,14 @@ function nav_widget(e) {
 
 	// groups -----------------------------------------------------------------
 
-	function row_groups_one_level(cols, range_defs) {
+	function row_groups_one_level(cols, range_defs, filtered) {
 		let fields = optflds(cols)
 		if (!fields)
 			return
 		let groups = set()
 		for (let row of e.all_rows) {
 			let group_vals = e.cell_vals(row, fields)
-			let group = e.lookup(cols, group_vals, range_defs)
+			let group = e.lookup(cols, group_vals, range_defs, filtered)
 			groups.add(group)
 			group.key_vals = group_vals
 		}
@@ -1904,16 +1906,16 @@ function nav_widget(e) {
 	}
 
 	// group_cols: 'col1 col2 > col3 col4 > ...'
-	e.row_groups = function(group_cols, range_defs, group_text_sep) {
+	e.row_groups = function(group_cols, range_defs, filtered, group_text_sep) {
 		group_text_sep = or(group_text_sep, ' / ')
 		let col_groups = group_cols.split(/\s*>\s*/)
 		if (col_groups.length == 1 && false) // TODO: enable this optimization again?
-			return row_groups_one_level(group_cols, range_defs)
+			return row_groups_one_level(group_cols, range_defs, filtered)
 		let all_cols = group_cols.replaceAll('>', ' ')
 		let fields = optflds(all_cols)
 		if (!fields)
 			return
-		let tree = e.index_tree(all_cols, range_defs)
+		let tree = e.index_tree(all_cols, range_defs, filtered)
 		let root_group = []
 		let depth = col_groups[0].names().length-1
 		function add_group(t, path, text_path, parent_group, parent_group_level) {
