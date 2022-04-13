@@ -401,10 +401,10 @@ function sqlpp.new(init)
 		s = s and trim(s) or ''
 		assert(s ~= '', 'sql name missing')
 		local q = self.sqlname_quote
-		if s:sub(1, 1) == q then
+		if s:sub(1, 1) == q then --already quoted
 			return s
 		end
-		if not s:find('.', 1 , true) then
+		if not s:find('.', 1, true) then
 			return self:needs_quoting(s) and self:check_allow_quoting(s) and q..s..q or s
 		end
 		self:needs_quoting'x' --avoid yield accross C-call boundary :rolleyes:
@@ -1270,14 +1270,42 @@ function sqlpp.new(init)
 		return opt
 	end
 
-	local function get_result_sets(self, results, opt, param_names, ret, ...)
+	cmd.table_changed = glue.noop --stub
+
+	--NOTE: schema or table names with spaces or dots inside are not supported!
+	local esc = glue.esc
+	local m1 = '^%s*'..esc('insert', '*i')..'%s+'..esc('into', '*i')..'%s+([^%s]+)'
+	local m2 = '^%s*'..esc('update', '*i')..'%s+'..'([^%s]+)'
+	local m3 = '^%s*'..esc('delete', '*i')..'%s+'..esc('from', '*i')..'%s+([^%s]+)'
+
+	local function get_result_sets(self, results, opt, sql, param_names, ret, ...)
 		if ret == nil then return nil, ... end --error
 		local rows, again, fields = ret, ...
+		if not fields then --update query
+			if rows.affected_rows > 0 then --that affected rows...
+				local s = sql:match(m1) or sql:match(m2) or sql:match(m3)
+				if s then
+					local q = self.sqlname_quote
+					if s:find(q, 1, true) then --`db`.`table` or `table`
+						s = s:gsub(q, '')
+					end
+					local sch, tbl
+					if s:find('.', 1, true) then --db.table
+						sch, tbl = s:match'^([^%.]+)%.(.+)'
+					else
+						sch, tbl = self.db, s
+					end
+					rows.affected_schema = sch
+					rows.affected_table  = tbl
+					self:table_changed(sch, tbl)
+				end
+			end
+		end
 		results = results or (again and {param_names = param_names}) or nil
 		if results then --multiple result sets
 			add(results, {rows, fields})
 			if again then
-				return get_result_sets(self, results, opt, param_names,
+				return get_result_sets(self, results, opt, sql, param_names,
 					self:assert(self:rawagain(opt)))
 			else
 				return results
@@ -1303,7 +1331,7 @@ function sqlpp.new(init)
 			sql, param_names = self:sqlquery(sql, ...)
 		end
 
-		return get_result_sets(self, nil, opt, param_names,
+		return get_result_sets(self, nil, opt, sql, param_names,
 			self:assert(self:rawquery(sql, opt)))
 	end
 
@@ -1387,7 +1415,7 @@ function sqlpp.new(init)
 			function stmt:exec_with_options(exec_opt, ...)
 				local t = map_params(self, cmd, param_map, ...)
 				local opt = exec_opt and update(exec_opt, opt) or opt
-				return get_result_sets(cmd, nil, opt, param_names,
+				return get_result_sets(cmd, nil, opt, sql, param_names,
 					cmd:assert(cmd:rawstmt_query(rawstmt, opt, unpack(t, 1, t.n))))
 			end
 
