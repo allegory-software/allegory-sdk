@@ -1550,9 +1550,10 @@ function ajax(req) {
 			req[name](arg1, ...rest)
 
 		let notify = req.notify instanceof EventTarget ? [req.notify] : req.notify
-		if (isarray(req.notify))
-			for (target of req.notify)
+		if (isarray(notify))
+			for (target of notify) {
 				target.fire('load', name, arg1, ...rest)
+			}
 
 	}
 
