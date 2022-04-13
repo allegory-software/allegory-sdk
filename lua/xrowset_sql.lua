@@ -282,3 +282,30 @@ function sql_rowset(...)
 
 	end, ...)
 end
+
+--TODO: finish this.
+function table_rowset(tbl, opt)
+	opt = opt or glue.empty
+	local tdef = table_def(tbl)
+	local rw_cols = opt.rw_cols
+	if not rw_cols then
+		for i,f in ipairs(tdef.fields) do
+			--
+		end
+	end
+	return sql_rowset(update({
+		select = format('select %s from %s', sqlnames, sqlname(tbl)),
+		where = opt.detail and '%s in (:param:filter)',
+		pk = tdef.pk,
+		hide_cols = opt.detail and tdef.pk..(' '..opt.hide_cols or ''),
+		insert_row = function(self, row)
+			self:insert_into(tbl, row, rw_cols)
+		end,
+		update_row = function(self, row)
+			self:update_into(tbl, row, rw_cols)
+		end,
+		delete_row = function(self, row)
+			self:delete_from(tbl, row)
+		end,
+	}, opt))
+end
