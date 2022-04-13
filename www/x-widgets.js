@@ -1412,6 +1412,27 @@ component('x-menu', function(e) {
 
 	// view
 
+	function init_menu_item(tr) {
+
+		tr.on('load', function(ev, ...args) {
+			tr.attr('disabled', tr.item.disabled || ev != 'done')
+			let s = tr.item.load_spin
+			if (s) {
+				s = repl(s, true, 'fa-spin')
+				s = repl(s, 'reverse', 'fa-spin fa-spin-reverse')
+				tr.icon_box.class(s, ev == 'start')
+			}
+		})
+
+		tr.item.load = function(url, success, fail, opt) {
+			return get(url, success, fail, assign({notify: tr}, opt))
+		}
+
+		tr.item.post = function(url, upload, success, fail, opt) {
+			return post(url, upload, success, fail, assign({notify: tr}, opt))
+		}
+	}
+
 	function create_item(item, disabled) {
 		let check_box = div({class: 'x-menu-check-div fa fa-check'})
 		let icon_box  = div({class: 'x-menu-icon-div'})
@@ -1427,12 +1448,14 @@ component('x-menu', function(e) {
 		let sub_td    = tag('td', {class: 'x-menu-sub-td'}, sub_box)
 		sub_box.style.visibility = item.items ? null : 'hidden'
 		let tr = tag('tr', {class: 'x-item x-menu-tr'}, check_td, title_td, key_td, sub_td)
+		tr.icon_box = icon_box
 		tr.class('disabled', disabled || item.disabled)
 		tr.item = item
 		tr.check_box = check_box
 		update_check(tr)
 		tr.on('pointerdown' , item_pointerdown)
 		tr.on('pointerenter', item_pointerenter)
+		init_menu_item(tr)
 		return tr
 	}
 
