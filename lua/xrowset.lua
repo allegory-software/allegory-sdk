@@ -127,6 +127,13 @@ function virtual_rowset(init, ...)
 
 	function rs.init_fields(rs)
 
+		local schema = config'db_schema'
+		if schema then
+			for i,field in ipairs(rs.fields) do
+				schema:resolve_type(field)
+			end
+		end
+
 		local hide_cols = index(names(rs.hide_cols) or glue.empty)
 		local   ro_cols = index(names(rs.  ro_cols) or glue.empty)
 		local   rw_cols = rs.rw_cols and index(names(rs.rw_cols))

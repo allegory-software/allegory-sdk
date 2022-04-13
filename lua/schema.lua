@@ -893,4 +893,8 @@ function diff:pp(opt)
 	end
 end
 
+function schema:resolve_type(t)
+	resolve_type(self, t, t, 1, #t, glue.empty, true, true)
+end
+
 return schema
