@@ -150,9 +150,12 @@ function M.connect(host, port, exp, tcp_opt)
 	return M.protocol(tcp)
 end
 
-function channel:close() return self.tcp:close() end
-function channel:onclose(fn) return self.tcp:onclose(fn) end
-function channel:closed() return self.tcp:closed() end
+function channel:close       ()        return self.tcp:close() end
+function channel:onclose     (fn)      return self.tcp:onclose(fn) end
+function channel:closed      ()        return self.tcp:closed() end
+function channel:sleep_job   ()        return self.tcp:sleep_job() end
+function channel:sleep_until (expires) return self.tcp:sleep_until(expires) end
+function channel:sleep       (timeout) return self.tcp:sleep(timeout) end
 
 function channel:recvall(onmessage, onerror)
 	local onmessage = wrapfn('recvall', onmessage, onerror, self)

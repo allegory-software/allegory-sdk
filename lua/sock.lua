@@ -65,16 +65,20 @@ SCHEDULING
 	sock.stop()                                stop polling
 	sock.run(f, ...) -> ...                    run a function inside a sock thread
 
-	sock.sleep_until(t)                        sleep without blocking until sock.clock() value
-	sock.sleep(s)                              sleep without blocking for s seconds
-	sock.sleep_job() -> sj                     make an interruptible sleep job
+	sock.sleep_job() -> sj                     make an interruptible async sleep job
 	sj:sleep_until(t) -> ...                   sleep until sock.clock()
 	sj:sleep(s) -> ...                         sleep for `s` seconds
 	sj:wakeup(...)                             wake up the sleeping thread
-	sock.runat(t, f) -> sjt                    run `f` at clock `t`
-	sock.runafter(s, f) -> sjt                 run `f` after `s` seconds
-	sock.runevery(s, f) -> sjt                 run `f` every `s` seconds
-	sjt:cancel()                               cancel timer
+	sj:cancel()                                calls sj:wakeup(sj.CANCEL)
+	sj.CANCEL                                  magic arg that can cancel runat()
+	sock.sleep_until(t) -> ...                 sleep until sock.clock() value
+	sock.sleep(s) -> ...                       sleep for s seconds
+	sock.runat(t, f) -> sj                     run `f` at clock `t`
+	sock.runafter(s, f) -> sj                  run `f` after `s` seconds
+	sock.runevery(s, f) -> sj                  run `f` every `s` seconds
+	s:sleep_job() -> sj                        sleep job that is auto-canceled on socket close
+	s:sleep_until(t) -> ...                    sleep_until() on auto-canceled sleep job
+	s:sleep(s) -> ...                          sleep() on auto-canceled sleep job
 
 	sock.threadset() -> ts
 	ts:thread(f, [fmt, ...]) -> co
@@ -1031,8 +1035,13 @@ local function wakeup(job, ...)
 	M.resume(job.thread, ...)
 	return true
 end
+local CANCEL = {}
+local function cancel(job)
+	wakeup(job, CANCEL)
+end
 function M.sleep_job()
-	return {sleep = sleep, sleep_until = sleep_until, wakeup = wakeup}
+	return {sleep = sleep, sleep_until = sleep_until, wakeup = wakeup,
+		cancel = cancel, CANCEL = CANCEL}
 end
 end
 
@@ -1453,8 +1462,13 @@ local function wakeup(job, ...)
 	M.resume(job.recv_thread, ...)
 	return true
 end
+local CANCEL = {}
+local function cancel(job)
+	wakeup(job, CANCEL)
+end
 function M.sleep_job()
-	return {sleep = sleep, sleep_until = sleep_until, wakeup = wakeup}
+	return {sleep = sleep, sleep_until = sleep_until, wakeup = wakeup,
+		cancel = cancel, CANCEL = CANCEL}
 end
 end
 
@@ -2239,16 +2253,10 @@ function M.sleep(timeout)
 	M.sleep_job():sleep(timeout)
 end
 
-local CANCEL = {}
-local function cancel_sleep(job)
-	job:wakeup(CANCEL)
-end
-
 function M.runat(t, f, ...)
 	local job = M.sleep_job()
-	job.cancel = cancel_sleep
 	M.resume(M.thread(function()
-		if job:sleep_until(t) == CANCEL then
+		if job:sleep_until(t) == job.CANCEL then
 			return
 		end
 		f()
@@ -2262,10 +2270,9 @@ end
 
 function M.runevery(interval, f, ...)
 	local job = M.sleep_job()
-	job.cancel = cancel_sleep
 	M.resume(M.thread(function()
 		while true do
-			if job:sleep(interval) == CANCEL then
+			if job:sleep(interval) == job.CANCEL then
 				return
 			end
 			if f() == false then
@@ -2274,6 +2281,22 @@ function M.runevery(interval, f, ...)
 		end
 	end, ...))
 	return job
+end
+
+function socket:sleep_job()
+	local job = M.sleep_job()
+	self:onclose(function()
+		job:cancel()
+	end)
+	return job
+end
+
+function socket:sleep_until(expires)
+	return self:sleep_job():sleep_until(expires)
+end
+
+function socket:sleep(timeout)
+	return self:sleep_job():sleep(timeout)
 end
 
 --debug API ------------------------------------------------------------------
