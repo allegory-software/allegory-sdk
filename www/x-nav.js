@@ -5021,7 +5021,7 @@ component('x-lookup-dropdown', function(e) {
 	field_types.duration = d
 
 	d.format = function(d) {
-		return d.duration(this.duration_format)
+		return isnum(d) ? d.duration(this.duration_format) : d
 	}
 
 	// booleans

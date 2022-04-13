@@ -2967,12 +2967,17 @@ component('x-chart', 'Input', function(e) {
 		let n = 0
 		let fi = sum_fld.val_index
 		for (let row of row_group)
-			n += row[fi]
+			n += (row[fi] || 0)
 		row_group.sum = n
 	}
 
+	function sum_fields() {
+		return e.nav && e.sum_cols != null
+			&& e.nav.optflds(e.sum_cols.replaceAll('..', ' '))
+	}
+
 	function row_groups() {
-		let sum_flds = e.nav && e.nav.optflds(e.sum_cols)
+		let sum_flds = sum_fields()
 		if (!sum_flds)
 			return
 		let cols = []
@@ -3002,13 +3007,20 @@ component('x-chart', 'Input', function(e) {
 		// split_group      : [row_group1, ...]     one graph: list of x-axis row groups (xgs)
 		// row_group        : [row1, ...]           one row group: one sum point.
 		let all_split_groups = []
+		let tied_back
 		for (let sum_fld of sum_flds) {
+			let tied = !!e.sum_cols.includes(sum_fld.name+'..')
 			let split_groups = e.split_cols
 				? e.nav.row_groups(e.split_cols+'>'+cols, defs)
 				: [e.nav.row_groups(cols, defs)]
-			for (let split_group of split_groups)
+			for (let split_group of split_groups) {
 				for (let row_group of split_group)
 					compute_sums(sum_fld, row_group)
+				split_group.tied_back = tied_back
+				split_group.tied = tied
+			}
+			tied_back = tied
+			// ^^ the syntax `col1..col2` ties two line graphs together into a closed shape.
 			all_split_groups.extend(split_groups)
 		}
 		all_split_groups.group_cols = cols
@@ -3016,7 +3028,7 @@ component('x-chart', 'Input', function(e) {
 	}
 
 	function sum_label(cls, text, sum) {
-		let sum_fld = e.nav.flds(e.sum_cols)[0]
+		let sum_fld = sum_fields()[0]
 		let a = []
 		if (text)
 			a.push(text)
@@ -3216,7 +3228,7 @@ component('x-chart', 'Input', function(e) {
 		{
 			let y_spacing = rotate ? 80 : 40 // wanted space between y-axis markers
 			let target_n = round(h / y_spacing) // wanted number of y-axis markers
-			let sum_fld = e.nav.flds(e.sum_cols)[0]
+			let sum_fld = sum_fields()[0]
 			;[y_step, min_sum, max_sum] =
 				compute_step_and_range(target_n, min_sum, max_sum, sum_fld.scale_base, sum_fld.scales)
 		}
@@ -3373,23 +3385,32 @@ component('x-chart', 'Input', function(e) {
 			} else {
 
 				// draw the line.
-				cx.beginPath()
+
+				if (!cg.tied_back)
+					cx.beginPath()
+
 				let x0, x
-				for (let xg of cg) {
+				for (let xg of (cg.tied_back ? cg.reverse() : cg)) {
 					x = xg.x
-					if (x0 == null) {
+					if (x0 == null && !cg.tied_back) {
 						x0 = x
 						cx.moveTo(x + .5, xg.y + .5)
-					} else
+					} else {
 						cx.lineTo(x + .5, xg.y + .5)
+					}
 				}
-				if (area) {
+
+				if (area && !cg.tied && !cg.tied_back) {
 					cx.lineTo(x  + .5, h - py2 + .5)
 					cx.lineTo(x0 + .5, h - py2 + .5)
 					cx.closePath()
+				}
+
+				if (area && !cg.tied) {
 					cx.fillStyle = line_color(cgi, groups.length, .5)
 					cx.fill()
 				}
+
 				cx.strokeStyle = color
 				cx.stroke()
 
