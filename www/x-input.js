@@ -424,6 +424,7 @@ component('x-button', 'Input', function(e) {
 		e.icon_box.hidden = !v
 	}
 	e.prop('icon', {store: 'var', type: 'icon'})
+	e.prop('load_spin', {store: 'var', attr: true})
 
 	e.prop('primary', {store: 'var', type: 'bool', attr: true})
 	e.prop('bare'   , {store: 'var', type: 'bool', attr: true})
@@ -530,8 +531,13 @@ component('x-button', 'Input', function(e) {
 
 	e.on('load', function(ev, ...args) {
 		e.disable('loading', ev != 'done')
-		if (e.load_spin)
-			e.icon_box.class('fa-spin', ev == 'start')
+		let s = e.load_spin
+		if (s) {
+			s = repl(s, '', true) // html attr
+			s = repl(s, true, 'fa-spin')
+			s = repl(s, 'reverse', 'fa-spin fa-spin-reverse')
+			e.icon_box.class(s, ev == 'start')
+		}
 	})
 
 	e.load = function(url, success, fail, opt) {
@@ -2963,22 +2969,52 @@ component('x-chart', 'Input', function(e) {
 		return [step, min_sum, max_sum]
 	}
 
-	function compute_sums(sum_fld, row_group) {
-		let n = 0
-		let fi = sum_fld.val_index
-		for (let row of row_group)
-			n += (row[fi] || 0)
+	function compute_sums(sum_def, row_group) {
+		if (!row_group.length)
+			return
+		let fi = sum_def.field.val_index
+		let n
+		if (sum_def.agg == 'sum' || sum_def.agg == 'avg') {
+			n = 0
+			for (let row of row_group)
+				n += (row[fi] || 0)
+			if (sum_def.agg == 'avg')
+				n /= row_group.length
+		} else if (sum_def.agg == 'min') {
+			n = 1/0
+			for (let row of row_group)
+				n = min(n, row[fi] || 0)
+		} else if (sum_def.agg == 'max') {
+			n = -1/0
+			for (let row of row_group)
+				n = max(n, row[fi] || 0)
+		}
 		row_group.sum = n
 	}
 
-	function sum_fields() {
-		return e.nav && e.sum_cols != null
-			&& e.nav.optflds(e.sum_cols.replaceAll('..', ' '))
+	// the syntax `COL1..COL2` ties two line graphs together into a closed shape.
+	function sum_field_defs() { // `COL1[/AGG][..COL2] ...`
+		if (!e.nav) return
+		if (e.sum_cols == null) return
+		let defs
+		let tied_back = false
+		for (let col of e.sum_cols.replaceAll('..', '.. ').names()) {
+			let tied = col.includes('..')
+			col = col.replace('..', '')
+			let agg = 'avg'; col.replace(/\/[^\/]+$/, k => { agg = k; return '' })
+			let fld = e.nav.optfld(col)
+			if (fld) {
+				defs = defs || []
+				defs.push({field: fld, tied: tied, tied_back: tied_back, agg: agg})
+			}
+			tied_back = fld ? tied : false
+		}
+		return defs
 	}
 
 	function row_groups() {
-		let sum_flds = sum_fields()
-		if (!sum_flds)
+		let sum_defs = sum_field_defs()
+		if (!sum_defs)
 			return
 		let cols = []
 		let defs
@@ -3007,20 +3043,16 @@ component('x-chart', 'Input', function(e) {
 		// split_group      : [row_group1, ...]     one graph: list of x-axis row groups (xgs)
 		// row_group        : [row1, ...]           one row group: one sum point.
 		let all_split_groups = []
-		let tied_back
-		for (let sum_fld of sum_flds) {
-			let tied = !!e.sum_cols.includes(sum_fld.name+'..')
+		for (let sum_def of sum_defs) {
 			let split_groups = e.split_cols
-				? e.nav.row_groups(e.split_cols+'>'+cols, defs)
-				: [e.nav.row_groups(cols, defs)]
+				? e.nav.row_groups(e.split_cols+'>'+cols, defs, true)
+				: [e.nav.row_groups(cols, defs, true)]
 			for (let split_group of split_groups) {
 				for (let row_group of split_group)
-					compute_sums(sum_fld, row_group)
-				split_group.tied_back = tied_back
-				split_group.tied = tied
+					compute_sums(sum_def, row_group)
+				split_group.tied_back = sum_def.tied_back
+				split_group.tied = sum_def.tied
 			}
-			tied_back = tied
-			// ^^ the syntax `col1..col2` ties two line graphs together into a closed shape.
 			all_split_groups.extend(split_groups)
 		}
 		all_split_groups.group_cols = cols
@@ -3028,7 +3060,7 @@ component('x-chart', 'Input', function(e) {
 	}
 
 	function sum_label(cls, text, sum) {
-		let sum_fld = sum_fields()[0]
+		let sum_fld = sum_field_defs()[0].field
 		let a = []
 		if (text)
 			a.push(text)
@@ -3159,7 +3191,7 @@ component('x-chart', 'Input', function(e) {
 	}
 
 	function line_color(i, n, alpha) {
-		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .5, .6, alpha)
+		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .8, .6, alpha)
 	}
 
 	function render_line_or_columns(columns, rotate, dots, area) {
@@ -3188,7 +3220,7 @@ component('x-chart', 'Input', function(e) {
 		let w = canvas.width
 		let h = canvas.height
 
-		// compute vertical range.
+		// compute vertical and horizontal ranges.
 		// compute horizontal labels.
 		let xgs = map() // {x_key -> xg}
 		let min_xv =  1/0
@@ -3216,6 +3248,9 @@ component('x-chart', 'Input', function(e) {
 			}
 		}
 
+		if (e.min_val) min_xv = e.min_val
+		if (e.max_val) max_xv = e.max_val
+
 		if (columns) {
 			let w = (max_xv - min_xv) / xgs.size
 			min_xv -= w / 2
@@ -3228,7 +3263,7 @@ component('x-chart', 'Input', function(e) {
 		{
 			let y_spacing = rotate ? 80 : 40 // wanted space between y-axis markers
 			let target_n = round(h / y_spacing) // wanted number of y-axis markers
-			let sum_fld = sum_fields()[0]
+			let sum_fld = sum_field_defs()[0].field
 			;[y_step, min_sum, max_sum] =
 				compute_step_and_range(target_n, min_sum, max_sum, sum_fld.scale_base, sum_fld.scales)
 		}
@@ -3273,8 +3308,8 @@ component('x-chart', 'Input', function(e) {
 		cx.fillStyle   = label_color
 		cx.strokeStyle = ref_line_color
 
-		let min_w = 20                      // min element width
-		let n = xgs.size                    // given number of elements
+		let min_w = 20    // min element width
+		let n = xgs.size  // given number of elements
 		let max_n = max(1, floor(w / max(w / n, min_w))) // max number of elements
 		let [step] = compute_step_and_range(min(n, max_n), 0, n)
 
@@ -3568,6 +3603,8 @@ component('x-chart', 'Input', function(e) {
 	e.prop('sum_cols'   , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
 	e.prop('min_sum'    , {store: 'var', type: 'number', attr: true})
 	e.prop('max_sum'    , {store: 'var', type: 'number', attr: true})
+	e.prop('min_val'    , {store: 'var', type: 'number', attr: true})
+	e.prop('max_val'    , {store: 'var', type: 'number', attr: true})
 	e.prop('min_sum_col', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
 	e.prop('max_sum_col', {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
 	e.prop('other_threshold', {store: 'var', type: 'number', default: .05, decimals: null, attr: true})
