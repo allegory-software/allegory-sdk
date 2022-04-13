@@ -1591,10 +1591,30 @@ textarea.x-editbox-input {
 	border-left: 0;
 }
 
-/* colors listbox --------------------------------------------------------- */
+/* color item ------------------------------------------------------------- */
 
 .x-item-color {
 	width: 100%;
+}
+
+/* progress bar item ------------------------------------------------------ */
+
+.x-item-progress {
+	width: 100%;
+	height: 100%;
+	position: relative;
+}
+
+.x-item-progress-bar {
+	position: absolute;
+	top: 0; left: 0; bottom: 0;
+	background-color: var(--x-item-bg-selected);
+}
+
+.x-item-progress-text {
+	position: absolute;
+	top: 0; left: 0; right: 0; bottom: 0;
+	text-align: center;
 }
 
 /* calendar --------------------------------------------------------------- */
@@ -2646,9 +2666,16 @@ textarea.x-editbox-input {
 	min-height: 0;
 	/* layout content */
 	display: grid;
-	overflow-x: auto;          /* show scrollbars as needed */
+	overflow-x: auto;
+	/* ^^ what we want is `auto` but because of a chrome bug we enable it
+	from js only when needed */
 	overflow-y: scroll;        /* show scrollbars always */
 	position: relative;        /* anchor rows div */
+}
+
+.x-vgrid .x-grid-cells-view {
+	overflow-x: scroll;        /* show scrollbars always */
+	overflow-y: auto;        /* same remark about `auto` */
 }
 
 .x-grid-cells-ct {

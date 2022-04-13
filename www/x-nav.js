@@ -5100,6 +5100,18 @@ component('x-lookup-dropdown', function(e) {
 		}, opt))
 	}
 
+	// percent
+
+	let percent = {}
+	field_types.percent = percent
+
+	percent.format = function(p) {
+		let bar = div({class: 'x-item-progress-bar'})
+		let txt = div({class: 'x-item-progress-text'}, isnum(p) ? p.dec(this.decimals) + '%' : p)
+		bar.style.right = (100 - (isnum(p) ? p : 0)) + '%'
+		return div({class: 'x-item-progress'}, bar, txt)
+	}
+
 	// icons
 
 	let icon = {}

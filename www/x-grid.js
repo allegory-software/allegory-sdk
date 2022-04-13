@@ -202,6 +202,13 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			vrn = floor(cells_view_h / e.cell_h) + 2
 			page_row_count = floor(cells_view_h / e.cell_h)
 
+			/*
+			// TODO: finish this!
+			e.cells_view.style.overflowX =
+				e.cells_view.scrollWidth > e.cells_view.clientWidth + 100
+					? 'scroll' : 'hidden'
+			*/
+
 		} else {
 
 			e.header.w = e.header_w
@@ -555,7 +562,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 		let field = e.fields[fi]
 
-		cell.attr('field', field.attr || field.type)
+		// TODO: is this used?
+		// cell.attr('field', field.attr || field.type)
 
 		cell.attr('align', field.align)
 		cell.class('focusable', e.can_focus_cell(row, field))
