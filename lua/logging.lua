@@ -114,6 +114,8 @@ logging.rpc = {}
 function logging.rpc:set_debug   (v) self.debug   = v end
 function logging.rpc:set_verbose (v) self.verbose = v end
 
+local logvar_message --fw. decl.
+
 function logging:toserver(host, port, queue_size, timeout)
 
 	local sock = require'sock'
@@ -143,6 +145,11 @@ function logging:toserver(host, port, queue_size, timeout)
 			chan = mess.connect(host, port, exp, {log = log_locally})
 
 			if chan then
+
+				--send a first message so the server knows who we are.
+				if not check_io(chan:send(logvar_message(self, 'hello'))) then
+					break
+				end
 
 				--create RPC thread/loop
 				self.liveadd(chan.tcp, 'logging')
@@ -400,13 +407,17 @@ local function warnif(self, module, event, cond, ...)
 	log(self, 'WARN', module, event, ...)
 end
 
+--[[local]] function logvar_message(self, k, v)
+	return {
+		deploy = self.deploy, machine = self.machine,
+		env = logging.env, time = time(),
+		event = 'set', k = k, v = v,
+	}
+end
+
 local function logvar(self, k, v)
 	if self.logtoserver then
-		self:logtoserver{
-			deploy = self.deploy, machine = self.machine,
-			env = logging.env, time = time(),
-			event = 'set', k = k, v = v,
-		}
+		self:logtoserver(logvar_message(self, k, v))
 	end
 end
 
