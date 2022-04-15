@@ -165,9 +165,11 @@ rows:
 
 indexing:
 	publishes:
-		e.index_tree(cols, [range_defs], [filtered])
-		e.lookup(cols, vals, [range_defs], [filtered]) -> [row1, ...]
-		e.row_groups(col_groups, [range_defs], [filtered], [group_text_sep]) -> [row1, ...]
+		e.tree_index(cols, [range_defs], [rows]) -> ix
+		ix.tree() -> index_tree
+		ix.lookup(vals) -> [row1,...]
+		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
+		e.row_groups({col_groups:, [range_defs:], [rows:], [group_text_sep:]}) -> [row1, ...]
 
 master-detail:
 	needs:
@@ -238,10 +240,16 @@ sorting:
 		can_sort_rows
 	publishes:
 		e.order_by <- 'col1[:desc] ...'
+		e.sort_rows([row1,...], order_by)
 	calls:
 		e.compare_rows(row1, row2)
 		e.compare_types(v1, v2)
 		e.compare_vals(v1, v2)
+
+filtering:
+	publishes:
+		e.expr_filter(expr) -> f
+		e.filter_rows(rows, expr) -> [row1,...]
 
 quicksearch:
 	config:
@@ -1687,8 +1695,9 @@ function nav_widget(e) {
 
 	// vlookup ----------------------------------------------------------------
 
-	// cols: 'col1 ...' | fi | field | [col1|field1,...]
-	function create_index(cols, range_defs, filtered) {
+	// cols        : 'col1 ...' | fi | field | [col1|field1,...]
+	// range_defs  : {col->{freq:, unit:, offset:}}
+	function create_index(cols, range_defs, rows) {
 
 		let idx = obj()
 
@@ -1781,7 +1790,7 @@ function nav_widget(e) {
 		idx.rebuild = function() {
 			fis = cols_arr.map(fld).map(f => f.val_index)
 			tree = map()
-			for (let row of (filtered ? e.rows : e.all_rows))
+			for (let row of (rows || e.all_rows))
 				add_row(row)
 		}
 
@@ -1832,25 +1841,24 @@ function nav_widget(e) {
 
 	let indices = obj() // {cache_key->index}
 
-	function index(cols, range_defs, filtered) {
+	e.tree_index = function(cols, range_defs, rows) {
 		cols = e.fldnames(cols)
-		let cache_key = cols
-		if (range_defs) cache_key = cache_key+' '+json(range_defs)
-		if (filtered) cache_key = cache_key + ' filtered'
-		let index = indices[cache_key]
-		if (!index) {
-			index = create_index(cols, range_defs, filtered)
-			indices[cache_key] = index
+		if (rows) {
+			return create_index(cols, range_defs, rows)
+		} else {
+			let cache_key = cols + (range_defs ? cols+' '+json(range_defs) : '')
+			let index = cache_key && indices[cache_key]
+			if (!index) {
+				index = create_index(cols, range_defs)
+				if (cache_key)
+					indices[cache_key] = index
+			}
+			return index
 		}
-		return index
 	}
 
-	e.index_tree = function(cols, range_defs, filtered) {
-		return index(cols, range_defs, filtered).tree()
-	}
-
-	e.lookup = function(cols, v, range_defs, filtered) {
-		return index(cols, range_defs, filtered).lookup(v)
+	e.lookup = function(cols, v, range_defs) {
+		return e.tree_index(cols, range_defs).lookup(v)
 	}
 
 	function update_indices(method, ...args) {
@@ -1878,14 +1886,15 @@ function nav_widget(e) {
 
 	// groups -----------------------------------------------------------------
 
-	function row_groups_one_level(cols, range_defs, filtered) {
+	function row_groups_one_level(cols, range_defs, rows) {
 		let fields = optflds(cols)
 		if (!fields)
 			return
 		let groups = set()
+		let ix = e.tree_index(cols, range_defs, rows)
 		for (let row of e.all_rows) {
 			let group_vals = e.cell_vals(row, fields)
-			let group = e.lookup(cols, group_vals, range_defs, filtered)
+			let group = ix.lookup(group_vals)
 			groups.add(group)
 			group.key_vals = group_vals
 		}
@@ -1905,17 +1914,21 @@ function nav_widget(e) {
 		path.remove(path_pos)
 	}
 
-	// group_cols: 'col1 col2 > col3 col4 > ...'
-	e.row_groups = function(group_cols, range_defs, filtered, group_text_sep) {
-		group_text_sep = or(group_text_sep, ' / ')
-		let col_groups = group_cols.split(/\s*>\s*/)
-		if (col_groups.length == 1 && false) // TODO: enable this optimization again?
-			return row_groups_one_level(group_cols, range_defs, filtered)
-		let all_cols = group_cols.replaceAll('>', ' ')
+	// opt:
+	//   col_groups     : 'col1 col2 > col3 col4 > ...'
+	//   range_defs     : {col->{freq:, unit:, offset:}}
+	//   rows           : [row1,...]
+	//   group_text_sep : separator for multi-col group labels
+	e.row_groups = function(opt) {
+		let group_text_sep = or(opt.group_text_sep, ' / ')
+		let col_groups = opt.col_groups.split(/\s*>\s*/)
+		if (false && col_groups.length == 1) // TODO: enable this optimization again?
+			return row_groups_one_level(opt.col_groups, opt.range_defs, opt.rows)
+		let all_cols = opt.col_groups.replaceAll('>', ' ')
 		let fields = optflds(all_cols)
 		if (!fields)
 			return
-		let tree = e.index_tree(all_cols, range_defs, filtered)
+		let tree = e.tree_index(all_cols, opt.range_defs, opt.rows).tree()
 		let root_group = []
 		let depth = col_groups[0].names().length-1
 		function add_group(t, path, text_path, parent_group, parent_group_level) {
@@ -2152,7 +2165,7 @@ function nav_widget(e) {
 		}
 	}
 
-	function row_comparator() {
+	function row_comparator(order_by_map) {
 
 		let order_by = map(order_by_map)
 
@@ -2225,24 +2238,28 @@ function nav_widget(e) {
 	function sort_rows(force) {
 		let must_sort = !!(e.parent_field || e.pos_field || order_by_map.size)
 		if (must_sort)
-			e.rows.sort(row_comparator())
+			e.rows.sort(row_comparator(order_by_map))
 		else if (force)
 			create_rows()
 		update_row_index()
 	}
 
+	e.sort_rows = function(rows, order_by) {
+		let order_by_map = map()
+		update_order_by_map(order_by, order_by_map)
+		ros.sort(row_comparator(order_by_map))
+	}
+
 	// changing the sort order ------------------------------------------------
 
-	let order_by_map = map()
-
-	function update_field_sort_order() {
+	function update_order_by_map(order_by, order_by_map) {
 		order_by_map.clear()
 		let pri = 0
 		for (let field of e.all_fields) {
 			field.sort_dir = null
 			field.sort_priority = null
 		}
-		for (let s1 of (e.order_by || '').names()) {
+		for (let s1 of (order_by || '').names()) {
 			let m = s1.split(':')
 			let name = m[0]
 			let field = e.all_fields[name]
@@ -2256,6 +2273,12 @@ function nav_widget(e) {
 				}
 			}
 		}
+	}
+
+	let order_by_map = map()
+
+	function update_field_sort_order() {
+		update_order_by_map(e.order_by, order_by_map)
 	}
 
 	function order_by_from_map() {
@@ -2292,7 +2315,7 @@ function nav_widget(e) {
 	// filtering --------------------------------------------------------------
 
 	// expr: [bin_oper, expr1, ...] | [un_oper, expr] | [col, oper, val]
-	function expr_filter(expr) {
+	e.expr_filter = function(expr) {
 		let expr_bin_ops = {'&&': 1, '||': 1}
 		let expr_un_ops = {'!': 1}
 		let s = []
@@ -2351,15 +2374,19 @@ function nav_widget(e) {
 					expr.push(['!==', field.name, v])
 					e.is_filtered = true
 				}
-		e.row_is_visible = expr.length > 1 ? expr_filter(expr) : return_true
+		e.row_is_visible = expr.length > 1 ? e.expr_filter(expr) : return_true
 	}
 
-	e.and_filter = function(cols, vals) {
+	e.and_expr = function(cols, vals) {
 		let expr = ['&&']
 		let i = 0
 		for (let col of cols.names())
 			expr.push(['===', col, vals[i++]])
-		return expr.length > 1 ? expr_filter(expr) : return_true
+		return expr
+	}
+
+	e.filter_rows = function(rows, expr) {
+		return rows.filter(e.expr_filter(expr))
 	}
 
 	// exclude filter UI ------------------------------------------------------
