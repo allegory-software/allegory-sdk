@@ -76,6 +76,7 @@ SCHEDULING
 	sock.runat(t, f) -> sj                     run `f` at clock `t`
 	sock.runafter(s, f) -> sj                  run `f` after `s` seconds
 	sock.runevery(s, f) -> sj                  run `f` every `s` seconds
+	sock.runagainevery(s, f) -> sj             run `f` now and every `s` seconds afterwards
 	s:sleep_job() -> sj                        sleep job that is auto-canceled on socket close
 	s:sleep_until(t) -> ...                    sleep_until() on auto-canceled sleep job
 	s:sleep(s) -> ...                          sleep() on auto-canceled sleep job
@@ -2268,9 +2269,14 @@ function M.runafter(timeout, f, ...)
 	return M.runat(clock() + timeout, f, ...)
 end
 
-function M.runevery(interval, f, ...)
+local function runevery(now_too, interval, f, ...)
 	local job = M.sleep_job()
 	M.resume(M.thread(function()
+		if now_too then
+			if f() == false then
+				return
+			end
+		end
 		while true do
 			if job:sleep(interval) == job.CANCEL then
 				return
@@ -2282,6 +2288,8 @@ function M.runevery(interval, f, ...)
 	end, ...))
 	return job
 end
+function M.runevery      (...) return runevery(false, ...) end
+function M.runagainevery (...) return runevery(true , ...) end
 
 function socket:sleep_job()
 	local job = M.sleep_job()

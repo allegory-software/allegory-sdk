@@ -164,15 +164,18 @@ function sql_rowset(...)
 
 		--query wrappers.
 
-		local function query(...)
-			return db(rs.db):query({to_array = false}, ...)
-		end
+		local load_opt = {
+			compact = true,
+			to_array = false,
+			null_value = null,
+			field_attrs = rs.field_attrs,
+		}
 
 		--see if we can make a static load_row().
 
 		if not rs.load_row and rs.select_row then
 			function rs:load_row(vals)
-				local rows = query(rs.select_row, vals)
+				local rows = db(rs.db):query(load_opt, rs.select_row, vals)
 				assert(#rows < 2, 'loaded back multiple rows for one inserted row')
 				return rows[1]
 			end
@@ -186,16 +189,11 @@ function sql_rowset(...)
 
 		local configure
 
-		local load_opt = {
-			compact = true,
-			null_value = null,
-			field_attrs = rs.field_attrs,
-		}
-
 		if not rs.load_rows then
 			assert(rs.select_all, 'select_all missing')
 			function rs:load_rows(res, param_vals)
-				local rows, fields, params = query(load_opt, rs.select_all, param_vals)
+				local db = type(rs.db) == 'function' and rs.db(param_vals) or db(rs.db)
+				local rows, fields, params = db:query(load_opt, rs.select_all, param_vals)
 				if configure then
 					configure(fields)
 					rs.params = params
@@ -209,7 +207,7 @@ function sql_rowset(...)
 		local apply_changes = rs.apply_changes
 		function rs:apply_changes(...)
 			if configure then
-				local _, fields = query(rs.select_none)
+				local _, fields = db(rs.db):query(load_opt, rs.select_none)
 				configure(fields)
 			end
 			return apply_changes(self, ...)
@@ -231,7 +229,7 @@ function sql_rowset(...)
 			local function where_row_sql()
 				local t = {}
 				for i, as_col in ipairs(rs.pk) do
-					local f = fields[as_col]
+					local f = assertf(fields[as_col], 'invalid pk col %s', as_col)
 					local tbl = f.db..'.'..f.table
 					local where_col = (f.table_alias or tbl)..'.'..f.col
 					if i > 1 then add(t, ' and ') end

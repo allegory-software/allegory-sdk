@@ -66,7 +66,7 @@ sqlpps = {}
 sqlpps.mysql     = require'sqlpp'.new'mysql'
 sqlpps.tarantool = require'sqlpp'.new'tarantool'
 local default_port = {mysql = 3306, tarantool = 3301}
-local pool = require'connpool'.new{log = webb.log, logging = true}
+local pool = require'connpool'.new()
 local mysql_print = require'mysql_print'
 
 sql_default = {'default'}

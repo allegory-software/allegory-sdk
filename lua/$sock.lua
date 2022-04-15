@@ -27,3 +27,4 @@ sleep_job      = sock.sleep_job
 runat          = sock.runat
 runafter       = sock.runafter
 runevery       = sock.runevery
+runagainevery  = sock.runagainevery
