@@ -40,6 +40,7 @@ local function print_table(opt)
 	local minsize = opt.minsize or 0
 	local sumdefs = opt.sums
 	local print   = opt.print or _G.print
+	local null    = opt.null
 
 	local max_sizes = {}
 	for j=1,#cols do
@@ -110,9 +111,9 @@ local function invert_table(cols, rows, minsize)
 	return ft, rt
 end
 
-local function format_cell(v, field)
+local function format_cell(v, field, null)
 	if v == null or v == nil then
-		return 'NULL'
+		return null
 	elseif field.to_text then
 		return field.to_text(v, field)
 	else
@@ -132,6 +133,7 @@ function print_result(opt)
 	local fields  = opt.fields
 	local minsize = opt.minsize
 	local sums    = opt.sums
+	local null    = opt.null or ''
 
 	local cols = {}
 	local colindex = {}
@@ -145,7 +147,7 @@ function print_result(opt)
 	for i,row in ipairs(rows) do
 		local t = {}
 		for j=1,#cols do
-			t[j] = format_cell(row[j], fields[j])
+			t[j] = format_cell(row[j], fields[j], null)
 			aligns[j] = cell_align(aligns[j], row[j], fields[j])
 		end
 		textrows[i] = t
@@ -183,7 +185,7 @@ function print_result(opt)
 				end
 				v = from_number(n, field)
 			end
-			sumdefs[col] = {op, format_cell(v, field)}
+			sumdefs[col] = {op, format_cell(v, field, null)}
 		end
 	end
 
