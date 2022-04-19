@@ -152,6 +152,7 @@ function sql_rowset(...)
 			rs.select_all = outdent(rs.select)
 				.. (rs.where_all and '\nwhere '..rs.where_all or '')
 				.. (rs.order_by and '\norder by '..rs.order_by or '')
+				.. (rs.limit and '\nlimit '..rs.limit or '')
 		end
 
 		if not rs.select_row and rs.select and rs.where_row then
