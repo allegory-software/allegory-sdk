@@ -390,6 +390,7 @@ function M.liveadd(...)
 	logging.liveadd(...)
 end
 
+--protocol libs will use these as their logging API.
 socket.log     = M.log
 socket.live    = M.live
 socket.liveadd = M.liveadd
@@ -1199,6 +1200,7 @@ do
 	end
 
 	function tcp:connect(host, port, expires, addr_flags, ...)
+		self.log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
 		if not self.bound_addr then
 			--ConnectEx requires binding first.
 			local ok, err = self:bind(...)
@@ -1241,6 +1243,7 @@ do
 	local accept_buf = accept_buf_ct()
 	local sa_len = ffi.sizeof(accept_buf) / 2
 	function tcp:accept(expires)
+		self.log('', 'sock', 'accept', '%-4s', self)
 		local s, err = M.tcp(self._af, self._pr)
 		if not s then
 			return nil, err
@@ -1516,6 +1519,7 @@ local connect = make_async(true, false, function(self, ai)
 end, EINPROGRESS)
 
 function socket:connect(host, port, expires, addr_flags, ...)
+	self.log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
 	local ai, ext_ai = self:addr(host, port, addr_flags)
 	if not ai then return nil, ext_ai end
 	if not self.bound_addr then
@@ -1558,6 +1562,7 @@ do
 	end, EWOULDBLOCK)
 
 	function tcp:accept(expires)
+		self.log('', 'sock', 'accept', '%-4s', self)
 		local s, err, errno = tcp_accept(self, expires)
 		local retry =
 			   errno == ENETDOWN
@@ -2344,7 +2349,9 @@ end
 
 --[[local]] function wrap_socket(class, s, st, af, pr)
 	local s = {s = s, __index = class, _st = st, _af = af, _pr = pr, r = 0, w = 0}
-	return setmetatable(s, s)
+	setmetatable(s, s)
+	s.log('', 'sock', 'create', '%-4s', s)
+	return s
 end
 function M.tcp(...) return create_socket(tcp, 'tcp', ...) end
 function M.udp(...) return create_socket(udp, 'udp', ...) end
