@@ -14,7 +14,7 @@ CONNECTING
 		host       : server's IP address (required).
 		port       : server's port (optional, defaults to 3306).
 		user       : user name (optional).
-		password   : password (optional).
+		pass[word] : password (optional).
 		db         : the database to set as current database (optional).
 		charset    : the character set used for the connection (required if no collation).
 		collation  : the collation used for the connection (required if no charset).
@@ -49,10 +49,15 @@ QUERYING
 			which will be called as `f(cn, fields, opt)` as soon as field
 			metadata is received but before rows are received (so you can set
 			a custom `mysql_to_lua` converter for particular fields).
+		dry         : `true` to print query instead of executing it, and return true.
 
 	cn:query(query, [opt]) -> res,nil|'again',cols | nil,err,errcode,sqlstate
 
 		Calls `send_query()` followed by a single call to `read_result()`.
+
+	cn:use([db], [opt]) -> true | nil,err,...
+
+		Change current database
 
 PREPARED STATEMENTS
 
@@ -1124,8 +1129,8 @@ function mysql.connect(opt)
 	mysql.note('connect', '%s:%s user=%s db=%s',
 		host, port, opt.user or '', opt.db or '')
 
-	local tcp = opt and opt.tcp or require'sock'.tcp
-	tcp = check_io(self, tcp())
+	local sock = opt and opt.sock or require'sock'
+	tcp = check_io(self, sock.tcp())
 
 	local self = setmetatable({tcp = tcp, host = host, port = port, tracebacks = opt.tracebacks}, conn_mt)
 
@@ -1183,7 +1188,7 @@ function mysql.connect(opt)
 	set_u8(buf, collation)
 	buf(23)
 	set_cstring(buf, opt.user or '')
-	set_token(buf, opt.password or '', scramble)
+	set_token(buf, opt.password or opt.pass or '', scramble)
 	set_cstring(buf, opt.db or '')
 	send_packet(self, buf)
 
@@ -1375,6 +1380,10 @@ end
 conn.read_result = protect(read_result)
 
 local function query(self, sql, opt)
+	if opt and opt.dry then
+		print(sql..';')
+		return true
+	end
 	send_query(self, sql)
 	return read_result(self, opt)
 end
@@ -1386,8 +1395,13 @@ local function pass(self, db, ret, ...)
 	self.db = db
 	return ret, ...
 end
-function conn:use(db)
-	return pass(self, db, self:query('use `' .. db .. '`'))
+function conn:use(db, opt)
+	if not db then
+		self.db = nil
+		return true
+	else
+		return pass(self, db, self:query('use `' .. db .. '`', opt))
+	end
 end
 end
 
