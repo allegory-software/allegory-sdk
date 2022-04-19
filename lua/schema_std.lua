@@ -97,17 +97,17 @@ return function()
 	types.bool0     = {bool , not_null, default = false, mysql_default = '0', tarantool_default = false}
 	types.bool1     = {bool , not_null, default = true , mysql_default = '1', tarantool_default = true}
 
-	types.int8      = {type = 'number', size = 1, decimals = 0, mysql_type = 'tinyint'  , min = -(2^ 7-1), max = 2^ 7, tarantool_type = 'integer'}
-	types.int16     = {type = 'number', size = 2, decimals = 0, mysql_type = 'smallint' , min = -(2^15-1), max = 2^15, tarantool_type = 'integer'}
-	types.int       = {type = 'number', size = 4, decimals = 0, mysql_type = 'int'      , min = -(2^31-1), max = 2^31, tarantool_type = 'integer'}
-	types.int52     = {type = 'number', size = 8, decimals = 0, mysql_type = 'bigint'   , min = -(2^52-1), max = 2^51, tarantool_type = 'integer'}
+	types.int8      = {type = 'number', align = 'right', size = 1, decimals = 0, mysql_type = 'tinyint'  , min = -(2^ 7-1), max = 2^ 7, tarantool_type = 'integer'}
+	types.int16     = {type = 'number', align = 'right', size = 2, decimals = 0, mysql_type = 'smallint' , min = -(2^15-1), max = 2^15, tarantool_type = 'integer'}
+	types.int       = {type = 'number', align = 'right', size = 4, decimals = 0, mysql_type = 'int'      , min = -(2^31-1), max = 2^31, tarantool_type = 'integer'}
+	types.int52     = {type = 'number', align = 'right', size = 8, decimals = 0, mysql_type = 'bigint'   , min = -(2^52-1), max = 2^51, tarantool_type = 'integer'}
 	types.uint8     = {int8 , unsigned = true, min = 0, max = 2^ 8-1}
 	types.uint16    = {int16, unsigned = true, min = 0, max = 2^16-1}
 	types.uint      = {int  , unsigned = true, min = 0, max = 2^32-1}
 	types.uint52    = {int52, unsigned = true, min = 0, max = 2^52-1}
 
-	types.double    = {type = 'number' , size = 8, mysql_type = 'double', tarantool_type = 'number'}
-	types.float     = {type = 'number' , size = 4, mysql_type = 'float' , tarantool_type = 'number'}
+	types.double    = {type = 'number' , align = 'right', size = 8, mysql_type = 'double', tarantool_type = 'number'}
+	types.float     = {type = 'number' , align = 'right', size = 4, mysql_type = 'float' , tarantool_type = 'number'}
 
 	types.dec       = {type = 'decimal', mysql_type = 'decimal', tarantool_type = 'number'}
 
@@ -116,7 +116,7 @@ return function()
 	types.chr       = {str, mysql_type = 'char', padded = true}
 	types.blob      = {type = 'binary', mysql_type = 'mediumblob', size = 0xffffff, tarantool_type = 'string', tarantool_collation = 'none'}
 
-	types.timeofday = {type = 'timeofday', mysql_type = 'time', tarantool_type = 'number',
+	types.timeofday = {type = 'timeofday', align = 'center', mysql_type = 'time', tarantool_type = 'number',
 		to_number   = time_to_seconds,
 		from_number = seconds_to_time,
 	}
@@ -133,9 +133,9 @@ return function()
 	--calculations or for pretty-printing eg. when debugging.
 	--types.timestamp   = {date, mysql_type = 'timestamp', has_time = true}
 	--types.timestamp_s = {date, mysql_type = 'timestamp', has_time = true, has_seconds = true}
-	types.time      = {double, type = 'time', tarantool_type = 'number'}
-	types.time_s    = {double, type = 'time', tarantool_type = 'number', has_seconds = true}
-	types.time_ms   = {double, type = 'time', tarantool_type = 'number', has_seconds = true, has_ms = true}
+	types.time      = {double, align = 'center', type = 'time', tarantool_type = 'number'}
+	types.time_s    = {double, align = 'center', type = 'time', tarantool_type = 'number', has_seconds = true}
+	types.time_ms   = {double, align = 'center', type = 'time', tarantool_type = 'number', has_seconds = true, has_ms = true}
 
 	types.id        = {uint, w = 40}
 	types.idpk      = {id, pk, autoinc}
@@ -169,8 +169,8 @@ return function()
 	types.currency  = {chr, size = 3, maxlen = 3, ascii_ci}
 	types.country   = {chr, size = 2, maxlen = 2, ascii_ci}
 	types.timeago   = {datetime_s, to_text = function(d) return glue_timeago(datetime_to_timestamp(d)) end}
-	types.filesize  = {uint52, type = 'filesize', to_text = function(n, field) return glue_kbytes(n, field.filesize_decimals, field.filesize_magnitude) end}
-	types.duration  = {double, type = 'duration', to_text = function(n) return glue_duration(n, 'days') end}
+	types.filesize  = {uint52, type = 'filesize', align = 'right', to_text = function(n, field) return glue_kbytes(n, field.filesize_decimals, field.filesize_magnitude) end}
+	types.duration  = {double, type = 'duration', align = 'right', to_text = function(n) return glue_duration(n, 'days') end}
 	types.secret_key  = {b64key, type = 'secret_key'}
 	types.public_key  = {b64key, type = 'public_key'}
 	types.private_key = {b64key, type = 'private_key'}
