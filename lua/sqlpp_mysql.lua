@@ -72,6 +72,12 @@ local function init_spp(spp, cmd)
 		rawstmt:free()
 	end
 
+	function cmd:rawselect(sql)
+		local rows, again, cols = self:assert(self:rawquery(sql))
+		assert(again == nil)
+		return rows, cols
+	end
+
 	--SQL quoting -------------------------------------------------------------
 
 	cmd.sqlname_quote = '`'
@@ -92,7 +98,7 @@ local function init_spp(spp, cmd)
 		if not self.rawquery then --fake
 			return {}
 		end
-		return index(self:assert(self:rawquery([[
+		return index((self:rawselect([[
 			select lower(word) from information_schema.keywords where reserved = 1
 		]])))
 	end
@@ -236,11 +242,14 @@ local function init_spp(spp, cmd)
 	function cmd:get_table_defs(opt)
 
 		opt = opt or empty
+		local all = repl(opt.all, nil, true)
+
 		local tables = {} --{DB.TBL->table}
 
-		local sql_db = opt.db and self:sqlval(opt.db)
+		local db = opt.db
+		local sql_db = db and self:sqlval(db)
 
-		for i, db_tbl, grp in spp.each_group('db_tbl', self:assert(self:rawquery([[
+		for i, db_tbl, grp in spp.each_group('db_tbl', self:rawselect([[
 			select
 				concat(table_schema, '.', table_name) db_tbl,
 				table_name,
@@ -264,7 +273,7 @@ local function init_spp(spp, cmd)
 				]]..(db and ' and table_schema = '..sql_db or '')..[[
 			order by
 				table_schema, table_name, ordinal_position
-			]])))
+			]]))
 		do
 			local fields = {}
 			for i, row in ipairs(grp) do
@@ -297,7 +306,7 @@ local function init_spp(spp, cmd)
 		local function row_ref_col(row) return row.ref_col end
 		local function return_false() return false end
 
-		for i, db_tbl, constraints in spp.each_group('db_tbl', self:assert(self:rawquery([[
+		for i, db_tbl, constraints in spp.each_group('db_tbl', self:rawselect([[
 			select
 				concat(cs.table_schema, '.', cs.table_name) db_tbl,
 				cs.table_schema as db,
@@ -325,7 +334,7 @@ local function init_spp(spp, cmd)
 				]]..(db and ' and cs.table_schema = '..sql_db or '')..[[
 			order by
 				cs.table_schema, cs.table_name, cs.constraint_name, kcu.ordinal_position
-			]])))
+			]]))
 		do
 			local tbl = tables[db_tbl]
 			for i, cs_name, grp in spp.each_group('constraint_name', constraints) do
@@ -369,8 +378,8 @@ local function init_spp(spp, cmd)
 
 		local function row_desc(t) return t.collation == 'D' end
 
-		if opt.all or opt.indexes then
-			for i, db_tbl, ixs in spp.each_group('db_tbl', self:assert(self:rawquery([[
+		if repl(opt.indexes, nil, all) then
+			for i, db_tbl, ixs in spp.each_group('db_tbl', self:rawselect([[
 				select
 					concat(s.table_schema, '.', s.table_name) db_tbl,
 					s.table_name,
@@ -388,7 +397,7 @@ local function init_spp(spp, cmd)
 					]]..(db and ' and s.table_schema = '..sql_db or '')..[[
 				order by
 					s.table_schema, s.table_name, s.index_name, s.seq_in_index
-				]])))
+				]]))
 			do
 				local tbl = tables[db_tbl]
 				local uks = tbl.uks
@@ -415,8 +424,8 @@ local function init_spp(spp, cmd)
 			end
 		end
 
-		if opt.all or opt.checks then
-			for i, db_tbl, checks in spp.each_group('db_tbl', self:assert(self:rawquery([[
+		if repl(opt.checks, nil, all) then
+			for i, db_tbl, checks in spp.each_group('db_tbl', self:rawselect([[
 				select
 					concat(cs.table_schema, '.', cs.table_name) db_tbl,
 					cc.constraint_name,
@@ -430,7 +439,7 @@ local function init_spp(spp, cmd)
 					]]..(db and ' and cs.table_schema = '..sql_db or '')..[[
 				order by
 					cs.table_schema, cs.table_name
-				]])))
+				]]))
 			do
 				local tbl = tables[db_tbl]
 				for i, row in ipairs(checks) do
@@ -441,8 +450,8 @@ local function init_spp(spp, cmd)
 			end
 		end
 
-		if opt.all or opt.triggers then
-			for i, db_tbl, triggers in spp.each_group('db_tbl', self:assert(self:rawquery([[
+		if repl(opt.triggers, nil, all) then
+			for i, db_tbl, triggers in spp.each_group('db_tbl', self:rawselect([[
 				select
 					concat(event_object_schema, '.', event_object_table) db_tbl,
 					trigger_name,
@@ -453,11 +462,10 @@ local function init_spp(spp, cmd)
 				from information_schema.triggers
 				where
 					event_object_schema not in ('mysql', 'information_schema', 'performance_schema', 'sys')
-					and definer = current_user
 					]]..(db and ' and event_object_schema = '..sql_db or '')..[[
 				order by
 					event_object_schema, event_object_table
-				]])))
+				]]))
 			do
 				local tbl = tables[db_tbl]
 				for i, row in ipairs(triggers) do
@@ -485,7 +493,7 @@ local function init_spp(spp, cmd)
 
 	function cmd:get_procs(db)
 		local procsets = {} --{db->{proc->p}}
-		for i, db, procs in spp.each_group('db', self:assert(self:rawquery([[
+		for i, db, procs in spp.each_group('db', self:rawselect([[
 			select
 				r.routine_schema db,
 				r.routine_name,
@@ -514,17 +522,20 @@ local function init_spp(spp, cmd)
 				]]..(db and ' and r.routine_schema = '..self:sqlval(db) or '')..[[
 			order by
 				r.routine_schema
-			]])))
+			]]))
 		do
 			local procset = attr(procsets, db)
 			for i, proc_name, grp in spp.each_group('routine_name', procs) do
+				local has_args = grp[1].parameter_name --because of left join
 				local p = {
-					args       = imap(grp, make_param),
+					args = has_args and imap(grp, make_param) or {},
 					mysql_body = grp[1].routine_definition,
 				}
 				procset[proc_name] = p
-				for i, param in ipairs(grp) do
-					p[i] = self:sqltype(param)
+				if has_args then
+					for i, param in ipairs(grp) do
+						p[i] = self:sqltype(param)
+					end
 				end
 			end
 		end
