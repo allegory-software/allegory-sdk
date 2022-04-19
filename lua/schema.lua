@@ -675,7 +675,7 @@ end
 
 local diff = {is_diff = true}
 
-function schema.diff(sc0, sc1, opt) --sync sc0 to sc1.
+function schema.diff(sc0, sc1) --sync sc0 to sc1.
 	local sc0 = assertf(isschema(sc0) and sc0, 'schema expected, got `%s`', type(sc0))
 	sc0:check_refs()
 	sc1:check_refs()
