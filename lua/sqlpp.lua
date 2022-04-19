@@ -36,7 +36,7 @@ INSTANCING
 	sqlpp.new(engine) -> spp                     create a preprocessor instance
 	spp.connect(options) -> cmd                  connect to a database
 	spp.use(rawconn) -> cmd                      use an existing connection
-	cmd:use(db, [schema])                        switch current database
+	cmd:use(db, [schema], [opt])                 switch current database
 	cmd:close()                                  close connection
 
 SQL FORMATTING
@@ -46,7 +46,7 @@ SQL FORMATTING
 	cmd:sqlrows(rows[, indent]) -> s             format `{{a,b},{c,d}}` as `'(a, b), (c, d)'`
 	spp.tsv_rows(opt, s) -> rows                 parse a tab-separated list into a list of rows
 	cmd:sqltsv(opt, s) -> s                      parse a tab-separated list and format with `sqlrows()`
-	cmd:sqldiff(diff, opt)                       format a [schema] diff object
+	cmd:sqldiff(diff) -> {sql1,...}              format a [schema] diff object
 
 SQL PREPROCESSING
 	cmd:sqlquery(sql, ...) -> sql, names         preprocess a query
@@ -56,15 +56,16 @@ SQL PREPROCESSING
 
 QUERY EXECUTION
 	cmd:query([opt], sql, ...) -> rows, cols     query with preprocessing
+		opt.parse                                 `false` to skip preprocessing
+		opt.MYSQL_OPTION                          option to pass to mysql query()
 	cmd:first_row([opt], sql, ...) -> rows, cols query and return the first row
 	cmd:first_row_vals([opt], sql, ...) -> v1,... query and return the first row unpacked
 	cmd:each_row([opt], sql, ...) -> iter        query and iterate rows
 	cmd:each_row_vals([opt], sql, ...)-> iter    query and iterate rows unpacked
 	cmd:each_group(col, [opt], sql, ...) -> iter query, group by col and iterate groups
 	cmd:prepare([opt], sql, ...) -> stmt         prepare query
-		opt.field_attrs <- {k->v}                 field attributes
-		opt.field_attrs <- f(cmd, fields, opt)    field attributes getter/generator
 		opt.parse                                 `false` to skip preprocessing
+		opt.MYSQL_OPTION                          option to pass to mysql prepare
 	stmt:exec(...) -> rows, cols                 execute prepared query
 	stmt:first_row(...) -> rows, cols            query and return the first row
 	stmt:each_row(...) -> iter                   query and iterate rows
@@ -80,13 +81,21 @@ SCHEMA REFLECTION
 	cmd:dbs() -> {db1,...}                       list databases
 	cmd:tables([db]) -> {tbl1,...}               list tables in (current) db
 	cmd:table_def(['[DB.]TABLE']) -> t           get table definition from `cmd.schemas.DB`
-	cmd:extract_schema([db]) -> sc               extract db [schema]
+	cmd:extract_schema([db], [opt]) -> sc        extract db [schema]
+		opt.all                                   extract all
+		opt.indexes                               extract indexes (mysql)
+		opt.checks                                extract check constriants (mysql)
+		opt.views                                 extract views (mysql)
+		opt.triggers                              extract triggers (mysql)
+		opt.functions                             extract functions (mysql)
+		opt.procs                                 extract stored procs (mysql)
 	spp.empty_schema() -> sc                     create an empty [schema]
 	cmd.schemas.DB = sc                          set schema manually for a database
 
 DDL COMMANDS
 	cmd:create_db(name, [charset], [collation])  create database
-	cmd:drop_db(name)                            drop database
+	cmd:drop_db(name, [opt])                     drop database
+	cmd:rename_db(old_db, new_db, [opt])         rename database
 	cmd:sync_schema(source_schema)               sync schema with a source schema
 
 MDL COMMANDS
@@ -1234,8 +1243,9 @@ function sqlpp.new(init)
 		self:assert(self.rawconn:close())
 	end
 
-	function cmd:use(db, schema)
-		self:assert(self.rawconn:use(db))
+	function cmd:use(db, schema, opt)
+		opt = opt and opt.dry and {dry = true} or nil
+		self:assert(self.rawconn:use(db, opt))
 		self.db = self.rawconn.db
 		if self.db and schema then
 			self.schemas[self.db] = schema
@@ -1281,6 +1291,7 @@ function sqlpp.new(init)
 	local function get_result_sets(self, results, opt, sql, param_names, ret, ...)
 		if ret == nil then return nil, ... end --error
 		local rows, again, fields = ret, ...
+		if rows == true then return true end --dry
 		if not fields then --update query
 			if rows.affected_rows > 0 then --that affected rows...
 				local s = sql:match(m1) or sql:match(m2) or sql:match(m3)
@@ -1443,6 +1454,13 @@ function sqlpp.new(init)
 		return self:exec_with_options'show databases'
 	end
 
+	function cmd:db_charset_and_collation(db)
+		return self:first_row_vals([[
+			select default_character_set_name, default_collation_name
+			from information_schema.schemata where schema_name = ?
+		]], db or self.db)
+	end
+
 	function cmd:tables(db)
 		return self:exec_with_options('show tables from ??', db or self.db)
 	end
@@ -1488,21 +1506,29 @@ function sqlpp.new(init)
 		return spp.empty_schema()
 	end
 
-	function cmd:extract_schema(db)
+	function cmd:extract_schema(db, opt)
 		db = db or assert(self.db)
+		local charset, collation = self:db_charset_and_collation(db)
+		assertf(charset, 'db not found: %s', db)
 		local sc = self:empty_schema()
-		for db_tbl, tbl in pairs(self:get_table_defs{db = db, all=1}) do
+		sc.charset, sc.collation = charset, collation
+		for db_tbl, tbl in pairs(self:get_table_defs(update({db = db}, opt))) do
 			sc.tables[tbl.name] = tbl
 		end
-		sc.procs = self:get_procs(db)[db]
+		opt = opt or empty
+		local all = repl(opt.all, nil, true)
+		if repl(opt.procs, nil, all) then
+			sc.procs = self:get_procs(db)[db]
+		end
 		return sc
 	end
 
 	--DDL commands ------------------------------------------------------------
 
-	function cmd:create_db(name, charset, collation)
-		return self:assert(self:query(outdent[[
-			create database if not exists `{name}`
+	function cmd:create_db(name, charset, collation, opt)
+		opt = opt and opt.dry and {dry = true} or nil
+		return self:query(opt, outdent[[
+			create database if not exists ::name
 				#if charset
 				character set {charset}
 				#endif
@@ -1513,11 +1539,12 @@ function sqlpp.new(init)
 				name      = name,
 				charset   = charset,
 				collation = collation,
-			}))
+			})
 	end
 
-	function cmd:drop_db(name)
-		return self:query('drop database if exists `{name}`', {name = name})
+	function cmd:drop_db(name, opt)
+		opt = opt and opt.dry and {dry = true} or nil
+		return self:query(opt, 'drop database if exists ??', name)
 	end
 
 	function cmd:sync_schema(src, opt)
@@ -1529,7 +1556,6 @@ function sqlpp.new(init)
 			or assertf(false, 'schema or sqlpp expected, got %s', type(src))
 		local this_sc = self:extract_schema()
 		local diff = schema.diff(this_sc, src_sc)
-		local qopt = {parse = false}
 		local sqls = self:sqldiff(diff)
 		if #sqls == 0 then
 			if opt.dry then
@@ -1540,16 +1566,55 @@ function sqlpp.new(init)
 				diff:pp()
 				print'\n/******** BEGIN SYNC SCHEMA ********/\n'
 			end
+			local qopt = {parse = false, dry = opt.dry}
 			for _,sql in ipairs(sqls) do
-				if opt.dry then
-					print(sql..';')
-				else
-					self:query(qopt, sql)
-				end
+				self:query(qopt, sql)
 			end
 			if opt.dry then
 				print'\n/********* END SYNC SCHEMA *********/\n'
 			end
+		end
+	end
+
+	function cmd:rename_db(old_db, new_db, opt)
+		opt = opt or empty
+		local schema = require'schema'
+
+		local cur_db = self.db
+
+		local dbs = glue.index(self:dbs())
+		assertf(dbs[old_db], 'rename_db: db does not exist: %s', old_db)
+		assertf(not dbs[new_db], 'rename_db: db already exists: %s. remove it first.', new_db)
+
+		local charset, collation = self:db_charset_and_collation(old_db)
+		assert(charset and collation)
+		self:create_db(new_db, charset, collation, opt)
+
+		--MySQL is missing a `RENAME DATABASE` command, so we have to do with
+		--its `RENAME TABLE` which can move tables between schemas along with
+		--their checks, indexes and foreign keys, but views, triggers, functions
+		--and procs we have to move (i.e. drop and recreate) ourselves.
+
+		local sc0 = self:extract_schema(old_db)
+		local sc1 = self:extract_schema(old_db, {
+			views = false,
+			triggers = false,
+			functions = false,
+			procs = false,
+		})
+		for tbl_name, tbl in pairs(sc1.tables) do
+			tbl.name = new_db..'.'..tbl_name
+			tbl.aka = {[tbl_name] = true}
+		end
+		local remove_all = self:sqldiff(schema.diff(sc0, sc1))
+		local create_all = self:sqldiff(schema.diff(sc1, sc0))
+
+		local qopt = {parse = false, dry = opt.dry}
+		self:use(old_db, nil, qopt); for _,sql in ipairs(remove_all) do self:query(qopt, sql) end
+		self:use(new_db, nil, qopt); for _,sql in ipairs(create_all) do self:query(qopt, sql) end
+		self:drop_db(old_db, qopt)
+		if cur_db ~= old_db then
+			self:use(cur_db, nil, qopt)
 		end
 	end
 
