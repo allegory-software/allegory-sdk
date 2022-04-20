@@ -1619,7 +1619,7 @@ function sqlpp.new(init)
 
 	function cmd:rename_db(old_db, new_db, opt)
 		local cur_db = self.db
-		local opt = {parse = false, dry = opt.dry}
+		local opt = {parse = false, dry = opt and opt.dry}
 		local sqls = self:rename_db_sqls(old_db, new_db)
 		for _,sql in ipairs(sqls) do
 			self:query(opt, sql)
