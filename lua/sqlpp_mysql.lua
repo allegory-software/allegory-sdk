@@ -188,7 +188,7 @@ local function init_spp(spp, cmd)
 			dt.decimals = t.numeric_scale
 			dt.type = dt.digits > 15 and 'decimal' or 'number'
 			if dt.type == 'number' then
-				min, max = mysql.dec_range(dt.digits, dt.decimals, dt.unsigned)
+				dt.min, dt.max = mysql.dec_range(dt.digits, dt.decimals, dt.unsigned)
 			end
 		elseif mt == 'tinyint' or mt == 'smallint' or mt == 'mediumint'
 			or mt == 'int' or mt == 'bigint'

@@ -402,6 +402,7 @@ function sqlpp.new(init)
 
 	function cmd:check_allow_quoting(s)
 		assertf(self.allow_quoting, 'use of reserved word: "%s"', s)
+		return true
 	end
 
 	--NOTE: don't use dots in db names, table names and column names!
@@ -1525,8 +1526,9 @@ function sqlpp.new(init)
 
 	--DDL commands ------------------------------------------------------------
 
-	function cmd:create_db_sql(name, charset, collation)
-		return self:sqlquery(outdent[[
+	function cmd:create_db(name, charset, collation, opt)
+		opt = opt and opt.dry and {dry = true} or nil
+		return self:query(opt, outdent[[
 			create database if not exists `{name}`
 				#if charset
 				character set {charset}
@@ -1539,11 +1541,6 @@ function sqlpp.new(init)
 				charset   = charset,
 				collation = collation,
 			})
-	end
-
-	function cmd:create_db(name, charset, collation, opt)
-		opt = opt and opt.dry and {dry = true} or nil
-		return self:query(opt, self:create_db_sql(name, charset, collation))
 	end
 
 	function cmd:drop_db(name, opt)
@@ -1589,7 +1586,6 @@ function sqlpp.new(init)
 
 		local charset, collation = self:db_charset_and_collation(old_db)
 		assert(charset and collation)
-		local create_db_sql = self:create_db_sql(new_db, charset, collation)
 
 		--MySQL is missing a `RENAME DATABASE` command, so we have to do with
 		--its `RENAME TABLE` which can move tables between schemas along with
@@ -1607,13 +1603,17 @@ function sqlpp.new(init)
 			tbl.name = new_db..'.'..tbl_name
 			tbl.aka = {[tbl_name] = true}
 		end
+		local allow_quoting = self.allow_quoting
+		self.allow_quoting = true
 		local remove_all = self:sqldiff(schema.diff(sc0, sc1))
 		local create_all = self:sqldiff(schema.diff(sc1, sc0))
+		self.allow_quoting = allow_quoting
 		return extend(
-			{create_db_sql},
+			{'create database `'..new_db..'` character set '..charset..' collate '..collation},
 			{'use `'..old_db..'`'}, remove_all,
 			{'use `'..new_db..'`'}, create_all,
-			self.db and {'use `'..self.db..'`'}
+			{'drop database `'..old_db..'`'},
+			self.db and self.db ~= old_db and {'use `'..self.db..'`'}
 		)
 	end
 
