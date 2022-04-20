@@ -1525,10 +1525,9 @@ function sqlpp.new(init)
 
 	--DDL commands ------------------------------------------------------------
 
-	function cmd:create_db(name, charset, collation, opt)
-		opt = opt and opt.dry and {dry = true} or nil
-		return self:query(opt, outdent[[
-			create database if not exists ::name
+	function cmd:create_db_sql(name, charset, collation)
+		return self:sqlquery(outdent[[
+			create database if not exists `{name}`
 				#if charset
 				character set {charset}
 				#endif
@@ -1542,9 +1541,14 @@ function sqlpp.new(init)
 			})
 	end
 
+	function cmd:create_db(name, charset, collation, opt)
+		opt = opt and opt.dry and {dry = true} or nil
+		return self:query(opt, self:create_db_sql(name, charset, collation))
+	end
+
 	function cmd:drop_db(name, opt)
 		opt = opt and opt.dry and {dry = true} or nil
-		return self:query(opt, 'drop database if exists ??', name)
+		return self:query(opt, 'drop database if exists `{name}`', {name = name})
 	end
 
 	function cmd:sync_schema(src, opt)
@@ -1576,11 +1580,8 @@ function sqlpp.new(init)
 		end
 	end
 
-	function cmd:rename_db(old_db, new_db, opt)
-		opt = opt or empty
+	function cmd:rename_db_sqls(old_db, new_db)
 		local schema = require'schema'
-
-		local cur_db = self.db
 
 		local dbs = glue.index(self:dbs())
 		assertf(dbs[old_db], 'rename_db: db does not exist: %s', old_db)
@@ -1588,7 +1589,7 @@ function sqlpp.new(init)
 
 		local charset, collation = self:db_charset_and_collation(old_db)
 		assert(charset and collation)
-		self:create_db(new_db, charset, collation, opt)
+		local create_db_sql = self:create_db_sql(new_db, charset, collation)
 
 		--MySQL is missing a `RENAME DATABASE` command, so we have to do with
 		--its `RENAME TABLE` which can move tables between schemas along with
@@ -1608,13 +1609,20 @@ function sqlpp.new(init)
 		end
 		local remove_all = self:sqldiff(schema.diff(sc0, sc1))
 		local create_all = self:sqldiff(schema.diff(sc1, sc0))
+		return extend(
+			{create_db_sql},
+			{'use `'..old_db..'`'}, remove_all,
+			{'use `'..new_db..'`'}, create_all,
+			self.db and {'use `'..self.db..'`'}
+		)
+	end
 
-		local qopt = {parse = false, dry = opt.dry}
-		self:use(old_db, nil, qopt); for _,sql in ipairs(remove_all) do self:query(qopt, sql) end
-		self:use(new_db, nil, qopt); for _,sql in ipairs(create_all) do self:query(qopt, sql) end
-		self:drop_db(old_db, qopt)
-		if cur_db ~= old_db then
-			self:use(cur_db, nil, qopt)
+	function cmd:rename_db(old_db, new_db, opt)
+		local cur_db = self.db
+		local opt = {parse = false, dry = opt.dry}
+		local sqls = self:rename_db_sqls(old_db, new_db)
+		for _,sql in ipairs(sqls) do
+			self:query(opt, sql)
 		end
 	end
 
