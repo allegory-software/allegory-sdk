@@ -124,6 +124,8 @@ local index = glue.index
 local repl = glue.repl
 local update = glue.update
 local time = glue.time
+local trim = glue.trim
+local starts = glue.starts
 
 local check_io, checkp, _, protect = errors.tcp_protocol_errors'mysql'
 
@@ -1231,14 +1233,16 @@ function conn:closed()
 	return not self.state
 end
 
-local function send_query(self, query)
-	local severity = query:find'^%s*select%s+' and '' or 'note'
-	mysql.log(severity, 'query', '%s', query)
+
+local function send_query(self, sql)
+	sql = trim(sql)
+	local severity = (starts(sql, 'select') or starts(sql, 'show')) and '' or 'note'
+	mysql.log(severity, 'query', '%s', sql)
 	assert(self.state == 'ready')
 	self.packet_no = -1
-	local buf = send_buffer(1 + #query)
+	local buf = send_buffer(1 + #sql)
 	set_u8(buf, COM_QUERY)
-	set_bytes(buf, query)
+	set_bytes(buf, sql)
 	send_packet(self, buf)
 	self.state = 'read'
 	return true

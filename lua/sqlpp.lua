@@ -96,6 +96,9 @@ DDL COMMANDS
 	cmd:create_db(name, [charset], [collation])  create database
 	cmd:drop_db(name, [opt])                     drop database
 	cmd:rename_db(old_db, new_db, [opt])         rename database
+	cmd:rename_user(old_user, new_user, [opt]    rename user
+	cmd:drop_user(user, [opt])                   drop user
+	cmd:grant_user(user, db, [opt])              grant user access to a db
 	cmd:sync_schema(source_schema)               sync schema with a source schema
 
 MDL COMMANDS
@@ -1624,6 +1627,22 @@ function sqlpp.new(init)
 		for _,sql in ipairs(sqls) do
 			self:query(opt, sql)
 		end
+	end
+
+	function cmd:rename_user(old_user, new_user, opt)
+		local opt = {parse = false, dry = opt and opt.dry}
+		self:query(opt, "rename user '"..old_user.."'@'localhost' to '"..new_user.."'@'localhost'")
+	end
+
+	function cmd:drop_user(user, opt)
+		local opt = {parse = false, dry = opt and opt.dry}
+		self:query(opt, "drop user '"..user.."'@'localhost'")
+	end
+
+	function cmd:grant_user(user, db, opt)
+		local opt = {parse = false, dry = opt and opt.dry}
+		self:query(opt, "grant all privileges on `"..db.."`.* to '"..user.."'@'localhost'")
+		self:query'flush privileges'
 	end
 
 	--MDL commands ------------------------------------------------------------
