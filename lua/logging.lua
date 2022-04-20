@@ -465,7 +465,7 @@ function logging.livelist()
 	return t
 end
 
-function logging.rpc:get_livelist()
+function logging.rpc:poll_livelist()
 	self.logvar('livelist', self.livelist())
 end
 
