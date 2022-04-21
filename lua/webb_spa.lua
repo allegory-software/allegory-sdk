@@ -12,6 +12,7 @@ API
 	css(s)                                 add css code to inline.css
 	js(s)                                  add js code to inline.js
 	html(s)                                add inline html code to the SPA body
+	spa_action()                           SPA action
 
 ACTIONS
 
@@ -231,7 +232,7 @@ local function page_title(infer, body)
 		or (args(1) or ''):gsub('[-_]', ' ')
 end
 
-action['404.html'] = function(action)
+function spa_action()
 	if _G.login then
 		login() --sets lang from user profile.
 	end
@@ -258,3 +259,5 @@ action['404.html'] = function(action)
 	t.templates = buf()
 	out(render_string(spa_template, t))
 end
+
+action['404.html'] = spa_action

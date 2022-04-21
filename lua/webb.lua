@@ -1687,7 +1687,7 @@ function outcatlist(listfile, ...)
 				add(t, tostring(mtime))
 				add(c, function() outfile(path) end)
 			elseif action then --file not found, try an action
-				local s, found = record(exec, file, ...)
+				local s, found = record(action, file, ...)
 				if found then
 					add(t, s)
 					add(c, function() out(s) end)

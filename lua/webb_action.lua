@@ -84,7 +84,7 @@ end
 function href(s, target_lang)
 	local t = url_arg(s)
 	local segs = t.segments
-	local action = not t.host and (segs[1] == '' and segs[2] and action_name(segs[2])) or nil
+	local action = not t.host and (segs and segs[1] == '' and segs[2] and action_name(segs[2])) or nil
 	if not action then
 		return url(s)
 	end
@@ -212,8 +212,12 @@ local function action_handler(action, ...)
 
 	if not handler then --look in the filesystem
 		local file = table.concat({action, ...}, '/')
-		file_ext = fileext(file)
-		local plain_file_allowed = not (file_ext and file_handlers[file_ext])
+		local file_ext = fileext(file)
+		if not file_ext then
+			file_ext = 'html'
+			file = file .. '.html'
+		end
+		local plain_file_allowed = not file_handlers[file_ext]
 		if plain_file_allowed then
 			handler = wwwfile[file] and wwwfile(file)
 			if not handler then

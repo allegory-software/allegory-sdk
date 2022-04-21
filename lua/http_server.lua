@@ -57,6 +57,7 @@ function server:bind_libs(libs)
 			self.start         = sock.start
 			self.sleep         = sock.sleep
 			self.currentthread = sock.currentthread
+			self.liveadd       = sock.liveadd
 		elseif lib == 'sock_libtls' then
 			local socktls = require'sock_libtls'
 			self.stcp          = socktls.server_stcp
@@ -207,7 +208,7 @@ function server:new(t)
 			end
 			tcp = stcp
 		end
-		sock.liveadd(tcp, tls and 'https' or 'http')
+		self.liveadd(tcp, tls and 'https' or 'http')
 		push(self.sockets, tcp)
 
 		function accept_connection()
@@ -222,7 +223,7 @@ function server:new(t)
 				end
 				return
 			end
-			sock.liveadd(ctcp, tls and 'https' or 'http')
+			self.liveadd(ctcp, tls and 'https' or 'http')
 			self.resume(self.thread(function()
 				local ok, err = errors.pcall(handler, tcp, ctcp, t)
 				self:check(ctcp, ok or errors.is(err, 'tcp'), 'handler', '%s', err)

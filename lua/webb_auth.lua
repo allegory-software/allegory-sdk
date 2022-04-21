@@ -24,7 +24,8 @@ CONFIG
 	secret                       <required>  secret to encrypt sessions and passwords
 	session_cookie_name          'session'   name of the session cookie
 	session_cookie_secure_flag   true        set Secure flag to cookie
-	auto_create_user             true        auto-create an anonymous users
+	auto_create_user             true        auto-create anonymous users
+	allow_create_user            true        allow create new users on auth
 	dev_email                    'dev@HOST'  dev (i.e. super-admin) email
 
 	auth_token_lifetime          3600        forgot-password token lifetime

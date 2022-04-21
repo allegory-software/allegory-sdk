@@ -3300,7 +3300,7 @@ function richtext_widget_editing(e) {
 
 component('x-if', 'Containers', function(e) {
 
-	let content = e.at[0]
+	let content = e.firstChild
 	e.clear()
 	e.hide()
 
