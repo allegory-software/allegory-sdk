@@ -675,13 +675,14 @@ end
 
 local dwbuf = ffi.new'DWORD[1]'
 
+--NOTE: always ask for more than 0 bytes from a pipe or you'll not see EOF.
 local function mask_eof(ret, err)
 	if ret then return ret end
 	if err == 'eof' then return 0 end --pipes do that
 	return nil, err
 end
 function file.read(f, buf, sz, expires)
-	assert(sz > 0) --because it returns 0 for EOF
+	if sz == 0 then return 0 end --masked for compat.
 	if f._read_async then
 		local sock = require'sock'
 		return mask_eof(sock._file_async_read(f, read_overlapped, buf, sz, expires))

@@ -257,8 +257,9 @@ int fsync(int fd);
 int64_t lseek(int fd, int64_t offset, int whence) asm("lseek%s");
 ]], linux and '64' or ''))
 
+--NOTE: always ask for more than 0 bytes from a pipe or you'll not see EOF.
 function file.read(f, buf, sz, expires)
-	assert(sz > 0) --because it returns 0 for EOF
+	if sz == 0 then return 0 end --masked for compat.
 	if f._async then
 		local sock = require'sock'
 		return sock._file_async_read(f, buf, sz, expires)
