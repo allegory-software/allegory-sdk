@@ -170,7 +170,7 @@ on('auth_sign_out_button.init', function(e) {
 
 // sign-in form --------------------------------------------------------------
 
-let sign_in_dialog = memoize(function() {
+let dialog = memoize(function() {
 
 	let e = unsafe_html(render('sign_in_dialog'))
 
@@ -199,7 +199,7 @@ let sign_in_dialog = memoize(function() {
 	})
 
 	e.email_button.action = function() {
-		let d = sign_in_dialog()
+		let d = dialog()
 		e.email_button.post(href('/sign-in-email.json'), {
 			email: e.email_edit.input_val,
 		}, function() {
@@ -212,7 +212,7 @@ let sign_in_dialog = memoize(function() {
 	}
 
 	e.code_button.action = function() {
-		let d = sign_in_dialog()
+		let d = dialog()
 		usr_nav.reload({
 			upload: {
 				type: 'code',
@@ -232,13 +232,27 @@ let sign_in_dialog = memoize(function() {
 
 function sign_in() {
 	set_signed_in(false, true)
-	let d = sign_in_dialog()
+	let d = dialog()
 	d.email_edit.val = null
 	d.code_edit.val = null
 	d.slides.slide(0)
 	d.modal()
 	// adding this dynamically to prevent loading the background needlessly.
 	$1('.modal-dialog').class('sign-in-splash-img')
+	return d
 }
+
+component('x-sign-in-dialog', function(e) {
+
+	e.style.display = 'contents'
+
+	e.on('bind', function(on) {
+		if (on)
+			sign_in()
+		else
+			dialog().close()
+	})
+
+})
 
 }

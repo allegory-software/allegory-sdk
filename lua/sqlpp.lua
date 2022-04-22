@@ -1721,7 +1721,7 @@ function sqlpp.new(init)
 		end
 	end
 
-	function cmd:insert_row(tbl, vals, col_map, or_update)
+	local function insert_row(self, tbl, vals, col_map, or_update, opt)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local tdef = self:table_def(tbl)
 		local ai_col = auto_increment_col(tdef)
@@ -1741,19 +1741,21 @@ function sqlpp.new(init)
 					%s
 			]]), self:sqlname(tbl), set_sql, set_sql)
 		end
-		local id = repl(self:query({parse = false}, sql).insert_id, 0, nil)
+		local id = repl(self:query(update({parse = false}, opt), sql).insert_id, 0, nil)
 		if id then
 			assert(ai_col)
 			vals[col_map[ai_col] or ai_col] = id
 		end
 		return id, ret
 	end
-
-	function cmd:insert_or_update_row(tbl, vals, col_map)
-		return self:insert_row(tbl, vals, col_map, true)
+	function cmd:insert_row(tbl, vals, col_map, opt)
+		return insert_row(self, tbl, vals, col_map, false, opt)
+	end
+	function cmd:insert_or_update_row(tbl, vals, col_map, opt)
+		return insert_row(self, tbl, vals, col_map, true, opt)
 	end
 
-	function cmd:update_row(tbl, vals, col_map, security_filter)
+	function cmd:update_row(tbl, vals, col_map, security_filter, opt)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map, vals)
 		local tdef = self:table_def(tbl)
@@ -1767,10 +1769,10 @@ function sqlpp.new(init)
 				%s
 			where %s
 		]], self:sqlname(tbl), set_sql, where_sql)
-		return self:query({parse = false}, sql)
+		return self:query(update({parse = false}, opt), sql)
 	end
 
-	function cmd:delete_row(tbl, vals, col_map, security_filter)
+	function cmd:delete_row(tbl, vals, col_map, security_filter, opt)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map, vals)
 		local tdef = self:table_def(tbl)
@@ -1778,13 +1780,13 @@ function sqlpp.new(init)
 		local sql = fmt(outdent[[
 			delete from %s where %s
 		]], self:sqlname(tbl), where_sql)
-		return self:query({parse = false}, sql)
+		return self:query(update({parse = false}, opt), sql)
 	end
 
 	--NOTE: The returned insert_id is that of the first inserted row.
 	--You do the math for the other rows, they should be consecutive even
 	--while other inserts are happening at the same time but I'm not sure.
-	function cmd:insert_rows(tbl, rows, col_map, compact)
+	function cmd:insert_rows(tbl, rows, col_map, compact, opt)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(assert(col_map))
 		if #rows == 0 then
@@ -1808,7 +1810,7 @@ function sqlpp.new(init)
 			values
 				%s
 		]], self:sqlname(tbl), cols_sql, rows_sql)
-		return self:query({parse = false}, sql)
+		return self:query(update({parse = false}, opt), sql)
 	end
 
 	function cmd:copy_table(tbl, dst_cmd)

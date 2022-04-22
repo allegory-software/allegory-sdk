@@ -398,11 +398,22 @@ component('x-button', 'Input', function(e) {
 		}
 	}
 
-	e.set_text = function(s) {
+	e.format_text = function(s) {
+		let row = e.row
+		if (!row) return s
+		return render_string(s, e.nav.serialize_row_vals(row))
+	}
+
+	function update_text() {
+		s = e.format_text(e.text)
 		e.text_box.set(s, 'pre-wrap')
 		e.class('text-empty', !s)
 		if (e.link)
-			e.link.set(TC(e.text))
+			e.link.set(TC(s))
+	}
+
+	e.set_text = function(s) {
+		e.update()
 	}
 	e.prop('text', {store: 'var', default: 'OK', slot: 'lang'})
 
@@ -561,6 +572,7 @@ component('x-button', 'Input', function(e) {
 
 	e.do_update_row = function(row) {
 		e.disabled = e.nav && !row
+		update_text()
 	}
 
 })

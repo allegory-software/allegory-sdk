@@ -1234,9 +1234,9 @@ function conn:closed()
 end
 
 
-local function send_query(self, sql)
+local function send_query(self, sql, quiet)
 	sql = trim(sql)
-	local severity = (starts(sql, 'select') or starts(sql, 'show')) and '' or 'note'
+	local severity = (quiet or starts(sql, 'select') or starts(sql, 'show')) and '' or 'note'
 	mysql.log(severity, 'query', '%s', sql)
 	assert(self.state == 'ready')
 	self.packet_no = -1
@@ -1388,7 +1388,7 @@ local function query(self, sql, opt)
 		print(sql..';')
 		return true
 	end
-	send_query(self, sql)
+	send_query(self, sql, opt and opt.quiet)
 	return read_result(self, opt)
 end
 conn.query = protect(query)
