@@ -75,6 +75,8 @@
 	--x-fg-link-visited : var(--x-fg);
 
 	--x-bg-button                 : #eff3f6;
+	--x-bg-button-hover           : #eff3f6; /* TODO: use this */
+	--x-bg-button-active          : #eff3f6; /* TODO: use this */
 	--x-fg-button                 : var(--x-fg-inverted);
 	--x-bg-button-primary         : #28a745;
 	--x-fg-button-primary         : var(--x-fg-inverted);
@@ -2274,7 +2276,7 @@ textarea.x-editbox-input {
 .x-form h3
 {
 	font-weight: normal;
-	margin-top: 1.2em;
+	margin-top: 1em;
 	margin-bottom: .2em;
 }
 
@@ -2741,14 +2743,12 @@ textarea.x-editbox-input {
 	display: inline-flex;
 	align-items: center;
 	justify-content: flex-end;
-	font-size: 10px;
 	width: 0;
 	padding: 0 4px;
-	height: 100%;
 	color: var(--x-fg-disabled);
 }
 
-.x-grid-cell-indent:empty::before {
+.x-grid-cell-indent:empty::after {
 	content: '\200b'; /* zwsp to force line height */
 }
 

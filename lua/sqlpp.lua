@@ -1723,7 +1723,7 @@ function sqlpp.new(init)
 
 	local function insert_row(self, tbl, vals, col_map, or_update, opt)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
-		local tdef = self:table_def(tbl)
+		local tdef = assertf(self:table_def(tbl), 'invalid table: %s', tbl)
 		local ai_col = auto_increment_col(tdef)
 		local col_map = col_map_arg(col_map, vals)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields, ai_col)
@@ -1758,7 +1758,7 @@ function sqlpp.new(init)
 	function cmd:update_row(tbl, vals, col_map, security_filter, opt)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map, vals)
-		local tdef = self:table_def(tbl)
+		local tdef = assertf(self:table_def(tbl), 'invalid table: %s', tbl)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields)
 		if not set_sql then
 			return
@@ -1775,7 +1775,7 @@ function sqlpp.new(init)
 	function cmd:delete_row(tbl, vals, col_map, security_filter, opt)
 		assertf(type(tbl) == 'string', 'table name expected, got %s', type(tbl))
 		local col_map = col_map_arg(col_map, vals)
-		local tdef = self:table_def(tbl)
+		local tdef = assertf(self:table_def(tbl), 'invalid table: %s', tbl)
 		local where_sql = where_sql(self, vals, col_map, tdef.pk, tdef.fields, security_filter)
 		local sql = fmt(outdent[[
 			delete from %s where %s

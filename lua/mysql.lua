@@ -1224,6 +1224,7 @@ function conn:close()
 		send_packet(self, buf)
 		check_io(self, self.tcp:close())
 		self.state = nil
+		self.sql = nil
 	end
 	return true
 end
@@ -1245,6 +1246,7 @@ local function send_query(self, sql, quiet)
 	set_bytes(buf, sql)
 	send_packet(self, buf)
 	self.state = 'read'
+	self.sql = sql
 	return true
 end
 conn.send_query = protect(send_query)
@@ -1253,8 +1255,11 @@ local function read_result(self, opt)
 	assert(self.state == 'read' or self.state == 'read_binary')
 	local typ, buf = recv_packet(self)
 	if typ == 'ERR' then
+		local message, errno, sqlstate = get_err_packet(buf)
+		mysql.log('ERROR', 'query', '%s\n\n%s [%d] [%s]', self.sql, message, errno, sqlstate)
 		self.state = 'ready'
-		return nil, get_err_packet(buf)
+		self.sql = nil
+		return nil, message, errno, sqlstate
 	elseif typ == 'OK' then
 		buf(1) --status: OK
 		local res = {}
@@ -1268,6 +1273,7 @@ local function read_result(self, opt)
 			return res, 'again'
 		else
 			self.state = 'ready'
+			self.sql = nil
 			return res
 		end
 	end
@@ -1292,6 +1298,7 @@ local function read_result(self, opt)
 
 		if typ == 'ERR' then
 			self.state = 'ready'
+			self.sql = nil
 			return nil, get_err_packet(buf)
 		end
 
@@ -1379,6 +1386,7 @@ local function read_result(self, opt)
 	end
 
 	self.state = 'ready'
+	self.sql = nil
 	return rows, nil, cols
 end
 conn.read_result = protect(read_result)

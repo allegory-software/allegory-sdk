@@ -529,8 +529,10 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 		cell.attr('title', s)
 	}
 
+	e.indent_size = 16
+
 	function indent_offset(indent) {
-		return 12 + indent * 16
+		return 12 + indent * e.indent_size
 	}
 
 	function set_cell_indent(cell_indent, indent) {
