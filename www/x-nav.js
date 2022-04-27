@@ -4077,6 +4077,7 @@ function nav_widget(e) {
 			} else if (row.removed) {
 				e.begin_set_state(row)
 				e.set_row_state('removed', false, false)
+				e.set_row_state('errors', undefined)
 				e.end_set_state()
 			} else if (row.modified) {
 				e.revert_row(row)

@@ -263,7 +263,7 @@ function virtual_rowset(init, ...)
 	end
 
 	local function db_error(err, s)
-		return config'hide_errors' and s or s..(err and err.message and ':\n'..err.message or '')
+		return glue.catargs(':\n', s, err and err.message)
 	end
 
 	function rs:can_add_row(values)
@@ -335,7 +335,7 @@ function virtual_rowset(init, ...)
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
 						else
-							rt.error = db_error(err, S('insert_error', 'Error on inserting record'))
+							rt.error = db_error(err)
 						end
 					end
 				else
@@ -375,7 +375,7 @@ function virtual_rowset(init, ...)
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
 						else
-							rt.error = db_error(err, S('update_error', 'Error on updating record'))
+							rt.error = db_error(err)
 						end
 					end
 				else
@@ -402,8 +402,7 @@ function virtual_rowset(init, ...)
 							end
 						end
 					else
-						rt.error = db_error(err,
-							S('delete_error', 'Error on removing record'))
+						rt.error = db_error(err)
 					end
 				else
 					rt.error = err or true
