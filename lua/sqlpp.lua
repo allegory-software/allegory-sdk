@@ -673,9 +673,9 @@ function sqlpp.new(init)
 	end
 
 	function cmd:sqlcol(fld, cf)
-		return _('%-16s %-14s %s%s', self:sqlname(fld.col), self:sqltype(fld),
+		return _('%-26s %-14s %-16s %s', self:sqlname(fld.col), self:sqltype(fld),
 			self:sqlcol_flags(fld) or '',
-			cf ~= nil and (cf == false and ' first' or ' after '..self:sqlname(cf)) or ''
+			cf ~= nil and (cf == false and 'first' or 'after '..self:sqlname(cf)) or ''
 		)
 	end
 
@@ -937,7 +937,7 @@ function sqlpp.new(init)
 							return d1.new.col_pos < d2.new.col_pos
 						end
 						for old_col, fd in sortedpairs(d.fields.update, cmp_by_col_pos) do
-							add(changes, _('change %-16s %s',
+							add(changes, _('change %-26s %s',
 								N(old_col), self:sqlcol(fd.new, fd.new.col_in_front)))
 						end
 					end
