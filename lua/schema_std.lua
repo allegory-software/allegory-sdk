@@ -120,22 +120,43 @@ return function()
 		to_number   = time_to_seconds,
 		from_number = seconds_to_time,
 	}
+	types.timeofday_s = {timeofday, has_seconds = true}
+
+	types.timeofday_in_seconds   = {type = 'timeofday_in_seconds', align = 'center', mysql_type = 'double', tarantool_type = 'number'}
+	types.timeofday_in_seconds_s = {timeofday_in_seconds, has_seconds = true}
+
 	types.date      = {type = 'date', mysql_type = 'date', tarantool_type = 'number',
 		mysql_to_sql       = date_to_sql,
 		mysql_to_tarantool = datetime_to_timestamp,
 		to_number          = datetime_to_timestamp,
 		from_number        = timestamp_to_datetime,
 	}
-	types.datetime  = {date, mysql_type = 'datetime', has_time = true, w = 80}
-	types.datetime_s= {datetime, has_seconds = true}
-	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `time` instead.
-	--The downside is that you have to use from_unixtime() in queries to do date
-	--calculations or for pretty-printing eg. when debugging.
+	types.datetime   = {date, mysql_type = 'datetime', has_time = true, w = 80}
+	types.datetime_s = {datetime, has_seconds = true}
+	types.timeago    = {datetime_s, timeago = true,
+		to_text = function(d)
+			return glue_timeago(datetime_to_timestamp(d))
+		end}
+
+	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `datetime` instead,
+	--which works the same as `timestamp` as long as you set the server timezone to UTC.
 	--types.timestamp   = {date, mysql_type = 'timestamp', has_time = true}
 	--types.timestamp_s = {date, mysql_type = 'timestamp', has_time = true, has_seconds = true}
-	types.time      = {double, align = 'center', type = 'time', tarantool_type = 'number'}
-	types.time_s    = {double, align = 'center', type = 'time', tarantool_type = 'number', has_seconds = true}
-	types.time_ms   = {double, align = 'center', type = 'time', tarantool_type = 'number', has_seconds = true, has_ms = true}
+
+	--timestamp-based types to use in virtual rowsets (no parsing, holds time() values).
+	types.time_date    = {double, type = 'time', align = 'center', tarantool_type = 'number'}
+	types.time         = {time_date, has_time = true, w = 80}
+	types.time_s       = {time, has_seconds = true}
+	types.time_ms      = {time, has_ms = true}
+	types.time_timeago = {time_s, timeago = true,
+		to_text = function(d)
+			return glue_timeago(d)
+		end}
+
+	types.duration   = {double, type = 'duration', align = 'right',
+		to_text = function(n)
+			return glue_duration(n, 'days')
+		end}
 
 	types.id        = {uint, w = 40}
 	types.idpk      = {id, pk, autoinc}
@@ -159,6 +180,10 @@ return function()
 	types.mtime.text = Sf('mtime_text', 'Last Modified At')
 	types.atime.text = Sf('atime_text', 'Last Accessed At')
 
+	types.time_atime = {time, not_null, readonly = true, text = types.atime.text}
+	types.time_ctime = {time, not_null, readonly = true, text = types.ctime.text}
+	types.time_mtime = {time, not_null, readonly = true, text = types.mtime.text}
+
 	types.money     = {dec, digits = 15, decimals = 3} -- 999 999 999 999 . 999     (fits in a double)
 	types.qty       = {dec, digits = 15, decimals = 6} --     999 999 999 . 999 999 (fits in a double)
 	types.percent   = {dec, digits =  8, decimals = 2} --         999 999 . 99
@@ -168,9 +193,10 @@ return function()
 	types.lang      = {chr, size = 2, maxlen = 2, ascii_ci}
 	types.currency  = {chr, size = 3, maxlen = 3, ascii_ci}
 	types.country   = {chr, size = 2, maxlen = 2, ascii_ci}
-	types.timeago   = {datetime_s, to_text = function(d) return glue_timeago(datetime_to_timestamp(d)) end}
-	types.filesize  = {uint52, type = 'filesize', align = 'right', to_text = function(n, field) return glue_kbytes(n, field.filesize_decimals, field.filesize_magnitude) end}
-	types.duration  = {double, type = 'duration', align = 'right', to_text = function(n) return glue_duration(n, 'days') end}
+	types.filesize  = {uint52, type = 'filesize', align = 'right',
+		to_text = function(n, field)
+			return glue_kbytes(n, field.filesize_decimals, field.filesize_magnitude)
+		end}
 	types.secret_key  = {b64key, type = 'secret_key'}
 	types.public_key  = {b64key, type = 'public_key'}
 	types.private_key = {b64key, type = 'private_key'}
