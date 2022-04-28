@@ -952,8 +952,17 @@ function editbox_widget(e, opt) {
 		e.label_box.class('empty', s == '')
 	}
 
-	e.from_text = function(s) { return e.field.from_text(s) }
-	e.to_text = function(v) { return e.field ? e.field.to_text(v) : '' }
+	e.from_text = function(s) {
+		return e.field.from_text(s)
+	}
+
+	e.to_text = function(v) {
+		if (!e.field)
+			return ''
+		if (v == null)
+			return ''
+		return e.field.to_text(v)
+	}
 
 	e.do_update_val = function(v, ev) {
 		if (e.input) {
