@@ -104,7 +104,7 @@ TIME
 	glue.day([utc, ][ts], [plus_days]) -> ts        timestamp at day's beginning from ts
 	glue.month([utc, ][ts], [plus_months]) -> ts    timestamp at month's beginning from ts
 	glue.year([utc, ][ts], [plus_years]) -> ts      timestamp at year's beginning from ts
-	glue.duration(s['days'|'seconds']) -> s         format a duration in seconds
+	glue.duration(s, ['approx[+s]'|'long']) -> s    format a duration in seconds
 	glue.timeago([utc, ]ts[, from_ts]) -> s         format relative time
 	glue.week_start_offset(country) -> n            week start offset for a country (0 for Sunday)
 SIZES
@@ -1433,19 +1433,10 @@ function glue.year(utc, t, offset)
 	return glue.time(false, d.year + (offset or 0))
 end
 
-function glue.duration(s, opt)
-	if opt == 'days' then
-		local d = floor(s / (24 * 3600))
-		local s = s - d * 24 * 3600
-		local h = floor(s / 3600)
-		local s = s - h * 3600
-		local m = floor(s / 60)
-		local s = s - m * 60
-		if d ~= 0 then return ('%dd%dh%dm%ds'):format(d, h, m, s) end
-		if h ~= 0 then return (   '%dh%dm%ds'):format(h, m, s) end
-		if m ~= 0 then return (      '%dm%ds'):format(m, s) end
-		if true   then return (         '%ds'):format(s) end
-	else
+do
+local t = {}
+function glue.duration(s, format) -- approx[+s] | long | nil
+	if format == 'approx' then
 		if s > 2 * 365 * 24 * 3600 then
 			return ('%d years'):format(floor(s / (365 * 24 * 3600)))
 		elseif s > 2 * 30.5 * 24 * 3600 then
@@ -1458,12 +1449,34 @@ function glue.duration(s, opt)
 			return ('%d minutes'):format(floor(s / 60))
 		elseif s > 60 then
 			return '1 minute'
-		elseif opt == 'seconds' then
+		elseif format == 'approx+s' then
 			return ('%d seconds'):format(s)
 		else
 			return 'seconds'
 		end
+	else
+		local d = floor(s / (24 * 3600))
+		local s = s - d * 24 * 3600
+		local h = floor(s / 3600)
+		local s = s - h * 3600
+		local m = floor(s / 60)
+		local s = s - m * 60
+		if format == 'long' then
+			for i=#t,1,-1 do t[i]=nil end
+			local i=1
+			if d ~= 0 then t[i] = d; t[i+1] = 'days'   ; i=i+2 end
+			if h ~= 0 then t[i] = h; t[i+1] = 'hours'  ; i=i+2 end
+			if m ~= 0 then t[i] = m; t[i+1] = 'minutes'; i=i+2 end
+			if 1 ~= 0 then t[i] = s; t[i+1] = 'seconds'; i=i+2 end
+			return concat(t, ' ')
+		else
+			if d ~= 0 then return ('%dd%02dh%02dm%02ds'):format(d, h, m, s) end
+			if h ~= 0 then return ('%dh%02dm%02ds'):format(h, m, s) end
+			if m ~= 0 then return ('%dm%02ds'):format(m, s) end
+			if 1 ~= 0 then return ('%ds'):format(s) end
+		end
 	end
+end
 end
 
 --format relative time, eg. `3 hours ago` or `in 2 weeks`.
@@ -1472,7 +1485,7 @@ function glue.timeago(utc, time, from_time)
 		utc, time, from_time = false, utc, time, from_time
 	end
 	local s = (from_time or glue.time(utc)) - time
-	return string.format(s > 0 and '%s ago' or 'in %s', glue.duration(math.abs(s)))
+	return string.format(s > 0 and '%s ago' or 'in %s', glue.duration(math.abs(s), 'approx'))
 end
 
 local wso = { -- fri=1, sat=2, sun=3
