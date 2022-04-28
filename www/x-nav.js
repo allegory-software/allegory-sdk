@@ -101,10 +101,10 @@ field attributes:
 		filesize_decimals  : filesize type, see kbytes()
 		filesize_min       : filesize type, see kbytes()
 
-		has_time       : date type (false), timestamp type (true)
+		has_time       : date type (false), time type (true)
 		has_seconds    : date type (false), timeofday type (false)
 
-		duration_format: duration type: 'days'|'seconds'|null ('seconds')
+		duration_format: see duration() in glue.js
 
 		button_options : button type: options to pass to button()
 
@@ -114,7 +114,6 @@ field attributes:
 		lookup_nav_id  : nav id for creating lookup_nav.
 		lookup_cols    : field(s) in lookup_nav that matches this field.
 		display_col    : field in lookup_nav to use as display_val of this field.
-		lookup_failed_display_val : f(v) -> s; what to use when lookup fails.
 
 	sorting:
 		sortable       : allow sorting (true).
@@ -2766,20 +2765,29 @@ function nav_widget(e) {
 			val = null
 		val = e.convert_val(field, val, row, ev)
 
-		let cur_val = e.cell_val(row, field)
+		let old_val = e.cell_val(row, field)
 
 		e.begin_set_state(row, ev)
 
-		e.set_cell_state(field, 'input_val', val, cur_val)
-		e.set_cell_state(field, 'val'      , val)
-		e.set_cell_state(field, 'errors'   , undefined)
-		e.set_row_state('errors'  , undefined)
-		e.set_row_state('modified', cells_modified(row, field), false)
+		// server merge-updates should not reset current input vals.
+		if (ev && ev.diff_merge) {
+			e.set_cell_state(field, 'val', val)
+			if (!e.cell_modified(row, field)) {
+				e.set_cell_state(field, 'errors', undefined)
+				e.set_row_state('errors', undefined)
+			}
+		} else {
+			e.set_cell_state(field, 'val', val)
+			e.set_cell_state(field, 'input_val', val, old_val)
+			e.set_cell_state(field, 'errors', undefined)
+			e.set_row_state('errors', undefined)
+		}
+		e.set_row_state('modified', cells_modified(row), false)
 
 		if (!row.modified)
 			row_unchanged(row)
 
-		if (val !== cur_val)
+		if (val !== old_val)
 			update_indices('val_changed', row, field, val)
 
 		e.end_set_state()
@@ -3114,16 +3122,12 @@ function nav_widget(e) {
 		if (v === '')
 			return field.empty_text
 		let ln = field.lookup_nav
-		if (ln) {
-			if (field.lookup_fields && field.display_field) {
-				let row = ln.lookup(field.lookup_fields, [v])[0]
-				if (row)
-					return ln.cell_display_val(row, field.display_field)
-			}
-			return field.lookup_failed_display_val(v)
-		} else {
-			return field.format(v, row, v0)
+		if (ln && field.lookup_fields && field.display_field) {
+			let row = ln.lookup(field.lookup_fields, [v])[0]
+			if (row)
+				return ln.cell_display_val(row, field.display_field)
 		}
+		return field.format(v, row, v0)
 	}
 
 	e.cell_display_val = function(row, field) {
@@ -3475,7 +3479,11 @@ function nav_widget(e) {
 
 		e.begin_update()
 
-		let rows_added = e.insert_rows(rs.rows, {from_server: true, row_state: {merged: true}})
+		let rows_added = e.insert_rows(rs.rows, {
+				from_server: true,
+				diff_merge: true,
+				row_state: {merged: true},
+			})
 		let rows_updated = rs.rows.length - rows_added
 
 		let rm_rows = []
@@ -4784,9 +4792,6 @@ component('x-lookup-dropdown', function(e) {
 		maxlen: 256,
 		null_text: S('null_text', ''),
 		empty_text: S('empty_text', 'empty text'),
-		lookup_failed_display_val: function(v) {
-			return this.format(v)
-		},
 		to_num: v => num(v, null),
 		from_num: return_arg,
 	}
@@ -4824,7 +4829,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	all_field_types.to_text = function(v) {
-		return v != null ? String(v) : ''
+		return String(v)
 	}
 
 	all_field_types.from_text = function(s) {
@@ -4869,13 +4874,9 @@ component('x-lookup-dropdown', function(e) {
 		return x != null ? x : s
 	}
 
-	number.to_text = function(x) {
-		return x != null ? String(x) : ''
-	}
-
-	number.format = function(x) {
-		x = num(x)
-		return x != null ? x.dec(this.decimals) : ''
+	number.format = function(s) {
+		let x = num(s)
+		return x != null ? x.dec(this.decimals) : s
 	}
 
 	// file sizes
@@ -4883,11 +4884,14 @@ component('x-lookup-dropdown', function(e) {
 	let filesize = assign({}, number)
 	field_types.filesize = filesize
 
-	filesize.format = function(x) {
+	filesize.format = function(s) {
+		let x = num(s)
+		if (x == null)
+			return x
 		let mag = this.filesize_magnitude
 		let dec = this.filesize_decimals || 0
 		let min = this.filesize_min || 1/10**dec
-		let s = x.kbytes(dec, mag)
+		s = x.kbytes(dec, mag)
 		return x < min ? span({class: 'x-dba-insignificant-size'}, s) : s
 	}
 
@@ -4916,7 +4920,6 @@ component('x-lookup-dropdown', function(e) {
 	date.from_num = date.from_time
 
 	date.to_text = function(v) {
-		if (v == null) return ''
 		let t = this.to_time(v, true)
 		if (t == null) return v
 		return t.date(null, this.has_time)
@@ -4934,7 +4937,6 @@ component('x-lookup-dropdown', function(e) {
 	date.max = date.to_time('9999-12-31 23:59:59')
 
 	date.format = function(s) {
-		if (s == null) return ''
 		let t = this.to_time(s, true)
 		if (t == null) return s
 		return t.date(null, this.has_time, this.has_seconds)
@@ -4954,51 +4956,45 @@ component('x-lookup-dropdown', function(e) {
 
 	// timestamps
 
-	let timestamp = {align: 'right'}
-	field_types.timestamp = timestamp
+	let ts = {align: 'right'}
+	field_types.time = ts
 
-	timestamp.has_time = true // for x-calendar
+	ts.has_time = true // for x-calendar
 
-	timestamp.to_time   = return_arg
-	timestamp.from_time = return_arg
+	ts.to_time   = return_arg
+	ts.from_time = return_arg
 
-	timestamp.to_num   = return_arg
-	timestamp.from_num = return_arg
+	ts.to_num   = return_arg
+	ts.from_num = return_arg
 
-	timestamp.to_text = function(t) {
-		let s = date.from_time(t)
-		return s ? s : ''
+	ts.to_text = function(v) {
+		if (isstr(v)) return v // invalid
+		return v.date('SQL', this.has_time, this.has_seconds)
 	}
 
-	timestamp.from_text = function(s) {
-		let t = date.to_time(s)
-		return t != null ? t : s
+	ts.from_text = function(s) {
+		return s.trim().parse_date('SQL')
 	}
 
-	timestamp.min = 0
-	timestamp.max = 2**32-1 // range of MySQL TIMESTAMP type
+	ts.min = 0
+	ts.max = 2**32-1 // range of MySQL TIMESTAMP type
 
-	timestamp.format = function(t) {
-		return span({timeago: '', time: t}, t.timeago())
+	ts.format = function(t) {
+		if (isstr(t)) return t // invalid
+		if (this.timeago)
+			return span({timeago: '', time: t}, t.timeago())
+		return t.date(null, this.has_time, this.has_seconds)
 	}
 
-	timestamp.validator_date = field => ({
+	ts.validator_date = field => ({
 		validate : v => v == null || (isnum(v) && v === v),
 		message  : S('validation_date', 'Date must be valid'),
 	})
 
-	// MySQL time
-
-	let td = {align: 'center'}
-	field_types.timeofday = td
-
-	td.to_text = function(t) {
-		if (t == null) return ''
-		return this.has_seconds ? t : t.slice(0, 5)
-	}
-
-	// formats: h m | h m s | hhmm | hhmmss
-	let time_from_text = function(s) {
+	// parsing of: h m | h m s | hhmm | hhmmss
+	// TODO: move this to glue.js date_parser() and use that.
+	let _tt_out = [0, 0, 0]
+	let parse_hms = function(s, has_seconds) {
 		let m = s.match(/\d+/g)
 		if (!m)
 			return
@@ -5019,23 +5015,39 @@ component('x-lookup-dropdown', function(e) {
 		if (H > 23) return
 		if (M > 59) return
 		if (S > 59) return
-		if (!this.has_seconds && S)
+		if (!has_seconds && S)
 			return
-		return H.base(10, 2) + ':' + M.base(10, 2)
-			+ ':' + (this.has_seconds ? S.base(10, 2) : '00')
+		_tt_out[0] = H
+		_tt_out[1] = M
+		_tt_out[2] = S
+		return _tt_out
 	}
 
-	td.from_text = function(s) {
-		let t = time_from_text.call(this, s)
-		return t != null ? t : s
+	// MySQL time
+
+	let td = {align: 'center'}
+	field_types.timeofday = td
+
+	td.to_text = function(v) {
+		let t = parse_hms(v, this.has_seconds)
+		if (t == null) return v // invalid
+		let s = t[0].base(10, 2) + ':' + t[1].base(10, 2)
+		if (this.has_seconds)
+			s += ':' + t[2].base(10, 2)
+		return s
 	}
 
-	td.format = function(t) {
-		return this.to_text(t)
+	td.from_text = function(s, has_seconds) {
+		let t = parse_hms(s, this.has_seconds)
+		if (t == null) return // invalid
+		return t[0].base(10, 2) + ':' + t[1].base(10, 2)
+			+ ':' + (this.has_seconds ? t[2].base(10, 2) : '00')
 	}
+
+	td.format = td.to_text
 
 	td.validator_time = field => ({
-		validate : v => v == null || time_from_text.call(field, v),
+		validate : v => v == null || parse_hms(v, field.has_seconds) != null,
 		message  : field.has_seconds
 			? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
 			: S('validate_time', 'Time must look like H:M or HHMM')
@@ -5045,14 +5057,76 @@ component('x-lookup-dropdown', function(e) {
 		return timeofdayedit(opt)
 	}
 
+	// timeofday in seconds
+
+	let tds = {align: 'center'}
+	field_types.timeofday_in_seconds = tds
+
+	tds.to_text = function(v) {
+		if (isstr(v)) return v // invalid
+		let H = floor(v / 3600)
+		let M = floor(v / 60) % 60
+		let S = floor(v) % 60
+		let s = H.base(10, 2) + ':' + M.base(10, 2)
+		if (this.has_seconds)
+			s += ':' + S.base(10, 2)
+		return s
+	}
+
+	tds.from_text = function(s) {
+		let t = parse_hms(s, this.has_seconds)
+		if (t == null) return s // invalid
+		return t[0] * 3600 + t[1] * 60 + t[2]
+	}
+
+	tds.format = tds.to_text
+
+	tds.validator_timeofday_in_seconds = field => ({
+		validate : v => v == null || tds_from_text(v, field.has_seconds),
+		message  : field.has_seconds
+			? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
+			: S('validate_time', 'Time must look like H:M or HHMM')
+	})
+
+	tds.editor = function(opt) {
+		return timeofdayedit(opt)
+	}
+
 	// duration
 
-	let d = {align: 'right', duration_format: 'days'}
+	let d = {align: 'right'}
 	field_types.duration = d
 
-	d.format = function(d) {
-		return isnum(d) ? d.duration(this.duration_format) : d
+	d.to_text = function(v) {
+		if (!isnum(v)) return v // invalid
+		return v.duration(this.duration_format)
 	}
+
+	// parse `N d[ays] N h[ours] N m[in] N s[ec]` in any order, spaces optional.
+	let d_re = /(\d+)\s*([^\d\s])[^\d\s]*/g
+	d.from_text = function(s) {
+		s = s.trim()
+		let m
+		let d = 0
+		d_re.lastIndex = 0 // reset regex state.
+		while ((m = d_re.exec(s)) != null) {
+			let x = num(m[1])
+			let t = m[2].lower()
+			if (t == 'd')
+				d += x * 3600 * 24
+			else if (t == 'h')
+				d += x * 3600
+			else if (t == 'm')
+				d += x * 60
+			else if (t == 's')
+				d += x
+			else
+				return s
+		}
+		return d
+	}
+
+	d.format = d.to_text
 
 	// booleans
 
