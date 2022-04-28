@@ -123,7 +123,7 @@ local function init_spp(spp, cmd)
 		elseif mt == 'varbinary' or mt == 'binary' then
 			return _('%s(%d)', mt, fld.size)
 		else
-			return mt
+			return glue.assert(mt, 'mysql_type missing for field: %s', fld.col)
 		end
 	end
 
