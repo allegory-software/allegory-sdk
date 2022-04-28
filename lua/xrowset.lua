@@ -33,6 +33,7 @@
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
 		readonly         : f             cannot be changed
+		null_text        : ''            text for null value
 		align            : 'left'|'right'|'center' cell alignment
 		enum_values      : ['foo',...]   enum values
 		enum_texts       : ['bla',...]   enum texts in current language
@@ -50,7 +51,9 @@
 		second_step      : n             for the time picker
 		has_time         : t             date type has time
 		has_seconds      : f             time has seconds
-		filesize_decimals:               decimals, for filesize type (0)
+		timeago          : f             format as relative time (see timeago())
+		duration_format  :               format for duration type (see duration())
+		filesize_decimals: 0             decimals, for filesize type
 		filesize_magnitude:              magnitude for filesize type
 		filesize_min     :               threshold for not making it gray
 
@@ -108,12 +111,13 @@ action['rowset.xlsx'] = function(name)
 end
 
 local client_field_attrs = {
-	internal=1, hidden=1, readonly=1,
+	internal=1, hidden=1, readonly=1, null_text=1,
 	name=1, type=1, text=1, hint=1, default=1, align=1,
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, display_width=1,
 	hour_step=1, minute_step=1, second_step=1, has_time=1, has_seconds=1,
+	timeago=1, duration_format=1,
 	filesize_decimals=1, filesize_magnitude=1, filesize_min=1,
 }
 
@@ -124,6 +128,8 @@ function virtual_rowset(init, ...)
 
 	local rs = {}
 	setmetatable(rs, rs)
+
+	local update_computed_fields
 
 	function rs.init_fields(rs)
 
@@ -150,6 +156,7 @@ function virtual_rowset(init, ...)
 		end
 
 		rs.client_fields = {}
+		local computed_fields
 
 		for i,f in ipairs(rs.fields) do
 			if hide_cols[f.name]
@@ -170,7 +177,8 @@ function virtual_rowset(init, ...)
 				glue.attr(rowset_tables, f.table)[rs.name] = true
 			end
 			if f.compute then
-				add(glue.attr(rs, 'computed_fields'), f)
+				computed_fields = computed_fields or {}
+				add(computed_fields, f)
 				f.readonly = true
 			end
 
@@ -186,6 +194,26 @@ function virtual_rowset(init, ...)
 		if not rs.insert_row then rs.can_add_rows    = false end
 		if not rs.update_row then rs.can_change_rows = false end
 		if not rs.delete_row then rs.can_remove_rows = false end
+
+		if computed_fields then
+			local current_row
+			local function get_val(_, k)
+				local field = rs.fields[k]
+				return field and current_row[field.index]
+			end
+			local vals = setmetatable({}, {__index = get_val})
+			--[[local]] function update_computed_fields(row)
+				current_row = row
+				rs:compute_row_vals(vals)
+				for i,f in ipairs(computed_fields) do
+					row[f.index] = repl(f.compute(self, vals), nil, null)
+				end
+				for k in pairs(vals) do
+					vals[k] = nil
+				end
+			end
+		end
+
 	end
 
 	local function update_client_fields()
@@ -203,29 +231,16 @@ function virtual_rowset(init, ...)
 
 	local repl = glue.repl
 
-	local function update_computed_fields(res)
-		if not rs.computed_fields then return end
-		local current_row
-		local function get_val(_, k)
-			local field = rs.fields[k]
-			return field and current_row[field.index]
-		end
-		local vals = setmetatable({}, {__index = get_val})
-		for i,row in ipairs(res.rows) do
-			current_row = row
-			rs:compute_row_vals(vals) --TODO: error-prone API becaue we're reusing vals.
-			for i,f in ipairs(rs.computed_fields) do
-				row[f.index] = repl(f.compute(self, vals), nil, null)
-			end
-		end
-	end
-
 	function rs:load(param_values)
 		local res = {}
 		rs:load_rows(res, param_values)
 		assert(res.rows[1] == nil or type(res.rows[1]) == 'table',
 			'first row not a table')
-		update_computed_fields(res)
+		if update_computed_fields then
+			for _,row in ipairs(res.rows) do
+				update_computed_fields(row)
+			end
+		end
 		update_client_fields()
 		merge(res, {
 			can_add_rows = rs.can_add_rows,
@@ -243,6 +258,50 @@ function virtual_rowset(init, ...)
 			tree_col = rs.tree_col,
 		})
 		return res
+	end
+
+	local function reload_row(op, rt, row_values)
+		if not rs.load_row then return end
+		local ok, row = catch('db', rs.load_row, rs, row_values)
+		if ok then
+			if op == 'insert' or op == 'update' then
+				if not row then
+					if op == 'insert' then
+						rt.error = S('inserted_record_not_found',
+							'Inserted record could not be loaded back')
+					else
+						rt.remove = true
+						rt.error = S('updated_record_not_found',
+							'Updated record could not be loaded back')
+					end
+				else
+					if update_computed_fields then
+						update_computed_fields(row)
+					end
+					rt.values = row
+				end
+			elseif row and op == 'delete' then
+				rt.error = S('removed_record_found',
+					'Removed record is still in db')
+			end
+		else
+			local err = row
+			if op == 'insert' then
+				rt.error = db_error(err,
+					S('load_inserted_record_error',
+						'Error on loading back inserted row'))
+			elseif op == 'update' then
+				rt.error = db_error(err,
+					S('load_updated_record_error',
+						'Error on loading back updated record'))
+			elseif op == 'delete' then
+				rt.error = db_error(err,
+					S('load_removed_record_error',
+						'Error on loading back removed record'))
+			else
+				assert(false)
+			end
+		end
 	end
 
 	function rs:validate_fields(values, only_present_values)
@@ -315,22 +374,7 @@ function virtual_rowset(init, ...)
 				if can ~= false then
 					local ok, err = catch('db', rs.insert_row, self, row.values)
 					if ok then
-						if rs.load_row then
-							local ok, row = catch('db', rs.load_row, self, row.values)
-							if ok then
-								if not row then
-									rt.error = S('inserted_record_not_found',
-										'Inserted record could not be loaded back')
-								else
-									rt.values = row
-								end
-							else
-								local err = row
-								rt.error = db_error(err,
-									S('load_inserted_record_error',
-										'Error on loading back inserted row'))
-							end
-						end
+						reload_row('insert', rt, row.values)
 					else
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
@@ -355,21 +399,7 @@ function virtual_rowset(init, ...)
 									row.values[k1] = v
 								end
 							end
-							local ok, row = catch('db', rs.load_row, self, row.values)
-							if ok then
-								if not row then
-									rt.remove = true
-									rt.error = S('updated_record_not_found',
-										'Updated record could not be loaded back')
-								else
-									rt.values = row
-								end
-							else
-								local err = row
-								rt.error = db_error(err,
-									S('load_updated_record_error',
-										'Error on loading back updated record'))
-							end
+							reload_row('update', rt, row.values)
 						end
 					else
 						if err.col then
@@ -387,20 +417,7 @@ function virtual_rowset(init, ...)
 				if can ~= false then
 					local ok, err = catch('db', rs.delete_row, self, row.values)
 					if ok then
-						if rs.load_row then
-							local ok, row = catch('db', rs.load_row, self, row.values)
-							if ok then
-								if row then
-									rt.error = S('removed_record_found',
-										'Removed record is still in db')
-								end
-							else
-								local err = row
-								rt.error = db_error(err,
-									S('load_removed_record_error',
-										'Error on loading back removed record'))
-							end
-						end
+						reload_row('delete', rt, row.values)
 					else
 						rt.error = db_error(err)
 					end
