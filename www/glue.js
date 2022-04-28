@@ -116,7 +116,7 @@ TIME & DATE
 	month_name   (ts, ['long'], [locale])
 	month_year   (ts, ['long'], [locale])
 	week_start_offset([country])
-	ds.duration(['days'|'seconds']) -> s
+	ds.duration(['approx[+s]'|'long']) -> s
 	ts.timeago() -> s
 	ts.date([locale], [with_time], [with_seconds]) -> s
 	s.parse_date([locale]) -> ts
@@ -1155,21 +1155,11 @@ method(Number, 'date', function(locale1, with_time, with_seconds) {
 
 // time formatting -----------------------------------------------------------
 
-method(Number, 'duration', function(opt) {
+{
+let a = []
+method(Number, 'duration', function(format) {  // approx[+s] | long | null
 	let s = this
-	if (opt == 'days') {
-		let d = floor(s / (24 * 3600))
-		s -= d * 24 * 3600
-		let h = floor(s / 3600)
-		s -= h * 3600
-		let m = floor(s / 60)
-		s -= m * 60
-		s = round(s)
-		if (d) return S('duration_dhms', '{0}d{1}h{2}m{3}s', d, h, m, s)
-		if (h) return S('duration_hms' ,     '{0}h{1}m{2}s',    h, m, s)
-		if (m) return S('duration_ms'  ,         '{0}m{1}s',       m, s)
-		if (1) return S('duration_s'   ,             '{0}s',          s)
-	} else {
+	if (format == 'approx') {
 		if (s > 2 * 365 * 24 * 3600)
 			return S('n_years', '{0} years', s / (365 * 24 * 3600).dec())
 		else if (s > 2 * 30.5 * 24 * 3600)
@@ -1182,16 +1172,39 @@ method(Number, 'duration', function(opt) {
 			return S('n_minutes', '{0} minutes', (s / 60).dec())
 		else if (s >= 60)
 			return S('one_minute', '1 minute')
-		else if (opt == 'seconds')
+		else if (format == 'approx+s')
 			return S('n_seconds', '{0} seconds', s.dec())
 		else
 			return S('seconds', 'seconds')
+	} else {
+		let d = floor(s / (24 * 3600))
+		s -= d * 24 * 3600
+		let h = floor(s / 3600)
+		s -= h * 3600
+		let m = floor(s / 60)
+		s -= m * 60
+		s = round(s)
+		a.length = 0
+		if (format == 'long') {
+			if (d) { a.push(d); a.push(S('days'   , 'days'   )); }
+			if (h) { a.push(h); a.push(S('hours'  , 'hours'  )); }
+			if (m) { a.push(m); a.push(S('minutes', 'minutes')); }
+			if (1) { a.push(s); a.push(S('seconds', 'seconds')); }
+			return a.join(' ')
+		} else {
+			if (d               ) { a.push(d                               + S('days_short'   , 'd')); }
+			if (d || h          ) { a.push(h.base(10, d           ? 2 : 0) + S('hours_short'  , 'h')); }
+			if (d || h || m     ) { a.push(m.base(10, d || h      ? 2 : 0) + S('minutes_short', 'm')); }
+			if (1               ) { a.push(s.base(10, d || h || m ? 2 : 0) + S('seconds_short', 's')); }
+			return a.join(' ')
+		}
 	}
 })
+}
 
 method(Number, 'timeago', function() {
 	let d = time() - this
-	return (d > -1 ? S('time_ago', '{0} ago') : S('in_time', 'in {0}')).subst(abs(d).duration())
+	return (d > -1 ? S('time_ago', '{0} ago') : S('in_time', 'in {0}')).subst(abs(d).duration('approx'))
 })
 
 // file size formatting ------------------------------------------------------
