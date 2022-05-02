@@ -276,7 +276,7 @@ local function debug_id(v)
 	end
 	local id = ids[v]
 	if not id then
-		id = type(v) == 'table' and v.debug_id
+		id = type(v) == 'table' and rawget(v, 'debug_id')
 		if not id then
 			id = (ids.last_id or 0) + 1
 			ids.last_id = id
@@ -328,7 +328,7 @@ local function debug_arg(v)
 	if type(v) == 'table' and not (mt and (mt.type or mt.debug_prefix)) then
 		return pp_compact(v)
 	end
-	return debug_id(v)
+	return (debug_id(v))
 end
 local function debug_arg_pp(v)
 	local v = debug_arg(v)
