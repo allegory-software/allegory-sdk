@@ -113,13 +113,15 @@ end
 
 function fs.wrap_fd(fd, async, is_pipe_end, path)
 
-	local f = setmetatable({
+	local f = {
 		fd = fd,
 		s = fd, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
-	}, file)
+		__index = file,
+	}
+	setmetatable(f, f)
 	fs.live(f, path or '')
 
 	if async then
