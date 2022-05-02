@@ -422,7 +422,7 @@ local userinfo = memoize(function(usr)
 		]], usr)
 	if not t then return {} end
 	t.haspass = tonumber(t.haspass) == 1
-	t.roles = glue.index(glue.names(t.roles) or {})
+	t.roles = glue.index(glue.words(t.roles) or {})
 	t.admin = t.roles.admin
 	t.sessions = setmetatable({}, weak_vals_mt)
 	return t
