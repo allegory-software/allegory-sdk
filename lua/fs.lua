@@ -745,7 +745,8 @@ end
 --file objects ---------------------------------------------------------------
 
 function fs.isfile(f)
-	return getmetatable(f) == file
+	local mt = getmetatable(f)
+	return type(mt) == 'table' and rawget(mt, '__index') == file
 end
 
 function open_opt(mode_opt, str_opt)
@@ -1231,7 +1232,6 @@ end
 --memory streams -------------------------------------------------------------
 
 local vfile = {}
-vfile.__index = vfile
 
 function fs.open_buffer(buf, sz, mode)
 	sz = sz or #buf
@@ -1245,8 +1245,9 @@ function fs.open_buffer(buf, sz, mode)
 		_buffer = buf, --anchor it
 		w = 0,
 		r = 0,
+		__index = vfile,
 	}
-	return setmetatable(f, vfile)
+	return setmetatable(f, f)
 end
 
 function vfile.close(f) f._closed = true; return true end
