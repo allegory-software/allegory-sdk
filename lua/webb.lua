@@ -1296,6 +1296,11 @@ local function repl_nulls(v, null_val)
 	end
 end
 
+function json_arg(v, null_val)
+	if type(v) ~= 'string' then return v end
+	return repl_nulls(cjson.decode(v), null_val)
+end
+
 function json(v, indent)
 	if indent and indent ~= '' then
 		return prettycjson(v, nil, indent)
