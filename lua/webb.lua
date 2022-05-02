@@ -1291,7 +1291,7 @@ local function repl_nulls(v, null_val)
 	if type(t) == 'table' then
 		return repl_nulls_t(t)
 	else
-		return repl(t, null, null_val)
+		return repl(v, null, null_val)
 	end
 end
 
