@@ -1289,16 +1289,11 @@ local function repl_nulls_t(t, null_val)
 end
 local function repl_nulls(v, null_val)
 	if null_val == null then return v end
-	if type(t) == 'table' then
-		return repl_nulls_t(t)
+	if type(v) == 'table' then
+		return repl_nulls_t(v)
 	else
 		return repl(v, null, null_val)
 	end
-end
-
-function json_arg(v, null_val)
-	if type(v) ~= 'string' then return v end
-	return repl_nulls(cjson.decode(v), null_val)
 end
 
 function json(v, indent)
