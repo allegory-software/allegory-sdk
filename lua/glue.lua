@@ -547,7 +547,7 @@ function glue.extend(dt,...)
 			local j = dt.n or #dt
 			local n = t.n or #t
 			for i=1,n do dt[j+i]=t[i] end
-			if t.n then dt.n = j+n end --adding a sparse array makes dt sparse.
+			if t.n or dt.n then dt.n = j+n end --adding a sparse array makes dt sparse.
 		end
 	end
 	return dt

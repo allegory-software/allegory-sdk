@@ -2,3 +2,4 @@
 /bin/*/
 /tests/*.log
 test.*
+/www/test.*
