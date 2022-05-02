@@ -428,17 +428,15 @@ end
 
 function fs.wrap_handle(h, read_async, write_async, is_pipe_end, path)
 
-	local f = {
+	local f = setmetatable({
 		handle = h,
 		s = h, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		_read_async  = read_async  and true or false,
 		_write_async = write_async and true or false,
-		__index = file,
 		w = 0, r = 0,
-	}
-	setmetatable(f, f)
+	}, file)
 	fs.live(f, path or '')
 
 	if read_async or write_async then

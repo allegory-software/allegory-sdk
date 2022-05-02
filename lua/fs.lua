@@ -627,9 +627,9 @@ win = ffi.abi'win' or nil
 
 --namespaces in which backends can add methods directly.
 fs = {backend = backend} --fs module namespace
-file = {} --file object methods
-stream = {} --FILE methods
-dir = {} --dir listing object methods
+file = {}; file.__index = file --file object methods
+stream = {}; stream.__index = stream --FILE methods
+dir = {}; dir.__index = dir --dir listing object methods
 
 local uint64_ct   = ffi.typeof'uint64_t'
 local void_ptr_ct = ffi.typeof'void*'
@@ -745,7 +745,7 @@ end
 --file objects ---------------------------------------------------------------
 
 function fs.isfile(f)
-	return type(f) == 'table' and rawget(f, '__index') == file
+	return getmetatable(f) == file
 end
 
 function open_opt(mode_opt, str_opt)
@@ -1231,6 +1231,7 @@ end
 --memory streams -------------------------------------------------------------
 
 local vfile = {}
+vfile.__index = vfile
 
 function fs.open_buffer(buf, sz, mode)
 	sz = sz or #buf
@@ -1242,11 +1243,10 @@ function fs.open_buffer(buf, sz, mode)
 		offset = 0,
 		mode = mode,
 		_buffer = buf, --anchor it
-		__index = vfile,
 		w = 0,
 		r = 0,
 	}
-	return setmetatable(f, f)
+	return setmetatable(f, vfile)
 end
 
 function vfile.close(f) f._closed = true; return true end
@@ -1414,7 +1414,7 @@ else
 	error'platform not Windows, Linux or OSX'
 end
 
-ffi.metatype(stream_ct, {__index = stream})
-ffi.metatype(dir_ct, {__index = dir})
+ffi.metatype(stream_ct, stream)
+ffi.metatype(dir_ct, dir)
 
 return fs
