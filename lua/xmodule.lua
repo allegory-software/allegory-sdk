@@ -33,7 +33,7 @@ rowset.rowsets = virtual_rowset(function(rs)
 		{name = 'name'}
 	}
 	rs.pk = 'name'
-	function rs:select_rows(res, params)
+	function rs:load_rows(res, params)
 		res.rows = {}
 		for name, rs in sortedpairs(rowset) do
 			add(res.rows, {name})
