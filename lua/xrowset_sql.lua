@@ -65,7 +65,7 @@ local concat = table.concat
 local add = table.insert
 
 local outdent = glue.outdent
-local names = glue.names
+local words = glue.words
 local noop = glue.noop
 local index = glue.index
 local assertf = glue.assert
@@ -143,7 +143,7 @@ function sql_rowset(...)
 
 		--the rowset's pk cannot be reliably inferred so it must be user-supplied.
 
-		rs.pk = names(rs.pk)
+		rs.pk = words(rs.pk)
 		assert(rs.pk and #rs.pk > 0, 'pk missing')
 
 		--static query generation (just stitching together user-supplied parts).
