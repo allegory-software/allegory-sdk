@@ -60,7 +60,7 @@ ARRAYS
 STRINGS
 	glue.gsplit(s,sep[,start[,plain]]) -> iter() -> e[,captures...]   split a string by a pattern
 	glue.split(s,sep[,start[,plain]]) -> {s1,...}   split a string by a pattern
-	glue.names('name1 ...') -> {'name1', ...}       split a string by whitespace
+	glue.words('name1 ...') -> {'name1', ...}       split a string by whitespace
 	glue.capitalize(s) -> s                         capitalize the first letter of every word in string
 	glue.lines(s, [opt], [init]) -> iter() -> s, i, j, k   iterate the lines of a string
 	glue.outdent(s, [indent]) -> s, indent          outdent/reindent text based on first line's indentation
@@ -106,6 +106,7 @@ TIME
 	glue.year([utc, ][ts], [plus_years]) -> ts      timestamp at year's beginning from ts
 	glue.duration(s, ['approx[+s]'|'long']) -> s    format a duration in seconds
 	glue.timeago([utc, ]ts[, from_ts]) -> s         format relative time
+	glue.timeofday(seconds) -> s                    format time of day
 	glue.week_start_offset(country) -> n            week start offset for a country (0 for Sunday)
 SIZES
 	glue.kbytes(x [,decimals]) -> s                 format byte size in k/M/G/T-bytes
@@ -776,7 +777,7 @@ end
 
 --split a string by whitespace. unlike glue.split(s, '%s+'), it ignores
 --any resulting empty elements; also, non-string args pass through.
-function glue.string.names(s)
+function glue.string.words(s)
 	if type(s) ~= 'string' then
 		return s
 	end
@@ -1464,10 +1465,10 @@ function glue.duration(s, format) -- approx[+s] | long | nil
 		if format == 'long' then
 			for i=#t,1,-1 do t[i]=nil end
 			local i=1
-			if d ~= 0 then t[i] = d; t[i+1] = 'days'   ; i=i+2 end
-			if h ~= 0 then t[i] = h; t[i+1] = 'hours'  ; i=i+2 end
-			if m ~= 0 then t[i] = m; t[i+1] = 'minutes'; i=i+2 end
-			if 1 ~= 0 then t[i] = s; t[i+1] = 'seconds'; i=i+2 end
+			if d ~= 0            then t[i] = d; t[i+1] = d > 1 and 'days'    or 'day'   ; i=i+2 end
+			if h ~= 0            then t[i] = h; t[i+1] = h > 1 and 'hours'   or 'hour'  ; i=i+2 end
+			if m ~= 0            then t[i] = m; t[i+1] = m > 1 and 'minutes' or 'minute'; i=i+2 end
+			if s ~= 0 or #t == 0 then t[i] = s; t[i+1] = s > 1 and 'seconds' or 'second'; i=i+2 end
 			return concat(t, ' ')
 		else
 			if d ~= 0 then return ('%dd%02dh%02dm%02ds'):format(d, h, m, s) end
@@ -1488,6 +1489,13 @@ function glue.timeago(utc, time, from_time)
 	return string.format(s > 0 and '%s ago' or 'in %s', glue.duration(math.abs(s), 'approx'))
 end
 
+function glue.timeofday(t, with_seconds)
+	local h = floor(t / 3600) % 24
+	local m = floor(t / 60) % 60
+	local s = t % 60
+	return format(with_seconds and '%02d:%02d:%02d' or '%02d:%02d', h, m, s)
+end
+
 local wso = { -- fri=1, sat=2, sun=3
 	MV=1,
 	AE=2,AF=2,BH=2,DJ=2,DZ=2,EG=2,IQ=2,IR=2,JO=2,KW=2,LY=2,OM=2,QA=2,SD=2,SY=2,
@@ -1505,10 +1513,11 @@ end
 local suffixes = {[0] = 'B', 'K', 'M', 'G', 'T', 'P', 'E'}
 local magnitudes = glue.index(suffixes)
 local clamp, ln1024 = glue.clamp, ln(1024)
+local decfmt = glue.memoize(function(dec) return '%.'..dec..'f%s' end)
 function glue.kbytes(x, dec, mag)
 	local i = mag and magnitudes[mag] or clamp(floor(ln(x) / ln1024), 0, #suffixes-1)
 	local z = x / 1024^i
-	local fmt = dec and dec ~= 0 and '%.'..dec..'f%s' or '%.0f%s'
+	local fmt = dec and dec ~= 0 and decfmt(dec) or '%.0f%s'
 	return (fmt):format(z, suffixes[i])
 end
 
