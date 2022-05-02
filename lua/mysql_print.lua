@@ -2,8 +2,11 @@
 --MySQL result pretty printing.
 --Written by Cosmin Apreutesei. Public Domain.
 
-local null = require'cjson'.null
+local glue = require'glue'
+local cjson = require'cjson'
+local null = cjson.null
 local cat = table.concat
+local index = glue.index
 
 local function ellipsis(s,n)
 	return #s > n and (s:sub(1,n-3) .. '...') or s
@@ -40,15 +43,14 @@ local function print_table(opt)
 	local minsize = opt.minsize or 0
 	local sumdefs = opt.sums
 	local print   = opt.print or _G.print
-	local null    = opt.null
 
 	local max_sizes = {}
 	for j=1,#cols do
 		max_sizes[j] = math.max(max_sizes[j] or minsize,
 			#cols[j], sd and #sd[1] or 0, sd and #sd[2] or 0)
 	end
-	for i=1,#rows do
-		for j=1,#cols do
+	for j=1,#cols do
+		for i=1,#rows do
 			max_sizes[j] = math.max(max_sizes[j], #rows[i][j])
 		end
 	end
@@ -96,24 +98,9 @@ local function print_table(opt)
 	print()
 end
 
-local function invert_table(cols, rows, minsize)
-	local ft, rt = {'field'}, {}
-	for i=1,#rows do
-		ft[i+1] = tostring(i)
-	end
-	for j=1,#cols do
-		local row = {cols[j]}
-		for i=1,#rows do
-			row[i+1] = rows[i][j]
-		end
-		rt[j] = row
-	end
-	return ft, rt
-end
-
-local function format_cell(v, field, null)
+local function format_cell(v, field, null_s)
 	if v == null or v == nil then
-		return null
+		return null_s
 	elseif field.to_text then
 		return field.to_text(v, field)
 	else
@@ -133,7 +120,23 @@ function print_result(opt)
 	local fields  = opt.fields
 	local minsize = opt.minsize
 	local sums    = opt.sums
-	local null    = opt.null or ''
+	local null_s  = opt.null_text or ''
+	local hidecols = opt.hidecols and index(words(opt.hidecols))
+	local showcols = opt.showcols and index(words(opt.showcols))
+
+	local valindex
+	if hidecols or showcols then
+		valindex = {}
+		local fields0 = fields
+		fields = {}
+		for i,field in ipairs(fields0) do
+			local col = field.name
+			if (not hidecols or not hidecols[col]) and (not showcols or showcols[col]) then
+				fields[#fields+1] = field
+				valindex[#fields] = i
+			end
+		end
+	end
 
 	local cols = {}
 	local colindex = {}
@@ -147,8 +150,9 @@ function print_result(opt)
 	for i,row in ipairs(rows) do
 		local t = {}
 		for j=1,#cols do
-			t[j] = format_cell(row[j], fields[j], null)
-			aligns[j] = cell_align(aligns[j], row[j], fields[j])
+			local vj = valindex and valindex[j] or j
+			t[j] = format_cell(row[vj], fields[j], null_s)
+			aligns[j] = cell_align(aligns[j], row[vj], fields[j])
 		end
 		textrows[i] = t
 	end
@@ -166,7 +170,8 @@ function print_result(opt)
 			local to_number   = field.to_number   or to_number
 			local from_number = field.from_number or from_number
 			for i,row in ipairs(rows) do
-				local v = row[j]
+				local vj = valindex and valindex[j] or j
+				local v = row[vj]
 				if v ~= nil then
 					local x = to_number(v, field)
 					if op == 'sum' or op == 'avg' then
@@ -185,12 +190,12 @@ function print_result(opt)
 				end
 				v = from_number(n, field)
 			end
-			sumdefs[col] = {op, format_cell(v, field, null)}
+			sumdefs[col] = {op, format_cell(v, field, null_s)}
 		end
 	end
 
 	print_table{
-		rows = textrows, cols = cols, aligns = aligns,
+		rows = textrows, cols = cols, aligns = aligns, valindex = valindex,
 		minsize = minsize, sums = sumdefs, print = opt.print,
 	}
 end
