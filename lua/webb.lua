@@ -1126,6 +1126,7 @@ function getpage(arg1, upload, receive_content)
 
 	local ct = res.headers['content-type']
 	if ct and ct.media_type == mime_types.json then
+		res.rawcontent = res.content
 		res.content = repl(json_arg(res.content), nil, null)
 	end
 	return res.content, res, req
