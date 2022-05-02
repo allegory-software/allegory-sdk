@@ -502,7 +502,7 @@ local function init_spp(spp, cmd)
 				p.parameter_mode, /* in|out */
 				p.parameter_name,
 
-				/* input for field_type_attrs(): */
+				/* type info */
 				p.data_type,
 				p.dtd_identifier column_type,
 				p.numeric_precision,
