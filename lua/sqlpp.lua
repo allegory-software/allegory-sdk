@@ -247,7 +247,7 @@ local attr = glue.attr
 local update = glue.update
 local merge = glue.merge
 local empty = glue.empty
-local names = glue.names
+local words = glue.words
 local outdent = glue.outdent
 local imap = glue.imap
 local pack = glue.pack
@@ -1659,7 +1659,7 @@ function sqlpp.new(init)
 			return s or empty
 		end
 		local t = {}
-		for _,s in ipairs(names(s)) do
+		for _,s in ipairs(words(s)) do
 			local col, val_name = s:match'^(.-)=(.*)'
 			if not col then
 				col, val_name = s, s
