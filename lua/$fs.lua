@@ -105,8 +105,8 @@ tryrm = fs.remove
 
 function rm(path)
 	local ok, err = fs.remove(path)
-	if not ok and err == 'not_found' then ok = true end
-	check('fs', 'rm', ok, '%s\n%s', path, err)
+	check('fs', 'rm', ok or err == 'not_found', '%s\n%s', path, err)
+	return ok
 end
 
 function mv(oldpath, newpath)
