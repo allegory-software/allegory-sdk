@@ -72,12 +72,6 @@
 		e.do_before(method, f)
 		e.do_after(method, f)
 	events:
-		event(name|ev, [bubbles], ...args) -> ev
-		e.on   (name|ev, f, [enable], [capture])
-		e.off  (name|ev, f, [capture])
-		e.once (name|ev, f, [enable], [capture])
-		e.fire    (name, ...args)
-		e.fireup  (name, ...args)
 		broadcast (name, ...args)
 		^[right]click       (ev, nclicks, mx, my)
 		^[right]pointerdown (ev, mx, my)
@@ -90,7 +84,6 @@
 		^stopped_event      (stopped_ev, ev)
 		^layout_changed()
 		e.capture_pointer(ev, on_pointermove, on_pointerup)
-		DEBUG_EVENTS = false
 		on_dom_load(fn)
 	element geometry:
 		px(x)
@@ -632,9 +625,8 @@ except for input elements that must have an explicit `tabindex=-1`.
 */
 
 {
-
-let callers = obj()
-let installers = obj()
+let installers = on.installers
+let callers = on.callers
 
 installers.bind = function() {
 	this.bool_attr('_bind', true)
@@ -667,17 +659,6 @@ installers.resize = function() {
 	this.on('bind', bind)
 	if (this.isConnected)
 		bind.call(this, true)
-}
-
-let hidden_events = {prop_changed: 1, attr_changed: 1, stopped_event: 1}
-
-function passthrough_caller(ev, f) {
-	if (isobject(ev.detail) && ev.detail.args) {
-		//if (!(ev.type in hidden_events))
-		//debug(ev.type, ...ev.detail.args)
-		return f.call(this, ...ev.detail.args, ev)
-	} else
-		return f.call(this, ev)
 }
 
 callers.click = function(ev, f) {
@@ -762,38 +743,6 @@ callers.wheel = function(ev, f) {
 	}
 }
 
-DEBUG_EVENTS = false
-
-etrack = DEBUG_EVENTS && new Map()
-
-let log_add_event = function(target, name, f, capture) {
-	if (target.initialized === null) // skip handlers added in the constructor.
-		return
-	capture = !!capture
-	let ft = attr(attr(attr(etrack, name, map), target, map), capture, map)
-	if (!ft.has(f))
-		ft.set(f, stacktrace())
-	else
-		debug('on duplicate', name, capture)
-}
-
-let log_remove_event = function(target, name, f, capture) {
-	capture = !!capture
-	let t = etrack.get(name)
-	let tt = t && t.get(target)
-	let ft = tt && tt.get(capture)
-	if (ft && ft.has(f)) {
-		ft.delete(f)
-		if (!ft.size) {
-			tt.delete(target)
-			if (!tt.size)
-				t.delete(name)
-		}
-	} else {
-		warn('off without on', name, capture)
-	}
-}
-
 override(Event, 'stopPropagation', function(inherited, ...args) {
 	inherited.call(this, ...args)
 	this.propagation_stoppped = true
@@ -801,93 +750,6 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 	if (this.type == 'pointerdown')
 		document.fire('stopped_event', this)
 })
-
-let on = function(name, f, enable, capture) {
-	assert(enable === undefined || typeof enable == 'boolean')
-	if (enable == false) {
-		this.off(name, f, capture)
-		return
-	}
-	let install = installers[name]
-	if (install)
-		install.call(this)
-	let listener
-	if (name.starts('raw:')) { // raw handler
-		name = name.slice(4)
-		listener = f
-	} else {
-		listener = f.listener
-		if (!listener) {
-			let caller = callers[name] || passthrough_caller
-			listener = function(ev) {
-				let ret = caller.call(this, ev, f)
-				if (ret === false) { // like jquery
-					ev.preventDefault()
-					ev.stopPropagation()
-					ev.stopImmediatePropagation()
-				}
-			}
-			f.listener = listener
-		}
-	}
-	if (DEBUG_EVENTS)
-		log_add_event(this, name, listener, capture)
-	this.addEventListener(name, listener, capture)
-}
-
-let off = function(name, f, capture) {
-	let listener = f.listener || f
-	if (DEBUG_EVENTS)
-		log_remove_event(this, name, listener, capture)
-	this.removeEventListener(name, listener, capture)
-}
-
-let once = function(name, f, enable, capture) {
-	if (enable == false) {
-		this.off(name, f, capture)
-		return
-	}
-	let wrapper = function(...args) {
-		let ret = f(...args)
-		this.off(name, wrapper, capture)
-		return ret
-	}
-	this.on(name, wrapper, true, capture)
-	f.listener = wrapper.listener // so it can be off'ed.
-}
-
-function event(name, bubbles, ...args) {
-	return typeof name == 'string'
-		? new CustomEvent(name, {detail: {args}, cancelable: true, bubbles: bubbles})
-		: name
-}
-
-let ev = obj()
-let ep = obj()
-let log_fire = DEBUG_EVENTS && function(e) {
-	ev[e.type] = (ev[e.type] || 0) + 1
-	if (e.type == 'prop_changed') {
-		let k = e.detail.args[1]
-		ep[k] = (ep[k] || 0) + 1
-	}
-	return e
-} || return_arg
-
-let fire = function(name, ...args) {
-	let e = log_fire(event(name, false, ...args))
-	return this.dispatchEvent(e)
-}
-
-let fireup = function(name, ...args) {
-	let e = log_fire(event(name, true, ...args))
-	return this.dispatchEvent(e)
-}
-
-method(EventTarget, 'on'     , on)
-method(EventTarget, 'off'    , off)
-method(EventTarget, 'once'   , once)
-method(EventTarget, 'fire'   , fire)
-method(EventTarget, 'fireup' , fireup)
 
 // DOM load event.
 

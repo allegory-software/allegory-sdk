@@ -122,28 +122,38 @@ TIME & DATE
 	s.parse_date([locale]) -> ts
 FILE SIZE FORMATTING
 	x.kbytes(x, [dec], [mag]) -> s
-colors:
+COLORS
 	hsl_to_rgb(h, s, L) -> '#rrggbb'
-geometry:
+GEOMETRY
 	point_around(cx, cy, r, angle) -> [x, y]
-timers:
+TIMERS
 	runafter(t, f) -> tm
 	runevery(t, f) -> tm
 	runagainevery(t, f) -> tm
 	clock()
 	timer(f)
-serialization:
+SERIALIZATION
 	json_arg(s) -> t
 	json(t) -> s
-clipboard:
+CLIPBOARD
 	copy_to_clipboard(text, done_func)
-local storage:
+LOCAL STORAGE
 	save(key, s)
 	load(key) -> s
-url decoding, encoding and updating:
+URL DECODING, ENCODING AND UPDATING
 	url_arg(s) -> t
 	url(t) -> s
-ajax requests:
+EVENTS
+	event(name|ev, [bubbles], ...args) -> ev
+	e.on   (name|ev, f, [enable], [capture])
+	e.off  (name|ev, f, [capture])
+	e.once (name|ev, f, [enable], [capture])
+	e.fire    (name, ...args)
+	e.fireup  (name, ...args)
+	on.installers.EVENT = f() { ... }
+	on.callers.EVENT = f(ev, f) { return f.call(this, ...) }
+	DEBUG_EVENTS = false
+AJAX REQUESTS
 	ajax(opt) -> req
 	get(url, success, [error], [opt]) -> req
 	post(url, data, [success], [error], [opt]) -> req
@@ -1186,10 +1196,10 @@ method(Number, 'duration', function(format) {  // approx[+s] | long | null
 		s = round(s)
 		a.length = 0
 		if (format == 'long') {
-			if (d) { a.push(d); a.push(S('days'   , 'days'   )); }
-			if (h) { a.push(h); a.push(S('hours'  , 'hours'  )); }
-			if (m) { a.push(m); a.push(S('minutes', 'minutes')); }
-			if (1) { a.push(s); a.push(S('seconds', 'seconds')); }
+			if (d) { a.push(d); a.push(d > 1 ? S('days'   , 'days'   ) : S('day'   , 'day'   )); }
+			if (h) { a.push(h); a.push(d > 1 ? S('hours'  , 'hours'  ) : S('hour'  , 'hour'  )); }
+			if (m) { a.push(m); a.push(d > 1 ? S('minutes', 'minutes') : S('minute', 'minute')); }
+			if (s || !a.length) { a.push(s); a.push(S('seconds', 'seconds')); }
 			return a.join(' ')
 		} else {
 			if (d               ) { a.push(d                               + S('days_short'   , 'd')); }
@@ -1204,7 +1214,8 @@ method(Number, 'duration', function(format) {  // approx[+s] | long | null
 
 method(Number, 'timeago', function() {
 	let d = time() - this
-	return (d > -1 ? S('time_ago', '{0} ago') : S('in_time', 'in {0}')).subst(abs(d).duration('approx'))
+	return (d > -1 ? S('time_ago', '{0} ago') : S('in_time', 'in {0}'))
+		.subst(abs(d).duration('approx'))
 })
 
 // file size formatting ------------------------------------------------------
@@ -1398,6 +1409,146 @@ function url(t) {
 	return path + (args ? '?' + args : '') + (fragment ? '#' + fragment : '')
 }
 
+/* events ----------------------------------------------------------------- */
+
+{
+let callers = obj()
+let installers = obj()
+
+DEBUG_EVENTS = false
+
+etrack = DEBUG_EVENTS && new Map()
+
+let log_add_event = function(target, name, f, capture) {
+	if (target.initialized === null) // skip handlers added in the constructor.
+		return
+	capture = !!capture
+	let ft = attr(attr(attr(etrack, name, map), target, map), capture, map)
+	if (!ft.has(f))
+		ft.set(f, stacktrace())
+	else
+		debug('on duplicate', name, capture)
+}
+
+let log_remove_event = function(target, name, f, capture) {
+	capture = !!capture
+	let t = etrack.get(name)
+	let tt = t && t.get(target)
+	let ft = tt && tt.get(capture)
+	if (ft && ft.has(f)) {
+		ft.delete(f)
+		if (!ft.size) {
+			tt.delete(target)
+			if (!tt.size)
+				t.delete(name)
+		}
+	} else {
+		warn('off without on', name, capture)
+	}
+}
+
+let hidden_events = {prop_changed: 1, attr_changed: 1, stopped_event: 1}
+
+function passthrough_caller(ev, f) {
+	if (isobject(ev.detail) && ev.detail.args) {
+		//if (!(ev.type in hidden_events))
+		//debug(ev.type, ...ev.detail.args)
+		return f.call(this, ...ev.detail.args, ev)
+	} else
+		return f.call(this, ev)
+}
+
+let on = function(name, f, enable, capture) {
+	assert(enable === undefined || typeof enable == 'boolean')
+	if (enable == false) {
+		this.off(name, f, capture)
+		return
+	}
+	let install = installers[name]
+	if (install)
+		install.call(this)
+	let listener
+	if (name.starts('raw:')) { // raw handler
+		name = name.slice(4)
+		listener = f
+	} else {
+		listener = f.listener
+		if (!listener) {
+			let caller = callers[name] || passthrough_caller
+			listener = function(ev) {
+				let ret = caller.call(this, ev, f)
+				if (ret === false) { // like jquery
+					ev.preventDefault()
+					ev.stopPropagation()
+					ev.stopImmediatePropagation()
+				}
+			}
+			f.listener = listener
+		}
+	}
+	if (DEBUG_EVENTS)
+		log_add_event(this, name, listener, capture)
+	this.addEventListener(name, listener, capture)
+}
+
+let off = function(name, f, capture) {
+	let listener = f.listener || f
+	if (DEBUG_EVENTS)
+		log_remove_event(this, name, listener, capture)
+	this.removeEventListener(name, listener, capture)
+}
+
+let once = function(name, f, enable, capture) {
+	if (enable == false) {
+		this.off(name, f, capture)
+		return
+	}
+	let wrapper = function(...args) {
+		let ret = f(...args)
+		this.off(name, wrapper, capture)
+		return ret
+	}
+	this.on(name, wrapper, true, capture)
+	f.listener = wrapper.listener // so it can be off'ed.
+}
+
+let ev = obj()
+let ep = obj()
+let log_fire = DEBUG_EVENTS && function(e) {
+	ev[e.type] = (ev[e.type] || 0) + 1
+	if (e.type == 'prop_changed') {
+		let k = e.detail.args[1]
+		ep[k] = (ep[k] || 0) + 1
+	}
+	return e
+} || return_arg
+
+function event(name, bubbles, ...args) {
+	return typeof name == 'string'
+		? new CustomEvent(name, {detail: {args}, cancelable: true, bubbles: bubbles})
+		: name
+}
+
+let fire = function(name, ...args) {
+	let e = log_fire(event(name, false, ...args))
+	return this.dispatchEvent(e)
+}
+
+let fireup = function(name, ...args) {
+	let e = log_fire(event(name, true, ...args))
+	return this.dispatchEvent(e)
+}
+
+method(EventTarget, 'on'     , on)
+method(EventTarget, 'off'    , off)
+method(EventTarget, 'once'   , once)
+method(EventTarget, 'fire'   , fire)
+method(EventTarget, 'fireup' , fireup)
+
+on.installers = installers
+on.callers = callers
+}
+
 /* AJAX requests -------------------------------------------------------------
 
 	ajax(opt) -> req
@@ -1413,6 +1564,7 @@ function url(t) {
 		opt.dont_send (false)
 		opt.notify: widget to send 'load' events to.
 		opt.notify_error: error notify function: f(message, 'error').
+		opt.onchunk: f(s, finished) [-> false]
 
 	req.send()
 	req.abort()
@@ -1522,6 +1674,9 @@ function ajax(req) {
 	xhr.onreadystatechange = function(ev) {
 		if (xhr.readyState > 1)
 			stop_slow_watch()
+		if (xhr.readyState > 2 && req.onchunk)
+			if (req.onchunk(xhr.response, xhr.readyState == 4) === false)
+				req.abort()
 		if (xhr.readyState == 4) {
 			let status = xhr.status
 			if (status) { // status is 0 for network errors, incl. timeout.
