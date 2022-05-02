@@ -97,7 +97,7 @@ local xlsx_workbook = require'xlsxwriter.workbook'
 local add = table.insert
 local catch = errors.catch
 local update = glue.update
-local names = glue.names
+local words = glue.words
 local index = glue.index
 
 rowset = {}
@@ -135,14 +135,12 @@ function virtual_rowset(init, ...)
 
 		local schema = config'db_schema'
 		if schema then
-			for i,field in ipairs(rs.fields) do
-				schema:resolve_type(field)
-			end
+			schema:resolve_types(rs.fields)
 		end
 
-		local hide_cols = index(names(rs.hide_cols) or glue.empty)
-		local   ro_cols = index(names(rs.  ro_cols) or glue.empty)
-		local   rw_cols = rs.rw_cols and index(names(rs.rw_cols))
+		local hide_cols = index(words(rs.hide_cols) or glue.empty)
+		local   ro_cols = index(words(rs.  ro_cols) or glue.empty)
+		local   rw_cols = rs.rw_cols and index(words(rs.rw_cols))
 
 		if rs.pos_col == nil and rs.fields.pos then
 			rs.pos_col = 'pos'
