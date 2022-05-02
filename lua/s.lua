@@ -104,7 +104,7 @@ local files = {}
 local ids --{id->{files=,n=,en_s}}
 
 function M.Sfile(filenames)
-	update(files, index(names(filenames)))
+	update(files, index(words(filenames)))
 	ids = nil
 end
 
