@@ -100,7 +100,7 @@ rep         = string.rep
 char        = string.char
 esc         = glue.esc
 subst       = glue.subst
-names       = glue.names
+words       = glue.words
 random_string = glue.random_string
 
 --make these globals because they may be used as filters.
@@ -242,7 +242,7 @@ if not ... then
 end
 
 return {with = function(s)
-	for _,s in ipairs(names(s)) do
+	for _,s in ipairs(words(s)) do
 		require('$'..s)
 	end
 end}
