@@ -174,7 +174,7 @@ HTTP REQUESTS
 
 JSON ENCODING/DECODING
 
-	json_arg(s) -> t                        decode JSON
+	json_arg(s[, null_val]) -> t            decode JSON
 	json(t) -> s                            encode JSON
 	null                                    value to encode json `null`
 	json_array(t) -> t                      mark t to be encoded as a json array
@@ -302,7 +302,7 @@ local _ = string.format
 local format = string.format
 local indir = function(...) return assert(path.indir(...)) end
 local index = glue.index
-local names = glue.names
+local words = glue.words
 
 _G.glue = glue
 _G.pp = pp
@@ -457,7 +457,7 @@ local files = {}
 local ids --{id->{files=,n=,en_s}}
 
 function Sfile(filenames)
-	update(files, index(names(filenames)))
+	update(files, index(words(filenames)))
 	ids = nil
 end
 
@@ -1114,7 +1114,7 @@ function getpage(arg1, upload, receive_content)
 		method = upload and 'POST',
 		content = upload,
 		receive_content = receive_content or 'string',
-		debug = config'getpage_debug' and index(names(config'getpage_debug' or '')),
+		debug = config'getpage_debug' and index(words(config'getpage_debug' or '')),
 	}, opt)
 	opt.headers = update(headers, opt.headers)
 
@@ -1126,7 +1126,7 @@ function getpage(arg1, upload, receive_content)
 
 	local ct = res.headers['content-type']
 	if ct and ct.media_type == mime_types.json then
-		res.content = json_arg(res.content, null)
+		res.content = repl(json_arg(s), nil, null)
 	end
 	return res.content, res, req
 end
@@ -1264,18 +1264,35 @@ function unpack_json(t)
 	return unpack(dt, 1, #t)
 end
 
---TODO: add option to cjson to avoid this crap.
-local function repl_nulls(t, null_val)
-	if type(t) == 'table' then
+local function repl_nulls_t(t, null_val)
+	if null_val == nil and t[1] ~= nil then --array
+		local n = #t
+		for i=1,n do
+			if t[i] == null then --sparse
+				t[i] = nil
+				t.n = n
+			elseif type(t[i]) == 'table' then
+				repl_nulls_t(t[i], nil)
+			end
+		end
+	else
 		for k,v in pairs(t) do
 			if v == null then
-				v = null_val
+				t[k] = null_val
 			elseif type(v) == 'table' then
-				repl_nulls(v, null_val)
+				repl_nulls_t(v, null_val)
 			end
 		end
 	end
 	return t
+end
+local function repl_nulls(v, null_val)
+	if null_val == null then return v end
+	if type(t) == 'table' then
+		return repl_nulls_t(t)
+	else
+		return repl(t, null, null_val)
+	end
 end
 
 function json_arg(v, null_val)
@@ -1284,7 +1301,6 @@ function json_arg(v, null_val)
 end
 
 function json(v, indent)
-	if v == nil then return nil end
 	if indent and indent ~= '' then
 		return prettycjson(v, nil, indent)
 	else
@@ -1720,7 +1736,7 @@ function sendmail(opt)
 
 	local smtp = check500(smtp:connect{
 		logging = true,
-		debug = config'smtp_debug' and index(names(config'smtp_debug' or '')),
+		debug = config'smtp_debug' and index(words(config'smtp_debug' or '')),
 		host  = config('smtp_host', '127.0.0.1'),
 		port  = config('smtp_port', 587), --TODO: 465
 		tls   = config('smtp_tls', false), --TODO: true
@@ -1950,7 +1966,7 @@ function webb.server(opt)
 		key_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.key')
 	end
 	return server:new(update({
-		debug = config'http_debug' and index(names(config'http_debug' or '')),
+		debug = config'http_debug' and index(words(config'http_debug' or '')),
 		listen = {
 			{
 				host = host,
