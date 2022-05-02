@@ -124,8 +124,22 @@ function print_result(opt)
 	local hidecols = opt.hidecols and index(words(opt.hidecols))
 	local showcols = opt.showcols and index(words(opt.showcols))
 
+	local colmap
+	if showcols then
+		colmap = {}
+		for s in pairs(showcols) do
+			if s:find'=' then
+				local col, head = s:match'(.-)=(.*)'
+				showcols[s] = nil
+				showcols[col] = true
+				colmap[col] = head
+			end
+		end
+	end
+
 	local valindex
 	if hidecols or showcols then
+
 		valindex = {}
 		local fields0 = fields
 		fields = {}
@@ -141,7 +155,7 @@ function print_result(opt)
 	local cols = {}
 	local colindex = {}
 	for i, field in ipairs(fields) do
-		cols[i] = field.name
+		cols[i] = colmap and colmap[field.name] or field.name
 		colindex[field.name] = i
 	end
 
