@@ -106,8 +106,8 @@ end
 
 local function format_path(t)
 	local dt = {}
-	for i = 1, #t do
-		dt[i] = escape(t[i], '/')
+	for i = 1, t.n or #t do
+		dt[i] = escape(t[i] or '', '/')
 	end
 	return table.concat(dt, '/')
 end
