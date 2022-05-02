@@ -242,7 +242,8 @@ do
 end
 
 local function debug_type(v)
-	return type(v) == 'table' and v.type or type(v)
+	local mt = getmetatable(v)
+	return type(mt) == 'table' and mt.type or type(v)
 end
 
 local prefixes = {
@@ -252,8 +253,11 @@ local prefixes = {
 }
 
 local function debug_prefix(v)
-	return type(v) == 'table' and v.debug_prefix
-		or prefixes[debug_type(v)] or debug_type(v)
+	local mt = getmetatable(v)
+	local prefix = type(mt) == 'table' and mt.debug_prefix
+	if prefix then return prefix end
+	local type = debug_type(v)
+	return prefixes[type] or type
 end
 
 local ids_db = {} --{type->{last_id=,live=,[obj]->id}}
@@ -310,51 +314,51 @@ local function pp_compact(v)
 	return #s < 50 and pp.format(v, pp_opt_compact) or s
 end
 
-local function debug_arg(for_printing, v)
-	if v == nil then
-		return 'nil'
-	elseif type(v) == 'boolean' then
-		return v and 'Y' or 'N'
-	elseif type(v) == 'number' then
-		return _('%.17g', v)
-	else --string, table, function, thread, cdata
-		v = type(v) == 'string' and v
-			or names[v]
-			or (getmetatable(v) and getmetatable(v).__tostring
-				and not (type(v) == 'table' and v.type and v.debug_prefix)
-				and tostring(v))
-			or (type(v) == 'table' and not v.type and not v.debug_prefix and pp_compact(v))
-			or debug_id(v)
-		if not for_printing then
-			if v:find('\n', 1, true) then --multiline, make room for it.
-				v = v:gsub('\r\n', '\n')
-				v = glue.outdent(v)
-				v = v:gsub('\t', '   ')
-				v = '\n\n'..v..'\n'
-			end
-			--avoid messing up the terminal when tailing logs.
-			v = v:gsub('[%z\1-\8\11-\31\128-\255]', '.')
-		end
-		return v
+local function debug_arg(v)
+	if v == nil then return 'nil' end
+	if type(v) == 'boolean' then return v and 'Y' or 'N' end
+	if type(v) == 'number' then return _('%.17g', v) end
+	if type(v) == 'string' then return v end
+	local name = names[v]
+	if name then return name end
+	local mt = getmetatable(v)
+	if mt and type(mt) == 'table' then
+		if mt.__tostring then return tostring(v) end
 	end
+	if type(v) == 'table' and not (mt and (mt.type or mt.debug_prefix)) then
+		return pp_compact(v)
+	end
+	return debug_id(v)
 end
-logging.arg       = function(v) return debug_arg(false, v) end
-logging.printarg  = function(v) return debug_arg(true , v) end
+local function debug_arg_pp(v)
+	local v = debug_arg(v)
+	if v:find('\n', 1, true) then --multiline, make room for it.
+		v = v:gsub('\r\n', '\n')
+		v = glue.outdent(v)
+		v = v:gsub('\t', '   ')
+		v = '\n\n'..v..'\n'
+	end
+	--avoid messing up the terminal when tailing logs.
+	v = v:gsub('[%z\1-\8\11-\31\128-\255]', '.')
+	return v
+end
+logging.arg       = debug_arg_pp
+logging.printarg  = debug_arg
 
-local function logging_args_func(for_printing)
+local function logging_args_func(debug_arg)
 	return function(...)
 		if select('#', ...) == 1 then
-			return debug_arg(for_printing, (...))
+			return debug_arg((...))
 		end
 		local args, n = {...}, select('#',...)
 		for i=1,n do
-			args[i] = debug_arg(for_printing, args[i])
+			args[i] = debug_arg(args[i])
 		end
 		return unpack(args, 1, n)
 	end
 end
-logging.args      = logging_args_func(false)
-logging.printargs = logging_args_func(true)
+logging.args      = logging_args_func(debug_arg_pp)
+logging.printargs = logging_args_func(debug_arg)
 
 local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 	if self.filter[severity] then return end
@@ -380,7 +384,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
 				env, os.date('%Y-%m-%d %H:%M:%S', time), severity,
 				module or '', (event or ''):sub(1, 8),
-				debug_arg(false, (coroutine.running())), msg or '')
+				debug_arg_pp((coroutine.running())), msg or '')
 		if tofile and self.logtofile then
 			self:logtofile(entry)
 		end
@@ -458,7 +462,7 @@ function logging.livelist()
 	for type, ids in pairs(ids_db) do
 		for o, s in pairs(ids.live) do
 			t[#t+1] = type
-			t[#t+1] = debug_arg(true, o)
+			t[#t+1] = debug_arg(o)
 			t[#t+1] = s
 		end
 	end
@@ -519,7 +523,7 @@ function logging.printlive(custom_print)
 		print(('%-12s: %d'):format(ty, ids.live_count))
 		local ids, ss = {}, {}
 		for o in pairs(live) do
-			local id = debug_arg(true, o)
+			local id = debug_arg(o)
 			ids[#ids+1] = id
 			ss[id] = live[o]
 		end
