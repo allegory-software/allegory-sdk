@@ -5,6 +5,7 @@ assert(ffi.os == 'Linux' or ffi.os == 'OSX', 'platform not Linux or OSX')
 
 local M = {}
 local proc = {type = 'process', debug_prefix = 'p'}
+proc.__index = proc
 
 ffi.cdef[[
 extern char **environ;
@@ -190,7 +191,7 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		env_ptr[m] = nil
 	end
 
-	local self = setmetatable({async = async, cmd = cmd, args = args}, {__index = proc})
+	local self = setmetatable({async = async, cmd = cmd, args = args}, proc)
 
 	if async then
 		local sock = require'sock'

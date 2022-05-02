@@ -5,6 +5,7 @@ assert(ffi.os == 'Windows', 'platform not Windows')
 
 local M = {}
 local proc = {type = 'process', debug_prefix = 'p'}
+proc.__index = proc
 
 --TODO: move relevant ctypes here and get rid of the winapi dependency
 --(not worth it unless you are really really bored).
@@ -54,7 +55,7 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 	local out_rf, out_wf
 	local err_rf, err_wf
 
-	local self = setmetatable({async = async, cmd = cmd}, {__index = proc})
+	local self = setmetatable({async = async, cmd = cmd}, proc)
 
 	local function close_all()
 		if self.stdin then
