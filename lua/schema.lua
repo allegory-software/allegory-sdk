@@ -102,7 +102,7 @@ local isfunc = glue.isfunc
 local assertf = glue.assert
 local attr = glue.attr
 local update = glue.update
-local names = glue.names
+local words = glue.words
 local pack = glue.pack
 local unpack = glue.unpack
 local keys = glue.keys
@@ -158,6 +158,10 @@ local function resolve_type(self, fld, t, i, n, fld_ct, allow_types, allow_flags
 	return n + 1
 end
 
+local function update_type(self, fld)
+	update(fld, rawget(self.type_attrs, fld.type))
+end
+
 local function parse_cols(self, t, dt, loc1, fld_ct)
 	local dt_i = #dt + 1
 	if t.after_col then
@@ -186,6 +190,7 @@ local function parse_cols(self, t, dt, loc1, fld_ct)
 		dt[col] = fld
 		i = resolve_type(self, fld, t, i, i , fld_ct, true , false , false)
 		i = resolve_type(self, fld, t, i, #t, fld_ct, false, true  , true )
+		update_type(self, fld)
 	end
 	if fld_ct.is_table then
 		for i, fld in ipairs(dt) do
@@ -322,8 +327,13 @@ do
 		self.flags = update({}, schema.flags)
 		self.types = update({}, schema.types)
 		self.procs = {}
+		self.type_attrs = update({}, schema.type_attrs)
+		setmetatable(self.type_attrs, {__index = function(ta, k)
+			local t = {}; rawset(ta, k, t); return t
+		end})
 		env.flags = self.flags
 		env.types = self.types
+		env.type_attrs = self.type_attrs
 		init(self, env, 'tables', parse_table)
 		local function resolve_symbol(t, k)
 			return k --symbols resolve to their name as string.
@@ -363,9 +373,10 @@ function schema:import(src)
 		end
 	elseif isschema(src) then --schema
 		if not self.loaded[src] then
-			import(self, 'types' , sc)
-			import(self, 'tables', sc)
-			import(self, 'procs' , sc)
+			import(self, 'types' , src)
+			import(self, 'tables', src)
+			import(self, 'procs' , src)
+			update(self.type_attrs, src.type_attrs)
 			self.loaded[src] = true
 		end
 	elseif istab(src) then --plain table: use as environsment.
@@ -403,7 +414,7 @@ schema.env.weak_fk  = fk_func'set null'
 
 function schema:add_fk(tbl, cols, ...)
 	local tbl = assertf(self.tables[tbl], 'unknown table `%s`', tbl)
-	add_fk(self, tbl, names(cols), ...)
+	add_fk(self, tbl, words(cols), ...)
 end
 
 function schema:add_child_fk(tbl, cols, ref_tbl)
@@ -432,8 +443,9 @@ end
 schema.env.uk = ix_func'uk'
 schema.env.ix = ix_func'ix'
 
-schema.flags = {}
-schema.types = {}
+schema.flags = {} --not used
+schema.types = {} --not used
+schema.type_attrs = {} --not used
 
 function schema.env.pk(arg1, ...)
 	if isschema(arg1) then --used as flag.
@@ -469,7 +481,7 @@ end
 function schema.env.aka(old_names)
 	return function(self, tbl, fld)
 		local entity = fld or tbl --table rename or field rename.
-		for _,old_name in ipairs(names(old_names)) do
+		for _,old_name in ipairs(words(old_names)) do
 			attr(entity, 'aka')[old_name] = true
 		end
 	end
@@ -501,7 +513,7 @@ function schema:add_proc(name, args, ...)
 end
 
 function schema:add_cols(tbl_name, t)
-	local nt = names(tbl_name)
+	local nt = words(tbl_name)
 	local tbl_name = nt[1]
 	if nt[2] then
 		assert(nt[2] == 'after')
@@ -893,8 +905,18 @@ function diff:pp(opt)
 	end
 end
 
-function schema:resolve_type(t)
+function schema:resolve_type(t) --{attr = val, flag1, ...}
 	resolve_type(self, t, t, 1, #t, glue.empty, true, true)
+	update_type(self, t)
+	for i=#t,1,-1 do t[i] = nil end --remove flags
+	return t
+end
+
+function schema:resolve_types(fields) --{field1, ...}
+	for i,t in ipairs(fields) do
+		t[i] = self:resolve_type(t)
+	end
+	return t
 end
 
 return schema

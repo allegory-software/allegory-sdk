@@ -56,8 +56,8 @@ DDL
 
 DEBUGGING
 
-	pqr(rows, fields)                              pretty-print query result
-	outpqr(rows, fields)                           same but using out()
+	pqr(opt | rows,fields)                         pretty-print query result
+	outpqr(opt | rows,fields)                      same but using out()
 
 ]==]
 
@@ -213,10 +213,13 @@ for method in pairs{
 	end
 end
 
-function pqr(rows, fields, sums)
-	return mysql_print.result{rows = rows, fields = fields, sums = sums}
+function pqr(rows, fields)
+	local opt = rows.rows and rows or {rows = rows, fields = fields}
+	return mysql_print.result(opt)
 end
 
-function outpqr(rows, fields, sums)
-	mysql_print.result{rows = rows, fields = fields, sums = sums, print = outprint}
+function outpqr(rows, fields)
+	local opt = rows.rows and update({}, rows) or {rows = rows, fields = fields}
+	opt.print = outprint
+	mysql_print.result(opt)
 end
