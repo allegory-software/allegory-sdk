@@ -10,9 +10,10 @@
 CMDLINE
 
 	cmdsection(name, [wrap_fn]) -> section         create a cmdline section
-	section([active, ]cmdargs, help[, descr], fn)  add a command to a section
-	cmd    ([active, ]cmdargs, help[, descr], fn)  add a command to the misc section
-	cmdaction(...) -> fn, action_name              process cmdline options
+	section([active, ]cmd+args, help[, descr], fn) add a command to a section
+	cmd    ([active, ]cmd+args, help[, descr], fn) add a command to the misc section
+	cmdaction(...) -> action, opt, args, run       process cmdline options
+	fn : function(opt, args...)                    cmd action handler
 
 ]==]
 
@@ -66,8 +67,8 @@ local function addcmd(self, active, s, helpline, help, fn)
 		local args = repl(args:trim(), '')
 		if not args then
 			args = {}
-			for i = 1, debug.getinfo(fn).nparams do
-				args[i] = debug.getlocal(fn, i):gsub('_', '-'):upper()
+			for i = 2, debug.getinfo(fn).nparams do --arg#1 gets the options.
+				args[i-1] = debug.getlocal(fn, i):gsub('_', '-'):upper()
 			end
 			if debug.getinfo(fn, 'u').isvararg then
 				add(args, '...')
@@ -78,7 +79,7 @@ local function addcmd(self, active, s, helpline, help, fn)
 		if wrap then fn = wrap(fn) end
 		local cmd = {name = name, args = args, fn = fn, helpline = helpline, help = help}
 		if name:find('|', 1, true) then
-			for i,name in ipairs(names(name:gsub('|', ' '))) do
+			for i,name in ipairs(words(name:gsub('|', ' '))) do
 				addcmdalias(self, name, cmd, i > 1)
 			end
 		else
@@ -132,50 +133,73 @@ cmd('help', 'Show this screen', function()
 	say''
 end)
 
-local function run_cmd(c, ...)
-	local fn = cmds[c]
+local function run_action(action, opt, ...)
+	local fn = cmds[action]
 	if fn then
-		return fn(...)
+		return fn(opt, ...)
 	else
-		say(' ERROR: Unknown command: %s', c)
+		say(' ERROR: Unknown command: %s', action:gsub('_', '-'))
 		usage()
 	end
 end
 
 function cmdaction(...)
 
-	local i, s = 1
-	while true do
-		s = select(i, ...)
-		i = i + 1
-		if s == '-v' then
-			logging.verbose = true
-			env('VERBOSE', 1) --propagate verbosity to sub-processes.
-		elseif s == '-q' then
-			logging.quiet = true
-			env('QUIET', 1)
-		elseif s == '--debug' or s == '-vv' then
-			logging.verbose = true
-			logging.debug = true
-			env('DEBUG', 1) --propagate debug to sub-processes.
-			env('VERBOSE', 1) --propagate verbosity to sub-processes.
-		else
-			break
+	local action
+	local args = {n = 0}
+	local opt = {}
+	local noopt
+	for i = 1, select('#',...) do
+		local s = trim(select(i, ...))
+		if s == '-' then
+			noopt = true --stop processing options (allow args that start with `-`)
+			goto next
 		end
+		if not noopt then
+			local k,v = s:match'^%-%-?([^=]+)=(.*)' -- `-k=v` or `--k=v`
+			if k then
+				opt[k] = v
+				goto next
+			end
+			local k = s:match'^%-%-?(.+)' -- `-k` or `--k`
+			if k then
+				if k:starts'no-' then -- `-no-k` or `--no-k`
+					opt[k:sub(3)] = false
+				else
+					opt[k] = true
+				end
+				goto next
+			end
+		end
+		if not action then
+			action = s:gsub('-', '_')
+			goto next
+		end
+		args.n = args.n + 1
+		args[args.n] = repl(s, '') --empty args are received as `nil`
+		::next::
+	end
+
+	if opt.v then
+		logging.verbose = true
+		env('VERBOSE', 1) --propagate verbosity to sub-processes.
+	end
+
+	if opt.q then
+		logging.quiet = true
+		env('QUIET', 1)
+	end
+
+	if opt.debug or opt.vv then
+		logging.verbose = true
+		logging.debug = true
+		env('DEBUG', 1) --propagate debug to sub-processes.
+		env('VERBOSE', 1) --propagate verbosity to sub-processes.
 	end
 
 	--inherit debug and verbosity from parent process.
 	if repl(env'DEBUG'  , '', nil) then logging.debug   = true end
 	if repl(env'VERBOSE', '', nil) then logging.verbose = true end
 
-	if s == '--help' then s = 'help' end
-	local c = s and s:gsub('-', '_') or 'help'
-
-	local args = pack(select(i, ...))
-	for i = i, select('#',...) do
-		if args[i] == '' then
-			args[i] = nil
-		end
-	end
-	return c, args, run_cmd
+	return action or 'help', opt, args, run_action
 end

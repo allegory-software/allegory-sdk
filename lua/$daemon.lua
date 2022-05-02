@@ -151,7 +151,7 @@ end)
 
 function daemon(app_name, ...)
 
-	local cmd_name, cmd_args, cmd_fn = cmdaction(...) --process cmdline options.
+	local cmd_action, cmd_opt, cmd_args, cmd_run = cmdaction(...) --process cmdline options.
 
 	assert(not app.name, 'daemon() already called')
 
@@ -238,15 +238,15 @@ function daemon(app_name, ...)
 		logging:tofile_stop()
 	end
 
-	function app:run_cmd(cmd_name, cmd_fn, ...) --stub
-		return cmd_fn(cmd_name, ...)
+	function app:run_cmd(cmd_action, cmd_run, cmd_opt, ...) --stub
+		return cmd_run(cmd_action, cmd_opt, ...)
 	end
 
 	function app:run()
-		if cmd_name == app.name then --caller module loaded with require()
+		if cmd_action == app.name then --caller module loaded with require()
 			return app
 		end
-		return self:run_cmd(cmd_name, cmd_fn, unpack(cmd_args))
+		return self:run_cmd(cmd_action, cmd_run, cmd_opt, unpack(cmd_args))
 	end
 
 	return app
