@@ -200,6 +200,13 @@ return function()
 		return b and 'Y' or b ~= nil and 'N' or ''
 	end
 
+	local decfmt = memoize(function(dec)
+		return '%.'..dec..'f' or '%.0f'
+	end)
+	function type_attrs.number.to_text(n, f)
+		return _(f.decimals and decfmt(f.decimals) or '%0.15g', n)
+	end
+
 	function type_attrs.timeofday_in_seconds.to_text(s, f)
 		return glue_timeofday(s, f.has_seconds)
 	end
