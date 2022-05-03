@@ -5214,7 +5214,6 @@ component('x-lookup-dropdown', function(e) {
 		let txt = div({class: 'x-item-progress-text'},
 			isnum(p) ? (p * 100).dec(this.decimals) + '%' : p)
 		bar.style.right = (100 - (isnum(p) ? p * 100 : 0)) + '%'
-		pr(p, isnum(p))
 		return div({class: 'x-item-progress'}, bar, txt)
 	}
 
