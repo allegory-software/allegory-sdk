@@ -7,6 +7,10 @@ local cjson = require'cjson'
 local null = cjson.null
 local cat = table.concat
 local index = glue.index
+local floor = math.floor
+local ceil = math.ceil
+local min = math.min
+local max = math.max
 
 local function ellipsis(s,n)
 	return #s > n and (s:sub(1,n-3) .. '...') or s
@@ -26,8 +30,8 @@ end
 
 function align.center(s,n)
 	local total = n - #s
-	local left = math.floor(total / 2)
-	local right = math.ceil(total / 2)
+	local left = floor(total / 2)
+	local right = ceil(total / 2)
 	s = (' '):rep(left)..s..(' '):rep(right)
 	return ellipsis(s,n)
 end
@@ -37,30 +41,31 @@ local function fit(s,n,al)
 end
 
 local function print_table(opt)
-	local rows    = opt.rows
-	local cols    = opt.cols
-	local aligns  = opt.aligns
-	local minsize = opt.minsize or 0
-	local sumdefs = opt.sums
-	local print   = opt.print or _G.print
+	local rows     = opt.rows
+	local cols     = opt.cols
+	local aligns   = opt.aligns
+	local minsize  = opt.minsize or 0
+	local sumdefs  = opt.sums
+	local print    = opt.print or _G.print
+	local maxsizes = {}
 
-	local max_sizes = {}
 	for j=1,#cols do
-		max_sizes[j] = math.max(max_sizes[j] or minsize,
+		maxsizes[j] = max(maxsizes[j] or minsize,
 			#cols[j], sd and #sd[1] or 0, sd and #sd[2] or 0)
 	end
 	for j=1,#cols do
+		local maxsize = opt.maxsizes and opt.maxsizes[cols[j]] or 1/0
 		for i=1,#rows do
-			max_sizes[j] = math.max(max_sizes[j], #rows[i][j])
+			maxsizes[j] = min(maxsize, max(maxsizes[j], #rows[i][j]))
 		end
 	end
 
 	local function fits(j, s)
-		return fit(s, max_sizes[j], aligns and aligns[j]) .. ' | '
+		return fit(s, maxsizes[j], aligns and aligns[j]) .. ' | '
 	end
 
 	local function hr(j)
-		return ('-'):rep(max_sizes[j]) .. ' + '
+		return ('-'):rep(maxsizes[j]) .. ' + '
 	end
 
 	print()
@@ -116,24 +121,30 @@ local function cell_align(current_align, cell_value, field)
 end
 
 function print_result(opt)
-	local rows    = opt.rows
-	local fields  = opt.fields
-	local minsize = opt.minsize
-	local sums    = opt.sums
-	local null_s  = opt.null_text or ''
+	local rows     = opt.rows
+	local fields   = opt.fields
+	local minsize  = opt.minsize
+	local sums     = opt.sums
+	local null_s   = opt.null_text or ''
 	local hidecols = opt.hidecols and index(words(opt.hidecols))
 	local showcols = opt.showcols and index(words(opt.showcols))
+	local colmap   = opt.colmap
 
-	local colmap
 	if showcols then
-		colmap = {}
+		local colmap1
 		for s in pairs(showcols) do
 			if s:find'=' then
 				local col, head = s:match'(.-)=(.*)'
-				showcols[s] = nil
-				showcols[col] = true
-				colmap[col] = head
+				showcols[s] = nil --only remove now
+				colmap1 = colmap1 or {}
+				colmap1[col] = head
 			end
+		end
+		if colmap1 then
+			for col in pairs(colmap1) do
+				showcols[col] = true --only add now (can't do both in the same loop).
+			end
+			colmap = update(colmap1, colmap)
 		end
 	end
 
@@ -191,9 +202,9 @@ function print_result(opt)
 					if op == 'sum' or op == 'avg' then
 						n = (n or 0) + x
 					elseif op == 'min' then
-						n = math.min(n or 1/0, x)
+						n = min(n or 1/0, x)
 					elseif op == 'max' then
-						n = math.max(n or -1/0, x)
+						n = max(n or -1/0, x)
 					end
 				end
 			end
@@ -210,7 +221,7 @@ function print_result(opt)
 
 	print_table{
 		rows = textrows, cols = cols, aligns = aligns, valindex = valindex,
-		minsize = minsize, sums = sumdefs, print = opt.print,
+		minsize = minsize, sums = sumdefs, print = opt.print, maxsizes = opt.maxsizes,
 	}
 end
 
