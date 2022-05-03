@@ -22,19 +22,23 @@ require'$log'
 
 --printing -------------------------------------------------------------------
 
+local function fmtargs(fmt, ...)
+	return fmt and select('#', ...) > 0 and fmt:format(...) or fmt or ''
+end
+
 function say(fmt, ...)
 	if logging.quiet then return end
-	io.stderr:write((fmt and fmt:format(...) or '')..'\n')
+	io.stderr:write(fmtargs(fmt, ...)..'\n')
 	io.stderr:flush()
 end
 
 function sayn(fmt, ...)
 	if logging.quiet then return end
-	io.stderr:write((fmt and fmt:format(...) or ''))
+	io.stderr:write(fmtargs(fmt, ...))
 end
 
 function die(fmt, ...)
-	say(fmt and ('ABORT: '..fmt):format(...) or 'ABORT')
+	say(fmt and fmtargs('ABORT: '..fmt, ...) or 'ABORT')
 	os.exit(1)
 end
 
