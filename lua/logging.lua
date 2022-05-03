@@ -48,6 +48,10 @@ local clock = time.clock
 local time = time.time
 local _ = string.format
 
+local function fmtargs(self, fmt, ...)
+	return fmt and select('#', ...) > 0 and _(fmt, self.args(...)) or fmt or nil
+end
+
 local logging = {
 	quiet = false,
 	verbose = false,
@@ -366,7 +370,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 	if self.filter[event   ] then return end
 	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
 	local time = time()
-	local msg = fmt and _(fmt, self.args(...))
+	local msg = fmtargs(self, fmt, ...)
 	if next(self.censor) then
 		for _,censor in pairs(self.censor) do
 			msg = censor(msg, self, severity, module, event)
@@ -435,12 +439,12 @@ local function live(self, o, fmt, ...)
 	elseif was_live then
 		ids.live_count = ids.live_count - 1
 	end
-	ids.live[o] = fmt and _(fmt, self.args(...)) or nil
+	ids.live[o] = fmtargs(self, fmt, ...)
 end
 
 local function liveadd(self, o, fmt, ...)
 	local id, ids = debug_id(o)
-	ids.live[o] = assert(ids.live[o]) .. ' ' .. _(fmt, self.args(...))
+	ids.live[o] = assert(ids.live[o]) .. ' ' .. fmtargs(self, fmt, ...)
 end
 
 local function init(self)
