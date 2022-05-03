@@ -23,7 +23,7 @@ require'$log'
 --printing -------------------------------------------------------------------
 
 local function fmtargs(fmt, ...)
-	return fmt and select('#', ...) > 0 and fmt:format(...) or fmt or ''
+	return fmt and fmt:format(...) or ''
 end
 
 function say(fmt, ...)

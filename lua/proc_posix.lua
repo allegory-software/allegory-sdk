@@ -362,7 +362,7 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		if M.logging then
 			local s = M.quote_args(nil, cmd, unpack(args))
 			M.log('', 'exec', '%s', s)
-			M.live(self, s)
+			M.live(self, '%s', s)
 		end
 
 		return self

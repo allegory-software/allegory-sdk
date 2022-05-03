@@ -48,10 +48,6 @@ local clock = time.clock
 local time = time.time
 local _ = string.format
 
-local function fmtargs(self, fmt, ...)
-	return fmt and select('#', ...) > 0 and _(fmt, self.args(...)) or fmt or nil
-end
-
 local logging = {
 	quiet = false,
 	verbose = false,
@@ -363,6 +359,10 @@ local function logging_args_func(debug_arg)
 end
 logging.args      = logging_args_func(debug_arg_pp)
 logging.printargs = logging_args_func(debug_arg)
+
+local function fmtargs(self, fmt, ...)
+	return fmt and _(fmt, self.args(...)) or nil
+end
 
 local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 	if self.filter[severity] then return end
