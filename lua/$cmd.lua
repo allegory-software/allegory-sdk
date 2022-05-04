@@ -38,7 +38,7 @@ function sayn(fmt, ...)
 end
 
 function die(fmt, ...)
-	say(fmt and fmtargs('ABORT: '..fmt, ...) or 'ABORT')
+	say(fmt and 'ABORT: '..fmt or 'ABORT', ...)
 	os.exit(1)
 end
 
