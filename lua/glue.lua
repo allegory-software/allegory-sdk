@@ -46,11 +46,11 @@ CACHING
 	glue.memoize(f,[cache],[minarg],[maxarg]) -> mf,cache   memoize pattern (fixarg or vararg)
 	glue.tuples([narg],[space]) -> tuple(...)->t,space      create a tuple space (fixarg or vararg)
 	glue.poison                                     value to use as arg#1 on a memoized function to clear the cache
-
 ARRAYS
 	glue.extend(dt, t1, ...) -> dt                  extend an array
 	glue.append(dt, v1, ...) -> dt                  append non-nil values to an array
 	glue.shift(t, i, n) -> t                        shift array elements
+	glue.slice(t, [i], [j]) -> t                    slice an array
 	glue.map(t, field|f,...) -> t                   map f over pairs of t or select a column from an array of records
 	glue.imap(t, field|f,...) -> t                  map f over ipairs of t or select a column from an array of records
 	glue.indexof(v, t, [i], [j]) -> i               scan array for value
@@ -588,6 +588,20 @@ local function remove_n(t, i, n)
 	for p=#t,#t-n+1,-1 do --clean tail
 		t[p] = nil
 	end
+end
+
+local clamp = glue.clamp
+function glue.slice(t, i, j) --TODO: not used. use it or scrape it.
+	local n = t.n or #t
+	i = i or 1
+	j = j or n
+	if i < 0 then i = n - i + 1 end
+	if j < 0 then j = n - i + 1 end
+	i = clamp(i, 1, n)
+	j = clamp(j, 1, n)
+	local dt = {}
+	for i=i,j do dt[i] = t[i] end
+	return dt
 end
 
 --shift all the elements on the right of i (i inclusive), n positions to the
