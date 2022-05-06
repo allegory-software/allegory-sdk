@@ -98,8 +98,14 @@ local function parse_event(s)
 end
 
 --register a function to be called for a specific event type.
-function events:on(ev, fn)
-	local ev, nss = parse_event(ev)
+function events:on(s, fn, on)
+	if not fn then
+		return
+	end
+	if on == false then
+		return self:off(s, fn)
+	end
+	local ev, nss = parse_event(s)
 	assert(ev, 'event name missing')
 	local t = self.__observers
 	if not t then
@@ -110,27 +116,31 @@ function events:on(ev, fn)
 	add(t, fn)
 	if nss then
 		for _,ns in ipairs(nss) do
-			add(attr(t, ns), fn)
+			attr(t, ns)[fn] = true
 		end
 	end
 end
 
 --remove a handler or all handlers of an event and/or namespace.
-function events:off(s)
+function events:off(s, fn)
 	local t = self.__observers
 	if not t then return end
 	local ev, nss = parse_event(s)
-	if ev and nss then
+	if fn then
+		local t = t[ev]
+		local i = t and indexof(fn, t)
+	elseif ev and nss then
 		local t = t[ev]
 		if t then
 			for _,ns in ipairs(nss) do
 				local fns = t[ns]
 				if fns then
-					for _,fn in ipairs(fns) do
+					for fn in pairs(fns) do
 						local i = indexof(fn, t)
 						if i then
 							remove(t, i)
 						end
+						fns[fn] = nil
 					end
 				end
 			end
@@ -142,14 +152,16 @@ function events:off(s)
 			for _,t in pairs(t) do
 				local fns = t[ns]
 				if fns then
-					for _,fn in ipairs(fns) do
-						remove(t, indexof(fn, t))
+					for fn in pairs(fns) do
+						local i = indexof(fn, t)
+						if i then
+							remove(t, i)
+						end
+						fns[fn] = nil
 					end
 				end
 			end
 		end
-	else
-		self.__observers = nil
 	end
 end
 
@@ -171,8 +183,9 @@ end
 
 --fire an event, i.e. call its handler method and all observers.
 function events:fire(ev, ...)
-	if self['on_'..ev] then
-		local ret = self[ev](self, ...)
+	local fn = self['on_'..ev]
+	if fn then
+		local ret = fn(self, ...)
 		if ret ~= nil then return ret end
 	end
 	local t = self.__observers
@@ -217,7 +230,7 @@ end
 obj:on('testing.ns1', handler_func(2))
 obj:on('testing.ns2', handler_func(3))
 obj:on('testing.ns3', handler_func(4))
-obj.testing = handler_func(1)
+obj.on_testing = handler_func(1)
 
 obj:fire('testing', 3, 5)
 assert(#t == 4)
