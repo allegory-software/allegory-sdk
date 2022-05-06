@@ -1,6 +1,6 @@
 --[[
 
-	Pub/sub mixin for object systems.
+	Event system (aka pub/sub) mixin for any object or class.
 	Written by Cosmin Apreutesei. Public Domain.
 
 Events are a way to associate an action with one or more callback functions

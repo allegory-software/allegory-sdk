@@ -61,6 +61,7 @@ scripts for new libraries.
   * [coro](lua/coro.lua)               - [Symmetric coroutines](https://stackoverflow.com/questions/41891989) for cross-yielding
   * [errors](lua/errors.lua)           - Structured exceptions for writing network protocols
   * [logging](lua/logging.lua)         - Logging to files and network
+  * [events](lua/events.lua)           - Event system (pub/sub) mixin for any object or class
   * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser with labels
   * [$](lua/$.lua), [$log](lua/$log.lua), [$fs](lua/$fs.lua), [$sock](lua/$sock.lua) - "Drop your tools on the floor" modules
   * [$daemon](lua/$daemon.lua)         - Scaffold/boilerplate for writing server apps
@@ -74,6 +75,8 @@ scripts for new libraries.
   * [pthread](lua/pthread.lua)         - Low-level threads
   * [luastate](lua/luastate.lua)       - Create Lua interpreters to use with OS threads
   * [thread](lua/thread.lua)           - High-level threads API based on pthread and luastate
+* __Multi-tasking__
+  * [tasks](lua/tasks.lua)             - Task system with process hierarchy, output capturing and scheduling
 * __Networking__
   * [sock](lua/sock.lua)               - Sockets & async scheduler for sockets & pipes
   * [sock_libtls](lua/sock_libtls.lua) - TLS-encrypted async TCP sockets

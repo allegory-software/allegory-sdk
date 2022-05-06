@@ -8,17 +8,19 @@ FACTS
 		* status info: .start_time, .duration, .killed, .exit_code, .freed.
 	* tasks form a tree:
 		* killing a task kills all its children.
-		* tasks wait for their child tasks to complete before they are finished.
+		* tasks wait for child tasks to finish before they are freed.
 		* events, stdout/stderr, notifications and errors bubble up to parent tasks.
-	* errors
+	* errors raised with ta:error() as well as any error raise in the action
+	function are captured and re-raised if the task runs in foreground.
 
 API
 	local ta = tasks.task(opt)
 		opt.action = fn(ta)       action to run
 		opt.parent_task           child of `parent_task`
-		opt.bg = true             run in background
-		opt.free_after = N        free after N seconds
-		opt.name = s              task name (for listing and for debugging)
+		opt.bg                    run in background.
+		opt.allow_fail            do not re-raise the errors raised with ta:error().
+		opt.free_after            free after N seconds (10). false = 1/0.
+		opt.name                  task name (for listing and for debugging).
 	t.id
 	M.tasks -> {ta->true}
 	M.tasks_by_id[id] -> ta
@@ -30,7 +32,7 @@ STATE
 	ta.exit_code               set if task finished and not killed
 	ta.pinned                  set to prevent freeing, unset to resume freeing
 	ta.freed                   task was freed
-	ta:start()                 start task.
+	ta:start() -> ta           start task.
 	ta:kill() -> t|f           kill task along with its children.
 	ta:do_kill() -> t|f        implement kill. must return true on success.
 	ta:free() -> t|f           free task along with its children, if none are running.
@@ -39,9 +41,9 @@ STATE
 	^remove_task(parent_ta, child_ta)
 
 LOGGING
-	ta:logerror(event, fmt, ...)
-	ta.errors -> {{task,event,fmt,...},...}
-	^logerror(ta, event, fmt, ...)
+	ta:error(event, err)
+	ta.errors -> {{task=, event=, error=},...}
+	^error(ta, event, error)
 
 NOTIFICATIONS
 	ta.notifications -> {{task=, kind=, message=},...}
@@ -63,6 +65,15 @@ STDOUT/STDERR
 	^write_stdout(ta, s)
 	^write_stderr(ta, s)
 
+TERMINALS
+	M.terminal(opt) -> te      create a terminal that can watch one or more tasks.
+	te:attach(ta)              attach terminal to a task.
+	te:detach(ta)              detach terminal from a task.
+	^<task event>(...)         attached tasks forward their events to the terminal.
+
+PROCESS TASK
+	M.exec(cmd_args|{cmd,arg1,...}, opt) -> ta
+
 ]]
 
 local glue = require'glue'
@@ -77,12 +88,17 @@ local _ = string.format
 local add = table.insert
 local cat = table.concat
 local time = time.time
+local unpack = glue.unpack
 local object = glue.object
 local update = glue.update
 local empty = glue.empty
 local attr = glue.attr
+local imap = glue.imap
+local sortedpairs = glue.sortedpairs
 local thread = sock.thread
 local resume = sock.resume
+local sleep = sock.sleep
+local runafter = sock.runafter
 
 local M = {}
 M.tasks = {}
@@ -103,8 +119,8 @@ function M.task(opt)
 		stdout_chunks = {},
 		stderr_chunks = {},
 		stdouterr_chunks = {},
-		errors = {}, --{{},...}
-		notifications = {}, --{{task,event,fmt,...},...}
+		errors = {}, --{{task=, event=, error=},...}
+		notifications = {}, --{{task=, kind=, message=},...}
 	 	child_tasks = {}, --{task1,...}
 	})
 	self.name = self.name or self.id
@@ -117,18 +133,21 @@ function M.task(opt)
 
 	function self:start()
 
+		if self.start_time then
+			return self --already started
+		end
 		self.start_time = time()
 		self:_setstatus'running'
 
 		local function run_task()
 			local ok, ret = errors.pcall(self.action, self)
 			if not ok then
-				self:logerror('run', '%s', ret)
+				self:error('run', ret)
 				self:_finish()
 			else
 				self:_finish(ret or 0)
 			end
-			runafter(self.free_after or 0, function()
+			runafter(self.free_after or 1/0, function()
 				while not self:free() do
 					sleep(1)
 				end
@@ -138,7 +157,12 @@ function M.task(opt)
 			resume(thread(run_task), 'task %s', self.name)
 		else
 			run_task()
+			if not self.allow_fail and #self.errors > 0 then
+				error(cat(imap(imap(self.errors, 'error'), tostring), '\n'))
+			end
 		end
+
+		return self
 	end
 
 	return self
@@ -159,10 +183,10 @@ end
 
 --state
 
-function task:_tasks_running()
+function task:_running()
 	if self.status == 'running' then return true end
 	for _,child_task in ipairs(self.child_tasks) do
-		if child_task:_tasks_running() then
+		if child_task:_running() then
 			return true
 		end
 	end
@@ -171,15 +195,15 @@ end
 function task:free()
 	if self.freed then return false end
 	if self.pinned then return false end
-	if self:_tasks_running() then return false end
+	if self:_running() then return false end
 	while #self.child_tasks > 0 do
 		child_task:free()
 	end
 	if self.parent_task then
 		self.parent_task:remove_task(self)
 	end
-	mm.tasks[self] = nil
-	mm.tasks_by_id[self.id] = nil
+	M.tasks[self] = nil
+	M.tasks_by_id[self.id] = nil
 	self.freed = true
 	return true
 end
@@ -194,8 +218,7 @@ function task:_finish(exit_code)
 	if self.duration then return end --already called.
 	self.duration = time() - self.start_time
 	self.exit_code = exit_code
-	--TODO: wait_for_children_to_finish
-	self:_setstatus(exit_code and 'finished')
+	self:_setstatus'finished'
 end
 
 function task:do_kill() return false end --stub
@@ -239,12 +262,13 @@ function task:log(severity, event, ...)
 	logging.log(severity, self.module, event, ...)
 end
 
-function task:on_logerror(task, event, ...)
-	add(self.errors, pack(task, event, ...))
+function task:on_error(task, event, err)
+	add(self.errors, {task = task, event = event, error = err})
 end
-function task:logerror(event, ...)
-	self:log('ERROR', event, ...)
-	self:fire_up('logerror', event, ...)
+function task:error(event, err)
+	assert(event and err, 'usage: task:error(event, error)')
+	self:log('ERROR', event, '%s', err)
+	self:fire_up('error', event, err)
 end
 
 --notifications
@@ -282,7 +306,35 @@ function task:stdout    () return cat(self.stdout_chunks) end
 function task:stderr    () return cat(self.stderr_chunks) end
 function task:stdouterr () return cat(self.stdouterr_chunks) end
 
---async exec tasks -----------------------------------------------------------
+--terminals ------------------------------------------------------------------
+
+--a terminal is an object that can attach and detach to any tasks at any time.
+--attaching to a task forwards the task's events to the terminal.
+
+local term = update({}, events)
+
+function M.terminal(opt)
+	local self = object(term, opt)
+	function self.task_on_event(task, ev, source_task, ...)
+		self:fire(ev, ...)
+	end
+	return self
+end
+
+function term:attach(task, on)
+	task:on('event', self.task_on_event, on)
+end
+
+function term:detach(task)
+	self:attach(task, false)
+end
+
+function term:on_write_stdout(s) io.stdout:write(s) end --stub
+function term:on_write_stderr(s) io.stderr:write(s) end --stub
+function term:on_error(event, err) print(_('ERROR [%s]: %s', event, err)) end --stub
+function term:on_notify(kind, s) print(_('%s: %s', kind:upper(), s)) end --stub
+
+--async process tasks with stdout/err capturing ------------------------------
 
 function M.exec(cmd, opt)
 
@@ -315,7 +367,7 @@ function M.exec(cmd, opt)
 				--dbg('mm', 'execin', '%s', opt.stdin)
 				local ok, err = p.stdin:write(opt.stdin)
 				if not ok then
-					self:logerror('stdinwr', '%s', err)
+					self:error('stdinwr', err)
 				end
 				assert(p.stdin:close()) --signal eof
 			end, 'exec-stdin %s', p))
@@ -327,7 +379,7 @@ function M.exec(cmd, opt)
 				while true do
 					local len, err = p.stdout:read(buf, sz)
 					if not len then
-						task:logerror('stdoutrd', '%s', err)
+						task:error('stdoutrd', err)
 						break
 					elseif len == 0 then
 						break
@@ -345,7 +397,7 @@ function M.exec(cmd, opt)
 				while true do
 					local len, err = p.stderr:read(buf, sz)
 					if not len then
-						task:logerror('stderrrd', '%s', err)
+						task:error('stderrrd', err)
 						break
 					elseif len == 0 then
 						break
@@ -360,7 +412,7 @@ function M.exec(cmd, opt)
 		local exit_code, err = p:wait()
 		if not exit_code then
 			if not (err == 'killed' and task.killed) then
-				task:logerror('procwait', '%s', err)
+				task:error('procwait', err)
 			end
 		end
 		while not (
@@ -371,6 +423,23 @@ function M.exec(cmd, opt)
 			sleep(.1)
 		end
 		p:forget()
+
+		if not self.bg and not self.allow_fail and exit_code ~= 0 then
+			local cmd_s = isstr(cmd) and cmd or proc.quote_args(nil, unpack(cmd))
+			local s = _('%s [%s]', cmd_s, exit_code)
+			if task.stdin then
+				s = s .. '\nSTDIN:\n' .. task.stdin
+			end
+			if opt.env then
+				local dt = {}
+				for k,v in sortedpairs(t) do
+					add(dt, _('%s = %s', k, v))
+				end
+				s = s .. '\nENV:\n' .. cat(dt, '\n')
+			end
+			self:error('exec', s)
+		end
+
 		return exit_code
 	end
 
@@ -378,13 +447,9 @@ function M.exec(cmd, opt)
 		return p:kill()
 	end
 
-	if not opt.allow_fail and task.exit_code and task.exit_code ~= 0 then
-		local cmd_s = isstr(cmd) and cmd or proc.quote_args_unix(unpack(cmd))
-		check500(false, 'exec: %s\nEXIT CODE: %s\nSTDIN:\n%s\nENV:%s\n',
-			cms_s, task.exit_code, task.stdin, opt.env)
+	if task.autostart ~= false then
+		task:start()
 	end
-
-	task:start()
 
 	return task
 end
@@ -393,19 +458,18 @@ end
 
 M.scheduled_tasks = {}
 
---[=[
 function M.set_scheduled_task(name, opt)
 	if not opt then
-		mm.scheduled_tasks[name] = nil
+		M.scheduled_tasks[name] = nil
 	else
 		assert(opt.task_name)
 		assert(opt.action)
 		assert(opt.start_hours or opt.run_every)
 		assert(opt.machine or opt.deploy)
-		local sched = mm.scheduled_tasks[name]
+		local sched = M.scheduled_tasks[name]
 		if not sched then
 			sched = {sched_name = name, ctime = time(), active = true}
-			mm.scheduled_tasks[name] = sched
+			M.scheduled_tasks[name] = sched
 		end
 		update(sched, opt)
 	end
@@ -420,7 +484,7 @@ local function run_tasks()
 	local now = time()
 	local today = glue.day(now)
 
-	for sched_name,t in pairs(mm.scheduled_tasks) do
+	for sched_name,t in pairs(M.scheduled_tasks) do
 
 		if t.active then
 
@@ -443,7 +507,7 @@ local function run_tasks()
 				end
 			end
 
-			if now >= min_time and not mm.running_task(t.task_name) then
+			if now >= min_time and not M.running_task(t.task_name) then
 				local rearm = run_every and true or false
 				note('mm', 'run-task', '%s', t.task_name)
 				t.last_run = now
@@ -454,7 +518,7 @@ local function run_tasks()
 				resume(thread(function()
 					local ok, err = errors.pcall(action)
 					if not ok then
-						logerror('mm', 'runtask', '%s: %s', sched_name, err)
+						error('mm', 'runtask', '%s: %s', sched_name, err)
 					end
 				end, 'run-task %s', t.task_name))
 			end
@@ -462,18 +526,24 @@ local function run_tasks()
 		end
 	end
 end
-]=]
 
 --self-test ------------------------------------------------------------------
 
 if not ... then
-
 	local tasks = M
-	local ta = tasks.exec({
-		'echo', 'hello'
-	}, {
-		--
-	})
-	pr(ta)
-
+	sock.run(function()
+		local ta = tasks.exec('echo hello', {
+			free_after = 0,
+			bg = true,
+			autostart = false,
+		})
+		local te = tasks.terminal()
+		te:attach(ta)
+		ta:start()
+		ta:notify_warn"The times they are a-changin'"
+		ta:error("steamin'", 'Gotcha!')
+		ta:error("cookin'" , 'Gotcha!')
+		ta:error("relaxin'", 'Gotcha!')
+		ta:error("workin'" , 'Gotcha!')
+	end)
 end
