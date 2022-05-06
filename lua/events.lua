@@ -10,11 +10,11 @@ callbacks later on, based on a criteria.
 This module is only a mixin (a plain table with methods). It must be added to
 your particular object system by copying the methods over to your base class.
 
-## Event facts
+EVENT FACTS
 
   * events fire in the order in which they were added.
   * extra args passed to `fire()` are passed to each event handler.
-  * if the method `obj:<event>(args...)` is found, it is called first.
+  * if the method `obj:on_EVENT(args...)` is found, it is called first.
   * returning a non-nil value from a handler interrupts the event handling
     call chain and the value is returned back by `fire()`.
   * the meta-event called `'event'` is fired on all events (the name of the
@@ -30,7 +30,13 @@ your particular object system by copying the methods over to your base class.
   * `obj:off()` can be safely called inside any event handler, even to remove
     itself.
 
-## Examples
+LIMITATIONS
+
+  * no bubbling or trickling/capturing as there is no awareness of a hierarchy.
+  Add them yourself as needed by walking up or down the tree and firing them
+  for each node (don't forget to inject the target object in the arg list).
+
+EXAMPLES
 
   * `apple:on('falling.ns1.ns2', function(self, args...) ... end)` - register
   an event handler and associate it with the `ns1` and `ns2` tags/namespaces.
@@ -44,7 +50,7 @@ your particular object system by copying the methods over to your base class.
   * `apple:off{nil, ns1}` - remove all event handlers on the `ns1` tag.
   * `apple:off() - remove all event handlers registered on `apple`.
 
-## API
+API
 
 	obj:on('event[.ns1...]', function(self, args...) ... end)
 	obj:on({event_name, ns1, ...}, function(self, args...) ... end)
@@ -121,7 +127,10 @@ function events:off(s)
 				local fns = t[ns]
 				if fns then
 					for _,fn in ipairs(fns) do
-						remove(t, indexof(fn, t))
+						local i = indexof(fn, t)
+						if i then
+							remove(t, i)
+						end
 					end
 				end
 			end
@@ -162,7 +171,7 @@ end
 
 --fire an event, i.e. call its handler method and all observers.
 function events:fire(ev, ...)
-	if self[ev] then
+	if self['on_'..ev] then
 		local ret = self[ev](self, ...)
 		if ret ~= nil then return ret end
 	end
