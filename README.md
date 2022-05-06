@@ -30,6 +30,10 @@ to see what's cooking for the next release.<br>
 Look at the [issues](https://github.com/allegory-software/allegory-sdk/issues)
 to see what's missing, broken or wanted.
 
+# Where it's used
+
+  * [Many Machines - the independent man's SAAS provisioning tool](https://github.com/allegory-software/many-machines)
+
 # Compatibility
 
  * Operating Systems: **Debian 10+**, **Windows 10**
