@@ -1108,7 +1108,7 @@ end
 
 --[[
 This 5 LOC object model has the following qualities:
-* small memory footprint: only 3 table slots and no extra tables.
+* small memory footprint: only 2 table slots and no extra tables.
 * funcall-style instantiation with t(...) by defining t:__call(...).
 * subclassing from instances is allowed (prototype-based inheritance).
 * do `t.__call = glue.object` to get t(...) -> t1 i.e. use glue.object as

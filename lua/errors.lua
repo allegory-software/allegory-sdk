@@ -159,7 +159,7 @@ local function onerror(e)
 			e.traceback = debug.traceback(e.message, 2)
 		end
 	else
-		return debug.traceback('\n'..tostring(e), 2)
+		return debug.traceback(tostring(e), 2)
 	end
 	return e
 end
