@@ -59,11 +59,10 @@ MULTI-LANGUAGE STRINGS IN SOURCE CODE
 
 REQUEST CONTEXT
 
-	cx() -> t                               get per-request shared context
+	cx() -> t                               get current request's shared context
 	cx().conn -> t                          get per-connection shared context
 	cx().fake -> t|f                        context is fake (we're on cmdline)
 	cx().request_id                         unique request id (for naming temp files)
-	webb.setcx(thread, t)                   set per-request shared context
 	webb.env([t]) -> t                      per-request shared environment
 	once(f, ...)                            memoize for current request
 	once_per_conn(f, ...)                   memoize for current connection
@@ -75,7 +74,6 @@ THREADING
 	resume(thread, ...) -> ...              resume thread
 	suspend() -> ...                        suspend thread
 	transfer(thread, ...) -> ...            transfer to thread
-	threadenv[thread]                       thread environment table
 	onthreadfinish(thread, f)               add a thread finalizer
 
 ITERATORS
@@ -283,13 +281,12 @@ local pp = require'pp'
 local uri = require'uri'
 local errors = require'errors'
 local sock = require'sock'
-local cjson = require'cjson'.new()
+local json = require'json'
 local b64 = require'base64'.encode
 local fs = require'fs'
 local path = require'path'
 local mustache = require'mustache'
 local xxhash = require'xxhash'
-local prettycjson = require'prettycjson'
 local box2d = require'box2d'
 
 local concat = table.concat
@@ -317,44 +314,35 @@ errors.errortype'http_response'.__tostring = function(self)
 	return s
 end
 
---threads and webb context switching -----------------------------------------
-
---request context for current thread.
-local cx do
-	local thread_cx = setmetatable({}, {__mode = 'k'})
-	function sock.save_thread_context(thread)
-		thread_cx[thread] = cx
-	end
-	function sock.restore_thread_context(thread)
-		cx = thread_cx[thread]
-	end
-
-	function _G.cx() return cx end
-	function webb.setcx(thread, cx1)
-		thread_cx[thread] = cx1
-		cx = cx1
-	end
-end
+--threads and webb context ---------------------------------------------------
 
 --from $sock
 
-threadenv      = sock.threadenv
 thread         = sock.thread
+threadenv      = sock.threadenv
+getthreadenv   = sock.getthreadenv
+getownthreadenv= sock.getownthreadenv
 currentthread  = sock.currentthread
 resume         = sock.resume
 suspend        = sock.suspend
 transfer       = sock.transfer
 onthreadfinish = sock.onthreadfinish
-
 cowrap         = sock.cowrap
 yield          = sock.yield
-
 sleep_until    = sock.sleep_until
 sleep          = sock.sleep
 sleep_job      = sock.sleep_job
 runat          = sock.runat
 runafter       = sock.runafter
 runevery       = sock.runevery
+
+local CX = {}
+local threadenv = sock.threadenv
+local currentthread = sock.currentthread
+function cx()
+	return threadenv[currentthread()][CX]
+end
+local cx = cx
 
 --config function ------------------------------------------------------------
 
@@ -403,6 +391,7 @@ function default_lang()
 end
 
 function lang(k)
+	local cx = cx()
 	local lang = cx and cx.lang or default_lang()
 	if not k then return lang end
 	local t = assert(webb.langinfo[lang])
@@ -413,7 +402,7 @@ end
 
 function setlang(lang)
 	if not lang or not webb.langinfo[lang] then return end --missing or invalid lang: ignore.
-	cx.lang = lang
+	cx().lang = lang
 end
 
 webb.countryinfo = {
@@ -432,7 +421,7 @@ function default_country()
 end
 
 function country(k)
-	local country = cx.country or default_country()
+	local country = cx().country or default_country()
 	if not k then return country end
 	local t = assert(webb.countryinfo[country])
 	local v = t[k]
@@ -441,6 +430,7 @@ function country(k)
 end
 
 function setcountry(country, if_not_set)
+	local cx = cx()
 	if if_not_set and cx.country then return end
 	cx.country = country and countryinfo(country) and country or default_country()
 end
@@ -585,6 +575,7 @@ end --do
 --per-request memoization.
 function once(f)
 	return function(...)
+		local cx = cx()
 		local mf = cx[f]
 		if not mf then
 			mf = memoize(f)
@@ -597,6 +588,7 @@ end
 --per-connection memoization.
 function once_per_conn(f)
 	return function(...)
+		local cx = cx()
 		local mf = cx.conn[f]
 		if not mf then
 			mf = memoize(f)
@@ -610,6 +602,7 @@ end
 --Inherits _G. Scripts run with `include()` and `run()` run in this environment
 --by default. If the `t` argument is given, an inherited environment is created.
 function webb.env(t)
+	local cx = cx()
 	local env = cx.env
 	if not env then
 		env = {__index = _G}
@@ -627,7 +620,14 @@ end
 --logging --------------------------------------------------------------------
 
 log = log or glue.noop
-function webb.log      (...) if cx then cx.req.http:log(...) else log(...) end end
+function webb.log(...)
+	local cx = cx()
+	if cx then
+		cx.req.http:log(...)
+	else
+		log(...)
+	end
+end
 function webb.dbg      (...) webb.log(''     , ...) end
 function webb.note     (...) webb.log('note' , ...) end
 function webb.logerror (...) webb.log('ERROR', ...) end
@@ -652,27 +652,30 @@ end
 --request API ----------------------------------------------------------------
 
 function method(which)
+	local m = cx().req.method:lower()
 	if which then
-		return cx.req.method:lower() == which:lower()
+		return m == which:lower()
 	else
-		return cx.req.method:lower()
+		return m
 	end
 end
 
 function headers(h)
+	local ht = cx().req.headers
 	if h then
-		return cx.req.headers[h]
+		return ht[h]
 	else
-		return cx.req.headers
+		return ht
 	end
 end
 
 function cookie(name)
-	local t = cx.req.headers.cookie
+	local t = cx().req.headers.cookie
 	return t and t[name]
 end
 
 function args(v)
+	local cx = cx()
 	local args, argc = cx.args, cx.argc
 	if not args then
 		local u = uri.parse(cx.req.uri)
@@ -704,6 +707,7 @@ function post(v)
 	if not method'post' then
 		return
 	end
+	local cx = cx()
 	local s = cx.post
 	if not s then
 		s = cx.req:read_body'string'
@@ -736,7 +740,7 @@ function upload(file)
 		local function write(buf, sz)
 			assert(write_protected(buf, sz))
 		end
-		cx.req:read_body(write)
+		cx().req:read_body(write)
 		write()
 		return file
 	end)
@@ -747,7 +751,7 @@ function scheme(s)
 		return scheme() == s
 	end
 	return headers'x-forwarded-proto'
-		or (cx.req.http.tcp.istlssocket and 'https' or 'http')
+		or (cx().req.http.tcp.istlssocket and 'https' or 'http')
 end
 
 function host(s)
@@ -757,7 +761,7 @@ function host(s)
 	return headers'x-forwarded-host'
 		or (headers'host' and headers'host'.host)
 		or config'host'
-		or cx.req.http.tcp.local_addr
+		or cx().req.http.tcp.local_addr
 end
 
 function port(p)
@@ -765,7 +769,7 @@ function port(p)
 		return port() == tonumber(p)
 	end
 	return headers'x-forwarded-port'
-		or cx.req.http.tcp.local_port
+		or cx().req.http.tcp.local_port
 end
 
 function email(user)
@@ -774,7 +778,7 @@ end
 
 function client_ip()
 	return headers'x-forwarded-for'
-		or cx.req.http.tcp.remote_addr
+		or cx().req.http.tcp.remote_addr
 end
 
 function googlebot()
@@ -833,14 +837,15 @@ end
 --output API -----------------------------------------------------------------
 
 function set_content_size(sz)
-	cx.res.content_size = sz
+	cx().res.content_size = sz
 end
 
 function outall(s, sz)
-	if cx.http_out or out_buffering() then
+	if cx().http_out or out_buffering() then
 		out(s, sz)
 	else
 		s = s == nil and '' or type(s) == 'cdata' and s or tostring(s)
+		local cx = cx()
 		cx.res.content = s
 		cx.res.content_size = sz
 		cx.req:respond(cx.res)
@@ -848,13 +853,14 @@ function outall(s, sz)
 end
 
 function out_buffering()
-	return cx.outfunc ~= nil
+	return cx().outfunc ~= nil
 end
 
 local function default_outfunc(s, sz)
 	if s == nil or s == '' or sz == 0 then
 		return
 	end
+	local cx = cx()
 	if not cx.http_out then
 		cx.res.want_out_function = true
 		cx.http_out = cx.req:respond(cx.res)
@@ -903,6 +909,7 @@ function stringbuffer(t)
 end
 
 function push_out(f)
+	local cx = cx()
 	cx.outfunc = f or stringbuffer()
 	if not cx.outfuncs then
 		cx.outfuncs = {}
@@ -911,6 +918,7 @@ function push_out(f)
 end
 
 function pop_out()
+	local cx = cx()
 	assert(cx.outfunc, 'pop_out() with nothing to pop')
 	local s = cx.outfunc()
 	local outfuncs = cx.outfuncs
@@ -920,6 +928,7 @@ function pop_out()
 end
 
 function out(s, sz)
+	local cx = cx()
 	local outfunc = cx.outfunc or default_outfunc
 	outfunc(s, sz)
 end
@@ -977,7 +986,7 @@ function outfile(path)
 end
 
 function setheader(name, val)
-	cx.res.headers[name] = val
+	cx().res.headers[name] = val
 end
 
 mime_types = {
@@ -1009,17 +1018,17 @@ mime_types = {
 }
 
 function setmime(ext)
-	cx.res.content_type = checkfound(mime_types[ext])
+	cx().res.content_type = checkfound(mime_types[ext])
 end
 
 function setcompress(on)
-	cx.res.compress = on
+	cx().res.compress = on
 end
 
 do
 local function print_wrapper(print)
 	return function(...)
-		if cx.res then setmime'txt' end
+		if cx().res then setmime'txt' end
 		print(...)
 	end
 end
@@ -1193,6 +1202,7 @@ local function checkfunc(code, default_err)
 	return function(ret, err, ...)
 		if ret then return ret end
 		err = err and format(err, ...) or default_err
+		local cx = cx()
 		local ct = cx and cx.res.content_type
 		http_error{
 			status = code,
@@ -1229,85 +1239,17 @@ function check_etag(s)
 end
 
 function setconnectionclose()
-	cx.res.close = true
+	cx().res.close = true
 end
 
 --json API -------------------------------------------------------------------
 
-cjson.encode_sparse_array(false, 0, 0) --encode all sparse arrays.
-cjson.encode_empty_table_as_object(false) --encode empty tables as arrays.
-
-null = cjson.null
-
-function json_array(t)
-	return setmetatable(t or {}, cjson.array_mt)
-end
-
-function pack_json(...)
-	local t = json_array{...}
-	for i=1,select('#',...) do
-		if t[i] == nil then
-			t[i] = null
-		end
-	end
-	return t
-end
-
-function unpack_json(t)
-	local dt = {}
-	for i=1,#t do
-		if t[i] == null then
-			dt[i] = nil
-		else
-			dt[i] = t[i]
-		end
-	end
-	return unpack(dt, 1, #t)
-end
-
-local function repl_nulls_t(t, null_val)
-	if null_val == nil and t[1] ~= nil then --array
-		local n = #t
-		for i=1,n do
-			if t[i] == null then --sparse
-				t[i] = nil
-				t.n = n
-			elseif type(t[i]) == 'table' then
-				repl_nulls_t(t[i], nil)
-			end
-		end
-	else
-		for k,v in pairs(t) do
-			if v == null then
-				t[k] = null_val
-			elseif type(v) == 'table' then
-				repl_nulls_t(v, null_val)
-			end
-		end
-	end
-	return t
-end
-local function repl_nulls(v, null_val)
-	if null_val == null then return v end
-	if type(v) == 'table' then
-		return repl_nulls_t(v)
-	else
-		return repl(v, null, null_val)
-	end
-end
-
-function json_arg(v, null_val)
-	if type(v) ~= 'string' then return v end
-	return repl_nulls(cjson.decode(v), null_val)
-end
-
-function json(v, indent)
-	if indent and indent ~= '' then
-		return prettycjson(v, nil, indent)
-	else
-		return cjson.encode(v)
-	end
-end
+json_arg    = json.decode
+null        = json.null
+json_array  = json.asarray
+pack_json   = json.pack
+unpack_json = json.unpack
+_G.json     = json.encode
 
 function out_json(v)
 	setmime'json'
@@ -1361,7 +1303,7 @@ function tmppath(patt, t)
 	assert(not patt:find'[\\/]') --no subdirs
 	mkdir(tmpdir(), true)
 	t = t or {}
-	t.request_id = cx.request_id
+	t.request_id = cx().request_id
 	local file = glue.subst(patt, t)
 	return path.abs(tmpdir(), file)
 end
@@ -1851,12 +1793,13 @@ end
 local next_request_id = 1
 
 function webb.respond(req)
-	webb.setcx(req.thread, {
+	local cx = {
 		req = req,
 		res = {headers = {}},
 		request_id = next_request_id,
 		conn = attr(req.http, '_webb_cx'),
-	})
+	}
+	getownthreadenv()[CX] = cx
 	next_request_id = next_request_id + 1
 	webb.dbg('webb', 'request', '%s %s', req.method, uri.unescape(req.uri))
 	local main = assert(config('main_module', config'app_name'))
@@ -1868,19 +1811,17 @@ function webb.respond(req)
 end
 
 function webb.request_finish(req)
-	local f = cx.request_finish
+	local f = cx().request_finish
 	if f then f() end
-	webb.setcx(req.thread, nil)
 end
 
 function onrequestfinish(f)
-	glue.after(cx, 'request_finish', f)
+	glue.after(cx(), 'request_finish', f)
 end
 
 --standalone operation -------------------------------------------------------
 
-function webb.fakecx()
-	assert(not cx)
+function webb.setfakecx()
 	local tcp = {}
 	local http = {tcp = tcp}
 	local req = {http = http, uri = '/'}
@@ -1892,6 +1833,7 @@ function webb.fakecx()
 		request_id = next_request_id,
 		conn = {},
 	}
+	cx.req_cx = cx
 	next_request_id = next_request_id + 1
 	function http:log(...)
 		log(...)
@@ -1903,38 +1845,35 @@ function webb.fakecx()
 		io.stdout:write(s)
 		io.stdout:flush()
 	end
+	getownthreadenv()[CX] = cx
 	return cx
 end
 
 function webb.thread(f, ...)
 	return thread(function(...)
-		local thread = currentthread()
-		webb.setcx(thread, webb.fakecx())
+		webb.setfacecx()
 		local ok, err = errors.pcall(f, ...)
 		if not ok then
 			webb.logerror('webb', 'thread', '%s', err)
 		end
-		webb.setcx(thread, nil)
 	end, ...)
 end
 
 function webb.run(f, ...)
-	if cx then
+	if cx() then
 		return f(...)
 	end
-	local thread = currentthread()
-	webb.setcx(thread, webb.fakecx())
-	local function pass(...)
-		webb.setcx(thread, nil)
-		return ...
-	end
-	return pass(sock.run(f, ...))
+	return sock.run(function(...)
+		webb.setfakecx()
+		return f(...)
+	end, ...)
 end
 
 function webb.request(...)
 	require'webb_action'
 	webb.run(function(arg1, ...)
 		local req = type(arg1) == 'table' and arg1 or {args = {arg1,...}}
+		local cx = cx()
 		cx.req.method = req.method or 'get'
 		cx.req.uri = req.uri or concat(glue.imap(glue.pack('', arg1, ...), tostring), '/')
 		update(cx.req.headers, req.headers)
