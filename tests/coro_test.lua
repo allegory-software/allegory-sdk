@@ -179,6 +179,25 @@ test('error() in safewrap thread is reported to the caller thread', function()
 	assert(err:find'!err!')
 end)
 
+test('error() in safewrap thread is reported to the caller thread', function()
+	local was_here
+	local ok, err = coroutine.resume(coroutine.create(function()
+		local f = coroutine.safewrap(function(yield)
+			yield'first'
+			error'!err!'
+		end)
+		assert(f() == 'first')
+		local ok,err = pcall(f)
+		assert(ok == false)
+		assert(err:find'!err!')
+		was_here = true
+		assert(ok, err)
+	end))
+	assert(was_here)
+	assert(ok == false)
+	assert(err:find'!err!')
+end)
+
 test('error() in sub-thread is reported to the parent thread', function()
 	local thread = coroutine.create(function()
 		local sub = coroutine.create(function()
@@ -217,7 +236,6 @@ test('error() in transferred thread is raised in the main thread', function()
 	end), true)
 	assert(not ok)
 	assert(err:find'here')
-	assert(traceback)
 end)
 
 test('trying to resume the current thread', function()
@@ -402,6 +420,7 @@ test('safewrap() cross-yielding', function()
 end)
 
 test('suspended coroutines are garbage-collected', function()
+	coroutine.logging = nil --logging.live() refs are not weak!
 	local t = setmetatable({}, {__mode = 'k'})
 	local parent = coroutine.running()
 	local co = coroutine.create(function(...)
