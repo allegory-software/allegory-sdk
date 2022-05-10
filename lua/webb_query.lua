@@ -116,10 +116,11 @@ function sqlpp(ns)
 	return conn_opt(ns or false).sqlpp
 end
 
+local DBS = {}
+
 function release_dbs()
-	local thread = currentthread()
-	local env = threadenv[thread]
-	local dbs = env and env.dbs
+	local t = getownthreadenv(nil, false)
+	local dbs = t and rawget(t, DBS)
 	if not dbs then return end
 	for key, db in pairs(dbs) do
 		db:release()
@@ -136,25 +137,25 @@ function db(ns, without_current_db)
 	local opt = conn_opt(ns or false)
 	local key = opt.pool_key
 	local thread = currentthread()
-	local cx = cx()
-	local env, onfinish
-	if cx and thread == cx.req.thread then --request thread
-		env = cx
-		onfinish = onrequestfinish
-	else --user thread
-		env = attr(threadenv, thread)
-		onfinish = onthreadfinish
-	end
-	local dbs = env.dbs
+	local env = getownthreadenv(thread)
+	local dbs = rawget(env, DBS)
 	if not dbs then
-		dbs = {}; env.dbs = dbs
+		dbs = {}
+		rawset(env, DBS, dbs)
 		local function release_dbs()
 			for key, db in pairs(dbs) do
 				db:release()
 				dbs[key] = nil
 			end
 		end
-		onfinish(release_dbs)
+		onthreadfinish(release_dbs)
+	end
+	local cx = cx()
+	if cx and thread == cx.req.thread then --http accept thread
+		if not cx._release_dbs then
+			onrequestfinish(release_dbs)
+			cx._release_dbs = true
+		end
 	end
 	local db, err = dbs[key]
 	if not db then
