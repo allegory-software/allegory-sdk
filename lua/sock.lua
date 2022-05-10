@@ -57,8 +57,10 @@ SCHEDULING
 	sock.cowrap(f) -> wrapper                  see coro.safewrap()
 	sock.currentthread() -> co                 see coro.running()
 	sock.transfer(co, ...) -> ...              see coro.transfer()
-	sock.onthreadfinish(co, f)                 run `f` when thread finishes
-	sock.threadenv[thread] <-> env             get/set thread environment
+	sock.threadenv[co] -> t                    get a thread's own or inherited environment
+	sock.getthreadenv([co]) -> t               get (current) thread's own enviornment
+	sock.getownthreadenv([co], [create]) -> t  get/create (current) thread's own environment
+	sock.onthreadfinish(co, f)                 run `f(thread)` when thread finishes
 
 	sock.poll()                                poll for I/O
 	sock.start()                               keep polling until all threads finish
@@ -66,12 +68,12 @@ SCHEDULING
 	sock.run(f, ...) -> ...                    run a function inside a sock thread
 
 	sock.sleep_job() -> sj                     make an interruptible async sleep job
-	sj:sleep_until(t) -> ...                   sleep until sock.clock()
+	sj:sleep_until(t) -> ...                   sleep until clock()
 	sj:sleep(s) -> ...                         sleep for `s` seconds
 	sj:wakeup(...)                             wake up the sleeping thread
 	sj:cancel()                                calls sj:wakeup(sj.CANCEL)
 	sj.CANCEL                                  magic arg that can cancel runat()
-	sock.sleep_until(t) -> ...                 sleep until sock.clock() value
+	sock.sleep_until(t) -> ...                 sleep until clock() value
 	sock.sleep(s) -> ...                       sleep for s seconds
 	sock.runat(t, f) -> sj                     run `f` at clock `t`
 	sock.runafter(s, f) -> sj                  run `f` after `s` seconds
@@ -99,7 +101,7 @@ so they can be used in conditionals.
 I/O functions only work inside threads created with `sock.thread()`.
 
 The optional `expires` arg controls the timeout of the operation and must be
-a `sock.clock()`-relative value (which is in seconds). If the expiration clock
+a `clock()`-relative value (which is in seconds). If the expiration clock
 is reached before the operation completes, `nil, 'timeout'` is returned.
 
 `host, port` args are passed to `sock.addr()` (with the optional `af` arg),
@@ -337,6 +339,8 @@ local coro   = require'coro'
 local clock  = require'time'.clock
 local errors = require'errors'
 
+coro.pcall = errors.pcall --add tracebacks to coro errors.
+
 local push = table.insert
 local pop  = table.remove
 
@@ -347,7 +351,7 @@ local OSX     = ffi.os == 'OSX'
 assert(Windows or Linux or OSX, 'unsupported platform')
 
 local C = Windows and ffi.load'ws2_32' or ffi.C
-local M = {C = C, clock = clock}
+local M = {C = C}
 
 local socket = {debug_prefix = 'S'} --common socket methods
 local tcp = {type = 'tcp_socket'}
@@ -2367,18 +2371,12 @@ M.raw_class = raw
 
 --coroutine-based scheduler --------------------------------------------------
 
-M.save_thread_context    = glue.noop --stub
-M.restore_thread_context = glue.noop --stub
+local weak_keys = {__mode = 'k'}
 
 local poll_thread
 
-local function restore(...)
-	M.restore_thread_context(currentthread())
-	return ...
-end
-
 local wait_count = 0
-local waiting = setmetatable({}, {__mode = 'k'}) --{thread -> true}
+local waiting = setmetatable({}, weak_keys) --{thread -> true}
 
 do
 local function pass(thread, ...)
@@ -2393,7 +2391,7 @@ end
 	if register ~= false then
 		waiting[thread] = true
 	end
-	return pass(thread, restore(transfer(poll_thread)))
+	return pass(thread, transfer(poll_thread))
 end
 end
 
@@ -2404,53 +2402,79 @@ function M.poll()
 	return poll()
 end
 
-local threadenv = setmetatable({}, {__mode = 'k'})
-M.threadenv = threadenv
---^^ making this weak allows unfinished threads to get collected.
-
+local threadfinish = setmetatable({}, weak_keys)
 function M.onthreadfinish(thread, f)
-	local env = glue.attr(threadenv, thread)
-	glue.after(env, '__finish', f)
+	glue.after(threadfinish, thread, f)
 end
 
+local threadenv = setmetatable({}, weak_keys)
+local ownthreadenv = setmetatable({}, weak_keys)
+M.threadenv = threadenv
+
+function M.getthreadenv(thread)
+	return threadenv[thread or currentthread()]
+end
+
+function M.getownthreadenv(thread, create)
+	thread = thread or currentthread()
+	local t = ownthreadenv[thread]
+	if not t and create ~= false then
+		t = {}
+		local pt = threadenv[thread]
+		if pt then --inherit parent env, if any.
+			t.__index = pt
+			setmetatable(t, t)
+		end
+		ownthreadenv[thread] = t
+		threadenv[thread] = t
+	end
+	return t
+end
+
+local function thread_onfinish(thread, ok, ...)
+	local finish = threadfinish[thread]
+	if finish then
+		finish(thread, ok, ...)
+	end
+	--sock threads don't have a caller thread to re-raise their errors into,
+	--and we don't want them to break the main thread either as coro thereads
+	--do by default, so errors are just logged and the thread finishes in the
+	--current poll_thread (which is the caller thread when using resume()).
+	if not ok then
+		M.log('ERROR', 'sock', 'thread', '%s', ...)
+	end
+	return true, coro.finish(poll_thread)
+end
 function M.thread(f, ...)
-	--wrap f so that it terminates in current poll_thread.
-	local thread
-	thread = coro.create(function(...)
-		M.save_thread_context(thread)
-		local ok, err = errors.pcall(f, ...)
-		local env = threadenv[thread]
-		if env then
-			threadenv[thread] = nil
-			local finish = env.__finish
-			if finish then
-				finish(thread, ok, err)
-			end
-		end
-		if not ok then
-			M.log('ERROR', 'sock', 'thread', '%s', err)
-		end
-		return coro.finish(poll_thread)
-	end, ...)
+	local thread = coro.create(f, thread_onfinish, ...)
+	threadenv[thread] = threadenv[currentthread()] --inherit threadenv.
 	return thread
 end
 
+local function cowrap_onfinish(thread, ok, ...)
+	local finish = threadfinish[thread]
+	if finish then
+		finish(thread, ok, ...)
+	end
+	--cowrap threads re-raise their errors in their caller thread (they always
+	--have one) so no need to log them. finalizers are still available for them.
+	return ok, ...
+end
 function M.cowrap(f, ...)
-	return coro.safewrap(function(...)
-		M.save_thread_context(currentthread())
-		return f(...)
-	end, ...)
+	local wrapped, thread = coro.safewrap(f, cowrap_onfinish, ...)
+	threadenv[thread] = threadenv[currentthread()] --inherit threadenv.
+	return wrapped, thread
 end
 
 function M.transfer(thread, ...)
 	assert(not waiting[thread], 'attempt to resume a thread that is waiting on I/O')
-	return restore(transfer(thread, ...))
+	return transfer(thread, ...)
 end
 
 M.cofinish = coro.finish
 
 function M.suspend(...)
-	return restore(transfer(poll_thread, ...))
+	return transfer(poll_thread, ...)
 end
 
 local function resume_pass(real_poll_thread, ...)
@@ -2460,7 +2484,7 @@ end
 function M.resume(thread, ...)
 	local real_poll_thread = poll_thread
 	--change poll_thread temporarily so that we get back here
-	--from suspend() or from wait().
+	--from the first call to suspend() or wait().
 	poll_thread = currentthread()
 	return resume_pass(real_poll_thread, M.transfer(thread, ...))
 end
