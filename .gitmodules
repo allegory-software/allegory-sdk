@@ -52,3 +52,9 @@
 [submodule "c/bcrypt/src"]
 	path = c/bcrypt/src
 	url = git@github.com:allegory-software/allegory-sdk-bcrypt.git
+[submodule "c/charls"]
+	path = c/charls/src
+	url = git@github.com:allegory-software/allegory-sdk-charls
+[submodule "c/openjpeg/src"]
+	path = c/openjpeg/src
+	url = git@github.com:allegory-software/allegory-sdk-openjpeg.git

@@ -1,0 +1,4 @@
+chrarls {
+  global: JpegLs*; charls_*;
+  local: *;
+}
