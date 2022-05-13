@@ -4,7 +4,8 @@ cd "${0%build}" || exit 1
 build() {
 	${X}gcc -c -O2 $C -fomit-frame-pointer -funroll-loops \
 		src/crypt_blowfish.c src/crypt_gensalt.c src/wrapper.c -Isrc
-	${X}gcc *.o -shared -o ../../bin/$P/$D $L	-Wl,--version-script=bcrypt.version
+	${X}gcc *.o -shared -o ../../bin/$P/$D $L\
+		-Wl,--version-script=bcrypt.version
 	rm -f      ../../bin/$P/$A
 	${X}ar rcs ../../bin/$P/$A *.o
 	rm *.o

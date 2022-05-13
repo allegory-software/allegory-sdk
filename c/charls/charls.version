@@ -1,4 +1,4 @@
-chrarls {
-  global: JpegLs*; charls_*;
+charls {
+  global: charls_*;
   local: *;
-}
+};
