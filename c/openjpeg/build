@@ -1,0 +1,48 @@
+#go@ sh build
+#!/bin/sh
+cd "${0%build}" || exit 1
+
+FILES="
+src/src/lib/openjp2/thread.c
+src/src/lib/openjp2/bio.c
+src/src/lib/openjp2/cio.c
+src/src/lib/openjp2/dwt.c
+src/src/lib/openjp2/event.c
+src/src/lib/openjp2/ht_dec.c
+src/src/lib/openjp2/image.c
+src/src/lib/openjp2/invert.c
+src/src/lib/openjp2/j2k.c
+src/src/lib/openjp2/jp2.c
+src/src/lib/openjp2/mct.c
+src/src/lib/openjp2/mqc.c
+src/src/lib/openjp2/openjpeg.c
+src/src/lib/openjp2/opj_clock.c
+src/src/lib/openjp2/pi.c
+src/src/lib/openjp2/t1.c
+src/src/lib/openjp2/t2.c
+src/src/lib/openjp2/tcd.c
+src/src/lib/openjp2/tgt.c
+src/src/lib/openjp2/function_list.c
+src/src/lib/openjp2/opj_malloc.c
+src/src/lib/openjp2/sparse_array.c
+"
+
+build() {
+	${X}gcc -c -O2 $FILES $C -I. -I.. -DOPJ_EXPORTS
+	${X}gcc *.o -shared -o ../../bin/$P/$D $L \
+		-Wl,-Bstatic -lpthread -Wl,-Bdynamic \
+		-Wl,--version-script=openjp2.version
+	rm -f      ../../bin/$P/$A
+	${X}ar rcs ../../bin/$P/$A *.o
+	rm *.o
+}
+
+if [ "$OSTYPE" = "msys" ]; then
+	P=windows L="-s -static-libgcc" D=openjp2.dll A=openjp2.a build
+elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
+	P=osx C="-arch x86_64" L="-arch x86_64 -install_name @rpath/libopenjp2.dylib" \
+	D=libopenjp2.dylib A=libopenjp2.a build
+else
+	P=linux C="-fPIC" L="-s -static-libgcc" \
+	D=libopenjp2.so A=libopenjp2.a build
+fi
