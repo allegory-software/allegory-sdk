@@ -1,0 +1,4 @@
+openjp2 {
+  global: opj_*;
+  local: *;
+};
