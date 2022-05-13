@@ -115,9 +115,9 @@ SIZES
 ERRORS
 	glue.assert(v [,message [,format_args...]]) -> v     assert with error message formatting
 	glue.protect(func) -> protected_func                 wrap an error-raising function
-	glue.pcall(f, ...) -> true, ... | false, traceback                pcall with traceback
-	glue.fpcall(f, finally, onerror, ...) -> result | nil, traceback  pcall with finally/onerror
-	glue.fcall(f, finally, onerror, ...) -> result                    same but re-raises
+	glue.pcall(f, ...) -> true, ... | false, traceback                      pcall with traceback
+	glue.fpcall(f(finally, onerror, ...), ...) -> result | nil, traceback   pcall with finally/onerror
+	glue.fcall (f(finally, onerror, ...), ...) -> result                    same but re-raises
 MODULES
 	glue.module([name, ][parent]) -> M              create a module
 	glue.autoload(t, submodules) -> M               autoload table keys from submodules
@@ -128,8 +128,8 @@ MODULES
 	glue.cpath(path [,index])                       insert a path in package.cpath
 ALLOCATION
 	glue.freelist([create], [destroy]) -> alloc, free                  freelist allocation pattern
-	glue.buffer(ctype) -> alloc(minlen) -> buf,capacity                auto-growing buffer
-	glue.dynarray(ctype[,cap]) -> alloc(minlen|false) -> buf, minlen   auto-growing buffer that preserves data
+	glue.buffer([ctype]) -> alloc(minlen) -> buf,capacity                auto-growing buffer
+	glue.dynarray([ctype][,cap]) -> alloc(minlen|false) -> buf, minlen   auto-growing buffer that preserves data
 	glue.dynarray_pump([dynarray]) -> write(), collect()               make a buffer with a write() API for writing into
 	glue.dynarray_loader([dynarray]) -> get(), put(), collect()        make a buffer with a get()/put() API for writing into
 	glue.readall(read, self, ...) -> buf, len       repeat read based on a read function
@@ -1605,7 +1605,7 @@ local function fpcall(f,...)
 	local function err(e)
 		for i=#errt,1,-1 do errt[i](e) end
 		for i=#fint,1,-1 do fint[i]() end
-		return tostring(e) .. '\n' .. debug.traceback()
+		return debug.traceback(e)
 	end
 	local function pass(ok,...)
 		if ok then
@@ -1657,7 +1657,7 @@ Setting foo.module = glue.module makes module foo directly extensible
 by calling foo:module'bar' or require'foo':module'bar'.
 
 All this functionality is packed into just 27 LOC, less than it takes to
-explain it, so read the code to get to another level of clarity.
+explain it, so read the code to get to another level of understanding.
 ]]
 function glue.module(name, parent)
 	if type(name) ~= 'string' then
