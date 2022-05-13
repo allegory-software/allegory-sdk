@@ -9,9 +9,25 @@ FACTS
 	* tasks form a tree:
 		* killing a task kills all its children.
 		* tasks wait for child tasks to finish before they are freed.
-		* events, stdout/stderr, notifications and errors bubble up to parent tasks.
-	* errors raised with ta:error() as well as any error raise in the action
-	function are captured and re-raised if the task runs in foreground.
+		* events bubble up to parent tasks.
+		* terminals are piped to their parent task.
+	* errors raised with ta:error() as well as any errors in the action handler
+	  are captured and re-raised if the task runs in foreground.
+
+TERMINALS
+	tasks.virtual_terminal   (vt, opt...) -> vt
+	tasks.recording_terminal (rt, opt...) -> rt
+	tasks.cmdline_terminal   (ct, opt...) -> ct
+	tasks.streaming_terminal (st, opt...) -> st
+	st.out_bytes(s)
+	tasks.streaming_terminal_reader(term) -> read(buf, sz)
+	vt:pipe(vt, [on])
+	rt:playback(vt)
+	rt:stdout()
+	rt:stderr()
+	rt:stdouterr()
+	rt:errors()
+	rt:notifications()
 
 API
 	local ta = tasks.task(opt)
@@ -21,6 +37,8 @@ API
 		opt.allow_fail            do not re-raise the errors raised with ta:error().
 		opt.free_after            free after N seconds (10). false = 1/0.
 		opt.name                  task name (for listing and for debugging).
+		opt.stdin                 stdin (for exec() tasks)
+
 	t.id
 	M.tasks -> {ta->true}
 	M.tasks_by_id[id] -> ta
@@ -41,6 +59,9 @@ STATE
 	^remove_task(parent_ta, child_ta)
 
 LOGGING
+	ta:log(severity, event, fmt, ...)
+
+ERRORS
 	ta:error(event, err)
 	ta.errors -> {{task=, event=, error=},...}
 	^error(ta, event, error)
@@ -57,13 +78,13 @@ STDOUT/STDERR
 	ta.stdout_chunks -> {s1,...}
 	ta.stderr_chunks -> {s1,...}
 	ta.stdouterr_chunks -> {s1,...}
-	ta:write_stdout(s)
-	ta:write_stderr(s)
+	ta:out_stdout(s)
+	ta:out_stderr(s)
 	ta:stdout() -> s
 	ta:stderr() -> s
 	ta:stdouterr() -> s
-	^write_stdout(ta, s)
-	^write_stderr(ta, s)
+	^out_stdout(ta, s)
+	^out_stderr(ta, s)
 
 TERMINALS
 	M.terminal(opt) -> te      create a terminal that can watch one or more tasks.
@@ -83,52 +104,295 @@ local sock = require'sock'
 local events = require'events'
 local proc = require'proc'
 local errors = require'errors'
+local json = require'json'
+local buffer = require'string.buffer'
 
 local _ = string.format
 local add = table.insert
 local cat = table.concat
+
 local time = time.time
+
+local pack = glue.pack
 local unpack = glue.unpack
-local object = glue.object
 local update = glue.update
 local empty = glue.empty
 local attr = glue.attr
 local imap = glue.imap
+local repl = glue.repl
 local sortedpairs = glue.sortedpairs
+
 local thread = sock.thread
 local resume = sock.resume
 local sleep = sock.sleep
 local runafter = sock.runafter
+local currentthread = sock.currentthread
+local threadenv = sock.threadenv
+local getownthreadenv = sock.getownthreadenv
 
 local M = {}
+
+--terminals ------------------------------------------------------------------
+
+--virtual terminal: fires events for input. can pipe input to other terminals.
+--publishes: pipe(term, [on]).
+
+local vterm = glue.object(nil, nil, events)
+M.virtual_terminal = vterm
+vterm.subclass = glue.object
+vterm.override = glue.override
+vterm.before = glue.before
+vterm.after = glue.after
+
+function vterm:__call(opt, ...)
+	local self = glue.object(self, opt, ...)
+	self:init()
+	return self
+end
+
+vterm.init = glue.noop
+
+function vterm:log(severity, event, ...)
+	local logging = self.logging
+	if not logging then return end
+	logging.log(severity, 'term', event, ...)
+end
+
+function vterm:out(...)
+	self:fire('out', ...)
+end
+
+function vterm:add_error(event, err)
+	self:log('ERROR', event, '%s', err)
+	self:out('error', event, err)
+end
+
+function vterm:out_notify(kind, s)
+	self:out('notify', kind, s)
+end
+function vterm:notify_kind (kind, ...) self:write_notify( kind  , _(...)) end
+function vterm:notify            (...) self:write_notify('info' , _(...)) end
+function vterm:notify_error      (...) self:write_notify('error', _(...)) end
+function vterm:notify_warn       (...) self:write_notify('warn' , _(...)) end
+
+function vterm:out_stdout(s)
+	self:out('stdout', s)
+end
+
+function vterm:out_stderr(s)
+	self:out('stderr', s)
+end
+
+function vterm:set_retval(v)
+	self:out('retval', v)
+end
+
+function vterm:pipe(term, on) --pipe out self to term.
+	if on == false then
+		return self:off{'out', term}
+	end
+	self:on({'out', term}, function(self, ...)
+		term:out(...)
+	end)
+end
+
+--recording terminal: records input and plays it back on another terminal.
+--publishes: playback(te), stdout(), stderr(), stdouterr(), errors(), notifications().
+
+local rterm = glue.object(nil, nil, vterm)
+M.recording_terminal = rterm
+
+function rterm:init()
+	self.buffer = {}
+end
+
+rterm:after('out', function(self, ...)
+	add(self.buffer, pack(...))
+end)
+
+function rterm:playback(term)
+	for _,t in ipairs(self.buffer) do
+		term:out(unpack(t))
+	end
+end
+
+local function add_some(self, maybe_add)
+	local dt = {}
+	for _,t in ipairs(self.buffer) do
+		maybe_add(dt, unpack(t))
+	end
+	return dt
+end
+local function add_stdout(t, cmd, s)
+	if cmd == 'stdout' then add(t, s) end
+end
+local function add_stderr(t, cmd, s)
+	if cmd == 'stderr' then add(t, s) end
+end
+local function add_stdouterr(t, cmd, s)
+	if cmd == 'stdout' or cmd == 'stderr' then add(t, s) end
+end
+local function add_error(t, cmd, event, err)
+	if cmd == 'error' then add(t, {event = event, err = err}) end
+end
+local function add_notify(t, cmd, kind, message)
+	if cmd == 'notify' then add(t, {kind = kind, message = message}) end
+end
+function rterm:stdout        () return cat(add_some(self, add_stdout)) end
+function rterm:stderr        () return cat(add_some(self, add_stderr)) end
+function rterm:stdouterr     () return cat(add_some(self, add_stdouterr)) end
+function rterm:errors        () return add_some(self, add_error) end
+function rterm:notifications () return add_some(self, add_notify) end
+
+--command-line terminal: formats input for command-line consumption.
+
+local cterm = glue.object(nil, nil, vterm)
+M.cmdline_terminal = cterm
+
+cterm:after('out', function(self, cmd, ...)
+	if cmd == 'stdout' then
+		local s = ...
+		io.stdout:write(s)
+	elseif cmd == 'stderr' then
+		local s = ...
+		io.stderr:write(s)
+	elseif cmd == 'notify' then
+		local kind, s = ...
+		io.stderr:write(_('%s: %s\n', repl(kind, 'info', 'note'):upper(), s))
+	elseif cmd == 'error' then
+		local event, err = ...
+		io.stderr:write(_('ERROR [%s]: %s\n', event, tostring(err)))
+	end
+end)
+
+--streaming output terminal: serializes input for network transmission.
+--calls: sterm.out_bytes(s)
+
+local sterm = glue.object(nil, nil, vterm)
+M.streaming_terminal = sterm
+
+function sterm:out_on(chan, s)
+	self.out_bytes(format('%s%08x\n%s', chan, #s, s))
+end
+
+sterm:after('out', function(self, cmd, ...)
+	if     cmd == 'stdout' then self:out_on('1', ...)
+	elseif cmd == 'stderr' then self:out_on('2', ...)
+	elseif cmd == 'notify' then
+		self:out_on(
+				kind == 'info'  and 'N'
+			or kind == 'warn'  and 'W'
+			or kind == 'error' and 'E', ...)
+	elseif cmd == 'error' then
+		local event, err = ...
+		self:out_on('e', json.encode{event, tostring(...)})
+	elseif cmd == 'retval' then
+		local ret = ...
+		self:out_on('R', json.encode(ret))
+	end
+end)
+
+--return `write(buf, sz)` which when called, deserializes a terminal output
+--stream and sends it to a terminal.
+
+function M.streaming_terminal_reader(self)
+	local buf = buffer.new()
+	local chan, size
+	return function(in_buf, sz)
+		buf:putcdata(in_buf, sz)
+		::again::
+		if not size and #buf >= 10 then
+			chan = buf:get(1)
+			size = assert(tonumber(buf:get(9), 16))
+		end
+		if size and #buf >= size then
+			local s = buf:get(size)
+			if chan == '1' then
+				self:out('stdout', s)
+			elseif chan == '2' then
+				self:out('stderr', s)
+			elseif chan == 'N' then
+				self:out('notify', 'info', s)
+			elseif chan == 'W' then
+				self:out('notify', 'warn', s)
+			elseif chan == 'E' then
+				self:out('notify', 'error', s)
+			elseif chan == 'e' then
+				local event, err = json.decode(s)
+				self:out('error', event, err)
+			elseif chan == 'R' then
+				local ret = json.decode(s)
+				self:out('retval', ret)
+			else
+				error(_('invalid channel: "%s"', chan))
+			end
+			chan, size = nil
+			goto again
+		end
+	end
+end
+
+--current thread's terminal --------------------------------------------------
+
+local function current_terminal(thread)
+	return threadenv[thread or currentthread()].terminal
+end
+M.current_terminal = current_terminal
+
+function M.set_current_terminal(term, thread)
+	getownthreadenv(thread).terminal = term
+end
+
+function M.add_error    (...) current_terminal():add_error    (...) end
+function M.notify_kind  (...) current_terminal():notify_kind  (...) end
+function M.notify       (...) current_terminal():notify       (...) end
+function M.notify_error (...) current_terminal():notify_error (...) end
+function M.notify_warn  (...) current_terminal():notify_warn  (...) end
+function M.out_stdout(s) current_terminal():out_stdout(s) end
+function M.out_stderr(s) current_terminal():out_stderr(s) end
+function M.set_retval(v) current_terminal():out_retval(v) end
+
+--tasks ----------------------------------------------------------------------
+
 M.tasks = {}
 M.tasks_by_id = {}
 M.last_task_id = 0
 
-local task = update({}, events)
+local task = glue.object(nil, nil, events)
+M.task = task
+task.subclass = glue.object
+task.override = glue.override
+task.before = glue.before
+task.after = glue.after
+
+function task:__call(opt, ...)
+	local self = glue.object(self, opt, ...)
+	self:init()
+	return self
+end
 
 task.module = 'task' --default
 task.free_after = 10
 
-function M.task(opt)
+function task:init()
 
 	M.last_task_id = M.last_task_id + 1
-	local self = object(task, opt, {
-		id = M.last_task_id,
-		status = 'not started',
-		stdout_chunks = {},
-		stderr_chunks = {},
-		stdouterr_chunks = {},
-		errors = {}, --{{task=, event=, error=},...}
-		notifications = {}, --{{task=, kind=, message=},...}
-	 	child_tasks = {}, --{task1,...}
-	})
+	self.id = M.last_task_id
+	self.status = 'not started'
+	self.child_tasks = {} --{task1,...}
 	self.name = self.name or self.id
+	self.terminal = M.recording_terminal()
 	M.tasks[self] = true
 	M.tasks_by_id[self.id] = self
 
-	if opt.parent_task then
-		opt.parent_task:add_task(self)
+	if self.parent_task then
+		self.parent_task:add_task(self)
+	else
+		local pt = current_terminal()
+		if pt then
+			self.parent_terminal = pt
+			self.terminal:pipe(pt)
+		end
 	end
 
 	function self:start()
@@ -140,20 +404,25 @@ function M.task(opt)
 		self:_setstatus'running'
 
 		local function run_task()
+
+			getownthreadenv().terminal = self.terminal
+
 			local ok, ret = errors.pcall(self.action, self)
 			if not ok then
-				self:error('run', ret)
+				add_error('run', ret)
 				self:_finish()
 			else
 				self:_finish(ret or 0)
 			end
+
 			runafter(self.free_after or 1/0, function()
 				while not self:free() do
 					sleep(1)
 				end
 			end, 'task-zombie %s', self.name)
 		end
-		if opt.bg then
+
+		if self.bg then
 			resume(thread(run_task), 'task %s', self.name)
 		else
 			run_task()
@@ -201,6 +470,8 @@ function task:free()
 	end
 	if self.parent_task then
 		self.parent_task:remove_task(self)
+	elseif self.parent_terminal then
+		self.terminal:pipe(self.parent_terminal, false)
 	end
 	M.tasks[self] = nil
 	M.tasks_by_id[self.id] = nil
@@ -245,6 +516,7 @@ end
 function task:add_task(child_task)
 	add(self.child_tasks, child_task)
 	self:fire_up('add_task', child_task)
+	child_task.terminal:pipe(self.terminal, true)
 end
 
 function task:remove_task(child_task)
@@ -252,6 +524,7 @@ function task:remove_task(child_task)
 	assert(i, 'Child task not found: %s', child_task.name)
 	remove(self.child_tasks, i)
 	self:fire_up('remove_task', child_task)
+	child_task.terminal:pipe(self.terminal, false)
 end
 
 --logging
@@ -306,33 +579,16 @@ function task:stdout    () return cat(self.stdout_chunks) end
 function task:stderr    () return cat(self.stderr_chunks) end
 function task:stdouterr () return cat(self.stdouterr_chunks) end
 
---terminals ------------------------------------------------------------------
-
---a terminal is an object that can attach and detach to any tasks at any time.
---attaching to a task forwards the task's events to the terminal.
-
-local term = update({}, events)
-
-function M.terminal(opt)
-	local self = object(term, opt)
-	function self.task_on_event(task, ev, source_task, ...)
-		self:fire(ev, ...)
+function task:print(...)
+	local n = select('#', ...)
+	for i=1,n do
+		self:write_stdout(format((select(i, ...))))
+		if i < n then
+			self:write_stdout'\t'
+		end
 	end
-	return self
+	self:write_stdout'\n'
 end
-
-function term:attach(task, on)
-	task:on('event', self.task_on_event, on)
-end
-
-function term:detach(task)
-	self:attach(task, false)
-end
-
-function term:on_write_stdout(s) io.stdout:write(s) end --stub
-function term:on_write_stderr(s) io.stderr:write(s) end --stub
-function term:on_error(event, err) print(_('ERROR [%s]: %s', event, err)) end --stub
-function term:on_notify(kind, s) print(_('%s: %s', kind:upper(), s)) end --stub
 
 --async process tasks with stdout/err capturing ------------------------------
 
@@ -547,3 +803,5 @@ if not ... then
 		ta:error("workin'" , 'Gotcha!')
 	end)
 end
+
+return M
