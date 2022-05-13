@@ -4178,7 +4178,7 @@ return {
 		[0x0000] = {'UL', '1', 'GenericGroupLength'},
 		[0x0008] = {'OF', '1', 'FloatPixelData'},
 		[0x0009] = {'OD', '1', 'DoubleFloatPixelData'},
-		[0x0010] = {'ox', '1', 'PixelData'},
+		[0x0010] = {'OW', '1', 'PixelData'},
 		[0x0020] = {'OW', '1', 'CoefficientsSDVN'},
 		[0x0030] = {'OW', '1', 'CoefficientsSDHN'},
 		[0x0040] = {'OW', '1', 'CoefficientsSDDN'},

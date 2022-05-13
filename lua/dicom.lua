@@ -399,10 +399,10 @@ function M.open(file, opt)
 			return g, e, vr, len
 		end
 
-		--[[local]] next_tag = next_tag_explicit
+		--[[local]] next_tag = next_tag_implicit
 
-		local function set_implicit()
-			next_tag = next_tag_implicit
+		local function set_explicit()
+			next_tag = next_tag_explicit
 		end
 
 		local seq = {} --root sequence for top-level tags.
@@ -422,48 +422,40 @@ function M.open(file, opt)
 							if next_u16() ~= 2 then break end
 							local t = add_tag(seq, next_tag_explicit())
 							if t and t.element == 0x0010 then --transfer syntax
-								local IMPLICIT_LITTLE                 = '1.2.840.10008.1.2'
-								local EXPLICIT_LITTLE                 = '1.2.840.10008.1.2.1'
-								local EXPLICIT_BIG                    = '1.2.840.10008.1.2.2'
-								local COMPRESSION_JPEG                = '1.2.840.10008.1.2.4'
-								local COMPRESSION_JPEG_LOSSLESS       = '1.2.840.10008.1.2.4.57'
-								local COMPRESSION_JPEG_LOSSLESS_SEL1  = '1.2.840.10008.1.2.4.70'
-								local COMPRESSION_JPEG_BASELINE_8BIT  = '1.2.840.10008.1.2.4.50'
-								local COMPRESSION_JPEG_BASELINE_12BIT = '1.2.840.10008.1.2.4.51'
-								local COMPRESSION_JPEG_LS_LOSSLESS    = '1.2.840.10008.1.2.4.80'
-								local COMPRESSION_JPEG_LS             = '1.2.840.10008.1.2.4.81'
-								local COMPRESSION_JPEG_2000_LOSSLESS  = '1.2.840.10008.1.2.4.90'
-								local COMPRESSION_JPEG_2000           = '1.2.840.10008.1.2.4.91'
-								local COMPRESSION_RLE                 = '1.2.840.10008.1.2.5'
-								local COMPRESSION_DEFLATE             = '1.2.840.10008.1.2.1.99'
-								if v == IMPLICIT_LITTLE                     then
-									set_implicit()
-								elseif v == EXPLICIT_BIG                    then
+								if v == '1.2.840.10008.1.2' then --implicit little-endian
+									--this is the default
+								elseif v == '1.2.840.10008.1.2.1' then --explicit little-endian
+									set_explicit()
+								elseif v == '1.2.840.10008.1.2.2' then --explicit big-endian
 									set_be = true
-								elseif v == COMPRESSION_DEFLATE             then
+								elseif v == '1.2.840.10008.1.2.1.99' then --deflate
 									set_deflate = true
-								elseif v == COMPRESSION_JPEG                then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_LOSSLESS       then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_LOSSLESS_SEL1  then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_BASELINE_8BIT  then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_BASELINE_12BIT then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_LS_LOSSLESS    then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_LS             then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_2000_LOSSLESS  then
-									print'NYI'
-								elseif v == COMPRESSION_JPEG_2000           then
-									print'NYI'
-								elseif v == COMPRESSION_RLE                 then
-									print'NYI'
-								elseif v == COMPRESSION_DEFLATE             then
-									print'NYI'
+								elseif v == '1.2.840.10008.1.2.5' then --RLE
+									print'RLE NYI'
+								elseif v == '1.2.840.10008.1.2.4' then --JPEG
+									print'JPEG NYI'
+								elseif
+									   v == '1.2.840.10008.1.2.4.57' --JPEG lossless
+									or v == '1.2.840.10008.1.2.4.70' --JPEG lossless sel1
+								then
+									print'JPEG-lossless NYI'
+								elseif
+									   v == '1.2.840.10008.1.2.4.50' --JPEG baseline 8bit
+									or v == '1.2.840.10008.1.2.4.51' --JPEG baseline 12bit
+								then
+									print'JPEG-BASELINE NYI'
+								elseif
+									   v == '1.2.840.10008.1.2.4.80' --JPEG-LS lossless
+									or v == '1.2.840.10008.1.2.4.81' --JPEG-LS
+								then
+									print'JPEG-LS NYI'
+								elseif
+									   v == '1.2.840.10008.1.2.4.90' --JPEG2000 lossless
+									or v == '1.2.840.10008.1.2.4.91' --JPEG2000
+								then
+									print'JPEG2000 NYI'
+								else
+									error('unknown transfer syntax '..v)
 								end
 							end
 						end
@@ -471,7 +463,7 @@ function M.open(file, opt)
 							set_big_endian()
 						end
 						if set_deflate then
-							print'NYI'
+							print'DEFLATE NYI'
 						end
 						return true
 					end
@@ -546,8 +538,8 @@ end
 
 
 if not ... then
-	require'$'
-	for _, in dir()
+	--require'$'
+	--for _, in dir()
 	local f = 'x:/dicom/_sample_files/0002.DCM'
 	local f = 'x:/dicom/_sample_files/2_skull_ct/DICOMDIR'
 	local df = assert(M.open(f, {
