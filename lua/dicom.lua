@@ -12,7 +12,8 @@ glue.luapath(glue.bin)
 local fs = require'fs'
 local buffer = require'string.buffer'
 local dict = require'dicom_dict'
-local jpegls = require'jpegls'
+local charls = require'charls'
+local libjpeg = require'libjpeg'
 
 local min = math.min
 local max = math.max
@@ -58,8 +59,7 @@ function M.open(file, opt)
 		local f = assert(fs.open(file))
 		onerror(function() f:close() end)
 
-		local filesize = assert(f:size())
-		local fileoffset = 0
+		local file_offset = 0
 
 		local df = {}
 
@@ -88,13 +88,19 @@ function M.open(file, opt)
 			if from_file > 0 then
 				assert(f:seek(from_file))
 			end
-			fileoffset = fileoffset + n
+			file_offset = file_offset + n
+		end
+
+		local function seek(offset)
+			buf:reset()
+			assert(f:seek('set', offset))
+			file_offset = offset
 		end
 
 		local function str(n)
 			need(n)
-			fileoffset = fileoffset + n
-			return buf:get(n):trim()
+			file_offset = file_offset + n
+			return buf:get(n):gsub('%z+$', ''):trim()
 		end
 
 		local function strbuf(n)
@@ -103,6 +109,13 @@ function M.open(file, opt)
 			ffi.copy(b, buf:ref(), n)
 			buf:skip(n)
 			return b
+		end
+
+		local function tobuf(dbuf, n)
+			need(n)
+			dbuf:reset():reserve(n)
+			ffi.copy(dbuf:ref(), buf:ref(), n)
+			dbuf:commit(n)
 		end
 
 		local function retp(p) return p end
@@ -288,17 +301,17 @@ function M.open(file, opt)
 		parse.SQ = function(len, t) --sequence items
 			--https://dicom.nema.org/dicom/2013/output/chtml/part05/sect_7.5.html
 			local seq_len = len or 1/0
-			local fileoffset0 = fileoffset
+			local file_offset0 = file_offset
 			while seq_len > 0 and next_u16() == 0xFFFE do
 				local g, e, vr, len = next_tag_implicit()
 				if vr == 'item' then
 					local item = {}
 					add(t, item)
 					local item_len = len or 1/0
-					local fileoffset0 = fileoffset
+					local file_offset0 = file_offset
 					while item_len > 0 and next_u16() ~= 0xFFFE do
 						add_tag(item, next_tag())
-						item_len = item_len - (fileoffset - fileoffset0)
+						item_len = item_len - (file_offset - file_offset0)
 					end
 					if not len then
 						local g, e, vr, len = next_tag_implicit()
@@ -307,7 +320,7 @@ function M.open(file, opt)
 				elseif vr == 'seqdelim' then
 					break
 				end
-				seq_len = seq_len - (fileoffset - fileoffset0)
+				seq_len = seq_len - (file_offset - file_offset0)
 			end
 			return sq
 		end
@@ -320,26 +333,98 @@ function M.open(file, opt)
 		parse.US = u16list
 		parse.UT = str1
 
-		parse[0x7fe00010] = function(len, t) --pixel data
-			if not len then --native: undefined-length SQ of fixed-length items.
-				local offsets
-				while next_u16() == 0xFFFE do
-					local g, e, len = u16(), u16(), u32()
-					if e == 0xE000 then --item
-						if offsets == nil then
-							offsets = len > 0 and strbuf(len)
-						else
-							skip(len)
+		local image = {}
+		image.__index = image
+
+		local decode --f(frame, buf, len)
+		local bot = buffer.new() --Basic Offset Table: u32[].
+		local function image_decode_encap(self)
+			assert(decode)
+			seek(self.file_offset)
+			local num_frames
+			local base_offset = file_offset + 8 --first byte of first fragment
+			local next_frame_offset = base_offset
+			local left_len = self.items_len
+			while left_len > 0 do
+				local item_offset = file_offset
+				need(8)
+				local g, e, item_len = u16(), u16(), u32()
+				assert(g == 0xFFFE)
+				assert(e == 0xE000)
+				assert(item_len)
+				left_len = left_len - (8 + item_len)
+				if not num_frames then --first item is the Basic Offset Table.
+					if item_len > 0 then --first offset is redundant and optional.
+						assert(item_len % 4 == 0)
+						num_frames = item_len / 4
+						assert(num_frames == floor(num_frames))
+						bot:reset()
+						tobuf(bot, item_len)
+					else
+						num_frames = 1
+					end
+				else
+					if item_offset == next_frame_offset then
+						if #self > 0 then
+							decode(self[#self]) --finish up decoding.
 						end
+						assert(#self < num_frames)
+						local frame = {}
+						add(self, frame)
+						--compute next frame's offset.
+						local offsets = #bot / 4
+						if #self >= num_frames then --last frame
+							next_frame_offset = base_offset + self.items_len - next_frame_offset
+						else
+							next_frame_offset = base_offset + cast(u32p, bot:ref())[#self]
+						end
+					end
+					assert(file_offset < next_frame_offset)
+					need(item_len)
+					decode(self[#self], buf:ref(), item_len)
+					skip(item_len)
+				end
+			end
+		end
+
+		local function image_decode_native(self)
+			local t = self.seq
+			local spp    = t[0x00280002] --1 or 3
+			local bps    = t[0x00280100] --1 or 8N (bits allocated)
+			local bps_st = t[0x00280101] --anything: bits stored
+			local planar = t[0x00280006] == 1
+			local rows   = t[0x00280010]
+			local cols   = t[0x00280011]
+			bits = assert(bits and bits[1])
+		end
+
+		parse[0x7fe00010] = function(len, t, vr, seq) --pixel data
+			t.file_offset = file_offset
+			if not len then --no length: skip one item at a time.
+				len = 0
+				while next_u16() == 0xFFFE do
+					local g, e, item_len = u16(), u16(), u32()
+					if e == 0xE000 then --item with defined len
+						assert(item_len)
+						skip(item_len)
+						len = len + (8 + item_len)
 					elseif e == 0xE0DD then --sequence delimiter
+						assert(item_len == 0)
 						break
 					else
-						error'invalid tag'
+						error'(FFFE,E000) or (FFFE,E0DD) expected'
 					end
 				end
-			else --encapsulated
-				pr('ENCAP PIXEL DATA', len)
+				t.decode = image_decode_encap
+				t.items_len = len --length sum of all items, including their headers.
+			else
+				skip(len)
+				t.decode = image_decode_native
+				t.len = len
+				t.vr = vr
 			end
+			t.seq = seq
+			setmetatable(t, image)
 		end
 
 		local types = {
@@ -356,19 +441,18 @@ function M.open(file, opt)
 				need(len)
 			end
 			local t = seq[ge]
-			if not t then
-				t = {type = types[vr]}
-				seq[ge] = t
-				parse(len, t)
-				return t
-			else --ignore duplicate tags like DCMTK.
+			if t then --ignore duplicate tags like DCMTK.
 				if len then
 					skip(len)
 				else
-					parse(len, {})
+					parse(len, {}, vr, seq)
 				end
 				return nil, 'duplicate tag'
 			end
+			t = {type = types[vr]}
+			seq[ge] = t
+			parse(len, t, vr, seq)
+			return t, g, e
 		end
 
 		local DATA_VRS = index{'OB', 'OW', 'OF', 'SQ', 'UT', 'UN'}
@@ -399,13 +483,48 @@ function M.open(file, opt)
 			return g, e, vr, len
 		end
 
-		--[[local]] next_tag = next_tag_implicit
+		--[[local]] next_tag = next_tag_explicit
 
-		local function set_explicit()
-			next_tag = next_tag_explicit
+		local function set_implicit()
+			next_tag = next_tag_implicit
 		end
 
 		local seq = {} --root sequence for top-level tags.
+
+		local function decode_native(frame, buf, sz)
+			print'native NYI'
+		end
+
+		local function decode_uncompressed(frame, buf, sz)
+			print'uncompressed NYI'
+		end
+
+		local function decode_jpeg(frame, buf, sz)
+			print'jpeg NYI'
+		end
+
+		local jpeg_sel1
+		local function decode_jpeg_lossless(frame, buf, sz)
+			print'jpeg-lossless NYI'
+		end
+
+		local jpeg_12bit
+		local function decode_jpeg_baseline(frame, buf, sz)
+			print'jpeg-baseline NYI'
+		end
+
+		local lossless
+		local function decode_jpeg_ls(frame, buf, sz)
+			print'jpeg-ls NYI'
+		end
+
+		local function decode_jpeg_2000(frame, buf, sz)
+			print'jpeg2000 NYI'
+		end
+
+		local function decode_rle(frame, buf, sz)
+			print'RLE NYI'
+		end
 
 		--https://dicom.nema.org/dicom/2013/output/chtml/part10/chapter_7.html#table_7.1-1
 		local function init()
@@ -420,43 +539,47 @@ function M.open(file, opt)
 						local set_be, set_deflate
 						while true do --file meta information group
 							if next_u16() ~= 2 then break end
-							local t = add_tag(seq, next_tag_explicit())
-							if t and t.element == 0x0010 then --transfer syntax
-								if v == '1.2.840.10008.1.2' then --implicit little-endian
-									--this is the default
+							local t, g, e = add_tag(seq, next_tag_explicit())
+							if t and e == 0x0010 then --transfer syntax
+								local v = t[1]
+								if     v == '1.2.840.10008.1.2' then --implicit little-endian
+									set_implicit()
 								elseif v == '1.2.840.10008.1.2.1' then --explicit little-endian
-									set_explicit()
+									--this is the default
 								elseif v == '1.2.840.10008.1.2.2' then --explicit big-endian
 									set_be = true
+								elseif v == '1.2.840.10008.1.2.1.98' then --encapped uncompressed
+									decode = decode_uncompressed
 								elseif v == '1.2.840.10008.1.2.1.99' then --deflate
 									set_deflate = true
-								elseif v == '1.2.840.10008.1.2.5' then --RLE
-									print'RLE NYI'
 								elseif v == '1.2.840.10008.1.2.4' then --JPEG
-									print'JPEG NYI'
-								elseif
-									   v == '1.2.840.10008.1.2.4.57' --JPEG lossless
-									or v == '1.2.840.10008.1.2.4.70' --JPEG lossless sel1
-								then
-									print'JPEG-lossless NYI'
-								elseif
-									   v == '1.2.840.10008.1.2.4.50' --JPEG baseline 8bit
-									or v == '1.2.840.10008.1.2.4.51' --JPEG baseline 12bit
-								then
-									print'JPEG-BASELINE NYI'
-								elseif
-									   v == '1.2.840.10008.1.2.4.80' --JPEG-LS lossless
-									or v == '1.2.840.10008.1.2.4.81' --JPEG-LS
-								then
-									print'JPEG-LS NYI'
-								elseif
-									   v == '1.2.840.10008.1.2.4.90' --JPEG2000 lossless
-									or v == '1.2.840.10008.1.2.4.91' --JPEG2000
-								then
-									print'JPEG2000 NYI'
+									decode = decode_jpeg
+								elseif v == '1.2.840.10008.1.2.4.57' then--JPEG lossless
+									decode = decode_jpeg_lossless
+								elseif v == '1.2.840.10008.1.2.4.70' then --JPEG lossless sel1
+									decode = decode_jpeg_lossless
+									jpeg_sel1 = true
+								elseif v == '1.2.840.10008.1.2.4.50' then --JPEG baseline 8bit
+									decode = decode_jpeg_baseline
+								elseif v == '1.2.840.10008.1.2.4.51' then --JPEG baseline 12bit
+									decode = decode_jpeg_baseline
+									jpeg_12bit = true
+								elseif v == '1.2.840.10008.1.2.4.80' then --JPEG-LS lossless
+									decode = decode_jpeg_ls
+									lossless = true
+								elseif v == '1.2.840.10008.1.2.4.81' then --JPEG-LS
+									decode = decode_jpeg_ls
+								elseif v == '1.2.840.10008.1.2.4.90' then --JPEG2000 lossless
+									decode = decode_jpeg_2000
+									lossless = true
+								elseif v == '1.2.840.10008.1.2.4.91' then --JPEG2000
+									decode = decode_jpeg_2000
+								elseif v == '1.2.840.10008.1.2.5' then --RLE
+									decode = decode_rle
 								else
 									error('unknown transfer syntax '..v)
 								end
+								decode = decode or decode_native
 							end
 						end
 						if set_be then
@@ -495,9 +618,8 @@ function M.open(file, opt)
 		end
 		df.tags = seq
 
-		function df:tag(g, e, seq1)
-			local seq = seq1 or seq
-			return seq[g * 0x10000 + e]
+		function df:image(seq)
+			return self.tags[0x7fe00010]
 		end
 
 		local function dump(item, level, i)
@@ -540,14 +662,18 @@ end
 if not ... then
 	--require'$'
 	--for _, in dir()
-	local f = 'x:/dicom/_sample_files/0002.DCM'
-	local f = 'x:/dicom/_sample_files/2_skull_ct/DICOMDIR'
-	local df = assert(M.open(f, {
+	local f = '0002.DCM'
+	--local f = '2_skull_ct/DICOMDIR'
+	local f = 'encapsulated_uncompressed.dcm'
+	local f = 'img2.dcm'
+	local df = assert(M.open('x:/dicom/_sample_files/'..f, {
 		--
 	}))
 	df:dump()
 
-	--pr(df:tags())
+	df:image():decode()
+
+	--pr(df.tags)
 
 	df:close()
 
