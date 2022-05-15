@@ -530,11 +530,12 @@ function M.open(file, opt)
 
 		CONCLUSIONS:
 		1. All 3 JPEG lossless algorithms (original, LS, 2000) are a joke:
-		all you get is 60% size and very slow decoders.
-		2. For the smallest number of libs to integrate to get the most
-		coverage of the standards you need: thorfdbg/libjpeg (C++, GPL)
-		+ OpenJPEG (clunky). That, or: CharLS (nice) + a build of libjpeg-turbo
-		with 12bpp (easy) + own JPEG-1-14 (hard) + OpenJPEG (clunky).
+		all you get is 60% size and very slow decoders. But we must read them all.
+		2. For the smallest number of libs to integrate to get the most coverage
+		of the standards you need: thorfdbg/libjpeg (C++, GPL) + OpenJPEG (clunky).
+		That, or: CharLS (nice) + a build of libjpeg-turbo with 12bpp (easy)
+		+ own JPEG-1-14 (hard) + OpenJPEG (clunky). Oh, and find something for
+		JPEG-2000-MCT (eg. Daikon has jpx.js from PDF.js).
 
 		]]
 
