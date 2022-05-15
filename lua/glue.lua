@@ -298,6 +298,9 @@ end
 
 --create a comparison function for sorting objects with table.sort().
 function glue.cmp(keys) --'KEY1[:DESC] ...'
+	if type(keys) ~= 'string' then
+		return keys
+	end
 	local f
 	for s in glue.eachword(keys) do
 		local k, desc = s:match'^([^:]+):(.*)'
@@ -330,23 +333,30 @@ function glue.keys(t, cmp)
 	for k in pairs(t) do
 		dt[#dt+1]=k
 	end
-	if cmp == true or cmp == 'asc' then
+	if cmp == true then
 		sort(dt)
-	elseif cmp == 'desc' then
+	elseif cmp == false then
 		sort(dt, desc_cmp)
+	elseif type(cmp) == 'string' then
+		cmp = glue.cmp(cmp)
+		sort(dt, function(k1, k2)
+			return cmp(t[k1], t[k2])
+		end)
 	elseif cmp then
 		sort(dt, cmp)
 	end
 	return dt
 end
 
+local repl = glue.repl
+
 function glue.sortedkeys(t, cmp)
-	return glue.keys(t, cmp or true)
+	return glue.keys(t, repl(cmp, nil, true))
 end
 
 --stateless pairs() that iterate elements in key order.
 function glue.sortedpairs(t, cmp)
-	local kt = glue.keys(t, cmp or true)
+	local kt = glue.keys(t, repl(cmp, nil, true))
 	local i, n = 0, #kt
 	return function()
 		i = i + 1
