@@ -32,6 +32,16 @@ test(glue.indexof('b', {'x', 'y', 'z'}), nil)
 
 test(glue.index{a=5,b=7,c=3}, {[5]='a',[7]='b',[3]='c'})
 
+local a1, a2, a3, b1, b2 = {a=1, b=1}, {a=1, b=2}, {a=1, b=3}, {a=2, b=1}, {a=2, b=2}
+local function testcmp(s, t1, t2)
+	table.sort(t1, glue.cmp(s))
+	test(t1, t2)
+end
+testcmp('a b'           , {a1, a2, a3, b1, b2}, {a1, a2, a3, b1, b2})
+testcmp('a:desc b:desc' , {a1, a2, a3, b1, b2}, {b2, b1, a3, a2, a1})
+testcmp('a b:desc'      , {a1, a2, a3, b1, b2}, {a3, a2, a1, b2, b1})
+testcmp('a:desc b'      , {a1, a2, a3, b1, b2}, {b1, b2, a1, a2, a3})
+
 test(glue.keys({a=5,b=7,c=3}, true), {'a','b','c'})
 test(glue.keys({'a','b','c'}, true), {1,2,3})
 
