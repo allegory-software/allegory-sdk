@@ -87,10 +87,7 @@ typedef enum CODEC_FORMAT {
     OPJ_CODEC_JPX  = 4      /**< JPX file format (JPEG 2000 Part-2) : to be coded */
 } OPJ_CODEC_FORMAT;
 
-/**
- * Progression order changes
- *
- */
+// Progression order changes
 typedef struct opj_poc {
     /** Resolution num start, Component num start, given by POC */
     uint32_t resno0, compno0;
@@ -117,8 +114,11 @@ typedef struct opj_poc {
 } opj_poc_t;
 
 enum {
-	OPJ_J2K_MAXRLVLS = 33,                 /**< Number of maximum resolution level authorized */
-	OPJ_J2K_MAXBANDS =, (3*OPJ_J2K_MAXRLVLS-2) /**< Number of maximum sub-band linked to number of resolution level */
+	OPJ_J2K_MAXRLVLS = 33,                     /**< Number of maximum resolution level authorized */
+	OPJ_J2K_MAXBANDS = (3*OPJ_J2K_MAXRLVLS-2), /**< Number of maximum sub-band linked to number of resolution level */
+	OPJ_PATH_LEN     = 4096,                   /**< Maximum allowed size for filenames */
+	JPWL_MAX_NO_TILESPECS = 16,                /**< Maximum number of tile parts expected by JPWL: increase at your will */
+	JPWL_MAX_NO_PACKSPECS = 16, /**< Maximum number of packet parts expected by JPWL: increase at your will */
 };
 
 /**
@@ -253,7 +253,7 @@ typedef struct opj_cparameters {
      * DEPRECATED: use RSIZ, OPJ_PROFILE_* and OPJ_EXTENSION_* instead
      * Profile name
      * */
-    OPJ_RSIZ_CAPABILITIES cp_rsiz;
+    enum cp_rsiz;
     /** Tile part generation*/
     char tp_on;
     /** Flag for Tile part generation*/
@@ -277,8 +277,10 @@ typedef struct opj_cparameters {
     uint16_t rsiz;
 } opj_cparameters_t;
 
-#define OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG  0x0001
-#define OPJ_DPARAMETERS_DUMP_FLAG 0x0002
+enum {
+	OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG = 0x0001,
+	OPJ_DPARAMETERS_DUMP_FLAG                  = 0x0002,
+};
 
 /**
  * Decompression parameters
@@ -377,7 +379,7 @@ typedef struct opj_image_comp {
     /** precision: number of bits per component per pixel */
     uint32_t prec;
     /** obsolete: use prec instead */
-    OPJ_DEPRECATED_STRUCT_MEMBER(uint32_t bpp, "Use prec instead");
+    uint32_t bpp;
     /** signed (1) / unsigned (0) */
     uint32_t sgnd;
     /** number of decoded resolution */
@@ -427,7 +429,7 @@ typedef struct opj_image_comptparm {
     /** precision: number of bits per component per pixel */
     uint32_t prec;
     /** obsolete: use prec instead */
-    OPJ_DEPRECATED_STRUCT_MEMBER(uint32_t bpp, "Use prec instead");
+    uint32_t bpp;
     /** signed (1) / unsigned (0) */
     uint32_t sgnd;
 } opj_image_cmptparm_t;
@@ -543,13 +545,12 @@ OPJ_BOOL opj_encode(opj_codec_t *p_codec, opj_stream_t *p_stream);
 
 ]]
 
---[==[
-
 local M = {}
 
 local decoder = {}
 
-FORMAT = (CODEC_J2K | CODEC_JP2 )
+function decoder.open(buf, sz)
+	FORMAT = (CODEC_J2K | CODEC_JP2 )
 
 opj_dparameters_t parameters;
 opj_image_t *image;
@@ -558,13 +559,14 @@ unsigned char *buf;
 long buf_len;
 
 opj_set_default_decoder_parameters(parameters);
-dinfo = C.opj_create_decompress(FORMAT);
+dinfo = C.opj_create_decompress(CODEC_J2K + CODEC_JP2)
 C.opj_setup_decoder(dinfo, &parameters);
 
 cio = opj_cio_open((opj_common_ptr)dinfo, buf, buf_len);
 
 image = opj_decode(dinfo, cio);
 
+--[==[
 'opj_decode()' fills image->comps[0-3].data, if the file is a valid
 J2K/JP2 file. If it is not, then 'image' should be NULL.
 

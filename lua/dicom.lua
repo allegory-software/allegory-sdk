@@ -50,6 +50,11 @@ assert(ffi.abi'le')
 
 local M = {}
 
+
+local function first(t)
+	return t and t[1]
+end
+
 function M.open(file, opt)
 	return fpcall(function(finally, onerror)
 
@@ -389,13 +394,13 @@ function M.open(file, opt)
 
 		local function image_decode_native(self)
 			local t = self.seq
-			local spp    = t[0x00280002] --1 or 3
-			local bps    = t[0x00280100] --1 or 8N (bits allocated)
-			local bps_st = t[0x00280101] --anything: bits stored
-			local planar = t[0x00280006] == 1
-			local rows   = t[0x00280010]
-			local cols   = t[0x00280011]
-			bits = assert(bits and bits[1])
+			local spp    = first(t[0x00280002]) --1 or 3
+			local bps    = first(t[0x00280100]) --1 or 8N (bits allocated)
+			local bps_st = first(t[0x00280101]) --anything: bits stored
+			local planar = first(t[0x00280006]) == 1
+			local rows   = first(t[0x00280010])
+			local cols   = first(t[0x00280011])
+			pr(spp, bps, bps_st, planar, rows, cols)
 		end
 
 		parse[0x7fe00010] = function(len, t, vr, seq) --pixel data
@@ -491,39 +496,72 @@ function M.open(file, opt)
 
 		local seq = {} --root sequence for top-level tags.
 
-		local function decode_native(frame, buf, sz)
-			print'native NYI'
-		end
-
 		local function decode_uncompressed(frame, buf, sz)
 			print'uncompressed NYI'
 		end
 
-		local function decode_jpeg(frame, buf, sz)
-			print'jpeg NYI'
+		local function decode_rle(frame, buf, sz)
+			print'RLE NYI'
 		end
 
-		local jpeg_sel1
-		local function decode_jpeg_lossless(frame, buf, sz)
-			print'jpeg-lossless NYI'
+		--[[
+
+		JPEG STANDARDS [*]=SUPPORTED [x]=NOT-SUPPORTED [-]=NOT USED IN DICOM.
+		------------------------------------------------------------------------
+		C* ISO-10918-1:1994 JPEG-1-1 original: baseline JPEG, 8bpp, no alpha:
+			- impl: libjpeg-turbo standard build, thorfdbg/libjpeg.
+		Rx ISO-10918-1:1994 JPEG-1-4 original: baseline JPEG, 12bpp, no alpha:
+			- impl: libjpeg-turbo built with `-DWITH_12BIT=1`, thorfdbg/libjpeg.
+		Cx ISO-10918-1:1994 JPEG-1-14 original lossless, 8bpp, 16bpp, no alpha:
+			- impl: DCMJP2K, thorfdbg/libjpeg.
+		R* ISO-14495-1:1999 JPEG-LS Part-1: 8bpp, 16bpp:
+			- impl: CharLS, thorfdbg/libjpeg.
+			- perf: better/faster than both JPEG-1-14 and JPEG-2000-1.
+		- ISO-14495-1:2003 JPEG-LS Part-2: multi-component transforms, arith. coding:
+			- impl: thorfdbg/libjpeg?
+		R* ISO-15444-1 JPEG-2000-1 Part-1 (jp2):
+			- impl: OpenJPEG (very slow decoder).
+		?x ISO-15444-1 JPEG-2000-2 Part-2 Annex-J multi-component transforms (jpx):
+			- impl: FFmpeg, DCMJP2K (not free). not in GDCM.
+			- perf: 2-3 times better compression ration on lossy (20% on lossless).
+		- ISO-18477-8 JPEG-XT lossless and near-lossless:
+			- impl: thorfdbg/libjpeg.
+			- perf: similar to PNG.
+
+		CONCLUSIONS:
+		1. All 3 JPEG lossless algorithms (original, LS, 2000) are a joke:
+		all you get is 60% size and very slow decoders.
+		2. For the smallest number of libs to integrate to get the most
+		coverage of the standards you need: thorfdbg/libjpeg (C++, GPL)
+		+ OpenJPEG (clunky). That, or: CharLS (nice) + a build of libjpeg-turbo
+		with 12bpp (easy) + own JPEG-1-14 (hard) + OpenJPEG (clunky).
+
+		]]
+
+		local function decode_jpeg1(frame, buf, sz)
+			print'JPEG-1 is NYI'
 		end
 
-		local jpeg_12bit
-		local function decode_jpeg_baseline(frame, buf, sz)
-			print'jpeg-baseline NYI'
+		local function decode_jpeg1_12bit(frame, buf, sz)
+			--TODO: build libjpeg-turbo with `-DWITH_12BIT=1` and change the binding.
+			print'JPEG-1 12bit is Not Supported'
 		end
 
-		local lossless
+		local function decode_jpeg1_lossless(frame, buf, sz)
+			--TODO: find an implementation.
+			print'JPEG-1 Original Lossless is Not Supported'
+		end
+
 		local function decode_jpeg_ls(frame, buf, sz)
-			print'jpeg-ls NYI'
+			print'JPEG-LS is NYI'
 		end
 
 		local function decode_jpeg_2000(frame, buf, sz)
-			print'jpeg2000 NYI'
+			print'JPEG-2000 is NYI'
 		end
 
-		local function decode_rle(frame, buf, sz)
-			print'RLE NYI'
+		local function decode_jpeg_2000_mct(frame, buf, sz)
+			print'JPEG-2000 Multi-Component Transformations Extension is Not Supported'
 		end
 
 		--https://dicom.nema.org/dicom/2013/output/chtml/part10/chapter_7.html#table_7.1-1
@@ -552,34 +590,31 @@ function M.open(file, opt)
 									decode = decode_uncompressed
 								elseif v == '1.2.840.10008.1.2.1.99' then --deflate
 									set_deflate = true
-								elseif v == '1.2.840.10008.1.2.4' then --JPEG
-									decode = decode_jpeg
-								elseif v == '1.2.840.10008.1.2.4.57' then--JPEG lossless
-									decode = decode_jpeg_lossless
-								elseif v == '1.2.840.10008.1.2.4.70' then --JPEG lossless sel1
-									decode = decode_jpeg_lossless
-									jpeg_sel1 = true
-								elseif v == '1.2.840.10008.1.2.4.50' then --JPEG baseline 8bit
-									decode = decode_jpeg_baseline
-								elseif v == '1.2.840.10008.1.2.4.51' then --JPEG baseline 12bit
-									decode = decode_jpeg_baseline
-									jpeg_12bit = true
+								elseif v == '1.2.840.10008.1.2.4.50' then --JPEG-1-1 baseline 8bit
+									decode = decode_jpeg1
+								elseif v == '1.2.840.10008.1.2.4.51' then --JPEG-1-4 baseline 12bit
+									decode = decode_jpeg1_12bit
+								elseif v == '1.2.840.10008.1.2.4.57' then --JPEG-1-14 lossless
+									decode = decode_jpeg1_lossless
+								elseif v == '1.2.840.10008.1.2.4.70' then --JPEG-1-14 lossless sel=1
+									decode = decode_jpeg1_lossless
 								elseif v == '1.2.840.10008.1.2.4.80' then --JPEG-LS lossless
 									decode = decode_jpeg_ls
-									lossless = true
-								elseif v == '1.2.840.10008.1.2.4.81' then --JPEG-LS
+								elseif v == '1.2.840.10008.1.2.4.81' then --JPEG-LS lossy
 									decode = decode_jpeg_ls
-								elseif v == '1.2.840.10008.1.2.4.90' then --JPEG2000 lossless
+								elseif v == '1.2.840.10008.1.2.4.90' then --JPEG-2000-1 lossless
 									decode = decode_jpeg_2000
-									lossless = true
-								elseif v == '1.2.840.10008.1.2.4.91' then --JPEG2000
+								elseif v == '1.2.840.10008.1.2.4.91' then --JPEG-2000-1
 									decode = decode_jpeg_2000
-								elseif v == '1.2.840.10008.1.2.5' then --RLE
+								elseif v == '1.2.840.10008.1.2.4.92' then --JPEG-2000-2 multicomp lossless
+									decode = decode_jpeg_2000_mct
+								elseif v == '1.2.840.10008.1.2.4.93' then --JPEG-2000-2 multicomp
+									decode = decode_jpeg_2000_mct
+								elseif v == '1.2.840.10008.1.2.5' then --RLE (lossless)
 									decode = decode_rle
 								else
 									error('unknown transfer syntax '..v)
 								end
-								decode = decode or decode_native
 							end
 						end
 						if set_be then
