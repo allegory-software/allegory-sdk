@@ -100,6 +100,7 @@ rep         = string.rep
 char        = string.char
 esc         = glue.esc
 subst       = glue.subst
+eachword    = glue.eachword
 words       = glue.words
 random_string = glue.random_string
 
