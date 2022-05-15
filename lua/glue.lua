@@ -33,6 +33,7 @@ TABLES
 	glue.empty                                      empty r/o table
 	glue.count(t[, maxn]) -> n                      count keys in table (up to maxn)
 	glue.index(t) -> dt                             switch keys with values
+	glue.cmp'KEY1[:DESC] ...' -> f                  create a cmp function for sorting objects
 	glue.keys(t[,sorted|'desc'|cmp]) -> dt          make a list of all the keys
 	glue.sortedkeys(t[,cmp]) -> dt                  make a sorted list of all keys
 	glue.sortedpairs(t [,cmp]) -> iter() -> k, v    like pairs() but in key order
@@ -60,7 +61,8 @@ ARRAYS
 STRINGS
 	glue.gsplit(s,sep[,start[,plain]]) -> iter() -> e[,captures...]   split a string by a pattern
 	glue.split(s,sep[,start[,plain]]) -> {s1,...}   split a string by a pattern
-	glue.words('name1 ...') -> {'name1', ...}       split a string by whitespace
+	glue.eachword'name1 ... ' -> f() -> 'name'      iterate words in a string
+	glue.words'name1 ...' -> {'name1', ...}         split a string by whitespace
 	glue.capitalize(s) -> s                         capitalize the first letter of every word in string
 	glue.lines(s, [opt], [init]) -> iter() -> s, i, j, k   iterate the lines of a string
 	glue.outdent(s, [indent]) -> s, indent          outdent/reindent text based on first line's indentation
@@ -292,6 +294,33 @@ function glue.index(t)
 	local dt={}
 	for k,v in pairs(t) do dt[v]=k end
 	return dt
+end
+
+--create a comparison function for sorting objects with table.sort().
+function glue.cmp(keys) --'KEY1[:DESC] ...'
+	local f
+	for s in glue.eachword(keys) do
+		local k, desc = s:match'^([^:]+):(.*)'
+		if k then
+			desc = desc == 'desc'
+		else
+			k = s
+		end
+		local f1 = desc
+			and function(a, b) local a, b = a[k], b[k]; return a > b and -1 or a < b and 1 end
+			or  function(a, b) local a, b = a[k], b[k]; return a < b and -1 or a > b and 1 end
+		if not f then
+			f = f1
+		else
+			local f0 = f
+			f = function(a, b)
+				return f0(a, b) or f1(a, b)
+			end
+		end
+	end
+	return function(a, b)
+		return f(a, b) == -1
+	end
 end
 
 --put keys in a list, optionally sorted.
@@ -791,6 +820,12 @@ function glue.string.split(s, sep, start, plain)
 	return glue.collect(glue.gsplit(s, sep, start, plain))
 end
 
+--iterate words in a strings. unlike glue.gsplit(s, '%s+'), it ignores
+--any resulting empty elements.
+function glue.string.eachword(s)
+	return glue.trim(s):gmatch'[^%s]+'
+end
+
 --split a string by whitespace. unlike glue.split(s, '%s+'), it ignores
 --any resulting empty elements; also, non-string args pass through.
 function glue.string.words(s)
@@ -798,7 +833,7 @@ function glue.string.words(s)
 		return s
 	end
 	local t = {}
-	for s in glue.trim(s):gmatch'[^%s]+' do
+	for s in glue.eachword(s) do
 		t[#t+1] = s
 	end
 	return t
