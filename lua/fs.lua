@@ -384,7 +384,7 @@ fs.dir([dir], [opt]) -> d, next
 
 		Check if dir entry is of type.
 
-fs.scan([path]) -> iter() -> sc
+fs.scandir([path]) -> iter() -> sc
 
 	Recursive dir walker. All sc methods return `nil, err` if an error occured
 	on the current dir entry, but the iteration otherwise continues.
@@ -1148,7 +1148,7 @@ end
 local push = table.insert
 local pop = table.remove
 
-function fs.scan(path)
+function fs.scandir(path)
 	local pds = {}
 	local next, d = fs.dir(path)
 	local name, err
