@@ -40,7 +40,7 @@ OPEN FILE ATTRIBUTES
 	f:attr([attr]) -> val|t                       get/set attribute(s) of open file
 	f:size() -> n                                 get file size
 DIRECTORY LISTING
-	fs.dir(dir, [dot_dirs]) -> d, next            directory contents iterator
+	fs.dir(dir, [opt]) -> d, next                 directory contents iterator
 	d:next() -> name, d                           call the iterator explicitly
 	d:close()                                     close iterator
 	d:closed() -> true|false                      check if iterator is closed
@@ -320,10 +320,11 @@ f:attr([attr]) -> val|t
 
 Directory listing ------------------------------------------------------------
 
-fs.dir([dir], [dot_dirs]) -> d, next
+fs.dir([dir], [opt]) -> d, next
 
-	Directory contents iterator. `dir` defaults to `'.'`. `dot_dirs=true` means
-	include `.` and `..` entries (default is to exclude them).
+	Directory contents iterator. `dir` defaults to '.'.
+	`opt` is a string that can include:
+		* `..`   :  include `.` and `..` dir entries (excluded by default).
 
 	USAGE
 
@@ -341,47 +342,61 @@ fs.dir([dir], [dot_dirs]) -> d, next
 	`fs.dir()` (eg. `'not_found'`) are passed to the iterator also, so the
 	iterator must be called at least once to see them.
 
-d:next() -> name, d | false, err | nil
+	d:next() -> name, d | false, err | nil
 
-	Call the iterator explicitly.
+		Call the iterator explicitly.
 
-d:close()
+	d:close()
 
-	Close the iterator. Always call `d:close()` before breaking the for loop
-	except when it's an error (in which case `d` holds the error message).
+		Close the iterator. Always call `d:close()` before breaking the for loop
+		except when it's an error (in which case `d` holds the error message).
 
-d:closed() -> true|false
+	d:closed() -> true|false
 
-	Check if the iterator is closed.
+		Check if the iterator is closed.
 
-d:name() -> s
+	d:name() -> s
 
-	The name of the current file or directory being iterated.
+		The name of the current file or directory being iterated.
 
-d:dir() -> s
+	d:dir() -> s
 
-	The directory that was passed to `fs.dir()`.
+		The directory that was passed to `fs.dir()`.
 
-d:path() -> s
+	d:path() -> s
 
-	The full path of the current dir entry (`d:dir()` combined with `d:name()`).
+		The full path of the current dir entry (`d:dir()` combined with `d:name()`).
 
-d:attr([attr, ][deref]) -> t|val
+	d:attr([attr, ][deref]) -> t|val
 
-	Get/set dir entry attribute(s).
+		Get/set dir entry attribute(s).
 
-	`deref` means return the attribute(s) of the symlink's target if the file is
-	a symlink (`deref` defaults to `true`!). When `deref=true`, even the `'type'`
-	attribute is the type of the target, so it will never be `'symlink'`.
+		`deref` means return the attribute(s) of the symlink's target if the file is
+		a symlink (`deref` defaults to `true`!). When `deref=true`, even the `'type'`
+		attribute is the type of the target, so it will never be `'symlink'`.
 
-	Some attributes for directory entries are free to get (but not for symlinks
-	when `deref=true`) meaning that they don't require a system call for each
-	file, notably `type` on all platforms, `atime`, `mtime`, `btime`, `size`
-	and `dosname` on Windows and `inode` on Linux and OSX.
+		Some attributes for directory entries are free to get (but not for symlinks
+		when `deref=true`) meaning that they don't require a system call for each
+		file, notably `type` on all platforms, `atime`, `mtime`, `btime`, `size`
+		and `dosname` on Windows and `inode` on Linux and OSX.
 
-d:is(type, [deref]) -> true|false
+	d:is(type, [deref]) -> true|false
 
-	Check if dir entry is of type.
+		Check if dir entry is of type.
+
+fs.scan([path]) -> iter() -> sc
+
+	Recursive dir walker. All sc methods return `nil, err` if an error occured
+	on the current dir entry, but the iteration otherwise continues.
+	`depth` arg can be 0=sc:depth(), 1=first-level, -1=parent-level, etc.
+
+	sc:close()
+	sc:closed() -> true|false
+	sc:name([depth]) -> s
+	sc:dir([depth]) -> s
+	sc:path([depth]) -> s
+	sc:attr([attr, ][deref]) -> t|val
+	sc:depth([n]) -> n (from 1)
 
 File attributes --------------------------------------------------------------
 
@@ -636,7 +651,7 @@ local void_ptr_ct = ffi.typeof'void*'
 local uintptr_ct  = ffi.typeof'uintptr_t'
 
 memoize = glue.memoize
-assert = glue.assert
+assertf = glue.assert
 buffer = glue.buffer
 update = glue.update
 
@@ -699,7 +714,7 @@ local function table_flags(t, masks, strict)
 		end
 		local bitmask = masks[flag]
 		if strict then
-			assert(bitmask, 'invalid flag: "%s"', tostring(flag))
+			assertf(bitmask, 'invalid flag: "%s"', tostring(flag))
 		end
 		if bitmask then
 			mask = bit.bor(mask, bitmask)
@@ -738,7 +753,7 @@ function flags(arg, masks, cur_bits, strict)
 	elseif arg == nil then
 		return 0
 	else
-		assert(false, 'flags expected but "%s" given', type(arg))
+		assertf(false, 'flags expected but "%s" given', type(arg))
 	end
 end
 
@@ -753,7 +768,7 @@ function open_opt(mode_opt, str_opt)
 	mode_opt = mode_opt or 'r'
 	local opt = type(mode_opt) == 'table' and mode_opt or nil
 	local mode = type(mode_opt) == 'string' and mode_opt or opt and opt.mode
-	local mopt = mode and assert(str_opt[mode], 'invalid open mode: %s', mode)
+	local mopt = mode and assertf(str_opt[mode], 'invalid open mode: %s', mode)
 	return opt and mopt and update({}, mopt, opt) or opt or mopt
 end
 
@@ -827,7 +842,7 @@ function file:seek(whence, offset)
 	end
 	whence = whence or 'cur'
 	offset = tonumber(offset or 0)
-	whence = assert(whences[whence], 'invalid whence: "%s"', whence)
+	whence = assertf(whences[whence], 'invalid whence: "%s"', whence)
 	return self:_seek(whence, offset)
 end
 
@@ -1075,29 +1090,12 @@ end
 
 local function dir_check(dir)
 	assert(not dir:closed(), 'dir closed')
-	assert(dir_ready(dir), 'dir not ready')
+	assert(dir_ready(dir), 'dir not ready') --must call next() at least once.
 end
 
-function fs.dir(dir, dot_dirs)
-	dir = dir or '.'
-	if dot_dirs then
-		return fs_dir(dir)
-	else --wrap iterator to skip `.` and `..` entries
-		local next, dir = fs_dir(dir)
-		local function wrapped_next(dir)
-			while true do
-				local file, err = next(dir)
-				if file == nil then
-					return nil
-				elseif not file then
-					return false, err
-				elseif file ~= '.' and file ~= '..' then
-					return file, dir
-				end
-			end
-		end
-		return wrapped_next, dir
-	end
+function fs.dir(dir, opt)
+	local skip_dot_dirs = not (opt and opt:find('..', 1, true))
+	return fs_dir(dir or '.', skip_dot_dirs)
 end
 
 function dir.path(dir)
@@ -1142,6 +1140,67 @@ function dir.is(dir, type, deref)
 		deref = false
 	end
 	return dir:attr('type', deref) == type
+end
+
+local push = table.insert
+local pop = table.remove
+
+function fs.scan(path)
+	local pds = {}
+	local next, d = fs.dir(path)
+	local name, err
+	local sc = {}
+	setmetatable(sc, sc)
+	function sc:close()
+		repeat
+			local ok, err = d:close()
+			if not ok then return nil, err end
+			d = pop(pds)
+		until not d
+		name, err = nil, 'closed'
+	end
+	function sc:depth(n)
+		n = n or 0
+		local maxdepth = #pds + 1
+		return n > 0 and min(maxdepth, n) or max(1, maxdepth + n)
+	end
+	function sc:__index(k) --forward other method calls to a dir object.
+		local f
+		function f(self, depth, ...)
+			if not name then return nil, err end
+			if type(depth) ~= 'number' then
+				return f(self, 0, depth, ...)
+			end
+			local d = d
+		 	if depth ~= 0 then
+				depth = self:depth(depth)
+				d = pds[depth] or d
+			end
+			return d[k](d, ...)
+		end
+		self[k] = f
+		return f
+	end
+	local function iter()
+		if not d then return nil end --closed
+		if name and d:is('dir', false) then
+			local next1, d1 = fs.dir(d:path())
+			assert(next1 == next)
+			push(pds, d)
+			d = d1
+		end
+		name, err = next(d)
+		if name == nil then
+			d = pop(pds)
+			if d then
+				return iter()
+			else
+				return nil
+			end
+		end
+		return sc
+	end
+	return iter
 end
 
 --memory mapping -------------------------------------------------------------
@@ -1236,7 +1295,7 @@ local vfile = {}
 function fs.open_buffer(buf, sz, mode)
 	sz = sz or #buf
 	mode = mode or 'r'
-	assert(mode == 'r' or mode == 'w', 'invalid mode: "%s"', mode)
+	assertf(mode == 'r' or mode == 'w', 'invalid mode: "%s"', mode)
 	local f = {
 		buffer = ffi.cast(u8p, buf),
 		size = sz,

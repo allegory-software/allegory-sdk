@@ -1335,6 +1335,7 @@ dir_ct = ffi.typeof[[
 		DWORD _errcode; // return `false, err, errcode` on the next iteration
 		int  _loaded;   // _fdata is loaded for the next iteration
 		int  _dirlen;
+		char _skip_dot_dirs;
 		char _dir[?];
 	}
 ]]
@@ -1376,11 +1377,19 @@ function dir.next(dir)
 	end
 	if dir._loaded == 1 then
 		dir._loaded = 0
-		return dir:name(), dir
+		local name = dir:name()
+		if dir._skip_dot_dirs == 1 and (name == '.' or name == '..') then
+			return dir.next(dir)
+		end
+		return name, dir
 	else
 		local ret = C.FindNextFileW(dir._handle, dir._fdata)
 		if ret ~= 0 then
-			return dir:name(), dir
+			local name = dir:name()
+			if dir._skip_dot_dirs == 1 and (name == '.' or name == '..') then
+				return dir.next(dir)
+			end
+			return name, dir
 		else
 			local errcode = C.GetLastError()
 			dir:close()
@@ -1392,11 +1401,12 @@ function dir.next(dir)
 	end
 end
 
-function fs_dir(path)
+function fs_dir(path, skip_dot_dirs)
 	assert(not path:find'[%*%?]') --no globbing allowed
 	local dir = dir_ct(#path)
 	dir._dirlen = #path
 	ffi.copy(dir._dir, path, #path)
+	dir._skip_dot_dirs = skip_dot_dirs and 1 or 0
 	dir._handle = C.FindFirstFileW(wcs(path .. '\\*'), dir._fdata)
 	if dir._handle == INVALID_HANDLE_VALUE then
 		dir._errcode = C.GetLastError()

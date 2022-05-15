@@ -716,6 +716,20 @@ function test.dir()
 	assert(found, 'fs_test.lua not found in cwd')
 end
 
+function test.dir_recursive()
+	local n = 0
+	for sc in fs.scan(win and 'c:\\' or '/proc') do
+		local typ, err = sc:attr'type'
+		local path, err = sc:path()
+		print(string.format('%-5s %-60s %s', typ, path, err or ''))
+		n = n + 1
+		if n >= 20 then
+			break
+		end
+	end
+	print(n)
+end
+
 function test.dir_not_found()
 	local n = 0
 	local err

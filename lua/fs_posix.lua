@@ -882,6 +882,7 @@ dir_ct = ffi.typeof[[
 		struct dirent* _dentry;
 		int  _errno;
 		int  _dirlen;
+		char _skip_dot_dirs;
 		char _dir[?];
 	}
 ]]
@@ -922,7 +923,11 @@ function dir.next(dir)
 	ffi.errno(0)
 	dir._dentry = C.readdir(dir._dirp)
 	if dir._dentry ~= nil then
-		return dir:name(), dir
+		local name = dir:name()
+		if dir._skip_dot_dirs == 1 and (name == '.' or name == '..') then
+			return dir.next(dir)
+		end
+		return name, dir
 	else
 		local errno = ffi.errno()
 		dir:close()
@@ -933,10 +938,11 @@ function dir.next(dir)
 	end
 end
 
-function fs_dir(path)
+function fs_dir(path, skip_dot_dirs)
 	local dir = dir_ct(#path)
 	dir._dirlen = #path
 	ffi.copy(dir._dir, path, #path)
+	dir._skip_dot_dirs = skip_dot_dirs and 1 or 0
 	dir._dirp = C.opendir(path)
 	if dir._dirp == nil then
 		dir._errno = ffi.errno()
