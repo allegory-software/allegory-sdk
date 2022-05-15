@@ -33,7 +33,7 @@ TABLES
 	glue.empty                                      empty r/o table
 	glue.count(t[, maxn]) -> n                      count keys in table (up to maxn)
 	glue.index(t) -> dt                             switch keys with values
-	glue.cmp'KEY1[:DESC] ...' -> f                  create a cmp function for sorting objects
+	glue.cmp'KEY1[>] ...' -> f                      create a cmp function for sorting objects
 	glue.keys(t[,sorted|'desc'|cmp]) -> dt          make a list of all the keys
 	glue.sortedkeys(t[,cmp]) -> dt                  make a sorted list of all keys
 	glue.sortedpairs(t [,cmp]) -> iter() -> k, v    like pairs() but in key order
@@ -297,15 +297,15 @@ function glue.index(t)
 end
 
 --create a comparison function for sorting objects with table.sort().
-function glue.cmp(keys) --'KEY1[:DESC] ...'
+function glue.cmp(keys) --'KEY1[>] ...'
 	if type(keys) ~= 'string' then
 		return keys
 	end
 	local f
 	for s in glue.eachword(keys) do
-		local k, desc = s:match'^([^:]+):(.*)'
+		local k, desc = s:match'^(.-)([<>])$'
 		if k then
-			desc = desc == 'desc'
+			desc = desc == '>'
 		else
 			k = s
 		end
