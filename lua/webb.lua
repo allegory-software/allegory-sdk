@@ -340,7 +340,8 @@ local CX = {}
 local threadenv = sock.threadenv
 local currentthread = sock.currentthread
 function cx()
-	return threadenv[currentthread()][CX]
+	local te = threadenv[currentthread()]
+	return te and te[CX]
 end
 local cx = cx
 
