@@ -46,7 +46,7 @@ local path = {}
 setmetatable(path, path)
 
 path.platform_sep = package.config:sub(1, 1)
-path.platform = path.platform_sep and 'win' or 'unix'
+path.platform = path.platform_sep == '\\' and 'win' or 'unix'
 
 local function win(pl) --check if pl (or current platform) is Windows
 	if pl == nil then pl = path.platform end
