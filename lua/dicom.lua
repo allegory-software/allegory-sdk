@@ -506,7 +506,8 @@ function M.open(file, opt)
 
 		--[[
 
-		JPEG STANDARDS [*]=SUPPORTED [x]=NOT-SUPPORTED [-]=NOT USED IN DICOM.
+		JPEG STANDARDS
+		[*]=SUPPORTED [x]=NOT-SUPPORTED [-]=NOT-USED [C]=COMMON [R]=RARE
 		------------------------------------------------------------------------
 		C* ISO-10918-1:1994 JPEG-1-1 original: baseline JPEG, 8bpp, no alpha:
 			- impl: libjpeg-turbo standard build, thorfdbg/libjpeg.
@@ -521,7 +522,7 @@ function M.open(file, opt)
 			- impl: thorfdbg/libjpeg?
 		R* ISO-15444-1 JPEG-2000-1 Part-1 (jp2):
 			- impl: OpenJPEG (very slow decoder).
-		?x ISO-15444-1 JPEG-2000-2 Part-2 Annex-J multi-component transforms (jpx):
+		Rx ISO-15444-1 JPEG-2000-2 Part-2 Annex-J multi-component transforms (jpx):
 			- impl: FFmpeg, DCMJP2K (not free). not in GDCM.
 			- perf: 2-3 times better compression ration on lossy (20% on lossless).
 		- ISO-18477-8 JPEG-XT lossless and near-lossless:
@@ -531,7 +532,7 @@ function M.open(file, opt)
 		CONCLUSIONS:
 		1. All 3 JPEG lossless algorithms (original, LS, 2000) are a joke:
 		all you get is 60% size and very slow decoders. But we must read them all.
-		2. For the smallest number of libs to integrate to get the most coverage
+		2. For the smallest number of libs to integrate to get complete coverage
 		of the standards you need: thorfdbg/libjpeg (C++, GPL) + OpenJPEG (clunky).
 		That, or: CharLS (nice) + a build of libjpeg-turbo with 12bpp (easy)
 		+ own JPEG-1-14 (hard) + OpenJPEG (clunky). Oh, and find something for
