@@ -655,6 +655,9 @@ assertf = glue.assert
 buffer = glue.buffer
 update = glue.update
 
+local u8p = glue.u8p
+local u8a = glue.u8a
+
 --error reporting ------------------------------------------------------------
 
 cdef'char *strerror(int errnum);'
@@ -774,8 +777,8 @@ end
 
 --returns a read(buf, sz) -> len function which reads ahead from file.
 function file.buffered_read(f, bufsize)
-	local ptr_ct = glue.u8p
-	local buf_ct = glue.u8a
+	local ptr_ct = u8p
+	local buf_ct = u8a
 	local o1, err = f:size()
 	local o0, err = f:seek'cur'
 	if not (o0 and o1) then
