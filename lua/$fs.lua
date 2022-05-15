@@ -31,7 +31,7 @@ FILESYSTEM API (NOT ASYNC)
 	touch(file, mtime, btime, silent)
 	chmod(file, perms)
 	mtime(file)
-	dir(path, patt, min_mtime, create, order_by)
+	dir(path, patt, min_mtime, create, order_by, recursive)
 	gen_id(name[, start]) -> n
 
 PROCESS API (NOT ASYNC!)
@@ -195,19 +195,39 @@ function dir(path, patt, min_mtime, create, order_by, recursive)
 	end
 	local t = {}
 	local create = create or function(file) return {} end
-	for file, d in fs.dir(path) do
-		if not file and d == 'not_found' then break end
-		check('fs', 'dir', file, 'dir listing failed for %s: %s', path, d)
-		if     (not min_mtime or d:attr'mtime' >= min_mtime)
-			and (not patt or file:find(patt))
-		then
-			local f = create(file)
-			if f then
-				f.name  = file
-				f.file  = d:path()
-				f.mtime = d:attr'mtime'
-				f.btime = d:attr'btime'
-				t[#t+1] = f
+	if recursive then
+		for sc in fs.scandir(path) do
+			local file, err = sc:name()
+			if not file and err == 'not_found' then break end
+			check('fs', 'dir', file, 'dir listing failed for %s: %s', sc:path(-1), err)
+			if     (not min_mtime or sc:attr'mtime' >= min_mtime)
+				and (not patt or file:find(patt))
+			then
+				local f = create(file, sc)
+				if f then
+					f.name  = file
+					f.file  = sc:path()
+					f.mtime = sc:attr'mtime'
+					f.btime = sc:attr'btime'
+					t[#t+1] = f
+				end
+			end
+		end
+	else
+		for file, d in fs.dir(path) do
+			if not file and d == 'not_found' then break end
+			check('fs', 'dir', file, 'dir listing failed for %s: %s', path, d)
+			if     (not min_mtime or d:attr'mtime' >= min_mtime)
+				and (not patt or file:find(patt))
+			then
+				local f = create(file, d)
+				if f then
+					f.name  = file
+					f.file  = d:path()
+					f.mtime = d:attr'mtime'
+					f.btime = d:attr'btime'
+					t[#t+1] = f
+				end
 			end
 		end
 	end
