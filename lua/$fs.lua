@@ -31,7 +31,7 @@ FILESYSTEM API (NOT ASYNC)
 	touch(file, mtime, btime, silent)
 	chmod(file, perms)
 	mtime(file)
-	dir(path, patt, min_mtime, create, desc, order_by)
+	dir(path, patt, min_mtime, create, order_by)
 	gen_id(name[, start]) -> n
 
 PROCESS API (NOT ASYNC!)
@@ -187,11 +187,11 @@ function mtime(file)
 	return fs.attr(file, 'mtime')
 end
 
-function dir(path, patt, min_mtime, create, desc, order_by)
+function dir(path, patt, min_mtime, create, order_by, recursive)
 	if type(path) == 'table' then
 		local t = path
-		path, patt, min_mtime, create, desc, order_by =
-			t.path, t.find, t.min_mtime, t.create, t.desc, t.order_by
+		path, patt, min_mtime, create, order_by, recursive =
+			t.path, t.find, t.min_mtime, t.create, t.order_by, t.recursive
 	end
 	local t = {}
 	local create = create or function(file) return {} end
@@ -204,25 +204,14 @@ function dir(path, patt, min_mtime, create, desc, order_by)
 			local f = create(file)
 			if f then
 				f.name  = file
-				f.file  = indir(path, file)
+				f.file  = d:path()
 				f.mtime = d:attr'mtime'
 				f.btime = d:attr'btime'
 				t[#t+1] = f
 			end
 		end
 	end
-	local cmp
-	if order_by == 'name' then
-		function cmp(a, b) return a.file < b.file end
-	else
-		function cmp(a, b)
-			return a.mtime < b.mtime or (a.mtime == b.mtime and a.file < b.file)
-		end
-	end
-	sort(t, cmp)
-	if desc then
-		glue.reverse(t)
-	end
+	sort(t, glue.cmp(order_by or 'mtime file'))
 	dbg('fs', 'dir', '%-20s %5d files%s%s', path,
 		#t,
 		patt and '\n  match: '..patt or '',
