@@ -111,7 +111,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 		let total_free_w = 0
 		let cw = cols_w
-		if (e.auto_cols_w && !col_resizing) {
+		if (e.auto_cols_w && (!e.rowset || e.rowset.auto_cols_w != false) && !col_resizing) {
 			cw = e.cells_view.clientWidth
 			total_free_w = max(0, cw - cols_w)
 		}
