@@ -136,7 +136,7 @@ scripts for new libraries.
 * __Support Libs__
   * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
 * __Dev Tools__
-  * [debugger]                         - Lua command-line debugger
+  * [debugger](lua/debugger.lua)       - Lua command-line debugger
 * __Web / Server side__
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
