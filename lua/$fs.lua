@@ -208,6 +208,7 @@ function dir(path, patt, min_mtime, create, order_by, recursive)
 					f.name    = file
 					f.path    = sc:path()
 					f.relpath = sc:relpath()
+					f.type    = sc:attr'type'
 					f.mtime   = sc:attr'mtime'
 					f.btime   = sc:attr'btime'
 					t[#t+1] = f
@@ -226,6 +227,7 @@ function dir(path, patt, min_mtime, create, order_by, recursive)
 					f.name    = file
 					f.path    = d:path()
 					f.relpath = file
+					f.type    = sc:attr'type'
 					f.mtime   = d:attr'mtime'
 					f.btime   = d:attr'btime'
 					t[#t+1] = f
