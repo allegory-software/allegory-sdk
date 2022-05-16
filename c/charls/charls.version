@@ -1,4 +1,0 @@
-charls {
-  global: charls_*;
-  local: *;
-};

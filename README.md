@@ -135,6 +135,8 @@ scripts for new libraries.
   * [box2d](lua/box2d.lua)             - 2D rectangle math
 * __Support Libs__
   * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
+* __Dev Tools__
+  * [debugger]                         - Lua command-line debugger
 * __Web / Server side__
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
