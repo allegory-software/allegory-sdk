@@ -429,9 +429,10 @@ test('a/b/',   'a/b/c', '../',      'win') --1 updir + empty + endsep
 test('a/b/c',  'a/b',   'c',        'win') --0 updirs + non-empty
 test('a/b',    'a/b',   '.',        'win') --0 updirs + empty
 test('a/b/',   'a/b',   './',       'win') --0 updirs + empty + endsep
-test('C:a/b/', 'C:a/b', 'C:./',     'win') --0 updirs + empty + endsep
+test('C:a/b/', 'C:a/b', './',       'win') --0 updirs + empty + endsep
 test('a/b',    'a/c/d', '../../b',  'win') --2 updirs + non-empty
 test('a/b/',   'a/c/d', '../../b/', 'win') --2 updirs + non-empty + endsep
+test('C:/a/b', 'C:/a' , 'b',        'win') --0 updirs + non-empty (DOS)
 
 --filename -------------------------------------------------------------------
 

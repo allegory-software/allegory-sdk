@@ -602,7 +602,7 @@ function path.indir(dir, file, ...)
 	return path.indir(p, ...)
 end
 
---Convert an absolute path into a relative path which is relative to `pwd`.
+--Convert a path (of any type) into a rel path that is relative to `pwd`.
 --Returns `nil` if the paths are of different types or don't have a base path
 --in common. The ending (back)slash is preserved if present.
 function path.rel(s, pwd, pl, sep, default_sep)
@@ -616,12 +616,12 @@ function path.rel(s, pwd, pl, sep, default_sep)
 	local pwd_suffix = pwd:sub(#prefix + 1)
 	local n = depth(pwd_suffix, win)
 	local p1 = ('..' .. sep):rep(n - 1) .. (n > 0 and '..' or '')
-	local p2 = p:sub(#prefix + 1)
+	local p2 = s:sub(#prefix + 1)
 	local p2 = p2:gsub(win and '^[\\/]+' or '^/+', '')
 	local p2 = p2:gsub(win and '[\\/]+$' or '/+$', '')
 	local p2 = p1 == '' and p2 == '' and '.' or p2
 	local p3 = p1 .. (p1 ~= '' and p2 ~= '' and sep or '') .. p2 .. endsep
-	return path.format(type, p3, drive, pl)
+	return path.format('rel', p3, nil, pl)
 end
 
 --[[
