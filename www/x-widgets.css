@@ -118,7 +118,7 @@
 	--x-bg-grid-editor             : var(--x-bg-popup);
 
 	--x-item-border-width          : 1px; /* needed to show rows with errors */
-	--x-grid-cell-line-height      : 1.2em;
+	--x-grid-cell-line-height      : 1em;
 
 }
 
