@@ -302,6 +302,11 @@ local function run_action(fallback, action, handler, ext, ...)
 	return true
 end
 
+function internal_action(action, ...)
+	local handler, ext = action_handler(find_action(action, ...))
+	return run_action(false, action, handler, ext, ...)
+end
+
 setmetatable(actions, {__call = function(self, action, ...)
 	local handler, ext = action_handler(find_action(action, ...))
 	return run_action(true, action, handler, ext, ...)

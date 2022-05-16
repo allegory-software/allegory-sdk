@@ -281,7 +281,7 @@ local pp = require'pp'
 local uri = require'uri'
 local errors = require'errors'
 local sock = require'sock'
-local json = require'json'
+local json_module = require'json'
 local b64 = require'base64'.encode
 local fs = require'fs'
 local path = require'path'
@@ -1245,12 +1245,12 @@ end
 
 --json API -------------------------------------------------------------------
 
-json_arg    = json.decode
-null        = json.null
-json_array  = json.asarray
-pack_json   = json.pack
-unpack_json = json.unpack
-_G.json     = json.encode
+json_arg    = json_module.decode
+null        = json_module.null
+json_array  = json_module.asarray
+pack_json   = json_module.pack
+unpack_json = json_module.unpack
+_G.json     = json_module.encode
 
 function out_json(v)
 	setmime'json'
@@ -1647,7 +1647,7 @@ function outcatlist(listfile, ...)
 				add(t, tostring(mtime))
 				add(c, function() outfile(path) end)
 			elseif action then --file not found, try an action
-				local s, found = record(action, file, ...)
+				local s, found = record(internal_action, file, ...)
 				if found then
 					add(t, s)
 					add(c, function() out(s) end)
