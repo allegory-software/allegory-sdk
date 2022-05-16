@@ -196,7 +196,7 @@ function dir(path, patt, min_mtime, create, order_by, recursive)
 	local t = {}
 	local create = create or function(file) return {} end
 	if recursive then
-		for sc in fs.scandir(path) do
+		for sc in fs.scan(path) do
 			local file, err = sc:name()
 			if not file and err == 'not_found' then break end
 			check('fs', 'dir', file, 'dir listing failed for %s: %s', sc:path(-1), err)
@@ -205,10 +205,11 @@ function dir(path, patt, min_mtime, create, order_by, recursive)
 			then
 				local f = create(file, sc)
 				if f then
-					f.name  = file
-					f.file  = sc:path()
-					f.mtime = sc:attr'mtime'
-					f.btime = sc:attr'btime'
+					f.name    = file
+					f.path    = sc:path()
+					f.relpath = sc:relpath()
+					f.mtime   = sc:attr'mtime'
+					f.btime   = sc:attr'btime'
 					t[#t+1] = f
 				end
 			end
@@ -222,16 +223,17 @@ function dir(path, patt, min_mtime, create, order_by, recursive)
 			then
 				local f = create(file, d)
 				if f then
-					f.name  = file
-					f.file  = d:path()
-					f.mtime = d:attr'mtime'
-					f.btime = d:attr'btime'
+					f.name    = file
+					f.path    = d:path()
+					f.relpath = file
+					f.mtime   = d:attr'mtime'
+					f.btime   = d:attr'btime'
 					t[#t+1] = f
 				end
 			end
 		end
 	end
-	sort(t, glue.cmp(order_by or 'mtime file'))
+	sort(t, glue.cmp(order_by or 'mtime path'))
 	dbg('fs', 'dir', '%-20s %5d files%s%s', path,
 		#t,
 		patt and '\n  match: '..patt or '',

@@ -384,7 +384,7 @@ fs.dir([dir], [opt]) -> d, next
 
 		Check if dir entry is of type.
 
-fs.scandir([path]) -> iter() -> sc
+fs.scan([path]) -> iter() -> sc
 
 	Recursive dir walker. All sc methods return `nil, err` if an error occured
 	on the current dir entry, but the iteration otherwise continues.
@@ -395,6 +395,7 @@ fs.scandir([path]) -> iter() -> sc
 	sc:name([depth]) -> s
 	sc:dir([depth]) -> s
 	sc:path([depth]) -> s
+	sc:relpath([depth]) -> s
 	sc:attr([attr, ][deref]) -> t|val
 	sc:depth([n]) -> n (from 1)
 
@@ -1147,8 +1148,9 @@ end
 
 local push = table.insert
 local pop = table.remove
+local relpath = path.rel
 
-function fs.scandir(path)
+function fs.scan(path)
 	local pds = {}
 	local next, d = fs.dir(path)
 	local name, err
@@ -1166,6 +1168,9 @@ function fs.scandir(path)
 		n = n or 0
 		local maxdepth = #pds + 1
 		return n > 0 and min(maxdepth, n) or max(1, maxdepth + n)
+	end
+	function sc:relpath(n)
+		return relpath(sc:path(n), path)
 	end
 	function sc:__index(k) --forward other method calls to a dir object.
 		local f

@@ -718,7 +718,7 @@ end
 
 function test.dir_recursive()
 	local n = 0
-	for sc in fs.scandir(win and 'c:\\' or '/proc') do
+	for sc in fs.scan(win and 'c:\\' or '/proc') do
 		local typ, err = sc:attr'type'
 		local path, err = sc:path()
 		print(string.format('%-5s %-60s %s', typ, path, err or ''))
