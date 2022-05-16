@@ -50,7 +50,6 @@ assert(ffi.abi'le')
 
 local M = {}
 
-
 local function first(t)
 	return t and t[1]
 end
@@ -260,10 +259,10 @@ function M.open(file, opt)
 		--https://dicom.nema.org/dicom/2013/output/chtml/part05/sect_6.2.html#table_6.2-1
 		parse.AE = strlist
 		parse.AS = function(len, t) --nnn[D|W|M|Y]
-			for i,s0 in ipairs(strlist(len, t)) do
+			for i,s in ipairs(strlist(len, t)) do
 				local age = tonumber(s:sub(1, 3))
 				local unit = s:sub(-1)
-				t[i] = age and {age, unit} or s0
+				t[i] = age and {age, unit} or s
 			end
 		end
 		parse.AT = u16list
@@ -659,6 +658,12 @@ function M.open(file, opt)
 			return self.tags[0x7fe00010]
 		end
 
+		function df:tagdef(ge) --name, vr, vm
+			local g, e = shr(ge, 16), band(ge, 0xffff)
+			local t = dict[g] and dict[g][e]
+			return t[3], t[1], t[2]
+		end
+
 		local function dump(item, level, i)
 			local pp = require'pp'
 			local indent = ('  '):rep(level)
@@ -716,4 +721,17 @@ if not ... then
 
 end
 
-return daikon
+function M.ge_arg(ge)
+	return shr(ge, 16), band(ge, 0xffff)
+end
+
+function M.ge(g, e)
+	return g * 0x10000 + e
+end
+
+function M.ge_format(g, e)
+	return _('(%04x,%04x)', g, e)
+end
+
+return M
+
