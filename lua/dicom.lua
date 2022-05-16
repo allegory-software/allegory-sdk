@@ -54,6 +54,20 @@ local function first(t)
 	return t and t[1]
 end
 
+local function ge_arg(ge)
+	return shr(ge, 16), band(ge, 0xffff)
+end
+local function ge(g, e)
+	return g * 0x10000 + e
+end
+local function ge_format(g, e)
+	return _('(%04x,%04x)', g, e)
+end
+
+M.ge_arg = ge_arg
+M.ge = ge
+M.ge_format = ge_format
+
 function M.open(file, opt)
 	return fpcall(function(finally, onerror)
 
@@ -439,7 +453,7 @@ function M.open(file, opt)
 				skip(len)
 				return
 			end
-			local ge = g * 0x10000 + e
+			local ge = ge(g, e)
 			local parse = assertf(parse[ge] or parse[vr], 'invalid VR: %s', vr)
 			if len then
 				need(len)
@@ -565,6 +579,8 @@ function M.open(file, opt)
 			print'JPEG-2000 Multi-Component Transformations Extension is Not Supported'
 		end
 
+		df.encoding = 'explicit LE'
+
 		--https://dicom.nema.org/dicom/2013/output/chtml/part10/chapter_7.html#table_7.1-1
 		local function init()
 			if have(0x80 + 4 + 2) then --preamble + prefix + first tag's group
@@ -581,37 +597,52 @@ function M.open(file, opt)
 							local t, g, e = add_tag(seq, next_tag_explicit())
 							if t and e == 0x0010 then --transfer syntax
 								local v = t[1]
-								if     v == '1.2.840.10008.1.2' then --implicit little-endian
+								if     v == '1.2.840.10008.1.2' then
+									df.encoding = 'implicit LE'
 									set_implicit()
-								elseif v == '1.2.840.10008.1.2.1' then --explicit little-endian
+								elseif v == '1.2.840.10008.1.2.1' then
 									--this is the default
-								elseif v == '1.2.840.10008.1.2.2' then --explicit big-endian
+								elseif v == '1.2.840.10008.1.2.2' then
+									df.encoding = 'explicit BE'
 									set_be = true
-								elseif v == '1.2.840.10008.1.2.1.98' then --encapped uncompressed
+								elseif v == '1.2.840.10008.1.2.1.98' then
+									df.encoding = 'uncompressed'
 									decode = decode_uncompressed
-								elseif v == '1.2.840.10008.1.2.1.99' then --deflate
+								elseif v == '1.2.840.10008.1.2.1.99' then
+									df.encoding = 'deflate'
 									set_deflate = true
-								elseif v == '1.2.840.10008.1.2.4.50' then --JPEG-1-1 baseline 8bit
+								elseif v == '1.2.840.10008.1.2.4.50' then
+									df.encoding = 'JPEG-1-1 baseline 8bit'
 									decode = decode_jpeg1
-								elseif v == '1.2.840.10008.1.2.4.51' then --JPEG-1-4 baseline 12bit
+								elseif v == '1.2.840.10008.1.2.4.51' then
+									df.encoding = 'JPEG-1-4 baseline 12bit'
 									decode = decode_jpeg1_12bit
-								elseif v == '1.2.840.10008.1.2.4.57' then --JPEG-1-14 lossless
+								elseif v == '1.2.840.10008.1.2.4.57' then
+									df.encoding = 'JPEG-1-14 lossless'
 									decode = decode_jpeg1_lossless
-								elseif v == '1.2.840.10008.1.2.4.70' then --JPEG-1-14 lossless sel=1
+								elseif v == '1.2.840.10008.1.2.4.70' then
+									df.encoding = 'JPEG-1-14 lossless sel=1'
 									decode = decode_jpeg1_lossless
-								elseif v == '1.2.840.10008.1.2.4.80' then --JPEG-LS lossless
+								elseif v == '1.2.840.10008.1.2.4.80' then
+									df.encoding = 'JPEG-LS lossless'
 									decode = decode_jpeg_ls
-								elseif v == '1.2.840.10008.1.2.4.81' then --JPEG-LS lossy
+								elseif v == '1.2.840.10008.1.2.4.81' then
+									df.encoding = 'JPEG-LS lossy'
 									decode = decode_jpeg_ls
-								elseif v == '1.2.840.10008.1.2.4.90' then --JPEG-2000-1 lossless
+								elseif v == '1.2.840.10008.1.2.4.90' then
+									df.encoding = 'JPEG-2000-1 lossless'
 									decode = decode_jpeg_2000
-								elseif v == '1.2.840.10008.1.2.4.91' then --JPEG-2000-1
+								elseif v == '1.2.840.10008.1.2.4.91' then
+									df.encoding = 'JPEG-2000-1'
 									decode = decode_jpeg_2000
-								elseif v == '1.2.840.10008.1.2.4.92' then --JPEG-2000-2 multicomp lossless
+								elseif v == '1.2.840.10008.1.2.4.92' then
+									df.encoding = 'JPEG-2000-2 MCT lossless'
 									decode = decode_jpeg_2000_mct
-								elseif v == '1.2.840.10008.1.2.4.93' then --JPEG-2000-2 multicomp
+								elseif v == '1.2.840.10008.1.2.4.93' then
+									df.encoding = 'JPEG-2000-2 MCT'
 									decode = decode_jpeg_2000_mct
-								elseif v == '1.2.840.10008.1.2.5' then --RLE (lossless)
+								elseif v == '1.2.840.10008.1.2.5' then
+									df.encoding = 'RLE'
 									decode = decode_rle
 								else
 									error('unknown transfer syntax '..v)
@@ -649,19 +680,29 @@ function M.open(file, opt)
 		end
 		assert(init(), 'invalid file')
 
-		while have(2) do
-			add_tag(seq, next_tag())
-		end
-		df.tags = seq
+		df.tags = memoize(function()
+			while have(2) do
+				add_tag(seq, next_tag())
+			end
+			return seq
+		end)
 
-		function df:image(seq)
-			return self.tags[0x7fe00010]
+		function df:tag(seq, ge)
+			if not istab(seq) then
+				return df:tag(self:tags(), seq)
+			end
+			return seq[ge]
 		end
 
 		function df:tagdef(ge) --name, vr, vm
-			local g, e = shr(ge, 16), band(ge, 0xffff)
+			local g, e = ge_arg(ge)
 			local t = dict[g] and dict[g][e]
+			if not t then return end
 			return t[3], t[1], t[2]
+		end
+
+		function df:image(seq)
+			return self:tag(0x7fe00010)
 		end
 
 		local function dump(item, level, i)
@@ -680,7 +721,7 @@ function M.open(file, opt)
 						s = pp.format(v)
 					end
 				end
-				local g, e = shr(ge, 16), band(ge, 0xffff)
+				local g, e = ge_arg(ge)
 				local ds = dict[g] and dict[g][e] and dict[g][e][3] or ''
 				local ds = lpad(ds, #ds + 6 - #indent)
 				local ds = rpad(ds, 40 - #indent)
@@ -693,7 +734,7 @@ function M.open(file, opt)
 			end
 		end
 		function df:dump()
-			dump(seq, 0)
+			dump(self:tags(), 0)
 		end
 
 		return df
@@ -719,18 +760,6 @@ if not ... then
 
 	df:close()
 
-end
-
-function M.ge_arg(ge)
-	return shr(ge, 16), band(ge, 0xffff)
-end
-
-function M.ge(g, e)
-	return g * 0x10000 + e
-end
-
-function M.ge_format(g, e)
-	return _('(%04x,%04x)', g, e)
 end
 
 return M
