@@ -9,22 +9,26 @@ The server-side stack is written entirely in Lua and contains:
 
  * a coroutine-based scheduler for epoll and IOCP multiplexing.
  * a programmable web-server-as-a-library.
- * an async DNS resolver.
- * a fully-featured http client.
+ * a fully-featured http client and async DNS resolver.
+ * OS threads with synchronized queues.
+ * async process execution with pipes and shared memory.
+ * the fastest libraries for hashing, encryption, compression, image codecs,
+   image resizing, JSON and XML codecs, CSV parsing and XLS generation.
  * async connectors for MySQL and Tarantool.
- * OS threads APIs, low-level and high-level.
- * ...see full list of modules below.
+ * a powerful SQL preprocessor with conditionals and macros.
+ * a database schema DSL with automatic schema synchronization.
+ * ...and more, see full list of modules below.
 
 The client-side stack is written from scratch in JavaScript and contains:
 
-* a virtual editable tree-grid widget, snappy a 100K records.
+* a virtual editable tree-grid widget that can handle 100,000 records at 60fps.
 * a collection of data-bound widgets for data entry, navigation and reporting.
-* layouting widgets for split-pane layouts.
+* layouting widgets for split-pane layouts common in data-dense business applications.
 * a mechanism for web components better than the native one.
 
 # Status
 
-Follow the [releases](https://github.com/allegory-software/allegory-sdk/releases)
+Follow the [releases](https://github.com/allegory-software/allegory-sdk/tags)
 to see what's new and the [dev branch](https://github.com/allegory-software/allegory-sdk/commits/dev)
 to see what's cooking for the next release.<br>
 Look at the [issues](https://github.com/allegory-software/allegory-sdk/issues)
@@ -197,7 +201,7 @@ A: We actually used OpenResty in the past, nothing wrong with it. It's
 probably even faster. It definitely has more features. Nginx is however quite
 large, not nearly as hackable as our pure-Lua server, it wants to control
 the main loop and manage threads all by itself, and its configuration
-directives are inevitably byzantine and undebuggable by trying to do
+directives are inescapably byzantine and undebuggable by trying to do
 declaratively what is sometimes better done procedurally.
 
 ------------------------------------------------------------------------------
