@@ -11,18 +11,26 @@ FACTS
 		* tasks wait for child tasks to finish before they are freed.
 		* events bubble up to parent tasks.
 		* terminals are piped to their parent task.
-	* errors raised with ta:error() as well as any errors in the action handler
+	* errors raised with add_error() as well as any errors in the action handler
 	  are captured and re-raised if the task runs in foreground.
 
 TERMINALS
-	tasks.virtual_terminal   (vt, opt...) -> vt
+	tasks.null_terminal      (nt, opt...) -> nt
 	tasks.recording_terminal (rt, opt...) -> rt
 	tasks.cmdline_terminal   (ct, opt...) -> ct
 	tasks.streaming_terminal (st, opt...) -> st
 	st.out_bytes(s)
 	tasks.streaming_terminal_reader(term) -> read(buf, sz)
-	vt:pipe(vt, [on])
-	rt:playback(vt)
+	*t:add_error(event, err)
+	*t:notify_kind(kind, fmt, ...)
+	*t:notify(fmt, ...)
+	*t:notify_error(fmt, ...)
+	*t:notify_warn(fmt, ...)
+	*t:out_stdout(s)
+	*t:out_stderr(s)
+	*t:set_retval(v)
+	*t:pipe(*t, [on])
+	rt:playback(*t)
 	rt:stdout()
 	rt:stderr()
 	rt:stdouterr()
@@ -34,7 +42,7 @@ API
 		opt.action = fn(ta)       action to run
 		opt.parent_task           child of `parent_task`
 		opt.bg                    run in background.
-		opt.allow_fail            do not re-raise the errors raised with ta:error().
+		opt.allow_fail            do not re-raise the errors raised with add_error().
 		opt.free_after            free after N seconds (10). false = 1/0.
 		opt.name                  task name (for listing and for debugging).
 		opt.stdin                 stdin (for exec() tasks)
@@ -57,34 +65,6 @@ STATE
 	^setstatus(ta, status)
 	^add_task(parent_ta, child_ta)
 	^remove_task(parent_ta, child_ta)
-
-LOGGING
-	ta:log(severity, event, fmt, ...)
-
-ERRORS
-	ta:error(event, err)
-	ta.errors -> {{task=, event=, error=},...}
-	^error(ta, event, error)
-
-NOTIFICATIONS
-	ta.notifications -> {{task=, kind=, message=},...}
-	ta:notify_kind(kind, fmt, ...)
-	ta:notify       (fmt, ...)
-	ta:notify_warn  (fmt, ...)
-	ta:notify_error (fmt, ...)
-	^notify(ta, kind, message)
-
-STDOUT/STDERR
-	ta.stdout_chunks -> {s1,...}
-	ta.stderr_chunks -> {s1,...}
-	ta.stdouterr_chunks -> {s1,...}
-	ta:out_stdout(s)
-	ta:out_stderr(s)
-	ta:stdout() -> s
-	ta:stderr() -> s
-	ta:stdouterr() -> s
-	^out_stdout(ta, s)
-	^out_stderr(ta, s)
 
 TERMINALS
 	M.terminal(opt) -> te      create a terminal that can watch one or more tasks.
@@ -134,60 +114,72 @@ local M = {}
 
 --terminals ------------------------------------------------------------------
 
---virtual terminal: fires events for input. can pipe input to other terminals.
+--null terminal: fires events for input. can pipe input to other terminals.
 --publishes: pipe(term, [on]).
 
-local vterm = glue.object(nil, nil, events)
-M.virtual_terminal = vterm
-vterm.subclass = glue.object
-vterm.override = glue.override
-vterm.before = glue.before
-vterm.after = glue.after
+local nterm = glue.object(nil, nil, events)
+M.null_terminal = nterm
+nterm.subclass = glue.object
+nterm.override = glue.override
+nterm.before = glue.before
+nterm.after = glue.after
 
-function vterm:__call(opt, ...)
+function nterm:__call(opt, ...)
 	local self = glue.object(self, opt, ...)
 	self:init()
 	return self
 end
 
-vterm.init = glue.noop
+nterm.init = glue.noop
 
-function vterm:log(severity, event, ...)
+function nterm:log(severity, event, ...)
 	local logging = self.logging
 	if not logging then return end
 	logging.log(severity, 'term', event, ...)
 end
 
-function vterm:out(...)
+function nterm:out(...)
 	self:fire('out', ...)
 end
 
-function vterm:add_error(event, err)
+function nterm:add_error(event, err)
 	self:log('ERROR', event, '%s', err)
 	self:out('error', event, err)
 end
 
-function vterm:out_notify(kind, s)
+function nterm:out_notify(kind, s)
 	self:out('notify', kind, s)
 end
-function vterm:notify_kind (kind, ...) self:write_notify( kind  , _(...)) end
-function vterm:notify            (...) self:write_notify('info' , _(...)) end
-function vterm:notify_error      (...) self:write_notify('error', _(...)) end
-function vterm:notify_warn       (...) self:write_notify('warn' , _(...)) end
+function nterm:notify_kind (kind, ...) self:out_notify( kind  , _(...)) end
+function nterm:notify            (...) self:out_notify('info' , _(...)) end
+function nterm:notify_error      (...) self:out_notify('error', _(...)) end
+function nterm:notify_warn       (...) self:out_notify('warn' , _(...)) end
 
-function vterm:out_stdout(s)
+function nterm:out_stdout(s)
 	self:out('stdout', s)
 end
 
-function vterm:out_stderr(s)
+function nterm:out_stderr(s)
 	self:out('stderr', s)
 end
 
-function vterm:set_retval(v)
+function nterm:print(...)
+	local n = select('#', ...)
+	for i=1,n do
+		local v = select(i, ...)
+		self:out_stdout(tostring(v))
+		if i < n then
+			self:out_stdout'\t'
+		end
+	end
+	self:out_stdout'\n'
+end
+
+function nterm:set_retval(v)
 	self:out('retval', v)
 end
 
-function vterm:pipe(term, on) --pipe out self to term.
+function nterm:pipe(term, on) --pipe out self to term.
 	if on == false then
 		return self:off{'out', term}
 	end
@@ -199,7 +191,7 @@ end
 --recording terminal: records input and plays it back on another terminal.
 --publishes: playback(te), stdout(), stderr(), stdouterr(), errors(), notifications().
 
-local rterm = glue.object(nil, nil, vterm)
+local rterm = glue.object(nil, nil, nterm)
 M.recording_terminal = rterm
 
 function rterm:init()
@@ -216,6 +208,7 @@ function rterm:playback(term)
 	end
 end
 
+do
 local function add_some(self, maybe_add)
 	local dt = {}
 	for _,t in ipairs(self.buffer) do
@@ -243,10 +236,11 @@ function rterm:stderr        () return cat(add_some(self, add_stderr)) end
 function rterm:stdouterr     () return cat(add_some(self, add_stdouterr)) end
 function rterm:errors        () return add_some(self, add_error) end
 function rterm:notifications () return add_some(self, add_notify) end
+end
 
 --command-line terminal: formats input for command-line consumption.
 
-local cterm = glue.object(nil, nil, vterm)
+local cterm = glue.object(nil, nil, nterm)
 M.cmdline_terminal = cterm
 
 cterm:after('out', function(self, cmd, ...)
@@ -256,19 +250,22 @@ cterm:after('out', function(self, cmd, ...)
 	elseif cmd == 'stderr' then
 		local s = ...
 		io.stderr:write(s)
+		io.stderr:flush()
 	elseif cmd == 'notify' then
 		local kind, s = ...
 		io.stderr:write(_('%s: %s\n', repl(kind, 'info', 'note'):upper(), s))
+		io.stderr:flush()
 	elseif cmd == 'error' then
 		local event, err = ...
 		io.stderr:write(_('ERROR [%s]: %s\n', event, tostring(err)))
+		io.stderr:flush()
 	end
 end)
 
 --streaming output terminal: serializes input for network transmission.
 --calls: sterm.out_bytes(s)
 
-local sterm = glue.object(nil, nil, vterm)
+local sterm = glue.object(nil, nil, nterm)
 M.streaming_terminal = sterm
 
 function sterm:out_on(chan, s)
@@ -335,13 +332,16 @@ end
 --current thread's terminal --------------------------------------------------
 
 local function current_terminal(thread)
-	return threadenv[thread or currentthread()].terminal
+	local env = threadenv[thread or currentthread()]
+	return env and env.terminal
 end
 M.current_terminal = current_terminal
 
 function M.set_current_terminal(term, thread)
 	getownthreadenv(thread).terminal = term
 end
+
+M.set_current_terminal(cterm())
 
 function M.add_error    (...) current_terminal():add_error    (...) end
 function M.notify_kind  (...) current_terminal():notify_kind  (...) end
@@ -409,7 +409,7 @@ function task:init()
 
 			local ok, ret = errors.pcall(self.action, self)
 			if not ok then
-				add_error('run', ret)
+				M.add_error('run', ret)
 				self:_finish()
 			else
 				self:_finish(ret or 0)
@@ -527,69 +527,6 @@ function task:remove_task(child_task)
 	child_task.terminal:pipe(self.terminal, false)
 end
 
---logging
-
-function task:log(severity, event, ...)
-	local logging = self.logging
-	if not logging then return end
-	logging.log(severity, self.module, event, ...)
-end
-
-function task:on_error(task, event, err)
-	add(self.errors, {task = task, event = event, error = err})
-end
-function task:error(event, err)
-	assert(event and err, 'usage: task:error(event, error)')
-	self:log('ERROR', event, '%s', err)
-	self:fire_up('error', event, err)
-end
-
---notifications
-
-function task:on_notify(task, kind, message)
-	add(self.notifications, {task = task, kind = kind, message = message})
-end
-function task:notify_kind(kind, fmt, ...) --kind: error|warn|info|nil
-	self:fire_up('notify', kind, _(fmt, ...))
-end
-
-function task:notify       (...) self:notify_kind('info' , ...) end
-function task:notify_error (...) self:notify_kind('error', ...) end
-function task:notify_warn  (...) self:notify_kind('warn' , ...) end
-
---stdout & stderr
-
-function task:on_write_stdout(task, s)
-	add(self.stdout_chunks, s)
-	add(self.stdouterr_chunks, s)
-end
-function task:write_stdout(s)
-	self:fire_up('write_stdout', s)
-end
-
-function task:on_write_stderr(task, s)
-	add(self.stderr_chunks, s)
-	add(self.stdouterr_chunks, s)
-end
-function task:write_stderr(s, source_task)
-	self:fire_up('write_stderr', source_task, s)
-end
-
-function task:stdout    () return cat(self.stdout_chunks) end
-function task:stderr    () return cat(self.stderr_chunks) end
-function task:stdouterr () return cat(self.stdouterr_chunks) end
-
-function task:print(...)
-	local n = select('#', ...)
-	for i=1,n do
-		self:write_stdout(format((select(i, ...))))
-		if i < n then
-			self:write_stdout'\t'
-		end
-	end
-	self:write_stdout'\n'
-end
-
 --async process tasks with stdout/err capturing ------------------------------
 
 function M.exec(cmd, opt)
@@ -623,7 +560,7 @@ function M.exec(cmd, opt)
 				--dbg('mm', 'execin', '%s', opt.stdin)
 				local ok, err = p.stdin:write(opt.stdin)
 				if not ok then
-					self:error('stdinwr', err)
+					M.add_error('stdinwr', err)
 				end
 				assert(p.stdin:close()) --signal eof
 			end, 'exec-stdin %s', p))
@@ -635,13 +572,13 @@ function M.exec(cmd, opt)
 				while true do
 					local len, err = p.stdout:read(buf, sz)
 					if not len then
-						task:error('stdoutrd', err)
+						M.add_error('stdoutrd', err)
 						break
 					elseif len == 0 then
 						break
 					end
 					local s = ffi.string(buf, len)
-					task:write_stdout(s)
+					M.out_stdout(s)
 				end
 				assert(p.stdout:close())
 			end, 'exec-stdout %s', p))
@@ -653,13 +590,13 @@ function M.exec(cmd, opt)
 				while true do
 					local len, err = p.stderr:read(buf, sz)
 					if not len then
-						task:error('stderrrd', err)
+						M.add_error('stderrrd', err)
 						break
 					elseif len == 0 then
 						break
 					end
 					local s = ffi.string(buf, len)
-					task:write_stderr(s)
+					M.out_stderr(s)
 				end
 				assert(p.stderr:close())
 			end, 'exec-stderr %s', p))
@@ -668,7 +605,7 @@ function M.exec(cmd, opt)
 		local exit_code, err = p:wait()
 		if not exit_code then
 			if not (err == 'killed' and task.killed) then
-				task:error('procwait', err)
+				M.add_error('procwait', err)
 			end
 		end
 		while not (
@@ -693,7 +630,7 @@ function M.exec(cmd, opt)
 				end
 				s = s .. '\nENV:\n' .. cat(dt, '\n')
 			end
-			self:error('exec', s)
+			M.add_error('exec', s)
 		end
 
 		return exit_code
@@ -774,7 +711,7 @@ local function run_tasks()
 				resume(thread(function()
 					local ok, err = errors.pcall(action)
 					if not ok then
-						error('mm', 'runtask', '%s: %s', sched_name, err)
+						M.add_error('mm', 'runtask', '%s: %s', sched_name, err)
 					end
 				end, 'run-task %s', t.task_name))
 			end
@@ -793,14 +730,12 @@ if not ... then
 			bg = true,
 			autostart = false,
 		})
-		local te = tasks.terminal()
-		te:attach(ta)
 		ta:start()
-		ta:notify_warn"The times they are a-changin'"
-		ta:error("steamin'", 'Gotcha!')
-		ta:error("cookin'" , 'Gotcha!')
-		ta:error("relaxin'", 'Gotcha!')
-		ta:error("workin'" , 'Gotcha!')
+		M.notify_warn"The times they are a-changin'"
+		M.add_error("steamin'", 'Gotcha!')
+		M.add_error("cookin'" , 'Gotcha!')
+		M.add_error("relaxin'", 'Gotcha!')
+		M.add_error("workin'" , 'Gotcha!')
 	end)
 end
 
