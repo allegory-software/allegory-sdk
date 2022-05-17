@@ -78,7 +78,7 @@ events.__observers = false
 local function parse_event(s)
 	local ev, t
 	if type(s) == 'table' then -- {ev|false, ns1, ...}
-		local ev = s[1] or nil
+		ev = s[1] or nil
 		t = {}
 		for i=2,#s do t[i-1] = s[i] end
 	elseif s:find('.', 1, true) then -- `[ev].ns1.ns2`
