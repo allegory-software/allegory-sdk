@@ -72,14 +72,13 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 		end
 	end
 
+	local time = require'time'
+	self._clock = time.clock
 	if async then
 		local sock = require'sock'
 		self._sleep = sock.sleep
-		self._clock = sock.clock
 	else
-		local time = require'time'
 		self._sleep = time.sleep
-		self._clock = time.clock
 	end
 
 	local si
