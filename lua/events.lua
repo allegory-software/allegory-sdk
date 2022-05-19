@@ -5,10 +5,13 @@
 
 Events are a way to associate an action with one or more callback functions
 to be called on that action, with the distinct ability to remove one or more
-callbacks later on, based on a criteria.
+callbacks later on, based on a criteria which can include the original
+callback function object or one or more associated identities.
 
 This module is only a mixin (a plain table with methods). It must be added to
 your particular object system by copying the methods over to your base class.
+
+NOTE: if event removal is not a requirement, glue.after() might be enough.
 
 EVENT FACTS
 
