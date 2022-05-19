@@ -206,6 +206,7 @@ logargs    = logargs  or pass
 logprintargs = logprintargs or pass
 
 raise = errors.raise
+iserror = errors.is
 
 function check(errorclass, event, v, ...)
 	if v then return v end
