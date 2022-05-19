@@ -8,7 +8,7 @@ selective catching and providing a context for the failure to help with
 recovery or logging. They're most useful in network protocols.
 
 	errors.error                            base class for errors
-	errors.error:init()                     stub: called after the error is created
+	errors.error:oninit(f)                  add more error init code.
 	errors.errortype([classname], [super]) -> eclass     create/get an error class
 	eclass(...) -> e                        create an error object
 	errors.new(classname,... | e) -> e      create/wrap/pass-through an error object
@@ -35,6 +35,12 @@ So if the first arg is a table it is converted to the final error object.
 Any following table args are merged with this object. Any following args
 after that are passed to string.format() and the result is placed in
 err_obj.message (if `message` was not already set). All args are optional.
+
+A note on tracebacks: with string errors, when catching an error temporarily
+to free resources and then re-raising it, the original stack trace is lost.
+Catching errors with errors.pcall() instead of standard pcall() adds a
+traceback to all plain string errors. Structured errors are usually raised
+inside protected functions so they don't get a traceback by default.
 
 ]=]
 
@@ -68,7 +74,18 @@ local function errortype(classname, super, default_error_message)
 end
 
 error = errortype'error'
-error.init = function() end
+
+function error:oninit(f)
+	if not self.init then
+		self.init = f
+	else
+		local init = self.init
+		self.init = function(self)
+			init(self)
+			f(self)
+		end
+	end
+end
 
 local function iserror(e)
 	return type(e) == 'table' and e.iserror
@@ -125,7 +142,7 @@ function error:__call(arg1, ...)
 	else
 		e = object(self, {message = arg1 and string.format(arg1, ...) or nil})
 	end
-	e:init()
+	if e.init then e:init() end
 	return e
 end
 
@@ -215,14 +232,17 @@ You should distinguish between multiple types of errors:
 
 - Invalid API usage, i.e. bugs on this side, which should raise (but shouldn't
   happen in production). Use `assert()` for those.
+
 - Response validation errors, i.e. bugs on the other side which shouldn't
   raise but they put the connection in an inconsistent state so the connection
   must be closed. Use `checkp()` short of "check protocol" for those. Note that
   if your protocol is not meant to work with a hostile or unstable peer, you
   can skip the `checkp()` checks entirely because they won't guard against
   anything and just bloat the code.
+
 - Request or response content validation errors, which can be user-corrected
   so mustn't raise and mustn't close the connection. Use `check()` for those.
+
 - I/O errors, i.e. network failures which can be temporary and thus make the
   request retriable (in a new connection, this one must be closed), so they
   must be distinguishable from other types of errors. Use `check_io()` for
