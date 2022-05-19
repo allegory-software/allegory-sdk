@@ -2084,6 +2084,7 @@ function glue.dynarray_pump(dynarr)
 	dynarr = dynarr or glue.dynarray()
 	local i = 0
 	local function write(src, len)
+		if src == nil then return end --eof
 		local dst = dynarr(i + len)
 		ffi.copy(dst + i, src, len or #src)
 		i = i + len
