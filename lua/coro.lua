@@ -92,6 +92,10 @@ coro.resume(thread, ...) -> true, ... | false, err
 
 	Behaves like standard coroutine.resume().
 
+coro.presume(thread, ok, ...) -> true, ... | false, err
+
+	Like resume() but can resume the target thread by raising an error in it.
+
 coro.running() -> thread, is_main
 
 	Behaves like standard coroutine.running() (from Lua 5.2 / LuaJIT 2).
@@ -252,11 +256,15 @@ local function remove_caller(thread, ...)
 	callers[thread] = nil
 	return ...
 end
-function coro.resume(thread, ...)
+local function presume(thread, ok, ...)
 	assert(thread ~= current, 'trying to resume the running thread')
 	assert(thread ~= main, 'trying to resume the main thread')
 	callers[thread] = current
-	return remove_caller(thread, ptransfer(thread, true, ...))
+	return remove_caller(thread, ptransfer(thread, ok, ...))
+end
+coro.presume = presume
+function coro.resume(thread, ...)
+	return presume(thread, true, ...)
 end
 
 function coro.yield(...)
