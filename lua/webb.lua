@@ -234,7 +234,6 @@ IMAGE PROCESSING
 HTTP SERVER INTEGRATION
 
 	webb.respond(req)                       webb.server response handler
-	webb.request_finish(req)
 	webb.server([opt]) -> server
 
 STANDALONE OPERATION
@@ -742,7 +741,6 @@ function upload(file)
 			assert(write_protected(buf, sz))
 		end
 		cx().req:read_body(write)
-		write()
 		return file
 	end)
 end
@@ -1811,13 +1809,8 @@ function webb.respond(req)
 	main()
 end
 
-function webb.request_finish(req)
-	local f = cx().request_finish
-	if f then f() end
-end
-
 function onrequestfinish(f)
-	glue.after(cx(), 'request_finish', f)
+	cx().req:onfinish(f)
 end
 
 --standalone operation -------------------------------------------------------
@@ -1926,7 +1919,6 @@ function webb.server(opt)
 			},
 		},
 		respond = webb.respond,
-		request_finish = webb.request_finish,
 	}, opt))
 end
 
