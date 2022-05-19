@@ -1,58 +1,45 @@
 --[[
 
 	ZLIB binding, providing:
-	* DEFLATE compression & decompression
-	* GZIP file compression & decompression
-	* CRC32 & ADLER32 checksums.
+		* DEFLATE compression & decompression
+		* GZIP file compression & decompression
+		* CRC32 & ADLER32 checksums.
 	Written by Cosmin Apreutesei. Public Domain.
 
 DEFLATE ----------------------------------------------------------------------
 
-zlib.deflate(read, write[, bufsize][, format][, level][, windowBits][, memLevel][, strategy])
+zlib.deflate(read, write, [bufsize], [format], [level], [windowBits], [memLevel], [strategy])
+zlib.inflate(read, write, [bufsize], [format], [windowBits])
 
-	* `read` is a reader function `read() -> s[,size] | cdata,size | nil`,
+	Compress/decompress a data stream using the DEFLATE algorithm.
+
+	* `read` is a function `read() -> s[,size] | cdata,size | nil (=eof)`,
 	  but it can also be a string or a table of strings.
-	* `write` is a writer function `write(cdata, size)`, but it can also be an
+
+	* `write` is a function `write(cdata, size)`, but it can also be an
 	  empty string (in which case a string with the output is returned) or
-	  an output table (in which case a table with output chunks is returned).
-	* `bufsize` determines the frequency and size of the writes
+	  an output table (in which case a table of output chunks is returned).
+
+	* both the reader and the writer are allowed to yield and raise errors.
+
+	* all errors be it from zlib or from callbacks are captured and `nil,err`
+	  is returned if that happens (otherwise true is returned).
+
+	* an abandoned thread suspended in read/write callbacks is gc'ed leak-free
+	  but gc pressure is not proportional to consumed memory (88 bytes),
+	  so abort the operation by raising an error in the callbacks instead.
+
+	* `bufsize` affects the frequency and size of the writes (defaults to 64K).
+
 	* `format` can be:
-	  * 'zlib' - wrap the deflate stream with a zlib header and trailer (default)
-	  * 'gzip' - wrap the deflate stream with a gzip header and trailer
-	  * 'deflate' - write a raw deflate stream with no header or trailer
-	* `level` controls the compression level (0-9 from none to best)
+	  * 'zlib' - wrap the deflate stream with a zlib header and trailer (default).
+	  * 'gzip' - wrap the deflate stream with a gzip header and trailer.
+	  * 'deflate' - write a raw deflate stream with no header or trailer.
+
+	* `level` controls the compression level (0-9 from none to best).
+
 	* for `windowBits`, `memLevel` and `strategy` refer to the zlib manual.
 	  * note that `windowBits` is always in the positive range 8..15.
-
-	Compress a data stream using the DEFLATE algorithm. The data is read from the
-	`read` function which should return the next string or `cdata, size` pair
-	every time it is called, until EOF when it should return `nil` or nothing.
-	The compressed data is written in chunks using the `write` function.
-
-	For convenience, `read` can also be a string or a list of strings, and `write`
-	can be a list to which to add the output chunks, or the empty string, in which
-	case the output is returned as a string.
-
-zlib.inflate(read, write[, bufsize][, format][, windowBits])
-
-	Uncompress a data stream that was compressed using the DEFLATE algorithm.
-	The arguments have the same meaning as for `deflate`.
-
-zlib.compress(s, [size][, level]) -> s
-zlib.compress(cdata, size[, level]) -> s
-zlib.compress_tobuffer(s, [size], [level], out_buffer, out_size) -> bytes_written
-zlib.compress_tobuffer(data, size, [level], out_buffer, out_size) -> bytes_written
-
-	Compress a string or cdata using the DEFLATE algorithm.
-
-zlib.uncompress(s, [size], out_size) -> s
-zlib.uncompress(cdata, size, out_size) -> s
-zlib.uncompress_tobuffer(s, [size], out_buffer, out_size) -> bytes_written
-zlib.uncompress_tobuffer(cdata, size, out_buffer, out_size) -> bytes_written
-
-	Uncompress a string or cdata using the DEFLATE algorithm. The size of the
-	uncompressed data must have been saved previously by the application and
-	transmitted to the decompressor by some mechanism outside the scope of this library.
 
 GZIP files -------------------------------------------------------------------
 
@@ -184,7 +171,7 @@ local function init_deflate(format, level, method, windowBits, memLevel, strateg
 	local strm = ffi.new'z_stream'
 	checkz(C.deflateInit2_(strm, level, method, windowBits, memLevel, strategy, version(), ffi.sizeof(strm)))
 	ffi.gc(strm, C.deflateEnd)
-	return strm, deflate
+	return strm, deflate, C.deflateEnd
 end
 
 local function init_inflate(format, windowBits)
@@ -193,14 +180,14 @@ local function init_inflate(format, windowBits)
 	local strm = ffi.new'z_stream'
 	checkz(C.inflateInit2_(strm, windowBits, version(), ffi.sizeof(strm)))
 	ffi.gc(strm, C.inflateEnd)
-	return strm, inflate
+	return strm, inflate, C.inflateEnd
 end
 
 local function inflate_deflate(init)
 	return function(read, write, bufsize, ...)
 		bufsize = bufsize or 64 * 1024
 
-		local strm, flate = init(...)
+		local strm, flate, flate_end = init(...)
 
 		local buf = ffi.new('uint8_t[?]', bufsize)
 		strm.next_out, strm.avail_out = buf, bufsize
@@ -239,36 +226,42 @@ local function inflate_deflate(init)
 			strm.next_out, strm.avail_out = buf, bufsize
 		end
 
-		local data, size --data must be anchored as an upvalue!
-		while true do
-			if strm.avail_in == 0 then --input buffer empty: refill
-				::again::
-				data, size = read()
-				if not data then --eof: finish up
-					local ret
-					repeat
+		local ok, err = pcall(function()
+			local data, size --data must be anchored as an upvalue!
+			while true do
+				if strm.avail_in == 0 then --input buffer empty: refill
+					::again::
+					data, size = read()
+					if not data then --eof: finish up
+						local ret
+						repeat
+							flush()
+						until not flate(strm, C.Z_FINISH)
 						flush()
-					until not flate(strm, C.Z_FINISH)
+						break
+					end
+					size = size or #data
+					if size == 0 then --avoid buffer error
+						goto again
+					end
+					strm.next_in, strm.avail_in = data, size
+				end
+				flush()
+				if not flate(strm, C.Z_NO_FLUSH) then
 					flush()
 					break
 				end
-				size = size or #data
-				if size == 0 then --avoid buffer error
-					goto again
-				end
-				strm.next_in, strm.avail_in = data, size
 			end
-			flush()
-			if not flate(strm, C.Z_NO_FLUSH) then
-				flush()
-				break
-			end
+		end)
+		flate_end(ffi.gc(strm, nil))
+		if not ok then
+			return nil, err
 		end
 
 		if asstring then
 			return table.concat(t)
 		else
-			return t
+			return t or true
 		end
 	end
 end
@@ -277,35 +270,6 @@ end
 local inflate = inflate_deflate(init_inflate)
 --deflate(read, write[, bufsize][, format][, level][, windowBits][, memLevel][, strategy])
 local deflate = inflate_deflate(init_deflate)
-
---utility functions
-
-local function compress_tobuffer(data, size, level, buf, sz)
-	level = level or -1
-	sz = ffi.new('unsigned long[1]', sz)
-	checkz(C.compress2(buf, sz, data, size, level))
-	return sz[0]
-end
-
-local function compress(data, size, level)
-	size = size or #data
-	local sz = C.compressBound(size)
-	local buf = ffi.new('uint8_t[?]', sz)
-	sz = compress_tobuffer(data, size, level, buf, sz)
-	return ffi.string(buf, sz)
-end
-
-local function uncompress_tobuffer(data, size, buf, sz)
-	sz = ffi.new('unsigned long[1]', sz)
-	checkz(C.uncompress(buf, sz, data, size))
-	return sz[0]
-end
-
-local function uncompress(data, size, sz)
-	local buf = ffi.new('uint8_t[?]', sz)
-	sz = uncompress_tobuffer(data, size or #data, buf, sz)
-	return ffi.string(buf, sz)
-end
 
 --gzip file access functions
 
@@ -410,10 +374,6 @@ return {
 	version = version,
 	inflate = inflate,
 	deflate = deflate,
-	uncompress_tobuffer = uncompress_tobuffer,
-	uncompress = uncompress,
-	compress_tobuffer = compress_tobuffer,
-	compress = compress,
 	open = gzopen,
 	adler32 = adler32,
 	crc32 = crc32,
