@@ -22,7 +22,7 @@ http:new(opt) -> http
 
 Client-side API --------------------------------------------------------------
 
-http:build_request(opt) -> req               | Make a HTTP request object.
+http:build_request(opt) -> creq              | Make a HTTP request object.
 
 	host                    vhost name
 	max_line_size           change the HTTP line size limit
@@ -30,21 +30,30 @@ http:build_request(opt) -> req               | Make a HTTP request object.
 	content, content_size   body: string, read function or buffer
 	compress                false: don't compress body
 
-http:send_request(req) -> true | nil,err     | Send a request.
-http:read_response(req) -> res | nil,err     | Receive server's response.
+http:send_request(creq) -> true | nil,err    | Send a request.
+http:read_response(creq) -> cres | nil,err   | Receive server's response.
 
 Server-side API --------------------------------------------------------------
 
-http:read_request(receive_content) -> req    | Receive a client's request.
-http:build_response(req, opt) -> res         | Make a HTTP response object.
+http:read_request() -> sreq                  | Receive a client's request.
 
-		close                   close the connection (and tell client to)
-		content, content_size   body: string, read function or cdata buffer
-		compress                false: don't compress body
-		allowed_methods         allowed methods: {method->true} (optional)
-		content_type            content type (optional)
+	sreq:read_body'string' -> s               | Read request body to a string.
+	sreq:read_body'buffer' -> buf, sz         | Read request body to a buffer.
+	sreq:read_body'reader' -> read            | Read request body pull-style.
+	sreq:read_body(write) -> true             | Read request body push-style.
 
-http:send_response(res) -> true | nil,err    | Send a response.
+	NOTE: read()->buf,sz returns nil on eof.
+	NOTE: write() is called one last time without args on eof.
+
+http:build_response(sreq, opt) -> sres       | Make a HTTP response object.
+
+	close                   close the connection (and tell client to)
+	content, content_size   body: string, read function or cdata buffer
+	compress                false: don't compress body
+	allowed_methods         allowed methods: {method->true} (optional)
+	content_type            content type (optional)
+
+http:send_response(sres) -> true | nil,err   | Send a response.
 
 ]=]
 
@@ -321,10 +330,12 @@ function http:send_chunked(read_content)
 	self:dp('>>', '%7d bytes in %d chunks', total, chunk_num)
 end
 
-function http:zlib_decoder(format, write)
+function http:gzip_decoder(format, write)
 	assert(self.zlib, 'zlib not loaded')
+	--NOTE: gzip threads are abandoned in suspended state on errors.
+	--That doesn't leak them but don't expect them to finish!
 	local decode = self.cowrap(function(yield)
-		self.zlib.inflate(yield, write, nil, format)
+		assert(self.zlib.inflate(yield, write, nil, format))
 	end, 'http-gzip-decode %s', self.tcp)
 	decode()
 	return decode
@@ -337,7 +348,7 @@ function http:chained_decoder(write, encodings)
 			if encoding == 'identity' or encoding == 'chunked' then
 				--identity does nothing, chunked would already be set.
 			elseif encoding == 'gzip' or encoding == 'deflate' then
-				write = self:zlib_decoder(encoding, write)
+				write = self:gzip_decoder(encoding, write)
 			else
 				error'unsupported encoding'
 			end
@@ -346,7 +357,7 @@ function http:chained_decoder(write, encodings)
 	return write
 end
 
-function http:zlib_encoder(format, content, content_size)
+function http:gzip_encoder(format, content, content_size)
 	assert(self.zlib, 'zlib not loaded')
 	if    type(content) == 'string'
 		or type(content) == 'function'
@@ -354,10 +365,17 @@ function http:zlib_encoder(format, content, content_size)
 	then
 		if type(content) == 'cdata' then
 			assert(content_size)
-			content = glue.buffer_reader(content, content_size)
+			local buf, sz, was_read = content, content_size
+			content = function()
+				if was_read then return end
+				was_read = true
+				return buf, sz
+			end
 		end
+		--NOTE: gzip threads are abandoned in suspended state on errors.
+		--That doesn't leak them but don't expect them to finish!
 		return (self.cowrap(function(yield)
-			self.zlib.deflate(content, yield, nil, format)
+			assert(self.zlib.deflate(content, yield, nil, format))
 		end, 'http-gzip-encode %s', self.tcp))
 	else
 		assert(false, type(content))
@@ -373,7 +391,7 @@ function http:send_body(content, content_size, transfer_encoding, close)
 			local total = 0
 			while true do
 				local chunk, len = content()
-				if not chunk then break end
+				if not chunk then break end --eof
 				local len = len or #chunk
 				total = total + len
 				self:dp('>>', '%7d bytes total', len)
@@ -394,7 +412,7 @@ function http:send_body(content, content_size, transfer_encoding, close)
 		--the client then we wait for it to close the connection in response
 		--to our FIN, and only after that we can close our end.
 		--if we'd just call close() that would send a RST to the client which
-		--would cut the client's pending input stream (it's how TCP works).
+		--would cut short the client's pending input stream (it's how TCP works).
 		--TODO: limit how much traffic we absorb for this.
 		self.tcp:shutdown('w', self.send_expires)
 		self:read_until_closed(glue.noop)
@@ -420,6 +438,7 @@ function http:read_body_to_writer(headers, write, from_server, close, state)
 	if close and from_server then
 		self:close(self.read_expires)
 	end
+	write() --signal eof to the gzip decoder, file writer, etc.
 	if state then state.body_was_read = true end
 end
 
@@ -493,6 +512,7 @@ function http:build_request(opt, cookies)
 		end
 	end
 	req.receive_content = write
+	req.headers_received = opt.headers_received
 
 	return req
 end
@@ -565,7 +585,7 @@ end
 local cres = {}
 
 function http:read_response(req)
-	local res = glue.object(cres, {request = req})
+	local res = glue.object(cres, {http = self, request = req})
 	req.response = res
 	res.rawheaders = {}
 
@@ -581,6 +601,10 @@ function http:read_response(req)
 
 	self:read_headers(res.rawheaders)
 	res.headers = self:parsed_headers(res.rawheaders)
+
+	if req.headers_received then
+		req.headers_received(res)
+	end
 
 	res.close = req.close
 		or (res.headers['connection'] and res.headers['connection'].close)
@@ -681,7 +705,7 @@ end
 function http:encode_content(content, content_size, content_encoding)
 	if content_encoding == 'gzip' or content_encoding == 'deflate' then
 		content, content_size =
-			self:zlib_encoder(content_encoding, content, content_size)
+			self:gzip_encoder(content_encoding, content, content_size)
 	else
 		assert(not content_encoding, 'invalid content-encoding')
 	end
