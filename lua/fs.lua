@@ -1424,7 +1424,7 @@ function fs.save(file, s, sz)
 			local s, sz
 			ok, s, sz = xpcall(read, debug.traceback)
 			if not ok then err = s; break end
-			if s == nil or s == '' then break end
+			if s == nil then break end --eof
 			if s == fs.abort then ok = false; break end
 			if type(s) ~= 'cdata' then
 				s = tostring(s)
