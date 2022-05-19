@@ -36,9 +36,9 @@
 libjpeg.open(opt | read) -> jpg
 
 	Open a JPEG image and read its header. The supplied read function can yield
-	and it can signal I/O errors by returning `nil, err`. It will only be asked
-	to read a positive number of bytes and it can return less bytes than asked,
-	including zero which signals EOF.
+	and it can signal I/O errors by returning `nil, err` or by raising an error.
+	It will only be asked to read a positive number of bytes and it can return
+	less bytes than asked, including zero which signals EOF.
 
 	Unknown JPEG formats are opened but the `format` field is missing.
 
