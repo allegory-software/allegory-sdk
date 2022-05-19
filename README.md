@@ -1,11 +1,11 @@
 
-# The Allegory SDK
+# :candy: The Allegory SDK
 
 The **Allegory SDK** is a self-contained cross-platform low-code programming
 environment for developing web-based **database-driven business apps** in
 **LuaJIT** and **JavaScript**.
 
-The server-side stack is written entirely in Lua and contains:
+The **server-side stack** is written entirely in Lua and contains:
 
  * a coroutine-based scheduler for epoll and IOCP multiplexing.
  * a programmable web-server-as-a-library.
@@ -19,7 +19,7 @@ The server-side stack is written entirely in Lua and contains:
  * a database schema DSL with automatic schema synchronization.
  * ...and more, see full list of modules below.
 
-The client-side stack is written from scratch in JavaScript and contains:
+The **client-side stack** is written from scratch in JavaScript and contains:
 
 * a virtual editable tree-grid widget that can handle 100,000 records at 60fps.
 * a collection of data-bound widgets for data entry, navigation and reporting.
