@@ -267,10 +267,9 @@ local function debug_id(v)
 	if not ids then
 		ids = setmetatable({
 			live_count = 0,
-			live = {} --setmetatable({}, mode_k)
-			-- ^^ TODO: put this back after making sure all objects are freed
-			-- explicitly and not left dangling (mostly to ensure that thread
-			-- finish events get triggered).
+			live = setmetatable({}, mode_k)
+			-- ^^ this table is weak because http gzip threads can be abandoned
+			-- in suspended state so live(nil) never gets called on them.
 		}, mode_k)
 		ids_db[ty] = ids
 	end
