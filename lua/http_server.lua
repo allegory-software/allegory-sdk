@@ -76,8 +76,6 @@ function server:time(ts)
 	return glue.time(ts)
 end
 
-server.request_finish = glue.noop --request finalizer stub
-
 function server:log(tcp, severity, module, event, fmt, ...)
 	local logging = self.logging
 	if not logging or logging.filter[severity] then return end
@@ -102,6 +100,10 @@ function server:new(t)
 		self.logging = require'logging'
 	end
 
+	local function req_onfinish(req, f)
+		glue.after(req, 'finish', f)
+	end
+
 	local function handler(stcp, ctcp, listen_opt)
 
 		local http = self.http:new({
@@ -122,14 +124,14 @@ function server:new(t)
 			local function send_response(opt)
 				sending_response = true
 				local res = http:build_response(req, opt, self:time())
-				local ok, err = http:send_response(res)
-				if not ok then error(err) end
+				assert(http:send_response(res))
 				finished = true
 			end
 
+			--NOTE: both req:respond() and out() raise on I/O errors breaking
+			--user's code, so use req:onfinish() to free resources.
 			function req.respond(req, opt)
 				if opt.want_out_function then
-					--NOTE: out() raises on I/O errors breaking user's code.
 					out = self.cowrap(function(yield)
 						opt.content = yield
 						send_response(opt)
@@ -143,8 +145,12 @@ function server:new(t)
 
 			req.thread = self.currentthread()
 
+			req.onfinish = req_onfinish
+
 			local ok, err = errors.pcall(self.respond, req)
-			self.request_finish(req)
+			if req.finish then
+				req:finish()
+			end
 
 			if not ok then
 				if not sending_response then
@@ -159,7 +165,7 @@ function server:new(t)
 				end
 			elseif not finished then --eof not signaled.
 				if out then
-					out() --eof
+					out() --signal eof (to release gzip object quickly).
 				else
 					send_response{}
 				end
