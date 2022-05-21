@@ -24,7 +24,6 @@ zlib.inflate(read, write, [bufsize], [format], [windowBits])
 	* errors raised in callbacks pass-through uncaught (but don't leak).
 	* `nil,err` is returned for zlib errors and callback aborts.
 	* an abandoned thread suspended in read/write callbacks is gc'ed leak-free.
-	  * gc pressure is not proportional to consumed memory (88 bytes) though.
 
 	* `bufsize` affects the frequency and size of the writes (defaults to 64K).
 	* `format` can be 'zlib' (default), 'gzip' or 'raw'.
@@ -160,8 +159,8 @@ local function inflate_deflate(deflate, read, write, bufsize, format, windowBits
 		ok, err = write(buf, bufsize - strm.avail_out)
 		if ok == false then goto finish end --abort
 		strm.next_out, strm.avail_out = buf, bufsize
-		if ret == C.Z_STREAM_END then goto finish end
-		if strm.avail_in > 0 then goto flate end --more data to compress.
+		if ret == C.Z_STREAM_END then ok = true; goto finish end
+		if strm.avail_in > 0 then goto flate end --more data to flate.
 		goto read
 	::finish::
 		flate_end(ffi.gc(strm, nil))
