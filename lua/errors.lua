@@ -162,6 +162,9 @@ local function raise(level, ...)
 	end
 end
 
+local function fix_traceback(s)
+	return s:gsub('(.-:%d+: )([^\n])', '%1\n%2')
+end
 local function pass(classes, ok, ...)
 	if ok then return true, ... end
 	local e = ...
@@ -173,10 +176,10 @@ end
 local function onerror(e)
 	if iserror(e) then
 		if e.addtraceback then
-			e.traceback = debug.traceback(e.message, 2)
+			e.traceback = fix_traceback(debug.traceback(e.message, 2))
 		end
 	else
-		return debug.traceback(tostring(e), 2)
+		return fix_traceback(debug.traceback(tostring(e), 2))
 	end
 	return e
 end
