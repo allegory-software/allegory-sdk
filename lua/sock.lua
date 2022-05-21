@@ -55,7 +55,8 @@ SCHEDULING
 	sock.yield(...) -> ...                     safe yield (see [coro])
 	sock.suspend(...) -> ...                   suspend thread
 	sock.cowrap(f) -> wrapper                  see coro.safewrap()
-	sock.currentthread() -> co                 see coro.running()
+	sock.currentthread() -> co, is_main        current coroutine and whether it's the main one
+	sock.threadstatus(co) -> s                 coroutine.status()
 	sock.transfer(co, ...) -> ...              see coro.transfer()
 	sock.threadenv[co] -> t                    get a thread's own or inherited environment
 	sock.getthreadenv([co]) -> t               get (current) thread's own enviornment
@@ -2490,6 +2491,7 @@ function M.resume(thread, ...)
 end
 
 M.currentthread = currentthread
+M.threadstatus = coro.status
 M.yield = coro.yield
 
 local function rets_tostring(rets)
