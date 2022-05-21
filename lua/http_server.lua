@@ -54,6 +54,7 @@ function server:bind_libs(libs)
 			self.thread        = sock.thread
 			self.resume        = sock.resume
 			self.cowrap        = sock.cowrap
+			self.threadstatus  = sock.threadstatus
 			self.start         = sock.start
 			self.sleep         = sock.sleep
 			self.currentthread = sock.currentthread
@@ -112,6 +113,7 @@ function server:new(t)
 			tcp = ctcp,
 			cowrap = self.cowrap,
 			currentthread = self.currentthread,
+			threadstatus = self.threadstatus,
 			listen_options = listen_opt,
 		})
 
@@ -119,20 +121,20 @@ function server:new(t)
 
 			local req = assert(http:read_request())
 
-			local finished, out, sending_response
+			local out, out_thread, send_started, send_finished
 
 			local function send_response(opt)
-				sending_response = true
+				send_started = true
 				local res = http:build_response(req, opt, self:time())
 				assert(http:send_response(res))
-				finished = true
+				send_finished = true
 			end
 
 			--NOTE: both req:respond() and out() raise on I/O errors breaking
 			--user's code, so use req:onfinish() to free resources.
 			function req.respond(req, opt)
 				if opt.want_out_function then
-					out = self.cowrap(function(yield)
+					out, out_thread = self.cowrap(function(yield)
 						opt.content = yield
 						send_response(opt)
 					end, 'http-server-out %s %s', ctcp, req.uri)
@@ -153,20 +155,28 @@ function server:new(t)
 			end
 
 			if not ok then
-				if not sending_response then
+				if not send_started then
 					if errors.is(err, 'http_response') then
 						req:respond(err)
 					else
 						self:check(ctcp, false, 'respond', '%s', err)
 						req:respond{status = 500}
 					end
-				else
+				else --status line already sent, too late to send HTTP 500.
+					if out_thread and self.threadstatus(out_thread) ~= 'dead' then
+						--Signal eof so that the out() thread finishes. We could
+						--abandon the thread and it will be collected without leaks
+						--but we want it to be removed from logging.live immediately.
+						--NOTE: we're checking that out_thread is really suspended
+						--because we also get here on I/O errors which kill it.
+						out()
+					end
 					error(err)
 				end
-			elseif not finished then --eof not signaled.
-				if out then
-					out() --signal eof (to release gzip object quickly).
-				else
+			elseif not send_finished then
+				if out then --out() thread waiting for eof
+					out() --signal eof
+				else --respond() not called
 					send_response{}
 				end
 			end
