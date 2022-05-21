@@ -969,7 +969,7 @@ function outfile_function(path)
 				f:close()
 				break
 			else
-				local ok, err = pcall(out, filebuf, len)
+				local ok, err = xpcall(out, debug.traceback, filebuf, len)
 				if not ok then
 					f:close()
 					error(err)

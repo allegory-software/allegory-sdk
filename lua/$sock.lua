@@ -19,6 +19,7 @@ cofinish       = sock.cofinish
 cowrap         = sock.cowrap
 yield          = sock.yield
 currentthread  = sock.currentthread
+threadstatus   = sock.threadstatus
 threadenv      = sock.threadenv
 getthreadenv   = sock.getthreadenv
 getownthreadenv= sock.getownthreadenv
