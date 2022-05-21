@@ -372,11 +372,23 @@ function http:gzip_encoder(format, content, content_size)
 				return buf, sz
 			end
 		end
-		--NOTE: gzip threads are abandoned in suspended state on errors.
-		--That doesn't leak them but don't expect them to finish!
-		return (self.cowrap(function(yield)
-			assert(self.zlib.deflate(content, yield, nil, format))
-		end, 'http-gzip-encode %s', self.tcp))
+		--NOTE: on error, the gzip thread is left in suspended state (either
+		--not yet started or waiting on write), and we could just abandon it
+		--and it will get gc'ed along with the zlib object. The reason we go
+		--the extra mile to make sure it always finishes is so it gets removed
+		--from the logging.live list immediately.
+		local content, gzip_thread = self.cowrap(function(yield, s)
+			if s == false then return end --abort on entry
+			local ok, err = self.zlib.deflate(content, yield, nil, format)
+			assert(ok or err == 'abort', err)
+		end, 'http-gzip-encode %s', self.tcp)
+		function self:after_send_response()
+			if self.threadstatus(gzip_thread) ~= 'dead' then
+				content(false, 'abort')
+			end
+		end
+		self.tcp.gzt = gzip_thread
+		return content
 	else
 		assert(false, type(content))
 	end
@@ -779,6 +791,14 @@ function http:send_response(res)
 	return true
 end
 http:protect'send_response'
+local send_response = http.send_response
+http.after_send_response = glue.noop
+function http:send_response(res)
+	local ret, err = send_response(self, res)
+	self:after_send_response(ret, err)
+	if ret then return ret end
+	return ret, err
+end
 
 --instantiation --------------------------------------------------------------
 
