@@ -62,18 +62,29 @@ if not ... then require'http_client_test'; return end
 
 local http = require'http'
 local uri = require'uri'
-local time = require'time'
 local glue = require'glue'
 
 local _ = string.format
-local attr = glue.attr
 local push = table.insert
 local pull = function(t)
 	return table.remove(t, 1)
 end
 
+local attr = glue.attr
+local override = glue.override
+local merge = glue.merge
+local update = glue.update
+local index = glue.index
+local words = glue.words
+local eachword = glue.eachword
+local update = glue.update
+local repl = glue.repl
+local object = glue.object
+local tuples = glue.tuples
+local noop = glue.noop
+
 local client = {
-	libs = 'sock fs zlib sock_libtls',
+	libs = 'sock fs zlib sock_libtls resolver json',
 	type = 'http_client', http = http,
 	max_conn = 50,
 	max_conn_per_target = 20,
@@ -84,38 +95,57 @@ local client = {
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
 	tls_options = {
-		ca_file = 'cacert.pem',
+		ca_file = function(self) return self.varpath'cacert.pem' end,
 	},
 }
 
-function client:time(ts)
-	return glue.time(ts)
-end
+--replaceable external dependencies ------------------------------------------
 
-function client:bind_libs(libs)
-	for lib in libs:gmatch'[^%s]+' do
-		if lib == 'sock' then
-			local sock = require'sock'
-			self.tcp           = sock.tcp
-			self.cowrap        = sock.cowrap
-			self.thread        = sock.thread
-			self.suspend       = sock.suspend
-			self.resume        = sock.resume
-			self.start         = sock.start
-			self.sleep         = sock.sleep
-			self.currentthread = sock.currentthread
-		elseif lib == 'sock_libtls' then
-			local socktls = require'sock_libtls'
-			self.stcp          = socktls.client_stcp
-			self.stcp_config   = socktls.config
-		elseif lib == 'zlib' then
-			self.http.zlib = require'zlib'
-		elseif lib == 'fs' then
-			self.loadfile = require'fs'.load
-			self.tls_options.loadfile = self.loadfile
-		else
-			assert(false)
-		end
+client.lib = {}
+function client.lib:sock()
+	local time = require'time'
+	local sock = require'sock'
+	self.time  = time.time
+	self.clock = time.clock
+	self.tcp           = sock.tcp
+	self.cowrap        = sock.cowrap
+	self.thread        = sock.thread
+	self.suspend       = sock.suspend
+	self.resume        = sock.resume
+	self.currentthread = sock.currentthread
+	self.threadstatus  = sock.threadstatus
+	self.start         = sock.start
+	self.sleep         = sock.sleep
+end
+function client.lib:socktls()
+	local socktls = require'sock_libtls'
+	self.stcp          = socktls.client_stcp
+	self.stcp_config   = socktls.config
+end
+function client.lib:zlib()
+	self.http.zlib = require'zlib'
+end
+function client.lib:fs()
+	self.loadfile = require'fs'.load
+end
+function client.lib:resolver()
+	self.resolve = require'resolver'.resolve
+end
+function client.lib:json()
+	local json = require'json'
+	self.json_encode = json.encode
+	self.json_decode = json.decode
+end
+function client.lib:config()
+	local config = require'config'
+	self.varpath = config.varpath
+end
+function client.lib:logging()
+	self.logging = require'logging'
+end
+local function bind_libs(self, libs)
+	for lib in eachword(libs or '') do
+		self.lib[lib](self)
 	end
 end
 
@@ -158,6 +188,7 @@ function client:target(t) --t is request options
 			debug = t.debug,
 			cowrap = self.cowrap,
 			currentthread = self.currentthread,
+			threadstatus = self.threadstatus,
 		}
 		target.max_pipelined_requests = t.max_pipelined_requests
 		target.max_conn = t.max_conn_per_target
@@ -237,12 +268,20 @@ end
 
 function client:stcp_options(host, port)
 	if not self._tls_config then
-		self._tls_config = self.stcp_config(self.tls_options)
+		local t = {}
+		for k,v in pairs(self.tls_options) do
+			if type(v) == 'function' then
+				t[k] = v(self, k) --option getter
+			else
+				t[k] = v
+			end
+		end
+		self._tls_config = self.stcp_config(t)
 	end
 	return self._tls_config
 end
 
-function client:resolve(host) --stub (use a resolver)
+function client.resolve(host) --stub (use a resolver)
 	return host
 end
 
@@ -256,8 +295,8 @@ function client:connect_now(target)
 	end
 	self:inc_conn_count(target)
 	local dt = target.connect_timeout
-	local expires = dt and time.clock() + dt or nil
-	local ip, err = self:resolve(host)
+	local expires = dt and self.clock() + dt or nil
+	local ip, err = self.resolve(host)
 	if not ip then
 		return nil, 'lookup failed for "'..host..'": '..tostring(err)
 	end
@@ -275,7 +314,7 @@ function client:connect_now(target)
 		end
 		return ...
 	end
-	glue.override(tcp, 'close', function(inherited, tcp, ...)
+	override(tcp, 'close', function(inherited, tcp, ...)
 		return pass(tcp:closed(), inherited(tcp, ...))
 	end)
 	if target.http_args.https then
@@ -381,7 +420,7 @@ function client:redirect_request_args(t, req, res)
 		https = https,
 		uri = uri,
 		compress = t.compress,
-		headers = glue.merge({['content-type'] = false}, t.headers),
+		headers = merge({['content-type'] = false}, t.headers),
 		receive_content = res.receive_content,
 		redirect_count = (t.redirect_count or 0) + 1,
 		connect_timeout = t.connect_timeout,
@@ -412,14 +451,14 @@ end
 function client:store_cookies(target, req, res, time)
 	local cookies = res.headers['set-cookie']
 	if not cookies then return end
-	local time = time or self:time()
+	local time = time or self.time()
 	local client_jar = self:cookie_jar(target.client_ip)
 	local host = target.host
 	for _,cookie in ipairs(cookies) do
 		if self:accept_cookie(cookie, host) then
 			local expires
 			if cookie.expires then
-				expires = self:time(cookie.expires)
+				expires = self.time(cookie.expires)
 			elseif cookie['max-age'] then
 				expires = time + cookie['max-age']
 			end
@@ -442,7 +481,7 @@ function client:get_cookies(client_ip, host, uri, https, time)
 	local client_jar = self:cookie_jar(client_ip)
 	if not client_jar then return end
 	local path = uri:match'^[^%?#]+'
-	local time = time or self:time()
+	local time = time or self.time()
 	local cookies = {}
 	local names = {}
 	for s in host:gmatch'[^%.]+' do
@@ -571,6 +610,47 @@ function client:update_ca_file()
 	}
 end
 
+--hi-level API: getpage ------------------------------------------------------
+
+function client:getpage(arg1, upload, receive_content)
+
+	local opt = type(arg1) == 'table' and arg1
+	upload = upload or opt and opt.upload
+	receive_content = receive_content or opt and opt.receive_content
+
+	local headers = {}
+	if type(upload) ~= 'string' then
+		upload = self.json_encode(upload)
+		headers['content-type'] = 'application/json'
+	end
+
+	local u = type(arg1) == 'string' and uri.parse(arg1) or arg1.url and opt(arg1.url)
+
+	local opt = update({
+		host = u and u.host,
+		uri = u and u.path,
+		https = u and u.scheme or 'https',
+		method = upload and 'POST',
+		content = upload,
+		receive_content = receive_content or 'string',
+		debug = self.getpage_debug and index(words(self.getpage_debug or '')),
+	}, opt)
+	opt.headers = update(headers, opt.headers)
+
+	local res, err, req = self:request(opt)
+
+	if not res then
+		return nil, err, req
+	end
+
+	local ct = res.headers['content-type']
+	if ct and ct.media_type == 'application/json' then
+		res.rawcontent = res.content
+		res.content = repl(self.json_decode(res.content), nil, null)
+	end
+	return res.content, res, req
+end
+
 --instantiation --------------------------------------------------------------
 
 function client:log(target, severity, module, event, fmt, ...)
@@ -586,15 +666,13 @@ end
 
 function client:new(t)
 
-	local self = glue.object(self, {}, t)
+	local self = object(self, {}, t)
 
-	self.last_client_ip_index = glue.tuples(2)
-	self.targets = glue.tuples(3)
+	self.last_client_ip_index = tuples(2)
+	self.targets = tuples(3)
 	self.cookies = {}
 
-	if self.libs then
-		self:bind_libs(self.libs)
-	end
+	bind_libs(self, self.libs)
 
 	self.logging = (self.logging == true or self.debug and self.logging == nil)
 		and require'logging' or self.logging
@@ -604,17 +682,33 @@ function client:new(t)
 			self:dp(target, '', ('<'):rep(1+rc)..('-'):rep(30-rc))
 			return ...
 		end
-		glue.override(self, 'request', function(inherited, self, t, ...)
+		override(self, 'request', function(inherited, self, t, ...)
 			local rc = t.redirect_count or 0
 			local target = self:target(t)
 			self:dp(target, '', ('>'):rep(1+rc)..('-'):rep(30-rc))
 			return pass(target, rc, inherited(self, t, ...))
 		end)
 	else
-		self.dp = glue.noop
+		self.dp = noop
 	end
 
 	return self
+end
+
+--global getpage -------------------------------------------------------------
+
+function client.create_getpage_client()
+	return client:new{
+		tls_options = {
+			ca_file = 'cacert.pem', --TODO: use vardir() API when done
+		},
+	}
+end
+
+local cl
+function client.getpage(...)
+	cl = cl or client.create_getpage_client()
+	return cl:getpage(...)
 end
 
 return client
