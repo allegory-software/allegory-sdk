@@ -10,67 +10,65 @@ FACTS
 		* killing a task kills all its children.
 		* tasks wait for child tasks to finish before they are freed.
 		* events bubble up to parent tasks.
-		* terminals are piped to their parent task.
-	* errors raised with add_error() as well as any errors in the action handler
-	  are captured and re-raised if the task runs in foreground.
+	* each task has a recording terminal piped to the terminal of the parent
+	  task, or to the current terminal if the task has no parent.
+	* the current terminal is set to the task's terminal while the task is running.
+	* the main thread has a cmdline_terminal by default.
+	*
 
 TERMINALS
-	tasks.null_terminal      (nt, opt...) -> nt
-	tasks.recording_terminal (rt, opt...) -> rt
-	tasks.cmdline_terminal   (ct, opt...) -> ct
-	tasks.streaming_terminal (st, opt...) -> st
-	st.out_bytes(s)
+	tasks.null_terminal(nt, opt...) -> nt
+		nt:out(src_term, channel, ...)
+		nt:notify_kind(kind, fmt, ...)
+		nt:notify(fmt, ...)
+		nt:notify_error(fmt, ...)
+		nt:notify_warn(fmt, ...)
+		nt:out_stdout(s)
+		nt:out_stderr(s)
+		nt:pipe(nt, [on])
+	tasks.recording_terminal(rt, opt...) -> rt
+		rt:playback(term)
+		rt:stdout()
+		rt:stderr()
+		rt:stdouterr()
+		rt:notifications()
+	tasks.cmdline_terminal(ct, opt...) -> ct
+	tasks.streaming_terminal(st, opt...) -> st
+		st:send_on(channel_code, s)
+		st.send(s)
 	tasks.streaming_terminal_reader(term) -> read(buf, sz)
-	*t:add_error(event, err)
-	*t:notify_kind(kind, fmt, ...)
-	*t:notify(fmt, ...)
-	*t:notify_error(fmt, ...)
-	*t:notify_warn(fmt, ...)
-	*t:out_stdout(s)
-	*t:out_stderr(s)
-	*t:set_retval(v)
-	*t:pipe(*t, [on])
-	rt:playback(*t)
-	rt:stdout()
-	rt:stderr()
-	rt:stdouterr()
-	rt:errors()
-	rt:notifications()
+		term:receive_on(channe_code, s)     receive message on custom channel
 
-API
+CURRENT TERMINAL
+	tasks.set_current_terminal(te) -> prev_te      set/replace current terminal
+	tasks.current_terminal() -> te                 get current terminal
+	tasks.METHOD(...)            call a method on the current terminal
+
+TASKS
 	local ta = tasks.task(opt)
 		opt.action = fn(ta)       action to run
 		opt.parent_task           child of `parent_task`
-		opt.bg                    run in background.
-		opt.allow_fail            do not re-raise the errors raised with add_error().
 		opt.free_after            free after N seconds (10). false = 1/0.
 		opt.name                  task name (for listing and for debugging).
 		opt.stdin                 stdin (for exec() tasks)
-
 	t.id
-	M.tasks -> {ta->true}
-	M.tasks_by_id[id] -> ta
-
-STATE
+	M.tasks -> {ta->true}      root task list
+	M.tasks_by_id -> {id->ta}  root task list mapped by id
 	ta.status                  task status
 	ta.start_time              set when task starts
 	ta.duration                set when task finishes
 	ta.exit_code               set if task finished and not killed
 	ta.pinned                  set to prevent freeing, unset to resume freeing
 	ta.freed                   task was freed
-	ta:start() -> ta           start task.
+	ta:start() -> ta           start task in background
+	ta:run() -> ret            run task in current thread
+	ta:pcall() -> ok,ret       run task in current thread, protected
 	ta:kill() -> t|f           kill task along with its children.
 	ta:do_kill() -> t|f        implement kill. must return true on success.
 	ta:free() -> t|f           free task along with its children, if none are running.
 	^setstatus(ta, status)
 	^add_task(parent_ta, child_ta)
 	^remove_task(parent_ta, child_ta)
-
-TERMINALS
-	M.terminal(opt) -> te      create a terminal that can watch one or more tasks.
-	te:attach(ta)              attach terminal to a task.
-	te:detach(ta)              detach terminal from a task.
-	^<task event>(...)         attached tasks forward their events to the terminal.
 
 PROCESS TASK
 	M.exec(cmd_args|{cmd,arg1,...}, opt) -> ta
@@ -112,6 +110,12 @@ local getownthreadenv = sock.getownthreadenv
 
 local M = {}
 
+function M.log(severity, event, ...)
+	local logging = M.logging
+	if not logging then return end
+	logging.log(severity, 'tasks', event, ...)
+end
+
 --terminals ------------------------------------------------------------------
 
 --null terminal: fires events for input. can pipe input to other terminals.
@@ -132,36 +136,20 @@ end
 
 nterm.init = glue.noop
 
-function nterm:log(severity, event, ...)
-	local logging = self.logging
-	if not logging then return end
-	logging.log(severity, 'term', event, ...)
+function nterm:out(src_term, chan, ...)
+	self:fire('out', src_term, chan, ...)
 end
 
-function nterm:out(...)
-	self:fire('out', ...)
+function nterm:out_notify(src_term, kind, s)
+	self:out(src_term, 'notify', kind, s)
 end
+function nterm:notify_kind (kind, ...) self:out_notify(self,  kind  , _(...)) end
+function nterm:notify            (...) self:out_notify(self, 'info' , _(...)) end
+function nterm:notify_error      (...) self:out_notify(self, 'error', _(...)) end
+function nterm:notify_warn       (...) self:out_notify(self, 'warn' , _(...)) end
 
-function nterm:add_error(event, err)
-	self:log('ERROR', event, '%s', err)
-	self:out('error', event, err)
-end
-
-function nterm:out_notify(kind, s)
-	self:out('notify', kind, s)
-end
-function nterm:notify_kind (kind, ...) self:out_notify( kind  , _(...)) end
-function nterm:notify            (...) self:out_notify('info' , _(...)) end
-function nterm:notify_error      (...) self:out_notify('error', _(...)) end
-function nterm:notify_warn       (...) self:out_notify('warn' , _(...)) end
-
-function nterm:out_stdout(s)
-	self:out('stdout', s)
-end
-
-function nterm:out_stderr(s)
-	self:out('stderr', s)
-end
+function nterm:out_stdout(s) self:out(self, 'stdout', s) end
+function nterm:out_stderr(s) self:out(self, 'stderr', s) end
 
 function nterm:print(...)
 	local n = select('#', ...)
@@ -175,21 +163,17 @@ function nterm:print(...)
 	self:out_stdout'\n'
 end
 
-function nterm:set_retval(v)
-	self:out('retval', v)
-end
-
 function nterm:pipe(term, on) --pipe out self to term.
 	if on == false then
 		return self:off{'out', term}
 	end
-	self:on({'out', term}, function(self, ...)
-		term:out(...)
+	self:on({'out', term}, function(self, src_term, chan, ...)
+		term:out(src_term, chan, ...)
 	end)
 end
 
 --recording terminal: records input and plays it back on another terminal.
---publishes: playback(te), stdout(), stderr(), stdouterr(), errors(), notifications().
+--publishes: playback(te), stdout(), stderr(), stdouterr(), notifications().
 
 local rterm = glue.object(nil, nil, nterm)
 M.recording_terminal = rterm
@@ -198,8 +182,8 @@ function rterm:init()
 	self.buffer = {}
 end
 
-rterm:after('out', function(self, ...)
-	add(self.buffer, pack(...))
+rterm:after('out', function(self, src_term, chan, ...)
+	add(self.buffer, pack(src_term, chan, ...))
 end)
 
 function rterm:playback(term)
@@ -216,25 +200,21 @@ local function add_some(self, maybe_add)
 	end
 	return dt
 end
-local function add_stdout(t, cmd, s)
-	if cmd == 'stdout' then add(t, s) end
+local function add_stdout(t, src_term, chan, s)
+	if chan == 'stdout' then add(t, s) end
 end
-local function add_stderr(t, cmd, s)
-	if cmd == 'stderr' then add(t, s) end
+local function add_stderr(t, src_term, chan, s)
+	if chan == 'stderr' then add(t, s) end
 end
-local function add_stdouterr(t, cmd, s)
-	if cmd == 'stdout' or cmd == 'stderr' then add(t, s) end
+local function add_stdouterr(t, src_term, chan, s)
+	if chan == 'stdout' or chan == 'stderr' then add(t, s) end
 end
-local function add_error(t, cmd, event, err)
-	if cmd == 'error' then add(t, {event = event, err = err}) end
-end
-local function add_notify(t, cmd, kind, message)
-	if cmd == 'notify' then add(t, {kind = kind, message = message}) end
+local function add_notify(t, src_term, chan, kind, message)
+	if chan == 'notify' then add(t, {kind = kind, message = message}) end
 end
 function rterm:stdout        () return cat(add_some(self, add_stdout)) end
 function rterm:stderr        () return cat(add_some(self, add_stderr)) end
 function rterm:stdouterr     () return cat(add_some(self, add_stdouterr)) end
-function rterm:errors        () return add_some(self, add_error) end
 function rterm:notifications () return add_some(self, add_notify) end
 end
 
@@ -243,56 +223,47 @@ end
 local cterm = glue.object(nil, nil, nterm)
 M.cmdline_terminal = cterm
 
-cterm:after('out', function(self, cmd, ...)
-	if cmd == 'stdout' then
+cterm:after('out', function(self, src_term, chan, ...)
+	if chan == 'stdout' then
 		local s = ...
 		io.stdout:write(s)
-	elseif cmd == 'stderr' then
+	elseif chan == 'stderr' then
 		local s = ...
 		io.stderr:write(s)
 		io.stderr:flush()
-	elseif cmd == 'notify' then
+	elseif chan == 'notify' then
 		local kind, s = ...
 		io.stderr:write(_('%s: %s\n', repl(kind, 'info', 'note'):upper(), s))
-		io.stderr:flush()
-	elseif cmd == 'error' then
-		local event, err = ...
-		io.stderr:write(_('ERROR [%s]: %s\n', event, tostring(err)))
 		io.stderr:flush()
 	end
 end)
 
 --streaming output terminal: serializes input for network transmission.
---calls: sterm.out_bytes(s)
+--calls: sterm.send(s)
 
 local sterm = glue.object(nil, nil, nterm)
 M.streaming_terminal = sterm
 
-function sterm:out_on(chan, s)
-	self.out_bytes(format('%s%08x\n%s', chan, #s, s))
+function sterm:send_on(chan, s)
+	self.send(format('%s%08x\n%s', chan, #s, s))
 end
 
-sterm:after('out', function(self, cmd, ...)
-	if     cmd == 'stdout' then self:out_on('1', ...)
-	elseif cmd == 'stderr' then self:out_on('2', ...)
-	elseif cmd == 'notify' then
-		self:out_on(
+sterm:after('out', function(self, src_term, chan, ...)
+	if     chan == 'stdout' then self:send_on('1', ...)
+	elseif chan == 'stderr' then self:send_on('2', ...)
+	elseif chan == 'notify' then
+		self:send_on(
 				kind == 'info'  and 'N'
-			or kind == 'warn'  and 'W'
-			or kind == 'error' and 'E', ...)
-	elseif cmd == 'error' then
-		local event, err = ...
-		self:out_on('e', json.encode{event, tostring(...)})
-	elseif cmd == 'retval' then
-		local ret = ...
-		self:out_on('R', json.encode(ret))
+			or kind == 'warn'  and 'W', ...)
+	else
+		self:send(chan, ...)
 	end
 end)
 
---return `write(buf, sz)` which when called, deserializes a terminal output
---stream and sends it to a terminal.
+--streaming terminal reader: returns `write(buf, sz)` which when called,
+--deserializes a terminal output stream and sends it to a terminal.
 
-function M.streaming_terminal_reader(self)
+function M.streaming_terminal_reader(term)
 	local buf = buffer.new()
 	local chan, size
 	return function(in_buf, sz)
@@ -305,23 +276,17 @@ function M.streaming_terminal_reader(self)
 		if size and #buf >= size then
 			local s = buf:get(size)
 			if chan == '1' then
-				self:out('stdout', s)
+				term:out('stdout', s)
 			elseif chan == '2' then
-				self:out('stderr', s)
+				term:out('stderr', s)
 			elseif chan == 'N' then
-				self:out('notify', 'info', s)
+				term:out('notify', 'info', s)
 			elseif chan == 'W' then
-				self:out('notify', 'warn', s)
+				term:out('notify', 'warn', s)
 			elseif chan == 'E' then
-				self:out('notify', 'error', s)
-			elseif chan == 'e' then
-				local event, err = json.decode(s)
-				self:out('error', event, err)
-			elseif chan == 'R' then
-				local ret = json.decode(s)
-				self:out('retval', ret)
-			else
-				error(_('invalid channel: "%s"', chan))
+				term:out('notify', 'error', s)
+			elseif term.receive_on then
+				term:receive_on(chan, s)
 			end
 			chan, size = nil
 			goto again
@@ -338,19 +303,20 @@ end
 M.current_terminal = current_terminal
 
 function M.set_current_terminal(term, thread)
-	getownthreadenv(thread).terminal = term
+	local env = getownthreadenv(thread)
+	local term0 = env.terminal
+	env.terminal = term
+	return term0
 end
 
 M.set_current_terminal(cterm())
 
-function M.add_error    (...) current_terminal():add_error    (...) end
 function M.notify_kind  (...) current_terminal():notify_kind  (...) end
 function M.notify       (...) current_terminal():notify       (...) end
 function M.notify_error (...) current_terminal():notify_error (...) end
 function M.notify_warn  (...) current_terminal():notify_warn  (...) end
 function M.out_stdout(s) current_terminal():out_stdout(s) end
 function M.out_stderr(s) current_terminal():out_stderr(s) end
-function M.set_retval(v) current_terminal():out_retval(v) end
 
 --tasks ----------------------------------------------------------------------
 
@@ -395,43 +361,36 @@ function task:init()
 		end
 	end
 
-	function self:start()
+	local function run_task()
+		self.start_time = time()
+		self.status = 'running'
+		self:fire_up('setstatus', 'running')
+		local term0 = M.set_current_terminal(self.terminal)
+		local ok, ret = errors.pcall(self.action, self)
+		M.set_current_terminal(term0)
+		self.duration = time() - self.start_time
+		self.status = 'finished'
+		self:fire_up('setstatus', 'finished')
+		runafter(self.free_after or 1/0, function()
+			while not self:free() do
+				sleep(1)
+			end
+		end, 'task-zombie %s', self.name)
+		return ok, ret
+	end
 
+	function self:start()
 		if self.start_time then
 			return self --already started
 		end
-		self.start_time = time()
-		self:_setstatus'running'
-
-		local function run_task()
-
-			getownthreadenv().terminal = self.terminal
-
-			local ok, ret = errors.pcall(self.action, self)
-			if not ok then
-				M.add_error('run', ret)
-				self:_finish()
-			else
-				self:_finish(ret or 0)
-			end
-
-			runafter(self.free_after or 1/0, function()
-				while not self:free() do
-					sleep(1)
-				end
-			end, 'task-zombie %s', self.name)
-		end
-
-		if self.bg then
-			resume(thread(run_task), 'task %s', self.name)
-		else
-			run_task()
-			if not self.allow_fail and #self.errors > 0 then
-				error(cat(imap(imap(self.errors, 'error'), tostring), '\n'))
-			end
-		end
-
+		resume(thread(run_task), 'task %s', self.name)
 		return self
+	end
+
+	self.pcall = run_task
+
+	function self:run()
+		assert(run_task())
 	end
 
 	return self
@@ -452,10 +411,10 @@ end
 
 --state
 
-function task:_running()
+function task:_cannot_free()
 	if self.status == 'running' then return true end
 	for _,child_task in ipairs(self.child_tasks) do
-		if child_task:_running() then
+		if child_task:_cannot_free() then
 			return true
 		end
 	end
@@ -464,7 +423,7 @@ end
 function task:free()
 	if self.freed then return false end
 	if self.pinned then return false end
-	if self:_running() then return false end
+	if self:_cannot_free() then return false end
 	while #self.child_tasks > 0 do
 		child_task:free()
 	end
@@ -477,19 +436,6 @@ function task:free()
 	M.tasks_by_id[self.id] = nil
 	self.freed = true
 	return true
-end
-
-function task:_setstatus(s)
-	self.status = s
-	self:fire_up('setstatus', s)
-end
-
-function task:_finish(exit_code)
-	if not self.start_time then return end --not started.
-	if self.duration then return end --already called.
-	self.duration = time() - self.start_time
-	self.exit_code = exit_code
-	self:_setstatus'finished'
 end
 
 function task:do_kill() return false end --stub
@@ -506,7 +452,6 @@ function task:kill()
 			self:notify_error('Task could not be killed: %s.', self.id)
 			return false
 		end
-		self:_finish()
 	end
 	return true
 end
@@ -553,14 +498,18 @@ function M.exec(cmd, opt)
 	task.cmd = cmd
 	task.process = p
 
+	local errors = {}
+	local function add_error(method, err)
+		add(errors, method..': '..err)
+	end
+
 	function task:action()
 
 		if p.stdin then
 			resume(thread(function()
-				--dbg('mm', 'execin', '%s', opt.stdin)
 				local ok, err = p.stdin:write(opt.stdin)
 				if not ok then
-					M.add_error('stdinwr', err)
+					add_error('stdinwr', err)
 				end
 				assert(p.stdin:close()) --signal eof
 			end, 'exec-stdin %s', p))
@@ -572,7 +521,7 @@ function M.exec(cmd, opt)
 				while true do
 					local len, err = p.stdout:read(buf, sz)
 					if not len then
-						M.add_error('stdoutrd', err)
+						add_error('stdout.read', err)
 						break
 					elseif len == 0 then
 						break
@@ -590,7 +539,7 @@ function M.exec(cmd, opt)
 				while true do
 					local len, err = p.stderr:read(buf, sz)
 					if not len then
-						M.add_error('stderrrd', err)
+						add_error('stderr.read', err)
 						break
 					elseif len == 0 then
 						break
@@ -604,8 +553,8 @@ function M.exec(cmd, opt)
 
 		local exit_code, err = p:wait()
 		if not exit_code then
-			if not (err == 'killed' and task.killed) then
-				M.add_error('procwait', err)
+			if not (err == 'killed' and task.killed) then --crashed/killed from outside
+				add_error('proc.wait', err)
 			end
 		end
 		while not (
@@ -630,7 +579,11 @@ function M.exec(cmd, opt)
 				end
 				s = s .. '\nENV:\n' .. cat(dt, '\n')
 			end
-			M.add_error('exec', s)
+			add_error('proc.exec', s)
+		end
+
+		if #errors > 0 then
+			error(cat(errors, '\n'))
 		end
 
 		return exit_code
@@ -640,8 +593,14 @@ function M.exec(cmd, opt)
 		return p:kill()
 	end
 
-	if task.autostart ~= false then
-		task:start()
+	if task.bg then
+		if task.autostart ~= false then
+			return task:start()
+		end
+	else
+		if task.autostart ~= false then
+			return task:run()
+		end
 	end
 
 	return task
@@ -649,42 +608,39 @@ end
 
 --scheduled tasks ------------------------------------------------------------
 
-M.scheduled_tasks = {}
+M.scheduled_tasks = {} --{name->sched}
 
 function M.set_scheduled_task(name, opt)
 	if not opt then
 		M.scheduled_tasks[name] = nil
 	else
-		assert(opt.task_name)
 		assert(opt.action)
 		assert(opt.start_hours or opt.run_every)
-		assert(opt.machine or opt.deploy)
 		local sched = M.scheduled_tasks[name]
 		if not sched then
-			sched = {sched_name = name, ctime = time(), active = true}
+			sched = {name = name, ctime = time(), active = true, running = false}
 			M.scheduled_tasks[name] = sched
 		end
 		update(sched, opt)
 	end
-	rowset_changed'scheduled_tasks'
 end
 
 --we need this minimum amount of persistence for scheduled tasks to work.
-function M.load_tasks_last_run() error'stub' end
-function M.save_task_last_run(name, t) error'stub' end
+function M.load_tasks_data() end --stub
+function M.save_task_data(name, t) end --stub
 
 local function run_tasks()
 	local now = time()
 	local today = glue.day(now)
 
-	for sched_name,t in pairs(M.scheduled_tasks) do
+	for name, sched in pairs(M.scheduled_tasks) do
 
-		if t.active then
+		if sched.active then
 
-			local start_hours = t.start_hours
-			local last_run = t.last_run
-			local run_every = t.run_every
-			local action = t.action
+			local start_hours = sched.start_hours
+			local last_run    = sched.last_run
+			local run_every   = sched.run_every
+			local action      = sched.action
 
 			local min_time = not start_hours and last_run and run_every
 				and last_run + run_every or -1/0
@@ -700,23 +656,27 @@ local function run_tasks()
 				end
 			end
 
-			if now >= min_time and not M.running_task(t.task_name) then
+			if now >= min_time and not sched.running then
 				local rearm = run_every and true or false
-				note('mm', 'run-task', '%s', t.task_name)
-				t.last_run = now
-				insert_or_update_row('task_last_run', {
-					sched_name = sched_name,
-					last_run = now,
-				})
-				resume(thread(function()
-					local ok, err = errors.pcall(action)
-					if not ok then
-						M.add_error('mm', 'runtask', '%s: %s', sched_name, err)
-					end
-				end, 'run-task %s', t.task_name))
+				M.log('note', 'run-task', '%s', name)
+				sched.last_run = now
+				M.save_task_data(name, {last_run = now})
+				M.task(sched):start()
 			end
 
 		end
+	end
+end
+
+local sched_job
+function M.task_scheduler(cmd)
+	if cmd == 'start' and not sched_job then
+		sched_job = sock.runevery(1, run_tasks)
+	elseif cmd == 'stop' and sched_job then
+		sched_job:wakeup()
+		sched_job = nil
+	elseif cmd == 'running' then
+		return sched_job and true or false
 	end
 end
 
@@ -724,18 +684,30 @@ end
 
 if not ... then
 	local tasks = M
+	tasks.logging = require'logging'
+	tasks.logging.verbose = true
+	tasks.logging.debug = true
 	sock.run(function()
+
 		local ta = tasks.exec('echo hello', {
 			free_after = 0,
 			bg = true,
 			autostart = false,
 		})
 		ta:start()
-		M.notify_warn"The times they are a-changin'"
-		M.add_error("steamin'", 'Gotcha!')
-		M.add_error("cookin'" , 'Gotcha!')
-		M.add_error("relaxin'", 'Gotcha!')
-		M.add_error("workin'" , 'Gotcha!')
+		tasks.notify_warn"The times they are a-changin'"
+		tasks.notify_error"Gotcha!"
+
+		tasks.set_scheduled_task('wasup', {
+			task_name = 'wasup',
+			action = function()
+				tasks.notify'Wasup!'
+			end,
+			start_hours = 0,
+			run_every = 10,
+		})
+
+		tasks.task_scheduler'start'
 	end)
 end
 
