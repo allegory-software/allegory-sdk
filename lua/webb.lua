@@ -1062,83 +1062,31 @@ end
 
 --dns resolver ---------------------------------------------------------------
 
-local hosts = {localhost = '127.0.0.1'}
+local rs = require'resolver'
+
 function config_host(host, ip)
-	hosts[host] = ip
+	rs.hosts[host] = ip
 end
 
-local resolver
-function resolve(host)
-	host = glue.trim(host)
-	if host:find'^%d+%.%d+%.%d+%.%d$' then --ip4
-		return host
-	end
-	local ip = hosts[host]
-	if ip then return ip end
-	resolver = resolver or require'resolver'.new{
-		servers = config('ns', {
-			'1.1.1.1', --cloudflare
-			'8.8.8.8', --google
-		}),
-	}
-	local addrs, err = resolver:lookup(host)
-	return addrs and addrs[1], err
+function rs.resolve_create_resolver()
+	return rs.new{servers = config('ns', rs.servers)}
 end
+
+resolve = rs.resolve
 
 --http requests --------------------------------------------------------------
 
-local getpage_client
+local client = require'http_client'
 
-function getpage(arg1, upload, receive_content)
-	local opt = type(arg1) == 'table' and arg1
-	upload = upload or opt and opt.upload
-	receive_content = receive_content or opt and opt.receive_content
-
-	if not getpage_client then
-
-		local http_client = require'http_client'
-
-		getpage_client = http_client:new(update({
-			resolve = function(_, host) return resolve(host) end,
-			tls_options = {
-				ca_file = config('ca_file', varpath'cacert.pem'),
-			},
-		}, opt))
-
-	end
-
-	local headers = {}
-	if type(upload) ~= 'string' then
-		upload = json(upload)
-		headers['content-type'] = mime_types.json
-	end
-
-	local u = type(arg1) == 'string' and uri.parse(arg1) or arg1.url and opt(arg1.url)
-
-	local opt = update({
-		host = u and u.host,
-		uri = u and u.path,
-		https = (u and u.scheme and u.scheme or scheme()) == 'https',
-		method = upload and 'POST',
-		content = upload,
-		receive_content = receive_content or 'string',
-		debug = config'getpage_debug' and index(words(config'getpage_debug' or '')),
-	}, opt)
-	opt.headers = update(headers, opt.headers)
-
-	local res, err, req = getpage_client:request(opt)
-
-	if not res then
-		return nil, err, req
-	end
-
-	local ct = res.headers['content-type']
-	if ct and ct.media_type == mime_types.json then
-		res.rawcontent = res.content
-		res.content = repl(json_arg(res.content), nil, null)
-	end
-	return res.content, res, req
+function client.create_getpage_client()
+	return client:new{
+		tls_options = {
+			ca_file = config('ca_file', varpath'cacert.pem'),
+		},
+	}
 end
+
+getpage = client.getpage
 
 --html encoding --------------------------------------------------------------
 
