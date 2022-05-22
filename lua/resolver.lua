@@ -53,11 +53,15 @@ r:reverse_lookup(address,[timeout]) -> hostnames
 
 	Make a `PTR` lookup for both IPv4 and IPv6 addresses.
 
+GLOBAL RESOLVER
+	rs.hosts[host] <-> ip       get/set static address
+	rs.servers <- {ns_ip1,...}  set up name servers: do it before calling resolve().
+	rs.resolve(host) -> ip      resolve a hostname
+
 ]=]
 
 local ffi      = require'ffi'
 local bit      = require'bit'
-local time     = require'time'.time
 local errors   = require'errors'
 local glue     = require'glue'
 local lrucache = require'lrucache'
@@ -549,24 +553,25 @@ local function schedule(rs, ns)
 	end
 end
 
+rs.lib = {}
+function rs.lib:sock()
+	local time = require'time'
+	local sock = require'sock'
+	self.clock = time.clock
+	self.time  = time.time
+	self.tcp = sock.tcp
+	self.udp = sock.udp
+	self.addr = sock.addr
+	self.thread = sock.thread
+	self.suspend = sock.suspend
+	self.resume = sock.resume
+	self.transfer = sock.transfer
+	self.currentthread = sock.currentthread
+	self.start = sock.start
+end
 local function bind_libs(self, libs)
-	for lib in libs:gmatch'[^%s]+' do
-		if lib == 'sock' then
-			local sock = require'sock'
-			self.tcp = sock.tcp
-			self.udp = sock.udp
-			self.addr = sock.addr
-			--scheduling
-			self.thread = sock.thread
-			self.suspend = sock.suspend
-			self.resume = sock.resume
-			self.transfer = sock.transfer
-			self.currentthread = sock.currentthread
-			self.start = sock.start
-			self.clock = sock.clock
-		else
-			assert(false)
-		end
+	for lib in glue.eachword(libs or '') do
+		rs.lib[lib](self)
 	end
 end
 
@@ -580,12 +585,9 @@ local function create_resolver(opt)
 		rs.dbgr = glue.noop
 	end
 
-	if rs.libs then
-		bind_libs(rs, rs.libs)
-	end
+	bind_libs(rs, rs.libs)
 
-	local servers = type(rs.servers) == 'string'
-		and glue.collect(rs.servers:gmatch'[^%s]+') or rs.servers
+	local servers = glue.words(rs.servers)
 
 	rs.nst = {}
 	for i,ns in ipairs(rs.servers) do
@@ -624,7 +626,7 @@ local function rs_query(rs, qname, qtype, timeout)
 	rs:dbg(nil, {name = qname}, 'LOOKUP')
 	local key = qtype..' '..qname
 	local res = rs.cache:get(key)
-	if res and time() > res.expires then
+	if res and rs.time() > res.expires then
 		rs.cache:remove_val(res)
 		res = nil
 	end
@@ -657,7 +659,7 @@ local function rs_query(rs, qname, qtype, timeout)
 				for _,answer in ipairs(res) do
 					min_ttl = math.min(min_ttl, answer.ttl)
 				end
-				res.expires = time() + min_ttl
+				res.expires = rs.time() + min_ttl
 				rs.cache:put(key, res)
 				rs:dbgr(ns, q, lt, '{...}')
 				rs.resume(lt, res)
@@ -778,5 +780,32 @@ if not ... then
 	r.start()
 end
 
+--global resolver ------------------------------------------------------------
+
+rs.hosts = {localhost = '127.0.0.1'}
+
+rs.servers = {
+	'1.1.1.1', --cloudflare
+	'8.8.8.8', --google
+}
+
+function rs.resolve_create_resolver()
+	return rs.new{servers = rs.servers}
+end
+
+function rs.resolve(host)
+	host = glue.trim(host)
+	if host:find'^%d+%.%d+%.%d+%.%d$' then --ip4
+		return host
+	end
+	if host:find(':', 1, true) then --ip6
+		return host
+	end
+	local ip = rs.hosts[host]
+	if ip then return ip end
+	rs.resolve_resolver = rs.resolve_resolver or rs.create_resolver()
+	local addrs, err = rs.resolve_resolver:lookup(host)
+	return addrs and addrs[1], err
+end
 
 return rs
