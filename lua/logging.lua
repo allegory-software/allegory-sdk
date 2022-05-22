@@ -267,7 +267,7 @@ local function debug_id(v)
 	if not ids then
 		ids = setmetatable({
 			live_count = 0,
-			live = setmetatable({}, mode_k)
+			live = {} --setmetatable({}, mode_k)
 			-- ^^ this table is weak because http gzip threads can be abandoned
 			-- in suspended state so live(nil) never gets called on them.
 		}, mode_k)
