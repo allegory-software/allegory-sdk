@@ -4,25 +4,22 @@
 
 if not ... then require'fs_test'; return end
 
-local ffi = require'ffi'
-local bit = require'bit'
-local bor, band, shl = bit.bor, bit.band, bit.lshift
-package.loaded.fs_posix = true --prevent recursive loading from fs module.
-setfenv(1, require'fs'.backend)
-
-local C = ffi.C
-
+require'glue'
 assert(win, 'platform not Windows')
+assert(package.loaded.fs)
+
+local
+	C, cast, bor, band, shl =
+	C, cast, bor, band, shl
+
+local file = _fs_file
+local dir  = _fs_dir
+local check_errno = _fs_check_errno
 
 --types, consts, utils -------------------------------------------------------
 
-if x64 then
-	cdef'typedef int64_t ULONG_PTR;'
-else
-	cdef'typedef int32_t ULONG_PTR;'
-end
-
 cdef[[
+typedef int64_t        ULONG_PTR;
 typedef void           VOID, *PVOID, *LPVOID;
 typedef VOID*          HANDLE, *PHANDLE;
 typedef unsigned short WORD;
@@ -63,10 +60,10 @@ typedef struct {
 } SECURITY_ATTRIBUTES, *LPSECURITY_ATTRIBUTES;
 ]]
 
-local INVALID_HANDLE_VALUE = ffi.cast('HANDLE', -1)
+local INVALID_HANDLE_VALUE = cast('HANDLE', -1)
 
 local wbuf = buffer'WCHAR[?]'
-local libuf = ffi.new'LARGE_INTEGER[1]'
+local libuf = new'LARGE_INTEGER[1]'
 
 --error handling -------------------------------------------------------------
 
@@ -121,7 +118,7 @@ local function checkneq(fail_ret, ok_ret, err_ret, ret, err, xtra_errors)
 		local buf, bufsz = errbuf(512)
 		local sz = C.FormatMessageA(
 			FORMAT_MESSAGE_FROM_SYSTEM, nil, err, 0, buf, bufsz, nil)
-		msg = sz > 0 and ffi.string(buf, sz):gsub('[\r\n]+$', '') or 'Error '..err
+		msg = sz > 0 and str(buf, sz):gsub('[\r\n]+$', '') or 'Error '..err
 	end
 	return err_ret, msg
 end
@@ -192,7 +189,7 @@ local function mbs(ws, wsz, mbuf) --WCHAR* -> string
 	local sz = C.WideCharToMultiByte(
 		CP_UTF8, 0, ws, wsz, buf, msz, nil, nil)
 	assert(sz == msz) --should never happen otherwise
-	return ffi.string(buf, sz-1)
+	return str(buf, sz-1)
 end
 
 --open/close -----------------------------------------------------------------
@@ -364,29 +361,29 @@ local function sec_attr(inheritable)
 	if not inheritable then
 		return nil
 	end
-	local sa = ffi.new'SECURITY_ATTRIBUTES'
-	sa.nLength = ffi.sizeof(sa)
+	local sa = new'SECURITY_ATTRIBUTES'
+	sa.nLength = sizeof(sa)
 	sa.bInheritHandle = true
 	return sa
 end
 
-function fs.open(path, mode_opt)
-	local opt = open_opt(mode_opt, str_opt)
+function open(path, mode_opt)
+	local opt = _open_opt(mode_opt, str_opt)
 	local async = opt.async or opt.read_async or opt.write_async
 	assert(not async or opt.is_pipe_end, 'only pipes can be async')
-	local access   = flags(opt.access or 'read', access_bits, nil, true)
-	local sharing  = flags(opt.sharing or 'read', sharing_bits, nil, true)
-	local creation = flags(opt.creation or 'open_existing', creation_bits, nil, true)
-	local attrbits = flags(opt.attrs, attr_bits, nil, true)
+	local access   = bitflags(opt.access or 'read', access_bits, nil, true)
+	local sharing  = bitflags(opt.sharing or 'read', sharing_bits, nil, true)
+	local creation = bitflags(opt.creation or 'open_existing', creation_bits, nil, true)
+	local attrbits = bitflags(opt.attrs, attr_bits, nil, true)
 	attrbits = attrbits == 0 and FILE_ATTRIBUTE_NORMAL or attrbits
-	local flagbits = flags(opt.flags, flag_bits)
+	local flagbits = bitflags(opt.flags, flag_bits)
 	local attflags = bor(attrbits, flagbits, async and FILE_FLAG_OVERLAPPED or 0)
 	local sa = sec_attr(opt.inheritable)
 	local h, err = checkh(C.CreateFileW(
 		wcs(path), access, sharing, sa, creation, attflags, nil
 	))
 	if not h then return nil, err end
-	local f, err = fs.wrap_handle(h,
+	local f, err = file_wrap_handle(h,
 		opt.async or opt.read_async,
 		opt.async or opt.write_async,
 		opt.is_pipe_end,
@@ -399,11 +396,10 @@ function fs.open(path, mode_opt)
 			return nil, err
 		end
 	end
-	local getbit = glue.getbit
+	local getbit = getbit
 	local r = getbit(access, access_bits.read ) or getbit(access, access_bits.generic_read)
 	local w = getbit(access, access_bits.write) or getbit(access, access_bits.generic_write)
-	f.log = opt.log or fs.log
-	f.log('', 'fs', 'open', '%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
+	log('', 'fs', 'open', '%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
 	return f
 end
 
@@ -415,18 +411,18 @@ function file.close(f)
 	if f:closed() then return true end
 	if f._read_async or f._write_async then
 		local sock = require'sock'
-		local ok, err = sock._unregister(f)
+		local ok, err = _sock_unregister(f)
 		if not ok then return false, err end
 	end
 	local ok, err = checknz(C.CloseHandle(f.handle))
 	if not ok then return false, err end
 	f.handle = INVALID_HANDLE_VALUE
-	f.log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
-	fs.live(f, nil)
+	log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	live(f, nil)
 	return true
 end
 
-function fs.wrap_handle(h, read_async, write_async, is_pipe_end, path)
+function file_wrap_handle(h, read_async, write_async, is_pipe_end, path)
 
 	local f = {
 		handle = h,
@@ -439,11 +435,11 @@ function fs.wrap_handle(h, read_async, write_async, is_pipe_end, path)
 		__index = file,
 	}
 	setmetatable(f, f)
-	fs.live(f, path or '')
+	live(f, path or '')
 
 	if read_async or write_async then
 		local sock = require'sock'
-		local ok, err = sock._register(f)
+		local ok, err = _sock_register(f)
 		if not ok then
 			assert(f:close())
 			return nil, err
@@ -458,21 +454,21 @@ int _fileno(struct FILE *stream);
 HANDLE _get_osfhandle(int fd);
 ]]
 
-function fs.wrap_fd(fd, ...)
+function file_wrap_fd(fd, ...)
 	local h = C._get_osfhandle(fd)
 	if h == nil then return check_errno() end
-	return fs.wrap_handle(h, ...)
+	return file_wrap_handle(h, ...)
 end
 
-function fs.fileno(file)
+function fileno(file)
 	local fd = C._fileno(file)
 	return check_errno(fd ~= -1 and fd or nil)
 end
 
-function fs.wrap_file(file)
-	local fd, err = fs.fileno(file)
+function file_wrap_file(file)
+	local fd, err = fileno(file)
 	if not fd then return nil, err end
-	return fs.wrap_fd(fd)
+	return file_wrap_fd(fd)
 end
 
 local HANDLE_FLAG_INHERIT = 1
@@ -525,7 +521,7 @@ local pipe_flag_bits = update({
 
 local serial = 0
 
-function fs.pipe(path, opt)
+function pipe(path, opt)
 	if type(path) == 'table' then
 		path, opt = path.path, path
 	end
@@ -536,7 +532,7 @@ function fs.pipe(path, opt)
 
 		local h, err = checkh(C.CreateNamedPipeW(
 			wcs(path),
-			flags(opt, pipe_flag_bits, async and FILE_FLAG_OVERLAPPED or 0),
+			bitflags(opt, pipe_flag_bits, async and FILE_FLAG_OVERLAPPED or 0),
 			0, --nothing interesting here
 			opt.max_instances or 255,
 			opt.write_buffer_size or 8192,
@@ -546,14 +542,13 @@ function fs.pipe(path, opt)
 		))
 		if not h then return nil, err end
 
-		local f, err = fs.wrap_handle(h,
+		local f, err = file_wrap_handle(h,
 				opt.async or opt.read_async,
 				opt.async or opt.write_async,
 				true, path
 			)
 		if not f then return nil, err end
-		f.log = opt.log or fs.log
-		f.log('', 'fs', 'pipe', '%-4s %s', f, path)
+		log('', 'fs', 'pipe', '%-4s %s', f, path)
 		return f
 
 	else --unnamed pipe, return both ends
@@ -563,10 +558,10 @@ function fs.pipe(path, opt)
 		if async then
 
 			serial = (serial + 1) % 0xffffffff
-			local path = string.format([[\\.\pipe\LuaPipe.%08x.%08x.%08x]],
-				C.GetCurrentThreadId(), fs.lua_state_id or 0, serial)
+			local path = format([[\\.\pipe\LuaPipe.%08x.%08x.%08x]],
+				C.GetCurrentThreadId(), lua_state_id or 0, serial)
 
-			local rf, err = fs.pipe{
+			local rf, err = pipe{
 				path = path,
 				r = true,
 				read_async = opt.read_async or opt.async,
@@ -578,7 +573,7 @@ function fs.pipe(path, opt)
 				return nil, err
 			end
 
-			local wf, err = fs.open(path, {
+			local wf, err = open(path, {
 				access = 'generic_write',
 				creation = 'open_existing',
 				sharing = '',
@@ -591,14 +586,12 @@ function fs.pipe(path, opt)
 				return nil, err
 			end
 
-			rf.log = opt.log or fs.log
-			wf.log = opt.log or fs.log
-			rf.log('', 'fs', 'pipe', 'r=%s w=%s async', rf, wf)
+			log('', 'fs', 'pipe', 'r=%s w=%s async', rf, wf)
 			return rf, wf
 
 		else --non-overlapped anon pipe, use native CreatePipe().
 
-			local hs = ffi.new'HANDLE[2]'
+			local hs = new'HANDLE[2]'
 			local sa = sec_attr(
 				opt.inheritable
 				or opt.read_inheritable
@@ -606,14 +599,11 @@ function fs.pipe(path, opt)
 			)
 			local ok, err = checknz(C.CreatePipe(hs, hs+1, sa, 0))
 			if not ok then return nil, err end
-			local rf = fs.wrap_handle(hs[0], nil, nil, true, 'pipe.r')
-			local wf = fs.wrap_handle(hs[1], nil, nil, true, 'pipe.w')
+			local rf = file_wrap_handle(hs[0], nil, nil, true, 'pipe.r')
+			local wf = file_wrap_handle(hs[1], nil, nil, true, 'pipe.w')
 			if opt.inheritable or opt.read_inheritable  then rf:set_inheritable(true) end
 			if opt.inheritable or opt.write_inheritable then wf:set_inheritable(true) end
-
-			rf.log = opt.log or fs.log
-			wf.log = opt.log or fs.log
-			rf.log('', 'fs', 'pipe', 'r=%s w=%s sync', rf, wf)
+			log('', 'fs', 'pipe', 'r=%s w=%s sync', rf, wf)
 			return rf, wf
 
 		end
@@ -673,7 +663,7 @@ local function write_overlapped(f, o, buf, sz)
 	return C.WriteFile(f.handle, buf, sz, nil, o) ~= 0
 end
 
-local dwbuf = ffi.new'DWORD[1]'
+local dwbuf = new'DWORD[1]'
 
 --NOTE: always ask for more than 0 bytes from a pipe or you'll not see EOF.
 local function mask_eof(ret, err)
@@ -685,7 +675,7 @@ function file.read(f, buf, sz, expires)
 	if sz == 0 then return 0 end --masked for compat.
 	if f._read_async then
 		local sock = require'sock'
-		return mask_eof(sock._file_async_read(f, read_overlapped, buf, sz, expires))
+		return mask_eof(_file_async_read(f, read_overlapped, buf, sz, expires))
 	else
 		local ok, err = mask_eof(checknz(C.ReadFile(f.handle, buf, sz, dwbuf, nil)))
 		if not ok then return nil, err end
@@ -698,7 +688,7 @@ end
 function file._write(f, buf, sz, expires)
 	if f._write_async then
 		local sock = require'sock'
-		return sock._file_async_write(f, write_overlapped, buf, sz, expires)
+		return _file_async_write(f, write_overlapped, buf, sz, expires)
 	else
 		local ok, err = checknz(C.WriteFile(f.handle, buf, sz or #buf, dwbuf, nil))
 		if not ok then return nil, err end
@@ -712,7 +702,7 @@ function file.flush(f)
 	return checknz(C.FlushFileBuffers(f.handle))
 end
 
-local ofsbuf = ffi.new'LARGE_INTEGER[1]'
+local ofsbuf = new'LARGE_INTEGER[1]'
 function file._seek(f, whence, offset)
 	ofsbuf[0].QuadPart = offset
 	local ok, err = checknz(C.SetFilePointerEx(f.handle, ofsbuf[0], libuf, whence))
@@ -751,37 +741,29 @@ BOOL MoveFileExW(
 );
 ]]
 
-local function logpath(severity, event, path, ok, err)
-	if not ok then return false, err end
-	fs.log(severity, 'fs', event, '%s', path)
-	return true
+function _mkdir(path)
+	return checknz(C.CreateDirectoryW(wcs(path), nil))
 end
 
-function mkdir(path)
-	return logpath('', 'mkdir', path, checknz(C.CreateDirectoryW(wcs(path), nil)))
+function _rmdir(path)
+	return checknz(C.RemoveDirectoryW(wcs(path)))
 end
 
-function rmdir(path)
-	return logpath('', 'rmdir', path, checknz(C.RemoveDirectoryW(wcs(path))))
+function _chdir(path)
+	startcwd()
+	return checknz(C.SetCurrentDirectoryW(wcs(path)))
 end
 
-function chdir(path)
-	fs.startcwd()
-	return logpath('', 'chdir', path, checknz(C.SetCurrentDirectoryW(wcs(path))))
-end
-
-function getcwd()
-	local sz, err = checknum(C.GetCurrentDirectoryW(0, nil))
-	if not sz then return nil, err end
+function cwd()
+	local sz = assert(checknum(C.GetCurrentDirectoryW(0, nil)))
 	local buf = wbuf(sz)
-	local sz, err = checknum(C.GetCurrentDirectoryW(sz, buf))
-	if not sz then return nil, err end
+	local sz = assert(checknum(C.GetCurrentDirectoryW(sz, buf)))
 	return mbs(buf, sz)
 end
-fs.startcwd = memoize(getcwd)
+startcwd = memoize(cwd)
 
-function rmfile(path)
-	return logpath('note', 'rmfile', path, checknz(C.DeleteFileW(wcs(path))))
+function _rmfile(path)
+	return checknz(C.DeleteFileW(wcs(path)))
 end
 
 local move_bits = {
@@ -797,15 +779,12 @@ local move_bits = {
 --TODO: implement this for file handles too: call SetFileInformationByHandle
 --with FILE_RENAME_INFO and ReplaceIfExists.
 local default_move_opt = 'replace_existing write_through' --posix
-function fs.move(oldpath, newpath, opt)
-	local ok, err = checknz(C.MoveFileExW(
+function _mv(oldpath, newpath, opt)
+	return checknz(C.MoveFileExW(
 		wcs(oldpath),
 		wcs(newpath, nil, wbuf),
-		flags(opt or default_move_opt, move_bits, nil, true)
+		bitflags(opt or default_move_opt, move_bits, nil, true)
 	))
-	if not ok then return false, err end
-	fs.log('', 'fs', 'move', 'old: %s\nnew: %s', oldpath, newpath)
-	return true
 end
 
 --symlinks & hardlinks -------------------------------------------------------
@@ -834,38 +813,21 @@ BOOL DeviceIoControl(
 );
 ]]
 
-local SYMBOLIC_LINK_FLAG_DIRECTORY = 0x1
-
-local function logmklink(event, link_path, target_path, is_dir, ok, err)
-	if not ok then return false, err end
-	fs.log('', 'fs', event, 'link:   %s (%s)\ntarget:  %s',
-		link_path, is_dir and 'dir' or 'file', target_path)
-	return true
+function _mksymlink(link_path, target_path, is_dir)
+	local flags = is_dir and 1 or 0 --SYMBOLIC_LINK_FLAG_DIRECTORY
+	return checknz(C.CreateSymbolicLinkW(
+			wcs(link_path),
+			wcs(target_path, nil, wbuf),
+			flags
+		) == 1 and 1 or 0) --(MSDN is wrong on this one)
 end
 
-function fs.mksymlink(link_path, target_path, is_dir)
-	local flags = is_dir and SYMBOLIC_LINK_FLAG_DIRECTORY or 0
-	return logmklink('mksymlink', link_path, target_path, is_dir,
-			checknz(
-				C.CreateSymbolicLinkW(
-					wcs(link_path),
-					wcs(target_path, nil, wbuf),
-					flags
-				) == 1 and 1 or 0 --(MSDN is wrong on this one)
-			)
-		)
-end
-
-function fs.mkhardlink(link_path, target_path)
-	return logmklink('mkhardlink', link_path, target_path, false,
-		checknz(
-			C.CreateHardLinkW(
-				wcs(link_path),
-				wcs(target_path, nil, wbuf),
-				nil
-			)
-		)
-	)
+function _mkhardlink(link_path, target_path)
+	return checknz(C.CreateHardLinkW(
+			wcs(link_path),
+			wcs(target_path, nil, wbuf),
+			nil
+		))
 end
 
 do
@@ -890,7 +852,7 @@ do
 		attrs = 'reparse_point',
 	}
 
-	local REPARSE_DATA_BUFFER = ffi.typeof[[
+	local REPARSE_DATA_BUFFER = typeof[[
 		struct {
 			ULONG  ReparseTag;
 			USHORT ReparseDataLength;
@@ -904,20 +866,20 @@ do
 		}
 	]]
 
-	local szbuf = ffi.new'DWORD[1]'
+	local szbuf = new'DWORD[1]'
 	local buf, sz = nil, 128
 
 	local ERROR_INSUFFICIENT_BUFFER = 122
 	local ERROR_MORE_DATA = 234
 
-	function readlink(path)
-		local f, err = fs.open(path, readlink_opt)
+	function _readlink(path)
+		local f, err = open(path, readlink_opt)
 		if not f then return nil, err end
 		::again::
 		local buf = buf or REPARSE_DATA_BUFFER(sz)
 		local ok = C.DeviceIoControl(
 			f.handle, FSCTL_GET_REPARSE_POINT, nil, 0,
-			buf, ffi.sizeof(buf), szbuf, nil
+			buf, sizeof(buf), szbuf, nil
 		) ~= 0
 		if not ok then
 			local err = C.GetLastError()
@@ -943,11 +905,11 @@ DWORD GetTempPathW(DWORD nBufferLength, LPWSTR lpBuffer);
 DWORD GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize);
 ]]
 
-function fs.homedir()
+function homedir()
 	return os.getenv'USERPROFILE'
 end
 
-function fs.tmpdir()
+function tmpdir()
 	local buf, bufsz = wbuf(256)
 	local sz, err = checknum(C.GetTempPathW(bufsz, buf))
 	if not sz then return nil, err end
@@ -960,14 +922,14 @@ function fs.tmpdir()
 	return mbs(buf, sz-1) --strip trailing '\'
 end
 
-function fs.appdir(appname)
+function appdir(appname)
 	local dir = os.getenv'LOCALAPPDATA'
 	return dir and dir..'\\'..appname
 end
 
 local ERROR_INSUFFICIENT_BUFFER = 122
 
-function fs.exepath()
+function exepath()
 	local buf, bufsz = wbuf(256)
 	::again::
 	local sz = C.GetModuleFileNameW(hmodule, buf, bufsz)
@@ -981,7 +943,7 @@ function fs.exepath()
 	end
 	return mbs(buf, sz)
 end
-fs.exepath = memoize(fs.exepath)
+exepath = memoize(exepath)
 
 --file attributes ------------------------------------------------------------
 
@@ -1120,7 +1082,7 @@ local changeable_attr_bits = {
 }
 local function set_attrbits(cur_bits, t)
 	cur_bits = cur_bits == FILE_ATTRIBUTE_NORMAL and 0 or cur_bits
-	local bits = flags(t, changeable_attr_bits, cur_bits)
+	local bits = bitflags(t, changeable_attr_bits, cur_bits)
 	return bits == 0 and FILE_ATTRIBUTE_NORMAL or bits
 end
 
@@ -1132,13 +1094,18 @@ local function is_symlink(bits, reparse_tag)
 end
 
 local function filetype(bits, reparse_tag)
-	return is_symlink(bits, reparse_tag) and 'symlink'
-		or band(bits, attr_bits.directory) ~= 0 and 'dir'
+	local filetype =
+		   band(bits, attr_bits.directory) ~= 0 and 'dir'
 		or band(bits, attr_bits.device   ) ~= 0 and 'dev'
 		or 'file'
+	if is_symlink(bits, reparse_tag) then
+		return 'symlink', filetype
+	else
+		return filetype
+	end
 end
 
-local file_info_ct = ffi.typeof'BY_HANDLE_FILE_INFORMATION'
+local file_info_ct = typeof'BY_HANDLE_FILE_INFORMATION'
 local info
 local function file_get_info(f)
 	info = info or file_info_ct()
@@ -1147,12 +1114,12 @@ local function file_get_info(f)
 	return info
 end
 
-local file_basic_info_ct = ffi.typeof'FILE_BASIC_INFO'
+local file_basic_info_ct = typeof'FILE_BASIC_INFO'
 local binfo
 local function file_get_basic_info(f)
 	binfo = binfo or file_basic_info_ct()
 	local ok, err = checknz(C.GetFileInformationByHandleEx(
-		f.handle, C.FileBasicInfo, binfo, ffi.sizeof(binfo)
+		f.handle, C.FileBasicInfo, binfo, sizeof(binfo)
 	))
 	if not ok then return nil, err end
 	return binfo
@@ -1160,12 +1127,15 @@ end
 
 local function file_set_basic_info(f, binfo)
 	return checknz(C.SetFileInformationByHandle(
-		f.handle, C.FileBasicInfo, binfo, ffi.sizeof(binfo)
+		f.handle, C.FileBasicInfo, binfo, sizeof(binfo)
 	))
 end
 
 local binfo_getters = {
 	type  = function(binfo) return filetype(binfo.FileAttributes) end,
+	symlink_type = function(binfo)
+		return select(2, filetype(binfo.FileAttributes))
+	end,
 	btime = function(binfo) return timestamp(binfo.CreationTime.QuadPart) end,
 	atime = function(binfo) return timestamp(binfo.LastAccessTime.QuadPart) end,
 	mtime = function(binfo) return timestamp(binfo.LastWriteTime.QuadPart) end,
@@ -1194,7 +1164,7 @@ local function file_attr_get_all(f)
 	return t
 end
 
-function file_attr_get(f, k)
+function _file_attr_get(f, k)
 	if not k then
 		return file_attr_get_all(f)
 	end
@@ -1222,7 +1192,7 @@ end
 local function set_filetime(ft, ts)
 	return ts and filetime(ts) or ft
 end
-function file_attr_set(f, t)
+function _file_attr_set(f, t)
 	local binfo, err = file_get_basic_info(f)
 	if not binfo then return nil, err end
 	binfo.FileAttributes = set_attrbits(binfo.FileAttributes, t)
@@ -1237,8 +1207,8 @@ function file_attr_set(f, t)
 	return file_set_basic_info(f, binfo)
 end
 
-function with_open_file(path, open_opt, func, ...)
-	local f, err = fs.open(path, open_opt)
+local function with_open_file(path, open_opt, func, ...)
+	local f, err = open(path, open_opt)
 	if not f then return nil, err end
 	local ret, err = func(f, ...)
 	if ret == nil and err then return nil, err end
@@ -1269,10 +1239,10 @@ local file_attr_data_get = {
 	size  = function(ad) return filesize(ad.nFileSizeHigh, ad.nFileSizeLow) end,
 }
 local file_attr_data
-function fs_attr_get(path, k, deref)
+function _fs_attr_get(path, k, deref)
 	local get = file_attr_data_get[k]
 	if get then --get the attr directly without opening the file.
-		file_attr_data = file_attr_data or ffi.new'WIN32_FILE_ATTRIBUTE_DATA'
+		file_attr_data = file_attr_data or new'WIN32_FILE_ATTRIBUTE_DATA'
 		local ok, err = checknz(C.GetFileAttributesExW(wcs(path),
 			C.GetFileExInfoStandard, file_attr_data))
 		if not ok then return nil, err end
@@ -1283,7 +1253,7 @@ function fs_attr_get(path, k, deref)
 		end
 	end
 	local opt = deref and open_opt or open_opt_symlink
-	return with_open_file(path, opt, file_attr_get, k)
+	return with_open_file(path, opt, _file_attr_get, k)
 end
 
 local open_opt = {
@@ -1298,9 +1268,9 @@ local open_opt_symlink = {
 	flags = 'backup_semantics open_reparse_point',
 	attrs = 'reparse_point',
 }
-function fs_attr_set(path, t, deref)
+function _fs_attr_set(path, t, deref)
 	local opt = deref and open_opt or open_opt_symlink
-	return with_open_file(path, opt, file_attr_set, t)
+	return with_open_file(path, opt, _file_attr_set, t)
 end
 
 --directory listing ----------------------------------------------------------
@@ -1328,7 +1298,7 @@ BOOL FindNextFileW(HANDLE, LPWIN32_FIND_DATAW);
 BOOL FindClose(HANDLE);
 ]]
 
-dir_ct = ffi.typeof[[
+dir_ct = typeof[[
 	struct {
 		HANDLE _handle;
 		WIN32_FIND_DATAW _fdata;
@@ -1363,7 +1333,7 @@ function dir_name(dir)
 end
 
 function dir.dir(dir)
-	return ffi.string(dir._dir, dir._dirlen)
+	return str(dir._dir, dir._dirlen)
 end
 
 function dir.next(dir)
@@ -1416,7 +1386,7 @@ function fs_dir(path, skip_dot_dirs)
 	return dir.next, dir
 end
 
-function dir_attr_get(dir, attr)
+function _dir_attr_get(dir, attr)
 	if attr == 'type' then
 		return filetype(dir._fdata.dwFileAttributes, dir._fdata.dwReserved0)
 	elseif attr == 'atime' then
@@ -1439,7 +1409,7 @@ end
 
 --memory mapping -------------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 typedef struct {
 	WORD wProcessorArchitecture;
 	WORD wReserved;
@@ -1457,17 +1427,13 @@ typedef struct {
 VOID GetSystemInfo(LPSYSTEM_INFO lpSystemInfo);
 ]]
 
-local pagesize
-function fs.pagesize()
-	if not pagesize then
-		local sysinfo = ffi.new'SYSTEM_INFO'
-		C.GetSystemInfo(sysinfo)
-		pagesize = sysinfo.dwAllocationGranularity
-	end
-	return pagesize
-end
+pagesize = memoize(function()
+	local sysinfo = new'SYSTEM_INFO'
+	C.GetSystemInfo(sysinfo)
+	return sysinfo.dwAllocationGranularity
+end)
 
-ffi.cdef[[
+cdef[[
 HANDLE CreateFileMappingW(
 	HANDLE hFile,
 	LPSECURITY_ATTRIBUTES lpFileMappingAttributes,
@@ -1550,7 +1516,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 			creation = write and 'open_always' or 'open_existing',
 		}
 		local err
-		file, err = fs.open(file, open_opt)
+		file, err = open(file, open_opt)
 		if not file then
 			return nil, err
 		end
@@ -1605,7 +1571,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 		if type(async) ~= 'boolean' then --async arg is optional
 			async, addr, sz = false, async, addr
 		end
-		local addr = fs.aligned_addr(addr or self.addr, 'left')
+		local addr = aligned_addr(addr or self.addr, 'left')
 		local ok, err = checknz(C.FlushViewOfFile(addr, sz or self.size))
 		if not ok then return false, err end
 		if not async and file then
@@ -1624,7 +1590,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 	end
 
 	local function unlink()
-		return fs.unlink_mapfile(tagname)
+		return unlink_mapfile(tagname)
 	end
 
 	return {addr = addr, size = size, free = free,
@@ -1632,14 +1598,14 @@ function fs_map(file, access, size, offset, addr, tagname)
 
 end
 
-function fs.unlink_mapfile(tagname) --no-op
+function unlink_mapfile(tagname) --no-op
 	check_tagname(tagname)
 	return true
 end
 
-function fs.protect(addr, size, access)
+function mprotect(addr, size, access)
 	local protect = protect_flag(parse_access(access or 'x'))
-	local old = ffi.new'DWORD[1]'
+	local old = new'DWORD[1]'
 	local ok, err = checknz(C.VirtualProtect(addr, size, prot, old))
 	if not ok then return false, err end
 	return true
@@ -1647,11 +1613,11 @@ end
 
 --mirror buffer --------------------------------------------------------------
 
-function fs.mirror_buffer(size, addr)
+function mirror_buffer(size, addr)
 
-	local size = fs.aligned_size(size or 1)
+	local size = aligned_size(size or 1)
 	local size_hi, size_lo = split_uint64(size * 2)
-	local addr = ffi.cast('uint8_t*', addr)
+	local addr = cast(u8p, addr)
 
 	local filemap, err = checknil(C.CreateFileMappingW(
 		INVALID_HANDLE_VALUE,
@@ -1697,7 +1663,7 @@ function fs.mirror_buffer(size, addr)
 		end
 
 		addr2, err = checknil(C.MapViewOfFileEx(
-			filemap, access_bits, 0, 0, size, ffi.cast('uint8_t*', addr1) + size
+			filemap, access_bits, 0, 0, size, cast(u8p, addr1) + size
 		), nil, mmap_errors)
 
 		if not addr2 then
@@ -1720,7 +1686,6 @@ end
 
 --free space reporting -------------------------------------------------------
 
-function fs.space(path)
+function fs_info(path)
 	return nil, 'NYI'
 end
-

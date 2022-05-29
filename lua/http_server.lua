@@ -8,7 +8,6 @@
 
 server:new(opt) -> server   | Create a server object
 
-	libs            required: pass 'sock sock_libtls zlib'
 	listen          {host=, port=, tls=t|f, tls_options=}
 	tls_options     options to pass to sock_libtls.
 
@@ -16,17 +15,14 @@ server:new(opt) -> server   | Create a server object
 
 if not ... then require'http_server_test'; return end
 
-local http = require'http'
-local time = require'time'
-local glue = require'glue'
-local errors = require'errors'
-
-local _ = string.format
-local attr = glue.attr
-local push = table.insert
+require'glue'
+require'sock'
+require'sock_libtls'
+require'gzip'
+require'fs'
+require'http'
 
 local server = {
-	libs = 'sock fs zlib sock_libtls',
 	type = 'http_server', http = http,
 	tls_options = {
 		protocols = 'tlsv1.2',
@@ -46,42 +42,10 @@ local server = {
 	},
 }
 
-function server:bind_libs(libs)
-	for lib in libs:gmatch'[^%s]+' do
-		if lib == 'sock' then
-			local sock = require'sock'
-			self.tcp           = sock.tcp
-			self.thread        = sock.thread
-			self.resume        = sock.resume
-			self.cowrap        = sock.cowrap
-			self.threadstatus  = sock.threadstatus
-			self.start         = sock.start
-			self.sleep         = sock.sleep
-			self.currentthread = sock.currentthread
-			self.liveadd       = sock.liveadd
-		elseif lib == 'sock_libtls' then
-			local socktls = require'sock_libtls'
-			self.stcp          = socktls.server_stcp
-		elseif lib == 'zlib' then
-			self.http.zlib = require'zlib'
-		elseif lib == 'fs' then
-			self.loadfile = require'fs'.load
-			self.tls_options.loadfile = self.loadfile
-		else
-			assert(false)
-		end
-	end
-end
-
-function server:time(ts)
-	return glue.time(ts)
-end
-
 function server:log(tcp, severity, module, event, fmt, ...)
-	local logging = self.logging
 	if not logging or logging.filter[severity] then return end
-	local s = type(fmt) == 'string' and _(fmt, logging.args(...)) or fmt or ''
-	logging.log(severity, module, event, '%-4s %s', tcp, s)
+	local s = type(fmt) == 'string' and _(fmt, logargs(...)) or fmt or ''
+	log(severity, module, event, '%-4s %s', tcp, s)
 end
 
 function server:check(tcp, ret, ...)
@@ -89,31 +53,20 @@ function server:check(tcp, ret, ...)
 	self:log(tcp, 'ERROR', 'htsrv', ...)
 end
 
-function server:new(t)
+function http_server(t)
 
-	local self = glue.object(self, {}, t)
-
-	if self.libs then
-		self:bind_libs(self.libs)
-	end
-
-	if self.debug and (self.logging == nil or self.logging == true) then
-		self.logging = require'logging'
-	end
+	local self = object(server, {}, t)
 
 	local function req_onfinish(req, f)
-		glue.after(req, 'finish', f)
+		after(req, 'finish', f)
 	end
 
 	local function handler(stcp, ctcp, listen_opt)
 
-		local http = self.http:new({
+		local http = http({
 			debug = self.debug,
 			max_line_size = self.max_line_size,
 			tcp = ctcp,
-			cowrap = self.cowrap,
-			currentthread = self.currentthread,
-			threadstatus = self.threadstatus,
 			listen_options = listen_opt,
 		})
 
@@ -125,7 +78,7 @@ function server:new(t)
 
 			local function send_response(opt)
 				send_started = true
-				local res = http:build_response(req, opt, self:time())
+				local res = http:build_response(req, opt, time())
 				assert(http:send_response(res))
 				send_finished = true
 			end
@@ -134,7 +87,7 @@ function server:new(t)
 			--user's code, so use req:onfinish() to free resources.
 			function req.respond(req, opt)
 				if opt.want_out_function then
-					out, out_thread = self.cowrap(function(yield)
+					out, out_thread = cowrap(function(yield)
 						opt.content = yield
 						send_response(opt)
 					end, 'http-server-out %s %s', ctcp, req.uri)
@@ -145,25 +98,25 @@ function server:new(t)
 				end
 			end
 
-			req.thread = self.currentthread()
+			req.thread = currentthread()
 
 			req.onfinish = req_onfinish
 
-			local ok, err = errors.pcall(self.respond, req)
+			local ok, err = pcall(self.respond, req)
 			if req.finish then
 				req:finish()
 			end
 
 			if not ok then
 				if not send_started then
-					if errors.is(err, 'http_response') then
+					if iserror(err, 'http_response') then
 						req:respond(err)
 					else
 						self:check(ctcp, false, 'respond', '%s', err)
 						req:respond{status = 500}
 					end
 				else --status line already sent, too late to send HTTP 500.
-					if out_thread and self.threadstatus(out_thread) ~= 'dead' then
+					if out_thread and threadstatus(out_thread) ~= 'dead' then
 						--Signal eof so that the out() thread finishes. We could
 						--abandon the thread and it will be collected without leaks
 						--but we want it to be removed from logging.live immediately.
@@ -204,7 +157,7 @@ function server:new(t)
 			goto continue
 		end
 
-		local tcp = assert(self.tcp())
+		local tcp = assert(tcp())
 		assert(tcp:setopt('reuseaddr', true))
 		local addr, port = t.addr or '*', t.port or (t.tls and 443 or 80)
 
@@ -216,7 +169,7 @@ function server:new(t)
 
 		local tls = t.tls
 		if tls then
-			local opt = glue.update(self.tls_options, t.tls_options)
+			local opt = update(self.tls_options, t.tls_options)
 			local stcp, err = self.stcp(tcp, opt)
 			if not self:check(tcp, stcp, 'stcp', '%s', err) then
 				tcp:close()
@@ -224,7 +177,7 @@ function server:new(t)
 			end
 			tcp = stcp
 		end
-		self.liveadd(tcp, tls and 'https' or 'http')
+		liveadd(tcp, tls and 'https' or 'http')
 		push(self.sockets, tcp)
 
 		function accept_connection()
@@ -233,21 +186,21 @@ function server:new(t)
 				if retry then
 					--temporary network error. let it retry but pause a little
 					--to avoid killing the CPU while the error persists.
-					sleep(.2)
+					wait(.2)
 				else
 					self:stop()
 				end
 				return
 			end
-			self.liveadd(ctcp, tls and 'https' or 'http')
-			self.resume(self.thread(function()
-				local ok, err = errors.pcall(handler, tcp, ctcp, t)
-				self:check(ctcp, ok or errors.is(err, 'tcp'), 'handler', '%s', err)
+			liveadd(ctcp, tls and 'https' or 'http')
+			resume(thread(function()
+				local ok, err = pcall(handler, tcp, ctcp, t)
+				self:check(ctcp, ok or iserror(err, 'tcp'), 'handler', '%s', err)
 				ctcp:close()
 			end, 'http-server-client %s', ctcp))
 		end
 
-		self.resume(self.thread(function()
+		resume(thread(function()
 			while not stop do
 				accept_connection()
 			end
@@ -258,5 +211,3 @@ function server:new(t)
 
 	return self
 end
-
-return server

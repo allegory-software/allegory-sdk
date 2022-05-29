@@ -1,33 +1,32 @@
-local pp = require'pp'
+require'pp'
+require'fs'
+require'glue'
 
-if jit then
-	local ffi = require'ffi'
-	local n = ffi.cast('int64_t', -1LL)
-	assert(pp.format(n) == '-1LL')
-	local un = ffi.cast('uint64_t', -1LL)
-	assert(pp.format(un) == '18446744073709551615ULL')
-end
+local n = cast('int64_t', -1LL)
+assert(pp(n) == '-1LL')
+local un = cast('uint64_t', -1LL)
+assert(pp(un) == '18446744073709551615ULL')
 
 --escaping
-assert(pp.format('\'"\t\n\r\b\0\1\2\31\32\33\125\126\127\128\255') ==
-						[['\'"\t\n\r\8\0\1\2\31 !}~\127\128\255']])
+assert(pp('\'"\t\n\r\b\0\1\2\31\32\33\125\126\127\128\255') ==
+			[['\'"\t\n\r\8\0\1\2\31 !}~\127\128\255']])
 
 --edge cases
-assert(pp.format{} == '{\n}')
+assert(pp{} == '{\n}')
 
 --recursion
-assert(pp.format(
+assert(pp(
 	 {1,2,3,a={4,5,6,b={c={d={e={f={7,8,9}}}}}}}, {indent = false}) ==
 	'{1,2,3,a={4,5,6,b={c={d={e={f={7,8,9}}}}}}}')
 
 --table keys
-assert(pp.format(
+assert(pp(
 	 {[{[{[{[{[{[{}]='f'}]='e'}]='d'}]='c'}]='b'}]='a'}, {indent = false}) ==
 	"{[{[{[{[{[{[{}]='f'}]='e'}]='d'}]='c'}]='b'}]='a'}")
 
 --indentation
 local c = {[{'c'}] = 'c'}
-local s1 = pp.format(
+local s1 = pp(
 	{'a','b','c','d',a=1,b={a=1,b=2},[c]=c},
 	{indent = '   '})
 local s2 = [[
@@ -64,28 +63,28 @@ end
 meta2.__pwrite = function(v, write, write_value)
 	write'tuple('; write_value(v.a); write','; write_value(v.b); write')'
 end
-assert(pp.format(t) == "tuple(1,tuple(1,'zzz'))")
+assert(pp(t) == "tuple(1,tuple(1,'zzz'))")
 
 --__tostring metamethod
 local t = {
 	[setmetatable({}, {__tostring = function() return 'tostring_key' end})] =
 		setmetatable({}, {__tostring = function() return 'tostring_val' end}),
 }
-assert(pp.format(t, false) == "{tostring_key='tostring_val'}")
+assert(pp(t, false) == "{tostring_key='tostring_val'}")
 
 --cycle detection
 local t={a={}}; t.a=t
-assert(pp.format(t,' ',{}) == [==[
+assert(pp(t,' ',{}) == [==[
 {
  a=nil --[[cycle]]
 }]==])
-assert(pp.format({a=coroutine.create(function() end)},' ',{}) == [==[
+assert(pp({a=coroutine.create(function() end)},' ',{}) == [==[
 {
  a=nil --[[unserializable thread]]
 }]==])
 
 --key sorting
-local s = pp.format({
+local s = pp({
 	[0] = '7', 5, 3, 1,
 	[12] = 'a',
 	[14.5] = 'b',	[1/0] = 'x',
@@ -136,6 +135,6 @@ assert(s == [==[
 }]==])
 
 local tmp = 'pp_test.tmp'
-assert(pp.save(tmp, {a=1, b=2}))
-assert(pp.format(assert(pp.load(tmp)), false) == '{a=1,b=2}')
-os.remove(tmp)
+assert(pp_save(tmp, {a=1, b=2}))
+assert(pp(assert(eval(tmp)), false) == '{a=1,b=2}')
+rmfile(tmp)

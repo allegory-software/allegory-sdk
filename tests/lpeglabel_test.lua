@@ -302,7 +302,7 @@ assert(p:match("AaBbCcDdBbCcDdDdDdBb") == 21)
 p = m.C(('ab' * ('c' * m.P'ef'^-1)^0)^-1)
 s = "abcefccefc"
 assert(s == p:match(s))
- 
+
 
 pi = "3.14159 26535 89793 23846 26433 83279 50288 41971 69399 37510"
 assert(m.match(m.Cs((m.P"1" / "a" + m.P"5" / "b" + m.P"9" / "c" + 1)^0), pi) ==
@@ -408,7 +408,7 @@ do
   print "testing large dynamic Cc"
   local lim = 2^16 - 1
   local c = 0
-  local function seq (n) 
+  local function seq (n)
     if n == 1 then c = c + 1; return m.Cc(c)
     else
       local m = math.floor(n / 2)
@@ -546,7 +546,7 @@ do
 
   p = #(m.P"abc" * m.B"c")
   assert(p:match("abc") == 1 and not p:match("ab"))
- 
+
   p = m.P{ "a" * m.V(2), m.P"b"^1 }
   checkerr("pattern may not have fixed length", m.B, p)
 
@@ -855,7 +855,7 @@ s = string.rep('a', l) .. string.rep('b', l) .. string.rep('c', l)
 p = (m.C(m.P'a'^1) * m.C(m.P'b'^1) * m.C(m.P'c'^1)) / '%3%2%1'
 
 assert(p:match(s) == string.rep('c', l) ..
-                     string.rep('b', l) .. 
+                     string.rep('b', l) ..
                      string.rep('a', l))
 
 print"+"
@@ -1060,8 +1060,8 @@ assert(#x == 500)
 local function id(s, i, x)
   if x == 'a' then return i, 1, 3, 7
   else return nil, 2, 4, 6, 8
-  end   
-end     
+  end
+end
 
 p = ((m.P(id) * 1 + m.Cmt(2, id) * 1  + m.Cmt(1, id) * 1))^0
 assert(table.concat{p:match('abababab')} == string.rep('137', 4))

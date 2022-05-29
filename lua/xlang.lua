@@ -78,7 +78,7 @@ end)
 --S_schema_fields translation rowset -----------------------------------------
 
 local function S_schema_file(lang, attr)
-	return varpath(string.format('%s-s-%s-col-%s.lua', config'app_name', lang, attr))
+	return varpath(_('%s-s-%s-col-%s.lua', config'app_name', lang, attr))
 end
 
 --TODO: invalidate this cache based on file's mtime but don't check too often.
@@ -88,7 +88,7 @@ local function S_schema_texts(lang, attr)
 end
 
 local function save_S_schema_texts(lang, attr, t)
-	save(S_schema_file(lang, attr), 'return '..pp.format(t, '\t'))
+	save(S_schema_file(lang, attr), 'return '..pp(t, '\t'))
 end
 
 local valid_attrs
@@ -114,8 +114,8 @@ rowset.S_schema_attrs = virtual_rowset(function(self, ...)
 		end
 	end
 
-	valid_attrs = glue.imap(rows, 1)
-	update(valid_attrs, glue.index(valid_attrs))
+	valid_attrs = imap(rows, 1)
+	update(valid_attrs, index(valid_attrs))
 
 end)
 
@@ -147,16 +147,16 @@ rowset.S_schema_fields = virtual_rowset(function(self, ...)
 				en_text = en_text()
 			end
 			local text = texts[tbl_type..'.'..tbl_name..'.'..col]
-			table.insert(rs.rows, {tbl_type, tbl_name, col, attr, en_text, text})
+			add(rs.rows, {tbl_type, tbl_name, col, attr, en_text, text})
 		end
 		for i,attr in ipairs(attrs) do
 			local texts = S_schema_texts(lang(), attr)
-			for tbl_name, tbl in glue.sortedpairs(db_schema().tables) do
+			for tbl_name, tbl in sortedpairs(db_schema().tables) do
 				for i, fld in ipairs(tbl.fields) do
 					add_row(texts, 'table', tbl_name, fld, fld.col, attr)
 				end
 			end
-			for rs_name, rs in glue.sortedpairs(rowset) do
+			for rs_name, rs in sortedpairs(rowset) do
 				if rs.client_fields then
 					for i, fld in ipairs(rs.client_fields) do
 						add_row(texts, 'rowset', rs_name, fld, fld.name, attr)

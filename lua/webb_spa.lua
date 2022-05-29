@@ -52,14 +52,12 @@ CONFIG
 
 require'webb_action'
 
-local format = string.format
-
 local client_configs = {}
 
 function client_config(name, default)
 	if not client_configs[name] then
 		client_configs[name] = true
-		table.insert(client_configs, name)
+		add(client_configs, name)
 	end
 	return config(name, default)
 end
@@ -84,7 +82,7 @@ action['config.js'] = function()
 	for i,k in ipairs(client_configs) do
 		local v = config(k)
 		if v ~= nil then
-			out(format('config(%s, %s)\n', json(k), json(v)))
+			out(format('config(%s, %s)\n', json_encode(k), json_encode(v)))
 		end
 	end
 
@@ -93,7 +91,7 @@ end
 action['strings.js'] = function()
 	local t = S_texts(lang(), 'js')
 	if not next(t) then return end
-	out'assign(S_texts, '; out_json(t); out')'
+	out'assign(S_texts, '; out(json_encode(t)); out')'
 end
 
 --simple API to add js and css snippets and files from server-side code
@@ -128,7 +126,7 @@ end
 local fontfiles = {}
 function fontfile(file)
 	for file in file:gmatch'[^%s]+' do
-		table.insert(fontfiles, file)
+		add(fontfiles, file)
 	end
 end
 

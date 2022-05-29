@@ -7,11 +7,11 @@
 		https://github.com/kengonakajima/luvit-base64/issues/1
 		http://lua-users.org/wiki/BaseSixtyFour
 
-b64.[encode|decode][_tobuffer](s, [size], [outbuf], [outbuf_size], [max_line]) -> outbuf, len
+base64[_encode|_decode][_tobuffer](s, [size], [outbuf], [outbuf_size], [max_line]) -> outbuf, len
 
 	Encode/decode string or cdata buffer to a string or buffer.
 
-b64.url[encode|decode](s) -> s
+base64url[_encode|_decode](s) -> s
 
 	Encode/decode URL based on RFC4648 Section 5 / RFC7515 Section 2 (JSON Web Signature).
 
@@ -19,20 +19,15 @@ b64.url[encode|decode](s) -> s
 
 if not ... then require'base64_test'; return end
 
-local base64 = {}
+require'glue'
 
-local ffi  = require'ffi'
-local bit  = require'bit'
-local shl  = bit.lshift
-local shr  = bit.rshift
-local bor  = bit.bor
-local band = bit.band
-local u8a  = ffi.typeof'uint8_t[?]'
-local u8p  = ffi.typeof'uint8_t*'
-local u16a = ffi.typeof'uint16_t[?]'
-local u16p = ffi.typeof'uint16_t*'
+local
+	shl, shr, bor, band, u8a, u8p, u16a, u16p, cast =
+	shl, shr, bor, band, u8a, u8p, u16a, u16p, cast
 
-local EQ = string.byte'='
+local str = ffi.string --null,0 => empty string, unlike glue's str().
+
+local EQ = byte'='
 
 local s = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 local b64c = u8a(#s+1, s)
@@ -46,7 +41,7 @@ for j=0,63,1 do
 	end
 end
 
-function base64.encode_tobuffer(s, sn, dbuf, dn, max_line)
+function base64_encode_tobuffer(s, sn, dbuf, dn, max_line)
 
 	local sn = sn or #s
 	local min_dn = math.ceil(sn / 3) * 4
@@ -54,9 +49,9 @@ function base64.encode_tobuffer(s, sn, dbuf, dn, max_line)
 	min_dn = min_dn + newlines * 2 --CRLF per MIME
 	local dn = dn or min_dn
 	assert(dn >= min_dn, 'buffer too small')
-	local dp  = dbuf and ffi.cast(u8p, dbuf) or u8a(min_dn)
-	local sp  = ffi.cast(u8p, s)
-	local dpw = ffi.cast(u16p, dp)
+	local dp  = dbuf and cast(u8p, dbuf) or u8a(min_dn)
+	local sp  = cast(u8p, s)
+	local dpw = cast(u16p, dp)
 	local si = 0
 	local di, li = 0, 0
 
@@ -120,23 +115,23 @@ function base64.encode_tobuffer(s, sn, dbuf, dn, max_line)
 	return dp, min_dn
 end
 
-function base64.encode(...)
-	return ffi.string(base64.encode_tobuffer(...))
+function base64_encode(...)
+	return str(base64_encode_tobuffer(...))
 end
 
 --decode ---------------------------------------------------------------------
 
 local b64i = u8a(256, 0xff)
-for i = 0, ffi.sizeof(b64c)-1 do
+for i = 0, sizeof(b64c)-1 do
 	b64i[b64c[i]] = i
 end
 b64i[EQ] = 0
 
 local block = u8a(4)
 
-function base64.decode_tobuffer(s, sn, dbuf, dn)
+function base64_decode_tobuffer(s, sn, dbuf, dn)
 	sn = sn or #s
-   local sp = ffi.cast(u8p, s)
+   local sp = cast(u8p, s)
 
 	local n = 0
 	for i = 0, sn-1 do
@@ -151,7 +146,7 @@ function base64.decode_tobuffer(s, sn, dbuf, dn)
 	local min_dn = n / 4 * 3
 	local dn = dn or min_dn
 	assert(dn >= min_dn, 'buffer too small')
-	local dp  = dbuf and ffi.cast(u8p, dbuf) or u8a(min_dn)
+	local dp  = dbuf and cast(u8p, dbuf) or u8a(min_dn)
 
 	local j = 0
 	local pad = 0
@@ -188,16 +183,14 @@ function base64.decode_tobuffer(s, sn, dbuf, dn)
 	return dp, j
 end
 
-function base64.decode(...)
-	return ffi.string(base64.decode_tobuffer(...))
+function base64_decode(...)
+	return str(base64_decode_tobuffer(...))
 end
 
-function base64.urlencode(s)
-	return base64.encode(s):gsub('/', '_'):gsub('+', '-'):gsub('=*$', '')
+function base64url_encode(s)
+	return base64_encode(s):gsub('/', '_'):gsub('+', '-'):gsub('=*$', '')
 end
 
-function base64.urldecode(s)
-	return base64.decode(s):gsub('_', '/'):gsub('-', '+'):gsub('=*$', '')
+function base64url_decode(s)
+	return base64_decode(s):gsub('_', '/'):gsub('-', '+'):gsub('=*$', '')
 end
-
-return base64

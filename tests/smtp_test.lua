@@ -1,16 +1,16 @@
 
-local glue = require'glue'
-local smtp = require'smtp'
-local sock = require'sock'
-local logging = require'logging'
-local multipart = require'multipart'
-require'ffi'.tls_libname = 'tls_bearssl'
+require'glue'
+require'smtp'
+require'sock'
+require'logging'
+require'multipart'
+tls_libname = 'tls_bearssl'
 
 logging.debug = true
 
-sock.run(function()
+run(function()
 
-	local smtp = smtp:connect{
+	local smtp = smtp_connect{
 		debug = {
 			protocol = true,
 			errors = true,

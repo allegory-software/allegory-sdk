@@ -8,14 +8,14 @@ between multiple threads in order to 1) avoid creating too many connections
 and 2) avoid the lag of connecting and authenticating every time a connection
 is needed.
 
-	pools:setlimits(key, opt)        set limits for a specific pool
-	pools:get(key, [expires]) -> c   get a connection from a pool
-	pools:put(key, c, s)             put a connection in a pool
-
-connpool.new([opt]) -> pools
+connpool([opt]) -> pools
 
 	* max_connections     : max connections for all pools (100)
 	* max_waiting_threads : max threads to queue up (1000)
+
+pools:setlimits(key, opt)        set limits for a specific pool
+pools:get(key, [expires]) -> c   get a connection from a pool
+pools:put(key, c, s)             put a connection in a pool
 
 pools:setlimits(key, opt)
 
@@ -50,16 +50,15 @@ arbitrary positions and 2) sock's interruptible timers.
 
 ]=]
 
-local glue = require'glue'
-local sock = require'sock'
-local queue = require'queue'
+require'glue'
+require'sock'
+require'queue'
 
-local add = table.insert
-local pop = table.remove
+local function dbg(event)
+	log('', 'cnpool', event)
+end
 
-local M = {}
-
-function M.new(opt)
+function conpool(opt)
 
 	local all_limit = opt and opt.max_connections or 100
 	local all_waitlist_limit = opt and opt.max_waiting_threads or 1000
@@ -82,13 +81,6 @@ function M.new(opt)
 		local limit = all_limit
 		local waitlist_limit = all_waitlist_limit
 
-		local logging_log = M.logging and M.logging.log
-		local log = logging_log and function(severity, ev, s)
-			logging_log(severity, 'cnpool', ev, '%s n=%d free=%d %s', key, n, #free, s or '')
-		end or glue.noop
-		local dbg  = logging_log and function(ev, s) log(''    , ev, s) end or glue.noop
-		local note = logging_log and function(ev, s) log('note', ev, s) end or glue.noop
-
 		function pool:setlimits(opt)
 			limit = opt.max_connections or limit
 			waitlist_limit = opt.max_waiting_threads or waitlist_limit
@@ -98,29 +90,29 @@ function M.new(opt)
 
 		local q
 		local function wait(expires)
-			if waitlist_limit < 1 or not expires or expires <= sock.clock() then
+			if waitlist_limit < 1 or not expires or expires <= clock() then
 				dbg'notime'
 				return nil, 'timeout'
 			end
-			q = q or queue.new(waitlist_limit, 'queue_index')
+			q = q or queue(waitlist_limit, 'queue_index')
 			if q:full() then
 				dbg'q-full'
 				return nil, 'timeout'
 			end
-			local sleeper = sock.sleep_job()
-			q:push(sleeper)
-			if sleeper:sleep_until(expires) then
+			local wait_job = wait_job()
+			q:push(wait_job)
+			if wait_job:wait_until(expires) then
 				return true
 			else
-				q:remove(sleeper)
+				q:remove(wait_job)
 				return nil, 'timeout'
 			end
 		end
 
 		local function check_waitlist()
-			local sleeper = q and q:pop()
-			if not sleeper then return end
-			sleeper:wakeup(true)
+			local wait_job = q and q:pop()
+			if not wait_job then return end
+			wait_job:resume(true)
 		end
 
 		function pool:get(expires)
@@ -149,7 +141,7 @@ function M.new(opt)
 			pool[c] = true
 			n = n + 1
 			dbg'put'
-			glue.before(s, 'close', function()
+			before(s, 'close', function()
 				pool[c] = nil
 				n = n - 1
 				dbg'close'
@@ -181,5 +173,3 @@ function M.new(opt)
 
 	return pools
 end
-
-return M

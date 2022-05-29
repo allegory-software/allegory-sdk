@@ -8,7 +8,7 @@
 	* Implemented as an array, not a linked list, so remove(v) is O(n).
 	* INDEX is a special key that if given will make find() and remove() O(1).
 
-	queue.new(size) -> q           create a queue
+	queue(size) -> q               create a queue
 	q:size()                       get queue capacity
 	q:count()                      get queue item count
 	q:full() -> t|f                check if the queue is full
@@ -16,6 +16,7 @@
 	q:push(v)                      add a value to the end of the queue
 	q:pop() -> v|nil               remove the first value from the queue (nil if empty)
 	q:peek() -> v|nil              get the first value without popping
+	q:exists(v) -> true|false      check if value exists
 	q:first() -> v|nil             get the first value without popping
 	q:last() -> v|nil              get the last value wihtout popping
 	q:items() -> iter() -> v       iterate values
@@ -24,7 +25,9 @@
 
 ]=]
 
-local function new(size, INDEX)
+local assert = assert
+
+function queue(size, INDEX)
 
 	local head = size
 	local tail = 1
@@ -108,13 +111,13 @@ local function new(size, INDEX)
 		end
 		if from_head then --move right of i to left.
 			for i = i, head-1 do t[i] = t[i+1]; if INDEX then t[i][INDEX] = i+1 end end
-			t[head] = false
 			if INDEX ~= nil then t[head][INDEX] = nil end
+			t[head] = false
 			head = mi(head - 1)
 		else --move left of i to right.
 			for i = i-1, tail, -1 do t[i+1] = t[i]; if INDEX then t[i+1][INDEX] = i end end
-			t[tail] = false
 			if INDEX ~= nil then t[tail][INDEX] = nil end
+			t[tail] = false
 			tail = mi(tail + 1)
 		end
 		n = n - 1
@@ -135,6 +138,9 @@ local function new(size, INDEX)
 			end
 		end
 	end
+	function q:exists(v)
+		return find(v) and true or false
+	end
 
 	function q:remove(v)
 		local mi = find(v)
@@ -145,5 +151,3 @@ local function new(size, INDEX)
 
 	return q
 end
-
-return {new = new}

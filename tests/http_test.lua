@@ -1,9 +1,7 @@
 
-local http = require'http'
-local socket = require'socket'
-local ffi = require'ffi'
+require'http'
+require'sock'
 local http_headers = require'http_headers'
-http.zlib = require'zlib'
 
 local function P(s)
 	return #s, (s:gsub('[\1-\31]', function(c) return '\\'..string.byte(c) end))
@@ -76,7 +74,7 @@ local function test_client()
 		receive_content = write_body,
 	}
 	local h = http_headers.parse_headers(res.rawheaders)
-	pp(res, req, h)
+	pr(res, req, h)
 
 	print('body', sock, P(flush_body()))
 
@@ -103,7 +101,7 @@ local function test_server()
 		wrap_sock(csock, server)
 		while true do
 			local req = server:read_request('string')
-			pp(req)
+			pr(req)
 			print('cbody', csock, req.content)
 			local i = 0
 			local function gen_content()

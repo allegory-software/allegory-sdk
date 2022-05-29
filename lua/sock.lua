@@ -5,7 +5,7 @@
 	TLS support in sock_libtls.lua.
 
 ADDRESS LOOKUP
-	sock.addr(...) -> ai                       look-up a hostname
+	sockaddr(...) -> ai                        look-up a hostname
 	ai:free()                                  free the address list
 	ai:next() -> ai|nil                        get next address in list
 	ai:addrs() -> iter() -> ai                 iterate addresses
@@ -23,9 +23,9 @@ ADDRESS LOOKUP
 	ip:tostring() -> s                         IP address in string form
 
 SOCKETS
-	sock.tcp([family][, protocol]) -> tcp      make a TCP socket
-	sock.udp([family][, protocol]) -> udp      make a UDP socket
-	sock.raw([family][, protocol]) -> raw      make a raw socket
+	tcp([family][, protocol]) -> tcp           make a TCP socket
+	udp([family][, protocol]) -> udp           make a UDP socket
+	rawsocket([family][, protocol]) -> raw     make a raw socket
 	s:socktype() -> s                          socket type: 'tcp', ...
 	s:family() -> s                            address family: 'inet', ...
 	s:protocol() -> s                          protocol: 'tcp', 'icmp', ...
@@ -36,6 +36,7 @@ SOCKETS
 	s:setopt(opt, val)                         set socket option (`'so_*'` or `'tcp_*'`)
 	s:getopt(opt) -> val                       get socket option
 	tcp|udp:connect(host, port, [expires], [af], ...)             connect to an address
+	connect(tcp, host, port, [expires])        create tcp socket and connect
 	tcp:send(s|buf, [len], [expires]) -> true  send bytes to connected address
 	udp:send(s|buf, [len], [expires]) -> len   send bytes to connected address
 	tcp|udp:recv(buf, maxlen, [expires]) -> len  receive bytes
@@ -50,47 +51,52 @@ SOCKETS
 	s:debug([protocol], [log])                 log the I/O stream and close
 
 SCHEDULING
-	sock.thread(func[, fmt, ...]) -> co        create a coroutine for async I/O
-	sock.resume(thread, ...) -> ...            resume thread
-	sock.yield(...) -> ...                     safe yield (see [coro])
-	sock.suspend(...) -> ...                   suspend thread
-	sock.cowrap(f) -> wrapper                  see coro.safewrap()
-	sock.currentthread() -> co, is_main        current coroutine and whether it's the main one
-	sock.threadstatus(co) -> s                 coroutine.status()
-	sock.transfer(co, ...) -> ...              see coro.transfer()
-	sock.threadenv[co] -> t                    get a thread's own or inherited environment
-	sock.getthreadenv([co]) -> t               get (current) thread's own enviornment
-	sock.getownthreadenv([co], [create]) -> t  get/create (current) thread's own environment
-	sock.onthreadfinish(co, f)                 run `f(thread)` when thread finishes
+	thread(func[, fmt, ...]) -> co             create a coroutine for async I/O
+	resume(thread, ...) -> ...                 resume thread
+	yield(...) -> ...                          safe yield (see [coro])
+	suspend(...) -> ...                        suspend thread
+	cowrap(f) -> wrapper                       see coro.safewrap()
+	currentthread() -> co, is_main             current coroutine and whether it's the main one
+	threadstatus(co) -> s                      coroutine.status()
+	transfer(co, ...) -> ...                   see coro.transfer()
+	threadenv[co] -> t                         get a thread's own or inherited environment
+	getthreadenv([co]) -> t                    get (current) thread's own enviornment
+	getownthreadenv([co], [create]) -> t       get/create (current) thread's own environment
+	onthreadfinish(co, f)                      run `f(thread)` when thread finishes
 
-	sock.poll()                                poll for I/O
-	sock.start()                               keep polling until all threads finish
-	sock.stop()                                stop polling
-	sock.run(f, ...) -> ...                    run a function inside a sock thread
+	poll()                                     poll for I/O
+	start()                                    keep polling until all threads finish
+	stop()                                     stop polling
+	run(f, ...) -> ...                         run a function inside a thread
 
-	sock.sleep_job() -> sj                     make an interruptible async sleep job
-	sj:sleep_until(t) -> ...                   sleep until clock()
-	sj:sleep(s) -> ...                         sleep for `s` seconds
-	sj:wakeup(...)                             wake up the sleeping thread
-	sj:cancel()                                calls sj:wakeup(sj.CANCEL)
-	sj.CANCEL                                  magic arg that can cancel runat()
-	sock.sleep_until(t) -> ...                 sleep until clock() value
-	sock.sleep(s) -> ...                       sleep for s seconds
-	sock.runat(t, f) -> sj                     run `f` at clock `t`
-	sock.runafter(s, f) -> sj                  run `f` after `s` seconds
-	sock.runevery(s, f) -> sj                  run `f` every `s` seconds
-	sock.runagainevery(s, f) -> sj             run `f` now and every `s` seconds afterwards
-	s:sleep_job() -> sj                        sleep job that is auto-canceled on socket close
-	s:sleep_until(t) -> ...                    sleep_until() on auto-canceled sleep job
-	s:sleep(s) -> ...                          sleep() on auto-canceled sleep job
+	wait_job() -> sj                          make an interruptible async wait job
+	  sj:wait_until(t) -> ...                 wait until clock()
+	  sj:wait(s) -> ...                       wait for `s` seconds
+	  sj:resume(...)                          resume the waiting thread
+	  sj:cancel()                             calls sj:resume(sj.CANCEL)
+	  sj.CANCEL                               magic arg that can cancel runat()
+	wait_until(t) -> ...                      wait until clock() value
+	wait(s) -> ...                            wait for s seconds
+	runat(t, f) -> sj                         run `f` at clock `t`
+	runafter(s, f) -> sj                      run `f` after `s` seconds
+	runevery(s, f) -> sj                      run `f` every `s` seconds
+	runagainevery(s, f) -> sj                 run `f` now and every `s` seconds afterwards
 
-	sock.threadset() -> ts
-	ts:thread(f, [fmt, ...]) -> co
-	ts:wait() -> {{ok=,ret=,thread=},...}
+	s:wait_job() -> sj                      wait job that is auto-canceled on socket close
+	s:wait_until(t) -> ...                  wait_until() on auto-canceled wait job
+	s:wait(s) -> ...                        wait() on auto-canceled wait job
+
+	threadset() -> ts
+	  ts:thread(f, [fmt, ...]) -> co
+	  ts:join() -> {{ok=,ret=,thread=},...}
 
 MULTI-THREADING
-	sock.iocp([iocp_h]) -> iocp_h              get/set IOCP handle (Windows)
-	sock.epoll_fd([epfd]) -> epfd              get/set epoll fd (Linux)
+	iocp([iocp_h]) -> iocp_h                   get/set IOCP handle (Windows)
+	epoll_fd([epfd]) -> epfd                   get/set epoll fd (Linux)
+
+PROTOCOL ERROR HANDLING
+	tcp_protocol_errors(protocol_name) -> check_io, checkp, check, protect
+	  check[p|_io](self, val, format, format_args...) -> val
 
 ------------------------------------------------------------------------------
 
@@ -99,19 +105,19 @@ or unrecoverable OS failure). Some error messages are normalized
 across platforms, like 'access_denied' and 'address_already_in_use'
 so they can be used in conditionals.
 
-I/O functions only work inside threads created with `sock.thread()`.
+I/O functions only work inside threads created with `thread()`.
 
 The optional `expires` arg controls the timeout of the operation and must be
 a `clock()`-relative value (which is in seconds). If the expiration clock
 is reached before the operation completes, `nil, 'timeout'` is returned.
 
-`host, port` args are passed to `sock.addr()` (with the optional `af` arg),
+`host, port` args are passed to `sockaddr()` (with the optional `af` arg),
 which means that an already resolved address can be passed as `ai, nil`
 in place of `host, port`.
 
 ADDRESS LOOKUP ---------------------------------------------------------------
 
-sock.addr(...) -> ai
+sockaddr(...) -> ai
 
 	Look-up a hostname. Returns an "address info" object which is a OS-allocated
 	linked list of one or more addresses resolved with the system's `getaddrinfo()`.
@@ -128,7 +134,7 @@ sock.addr(...) -> ai
   * `protocol` can be `'ip'`, `'ipv6'`, `'tcp'`, `'udp'`, `'raw'`, `'icmp'`,
   `'igmp'` or `'icmpv6'` or `0` (the default is either `'tcp'`, `'udp'`
   or `'raw'`, based on socket type).
-  * `af` are a `glue.bor()` list of `passive`, `cannonname`,
+  * `af` are a `bor()` list of `passive`, `cannonname`,
     `numerichost`, `numericserv`, `all`, `v4mapped`, `addrconfig`
     which map to `getaddrinfo()` flags.
 
@@ -136,15 +142,15 @@ NOTE: `getaddrinfo()` is blocking. If that's a problem, use [resolver](resolver.
 
 SOCKETS ----------------------------------------------------------------------
 
-sock.tcp([family][, protocol]) -> tcp
+tcp([family][, protocol]) -> tcp
 
 	Make a TCP socket. The default family is `'inet'`.
 
-sock.udp([family][, protocol]) -> udp
+udp([family][, protocol]) -> udp
 
 	Make an UDP socket. The default family is `'inet'`.
 
-sock.raw([family][, protocol]) -> raw`
+rawsocket([family][, protocol]) -> raw`
 
 	Make a raw socket. The default family is `'inet'`.
 
@@ -250,10 +256,10 @@ tcp:shutdown('r'|'w'|'rw')
 
 SCHEDULING -------------------------------------------------------------------
 
-	Scheduling is based on synchronous coroutines provided by [coro](coro.md) which
+	Scheduling is based on synchronous coroutines provided by coro.lua which
 	allows coroutine-based iterators that perform socket I/O to be written.
 
-sock.thread(func[, fmt, ...]) -> co
+thread(func[, fmt, ...]) -> co
 
 	Create a coroutine for performing async I/O. The coroutine must be resumed
 	to start. When the coroutine finishes, the control is transfered to
@@ -262,51 +268,51 @@ sock.thread(func[, fmt, ...]) -> co
 	Full-duplex I/O on a socket can be achieved by performing reads in one thread
 	and writes in another.
 
-sock.resume(thread, ...)
+resume(thread, ...)
 
 	Resume a thread, which means transfer control to it, but also temporarily
 	change the I/O thread to be this thread so that the first suspending call
-	(send, recv, sleep, suspend, etc.) gives control back to this thread.
-	This is _the_ trick to starting multiple threads before starting polling.
+	(send, recv, wait, suspend, etc.) gives control back to this thread.
+	_This_ is the trick to starting multiple threads before starting polling.
 
-sock.suspend(...) -> ...
+suspend(...) -> ...
 
-	Suspend current thread, transfering to the polling thread (but also see resume()).
+	Suspend current thread, transfering to the polling thread (but see resume()).
 
-sock.poll(timeout) -> true | false,'timeout'
+poll(timeout) -> true | false,'timeout'
 
 	Poll for the next I/O event and resume the coroutine that waits for it.
 
 	Timeout is in seconds with anything beyond 2^31-1 taken as infinte
 	and defaults to infinite.
 
-sock.start(timeout)
+start(timeout)
 
 	Start polling. Stops after the timeout expires and there's no more I/O
 	or `stop()` was called.
 
-sock.stop()
+stop()
 
 	Tell the loop to stop dequeuing and return.
 
-sock.sleep_until(t)
+wait_until(t)
 
-	Sleep until a time.clock() value without blocking other threads.
+	Wait until a clock() value without blocking other threads.
 
-sock.sleep(s)
+wait(s) -> ...
 
-	Sleep `s` seconds without blocking other threads.
+	Wait `s` seconds without blocking other threads.
 
-sock.sleep_job() -> sj
+wait_job() -> sj
 
-	Make an interruptible sleeping job. Put the current thread sleep using
-	`sj:sleep()` or `sj:sleep_until()` and then from another thread call
-	`sj:wakeup()` to resume the sleeping thread. Any arguments passed to
-	`wakeup()` will be returned by `sleep()`.
+	Make an interruptible waiting job. Put the current thread wait using
+	`sj:wait()` or `sj:wait_until()` and then from another thread call
+	`sj:resume()` to resume the waiting thread. Any arguments passed to
+	`sj:resume()` will be returned by `wait()`.
 
 MULTI-THREADING --------------------------------------------------------------
 
-sock.iocp([iocp_handle]) -> iocp_handle
+iocp([iocp_handle]) -> iocp_handle
 
 	Get/set the global IOCP handle (Windows).
 
@@ -315,10 +321,10 @@ sock.iocp([iocp_handle]) -> iocp_handle
 	kernel to better distribute the completion events between threads.
 
 	To share the IOCP with another Lua state running on a different thread,
-	get the IOCP handle with `sock.iocp()`, copy it over to the other state,
-	then set it with `sock.iocp(copied_iocp)`.
+	get the IOCP handle with `iocp()`, copy it over to the other state,
+	then set it with `iocp(copied_iocp)`.
 
-sock.epoll_fd([epfd]) -> epfd
+epoll_fd([epfd]) -> epfd
 
 	Get/set the global epoll fd (Linux).
 
@@ -326,33 +332,30 @@ sock.epoll_fd([epfd]) -> epfd
 	threads is more efficient for the kernel than having one epfd per thread.
 
 	To share the epfd with another Lua state running on a different thread,
-	get the epfd with `sock.epoll_fd()`, copy it over to the other state,
-	then set it with `sock.epoll_fd(copied_epfd)`.
+	get the epfd with `epoll_fd()`, copy it over to the other state,
+	then set it with `epoll_fd(copied_epfd)`.
 
 ]=]
 
-local ffi = require'ffi'
-local bit = require'bit'
+if not ... then require'sock_test'; return end
 
-local glue   = require'glue'
-local heap   = require'heap'
-local coro   = require'coro'
-local clock  = require'time'.clock
-local errors = require'errors'
+require'glue'
+require'heap'
+require'logging'
+local coro = require'coro'
 
-coro.pcall = errors.pcall --add tracebacks to coro errors.
+local gc    = ffi.gc
+local fill  = ffi.fill
+local errno = ffi.errno
 
-local push = table.insert
-local pop  = table.remove
-
-local Windows = ffi.os == 'Windows'
-local Linux   = ffi.os == 'Linux'
-local OSX     = ffi.os == 'OSX'
+local coro_create   = coro.create
+local coro_safewrap = coro.safewrap
+local coro_transfer = coro.transfer
+local coro_finish   = coro.finish
 
 assert(Windows or Linux or OSX, 'unsupported platform')
 
-local C = Windows and ffi.load'ws2_32' or ffi.C
-local M = {C = C}
+local C = Windows and ffi.load'ws2_32' or C
 
 local socket = {debug_prefix = 'S'} --common socket methods
 local tcp = {type = 'tcp_socket'}
@@ -360,57 +363,19 @@ local udp = {type = 'udp_socket'}
 local raw = {type = 'raw_socket'}
 
 --forward declarations
-local check, poll, wait, create_socket, wrap_socket
-
-local function str(s, len)
-	if s == nil then return nil end
-	return ffi.string(s, len)
-end
-
-local currentthread = coro.running
-local transfer = coro.transfer
-
-function M.log(severity, module, event, fmt, ...)
-	local logging = M.logging
-	if not logging then
-		if severity == 'ERROR' then
-			io.stderr:write(fmt:format(...))
-			io.stderr:write'\n'
-			io.stderr:flush()
-		end
-		return
-	end
-	logging.log(severity, module, event, fmt, ...)
-end
-
-function M.live(...)
-	local logging = M.logging
-	if not logging then return end
-	logging.live(...)
-end
-
-function M.liveadd(...)
-	local logging = M.logging
-	if not logging then return end
-	logging.liveadd(...)
-end
-
---protocol libs will use these as their logging API.
-socket.log     = M.log
-socket.live    = M.live
-socket.liveadd = M.liveadd
+local check, _poll, wait_io, create_socket, wrap_socket
 
 function socket:close()
 	if not self.s then return true end
-	assert(M._unregister(self))
+	assert(_sock_unregister(self))
 	if self.listen_socket then
 		self.listen_socket.n = self.listen_socket.n - 1
 	end
 	local ok, err = self:_close()
-	M.live(self, nil)
+	live(self, nil)
 	self.s = nil --unsafe to close twice no matter the error.
 	if not ok then return false, err end
-	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
+	log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
 		self.n and ' live:'..self.n or '')
 	return true
 end
@@ -431,7 +396,7 @@ end
 
 --getaddrinfo() --------------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 struct sockaddr_in {
 	short          family_num;
 	uint8_t        port_bytes[2];
@@ -461,7 +426,7 @@ typedef struct sockaddr {
 
 -- working around ABI blindness of C programmers...
 if Windows then
-	ffi.cdef[[
+	cdef[[
 	struct addrinfo {
 		int              flags;
 		int              family_num;
@@ -474,7 +439,7 @@ if Windows then
 	};
 	]]
 else
-	ffi.cdef[[
+	cdef[[
 	struct addrinfo {
 		int              flags;
 		int              family_num;
@@ -488,7 +453,7 @@ else
 	]]
 end
 
-ffi.cdef[[
+cdef[[
 int getaddrinfo(const char *node, const char *service,
 	const struct addrinfo *hints, struct addrinfo **res);
 void freeaddrinfo(struct addrinfo *);
@@ -501,14 +466,14 @@ do
 		inet6 = Windows and 23 or Linux and 10,
 		unix  = Linux and 1,
 	}
-	local family_map = glue.index(families)
+	local family_map = index(families)
 
 	local socket_types = {
 		tcp = Windows and 1 or Linux and 1,
 		udp = Windows and 2 or Linux and 2,
 		raw = Windows and 3 or Linux and 3,
 	}
-	local socket_type_map = glue.index(socket_types)
+	local socket_type_map = index(socket_types)
 
 	local protocols = {
 		ip     = Windows and   0 or Linux and   0,
@@ -520,7 +485,7 @@ do
 		ipv6   = Windows and  41 or Linux and  41,
 		icmpv6 = Windows and  58 or Linux and  58,
 	}
-	local protocol_map = glue.index(protocols)
+	local protocol_map = index(protocols)
 
 	local flag_bits = {
 		passive     = Windows and 0x00000001 or 0x0001,
@@ -545,9 +510,9 @@ do
 		return st, af, pr
 	end
 
-	local hints = ffi.new'struct addrinfo'
-	local addrs = ffi.new'struct addrinfo*[1]'
-	local addrinfo_ct = ffi.typeof'struct addrinfo'
+	local hints = new'struct addrinfo'
+	local addrs = new'struct addrinfo*[1]'
+	local addrinfo_ct = typeof'struct addrinfo'
 
 	local getaddrinfo_error
 	if Windows then
@@ -555,13 +520,13 @@ do
 			return check()
 		end
 	else
-		ffi.cdef'const char *gai_strerror(int ecode);'
+		cdef'const char *gai_strerror(int ecode);'
 		function getaddrinfo_error(err)
 			return nil, str(C.gai_strerror(err))
 		end
 	end
 
-	function M.addr(host, port, socket_type, family, protocol, flags)
+	function sockaddr(host, port, socket_type, family, protocol, flags)
 		if host == '*' then host = '0.0.0.0' end --all.
 		if ffi.istype(addrinfo_ct, host) then
 			return host, true --pass-through and return "not owned" flag
@@ -572,19 +537,19 @@ do
 		end
 		assert(host, 'host required')
 		assert(port, 'port required')
-		ffi.fill(hints, ffi.sizeof(hints))
+		fill(hints, sizeof(hints))
 		hints.socktype_num, hints.family_num, hints.protocol_num
 			= socketargs(socket_type, family, protocol)
-		hints.flags = glue.bor(flags or 0, flag_bits, true)
+		hints.flags = flags and bitflags(flags, flag_bits, nil, true) or 0
 		local ret = C.getaddrinfo(host, port and tostring(port), hints, addrs)
 		if ret ~= 0 then return getaddrinfo_error(ret) end
-		return ffi.gc(addrs[0], C.freeaddrinfo)
+		return gc(addrs[0], C.freeaddrinfo)
 	end
 
 	local ai = {}
 
 	function ai:free()
-		ffi.gc(self, nil)
+		gc(self, nil)
 		C.freeaddrinfo(self)
 	end
 
@@ -622,7 +587,7 @@ do
 		return self.addr_in:tostring()..(self:port() ~= 0 and ':'..self:port() or '')
 	end
 
-	ffi.metatype('struct sockaddr', {__index = sa})
+	metatype('struct sockaddr', {__index = sa})
 
 	local sa_in4 = {}
 
@@ -635,7 +600,7 @@ do
 		return string.format('%d.%d.%d.%d', b[0], b[1], b[2], b[3])
 	end
 
-	ffi.metatype('struct sockaddr_in', {__index = sa_in4})
+	metatype('struct sockaddr_in', {__index = sa_in4})
 
 	local sa_in6 = {}
 
@@ -650,27 +615,27 @@ do
 			b[ 8]*0x100+b[ 9], b[10]*0x100+b[11], b[12]*0x100+b[13], b[14]*0x100+b[15])
 	end
 
-	ffi.metatype('struct sockaddr_in6', {__index = sa_in6})
+	metatype('struct sockaddr_in6', {__index = sa_in6})
 
-	ffi.metatype(addrinfo_ct, {__index = ai})
+	metatype(addrinfo_ct, {__index = ai})
 
 	function socket:socktype () return socket_type_map[self._st] end
 	function socket:family   () return family_map     [self._af] end
 	function socket:protocol () return protocol_map   [self._pr] end
 
 	function socket:addr(host, port, flags)
-		return M.addr(host, port, self._st, self._af, self._pr, addr_flags)
+		return sockaddr(host, port, self._st, self._af, self._pr, addr_flags)
 	end
 
 end
 
-local sockaddr_ct = ffi.typeof'sockaddr'
+local sockaddr_ct = typeof'sockaddr'
 
 --Winsock2 & IOCP ------------------------------------------------------------
 
 if Windows then
 
-ffi.cdef[[
+cdef[[
 
 // required types from `winapi.types` ----------------------------------------
 
@@ -874,11 +839,11 @@ void GetAcceptExSockaddrs(
 
 ]]
 
-local nbuf = ffi.new'DWORD[1]' --global buffer shared between many calls.
+local nbuf = new'DWORD[1]' --global buffer shared between many calls.
 
 --error handling
 do
-	ffi.cdef[[
+	cdef[[
 	DWORD FormatMessageA(
 		DWORD dwFlags,
 		LPCVOID lpSource,
@@ -908,10 +873,10 @@ do
 		local err = err or C.WSAGetLastError()
 		local msg = error_classes[err]
 		if not msg then
-			buf = buf or ffi.new('char[?]', 256)
+			buf = buf or new('char[?]', 256)
 			local sz = ffi.C.FormatMessageA(
 				FORMAT_MESSAGE_FROM_SYSTEM, nil, err, 0, buf, 256, nil)
-			msg = sz > 0 and ffi.string(buf, sz):gsub('[\r\n]+$', '') or 'Error '..err
+			msg = sz > 0 and str(buf, sz):gsub('[\r\n]+$', '') or 'Error '..err
 		end
 		return ret, msg
 	end
@@ -919,7 +884,7 @@ end
 
 --init winsock library.
 do
-	local WSADATA = ffi.new'WSADATA'
+	local WSADATA = new'WSADATA'
 	assert(check(C.WSAStartup(0x101, WSADATA) == 0))
 	assert(WSADATA.wVersion == 0x101)
 end
@@ -930,14 +895,14 @@ do
 	local IOC_OUT = 0x40000000
 	local IOC_IN  = 0x80000000
 	local IOC_WS2 = 0x08000000
-	local SIO_GET_EXTENSION_FUNCTION_POINTER = bit.bor(IOC_IN, IOC_OUT, IOC_WS2, 6)
+	local SIO_GET_EXTENSION_FUNCTION_POINTER = bor(IOC_IN, IOC_OUT, IOC_WS2, 6)
 
 	function bind_winsock_func(socket, func_ct, func_guid)
-		local cbuf = ffi.new(ffi.typeof('$[1]', ffi.typeof(func_ct)))
+		local cbuf = new(typeof('$[1]', typeof(func_ct)))
 		assert(check(C.WSAIoctl(
 			socket, SIO_GET_EXTENSION_FUNCTION_POINTER,
-			func_guid, ffi.sizeof(func_guid),
-			cbuf, ffi.sizeof(cbuf),
+			func_guid, sizeof(func_guid),
+			cbuf, sizeof(cbuf),
 			nbuf, nil, nil
 		)) == 0)
 		assert(cbuf[0] ~= nil)
@@ -947,26 +912,26 @@ end
 
 --Binding ConnectEx() because WSAConnect() doesn't do IOCP.
 local function ConnectEx(s, ...)
-	ConnectEx = bind_winsock_func(s, 'LPFN_CONNECTEX', ffi.new('GUID',
+	ConnectEx = bind_winsock_func(s, 'LPFN_CONNECTEX', new('GUID',
 		0x25a207b9,0xddf3,0x4660,{0x8e,0xe9,0x76,0xe5,0x8c,0x74,0x06,0x3e}))
 	return ConnectEx(s, ...)
 end
 
 local function AcceptEx(s, ...)
-	AcceptEx = bind_winsock_func(s, 'LPFN_ACCEPTEX', ffi.new('GUID',
+	AcceptEx = bind_winsock_func(s, 'LPFN_ACCEPTEX', new('GUID',
 		{0xb5367df1,0xcbac,0x11cf,{0x95,0xca,0x00,0x80,0x5f,0x48,0xa1,0x92}}))
 	return AcceptEx(s, ...)
 end
 
 do
 	local iocp
-	function M.iocp(shared_iocp)
+	function _G.iocp(shared_iocp)
 		if shared_iocp then
 			iocp = shared_iocp
 		elseif not iocp then
-			local INVALID_HANDLE_VALUE = ffi.cast('HANDLE', -1)
+			local INVALID_HANDLE_VALUE = cast('HANDLE', -1)
 			iocp = ffi.C.CreateIoCompletionPort(INVALID_HANDLE_VALUE, nil, 0, 0)
-			assert(check(M.iocp ~= nil))
+			assert(check(iocp ~= nil))
 		end
 		return iocp
 	end
@@ -974,18 +939,18 @@ end
 
 do
 	local WSA_FLAG_OVERLAPPED = 0x01
-	local INVALID_SOCKET = ffi.cast('SOCKET', -1)
+	local INVALID_SOCKET = cast('SOCKET', -1)
 
-	function M._register(socket)
-		local iocp = M.iocp()
-		local h = ffi.cast('HANDLE', socket.s)
+	function _sock_register(socket)
+		local iocp = iocp()
+		local h = cast('HANDLE', socket.s)
 		if ffi.C.CreateIoCompletionPort(h, iocp, 0, 0) ~= iocp then
 			return check()
 		end
 		return true
 	end
 
-	function M._unregister()
+	function _sock_unregister()
 		return true --no need.
 	end
 
@@ -1002,9 +967,9 @@ do
 		end
 
 		local s = wrap_socket(class, s, st, af, pr)
-		M.live(s, socktype)
+		live(s, socktype)
 
-		local ok, err = M._register(s)
+		local ok, err = _sock_register(s)
 		if not ok then
 			s:close()
 			return nil, err
@@ -1018,7 +983,7 @@ function socket:_close()
 	return check(C.closesocket(self.s) == 0)
 end
 
-local expires_heap = heap.valueheap{
+local expires_heap = heap{
 	cmp = function(job1, job2)
 		return job1.expires < job2.expires
 	end,
@@ -1026,28 +991,28 @@ local expires_heap = heap.valueheap{
 }
 
 do
-local function sleep_until(job, expires)
+local function wait_until(job, expires)
 	job.thread = currentthread()
 	job.expires = expires
 	expires_heap:push(job)
-	return wait(false)
+	return wait_io(false)
 end
-local function sleep(job, timeout)
-	return sleep_until(job, clock() + timeout)
+local function wait(job, timeout)
+	return wait_until(job, clock() + timeout)
 end
-local function wakeup(job, ...)
+local function job_resume(job, ...)
 	if not expires_heap:remove(job) then
 		return false
 	end
-	M.resume(job.thread, ...)
+	resume(job.thread, ...)
 	return true
 end
 local CANCEL = {}
 local function cancel(job)
-	wakeup(job, CANCEL)
+	job_resume(job, CANCEL)
 end
-function M.sleep_job()
-	return {sleep = sleep, sleep_until = sleep_until, wakeup = wakeup,
+function wait_job()
+	return {wait = wait, wait_until = wait_until, resume = job_resume,
 		cancel = cancel, CANCEL = CANCEL}
 end
 end
@@ -1057,16 +1022,16 @@ do
 	local jobs = {} --{job1, ...}
 	local freed = {} --{job_index1, ...}
 
-	local overlapped_ct = ffi.typeof[[
+	local overlapped_ct = typeof[[
 		struct {
 			OVERLAPPED overlapped;
 			int job_index;
 		}
 	]]
-	local overlapped_ptr_ct = ffi.typeof('$*', overlapped_ct)
+	local overlapped_ptr_ct = typeof('$*', overlapped_ct)
 
-	local OVERLAPPED = ffi.typeof'OVERLAPPED'
-	local LPOVERLAPPED = ffi.typeof'LPOVERLAPPED'
+	local OVERLAPPED = typeof'OVERLAPPED'
+	local LPOVERLAPPED = typeof'LPOVERLAPPED'
 
 	function overlapped(socket, done, expires)
 		if #freed > 0 then
@@ -1075,8 +1040,8 @@ do
 			job.socket = socket --socket or file object from fs.pipe()
 			job.done = done
 			job.expires = expires
-			local o = ffi.cast(LPOVERLAPPED, job.overlapped)
-			ffi.fill(o, ffi.sizeof(OVERLAPPED))
+			local o = cast(LPOVERLAPPED, job.overlapped)
+			fill(o, sizeof(OVERLAPPED))
 			return o, job
 		else
 			local job = {socket = socket, done = done, expires = expires}
@@ -1084,12 +1049,12 @@ do
 			job.overlapped = o
 			push(jobs, job)
 			o.job_index = #jobs
-			return ffi.cast(LPOVERLAPPED, o), job
+			return cast(LPOVERLAPPED, o), job
 		end
 	end
 
 	function free_overlapped(o)
-		local o = ffi.cast(overlapped_ptr_ct, o)
+		local o = cast(overlapped_ptr_ct, o)
 		push(freed, o.job_index)
 		return jobs[o.job_index]
 	end
@@ -1097,17 +1062,17 @@ do
 end
 
 do
-	local keybuf = ffi.new'ULONG_PTR[1]'
-	local obuf = ffi.new'LPOVERLAPPED[1]'
+	local keybuf = new'ULONG_PTR[1]'
+	local obuf = new'LPOVERLAPPED[1]'
 
 	local WAIT_TIMEOUT = 258
 	local ERROR_OPERATION_ABORTED = 995
 	local ERROR_NOT_FOUND = 1168
 	local INFINITE = 0xffffffff
 
-	local void_ptr_c = ffi.typeof'void*'
+	local void_ptr_c = typeof'void*'
 
-	--[[local]] function poll()
+	--[[local]] function _poll()
 
 		local job = expires_heap:peek()
 		local timeout = job and math.max(0, job.expires - clock()) or 1/0
@@ -1117,7 +1082,7 @@ do
 		if timeout_ms > 0x7fffffff then timeout_ms = INFINITE end
 
 		local ok = ffi.C.GetQueuedCompletionStatus(
-			M.iocp(), nbuf, keybuf, obuf, timeout_ms) ~= 0
+			iocp(), nbuf, keybuf, obuf, timeout_ms) ~= 0
 
 		local o = obuf[0]
 
@@ -1138,18 +1103,18 @@ do
 						if job.socket then
 							local s = job.socket.s --pipe or socket
 							local o = job.overlapped.overlapped
-							local ok = ffi.C.CancelIoEx(ffi.cast(void_ptr_c, s), o) ~= 0
+							local ok = ffi.C.CancelIoEx(cast(void_ptr_c, s), o) ~= 0
 							if not ok then
 								local err = C.WSAGetLastError()
 								if err == ERROR_NOT_FOUND then --too late, already gone
 									free_overlapped(o)
-									transfer(job.thread, nil, 'timeout')
+									coro_transfer(job.thread, nil, 'timeout')
 								else
 									assert(check(ok, err))
 								end
 							end
-						else --sleep
-							transfer(job.thread)
+						else --wait()
+							coro_transfer(job.thread)
 						end
 					else
 						--jobs are popped in expire-order so no point looking beyond this.
@@ -1169,16 +1134,16 @@ do
 				if job.expires then
 					assert(expires_heap:remove(job))
 				end
-				transfer(job.thread, job:done(n))
+				coro_transfer(job.thread, job:done(n))
 			else
 				local err = C.WSAGetLastError()
 				if err == ERROR_OPERATION_ABORTED then --canceled
-					transfer(job.thread, nil, 'timeout')
+					coro_transfer(job.thread, nil, 'timeout')
 				else
 					if job.expires then
 						assert(expires_heap:remove(job))
 					end
-					transfer(job.thread, check(nil, err))
+					coro_transfer(job.thread, check(nil, err))
 				end
 			end
 			return true
@@ -1195,7 +1160,7 @@ do
 				expires_heap:push(job)
 			end
 			job.thread = currentthread()
-			return wait()
+			return wait_io()
 		end
 		return check()
 	end
@@ -1205,7 +1170,7 @@ do
 	end
 
 	function tcp:connect(host, port, expires, addr_flags, ...)
-		self.log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
+		log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
 		if not self.bound_addr then
 			--ConnectEx requires binding first.
 			local ok, err = self:bind(...)
@@ -1221,8 +1186,8 @@ do
 			return false, err
 		end
 		local ip = ai:tostring()
-		self.log('', 'sock', 'connectd', '%-4s %s', self, ip)
-		self.live(self, 'connected %s', ip)
+		log('', 'sock', 'connectd', '%-4s %s', self, ip)
+		live(self, 'connected %s', ip)
 		if not ext_ai then ai:free() end
 		return true
 	end
@@ -1233,11 +1198,11 @@ do
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		self.log('', 'sock', 'connected', '%-4s %s', self, ai:tostring())
+		log('', 'sock', 'connected', '%-4s %s', self, ai:tostring())
 		return true
 	end
 
-	local accept_buf_ct = ffi.typeof[[
+	local accept_buf_ct = typeof[[
 		struct {
 			struct sockaddr local_addr;
 			char reserved[16];
@@ -1246,14 +1211,14 @@ do
 		}
 	]]
 	local accept_buf = accept_buf_ct()
-	local sa_len = ffi.sizeof(accept_buf) / 2
+	local sa_len = sizeof(accept_buf) / 2
 	function tcp:accept(expires)
-		self.log('', 'sock', 'accept', '%-4s', self)
-		local s, err = M.tcp(self._af, self._pr)
+		log('', 'sock', 'accept', '%-4s', self)
+		local s, err = create_socket(tcp, 'tcp', self._af, self._pr)
 		if not s then
 			return nil, err
 		end
-		M.live(s, 'wait-accept %s', self) --only shows in Windows.
+		live(s, 'wait-accept %s', self) --only shows in Windows.
 		local o, job = overlapped(self, return_true, expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
 		local ok, err = check_pending(ok, job)
@@ -1267,9 +1232,9 @@ do
 		local lp = accept_buf. local_addr:port()
 		self.n = self.n + 1
 		s.i = self.n
-		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1278,16 +1243,16 @@ do
 		return s
 	end
 
-	local pchar_t = ffi.typeof'char*'
-	local wsabuf = ffi.new'WSABUF'
-	local flagsbuf = ffi.new'DWORD[1]'
+	local pchar_t = typeof'char*'
+	local wsabuf = new'WSABUF'
+	local flagsbuf = new'DWORD[1]'
 
 	local function io_done(job, n)
 		return n
 	end
 
 	local function socket_send(self, buf, len, expires)
-		wsabuf.buf = type(buf) == 'string' and ffi.cast(pchar_t, buf) or buf
+		wsabuf.buf = type(buf) == 'string' and cast(pchar_t, buf) or buf
 		wsabuf.len = len
 		local o, job = overlapped(self, io_done, expires)
 		local ok = C.WSASend(self.s, wsabuf, 1, nil, 0, o, nil) == 0
@@ -1326,7 +1291,7 @@ do
 		len = len or #buf
 		local ai, ext_ai = self:addr(host, port, addr_flags)
 		if not ai then return nil, ext_ai end
-		wsabuf.buf = type(buf) == 'string' and ffi.cast(pchar_t, buf) or buf
+		wsabuf.buf = type(buf) == 'string' and cast(pchar_t, buf) or buf
 		wsabuf.len = len
 		local o, job = overlapped(self, io_done, expires)
 		local ok = C.WSASendTo(self.s, wsabuf, 1, nil, flags or 0, ai.addr, ai.addrlen, o, nil) == 0
@@ -1337,8 +1302,8 @@ do
 		return n
 	end
 
-	local int_buf_ct = ffi.typeof'int[1]'
-	local sa_buf_len = ffi.sizeof(sockaddr_ct)
+	local int_buf_ct = typeof'int[1]'
+	local sa_buf_len = sizeof(sockaddr_ct)
 
 	function udp:recvnext(buf, len, expires, flags)
 		assert(len > 0)
@@ -1357,7 +1322,7 @@ do
 		return n, job.sa
 	end
 
-	function M._file_async_read(f, read_overlapped, buf, sz, expires)
+	function _file_async_read(f, read_overlapped, buf, sz, expires)
 		local o, job = overlapped(f, io_done, expires)
 		local ok = read_overlapped(f, o, buf, sz)
 		local n, err = check_pending(ok, job)
@@ -1365,7 +1330,7 @@ do
 		return n
 	end
 
-	function M._file_async_write(f, write_overlapped, buf, sz, expires)
+	function _file_async_write(f, write_overlapped, buf, sz, expires)
 		local o, job = overlapped(f, io_done, expires)
 		local ok = write_overlapped(f, o, buf, sz)
 		local n, err = check_pending(ok, job)
@@ -1381,7 +1346,7 @@ end --if Windows
 
 if Linux or OSX then
 
-ffi.cdef[[
+cdef[[
 typedef int SOCKET;
 int socket(int af, int type, int protocol);
 int accept(int s, struct sockaddr *addr, int *addrlen);
@@ -1411,10 +1376,10 @@ local error_classes = {
 	[111] = 'connection_refused', --ECONNREFUSED
 }
 
-ffi.cdef'char *strerror(int errnum);'
+cdef'char *strerror(int errnum);'
 function check(ret)
 	if ret then return ret end
-	local err = ffi.errno()
+	local err = errno()
 	local msg = error_classes[err]
 	return ret, msg or str(C.strerror(err)), err
 end
@@ -1423,12 +1388,12 @@ local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
 
 --[[local]] function create_socket(class, socktype, family, protocol)
 	local st, af, pr = socketargs(socktype, family or 'inet', protocol)
-	local s = C.socket(af, bit.bor(st, SOCK_NONBLOCK), pr)
+	local s = C.socket(af, bor(st, SOCK_NONBLOCK), pr)
 	if s == -1 then
 		return check()
 	end
 	local s = wrap_socket(class, s, st, af, pr)
-	M.live(s, socktype)
+	live(s, socktype)
 	return s
 end
 
@@ -1440,14 +1405,14 @@ local EAGAIN      = 11
 local EWOULDBLOCK = 11
 local EINPROGRESS = 115
 
-local recv_expires_heap = heap.valueheap{
+local recv_expires_heap = heap{
 	cmp = function(s1, s2)
 		return s1.recv_expires < s2.recv_expires
 	end,
 	index_key = 'index', --enable O(log n) removal.
 }
 
-local send_expires_heap = heap.valueheap{
+local send_expires_heap = heap{
 	cmp = function(s1, s2)
 		return s1.send_expires < s2.send_expires
 	end,
@@ -1455,28 +1420,28 @@ local send_expires_heap = heap.valueheap{
 }
 
 do
-local function sleep_until(job, expires)
+local function wait_until(job, expires)
 	job.recv_thread = currentthread()
 	job.recv_expires = expires
 	recv_expires_heap:push(job)
-	return wait(false)
+	return wait_io(false)
 end
-local function sleep(job, timeout)
-	return sleep_until(job, clock() + timeout)
+local function wait(job, timeout)
+	return wait_until(job, clock() + timeout)
 end
-local function wakeup(job, ...)
+local function job_resume(job, ...)
 	if not recv_expires_heap:remove(job) then
 		return false
 	end
-	M.resume(job.recv_thread, ...)
+	resume(job.recv_thread, ...)
 	return true
 end
 local CANCEL = {}
 local function cancel(job)
-	wakeup(job, CANCEL)
+	job_resume(job, CANCEL)
 end
-function M.sleep_job()
-	return {sleep = sleep, sleep_until = sleep_until, wakeup = wakeup,
+function wait_job()
+	return {wait = wait, wait_until = wait_until, resume = job_resume,
 		cancel = cancel, CANCEL = CANCEL}
 end
 end
@@ -1495,7 +1460,7 @@ local function make_async(for_writing, returns_n, func, wait_errno)
 			end
 			return ret
 		end
-		if ffi.errno() == wait_errno then
+		if errno() == wait_errno then
 			if for_writing then
 				self.send_expires = expires
 				if expires then
@@ -1509,7 +1474,7 @@ local function make_async(for_writing, returns_n, func, wait_errno)
 				end
 				self.recv_thread = currentthread()
 			end
-			local ok, err = wait()
+			local ok, err = wait_io()
 			if not ok then
 				return nil, err
 			end
@@ -1519,12 +1484,12 @@ local function make_async(for_writing, returns_n, func, wait_errno)
 	end
 end
 
-local connect = make_async(true, false, function(self, ai)
+local _connect = make_async(true, false, function(self, ai)
 	return C.connect(self.s, ai.addr, ai.addrlen)
 end, EINPROGRESS)
 
 function socket:connect(host, port, expires, addr_flags, ...)
-	self.log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
+	log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
 	local ai, ext_ai = self:addr(host, port, addr_flags)
 	if not ai then return nil, ext_ai end
 	if not self.bound_addr then
@@ -1534,14 +1499,14 @@ function socket:connect(host, port, expires, addr_flags, ...)
 			return false, err
 		end
 	end
-	local len, err = connect(self, expires, ai)
+	local len, err = _connect(self, expires, ai)
 	if not len then
 		if not ext_ai then ai:free() end
 		return false, err
 	end
 	local ip = ai:tostring()
-	self.log('', 'sock', 'connectd', '%-4s %s', self, ip)
-	self.live(self, 'connected %s', ip)
+	log('', 'sock', 'connectd', '%-4s %s', self, ip)
+	live(self, 'connected %s', ip)
 	if not ext_ai then ai:free() end
 	return true
 end
@@ -1557,9 +1522,9 @@ do
 	local EOPNOTSUPP    =  95
 	local ENETUNREACH   = 101
 
-	local nbuf = ffi.new'int[1]'
+	local nbuf = new'int[1]'
 	local accept_buf = sockaddr_ct()
-	local accept_buf_size = ffi.sizeof(accept_buf)
+	local accept_buf_size = sizeof(accept_buf)
 
 	local tcp_accept = make_async(false, false, function(self)
 		nbuf[0] = accept_buf_size
@@ -1567,7 +1532,7 @@ do
 	end, EWOULDBLOCK)
 
 	function tcp:accept(expires)
-		self.log('', 'sock', 'accept', '%-4s', self)
+		log('', 'sock', 'accept', '%-4s', self)
 		local s, err, errno = tcp_accept(self, expires)
 		local retry =
 			   errno == ENETDOWN
@@ -1582,7 +1547,7 @@ do
 			return nil, err, retry
 		end
 		local s = wrap_socket(tcp, s, self._st, self._af, self._pr)
-		local ok, err = M._register(s)
+		local ok, err = _sock_register(s)
 		if not ok then
 			s:close()
 			return nil, err
@@ -1600,9 +1565,9 @@ do
 		local lp = accept_buf:port()
 		self.n = self.n + 1
 		s.i = self.n
-		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1654,8 +1619,8 @@ end
 
 do
 	local src_buf = sockaddr_ct()
-	local src_buf_len = ffi.sizeof(src_buf)
-	local src_len_buf = ffi.new'int[1]'
+	local src_buf_len = sizeof(src_buf)
+	local src_len_buf = new'int[1]'
 
 	local udp_recvnext = make_async(false, true, function(self, buf, len, flags)
 		src_len_buf[0] = src_buf_len
@@ -1679,10 +1644,10 @@ local file_read = make_async(false, true, function(self, buf, len)
 	return tonumber(C.read(self.fd, buf, len))
 end, EAGAIN)
 
-function M._file_async_write(f, buf, len, expires)
+function _file_async_write(f, buf, len, expires)
 	return file_write(f, expires, buf, len)
 end
-function M._file_async_read(f, buf, len, expires)
+function _file_async_read(f, buf, len, expires)
 	return file_read(f, expires, buf, len)
 end
 
@@ -1690,7 +1655,7 @@ end
 
 if Linux then
 
-ffi.cdef[[
+cdef[[
 typedef union epoll_data {
 	void *ptr;
 	int fd;
@@ -1721,7 +1686,7 @@ local EPOLL_CTL_MOD = 3
 
 do
 	local epoll_fd
-	function M.epoll_fd(shared_epoll_fd, flags)
+	function _G.epoll_fd(shared_epoll_fd, flags)
 		if shared_epoll_fd then
 			epoll_fd = shared_epoll_fd
 		elseif not epoll_fd then
@@ -1737,24 +1702,24 @@ do
 	local sockets = {} --{socket1, ...}
 	local free_indices = {} --{i1, ...}
 
-	local e = ffi.new'struct epoll_event'
-	function M._register(s)
+	local e = new'struct epoll_event'
+	function _sock_register(s)
 		local i = pop(free_indices) or #sockets + 1
 		s._i = i
 		sockets[i] = s
 		e.data.u32 = i
 		e.events = EPOLLIN + EPOLLOUT + EPOLLET
-		return check(C.epoll_ctl(M.epoll_fd(), EPOLL_CTL_ADD, s.s, e) == 0)
+		return check(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, s.s, e) == 0)
 	end
 
 	local ENOENT = 2
 
-	function M._unregister(s)
+	function _sock_unregister(s)
 		local i = s._i
 		if not i then return true end --closing before bind() was called.
-		local ok = C.epoll_ctl(M.epoll_fd(), EPOLL_CTL_DEL, s.s, nil) == 0
+		local ok = C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, s.s, nil) == 0
 		--epoll removed the fd if connection was closed so ENOENT is normal.
-		if not ok and ffi.errno() ~= ENOENT then
+		if not ok and errno() ~= ENOENT then
 			return check()
 		end
 		sockets[i] = false
@@ -1785,15 +1750,15 @@ do
 		end
 		if has_err then
 			local err = socket:getopt'error'
-			transfer(thread, nil, err or 'socket error')
+			coro_transfer(thread, nil, err or 'socket error')
 		else
-			transfer(thread, true)
+			coro_transfer(thread, true)
 		end
 	end
 
 	local function check_heap(heap, EXPIRES, THREAD, t)
 		while true do
-			local socket = heap:peek() --gets a socket or sleep job
+			local socket = heap:peek() --gets a socket or wait job
 			if not socket then
 				break
 			end
@@ -1802,7 +1767,7 @@ do
 				socket[EXPIRES] = nil
 				local thread = socket[THREAD]
 				socket[THREAD] = nil
-				transfer(thread, nil, 'timeout')
+				coro_transfer(thread, nil, 'timeout')
 			else
 				--socket are popped in expire-order so no point looking beyond this.
 				break
@@ -1816,11 +1781,11 @@ do
 	--not the number of epoll_event items that were filled, contrary to what
 	--the epoll man page says, so it's not trivial to parse the result.
 	local maxevents = 1
-	local events = ffi.new('struct epoll_event[?]', maxevents)
+	local events = new('struct epoll_event[?]', maxevents)
 	local RECV_MASK = EPOLLIN  + EPOLLERR + EPOLLHUP + EPOLLRDHUP
 	local SEND_MASK = EPOLLOUT + EPOLLERR + EPOLLHUP + EPOLLRDHUP
 
-	--[[local]] function poll()
+	--[[local]] function _poll()
 
 		local ss = send_expires_heap:peek()
 		local rs = recv_expires_heap:peek()
@@ -1832,7 +1797,7 @@ do
 		local timeout_ms = math.max(timeout * 1000, 100)
 		if timeout_ms > 0x7fffffff then timeout_ms = -1 end --infinite
 
-		local n = C.epoll_wait(M.epoll_fd(), events, maxevents, timeout_ms)
+		local n = C.epoll_wait(epoll_fd(), events, maxevents, timeout_ms)
 		if n > 0 then
 			assert(n == 1)
 			local e = events[0].events
@@ -1840,9 +1805,9 @@ do
 			local socket = sockets[si]
 			--if EPOLLHUP/RDHUP/ERR arrives (and it'll arrive alone because maxevents == 1),
 			--we need to wake up all waiting threads because EPOLLIN/OUT might never follow!
-			local has_err = bit.band(e, EPOLLERR) ~= 0
-			if bit.band(e, RECV_MASK) ~= 0 then wake(socket, false, has_err) end
-			if bit.band(e, SEND_MASK) ~= 0 then wake(socket, true , has_err) end
+			local has_err = band(e, EPOLLERR) ~= 0
+			if band(e, RECV_MASK) ~= 0 then wake(socket, false, has_err) end
+			if band(e, SEND_MASK) ~= 0 then wake(socket, true , has_err) end
 			return true
 		elseif n == 0 then
 			--handle timed-out ops.
@@ -1862,7 +1827,7 @@ end --if Linux
 
 if OSX then
 
-ffi.cdef[[
+cdef[[
 int kqueue(void);
 int kevent(int kq, const struct kevent *changelist, int nchanges,
 	struct kevent *eventlist, int nevents,
@@ -1876,7 +1841,7 @@ end --if Linux or OSX
 
 --shutodnw() -----------------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 int shutdown(SOCKET s, int how);
 ]]
 
@@ -1889,7 +1854,7 @@ end
 
 --bind() ---------------------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 int bind(SOCKET s, const sockaddr*, int namelen);
 ]]
 
@@ -1906,7 +1871,7 @@ function socket:bind(host, port, addr_flags)
 	self.bound_port = bp
 	if Linux then
 		--epoll_ctl() must be called after bind() for some reason.
-		return M._register(self)
+		return _sock_register(self)
 	else
 		return true
 	end
@@ -1914,7 +1879,7 @@ end
 
 --listen() -------------------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 int listen(SOCKET s, int backlog);
 ]]
 
@@ -1926,18 +1891,18 @@ function tcp:listen(backlog, host, port, addr_flags)
 		local ok, err = self:bind(host, port, addr_flags)
 		if not ok then return nil, err end
 	end
-	backlog = glue.clamp(backlog or 1/0, 0, 0x7fffffff)
+	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
 	local ok = C.listen(self.s, backlog) == 0
 	if not ok then return check() end
-	self.log('', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
-	self.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
+	log('', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
+	live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0 --live client connection count
 	return true
 end
 
 do --getopt() & setopt() -----------------------------------------------------
 
-local buf = ffi.new[[
+local buf = new[[
 	union {
 		char     c[4];
 		uint32_t u;
@@ -1991,10 +1956,10 @@ OPT = { --Windows 7 options only
 	bsp_state          = 0x1009, -- get socket 5-tuple state
 	conditional_accept = 0x3002, -- enable true conditional accept (see msdn)
 	connect_time       = 0x700C, -- number of seconds a socket has been connected
-	dontlinger         = bit.bnot(0x0080),
+	dontlinger         = bnot(0x0080),
 	dontroute          = 0x0010, -- just use interface addresses
 	error              = 0x1007, -- get error status and clear
-	exclusiveaddruse   = bit.bnot(0x0004), -- disallow local address reuse
+	exclusiveaddruse   = bnot(0x0004), -- disallow local address reuse
 	keepalive          = 0x0008, -- keep connections alive
 	linger             = 0x0080, -- linger on close if data present
 	max_msg_size       = 0x2003, -- maximum message size for UDP
@@ -2178,7 +2143,7 @@ set_opt = {
 end
 
 local function parse_opt(k)
-	local opt = assert(OPT[k], 'invalid socket option')
+	local opt = assertf(OPT[k], 'invalid socket option: %s', k)
 	local level =
 		(k:find('tcp_', 1, true) and 6) --TCP protocol number
 		or (
@@ -2190,8 +2155,8 @@ end
 
 function socket:getopt(k)
 	local opt, level = parse_opt(k)
-	local get = assert(get_opt[k], 'write-only socket option')
-	local nbuf = ffi.new('int[1]', 4)
+	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
+	local nbuf = i32a(1)
 	local ok, err = check(C.getsockopt(self.s, level, opt, buf.c, nbuf))
 	if not ok then return nil, err end
 	return get(buf, sz)
@@ -2208,7 +2173,7 @@ end --do
 
 --tcp repeat I/O -------------------------------------------------------------
 
-local pchar_t = ffi.typeof'char*'
+local pchar_t = typeof'char*'
 
 function tcp:send(buf, sz, expires)
 	sz = sz or #buf
@@ -2223,7 +2188,7 @@ function tcp:send(buf, sz, expires)
 		end
 		assert(len > 0)
 		if type(buf) == 'string' then --only make pointer on the rare second pass.
-			buf = ffi.cast(pchar_t, buf)
+			buf = cast(pchar_t, buf)
 		end
 		buf = buf + len
 		sz  = sz  - len
@@ -2247,27 +2212,27 @@ function tcp:recvn(buf, sz, expires)
 end
 
 function tcp:recvall(expires)
-	return glue.readall(self.recv, self, expires)
+	return readall(self.recv, self, expires)
 end
 
 function tcp:recvall_read(expires)
-	return glue.buffer_reader(self:recvall(expires))
+	return buffer_reader(self:recvall(expires))
 end
 
 --sleeping & timers ----------------------------------------------------------
 
-function M.sleep_until(expires)
-	M.sleep_job():sleep_until(expires)
+function wait_until(expires)
+	wait_job():wait_until(expires)
 end
 
-function M.sleep(timeout)
-	M.sleep_job():sleep(timeout)
+function wait(timeout)
+	wait_job():wait(timeout)
 end
 
-function M.runat(t, f, ...)
-	local job = M.sleep_job()
-	M.resume(M.thread(function()
-		if job:sleep_until(t) == job.CANCEL then
+function runat(t, f, ...)
+	local job = wait_job()
+	resume(thread(function()
+		if job:wait_until(t) == job.CANCEL then
 			return
 		end
 		f()
@@ -2275,20 +2240,20 @@ function M.runat(t, f, ...)
 	return job
 end
 
-function M.runafter(timeout, f, ...)
-	return M.runat(clock() + timeout, f, ...)
+function runafter(timeout, f, ...)
+	return runat(clock() + timeout, f, ...)
 end
 
-local function runevery(now_too, interval, f, ...)
-	local job = M.sleep_job()
-	M.resume(M.thread(function()
+local function _runevery(now_too, interval, f, ...)
+	local job = wait_job()
+	resume(thread(function()
 		if now_too then
 			if f() == false then
 				return
 			end
 		end
 		while true do
-			if job:sleep(interval) == job.CANCEL then
+			if job:wait(interval) == job.CANCEL then
 				return
 			end
 			if f() == false then
@@ -2298,50 +2263,48 @@ local function runevery(now_too, interval, f, ...)
 	end, ...))
 	return job
 end
-function M.runevery      (...) return runevery(false, ...) end
-function M.runagainevery (...) return runevery(true , ...) end
+function runevery      (...) return _runevery(false, ...) end
+function runagainevery (...) return _runevery(true , ...) end
 
-function socket:sleep_job()
-	local job = M.sleep_job()
+function socket:wait_job()
+	local job = wait_job()
 	self:onclose(function()
 		job:cancel()
 	end)
 	return job
 end
 
-function socket:sleep_until(expires)
-	return self:sleep_job():sleep_until(expires)
+function socket:wait_until(expires)
+	return self:wait_job():wait_until(expires)
 end
 
-function socket:sleep(timeout)
-	return self:sleep_job():sleep(timeout)
+function socket:wait(timeout)
+	return self:wait_job():wait(timeout)
 end
 
 --debug API ------------------------------------------------------------------
 
-function socket:debug(protocol, log)
-
-	log = log or require'logging'.log
+function socket:debug(protocol)
 
 	local function ds(event, s)
 		log('', protocol or '', event, '%-4s %5s %s', self, s and #s or '', s)
 	end
 
-	glue.override(self, 'recv', function(inherited, self, buf, ...)
+	override(self, 'recv', function(inherited, self, buf, ...)
 		local sz, err = inherited(self, buf, ...)
 		if not sz then return nil, err end
-		ds('<', ffi.string(buf, sz))
+		ds('<', str(buf, sz))
 		return sz
 	end)
 
-	glue.override(self, 'send', function(inherited, self, buf, sz, ...)
+	override(self, 'send', function(inherited, self, buf, sz, ...)
 		local ok, err = inherited(self, buf, sz, ...)
 		if not ok then return nil, err end
-		ds('>', ffi.string(buf, sz or #buf))
+		ds('>', str(buf, sz or #buf))
 		return ok
 	end)
 
-	glue.override(self, 'close', function(inherited, self, ...)
+	override(self, 'close', function(inherited, self, ...)
 		local ok, err = inherited(self, ...)
 		if not ok then return nil, err  end
 		ds('CC')
@@ -2355,20 +2318,30 @@ end
 --[[local]] function wrap_socket(class, s, st, af, pr)
 	local s = {s = s, __index = class, _st = st, _af = af, _pr = pr, r = 0, w = 0}
 	setmetatable(s, s)
-	s.log('', 'sock', 'create', '%-4s', s)
+	log('', 'sock', 'create', '%-4s', s)
 	return s
 end
-function M.tcp(...) return create_socket(tcp, 'tcp', ...) end
-function M.udp(...) return create_socket(udp, 'udp', ...) end
-function M.raw(...) return create_socket(raw, 'raw', ...) end
+function _G.tcp       (...) return create_socket(tcp, 'tcp', ...) end
+function _G.udp       (...) return create_socket(udp, 'udp', ...) end
+function _G.rawsocket (...) return create_socket(raw, 'raw', ...) end
 
-glue.update(tcp, socket)
-glue.update(udp, socket)
-glue.update(raw, socket)
+update(tcp, socket)
+update(udp, socket)
+update(raw, socket)
 
-M.udp_class = udp
-M.tcp_class = tcp
-M.raw_class = raw
+udp_class = udp
+tcp_class = tcp
+raw_class = raw
+
+function connect(host, port, expires)
+	local tcp = tcp()
+	local ok, err = tcp:connect(host, port, expires)
+	if not ok then
+		tcp:close()
+		return nil, err
+	end
+	return tcp
+end
 
 --coroutine-based scheduler --------------------------------------------------
 
@@ -2380,43 +2353,45 @@ local wait_count = 0
 local waiting = setmetatable({}, weak_keys) --{thread -> true}
 
 do
-local function pass(thread, ...)
+local function cont(thread, ...)
 	wait_count = wait_count - 1
 	waiting[thread] = nil
 	return ...
 end
---[[local]] function wait(register)
+--[[local]] function wait_io(register)
 	local thread, is_main = currentthread()
 	assert(not is_main, 'trying to perform I/O from the main thread')
 	wait_count = wait_count + 1
 	if register ~= false then
 		waiting[thread] = true
 	end
-	return pass(thread, transfer(poll_thread))
+	return cont(thread, coro_transfer(poll_thread))
 end
 end
 
-function M.poll()
+function poll()
 	if wait_count == 0 then
 		return nil, 'empty'
 	end
-	return poll()
+	return _poll()
 end
 
 local threadfinish = setmetatable({}, weak_keys)
-function M.onthreadfinish(thread, f)
-	glue.after(threadfinish, thread, f)
+function onthreadfinish(thread, f)
+	after(threadfinish, thread, f)
 end
+
+currentthread = coro.running
 
 local threadenv = setmetatable({}, weak_keys)
 local ownthreadenv = setmetatable({}, weak_keys)
-M.threadenv = threadenv
+_G.threadenv = threadenv
 
-function M.getthreadenv(thread)
+function getthreadenv(thread)
 	return threadenv[thread or currentthread()]
 end
 
-function M.getownthreadenv(thread, create)
+function getownthreadenv(thread, create)
 	thread = thread or currentthread()
 	local t = ownthreadenv[thread]
 	if not t and create ~= false then
@@ -2437,17 +2412,17 @@ local function thread_onfinish(thread, ok, ...)
 	if finish then
 		finish(thread, ok, ...)
 	end
-	--sock threads don't have a caller thread to re-raise their errors into,
+	--poll threads don't have a caller thread to re-raise their errors into,
 	--and we don't want them to break the main thread either as coro thereads
 	--do by default, so errors are just logged and the thread finishes in the
 	--current poll_thread (which is the caller thread when using resume()).
 	if not ok then
-		M.log('ERROR', 'sock', 'thread', '%s', ...)
+		log('ERROR', 'sock', 'thread', '%s', ...)
 	end
-	return true, coro.finish(poll_thread)
+	return true, coro_finish(poll_thread)
 end
-function M.thread(f, ...)
-	local thread = coro.create(f, thread_onfinish, ...)
+function thread(f, ...)
+	local thread = coro_create(f, thread_onfinish, ...)
 	threadenv[thread] = threadenv[currentthread()] --inherit threadenv.
 	return thread
 end
@@ -2461,51 +2436,47 @@ local function cowrap_onfinish(thread, ok, ...)
 	--have one) so no need to log them. finalizers are still available for them.
 	return ok, ...
 end
-function M.cowrap(f, ...)
-	local wrapped, thread = coro.safewrap(f, cowrap_onfinish, ...)
+function cowrap(f, ...)
+	local wrapped, thread = coro_safewrap(f, cowrap_onfinish, ...)
 	threadenv[thread] = threadenv[currentthread()] --inherit threadenv.
 	return wrapped, thread
 end
 
-function M.transfer(thread, ...)
+function transfer(thread, ...)
 	assert(not waiting[thread], 'attempt to resume a thread that is waiting on I/O')
-	return transfer(thread, ...)
+	return coro_transfer(thread, ...)
 end
 
-M.cofinish = coro.finish
-
-function M.suspend(...)
-	return transfer(poll_thread, ...)
+function suspend(...)
+	return coro_transfer(poll_thread, ...)
 end
 
-local function resume_pass(real_poll_thread, ...)
+do
+local function cont(real_poll_thread, ...)
 	poll_thread = real_poll_thread
 	return ...
 end
-function M.resume(thread, ...)
+function resume(thread, ...)
+	assert(not waiting[thread], 'attempt to resume a thread that is waiting on I/O')
 	local real_poll_thread = poll_thread
 	--change poll_thread temporarily so that we get back here
-	--from the first call to suspend() or wait().
+	--from the first call to suspend() or wait_io().
 	poll_thread = currentthread()
-	return resume_pass(real_poll_thread, M.transfer(thread, ...))
+	return cont(real_poll_thread, coro_transfer(thread, ...))
 end
-
-M.currentthread = currentthread
-M.threadstatus = coro.status
-M.yield = coro.yield
+end
 
 local function rets_tostring(rets)
 	local t = {}
-	local logarg = M.logging and M.logging.arg or tostring
 	for i,ret in ipairs(rets) do
-		local args = table.concat(glue.imap(ret, logarg), ', ')
+		local args = table.concat(imap(ret, logarg), ', ')
 		t[i] = logarg(ret.thread) .. ': '..args
 	end
 	return table.concat(t, '\n')
 end
 local rets_mt = {__tostring = rets_tostring}
 
-function M.threadset()
+function threadset()
 	local ts = {}
 	local n = 0
 	local all_ok = true
@@ -2523,63 +2494,158 @@ function M.threadset()
 		if not ok then all_ok = false end
 	end
 	function ts:thread(f, ...)
-		return M.thread(function(...)
+		return thread(function(...)
 			n = n + 1
 			local ret = {thread = currentthread()}
-			pass(ret, errors.pcall(f, ...))
+			pass(ret, pcall(f, ...))
 			n = n - 1
 			if n == 0 then
 				transfer(wait_thread)
 			end
 		end, ...)
 	end
-	function ts:wait()
+	function ts:join()
 		if n ~= 0 then
 			wait_thread = currentthread()
-			M.suspend()
+			suspend()
 		end
 		return all_ok, rets
 	end
 	return ts
 end
 
-local stop = false
+local _stop = false
 local running = false
-function M.stop() stop = true end
-function M.start()
+function stop() _stop = true end
+function start()
 	if running then
 		return
 	end
 	poll_thread = currentthread()
 	repeat
 		running = true
-		local ret, err = M.poll()
+		local ret, err = poll()
 		if not ret then
-			M.stop()
+			stop()
 			if err ~= 'empty' then
 				running = false
-				stop = false
+				_stop = false
 				return ret, err
 			end
 		end
-	until stop
+	until _stop
 	running = false
-	stop = false
+	_stop = false
 	return true
 end
 
-function M.run(f, ...)
+function run(f, ...)
 	if running then
 		return f(...)
 	else
 		local ret
 		local function wrapper(...)
-			ret = glue.pack(f(...))
+			ret = pack(f(...))
 		end
-		M.resume(M.thread(wrapper, 'sock-run'), ...)
-		assert(M.start())
-		return ret and glue.unpack(ret)
+		resume(thread(wrapper, 'sock-run'), ...)
+		assert(start())
+		return ret and unpack(ret)
 	end
 end
 
-return M
+--[=[ TCP protocol error handling --------------------------------------------
+
+tcp_protocol_errors(protocol_name) -> check_io, checkp, check, protect
+check[p|_io](self, val, format, format_args...) -> val
+
+This is an error-handling discipline to use when writing TCP-based
+protocols. Instead of using standard `assert()` and `pcall()`, use `check()`,
+`checkp()` and `check_io()` to raise errors inside protocol methods and then
+wrap those methods in `protect()` to catch those errors and have the method
+return `nil, err` instead of raising for those types of errors.
+
+You should distinguish between multiple types of errors:
+
+- Invalid API usage, i.e. bugs on this side, which should raise (but shouldn't
+  happen in production). Use `assert()` for those.
+
+- Response validation errors, i.e. bugs on the other side which shouldn't
+  raise but they put the connection in an inconsistent state so the connection
+  must be closed. Use `checkp()` short of "check protocol" for those. Note that
+  if your protocol is not meant to work with a hostile or unstable peer, you
+  can skip the `checkp()` checks entirely because they won't guard against
+  anything and just bloat the code.
+
+- Request or response content validation errors, which can be user-corrected
+  so mustn't raise and mustn't close the connection. Use `check()` for those.
+
+- I/O errors, i.e. network failures which can be temporary and thus make the
+  request retriable (in a new connection, this one must be closed), so they
+  must be distinguishable from other types of errors. Use `check_io()` for
+  those. On the call side then check the error class for implementing retries.
+
+Following this protocol should easily cut your network code in half, increase
+its readability (no more error-handling noise) and its reliability (no more
+confusion about when to raise and when not to or forgetting to handle an error).
+
+Your connection object must have a `tcp` field with a tcp:close() method
+to be called by check_io() and checkp() (but not by check()) on failure.
+
+Note that protect() only catches errors raised by check*(), other Lua errors
+pass through and the connection isn't closed either.
+
+Note that the sock API does not currently distinguish usage errors from
+network errors, so calling eg. `check_io(self, self.tcp:connect())` will
+catch usage errors as network errors. This must be fixed in sock, eg. with
+a third return value `retry` indicating that the error is a network error,
+then we can make check_io() take that into account and call check()
+internally if `retry` is false.
+
+]=]
+
+local tcp_error = errortype'tcp'
+
+function tcp_error:init()
+	if self.tcp then
+		self.tcp:close(0)
+		self.tcp = nil
+	end
+end
+
+local function check_io(self, v, ...)
+	if v then return v, ... end
+	raise(tcp_error({
+		tcp = self and self.tcp,
+		addtraceback = self and self.tracebacks,
+	}, ...))
+end
+
+local errors_protect = protect
+
+function tcp_protocol_errors(protocol)
+
+	local protocol_error = errortype(protocol, nil, protocol .. ' protocol error')
+	local content_error  = errortype(nil, nil, protocol .. ' error')
+
+	protocol_error.init = tcp_error.init
+
+	local function checker(create_error)
+		return function(self, v, ...)
+			if v then return v, ... end
+			raise(create_error({
+				tcp = self and self.tcp,
+				addtraceback = self and self.tracebacks,
+			}, ...))
+		end
+	end
+	local checkp = checker(protocol_error)
+	local check  = checker(content_error)
+
+	local classes = {[tcp_error]=1, [protocol_error]=1, [content_error]=1}
+
+	local function protect(f, oncaught)
+		return errors_protect(classes, f, oncaught)
+	end
+
+	return check_io, checkp, check, protect
+end

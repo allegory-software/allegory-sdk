@@ -44,27 +44,15 @@ LIMITATIONS
 	* loading back the output with the Lua interpreter is not safe.
 
 API
-	pp(v1, ...)                    print the arguments to standard output.
-	pp.write(write, v, options...) pritty-print to supplied write function.
-	pp.save(path, v, options...)   pretty-print a value to a file, prepending 'return '.
-	pp.load(path) -> v             load back a saved value.
-	pp.stream(f, v, options...)    pretty-print a value to an opened file.
-	pp.format(v, options...) -> s  pretty-print a value to a string.
+	pp(v, opt...) -> s                      pretty-print v to a string.
+	[try_]pp_save(f|write|path, v, opt...)  pretty-print v to file.
 
-pp(v1, ...)
-
-	Print the arguments to standard output.
-	Only tables are pretty-printed, everything else gets printed raw.
-	Cycle detection, indentation and sorting of keys are enabled in this mode.
-	Unserializable values get a comment in place.
-	Functions are skipped entirely.
-
-pp.write(write, v, options...)
+pp_write(write, v, opt...)
 
 	Pretty-print a value using a supplied write function that takes a string.
 	The options can be given in a table or as separate args:
 
-	* `indent` - enable indentation (default is '\t', pass `false` to get compact output).
+	* `indent` - default is '\t', pass `false` to get compact, faster output.
 	* `quote` - string quoting to use eg. `'"'` (default is "'").
 	* `line_term` - line terminator to use (default is `'\n'`).
 	* `onerror` - enable error handling eg. `function(err_type, v, depth)
@@ -80,9 +68,18 @@ pp.write(write, v, options...)
 
 if not ... then require'pp_test'; return end
 
-local type, tostring = type, tostring
-local string_format, string_dump = string.format, string.dump
-local math_huge, floor = math.huge, math.floor
+local ffi = require'ffi'
+
+local
+	type, tostring, string_format, string_dump, math_huge, floor =
+	type, tostring, string.format, string.dump, math.huge, math.floor
+
+local sort   = table.sort
+local concat = table.concat
+local io_stdout = io.stdout
+
+local int64  = ffi.typeof'int64_t'
+local uint64 = ffi.typeof'uint64_t'
 
 --pretty printing for non-structured types -----------------------------------
 
@@ -174,14 +171,8 @@ local function write_function(f, write, quote)
 	write'loadstring('; write_string(string_dump(f, true), write, quote); write')'
 end
 
-local ffi, int64, uint64
 local function is_int64(v)
 	if type(v) ~= 'cdata' then return false end
-	if not int64 then
-		ffi = require'ffi'
-		int64 = ffi.typeof'int64_t'
-		uint64 = ffi.typeof'uint64_t'
-	end
 	return ffi.istype(v, int64) or ffi.istype(v, uint64)
 end
 
@@ -234,13 +225,11 @@ end
 
 --pretty-printing for tables -------------------------------------------------
 
-local to_string --fw. decl.
-
 local cache = setmetatable({}, {__mode = 'kv'})
-local function cached_to_string(v, parents)
+local function cached_pp(v, parents)
 	local s = cache[v]
 	if not s then
-		s = to_string(v, nil, parents, nil, nil, nil, true)
+		s = pp(v, nil, parents, nil, nil, nil, true)
 		cache[v] = s
 	end
 	return s
@@ -250,7 +239,9 @@ local function virttype(v)
 	return is_stringable(v) and 'string' or type(v)
 end
 
-local type_order = {boolean=1, number=2, string=3, table=4, thread=5, cdata=6, ['function']=7}
+local type_order = {
+	boolean=1, number=2, string=3, table=4, thread=5, cdata=6, ['function']=7,
+}
 local function cmp_func(t, parents)
 	local function cmp(a, b)
 		local ta, tb = virttype(a), virttype(b)
@@ -264,8 +255,8 @@ local function cmp_func(t, parents)
 			elseif a == nil then --can happen when comparing values
 				return false
 			else
-				local sa = cached_to_string(a, parents)
-				local sb = cached_to_string(b, parents)
+				local sa = cached_pp(a, parents)
+				local sb = cached_pp(b, parents)
 				if sa == sb then --keys look the same serialized, compare values
 					return cmp(t[a], t[b])
 				else
@@ -284,7 +275,7 @@ local function sortedpairs(t, parents)
 	for k in pairs(t) do
 		keys[#keys+1] = k
 	end
-	table.sort(keys, cmp_func(t, parents))
+	sort(keys, cmp_func(t, parents))
 	local i = 0
 	return function()
 		i = i + 1
@@ -422,83 +413,34 @@ local function args(opt, ...)
 		sort_keys, filter
 end
 
-local function to_sink(write, v, ...)
-	return pretty(v, write, 1, nil, args(...))
+function try_pp_save(write, v, ...)
+	if type(write) == 'string' then --path
+		require'fs'
+		local write_protected = assert(file_saver(write))
+		local function write(s)
+			return assert(write_protected(s))
+		end
+	elseif type(write) ~= 'function' then --assume io or fs file object
+		local f = write
+		write = function(s) assert(f:write(s)) end
+	end
+	write'return '
+	local ok, err = pcall(pretty, v, write, 1, nil, args(...))
+	if not ok then
+		local ok1, err1 = write_protected(ABORT)
+		if not ok1 then return false, err1 end
+		return false, err
+	else
+		return true
+	end
 end
 
-function to_string(v, ...) --fw. declared
+function pp_save(write, v, ...)
+	assert(try_pp_save(write, v, ...))
+end
+
+function pp(v, ...)
 	local buf = {}
 	pretty(v, function(s) buf[#buf+1] = s end, 1, nil, args(...))
-	return table.concat(buf)
+	return concat(buf)
 end
-
-local function to_openfile(f, v, ...)
-	pretty(v, function(s) assert(f:write(s)) end, 1, nil, args(...))
-end
-
-local function to_file(file, v, ...)
-	local fs = require'fs'
-	return fs.save(file, coroutine.wrap(function(...)
-		coroutine.yield'return '
-		to_sink(coroutine.yield, v, ...)
-	end, ...))
-end
-
-local function to_stdout(v, ...)
-	return to_openfile(io.stdout, v, ...)
-end
-
-local pp_skip = {
-	__index = 1,
-	__newindex = 1,
-	__mode = 1,
-}
-local function filter(v, k, t) --don't show methods and inherited objects.
-	if type(v) == 'function' then return end --skip methods.
-	if getmetatable(t) == t and pp_skip[k] then return end --skip inherits.
-	return true, v
-end
-local function pp(...)
-	local n = select('#',...)
-	for i = 1, n do
-		local v = select(i,...)
-		if is_stringable(v) then
-			io.stdout:write(tostring(v))
-		else
-			to_openfile(io.stdout, v, nil, nil, nil, nil, nil, nil, filter)
-		end
-		if i < n then io.stdout:write'\t' end
-	end
-	io.stdout:write'\n'
-	io.stdout:flush()
-	return ...
-end
-
-return setmetatable({
-
-	--these can be exposed too if needed:
-	--
-	--is_identifier = is_identifier,
-	--is_dumpable = is_dumpable,
-	--is_serializable = is_serializable,
-	--is_stringable = is_stringable,
-	--
-	--format_value = format_value,
-	--write_value = write_value,
-
-	write = to_sink,
-	format = to_string,
-	stream = to_openfile,
-	save = to_file,
-	load = function(file)
-		local f, err = loadfile(file)
-		if not f then return nil, err end
-		local ok, v = pcall(f)
-		if not ok then return nil, v end
-		return v
-	end,
-	pp = pp, --old API
-
-}, {__call = function(self, ...)
-	return self.pp(...)
-end})

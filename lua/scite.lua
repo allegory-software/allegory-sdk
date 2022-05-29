@@ -1,7 +1,6 @@
 io.stdout:setvbuf'no'
-local glue = require'glue'
-local fs = require'fs'
-local tests_dir = fs.exedir()..'/../../tests'
-glue.luapath(tests_dir)
-fs.chdir(tests_dir)
-require'$log'
+require'glue'
+require'fs'
+local tests_dir = exedir()..'/../../tests'
+luapath(tests_dir)
+chdir(tests_dir)

@@ -1,13 +1,12 @@
 
-local mysql = require'mysql'
-local sock = require'sock'
-local pp = require'pp'
-require'$'
+require'mysql'
+require'sock'
+require'logging'
 
-sock.run(function()
+run(function()
 
-	local conn = assert(mysql.connect{
-		host = '127.0.0.1',
+	local conn = assert(mysql_connect{
+		host = '10.0.0.5',
 		port = 3307,
 		user = 'root',
 		password = 'root',
@@ -76,7 +75,7 @@ sock.run(function()
 		print()
 	end
 
-	--pp(conn:query'select * from val where val = 1')
+	--pr(conn:query'select * from val where val = 1')
 	local stmt = assert(conn:prepare
 		--'select cast(123 as tinyint) union select cast(123 as tinyint)')
 		'select * from mysql_test')

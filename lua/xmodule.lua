@@ -21,10 +21,7 @@ CALLS
 
 require'xrowset'
 require'webb_action'
-
-local path = require'path'
-local fs = require'fs'
-local _ = string.format
+require'fs'
 
 --rowsets --------------------------------------------------------------------
 
@@ -49,7 +46,7 @@ end
 
 function xmodule_layer(layer)
 	local s = load(xmodule_layer_file(layer), false)
-	return s and json(s)
+	return s and json_encode(s)
 end
 
 function action.xmodule_next_id(module)
@@ -67,7 +64,7 @@ action['xmodule_layer.json'] = function(layer)
 	checkarg(layer:find'^[%w_%-]+$')
 	local file = xmodule_layer_file(layer)
 	if method'post' then
-		save(file, json(post(), '\t'))
+		save(file, json_encode(post(), '\t'))
 	else
 		outall(load(file, '{}'))
 	end

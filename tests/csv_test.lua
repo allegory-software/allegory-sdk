@@ -1,5 +1,5 @@
 pcall(require, "strict")
-local csv = require"csv"
+require"csv"
 
 local errors = 0
 
@@ -33,7 +33,7 @@ local function test(filename, correct_result, parameters)
   parameters = parameters or {}
   for i = 1, 16 do
     parameters.buffer_size = i
-    local f = csv.open(filename, parameters)
+    local f = csv_open(filename, parameters)
     local fileok = testhandle(f, correct_result)
 
     if fileok then
@@ -41,7 +41,7 @@ local function test(filename, correct_result, parameters)
       local data = f:read("*a")
       f:close()
 
-      f = csv.openstring(data, parameters)
+      f = csv_openstring(data, parameters)
       testhandle(f, correct_result)
     end
   end

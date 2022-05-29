@@ -3,33 +3,35 @@
 	Wall clock, monotonic clock, and sleep function (Windows, Linux and OSX).
 	Written by Cosmin Apreutesei. Public Domain.
 
-	time.time() -> ts    wall clock time with ~100us precision
-	time.clock() -> ts   monotonic time in seconds with ~1us precision
-	time.startclock      system clock when this module was loaded
-	time.sleep(s)        sleep with sub-second precision (~10-100ms)
-	time.install()       increase accuracy of `os.date()` and `os.time()`
+	now() -> ts          current time with ~100us precision
+	clock() -> ts        monotonic clock in seconds with ~1us precision
+	startclock           clock() when this module was loaded
+	sleep(s)             sleep with sub-second precision (~10-100ms)
 
-	time.time() -> ts
+	now() -> ts
 
-		Reads the wall-clock time as a UNIX timestamp (a Lua number).
+		Reads the time as a UNIX timestamp (a Lua number).
 		It is the same as the time returned by `os.time()` on all platforms,
 		except it has sub-second precision. It is affected by drifting,
 		leap seconds and time adjustments by the user. It is not affected
 		by timezones. It can be used to synchronize time between different
 		boxes on a network regardless of platform.
 
-	time.clock() -> ts
+	clock() -> ts
 
 		Reads a monotonic performance counter, and is thus more accurate than
-		`time.time()`, it should never go back or drift, but it doesn't have
+		`now()`, it should never go back or drift, but it doesn't have
 		a fixed time base between program executions. It can be used
 		for measuring short time intervals for thread synchronization, etc.
+
+	sleep(s)
+
+		Suspends the current process `s` seconds. Different than wait() which
+		only suspends the current Lua thread.
 
 ]=]
 
 local ffi = require'ffi'
-
-local M = {}
 local C = ffi.C
 
 if ffi.os == 'Windows' then
@@ -44,7 +46,7 @@ if ffi.os == 'Windows' then
 	local t = ffi.new'uint64_t[1]'
 	local DELTA_EPOCH_IN_100NS = 116444736000000000ULL
 
-	function M.time()
+	function now()
 		C.time_GetSystemTimeAsFileTime(t)
 		return tonumber(t[0] - DELTA_EPOCH_IN_100NS) * 1e-7
 	end
@@ -53,14 +55,14 @@ if ffi.os == 'Windows' then
 	local inv_qpf = 1 / tonumber(t[0]) --precision loss in e-10
 
 	local t0 = 0
-	function M.clock()
+	function clock()
 		assert(C.time_QueryPerformanceCounter(t) ~= 0)
 		return tonumber(t[0]) * inv_qpf - t0
 	end
-	t0 = M.clock()
-	M.startclock = t0
+	t0 = clock()
+	startclock = t0
 
-	function M.sleep(s)
+	function sleep(s)
 		C.time_Sleep(s * 1000)
 	end
 
@@ -79,7 +81,7 @@ elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
 
 	local t = ffi.new'time_timespec'
 
-	function M.sleep(s)
+	function sleep(s)
 		local int, frac = math.modf(s)
 		t.s = int
 		t.ns = frac * 1e9
@@ -106,18 +108,18 @@ elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
 			return tonumber(t.s) + tonumber(t.ns) / 1e9
 		end
 
-		function M.time()
+		function now()
 			assert(clock_gettime(CLOCK_REALTIME, t) == 0)
 			return tos(t)
 		end
 
 		local t0 = 0
-		function M.clock()
+		function clock()
 			assert(clock_gettime(CLOCK_MONOTONIC, t) == 0)
 			return tos(t) - t0
 		end
-		t0 = M.clock()
-		M.startclock = t0
+		t0 = clock()
+		startclock = t0
 
 	elseif ffi.os == 'OSX' then
 
@@ -139,7 +141,7 @@ elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
 
 		local t = ffi.new'time_timeval'
 
-		function M.time()
+		function now()
 			assert(C.time_gettimeofday(t, nil) == 0)
 			return tonumber(t.s) + tonumber(t.us) * 1e-6
 		end
@@ -150,61 +152,32 @@ elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
 		assert(C.time_mach_timebase_info(timebase) == 0)
 		local scale = tonumber(timebase.numer) / tonumber(timebase.denom) / 1e9
 		local t0
-		function M.clock()
+		function clock()
 			return tonumber(C.time_mach_absolute_time()) * scale - t0
 		end
-		t0 = M.clock()
+		t0 = clock()
 
 	end --OSX
 
 end --Linux or OSX
 
-function M.install()
-
-	--replace os.time() with a more accurate version...
-	--glue.time() will also benefit.
-	local os_time = os.time
-	local time = M.time
-	function os.time(t)
-		if not t then return time() end
-		return os_time(t)
-	end
-
-	--replace os.date() with a more accurate version...
-	local os_date = os.date
-	local time = M.time
-	function os.date(fmt, t)
-		t = t or time()
-		local d = os_date(fmt, t)
-		if type(d) == 'table' then
-			d.sec = d.sec + t - floor(t) --increase accuracy in d.sec
-		end
-		return d
-	end
-
-	--replace os.clock() with a more accurate version...
-	os.clock = M.clock
-
-end
-
 --demo -----------------------------------------------------------------------
 
 if not ... then
 	io.stdout:setvbuf'no'
-	local time = M
 
-	print('time ', time.time())
-	print('clock', time.clock())
+	print('now'   , now())
+	print('clock' , clock())
 
 	local function test_sleep(s, ss)
-		local t0 = time.clock()
+		local t0 = clock()
 		local times = math.floor(s*1/ss)
 		s = times * ss
 		print(string.format('sleeping %gms in %gms increments (%d times)...', s * 1000, ss * 1000, times))
 		for i=1,times do
-			time.sleep(ss)
+			sleep(ss)
 		end
-		local t1 = time.clock()
+		local t1 = clock()
 		print(string.format('  missed by: %0.2fms', (t1 - t0 - s) / times * 1000))
 	end
 
@@ -212,5 +185,3 @@ if not ... then
 	test_sleep(0.2, 0.02)
 	test_sleep(2, 0.2)
 end
-
-return M

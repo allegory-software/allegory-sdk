@@ -3,9 +3,9 @@
 	BLAKE3 fast cryptographic hash.
 	Writen by Cosmin Apreutesei. Public Domain.
 
-	blake3.new([key[, sz]]) -> b3                 get a hash state
-	blake3.derive_key(context[, sz]) -> b3        get a hash state in key derivation mode
-	blake3.hash(s, [sz], [key], [out[, outsz]]) -> s   hash a string
+	blake3_state([key[, sz]]) -> b3               get a hash state
+	blake3_derive_key(context[, sz]) -> b3        get a hash state in key derivation mode
+	blake3(s, [sz], [key], [out[, outsz]]) -> s   hash a string
 	b3:update(s[, sz]) -> b3                      digest a string or buffer
 	b3:finalize([buf[, sz]]) -> s                 finalize and get the hash
 	b3:finalize_tobuffer([buf[, sz]]) -> buf, sz  finalize and get the hash into a buffer
@@ -18,7 +18,6 @@ if not ... then require'blake3_test'; return end
 
 local ffi = require'ffi'
 local C = ffi.load'blake3'
-local M = {}
 
 ffi.cdef[[
 enum {
@@ -60,8 +59,8 @@ local blake3_outbuf = ffi.typeof'uint8_t[BLAKE3_OUT_LEN]'
 local b3 = {}
 
 local kbuf = ffi.new'uint8_t[BLAKE3_KEY_LEN]'
-function M.new(key, sz)
-	local self = ffi.cast(ffi.typeof('blake3_hasher*'), require'glue'.malloc(ffi.sizeof(blake3_hasher)))
+function blake3_state(key, sz)
+	local self = blake3_hasher()
 	if key then
 		ffi.fill(kbuf, C.BLAKE3_KEY_LEN)
 		ffi.copy(kbuf, key, math.min(C.BLAKE3_KEY_LEN, sz or #key))
@@ -72,7 +71,7 @@ function M.new(key, sz)
 	return self
 end
 
-function M.derive_key(cx, sz)
+function blake3_derive_key(cx, sz)
 	local self = blake3_hasher()
 	C.blake3_hasher_init_derive_key_raw(self, cx, sz or #cx)
 	return self
@@ -106,8 +105,6 @@ end
 
 ffi.metatype(blake3_hasher, {__index = b3})
 
-function M.hash(s, sz, key, out, outsz)
-	return M.new(key):update(s, sz):finalize(out, outsz)
+function blake3(s, sz, key, out, outsz)
+	return blake3_state(key):update(s, sz):finalize(out, outsz)
 end
-
-return M

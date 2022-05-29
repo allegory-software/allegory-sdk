@@ -87,39 +87,39 @@ raw64       x               integer             0..0xffffffffffffffffUL
 API --------------------------------------------------------------------------
 
 BITMAP INFO
-	bitmap.format(bmp|\format_name) -> format`,              | bitmap format (a table)
-	bitmap.stride(bmp) -> stride`                            | row stride in bytes
-	bitmap.row_size(bmp) -> size`                            | row size in bytes
-	bitmap.colortype(bmp|\colortype_name) -> colortype`      | bitmap colortype (a table)
+	bitmap_format(bmp|\format_name) -> format`,              | bitmap format (a table)
+	bitmap_stride(bmp) -> stride`                            | row stride in bytes
+	bitmap_row_size(bmp) -> size`                            | row size in bytes
+	bitmap_colortype(bmp|\colortype_name) -> colortype`      | bitmap colortype (a table)
 BITMAP OPS
-	bitmap.new(w, h, ...) -> dst`                            | create a bitmap
-	bitmap.copy(src[, format], ...) -> dst`                  | copy and convert a bitmap
-	bitmap.paint(dst, src, dstx, dsty, ...) -> dst`          | paint a bitmap on another
-	bitmap.clear([byte_value])`                              | clear bitmap
-	bitmap.sub(src, [x], [y], [w], [h]) -> dst`              | make a sub-bitmap
+	bitmap(w, h, ...) -> dst`                                | create a bitmap
+	bitmap_copy(src[, format], ...) -> dst`                  | copy and convert a bitmap
+	bitmap_paint(dst, src, dstx, dsty, ...) -> dst`          | paint a bitmap on another
+	bitmap_clear([byte_value])`                              | clear bitmap
+	bitmap_sub(src, [x], [y], [w], [h]) -> dst`              | make a sub-bitmap
 PIXEL ACCESS
-	bitmap.pixel_interface(src) -> getpixel, setpixel`       | get a pixel interface
-	bitmap.channel_interface(bmp, n) -> getval, setval`      | get a channel interface
+	bitmap_pixel_interface(src) -> getpixel, setpixel`       | get a pixel interface
+	bitmap_channel_interface(bmp, n) -> getval, setval`      | get a channel interface
 UTILS
-	bitmap.min_stride(format, width) -> min_stride`          | minimum stride for width
-	bitmap.aligned_stride(stride[, align]) -> stride, align` | next aligned stride
-	bitmap.aligned_pointer(ptr[, align]) -> ptr, align`      | next aligned pointer
+	bitmap_min_stride(format, width) -> min_stride`          | minimum stride for width
+	bitmap_aligned_stride(stride[, align]) -> stride, align` | next aligned stride
+	bitmap_aligned_pointer(ptr[, align]) -> ptr, align`      | next aligned pointer
 
 Bitmap operations ------------------------------------------------------------
 
-bitmap.new(w, h, format, [bottom_up], [align], [stride], [alloc]) -> new_bmp
+bitmap(w, h, format, [bottom_up], [align], [stride], [alloc]) -> bmp
 
 	Create a bitmap object. The optional `align` (which defaults to 1) specifies
 	the data pointer and stride alignment (`true` means 4). The optional `alloc`
-	is an `alloc(bytes) -> data` function (eg. `glue.malloc`).
+	is an `alloc(bytes) -> data` function (eg. `malloc`).
 
-bitmap.copy(bmp, [format], [bottom_up], [align], [stride]) -> new_bmp
+bitmap_copy(bmp, [format], [bottom_up], [align], [stride]) -> bmp
 
 	Copy a bitmap, optionally to a new format, orientation and stride. If `format`
 	is not specified, stride and orientation default to those of source bitmap's,
 	otherwise they default to top-down, minimum stride.
 
-bitmap.paint(dest_bmp, source_bmp[, dstx, dsty][, convert_pixel, [src_colortype], [dst_colortype]]) -> dest_bmp
+bitmap_paint(dest_bmp, source_bmp[, dstx, dsty][, convert_pixel, [src_colortype], [dst_colortype]]) -> dest_bmp
 
 	Paint a source bitmap into a destination bitmap, with all the necessary
 	clipping and pixel and colortype conversions.
@@ -137,7 +137,7 @@ bitmap.paint(dest_bmp, source_bmp[, dstx, dsty][, convert_pixel, [src_colortype]
 	bitmap can also be the source bitmap itself, which is useful for performing
 	custom transformations via the `convert_pixel` callback.
 
-bitmap.sub(bmp, [x], [y], [w], [h]) -> sub_bmp
+bitmap_sub(bmp, [x], [y], [w], [h]) -> sub_bmp
 
 	Crop a bitmap without copying the pixels (the `data` field of the sub-bitmap
 	is a pointer into the `data` buffer of the parent bitmap). The parent bitmap
@@ -151,7 +151,7 @@ bitmap.sub(bmp, [x], [y], [w], [h]) -> sub_bmp
 	To get real cropping, just copy the bitmap, specifying the format and
 	orientation to reset the stride:
 
-		sub = bitmap.copy(sub, sub.format, sub.bottom_up)
+		sub = bitmap_copy(sub, sub.format, sub.bottom_up)
 
 	> NOTE: For 1, 2, 4 bpp formats, the coordinates must be such that the
 	data pointer points to the beginning of a byte (that is, is not fractional).
@@ -160,7 +160,7 @@ bitmap.sub(bmp, [x], [y], [w], [h]) -> sub_bmp
 
 Pixel interface --------------------------------------------------------------
 
-bitmap.pixel_interface(bitmap[, colortype]) -> getpixel, setpixel
+bitmap_pixel_interface(bitmap[, colortype]) -> getpixel, setpixel
 
 Return an API for getting and setting individual pixels of a bitmap object:
 
@@ -177,7 +177,7 @@ Example:
 		return r / 2, g / 2, b / 2, a --make 2x darker
 	end
 
-	local getpixel, setpixel = bitmap.pixel_interface(bmp)
+	local getpixel, setpixel = bitmap_pixel_interface(bmp)
 	for y = 0, bmp.h-1 do
 		for x = 0, bmp.w-1 do
 			setpixel(x, y, darken(getpixel(x, y)))
@@ -185,11 +185,11 @@ Example:
 	end
 
 	--the above has the same effect as:
-	bitmap.paint(bmp, bmp, darken)
+	bitmap_paint(bmp, bmp, darken)
 
 Channel interface ------------------------------------------------------------
 
-bitmap.channel_interface(bitmap, channel) -> getvalue, setvalue
+bitmap_channel_interface(bitmap, channel) -> getvalue, setvalue
 
 Return an API for getting and setting values for a single color channel:
 
@@ -198,36 +198,36 @@ Return an API for getting and setting values for a single color channel:
 
 Utilities --------------------------------------------------------------------
 
-bitmap.min_stride(format, width) -> min_stride
+bitmap_min_stride(format, width) -> min_stride
 
 	Return the minimum stride in bytes given a format and width.
 	A bitmap data buffer should never be smaller than `min_stride * height`.
 
-bitmap.aligned_stride(stride[, align]) -> stride, align
+bitmap_aligned_stride(stride[, align]) -> stride, align
 
 	Given a stride (which can also be fractional) and a power-of-two alignment,
 	return the next smallest stride that is a multiple of the alignment
 	(`align` defaults to 1 and `true` means 4).
 
-bitmap.aligned_pointer(ptr[, align]) -> ptr, align
+bitmap_aligned_pointer(ptr[, align]) -> ptr, align
 
 	Same as `aligned_stride()` but for pointers. The returned pointer is of type
 	`void*`.
 
-bitmap.row_size(bmp) -> size
+bitmap_row_size(bmp) -> size
 
 	Bitmap's row size, in bytes, i.e. bitmap's minimum stride.
 
 Introspection ----------------------------------------------------------------
 
-bitmap.conversions(source_format) -> iter() -> name, def
+bitmap_conversions(source_format) -> iter() -> name, def
 
 	Given a source bitmap format, iterate through all the formats that the source
 	format can be converted to. `name` is the format name and `def` is
 	the format definition which is a table with the fields `bpp`, `ctype`,
 	`colortype`, `read`, `write`.
 
-bitmap.dumpinfo()
+bitmap_dumpinfo()
 
 	Print the list of supported pixel formats and the list of supported
 	colortype conversions.
@@ -267,19 +267,18 @@ A custom colortype definition is a table with the following fields:
 
 ]=]
 
-local ffi = require'ffi'
-local bit = require'bit'
-local glue = require'glue'
-local box2d = require'box2d'
+if not ... then require'bitmap_test'; return end
 
-local floor, ceil, min, max =
-	math.floor, math.ceil, math.min, math.max
-local shr, shl, band, bor, bnot =
-	bit.rshift, bit.lshift, bit.band, bit.bor, bit.bnot
+require'glue'
+require'rect'
+
+local
+	floor, ceil, min, max, shr, shl, band, bor, bnot =
+	floor, ceil, min, max, shr, shl, band, bor, bnot
 
 --colortypes
 
-local colortypes = glue.autoload({
+local colortypes = {
 	rgba8  = {channels = 'rgba', bpc =  8, max = 0xff},
 	rgba16 = {channels = 'rgba', bpc = 16, max = 0xffff},
 	ga8    = {channels = 'ga',   bpc =  8, max = 0xff},
@@ -287,21 +286,21 @@ local colortypes = glue.autoload({
 	cmyk8  = {channels = 'cmyk', bpc =  8, max = 0xff},
 	ycc8   = {channels = 'ycc',  bpc =  8, max = 0xff},
 	ycck8  = {channels = 'ycck', bpc =  8, max = 0xff},
-}, {
-	rgbaf = 'bitmap_rgbaf',
-})
+}
+bitmap_colortypes = colortypes
 
 --pixel formats
 
 local formats = {}
+bitmap_formats = formats
 
 local function format(bpp, ctype, colortype, read, write, ...)
-	return {bpp = bpp, ctype = ffi.typeof(ctype),
+	return {bpp = bpp, ctype = typeof(ctype),
 		colortype = colortype, read = read, write = write, ...}
 end
 
 local function override_format(fmt, ...)
-	return glue.merge(format(...), formats[fmt])
+	return merge(format(...), formats[fmt])
 end
 
 --read/write individual channels
@@ -589,19 +588,13 @@ function formats.g4.write(d,i,g)
 				shr(band(g, 0xf0), dbit)) --set the bits
 end
 
-glue.append(formats.g1, formats.g1.read, rff, formats.g1.write)
-glue.append(formats.g2, formats.g2.read, rff, formats.g2.write)
-glue.append(formats.g4, formats.g4.read, rff, formats.g4.write)
+append(formats.g1, formats.g1.read, rff, formats.g1.write)
+append(formats.g2, formats.g2.read, rff, formats.g2.write)
+append(formats.g4, formats.g4.read, rff, formats.g4.write)
 
 --8bpc YCC and YCCK
 formats.ycc8  = override_format('rgb8',  24, 'uint8_t', 'ycc8')
 formats.ycck8 = override_format('rgba8', 32, 'uint8_t', 'ycck8')
-
---formats from other submodules
-glue.autoload(formats, {
-	rgbaf = 'bitmap_rgbaf',
-	rgbad = 'bitmap_rgbaf',
-})
 
 --converters between different standard colortypes
 
@@ -609,6 +602,7 @@ local conv = {
 	rgba8 = {}, rgba16 = {}, ga8 = {}, ga16 = {},
 	cmyk8 = {}, ycc8 = {}, ycck8 = {},
 }
+bitmap_converters = conv
 
 function conv.rgba8.rgba16(r, g, b, a)
 	return
@@ -654,6 +648,7 @@ end
 local function rgb2g(r, g, b)
 	return 0.2126 * r + 0.7152 * g + 0.0722 * b
 end
+bitmap_rgb2g = rgb2g
 
 function conv.rgba8.ga8(r, g, b, a)
 	return round8(rgb2g(r, g, b)), a
@@ -745,26 +740,29 @@ local function aligned_address(addr, align)
 	assert(align >= 2)
 	assert(band(align, align - 1) == 0) --must be power-of-two
 	if ffi.istype('uint64_t', addr) then
-		align = ffi.cast('uint64_t', align) --so that bnot() works
+		align = cast('uint64_t', align) --so that bnot() works
 	end
 	return band(addr + align - 1, bnot(align - 1)), align
 end
 
-local voidp_ct = ffi.typeof'void*'
+local voidp_ct = typeof'void*'
 local function aligned_pointer(ptr, align)
-	local addr = ffi.cast('uintptr_t', ptr)
-	return ffi.cast(voidp_ct, (aligned_address(addr, align)))
+	local addr = cast('uintptr_t', ptr)
+	return cast(voidp_ct, (aligned_address(addr, align)))
 end
+bitmap_aligned_pointer = aligned_pointer
 
 --next stride that is a multiple of `align` bytes
 local function aligned_stride(stride, align)
 	return aligned_address(ceil(stride), align)
 end
+bitmap_aligned_stride = aligned_stride
 
 --minimum stride for a specific format
 local function min_stride(format, w)
 	return w * valid_format(format).bpp / 8 --stride is fractional for < 8bpp formats, that's ok.
 end
+bitmap_min_stride = min_stride
 
 --validate stride against min. stride
 local function valid_stride(format, w, stride, align)
@@ -775,29 +773,29 @@ local function valid_stride(format, w, stride, align)
 	return stride, align
 end
 
-local function bitmap_stride(bmp)
+function bitmap_stride(bmp)
 	return valid_stride(bmp.format, bmp.w, bmp.stride)
 end
 
-local function bitmap_row_size(bmp) --can be fractional
+function bitmap_row_size(bmp) --can be fractional
 	return min_stride(bmp.format, bmp.w)
 end
 
-local function bitmap_format(bmp)
+function bitmap_format(bmp)
 	return valid_format(type(bmp) == 'string' and bmp or bmp.format)
 end
 
-local function bitmap_colortype(bmp)
+function bitmap_colortype(bmp)
 	return valid_colortype(type(bmp) == 'string' and bmp
 			or valid_format(bmp.format).colortype)
 end
 
-local function new(w, h, format, bottom_up, align, stride, alloc)
+function bitmap(w, h, format, bottom_up, align, stride, alloc)
 	local stride, align = valid_stride(format, w, stride, align)
 	local size = ceil(stride * h)
 	assert(size > 0, 'invalid size')
 	local _size = size + (align - 1)
-	local _data = alloc and alloc(_size) or ffi.new(ffi.typeof('char[$]', _size))
+	local _data = alloc and alloc(_size) or ffi.new(typeof('char[$]', _size))
 	local data = aligned_pointer(_data, align)
 	return {w = w, h = h, format = format, bottom_up = bottom_up or nil,
 		stride = stride, data = data, _data = _data, size = size,
@@ -808,11 +806,11 @@ end
 
 local function data_interface(bmp)
 	local format = bitmap_format(bmp)
-	local data = ffi.cast(ffi.typeof('$*', ffi.typeof(format.ctype)), bmp.data)
+	local data = cast(typeof('$*', typeof(format.ctype)), bmp.data)
 	local stride_bytes = valid_stride(bmp.format, bmp.w, bmp.stride)
-	local stride_samples = stride_bytes / ffi.sizeof(format.ctype)
+	local stride_samples = stride_bytes / sizeof(format.ctype)
 	--NOTE: pixelsize is fractional for < 8bpp formats, that's ok.
-	local pixelsize = format.bpp / 8 / ffi.sizeof(format.ctype)
+	local pixelsize = format.bpp / 8 / sizeof(format.ctype)
 	return format, data, stride_samples, pixelsize
 end
 
@@ -840,7 +838,7 @@ local function coord_interface(bmp, read, write)
 end
 
 local function discard() end
-local function channel_interface(bmp, channel)
+function bitmap_channel_interface(bmp, channel)
 	local colortype = bitmap_colortype(bmp)
 	local n = #colortype.channels
 	local format = bitmap_format(bmp)
@@ -854,13 +852,13 @@ local function direct_pixel_interface(bmp)
 	return coord_interface(bmp, format.read, format.write)
 end
 
-local function pixel_interface(bmp, colortype)
+function bitmap_pixel_interface(bmp, colortype)
 	local format, data, stride, pixelsize = data_interface(bmp)
 	if not colortype or colortype == format.colortype then
 		return direct_pixel_interface(bmp)
 	end
-	valid_colortype(format.colortype) --autoload colortypes
-	valid_colortype(colortype)        --autoload colortypes
+	valid_colortype(format.colortype)
+	valid_colortype(colortype)
 	local read_pixel  = assert(conv[format.colortype][colortype], 'invalid conversion')
 	local write_pixel = assert(conv[colortype][format.colortype], 'invalid conversion')
 	local direct_getpixel, direct_setpixel = direct_pixel_interface(bmp)
@@ -877,7 +875,7 @@ end
 
 --create a bitmap representing a rectangular region of another bitmap.
 --no pixels are copied: the bitmap references the same data buffer as the original.
-local function sub(bmp, x, y, w, h)
+function bitmap_sub(bmp, x, y, w, h)
 	x, y, w, h = box2d.clip(x or 0, y or 0, w or 1/0, h or 1/0, 0, 0, bmp.w, bmp.h)
 	if w == 0 or h == 0 then return end --can't have bitmaps in 1 or 0 dimensions
 	local format, data, stride, pixelsize = data_interface(bmp)
@@ -886,7 +884,7 @@ local function sub(bmp, x, y, w, h)
 	end
 	local i = y * stride + x * pixelsize
 	assert(i == floor(i), 'invalid coordinates')
-	local byte_stride = stride * ffi.sizeof(format.ctype)
+	local byte_stride = stride * sizeof(format.ctype)
 	return {w = w, h = h, format = bmp.format, bottom_up = bmp.bottom_up,
 				stride = bmp.stride, data = data + i, size = byte_stride * h,
 				parent = bmp, x = x, y = y}
@@ -908,7 +906,7 @@ local function chain(f, g)
 	return f or g
 end
 
-local function paint(dst, src, dstx, dsty, convert_pixel, src_colortype, dst_colortype)
+function bitmap_paint(dst, src, dstx, dsty, convert_pixel, src_colortype, dst_colortype)
 
 	if not tonumber(dstx) then --dstx, dsty are optional inner args
 		convert_pixel, dstx, dsty = dstx
@@ -920,8 +918,8 @@ local function paint(dst, src, dstx, dsty, convert_pixel, src_colortype, dst_col
 	if dstx ~= 0 or dsty ~= 0 or src.w ~= dst.w or src.h ~= dst.h then
 		local x, y, w, h = box2d.clip(dstx, dsty, dst.w-dstx, dst.h-dsty, dstx, dsty, src.w, src.h)
 		if w == 0 or h == 0 then return end
-		src = sub(src, 0, 0, w, h)
-		dst = sub(dst, x, y, w, h)
+		src = bitmap_sub(src, 0, 0, w, h)
+		dst = bitmap_sub(dst, x, y, w, h)
 	end
 	assert(src.h == dst.h)
 	assert(src.w == dst.w)
@@ -1002,23 +1000,23 @@ end
 
 --bitmap copy
 
-local function copy(src, format, bottom_up, align, stride)
+function bitmap_copy(src, format, bottom_up, align, stride)
 	if not format then
 		format = src.format
 		if bottom_up == nil then bottom_up = src.bottom_up end
 		stride = stride or src.stride
 	end
-	local dst = new(src.w, src.h, format, bottom_up, align, stride)
-	return paint(dst, src)
+	local dst = bitmap(src.w, src.h, format, bottom_up, align, stride)
+	return bitmap_paint(dst, src)
 end
 
-local function clear(bmp, c)
+function bitmap_clear(bmp, c)
 	ffi.fill(bmp.data, bmp.h * bmp.stride, c)
 end
 
 --reflection
 
-local function conversions(src_format)
+function bitmap_conversions(src_format)
 	src_format = valid_format(src_format)
 	return coroutine.wrap(function()
 		for dname, dst_format in pairs(formats) do
@@ -1036,72 +1034,27 @@ local function conversions(src_format)
 	end)
 end
 
-local function dumpinfo()
+function bitmap_dumpinfo()
 	local function enumkeys(t)
-		t = glue.keys(t)
-		table.sort(t)
-		return table.concat(t, ', ')
+		t = keys(t)
+		sort(t)
+		return concat(t, ', ')
 	end
-	local format = '%-10s %-6s %-25s %-10s %s'
-	print(string.format(format, '!format', 'bpp', 'ctype', 'colortype',
-		'conversions'))
-	for s,t in glue.sortedpairs(formats) do
+	local fmt = '%-10s %-6s %-25s %-10s %s'
+	print(_(fmt, '!format', 'bpp', 'ctype', 'colortype', 'conversions'))
+	for s,t in sortedpairs(formats) do
 		local ct = {}
-		for d in conversions(s) do
+		for d in bitmap_conversions(s) do
 			ct[#ct+1] = d
 		end
-		table.sort(ct)
-		print(string.format(format, s, tostring(t.bpp), tostring(t.ctype),
-			t.colortype, table.concat(ct, ', ')))
+		sort(ct)
+		print(_(fmt, s, tostring(t.bpp), tostring(t.ctype),
+			t.colortype, concat(ct, ', ')))
 	end
-	local format = '%-12s %-10s %-6s  ->  %s'
-	print(string.format(format, '!colortype', 'channels', 'bpc',
-		'conversions'))
-	for s,t in glue.sortedpairs(conv) do
+	local fmt = '%-12s %-10s %-6s  ->  %s'
+	print(_(fmt, '!colortype', 'channels', 'bpc', 'conversions'))
+	for s,t in sortedpairs(conv) do
 		local ct = colortypes[s]
-		print(string.format(format, s, ct.channels, tostring(ct.bpc),
-			enumkeys(t)))
+		print(_(fmt, s, ct.channels, tostring(ct.bpc), enumkeys(t)))
 	end
 end
-
-return glue.autoload({
-	--format/stride math
-	valid_format = valid_format,
-	aligned_stride = aligned_stride,
-	aligned_pointer = aligned_pointer,
-	min_stride = min_stride,
-	valid_stride = valid_stride,
-	--bitmap info
-	format = bitmap_format,
-	stride = bitmap_stride,
-	row_size = bitmap_row_size,
-	colortype = bitmap_colortype,
-	--bitmap operations
-	new = new,
-	paint = paint,
-	copy = copy,
-	clear = clear,
-	sub = sub,
-	--pixel interface
-	--data_interface = data_interface, --publish if needed
-	pixel_interface = pixel_interface,
-	channel_interface = channel_interface,
-	--reflection
-	conversions = conversions,
-	dumpinfo = dumpinfo,
-	--extension
-	colortypes = colortypes,
-	formats = formats,
-	converters = conv,
-	rgb2g = rgb2g,
-}, {
-	dither    = 'bitmap_dither',
-	invert    = 'bitmap_effects',
-	grayscale = 'bitmap_effects',
-	convolve  = 'bitmap_effects',
-	sharpen   = 'bitmap_effects',
-	mirror    = 'bitmap_effects',
-	blend     = 'bitmap_blend',
-	blend_op  = 'bitmap_blend',
-	resize    = 'bitmap_resize',
-})

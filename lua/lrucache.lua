@@ -22,35 +22,34 @@
 
 ]=]
 
-local list = require'linkedlist'
+require'linkedlist'
 
-local cache = {}
-cache.__index = cache
+local lrucache = {}
+lrucache.__index = lrucache
 
-cache.max_size = 1
+lrucache.max_size = 1
 
-function cache:clear()
+function lrucache:clear()
 	if self.keys then
 		for val in pairs(self.keys) do
 			self:free_value(val)
 		end
 	end
-	self.lru = list()
+	self.lru = linkedlist()
 	self.values = {} --{key -> val}
 	self.keys = {} --{val -> key}
 	self.total_size = 0
 	return self
 end
 
-function cache:new(t)
-	t = t or {}
-	local self = setmetatable(t, self)
+function _G.lrucache(t)
+	local self = setmetatable(t or {}, lrucache)
 	return self:clear()
 end
 
-setmetatable(cache, {__call = cache.new})
+setmetatable(lrucache, {__call = lrucache.new})
 
-function cache:free()
+function lrucache:free()
 	if self.keys then
 		for val in pairs(self.keys) do
 			self:free_value(val)
@@ -62,14 +61,14 @@ function cache:free()
 	end
 end
 
-function cache:free_size()
+function lrucache:free_size()
 	return self.max_size - self.total_size
 end
 
-function cache:value_size(val) return 1 end --stub, size must be >= 0 always
-function cache:free_value(val) end --stub
+function lrucache:value_size(val) return 1 end --stub, size must be >= 0 always
+function lrucache:free_value(val) end --stub
 
-function cache:get(key)
+function lrucache:get(key)
 	local val = self.values[key]
 	if not val then return nil end
 	self.lru:remove(val)
@@ -77,7 +76,7 @@ function cache:get(key)
 	return val
 end
 
-function cache:_remove(key, val)
+function lrucache:_remove(key, val)
 	local val_size = self:value_size(val)
 	self.lru:remove(val)
 	self:free_value(val)
@@ -86,28 +85,28 @@ function cache:_remove(key, val)
 	self.total_size = self.total_size - val_size
 end
 
-function cache:remove(key)
+function lrucache:remove(key)
 	local val = self.values[key]
 	if not val then return nil end
 	self:_remove(key, val)
 	return val
 end
 
-function cache:remove_val(val)
+function lrucache:remove_val(val)
 	local key = self.keys[val]
 	if not key then return nil end
 	self:_remove(key, val)
 	return key
 end
 
-function cache:remove_last()
+function lrucache:remove_last()
 	local val = self.lru.last
 	if not val then return nil end
 	self:_remove(self.keys[val], val)
 	return val
 end
 
-function cache:put(key, val)
+function lrucache:put(key, val)
 	local val_size = self:value_size(val)
 	local old_val = self.values[key]
 	if old_val then
@@ -124,5 +123,3 @@ function cache:put(key, val)
 	self.lru:insert_first(val)
 	self.total_size = self.total_size + val_size
 end
-
-return cache

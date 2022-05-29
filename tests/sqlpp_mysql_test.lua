@@ -1,9 +1,10 @@
 
+require'sock'
+require'logging'
 local spp = require'sqlpp'.new'mysql'
-require'$'
 
 if false then
-	pp(spp.query(outdent[[
+	pr(spp.query(outdent[[
 		select
 			{verbatim}, '?', :foo, ::bar,
 		from
@@ -19,8 +20,7 @@ if false then
 	}, 'xxx'))
 end
 
-local sock = require'sock'
-sock.run(function()
+run(function()
 
 	local cmd = spp.connect{
 		host = '127.0.0.1',
@@ -32,24 +32,24 @@ sock.run(function()
 	}
 
 	if false then
-		pp(cmd:table_def'usr')
+		pr(cmd:table_def'usr')
 	end
 
 	if false then
-		pp(cmd:query'select * from val limit 1; select * from attr limit 1')
+		pr(cmd:query'select * from val limit 1; select * from attr limit 1')
 	end
 
 	if false then
 		local stmt = assert(cmd:prepare('select * from val where val = :val'))
-		pp(stmt:exec{val = 2})
+		pr(stmt:exec{val = 2})
 	end
 
 	if false then
-		pp(cmd:query'insert into val (val, attr) values (100000000, 10000000)')
+		pr(cmd:query'insert into val (val, attr) values (100000000, 10000000)')
 	end
 
 	if false then
-		pp(cmd:query'delete from val where val = 1')
+		pr(cmd:query'delete from val where val = 1')
 	end
 
 	if false then
@@ -60,7 +60,7 @@ sock.run(function()
 	end
 
 	if false then
-		pp(cmd:table_defs()['sp.currency'])
+		pr(cmd:table_defs()['sp.currency'])
 	end
 
 	if true then
@@ -121,11 +121,10 @@ sock.run(function()
 			'mysql_buffer_type',
 		})
 
-		pp(rows)
+		pr(rows)
 
 		cn:close()
 
 	end
 
 end)
-

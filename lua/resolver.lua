@@ -9,16 +9,16 @@
 	times and impact-free (for the client) failovers at the expense of a little
 	more network traffic which DNS servers are already made to handle.
 
-	IMPORTANT: call `math.randomseed` prior to using this module to decrease
+	IMPORTANT: call `randomseed` prior to using this module to decrease
 	the chance of cache poisoning attacks.
 
 API
-	resolver.new(t) -> r`                             create a resolver
+	resolver(t) -> r`                                 create a resolver
 	r:query(name,[type],[timeout] | t) -> answers`    query
 	r:lookup(name,[type],[timeout]) -> addresses`     name lookup
 	r:reverse_lookup(address,[timeout]) -> hosts`     reverse lookup
 
-resolver:new(t) -> r
+resolver(t) -> r
 
 	Create a resolver object. Options:
 
@@ -54,29 +54,23 @@ r:reverse_lookup(address,[timeout]) -> hostnames
 	Make a `PTR` lookup for both IPv4 and IPv6 addresses.
 
 GLOBAL RESOLVER
-	rs.hosts[host] <-> ip       get/set static address
-	rs.servers <- {ns_ip1,...}  set up name servers: do it before calling resolve().
-	rs.resolve(host) -> ip      resolve a hostname
+	resolve_hosts[host] <-> ip       get/set static address
+	resolve_servers <- {ns_ip1,...}  set up name servers: do it before calling resolve().
+	resolve(host) -> ip              resolve a hostname
 
 ]=]
 
-local ffi      = require'ffi'
-local bit      = require'bit'
-local errors   = require'errors'
-local glue     = require'glue'
-local lrucache = require'lrucache'
+require'glue'
+require'lrucache'
+require'sock'
 
-local band = bit.band
-local shr = bit.rshift
-local shl = bit.lshift
-local char = string.char
-local format = string.format
-local add = table.insert
-local concat = table.concat
+local
+	band, shr, shl, char, format, add, concat, u8a, str =
+	band, shr, shl, char, format, add, concat, u8a, str
 
 --error handling -------------------------------------------------------------
 
-local check_io, checkp, _, protect = errors.tcp_protocol_errors'dns'
+local check_io, checkp, _, protect = tcp_protocol_errors'dns'
 
 local function check_len(q, i, n, len)
 	return checkp(q, n >= i+len, 'response too short')
@@ -161,7 +155,7 @@ local function label(q, p, i, n, maxlen) --string: len(1) text
 	local len = p[i]; i=i+1
 	checkp(q, len > 0 and len <= maxlen, 'response too short')
 	check_len(q, i, n, len)
-	return ffi.string(p+i, len), i+len
+	return str(p+i, len), i+len
 end
 
 local function name(q, p, i, n) --name: label1... end|pointer
@@ -187,7 +181,7 @@ local function name(q, p, i, n) --name: label1... end|pointer
 	return s, i
 end
 
-local qtype_names = glue.index(qtypes)
+local qtype_names = index(qtypes)
 
 local function parse_answer(q, ans, p, i, n)
 	ans.name  , i = name(q, p, i, n)
@@ -238,7 +232,7 @@ local function parse_answer(q, ans, p, i, n)
 		ans.soa_expire    , i =  u32(q, p, i, n)
 		ans.soa_minimum   , i =  u32(q, p, i, n)
 	else --unknown type, return the raw value
-		ans.rdata, i = ffi.string(p+i, n-i), n
+		ans.rdata, i = str(p+i, n-i), n
 	end
 	return i
 end
@@ -345,19 +339,25 @@ complex flows it's up to you to provide the answer and the guarantee.
 
 local rs = {} --resolver class
 
-rs.libs = 'sock'
+rs.hosts = {
+	localhost = '127.0.0.1',
+}
+rs.servers = {
+	'1.1.1.1', --cloudflare
+	'8.8.8.8', --google
+}
+
 rs.max_cache_entries = 1e5
 
 local function threadname(thread)
-	local logging = require'logging'
-	return logging.arg(thread or coroutine.running())
+	return logprintarg(thread or currentthread())
 end
 
 function rs:_dbg(ns, q, ...)
 	print(
 		'resolver.lua:'..debug.getinfo(3).currentline..':',
 		threadname(),
-		ns and glue.count(ns.queue) or '',
+		ns and count(ns.queue) or '',
 		q and q.name:sub(1, 7) or '',
 		q and q.i or '',
 		...)
@@ -393,7 +393,7 @@ local function tcp_query(rs, ns, q)
 
 	rs:dbg(ns, q, 'TCP_QUERY')
 
-	local tcp = check_io(q, rs.tcp())
+	local tcp = check_io(q, tcp())
 	q.tcp = tcp --pin it so that it's closed automatically on error.
 
 	local expires = q.expires
@@ -401,12 +401,12 @@ local function tcp_query(rs, ns, q)
 	check_io(q, tcp:connect(ns.ai, nil, expires))
 	check_io(q, tcp:send(u16_str(#q.s) .. q.s, nil, expires))
 
-	local len_buf = ffi.new'uint8_t[2]'
+	local len_buf = u8a(2)
 	check_io(q, tcp:recvn(len_buf, 2, expires))
 	local len = u16(q, len_buf, 0, 2)
 	checkp(q, len <= 4096, 'response too long')
 
-	local buf = ffi.new('uint8_t[?]', len)
+	local buf = u8a(len)
 	check_io(q, tcp:recvn(buf, len, expires))
 
 	tcp:close(0)
@@ -417,7 +417,7 @@ end
 
 local function gen_qid(rs, ns, now)
 	for i = 1, 10 do --expect a 50% chance of collision at around 362 qids.
-		local qid = math.random(0, 65535)
+		local qid = random(0, 65535)
 		local q = ns.queue[qid]
 		if not q then
 			return qid
@@ -437,7 +437,7 @@ local function ns_query(rs, ns, q)
 	assert(q.timeout >= 0.1)
 
 	--generate a request with a random id.
-	local now = rs.clock()
+	local now = clock()
 	q.expires = now + q.timeout
 	q.id = check_io(q, gen_qid(rs, ns, now))
 	qi = qi + 1
@@ -461,17 +461,17 @@ local function ns_query(rs, ns, q)
 
 	--start the scheduler or suspend. the scheduler will resume() us back
 	--on the matching recv() or on timeout.
-	q.thread = rs.currentthread()
+	q.thread = currentthread()
 	local buf, len, errcode
 	if not ns.scheduler_running then
 		rs:dbgr(ns, q, ns.scheduler)
-		buf, len, errcode = check_io(q, rs.transfer(ns.scheduler))
+		buf, len, errcode = check_io(q, transfer(ns.scheduler))
 	elseif q.result then
 		rs:dbg(ns, q, 'EARLY', len)
-		buf, len, errcode = check_io(q, glue.unpack(q.result))
+		buf, len, errcode = check_io(q, unpack(q.result))
 	else
 		rs:dbgs(ns, q)
-		buf, len, errcode = check_io(q, rs.suspend())
+		buf, len, errcode = check_io(q, suspend())
 	end
 
 	local answers, err, errcode = parse_response(q, buf, len)
@@ -486,23 +486,23 @@ local ns_query = protect(ns_query)
 
 local function schedule(rs, ns)
 	local sz = 4096
-	local buf = ffi.new('uint8_t[?]', sz)
+	local buf = u8a(sz)
 	local function respond(q, ...)
 		if q.thread then
-			rs.resume(q.thread, ...)
+			resume(q.thread, ...)
 		else
-			q.result = glue.pack(...)
+			q.result = pack(...)
 		end
 	end
 	while true do
 		ns.scheduler_running = true
 		while true do
 			local min_expires
-			local now = rs.clock()
+			local now = clock()
 			for qid, q in pairs(ns.queue) do
 				if not q.lost then
 					if now < q.expires then
-						min_expires = math.min(min_expires or 1/0, q.expires)
+						min_expires = min(min_expires or 1/0, q.expires)
 					else
 						q.lost = true
 						rs:dbgt(ns, q, 'TIMEOUT')
@@ -530,10 +530,10 @@ local function schedule(rs, ns)
 					end
 				end
 			else
-				local qid = parse_qid(glue.empty, buf, len)
+				local qid = parse_qid(empty, buf, len)
 				local q = ns.queue[qid]
 				if q then
-					if rs.clock() < q.expires then
+					if clock() < q.expires then
 						ns.queue[qid] = nil
 						rs:dbgt(ns, q, 'DATA', len)
 						respond(q, buf, len)
@@ -549,45 +549,21 @@ local function schedule(rs, ns)
 		end
 		ns.scheduler_running = false
 		rs:dbgs()
-		rs.suspend()
+		suspend()
 	end
 end
 
-rs.lib = {}
-function rs.lib:sock()
-	local time = require'time'
-	local sock = require'sock'
-	self.clock = time.clock
-	self.time  = time.time
-	self.tcp = sock.tcp
-	self.udp = sock.udp
-	self.addr = sock.addr
-	self.thread = sock.thread
-	self.suspend = sock.suspend
-	self.resume = sock.resume
-	self.transfer = sock.transfer
-	self.currentthread = sock.currentthread
-	self.start = sock.start
-end
-local function bind_libs(self, libs)
-	for lib in glue.eachword(libs or '') do
-		rs.lib[lib](self)
-	end
-end
-
-local function create_resolver(opt)
-	local rs = glue.update({}, rs, opt)
+function resolver(opt)
+	local rs = update({}, rs, opt)
 
 	if not rs.debug then
-		rs.dbg  = glue.noop
-		rs.dbgt = glue.noop
-		rs.dbgs = glue.noop
-		rs.dbgr = glue.noop
+		rs.dbg  = noop
+		rs.dbgt = noop
+		rs.dbgs = noop
+		rs.dbgr = noop
 	end
 
-	bind_libs(rs, rs.libs)
-
-	local servers = glue.words(rs.servers)
+	local servers = collect(words(rs.servers))
 
 	rs.nst = {}
 	for i,ns in ipairs(rs.servers) do
@@ -599,11 +575,11 @@ local function create_resolver(opt)
 		else
 			host, port = ns, 53
 		end
-		local ai = assert(rs.addr(host, port))
-		local udp = assert(rs.udp())
+		local ai = assert(sockaddr(host, port))
+		local udp = assert(udp())
 		assert(udp:connect(ai))
 		local ns = {ai = ai, udp = udp, tcp_only = tcp_only, queue = {}}
-		ns.scheduler = rs.thread(function()
+		ns.scheduler = thread(function()
 			schedule(rs, ns)
 		end, 'N'..i)
 		rs.nst[i] = ns
@@ -615,7 +591,6 @@ local function create_resolver(opt)
 
 	return rs
 end
-rs.new = create_resolver
 
 local function rs_query(rs, qname, qtype, timeout)
 	local t = type(qname) == 'table' and qname or nil
@@ -637,15 +612,15 @@ local function rs_query(rs, qname, qtype, timeout)
 	local queries_left = #rs.nst
 	for i,ns in ipairs(rs.nst) do
 		rs.resume(rs.thread(function()
-			local t = glue.update({name = qname, type = qtype, timeout = timeout}, t)
-			local q = glue.object(q, t)
+			local t = update({name = qname, type = qtype, timeout = timeout}, t)
+			local q = object(q, t)
 			local res, err, errcode = ns_query(rs, ns, q) --suspends inside the first send().
 			queries_left = queries_left - 1
 			if not lookup_thread then
 				rs:dbg(ns, q, 'DISCARD (late)')
 				return
 			end
-			if not res and errors.is(err, 'tcp') and queries_left > 0 then
+			if not res and iserror(err, 'tcp') and queries_left > 0 then
 				rs:dbg(ns, q, 'DISCARD (socket error and not last)')
 				return
 			end
@@ -657,7 +632,7 @@ local function rs_query(rs, qname, qtype, timeout)
 			else
 				local min_ttl = 1/0
 				for _,answer in ipairs(res) do
-					min_ttl = math.min(min_ttl, answer.ttl)
+					min_ttl = min(min_ttl, answer.ttl)
 				end
 				res.expires = rs.time() + min_ttl
 				rs.cache:put(key, res)
@@ -667,7 +642,7 @@ local function rs_query(rs, qname, qtype, timeout)
 		end, rs.debug and 'N'..i..'-'..threadname()))
 	end
 	rs:dbgs()
-	return rs.suspend() -- the first thread to finish will resume us.
+	return suspend() -- the first thread to finish will resume us.
 end
 rs.query = protect(rs_query)
 
@@ -715,15 +690,40 @@ function rs:reverse_lookup(addr, timeout)
 	return filter_answers('PTR', 'ptr', self:query(s, 'PTR', timeout))
 end
 
+function rs:resolve(host)
+	if host:find'^%d+%.%d+%.%d+%.%d$' then --ip4
+		return host
+	end
+	if host:find(':', 1, true) then --ip6
+		return host
+	end
+	local ip = self.hosts[host] --static
+	if ip then
+		return ip
+	end
+	return self:lookup(host)
+end
+
+--global resolver ------------------------------------------------------------
+
+local rs
+function resolve(host)
+	host = trim(host)
+	rs = rs or resolver{
+		hosts = config'hosts',
+		servers = config'ns',
+	}
+	local addrs, err = rs:resolve(host)
+	return addrs and addrs[1], err
+end
+
 --self-test ------------------------------------------------------------------
 
 if not ... then
 
-	local pp = require'pp'
-	local time = require'time'
-	math.randomseed(time.clock())
+	randomseed(clock())
 
-	local r = assert(rs.new{
+	local r = assert(resolver{
 		servers = {
 			'127.0.0.1',
 			'10.0.0.1',
@@ -738,7 +738,7 @@ if not ... then
 
 	local function lookup(q)
 
-		local s = type(q) == 'string' and q or pp.format(q)
+		local s = type(q) == 'string' and q or pp(q)
 
 		local answers, err = r:query(q)
 
@@ -774,38 +774,8 @@ if not ... then
  		'www.openresty.org',
 		'www.lua.org',
 	} do
-		r.resume(r.thread(lookup, 'L'..i), s)
+		resume(thread(lookup, 'L'..i), s)
 	end
 
-	r.start()
+	start()
 end
-
---global resolver ------------------------------------------------------------
-
-rs.hosts = {localhost = '127.0.0.1'}
-
-rs.servers = {
-	'1.1.1.1', --cloudflare
-	'8.8.8.8', --google
-}
-
-function rs.resolve_create_resolver()
-	return rs.new{servers = rs.servers}
-end
-
-function rs.resolve(host)
-	host = glue.trim(host)
-	if host:find'^%d+%.%d+%.%d+%.%d$' then --ip4
-		return host
-	end
-	if host:find(':', 1, true) then --ip6
-		return host
-	end
-	local ip = rs.hosts[host]
-	if ip then return ip end
-	rs.resolve_resolver = rs.resolve_resolver or rs.create_resolver()
-	local addrs, err = rs.resolve_resolver:lookup(host)
-	return addrs and addrs[1], err
-end
-
-return rs

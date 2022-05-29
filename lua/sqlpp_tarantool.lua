@@ -4,27 +4,9 @@
 
 if not ... then require'test'; return end
 
-local glue = require'glue'
+require'glue'
 local tarantool = require'tarantool'
 local mp = require'msgpack'
-
---[[
-local fmt = string.format
-local add = table.insert
-local cat = table.concat
-
-local repl = glue.repl
-local outdent = glue.outdent
-local sortedpairs = glue.sortedpairs
-local subst = glue.subst
-local attr = glue.attr
-local imap = glue.imap
-local index = glue.index
-local update = glue.update
-]]
-local catargs = glue.catargs
-local empty = glue.empty
-
 
 --https://www.tarantool.io/en/doc/latest/reference/reference_sql/sql_user_guide/#reserved-words
 local reserved_words = {}
@@ -111,7 +93,7 @@ local function init_spp(spp, cmd)
 	end
 
 	function cmd:sqlcol_flags(fld)
-		return catargs(' ',
+		return catany(' ',
 			fld.tarantool_collation and 'collate "'..fld.tarantool_collation..'"' or nil,
 			fld.not_null and 'not null' or nil,
 			fld.auto_increment and 'autoincrement' or nil,
@@ -229,7 +211,7 @@ local function init_spp(spp, cmd)
 					and rc.constraint_name   = kcu.constraint_name
 			where
 				cs.table_schema not in ('mysql', 'information_schema', 'performance_schema', 'sys')
-				and ]]..(catargs(' and ',
+				and ]]..(catany(' and ',
 						db  and 'cs.table_schema = '..sql_db,
 						tbl and 'cs.table_name   = '..sql_tbl) or '1 = 1')..[[
 			order by
@@ -289,7 +271,7 @@ local function init_spp(spp, cmd)
 					and cs.constraint_name  = s.index_name
 				where
 					s.table_schema not in ('mysql', 'information_schema', 'performance_schema', 'sys')
-					and ]]..(catargs(' and ',
+					and ]]..(catany(' and ',
 							db  and 's.table_schema = '..sql_db,
 							tbl and 's.table_name   = '..sql_tbl) or '1 = 1')..[[
 				order by
@@ -333,7 +315,7 @@ local function init_spp(spp, cmd)
 					and cs.constraint_name = cc.constraint_name
 				where
 					cs.table_schema not in ('mysql', 'information_schema', 'performance_schema', 'sys')
-					and ]]..(catargs(' and ',
+					and ]]..(catany(' and ',
 							db  and 'cs.table_schema = '..sql_db,
 							tbl and 'cs.table_name   = '..sql_tbl) or '1 = 1')..[[
 				order by
@@ -362,7 +344,7 @@ local function init_spp(spp, cmd)
 				where
 					event_object_schema not in ('mysql', 'information_schema', 'performance_schema', 'sys')
 					and definer = current_user
-					and ]]..(catargs(' and ',
+					and ]]..(catany(' and ',
 							db  and 'event_object_schema = '..sql_db,
 							tbl and 'event_object_table  = '..sql_tbl) or '1 = 1')..[[
 				order by

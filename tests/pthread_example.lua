@@ -1,10 +1,10 @@
 
 local ffi = require'ffi'
-local pthread = require'pthread'
-local luastate = require'luastate'
+require'pthread'
+require'luastate'
 
 --make a new Lua state
-local state = luastate.open()
+local state = luastate()
 
 --load the standard libraries into the Lua state
 state:openlibs()
@@ -39,7 +39,7 @@ end)
 local worker_cb_ptr = ffi.cast('void*', state:call())
 
 --create a thread which will start running automatically.
-local thread = pthread.new(worker_cb_ptr)
+local thread = pthread(worker_cb_ptr)
 
 --wait for the thread to finish.
 thread:join()

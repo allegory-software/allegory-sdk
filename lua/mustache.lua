@@ -36,7 +36,7 @@ FEATURES
 
 API
 
-mustache.render(template, [data], [partials], [write], [d1, d2], [escape_func]) -> s
+mustache_render(template, [data], [partials], [write], [d1, d2], [escape_func]) -> s
 
 	(Compile and) render a template.
 
@@ -47,11 +47,11 @@ mustache.render(template, [data], [partials], [write], [d1, d2], [escape_func]) 
 	d1, d2      : initial set delimiters.
 	escape_func : the escape function for {{var}} substitutions.
 
-mustache.compile(template[, d1, d2]) -> template
+mustache_compile(template[, d1, d2]) -> template
 
 	Compile a template to bytecode (if not already compiled).
 
-mustache.dump(program, [d1, d2], [print])
+mustache_dump(program, [d1, d2], [print])
 
 	Dump the template bytecode (for debugging).
 
@@ -59,13 +59,7 @@ mustache.dump(program, [d1, d2], [print])
 
 if not ... then require'mustache_test'; return end
 
-local glue = require'glue'
-
-local push = table.insert
-local pop = table.remove
-local _ = string.format
-local lineinfo = glue.lineinfo
-local esc = glue.esc
+require'glue'
 
 --raise an error for something that happened at s[i], so that position in
 --file (line, column) can be printed. if i is nil, eof is assumed.
@@ -80,16 +74,11 @@ local function raise(s, i, err, ...)
 		else
 			where = 'eof'
 		end
-		err = _('error at %s: %s.', where, err)
+		err = _('error at %s: %s', where, err)
 	else
-		err = _('error: %s.', err)
+		err = _('error: %s', err)
 	end
-	error(err, 2)
-end
-
-local function trim(s) --fast trim from glue
-	local from = s:match'^%s*()'
-	return from > #s and '' or s:match('.*%S', from)
+	error(newerror('mustache', '%s', err), 2)
 end
 
 --calls parse(i, j, token_type, ...) for each token in s. i and j are such
@@ -188,7 +177,7 @@ local cache = setmetatable({}, {__mode = 'kv'}) --{template -> prog} cache
 --and d1 and d2 are the current set delimiters (for lambdas).
 --(**) for partials, i1 is such that template:sub(i, i1) gives the
 --indent of the partial which must be applied to the lines of the result.
-local function compile(template, d1, d2)
+function mustache_compile(template, d1, d2)
 	if type(template) == 'table' then --already compiled
 		return template
 	end
@@ -243,22 +232,21 @@ local function compile(template, d1, d2)
 	end, d1, d2)
 
 	if #sec_stack > 0 then
-		local sections = table.concat(sec_stack, ', ')
+		local sections = concat(sec_stack, ', ')
 		raise(template, nil, 'unclosed sections: %s', sections)
 	end
 
 	return prog
 end
 
-local function dump(prog, d1, d2, print) --dump bytecode
+function mustache_dump(prog, d1, d2, print) --dump bytecode
 	print = print or _G.print
-	prog = compile(prog, d1, d2)
-	local pp = require'pp'
+	prog = mustache_compile(prog, d1, d2)
 	local function var(var)
-		return type(var) == 'table' and table.concat(var, '.') or var
+		return type(var) == 'table' and concat(var, '.') or var
 	end
 	local function text(s)
-		local s = pp.format(s)
+		local s = pp(s)
 		if #s > 50 then
 			s = s:sub(1, 50-3)..'...'
 		end
@@ -296,20 +284,6 @@ local function dump(prog, d1, d2, print) --dump bytecode
 		print(_('%5d %2d %3d:%3d %3d  %-6s %s', i, j-i+1, line, col, pc, cmd, s))
 		pc = pc + 3
 	end
-end
-
-local escapes = { --from mustache.js
-	['&']  = '&amp;',
-	['<']  = '&lt;',
-	['>']  = '&gt;',
-	['"']  = '&quot;',
-	["'"]  = '&#39;',
-	['/']  = '&#x2F;',
-	['`']  = '&#x60;', --attr. delimiter in IE
-	['=']  = '&#x3D;',
-}
-local function escape_html(v)
-	return v:gsub('[&<>"\'/`=]', escapes) or v
 end
 
 --check if a value is considered valid in a way compatible with mustache.js.
@@ -387,7 +361,7 @@ end
 
 local function render(prog, ctx_stack, getpartial, write, d1, d2, esc)
 
-	prog = compile(prog, d1, d2)
+	prog = mustache_compile(prog, d1, d2)
 
 	local outbuf
 	if not write then --writer not given, do buffered output
@@ -525,12 +499,11 @@ local function render(prog, ctx_stack, getpartial, write, d1, d2, esc)
 	end
 
 	if outbuf then
-		return table.concat(outbuf)
+		return concat(outbuf)
 	end
 end
 
-local internal_render = render
-local function render(prog, view, getpartial, write, d1, d2, esc)
+function mustache_render(prog, view, getpartial, write, d1, d2, esc)
 	if type(getpartial) == 'table' then --partials table given, build getter
 		local partials = getpartial
 		getpartial = function(name)
@@ -538,12 +511,6 @@ local function render(prog, view, getpartial, write, d1, d2, esc)
 		end
 	end
 	local ctx_stack = {view}
-	esc = esc or escape_html
-	return internal_render(prog, ctx_stack, getpartial, write, d1, d2, esc)
+	esc = esc or html_escape
+	return render(prog, ctx_stack, getpartial, write, d1, d2, esc)
 end
-
-return {
-	compile = compile,
-	render = render,
-	dump = dump,
-}

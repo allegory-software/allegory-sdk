@@ -12,21 +12,21 @@ FEATURES
   * platform-specific functionality exposed
 
 FILE OBJECTS
-	fs.open(path[, mode|opt]) -> f                open file
+	open(path[, mode|opt]) -> f                   open file
 	f:close()                                     close file
 	f:closed() -> true|false                      check if file is closed
-	fs.isfile(f) -> true|false                    check if f is a file object
+	isfile(f) -> true|false                       check if f is a file object
 	f.handle -> HANDLE                            Windows HANDLE (Windows platforms)
 	f.fd -> fd                                    POSIX file descriptor (POSIX platforms)
 PIPES
-	fs.pipe() -> rf, wf                           create an anonymous pipe
-	fs.pipe({path=,<opt>=} | path[,options]) -> pf   create a named pipe (Windows)
-	fs.pipe({path=,mode=} | path[,mode]) -> true  create a named pipe (POSIX)
+	pipe() -> rf, wf                              create an anonymous pipe
+	pipe({path=,<opt>=} | path[,options]) -> pf   create a named pipe (Windows)
+	pipe({path=,mode=} | path[,mode]) -> true     create a named pipe (POSIX)
 STDIO STREAMS
 	f:stream(mode) -> fs                          open a FILE* object from a file
 	fs:close()                                    close the FILE* object
 MEMORY STREAMS
-	fs.open_buffer(buf, [size], [mode]) -> f      create a memory stream
+	open_buffer(buf, [size], [mode]) -> f         create a memory stream
 FILE I/O
 	f:read(buf, len) -> readlen                   read data from file
 	f:readn(buf, n) -> true                       read exactly n bytes
@@ -40,68 +40,84 @@ OPEN FILE ATTRIBUTES
 	f:attr([attr]) -> val|t                       get/set attribute(s) of open file
 	f:size() -> n                                 get file size
 DIRECTORY LISTING
-	fs.dir(dir, [opt]) -> d, next                 directory contents iterator
-	d:next() -> name, d                           call the iterator explicitly
-	d:close()                                     close iterator
-	d:closed() -> true|false                      check if iterator is closed
-	d:name() -> s                                 dir entry's name
-	d:dir() -> s                                  dir that was passed to fs.dir()
-	d:path() -> s                                 full path of the dir entry
-	d:attr([attr, ][deref]) -> t|val              get/set dir entry attribute(s)
-	d:is(type, [deref]) -> t|f                    check if dir entry is of type
+	ls(dir, [opt]) -> d, next                     directory contents iterator
+	  d:next() -> name, d                         call the iterator explicitly
+	  d:close()                                   close iterator
+	  d:closed() -> true|false                    check if iterator is closed
+	  d:name() -> s                               dir entry's name
+	  d:dir() -> s                                dir that was passed to ls()
+	  d:path() -> s                               full path of the dir entry
+	  d:attr([attr, ][deref]) -> t|val            get/set dir entry attribute(s)
+	  d:is(type, [deref]) -> t|f                  check if dir entry is of type
+	scandir([path]) -> iter() -> sc               recursive dir iterator
+	  sc:close()
+	  sc:closed() -> true|false
+	  sc:name([depth]) -> s
+	  sc:dir([depth]) -> s
+	  sc:path([depth]) -> s
+	  sc:relpath([depth]) -> s
+	  sc:attr([attr, ][deref]) -> t|val
+	  sc:depth([n]) -> n (from 1)
+	searchpaths({path1,...}, file, [type]) -> path
 FILE ATTRIBUTES
-	fs.attr(path, [attr, ][deref]) -> t|val       get/set file attribute(s)
-	fs.is(path, [type], [deref]) -> t|f           check if file exists or is of a certain type
+	file_attr(path, [attr, ][deref]) -> t|val     get/set file attribute(s)
+	file_is(path, [type], [deref]) -> t|f         check if file exists or is of a certain type
+	exists                                      = file_is
+	mtime(path, [deref]) -> ts                    get file's modification time
+	[try_]chmod(path, perms, [quiet]) -> path     change a file or dir's permissions
 FILESYSTEM OPS
-	fs.mkdir(path, [recursive], [perms])          make directory
-	fs.cwd() -> path                              get current working directory
-	fs.chdir(path)                                set current working directory
-	fs.startcwd() -> path                         get the cwd that process started with
-	fs.remove(path, [recursive])                  remove file or directory (recursively)
-	fs.move(path, newpath, [opt])                 rename/move file on the same filesystem
+	cwd() -> path                                 get current working directory
+	abspath(path[, cwd]) -> path                  convert path to absolute path
+	startcwd() -> path                            get the cwd that process started with
+	[try_]chdir(path)                             set current working directory
+	run_indir(dir, fn)                            run function in specified cwd
+	[try_]mkdir(dir, [recursive], [perms], [quiet]) -> dir    make directory
+	[try_]rm[dir|file](path, [quiet])             remove directory or file
+	[try_]rm_rf(path, [quiet])                    like `rm -rf`
+	[try_]mkdirs(file, [quiet]) -> file           make file's dir
+	mv(old_path, new_path, [quiet])               rename/move file or dir on the same filesystem
 SYMLINKS & HARDLINKS
-	fs.mksymlink(symlink, path, is_dir)           create a symbolic link for a file or dir
-	fs.mkhardlink(hardlink, path)                 create a hard link for a file
-	fs.readlink(path) -> path                     dereference a symlink recursively
+	[try_]mksymlink(symlink, path, is_dir, [quiet])  create a symbolic link for a file or dir
+	[try_]mkhardlink(hardlink, path, [quiet])     create a hard link for a file
+	readlink(path) -> path                        dereference a symlink recursively
 COMMON PATHS
-	fs.homedir() -> path                          get current user's home directory
-	fs.tmpdir() -> path                           get the temporary directory
-	fs.exepath() -> path                          get the full path of the running executable
-	fs.exedir() -> path                           get the directory of the running executable
-	fs.appdir([appname]) -> path                  get the current user's app data dir
-	fs.scriptdir() -> path                        get the directory of the main script
+	homedir() -> path                             get current user's home directory
+	tmpdir() -> path                              get the temporary directory
+	exepath() -> path                             get the full path of the running executable
+	exedir() -> path                              get the directory of the running executable
+	appdir([appname]) -> path                     get the current user's app data dir
+	scriptdir() -> path                           get the directory of the main script
+	vardir() -> path                              get script's private r/w directory
+	varpath(file) -> path                         get vardir-relative path
 LOW LEVEL
-	fs.wrap_handle(HANDLE) -> f                   wrap opened HANDLE (Windows)
-	fs.wrap_fd(fd) -> f                           wrap opened file descriptor
-	fs.wrap_file(FILE*) -> f                      wrap opened FILE* object
-	fs.fileno(FILE*) -> fd                        get stream's file descriptor
+	file_wrap_handle(HANDLE) -> f                 wrap opened HANDLE (Windows)
+	file_wrap_fd(fd) -> f                         wrap opened file descriptor
+	file_wrap_file(FILE*) -> f                    wrap opened FILE* object
+	fileno(FILE*) -> fd                           get stream's file descriptor
 MEMORY MAPPING
-	fs.map(...) -> map                            create a memory mapping
+	mmap(...) -> map                              create a memory mapping
 	f:map([offset],[size],[addr],[access]) -> map   create a memory mapping
 	map.addr                                      a void* pointer to the mapped memory
 	map.size                                      size of the mapped memory in bytes
 	map:flush([async, ][addr, size])              flush (parts of) the mapping to disk
 	map:free()                                    release the memory and associated resources
-	fs.unlink_mapfile(tagname)                    remove the shared memory file from disk (Linux, OSX)
+	unlink_mapfile(tagname)                       remove the shared memory file from disk (Linux, OSX)
 	map:unlink()
-	fs.mirror_buffer([size], [addr]) -> map       create a mirrored memory-mapped ring buffer
-	fs.pagesize() -> bytes                        get allocation granularity
-	fs.aligned_size(bytes[, dir]) -> bytes        next/prev page-aligned size
-	fs.aligned_addr(ptr[, dir]) -> ptr            next/prev page-aligned address
+	mirror_buffer([size], [addr]) -> map          create a mirrored memory-mapped ring buffer
+	pagesize() -> bytes                           get allocation granularity
+	aligned_size(bytes[, dir]) -> bytes           next/prev page-aligned size
+	aligned_addr(ptr[, dir]) -> ptr               next/prev page-aligned address
 FILESYSTEM INFO
-	fs.info(path) -> {size=, free=}               get free/total disk space for a path
+	fs_info(path) -> {size=, free=}               get free/total disk space for a path
 HI-LEVEL APIs
-	fs.load[_tobuffer](path, [ignore_fsize]) -> buf,len  read file to string or buffer
-	fs.save(path, v | buf,len | t | read)         atomic save value/buffer/array/read-results
-	fs.saver(path) -> f(v | buf,len | t | read)   atomic save writer function
+	[try_]load[_tobuffer](path, [ignore_fsize]) -> buf,len  read file to string or buffer
+	[try_]save(path, s, [sz], [perms], [quiet])   atomic save value/buffer/array/read-results
+	file_saver(path) -> f(v | buf,len | t | read) atomic save writer function
+	touch(file, [mtime], [btime], [quiet])
+	cp(src_file, dst_file)
 
 The `deref` arg is true by default, meaning that by default, symlinks are
 followed recursively and transparently where this option is available.
-
-All functions raise on user error and unrecoverable OS error, but return
-`nil,err` on recoverable failure. Functions which are listed as having no
-return value actually return true for indicating success. Recoverable errors
-are normalized and made portable, eg. 'not_found' (see full list below).
 
 FILE ATTRIBUTES
 
@@ -138,11 +154,11 @@ FILE ATTRIBUTES
  blocks        |        | r      | r        | number of 512B blocks allocated
 
 On the table above, `r` means that the attribute is read/only and `rw` means
-that the attribute can be changed. Attributes can be queried and changed
-from different contexts via `f:attr()`, `fs.attr()` and `d:attr()`.
+that the attribute can be changed. Attributes can be queried and changed via
+`f:attr()`, `file_attr()` and `d:attr()`.
 
-NOTE: File sizes and offsets are Lua numbers not 64bit ints, so they can
-hold at most 8KTB. This will change when that becomes a problem.
+NOTE: File sizes and offsets are Lua numbers not 64bit ints, so they can hold
+at most 8KTB.
 
 FILE TYPES
 
@@ -158,7 +174,6 @@ FILE TYPES
  socket       |        | *      | *        | file is a socket
  unknown      |        | *      | *        | file type unknown
 
-
 NORMALIZED ERROR MESSAGES
 
 	not_found          file/dir/path not found
@@ -172,7 +187,7 @@ NORMALIZED ERROR MESSAGES
 
 File Objects -----------------------------------------------------------------
 
-fs.open(path[, mode|opt]) -> f
+open(path[, mode|opt]) -> f
 
 Open/create a file for reading and/or writing. The second arg can be a string:
 
@@ -200,21 +215,21 @@ Open/create a file for reading and/or writing. The second arg can be a string:
  flags     | Linux, OSX   | `open() / flags`                       | 'rdonly'
  mode      | Linux, OSX   | `octal or symbolic perms`              | '0666' / 'rwx'
 
-The `mode` arg is passed to `unixperms.parse()`.
+The `mode` arg is passed to `unixperms_parse()`.
 
 Pipes ------------------------------------------------------------------------
 
-fs.pipe() -> rf, wf
+pipe() -> rf, wf
 
 	Create an anonymous (unnamed) pipe. Return two files corresponding to the
 	read and write ends of the pipe.
 
 	NOTE: If you're using async anonymous pipes in Windows _and_ you're
 	also creating multiple Lua states _per OS thread_, make sure to set a unique
-	`fs.lua_state_id` per Lua state to distinguish them. That is because
+	`lua_state_id` per Lua state to distinguish them. That is because
 	in Windows, async anonymous pipes are emulated using named pipes.
 
-fs.pipe({path=,<opt>=} | path[,options]) -> pf
+pipe({path=,<opt>=} | path[,options]) -> pf
 
 	Create or open a named pipe (Windows). Named pipes on Windows cannot
 	be created in any directory like on POSIX systems, instead they must be
@@ -224,7 +239,7 @@ fs.pipe({path=,<opt>=} | path[,options]) -> pf
 	Named pipes on Windows cannot be removed and are not persistent. They are
 	destroyed automatically when the process that created them exits.
 
-fs.pipe({path=,mode=} | path[,mode]) -> true
+pipe({path=,mode=} | path[,mode]) -> true
 
 	Create a named pipe (POSIX). Named pipes on POSIX are persistent and can be
 	created in any directory as they are just a type of file.
@@ -242,7 +257,7 @@ fs:close()
 
 Memory Streams ---------------------------------------------------------------
 
-fs.open_buffer(buf, [size], [mode]) -> f
+open_buffer(buf, [size], [mode]) -> f
 
 	Create a memory stream for reading and writing data from and into a buffer
 	using the file API. Only opening modes 'r' and 'w' are supported.
@@ -282,26 +297,26 @@ f:truncate(size, [opt])
 	This can be done both to shorten a file and thus free disk space, or to
 	preallocate disk space to be subsequently filled (eg. when downloading a file).
 
-	On Linux
+	... On Linux
 
-		`opt` is an optional string for Linux which can contain any of the words
-		`fallocate` (call `fallocate()`) and `fail` (do not call `ftruncate()`
-		if `fallocate()` fails: return an error instead). The problem with calling
-		`ftruncate()` if `fallocate()` fails is that on most filesystems, that
-		creates a sparse file which doesn't help if what you want is to actually
-		reserve space on the disk, hence the `fail` option. The default is
-		`'fallocate fail'` which should never create a sparse file, but it can be
-		slow on some file systems (when it's emulated) or it can just fail
-		(like on virtual filesystems).
+	`opt` is an optional string for Linux which can contain any of the words
+	`fallocate` (call `fallocate()`) and `fail` (do not call `ftruncate()`
+	if `fallocate()` fails: return an error instead). The problem with calling
+	`ftruncate()` if `fallocate()` fails is that on most filesystems, that
+	creates a sparse file which doesn't help if what you want is to actually
+	reserve space on the disk, hence the `fail` option. The default is
+	`'fallocate fail'` which should never create a sparse file, but it can be
+	slow on some file systems (when it's emulated) or it can just fail
+	(like on virtual filesystems).
 
-		Btw, seeking past EOF and writing something there will also create a sparse
-		file, so there's no easy way out of this complexity.
+	Btw, seeking past EOF and writing something there will also create a sparse
+	file, so there's no easy way out of this complexity.
 
-	On Windows
+	... On Windows
 
-		On NTFS truncation is smarter: disk space is reserved but no zero bytes are
-		written. Those bytes are only written on subsequent write calls that skip
-		over the reserved area, otherwise there's no overhead.
+	On NTFS truncation is smarter: disk space is reserved but no zero bytes are
+	written. Those bytes are only written on subsequent write calls that skip
+	over the reserved area, otherwise there's no overhead.
 
 f:buffered_read([bufsize]) -> read(buf, len)
 
@@ -320,7 +335,7 @@ f:attr([attr]) -> val|t
 
 Directory listing ------------------------------------------------------------
 
-fs.dir([dir], [opt]) -> d, next
+ls([dir], [opt]) -> d, next
 
 	Directory contents iterator. `dir` defaults to '.'.
 	`opt` is a string that can include:
@@ -328,7 +343,7 @@ fs.dir([dir], [opt]) -> d, next
 
 	USAGE
 
-		for name, d in fs.dir() do
+		for name, d in ls() do
 			if not name then
 				print('error: ', d)
 				break
@@ -339,7 +354,7 @@ fs.dir([dir], [opt]) -> d, next
 	Always include the `if not name` condition when iterating. The iterator
 	doesn't raise any errors. Instead it returns `false, err` as the
 	last iteration when encountering an error. Initial errors from calling
-	`fs.dir()` (eg. `'not_found'`) are passed to the iterator also, so the
+	`ls()` (eg. `'not_found'`) are passed to the iterator also, so the
 	iterator must be called at least once to see them.
 
 	d:next() -> name, d | false, err | nil
@@ -361,7 +376,7 @@ fs.dir([dir], [opt]) -> d, next
 
 	d:dir() -> s
 
-		The directory that was passed to `fs.dir()`.
+		The directory that was passed to `ls()`.
 
 	d:path() -> s
 
@@ -384,7 +399,7 @@ fs.dir([dir], [opt]) -> d, next
 
 		Check if dir entry is of type.
 
-fs.scan([path]) -> iter() -> sc
+scandir([path]) -> iter() -> sc
 
 	Recursive dir walker. All sc methods return `nil, err` if an error occured
 	on the current dir entry, but the iteration otherwise continues.
@@ -401,32 +416,28 @@ fs.scan([path]) -> iter() -> sc
 
 File attributes --------------------------------------------------------------
 
-fs.attr(path, [attr, ][deref]) -> t|val
+file_attr(path, [attr, ][deref]) -> t|val
 
 	Get/set a file's attribute(s) given its path in utf8.
 
-fs.is(path, [type], [deref]) -> true|false
+file_is(path, [type], [deref]) -> true|false
 
 	Check if file exists or if it is of a certain type.
 
 Filesystem operations --------------------------------------------------------
 
-fs.mkdir(path, [recursive], [perms])
+mkdir(path, [recursive], [perms])
 
-	Make directory. `perms` can be a number or a string passed to `unixperms.parse()`.
+	Make directory. `perms` can be a number or a string passed to `unixperms_parse()`.
 
 	NOTE: In recursive mode, if the directory already exists this function
 	returns `true, 'already_exists'`.
 
-fs.cd|cwd|chdir([path]) -> path
-
-	Get/set current directory.
-
-fs.remove(path, [recursive])
+fileremove(path, [recursive])
 
 	Remove a file or directory (recursively if `recursive=true`).
 
-fs.move(path, newpath, [opt])
+filemove(path, newpath, [opt])
 
 	Rename/move a file on the same filesystem. On Windows, `opt` represents
 	the `MOVEFILE_*` flags and defaults to `'replace_existing write_through'`.
@@ -435,17 +446,7 @@ fs.move(path, newpath, [opt])
 
 Symlinks & Hardlinks ---------------------------------------------------------
 
-fs.mksymlink(symlink, path, is_dir)
-
-	Create a symbolic link for a file or dir. The `is_dir` arg is required
-	for Windows for creating symlinks to directories. It's ignored on Linux
-	and OSX.
-
-fs.mkhardlink(hardlink, path)
-
-	Create a hard link for a file.
-
-fs.readlink(path) -> path
+readlink(path) -> path
 
 	Dereference a symlink recursively. The result can be an absolute or
 	relative path which can be valid or not.
@@ -465,8 +466,8 @@ Memory Mapping ---------------------------------------------------------------
 	  this API unsuitable for mapping files from removable media or recovering
 	  from write failures in general. For all other uses it is fine.
 
-fs.map(args_t) -> map
-fs.map(path, [access], [size], [offset], [addr], [tagname], [perms]) -> map
+mmap(args_t) -> map
+mmap(path, [access], [size], [offset], [addr], [tagname], [perms]) -> map
 f:map([offset], [size], [addr], [access])
 
 	Create a memory map object. Args:
@@ -532,7 +533,7 @@ NOTES
 map:free()
 
 	Free the memory and all associated resources and close the file
-	if it was opened by the `fs.map()` call.
+	if it was opened by the `mmap()` call.
 
 map:flush([async, ][addr, size]) -> true | nil,err
 
@@ -540,7 +541,7 @@ map:flush([async, ][addr, size]) -> true | nil,err
 	it will be automatically aligned to the left. If `async` is true,
 	perform the operation asynchronously and return immediately.
 
-fs.unlink_mapfile(tagname)` <br> `map:unlink()
+unlink_mapfile(tagname)` <br> `map:unlink()
 
 	Remove a (the) shared memory file from disk. When creating a shared memory
 	mapping using `tagname`, a file is created on the filesystem on Linux
@@ -548,7 +549,7 @@ fs.unlink_mapfile(tagname)` <br> `map:unlink()
 	no longer needed. This can be done anytime, even while mappings are open and
 	will not affect said mappings.
 
-fs.mirror_buffer([size], [addr]) -> map  (OSX support is NYI)
+mirror_buffer([size], [addr]) -> map  (OSX support is NYI)
 
 	Create a mirrored buffer to use with a lock-free ring buffer. Args:
 	* `size`: the size of the memory segment (optional; one page size
@@ -560,17 +561,17 @@ fs.mirror_buffer([size], [addr]) -> map  (OSX support is NYI)
 	The memory block at `addr` is mirrored such that
 	`(char*)addr[i] == (char*)addr[size+i]` for any `i` in `0..size-1`.
 
-fs.aligned_size(bytes[, dir]) -> bytes
+aligned_size(bytes[, dir]) -> bytes
 
 	Get the next larger (dir = 'right', default) or smaller (dir = 'left') size
 	that is aligned to a page boundary. It can be used to align offsets and sizes.
 
-fs.aligned_addr(ptr[, dir]) -> ptr
+aligned_addr(ptr[, dir]) -> ptr
 
 	Get the next (dir = 'right', default) or previous (dir = 'left') address that
 	is aligned to a page boundary. It can be used to align pointers.
 
-fs.pagesize() -> bytes
+pagesize() -> bytes
 
 	Get the current page size. Memory will always be allocated in multiples
 	of this size and file offsets must be aligned to this size too.
@@ -578,7 +579,7 @@ fs.pagesize() -> bytes
 Async I/O --------------------------------------------------------------------
 
 Named pipes can be opened with `async = true` option which opens them
-in async mode, which uses the [sock](sock.md) scheduler to multiplex the I/O
+in async mode, which uses the sock scheduler to multiplex the I/O
 which means all I/O then must be performed inside sock threads.
 In this mode, the `read()` and `write()` methods take an additional `expires`
 arg that behaves just like with sockets.
@@ -622,42 +623,16 @@ Read Arvid Norberg's article[1] for more info.
 
 if not ... then require'fs_test'; return end
 
-local ffi = require'ffi'
-local bit = require'bit'
-local glue = require'glue'
-local path = require'path'
+require'glue'
+require'path'
 
-local min, max, floor, ceil, ln =
-	math.min, math.max, math.floor, math.ceil, math.log
+local
+	C, min, max, floor, ceil, ln =
+	C, min, max, floor, ceil, ln
 
-local C = ffi.C
-
-local backend = setmetatable({}, {__index = _G})
-setfenv(1, backend)
-
-cdef = ffi.cdef
-x64 = ffi.arch == 'x64' or nil
-osx = ffi.os == 'OSX' or nil
-linux = ffi.os == 'Linux' or nil
-win = ffi.abi'win' or nil
-
---namespaces in which backends can add methods directly.
-fs = {backend = backend} --fs module namespace
-file = {}; file.__index = file --file object methods
-stream = {}; stream.__index = stream --FILE methods
-dir = {}; dir.__index = dir --dir listing object methods
-
-local uint64_ct   = ffi.typeof'uint64_t'
-local void_ptr_ct = ffi.typeof'void*'
-local uintptr_ct  = ffi.typeof'uintptr_t'
-
-memoize = glue.memoize
-assertf = glue.assert
-buffer = glue.buffer
-update = glue.update
-
-local u8p = glue.u8p
-local u8a = glue.u8a
+local file = {}; file.__index = file --file object methods
+local stream = {}; stream.__index = stream --FILE methods
+local dir = {}; dir.__index = dir --dir listing object methods
 
 --error reporting ------------------------------------------------------------
 
@@ -671,104 +646,31 @@ local errors = {
 	[17] = 'already_exists', --EEXIST, open(), mkdir()
 	[20] = 'not_found', --ENOTDIR, opendir()
 	[21] = 'is_dir', --EISDIR, unlink()
-	[linux and 39 or osx and 66 or ''] = 'not_empty', --ENOTEMPTY, rmdir()
+	[Linux and 39 or OSX and 66 or ''] = 'not_empty', --ENOTEMPTY, rmdir()
 	[28] = 'disk_full', --ENOSPC: fallocate()
-	[linux and 95 or ''] = 'not_supported', --EOPNOTSUPP: fallocate()
-	[linux and 32 or ''] = 'eof', --EPIPE: write()
+	[Linux and 95 or ''] = 'not_supported', --EOPNOTSUPP: fallocate()
+	[Linux and 32 or ''] = 'eof', --EPIPE: write()
 }
 
-function check_errno(ret, errno, xtra_errors)
+local function check_errno(ret, errno, xtra_errors)
 	if ret then return ret end
 	errno = errno or ffi.errno()
 	local err = errors[errno] or (xtra_errors and xtra_errors[errno])
 	if not err then
 		local s = C.strerror(errno)
-		err = s ~= nil and ffi.string(s) or 'Error '..errno
+		err = s ~= nil and str(s) or 'Error '..errno
 	end
 	return ret, err
 end
 
-function fs.log(...)
-	local logging = fs.logging
-	if not logging then return end
-	logging.log(...)
-end
-
-function fs.live(...)
-	local logging = fs.logging
-	if not logging then return end
-	logging.live(...)
-end
-
---flags arg parsing ----------------------------------------------------------
-
---turn a table of boolean options into a bit mask.
-local function table_flags(t, masks, strict)
-	local bits = 0
-	local mask = 0
-	for k,v in pairs(t) do
-		local flag
-		if type(k) == 'string' and v then --flags as table keys: {flag->true}
-			flag = k
-		elseif type(k) == 'number'
-			and floor(k) == k
-			and type(v) == 'string'
-		then --flags as array: {flag1,...}
-			flag = v
-		end
-		local bitmask = masks[flag]
-		if strict then
-			assertf(bitmask, 'invalid flag: "%s"', tostring(flag))
-		end
-		if bitmask then
-			mask = bit.bor(mask, bitmask)
-			if flag then
-				bits = bit.bor(bits, bitmask)
-			end
-		end
-	end
-	return bits, mask
-end
-
---turn 'opt1 +opt2 -opt3' -> {opt1=true, opt2=true, opt3=false}
-local string_flags = memoize(function(strict, masks, s)
-	local t = {}
-	for s in s:gmatch'[^ ,]+' do
-		local m,s = s:match'^([%+%-]?)(.*)$'
-		t[s] = m ~= '-'
-	end
-	return {table_flags(t, masks, strict)}
-end)
-
---set one or more bits of a value without affecting other bits.
-function setbits(bits, mask, over)
-	return over and bit.bor(bits, bit.band(over, bit.bnot(mask))) or bits
-end
-
-function flags(arg, masks, cur_bits, strict)
-	if type(arg) == 'string' then
-		local bits, mask = unpack(string_flags(strict or false, masks, arg))
-		return setbits(bits, mask, cur_bits)
-	elseif type(arg) == 'table' then
-		local bits, mask = table_flags(arg, masks, strict)
-		return setbits(bits, mask, cur_bits)
-	elseif type(arg) == 'number' then
-		return arg
-	elseif arg == nil then
-		return 0
-	else
-		assertf(false, 'flags expected but "%s" given', type(arg))
-	end
-end
-
 --file objects ---------------------------------------------------------------
 
-function fs.isfile(f)
+function isfile(f)
 	local mt = getmetatable(f)
 	return type(mt) == 'table' and rawget(mt, '__index') == file
 end
 
-function open_opt(mode_opt, str_opt)
+function _open_opt(mode_opt, str_opt)
 	mode_opt = mode_opt or 'r'
 	local opt = type(mode_opt) == 'table' and mode_opt or nil
 	local mode = type(mode_opt) == 'string' and mode_opt or opt and opt.mode
@@ -812,7 +714,7 @@ function file.buffered_read(f, bufsize)
 			end
 			--TODO: benchmark: read less instead of copying.
 			local n = min(sz, len)
-			ffi.copy(ffi.cast(ptr_ct, dst) + rsz, buf + ofs, n)
+			copy(cast(ptr_ct, dst) + rsz, buf + ofs, n)
 			ofs = ofs + n
 			len = len - n
 			rsz = rsz + n
@@ -829,7 +731,7 @@ typedef struct FILE FILE;
 int fclose(FILE*);
 ]]
 
-stream_ct = ffi.typeof'struct FILE'
+stream_ct = typeof'struct FILE'
 
 function stream.close(fs)
 	local ok = C.fclose(fs) == 0
@@ -863,7 +765,7 @@ function file:write(buf, sz, expires)
 		end
 		assert(len > 0)
 		if type(buf) == 'string' then --only make pointer on the rare second iteration.
-			buf = ffi.cast(u8p, buf)
+			buf = cast(u8p, buf)
 		end
 		buf = buf + len
 		sz  = sz  - len
@@ -884,16 +786,14 @@ function file:readn(buf, sz, expires)
 	return true
 end
 
-local u8a = ffi.typeof'uint8_t[?]'
 function file:readall(expires, ignore_file_size)
 	if self.type == 'pipe' or ignore_file_size then
-		return glue.readall(self.read, self, expires)
+		return readall(self.read, self, expires)
 	end
 	assert(self.type == 'file')
 	local size, err = self:attr'size'; if not size then return nil, err end
 	local offset, err = self:seek(); if not offset then return nil, err end
 	local sz = size - offset
-	if sz == 0 then return nil, 0 end
 	local buf = u8a(sz)
 	local n, err = self:read(buf, sz)
 	if not n then return nil, err end
@@ -903,143 +803,328 @@ end
 
 --filesystem operations ------------------------------------------------------
 
-function fs.mkdir(dir, recursive, ...)
+function try_chdir(dir)
+	local ok, err = _chdir(dir)
+	if not ok then return false, err end
+	log('', 'fs', 'chdir', '%s', dir)
+	return true
+end
+
+local function _try_mkdir(path, perms, quiet)
+	local ok, err = _mkdir(path, perms)
+	if not ok then
+		if err == 'already_exists' then return true, err end
+		return false, err
+	end
+	log(quiet and '' or 'note', 'fs', 'mkdir', '%s%s%s',
+		path, perms and ' ' or '', perms or '')
+	return true
+end
+
+function try_mkdir(dir, recursive, perms, quiet)
 	if recursive then
-		if win and not path.dir(dir) then --because mkdir'c:/' gives access denied.
+		if win and not path_dir(dir) then --because mkdir'c:/' gives access denied.
 			return true
 		end
-		dir = path.normalize(dir) --avoid creating `dir` in `dir/..` sequences
+		dir = path_normalize(dir) --avoid creating `dir` in `dir/..` sequences
 		local t = {}
 		while true do
-			local ok, err, errno = mkdir(dir, ...)
+			local ok, err = _try_mkdir(dir, perms, quiet)
 			if ok then break end
 			if err ~= 'not_found' then --other problem
-				ok = err == 'already_exists' and #t == 0
-				return ok, err, errno
+				return ok, err
 			end
-			table.insert(t, dir)
-			dir = path.dir(dir)
+			add(t, dir)
+			dir = path_dir(dir)
 			if not dir then --reached root
 				return ok, err
 			end
 		end
 		while #t > 0 do
-			local dir = table.remove(t)
-			local ok, err, errno = mkdir(dir, ...)
-			if not ok then return ok, err, errno end
+			local dir = remove(t)
+			local ok, err = _try_mkdir(dir, perms, quiet)
+			if not ok then return ok, err end
 		end
 		return true
 	else
-		return mkdir(dir, ...)
+		return _try_mkdir(dir, perms, quiet)
 	end
 end
 
-local function remove(path)
-	local type = fs.attr(path, 'type', false)
-	if type == 'dir' or (win and type == 'symlink'
-		and fs.is(path, 'dir'))
-	then
-		return rmdir(path)
-	end
-	return rmfile(path)
+function try_mkdirs(file)
+	local ok, err = try_mkdir(assert(path_dir(file)))
+	if not ok then return nil, err end
+	return file
 end
 
---TODO: for Windows, this simple algorithm is not correct. On NTFS we
---should be moving all files to a temp folder and deleting them from there.
-local function rmdir_recursive(dir)
-	for file, d in fs.dir(dir) do
+function try_rmdir(dir, quiet)
+	local ok, err, errcode = _rmdir(dir)
+	if not ok then
+		if err == 'not_found' then return true, err end
+		return false, err
+	end
+	log(quiet and '' or 'note', 'fs', 'rmdir', '%s', dir)
+	return true
+end
+
+function try_rmfile(file, quiet)
+	local ok, err = _rmfile(file)
+	if not ok then
+		if err == 'not_found' then return true, err end
+		return false, err
+	end
+	log(quiet and '' or 'note', 'fs', 'rmfile', '%s', file)
+	return ok, err
+end
+
+local function try_rm(path, quiet)
+	local type, err = file_attr(path, 'type', false)
+	if not type and err == 'not_found' then
+		return true, err
+	end
+	if type == 'dir' or (win and type == 'symlink' and err == 'dir') then
+		return try_rmdir(path, quiet)
+	else
+		return try_rmfile(path, quiet)
+	end
+end
+
+local function try_rmdir_recursive(dir, quiet)
+	for file, d in ls(dir) do
 		if not file then
+			if d == 'not_found' then return true, d end
 			return file, d
 		end
-		local filepath = path.combine(dir, file)
+		local filepath = path_combine(dir, file)
 		local ok, err
-		local realtype = d:attr('type', false)
+		local realtype, err = d:attr('type', false)
 		if realtype == 'dir' then
-			ok, err = rmdir_recursive(filepath)
-		elseif win and realtype == 'symlink' and fs.is(filepath, 'dir') then
-			ok, err = rmdir(filepath)
-		else
-			ok, err = rmfile(filepath)
+			ok, err = try_rmdir_recursive(filepath, quiet)
+		elseif win and realtype == 'symlink' and err == 'dir' then
+			ok, err = try_rmdir(filepath, quiet)
+		elseif realtype then
+			ok, err = try_rmfile(filepath, quiet)
 		end
 		if not ok then
 			d:close()
 			return ok, err
 		end
 	end
-	return rmdir(dir)
+	return try_rmdir(dir, quiet)
 end
-
-function fs.remove(dirfile, recursive)
-	if recursive then
-		--not recursing if the dir is a symlink, unless it has an endsep!
-		if not path.endsep(dirfile) then
-			local type, err = fs.attr(dirfile, 'type', false)
-			if not type then return nil, err end
-			if type == 'symlink' then
-				if win and fs.is(dirfile, 'dir') then
-					return rmdir(dirfile)
-				end
-				return rmfile(dirfile)
+local function try_rm_rf(path, quiet)
+	--not recursing if the dir is a symlink, unless it has an endsep!
+	if not path_endsep(path) then
+		local type, err = file_attr(path, 'type', false)
+		if not type then
+			if err == 'not_found' then return true, err end
+			return nil, err
+		end
+		if type == 'symlink' then
+			if win and err == 'dir' then
+				return try_rmdir(path, quiet)
+			else
+				return try_rmfile(path, quiet)
 			end
 		end
-		return rmdir_recursive(dirfile)
-	else
-		return remove(dirfile)
 	end
+	return try_rmdir_recursive(path, quiet)
 end
 
-function fs.cwd() return getcwd() end
-function fs.chdir(dir) return chdir(dir) end
+function try_mv(old_path, new_path, quiet)
+	local ok, err = _mv(old_path, new_path)
+	if not ok then return false, err end
+	log(quiet and '' or 'note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
+	return true
+end
+
+--is_dir is required for Windows for creating symlinks to directories.
+--it's ignored on Linux and OSX.
+function try_mksymlink(link_path, target_path, is_dir, quiet, replace)
+	if not win then is_dir = nil end
+	local ok, err = _mksymlink(link_path, target_path, is_dir)
+	if not ok then
+		if err == 'already_exists' then
+			local file_type, symlink_type = file_attr(link_path, 'type')
+			if file_type == 'symlink'
+				and (symlink_type == 'dir') == (is_dir or false)
+			then
+				if readlink(link_path) == target_path then
+					return true, err
+				elseif replace ~= false then
+					if is_dir then
+						local ok, err = try_rmdir(link_path)
+						if not ok then return false, err end
+					else
+						local ok, err = try_rmfile(link_path)
+						if not ok then return false, err end
+					end
+					local ok, err = _mksymlink(link_path, target_path, is_dir)
+					if not ok then return false, err end
+					return true, 'replaced'
+				end
+			end
+		end
+		return false, err
+	end
+	log('', 'fs', 'mkslink', 'link:   %s%s\ntarget:  %s', link_path,
+		is_dir and ' (dir)' or is_dir == false and ' (file)' or '',
+		target_path)
+	return true
+end
+
+function try_mkhardlink(link_path, target_path, quiet)
+	local ok, err = _mkhardlink(link_path, target_path)
+	if not ok then
+		if err == 'already_exists' then
+			local ID = win and 'id' or 'inode'
+			local i1 = file_attr(target_path, ID)
+			if not i1 then goto fuggetit end
+			local i2 = file_attr(link_path, ID)
+			if not i2 then goto fuggetit end
+			if i1 == i2 then return true, err end
+		end
+		::fuggetit::
+		return false, err
+	end
+	log('', 'fs', 'mkhlink', 'link:   %s\ntarget:  %s', link_path, target_path)
+	return true
+end
+
+--raising versions
+
+function chdir(dir)
+	local ok, err = try_chdir(dir)
+	if ok then return dir, err end
+	check('fs', 'chdir', ok, '%s: %s', dir, err)
+end
+
+function mkdir(dir, perms, quiet)
+	local ok, err = try_mkdir(dir, true, perms, quiet)
+	if ok then return dir, err end
+	check('fs', 'mkdir', ok, '%s%s%s: %s', dir, perms and ' ' or '', perms or '', err)
+end
+
+function mkdirs(file)
+	mkdir(assert(path_dir(file)))
+	return file
+end
+
+function rmdir(dir, quiet)
+	local ok, err = try_rmdir(dir, quiet)
+	if ok then return dir, err end
+	check('fs', 'rmdir', ok, '%s: %s', dir, err)
+end
+
+function rmfile(path, quiet)
+	local ok, err = try_rmfile(path, quiet)
+	if ok then return path, err end
+	check('fs', 'rmfile', ok, '%s: %s', path, err)
+end
+
+function rm(path, quiet)
+	local ok, err = try_rm(path, quiet)
+	if ok then return path, err end
+	check('fs', 'rm', ok, '%s: %s', path, err)
+end
+
+function rm_rf(path, quiet)
+	local ok, err = try_rm_rf(path, quiet)
+	if ok then return path, err end
+	check('fs', 'rm_rf', ok, '%s: %s', path, err)
+end
+
+function mv(old_path, new_path, quiet)
+	local ok, err = try_mv(old_path, new_path, quiet)
+	if ok then return new_path, err end
+	check('fs', 'mv', ok, 'old: %s\nnew: %s\nerror: %s',
+		old_path, new_path, err)
+end
+
+function mksymlink(link_path, target_path, is_dir, quiet)
+	local ok, err = try_mksymlink(link_path, target_path, is_dir)
+	if ok then return dir, err end
+	check('fs', 'mkslink', ok, '%s: %s', dir, err)
+end
+
+function mkhardlink(link_path, target_path, quiet)
+	local ok, err = try_mkhardlink(link_path, target_path)
+	if ok then return dir, err end
+	check('fs', 'mkhlink', ok, '%s%s%s: %s', dir, perms and ' ' or '', perms or '', err)
+end
 
 --symlinks -------------------------------------------------------------------
 
-local function readlink_recursive(link, maxdepth)
-	if not fs.is(link, 'symlink') then
+function readlink(link, maxdepth)
+	maxdepth = maxdepth or 32
+	if not file_is(link, 'symlink') then
 		return link
 	end
 	if maxdepth == 0 then
 		return nil, 'not_found'
 	end
-	local target, err = readlink(link)
+	local target, err = _readlink(link)
 	if not target then
 		return nil, err
 	end
-	if path.isabs(target) then
+	if path_isabs(target) then
 		link = target
 	else --relative symlinks are relative to their own dir
-		local link_dir = path.dir(link)
+		local link_dir = path_dir(link)
 		if not link_dir then
 			return nil, 'not_found'
 		elseif link_dir == '.' then
 			link_dir = ''
 		end
-		link = path.combine(link_dir, target)
+		link = path_combine(link_dir, target)
 	end
-	return readlink_recursive(link, maxdepth - 1)
+	return readlink(link, maxdepth - 1)
 end
 
-function fs.readlink(link)
-	return readlink_recursive(link, 32)
+--paths ----------------------------------------------------------------------
+
+function abspath(path, pwd)
+	if path_isabs(path) then
+		return path
+	end
+	return path_combine(pwd or cwd(), path)
 end
 
---common paths ---------------------------------------------------------------
+function run_indir(dir, fn, ...)
+	local cwd = cwd()
+	chdir(dir)
+	local function pass(ok, ...)
+		chdir(cwd)
+		if ok then return ... end
+		error(..., 2)
+	end
+	pass(pcall(fn, ...))
+end
 
-fs.exedir = memoize(function()
-	return path.dir(fs.exepath())
+exedir = memoize(function()
+	return path_dir(exepath())
 end)
 
-fs.scriptdir = memoize(function()
-	local s = path.combine(fs.startcwd(), glue.bin)
-	return s and path.normalize(s) or glue.bin
+scriptdir = memoize(function()
+	local s = path_combine(startcwd(), rel_scriptdir)
+	return s and path_normalize(s) or rel_scriptdir
 end)
+
+vardir = memoize(function()
+	return config'vardir' or indir(scriptdir(), 'var')
+end)
+
+function varpath(file)
+	return indir(vardir(), file)
+end
 
 --file attributes ------------------------------------------------------------
 
 function file.attr(f, attr)
 	if type(attr) == 'table' then
-		return file_attr_set(f, attr)
+		return _file_attr_set(f, attr)
 	else
-		return file_attr_get(f, attr)
+		return _file_attr_get(f, attr)
 	end
 end
 
@@ -1057,37 +1142,59 @@ local function attr_args(attr, deref)
 	return attr, deref
 end
 
-function fs.attr(path, ...)
+function file_attr(path, ...)
 	local attr, deref = attr_args(...)
 	if attr == 'target' then
 		--NOTE: posix doesn't need a type check here, but Windows does
-		if not win or fs.is(path, 'symlink') then
+		if not win or file_is(path, 'symlink') then
 			return readlink(path)
 		else
 			return nil --no error for non-symlink files
 		end
 	end
 	if type(attr) == 'table' then
-		return fs_attr_set(path, attr, deref)
+		return _fs_attr_set(path, attr, deref)
 	else
-		return fs_attr_get(path, attr, deref)
+		return _fs_attr_get(path, attr, deref)
 	end
 end
 
-function fs.is(path, type, deref)
+function mtime(file, deref)
+	return file_attr(file, 'mtime', deref)
+end
+
+function try_chmod(path, perms, quiet)
+	local ok, err = file_attr(path, {perms = perms})
+	if not ok then return false, err end
+	log(quiet and '' or 'note', 'fs', 'chmod', '%s', file)
+	return path
+end
+
+function chmod(path, perms, quiet)
+	local ok, err = try_chmod(path, perms, quiet)
+	check('fs', 'chmod', ok, '%s: %s', path, err)
+	return path
+end
+
+function file_is(path, type, deref)
 	if type == 'symlink' then
 		deref = false
 	end
-	local ftype, err = fs.attr(path, 'type', deref)
+	local ftype, err = file_attr(path, 'type', deref)
 	if not type and not ftype and err == 'not_found' then
 		return false
 	elseif not type and ftype then
 		return true
 	elseif not ftype then
-		return nil, err
+		check('fs', 'file_is', nil, '%s: %s', path, err)
 	else
 		return ftype == type
 	end
+end
+exists = file_is
+
+function checkexists(file, type)
+	check('fs', 'exists', exists(file, type), '%s', file)
 end
 
 --directory listing ----------------------------------------------------------
@@ -1097,13 +1204,13 @@ local function dir_check(dir)
 	assert(dir_ready(dir), 'dir not ready') --must call next() at least once.
 end
 
-function fs.dir(dir, opt)
+function ls(dir, opt)
 	local skip_dot_dirs = not (opt and opt:find('..', 1, true))
 	return fs_dir(dir or '.', skip_dot_dirs)
 end
 
 function dir.path(dir)
-	return path.combine(dir:dir(), dir:name())
+	return path_combine(dir:dir(), dir:name())
 end
 
 function dir.name(dir)
@@ -1112,7 +1219,7 @@ function dir.name(dir)
 end
 
 local function dir_is_symlink(dir)
-	return dir_attr_get(dir, 'type', false) == 'symlink'
+	return _dir_attr_get(dir, 'type', false) == 'symlink'
 end
 
 function dir.attr(dir, ...)
@@ -1128,11 +1235,11 @@ function dir.attr(dir, ...)
 	if type(attr) == 'table' then
 		return fs_attr_set(dir:path(), attr, deref)
 	elseif not attr or (deref and dir_is_symlink(dir)) then
-		return fs_attr_get(dir:path(), attr, deref)
+		return _fs_attr_get(dir:path(), attr, deref)
 	else
-		local val, found = dir_attr_get(dir, attr)
+		local val, found = _dir_attr_get(dir, attr)
 		if found == false then --attr not found in state
-			return fs_attr_get(dir:path(), attr)
+			return _fs_attr_get(dir:path(), attr)
 		else
 			return val
 		end
@@ -1148,11 +1255,10 @@ end
 
 local push = table.insert
 local pop = table.remove
-local relpath = path.rel
 
-function fs.scan(path)
+function scandir(path)
 	local pds = {}
-	local next, d = fs.dir(path)
+	local next, d = ls(path)
 	local name, err
 	local sc = {}
 	setmetatable(sc, sc)
@@ -1192,7 +1298,7 @@ function fs.scan(path)
 	local function iter()
 		if not d then return nil end --closed
 		if name and d:is('dir', false) then
-			local next1, d1 = fs.dir(d:path())
+			local next1, d1 = ls(d:path())
 			assert(next1 == next)
 			push(pds, d)
 			d = d1
@@ -1211,10 +1317,19 @@ function fs.scan(path)
 	return iter
 end
 
+function searchpaths(paths, file, type)
+	for _,path in ipairs(paths) do
+		local abs_path = indir(path, file)
+		if file_is(abs_path, type) then
+			return abs_path
+		end
+	end
+end
+
 --memory mapping -------------------------------------------------------------
 
 do
-local m = ffi.new[[
+local m = new[[
 	union {
 		struct { uint32_t lo; uint32_t hi; };
 		uint64_t x;
@@ -1230,24 +1345,23 @@ function join_uint64(hi, lo)
 end
 end
 
-function fs.aligned_size(size, dir) --dir can be 'l' or 'r' (default: 'r')
-	if ffi.istype(uint64_ct, size) then --an uintptr_t on x64
-		local pagesize = fs.pagesize()
+function aligned_size(size, dir) --dir can be 'l' or 'r' (default: 'r')
+	if ffi.istype(u64, size) then --an uintptr_t on x64
+		local pagesize = pagesize()
 		local hi, lo = split_uint64(size)
-		local lo = fs.aligned_size(lo, dir)
+		local lo = aligned_size(lo, dir)
 		return join_uint64(hi, lo)
 	else
-		local pagesize = fs.pagesize()
+		local pagesize = pagesize()
 		if not (dir and dir:find'^l') then --align to the right
 			size = size + pagesize - 1
 		end
-		return bit.band(size, bit.bnot(pagesize - 1))
+		return band(size, bnot(pagesize - 1))
 	end
 end
 
-function fs.aligned_addr(addr, dir)
-	return ffi.cast(void_ptr_ct,
-		fs.aligned_size(ffi.cast(uintptr_ct, addr), dir))
+function aligned_addr(addr, dir)
+	return cast(voidp, aligned_size(cast(uintptr, addr), dir))
 end
 
 function parse_access(s)
@@ -1264,17 +1378,17 @@ function check_tagname(tagname)
 	return tagname
 end
 
-function file.map(f, ...)
+function file.mmap(f, ...)
 	local access, size, offset, addr
 	if type(t) == 'table' then
 		access, size, offset, addr = t.access, t.size, t.offset, t.addr
 	else
 		offset, size, addr, access = ...
 	end
-	return fs.map(f, access or f.access, size, offset, addr)
+	return mmap(f, access or f.access, size, offset, addr)
 end
 
-function fs.map(t,...)
+function mmap(t,...)
 	local file, access, size, offset, addr, tagname, perms
 	if type(t) == 'table' then
 		file, access, size, offset, addr, tagname, perms =
@@ -1282,15 +1396,15 @@ function fs.map(t,...)
 	else
 		file, access, size, offset, addr, tagname, perms = t, ...
 	end
-	assert(not file or type(file) == 'string' or fs.isfile(file), 'invalid file argument')
+	assert(not file or type(file) == 'string' or isfile(file), 'invalid file argument')
 	assert(file or size, 'file and/or size expected')
 	assert(not size or size > 0, 'size must be > 0')
 	local offset = file and offset or 0
 	assert(offset >= 0, 'offset must be >= 0')
-	assert(offset == fs.aligned_size(offset), 'offset not page-aligned')
-	local addr = addr and ffi.cast(void_ptr_ct, addr)
+	assert(offset == aligned_size(offset), 'offset not page-aligned')
+	local addr = addr and cast(voidp, addr)
 	assert(not addr or addr ~= nil, 'addr can\'t be zero')
-	assert(not addr or addr == fs.aligned_addr(addr), 'addr not page-aligned')
+	assert(not addr or addr == aligned_addr(addr), 'addr not page-aligned')
 	assert(not (file and tagname), 'cannot have both file and tagname')
 	assert(not tagname or not tagname:find'\\', 'tagname cannot contain `\\`')
 	return fs_map(file, access, size, offset, addr, tagname, perms)
@@ -1300,12 +1414,12 @@ end
 
 local vfile = {}
 
-function fs.open_buffer(buf, sz, mode)
+function open_buffer(buf, sz, mode)
 	sz = sz or #buf
 	mode = mode or 'r'
 	assertf(mode == 'r' or mode == 'w', 'invalid mode: "%s"', mode)
 	local f = {
-		buffer = ffi.cast(u8p, buf),
+		buffer = cast(u8p, buf),
 		size = sz,
 		offset = 0,
 		mode = mode,
@@ -1332,7 +1446,7 @@ function vfile.read(f, buf, sz)
 		return nil, 'access_denied'
 	end
 	sz = min(max(0, sz), max(0, f.size - f.offset))
-	ffi.copy(buf, f.buffer + f.offset, sz)
+	copy(buf, f.buffer + f.offset, sz)
 	f.offset = f.offset + sz
 	f.r = f.r + sz
 	return sz
@@ -1346,7 +1460,7 @@ function vfile.write(f, buf, sz)
 		return nil, 'access_denied'
 	end
 	sz = min(max(0, sz), max(0, f.size - f.offset))
-	ffi.copy(f.buffer + f.offset, buf, sz)
+	copy(f.buffer + f.offset, buf, sz)
 	f.offset = f.offset + sz
 	f.w = f.w + sz
 	return sz
@@ -1376,10 +1490,13 @@ vfile.buffered_read = file.buffered_read
 
 --hi-level APIs --------------------------------------------------------------
 
-fs.abort = {} --error signal to pass to save()'s reader function.
+ABORT = {} --error signal to pass to save()'s reader function.
 
-function fs.load_tobuffer(file, ignore_file_size)
-	local f, err = fs.open(file)
+function try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
+	local f, err = open(file)
+	if not f and err == 'not_found' and default_buf ~= nil then
+		return default_buf, default_len
+	end
 	if not f then
 		return nil, err
 	end
@@ -1388,32 +1505,45 @@ function fs.load_tobuffer(file, ignore_file_size)
 	return buf, len
 end
 
-function fs.load(file, ignore_file_size)
-	local buf, len = fs.load_tobuffer(file, ignore_file_size)
+function try_load(file, ignore_file_size)
+	local buf, len = try_load_tobuffer(file, ignore_file_size)
 	if not buf then return nil, len end
-	return ffi.string(buf, len)
+	return str(buf, len)
 end
 
+function load_tobuffer(file, default_buf, default_len, ignore_file_size)
+	local buf, len = try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
+	check('fs', 'load', buf, '%s: %s', file, len)
+	return buf, len
+end
+
+function load(path, default, ignore_file_size) --load a file into a string.
+	local buf, len = load_tobuffer(path, default, nil, ignore_file_size)
+	if buf == default then return default end
+	return str(buf, len)
+end
+
+
 --write a Lua value, array of values or function results to a file atomically.
-function fs.save(file, s, sz)
+local function _save(file, s, sz, perms)
 
 	local tmpfile = file..'.tmp'
 
-	local dir = path.dir(tmpfile)
-	if path.dir(dir) then --because mkdir'c:/' gives access denied.
-		local ok, err = fs.mkdir(dir, true)
+	local dir = path_dir(tmpfile)
+	if path_dir(dir) then --because mkdir'c:/' gives access denied.
+		local ok, err = try_mkdir(dir, true, perms)
 		if not ok then
-			return false, _('could not create dir %s:\n\t%s', dir, err)
+			return false, _('could not create dir %s: %s', dir, err)
 		end
 	end
 
-	local f, err = fs.open(tmpfile, 'w')
+	local f, err = open(tmpfile, perms and {mode = 'w', perms = perms} or 'w')
 	if not f then
-		return false, _('could not open file %s:\n\t%s', tmpfile, err)
+		return false, _('could not open file %s: %s', tmpfile, err)
 	end
 
 	local ok, err = true
-	if type(s) == 'table' then --table of stringables
+	if type(s) == 'table' then --array of stringables
 		for i = 1, #s do
 			ok, err = f:write(tostring(s[i]))
 			if not ok then break end
@@ -1422,10 +1552,10 @@ function fs.save(file, s, sz)
 		local read = s
 		while true do
 			local s, sz
-			ok, s, sz = xpcall(read, debug.traceback)
+			ok, s, sz = pcall(read)
 			if not ok then err = s; break end
 			if s == nil then break end --eof
-			if s == fs.abort then ok = false; break end
+			if s == ABORT then ok = false; break end
 			if type(s) ~= 'cdata' then
 				s = tostring(s)
 			end
@@ -1441,20 +1571,20 @@ function fs.save(file, s, sz)
 	f:close()
 
 	if not ok then
-		local err_msg = 'could not write to file %s:\n\t%s'
-		local ok, rm_err = fs.remove(tmpfile)
+		local err_msg = 'could not write to file %s: %s'
+		local ok, rm_err = try_rmfile(tmpfile)
 		if not ok then
-			err_msg = err_msg..'\nremoving it also failed:\n\t%s'
+			err_msg = err_msg..'\nremoving it also failed: %s'
 		end
 		return false, _(err_msg, tmpfile, err, rm_err)
 	end
 
-	local ok, err = fs.move(tmpfile, file)
+	local ok, err = try_mv(tmpfile, file)
 	if not ok then
-		local err_msg = 'could not move file %s -> %s:\n\t%s'
-		local ok, rm_err = fs.remove(tmpfile)
+		local err_msg = 'could not move file %s -> %s: %s'
+		local ok, rm_err = try_rmfile(tmpfile)
 		if not ok then
-			err_msg = err_msg..'\nremoving it also failed:\n\t%s'
+			err_msg = err_msg..'\nremoving it also failed: %s'
 		end
 		return false, _(err_msg, tmpfile, file, err, rm_err)
 	end
@@ -1462,27 +1592,152 @@ function fs.save(file, s, sz)
 	return true
 end
 
-function fs.saver(file)
-	local write = coroutine.wrap(function()
-		return fs.save(file, coroutine.yield)
+function try_save(file, s, sz, perms, quiet)
+	local ok, err = _save(file, s, sz, perms)
+	if not ok then return false, err end
+	local sz = sz or type(s) == 'string' and #s
+	local ssz = sz and _(' (%s)', kbytes(sz)) or ''
+	log(quiet and '' or 'note', 'fs', 'save', '%s%s', file, ssz)
+	return true
+end
+
+function save(file, s, sz, perms, quiet)
+	local ok, err = try_save(file, s, sz, perms, quiet)
+	check('fs', 'save', ok, '%s: %s', file, err)
+end
+
+function file_saver(file)
+	local coro = require'coro'
+	local write = coro.wrap(function()
+		return try_save(file, coro.yield)
 	end)
 	local ok, err = write()
 	if not ok then return false, err end
 	return write
 end
 
---load platfrom module -------------------------------------------------------
-
-package.loaded.fs = fs --prevent recursive loading by submodules.
-if win then
-	require'fs_win'
-elseif linux or osx then
-	require'fs_posix'
-else
-	error'platform not Windows, Linux or OSX'
+function cp(src_file, dst_file, quiet)
+	log(quiet and '' or 'note', 'fs', 'cp', 'src: %s ->\ndst: %s', src_file, dst_file)
+	--TODO: buffered read for large files.
+	save(dst_file, load(src_file))
 end
 
-ffi.metatype(stream_ct, stream)
-ffi.metatype(dir_ct, dir)
+function try_touch(file, mtime, btime, quiet) --create file or update its mtime.
+	if not exists(file) then
+		local ok, err = try_save(file, '', quiet)
+		if not ok then return false, err end
+		if not (mtime or btime) then
+			return
+		end
+	end
+	if not quiet then
+		dbg('fs', 'touch', '%s to %s%s', file,
+			date('%d-%m-%Y %H:%M', mtime) or 'now',
+			btime and ', btime '..date('%d-%m-%Y %H:%M', btime) or '')
+	end
+	local ok, err = file_attr(file, {
+		mtime = mtime or time(),
+		btime = btime or nil,
+	})
+end
 
-return fs
+function touch(file, mtime, btime, quiet)
+	local ok, err = try_touch(file, mtime, btime, quiet)
+	return check('fs', 'touch', ok and file, '%s: %s', file, err)
+end
+
+function ls_dir(path, patt, min_mtime, create, order_by, recursive)
+	if type(path) == 'table' then
+		local t = path
+		path, patt, min_mtime, create, order_by, recursive =
+			t.path, t.find, t.min_mtime, t.create, t.order_by, t.recursive
+	end
+	local t = {}
+	local create = create or function(file) return {} end
+	if recursive then
+		for sc in scandir(path) do
+			local file, err = sc:name()
+			if not file and err == 'not_found' then break end
+			check('fs', 'dir', file, 'dir listing failed for %s: %s', sc:path(-1), err)
+			if     (not min_mtime or sc:attr'mtime' >= min_mtime)
+				and (not patt or file:find(patt))
+			then
+				local f = create(file, sc)
+				if f then
+					f.name    = file
+					f.path    = sc:path()
+					f.relpath = sc:relpath()
+					f.type    = sc:attr'type'
+					f.mtime   = sc:attr'mtime'
+					f.btime   = sc:attr'btime'
+					t[#t+1] = f
+				end
+			end
+		end
+	else
+		for file, d in ls(path) do
+			if not file and d == 'not_found' then break end
+			check('fs', 'dir', file, 'dir listing failed for %s: %s', path, d)
+			if     (not min_mtime or d:attr'mtime' >= min_mtime)
+				and (not patt or file:find(patt))
+			then
+				local f = create(file, d)
+				if f then
+					f.name    = file
+					f.path    = d:path()
+					f.relpath = file
+					f.type    = sc:attr'type'
+					f.mtime   = d:attr'mtime'
+					f.btime   = d:attr'btime'
+					t[#t+1] = f
+				end
+			end
+		end
+	end
+	sort(t, cmp(order_by or 'mtime path'))
+	dbg('fs', 'dir', '%-20s %5d files%s%s', path,
+		#t,
+		patt and '\n  match: '..patt or '',
+		min_mtime and '\n  mtime >= '..date('%d-%m-%Y %H:%M', min_mtime) or '')
+	local i = 0
+	return function()
+		i = i + 1
+		return t[i]
+	end
+end
+
+local function toid(s, field) --validate and id minimally.
+	local n = tonumber(s)
+	if n and n >= 0 and floor(n) == n then return n end
+ 	return nil, '%s invalid: %s', field or 'field', s
+end
+function gen_id(name, start, quiet)
+	local next_id_file = varpath'next_'..name
+	if not exists(next_id_file) then
+		save(next_id_file, tostring(start or 1), nil, quiet)
+	else
+		touch(next_id_file, nil, nil, quiet)
+	end
+	local n = tonumber(load(next_id_file))
+	check('fs', 'gen_id', toid(n, next_id_file))
+	save(next_id_file, tostring(n + 1), nil, quiet)
+	log('note', 'fs', 'gen_id', '%s: %d', name, n)
+	return n
+end
+
+--load platfrom module -------------------------------------------------------
+
+_fs_file = file
+_fs_dir = dir
+_fs_check_errno = check_errno
+
+if win then
+	require'fs_win'
+elseif Linux or OSX then
+	require'fs_posix'
+else
+	error'unsupported platform'
+end
+
+metatype(stream_ct, stream)
+metatype(dir_ct, dir)

@@ -70,11 +70,11 @@ function alias(en_action, alias_action, alias_lang)
 	if default_lang ~= 'en' and alias_lang == default_lang then
 		if not aliases[en_action] then --user can override this
 			aliases[en_action] = {lang = 'en', action = en_action}
-			glue.attr(aliases_json.to_lang, en_action).en = en_action
+			attr(aliases_json.to_lang, en_action).en = en_action
 		end
 	end
 	aliases_json.to_en[alias_action] = en_action
-	glue.attr(aliases_json.to_lang, en_action)[alias_lang] = alias_action
+	attr(aliases_json.to_lang, en_action)[alias_lang] = alias_action
 end
 
 --given a url (in encoded or decoded form), if it's an action url,
@@ -150,7 +150,7 @@ end
 local function json_filter(handler, ...)
 	local s = handler(...)
 	if s ~= nil then
-		s = json(s)
+		s = json_encode(s)
 		check_etag(s)
 		outall(s)
 	end
@@ -181,14 +181,14 @@ local file_handlers = {
 		outcatlist(file, ...)
 	end,
 	lua = function(file, ...)
-		return run(file, nil, ...)
+		return run_lua_file(file, nil, ...)
 	end,
 	lp = function(file, ...)
 		include(file)
 	end,
 }
 
-local actions_ext = glue.keys(file_handlers, true)
+local actions_ext = keys(file_handlers, true)
 
 local actions = {} --{action -> handler | s}
 
@@ -211,7 +211,7 @@ local function action_handler(action, ...)
 		or actions[action_name(action_with_ext)] --look again with .html extension
 
 	if not handler then --look in the filesystem
-		local file = table.concat({action, ...}, '/')
+		local file = concat({action, ...}, '/')
 		local file_ext = fileext(file)
 		if not file_ext then
 			file_ext = 'html'
@@ -235,7 +235,7 @@ local function action_handler(action, ...)
 		for i,ext in ipairs(actions_ext) do
 			local action_file1 = action_with_ext..'.'..ext
 			if wwwfile[action_file1] or wwwpath(action_file1) then
-				glue.assert(not action_file,
+				assertf(not action_file,
 					'multiple action files for %s (%s, was %s)',
 						action_with_ext, action_file1, action_file)
 				file_handler = file_handlers[ext]
@@ -286,7 +286,7 @@ local function run_action(fallback, action, handler, ext, ...)
 		}
 		local nf_action = not_found_actions[mime]
 		if not nf_action then
-			webb.note('webb', '404', '%s', table.concat({action, ...}, '/'))
+			webb.log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
 			return false
 		end
 		local handler, ext = action_handler(nf_action, ...)
@@ -312,4 +312,3 @@ setmetatable(actions, {__call = function(self, action, ...)
 	return run_action(true, action, handler, ext, ...)
 end})
 action = actions
-

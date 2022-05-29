@@ -5,33 +5,13 @@
 setfenv(1, require'winapi.namespace')
 require'winapi.types'
 
---ffi, bit, C ----------------------------------------------------------------
+require'glue'
 
-ffi = require'ffi'
-bit = require'bit'
-C = ffi.C
-
-assert(ffi.abi'win', 'platform not Windows')
-
---glue -----------------------------------------------------------------------
-
-glue = require'glue'
-
-assert       = glue.assert
-extend       = glue.extend
-fcall        = glue.fcall
-index        = glue.index
-merge        = glue.merge
-pass         = glue.pass
-pcall        = glue.pcall
-trim         = glue.trim
-update       = glue.update
-setbit       = glue.setbit
-getbit       = glue.getbit
+assert(win, 'platform not Windows')
 
 --error reporting -------------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 DWORD GetLastError(void);
 
 void SetLastError(DWORD dwErrCode);
@@ -213,7 +193,7 @@ end
 --turn a pointer into a number to make it indexable in a Lua table. nil passes through.
 --NOTE: winapi handles are are safe to convert on x64 as they are kept into the low 32bit.
 function ptonumber(p)
-	return p and tonumber(ffi.cast('ULONG', p))
+	return p and tonumber(cast('ULONG', p))
 end
 
 --turn NULL pointers to nil. anything else passes through.
@@ -276,13 +256,6 @@ function split_uint64(x)
 	return m.HighPart, m.LowPart
 end
 
---bitmask utils --------------------------------------------------------------
-
---set one or more bits of a value without affecting other bits.
-function setbits(over, mask, bits)
-	return bor(bits, band(over, bnot(mask)))
-end
-
 --ctype constructor ----------------------------------------------------------
 
 --use arg = types.FOO(arg) instead of arg = ffi.new('FOO', arg): if arg is
@@ -293,7 +266,7 @@ types = {}
 setmetatable(types, types)
 
 function types:__index(type_str)
-	local ctype = ffi.typeof(type_str)
+	local ctype = typeof(type_str)
 	self[type_str] = function(t,...)
 		if ffi.istype(ctype, t) then return t end
 		if t == nil then return ctype() end
@@ -311,7 +284,7 @@ end
 --retval since APIs usually need that. see arrays_test.lua for full semantics.
 arrays = setmetatable({}, {
 	__index = function(t,k)
-		local ctype = ffi.typeof(k..'[?]')
+		local ctype = typeof(k..'[?]')
 		t[k] = function(t,...)
 			local n
 			if type(t) == 'table' then --arr{elem1, elem2, ...} constructor

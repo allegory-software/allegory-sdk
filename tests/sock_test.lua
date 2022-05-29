@@ -2,63 +2,32 @@
 io.stdout:setvbuf'no'
 io.stderr:setvbuf'no'
 
-local glue = require'glue'
-local thread = require'thread'
-local sock = require'sock'
-local ffi = require'ffi'
-local coro = require'coro'
+require'glue'
+require'os_thread'
+require'sock'
 
 local function test_addr()
 	local function dump(...)
-		for ai in assert(sock.addr(...)):addrs() do
+		for ai in assert(sockaddr(...)):addrs() do
 			print(ai:tostring(), ai:type(), ai:family(), ai:protocol(), ai:name())
 		end
 	end
 	dump('1234:2345:3456:4567:5678:6789:7890:8901', 0, 'tcp', 'inet6')
 	dump('123.124.125.126', 1234, 'tcp', 'inet', nil, {cannonname = true})
-	dump()
-
+	dump('*', 0)
 end
 
 local function test_sockopt()
-	local s = assert(sock.tcp())
+	local s = assert(tcp())
 	for _,k in ipairs{
-		'acceptconn        ',
-		'broadcast         ',
-		--'bsp_state       ',
-		'conditional_accept',
-		'connect_time      ',
-		'dontlinger        ',
-		'dontroute         ',
 		'error             ',
-		'exclusiveaddruse  ',
-		'keepalive         ',
-		--'linger          ',
-		'max_msg_size      ',
-		'maxdg             ',
-		'maxpathdg         ',
-		'oobinline         ',
-		'pause_accept      ',
-		'port_scalability  ',
-		--'protocol_info   ',
-		'randomize_port    ',
-		'rcvbuf            ',
-		'rcvlowat          ',
-		'rcvtimeo          ',
 		'reuseaddr         ',
-		'sndbuf            ',
-		'sndlowat          ',
-		'sndtimeo          ',
-		'type              ',
-		'tcp_bsdurgent     ',
-		'tcp_expedited_1122',
-		'tcp_maxrt         ',
-		'tcp_nodelay       ',
-		'tcp_timestamps    ',
 	} do
-		local sk, k = k, glue.trim(k)
-		local v = s:getopt(k)
-		print(sk, v)
+		if k then
+			local sk, k = k, trim(k)
+			local v = s:getopt(k)
+			print(sk, v)
+		end
 	end
 
 	print''
@@ -91,7 +60,7 @@ local function test_sockopt()
 		'tcp_nodelay            ',
 		'tcp_timestamps      	',
 	} do
-		local sk, k = k, glue.trim(k)
+		local sk, k = k, trim(k)
 		local canget, v = pcall(s.getopt, s, k)
 		if canget then
 			print(k, pcall(s.setopt, s, k, v))
@@ -100,31 +69,34 @@ local function test_sockopt()
 end
 
 local function start_server()
-	local server_thread = thread.new(function()
-		local sock = require'sock'
-		local coro = require'coro'
-		local s = assert(sock.tcp())
+	pr'server'
+	local server_thread = os_thread(function()
+		require'sock'
+		require'logging'
+		local s = assert(tcp())
 		assert(s:listen('*', 8090))
-		sock.newthread(function()
+		resume(thread(function()
 			while true do
 				print'...'
-				local cs, ra, la = assert(s:accept())
-				print('accepted', cs, ra:tostring(), ra:port(), la and la:tostring(), la and la:port())
-				print('accepted_thread', coro.running())
-				sock.newthread(function()
+				local cs = assert(s:accept())
+				pr('accepted', cs,
+					cs.remote_addr, cs.remote_port,
+					cs. local_addr, cs. local_port)
+				pr('accepted_thread', currentthread())
+				thread(function()
 					print'closing cs'
 					--cs:recv(buf, len)
 					assert(cs:close())
-					print('closed', coro.running())
+					print('closed', currentthread())
 				end)
-				print('backto accepted_thread', coro.running())
+				print('backto accepted_thread', currentthread())
 			end
 			s:close()
-		end)
-		print(sock.start())
+		end))
+		start()
 	end)
 
-	-- local s = assert(sock.tcp())
+	-- local s = assert(tcp())
 	-- --assert(s:bind('127.0.0.1', 8090))
 	-- print(s:connect('127.0.0.1', '8080'))
 	-- --assert(s:send'hello')
@@ -134,22 +106,23 @@ local function start_server()
 end
 
 local function start_client()
-	local s = assert(sock.tcp())
-	sock.newthread(function()
+	pr'client'
+	local s = assert(tcp())
+	resume(thread(function()
 		print'...'
-		print(assert(s:connect(ffi.abi'win' and '10.8.1.130' or '10.8.2.153', 8090)))
+		print(assert(s:connect('10.0.0.5', 8090, 1)))
 		print(assert(s:send'hello'))
 		print(assert(s:close()))
-		sock.stop()
-	end)
-	print(sock.start())
+		stop()
+	end))
+	start()
 end
 
 local function test_http()
 
-	sock.newthread(function()
+	thread(function()
 
-		local s = assert(sock.tcp())
+		local s = assert(tcp())
 		print('connect', s:connect(ffi.abi'win' and '127.0.0.1' or '10.8.2.153', 80))
 		print('send', s:send'GET / HTTP/1.0\r\n\r\n')
 		local buf = ffi.new'char[4096]'
@@ -163,34 +136,48 @@ local function test_http()
 
 	end)
 
-	print('start', sock.start(1))
+	print('start', start(1))
 
 end
 
 local function test_timers()
-
-	sock.run(function()
+	run(function()
 		local i = 1
-		local job = sock.runevery(.1, function()
+		local job = runevery(.1, function()
 			print(i); i = i + 1
 		end)
-		sock.runafter(1, function()
+		runafter(1, function()
 			print'canceling'
 			job:cancel()
 			print'done'
 		end)
 	end)
-
-	os.exit()
 end
 
---test_timers()
+local function test_errors()
+	local check_io, checkp, check, protect = tcp_protocol_errors'test'
+	local t = {tcp = {close = function(self) self.closed = true end}}
+	t.test0 = protect(function(t) check(t) end)
+	t.test1 = protect(function(t) checkp(t, nil, 'see %d', 123) end)
+	t.test2 = protect(function(t) check_io(t, nil, 'see %d', 321) end)
+	t.test3 = protect(function(t) checkp(t) end)
+	local _, err = t:test0()
+	print(tostring(err), getmetatable(err).__tostring(err))
+	assert(iserror(err))
+	assert(not t.tcp.closed)
+	pr(t:test1())
+	assert(t.tcp.closed)
+	pr(t:test2())
+	pr(t:test3())
+end
 
---test_addr()
+test_errors()
+test_timers()
+test_addr()
 test_sockopt()
---test_http()
+test_http()
 
-if ffi.os == 'Windows' then
+if win then
 	start_server()
 else
 	start_client()

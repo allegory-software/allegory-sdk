@@ -1,15 +1,15 @@
 --go @ plink d10 sdk/bin/linux/luajit sdk/tests/sha2_test.lua
-local sha2 = require'sha2'
-local glue = require'glue'
+require'glue'
+require'sha2'
 
 sha = {
-	SHA256 = function(s) return glue.tohex(sha2.sha256(s)) end,
-	SHA384 = function(s) return glue.tohex(sha2.sha384(s)) end,
-	SHA512 = function(s) return glue.tohex(sha2.sha512(s)) end,
+	SHA256 = function(s) return tohex(sha256(s)) end,
+	SHA384 = function(s) return tohex(sha384(s)) end,
+	SHA512 = function(s) return tohex(sha512(s)) end,
 }
 
 for file in io.popen('ls sha2_test/*.dat'):lines() do
-	local s = glue.readfile(file, 'rb')
+	local s = load(file)
 	local hashes = {}
 	do
 		local f = assert(io.open(file:gsub('%.dat$', '')..'.info'))

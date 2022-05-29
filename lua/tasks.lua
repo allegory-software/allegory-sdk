@@ -75,38 +75,12 @@ PROCESS TASK
 
 ]]
 
-local glue = require'glue'
-local time = require'time'
-local proc = require'proc'
-local sock = require'sock'
-local events = require'events'
-local proc = require'proc'
-local errors = require'errors'
-local json = require'json'
+require'glue'
+require'proc'
+require'sock'
+require'events'
+require'json'
 local buffer = require'string.buffer'
-
-local _ = string.format
-local add = table.insert
-local cat = table.concat
-
-local time = time.time
-
-local pack = glue.pack
-local unpack = glue.unpack
-local update = glue.update
-local empty = glue.empty
-local attr = glue.attr
-local imap = glue.imap
-local repl = glue.repl
-local sortedpairs = glue.sortedpairs
-
-local thread = sock.thread
-local resume = sock.resume
-local sleep = sock.sleep
-local runafter = sock.runafter
-local currentthread = sock.currentthread
-local threadenv = sock.threadenv
-local getownthreadenv = sock.getownthreadenv
 
 local M = {}
 
@@ -121,20 +95,20 @@ end
 --null terminal: fires events for input. can pipe input to other terminals.
 --publishes: pipe(term, [on]).
 
-local nterm = glue.object(nil, nil, events)
+local nterm = object(nil, nil, events)
 M.null_terminal = nterm
-nterm.subclass = glue.object
-nterm.override = glue.override
-nterm.before = glue.before
-nterm.after = glue.after
+nterm.subclass = object
+nterm.override = override
+nterm.before = before
+nterm.after = after
 
 function nterm:__call(opt, ...)
-	local self = glue.object(self, opt, ...)
+	local self = object(self, opt, ...)
 	self:init()
 	return self
 end
 
-nterm.init = glue.noop
+nterm.init = noop
 
 function nterm:out(src_term, chan, ...)
 	self:fire('out', src_term, chan, ...)
@@ -175,7 +149,7 @@ end
 --recording terminal: records input and plays it back on another terminal.
 --publishes: playback(te), stdout(), stderr(), stdouterr(), notifications().
 
-local rterm = glue.object(nil, nil, nterm)
+local rterm = object(nil, nil, nterm)
 M.recording_terminal = rterm
 
 function rterm:init()
@@ -220,28 +194,29 @@ end
 
 --command-line terminal: formats input for command-line consumption.
 
-local cterm = glue.object(nil, nil, nterm)
+local cterm = object(nil, nil, nterm)
 M.cmdline_terminal = cterm
 
+local stdout, stderr = io.stdout, io.stderr
 cterm:after('out', function(self, src_term, chan, ...)
 	if chan == 'stdout' then
 		local s = ...
-		io.stdout:write(s)
+		stdout:write(s)
 	elseif chan == 'stderr' then
 		local s = ...
-		io.stderr:write(s)
-		io.stderr:flush()
+		stderr:write(s)
+		stderr:flush()
 	elseif chan == 'notify' then
 		local kind, s = ...
-		io.stderr:write(_('%s: %s\n', repl(kind, 'info', 'note'):upper(), s))
-		io.stderr:flush()
+		stderr:write(_('%s: %s\n', repl(kind, 'info', 'note'):upper(), s))
+		stderr:flush()
 	end
 end)
 
 --streaming output terminal: serializes input for network transmission.
 --calls: sterm.send(s)
 
-local sterm = glue.object(nil, nil, nterm)
+local sterm = object(nil, nil, nterm)
 M.streaming_terminal = sterm
 
 function sterm:send_on(chan, s)
@@ -324,15 +299,15 @@ M.tasks = {}
 M.tasks_by_id = {}
 M.last_task_id = 0
 
-local task = glue.object(nil, nil, events)
+local task = object(nil, nil, events)
 M.task = task
-task.subclass = glue.object
-task.override = glue.override
-task.before = glue.before
-task.after = glue.after
+task.subclass = object
+task.override = override
+task.before = before
+task.after = after
 
 function task:__call(opt, ...)
-	local self = glue.object(self, opt, ...)
+	local self = object(self, opt, ...)
 	self:init()
 	return self
 end
@@ -366,14 +341,14 @@ function task:init()
 		self.status = 'running'
 		self:fire_up('setstatus', 'running')
 		local term0 = M.set_current_terminal(self.terminal)
-		local ok, ret = errors.pcall(self.action, self)
+		local ok, ret = pcall(self.action, self)
 		M.set_current_terminal(term0)
 		self.duration = time() - self.start_time
 		self.status = 'finished'
 		self:fire_up('setstatus', 'finished')
 		runafter(self.free_after or 1/0, function()
 			while not self:free() do
-				sleep(1)
+				wait(1)
 			end
 		end, 'task-zombie %s', self.name)
 		return ok, ret
@@ -562,7 +537,7 @@ function M.exec(cmd, opt)
 			and (not p.stdout or p.stdout:closed())
 			and (not p.stderr or p.stderr:closed())
 		) do
-			sleep(.1)
+			wait(.1)
 		end
 		p:forget()
 
@@ -631,7 +606,7 @@ function M.save_task_data(name, t) end --stub
 
 local function run_tasks()
 	local now = time()
-	local today = glue.day(now)
+	local today = day(now)
 
 	for name, sched in pairs(M.scheduled_tasks) do
 
@@ -673,7 +648,7 @@ function M.task_scheduler(cmd)
 	if cmd == 'start' and not sched_job then
 		sched_job = sock.runevery(1, run_tasks)
 	elseif cmd == 'stop' and sched_job then
-		sched_job:wakeup()
+		sched_job:resume()
 		sched_job = nil
 	elseif cmd == 'running' then
 		return sched_job and true or false

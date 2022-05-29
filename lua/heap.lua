@@ -10,9 +10,9 @@
 	(assuming they're indexable) to store the element index which makes
 	removal O(log n) too.
 
-	heap.heap(...) -> push, pop     create a heap API from a stack API
-	heap.cdataheap(h) -> h          create a fixed-capacity cdata-based heap
-	heap.valueheap([h]) -> h        create a heap for Lua values
+	virtualheap(...) -> push, pop   create a heap API from a stack API
+	cdataheap(h) -> h               create a fixed-capacity cdata-based heap
+	heap([h]) -> h                  create a heap for Lua values
 	h:push(val) -> i                push a value
 	h:pop([i][, dst]) -> val        pop value (root value at default index 1)
 	h:replace(i, val)               replace value at index
@@ -23,7 +23,7 @@
 
 	Values that compare equally are popped in random order.
 
-heap.heap(push, pop, swap, len, cmp) -> push, pop, rebalance
+virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance
 
 	Create a heap API:
 
@@ -43,7 +43,7 @@ heap.heap(push, pop, swap, len, cmp) -> push, pop, rebalance
 	function. If `cmp(i, j)` returns `a[i] < a[j]` then it's a min-heap.
 	Stack indices are assumed to be consecutive.
 
-heap.cdataheap(h) -> h
+cdataheap(h) -> h
 
 	Create a cdata heap over table `h` which must contain:
 
@@ -53,13 +53,13 @@ heap.cdataheap(h) -> h
 	  * `index_key`: enables O(1) `h:find(v)` and thus O(log n) `h:remove(v)`
 	  at the price of setting `e[index_key]` on all elements of the heap,
 	  otherwise `h:find(v)` is O(n) and `h:remove(v)` is O(n).
-	  * `dynarray`: alternative `glue.dynarray` implementation (optional).
+	  * `dynarray`: alternative `dynarray` implementation (optional).
 
 	NOTE: `cdata` heaps are 1-indexed just like value heaps.
 
 	EXAMPLE
 
-		local h = heap.cdataheap{
+		local h = cdataheap{
 			ctype = [[
 				struct {
 					int priority;
@@ -84,7 +84,7 @@ heap.cdataheap(h) -> h
 	Note: the `order` field in this example is used to stabilize
 	the order in which elements with the same priority are popped.
 
-heap.valueheap([h]) -> h
+heap([h]) -> h
 
 	Create a value heap from table `h`, which can contain:
 
@@ -98,7 +98,7 @@ heap.valueheap([h]) -> h
 
 	Example:
 
-		local h = heap.valueheap{cmp = function(a, b)
+		local h = valueheap{cmp = function(a, b)
 				return a.priority < b.priority
 			end}
 		h:push{priority = 20, etc = 'bar'}
@@ -114,11 +114,13 @@ TODO
 
 if not ... then require'heap_test'; return end
 
-local assert, floor = assert, math.floor
+local
+	assert, floor =
+	assert, math.floor
 
 --heap algorithm working over abstract API that counts from one.
 
-local function heap(add, remove, swap, length, cmp)
+function virtualheap(add, remove, swap, length, cmp)
 
 	local function moveup(child)
 		local parent = floor(child / 2)
@@ -197,13 +199,15 @@ end
 
 --cdata heap working over a cdata dynamic array.
 
-local function cdataheap(h)
+function cdataheap(h)
 
-	local ffi = require'ffi'
+	require'glue'
 
-	local ctype = ffi.typeof(h.ctype)
+	local ctype = typeof(h.ctype)
 	local arr = h.dynarray
-		or require'glue'.dynarray(ffi.typeof('$[?]', ctype), h.min_capacity)
+	if not arr then
+		arr = dynarray(typeof('$[?]', ctype), h.min_capacity)
+	end
 	local t, n = nil, 0
 
 	local add, rem, swap
@@ -244,7 +248,7 @@ local function cdataheap(h)
 		and function(i, j) return h.cmp(t[i], t[j]) end
 		or  function(i, j) return t[i] < t[j] end
 
-	local push, pop, rebalance = heap(add, rem, swap, length, cmp)
+	local push, pop, rebalance = virtualheap(add, rem, swap, length, cmp)
 
 	heap_mixin(h, INDEX)
 
@@ -255,7 +259,7 @@ local function cdataheap(h)
 		if box then
 			box[0] = t[i]
 		else
-			return ffi.new(ctype, t[i])
+			return ctype(t[i])
 		end
 	end
 	function h:push(v)
@@ -291,7 +295,7 @@ end
 
 --value heap working over a Lua table
 
-local function valueheap(h)
+function heap(h)
 	h = h or {}
 	local t, n = h, #h
 	local add, rem, swap
@@ -313,7 +317,7 @@ local function valueheap(h)
 	local cmp = h.cmp
 		and function(i, j) return h.cmp(t[i], t[j]) end
 		or  function(i, j) return t[i] < t[j] end
-	local push, pop, rebalance = heap(add, rem, swap, length, cmp)
+	local push, pop, rebalance = virtualheap(add, rem, swap, length, cmp)
 
 	heap_mixin(h, INDEX)
 
@@ -347,9 +351,3 @@ local function valueheap(h)
 	end
 	return h
 end
-
-return {
-	heap = heap,
-	valueheap = valueheap,
-	cdataheap = cdataheap,
-}

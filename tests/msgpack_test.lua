@@ -1,9 +1,8 @@
+require'glue'
+require'msgpack'
 
-local mp = require 'msgpack'
-local glue = require'glue'
-local ffi = require'ffi'
+local mp = msgpack()
 local N = mp.N
-local repl = glue.repl
 
 local data = {
     false,              "false",
@@ -58,14 +57,14 @@ local data = {
     { a=97 },           "{\"a\"=>97} map 32",
     { [N] = true, {[N] = true} },             "[[]]",
     { [N] = true, {[N] = true, "a"} },          "[[\"a\"]]",
-	 glue.fromhex('01                        ', true), "fixext 1",
-    glue.fromhex('02 01                     ', true), "fixext 2",
-    glue.fromhex('04 03 02 01               ', true), "fixext 4",
-    glue.fromhex('08 07 06 05 04 03 02 01   ', true), "fixext 8",
-    glue.fromhex('10 0f 0e 0d 0c 0b 0a 09 08 07 06 05 04 03 02 01', true), "fixext 16",
-    glue.fromhex('61', true), "ext 8",
-    glue.fromhex('61', true), "ext 16",
-    glue.fromhex('61', true), "ext 32",
+	 fromhex('01                        ', true), "fixext 1",
+    fromhex('02 01                     ', true), "fixext 2",
+    fromhex('04 03 02 01               ', true), "fixext 4",
+    fromhex('08 07 06 05 04 03 02 01   ', true), "fixext 8",
+    fromhex('10 0f 0e 0d 0c 0b 0a 09 08 07 06 05 04 03 02 01', true), "fixext 16",
+    fromhex('61', true), "ext 8",
+    fromhex('61', true), "ext 16",
+    fromhex('61', true), "ext 32",
     ffi.cast('uint64_t', 0),                  "0 uint64",
     ffi.cast('int64_t' , 0),                  "0 int64",
     ffi.cast('int64_t',  -1),                 "-1 int64",
@@ -163,8 +162,8 @@ mp.decode_unknown = function(self, p, i, len, typ)
 	return ffi.string(p+i, len)
 end
 
-mp.decode_i64 = glue.pass
-mp.decode_u64 = glue.pass
+mp.decode_i64 = pass
+mp.decode_u64 = pass
 
 local i = 1
 local function eqs(v1, v0, descr)
@@ -178,7 +177,7 @@ local function eq(v1, v0, descr)
 			eqs(repl(v0[N], true, #v0), repl(v1[N], true, #v1) or #v1, descr)
 			for k,v in ipairs(v0) do eq(v0[k], v, descr) end
 		else
-        eqs(glue.count(v1), glue.count(v0), descr)
+        eqs(count(v1), count(v0), descr)
 			for k,v in pairs(v1) do eq(v0[k], v, descr) end
 			for k,v in pairs(v0) do eq(v1[k], v, descr) end
 		end
@@ -270,6 +269,7 @@ cb 80 00 00 00 00 00 00 00      # -0.0 double
 ff                              # -1.0 double
 ]===]
 
-local v0 = glue.tohex(encoded)
-local v1 = glue.tohex(b:tostring())
+local v0 = tohex(encoded)
+local v1 = tohex(b:tostring())
 assert(v0 == v1)
+pr'OK'

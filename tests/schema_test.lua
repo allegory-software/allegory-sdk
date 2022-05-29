@@ -72,7 +72,7 @@ sc:import(function()
 	}
 end)
 
-webb.run(function()
+run(function()
 
 	if true then
 		local st1 = {
@@ -100,7 +100,7 @@ webb.run(function()
 		local sc1 = schema.new(st1):import(sc1)
 		local sc2 = schema.new(st2):import(sc2)
 		local d = schema.diff(sc1, sc2)
-		--pp(d)
+		--pr(d)
 		d:pp()
 	end
 
@@ -116,8 +116,8 @@ webb.run(function()
 		})
 
 		local dbsc = cn:extract_schema('sp')
-		--pp(sc.tables.addr)
-		--pp(sc.procs)
+		--pr(sc.tables.addr)
+		--pr(sc.procs)
 
 		local diff = schema.diff(cn:empty_schema(), sc)
 		diff:pp{

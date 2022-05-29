@@ -104,7 +104,7 @@ local files = {}
 local ids --{id->{files=,n=,en_s}}
 
 function M.Sfile(filenames)
-	update(files, index(words(filenames)))
+	update(files, index(collect(words(filenames))))
 	ids = nil
 end
 
@@ -202,7 +202,7 @@ local function S_for(ext, id, en_s, ...)
 	end
 	s = s or en_s or ''
 	if select('#', ...) > 0 then
-		return glue.subst(s, ...)
+		return subst(s, ...)
 	else
 		return s
 	end

@@ -4,32 +4,32 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 THREADS
-	pthread.new(func_ptr[, attrs]) -> th          create and start a new thread
+	pthread(func_ptr[, attrs]) -> th              create and start a new thread
 	th:equal(other_th) -> true | false            check if two threads are equal
 	th:join() -> status                           wait for a thread to finish
 	th:detach()                                   detach a thread
 	th:priority(new_priority)                     set thread priority
 	th:priority() -> priority                     get thread priority
-	pthread.min_priority() -> priority            get min. priority
-	pthread.max_priority() -> priority            get max. priority
-	pthread.yield()                               relinquish control to the scheduler
+	pthread_min_priority() -> priority            get min. priority
+	pthread_max_priority() -> priority            get max. priority
+	pthread_yield()                               relinquish control to the scheduler
 
 MUTEXES
-	pthread.mutex([mattrs]) -> mutex              create a mutex
+	mutex([mattrs]) -> mutex                      create a mutex
 	mutex:free()                                  free a mutex
 	mutex:lock()                                  lock a mutex
 	mutex:unlock()                                unlock a mutex
 	mutex:trylock() -> true | false               lock a mutex or return false
 
 CONDITION VARIABLES
-	pthread.cond() -> cond                        create a condition variable
+	condvar() -> cond                             create a condition variable
 	cond:free()                                   free the condition variable
 	cond:broadcast()                              broadcast
 	cond:signal()                                 signal
-	cond:wait(mutex[, timeout]) -> true | false   wait with optional timeout (*)
+	cond:wait(mutex[, expires]) -> true | false   wait until `expires` (*)
 
 READ/WRITE LOCKS
-	pthread.rwlock() -> rwlock                    create a r/w lock
+	rwlock() -> rwlock                            create a r/w lock
 	rwlock:free()                                 free a r/w lock
 	rwlock:writelock()                            lock for writing
 	rwlock:readlock()                             lock for reading
@@ -37,13 +37,13 @@ READ/WRITE LOCKS
 	rwlock:tryreadlock() -> true | false          try to lock for reading
 	rwlock:unlock()                               unlock the r/w lock
 
-> (*) timeout is an os.time() or `time.time()` timestamp, not a time period.
+> (*) `expires` is a time() value, not a timeout nor a clock() value!
 
 NOTE: All functions raise errors but error messages are not included
 and error codes are platform specific. Use `c/precompile errno.h | grep CODE`
 to search for specific codes.
 
-pthread.new(func_ptr[, attrs]) -> th
+pthread(func_ptr[, attrs]) -> th
 
 	Create and start a new thread and return the thread object.
 
@@ -59,7 +59,7 @@ pthread.new(func_ptr[, attrs]) -> th
   * `stacksize = n` - stack size in bytes (OS restrictions apply).
 
 
-pthread.mutex([mattrs]) -> mutex
+mutex([mattrs]) -> mutex
 
 	Create a mutex. The optional mattrs table can have the fields:
 
@@ -140,7 +140,6 @@ local ffi = require'ffi'
 local lib = ffi.os == 'Windows' and 'libwinpthread-1' or 'pthread'
 local C = ffi.load(lib)
 local H = {} --header namespace
-local M = {C = C, H = H}
 assert(ffi.abi'64bit')
 
 if ffi.os == 'Linux' then
@@ -435,7 +434,7 @@ local function checktimeout(ret)
 	return ret == 0
 end
 
---convert a time returned by os.time() or pthread.time() to timespec
+--convert a time returned by os.time() to timespec
 local function timespec(time, ts)
 	local int, frac = math.modf(time)
 	ts.s = int
@@ -448,13 +447,13 @@ end
 --create a new thread with a C callback. to use with a Lua callback,
 --create a Lua state and a ffi callback pointing to a function inside
 --the state, and use that as func_cb.
-function M.new(func_cb, attrs, ud)
+function pthread(func_cb, attrs, ud)
 	local thread = ffi.new'pthread_t'
 	local attr
 	if attrs then
 		attr = ffi.new'pthread_attr_t'
 		C.pthread_attr_init(attr)
-		if attrs.detached then --not very useful, see M.detach()
+		if attrs.detached then --not very useful, see pthread:detach()
 			checkz(C.pthread_attr_setdetachstate(attr, C.PTHREAD_CREATE_DETACHED))
 		end
 		if attrs.priority then --useless on Linux for non-root users
@@ -479,17 +478,17 @@ function M.new(func_cb, attrs, ud)
 end
 
 --current thread
-function M.self()
+function pthread_self()
 	return ffi.new('pthread_t', C.pthread_self())
 end
 
 --test two thread objects for equality.
-function M.equal(t1, t2)
+local function pthread_equal(t1, t2)
 	return C.pthread_equal(t1, t2) ~= 0
 end
 
 --wait for a thread to finish.
-function M.join(thread)
+local function pthread_join(thread)
 	local status = ffi.new'void*[1]'
 	checkz(C.pthread_join(thread, status))
 	return status[0]
@@ -498,7 +497,7 @@ end
 --set a thread loose (not very useful because it's hard to know when
 --a detached thread has died so that another thread can clean up after it,
 --and a Lua state can't free itself up from within either).
-function M.detach(thread)
+local function pthread_detach(thread)
 	checkz(C.pthread_detach(thread))
 end
 
@@ -506,7 +505,7 @@ end
 --NOTE: on Linux, min_priority() == max_priority() == 0 for SCHED_OTHER
 --(which is the only cross-platform SCHED_* value), and SCHED_RR needs root
 --which is a major usability hit, so it's not included.
-function M.priority(thread, sched, level)
+local function pthread_priority(thread, sched, level)
 	assert(not sched or sched == 'other')
 	local param = ffi.new'sched_param'
 	if level then
@@ -517,21 +516,21 @@ function M.priority(thread, sched, level)
 		return param.sched_priority
 	end
 end
-function M.min_priority(sched)
+function pthread_min_priority(sched)
 	assert(not sched or sched == 'other')
 	return C.sched_get_priority_min(C.SCHED_OTHER)
 end
-function M.max_priority(sched)
+function pthread_max_priority(sched)
 	assert(not sched or sched == 'other')
 	return C.sched_get_priority_max(C.SCHED_OTHER)
 end
 
 ffi.metatype('pthread_t', {
 		__index = {
-			equal = M.equal,
-			join = M.join,
-			detach = M.detach,
-			priority = M.priority,
+			equal = pthread_equal,
+			join = pthread_join,
+			detach = pthread_detach,
+			priority = pthread_priority,
 		},
 	})
 
@@ -545,7 +544,7 @@ local mtypes = {
 	recursive  = C.PTHREAD_MUTEX_RECURSIVE,
 }
 
-function M.mutex(mattrs, space)
+function _G.mutex(mattrs, space)
 	local mutex = space or ffi.new'pthread_mutex_t'
 	H.PTHREAD_MUTEX_INITIALIZER(mutex)
 	local mattr
@@ -592,7 +591,7 @@ ffi.metatype('pthread_mutex_t', {__index = mutex})
 
 local cond = {}
 
-function M.cond(_, space)
+function _G.condvar(_, space)
 	local cond = space or ffi.new'pthread_cond_t'
 	H.PTHREAD_COND_INITIALIZER(cond)
 	checkz(C.pthread_cond_init(cond, nil))
@@ -633,7 +632,7 @@ ffi.metatype('pthread_cond_t', {__index = cond})
 
 local rwlock = {}
 
-function M.rwlock(_, space)
+function _G.rwlock(_, space)
 	local rwlock = space or ffi.new'pthread_rwlock_t'
 	H.PTHREAD_RWLOCK_INITIALIZER(rwlock)
 	checkz(C.pthread_rwlock_init(rwlock, nil))
@@ -671,8 +670,6 @@ end
 ffi.metatype('pthread_rwlock_t', {__index = rwlock})
 
 local SC = ffi.os == 'Windows' and C or ffi.C
-function M.yield()
+function pthread_yield()
 	checkz(SC.sched_yield())
 end
-
-return M

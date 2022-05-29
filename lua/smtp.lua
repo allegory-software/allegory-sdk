@@ -3,7 +3,7 @@
 	Async SMTP(s) client.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	smtp:connect{host=, port=, tls=, user=, pass=} -> c
+	smtp_connect{host=, port=, tls=, user=, pass=} -> c
 	c:sendmail{from=, to=, headers=, message=} -> c
 	c:close() -> c
 
@@ -11,14 +11,14 @@
 
 if not ... then require'smtp_test'; return end
 
-local glue = require'glue'
-local errors = require'errors'
-local linebuffer = require'linebuffer'
-local b64 = require'base64'.encode
-local _ = string.format
+require'glue'
+require'linebuffer'
+require'base64'
+require'sock'
+require'sock_libtls'
+require'multipart'
 
 local client = {
-	libs = 'sock sock_libtls',
 	type = 'smtp_client', debug_prefix = 'S',
 	host = '127.0.0.1',
 	port = 587,
@@ -29,32 +29,14 @@ local client = {
 	xmailer = 'allegory-sdk smtp client',
 }
 
-local check_io, checkp, check, protect = errors.tcp_protocol_errors'smtp'
+local check_io, checkp, check, protect = tcp_protocol_errors'smtp'
 
-function client:connect(t)
+function smtp_connect(t)
 
-	local self = glue.object(self, {}, t)
+	local self = object(client, {}, t)
 
-	for lib in self.libs:gmatch'[^%s]+' do
-		if lib == 'sock' then
-			local sock = require'sock'
-			self.create_tcp = sock.tcp
-			self.clock      = sock.clock
-			self.resolve = self.resolve
-				or function(_, host)
-					return sock.addr(host, 0):tostring()
-				end
-		elseif lib == 'sock_libtls' then
-			local socktls = require'sock_libtls'
-			self.create_stcp = socktls.client_stcp
-			self.stcp_config = socktls.config
-		else
-			assert(false)
-		end
-	end
-
-	self.host_addr = check(self, self:resolve(self.host))
-	self.tcp = check(self, self.create_tcp())
+	self.host_addr = check(self, resolve(self.host))
+	self.tcp = check(self, tcp())
 
 	--logging & debugging
 
@@ -80,7 +62,7 @@ function client:connect(t)
 		self.tcp:debug('smtp', log)
 	end
 
-	local dp = glue.noop
+	local dp = noop
 	if log and self.debug and self.debug.protocol then
 		function dp(...)
 			return log('', 'smtp', ...)
@@ -91,7 +73,7 @@ function client:connect(t)
 
 	local expires
 	local function set_timeout(dt)
-		expires = dt and self.clock() + dt or nil
+		expires = dt and clock() + dt or nil
 	end
 
 	local function read(buf, sz)
@@ -126,13 +108,14 @@ function client:connect(t)
 		check_io(self, self.tcp:connect(self.host_addr, self.port, expires))
 		dp('connect', '%s %s %s', self.tcp, self.host_addr, self.port)
 		if self.tls then
-			self.tcp = check_io(self, self.create_stcp(self.tcp, self.host, self.tls_options))
+			self.tcp = check_io(self, client_stcp(self.tcp, self.host, self.tls_options))
 		end
 		check_reply'2..'
 		send_line('EHLO %s', self.domain)
 		check_reply'2..'
 		if self.user then
-			send_line('AUTH PLAIN %s', b64('\0' .. self.user .. '\0' .. self.pass))
+			send_line('AUTH PLAIN %s', base64_encode(
+				'\0' .. self.user .. '\0' .. self.pass))
 			check_reply'2..'
 		end
 		return self
@@ -143,7 +126,7 @@ function client:connect(t)
 		if log then
 			log('note', 'smtp', 'sendmail', '%s from=%s to=%s subj="%s" msg#=%s',
 				self.tcp, req.from, req.to, req.headers and req.headers.subject,
-				glue.kbytes(#req.message))
+				kbytes(#req.message))
 		end
 		set_timeout(self.sendmail_timeout)
 		send_line('MAIL FROM: %s', req.from)
@@ -155,17 +138,17 @@ function client:connect(t)
 		end
 		send_line'DATA'
 		check_reply'3..'
-		local ht = glue.update({}, req.headers)
+		local ht = update({}, req.headers)
 		ht.date = os.date('!%a, %d %b %Y %H:%M:%S -0000')
 		ht.x_mailer = self.xmailer
 		ht.mime_version = '1.0'
 		local t = {}
-		for k,v in glue.sortedpairs(ht) do
+		for k,v in sortedpairs(ht) do
 			t[#t+1] = k:gsub('_', '-'):lower() .. ': ' .. tostring(v)
 		end
 		t[#t+1] = ''
 		t[#t+1] = ''
-		local headers = table.concat(t, '\r\n')
+		local headers = concat(t, '\r\n')
 		send(headers)
 		local data = req.message:gsub('^%.', '..'):gsub('\n%.', '..')
 		send(data)
@@ -191,4 +174,40 @@ function client:connect(t)
 	return self:_connect()
 end
 
-return client
+local function strip_name(email)
+	return email:match'<(.-)>' or email
+end
+function try_sendmail(opt)
+
+	local smtp, err = smtp:connect{
+		logging = true,
+		debug = config'smtp_debug' and index(collect(words(config'smtp_debug' or ''))),
+		host  = config('smtp_host', '127.0.0.1'),
+		port  = config('smtp_port', 587), --TODO: 465
+		tls   = config('smtp_tls', false), --TODO: true
+		user  = config'smtp_user',
+		pass  = config'smtp_pass',
+		tls_options = {
+			ca_file = config('ca_file', varpath'cacert.pem'),
+		},
+	}
+	if not smtp then return nil, err end
+
+	local req = update({}, opt)
+	req = multipart_mail(req)
+	req.from = strip_name(opt.from)
+	req.to   = strip_name(opt.to)
+
+	local ok, err = smtp:sendmail(req)
+	if not ok then return nil, err end
+
+	local ok, err = smtp:close()
+	if not ok then return nil, err end
+
+	return true
+end
+
+function sendmail(opt)
+	local ok, err = try_sendmail(opt)
+	check('smtp', 'sendmail', ok, 'from: %s\n  to: %s\n%s', opt.from, opt.to, err)
+end

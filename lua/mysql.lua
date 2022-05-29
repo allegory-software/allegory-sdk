@@ -9,7 +9,7 @@
 
 CONNECTING
 
-	mysql.connect(opt) -> ok | nil,err,[errcode],[sqlstate]
+	mysql_connect(opt) -> ok | nil,err,[errcode],[sqlstate]
 
 		host       : server's IP address (required).
 		port       : server's port (optional, defaults to 3306).
@@ -21,7 +21,7 @@ CONNECTING
 		max_packet_size: max reply packet size (defaults to 16 MB).
 		ssl        : enable SSL (false). returns 'no_ssl' if disabled by server.
 		ssl_verify : check server's SSL certificate (false).
-		to_lua     : value converter `f(v, col) -> v` (defaults to `mysql.to_lua`).
+		to_lua     : value converter `f(v, col) -> v` (defaults to `mysql_to_lua`).
 
 	cn:close()         Close connection.
 	cn:closed()        Check if the connection was closed.
@@ -74,7 +74,7 @@ PREPARED STATEMENTS
 
 ESCAPING
 
-	mysql.esc_utf8(s) -> s
+	mysql_escape_utf8(s) -> s
 
 		Escape string to be used inside SQL string literals. Only works on
 		connections for which the charset is ASCII or an ASCII superset (ascii, utf8).
@@ -85,16 +85,16 @@ ESCAPING
 
 CONVERSION
 
-	mysql.datetime_to_timestamp(sql_datetime_string[, utc]) -> t
-	mysql.timestamp_to_datetime(t[, utc]) -> sql_datetime_string
-	mysql.time_to_seconds(sql_time_string) -> s
-	mysql.seconds_to_time(s) -> sql_time_string
+	mysql_datetime_to_timestamp(sql_datetime_string[, utc]) -> t
+	mysql_timestamp_to_datetime(t[, utc]) -> sql_datetime_string
+	mysql_time_to_seconds(sql_time_string) -> s
+	mysql_seconds_to_time(s) -> sql_time_string
 
 NOTE: Decimals with up to 15 digits of precision and 64 bit integers are
 converted to Lua numbers by default. That limits the useful range of integer
 types to 15 significant digits. If you have other needs, provide your own
 converter function which can be set as either:
-	- mysql.to_lua,
+	- mysql_to_lua,
 	- query_options.field_attrs.FIELD_NAME.mysql_to_lua,
 	- schema.TABLE.COL.mysql_to_lua.
 
@@ -102,34 +102,15 @@ converter function which can be set as either:
 
 if not ... then require'mysql_test'; return end
 
-local ffi = require'ffi'
-local bit = require'bit'
-local sha1 = require'sha1'.sha1
-local glue = require'glue'
-local errors = require'errors'
+require'sock'
+require'glue'
+require'sha1'
 
-local format = string.format
-local band = bit.band
-local xor = bit.bxor
-local bor = bit.bor
-local shl = bit.lshift
-local shr = bit.rshift
-local floor = math.floor
-local ceil = math.ceil
-local tonumber = tonumber
+local
+	band, xor, bor, shl, shr, floor, ceil, tonumber, dynarray, u8a, index, repl, update, time, trim, starts =
+	band, xor, bor, shl, shr, floor, ceil, tonumber, dynarray, u8a, index, repl, update, time, trim, starts
 
-local dynarray = glue.dynarray
-local u8a = glue.u8a
-local index = glue.index
-local repl = glue.repl
-local update = glue.update
-local time = glue.time
-local trim = glue.trim
-local starts = glue.starts
-
-local check_io, checkp, _, protect = errors.tcp_protocol_errors'mysql'
-
-local mysql = {}
+local check_io, checkp, _, protect = tcp_protocol_errors'mysql'
 
 local COM_QUIT         = 0x01
 local COM_QUERY        = 0x03
@@ -575,7 +556,7 @@ local int_ranges = {
 local conn = {}
 local conn_mt = {__index = conn}
 
-function mysql.isconn(x)
+function ismysqlconn(x)
 	return getmetatable(x) == conn_mt
 end
 
@@ -589,16 +570,6 @@ local function buf_len(buf)
 	return n
 end
 
-local  i8_ct = ffi.typeof  'int8_t*'
-local i16_ct = ffi.typeof 'int16_t*'
-local u16_ct = ffi.typeof'uint16_t*'
-local i32_ct = ffi.typeof' int32_t*'
-local u32_ct = ffi.typeof'uint32_t*'
-local i64_ct = ffi.typeof 'int64_t*'
-local u64_ct = ffi.typeof'uint64_t*'
-local f64_ct = ffi.typeof'double*'
-local f32_ct = ffi.typeof'float*'
-
 local function get_u8(buf)
 	local p, i = buf(1)
 	return p[i]
@@ -606,17 +577,17 @@ end
 
 local function get_i8(buf)
 	local p, i = buf(1)
-	return ffi.cast(i8_ct, p+i)[0]
+	return cast(i8p, p+i)[0]
 end
 
 local function get_u16(buf)
 	local p, i = buf(2)
-	return ffi.cast(u16_ct, p+i)[0]
+	return cast(u16p, p+i)[0]
 end
 
 local function get_i16(buf)
 	local p, i = buf(2)
-	return ffi.cast(i16_ct, p+i)[0]
+	return cast(i16p, p+i)[0]
 end
 
 local function get_u24(buf)
@@ -627,32 +598,32 @@ end
 
 local function get_u32(buf)
 	local p, i = buf(4)
-	return ffi.cast(u32_ct, p+i)[0]
+	return cast(u32p, p+i)[0]
 end
 
 local function get_i32(buf)
 	local p, i = buf(4)
-	return ffi.cast(i32_ct, p+i)[0]
+	return cast(i32p, p+i)[0]
 end
 
 local function get_u64(buf)
 	local p, i = buf(8)
-	return tonumber(ffi.cast(u64_ct, p+i)[0])
+	return tonumber(cast(u64p, p+i)[0])
 end
 
 local function get_i64(buf)
 	local p, i = buf(8)
-	return tonumber(ffi.cast(i64_ct, p+i)[0])
+	return tonumber(cast(i64p, p+i)[0])
 end
 
 local function get_f64(buf)
 	local p, i = buf(8)
-	return tonumber(ffi.cast(f64_ct, p+i)[0])
+	return tonumber(cast(f64p, p+i)[0])
 end
 
 local function get_f32(buf)
 	local p, i = buf(4)
-	return tonumber(ffi.cast(f32_ct, p+i)[0])
+	return tonumber(cast(f32p, p+i)[0])
 end
 
 local function get_uint(buf) --length-encoded int
@@ -677,7 +648,7 @@ local function get_cstring(buf)
 	while true do
 		local _, i = buf(1)
 		if p[i] == 0 then
-			return ffi.string(p+i0, i-i0)
+			return str(p+i0, i-i0)
 		end
 		i = i + 1
 	end
@@ -687,12 +658,12 @@ local function get_str(buf) --length-encoded string
 	local slen = get_uint(buf)
 	if not slen then return nil end
 	local p, i = buf(slen)
-	return ffi.string(p+i, slen)
+	return str(p+i, slen)
 end
 
 local function get_bytes(buf, len) --fixed-length string
 	local p, i, len = buf(len)
-	return ffi.string(p+i, len)
+	return str(p+i, len)
 end
 
 local function get_datetime(buf, date_format)
@@ -807,7 +778,7 @@ end
 local function set_i8(buf, x)
 	local p, i = buf(1)
 	assert(x >= -127 and x <= 128)
-	ffi.cast(i8_ct, p+i)[0] = x
+	cast(i8p, p+i)[0] = x
 end
 
 local function set_u24(buf, x)
@@ -821,35 +792,35 @@ end
 local function set_u32(buf, x)
 	local p, i = buf(4)
 	assert(x >= 0 and x < 2^32)
-	ffi.cast(u32_ct, p+i)[0] = x
+	cast(u32p, p+i)[0] = x
 end
 
 local function set_i32(buf, x)
 	local p, i = buf(4)
 	assert(x >= -(2^31-1) and x <= 2^31)
-	ffi.cast(i32_ct, p+i)[0] = x
+	cast(i32p, p+i)[0] = x
 end
 
 local function set_u64(buf, x)
 	local p, i = buf(8)
 	assert(x >= 0 and x <= 2^52)
-	ffi.cast(u64_ct, p+i)[0] = x
+	cast(u64p, p+i)[0] = x
 end
 
 local function set_i64(buf, x)
 	local p, i = buf(8)
 	assert(x >= -(2^51-1) and x <= 2^51)
-	ffi.cast(i64_ct, p+i)[0] = x
+	cast(i64p, p+i)[0] = x
 end
 
 local function set_f64(buf, x)
 	local p, i = buf(8)
-	ffi.cast(f64_ct, p+i)[0] = x
+	cast(f64p, p+i)[0] = x
 end
 
 local function set_f32(buf, x)
 	local p, i = buf(4)
-	ffi.cast(f32_ct, p+i)[0] = x
+	cast(f32p, p+i)[0] = x
 end
 
 local function set_uint(buf, x) --length-encoded int
@@ -964,7 +935,7 @@ end
 
 local UNSIGNED_FLAG = 32
 
-function mysql.int_range(type, unsigned) --min, max, size
+function mysql_int_range(type, unsigned) --min, max, size
 	local range = int_ranges[type]
 	if range then
 		if unsigned then
@@ -975,7 +946,7 @@ function mysql.int_range(type, unsigned) --min, max, size
 	end
 end
 
-function mysql.dec_range(digits, decimals, unsigned) --min, max, digits
+function mysql_dec_range(digits, decimals, unsigned) --min, max, digits
 	local max = 10^(digits - decimals) - 10^-decimals
 	local min = unsigned and 0 or -max --unsigned decimals is deprecated!
 	return min, max, digits
@@ -983,7 +954,7 @@ end
 
 --This is dumb: there's no such thing as "char length" on a variable-width
 --MBCS but that's how you have to declare a varchar these days.
-function mysql.char_size(byte_size, collation)
+function mysql_char_size(byte_size, collation)
 	charset = collation:match'^[^_]+'
 	local mcw = max_char_widths[charset]
 	return mcw and floor(byte_size / mcw + .5) or byte_size
@@ -1110,29 +1081,19 @@ local function get_err_packet(buf)
 	return message, errno, sqlstate
 end
 
-function mysql.log(severity, ...)
-	local logging = mysql.logging
-	if not logging then return end
-	logging.log(severity, 'mysql', ...)
-end
+function mysql_connect(opt)
 
-function mysql.dbg  (...) mysql.log(''    , ...) end
-function mysql.note (...) mysql.log('note', ...) end
-
-function mysql.connect(opt)
-
-	if mysql.isconn(opt) then --pass-through
+	if ismysqlconn(opt) then --pass-through
 		return opt
 	end
 
 	local host = opt.host or '127.0.0.1'
 	local port = opt.port or 3306
 
-	mysql.note('connect', '%s:%s user=%s db=%s',
+	log('note', 'mysql', 'connect', '%s:%s user=%s db=%s',
 		host, port, opt.user or '', opt.db or '')
 
-	local sock = opt and opt.sock or require'sock'
-	tcp = check_io(self, sock.tcp())
+	local tcp = check_io(self, tcp())
 
 	local self = setmetatable({tcp = tcp, host = host, port = port, tracebacks = opt.tracebacks}, conn_mt)
 
@@ -1202,15 +1163,15 @@ function mysql.connect(opt)
 	end
 	checkp(self, typ == 'OK', 'bad packet type')
 
-	self.to_lua = mysql.to_lua
+	self.to_lua = mysql_to_lua
 	self.state = 'ready'
 
 	self.charset_is_ascii_superset = self.charset and not mb_charsets[self.charset]
 	self.db = opt.db
 	self.user = opt.user
 
-	sock.liveadd(tcp, 'mysql user=%s db=%s %s', opt.user or '', opt.db or '',
-		sock.currentthread())
+	liveadd(tcp, 'mysql user=%s db=%s %s', opt.user or '', opt.db or '',
+		currentthread())
 
 	return self
 end
@@ -1218,7 +1179,7 @@ conn.connect = protect(conn.connect)
 
 function conn:close()
 	if self.state then
-		mysql.note('close', '%s:%s', self.host, self.port)
+		log('note', 'mysql', 'close', '%s:%s', self.host, self.port)
 		local buf = send_buffer(1)
 		set_u8(buf, COM_QUIT)
 		send_packet(self, buf)
@@ -1238,7 +1199,7 @@ end
 local function send_query(self, sql, quiet)
 	sql = trim(sql)
 	local severity = (quiet or starts(sql, 'select') or starts(sql, 'show')) and '' or 'note'
-	mysql.log(severity, 'query', '%s', sql)
+	log(severity, 'mysql', 'query', '%s', sql)
 	assert(self.state == 'ready')
 	self.packet_no = -1
 	local buf = send_buffer(1 + #sql)
@@ -1256,7 +1217,7 @@ local function read_result(self, opt)
 	local typ, buf = recv_packet(self)
 	if typ == 'ERR' then
 		local message, errno, sqlstate = get_err_packet(buf)
-		mysql.log('ERROR', 'query', '%s\n\n%s [%d] [%s]', self.sql, message, errno, sqlstate)
+		log('ERROR', 'mysql', 'query', '%s\n\n%s [%d] [%s]', self.sql, message, errno, sqlstate)
 		self.state = 'ready'
 		self.sql = nil
 		return nil, message, errno, sqlstate
@@ -1475,7 +1436,7 @@ function stmt:exec(...)
 	set_u32(buf, 1) --iteration-count, must be 1
 	if #stmt.params > 0 then
 		local nulls_len = floor((#stmt.params + 7) / 8)
-		local nulls = ffi.new('uint8_t[?]', nulls_len)
+		local nulls = u8a(nulls_len)
 		for i = 1, #stmt.params do
 			local val = select(i, ...)
 			if val == nil then
@@ -1571,14 +1532,14 @@ local qmap = {
 local function esc_utf8(s)
 	return s:gsub('[\\\'%z\b\n\r\t\26\"]', qmap)
 end
-mysql.esc_utf8 = esc_utf8
+mysql_escape_utf8 = esc_utf8
 function conn:esc(s)
 	--MBCS that are not ASCII supersets need decoding for correct quoting.
 	assert(self.charset_is_ascii_superset, 'NYI')
 	return esc_utf8(s)
 end
 
-function mysql.datetime_to_timestamp(v, utc) --'yyyy-mm-dd HH:SS:MM'
+function mysql_datetime_to_timestamp(v, utc) --'yyyy-mm-dd HH:SS:MM'
 	if v == nil then return nil end
 	local y = tonumber(v:sub( 1,  4))
 	local m = tonumber(v:sub( 6,  7))
@@ -1588,21 +1549,21 @@ function mysql.datetime_to_timestamp(v, utc) --'yyyy-mm-dd HH:SS:MM'
 	local S = tonumber(v:sub(18, 19))
 	return time(utc or false, y, m, d, H, M, S)
 end
-assert(mysql.datetime_to_timestamp'2000-01-02 03:04:05' == time(2000, 1, 2, 3, 4, 5))
+assert(mysql_datetime_to_timestamp'2000-01-02 03:04:05' == time(2000, 1, 2, 3, 4, 5))
 
-function mysql.timestamp_to_datetime(t, utc) --'yyyy-mm-dd HH:SS:MM'
-	local d = os.date(utc and '!*t' or '*t', t)
+function mysql_timestamp_to_datetime(t, utc) --'yyyy-mm-dd HH:SS:MM'
+	local d = date(utc and '!*t' or '*t', t)
 	return format('%04d-%02d-%02d %02d:%02d:%02d',
 		d.year, d.month, d.day, d.hour, d.min, d.sec)
 end
 
-function mysql.time_to_seconds(v)
+function mysql_time_to_seconds(v)
 	if v == nil then return nil end
 	local h, m, s = v:match'^(%d+):(%d+):(%d+)'
 	return tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
 end
 
-function mysql.seconds_to_time(s)
+function mysql_seconds_to_time(s)
 	return format('%02d:%02d:%02d', floor(s / 3600), floor(s / 60), s)
 end
 

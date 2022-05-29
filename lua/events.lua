@@ -11,7 +11,7 @@ callback function object or one or more associated identities.
 This module is only a mixin (a plain table with methods). It must be added to
 your particular object system by copying the methods over to your base class.
 
-NOTE: if event removal is not a requirement, glue.after() might be enough.
+NOTE: if event removal is not a requirement, after() might be enough.
 
 EVENT FACTS
 
@@ -65,14 +65,9 @@ API
 
 ]]
 
-local glue = require'glue'
+require'glue'
 
-local add = table.insert
-local remove = table.remove
-local indexof = glue.indexof
-local attr = glue.attr
-
-local events = {}
+events = {}
 
 --default values to speed up look-up in class systems with dynamic dispatch.
 events.event = false
@@ -258,5 +253,3 @@ assert(t[1] == 1)
 
 end
 
-
-return events

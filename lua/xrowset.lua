@@ -90,15 +90,8 @@ ACTIONS
 
 require'webb_action'
 
-local glue = require'glue'
-local errors = require'errors'
+require'glue'
 local xlsx_workbook = require'xlsxwriter.workbook'
-
-local add = table.insert
-local catch = errors.catch
-local update = glue.update
-local words = glue.words
-local index = glue.index
 
 rowset = {}
 
@@ -138,9 +131,9 @@ function virtual_rowset(init, ...)
 			schema:resolve_types(rs.fields)
 		end
 
-		local hide_cols = index(words(rs.hide_cols) or glue.empty)
-		local   ro_cols = index(words(rs.  ro_cols) or glue.empty)
-		local   rw_cols = rs.rw_cols and index(words(rs.rw_cols))
+		local hide_cols = index(collect(words(rs.hide_cols) or empty))
+		local   ro_cols = index(collect(words(rs.  ro_cols) or empty))
+		local   rw_cols = rs.rw_cols and index(collect(words(rs.rw_cols)))
 
 		if rs.pos_col == nil and rs.fields.pos then
 			rs.pos_col = 'pos'
@@ -172,7 +165,7 @@ function virtual_rowset(init, ...)
 			update(f, rs.field_attrs and rs.field_attrs[f.name])
 
 			if f.table then
-				glue.attr(rowset_tables, f.table)[rs.name] = true
+				attr(rowset_tables, f.table)[rs.name] = true
 			end
 			if f.compute then
 				computed_fields = computed_fields or {}
@@ -225,9 +218,9 @@ function virtual_rowset(init, ...)
 		end
 	end
 
-	rs.compute_row_vals = glue.noop
+	rs.compute_row_vals = noop
 
-	local repl = glue.repl
+	local repl = repl
 
 	function rs:load(param_values)
 		local res = {}
@@ -320,7 +313,7 @@ function virtual_rowset(init, ...)
 	end
 
 	local function db_error(err, s)
-		return glue.catargs(':\n', s, err and err.message)
+		return catany(':\n', s, err and err.message)
 	end
 
 	function rs:can_add_row(values)
@@ -362,7 +355,7 @@ function virtual_rowset(init, ...)
 	function rs:apply_changes(changes, update_id)
 
 		local res = {rows = {}}
-		local self = glue.object(rs)
+		local self = object(rs)
 		self.changed_rowsets = {}
 
 		for _,row in ipairs(changes.rows) do
@@ -442,7 +435,7 @@ function virtual_rowset(init, ...)
 		setheader('content-disposition', {'attachment', filename = rs_name..'.xlsx'})
 		local file = tmppath('rowset-{name}-{request_id}.xlsx', {name = rs_name})
 		local wb = assert(xlsx_workbook:new(file))
-		glue.fcall(function(finally, onerror)
+		fcall(function(finally, onerror)
 			onerror(function()
 				if wb then wb:close() end
 				fs.remove(file)
@@ -453,9 +446,9 @@ function virtual_rowset(init, ...)
 			local dt   = wb:add_format({num_format = country('date_format')..' hh:mm'})
 			local dts  = wb:add_format({num_format = country('date_format')..' hh:mm:ss'})
 			for i,field in ipairs(rs.fields) do
-				ws:write(0, i-1, field.text or glue.capitalize(field.name), bold)
+				ws:write(0, i-1, field.text or capitalize(field.name), bold)
 				local w = field.display_width
-				w = field.hidden and 1 or w and math.min(32, w)
+				w = field.hidden and 1 or w and min(32, w)
 				local fmt
 				if field.type == 'date' then
 					fmt = field.has_time and (field.has_seconds and dts or dt) or d
@@ -491,7 +484,7 @@ function virtual_rowset(init, ...)
 		elseif type(rs.allow) == 'string' then
 			allow(admin(rs.allow))
 		end
-		local filter = json_arg(args'filter') or {}
+		local filter = json_decode(args'filter') or {}
 		local params = {}
 		--params are prefixed so that they can be used in col_maps.
 		--:old variants are added too for update where sql.
@@ -575,7 +568,7 @@ action['xrowset.events'] = function()
 		--clean up the accept thread. this works because the client shouldn't
 		--send anything anymore so recv() should only return on close.
 		local tcp = cx().req.http.tcp
-		local buf = glue.u8a(1)
+		local buf = u8a(1)
 		while tcp:recv(buf, 1) == 1 do
 			--this shouldn't happen, but sometimes we do get data on this pipe.
 			--we should figure out why but for now it doesn't break anything.
@@ -607,7 +600,7 @@ action['xrowset.events'] = function()
 			t[#t+1] = 'data: '..rowset_name..' '..update_ids..'\n\n'
 			rowsets[rowset_name] = nil
 		end
-		local events = table.concat(t)
+		local events = concat(t)
 		assert(not out_buffering())
 		out(events)
 	end

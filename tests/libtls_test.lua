@@ -1,8 +1,10 @@
-local ffi = require'ffi'
-ffi.tls_libname = 'tls_bearssl'
-local tls = require'libtls'
+tls_libname = 'tls_bearssl'
+require'glue'
+require'libtls'
 
-local c = tls.client{
+local c = tls_client{
+
+	loadfile = try_load,
 
 	alpn = '123',
 	ca = 'x',

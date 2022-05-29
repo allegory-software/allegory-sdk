@@ -6,14 +6,12 @@
 	Features: streams, prepared statements, UUID & DECIMAL types.
 
 CONECTING
-	tarantool.connect(opt) -> tt          connect to server
+	tarantool_connect(opt) -> tt          connect to server
 	  opt.host                            host (`'127.0.0.1'`)
 	  opt.port                            port (`3301`)
 	  opt.user                            user (optional)
 	  opt.password                        password (optional)
 	  opt.timeout                         timeout (`2`)
-	  opt.tcp                             tcp object (`sock.tcp()`)
-	  opt.clock                           clock function (`sock.clock`)
 	  opt.mp                              msgpack instance to use (optional)
 	tt:stream() -> tt                     create a stream
 
@@ -70,33 +68,20 @@ What the args mean:
 
 if not ... then require'tarantool_test'; return end
 
-local ffi     = require'ffi'
-local bit     = require'bit'
-local mp      = require'msgpack'
-local b64     = require'base64'
-local sha1    = require'sha1'.sha1
-local errors  = require'errors'
-local glue    = require'glue'
+require'sock'
+require'glue'
+require'base64'
+require'sha1'
+require'msgpack'
+local buffer = require'string.buffer'.new
 
-local u8a     = glue.u8a
-local u8p     = glue.u8p
-local buffer  = glue.buffer
-local empty   = glue.empty
-local memoize = glue.memoize
-local object  = glue.object
+local
+	u8a, u8p, empty, memoize, object =
+	u8a, u8p, empty, memoize, object
 
-local check_io, checkp, check, protect = errors.tcp_protocol_errors'tarantool'
+local check_io, checkp, check, protect = tcp_protocol_errors'tarantool'
 
 local c = {host = '127.0.0.1', port = 3301, timeout = 5, tracebacks = false}
-
-function c.log(severity, ...)
-	local logging = c.logging
-	if not logging then return end
-	logging.log(severity, 'taran', ...)
-end
-
-function c.dbg  (...) c.log(''    , ...) end
-function c.note (...) c.log('note', ...) end
 
 --IPROTO_*
 local OK            = 0
@@ -157,13 +142,13 @@ local INDEX_INDEX_NAME = 2
 local function xor_strings(s1, s2)
 	assert(#s1 == #s2)
 	local n = #s1
-	local p1 = ffi.cast(u8p, s1)
-	local p2 = ffi.cast(u8p, s2)
+	local p1 = cast(u8p, s1)
+	local p2 = cast(u8p, s2)
 	local b = u8a(n)
 	for i = 0, n-1 do
-		b[i] = bit.bxor(p1[i], p2[i])
+		b[i] = xor(p1[i], p2[i])
 	end
-	return ffi.string(b, n)
+	return str(b, n)
 end
 
 local request, tselect --fw. decl.
@@ -176,44 +161,42 @@ local function decode_decimal(mp, p, i, len)
 	local ldecnumber = require'ldecnumber'
 	local i2 = i + len
 	local i1, scale = mp:decode_next(p, i2, i)
-	local s = ffi.string(p+i1, i2-i1) --lame that we have to intern a string for this.
+	local s = str(p+i1, i2-i1) --lame that we have to intern a string for this.
 	return ldecnumber.frompacked(s, scale)
 end
 
 local function decode_uuid(mp, p, i, len) --16 bytes binary UUID
-	return ffi.string(p+i, len)
+	return str(p+i, len)
 end
 
-c.connect = protect(function(opt)
+tarantool_connect = protect(function(opt)
 	local c = object(c, opt)
-	c.note('connect', '%s:%s user=%s', c.host, c.port, c.user or '')
+	log('note', 'taran', 'connect', '%s:%s user=%s', c.host, c.port, c.user or '')
 	c:clear_metadata_cache()
-	if not c.tcp then
-		local sock = require'sock'
-		c.tcp = sock.tcp
-		c.clock = sock.clock
-	end
-	c.tcp = check_io(c, c.tcp()) --pin it so that it's closed automatically on error.
-	local expires = opt.expires or c.clock() + (opt.timeout or c.timeout)
+	c.tcp = check_io(c, tcp()) --pin it so that it's closed automatically on error.
+	local expires = opt.expires or clock() + (opt.timeout or c.timeout)
 	check_io(c, c.tcp:connect(c.host, c.port, expires))
-	c._b = buffer()
-	c.mp = opt.mp or mp.new()
+	local b = buffer()
+	c._b = function(sz)
+		return b:reset():reserve(sz):ref()
+	end
+	c.mp = opt.mp or msgpack()
 	c.mp.error = function(err) checkp(c, false, '%s', err) end
 	c.mp.decoder[MP_DECIMAL] = decode_decimal
 	c.mp.decoder[MP_UUID   ] = decode_uuid
-	c._mb = mp:encoding_buffer()
+	c._mb = c.mp:encoding_buffer()
 	local b = c._b(64)
 	check_io(c, c.tcp:recvn(b, 64, expires)) --greeting
-	local salt = ffi.string(check_io(c, c.tcp:recvn(b, 64, expires)), 44)
+	local salt = str(check_io(c, c.tcp:recvn(b, 64, expires)), 44)
 	if c.user then
 		local body = {[USER_NAME] = c.user}
 		if c.password and c.password ~= '' then
-			local salt = b64.decode(salt):sub(1, 20)
+			local salt = base64_decode(salt):sub(1, 20)
 			local s1 = sha1(c.password)
 			local s2 = sha1(s1)
 			local s3 = sha1(salt .. s2)
 			local scramble = xor_strings(s1, s3)
-			body[TUPLE] = mp.array('chap-sha1', scramble)
+			body[TUPLE] = c.mp.array('chap-sha1', scramble)
 		end
 		request(c, AUTH, body, expires)
 	end
@@ -226,12 +209,12 @@ c.stream = function(c)
 end
 
 c.close = function(c)
-	c.note('close', '%s:%s', c.host, c.port)
+	log('note', 'taran', 'close', '%s:%s', c.host, c.port)
 	return c.tcp:close()
 end
 
 --[[local]] function request(c, req_type, body, expires)
-	local expires = expires or c.clock() + c.timeout
+	local expires = expires or clock() + c.timeout
 	c.sync_num = (c.sync_num or 0) + 1
 	local header = {
 		[SYNC] = c.sync_num,
@@ -278,7 +261,7 @@ c.clear_metadata_cache = function(c)
 	end)
 end
 
-local function key_arg(key)
+local function key_arg(mp, key)
 	return mp.toarray(type(key) == 'table' and key or key == nil and {} or {key})
 end
 
@@ -316,12 +299,12 @@ end
 	local body = {
 		[SPACE_ID] = space,
 		[INDEX_ID] = index,
-		[KEY] = key_arg(key),
+		[KEY] = key_arg(c.mp, key),
 	}
 	body[LIMIT] = opt.limit or 0xFFFFFFFF
 	body[OFFSET] = opt.offset or 0
 	body[ITERATOR] = opt.iterator
-	local expires = opt.expires or c.clock() + (opt.timeout or c.timeout)
+	local expires = opt.expires or clock() + (opt.timeout or c.timeout)
 	return exec_response(request(c, SELECT, body, expires))
 end
 c.select = protect(tselect)
@@ -345,7 +328,7 @@ c.update = protect(function(c, space, index, key, oplist)
 	return request(c, UPDATE, {
 		[SPACE_ID] = space,
 		[INDEX_ID] = index,
-		[KEY] = key_arg(key),
+		[KEY] = key_arg(c.mp, key),
 		[TUPLE] = mp.toarray(oplist),
 	})[DATA]
 end)
@@ -355,7 +338,7 @@ c.delete = protect(function(c, space, key)
 	return request(c, DELETE, {
 		[SPACE_ID] = space,
 		[INDEX_ID] = index,
-		[KEY] = key_arg(key),
+		[KEY] = key_arg(c.mp, key),
 	})[DATA]
 end)
 
@@ -364,20 +347,20 @@ c.upsert = protect(function(c, space, index, key, oplist)
 		[SPACE_ID] = resolve_space(c, space),
 		[INDEX_ID] = index,
 		[OPS] = oplist,
-		[TUPLE] = key_arg(key),
+		[TUPLE] = key_arg(c.mp, key),
 	})[DATA]
 end)
 
 c.eval = protect(function(c, expr, ...)
 	if type(expr) == 'function' then
 		expr = require'pp'.format(expr)
-		expr = string.format('return assert(%s)(...)', expr)
+		expr = format('return assert(%s)(...)', expr)
 	end
-	return unpack(request(c, EVAL, {[EXPR] = expr, [TUPLE] = mp.array(...)})[DATA])
+	return unpack(request(c, EVAL, {[EXPR] = expr, [TUPLE] = c.mp.array(...)})[DATA])
 end)
 
 c.call = protect(function(c, fn, ...)
-	return unpack(request(c, CALL, {[FUNCTION_NAME] = fn, [TUPLE] = mp.array(...)})[DATA])
+	return unpack(request(c, CALL, {[FUNCTION_NAME] = fn, [TUPLE] = c.mp.array(...)})[DATA])
 end)
 
 c.exec = protect(function(c, sql, params, xopt, param_meta)
@@ -392,7 +375,7 @@ c.exec = protect(function(c, sql, params, xopt, param_meta)
 			end
 		end
 	end
-	c.dbg('exec', '%s', sql)
+	log('', 'taran', 'exec', '%s', sql)
 	return exec_response(request(c, EXECUTE, {
 		[STMT_ID] = type(sql) == 'number' and sql or nil,
 		[SQL_TEXT] = type(sql) == 'string' and sql or nil,
@@ -449,5 +432,3 @@ local function esc_quote(s) return "''" end
 function c.esc(s)
 	return s:gsub("'", esc_quote)
 end
-
-return c

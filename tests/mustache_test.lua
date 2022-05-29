@@ -1,13 +1,11 @@
 
-local mustache = require'mustache'
-local glue = require'glue'
-local cjson = require'cjson'
-local fs = require'fs'
-local pp = require'pp'
+require'glue'
+require'mustache'
+require'json'
 
 local function test_spec(t)
 	print(t.desc)
-	local ok, s = pcall(mustache.render, t.template, t.data, t.partials)
+	local ok, s = pcall(mustache_render, t.template, t.data, t.partials)
 	local success = ok and s == t.expected
 	if not success then
 		print()
@@ -15,16 +13,16 @@ local function test_spec(t)
 		print(pp.format(t.template))
 		print()
 		print('DUMP:')
-		mustache.dump(t.template)
+		mustache_dump(t.template)
 		print()
 		print('DATA:')
 		print()
-		pp(t.data)
+		pr(t.data)
 		print()
 		if t.partials then
 			print('PARTIALS:')
 			print()
-			pp(t.partials)
+			pr(t.partials)
 			print()
 		end
 		print('EXPECTED:')
@@ -43,11 +41,11 @@ local function test_specs()
 	local failed = 0
 	local total = 0
 	local dir = 'mustache_test'
-	for file in fs.dir(dir) do
+	for file in ls(dir) do
 		local path = dir..'/'..file
 		local doc
 		if file:find'%.json$' then
-			doc = cjson.decode(glue.readfile(path))
+			doc = json_decode(load(path))
 		elseif file:find'%.lua$' then
 			doc = loadfile(path)()
 		end
@@ -70,7 +68,7 @@ end
 local function test_dump()
 	print'TESTING DUMP:'
 	print()
-	mustache.dump(
+	mustache_dump(
 		'  {{>nope}}\n  {{hei}} there {{#cowboy}}inside{{/cowboy}}'..
 		'{{=<% %>=}}  <%^cow%>outside<%/cow%>')
 	print()
@@ -78,7 +76,7 @@ end
 
 local function test_basic()
 	local function test(template, view, expected)
-		local result = mustache.render(template, view)
+		local result = mustache_render(template, view)
 		if result == expected then return end
 		local pp = require'pp'
 		error(string.format('%s ~= %s', pp.format(result), pp.format(expected)))
@@ -100,12 +98,12 @@ local function test_errors()
 		assert(not ok)
 		print(err)
 	end
-	testerr(mustache.render, 'first line\nhello {{  }}!')
-	testerr(mustache.render, 'first line\n  {{= <% =}}')
-	testerr(mustache.render, '{{#s1}}{{^s2}}')
-	testerr(mustache.render, '{{#s1}}{{#s2}}{{/s1}}{{/s2}}')
-	testerr(mustache.render, '{{#a.b}}{{/a.b}}', {a = 'hey'})
-	testerr(mustache.render, '{{/a}}')
+	testerr(mustache_render, 'first line\nhello {{  }}!')
+	testerr(mustache_render, 'first line\n  {{= <% =}}')
+	testerr(mustache_render, '{{#s1}}{{^s2}}')
+	testerr(mustache_render, '{{#s1}}{{#s2}}{{/s1}}{{/s2}}')
+	testerr(mustache_render, '{{#a.b}}{{/a.b}}', {a = 'hey'})
+	testerr(mustache_render, '{{/a}}')
 	print()
 end
 

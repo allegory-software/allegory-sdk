@@ -11,16 +11,19 @@
 
 if not ... then require'linebuffer_test'; return end
 
-local ffi = require'ffi'
+local ffi  = require'ffi'
+local min  = math.min
+local byte = string.byte
+local u8a  = ffi.typeof'char[?]'
 
 --Based on `read(buf, maxsz) -> sz`, create the API:
 --  `readline() -> s`
 --  `read(maxsz) -> buf, sz`
-return function(read, term, sz)
+function linebuffer(read, term, sz)
 
 	local find_term
 	if #term == 1 then
-		local t = string.byte(term)
+		local t = byte(term)
 		function find_term(buf, i, j)
 			for i = i, j-1 do
 				if buf[i] == t then
@@ -30,7 +33,7 @@ return function(read, term, sz)
 			return false, 0, 0
 		end
 	elseif #term == 2 then
-		local t1, t2 = string.byte(term, 1, 2)
+		local t1, t2 = byte(term, 1, 2)
 		function find_term(buf, i, j)
 			for i = i, j-2 do
 				if buf[i] == t1 and buf[i+1] == t2 then
@@ -46,7 +49,7 @@ return function(read, term, sz)
 	--single-piece ring buffer (no wrap-around).
 
 	assert(sz >= 1024)
-	local buf = ffi.new('char[?]', sz)
+	local buf = u8a(sz)
 
 	local i = 0 --index of first valid byte.
 	local j = 0 --index right after last valid byte.
@@ -97,7 +100,7 @@ return function(read, term, sz)
 				return nil, err
 			end
 		end
-		local n = math.min(maxn, j - i)
+		local n = min(maxn, j - i)
 		local buf = buf + i
 		i = i + n
 		return buf, n

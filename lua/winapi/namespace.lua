@@ -11,7 +11,7 @@ _M._M = _M
 setfenv(1, _M) --all sub-modules use this pattern to publish their stuff.
 
 --utility to import the contents of a table into the global winapi namespace
---because when strict mode is enabled we can't do glue.update(_M, t)
+--because when strict mode is enabled we can't do update(_M, t)
 function import(globals)
 	for k,v in pairs(globals) do
 		rawset(_M, k, v)

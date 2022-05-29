@@ -3,16 +3,21 @@
 	Fast image resampling based on Pillow SIMD.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	pil.image(bmp) -> img         create an image object from a bitmap
+	pillow_image(bmp) -> img      create an image object from a bitmap
 	img:resize([w], [h], [filter], [cx1], [cy1], [cx2], [cy2])  resize and/or crop
 	img:bitmap() -> bmp           get the image as a bitmap with bmp:free()
 	img:free()                    free the image
 
+HI-LEVEL API
+
+	resize_image(src_path, dst_path, max_w, max_h)
+
+
 ]=]
 
 local ffi = require'ffi'
-local avx2 = require('cpu_supports')('avx2')
-local C = ffi.load('pillow_simd'..(avx2 and '_avx2' or ''))
+require'cpu_supports'
+local C = ffi.load('pillow_simd'..(cpu_supports'avx2' and '_avx2' or ''))
 
 ffi.cdef[[
 
@@ -33,8 +38,6 @@ pillow_image_t* pillow_resample(
 
 ]]
 
-local pil = {}
-
 local function ptr(p) return p ~= nil and p or nil end
 
 local modes = {
@@ -50,7 +53,7 @@ local modes = {
 local formats = {}
 for k,v in pairs(modes) do formats[v] = k end
 
-function pil.image(bmp)
+function pillow_image(bmp)
 	local mode = assert(modes[bmp.format], 'unsupported format')
 	return assert(ptr(C.pillow_image_create_for_data(
 		bmp.data, mode, bmp.w, bmp.h, bmp.stride, bmp.bottom_up and 1 or 0)))
@@ -109,5 +112,3 @@ ffi.metatype('pillow_image_t', {__index = {
 	bitmap = to_bitmap,
 	resize = resize,
 }})
-
-return pil

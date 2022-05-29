@@ -4,18 +4,20 @@
 
 if not ... then require'fs_test'; return end
 
-local ffi = require'ffi'
-local bit = require'bit'
-local bor, band, bnot, shl = bit.bor, bit.band, bit.bnot, bit.lshift
-package.loaded.fs_posix = true --prevent recursive loading from fs module.
-setfenv(1, require'fs'.backend)
-
-local C = ffi.C
+require'glue'
 
 --POSIX does not define an ABI and platfoms have different cdefs thus we have
 --to limit support to the platforms and architectures we actually tested for.
-assert(linux or osx, 'platform not Linux or OSX')
-assert(x64 or ffi.arch == 'x86', 'arch not x86 or x64')
+assert(Linux or OSX, 'platform not Linux or OSX')
+assert(package.loaded.fs)
+
+local
+	C, cast, bor, band, bnot, shl =
+	C, cast, bor, band, bnot, shl
+
+local file  = _fs_file
+local dir   = _fs_dir
+local check = _fs_check_errno
 
 --types, consts, utils -------------------------------------------------------
 
@@ -28,20 +30,18 @@ typedef size_t time_t;
 typedef int64_t off64_t;
 ]]
 
-if linux then
+if Linux then
 	cdef'long syscall(int number, ...);' --stat, fstat, lstat
-elseif osx then
+elseif OSX then
 	cdef'int fcntl(int fd, int cmd, ...);' --fallocate
 end
-
-check = check_errno
 
 local cbuf = buffer'char[?]'
 
 local function parse_perms(s, base)
 	if type(s) == 'string' then
-		local unixperms = require'unixperms'
-		return unixperms.parse(s, base)
+		require'unixperms'
+		return unixperms_parse(s, base)
 	else --pass-through
 		return s or tonumber('600', 8), false
 	end
@@ -56,34 +56,34 @@ int close(int fd);
 
 local o_bits = {
 	--Linux & OSX
-	rdonly    = osx and 0x000000 or 0x000000, --access: read only
-	wronly    = osx and 0x000001 or 0x000001, --access: write only
-	rdwr      = osx and 0x000002 or 0x000002, --access: read + write
-	accmode   = osx and 0x000003 or 0x000003, --access: ioctl() only
-	append    = osx and 0x000008 or 0x000400, --append mode: write() at eof
-	trunc     = osx and 0x000400 or 0x000200, --truncate the file on opening
-	creat     = osx and 0x000200 or 0x000040, --create if not exist
-	excl      = osx and 0x000800 or 0x000080, --create or fail (needs 'creat')
-	nofollow  = osx and 0x000100 or 0x020000, --fail if file is a symlink
-	directory = osx and 0x100000 or 0x010000, --open if directory or fail
-	nonblock  = osx and 0x000004 or 0x000800, --non-blocking (not for files)
-	async     = osx and 0x000040 or 0x002000, --enable signal-driven I/O
-	sync      = osx and 0x000080 or 0x101000, --enable _file_ sync
-	fsync     = osx and 0x000080 or 0x101000, --'sync'
-	dsync     = osx and 0x400000 or 0x001000, --enable _data_ sync
-	noctty    = osx and 0x020000 or 0x000100, --prevent becoming ctty
-	cloexec   = osx and     2^24 or 0x080000, --set close-on-exec
+	rdonly    = OSX and 0x000000 or 0x000000, --access: read only
+	wronly    = OSX and 0x000001 or 0x000001, --access: write only
+	rdwr      = OSX and 0x000002 or 0x000002, --access: read + write
+	accmode   = OSX and 0x000003 or 0x000003, --access: ioctl() only
+	append    = OSX and 0x000008 or 0x000400, --append mode: write() at eof
+	trunc     = OSX and 0x000400 or 0x000200, --truncate the file on opening
+	creat     = OSX and 0x000200 or 0x000040, --create if not exist
+	excl      = OSX and 0x000800 or 0x000080, --create or fail (needs 'creat')
+	nofollow  = OSX and 0x000100 or 0x020000, --fail if file is a symlink
+	directory = OSX and 0x100000 or 0x010000, --open if directory or fail
+	nonblock  = OSX and 0x000004 or 0x000800, --non-blocking (not for files)
+	async     = OSX and 0x000040 or 0x002000, --enable signal-driven I/O
+	sync      = OSX and 0x000080 or 0x101000, --enable _file_ sync
+	fsync     = OSX and 0x000080 or 0x101000, --'sync'
+	dsync     = OSX and 0x400000 or 0x001000, --enable _data_ sync
+	noctty    = OSX and 0x020000 or 0x000100, --prevent becoming ctty
+	cloexec   = OSX and     2^24 or 0x080000, --set close-on-exec
 	--Linux only
-	direct    = linux and 0x004000, --don't cache writes
-	noatime   = linux and 0x040000, --don't update atime
-	rsync     = linux and 0x101000, --'sync'
-	path      = linux and 0x200000, --open only for fd-level ops
-   tmpfile   = linux and 0x410000, --create anon temp file (Linux 3.11+)
+	direct    = Linux and 0x004000, --don't cache writes
+	noatime   = Linux and 0x040000, --don't update atime
+	rsync     = Linux and 0x101000, --'sync'
+	path      = Linux and 0x200000, --open only for fd-level ops
+   tmpfile   = Linux and 0x410000, --create anon temp file (Linux 3.11+)
 	--OSX only
-	shlock    = osx and 0x000010, --get a shared lock
-	exlock    = osx and 0x000020, --get an exclusive lock
-	evtonly   = osx and 0x008000, --open for events only (allows unmount)
-	symlink   = osx and 0x200000, --open the symlink itself
+	shlock    = OSX and 0x000010, --get a shared lock
+	exlock    = OSX and 0x000020, --get an exclusive lock
+	evtonly   = OSX and 0x008000, --open for events only (allows unmount)
+	symlink   = OSX and 0x200000, --open the symlink itself
 }
 
 local str_opt = {
@@ -95,7 +95,7 @@ local str_opt = {
 	['a+'] = {flags = 'creat rdwr', seek_end = true},
 }
 
-ffi.cdef'int fcntl(int fd, int cmd, ...);'
+cdef'int fcntl(int fd, int cmd, ...);'
 
 local F_GETFL     = 3
 local F_SETFL     = 4
@@ -103,15 +103,15 @@ local O_NONBLOCK  = 0x800
 
 function file.make_async(f)
 	local fl = C.fcntl(f.fd, F_GETFL)
-	assert(check(C.fcntl(f.fd, F_SETFL, ffi.cast('int', bor(fl, O_NONBLOCK))) == 0))
+	assert(check(C.fcntl(f.fd, F_SETFL, cast('int', bor(fl, O_NONBLOCK))) == 0))
 	local sock = require'sock'
-	local ok, err = sock._register(f)
+	local ok, err = _sock_register(f)
 	if not ok then return nil, err end
 	f._async = true
 	return true
 end
 
-function fs.wrap_fd(fd, async, is_pipe_end, path)
+function file_wrap_fd(fd, async, is_pipe_end, path)
 
 	local f = {
 		fd = fd,
@@ -122,7 +122,7 @@ function fs.wrap_fd(fd, async, is_pipe_end, path)
 		__index = file,
 	}
 	setmetatable(f, f)
-	fs.live(f, path or '')
+	live(f, path or '')
 
 	if async then
 		local ok, err = f:make_async()
@@ -135,15 +135,15 @@ function fs.wrap_fd(fd, async, is_pipe_end, path)
 	return f
 end
 
-function fs.open(path, mode_opt)
-	local opt = open_opt(mode_opt, str_opt)
-	local flags = flags(opt.flags or 'rdonly', o_bits)
+function open(path, mode_opt)
+	local opt = _open_opt(mode_opt, str_opt)
+	local flags = bitflags(opt.flags or 'rdonly', o_bits)
 	flags = bor(flags, opt.async and O_NONBLOCK or 0)
 	local mode = parse_perms(opt.perms)
 	local open = opt.open or C.open
 	local fd = open(path, flags, mode)
 	if fd == -1 then return check() end
-	local f, err = fs.wrap_fd(fd, opt.async, opt.is_pipe_end, path)
+	local f, err = file_wrap_fd(fd, opt.async, opt.is_pipe_end, path)
 	if not f then return nil, err end
 	if opt.seek_end then
 		local pos, err = f:seek('end', 0)
@@ -155,8 +155,7 @@ function fs.open(path, mode_opt)
 	f.shm = opt.shm and true or false
 	local r = band(flags, o_bits.rdonly) == o_bits.rdonly and 'r' or ''
 	local w = band(flags, o_bits.wronly) == o_bits.wronly and 'w' or ''
-	f.log = opt.log or fs.log
-	f.log('', 'fs', 'open', '%-4s %s%s %s', f, r, w, path)
+	log('', 'fs', 'open', '%-4s %s%s %s', f, r, w, path)
 	return f
 end
 
@@ -168,14 +167,14 @@ function file.close(f)
 	if f:closed() then return true end
 	if f._async then
 		local sock = require'sock'
-		local ok, err = sock._unregister(f)
+		local ok, err = _sock_unregister(f)
 		if not ok then return nil, err end
 	end
 	local ok = C.close(f.fd) == 0
 	if not ok then return check(false) end
 	f.fd = -1
-	f.log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
-	fs.live(f, nil)
+	log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	live(f, nil)
 	return true
 end
 
@@ -183,16 +182,16 @@ cdef[[
 int fileno(struct FILE *stream);
 ]]
 
-function fs.fileno(file)
+function fileno(file)
 	local fd = C.fileno(file)
 	if fd == -1 then return check() end
 	return fd
 end
 
-function fs.wrap_file(file, ...)
+function file_wrap_file(file, ...)
 	local fd = C.fileno(file)
 	if fd == -1 then return check() end
-	return fs.wrap_fd(fd, ...)
+	return file_wrap_fd(fd, ...)
 end
 
 function file.set_inheritable(file, inheritable)
@@ -201,12 +200,12 @@ end
 
 --pipes ----------------------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 int pipe(int[2]);
 int mkfifo(const char *pathname, mode_t mode);
 ]]
 
-function fs.pipe(path, mode, opt)
+function pipe(path, mode, opt)
 	if type(path) == 'table' then
 		path, mode, opt = path.path, path.mode, path
 	end
@@ -215,25 +214,22 @@ function fs.pipe(path, mode, opt)
 	if path then
 		local fd = C.mkfifo(path, mode)
 		if fd == -1 then return check() end
-		local f, err = fs.wrap_fd(fd, opt.async, true, path)
+		local f, err = file_wrap_fd(fd, opt.async, true, path)
 		if not f then return nil, err end
-		f.log = opt.log or fs.log
-		f.log('', 'fs', 'pipe', '%-4s %s', f, path)
+		log('', 'fs', 'pipe', '%-4s %s', f, path)
 		return f
 	else --unnamed pipe
-		local fds = ffi.new'int[2]'
+		local fds = new'int[2]'
 		local ok = C.pipe(fds) == 0
 		if not ok then return check() end
-		local rf, err1 = fs.wrap_fd(fds[0], opt.async or opt.read_async , true, 'pipe.r')
-		local wf, err2 = fs.wrap_fd(fds[1], opt.async or opt.write_async, true, 'pipe.w')
+		local rf, err1 = file_wrap_fd(fds[0], opt.async or opt.read_async , true, 'pipe.r')
+		local wf, err2 = file_wrap_fd(fds[1], opt.async or opt.write_async, true, 'pipe.w')
 		if not (rf and wf) then
 			if rf then assert(rf:close()) end
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
 		end
-		rf.log = opt.log or fs.log
-		wf.log = opt.log or fs.log
-		rf.log('', 'fs', 'pipe', 'r=%s w=%s %s %o', rf, wf, opt.async and 'async' or 'sync', mode)
+		log('', 'fs', 'pipe', 'r=%s w=%s %s %o', rf, wf, opt.async and 'async' or 'sync', mode)
 		return rf, wf
 	end
 end
@@ -250,19 +246,19 @@ end
 
 --i/o ------------------------------------------------------------------------
 
-cdef(string.format([[
+cdef(format([[
 ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 int fsync(int fd);
 int64_t lseek(int fd, int64_t offset, int whence) asm("lseek%s");
-]], linux and '64' or ''))
+]], Linux and '64' or ''))
 
 --NOTE: always ask for more than 0 bytes from a pipe or you'll not see EOF.
 function file.read(f, buf, sz, expires)
 	if sz == 0 then return 0 end --masked for compat.
 	if f._async then
 		local sock = require'sock'
-		return sock._file_async_read(f, buf, sz, expires)
+		return _file_async_read(f, buf, sz, expires)
 	else
 		local n = C.read(f.fd, buf, sz)
 		if n == -1 then return check() end
@@ -275,7 +271,7 @@ end
 function file._write(f, buf, sz, expires)
 	if f._async then
 		local sock = require'sock'
-		return sock._file_async_write(f, buf, sz, expires)
+		return _file_async_write(f, buf, sz, expires)
 	else
 		local n = C.write(f.fd, buf, sz or #buf)
 		if n == -1 then return check() end
@@ -305,14 +301,14 @@ cdef'int ftruncate(int fd, int64_t length);'
 
 local fallocate
 
-if osx then
+if OSX then
 
 	local F_PREALLOCATE    = 42
 	local F_ALLOCATECONTIG = 2
 	local F_PEOFPOSMODE    = 3
 	local F_ALLOCATEALL    = 4
 
-	local fstore_ct = ffi.typeof[[
+	local fstore_ct = typeof[[
 		struct {
 			uint32_t fst_flags;
 			int      fst_posmode;
@@ -322,15 +318,15 @@ if osx then
 		}
 	]]
 
-	local void = ffi.typeof'void*'
+	local void = typeof'void*'
 	local store
 	function fallocate(fd, size)
 		store = store or fstore_ct(F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, 0)
 		store.fst_bytesalloc = size
-		local ret = C.fcntl(fd, F_PREALLOCATE, ffi.cast(void, store))
+		local ret = C.fcntl(fd, F_PREALLOCATE, cast(void, store))
 		if ret == -1 then --too fragmented, allocate non-contiguous space
 			store.fst_flags = F_ALLOCATEALL
-			local ret = C.fcntl(fd, F_PREALLOCATE, ffi.cast(void, store))
+			local ret = C.fcntl(fd, F_PREALLOCATE, cast(void, store))
 			if ret == -1 then return check(false) end
 		end
 		return true
@@ -388,54 +384,42 @@ int unlink(const char *pathname);
 int rename(const char *oldpath, const char *newpath);
 ]]
 
-local function logpath(severity, event, path, ok, err)
-	if not ok then return false, err end
-	fs.log(severity, 'fs', event, '%s', path)
-	return true
+function _mkdir(path, perms)
+	return check(C.mkdir(path, perms or 0x1ff) == 0) --0x1ff=0777
 end
 
-function mkdir(path, perms)
-	local ok, err = check(C.mkdir(path, perms or 0x1ff) == 0)
-	if not ok then return false, err end
-	fs.log('', 'fs', 'mkdir', '%s %s', path, perms)
-	return true
+function _rmdir(path)
+	return check(C.rmdir(path) == 0)
 end
 
-function rmdir(path)
-	return logpath('', 'rmdir', path, check(C.rmdir(path) == 0))
-end
-
-function chdir(path)
-	fs.startcwd()
-	return logpath('', 'chdir', path, check(C.chdir(path) == 0))
+function _chdir(path)
+	startcwd()
+	return check(C.chdir(path) == 0)
 end
 
 local ERANGE = 34
 
-function getcwd()
+function cwd()
 	while true do
 		local buf, sz = cbuf(256)
 		if C.getcwd(buf, sz) == nil then
 			if ffi.errno() ~= ERANGE or buf >= 2048 then
-				return check()
+				return assert(check())
 			else
 				buf, sz = cbuf(sz * 2)
 			end
 		end
-		return ffi.string(buf)
+		return str(buf)
 	end
 end
-fs.startcwd = memoize(getcwd)
+startcwd = memoize(cwd)
 
-function rmfile(path)
-	return logpath('note', 'rmfile', path, check(C.unlink(path) == 0))
+function _rmfile(path)
+	return check(C.unlink(path) == 0)
 end
 
-function fs.move(oldpath, newpath)
-	local ok, err = check(C.rename(oldpath, newpath) == 0)
-	if not ok then return false, err end
-	fs.log('', 'fs', 'move', 'old: %s\nnew: %s', oldpath, newpath)
-	return true
+function _mv(oldpath, newpath)
+	return check(C.rename(oldpath, newpath) == 0)
 end
 
 --hardlinks & symlinks -------------------------------------------------------
@@ -446,25 +430,17 @@ int symlink(const char *oldpath, const char *newpath);
 ssize_t readlink(const char *path, char *buf, size_t bufsize);
 ]]
 
-local function logmklink(event, link_path, target_path, ok, err)
-	if not ok then return false, err end
-	fs.log('', 'fs', event, 'link:   %s\ntarget:  %s', link_path, target_path)
-	return true
+function _mksymlink(link_path, target_path)
+	return check(C.symlink(target_path, link_path) == 0)
 end
 
-function fs.mksymlink(link_path, target_path)
-	return logmklink('mksymlink', link_path, target_path,
-		check(C.symlink(target_path, link_path) == 0))
-end
-
-function fs.mkhardlink(link_path, target_path)
-	return logmklink('mkhardlink', link_path, target_path,
-		check(C.link(target_path, link_path) == 0))
+function _mkhardlink(link_path, target_path)
+	return check(C.link(target_path, link_path) == 0)
 end
 
 local EINVAL = 22
 
-function readlink(link_path)
+function _readlink(link_path)
 	local buf, sz = cbuf(256)
 	::again::
 	local len = C.readlink(link_path, buf, sz)
@@ -478,52 +454,46 @@ function readlink(link_path)
 		buf, sz = cbuf(sz * 2)
 		goto again
 	end
-	return ffi.string(buf, len)
+	return str(buf, len)
 end
 
 --common paths ---------------------------------------------------------------
 
-function fs.homedir()
+function homedir()
 	return os.getenv'HOME'
 end
 
-function fs.tmpdir()
+function tmpdir()
 	return os.getenv'TMPDIR' or '/tmp'
 end
 
-function fs.appdir(appname)
-	local dir = fs.homedir()
-	return dir and string.format('%s/.%s', dir, appname)
+function appdir(appname)
+	local dir = homedir()
+	return dir and format('%s/.%s', dir, appname)
 end
 
-if osx then
-
+if OSX then
 	cdef'int _NSGetExecutablePath(char* buf, uint32_t* bufsize);'
-
-	function fs.exepath()
+	function exepath()
 		local buf, sz = cbuf(256)
-		local out_sz = ffi.new('uint32_t[1]', sz)
+		local out_sz = u32a(1)
 		::again::
 		if C._NSGetExecutablePath(buf, out_sz) ~= 0 then
 			buf, sz = cbuf(out_sz[0])
 			goto again
 		end
-		return (ffi.string(buf, sz):gsub('//', '/'))
+		return (str(buf, sz):gsub('//', '/'))
 	end
-
 else
-
-	function fs.exepath()
+	function exepath()
 		return readlink'/proc/self/exe'
 	end
-
 end
-
-fs.exepath = memoize(fs.exepath)
+exepath = memoize(exepath)
 
 --file attributes ------------------------------------------------------------
 
-if linux and x64 then cdef[[
+if Linux then cdef[[
 struct stat {
 	uint64_t st_dev;
 	uint64_t st_ino;
@@ -544,30 +514,7 @@ struct stat {
 	uint64_t st_ctime_nsec;
 	int64_t  __unused[3];
 };
-]]
-elseif linux then cdef[[
-struct stat { // NOTE: 64bit version
-	uint64_t st_dev;
-	uint8_t  __pad0[4];
-	uint32_t __st_ino;
-	uint32_t st_mode;
-	uint32_t st_nlink;
-	uint32_t st_uid;
-	uint32_t st_gid;
-	uint64_t st_rdev;
-	uint8_t  __pad3[4];
-	int64_t  st_size;
-	uint32_t st_blksize;
-	uint64_t st_blocks;
-	uint32_t st_atime;
-	uint32_t st_atime_nsec;
-	uint32_t st_mtime;
-	uint32_t st_mtime_nsec;
-	uint32_t st_ctime;
-	uint32_t st_ctime_nsec;
-	uint64_t st_ino;
-};
-]] elseif osx then cdef[[
+]] elseif OSX then cdef[[
 struct stat { // NOTE: 64bit version
 	uint32_t st_dev;
 	uint16_t st_mode;
@@ -638,11 +585,11 @@ local stat_getters = {
 	atime   = function(st) return st_time(st.st_atime, st.st_atime_nsec) end,
 	mtime   = function(st) return st_time(st.st_mtime, st.st_mtime_nsec) end,
 	ctime   = function(st) return st_time(st.st_ctime, st.st_ctime_nsec) end,
-	btime   = osx and
+	btime   = OSX and
 				 function(st) return st_time(st.st_btime, st.st_btime_nsec) end,
 }
 
-local stat_ct = ffi.typeof'struct stat'
+local stat_ct = typeof'struct stat'
 local st
 local function wrap(stat_func)
 	return function(arg, attr)
@@ -661,22 +608,19 @@ local function wrap(stat_func)
 		end
 	end
 end
-if linux then
-	local void = ffi.typeof'void*'
-	local int = ffi.typeof'int'
+if Linux then
+	local void = typeof'void*'
+	local int = typeof'int'
 	fstat = wrap(function(f, st)
-		return C.syscall(x64 and 5 or 197,
-			ffi.cast(int, f.fd), ffi.cast(void, st))
+		return C.syscall(5, cast(int, f.fd), cast(void, st))
 	end)
 	stat = wrap(function(path, st)
-		return C.syscall(x64 and 4 or 195,
-			ffi.cast(void, path), ffi.cast(void, st))
+		return C.syscall(4, cast(void, path), cast(void, st))
 	end)
 	lstat = wrap(function(path, st)
-		return C.syscall(x64 and 6 or 196,
-			ffi.cast(void, path), ffi.cast(void, st))
+		return C.syscall(6, cast(void, path), cast(void, st))
 	end)
-elseif osx then
+elseif OSX then
 	fstat = wrap(function(f, st) return C.fstat64(f.fd, st) end)
 	stat = wrap(C.stat64)
 	lstat = wrap(C.lstat64)
@@ -684,7 +628,7 @@ end
 
 local utimes, futimes, lutimes
 
-if linux then
+if Linux then
 
 	cdef[[
 	struct timespec {
@@ -700,7 +644,7 @@ if linux then
 	local function set_timespec(ts, t)
 		if ts then
 			t.tv_sec = ts
-			t.tv_nsec = (ts - math.floor(ts)) * 1e9
+			t.tv_nsec = (ts - floor(ts)) * 1e9
 		else
 			t.tv_sec = 0
 			t.tv_nsec = UTIME_OMIT
@@ -709,7 +653,7 @@ if linux then
 
 	local AT_FDCWD = -100
 
-	local ts_ct = ffi.typeof'struct timespec[2]'
+	local ts_ct = typeof'struct timespec[2]'
 	local ts
 	function futimes(f, atime, mtime)
 		ts = ts or ts_ct()
@@ -734,7 +678,7 @@ if linux then
 		return check(C.utimensat(AT_FDCWD, path, ts, AT_SYMLINK_NOFOLLOW) == 0)
 	end
 
-elseif osx then
+elseif OSX then
 
 	cdef[[
 	struct timeval {
@@ -748,12 +692,12 @@ elseif osx then
 
 	local function set_timeval(ts, t)
 		t.tv_sec = ts
-		t.tv_usec = (ts - math.floor(ts)) * 1e7 --apparently ignored
+		t.tv_usec = (ts - floor(ts)) * 1e7 --apparently ignored
 	end
 
 	--TODO: find a way to change btime too (probably with CF or Cocoa, which
 	--means many more LOC and more BS for setting one damn integer).
-	local tv_ct = ffi.typeof'struct timeval[2]'
+	local tv_ct = typeof'struct timeval[2]'
 	local tv
 	local function wrap(utimes_func, stat_func)
 		return function(arg, atime, mtime)
@@ -812,9 +756,9 @@ local fchown = wrap(function(f, uid, gid) return C.fchown(f.fd, uid, gid) end)
 local chown = wrap(C.chown)
 local lchown = wrap(C.lchown)
 
-file_attr_get = fstat
+_file_attr_get = fstat
 
-function fs_attr_get(path, attr, deref)
+function _fs_attr_get(path, attr, deref)
 	local stat = deref and stat or lstat
 	return stat(path, attr)
 end
@@ -838,19 +782,18 @@ local function wrap(chmod_func, chown_func, utimes_func)
 	end
 end
 
-file_attr_set = wrap(fchmod, fchown, futimes)
+_file_attr_set = wrap(fchmod, fchown, futimes)
 
-fs_attr_set_deref = wrap(chmod, chown, utimes)
-fs_attr_set_symlink = wrap(lchmod, lchown, lutimes)
-
-function fs_attr_set(path, t, deref)
-	local set = deref and fs_attr_set_deref or fs_attr_set_symlink
+local set_deref   = wrap( chmod,  chown,  utimes)
+local set_symlink = wrap(lchmod, lchown, lutimes)
+function _fs_attr_set(path, t, deref)
+	local set = deref and set_deref or set_symlink
 	return set(path, t)
 end
 
 --directory listing ----------------------------------------------------------
 
-if linux then cdef[[
+if Linux then cdef[[
 struct dirent { // NOTE: 64bit version
 	uint64_t        d_ino;
 	int64_t         d_off;
@@ -858,7 +801,7 @@ struct dirent { // NOTE: 64bit version
 	unsigned char   d_type;
 	char            d_name[256];
 };
-]] elseif osx then cdef[[
+]] elseif OSX then cdef[[
 struct dirent { // NOTE: 64bit version
 	uint64_t d_ino;
 	uint64_t d_seekoff;
@@ -869,14 +812,14 @@ struct dirent { // NOTE: 64bit version
 };
 ]] end
 
-cdef(string.format([[
+cdef(format([[
 typedef struct DIR DIR;
 DIR *opendir(const char *name);
 struct dirent *readdir(DIR *dirp) asm("%s");
 int closedir(DIR *dirp);
-]], linux and 'readdir64' or osx and 'readdir$INODE64'))
+]], Linux and 'readdir64' or OSX and 'readdir$INODE64'))
 
-dir_ct = ffi.typeof[[
+dir_ct = typeof[[
 	struct {
 		DIR *_dirp;
 		struct dirent* _dentry;
@@ -904,11 +847,11 @@ function dir.closed(dir)
 end
 
 function dir_name(dir)
-	return ffi.string(dir._dentry.d_name)
+	return str(dir._dentry.d_name)
 end
 
 function dir.dir(dir)
-	return ffi.string(dir._dir, dir._dirlen)
+	return str(dir._dir, dir._dirlen)
 end
 
 function dir.next(dir)
@@ -982,7 +925,7 @@ local dt_names = {
 	[DT_UNKNOWN] = 'unknown',
 }
 
-function dir_attr_get(dir, attr)
+function _dir_attr_get(dir, attr)
 	if attr == 'type' and dir._dentry.d_type == DT_UNKNOWN then
 		--some filesystems (eg. VFAT) require this extra call to get the type.
 		local type, err = lstat(dir:path(), 'type')
@@ -1007,34 +950,35 @@ local mmap_errors = {
 	[12] = 'out_of_mem', --ENOMEM
 	[22] = 'file_too_short', --EINVAL
 	[27] = 'disk_full', --EFBIG
-	[osx and 69 or 122] = 'disk_full', --EDQUOT
+	[OSX and 69 or 122] = 'disk_full', --EDQUOT
 }
 
 local librt = C
-if linux then --for shm_open()
+if Linux then --for shm_open()
 	local ok, rt = pcall(ffi.load, 'rt')
 	if ok then librt = rt end
 end
 
-if linux then
+if Linux then
 	cdef'int __getpagesize();'
-elseif osx then
+elseif OSX then
 	cdef'int getpagesize();'
 end
-fs.pagesize = linux and C.__getpagesize or C.getpagesize
+local getpagesize = Linux and C.__getpagesize or C.getpagesize
+pagesize = memoize(function() return getpagesize() end)
 
 cdef[[
 int shm_open(const char *name, int oflag, mode_t mode);
 int shm_unlink(const char *name);
 ]]
 
-cdef(string.format([[
+cdef(format([[
 void* mmap(void *addr, size_t length, int prot, int flags,
 	int fd, off64_t offset) asm("%s");
 int munmap(void *addr, size_t length);
 int msync(void *addr, size_t length, int flags);
 int mprotect(void *addr, size_t len, int prot);
-]], osx and 'mmap' or 'mmap64'))
+]], OSX and 'mmap' or 'mmap64'))
 
 local PROT_READ  = 1
 local PROT_WRITE = 2
@@ -1048,7 +992,7 @@ end
 
 local function mmap(...)
 	local addr = C.mmap(...)
-	local ok, err = check(ffi.cast('intptr_t', addr) ~= -1, nil, mmap_errors)
+	local ok, err = check(cast('intptr_t', addr) ~= -1, nil, mmap_errors)
 	if not ok then return nil, err end
 	return addr
 end
@@ -1056,7 +1000,7 @@ end
 local MAP_SHARED  = 1
 local MAP_PRIVATE = 2 --copy-on-write
 local MAP_FIXED   = 0x0010
-local MAP_ANON    = osx and 0x1000 or 0x0020
+local MAP_ANON    = OSX and 0x1000 or 0x0020
 
 function fs_map(file, access, size, offset, addr, tagname, perms)
 
@@ -1078,7 +1022,7 @@ function fs_map(file, access, size, offset, addr, tagname, perms)
 				(write and tonumber('200', 8) or 0) +
 				(exec  and tonumber('100', 8) or 0)
 		local err
-		file, err = fs.open(file, {
+		file, err = open(file, {
 				flags = flags, perms = perms,
 				open = tagname and librt.shm_open,
 				shm = tagname and true or nil,
@@ -1135,13 +1079,13 @@ function fs_map(file, access, size, offset, addr, tagname, perms)
 
 	local MS_ASYNC      = 1
 	local MS_INVALIDATE = 2
-	local MS_SYNC       = osx and 0x0010 or 4
+	local MS_SYNC       = OSX and 0x0010 or 4
 
 	local function flush(self, async, addr, sz)
 		if type(async) ~= 'boolean' then --async arg is optional
 			async, addr, sz = false, async, addr
 		end
-		local addr = fs.aligned_addr(addr or self.addr, 'left')
+		local addr = aligned_addr(addr or self.addr, 'left')
 		local flags = bor(async and MS_ASYNC or MS_SYNC, MS_INVALIDATE)
 		local ok = C.msync(addr, sz or self.size, flags) == 0
 		if not ok then return check(false) end
@@ -1154,7 +1098,7 @@ function fs_map(file, access, size, offset, addr, tagname, perms)
 	end
 
 	local function unlink()
-		return fs.unlink_mapfile(tagname)
+		return unlink_mapfile(tagname)
 	end
 
 	return {addr = addr, size = size, free = free,
@@ -1162,27 +1106,27 @@ function fs_map(file, access, size, offset, addr, tagname, perms)
 
 end
 
-function fs.unlink_mapfile(tagname)
+function unlink_mapfile(tagname)
 	local ok, err = check(librt.shm_unlink(check_tagname(tagname)) == 0)
 	if ok or err == 'not_found' then return true end
 	return nil, err
 end
 
-function fs.protect(addr, size, access)
+function mprotect(addr, size, access)
 	local protect = protect_bits(parse_access(access or 'x'))
 	return check(C.mprotect(addr, size, protect) == 0)
 end
 
 --mirror buffer --------------------------------------------------------------
 
-if linux then
+if Linux then
 
 cdef'int memfd_create(const char *name, unsigned int flags);'
 local MFD_CLOEXEC = 0x0001
 
-function fs.mirror_buffer(size, addr)
+function mirror_buffer(size, addr)
 
-	local size = fs.aligned_size(size or 1)
+	local size = aligned_size(size or 1)
 
 	local fd = C.memfd_create('mirror_buffer', MFD_CLOEXEC)
 	if fd == -1 then return check() end
@@ -1203,7 +1147,7 @@ function fs.mirror_buffer(size, addr)
 
 	for i = 1, 100 do
 
-		local addr = ffi.cast('void*', addr)
+		local addr = cast('void*', addr)
 		local flags = bor(MAP_PRIVATE, MAP_ANON, addr ~= nil and MAP_FIXED or 0)
 		local addr0, err = mmap(addr, size * 2, 0, flags, 0, 0)
 		if not addr0 then
@@ -1221,7 +1165,7 @@ function fs.mirror_buffer(size, addr)
 			goto skip
 		end
 
-		addr2 = ffi.cast('uint8_t*', addr1) + size
+		addr2 = cast('uint8_t*', addr1) + size
 		addr2, err = mmap(addr2, size, protect, flags, fd, 0)
 		if not addr2 then
 			C.munmap(addr1, size)
@@ -1241,19 +1185,19 @@ function fs.mirror_buffer(size, addr)
 
 end
 
-elseif osx then
+elseif OSX then
 
-function fs.mirror_buffer(size, addr)
+function mirror_buffer(size, addr)
 	error'NYI'
 end
 
-end --if osx
+end --if OSX
 
-if linux then
+if Linux then
 
 --free space reporting -------------------------------------------------------
 
-ffi.cdef[[
+cdef[[
 int statfs(const char *path, struct statfs *buf);
 typedef long int __fsword_t;
 typedef unsigned long int fsblkcnt_t;
@@ -1275,7 +1219,7 @@ struct statfs {
 	__fsword_t f_spare[4]; /* Padding bytes reserved for future use */
 };
 ]]
-local statfs_ct = ffi.typeof'struct statfs'
+local statfs_ct = typeof'struct statfs'
 local statfs_buf
 local function statfs(path)
 	statfs_buf = statfs_buf or statfs_ct()
@@ -1284,7 +1228,7 @@ local function statfs(path)
 	return statfs_buf
 end
 
-function fs.info(path)
+function fs_info(path)
 	local buf, err = statfs(path)
 	if not buf then return nil, err end
 	local t = {}
@@ -1293,5 +1237,4 @@ function fs.info(path)
 	return t
 end
 
-end --if linux
-
+end --if Linux

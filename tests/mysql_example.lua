@@ -1,9 +1,9 @@
-local mysql = require'mysql'
-local sock = require'sock'
+require'mysql'
+require'sock'
 
-sock.run(function()
+run(function()
 
-	assert(mysql.connect{
+	assert(mysql_connect{
 		host = '127.0.0.1',
 		port = 3306,
 		user = 'bar',

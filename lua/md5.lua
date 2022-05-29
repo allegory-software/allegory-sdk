@@ -2,14 +2,14 @@
 
 	MD5 hash and digest.
 
-	md5.sum(s[, #s]) -> s   compute the MD5 hash of a string or buffer.
-	md5.digest() -> digest  get a closure that can consume data chunks.
+	md5(s[, #s]) -> s       compute the MD5 hash of a string or buffer.
+	md5_digest() -> digest  get a closure that can consume data chunks.
 	digest(s[, size])       digest a string
 	digest(cdata, size)     digest a cdata buffer
 	digest() -> s           return the hash
 
 	The functions return the binary representation of the hash.
-	To get the hex representation, use glue.tohex().
+	To get the hex representation, use tohex().
 
 ]=]
 
@@ -35,7 +35,7 @@ void MD5_Update(MD5_CTX *ctx, const uint8_t *data, uint32_t size);
 void MD5_Final(const uint8_t *result, MD5_CTX *ctx);
 ]]
 
-local function digest()
+function md5_digest()
 	local ctx = ffi.new'MD5_CTX'
 	local result = ffi.new'uint8_t[16]'
 	C.MD5_Init(ctx)
@@ -49,12 +49,6 @@ local function digest()
 	end
 end
 
-local function sum(data, size)
-	local d = digest(); d(data, size); return d()
+function md5(data, size)
+	local d = md5_digest(); d(data, size); return d()
 end
-
-return {
-	digest = digest,
-	sum = sum,
-	C = C,
-}

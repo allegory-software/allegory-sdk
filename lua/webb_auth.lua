@@ -145,14 +145,14 @@ anonymous then that user is also deleted afterwards.
 
 ]==]
 
+require'glue'
 require'webb_query'
 require'schema'
 local blake3 = require'blake3'
 local bcrypt = require'bcrypt'
-local glue = require'glue'
 
 local function fullname(firstname, lastname)
-	return (glue.catargs('', firstname, lastname) or ''):trim()
+	return (catany('', firstname, lastname) or ''):trim()
 end
 
 --schema ---------------------------------------------------------------------
@@ -234,7 +234,7 @@ end
 
 --config ---------------------------------------------------------------------
 
-local webb_secret = glue.memoize(function()
+local webb_secret = memoize(function()
 	local s = assert(config'secret', 'secret not configured')
 	assert(#s >= 32, 'secret too short')
 	return s
@@ -243,7 +243,7 @@ end)
 local function secret_hash(s)
 	local secret = webb_secret()
 	local token = blake3.hash(s, nil, secret)
-	return glue.tohex(token) --64 bytes
+	return tohex(token) --64 bytes
 end
 
 --session cookie -------------------------------------------------------------
@@ -313,7 +313,7 @@ local function save_session(sess)
 	sess.expires = sess.expires or time() + 2 * 365 * 24 * 3600 --2 years
 	if sess.usr then --login
 		if not sess.id then
-			sess.id = glue.tohex(random_string(16))
+			sess.id = tohex(random_string(16))
 			query([[
 				insert into sess
 					(token, expires, usr)
@@ -422,14 +422,14 @@ local userinfo = memoize(function(usr)
 		]], usr)
 	if not t then return {} end
 	t.haspass = tonumber(t.haspass) == 1
-	t.roles = glue.index(glue.words(t.roles) or {})
+	t.roles = index(collect(words(t.roles) or {}))
 	t.admin = t.roles.admin
 	t.sessions = setmetatable({}, weak_vals_mt)
 	return t
 end)
 
 function clear_userinfo_cache(usr)
-	userinfo(glue.poison, usr)
+	userinfo(poison, usr)
 end
 
 --session-cookie authentication ----------------------------------------------
@@ -444,7 +444,7 @@ end
 
 local function create_user()
 	allow(config('allow_create_user', true))
-	sleep(0.1) --make flooding up the table a bit slower
+	wait(0.1) --make flooding up the table a bit slower
 	local usr = query([[
 		insert into usr set
 			clientip = :clientip,
@@ -601,7 +601,7 @@ function gen_auth_token(email)
 
 	local token = secret_hash(random_string(32))
 	local ok, err = register_token(usr, token, 'email', token_lifetime, token_maxcount)
-	webb.note('auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
+	webb.log('note', 'auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
 	return ok and token or nil, err
 end
 
@@ -632,14 +632,14 @@ function gen_auth_code(validates, s)
 	local code = secret_hash(random_string(64)):gsub('[a-f]', ''):sub(1, 6)
 	assert(#code == 6)
 	local ok, err = register_token(usr, code, validates, code_lifetime, code_maxcount)
-	webb.note('auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
+	webb.log('note', 'auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
 		usr, code, validates, err)
 	return ok and code or nil, err
 end
 
 local function token_usr(token)
 	if not token then return end
-	sleep(0.2) --slow down brute-forcing
+	wait(0.2) --slow down brute-forcing
 	local t = first_row([[
 		select ut.usr, ut.validates from
 			usrtoken ut
@@ -688,7 +688,7 @@ end
 --authentication logic -------------------------------------------------------
 
 function login(auth, switch_user)
-	switch_user = switch_user or glue.pass
+	switch_user = switch_user or pass
 	local usr, err = authenticate(auth)
 	if usr then
 		local susr = valid_usr(session_usr())

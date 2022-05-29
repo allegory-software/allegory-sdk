@@ -4,10 +4,10 @@
 	Derived from sha.lua 0.6.0 from https://github.com/mpeterv/sha1 (MIT License).
 	Written by Jeffrey Friedl and modified by Eike Decker and Enrique García Cota.
 
-sha1.sha1(s) -> s
+sha1(s) -> s
 
 	Compute the SHA-1 hash of a string. Returns the binary representation
-	of the hash. To get the hex representation, use `glue.tohex()`.
+	of the hash. To get the hex representation, use `tohex()`.
 
 ]]
 
@@ -17,12 +17,12 @@ if not ... then
 	return
 end
 
-local band = bit.band
-local bor = bit.bor
-local bxor = bit.bxor
-local rol = bit.rol
+local bit = require'bit'
 
-local sha1 = {}
+local bor  = bit.bor
+local band = bit.band
+local bxor = bit.bxor
+local rol  = bit.rol
 
 -- Merges four bytes into a uint32 number.
 local function bytes_to_uint32(a, b, c, d)
@@ -50,24 +50,24 @@ local function uint32_majority(a, b, c)
 	return bor(band(a, bor(b, c)), band(b, c))
 end
 
-local sbyte = string.byte
-local schar = string.char
-local srep = string.rep
+local byte = string.byte
+local char = string.char
+local rep  = string.rep
 
 -- Calculates SHA1 for a string, returns it encoded as 40 hexadecimal digits.
-function sha1.sha1(str)
+function sha1(str)
 	-- Input preprocessing.
 	-- First, append a `1` bit and seven `0` bits.
-	local first_append = schar(0x80)
+	local first_append = char(0x80)
 
 	-- Next, append some zero bytes to make the length of the final message a multiple of 64.
 	-- Eight more bytes will be added next.
 	local non_zero_message_bytes = #str + 1 + 8
-	local second_append = srep(schar(0), -non_zero_message_bytes % 64)
+	local second_append = rep(char(0), -non_zero_message_bytes % 64)
 
 	-- Finally, append the length of the original message in bits as a 64-bit number.
 	-- Assume that it fits into the lower 32 bits.
-	local third_append = schar(0, 0, 0, 0, uint32_to_bytes(#str * 8))
+	local third_append = char(0, 0, 0, 0, uint32_to_bytes(#str * 8))
 
 	str = str .. first_append .. second_append .. third_append
 	assert(#str % 64 == 0)
@@ -87,7 +87,7 @@ function sha1.sha1(str)
 		local uint32_start = chunk_start
 
 		for i = 0, 15 do
-			w[i] = bytes_to_uint32(sbyte(str, uint32_start, uint32_start + 3))
+			w[i] = bytes_to_uint32(byte(str, uint32_start, uint32_start + 3))
 			uint32_start = uint32_start + 4
 		end
 
@@ -139,11 +139,9 @@ function sha1.sha1(str)
 	end
 
 	return
-		schar(uint32_to_bytes(h0)) ..
-		schar(uint32_to_bytes(h1)) ..
-		schar(uint32_to_bytes(h2)) ..
-		schar(uint32_to_bytes(h3)) ..
-		schar(uint32_to_bytes(h4))
+		char(uint32_to_bytes(h0)) ..
+		char(uint32_to_bytes(h1)) ..
+		char(uint32_to_bytes(h2)) ..
+		char(uint32_to_bytes(h3)) ..
+		char(uint32_to_bytes(h4))
 end
-
-return sha1

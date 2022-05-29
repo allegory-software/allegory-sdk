@@ -2,7 +2,7 @@
 --HTTP date parsing and formatting.
 --Written by Cosmin Apreutesei. Public Domain.
 
-local glue = require'glue'
+require'glue'
 
 --parsing
 
@@ -10,9 +10,9 @@ local wdays = {'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'}
 local weekdays = {'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'}
 local months = {'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'}
 
-local wdays_map    = glue.index(wdays)
-local weekdays_map = glue.index(weekdays)
-local months_map   = glue.index(months)
+local wdays_map    = index(wdays)
+local weekdays_map = index(weekdays)
+local months_map   = index(months)
 
 local function check(w,d,mo,y,h,m,s)
 	return w and mo and d >= 1 and d <= 31 and y <= 9999
@@ -56,19 +56,19 @@ local function asctimedate(s)
 			hour = h, min = m, sec = s, utc = true}
 end
 
-local function parse(s)
+function http_date_parse(s)
 	return rfc1123date(s) or rfc850date(s) or asctimedate(s)
 end
 
 --formatting
 
-local function format(t, fmt)
+function http_date_format(t, fmt)
 	if not fmt or fmt == 'rfc1123' then
 		--wkday "," SP 2DIGIT-day SP month SP 4DIGIT-year SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP "GMT"
 		if type(t) == 'table' then
-			t = glue.time(t)
+			t = time(t)
 		end
-		local t = os.date('!*t', t)
+		local t = date('!*t', t)
 		return string.format('%s, %02d %s %04d %02d:%02d:%02d GMT',
 			wdays[t.wday], t.day, months[t.month], t.year, t.hour, t.min, t.sec)
 	else
@@ -82,17 +82,12 @@ end
 if not ... then
 	require'unit'
 	local d = {day = 6, sec = 37, wday = 1, min = 49, year = 1994, month = 11, hour = 8, utc = true}
-	test(parse'Sun, 06 Nov 1994 08:49:37 GMT', d)
-	test(parse'Sun, 06-Nov-1994 08:49:37 GMT', d) --RFC my ass...
-	test(parse'Sunday, 06-Nov-94 08:49:37 GMT', d)
-	test(parse'Sun Nov  6 08:49:37 1994', d)
-	test(parse'Sun Nov 66 08:49:37 1994', nil)
-	test(parse'SundaY, 06-Nov-94 08:49:37 GMT', nil)
+	test(http_date_parse'Sun, 06 Nov 1994 08:49:37 GMT', d)
+	test(http_date_parse'Sun, 06-Nov-1994 08:49:37 GMT', d) --RFC my ass...
+	test(http_date_parse'Sunday, 06-Nov-94 08:49:37 GMT', d)
+	test(http_date_parse'Sun Nov  6 08:49:37 1994', d)
+	test(http_date_parse'Sun Nov 66 08:49:37 1994', nil)
+	test(http_date_parse'SundaY, 06-Nov-94 08:49:37 GMT', nil)
 	d.wday = nil --it gets populated based on date.
-	test(format(d), 'Sun, 06 Nov 1994 08:49:37 GMT')
+	test(http_date_format(d), 'Sun, 06 Nov 1994 08:49:37 GMT')
 end
-
-return {
-	parse = parse,
-	format = format,
-}

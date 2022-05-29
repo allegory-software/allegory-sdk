@@ -96,7 +96,7 @@ function dbname(ns)
 		or pconfig(ns, 'db_name', assert(config'app_name')..(ns and '_'..ns or ''))
 end
 
-local conn_opt = glue.memoize(function(ns)
+local conn_opt = memoize(function(ns)
 	local t = {}
 	local engine = pconfig(ns, 'db_engine', 'mysql')
 	t.sqlpp      = assert(sqlpps[engine])

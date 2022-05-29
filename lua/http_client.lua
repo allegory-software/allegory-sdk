@@ -8,13 +8,12 @@
 	cookie jars, multi-level debugging, caching, cdata-buffer-based I/O.
 	In short, your dream library for web scraping.
 
-	http_client:new(opt) -> client       create a client object
+	http_client(opt) -> client           create a client object
 	client:request(opt) -> req, res      make a HTTP request
 	client:close_all()                   close all connections
 
-client:new(opt) -> client
+http_client(opt) -> client
 
-		libs                    required: 'sock sock_libtls zlib'
 		max_conn                limit the number of total connections
 		max_conn_per_target     limit the number of connections per target
 		max_pipelined_requests  limit the number of pipelined requests
@@ -23,7 +22,6 @@ client:new(opt) -> client
 		max_redirects           number of redirects before giving up
 		debug                   true to enable client-level debugging
 		tls_options             options to pass to sock_libtls
-		resolve                 DNS resolver function: resolve(client, host) -> ip
 
 	NOTE: A target is a combination of (vhost, port, client_ip) on which
 	one or more HTTP connections can be created subject to per-target limits.
@@ -45,7 +43,7 @@ client:request(opt) -> req, res
 
 	Make a HTTP request. This must be called from a scheduled socket thread.
 
-		connection options...     options to pass to `http:new()`
+		connection options...     options to pass to `http()`
 		request options...        options to pass to `http:make_request()`
 		client_ip                 client ip to bind to (optional)
 		connect_timeout           connect timeout (optional)
@@ -60,31 +58,21 @@ client:close_all()
 
 if not ... then require'http_client_test'; return end
 
-local http = require'http'
-local uri = require'uri'
-local glue = require'glue'
+require'glue'
+require'json'
+require'url'
+require'sock'
+require'sock_libtls'
+require'gzip'
+require'fs'
+require'resolver'
+require'http'
 
-local _ = string.format
-local push = table.insert
 local pull = function(t)
-	return table.remove(t, 1)
+	return remove(t, 1)
 end
 
-local attr = glue.attr
-local override = glue.override
-local merge = glue.merge
-local update = glue.update
-local index = glue.index
-local words = glue.words
-local eachword = glue.eachword
-local update = glue.update
-local repl = glue.repl
-local object = glue.object
-local tuples = glue.tuples
-local noop = glue.noop
-
 local client = {
-	libs = 'sock fs zlib sock_libtls resolver json',
 	type = 'http_client', http = http,
 	max_conn = 50,
 	max_conn_per_target = 20,
@@ -95,59 +83,11 @@ local client = {
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
 	tls_options = {
-		ca_file = function(self) return self.varpath'cacert.pem' end,
+		ca_file = function(self)
+			return config'ca_file' or varpath'cacert.pem'
+		end,
 	},
 }
-
---replaceable external dependencies ------------------------------------------
-
-client.lib = {}
-function client.lib:sock()
-	local time = require'time'
-	local sock = require'sock'
-	self.time  = time.time
-	self.clock = time.clock
-	self.tcp           = sock.tcp
-	self.cowrap        = sock.cowrap
-	self.thread        = sock.thread
-	self.suspend       = sock.suspend
-	self.resume        = sock.resume
-	self.currentthread = sock.currentthread
-	self.threadstatus  = sock.threadstatus
-	self.start         = sock.start
-	self.sleep         = sock.sleep
-end
-function client.lib:socktls()
-	local socktls = require'sock_libtls'
-	self.stcp          = socktls.client_stcp
-	self.stcp_config   = socktls.config
-end
-function client.lib:zlib()
-	self.http.zlib = require'zlib'
-end
-function client.lib:fs()
-	self.loadfile = require'fs'.load
-end
-function client.lib:resolver()
-	self.resolve = require'resolver'.resolve
-end
-function client.lib:json()
-	local json = require'json'
-	self.json_encode = json.encode
-	self.json_decode = json.decode
-end
-function client.lib:config()
-	local config = require'config'
-	self.varpath = config.varpath
-end
-function client.lib:logging()
-	self.logging = require'logging'
-end
-local function bind_libs(self, libs)
-	for lib in eachword(libs or '') do
-		self.lib[lib](self)
-	end
-end
 
 --targets --------------------------------------------------------------------
 
@@ -276,13 +216,9 @@ function client:stcp_options(host, port)
 				t[k] = v
 			end
 		end
-		self._tls_config = self.stcp_config(t)
+		self._tls_config = stcp_config(t)
 	end
 	return self._tls_config
-end
-
-function client.resolve(host) --stub (use a resolver)
-	return host
 end
 
 function client:connect_now(target)
@@ -296,7 +232,7 @@ function client:connect_now(target)
 	self:inc_conn_count(target)
 	local dt = target.connect_timeout
 	local expires = dt and self.clock() + dt or nil
-	local ip, err = self.resolve(host)
+	local ip, err = resolve(host)
 	if not ip then
 		return nil, 'lookup failed for "'..host..'": '..tostring(err)
 	end
@@ -326,7 +262,7 @@ function client:connect_now(target)
 		tcp = stcp
 	end
 	target.http_args.tcp = tcp
-	local http = http:new(target.http_args)
+	local http = http(target.http_args)
 	self:dp(target, ' BIND', '%s %s', tcp, http)
 	return http
 end
@@ -404,8 +340,8 @@ end
 
 function client:redirect_request_args(t, req, res)
 	local location = assert(res.redirect_location, 'no location')
-	local loc = uri.parse(location)
-	local uri = uri.format{
+	local loc = url_parse(location)
+	local uri = url_format{
 		path = loc.path,
 		query = loc.query,
 		fragment = loc.fragment,
@@ -513,7 +449,7 @@ function client:save_cookies(file)
 end
 
 function client:load_cookies(file)
-	local s, err = self.loadfile(file)
+	local s, err = load(file)
 	if not s then return nil, err end
 	local f, err = loadstring('return '..s, file)
 	if not f then return nil, err end
@@ -633,7 +569,7 @@ function client:getpage(arg1, upload, receive_content)
 		method = upload and 'POST',
 		content = upload,
 		receive_content = receive_content or 'string',
-		debug = self.getpage_debug and index(words(self.getpage_debug or '')),
+		debug = self.getpage_debug and index(collect(words(self.getpage_debug or ''))),
 	}, opt)
 	opt.headers = update(headers, opt.headers)
 
@@ -664,15 +600,13 @@ function client:dp(target, ...)
 	return self:log(target, '', 'htcl', ...)
 end
 
-function client:new(t)
+function http_client(t)
 
-	local self = object(self, {}, t)
+	local self = object(client, {}, t)
 
 	self.last_client_ip_index = tuples(2)
 	self.targets = tuples(3)
 	self.cookies = {}
-
-	bind_libs(self, self.libs)
 
 	self.logging = (self.logging == true or self.debug and self.logging == nil)
 		and require'logging' or self.logging
@@ -697,18 +631,12 @@ end
 
 --global getpage -------------------------------------------------------------
 
-function client.create_getpage_client()
-	return client:new{
+local cl
+function getpage(...)
+	cl = cl or http_client{
 		tls_options = {
-			ca_file = 'cacert.pem', --TODO: use vardir() API when done
+			ca_file = config'ca_file' or varpath'cacert.pem',
 		},
 	}
-end
-
-local cl
-function client.getpage(...)
-	cl = cl or client.create_getpage_client()
 	return cl:getpage(...)
 end
-
-return client

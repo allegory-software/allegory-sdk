@@ -2,16 +2,10 @@
 --http header values parsing and formatting.
 --Written by Cosmin Apreutesei. Public Domain.
 
-local glue = require'glue'
-local b64 = require'base64'
-local http_date = require'http_date'
+require'glue'
+require'base64'
+require'http_date'
 local re = require'relabel' --for tokens()
-
-local b64, b64_arg = b64.encode, b64.decode
-local _ = string.format
-local concat = table.concat
-local trim = glue.trim
-local pass = glue.pass
 
 local headers = {}
 
@@ -44,9 +38,9 @@ end
 
 --simple compound value parsers (no comments or quoted strings involved)
 
---date is in UTC. use glue.time() not os.time() to get a timestamp from it!
+--date is in UTC. use time() not os.time() to get a timestamp from it!
 local function date(s)
-	return http_date.parse(s)
+	return http_date_parse(s)
 end
 
 local function namesplit(s)
@@ -223,7 +217,7 @@ local function credentials(s) --basic base64-string | digest k=v,... per http://
 	if not scheme then return end
 	scheme = name(scheme)
 	if scheme == 'basic' then --basic base64("user:password")
-		local user,pass = b64_arg(s):match'^([^:]*):(.*)$'
+		local user,pass = base64_decode(s):match'^([^:]*):(.*)$'
 		return {scheme = scheme, user = user, pass = pass}
 	elseif scheme == 'digest' then
 		local dt = propertylist(s, credentials_parsers)
@@ -306,7 +300,7 @@ parse.content_length = int
 parse.content_location = url
 
 function parse.content_md5(s)
-	return b64_arg(s)
+	return base64_decode(s)
 end
 
 function parse.content_range(s) --bytes <from>-<to>/<total> -> {from=,to=,total=,size=}
@@ -665,7 +659,7 @@ local function int(v)
 end
 
 local function date(t)
-	return http_date.format(t, 'rfc1123')
+	return http_date_format(t, 'rfc1123')
 end
 
 --{k->true} -> k1,k2,...
@@ -816,7 +810,7 @@ headers.nofold = { --headers that it isn't safe to fold.
 format.cache_control = kvlist --no_cache
 format.connection = cilist
 format.content_length = int
-format.content_md5 = b64
+function format.content_md5(s) return base64_encode(s) end
 format.content_type = params{charset = ci} --text/html; charset=iso-8859-1
 format.date = date
 format.pragma = nil --cilist?

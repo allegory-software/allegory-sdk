@@ -9,5 +9,4 @@ require'winapi.types'
 require'winapi.util'
 require'winapi.struct'
 require'winapi.wcs'
-require'winapi.bitmask'
 return _M

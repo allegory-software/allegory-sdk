@@ -4,38 +4,31 @@
 
 if not ... then require'schema_test'; return end
 
-local glue = require'glue'
-local mysql = require'mysql'
+require'glue'
+require'mysql'
 
-local floor = math.floor
-local _ = string.format
-local os_date = os.date
-local memoize = memoize
-local glue_kbytes = glue.kbytes
-local glue_timeago = glue.timeago
-local glue_timeofday = glue.timeofday
-local glue_duration = glue.duration
-local datetime_to_timestamp = mysql.datetime_to_timestamp
-local timestamp_to_datetime = mysql.timestamp_to_datetime
-local time_to_seconds = mysql.time_to_seconds
-local seconds_to_time = mysql.seconds_to_time
+local
+	floor, date, memoize, kbytes =
+	floor, date, memoize, kbytes
 
-local datetime_to_timestamp = function(s) return datetime_to_timestamp(s) end
-local timestamp_to_datetime = function(t) return timestamp_to_datetime(t) end
-local time_to_seconds       = function(t) return time_to_seconds(t) end
-local seconds_to_time       = function(s) return seconds_to_time(s) end
+local glue_timeago = timeago
+local glue_timeofday = timeofday
+local glue_duration = duration
+
+local datetime_to_timestamp = function(s) return mysql_datetime_to_timestamp(s) end
+local timestamp_to_datetime = function(t) return mysql_timestamp_to_datetime(t) end
+local time_to_seconds       = function(t) return mysql_time_to_seconds(t) end
+local seconds_to_time       = function(s) return mysql_seconds_to_time(s) end
 
 local env = {}
 do
 	local schema = require'schema'
-	local cat = table.concat
-	local words = glue.words
-	local outdent = glue.outdent
-	local trim = glue.trim
-	local index = glue.index
+	local
+		cat, outdent, trim, index =
+		cat, outdent, trim, index
 
 	function env.enum(...) --mysql-specific `enum` type
-		local vals = words(cat({...}, ' '))
+		local vals = collect(words(cat({...}, ' ')))
 		return {is_type = true,
 			type = 'enum', enum_values = vals, charset = 'ascii', collation = 'ascii_ci',
 			enum_indices = index(vals),
@@ -46,7 +39,7 @@ do
 	end
 
 	function env.set(...) --mysql-specific `set` type
-		local vals = words(cat({...}, ' '))
+		local vals = collect(words(cat({...}, ' ')))
 		return {is_type = true, type = 'set', mysql_type = 'set', set_values = vals,
 			charset = 'ascii', collation = 'ascii_general_ci' , mysql_collation = 'ascii_general_ci'}
 	end
@@ -219,7 +212,7 @@ return function()
 		if f.timeago then
 			return glue_timeago(t)
 		else
-			return os_date(f.has_time and (f.has_seconds and '%Y-%m-%d %H:%M:%S'
+			return date(f.has_time and (f.has_seconds and '%Y-%m-%d %H:%M:%S'
 				or '%Y-%m-%d %H:%M') or '%Y-%m-%d', t)
 		end
 	end
@@ -229,7 +222,7 @@ return function()
 	end
 
 	function type_attrs.filesize.to_text(n, f)
-		return glue_kbytes(n, f.filesize_decimals, f.filesize_magnitude)
+		return kbytes(n, f.filesize_decimals, f.filesize_magnitude)
 	end
 
 	local decfmt = memoize(function(dec)

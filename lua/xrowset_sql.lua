@@ -57,21 +57,7 @@
 
 require'xrowset'
 require'webb_query'
-
-local glue = require'glue'
-
-local format = string.format
-local concat = table.concat
-local add = table.insert
-
-local outdent = glue.outdent
-local words = glue.words
-local noop = glue.noop
-local index = glue.index
-local assertf = glue.assert
-local repl = glue.repl
-local memoize = glue.memoize
-local sortedpairs = glue.sortedpairs
+require'glue'
 
 --usage in sql:
 	-- single-key : `foo in (:param:filter)`
@@ -108,8 +94,8 @@ function lookup_rowset(tbl)
 	if not rs then
 		local tdef = checkfound(table_def(tbl))
 		local name_col = guess_name_col(tdef)
-		local t = glue.extend({name_col}, tdef.pk)
-		local cols = concat(glue.imap(t, sqlname), ', ')
+		local t = extend({name_col}, tdef.pk)
+		local cols = concat(imap(t, sqlname), ', ')
 		local order_by = tdef.pos_col or concat(tdef.pk, ' ')
 		rs = sql_rowset{
 			select = format('select %s from %s %s', cols, tbl, order_by),
@@ -122,7 +108,7 @@ function lookup_rowset(tbl)
 end
 
 setmetatable(rowset, {__index = function(self, rs_name)
-	if glue.starts(rs_name, 'lookup_') then
+	if starts(rs_name, 'lookup_') then
 		local tbl = checkfound(rs_name:match'lookup_(.+)')
 		lookup_rowset(tbl)
 		return rawget(rowset, rs_name)
@@ -143,7 +129,7 @@ function sql_rowset(...)
 
 		--the rowset's pk cannot be reliably inferred so it must be user-supplied.
 
-		rs.pk = words(rs.pk)
+		rs.pk = collect(words(rs.pk))
 		assert(rs.pk and #rs.pk > 0, 'pk missing')
 
 		--static query generation (just stitching together user-supplied parts).
@@ -284,7 +270,7 @@ end
 
 --TODO: finish this.
 function table_rowset(tbl, opt)
-	opt = opt or glue.empty
+	opt = opt or empty
 	local tdef = table_def(tbl)
 	local rw_cols = opt.rw_cols
 	if not rw_cols then

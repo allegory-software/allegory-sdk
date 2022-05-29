@@ -1,16 +1,13 @@
-local ffi = require'ffi'
-local fs = require'fs'
-local pp = require'pp'
-local time = require'time'
-local win = ffi.abi'win'
-local linux = ffi.os == 'Linux'
-local osx = ffi.os == 'OSX'
-local x64 = ffi.arch == 'x64'
+--go @ plink d10 -t -batch sdk/bin/linux/luajit sdk/tests/fs_test.lua
+require'glue'
+require'fs'
+require'logging'
 
 --if luapower sits on a VirtualBox shared folder on a Windows host
 --we can't mmap files, create symlinks or use locking on that, so we'll use
 --$HOME, which is usually a disk mount.
-local prefix = win and '' or os.getenv'HOME'..'/'
+local tests_dir = exedir()..'/../../tests'
+local fs_test_lua = tests_dir..'/fs_test.lua'
 
 local test = setmetatable({}, {__newindex = function(t, k, v)
 	rawset(t, k, v)
@@ -21,26 +18,26 @@ end})
 
 function test.open_close()
 	local testfile = 'fs_testfile'
-	local f = assert(fs.open(testfile, 'w'))
-	assert(fs.isfile(f))
+	local f = assert(open(testfile, 'w'))
+	assert(isfile(f))
 	assert(not f:closed())
 	assert(f:close())
 	assert(f:closed())
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 function test.open_not_found()
 	local nonexistent = 'this_file_should_not_exist'
-	local f, err = fs.open(nonexistent)
+	local f, err = open(nonexistent)
 	assert(not f)
 	assert(err == 'not_found')
 end
 
 function test.open_already_exists_file()
 	local testfile = 'fs_testfile'
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 	assert(f:close())
-	local f, err = fs.open(testfile,
+	local f, err = open(testfile,
 		win and {
 			access = 'write',
 			creation = 'create_new',
@@ -50,14 +47,14 @@ function test.open_already_exists_file()
 		})
 	assert(not f)
 	assert(err == 'already_exists')
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 function test.open_already_exists_dir()
 	local testfile = 'fs_test_dir_already_exists'
-	fs.remove(testfile)
-	assert(fs.mkdir(testfile))
-	local f, err = fs.open(testfile,
+	rmdir(testfile)
+	mkdir(testfile)
+	local f, err = open(testfile,
 		win and {
 			access = 'write',
 			creation = 'create_new',
@@ -67,15 +64,15 @@ function test.open_already_exists_dir()
 		})
 	assert(not f)
 	assert(err == 'already_exists')
-	assert(fs.remove(testfile))
+	rmdir(testfile)
 end
 
 function test.open_dir()
-	local testfile = 'fs_test_dir'
+	local testfile = 'fs_test_open_dir'
 	local using_backup_semantics = true
-	fs.remove(testfile, true)
-	assert(fs.mkdir(testfile))
-	local f, err = fs.open(testfile)
+	rmdir(testfile)
+	mkdir(testfile)
+	local f, err = open(testfile)
 	if win and not using_backup_semantics then
 		--using `backup_semantics` flag on CreateFile allows us to upen
 		--directories like in Linux, otherwise we'd get an access_denied error.
@@ -86,28 +83,28 @@ function test.open_dir()
 		assert(f)
 		assert(f:close())
 	end
-	assert(fs.remove(testfile))
+	rmdir(testfile)
 end
 
 function test.wrap_file() --indirectly tests wrap_fd() and wrap_handle()
 	local name = 'fs_test_wrap_file'
-	os.remove(name)
+	rmfile(name)
 	local f = io.open(name, 'w')
 	f:write'hello'
 	f:flush()
-	if linux then
+	if Linux then
 		os.execute'sleep .2' --WTF??
 	end
-	local f2 = fs.wrap_file(f)
+	local f2 = file_wrap_file(f)
 	assert(f2:attr'size' == 5)
 	f:close()
-	os.remove(name)
+	rmfile(name)
 end
 
 --pipes ----------------------------------------------------------------------
 
 function test.pipe() --I/O test in proc_test.lua
-	local rf, wf = assert(fs.pipe())
+	local rf, wf = assert(pipe())
 	rf:close()
 	wf:close()
 end
@@ -117,8 +114,8 @@ function test.named_pipe_win()
 	if not win then return end
 	local opt = 'rw' --'rw single_instance'
 	local name = [[\\.\pipe\fs_test_pipe]]
-	local p1 = assert(fs.pipe(name, opt))
-	local p2 = assert(fs.pipe(name, opt))
+	local p1 = assert(pipe(name, opt))
+	local p2 = assert(pipe(name, opt))
 	p1:close()
 	p2:close()
 end
@@ -127,11 +124,11 @@ end
 function test.named_pipe_posix()
 	if win then return end
 	local opt = 'rw'
-	local file = prefix..'fs_test_pipe'
-	os.remove(file)
-	local p = assert(fs.pipe(name, opt))
+	local file = 'fs_test_pipe'
+	rmfile(file)
+	local p = assert(pipe(name, opt))
 	p:close()
-	os.remove(file)
+	rmfile(file)
 end
 
 --i/o ------------------------------------------------------------------------
@@ -142,7 +139,7 @@ function test.read_write()
 	local buf = ffi.new('uint8_t[?]', sz)
 
 	--write some patterns
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 	for i=0,sz-1 do
 		buf[i] = i
 	end
@@ -152,7 +149,7 @@ function test.read_write()
 	assert(f:close())
 
 	--read them back
-	local f = assert(fs.open(testfile))
+	local f = assert(open(testfile))
 	local t = {}
 	while true do
 		local readsz = assert(f:read(buf, sz))
@@ -167,23 +164,23 @@ function test.read_write()
 		assert(s:byte(i) == (i-1) % 256)
 	end
 
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 function test.open_modes()
 	local testfile = 'fs_test'
 	--TODO:
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 	f:close()
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 function test.seek()
 	local testfile = 'fs_test'
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 
-	--test large file support by seeking out-of-bounds
-	local newpos = x64 and 2^51 + 113 or 2^42 + 113
+	--test large file support by seeking past 32bit
+	local newpos = 2^40
 	local pos = assert(f:seek('set', newpos))
 	assert(pos == newpos)
 	local pos = assert(f:seek(-100))
@@ -205,32 +202,32 @@ function test.seek()
 	assert(f:seek'end' == newpos + 1)
 	assert(f:close())
 
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 --streams --------------------------------------------------------------------
 
 function test.stream()
 	local testfile = 'fs_test'
-	local f = assert(assert(fs.open(testfile, 'w')):stream('w'))
+	local f = assert(assert(open(testfile, 'w')):stream('w'))
 	f:close()
-	local f = assert(assert(fs.open(testfile, 'r')):stream('r'))
+	local f = assert(assert(open(testfile, 'r')):stream('r'))
 	f:close()
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 --truncate -------------------------------------------------------------------
 
 function test.truncate_seek()
-	local testfile = prefix..'fs_test_truncate_seek'
+	local testfile = 'fs_test_truncate_seek'
 	--truncate/grow
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 	local newpos = 1024^2
 	assert(f:truncate(newpos))
 	assert(f:seek() == newpos)
 	assert(f:close())
 	--check size
-	local f = assert(fs.open(testfile, 'r+'))
+	local f = assert(open(testfile, 'r+'))
 	local pos = assert(f:seek'end')
 	assert(pos == newpos)
 	--truncate/shrink
@@ -239,42 +236,43 @@ function test.truncate_seek()
 	assert(pos == newpos - 100)
 	assert(f:close())
 	--check size
-	local f = assert(fs.open(testfile, 'r'))
+	local f = assert(open(testfile, 'r'))
 	local pos = assert(f:seek'end')
 	assert(pos == newpos - 100)
 	assert(f:close())
 
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 --filesystem operations ------------------------------------------------------
 
 function test.cd_mkdir_remove()
 	local testdir = 'fs_test_dir'
-	local cd = assert(fs.cwd())
-	assert(fs.mkdir(testdir)) --relative paths should work
-	assert(fs.chdir(testdir))   --relative paths should work
-	assert(fs.chdir(cd))
-	assert(fs.cwd() == cd)
-	assert(fs.remove(testdir)) --relative paths should work
+	local cd = cwd()
+	mkdir(testdir) --relative paths should work
+	chdir(testdir) --relative paths should work
+	chdir(cd)
+	assert(cwd() == cd)
+	rmdir(testdir) --relative paths should work
 end
 
 function test.mkdir_recursive()
-	assert(fs.mkdir('fs_test_dir/a/b/c', true))
-	assert(fs.remove'fs_test_dir/a/b/c')
-	assert(fs.remove'fs_test_dir/a/b')
-	assert(fs.remove'fs_test_dir/a')
-	assert(fs.remove'fs_test_dir')
+	mkdir('fs_test_dir/a/b/c', true)
+	rmdir'fs_test_dir/a/b/c'
+	rmdir'fs_test_dir/a/b'
+	rmdir'fs_test_dir/a'
+	rmdir'fs_test_dir'
 end
 
 function test.remove_recursive()
-	local rootdir = prefix..'fs_test_rmdir_rec/'
-	fs.remove(rootdir, true)
+	do return end --TODO:
+	local rootdir = 'fs_test_rmdir_rec/'
+	rmfile(rootdir, true)
 	local function mkdir(dir)
-		assert(fs.mkdir(rootdir..dir, true))
+		mkdir(rootdir..dir, true)
 	end
 	local function mkfile(file)
-		local f = assert(fs.open(rootdir..file, 'w'))
+		local f = assert(open(rootdir..file, 'w'))
 		assert(f:close())
 	end
 	mkdir'a/b/c'
@@ -286,105 +284,106 @@ function test.remove_recursive()
 	mkfile'a/b/f2'
 	mkdir'a/b/d1'
 	mkdir'a/b/d2'
-	assert(fs.remove(rootdir, true))
+	rmfile(rootdir, true)
 end
 
 function test.dir_empty()
 	local d = 'fs_test_dir_empty/a/b'
-	fs.remove('fs_test_dir_empty/', true)
-	fs.mkdir(d, true)
-	for name in fs.dir(d) do
+	rm_rf'fs_test_dir_empty/'
+	mkdir(d, true)
+	for name in ls(d) do
 		print(name)
 	end
-	fs.remove('fs_test_dir_empty/', true)
+	rm_rf'fs_test_dir_empty/'
 end
 
 function test.mkdir_already_exists_dir()
-	assert(fs.mkdir'fs_test_dir')
-	local ok, err = fs.mkdir'fs_test_dir'
-	assert(not ok)
+	mkdir'fs_test_dir'
+	local ok, err = try_mkdir'fs_test_dir'
+	assert(ok)
 	assert(err == 'already_exists')
-	assert(fs.remove'fs_test_dir')
+	rmdir'fs_test_dir'
 end
 
 function test.mkdir_already_exists_file()
 	local testfile = 'fs_test_dir_already_exists_file'
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 	assert(f:close())
-	local ok, err = fs.mkdir(testfile)
-	assert(not ok)
+	local ok, err = try_mkdir(testfile)
+	assert(ok)
 	assert(err == 'already_exists')
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 function test.mkdir_not_found()
-	local ok, err = fs.mkdir'fs_test_nonexistent/nonexistent'
+	local ok, err = try_mkdir'fs_test_nonexistent/nonexistent'
 	assert(not ok)
 	assert(err == 'not_found')
 end
 
-function test.remove_not_found()
-	local testfile = 'fs_test_rmdir'
-	local ok, err = fs.remove(testfile)
-	assert(not ok)
+function test.remove_dir_not_found()
+	local testfile = 'fs_test_rmdir_not_found'
+	rmdir(testfile)
+	local ok, err = rmfile(testfile)
+	assert(ok)
 	assert(err == 'not_found')
 end
 
 function test.remove_not_empty()
 	local dir1 = 'fs_test_rmdir'
 	local dir2 = 'fs_test_rmdir/subdir'
-	fs.remove(dir2)
-	fs.remove(dir1)
-	assert(fs.mkdir(dir1))
-	assert(fs.mkdir(dir2))
-	local ok, err = fs.remove(dir1)
+	rmdir(dir2)
+	rmdir(dir1)
+	mkdir(dir1)
+	mkdir(dir2)
+	local ok, err = try_rmdir(dir1)
 	assert(not ok)
 	assert(err == 'not_empty')
-	assert(fs.remove(dir2))
-	assert(fs.remove(dir1))
+	rmdir(dir2)
+	rmdir(dir1)
 end
 
 function test.remove_file()
 	local name = 'fs_test_remove_file'
-	os.remove(name)
+	rmfile(name)
 	assert(io.open(name, 'w')):close()
-	assert(fs.remove(name))
+	rmfile(name)
 	assert(not io.open(name, 'r'))
 end
 
 function test.cd_not_found()
-	local ok, err = fs.chdir'fs_test_nonexistent/nonexistent'
+	local ok, err = try_chdir'fs_test_nonexistent/nonexistent'
 	assert(not ok)
 	assert(err == 'not_found')
 end
 
 function test.remove()
 	local testfile = 'fs_test_remove'
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 	assert(f:close())
-	assert(fs.remove(testfile))
-	assert(not fs.open(testfile))
+	rmfile(testfile)
+	assert(not open(testfile))
 end
 
-function test.remove_not_found()
+function test.remove_file_not_found()
 	local testfile = 'fs_test_remove'
-	local ok, err = fs.remove(testfile)
-	assert(not ok)
+	local ok, err = try_rmfile(testfile)
+	assert(ok)
 	assert(err == 'not_found')
 end
 
 function test.move()
 	local f1 = 'fs_test_move1'
 	local f2 = 'fs_test_move2'
-	local f = assert(fs.open(f1, 'w'))
+	local f = assert(open(f1, 'w'))
 	assert(f:close())
-	assert(fs.move(f1, f2))
-	assert(fs.remove(f2))
-	assert(not fs.remove(f1))
+	mv(f1, f2)
+	rmfile(f2)
+	assert(select(2, try_rmfile(f1)) == 'not_found')
 end
 
 function test.move_not_found()
-	local ok, err = fs.move('fs_nonexistent_file', 'fs_nonexistent2')
+	local ok, err = try_mv('fs_nonexistent_file', 'fs_nonexistent2')
 	assert(not ok)
 	assert(err == 'not_found')
 end
@@ -394,30 +393,24 @@ function test.move_replace()
 	local f2 = 'fs_test_move2'
 	local buf = ffi.new'char[1]'
 
-	local f = assert(fs.open(f1, 'w'))
+	local f = assert(open(f1, 'w'))
 	buf[0] = ('1'):byte(1)
 	f:write(buf, 1)
 	assert(f:close())
 
-	local f = assert(fs.open(f2, 'w'))
+	local f = assert(open(f2, 'w'))
 	buf[0] = ('2'):byte(1)
 	assert(f:write(buf, 1))
 	assert(f:close())
 
-	assert(fs.move(f1, f2))
+	mv(f1, f2)
 
-	local f = assert(fs.open(f2))
+	local f = assert(open(f2))
 	assert(f:read(buf, 1))
 	assert(buf[0] == ('1'):byte(1))
 	assert(f:close())
 
-	assert(fs.remove(f2))
-end
-
-function test.remove_not_found()
-	local ok, err = fs.remove'fs_non_existent'
-	assert(not ok)
-	assert(err == 'not_found')
+	rmfile(f2)
 end
 
 --symlinks -------------------------------------------------------------------
@@ -425,92 +418,92 @@ end
 local function mksymlink_file(f1, f2)
 	local buf = ffi.new'char[1]'
 
-	fs.remove(f1)
-	fs.remove(f2)
+	rmfile(f1)
+	rmfile(f2)
 
-	local f = assert(fs.open(f2, 'w'))
+	local f = assert(open(f2, 'w'))
 	buf[0] = ('X'):byte(1)
 	f:write(buf, 1)
 	assert(f:close())
 
-	time.sleep(0.1)
+	block(0.1)
 
-	local ok,err = fs.mksymlink(f1, f2)
+	local ok,err = mksymlink(f1, f2)
 	if ok then
-		assert(fs.is(f1, 'symlink'))
-		local f = assert(fs.open(f1))
+		assert(file_is(f1, 'symlink'))
+		local f = assert(open(f1))
 		assert(f:read(buf, 1))
 		assert(buf[0] == ('X'):byte(1))
 		assert(f:close())
 	else
-		fs.remove(f1)
-		fs.remove(f2)
+		rmfile(f1)
+		rmfile(f2)
 		assert(ok, err)
 	end
 end
 
 function test.mksymlink_file()
-	local f1 = prefix..'fs_test_symlink_file'
-	local f2 = prefix..'fs_test_symlink_file_target'
+	local f1 = 'fs_test_symlink_file'
+	local f2 = 'fs_test_symlink_file_target'
 	mksymlink_file(f1, f2)
-	assert(fs.is(f1, 'symlink'))
-	assert(fs.remove(f1))
-	assert(fs.remove(f2))
+	assert(file_is(f1, 'symlink'))
+	rmfile(f1)
+	rmfile(f2)
 end
 
 function test.mksymlink_dir()
-	local link = prefix..'fs_test_symlink_dir'
-	local dir = prefix..'fs_test_symlink_dir_target'
-	fs.remove(link)
-	fs.remove(dir..'/test_dir')
-	fs.remove(dir)
-	assert(fs.mkdir(dir))
-	assert(fs.mkdir(dir..'/test_dir'))
-	local ok,err = fs.mksymlink(link, dir, true)
+	local link = 'fs_test_symlink_dir'
+	local dir = 'fs_test_symlink_dir_target'
+	rm(link)
+	rmdir(dir..'/test_dir')
+	rmdir(dir)
+	mkdir(dir)
+	mkdir(dir..'/test_dir')
+	local ok,err = mksymlink(link, dir, true)
 	if ok then
-		assert(fs.is(link..'/test_dir', 'dir'))
-		assert(fs.remove(link..'/test_dir'))
-		assert(fs.remove(link))
-		assert(fs.remove(dir))
+		assert(file_is(link..'/test_dir', 'dir'))
+		rmdir(link..'/test_dir')
+		rm(link)
+		rmdir(dir)
 	else
-		assert(fs.remove(dir, true))
+		rm_rf(dir)
 	end
 	assert(ok,err)
 end
 
 function test.readlink_file()
-	local f1 = prefix..'fs_test_readlink_file'
-	local f2 = prefix..'fs_test_readlink_file_target'
+	local f1 = 'fs_test_readlink_file'
+	local f2 = 'fs_test_readlink_file_target'
 	mksymlink_file(f1, f2)
-	assert(fs.readlink(f1) == f2)
-	assert(fs.remove(f1))
-	assert(fs.remove(f2))
+	assert(readlink(f1) == f2)
+	rmfile(f1)
+	rmfile(f2)
 end
 
 function test.readlink_dir()
-	local d1 = prefix..'fs_test_readlink_dir'
-	local d2 = prefix..'fs_test_readlink_dir_target'
-	fs.remove(d1)
-	fs.remove(d2..'/test_dir')
-	fs.remove(d2)
-	fs.remove(d2)
-	assert(fs.mkdir(d2))
-	assert(fs.mkdir(d2..'/test_dir'))
-	local ok,err = fs.mksymlink(d1, d2, true)
+	local d1 = 'fs_test_readlink_dir'
+	local d2 = 'fs_test_readlink_dir_target'
+	rmdir(d1)
+	rmdir(d2..'/test_dir')
+	rmdir(d2)
+	rmdir(d2)
+	mkdir(d2)
+	mkdir(d2..'/test_dir')
+	local ok,err = try_mksymlink(d1, d2, true)
 	if ok then
-		assert(fs.is(d1, 'symlink'))
+		assert(file_is(d1, 'symlink'))
 		local t = {}
-		for d in fs.dir(d1) do
+		for d in ls(d1) do
 			t[#t+1] = d
 		end
 		assert(#t == 1)
 		assert(t[1] == 'test_dir')
-		assert(fs.remove(d1..'/test_dir'))
-		assert(fs.readlink(d1) == d2)
-		assert(fs.remove(d1))
-		assert(fs.remove(d2))
+		rmdir(d1..'/test_dir')
+		assert(readlink(d1) == d2)
+		rmdir(d1)
+		rmdir(d2)
 	else
-		assert(fs.remove(d2, true))
+		rmdir(d2, true)
 	end
 	assert(ok,err)
 end
@@ -524,16 +517,17 @@ function test.attr_deref()
 end
 
 function test.symlink_attr_deref()
-	local f1 = prefix..'fs_test_readlink_file'
-	local f2 = prefix..'fs_test_readlink_file_target'
+	local f1 = 'fs_test_readlink_file'
+	local f2 = 'fs_test_readlink_file_target'
 	mksymlink_file(f1, f2)
-	local lattr = assert(fs.attr(f1, false))
-	local tattr1 = assert(fs.attr(f1, true))
-	local tattr2 = assert(fs.attr(f2))
-	assert(lattr.type == 'symlink')
+	local lattr  = assert(file_attr(f1, false))
+	local tattr1 = assert(file_attr(f1, true))
+	local tattr2 = assert(file_attr(f2))
+	assert(lattr .type == 'symlink')
 	assert(tattr1.type == 'file')
 	assert(tattr2.type == 'file')
 	if win then
+		assert(lattr.symlink_type == 'file')
 		assert(tattr1.id == tattr2.id) --same file
 	else
 		assert(tattr1.inode == tattr2.inode) --same file
@@ -544,57 +538,57 @@ function test.symlink_attr_deref()
 	else
 		assert(lattr.inode ~= tattr1.inode) --diff. file
 	end
-	assert(fs.remove(f1))
-	assert(fs.remove(f2))
+	rmfile(f1)
+	rmfile(f2)
 end
 
 --hardlinks ------------------------------------------------------------------
 
 function test.mkhardlink() --hardlinks only work for files in NTFS
-	local f1 = prefix..'fs_test_hardlink'
-	local f2 = prefix..'fs_test_hardlink_target'
-	fs.remove(f1)
-	fs.remove(f2)
+	local f1 = 'fs_test_hardlink'
+	local f2 = 'fs_test_hardlink_target'
+	rmfile(f1)
+	rmfile(f2)
 
 	local buf = ffi.new'char[1]'
 
-	local f = assert(fs.open(f2, 'w'))
+	local f = assert(open(f2, 'w'))
 	buf[0] = ('X'):byte(1)
 	f:write(buf, 1)
 	assert(f:close())
 
-	assert(fs.mkhardlink(f1, f2))
+	mkhardlink(f1, f2)
 
-	local f = assert(fs.open(f1))
+	local f = assert(open(f1))
 	assert(f:read(buf, 1))
 	assert(buf[0] == ('X'):byte(1))
 	assert(f:close())
 
-	assert(fs.remove(f1))
-	assert(fs.remove(f2))
+	rmfile(f1)
+	rmfile(f2)
 end
 
 --file times -----------------------------------------------------------------
 
 function test.times()
 	local testfile = 'fs_test_time'
-	fs.remove(testfile)
-	local f = assert(fs.open(testfile, 'w'))
+	rmfile(testfile)
+	local f = assert(open(testfile, 'w'))
 	local t = f:attr()
 	assert(t.atime >= 0)
 	assert(t.mtime >= 0)
 	assert(win or t.ctime >= 0)
-	assert(linux or t.btime >= 0)
+	assert(Linux or t.btime >= 0)
 	assert(f:close())
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 function test.times_set()
 	local testfile = 'fs_test_time'
-	local f = assert(fs.open(testfile, 'w'))
+	local f = assert(open(testfile, 'w'))
 
 	--TODO: futimes() on OSX doesn't use tv_usec
-	local frac = (osx or win) and 0 or 1/2
+	local frac = (OSX or win) and 0 or 1/2
 	local t = math.floor(os.time())
 	local btime = t - 7200 - frac
 	local mtime = t - 3600 - frac
@@ -630,29 +624,29 @@ function test.times_set()
 	assert(atime == atime1)
 
 	assert(f:close())
-	assert(fs.remove(testfile))
+	rmfile(testfile)
 end
 
 --common paths ---------------------------------------------------------------
 
 function test.paths()
-	print('homedir', fs.homedir())
-	print('tmpdir ', fs.tmpdir())
-	print('exepath', fs.exepath())
-	print('exedir' , fs.exedir())
-	print('scriptdir', fs.scriptdir())
+	print('homedir', homedir())
+	print('tmpdir ', tmpdir())
+	print('exepath', exepath())
+	print('exedir' , exedir())
+	print('scriptdir', scriptdir())
 end
 
 --file attributes ------------------------------------------------------------
 
 function test.attr()
-	local testfile = 'fs_test.lua'
+	local testfile = fs_test_lua
 	local function test(attr)
 		assert(attr.type == 'file')
 		assert(attr.size > 10000)
 		assert(attr.atime)
 		assert(attr.mtime)
-		assert(linux and attr.ctime or attr.btime)
+		assert(Linux and attr.ctime or attr.btime)
 		assert(not win or attr.archive)
 		if not win then
 			assert(attr.inode)
@@ -666,13 +660,13 @@ function test.attr()
 			assert(attr.dev >= 0)
 		end
 	end
-	local attr = assert(fs.attr(testfile, false))
+	local attr = assert(file_attr(testfile, false))
 	test(attr)
-	assert(fs.attr(testfile, 'type' , false) == attr.type)
-	assert(fs.attr(testfile, 'atime', false) == attr.atime)
-	assert(fs.attr(testfile, 'mtime', false) == attr.mtime)
-	assert(fs.attr(testfile, 'btime', false) == attr.btime)
-	assert(fs.attr(testfile, 'size' , false) == attr.size)
+	assert(file_attr(testfile, 'type' , false) == attr.type)
+	assert(file_attr(testfile, 'atime', false) == attr.atime)
+	assert(file_attr(testfile, 'mtime', false) == attr.mtime)
+	assert(file_attr(testfile, 'btime', false) == attr.btime)
+	assert(file_attr(testfile, 'size' , false) == attr.size)
 end
 
 function test.attr_set()
@@ -685,7 +679,7 @@ function test.dir()
 	local found
 	local n = 0
 	local files = {}
-	for file, d in fs.dir() do
+	for file, d in ls(tests_dir) do
 		if not file then break end
 		found = found or file == 'fs_test.lua'
 		n = n + 1
@@ -718,7 +712,7 @@ end
 
 function test.dir_recursive()
 	local n = 0
-	for sc in fs.scan(win and 'c:\\' or '/proc') do
+	for sc in scandir(win and 'c:\\' or '/proc') do
 		local typ, err = sc:attr'type'
 		local path, err = sc:path()
 		print(string.format('%-5s %-60s %s', typ, path, err or ''))
@@ -733,7 +727,7 @@ end
 function test.dir_not_found()
 	local n = 0
 	local err
-	for file, err1 in fs.dir'nonexistent_dir' do
+	for file, err1 in ls'nonexistent_dir' do
 		if not file then
 			err = err1
 			break
@@ -749,7 +743,7 @@ end
 function test.dir_is_file()
 	local n = 0
 	local err
-	for file, err1 in fs.dir'fs_test.lua' do
+	for file, err1 in ls(fs_test_lua) do
 		if not file then
 			err = err1
 			break
@@ -774,13 +768,13 @@ end
 local mediumsize = 1024^2 * 10 + 1 -- 10 MB + 1 byte to make it non-aligned
 
 function test.pagesize()
-	assert(fs.pagesize() > 0)
-	assert(fs.pagesize() % 4096 == 0)
+	assert(pagesize() > 0)
+	assert(pagesize() % 4096 == 0)
 end
 
 local function zerosize_file(filename)
 	local file = filename or 'fs_test_zerosize'
-	os.remove(file)
+	rmfile(file)
 	local f = assert(io.open(file, 'w'))
 	f:close()
 	return file
@@ -794,7 +788,7 @@ function test.filesize()
 	assert(mmap.filesize(file) == 123)
 	assert(mmap.filesize(file, 63) == 63) --shrink
 	assert(mmap.filesize(file) == 63)
-	os.remove(file)
+	rmfile(file)
 end
 ]]
 
@@ -822,7 +816,7 @@ local function check_empty(map)
 end
 
 function test.map_anonymous_write(size)
-	local map = assert(fs.map{access = 'w', size = size or mediumsize})
+	local map = assert(mmap{access = 'w', size = size or mediumsize})
 	check_empty(map)
 	fill(map)
 	check_filled(map)
@@ -831,71 +825,71 @@ end
 
 --NOTE: there's no point in making an unshareable read-only mapping.
 function test.map_anonymous_readonly_empty()
-	local map = assert(fs.map{access = 'r', size = mediumsize})
+	local map = assert(mmap{access = 'r', size = mediumsize})
 	check_empty(map)
 	map:free()
 end
 
 function test.map_file_read()
-	local map = assert(fs.map{file = 'fs_test.lua'})
+	local map = assert(mmap{file = fs_test_lua})
 	assert(ffi.string(map.addr, map.size):find'test%.map_file_read')
 	map:free()
 end
 
 function test.map_file_write()
-	local file = prefix..'fs_test_mmap'
-	os.remove(file)
-	local map1 = assert(fs.map{file = file, size = mediumsize, access = 'w'})
+	local file = 'fs_test_mmap'
+	rmfile(file)
+	local map1 = assert(mmap{file = file, size = mediumsize, access = 'w'})
 	fill(map1)
 	map1:free()
-	local map2 = assert(fs.map{file = file, access = 'r'})
+	local map2 = assert(mmap{file = file, access = 'r'})
 	check_filled(map2)
 	map2:free()
-	os.remove(file)
+	rmfile(file)
 end
 
 function test.map_file_write_live()
-	local file = prefix..'fs_test_mmap'
-	os.remove(file)
-	local map1 = assert(fs.map{file = file, size = mediumsize, access = 'w'})
-	local map2 = assert(fs.map{file = file, access = 'r'})
+	local file = 'fs_test_mmap'
+	rmfile(file)
+	local map1 = assert(mmap{file = file, size = mediumsize, access = 'w'})
+	local map2 = assert(mmap{file = file, access = 'r'})
 	fill(map1)
 	map1:flush()
 	check_filled(map2)
 	map1:free()
 	map2:free()
-	os.remove(file)
+	rmfile(file)
 end
 
 function test.map_file_copy_on_write()
-	local file = prefix..'fs_test_mmap'
-	os.remove(file)
+	local file = 'fs_test_mmap'
+	rmfile(file)
 	local size = mediumsize
-	local map = assert(fs.map{file = file, access = 'w', size = size})
+	local map = assert(mmap{file = file, access = 'w', size = size})
 	fill(map)
 	map:free()
-	local map = assert(fs.map{file = file, access = 'c'})
+	local map = assert(mmap{file = file, access = 'c'})
 	assert(map.size == size)
 	ffi.fill(map.addr, map.size, 123)
 	map:flush()
 	map:free()
 	--check that the file wasn't altered by fill()
-	local map = assert(fs.map{file = file})
+	local map = assert(mmap{file = file})
 	assert(map.size == size)
 	check_filled(map)
 	map:free()
-	os.remove(file)
+	rmfile(file)
 end
 
 function test.map_file_copy_on_write_live()
-	local file = prefix..'fs_test_mmap'
+	local file = 'fs_test_mmap'
 	--TODO: COW on opened file doesn't work on OSX
 	if ffi.os == 'OSX' then return end
-	os.remove(file)
+	rmfile(file)
 	local size = mediumsize
-	local mapw = assert(fs.map{file = file, access = 'w', size = size})
-	local mapc = assert(fs.map{file = file, access = 'c'})
-	local mapr = assert(fs.map{file = file, access = 'r'})
+	local mapw = assert(mmap{file = file, access = 'w', size = size})
+	local mapc = assert(mmap{file = file, access = 'c'})
+	local mapr = assert(mmap{file = file, access = 'r'})
 	assert(mapw.size == size)
 	assert(mapc.size == size)
 	assert(mapr.size == size)
@@ -912,14 +906,14 @@ function test.map_file_copy_on_write_live()
 	mapw:free()
 	mapc:free()
 	mapr:free()
-	os.remove(file)
+	rmfile(file)
 end
 
 function test.map_shared_via_tagname()
 	local name = 'mmap_test_tagname'
 	local size = mediumsize
-	local map1 = assert(fs.map{tagname = name, access = 'w', size = size})
-	local map2 = assert(fs.map{tagname = name, access = 'r', size = size})
+	local map1 = assert(mmap{tagname = name, access = 'w', size = size})
+	local map2 = assert(mmap{tagname = name, access = 'r', size = size})
 	assert(map1:unlink()) --can be called while mappings are alive.
 	assert(map2:unlink()) --ok even if file not found.
 	assert(map1.addr ~= map2.addr)
@@ -933,8 +927,8 @@ end
 
 function test.map_file_exec()
 	--TODO: test by exec'ing some code in the memory.
-	local exe = win and '../bin/windows/luajit.exe' or '../bin/linux/luajit'
-	local map = assert(fs.map{file = exe, access = 'x'})
+	local exe = exepath()
+	local map = assert(mmap{file = exe, access = 'x'})
 	if win then
 		assert(ffi.string(map.addr, 2) == 'MZ')
 	else
@@ -944,22 +938,22 @@ function test.map_file_exec()
 end
 
 function test.map_offset_live()
-	local file = prefix..'fs_test_mmap'
-	os.remove(file)
-	local offset = fs.pagesize()
+	local file = 'fs_test_mmap'
+	rmfile(file)
+	local offset = pagesize()
 	local size = offset * 2
-	local map1 = assert(fs.map{file = file, size = size, access = 'w'})
-	local map2 = assert(fs.map{file = file, offset = offset})
+	local map1 = assert(mmap{file = file, size = size, access = 'w'})
+	local map2 = assert(mmap{file = file, offset = offset})
 	fill(map1)
 	map1:flush()
 	check_filled(map2, offset)
 	map1:free()
 	map2:free()
-	os.remove(file)
+	rmfile(file)
 end
 
 function test.map_mirror_buffer(addr)
-	local map = assert(fs.mirror_buffer(1, addr))
+	local map = assert(mirror_buffer(1, addr))
 	local p = ffi.cast('char*', map.addr)
 	p[0] = 123
 	assert(p[map.size] == 123)
@@ -973,60 +967,60 @@ end
 --mmap failure modes
 
 function test.map_invalid_size()
-	local ok, err = pcall(fs.map, {file = 'fs_test.lua', size = 0})
+	local ok, err = pcall(mmap, {file = fs_test_lua, size = 0})
 	assert(not ok and err:find'size')
 end
 
 function test.map_invalid_offset()
-	local ok, err = pcall(fs.map, {file = 'fs_test.lua', offset = 1})
+	local ok, err = pcall(mmap, {file = fs_test_lua, offset = 1})
 	assert(not ok and err:find'aligned')
 end
 
 function test.map_invalid_address()
-	local map, err = fs.map{
-		size = fs.pagesize() * 1,
-		addr = -fs.pagesize(),
+	local map, err = mmap{
+		size = pagesize() * 1,
+		addr = -pagesize(),
 	}
 	assert(not map and err == 'out_of_mem')
 end
 
 function test.map_size_too_large()
 	local size = 1024^3 * (ffi.abi'32bit' and 3 or 1024^3)
-	local map, err = fs.map{access = 'w', size = size}
+	local map, err = mmap{access = 'w', size = size}
 	assert(not map and err == 'out_of_mem')
 end
 
 function test.map_readonly_not_found()
-	local map, err = fs.map{file = 'askdfask8920349zjk'}
+	local map, err = mmap{file = 'askdfask8920349zjk'}
 	assert(not map and err == 'not_found')
 end
 
 function test.map_readonly_too_short()
-	local map, err = fs.map{file = 'fs_test.lua', size = 1024*1000}
+	local map, err = mmap{file = fs_test_lua, size = 1024*1000}
 	assert(not map and err == 'file_too_short')
 end
 
 function test.map_readonly_too_short_zero()
-	local map, err = fs.map{file = zerosize_file()}
+	local map, err = mmap{file = zerosize_file()}
 	assert(not map and err == 'file_too_short')
-	os.remove'fs_test_zerosize'
+	rmfile'fs_test_zerosize'
 end
 
 function test.map_write_too_short_zero()
-	local map, err = fs.map{file = zerosize_file(), access = 'w'}
+	local map, err = mmap{file = zerosize_file(), access = 'w'}
 	assert(not map and err == 'file_too_short')
-	os.remove'fs_test_zerosize'
+	rmfile'fs_test_zerosize'
 end
 
 function test.map_disk_full()
-	local file = prefix..'fs_test_file_huge'
-	os.remove(file)
-	local map, err = fs.map{
+	local file = 'fs_test_file_huge'
+	rmfile(file)
+	local map, err = mmap{
 		file = file,
 		size = 1024^4, --let's see how this is gonna last...
 		access = 'w',
 	}
-	os.remove(file)
+	rmfile(file)
 	assert(not map and err == 'disk_full')
 end
 
@@ -1036,7 +1030,7 @@ function test.open_buffer()
 	local sz = 100
 	local buf = ffi.new('char[?]', sz)
 	ffi.fill(buf, sz, 42)
-	local f = assert(fs.open_buffer(buf, sz, 'w'))
+	local f = assert(open_buffer(buf, sz, 'w'))
 	assert(f:seek(100) == 100)
 	assert(f:seek(100) == 200)
 	assert(f:seek() == 200)
@@ -1061,6 +1055,10 @@ end
 
 --test cmdline ---------------------------------------------------------------
 
+chdir(win and tests_dir or os.getenv'HOME')
+mkdir'fs_test'
+chdir'fs_test'
+
 local name = ...
 if not name or name == 'fs_test' then
 	--run all tests in the order in which they appear in the code.
@@ -1078,9 +1076,12 @@ if not name or name == 'fs_test' then
 		end
 	end
 	print(string.format('ok: %d, failed: %d', m, n))
-	os.exit(n > 0 and 1 or 0)
 elseif test[name] then
 	test[name](select(2, ...))
 else
 	print('Unknown test "'..(name)..'".')
 end
+
+assert(path_file(cwd()) == 'fs_test')
+chdir'..'
+rm_rf'fs_test'

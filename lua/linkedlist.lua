@@ -6,7 +6,7 @@
 	In this implementation items must be Lua tables for which fields `_prev`
 	and `_next` are reserved for linking.
 
-	list() -> list                          create a new list
+	linkedlist() -> list                    create a new linked list
 	list:clear()                            clear the list
 	list:insert_first(t)                    add an item at beginning of the list
 	list:insert_last(t)                     add an item at the end of the list
@@ -25,22 +25,22 @@
 
 if not ... then require'linkedlist_test'; return end
 
-local list = {}
-list.__index = list
+linkedlist = {}
+linkedlist.__index = linkedlist
 
-function list:new()
+function linkedlist:new()
 	return setmetatable({length = 0}, self)
 end
 
-setmetatable(list, {__call = list.new})
+setmetatable(linkedlist, {__call = linkedlist.new})
 
-function list:clear()
+function linkedlist:clear()
 	self.length = 0
 	self.first = nil
 	self.last = nil
 end
 
-function list:insert_first(t)
+function linkedlist:insert_first(t)
 	assert(t)
 	if self.first then
 		self.first._prev = t
@@ -53,7 +53,7 @@ function list:insert_first(t)
 	self.length = self.length + 1
 end
 
-function list:insert_after(anchor, t)
+function linkedlist:insert_after(anchor, t)
 	if not t then anchor, t = nil, anchor end
 	if not anchor then anchor = self.last end
 	assert(t)
@@ -73,11 +73,11 @@ function list:insert_after(anchor, t)
 	end
 end
 
-function list:insert_last(t)
+function linkedlist:insert_last(t)
 	self:insert_after(nil, t)
 end
 
-function list:insert_before(anchor, t)
+function linkedlist:insert_before(anchor, t)
 	if not t then anchor, t = nil, anchor end
 	if not anchor then anchor = self.first end
 	anchor = anchor and anchor._prev
@@ -89,7 +89,7 @@ function list:insert_before(anchor, t)
 	end
 end
 
-function list:remove(t)
+function linkedlist:remove(t)
 	assert(t)
 	if t._next then
 		if t._prev then
@@ -115,19 +115,19 @@ function list:remove(t)
 	return t
 end
 
-function list:remove_last()
+function linkedlist:remove_last()
 	if not self.last then return end
 	return self:remove(self.last)
 end
 
-function list:remove_first()
+function linkedlist:remove_first()
 	if not self.first then return end
 	return self:remove(self.first)
 end
 
 --iterating
 
-function list:next(last)
+function linkedlist:next(last)
 	if last then
 		return last._next
 	else
@@ -135,11 +135,11 @@ function list:next(last)
 	end
 end
 
-function list:items()
+function linkedlist:items()
 	return self.next, self
 end
 
-function list:prev(last)
+function linkedlist:prev(last)
 	if last then
 		return last._prev
 	else
@@ -147,18 +147,16 @@ function list:prev(last)
 	end
 end
 
-function list:reverse_items()
+function linkedlist:reverse_items()
 	return self.prev, self
 end
 
 --utils
 
-function list:copy()
+function linkedlist:copy()
 	local list = self:new()
 	for item in self:items() do
 		list:push(item)
 	end
 	return list
 end
-
-return list

@@ -15,23 +15,8 @@
 
 if not ... then require'sqlpp_mysql_test'; return end
 
-local glue = require'glue'
-local mysql = require'mysql'
-
-local fmt = string.format
-local add = table.insert
-local cat = table.concat
-
-local repl = glue.repl
-local outdent = glue.outdent
-local sortedpairs = glue.sortedpairs
-local subst = glue.subst
-local catargs = glue.catargs
-local attr = glue.attr
-local imap = glue.imap
-local index = glue.index
-local update = glue.update
-local empty = glue.empty
+require'glue'
+require'mysql'
 
 local function init_spp(spp, cmd)
 
@@ -56,9 +41,9 @@ local function init_spp(spp, cmd)
 	end
 	function cmd:rawconnect(opt)
 		if opt and opt.fake then
-			return {fake = true, host = 'fake', port = 'fake', esc = mysql.esc_utf8}
+			return {fake = true, host = 'fake', port = 'fake', esc = mysql_esc_utf8}
 		end
-		return pass(self, mysql.connect(opt))
+		return pass(self, mysql_connect(opt))
 	end
 	function cmd:rawuse(cn)
 		return pass(self, cn)
@@ -118,17 +103,17 @@ local function init_spp(spp, cmd)
 			local vals = fld.enum_values or fld.set_values
 			return _('%s(%s)', mt, cat(imap(vals, sqlval), ', '))
 		elseif mt == 'varchar' or mt == 'char' then
-			local maxlen = fld.maxlen or mysql.char_size(fld.size, fld.mysql_collation)
+			local maxlen = fld.maxlen or mysql_char_size(fld.size, fld.mysql_collation)
 			return _('%s(%d)', mt, maxlen)
 		elseif mt == 'varbinary' or mt == 'binary' then
 			return _('%s(%d)', mt, fld.size)
 		else
-			return glue.assert(mt, 'mysql_type missing for field: %s', fld.col)
+			return assertf(mt, 'mysql_type missing for field: %s', fld.col)
 		end
 	end
 
 	function cmd:sqlcol_flags(fld)
-		return catargs(' ',
+		return catany(' ',
 			fld.unsigned and 'unsigned' or nil,
 			fld.mysql_collation and 'collate '..fld.mysql_collation or nil,
 			fld.not_null and 'not null' or nil,
@@ -188,13 +173,13 @@ local function init_spp(spp, cmd)
 			dt.decimals = t.numeric_scale
 			dt.type = dt.digits > 15 and 'decimal' or 'number'
 			if dt.type == 'number' then
-				dt.min, dt.max = mysql.dec_range(dt.digits, dt.decimals, dt.unsigned)
+				dt.min, dt.max = mysql_dec_range(dt.digits, dt.decimals, dt.unsigned)
 			end
 		elseif mt == 'tinyint' or mt == 'smallint' or mt == 'mediumint'
 			or mt == 'int' or mt == 'bigint'
 		then
 			dt.type = 'number'
-			dt.min, dt.max, dt.size = mysql.int_range(mt, dt.unsigned)
+			dt.min, dt.max, dt.size = mysql_int_range(mt, dt.unsigned)
 			dt.decimals = 0
 		elseif mt == 'float' then
 			dt.type = 'number'

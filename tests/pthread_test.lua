@@ -1,8 +1,6 @@
-local pthread = require'pthread'
-local lua = require'luastate'
-local ffi = require'ffi'
-local glue = require'glue'
-local pp = require'pp'
+require'glue'
+require'pthread'
+require'luastate'
 io.stdout:setvbuf'no'
 
 --helpers
@@ -18,8 +16,8 @@ end
 --globals
 
 local function test_priority_range()
-	local pr0 = pthread.min_priority()
-	local pr1 = pthread.max_priority()
+	local pr0 = pthread_min_priority()
+	local pr1 = pthread_max_priority()
 	print('priority range: ', pr0, pr1)
 	assert(pr1 >= pr0)
 end
@@ -30,7 +28,7 @@ end
 --create a new Lua state and a new thread, and run a worker function
 --in that state and thread.
 local function create_thread(worker, args, attrs)
-	local state = lua.open()
+	local state = luastate()
 	state:openlibs()
 	state:push(function(worker, args)
 		local ffi = require'ffi'
@@ -44,7 +42,7 @@ local function create_thread(worker, args, attrs)
 		return tonumber(ffi.cast('intptr_t', wrapper_cb))
 	end)
 	local wrapper_cb_ptr = ffi.cast('void *', state:call(worker, args))
-	local thread = pthread.new(wrapper_cb_ptr, attrs)
+	local thread = pthread(wrapper_cb_ptr, attrs)
 	local function join()
 		local status = thread:join()
 		state:getglobal'retvals'
@@ -60,7 +58,7 @@ local function test_thread_self_equal()
 	local join, th1 = create_thread(function()
 		local pthread = require'pthread'
 		local ffi = require'ffi'
-		local th = pthread.self()
+		local th = pthread_self()
 		return ffi.string(th, ffi.sizeof(th))
 	end)
 	local _, ths = join()
@@ -71,9 +69,9 @@ end
 
 local function test_priorities()
 	create_thread(function() end, nil,
-		{priority = pthread.max_priority()})()
+		{priority = pthread_max_priority()})()
 	create_thread(function() end, nil,
-		{priority = pthread.min_priority()})()
+		{priority = pthread_min_priority()})()
 end
 
 --speed/leak long test
@@ -99,7 +97,7 @@ end
 --mutexes
 
 local function test_mutex(times, threads)
-	local m = pthread.mutex{type = 'recursive'}
+	local m = mutex{type = 'recursive'}
 
 	local joins = {}
 	local n = ffi.new'int[1]'
@@ -144,8 +142,8 @@ end
 --test cond. vars
 
 local function test_cond_var(times, timeout)
-	local mutex = pthread.mutex()
-	local cond = pthread.cond()
+	local mutex = mutex()
+	local cond = condvar()
 
 	local n = ffi.new('double[1]', -times/2)
 
@@ -224,7 +222,7 @@ end
 --test r/w locks
 
 local function test_rwlock(readtimes, readthreads, writetimes, writethreads)
-	local rwlock = pthread.rwlock()
+	local rwlock = rwlock()
 
 	local joins = {}
 	local n = ffi.new'int[1]'

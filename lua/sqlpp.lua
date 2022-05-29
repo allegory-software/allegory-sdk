@@ -232,27 +232,7 @@ Load the MySQL module into an sqlpp instance.
 
 if not ... then require'sqlpp_mysql_test'; return end
 
-local glue = require'glue'
-local errors = require'errors'
-
-local fmt = string.format
-local add = table.insert
-local del = table.remove
-local cat = table.concat
-local char = string.char
-
-local assertf = glue.assert
-local repl = glue.repl
-local attr = glue.attr
-local update = glue.update
-local merge = glue.merge
-local empty = glue.empty
-local words = glue.words
-local outdent = glue.outdent
-local imap = glue.imap
-local pack = glue.pack
-local trim = glue.trim
-local sortedpairs = glue.sortedpairs
+require'glue'
 
 local sqlpp = {package = {}}
 
@@ -329,7 +309,7 @@ function sqlpp.new(init)
 		local state = {active = true}
 		local states = {state}
 		local level = 1
-		for line in glue.lines(sql) do
+		for line in sql:lines() do
 			local s, expr = line:match'^%s*#([%w_]+)(.*)'
 			if s == 'if' then
 				level = level + 1
@@ -583,7 +563,7 @@ function sqlpp.new(init)
 		local param_names = {}
 
 		--collect verbatims
-		sql = glue.subst(sql, function(name)
+		sql = subst(sql, function(name)
 				add(param_names, name)
 				add(repl, assertf(params[name], '{%s} is missing', name))
 				return mark(#repl)
@@ -1077,7 +1057,7 @@ function sqlpp.new(init)
 		for ri,srow in ipairs(srows) do
 			local t = {}
 			for i,s in ipairs(srow) do
-				t[i] = glue.pad(s, max_sizes[i], ' ', pad_dirs[i])
+				t[i] = pad(s, max_sizes[i], ' ', pad_dirs[i])
 			end
 			dt[ri] = prefix..cat(t, ', ')..')'
 		end
@@ -1098,7 +1078,7 @@ function sqlpp.new(init)
 		local n = t.n
 		if not n then
 			if cols then
-				local cols = glue.extend({}, cols)
+				local cols = extend({}, cols)
 				table.sort(cols)
 				n = cols[#cols]
 			else
@@ -1113,7 +1093,7 @@ function sqlpp.new(init)
 				end
 			end
 		end
-		cols = cols and glue.index(cols) --{3, 1, 2} -> {[3]->1, [1]->2, [2]->3}
+		cols = cols and index(cols) --{3, 1, 2} -> {[3]->1, [1]->2, [2]->3}
 		local patt = '^'..('(.-)\t'):rep(n-1)..'(.*)'
 		local function transform_line(row, ...)
 			for i=1,n do
@@ -1130,7 +1110,7 @@ function sqlpp.new(init)
 		end
 		local rows = {}
 		local ri = 1
-		for s in glue.lines(s) do
+		for s in lines(s) do
 			local row = {}
 			rows[ri] = row
 			transform_line(row, s:match(patt))
@@ -1208,14 +1188,14 @@ function sqlpp.new(init)
 		local parse = spp.errno[errno]
 		local err
 		if parse then
-			err = errors.new('db', {
+			err = newerror('db', {
 				sqlcode = errno,
 				sqlstate = sqlstate,
 				message = msg,
 			})
 			parse(self, err)
 		else
-			err = errors.new('db', {
+			err = newerror('db', {
 					sqlcode = errno,
 					sqlstate = sqlstate,
 					addtraceback = true,
@@ -1225,7 +1205,7 @@ function sqlpp.new(init)
 					sqlstate and ' '..sqlstate or ''
 			)
 		end
-		errors.raise(err)
+		raise(err)
 	end
 
 	local function init_conn(self, opt, rawconn)
@@ -1284,10 +1264,9 @@ function sqlpp.new(init)
 		return opt
 	end
 
-	cmd.table_changed = glue.noop --stub
+	cmd.table_changed = noop --stub
 
 	--NOTE: schema or table names with spaces or dots inside are not supported!
-	local esc = glue.esc
 	local m1 = '^%s*'..esc('insert', '*i')..'%s+'..esc('into', '*i')..'%s+([^%s]+)'
 	local m2 = '^%s*'..esc('update', '*i')..'%s+'..'([^%s]+)'
 	local m3 = '^%s*'..esc('delete', '*i')..'%s+'..esc('from', '*i')..'%s+([^%s]+)'
@@ -1449,7 +1428,7 @@ function sqlpp.new(init)
 			self:query(ok and 'commit' or 'rollback')
 			return assert(ok, ...)
 		end
-		return pass(glue.pcall(f, ...))
+		return pass(pcall(f, ...))
 	end
 
 	--schema reflection -------------------------------------------------------
@@ -1583,7 +1562,7 @@ function sqlpp.new(init)
 	function cmd:rename_db_sqls(old_db, new_db)
 		local schema = require'schema'
 
-		local dbs = glue.index(self:dbs())
+		local dbs = index(self:dbs())
 		assertf(dbs[old_db], 'rename_db: db does not exist: %s', old_db)
 		assertf(not dbs[new_db], 'rename_db: db already exists: %s. remove it first.', new_db)
 
@@ -1659,7 +1638,7 @@ function sqlpp.new(init)
 			return s or empty
 		end
 		local t = {}
-		for _,s in ipairs(words(s)) do
+		for s in words(s) do
 			local col, val_name = s:match'^(.-)=(.*)'
 			if not col then
 				col, val_name = s, s
@@ -1800,7 +1779,7 @@ function sqlpp.new(init)
 			indent = '\t',
 		})
 		local t = {}
-		for i,s in ipairs(glue.keys(col_map, true)) do
+		for i,s in ipairs(keys(col_map, true)) do
 			t[i] = self:sqlname(s)
 		end
 		local cols_sql = cat(t, ', ')

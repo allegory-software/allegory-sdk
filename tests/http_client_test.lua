@@ -1,12 +1,11 @@
 
-local ffi = require'ffi'
---ffi.tls_libname = 'tls_bearssl'
-ffi.tls_libname = 'tls_libressl'
-local logging = require'logging'
-logging.debug = true
+tls_libname = 'tls_bearssl'
+--tls_libname = 'tls_libressl'
 
-local client  = require'http_client'
-local time    = require'time'
+require'glue'
+require'logging'
+require'http_client'
+logging.debug = true
 
 local function search_page_url(pn)
 	return 'https://luapower.com/'
@@ -22,7 +21,7 @@ function mbytes(n)
 	return n and string.format('%.1fmB', n/(1024*1024))
 end
 
-local client = client:new{
+local client = http_client{
 	max_conn = 1,
 	max_pipelined_requests = 10,
 	debug = {protocol = true},
@@ -31,9 +30,9 @@ local client = client:new{
 local n = 0
 for i=1,5 do
 	--client.max_pipelined_requests = 0
-	client.thread(function()
+	thread(function()
 		--print('sleep .5')
-		--client.sleep(.5)
+		--sleep(.5)
 		local res, req, err = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			--host = 'www.libpng.org', uri = '/pub/png/spec/1.2/PNG-Chunks.html',
@@ -55,13 +54,12 @@ for i=1,5 do
 			n = n + (res and res.content and #res.content or 0)
 		else
 			print('sleep .5')
-			client.sleep(.5)
+			sleep(.5)
 			print('ERROR:', req)
 		end
 	end)
 end
-local t0 = time.clock()
-client.start()
-t1 = time.clock()
+local t0 = clock()
+start()
+t1 = clock()
 print(mbytes(n / (t1 - t0))..'/s')
-

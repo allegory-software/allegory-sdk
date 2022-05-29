@@ -8,16 +8,16 @@
 	headers, RLE deltas). Supports progressive loading, yielding from the
 	reader and writer functions and saving in bgra8 format.
 
-	bmp.open(read) -> b | nil,err          open a BMP file and read it's header
+	bmp_open(read) -> b | nil,err          open a BMP file and read it's header
 	  read(buf, len) -> len|0|nil          read function (can yield)
 	b.w, bmp.h                             bitmap dimensions
 	b.bpp                                  bits per pixel
 	b:load(bmp[, x, y]) -> bmp | nil,err   load/paint the pixels into a given bitmap
 	b:load(format, ...) -> bmp | nil,err   load the pixels into a new bitmap
 	b:rows(bmp | format,...) -> iter() -> i, bmp   iterate the rows over a 1-row bitmap
-	bmp.save(bmp, write) -> ok | nil,err   save a bitmap using a write function
+	bmp_save(bmp, write) -> ok | nil,err   save a bitmap using a write function
 
-bmp.open(read) -> b | nil,err
+bmp_open(read) -> b | nil,err
 
 	Open a BMP file. The read function can yield and it can signal I/O errors
 	by returning `nil, err`. It will only be asked to read a positive number
@@ -41,7 +41,7 @@ b:rows(bmp | format,...) -> iter() -> i, bmp
 	is decreasing if the bitmap is bottom-up. Unlike `b:load()`, this method
 	and the returned iterator are not protected (they raise errors).
 
-bmp.save(bmp, write) -> true | nil, err
+bmp_save(bmp, write) -> true | nil, err
 
 	Save bmp file using a `write(buf, size)` function to write the bytes.
 	The write function should accept any size >= 0 and it should raise an error
@@ -61,19 +61,15 @@ Low-level API
 
 ]=]
 
-if not ... then require'bmp_demo'; return end
+require'glue'
+require'bitmap'
 
-local ffi = require'ffi'
-local bit = require'bit'
-local bitmap = require'bitmap'
-local glue = require'glue'
-local shr, shl, bor, band, bnot =
-	bit.rshift, bit.lshift, bit.bor, bit.band, bit.bnot
-
-local M = {}
+local
+	shr, shl, bor, band, bnot =
+	shr, shl, bor, band, bnot
 
 --BITMAPFILEHEADER
-local file_header = ffi.typeof[[struct __attribute__((__packed__)) {
+local file_header = typeof[[struct __attribute__((__packed__)) {
 	char     magic[2]; // 'BM'
 	uint32_t size;
 	uint16_t reserved1;
@@ -83,7 +79,7 @@ local file_header = ffi.typeof[[struct __attribute__((__packed__)) {
 }]]
 
 --BITMAPCOREHEADER, Windows 2.0 or later
-local core_header = ffi.typeof[[struct __attribute__((__packed__)) {
+local core_header = typeof[[struct __attribute__((__packed__)) {
 	// BITMAPCOREHEADER
 	uint16_t w;
 	uint16_t h;
@@ -92,7 +88,7 @@ local core_header = ffi.typeof[[struct __attribute__((__packed__)) {
 }]]
 
 --BITMAPINFOHEADER, Windows NT, 3.1x or later
-local info_header = ffi.typeof[[struct __attribute__((__packed__)) {
+local info_header = typeof[[struct __attribute__((__packed__)) {
 	int32_t  w;
 	int32_t  h;
 	uint16_t planes;       // 1
@@ -106,7 +102,7 @@ local info_header = ffi.typeof[[struct __attribute__((__packed__)) {
 }]]
 
 --BITMAPV2INFOHEADER, undocumented, Adobe Photoshop
-local v2_header = ffi.typeof([[struct __attribute__((__packed__)) {
+local v2_header = typeof([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t mask_r;
 	uint32_t mask_g;
@@ -114,13 +110,13 @@ local v2_header = ffi.typeof([[struct __attribute__((__packed__)) {
 }]], info_header)
 
 --BITMAPV3INFOHEADER, undocumented, Adobe Photoshop
-local v3_header = ffi.typeof([[struct __attribute__((__packed__)) {
+local v3_header = typeof([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t mask_a;
 }]], v2_header)
 
 --BITMAPV4HEADER, Windows NT 4.0, 95 or later
-local v4_header = ffi.typeof([[struct __attribute__((__packed__)) {
+local v4_header = typeof([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t cs_type;
 	struct { int32_t rx, ry, rz, gx, gy, gz, bx, by, bz; } endpoints;
@@ -130,7 +126,7 @@ local v4_header = ffi.typeof([[struct __attribute__((__packed__)) {
 }]], v3_header)
 
 --BITMAPV5HEADER, Windows NT 5.0, 98 or later
-local v5_header = ffi.typeof([[struct __attribute__((__packed__)) {
+local v5_header = typeof([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t intent;
 	uint32_t profile_data;
@@ -138,13 +134,13 @@ local v5_header = ffi.typeof([[struct __attribute__((__packed__)) {
 	uint32_t reserved;
 }]], v4_header)
 
-local rgb_triple = ffi.typeof[[struct __attribute__((__packed__)) {
+local rgb_triple = typeof[[struct __attribute__((__packed__)) {
 	uint8_t b;
 	uint8_t g;
 	uint8_t r;
 }]]
 
-local rgb_quad = ffi.typeof([[struct __attribute__((__packed__)) {
+local rgb_quad = typeof([[struct __attribute__((__packed__)) {
 	$;
 	uint8_t a;
 }]], rgb_triple)
@@ -153,22 +149,22 @@ local compressions = {[0] = 'rgb', 'rle8', 'rle4', 'bitfields',
 	'jpeg', 'png', 'alphabitfields'}
 
 local valid_bpps = {
-	rgb = glue.index{1, 2, 4, 8, 16, 24, 32, 64},
-	rle4 = glue.index{4},
-	rle8 = glue.index{8},
-	bitfields = glue.index{16, 32},
-	alphabitfields = glue.index{16, 32},
-	jpeg = glue.index{0},
-	png = glue.index{0},
+	rgb = index{1, 2, 4, 8, 16, 24, 32, 64},
+	rle4 = index{4},
+	rle8 = index{8},
+	bitfields = index{16, 32},
+	alphabitfields = index{16, 32},
+	jpeg = index{0},
+	png = index{0},
 }
 
-M.open = glue.protect(function(read_bytes)
+bmp_open = protect(function(read_bytes)
 
 	--wrap the reader so we can count the bytes read
 	local bytes_read = 0
 	local function read(buf, sz)
 		if sz == 0 then return buf end
-		local sz = sz or ffi.sizeof(buf)
+		local sz = sz or sizeof(buf)
 		assert(read_bytes(buf, sz) == sz, 'eof')
 		bytes_read = bytes_read + sz
 		return buf
@@ -185,22 +181,22 @@ M.open = glue.protect(function(read_bytes)
 	local quad_pal = true --palette entries are quads except for core header
 	local ext_bitmasks = false
 	local h
-	if z == ffi.sizeof(core_header) then
+	if z == sizeof(core_header) then
 		core = true
 		quad_pal = false
 		h = read(core_header())
-	elseif z == ffi.sizeof(info_header) then
+	elseif z == sizeof(info_header) then
 		alpha_mask = false --...unless comp == 'alphabitfields', see below
 		ext_bitmasks = true --bitfield masks are right after the header
 		h = read(info_header())
-	elseif z == ffi.sizeof(v2_header) then
+	elseif z == sizeof(v2_header) then
 		alpha_mask = false
 		h = read(v2_header())
-	elseif z == ffi.sizeof(v3_header) then
+	elseif z == sizeof(v3_header) then
 		h = read(v3_header())
-	elseif z == ffi.sizeof(v4_header) then
+	elseif z == sizeof(v4_header) then
 		h = read(v4_header())
-	elseif z == ffi.sizeof(v5_header) then
+	elseif z == sizeof(v5_header) then
 		h = read(v5_header())
 	elseif z == 64 + 4 then
 		error'OS22XBITMAPHEADER is not supported'
@@ -219,7 +215,7 @@ M.open = glue.protect(function(read_bytes)
 	local bitfields = comp:find'bitfields$'
 	local palettized = bpp >=1 and bpp <= 8
 	local width = h.w
-	local height = math.abs(h.h)
+	local height = abs(h.h)
 	local bottom_up = h.h > 0
 	assert(width >= 1, 'invalid width')
 	assert(height >= 1, 'invalid height')
@@ -232,7 +228,7 @@ M.open = glue.protect(function(read_bytes)
 		if ext_bitmasks then
 			read(bitmasks, masks_size)
 		else
-			local masks_ptr = ffi.cast('uint8_t*', h) + ffi.offsetof(h, 'mask_r')
+			local masks_ptr = cast('uint8_t*', h) + ffi.offsetof(h, 'mask_r')
 			ffi.copy(bitmasks, masks_ptr, masks_size)
 		end
 		has_alpha = bitmasks[3] > 0
@@ -252,13 +248,13 @@ M.open = glue.protect(function(read_bytes)
 	local pal
 	if palettized then
 		local pal_entry_ct = quad_pal and rgb_quad or rgb_triple
-		local pal_ct = ffi.typeof('$[?]', pal_entry_ct)
-		pal_count = math.floor(pal_size / ffi.sizeof(pal_entry_ct))
-		pal_count = math.min(pal_count, 2^bpp)
+		local pal_ct = typeof('$[?]', pal_entry_ct)
+		pal_count = floor(pal_size / sizeof(pal_entry_ct))
+		pal_count = min(pal_count, 2^bpp)
 		if pal_count > 0 then
 			function load_pal()
 				pal = read(pal_ct(pal_count))
-				read(nil, pal_size - ffi.sizeof(pal)) --null-read to pixel data
+				read(nil, pal_size - sizeof(pal)) --null-read to pixel data
 				load_pal = noop
 			end
 		end
@@ -328,7 +324,7 @@ M.open = glue.protect(function(read_bytes)
 
 			--make a custom pixel converter if the bitfields do not represent
 			--a standard format implemented in the `bitmap` module.
-			if not bitmap.formats[format] then
+			if not bitmap_formats[format] then
 				format = 'raw'..bpp
 				dst_colorspace = 'rgba8'
 				local r_and = bitmasks[0]
@@ -389,7 +385,7 @@ M.open = glue.protect(function(read_bytes)
 				local read_pixels, fill_pixels
 
 				local rle_buf = ffi.new'uint8_t[2]'
-				local p = ffi.cast('uint8_t*', row_bmp.data)
+				local p = cast('uint8_t*', row_bmp.data)
 
 				if bpp == 8 then --RLE8
 
@@ -409,18 +405,18 @@ M.open = glue.protect(function(read_bytes)
 				elseif bpp == 4 then --RLE4
 
 					local function shift_back(i, n) --shift data back one nibble
-						local i0 = math.floor(i)
+						local i0 = floor(i)
 						if i0 == i then return end --no need for shifting
 						p[i0] = bor(band(p[i0], 0xf0), shr(p[i0+1], 4)) --stitch the first nibble
-						for i = math.ceil(i), i0 + n do
+						for i = ceil(i), i0 + n do
 							p[i] = bor(shl(p[i], 4), shr(p[i+1], 4))
 						end
 					end
 
 					function read_pixels(i, n)
 						local i = i * 0.5
-						local n = math.ceil(n * 0.5)
-						read(p + math.ceil(i), n)
+						local n = ceil(n * 0.5)
+						read(p + ceil(i), n)
 						shift_back(i, n)
 						--read the word-align padding
 						local n2 = band(n + 1, bnot(1)) - n
@@ -431,8 +427,8 @@ M.open = glue.protect(function(read_bytes)
 
 					function fill_pixels(i, n, v)
 						local i = i * 0.5
-						local n = math.ceil(n * 0.5)
-						ffi.fill(p + math.ceil(i), n, v)
+						local n = ceil(n * 0.5)
+						ffi.fill(p + ceil(i), n, v)
 						shift_back(i, n)
 					end
 
@@ -487,22 +483,22 @@ M.open = glue.protect(function(read_bytes)
 			if type(arg) == 'table' and arg.data then --arg is a bitmap
 				dst_bmp = arg
 			else --arg is a format name or specifier
-				dst_bmp = bitmap.new(width, 1, arg, ...)
+				dst_bmp = bitmap(width, 1, arg, ...)
 			end
 
 			--load row function: convert or direct copy
 			local load_row
-			local stride = bitmap.aligned_stride(bitmap.min_stride(format, width))
+			local stride = bitmap_aligned_stride(bitmap_min_stride(format, width))
 			if convert_pixel                 --needs pixel conversion
 				or dst_bmp.format ~= format   --needs pixel conversion
 				or dst_bmp.w < width          --needs clipping
 				or dst_bmp.stride < stride    --can't copy whole stride
 			then
-				local row_bmp = bitmap.new(width, 1, format, false, true)
+				local row_bmp = bitmap(width, 1, format, false, true)
 				local read_row = row_reader(row_bmp)
 				function load_row()
 					read_row()
-					bitmap.paint(dst_bmp, row_bmp, 0, 0,
+					bitmap_paint(dst_bmp, row_bmp, 0, 0,
 						convert_pixel, nil, dst_colorspace)
 				end
 			else --load row into dst_bmp directly
@@ -529,17 +525,17 @@ M.open = glue.protect(function(read_bytes)
 			if type(arg) == 'table' and arg.data then
 				dst_bmp, dst_x, dst_y = arg, ...
 			else
-				dst_bmp = bitmap.new(width, height, arg, ...)
+				dst_bmp = bitmap(width, height, arg, ...)
 			end
 			local dst_x = dst_x or 0
 			local dst_y = dst_y or 0
 
-			local row_bmp = bitmap.new(width, 1, format, false, true)
+			local row_bmp = bitmap(width, 1, format, false, true)
 			local read_row = row_reader(row_bmp)
 
 			local function load_row(j)
 				read_row()
-				bitmap.paint(dst_bmp, row_bmp, dst_x, dst_y + j,
+				bitmap_paint(dst_bmp, row_bmp, dst_x, dst_y + j,
 					convert_pixel, nil, dst_colorspace)
 			end
 
@@ -596,7 +592,7 @@ M.open = glue.protect(function(read_bytes)
 		init_load()
 		return row_iterator(...)
 	end
-	bmp.load = glue.protect(function(self, ...)
+	bmp.load = protect(function(self, ...)
 		init_load()
 		return load_rows(...)
 	end)
@@ -604,7 +600,7 @@ M.open = glue.protect(function(read_bytes)
 	return bmp
 end)
 
-M.save = glue.protect(function(bmp, write)
+bmp_save = protect(function(bmp, write)
 	local fh = file_header()
 	local h = info_header()
 	local image_size = h.w * h.h * 4
@@ -614,26 +610,23 @@ M.save = glue.protect(function(bmp, write)
 		'\xff\x00\x00\x00'..  --B
 		'\x00\x00\x00\xff'    --A
 	ffi.copy(fh.magic, 'BM', 2)
-	fh.image_offset = ffi.sizeof(fh) + ffi.sizeof(h) + #masks
+	fh.image_offset = sizeof(fh) + sizeof(h) + #masks
 	fh.size = fh.image_offset + image_size
-	fh.header_size = ffi.sizeof(h) + 4
+	fh.header_size = sizeof(h) + 4
 	h.w = bmp.w
 	h.h = bmp.h
 	h.planes = 1
 	h.bpp = 32
 	h.compression = 3 --bitfields so we can have alpha
 	h.image_size = image_size
-	write(fh, ffi.sizeof(fh))
-	write(h, ffi.sizeof(h))
+	write(fh, sizeof(fh))
+	write(h, sizeof(h))
 	write(masks, #masks)
 	--save progressively line-by-line using a 1-row bitmap
-	local row_bmp = bitmap.new(bmp.w, 1, 'bgra8')
+	local row_bmp = bitmap(bmp.w, 1, 'bgra8')
 	for j=bmp.h-1,0,-1 do
-		local src_row_bmp = bitmap.sub(bmp, 0, j, bmp.w, 1)
-		bitmap.paint(row_bmp, src_row_bmp)
+		local src_row_bmp = bitmap_sub(bmp, 0, j, bmp.w, 1)
+		bitmap_paint(row_bmp, src_row_bmp)
 		write(row_bmp.data, row_bmp.stride)
 	end
 end)
-
-
-return M

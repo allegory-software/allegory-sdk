@@ -91,32 +91,7 @@ API
 
 if not ... then require'schema_test'; return end
 
-local glue = require'glue'
-
-local add = table.insert
-local cat = table.concat
-
-local isstr = glue.isstr
-local istab = glue.istab
-local isfunc = glue.isfunc
-local assertf = glue.assert
-local attr = glue.attr
-local update = glue.update
-local words = glue.words
-local pack = glue.pack
-local unpack = glue.unpack
-local keys = glue.keys
-local empty = glue.empty
-local kbytes = glue.kbytes
-local sortedpairs = glue.sortedpairs
-local catargs = glue.catargs
-local repl = glue.repl
-local imap = glue.imap
-local _ = string.format
-local trim = glue.trim
-local index = glue.index
-local outdent = glue.outdent
-local extend = glue.extend
+require'glue'
 
 --definition parsing ---------------------------------------------------------
 
@@ -186,7 +161,7 @@ local function parse_cols(self, t, dt, loc1, fld_ct)
 		assertf(isstr(col), 'column name expected for `%s`, got %s', loc1, type(col))
 		i = i + 1
 		local fld = {col = col, mode = mode}
-		table.insert(dt, dt_i, fld); dt_i = dt_i + 1
+		insert(dt, dt_i, fld); dt_i = dt_i + 1
 		dt[col] = fld
 		i = resolve_type(self, fld, t, i, i , fld_ct, true , false , false)
 		i = resolve_type(self, fld, t, i, #t, fld_ct, false, true  , true )
@@ -414,7 +389,7 @@ schema.env.weak_fk  = fk_func'set null'
 
 function schema:add_fk(tbl, cols, ...)
 	local tbl = assertf(self.tables[tbl], 'unknown table `%s`', tbl)
-	add_fk(self, tbl, words(cols), ...)
+	add_fk(self, tbl, collect(words(cols)), ...)
 end
 
 function schema:add_child_fk(tbl, cols, ref_tbl)
@@ -481,7 +456,7 @@ end
 function schema.env.aka(old_names)
 	return function(self, tbl, fld)
 		local entity = fld or tbl --table rename or field rename.
-		for _,old_name in ipairs(words(old_names)) do
+		for old_name in words(old_names) do
 			attr(entity, 'aka')[old_name] = true
 		end
 	end
@@ -513,7 +488,7 @@ function schema:add_proc(name, args, ...)
 end
 
 function schema:add_cols(tbl_name, t)
-	local nt = words(tbl_name)
+	local nt = collect(words(tbl_name))
 	local tbl_name = nt[1]
 	if nt[2] then
 		assert(nt[2] == 'after')
@@ -906,7 +881,7 @@ function diff:pp(opt)
 end
 
 function schema:resolve_type(t) --{attr = val, flag1, ...}
-	resolve_type(self, t, t, 1, #t, glue.empty, true, true)
+	resolve_type(self, t, t, 1, #t, empty, true, true)
 	update_type(self, t)
 	for i=#t,1,-1 do t[i] = nil end --remove flags
 	return t

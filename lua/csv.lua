@@ -8,7 +8,7 @@
 	inside quoted fields and offers an iterator interface so it can handle
 	large files.
 
-	`csv.open` takes a second argument `parameters`, a table of parameters
+	`csv_open` takes a second argument `parameters`, a table of parameters
 	controlling how the file is read:
 
 	+ `separator` sets the separator.  It'll probably guess the separator
@@ -47,7 +47,7 @@
 		default is 1MB.  It used to be 4096 bytes which is what `pagesize` says on
 		my system, but that seems kind of small.
 
-	`csv.openstring` works exactly like `csv.open` except the first argument
+	`csv_openstring` works exactly like `csv_open` except the first argument
 	is the contents of the csv file. In this case `buffer_size` is set to
 	the length of the string.
 
@@ -539,7 +539,7 @@ end
 
 --- Open a file for reading as a delimited file
 --  @return a file object
-local function open(
+function csv_open(
 	filename,         -- string: name of the file to open
 	parameters)       -- ?table: parameters controlling reading the file.
 										-- See README.md
@@ -564,7 +564,7 @@ end
 
 --- Open a string for reading as a delimited file
 --  @return a file object
-local function openstring(
+function csv_openstring(
 	filecontents,     -- string: The contents of the delimited file
 	parameters)       -- ?table: parameters controlling reading the file.
 										-- See README.md
@@ -576,11 +576,8 @@ local function openstring(
 end
 
 if not ... then
-	local csv = require'csv'
-	local f = csv.open'file.csv'
+	local f = csv_open'file.csv'
 	for fields in f:lines() do
 		 for i, v in ipairs(fields) do print(i, v) end
 	end
 end
-
-return { open = open, openstring = openstring, use = use }

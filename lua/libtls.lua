@@ -6,19 +6,16 @@ if not ... then require'http_server_test'; return end
 
 if not ... then require'libtls_test'; return end
 
-local ffi = require'ffi'
 require'libtls_h'
-local C = ffi.load(ffi.tls_libname or 'tls')
-local M = {C = C}
+require'glue'
+local C = ffi.load(tls_libname or 'tls')
 
-M.debug = function() end
-
-local function ptr(p) return p ~= nil and p or nil end
-local function str(s) return s ~= nil and ffi.string(s) or nil end
+TLS_WANT_POLLIN  = C.TLS_WANT_POLLIN
+TLS_WANT_POLLOUT = C.TLS_WANT_POLLOUT
 
 local config = {}
 
-function M.config(t)
+function tls_config(t)
 	if ffi.istype('struct tls_config', t) then
 		return t --pass-through
 	end
@@ -253,8 +250,8 @@ do
 				local sz = is_str and (t[k..'_size'] or #v) or nil
 				local ok, err = set_method(self, v, sz)
 				if not ok then return nil, err end
-				M.debug(('tls config %-25s %s'):format(k,
-					tostring(v):gsub('^%s+', ''):gsub('\r?\n%s*', ' \\n ')))
+				log('', 'tls', 'config', '%-25s %s', k,
+					tostring(v):gsub('^%s+', ''):gsub('\r?\n%s*', ' \\n '))
 			end
 		end
 		return true
@@ -273,7 +270,7 @@ local tls = {}
 
 function tls:configure(t)
 	if t then
-		local conf, created = M.config(t)
+		local conf, created = tls_config(t)
 		local ok, err = check(self, C.tls_configure(self, conf))
 		if created then
 			conf:free() --self holds the only ref to conf now.
@@ -283,11 +280,11 @@ function tls:configure(t)
 	return self
 end
 
-function M.client(conf)
+function tls_client(conf)
 	return assert(ptr(C.tls_client())):configure(conf)
 end
 
-function M.server(conf)
+function tls_server(conf)
 	return assert(ptr(C.tls_server())):configure(conf)
 end
 
@@ -334,5 +331,3 @@ function tls:close()
 end
 
 ffi.metatype('struct tls', {__index = tls})
-
-return M

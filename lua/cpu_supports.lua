@@ -14,6 +14,8 @@ local flags = {
 	avx2  = 0x0200,
 }
 
-return function(what)
-	return bit.band(C.cpu_supports(), assert(flags[what])) ~= 0
+local band = bit.band
+local assert = assert
+function cpu_supports(what)
+	return band(C.cpu_supports(), assert(flags[what])) ~= 0
 end

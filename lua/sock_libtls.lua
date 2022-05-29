@@ -5,10 +5,10 @@
 
 API
 
-	stls.config(opt) -> conf              create a shared config object
+	tls_config(opt) -> conf               create a shared config object
 	conf:free()                           free the config object
-	stls.client_stcp(tcp, servername, opt) -> cstcp  create a secure socket for a client
-	stls.server_stcp(tcp, opt) -> sstcp   create a secure socket for a server
+	client_stcp(tcp, servername, opt) -> cstcp  create a secure socket for a client
+	server_stcp(tcp, opt) -> sstcp        create a secure socket for a server
 	cstcp:connect(vhost)                  connect to a server
 	sstcp:accept() -> cstcp               accept a client connection
 	cstcp:recv()                          same semantics as `tcp:recv()`
@@ -73,16 +73,13 @@ A word on certificate revocation
 
 ]=]
 
-local sock = require'sock'
-local glue = require'glue'
-local tls = require'libtls'
-local ffi = require'ffi'
-local C = tls.C
+require'glue'
+require'sock'
+require'libtls'
 
 local stcp = {issocket = true, istcpsocket = true, istlssocket = true}
-local client_stcp = glue.update({}, sock.tcp_class)
-local server_stcp = glue.update({}, sock.tcp_class)
-local M = {}
+local client_stcp = update({}, tcp_class)
+local server_stcp = update({}, tcp_class)
 
 local w_bufs = {}
 local r_bufs = {}
@@ -105,7 +102,7 @@ local function free_buf_slot(i)
 	buf_freelist[buf_freelist_n] = i
 end
 
-local read_cb = ffi.cast('tls_read_cb', function(tls, buf, sz, i)
+local read_cb = cast('tls_read_cb', function(tls, buf, sz, i)
 	sz = tonumber(sz)
 	i = tonumber(i)
 	assert(i >= 1 and i <= bufs_n, i)
@@ -113,7 +110,7 @@ local read_cb = ffi.cast('tls_read_cb', function(tls, buf, sz, i)
 	if not r_buf then
 		r_bufs[2*i] = buf
 		r_bufs[2*i+1] = sz
-		return C.TLS_WANT_POLLIN
+		return TLS_WANT_POLLIN
 	else
 		assert(r_buf == buf)
 		assert(r_sz <= sz)
@@ -122,7 +119,7 @@ local read_cb = ffi.cast('tls_read_cb', function(tls, buf, sz, i)
 	end
 end)
 
-local write_cb = ffi.cast('tls_write_cb', function(tls, buf, sz, i)
+local write_cb = cast('tls_write_cb', function(tls, buf, sz, i)
 	sz = tonumber(sz)
 	i = tonumber(i)
 	assert(i >= 1 and i <= bufs_n, i)
@@ -130,7 +127,7 @@ local write_cb = ffi.cast('tls_write_cb', function(tls, buf, sz, i)
 	if not w_buf then
 		w_bufs[2*i] = buf
 		w_bufs[2*i+1] = sz
-		return C.TLS_WANT_POLLOUT
+		return TLS_WANT_POLLOUT
 	else
 		assert(w_buf == buf)
 		assert(w_sz <= sz)
@@ -197,15 +194,15 @@ function stcp:close(expires)
 end
 
 local function wrap_stcp(stcp_class, tcp, tls, buf_slot)
-	return glue.object(stcp_class, {
+	return object(stcp_class, {
 		tcp = tcp,
 		tls = tls,
 		buf_slot = buf_slot,
 	})
 end
 
-function M.client_stcp(tcp, servername, opt)
-	local tls, err = tls.client(opt)
+function _G.client_stcp(tcp, servername, opt)
+	local tls, err = tls_client(opt)
 	if not tls then
 		return nil, err
 	end
@@ -218,8 +215,8 @@ function M.client_stcp(tcp, servername, opt)
 	return wrap_stcp(client_stcp, tcp, tls, buf_slot)
 end
 
-function M.server_stcp(tcp, opt)
-	local tls, err = tls.server(opt)
+function _G.server_stcp(tcp, opt)
+	local tls, err = tls_server(opt)
 	if not tls then
 		return nil, err
 	end
@@ -249,9 +246,5 @@ function stcp:shutdown(mode)
 	return self.tcp:shutdown(mode)
 end
 
-glue.update(client_stcp, stcp)
-glue.update(server_stcp, stcp)
-
-M.config = tls.config
-
-return M
+update(client_stcp, stcp)
+update(server_stcp, stcp)

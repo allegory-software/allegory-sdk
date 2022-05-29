@@ -1,9 +1,7 @@
 
-local ffi = require'ffi'
-local bit = require'bit'
-assert(ffi.os == 'Windows', 'platform not Windows')
+assert(package.loaded.proc)
+assert(Windows, 'platform not Windows')
 
-local M = {}
 local proc = {type = 'process', debug_prefix = 'p'}
 proc.__index = proc
 
@@ -13,7 +11,7 @@ local winapi = require'winapi'
 require'winapi.process'
 require'winapi.thread'
 
-function M.env(k, v)
+function env(k, v)
 	if k then
 		if v ~= nil then
 			assert(winapi.SetEnvironmentVariable(k, v))
@@ -38,24 +36,24 @@ local error_classes = {
 	[0x005] = 'access_denied', --ERROR_ACCESS_DENIED
 }
 
-function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_handles)
+function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 	if type(cmd) == 'table' then
 		local t = {}
-		t[1] = M.quote_path_win(cmd[1])
+		t[1] = quote_path_win(cmd[1])
 		for i = 2, cmd.n or #cmd do
 			if cmd[i] then --nil and false args are skipped. pass '' to inject empt args.
-				t[#t+1] = M.quote_arg_win(cmd[i])
+				t[#t+1] = quote_arg_win(cmd[i])
 			end
 		end
-		cmd = table.concat(t, ' ')
+		cmd = concat(t, ' ')
 	end
 
 	local inp_rf, inp_wf
 	local out_rf, out_wf
 	local err_rf, err_wf
 
-	local self = setmetatable({async = async, cmd = cmd}, proc)
+	local self = setmetatable({cmd = cmd}, proc)
 
 	local function close_all()
 		if self.stdin then
@@ -72,23 +70,13 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 		end
 	end
 
-	local time = require'time'
-	self._clock = time.clock
-	if async then
-		local sock = require'sock'
-		self._sleep = sock.sleep
-	else
-		self._sleep = time.sleep
-	end
-
 	local si
 
 	if stdin or stdout or stderr then
 
 		if stdin == true then
-			local fs = require'fs'
-			inp_rf, inp_wf = fs.pipe{
-				write_async = async,
+			inp_rf, inp_wf = pipe{
+				write_async = true,
 				read_inheritable = true,
 			}
 			if not inp_rf then
@@ -103,9 +91,8 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 		end
 
 		if stdout == true then
-			local fs = require'fs'
-			out_rf, out_wf = fs.pipe{
-				read_async = async,
+			out_rf, out_wf = pipe{
+				read_async = true,
 				write_inheritable = true,
 			}
 			if not out_rf then
@@ -120,9 +107,8 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 		end
 
 		if stderr == true then
-			local fs = require'fs'
-			err_rf, err_wf = fs.pipe{
-				read_async = async,
+			err_rf, err_wf = pipe{
+				read_async = true,
 				write_inheritable = true,
 			}
 			if not err_rf then
@@ -159,7 +145,7 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 	local pi, err, errcode = winapi.CreateProcess(
 		cmd, env, dir, si, inherit_handles,
 			autokill
-				and bit.bor(
+				and bor(
 					winapi.CREATE_SUSPENDED, --so we can add it to a job before it starts
 					is_in_job and winapi.CREATE_BREAKAWAY_FROM_JOB or 0
 				)
@@ -187,8 +173,8 @@ function M.exec(cmd, env, dir, stdin, stdout, stderr, autokill, async, inherit_h
 	self.id                 = pi.dwProcessId
 	self.main_thread_id     = pi.dwThreadId
 
-	M.log('', 'exec', '%s', cmd)
-	M.live(self, '%s', cmd)
+	log('', 'proc', 'exec', '%s', cmd)
+	live(self, '%s', cmd)
 
 	return self
 end
@@ -204,7 +190,7 @@ function proc:forget()
 		self.id = false
 		self.main_thread_handle = false
 		self.main_thread_id = false
-		M.live(self, nil)
+		live(self, nil)
 	end
 end
 
@@ -244,8 +230,8 @@ function proc:wait(expires)
 	if not self.handle then
 		return nil, 'forgotten'
 	end
-	while self:status() == 'active' and self._clock() < (expires or 1/0) do
-		self._sleep(.1)
+	while self:status() == 'active' and clock() < (expires or 1/0) do
+		wait(.1)
 	end
 	local exit_code, err = self:exit_code()
 	if exit_code then
@@ -260,16 +246,14 @@ function proc:status() --finished | killed | active | forgotten
 	return code and 'finished' or err
 end
 
-function M.info(pid)
+function proc_info(pid)
 	return {} --NYI
 end
 
 function proc:info()
-	return M.info(self.pid)
+	return procinfo(self.pid)
 end
 
-function M.osinfo()
+function os_info()
 	return nil, 'NYI'
 end
-
-return M

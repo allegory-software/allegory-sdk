@@ -1,13 +1,13 @@
 
-local ffi = require'ffi'
-local bit = require'bit'
-assert(ffi.os == 'Linux' or ffi.os == 'OSX', 'platform not Linux or OSX')
+assert(package.loaded.proc)
+assert(Linux or OSX, 'platform not Linux or OSX')
 
-local M = {}
+local errno = ffi.errno
+
 local proc = {type = 'process', debug_prefix = 'p'}
 proc.__index = proc
 
-ffi.cdef[[
+cdef[[
 extern char **environ;
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
@@ -50,24 +50,22 @@ local error_classes = {
 	[13] = 'access_denied', --EACCES (file perms)
 }
 
-local C = ffi.C
+local C = C
 
-local char     = ffi.typeof'char[?]'
-local char_ptr = ffi.typeof'char*[?]'
-local int      = ffi.typeof'int[?]'
+local u8pa = typeof'char*[?]'
 
 local function check(ret, errno)
 	if ret then return ret end
 	if type(errno) == 'string' then return nil, errno end
-	errno = errno or ffi.errno()
+	errno = errno or errno()
 	local s = error_classes[errno]
 	if s then return nil, s end
 	local s = C.strerror(errno)
-	local s = s ~= nil and ffi.string(s) or 'Error '..errno
+	local s = str(s) or 'Error '..errno
 	return nil, s
 end
 
-function M.env(k, v)
+function env(k, v)
 	if k then
 		if v then
 			assert(C.setenv(k, tostring(v), 1) == 0)
@@ -81,7 +79,7 @@ function M.env(k, v)
 	local t = {}
 	local i = 0
 	while e[i] ~= nil do
-		local s = ffi.string(e[i])
+		local s = str(e[i])
 		local k,v = s:match'^([^=]*)=(.*)'
 		if k and k ~= '' then
 			t[k] = v
@@ -93,17 +91,17 @@ end
 
 local function getcwd()
 	local sz = 256
-	local buf = char(sz)
+	local buf = u8a(sz)
 	while true do
 		if C.getcwd(buf, sz) == nil then
-			if ffi.errno() ~= ERANGE then
+			if errno() ~= ERANGE then
 				return check()
 			else
 				sz = sz * 2
-				buf = char(sz)
+				buf = u8a(sz)
 			end
 		end
-		return ffi.string(buf)
+		return str(buf)
 	end
 end
 
@@ -111,7 +109,7 @@ local function close_fd(fd)
 	return C.close(fd) == 0
 end
 
-function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_handles)
+function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 	local cmd, args
 	if type(t) == 'table' then
@@ -150,14 +148,14 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		for i,s in ipairs(args) do
 			n = n + #s + 1
 		end
-		arg_buf = char(n)
-		arg_ptr = char_ptr(m + 1)
+		arg_buf = u8a(n)
+		arg_ptr = u8pa(m + 1)
 		local n = 0
-		ffi.copy(arg_buf, cmd, #cmd + 1)
+		copy(arg_buf, cmd, #cmd + 1)
 		arg_ptr[0] = arg_buf
 		n = n + #cmd + 1
 		for i,s in ipairs(args) do
-			ffi.copy(arg_buf + n, s, #s + 1)
+			copy(arg_buf + n, s, #s + 1)
 			arg_ptr[i] = arg_buf + n
 			n = n + #s + 1
 		end
@@ -174,34 +172,24 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 			n = n + #k + 1 + #v + 1
 			m = m + 1
 		end
-		env_buf = char(n)
-		env_ptr = char_ptr(m + 1)
+		env_buf = u8a(n)
+		env_ptr = u8pa(m + 1)
 		local i = 0
 		local n = 0
 		for k,v in pairs(env) do
 			v = tostring(v)
 			env_ptr[i] = env_buf + n
-			ffi.copy(env_buf + n, k, #k)
+			copy(env_buf + n, k, #k)
 			n = n + #k
 			env_buf[n] = string.byte('=')
 			n = n + 1
-			ffi.copy(env_buf + n, v, #v + 1)
+			copy(env_buf + n, v, #v + 1)
 			n = n + #v + 1
 		end
 		env_ptr[m] = nil
 	end
 
-	local self = setmetatable({async = async, cmd = cmd, args = args}, proc)
-
-	if async then
-		local sock = require'sock'
-		self._sleep = sock.sleep
-		self._clock = sock.clock
-	else
-		local time = require'time'
-		self._sleep = time.sleep
-		self._clock = time.clock
-	end
+	local self = setmetatable({cmd = cmd, args = args}, proc)
 
 	local errno_r_fd, errno_w_fd
 
@@ -236,7 +224,7 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 	end
 
 	--see https://stackoverflow.com/questions/1584956/how-to-handle-execvp-errors-after-fork
-	local pipefds = int(2)
+	local pipefds = u32a(2)
 	if C.pipe(pipefds) ~= 0 then
 		return check()
 	end
@@ -244,15 +232,14 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 	errno_w_fd = pipefds[1]
 
 	local flags = C.fcntl(errno_w_fd, F_GETFD)
-	local flags = bit.bor(flags, FD_CLOEXEC) --close on exec.
-	if C.fcntl(errno_w_fd, F_SETFD, ffi.cast('int', flags)) ~= 0 then
+	local flags = bor(flags, FD_CLOEXEC) --close on exec.
+	if C.fcntl(errno_w_fd, F_SETFD, cast('int', flags)) ~= 0 then
 		return check()
  	end
 
 	if stdin == true then
-		local fs = require'fs'
-		inp_rf, inp_wf = fs.pipe{
-			write_async = async,
+		inp_rf, inp_wf = pipe{
+			write_async = true,
 		}
 		if not inp_rf then
 			return check(nil, inp_wf)
@@ -263,9 +250,8 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 	end
 
 	if stdout == true then
-		local fs = require'fs'
-		out_rf, out_wf = fs.pipe{
-			read_async = async,
+		out_rf, out_wf = pipe{
+			read_async = true,
 		}
 		if not out_rf then
 			return check(nil, out_wf)
@@ -276,9 +262,8 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 	end
 
 	if stderr == true then
-		local fs = require'fs'
-		err_rf, err_wf = fs.pipe{
-			read_async = async,
+		err_rf, err_wf = pipe{
+			read_async = true,
 		}
 		if not err_rf then
 			return check(nil, err_wf)
@@ -300,8 +285,8 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		--put errno on the errno pipe and exit.
 		local function check(ret, err)
 			if ret then return ret end
-			local err = int(1, err or ffi.errno())
-			C.write(errno_w_fd, err, ffi.sizeof(err))
+			local err = u32a(1, err or errno())
+			C.write(errno_w_fd, err, sizeof(err))
 				--^^ this can fail but it should not block.
 			C._exit(0)
 		end
@@ -339,11 +324,11 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 		--check if exec failed by reading from the errno pipe.
 		assert(check(close_fd(errno_w_fd)))
 		errno_w_fd = nil
-		local err = int(1)
+		local err = u32a(1)
 		local n
 		repeat
-			n = C.read(errno_r_fd, err, ffi.sizeof(err))
-		until not (n == -1 and (ffi.errno() == EAGAIN or ffi.errno() == EINTR))
+			n = C.read(errno_r_fd, err, sizeof(err))
+		until not (n == -1 and (errno() == EAGAIN or errno() == EINTR))
 		assert(check(close_fd(errno_r_fd)))
 		errno_r_fd = nil
 		if n > 0 then
@@ -359,10 +344,10 @@ function M.exec(t, env, dir, stdin, stdout, stderr, autokill, async, inherit_han
 
 		self.pid = pid
 
-		if M.logging then
-			local s = M.quote_args(nil, cmd, unpack(args))
-			M.log('', 'exec', '%s', s)
-			M.live(self, '%s', s)
+		if logging then
+			local s = cmdline_quote_args(nil, cmd, unpack(args))
+			log('', 'proc', 'exec', '%s', s)
+			live(self, '%s', s)
 		end
 
 		return self
@@ -371,7 +356,7 @@ end
 
 function proc:forget()
 	if self.pid then
-		M.live(self, nil)
+		live(self, nil)
 	end
 	if self.stdin  then assert(self.stdin :close()) end
 	if self.stdout then assert(self.stdout:close()) end
@@ -395,7 +380,7 @@ function proc:exit_code()
 	if not self.pid then
 		return nil, 'forgotten'
 	end
-	local status = int(1)
+	local status = u32a(1)
 	local pid = C.waitpid(self.pid, status, WNOHANG)
 	if pid < 0 then
 		return check()
@@ -404,8 +389,8 @@ function proc:exit_code()
 		return nil, 'active'
 	end
 	--save the exit status so we can forget the process.
-	if bit.band(status[0], 0x7f) == 0 then --exited with exit code
-		self._exit_code = bit.rshift(bit.band(status[0], 0xff00), 8)
+	if band(status[0], 0x7f) == 0 then --exited with exit code
+		self._exit_code = shr(band(status[0], 0xff00), 8)
 	else
 		self._killed = true
 	end
@@ -416,8 +401,8 @@ function proc:wait(expires)
 	if not self.pid then
 		return nil, 'forgotten'
 	end
-	while self:status() == 'active' and self._clock() < (expires or 1/0) do
-		self._sleep(0.1)
+	while self:status() == 'active' and clock() < (expires or 1/0) do
+		wait(0.1)
 	end
 	local exit_code, err = self:exit_code()
 	if exit_code then
@@ -435,9 +420,9 @@ end
 --process state --------------------------------------------------------------
 
 local USER_HZ do
-	ffi.cdef'long int sysconf(int name);'
+	cdef'long int sysconf(int name);'
 	local _SC_CLK_TCK = 2
-	USER_HZ = tonumber(ffi.C.sysconf(2))
+	USER_HZ = tonumber(C.sysconf(2))
 	assert(USER_HZ ~= -1)
 end
 
@@ -477,7 +462,7 @@ local parse_stat do
 		'itrealvalue', N,
 		'starttime'  , T,
 		'vsize'      , N,
-		'rss'        , {'(-?%d+)', function(s) return tonumber(s) * require'fs'.pagesize() end},
+		'rss'        , {'(-?%d+)', function(s) return tonumber(s) * pagesize() end},
 		'rsslim'     , N,
 	}
 	local nt, pt, dt = {}, {}, {}
@@ -499,28 +484,25 @@ local parse_stat do
 		return pass(s:match(patt))
 	end
 end
-function M.info(pid)
-	local fs = require'fs'
-	local s, err = fs.load(('/proc/%d/stat'):format(pid or C.getpid()), true)
+function proc_info(pid)
+	local s, err = load(('/proc/%d/stat'):format(pid or C.getpid()), true)
 	if not s then return nil, err end
 	return parse_stat(s)
 end
 
 function proc:info()
-	return M.info(self.pid)
+	return proc_info(self.pid)
 end
 
-function M.osinfo()
-	local fs = require'fs'
-
-	local s, err = fs.load('/proc/meminfo', true)
+function os_info()
+	local s, err = load('/proc/meminfo', true)
 	if not s then return nil, err end
 	local total = tonumber(s:match'MemTotal:%s*(%d+) kB')
 	local avail = tonumber(s:match'MemAvailable:%s*(%d+) kB')
 	total = total and total * 1024
 	avail = avail and avail * 1024
 
-	local s, err = fs.load('/proc/stat', true)
+	local s, err = load('/proc/stat', true)
 	if not s then return nil, err end
 	local cputimes = {}
 	for cpu, user, nice, sys, idle in s:gmatch'cpu(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)' do
@@ -532,7 +514,7 @@ function M.osinfo()
 		cputimes[cpu+1] = {user = user, nice = nice, sys = sys, idle = idle}
 	end
 
-	local s, err = fs.load('/proc/uptime', true)
+	local s, err = load('/proc/uptime', true)
 	if not s then return nil, err end
 	local uptime = tonumber(s:match'^%d+')
 
@@ -543,5 +525,3 @@ function M.osinfo()
 		cputimes = cputimes, --per-cpu times
 	}
 end
-
-return M

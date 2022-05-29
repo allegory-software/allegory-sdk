@@ -9,14 +9,14 @@
 		- raising & catching errors in event handlers
 
 SERVER
-	mess.listen(host, port, onaccept, [onerror], [server_name]) -> server
+	mess_listen(host, port, onaccept, [onerror], [server_name]) -> server
 	onaccept(server, channel)
 	onerror(server, error)
 
 	server:stop()
 
 CLIENT
-	mess.connect(host, port, [expires], [tcp_opt]) -> channel
+	mess_connect(host, port, [expires], [tcp_opt]) -> channel
 
 CHANNEL
 	channel:send(msg, [expires]) -> ok | false,err
@@ -31,26 +31,25 @@ CHANNEL
 	channel:onclose(fn)
 
 PROTOCOL
-	mess.protocol(tcp) -> channel
+	mess_protocol(tcp) -> channel
 
 ]]
 
-local errors = require'errors'
-local sock = require'sock'
+require'glue'
+require'sock'
 local buffer = require'string.buffer'
-local ffi = require'ffi'
-local glue = require'glue'
 
-local cast, u32p = ffi.cast, glue.u32p
+local
+	cast, u32p =
+	cast, u32p
 
-local check_io, checkp, check, protect = errors.tcp_protocol_errors'mess'
+local check_io, checkp, check, protect = tcp_protocol_errors'mess'
 
-local M = {}
 local channel = {maxlen = 16 * 1024^2}
 
-function M.protocol(tcp)
+function mess_protocol(tcp)
 
-	local chan = glue.update({tcp = tcp}, channel)
+	local chan = update({tcp = tcp}, channel)
 
 	local buf = buffer.new()
 	chan.send = protect(function(self, msg, exp)
@@ -82,28 +81,28 @@ end
 
 local function wrapfn(event, fn, onerror, self)
 	return function(...)
-		local ok, err = errors.pcall(fn, ...)
+		local ok, err = pcall(fn, ...)
 		if not ok then
 			if onerror then
 				onerror(self, err)
 			end
-			sock.log('ERROR', 'mess', event, '%s', err)
+			log('ERROR', 'mess', event, '%s', err)
 		end
 	end
 end
 
-function M.listen(host, port, onaccept, onerror, server_name)
+function mess_listen(host, port, onaccept, onerror, server_name)
 
 	server_name = server_name or 'mess'
 
-	local tcp = assert(sock.tcp())
+	local tcp = assert(tcp())
 
 	local server = {tcp = tcp}
 
 	check_io(server, tcp:setopt('reuseaddr', true))
 	check_io(server, tcp:listen(host, port))
 
-	sock.liveadd(tcp, server_name)
+	liveadd(tcp, server_name)
 
 	local stop
 	function server:stop()
@@ -112,7 +111,7 @@ function M.listen(host, port, onaccept, onerror, server_name)
 	end
 
 	local onaccept = wrapfn('accept', onaccept, onerror, server)
-	sock.resume(sock.thread(function()
+	resume(thread(function()
 		while not stop do
 			local ctcp, err, retry = tcp:accept()
 			if not ctcp then
@@ -120,15 +119,15 @@ function M.listen(host, port, onaccept, onerror, server_name)
 					break
 				elseif retry then
 					--temporary network error. retry without killing the CPU.
-					sock.sleep(0.2)
+					wait(0.2)
 					goto skip
 				else
 					check_io(server, nil, err)
 				end
 			end
-			sock.liveadd(ctcp, server_name)
-			sock.resume(sock.thread(function()
-				local chan = M.protocol(ctcp)
+			liveadd(ctcp, server_name)
+			resume(thread(function()
+				local chan = mess_protocol(ctcp)
 				onaccept(server, chan)
 				ctcp:close()
 			end, server_name..'-accepted %s', ctcp))
@@ -139,31 +138,31 @@ function M.listen(host, port, onaccept, onerror, server_name)
 	return server
 end
 
-function M.connect(host, port, exp, tcp_opt)
-	local tcp = assert(sock.tcp())
-	glue.update(tcp, tcp_opt)
+function mess_connect(host, port, exp, tcp_opt)
+	local tcp = assert(tcp())
+	update(tcp, tcp_opt)
 	local ok, err = tcp:connect(host, port, exp)
 	if not ok then
 		tcp:close()
 		return nil, err
 	end
-	return M.protocol(tcp)
+	return mess_protocol(tcp)
 end
 
 function channel:close       ()        return self.tcp:close() end
 function channel:onclose     (fn)      return self.tcp:onclose(fn) end
 function channel:closed      ()        return self.tcp:closed() end
-function channel:sleep_job   ()        return self.tcp:sleep_job() end
-function channel:sleep_until (expires) return self.tcp:sleep_until(expires) end
-function channel:sleep       (timeout) return self.tcp:sleep(timeout) end
+function channel:wait_job    ()        return self.tcp:wait_job() end
+function channel:wait_until  (expires) return self.tcp:wait_until(expires) end
+function channel:wait        (timeout) return self.tcp:wait(timeout) end
 
 function channel:recvall(onmessage, onerror)
 	local onmessage = wrapfn('recvall', onmessage, onerror, self)
 	while not self:closed() do
 		local ok, msg = self:recv()
 		if not ok then
-			if not errors.is(msg, 'tcp') then
-				sock.log('ERROR', 'mess', 'recv', '%s', msg)
+			if not iserror(msg, 'tcp') then
+				log('ERROR', 'mess', 'recv', '%s', msg)
 			end
 		else
 			onmessage(self, msg)
@@ -173,18 +172,16 @@ end
 
 if not ... then
 
-	local mess = M
-	local pp = require'pp'
-	local logging = require'logging'
-	sock.logging = logging
+	require'glue'
+	require'logging'
 	logging.verbose = true
 	logging.debug = true
 
-	sock.resume(sock.thread(function()
+	resume(thread(function()
 
-		local server = mess.listen('127.0.0.1', '1234', function(self, chan)
+		local server = mess_listen('127.0.0.1', '1234', function(self, chan)
 			chan:recvall(function(self, msg)
-				pp('recv', msg)
+				pr('recv', msg)
 			end)
 			chan:close()
 			self:stop()
@@ -192,17 +189,17 @@ if not ... then
 
 	end))
 
-	sock.resume(sock.thread(function()
+	resume(thread(function()
 
-		local chan = mess.connect('127.0.0.1', '1234')
-		for i = 1, 100 do
+		local chan = mess_connect('127.0.0.1', '1234', clock() + 1)
+		for i = 1, 20 do
 			assert(chan:send{a = i, b = 2*i, i = tostring(i)})
 		end
 		chan:close()
 
 	end))
 
-	sock.start()
+	start()
 
 end
 

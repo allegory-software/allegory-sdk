@@ -1,6 +1,6 @@
-local luastate = require'luastate'
+require'luastate'
 
-local lua = luastate.open()
+local lua = luastate()
 lua:openlibs('base')
 lua:openlibs()
 
@@ -76,3 +76,4 @@ f2()
 
 assert(lua:gettop() == 0)
 lua:close()
+print'ok'

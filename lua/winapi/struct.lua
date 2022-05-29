@@ -22,7 +22,7 @@ function Struct:set(cdata, field, value) --hot code
 	if def then
 		local name, mask, setter = unpack(def, 1, 3)
 		if mask then
-			cdata[self.mask] = setbit(cdata[self.mask] or 0, mask, value ~= nil)
+			cdata[self.mask] = setbit(value ~= nil, mask, cdata[self.mask])
 		end
 		if name then
 			if setter then
@@ -61,8 +61,8 @@ function Struct:set(cdata, field, value) --hot code
 				local datafield, maskfield, prefix = unpack(def, 1, 3)
 				local mask = _M[prefix..'_'..bitname:upper()]
 				if mask then
-					cdata[maskfield] = setbit(cdata[maskfield] or 0, mask, value ~= nil)
-					cdata[datafield] = setbit(cdata[datafield] or 0, mask, value)
+					cdata[maskfield] = setbit(value ~= nil, mask, cdata[maskfield])
+					cdata[datafield] = setbit(value       , mask, cdata[datafield])
 					return
 				end
 			end

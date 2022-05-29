@@ -1,7 +1,7 @@
 
-local dlist = require'linkedlist'
+require'linkedlist'
 
-local list = dlist()
+local list = linkedlist()
 
 local function test(t) --test length and list traversal in both directions
 	assert(list.length == #t)

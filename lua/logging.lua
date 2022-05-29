@@ -5,12 +5,9 @@
 
 LOGGING
 	logging.log(severity, module, event, fmt, ...)
-	logging.note(module, event, fmt, ...)
-	logging.dbg(module, event, fmt, ...)
-	logging.warnif(module, event, condition, fmt, ...)
-	logging.logerror(module, event, fmt, ...)
 	logging.logvar(k, v)
 	logging.live(e, [fmt, ...] | nil)
+	pr(...)
 UTILS
 	logging.arg(v) -> s
 	logging.printarg(v) -> s
@@ -37,18 +34,23 @@ Logging is done to stderr by default. To start logging to a file, call
 logging:tofile(). To start logging to a server, call logging:toserver().
 You can call both.
 
+
+LOGGING API
+
+	log(severity, module, event, fmt, ...)
+	loglive(e, [fmt, ...] | nil)
+	logliveadd(e, fmt, ...)
+
+	logarg(v) -> s
+	logprintarg(v) -> s
+	logargs(...) -> ...
+	logprintargs(...) -> ...
+
 ]]
 
-local ffi = require'ffi'
-local time = require'time'
-local pp = require'pp'
-local glue = require'glue'
+require'glue'
 
-local clock = time.clock
-local time = time.time
-local _ = string.format
-
-local logging = {
+logging = {
 	quiet = false,
 	verbose = false,
 	debug = false,
@@ -61,7 +63,7 @@ local logging = {
 
 function logging:tofile(logfile, max_size)
 
-	local fs = require'fs'
+	require'fs'
 
 	local logfile0 = logfile:gsub('(%.[^%.]+)$', '0%1')
 	if logfile0 == logfile then logfile0 = logfile..'0' end
@@ -72,9 +74,9 @@ function logging:tofile(logfile, max_size)
 		self.logto(false, false, ...)
 	end
 
-	local function open()
+	local function open_logfile()
 		if f then return true end
-		f = fs.open(logfile, {mode = 'a', log = log_locally})
+		f = open(logfile, {mode = 'a', log = log_locally})
 		if not f then return end
 		size = f:attr'size'
 		if not f then return end
@@ -86,14 +88,14 @@ function logging:tofile(logfile, max_size)
 	local function rotate(len)
 		if max_size and size + len > max_size / 2 then
 			f:close(); f = nil
-			if not fs.move(logfile, logfile0) then return end
-			if not open() then return end
+			if not try_mv(logfile, logfile0) then return end
+			if not open_logfile() then return end
 		end
 		return true
 	end
 
 	function self:logtofile(s)
-		if not open() then return end
+		if not open_logfile() then return end
 		if not rotate(#s + 1) then return end
 		size = size + #s + 1
 		if not f:write(s) then return end
@@ -118,15 +120,15 @@ local logvar_message --fw. decl.
 
 function logging:toserver(host, port, queue_size, timeout)
 
-	local sock = require'sock'
-	local queue = require'queue'
-	local mess = require'mess'
+	require'sock'
+	require'queue'
+	require'mess'
 
 	queue_size = queue_size or logging.queue_size
 	timeout = timeout or logging.timeout
 
 	local chan
-	local reconn_sleeper
+	local reconn_wait_job
 	local stop
 
 	local function check_io(ret, ...)
@@ -142,7 +144,7 @@ function logging:toserver(host, port, queue_size, timeout)
 			local function log_locally(...)
 				self.logto(false, false, ...)
 			end
-			chan = mess.connect(host, port, exp, {log = log_locally})
+			chan = mess_connect(host, port, exp, {log = log_locally})
 
 			if chan then
 
@@ -153,13 +155,13 @@ function logging:toserver(host, port, queue_size, timeout)
 
 				--create RPC thread/loop
 				self.liveadd(chan.tcp, 'logging')
-				sock.resume(sock.thread(function()
+				resume(thread(function()
 					while not stop do
 						local ok, cmd_args = check_io(chan:recv())
 						if not ok then break end
 						if type(cmd_args) == 'table' then
 							local f = self.rpc[cmd_args[1]]
-							if f then f(self, glue.unpack(cmd_args, 2)) end
+							if f then f(self, unpack(cmd_args, 2)) end
 						end
 					end
 				end, 'logging-rpc %s', chan.tcp))
@@ -169,18 +171,18 @@ function logging:toserver(host, port, queue_size, timeout)
 
 			--wait because 'connection_refused' error comes instantly on Linux.
 			if not stop and exp > clock() + 0.2 then
-				reconn_sleeper = sock.sleep_job()
-				reconn_sleeper:sleep_until(exp)
-				reconn_sleeper = nil
+				reconn_wait_job = wait_job()
+				reconn_wait_job:wait_until(exp)
+				reconn_wait_job = nil
 			end
 		end
 		return false
 	end
 
-	local queue = queue.new(queue_size or 1/0)
+	local queue = queue(queue_size or 1/0)
 	local send_thread_suspended = true
 
-	local send_thread = sock.thread(function()
+	local send_thread = thread(function()
 		send_thread_suspended = false
 		while not stop do
 			local msg = queue:peek()
@@ -192,7 +194,7 @@ function logging:toserver(host, port, queue_size, timeout)
 				end
 			else
 				send_thread_suspended = true
-				sock.suspend()
+				suspend()
 				send_thread_suspended = false
 			end
 		end
@@ -205,7 +207,7 @@ function logging:toserver(host, port, queue_size, timeout)
 			queue:push(msg)
 		end
 		if send_thread_suspended then
-			sock.resume(send_thread)
+			resume(send_thread)
 		end
 	end
 
@@ -213,9 +215,9 @@ function logging:toserver(host, port, queue_size, timeout)
 		stop = true
 		check_io()
 		if send_thread_suspended then
-			sock.resume(send_thread)
-		elseif reconn_sleeper then
-			reconn_sleeper:wakeup()
+			resume(send_thread)
+		elseif reconn_wait_job then
+			reconn_wait_job:resume()
 		end
 	end
 
@@ -309,8 +311,8 @@ local pp_opt_compact = {
 	indent = false,
 }
 local function pp_compact(v)
-	local s = pp.format(v, pp_opt)
-	return #s < 50 and pp.format(v, pp_opt_compact) or s
+	local s = pp(v, pp_opt)
+	return #s < 50 and pp(v, pp_opt_compact) or s
 end
 
 local function debug_arg(v)
@@ -333,7 +335,7 @@ local function debug_arg_pp(v)
 	local v = debug_arg(v)
 	if v:find('\n', 1, true) then --multiline, make room for it.
 		v = v:gsub('\r\n', '\n')
-		v = glue.outdent(v)
+		v = outdent(v)
 		v = v:gsub('\t', '   ')
 		v = '\n\n'..v..'\n'
 	end
@@ -364,6 +366,10 @@ local function fmtargs(self, fmt, ...)
 end
 
 local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
+	if not self.filter then
+		pr(self)
+		exit()
+	end
 	if self.filter[severity] then return end
 	if self.filter[module  ] then return end
 	if self.filter[event   ] then return end
@@ -377,7 +383,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 	end
 	if msg and msg:find('\n', 1, true) then --multiline
 		local arg1_multiline = msg:find'^\n\n'
-		msg = glue.outdent(msg, '\t')
+		msg = outdent(msg, '\t')
 		if not arg1_multiline then
 			msg = '\n\n'..msg..'\n'
 		end
@@ -385,7 +391,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
 		local entry = (self.logtofile or not self.quiet)
 			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
-				env, os.date('%Y-%m-%d %H:%M:%S', time), severity,
+				env, date('%Y-%m-%d %H:%M:%S', time), severity,
 				module or '', (event or ''):sub(1, 8),
 				debug_arg_pp((coroutine.running())), msg or '')
 		if tofile and self.logtofile then
@@ -404,14 +410,8 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 		end
 	end
 end
-local function log      (self, ...) logto(self, true, true, ...) end
-local function note     (self, ...) log(self, 'note', ...) end
-local function dbg      (self, ...) log(self, '', ...) end
-local function logerror (self, ...) log(self, 'ERROR', ...) end
-
-local function warnif(self, module, event, cond, ...)
-	if not cond then return end
-	log(self, 'WARN', module, event, ...)
+local function log(self, ...)
+	logto(self, true, true, ...)
 end
 
 --[[local]] function logvar_message(self, k, v)
@@ -449,10 +449,6 @@ end
 local function init(self)
 	self.logto    = function(...) return logto    (self, ...) end
 	self.log      = function(...) return log      (self, ...) end
-	self.note     = function(...) return note     (self, ...) end
-	self.dbg      = function(...) return dbg      (self, ...) end
-	self.warnif   = function(...) return warnif   (self, ...) end
-	self.logerror = function(...) return logerror (self, ...) end
 	self.logvar   = function(...) return logvar   (self, ...) end
 	self.live     = function(...) return live     (self, ...) end
 	self.liveadd  = function(...) return liveadd  (self, ...) end
@@ -480,7 +476,7 @@ function logging.rpc:get_procinfo()
 	local proc = require'proc'
 	local t = proc.info()
 	local pt = proc.osinfo()
-	local ft = fs.info'/'
+	local ft = fs_info'/'
 	self.logvar('procinfo', {
 		clock    = clock(),
 		utime    = t and t.utime,
@@ -500,7 +496,7 @@ end
 
 function logging.rpc:get_osinfo()
 	local pt = proc.osinfo()
-	local ft = fs.info'/'
+	local ft = fs_info'/'
 	self.logvar('osinfo', {
 		clock    = clock(),
 		uptime   = pt and pt.uptime,
@@ -545,41 +541,46 @@ function logging.new()
 	return init(setmetatable({}, logging))
 end
 
+_G.log          = logging.log
+_G.live         = logging.live
+_G.liveadd      = logging.liveadd
+_G.logarg       = logging.arg
+_G.logprintarg  = logging.printarg
+_G.logargs      = logging.args
+_G.logprintargs = logging.printargs
+
+
 if not ... then
 
-	local sock = require'sock'
+	require'sock'
+	require'fs'
 
-	local logging = logging.new()
+	local log = _G.log
 
-	sock.resume(sock.thread(function()
-		sock.sleep(5)
+	resume(thread(function()
+		wait(5)
 		logging:toserver_stop()
 		print'told to stop'
 	end))
 
-	sock.run(function()
+	run(function()
 
 		logging.debug = true
 
 		logging:tofile('test.log', 64000)
-		logging:toserver('127.0.0.1', 1234, 998, .5)
+		logging:toserver('127.0.0.1', 1234, 998, 1)
 
 		for i=1,1000 do
-			logging.note('test-m', 'test-ev', 'foo %d bar', i)
+			log('note', 'test-m', 'test-ev', 'foo %d bar', i)
 		end
 
-		local sock = require'sock'
-		local fs = require'fs'
+		local s1 = tcp()
+		local s2 = tcp()
+		local t1 = thread(function() end)
+		local t2 = thread(function() end)
 
-		local s1 = sock.tcp()
-		local s2 = sock.tcp()
-		local t1 = coroutine.create(function() end)
-		local t2 = coroutine.create(function() end)
-
-		logging.dbg('test-m', 'test-ev', '%s %s %s %s\nanother thing', s1, s2, t1, t2)
+		log('', 'test-m', 'test-ev', '%s %s %s %s\nanother thing', s1, s2, t1, t2)
 
 	end)
 
 end
-
-return logging

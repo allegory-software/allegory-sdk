@@ -3,7 +3,7 @@
 	Multipart MIME encoding.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	multipart.new(type, [write], [boundary]) -> m
+	multipart(type, [write], [boundary]) -> m
 	m:add_raw(s)
 	m:add_base64(s)
 	m:add_part(headers)
@@ -13,7 +13,7 @@
 	m:add_multipart(type) -> m
 	m:finish()
 
-	multipart.email(msg) -> s
+	multipart_mail(msg) -> s
 		msg.text
 		msg.html                    '<img src="@foo">'
 		msg.inlines                 {{id='@foo', contents=},...}
@@ -21,18 +21,16 @@
 
 ]=]
 
-local glue = require'glue'
-local b64 = require'base64'.encode
-local _ = string.format
-local sortedpairs = glue.sortedpairs
+require'glue'
+require'base64'
 
-local multipart = {utf8_headers = {subject=1}}
+local mp = {utf8_headers = {subject=1}}
 
 local function encode(s)
-	return _('=?utf-8?B?%s?=', b64(s))
+	return _('=?utf-8?B?%s?=', base64_encode(s))
 end
 
-function multipart.new(multipart_type, write, boundary)
+function multipart(multipart_type, write, boundary)
 
 	local t
 	if not write then
@@ -42,8 +40,8 @@ function multipart.new(multipart_type, write, boundary)
 		end
 	end
 
-	local m = glue.object(multipart)
-	boundary = boundary or glue.tohex(glue.random_string(19))
+	local m = object(mp)
+	boundary = boundary or tohex(random_string(19))
 	m.content_type = _('multipart/%s; boundary=%s', multipart_type, boundary)
 
 	local function cmp(a, b) return tostring(a) < tostring(b) end
@@ -88,7 +86,7 @@ function multipart.new(multipart_type, write, boundary)
 	function m:finish()
 		write'\r\n--'; write(boundary); write'--\r\n'
 		if t then
-			return table.concat(t)
+			return concat(t)
 		end
 	end
 
@@ -97,11 +95,11 @@ function multipart.new(multipart_type, write, boundary)
 	end
 
 	function m:add_base64(s)
-		write(b64(s, nil, nil, nil, 76))
+		write(base64_encode(s, nil, nil, nil, 76))
 	end
 
 	function m:add_multipart(type)
-		local m = multipart.new(type, write)
+		local m = multipart(type, write)
 		self:add_part{content_type = m.content_type}
 		return m
 	end
@@ -138,8 +136,8 @@ function multipart.new(multipart_type, write, boundary)
 end
 
 --https://stackoverflow.com/questions/3902455/mail-multipart-alternative-vs-multipart-mixed
-function multipart.mail(msg)
-	local mix = multipart.new'mixed'
+function multipart_mail(msg)
+	local mix = multipart'mixed'
 	local alt = mix:add_multipart'alternative'
    if msg.text then
 		alt:add_part{
@@ -181,9 +179,7 @@ end
 
 if not ... then
 
-	local fs = require'fs'
-
-	local req = multipart.mail{
+	local req = multipart_mail{
 		from = 'thedude@dude.com',
 		text = 'Hello Dude!',
 		html = '<h1>Hello</h1><p>Hello Dude</p>',
@@ -191,12 +187,12 @@ if not ... then
 			{
 				cid = 'img1',
 				filename = 'progressive.jpg',
-				contents = fs.load'../tests/jpeg_test/progressive.jpg',
+				contents = load'../tests/jpeg_test/progressive.jpg',
 			},
 			{
 				cid = 'img2',
 				filename = 'birds.jpg',
-				contents = fs.load'../tests/pillow_test/birds.jpg',
+				contents = load'../tests/pillow_test/birds.jpg',
 			},
 		},
 		attachments = {
@@ -216,5 +212,3 @@ if not ... then
 	pr((req.message:gsub('\r', '')))
 
 end
-
-return multipart

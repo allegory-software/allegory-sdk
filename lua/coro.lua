@@ -33,9 +33,8 @@ RATIONALE
 	* a finalizer can be specified to run when the coroutine finishes (whether
 	  with an error or not) and can change the outcome of the coroutine (error
 	  or success), its return values, and the transfer coroutine.
-	* `coro.pcall` can be replaced with `errors.pcall` to add tracebacks.
-	* threads can be named for live-tracking with `logging.live()`
-	  if the logging module is made available.
+	* `coro.pcall` can be replaced to add tracebacks.
+	* `coro.live` can be replaced for live-tracking threads.
 
 coro.create(f, [onfinish], [fmt, ...]) -> thread
 
@@ -62,7 +61,7 @@ coro.transfer(thread[, ...]) -> ...
 	resumed into) must finish by transferring control to another coroutine
 	(or to the main thread) otherwise an error is raised.
 
-coro.ptransfer(thread[, ok, ...]) -> ok, ... | nil, err
+coro.transfer_with(thread[, ok, ...]) -> ok, ... | nil, err
 
 	Protected transfer: a low-level variant of `coro.transfer()` that doesn't
 	raise, and which can raise an error into the waiting target thread.
@@ -71,17 +70,10 @@ return coro.finish(thread, ...)
 
 	Finish the coroutine by transferring control to another thread.
 
-return coro.pfinish(thread, ok, ...)
+return coro.finish_with(thread, ok, ...)
 
 	Finish the coroutine by transferring control to another thread, possibly
-	raising an error in that thread analogous to ptransfer.
-
-coro.install() -> old_coroutine_module
-
-	Replace `_G.coroutine` with `coro` and return the old coroutine module.
-	This enables coroutine-based-generators-over-abstract-I/O-callbacks
-	from external modules to work with scheduled I/O functions which call
-	`coro.transfer()` inside.
+	raising an error in that thread analogous to transfer_with.
 
 coro.yield(...) -> ...
 
@@ -92,7 +84,7 @@ coro.resume(thread, ...) -> true, ... | false, err
 
 	Behaves like standard coroutine.resume().
 
-coro.presume(thread, ok, ...) -> true, ... | false, err
+coro.resume_with(thread, ok, ...) -> true, ... | false, err
 
 	Like resume() but can resume the target thread by raising an error in it.
 
@@ -126,10 +118,6 @@ coro.safewrap(f, [onfinish], [fmt, ...]) -> wrapped, thread
 	even if said library uses coroutines itself and wouldn't normally allow
 	the callbacks to yield.
 
-coro.logging = require'logging'
-
-	Enable error logging and live-tracking of threads.
-
 WHY IT WORKS
 
 	This works because calling resume() from a thread is a lie: instead of
@@ -160,10 +148,7 @@ assert(is_main, 'coro must be loaded from the main thread')
 local current = main
 local coro = {main = main, pcall = pcall}
 
-function coro.live(thread, ...)
-	local logging = coro.logging
-	if logging then return logging.live(thread, ...) end
-end
+function coro.live() end --stub
 
 local function unprotect(ok, ...)
 	if not ok then
@@ -173,7 +158,7 @@ local function unprotect(ok, ...)
 end
 
 local FIN = {}
-function coro.pfinish(thread, ok, ...)
+function coro.finish_with(thread, ok, ...)
 	return FIN, thread, ok, ...
 end
 function coro.finish(thread, ...)
@@ -202,7 +187,7 @@ function coro.create(f, onfinish, fmt, ...)
 	onfinish = onfinish or onfinish_pass
 	local thread
 	thread = cocreate(function(ok, ...)
-		if not ok then --ptransferred into with an error.
+		if not ok then --transferred into with an error.
 			return finish(thread, onfinish(thread, false, ...))
 		end
 		return finish(thread, onfinish(thread, coro.pcall(f, ...)))
@@ -231,7 +216,7 @@ local function go(thread, ok, ...)
 	return go(select(2, resume(thread, ok, ...))) --tail call
 end
 
-local function ptransfer(thread, ok, ...)
+local function transfer_with(thread, ok, ...)
 	if type(thread) ~= 'thread' then
 		error('coroutine expected, got: '..type(thread), 2)
 	end
@@ -246,25 +231,25 @@ local function ptransfer(thread, ok, ...)
 end
 
 local function transfer(thread, ...)
-	return unprotect(ptransfer(thread, true, ...))
+	return unprotect(transfer_with(thread, true, ...))
 end
 
-coro.ptransfer = ptransfer
+coro.transfer_with = transfer_with
 coro.transfer = transfer
 
 local function remove_caller(thread, ...)
 	callers[thread] = nil
 	return ...
 end
-local function presume(thread, ok, ...)
+local function resume_with(thread, ok, ...)
 	assert(thread ~= current, 'trying to resume the running thread')
 	assert(thread ~= main, 'trying to resume the main thread')
 	callers[thread] = current
-	return remove_caller(thread, ptransfer(thread, ok, ...))
+	return remove_caller(thread, transfer_with(thread, ok, ...))
 end
-coro.presume = presume
+coro.resume_with = resume_with
 function coro.resume(thread, ...)
-	return presume(thread, true, ...)
+	return resume_with(thread, true, ...)
 end
 
 function coro.yield(...)
@@ -310,11 +295,6 @@ function coro.safewrap(f, onfinish, fmt, ...)
 		ct = current
 		return transfer(yt, ...)
 	end, yt
-end
-
-function coro.install()
-	_G.coroutine = coro
-	return coroutine
 end
 
 return coro

@@ -1,6 +1,6 @@
-local queue = require'queue'
+require'queue'
 
-local q = queue.new(4)
+local q = queue(4)
 local function test(s)
 	local t = {}
 	for s in q:items() do t[#t+1] = s end
@@ -35,7 +35,7 @@ assert(q:pop())
 assert(q:push'e')
 assert(q:push'f')
 test'cdef'
-assert(q:find'c' == 3)
-assert(q:find'd' == 4)
-assert(q:find'e' == 1)
-assert(q:find'f' == 2)
+assert(q:exists'c')
+assert(q:exists'd')
+assert(q:exists'e')
+assert(q:exists'f')

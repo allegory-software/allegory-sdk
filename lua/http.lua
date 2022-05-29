@@ -9,7 +9,7 @@
 	GZip compression can be enabled with http.zlib = require'zlib'.
 	All functions return nil,err on I/O errors.
 
-http:new(opt) -> http
+http(opt) -> http
 
 	Create a HTTP protocol object that should be used on a single freshly open
 	HTTP or HTTPS connection to either perform HTTP requests on it (as client)
@@ -59,19 +59,15 @@ http:send_response(sres) -> true | nil,err   | Send a response.
 
 if not ... then require'http_server_test'; return end
 
-local clock = require'time'.clock
-local glue = require'glue'
-local errors = require'errors'
-local linebuffer = require'linebuffer'
+require'glue'
+require'linebuffer'
 local http_headers = require'http_headers'
-local ffi = require'ffi'
-local _ = string.format
 
 local http = {type = 'http_connection', debug_prefix = 'H'}
 
 --error handling -------------------------------------------------------------
 
-local check_io, checkp, _check, protect = errors.tcp_protocol_errors'http'
+local check_io, checkp, _check, protect = tcp_protocol_errors'http'
 
 http.check_io = check_io
 http.checkp = checkp
@@ -219,7 +215,7 @@ http.remove = {}
 --passing a table as value will generate duplicate headers for each value
 --  (set-cookie will come like that because it's not safe to send it folded).
 function http:send_headers(headers)
-	for k, v in glue.sortedpairs(headers) do
+	for k, v in sortedpairs(headers) do
 		if v ~= http.remove then
 			k, v = self:format_header(k, v)
 			if v then
@@ -334,7 +330,7 @@ function http:gzip_decoder(format, write)
 	assert(self.zlib, 'zlib not loaded')
 	--NOTE: gzip threads are abandoned in suspended state on errors.
 	--That doesn't leak them but don't expect them to finish!
-	local decode = self.cowrap(function(yield)
+	local decode = cowrap(function(yield)
 		assert(self.zlib.inflate(yield, write, nil, format))
 	end, 'http-gzip-decode %s', self.tcp)
 	decode()
@@ -377,13 +373,13 @@ function http:gzip_encoder(format, content, content_size)
 		--and it will get gc'ed along with the zlib object. The reason we go
 		--the extra mile to make sure it always finishes is so it gets removed
 		--from the logging.live list immediately.
-		local content, gzip_thread = self.cowrap(function(yield, s)
+		local content, gzip_thread = cowrap(function(yield, s)
 			if s == false then return end --abort on entry
 			local ok, err = self.zlib.deflate(content, yield, nil, format)
 			assert(ok or err == 'abort', err)
 		end, 'http-gzip-encode %s', self.tcp)
 		function self:after_send_response()
-			if self.threadstatus(gzip_thread) ~= 'dead' then
+			if threadstatus(gzip_thread) ~= 'dead' then
 				content(false, 'abort')
 			end
 		end
@@ -427,7 +423,7 @@ function http:send_body(content, content_size, transfer_encoding, close)
 		--would cut short the client's pending input stream (it's how TCP works).
 		--TODO: limit how much traffic we absorb for this.
 		self.tcp:shutdown('w', self.send_expires)
-		self:read_until_closed(glue.noop)
+		self:read_until_closed(noop)
 		self:close(self.send_expires)
 	end
 end
@@ -435,7 +431,7 @@ end
 function http:read_body_to_writer(headers, write, from_server, close, state)
 	if state then state.body_was_read = false end
 	write = write and self:chained_decoder(write, headers['content-encoding'])
-		or glue.noop
+		or noop
 	local te = headers['transfer-encoding']
 	if te and te[#te] == 'chunked' then
 		self:read_chunks(write)
@@ -457,7 +453,7 @@ end
 function http:read_body(headers, write, from_server, close, state)
 	if write == 'string' or write == 'buffer' then
 		local to_string = write == 'string'
-		local write, collect = glue.dynarray_pump()
+		local write, collect = dynarray_pump()
 		self:read_body_to_writer(headers, write, from_server, close, state)
 		local buf, sz = collect()
 		if to_string then
@@ -467,7 +463,7 @@ function http:read_body(headers, write, from_server, close, state)
 		end
 	elseif write == 'reader' then
 		--don't read the body, but return a reader function for it instead.
-		return (self.cowrap(function(yield)
+		return (cowrap(function(yield)
 			self:read_body_to_writer(headers, yield, from_server, close, state)
 			return nil, 'eof'
 		end, 'http-read-body %s', self.tcp))
@@ -483,7 +479,7 @@ local creq = {}
 http.client_request_class = creq
 
 function http:build_request(opt, cookies)
-	local req = glue.object(creq,
+	local req = object(creq,
 		{http = self, type = 'http_request', debug_prefix = '>'})
 
 	req.http_version = opt.http_version or '1.1'
@@ -511,7 +507,7 @@ function http:build_request(opt, cookies)
 	req.content, req.content_size = opt.content or '', opt.content_size
 
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
-	glue.update(req.headers, opt.headers)
+	update(req.headers, opt.headers)
 
 	req.request_timeout = opt.request_timeout
 	req.reply_timeout   = opt.reply_timeout
@@ -597,7 +593,7 @@ end
 local cres = {}
 
 function http:read_response(req)
-	local res = glue.object(cres, {http = self, request = req})
+	local res = object(cres, {http = self, request = req})
 	req.response = res
 	res.rawheaders = {}
 
@@ -645,7 +641,7 @@ http.server_request_class = sreq
 
 function http:read_request()
 	self.start_time = clock()
-	local req = glue.object(sreq, {http = self})
+	local req = object(sreq, {http = self})
 	req.http_version, req.method, req.uri = self:read_request_line()
 	req.rawheaders = {}
 	self:read_headers(req.rawheaders)
@@ -678,7 +674,7 @@ local function q0(t)
 	return type(t) == 'table' and t.q == 0
 end
 
-http.nocompress_mime_types = glue.index{
+http.nocompress_mime_types = index{
 	'image/gif',
 	'image/jpeg',
 	'image/png',
@@ -732,7 +728,7 @@ end
 local sres = {}
 
 function http:build_response(req, opt, time)
-	local res = glue.object(self.response,
+	local res = object(self.response,
 		{http = self, request = req, type = 'http_response', debug_prefix = '<'})
 	res.headers = {}
 
@@ -779,7 +775,7 @@ function http:build_response(req, opt, time)
 	res.headers['date'] = time
 
 	self:set_body_headers(res.headers, res.content, res.content_size, res.close)
-	glue.update(res.headers, opt.headers)
+	update(res.headers, opt.headers)
 
 	return res
 end
@@ -792,7 +788,7 @@ function http:send_response(res)
 end
 http:protect'send_response'
 local send_response = http.send_response
-http.after_send_response = glue.noop
+http.after_send_response = noop
 function http:send_response(res)
 	local ret, err = send_response(self, res)
 	self:after_send_response(ret, err)
@@ -803,43 +799,34 @@ end
 --instantiation --------------------------------------------------------------
 
 function http:log(severity, module, event, fmt, ...)
-	local logging = self.logging
 	if not logging or logging.filter[severity] then return end
 	local S = self.tcp or '-'
 	local dt = clock() - self.start_time
-	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
+	local s = fmt and _(fmt, logargs(...)) or ''
+	log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
 end
 
 function http:dp(...)
 	return self:log('', 'http', ...)
 end
 
-function http:new(t)
+function _G.http(t)
 
-	local self = glue.object(self, {}, t)
+	local self = object(http, {}, t)
 
 	if self.debug and self.debug.tracebacks then
 		self.tracebacks = true --for tcp_protocol_errors.
 	end
 
-	self.logging = (self.logging == true or self.debug and self.logging == nil)
-		and require'logging' or self.logging
-
-	if not self.logging then
-		self.log = glue.noop
-	end
-	if not (self.logging and self.debug and self.debug.protocol) then
-		self.dp = glue.noop
+	if not (logging and self.debug and self.debug.protocol) then
+		self.dp = noop
 	end
 
-	if self.logging and self.debug and self.debug.stream then
-		self.tcp:debug('http', self.logging.log)
+	if logging and self.debug and self.debug.stream then
+		self.tcp:debug'http'
 	end
 
 	self:create_linebuffer()
 	self:create_send_function()
 	return self
 end
-
-return http

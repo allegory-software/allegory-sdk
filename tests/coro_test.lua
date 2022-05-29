@@ -1,8 +1,6 @@
 local coroutine = require'coro'
 local main = coroutine.running()
 
-coroutine.logging = require'logging'
-
 local function test(descr, f)
 	local ok, err = xpcall(f, debug.traceback)
 	print((ok and 'ok:   ' or 'fail: ') .. descr)
@@ -227,7 +225,7 @@ function()
 end)
 
 test('error() in transferred thread is raised in the main thread', function()
-	local ok, err, traceback = coroutine.ptransfer(coroutine.create(function()
+	local ok, err, traceback = coroutine.transfer_with(coroutine.create(function()
 		local thread = coroutine.create(function()
 			error'here'
 		end)
@@ -420,7 +418,6 @@ test('safewrap() cross-yielding', function()
 end)
 
 test('suspended coroutines are garbage-collected', function()
-	coroutine.logging = nil --logging.live() refs are not weak!
 	local t = setmetatable({}, {__mode = 'k'})
 	local parent = coroutine.running()
 	local co = coroutine.create(function(...)

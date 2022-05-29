@@ -1,14 +1,12 @@
 
-local ffi = require'ffi'
-local server  = require'http_server'
-ffi.tls_libname = 'tls_bearssl'
-local logging = require'logging'
+tls_libname = 'tls_bearssl'
+require'glue'
+require'http_server'
 logging.debug = true
 
 --local webb_respond = require'http_server_webb'
 
-local server = server:new{
-	libs = 'sock zlib sock_libtls',
+local server = http_server{
 	listen = {
 		{
 			host = 'localhost',
@@ -56,4 +54,4 @@ local server = server:new{
 	--respond = webb_respond,
 }
 
-server.start()
+start()

@@ -1,14 +1,10 @@
 
-local glue = require'glue'
-local pp = require'pp'
-local fs = require'fs'
+require'glue'
+require'fs'
 
-assert(fs.chdir(fs.exedir()..'/../../tests'))
+assert(chdir(exedir()..'/../../tests'))
 
-local function tostr(s)
-	return pp.format(s)
-end
-
+local tostr = pp
 local function _test(t1, t2, prefix, level)
 	if type(t1)=='table' and type(t2)=='table' then
 		--for k,v in pairs(t1) do print('>t1',k,v) end

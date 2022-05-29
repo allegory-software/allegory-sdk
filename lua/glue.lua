@@ -3,283 +3,491 @@
 	Lua "assorted lengths of wire" library.
 	Written by Cosmin Apreutesei. Public domain.
 
-	Glue is a collection of "hand tools" necessary in any good dynamic language.
-	It is compatible with Lua 5.1 with a few functions only available to LuaJIT.
-
-TYPE CHECKING
-	glue.isstr                                      is string
-	glue.isnum                                      is number
-	glue.isint                                      is integer (includes 1/0 and -1/0)
-	glue.istab                                      is table
-	glue.isfunc                                     is function
-	glue.iscdata                                    is cdata
+TYPES
+	isstr(v)                       is v a string
+	isnum(v)                       is v a number
+	isint(v)                       is v an integer (includes 1/0 and -1/0)
+	istab(v)                       is v a table
+	isarray(v)                     is v a table with only array elements
+	isempty(v)                     is v a table and is it empty
+	isfunc(v)                      is v a function
+	iscdata(v)                     is v a cdata
+	iserror(v[, classes])          is v a structured error
 MATH
-	glue.round(x[, p]) -> y                         round x to nearest integer or multiple of p (half up)
-	glue.snap(x[, p]) -> y                          synonym for glue.round
-	glue.floor(x[, p]) -> y                         round x down to nearest integer or multiple of p
-	glue.ceil(x[, p]) -> y                          round x up to nearest integer or multiple of p
-	glue.clamp(x, min, max) -> y                    clamp x in range
-	glue.lerp(x, x0, x1, y0, y1) -> y               linear interpolation
-	glue.sign(x) -> 1|0|-1                          sign
-	glue.strict_sign(x) -> 1|-1                     strict sign
-	glue.nextpow2(x) -> y                           next power-of-2 number
-	glue.repl(x, v, r) -> x                         replace v with r in x
-	glue.random_string(n) -> s                      generate random string of length n
-	glue.uuid() -> s                                generate random UUID v4
+	floor                        = math.floor
+	ceil                         = math.ceil
+	round(x[, p]) -> y             round x to nearest multiple of p=1 half-up
+	snap                         = round
+	min                          = math.min
+	max                          = math.max
+	clamp(x, min, max) -> y        clamp x in range
+	abs                          = math.abs
+	sign(x) -> 1|0|-1              sign
+	strict_sign(x) -> 1|-1         strict sign
+	sqrt                         = math.sqrt
+	ln                           = math.log
+	log10                        = math.log10
+	sin                          = math.sin
+	cos                          = math.cos
+	tan                          = math.tan
+	rad                          = math.rad
+	deg                          = math.deg
+	PI                           = math.pi
+	random                       = math.random
+	randomseed                   = math.randomseed
+	random_string(n) -> s          generate random string of length n
+	uuid() -> s                    generate random UUID v4
+	lerp(x, x0, x1, y0, y1) -> y   project x in x0..x1 over y0..y1
+	nextpow2(x) -> y               next power-of-2 number
+	repl(x, v, r) -> x             replace v with r in x
 VARARGS
-	glue.pack(...) -> t                             pack varargs
-	glue.unpack(t, [i] [,j]) -> ...                 unpack varargs
-TABLES
-	glue.empty                                      empty r/o table
-	glue.count(t[, maxn]) -> n                      count keys in table (up to maxn)
-	glue.index(t) -> dt                             switch keys with values
-	glue.cmp'KEY1[>] ...' -> f                      create a cmp function for sorting objects
-	glue.keys(t[,sorted|'desc'|cmp]) -> dt          make a list of all the keys
-	glue.sortedkeys(t[,cmp]) -> dt                  make a sorted list of all keys
-	glue.sortedpairs(t [,cmp]) -> iter() -> k, v    like pairs() but in key order
-	glue.update(dt, t1, ...) -> dt                  merge tables - overwrites keys
-	glue.merge(dt, t1, ...) -> dt                   merge tables - no overwriting
-	glue.attr(t, k, [f, ...]) -> v                  autofield pattern for one key
-	glue.attrs(t, N, [f], k1, ..., kN) -> v         autofield pattern for a chain of keys
-	glue.attrs_find(t, k1, ..., kN) -> v            t[k1]...[kN]
-	glue.attrs_clear(t, k1, ..., kN)                remove value at the end of key chain
-CACHING
-	glue.memoize(f,[cache],[minarg],[maxarg]) -> mf,cache   memoize pattern (fixarg or vararg)
-	glue.tuples([narg],[space]) -> tuple(...)->t,space      create a tuple space (fixarg or vararg)
-	glue.poison                                     value to use as arg#1 on a memoized function to clear the cache
+	pack(...) -> t                 pack varargs, setting t.n to arg num
+	unpack(t, [i], [j]) -> ...     unpack varargs, using t.n if any
 ARRAYS
-	glue.extend(dt, t1, ...) -> dt                  extend an array
-	glue.append(dt, v1, ...) -> dt                  append non-nil values to an array
-	glue.shift(t, i, n) -> t                        shift array elements
-	glue.slice(t, [i], [j]) -> t                    slice an array
-	glue.map(t, field|f,...) -> t                   map f over pairs of t or select a column from an array of records
-	glue.imap(t, field|f,...) -> t                  map f over ipairs of t or select a column from an array of records
-	glue.indexof(v, t, [i], [j]) -> i               scan array for value
-	glue.binsearch(v, t, [cmp], [i], [j]) -> i      binary search in sorted array
-	glue.sortedarray([sa]) -> sa                    stay-sorted array with insertion and removal in O(log n)
-	glue.reverse(t, [i], [j]) -> t                  reverse array in place
+	insert                       = table.insert
+	remove                       = table.remove
+	pop                          = remove
+	sort                         = table.sort
+	add(t, v)                      insert(t, v)
+	push(t, v)                   = add
+	extend(dt, t1, ...) -> dt      extend an array
+	append(dt, v1, ...) -> dt      append non-nil values to an array
+	shift(t, i, n) -> t            shift array elements
+	slice(t, [i], [j]) -> t        slice an array
+	imap(t, field|f,...) -> t      map f over ipairs of t or pluck field
+	indexof(v, t, [i], [j]) -> i   scan array for value
+	cmp'KEY1[>] ...' -> f          create a cmp function for sort and binsearch
+	binsearch(v, t, [cmp], [i], [j]) -> i    bin search in sorted array
+	sortedarray([sa]) -> sa        stay-sorted array with fast search
+	  sa:find(v) -> i|nil          find value in O(logN)
+	  sa:add(v)                    add value in O(N+logN)
+	  sa:remove(v) -> v|nil        remove value in O(N+logN)
+	  sa.cmp                       cmp function for binsearch
+	reverse(t, [i], [j]) -> t      reverse array in place
+TABLES
+	empty                          shared empty r/o table
+	count(t[, maxn]) -> n          count keys in table up to maxn=1/0
+	index(t) -> dt                 switch keys with values
+	keys(t,[cmp]) -> dt            make a list with keys of t
+	sortedkeys(t,[cmp]) -> dt      make a sorted list of keys of t
+	sortedpairs(t,[cmp]) => k, v   like pairs() but in key order
+	update(dt, t1, ...) -> dt      merge tables - overwrites keys
+	merge(dt, t1, ...) -> dt       merge tables - no overwriting
+	map(t, field|f,...) -> t       map f over pairs of t or pluck field
+	attr(t, k, [f, ...]) -> v      autofield pattern for one key
+	attrs(t, N, [f], k1,...) -> v  autofield pattern for a chain of keys
+	attrs_find(t, k1,...) -> v     return t[k1][k2]... as found
+	attrs_clear(t, k1,...)         remove value at the end of key chain
+CACHING
+	memoize(f,opt...) -> mf,cache  memoize pattern
+	tuples(opt...) -> tuple(...) -> t   create a tuple space
+	poison                         poision value to clear cache on memoized func
 STRINGS
-	glue.gsplit(s,sep[,start[,plain]]) -> iter() -> e[,captures...]   split a string by a pattern
-	glue.split(s,sep[,start[,plain]]) -> {s1,...}   split a string by a pattern
-	glue.eachword'name1 ... ' -> f() -> 'name'      iterate words in a string
-	glue.words'name1 ...' -> {'name1', ...}         split a string by whitespace
-	glue.capitalize(s) -> s                         capitalize the first letter of every word in string
-	glue.lines(s, [opt], [init]) -> iter() -> s, i, j, k   iterate the lines of a string
-	glue.outdent(s, [indent]) -> s, indent          outdent/reindent text based on first line's indentation
-	glue.lineinfo(s, [i]) -> line, col              return text position from byte position
-	glue.trim(s) -> s                               remove padding
-	glue.pad(s, n, [c], dir) -> s                   pad string
-	glue.lpad(s, n, [c]) -> s                       left-pad string
-	glue.rpad(s, n, [c]) -> s                       right-pad string
-	glue.esc(s [,mode]) -> pat                      escape magic pattern characters
-	glue.tohex(s|n [,upper]) -> s                   string or number to hex
-	glue.fromhex(s[, isvalid]) -> s                 hex to string
-	glue.starts(s, prefix) -> t|f                   find if string s starts with prefix
-	glue.ends(s, suffix) -> t|f                     find if string s ends with suffix
-	glue.subst(s, t) -> s                           string interpolation of {foo} occurences
-	glue.catargs(sep, ...) -> s                     concat non-nil args
+	format                       = string.format
+	fmt                          = string.format
+	_                            = string.format
+	concat                       = table.concat
+	cat                          = concat
+	catany(sep, ...) -> s          concat non-nil args
+	catall(...) -> s               concat args; return nil if any arg is nil
+	rep                          = string.rep
+	char                         = string.char
+	byte                         = string.byte
+	num                          = tonumber
+	split(s,sep[,start[,plain]]) => e[,captures...]  split a string on regex
+	words'name1 ... ' => 'name1'   iterate words in a string
+	lines(s, [opt], [i]) => s, i, j, k      iterate the lines of a string
+	outdent(s, [indent]) -> s, indent       outdent/reindent text
+	lineinfo(s, [i]) -> line, col  find text position at byte position
+	trim(s) -> s                   remove whitespace paddings
+	lpad(s, n, [c]) -> s           left-pad string
+	rpad(s, n, [c]) -> s           right-pad string
+	pad(s, n, [c], dir) -> s       pad string left or right
+	esc(s [,mode]) -> pat          escape string to use in regex
+	tohex(s|n [,upper]) -> s       string or number to hex
+	fromhex(s[, isvalid]) -> s     hex to string
+	starts(s, prefix) -> t|f       find if string starts with prefix
+	ends(s, suffix) -> t|f         find if string ends with suffix
+	subst(s, t) -> s               string interpolation pattern
+	capitalize(s) -> s             capitalize words
+	html_escape(s) -> s            escape HTML string
+	kbytes(x [,decimals]) -> s     format byte size in k/M/G/T-bytes
+STDOUT & STDERR
+	print_function(write[, format]) -> f  create a print()-like function
+	printf(fmt, ...)               print with string formatting
+	say([fmt, ...])                print to stderr
+	sayn(fmt, ...])                print to stderr without newline
+	die([fmt, ...])                exit with abort message and exit code 1
 ITERATORS
-	glue.collect([i,] iterator) -> t                collect iterated values into an array
-STUBS
-	glue.pass(...) -> ...                           does nothing, returns back all arguments
-	glue.noop(...)                                  does nothing, returns nothing
+	collect([i,] iter) -> t        collect iterated values into an array
+CALLBACKS
+	pass(...) -> ...               does nothing, returns back all arguments
+	noop(...)                      does nothing, returns nothing
 OBJECTS
-	glue.inherit(t, parent) -> t                    set or clear inheritance
-	glue.object([super][, t], ...) -> t             create a class or object
-	glue.before(class, method_name, f)              call f at the beginning of a method
-	glue.after(class, method_name, f)               call f at the end of a method
-	glue.override(class, method_name, f)            override a method
-	glue.gettersandsetters([getters], [setters], [super]) -> mt  create a metatable that supports virtual properties
-OS
-	glue.win                                        true if platform is Windows
-FILE & PIPE I/O
-	glue.canopen(filename[, mode]) -> filename | nil            check if a file exists and can be opened
-	glue.readfile(filename[, format][, open]) -> s | nil, err   read the contents of a file into a string
-	glue.readpipe(cmd[,format][, open]) -> s | nil, err         read the output of a command into a string
-	glue.writefile(filename, s|t|read, [format], [tmpfile])     write data to file safely
-	glue.printer(out[, format]) -> f                            virtualize the print() function
-TIME
-	glue.time([utc, ][t]) -> ts                     like os.time() with optional UTC and date args
-	glue.time([utc, ][y, [m], [d], [h], [min], [s], [isdst]]) -> ts  like os.time() with optional UTC and date args
-	glue.utc_diff(t) -> seconds                     seconds from local time t to UTC
-	glue.sunday([utc, ]t, [weeks]) -> t             time at last Sunday before t
-	glue.day([utc, ][ts], [plus_days]) -> ts        timestamp at day's beginning from ts
-	glue.month([utc, ][ts], [plus_months]) -> ts    timestamp at month's beginning from ts
-	glue.year([utc, ][ts], [plus_years]) -> ts      timestamp at year's beginning from ts
-	glue.duration(s, ['approx[+s]'|'long']) -> s    format a duration in seconds
-	glue.timeago([utc, ]ts[, from_ts]) -> s         format relative time
-	glue.timeofday(seconds) -> s                    format time of day
-	glue.week_start_offset(country) -> n            week start offset for a country (0 for Sunday)
-SIZES
-	glue.kbytes(x [,decimals]) -> s                 format byte size in k/M/G/T-bytes
-2D BOXES
-	glue.fitbox(w, h, bw, bh) -> w, h               fit (w, h) box inside (bw, bh) box
+	object([super][, t], ...) -> t    create a class or object
+	before(class, method_name, f)     call f at the beginning of a method
+	after(class, method_name, f)      call f at the end of a method
+	override(class, method_name, f)   override a method
+	gettersandsetters([gets], [sets], [super]) -> mt    add virtual properties
+PLATFORM
+	Windows, win                   true if platform is Windows
+	Linux                          true if platform is Linux
+	OSX                            true if platform is OSX
+PROCESS CONTROL
+	sleep(s)                       suspend process i.e. blocking sleep
+	exit                         = os.exit
+TIME & DATES
+	now() -> ts                    os.time() but more accurate
+	clock() -> x                   os.clock() but more accurate
+	time([utc, ][t]) -> ts         os.time() but more accurate and with utc option
+	time([utc, ][y], [m], [d], [H], [M], [S], [isdst]) -> ts  with positional args
+	date                         = os.date
+	utc_diff(t) -> seconds                     seconds from local time t to UTC
+	sunday ([utc, ]t, [weeks]) -> ts           time at last Sunday before t
+	day    ([utc, ][t], [plus_days]) -> ts     time at day's beginning from t
+	month  ([utc, ][t], [plus_months]) -> ts   time at month's beginning from t
+	year   ([utc, ][t], [plus_years]) -> ts    time at year's beginning from t
+	duration(s, ['approx[+s]'|'long']) -> s    format a duration in seconds
+	timeago([utc, ]t[, from_t]) -> s           format relative time
+	timeofday(seconds) -> s                    format time of day
+	week_start(country) -> n                   week start in country; 0=Sunday
 ERRORS
-	glue.assert(v [,message [,format_args...]]) -> v     assert with error message formatting
-	glue.protect(func) -> protected_func                 wrap an error-raising function
-	glue.pcall(f, ...) -> true, ... | false, traceback                      pcall with traceback
-	glue.fpcall(f(finally, onerror, ...), ...) -> result | nil, traceback   pcall with finally/onerror
-	glue.fcall (f(finally, onerror, ...), ...) -> result                    same but re-raises
-MODULES
-	glue.module([name, ][parent]) -> M              create a module
-	glue.autoload(t, submodules) -> M               autoload table keys from submodules
-	glue.autoload(t, key, module|loader) -> t       autoload table keys from submodules
-	glue.bin                                        get the script's directory
-	glue.scriptname                                 get the script's name
-	glue.luapath(path [,index [,ext]])              insert a path in package.path
-	glue.cpath(path [,index])                       insert a path in package.cpath
-ALLOCATION
-	glue.freelist([create], [destroy]) -> alloc, free                  freelist allocation pattern
-	glue.buffer([ctype]) -> alloc(minlen) -> buf,capacity                auto-growing buffer
-	glue.dynarray([ctype][,cap]) -> alloc(minlen|false) -> buf, minlen   auto-growing buffer that preserves data
-	glue.dynarray_pump([dynarray]) -> write(), collect()               make a buffer with a write() API for writing into
-	glue.dynarray_loader([dynarray]) -> get(), put(), collect()        make a buffer with a get()/put() API for writing into
-	glue.readall(read, self, ...) -> buf, len       repeat read based on a read function
-	glue.buffer_reader(buf, len) -> read            make a read function that consumes a buffer
-	glue.malloc(size) -> p                          C malloc
-	glue.realloc(p, size) -> p                      C realloc
-	glue.free(p)                                    C free
-FFI HELPERS
-	glue.addr(ptr) -> number | string               store pointer address in Lua value
-	glue.ptr([ctype, ]number|string) -> ptr         convert address to pointer
-	glue.getbit(val, mask) -> true|false            get the value of a single bit from an integer
-	glue.setbit(val, mask, bitval) -> val           set the value of a single bit from an integer
-	glue.bor(flags, bits, [strict]) -> mask         bit.bor() that takes a string or table
+	assertf(v[,fmt,...]) -> v      assert with error message formatting
+	fpcall(f, ...) -> ok,...       pcall with finally/onerror
+	fcall(f, ...) -> ...           same but re-raises errors
+	errortype([classname], [super]) -> E    create/get an error class
+	  E(...) -> e                           create an error object
+	  E:oninit(f)                           add error init code.
+	  E:__call(...) -> e                    error class constructor
+	  E:__tostring() -> s                   to make `error(e)` work
+	  E.addtraceback                        add a traceback to errors
+	newerror(classname,... | e) -> e        create/wrap/pass-through an error object
+	  e.message                             formatted error message
+	  e.traceback                           traceback at error site
+	iserror(v[, classes]) -> true|false     check an error object type
+	raise([level, ]classname,... | e)      (create and) raise an error
+	catch([classes], f, ...) -> true,... | false,e    pcall `f` and catch errors
+	pcall(f, ...) -> ok,...                 pcall that stores traceback in `e.traceback`
+	lua_pcall(f, ...) -> ok,...             Lua's pcall renamed (no tracebacks)
+	protect([classes, ]f, [oncaught]) -> f  turn raising f into nil,err-returning
 
-TIP: Extend the Lua string namespace with glue.update(string, glue.string)
-so you can use all glue string functions as string methods, eg. s:trim().
+MODULES
+	module([name, ][parent]) -> M  create a module
+	autoload(t, submodules) -> M   autoload table keys from submodules
+	autoload(t, key, module|loader) -> t       autoload table key from module
+	rel_scriptdir                  get the script's directory
+	scriptname                     get the script's name
+	luapath(path [,index [,ext]])  insert a path in package.path
+	cpath(path [,index])           insert a path in package.cpath
+LUA ALLOCATION
+	freelist([create], [destroy]) -> alloc,free   freelist allocation pattern
+INTERPRETER
+	eval(s) -> ...               = loadstring('return '..s)
+BITS
+	bit                          = require'bit'
+	bnot                         = bit.bnot
+	shl                          = bit.lshift
+	shr                          = bit.rshift
+	band                         = bit.band
+	bor                          = bit.bor
+	xor                          = bit.bxor
+	getbit(x, mask) -> bit         get the value of a single bit from x
+	setbit(bits, mask, [x]) -> x   set the value of a single bit on x
+	setbits(bits, mask, [x]) -> x  set the value of multiple bits over x
+	bitflags(flags, masks, [x], [strict]) -> mask    bor() flags over x
+FFI
+	ffi                          = require'ffi'
+	C                            = ffi.C
+	cdef                         = ffi.cdef
+	new                          = ffi.new
+	cast                         = ffi.cast
+	sizeof                       = ffi.sizeof
+	typeof                       = ffi.typeof
+	copy                         = ffi.copy
+	fill                         = ffi.fill
+	gc                           = ffi.gc
+	metatype                     = ffi.metatype
+	str(buf, len)                = ffi.string(buf, len) if buf is not null
+	ptr(p)                       = p ~= nil and p  or nil
+	ptr_encode(p) -> n|s           store pointer address in Lua value
+	ptr_decode([ctype,]n|s) -> p   convert address to pointer
+FFI ALLOCATION
+	buffer([ctype]) -> alloc
+	  alloc(len) -> buf,len        alloc len and get a buffer
+	dynarray([ctype][,cap]) -> alloc
+		alloc(len)->buf,len         alloc len and get a buffer, contents preserved
+	dynarray_pump([dynarray]) -> write, collect
+	  write(buf,len)               append to internal buffer
+	  collect() -> buf,len         get internal buffer
+	dynarray_loader([dynarray]) -> get, commit, collect
+	  get(len) -> buf,len          get a buffer of len to write to
+	  commit(len)                  commit len
+	  collect() -> buf,len         get internal buffer
+	readall(read,...) -> buf,len   repeat read based on a read function
+	buffer_reader(buf,len)->read   make a read function that consumes a buffer
+	malloc(size) -> p              C malloc
+	realloc(p, size) -> p          C realloc
+	free(p)                        C free
+CONFIG
+	config(k[, default]) -> v      get/set global config value
+	with_config(conf, f, ...) -> ...    run f with custom config table
+	load_config(file)              load config file
+DEBUGGING
+	traceback                    = debug.traceback
+   trace()                        print current stack trace to stderr
+	pr(...)                        print to stderr with logprintargs
+LOGGING
 
 ]=]
 
 if not ... then require'glue_test'; return end
 
-local glue = {}
+ffi = require'ffi'
+bit = require'bit'
+require'time'
+require'pp'
 
-local min, max, floor, ceil, ln, random =
-	math.min, math.max, math.floor, math.ceil, math.log, math.random
-local insert, remove, sort, concat = table.insert, table.remove, table.sort, table.concat
-local char = string.char
 local
-	type, select, unpack, pairs, next, rawget, assert, setmetatable, getmetatable =
-	type, select, unpack, pairs, next, rawget, assert, setmetatable, getmetatable
+	type, select, pairs, next, rawget, rawset, assert, error, tostring, setmetatable, getmetatable =
+	type, select, pairs, next, rawget, rawset, assert, error, tostring, setmetatable, getmetatable
+
+local format = string.format
+local concat = table.concat
+local insert = table.insert
+local remove = table.remove
+local sort   = table.sort
+local gsub   = string.gsub
+local io_stderr = io.stderr
+
+local ffi_string = ffi.string
+local function str(s, len)
+	if s == nil then return nil end
+	return ffi_string(s, len)
+end
+
+function ptr(p)
+	return p ~= nil and p or nil
+end
 
 --types ----------------------------------------------------------------------
 
-glue.isstr  = function(s) return type(s) == 'string' end
-glue.isnum  = function(x) return type(x) == 'number' end
-glue.isint  = function(x) return type(x) == 'number' and floor(x) == x end
-glue.istab  = function(x) return type(x) == 'table'  end
-glue.isfunc = function(f) return type(f) == 'function' end
-glue.iscdata = function(f) return type(f) == 'cdata' end
-glue.isthread = function(f) return type(f) == 'thread' end
+isstr    = function(v) return type(v) == 'string' end
+isnum    = function(v) return type(v) == 'number' end
+isint    = function(v) return type(v) == 'number' and floor(v) == v end
+istab    = function(v) return type(v) == 'table'  end
+isarray  = require'table.isarray'
+isempty  = require'table.isempty'
+isfunc   = function(v) return type(v) == 'function' end
+iscdata  = function(v) return type(v) == 'cdata'  end
+isthread = function(v) return type(v) == 'thread' end
 
 --math -----------------------------------------------------------------------
+
+min    = math.min
+max    = math.max
+floor  = math.floor
+ceil   = math.ceil
+abs    = math.abs
+sqrt   = math.sqrt
+ln     = math.log
+log10  = math.log10
+sin    = math.sin
+cos    = math.cos
+tan    = math.tan
+rad    = math.rad
+deg    = math.deg
+PI     = math.pi
+random = math.random
+randomseed = math.randomseed
+
+local
+	min, max, floor, ceil, ln, random =
+	min, max, floor, ceil, ln, random
 
 --Round a number towards nearest integer or multiple of p.
 --Rounds half-up (i.e. it returns -1 for -1.5).
 --Works with numbers up to +/-2^52.
 --It's not dead accurate as it returns eg. 1 instead of 0 for
 --   0.49999999999999997 (the number right before 0.5) which is < 0.5.
-function glue.round(x, p)
+function round(x, p)
 	p = p or 1
 	return floor(x / p + .5) * p
 end
-
---round a number towards nearest smaller integer or multiple of p.
-function glue.floor(x, p)
-	p = p or 1
-	return floor(x / p) * p
-end
-
---round a number towards nearest larger integer or multiple of p.
-function glue.ceil(x, p)
-	p = p or 1
-	return ceil(x / p) * p
-end
-
-glue.snap = glue.round
+snap = round
 
 --clamp a value in range. If max < min, the result is max.
-function glue.clamp(x, x0, x1)
+function clamp(x, x0, x1)
 	return min(max(x, x0), x1)
 end
 
 --linearly project x in x0..x1 range to the y0..y1 range.
-function glue.lerp(x, x0, x1, y0, y1)
+function lerp(x, x0, x1, y0, y1)
 	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
 end
 
-function glue.logbase(x, base)
+function logbase(x, base)
 	return ln(x) / ln(base)
 end
 
-function glue.nextpow2(x)
+function nextpow2(x)
 	return max(0, 2^(ceil(ln(x) / ln(2))))
 end
 
-function glue.sign(x)
+function sign(x)
 	return x > 0 and 1 or x == 0 and 0 or -1
 end
 
-function glue.strict_sign(x)
+function strict_sign(x)
 	return x >= 0 and 1 or -1
 end
 
-function glue.repl(x, v, r)
+function repl(x, v, r)
 	if x == v then return r else return x end
 end
 
-if jit then
-	local str = require'ffi'.string
-	function glue.random_string(n)
-		local buf = glue.u32a(n/4+1)
-		for i=0,n/4 do
-			buf[i] = random(0, 2^32-1)
-		end
-		return str(buf, n)
-	end
-else
-	function glue.random_string(n)
-		local t = {}
-		for i=1,n do
-			t[i] = random(0, 255)
-		end
-		return char(unpack(t))
-	end
-end
-
-function glue.uuid() --don't forget to seed the randomizer!
-	return ('%08x-%04x-%04x-%04x-%08x%04x'):format(
+function uuid() --don't forget to seed the randomizer!
+	return format('%08x-%04x-%04x-%04x-%08x%04x',
 		random(0xffffffff), random(0xffff),
 		0x4000 + random(0x0fff), --4xxx
 		0x8000 + random(0x3fff), --10bb-bbbb-bbbb-bbbb
 		random(0xffffffff), random(0xffff))
 end
 
+do
+local u32a = ffi.typeof'uint32_t[?]'
+function random_string(n)
+	local buf = u32a(n/4+1)
+	for i=0,n/4 do
+		buf[i] = random(0, 2^32-1)
+	end
+	return str(buf, n)
+end
+end
+
 --varargs --------------------------------------------------------------------
 
 if table.pack then
-	glue.pack = table.pack
+	pack = table.pack
 else
-	function glue.pack(...)
+	function pack(...)
 		return {n = select('#', ...), ...}
 	end
 end
 
 --always use this because table.unpack's default j is #t not t.n.
-function glue.unpack(t, i, j)
-	return unpack(t, i or 1, j or t.n or #t)
+local lua_unpack = unpack
+function unpack(t, i, j)
+	return lua_unpack(t, i or 1, j or t.n or #t)
 end
 
 --tables ---------------------------------------------------------------------
 
-glue.empty = setmetatable({}, {
-	__newindex = function() error'trying to set a field in glue.empty' end, --read-only
+_G.concat = table.concat
+_G.cat    = table.concat
+_G.insert = table.insert
+_G.remove = table.remove
+_G.pop    = table.remove
+_G.sort   = table.sort
+
+function add(t, v)
+	return insert(t, v)
+end
+push = add
+
+--scan list for value. works with ffi arrays too given i and j.
+--Works on ffi arrays too if i and j are provided.
+function indexof(v, t, eq, i, j)
+	i = i or 1
+	j = j or #t
+	if eq then
+		for i = i, j do
+			if eq(t[i], v) then
+				return i
+			end
+		end
+	else
+		for i = i, j do
+			if t[i] == v then
+				return i
+			end
+		end
+	end
+end
+
+--reverse elements of a list in place. works with ffi arrays too given i and j.
+function reverse(t, i, j)
+	i = i or 1
+	j = (j or #t) + 1
+	for k = 1, (j-i)/2 do
+		t[i+k-1], t[j-k] = t[j-k], t[i+k-1]
+	end
+	return t
+end
+
+-- binary search for the smallest insert position that keeps the table sorted.
+-- returns nil if v is larger than the largest value or if t is empty.
+-- works with ffi arrays too if lo and hi are provided.
+-- cmp is f(t, i, v) -> t|f or it can be '<', '>', '<=', '>='.
+-- use t[i] <  v to get the smallest insert position.
+-- use t[i] <= v to get the largest insert position.
+-- use t[i] >  v (i.e. '>') to search in a reverse-sorted array.
+local cmps = {}
+cmps['<' ] = function(t, i, v) return t[i] <  v end
+cmps['>' ] = function(t, i, v) return t[i] >  v end
+cmps['<='] = function(t, i, v) return t[i] <= v end
+cmps['>='] = function(t, i, v) return t[i] >= v end
+local less = cmps['<']
+function binsearch(v, t, cmp, lo, hi)
+	lo, hi = lo or 1, hi or #t
+	cmp = cmp and cmps[cmp] or cmp or less
+	local len = hi - lo + 1
+	if len == 0 then return nil end
+	if len == 1 then return not cmp(t, lo, v) and lo or nil end
+	while lo < hi do
+		local mid = floor(lo + (hi - lo) / 2)
+		if cmp(t, mid, v) then
+			lo = mid + 1
+			if lo == hi and cmp(t, lo, v) then
+				return nil
+			end
+		else
+			hi = mid
+		end
+	end
+	return lo
+end
+
+--array that stays sorted with search in O(logN) and add/remove in O(N+logN).
+--if given an array to be wrapped, it must be already sorted.
+--sa.cmp is used for cmp in binarysearch().
+do
+local sa = {}
+local insert, remove, binsearch = insert, remove, binsearch
+function sa:find(v)
+	return binsearch(v, self, self.cmp)
+end
+function sa:add(v)
+	local i = self:find(v) or #self+1
+	insert(self, i, v)
+	return i
+end
+function sa:remove(v)
+	local i = self:find(v)
+	if not i then return nil end
+	return remove(self, i)
+end
+function sortedarray(t)
+	return object(sa, t)
+end
+end
+
+empty = setmetatable({}, {
+	__newindex = function() error'trying to set a field in empty' end, --read-only
 	__metatable = false,
 })
 
 --count the keys in a table with an optional upper limit.
-function glue.count(t, maxn)
+function count(t, maxn)
 	local maxn = maxn or 1/0
 	local n = 0
 	for _ in pairs(t) do
@@ -290,28 +498,44 @@ function glue.count(t, maxn)
 end
 
 --reverse keys with values.
-function glue.index(t)
+function index(t)
 	local dt={}
 	for k,v in pairs(t) do dt[v]=k end
 	return dt
 end
 
---create a comparison function for sorting objects with table.sort().
-function glue.cmp(keys) --'KEY1[>] ...'
+--create a comparison function for sorting objects with sort().
+local function cmp_asc  (a, b) return a < b end
+local function cmp_desc (a, b) return a > b end
+local function cmp_k_asc(k)
+	return function(a, b)
+		local a, b = a[k], b[k]
+		return a < b and -1 or a > b and 1
+	end
+end
+local function cmp_k_desc(k)
+	return function(a, b)
+		local a, b = a[k], b[k]
+		return a > b and -1 or a < b and 1
+	end
+end
+function cmp(keys) --true|false|'KEY1[>] ...'
 	if type(keys) ~= 'string' then
 		return keys
+	elseif keys == true then
+		return cmp_asc
+	elseif keys == false then
+		return cmd_desc
 	end
 	local f
-	for s in glue.eachword(keys) do
+	for s in keys:gmatch'%S+' do
 		local k, desc = s:match'^(.-)([<>])$'
 		if k then
 			desc = desc == '>'
 		else
 			k = s
 		end
-		local f1 = desc
-			and function(a, b) local a, b = a[k], b[k]; return a > b and -1 or a < b and 1 end
-			or  function(a, b) local a, b = a[k], b[k]; return a < b and -1 or a > b and 1 end
+		local f1 = desc and cmp_k_desc(k) or cmp_k_asc(k)
 		if not f then
 			f = f1
 		else
@@ -328,7 +552,8 @@ end
 
 --put keys in a list, optionally sorted.
 local function desc_cmp(a, b) return a > b end
-function glue.keys(t, cmp)
+local glue_cmp = cmp
+function keys(t, cmp)
 	local dt={}
 	for k in pairs(t) do
 		dt[#dt+1]=k
@@ -338,7 +563,7 @@ function glue.keys(t, cmp)
 	elseif cmp == false then
 		sort(dt, desc_cmp)
 	elseif type(cmp) == 'string' then
-		cmp = glue.cmp(cmp)
+		cmp = glue_cmp(cmp)
 		sort(dt, function(k1, k2)
 			return cmp(t[k1], t[k2])
 		end)
@@ -348,15 +573,17 @@ function glue.keys(t, cmp)
 	return dt
 end
 
-local repl = glue.repl
+local
+	repl, keys =
+	repl, keys
 
-function glue.sortedkeys(t, cmp)
-	return glue.keys(t, repl(cmp, nil, true))
+function sortedkeys(t, cmp)
+	return keys(t, repl(cmp, nil, true))
 end
 
 --stateless pairs() that iterate elements in key order.
-function glue.sortedpairs(t, cmp)
-	local kt = glue.keys(t, repl(cmp, nil, true))
+function sortedpairs(t, cmp)
+	local kt = keys(t, repl(cmp, nil, true))
 	local i, n = 0, #kt
 	return function()
 		i = i + 1
@@ -366,7 +593,7 @@ function glue.sortedpairs(t, cmp)
 end
 
 --update a table with the contents of other table(s) (falsey args skipped).
-function glue.update(dt,...)
+function update(dt,...)
 	for i=1,select('#',...) do
 		local t=select(i,...)
 		if t then
@@ -377,7 +604,7 @@ function glue.update(dt,...)
 end
 
 --add the contents of other table(s) without overwrite.
-function glue.merge(dt,...)
+function merge(dt,...)
 	for i=1,select('#',...) do
 		local t=select(i,...)
 		if t then
@@ -392,7 +619,7 @@ end
 local NIL = {}
 
 --`attr(t, k1)[k2] = v` is like `t[k1][k2] = v` with auto-creating `t[k1]`.
-function glue.attr(t, k, cons, ...)
+function attr(t, k, cons, ...)
 	if k == nil then k = NIL end
 	local v = t[k]
 	if v == nil then
@@ -407,7 +634,7 @@ function glue.attr(t, k, cons, ...)
 	return v
 end
 
-function glue.attrs(t, n, cons, ...)
+function attrs(t, n, cons, ...)
 	for i = 1, n do
 		local k = select(i,...)
 		if k == nil then k = NIL end
@@ -435,7 +662,7 @@ function glue.attrs(t, n, cons, ...)
 	end
 end
 
-function glue.attrs_find(t, ...)
+function attrs_find(t, ...)
 	for i = 1, select('#', ...) do
 		local k = select(i,...)
 		if k == nil then k = NIL end
@@ -446,7 +673,7 @@ function glue.attrs_find(t, ...)
 	return t
 end
 
-function glue.attrs_clear(t, ...)
+function attrs_clear(t, ...)
 	local n = select('#', ...)
 	if n == 0 then
 		for k,v in pairs(t) do
@@ -484,7 +711,7 @@ function glue.attrs_clear(t, ...)
 	end
 end
 
-local attrs, attrs_clear = glue.attrs, glue.attrs_clear
+local attrs, attrs_clear = attrs, attrs_clear
 
 local NOARG = {} --special arg for zero-arg functions or calls.
 
@@ -504,7 +731,7 @@ end
 
 --with vararg functions we can't just store the memoized value in the
 --leaf node because any leaf node can become a key node on future calls.
-local VAL   = {} --special key to store the memozied value in the leaf node.
+local VAL = {} --special key to store the memozied value in the leaf node.
 local function memoize_vararg(f, minarg, maxarg, cache)
 	cache = cache or {}
 	return function(...)
@@ -522,41 +749,14 @@ local function memoize_vararg(f, minarg, maxarg, cache)
 	end, cache
 end
 
---tuples are interned value lists that can be used as table keys to achieve
---multi-key indexing because they have value semantics: a tuple space returns
---the same tuple object for the same combination of values.
-local tuple_mt = {__call = glue.unpack}
-function tuple_mt:__tostring()
-	local t = {}
-	for i=1,self.n do
-		t[i] = tostring(self[i])
-	end
-	return string.format('(%s)', concat(t, ', '))
-end
-function glue.tuples(n, space)
-	space = space or {}
-	local function gen_tuple(...)
-		return setmetatable({n = select('#', ...), ...}, tuple_mt)
-	end
-	if n then --fixarg: use the leaf node itself as the tuple object.
-		assert(n >= 1)
-		return memoize_fixarg(gen_tuple, n, space)
-	else --vararg: put the tuple in the special VAL key of the value-table.
-		return memoize_vararg(gen_tuple, 0, 1/0, space)
-	end
-end
-function glue.istuple(t)
-	return getmetatable(t) == tuple_mt
-end
-
 --special value to use as arg#1 on a memoized function to clear the cache
 --on a prefix of arguments.
-local POISON = {}
-glue.poison = POISON
-
-function glue.memoize(f, cache, minarg, maxarg)
+poison = {}
+local poison = poison
+local debug_getinfo = debug.getinfo
+function memoize(f, cache, minarg, maxarg)
 	if not minarg then
-		local info = debug.getinfo(f, 'u')
+		local info = debug_getinfo(f, 'u')
 		if info.isvararg then
 			minarg, maxarg = info.nparams, 1/0
 		else
@@ -568,7 +768,7 @@ function glue.memoize(f, cache, minarg, maxarg)
 		and memoize_vararg(f, minarg, maxarg, cache)
 		 or memoize_fixarg(f, minarg, cache)
 	return function(...)
-		if ... == POISON then
+		if ... == poison then
 			attrs_clear(cache, select(2, ...))
 		else
 			return mf(...)
@@ -576,10 +776,40 @@ function glue.memoize(f, cache, minarg, maxarg)
 	end, cache, minarg, maxarg
 end
 
---lists ----------------------------------------------------------------------
+--tuples are interned value lists that can be used as table keys to achieve
+--multi-key indexing because they have value semantics: a tuple space returns
+--the same tuple object for the same combination of values.
+do
+local tuple_mt = {__call = unpack}
+function tuple_mt:__tostring()
+	local t = {}
+	for i=1,self.n do
+		t[i] = tostring(self[i])
+	end
+	return format('(%s)', concat(t, ', '))
+end
+function tuples(n, space)
+	space = space or {}
+	local function gen_tuple(...)
+		return setmetatable({n = select('#', ...), ...}, tuple_mt)
+	end
+	if n then --fixarg: use the leaf node itself as the tuple object.
+		assert(n >= 1)
+		return memoize_fixarg(gen_tuple, n, space)
+	else --vararg: put the tuple in the special VAL key of the value-table.
+		return memoize_vararg(gen_tuple, 0, 1/0, space)
+	end
+end
+function istuple(t)
+	return getmetatable(t) == tuple_mt
+end
+end
+
+cmp_k_asc  = memoize(cmp_k_asc)
+cmp_k_desc = memoize(cmp_k_desc)
 
 --extend a list with the elements of other lists (skipping falsey args).
-function glue.extend(dt,...)
+function extend(dt,...)
 	for j=1,select('#',...) do
 		local t=select(j,...)
 		if t then
@@ -593,7 +823,7 @@ function glue.extend(dt,...)
 end
 
 --append non-nil arguments to a list.
-function glue.append(dt,...)
+function append(dt,...)
 	local j = #dt
 	for i=1,select('#',...) do
 		dt[j+i] = select(i,...)
@@ -629,8 +859,8 @@ local function remove_n(t, i, n)
 	end
 end
 
-local clamp = glue.clamp
-function glue.slice(t, i, j) --TODO: not used. use it or scrape it.
+local clamp = clamp
+function slice(t, i, j) --TODO: not used. use it or scrape it.
 	local n = t.n or #t
 	i = i or 1
 	j = j or n
@@ -646,7 +876,7 @@ end
 --shift all the elements on the right of i (i inclusive), n positions to the
 --to the left (if n is negative), removing elements, or further to the right
 --(if n is positive), making room for new elements.
-function glue.shift(t, i, n)
+function shift(t, i, n)
 	if n > 0 then
 		insert_n(t, i, n)
 	elseif n < 0 then
@@ -661,7 +891,7 @@ end
 --are called as methods and their result is selected instead. This allows eg.
 --calling a method for each element in a table of objects and collecting
 --the results in a table.
-function glue.map(t, f, ...)
+function map(t, f, ...)
 	local dt = {}
 	if type(f) == 'function' then
 		for k,v in pairs(t) do
@@ -682,7 +912,7 @@ end
 
 --map `f(v, ...) -> v1` over t or extract a column from a list of records.
 --same plucking semantics as map() but applied on lists.
-function glue.imap(t, f, ...)
+function imap(t, f, ...)
 	local dt = {n = t.n}
 	local n = t.n or #t
 	if type(f) == 'function' then
@@ -703,113 +933,34 @@ function glue.imap(t, f, ...)
 	return dt
 end
 
---arrays ---------------------------------------------------------------------
-
---scan list for value. works with ffi arrays too given i and j.
---Works on ffi arrays too if i and j are provided.
-function glue.indexof(v, t, eq, i, j)
-	i = i or 1
-	j = j or #t
-	if eq then
-		for i = i, j do
-			if eq(t[i], v) then
-				return i
-			end
-		end
-	else
-		for i = i, j do
-			if t[i] == v then
-				return i
-			end
-		end
-	end
-end
-
---reverse elements of a list in place. works with ffi arrays too given i and j.
-function glue.reverse(t, i, j)
-	i = i or 1
-	j = (j or #t) + 1
-	for k = 1, (j-i)/2 do
-		t[i+k-1], t[j-k] = t[j-k], t[i+k-1]
-	end
-	return t
-end
-
--- binary search for the smallest insert position that keeps the table sorted.
--- returns nil if v is larger than the largest value or if t is empty.
--- works with ffi arrays too if lo and hi are provided.
--- cmp is f(t, i, v) -> t|f or it can be '<', '>', '<=', '>='.
--- use t[i] <  v to get the smallest insert position.
--- use t[i] <= v to get the largest insert position.
--- use t[i] >  v (i.e. '>') to search in a reverse-sorted array.
-local cmps = {}
-cmps['<' ] = function(t, i, v) return t[i] <  v end
-cmps['>' ] = function(t, i, v) return t[i] >  v end
-cmps['<='] = function(t, i, v) return t[i] <= v end
-cmps['>='] = function(t, i, v) return t[i] >= v end
-local less = cmps['<']
-function glue.binsearch(v, t, cmp, lo, hi)
-	lo, hi = lo or 1, hi or #t
-	cmp = cmp and cmps[cmp] or cmp or less
-	local len = hi - lo + 1
-	if len == 0 then return nil end
-	if len == 1 then return not cmp(t, lo, v) and lo or nil end
-	while lo < hi do
-		local mid = floor(lo + (hi - lo) / 2)
-		if cmp(t, mid, v) then
-			lo = mid + 1
-			if lo == hi and cmp(t, lo, v) then
-				return nil
-			end
-		else
-			hi = mid
-		end
-	end
-	return lo
-end
-
---array that stays sorted with insertion, searching and removal in O(log n).
---if given an array to be wrapped, it must be already sorted.
---sa.cmp is used for cmp in binarysearch().
---use sa:push(v) to add values.
---use sa:find(v) -> i|nil to look up values.
---use sa:remove_value(v) -> v|nil to find and remove a value.
-do local sa = {}
-	function sa:find(v) return glue.binsearch(v, self, self.cmp) end
-	function sa:push(v) insert(self, self:find(v) or #self+1, v) end
-	function sa:remove_value(v)
-		local i = self:find(v)
-		if not i then return nil end
-		return remove(self, i)
-	end
-	function glue.sortedarray(t)
-		return glue.object(sa, t)
-	end
-end
-
 --strings --------------------------------------------------------------------
 
---string submodule. has its own namespace which can be merged with _G.string.
-glue.string = {}
+_G.format = format
+fmt  = format
+_    = format
+rep  = string.rep
+char = string.char
+byte = string.byte
+num  = tonumber
 
 --split a string by a separator pattern (or plain string).
 --returns a stateless iterator for the pieces.
 --if sep is '' returns the entire string in one iteration.
---empty strings between separators are always returned, eg. glue.gsplit(',', ',')
+--empty strings between separators are always returned, eg. split(',', ',')
 --produces 2 empty strings.
 --captures are allowed in sep and they are returned after the element,
 --except for the last element for which they don't match (by definition).
 local function iterate_once(s, s1)
 	return s1 == nil and s or nil
 end
-function glue.string.gsplit(s, sep, start, plain)
+function split(s, sep, start, plain)
 	start = start or 1
 	plain = plain or false
 	if not s:find(sep, start, plain) then
 		return iterate_once, s:sub(start)
 	end
 	local done = false
-	local function pass(i, j, ...)
+	local function cont(i, j, ...)
 		if i then
 			local seg = s:sub(start, i - 1)
 			start = j + 1
@@ -822,38 +973,18 @@ function glue.string.gsplit(s, sep, start, plain)
 	return function()
 		if done then return end
 		if sep == '' then done = true; return s:sub(start) end
-		return pass(s:find(sep, start, plain))
+		return cont(s:find(sep, start, plain))
 	end
 end
+string.split = split
 
-function glue.string.split(s, sep, start, plain)
-	return glue.collect(glue.gsplit(s, sep, start, plain))
-end
-
---iterate words in a strings. unlike glue.gsplit(s, '%s+'), it ignores
+--iterate words in a strings. unlike split(s, '%s+'), it ignores
 --any resulting empty elements.
-function glue.string.eachword(s)
-	return glue.trim(s):gmatch'[^%s]+'
+function words(s)
+	if type(s) ~= 'string' then return s end
+	return s:gmatch'%S+'
 end
-
---split a string by whitespace. unlike glue.split(s, '%s+'), it ignores
---any resulting empty elements; also, non-string args pass through.
-function glue.string.words(s)
-	if type(s) ~= 'string' then
-		return s
-	end
-	local t = {}
-	for s in glue.eachword(s) do
-		t[#t+1] = s
-	end
-	return t
-end
-
---capitalize the first letter of every word in string.
-local function cap(a, b) return a:upper()..b end
-function glue.string.capitalize(s)
-	return s:gsub('(%l)(%w*)', cap)
-end
+string.words = words
 
 --[[
  split a string into lines, optionally including the line terminator.
@@ -868,7 +999,7 @@ end
   iterated.
 * init tells it where to start parsing (default is 1).
 ]]
-function glue.string.lines(s, opt, i)
+function lines(s, opt, i)
 	local term = opt == '*L'
 	local patt = term and '()([^\r\n]*()\r?\n?())' or '()([^\r\n]*)()\r?\n?()'
 	i = i or 1
@@ -881,27 +1012,28 @@ function glue.string.lines(s, opt, i)
 		return s, i0, i1, i2
 	end
 end
+string.lines = lines
 
 --outdent lines based on the indentation of the first non-empty line.
 --bails out if a subsequent line is less indented than the first non-empty line.
 --newindent is an optional indentation to prepended to each unindented line.
-function glue.string.outdent(s, newindent)
+function outdent(s, newindent)
 	newindent = newindent or ''
 	local indent
 	local t = {}
-	for s in glue.lines(s) do
+	for s in lines(s) do
 		local indent1 = s:match'^([\t ]*)[^%s]'
 		if not indent then
 			indent = indent1
 		elseif indent1 then
 			if indent ~= indent1 then
 				if #indent1 > #indent then --more indented
-					if not glue.starts(indent1, indent) then
+					if not starts(indent1, indent) then
 						indent = ''
 						break
 					end
 				elseif #indent > #indent1 then --less indented
-					if not glue.starts(indent, indent1) then
+					if not starts(indent, indent1) then
 						indent = ''
 						break
 					end
@@ -923,10 +1055,11 @@ function glue.string.outdent(s, newindent)
 	end
 	return concat(t, '\n'), indent
 end
+string.outdent = outdent
 
 --return the line and column numbers at a specific index in a string.
 --if i is not given, returns a function f(i) that is faster on repeat calls.
-function glue.string.lineinfo(s, i)
+function lineinfo(s, i)
 	if i then --simpler version with no garbage for when the index is given.
 		assert(i > 0 and i <= #s + 1)
 		local line, col = 1, 1
@@ -948,7 +1081,7 @@ function glue.string.lineinfo(s, i)
 	assert(#t >= 2)
 	local function lineinfo(i)
 		--do a binary search in t to find the line.
-		--TODO: replace this with glue.binsearch().
+		--TODO: replace this with binsearch().
 		assert(i > 0 and i <= #s + 1)
 		local min, max = 1, #t
 		while true do
@@ -966,85 +1099,93 @@ function glue.string.lineinfo(s, i)
 	end
 	return lineinfo
 end
+string.lineinfo = lineinfo
 
 --string trim12 from Lua wiki (trims any %s).
-function glue.string.trim(s)
+function trim(s)
 	local from = s:match'^%s*()'
 	return from > #s and '' or s:match('.*%S', from)
 end
+string.trim = trim
 
 --pad string s to length n using char c (which defaults to ' ') on its right
 --side (dir = 'r') or left side (dir = 'l').
-local function pad(s, n, c, dir)
+function pad(s, n, c, dir)
 	local pad = (c or ' '):rep(n - #s)
 	return dir == 'l' and pad..s or dir == 'r' and s..pad or error'dir arg required'
 end
-glue.string.pad = pad
-function glue.string.lpad(s, n, c) return pad(s, n, c, 'l') end
-function glue.string.rpad(s, n, c) return pad(s, n, c, 'r') end
+local pad = pad
+function lpad(s, n, c) return pad(s, n, c, 'l') end
+function rpad(s, n, c) return pad(s, n, c, 'r') end
+string.pad = pad
+string.lpad = lpad
+string.rpad = rpad
 
 --escape a string so that it can be matched literally inside a pattern.
 --escape magic characters of string s so that it can be used as a pattern
 --that matches s literally in string matching functions.
 --the optional arg mode can have the value '*i' (for case insensitive).
 local function format_ci_pat(c)
-	return ('[%s%s]'):format(c:lower(), c:upper())
+	return format('[%s%s]', c:lower(), c:upper())
 end
-function glue.string.esc(s, mode) --escape is a reserved word in Terra
-	s = s:gsub('%%','%%%%'):gsub('%z','%%z')
-		:gsub('([%^%$%(%)%.%[%]%*%+%-%?])', '%%%1')
-	if mode == '*i' then s = s:gsub('[%a]', format_ci_pat) end
+function esc(s, mode) --escape is a reserved word in Terra
+	s = gsub(gsub(gsub(s, '%%','%%%%'), '%z','%%z'), '([%^%$%(%)%.%[%]%*%+%-%?])', '%%%1')
+	if mode == '*i' then s = gsub(s, '[%a]', format_ci_pat) end
 	return s
 end
+string.esc = esc
 
 --convert binary string or a Lua number to its hex representation.
 --numbers must be in the unsigned 32 bit integer range.
-function glue.string.tohex(s, upper)
+function tohex(s, upper)
 	if type(s) == 'number' then
-		return (upper and '%08.8X' or '%08.8x'):format(s)
+		return format(upper and '%08.8X' or '%08.8x', s)
 	end
 	if upper then
-		return (s:gsub('.', function(c)
-		  return ('%02X'):format(c:byte())
+		return (gsub(s, '.', function(c)
+		  return format('%02X', c:byte())
 		end))
 	else
-		return (s:gsub('.', function(c)
-		  return ('%02x'):format(c:byte())
+		return (gsub(s, '.', function(c)
+		  return format('%02x', c:byte())
 		end))
 	end
 end
+string.tohex = tohex
 
 --convert hex string to its binary representation. returns nil on invalid
 --input unless isvalid is given which makes it raise on invalid input.
-local function fromhex(s, isvalid)
+function fromhex(s, isvalid)
 	if not isvalid then
 		if s:find'[^0-9a-fA-F]' then
 			return nil
 		end
 	else
-		s = s:gsub('[^0-9a-fA-F]', '')
+		s = gsub(s, '[^0-9a-fA-F]', '')
 	end
 	if #s % 2 == 1 then
 		return fromhex('0'..s)
 	end
-	return (s:gsub('..', function(cc)
+	return (gsub(s, '..', function(cc)
 		return char(assert(tonumber(cc, 16)))
 	end))
 end
-glue.string.fromhex = fromhex
+string.fromhex = fromhex
 
-function glue.string.starts(s, p) --5x faster than s:find'^...' in LuaJIT 2.1
+function starts(s, p) --5x faster than s:find'^...' in LuaJIT 2.1
 	return s:sub(1, #p) == p
 end
+string.starts = starts
 
-function glue.string.ends(s, p)
+function ends(s, p)
 	return p == '' or s:sub(-#p) == p
 end
+string.ends = ends
 
-function glue.string.subst(s, t, get_missing) --subst('{foo} {bar}', {foo=1, bar=2}) -> '1 2'
+function subst(s, t, get_missing) --subst('{foo} {bar}', {foo=1, bar=2}) -> '1 2'
 	if get_missing then
 		local missing
-		return s:gsub('{([_%w]+)}', function(s)
+		return gsub(s, '{([_%w]+)}', function(s)
 			if t[s] ~= nil then
 				return t[s]
 			else
@@ -1053,12 +1194,13 @@ function glue.string.subst(s, t, get_missing) --subst('{foo} {bar}', {foo=1, bar
 			end
 		end), missing
 	else
-		return s:gsub('{([_%w]+)}', t)
+		return gsub(s, '{([_%w]+)}', t)
 	end
 end
+string.subst = subst
 
 --concat args, skipping nil ones. returns nil if there are no non-nil args.
-function glue.catargs(sep, ...)
+function catany(sep, ...)
 	local n = select('#', ...)
 	if n == 0 then
 		return nil
@@ -1090,17 +1232,95 @@ function glue.catargs(sep, ...)
 	end
 end
 
-function glue.catall(...)
+function catall(...)
 	for i=1,select('#',...) do
 		if not select(i,...) then
 			return nil
 		end
 	end
-	return glue.catargs('', ...)
+	return catany('', ...)
 end
 
---publish the string submodule in the glue namespace.
-glue.update(glue, glue.string)
+--capitalize the first letter of every word in string.
+local function cap(a, b) return a:upper()..b end
+function capitalize(s)
+	return gsub(s, '(%l)(%w*)', cap)
+end
+string.capitalize = capitalize
+
+--NOTE: this is not generic enough to be in here but we won't make a full
+--module just for it.
+
+local escapes = { --from mustache.js
+	['&']  = '&amp;',
+	['<']  = '&lt;',
+	['>']  = '&gt;',
+	['"']  = '&quot;',
+	["'"]  = '&#39;',
+	['/']  = '&#x2F;',
+	['`']  = '&#x60;', --attr. delimiter in IE
+	['=']  = '&#x3D;',
+}
+function html_escape(s)
+	if s == nil then return '' end
+	return s:gsub('[&<>"\'/`=]', escapes)
+end
+string.html_escape = html_escape
+
+do
+local suffixes = {[0] = 'B', 'K', 'M', 'G', 'T', 'P', 'E'}
+local magnitudes = index(suffixes)
+local clamp, ln1024 = clamp, ln(1024)
+local decfmt = memoize(function(dec) return '%.'..dec..'f%s' end)
+function kbytes(x, dec, mag)
+	local i = mag and magnitudes[mag] or clamp(floor(ln(x) / ln1024), 0, #suffixes-1)
+	local z = x / 1024^i
+	local fmt = dec and dec ~= 0 and decfmt(dec) or '%.0f%s'
+	return format(fmt, z, suffixes[i])
+end
+end
+
+--stdout & stderr ------------------------------------------------------------
+
+--virtualize the print function, eg. print_function(io.write, tostring)
+--gets you standard print().
+function print_function(out, format)
+	format = format or tostring
+	return function(...)
+		local n = select('#', ...)
+		for i=1,n do
+			out(format((select(i, ...))))
+			if i < n then
+				out'\t'
+			end
+		end
+		out'\n'
+	end
+end
+
+function printf(...)
+	return print(format(...))
+end
+
+local function fmtargs(fmt, ...)
+	return fmt and fmt:format(...) or ''
+end
+
+function say(fmt, ...)
+	if logging.quiet then return end
+	io_stderr:write(fmtargs(fmt, ...)..'\n')
+	io_stderr:flush()
+end
+
+function sayn(fmt, ...)
+	if logging.quiet then return end
+	io_stderr:write(fmtargs(fmt, ...))
+end
+
+function die(fmt, ...)
+	say(fmt and 'ABORT: '..fmt or 'ABORT', ...)
+	os.exit(1)
+end
 
 --iterators ------------------------------------------------------------------
 
@@ -1122,44 +1342,32 @@ local function collect_first(f,s,v)
 	until v == nil
 	return t
 end
-function glue.collect(n,...)
+function collect(n,...)
 	if type(n) == 'number' then
 		return collect_at(n,...)
-	else
+	elseif type(n) == 'function' then
 		return collect_first(n,...)
+	else --pass-through, eg. collect(words(nil)) -> nil.
+		return n,...
 	end
 end
 
 --stubs ----------------------------------------------------------------------
 
-function glue.pass(...) return ... end
-function glue.noop() return end
+function pass(...) return ... end
+function noop() return end
 
 --objects --------------------------------------------------------------------
-
---set up dynamic inheritance by creating or updating a table's metatable.
---unlike glue.object(), this doesn't add any keys to the object.
---for static (single or multiple) inheritance, use glue.update().
---parent can be a function for dynamic dispatching.
-function glue.inherit(t, parent)
-	local meta = getmetatable(t)
-	if meta then
-		meta.__index = parent
-	elseif parent ~= nil then
-		setmetatable(t, {__index = parent})
-	end
-	return t
-end
 
 --[[
 This 5 LOC object model has the following qualities:
 * small memory footprint: only 2 table slots and no extra tables.
 * funcall-style instantiation with t(...) by defining t:__call(...).
 * subclassing from instances is allowed (prototype-based inheritance).
-* do `t.__call = glue.object` to get t(...) -> t1 i.e. use glue.object as
+* do `t.__call = object` to get t(...) -> t1 i.e. use `object` as
   constructor stub for both subclassing and instantiation.
-* do `t.new = glue.object` to get t:new(...) -> t1 (same thing, different style).
-* do `t.subclass = glue.object` to get t:subclass(...) -> t1, i.e. use
+* do `t.new = object` to get t:new(...) -> t1 (same thing, different style).
+* do `t.subclass = object` to get t:subclass(...) -> t1, i.e. use
   different constructors for subclassing and for instantiation.
 * virtual classes (aka dependency injection, aka nested inner classes whose
   fields and methods can be overridden by subclasses of the outer class):
@@ -1173,32 +1381,32 @@ This 5 LOC object model has the following qualities:
   container object from the inner object.
 * overriding syntax sugar so that the super class need not be referenced
   explicitly when overriding can be incorporated into a class C with
-  `C.override = glue.override`, `C.before = glue.before`, `C.after = glue.after`.
+  `C.override = override`, `C.before = before`, `C.after = after`.
 ]]
-function glue.object(super, o, ...)
+function object(super, o, ...)
 	o = o or {}
 	o.__index = super
 	o.__call = super and super.__call
-	glue.update(o, ...) --add mixins, defaults, etc.
+	update(o, ...) --add mixins, defaults, etc.
 	return setmetatable(o, o)
 end
 
 --[[
 We call these method overriding hooks. Check it out:
-	glue.before   (foo, 'bar', f)  # foo.bar method patched to call f(self, ...) first
-	glue.after    (foo, 'bar', f)  # foo.bar method patched to call f(self, ...) last
-	glue.override (foo, 'bar', f)  # foo.bar(...) returns f(inherited, self, ...)
+	before   (foo, 'bar', f)  # foo.bar method patched to call f(self, ...) first
+	after    (foo, 'bar', f)  # foo.bar method patched to call f(self, ...) last
+	override (foo, 'bar', f)  # foo.bar(...) returns f(inherited, self, ...)
 or:
-	Foo.before = glue.before    # Foo class got new ability
-	Foo.after  = glue.after     # Foo class got new ability
-	foo:before  ('bar', f)      # foo.bar method patched to call f(self, ...) first
-	foo:after   ('bar', f)      # foo.bar method patched to call f(self, ...) last
-	foo:override('bar', f)      # foo.bar(...) returns f(inherited, self, ...)
+	Foo.before = before       # Foo class got new ability
+	Foo.after  = after        # Foo class got new ability
+	foo:before  ('bar', f)    # foo.bar method patched to call f(self, ...) first
+	foo:after   ('bar', f)    # foo.bar method patched to call f(self, ...) last
+	foo:override('bar', f)    # foo.bar(...) returns f(inherited, self, ...)
 ]]
 local function install(self, combine, method_name, hook)
 	rawset(self, method_name, combine(self[method_name], hook))
 end
-local function before(method, hook)
+local function _before(method, hook)
 	if method then
 		return function(self, ...)
 			hook(self, ...)
@@ -1208,10 +1416,10 @@ local function before(method, hook)
 		return hook
 	end
 end
-function glue.before(self, method_name, hook)
-	install(self, before, method_name, hook)
+function before(self, method_name, hook)
+	install(self, _before, method_name, hook)
 end
-local function after(method, hook)
+local function _after(method, hook)
 	if method then
 		return function(self, ...)
 			method(self, ...)
@@ -1221,23 +1429,23 @@ local function after(method, hook)
 		return hook
 	end
 end
-function glue.after(self, method_name, hook)
-	install(self, after, method_name, hook)
+function after(self, method_name, hook)
+	install(self, _after, method_name, hook)
 end
-local function override(method, hook)
-	local method = method or glue.noop
+local function _override(method, hook)
+	local method = method or noop
 	return function(...)
 		return hook(method, ...)
 	end
 end
-function glue.override(self, method_name, hook)
-	install(self, override, method_name, hook)
+function override(self, method_name, hook)
+	install(self, _override, method_name, hook)
 end
 
 --Return a metatable that supports virtual properties with getters and setters.
 --Can be used with setmetatable() and ffi.metatype(). `super` allows keeping
 --the functionality of __index while __index is being used for getters.
-function glue.gettersandsetters(getters, setters, super)
+function gettersandsetters(getters, setters, super)
 	local get = getters and function(t, k)
 		local get = getters[k]
 		if get then return get(t) end
@@ -1253,189 +1461,47 @@ end
 
 --os -------------------------------------------------------------------------
 
-glue.win = package.config:sub(1,1) == '\\'
+win = package.config:sub(1,1) == '\\'
 
---i/o ------------------------------------------------------------------------
+--process control ------------------------------------------------------------
 
---check if a file exists and can be opened for reading or writing.
---TIP: use fs.is(name) instead if available.
-function glue.canopen(name, mode)
-	local f = io.open(name, mode or (glue.win and 'rb' or 'r'))
-	if f then f:close() end
-	return f ~= nil and name or nil
-end
-
---read a file into a string (in binary mode by default).
---TIP: use fs.load(file) instead if available.
-function glue.readfile(name, mode, open)
-	open = open or io.open
-	local f, err = open(name, mode=='t' and 'r' or (glue.win and 'rb' or 'r'))
-	if not f then return nil, err end
-	local s, err = f:read'*a'
-	if s == nil then
-		f:close()
-		return nil, err
-	end
-	f:close()
-	return s
-end
-
---read the output of a command into a string.
---TIP: use proc.exec() instead if available.
-function glue.readpipe(cmd, mode, open)
-	return glue.readfile(cmd, mode, open or io.popen)
-end
-
---[[
-Move or rename a file. If `newpath` exists and it's a file, it is replaced by
-the old file atomically. The operation can still fail under many circumstances
-like if `newpath` is a directory or if the files are in different filesystems
-or if `oldpath` is missing or locked, etc. For consistent behavior across OSes,
-both paths should be either absolute paths or simple filenames without a path.
-TIP: use fs.move() instead if available.
-]]
-if jit then
-
-	local ffi = require'ffi'
-
-	if ffi.os == 'Windows' then
-
-		ffi.cdef[[
-			int MoveFileExA(
-				const char *lpExistingFileName,
-				const char *lpNewFileName,
-				unsigned long dwFlags
-			);
-			int GetLastError(void);
-		]]
-
-		local MOVEFILE_REPLACE_EXISTING = 1
-		local MOVEFILE_WRITE_THROUGH    = 8
-		local ERROR_FILE_EXISTS         = 80
-		local ERROR_ALREADY_EXISTS      = 183
-
-		function glue.replacefile(oldfile, newfile)
-			if ffi.C.MoveFileExA(oldfile, newfile, 0) ~= 0 then
-				return true
-			end
-			local err = ffi.C.GetLastError()
-			if err == ERROR_FILE_EXISTS or err == ERROR_ALREADY_EXISTS then
-				if ffi.C.MoveFileExA(oldfile, newfile,
-					bit.bor(MOVEFILE_WRITE_THROUGH, MOVEFILE_REPLACE_EXISTING)) ~= 0
-				then
-					return true
-				end
-				err = ffi.C.GetLastError()
-			end
-			return nil, 'WinAPI error '..err
-		end
-
-	else
-
-		function glue.replacefile(oldfile, newfile)
-			return os.rename(oldfile, newfile)
-		end
-
-	end
-
-end
-
---write a string, number, array of strings or function results to a file.
---uses binary mode by default. atomic by default by writing to a temp file.
---`format` can be 't' (text mode - Windows) or 'a' or 'at' for appending.
---TIP: use fs.save() instead if available.
-function glue.writefile(filename, s, mode, tmpfile)
-	local append = mode == 'a' or mode == 'at'
-	if tmpfile == nil and not append then
-		tmpfile = true --enabled by default.
-	end
-	if tmpfile then
-		if tmpfile == true then
-			tmpfile = filename..'.tmp'
-		end
-		local ok, err = glue.writefile(tmpfile, s, mode, false)
-		if not ok then
-			return nil, err
-		end
-		local ok, err = glue.replacefile(tmpfile, filename)
-		if not ok then
-			os.remove(tmpfile)
-			return nil, err
-		else
-			return true
-		end
-	end
-	local m = append and (mode=='at' and 'a' or 'ab') or (mode=='t' and 'w' or 'wb')
-	local f, err = io.open(filename, m)
-	if not f then
-		return nil, err
-	end
-	local ok, err = true
-	if type(s) == 'table' then
-		for i = 1, #s do
-			ok, err = f:write(s[i])
-			if not ok then break end
-		end
-	elseif type(s) == 'function' then
-		local read = s
-		while true do
-			ok, err = xpcall(read, debug.traceback)
-			if not ok or err == nil then break end
-			ok, err = f:write(err)
-			if not ok then break end
-		end
-	else --string or number
-		ok, err = f:write(s)
-	end
-	f:close()
-	if not ok then
-		if not append then
-			os.remove(filename)
-		end
-		return nil, err
-	else
-		return true
-	end
-end
-
---virtualize the print function, eg. glue.printer(io.write, tostring)
---gets you standard print().
-function glue.printer(out, format)
-	format = format or tostring
-	return function(...)
-		local n = select('#', ...)
-		for i=1,n do
-			out(format((select(i, ...))))
-			if i < n then
-				out'\t'
-			end
-		end
-		out'\n'
-	end
-end
+exit = os.exit
 
 --dates & timestamps ---------------------------------------------------------
 
+local now = now
+local os_date = os.date
+local os_time = os.time
+
+function date(fmt, t)
+	t = t or now()
+	local d = os_date(fmt, t)
+	if type(d) == 'table' then
+		d.sec = d.sec + t - floor(t) --increase accuracy in d.sec
+	end
+	return d
+end
+
+local date = date
+
 --compute timestamp diff. to UTC because os.time() has no option for UTC.
-function glue.utc_diff(t)
-   local ld = os.date('*t', t)
+function utc_diff(t)
+   local ld = date('*t', t)
 	ld.isdst = false --adjust for DST.
-	local ud = os.date('!*t', t)
-	local lt = os.time(ld)
-	local ut = os.time(ud)
+	local ud = date('!*t', t)
+	local lt = os_time(ld)
+	local ut = os_time(ud)
 	return lt and ut and lt - ut
 end
 
---[[
-Like os.time() but considers the arguments to be in UTC if either `utc` or `t.utc` is `true`.
-
-You should only use os.date() and os.time() and therefore glue.time() for
-current dates and use something else for historical dates because these
-functions don't work with negative timestamps. They're Y2038-safe though.
-
-os.time() only has second accuracy. For sub-second accuracy use the time module.
-]]
-function glue.time(utc, y, m, d, h, M, s, isdst)
+--Like os.time() but with utc option and sub-second accuracy.
+--NOTE: You should only use date() and time() for current dates and use
+--something else for historical dates because these functions don't work
+--with negative timestamps. They're Y2038-safe though.
+function time(utc, y, m, d, h, M, s, isdst)
+	if utc == nil then --shortcut: just get the current time
+		return now()
+	end
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, y, m, d, h, M, s, isdst = nil, utc, y, m, d, h, M, s
 	end
@@ -1444,75 +1510,72 @@ function glue.time(utc, y, m, d, h, M, s, isdst)
 		if utc == nil then utc = t.utc end
 		y, m, d, h, M, s, isdst = t.year, t.month, t.day, t.hour, t.min, t.sec, t.isdst
 	end
-	local t
-	if not y then
-		t = os.time()
-	else
-		s = s or 0
-		t = os.time{year = y, month = m or 1, day = d or 1, hour = h or 0,
-			min = M or 0, sec = s, isdst = isdst}
-		if not t then return nil end
-		t = t + s - floor(s)
-	end
-	local d = not utc and 0 or glue.utc_diff(t)
+	s = s or 0
+	local t = os_time{year = y, month = m or 1, day = d or 1, hour = h or 0,
+		min = M or 0, sec = s, isdst = isdst}
+	if not t then return nil end
+	t = t + s - floor(s)
+	local d = not utc and 0 or utc_diff(t)
 	if not d then return nil end
 	return t + d
 end
 
+local time = time
+
 --get the time at last sunday before a given time, plus/minus a number of weeks.
-function glue.sunday(utc, t, offset)
+function sunday(utc, t, offset)
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, t, offset = false, utc, t
 	end
-	local d = os.date(utc and '!*t' or '*t', t)
-	return glue.time(false, d.year, d.month, d.day - (d.wday - 1) + (offset or 0) * 7)
+	local d = date(utc and '!*t' or '*t', t)
+	return time(false, d.year, d.month, d.day - (d.wday - 1) + (offset or 0) * 7)
 end
 
 --get the time at the start of the day of a given time, plus/minus a number of days.
-function glue.day(utc, t, offset)
+function day(utc, t, offset)
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, t, offset = false, utc, t
 	end
-	local d = os.date(utc and '!*t' or '*t', t)
-	return glue.time(false, d.year, d.month, d.day + (offset or 0))
+	local d = date(utc and '!*t' or '*t', t)
+	return time(false, d.year, d.month, d.day + (offset or 0))
 end
 
 --get the time at the start of the month of a given time, plus/minus a number of months.
-function glue.month(utc, t, offset)
+function month(utc, t, offset)
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, t, offset = false, utc, t
 	end
-	local d = os.date(utc and '!*t' or '*t', t)
-	return glue.time(false, d.year, d.month + (offset or 0))
+	local d = date(utc and '!*t' or '*t', t)
+	return time(false, d.year, d.month + (offset or 0))
 end
 
 --get the time at the start of the year of a given time, plus/minus a number of years.
-function glue.year(utc, t, offset)
+function year(utc, t, offset)
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, t, offset = false, utc, t
 	end
-	local d = os.date(utc and '!*t' or '*t', t)
-	return glue.time(false, d.year + (offset or 0))
+	local d = date(utc and '!*t' or '*t', t)
+	return time(false, d.year + (offset or 0))
 end
 
 do
 local t = {}
-function glue.duration(s, format) -- approx[+s] | long | nil
+function duration(s, format) -- approx[+s] | long | nil
 	if format == 'approx' then
 		if s > 2 * 365 * 24 * 3600 then
-			return ('%d years'):format(floor(s / (365 * 24 * 3600)))
+			return format('%d years', floor(s / (365 * 24 * 3600)))
 		elseif s > 2 * 30.5 * 24 * 3600 then
-			return ('%d months'):format(floor(s / (30.5 * 24 * 3600)))
+			return format('%d months', floor(s / (30.5 * 24 * 3600)))
 		elseif s > 1.5 * 24 * 3600 then
-			return ('%d days'):format(floor(s / (24 * 3600)))
+			return format('%d days', floor(s / (24 * 3600)))
 		elseif s > 2 * 3600 then
-			return ('%d hours'):format(floor(s / 3600))
+			return format('%d hours', floor(s / 3600))
 		elseif s > 2 * 60 then
-			return ('%d minutes'):format(floor(s / 60))
+			return format('%d minutes', floor(s / 60))
 		elseif s > 60 then
 			return '1 minute'
 		elseif format == 'approx+s' then
-			return ('%d seconds'):format(s)
+			return format('%d seconds', s)
 		else
 			return 'seconds'
 		end
@@ -1532,25 +1595,27 @@ function glue.duration(s, format) -- approx[+s] | long | nil
 			if s ~= 0 or #t == 0 then t[i] = s; t[i+1] = s > 1 and 'seconds' or 'second'; i=i+2 end
 			return concat(t, ' ')
 		else
-			if d ~= 0 then return ('%dd%02dh%02dm%02ds'):format(d, h, m, s) end
-			if h ~= 0 then return ('%dh%02dm%02ds'):format(h, m, s) end
-			if m ~= 0 then return ('%dm%02ds'):format(m, s) end
-			if 1 ~= 0 then return ('%ds'):format(s) end
+			if d ~= 0 then return format('%dd%02dh%02dm%02ds', d, h, m, s) end
+			if h ~= 0 then return format('%dh%02dm%02ds', h, m, s) end
+			if m ~= 0 then return format('%dm%02ds', m, s) end
+			if 1 ~= 0 then return format('%ds', s) end
 		end
 	end
 end
 end
 
 --format relative time, eg. `3 hours ago` or `in 2 weeks`.
-function glue.timeago(utc, time, from_time)
+local duration = duration
+local abs = math.abs
+function timeago(utc, time, from_time)
 	if type(utc) ~= 'boolean' then --shift arg#1
 		utc, time, from_time = false, utc, time, from_time
 	end
-	local s = (from_time or glue.time(utc)) - time
-	return string.format(s > 0 and '%s ago' or 'in %s', glue.duration(math.abs(s), 'approx'))
+	local s = (from_time or time(utc)) - time
+	return format(s > 0 and '%s ago' or 'in %s', duration(abs(s), 'approx'))
 end
 
-function glue.timeofday(t, with_seconds)
+function timeofday(t, with_seconds)
 	local h = floor(t / 3600) % 24
 	local m = floor(t / 60) % 60
 	local s = t % 60
@@ -1565,56 +1630,26 @@ local wso = { -- fri=1, sat=2, sun=3
 	MO=3,MT=3,MX=3,MZ=3,NI=3,NP=3,PA=3,PE=3,PH=3,PK=3,PR=3,PT=3,PY=3,SA=3,SG=3,
 	SV=3,TH=3,TT=3,TW=3,UM=3,US=3,VE=3,VI=3,WS=3,YE=3,ZA=3,ZW=3,
 }
-function glue.week_start_offset(country) --sun=0, mon=1, sat=-1, fri=-2
+function week_start(country) --sun=0, mon=1, sat=-1, fri=-2
 	return (wso[country] or 4) - 3
-end
-
---size formatting ------------------------------------------------------------
-
-local suffixes = {[0] = 'B', 'K', 'M', 'G', 'T', 'P', 'E'}
-local magnitudes = glue.index(suffixes)
-local clamp, ln1024 = glue.clamp, ln(1024)
-local decfmt = glue.memoize(function(dec) return '%.'..dec..'f%s' end)
-function glue.kbytes(x, dec, mag)
-	local i = mag and magnitudes[mag] or clamp(floor(ln(x) / ln1024), 0, #suffixes-1)
-	local z = x / 1024^i
-	local fmt = dec and dec ~= 0 and decfmt(dec) or '%.0f%s'
-	return (fmt):format(z, suffixes[i])
-end
-
---2D boxes -------------------------------------------------------------------
-
-function glue.fitbox(w, h, bw, bh)
-	if w / h > bw / bh then
-		return bw, bw * h / w
-	else
-		return bh * w / h, bh
-	end
 end
 
 --error handling -------------------------------------------------------------
 
+local xpcall = xpcall
+
 --like standard assert() but with error message formatting via string.format()
---and doesn't allocate memory until the assertion fails.
+--and doesn't allocate memory unless the assertion fails.
 --NOTE: unlike standard assert(), this only returns the first argument
 --to avoid returning the error message and it's args along with it so don't
 --use it with functions returning multiple values if you want those values.
-function glue.assert(v, err, ...)
+function assertf(v, err, ...)
 	if v then return v end
 	err = err or 'assertion failed!'
 	if select('#',...) > 0 then
-		err = string.format(err, ...)
+		err = format(err, ...)
 	end
 	error(err, 2)
-end
-
---pcall with traceback, which is lost with standard pcall. LuaJIT and Lua 5.2 only.
---TIP: use errors.pcall() instead if available.
-local function pcall_error(e)
-	return debug.traceback('\n'..tostring(e), 2)
-end
-function glue.pcall(f, ...)
-	return xpcall(f, pcall_error, ...)
 end
 
 local function unprotect(ok, result, ...)
@@ -1623,16 +1658,8 @@ local function unprotect(ok, result, ...)
 	return result, ...
 end
 
---wrap a function that raises errors on failure into a function that follows
---the Lua convention of returning nil,err on failure.
-function glue.protect(func)
-	return function(...)
-		return unprotect(pcall(func, ...))
-	end
-end
-
 --[[
-Pcall with finally and except "clauses":
+pcall with finally and except "clauses":
 
 	local ret,err = fpcall(function(finally, onerror, ...)
 		local foo = getfoo()
@@ -1643,7 +1670,7 @@ Pcall with finally and except "clauses":
 NOTE: a bit bloated at 2 tables and 4 closures. Can we reduce the overhead?
 NOTE: LuaJIT and Lua 5.2 only from using a xpcall message handler.
 ]]
-local function fpcall(f,...)
+local function _fpcall(f,...)
 	local fint, errt = {}, {}
 	local function finally(f) fint[#fint+1] = f end
 	local function onerror(f) errt[#errt+1] = f end
@@ -1652,17 +1679,16 @@ local function fpcall(f,...)
 		for i=#fint,1,-1 do fint[i]() end
 		return debug.traceback(e)
 	end
-	local function pass(ok,...)
+	local function cont(ok,...)
 		if ok then
 			for i=#fint,1,-1 do fint[i]() end
 		end
 		return ok,...
 	end
-	return pass(xpcall(f, err, finally, onerror, ...))
+	return cont(xpcall(f, err, finally, onerror, ...))
 end
-
-function glue.fpcall(...)
-	return unprotect(fpcall(...))
+function fpcall(...)
+	return unprotect(_fpcall(...))
 end
 
 --fcall is like fpcall() but without the protection (i.e. raises errors).
@@ -1670,8 +1696,210 @@ local function assert_fpcall(ok, ...)
 	if not ok then error(..., 2) end
 	return ...
 end
-function glue.fcall(...)
-	return assert_fpcall(fpcall(...))
+function fcall(...)
+	return assert_fpcall(_fpcall(...))
+end
+
+--[=[ structured exceptions --------------------------------------------------
+
+Structured exceptions are an enhancement over string exceptions, adding
+selective catching and providing a context for the failure to help with
+recovery or logging. They're most useful in network protocols.
+
+In the API `classes` can be given as either 'classname1 ...' or {class1->true}.
+When given in table form, you must include all the superclasses in the table
+since they are not added automatically!
+
+raise() passes its varargs to newerror() which passes them to
+eclass() which passes them to eclass:__call() which interprets them
+as follows: `[err_obj, err_obj_options..., ][format, format_args...]`.
+So if the first arg is a table it is converted to the final error object.
+Any following table args are merged with this object. Any following args
+after that are passed to string.format() and the result is placed in
+err_obj.message (if `message` was not already set). All args are optional.
+
+A note on tracebacks: with string errors, when catching an error temporarily
+to free resources and then re-raising it, the original stack trace is lost.
+Catching errors with the pcall() that's reimplemented here instead of with
+the standard pcall() adds a traceback to all plain string errors. Structured
+errors are usually raised inside protected functions so they don't get a
+traceback by default unless they ask for it.
+
+]=]
+
+do
+local lua_error = error
+local lua_pcall = pcall
+
+local classes = {} --{name -> class}
+local class_sets = {} --{'name1 name2 ...' -> {class->true}}
+local Error --base error class, defined below.
+
+local function errortype(classname, super, default_error_message)
+	local class = classname and classes[classname]
+	if not class then
+		super = type(super) == 'string' and assert(classes[super]) or super or Error
+		class = object(super, {classname = classname, iserror = true,
+			default_error_message = default_error_message or classname .. ' error'})
+		if classname then
+			classes[classname] = class
+			class_sets = {}
+		end
+	end
+	return class
+end
+
+Error = errortype'error'
+
+function Error:oninit(f)
+	if not self.init then
+		self.init = f
+	else
+		local init = self.init
+		self.init = function(self)
+			init(self)
+			f(self)
+		end
+	end
+end
+
+local function newerror(arg, ...)
+	if type(arg) == 'string' then
+		local class = classes[arg] or errortype(arg)
+		return class(...)
+	end
+	return arg
+end
+
+local function class_table(s)
+	if type(s) == 'string' then
+		local t = class_sets[s]
+		if not t then
+			t = {}
+			class_sets[s] = t
+			for s in s:gmatch'[^%s,]+' do
+				local class = classes[s]
+				while class do
+					t[class] = true
+					class = class.__index
+				end
+			end
+		end
+		return t
+	else
+		assert(type(s) == 'table')
+		return s --if given as table, must contain superclasses too!
+	end
+end
+
+local function iserror(e, classes)
+	local mt = getmetatable(e)
+	if not (type(mt) == 'table' and rawget(mt, 'iserror')) then return false end
+	if not classes then return true end
+	return class_table(classes)[e.__index] or false
+end
+
+local function merge_option_tables(e, arg1, ...)
+	if type(arg1) == 'table' then
+		for k,v in pairs(arg1) do e[k] = v end
+		return merge_option_tables(e, ...)
+	else
+		e.message = e.message or (arg1 and format(arg1, ...) or nil)
+		return e
+	end
+end
+function Error:__call(arg1, ...)
+	local e
+	if type(arg1) == 'table' then
+		e = merge_option_tables(object(self, arg1), ...)
+	else
+		e = object(self, {
+			message = arg1 and format(arg1, ...) or nil})
+	end
+	e.iserror = true
+	e.__tostring = self.__tostring
+	if e.init then e:init() end
+	return e
+end
+
+function Error:__tostring()
+	local s = self.traceback or self.message or self.default_error_message
+	if self.errorcode then
+		s = s .. ' ['..self.errorcode..']'
+	end
+	return s
+end
+
+local function raise(level, ...)
+	if type(level) == 'number' then
+		lua_error(newerror(...), level)
+	else
+		lua_error((newerror(level, ...)))
+	end
+end
+
+local function fix_traceback(s)
+	return s:gsub('(.-:%d+: )([^\n])', '%1\n%2')
+end
+local function cont(classes, ok, ...)
+	if ok then return true, ... end
+	local e = ...
+	if iserror(e, classes) then
+		return false, e
+	end
+	lua_error(e, 3)
+end
+local function onerror(e)
+	if iserror(e) then
+		if e.addtraceback then
+			e.traceback = fix_traceback(traceback(e.message, 2))
+		end
+	else
+		return fix_traceback(traceback(tostring(e), 2))
+	end
+	return e
+end
+local function pcall(f, ...)
+	return xpcall(f, onerror, ...)
+end
+local function catch(classes, f, ...)
+	return cont(classes, pcall(f, ...))
+end
+
+local function cont(oncaught, ok, ...)
+	if ok then return ... end
+	if oncaught then oncaught(...) end
+	return nil, ...
+end
+local function protect(classes, f, oncaught)
+	if type(classes) == 'function' then
+		return protect(nil, classes, f)
+	end
+	return function(...)
+		return cont(oncaught, catch(classes, f, ...))
+	end
+end
+
+function check(errorclass, event, v, ...)
+	if v then return v end
+	assert(type(errorclass) == 'string' or iserror(errorclass))
+	assert(type(event) == 'string')
+	local e = newerror(errorclass, ...)
+	if not e.logged then
+		log('error', e.classname, event, '%s', e.message)
+		e.logged = true --prevent duplicate logging of the error on a catch-all handler.
+	end
+	raise(e)
+end
+
+_G.errortype = errortype
+_G.newerror = newerror
+_G.iserror = iserror
+_G.raise = raise
+_G.catch = catch
+_G.pcall = pcall
+_G.lua_pcall = lua_pcall
+_G.protect = protect
 end
 
 --modules --------------------------------------------------------------------
@@ -1686,7 +1914,7 @@ accessed directly from the new environment.
 `parent` controls what the namespaces will inherit and it can be either
 another module, in which case M inherits parent and P inherits parent._P,
 or it can be a string in which case the module to inherit is first required.
-`parent` defaults to _M so that calling glue.module() creates a submodule
+`parent` defaults to _M so that calling module() creates a submodule
 of the current module. If there's no _M in the current environment then P
 inherits _G and M inherits nothing.
 
@@ -1698,13 +1926,13 @@ to make a Lua file and require that.
 Naming the module also sets P[name] = M so that public symbols can be
 declared in foo.bar style instead of _M.bar.
 
-Setting foo.module = glue.module makes module foo directly extensible
+Setting foo.module = module makes module foo directly extensible
 by calling foo:module'bar' or require'foo':module'bar'.
 
 All this functionality is packed into just 27 LOC, less than it takes to
 explain it, so read the code to get to another level of understanding.
 ]]
-function glue.module(name, parent)
+function module(name, parent)
 	if type(name) ~= 'string' then
 		name, parent = parent, name
 	end
@@ -1762,7 +1990,7 @@ local function bar() --function implemented in the main module
 end
 
 --create and return the module table
-return glue.autoload({
+return autoload({
    ...
    bar = bar,
 }, {
@@ -1788,7 +2016,7 @@ local foo = require'foo'
 foo.baz(...) -- foo_extra was now loaded automatically
 ```
 ]]
-function glue.autoload(t, k, v)
+function autoload(t, k, v)
 	local mt = getmetatable(t) or {}
 	if not mt.__autoload then
 		local old_index = mt.__index
@@ -1821,7 +2049,7 @@ function glue.autoload(t, k, v)
 		setmetatable(t, mt)
 	end
 	if type(k) == 'table' then
-		glue.update(mt.__autoload, k) --multiple key -> module associations.
+		update(mt.__autoload, k) --multiple key -> module associations.
 	else
 		mt.__autoload[k] = v --single key -> module association.
 	end
@@ -1833,46 +2061,46 @@ end
 --NOTE: for bundled executables, this returns the executable's directory.
 local arg0 = rawget(_G, 'arg') and arg[0]
 local dir = arg0 and arg0:gsub('[/\\]?[^/\\]+$', '') or '' --remove file name
-glue.bin = dir == '' and '.' or dir
+rel_scriptdir = dir == '' and '.' or dir
 
 --portable way to get script's name without Lua file extension, based on arg[0].
 --NOTE: for bundled executables, this returns the executable's name.
-glue.scriptname = arg0
-	and (glue.win and arg0:gsub('%.exe$', '') or arg0)
+scriptname = arg0
+	and (win and arg0:gsub('%.exe$', '') or arg0)
 		:gsub('%.lua$', ''):match'[^/\\]+$'
 
 --portable way to add more paths to package.path, at any place in the list.
 --negative indices count from the end of the list like string.sub().
 --index 'after' means 0. `ext` specifies the file extension to use.
-function glue.luapath(path, index, ext)
+function luapath(path, index, ext)
 	ext = ext or 'lua'
 	index = index or 1
 	local psep = package.config:sub(1,1) --'/'
 	local tsep = package.config:sub(3,3) --';'
 	local wild = package.config:sub(5,5) --'?'
-	local paths = glue.collect(glue.gsplit(package.path, tsep, nil, true))
+	local paths = collect(split(package.path, tsep, nil, true))
 	path = path:gsub('[/\\]', psep) --normalize slashes
 	if index == 'after' then index = 0 end
 	if index < 1 then index = #paths + 1 + index end
-	table.insert(paths, index,  path .. psep .. wild .. psep .. 'init.' .. ext)
-	table.insert(paths, index,  path .. psep .. wild .. '.' .. ext)
+	insert(paths, index,  path .. psep .. wild .. psep .. 'init.' .. ext)
+	insert(paths, index,  path .. psep .. wild .. '.' .. ext)
 	package.path = concat(paths, tsep)
 end
 
 --portable way to add more paths to package.cpath, at any place in the list.
 --negative indices count from the end of the list like string.sub().
 --index 'after' means 0.
-function glue.cpath(path, index)
+function cpath(path, index)
 	index = index or 1
 	local psep = package.config:sub(1,1) --'/'
 	local tsep = package.config:sub(3,3) --';'
 	local wild = package.config:sub(5,5) --'?'
 	local ext = package.cpath:match('%.([%a]+)%'..tsep..'?') --dll | so | dylib
-	local paths = glue.collect(glue.gsplit(package.cpath, tsep, nil, true))
+	local paths = collect(split(package.cpath, tsep, nil, true))
 	path = path:gsub('[/\\]', psep) --normalize slashes
 	if index == 'after' then index = 0 end
 	if index < 1 then index = #paths + 1 + index end
-	table.insert(paths, index,  path .. psep .. wild .. '.' .. ext)
+	insert(paths, index,  path .. psep .. wild .. '.' .. ext)
 	package.cpath = concat(paths, tsep)
 end
 
@@ -1883,9 +2111,9 @@ end
 local function create_table()
 	return {}
 end
-function glue.freelist(create, destroy)
+function freelist(create, destroy)
 	create = create or create_table
-	destroy = destroy or glue.noop
+	destroy = destroy or noop
 	local t = {} --{freed_index -> e}
 	local n = 0
 	local function alloc()
@@ -1904,47 +2132,171 @@ function glue.freelist(create, destroy)
 	return alloc, free
 end
 
+--interpreter ----------------------------------------------------------------
+
+local loadstring = loadstring
+function eval(s, ...)
+	local f = assert(loadstring('return '..s))
+	return f(...)
+end
+
+--bits -----------------------------------------------------------------------
+
+bnot = bit.bnot
+shl  = bit.lshift
+shr  = bit.rshift
+band = bit.band
+bor  = bit.bor
+xor  = bit.bxor
+
+local
+	band, bor, bnot =
+	band, bor, bnot
+
+--extract the bool value of a bitmask from a value.
+function getbit(from, mask)
+	return band(from, mask) == mask
+end
+
+--set a single bit of a value without affecting other bits.
+function setbit(yes, mask, over)
+	if not over then return yes and mask or 0 end
+	return bor(yes and mask or 0, band(over, bnot(mask)))
+end
+
+--set one or more bits of a value without affecting other bits.
+local function setbits(bits, mask, over)
+	return over and bor(bits, band(over, bnot(mask))) or bits
+end
+
+--turn a table of boolean options into a bit mask.
+local function table_flags(t, masks, strict)
+	local bits = 0
+	local mask = 0
+	for k,v in pairs(t) do
+		local flag
+		if type(k) == 'string' and v then --flags as table keys: {flag->true}
+			flag = k
+		elseif type(k) == 'number'
+			and floor(k) == k
+			and type(v) == 'string'
+		then --flags as array: {flag1,...}
+			flag = v
+		end
+		local bitmask = masks[flag]
+		if strict then
+			assertf(bitmask, 'invalid flag: "%s"', tostring(flag))
+		end
+		if bitmask then
+			mask = bit.bor(mask, bitmask)
+			if flag then
+				bits = bit.bor(bits, bitmask)
+			end
+		end
+	end
+	return bits, mask
+end
+
+--turn 'opt1 +opt2 -opt3' -> {opt1=true, opt2=true, opt3=false}
+local string_flags = memoize(function(strict, masks, s)
+	local t = {}
+	for s in s:gmatch'[^ ,]+' do
+		local m,s = s:match'^([%+%-]?)(.*)$'
+		t[s] = m ~= '-'
+	end
+	return {table_flags(t, masks, strict)}
+end)
+
+--bor() that takes its arguments as a string of form 'opt1 +opt2 -opt3...',
+--a list of form {'opt1', 'opt2', ...} or a map of form {opt->true|false},
+--and performs bor() on the numeric values of those arguments where the
+--numeric values are given as the `masks` table in form {opt->mask}.
+--Useful for Luaizing C functions that take bitmask flags.
+--Example: bitflags('a c', {a=1, b=2, c=4}) -> 5
+function bitflags(arg, masks, cur_bits, strict)
+	if type(arg) == 'string' then
+		local bits, mask = unpack(string_flags(strict or false, masks, arg))
+		return setbits(bits, mask, cur_bits)
+	elseif type(arg) == 'table' then
+		local bits, mask = table_flags(arg, masks, strict)
+		return setbits(bits, mask, cur_bits)
+	elseif type(arg) == 'number' then
+		return arg
+	elseif arg == nil then
+		return 0
+	else
+		assertf(false, 'flags expected but "%s" given', type(arg))
+	end
+end
+
 --ffi ------------------------------------------------------------------------
 
-if jit then
+C      = ffi.C
+cdef   = ffi.cdef
+new    = ffi.new
+cast   = ffi.cast
+sizeof = ffi.sizeof
+typeof = ffi.typeof
+copy   = ffi.copy
+fill   = ffi.fill
+gc     = ffi.gc
+metatype = ffi.metatype
+_G.str = str
+_G[ffi.os] = true
+win    = Windows
 
-local ffi = require'ffi'
+local
+	cast, typeof =
+	cast, typeof
 
-glue.i8p = ffi.typeof'int8_t*'
-glue.i8a = ffi.typeof'int8_t[?]'
-glue.u8p = ffi.typeof'uint8_t*'
-glue.u8a = ffi.typeof'uint8_t[?]'
+i8p = typeof'int8_t*'
+i8a = typeof'int8_t[?]'
+u8p = typeof'uint8_t*'
+u8a = typeof'uint8_t[?]'
 
-glue.i16p = ffi.typeof'int16_t*'
-glue.i16a = ffi.typeof'int16_t[?]'
-glue.u16p = ffi.typeof'uint16_t*'
-glue.u16a = ffi.typeof'uint16_t[?]'
+i16p = typeof'int16_t*'
+i16a = typeof'int16_t[?]'
+u16p = typeof'uint16_t*'
+u16a = typeof'uint16_t[?]'
 
-glue.i32p = ffi.typeof'int32_t*'
-glue.i32a = ffi.typeof'int32_t[?]'
-glue.u32p = ffi.typeof'uint32_t*'
-glue.u32a = ffi.typeof'uint32_t[?]'
+i32p = typeof'int32_t*'
+i32a = typeof'int32_t[?]'
+u32p = typeof'uint32_t*'
+u32a = typeof'uint32_t[?]'
 
-glue.i64p = ffi.typeof'int64_t*'
-glue.i64a = ffi.typeof'int64_t[?]'
-glue.u64p = ffi.typeof'uint64_t*'
-glue.u64a = ffi.typeof'uint64_t[?]'
+i64p = typeof'int64_t*'
+i64a = typeof'int64_t[?]'
+u64p = typeof'uint64_t*'
+u64a = typeof'uint64_t[?]'
 
-glue.f32p = ffi.typeof'float*'
-glue.f32a = ffi.typeof'float[?]'
-glue.f64p = ffi.typeof'double*'
-glue.f64a = ffi.typeof'double[?]'
+f32p = typeof'float*'
+f32a = typeof'float[?]'
+f64p = typeof'double*'
+f64a = typeof'double[?]'
 
-ffi.cdef[[
+i32 = typeof'int32_t'
+u32 = typeof'uint32_t'
+u64 = typeof'uint64_t'
+i64 = typeof'int64_t'
+
+voidp   = typeof'void*'
+intptr  = typeof'intptr_t'
+uintptr = typeof'uintptr_t'
+
+cdef[[
 void* malloc  (size_t size);
 void* realloc (void* ptr, size_t size);
 void  free    (void* ptr);
 ]]
 
-local function ptr(p) return p ~= nil and p or nil end
-function glue.malloc(size) return ptr(ffi.C.malloc(size)) end
-function glue.realloc(p, size) return ptr(ffi.C.realloc(p, size)) end
-glue.free = ffi.C.free
+function ptr(p) --convert nulls to nil so that `if not p` works.
+	return p ~= nil and p or nil
+end
+
+local ptr = ptr
+function malloc(size) return ptr(ffi.C.malloc(size)) end
+function realloc(p, size) return ptr(ffi.C.realloc(p, size)) end
+free = ffi.C.free
 
 --[[
 auto-growing buffer allocation pattern.
@@ -1958,26 +2310,26 @@ auto-growing buffer allocation pattern.
   are allowed to access both buffers between two consecutive allocations
   in order to copy the contents to the new buffer yourself.
 ]]
-function glue.buffer(ctype)
-	local vla = ffi.typeof(ctype or glue.u8a)
+function buffer(ctype)
+	local vla = typeof(ctype or u8a)
 	local buf, len = nil, -1
 	return function(minlen)
 		if minlen == false then
 			buf, len = nil, -1
 		elseif minlen > len then
-			len = glue.nextpow2(minlen)
+			len = nextpow2(minlen)
 			buf = vla(len)
 		end
 		return buf, len
 	end
 end
 
---like glue.buffer() but preserves data on reallocations
+--like buffer() but preserves data on reallocations
 --also returns minlen instead of capacity.
-function glue.dynarray(ctype, min_capacity)
-	ctype = ctype or glue.u8a
-	local buffer = glue.buffer(ctype)
-	local elem_size = ffi.sizeof(ctype, 1)
+function dynarray(ctype, min_capacity)
+	ctype = ctype or u8a
+	local buffer = buffer(ctype)
+	local elem_size = sizeof(ctype, 1)
 	local buf0, minlen0
 	return function(minlen)
 		local buf, len = buffer(max(min_capacity or 0, minlen))
@@ -1989,99 +2341,39 @@ function glue.dynarray(ctype, min_capacity)
 	end
 end
 
-local intptr_ct = ffi.typeof'intptr_t'
-local intptrptr_ct = ffi.typeof'const intptr_t*'
-local intptr1_ct = ffi.typeof'intptr_t[1]'
-local voidptr_ct = ffi.typeof'void*'
+local intptrptr = ffi.typeof'const intptr_t*'
+local intptr1 = ffi.typeof'intptr_t[1]'
 
 --convert a pointer's address to a Lua number or possibly string.
---use case: hashing on pointer values (i.e. using pointers as table keys)
---use case: moving pointers in and out of Lua states when using luastate.lua.
-function glue.addr(p)
-	local np = ffi.cast(intptr_ct, ffi.cast(voidptr_ct, p))
+--use case #1: hashing on pointer values i.e. using pointers as table keys.
+--use case #2: moving pointers in and out of Lua states when using luastate.lua.
+function ptr_encode(p)
+	local np = cast(intptr, cast(voidp, p))
    local n = tonumber(np)
-	if ffi.cast(intptr_ct, n) ~= np then
+	if cast(intptr, n) ~= np then
 		--address too big (ASLR? tagged pointers?): convert to string.
-		return ffi.string(intptr1_ct(np), 8)
+		return str(intptr1(np), 8)
 	end
 	return n
 end
 
---convert a number or string to a pointer, optionally specifying a ctype.
-function glue.ptr(ctype, addr)
+--convert a pointer address to a pointer, optionally specifying a ctype.
+function ptr_decode(ctype, addr)
 	if not addr then
-		ctype, addr = voidptr_ct, ctype
+		ctype, addr = voidp, ctype
 	end
 	if type(addr) == 'string' then
-		return ffi.cast(ctype, ffi.cast(voidptr_ct,
-			ffi.cast(intptrptr_ct, addr)[0]))
+		return cast(ctype, cast(voidp, cast(intptrptr, addr)[0]))
 	else
-		return ffi.cast(ctype, addr)
+		return cast(ctype, addr)
 	end
 end
-
-end --if jit
-
-if bit then
-
-local band, bor, bnot = bit.band, bit.bor, bit.bnot
-
---extract the bool value of a bitmask from a value.
-function glue.getbit(from, mask)
-	return band(from, mask) == mask
-end
-
---set a single bit of a value without affecting other bits.
-function glue.setbit(over, mask, yes)
-	return bor(yes and mask or 0, band(over, bnot(mask)))
-end
-
---bit.bor() that takes its arguments as a string of form 'opt1 opt2 ...',
---a list of form {'opt1', 'opt2', ...} or a map of form {opt->true}, and
---performs bit.bor() on the numeric values of those arguments where the
---numeric values are given as the `bits` table in form {opt->bitvalue}.
---Useful for Luaizing C functions that take bitmask flags.
---Example: glue.bor('a c', {a=1, b=2, c=4}) -> 5
-local function bor_bit(bits, k, mask, strict)
-	local b = bits[k]
-	if b then
-		return bit.bor(mask, b)
-	elseif strict then
-		error(string.format('invalid bit %s', k))
-	else
-		return mask
-	end
-end
-function glue.bor(flags, bits, strict)
-	local mask = 0
-	if type(flags) == 'number' then
-		return flags --passthrough
-	elseif type(flags) == 'string' then
-		for k in flags:gmatch'[^%s]+' do
-			mask = bor_bit(bits, k, mask, strict)
-		end
-	elseif type(flags) == 'table' then
-		for k,v in pairs(flags) do
-			k = type(k) == 'number' and v or k
-			mask = bor_bit(bits, k, mask, strict)
-		end
-	else
-		error'flags expected'
-	end
-	return mask
-end
-
-end --if bit
 
 --buffered I/O ---------------------------------------------------------------
 
-if jit then
-
-local ffi = require'ffi'
-
 --make a write(buf, sz) that appends data to a dynarray accumulator.
-function glue.dynarray_pump(dynarr)
-	dynarr = dynarr or glue.dynarray()
+function dynarray_pump(dynarr)
+	dynarr = dynarr or dynarray()
 	local i = 0
 	local function write(src, len)
 		if src == nil then return end --eof
@@ -2098,8 +2390,8 @@ end
 
 --unlike a pump which copies the user's buffer, a loader provides a buffer
 --for the user to fill up and mark (a portion of it) as filled.
-function glue.dynarray_loader(dynarr)
-	dynarr = dynarr or glue.dynarray()
+function dynarray_loader(dynarr)
+	dynarr = dynarr or dynarray()
 	local i = 0
 	local function get(sz)
 		return dynarr(i + sz) + i, sz
@@ -2114,8 +2406,8 @@ function glue.dynarray_loader(dynarr)
 end
 
 --load up a dynarray with repeated reads given a read(self, buf, sz, expires) method.
-function glue.readall(read, self, ...)
-	local get, put, collect = glue.dynarray_loader()
+function readall(read, self, ...)
+	local get, put, collect = dynarray_loader()
 	while true do
 		local buf, sz = get(16 * 1024)
 		local len, err = read(self, buf, sz, ...)
@@ -2129,10 +2421,10 @@ end
 --supplied buffer. The supplied buf,sz can also be nil,err in which case
 --the read function will always return just that. The buffer must be a
 --(u)int8_t pointer or VLA.
-function glue.buffer_reader(p, n)
+function buffer_reader(p, n)
 	return function(buf, sz)
 		if p == nil then return p, n end
-		sz = math.min(n, sz)
+		sz = min(n, sz)
 		if sz == 0 then return nil, 'eof' end
 		ffi.copy(buf, p, sz)
 		p = p + sz
@@ -2141,6 +2433,72 @@ function glue.buffer_reader(p, n)
 	end
 end
 
-end --if jit
+--config ---------------------------------------------------------------------
 
-return glue
+do
+	local conf = {}
+	function config(k, default)
+		if type(k) == 'table' then
+			for k, v in pairs(v) do
+				config(k, v)
+			end
+		else
+			local v = conf[k]
+			if v == nil then
+				v = default
+				conf[k] = v
+			end
+			return v
+		end
+	end
+
+	function with_config(t, f, ...)
+		local old_conf = conf
+		local function pass(ok,...)
+			conf = old_conf
+			assert(ok,...)
+			return ...
+		end
+		conf = setmetatable(t, {__index = old_conf})
+		return pass(pcall(f, ...))
+	end
+
+	function load_config(file)
+		local conf_s = load(file, false)
+		if not conf_s then
+			return false
+		end
+		local conf_fn = assert(loadstring(conf_s))
+		setfenv(conf_fn, conf)
+		conf_fn()
+		return true
+	end
+end
+
+--debugging ------------------------------------------------------------------
+
+traceback = debug.traceback
+
+function trace()
+	io_stderr:write(traceback())
+	io_stderr:flush()
+end
+
+function pr(...)
+	for i=1,select('#',...) do
+		io_stderr:write(logprintarg((select(i,...))))
+		io_stderr:write'\t'
+	end
+	io_stderr:write'\n'
+	io_stderr:flush()
+	return ...
+end
+
+
+package.loaded.glue = {with = function(s)
+	for s in words(s) do
+		require(s)
+	end
+end}
+
+require'logging'

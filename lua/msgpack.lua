@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 INSTANCING
-	mp.new([mp]) -> mp                   create a new mp instance (optional)
+	msgpack([mp]) -> mp                  create a new msgpack instance
 
 DECODING
 	mp:decode_next(p, [n], [i]) -> next_i, v            decode value at offset i in p
@@ -46,8 +46,7 @@ DECODING BEHAVIOR
 	* nil array elements create Lua sparse arrays, unless mp.nil_element is set.
 	* extension types are decoded with mp.decoder[type], falling back to
 	mp:decode_unknown() (pre-defined as a stub that returns nil).
-	* decoding errors are raised with mp.error() which defaults to _G.error
-	(see errors.lua for why you'd want to replace this).
+	* decoding errors are raised with mp.error() which defaults to _G.error.
 	* there's no way to tell an empty array from an empty map.
 
 ENCODING BEHAVIOR
@@ -63,35 +62,17 @@ ENCODING BEHAVIOR
 
 if not ... then require'msgpack_test'; return end
 
-local ffi = require'ffi'
-local bit = require'bit'
-local glue = require'glue'
+require'glue'
 
-local floor = math.floor
-local bor, band, shr = bit.bor, bit.band, bit.rshift
+local
+	bor, band, shr, floor, noop, repl, update, dynarray =
+	bor, band, shr, floor, noop, repl, update, dynarray
 
-local u32  = ffi.typeof'uint32_t'
-local i64  = ffi.typeof'int64_t'
-local u64  = ffi.typeof'uint64_t'
+local
+	u32, i64, u64, u8a, i8p, u8p, i16p, u16p, i32p, u32p, i64p, u64p, f32p, f64p =
+	u32, i64, u64, u8a, i8p, u8p, i16p, u16p, i32p, u32p, i64p, u64p, f32p, f64p
 
-local u8a  = glue.u8a
-local i8p  = glue.i8p
-local u8p  = glue.u8p
-local i16p = glue.i16p
-local u16p = glue.u16p
-local i32p = glue.i32p
-local u32p = glue.u32p
-local i64p = glue.i64p
-local u64p = glue.u64p
-local f32p = glue.f32p
-local f64p = glue.f64p
-
-local noop     = glue.noop
-local repl     = glue.repl
-local update   = glue.update
-local dynarray = glue.dynarray
-
-local t_buf = ffi.new'uint8_t[8]'
+local t_buf = u8a(8)
 
 local mp = {decoder = {}}
 
@@ -100,7 +81,7 @@ mp.decode_i64 = tonumber --stub
 mp.decode_u64 = tonumber --stub
 mp.error = error --stub
 
-function mp.new(self)
+function msgpack(self)
 	assert(self ~= mp)
 	return update(self or {}, mp)
 end
@@ -131,7 +112,7 @@ end
 local function num(self, p, n, i, ct, len, tonumber)
 	if i + len > n then self.error'short read' end
 	rcopy(t_buf, p + i, len)
-	local v = ffi.cast(ct, t_buf)[0]
+	local v = cast(ct, t_buf)[0]
 	return i + len, tonumber and tonumber(v) or v
 end
 
@@ -184,7 +165,7 @@ end
 	if c <  0x90 then return map(self, d, p, n, i, band(c, 0x0f)) end
 	if c <  0xa0 then return arr(self, d, p, n, i, band(c, 0x0f)) end
 	if c <  0xc0 then return str(self, p, n, i, band(c, 0x1f)) end
-	if c >  0xdf then return i, ffi.cast(i8p, p)[i-1] end
+	if c >  0xdf then return i, cast(i8p, p)[i-1] end
 	if c == 0xc0 then return i, nil end
 	if c == 0xc2 then return i, false end
 	if c == 0xc3 then return i, true end
@@ -220,14 +201,14 @@ end
 end
 
 function mp:decode_next(p, n, i)
-	p = ffi.cast(u8p, p)
+	p = cast(u8p, p)
 	return obj(self, 0, p, n, i or 0)
 end
 
 function mp:decode_each(p, n, i)
 	i = i or 0
 	n = n or #p
-	p = ffi.cast(u8p, p)
+	p = cast(u8p, p)
 	return function()
 		if i >= n then return nil end
 		local v
@@ -265,17 +246,17 @@ function mp:encoding_buffer(min_size)
 		if n <= 0xff and u8mark then
 			local p, i = b(2)
 			p[i] = u8mark
-			ffi.cast(u8p, p+i+1)[0] = n
+			cast(u8p, p+i+1)[0] = n
 		elseif n <= 0xffff then
 			local p, i = b(3)
 			p[i] = u16mark
-			ffi.cast(u16p, p+i+1)[0] = n
+			cast(u16p, p+i+1)[0] = n
 			rev2(p, i+1)
 		else
-			if n > 0xffffffff then mp.error'too many elements' end
+			if n > 0xffffffff then self.error'too many elements' end
 			local p, i = b(5)
 			p[i] = u32mark
-			ffi.cast(u32p, p+i+1)[0] = n
+			cast(u32p, p+i+1)[0] = n
 			rev4(p, i+1)
 		end
 	end
@@ -319,21 +300,21 @@ function mp:encoding_buffer(min_size)
 				elseif v >= -0x80 then
 					local p, i = b(2)
 					p[i] = 0xd0
-					ffi.cast(i8p, p+i+1)[0] = v
+					cast(i8p, p+i+1)[0] = v
 				elseif v >= -0x8000 then
 					local p, i = b(3)
 					p[i] = 0xd1
-					ffi.cast(i16p, p+i+1)[0] = v
+					cast(i16p, p+i+1)[0] = v
 					rev2(p, i+1)
 				elseif v >= -0x80000000 then
 					local p, i = b(5)
 					p[i] = 0xd2
-					ffi.cast(i32p, p+i+1)[0] = v
+					cast(i32p, p+i+1)[0] = v
 					rev4(p, i+1)
 				else
 					local p, i = b(9)
 					p[i] = 0xd3
-					ffi.cast(i64p, p+i+1)[0] = v
+					cast(i64p, p+i+1)[0] = v
 					rev8(p, i+1)
 				end
 			elseif v <= 0x7f then
@@ -346,28 +327,28 @@ function mp:encoding_buffer(min_size)
 			elseif v <= 0xffff then
 				local p, i = b(3)
 				p[i] = 0xcd
-				ffi.cast(u16p, p+i+1)[0] = v
+				cast(u16p, p+i+1)[0] = v
 				rev2(p, i+1)
 			elseif v <= 0xffffffff then
 				local p, i = b(5)
 				p[i] = 0xce
-				ffi.cast(u32p, p+i+1)[0] = v
+				cast(u32p, p+i+1)[0] = v
 				rev4(p, i+1)
 			else
 				local p, i = b(9)
 				p[i] = 0xcf
-				ffi.cast(u64p, p+i+1)[0] = v
+				cast(u64p, p+i+1)[0] = v
 				rev8(p, i+1)
 			end
 		elseif ffi.istype(i64, v) then
 			local p, i = b(9)
 			p[i] = 0xd3
-			ffi.cast(i64p, p+i+1)[0] = v
+			cast(i64p, p+i+1)[0] = v
 			rev8(p, i+1)
 		elseif ffi.istype(u64, v) then
 			local p, i = b(9)
 			p[i] = 0xcf
-			ffi.cast(u64p, p+i+1)[0] = v
+			cast(u64p, p+i+1)[0] = v
 			rev8(p, i+1)
 		else
 			error('number expected, got '..type(v))
@@ -377,14 +358,14 @@ function mp:encoding_buffer(min_size)
 	function buf:encode_float(v)
 		local p, i = b(5)
 		p[i] = 0xca
-		ffi.cast(f32p, p+i+1)[0] = v
+		cast(f32p, p+i+1)[0] = v
 		rev4(p, i+1)
 		return self
 	end
 	function buf:encode_double(v)
 		local p, i = b(9)
 		p[i] = 0xcb
-		ffi.cast(f64p, p+i+1)[0] = v
+		cast(f64p, p+i+1)[0] = v
 		rev8(p, i+1)
 		return self
 	end
@@ -397,7 +378,7 @@ function mp:encoding_buffer(min_size)
 	end
 	function buf:encode_ext(typ, n)
 		local n = n or #v
-		if n <= 0 then mp.error'zero bytes ext' end
+		if n <= 0 then self.error'zero bytes ext' end
 		if n == 1 then
 			local p, i = b(2)
 			p[i] = 0xd4
@@ -426,9 +407,9 @@ function mp:encoding_buffer(min_size)
 		return self
 	end
 	function buf:encode_ext_int(ct, x)
-		local n = ffi.sizeof(ct)
+		local n = sizeof(ct)
 		local p, i = b(n)
-		ffi.cast(ct, p+i)[0] = v
+		cast(ct, p+i)[0] = v
 		local rev = n == 1 and noop or n == 2 and rev2
 			or n == 4 and rev4 or n == 8 and rev8
 		rev(p, i)
@@ -505,5 +486,3 @@ function mp:encoding_buffer(min_size)
 	end
 	return buf
 end
-
-return mp

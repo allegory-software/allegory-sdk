@@ -23,17 +23,6 @@ FEATURES
   * webb_spa    : SPA module with client-side action-based routing
   * webb_auth   : Session-based authentication module
 
-EXPORTS
-
-	glue pp
-
-CONFIG API
-
-	config(name[, default_val]) -> val      get/set config value
-	config{name->val}                       set multiple config values
-	with_config(conf, f, ...) -> ...        run f with custom config table
-	config_host(host, ip)                   add a static entry for resolve()
-
 MULTI-LANGUAGE & MULTI-COUNTRY SUPPORT
 
 	lang([k])                               get lang or lang property for current request
@@ -67,35 +56,9 @@ REQUEST CONTEXT
 	once(f, ...)                            memoize for current request
 	once_per_conn(f, ...)                   memoize for current connection
 
-THREADING
-
-	thread(f[, fmt, ...]) -> thread         create thread
-	currentthread() -> thread               get currently running thread
-	resume(thread, ...) -> ...              resume thread
-	suspend() -> ...                        suspend thread
-	transfer(thread, ...) -> ...            transfer to thread
-	onthreadfinish(thread, f)               add a thread finalizer
-
-ITERATORS
-
-	cowrap(f, ...) -> f                     create iterator
-	yield(...) -> ...                       yield from iterator
-
-TIMERS
-
-	sleep(n)                                sleep n seconds
-	sleep_until(t)                          sleep until time
-	sleep_job() -> sj                       make a sleep job
-	runat(ts, f)                            run f at time
-	runafter(s, f)                          run f after s seconds
-	runevery(s, f)                          run f every s seconds
-
 LOGGING
 
 	webb.dbg      (module, event, fmt, ...)
-	webb.note     (module, event, fmt, ...)
-	webb.warnif   (module, event, cond, fmt, ...)
-	webb.logerror (module, event, fmt, ...)
 
 REQUEST
 
@@ -139,13 +102,8 @@ OUTPUT
 	outfile(file, [parse])                  output a file's contents
 	outfile_function(file) -> f()|nil       return an outfile function if the file exists
 
-HTML ENCODING
-
-	html(s) -> s                            escape html
-
 URL ENCODING
 
-	url{...} -> t | s                       encode url
 	absurl([path]) -> s                     get the absolute url for a local url
 	slug(id, s) -> s                        encode id and s to `s-id`
 
@@ -161,37 +119,14 @@ RESPONSE
 	onrequestfinish(f)                      add a request finalizer
 	setconnectionclose()                    close the connection after this request.
 
-SOCKETS
-
-	connect(ip, port) -> sock               connect to a server
-	resolve(host) -> ip4                    resolve a hostname
-
-HTTP REQUESTS
-
-	getpage(url,[upload] | opt) -> req      make a HTTP request
-
-JSON ENCODING/DECODING
-
-	json_arg(s[, null_val]) -> t            decode JSON
-	json(t) -> s                            encode JSON
-	null                                    value to encode json `null`
-	json_array(t) -> t                      mark t to be encoded as a json array
-	pack_json(...) -> t                     like pack() but nils become null
-	unpack_json(t) -> ...                   like unpack() but nulls become nil
-
 FILESYSTEM
 
 	wwwpath(file, [type]) -> path           get www subpath (and check if exists)
 	wwwfile(file, [default]) -> s           get www file contents
 	wwwfile.filename <- s|f(filename)       set virtual www file contents
 	wwwfiles([filter]) -> {name->true}      list www files
-	varpath(file) -> path                   get var subpath (no check that it exists)
-	varfile.filename <- s|f(filename)       set virtual file contents
-	varfile(file, [default]) -> s           get var file contents
 	tmppath([pattern], [t]) -> path         make a tmp file path
 	outfile(file)                           output a file with mtime-based etag checking
-	webb.loadfile(file, [default]) -> s     get a file's contents into a string
-	webb.savefile(file, s)                  save a string to a file
 
 MUSTACHE TEMPLATES
 
@@ -209,8 +144,8 @@ LUAPAGES TEMPLATES
 
 LUA SCRIPTS
 
-	run_string(s, [env], args...) -> ret    run Lua script
-	run(file, [env], args...) -> ret        run Lua script
+	run_lua_string(s, [env], args...) -> ret    run Lua script from string
+	run_lua_file(file, [env], args...) -> ret   run Lua script from file
 
 HTML FILTERS
 
@@ -222,13 +157,8 @@ FILE CONCATENATION LISTS
 	catlist_files(s) -> {file1,...}         parse a .cat file
 	outcatlist(file, args...)               output a .cat file
 
-MAIL SENDING
-
-	sendmail{from=, to=, subject=, text=, html=, attachments=, inlines=}
-
 IMAGE PROCESSING
 
-	resize_image(src_path, dst_path, max_w, max_h)
 	base64_image_src(s)
 
 HTTP SERVER INTEGRATION
@@ -240,7 +170,6 @@ STANDALONE OPERATION
 
 	webb.fakecx() -> cx                     make a fake webb context.
 	webb.run(f, ...)                        run a function in a webb context.
-	webb.thread(f[, fmt,...]) -> co         make a thread with a webb context.
 	webb.request(req | arg1,...)            make a request without a http server.
 
 CONFIG
@@ -259,53 +188,25 @@ CONFIG
 	https_key_file   VAR_DIR/HOST.key      SSL key file
 	base_url         SCHEME://HOST[:PORT]  fixed base URL for absurl()
 	host             tcp.local_addr        when `Host` header missing
-	ns               1.1.1.1 8.8.8.8       nameserver IPs
-	ca_file          VAR_DIR/cacert.pem    CA file for HTTPS and SMTPS clients
-	smtp_host        127.0.0.1             SMTP host
-	smtp_port        587                   SMTP port
-	smtp_user        <required>            SMTP auth user
-	smtp_pass        <required>            SMTP auth password
-	smtp_tls         false                 true to use TLS with SMTP
-	noreply_email    noreply@HOST
-	http_debug       nil                   'protocol stream errors tracebacks'
-	smtp_debug       nil                   'protocol stream errors tracebacks'
 	getpage_debug    nil                   'protocol stream errors tracebacks'
 	default_lang     'en'                  default language
 
 ]==]
 
-local ffi = require'ffi'
-local glue = require'glue'
-local pp = require'pp'
-local uri = require'uri'
-local errors = require'errors'
-local sock = require'sock'
-local json_module = require'json'
-local b64 = require'base64'.encode
-local fs = require'fs'
-local path = require'path'
-local mustache = require'mustache'
-local xxhash = require'xxhash'
-local box2d = require'box2d'
-
-local concat = table.concat
-local remove = table.remove
-local add = table.insert
-local update = glue.update
-local assertf = glue.assert
-local memoize = glue.memoize
-local _ = string.format
-local format = string.format
-local indir = function(...) return assert(path.indir(...)) end
-local index = glue.index
-local words = glue.words
-
-_G.glue = glue
-_G.pp = pp
+require'glue'
+require'url'
+require'sock'
+require'json'
+require'base64'
+require'fs'
+require'path'
+require'rect'
+require'mustache'
+require'xxhash'
 
 webb = {}
 
-errors.errortype'http_response'.__tostring = function(self)
+errortype'http_response'.__tostring = function(self)
 	local s = self.traceback or self.message or ''
 	if self.status then
 		s = self.status .. ' ' .. s
@@ -313,66 +214,14 @@ errors.errortype'http_response'.__tostring = function(self)
 	return s
 end
 
---threads and webb context ---------------------------------------------------
-
---from $sock
-
-thread         = sock.thread
-threadenv      = sock.threadenv
-getthreadenv   = sock.getthreadenv
-getownthreadenv= sock.getownthreadenv
-currentthread  = sock.currentthread
-resume         = sock.resume
-suspend        = sock.suspend
-transfer       = sock.transfer
-onthreadfinish = sock.onthreadfinish
-cowrap         = sock.cowrap
-yield          = sock.yield
-sleep_until    = sock.sleep_until
-sleep          = sock.sleep
-sleep_job      = sock.sleep_job
-runat          = sock.runat
-runafter       = sock.runafter
-runevery       = sock.runevery
+--webb context ---------------------------------------------------------------
 
 local CX = {}
-local threadenv = sock.threadenv
-local currentthread = sock.currentthread
 function cx()
 	local te = threadenv[currentthread()]
 	return te and te[CX]
 end
 local cx = cx
-
---config function ------------------------------------------------------------
-
-do
-	local conf = {}
-	function config(k, default)
-		if type(k) == 'table' then
-			for k, v in pairs(v) do
-				config(k, v)
-			end
-		else
-			local v = conf[k]
-			if v == nil then
-				v = default
-				conf[k] = v
-			end
-			return v
-		end
-	end
-
-	function with_config(t, f, ...)
-		local old_conf = conf
-		local function pass(...)
-			conf = old_conf
-			return ...
-		end
-		conf = setmetatable(t, {__index = old_conf})
-		return pass(f(...))
-	end
-end
 
 --multi-language support with stubs ------------------------------------------
 
@@ -447,7 +296,7 @@ local files = {}
 local ids --{id->{files=,n=,en_s}}
 
 function Sfile(filenames)
-	update(files, index(words(filenames)))
+	update(files, index(collect(words(filenames))))
 	ids = nil
 end
 
@@ -552,7 +401,7 @@ function S_for(ext, id, en_s, ...)
 	end
 	s = s or en_s or ''
 	if select('#', ...) > 0 then
-		return glue.subst(s, ...)
+		return subst(s, ...)
 	else
 		return s
 	end
@@ -619,7 +468,6 @@ end
 
 --logging --------------------------------------------------------------------
 
-log = log or glue.noop
 function webb.log(...)
 	local cx = cx()
 	if cx then
@@ -627,13 +475,6 @@ function webb.log(...)
 	else
 		log(...)
 	end
-end
-function webb.dbg      (...) webb.log(''     , ...) end
-function webb.note     (...) webb.log('note' , ...) end
-function webb.logerror (...) webb.log('ERROR', ...) end
-function webb.warnif   (module, event, cond, ...)
-	if not cond then return end
-	webb.log('WARN', module, event, ...)
 end
 
 function webb.trace(event, s, ...)
@@ -733,10 +574,10 @@ function post(v)
 end
 
 function upload(file)
-	return glue.fcall(function(finally, except)
-		webb.note('webb', 'upload', '%s', file)
-		local write_protected = assert(fs.saver(file))
-		except(function() write_protected(fs.abort) end)
+	return fcall(function(finally, except)
+		webb.log('note', 'webb', 'upload', '%s', file)
+		local write_protected = assert(file_saver(file))
+		except(function() write_protected(ABORT) end)
 		local function write(buf, sz)
 			assert(write_protected(buf, sz))
 		end
@@ -797,7 +638,7 @@ function id_arg(s)
 end
 
 function str_arg(s)
-	s = glue.trim(s or '')
+	s = trim(s or '')
 	return s ~= '' and s or nil
 end
 
@@ -819,7 +660,7 @@ function list_arg(s, arg_f)
 	if not s then return nil end
 	arg_f = arg_f or str_arg
 	local t = {}
-	for s in glue.gsplit(s, ',', 1, true) do
+	for s in split(s, ',', 1, true) do
 		add(t, arg_f(s))
 	end
 	return t
@@ -942,10 +783,10 @@ end
 
 function outfile_function(path)
 
-	local mtime = assert(fs.attr(path, 'mtime'))
+	local mtime = assert(mtime(path))
 	check_etag(tostring(mtime))
 
-	local f = fs.open(path)
+	local f = open(path)
 	if not f then
 		return
 	end
@@ -958,8 +799,8 @@ function outfile_function(path)
 
 	return function()
 		set_content_size(file_size)
-		local filebuf_size = math.min(file_size, 65536)
-		local filebuf = glue.u8a(filebuf_size)
+		local filebuf_size = min(file_size, 65536)
+		local filebuf = u8a(filebuf_size)
 		while true do
 			local len, err = f:read(filebuf, filebuf_size)
 			if not len then
@@ -969,7 +810,7 @@ function outfile_function(path)
 				f:close()
 				break
 			else
-				local ok, err = xpcall(out, debug.traceback, filebuf, len)
+				local ok, err = pcall(out, filebuf, len)
 				if not ok then
 					f:close()
 					error(err)
@@ -1024,89 +865,13 @@ function setcompress(on)
 	cx().res.compress = on
 end
 
-do
-local function print_wrapper(print)
-	return function(...)
-		if cx().res then setmime'txt' end
-		print(...)
-	end
-end
-outprint = print_wrapper(glue.printer(out))
-local metamethods = {
-	__index = 1,
-	__newindex = 1,
-	__mode = 1,
-}
-local i64 = ffi.typeof'int64_t'
-local u64 = ffi.typeof'uint64_t'
-local function filter(v, k, t)
-	return type(v) ~= 'function'
-		and not (t and getmetatable(t) == t and metamethods[k])
-		and (type(v) ~= 'cdata'
-			or ffi.istype(v, i64)
-			or ffi.istype(v, u64))
-end
-outpp = print_wrapper(glue.printer(out, function(v)
-	return pp.format(v, '   ', {}, nil, nil, nil, true, filter)
-end))
-end
-
---sockets --------------------------------------------------------------------
-
-function connect(host, port)
-	local skt = sock.tcp()
-	local ok, err = skt:connect(host, port)
-	if not ok then return nil, err end
-	return skt
-end
-
---dns resolver ---------------------------------------------------------------
-
-local rs = require'resolver'
-
-function config_host(host, ip)
-	rs.hosts[host] = ip
-end
-
-function rs.resolve_create_resolver()
-	return rs.new{servers = config('ns', rs.servers)}
-end
-
-resolve = rs.resolve
-
---http requests --------------------------------------------------------------
-
-local client = require'http_client'
-
-function client.create_getpage_client()
-	return client:new{
-		tls_options = {
-			ca_file = config('ca_file', varpath'cacert.pem'),
-		},
-	}
-end
-
-getpage = client.getpage
-
---html encoding --------------------------------------------------------------
-
-function html(s)
-	if s == nil then return '' end
-	return (tostring(s):gsub('[&"<>\\]', function(c)
-		if c == '&' then return '&amp;'
-		elseif c == '"' then return '\"'
-		elseif c == '\\' then return '\\\\'
-		elseif c == '<' then return '&lt;'
-		elseif c == '>' then return '&gt;'
-		else return c end
-	end))
+local _print = print_function(out)
+function outprint(...)
+	if cx().res then setmime'txt' end
+	_print(...)
 end
 
 --url encoding ---------------------------------------------------------------
-
-function url(t)
-	return type(t) == 'table' and  uri.format(t) or t
-end
 
 function absurl(path)
 	path = path or ''
@@ -1116,7 +881,7 @@ function absurl(path)
 end
 
 function slug(id, s)
-	s = glue.trim(s or '')
+	s = trim(s or '')
 		:gsub('[%s_;:=&@/%?]', '-') --turn separators into dashes
 		:gsub('%-+', '-')           --compress dashes
 		:gsub('[^%w%-%.,~]', '')    --strip chars that would be url-encoded
@@ -1127,7 +892,6 @@ end
 
 --response API ---------------------------------------------------------------
 
-
 function http_error(status, content) --status,[content] | http_response
 	local err
 	if type(status) == 'number' then
@@ -1137,7 +901,7 @@ function http_error(status, content) --status,[content] | http_response
 	else
 		assert(false)
 	end
-	errors.raise(3, 'http_response', err)
+	raise(3, 'http_response', err)
 end
 
 function redirect(uri)
@@ -1171,7 +935,7 @@ check500   = checkfunc(500, 'internal error')
 function check_etag(s)
 	if not method'get' then return s end
 	if out_buffering() then return s end
-	local etag = xxhash.hash128(s):hex()
+	local etag = xxhash128(s):hex()
 	local etags = headers'if-none-match'
 	if etags and type(etags) == 'table' then
 		for _,t in ipairs(etags) do
@@ -1189,61 +953,16 @@ function setconnectionclose()
 	cx().res.close = true
 end
 
---json API -------------------------------------------------------------------
-
-json_arg    = json_module.decode
-null        = json_module.null
-json_array  = json_module.asarray
-pack_json   = json_module.pack
-unpack_json = json_module.unpack
-_G.json     = json_module.encode
-
-function out_json(v)
-	setmime'json'
-	outall(json(v))
-end
-
 --filesystem API -------------------------------------------------------------
-
-function webb.loadfile(path, default) --load a file into a string.
-	local s, err = fs.load(path)
-	if not s and err == 'not_found' and default ~= nil then
-		return default
-	end
-	if not s then
-		webb.logerror('webb', 'load', '%s\n%s', path, err)
-		error(err, 2)
-	end
-	return s
-end
-
-function webb.savefile(file, s)
-	webb.note('webb', 'save', '%s (%s)', file, kbytes(#s))
-	local ok, err = fs.save(file, s)
-	if not ok then
-		webb.logerror('webb', 'save', '%s', err)
-		error(err, 2)
-	end
-end
 
 local function wwwdir()
 	return config'www_dir'
-		or config('www_dir', indir(config'app_dir', 'www'))
+		or config('www_dir', indir(scriptdir(), 'www'))
 end
 
 local function libwwwdir()
 	return config'libwww_dir'
-		or config('libwww_dir', indir(config'app_dir', 'sdk', 'www'))
-end
-
-local function vardir()
-	return config'var_dir'
-		or config('var_dir', indir(config'app_dir', 'var'))
-end
-
-local function tmpdir()
-	return config'tmp_dir'
-		or config('tmp_dir', indir(config'app_dir', 'tmp'))
+		or config('libwww_dir', indir(scriptdir(), 'sdk', 'www'))
 end
 
 function tmppath(patt, t)
@@ -1251,8 +970,8 @@ function tmppath(patt, t)
 	mkdir(tmpdir(), true)
 	t = t or {}
 	t.request_id = cx().request_id
-	local file = glue.subst(patt, t)
-	return path.abs(tmpdir(), file)
+	local file = subst(patt, t)
+	return path_combine(tmpdir(), file)
 end
 
 function wwwpath(file, type)
@@ -1260,10 +979,10 @@ function wwwpath(file, type)
 	if file:find('..', 1, true) then return end --TODO: use path module for this
 	--look into www dir
 	local abs_path = indir(wwwdir(), file)
-	if fs.is(abs_path, type) then return abs_path end
+	if file_is(abs_path, type) then return abs_path end
 	--look into the "lib" www dir
 	local abs_path = libwwwdir() and indir(libwwwdir(), file)
-	if abs_path and fs.is(abs_path, type) then return abs_path end
+	if abs_path and file_is(abs_path, type) then return abs_path end
 	return nil, file..' not found'
 end
 
@@ -1292,14 +1011,14 @@ function wwwfiles(filter)
 		local patt = filter
 		filter = function(s) return s:find(patt) end
 	end
-	filter = filter or glue.pass
+	filter = filter or pass
 	local t = {}
 	for name in pairs(wwwfile) do
 		if filter(name) then
 			t[name] = true
 		end
 	end
-	for name, d in fs.dir(wwwdir()) do
+	for name, d in ls(wwwdir()) do
 		if not name then
 			break
 		end
@@ -1307,7 +1026,7 @@ function wwwfiles(filter)
 			t[name] = true
 		end
 	end
-	for name, d in fs.dir(libwwwdir()) do
+	for name, d in ls(libwwwdir()) do
 		if not name then
 			break
 		end
@@ -1325,7 +1044,7 @@ local function underscores(name)
 end
 
 function render_string(s, data, partials)
-	return (mustache.render(s, data, partials))
+	return (mustache_render(s, data, partials))
 end
 
 function render_file(file, data, partials)
@@ -1368,7 +1087,7 @@ end
 
 --gather all the templates from the filesystem.
 local load_templates = memoize(function()
-	for i,file in ipairs(glue.keys(wwwfiles'%.html%.mu$')) do
+	for i,file in ipairs(keys(wwwfiles'%.html%.mu$')) do
 		local s = wwwfile(file)
 		local _, i = mustache_unwrap(s, template, file)
 		if i == 0 then --must be without the <script> tag
@@ -1380,7 +1099,7 @@ local load_templates = memoize(function()
 	end
 	--[[
 	--TODO: static templates
-	for i,file in ipairs(glue.keys(wwwfiles'%.html')) do
+	for i,file in ipairs(keys(wwwfiles'%.html')) do
 		local s = wwwfile(file)
 		local _, i = mustache_unwrap(s, template, file)
 		if i == 0 then --must be without the <script> tag
@@ -1497,7 +1216,7 @@ local function compile_lua_string(s, chunkname)
 	end
 end
 
-local compile_lua = memoize(function(file)
+local compile_lua_file = memoize(function(file)
 	return compile_lua_string(wwwfile(file), file)
 end)
 
@@ -1505,8 +1224,8 @@ function run_string(s, env, ...)
 	return compile_lua_string(s)(env, ...)
 end
 
-function run(file, env, ...)
-	return compile_lua(file)(env, ...)
+function run_file(file, env, ...)
+	return compile_lua_file(file)(env, ...)
 end
 
 --html filters ---------------------------------------------------------------
@@ -1589,7 +1308,7 @@ function outcatlist(listfile, ...)
 		else
 			local path = wwwpath(file)
 			if path then --plain file, get its mtime
-				local mtime = fs.attr(path, 'mtime')
+				local mtime = ls(path, 'mtime')
 				add(t, tostring(mtime))
 				add(c, function() outfile(path) end)
 			elseif action then --file not found, try an action
@@ -1614,125 +1333,10 @@ function outcatlist(listfile, ...)
 	end
 end
 
---mail sending ---------------------------------------------------------------
-
-local function strip_name(email)
-	return email:match'<(.-)>' or email
-end
-function sendmail(opt)
-
-	local smtp = require'smtp'
-	local multipart = require'multipart'
-
-	local smtp = check500(smtp:connect{
-		logging = true,
-		debug = config'smtp_debug' and index(words(config'smtp_debug' or '')),
-		host  = config('smtp_host', '127.0.0.1'),
-		port  = config('smtp_port', 587), --TODO: 465
-		tls   = config('smtp_tls', false), --TODO: true
-		user  = config'smtp_user',
-		pass  = config'smtp_pass',
-		tls_options = {
-			ca_file = config('ca_file', varpath'cacert.pem'),
-		},
-	})
-
-	local req = update({}, opt)
-	req.from = strip_name(opt.from)
-	req.to = strip_name(opt.to)
-	req = multipart.mail(req)
-
-	check500(smtp:sendmail(req))
-	check500(smtp:close())
-end
-
 --image processing -----------------------------------------------------------
 
-function resize_image(src_path, dst_path, max_w, max_h)
-
-	glue.fcall(function(finally, except)
-
-		local src_ext = path.ext(src_path)
-		local dst_ext = path.ext(dst_path)
-		assert(src_ext == 'jpg' or src_ext == 'jpeg' or src_ext == 'png')
-		assert(dst_ext == 'jpg' or dst_ext == 'jpeg' or dst_ext == 'png')
-
-		--decode.
-		local bmp do
-			local f = assert(fs.open(src_path, 'r'), 'not_found')
-			finally(function() f:close() end)
-
-			if src_ext == 'jpg' or src_ext == 'jpeg' then
-
-				local libjpeg = require'libjpeg'
-
-				local read = f:buffered_read()
-				local img = assert(libjpeg.open{read = read})
-				finally(function() img:free() end)
-
-				local w, h = box2d.fit(img.w, img.h, max_w, max_h)
-				local sn = math.ceil(glue.clamp(math.max(w / img.w, h / img.h) * 8, 1, 8))
-				bmp = assert(img:load{
-					accept = {rgba8 = true},
-					scale_num = sn,
-					scale_denom = 8,
-				})
-
-			elseif src_ext == 'png' then
-
-				local libspng = require'libspng'
-				error'NYI'
-
-			end
-		end
-
-		--scale down, if necessary.
-		local w, h = box2d.fit(bmp.w, bmp.h, max_w, max_h)
-		if w < bmp.w or h < bmp.h then
-
-			webb.note('webb', 'resize', '%s %d,%d -> %d,%d %d%%', path.file(src_path),
-				bmp.w, bmp.h, w, h, w / bmp.w * 100)
-
-			local pil = require'pillow'
-
-			local src_img = pil.image(bmp)
-			local dst_img = src_img:resize(w, h)
-			src_img:free()
-			bmp = dst_img:bitmap()
-			finally(function() dst_img:free() end)
-
-		end
-
-		--encode back.
-		local write_protected = assert(fs.saver(dst_path))
-		except(function() write_protected(fs.abort) end)
-		local function write(buf, sz)
-			return assert(write_protected(buf, sz))
-		end
-		if dst_ext == 'jpg' or dst_ext == 'jpeg' then
-
-			local libjpeg = require'libjpeg'
-
-			assert(libjpeg.save{
-				bitmap = bmp,
-				write = write,
-				quality = 90,
-			})
-
-		elseif dst_ext == 'png' then
-
-			local libspng = require'libspng'
-			error'NYI'
-
-		end
-		write()
-
-	end)
-
-end
-
 function base64_image_src(s)
-	return s and 'data:image/png;base64, '..b64(s)
+	return s and 'data:image/png;base64, '..base64_encode(s)
 end
 
 --webb.server respond function -----------------------------------------------
@@ -1794,9 +1398,9 @@ end
 function webb.thread(f, ...)
 	return thread(function(...)
 		webb.setfacecx()
-		local ok, err = errors.pcall(f, ...)
+		local ok, err = pcall(f, ...)
 		if not ok then
-			webb.logerror('webb', 'thread', '%s', err)
+			webb.log('ERROR', 'webb', 'thread', '%s', err)
 		end
 	end, ...)
 end
@@ -1805,7 +1409,7 @@ function webb.run(f, ...)
 	if cx() then
 		return f(...)
 	end
-	return sock.run(function(...)
+	return run(function(...)
 		webb.setfakecx()
 		return f(...)
 	end, ...)
@@ -1817,7 +1421,7 @@ function webb.request(...)
 		local req = type(arg1) == 'table' and arg1 or {args = {arg1,...}}
 		local cx = cx()
 		cx.req.method = req.method or 'get'
-		cx.req.uri = req.uri or concat(glue.imap(glue.pack('', arg1, ...), tostring), '/')
+		cx.req.uri = req.uri or concat(imap(pack('', arg1, ...), tostring), '/')
 		update(cx.req.headers, req.headers)
 		function req.respond(req, res)
 			assert(not res.want_out_function)
@@ -1848,7 +1452,7 @@ function webb.server(opt)
 		key_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.key')
 	end
 	return server:new(update({
-		debug = config'http_debug' and index(words(config'http_debug' or '')),
+		debug = config'http_debug' and index(collect(words(config'http_debug' or ''))),
 		listen = {
 			{
 				host = host,

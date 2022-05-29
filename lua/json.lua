@@ -3,29 +3,30 @@
 	JSON encoding and decoding API.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	json.decode(s[, null_val]) -> t     decode JSON
-	json.encode(t) -> s                 encode JSON
-	json.null                           value to encode json `null`
-	json.asarray(t) -> t                mark t to be encoded as a json array
-	json.pack(...) -> t                 like pack() but nils become null
-	json.unpack(t) -> ...               like unpack() but nulls become nil
+	[try_]json_decode(s[, null_val]) -> v   decode JSON
+	json_encode(v[, indent]) -> s       encode JSON
+	null                                value to encode/decode json `null`
+	json_asarray(t) -> t                mark t to be encoded as a json array
+	json_pack(...) -> t                 like pack() but nils become null
+	json_unpack(t) -> ...               like unpack() but nulls become nil
 
 ]==]
 
-local cjson = require'cjson'.new()
-local prettycjson = require'prettycjson'
-local json = {}
+local cjson      = require'cjson'.new()
+local cjson_safe = require'cjson.safe'.new()
 
 cjson.encode_sparse_array(false, 0, 0) --encode all sparse arrays.
 cjson.encode_empty_table_as_object(false) --encode empty tables as arrays.
+cjson_safe.encode_sparse_array(false, 0, 0) --encode all sparse arrays.
+cjson_safe.encode_empty_table_as_object(false) --encode empty tables as arrays.
 
-json.null = cjson.null
+null = cjson.null
 
-function json.asarray(t)
+function json_asarray(t)
 	return setmetatable(t or {}, cjson.array_mt)
 end
 
-function json.pack(...)
+function json_pack(...)
 	local t = json_array{...}
 	for i=1,select('#',...) do
 		if t[i] == nil then
@@ -35,7 +36,7 @@ function json.pack(...)
 	return t
 end
 
-function json.unpack(t)
+function json_unpack(t)
 	local dt = {}
 	for i=1,#t do
 		if t[i] == null then
@@ -78,17 +79,68 @@ local function repl_nulls(v, null_val)
 	end
 end
 
-function json.decode(v, null_val)
+function json_decode(v, null_val)
 	if type(v) ~= 'string' then return v end
 	return repl_nulls(cjson.decode(v), null_val)
 end
 
-function json.encode(v, indent)
-	if indent and indent ~= '' then
-		return prettycjson(v, nil, indent)
-	else
-		return cjson.encode(v)
-	end
+function try_json_decode(v, null_val)
+	if type(v) ~= 'string' then return v end
+	local v, err = cjson_safe.decode(v)
+	if v == nil then return nil, err end
+	return repl_nulls(v, null_val)
 end
 
-return json
+--prettycjson 1.5 from https://github.com/bungle/lua-resty-prettycjson.
+--Copyright (c) 2015 — 2016, Aapo Talvensaari. BSD license.
+local rep = string.rep
+local cat = table.concat
+local function pretty(s, lf, id, ac)
+	lf, id, ac = lf or '\n', id or '\t', ac or ' '
+	local i, j, k, n, r, p, q  = 1, 0, 0, #s, {}, nil, nil
+	local al = ac:sub(-1) == '\n'
+	for x = 1, n do
+		local c = s:sub(x, x)
+		if not q and (c == '{' or c == '[') then
+			r[i] = p == ':' and c..lf or rep(id, j)..c..lf
+			j = j + 1
+		elseif not q and (c == '}' or c == ']') then
+			j = j - 1
+			if p == '{' or p == '[' then
+				i = i - 1
+				r[i] = rep(id, j)..p..c
+			else
+				r[i] = lf..rep(id, j)..c
+			end
+		elseif not q and c == ',' then
+			r[i] = c..lf
+			k = -1
+		elseif not q and c == ':' then
+			r[i] = c..ac
+			if al then
+				i = i + 1
+				r[i] = rep(id, j)
+			end
+		else
+			if c == '\'' and p ~= '\\' then
+				q = not q and true or nil
+			end
+			if j ~= k then
+				r[i] = rep(id, j)
+				i, k = i + 1, j
+			end
+			r[i] = c
+		end
+		p, i = c, i + 1
+	end
+	return cat(r)
+end
+
+function json_encode(v, indent)
+	local s = cjson.encode(v)
+	if indent and indent ~= '' then
+		return pretty(s, nil, indent)
+	else
+		return s
+	end
+end

@@ -3,9 +3,15 @@
 	XXHASH: extremely fast non-cryptographic hash.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	xxhash.hash32|64|128(data[, len[, seed]]) -> hash
+	xxhash32|64|128(data[, len[, seed]]) -> hash
 
 		Compute a 32|64|128 bit hash.
+
+	xxhash128_digest([seed]) -> st
+	st:reset()
+	st:update(s | buf,sz)
+	st:hash() -> hash
+	st:free()
 
 ]=]
 
@@ -13,12 +19,10 @@ local ffi = require'ffi'
 local bit = require'bit'
 require'xxhash_h'
 local C = ffi.load'xxhash'
-local M = {C = C}
-M.version = C.XXH_versionNumber
 
-function M.hash32 (data, sz, seed) return C.XXH32 (data, sz or #data, seed or 0) end
-function M.hash64 (data, sz, seed) return C.XXH64 (data, sz or #data, seed or 0) end
-function M.hash128(data, sz, seed) return C.XXH128(data, sz or #data, seed or 0) end
+function xxhash32 (data, sz, seed) return C.XXH32 (data, sz or #data, seed or 0) end
+function xxhash64 (data, sz, seed) return C.XXH64 (data, sz or #data, seed or 0) end
+function xxhash128(data, sz, seed) return C.XXH128(data, sz or #data, seed or 0) end
 
 local h = {}
 
@@ -55,11 +59,11 @@ function st:update(s, len)
 	return self
 end
 
-function st:digest()
+function st:hash()
 	return C.XXH3_128bits_digest(self)
 end
 
-function M.hash128_digest(seed)
+function xxhash128_digest(seed)
 	local st = C.XXH3_createState()
 	assert(st ~= nil)
 	return st:reset(seed)
@@ -68,11 +72,10 @@ end
 ffi.metatype('XXH3_state_t', st_meta)
 
 if not ... then --self-test
-	local st = M.hash128_digest()
+	local st = xxhash128_digest()
 	st:update('abcd')
 	st:update('1324')
-	assert(st:digest():bin() == M.hash128('abcd1324'):bin())
-	assert(st:digest():hex() == M.hash128('abcd1324'):hex())
+	assert(st:hash():bin() == xxhash128('abcd1324'):bin())
+	assert(st:hash():hex() == xxhash128('abcd1324'):hex())
+	print'ok'
 end
-
-return M

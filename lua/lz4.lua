@@ -4,12 +4,12 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 BUFFER API
-	lz4.compress(src, [#src], dst, [#dst], [accel], [level], [state], [filldest]) -> #dst
-	lz4.decompress(src, [#src] | true, dst, [#dst], [outlen]) -> #dst
+	lz4_compress(src, [#src], dst, [#dst], [accel], [level], [state], [filldest]) -> #dst
+	lz4_decompress(src, [#src] | true, dst, [#dst], [outlen]) -> #dst
 
 STREAM API
-	lz4.compress_stream([hc]) -> cs
-	lz4.decompress_stream() -> ds
+	lz4_compress_stream([hc]) -> cs
+	lz4_decompress_stream() -> ds
 	cs:compress(src, [#src], dst, [#dst], [accel/level]) -> #dst
 	ds:decompress(src, [#src] | true, dst, [#dst])
 
@@ -21,10 +21,9 @@ DICTIONARIES
 	cs|ds:reset()
 
 MISC
-	lz4.sizeof_state() -> bytes
-	lz4.sizeof_state_hc() -> bytes
-	lz4.compress_bound() -> bytes
-	lz4.version() -> n
+	lz4_sizeof_state() -> bytes
+	lz4_sizeof_state_hc() -> bytes
+	lz4_compress_bound() -> bytes
 
 ]]
 
@@ -173,17 +172,14 @@ int LZ4_compress_HC_continue(
 ]]
 
 local C = ffi.load'lz4'
-local M = {C = C}
-
-M.version = C.LZ4_versionNumber
 
 --NOTE: user-allocated states must start on 8-byte boundary!
-M.sizeof_state = C.LZ4_sizeofState
-M.sizeof_state_hc = C.LZ4_sizeofStateHC
+lz4_sizeof_state    = C.LZ4_sizeofState
+lz4_sizeof_state_hc = C.LZ4_sizeofStateHC
 
-M.compress_bound = C.LZ4_compressBound
+lz4_compress_bound = C.LZ4_compressBound
 
-function M.compress(src, srclen, dst, dstlen, accel, level, state, filldest)
+function lz4_compress(src, srclen, dst, dstlen, accel, level, state, filldest)
 	srclen = srclen or #src
 	dstlen = dstlen or #dst
 	if level then
@@ -211,7 +207,7 @@ function M.compress(src, srclen, dst, dstlen, accel, level, state, filldest)
 	return dstlen
 end
 
-function M.decompress(src, srclen, dst, dstlen, outlen)
+function lz4_decompress(src, srclen, dst, dstlen, outlen)
 	srclen = srclen or #src
 	dstlen = dstlen or #dst
 	if dict then
@@ -238,7 +234,7 @@ end
 local enc = {}
 enc.__index = enc
 
-function M.compress_stream(hc)
+function lz4_compress_stream(hc)
 	local stream = hc and C.LZ4_createStreamHC() or C.LZ4_createStream()
 	assert(stream ~= nil)
 	return ffi.gc(stream, stream.free)
@@ -296,7 +292,7 @@ end
 local dec = {}
 dec.__index = dec
 
-function M.decompress_stream()
+function lz4_decompress_stream()
 	local stream = C.LZ4_createStreamDecode()
 	assert(stream ~= nil)
 	return ffi.gc(stream, stream.free)
@@ -327,8 +323,7 @@ ffi.metatype('LZ4_streamDecode_t', dec)
 
 
 if not ... then
-	local lz = M--require'lz4'
-	local s = lz.compress_stream()
+	local s = lz4_compress_stream()
 	--TODO
 	--local n = s:compress(src, srclen, dst, dstlen)
 	s:free()

@@ -2,15 +2,8 @@
 --MySQL result pretty printing.
 --Written by Cosmin Apreutesei. Public Domain.
 
-local glue = require'glue'
-local cjson = require'cjson'
-local null = cjson.null
-local cat = table.concat
-local index = glue.index
-local floor = math.floor
-local ceil = math.ceil
-local min = math.min
-local max = math.max
+require'glue'
+require'json'
 
 local function ellipsis(s,n)
 	return #s > n and (s:sub(1,n-3) .. '...') or s
@@ -120,14 +113,14 @@ local function cell_align(current_align, cell_value, field)
 	return 'left'
 end
 
-function print_result(opt)
+function mysql_print_result(opt)
 	local rows     = opt.rows
 	local fields   = opt.fields
 	local minsize  = opt.minsize
 	local sums     = opt.sums
 	local null_s   = opt.null_text or ''
-	local hidecols = opt.hidecols and index(words(opt.hidecols))
-	local showcols = opt.showcols and index(words(opt.showcols))
+	local hidecols = opt.hidecols and index(collect(words(opt.hidecols)))
+	local showcols = opt.showcols and index(collect(words(opt.showcols)))
 	local colmap   = opt.colmap
 
 	if showcols then
@@ -224,11 +217,3 @@ function print_result(opt)
 		minsize = minsize, sums = sumdefs, print = opt.print, maxsizes = opt.maxsizes,
 	}
 end
-
-return {
-	fit = fit,
-	format_cell = format_cell,
-	cell_align = cell_align,
-	table = print_table,
-	result = print_result,
-}

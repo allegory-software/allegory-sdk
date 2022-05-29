@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 STATES
-	luastate.open() -> state                   create a new Lua state
+	luastate() -> state                        create a new Lua state
 	state:close()                              free the Lua state
 	state:status() -> 0 | err | C.LUA_YIELD    state runtime status
 	state:newthread() -> state                 create a new coroutine as a Lua state
@@ -99,7 +99,7 @@ INTERPRETER
 	state:pcall_opt(opt, ...) -> ok, ...       pcall with options
 	state:call_opt(opt, ...) -> ...            call with options
 GC
-	state:gc(luastate.C.LUA_GC*, n)            control the garbage collector
+	state:gc(C.LUA_GC*, n)                     control the garbage collector
 	state:getgccount() -> n                    get the number of garbage items
 MACROS
 	state:upvalueindex(i) -> i                 get upvalue pseudo-index
@@ -149,16 +149,17 @@ if not ... then require'luastate_test'; return end
 require'luajit_h'
 local ffi = require'ffi'
 local C = ffi.C
-local M = {C = C}
 local cast = ffi.cast
 
 local function not_implemented()
 	error('Not implemented', 3)
 end
 
+local M = {}
+
 --states
 
-function M.open()
+function luastate()
 	local L = C.luaL_newstate()
 	assert(L ~= nil, 'out of memory')
 	ffi.gc(L, M.close)
@@ -592,6 +593,9 @@ function M.call(L, ...)
 	return M.call_opt(L, nil, ...)
 end
 
+M.lua_pcall = C.lua_pcall
+M.lua_call = C.lua_call
+
 --resume the coroutine at the top of the stack,
 --wrapping the passing of args and the returning of yielded values.
 function M.resume_opt(L, opt, ...)
@@ -657,114 +661,4 @@ end
 
 --object interface
 
-ffi.metatype('lua_State', {__index = {
-	check = M.check,
-	--states
-	close = M.close,
-	status = M.status,
-	newthread = M.newthread,
-	resume_opt = M.resume_opt,
-	resume = M.resume,
-	--compiler
-	openlibs = M.openlibs,
-	loadbuffer = M.loadbuffer,
-	loadstring = M.loadstring,
-	loadfile = M.loadfile,
-	load = M.load,
-	dofile = M.dofile,
-	dostring = M.dostring,
-	dump = M.dump,
-	--stack / indices
-	abs_index = M.abs_index,
-	gettop = M.gettop,
-	settop = M.settop,
-	pop = M.pop,
-	checkstack = M.checkstack,
-	xmove = M.xmove,
-	insert = M.insert,
-	remove = M.remove,
-	replace = M.replace,
-	--stack / read
-	type = M.type,
-	objlen = M.objlen,
-	strlen = M.strlen,
-	isnumber = M.isnumber,
-	isstring = M.isstring,
-	iscfunction = M.iscfunction,
-	isuserdata = M.isuserdata,
-	isfunction = M.isfunction,
-	istable = M.istable,
-	islightuserdata = M.islightuserdata,
-	isnil = M.isnil,
-	isboolean = M.isboolean,
-	isthread = M.isthread,
-	isnone = M.isnone,
-	isnoneornil = M.isnoneornil,
-	toboolean = M.toboolean,
-	tonumber = M.tonumber,
-	tointeger = M.tointeger,
-	tolstring = M.tolstring,
-	tostring = M.tostring,
-	tothread = M.tothread,
-	touserdata = M.touserdata,
-	topointer = M.topointer,
-	--stack / read / tables
-	next = M.next,
-	gettable = M.gettable,
-	getfield = M.getfield,
-	rawget = M.rawget,
-	rawgeti = M.rawgeti,
-	getmetatable = M.getmetatable,
-	--stack / get / synthesis
-	get = M.get,
-	--stack / write
-	pushnil = M.pushnil,
-	pushboolean = M.pushboolean,
-	pushinteger = M.pushinteger,
-	pushcclosure = M.pushcclosure,
-	pushcfunction = M.pushcfunction,
-	pushlightuserdata = M.pushlightuserdata,
-	pushlstring = M.pushlstring,
-	pushstring = M.pushstring,
-	pushthread = M.pushthread,
-	pushvalue = M.pushvalue,
-	--stack / write / tables
-	createtable = M.createtable,
-	newtable = M.newtable,
-	settable = M.settable,
-	setfield = M.setfield,
-	rawset = M.rawset,
-	rawseti = M.rawseti,
-	setmetatable = M.setmetatable,
-	--stack / write / synthesis
-	push = M.push,
-	--stack / compare
-	equal = M.equal,
-	rawequal = M.rawequal,
-	lessthan = M.lessthan,
-	--interpreter
-	pushvalues_opt = M.pushvalues_opt,
-	popvalues_opt = M.popvalues_opt,
-	pushvalues = M.pushvalues,
-	popvalues = M.popvalues,
-	xpcall_opt = M.xpcall_opt,
-	pcall_opt = M.pcall_opt,
-	call_opt = M.call_opt,
-	xpcall = M.xpcall,
-	pcall = M.pcall,
-	call = M.call,
-	lua_pcall = C.lua_pcall,
-	lua_call = C.lua_call,
-	--gc
-	gc = M.gc,
-	getgccount = M.getgccount,
-	--macros
-	upvalueindex = M.upvalueindex,
-	register = M.register,
-	setglobal = M.setglobal,
-	getglobal = M.getglobal,
-	getregistry = M.getregistry,
-}})
-
-
-return M
+ffi.metatype('lua_State', {__index = M})

@@ -1,0 +1,13 @@
+
+glue.buffer   -> string.buffer
+	tarantool
+
+dynarray      -> string.buffer
+	glue:
+		dynarray_pump
+		dynarray_loader
+		readall
+	heap
+	mysql
+	msgpack
+

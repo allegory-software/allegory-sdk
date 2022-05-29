@@ -62,7 +62,7 @@ return function(app_name, ...)
 		return webb.run(function(...)
 			local ok, err = errors.pcall(cmd_fn, cmd_name, ...)
 			if not ok then --check500, assert, etc.
-				webb.logerror('webb', 'run', '%s', err)
+				webb.log('ERROR', 'webb', 'run', '%s', err)
 				return 1
 			end
 			return err --exit_code

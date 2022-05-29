@@ -3,12 +3,12 @@
 	SHA-256/-384/-512 hashing.
 	Written by Cosmin Apreutesei. Public Domain.
 
-sha2.sha[256|384|512](s[, size]) -> s
-sha2.sha[256|384|512](cdata, size) -> s
+sha[256|384|512](s[, size]) -> s
+sha[256|384|512](cdata, size) -> s
 
 	Compute the SHA-2 hash of a string or a cdata buffer.
 
-sha2.sha[256|384|512]_digest() -> digest
+sha2[256|384|512]_digest() -> digest
 
 	Get a SHA-2 digest closure that can consume multiple data chunks:
 
@@ -17,7 +17,7 @@ sha2.sha[256|384|512]_digest() -> digest
 	digest() -> s          return the hash
 
 All functions return the binary representation of the hash.
-To get the hex representation, use glue.tohex().
+To get the hex representation, use tohex().
 
 ]=]
 
@@ -64,10 +64,12 @@ void SHA512_Update(SHA512_CTX*, const uint8_t*, size_t);
 void SHA512_Final(uint8_t[SHA512_DIGEST_LENGTH], SHA512_CTX*);
 ]]
 
+local u8a = ffi.typeof'uint8_t[?]'
+
 local function digest_function(Context, Init, Update, Final, DIGEST_LENGTH)
 	return function()
 		local ctx = Context()
-		local result = ffi.new('uint8_t[?]', DIGEST_LENGTH)
+		local result = u8a(DIGEST_LENGTH)
 		Init(ctx)
 		return function(data, size)
 			if data then
@@ -86,13 +88,11 @@ local function hash_function(digest_function)
 	end
 end
 
-local M = {C = C} --pin C!
+_G[C] = true --pin C!
 
-M.sha256_digest = digest_function(ffi.typeof'SHA256_CTX', C.SHA256_Init, C.SHA256_Update, C.SHA256_Final, C.SHA256_DIGEST_LENGTH)
-M.sha384_digest = digest_function(ffi.typeof'SHA384_CTX', C.SHA384_Init, C.SHA384_Update, C.SHA384_Final, C.SHA384_DIGEST_LENGTH)
-M.sha512_digest = digest_function(ffi.typeof'SHA512_CTX', C.SHA512_Init, C.SHA512_Update, C.SHA512_Final, C.SHA512_DIGEST_LENGTH)
-M.sha256 = hash_function(M.sha256_digest)
-M.sha384 = hash_function(M.sha384_digest)
-M.sha512 = hash_function(M.sha512_digest)
-
-return M
+sha256_digest = digest_function(ffi.typeof'SHA256_CTX', C.SHA256_Init, C.SHA256_Update, C.SHA256_Final, C.SHA256_DIGEST_LENGTH)
+sha384_digest = digest_function(ffi.typeof'SHA384_CTX', C.SHA384_Init, C.SHA384_Update, C.SHA384_Final, C.SHA384_DIGEST_LENGTH)
+sha512_digest = digest_function(ffi.typeof'SHA512_CTX', C.SHA512_Init, C.SHA512_Update, C.SHA512_Final, C.SHA512_DIGEST_LENGTH)
+sha256 = hash_function(sha256_digest)
+sha384 = hash_function(sha384_digest)
+sha512 = hash_function(sha512_digest)

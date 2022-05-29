@@ -549,7 +549,7 @@ function webb.lang_schema()
 
 end
 
-local supported_langs = glue.memoize(function()
+local supported_langs = memoize(function()
 	local t = {}
 	for i,row in each_row'select * from lang where supported = 1' do
 		t[row.lang] = row
@@ -557,7 +557,7 @@ local supported_langs = glue.memoize(function()
 	return t
 end)
 
-local supported_countries = glue.memoize(function()
+local supported_countries = memoize(function()
 	local t = {}
 	for i,row in each_row'select * from country' do
 		t[row.country] = row

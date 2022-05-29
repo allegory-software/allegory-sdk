@@ -5,27 +5,27 @@
 
 	Missing features: named mutexes, semaphores and events.
 
-	proc.exec(opt | cmd,...) -> p                   spawn a child process
-	proc.exec_luafile(opt | script,...) -> p        spawn a process running a Lua script
-	p:kill()                                        kill process
-	p:wait([expires]) -> status                     wait for a process to finish
-	p:status() -> active|finished|killed|forgotten  process status
-	p:exit_code() -> code | nil,status              get process exit code
-	p:forget()                                      close process handles
+	exec(opt | cmd,...) -> p                   spawn a child process in background
+	exec_luafile(opt | script,...) -> p        spawn a process running a Lua script
+	  p:kill()                                 kill process
+	  p:wait([expires]) -> status              wait for a process to finish
+	  p:status() -> active|finished|killed|forgotten    process status
+	  p:exit_code() -> code | nil,status       get process exit code
+	  p:forget()                               close process handles
 
-	proc.env(k) -> v                                get env. var
-	proc.env(k, v)                                  set env. var
-	proc.env(k, false)                              delete env. var
-	proc.env() -> env                               get all env. vars
+	env(k) -> v                                get env. var
+	env(k, v)                                  set env. var
+	env(k, false)                              delete env. var
+	env() -> env                               get all env. vars
 
-	proc.esc(s, [platform]) -> s                    escape string (but not quote)
-	proc.quote_arg(s, [platform]) -> s              quote as cmdline arg
-	proc.quote_arg[_PLATFORM](s) -> s               quote as cmdline arg
-	proc.quote_args(platform, ...) -> s             quote as cmdline args
-	proc.quote_args[_PLATFORM](...) -> s            quote as cmdline args
-	proc.quote_vars({k->v}, [format], [platform]) -> s   quote as var assignments
+	cmdline_escape(s, [platform]) -> s         escape string (but don't quote)
+	cmdline_quote_arg(s, [platform]) -> s      quote as cmdline arg
+	cmdline_quote_arg[_PLATFORM](s) -> s       quote as cmdline arg
+	cmdline_quote_args(platform, ...) -> s     quote as cmdline args
+	cmdline_quote_args[_PLATFORM](...) -> s    quote as cmdline args
+	cmdline_quote_vars({k->v}, [format], [platform]) -> s   quote as var assignments
 
-proc.exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
+exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
 
 	Spawn a child process and return a process object to query and control the
 	process. Options can be given as separate args or in a table.
@@ -41,17 +41,21 @@ proc.exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) 
 	  for you.
 	* `autokill` kills the process when the calling process exits.
 
-proc.exec_luafile(opt | script,...) -> p
+exec_luafile(opt | script,...) -> p
 
 	Spawn a process running a Lua script, using the same LuaJIT executable
 	as that of the running process. The process starts in the current directory
 	unless otherwise specified. The arguments and options are the same as for
 	`exec()`, except that `cmd` must be a Lua file instead of an executable file.
 
-proc.info([pid]) -> t
+proc_info([pid]) -> t
 proc:info() -> t
 
 	Get process info. On Linux, it parses `/proc/PID/stat`. Windows is NYI.
+
+os_info() -> t
+
+	Get OS info.
 
 --NOTES ----------------------------------------------------------------------
 
@@ -104,33 +108,17 @@ processes. In Linux it isn't. IOW autkill inheritance is not portable.
 
 if not ... then require'proc_test'; return end
 
-local ffi = require'ffi'
-local win = ffi.os == 'Windows'
+require'glue'
+require'fs'
+require'sock'
+
 local current_platform = win and 'win' or 'unix'
-local M = require('proc_'..(win and 'win' or 'posix'))
-
-local function extend(dt, t)
-	if not t then return dt end
-	local j = #dt
-	for i=1,#t do dt[j+i]=t[i] end
-end
-
-function M.log(severity, ...)
-	local logging = M.logging
-	if not logging then return end
-	logging.log(severity, 'proc', ...)
-end
-
-function M.live(...)
-	local logging = M.logging
-	if not logging then return end
-	logging.live(...)
-end
+require('proc_'..(win and 'win' or 'posix'))
 
 --see https://docs.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way
 --You will lose precious IQ points if you read that. Lose enough of them
 --and you might get a job at Microsoft!
-function M.esc_win(s) --escape for putting inside double-quoted string
+function cmdline_escape_win(s) --escape for putting inside double-quoted string
 	s = tostring(s)
 	if not s:find'[\\"]' then
 		return s
@@ -140,94 +128,93 @@ function M.esc_win(s) --escape for putting inside double-quoted string
 	return s
 end
 
-function M.esc_unix(s) --escape for putting inside double-quoted string
+function cmdline_escape_unix(s) --escape for putting inside double-quoted string
 	return tostring(s):gsub('[$`\\!]', '\\%1')
 end
 
-function M.esc(s, platform)
+function cmdline_escape(s, platform)
 	platform = platform or current_platform
 	local esc =
-		   platform == 'win'  and M.esc_win
-		or platform == 'unix' and M.esc_unix
+		   platform == 'win'  and cmdline_esc_win
+		or platform == 'unix' and cmdline_esc_unix
 	assert(esc, 'invalid platform')
 	return esc(s)
 end
 
-function M.quote_path_win(s)
+function cmdline_quote_path_win(s)
 	if s:find'%s' then
 		s = '"'..s..'"'
 	end
 	return s
 end
 
-function M.quote_arg_win(s)
+function cmdline_quote_arg_win(s)
 	s = tostring(s)
 	if not s:find'[ \t\n\v"^&<>|]' then
 		return s
 	else
-		return '"'..M.esc_win(s)..'"'
+		return '"'..cmdline_escape_win(s)..'"'
 	end
 end
 
-function M.quote_arg_unix(s)
+function cmdline_quote_arg_unix(s)
 	s = tostring(s)
 	if not s:find'[^a-zA-Z0-9._+:@%%/%-=]' then
 		return s
 	else
-		return '"'..M.esc_unix(s)..'"'
+		return '"'..cmdline_escape_unix(s)..'"'
 	end
 end
 
-function M.quote_arg(s, platform)
+function cmdline_quote_arg(s, platform)
 	platform = platform or current_platform
 	local quote_arg =
-		   platform == 'win'  and M.quote_arg_win
-		or platform == 'unix' and M.quote_arg_unix
+		   platform == 'win'  and cmdline_quote_arg_win
+		or platform == 'unix' and cmdline_quote_arg_unix
 	assert(quote_arg, 'invalid platform')
 	return quote_arg(s)
 end
 
-function M.quote_vars(vars, format, platform)
+function cmdline_quote_vars(vars, format, platform)
 	local t = {}
 	for k,v in sortedpairs(vars) do
-		t[#t+1] = string.format(format or '%s=%s\n', k, M.quote_arg(v, platform))
+		t[#t+1] = string.format(format or '%s=%s\n', k, cmdline_quote_arg(v, platform))
 	end
 	return table.concat(t)
 end
 
-function M.quote_args(platform, ...)
+function cmdline_quote_args(platform, ...)
 	local t = {}
 	for i=1,select('#',...) do
 		local v = select(i,...)
 		if v then --nil and false args are skipped. pass '' to inject empty args.
-			t[#t+1] = M.quote_arg(v, platform)
+			t[#t+1] = cmdline_quote_arg(v, platform)
 		end
 	end
 	return table.concat(t, ' ')
 end
-function M.quote_args_win (...) return M.quote_args('win', ...) end
-function M.quote_args_unix(...) return M.quote_args('unix', ...) end
+function cmdline_quote_args_win (...) return cmdline_quote_args('win', ...) end
+function cmdline_quote_args_unix(...) return cmdline_quote_args('unix', ...) end
 
 --cmd|{cmd,arg1,...}, env, ...
 --{cmd=cmd|{cmd,arg1,...}, env=, ...}
-local exec = M.exec
-function M.exec(t, ...)
+function exec(t, ...)
 	if type(t) == 'table' then
-		return exec(t.cmd, t.env, t.dir, t.stdin, t.stdout, t.stderr,
-			t.autokill, t.async, t.inherit_handles)
+		return _exec(t.cmd, t.env, t.dir, t.stdin, t.stdout, t.stderr,
+			t.autokill, t.inherit_handles)
 	else
-		return exec(t, ...)
+		return _exec(t, ...)
 	end
 end
 
 --script|{script,arg1,...}, env, ...
 --{script=, env=, ...}
-function M.exec_luafile(arg, ...)
-	local exepath = require'package.exepath'
+function exec_luafile(arg, ...)
+	local exepath = exepath()
 	local script = type(arg) == 'string' and arg or arg.script
 	local cmd = type(script) == 'string' and {exepath, script} or extend({exepath}, script)
 	if type(arg) == 'string' then
-		return M.exec(cmd, ...)
+		return _exec(cmd, ...)
 	else
 		local t = {cmd = cmd}
 		for k,v in pairs(arg) do
@@ -235,8 +222,6 @@ function M.exec_luafile(arg, ...)
 				t[k] = v
 			end
 		end
-		return M.exec(t)
+		return exec(t)
 	end
 end
-
-return M

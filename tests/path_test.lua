@@ -1,41 +1,41 @@
-local path = require'path'
+require'path'
 
-assert(path.platform == 'win' or path.platform == 'unix')
-assert(path.default_sep'win' == '\\')
-assert(path.default_sep'unix' == '/')
-assert(path.default_sep() == path.default_sep(path.platform))
+assert(path_platform == 'win' or path_platform == 'unix')
+assert(path_default_sep'win' == '\\')
+assert(path_default_sep'unix' == '/')
+assert(path_default_sep() == path_default_sep(path_platform))
 
-assert(path.dev_alias'NUL' == 'NUL')
-assert(path.dev_alias'c:/a/b/con.txt' == 'CON')
+assert(path_dev_alias'NUL' == 'NUL')
+assert(path_dev_alias'c:/a/b/con.txt' == 'CON')
 
 --type -----------------------------------------------------------------------
 
-assert(path.type('c:\\', 'win') == 'abs')
-assert(path.type('c:/a/b', 'win') == 'abs')
-assert(path.type('/', 'unix') == 'abs')
-assert(path.type('/a/b', 'unix') == 'abs')
-assert(path.type('\\\\?\\C:\\', 'win') == 'abs_long')
-assert(path.type('/a/b', 'win') == 'abs_nodrive')
-assert(path.type('', 'win') == 'rel')
-assert(path.type('a', 'win') == 'rel')
-assert(path.type('a/b', 'win') == 'rel')
-assert(path.type('C:', 'win') == 'rel_drive')
-assert(path.type('C:a', 'win') == 'rel_drive')
-assert(path.type('\\\\', 'win') == 'unc')
-assert(path.type('\\\\server\\share', 'win') == 'unc')
-assert(path.type('\\\\?\\UNC\\', 'win') == 'unc_long')
-assert(path.type('\\\\?\\UNC\\server', 'win') == 'unc_long')
-assert(path.type('\\\\?\\UNC\\server\\share', 'win') == 'unc_long')
-assert(path.type('\\\\?\\', 'win') == 'global')
-assert(path.type('\\\\?\\a', 'win') == 'global')
-assert(path.type('\\\\.\\', 'win') == 'dev')
-assert(path.type('\\\\.\\a', 'win') == 'dev')
-assert(path.type('c:/nul', 'win') == 'dev_alias')
+assert(path_type('c:\\', 'win') == 'abs')
+assert(path_type('c:/a/b', 'win') == 'abs')
+assert(path_type('/', 'unix') == 'abs')
+assert(path_type('/a/b', 'unix') == 'abs')
+assert(path_type('\\\\?\\C:\\', 'win') == 'abs_long')
+assert(path_type('/a/b', 'win') == 'abs_nodrive')
+assert(path_type('', 'win') == 'rel')
+assert(path_type('a', 'win') == 'rel')
+assert(path_type('a/b', 'win') == 'rel')
+assert(path_type('C:', 'win') == 'rel_drive')
+assert(path_type('C:a', 'win') == 'rel_drive')
+assert(path_type('\\\\', 'win') == 'unc')
+assert(path_type('\\\\server\\share', 'win') == 'unc')
+assert(path_type('\\\\?\\UNC\\', 'win') == 'unc_long')
+assert(path_type('\\\\?\\UNC\\server', 'win') == 'unc_long')
+assert(path_type('\\\\?\\UNC\\server\\share', 'win') == 'unc_long')
+assert(path_type('\\\\?\\', 'win') == 'global')
+assert(path_type('\\\\?\\a', 'win') == 'global')
+assert(path_type('\\\\.\\', 'win') == 'dev')
+assert(path_type('\\\\.\\a', 'win') == 'dev')
+assert(path_type('c:/nul', 'win') == 'dev_alias')
 
 --isabs ----------------------------------------------------------------------
 
 local function test(s, pl, isabs2, isempty2, isvalid2)
-	local isabs1, isempty1, isvalid1 = path.isabs(s, pl)
+	local isabs1, isempty1, isvalid1 = path_isabs(s, pl)
 	print('isabs', s, pl, '->', isabs1, isempty1, isvalid1)
 	assert(isabs1 == isabs2)
 	assert(isempty1 == isempty2)
@@ -64,7 +64,7 @@ test('', 'unix', false, true, true)
 --endsep ---------------------------------------------------------------------
 
 local function test(s, s2, success2, pl, sep, default_sep)
-	local s1, success1 = path.endsep(s, pl, sep, default_sep)
+	local s1, success1 = path_endsep(s, pl, sep, default_sep)
 	print('endsep', s, pl, sep, '->', s1, success1)
 	assert(s1 == s2)
 	assert(success1 == success2)
@@ -103,7 +103,7 @@ test('C:', 'C:', false, 'win', '/')
 --separator ------------------------------------------------------------------
 
 local function test(s, s2, pl, sep, default_sep, empty_names)
-	local s1 = path.sep(s, pl, sep, default_sep, empty_names)
+	local s1 = path_sep(s, pl, sep, default_sep, empty_names)
 	print('sep', s, pl, sep, default_sep, empty_names, '->', s1)
 	assert(s1 == s2)
 end
@@ -139,7 +139,7 @@ test('a//b\\\\\\c', 'a//b///c', 'win', false, '/', true)
 --file -----------------------------------------------------------------------
 
 local function test(s, pl, s2)
-	local s1 = path.file(s, pl)
+	local s1 = path_file(s, pl)
 	print('file', s, pl, '->', s1)
 	assert(s1 == s2)
 end
@@ -158,7 +158,7 @@ test('a/b/', 'unix', '')
 --nameext --------------------------------------------------------------------
 
 local function test(s, pl, name2, ext2)
-	local name1, ext1 = path.nameext(s, pl)
+	local name1, ext1 = path_nameext(s, pl)
 	print('nameext', s, pl, '->', name1, ext1)
 	assert(name1 == name2)
 	assert(ext1 == ext2)
@@ -175,7 +175,7 @@ test('/a/b/.bashrc', 'win', '.bashrc', nil)
 --dir ------------------------------------------------------------------------
 
 local function test(s, pl, s2)
-	local s1 = path.dir(s, pl)
+	local s1 = path_dir(s, pl)
 	print('dir', s, pl, '->', s1)
 	assert(s1 == s2)
 end
@@ -218,13 +218,12 @@ test('a/b', 'unix', 'a')
 
 function test(s, pl, full, t2)
 	local t1 = {}
-	for s, sep in path.gsplit(s, pl, full) do
+	for s, sep in path_split(s, pl, full) do
 		table.insert(t1, s)
 		table.insert(t1, sep)
 	end
-	local _ = require'pp'.format
-	print('gsplit', s, pl, full, '->', _(t1))
-	assert(_(t1) == _(t2))
+	print('split', s, pl, full, '->', pp(t1))
+	assert(pp(t1) == pp(t2))
 end
 
 test('', 'win', nil, {})
@@ -239,7 +238,7 @@ test('a/b\\c', 'unix', nil, {'a', '/', 'b\\c', ''})
 --normalize ------------------------------------------------------------------
 
 local function test(s, pl, opt, s2)
-	local s1 = path.normalize(s, pl, opt)
+	local s1 = path_normalize(s, pl, opt)
 	print('normal', s, pl, 'opt', '->', s1)
 	assert(s1 == s2)
 end
@@ -318,7 +317,7 @@ test('C:'..('/a/b'):rep(65), 'win', long, '\\\\?\\C:'..('\\a\\b'):rep(65))
 --commonpath -----------------------------------------------------------------
 
 local function test(a, b, pl, c2)
-	local c1 = path.commonpath(a, b, pl)
+	local c1 = path_commonpath(a, b, pl)
 	print('commonp', a, b, pl, '->', c1)
 	assert(c1 == c2)
 end
@@ -361,24 +360,24 @@ test('C:a/B/c', 'C:a/b/c/d', 'win',  'C:a/B/c') --pick smallest
 
 --depth ----------------------------------------------------------------------
 
-assert(path.depth(''), 'win' == 0)
-assert(path.depth('/'), 'win' == 0)
-assert(path.depth('/\\///'), 'win' == 0)
-assert(path.depth('a/'), 'win' == 1)
-assert(path.depth('/a'), 'win' == 1)
-assert(path.depth('/a/'), 'win' == 1)
-assert(path.depth('a/b'), 'win' == 2)
-assert(path.depth('/a/b'), 'win' == 2)
-assert(path.depth('a/b/'), 'win' == 2)
-assert(path.depth('/a/b/'), 'win' == 2)
-assert(path.depth('a/b/c'), 'win' == 3)
-assert(path.depth('C:/a/b/c'), 'win' == 3)
-assert(path.depth('\\\\server\\share\\path'), 'win' == 2)
+assert(path_depth(''), 'win' == 0)
+assert(path_depth('/'), 'win' == 0)
+assert(path_depth('/\\///'), 'win' == 0)
+assert(path_depth('a/'), 'win' == 1)
+assert(path_depth('/a'), 'win' == 1)
+assert(path_depth('/a/'), 'win' == 1)
+assert(path_depth('a/b'), 'win' == 2)
+assert(path_depth('/a/b'), 'win' == 2)
+assert(path_depth('a/b/'), 'win' == 2)
+assert(path_depth('/a/b/'), 'win' == 2)
+assert(path_depth('a/b/c'), 'win' == 3)
+assert(path_depth('C:/a/b/c'), 'win' == 3)
+assert(path_depth('\\\\server\\share\\path'), 'win' == 2)
 
 --combine (& implicitly abs) -------------------------------------------------
 
 local function test(s1, s2, pl, p2, err2)
-	local p1, err1 = path.combine(s1, s2, pl)
+	local p1, err1 = path_combine(s1, s2, pl)
 	print('combine', s1, s2, pl, '->', p1, err1, err1)
 	assert(p1 == p2)
 	if err2 then
@@ -406,7 +405,7 @@ test('C:', 'D:', 'win', nil, 'cannot combine') --drives
 --rel ------------------------------------------------------------------------
 
 local function test(s, pwd, s2, pl, sep, default_sep)
-	local s1 = path.rel(s, pwd, pl, sep, default_sep)
+	local s1 = relpath(s, pwd, pl, sep, default_sep)
 	print('rel', s, pwd, pl, '->', s1)
 	assert(s1 == s2)
 end
@@ -437,7 +436,7 @@ test('C:/a/b', 'C:/a' , 'b',        'win') --0 updirs + non-empty (DOS)
 --filename -------------------------------------------------------------------
 
 local function test(s, pl, repl, s2)
-	local s1, err, errcode = path.filename(s, pl, repl)
+	local s1, err, errcode = path_filename(s, pl, repl)
 	print('filename', s, pl, repl, '->', s1, err, errcode)
 	assert(s1 == s2)
 end
@@ -447,4 +446,3 @@ test('/a/..', 'unix', function() end, nil)
 test('/a/..', 'unix', function() return false end, nil)
 test('/a/..', 'unix', function(s, err) return '' end, '/a/')
 --TODO
-

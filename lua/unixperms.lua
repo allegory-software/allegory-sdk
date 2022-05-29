@@ -3,7 +3,7 @@
 	UNIX permissions string parser and formatter.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	unixperms.parse(s[, base]) -> mode, is_relative
+	unixperms_parse(s[, base]) -> mode, is_relative
 
 		Parse a unix permissions string and return its binary value. The string
 		can be an octal number beginning with a `'0'`, or a specification of form
@@ -14,7 +14,7 @@
 		an absolute spec. `base` defaults to `0`. If `s` is not a string, `s, false`
 		is returned.
 
-	unixperms.format(mode[, opt]) -> s
+	unixperms_format(mode[, opt]) -> s
 
 		Format a unix permissions binary value to a string. `opt` can be `'l[ong]'`
 		(which turns `0555` into `'r-xr-xr-x'`) or `'o[ctal]'` (which turns `0555`
@@ -24,12 +24,19 @@
 
 local bit = require'bit'
 
+local bor  = bit.bor
+local band = bit.band
+local bnot = bit.bnot
+local shr  = bit.rshift
+
+local format = string.format
+
 local function oct(s)
 	return tonumber(s, 8)
 end
 
 local function octs(n)
-	return string.format('%05o', n)
+	return format('%05o', n)
 end
 
 local bitmasks = {
@@ -55,16 +62,16 @@ local function bits(who, what)
 	local bits, mask = 0, 0
 	for c1 in who:gmatch'.' do
 		for c2 in what:gmatch'.' do
-			bits = bit.bor(bits, bitmasks[c1..c2] or 0)
+			bits = bor(bits, bitmasks[c1..c2] or 0)
 		end
-		mask = bit.bor(mask, masks[c1])
+		mask = bor(mask, masks[c1])
 	end
 	return bits, mask
 end
 
 --set one or more bits of a value without affecting other bits.
 local function setbits(bits, mask, over)
-	return bit.bor(bits, bit.band(over, bit.bnot(mask)))
+	return bor(bits, band(over, bnot(mask)))
 end
 
 local all = oct'07777'
@@ -95,16 +102,16 @@ local function string_parser(s)
 		if how == '' or how == '=' then
 			push(t, function(mode, mask)
 				mode = setbits(bits1, mask1, mode)
-				mask = bit.bor(mask1, mask)
+				mask = bor(mask1, mask)
 				return mode, mask
 			end)
 		elseif how == '-' then
 			push(t, function(mode, mask)
-				return bit.band(bit.bnot(bits1), mode), mask
+				return band(bnot(bits1), mode), mask
 			end)
 		elseif how == '+' then
 			push(t, function(mode, mask)
-				return bit.bor(bits1, mode), mask
+				return bor(bits1, mode), mask
 			end)
 		end
 	end)
@@ -129,7 +136,7 @@ local function parse_string(s, base)
 	return parse(base)
 end
 
-local function parse(s, base)
+function unixperms_parse(s, base)
 	base = oct(base or 0)
 	if type(s) == 'string' then
 		return parse_string(s, base)
@@ -139,27 +146,27 @@ local function parse(s, base)
 end
 
 local function s(b, suid, Suid)
-	local x = bit.band(b, 1) ~= 0
+	local x = band(b, 1) ~= 0
 		and (suid or 'x')
 		or (Suid or '-')
-	local w = bit.band(b, 2) ~= 0 and 'w' or '-'
-	local r = bit.band(b, 4) ~= 0 and 'r' or '-'
-	return string.format('%s%s%s', r, w, x)
+	local w = band(b, 2) ~= 0 and 'w' or '-'
+	local r = band(b, 4) ~= 0 and 'r' or '-'
+	return format('%s%s%s', r, w, x)
 end
 local function long(mode)
-	local o = bit.band(bit.rshift(mode, 0), 7)
-	local g = bit.band(bit.rshift(mode, 3), 7)
-	local u = bit.band(bit.rshift(mode, 6), 7)
-	local st = bit.band(bit.rshift(mode, 9), 1) ~= 0
-	local sg = bit.band(bit.rshift(mode, 10), 1) ~= 0
-	local su = bit.band(bit.rshift(mode, 11), 1) ~= 0
-	return string.format('%s%s%s',
+	local o  = band(shr(mode, 0), 7)
+	local g  = band(shr(mode, 3), 7)
+	local u  = band(shr(mode, 6), 7)
+	local st = band(shr(mode, 9), 1) ~= 0
+	local sg = band(shr(mode, 10), 1) ~= 0
+	local su = band(shr(mode, 11), 1) ~= 0
+	return format('%s%s%s',
 		s(u, su and 's', su and 'S'),
 		s(g, sg and 's', sg and 'S'),
 		s(o, st and 't', st and 'T'))
 end
 
-local function format(mode, style)
+function unixperms_format(mode, style)
 	return
 		(not style or style:find'^o') and octs(mode)
 		or style:find'^l' and long(mode)
@@ -168,12 +175,12 @@ end
 if not ... then --unit test --------------------------------------------------
 
 	local function test(s, octal, base, rel2)
-		local m1, rel1 = parse(s, base)
+		local m1, rel1 = unixperms_parse(s, base)
 		local m2 = oct(octal)
 		print(
-			string.format('%-10s', s),
-			format(m1, 'l') .. ' ' .. format(m1), rel1,
-			format(m2, 'l') .. ' ' .. format(m2), rel2)
+			format('%-10s', s),
+			unixperms_format(m1, 'l') .. ' ' .. unixperms_format(m1), rel1,
+			unixperms_format(m2, 'l') .. ' ' .. unixperms_format(m2), rel2)
 		assert(m1 == m2)
 		assert(rel1 == rel2)
 	end
@@ -256,18 +263,13 @@ if not ... then --unit test --------------------------------------------------
 	test('02010',  '02010', '00000', false)
 	test('03110',  '03110', '00000', false)
 
-	print(format(oct'04100', 'l'))
-	print(format(oct'04000', 'l'))
-	print(format(oct'02010', 'l'))
-	print(format(oct'02000', 'l'))
-	print(format(oct'01001', 'l'))
-	print(format(oct'01000', 'l'))
-	print(format(oct'07111', 'l'))
-	print(format(oct'07000', 'l'))
+	print(unixperms_format(oct'04100', 'l'))
+	print(unixperms_format(oct'04000', 'l'))
+	print(unixperms_format(oct'02010', 'l'))
+	print(unixperms_format(oct'02000', 'l'))
+	print(unixperms_format(oct'01001', 'l'))
+	print(unixperms_format(oct'01000', 'l'))
+	print(unixperms_format(oct'07111', 'l'))
+	print(unixperms_format(oct'07000', 'l'))
 
 end
-
-return {
-	parse = parse,
-	format = format,
-}
