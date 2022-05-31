@@ -199,7 +199,7 @@ function cmdline_quote_args_unix(...) return cmdline_quote_args('unix', ...) end
 --cmd|{cmd,arg1,...}, env, ...
 --{cmd=cmd|{cmd,arg1,...}, env=, ...}
 function exec(t, ...)
-	if type(t) == 'table' then
+	if istab(t) then
 		return _exec(t.cmd, t.env, t.dir, t.stdin, t.stdout, t.stderr,
 			t.autokill, t.inherit_handles)
 	else
@@ -211,9 +211,9 @@ end
 --{script=, env=, ...}
 function exec_luafile(arg, ...)
 	local exepath = exepath()
-	local script = type(arg) == 'string' and arg or arg.script
-	local cmd = type(script) == 'string' and {exepath, script} or extend({exepath}, script)
-	if type(arg) == 'string' then
+	local script = isstr(arg) and arg or arg.script
+	local cmd = isstr(script) and {exepath, script} or extend({exepath}, script)
+	if isstr(arg) then
 		return _exec(cmd, ...)
 	else
 		local t = {cmd = cmd}

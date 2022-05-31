@@ -23,3 +23,4 @@ local function encln(s, n) return base64_encode(s:rep(n), nil, nil, nil, 76) end
 assert(encln('.', 1) == 'Lg==\r\n')
 assert(encln('.', 76/4*3) == ('Li4u'):rep(76/4)..'\r\n')
 assert(encln('.', 76/4*3+1) == ('Li4u'):rep(76/4)..'\r\nLg==\r\n')
+print'ok'

@@ -24,8 +24,8 @@ local env = {}
 do
 	local schema = require'schema'
 	local
-		cat, outdent, trim, index =
-		cat, outdent, trim, index
+		tonumber, type, cat, outdent, trim, index =
+		tonumber, type, cat, outdent, trim, index
 
 	function env.enum(...) --mysql-specific `enum` type
 		local vals = collect(words(cat({...}, ' ')))

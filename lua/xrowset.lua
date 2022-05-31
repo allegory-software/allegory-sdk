@@ -211,7 +211,7 @@ function virtual_rowset(init, ...)
 		for i,f in ipairs(rs.client_fields) do
 			for k,v in pairs(f) do
 				local v = rs.fields[i][k]
-				if type(v) == 'function' then --value getter/generator
+				if isfunc(v) then --value getter/generator
 					f[k] = v()
 				end
 			end
@@ -225,7 +225,7 @@ function virtual_rowset(init, ...)
 	function rs:load(param_values)
 		local res = {}
 		rs:load_rows(res, param_values)
-		assert(res.rows[1] == nil or type(res.rows[1]) == 'table',
+		assert(res.rows[1] == nil or istab(res.rows[1]),
 			'first row not a table')
 		if update_computed_fields then
 			for _,row in ipairs(res.rows) do
@@ -302,7 +302,7 @@ function virtual_rowset(init, ...)
 				local val = values[fld.name]
 				if val ~= nil or only_present_values then
 					local err = fld.validate(val, fld, rs)
-					if type(err) == 'string' then
+					if isstr(err) then
 						errors = errors or {}
 						errors[fld.name] = err
 					end
@@ -479,9 +479,9 @@ function virtual_rowset(init, ...)
 
 	function rs:respond(rowset_name, out_format)
 		rs.name = rowset_name
-		if type(rs.allow) == 'function' then
+		if isfunc(rs.allow) then
 			allow(rs.allow())
-		elseif type(rs.allow) == 'string' then
+		elseif isstr(rs.allow) then
 			allow(admin(rs.allow))
 		end
 		local filter = json_decode(args'filter') or {}
@@ -539,7 +539,7 @@ local waiting_events_threads = {}
 local changed_rowsets = {} --{cx()->{rowset->'update_id1 ...'}}
 
 function rowset_changed(rowset_name, update_id)
-	local rowsets = type(rowset_name) == 'table' and rowset_name or {[rowset_name] = true}
+	local rowsets = istab(rowset_name) and rowset_name or {[rowset_name] = true}
 	push_rowset_changed_events(rowsets, update_id or 'server')
 end
 

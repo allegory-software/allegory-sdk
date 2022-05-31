@@ -50,6 +50,8 @@ arbitrary positions and 2) sock's interruptible timers.
 
 ]=]
 
+if not ... then require'conpool_test'; return end
+
 require'glue'
 require'sock'
 require'queue'

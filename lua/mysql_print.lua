@@ -109,7 +109,7 @@ end
 local function cell_align(current_align, cell_value, field)
 	if field and field.align then return field.align end
 	if current_align == 'left' then return 'left' end
-	if type(cell_value) == 'number' or type(cell_value) == 'cdata' then return 'right' end
+	if isnum(cell_value) or iscdata(cell_value) then return 'right' end
 	return 'left'
 end
 

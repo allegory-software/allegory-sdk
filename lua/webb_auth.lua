@@ -378,7 +378,7 @@ end
 local auth = {} --auth.<type>(auth) -> usr, can_create
 
 local function authenticate(a)
-	local auth = auth[a and type(a) == 'table' and a.type or 'session']
+	local auth = auth[a and istab(a) and a.type or 'session']
 	if not auth then
 		return nil, 'invalid argument'
 	end
@@ -533,7 +533,7 @@ function auth.pass(auth)
 		local email = assert(json_str_arg(auth.email))
 		assert(#email >= 1)
 		local pass = assert(auth.pass)
-		assert(type(pass) == 'string' and #pass >= 1)
+		assert(isstr(pass) and #pass >= 1)
 		if email_usr(email) then
 			return nil,
 				S('email_taken', 'Email already registered'),

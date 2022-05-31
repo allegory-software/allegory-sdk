@@ -38,17 +38,14 @@ function ptest(t1,t2)
 	test(t1,t2,nil,3)
 end
 
+do
 local time
 local last_time
 function timediff()
-    time = time or require'time'
-    local time = time.clock()
+    local time = clock()
     local d = last_time and (time - last_time) or 0
     last_time = time
     return d
 end
-
-function dir(d)
-	local f = io.popen('ls -1 '..d)
-	return glue.collect(f:lines())
 end
+

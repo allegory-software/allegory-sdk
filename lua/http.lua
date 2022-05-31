@@ -61,6 +61,7 @@ if not ... then require'http_server_test'; return end
 
 require'glue'
 require'linebuffer'
+require'sock'
 local http_headers = require'http_headers'
 
 local http = {type = 'http_connection', debug_prefix = 'H'}
@@ -219,7 +220,7 @@ function http:send_headers(headers)
 		if v ~= http.remove then
 			k, v = self:format_header(k, v)
 			if v then
-				if type(v) == 'table' then --must be sent unfolded.
+				if istab(v) then --must be sent unfolded.
 					for i,v in ipairs(v) do
 						self:dp('->', '%-17s %s', k, v)
 						self:send(_('%s: %s\r\n', k, v))
@@ -268,12 +269,12 @@ end
 --body -----------------------------------------------------------------------
 
 function http:set_body_headers(headers, content, content_size, close)
-	if type(content) == 'string' then
+	if isstr(content) then
 		assert(not content_size, 'content_size would be ignored')
 		headers['content-length'] = #content
-	elseif type(content) == 'cdata' then
+	elseif iscdata(content) then
 		headers['content-length'] = assert(content_size, 'content_size missing')
-	elseif type(content) == 'function' then
+	elseif isfunc(content) then
 		if content_size then
 			headers['content-length'] = content_size
 		elseif not close then
@@ -355,11 +356,8 @@ end
 
 function http:gzip_encoder(format, content, content_size)
 	assert(self.zlib, 'zlib not loaded')
-	if    type(content) == 'string'
-		or type(content) == 'function'
-		or type(content) == 'cdata'
-	then
-		if type(content) == 'cdata' then
+	if isstr(content) or isfunc(content) or iscdata(content) then
+		if iscdata(content) then
 			assert(content_size)
 			local buf, sz, was_read = content, content_size
 			content = function()
@@ -395,7 +393,7 @@ function http:send_body(content, content_size, transfer_encoding, close)
 		self:send_chunked(content)
 	else
 		assert(not transfer_encoding, 'invalid transfer-encoding')
-		if type(content) == 'function' then
+		if isfunc(content) then
 			local total = 0
 			while true do
 				local chunk, len = content()
@@ -513,7 +511,7 @@ function http:build_request(opt, cookies)
 	req.reply_timeout   = opt.reply_timeout
 
 	local write = opt.receive_content
-	if type(write) == 'function' then
+	if isfunc(write) then
 		local user_write = write
 		function write(buf, sz)
 			return user_write(req, buf, sz)
@@ -662,7 +660,7 @@ http:protect'read_request_body'
 
 local function content_size(opt)
 	local content = opt.content or ''
-	return type(content) == 'string' and #content or opt.content_size
+	return isstr(content) and #content or opt.content_size
 end
 
 local function no_body(res, status)
@@ -671,7 +669,7 @@ local function no_body(res, status)
 end
 
 local function q0(t)
-	return type(t) == 'table' and t.q == 0
+	return istab(t) and t.q == 0
 end
 
 http.nocompress_mime_types = index{

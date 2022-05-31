@@ -159,7 +159,7 @@ function logging:toserver(host, port, queue_size, timeout)
 					while not stop do
 						local ok, cmd_args = check_io(chan:recv())
 						if not ok then break end
-						if type(cmd_args) == 'table' then
+						if istab(cmd_args) then
 							local f = self.rpc[cmd_args[1]]
 							if f then f(self, unpack(cmd_args, 2)) end
 						end
@@ -245,7 +245,7 @@ end
 
 local function debug_type(v)
 	local mt = getmetatable(v)
-	return type(mt) == 'table' and mt.type or type(v)
+	return istab(mt) and mt.type or type(v)
 end
 
 local prefixes = {
@@ -256,7 +256,7 @@ local prefixes = {
 
 local function debug_prefix(v)
 	local mt = getmetatable(v)
-	local prefix = type(mt) == 'table' and mt.debug_prefix
+	local prefix = istab(mt) and mt.debug_prefix
 	if prefix then return prefix end
 	local type = debug_type(v)
 	return prefixes[type] or type
@@ -277,7 +277,7 @@ local function debug_id(v)
 	end
 	local id = ids[v]
 	if not id then
-		id = type(v) == 'table' and rawget(v, 'debug_id')
+		id = istab(v) and rawget(v, 'debug_id')
 		if not id then
 			id = (ids.last_id or 0) + 1
 			ids.last_id = id
@@ -323,10 +323,10 @@ local function debug_arg(v)
 	local name = names[v]
 	if name then return name end
 	local mt = getmetatable(v)
-	if mt and type(mt) == 'table' then
+	if istab(mt) then
 		if mt.__tostring then return tostring(v) end
 	end
-	if type(v) == 'table' and not (mt and (mt.type or mt.debug_prefix)) then
+	if istab(v) and not (mt and (mt.type or mt.debug_prefix)) then
 		return pp_compact(v)
 	end
 	return (debug_id(v))

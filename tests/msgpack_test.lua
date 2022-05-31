@@ -272,4 +272,5 @@ ff                              # -1.0 double
 local v0 = tohex(encoded)
 local v1 = tohex(b:tostring())
 assert(v0 == v1)
-pr'OK'
+
+print'ok'

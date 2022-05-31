@@ -75,7 +75,7 @@ events.__observers = false
 
 local function parse_event(s)
 	local ev, t
-	if type(s) == 'table' then -- {ev|false, ns1, ...}
+	if istab(s) then -- {ev|false, ns1, ...}
 		ev = s[1] or nil
 		t = {}
 		for i=2,#s do t[i-1] = s[i] end

@@ -19,7 +19,7 @@ LIMITATIONS
 	* no stream API (use temp files, it's ok).
 
 BROWSING
-	zip_open(opt | file,[mode],[passwd]) -> rz|wz
+	[try_]zip_open(opt | file,[mode],[passwd]) -> rz|wz
 		mode                : open mode ('r'; 'r'|'w'|'a')
 		file                : open zip file from disk
 		in_memory           : load whole file in memory (false)
@@ -121,10 +121,6 @@ local C = ffi.load'minizip2'
 
 --tools ----------------------------------------------------------------------
 
-local function str(s, len)
-	return s ~= nil and ffi.string(s, len) or nil
-end
-
 local function init_properties(self, t, fields)
 	for k in pairs(fields) do
 		if t[k] then self[k] = t[k] end
@@ -185,7 +181,7 @@ function entry_set:disk_offset       (n) self.disk_offset_i64       = n end
 function entry_get:zip64             () return self.zip64_u16 == 1 end
 function entry_set:zip64             (b) self.zip64_u16 = b end
 
-ffi.metatype('mz_zip_file', gettersandsetters(entry_get, entry_set))
+metatype('mz_zip_file', gettersandsetters(entry_get, entry_set))
 
 --reader & writer ------------------------------------------------------------
 
@@ -199,9 +195,9 @@ local writer_ptr_ct = typeof'struct minizip_writer_t*'
 local reader = {}; local reader_get = {}; local reader_set = {}
 local writer = {}; local writer_get = {}; local writer_set = {}
 
-local cbuf = ffi.new'char*[1]'
-local bbuf = ffi.new'uint8_t[1]'
-local vbuf = ffi.new'void*[1]'
+local cbuf = new'char*[1]'
+local bbuf = new'uint8_t[1]'
+local vbuf = new'void*[1]'
 
 local entry_init_fields = {
 	mtime=1,
@@ -212,9 +208,9 @@ local entry_init_fields = {
 	linkname=1,
 }
 local function mz_zip_file(t)
-	local e = ffi.new'mz_zip_file'
+	local e = new'mz_zip_file'
 	init_properties(e, t, entry_init_fields)
-	ffi.gc(e, function() --anchor the strings
+	gc(e, function() --anchor the strings
 		local _ = t.filename
 		local _ = t.comment
 		local _ = t.linkname
@@ -250,7 +246,7 @@ local function check(err, ret)
 	assert(err ~= C.MZ_VERSION_ERROR  , 'version error')
 	if err >= 0 then return ret end
 	local err = error_strings[err] or err
-	return nil, string.format('minizip %s error', err), err
+	return nil, format('minizip %s error', err), err
 end
 
 local function checkok(err)
@@ -274,7 +270,7 @@ local function open_reader(t)
 		end
 	elseif t.data then
 		err = C.mz_zip_reader_open_buffer(z, t.data, t.size or #t.data, t.copy or false)
-		ffi.gc(z, function() local _ = t.data end) --anchor it
+		gc(z, function() local _ = t.data end) --anchor it
 	else
 		--TODO: int32_t mz_zip_reader_open(void *handle, void *stream);
 		assert(false)
@@ -303,12 +299,15 @@ local function open_writer(t)
 	return check(err, z)
 end
 
-function zip_open(t, mode, password)
-	if type(t) == 'string' then
+function try_zip_open(t, mode, password)
+	if isstr(t) then
 		t = {file = t, mode = mode, password = password}
 	end
 	local open = (t.mode or 'r') == 'r' and open_reader or open_writer
 	return open(t)
+end
+function zip_open(...)
+	return assert(try_zip_open(...))
 end
 
 function reader:close()
@@ -346,7 +345,7 @@ function reader:find(filename, ignore_case)
 	return checkeol(C.mz_zip_reader_locate_entry(self, filename, ignore_case or false))
 end
 
-local pebuf = ffi.new'mz_zip_file*[1]'
+local pebuf = new'mz_zip_file*[1]'
 function reader_get:entry()
 	assert(checkok(C.mz_zip_reader_entry_get_info(self, pebuf)))
 	return pebuf[0]
@@ -405,7 +404,7 @@ function reader:read(buf, len)
 			if err then return nil, err end
 			return nil
 		end
-		local buf = ffi.new('char[?]', len)
+		local buf = u8a(len)
 		local ok, err, ec = checkok(C.mz_zip_reader_entry_save_buffer(self, buf, len))
 		if not ok then return nil, err, ec end
 		return str(buf, len)
@@ -455,7 +454,7 @@ function reader:entry_hash(algorithm, hbuf, hbuf_size)
 	if not hbuf then
 		return_string = true
 		hbuf_size = digest_size
-		hbuf = ffi.new('char[?]', digest_size)
+		hbuf = u8a(digest_size)
 	elseif hbuf_size < digest_size then
 		return nil, digest_size
 	end
@@ -517,7 +516,7 @@ end
 
 local void_ptr_ct = typeof'void*'
 function writer:add_memfile(entry, ...)
-	if type(entry) == 'string' then
+	if isstr(entry) then
 		local data, size = ...
 		entry = {filename = entry, data = data, size = size}
 	end
@@ -570,7 +569,7 @@ function writer_set:compression_level(level)
 	if level <= 0 then
 		self.compression_method = 'store'
 	else
-		C.mz_zip_writer_set_compress_level(self, math.min(math.max(level, 1), 9))
+		C.mz_zip_writer_set_compress_level(self, clamp(level, 1, 9))
 	end
 end
 
@@ -595,5 +594,5 @@ function writer_get:zip_handle()
 	return vbuf[0]
 end
 
-ffi.metatype('struct minizip_reader_t', gettersandsetters(reader_get, reader_set, reader))
-ffi.metatype('struct minizip_writer_t', gettersandsetters(writer_get, writer_set, writer))
+metatype('struct minizip_reader_t', gettersandsetters(reader_get, reader_set, reader))
+metatype('struct minizip_writer_t', gettersandsetters(writer_get, writer_set, writer))

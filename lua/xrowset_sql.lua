@@ -119,7 +119,7 @@ function sql_rowset(...)
 
 	return virtual_rowset(function(rs, sql, ...)
 
-		if type(sql) == 'string' then
+		if isstr(sql) then
 			rs.select = sql
 		else
 			update(rs, sql, ...)
@@ -179,7 +179,7 @@ function sql_rowset(...)
 		if not rs.load_rows then
 			assert(rs.select_all, 'select_all missing')
 			function rs:load_rows(res, param_vals)
-				local db = type(rs.db) == 'function' and rs.db(param_vals) or db(rs.db)
+				local db = isfunc(rs.db) and rs.db(param_vals) or db(rs.db)
 				local rows, fields, params = db:query(load_opt, rs.select_all, param_vals)
 				if configure then
 					configure(fields)

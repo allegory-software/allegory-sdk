@@ -355,7 +355,7 @@ function Sfile_ids()
 		end
 		for i,k in ipairs(template()) do
 			local s = template(k)
-			if type(s) == 'function' then --template getter/generator
+			if isfunc(s) then --template getter/generator
 				s = s()
 			end
 			Sfile_template(ids, k, s)
@@ -566,7 +566,7 @@ function post(v)
 		end
 		cx.post = s
 	end
-	if v and type(s) == 'table' then
+	if v and istab(s) then
 		return s[v]
 	else
 		return s
@@ -632,7 +632,7 @@ end
 --arg validation & decoding --------------------------------------------------
 
 function id_arg(s)
-	if not s or type(s) == 'number' then return s end
+	if not s or isnum(s) then return s end
 	local n = tonumber(s:match'(%d+)$') --strip any slug
 	return n and n >= 0 and n or nil
 end
@@ -643,7 +643,7 @@ function str_arg(s)
 end
 
 function json_str_arg(s)
-	return type(s) == 'string' and s or nil
+	return isstr(s) and s or nil
 end
 
 function enum_arg(s, ...)
@@ -671,7 +671,7 @@ function checkbox_arg(s)
 end
 
 function url_arg(s)
-	return type(s) == 'string' and uri.parse(s) or s
+	return isstr(s) and uri.parse(s) or s
 end
 
 --output API -----------------------------------------------------------------
@@ -684,7 +684,7 @@ function outall(s, sz)
 	if cx().http_out or out_buffering() then
 		out(s, sz)
 	else
-		s = s == nil and '' or type(s) == 'cdata' and s or tostring(s)
+		s = s == nil and '' or iscdata(s) and s or tostring(s)
 		local cx = cx()
 		cx.res.content = s
 		cx.res.content_size = sz
@@ -705,7 +705,7 @@ local function default_outfunc(s, sz)
 		cx.res.want_out_function = true
 		cx.http_out = cx.req:respond(cx.res)
 	end
-	s = type(s) ~= 'cdata' and tostring(s) or s
+	s = not iscdata(s) and tostring(s) or s
 	cx.http_out(s, sz)
 end
 
@@ -727,11 +727,11 @@ function stringbuffer(t)
 			if s == nil or s == '' or sz == 0 then
 				return
 			end
-			if type(s) == 'cdata' then
+			if iscdata(s) then
 				assert(sz)
-				s = ffi.string(s, sz)
+				s = str(s, sz)
 				add(t, s)
-			elseif type(s) == 'function' then --content generator
+			elseif isfunc(s) then --content generator
 				if not geni then
 					geni = {}
 					genf = {}
@@ -894,9 +894,9 @@ end
 
 function http_error(status, content) --status,[content] | http_response
 	local err
-	if type(status) == 'number' then
+	if isnum(status) then
 		err = {status = status, content = content}
-	elseif type(status) == 'table' then
+	elseif istab(status) then
 		err = status
 	else
 		assert(false)
@@ -937,7 +937,7 @@ function check_etag(s)
 	if out_buffering() then return s end
 	local etag = xxhash128(s):hex()
 	local etags = headers'if-none-match'
-	if etags and type(etags) == 'table' then
+	if etags and istab(etags) then
 		for _,t in ipairs(etags) do
 			if t.etag == etag then
 				http_error(304)
@@ -992,7 +992,7 @@ local function file_object(findfile) --{filename -> content | handler(filename)}
 	return setmetatable({}, {
 		__call = function(self, file, default)
 			local f = self[file]
-			if type(f) == 'function' then
+			if isfunc(f) then
 				return f()
 			elseif f then
 				return f
@@ -1007,7 +1007,7 @@ wwwfile = file_object(wwwpath)
 varfile = file_object(varpath)
 
 function wwwfiles(filter)
-	if type(filter) == 'string' then
+	if isstr(filter) then
 		local patt = filter
 		filter = function(s) return s:find(patt) end
 	end
@@ -1119,7 +1119,7 @@ local function template_call(template, name)
 	else
 		name = underscores(name)
 		local s = assertf(template[name], 'template not found: %s', name)
-		if type(s) == 'function' then --template getter/generator
+		if isfunc(s) then --template getter/generator
 			s = s()
 		end
 		return s
@@ -1354,8 +1354,8 @@ function webb.respond(req)
 	next_request_id = next_request_id + 1
 	webb.dbg('webb', 'request', '%s %s', req.method, uri.unescape(req.uri))
 	local main = assert(config('main_module', config'app_name'))
-	local main = type(main) == 'string' and require(main) or main
-	if type(main) == 'table' then
+	local main = isstr(main) and require(main) or main
+	if istab(main) then
 		main = main.respond
 	end
 	main()
@@ -1385,8 +1385,8 @@ function webb.setfakecx()
 		log(...)
 	end
 	function cx.outfunc(s, sz)
-		if type(s) == 'cdata' then
-			s = ffi.string(s, sz)
+		if iscdata(s) then
+			s = str(s, sz)
 		end
 		io.stdout:write(s)
 		io.stdout:flush()
@@ -1418,7 +1418,7 @@ end
 function webb.request(...)
 	require'webb_action'
 	webb.run(function(arg1, ...)
-		local req = type(arg1) == 'table' and arg1 or {args = {arg1,...}}
+		local req = istab(arg1) and arg1 or {args = {arg1,...}}
 		local cx = cx()
 		cx.req.method = req.method or 'get'
 		cx.req.uri = req.uri or concat(imap(pack('', arg1, ...), tostring), '/')

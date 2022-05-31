@@ -39,7 +39,7 @@ end
 local cbuf = buffer'char[?]'
 
 local function parse_perms(s, base)
-	if type(s) == 'string' then
+	if isstr(s) then
 		require'unixperms'
 		return unixperms_parse(s, base)
 	else --pass-through
@@ -86,7 +86,7 @@ local o_bits = {
 	symlink   = OSX and 0x200000, --open the symlink itself
 }
 
-local str_opt = {
+_open_mode_opt = {
 	['r' ] = {flags = 'rdonly'},
 	['r+'] = {flags = 'rdwr'},
 	['w' ] = {flags = 'creat wronly trunc'},
@@ -117,6 +117,7 @@ function file_wrap_fd(fd, async, is_pipe_end, path)
 		fd = fd,
 		s = fd, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
+		path = path,
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
 		__index = file,
@@ -135,8 +136,7 @@ function file_wrap_fd(fd, async, is_pipe_end, path)
 	return f
 end
 
-function open(path, mode_opt)
-	local opt = _open_opt(mode_opt, str_opt)
+function _open(path, opt, quiet)
 	local flags = bitflags(opt.flags or 'rdonly', o_bits)
 	flags = bor(flags, opt.async and O_NONBLOCK or 0)
 	local mode = parse_perms(opt.perms)
@@ -155,7 +155,8 @@ function open(path, mode_opt)
 	f.shm = opt.shm and true or false
 	local r = band(flags, o_bits.rdonly) == o_bits.rdonly and 'r' or ''
 	local w = band(flags, o_bits.wronly) == o_bits.wronly and 'w' or ''
-	log('', 'fs', 'open', '%-4s %s%s %s', f, r, w, path)
+	f.quiet = quiet or not w
+	log(f.quiet and '' or 'note', 'fs', 'open', '%-4s %s%s %s', f, r, w, path)
 	return f
 end
 
@@ -163,7 +164,7 @@ function file.closed(f)
 	return f.fd == -1
 end
 
-function file.close(f)
+function file.try_close(f)
 	if f:closed() then return true end
 	if f._async then
 		local sock = require'sock'
@@ -173,7 +174,7 @@ function file.close(f)
 	local ok = C.close(f.fd) == 0
 	if not ok then return check(false) end
 	f.fd = -1
-	log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	log(f.quiet and '' or 'note', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil)
 	return true
 end
@@ -206,7 +207,7 @@ int mkfifo(const char *pathname, mode_t mode);
 ]]
 
 function pipe(path, mode, opt)
-	if type(path) == 'table' then
+	if istab(path) then
 		path, mode, opt = path.path, path.mode, path
 	end
 	opt = opt or {}
@@ -345,7 +346,7 @@ end
 --NOTE: lseek() is not defined for shm_open()'ed fds, that's why we ask
 --for a `size` arg. The seek() behavior is just for compat with Windows.
 function file.truncate(f, size, opt)
-	assert(type(size) == 'number', 'size expected')
+	assert(isnum(size), 'size expected')
 	if not f.shm then
 		local pos, err = f:seek('set', size)
 		if not pos then return nil, err end
@@ -403,7 +404,7 @@ function cwd()
 	while true do
 		local buf, sz = cbuf(256)
 		if C.getcwd(buf, sz) == nil then
-			if ffi.errno() ~= ERANGE or buf >= 2048 then
+			if errno() ~= ERANGE or buf >= 2048 then
 				return assert(check())
 			else
 				buf, sz = cbuf(sz * 2)
@@ -445,7 +446,7 @@ function _readlink(link_path)
 	::again::
 	local len = C.readlink(link_path, buf, sz)
 	if len == -1 then
-		if ffi.errno() == EINVAL then --make it legit: no symlink, no target
+		if errno() == EINVAL then --make it legit: no symlink, no target
 			return nil
 		end
 		return check()
@@ -863,7 +864,7 @@ function dir.next(dir)
 		end
 		return nil
 	end
-	ffi.errno(0)
+	errno(0)
 	dir._dentry = C.readdir(dir._dirp)
 	if dir._dentry ~= nil then
 		local name = dir:name()
@@ -872,7 +873,7 @@ function dir.next(dir)
 		end
 		return name, dir
 	else
-		local errno = ffi.errno()
+		local errno = errno()
 		dir:close()
 		if errno == 0 then
 			return nil
@@ -884,11 +885,11 @@ end
 function fs_dir(path, skip_dot_dirs)
 	local dir = dir_ct(#path)
 	dir._dirlen = #path
-	ffi.copy(dir._dir, path, #path)
+	copy(dir._dir, path, #path)
 	dir._skip_dot_dirs = skip_dot_dirs and 1 or 0
 	dir._dirp = C.opendir(path)
 	if dir._dirp == nil then
-		dir._errno = ffi.errno()
+		dir._errno = errno()
 	end
 	return dir.next, dir
 end
@@ -1015,14 +1016,14 @@ function fs_map(file, access, size, offset, addr, tagname, perms)
 
 	file = file or tagname and check_tagname(tagname)
 
-	if type(file) == 'string' then
+	if isstr(file) then
 		local flags = write and 'rdwr creat' or 'rdonly'
 		local perms = perms and parse_perms(perms)
 			or tonumber('400', 8) +
 				(write and tonumber('200', 8) or 0) +
 				(exec  and tonumber('100', 8) or 0)
 		local err
-		file, err = open(file, {
+		file, err = _open(file, {
 				flags = flags, perms = perms,
 				open = tagname and librt.shm_open,
 				shm = tagname and true or nil,
@@ -1082,7 +1083,7 @@ function fs_map(file, access, size, offset, addr, tagname, perms)
 	local MS_SYNC       = OSX and 0x0010 or 4
 
 	local function flush(self, async, addr, sz)
-		if type(async) ~= 'boolean' then --async arg is optional
+		if not isbool(async) then --async arg is optional
 			async, addr, sz = false, async, addr
 		end
 		local addr = aligned_addr(addr or self.addr, 'left')
@@ -1223,7 +1224,7 @@ local statfs_ct = typeof'struct statfs'
 local statfs_buf
 local function statfs(path)
 	statfs_buf = statfs_buf or statfs_ct()
-	local ok, err = check(ffi.C.statfs(path, statfs_buf) == 0)
+	local ok, err = check(C.statfs(path, statfs_buf) == 0)
 	if not ok then return nil, err end
 	return statfs_buf
 end

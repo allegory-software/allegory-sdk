@@ -178,7 +178,7 @@ local cache = setmetatable({}, {__mode = 'kv'}) --{template -> prog} cache
 --(**) for partials, i1 is such that template:sub(i, i1) gives the
 --indent of the partial which must be applied to the lines of the result.
 function mustache_compile(template, d1, d2)
-	if type(template) == 'table' then --already compiled
+	if istab(template) then --already compiled
 		return template
 	end
 	assert(not d1 == not d2, 'error: only one delimiter specified')
@@ -243,7 +243,7 @@ function mustache_dump(prog, d1, d2, print) --dump bytecode
 	print = print or _G.print
 	prog = mustache_compile(prog, d1, d2)
 	local function var(var)
-		return type(var) == 'table' and concat(var, '.') or var
+		return istab(var) and concat(var, '.') or var
 	end
 	local function text(s)
 		local s = pp(s)
@@ -288,7 +288,7 @@ end
 
 --check if a value is considered valid in a way compatible with mustache.js.
 local function istrue(v)
-	if type(v) == 'table' then
+	if istab(v) then
 		return next(v) ~= nil
 	else
 		return v and v ~= '' and v ~= 0 and v ~= '0' or false
@@ -342,7 +342,7 @@ local function resolve(ctx_stack, var) --find a value in a context stack
 	end
 	if var == '.' then --"this" var
 		return ctx_stack[#ctx_stack]
-	elseif type(var) == 'table' then --'a.b.c' parsed as {'a', 'b', 'c'}
+	elseif istab(var) then --'a.b.c' parsed as {'a', 'b', 'c'}
 		local val = lookup(ctx_stack, var[1], #ctx_stack)
 		for i=2,#var do
 			if not istrue(val) then --falsey values resolve to ''
@@ -407,7 +407,7 @@ local function render(prog, ctx_stack, getpartial, write, d1, d2, esc)
 			push(iter_stack, pc)
 			push(iter_stack, 'list')
 			push(ctx_stack, nextvalue()) --always non-nil
-		elseif type(val) == 'table' then --hashmap, set as context
+		elseif istab(val) then --hashmap, set as context
 			push(iter_stack, 'hash')
 			push(ctx_stack, val)
 		else --conditional section, don't push a context
@@ -504,7 +504,7 @@ local function render(prog, ctx_stack, getpartial, write, d1, d2, esc)
 end
 
 function mustache_render(prog, view, getpartial, write, d1, d2, esc)
-	if type(getpartial) == 'table' then --partials table given, build getter
+	if istab(getpartial) then --partials table given, build getter
 		local partials = getpartial
 		getpartial = function(name)
 			return partials[name]

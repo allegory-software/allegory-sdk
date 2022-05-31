@@ -27,7 +27,7 @@ resolver(t) -> r
 	  `{host=, [port=], [tcp_only=true]}`.
 	* max_cache_entries: max. number of response cache entries (defaults to 10K).
 
-r:query(name,[type],[timeout] | t) -> answers
+r:[try_]query(name,[type],[timeout] | t) -> answers
 
 	Perform a DNS query and return a list of parsed DNS records, or `nil, err`
 	for input, network or server errors (where `err` is an error object).
@@ -45,11 +45,11 @@ r:query(name,[type],[timeout] | t) -> answers
 	Unsupported types must be given by number and they will be received unparsed
 	in the `rdata` field of the answer.
 
-r:lookup(name,[type],[timeout]) -> addresses
+r:[try_]lookup(name,[type],[timeout]) -> addresses
 
 	Make a query and return the addresses.
 
-r:reverse_lookup(address,[timeout]) -> hostnames
+r:[try_]reverse_lookup(address,[timeout]) -> hostnames
 
 	Make a `PTR` lookup for both IPv4 and IPv6 addresses.
 
@@ -462,25 +462,25 @@ local function ns_query(rs, ns, q)
 	--start the scheduler or suspend. the scheduler will resume() us back
 	--on the matching recv() or on timeout.
 	q.thread = currentthread()
-	local buf, len, errcode
+	local buf, len
 	if not ns.scheduler_running then
 		rs:dbgr(ns, q, ns.scheduler)
-		buf, len, errcode = check_io(q, transfer(ns.scheduler))
+		buf, len = check_io(q, transfer(ns.scheduler))
 	elseif q.result then
 		rs:dbg(ns, q, 'EARLY', len)
-		buf, len, errcode = check_io(q, unpack(q.result))
+		buf, len = check_io(q, unpack(q.result))
 	else
 		rs:dbgs(ns, q)
-		buf, len, errcode = check_io(q, suspend())
+		buf, len = check_io(q, suspend())
 	end
 
-	local answers, err, errcode = parse_response(q, buf, len)
+	local answers, err = parse_response(q, buf, len)
 
 	if not answers and err == 'truncated' then
-		answers, err, errcode = tcp_query(rs, ns, q)
+		answers, err = tcp_query(rs, ns, q)
 	end
 
-	return answers, err, errcode
+	return answers, err
 end
 local ns_query = protect(ns_query)
 
@@ -519,14 +519,14 @@ local function schedule(rs, ns)
 			if not min_expires then
 				break
 			end
-			local len, err, errcode = ns.udp:recv(buf, sz, min_expires)
-			rs:dbg(ns, nil, 'RECV', len, err or '', errcode or '')
+			local len, err = ns.udp:recv(buf, sz, min_expires)
+			rs:dbg(ns, nil, 'RECV', len, err)
 			if not len then
 				for qid, q in pairs(ns.queue) do
 					if not q.lost then
 						q.lost = true
-						rs:dbgt(ns, q, 'ERROR', err, errcode)
-						respond(q, nil, err, errcode)
+						rs:dbgt(ns, q, 'ERROR', err)
+						respond(q, nil, err)
 					end
 				end
 			else
@@ -568,14 +568,14 @@ function resolver(opt)
 	rs.nst = {}
 	for i,ns in ipairs(rs.servers) do
 		local host, port, tcp_only
-		if type(ns) == 'table' then
+		if istab(ns) then
 			host = ns.host or ns[1]
 			port = ns.port or ns[2] or 53
 			tcp_only = ns.tcp_only
 		else
 			host, port = ns, 53
 		end
-		local ai = assert(sockaddr(host, port))
+		local ai = assert(getaddrinfo(host, port))
 		local udp = assert(udp())
 		assert(udp:connect(ai))
 		local ns = {ai = ai, udp = udp, tcp_only = tcp_only, queue = {}}
@@ -592,8 +592,8 @@ function resolver(opt)
 	return rs
 end
 
-local function rs_query(rs, qname, qtype, timeout)
-	local t = type(qname) == 'table' and qname or nil
+function rs.query(rs, qname, qtype, timeout)
+	local t = istab(qname) and qname or nil
 	if t then
 		qname, qtype, timeout = t.name, t.type, t.timeout
 	end
@@ -601,20 +601,20 @@ local function rs_query(rs, qname, qtype, timeout)
 	rs:dbg(nil, {name = qname}, 'LOOKUP')
 	local key = qtype..' '..qname
 	local res = rs.cache:get(key)
-	if res and rs.time() > res.expires then
+	if res and now() > res.expires then
 		rs.cache:remove_val(res)
 		res = nil
 	end
 	if res then
 		return res
 	end
-	local lookup_thread = rs.currentthread()
+	local lookup_thread = currentthread()
 	local queries_left = #rs.nst
 	for i,ns in ipairs(rs.nst) do
-		rs.resume(rs.thread(function()
+		resume(thread(function()
 			local t = update({name = qname, type = qtype, timeout = timeout}, t)
 			local q = object(q, t)
-			local res, err, errcode = ns_query(rs, ns, q) --suspends inside the first send().
+			local res, err = ns_query(rs, ns, q) --suspends inside the first send().
 			queries_left = queries_left - 1
 			if not lookup_thread then
 				rs:dbg(ns, q, 'DISCARD (late)')
@@ -627,24 +627,24 @@ local function rs_query(rs, qname, qtype, timeout)
 			local lt = lookup_thread
 			lookup_thread = nil
 			if not res then
-				rs:dbgr(ns, q, lt, nil, err, errcode)
-				rs.resume(lt, nil, err, errcode)
+				rs:dbgr(ns, q, lt, nil, err)
+				resume(lt, nil, err)
 			else
 				local min_ttl = 1/0
 				for _,answer in ipairs(res) do
 					min_ttl = min(min_ttl, answer.ttl)
 				end
-				res.expires = rs.time() + min_ttl
+				res.expires = now() + min_ttl
 				rs.cache:put(key, res)
 				rs:dbgr(ns, q, lt, '{...}')
-				rs.resume(lt, res)
+				resume(lt, res)
 			end
 		end, rs.debug and 'N'..i..'-'..threadname()))
 	end
 	rs:dbgs()
 	return suspend() -- the first thread to finish will resume us.
 end
-rs.query = protect(rs_query)
+rs.try_query = protect(rs.query)
 
 local function hex4(s)
 	return ('%04x'):format(tonumber(s, 16))
@@ -668,29 +668,37 @@ local function arpa_str(s)
 	end
 end
 
-local function filter_answers(type, key, ret, ...)
+local function filter_answers(type, ret, ...)
 	if not ret then return ret, ... end
 	local t = {}
 	for i,ans in ipairs(ret) do
 		if ans.type == type then
-			table.insert(t, ans[key])
+			table.insert(t, ans[type:lower()])
 		end
 	end
 	return t
 end
 
+function rs:try_lookup(name, type, timeout)
+	return filter_answers(type, self:try_query(name, type, timeout))
+end
 function rs:lookup(name, type, timeout)
 	type = type or 'A'
-	return filter_answers(type, type:lower(), self:query(name, type, timeout))
+	return filter_answers(type, self:query(name, type, timeout))
 end
 
+function rs:try_reverse_lookup(addr, timeout)
+	local s = arpa_str(addr)
+	if not s then return nil, 'invalid address' end
+	return filter_answers('PTR', self:try_query(s, 'PTR', timeout))
+end
 function rs:reverse_lookup(addr, timeout)
 	local s = arpa_str(addr)
 	if not s then return nil, 'invalid address' end
-	return filter_answers('PTR', 'ptr', self:query(s, 'PTR', timeout))
+	return filter_answers('PTR', self:query(s, 'PTR', timeout))
 end
 
-function rs:resolve(host)
+local function static_resolve(self, host)
 	if host:find'^%d+%.%d+%.%d+%.%d$' then --ip4
 		return host
 	end
@@ -701,6 +709,15 @@ function rs:resolve(host)
 	if ip then
 		return ip
 	end
+end
+function rs:try_resolve(host)
+	local ip = static_resolve(self, host)
+	if ip then return ip end
+	return self:try_lookup(host)
+end
+function rs:resolve(host)
+	local ip = static_resolve(self, host)
+	if ip then return ip end
 	return self:lookup(host)
 end
 
@@ -710,8 +727,9 @@ local rs
 function resolve(host)
 	host = trim(host)
 	rs = rs or resolver{
-		hosts = config'hosts',
+		hosts   = config'hosts',
 		servers = config'ns',
+		debug   = config'resolver_debug',
 	}
 	local addrs, err = rs:resolve(host)
 	return addrs and addrs[1], err
@@ -723,7 +741,7 @@ if not ... then
 
 	randomseed(clock())
 
-	local r = assert(resolver{
+	local r = resolver{
 		servers = {
 			'127.0.0.1',
 			'10.0.0.1',
@@ -733,12 +751,12 @@ if not ... then
 			--{host = '8.8.4.4', port = 53},
 		},
 		--tcp_only = true,
-		debug = true,
-	})
+		--debug = true,
+	}
 
 	local function lookup(q)
 
-		local s = type(q) == 'string' and q or pp(q)
+		local s = isstr(q) and q or pp(q)
 
 		local answers, err = r:query(q)
 
@@ -747,7 +765,7 @@ if not ... then
 		else
 			for i, ans in ipairs(answers) do
 
-				print(format('%-16s %-16s type: %s  ttl: %3d',
+				print(format('%-30s %-30s %-8s  ttl: %6d',
 					ans.name,
 					ans.a or ans.cname,
 					ans.type,
@@ -756,10 +774,10 @@ if not ... then
 				if ans.a then
 					local names, err = r:reverse_lookup(ans.a)
 					if not names then
-						print('', format('%s: %s', s, err))
+						printf('R %-28s: %s', isstr(q) and q or q.name, err)
 					else
 						for i,name in ipairs(names) do
-							print('', ans.a, name)
+							printf('R %-28s %s', ans.a, name)
 						end
 					end
 				end
@@ -768,7 +786,10 @@ if not ... then
 	end
 
 	for i,s in ipairs{
-		--{name = 'luapower.com', tcp_only = false, timeout = 1},
+		{name = 'luapower.com', tcp_only = true, timeout = 1},
+		'luapower.com',
+		'luapower.com',
+		--'luapower.com',
 		{name = 'catcostaocasa.ro', timeout = 1},
 		{name = 'www.yahoo.com', timeout = 1},
  		'www.openresty.org',

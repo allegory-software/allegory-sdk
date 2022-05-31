@@ -6,7 +6,7 @@
 	Supports progressive loading, yielding from the reader function,
 	partial loading, fractional scaling and multiple pixel formats.
 
-	jpeg_open(opt | read) -> jpg      open a JPEG image for decoding
+	[try_]jpeg_open(opt|read) -> jpg  open a JPEG image for decoding
 	  read(buf, len) -> len|0|nil     read function (can yield)
 	  partial_loading                 load broken images partially (true)
 	  warning                         f(msg, level) for non-fatal errors
@@ -16,7 +16,7 @@
 	jpg.progressive                   JPEG file is progressive
 	jpg.jfif                          JFIF marker (see code)
 	jpg.adobe                         Adobe marker (see code)
-	jpg:load([opt]) -> bmp            load the image into a bitmap
+	jpg:[try_]load([opt]) -> bmp      load the image into a bitmap
 	  accept.FORMAT                   specify one or more accepted formats (*)
 	  accept.bottom_up                output bitmap should be upside-down (false).
 	  accept.stride_aligned           row stride should be a multiple of 4 (false).
@@ -31,12 +31,12 @@
 	  pixels of early progression stages for progressive JPEGs.
 	jpg.partial                       JPEG file is truncated (see after loading)
 	jpg:free()                        free the image
-	jpeg_save(opt)                    compress a bitmap into a JPEG image
+	[try_]jpeg_save(opt)              compress a bitmap into a JPEG image
 
 jpeg_open(opt | read) -> jpg
 
 	Open a JPEG image and read its header. The supplied read function can yield
-	and it can signal I/O errors by returning `nil, err` or by raising an error.
+	and it can signal I/O errors by returning `nil,err` or by raising an error.
 	It will only be asked to read a positive number of bytes and it can return
 	less bytes than asked, including zero which signals EOF.
 
@@ -47,7 +47,7 @@ jpeg_open(opt | read) -> jpg
 	decoding either for the same reason).
 
 	TIP: Wrap `tcp:read()` from sock.lua to read from a TCP socket.
-	TIP: Use `f:buffered_read()` from fs.lua to read from a file.
+	TIP: Use `f:*_reader()` from fs.lua to read from a file.
 
 jpg:load([opt]) -> bmp
 
@@ -66,7 +66,7 @@ For more info on the decoding process and options read the [libjpeg-turbo doc].
 
 NOTE: the number of bits per channel in the output bitmap is always 8.
 
-jpeg_save(opt)
+[try_]jpeg_save(opt)
 
 	Encode a bitmap as JPEG. `opt` is a table containing at least
 	the source bitmap and an output write function, and possibly other options:
@@ -159,7 +159,7 @@ local function callback_manager(mgr_ctype, callbacks)
 	local mgr = new(mgr_ctype)
 	local cbt = {}
 	for k,f in pairs(callbacks) do
-		if type(f) == 'function' then
+		if isfunc(f) then
 			cbt[k] = cast(format('jpeg_%s_callback', k), f)
 			mgr[k] = cbt[k]
 		else
@@ -265,10 +265,15 @@ local function jpeg_finish_decompress(cinfo)
 end
 jit.off(jpeg_finish_decompress)
 
-function jpeg_open(opt)
+local function check(ret, err)
+	if ret then return ret end
+	raise('jpeg', '%s', err)
+end
+
+function try_jpeg_open(opt)
 
 	--normalize args
-	if type(opt) == 'function' then
+	if isfunc(opt) then
 		opt = {read = opt}
 	end
 	local read = assert(opt.read, 'read expected')
@@ -325,8 +330,8 @@ function jpeg_open(opt)
 	local function fill_input_buffer()
 		while bytes_to_skip > 0 do
 			local sz = math.min(skip_buf_sz, bytes_to_skip)
-			local readsz = assert(read(skip_buf, sz))
-			assert(readsz > 0, 'eof')
+			local readsz = check(read(skip_buf, sz))
+			check(readsz > 0, 'eof')
 			bytes_to_skip = bytes_to_skip - readsz
 		end
 		local ofs = tonumber(cinfo.src.bytes_in_buffer)
@@ -336,12 +341,12 @@ function jpeg_open(opt)
 		cinfo.src.next_input_byte = buf
 		--fill the rest of the buffer
 		local sz = sz - ofs
-		assert(sz > 0, 'buffer too small')
-		local readsz = assert(read(buf + ofs, sz))
+		check(sz > 0, 'buffer too small')
+		local readsz = check(read(buf + ofs, sz))
 		if readsz == 0 then --eof
-			assert(partial_loading, 'eof')
+			check(partial_loading, 'eof')
 			readsz = #JPEG_EOI
-			assert(readsz <= sz, 'buffer too small')
+			check(readsz <= sz, 'buffer too small')
 			copy(buf + ofs, JPEG_EOI)
 			img.partial = true
 		end
@@ -403,24 +408,25 @@ function jpeg_open(opt)
 	local ok, err = pcall(load_header)
 	if not ok then
 		free()
+		assert(iserror(err, 'jpeg'), err)
 		return nil, err
 	end
 
-	local function load_image(img, opt)
+	function img.load(img, opt)
 		opt = opt or empty
 		local bmp = {}
 		--find the best accepted output pixel format
-		assert(img.format, 'invalid pixel format')
-		assert(cinfo.num_components == channel_count[img.format])
+		check(img.format, 'invalid pixel format')
+		check(cinfo.num_components == channel_count[img.format])
 		bmp.format = best_format(img.format, opt.accept)
 
 		--set decompression options
-		cinfo.out_color_space = assert(color_spaces[bmp.format])
+		cinfo.out_color_space = check(color_spaces[bmp.format])
 		cinfo.output_components = channel_count[bmp.format]
 		cinfo.scale_num   = opt.scale_num or 1
 		cinfo.scale_denom = opt.scale_denom or 1
 		local dct_method = dct_methods[opt.dct_method or 'accurate']
-		cinfo.dct_method = assert(dct_method, 'invalid dct_method')
+		cinfo.dct_method = check(dct_method, 'invalid dct_method')
 		cinfo.do_fancy_upsampling = opt.fancy_upsampling or false
 		cinfo.do_block_smoothing  = opt.block_smoothing or false
 		cinfo.buffered_image = 1 --multi-scan reading
@@ -491,13 +497,13 @@ function jpeg_open(opt)
 
 		return bmp
 	end
-
-	img.load = protect(load_image)
+	img.try_load = protect('jpeg', img.load)
 
 	return img
 end
+jpeg_open = protect('jpeg', try_jpeg_open)
 
-function jpeg_save(opt)
+function try_jpeg_save(opt)
 	return fpcall(function(finally)
 
 		--create the state object
@@ -533,12 +539,12 @@ function jpeg_save(opt)
 		end
 
 		function cb.term_destination(cinfo)
-			assert(write(buf, sz - tonumber(cinfo.dest.free_in_buffer)))
+			check(write(buf, sz - tonumber(cinfo.dest.free_in_buffer)))
 			finish()
 		end
 
 		function cb.empty_output_buffer(cinfo)
-			assert(write(buf, sz))
+			check(write(buf, sz))
 			cb.init_destination(cinfo)
 			return true
 		end
@@ -552,9 +558,9 @@ function jpeg_save(opt)
 		cinfo.image_width  = opt.bitmap.w
 		cinfo.image_height = opt.bitmap.h
 		cinfo.in_color_space =
-			assert(color_spaces[opt.bitmap.format], 'invalid source format')
+			check(color_spaces[opt.bitmap.format], 'invalid source format')
 		cinfo.input_components =
-			assert(channel_count[opt.bitmap.format], 'invalid source format')
+			check(channel_count[opt.bitmap.format], 'invalid source format')
 
 		--set the default compression options based on in_color_space
 		C.jpeg_set_defaults(cinfo)
@@ -562,7 +568,7 @@ function jpeg_save(opt)
 		--set compression options
 		if opt.format then
 			C.jpeg_set_colorspace(cinfo,
-				assert(color_spaces[opt.format], 'invalid destination format'))
+				check(color_spaces[opt.format], 'invalid destination format'))
 		end
 		if opt.quality then
 			C.jpeg_set_quality(cinfo, opt.quality, true)
@@ -572,7 +578,7 @@ function jpeg_save(opt)
 		end
 		if opt.dct_method then
 			cinfo.dct_method =
-				assert(dct_methods[opt.dct_method], 'invalid dct_method')
+				check(dct_methods[opt.dct_method], 'invalid dct_method')
 		end
 		if opt.optimize_coding then
 			cinfo.optimize_coding = opt.optimize_coding
@@ -596,4 +602,9 @@ function jpeg_save(opt)
 
 	end)
 end
-jit.off(jpeg_save, true)
+jit.off(try_jpeg_save, true)
+
+function jpeg_save(...)
+	return assert(try_jpeg_save(...))
+end
+

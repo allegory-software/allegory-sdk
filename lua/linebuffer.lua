@@ -15,6 +15,8 @@ local ffi  = require'ffi'
 local min  = math.min
 local byte = string.byte
 local u8a  = ffi.typeof'char[?]'
+local copy = ffi.copy
+local str  = ffi.string
 
 --Based on `read(buf, maxsz) -> sz`, create the API:
 --  `readline() -> s`
@@ -61,7 +63,7 @@ function linebuffer(read, term, sz)
 			if i == 0 then --buffer full.
 				return nil, 'line too long'
 			else --move data to make space at the end.
-				ffi.copy(buf, buf + i, j - i)
+				copy(buf, buf + i, j - i)
 				i, j = 0, j - i
 			end
 		end
@@ -81,7 +83,7 @@ function linebuffer(read, term, sz)
 		while true do
 			local found, line_j, next_i = find_term(buf, i + n, j)
 			if found then
-				local s = ffi.string(buf + i, line_j - i)
+				local s = str(buf + i, line_j - i)
 				i = next_i
 				return s
 			else

@@ -719,15 +719,15 @@ end
 --bitmap objects
 
 local function valid_colortype(colortype)
-	return type(colortype) == 'string'
-				and assert(colortypes[colortype], 'invalid colortype') --standard colortype
-				or assert(colortype, 'colortype missing') --custom colortype
+	return isstr(colortype)
+		and assert(colortypes[colortype], 'invalid colortype') --standard colortype
+		or assert(colortype, 'colortype missing') --custom colortype
 end
 
 local function valid_format(format)
-	return type(format) == 'string'
-				and assert(formats[format], 'invalid format') --standard format
-				or assert(format, 'format missing') --custom format
+	return isstr(format)
+		and assert(formats[format], 'invalid format') --standard format
+		or assert(format, 'format missing') --custom format
 end
 
 --next address that is multiple of `align` bytes
@@ -739,7 +739,7 @@ local function aligned_address(addr, align)
 	end
 	assert(align >= 2)
 	assert(band(align, align - 1) == 0) --must be power-of-two
-	if ffi.istype('uint64_t', addr) then
+	if istype('uint64_t', addr) then
 		align = cast('uint64_t', align) --so that bnot() works
 	end
 	return band(addr + align - 1, bnot(align - 1)), align
@@ -782,12 +782,12 @@ function bitmap_row_size(bmp) --can be fractional
 end
 
 function bitmap_format(bmp)
-	return valid_format(type(bmp) == 'string' and bmp or bmp.format)
+	return valid_format(isstr(bmp) and bmp or bmp.format)
 end
 
 function bitmap_colortype(bmp)
-	return valid_colortype(type(bmp) == 'string' and bmp
-			or valid_format(bmp.format).colortype)
+	return valid_colortype(isstr(bmp) and bmp
+		or valid_format(bmp.format).colortype)
 end
 
 function bitmap(w, h, format, bottom_up, align, stride, alloc)
@@ -795,7 +795,7 @@ function bitmap(w, h, format, bottom_up, align, stride, alloc)
 	local size = ceil(stride * h)
 	assert(size > 0, 'invalid size')
 	local _size = size + (align - 1)
-	local _data = alloc and alloc(_size) or ffi.new(typeof('char[$]', _size))
+	local _data = alloc and alloc(_size) or new(typeof('char[$]', _size))
 	local data = aligned_pointer(_data, align)
 	return {w = w, h = h, format = format, bottom_up = bottom_up or nil,
 		stride = stride, data = data, _data = _data, size = size,
@@ -876,7 +876,7 @@ end
 --create a bitmap representing a rectangular region of another bitmap.
 --no pixels are copied: the bitmap references the same data buffer as the original.
 function bitmap_sub(bmp, x, y, w, h)
-	x, y, w, h = box2d.clip(x or 0, y or 0, w or 1/0, h or 1/0, 0, 0, bmp.w, bmp.h)
+	x, y, w, h = rect_clip(x or 0, y or 0, w or 1/0, h or 1/0, 0, 0, bmp.w, bmp.h)
 	if w == 0 or h == 0 then return end --can't have bitmaps in 1 or 0 dimensions
 	local format, data, stride, pixelsize = data_interface(bmp)
 	if bmp.bottom_up then
@@ -916,7 +916,7 @@ function bitmap_paint(dst, src, dstx, dsty, convert_pixel, src_colortype, dst_co
 	dstx = dstx or 0
 	dsty = dsty or 0
 	if dstx ~= 0 or dsty ~= 0 or src.w ~= dst.w or src.h ~= dst.h then
-		local x, y, w, h = box2d.clip(dstx, dsty, dst.w-dstx, dst.h-dsty, dstx, dsty, src.w, src.h)
+		local x, y, w, h = rect_clip(dstx, dsty, dst.w-dstx, dst.h-dsty, dstx, dsty, src.w, src.h)
 		if w == 0 or h == 0 then return end
 		src = bitmap_sub(src, 0, 0, w, h)
 		dst = bitmap_sub(dst, x, y, w, h)
@@ -937,7 +937,7 @@ function bitmap_paint(dst, src, dstx, dsty, convert_pixel, src_colortype, dst_co
 	then
 		if src.data ~= dst.data then
 			assert(dst.size >= src.size)
-			ffi.copy(dst.data, src.data, src.size)
+			copy(dst.data, src.data, src.size)
 		end
 		return dst
 	end
@@ -963,7 +963,7 @@ function bitmap_paint(dst, src, dstx, dsty, convert_pixel, src_colortype, dst_co
 		and src_rowsize == floor(src_rowsize) --can't copy fractional row sizes
 	then
 		for sj = 0, (src.h - 1) * src_stride, src_stride do
-			ffi.copy(dst_data + dj, src_data + sj, src_rowsize)
+			copy(dst_data + dj, src_data + sj, src_rowsize)
 			dj = dj + dst_stride
 		end
 		return dst
@@ -1011,7 +1011,7 @@ function bitmap_copy(src, format, bottom_up, align, stride)
 end
 
 function bitmap_clear(bmp, c)
-	ffi.fill(bmp.data, bmp.h * bmp.stride, c)
+	fill(bmp.data, bmp.h * bmp.stride, c)
 end
 
 --reflection

@@ -44,7 +44,7 @@ local server = {
 
 function server:log(tcp, severity, module, event, fmt, ...)
 	if not logging or logging.filter[severity] then return end
-	local s = type(fmt) == 'string' and _(fmt, logargs(...)) or fmt or ''
+	local s = isstr(fmt) and _(fmt, logargs(...)) or fmt or ''
 	log(severity, module, event, '%-4s %s', tcp, s)
 end
 

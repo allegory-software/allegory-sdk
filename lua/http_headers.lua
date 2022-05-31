@@ -665,7 +665,7 @@ end
 --{k->true} -> k1,k2,...
 local function klist(t, format)
 	format = format or pass
-	if type(t) == 'table' then
+	if istab(t) then
 		local dt = {}
 		for k,v in pairs(t) do
 			if v then
@@ -688,7 +688,7 @@ end
 --{v1,v2,...} -> v1,v2,...
 local function list(t, format)
 	format = format or pass
-	if type(t) == 'table' then
+	if istab(t) then
 		local dt = {}
 		for i,v in ipairs(t) do
 			dt[#dt+1] = format(v)
@@ -717,7 +717,7 @@ end
 --{name,k1=v1,...} -> name[; k1=v1 ...]
 local function params(attrs)
 	return function(s)
-		if type(s) == 'table' then
+		if istab(s) then
 			local t = {assert(s[1])}
 			for k,v in pairs(s) do
 				if k ~= 1 then
@@ -777,7 +777,7 @@ local format_cookie_attr = {
 function format.set_cookie(t)
 	local dt = {}
 	for k,c in pairs(t) do
-		if type(c) == 'string' then
+		if isstr(c) then
 			c = {value = c, attrs = {}}
 		end
 		assert(token(k), 'invalid cookie name')
@@ -872,7 +872,7 @@ format.x_powered_by = nil --PHP/5.2.1
 
 function headers.format_header(k, v)
 	local k = k:lower()
-	if type(v) ~= 'string' then --strings pass-through unchanged.
+	if not isstr(v) then --strings pass-through unchanged.
 		local f = format[k:gsub('-', '_')]
 		if f then v = f(v) end
 	end

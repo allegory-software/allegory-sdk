@@ -41,7 +41,7 @@ local function test(filename, correct_result, parameters)
       local data = f:read("*a")
       f:close()
 
-      f = csv_openstring(data, parameters)
+      f = csv_open_string(data, parameters)
       testhandle(f, correct_result)
     end
   end

@@ -3,13 +3,13 @@
 	PNG encoding and decoding with libspng (not yieldable).
 	Written by Cosmin Apreutesei. Public Domain.
 
-	png_open(opt | read) -> png    open a PNG image for decoding
+	[try_]png_open(opt|read) -> png    open a PNG image for decoding
 	  read(buf, len) -> len|0|nil  the read function (can't yield)
 	png.format, png.w, png.h       PNG file native format and dimensions
 	png.interlaced                 PNG file is interlaced
 	png.indexed                    PNG file is palette-based
 
-	png:load([opt]) -> bmp         load the image into a bitmap
+	png:[try_]load([opt]) -> bmp       load the image into a bitmap
 	  opt.accept            : {FORMAT->true}
 	    FORMAT: bgra8, rgba8, rgba16, rgb8, g8, ga8, ga16.
 	  opt.bottom_up         : bottom-up bitmap (false).
@@ -19,9 +19,9 @@
 
 	png:free()                     free the image
 
-	png_save(opt)                  encode a bitmap into a PNG image
+	[try_]png_save(opt)            encode a bitmap into a PNG image
 
-png_open(opt) -> png
+[try_]png_open(opt) -> png
 
 	Open a PNG image and read its header. The supplied read function cannot
 	yield and must signal I/O errors by returning `nil`. It will only be asked
@@ -29,9 +29,9 @@ png_open(opt) -> png
 	including zero which signals EOF.
 
 	TIP: Use `tcp:recvall_read()` from sock.lua to read from a TCP socket.
-	TIP: Use `f:buffered_read()` from fs.lua to read from a file.
+	TIP: Use `f:*_reader()` from fs.lua to read from a file.
 
-png:load(opt) -> bmp
+png:[try_]load(opt) -> bmp
 
 	If no `accept` option is given or no conversion is possible, the image
 	is returned in the native format, transparency not decoded, gamma not
@@ -45,7 +45,7 @@ png:load(opt) -> bmp
 		* standard bitmap fields: format, bottom_up, stride, data, size, w, h.
 		* partial: image wasn't fully read (read_error contains the error).
 
-png_save(opt)
+[try_]png_save(opt)
 
 	Encode a bitmap as PNG. `opt` is a table containing at least the source
 	bitmap and an output write function, and possibly other options:
@@ -62,7 +62,6 @@ png_save(opt)
 if not ... then require'png_test'; return end
 
 require'glue'
-
 require'libspng_h'
 local C = ffi.load'spng'
 
@@ -197,9 +196,9 @@ local premultiply_funcs = {
 	ga16   = C.spng_premultiply_alpha_ga16,
 }
 
-function png_open(opt)
+function try_png_open(opt)
 
-	if type(opt) == 'function' then
+	if isfunc(opt) then
 		opt = {read = opt}
 	end
 	local read = assert(opt.read, 'read expected')
@@ -267,13 +266,13 @@ function png_open(opt)
 	img.indexed = ihdr.color_type == C.SPNG_COLOR_TYPE_INDEXED or nil
 	ihdr = nil
 
-	function img:load(opt)
+	function img:try_load(opt)
 
 		local gamma = opt and opt.gamma
 		local accept = opt and opt.accept
 		local bmp_fmt, spng_fmt = best_fmt(img.format, accept, gamma)
 
-		local nb = ffi.new'size_t[1]'
+		local nb = new'size_t[1]'
 		local ok, err = check(C.spng_decoded_image_size(ctx, spng_fmt, nb))
 		if not ok then
 			return nil, err
@@ -296,7 +295,7 @@ function png_open(opt)
 		)
 		C.spng_decode_image(ctx, nil, 0, spng_fmt, flags)
 
-		local row_info = ffi.new'struct spng_row_info'
+		local row_info = new'struct spng_row_info'
 		local bottom_up = opt and opt.accept and opt.accept.bottom_up
 		bmp.bottom_up = bottom_up
 		local row_sz = bmp.size / bmp.h
@@ -333,9 +332,17 @@ function png_open(opt)
 	end
 	jit.off(img.load) --calls back into Lua through a ffi call.
 
+	function img:load(...)
+		return self:try_load(...)
+	end
+
 	return img
 end
-jit.off(png_open) --calls back into Lua through a ffi call.
+jit.off(try_png_open) --calls back into Lua through a ffi call.
+
+function png_open(...)
+	return assert(try_png_open(...))
+end
 
 local function struct_setter(ct, set) --setter for a struct type
 	local ct = typeof(ct)
@@ -398,7 +405,7 @@ local color_types = {
 	i8     = C.SPNG_COLOR_TYPE_INDEXED,
 }
 
-function png_save(opt)
+function try_png_save(opt)
 
 	local bmp = assert(opt and opt.bitmap, 'bitmap expected')
 	local write = assert(opt and opt.write, 'write expected')
@@ -461,7 +468,7 @@ function png_save(opt)
 	local data = bmp.data
 	if bmp.format == 'bgra8' then
 		data = u8a(bmp.size)
-		ffi.copy(data, bmp.data, bmp.size)
+		copy(data, bmp.data, bmp.size)
 		C.spng_rgba8_to_bgra8(data, bmp.size)
 	end
 
@@ -474,4 +481,8 @@ function png_save(opt)
 
 	return true
 end
-jit.off(png_save) --calls back into Lua through a ffi call.
+jit.off(try_png_save) --calls back into Lua through a ffi call.
+
+function png_save(...)
+	return assert(try_png_save(...))
+end

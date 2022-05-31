@@ -37,7 +37,7 @@ PROTOCOL
 
 require'glue'
 require'sock'
-local buffer = require'string.buffer'
+local string_buffer = require'string.buffer'.new
 
 local
 	cast, u32p =
@@ -51,7 +51,7 @@ function mess_protocol(tcp)
 
 	local chan = update({tcp = tcp}, channel)
 
-	local buf = buffer.new()
+	local buf = string_buffer()
 	chan.send = protect(function(self, msg, exp)
 		buf:reset()
 		buf:reserve(4)
@@ -63,7 +63,7 @@ function mess_protocol(tcp)
 		return true
 	end)
 
-	local buf = buffer.new()
+	local buf = string_buffer()
 	chan.recv = protect(function(self)
 		buf:reset()
 		local plen = buf:reserve(4)
@@ -181,9 +181,9 @@ if not ... then
 
 		local server = mess_listen('127.0.0.1', '1234', function(self, chan)
 			chan:recvall(function(self, msg)
-				pr('recv', msg)
+				assert(self:send(msg))
 			end)
-			chan:close()
+			assert(chan:close())
 			self:stop()
 		end)
 
@@ -193,9 +193,11 @@ if not ... then
 
 		local chan = mess_connect('127.0.0.1', '1234', clock() + 1)
 		for i = 1, 20 do
-			assert(chan:send{a = i, b = 2*i, i = tostring(i)})
+			assert(chan:send{a = i, b = 2*i, s = tostring(i)})
+			local _, t = assert(chan:recv())
+			pr(t)
 		end
-		chan:close()
+		assert(chan:close())
 
 	end))
 

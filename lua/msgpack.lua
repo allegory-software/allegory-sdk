@@ -65,9 +65,11 @@ if not ... then require'msgpack_test'; return end
 require'glue'
 
 local
-	bor, band, shr, floor, noop, repl, update, dynarray =
-	bor, band, shr, floor, noop, repl, update, dynarray
-
+	type, bor, band, shr, floor, noop, repl, update, dynarray =
+	type, bor, band, shr, floor, noop, repl, update, dynarray
+local
+	istype, copy, cast, ffi_string =
+	istype, copy, cast, ffi.string
 local
 	u32, i64, u64, u8a, i8p, u8p, i16p, u16p, i32p, u32p, i64p, u64p, f32p, f64p =
 	u32, i64, u64, u8a, i8p, u8p, i16p, u16p, i32p, u32p, i64p, u64p, f32p, f64p
@@ -82,7 +84,6 @@ mp.decode_u64 = tonumber --stub
 mp.error = error --stub
 
 function msgpack(self)
-	assert(self ~= mp)
 	return update(self or {}, mp)
 end
 
@@ -118,7 +119,7 @@ end
 
 local function str(self, p, n, i, len)
 	if i + len > n then self.error'short read' end
-	return i + len, ffi.string(p + i, len)
+	return i + len, ffi_string(p + i, len)
 end
 
 local function ext(self, p, n, i, len)
@@ -340,12 +341,12 @@ function mp:encoding_buffer(min_size)
 				cast(u64p, p+i+1)[0] = v
 				rev8(p, i+1)
 			end
-		elseif ffi.istype(i64, v) then
+		elseif istype(i64, v) then
 			local p, i = b(9)
 			p[i] = 0xd3
 			cast(i64p, p+i+1)[0] = v
 			rev8(p, i+1)
-		elseif ffi.istype(u64, v) then
+		elseif istype(u64, v) then
 			local p, i = b(9)
 			p[i] = 0xcf
 			cast(u64p, p+i+1)[0] = v
@@ -373,7 +374,7 @@ function mp:encoding_buffer(min_size)
 		local n = n or #v
 		encode_len(n, 0xc4, 0xc5, 0xc6)
 		local p, i = b(n)
-		ffi.copy(p + i, v, n)
+		copy(p + i, v, n)
 		return self
 	end
 	function buf:encode_ext(typ, n)
@@ -457,14 +458,14 @@ function mp:encoding_buffer(min_size)
 				encode_len(#v, 0xd9, 0xda, 0xdb)
 			end
 			local p, i = b(#v)
-			ffi.copy(p + i, v, #v)
+			copy(p + i, v, #v)
 		elseif type(v) == 'table' then
 			if mp:isarray(v) then
 				self:encode_array(v)
 			else
 				self:encode_map(v)
 			end
-		elseif ffi.istype(i64, v) or ffi.istype(u64, v) then
+		elseif istype(i64, v) or istype(u64, v) then
 			self:encode_int(v)
 		else
 			error('invalid type '..type(v))
@@ -478,7 +479,7 @@ function mp:encoding_buffer(min_size)
 		return arr(n)
 	end
 	function buf:tostring()
-		return ffi.string(arr(n))
+		return ffi_string(arr(n))
 	end
 	function buf:reset()
 		n = 0

@@ -8,11 +8,6 @@
 	img:bitmap() -> bmp           get the image as a bitmap with bmp:free()
 	img:free()                    free the image
 
-HI-LEVEL API
-
-	resize_image(src_path, dst_path, max_w, max_h)
-
-
 ]=]
 
 local ffi = require'ffi'

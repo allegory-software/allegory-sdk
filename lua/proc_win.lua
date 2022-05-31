@@ -38,7 +38,7 @@ local error_classes = {
 
 function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
-	if type(cmd) == 'table' then
+	if istab(cmd) then
 		local t = {}
 		t[1] = quote_path_win(cmd[1])
 		for i = 2, cmd.n or #cmd do

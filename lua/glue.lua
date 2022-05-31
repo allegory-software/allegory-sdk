@@ -8,10 +8,12 @@ TYPES
 	isnum(v)                       is v a number
 	isint(v)                       is v an integer (includes 1/0 and -1/0)
 	istab(v)                       is v a table
+	isbool(v)                      is v a boolean
 	isarray(v)                     is v a table with only array elements
 	isempty(v)                     is v a table and is it empty
 	isfunc(v)                      is v a function
 	iscdata(v)                     is v a cdata
+	istype(v, ctype)             = ffi.istype
 	iserror(v[, classes])          is v a structured error
 MATH
 	floor                        = math.floor
@@ -182,7 +184,7 @@ MODULES
 LUA ALLOCATION
 	freelist([create], [destroy]) -> alloc,free   freelist allocation pattern
 INTERPRETER
-	eval(s) -> ...               = loadstring('return '..s)
+	[p]eval(s) -> ...            = loadstring('return '..s)
 BITS
 	bit                          = require'bit'
 	bnot                         = bit.bnot
@@ -202,11 +204,14 @@ FFI
 	new                          = ffi.new
 	cast                         = ffi.cast
 	sizeof                       = ffi.sizeof
+	offsetof                     = ffi.offsetof
 	typeof                       = ffi.typeof
 	copy                         = ffi.copy
 	fill                         = ffi.fill
 	gc                           = ffi.gc
 	metatype                     = ffi.metatype
+	istype                       = ffi.istype
+	errno                        = ffi.errno
 	str(buf, len)                = ffi.string(buf, len) if buf is not null
 	ptr(p)                       = p ~= nil and p  or nil
 	ptr_encode(p) -> n|s           store pointer address in Lua value
@@ -237,6 +242,7 @@ DEBUGGING
    trace()                        print current stack trace to stderr
 	pr(...)                        print to stderr with logprintargs
 LOGGING
+	see logging.lua
 
 ]=]
 
@@ -275,6 +281,7 @@ isstr    = function(v) return type(v) == 'string' end
 isnum    = function(v) return type(v) == 'number' end
 isint    = function(v) return type(v) == 'number' and floor(v) == v end
 istab    = function(v) return type(v) == 'table'  end
+isbool   = function(v) return v == true or v == false end
 isarray  = require'table.isarray'
 isempty  = require'table.isempty'
 isfunc   = function(v) return type(v) == 'function' end
@@ -1777,7 +1784,7 @@ local function class_table(s)
 		if not t then
 			t = {}
 			class_sets[s] = t
-			for s in s:gmatch'[^%s,]+' do
+			for s in words(s) do
 				local class = classes[s]
 				while class do
 					t[class] = true
@@ -1794,7 +1801,8 @@ end
 
 local function iserror(e, classes)
 	local mt = getmetatable(e)
-	if not (type(mt) == 'table' and rawget(mt, 'iserror')) then return false end
+	if type(mt) ~= 'table' then return false end
+	if not rawget(mt, 'iserror') then return false end
 	if not classes then return true end
 	return class_table(classes)[e.__index] or false
 end
@@ -1844,7 +1852,7 @@ end
 local function cont(classes, ok, ...)
 	if ok then return true, ... end
 	local e = ...
-	if iserror(e, classes) then
+	if not classes or iserror(e, classes) then
 		return false, e
 	end
 	lua_error(e, 3)
@@ -1886,7 +1894,7 @@ function check(errorclass, event, v, ...)
 	assert(type(event) == 'string')
 	local e = newerror(errorclass, ...)
 	if not e.logged then
-		log('error', e.classname, event, '%s', e.message)
+		log('ERROR', e.classname, event, '%s', e.message)
 		e.logged = true --prevent duplicate logging of the error on a catch-all handler.
 	end
 	raise(e)
@@ -2140,6 +2148,12 @@ function eval(s, ...)
 	return f(...)
 end
 
+function peval(s, ...)
+	local f, err = loadstring('return '..s)
+	if not f then return false, err end
+	return pcall(f, ...)
+end
+
 --bits -----------------------------------------------------------------------
 
 bnot = bit.bnot
@@ -2236,18 +2250,21 @@ cdef   = ffi.cdef
 new    = ffi.new
 cast   = ffi.cast
 sizeof = ffi.sizeof
+offsetof = ffi.offsetof
 typeof = ffi.typeof
 copy   = ffi.copy
 fill   = ffi.fill
 gc     = ffi.gc
 metatype = ffi.metatype
+istype = ffi.istype
+errno  = ffi.errno
 _G.str = str
 _G[ffi.os] = true
 win    = Windows
 
 local
-	cast, typeof =
-	cast, typeof
+	C, cast, copy, typeof =
+	C, cast, copy, typeof
 
 i8p = typeof'int8_t*'
 i8a = typeof'int8_t[?]'
@@ -2289,14 +2306,14 @@ void* realloc (void* ptr, size_t size);
 void  free    (void* ptr);
 ]]
 
-function ptr(p) --convert nulls to nil so that `if not p` works.
+local function ptr(p) --convert nulls to nil so that `if not p` works.
 	return p ~= nil and p or nil
 end
 
 local ptr = ptr
-function malloc(size) return ptr(ffi.C.malloc(size)) end
-function realloc(p, size) return ptr(ffi.C.realloc(p, size)) end
-free = ffi.C.free
+function malloc(size) return ptr(C.malloc(size)) end
+function realloc(p, size) return ptr(C.realloc(p, size)) end
+free = C.free
 
 --[[
 auto-growing buffer allocation pattern.
@@ -2304,12 +2321,13 @@ auto-growing buffer allocation pattern.
 - the buffer only grows in powers-of-two steps.
 - alloc() returns the buffer's current capacity which can be equal or
   greater than the requested length.
-- the returned buffer is pinned by the allocation function. call alloc(false)
-  to unpin the buffer.
+- the returned buffer is referenced by the allocation function. call
+  alloc(false) to let it loose.
 - the contents of the buffer are not preserved between allocations but you
   are allowed to access both buffers between two consecutive allocations
   in order to copy the contents to the new buffer yourself.
 ]]
+local nextpow2 = nextpow2
 function buffer(ctype)
 	local vla = typeof(ctype or u8a)
 	local buf, len = nil, -1
@@ -2324,7 +2342,7 @@ function buffer(ctype)
 	end
 end
 
---like buffer() but preserves data on reallocations
+--like buffer() but preserves data on reallocations.
 --also returns minlen instead of capacity.
 function dynarray(ctype, min_capacity)
 	ctype = ctype or u8a
@@ -2334,36 +2352,35 @@ function dynarray(ctype, min_capacity)
 	return function(minlen)
 		local buf, len = buffer(max(min_capacity or 0, minlen))
 		if buf ~= buf0 and buf ~= nil and buf0 ~= nil then
-			ffi.copy(buf, buf0, minlen0 * elem_size)
+			copy(buf, buf0, minlen0 * elem_size)
 		end
 		buf0, minlen0 = buf, minlen
 		return buf, minlen
 	end
 end
 
-local intptrptr = ffi.typeof'const intptr_t*'
-local intptr1 = ffi.typeof'intptr_t[1]'
-
 --convert a pointer's address to a Lua number or possibly string.
 --use case #1: hashing on pointer values i.e. using pointers as table keys.
 --use case #2: moving pointers in and out of Lua states when using luastate.lua.
+local intptr_a1 = typeof'intptr_t[1]'
 function ptr_encode(p)
 	local np = cast(intptr, cast(voidp, p))
    local n = tonumber(np)
 	if cast(intptr, n) ~= np then
 		--address too big (ASLR? tagged pointers?): convert to string.
-		return str(intptr1(np), 8)
+		return str(intptr_a1(np), 8)
 	end
 	return n
 end
 
 --convert a pointer address to a pointer, optionally specifying a ctype.
+local intptrp = typeof'const intptr_t*'
 function ptr_decode(ctype, addr)
 	if not addr then
 		ctype, addr = voidp, ctype
 	end
 	if type(addr) == 'string' then
-		return cast(ctype, cast(voidp, cast(intptrptr, addr)[0]))
+		return cast(ctype, cast(voidp, cast(intptrp, addr)[0]))
 	else
 		return cast(ctype, addr)
 	end
@@ -2378,7 +2395,7 @@ function dynarray_pump(dynarr)
 	local function write(src, len)
 		if src == nil then return end --eof
 		local dst = dynarr(i + len)
-		ffi.copy(dst + i, src, len or #src)
+		copy(dst + i, src, len or #src)
 		i = i + len
 		return len
 	end
@@ -2426,7 +2443,7 @@ function buffer_reader(p, n)
 		if p == nil then return p, n end
 		sz = min(n, sz)
 		if sz == 0 then return nil, 'eof' end
-		ffi.copy(buf, p, sz)
+		copy(buf, p, sz)
 		p = p + sz
 		n = n - sz
 		return sz
@@ -2481,6 +2498,7 @@ traceback = debug.traceback
 
 function trace()
 	io_stderr:write(traceback())
+	io_stderr:write'\n'
 	io_stderr:flush()
 end
 

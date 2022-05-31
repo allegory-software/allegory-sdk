@@ -56,7 +56,7 @@ local u8pa = typeof'char*[?]'
 
 local function check(ret, errno)
 	if ret then return ret end
-	if type(errno) == 'string' then return nil, errno end
+	if isstr(errno) then return nil, errno end
 	errno = errno or errno()
 	local s = error_classes[errno]
 	if s then return nil, s end
@@ -112,7 +112,7 @@ end
 function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 	local cmd, args
-	if type(t) == 'table' then
+	if istab(t) then
 		cmd = t[1]
 		if #t > 1 then
 			args = {}

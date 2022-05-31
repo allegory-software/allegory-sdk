@@ -90,7 +90,7 @@ z.aes = false
 z:add_all('tmp/minizip-test')
 z:close()
 
-assert(fs.remove('tmp/minizip-test', true))
+rm_rf'tmp/minizip-test'
 
 local z = zip_open('zip_test/test-aes2.zip', 'r', '321')
 
@@ -100,6 +100,6 @@ z:extract_all'tmp/minizip-test'
 
 z:close()
 
-assert(fs.remove('tmp/minizip-test', true))
-fs.remove'zip_test/test-aes2.zip'
-fs.remove'tmp'
+rm_rf'tmp/minizip-test'
+rmfile'zip_test/test-aes2.zip'
+rmdir'tmp'

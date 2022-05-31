@@ -9,7 +9,7 @@
 
 CONNECTING
 
-	mysql_connect(opt) -> ok | nil,err,[errcode],[sqlstate]
+	[try_]mysql_connect(opt) -> ok | nil,err,[errcode],[sqlstate]
 
 		host       : server's IP address (required).
 		port       : server's port (optional, defaults to 3306).
@@ -23,17 +23,17 @@ CONNECTING
 		ssl_verify : check server's SSL certificate (false).
 		to_lua     : value converter `f(v, col) -> v` (defaults to `mysql_to_lua`).
 
-	cn:close()         Close connection.
-	cn:closed()        Check if the connection was closed.
+	cn:[try_]close()   Close connection.
+	cn:[try_]closed()  Check if the connection was closed.
 	cn.server_ver      Get server version.
 
 QUERYING
 
-	cn:send_query(sql) -> bytes | nil,err
+	cn:[try_]send_query(sql) -> bytes | nil,err
 
 		Execute query. Must be followed by one or more calls to read_result().
 
-	cn:read_result([opt]) -> res,nil|'again',cols | nil,err,errcode,sqlstate
+	cn:[try_]read_result([opt]) -> res,nil|'again',cols | nil,err,errcode,sqlstate
 
 		Read in the next result returned from the server. 'again' signals
 		that more results are coming in which case read_result() must be called
@@ -51,26 +51,26 @@ QUERYING
 			a custom `mysql_to_lua` converter for particular fields).
 		dry         : `true` to print query instead of executing it, and return true.
 
-	cn:query(query, [opt]) -> res,nil|'again',cols | nil,err,errcode,sqlstate
+	cn:[try_]query(query, [opt]) -> res,nil|'again',cols | nil,err,errcode,sqlstate
 
 		Calls `send_query()` followed by a single call to `read_result()`.
 
-	cn:use([db], [opt]) -> true | nil,err,...
+	cn:[try_]use([db], [opt]) -> true | nil,err,...
 
 		Change current database
 
 PREPARED STATEMENTS
 
-	cn:prepare(query, [opt]) -> stmt
+	cn:[try_]prepare(query, [opt]) -> stmt
 
 		Prepare a statement.
 			cursor: 'read_only', 'update', 'scrollabe', 'none' (default: 'none').
 
-	stmt:exec(params...)
+	stmt:[try_]exec(params...)
 
 		Execute a statement. Call cn:read_result() to get results.
 
-	stmt:free()             Free statement.
+	stmt:[try_]free()             Free statement.
 
 ESCAPING
 
@@ -107,8 +107,11 @@ require'glue'
 require'sha1'
 
 local
-	band, xor, bor, shl, shr, floor, ceil, tonumber, dynarray, u8a, index, repl, update, time, trim, starts =
-	band, xor, bor, shl, shr, floor, ceil, tonumber, dynarray, u8a, index, repl, update, time, trim, starts
+	floor, ceil, tonumber, index, repl, update, trim, starts, isstr, isfunc =
+	floor, ceil, tonumber, index, repl, update, trim, starts, isstr, isfunc
+local
+	band, xor, bor, shl, shr, u8a, copy, dynarray =
+	band, xor, bor, shl, shr, u8a, copy, dynarray
 
 local check_io, checkp, _, protect = tcp_protocol_errors'mysql'
 
@@ -715,7 +718,7 @@ end
 
 local function set_datetime(buf, t)
 	local y, m, d, H, M, S
-	if type(t) == 'string' then
+	if isstr(t) then
 		y, m, d, t = t:match'^(%d+)-(%d+)-(%d+)(.*)'
 		H, M, S = t:match' (%d+):(%d+):([%d.]+)'
 		y = tonumber(y)
@@ -745,7 +748,7 @@ end
 
 local function set_time(buf, t)
 	local days, H, M, S
-	if type(t) == 'string' then
+	if isstr(t) then
 		local d, rest = t:match'^([+%-%d]+)d (.*)'
 		days = d and tonumber(d) or 0
 		t = d and rest or t
@@ -841,13 +844,13 @@ end
 
 local function set_cstring(buf, s)
 	local p, i = buf(#s+1)
-	ffi.copy(p+i, s)
+	copy(p+i, s)
 end
 
 local function set_bytes(buf, s, len)
 	len = len or #s
 	local p, i = buf(len)
-	ffi.copy(p+i, s, len)
+	copy(p+i, s, len)
 end
 
 local function set_str(buf, s)
@@ -1056,7 +1059,7 @@ local function recv_field_packets(self, field_count, field_attrs, opt)
 		checkp(self, typ == 'EOF', 'bad packet type')
 		get_eof_packet(buf)
 	end
-	if type(field_attrs) == 'function' then
+	if isfunc(field_attrs) then
 		field_attrs = field_attrs(self, fields, opt)
 	end
 	if field_attrs then
@@ -1175,7 +1178,7 @@ function mysql_connect(opt)
 
 	return self
 end
-conn.connect = protect(conn.connect)
+try_mysql_connect = protect(mysql_connect)
 
 function conn:close()
 	if self.state then
@@ -1189,14 +1192,14 @@ function conn:close()
 	end
 	return true
 end
-conn.close = protect(conn.close)
+conn.try_close = protect(conn.close)
 
 function conn:closed()
 	return not self.state
 end
 
 
-local function send_query(self, sql, quiet)
+function conn.send_query(self, sql, quiet)
 	sql = trim(sql)
 	local severity = (quiet or starts(sql, 'select') or starts(sql, 'show')) and '' or 'note'
 	log(severity, 'mysql', 'query', '%s', sql)
@@ -1210,9 +1213,9 @@ local function send_query(self, sql, quiet)
 	self.sql = sql
 	return true
 end
-conn.send_query = protect(send_query)
+conn.try_send_query = protect(conn.send_query)
 
-local function read_result(self, opt)
+function conn.read_result(self, opt)
 	assert(self.state == 'read' or self.state == 'read_binary')
 	local typ, buf = recv_packet(self)
 	if typ == 'ERR' then
@@ -1350,32 +1353,42 @@ local function read_result(self, opt)
 	self.sql = nil
 	return rows, nil, cols
 end
-conn.read_result = protect(read_result)
+conn.try_read_result = protect(conn.read_result)
 
-local function query(self, sql, opt)
+function conn.query(self, sql, opt)
 	if opt and opt.dry then
 		print(sql..';')
 		return true
 	end
-	send_query(self, sql, opt and opt.quiet)
-	return read_result(self, opt)
+	self:send_query(sql, opt and opt.quiet)
+	return self:read_result(opt)
 end
-conn.query = protect(query)
 
-do
-local function pass(self, db, ret, ...)
+function conn.try_query(self, sql, opt)
+	if opt and opt.dry then
+		print(sql..';')
+		return true
+	end
+	local ok, err = self:try_send_query(sql, opt and opt.quiet)
+	if not ok then return nil, err end
+	return self:try_read_result(opt)
+end
+
+local function cont(self, db, ret, ...)
 	if not ret then return nil, ... end
 	self.db = db
 	return ret, ...
 end
-function conn:use(db, opt)
+function conn:try_use(db, opt)
 	if not db then
 		self.db = nil
 		return true
 	else
-		return pass(self, db, self:query('use `' .. db .. '`', opt))
+		return cont(self, db, self:query('use `' .. db .. '`', opt))
 	end
 end
+function conn:use(...)
+	return assert(self:try_use(...))
 end
 
 local stmt = {}
@@ -1412,7 +1425,7 @@ function conn:prepare(query, opt)
 	stmt.cursor = assert(cursor_types[opt and opt.cursor or 'none'])
 	return stmt
 end
-conn.prepare = protect(conn.prepare)
+conn.try_prepare = protect(conn.prepare)
 
 function stmt:free()
 	local self, stmt = self.conn, self
@@ -1423,7 +1436,7 @@ function stmt:free()
 	set_u32(buf, stmt.id)
 	return true
 end
-stmt.free = protect(stmt.free)
+stmt.try_free = protect(stmt.free)
 
 function stmt:exec(...)
 	local self, stmt = self.conn, self
@@ -1507,14 +1520,14 @@ function stmt:exec(...)
 	self.state = 'read_binary'
 	return true
 end
-stmt.exec = protect(stmt.exec)
+stmt.try_exec = protect(stmt.exec)
 
-local function pass(self, opt, ok, ...)
+local function cont(self, opt, ok, ...)
 	if not ok then return nil, ... end
 	return self.conn:read_result(opt)
 end
 function stmt:query(opt, ...)
-	return pass(self, opt, self:exec(...))
+	return cont(self, opt, self:exec(...))
 end
 
 local qmap = {
@@ -1566,5 +1579,3 @@ end
 function mysql_seconds_to_time(s)
 	return format('%02d:%02d:%02d', floor(s / 3600), floor(s / 60), s)
 end
-
-return mysql

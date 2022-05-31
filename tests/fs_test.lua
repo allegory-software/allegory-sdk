@@ -18,26 +18,26 @@ end})
 
 function test.open_close()
 	local testfile = 'fs_testfile'
-	local f = assert(open(testfile, 'w'))
+	local f = open(testfile, 'w')
 	assert(isfile(f))
 	assert(not f:closed())
-	assert(f:close())
+	f:close()
 	assert(f:closed())
 	rmfile(testfile)
 end
 
 function test.open_not_found()
 	local nonexistent = 'this_file_should_not_exist'
-	local f, err = open(nonexistent)
+	local f, err = try_open(nonexistent)
 	assert(not f)
 	assert(err == 'not_found')
 end
 
 function test.open_already_exists_file()
 	local testfile = 'fs_testfile'
-	local f = assert(open(testfile, 'w'))
-	assert(f:close())
-	local f, err = open(testfile,
+	local f = open(testfile, 'w')
+	f:close()
+	local f, err = try_open(testfile,
 		win and {
 			access = 'write',
 			creation = 'create_new',
@@ -54,7 +54,7 @@ function test.open_already_exists_dir()
 	local testfile = 'fs_test_dir_already_exists'
 	rmdir(testfile)
 	mkdir(testfile)
-	local f, err = open(testfile,
+	local f, err = try_open(testfile,
 		win and {
 			access = 'write',
 			creation = 'create_new',
@@ -72,7 +72,7 @@ function test.open_dir()
 	local using_backup_semantics = true
 	rmdir(testfile)
 	mkdir(testfile)
-	local f, err = open(testfile)
+	local f, err = try_open(testfile)
 	if win and not using_backup_semantics then
 		--using `backup_semantics` flag on CreateFile allows us to upen
 		--directories like in Linux, otherwise we'd get an access_denied error.
@@ -81,7 +81,7 @@ function test.open_dir()
 		assert(err == 'access_denied')
 	else
 		assert(f)
-		assert(f:close())
+		f:close()
 	end
 	rmdir(testfile)
 end
@@ -139,24 +139,24 @@ function test.read_write()
 	local buf = ffi.new('uint8_t[?]', sz)
 
 	--write some patterns
-	local f = assert(open(testfile, 'w'))
+	local f = open(testfile, 'w')
 	for i=0,sz-1 do
 		buf[i] = i
 	end
 	for i=1,4 do
 		assert(f:write(buf, sz))
 	end
-	assert(f:close())
+	f:close()
 
 	--read them back
-	local f = assert(open(testfile))
+	local f = open(testfile)
 	local t = {}
 	while true do
 		local readsz = assert(f:read(buf, sz))
 		if readsz == 0 then break end
 		t[#t+1] = ffi.string(buf, readsz)
 	end
-	assert(f:close())
+	f:close()
 
 	--check them out
 	local s = table.concat(t)
@@ -170,14 +170,14 @@ end
 function test.open_modes()
 	local testfile = 'fs_test'
 	--TODO:
-	local f = assert(open(testfile, 'w'))
+	local f = open(testfile, 'w')
 	f:close()
 	rmfile(testfile)
 end
 
 function test.seek()
 	local testfile = 'fs_test'
-	local f = assert(open(testfile, 'w'))
+	local f = open(testfile, 'w')
 
 	--test large file support by seeking past 32bit
 	local newpos = 2^40
@@ -200,7 +200,7 @@ function test.seek()
 	local pos = assert(f:seek('end'))
 	assert(pos == newpos + 1) --end updated
 	assert(f:seek'end' == newpos + 1)
-	assert(f:close())
+	f:close()
 
 	rmfile(testfile)
 end
@@ -209,9 +209,9 @@ end
 
 function test.stream()
 	local testfile = 'fs_test'
-	local f = assert(assert(open(testfile, 'w')):stream('w'))
+	local f = open(testfile, 'w'):stream('w')
 	f:close()
-	local f = assert(assert(open(testfile, 'r')):stream('r'))
+	local f = open(testfile, 'r'):stream('r')
 	f:close()
 	rmfile(testfile)
 end
@@ -221,25 +221,25 @@ end
 function test.truncate_seek()
 	local testfile = 'fs_test_truncate_seek'
 	--truncate/grow
-	local f = assert(open(testfile, 'w'))
+	local f = open(testfile, 'w')
 	local newpos = 1024^2
 	assert(f:truncate(newpos))
 	assert(f:seek() == newpos)
-	assert(f:close())
+	f:close()
 	--check size
-	local f = assert(open(testfile, 'r+'))
+	local f = open(testfile, 'r+')
 	local pos = assert(f:seek'end')
 	assert(pos == newpos)
 	--truncate/shrink
 	local pos = assert(f:seek('end', -100))
 	assert(f:truncate(pos))
 	assert(pos == newpos - 100)
-	assert(f:close())
+	f:close()
 	--check size
-	local f = assert(open(testfile, 'r'))
+	local f = open(testfile, 'r')
 	local pos = assert(f:seek'end')
 	assert(pos == newpos - 100)
-	assert(f:close())
+	f:close()
 
 	rmfile(testfile)
 end
@@ -272,8 +272,8 @@ function test.remove_recursive()
 		mkdir(rootdir..dir, true)
 	end
 	local function mkfile(file)
-		local f = assert(open(rootdir..file, 'w'))
-		assert(f:close())
+		local f = open(rootdir..file, 'w')
+		f:close()
 	end
 	mkdir'a/b/c'
 	mkfile'a/b/c/f1'
@@ -307,8 +307,8 @@ end
 
 function test.mkdir_already_exists_file()
 	local testfile = 'fs_test_dir_already_exists_file'
-	local f = assert(open(testfile, 'w'))
-	assert(f:close())
+	local f = open(testfile, 'w')
+	f:close()
 	local ok, err = try_mkdir(testfile)
 	assert(ok)
 	assert(err == 'already_exists')
@@ -359,10 +359,10 @@ end
 
 function test.remove()
 	local testfile = 'fs_test_remove'
-	local f = assert(open(testfile, 'w'))
-	assert(f:close())
+	local f = open(testfile, 'w')
+	f:close()
 	rmfile(testfile)
-	assert(not open(testfile))
+	assert(not try_open(testfile))
 end
 
 function test.remove_file_not_found()
@@ -375,8 +375,8 @@ end
 function test.move()
 	local f1 = 'fs_test_move1'
 	local f2 = 'fs_test_move2'
-	local f = assert(open(f1, 'w'))
-	assert(f:close())
+	local f = open(f1, 'w')
+	f:close()
 	mv(f1, f2)
 	rmfile(f2)
 	assert(select(2, try_rmfile(f1)) == 'not_found')
@@ -393,22 +393,22 @@ function test.move_replace()
 	local f2 = 'fs_test_move2'
 	local buf = ffi.new'char[1]'
 
-	local f = assert(open(f1, 'w'))
+	local f = open(f1, 'w')
 	buf[0] = ('1'):byte(1)
 	f:write(buf, 1)
-	assert(f:close())
+	f:close()
 
-	local f = assert(open(f2, 'w'))
+	local f = open(f2, 'w')
 	buf[0] = ('2'):byte(1)
 	assert(f:write(buf, 1))
-	assert(f:close())
+	f:close()
 
 	mv(f1, f2)
 
-	local f = assert(open(f2))
+	local f = open(f2)
 	assert(f:read(buf, 1))
 	assert(buf[0] == ('1'):byte(1))
-	assert(f:close())
+	f:close()
 
 	rmfile(f2)
 end
@@ -416,25 +416,25 @@ end
 --symlinks -------------------------------------------------------------------
 
 local function mksymlink_file(f1, f2)
-	local buf = ffi.new'char[1]'
+	local buf = u8a(1)
 
 	rmfile(f1)
 	rmfile(f2)
 
-	local f = assert(open(f2, 'w'))
+	local f = open(f2, 'w')
 	buf[0] = ('X'):byte(1)
 	f:write(buf, 1)
-	assert(f:close())
+	f:close()
 
-	block(0.1)
+	sleep(0.1)
 
-	local ok,err = mksymlink(f1, f2)
+	local ok, err = try_mksymlink(f1, f2)
 	if ok then
 		assert(file_is(f1, 'symlink'))
-		local f = assert(open(f1))
+		local f = open(f1)
 		assert(f:read(buf, 1))
 		assert(buf[0] == ('X'):byte(1))
-		assert(f:close())
+		f:close()
 	else
 		rmfile(f1)
 		rmfile(f2)
@@ -552,17 +552,17 @@ function test.mkhardlink() --hardlinks only work for files in NTFS
 
 	local buf = ffi.new'char[1]'
 
-	local f = assert(open(f2, 'w'))
+	local f = open(f2, 'w')
 	buf[0] = ('X'):byte(1)
 	f:write(buf, 1)
-	assert(f:close())
+	f:close()
 
 	mkhardlink(f1, f2)
 
-	local f = assert(open(f1))
+	local f = open(f1)
 	assert(f:read(buf, 1))
 	assert(buf[0] == ('X'):byte(1))
-	assert(f:close())
+	f:close()
 
 	rmfile(f1)
 	rmfile(f2)
@@ -573,19 +573,19 @@ end
 function test.times()
 	local testfile = 'fs_test_time'
 	rmfile(testfile)
-	local f = assert(open(testfile, 'w'))
+	local f = open(testfile, 'w')
 	local t = f:attr()
 	assert(t.atime >= 0)
 	assert(t.mtime >= 0)
 	assert(win or t.ctime >= 0)
 	assert(Linux or t.btime >= 0)
-	assert(f:close())
+	f:close()
 	rmfile(testfile)
 end
 
 function test.times_set()
 	local testfile = 'fs_test_time'
-	local f = assert(open(testfile, 'w'))
+	local f = open(testfile, 'w')
 
 	--TODO: futimes() on OSX doesn't use tv_usec
 	local frac = (OSX or win) and 0 or 1/2
@@ -623,7 +623,7 @@ function test.times_set()
 	assert(mtime == mtime1)
 	assert(atime == atime1)
 
-	assert(f:close())
+	f:close()
 	rmfile(testfile)
 end
 
@@ -1047,7 +1047,7 @@ function test.open_buffer()
 	ffi.fill(buf, sz, 43)
 	assert(f:write(buf, 1000) == 100)
 	assert(ffi.string(buf, 100) == (string.char(43):rep(100)))
-	assert(f:close())
+	f:close()
 	assert(f:closed())
 	assert(f:read(buf, 1000) == nil)
 	assert(f:write(buf, 1000) == nil)
@@ -1065,7 +1065,7 @@ if not name or name == 'fs_test' then
 	local n,m = 0, 0
 	for i,k in ipairs(test) do
 		if not k:find'^_' then
-			print('test '..k)
+			print('test.'..k)
 			local ok, err = xpcall(test[k], debug.traceback)
 			if not ok then
 				print(err)

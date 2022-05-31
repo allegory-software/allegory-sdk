@@ -84,6 +84,6 @@ run(function()
 
 	end
 
-	assert(smtp:close())
+	smtp:close()
 
 end)

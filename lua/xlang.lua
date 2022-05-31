@@ -143,7 +143,7 @@ rowset.S_schema_fields = virtual_rowset(function(self, ...)
 		rs.rows = {}
 		local function add_row(texts, tbl_type, tbl_name, fld, col, attr)
 			local en_text = fld['en_'..attr]
-			if type(en_text) == 'function' then --getter/generator
+			if isfunc(en_text) then --getter/generator
 				en_text = en_text()
 			end
 			local text = texts[tbl_type..'.'..tbl_name..'.'..col]
@@ -206,7 +206,7 @@ local function update_S_texts(tbl, fld, col, attr)
 			return s
 		end
 		s = en_text
-		if type(s) == 'function' then
+		if isfunc(s) then
 			s = s()
 		end
 		return s

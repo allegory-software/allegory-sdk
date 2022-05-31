@@ -258,7 +258,7 @@ end
 
 function xml_parse(t, callbacks)
 	local root = true
-	if type(callbacks) ~= 'function' then
+	if not isfunc(callbacks) then
 		local known_tags = callbacks
 		callbacks, root = maketree_callbacks(known_tags)
 	end

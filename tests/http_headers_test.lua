@@ -10,8 +10,7 @@ local function dump(s)
 end
 
 dump[[
-Accept: text/plain; q=0.5, text/html,
-				text/x-dvi; q=0.8, text/x-c
+Accept: text/plain; q=0.5, text/html, text/x-dvi; q=0.8, text/x-c
 Accept-Charset: utf-8
 Accept-Encoding: gzip, deflate
 Accept-Language: en-US

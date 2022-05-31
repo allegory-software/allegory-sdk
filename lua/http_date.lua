@@ -65,7 +65,7 @@ end
 function http_date_format(t, fmt)
 	if not fmt or fmt == 'rfc1123' then
 		--wkday "," SP 2DIGIT-day SP month SP 4DIGIT-year SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP "GMT"
-		if type(t) == 'table' then
+		if istab(t) then
 			t = time(t)
 		end
 		local t = date('!*t', t)

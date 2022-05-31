@@ -72,6 +72,10 @@ local pull = function(t)
 	return remove(t, 1)
 end
 
+function ca_file_path()
+	return config'ca_file' or varpath'cacert.pem'
+end
+
 local client = {
 	type = 'http_client', http = http,
 	max_conn = 50,
@@ -83,9 +87,7 @@ local client = {
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
 	tls_options = {
-		ca_file = function(self)
-			return config'ca_file' or varpath'cacert.pem'
-		end,
+		ca_file = ca_file_path,
 	},
 }
 
@@ -125,10 +127,7 @@ function client:target(t) --t is request options
 			client_ip = client_ip,
 			https = https,
 			max_line_size = t.max_line_size,
-			debug = t.debug,
-			cowrap = self.cowrap,
-			currentthread = self.currentthread,
-			threadstatus = self.threadstatus,
+			debug = t.debug or self.debug,
 		}
 		target.max_pipelined_requests = t.max_pipelined_requests
 		target.max_conn = t.max_conn_per_target
@@ -210,20 +209,20 @@ function client:stcp_options(host, port)
 	if not self._tls_config then
 		local t = {}
 		for k,v in pairs(self.tls_options) do
-			if type(v) == 'function' then
+			if isfunc(v) then
 				t[k] = v(self, k) --option getter
 			else
 				t[k] = v
 			end
 		end
-		self._tls_config = stcp_config(t)
+		self._tls_config = tls_config(t)
 	end
 	return self._tls_config
 end
 
 function client:connect_now(target)
 	local host, port, client_ip = target()
-	local tcp, err = self.tcp()
+	local tcp, err = tcp()
 	if not tcp then return nil, err end
 	if client_ip then
 		local ok, err = tcp:bind(client_ip)
@@ -231,7 +230,7 @@ function client:connect_now(target)
 	end
 	self:inc_conn_count(target)
 	local dt = target.connect_timeout
-	local expires = dt and self.clock() + dt or nil
+	local expires = dt and clock() + dt or nil
 	local ip, err = resolve(host)
 	if not ip then
 		return nil, 'lookup failed for "'..host..'": '..tostring(err)
@@ -254,7 +253,7 @@ function client:connect_now(target)
 		return pass(tcp:closed(), inherited(tcp, ...))
 	end)
 	if target.http_args.https then
-		local stcp, err = self.stcp(tcp, host, self:stcp_options(host, port))
+		local stcp, err = client_stcp(tcp, host, self:stcp_options(host, port))
 		self:dp(target, ' TLS', '%s %s %s', stcp, http, err or '')
 		if not stcp then
 			return nil, err
@@ -268,9 +267,9 @@ function client:connect_now(target)
 end
 
 function client:wait_conn(target)
-	local thread = self.currentthread()
+	local thread = currentthread()
 	self:push_wait_conn_thread(thread, target)
-	local http = self.suspend()
+	local http = suspend()
 	if http == 'connect' then
 		return self:connect_now(target)
 	else
@@ -292,14 +291,14 @@ function client:resume_next_wait_conn_thread()
 	local thread, target = self:pull_wait_conn_thread()
 	if not thread then return end
 	self:dp(target, '^WAIT_CO', '%s', thread)
-	self.resume(thread, 'connect')
+	resume(thread, 'connect')
 end
 
 function client:resume_matching_wait_conn_thread(target, http)
 	local thread = self:pull_matching_wait_conn_thread(target)
 	if not thread then return end
 	self:dp(target, '^WAIT_CO', '%s < %s', thread, http)
-	self.resume(thread, http)
+	resume(thread, http)
 	return true
 end
 
@@ -362,7 +361,7 @@ function client:redirect_request_args(t, req, res)
 		connect_timeout = t.connect_timeout,
 		request_timeout = t.request_timeout,
 		reply_timeout   = t.reply_timeout,
-		debug = t.debug,
+		debug = t.debug or self.debug,
 	}
 end
 
@@ -380,21 +379,21 @@ function client:remove_cookie(jar, domain, path, name)
 	--
 end
 
-function client:clear_cookies(client_ip, host, time)
+function client:clear_cookies(client_ip, host)
 	--
 end
 
-function client:store_cookies(target, req, res, time)
+function client:store_cookies(target, req, res)
 	local cookies = res.headers['set-cookie']
 	if not cookies then return end
-	local time = time or self.time()
+	local time = time()
 	local client_jar = self:cookie_jar(target.client_ip)
 	local host = target.host
 	for _,cookie in ipairs(cookies) do
 		if self:accept_cookie(cookie, host) then
 			local expires
 			if cookie.expires then
-				expires = self.time(cookie.expires)
+				expires = cookie.expires
 			elseif cookie['max-age'] then
 				expires = time + cookie['max-age']
 			end
@@ -413,11 +412,11 @@ function client:store_cookies(target, req, res, time)
 	end
 end
 
-function client:get_cookies(client_ip, host, uri, https, time)
+function client:get_cookies(client_ip, host, uri, https)
 	local client_jar = self:cookie_jar(client_ip)
 	if not client_jar then return end
 	local path = uri:match'^[^%?#]+'
-	local time = time or self.time()
+	local time = time()
 	local cookies = {}
 	local names = {}
 	for s in host:gmatch'[^%.]+' do
@@ -445,16 +444,14 @@ function client:get_cookies(client_ip, host, uri, https, time)
 end
 
 function client:save_cookies(file)
-	return pp.save(file, self.cookies)
+	return pp_save(file, self.cookies)
 end
 
 function client:load_cookies(file)
-	local s, err = load(file)
+	local s, err = try_load(file)
 	if not s then return nil, err end
-	local f, err = loadstring('return '..s, file)
-	if not f then return nil, err end
-	local ok, t = pcall(f)
-	if not ok then return nil, t end
+	local t, err = peval(s)
+	if not t then return nil, err end
 	self.cookies = t
 end
 
@@ -484,7 +481,7 @@ function client:request(t)
 
 	local waiting_response
 	if http.reading_response then
-		self:push_wait_response_thread(http, self.currentthread(), target)
+		self:push_wait_response_thread(http, currentthread(), target)
 		waiting_response = true
 	else
 		http.reading_response = true
@@ -499,7 +496,7 @@ function client:request(t)
 	end
 
 	if waiting_response then
-		self.suspend()
+		suspend()
 	end
 
 	local res, err = self:read_response_now(http, req)
@@ -516,13 +513,13 @@ function client:request(t)
 	if not http.closed then
 		local thread = self:pull_wait_response_thread(http, target)
 		if thread then
-			self.resume(thread)
+			resume(thread)
 		end
 	end
 
 	self:dp(target, '-RQ', '%s.%s.%s body: %d bytes',
 		target, http, req,
-		res and type(res.content) == 'string' and #res.content or 0)
+		res and isstr(res.content) and #res.content or 0)
 
 	if res and res.redirect_location then
 		local t = self:redirect_request_args(t, req, res)
@@ -536,40 +533,30 @@ function client:request(t)
 	return res, true, req
 end
 
---downloading CA file --------------------------------------------------------
-
-function client:update_ca_file()
-	self:request{
-		host = 'curl.haxx.se',
-		uri = '/ca/cacert.pem',
-		https = true,
-	}
-end
-
 --hi-level API: getpage ------------------------------------------------------
 
 function client:getpage(arg1, upload, receive_content)
 
-	local opt = type(arg1) == 'table' and arg1
-	upload = upload or opt and opt.upload
-	receive_content = receive_content or opt and opt.receive_content
+	local opt = istab(arg1) and arg1 or empty
+	upload = upload or opt.upload
+	receive_content = receive_content or opt.receive_content
 
 	local headers = {}
-	if type(upload) ~= 'string' then
-		upload = self.json_encode(upload)
+	if not isstr(upload) then
+		upload = json_encode(upload)
 		headers['content-type'] = 'application/json'
 	end
 
-	local u = type(arg1) == 'string' and uri.parse(arg1) or arg1.url and opt(arg1.url)
+	local url = isstr(arg1) and arg1 or opt.url
+	local u = url and url_parse(url)
 
 	local opt = update({
 		host = u and u.host,
 		uri = u and u.path,
-		https = u and u.scheme or 'https',
+		https = u and u.scheme or opt.https ~= false,
 		method = upload and 'POST',
 		content = upload,
 		receive_content = receive_content or 'string',
-		debug = self.getpage_debug and index(collect(words(self.getpage_debug or ''))),
 	}, opt)
 	opt.headers = update(headers, opt.headers)
 
@@ -582,7 +569,7 @@ function client:getpage(arg1, upload, receive_content)
 	local ct = res.headers['content-type']
 	if ct and ct.media_type == 'application/json' then
 		res.rawcontent = res.content
-		res.content = repl(self.json_decode(res.content), nil, null)
+		res.content = repl(json_decode(res.content), nil, null)
 	end
 	return res.content, res, req
 end
@@ -590,10 +577,9 @@ end
 --instantiation --------------------------------------------------------------
 
 function client:log(target, severity, module, event, fmt, ...)
-	local logging = self.logging
-	if not logging or logging.filter[severity] then return end
+	if logging.filter[severity] then return end
 	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.log(severity, module, event, '%-4s %s', target or '', s)
+	log(severity, module, event, '%-4s %s', target or '', s)
 end
 
 function client:dp(target, ...)
@@ -608,10 +594,7 @@ function http_client(t)
 	self.targets = tuples(3)
 	self.cookies = {}
 
-	self.logging = (self.logging == true or self.debug and self.logging == nil)
-		and require'logging' or self.logging
-
-	if self.logging and self.debug then
+	if self.debug and self.debug.sched then
 		local function pass(target, rc, ...)
 			self:dp(target, '', ('<'):rep(1+rc)..('-'):rep(30-rc))
 			return ...
@@ -634,9 +617,16 @@ end
 local cl
 function getpage(...)
 	cl = cl or http_client{
-		tls_options = {
-			ca_file = config'ca_file' or varpath'cacert.pem',
-		},
+		debug = config'getpage_debug' and index(collect(words(config'getpage_debug'))),
 	}
 	return cl:getpage(...)
+end
+
+function update_ca_file()
+	local file = ca_file_path()
+	local s, err = getpage{
+		url = 'https://curl.haxx.se/ca/cacert.pem',
+	}
+	assert(s, err)
+	save(file, s)
 end

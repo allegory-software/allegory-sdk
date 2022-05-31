@@ -60,7 +60,7 @@ function multipart(multipart_type, write, boundary)
 		end
 		for k,v in sortedpairs(ht) do
 			write(k); write': '
-			if type(v) == 'table' then
+			if istab(v) then
 				local v, opt = v[1], v
 				if self.utf8_headers[k] then
 					v = encode(v)

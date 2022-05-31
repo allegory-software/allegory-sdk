@@ -1,3 +1,4 @@
+--go@ plink d10 -t -batch sdk/bin/linux/luajit sdk/tests/sock_test.lua
 
 io.stdout:setvbuf'no'
 io.stderr:setvbuf'no'
@@ -8,7 +9,7 @@ require'sock'
 
 local function test_addr()
 	local function dump(...)
-		for ai in assert(sockaddr(...)):addrs() do
+		for ai in assert(getaddrinfo(...)):addrs() do
 			print(ai:tostring(), ai:type(), ai:family(), ai:protocol(), ai:name())
 		end
 	end

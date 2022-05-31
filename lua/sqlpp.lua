@@ -234,9 +234,15 @@ if not ... then require'sqlpp_mysql_test'; return end
 
 require'glue'
 
+local
+	assert, type =
+	assert, type
+
 local sqlpp = {package = {}}
 
-function sqlpp.ispp(v) return type(v) == 'table' and v.is_sqlpp or false end
+function sqlpp.ispp(v)
+	return type(v) == 'table' and v.is_sqlpp or false
+end
 
 function sqlpp.new(init)
 

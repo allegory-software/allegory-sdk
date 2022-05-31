@@ -33,7 +33,7 @@ inflate(read, write, [bufsize], [format], [windowBits])
 
 GZIP files -------------------------------------------------------------------
 
-gzip_open(filename[, mode][, bufsize]) -> gzfile
+[try_]gzip_open(filename[, mode][, bufsize]) -> gzfile
 gzfile:close()
 gzfile:flush('none|partial|sync|full|finish|block|trees')
 gzfile:read_tobuffer(buf, size) -> bytes_read
@@ -71,7 +71,7 @@ local C = ffi.load'z'
 
 local function inflate_deflate(deflate, read, write, bufsize, format, windowBits, ...)
 
-	if type(read) == 'string' then
+	if isstr(read) then
 		local s = read
 		local done
 		read = function()
@@ -79,7 +79,7 @@ local function inflate_deflate(deflate, read, write, bufsize, format, windowBits
 			done = true
 			return s
 		end
-	elseif type(read) == 'table' then
+	elseif istab(read) then
 		local t = read
 		local i = 0
 		read = function()
@@ -90,7 +90,7 @@ local function inflate_deflate(deflate, read, write, bufsize, format, windowBits
 
 	local t
 	local asstring = write == ''
-	if type(write) == 'table' or asstring then
+	if istab(write) or asstring then
 		t = asstring and {} or write
 		write = function(data, sz)
 			t[#t+1] = str(data, sz)
@@ -122,7 +122,7 @@ local function inflate_deflate(deflate, read, write, bufsize, format, windowBits
 	if ret ~= 0 then
 		error(str(C.zError(ret)))
 	end
-	ffi.gc(strm, flate_end)
+	gc(strm, flate_end)
 
 	local buf = u8a(bufsize)
 	strm.next_out, strm.avail_out = buf, bufsize
@@ -155,7 +155,7 @@ local function inflate_deflate(deflate, read, write, bufsize, format, windowBits
 		if strm.avail_in > 0 then goto flate end --more data to flate.
 		goto read
 	::finish::
-		flate_end(ffi.gc(strm, nil))
+		flate_end(gc(strm, nil))
 		if not ok then return nil, err end
 		if asstring then return table.concat(t) end
 		return t or true
@@ -174,17 +174,20 @@ local function checkminus1(ret) assert(ret ~= -1); return ret end
 
 local function gzclose(gzfile)
 	checkz(C.gzclose(gzfile))
-	ffi.gc(gzfile, nil)
+	gc(gzfile, nil)
 end
 
-function gzip_open(filename, mode, bufsize)
+function try_gzip_open(filename, mode, bufsize)
 	local gzfile = C.gzopen(filename, mode or 'r')
 	if gzfile == nil then
-		return nil, string.format('errno %d', ffi.errno())
+		return nil, string.format('errno %d', errno())
 	end
-	ffi.gc(gzfile, gzclose)
+	gc(gzfile, gzclose)
 	if bufsize then C.gzbuffer(gzfile, bufsize) end
 	return gzfile
+end
+function gzip_open(...)
+	return assert(try_gzip_open(...))
 end
 
 local flush_enum = {
@@ -226,7 +229,7 @@ local function gzseek(gzfile, ...)
 	if narg == 0 then
 		whence, offset = 'cur', 0
 	elseif narg == 1 then
-		if type(...) == 'string' then
+		if isstr((...)) then
 			whence, offset = ..., 0
 		else
 			whence, offset = 'cur',...
@@ -242,7 +245,7 @@ local function gzoffset(gzfile)
 	return checkminus1(C.gzoffset(gzfile))
 end
 
-ffi.metatype('gzFile_s', {__index = {
+metatype('gzFile_s', {__index = {
 	close = gzclose,
 	read = gzread,
 	write = gzwrite,

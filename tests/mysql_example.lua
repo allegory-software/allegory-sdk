@@ -3,30 +3,31 @@ require'sock'
 
 run(function()
 
-	assert(mysql_connect{
-		host = '127.0.0.1',
-		port = 3306,
-		user = 'bar',
-		password = 'baz',
-		db = 'foo',
+	local cn = mysql_connect{
+		host = '10.0.0.5',
+		port = 3307,
+		user = 'root',
+		password = 'root',
 		charset = 'utf8mb4',
 		max_packet_size = 1024 * 1024,
-	})
+	}
 
-	assert(cn:query('drop table if exists cats'))
+	cn:query'create database if not exists example'
+	cn:use'example'
+	cn:query'drop table if exists cats'
 
-	local res = assert(cn:query('create table cats '
+	local res = cn:query('create table cats '
 				  .. '(id serial primary key, '
-				  .. 'name varchar(5))'))
+				  .. 'name varchar(5))')
 
-	local res = assert(cn:query('insert into cats (name) '
-		.. "values ('Bob'),(''),(null)"))
+	local res = cn:query('insert into cats (name) '
+		.. "values ('Bob'),(''),(null)")
 
 	print(res.affected_rows, ' rows inserted into table cats ',
 			'(last insert id: ', res.insert_id, ')')
 
-	require'pp'(assert(cn:query('select * from cats order by id asc', 10)))
+	pr(cn:query('select * from cats order by id asc'))
 
-	assert(cn:close())
+	cn:close()
 
 end)

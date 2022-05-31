@@ -15,7 +15,7 @@
 	b:load(bmp[, x, y]) -> bmp | nil,err   load/paint the pixels into a given bitmap
 	b:load(format, ...) -> bmp | nil,err   load the pixels into a new bitmap
 	b:rows(bmp | format,...) -> iter() -> i, bmp   iterate the rows over a 1-row bitmap
-	bmp_save(bmp, write) -> ok | nil,err   save a bitmap using a write function
+	[try_]bmp_save(bmp, write) -> ok | nil,err   save a bitmap using a write function
 
 bmp_open(read) -> b | nil,err
 
@@ -41,7 +41,7 @@ b:rows(bmp | format,...) -> iter() -> i, bmp
 	is decreasing if the bitmap is bottom-up. Unlike `b:load()`, this method
 	and the returned iterator are not protected (they raise errors).
 
-bmp_save(bmp, write) -> true | nil, err
+[try_]bmp_save(bmp, write) -> true | nil, err
 
 	Save bmp file using a `write(buf, size)` function to write the bytes.
 	The write function should accept any size >= 0 and it should raise an error
@@ -60,6 +60,8 @@ Low-level API
 	b.pal_count -> n`                  palette color count
 
 ]=]
+
+if not ... then require'bmp_test'; return end
 
 require'glue'
 require'bitmap'
@@ -158,21 +160,27 @@ local valid_bpps = {
 	png = index{0},
 }
 
-bmp_open = protect(function(read_bytes)
+local function check(ret, err)
+	if ret then return ret end
+	raise(2, 'bmp', '%s', err)
+end
+
+try_bmp_open = protect('bmp', function(read_bytes)
 
 	--wrap the reader so we can count the bytes read
 	local bytes_read = 0
 	local function read(buf, sz)
 		if sz == 0 then return buf end
 		local sz = sz or sizeof(buf)
-		assert(read_bytes(buf, sz) == sz, 'eof')
+		local readsz = check(read_bytes(buf, sz))
+		check(readsz == sz, 'eof')
 		bytes_read = bytes_read + sz
 		return buf
 	end
 
 	--load the file header and validate it
 	local fh = read(file_header())
-	assert(ffi.string(fh.magic, 2) == 'BM')
+	check(str(fh.magic, 2) == 'BM', 'not a bmp')
 
 	--load the DIB header
 	local z = fh.header_size - 4
@@ -199,37 +207,37 @@ bmp_open = protect(function(read_bytes)
 	elseif z == sizeof(v5_header) then
 		h = read(v5_header())
 	elseif z == 64 + 4 then
-		error'OS22XBITMAPHEADER is not supported'
+		check(false, 'OS22XBITMAPHEADER is not supported')
 	else
-		error('invalid info header size '..(z+4))
+		check(false, 'invalid info header size')
 	end
 
 	--validate it and extract info from it
-	assert(h.planes == 1, 'invalid number of planes')
+	check(h.planes == 1, 'invalid number of planes')
 	local comp = core and 0 or h.compression
-	local comp = assert(compressions[comp], 'invalid compression type')
+	local comp = check(compressions[comp], 'invalid compression type')
 	alpha_mask = alpha_mask or comp == 'alphabitfields' --Windows CE
 	local bpp = h.bpp
-	assert(valid_bpps[comp][bpp], 'invalid bpp')
+	check(valid_bpps[comp][bpp], 'invalid bpp')
 	local rle = comp:find'^rle'
 	local bitfields = comp:find'bitfields$'
 	local palettized = bpp >=1 and bpp <= 8
 	local width = h.w
 	local height = abs(h.h)
 	local bottom_up = h.h > 0
-	assert(width >= 1, 'invalid width')
-	assert(height >= 1, 'invalid height')
+	check(width  >= 1 and width  <= 10000, 'invalid width' )
+	check(height >= 1 and height <= 10000, 'invalid height')
 
 	--load the channel masks for bitfield bitmaps
 	local bitmasks, has_alpha
 	if bitfields then
-		bitmasks = ffi.new('uint32_t[?]', 4)
+		bitmasks = u32a(4)
 		local masks_size = (alpha_mask and 4 or 3) * 4
 		if ext_bitmasks then
 			read(bitmasks, masks_size)
 		else
-			local masks_ptr = cast('uint8_t*', h) + ffi.offsetof(h, 'mask_r')
-			ffi.copy(bitmasks, masks_ptr, masks_size)
+			local masks_ptr = cast('uint8_t*', h) + offsetof(h, 'mask_r')
+			copy(bitmasks, masks_ptr, masks_size)
 		end
 		has_alpha = bitmasks[3] > 0
 	end
@@ -237,7 +245,7 @@ bmp_open = protect(function(read_bytes)
 	--make a one-time palette loader and indexer
 	local load_pal
 	local pal_size = fh.image_offset - bytes_read
-	assert(pal_size >= 0, 'invalid image offset')
+	check(pal_size >= 0, 'invalid image offset')
 	local function noop() end
 	local function skip_pal()
 		read(nil, pal_size) --null-read to pixel data
@@ -261,7 +269,7 @@ bmp_open = protect(function(read_bytes)
 	end
 	local function pal_entry(i)
 		load_pal()
-		assert(i < pal_count, 'palette index out of range')
+		check(i < pal_count, 'palette index out of range')
 		return pal[i].r, pal[i].g, pal[i].b, 0xff
 	end
 
@@ -269,12 +277,12 @@ bmp_open = protect(function(read_bytes)
 	local row_iterator, load_rows
 	local function init_load()
 
-		assert(not row_iterator, 'already loaded')
+		check(not row_iterator, 'already loaded')
 
 		if comp == 'jpeg' then
-			error'jpeg not supported'
+			check(false, 'jpeg not supported')
 		elseif comp == 'png' then
-			error'png not supported'
+			check(false, 'png not supported')
 		end
 
 		--decide on the row bitmap format and if needed make a pixel converter
@@ -363,7 +371,7 @@ bmp_open = protect(function(read_bytes)
 			elseif bpp == 8 then
 				convert_pixel = pal_entry
 			else
-				assert(false)
+				check(false, 'invalid bpp')
 			end
 
 		else --packed, standard format
@@ -374,7 +382,7 @@ bmp_open = protect(function(read_bytes)
 				[32] = 'bgrx8',
 				[64] = 'bgrx16',
 			}
-			format = assert(formats[bpp])
+			format = check(formats[bpp], 'invalid bpp')
 
 		end
 
@@ -384,8 +392,8 @@ bmp_open = protect(function(read_bytes)
 
 				local read_pixels, fill_pixels
 
-				local rle_buf = ffi.new'uint8_t[2]'
-				local p = cast('uint8_t*', row_bmp.data)
+				local rle_buf = u8a(2)
+				local p = cast(u8p, row_bmp.data)
 
 				if bpp == 8 then --RLE8
 
@@ -399,7 +407,7 @@ bmp_open = protect(function(read_bytes)
 					end
 
 					function fill_pixels(i, n, v)
-						ffi.fill(p + i, n, v)
+						fill(p + i, n, v)
 					end
 
 				elseif bpp == 4 then --RLE4
@@ -428,7 +436,7 @@ bmp_open = protect(function(read_bytes)
 					function fill_pixels(i, n, v)
 						local i = i * 0.5
 						local n = ceil(n * 0.5)
-						ffi.fill(p + ceil(i), n, v)
+						fill(p + ceil(i), n, v)
 						shift_back(i, n)
 					end
 
@@ -445,25 +453,25 @@ bmp_open = protect(function(read_bytes)
 						local k = rle_buf[1]
 						if n == 0 then --escape
 							if k == 0 then --eol
-								assert(i == width, 'RLE EOL too soon')
+								check(i == width, 'RLE EOL too soon')
 								j = j + 1
 								break
 							elseif k == 1 then --eof
-								assert(j == height-1, 'RLE EOF too soon')
+								check(j == height-1, 'RLE EOF too soon')
 								break
 							elseif k == 2 then --delta
 								read(rle_buf, 2)
 								local x = rle_buf[0]
 								local y = rle_buf[1]
 								--we can't use a row-by-row loader with this code
-								error'RLE delta not supported'
+								check(false, 'RLE delta not supported')
 							else --absolute mode: k = number of pixels to read
-								assert(i + k <= width, 'RLE overflow')
+								check(i + k <= width, 'RLE overflow')
 								read_pixels(i, k)
 								i = i + k
 							end
 						else --repeat: n = number of pixels to repeat, k = color
-							assert(i + n <= width, 'RLE overflow')
+							check(i + n <= width, 'RLE overflow')
 							fill_pixels(i, n, k)
 							i = i + n
 						end
@@ -480,7 +488,7 @@ bmp_open = protect(function(read_bytes)
 		function row_iterator(arg, ...)
 
 			local dst_bmp
-			if type(arg) == 'table' and arg.data then --arg is a bitmap
+			if istab(arg) and arg.data then --arg is a bitmap
 				dst_bmp = arg
 			else --arg is a format name or specifier
 				dst_bmp = bitmap(width, 1, arg, ...)
@@ -522,7 +530,7 @@ bmp_open = protect(function(read_bytes)
 		function load_rows(arg, ...)
 
 			local dst_bmp, dst_x, dst_y
-			if type(arg) == 'table' and arg.data then
+			if istab(arg) and arg.data then
 				dst_bmp, dst_x, dst_y = arg, ...
 			else
 				dst_bmp = bitmap(width, height, arg, ...)
@@ -592,15 +600,22 @@ bmp_open = protect(function(read_bytes)
 		init_load()
 		return row_iterator(...)
 	end
-	bmp.load = protect(function(self, ...)
+	bmp.try_load = protect('bmp', function(self, ...)
 		init_load()
 		return load_rows(...)
 	end)
+	bmp.load = function(self, ...)
+		return assert(self:try_load(...))
+	end
 
 	return bmp
 end)
 
-bmp_save = protect(function(bmp, write)
+function bmp_open(...)
+	return assert(try_bmp_open(...))
+end
+
+function bmp_save(bmp, write)
 	local fh = file_header()
 	local h = info_header()
 	local image_size = h.w * h.h * 4
@@ -609,7 +624,7 @@ bmp_save = protect(function(bmp, write)
 		'\x00\xff\x00\x00'..  --G
 		'\xff\x00\x00\x00'..  --B
 		'\x00\x00\x00\xff'    --A
-	ffi.copy(fh.magic, 'BM', 2)
+	copy(fh.magic, 'BM', 2)
 	fh.image_offset = sizeof(fh) + sizeof(h) + #masks
 	fh.size = fh.image_offset + image_size
 	fh.header_size = sizeof(h) + 4
@@ -629,4 +644,5 @@ bmp_save = protect(function(bmp, write)
 		bitmap_paint(row_bmp, src_row_bmp)
 		write(row_bmp.data, row_bmp.stride)
 	end
-end)
+end
+try_bmp_save = protect(bmp_save)

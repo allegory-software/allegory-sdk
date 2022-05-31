@@ -5,7 +5,7 @@
 	TLS support in sock_libtls.lua.
 
 ADDRESS LOOKUP
-	sockaddr(...) -> ai                        look-up a hostname
+	getaddrinfo(...) -> ai                     look-up a hostname
 	ai:free()                                  free the address list
 	ai:next() -> ai|nil                        get next address in list
 	ai:addrs() -> iter() -> ai                 iterate addresses
@@ -111,13 +111,13 @@ The optional `expires` arg controls the timeout of the operation and must be
 a `clock()`-relative value (which is in seconds). If the expiration clock
 is reached before the operation completes, `nil, 'timeout'` is returned.
 
-`host, port` args are passed to `sockaddr()` (with the optional `af` arg),
+`host, port` args are passed to `getaddrinfo()` (with the optional `af` arg),
 which means that an already resolved address can be passed as `ai, nil`
 in place of `host, port`.
 
 ADDRESS LOOKUP ---------------------------------------------------------------
 
-sockaddr(...) -> ai
+getaddrinfo(...) -> ai
 
 	Look-up a hostname. Returns an "address info" object which is a OS-allocated
 	linked list of one or more addresses resolved with the system's `getaddrinfo()`.
@@ -138,7 +138,7 @@ sockaddr(...) -> ai
     `numerichost`, `numericserv`, `all`, `v4mapped`, `addrconfig`
     which map to `getaddrinfo()` flags.
 
-NOTE: `getaddrinfo()` is blocking. If that's a problem, use [resolver](resolver.md).
+NOTE: `getaddrinfo()` is blocking! Use resolve() to resolve hostnames first!
 
 SOCKETS ----------------------------------------------------------------------
 
@@ -344,9 +344,9 @@ require'heap'
 require'logging'
 local coro = require'coro'
 
-local gc    = ffi.gc
-local fill  = ffi.fill
-local errno = ffi.errno
+local
+	assert, isstr, clock, max, abs, min, bor, band, cast, u8p, fill, str, errno =
+	assert, isstr, clock, max, abs, min, bor, band, cast, u8p, fill, str, errno
 
 local coro_create   = coro.create
 local coro_safewrap = coro.safewrap
@@ -526,11 +526,11 @@ do
 		end
 	end
 
-	function sockaddr(host, port, socket_type, family, protocol, flags)
+	function getaddrinfo(host, port, socket_type, family, protocol, flags)
 		if host == '*' then host = '0.0.0.0' end --all.
-		if ffi.istype(addrinfo_ct, host) then
+		if istype(addrinfo_ct, host) then
 			return host, true --pass-through and return "not owned" flag
-		elseif type(host) == 'table' then
+		elseif istab(host) then
 			local t = host
 			host, port, family, socket_type, protocol, flags =
 				t.host, t.port or port, t.family, t.socket_type, t.protocol, t.flags
@@ -597,7 +597,7 @@ do
 
 	function sa_in4:tostring()
 		local b = self.ip_bytes
-		return string.format('%d.%d.%d.%d', b[0], b[1], b[2], b[3])
+		return format('%d.%d.%d.%d', b[0], b[1], b[2], b[3])
 	end
 
 	metatype('struct sockaddr_in', {__index = sa_in4})
@@ -610,7 +610,7 @@ do
 
 	function sa_in6:tostring()
 		local b = self.ip_bytes
-		return string.format('%x:%x:%x:%x:%x:%x:%x:%x',
+		return format('%x:%x:%x:%x:%x:%x:%x:%x',
 			b[ 0]*0x100+b[ 1], b[ 2]*0x100+b[ 3], b[ 4]*0x100+b[ 5], b[ 6]*0x100+b[ 7],
 			b[ 8]*0x100+b[ 9], b[10]*0x100+b[11], b[12]*0x100+b[13], b[14]*0x100+b[15])
 	end
@@ -624,7 +624,7 @@ do
 	function socket:protocol () return protocol_map   [self._pr] end
 
 	function socket:addr(host, port, flags)
-		return sockaddr(host, port, self._st, self._af, self._pr, addr_flags)
+		return getaddrinfo(host, port, self._st, self._af, self._pr, addr_flags)
 	end
 
 end
@@ -839,6 +839,8 @@ void GetAcceptExSockaddrs(
 
 ]]
 
+local WSAGetLastError = C.WSAGetLastError
+
 local nbuf = new'DWORD[1]' --global buffer shared between many calls.
 
 --error handling
@@ -870,7 +872,7 @@ do
 	local buf
 	function check(ret, err)
 		if ret then return ret end
-		local err = err or C.WSAGetLastError()
+		local err = err or WSAGetLastError()
 		local msg = error_classes[err]
 		if not msg then
 			buf = buf or new('char[?]', 256)
@@ -1070,25 +1072,27 @@ do
 	local ERROR_NOT_FOUND = 1168
 	local INFINITE = 0xffffffff
 
-	local void_ptr_c = typeof'void*'
+	local voidp = voidp
+	local GetQueuedCompletionStatus = ffi.C.GetQueuedCompletionStatus
+	local CancelIoEx = ffi.C.CancelIoEx
 
 	--[[local]] function _poll()
 
 		local job = expires_heap:peek()
-		local timeout = job and math.max(0, job.expires - clock()) or 1/0
+		local timeout = job and max(0, job.expires - clock()) or 1/0
 
-		local timeout_ms = math.max(timeout * 1000, 100)
+		local timeout_ms = max(timeout * 1000, 100)
 		--we're going infinite after 0x7fffffff for compat. with Linux.
 		if timeout_ms > 0x7fffffff then timeout_ms = INFINITE end
 
-		local ok = ffi.C.GetQueuedCompletionStatus(
+		local ok = GetQueuedCompletionStatus(
 			iocp(), nbuf, keybuf, obuf, timeout_ms) ~= 0
 
 		local o = obuf[0]
 
 		if o == nil then
 			assert(not ok)
-			local err = C.WSAGetLastError()
+			local err = WSAGetLastError()
 			if err == WAIT_TIMEOUT then
 				--cancel all timed-out jobs.
 				local t = clock()
@@ -1097,15 +1101,15 @@ do
 					if not job then
 						break
 					end
-					if math.abs(t - job.expires) <= .05 then --arbitrary threshold.
+					if abs(t - job.expires) <= .05 then --arbitrary threshold.
 						expires_heap:pop()
 						job.expires = nil
 						if job.socket then
 							local s = job.socket.s --pipe or socket
 							local o = job.overlapped.overlapped
-							local ok = ffi.C.CancelIoEx(cast(void_ptr_c, s), o) ~= 0
+							local ok = CancelIoEx(cast(voidp, s), o) ~= 0
 							if not ok then
-								local err = C.WSAGetLastError()
+								local err = WSAGetLastError()
 								if err == ERROR_NOT_FOUND then --too late, already gone
 									free_overlapped(o)
 									coro_transfer(job.thread, nil, 'timeout')
@@ -1136,7 +1140,7 @@ do
 				end
 				coro_transfer(job.thread, job:done(n))
 			else
-				local err = C.WSAGetLastError()
+				local err = WSAGetLastError()
 				if err == ERROR_OPERATION_ABORTED then --canceled
 					coro_transfer(job.thread, nil, 'timeout')
 				else
@@ -1155,7 +1159,7 @@ do
 	local WSA_IO_PENDING = 997 --alias to ERROR_IO_PENDING
 
 	local function check_pending(ok, job)
-		if ok or C.WSAGetLastError() == WSA_IO_PENDING then
+		if ok or WSAGetLastError() == WSA_IO_PENDING then
 			if job.expires then
 				expires_heap:push(job)
 			end
@@ -1243,7 +1247,6 @@ do
 		return s
 	end
 
-	local pchar_t = typeof'char*'
 	local wsabuf = new'WSABUF'
 	local flagsbuf = new'DWORD[1]'
 
@@ -1252,7 +1255,7 @@ do
 	end
 
 	local function socket_send(self, buf, len, expires)
-		wsabuf.buf = type(buf) == 'string' and cast(pchar_t, buf) or buf
+		wsabuf.buf = isstr(buf) and cast(u8p, buf) or buf
 		wsabuf.len = len
 		local o, job = overlapped(self, io_done, expires)
 		local ok = C.WSASend(self.s, wsabuf, 1, nil, 0, o, nil) == 0
@@ -1291,7 +1294,7 @@ do
 		len = len or #buf
 		local ai, ext_ai = self:addr(host, port, addr_flags)
 		if not ai then return nil, ext_ai end
-		wsabuf.buf = type(buf) == 'string' and cast(pchar_t, buf) or buf
+		wsabuf.buf = isstr(buf) and cast(u8p, buf) or buf
 		wsabuf.len = len
 		local o, job = overlapped(self, io_done, expires)
 		local ok = C.WSASendTo(self.s, wsabuf, 1, nil, flags or 0, ai.addr, ai.addrlen, o, nil) == 0
@@ -1381,7 +1384,7 @@ function check(ret)
 	if ret then return ret end
 	local err = errno()
 	local msg = error_classes[err]
-	return ret, msg or str(C.strerror(err)), err
+	return ret, msg or str(C.strerror(err))
 end
 
 local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
@@ -1791,10 +1794,10 @@ do
 		local rs = recv_expires_heap:peek()
 		local sx = ss and ss.send_expires
 		local rx = rs and rs.recv_expires
-		local expires = math.min(sx or 1/0, rx or 1/0)
-		local timeout = expires < 1/0 and math.max(0, expires - clock()) or 1/0
+		local expires = min(sx or 1/0, rx or 1/0)
+		local timeout = expires < 1/0 and max(0, expires - clock()) or 1/0
 
-		local timeout_ms = math.max(timeout * 1000, 100)
+		local timeout_ms = max(timeout * 1000, 100)
 		if timeout_ms > 0x7fffffff then timeout_ms = -1 end --infinite
 
 		local n = C.epoll_wait(epoll_fd(), events, maxevents, timeout_ms)
@@ -1884,7 +1887,7 @@ int listen(SOCKET s, int backlog);
 ]]
 
 function tcp:listen(backlog, host, port, addr_flags)
-	if type(backlog) ~= 'number' then
+	if not isnum(backlog) then
 		backlog, host, port = 1/0, backlog, host
 	end
 	if not self.bound_addr then
@@ -2173,8 +2176,6 @@ end --do
 
 --tcp repeat I/O -------------------------------------------------------------
 
-local pchar_t = typeof'char*'
-
 function tcp:send(buf, sz, expires)
 	sz = sz or #buf
 	local sz0 = sz
@@ -2187,8 +2188,8 @@ function tcp:send(buf, sz, expires)
 			return nil, err, sz0 - sz
 		end
 		assert(len > 0)
-		if type(buf) == 'string' then --only make pointer on the rare second pass.
-			buf = cast(pchar_t, buf)
+		if isstr(buf) then --only make pointer on the rare second pass.
+			buf = cast(u8p, buf)
 		end
 		buf = buf + len
 		sz  = sz  - len
@@ -2360,6 +2361,7 @@ local function cont(thread, ...)
 end
 --[[local]] function wait_io(register)
 	local thread, is_main = currentthread()
+	assert(poll_thread, 'poll loop not started')
 	assert(not is_main, 'trying to perform I/O from the main thread')
 	wait_count = wait_count + 1
 	if register ~= false then
@@ -2448,6 +2450,7 @@ function transfer(thread, ...)
 end
 
 function suspend(...)
+	assert(poll_thread, 'poll loop not started')
 	return coro_transfer(poll_thread, ...)
 end
 
@@ -2469,10 +2472,10 @@ end
 local function rets_tostring(rets)
 	local t = {}
 	for i,ret in ipairs(rets) do
-		local args = table.concat(imap(ret, logarg), ', ')
+		local args = concat(imap(ret, logarg), ', ')
 		t[i] = logarg(ret.thread) .. ': '..args
 	end
-	return table.concat(t, '\n')
+	return concat(t, '\n')
 end
 local rets_mt = {__tostring = rets_tostring}
 

@@ -111,15 +111,29 @@ function lrucache:put(key, val)
 	local old_val = self.values[key]
 	if old_val then
 		self.lru:remove(old_val)
+		self.keys[old_val] = nil
 		self.total_size = self.total_size - val_size
 	end
 	while self.lru.last and self.total_size + val_size > self.max_size do
 		self:remove_last()
 	end
-	if not old_val then
-		self.values[key] = val
-		self.keys[val] = key
-	end
+	self.values[key] = val
+	self.keys[val] = key
 	self.lru:insert_first(val)
 	self.total_size = self.total_size + val_size
+end
+
+
+if not ... then
+
+	local cache = _G.lrucache()
+
+	local k1 = {}
+	local v1 = {}
+	local v2 = {}
+	local v3 = {}
+	cache:put(k1, v1)
+	cache:put(k1, v2)
+	cache:put(k1, v3)
+
 end

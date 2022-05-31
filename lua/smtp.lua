@@ -131,7 +131,7 @@ function smtp_connect(t)
 		set_timeout(self.sendmail_timeout)
 		send_line('MAIL FROM: %s', req.from)
 		check_reply'2..'
-		local to = type(req.to) == 'string' and {req.to} or req.to
+		local to = isstr(req.to) and {req.to} or req.to
 		for i,to in ipairs(to) do
 			 send_line('RCPT TO: %s', req.to)
 			 check_reply'2..'

@@ -16,7 +16,7 @@ TLS_WANT_POLLOUT = C.TLS_WANT_POLLOUT
 local config = {}
 
 function tls_config(t)
-	if ffi.istype('struct tls_config', t) then
+	if istype('struct tls_config', t) then
 		return t --pass-through
 	end
 	local self = assert(ptr(C.tls_config_new()))
@@ -129,7 +129,7 @@ end
 
 function config:set_protocols(protocols)
 	local err
-	if type(protocols) == 'string' then
+	if isstr(protocols) then
 		protocols, err = self:parse_protocols(protocols)
 		if not protocols then return nil, err end
 	end
@@ -157,7 +157,7 @@ config.verify_client          = return_true(C.tls_config_verify_client)
 config.verify_client_optional = return_true(C.tls_config_verify_client_optional)
 config.clear_keys             = return_true(C.tls_config_clear_keys)
 
-local proto_buf = ffi.new'uint32_t[1]'
+local proto_buf = u32a(1)
 function config:parse_protocols(s)
 	s = s:gsub('^%s+', ''):gsub('%s+$', ''):gsub('%s+', ':')
 	local ok, err = check(self, C.tls_config_parse_protocols(proto_buf, s))
@@ -212,34 +212,37 @@ do
 		{'session_lifetime'      , config.set_session_lifetime},
 	}
 
-	local function load_files(t, loadfile)
+	local function load_files(t)
 		local st = {}
 		for k,v in pairs(t) do
 			if k:find'_file$' then
 				--NOTE: bearssl doesn't handle CRLF.
-				st[k:gsub('_file$', '')] = assert(loadfile(v)):gsub('\r', '')
+				local v, err = try_load(v)
+				if v then
+					st[k:gsub('_file$', '')] = v:gsub('\r', '')
+				end
 				t[k] = nil
 			end
 		end
-		for k,v in pairs(st) do
-			t[k] = v
-		end
+		update(t, st)
 	end
 
 	function config:set(t1)
 
-		local loadfile = assert(t1.loadfile)
 		local t = {}
-		for k,v in pairs(t1) do t[k] = v end
-		load_files(t, loadfile)
+		for k,v in pairs(t1) do
+			if isfunc(v) then v = v() end --getter
+			t[k] = v
+		end
+		load_files(t)
 		if t.keypairs then
 			for i,t in ipairs(t.keypairs) do
-				load_files(t, loadfile)
+				load_files(t)
 			end
 		end
 		if t.ticket_keys then
 			for i,t in ipairs(t.ticket_keys) do
-				load_files(t, loadfile)
+				load_files(t)
 			end
 		end
 
@@ -250,8 +253,7 @@ do
 				local sz = is_str and (t[k..'_size'] or #v) or nil
 				local ok, err = set_method(self, v, sz)
 				if not ok then return nil, err end
-				log('', 'tls', 'config', '%-25s %s', k,
-					tostring(v):gsub('^%s+', ''):gsub('\r?\n%s*', ' \\n '))
+				log('', 'tls', 'config', '%-25s %s', k, tostring(v))
 			end
 		end
 		return true
@@ -259,7 +261,7 @@ do
 
 end
 
-ffi.metatype('struct tls_config', {__index = config})
+metatype('struct tls_config', {__index = config})
 
 local function check(self, ret)
 	if ret == 0 then return true end
@@ -297,7 +299,7 @@ function tls:free()
 	C.tls_free(self)
 end
 
-local ctls_buf = ffi.new'struct tls*[1]'
+local ctls_buf = new'struct tls*[1]'
 function tls:accept(read_cb, write_cb, cb_arg)
 	local ok, err = check(self, C.tls_accept_cbs(self, ctls_buf, read_cb, write_cb, cb_arg))
 	if not ok then return nil, err end
@@ -330,4 +332,4 @@ function tls:close()
 	return true
 end
 
-ffi.metatype('struct tls', {__index = tls})
+metatype('struct tls', {__index = tls})

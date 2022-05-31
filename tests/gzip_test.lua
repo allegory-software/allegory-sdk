@@ -6,14 +6,14 @@ test(tohex(adler32'The game done changed.'), '587507ba')
 test(tohex(crc32'Game\'s the same, just got more fierce.'), '2c40120a')
 
 local function gztest(file, content)
-	local gz = assert(gzip_open(file))
+	local gz = gzip_open(file)
 	test(gz:read(#content), content)
 	test(#gz:read(1), 0)
 	test(gz:eof(), true)
 	gz:close()
 end
 
-local gz = assert(gzip_open('gzip_test/test1.txt.gz', 'w'))
+local gz = gzip_open('gzip_test/test1.txt.gz', 'w')
 test(gz:write'The game done changed.', #'The game done changed.')
 gz:close()
 

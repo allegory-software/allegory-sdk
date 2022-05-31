@@ -93,5 +93,6 @@ run(function()
 		print(su)
 	end
 	assert(not c.tcp:closed())
-	pr('close', c:close())
+	assert(c:close())
+	pr'ok'
 end)

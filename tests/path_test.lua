@@ -437,10 +437,9 @@ test('C:/a/b', 'C:/a' , 'b',        'win') --0 updirs + non-empty (DOS)
 
 local function test(s, pl, repl, s2)
 	local s1, err, errcode = path_filename(s, pl, repl)
-	print('filename', s, pl, repl, '->', s1, err, errcode)
+	print('filename', s, pl, '->', s1, err, errcode)
 	assert(s1 == s2)
 end
-
 test('/a/..', 'unix', nil, nil)
 test('/a/..', 'unix', function() end, nil)
 test('/a/..', 'unix', function() return false end, nil)

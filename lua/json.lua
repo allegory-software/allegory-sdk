@@ -22,6 +22,10 @@ cjson_safe.encode_empty_table_as_object(false) --encode empty tables as arrays.
 
 null = cjson.null
 
+local
+	type, select, pairs, unpack =
+	type, select, pairs, unpack
+
 function json_asarray(t)
 	return setmetatable(t or {}, cjson.array_mt)
 end
@@ -74,8 +78,10 @@ local function repl_nulls(v, null_val)
 	if null_val == null then return v end
 	if type(v) == 'table' then
 		return repl_nulls_t(v)
+	elseif v == null then
+		return null_val
 	else
-		return repl(v, null, null_val)
+		return v
 	end
 end
 

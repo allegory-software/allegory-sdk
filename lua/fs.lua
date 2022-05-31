@@ -12,8 +12,8 @@ FEATURES
   * platform-specific functionality exposed
 
 FILE OBJECTS
-	open(path[, mode|opt]) -> f                   open file
-	f:close()                                     close file
+	[try_]open(path[, mode|opt]) -> f             open file
+	f:[try_]close()                               close file
 	f:closed() -> true|false                      check if file is closed
 	isfile(f) -> true|false                       check if f is a file object
 	f.handle -> HANDLE                            Windows HANDLE (Windows platforms)
@@ -35,14 +35,14 @@ FILE I/O
 	f:flush()                                     flush buffers
 	f:seek([whence] [, offset]) -> pos            get/set the file pointer
 	f:truncate([opt])                             truncate file to current file pointer
-	f:buffered_read([bufsize]) -> read(buf, sz)   get a buffered read function
+	f:[un]buffered_reader([bufsize]) -> read(buf, sz)   get read(buf, sz)
 OPEN FILE ATTRIBUTES
-	f:attr([attr]) -> val|t                       get/set attribute(s) of open file
+	f:[try_]attr([attr]) -> val|t                 get/set attribute(s) of open file
 	f:size() -> n                                 get file size
 DIRECTORY LISTING
 	ls(dir, [opt]) -> d, next                     directory contents iterator
 	  d:next() -> name, d                         call the iterator explicitly
-	  d:close()                                   close iterator
+	  d:[try_]close()                             close iterator
 	  d:closed() -> true|false                    check if iterator is closed
 	  d:name() -> s                               dir entry's name
 	  d:dir() -> s                                dir that was passed to ls()
@@ -60,9 +60,10 @@ DIRECTORY LISTING
 	  sc:depth([n]) -> n (from 1)
 	searchpaths({path1,...}, file, [type]) -> path
 FILE ATTRIBUTES
-	file_attr(path, [attr, ][deref]) -> t|val     get/set file attribute(s)
+	[try_]file_attr(path, [attr, ][deref]) -> t|val     get/set file attribute(s)
 	file_is(path, [type], [deref]) -> t|f         check if file exists or is of a certain type
 	exists                                      = file_is
+	checkexists(path, [type], [deref])            assert that file exists
 	mtime(path, [deref]) -> ts                    get file's modification time
 	[try_]chmod(path, perms, [quiet]) -> path     change a file or dir's permissions
 FILESYSTEM OPS
@@ -75,11 +76,11 @@ FILESYSTEM OPS
 	[try_]rm[dir|file](path, [quiet])             remove directory or file
 	[try_]rm_rf(path, [quiet])                    like `rm -rf`
 	[try_]mkdirs(file, [quiet]) -> file           make file's dir
-	mv(old_path, new_path, [quiet])               rename/move file or dir on the same filesystem
+	[try_]mv(old_path, new_path, [quiet])         rename/move file or dir on the same filesystem
 SYMLINKS & HARDLINKS
 	[try_]mksymlink(symlink, path, is_dir, [quiet])  create a symbolic link for a file or dir
 	[try_]mkhardlink(hardlink, path, [quiet])     create a hard link for a file
-	readlink(path) -> path                        dereference a symlink recursively
+	[try_]readlink(path) -> path                  dereference a symlink recursively
 COMMON PATHS
 	homedir() -> path                             get current user's home directory
 	tmpdir() -> path                              get the temporary directory
@@ -187,7 +188,7 @@ NORMALIZED ERROR MESSAGES
 
 File Objects -----------------------------------------------------------------
 
-open(path[, mode|opt]) -> f
+[try_]open(path[, mode|opt]) -> f
 
 Open/create a file for reading and/or writing. The second arg can be a string:
 
@@ -318,11 +319,11 @@ f:truncate(size, [opt])
 	written. Those bytes are only written on subsequent write calls that skip
 	over the reserved area, otherwise there's no overhead.
 
-f:buffered_read([bufsize]) -> read(buf, len)
+f:[un]buffered_reader([bufsize]) -> read(buf, len)
 
 	Returns a `read(buf, len) -> readlen` function which reads ahead from file
 	in order to lower the number of syscalls. `bufsize` specifies the buffer's
-	size (default is 64K).
+	size (default is 64K). The unbuffered version doesn't use a buffer.
 
 Open file attributes ---------------------------------------------------------
 
@@ -416,7 +417,7 @@ scandir([path]) -> iter() -> sc
 
 File attributes --------------------------------------------------------------
 
-file_attr(path, [attr, ][deref]) -> t|val
+[try_]file_attr(path, [attr, ][deref]) -> t|val
 
 	Get/set a file's attribute(s) given its path in utf8.
 
@@ -446,7 +447,7 @@ filemove(path, newpath, [opt])
 
 Symlinks & Hardlinks ---------------------------------------------------------
 
-readlink(path) -> path
+[try_]readlink(path) -> path
 
 	Dereference a symlink recursively. The result can be an absolute or
 	relative path which can be valid or not.
@@ -627,8 +628,8 @@ require'glue'
 require'path'
 
 local
-	C, min, max, floor, ceil, ln =
-	C, min, max, floor, ceil, ln
+	C, min, max, floor, ceil, ln, push, pop =
+	C, min, max, floor, ceil, ln, push, pop
 
 local file = {}; file.__index = file --file object methods
 local stream = {}; stream.__index = stream --FILE methods
@@ -667,19 +668,40 @@ end
 
 function isfile(f)
 	local mt = getmetatable(f)
-	return type(mt) == 'table' and rawget(mt, '__index') == file
+	return istab(mt) and rawget(mt, '__index') == file
 end
 
-function _open_opt(mode_opt, str_opt)
+function try_open(path, mode_opt, quiet)
 	mode_opt = mode_opt or 'r'
-	local opt = type(mode_opt) == 'table' and mode_opt or nil
-	local mode = type(mode_opt) == 'string' and mode_opt or opt and opt.mode
-	local mopt = mode and assertf(str_opt[mode], 'invalid open mode: %s', mode)
-	return opt and mopt and update({}, mopt, opt) or opt or mopt
+	local opt = istab(mode_opt) and mode_opt or nil
+	local mode = isstr(mode_opt) and mode_opt or opt and opt.mode
+	local mopt = mode and assertf(_open_mode_opt[mode], 'invalid open mode: %s', mode)
+	return _open(path, opt and mopt and update({}, mopt, opt) or opt or mopt, quiet)
 end
 
---returns a read(buf, sz) -> len function which reads ahead from file.
-function file.buffered_read(f, bufsize)
+function open(path, mode_opt, quiet)
+	local f, err = try_open(path, mode_opt, quiet)
+	check('fs', 'open', f, '%s: %s', path, err)
+	return f
+end
+
+function file.close(f)
+	return assert(f:try_close())
+end
+
+function file.unbuffered_reader(f)
+	return function(buf, sz)
+		if not buf then
+			local i, err = f:seek('cur',  0); if not i then return nil, err end
+			local j, err = f:seek('cur', sz); if not i then return nil, err end
+			return j - i
+		else
+			return f:read(buf, sz) --skip bytes (libjpeg semantics)
+		end
+	end
+end
+
+function file.buffered_reader(f, bufsize)
 	local ptr_ct = u8p
 	local buf_ct = u8a
 	local o1, err = f:size()
@@ -693,7 +715,7 @@ function file.buffered_read(f, bufsize)
 	local eof = false
 	return function(dst, sz)
 		if not dst then --skip bytes (libjpeg semantics)
-			local i, err = f:seek('cur')    ; if not i then return nil, err end
+			local i, err = f:seek('cur',  0); if not i then return nil, err end
 			local j, err = f:seek('cur', sz); if not j then return nil, err end
 			return j - i
 		end
@@ -764,7 +786,7 @@ function file:write(buf, sz, expires)
 			return nil, err, sz0 - sz
 		end
 		assert(len > 0)
-		if type(buf) == 'string' then --only make pointer on the rare second iteration.
+		if isstr(buf) then --only make pointer on the rare second iteration.
 			buf = cast(u8p, buf)
 		end
 		buf = buf + len
@@ -834,14 +856,14 @@ function try_mkdir(dir, recursive, perms, quiet)
 			if err ~= 'not_found' then --other problem
 				return ok, err
 			end
-			add(t, dir)
+			push(t, dir)
 			dir = path_dir(dir)
 			if not dir then --reached root
 				return ok, err
 			end
 		end
 		while #t > 0 do
-			local dir = remove(t)
+			local dir = pop(t)
 			local ok, err = _try_mkdir(dir, perms, quiet)
 			if not ok then return ok, err end
 		end
@@ -878,7 +900,7 @@ function try_rmfile(file, quiet)
 end
 
 local function try_rm(path, quiet)
-	local type, err = file_attr(path, 'type', false)
+	local type, err = try_file_attr(path, 'type', false)
 	if not type and err == 'not_found' then
 		return true, err
 	end
@@ -915,7 +937,7 @@ end
 local function try_rm_rf(path, quiet)
 	--not recursing if the dir is a symlink, unless it has an endsep!
 	if not path_endsep(path) then
-		local type, err = file_attr(path, 'type', false)
+		local type, err = try_file_attr(path, 'type', false)
 		if not type then
 			if err == 'not_found' then return true, err end
 			return nil, err
@@ -945,11 +967,11 @@ function try_mksymlink(link_path, target_path, is_dir, quiet, replace)
 	local ok, err = _mksymlink(link_path, target_path, is_dir)
 	if not ok then
 		if err == 'already_exists' then
-			local file_type, symlink_type = file_attr(link_path, 'type')
+			local file_type, symlink_type = try_file_attr(link_path, 'type')
 			if file_type == 'symlink'
 				and (symlink_type == 'dir') == (is_dir or false)
 			then
-				if readlink(link_path) == target_path then
+				if try_readlink(link_path) == target_path then
 					return true, err
 				elseif replace ~= false then
 					if is_dir then
@@ -978,9 +1000,9 @@ function try_mkhardlink(link_path, target_path, quiet)
 	if not ok then
 		if err == 'already_exists' then
 			local ID = win and 'id' or 'inode'
-			local i1 = file_attr(target_path, ID)
+			local i1 = try_file_attr(target_path, ID)
 			if not i1 then goto fuggetit end
-			local i2 = file_attr(link_path, ID)
+			local i2 = try_file_attr(link_path, ID)
 			if not i2 then goto fuggetit end
 			if i1 == i2 then return true, err end
 		end
@@ -1055,7 +1077,7 @@ end
 
 --symlinks -------------------------------------------------------------------
 
-function readlink(link, maxdepth)
+function try_readlink(link, maxdepth)
 	maxdepth = maxdepth or 32
 	if not file_is(link, 'symlink') then
 		return link
@@ -1078,7 +1100,15 @@ function readlink(link, maxdepth)
 		end
 		link = path_combine(link_dir, target)
 	end
-	return readlink(link, maxdepth - 1)
+	return try_readlink(link, maxdepth - 1)
+end
+
+function readlink(link, maxdepth)
+	local target, err = try_readlink(link, maxdepth)
+	local ok = target ~= nil or err == 'not_found'
+	check('fs', 'readlink', ok, '%s: %s', link, err)
+	if target == nil then return target, err end
+	return target
 end
 
 --paths ----------------------------------------------------------------------
@@ -1120,12 +1150,20 @@ end
 
 --file attributes ------------------------------------------------------------
 
-function file.attr(f, attr)
-	if type(attr) == 'table' then
+function file.try_attr(f, attr)
+	if istab(attr) then
 		return _file_attr_set(f, attr)
 	else
 		return _file_attr_get(f, attr)
 	end
+end
+
+function file.attr(f, attr)
+	local ret, err = f:try_attr(attr)
+	local ok = ret ~= nil or err == nil or err == 'not_found'
+	check('fs', 'attr', ok, '%s: %s', f.path, err)
+	if err ~= nil then return ret, err end
+	return ret
 end
 
 function file.size(f)
@@ -1133,7 +1171,7 @@ function file.size(f)
 end
 
 local function attr_args(attr, deref)
-	if type(attr) == 'boolean' then --middle arg missing
+	if isbool(attr) then --middle arg missing
 		attr, deref = nil, attr
 	end
 	if deref == nil then
@@ -1142,34 +1180,43 @@ local function attr_args(attr, deref)
 	return attr, deref
 end
 
-function file_attr(path, ...)
+function try_file_attr(path, ...)
 	local attr, deref = attr_args(...)
 	if attr == 'target' then
 		--NOTE: posix doesn't need a type check here, but Windows does
 		if not win or file_is(path, 'symlink') then
-			return readlink(path)
+			return try_readlink(path)
 		else
 			return nil --no error for non-symlink files
 		end
 	end
-	if type(attr) == 'table' then
+	if istab(attr) then
 		return _fs_attr_set(path, attr, deref)
 	else
 		return _fs_attr_get(path, attr, deref)
 	end
 end
+function file_attr(path, ...)
+	local ret, err = try_file_attr(path, ...)
+	local ok = ret ~= nil or err == nil or err == 'not_found'
+	check('fs', 'attr', ok, '%s: %s', path, err)
+	if err ~= nil then return ret, err end
+	return ret
+end
 
+function try_mtime(file, deref)
+	return try_file_attr(file, 'mtime', deref)
+end
 function mtime(file, deref)
 	return file_attr(file, 'mtime', deref)
 end
 
 function try_chmod(path, perms, quiet)
-	local ok, err = file_attr(path, {perms = perms})
+	local ok, err = try_file_attr(path, {perms = perms})
 	if not ok then return false, err end
 	log(quiet and '' or 'note', 'fs', 'chmod', '%s', file)
 	return path
 end
-
 function chmod(path, perms, quiet)
 	local ok, err = try_chmod(path, perms, quiet)
 	check('fs', 'chmod', ok, '%s: %s', path, err)
@@ -1180,7 +1227,7 @@ function file_is(path, type, deref)
 	if type == 'symlink' then
 		deref = false
 	end
-	local ftype, err = file_attr(path, 'type', deref)
+	local ftype, err = try_file_attr(path, 'type', deref)
 	if not type and not ftype and err == 'not_found' then
 		return false
 	elseif not type and ftype then
@@ -1193,8 +1240,8 @@ function file_is(path, type, deref)
 end
 exists = file_is
 
-function checkexists(file, type)
-	check('fs', 'exists', exists(file, type), '%s', file)
+function checkexists(file, type, deref)
+	check('fs', 'exists', exists(file, type, deref), '%s', file)
 end
 
 --directory listing ----------------------------------------------------------
@@ -1227,12 +1274,12 @@ function dir.attr(dir, ...)
 	local attr, deref = attr_args(...)
 	if attr == 'target' then
 		if dir_is_symlink(dir) then
-			return readlink(dir:path())
+			return try_readlink(dir:path())
 		else
 			return nil --no error for non-symlink files
 		end
 	end
-	if type(attr) == 'table' then
+	if istab(attr) then
 		return fs_attr_set(dir:path(), attr, deref)
 	elseif not attr or (deref and dir_is_symlink(dir)) then
 		return _fs_attr_get(dir:path(), attr, deref)
@@ -1252,9 +1299,6 @@ function dir.is(dir, type, deref)
 	end
 	return dir:attr('type', deref) == type
 end
-
-local push = table.insert
-local pop = table.remove
 
 function scandir(path)
 	local pds = {}
@@ -1282,7 +1326,7 @@ function scandir(path)
 		local f
 		function f(self, depth, ...)
 			if not name then return nil, err end
-			if type(depth) ~= 'number' then
+			if not isnum(depth) then
 				return f(self, 0, depth, ...)
 			end
 			local d = d
@@ -1346,7 +1390,7 @@ end
 end
 
 function aligned_size(size, dir) --dir can be 'l' or 'r' (default: 'r')
-	if ffi.istype(u64, size) then --an uintptr_t on x64
+	if istype(u64, size) then --an uintptr_t on x64
 		local pagesize = pagesize()
 		local hi, lo = split_uint64(size)
 		local lo = aligned_size(lo, dir)
@@ -1380,7 +1424,7 @@ end
 
 function file.mmap(f, ...)
 	local access, size, offset, addr
-	if type(t) == 'table' then
+	if istab(t) then
 		access, size, offset, addr = t.access, t.size, t.offset, t.addr
 	else
 		offset, size, addr, access = ...
@@ -1390,13 +1434,13 @@ end
 
 function mmap(t,...)
 	local file, access, size, offset, addr, tagname, perms
-	if type(t) == 'table' then
+	if istab(t) then
 		file, access, size, offset, addr, tagname, perms =
 			t.file, t.access, t.size, t.offset, t.addr, t.tagname, t.perms
 	else
 		file, access, size, offset, addr, tagname, perms = t, ...
 	end
-	assert(not file or type(file) == 'string' or isfile(file), 'invalid file argument')
+	assert(not file or isstr(file) or isfile(file), 'invalid file argument')
 	assert(file or size, 'file and/or size expected')
 	assert(not size or size > 0, 'size must be > 0')
 	local offset = file and offset or 0
@@ -1486,18 +1530,19 @@ function vfile:truncate(size)
 	return true
 end
 
-vfile.buffered_read = file.buffered_read
+vfile.unbuffered_reader = file.unbuffered_reader
+vfile  .buffered_reader = file  .buffered_reader
 
 --hi-level APIs --------------------------------------------------------------
 
 ABORT = {} --error signal to pass to save()'s reader function.
 
 function try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
-	local f, err = open(file)
-	if not f and err == 'not_found' and default_buf ~= nil then
-		return default_buf, default_len
-	end
+	local f, err = try_open(file)
 	if not f then
+		if err == 'not_found' and default_buf ~= nil then
+			return default_buf, default_len
+		end
 		return nil, err
 	end
 	local buf, len = f:readall(nil, ignore_file_size)
@@ -1525,6 +1570,8 @@ end
 
 
 --write a Lua value, array of values or function results to a file atomically.
+--TODO: make a file_saver() out of this without coroutines and use it
+--in resize_image()!
 local function _save(file, s, sz, perms)
 
 	local tmpfile = file..'.tmp'
@@ -1537,18 +1584,18 @@ local function _save(file, s, sz, perms)
 		end
 	end
 
-	local f, err = open(tmpfile, perms and {mode = 'w', perms = perms} or 'w')
+	local f, err = try_open(tmpfile, perms and {mode = 'w', perms = perms} or 'w', true)
 	if not f then
 		return false, _('could not open file %s: %s', tmpfile, err)
 	end
 
 	local ok, err = true
-	if type(s) == 'table' then --array of stringables
+	if istab(s) then --array of stringables
 		for i = 1, #s do
 			ok, err = f:write(tostring(s[i]))
 			if not ok then break end
 		end
-	elseif type(s) == 'function' then --reader of buffers or stringables
+	elseif isfunc(s) then --reader of buffers or stringables
 		local read = s
 		while true do
 			local s, sz
@@ -1556,14 +1603,14 @@ local function _save(file, s, sz, perms)
 			if not ok then err = s; break end
 			if s == nil then break end --eof
 			if s == ABORT then ok = false; break end
-			if type(s) ~= 'cdata' then
+			if not iscdata(s) then
 				s = tostring(s)
 			end
 			ok, err = f:write(s, sz)
 			if not ok then break end
 		end
 	elseif s ~= nil and s ~= '' then --buffer or stringable
-		if type(s) ~= 'cdata' then
+		if not iscdata(s) then
 			s = tostring(s)
 		end
 		ok, err = f:write(s, sz)
@@ -1572,17 +1619,17 @@ local function _save(file, s, sz, perms)
 
 	if not ok then
 		local err_msg = 'could not write to file %s: %s'
-		local ok, rm_err = try_rmfile(tmpfile)
+		local ok, rm_err = try_rmfile(tmpfile, true)
 		if not ok then
 			err_msg = err_msg..'\nremoving it also failed: %s'
 		end
 		return false, _(err_msg, tmpfile, err, rm_err)
 	end
 
-	local ok, err = try_mv(tmpfile, file)
+	local ok, err = try_mv(tmpfile, file, true)
 	if not ok then
 		local err_msg = 'could not move file %s -> %s: %s'
-		local ok, rm_err = try_rmfile(tmpfile)
+		local ok, rm_err = try_rmfile(tmpfile, true)
 		if not ok then
 			err_msg = err_msg..'\nremoving it also failed: %s'
 		end
@@ -1595,7 +1642,7 @@ end
 function try_save(file, s, sz, perms, quiet)
 	local ok, err = _save(file, s, sz, perms)
 	if not ok then return false, err end
-	local sz = sz or type(s) == 'string' and #s
+	local sz = sz or isstr(s) and #s
 	local ssz = sz and _(' (%s)', kbytes(sz)) or ''
 	log(quiet and '' or 'note', 'fs', 'save', '%s%s', file, ssz)
 	return true
@@ -1616,6 +1663,7 @@ function file_saver(file)
 	return write
 end
 
+--TODO: try_cp()
 function cp(src_file, dst_file, quiet)
 	log(quiet and '' or 'note', 'fs', 'cp', 'src: %s ->\ndst: %s', src_file, dst_file)
 	--TODO: buffered read for large files.
@@ -1635,7 +1683,7 @@ function try_touch(file, mtime, btime, quiet) --create file or update its mtime.
 			date('%d-%m-%Y %H:%M', mtime) or 'now',
 			btime and ', btime '..date('%d-%m-%Y %H:%M', btime) or '')
 	end
-	local ok, err = file_attr(file, {
+	local ok, err = try_file_attr(file, {
 		mtime = mtime or time(),
 		btime = btime or nil,
 	})
@@ -1646,8 +1694,9 @@ function touch(file, mtime, btime, quiet)
 	return check('fs', 'touch', ok and file, '%s: %s', file, err)
 end
 
+--TODO: remove this or incorporate into ls() ?
 function ls_dir(path, patt, min_mtime, create, order_by, recursive)
-	if type(path) == 'table' then
+	if istab(path) then
 		local t = path
 		path, patt, min_mtime, create, order_by, recursive =
 			t.path, t.find, t.min_mtime, t.create, t.order_by, t.recursive

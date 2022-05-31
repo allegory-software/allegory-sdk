@@ -247,7 +247,7 @@ local function action_handler(action, ...)
 		end
 	end
 
-	if handler and type(handler) ~= 'function' then
+	if handler and not isfunc(handler) then
 		local s = handler
 		handler = function()
 			outall(s)

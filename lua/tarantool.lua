@@ -6,48 +6,48 @@
 	Features: streams, prepared statements, UUID & DECIMAL types.
 
 CONECTING
-	tarantool_connect(opt) -> tt          connect to server
-	  opt.host                            host (`'127.0.0.1'`)
-	  opt.port                            port (`3301`)
-	  opt.user                            user (optional)
-	  opt.password                        password (optional)
-	  opt.timeout                         timeout (`2`)
-	  opt.mp                              msgpack instance to use (optional)
-	tt:stream() -> tt                     create a stream
+	[try_]tarantool_connect(opt) -> tt      connect to server
+	  opt.host                              host (`'127.0.0.1'`)
+	  opt.port                              port (`3301`)
+	  opt.user                              user (optional)
+	  opt.password                          password (optional)
+	  opt.timeout                           timeout (`2`)
+	  opt.mp                                msgpack instance to use (optional)
+	tt:stream() -> tt                       create a stream
 
 SELECTING
-	tt:select(space,[index],[key],[sopt]) -> tuples  select tuples from a space
-	  sopt.limit                          limit (`4GB-1`)
-	  sopt.offset                         offset (`0`)
-	  sopt.iterator                       iterator
+	tt:select(space,[index],[key],[sopt]) -> tuples    select tuples from a space
+	  sopt.limit                            limit (`4GB-1`)
+	  sopt.offset                           offset (`0`)
+	  sopt.iterator                         iterator
 
 UPDATING
-	tt:insert(space, tuple)               insert a tuple in a space
-	tt:replace(space, tuple)              insert or update a tuple in a space
-	tt:delete(space, key)                 delete tuples from a space
-	tt:update(space, index, key, oplist)  update tuples in bulk
+	tt:[try_]insert(space, tuple)                 insert a tuple in a space
+	tt:[try_]replace(space, tuple)                insert or update a tuple in a space
+	tt:[try_]delete(space, key)                   delete tuples from a space
+	tt:[try_]update(space, index, key, oplist)    update tuples in bulk
 		https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_space/update/
-	tt:upsert(space, index, key, oplist)  insert or update tuples in bulk
+	tt:[try_]upsert(space, index, key, oplist)    insert or update tuples in bulk
 		https://www.tarantool.io/en/doc/latest/reference/reference_lua/box_space/upsert/
 
 LUA RPC
-	tt:eval(expr, ...) -> ...             eval Lua expression on the server
-	tt:call(fn, ...) -> ...               call Lua function on the server
+	tt:[try_]eval(expr, ...) -> ...         eval Lua expression on the server
+	tt:[try_]call(fn, ...) -> ...           call Lua function on the server
 
 SQL QUERIES
-	tt:exec(sql, params, [xopt]) -> rows  execute SQL statement
+	tt:[try_]exec(sql, params, [xopt]) -> rows  execute SQL statement
 
 SQL PREPARED STATEMENTS
-	tt:prepare(sql) -> st                 prepare SQL statement
-	st:exec(params, [xopt]) -> rows       exec prepared statement
-	st:free()                             unprepare statement
-	st.fields                             field list with field info
-	st.params                             param list with param info
+	tt:[try_]prepare(sql) -> st             prepare SQL statement
+	st:[try_]exec(params, [xopt]) -> rows   exec prepared statement
+	st:[try_]free()                         unprepare statement
+	st.fields                               field list with field info
+	st.params                               param list with param info
 
 MISC
-	tt:ping()                             ping
-	tt:clear_metadata_cache()             clear `space` and `index` names
-	tt.mp                                 msgpack instance used
+	tt:[try_]ping()                         ping
+	tt:clear_metadata_cache()               clear `space` and `index` names
+	tt.mp                                   msgpack instance used
 
 What the args mean:
 
@@ -73,11 +73,10 @@ require'glue'
 require'base64'
 require'sha1'
 require'msgpack'
-local buffer = require'string.buffer'.new
 
 local
-	u8a, u8p, empty, memoize, object =
-	u8a, u8p, empty, memoize, object
+	u8a, u8p, buffer, empty, memoize, object =
+	u8a, u8p, buffer, empty, memoize, object
 
 local check_io, checkp, check, protect = tcp_protocol_errors'tarantool'
 
@@ -169,17 +168,14 @@ local function decode_uuid(mp, p, i, len) --16 bytes binary UUID
 	return str(p+i, len)
 end
 
-tarantool_connect = protect(function(opt)
+tarantool_connect = function(opt)
 	local c = object(c, opt)
 	log('note', 'taran', 'connect', '%s:%s user=%s', c.host, c.port, c.user or '')
 	c:clear_metadata_cache()
 	c.tcp = check_io(c, tcp()) --pin it so that it's closed automatically on error.
 	local expires = opt.expires or clock() + (opt.timeout or c.timeout)
 	check_io(c, c.tcp:connect(c.host, c.port, expires))
-	local b = buffer()
-	c._b = function(sz)
-		return b:reset():reserve(sz):ref()
-	end
+	c._b = buffer()
 	c.mp = opt.mp or msgpack()
 	c.mp.error = function(err) checkp(c, false, '%s', err) end
 	c.mp.decoder[MP_DECIMAL] = decode_decimal
@@ -201,7 +197,8 @@ tarantool_connect = protect(function(opt)
 		request(c, AUTH, body, expires)
 	end
 	return c
-end)
+end
+try_tarantool_connect = protect(tarantool_connect)
 
 c.stream = function(c)
 	c.last_stream_id = (c.last_stream_id or 0) + 1
@@ -293,7 +290,7 @@ local function exec_response(res)
 	return apply_sqlinfo(res[DATA] or {}, res[SQL_INFO]), fields(res[METADATA])
 end
 
---[[local]] function tselect(c, space, index, key, opt)
+function c.select(c, space, index, key, opt)
 	opt = opt or empty
 	local space, index = resolve_index(c, space, index)
 	local body = {
@@ -307,23 +304,26 @@ end
 	local expires = opt.expires or clock() + (opt.timeout or c.timeout)
 	return exec_response(request(c, SELECT, body, expires))
 end
-c.select = protect(tselect)
+tselect = c.select
+c.try_select = protect(c.select)
 
-c.insert = protect(function(c, space, tuple)
+function c.insert(c, space, tuple)
 	return request(c, INSERT, {
 		[SPACE_ID] = resolve_space(c, space),
 		[TUPLE] = mp.toarray(tuple),
 	})[DATA]
-end)
+end
+c.try_insert = protect(c.insert)
 
-c.replace = protect(function(c, space, tuple)
+function c.replace(c, space, tuple)
 	return request(c, REPLACE, {
 		[SPACE_ID] = resolve_space(c, space),
 		[TUPLE] = mp.toarray(tuple),
 	})[DATA]
-end)
+end
+c.try_replace = protect(c.replace)
 
-c.update = protect(function(c, space, index, key, oplist)
+function c.update(c, space, index, key, oplist)
 	local space, index = resolve_index(c, space, index)
 	return request(c, UPDATE, {
 		[SPACE_ID] = space,
@@ -331,39 +331,44 @@ c.update = protect(function(c, space, index, key, oplist)
 		[KEY] = key_arg(c.mp, key),
 		[TUPLE] = mp.toarray(oplist),
 	})[DATA]
-end)
+end
+c.try_update = protect(c.update)
 
-c.delete = protect(function(c, space, key)
+function c.delete(c, space, key)
 	local space, index = resolve_index(c, space, index)
 	return request(c, DELETE, {
 		[SPACE_ID] = space,
 		[INDEX_ID] = index,
 		[KEY] = key_arg(c.mp, key),
 	})[DATA]
-end)
+end
+c.try_delete = protect(c.delete)
 
-c.upsert = protect(function(c, space, index, key, oplist)
+function c.upsert(c, space, index, key, oplist)
 	return request(c, UPSERT, {
 		[SPACE_ID] = resolve_space(c, space),
 		[INDEX_ID] = index,
 		[OPS] = oplist,
 		[TUPLE] = key_arg(c.mp, key),
 	})[DATA]
-end)
+end
+c.try_upsert = protect(c.upsert)
 
-c.eval = protect(function(c, expr, ...)
+function c.eval(c, expr, ...)
 	if type(expr) == 'function' then
 		expr = require'pp'.format(expr)
 		expr = format('return assert(%s)(...)', expr)
 	end
 	return unpack(request(c, EVAL, {[EXPR] = expr, [TUPLE] = c.mp.array(...)})[DATA])
-end)
+end
+c.try_eval = protect(c.eval)
 
-c.call = protect(function(c, fn, ...)
+function c.call(c, fn, ...)
 	return unpack(request(c, CALL, {[FUNCTION_NAME] = fn, [TUPLE] = c.mp.array(...)})[DATA])
-end)
+end
+c.try_call = protect(c.call)
 
-c.exec = protect(function(c, sql, params, xopt, param_meta)
+function c.exec(c, sql, params, xopt, param_meta)
 	if param_meta and param_meta.has_named_params then --pick params from named keys
 		local t = params
 		params = {}
@@ -382,7 +387,8 @@ c.exec = protect(function(c, sql, params, xopt, param_meta)
 		[SQL_BIND] = params,
 		[OPTIONS] = xopt or empty,
 	}))
-end)
+end
+c.try_exec = protect(c.exec)
 
 local st = {}
 
@@ -401,7 +407,7 @@ local function params(t)
 	return t
 end
 
-c.prepare = protect(function(c, sql)
+function c.prepare(c, sql)
 	local res = request(c, PREPARE, {
 		[SQL_TEXT] = type(sql) == 'string' and sql or nil,
 	})
@@ -411,22 +417,28 @@ c.prepare = protect(function(c, sql)
 		fields = fields(res[METADATA]),
 		params = params(res[BIND_METADATA]),
 	})
-end)
+end
+c.try_prepare = protect(c.prepare)
 
 function st:exec(params, xopt)
 	return self.conn:exec(self.id, params, xopt, self.params)
 end
 
-local unprepare = protect(function(c, stmt_id)
+local function unprepare(c, stmt_id)
 	return request(c, PREPARE, {[STMT_ID] = stmt_id})[STMT_ID]
-end)
+end
+local try_unprepare = protect(unprepare)
 function st:free()
 	return unprepare(self.conn, self.id)
 end
+function st:try_free()
+	return try_unprepare(self.conn, self.id)
+end
 
-c.ping = protect(function(c)
+function c.ping(c)
 	return request(c, PING, empty)
-end)
+end
+c.try_ping = protect(c.ping)
 
 local function esc_quote(s) return "''" end
 function c.esc(s)

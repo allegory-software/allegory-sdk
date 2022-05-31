@@ -322,7 +322,7 @@ local flag_bits = {
 	first_pipe_instance  = 0x00080000,
 }
 
-local str_opt = {
+_open_mode_opt = {
 	r = {
 		access = 'read',
 		creation = 'open_existing',
@@ -367,8 +367,7 @@ local function sec_attr(inheritable)
 	return sa
 end
 
-function open(path, mode_opt)
-	local opt = _open_opt(mode_opt, str_opt)
+function _open(path, opt)
 	local async = opt.async or opt.read_async or opt.write_async
 	assert(not async or opt.is_pipe_end, 'only pipes can be async')
 	local access   = bitflags(opt.access or 'read', access_bits, nil, true)
@@ -407,7 +406,7 @@ function file.closed(f)
 	return f.handle == INVALID_HANDLE_VALUE
 end
 
-function file.close(f)
+function file.try_close(f)
 	if f:closed() then return true end
 	if f._read_async or f._write_async then
 		local sock = require'sock'
@@ -428,6 +427,7 @@ function file_wrap_handle(h, read_async, write_async, is_pipe_end, path)
 		handle = h,
 		s = h, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
+		path = path,
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		_read_async  = read_async  and true or false,
 		_write_async = write_async and true or false,
@@ -441,7 +441,7 @@ function file_wrap_handle(h, read_async, write_async, is_pipe_end, path)
 		local sock = require'sock'
 		local ok, err = _sock_register(f)
 		if not ok then
-			assert(f:close())
+			f:close()
 			return nil, err
 		end
 	end
@@ -522,7 +522,7 @@ local pipe_flag_bits = update({
 local serial = 0
 
 function pipe(path, opt)
-	if type(path) == 'table' then
+	if istab(path) then
 		path, opt = path.path, path
 	end
 	opt = opt or {}
@@ -573,7 +573,7 @@ function pipe(path, opt)
 				return nil, err
 			end
 
-			local wf, err = open(path, {
+			local wf, err = _open(path, {
 				access = 'generic_write',
 				creation = 'open_existing',
 				sharing = '',
@@ -873,7 +873,7 @@ do
 	local ERROR_MORE_DATA = 234
 
 	function _readlink(path)
-		local f, err = open(path, readlink_opt)
+		local f, err = _open(path, readlink_opt)
 		if not f then return nil, err end
 		::again::
 		local buf = buf or REPARSE_DATA_BUFFER(sz)
@@ -1208,12 +1208,11 @@ function _file_attr_set(f, t)
 end
 
 local function with_open_file(path, open_opt, func, ...)
-	local f, err = open(path, open_opt)
+	local f, err = _open(path, open_opt)
 	if not f then return nil, err end
 	local ret, err = func(f, ...)
 	if ret == nil and err then return nil, err end
-	local ok, err = f:close()
-	if not ok then return nil, err end
+	f:close()
 	return ret
 end
 
@@ -1310,12 +1309,16 @@ dir_ct = typeof[[
 	}
 ]]
 
-function dir.close(dir)
+function dir.try_close(dir)
 	if dir:closed() then return true end
 	local ok, err = checknz(C.FindClose(dir._handle))
 	if not ok then return false, err end
 	dir._handle = INVALID_HANDLE_VALUE
 	return true
+end
+
+function dir.close(dir)
+	assert(dir:try_close())
 end
 
 function dir.closed(dir)
@@ -1375,7 +1378,7 @@ function fs_dir(path, skip_dot_dirs)
 	assert(not path:find'[%*%?]') --no globbing allowed
 	local dir = dir_ct(#path)
 	dir._dirlen = #path
-	ffi.copy(dir._dir, path, #path)
+	copy(dir._dir, path, #path)
 	dir._skip_dot_dirs = skip_dot_dirs and 1 or 0
 	dir._handle = C.FindFirstFileW(wcs(path .. '\\*'), dir._fdata)
 	if dir._handle == INVALID_HANDLE_VALUE then
@@ -1507,7 +1510,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 		return nil, err
 	end
 
-	if type(file) == 'string' then
+	if isstr(file) then
 		local open_opt = {
 			access = 'read'
 				.. (exec  and ' execute' or '')
@@ -1516,7 +1519,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 			creation = write and 'open_always' or 'open_existing',
 		}
 		local err
-		file, err = open(file, open_opt)
+		file, err = try_open(file, open_opt)
 		if not file then
 			return nil, err
 		end
@@ -1568,7 +1571,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 	end
 
 	local function flush(self, async, addr, sz)
-		if type(async) ~= 'boolean' then --async arg is optional
+		if not isbool(async) then --async arg is optional
 			async, addr, sz = false, async, addr
 		end
 		local addr = aligned_addr(addr or self.addr, 'left')
