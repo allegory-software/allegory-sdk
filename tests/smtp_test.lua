@@ -1,37 +1,26 @@
-
 require'glue'
 require'smtp'
+require'resolver'
 require'sock'
 require'logging'
 require'multipart'
-tls_libname = 'tls_bearssl'
+logging.filter.tls = true
+config('ca_file', exedir()..'/../../tests/cacert.pem')
 
 logging.debug = true
 
-run(function()
+config('smtp_host' , 'mail.bpnpart.com')
+--config('smtp_port' , 587)
+--config('smtp_tls'  , false)
+config('smtp_user' , 'admin@bpnpart.com')
+config('smtp_pass' , 'Bpnpart@0@0')
+config('smtp_debug', 'protocol errors tracebacks')
 
-	local smtp = smtp_connect{
-		debug = {
-			protocol = true,
-			errors = true,
-			tracebacks = true,
-			stream = true,
-		},
-		logging = true,
-		host = 'mail.bpnpart.com',
-		port = 587,
-		--port = 465, tls = true,
-		user = 'admin@bpnpart.com',
-		pass = 'Bpnpart@0@0',
-		tls_options = {
-			ca_file = 'x:/care/cacert.pem',
-			loadfile = glue.readfile,
-		},
-	}
+run(function()
 
 	if false then
 
-		assert(smtp:sendmail{
+		sendmail{
 			from = 'admin@bpnpart.com',
 			to = 'cosmin.apreutesei@gmail.com',
 			message = 'Hello Dude!',
@@ -40,11 +29,11 @@ run(function()
 				to = 'cosmin.apreutesei@gmail.com',
 				subject = 'How are you today?',
 			},
-		})
+		}
 
 	else
 
-		local req = multipart.mail{
+		sendmail{
 			from = 'admin@bpnpart.com',
 			to = 'cosmin.apreutesei@gmail.com',
 			subject = 'How are you today?',
@@ -55,13 +44,13 @@ run(function()
 					cid = 'img1',
 					filename = 'progressive.jpg',
 					content_type = 'image/jpeg',
-					contents = assert(glue.readfile'jpeg_test/progressive.jpg'),
+					contents = load'jpeg_test/progressive.jpg',
 				},
 				{
 					cid = 'img2',
 					filename = 'birds.jpg',
 					content_type = 'image/jpeg',
-					contents = assert(glue.readfile'pillow_test/birds.jpg'),
+					contents = load'resize_image_test/birds.jpg',
 				},
 			},
 			attachments = {
@@ -80,10 +69,6 @@ run(function()
 			},
 		}
 
-		assert(smtp:sendmail(req))
-
 	end
-
-	smtp:close()
 
 end)

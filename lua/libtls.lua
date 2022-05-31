@@ -8,10 +8,14 @@ if not ... then require'libtls_test'; return end
 
 require'libtls_h'
 require'glue'
-local C = ffi.load(tls_libname or 'tls')
+local C = ffi.load(tls_libname or 'tls_bearssl')
 
 TLS_WANT_POLLIN  = C.TLS_WANT_POLLIN
 TLS_WANT_POLLOUT = C.TLS_WANT_POLLOUT
+
+function ca_file_path()
+	return config'ca_file' or varpath'cacert.pem'
+end
 
 local config = {}
 

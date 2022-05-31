@@ -6,7 +6,6 @@
 	This module only implements the protocol. For a working HTTP client
 	see http_client.lua, for a server see http_server.lua.
 
-	GZip compression can be enabled with http.zlib = require'zlib'.
 	All functions return nil,err on I/O errors.
 
 http(opt) -> http
@@ -60,6 +59,7 @@ http:send_response(sres) -> true | nil,err   | Send a response.
 if not ... then require'http_server_test'; return end
 
 require'glue'
+require'gzip'
 require'linebuffer'
 require'sock'
 local http_headers = require'http_headers'
@@ -328,11 +328,10 @@ function http:send_chunked(read_content)
 end
 
 function http:gzip_decoder(format, write)
-	assert(self.zlib, 'zlib not loaded')
 	--NOTE: gzip threads are abandoned in suspended state on errors.
 	--That doesn't leak them but don't expect them to finish!
 	local decode = cowrap(function(yield)
-		assert(self.zlib.inflate(yield, write, nil, format))
+		assert(inflate(yield, write, nil, format))
 	end, 'http-gzip-decode %s', self.tcp)
 	decode()
 	return decode
@@ -355,7 +354,6 @@ function http:chained_decoder(write, encodings)
 end
 
 function http:gzip_encoder(format, content, content_size)
-	assert(self.zlib, 'zlib not loaded')
 	if isstr(content) or isfunc(content) or iscdata(content) then
 		if iscdata(content) then
 			assert(content_size)
@@ -373,7 +371,7 @@ function http:gzip_encoder(format, content, content_size)
 		--from the logging.live list immediately.
 		local content, gzip_thread = cowrap(function(yield, s)
 			if s == false then return end --abort on entry
-			local ok, err = self.zlib.deflate(content, yield, nil, format)
+			local ok, err = deflate(content, yield, nil, format)
 			assert(ok or err == 'abort', err)
 		end, 'http-gzip-encode %s', self.tcp)
 		function self:after_send_response()
@@ -444,7 +442,6 @@ function http:read_body_to_writer(headers, write, from_server, close, state)
 	if close and from_server then
 		self:close(self.read_expires)
 	end
-	write() --signal eof to the gzip decoder, file writer, etc.
 	if state then state.body_was_read = true end
 end
 
@@ -463,10 +460,11 @@ function http:read_body(headers, write, from_server, close, state)
 		--don't read the body, but return a reader function for it instead.
 		return (cowrap(function(yield)
 			self:read_body_to_writer(headers, yield, from_server, close, state)
-			return nil, 'eof'
+			--not returning anything here signals eof.
 		end, 'http-read-body %s', self.tcp))
 	else --function or nil
 		self:read_body_to_writer(headers, write, from_server, close, state)
+		write() --signal eof to writer.
 		return true --signal that content was read.
 	end
 end
@@ -496,7 +494,7 @@ function http:build_request(opt, cookies)
 		req.headers['connection'] = 'close'
 	end
 
-	if opt.compress ~= false and self.zlib then
+	if opt.compress ~= false then
 		req.headers['accept-encoding'] = 'gzip, deflate'
 	end
 
@@ -697,7 +695,7 @@ function http:accept_content_encoding(req, opt)
 	if not accept then
 		return true
 	end
-	local compress = opt.compress ~= false and self.zlib
+	local compress = opt.compress ~= false
 		and (content_size(opt) or 1/0) >= 1000
 		and (not opt.content_type or not self.nocompress_mime_types[opt.content_type])
 	if not compress then

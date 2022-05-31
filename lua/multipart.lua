@@ -177,6 +177,7 @@ function multipart_mail(msg)
 	return req
 end
 
+
 if not ... then
 
 	local req = multipart_mail{
@@ -192,7 +193,7 @@ if not ... then
 			{
 				cid = 'img2',
 				filename = 'birds.jpg',
-				contents = load'../tests/pillow_test/birds.jpg',
+				contents = load'../tests/resize_image_test/birds.jpg',
 			},
 		},
 		attachments = {

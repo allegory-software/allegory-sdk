@@ -170,11 +170,12 @@ function http_server(t)
 		local tls = t.tls
 		if tls then
 			local opt = update(self.tls_options, t.tls_options)
-			local stcp, err = self.stcp(tcp, opt)
+			local stcp, err = server_stcp(tcp, opt)
 			if not self:check(tcp, stcp, 'stcp', '%s', err) then
 				tcp:close()
 				goto continue
 			end
+			live(stcp, 'listen %s:%d', tcp.bound_addr, tcp.bound_port)
 			tcp = stcp
 		end
 		liveadd(tcp, tls and 'https' or 'http')

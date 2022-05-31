@@ -72,10 +72,6 @@ local pull = function(t)
 	return remove(t, 1)
 end
 
-function ca_file_path()
-	return config'ca_file' or varpath'cacert.pem'
-end
-
 local client = {
 	type = 'http_client', http = http,
 	max_conn = 50,
@@ -617,6 +613,11 @@ end
 local cl
 function getpage(...)
 	cl = cl or http_client{
+		max_conn               = config'getpage_max_conn',
+		max_conn_per_target    = config'getpage_max_conn_per_target',
+		max_pipelined_requests = config'getpage_max_pipelined_requests',
+		client_ips             = config'getpage_client_ips',
+		max_redirects          = config'getpage_max_redirects',
 		debug = config'getpage_debug' and index(collect(words(config'getpage_debug'))),
 	}
 	return cl:getpage(...)

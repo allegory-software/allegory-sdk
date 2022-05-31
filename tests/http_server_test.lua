@@ -1,10 +1,6 @@
-
-tls_libname = 'tls_bearssl'
 require'glue'
 require'http_server'
 logging.debug = true
-
---local webb_respond = require'http_server_webb'
 
 local server = http_server{
 	listen = {
@@ -13,22 +9,20 @@ local server = http_server{
 			addr = '127.0.0.1',
 			port = 80,
 		},
-		--[[
 		{
-			--host = 'localhost',
+			host = 'localhost',
 			addr = '127.0.0.1',
 			port = 443,
 			tls = true,
 			tls_options = {
 				keypairs = {
 					{
-						cert_file = 'localhost.crt',
-						key_file  = 'localhost.key',
+						cert_file = exedir()..'/../../tests/localhost.crt',
+						key_file  = exedir()..'/../../tests/localhost.key',
 					},
 				},
 			},
 		},
-		]]
 	},
 	debug = {
 		protocol = true,
@@ -40,8 +34,8 @@ local server = http_server{
 		local read_body = req:read_body'reader'
 		while true do
 			local buf, sz = read_body()
-			if buf == nil and sz == 'eof' then break end
-			local s = ffi.string(buf, sz)
+			if buf == nil then break end --eof
+			local s = str(buf, sz)
 			print(s)
 		end
 		local out = req:respond({

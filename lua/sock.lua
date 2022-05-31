@@ -343,6 +343,8 @@ require'glue'
 require'heap'
 require'logging'
 local coro = require'coro'
+coro.live  = live
+coro.pcall = pcall
 
 local
 	assert, isstr, clock, max, abs, min, bor, band, cast, u8p, fill, str, errno =
@@ -365,6 +367,7 @@ local raw = {type = 'raw_socket'}
 --forward declarations
 local check, _poll, wait_io, create_socket, wrap_socket
 
+--NOTE: close() returns `false` on error but it should be ignored.
 function socket:close()
 	if not self.s then return true end
 	assert(_sock_unregister(self))
@@ -2288,7 +2291,7 @@ end
 function socket:debug(protocol)
 
 	local function ds(event, s)
-		log('', protocol or '', event, '%-4s %5s %s', self, s and #s or '', s)
+		log('', protocol or '', event, '%-4s %5s %s', self, s and #s or '', s or '')
 	end
 
 	override(self, 'recv', function(inherited, self, buf, ...)
@@ -2384,6 +2387,7 @@ function onthreadfinish(thread, f)
 end
 
 currentthread = coro.running
+threadstatus = coro.status
 
 local threadenv = setmetatable({}, weak_keys)
 local ownthreadenv = setmetatable({}, weak_keys)
@@ -2623,8 +2627,6 @@ local function check_io(self, v, ...)
 	}, ...))
 end
 
-local errors_protect = protect
-
 function tcp_protocol_errors(protocol)
 
 	local protocol_error = errortype(protocol, nil, protocol .. ' protocol error')
@@ -2646,9 +2648,9 @@ function tcp_protocol_errors(protocol)
 
 	local classes = {[tcp_error]=1, [protocol_error]=1, [content_error]=1}
 
-	local function protect(f, oncaught)
-		return errors_protect(classes, f, oncaught)
+	local function protect_this(f, oncaught)
+		return protect(classes, f, oncaught)
 	end
 
-	return check_io, checkp, check, protect
+	return check_io, checkp, check, protect_this
 end

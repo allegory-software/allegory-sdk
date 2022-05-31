@@ -3,9 +3,11 @@
 	Async SMTP(s) client.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	smtp_connect{host=, port=, tls=, user=, pass=} -> c
-	c:sendmail{from=, to=, headers=, message=} -> c
+	[try_]smtp_connect{host=, port=, tls=, user=, pass=} -> c
+	c:[try_]sendmail{from=, to=, headers=, message=} -> c
 	c:close() -> c
+
+	[try_]sendmail(multipart|multipart_opt)
 
 ]=]
 
@@ -19,19 +21,23 @@ require'sock_libtls'
 require'multipart'
 
 local client = {
-	type = 'smtp_client', debug_prefix = 'S',
+	type = 'smtp_client', debug_prefix = 'm',
 	host = '127.0.0.1',
-	port = 587,
+	port = 465,
+	tls = true,
 	connect_timeout = 5,
 	sendmail_timeout = 60,
 	domain = 'localhost', --client's domain (useless)
 	max_line_size = 8192,
 	xmailer = 'allegory-sdk smtp client',
+	tls_options = {
+		ca_file = ca_file_path,
+	},
 }
 
 local check_io, checkp, check, protect = tcp_protocol_errors'smtp'
 
-function smtp_connect(t)
+function try_smtp_connect(t)
 
 	local self = object(client, {}, t)
 
@@ -44,29 +50,18 @@ function smtp_connect(t)
 		self.tracebacks = true --for tcp_protocol_errors.
 	end
 
-	self.logging = (self.logging == true or self.debug and self.logging == nil)
-		and require'logging' or self.logging
-	local log = self.logging and self.logging.log
-
 	local function mprotect(method)
 		local oncaught
-		if log and self.debug and self.debug.errors then
+		if self.debug and self.debug.errors then
 			function oncaught(err)
 				log('ERROR', 'smtp', method, '%s', err)
 			end
 		end
-		self[method] = protect(self[method], oncaught)
+		self['try_'..method] = protect(self[method], oncaught)
 	end
 
-	if log and self.debug and self.debug.stream then
+	if self.debug and self.debug.stream then
 		self.tcp:debug('smtp', log)
-	end
-
-	local dp = noop
-	if log and self.debug and self.debug.protocol then
-		function dp(...)
-			return log('', 'smtp', ...)
-		end
 	end
 
 	--I/O
@@ -106,7 +101,6 @@ function smtp_connect(t)
 	function self:_connect()
 		set_timeout(self.connect_timeout)
 		check_io(self, self.tcp:connect(self.host_addr, self.port, expires))
-		dp('connect', '%s %s %s', self.tcp, self.host_addr, self.port)
 		if self.tls then
 			self.tcp = check_io(self, client_stcp(self.tcp, self.host, self.tls_options))
 		end
@@ -162,7 +156,6 @@ function smtp_connect(t)
 		if self.tcp:closed() then
 			return true
 		end
-		dp('close', '%s', self.tcp)
 		set_timeout(self.connect_timeout)
 		send_line'QUIT'
 		check_reply'2..'
@@ -171,34 +164,30 @@ function smtp_connect(t)
 	end
 	mprotect'close'
 
-	return self:_connect()
+	return self:try__connect()
 end
+smtp_connect = protect(try_smtp_connect)
 
 local function strip_name(email)
 	return email:match'<(.-)>' or email
 end
 function try_sendmail(opt)
 
-	local smtp, err = smtp:connect{
-		logging = true,
-		debug = config'smtp_debug' and index(collect(words(config'smtp_debug' or ''))),
-		host  = config('smtp_host', '127.0.0.1'),
-		port  = config('smtp_port', 587), --TODO: 465
-		tls   = config('smtp_tls', false), --TODO: true
+	local smtp, err = try_smtp_connect{
+		debug = config'smtp_debug' and index(collect(words(config'smtp_debug'))),
+		host  = config'smtp_host',
+		port  = config'smtp_port',
+		tls   = config'smtp_tls',
 		user  = config'smtp_user',
 		pass  = config'smtp_pass',
-		tls_options = {
-			ca_file = config('ca_file', varpath'cacert.pem'),
-		},
 	}
 	if not smtp then return nil, err end
 
-	local req = update({}, opt)
-	req = multipart_mail(req)
+	req = multipart_mail(update({}, opt))
 	req.from = strip_name(opt.from)
 	req.to   = strip_name(opt.to)
 
-	local ok, err = smtp:sendmail(req)
+	local ok, err = smtp:try_sendmail(req)
 	if not ok then return nil, err end
 
 	local ok, err = smtp:close()
@@ -206,7 +195,6 @@ function try_sendmail(opt)
 
 	return true
 end
-
 function sendmail(opt)
 	local ok, err = try_sendmail(opt)
 	check('smtp', 'sendmail', ok, 'from: %s\n  to: %s\n%s', opt.from, opt.to, err)

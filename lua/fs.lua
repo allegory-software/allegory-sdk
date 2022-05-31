@@ -1601,8 +1601,10 @@ local function _save(file, s, sz, perms)
 			local s, sz
 			ok, s, sz = pcall(read)
 			if not ok then err = s; break end
-			if s == nil then break end --eof
-			if s == ABORT then ok = false; break end
+			if s == nil then
+				if sz ~= nil then ok = false end --error, not eof
+				break
+			end
 			if not iscdata(s) then
 				s = tostring(s)
 			end

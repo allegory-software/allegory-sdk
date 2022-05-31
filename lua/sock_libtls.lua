@@ -77,9 +77,14 @@ require'glue'
 require'sock'
 require'libtls'
 
-local stcp = {issocket = true, istcpsocket = true, istlssocket = true}
-local client_stcp = update({}, tcp_class)
-local server_stcp = update({}, tcp_class)
+local stcp = {
+	issocket = true,
+	istcpsocket = true,
+	istlssocket = true,
+	debug_prefix = 'X',
+}
+local client_stcp = update({type = 'client_tls_socket'}, tcp_class)
+local server_stcp = update({type = 'server_tls_socket'}, tcp_class)
 
 local w_bufs = {}
 local r_bufs = {}
@@ -183,6 +188,7 @@ function stcp:close(expires)
 	repeat
 		recall, tls_ok, tls_err = checkio(self, expires, self.tls:close())
 	until not recall
+	live(self, nil)
 	self.tls:free()
 	local tcp_ok, tcp_err = self.tcp:close()
 	self.tls = nil
@@ -193,12 +199,14 @@ function stcp:close(expires)
 	return true
 end
 
-local function wrap_stcp(stcp_class, tcp, tls, buf_slot)
-	return object(stcp_class, {
+local function wrap_stcp(stcp_class, tcp, tls, buf_slot, name)
+	local stcp = object(stcp_class, {
 		tcp = tcp,
 		tls = tls,
 		buf_slot = buf_slot,
 	})
+	live(stcp, name or stcp_class.type)
+	return stcp
 end
 
 function _G.client_stcp(tcp, servername, opt)

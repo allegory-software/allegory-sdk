@@ -1,11 +1,7 @@
-tls_libname = 'tls_bearssl'
 require'glue'
 require'libtls'
 
 local c = tls_client{
-
-	loadfile = try_load,
-
 	alpn = '123',
 	ca = 'x',
 	--ciphers = 'P-256',
@@ -31,6 +27,5 @@ local c = tls_client{
 	verify_client          = true,
 	verify_client_optional = true,
 }
-
 
 c:free()

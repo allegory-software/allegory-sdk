@@ -1,14 +1,10 @@
-
-tls_libname = 'tls_bearssl'
---tls_libname = 'tls_libressl'
-
 require'glue'
 require'http_client'
 logging.verbose = true
 --logging.debug = true
---logging.filter.tls = true
 --config('getpage_debug', 'protocol')
-config('ca_file', scriptdir()..'/cacert.pem')
+logging.filter.tls = true
+config('ca_file', exedir()..'/../../tests/cacert.pem')
 
 local function search_page_url(pn)
 	return 'https://luapower.com/'
