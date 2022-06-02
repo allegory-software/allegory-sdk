@@ -82,11 +82,11 @@ end
 --(or current) language if any, or add ?lang= if the given language
 --is not the default language.
 function href(s, target_lang)
-	local t = url_arg(s)
+	local t = url_parse(s)
 	local segs = t.segments
 	local action = not t.host and (segs and segs[1] == '' and segs[2] and action_name(segs[2])) or nil
 	if not action then
-		return url(s)
+		return url_format(s)
 	end
 	local default_lang = default_lang()
 	local target_lang = target_lang or (t.args and t.args.lang) or lang()
@@ -103,7 +103,7 @@ function href(s, target_lang)
 	elseif target_lang ~= default_lang then
 		attr(t, 'args').lang = target_lang
 	end
-	return url(t)
+	return url_format(t)
 end
 
 --given a list of path elements, find the action they point to
@@ -194,7 +194,7 @@ local actions = {} --{action -> handler | s}
 
 local function action_handler(action, ...)
 
-	local action_ext = fileext(action)
+	local action_ext = path_ext(action)
 	local action_no_ext
 	local action_with_ext = action
 	if not action_ext then --add the default .html extension to the action
@@ -212,7 +212,7 @@ local function action_handler(action, ...)
 
 	if not handler then --look in the filesystem
 		local file = concat({action, ...}, '/')
-		local file_ext = fileext(file)
+		local file_ext = path_ext(file)
 		if not file_ext then
 			file_ext = 'html'
 			file = file .. '.html'
@@ -286,7 +286,7 @@ local function run_action(fallback, action, handler, ext, ...)
 		}
 		local nf_action = not_found_actions[mime]
 		if not nf_action then
-			webb.log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
+			http_log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
 			return false
 		end
 		local handler, ext = action_handler(nf_action, ...)

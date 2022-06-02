@@ -38,6 +38,9 @@ local server = http_server{
 			local s = str(buf, sz)
 			print(s)
 		end
+		if req.uri == '/favicon.ico' then
+			raise('http_response', {status = 404})
+		end
 		local out = req:respond({
 			--compress = false,
 			want_out_function = true,

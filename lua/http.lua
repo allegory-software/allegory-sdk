@@ -464,7 +464,7 @@ function http:read_body(headers, write, from_server, close, state)
 		end, 'http-read-body %s', self.tcp))
 	else --function or nil
 		self:read_body_to_writer(headers, write, from_server, close, state)
-		write() --signal eof to writer.
+		if write then write() end --signal eof to writer.
 		return true --signal that content was read.
 	end
 end

@@ -5,15 +5,19 @@
 if not ... then require'schema_test'; return end
 
 require'glue'
+require'schema'
 require'mysql'
 
+--NOTE: locals clash with words in the schema definition below so we name
+--them so they can't be field types or flags!
 local
-	floor, date, memoize, kbytes =
-	floor, date, memoize, kbytes
+	memoize, kbytes =
+	memoize, kbytes
 
-local glue_timeago = timeago
+local glue_timeago   = timeago
 local glue_timeofday = timeofday
-local glue_duration = duration
+local glue_duration  = duration
+local glue_date      = date
 
 local datetime_to_timestamp = function(s) return mysql_datetime_to_timestamp(s) end
 local timestamp_to_datetime = function(t) return mysql_timestamp_to_datetime(t) end
@@ -22,7 +26,6 @@ local seconds_to_time       = function(s) return mysql_seconds_to_time(s) end
 
 local env = {}
 do
-	local schema = require'schema'
 	local
 		tonumber, type, cat, outdent, trim, index =
 		tonumber, type, cat, outdent, trim, index
@@ -212,7 +215,7 @@ return function()
 		if f.timeago then
 			return glue_timeago(t)
 		else
-			return date(f.has_time and (f.has_seconds and '%Y-%m-%d %H:%M:%S'
+			return glue_date(f.has_time and (f.has_seconds and '%Y-%m-%d %H:%M:%S'
 				or '%Y-%m-%d %H:%M') or '%Y-%m-%d', t)
 		end
 	end

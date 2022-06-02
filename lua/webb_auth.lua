@@ -17,7 +17,7 @@ SESSIONS
 
 SCHEMA
 
-	webb.auth_schema                         auth schema
+	auth_schema                              auth schema
 
 CONFIG
 
@@ -146,10 +146,10 @@ anonymous then that user is also deleted afterwards.
 ]==]
 
 require'glue'
-require'webb_query'
+require'query'
 require'schema'
-local blake3 = require'blake3'
-local bcrypt = require'bcrypt'
+require'blake3'
+require'bcrypt'
 
 local function fullname(firstname, lastname)
 	return (catany('', firstname, lastname) or ''):trim()
@@ -157,7 +157,7 @@ end
 
 --schema ---------------------------------------------------------------------
 
-function webb.auth_schema()
+function auth_schema()
 
 	import'schema_std'
 
@@ -242,7 +242,7 @@ end)
 
 local function secret_hash(s)
 	local secret = webb_secret()
-	local token = blake3.hash(s, nil, secret)
+	local token = blake3(s, nil, secret)
 	return tohex(token) --64 bytes
 end
 
@@ -299,7 +299,7 @@ local function load_session()
 		return {id = sid, usr = usr}
 	end
 end
-local session = once(function()
+local session = http_once_per_req(function()
 	return load_session() or {}
 end)
 
@@ -382,13 +382,13 @@ local function authenticate(a)
 	if not auth then
 		return nil, 'invalid argument'
 	end
-	webb.dbg('auth', 'auth', '%s', pp.format(a, false))
+	http_log('', 'auth', 'auth', '%s', a)
 	local usr, err = auth(a)
 	if usr then
-		webb.dbg('auth', 'auth-ok', 'usr=%d', usr)
+		http_log('', 'auth', 'auth-ok', 'usr=%d', usr)
 		return usr
 	else
-		webb.dbg('auth', 'auth-fail', '%s', err)
+		http_log('', 'auth', 'auth-fail', '%s', err)
 		return nil, err
 	end
 end
@@ -487,8 +487,8 @@ local function email_pass_usr(email, pass)
 	local u = first_row([[
 		select usr, pass from usr where
 			active = 1 and email = ?
-		]], email, bcrypt.hash(pass))
-	return u and bcrypt.verify(pass, u.pass) and u.usr or nil
+		]], email, bcrypt_hash(pass))
+	return u and bcrypt_verify(pass, u.pass) and u.usr or nil
 end
 
 local function email_usr(email)
@@ -548,7 +548,7 @@ function auth.pass(auth)
 				pass = ?
 			where
 				usr = ?
-			]], email, bcrypt.hash(pass), usr)
+			]], email, bcrypt_hash(pass), usr)
 		clear_userinfo_cache(usr)
 		return usr
 	end
@@ -601,7 +601,7 @@ function gen_auth_token(email)
 
 	local token = secret_hash(random_string(32))
 	local ok, err = register_token(usr, token, 'email', token_lifetime, token_maxcount)
-	webb.log('note', 'auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
+	http_log('note', 'auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
 	return ok and token or nil, err
 end
 
@@ -632,7 +632,7 @@ function gen_auth_code(validates, s)
 	local code = secret_hash(random_string(64)):gsub('[a-f]', ''):sub(1, 6)
 	assert(#code == 6)
 	local ok, err = register_token(usr, code, validates, code_lifetime, code_maxcount)
-	webb.log('note', 'auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
+	http_log('note', 'auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
 		usr, code, validates, err)
 	return ok and code or nil, err
 end
@@ -769,7 +769,7 @@ function auth.update(auth)
 		end
 	end
 
-	pass = pass and bcrypt.hash(pass)
+	pass = pass and bcrypt_hash(pass)
 
 	query([[
 		update usr set
@@ -804,10 +804,10 @@ end
 
 if not ... then
 	if false then
-		webb.run(auth_create_tables)
+		http_run(auth_create_tables)
 	else
 		config('secret', '!xpAi$^!@#)fas!`5@cXiOZ{!9fdsjdkfh7zk')
-		webb.request{
+		webb_request{
 			uri = '/login.json',
 			headers = {
 				cookie = {
@@ -815,7 +815,7 @@ if not ... then
 				},
 			},
 		}
-		webb.run(function()
+		http_run(function()
 			--query('delete from usrtoken')
 			--print(gen_auth_code('email', 'admin@mysite'))
 			--prq(query'select * from sess')
@@ -824,4 +824,4 @@ if not ... then
 	end
 end
 
-return webb.auth_schema --so you can call schema:import'webb_auth'
+return auth_schema --so you can call schema:import'webb_auth'

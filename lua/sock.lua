@@ -59,6 +59,7 @@ SCHEDULING
 	currentthread() -> co, is_main             current coroutine and whether it's the main one
 	threadstatus(co) -> s                      coroutine.status()
 	transfer(co, ...) -> ...                   see coro.transfer()
+	cofinish(co, ...) -> ...                   see coro.finish()
 	threadenv[co] -> t                         get a thread's own or inherited environment
 	getthreadenv([co]) -> t                    get (current) thread's own enviornment
 	getownthreadenv([co], [create]) -> t       get/create (current) thread's own environment
@@ -2291,7 +2292,8 @@ end
 function socket:debug(protocol)
 
 	local function ds(event, s)
-		log('', protocol or '', event, '%-4s %5s %s', self, s and #s or '', s or '')
+		log('', protocol or '', event, '%-4s %5s %s',
+			self, s and #s or '', s or '')
 	end
 
 	override(self, 'recv', function(inherited, self, buf, ...)
@@ -2388,6 +2390,7 @@ end
 
 currentthread = coro.running
 threadstatus = coro.status
+cofinish = coro.finish
 
 local threadenv = setmetatable({}, weak_keys)
 local ownthreadenv = setmetatable({}, weak_keys)

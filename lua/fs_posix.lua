@@ -153,10 +153,11 @@ function _open(path, opt, quiet)
 		end
 	end
 	f.shm = opt.shm and true or false
-	local r = band(flags, o_bits.rdonly) == o_bits.rdonly and 'r' or ''
-	local w = band(flags, o_bits.wronly) == o_bits.wronly and 'w' or ''
+	local r = band(flags, o_bits.rdonly) == o_bits.rdonly
+	local w = band(flags, o_bits.wronly) == o_bits.wronly
 	f.quiet = quiet or not w
-	log(f.quiet and '' or 'note', 'fs', 'open', '%-4s %s%s %s', f, r, w, path)
+	log(f.quiet and '' or 'note', 'fs', 'open',
+		'%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
 	return f
 end
 

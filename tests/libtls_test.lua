@@ -29,3 +29,4 @@ local c = tls_client{
 }
 
 c:free()
+print'ok'

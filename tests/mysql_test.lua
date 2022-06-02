@@ -9,7 +9,7 @@ run(function()
 		host = '10.0.0.5',
 		port = 3307,
 		user = 'root',
-		password = 'root',
+		pass = 'root',
 		db = 'sp',
 		charset = 'utf8mb4',
 	})

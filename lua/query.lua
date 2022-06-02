@@ -1,6 +1,6 @@
 --[==[
 
-	webb | SQL database access
+	SQL database access
 	Written by Cosmin Apreutesei. Public Domain.
 
 PREPROCESSOR
@@ -62,12 +62,15 @@ DEBUGGING
 ]==]
 
 require'webb'
+require'connpool'
+require'mysql_print'
+require'sqlpp'
+
 sqlpps = {}
-sqlpps.mysql     = require'sqlpp'.new'mysql'
-sqlpps.tarantool = require'sqlpp'.new'tarantool'
+sqlpps.mysql     = sqlpp'mysql'
+sqlpps.tarantool = sqlpp'tarantool'
 local default_port = {mysql = 3306, tarantool = 3301}
-local pool = require'connpool'.new()
-local mysql_print = require'mysql_print'
+local pool = connpool()
 
 sql_default = {'default'}
 
@@ -93,7 +96,7 @@ end
 
 function dbname(ns)
 	return pconfig(ns, 'db_name')
-		or pconfig(ns, 'db_name', assert(config'app_name')..(ns and '_'..ns or ''))
+		or pconfig(ns, 'db_name', scriptname..(ns and '_'..ns or ''))
 end
 
 local conn_opt = memoize(function(ns)
@@ -103,7 +106,7 @@ local conn_opt = memoize(function(ns)
 	t.host       = pconfig(ns, 'db_host', '127.0.0.1')
 	t.port       = pconfig(ns, 'db_port', assert(default_port[engine]))
 	t.user       = pconfig(ns, 'db_user', 'root')
-	t.password   = pconfig(ns, 'db_pass')
+	t.pass       = pconfig(ns, 'db_pass', 'root')
 	t.db         = dbname(ns)
 	t.charset    = 'utf8mb4'
 	t.pool_key   = t.user..'@'..t.host..':'..t.port..':'..(t.db or '')
@@ -150,11 +153,12 @@ function db(ns, without_current_db)
 		end
 		onthreadfinish(release_dbs)
 	end
-	local cx = cx()
-	if cx and thread == cx.req.thread then --http accept thread
-		if not cx._release_dbs then
+	local tenv = getthreadenv()
+	local renv = tenv and tenv.http_request
+	if renv and thread == renv.thread then
+		if not renv._release_dbs then
 			onrequestfinish(release_dbs)
-			cx._release_dbs = true
+			renv._release_dbs = true
 		end
 	end
 	local db, err = dbs[key]
@@ -223,4 +227,21 @@ function outpqr(rows, fields)
 	local opt = rows.rows and update({}, rows) or {rows = rows, fields = fields}
 	opt.print = outprint
 	mysql_print.result(opt)
+end
+
+
+if not ... then
+
+config('db_host', '10.0.0.5')
+config('db_port', 3307)
+config('db_name', 'information_schema')
+
+run(function()
+	for _,s in each_row_vals([[
+		select table_name from tables where table_schema = ?
+	]], 'mysql') do
+		pr(s)
+	end
+end)
+
 end

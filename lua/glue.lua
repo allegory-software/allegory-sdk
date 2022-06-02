@@ -138,6 +138,7 @@ PLATFORM
 PROCESS CONTROL
 	sleep(s)                       suspend process i.e. blocking sleep
 	exit                         = os.exit
+	env                          = os.getenv
 TIME & DATES
 	now() -> ts                    os.time() but more accurate
 	clock() -> x                   os.clock() but more accurate
@@ -236,7 +237,8 @@ FFI ALLOCATION
 CONFIG
 	config(k[, default]) -> v      get/set global config value
 	with_config(conf, f, ...) -> ...    run f with custom config table
-	load_config(file)              load config file
+	load_config_file(file)         load config file
+	load_config_string(s)          load config from string
 DEBUGGING
 	traceback                    = debug.traceback
    trace()                        print current stack trace to stderr
@@ -1328,6 +1330,8 @@ function die(fmt, ...)
 	say(fmt and 'ABORT: '..fmt or 'ABORT', ...)
 	os.exit(1)
 end
+
+env = os.getenv --replaced by proc module.
 
 --iterators ------------------------------------------------------------------
 
@@ -2480,15 +2484,16 @@ do
 		return pass(pcall(f, ...))
 	end
 
-	function load_config(file)
-		local conf_s = load(file, false)
-		if not conf_s then
-			return false
-		end
-		local conf_fn = assert(loadstring(conf_s))
-		setfenv(conf_fn, conf)
-		conf_fn()
+	function load_config_string(s)
+		local f = assert(loadstring(s))
+		setfenv(f, conf)
+		f()
 		return true
+	end
+
+	function load_config_file(file)
+		local s = load(file, false)
+		return s and load_config_string(s)
 	end
 end
 

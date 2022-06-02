@@ -12,6 +12,7 @@
 ]==]
 
 require'glue'
+require'proc'
 
 local cmds = {}
 
@@ -52,8 +53,10 @@ local function addcmd(self, active, s, helpline, help, fn)
 		if wrap then fn = wrap(fn) end
 		local cmd = {name = name, args = args, fn = fn, helpline = helpline, help = help}
 		if name:find('|', 1, true) then
-			for i,name in ipairs(words(name:gsub('|', ' '))) do
-				addcmdalias(self, name, cmd, i > 1)
+			local isalias
+			for name in words(name:gsub('|', ' ')) do
+				addcmdalias(self, name, cmd, isalias)
+				isalias = true
 			end
 		else
 			addcmdalias(self, name, cmd)

@@ -70,13 +70,9 @@ function logging:tofile(logfile, max_size)
 
 	local f, size
 
-	local function log_locally(...)
-		self.logto(false, false, ...)
-	end
-
-	local function open_logfile()
-		if f then return true end
-		f = open(logfile, {mode = 'a', log = log_locally})
+	local function try_open_logfile()
+		if f ~= nil then return true end
+		f = try_open(logfile, 'a')
 		if not f then return end
 		size = f:attr'size'
 		if not f then return end
@@ -85,7 +81,7 @@ function logging:tofile(logfile, max_size)
 
 	max_size = max_size or self.max_disk_size
 
-	local function rotate(len)
+	local function try_rotate(len)
 		if max_size and size + len > max_size / 2 then
 			f:close(); f = nil
 			if not try_mv(logfile, logfile0) then return end
@@ -94,17 +90,21 @@ function logging:tofile(logfile, max_size)
 		return true
 	end
 
+	local logging_tofile
 	function self:logtofile(s)
-		if not open_logfile() then return end
-		if not rotate(#s + 1) then return end
+		if logging_tofile then return end --prevent recursion
+		logging_tofile = true
+		if not try_open_logfile() then f = false; return end
+		if not try_rotate(#s + 1) then f = false; return end
 		size = size + #s + 1
-		if not f:write(s) then return end
+		if not f:write(s) then self:tofile_stop(); return end
 		if self.flush then f:flush() end
+		logging_tofile = false
 	end
 
 	function self:tofile_stop()
 		if not f then return end
-		f:close()
+		f:try_close()
 		f = nil
 	end
 
@@ -141,10 +141,7 @@ function logging:toserver(host, port, queue_size, timeout)
 		if chan then return chan end
 		while not stop do
 			local exp = timeout and clock() + timeout
-			local function log_locally(...)
-				self.logto(false, false, ...)
-			end
-			chan = mess_connect(host, port, exp, {log = log_locally})
+			chan = mess_connect(host, port, exp)
 
 			if chan then
 
@@ -362,7 +359,7 @@ logging.args      = logging_args_func(debug_arg_pp)
 logging.printargs = logging_args_func(debug_arg)
 
 local function fmtargs(self, fmt, ...)
-	return fmt and _(fmt, self.args(...)) or nil
+	return fmt and _(fmt, self.args(...)) or ''
 end
 
 local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
@@ -381,7 +378,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 			msg = censor(msg, self, severity, module, event)
 		end
 	end
-	if msg and msg:find('\n', 1, true) then --multiline
+	if msg:find('\n', 1, true) then --multiline
 		local arg1_multiline = msg:find'^\n\n'
 		msg = outdent(msg, '\t')
 		if not arg1_multiline then
@@ -393,7 +390,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
 				env, date('%Y-%m-%d %H:%M:%S', time), severity,
 				module or '', (event or ''):sub(1, 8),
-				debug_arg_pp((coroutine.running())), msg or '')
+				debug_arg_pp((coroutine.running())), msg)
 		if tofile and self.logtofile then
 			self:logtofile(entry)
 		end
@@ -541,6 +538,7 @@ function logging.new()
 	return init(setmetatable({}, logging))
 end
 
+_G.logto        = logging.logto
 _G.log          = logging.log
 _G.live         = logging.live
 _G.liveadd      = logging.liveadd

@@ -5,10 +5,10 @@
 
 ]==]
 
-require'webb_query'
+require'query'
 require'schema'
 
-function webb.lang_schema()
+function lang_schema()
 
 	tables.lang = {
 		lang                , lang, pk,
@@ -565,11 +565,11 @@ local supported_countries = memoize(function()
 	return t
 end)
 
-webb.langinfo = setmetatable({}, {__index = function(t, k)
+langinfo = setmetatable({}, {__index = function(t, k)
 	return supported_langs()[k]
 end})
 
-webb.countryinfo = setmetatable({}, {__index = function(t, k)
+countryinfo = setmetatable({}, {__index = function(t, k)
 	return supported_countries()[k]
 end})
 
@@ -581,4 +581,4 @@ qmacro.default_lang = function()
 	return sqlval(default_lang())
 end
 
-return webb.lang_schema --so you can call schema:import'webb_lang'
+return lang_schema --so you can call schema:import'webb_lang'

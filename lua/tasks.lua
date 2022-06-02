@@ -52,8 +52,8 @@ TASKS
 		opt.name                  task name (for listing and for debugging).
 		opt.stdin                 stdin (for exec() tasks)
 	t.id
-	M.tasks -> {ta->true}      root task list
-	M.tasks_by_id -> {id->ta}  root task list mapped by id
+	tasks -> {ta->true}        root task list
+	tasks_by_id -> {id->ta}    root task list mapped by id
 	ta.status                  task status
 	ta.start_time              set when task starts
 	ta.duration                set when task finishes
@@ -71,7 +71,7 @@ TASKS
 	^remove_task(parent_ta, child_ta)
 
 PROCESS TASK
-	M.exec(cmd_args|{cmd,arg1,...}, opt) -> ta
+	task_exec(cmd_args|{cmd,arg1,...}, opt) -> ta
 
 ]]
 
@@ -80,15 +80,7 @@ require'proc'
 require'sock'
 require'events'
 require'json'
-local buffer = require'string.buffer'
-
-local M = {}
-
-function M.log(severity, event, ...)
-	local logging = M.logging
-	if not logging then return end
-	logging.log(severity, 'tasks', event, ...)
-end
+local string_buffer = require'string.buffer'.new
 
 --terminals ------------------------------------------------------------------
 
@@ -96,7 +88,7 @@ end
 --publishes: pipe(term, [on]).
 
 local nterm = object(nil, nil, events)
-M.null_terminal = nterm
+null_terminal = nterm
 nterm.subclass = object
 nterm.override = override
 nterm.before = before
@@ -150,7 +142,7 @@ end
 --publishes: playback(te), stdout(), stderr(), stdouterr(), notifications().
 
 local rterm = object(nil, nil, nterm)
-M.recording_terminal = rterm
+recording_terminal = rterm
 
 function rterm:init()
 	self.buffer = {}
@@ -195,7 +187,7 @@ end
 --command-line terminal: formats input for command-line consumption.
 
 local cterm = object(nil, nil, nterm)
-M.cmdline_terminal = cterm
+cmdline_terminal = cterm
 
 local stdout, stderr = io.stdout, io.stderr
 cterm:after('out', function(self, src_term, chan, ...)
@@ -217,7 +209,7 @@ end)
 --calls: sterm.send(s)
 
 local sterm = object(nil, nil, nterm)
-M.streaming_terminal = sterm
+streaming_terminal = sterm
 
 function sterm:send_on(chan, s)
 	self.send(format('%s%08x\n%s', chan, #s, s))
@@ -238,8 +230,8 @@ end)
 --streaming terminal reader: returns `write(buf, sz)` which when called,
 --deserializes a terminal output stream and sends it to a terminal.
 
-function M.streaming_terminal_reader(term)
-	local buf = buffer.new()
+function streaming_terminal_reader(term)
+	local buf = string_buffer()
 	local chan, size
 	return function(in_buf, sz)
 		buf:putcdata(in_buf, sz)
@@ -275,32 +267,31 @@ local function current_terminal(thread)
 	local env = threadenv[thread or currentthread()]
 	return env and env.terminal
 end
-M.current_terminal = current_terminal
+current_terminal = current_terminal
 
-function M.set_current_terminal(term, thread)
+function set_current_terminal(term, thread)
 	local env = getownthreadenv(thread)
 	local term0 = env.terminal
 	env.terminal = term
 	return term0
 end
 
-M.set_current_terminal(cterm())
+set_current_terminal(cterm())
 
-function M.notify_kind  (...) current_terminal():notify_kind  (...) end
-function M.notify       (...) current_terminal():notify       (...) end
-function M.notify_error (...) current_terminal():notify_error (...) end
-function M.notify_warn  (...) current_terminal():notify_warn  (...) end
-function M.out_stdout(s) current_terminal():out_stdout(s) end
-function M.out_stderr(s) current_terminal():out_stderr(s) end
+function notify_kind  (...) current_terminal():notify_kind  (...) end
+function notify       (...) current_terminal():notify       (...) end
+function notify_error (...) current_terminal():notify_error (...) end
+function notify_warn  (...) current_terminal():notify_warn  (...) end
+function out_stdout(s) current_terminal():out_stdout(s) end
+function out_stderr(s) current_terminal():out_stderr(s) end
 
 --tasks ----------------------------------------------------------------------
 
-M.tasks = {}
-M.tasks_by_id = {}
-M.last_task_id = 0
+tasks = {}
+tasks_by_id = {}
+local last_task_id = 0
 
-local task = object(nil, nil, events)
-M.task = task
+task = object(nil, nil, events)
 task.subclass = object
 task.override = override
 task.before = before
@@ -317,14 +308,14 @@ task.free_after = 10
 
 function task:init()
 
-	M.last_task_id = M.last_task_id + 1
-	self.id = M.last_task_id
+	last_task_id = last_task_id + 1
+	self.id = last_task_id
 	self.status = 'not started'
 	self.child_tasks = {} --{task1,...}
 	self.name = self.name or self.id
-	self.terminal = M.recording_terminal()
-	M.tasks[self] = true
-	M.tasks_by_id[self.id] = self
+	self.terminal = recording_terminal()
+	tasks[self] = true
+	tasks_by_id[self.id] = self
 
 	if self.parent_task then
 		self.parent_task:add_task(self)
@@ -340,9 +331,9 @@ function task:init()
 		self.start_time = time()
 		self.status = 'running'
 		self:fire_up('setstatus', 'running')
-		local term0 = M.set_current_terminal(self.terminal)
+		local term0 = set_current_terminal(self.terminal)
 		local ok, ret = pcall(self.action, self)
-		M.set_current_terminal(term0)
+		set_current_terminal(term0)
 		self.duration = time() - self.start_time
 		self.status = 'finished'
 		self:fire_up('setstatus', 'finished')
@@ -407,8 +398,8 @@ function task:free()
 	elseif self.parent_terminal then
 		self.terminal:pipe(self.parent_terminal, false)
 	end
-	M.tasks[self] = nil
-	M.tasks_by_id[self.id] = nil
+	tasks[self] = nil
+	tasks_by_id[self.id] = nil
 	self.freed = true
 	return true
 end
@@ -449,16 +440,16 @@ end
 
 --async process tasks with stdout/err capturing ------------------------------
 
-function M.exec(cmd, opt)
+function task_exec(cmd, opt)
 
 	opt = opt or empty
 
 	local capture_stdout = opt.capture_stdout ~= false
 	local capture_stderr = opt.capture_stderr ~= false
 
-	local env = opt.env and update(proc.env(), opt.env)
+	local env = opt.env and update(env(), opt.env)
 
-	local p = assert(proc.exec{
+	local p = assert(exec{
 		cmd = cmd,
 		env = env,
 		async = true,
@@ -468,7 +459,7 @@ function M.exec(cmd, opt)
 		stdin = opt.stdin and true or false,
 	})
 
-	local task = M.task(update({}, opt))
+	local task = task(update({}, opt))
 
 	task.cmd = cmd
 	task.process = p
@@ -502,7 +493,7 @@ function M.exec(cmd, opt)
 						break
 					end
 					local s = ffi.string(buf, len)
-					M.out_stdout(s)
+					out_stdout(s)
 				end
 				assert(p.stdout:close())
 			end, 'exec-stdout %s', p))
@@ -520,7 +511,7 @@ function M.exec(cmd, opt)
 						break
 					end
 					local s = ffi.string(buf, len)
-					M.out_stderr(s)
+					out_stderr(s)
 				end
 				assert(p.stderr:close())
 			end, 'exec-stderr %s', p))
@@ -542,7 +533,7 @@ function M.exec(cmd, opt)
 		p:forget()
 
 		if not self.bg and not self.allow_fail and exit_code ~= 0 then
-			local cmd_s = isstr(cmd) and cmd or proc.quote_args(nil, unpack(cmd))
+			local cmd_s = isstr(cmd) and cmd or cmdline_quote_args(nil, unpack(cmd))
 			local s = _('%s [%s]', cmd_s, exit_code)
 			if task.stdin then
 				s = s .. '\nSTDIN:\n' .. task.stdin
@@ -583,32 +574,32 @@ end
 
 --scheduled tasks ------------------------------------------------------------
 
-M.scheduled_tasks = {} --{name->sched}
+scheduled_tasks = {} --{name->sched}
 
-function M.set_scheduled_task(name, opt)
+function set_scheduled_task(name, opt)
 	if not opt then
-		M.scheduled_tasks[name] = nil
+		scheduled_tasks[name] = nil
 	else
 		assert(opt.action)
 		assert(opt.start_hours or opt.run_every)
-		local sched = M.scheduled_tasks[name]
+		local sched = scheduled_tasks[name]
 		if not sched then
 			sched = {name = name, ctime = time(), active = true, running = false}
-			M.scheduled_tasks[name] = sched
+			scheduled_tasks[name] = sched
 		end
 		update(sched, opt)
 	end
 end
 
 --we need this minimum amount of persistence for scheduled tasks to work.
-function M.load_tasks_data() end --stub
-function M.save_task_data(name, t) end --stub
+function load_tasks_data() end --stub
+function save_task_data(name, t) end --stub
 
 local function run_tasks()
 	local now = time()
 	local today = day(now)
 
-	for name, sched in pairs(M.scheduled_tasks) do
+	for name, sched in pairs(scheduled_tasks) do
 
 		if sched.active then
 
@@ -633,10 +624,10 @@ local function run_tasks()
 
 			if now >= min_time and not sched.running then
 				local rearm = run_every and true or false
-				M.log('note', 'run-task', '%s', name)
+				log('note', 'tasks', 'run-task', '%s', name)
 				sched.last_run = now
-				M.save_task_data(name, {last_run = now})
-				M.task(sched):start()
+				save_task_data(name, {last_run = now})
+				task(sched):start()
 			end
 
 		end
@@ -644,9 +635,9 @@ local function run_tasks()
 end
 
 local sched_job
-function M.task_scheduler(cmd)
+function task_scheduler(cmd)
 	if cmd == 'start' and not sched_job then
-		sched_job = sock.runevery(1, run_tasks)
+		sched_job = runevery(1, run_tasks)
 	elseif cmd == 'stop' and sched_job then
 		sched_job:resume()
 		sched_job = nil
@@ -658,32 +649,28 @@ end
 --self-test ------------------------------------------------------------------
 
 if not ... then
-	local tasks = M
-	tasks.logging = require'logging'
-	tasks.logging.verbose = true
-	tasks.logging.debug = true
-	sock.run(function()
+	logging.verbose = true
+	logging.debug = true
+	run(function()
 
-		local ta = tasks.exec('echo hello', {
+		local ta = task_exec('echo hello', {
 			free_after = 0,
 			bg = true,
 			autostart = false,
 		})
 		ta:start()
-		tasks.notify_warn"The times they are a-changin'"
-		tasks.notify_error"Gotcha!"
+		notify_warn"The times they are a-changin'"
+		notify_error"Gotcha!"
 
-		tasks.set_scheduled_task('wasup', {
+		set_scheduled_task('wasup', {
 			task_name = 'wasup',
 			action = function()
-				tasks.notify'Wasup!'
+				notify'Wasup!'
 			end,
 			start_hours = 0,
 			run_every = 10,
 		})
 
-		tasks.task_scheduler'start'
+		task_scheduler'start'
 	end)
 end
-
-return M

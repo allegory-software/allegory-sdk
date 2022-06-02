@@ -64,7 +64,7 @@ os_info() -> t
 Only use uppercase env. var names because like file names, env. vars
 are case-sensitive on POSIX, but case-insensitive on Windows.
 
-Only use `proc.env()` to read variables instead of `os.getenv()` because
+Only use `env()` to read variables instead of `os.getenv()` because
 the latter won't see the changes made to variables.
 
 #### Exit codes

@@ -367,7 +367,7 @@ local function sec_attr(inheritable)
 	return sa
 end
 
-function _open(path, opt)
+function _open(path, opt, quiet)
 	local async = opt.async or opt.read_async or opt.write_async
 	assert(not async or opt.is_pipe_end, 'only pipes can be async')
 	local access   = bitflags(opt.access or 'read', access_bits, nil, true)
@@ -398,7 +398,9 @@ function _open(path, opt)
 	local getbit = getbit
 	local r = getbit(access, access_bits.read ) or getbit(access, access_bits.generic_read)
 	local w = getbit(access, access_bits.write) or getbit(access, access_bits.generic_write)
-	log('', 'fs', 'open', '%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
+	f.quiet = quiet or not w
+	log(quiet and '' or 'note', 'fs', 'open', '%-4s %s%s %s', f,
+		r and 'r' or '', w and 'w' or '', path)
 	return f
 end
 

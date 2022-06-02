@@ -83,8 +83,8 @@ field names. With the first variant only flag names clash with field names
 which is more acceptable.
 
 API
-	schema.new(opt) -> sc`          create a new schema object
-	schema.diff(sc1, sc2) -> diff`  find out what changed between `sc1` and `sc2`
+	schema(opt) -> sc`              create a new schema object
+	schema_diff(sc1, sc2) -> diff`  find out what changed between `sc1` and `sc2`
 	diff:pp()`                      pretty print a schema diff
 
 ]=]
@@ -295,7 +295,7 @@ do
 			end,
 		})
 	end
-	function schema.new(opt)
+	function _G.schema(opt)
 		assert(opt ~= schema, 'use dot notation')
 		local self = update(opt or {}, schema)
 		local env = update({self = self}, schema.env)

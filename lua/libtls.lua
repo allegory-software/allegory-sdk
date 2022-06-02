@@ -1,6 +1,4 @@
 
-if not ... then require'http_server_test'; return end
-
 --libtls binding.
 --Written by Cosmin Apreutesei. Public Domain.
 
@@ -281,7 +279,7 @@ function tls:configure(t)
 		if created then
 			conf:free() --self holds the only ref to conf now.
 		end
-		assert(ok, err)
+		assertf(ok, '%s\n%s', err, pp(t))
 	end
 	return self
 end

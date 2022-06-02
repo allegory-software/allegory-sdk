@@ -67,22 +67,21 @@ scripts for new libraries.
   * [glue](lua/glue.lua)               - "Assorted lengths of wire" library
   * [pp](lua/pp.lua)                   - Pretty printer and serializer
   * [coro](lua/coro.lua)               - [Symmetric coroutines](https://stackoverflow.com/questions/41891989) for cross-yielding
-  * [errors](lua/errors.lua)           - Structured exceptions for writing network protocols
   * [logging](lua/logging.lua)         - Logging to files and network
   * [events](lua/events.lua)           - Event system (pub/sub) mixin for any object or class
   * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser with labels
-  * [$](lua/$.lua), [$log](lua/$log.lua), [$fs](lua/$fs.lua), [$sock](lua/$sock.lua) - "Drop your tools on the floor" modules
-  * [$daemon](lua/$daemon.lua)         - Scaffold/boilerplate for writing server apps
+  * [daemon](lua/daemon.lua)           - Scaffold/boilerplate for writing server apps
+  * [cmdline](lua/cmdline.lua)         - Command-line arg processing
 * __Platform APIs__
-  * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep
   * [fs](lua/fs.lua)                   - Filesystems, pipes, memory mapping
   * [proc](lua/proc.lua)               - Async process execution with I/O redirection
   * [path](lua/path.lua)               - Path manipulation
   * [unixperms](lua/unixperms.lua)     - Unix permissons string parser
+  * [time](lua/time.lua)               - Wall clock, monotonic clock, sleep
 * __Multi-threading__
-  * [pthread](lua/pthread.lua)         - Low-level threads
+  * [os_thread](lua/os_thread.lua)     - High-level threads API based on pthread and luastate
   * [luastate](lua/luastate.lua)       - Create Lua interpreters to use with OS threads
-  * [thread](lua/thread.lua)           - High-level threads API based on pthread and luastate
+  * [pthread](lua/pthread.lua)         - Low-level threads
 * __Multi-tasking__
   * [tasks](lua/tasks.lua)             - Task system with process hierarchy, output capturing and scheduling
 * __Networking__
@@ -94,14 +93,14 @@ scripts for new libraries.
   * [http_client](lua/http_client.lua) - Async HTTP(s) 1.1 client for high-volume web scraping
   * [http_server](lua/http_server.lua) - Async HTTP(s) 1.1 server
   * [smtp](lua/smtp.lua)               - Async SMTP(s) client
-  * [uri](lua/uri.lua)                 - URI manipulation
+  * [url](lua/url.lua)                 - URL parsing and formatting
   * [ipv6](lua/ipv6.lua)               - IPv6 conversion routines
 * __Data Exchange__
   * [base64](lua/base64.lua)           - Base64 encoding & decoding
-  * [cjson](c/cjson/cjson.txt)         - Fast JSON encoding & decoding
+  * [json](lua/json.lua)               - Fast JSON encoding & decoding
   * [msgpack](lua/msgpack.lua)         - MessagePack encoding & decoding
-  * [expat](lua/expat.lua)             - XML parsing
-  * [genx](lua/genx.lua)               - XML formatting
+  * [xml_parse](lua/xml_parse.lua)     - XML SAX parsing
+  * [xml](lua/xml.lua)                 - XML formatting
   * [csv](lua/csv.lua)                 - CSV parsing
   * [xlsxwriter](lua/xlsxwriter.md)    - Excel 2007+ XLSX file generation
   * [multipart](lua/multipart.lua)     - Multipart MIME encoding
@@ -114,19 +113,21 @@ scripts for new libraries.
   * [hmac](lua/hmac.lua)               - HMAC signing
   * [bcrypt](lua/bcrypt.lua)           - Password hashing
 * __Compression__
-  * [zlib](lua/zlib.lua)               - DEFLATE, ZLIB, GZIP (based on [zlib-ng](https://github.com/zlib-ng/zlib-ng))
+  * [gzip](lua/gzip.lua)               - DEFLATE & GZIP (based on [zlib-ng](https://github.com/zlib-ng/zlib-ng))
   * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating (based on [minizip-ng](https://github.com/zlib-ng/minizip-ng))
 * __Databases__
   * [sqlpp](lua/sqlpp.lua)             - SQL preprocessor
   * [mysql](lua/mysql.lua)             - MySQL async driver
   * [tarantool](lua/tarantool.lua)     - Tarantool async driver
   * [schema](lua/schema.lua)           - Database schema diff'ing and migrations
+  * [query](lua/query.lua)             - SQL queries with preprocessor on a connection pool
 * __Raster Images__
-  * [libjpeg](lua/libjpeg.lua)         - Fast JPEG decoding & encoding (based on [libjpeg-turbo](https://libjpeg-turbo.org/))
-  * [libspng](lua/libspng.lua)         - Fast PNG decoding & encoding (based on [libspng](https://libspng.org/))
+  * [jpeg](lua/jpeg.lua)               - Fast JPEG decoding & encoding (based on [libjpeg-turbo](https://libjpeg-turbo.org/))
+  * [png](lua/png.lua)                 - Fast PNG decoding & encoding (based on [libspng](https://libspng.org/))
   * [bmp](lua/bmp.lua)                 - BMP decoding & encoding
   * [bitmap](lua/bitmap.lua)           - Bitmap conversions
   * [pillow](lua/pillow.lua)           - Fast image resizing (based on [Pillow-SIMD](https://github.com/uploadcare/pillow-simd#pillow-simd))
+  * [resize_image](lua/resize_image.lua) - Image resizing and format conversion
 * __Templating__
   * [mustache](lua/mustache.lua)       - Logic-less [templates](https://mustache.github.io/) on server-side
 * __Data Structures__
@@ -136,7 +137,7 @@ scripts for new libraries.
   * [lrucache](lua/lrucache.lua)       - LRU Cache
 * __Math__
   * [ldecnumber](c/ldecNumber/ldecnumber.txt) - Fixed-precision decimal numbers math
-  * [box2d](lua/box2d.lua)             - 2D rectangle math
+  * [rect](lua/rect.lua)               - 2D rectangle math
 * __Support Libs__
   * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
 * __Dev Tools__
@@ -144,7 +145,6 @@ scripts for new libraries.
 * __Web / Server side__
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
-  * [webb_query](lua/webb_query.lua)   - SQL database access
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
   * [webb_spa](lua/webb_spa.lua)       - Single-page app support
   * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification

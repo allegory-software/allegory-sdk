@@ -33,7 +33,7 @@ Backends & writing your own
 	as a reference for how to do all that.
 
 INSTANCING
-	sqlpp.new(engine) -> spp                     create a preprocessor instance
+	sqlpp(engine) -> spp                         create a preprocessor instance
 	spp.connect(options) -> cmd                  connect to a database
 	spp.use(rawconn) -> cmd                      use an existing connection
 	cmd:use(db, [schema], [opt])                 switch current database
@@ -109,7 +109,7 @@ MDL COMMANDS
 	cmd:delete_row(tbl, vals, col_map, [filter]) delete row
 
 MODULE SYSTEM
-	function sqlpp.package.NAME(spp) end         extend the preprocessor with a module
+	function sqlpp_package.NAME(spp) end         extend the preprocessor with a module
 	spp.import(module)                           import sqlpp module
 
 MODULES
@@ -124,7 +124,7 @@ EXTENDING THE PREPROCESSOR
 
 ## Preprocessor
 
-### sqlpp.new() -> spp
+### sqlpp() -> spp
 
 Create a preprocessor instance. Modules can be loaded into the instance
 with `spp.import()`.
@@ -209,25 +209,6 @@ The schema can be defined manually or it can be taken from the server.
 ```lua
 cmd.schemas[cmd.db] = cmd:extract_schema()
 ```
-
-## Module system
-
-## `function sqlpp.package.NAME(spp) end`
-
-Extend the preprocessor with a module, available to all preprocessor
-instances to be loaded with `spp.import()`.
-
-### spp.import(name)
-
-Load a module into the preprocessor instance.
-
-## Modules
-
-### require'sqlpp_mysql
-### spp.import'mysql'
-
-Load the MySQL module into an sqlpp instance.
-
 ]=]
 
 if not ... then require'sqlpp_mysql_test'; return end
@@ -238,20 +219,21 @@ local
 	assert, type =
 	assert, type
 
-local sqlpp = {package = {}}
+local sqlpp = {}
+local sqlpp_package = {}
 
-function sqlpp.ispp(v)
-	return type(v) == 'table' and v.is_sqlpp or false
+function issqlpp(v)
+	return type(v) == 'table' and rawget(v, 'issqlpp') or false
 end
 
-function sqlpp.new(init)
+function _G.sqlpp(init)
 
 	assert(init, 'engine module name or engine init function expected')
 	if type(init) == 'string' then
 		init = require('sqlpp_'..init).init_spp
 	end
 
-	local spp = {is_sqlpp = true}
+	local spp = {issqlpp = true}
 	local cmd = {spp = spp}
 	spp.command = cmd
 
@@ -1175,7 +1157,7 @@ function sqlpp.new(init)
 	function spp.import(pkg)
 		for pkg in pkg:gmatch'[^%s]+' do
 			if not spp.loaded[pkg] then
-				assertf(sqlpp.package[pkg], 'no sqlpp module: %s', pkg)(spp)
+				assertf(sqlpp_package[pkg], 'no sqlpp module: %s', pkg)(spp)
 				spp.loaded[pkg] = true
 			end
 		end
@@ -1487,8 +1469,8 @@ function sqlpp.new(init)
 	end
 
 	function spp.empty_schema()
-		local schema = require'schema'
-		return schema.new(update({engine = spp.engine}, spp.schema_options))
+		require'schema'
+		return schema(update({engine = spp.engine}, spp.schema_options))
 	end
 
 	function cmd:empty_schema()
@@ -1541,7 +1523,7 @@ function sqlpp.new(init)
 		local schema = require'schema'
 		local src_sc =
 			schema.isschema(src) and src
-			or sqlpp.ispp(src) and src:extract_schema()
+			or issqlpp(src) and src:extract_schema()
 			or assertf(false, 'schema or sqlpp expected, got %s', type(src))
 		local this_sc = self:extract_schema()
 		local diff = schema.diff(this_sc, src_sc)
@@ -1826,5 +1808,3 @@ function sqlpp.new(init)
 
 	return spp
 end
-
-return sqlpp

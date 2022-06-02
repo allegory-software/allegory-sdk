@@ -48,11 +48,9 @@ MULTI-LANGUAGE STRINGS IN SOURCE CODE
 
 REQUEST CONTEXT
 
-	cx() -> t                               get current request's shared context
-	cx().conn -> t                          get per-connection shared context
-	cx().fake -> t|f                        context is fake (we're on cmdline)
-	cx().request_id                         unique request id (for naming temp files)
-	webb.env([t]) -> t                      per-request shared environment
+	http_request() -> req                   get current request's shared context
+	  req.fake -> t|f                       context is fake (we're on cmdline)
+	  req.request_id                        unique request id (for naming temp files)
 	once(f, ...)                            memoize for current request
 	once_per_conn(f, ...)                   memoize for current connection
 
@@ -73,8 +71,8 @@ REQUEST
 	port([p]) -> p | t|f                    get/check server port
 	email(user) -> s                        get email address of user
 	client_ip() -> s                        get client's ip address
-	googlebot() -> t|f                      check if UA is the google bot
-	mobile() -> t|F                         check if UA is a mobile browser
+	isgooglebot() -> t|f                    check if UA is the google bot
+	ismobile() -> t|F                       check if UA is a mobile browser
 
 ARG PARSING
 
@@ -87,7 +85,7 @@ ARG PARSING
 
 OUTPUT
 
-	set_content_size(sz)                    set content size to avoid chunked encoding
+	setcontentsize(sz)                      set content size to avoid chunked encoding
 	outall(s[, sz])                         output a single value
 	out(s[, sz])                            output one more non-nil value
 	push_out([f])                           push output function or buffer
@@ -161,36 +159,6 @@ IMAGE PROCESSING
 
 	base64_image_src(s)
 
-HTTP SERVER INTEGRATION
-
-	webb.respond(req)                       webb.server response handler
-	webb.server([opt]) -> server
-
-STANDALONE OPERATION
-
-	webb.fakecx() -> cx                     make a fake webb context.
-	webb.run(f, ...)                        run a function in a webb context.
-	webb.request(req | arg1,...)            make a request without a http server.
-
-CONFIG
-
-	app_name         <required>            app name
-	app_dir          <required>            app dir
-	main_module      app_name              main module / respond function
-	www_dir          APP_DIR/www           static files dir
-	libwww_dir       APP_DIR/sdk/www       shared www dir
-	var_dir          APP_DIR/var           persistent state dir
-	http_addr        *                     HTTP listen IP address
-	http_port        80                    HTTP listen port
-	https_addr       *                     HTTPS listen addr
-	https_port       443                   HTTPS listen port
-	https_crt_file   VAR_DIR/HOST.crt      SSL crt file
-	https_key_file   VAR_DIR/HOST.key      SSL key file
-	base_url         SCHEME://HOST[:PORT]  fixed base URL for absurl()
-	host             tcp.local_addr        when `Host` header missing
-	getpage_debug    nil                   'protocol stream errors tracebacks'
-	default_lang     'en'                  default language
-
 ]==]
 
 require'glue'
@@ -203,260 +171,76 @@ require'path'
 require'rect'
 require'mustache'
 require'xxhash'
+require'http_server'
 
-webb = {}
+--http server wiring ---------------------------------------------------------
 
-errortype'http_response'.__tostring = function(self)
-	local s = self.traceback or self.message or ''
-	if self.status then
-		s = self.status .. ' ' .. s
+--http thread context for all context-free APIs below.
+local function req()
+	local tenv = getthreadenv()
+	return tenv and tenv.http_request
+end
+http_req = req
+
+local function respond(req)
+	req.res = {headers = {}}
+	getownthreadenv().http_request = req
+	http_log('', 'webb', 'request', '%s %s', req.method, url_unescape(req.uri))
+	local main = config('main_module', scriptname)
+	local main = isstr(main) and require(main) or main
+	if istab(main) then
+		main = main.respond
 	end
-	return s
+	main()
+end
+function webb_http_server(opt)
+	return http_server({
+		respond = respond,
+	}, opt)
 end
 
---webb context ---------------------------------------------------------------
+--context-free utils ---------------------------------------------------------
 
-local CX = {}
-function cx()
-	local te = threadenv[currentthread()]
-	return te and te[CX]
+function onrequestfinish(f)
+	req():onfinish(f)
 end
-local cx = cx
-
---multi-language support with stubs ------------------------------------------
-
-webb.langinfo = {
-	en = {
-		rtl = false,
-		en_name = 'English',
-		name = 'English',
-		decimal_separator = ',',
-		thousands_separator = '.',
-	},
-}
-
-function default_lang()
-	return config('default_lang', 'en')
-end
-
-function lang(k)
-	local cx = cx()
-	local lang = cx and cx.lang or default_lang()
-	if not k then return lang end
-	local t = assert(webb.langinfo[lang])
-	local v = t[k]
-	assert(v ~= nil)
-	return v
-end
-
-function setlang(lang)
-	if not lang or not webb.langinfo[lang] then return end --missing or invalid lang: ignore.
-	cx().lang = lang
-end
-
-webb.countryinfo = {
-	US = {
-		lang = 'en',
-		currency = 'USD',
-		imperial_system = true,
-		week_start_offset = 0,
-		en_name = 'United States',
-		date_format = 'mm-dd-yyyy',
-	},
-}
-
-function default_country()
-	return config('default_country', 'US')
-end
-
-function country(k)
-	local country = cx().country or default_country()
-	if not k then return country end
-	local t = assert(webb.countryinfo[country])
-	local v = t[k]
-	assert(v ~= nil)
-	return v
-end
-
-function setcountry(country, if_not_set)
-	local cx = cx()
-	if if_not_set and cx.country then return end
-	cx.country = country and countryinfo(country) and country or default_country()
-end
-
-function multilang()
-	return config('multilang', true)
-end
-
---multi-language strings in source code files --------------------------------
-
-do
-
-local files = {}
-local ids --{id->{files=,n=,en_s}}
-
-function Sfile(filenames)
-	update(files, index(collect(words(filenames))))
-	ids = nil
-end
-
-function Sfile_template(ids, file, s)
-
-	local function add_id(id, en_s)
-		local ext_id ='html:'..id
-		local t = ids[ext_id]
-		if not t then
-			t = {files = file, n = 1, en_s = en_s}
-			ids[ext_id] = t
-		else
-			t.files = t.files .. ' ' .. file
-			t.n = t.n + 1
-		end
-	end
-
-	--<t s=ID>EN_S</t>
-	for id, en_s in s:gmatch'<t%s+s=([%w_%-]+).->(.-)</t>' do
-		add_id(id, en_s)
-	end
-
-	--replace attr:s:ID="EN_S" and attr:s:ID=EN_S
-	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=(%b"")' do
-		en_s = en_s:sub(2, -2)
-		add_id(id, en_s)
-	end
-	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=([^%s>]*)' do
-		add_id(id, en_s)
-	end
-end
-
-function Sfile_ids()
-	if not ids then
-		ids = {}
-		for file in pairs(files) do
-			local ext = fileext(file)
-			local s
-			if ext == 'js' then
-				s = wwwfile(file)
-			elseif ext == 'lua' then
-				s = webb.loadfile(indir(config'app_dir', file), false)
-						or webb.loadfile(indir(config'app_dir', 'sdk', 'lua', file))
-			end
-			for id, en_s in s:gmatch"[^%w_]Sf?%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
-				local ext_id = ext..':'..id
-				local t = ids[ext_id]
-				if not t then
-					t = {files = file, n = 1, en_s = en_s}
-					ids[ext_id] = t
-				else
-					t.files = t.files .. ' ' .. file
-					t.n = t.n + 1
-				end
-			end
-		end
-		for i,k in ipairs(template()) do
-			local s = template(k)
-			if isfunc(s) then --template getter/generator
-				s = s()
-			end
-			Sfile_template(ids, k, s)
-		end
-	end
-	return ids
-end
-
---using a different file for js strings so that strings.js only sends
---js strings to the client for client-side translation.
-local function s_file(lang, ext)
-	return varpath(format('%s-s-%s%s.lua', config'app_name', lang,
-		ext == 'lua' and '' or '-'..ext))
-end
-
---TODO: invalidate this cache based on file's mtime but don't check too often.
-S_texts = function(lang, ext)
-	local s = webb.loadfile(s_file(lang, ext), false)
-	return s and loadstring(s)() or {}
-end
-
-local function save_S_texts(lang, ext, t)
-	webb.savefile(s_file(lang, ext), 'return '..pp.format(t, '\t'))
-end
-
-function update_S_texts(lang, ext, t)
-	local texts = S_texts(lang, ext)
-	for k,v in pairs(t) do
-		texts[k] = v or nil
-	end
-	save_S_texts(lang, ext, texts)
-end
-
-function S_for(ext, id, en_s, ...)
-	local lang = lang()
-	local t = S_texts(lang, ext)
-	local s = t[id]
-	if not s then
-		local dlang = default_lang()
-		if dlang ~= 'en' and dlang ~= lang then
-			s = S_texts(dlang, ext)
-		end
-	end
-	s = s or en_s or ''
-	if select('#', ...) > 0 then
-		return subst(s, ...)
-	else
-		return s
-	end
-end
-
-function S(...)
-	return S_for('lua', ...)
-end
-
-function Sf(id, en_s)
-	return function(...)
-		return S_for('lua', id, en_s, ...)
-	end
-end
-
-end --do
-
---per-request environment ----------------------------------------------------
 
 --per-request memoization.
-function once(f)
+function http_once_per_req(f)
 	return function(...)
-		local cx = cx()
-		local mf = cx[f]
+		local req = req()
+		local mf = req[f]
 		if not mf then
 			mf = memoize(f)
-			cx[f] = mf
+			req[f] = mf
 		end
 		return mf(...)
 	end
 end
 
 --per-connection memoization.
-function once_per_conn(f)
+function http_once_per_conn(f)
 	return function(...)
-		local cx = cx()
-		local mf = cx.conn[f]
+		local req = req()
+		local mf = req.http[f]
 		if not mf then
 			mf = memoize(f)
-			cx.conn[f] = mf
+			req.http[f] = mf
 		end
 		return mf(...)
 	end
 end
 
---per-request shared environment to use in all app code.
---Inherits _G. Scripts run with `include()` and `run()` run in this environment
---by default. If the `t` argument is given, an inherited environment is created.
-function webb.env(t)
-	local cx = cx()
-	local env = cx.env
+--per-request shared environment. Inherits _G. Scripts run with `include()`
+--and `run_lua*()` run in this environment by default. If the `t` argument
+--is given, an inherited environment is created.
+function http_request_env(t)
+	local req = req()
+	local env = req.env
 	if not env then
 		env = {__index = _G}
 		setmetatable(env, env)
-		cx.env = env
+		req.env = env
 	end
 	if t then
 		t.__index = env
@@ -466,34 +250,14 @@ function webb.env(t)
 	end
 end
 
---logging --------------------------------------------------------------------
-
-function webb.log(...)
-	local cx = cx()
-	if cx then
-		cx.req.http:log(...)
-	else
-		log(...)
-	end
+function http_log(...)
+	req().http:log(...)
 end
 
-function webb.trace(event, s, ...)
-	if not event then
-		webb.dbg('webb', 'trace', '%s', debug.traceback())
-		return
-	end
-	webb.dbg('webb', event, '%4.2f '..s, 0, ...)
-	local t0 = time()
-	return function(event, s, ...)
-		local dt = time() - t0
-		webb.dbg('webb', event, '%4.2f '..s, dt, ...)
-	end
-end
-
---request API ----------------------------------------------------------------
+--request breakdown ----------------------------------------------------------
 
 function method(which)
-	local m = cx().req.method:lower()
+	local m = req().method:lower()
 	if which then
 		return m == which:lower()
 	else
@@ -502,7 +266,7 @@ function method(which)
 end
 
 function headers(h)
-	local ht = cx().req.headers
+	local ht = req().headers
 	if h then
 		return ht[h]
 	else
@@ -511,15 +275,15 @@ function headers(h)
 end
 
 function cookie(name)
-	local t = cx().req.headers.cookie
+	local t = req().headers.cookie
 	return t and t[name]
 end
 
 function args(v)
-	local cx = cx()
-	local args, argc = cx.args, cx.argc
+	local req = req()
+	local args, argc = req.args, req.argc
 	if not args then
-		local u = uri.parse(cx.req.uri)
+		local u = url_parse(req.uri)
 		args = u.segments
 		remove(args, 1) -- /a/b -> a/b
 		argc = #args
@@ -534,8 +298,8 @@ function args(v)
 				args[k] = v
 			end
 		end
-		cx.args = args
-		cx.argc = argc
+		req.args = args
+		req.argc = argc
 	end
 	if v then
 		return args[v]
@@ -548,23 +312,23 @@ function post(v)
 	if not method'post' then
 		return
 	end
-	local cx = cx()
-	local s = cx.post
+	local req = req()
+	local s = req.post
 	if not s then
-		s = cx.req:read_body'string'
+		s = req:read_body'string'
 		if s == '' then
 			s = nil
 		else
-			local ct = cx.req.headers['content-type']
+			local ct = req.headers['content-type']
 			if ct then
 				if ct.media_type == 'application/x-www-form-urlencoded' then
-					s = uri.parse_args(s)
+					s = url_parse_args(s)
 				elseif ct.media_type == 'application/json' then --prevent ENCTYPE CORS
-					s = json_arg(s)
+					s = json_decode(s)
 				end
 			end
 		end
-		cx.post = s
+		req.post = s
 	end
 	if v and istab(s) then
 		return s[v]
@@ -575,13 +339,13 @@ end
 
 function upload(file)
 	return fcall(function(finally, except)
-		webb.log('note', 'webb', 'upload', '%s', file)
+		http_log('note', 'webb', 'upload', '%s', file)
 		local write_protected = assert(file_saver(file))
 		except(function() write_protected(ABORT) end)
 		local function write(buf, sz)
 			assert(write_protected(buf, sz))
 		end
-		cx().req:read_body(write)
+		req():read_body(write)
 		return file
 	end)
 end
@@ -591,7 +355,7 @@ function scheme(s)
 		return scheme() == s
 	end
 	return headers'x-forwarded-proto'
-		or (cx().req.http.tcp.istlssocket and 'https' or 'http')
+		or (req().http.tcp.istlssocket and 'https' or 'http')
 end
 
 function host(s)
@@ -601,7 +365,7 @@ function host(s)
 	return headers'x-forwarded-host'
 		or (headers'host' and headers'host'.host)
 		or config'host'
-		or cx().req.http.tcp.local_addr
+		or req().http.tcp.local_addr
 end
 
 function port(p)
@@ -609,7 +373,7 @@ function port(p)
 		return port() == tonumber(p)
 	end
 	return headers'x-forwarded-port'
-		or cx().req.http.tcp.local_port
+		or req().http.tcp.local_port
 end
 
 function email(user)
@@ -618,95 +382,143 @@ end
 
 function client_ip()
 	return headers'x-forwarded-for'
-		or cx().req.http.tcp.remote_addr
+		or req().http.tcp.remote_addr
 end
 
-function googlebot()
+function isgooglebot()
 	return headers'user-agent':find'googlebot' and true or false
 end
 
-function mobile()
+function ismobile()
 	return headers'user-agent':find'mobi' and true or false
 end
 
---arg validation & decoding --------------------------------------------------
+--response API ---------------------------------------------------------------
 
-function id_arg(s)
-	if not s or isnum(s) then return s end
-	local n = tonumber(s:match'(%d+)$') --strip any slug
-	return n and n >= 0 and n or nil
+--responding with a http status message by raising an error.
+local function checkfunc(code, default_err)
+	return function(ret, err, ...)
+		if ret then return ret end
+		err = err and format(err, ...) or default_err
+		local req = req()
+		local ct = req.res.content_type
+		http_error{
+			status = code,
+			content_type = ct,
+			headers = {
+				--allow logout() to remove cookie while raising 403.
+				['set-cookie'] = req.res.headers['set-cookie'],
+			},
+			content = ct == mime_types.json
+				and json_encode{error = err} or tostring(err),
+			message = err, --for tostring()
+		}
+	end
+end
+checkfound = checkfunc(404, 'not found')
+checkarg   = checkfunc(400, 'invalid argument')
+allow      = checkfunc(403, 'not allowed')
+check500   = checkfunc(500, 'internal error')
+
+function redirect(url)
+	--TODO: make it work with relative paths
+	http_error{status = 303, headers = {location = url}}
 end
 
-function str_arg(s)
-	s = trim(s or '')
-	return s ~= '' and s or nil
-end
-
-function json_str_arg(s)
-	return isstr(s) and s or nil
-end
-
-function enum_arg(s, ...)
-	for i=1,select('#',...) do
-		if s == select(i,...) then
-			return s
+function check_etag(s)
+	if not method'get' then return s end
+	if out_buffering() then return s end
+	local etag = xxhash128(s):hex()
+	local etags = headers'if-none-match'
+	if etags and istab(etags) then
+		for _,t in ipairs(etags) do
+			if t.etag == etag then
+				http_error(304)
+			end
 		end
 	end
-	return nil
+	--send etag to client as weak etag so that gzip filter still apply.
+	setheader('etag', 'W/'..etag)
+	return s
 end
 
-function list_arg(s, arg_f)
-	local s = str_arg(s)
-	if not s then return nil end
-	arg_f = arg_f or str_arg
-	local t = {}
-	for s in split(s, ',', 1, true) do
-		add(t, arg_f(s))
-	end
-	return t
+function setconnectionclose()
+	req().res.close = true
 end
 
-function checkbox_arg(s)
-	return s == 'on' and 'checked' or nil
+mime_types = {
+	html = 'text/html',
+	txt  = 'text/plain',
+	sh   = 'text/plain',
+	css  = 'text/css',
+	json = 'application/json',
+	js   = 'application/javascript',
+	jpg  = 'image/jpeg',
+	jpeg = 'image/jpeg',
+	png  = 'image/png',
+	gif  = 'image/gif',
+	ico  = 'image/x-icon',
+	svg  = 'image/svg+xml',
+	ttf  = 'font/ttf',
+	woff = 'font/woff',
+	woff2= 'font/woff2',
+	pdf  = 'application/pdf',
+	zip  = 'application/zip',
+	gz   = 'application/x-gzip',
+	tgz  = 'application/x-gzip',
+	xz   = 'application/x-xz',
+	bz2  = 'application/x-bz2',
+	tar  = 'application/x-tar',
+	mp3  = 'audio/mpeg',
+	events = 'text/event-stream',
+	xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+}
+
+function setmime(ext)
+	req().res.content_type = checkfound(mime_types[ext])
 end
 
-function url_arg(s)
-	return isstr(s) and uri.parse(s) or s
+function setcompress(on)
+	req().res.compress = on
+end
+
+function setcontentsize(sz)
+	req().res.content_size = sz
 end
 
 --output API -----------------------------------------------------------------
 
-function set_content_size(sz)
-	cx().res.content_size = sz
+function base64_image_src(s)
+	return s and 'data:image/png;base64, '..base64_encode(s)
 end
 
 function outall(s, sz)
-	if cx().http_out or out_buffering() then
+	if req().http_out or out_buffering() then
 		out(s, sz)
 	else
 		s = s == nil and '' or iscdata(s) and s or tostring(s)
-		local cx = cx()
-		cx.res.content = s
-		cx.res.content_size = sz
-		cx.req:respond(cx.res)
+		local req = req()
+		req.res.content = s
+		req.res.content_size = sz
+		req:respond(req.res)
 	end
 end
 
 function out_buffering()
-	return cx().outfunc ~= nil
+	return req().outfunc ~= nil
 end
 
 local function default_outfunc(s, sz)
 	if s == nil or s == '' or sz == 0 then
 		return
 	end
-	local cx = cx()
-	if not cx.http_out then
-		cx.res.want_out_function = true
-		cx.http_out = cx.req:respond(cx.res)
+	local req = req()
+	if not req.http_out then
+		req.res.want_out_function = true
+		req.http_out = req:respond(req.res)
 	end
 	s = not iscdata(s) and tostring(s) or s
-	cx.http_out(s, sz)
+	req.http_out(s, sz)
 end
 
 function stringbuffer(t)
@@ -749,27 +561,27 @@ function stringbuffer(t)
 end
 
 function push_out(f)
-	local cx = cx()
-	cx.outfunc = f or stringbuffer()
-	if not cx.outfuncs then
-		cx.outfuncs = {}
+	local req = req()
+	req.outfunc = f or stringbuffer()
+	if not req.outfuncs then
+		req.outfuncs = {}
 	end
-	add(cx.outfuncs, cx.outfunc)
+	add(req.outfuncs, req.outfunc)
 end
 
 function pop_out()
-	local cx = cx()
-	assert(cx.outfunc, 'pop_out() with nothing to pop')
-	local s = cx.outfunc()
-	local outfuncs = cx.outfuncs
+	local req = req()
+	assert(req.outfunc, 'pop_out() with nothing to pop')
+	local s = req.outfunc()
+	local outfuncs = req.outfuncs
 	remove(outfuncs)
-	cx.outfunc = outfuncs[#outfuncs]
+	req.outfunc = outfuncs[#outfuncs]
 	return s
 end
 
 function out(s, sz)
-	local cx = cx()
-	local outfunc = cx.outfunc or default_outfunc
+	local req = req()
+	local outfunc = req.outfunc or default_outfunc
 	outfunc(s, sz)
 end
 
@@ -798,7 +610,7 @@ function outfile_function(path)
 	end
 
 	return function()
-		set_content_size(file_size)
+		setcontentsize(file_size)
 		local filebuf_size = min(file_size, 65536)
 		local filebuf = u8a(filebuf_size)
 		while true do
@@ -826,48 +638,12 @@ function outfile(path)
 end
 
 function setheader(name, val)
-	cx().res.headers[name] = val
-end
-
-mime_types = {
-	html = 'text/html',
-	txt  = 'text/plain',
-	sh   = 'text/plain',
-	css  = 'text/css',
-	json = 'application/json',
-	js   = 'application/javascript',
-	jpg  = 'image/jpeg',
-	jpeg = 'image/jpeg',
-	png  = 'image/png',
-	gif  = 'image/gif',
-	ico  = 'image/x-icon',
-	svg  = 'image/svg+xml',
-	ttf  = 'font/ttf',
-	woff = 'font/woff',
-	woff2= 'font/woff2',
-	pdf  = 'application/pdf',
-	zip  = 'application/zip',
-	gz   = 'application/x-gzip',
-	tgz  = 'application/x-gzip',
-	xz   = 'application/x-xz',
-	bz2  = 'application/x-bz2',
-	tar  = 'application/x-tar',
-	mp3  = 'audio/mpeg',
-	events = 'text/event-stream',
-	xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-}
-
-function setmime(ext)
-	cx().res.content_type = checkfound(mime_types[ext])
-end
-
-function setcompress(on)
-	cx().res.compress = on
+	req().res.headers[name] = val
 end
 
 local _print = print_function(out)
 function outprint(...)
-	if cx().res then setmime'txt' end
+	if req().res then setmime'txt' end
 	_print(...)
 end
 
@@ -890,69 +666,6 @@ function slug(id, s)
 	return (s ~= '' and s..'-' or '')..tostring(id)
 end
 
---response API ---------------------------------------------------------------
-
-function http_error(status, content) --status,[content] | http_response
-	local err
-	if isnum(status) then
-		err = {status = status, content = content}
-	elseif istab(status) then
-		err = status
-	else
-		assert(false)
-	end
-	raise(3, 'http_response', err)
-end
-
-function redirect(uri)
-	--TODO: make it work with relative paths
-	http_error{status = 303, headers = {location = uri}}
-end
-
-local function checkfunc(code, default_err)
-	return function(ret, err, ...)
-		if ret then return ret end
-		err = err and format(err, ...) or default_err
-		local cx = cx()
-		local ct = cx and cx.res.content_type
-		http_error{
-			status = code,
-			content_type = ct,
-			headers = {
-				--allow logout() to remove cookie while raising 403.
-				['set-cookie'] = cx and cx.res.headers['set-cookie'],
-			},
-			content = ct == mime_types.json and json{error = err} or tostring(err),
-			message = err, --for tostring()
-		}
-	end
-end
-checkfound = checkfunc(404, 'not found')
-checkarg   = checkfunc(400, 'invalid argument')
-allow      = checkfunc(403, 'not allowed')
-check500   = checkfunc(500, 'internal error')
-
-function check_etag(s)
-	if not method'get' then return s end
-	if out_buffering() then return s end
-	local etag = xxhash128(s):hex()
-	local etags = headers'if-none-match'
-	if etags and istab(etags) then
-		for _,t in ipairs(etags) do
-			if t.etag == etag then
-				http_error(304)
-			end
-		end
-	end
-	--send etag to client as weak etag so that gzip filter still apply.
-	setheader('etag', 'W/'..etag)
-	return s
-end
-
-function setconnectionclose()
-	cx().res.close = true
-end
-
 --filesystem API -------------------------------------------------------------
 
 local function wwwdir()
@@ -969,7 +682,7 @@ function tmppath(patt, t)
 	assert(not patt:find'[\\/]') --no subdirs
 	mkdir(tmpdir(), true)
 	t = t or {}
-	t.request_id = cx().request_id
+	t.request_id = req().request_id
 	local file = subst(patt, t)
 	return path_combine(tmpdir(), file)
 end
@@ -1035,6 +748,247 @@ function wwwfiles(filter)
 		end
 	end
 	return t
+end
+
+--multi-language support with stubs ------------------------------------------
+
+langinfo = {
+	en = {
+		rtl = false,
+		en_name = 'English',
+		name = 'English',
+		decimal_separator = ',',
+		thousands_separator = '.',
+	},
+}
+
+function default_lang()
+	return config('default_lang', 'en')
+end
+
+function lang(k)
+	local req = req()
+	local lang = req and req.lang or default_lang()
+	if not k then return lang end
+	local t = assert(webb.langinfo[lang])
+	local v = t[k]
+	assert(v ~= nil)
+	return v
+end
+
+function setlang(lang)
+	if not lang or not webb.langinfo[lang] then return end --missing or invalid lang: ignore.
+	req().lang = lang
+end
+
+countryinfo = {
+	US = {
+		lang = 'en',
+		currency = 'USD',
+		imperial_system = true,
+		week_start_offset = 0,
+		en_name = 'United States',
+		date_format = 'mm-dd-yyyy',
+	},
+}
+
+function default_country()
+	return config('default_country', 'US')
+end
+
+function country(k)
+	local country = req().country or default_country()
+	if not k then return country end
+	local t = assert(webb.countryinfo[country])
+	local v = t[k]
+	assert(v ~= nil)
+	return v
+end
+
+function setcountry(country, if_not_set)
+	local req = req()
+	if if_not_set and req.country then return end
+	req.country = country and countryinfo(country) and country or default_country()
+end
+
+function multilang()
+	return config('multilang', true)
+end
+
+--multi-language strings in source code files --------------------------------
+
+do
+
+local files = {}
+local ids --{id->{files=,n=,en_s}}
+
+function Sfile(filenames)
+	update(files, index(collect(words(filenames))))
+	ids = nil
+end
+
+function Sfile_template(ids, file, s)
+
+	local function add_id(id, en_s)
+		local ext_id ='html:'..id
+		local t = ids[ext_id]
+		if not t then
+			t = {files = file, n = 1, en_s = en_s}
+			ids[ext_id] = t
+		else
+			t.files = t.files .. ' ' .. file
+			t.n = t.n + 1
+		end
+	end
+
+	--<t s=ID>EN_S</t>
+	for id, en_s in s:gmatch'<t%s+s=([%w_%-]+).->(.-)</t>' do
+		add_id(id, en_s)
+	end
+
+	--replace attr:s:ID="EN_S" and attr:s:ID=EN_S
+	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=(%b"")' do
+		en_s = en_s:sub(2, -2)
+		add_id(id, en_s)
+	end
+	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=([^%s>]*)' do
+		add_id(id, en_s)
+	end
+end
+
+function Sfile_ids()
+	if not ids then
+		ids = {}
+		for file in pairs(files) do
+			local ext = path_fileext(file)
+			local s
+			if ext == 'js' then
+				s = wwwfile(file)
+			elseif ext == 'lua' then
+				s = webb.loadfile(indir(config'app_dir', file), false)
+						or webb.loadfile(indir(config'app_dir', 'sdk', 'lua', file))
+			end
+			for id, en_s in s:gmatch"[^%w_]Sf?%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
+				local ext_id = ext..':'..id
+				local t = ids[ext_id]
+				if not t then
+					t = {files = file, n = 1, en_s = en_s}
+					ids[ext_id] = t
+				else
+					t.files = t.files .. ' ' .. file
+					t.n = t.n + 1
+				end
+			end
+		end
+		for i,k in ipairs(template()) do
+			local s = template(k)
+			if isfunc(s) then --template getter/generator
+				s = s()
+			end
+			Sfile_template(ids, k, s)
+		end
+	end
+	return ids
+end
+
+--using a different file for js strings so that strings.js only sends
+--js strings to the client for client-side translation.
+local function s_file(lang, ext)
+	return varpath(format('%s-s-%s%s.lua', config'app_name', lang,
+		ext == 'lua' and '' or '-'..ext))
+end
+
+--TODO: invalidate this cache based on file's mtime but don't check too often.
+S_texts = function(lang, ext)
+	local s = load(s_file(lang, ext), false)
+	return s and loadstring(s)() or {}
+end
+
+local function save_S_texts(lang, ext, t)
+	webb.savefile(s_file(lang, ext), 'return '..pp.format(t, '\t'))
+end
+
+function update_S_texts(lang, ext, t)
+	local texts = S_texts(lang, ext)
+	for k,v in pairs(t) do
+		texts[k] = v or nil
+	end
+	save_S_texts(lang, ext, texts)
+end
+
+function S_for(ext, id, en_s, ...)
+	local lang = lang()
+	local t = S_texts(lang, ext)
+	local s = t[id]
+	if not s then
+		local dlang = default_lang()
+		if dlang ~= 'en' and dlang ~= lang then
+			s = S_texts(dlang, ext)
+		end
+	end
+	s = s or en_s or ''
+	if select('#', ...) > 0 then
+		return subst(s, ...)
+	else
+		return s
+	end
+end
+
+function S(...)
+	return S_for('lua', ...)
+end
+
+function Sf(id, en_s)
+	return function(...)
+		return S_for('lua', id, en_s, ...)
+	end
+end
+
+end --do
+
+--arg validation & decoding --------------------------------------------------
+
+function id_arg(s)
+	if not s or isnum(s) then return s end
+	local n = tonumber(s:match'(%d+)$') --strip any slug
+	return n and n >= 0 and n or nil
+end
+
+function str_arg(s)
+	s = trim(s or '')
+	return s ~= '' and s or nil
+end
+
+function json_str_arg(s)
+	return isstr(s) and s or nil
+end
+
+function enum_arg(s, ...)
+	for i=1,select('#',...) do
+		if s == select(i,...) then
+			return s
+		end
+	end
+	return nil
+end
+
+function list_arg(s, arg_f)
+	local s = str_arg(s)
+	if not s then return nil end
+	arg_f = arg_f or str_arg
+	local t = {}
+	for s in split(s, ',', 1, true) do
+		add(t, arg_f(s))
+	end
+	return t
+end
+
+function checkbox_arg(s)
+	return s == 'on' and 'checked' or nil
+end
+
+function url_arg(s)
+	return isstr(s) and url_parse(s) or s
 end
 
 --mustache html templates ----------------------------------------------------
@@ -1220,11 +1174,11 @@ local compile_lua_file = memoize(function(file)
 	return compile_lua_string(wwwfile(file), file)
 end)
 
-function run_string(s, env, ...)
+function run_lua_string(s, env, ...)
 	return compile_lua_string(s)(env, ...)
 end
 
-function run_file(file, env, ...)
+function run_lua_file(file, env, ...)
 	return compile_lua_file(file)(env, ...)
 end
 
@@ -1332,156 +1286,3 @@ function outcatlist(listfile, ...)
 		out(sep)
 	end
 end
-
---image processing -----------------------------------------------------------
-
-function base64_image_src(s)
-	return s and 'data:image/png;base64, '..base64_encode(s)
-end
-
---webb.server respond function -----------------------------------------------
-
-local next_request_id = 1
-
-function webb.respond(req)
-	local cx = {
-		req = req,
-		res = {headers = {}},
-		request_id = next_request_id,
-		conn = attr(req.http, '_webb_cx'),
-	}
-	getownthreadenv()[CX] = cx
-	next_request_id = next_request_id + 1
-	webb.dbg('webb', 'request', '%s %s', req.method, uri.unescape(req.uri))
-	local main = assert(config('main_module', config'app_name'))
-	local main = isstr(main) and require(main) or main
-	if istab(main) then
-		main = main.respond
-	end
-	main()
-end
-
-function onrequestfinish(f)
-	cx().req:onfinish(f)
-end
-
---standalone operation -------------------------------------------------------
-
-function webb.setfakecx()
-	local tcp = {}
-	local http = {tcp = tcp}
-	local req = {http = http, uri = '/'}
-	req.headers = {}
-	local cx = {
-		req = req,
-		res = {headers = {}},
-		fake = true,
-		request_id = next_request_id,
-		conn = {},
-	}
-	cx.req_cx = cx
-	next_request_id = next_request_id + 1
-	function http:log(...)
-		log(...)
-	end
-	function cx.outfunc(s, sz)
-		if iscdata(s) then
-			s = str(s, sz)
-		end
-		io.stdout:write(s)
-		io.stdout:flush()
-	end
-	getownthreadenv()[CX] = cx
-	return cx
-end
-
-function webb.thread(f, ...)
-	return thread(function(...)
-		webb.setfacecx()
-		local ok, err = pcall(f, ...)
-		if not ok then
-			webb.log('ERROR', 'webb', 'thread', '%s', err)
-		end
-	end, ...)
-end
-
-function webb.run(f, ...)
-	if cx() then
-		return f(...)
-	end
-	return run(function(...)
-		webb.setfakecx()
-		return f(...)
-	end, ...)
-end
-
-function webb.request(...)
-	require'webb_action'
-	webb.run(function(arg1, ...)
-		local req = istab(arg1) and arg1 or {args = {arg1,...}}
-		local cx = cx()
-		cx.req.method = req.method or 'get'
-		cx.req.uri = req.uri or concat(imap(pack('', arg1, ...), tostring), '/')
-		update(cx.req.headers, req.headers)
-		function req.respond(req, res)
-			assert(not res.want_out_function)
-			if res.content then
-				out(res.content)
-			end
-		end
-		checkfound(action(unpack(args())))
-	end, ...)
-end
-
---pre-configured http app server ---------------------------------------------
-
-function webb.server(opt)
-	local server = require'http_server'
-	local host       = config('host', 'localhost')
-	local http_addr  = config('http_addr', '*')
-	local https_addr = config('https_addr', '*')
-	local crt_file = config'https_crt_file' or varpath(host..'.crt')
-	local key_file = config'https_key_file' or varpath(host..'.key')
-	if https_addr and host == 'localhost'
-		and not config'https_crt_file'
-		and not config'https_key_file'
-		and not exists(crt_file)
-		and not exists(key_file)
-	then
-		crt_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.crt')
-		key_file = indir(config'app_dir', 'sdk', 'tests', 'localhost.key')
-	end
-	return server:new(update({
-		debug = config'http_debug' and index(collect(words(config'http_debug' or ''))),
-		listen = {
-			{
-				host = host,
-				addr = https_addr,
-				port = config'https_port',
-				tls = true,
-				tls_options = {
-					cert_file = crt_file,
-					key_file  = key_file,
-				},
-			},
-			{
-				host = host,
-				addr = http_addr,
-				port = config'http_port',
-			},
-		},
-		respond = webb.respond,
-	}, opt))
-end
-
-if not ... then
-
-	--because we're gonna load `webb_action` which loads back `webb`.
-	package.loaded.webb = true
-
-	config('app_name', 'test')
-	webb.request('')
-
-end
-
-return webb

@@ -46,11 +46,9 @@ end
 local schema = require'schema'
 local spp = require'sqlpp'.new'mysql'
 
-local sc = schema.new()
+local sc = schema()
 require'webb_auth'
 require'webb_lang'
-local auth_schema = webb.auth_schema
-local lang_schema = webb.lang_schema
 
 local getfenv = getfenv
 local pairs = pairs

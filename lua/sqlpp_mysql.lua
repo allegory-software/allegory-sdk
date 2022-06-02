@@ -517,11 +517,6 @@ local function init_spp(spp, cmd)
 					mysql_body = grp[1].routine_definition,
 				}
 				procset[proc_name] = p
-				if has_args then
-					for i, param in ipairs(grp) do
-						p[i] = self:sqltype(param)
-					end
-				end
 			end
 		end
 		return procsets

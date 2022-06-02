@@ -74,6 +74,7 @@ action['config.js'] = function()
 
 	--required config values must be initialized.
 	--NOTE: these must match the real defaults that are set in their places of usage.
+	config('app_name', scriptname)
 	config('default_lang', 'en')
 	config('root_action', 'en')
 	config('page_title_suffix', ' - '..host())

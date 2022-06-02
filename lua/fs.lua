@@ -1558,7 +1558,7 @@ end
 
 function load_tobuffer(file, default_buf, default_len, ignore_file_size)
 	local buf, len = try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
-	check('fs', 'load', buf, '%s: %s', file, len)
+	check('fs', 'load', buf ~= nil, '%s: %s', file, len)
 	return buf, len
 end
 

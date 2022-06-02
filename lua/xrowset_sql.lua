@@ -56,7 +56,7 @@
 ]]
 
 require'xrowset'
-require'webb_query'
+require'query'
 require'glue'
 
 --usage in sql:

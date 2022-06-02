@@ -1,7 +1,9 @@
 
 require'sock'
 require'logging'
-local spp = require'sqlpp'.new'mysql'
+require'sqlpp'
+
+local spp = sqlpp'mysql'
 
 if false then
 	pr(spp.query(outdent[[
@@ -23,10 +25,10 @@ end
 run(function()
 
 	local cmd = spp.connect{
-		host = '127.0.0.1',
+		host = '10.0.0.5',
 		port = 3307,
 		user = 'root',
-		password = 'root',
+		pass= 'root',
 		db = 'sp',
 		charset = 'utf8mb4',
 	}
@@ -63,13 +65,13 @@ run(function()
 		pr(cmd:table_defs()['sp.currency'])
 	end
 
-	if true then
+	if false then
 
 		local cn = spp.connect{
-			host = '127.0.0.1',
+			host = '10.0.0.5',
 			port = 3307,
 			user = 'root',
-			password = 'root',
+			pass = 'root',
 			db = 'sp',
 			charset = 'utf8mb4',
 		}

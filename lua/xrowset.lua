@@ -536,7 +536,7 @@ end
 --reload push-notifications --------------------------------------------------
 
 local waiting_events_threads = {}
-local changed_rowsets = {} --{cx()->{rowset->'update_id1 ...'}}
+local changed_rowsets = {} --{req->{rowset->'update_id1 ...'}}
 
 function rowset_changed(rowset_name, update_id)
 	local rowsets = istab(rowset_name) and rowset_name or {[rowset_name] = true}
@@ -567,7 +567,7 @@ action['xrowset.events'] = function()
 		--the sending thread if suspended and finish it so the server can
 		--clean up the accept thread. this works because the client shouldn't
 		--send anything anymore so recv() should only return on close.
-		local tcp = cx().req.http.tcp
+		local tcp = http_req().http.tcp
 		local buf = u8a(1)
 		while tcp:recv(buf, 1) == 1 do
 			--this shouldn't happen, but sometimes we do get data on this pipe.
@@ -578,10 +578,10 @@ action['xrowset.events'] = function()
 		end
 	end, 'xrowset.events-wait'))
 	local rowsets = {}
-	local key = cx()
-	changed_rowsets[key] = rowsets
+	local req = http_req()
+	changed_rowsets[req] = rowsets
 	onrequestfinish(function()
-		changed_rowsets[key] = nil
+		changed_rowsets[req] = nil
 	end)
 	while true do
 		if not next(rowsets) then

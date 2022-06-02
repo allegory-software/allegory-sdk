@@ -50,7 +50,7 @@ arbitrary positions and 2) sock's interruptible timers.
 
 ]=]
 
-if not ... then require'conpool_test'; return end
+if not ... then require'connpool_test'; return end
 
 require'glue'
 require'sock'
@@ -60,7 +60,7 @@ local function dbg(event)
 	log('', 'cnpool', event)
 end
 
-function conpool(opt)
+function connpool(opt)
 
 	local all_limit = opt and opt.max_connections or 100
 	local all_waitlist_limit = opt and opt.max_waiting_threads or 1000

@@ -3,7 +3,7 @@ require'sock'
 require'connpool'
 logging.debug = true
 
-local pool = conpool{max_connections = 2, max_waiting_threads = 1}
+local pool = connpool{max_connections = 2, max_waiting_threads = 1}
 local h = 'test'
 
 run(function()
