@@ -408,12 +408,11 @@ function file.closed(f)
 	return f.handle == INVALID_HANDLE_VALUE
 end
 
-function file.try_close(f)
+function file.close(f)
 	if f:closed() then return true end
 	if f._read_async or f._write_async then
 		local sock = require'sock'
-		local ok, err = _sock_unregister(f)
-		if not ok then return false, err end
+		_sock_unregister(f)
 	end
 	local ok, err = checknz(C.CloseHandle(f.handle))
 	if not ok then return false, err end
@@ -550,7 +549,7 @@ function pipe(path, opt)
 				true, path
 			)
 		if not f then return nil, err end
-		log('', 'fs', 'pipe', '%-4s %s', f, path)
+		log('', 'fs', 'pipe', '%s%s %s', f, async and '' or ',blocking', path)
 		return f
 
 	else --unnamed pipe, return both ends

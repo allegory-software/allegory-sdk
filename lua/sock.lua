@@ -48,7 +48,7 @@ SOCKETS
 	udp:sendto(host, port, s|buf, [len], [expires], [af]) -> len  send a datagram to an address
 	udp:recvnext(buf, maxlen, [expires], [flags]) -> len, sa      receive the next datagram
 	tcp:shutdown('r'|'w'|'rw', [expires])      send FIN
-	s:debug([protocol], [log])                 log the I/O stream and close
+	s:debug([protocol])                        enable debugging
 
 SCHEDULING
 	thread(func[, fmt, ...]) -> co             create a coroutine for async I/O
@@ -371,7 +371,7 @@ local check, _poll, wait_io, create_socket, wrap_socket
 --NOTE: close() returns `false` on error but it should be ignored.
 function socket:close()
 	if not self.s then return true end
-	assert(_sock_unregister(self))
+	_sock_unregister(self)
 	if self.listen_socket then
 		self.listen_socket.n = self.listen_socket.n - 1
 	end
@@ -956,9 +956,7 @@ do
 		return true
 	end
 
-	function _sock_unregister()
-		return true --no need.
-	end
+	_sock_unregister = noop --no need.
 
 	--[[local]] function create_socket(class, socktype, family, protocol)
 
@@ -1723,15 +1721,9 @@ do
 
 	function _sock_unregister(s)
 		local i = s._i
-		if not i then return true end --closing before bind() was called.
-		local ok = C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, s.s, nil) == 0
-		--epoll removed the fd if connection was closed so ENOENT is normal.
-		if not ok and errno() ~= ENOENT then
-			return check()
-		end
+		if not i then return end --closing before bind() was called.
 		sockets[i] = false
 		push(free_indices, i)
-		return true
 	end
 
 	local function wake(socket, for_writing, has_err)
@@ -2617,7 +2609,7 @@ local tcp_error = errortype'tcp'
 
 function tcp_error:init()
 	if self.tcp then
-		self.tcp:close(0)
+		self.tcp:close()
 		self.tcp = nil
 	end
 end

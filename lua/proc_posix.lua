@@ -419,6 +419,34 @@ end
 
 --process state --------------------------------------------------------------
 
+local loader = memoize(function(path)
+	local f
+	return function()
+		local err
+		if not f then
+			f = try_open(path)
+			if not f then return nil, err end
+		else
+			local off, err = f:seek('set', 0)
+			if not off or off ~= 0 then
+				f:close()
+				f = nil
+				return nil, err
+			end
+		end
+		local buf, len = f:readall(nil, true)
+		if not buf then
+			f:close()
+			f = nil
+			return nil, len
+		end
+		return str(buf, len)
+	end
+end)
+local function load_proc(path)
+	return loader(path)()
+end
+
 local USER_HZ do
 	cdef'long int sysconf(int name);'
 	local _SC_CLK_TCK = 2
@@ -485,7 +513,7 @@ local parse_stat do
 	end
 end
 function proc_info(pid)
-	local s, err = load(('/proc/%d/stat'):format(pid or C.getpid()), true)
+	local s, err = load_proc(format('/proc/%d/stat', pid or C.getpid()))
 	if not s then return nil, err end
 	return parse_stat(s)
 end
@@ -495,14 +523,14 @@ function proc:info()
 end
 
 function os_info()
-	local s, err = load('/proc/meminfo', true)
+	local s, err = load_proc'/proc/meminfo'
 	if not s then return nil, err end
 	local total = tonumber(s:match'MemTotal:%s*(%d+) kB')
 	local avail = tonumber(s:match'MemAvailable:%s*(%d+) kB')
 	total = total and total * 1024
 	avail = avail and avail * 1024
 
-	local s, err = load('/proc/stat', true)
+	local s, err = load_proc'/proc/stat'
 	if not s then return nil, err end
 	local cputimes = {}
 	for cpu, user, nice, sys, idle in s:gmatch'cpu(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)' do
@@ -514,7 +542,7 @@ function os_info()
 		cputimes[cpu+1] = {user = user, nice = nice, sys = sys, idle = idle}
 	end
 
-	local s, err = load('/proc/uptime', true)
+	local s, err = load_proc'/proc/uptime'
 	if not s then return nil, err end
 	local uptime = tonumber(s:match'^%d+')
 

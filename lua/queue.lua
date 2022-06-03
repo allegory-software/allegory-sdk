@@ -6,7 +6,7 @@
 	* Allows removing a value at any position from the queue.
 	* For a cdata ringbuffer, look at fs.mirror_buffer().
 	* Implemented as an array, not a linked list, so remove(v) is O(n).
-	* INDEX is a special key that if given will make find() and remove() O(1).
+	* INDEX is a special key that if given will make find() be O(1).
 
 	queue(size) -> q               create a queue
 	q:size()                       get queue capacity

@@ -13,7 +13,7 @@ FEATURES
 
 FILE OBJECTS
 	[try_]open(path[, mode|opt]) -> f             open file
-	f:[try_]close()                               close file
+	f:close()                                     close file
 	f:closed() -> true|false                      check if file is closed
 	isfile(f) -> true|false                       check if f is a file object
 	f.handle -> HANDLE                            Windows HANDLE (Windows platforms)
@@ -683,10 +683,6 @@ function open(path, mode_opt, quiet)
 	local f, err = try_open(path, mode_opt, quiet)
 	check('fs', 'open', f, '%s: %s', path, err)
 	return f
-end
-
-function file.close(f)
-	return assert(f:try_close())
 end
 
 function file.unbuffered_reader(f)
@@ -1567,7 +1563,6 @@ function load(path, default, ignore_file_size) --load a file into a string.
 	if buf == default then return default end
 	return str(buf, len)
 end
-
 
 --write a Lua value, array of values or function results to a file atomically.
 --TODO: make a file_saver() out of this without coroutines and use it

@@ -165,12 +165,11 @@ function file.closed(f)
 	return f.fd == -1
 end
 
-function file.try_close(f)
+function file.close(f)
 	if f:closed() then return true end
 	if f._async then
 		local sock = require'sock'
-		local ok, err = _sock_unregister(f)
-		if not ok then return nil, err end
+		_sock_unregister(f)
 	end
 	local ok = C.close(f.fd) == 0
 	if not ok then return check(false) end
@@ -224,14 +223,18 @@ function pipe(path, mode, opt)
 		local fds = new'int[2]'
 		local ok = C.pipe(fds) == 0
 		if not ok then return check() end
-		local rf, err1 = file_wrap_fd(fds[0], opt.async or opt.read_async , true, 'pipe.r')
-		local wf, err2 = file_wrap_fd(fds[1], opt.async or opt.write_async, true, 'pipe.w')
+		local r_async = opt.async or opt.read_async
+		local w_async = opt.async or opt.write_async
+		local rf, err1 = file_wrap_fd(fds[0], r_async, true, 'pipe.r')
+		local wf, err2 = file_wrap_fd(fds[1], w_async, true, 'pipe.w')
 		if not (rf and wf) then
 			if rf then assert(rf:close()) end
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
 		end
-		log('', 'fs', 'pipe', 'r=%s w=%s %s %o', rf, wf, opt.async and 'async' or 'sync', mode)
+		log('', 'fs', 'pipe', 'r=%s%s w=%s%s %o',
+			rf, r_async and '' or ',blocking',
+			wf, w_async and '' or ',blocking', mode)
 		return rf, wf
 	end
 end

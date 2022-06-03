@@ -85,7 +85,7 @@ function logging:tofile(logfile, max_size)
 		if max_size and size + len > max_size / 2 then
 			f:close(); f = nil
 			if not try_mv(logfile, logfile0) then return end
-			if not open_logfile() then return end
+			if not try_open_logfile() then return end
 		end
 		return true
 	end
@@ -267,7 +267,7 @@ local function debug_id(v)
 		ids = setmetatable({
 			live_count = 0,
 			live = {} --setmetatable({}, mode_k)
-			-- ^^ this table is weak because http gzip threads can be abandoned
+			-- ^^ this table is weak because threads can be abandoned
 			-- in suspended state so live(nil) never gets called on them.
 		}, mode_k)
 		ids_db[ty] = ids
@@ -359,20 +359,16 @@ logging.args      = logging_args_func(debug_arg_pp)
 logging.printargs = logging_args_func(debug_arg)
 
 local function fmtargs(self, fmt, ...)
-	return fmt and _(fmt, self.args(...)) or ''
+	return _(fmt, self.args(...))
 end
 
 local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
-	if not self.filter then
-		pr(self)
-		exit()
-	end
 	if self.filter[severity] then return end
 	if self.filter[module  ] then return end
 	if self.filter[event   ] then return end
 	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
 	local time = time()
-	local msg = fmtargs(self, fmt, ...)
+	local msg = fmt and fmtargs(self, fmt, ...) or ''
 	if next(self.censor) then
 		for _,censor in pairs(self.censor) do
 			msg = censor(msg, self, severity, module, event)
@@ -427,20 +423,27 @@ end
 
 local function live(self, o, fmt, ...)
 	local id, ids = debug_id(o)
+	local s = fmt and fmtargs(self, fmt, ...)
 	local was_live = ids.live[o] ~= nil
+	local event = '~'
 	if fmt ~= nil then
 		if not was_live then
 			ids.live_count = ids.live_count + 1
+			event = '+'
 		end
 	elseif was_live then
 		ids.live_count = ids.live_count - 1
+		event = '-'
 	end
-	ids.live[o] = fmtargs(self, fmt, ...)
+	self.log('', 'log', event, '%-4s %s live=%d', o, s or ids.live[o], ids.live_count)
+	ids.live[o] = s
 end
 
 local function liveadd(self, o, fmt, ...)
 	local id, ids = debug_id(o)
-	ids.live[o] = assert(ids.live[o]) .. ' ' .. fmtargs(self, fmt, ...)
+	local s = assert(ids.live[o]) .. ' ' .. fmtargs(self, fmt, ...)
+	ids.live[o] = s
+	self.log('', 'log', '~', '%-4s %s', o, s)
 end
 
 local function init(self)
@@ -471,8 +474,8 @@ end
 
 function logging.rpc:get_procinfo()
 	local proc = require'proc'
-	local t = proc.info()
-	local pt = proc.osinfo()
+	local t  = proc_info()
+	local pt = os_info()
 	local ft = fs_info'/'
 	self.logvar('procinfo', {
 		clock    = clock(),
@@ -559,7 +562,7 @@ if not ... then
 		wait(5)
 		logging:toserver_stop()
 		print'told to stop'
-	end))
+	end, 'test'))
 
 	run(function()
 
@@ -574,8 +577,8 @@ if not ... then
 
 		local s1 = tcp()
 		local s2 = tcp()
-		local t1 = thread(function() end)
-		local t2 = thread(function() end)
+		local t1 = thread(function() end, 't1')
+		local t2 = thread(function() end, 't2')
 
 		log('', 'test-m', 'test-ev', '%s %s %s %s\nanother thing', s1, s2, t1, t2)
 

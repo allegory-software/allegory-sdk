@@ -1,3 +1,4 @@
+--go@ plink d10 -t -batch sdk/bin/linux/luajit sdk/lua/mess.lua
 --[[
 
 	Simple TCP protocol for sending and receiving Lua values.
@@ -16,7 +17,8 @@ SERVER
 	server:stop()
 
 CLIENT
-	mess_connect(host, port, [expires], [tcp_opt]) -> channel
+	mess_connect(host, port, [expires], [opt]) -> channel
+		opt.debug
 
 CHANNEL
 	channel:send(msg, [expires]) -> ok | false,err
@@ -138,9 +140,11 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 	return server
 end
 
-function mess_connect(host, port, exp, tcp_opt)
+function mess_connect(host, port, exp, opt)
 	local tcp = assert(tcp())
-	update(tcp, tcp_opt)
+	if opt and opt.debug then
+		tcp:debug'mess'
+	end
 	local ok, err = tcp:connect(host, port, exp)
 	if not ok then
 		tcp:close()
@@ -179,7 +183,7 @@ if not ... then
 
 	resume(thread(function()
 
-		local server = mess_listen('127.0.0.1', '1234', function(self, chan)
+		local server = mess_listen('127.0.0.1', '5555', function(self, chan)
 			chan:recvall(function(self, msg)
 				assert(self:send(msg))
 			end)
@@ -187,11 +191,11 @@ if not ... then
 			self:stop()
 		end)
 
-	end))
+	end, 'server'))
 
 	resume(thread(function()
 
-		local chan = mess_connect('127.0.0.1', '1234', clock() + 1)
+		local chan = mess_connect('127.0.0.1', '5555', clock() + 1)
 		for i = 1, 20 do
 			assert(chan:send{a = i, b = 2*i, s = tostring(i)})
 			local _, t = assert(chan:recv())
@@ -199,7 +203,7 @@ if not ... then
 		end
 		assert(chan:close())
 
-	end))
+	end, 'client'))
 
 	start()
 

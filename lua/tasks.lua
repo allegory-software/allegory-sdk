@@ -264,8 +264,8 @@ end
 --current thread's terminal --------------------------------------------------
 
 local function current_terminal(thread)
-	local env = threadenv[thread or currentthread()]
-	return env and env.terminal
+	local tenv = threadenv[thread or currentthread()]
+	return tenv and tenv.terminal
 end
 current_terminal = current_terminal
 
@@ -306,6 +306,9 @@ end
 task.module = 'task' --default
 task.free_after = 10
 
+function task:stdout() return self.terminal:stdout() end
+function task:stderr() return self.terminal:stderr() end
+
 function task:init()
 
 	last_task_id = last_task_id + 1
@@ -327,7 +330,7 @@ function task:init()
 		end
 	end
 
-	local function run_task()
+	function self:try_run()
 		self.start_time = time()
 		self.status = 'running'
 		self:fire_up('setstatus', 'running')
@@ -342,21 +345,19 @@ function task:init()
 				wait(1)
 			end
 		end, 'task-zombie %s', self.name)
-		return ok, ret
+		return self, ok, ret
 	end
 
 	function self:start()
 		if self.start_time then
 			return self --already started
 		end
-		resume(thread(run_task), 'task %s', self.name)
+		resume(thread(self.try_run, 'task %s', self.name), self)
 		return self
 	end
 
-	self.pcall = run_task
-
 	function self:run()
-		assert(run_task())
+		return assert(self:try_run())
 	end
 
 	return self
@@ -446,6 +447,8 @@ function task_exec(cmd, opt)
 
 	local capture_stdout = opt.capture_stdout ~= false
 	local capture_stderr = opt.capture_stderr ~= false
+	local allow_out_stdout = opt.out_stdout ~= false
+	local allow_out_stderr = opt.out_stderr ~= false
 
 	local env = opt.env and update(env(), opt.env)
 
@@ -492,8 +495,10 @@ function task_exec(cmd, opt)
 					elseif len == 0 then
 						break
 					end
-					local s = ffi.string(buf, len)
-					out_stdout(s)
+					if allow_out_stdout then
+						local s = str(buf, len)
+						out_stdout(s)
+					end
 				end
 				assert(p.stdout:close())
 			end, 'exec-stdout %s', p))
@@ -510,8 +515,10 @@ function task_exec(cmd, opt)
 					elseif len == 0 then
 						break
 					end
-					local s = ffi.string(buf, len)
-					out_stderr(s)
+					if allow_out_stderr then
+						local s = str(buf, len)
+						out_stderr(s)
+					end
 				end
 				assert(p.stderr:close())
 			end, 'exec-stderr %s', p))

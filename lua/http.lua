@@ -471,12 +471,11 @@ end
 
 --client-side ----------------------------------------------------------------
 
-local creq = {}
+local creq = {type = 'http_request', debug_prefix = '>'}
 http.client_request_class = creq
 
 function http:build_request(opt, cookies)
-	local req = object(creq,
-		{http = self, type = 'http_request', debug_prefix = '>'})
+	local req = object(creq, {http = self})
 
 	req.http_version = opt.http_version or '1.1'
 	req.method = opt.method or 'GET'
@@ -586,7 +585,7 @@ function http:should_send_cookie(cookie, host, path, https)
 		and self:cookie_path_matches_request_path(cookie, path)
 end
 
-local cres = {}
+local cres = {type = 'http_response', debug_prefix = '<'}
 
 function http:read_response(req)
 	local res = object(cres, {http = self, request = req})
@@ -632,13 +631,13 @@ http:protect'read_response'
 
 --server side ----------------------------------------------------------------
 
-local sreq = {}
+local sreq = {type = 'http_request', debug_prefix = '<'}
 http.server_request_class = sreq
 
 function http:read_request()
-	self.start_time = clock()
 	local req = object(sreq, {http = self})
 	req.http_version, req.method, req.uri = self:read_request_line()
+	self.start_time = clock()
 	req.rawheaders = {}
 	self:read_headers(req.rawheaders)
 	req.headers = self:parsed_headers(req.rawheaders)
@@ -721,11 +720,10 @@ function http:allow_method(req, opt)
 	return not allowed_methods or allowed_methods[req.method], allowed_methods
 end
 
-local sres = {}
+local sres = {type = 'http_response', debug_prefix = '>'}
 
 function http:build_response(req, opt, time)
-	local res = object(self.response,
-		{http = self, request = req, type = 'http_response', debug_prefix = '<'})
+	local res = object(sres, {http = self, request = req})
 	res.headers = {}
 
 	res.http_version = opt.http_version or req.http_version
@@ -799,7 +797,7 @@ function http:log(severity, module, event, fmt, ...)
 	local S = self.tcp or '-'
 	local dt = clock() - self.start_time
 	local s = fmt and _(fmt, logargs(...)) or ''
-	log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
+	log(severity, module, event, '%-4s %4dms %s', S, dt * 1000, s)
 end
 
 function http:dp(...)
