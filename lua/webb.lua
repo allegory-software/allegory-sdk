@@ -29,12 +29,12 @@ MULTI-LANGUAGE & MULTI-COUNTRY SUPPORT
 	setlang(lang)                           set lang of current request
 	default_lang()                          get the default lang
 	multilang()                             check if the app is multilanguage
-	webb.langinfo[lang] -> {k->v}           static language property table
+	langinfo[lang] -> {k->v}                static language property table
 
 	country([k])                            get country or country property for current request
 	setcountry(country, [if_not_set])       set country of current request
 	default_country()                       get the default country
-	webb.countryinfo[country] -> {k->v}     static country property table
+	countryinfo[country] -> {k->v}          static country property table
 
 MULTI-LANGUAGE STRINGS IN SOURCE CODE
 
@@ -53,10 +53,6 @@ REQUEST CONTEXT
 	  req.request_id                        unique request id (for naming temp files)
 	once(f, ...)                            memoize for current request
 	once_per_conn(f, ...)                   memoize for current connection
-
-LOGGING
-
-	webb.dbg      (module, event, fmt, ...)
 
 REQUEST
 
@@ -711,7 +707,7 @@ local function file_object(findfile) --{filename -> content | handler(filename)}
 				return f
 			else
 				local file = findfile(file)
-				return file and webb.loadfile(file, default)
+				return file and load(file, default)
 			end
 		end,
 	})
@@ -770,14 +766,14 @@ function lang(k)
 	local req = req()
 	local lang = req and req.lang or default_lang()
 	if not k then return lang end
-	local t = assert(webb.langinfo[lang])
+	local t = assert(langinfo[lang])
 	local v = t[k]
 	assert(v ~= nil)
 	return v
 end
 
 function setlang(lang)
-	if not lang or not webb.langinfo[lang] then return end --missing or invalid lang: ignore.
+	if not lang or not langinfo[lang] then return end --missing or invalid lang: ignore.
 	req().lang = lang
 end
 
@@ -799,7 +795,7 @@ end
 function country(k)
 	local country = req().country or default_country()
 	if not k then return country end
-	local t = assert(webb.countryinfo[country])
+	local t = assert(countryinfo[country])
 	local v = t[k]
 	assert(v ~= nil)
 	return v
@@ -865,8 +861,8 @@ function Sfile_ids()
 			if ext == 'js' then
 				s = wwwfile(file)
 			elseif ext == 'lua' then
-				s = webb.loadfile(indir(config'app_dir', file), false)
-						or webb.loadfile(indir(config'app_dir', 'sdk', 'lua', file))
+				s = load(indir(config'app_dir', file), false)
+						or load(indir(config'app_dir', 'sdk', 'lua', file))
 			end
 			for id, en_s in s:gmatch"[^%w_]Sf?%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
 				local ext_id = ext..':'..id
@@ -905,7 +901,7 @@ S_texts = function(lang, ext)
 end
 
 local function save_S_texts(lang, ext, t)
-	webb.savefile(s_file(lang, ext), 'return '..pp.format(t, '\t'))
+	save(s_file(lang, ext), 'return '..pp(t, '\t'))
 end
 
 function update_S_texts(lang, ext, t)
@@ -1143,7 +1139,7 @@ end
 local function compile_string(s, chunkname)
 	local f = lp_compile(s, chunkname)
 	return function(_env, ...)
-		setfenv(f, _env or webb.env())
+		setfenv(f, _env or http_request_env())
 		f(...)
 	end
 end
@@ -1165,7 +1161,7 @@ end
 local function compile_lua_string(s, chunkname)
 	local f = assert(loadstring(s, chunkname))
 	return function(env_, ...)
-		setfenv(f, env_ or webb.env())
+		setfenv(f, env_ or http_request_env())
 		return f(...)
 	end
 end

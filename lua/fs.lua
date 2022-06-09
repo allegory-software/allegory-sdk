@@ -1676,7 +1676,7 @@ function try_touch(file, mtime, btime, quiet) --create file or update its mtime.
 		end
 	end
 	if not quiet then
-		dbg('fs', 'touch', '%s to %s%s', file,
+		log('', 'fs', 'touch', '%s to %s%s', file,
 			date('%d-%m-%Y %H:%M', mtime) or 'now',
 			btime and ', btime '..date('%d-%m-%Y %H:%M', btime) or '')
 	end
@@ -1741,7 +1741,7 @@ function ls_dir(path, patt, min_mtime, create, order_by, recursive)
 		end
 	end
 	sort(t, cmp(order_by or 'mtime path'))
-	dbg('fs', 'dir', '%-20s %5d files%s%s', path,
+	log('', 'fs', 'dir', '%-20s %5d files%s%s', path,
 		#t,
 		patt and '\n  match: '..patt or '',
 		min_mtime and '\n  mtime >= '..date('%d-%m-%Y %H:%M', min_mtime) or '')

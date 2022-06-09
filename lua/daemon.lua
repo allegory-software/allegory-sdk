@@ -149,6 +149,7 @@ function daemon(...)
 
 	--make require() see Lua modules from the script dir.
 	luapath(scriptdir())
+	ffipath(indir(scriptdir(), 'bin', win and 'windows' or 'linux'))
 
 	--cd to scriptdir so that we can use relative paths for everything if we want to.
 	chdir(scriptdir())

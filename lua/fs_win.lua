@@ -399,7 +399,7 @@ function _open(path, opt, quiet)
 	local r = getbit(access, access_bits.read ) or getbit(access, access_bits.generic_read)
 	local w = getbit(access, access_bits.write) or getbit(access, access_bits.generic_write)
 	f.quiet = quiet or not w
-	log(quiet and '' or 'note', 'fs', 'open', '%-4s %s%s %s', f,
+	log(f.quiet and '' or 'note', 'fs', 'open', '%-4s %s%s %s', f,
 		r and 'r' or '', w and 'w' or '', path)
 	return f
 end

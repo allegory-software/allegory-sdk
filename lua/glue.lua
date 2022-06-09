@@ -2081,39 +2081,59 @@ scriptname = arg0
 	and (win and arg0:gsub('%.exe$', '') or arg0)
 		:gsub('%.lua$', ''):match'[^/\\]+$'
 
---portable way to add more paths to package.path, at any place in the list.
---negative indices count from the end of the list like string.sub().
---index 'after' means 0. `ext` specifies the file extension to use.
-function luapath(path, index, ext)
-	ext = ext or 'lua'
+local function add_path(path_s, path, index, ext)
 	index = index or 1
 	local psep = package.config:sub(1,1) --'/'
 	local tsep = package.config:sub(3,3) --';'
 	local wild = package.config:sub(5,5) --'?'
-	local paths = collect(split(package.path, tsep, nil, true))
-	path = path:gsub('[/\\]', psep) --normalize slashes
+	local ext = ext or path_s:match('%.([%a]+)%'..tsep..'?')
+	local paths = path_s and collect(split(path_s, tsep, nil, true)) or {}
+	local path = path:gsub('[/\\]', psep) --normalize slashes
 	if index == 'after' then index = 0 end
 	if index < 1 then index = #paths + 1 + index end
-	insert(paths, index,  path .. psep .. wild .. psep .. 'init.' .. ext)
 	insert(paths, index,  path .. psep .. wild .. '.' .. ext)
-	package.path = concat(paths, tsep)
+	return concat(paths, tsep)
+end
+
+--portable way to add more paths to package.path, at any place in the list.
+--negative indices count from the end of the list like string.sub().
+--index 'after' means 0. `ext` specifies the file extension to use.
+function luapath(path, index, ext)
+	package.path = add_path(package.path, path, index, ext or 'lua')
 end
 
 --portable way to add more paths to package.cpath, at any place in the list.
 --negative indices count from the end of the list like string.sub().
 --index 'after' means 0.
 function cpath(path, index)
-	index = index or 1
-	local psep = package.config:sub(1,1) --'/'
-	local tsep = package.config:sub(3,3) --';'
-	local wild = package.config:sub(5,5) --'?'
-	local ext = package.cpath:match('%.([%a]+)%'..tsep..'?') --dll | so | dylib
-	local paths = collect(split(package.cpath, tsep, nil, true))
-	path = path:gsub('[/\\]', psep) --normalize slashes
-	if index == 'after' then index = 0 end
-	if index < 1 then index = #paths + 1 + index end
-	insert(paths, index,  path .. psep .. wild .. '.' .. ext)
-	package.cpath = concat(paths, tsep)
+	package.cpath = add_path(package.cpath, path, index)
+end
+
+--this crap is because Windows doesn't have LD_LOAD_LIBRARY.
+local ffi_load
+function ffipath(path, index)
+	if not ffi_load then
+		ffi_load = ffi.load
+		local tsep = package.config:sub(3,3) --';'
+		local split_patt = '[^'..esc(tsep)..']+'
+		ffi.load = function(name, global)
+			local path = name
+			if not name:find'[\\/]' then
+				for path_patt in package.ffipath:gmatch(split_patt) do
+					local path1 = path_patt:gsub('%?', name)
+					if exists(path1) then
+						path = path1
+						break
+					end
+				end
+			end
+			return ffi_load(path, global)
+		end
+	end
+	package.ffipath = add_path(package.ffipath, path, index,
+		win and 'dll'
+		or Linux and 'so'
+		or OSX and 'dylib')
 end
 
 --allocation -----------------------------------------------------------------
