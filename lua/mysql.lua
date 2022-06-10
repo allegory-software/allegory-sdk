@@ -1096,7 +1096,7 @@ function mysql_connect(opt)
 	log('note', 'mysql', 'connect', '%s:%s user=%s db=%s',
 		host, port, opt.user or '', opt.db or '')
 
-	local tcp = check_io(self, tcp())
+	local tcp = tcp()
 
 	local self = setmetatable({tcp = tcp, host = host, port = port, tracebacks = opt.tracebacks}, conn_mt)
 

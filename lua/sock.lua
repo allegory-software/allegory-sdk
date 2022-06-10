@@ -1220,10 +1220,7 @@ do
 	local sa_len = sizeof(accept_buf) / 2
 	function tcp:accept(expires)
 		log('', 'sock', 'accept', '%-4s', self)
-		local s, err = create_socket(tcp, 'tcp', self._af, self._pr)
-		if not s then
-			return nil, err
-		end
+		local s = assert(create_socket(tcp, 'tcp', self._af, self._pr))
 		live(s, 'wait-accept %s', self) --only shows in Windows.
 		local o, job = overlapped(self, return_true, expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
@@ -2319,9 +2316,9 @@ end
 	log('', 'sock', 'create', '%-4s', s)
 	return s
 end
-function _G.tcp       (...) return create_socket(tcp, 'tcp', ...) end
-function _G.udp       (...) return create_socket(udp, 'udp', ...) end
-function _G.rawsocket (...) return create_socket(raw, 'raw', ...) end
+function _G.tcp       (...) return assert(create_socket(tcp, 'tcp', ...)) end
+function _G.udp       (...) return assert(create_socket(udp, 'udp', ...)) end
+function _G.rawsocket (...) return assert(create_socket(raw, 'raw', ...)) end
 
 update(tcp, socket)
 update(udp, socket)
