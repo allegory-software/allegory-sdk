@@ -2186,10 +2186,15 @@ shr  = bit.rshift
 band = bit.band
 bor  = bit.bor
 xor  = bit.bxor
+bswap = bit.bswap
 
 local
-	band, bor, bnot =
-	band, bor, bnot
+	band, bor, bnot, shr, bswap =
+	band, bor, bnot, shr, bswap
+
+function bswap16(x)
+	return shr(bswap(x), 16)
+end
 
 --extract the bool value of a bitmask from a value.
 function getbit(from, mask)
@@ -2323,6 +2328,19 @@ i64 = typeof'int64_t'
 voidp   = typeof'void*'
 intptr  = typeof'intptr_t'
 uintptr = typeof'uintptr_t'
+
+cdef[[
+typedef   int8_t i8;
+typedef  uint8_t u8;
+typedef  int16_t i16;
+typedef uint16_t u16;
+typedef  int32_t i32;
+typedef uint32_t u32;
+typedef  int64_t i64;
+typedef uint64_t u64;
+typedef  float   f32;
+typedef double   f64;
+]]
 
 cdef[[
 void* malloc  (size_t size);
@@ -2472,6 +2490,78 @@ function buffer_reader(p, n)
 		n = n - sz
 		return sz
 	end
+end
+
+--enhanced string.buffer for binary network protocols ------------------------
+
+local sbuffer = require'string.buffer'.new
+local sb = {check = function(self, ...) return assert(...) end}
+local t = {
+	'u8'    ,  u8p, 1, false,
+	'i8'    ,  i8p, 1, false,
+	'u16'   , u16p, 2, false,
+	'i16'   , i16p, 2, false,
+	'u16_be', u16p, 2, bswap16,
+	'i16_be', i16p, 2, bswap16,
+	'u32'   , u32p, 4, false,
+	'i32'   , i32p, 4, false,
+	'u32_be', u32p, 4, bswap,
+	'i32_be', i32p, 4, bswap,
+	'u64'   , u64p, 8, false,
+	'i64'   , i64p, 8, false,
+	'f32'   , f32p, 4, false,
+	'f64'   , f64p, 8, false,
+}
+for i=1,#t,4 do
+	local k, pt, n, swap = unpack(t, i, i+3)
+	sb['put_'..k] = function(self, x)
+		local p = self:reserve(n)
+		cast(pt, p)[0] = swap and swap(x) or x
+		return self:commit(n)
+	end
+	sb['put_'..k..'_at'] = function(self, offset, x)
+		local p, len = self:ref()
+		assert(len >= offset + n, 'eof')
+		cast(pt, p + offset)[0] = swap and swap(x) or x
+		return self
+	end
+	sb['get_'..k] = function(self, offset)
+		local p, len = self:ref()
+		self:check(len >= n, 'eof')
+		local x = cast(pt, p)[0]
+		if swap then x = swap(x) end
+		self:_skip(n)
+		return x
+	end
+end
+function sb:fill(n, c)
+	local p = self:reserve(n)
+	fill(p, n, c)
+	return self:commit(n)
+end
+function sb:skip(n)
+	self:check(#self >= n, 'eof')
+	return self:_skip(n)
+end
+function string_buffer(...)
+	local sb = object(sb)
+	local b = sbuffer(...)
+	function sb:put     (...) return b:put     (...) end
+	function sb:putf    (...) return b:putf    (...) end
+	function sb:putcdata(...) return b:putcdata(...) end
+	function sb:get     (...) return b:get     (...) end
+	function sb:set     (...) return b:set     (...) end
+	function sb:encode  (o)   return b:encode  (o)   end
+	function sb:decode  ()    return b:decode  ()    end
+	function sb:ref     ()    return b:ref     ()    end
+	function sb:commit  (n)   return b:commit  (n)   end
+	function sb:reserve (n)   return b:reserve (n)   end
+	function sb:reset   ()    return b:reset   ()    end
+	function sb:tostring()    return b:tostring()    end
+	function sb:free    ()    return b:free    ()    end
+	function sb:_skip   (n)   return b:skip    (n)   end
+	function sb:__len() return #b end
+	return sb
 end
 
 --config ---------------------------------------------------------------------
