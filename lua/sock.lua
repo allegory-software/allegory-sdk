@@ -360,10 +360,15 @@ assert(Windows or Linux or OSX, 'unsupported platform')
 
 local C = Windows and ffi.load'ws2_32' or C
 
-local socket = {debug_prefix = 'S'} --common socket methods
+local socket = {issocket = true, debug_prefix = 'S'} --common socket methods
 local tcp = {type = 'tcp_socket'}
 local udp = {type = 'udp_socket'}
 local raw = {type = 'raw_socket'}
+
+function issocket(s)
+	local mt = getmetatable(s)
+	return istab(mt) and rawget(mt, 'issocket') or false
+end
 
 --forward declarations
 local check, _poll, wait_io, create_socket, wrap_socket
@@ -2619,7 +2624,7 @@ local function check_io(self, v, ...)
 	}, ...))
 end
 
-function tcp_protocol_errors(protocol)
+tcp_protocol_errors = memoize_multiret(function(protocol)
 
 	local protocol_error = errortype(protocol, nil, protocol .. ' protocol error')
 	local content_error  = errortype(nil, nil, protocol .. ' error')
@@ -2645,4 +2650,38 @@ function tcp_protocol_errors(protocol)
 	end
 
 	return check_io, checkp, check, protect_this
+end)
+
+--buffer object for binary protocols -----------------------------------------
+
+function protocol_buffer(self, protocol, MIN_SIZE)
+	protocol = protocol or 'tcp'
+	MIN_SIZE = MIN_SIZE or 64 * 1024
+	local f = assert(self.tcp)
+	local b = string_buffer(MIN_SIZE)
+	local check_io, checkp, check, protect = tcp_protocol_errors(protocol)
+	b.tcp = f
+	b.check = checkp
+	--we can't read ahead from the socket because there might be data after.
+	function b:have(n)
+		local n0 = #self
+		if n0 < n then
+			local p, n = self:reserve(n - n0)
+			while n > 0 do
+				local recv_n, err = check_io(self, f:recv(p, n))
+				if recv_n == 0 then return false, 'eof' end
+				n = n - recv_n
+				self:commit(n)
+			end
+		end
+		return true
+	end
+	function b:write()
+		check_io(self, f:send(self:ref()))
+		self:reset()
+	end
+	function b:need(n)
+		check_io(self, self:have(n))
+	end
+	return b
 end

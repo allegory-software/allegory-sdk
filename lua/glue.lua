@@ -15,6 +15,7 @@ TYPES
 	iscdata(v)                     is v a cdata
 	istype(v, ctype)             = ffi.istype
 	iserror(v[, classes])          is v a structured error
+	inherits(v, class)             is v an object that inherits from class
 MATH
 	floor                        = math.floor
 	ceil                         = math.ceil
@@ -81,8 +82,8 @@ TABLES
 	attrs_find(t, k1,...) -> v     return t[k1][k2]... as found
 	attrs_clear(t, k1,...)         remove value at the end of key chain
 CACHING
-	memoize(f,opt...) -> mf,cache  memoize pattern
-	tuples(opt...) -> tuple(...) -> t   create a tuple space
+	memoize[_multiret](f,opt...) -> mf,cache   memoize pattern
+	tuples(opt...) -> tuple(...) -> t          create a tuple space
 	poison                         poision value to clear cache on memoized func
 STRINGS
 	format                       = string.format
@@ -785,6 +786,15 @@ function memoize(f, cache, minarg, maxarg)
 	end, cache, minarg, maxarg
 end
 
+function memoize_multiret(f, ...)
+	local mf = memoize(function(...)
+		return pack(f(...))
+	end, ...)
+	return function(...)
+		return unpack(mf(...))
+	end
+end
+
 --tuples are interned value lists that can be used as table keys to achieve
 --multi-key indexing because they have value semantics: a tuple space returns
 --the same tuple object for the same combination of values.
@@ -1400,6 +1410,15 @@ function object(super, o, ...)
 	o.__call = super and super.__call
 	update(o, ...) --add mixins, defaults, etc.
 	return setmetatable(o, o)
+end
+
+function inherits(v, class)
+	local mt = getmetatable(v)
+	if type(mt) ~= 'table' then return false end
+	local parent = rawget(mt, '__index')
+	if parent == nil then return false end
+	if parent == class then return true end
+	return inherits(parent, class)
 end
 
 --[[
