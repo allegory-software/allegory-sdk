@@ -168,12 +168,12 @@ end
 function file.close(f)
 	if f:closed() then return true end
 	if f._async then
-		local sock = require'sock'
+		require'sock'
 		_sock_unregister(f)
 	end
 	local ok = C.close(f.fd) == 0
+	f.fd = -1 --fd is gone no matter the error.
 	if not ok then return check(false) end
-	f.fd = -1
 	log(f.quiet and '' or 'note', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil)
 	return true
@@ -262,7 +262,7 @@ int64_t lseek(int fd, int64_t offset, int whence) asm("lseek%s");
 function file.read(f, buf, sz, expires)
 	if sz == 0 then return 0 end --masked for compat.
 	if f._async then
-		local sock = require'sock'
+		require'sock'
 		return _file_async_read(f, buf, sz, expires)
 	else
 		local n = C.read(f.fd, buf, sz)
@@ -275,7 +275,7 @@ end
 
 function file._write(f, buf, sz, expires)
 	if f._async then
-		local sock = require'sock'
+		require'sock'
 		return _file_async_write(f, buf, sz, expires)
 	else
 		local n = C.write(f.fd, buf, sz or #buf)

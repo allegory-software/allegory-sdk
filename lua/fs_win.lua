@@ -415,19 +415,23 @@ function file.close(f)
 		_sock_unregister(f)
 	end
 	local ok, err = checknz(C.CloseHandle(f.handle))
+	f.handle = INVALID_HANDLE_VALUE --handle is gone no matter the error.
 	if not ok then return false, err end
-	f.handle = INVALID_HANDLE_VALUE
-	log('', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	log(f.quiet and '' or 'note', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil)
 	return true
 end
 
 function file_wrap_handle(h, read_async, write_async, is_pipe_end, path)
 
+	--make `if f.seek then` the idiom for checking if a file is seekable.
+	local seek; if is_pipe_end then seek = false end
+
 	local f = {
 		handle = h,
 		s = h, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
+		seek = seek,
 		path = path,
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		_read_async  = read_async  and true or false,

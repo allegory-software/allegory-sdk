@@ -15,7 +15,7 @@ FILE OBJECTS
 	[try_]open(path[, mode|opt]) -> f             open file
 	f:close()                                     close file
 	f:closed() -> true|false                      check if file is closed
-	isfile(f) -> true|false                       check if f is a file object
+	isfile(f [,'file'|'pipe']) -> true|false      check if f is a file or pipe
 	f.handle -> HANDLE                            Windows HANDLE (Windows platforms)
 	f.fd -> fd                                    POSIX file descriptor (POSIX platforms)
 PIPES
@@ -666,9 +666,9 @@ end
 
 --file objects ---------------------------------------------------------------
 
-function isfile(f)
+local function isfile(f, type)
 	local mt = getmetatable(f)
-	return istab(mt) and rawget(mt, '__index') == file
+	return istab(mt) and rawget(mt, '__index') == file and (not type or f.type == type)
 end
 
 function try_open(path, mode_opt, quiet)
@@ -792,16 +792,18 @@ function file:write(buf, sz, expires)
 end
 
 function file:readn(buf, sz, expires)
-	local sz0 = sz
+	local buf0, sz0 = buf, sz
 	while sz > 0 do
 		local len, err = self:read(buf, sz, expires)
-		if not len or len == 0 then --short read
+		if not len then --short read
 			return nil, err, sz0 - sz
+		elseif len == 0 then --eof
+			return nil, 'eof', sz0 - sz
 		end
 		buf = buf + len
 		sz  = sz  - len
 	end
-	return true
+	return buf0, sz0
 end
 
 function file:readall(expires, ignore_file_size)
@@ -1529,117 +1531,11 @@ end
 vfile.unbuffered_reader = file.unbuffered_reader
 vfile  .buffered_reader = file  .buffered_reader
 
---[=[ file error handling ----------------------------------------------------
-
-filetype_errors(filetype_name) -> check_io, checkf, check, protect
-check[f|_io](self, val, format, format_args...) -> val
-
-This is an error-handling discipline to use when writing file decoders.
-Instead of using standard `assert()` and `pcall()`, use `check()`, `checkp()`
-and `check_io()` to raise errors inside file decoding and encoding methods
-and then wrap those methods in `protect()` to catch those errors and have the
-method return `nil, err` instead of raising for those types of errors.
-
-You should distinguish between multiple types of errors:
-
-- Invalid API usage which should raise (but shouldn't happen in production).
-  Use `assert()` for those.
-
-- Format validation errors which shouldn't raise but they put the decoder
-  in an inconsistent state so the file must be closed. Use `checkf()` short
-  of "check format" for those.
-
-- Content validation errors, which can be user-corrected so mustn't raise
-and mustn't close the file. Use `check()` for those.
-
-- I/O errors which can be temporary and thus make the request retriable so they
-  must be distinguishable from other types of errors. Use `check_io()` for
-  those. On the call side then check the error class for implementing retries.
-
-Your decoder object must have a `f` field with a f:close() method
-to be called by check_io() and checkf() (but not by check()) on failure.
-
-Note that protect() only catches errors raised by check*(), other Lua errors
-pass through and the file isn't closed either.
-
-]=]
-
-local filetype_error = errortype'file'
-
-function filetype_error:init()
-	if self.f then
-		self.f:close()
-		self.f = nil
-	end
-end
-
-local function check_io(self, v, ...)
-	if v then return v, ... end
-	raise(filetype_error({
-		f = self and self.f,
-		addtraceback = self and self.tracebacks,
-	}, ...))
-end
-
-filetype_errors = memoize_multiret(function(filetype)
-
-	local file_error = errortype(filetype, nil, filetype .. ' error')
-	local content_error  = errortype(nil, nil, filetype .. ' error')
-
-	file_error.init = filetype_error.init
-
-	local function checker(create_error)
-		return function(self, v, ...)
-			if v then return v, ... end
-			raise(create_error({
-				tcp = self and self.tcp,
-				addtraceback = self and self.tracebacks,
-			}, ...))
-		end
-	end
-	local checkf = checker(file_error)
-	local check  = checker(content_error)
-
-	local classes = {[filetype_error]=1, [file_error]=1, [content_error]=1}
-
-	local function protect_this(f, oncaught)
-		return protect(classes, f, oncaught)
-	end
-
-	return check_io, checkf, check, protect_this
-end)
-
---buffer objects for binary files --------------------------------------------
-
-function file_buffer(self, filetype, MIN_SIZE)
-	filetype = filetype or 'file'
-	MIN_SIZE = MIN_SIZE or 64 * 1024
-	local f = isfile(self) and self or assert(self.f)
-	local b = string_buffer(MIN_SIZE)
-	local check_io, checkf, check, protect = filetype_errors(filetype)
-	b.f = f
-	b.check = checkf
-	function b:have(n)
-		local n0 = #self
-		if n0 < n then
-			local p, n = self:reserve(max(MIN_SIZE, n - n0))
-			local read_n = check_io(self, f:read(p, n))
-			if read_n == 0 then return false, 'eof' end
-			self:commit(read_n)
-		end
-		return true
-	end
-	function b:need(n)
-		check_io(self, self:have(n))
-	end
-	function b:write()
-		check_io(self, f:write(self:ref()))
-		self:reset()
-	end
-	return b
-end
-
 --hi-level APIs --------------------------------------------------------------
+
+function file:buffer(filetype)
+	return protocol_buffer({f = self}, filetype)
+end
 
 ABORT = {} --error signal to pass to save()'s reader function.
 
@@ -1722,7 +1618,10 @@ local function _save(file, s, sz, perms)
 		end
 		ok, err = f:write(s, sz)
 	end
-	f:close()
+	local close_ok, close_err = f:close()
+	if ok then --I/O errors can also be reported by close().
+		ok, err = close_ok, close_err
+	end
 
 	if not ok then
 		local err_msg = 'could not write to file %s: %s'
