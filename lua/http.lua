@@ -91,8 +91,8 @@ function http:create_send_function()
 	end
 end
 
-function http:close(expires)
-	self:check_io(self.tcp:close(expires))
+function http:close()
+	self:check_io(self.tcp:close())
 end
 
 --linebuffer-based read API --------------------------------------------------
@@ -420,7 +420,7 @@ function http:send_body(content, content_size, transfer_encoding, close)
 		--TODO: limit how much traffic we absorb for this.
 		self.tcp:shutdown('w', self.send_expires)
 		self:read_until_closed(noop)
-		self:close(self.send_expires)
+		self:close()
 	end
 end
 
@@ -440,7 +440,7 @@ function http:read_body_to_writer(headers, write, from_server, close, state)
 		self:read_until_closed(write)
 	end
 	if close and from_server then
-		self:close(self.read_expires)
+		self:close()
 	end
 	if state then state.body_was_read = true end
 end

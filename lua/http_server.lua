@@ -212,7 +212,7 @@ function http_server(...)
 			goto continue
 		end
 
-		local tcp = assert(tcp())
+		local tcp = tcp()
 		assert(tcp:setopt('reuseaddr', true))
 		local addr = listen_opt.addr or '*'
 		local port = listen_opt.port or (listen_opt.tls and 443 or 80)
