@@ -40,14 +40,14 @@ SOCKETS
 	tcp:send(s|buf, [len], [expires]) -> true  send bytes to connected address
 	udp:send(s|buf, [len], [expires]) -> len   send bytes to connected address
 	tcp|udp:recv(buf, maxlen, [expires]) -> len  receive bytes
-	tcp:listen([backlog, ]host, port, [af])    put socket in listening mode
+	tcp:[try_]listen([backlog, ]host, port, [af])    put socket in listening mode
 	tcp:accept([expires]) -> ctcp              accept a client connection
 	tcp:recvn(buf, len, [expires]) -> buf, len receive n bytes
 	tcp:recvall() -> buf, len                  receive until closed
 	tcp:recvall_read() -> read                 make a buffered read function
 	udp:sendto(host, port, s|buf, [len], [expires], [af]) -> len  send a datagram to an address
 	udp:recvnext(buf, maxlen, [expires], [flags]) -> len, sa      receive the next datagram
-	tcp:shutdown('r'|'w'|'rw', [expires])      send FIN
+	tcp:shutdown(['r'|'w'|'rw'])               send FIN
 	s:debug([protocol])                        enable debugging
 
 SCHEDULING
@@ -194,7 +194,7 @@ tcp|udp:recv(buf, maxlen, [expires], [flags]) -> len
 	With TCP, returning 0 means that the socket was closed on the other side.
 	With UDP it just means that an empty packet was received.
 
-tcp:listen([backlog, ]host, port, [af])
+tcp:[try_]listen([backlog, ]host, port, [af])
 
 	Put the socket in listening mode, binding the socket if not bound already
 	(in which case `host` and `port` args are ignored). The `backlog` defaults
@@ -233,9 +233,9 @@ udp:recvnext(buf, maxlen, [expires], [flags]) -> len, sa
 	Receive the next incoming datagram, wherever it came from, along with the
 	source address. If the socket is connected, packets are still filtered though.
 
-tcp:shutdown('r'|'w'|'rw')
+tcp:shutdown(['r'|'w'|'rw'])
 
-	Shutdown the socket for receiving, sending or both. Does not block.
+	Shutdown the socket for receiving, sending or both (default). Does not block.
 
 	Sends a TCP FIN packet to indicate refusal to send/receive any more data
 	on the connection. The FIN packet is only sent after all the current pending
@@ -1884,7 +1884,7 @@ cdef[[
 int listen(SOCKET s, int backlog);
 ]]
 
-function tcp:listen(backlog, host, port, addr_flags)
+function tcp:try_listen(backlog, host, port, addr_flags)
 	if not isnum(backlog) then
 		backlog, host, port = 1/0, backlog, host
 	end
@@ -1899,6 +1899,10 @@ function tcp:listen(backlog, host, port, addr_flags)
 	live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0 --live client connection count
 	return true
+end
+
+function tcp:listen(...)
+	assert(self:try_listen(...))
 end
 
 do --getopt() & setopt() -----------------------------------------------------
@@ -2336,11 +2340,26 @@ raw_class = raw
 function connect(host, port, expires)
 	local tcp = tcp()
 	local ok, err = tcp:connect(host, port, expires)
-	if not ok then
-		tcp:close()
-		return nil, err
-	end
+	if not ok then tcp:close(); return nil, err end
 	return tcp
+end
+
+function listen(addr, port)
+	local tcp = tcp()
+	local ok, err = tcp:setopt('reuseaddr', true)
+	if not ok then tcp:close(); error(err) end
+	local ok, err = tcp:try_listen(addr, port)
+	if not ok then tcp:close(); error(err) end
+	return tcp
+end
+
+--I/O API for protocol buffers.
+tcp.read = tcp.recv
+tcp.readn = tcp.recvn
+tcp.write = tcp.send
+
+function socket:buffer(protocol)
+	return protocol_buffer({f = self}, protocol)
 end
 
 --coroutine-based scheduler --------------------------------------------------
@@ -2651,37 +2670,3 @@ tcp_protocol_errors = memoize_multiret(function(protocol)
 
 	return check_io, checkp, check, protect_this
 end)
-
---buffer object for binary protocols -----------------------------------------
-
-function protocol_buffer(self, protocol, MIN_SIZE)
-	protocol = protocol or 'tcp'
-	MIN_SIZE = MIN_SIZE or 64 * 1024
-	local f = assert(self.tcp)
-	local b = string_buffer(MIN_SIZE)
-	local check_io, checkp, check, protect = tcp_protocol_errors(protocol)
-	b.tcp = f
-	b.check = checkp
-	--we can't read ahead from the socket because there might be data after.
-	function b:have(n)
-		local n0 = #self
-		if n0 < n then
-			local p, n = self:reserve(n - n0)
-			while n > 0 do
-				local recv_n, err = check_io(self, f:recv(p, n))
-				if recv_n == 0 then return false, 'eof' end
-				n = n - recv_n
-				self:commit(n)
-			end
-		end
-		return true
-	end
-	function b:write()
-		check_io(self, f:send(self:ref()))
-		self:reset()
-	end
-	function b:need(n)
-		check_io(self, self:have(n))
-	end
-	return b
-end
