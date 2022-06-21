@@ -161,7 +161,6 @@ ERRORS
 	fcall(f, ...) -> ...           same but re-raises errors
 	errortype([classname], [super]) -> E    create/get an error class
 	  E(...) -> e                           create an error object
-	  E:oninit(f)                           add error init code.
 	  E:__call(...) -> e                    error class constructor
 	  E:__tostring() -> s                   to make `error(e)` work
 	  E.addtraceback                        add a traceback to errors
@@ -214,10 +213,11 @@ FFI
 	metatype                     = ffi.metatype
 	istype                       = ffi.istype
 	errno                        = ffi.errno
+	check_errno(v[, err]) -> v | nil, s
 	str(buf, len)                = ffi.string(buf, len) if buf is not null
 	ptr(p)                       = p ~= nil and p  or nil
-	ptr_encode(p) -> n|s           store pointer address in Lua value
-	ptr_decode([ctype,]n|s) -> p   convert address to pointer
+	ptr_serialize(p) -> n|s             store pointer address in Lua value
+	ptr_deserialize([ctype,]n|s) -> p   convert address to pointer
 FFI ALLOCATION
 	buffer([ctype]) -> alloc
 	  alloc(len) -> buf,len        alloc len and get a buffer
@@ -1763,34 +1763,23 @@ local lua_pcall = pcall
 
 local classes = {} --{name -> class}
 local class_sets = {} --{'name1 name2 ...' -> {class->true}}
-local Error --base error class, defined below.
 
 local function errortype(classname, super, default_error_message)
 	local class = classname and classes[classname]
 	if not class then
 		super = type(super) == 'string' and assert(classes[super]) or super or Error
-		class = object(super, {classname = classname, iserror = true,
-			default_error_message = default_error_message or classname .. ' error'})
+		class = object(super, {
+			type = classname and classname..'_error' or 'error',
+			errortype = classname, iserror = true,
+			default_error_message = default_error_message
+				or (classname and classname..' error') or 'error',
+		})
 		if classname then
 			classes[classname] = class
 			class_sets = {}
 		end
 	end
 	return class
-end
-
-Error = errortype'error'
-
-function Error:oninit(f)
-	if not self.init then
-		self.init = f
-	else
-		local init = self.init
-		self.init = function(self)
-			init(self)
-			f(self)
-		end
-	end
 end
 
 local function newerror(arg, ...)
@@ -1830,37 +1819,6 @@ local function iserror(e, classes)
 	return class_table(classes)[e.__index] or false
 end
 
-local function merge_option_tables(e, arg1, ...)
-	if type(arg1) == 'table' then
-		for k,v in pairs(arg1) do e[k] = v end
-		return merge_option_tables(e, ...)
-	else
-		e.message = e.message or (arg1 and format(arg1, ...) or nil)
-		return e
-	end
-end
-function Error:__call(arg1, ...)
-	local e
-	if type(arg1) == 'table' then
-		e = merge_option_tables(object(self, arg1), ...)
-	else
-		e = object(self, {
-			message = arg1 and format(arg1, ...) or nil})
-	end
-	e.iserror = true
-	e.__tostring = self.__tostring
-	if e.init then e:init() end
-	return e
-end
-
-function Error:__tostring()
-	local s = self.traceback or self.message or self.default_error_message
-	if self.errorcode then
-		s = s .. ' ['..self.errorcode..']'
-	end
-	return s
-end
-
 local function raise(level, ...)
 	if type(level) == 'number' then
 		lua_error(newerror(...), level)
@@ -1882,7 +1840,7 @@ local function cont(classes, ok, ...)
 end
 local function onerror(e)
 	if iserror(e) then
-		if e.addtraceback then
+		if e.addtraceback and not e.traceback then
 			e.traceback = fix_traceback(traceback(e.message, 2))
 		end
 	else
@@ -1911,18 +1869,6 @@ local function protect(classes, f, oncaught)
 	end
 end
 
-function check(errorclass, event, v, ...)
-	if v then return v end
-	assert(type(errorclass) == 'string' or iserror(errorclass))
-	assert(type(event) == 'string')
-	local e = newerror(errorclass, ...)
-	if not e.logged then
-		log('ERROR', e.classname, event, '%s', e.message)
-		e.logged = true --prevent duplicate logging of the error on a catch-all handler.
-	end
-	raise(e)
-end
-
 _G.errortype = errortype
 _G.newerror = newerror
 _G.iserror = iserror
@@ -1931,6 +1877,55 @@ _G.catch = catch
 _G.pcall = pcall
 _G.lua_pcall = lua_pcall
 _G.protect = protect
+
+--base error class that all error types inherit from.
+
+Error = errortype()
+
+function Error.identify(e)
+	return iserror(e)
+end
+
+function Error:serialize()
+	return {errortype = self.errortype, message = tostring(self)}
+end
+
+function Error.deserialize(t)
+	return newerror(t.errortype, t)
+end
+
+local function merge_option_tables(e, arg1, ...)
+	if type(arg1) == 'table' then
+		for k,v in pairs(arg1) do e[k] = v end
+		return merge_option_tables(e, ...)
+	else
+		e.message = e.message or (arg1 and format(arg1, logargs(...)) or nil)
+		return e
+	end
+end
+function Error:__call(arg1, ...)
+	local e
+	if type(arg1) == 'table' then
+		e = merge_option_tables(object(self, arg1), ...)
+	else
+		e = object(self, {message = arg1 and format(arg1, logargs(...)) or nil})
+	end
+	e.iserror = true
+	e.__tostring = self.__tostring
+	if e.init then
+		e:init()
+	end
+	return e
+end
+
+function Error:__tostring()
+	local s = self.traceback or self.message or self.default_error_message
+	if self.errorcode then
+		s = s .. ' ['..self.errorcode..']'
+	end
+	return s
+end
+
 end
 
 --modules --------------------------------------------------------------------
@@ -2425,7 +2420,7 @@ end
 --use case #1: hashing on pointer values i.e. using pointers as table keys.
 --use case #2: moving pointers in and out of Lua states when using luastate.lua.
 local intptr_a1 = typeof'intptr_t[1]'
-function ptr_encode(p)
+function ptr_serialize(p)
 	local np = cast(intptr, cast(voidp, p))
    local n = tonumber(np)
 	if cast(intptr, n) ~= np then
@@ -2437,7 +2432,7 @@ end
 
 --convert a pointer address to a pointer, optionally specifying a ctype.
 local intptrp = typeof'const intptr_t*'
-function ptr_decode(ctype, addr)
+function ptr_deserialize(ctype, addr)
 	if not addr then
 		ctype, addr = voidp, ctype
 	end
@@ -2446,6 +2441,48 @@ function ptr_decode(ctype, addr)
 	else
 		return cast(ctype, addr)
 	end
+end
+
+--errno unified messages -----------------------------------------------------
+--only list here errors that are recoverable at least in some contexts.
+
+cdef'char *strerror(int errnum);'
+
+local errno_msgs = {
+	--fs & proc
+	[  1] = 'access_denied', --EPERM
+	[  2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
+	                     --rmdir(), opendir(), rename(), unlink()
+	[  5] = 'io_error', --EIO, readlink(), read()
+	[ 13] = 'access_denied', --EACCESS, mkdir() etc.
+	[ 17] = 'already_exists', --EEXIST, open(), mkdir()
+	[ 20] = 'not_found', --ENOTDIR, opendir()
+	[ 21] = 'is_dir', --EISDIR, unlink()
+	[Linux and 39 or OSX and 66 or ''] = 'not_empty', --ENOTEMPTY, rmdir()
+	[ 28] = 'disk_full', --ENOSPC: fallocate()
+	[Linux and 95 or ''] = 'not_supported', --EOPNOTSUPP: fallocate()
+	[Linux and 32 or ''] = 'eof', --EPIPE: write()
+	--sock
+	[ 98] = 'address_already_in_use' , --EADDRINUSE
+	[103] = 'connection_aborted'     , --ECONNABORTED
+	[104] = 'connection_reset'       , --ECONNRESET
+	[111] = 'connection_refused'     , --ECONNREFUSED
+	--mmap
+	[ 12] = 'out_of_mem'              , --ENOMEM
+	[ 22] = 'file_too_short'          , --EINVAL
+	[ 27] = 'disk_full'               , --EFBIG
+	[OSX and 69 or 122] = 'disk_full' , --EDQUOT
+}
+
+function check_errno(ret, err)
+	if ret then return ret end
+	if isstr(err) then return ret, err end
+	err = err or errno()
+	local s = errno_msgs[err]
+	if s then return ret, s end
+	local s = C.strerror(err)
+	local s = str(s) or 'Error '..err
+	return ret, s
 end
 
 --buffered I/O ---------------------------------------------------------------
@@ -2512,14 +2549,18 @@ function buffer_reader(p, n)
 	end
 end
 
+--like dynarray() but with a lot more features, including fast binary
+--(de)serialization of Lua values and a queue-like push/pull API.
+--see https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html
+string_buffer = require'string.buffer'.new
+
 --[=[ error handling for network protocols and file decoders -----------------
 
-protocol_errors(protocol_name|file_type_name) -> check_io, checkp, check, protect
-check[p|_io](self, val, format, format_args...) -> val
+check[_io|p|np](self, val, format, format_args...) -> val
 
 This is an error-handling discipline to use when writing TCP-based protocols
 as well as file decoders and encoders. Instead of using standard `assert()`
-and `pcall()`, use `check()`, `checkp()` and `check_io()` to raise errors
+and `pcall()`, use `check_io()`, `checkp()` and `checknp()` to raise errors
 inside protocol/decoder/encoder methods and then wrap those methods in
 `protect()` to convert them into `nil, err`-returning methods.
 
@@ -2536,7 +2577,7 @@ You should distinguish between multiple types of errors:
   entirely because they won't guard against anything and just bloat the code.
 
 - Request or response content validation errors, which can be user-corrected
-  so they mustn't raise and mustn't close the connection/file. Use `check()`
+  so they mustn't raise and mustn't close the connection/file. Use `checknp()`
   for those.
 
 - I/O errors, i.e. network/pipe failures which can be temporary and thus make
@@ -2548,300 +2589,75 @@ Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
 confusion about when to raise and when not to or forgetting to handle an error).
 
-Your object must have an abort() method which will be called by check_io()
-and checkp() (but not by check()) on failure.
+Your object must have a try_close() method which will be called by check_io()
+and checkp() (but not by checknp()) on failure.
 
 Note that protect() only catches errors raised by check*(), other Lua errors
 pass through and the connection isn't closed either.
 
-TODO: The sock API does not currently distinguish usage errors from
-network errors, so calling eg. `check_io(self, self.tcp:connect())` will
-catch usage errors as network errors. This must be fixed in sock, eg. with
-a third return value `retry` indicating that the error is a network error,
-then we can make check_io() take that into account and call check()
-internally if `retry` is false.
-
+TODO: Currently try_*() methods on sock and fs modules do not break on usage
+errors coming from the OS, so those errors come up as retriable I/O errors
+which is not correct. This must be fixed in fs and sock by calling assert()
+on all error codes that indicate non-transient errors.
 ]=]
 
 local function io_error_init(self)
-	if self.abort then
-		self:abort()
-	end
-end
-local function checker(create_error)
-	return function(self, v, ...)
-		if v then return v, ... end
-		raise(create_error({
-			abort = self and assert(self.abort),
-			addtraceback = self and self.tracebacks,
-		}, ...))
-	end
-end
-protocol_errors = memoize_multiret(function(protocol)
-
-	local io_error      = errortype'io'
-	local proto_error   = errortype(protocol, nil, protocol .. ' error')
-	local content_error = errortype(nil     , nil, protocol .. ' error')
-
-	io_error.init    = io_error_init
-	proto_error.init = io_error_init
-
-	local check_io = checker(io_error)
-	local checkp   = checker(proto_error)
-	local check    = checker(content_error)
-
-	local classes = {[io_error]=1, [proto_error]=1, [content_error]=1}
-
-	local function protect_this(f, oncaught)
-		return protect(classes, f, oncaught)
-	end
-
-	return check_io, checkp, check, protect_this
-end)
-
---protocol_buffer ------------------------------------------------------------
---based on string.buffer: https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html
---augmented with protocol error handling for easy parsing of binary files
---and network protocols (binary or line-based).
-
-string_buffer = require'string.buffer'.new
-
-do
-
-local pb = {}
-
-local function assert_self(self, ...)
-	return assert(...)
-end
-pb.check_io = assert_self
-pb.checkp   = assert_self
-
-local function cond_bswap16(x, self)
-	return self.be and bswap16(x) or x
-end
-local function cond_bswap(x, self)
-	return self.be and bswap(x) or x
-end
-
-local t = {
-	 'u8'   ,  u8p, 1, false,
-	 'i8'   ,  i8p, 1, false,
-	'u16_le', u16p, 2, false,
-	'i16_le', i16p, 2, false,
-	'u16_be', u16p, 2, bswap16,
-	'i16_be', i16p, 2, bswap16,
-	'u32_le', u32p, 4, false,
-	'i32_le', i32p, 4, false,
-	'u32_be', u32p, 4, bswap,
-	'i32_be', i32p, 4, bswap,
-	'u64_le', u64p, 8, false,
-	'i64_le', i64p, 8, false,
-	'u16'   , u16p, 2, cond_bswap16,
-	'i16'   , i16p, 2, cond_bswap16,
-	'u32'   , u32p, 4, cond_bswap,
-	'i32'   , i32p, 4, cond_bswap,
-	'f32'   , f32p, 4, false,
-	'f64'   , f64p, 8, false,
-}
-for i=1,#t,4 do
-	local k, pt, n, swap = unpack(t, i, i+3)
-	pb['put_'..k] = function(self, x)
-		local p = self:reserve(n)
-		cast(pt, p)[0] = swap and swap(x, self) or x
-		return self:commit(n)
-	end
-	pb['put_'..k..'_at'] = function(self, offset, x)
-		local p, len = self:ref()
-		assert(len >= offset + n, 'eof')
-		cast(pt, p + offset)[0] = swap and swap(x, self) or x
-		return self
-	end
-	pb['get_'..k] = function(self, offset)
-		local p, len = self:ref()
-		self:check_io(len >= n, 'eof')
-		local x = cast(pt, p)[0]
-		if swap then x = swap(x, self) end
-		self:_skip(n)
-		return x
-	end
-	pb['get_'..k..'_at'] = function(self, offset)
-		local p, len = self:ref()
-		self:check_io(len >= offset + n, 'eof')
-		local x = cast(pt, p + offset)[0]
-		if swap then x = swap(x, self) end
-		return x
+	if self.target then
+		self.target:try_close()
 	end
 end
 
-function pb:get(n)
-	if not n then
-		return self:_get()
+io_error = errortype'io'
+io_error.init = io_error_init
+function check_io(self, v, ...)
+	if v then return v, ... end
+	raise(io_error({
+		target = self,
+		addtraceback = self and self.tracebacks,
+	}, ...))
+end
+
+protocol_error = errortype'protocol'
+protocol_error.init = io_error_init
+function checkp(self, v, ...)
+	if v then return v, ... end
+	raise(protocol_error({
+		target = self,
+		addtraceback = self and self.tracebacks,
+	}, ...))
+end
+
+content_error = errortype'content'
+function checknp(self, v, ...)
+	if v then return v, ... end
+	raise(content_error({
+		addtraceback = self and self.tracebacks,
+	}, ...))
+end
+
+function check(errorclass, event, v, ...)
+	if v then return v end
+	assert(type(errorclass) == 'string' or iserror(errorclass))
+	assert(type(event) == 'string')
+	local e = newerror(errorclass, ...)
+	if not e.logged then
+		log('ERROR', e.errortype, event, '%s', e.message)
+		e.logged = true
 	end
-	self:check_io(#self >= n, 'eof')
-	return self:_get(n)
+	raise(e)
 end
 
-function pb:decode()
-	local ok, v = lua_pcall(self._decode)
-	self:checkp(ok, v)
-	return v
+function protect_io(f, oncaught)
+	return protect('io protocol content', f, oncaught)
 end
 
-function pb:fill(n, c)
-	local p = self:reserve(n)
-	fill(p, n, c)
-	return self:commit(n)
-end
-
-function pb:find(c, maxlen)
-	assert(#c >= 1 and #c <= 2)
-	local b1, b2 = byte(c, 1, 2)
-	local p, len = self:ref()
-	if maxlen and len > maxlen then
-		len = maxlen
-	end
-	if b2 then
-		for i = 0, len-2 do
-			if p[i] == b1 and p[i+1] == b2 then
-				return true, i
-			end
-		end
-	else
-		for i = 0, len-1 do
-			if p[i] == b1 then
-				return true, i
-			end
-		end
-	end
-	return false, 0
-end
-
-function pb:getto(term, maxlen)
-	local i = self:find(term, maxlen)
-	if not i then return nil end
-	local s = self:get(i)
-	self:_skip(#term)
-	return s
-end
-
---I/O
-
-function pb:abort() --for check*()
-	self.f:close() --no error checking here.
-end
-
-function pb:settimeout(s)
-	self.expires = clock() + s
-end
-
-function pb:read(p, size)
-	local n = self:check_io(self.f:read(p, size, self.expires))
-	self.offset = self.offset + n
-	return n
-end
-
-function pb:readn(p, n)
-	self:check_io(self.f:readn(p, n, self.expires))
-	self.offset = self.offset + n
-end
-
-function pb:write(p, n)
-	self:check_io(self.f:write(p, n, self.expires))
-	self.offset = self.offset + n
-end
-
-pb.minsize = 65536 --set this to 0 to disable read-ahead.
-function pb:have(n)
-	local have = #self
-	if n <= have then return true end
-	n = n - have
-	local p, size = self:reserve(max(n, self.minsize - have))
-	while n > 0 do
-		local read_n = self:read(p, size)
-		if read_n == 0 then return false, 'eof' end
-		self:commit(read_n)
-		n = n - read_n
-		size = size - read_n
-	end
-	return true
-end
-
-function pb:need(n)
-	self:check_io(self:have(n))
-end
-
-function pb:flush()
-	local p, len = self:ref()
-	self:write(p, len)
-	self:reset()
-end
-
-function pb:skip(n, past_buffer)
-	local buf_n = min(n, #self)
-	self:_skip(buf_n)
-	n = n - buf_n
-	if n > 0 then
-		self:check_io(past_buffer, 'eof')
-		if self.f.seek then
-			local file_size = self:check_io(self.f:size())
-			local file_pos = self:check_io(self.f:seek())
-			self:check_io(file_pos <= file_size, 'eof')
-			local file_pos1 = self:check_io(self.f:seek(n))
-			self:check_io(file_pos1 == file_pos + n, 'eof')
-			self.offset = self.offset + n
-		else
-			local n1 = min(n, max(self.minsize, 4096))
-			while n > 0 do
-				self:need(min(n, n1))
-				self:reset()
-				n = n - n1
-			end
-		end
+local check_io = check_io
+function unprotect_io(f)
+	assert(f)
+	return function(self, ...)
+		return check_io(self, f(self, ...))
 	end
 end
-
-function pb:seek(offset)
-	assert(self.f.seek, 'file not seekable')
-	self:check_io(#self == 0, 'read buffer not empty')
-	self:check_io(self.f:seek('set', offset))
-	self.offset = offset
-end
-
-pb.linesize = 4096
-pb.lineterm = '\r\n'
-function pb:readline() --for line-based protocols like http.
-	self:have(self.linesize)
-	return self:checkp(self:getto(self.lineterm, self.linesize), 'eof')
-end
-
-function pb:put      (...) return self.b:put      (...) end
-function pb:putf     (...) return self.b:putf     (...) end
-function pb:putcdata (...) return self.b:putcdata (...) end
-function pb:set      (...) return self.b:set      (...) end
-function pb:reset    ()    return self.b:reset    ()    end
-function pb:encode   (o)   return self.b:encode   (o)   end
-function pb:tostring ()    return self.b:tostring ()    end
-function pb:free     ()    return self.b:free     ()    end
-
-function protocol_buffer(self, protocol)
-	self.check_io, self.checkp = protocol_errors(protocol)
-	self.offset = 0
-	local pb = object(pb, self)
-	local bopt = opt and (opt.dict or opt.metatable)
-		and {dict = opt.dict, metatable = opt.metatable}
-	local b = string_buffer(bopt)
-	pb.b = b
-	function pb:__len   ()  return #b               end
-	function pb:ref     ()  return b:ref     ()    end
-	function pb:reserve (n) return b:reserve (n)   end
-	function pb:commit  (n) return b:commit  (n)   end
-	function pb:_get    (n) return b:get     (n)   end
-	function pb:_skip   (n) return b:skip    (n)   end
-	function pb._decode ()  return b:decode  ()    end
-	return pb
-end
-
-end --do
 
 --config ---------------------------------------------------------------------
 

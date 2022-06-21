@@ -289,7 +289,7 @@ local function test_errors()
 	raise(e)
 end
 assert(not pcall(test_errors))
-assert(caught.classname == 'e2')
+assert(caught.errortype == 'e2')
 assert(caught.message == 'imma e2')
 
 --closures -------------------------------------------------------------------
@@ -436,16 +436,16 @@ assert(package.cpath:match(esc(norm'zab/?.'..so)..'$'))
 
 local ffi = require'ffi'
 
-assert(ptr_encode(cast('void*', 0x55555555)) == 0x55555555)
-assert(ptr_decode('int*', 0x55555555) == cast('void*', 0x55555555))
+assert(ptr_serialize(cast('void*', 0x55555555)) == 0x55555555)
+assert(ptr_deserialize('int*', 0x55555555) == cast('void*', 0x55555555))
 
-assert(ptr_encode(cast('void*', 0x5555555555)) == 0x5555555555)
+assert(ptr_serialize(cast('void*', 0x5555555555)) == 0x5555555555)
 --going out of our way not to use the LL suffix so that Lua 5.1 can compile this.
 local huge = ffi.new('union { struct { uint32_t lo; uint32_t hi; }; struct{} *p; }',
 	{lo = 0x12345678, hi = 0xdeadbeef})
 local huges = '\x78\x56\x34\x12\xef\xbe\xad\xde'
-assert(ptr_encode(huge.p) == huges) --string comparison
-assert(ptr_decode('union{}*', huges) == huge.p) --pointer comparison
+assert(ptr_serialize(huge.p) == huges) --string comparison
+assert(ptr_deserialize('union{}*', huges) == huge.p) --pointer comparison
 
 --list the namespace ---------------------------------------------------------
 

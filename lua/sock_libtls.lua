@@ -9,16 +9,16 @@ API
 	conf:free()                           free the config object
 	client_stcp(tcp, servername, opt) -> cstcp  create a secure socket for a client
 	server_stcp(tcp, opt) -> sstcp        create a secure socket for a server
-	cstcp:connect(vhost)                  connect to a server
-	sstcp:accept() -> cstcp               accept a client connection
-	cstcp:recv()                          same semantics as `tcp:recv()`
-	cstcp:send()                          same semantics as `tcp:send()`
-	cstcp:recvn()                         same semantics as `tcp:recvn()`
-	cstcp:recvall()                       same semantics as `tcp:recvall()`
-	cstcp:recvall_read()                  same semantics as `tcp:recvall_read()`
-	cstcp:shutdown('r'|'w'|'rw')          calls `self.tcp:shutdown()`
-	cstcp:close()                         close client socket
-	sstcp:close()                         close server socket
+	cstcp:[try_]connect(vhost)            connect to a server
+	sstcp:[try_]accept() -> cstcp         accept a client connection
+	cstcp:[try_]recv()                    same semantics as `tcp:recv()`
+	cstcp:[try_]send()                    same semantics as `tcp:send()`
+	cstcp:[try_]recvn()                   same semantics as `tcp:recvn()`
+	cstcp:[try_]recvall()                 same semantics as `tcp:recvall()`
+	cstcp:[try_]recvall_read()            same semantics as `tcp:recvall_read()`
+	cstcp:[try_]shutdown('r'|'w'|'rw')    calls `self.tcp:shutdown()`
+	cstcp:[try_]close()                   close client socket
+	sstcp:[try_]close()                   close server socket
 
 Config options
 
@@ -83,8 +83,8 @@ local stcp = {
 	istlssocket = true,
 	debug_prefix = 'X',
 }
-local client_stcp = update({type = 'client_tls_socket'}, tcp_class)
-local server_stcp = update({type = 'server_tls_socket'}, tcp_class)
+local client_stcp = merge({type = 'client_tls_socket'}, tcp_class)
+local server_stcp = merge({type = 'server_tls_socket'}, tcp_class)
 
 local w_bufs = {}
 local r_bufs = {}
@@ -141,11 +141,11 @@ local write_cb = cast('tls_write_cb', function(tls, buf, sz, i)
 	end
 end)
 
-local function checkio(self, expires, tls_ret, tls_err)
+local function checkio(self, tls_ret, tls_err)
 	if tls_err == 'wantrecv' then
 		local i = self.buf_slot
 		local buf, sz = r_bufs[2*i], r_bufs[2*i+1]
-		local len, err = self.tcp:recv(buf, sz, expires)
+		local len, err = self.tcp:try_recv(buf, sz)
 		if not len then
 			return false, len, err
 		end
@@ -154,7 +154,7 @@ local function checkio(self, expires, tls_ret, tls_err)
 	elseif tls_err == 'wantsend' then
 		local i = self.buf_slot
 		local buf, sz = w_bufs[2*i], w_bufs[2*i+1]
-		local len, err = self.tcp:_send(buf, sz, expires)
+		local len, err = self.tcp:_send(buf, sz)
 		if not len then
 			return false, len, err
 		end
@@ -165,32 +165,32 @@ local function checkio(self, expires, tls_ret, tls_err)
 	end
 end
 
-function client_stcp:recv(buf, sz, expires)
+function client_stcp:try_recv(buf, sz)
 	if self._closed then return 0 end
 	while true do
-		local recall, ret, err = checkio(self, expires, self.tls:recv(buf, sz))
+		local recall, ret, err = checkio(self, self.tls:recv(buf, sz))
 		if not recall then return ret, err end
 	end
 end
 
-function client_stcp:_send(buf, sz, expires)
+function client_stcp:_send(buf, sz)
 	if self._closed then return nil, 'eof' end
 	while true do
-		local recall, ret, err = checkio(self, expires, self.tls:send(buf, sz))
+		local recall, ret, err = checkio(self, self.tls:send(buf, sz))
 		if not recall then return ret, err end
 	end
 end
 
-function stcp:close(expires)
+function stcp:try_close()
 	if self._closed then return true end
 	self._closed = true --close barrier.
 	local recall, tls_ok, tls_err
 	repeat
-		recall, tls_ok, tls_err = checkio(self, expires, self.tls:close())
+		recall, tls_ok, tls_err = checkio(self, self.tls:close())
 	until not recall
 	live(self, nil)
 	self.tls:free()
-	local tcp_ok, tcp_err = self.tcp:close()
+	local tcp_ok, tcp_err = self.tcp:try_close()
 	self.tls = nil
 	self.tcp = nil
 	free_buf_slot(self.buf_slot)
@@ -204,16 +204,14 @@ local function wrap_stcp(stcp_class, tcp, tls, buf_slot, name)
 		tcp = tcp,
 		tls = tls,
 		buf_slot = buf_slot,
+		check_io = check_io, checkp = checkp,
 	})
 	live(stcp, name or stcp_class.type)
 	return stcp
 end
 
 function _G.client_stcp(tcp, servername, opt)
-	local tls, err = tls_client(opt)
-	if not tls then
-		return nil, err
-	end
+	local tls = tls_client(opt)
 	local buf_slot = alloc_buf_slot()
 	local ok, err = tls:connect(servername, read_cb, write_cb, buf_slot)
 	if not ok then
@@ -224,16 +222,13 @@ function _G.client_stcp(tcp, servername, opt)
 end
 
 function _G.server_stcp(tcp, opt)
-	local tls, err = tls_server(opt)
-	if not tls then
-		return nil, err
-	end
+	local tls = tls_server(opt)
 	local buf_slot = alloc_buf_slot() --for close()
 	return wrap_stcp(server_stcp, tcp, tls, buf_slot)
 end
 
-function server_stcp:accept()
-	local ctcp, err = self.tcp:accept()
+function server_stcp:try_accept()
+	local ctcp, err = self.tcp:try_accept()
 	if not ctcp then
 		return nil, err
 	end
@@ -250,9 +245,17 @@ function stcp:closed()
 	return self._closed or false
 end
 
-function stcp:shutdown(mode)
-	return self.tcp:shutdown(mode)
+function stcp:try_shutdown(mode)
+	return self.tcp:try_shutdown(mode)
 end
 
 update(client_stcp, stcp)
 update(server_stcp, stcp)
+
+stcp.close         = unprotect_io(stcp.try_close)
+stcp.shutdown      = unprotect_io(stcp.try_shutdown)
+client_stcp.recv   = unprotect_io(client_stcp.try_recv)
+server_stcp.accept = unprotect_io(server_stcp.try_accept)
+
+client_stcp.try_read  = client_stcp.try_recv
+client_stcp.read      = client_stcp.recv

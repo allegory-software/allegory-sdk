@@ -65,12 +65,10 @@ require'lrucache'
 require'sock'
 
 local
-	band, shr, shl, char, format, add, concat, u8a, str =
-	band, shr, shl, char, format, add, concat, u8a, str
+	band, shr, shl, char, format, add, concat, u8a, str, check_io, checkp =
+	band, shr, shl, char, format, add, concat, u8a, str, check_io, checkp
 
 --error handling -------------------------------------------------------------
-
-local check_io, checkp, _, protect = tcp_protocol_errors'dns'
 
 local function check_len(q, i, n, len)
 	return checkp(q, n >= i+len, 'response too short')
@@ -387,30 +385,28 @@ q.authority_section = false
 q.additional_section = false
 q.tracebacks = false
 q.tcp_only = false
+q.try_close = noop --stub, for check_io()
 
 --NOTE: DNS servers don't support request pipelining so we use one-shot sockets.
 local function tcp_query(rs, ns, q)
 
 	rs:dbg(ns, q, 'TCP_QUERY')
 
-	local tcp = check_io(q, tcp())
-	q.tcp = tcp --pin it so that it's closed automatically on error.
+	local s = tcp()
+	s:setexpires(q.expires)
 
-	local expires = q.expires
-
-	check_io(q, tcp:connect(ns.ai, nil, expires))
-	check_io(q, tcp:send(u16_str(#q.s) .. q.s, nil, expires))
+	s:connect(ns.ai)
+	s:send(u16_str(#q.s) .. q.s)
 
 	local len_buf = u8a(2)
-	check_io(q, tcp:recvn(len_buf, 2, expires))
+	s:recvn(len_buf, 2)
 	local len = u16(q, len_buf, 0, 2)
-	checkp(q, len <= 4096, 'response too long')
+	s:checkp(len <= 4096, 'response too long')
 
 	local buf = u8a(len)
-	check_io(q, tcp:recvn(buf, len, expires))
+	s:recvn(buf, len)
 
-	tcp:close(0)
-	q.tcp = nil
+	s:close()
 
 	return parse_response(q, buf, len)
 end
@@ -456,7 +452,8 @@ local function ns_query(rs, ns, q)
 	--itself inside send(), returning control to the calling thread.
 	--the I/O scheduler will resume this thread next when send() completes.
 	rs:dbg(ns, q, 'SEND.')
-	check_io(q, ns.udp:send(q.s, nil, q.expires))
+	ns.udp:setexpires(q.expires)
+	ns.udp:send(q.s)
 	rs:dbg(ns, q, 'SENT')
 
 	--start the scheduler or suspend. the scheduler will resume() us back
@@ -482,7 +479,7 @@ local function ns_query(rs, ns, q)
 
 	return answers, err
 end
-local ns_query = protect(ns_query)
+local try_ns_query = protect_io(ns_query)
 
 local function schedule(rs, ns)
 	local sz = 4096
@@ -519,7 +516,8 @@ local function schedule(rs, ns)
 			if not min_expires then
 				break
 			end
-			local len, err = ns.udp:recv(buf, sz, min_expires)
+			ns.udp:setexpires(min_expires)
+			local len, err = ns.udp:try_recv(buf, sz)
 			rs:dbg(ns, nil, 'RECV', len, err)
 			if not len then
 				for qid, q in pairs(ns.queue) do
@@ -575,9 +573,9 @@ function resolver(opt)
 		else
 			host, port = ns, 53
 		end
-		local ai = assert(getaddrinfo(host, port))
-		local udp = assert(udp())
-		assert(udp:connect(ai))
+		local ai = getaddrinfo(host, port)
+		local udp = udp()
+		udp:connect(ai)
 		local ns = {ai = ai, udp = udp, tcp_only = tcp_only, queue = {}}
 		ns.scheduler = thread(function()
 			schedule(rs, ns)
@@ -592,7 +590,7 @@ function resolver(opt)
 	return rs
 end
 
-function rs.query(rs, qname, qtype, timeout)
+function rs.try_query(rs, qname, qtype, timeout)
 	local t = istab(qname) and qname or nil
 	if t then
 		qname, qtype, timeout = t.name, t.type, t.timeout
@@ -614,14 +612,14 @@ function rs.query(rs, qname, qtype, timeout)
 		resume(thread(function()
 			local t = update({name = qname, type = qtype, timeout = timeout}, t)
 			local q = object(q, t)
-			local res, err = ns_query(rs, ns, q) --suspends inside the first send().
+			local res, err = try_ns_query(rs, ns, q) --suspends inside the first send().
 			queries_left = queries_left - 1
 			if not lookup_thread then
 				rs:dbg(ns, q, 'DISCARD (late)')
 				return
 			end
-			if not res and iserror(err, 'tcp') and queries_left > 0 then
-				rs:dbg(ns, q, 'DISCARD (socket error and not last)')
+			if not res and iserror(err, 'io') and queries_left > 0 then
+				rs:dbg(ns, q, 'DISCARD (I/O error and not last)')
 				return
 			end
 			local lt = lookup_thread
@@ -639,12 +637,14 @@ function rs.query(rs, qname, qtype, timeout)
 				rs:dbgr(ns, q, lt, '{...}')
 				resume(lt, res)
 			end
-		end, rs.debug and 'N'..i..'-'..threadname()))
+		end, 'N'..i))
 	end
 	rs:dbgs()
 	return suspend() -- the first thread to finish will resume us.
 end
-rs.try_query = protect(rs.query)
+function rs:query(...)
+	return check_io(nil, self:try_query(...))
+end
 
 local function hex4(s)
 	return ('%04x'):format(tonumber(s, 16))
@@ -678,24 +678,20 @@ local function filter_answers(type, ret, ...)
 	end
 	return t
 end
-
 function rs:try_lookup(name, type, timeout)
+	type = type or 'A'
 	return filter_answers(type, self:try_query(name, type, timeout))
 end
-function rs:lookup(name, type, timeout)
-	type = type or 'A'
-	return filter_answers(type, self:query(name, type, timeout))
+function rs:lookup(...)
+	return check_io(nil, self:try_lookup(...))
 end
-
 function rs:try_reverse_lookup(addr, timeout)
 	local s = arpa_str(addr)
 	if not s then return nil, 'invalid address' end
 	return filter_answers('PTR', self:try_query(s, 'PTR', timeout))
 end
-function rs:reverse_lookup(addr, timeout)
-	local s = arpa_str(addr)
-	if not s then return nil, 'invalid address' end
-	return filter_answers('PTR', self:query(s, 'PTR', timeout))
+function rs:reverse_lookup(...)
+	return check_io(nil, self:try_reverse_lookup(...))
 end
 
 local function static_resolve(self, host)
@@ -715,24 +711,26 @@ function rs:try_resolve(host)
 	if ip then return ip end
 	return self:try_lookup(host)
 end
-function rs:resolve(host)
-	local ip = static_resolve(self, host)
-	if ip then return ip end
-	return self:lookup(host)
+function rs:resolve(...)
+	return check_io(nil, self:try_resolve(...))
 end
 
 --global resolver ------------------------------------------------------------
 
 local rs
-function resolve(host)
+function try_resolve(host)
 	host = trim(host)
 	rs = rs or resolver{
 		hosts   = config'hosts',
 		servers = config'ns',
 		debug   = config'resolver_debug',
 	}
-	local addrs, err = rs:resolve(host)
+	local addrs, err = rs:try_resolve(host)
 	return addrs and addrs[1], err
+end
+
+function resolve(...)
+	return check_io(nil, try_resolve(...))
 end
 
 --self-test ------------------------------------------------------------------
@@ -747,8 +745,8 @@ if not ... then
 			'10.0.0.1',
 			'10.0.0.10',
 			'1.1.1.1',
-			--'8.8.8.8',
-			--{host = '8.8.4.4', port = 53},
+			'8.8.8.8',
+			{host = '8.8.4.4', port = 53},
 		},
 		--tcp_only = true,
 		--debug = true,
@@ -758,26 +756,27 @@ if not ... then
 
 		local s = isstr(q) and q or pp(q)
 
-		local answers, err = r:query(q)
+		local answers, err = r:try_query(q)
 
 		if not answers then
-			print(format('%s: %s', s, err))
+			printf('%s: %s', s, err)
 		else
 			for i, ans in ipairs(answers) do
 
-				print(format('%-30s %-30s %-8s  ttl: %6d',
+				printf('L %d: %-30s %-30s %-8s  ttl: %6d',
+					i,
 					ans.name,
 					ans.a or ans.cname,
 					ans.type,
-					ans.ttl))
+					ans.ttl)
 
 				if ans.a then
-					local names, err = r:reverse_lookup(ans.a)
+					local names, err = r:try_reverse_lookup(ans.a)
 					if not names then
-						printf('R %-28s: %s', isstr(q) and q or q.name, err)
+						printf('R E: %-30s %s', isstr(q) and q or q.name, err)
 					else
 						for i,name in ipairs(names) do
-							printf('R %-28s %s', ans.a, name)
+							printf('R %d: %-30s %s', i, ans.a, name)
 						end
 					end
 				end
@@ -789,7 +788,7 @@ if not ... then
 		{name = 'luapower.com', tcp_only = true, timeout = 1},
 		'luapower.com',
 		'luapower.com',
-		--'luapower.com',
+		'luapower.com',
 		{name = 'catcostaocasa.ro', timeout = 1},
 		{name = 'www.yahoo.com', timeout = 1},
  		'www.openresty.org',

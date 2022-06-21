@@ -17,7 +17,7 @@ local
 
 local file  = _fs_file
 local dir   = _fs_dir
-local check = _fs_check_errno
+local check = check_errno
 
 --types, consts, utils -------------------------------------------------------
 
@@ -101,10 +101,10 @@ local F_GETFL     = 3
 local F_SETFL     = 4
 local O_NONBLOCK  = 0x800
 
-function file.make_async(f)
+local function make_async(f)
 	local fl = C.fcntl(f.fd, F_GETFL)
 	assert(check(C.fcntl(f.fd, F_SETFL, cast('int', bor(fl, O_NONBLOCK))) == 0))
-	local sock = require'sock'
+	require'sock'
 	local ok, err = _sock_register(f)
 	if not ok then return nil, err end
 	f._async = true
@@ -126,7 +126,7 @@ function file_wrap_fd(fd, async, is_pipe_end, path)
 	live(f, path or '')
 
 	if async then
-		local ok, err = f:make_async()
+		local ok, err = make_async(f)
 		if not ok then
 			assert(f:close())
 			return nil, err
@@ -165,7 +165,7 @@ function file.closed(f)
 	return f.fd == -1
 end
 
-function file.close(f)
+function file.try_close(f)
 	if f:closed() then return true end
 	if f._async then
 		require'sock'
@@ -259,11 +259,11 @@ int64_t lseek(int fd, int64_t offset, int whence) asm("lseek%s");
 ]], Linux and '64' or ''))
 
 --NOTE: always ask for more than 0 bytes from a pipe or you'll not see EOF.
-function file.read(f, buf, sz, expires)
+function file.try_read(f, buf, sz)
 	if sz == 0 then return 0 end --masked for compat.
 	if f._async then
 		require'sock'
-		return _file_async_read(f, buf, sz, expires)
+		return _file_async_read(f, buf, sz)
 	else
 		local n = C.read(f.fd, buf, sz)
 		if n == -1 then return check() end
@@ -273,10 +273,10 @@ function file.read(f, buf, sz, expires)
 	end
 end
 
-function file._write(f, buf, sz, expires)
+function file._write(f, buf, sz)
 	if f._async then
 		require'sock'
-		return _file_async_write(f, buf, sz, expires)
+		return _file_async_write(f, buf, sz)
 	else
 		local n = C.write(f.fd, buf, sz or #buf)
 		if n == -1 then return check() end
@@ -286,7 +286,7 @@ function file._write(f, buf, sz, expires)
 	end
 end
 
-function file.flush(f)
+function file.try_flush(f)
 	return check(C.fsync(f.fd) == 0)
 end
 
@@ -349,7 +349,7 @@ end
 
 --NOTE: lseek() is not defined for shm_open()'ed fds, that's why we ask
 --for a `size` arg. The seek() behavior is just for compat with Windows.
-function file.truncate(f, size, opt)
+function file.try_truncate(f, size, opt)
 	assert(isnum(size), 'size expected')
 	if not f.shm then
 		local pos, err = f:seek('set', size)
@@ -358,7 +358,7 @@ function file.truncate(f, size, opt)
 	if not f.shm then
 		opt = opt or 'fallocate fail' --emulate Windows behavior.
 		if opt:find'fallocate' then
-			local cursize, err = f:attr'size'
+			local cursize, err = f:try_attr'size'
 			if not cursize then return nil, err end
 			local ok, err = fallocate(f.fd, size)
 			if not ok then
@@ -886,7 +886,7 @@ function dir.next(dir)
 	end
 end
 
-function fs_dir(path, skip_dot_dirs)
+function _ls(path, skip_dot_dirs)
 	local dir = dir_ct(#path)
 	dir._dirlen = #path
 	copy(dir._dir, path, #path)
@@ -951,13 +951,6 @@ end
 
 --memory mapping -------------------------------------------------------------
 
-local mmap_errors = {
-	[12] = 'out_of_mem', --ENOMEM
-	[22] = 'file_too_short', --EINVAL
-	[27] = 'disk_full', --EFBIG
-	[OSX and 69 or 122] = 'disk_full', --EDQUOT
-}
-
 local librt = C
 if Linux then --for shm_open()
 	local ok, rt = pcall(ffi.load, 'rt')
@@ -997,7 +990,7 @@ end
 
 local function mmap(...)
 	local addr = C.mmap(...)
-	local ok, err = check(cast('intptr_t', addr) ~= -1, nil, mmap_errors)
+	local ok, err = check(cast('intptr_t', addr) ~= -1)
 	if not ok then return nil, err end
 	return addr
 end
@@ -1007,14 +1000,14 @@ local MAP_PRIVATE = 2 --copy-on-write
 local MAP_FIXED   = 0x0010
 local MAP_ANON    = OSX and 0x1000 or 0x0020
 
-function fs_map(file, access, size, offset, addr, tagname, perms)
+function _mmap(file, access, size, offset, addr, tagname, perms)
 
 	local write, exec, copy = parse_access(access or '')
 
 	--open the file, if any.
 
 	local function exit(err)
-		if file then file:close() end
+		if file then file:try_close() end
 		return nil, err
 	end
 
@@ -1041,24 +1034,24 @@ function fs_map(file, access, size, offset, addr, tagname, perms)
 
 	if file then
 		if not size then --if size not given, assume entire file.
-			local filesize, err = file:attr'size'
+			local filesize, err = file:try_attr'size'
 			if not filesize then
 				return exit(err)
 			end
 			size = filesize - offset
 		elseif write then --if writable file too short, extend it.
-			local filesize, err = file:attr'size'
+			local filesize, err = file:try_attr'size'
 			if not filesize then
 				return exit(err)
 			end
 			if filesize < offset + size then
-				local ok, err = file:truncate(offset + size)
+				local ok, err = file:try_truncate(offset + size)
 				if not ok then
 					return exit(err)
 				end
 			end
 		else --if read/only file too short.
-			local filesize, err = file:attr'size'
+			local filesize, err = file:try_attr'size'
 			if not filesize then
 				return exit(err)
 			end

@@ -17,14 +17,12 @@ http(opt) -> http
 		tcp               the I/O API (required)
 		port              if client: server's port (optional)
 		https             if client: `true` if using TLS (optional)
-		max_line_size     change the HTTP line size limit
 
 Client-side API --------------------------------------------------------------
 
 http:build_request(opt) -> creq              | Make a HTTP request object.
 
 	host                    vhost name
-	max_line_size           change the HTTP line size limit
 	close                   close the connection after replying
 	content, content_size   body: string, read function or buffer
 	compress                false: don't compress body
@@ -59,79 +57,32 @@ http:send_response(sres) -> true | nil,err   | Send a response.
 if not ... then require'http_server_test'; return end
 
 require'glue'
+require'pbuffer'
 require'gzip'
-require'linebuffer'
 require'sock'
 local http_headers = require'http_headers'
 
 local http = {type = 'http_connection', debug_prefix = 'H'}
 
---error handling -------------------------------------------------------------
+function http:log(severity, module, event, fmt, ...)
+	if not logging or logging.filter[severity] then return end
+	local S = self.f or '-'
+	local dt = clock() - self.start_time
+	local s = fmt and _(fmt, logargs(...)) or ''
+	log(severity, module, event, '%-4s %4dms %s', S, dt * 1000, s)
+end
 
-local check_io, checkp, _check, protect = tcp_protocol_errors'http'
-
-http.check_io = check_io
-http.checkp = checkp
+function http:dp(...)
+	return self:log('', 'http', ...)
+end
 
 function http:protect(method)
 	local function oncaught(err)
 		if self.debug and self.debug.errors then
 			self:log('ERROR', 'http', method, '%s', err)
-			self.logged = true
 		end
 	end
-	self[method] = protect(self[method], oncaught)
-end
-
---low-level I/O API ----------------------------------------------------------
-
-function http:create_send_function()
-	function self:send(buf, sz)
-		self:check_io(self.tcp:send(buf, sz, self.send_expires))
-	end
-end
-
-function http:close()
-	self:check_io(self.tcp:close())
-end
-
---linebuffer-based read API --------------------------------------------------
-
-function http:read_exactly(n, write)
-	local read = self.linebuffer.read
-	local n0 = n
-	while n > 0 do
-		local buf, sz = read(n)
-		self:check_io(buf, sz)
-		write(buf, sz)
-		n = n - sz
-	end
-end
-
-function http:read_line()
-	return self:check_io(self.linebuffer.readline())
-end
-
-function http:read_until_closed(write_content)
-	local read = self.linebuffer.read
-	while true do
-		local buf, sz = read(1/0)
-		if not buf then
-			self:check_io(nil, sz)
-		elseif sz == 0 then
-			break
-		end
-		write_content(buf, sz)
-	end
-end
-
-http.max_line_size = 8192
-
-function http:create_linebuffer()
-	local function read(buf, sz)
-		return self.tcp:recv(buf, sz, self.read_expires)
-	end
-	self.linebuffer = linebuffer(read, '\r\n', self.max_line_size)
+	self[method] = protect_io(self[method], oncaught)
 end
 
 --request line & status line -------------------------------------------------
@@ -163,15 +114,15 @@ function http:send_request_line(method, uri, http_version)
 	assert(method and method == method:upper())
 	assert(uri)
 	self:dp('=>', '%s %s HTTP/%s', method, uri, http_version)
-	self:send(_('%s %s HTTP/%s\r\n', method, uri, http_version))
+	self.f:send(_('%s %s HTTP/%s\r\n', method, uri, http_version))
 	return true
 end
 
 function http:read_request_line()
 	local method, uri, http_version =
-		self:read_line():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
+		self.b:readline():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
 	self:dp('<=', '%s %s HTTP/%s', method, uri, http_version)
-	self:checkp(method and (http_version == '1.0' or http_version == '1.1'), 'invalid request line')
+	self.f:checkp(method and (http_version == '1.0' or http_version == '1.1'), 'invalid request line')
 	return http_version, method, uri
 end
 
@@ -183,16 +134,16 @@ function http:send_status_line(status, message, http_version)
 	assert(http_version == '1.1' or http_version == '1.0')
 	local s = _('HTTP/%s %d %s\r\n', http_version, status, message)
 	self:dp('=>', '%s %s %s', status, message, http_version)
-	self:send(s)
+	self.f:send(s)
 end
 
 function http:read_status_line()
-	local line = self:read_line()
+	local line = self.b:readline()
 	local http_version, status, status_message
 		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
 	self:dp('<=', '%s %s %s', status, status_message, http_version)
 	status = tonumber(status)
-	self:checkp(http_version and status, 'invalid status line')
+	self.f:checkp(http_version and status, 'invalid status line')
 	return http_version, status, status_message
 end
 
@@ -223,29 +174,29 @@ function http:send_headers(headers)
 				if istab(v) then --must be sent unfolded.
 					for i,v in ipairs(v) do
 						self:dp('->', '%-17s %s', k, v)
-						self:send(_('%s: %s\r\n', k, v))
+						self.f:send(_('%s: %s\r\n', k, v))
 					end
 				else
 					self:dp('->', '%-17s %s', k, v)
-					self:send(_('%s: %s\r\n', k, v))
+					self.f:send(_('%s: %s\r\n', k, v))
 				end
 			end
 		end
 	end
-	self:send'\r\n'
+	self.f:send'\r\n'
 end
 
 function http:read_headers(rawheaders)
 	local line, name, value
-	line = self:read_line()
+	line = self.b:readline()
 	while line ~= '' do --headers end up with a blank line
 		name, value = line:match'^([^:]+):%s*(.*)'
-		self:checkp(name, 'invalid header')
+		self.f:checkp(name, 'invalid header')
 		name = name:lower() --header names are case-insensitive
-		line = self:read_line()
+		line = self.b:readline()
 		while line:find'^%s' do --unfold any folded values
 			value = value .. line
-			line = self:read_line()
+			line = self.b:readline()
 		end
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
@@ -290,17 +241,17 @@ function http:read_chunks(write_content)
 	local chunk_num = 0
 	while true do
 		chunk_num = chunk_num + 1
-		local line = self:read_line()
-		local len = tonumber(string.gsub(line, ';.*', ''), 16) --len[; extension]
-		self:checkp(len, 'invalid chunk size')
+		local line = self.b:readline()
+		local len = tonumber(line:gsub(';.*', ''), 16) --len[; extension]
+		self.f:checkp(len, 'invalid chunk size')
 		total = total + len
 		self:dp('<<', '%7d bytes; chunk %d', len, chunk_num)
 		if len == 0 then --last chunk (trailers not supported)
-			self:read_line()
+			self.b:readline()
 			break
 		end
-		self:read_exactly(len, write_content)
-		self:read_line()
+		self.b:readn_to(len, write_content)
+		self.b:readline()
 	end
 	self:dp('<<', '%7d bytes in %d chunks', total, chunk_num)
 end
@@ -315,12 +266,12 @@ function http:send_chunked(read_content)
 			local len = len or #chunk
 			total = total + len
 			self:dp('>>', '%7d bytes; chunk %d', len, chunk_num)
-			self:send(_('%X\r\n', len))
-			self:send(chunk, len)
-			self:send'\r\n'
+			self.f:send(_('%X\r\n', len))
+			self.f:send(chunk, len)
+			self.f:send'\r\n'
 		else
 			self:dp('>>', '%7d bytes; chunk %d', 0, chunk_num)
-			self:send'0\r\n\r\n'
+			self.f:send'0\r\n\r\n'
 			break
 		end
 	end
@@ -332,7 +283,7 @@ function http:gzip_decoder(format, write)
 	--That doesn't leak them but don't expect them to finish!
 	local decode = cowrap(function(yield)
 		assert(inflate(yield, write, nil, format))
-	end, 'http-gzip-decode %s', self.tcp)
+	end, 'http-gzip-decode %s', self.f)
 	decode()
 	return decode
 end
@@ -373,13 +324,13 @@ function http:gzip_encoder(format, content, content_size)
 			if s == false then return end --abort on entry
 			local ok, err = deflate(content, yield, nil, format)
 			assert(ok or err == 'abort', err)
-		end, 'http-gzip-encode %s', self.tcp)
+		end, 'http-gzip-encode %s', self.f)
 		function self:after_send_response()
 			if threadstatus(gzip_thread) ~= 'dead' then
 				content(false, 'abort')
 			end
 		end
-		self.tcp.gzt = gzip_thread
+		self.f.gzt = gzip_thread
 		return content
 	else
 		assert(false, type(content))
@@ -399,18 +350,18 @@ function http:send_body(content, content_size, transfer_encoding, close)
 				local len = len or #chunk
 				total = total + len
 				self:dp('>>', '%7d bytes total', len)
-				self:send(chunk, len)
+				self.f:send(chunk, len)
 			end
 			self:dp('>>', '%7d bytes total', total)
 		else
 			local len = content_size or #content
 			if len > 0 then
 				self:dp('>>', '%7d bytes', len)
-				self:send(content, len)
+				self.f:send(content, len)
 			end
 		end
 	end
-	self:dp('  ', '')
+	self:dp('>>', '0 bytes')
 	if close then
 		--this is the "http graceful close" you hear about: we send a FIN to
 		--the client then we wait for it to close the connection in response
@@ -418,9 +369,9 @@ function http:send_body(content, content_size, transfer_encoding, close)
 		--if we'd just call close() that would send a RST to the client which
 		--would cut short the client's pending input stream (it's how TCP works).
 		--TODO: limit how much traffic we absorb for this.
-		self.tcp:shutdown('w', self.send_expires)
-		self:read_until_closed(noop)
-		self:close()
+		self.f:shutdown'w'
+		self.b:readall_to(noop)
+		self.f:close()
 	end
 end
 
@@ -434,13 +385,13 @@ function http:read_body_to_writer(headers, write, from_server, close, state)
 	elseif headers['content-length'] then
 		local len = headers['content-length']
 		self:dp('<<', '%7d bytes total', len)
-		self:read_exactly(len, write)
+		self.b:readn_to(len, write)
 	elseif from_server and close then
 		self:dp('<<', '?? bytes (reading until closed)')
-		self:read_until_closed(write)
+		self.b:readall_to(write)
 	end
 	if close and from_server then
-		self:close()
+		self.f:close()
 	end
 	if state then state.body_was_read = true end
 end
@@ -461,7 +412,7 @@ function http:read_body(headers, write, from_server, close, state)
 		return (cowrap(function(yield)
 			self:read_body_to_writer(headers, yield, from_server, close, state)
 			--not returning anything here signals eof.
-		end, 'http-read-body %s', self.tcp))
+		end, 'http-read-body %s', self.f))
 	else --function or nil
 		self:read_body_to_writer(headers, write, from_server, close, state)
 		if write then write() end --signal eof to writer.
@@ -523,7 +474,7 @@ end
 function http:send_request(req)
 	local dt = req.request_timeout
 	self.start_time = clock()
-	self.send_expires = dt and self.start_time + dt or nil
+	self.f:setexpires('w', dt and self.start_time + dt or nil)
 	self:send_request_line(req.method, req.uri, req.http_version)
 	self:send_headers(req.headers)
 	self:send_body(req.content, req.content_size, req.headers['transfer-encoding'])
@@ -593,7 +544,7 @@ function http:read_response(req)
 	res.rawheaders = {}
 
 	local dt = req.reply_timeout
-	self.read_expires = dt and clock() + dt or nil
+	self.f:setexpires('r', dt and clock() + dt or nil)
 
 	res.http_version, res.status, res.status_message = self:read_status_line()
 
@@ -616,7 +567,7 @@ function http:read_response(req)
 	local receive_content = req.receive_content
 	if self:should_redirect(req, res) then
 		receive_content = nil --ignore the body (it's not the body we want)
-		res.redirect_location = self:checkp(res.headers['location'], 'no location')
+		res.redirect_location = self.f:checkp(res.headers['location'], 'no location')
 		res.receive_content = req.receive_content
 	end
 
@@ -636,8 +587,8 @@ http.server_request_class = sreq
 
 function http:read_request()
 	local req = object(sreq, {http = self})
-	req.http_version, req.method, req.uri = self:read_request_line()
 	self.start_time = clock()
+	req.http_version, req.method, req.uri = self:read_request_line()
 	req.rawheaders = {}
 	self:read_headers(req.rawheaders)
 	req.headers = self:parsed_headers(req.rawheaders)
@@ -792,35 +743,22 @@ end
 
 --instantiation --------------------------------------------------------------
 
-function http:log(severity, module, event, fmt, ...)
-	if not logging or logging.filter[severity] then return end
-	local S = self.tcp or '-'
-	local dt = clock() - self.start_time
-	local s = fmt and _(fmt, logargs(...)) or ''
-	log(severity, module, event, '%-4s %4dms %s', S, dt * 1000, s)
-end
-
-function http:dp(...)
-	return self:log('', 'http', ...)
-end
-
 function _G.http(t)
 
+	assert(t.f)
 	local self = object(http, {}, t)
 
 	if self.debug and self.debug.tracebacks then
-		self.tracebacks = true --for tcp_protocol_errors.
+		self.f.tracebacks = true --for check_io()
 	end
-
 	if not (logging and self.debug and self.debug.protocol) then
 		self.dp = noop
 	end
-
 	if logging and self.debug and self.debug.stream then
-		self.tcp:debug'http'
+		self.f:debug'http'
 	end
 
-	self:create_linebuffer()
-	self:create_send_function()
+	self.b = pbuffer{f = self.f} --for reading only
+
 	return self
 end

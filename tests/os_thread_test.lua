@@ -43,9 +43,9 @@ local function test_pthread_creation()
    	require'glue'
 		local function worker() end
 	   local worker_cb = ffi.cast('void *(*)(void *)', worker)
-	   return ptr_encode(worker_cb)
+	   return ptr_serialize(worker_cb)
 	end)
-	local worker_cb_ptr = ptr_decode(state:call())
+	local worker_cb_ptr = ptr_deserialize(state:call())
 	local t0 = clock()
 	local n = 1000
 	for i=1,n do

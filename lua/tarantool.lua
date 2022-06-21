@@ -11,7 +11,7 @@ CONECTING
 	  opt.port                              port (`3301`)
 	  opt.user                              user (optional)
 	  opt.password                          password (optional)
-	  opt.timeout                           timeout (`2`)
+	  opt.timeout                           timeout (`5`)
 	  opt.mp                                msgpack instance to use (optional)
 	tt:stream() -> tt                       create a stream
 
@@ -77,8 +77,6 @@ require'msgpack'
 local
 	u8a, u8p, buffer, empty, memoize, object =
 	u8a, u8p, buffer, empty, memoize, object
-
-local check_io, checkp, check, protect = tcp_protocol_errors'tarantool'
 
 local c = {host = '127.0.0.1', port = 3301, timeout = 5, tracebacks = false}
 
@@ -172,18 +170,18 @@ tarantool_connect = function(opt)
 	local c = object(c, opt)
 	log('note', 'taran', 'connect', '%s:%s user=%s', c.host, c.port, c.user or '')
 	c:clear_metadata_cache()
-	c.tcp = check_io(c, tcp()) --pin it so that it's closed automatically on error.
-	local expires = opt.expires or clock() + (opt.timeout or c.timeout)
-	check_io(c, c.tcp:connect(c.host, c.port, expires))
+	c.tcp = tcp()
+	c.tcp:settimeout(c.timeout)
+	c.tcp:connect(c.host, c.port)
 	c._b = buffer()
 	c.mp = opt.mp or msgpack()
-	c.mp.error = function(err) checkp(c, false, '%s', err) end
+	c.mp.error = function(err) c.tcp:checkp(false, '%s', err) end
 	c.mp.decoder[MP_DECIMAL] = decode_decimal
 	c.mp.decoder[MP_UUID   ] = decode_uuid
 	c._mb = c.mp:encoding_buffer()
 	local b = c._b(64)
-	check_io(c, c.tcp:recvn(b, 64, expires)) --greeting
-	local salt = str(check_io(c, c.tcp:recvn(b, 64, expires)), 44)
+	c.tcp:recvn(b, 64) --greeting
+	local salt = str(c.tcp:recvn(b, 64), 44)
 	if c.user then
 		local body = {[USER_NAME] = c.user}
 		if c.password and c.password ~= '' then
@@ -194,11 +192,11 @@ tarantool_connect = function(opt)
 			local scramble = xor_strings(s1, s3)
 			body[TUPLE] = c.mp.array('chap-sha1', scramble)
 		end
-		request(c, AUTH, body, expires)
+		request(c, AUTH, body)
 	end
 	return c
 end
-try_tarantool_connect = protect(tarantool_connect)
+try_tarantool_connect = protect_io(tarantool_connect)
 
 c.stream = function(c)
 	c.last_stream_id = (c.last_stream_id or 0) + 1
@@ -210,8 +208,8 @@ c.close = function(c)
 	return c.tcp:close()
 end
 
---[[local]] function request(c, req_type, body, expires)
-	local expires = expires or clock() + c.timeout
+--[[local]] function request(c, req_type, body)
+	c.tcp:settimeout(c.timeout)
 	c.sync_num = (c.sync_num or 0) + 1
 	local header = {
 		[SYNC] = c.sync_num,
@@ -222,16 +220,16 @@ end
 	local mb = c._mb
 	local req = mb:reset():encode_map(header):encode_map(body):tostring()
 	local len = mb:reset():encode_int(#req):tostring()
-	check_io(c, c.tcp:send(len .. req))
-	local size = check_io(c, c.tcp:recvn(c._b(5), 5, expires))
-	local _, size = mp:decode_next(size, 5)
-	local s = check_io(c, c.tcp:recvn(c._b(size), size, expires))
-	local i, res_header = mp:decode_next(s, size)
-	checkp(c, res_header[SYNC] == c.sync_num)
-	local i, res_body = mp:decode_next(s, size, i)
+	c.tcp:send(len .. req)
+	local p = c.tcp:recvn(c._b(5), 5)
+	local _, size = mp:decode_next(p, 5)
+	local p = c.tcp:recvn(c._b(size), size)
+	local i, res_header = mp:decode_next(p, size)
+	c.tcp:checkp(res_header[SYNC] == c.sync_num)
+	local i, res_body = mp:decode_next(p, size, i)
 	local code = res_header[REQUEST_TYPE]
 	if code ~= OK then
-		check(c, false, res_body[ERROR])
+		c.tcp:checkp(false, res_body[ERROR])
 	end
 	return res_body
 end
@@ -249,12 +247,12 @@ end
 c.clear_metadata_cache = function(c)
 	c._lookup_space = memoize(function(space)
 		local t = tselect(c, VIEW_SPACE, INDEX_SPACE_NAME, space)
-		return check(c, t[1] and t[1][1], "no space '%s'", space)
+		return c.tcp:checknp(t[1] and t[1][1], "no space '%s'", space)
 	end)
 	c._lookup_index = memoize(function(spaceno, index)
 		if not spaceno then return end
 		local t = tselect(c, VIEW_INDEX, INDEX_INDEX_NAME, {spaceno, index})
-		return check(c, t[1] and t[1][2], "no index '%s'", index)
+		return c.tcp:checknp(t[1] and t[1][2], "no index '%s'", index)
 	end)
 end
 
@@ -301,11 +299,10 @@ function c.select(c, space, index, key, opt)
 	body[LIMIT] = opt.limit or 0xFFFFFFFF
 	body[OFFSET] = opt.offset or 0
 	body[ITERATOR] = opt.iterator
-	local expires = opt.expires or clock() + (opt.timeout or c.timeout)
-	return exec_response(request(c, SELECT, body, expires))
+	return exec_response(request(c, SELECT, body))
 end
 tselect = c.select
-c.try_select = protect(c.select)
+c.try_select = protect_io(c.select)
 
 function c.insert(c, space, tuple)
 	return request(c, INSERT, {
@@ -313,7 +310,7 @@ function c.insert(c, space, tuple)
 		[TUPLE] = mp.toarray(tuple),
 	})[DATA]
 end
-c.try_insert = protect(c.insert)
+c.try_insert = protect_io(c.insert)
 
 function c.replace(c, space, tuple)
 	return request(c, REPLACE, {
@@ -321,7 +318,7 @@ function c.replace(c, space, tuple)
 		[TUPLE] = mp.toarray(tuple),
 	})[DATA]
 end
-c.try_replace = protect(c.replace)
+c.try_replace = protect_io(c.replace)
 
 function c.update(c, space, index, key, oplist)
 	local space, index = resolve_index(c, space, index)
@@ -332,7 +329,7 @@ function c.update(c, space, index, key, oplist)
 		[TUPLE] = mp.toarray(oplist),
 	})[DATA]
 end
-c.try_update = protect(c.update)
+c.try_update = protect_io(c.update)
 
 function c.delete(c, space, key)
 	local space, index = resolve_index(c, space, index)
@@ -342,7 +339,7 @@ function c.delete(c, space, key)
 		[KEY] = key_arg(c.mp, key),
 	})[DATA]
 end
-c.try_delete = protect(c.delete)
+c.try_delete = protect_io(c.delete)
 
 function c.upsert(c, space, index, key, oplist)
 	return request(c, UPSERT, {
@@ -352,7 +349,7 @@ function c.upsert(c, space, index, key, oplist)
 		[TUPLE] = key_arg(c.mp, key),
 	})[DATA]
 end
-c.try_upsert = protect(c.upsert)
+c.try_upsert = protect_io(c.upsert)
 
 function c.eval(c, expr, ...)
 	if type(expr) == 'function' then
@@ -361,12 +358,12 @@ function c.eval(c, expr, ...)
 	end
 	return unpack(request(c, EVAL, {[EXPR] = expr, [TUPLE] = c.mp.array(...)})[DATA])
 end
-c.try_eval = protect(c.eval)
+c.try_eval = protect_io(c.eval)
 
 function c.call(c, fn, ...)
 	return unpack(request(c, CALL, {[FUNCTION_NAME] = fn, [TUPLE] = c.mp.array(...)})[DATA])
 end
-c.try_call = protect(c.call)
+c.try_call = protect_io(c.call)
 
 function c.exec(c, sql, params, xopt, param_meta)
 	if param_meta and param_meta.has_named_params then --pick params from named keys
@@ -388,7 +385,7 @@ function c.exec(c, sql, params, xopt, param_meta)
 		[OPTIONS] = xopt or empty,
 	}))
 end
-c.try_exec = protect(c.exec)
+c.try_exec = protect_io(c.exec)
 
 local st = {}
 
@@ -418,7 +415,7 @@ function c.prepare(c, sql)
 		params = params(res[BIND_METADATA]),
 	})
 end
-c.try_prepare = protect(c.prepare)
+c.try_prepare = protect_io(c.prepare)
 
 function st:exec(params, xopt)
 	return self.conn:exec(self.id, params, xopt, self.params)
@@ -427,7 +424,7 @@ end
 local function unprepare(c, stmt_id)
 	return request(c, PREPARE, {[STMT_ID] = stmt_id})[STMT_ID]
 end
-local try_unprepare = protect(unprepare)
+local try_unprepare = protect_io(unprepare)
 function st:free()
 	return unprepare(self.conn, self.id)
 end
@@ -438,7 +435,7 @@ end
 function c.ping(c)
 	return request(c, PING, empty)
 end
-c.try_ping = protect(c.ping)
+c.try_ping = protect_io(c.ping)
 
 local function esc_quote(s) return "''" end
 function c.esc(s)

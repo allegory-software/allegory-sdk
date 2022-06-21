@@ -40,10 +40,10 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 	if istab(cmd) then
 		local t = {}
-		t[1] = quote_path_win(cmd[1])
+		t[1] = cmdline_quote_path_win(cmd[1])
 		for i = 2, cmd.n or #cmd do
 			if cmd[i] then --nil and false args are skipped. pass '' to inject empt args.
-				t[#t+1] = quote_arg_win(cmd[i])
+				t[#t+1] = cmdline_quote_arg_win(cmd[i])
 			end
 		end
 		cmd = concat(t, ' ')
@@ -170,7 +170,7 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 	self.handle             = pi.hProcess
 	self.main_thread_handle = pi.hThread
-	self.id                 = pi.dwProcessId
+	self.pid                = pi.dwProcessId
 	self.main_thread_id     = pi.dwThreadId
 
 	log('', 'proc', 'exec', '%s', cmd)
@@ -187,7 +187,7 @@ function proc:forget()
 		assert(winapi.CloseHandle(self.handle))
 		assert(winapi.CloseHandle(self.main_thread_handle))
 		self.handle = false
-		self.id = false
+		self.pid = false
 		self.main_thread_handle = false
 		self.main_thread_id = false
 		live(self, nil)
@@ -200,6 +200,8 @@ local EXIT_CODE_KILLED = winapi.STILL_ACTIVE + 1
 function proc:kill()
 	if not self.handle then
 		return nil, 'forgotten'
+	elseif self:status() == 'killed' then --otherwise we get "access denied".
+		return nil, 'killed'
 	end
 	return winapi.TerminateProcess(self.handle, EXIT_CODE_KILLED)
 end

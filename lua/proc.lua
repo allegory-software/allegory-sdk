@@ -7,6 +7,7 @@
 
 	exec(opt | cmd,...) -> p                   spawn a child process in background
 	exec_luafile(opt | script,...) -> p        spawn a process running a Lua script
+	  p.pid                                    process ID
 	  p:kill()                                 kill process
 	  p:wait([expires]) -> status              wait for a process to finish
 	  p:status() -> active|finished|killed|forgotten    process status
@@ -30,16 +31,20 @@ exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
 	Spawn a child process and return a process object to query and control the
 	process. Options can be given as separate args or in a table.
 
-	* `cmd` can be either a **string or an array** containing the filepath
-	  of the executable to run and its command-line arguments.
-	* `env` is a table of environment variables (if not given, the current
-	  environment is inherited).
-	* `cur_dir` is the directory to start the process in.
-	* `stdin`, `stdout`, `stderr` are pipe ends created with `fs.pipe()`
-	  to redirect the standard input, output and error streams of the process;
-	  you can also set any of these to `true` to have them opened (and closed)
-	  for you.
-	* `autokill` kills the process when the calling process exits.
+		cmd
+			a string or an array containing the filepath of the executable to run
+			and its command-line arguments.
+		env
+			a table of environment variables (if not given, the current
+			environment is inherited).
+		cur_dir
+			the directory to start the process in
+		stdin, stdout, stderr
+			pipe ends created with pipe() to redirect the standard input,
+			output and error streams of the process; you can also set any
+			of these to `true` to have them opened (and closed) for you.
+		autokill
+			kills the process when the calling process exits.
 
 exec_luafile(opt | script,...) -> p
 
@@ -199,7 +204,7 @@ function cmdline_quote_args_unix(...) return cmdline_quote_args('unix', ...) end
 --cmd|{cmd,arg1,...}, env, ...
 --{cmd=cmd|{cmd,arg1,...}, env=, ...}
 function exec(t, ...)
-	if istab(t) then
+	if istab(t) and t.cmd then
 		return _exec(t.cmd, t.env, t.dir, t.stdin, t.stdout, t.stderr,
 			t.autokill, t.inherit_handles)
 	else
@@ -209,7 +214,7 @@ end
 
 --script|{script,arg1,...}, env, ...
 --{script=, env=, ...}
-function exec_luafile(arg, ...)
+function exec_lua_file(arg, ...)
 	local exepath = exepath()
 	local script = isstr(arg) and arg or arg.script
 	local cmd = isstr(script) and {exepath, script} or extend({exepath}, script)
@@ -224,4 +229,27 @@ function exec_luafile(arg, ...)
 		end
 		return exec(t)
 	end
+end
+
+function exec_lua(arg, ...)
+	local exepath = exepath()
+	local script = isstr(arg) and arg or arg.script
+	local cmd = isstr(script) and {exepath, '-'} or extend({exepath}, '-')
+	local t = {cmd = cmd, stdin = true}
+	if isstr(arg) then
+		t.env, t.dir, t.stdout, t.stderr, t.autokill, t.inherit_handles = ...
+	else
+		for k,v in pairs(arg) do
+			if k ~= 'script' and t[k] == nil then
+				t[k] = v
+			end
+		end
+	end
+	local p, err = exec(t)
+	if not p then return nil, err end
+	run(function()
+		p.stdin:write(script)
+		p.stdin:close()
+	end)
+	return p
 end

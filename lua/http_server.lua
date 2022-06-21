@@ -190,7 +190,7 @@ function http_server(...)
 		local http = http({
 			debug = self.debug,
 			max_line_size = self.max_line_size,
-			tcp = ctcp,
+			f = ctcp,
 		})
 		while not ctcp:closed() do
 			local req = assert(http:read_request())
@@ -213,24 +213,16 @@ function http_server(...)
 		end
 
 		local tcp = tcp()
-		assert(tcp:setopt('reuseaddr', true))
+		tcp:setopt('reuseaddr', true)
 		local addr = listen_opt.addr or '*'
 		local port = listen_opt.port or (listen_opt.tls and 443 or 80)
 
-		local ok, err = tcp:listen(addr, port)
-		if not ok then
-			self:check(tcp, false, 'listen', '("%s", %s): %s', addr, port, err)
-			goto continue
-		end
+		tcp:listen(addr, port)
 
 		local tls = listen_opt.tls
 		if tls then
 			local opt = update(self.tls_options, listen_opt.tls_options)
-			local stcp, err = server_stcp(tcp, opt)
-			if not self:check(tcp, stcp, 'stcp', '%s', err) then
-				tcp:close()
-				goto continue
-			end
+			local stcp = server_stcp(tcp, opt)
 			live(stcp, 'listen %s:%d', tcp.bound_addr, tcp.bound_port)
 			tcp = stcp
 		end
@@ -238,21 +230,22 @@ function http_server(...)
 		push(self.sockets, tcp)
 
 		local function accept_connection()
-			local ctcp, err, retry = tcp:accept()
-			if not self:check(tcp, ctcp, 'accept', '%s', err) then
-				if retry then
+			local ctcp, err = tcp:accept()
+			if not ctcp then
+				if tcp:closed() then --stop() called.
+					return
+				else
+					self:check(tcp, false, 'accept', '%s', err)
 					--temporary network error. let it retry but pause a little
 					--to avoid killing the CPU while the error persists.
 					wait(.2)
-				else
-					self:stop()
+					return
 				end
-				return
 			end
 			liveadd(ctcp, tls and 'https' or 'http')
 			resume(thread(function()
 				local ok, err = pcall(handle_connection, tcp, ctcp)
-				self:check(ctcp, ok or iserror(err, 'tcp'), 'handler', '%s', err)
+				self:check(ctcp, ok or iserror(err, 'io'), 'handler', '%s', err)
 				ctcp:close()
 			end, 'http-server-client %s', ctcp))
 		end

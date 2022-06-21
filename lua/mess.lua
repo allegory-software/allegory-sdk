@@ -17,8 +17,9 @@ SERVER
 	server:stop()
 
 CLIENT
-	mess_connect(host, port, [expires], [opt]) -> channel
+	mess_connect(host, port, [opt]) -> channel
 		opt.debug
+		opt.timeout
 
 CHANNEL
 	channel:send(msg, [expires]) -> ok | false,err
@@ -39,13 +40,10 @@ PROTOCOL
 
 require'glue'
 require'sock'
-local string_buffer = require'string.buffer'.new
 
 local
 	cast, u32p =
 	cast, u32p
-
-local check_io, checkp, check, protect = tcp_protocol_errors'mess'
 
 local channel = {maxlen = 16 * 1024^2}
 
@@ -54,29 +52,32 @@ function mess_protocol(tcp)
 	local chan = update({tcp = tcp}, channel)
 
 	local buf = string_buffer()
-	chan.send = protect(function(self, msg, exp)
+	function chan:send(msg, exp)
 		buf:reset()
 		buf:reserve(4)
 		buf:commit(4)
 		buf:encode(msg)
 		local p, len = buf:ref()
 		cast(u32p, p)[0] = len - 4
-		check_io(self, tcp:send(p, len, exp))
+		tcp:send(p, len, exp)
 		return true
-	end)
+	end
+	chan.try_send = protect_io(chan.send)
 
 	local buf = string_buffer()
-	chan.recv = protect(function(self)
+	function chan:recv()
 		buf:reset()
 		local plen = buf:reserve(4)
-		check_io(self, tcp:recvn(plen, 4))
+		tcp:recvn(plen, 4)
 		local len = cast(u32p, plen)[0]
-		checkp(self, len <= self.maxlen, 'message too big: %d', len)
+		tcp:checkp(len <= self.maxlen, 'message too big: %d', len)
 		local p = buf:reset():reserve(len)
-		check_io(self, tcp:recvn(p, len))
+		tcp:recvn(p, len)
 		buf:commit(len)
-		return check(self, pcall(buf.decode, buf))
-	end)
+		local t = buf:decode()
+		return t
+	end
+	chan.try_recv = protect_io(chan.recv)
 
 	return chan
 end
@@ -97,35 +98,34 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 
 	server_name = server_name or 'mess'
 
-	local tcp = assert(tcp())
+	local tcp = tcp()
 
 	local server = {tcp = tcp}
 
-	check_io(server, tcp:setopt('reuseaddr', true))
-	check_io(server, tcp:listen(host, port))
+	tcp:setopt('reuseaddr', true)
+	tcp:listen(host, port)
 
 	liveadd(tcp, server_name)
 
 	local stop
 	function server:stop()
 		stop = true
+		tcp:shutdown'r'
 		tcp:close()
 	end
 
 	local onaccept = wrapfn('accept', onaccept, onerror, server)
 	resume(thread(function()
 		while not stop do
-			local ctcp, err, retry = tcp:accept()
+			local ctcp, err, retry = tcp:try_accept()
 			if not ctcp then
 				if tcp:closed() then --stop() called.
 					break
-				elseif retry then
-					--temporary network error. retry without killing the CPU.
-					wait(0.2)
-					goto skip
-				else
-					check_io(server, nil, err)
 				end
+				tcp:check_io(retry, err)
+				--temporary network error. retry without killing the CPU.
+				wait(0.2)
+				goto skip
 			end
 			liveadd(ctcp, server_name)
 			resume(thread(function()
@@ -140,19 +140,18 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 	return server
 end
 
-function mess_connect(host, port, exp, opt)
-	local tcp = assert(tcp())
+function mess_connect(host, port, opt)
+	local tcp = tcp()
 	if opt and opt.debug then
 		tcp:debug'mess'
 	end
-	local ok, err = tcp:connect(host, port, exp)
-	if not ok then
-		tcp:close()
-		return nil, err
-	end
+	tcp:settimeout(opt and opt.timeout)
+	tcp:connect(host, port)
 	return mess_protocol(tcp)
 end
+try_mess_connect = protect_io(mess_connect)
 
+function channel:try_close   ()        return self.tcp:try_close() end
 function channel:close       ()        return self.tcp:close() end
 function channel:onclose     (fn)      return self.tcp:onclose(fn) end
 function channel:closed      ()        return self.tcp:closed() end
@@ -163,10 +162,12 @@ function channel:wait        (timeout) return self.tcp:wait(timeout) end
 function channel:recvall(onmessage, onerror)
 	local onmessage = wrapfn('recvall', onmessage, onerror, self)
 	while not self:closed() do
-		local ok, msg = self:recv()
-		if not ok then
-			if not iserror(msg, 'tcp') then
-				log('ERROR', 'mess', 'recv', '%s', msg)
+		local msg, err = self:try_recv()
+		if not msg and err then
+			if iserror(err, 'io') and err.message == 'eof' then
+				break
+			else
+				log('ERROR', 'mess', 'recv', '%s', err)
 			end
 		else
 			onmessage(self, msg)
@@ -176,8 +177,6 @@ end
 
 if not ... then
 
-	require'glue'
-	require'logging'
 	logging.verbose = true
 	logging.debug = true
 
@@ -185,9 +184,9 @@ if not ... then
 
 		local server = mess_listen('127.0.0.1', '5555', function(self, chan)
 			chan:recvall(function(self, msg)
-				assert(self:send(msg))
+				self:send(msg)
 			end)
-			assert(chan:close())
+			chan:close()
 			self:stop()
 		end)
 
@@ -195,13 +194,13 @@ if not ... then
 
 	resume(thread(function()
 
-		local chan = mess_connect('127.0.0.1', '5555', clock() + 1)
+		local chan = mess_connect('127.0.0.1', '5555', {timeout = 1})
 		for i = 1, 20 do
-			assert(chan:send{a = i, b = 2*i, s = tostring(i)})
-			local _, t = assert(chan:recv())
+			chan:send{a = i, b = 2*i, s = tostring(i)}
+			local t = chan:recv()
 			pr(t)
 		end
-		assert(chan:close())
+		chan:close()
 
 	end, 'client'))
 

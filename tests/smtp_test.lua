@@ -14,7 +14,7 @@ config('smtp_host' , 'mail.bpnpart.com')
 --config('smtp_tls'  , false)
 config('smtp_user' , 'admin@bpnpart.com')
 config('smtp_pass' , 'Bpnpart@0@0')
-config('smtp_debug', 'protocol errors tracebacks')
+config('smtp_debug', 'protocol errors stream tracebacks')
 
 run(function()
 

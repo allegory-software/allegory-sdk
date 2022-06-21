@@ -5,7 +5,7 @@
 	TLS support in sock_libtls.lua.
 
 ADDRESS LOOKUP
-	getaddrinfo(...) -> ai                     look-up a hostname
+	[try_]getaddrinfo(...) -> ai               look-up a hostname
 	ai:free()                                  free the address list
 	ai:next() -> ai|nil                        get next address in list
 	ai:addrs() -> iter() -> ai                 iterate addresses
@@ -23,81 +23,80 @@ ADDRESS LOOKUP
 	ip:tostring() -> s                         IP address in string form
 
 SOCKETS
-	tcp([family][, protocol]) -> tcp           make a TCP socket
-	udp([family][, protocol]) -> udp           make a UDP socket
+	tcp([family], [protocol]) -> tcp           make a TCP socket
+	udp([family], [protocol]) -> udp           make a UDP socket
 	rawsocket([family][, protocol]) -> raw     make a raw socket
-	s:socktype() -> s                          socket type: 'tcp', ...
-	s:family() -> s                            address family: 'inet', ...
-	s:protocol() -> s                          protocol: 'tcp', 'icmp', ...
-	s:close()                                  send FIN and/or RST and free socket
-	s:closed() -> t|f                          check if the socket is closed
-	s:onclose(fn)                              exec fn after the socket is closed
-	s:bind([host], [port], [af])               bind socket to an address
-	s:setopt(opt, val)                         set socket option (`'so_*'` or `'tcp_*'`)
-	s:getopt(opt) -> val                       get socket option
-	tcp|udp:connect(host, port, [expires], [af], ...)             connect to an address
-	connect(tcp, host, port, [expires])        create tcp socket and connect
-	tcp:send(s|buf, [len], [expires]) -> true  send bytes to connected address
-	udp:send(s|buf, [len], [expires]) -> len   send bytes to connected address
-	tcp|udp:recv(buf, maxlen, [expires]) -> len  receive bytes
-	tcp:[try_]listen([backlog, ]host, port, [af])    put socket in listening mode
-	tcp:accept([expires]) -> ctcp              accept a client connection
-	tcp:recvn(buf, len, [expires]) -> buf, len receive n bytes
-	tcp:recvall() -> buf, len                  receive until closed
-	tcp:recvall_read() -> read                 make a buffered read function
-	udp:sendto(host, port, s|buf, [len], [expires], [af]) -> len  send a datagram to an address
-	udp:recvnext(buf, maxlen, [expires], [flags]) -> len, sa      receive the next datagram
-	tcp:shutdown(['r'|'w'|'rw'])               send FIN
+	[try_]connect(host, port, [timeout]) -> tcp     create tcp socket and connect
+	listen([backlog, ]host, port) -> tcp            create tcp socket and listen
+	s:socktype() -> s                               socket type: 'tcp', ...
+	s:family() -> s                                 address family: 'inet', ...
+	s:protocol() -> s                               protocol: 'tcp', 'icmp', ...
+	s:[try_]close()                                 send FIN and/or RST and free socket
+	s:closed() -> t|f                               check if the socket is closed
+	s:onclose(fn)                                   exec fn after the socket is closed
+	s:[try_]bind([host], [port], [af])              bind socket to an address
+	s:[try_]setopt(opt, val)                        set socket option (`'so_*'` or `'tcp_*'`)
+	s:[try_]getopt(opt) -> val                      get socket option
+	tcp|udp:[try_]connect(host, port, [af], ...)    connect to an address
+	tcp:[try_]send(s|buf, [len]) -> true            send bytes to connected address
+	udp:[try_]send(s|buf, [len]) -> len             send bytes to connected address
+	tcp|udp:[try_]recv(buf, maxlen) -> len          receive bytes
+	tcp:[try_]listen([backlog, ]host, port, [af])   put socket in listening mode
+	tcp:[try_]accept() -> ctcp | nil,err,[retry]    accept a client connection
+	tcp:[try_]recvn(buf, n) -> buf, n               receive n bytes
+	tcp:[try_]recvall() -> buf, len                 receive until closed
+	tcp:[try_]recvall_read() -> read                make a buffered read function
+	udp:[try_]sendto(host, port, s|buf, [len], [af]) -> len    send a datagram to an address
+	udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa        receive the next datagram
+	tcp:[try_]shutdown(['r'|'w'|'rw'])         send FIN
 	s:debug([protocol])                        enable debugging
 
-SCHEDULING
-	thread(func[, fmt, ...]) -> co             create a coroutine for async I/O
-	resume(thread, ...) -> ...                 resume thread
-	yield(...) -> ...                          safe yield (see [coro])
-	suspend(...) -> ...                        suspend thread
-	cowrap(f) -> wrapper                       see coro.safewrap()
-	currentthread() -> co, is_main             current coroutine and whether it's the main one
-	threadstatus(co) -> s                      coroutine.status()
-	transfer(co, ...) -> ...                   see coro.transfer()
-	cofinish(co, ...) -> ...                   see coro.finish()
-	threadenv[co] -> t                         get a thread's own or inherited environment
-	getthreadenv([co]) -> t                    get (current) thread's own enviornment
-	getownthreadenv([co], [create]) -> t       get/create (current) thread's own environment
-	onthreadfinish(co, f)                      run `f(thread)` when thread finishes
+THREADS
+	thread(func[, fmt, ...]) -> co         create a coroutine for async I/O
+	resume(thread, ...) -> ...             resume thread
+	yield(...) -> ...                      safe yield (see [coro])
+	suspend(...) -> ...                    suspend thread
+	cowrap(f) -> wrapper                   see coro.safewrap()
+	currentthread() -> co, is_main         current coroutine and whether it's the main one
+	threadstatus(co) -> s                  coroutine.status()
+	transfer(co, ...) -> ...               see coro.transfer()
+	cofinish(co, ...) -> ...               see coro.finish()
+	threadenv[co] -> t                     get a thread's own or inherited environment
+	getthreadenv([co]) -> t                get (current) thread's own enviornment
+	getownthreadenv([co], [create]) -> t   get/create (current) thread's own environment
+	onthreadfinish(co, f)                  run `f(thread)` when thread finishes
 
-	poll()                                     poll for I/O
-	start()                                    keep polling until all threads finish
-	stop()                                     stop polling
-	run(f, ...) -> ...                         run a function inside a thread
+SCHEDULER
+	poll()                                 poll for I/O
+	start()                                keep polling until all threads finish
+	stop()                                 stop polling
+	run(f, ...) -> ...                     run a function inside a thread
 
-	wait_job() -> sj                          make an interruptible async wait job
-	  sj:wait_until(t) -> ...                 wait until clock()
-	  sj:wait(s) -> ...                       wait for `s` seconds
-	  sj:resume(...)                          resume the waiting thread
-	  sj:cancel()                             calls sj:resume(sj.CANCEL)
-	  sj.CANCEL                               magic arg that can cancel runat()
-	wait_until(t) -> ...                      wait until clock() value
-	wait(s) -> ...                            wait for s seconds
-	runat(t, f) -> sj                         run `f` at clock `t`
-	runafter(s, f) -> sj                      run `f` after `s` seconds
-	runevery(s, f) -> sj                      run `f` every `s` seconds
-	runagainevery(s, f) -> sj                 run `f` now and every `s` seconds afterwards
+TIMERS
+	wait_job() -> sj            make an interruptible async wait job
+	  sj:wait_until(t) -> ...   wait until clock()
+	  sj:wait(s) -> ...         wait for `s` seconds
+	  sj:resume(...)            resume the waiting thread
+	  sj:cancel()               calls sj:resume(sj.CANCEL)
+	  sj.CANCEL                 magic arg that can cancel runat()
+	wait_until(t) -> ...        wait until clock() value
+	wait(s) -> ...              wait for s seconds
+	runat(t, f) -> sj           run `f` at clock `t`
+	runafter(s, f) -> sj        run `f` after `s` seconds
+	runevery(s, f) -> sj        run `f` every `s` seconds
+	runagainevery(s, f) -> sj   run `f` now and every `s` seconds afterwards
+	s:wait_job() -> sj          wait job that is auto-canceled on socket close
+	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job
+	s:wait(s) -> ...            wait() on auto-canceled wait job
 
-	s:wait_job() -> sj                      wait job that is auto-canceled on socket close
-	s:wait_until(t) -> ...                  wait_until() on auto-canceled wait job
-	s:wait(s) -> ...                        wait() on auto-canceled wait job
-
+THREAD SETS
 	threadset() -> ts
 	  ts:thread(f, [fmt, ...]) -> co
 	  ts:join() -> {{ok=,ret=,thread=},...}
 
-MULTI-THREADING
-	iocp([iocp_h]) -> iocp_h                   get/set IOCP handle (Windows)
-	epoll_fd([epfd]) -> epfd                   get/set epoll fd (Linux)
-
-PROTOCOL ERROR HANDLING
-	tcp_protocol_errors(protocol_name) -> check_io, checkp, check, protect
-	  check[p|_io](self, val, format, format_args...) -> val
+MULTI-THREADING (WITH OS THREADS)
+	iocp([iocp_h]) -> iocp_h    get/set IOCP handle (Windows)
+	epoll_fd([epfd]) -> epfd    get/set epoll fd (Linux)
 
 ------------------------------------------------------------------------------
 
@@ -107,10 +106,6 @@ across platforms, like 'access_denied' and 'address_already_in_use'
 so they can be used in conditionals.
 
 I/O functions only work inside threads created with `thread()`.
-
-The optional `expires` arg controls the timeout of the operation and must be
-a `clock()`-relative value (which is in seconds). If the expiration clock
-is reached before the operation completes, `nil, 'timeout'` is returned.
 
 `host, port` args are passed to `getaddrinfo()` (with the optional `af` arg),
 which means that an already resolved address can be passed as `ai, nil`
@@ -155,7 +150,7 @@ rawsocket([family][, protocol]) -> raw`
 
 	Make a raw socket. The default family is `'inet'`.
 
-s:close()
+s:[try_]close()
 
 	Close the connection and free the socket.
 
@@ -163,12 +158,19 @@ s:close()
 	returned 0 yet), or 2) `so_linger` socket option was set with a zero timeout,
 	then a TCP RST packet is sent to the client, otherwise a FIN is sent.
 
-s:bind([host], [port], [af])
+s:[try_]bind([host], [port], [af])
 
 	Bind socket to an interface/port (which default to '*' and 0 respectively
 	meaning all interfaces and a random port).
 
-tcp|udp:connect(host, port, [expires], [af])
+s:setexpires(['r'|'w'], clock|nil)
+s:settimeout(['r'|'w'], seconds|nil)
+
+	Set or clear the expiration clock for all subsequent I/O operations.
+	If the expiration clock is reached before an operation completes,
+	`nil, 'timeout'` is returned.
+
+tcp|udp:[try_]connect(host, port, [af], ...)
 
 	Connect to an address, binding the socket to `('*', 0)` if not bound already.
 
@@ -177,18 +179,18 @@ tcp|udp:connect(host, port, [expires], [af])
 	you can call connect() multiple times (use `('*', 0)` to switch back to
 	unfiltered mode).
 
-tcp:send(s|buf, [len], [expires], [flags]) -> true
+tcp:[try_]send(s|buf, [len], [flags]) -> true
 
 	Send bytes to the connected address.
 	Partial writes are signaled with `nil, err, writelen`.
 	Trying to send zero bytes is allowed but it's a no-op (doesn't go to the OS).
 
-udp:send(s|buf, [len], [expires], [flags]) -> len
+udp:[try_]send(s|buf, [len], [flags]) -> len
 
 	Send bytes to the connected address.
 	Empty packets (zero bytes) are allowed.
 
-tcp|udp:recv(buf, maxlen, [expires], [flags]) -> len
+tcp|udp:[try_]recv(buf, maxlen, [flags]) -> len
 
 	Receive bytes from the connected address.
 	With TCP, returning 0 means that the socket was closed on the other side.
@@ -200,7 +202,7 @@ tcp:[try_]listen([backlog, ]host, port, [af])
 	(in which case `host` and `port` args are ignored). The `backlog` defaults
 	to `1/0` which means "use the maximum allowed".
 
-tcp:accept([expires]) -> ctcp | nil,err,[retry]
+tcp:[try_]accept() -> ctcp | nil,err,[retry]
 
 	Accept a client connection. The connection socket has additional fields:
 	`remote_addr`, `remote_port`, `local_addr`, `local_port`.
@@ -208,12 +210,12 @@ tcp:accept([expires]) -> ctcp | nil,err,[retry]
 	A third return value indicates that the error is a network error and thus
 	the call be retried.
 
-tcp:recvn(buf, len, [expires]) -> buf, len
+tcp:[try_]recvn(buf, len) -> true
 
 	Repeat recv until `len` bytes are received.
 	Partial reads are signaled with `nil, err, readlen`.
 
-tcp:recvall() -> buf,len | nil,err,buf,len
+tcp:[try_]recvall() -> buf,len | nil,err,buf,len
 
 	Receive until closed into an accumulating buffer. If an error occurs
 	before the socket is closed, the partial buffer and length is returned after it.
@@ -223,17 +225,17 @@ tcp:recvall_read() -> read
 	Receive all data into a buffer and make a `read` function that consumes it.
 	Useful for APIs that require an input `read` function that cannot yield.
 
-udp:sendto(host, port, s|buf, [maxlen], [expires], [flags], [af]) -> len
+udp:[try_]sendto(host, port, s|buf, [maxlen], [flags], [af]) -> len
 
 	Send a datagram to a specific destination, regardless of whether the socket
 	is connected or not.
 
-udp:recvnext(buf, maxlen, [expires], [flags]) -> len, sa
+udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa
 
 	Receive the next incoming datagram, wherever it came from, along with the
 	source address. If the socket is connected, packets are still filtered though.
 
-tcp:shutdown(['r'|'w'|'rw'])
+tcp:[try_]shutdown(['r'|'w'|'rw'])
 
 	Shutdown the socket for receiving, sending or both (default). Does not block.
 
@@ -287,10 +289,9 @@ poll(timeout) -> true | false,'timeout'
 	Timeout is in seconds with anything beyond 2^31-1 taken as infinte
 	and defaults to infinite.
 
-start(timeout)
+start()
 
-	Start polling. Stops after the timeout expires and there's no more I/O
-	or `stop()` was called.
+	Start polling. Stops when no more I/O or `stop()` was called.
 
 stop()
 
@@ -371,10 +372,10 @@ function issocket(s)
 end
 
 --forward declarations
-local check, _poll, wait_io, create_socket, wrap_socket
+local check, _poll, wait_io, cancel_wait_io, create_socket, wrap_socket
 
 --NOTE: close() returns `false` on error but it should be ignored.
-function socket:close()
+function socket:try_close()
 	if not self.s then return true end
 	_sock_unregister(self)
 	if self.listen_socket then
@@ -394,9 +395,9 @@ function socket:closed()
 end
 
 function socket:onclose(fn)
-	local close = self.close
-	function self:close()
-		local ok, err = close(self)
+	local try_close = self.try_close
+	function self:try_close()
+		local ok, err = try_close(self)
 		fn()
 		if not ok then return false, err end
 		return true
@@ -535,7 +536,7 @@ do
 		end
 	end
 
-	function getaddrinfo(host, port, socket_type, family, protocol, flags)
+	function try_getaddrinfo(host, port, socket_type, family, protocol, flags)
 		if host == '*' then host = '0.0.0.0' end --all.
 		if istype(addrinfo_ct, host) then
 			return host, true --pass-through and return "not owned" flag
@@ -553,6 +554,9 @@ do
 		local ret = C.getaddrinfo(host, port and tostring(port), hints, addrs)
 		if ret ~= 0 then return getaddrinfo_error(ret) end
 		return gc(addrs[0], C.freeaddrinfo)
+	end
+	function getaddrinfo(...)
+		return assert(try_getaddrinfo(...))
 	end
 
 	local ai = {}
@@ -868,7 +872,7 @@ do
 
 	local FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000
 
-	local error_classes = {
+	local error_msgs = {
 		[10013] = 'access_denied', --WSAEACCES
 		[10048] = 'address_already_in_use', --WSAEADDRINUSE
 		[10053] = 'connection_aborted', --WSAECONNABORTED
@@ -882,14 +886,14 @@ do
 	function check(ret, err)
 		if ret then return ret end
 		local err = err or WSAGetLastError()
-		local msg = error_classes[err]
+		local msg = error_msgs[err]
 		if not msg then
 			buf = buf or new('char[?]', 256)
 			local sz = ffi.C.FormatMessageA(
 				FORMAT_MESSAGE_FROM_SYSTEM, nil, err, 0, buf, 256, nil)
 			msg = sz > 0 and str(buf, sz):gsub('[\r\n]+$', '') or 'Error '..err
 		end
-		return ret, msg
+		return ret, msg, err
 	end
 end
 
@@ -970,18 +974,15 @@ do
 		local flags = WSA_FLAG_OVERLAPPED
 
 		local s = C.WSASocketW(af, st, pr, nil, 0, flags)
-
-		if s == INVALID_SOCKET then
-			return check()
-		end
+		assert(check(s ~= INVALID_SOCKET))
 
 		local s = wrap_socket(class, s, st, af, pr)
 		live(s, socktype)
 
 		local ok, err = _sock_register(s)
 		if not ok then
-			s:close()
-			return nil, err
+			s:try_close()
+			error(err)
 		end
 
 		return s
@@ -1180,16 +1181,16 @@ do
 		return true
 	end
 
-	function tcp:connect(host, port, expires, addr_flags, ...)
+	function tcp:try_connect(host, port, addr_flags, ...)
 		log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
 		if not self.bound_addr then
 			--ConnectEx requires binding first.
-			local ok, err = self:bind(...)
-			if not ok then return nil, err end
+			local ok, err = self:try_bind(...)
+			if not ok then return false, err end
 		end
 		local ai, ext_ai = self:addr(host, port, addr_flags)
 		if not ai then return nil, ext_ai end
-		local o, job = overlapped(self, return_true, expires)
+		local o, job = overlapped(self, return_true, self.recv_expires)
 		local ok = ConnectEx(self.s, ai.addr, ai.addrlen, nil, 0, nil, o) == 1
 		local ok, err = check_pending(ok, job)
 		if not ok then
@@ -1203,7 +1204,7 @@ do
 		return true
 	end
 
-	function udp:connect(host, port, expires, addr_flags)
+	function udp:try_connect(host, port, addr_flags)
 		local ai, ext_ai = self:addr(host, port, addr_flags)
 		if not ai then return nil, ext_ai end
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
@@ -1212,6 +1213,13 @@ do
 		log('', 'sock', 'connected', '%-4s %s', self, ai:tostring())
 		return true
 	end
+
+	local WSAEACCES     = 10013
+	local WSAECONNRESET = 10054
+	local WSAENETDOWN   = 10050
+	local WSAEMFILE     = 10024
+	local WSAENOBUFS    = 10055
+	local WSATRY_AGAIN  = 11002
 
 	local accept_buf_ct = typeof[[
 		struct {
@@ -1223,16 +1231,23 @@ do
 	]]
 	local accept_buf = accept_buf_ct()
 	local sa_len = sizeof(accept_buf) / 2
-	function tcp:accept(expires)
+	function tcp:try_accept()
 		log('', 'sock', 'accept', '%-4s', self)
-		local s = assert(create_socket(tcp, 'tcp', self._af, self._pr))
+		local s = create_socket(tcp, 'tcp', self._af, self._pr)
 		live(s, 'wait-accept %s', self) --only shows in Windows.
-		local o, job = overlapped(self, return_true, expires)
+		local o, job = overlapped(self, return_true, self.recv_expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
-		local ok, err = check_pending(ok, job)
+		local ok, msg, err = check_pending(ok, job)
 		if not ok then
-			s:close()
-			return nil, err
+			s:try_close()
+			local retry =
+				   err == WSAEACCES
+				or err == WSAECONNRESET
+				or err == WSAENETDOWN
+				or err == WSAEMFILE
+				or err == WSAENOBUFS
+				or err == WSATRY_AGAIN
+			return nil, msg, retry
 		end
 		local ra = accept_buf.remote_addr:addr():tostring()
 		local rp = accept_buf.remote_addr:port()
@@ -1258,10 +1273,10 @@ do
 		return n
 	end
 
-	local function socket_send(self, buf, len, expires)
+	local function socket_send(self, buf, len)
 		wsabuf.buf = isstr(buf) and cast(u8p, buf) or buf
 		wsabuf.len = len
-		local o, job = overlapped(self, io_done, expires)
+		local o, job = overlapped(self, io_done, self.send_expires)
 		local ok = C.WSASend(self.s, wsabuf, 1, nil, 0, o, nil) == 0
 		local n, err = check_pending(ok, job)
 		if not n then return nil, err end
@@ -1269,23 +1284,23 @@ do
 		return n
 	end
 
-	function tcp:_send(buf, len, expires)
+	function udp:try_send(buf, len)
+		return socket_send(self, buf, len or #buf)
+	end
+
+	function tcp:_send(buf, len)
 		if not self.s then return nil, 'closed' end
 		len = len or #buf
 		if len == 0 then return 0 end --mask-out null-writes
-		return socket_send(self, buf, len, expires)
+		return socket_send(self, buf, len)
 	end
 
-	function udp:send(buf, len, expires)
-		return socket_send(self, buf, len or #buf, expires)
-	end
-
-	function socket:recv(buf, len, expires)
+	function socket:try_recv(buf, len)
 		if not self.s then return nil, 'closed' end
 		assert(len > 0)
 		wsabuf.buf = buf
 		wsabuf.len = len
-		local o, job = overlapped(self, io_done, expires)
+		local o, job = overlapped(self, io_done, self.recv_expires)
 		flagsbuf[0] = 0
 		local ok = C.WSARecv(self.s, wsabuf, 1, nil, flagsbuf, o, nil) == 0
 		local r, err = check_pending(ok, job)
@@ -1294,13 +1309,13 @@ do
 		return r
 	end
 
-	function udp:sendto(host, port, buf, len, expires, flags, addr_flags)
+	function udp:try_sendto(host, port, buf, len, flags, addr_flags)
 		len = len or #buf
 		local ai, ext_ai = self:addr(host, port, addr_flags)
 		if not ai then return nil, ext_ai end
 		wsabuf.buf = isstr(buf) and cast(u8p, buf) or buf
 		wsabuf.len = len
-		local o, job = overlapped(self, io_done, expires)
+		local o, job = overlapped(self, io_done, self.send_expires)
 		local ok = C.WSASendTo(self.s, wsabuf, 1, nil, flags or 0, ai.addr, ai.addrlen, o, nil) == 0
 		if not ext_ai then ai:free() end
 		local n, err = check_pending(ok, job)
@@ -1312,11 +1327,11 @@ do
 	local int_buf_ct = typeof'int[1]'
 	local sa_buf_len = sizeof(sockaddr_ct)
 
-	function udp:recvnext(buf, len, expires, flags)
+	function udp:try_recvnext(buf, len, flags)
 		assert(len > 0)
 		wsabuf.buf = buf
 		wsabuf.len = len
-		local o, job = overlapped(self, io_done, expires)
+		local o, job = overlapped(self, io_done, self.recv_expires)
 		flagsbuf[0] = flags or 0
 		if not job.sa then job.sa = sockaddr_ct() end
 		if not job.sa_len_buf then job.sa_len_buf = int_buf_ct() end
@@ -1329,16 +1344,16 @@ do
 		return n, job.sa
 	end
 
-	function _file_async_read(f, read_overlapped, buf, sz, expires)
-		local o, job = overlapped(f, io_done, expires)
+	function _file_async_read(f, read_overlapped, buf, sz)
+		local o, job = overlapped(f, io_done, f.recv_expires)
 		local ok = read_overlapped(f, o, buf, sz)
 		local n, err = check_pending(ok, job)
 		if not n then return nil, err end
 		return n
 	end
 
-	function _file_async_write(f, write_overlapped, buf, sz, expires)
-		local o, job = overlapped(f, io_done, expires)
+	function _file_async_write(f, write_overlapped, buf, sz)
+		local o, job = overlapped(f, io_done, f.send_expires)
 		local ok = write_overlapped(f, o, buf, sz)
 		local n, err = check_pending(ok, job)
 		if not n then return nil, err end
@@ -1375,37 +1390,23 @@ ssize_t write(int fd, const void *buf, size_t count);
 
 --error handling.
 
-local error_classes = {
-	[ 13] = 'access_denied', --EACCES
-	[ 98] = 'address_already_in_use', --EADDRINUSE
-	[103] = 'connection_aborted', --ECONNABORTED
-	[104] = 'connection_reset', --ECONNRESET
-	[111] = 'connection_refused', --ECONNREFUSED
-}
-
-cdef'char *strerror(int errnum);'
-function check(ret)
-	if ret then return ret end
-	local err = errno()
-	local msg = error_classes[err]
-	return ret, msg or str(C.strerror(err))
-end
+--[[local]] check = check_errno
 
 local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
 
 --[[local]] function create_socket(class, socktype, family, protocol)
 	local st, af, pr = socketargs(socktype, family or 'inet', protocol)
 	local s = C.socket(af, bor(st, SOCK_NONBLOCK), pr)
-	if s == -1 then
-		return check()
-	end
+	assert(check(s ~= -1))
 	local s = wrap_socket(class, s, st, af, pr)
 	live(s, socktype)
 	return s
 end
 
 function socket:_close()
-	return check(C.close(self.s) == 0)
+	local ok, err = check(C.close(self.s) == 0)
+	cancel_wait_io(self)
+	return ok, err
 end
 
 local EAGAIN      = 11
@@ -1454,7 +1455,7 @@ end
 end
 
 local function make_async(for_writing, returns_n, func, wait_errno)
-	return function(self, expires, ...)
+	return function(self, ...)
 		::again::
 		local ret = func(self, ...)
 		if ret >= 0 then
@@ -1469,14 +1470,12 @@ local function make_async(for_writing, returns_n, func, wait_errno)
 		end
 		if errno() == wait_errno then
 			if for_writing then
-				self.send_expires = expires
-				if expires then
+				if self.send_expires then
 					send_expires_heap:push(self)
 				end
 				self.send_thread = currentthread()
 			else
-				self.recv_expires = expires
-				if expires then
+				if self.recv_expires then
 					recv_expires_heap:push(self)
 				end
 				self.recv_thread = currentthread()
@@ -1495,18 +1494,18 @@ local _connect = make_async(true, false, function(self, ai)
 	return C.connect(self.s, ai.addr, ai.addrlen)
 end, EINPROGRESS)
 
-function socket:connect(host, port, expires, addr_flags, ...)
+function tcp:try_connect(host, port, addr_flags, ...)
 	log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
 	local ai, ext_ai = self:addr(host, port, addr_flags)
-	if not ai then return nil, ext_ai end
+	if not ai then return false, ext_ai end
 	if not self.bound_addr then
-		local ok, err = self:bind(...)
+		local ok, err = self:try_bind(...)
 		if not ok then
 			if not ext_ai then ai:free() end
 			return false, err
 		end
 	end
-	local len, err = _connect(self, expires, ai)
+	local len, err = _connect(self, ai)
 	if not len then
 		if not ext_ai then ai:free() end
 		return false, err
@@ -1517,6 +1516,7 @@ function socket:connect(host, port, expires, addr_flags, ...)
 	if not ext_ai then ai:free() end
 	return true
 end
+udp.try_connect = tcp.try_connect
 
 do
 	--see man accept(2); get error codes with `sh c/precompile errno.h`.
@@ -1535,12 +1535,13 @@ do
 
 	local tcp_accept = make_async(false, false, function(self)
 		nbuf[0] = accept_buf_size
-		return C.accept4(self.s, accept_buf, nbuf, SOCK_NONBLOCK)
+		local r = C.accept4(self.s, accept_buf, nbuf, SOCK_NONBLOCK)
+		return r
 	end, EWOULDBLOCK)
 
-	function tcp:accept(expires)
+	function tcp:try_accept()
 		log('', 'sock', 'accept', '%-4s', self)
-		local s, err, errno = tcp_accept(self, expires)
+		local s, err, errno = tcp_accept(self)
 		local retry =
 			   errno == ENETDOWN
 			or errno == EPROTO
@@ -1556,7 +1557,7 @@ do
 		local s = wrap_socket(tcp, s, self._st, self._af, self._pr)
 		local ok, err = _sock_register(s)
 		if not ok then
-			s:close()
+			s:try_close()
 			return nil, err
 		end
 		local ra = accept_buf:addr():tostring()
@@ -1565,7 +1566,7 @@ do
 		nbuf[0] = accept_buf_size
 		local ok, err = check(C.getsockname(s.s, accept_buf, nbuf) == 0)
 		if not ok then
-			s:close()
+			s:try_close()
 			return nil, err
 		end
 		local la = accept_buf:addr():tostring()
@@ -1589,36 +1590,36 @@ local socket_send = make_async(true, true, function(self, buf, len, flags)
 	return C.send(self.s, buf, len, flags or MSG_NOSIGNAL)
 end, EWOULDBLOCK)
 
-function tcp:_send(buf, len, expires, flags)
+function tcp:_send(buf, len, flags)
 	if not self.s then return nil, 'closed' end
 	len = len or #buf
 	if len == 0 then return 0 end --mask-out null-writes
-	return socket_send(self, expires, buf, len, flags)
+	return socket_send(self, buf, len, flags)
 end
 
-function udp:send(buf, len, expires, flags)
-	return socket_send(self, expires, buf, len or #buf, flags)
+function udp:try_send(buf, len, flags)
+	return socket_send(self, buf, len or #buf, flags)
 end
 
 local socket_recv = make_async(false, true, function(self, buf, len, flags)
 	return C.recv(self.s, buf, len, flags or 0)
 end, EWOULDBLOCK)
 
-function socket:recv(buf, len, expires, flags)
+function socket:try_recv(buf, len, flags)
 	if not self.s then return nil, 'closed' end
 	assert(len > 0)
-	return socket_recv(self, expires, buf, len, flags)
+	return socket_recv(self, buf, len, flags)
 end
 
 local udp_sendto = make_async(true, true, function(self, ai, buf, len, flags)
 	return C.sendto(self.s, buf, len, flags or 0, ai.addr, ai.addrlen)
 end, EWOULDBLOCK)
 
-function udp:sendto(host, port, buf, len, expires, flags, addr_flags)
+function udp:try_sendto(host, port, buf, len, flags, addr_flags)
 	len = len or #buf
 	local ai, ext_ai = self:addr(host, port, addr_flags)
 	if not ai then return nil, ext_ai end
-	local len, err = udp_sendto(self, expires, ai, buf, len, flags)
+	local len, err = udp_sendto(self, ai, buf, len, flags)
 	if not len then return nil, err end
 	if not ext_ai then ai:free() end
 	return len
@@ -1634,9 +1635,9 @@ do
 		return C.recvfrom(self.s, buf, len, flags or 0, src_buf, src_len_buf)
 	end, EWOULDBLOCK)
 
-	function udp:recvnext(buf, len, expires, flags)
+	function udp:try_recvnext(buf, len, flags)
 		assert(len > 0)
-		local len, err = udp_recvnext(self, expires, buf, len, flags)
+		local len, err = udp_recvnext(self, buf, len, flags)
 		if not len then return nil, err end
 		assert(src_len_buf[0] <= src_buf_len) --not truncated
 		return len, src_buf
@@ -1651,11 +1652,11 @@ local file_read = make_async(false, true, function(self, buf, len)
 	return tonumber(C.read(self.fd, buf, len))
 end, EAGAIN)
 
-function _file_async_write(f, buf, len, expires)
-	return file_write(f, expires, buf, len)
+function _file_async_write(f, buf, len)
+	return file_write(f, buf, len)
 end
-function _file_async_read(f, buf, len, expires)
-	return file_read(f, expires, buf, len)
+function _file_async_read(f, buf, len)
+	return file_read(f, buf, len)
 end
 
 --epoll ----------------------------------------------------------------------
@@ -1750,7 +1751,7 @@ do
 			socket.recv_thread = nil
 		end
 		if has_err then
-			local err = socket:getopt'error'
+			local err = socket:try_getopt'error'
 			coro_transfer(thread, nil, err or 'socket error')
 		else
 			coro_transfer(thread, true)
@@ -1846,11 +1847,12 @@ cdef[[
 int shutdown(SOCKET s, int how);
 ]]
 
-function tcp:shutdown(which)
+function tcp:try_shutdown(which)
+	if not self.s then return nil, 'closed' end
 	return check(C.shutdown(self.s,
 		   which == 'r' and 0
 		or which == 'w' and 1
-		or (not which or which == 'rw' and 2)))
+		or (not which or which == 'rw') and 2))
 end
 
 --bind() ---------------------------------------------------------------------
@@ -1859,7 +1861,7 @@ cdef[[
 int bind(SOCKET s, const sockaddr*, int namelen);
 ]]
 
-function socket:bind(host, port, addr_flags)
+function socket:try_bind(host, port, addr_flags)
 	assert(not self.bound_addr)
 	local ai, ext_ai = self:addr(host or '*', port or 0, addr_flags)
 	if not ai then return nil, ext_ai end
@@ -1889,7 +1891,7 @@ function tcp:try_listen(backlog, host, port, addr_flags)
 		backlog, host, port = 1/0, backlog, host
 	end
 	if not self.bound_addr then
-		local ok, err = self:bind(host, port, addr_flags)
+		local ok, err = self:try_bind(host, port, addr_flags)
 		if not ok then return nil, err end
 	end
 	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
@@ -1899,10 +1901,6 @@ function tcp:try_listen(backlog, host, port, addr_flags)
 	live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0 --live client connection count
 	return true
-end
-
-function tcp:listen(...)
-	assert(self:try_listen(...))
 end
 
 do --getopt() & setopt() -----------------------------------------------------
@@ -2158,16 +2156,16 @@ local function parse_opt(k)
 	return opt, level
 end
 
-function socket:getopt(k)
+function socket:try_getopt(k)
 	local opt, level = parse_opt(k)
 	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
 	local nbuf = i32a(1)
-	local ok, err = check(C.getsockopt(self.s, level, opt, buf.c, nbuf))
+	local ok, err = check(C.getsockopt(self.s, level, opt, buf.c, nbuf) == 0)
 	if not ok then return nil, err end
 	return get(buf, sz)
 end
 
-function socket:setopt(k, v)
+function socket:try_setopt(k, v)
 	local opt, level = parse_opt(k)
 	local set = assert(set_opt[k], 'read-only socket option')
 	local buf, sz = set(v)
@@ -2178,11 +2176,11 @@ end --do
 
 --tcp repeat I/O -------------------------------------------------------------
 
-function tcp:send(buf, sz, expires)
+function tcp:try_send(buf, sz)
 	sz = sz or #buf
 	local sz0 = sz
 	while true do
-		local len, err = self:_send(buf, sz, expires)
+		local len, err = self:_send(buf, sz)
 		if len == sz then
 			break
 		end
@@ -2199,10 +2197,10 @@ function tcp:send(buf, sz, expires)
 	return true
 end
 
-function tcp:recvn(buf, sz, expires)
+function tcp:try_recvn(buf, sz)
 	local buf0, sz0 = buf, sz
 	while sz > 0 do
-		local len, err = self:recv(buf, sz, expires)
+		local len, err = self:recv(buf, sz)
 		if not len then --short read
 			return nil, err, sz0 - sz
 		elseif len == 0 then --closed
@@ -2214,12 +2212,12 @@ function tcp:recvn(buf, sz, expires)
 	return buf0, sz0
 end
 
-function tcp:recvall(expires)
-	return readall(self.recv, self, expires)
+function tcp:try_recvall()
+	return readall(self.recv, self)
 end
 
-function tcp:recvall_read(expires)
-	return buffer_reader(self:recvall(expires))
+function tcp:recvall_read()
+	return buffer_reader(self:recvall())
 end
 
 --sleeping & timers ----------------------------------------------------------
@@ -2319,15 +2317,64 @@ end
 
 --hi-level APIs --------------------------------------------------------------
 
+function socket:setexpires(rw, expires)
+	if not isstr(rw) then rw, expires = nil, rw end
+	local r = rw == 'r' or not rw
+	local w = rw == 'w' or not rw
+	if r then self.recv_expires = expires end
+	if w then self.send_expires = expires end
+end
+function socket:settimeout(s, rw)
+	self:setexpires(s and clock() + s, rw)
+end
+
+socket.getopt  = unprotect_io(socket.try_getopt)
+socket.setopt  = unprotect_io(socket.try_setopt)
+socket.close   = unprotect_io(socket.try_close)
+socket.bind    = unprotect_io(socket.try_bind)
+socket.recv    = unprotect_io(socket.try_recv)
+tcp.connect    = unprotect_io(tcp.try_connect)
+tcp.listen     = unprotect_io(tcp.try_listen)
+tcp.recvn      = unprotect_io(tcp.try_recvn)
+tcp.recvall    = unprotect_io(tcp.try_recvall)
+tcp.send       = unprotect_io(tcp.try_send)
+tcp.shutdown   = unprotect_io(tcp.try_shutdown)
+udp.connect    = unprotect_io(udp.try_connect)
+udp.recvnext   = unprotect_io(udp.try_recvnext)
+udp.send       = unprotect_io(udp.try_send)
+udp.sendto     = unprotect_io(udp.try_sendto)
+
+function tcp:accept()
+	local s, err, retry = self:try_accept()
+	if s then return s end
+	self:check_io(retry, err)
+	return nil, err, true
+end
+
+--I/O API for protocol buffers.
+socket.try_read = socket.try_recv
+socket.read   = socket.recv
+tcp.try_readn = tcp.try_recvn
+tcp.try_write = tcp.try_send
+tcp.readn     = tcp.recvn
+tcp.write     = tcp.send
+
+function socket:pbuffer()
+	return pbuffer{f = self}
+end
+
 --[[local]] function wrap_socket(class, s, st, af, pr)
-	local s = {s = s, __index = class, _st = st, _af = af, _pr = pr, r = 0, w = 0}
+	local s = {s = s, __index = class,
+		check_io = check_io, checkp = checkp,
+		protect = protect,
+		_st = st, _af = af, _pr = pr, r = 0, w = 0}
 	setmetatable(s, s)
 	log('', 'sock', 'create', '%-4s', s)
 	return s
 end
-function _G.tcp       (...) return assert(create_socket(tcp, 'tcp', ...)) end
-function _G.udp       (...) return assert(create_socket(udp, 'udp', ...)) end
-function _G.rawsocket (...) return assert(create_socket(raw, 'raw', ...)) end
+function _G.tcp       (...) return create_socket(tcp, 'tcp', ...) end
+function _G.udp       (...) return create_socket(udp, 'udp', ...) end
+function _G.rawsocket (...) return create_socket(raw, 'raw', ...) end
 
 update(tcp, socket)
 update(udp, socket)
@@ -2337,29 +2384,30 @@ udp_class = udp
 tcp_class = tcp
 raw_class = raw
 
-function connect(host, port, expires)
-	local tcp = tcp()
-	local ok, err = tcp:connect(host, port, expires)
-	if not ok then tcp:close(); return nil, err end
-	return tcp
+local create_tcp = _G.tcp
+
+function try_connect(host, port, timeout)
+	local self = create_tcp()
+	self:settimeout(timeout)
+	local ok, err = self:try_connect(host, port)
+	if not ok then
+		self:try_close()
+		return nil, err
+	end
+	self:settimeout(nil)
+	return self
+end
+function connect(host, port, timeout)
+	local self = create_tcp()
+	self:settimeout(timeout)
+	return self:connect(host, port)
 end
 
-function listen(addr, port)
-	local tcp = tcp()
-	local ok, err = tcp:setopt('reuseaddr', true)
-	if not ok then tcp:close(); error(err) end
-	local ok, err = tcp:try_listen(addr, port)
-	if not ok then tcp:close(); error(err) end
-	return tcp
-end
-
---I/O API for protocol buffers.
-tcp.read = tcp.recv
-tcp.readn = tcp.recvn
-tcp.write = tcp.send
-
-function socket:buffer(protocol)
-	return protocol_buffer({f = self}, protocol)
+function listen(host, port)
+	local self = create_tcp()
+	self:setopt('reuseaddr', true)
+	self:listen(host, port)
+	return self
 end
 
 --coroutine-based scheduler --------------------------------------------------
@@ -2371,8 +2419,7 @@ local poll_thread
 local wait_count = 0
 local waiting = setmetatable({}, weak_keys) --{thread -> true}
 
-do
-local function cont(thread, ...)
+local function wait_io_cont(thread, ...)
 	wait_count = wait_count - 1
 	waiting[thread] = nil
 	return ...
@@ -2385,8 +2432,25 @@ end
 	if register ~= false then
 		waiting[thread] = true
 	end
-	return cont(thread, coro_transfer(poll_thread))
+	return wait_io_cont(thread, coro_transfer(poll_thread))
 end
+
+--closing a socket doesn't trigger an epoll event, instead the socket is
+--silently removed from the epoll list, thus we have to wake up any waiting
+--threads manually when the socket is closed from another thread.
+--[[local]] function cancel_wait_io(self)
+	local t = self.recv_thread
+	if t then
+		waiting[t] = nil
+		self.recv_thread = nil
+		resume(t, nil, 'closed')
+	end
+	local t = self.send_thread
+	if t then
+		waiting[t] = nil
+		self.send_thread = nil
+		resume(t, nil, 'closed')
+	end
 end
 
 function poll()
@@ -2575,98 +2639,3 @@ function run(f, ...)
 		return ret and unpack(ret)
 	end
 end
-
---[=[ TCP protocol error handling --------------------------------------------
-
-tcp_protocol_errors(protocol_name) -> check_io, checkp, check, protect
-check[p|_io](self, val, format, format_args...) -> val
-
-This is an error-handling discipline to use when writing TCP-based
-protocols. Instead of using standard `assert()` and `pcall()`, use `check()`,
-`checkp()` and `check_io()` to raise errors inside protocol methods and then
-wrap those methods in `protect()` to catch those errors and have the method
-return `nil, err` instead of raising for those types of errors.
-
-You should distinguish between multiple types of errors:
-
-- Invalid API usage, i.e. bugs on this side, which should raise (but shouldn't
-  happen in production). Use `assert()` for those.
-
-- Response validation errors, i.e. bugs on the other side which shouldn't
-  raise but they put the connection in an inconsistent state so the connection
-  must be closed. Use `checkp()` short of "check protocol" for those. Note that
-  if your protocol is not meant to work with a hostile or unstable peer, you
-  can skip the `checkp()` checks entirely because they won't guard against
-  anything and just bloat the code.
-
-- Request or response content validation errors, which can be user-corrected
-  so mustn't raise and mustn't close the connection. Use `check()` for those.
-
-- I/O errors, i.e. network failures which can be temporary and thus make the
-  request retriable (in a new connection, this one must be closed), so they
-  must be distinguishable from other types of errors. Use `check_io()` for
-  those. On the call side then check the error class for implementing retries.
-
-Following this protocol should easily cut your network code in half, increase
-its readability (no more error-handling noise) and its reliability (no more
-confusion about when to raise and when not to or forgetting to handle an error).
-
-Your connection object must have a `tcp` field with a tcp:close() method
-to be called by check_io() and checkp() (but not by check()) on failure.
-
-Note that protect() only catches errors raised by check*(), other Lua errors
-pass through and the connection isn't closed either.
-
-Note that the sock API does not currently distinguish usage errors from
-network errors, so calling eg. `check_io(self, self.tcp:connect())` will
-catch usage errors as network errors. This must be fixed in sock, eg. with
-a third return value `retry` indicating that the error is a network error,
-then we can make check_io() take that into account and call check()
-internally if `retry` is false.
-
-]=]
-
-local tcp_error = errortype'tcp'
-
-function tcp_error:init()
-	if self.tcp then
-		self.tcp:close()
-		self.tcp = nil
-	end
-end
-
-local function check_io(self, v, ...)
-	if v then return v, ... end
-	raise(tcp_error({
-		tcp = self and self.tcp,
-		addtraceback = self and self.tracebacks,
-	}, ...))
-end
-
-tcp_protocol_errors = memoize_multiret(function(protocol)
-
-	local protocol_error = errortype(protocol, nil, protocol .. ' protocol error')
-	local content_error  = errortype(nil, nil, protocol .. ' error')
-
-	protocol_error.init = tcp_error.init
-
-	local function checker(create_error)
-		return function(self, v, ...)
-			if v then return v, ... end
-			raise(create_error({
-				tcp = self and self.tcp,
-				addtraceback = self and self.tracebacks,
-			}, ...))
-		end
-	end
-	local checkp = checker(protocol_error)
-	local check  = checker(content_error)
-
-	local classes = {[tcp_error]=1, [protocol_error]=1, [content_error]=1}
-
-	local function protect_this(f, oncaught)
-		return protect(classes, f, oncaught)
-	end
-
-	return check_io, checkp, check, protect_this
-end)

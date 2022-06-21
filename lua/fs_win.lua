@@ -9,12 +9,11 @@ assert(win, 'platform not Windows')
 assert(package.loaded.fs)
 
 local
-	C, cast, bor, band, shl =
-	C, cast, bor, band, shl
+	C, cast, bor, band, shl, check_errno =
+	C, cast, bor, band, shl, check_errno
 
 local file = _fs_file
 local dir  = _fs_dir
-local check_errno = _fs_check_errno
 
 --types, consts, utils -------------------------------------------------------
 
@@ -408,10 +407,10 @@ function file.closed(f)
 	return f.handle == INVALID_HANDLE_VALUE
 end
 
-function file.close(f)
+function file.try_close(f)
 	if f:closed() then return true end
 	if f._read_async or f._write_async then
-		local sock = require'sock'
+		require'sock'
 		_sock_unregister(f)
 	end
 	local ok, err = checknz(C.CloseHandle(f.handle))
@@ -443,7 +442,7 @@ function file_wrap_handle(h, read_async, write_async, is_pipe_end, path)
 	live(f, path or '')
 
 	if read_async or write_async then
-		local sock = require'sock'
+		require'sock'
 		local ok, err = _sock_register(f)
 		if not ok then
 			f:close()
@@ -676,11 +675,11 @@ local function mask_eof(ret, err)
 	if err == 'eof' then return 0 end --pipes do that
 	return nil, err
 end
-function file.read(f, buf, sz, expires)
+function file.try_read(f, buf, sz)
 	if sz == 0 then return 0 end --masked for compat.
 	if f._read_async then
-		local sock = require'sock'
-		return mask_eof(_file_async_read(f, read_overlapped, buf, sz, expires))
+		require'sock'
+		return mask_eof(_file_async_read(f, read_overlapped, buf, sz))
 	else
 		local ok, err = mask_eof(checknz(C.ReadFile(f.handle, buf, sz, dwbuf, nil)))
 		if not ok then return nil, err end
@@ -690,10 +689,10 @@ function file.read(f, buf, sz, expires)
 	end
 end
 
-function file._write(f, buf, sz, expires)
+function file._write(f, buf, sz)
 	if f._write_async then
-		local sock = require'sock'
-		return _file_async_write(f, write_overlapped, buf, sz, expires)
+		require'sock'
+		return _file_async_write(f, write_overlapped, buf, sz)
 	else
 		local ok, err = checknz(C.WriteFile(f.handle, buf, sz or #buf, dwbuf, nil))
 		if not ok then return nil, err end
@@ -703,7 +702,7 @@ function file._write(f, buf, sz, expires)
 	end
 end
 
-function file.flush(f)
+function file.try_flush(f)
 	return checknz(C.FlushFileBuffers(f.handle))
 end
 
@@ -725,7 +724,7 @@ cdef'BOOL SetEndOfFile(HANDLE hFile);'
 --until the first write call _that requires it_. This is a good optimization
 --since usually the file will be written sequentially after the truncation
 --in which case those extra zero bytes will never get a chance to be written.
-function file.truncate(f, size)
+function file.try_truncate(f, size)
 	local pos, err = f:seek('set', size)
 	if not pos then return nil, err end
 	return checknz(C.SetEndOfFile(f.handle))
@@ -1379,7 +1378,7 @@ function dir.next(dir)
 	end
 end
 
-function fs_dir(path, skip_dot_dirs)
+function _ls(path, skip_dot_dirs)
 	assert(not path:find'[%*%?]') --no globbing allowed
 	local dir = dir_ct(#path)
 	dir._dirlen = #path
@@ -1504,14 +1503,14 @@ local FILE_MAP_WRITE   = 0x0002
 local FILE_MAP_READ    = 0x0004
 local FILE_MAP_EXECUTE = 0x0020
 
-function fs_map(file, access, size, offset, addr, tagname)
+function _mmap(file, access, size, offset, addr, tagname)
 
 	local write, exec, copy = parse_access(access or '')
 
 	--open the file, if any.
 
 	local function exit(err)
-		if file then file:close() end
+		if file then file:try_close() end
 		return nil, err
 	end
 
@@ -1583,7 +1582,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 		local ok, err = checknz(C.FlushViewOfFile(addr, sz or self.size))
 		if not ok then return false, err end
 		if not async and file then
-			local ok, err = file:flush()
+			local ok, err = file:try_flush()
 			if not ok then return false, err end
 		end
 		return true
@@ -1592,7 +1591,7 @@ function fs_map(file, access, size, offset, addr, tagname)
 	--if size wasn't given, get the file size so that the user always knows
 	--the actual size of the mapped memory.
 	if not size then
-		local filesize, err = file:attr'size'
+		local filesize, err = file:try_attr'size'
 		if not filesize then return nil, err end
 		size = filesize - offset
 	end

@@ -218,8 +218,7 @@ end
 
 function client:connect_now(target)
 	local host, port, client_ip = target()
-	local tcp, err = tcp()
-	if not tcp then return nil, err end
+	local tcp = tcp()
 	if client_ip then
 		local ok, err = tcp:bind(client_ip)
 		if not ok then return nil, err end
@@ -227,7 +226,7 @@ function client:connect_now(target)
 	self:inc_conn_count(target)
 	local dt = target.connect_timeout
 	local expires = dt and clock() + dt or nil
-	local ip, err = resolve(host)
+	local ip, err = try_resolve(host)
 	if not ip then
 		return nil, 'lookup failed for "'..host..'": '..tostring(err)
 	end
@@ -256,7 +255,7 @@ function client:connect_now(target)
 		end
 		tcp = stcp
 	end
-	target.http_args.tcp = tcp
+	target.http_args.f = tcp
 	local http = http(target.http_args)
 	self:dp(target, ' BIND', '%s %s', tcp, http)
 	return http
@@ -538,7 +537,7 @@ function client:getpage(arg1, upload, receive_content)
 	receive_content = receive_content or opt.receive_content
 
 	local headers = {}
-	if not isstr(upload) then
+	if upload ~= nil and not isstr(upload) then
 		upload = json_encode(upload)
 		headers['content-type'] = 'application/json'
 	end
@@ -549,7 +548,7 @@ function client:getpage(arg1, upload, receive_content)
 	local opt = update({
 		host = u and u.host,
 		uri = u and u.path,
-		https = u and u.scheme or opt.https ~= false,
+		https = u and u.scheme == 'https' or not u and opt.https ~= false,
 		method = upload and 'POST',
 		content = upload,
 		receive_content = receive_content or 'string',
@@ -561,7 +560,6 @@ function client:getpage(arg1, upload, receive_content)
 	if not res then
 		return nil, err, req
 	end
-
 	local ct = res.headers['content-type']
 	if ct and ct.media_type == 'application/json' then
 		res.rawcontent = res.content

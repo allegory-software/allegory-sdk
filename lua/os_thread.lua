@@ -116,7 +116,7 @@ require'luastate'
 --objects that implement the shareable interface can be shared
 --between Lua states when passing args in and out of Lua states.
 
-local typemap = {} --{ctype_name = {identify=f, decode=f, encode=f}}
+local typemap = {} --{ctype_name = {identify=f, deserialize=f, serialize=f}}
 
 --shareable pointers
 local function pointer_class(in_ctype, out_ctype)
@@ -124,11 +124,11 @@ local function pointer_class(in_ctype, out_ctype)
 	function class.identify(p)
 		return istype(in_ctype, p)
 	end
-	function class.encode(p)
-		return {addr = ptr_encode(p)}
+	function class.serialize(p)
+		return {addr = ptr_serialize(p)}
 	end
-	function class.decode(t)
-		return ptr_decode(out_ctype or in_ctype, t.addr)
+	function class.deserialize(t)
+		return ptr_deserialize(out_ctype or in_ctype, t.addr)
 	end
 	return class
 end
@@ -148,41 +148,41 @@ shared_pointer('pthread_mutex_t'  , 'pthread_mutex_t*')
 shared_pointer('pthread_rwlock_t' , 'pthread_rwlock_t*')
 shared_pointer('pthread_cond_t'   , 'pthread_cond_t*')
 
---identify a shareable object and encode it.
-local function encode_shareable(x)
+--identify a shareable object and serialize it.
+local function serialize_shareable(x)
 	for typename, class in pairs(typemap) do
 		if class.identify(x) then
-			local t = class.encode(x)
-			t.type = typename
+			local t = class.serialize(x)
+			t.serialize_type = typename
 			return t
 		end
 	end
 end
 
---decode an encoded shareable object
-local function decode_shareable(t)
-	return typemap[t.type].decode(t)
+--deserialize a serialized shareable object
+local function deserialize_shareable(t)
+	return typemap[t.serialize_type].deserialize(t)
 end
 
---encode all shareable objects in a packed list of args
-function _os_thread_encode_args(t)
+--serialize all shareable objects in a packed list of args
+function _os_thread_serialize_args(t)
 	t.shared = {} --{i1,...}
 	for i=1,t.n do
-		local e = encode_shareable(t[i])
+		local e = serialize_shareable(t[i])
 		if e then
 			t[i] = e
-			--put the indices of encoded objects aside for identification
-			--and easy traversal when decoding
+			--put the indices of serialized objects aside for identification
+			--and easy traversal when deserializing.
 			add(t.shared, i)
 		end
 	end
 	return t
 end
 
---decode all encoded shareable objects in a packed list of args
-function _os_thread_decode_args(t)
+--deserialize all serialized shareable objects in a packed list of args
+function _os_thread_deserialize_args(t)
 	for _,i in ipairs(t.shared) do
-		t[i] = decode_shareable(t[i])
+		t[i] = deserialize_shareable(t[i])
 	end
 	return t
 end
@@ -373,26 +373,26 @@ end
 
 --queues / shareable interface
 
-function queue:identify()
-	return getmetatable(self) == queue
+function queue.identify(q)
+	return getmetatable(q) == queue
 end
 
-function queue:encode()
+function queue:serialize()
 	return {
-		state_addr          = ptr_encode(self.state),
-		mutex_addr          = ptr_encode(self.mutex),
-		cond_not_full_addr  = ptr_encode(self.cond_not_full),
-		cond_not_empty_addr = ptr_encode(self.cond_not_empty),
+		state_addr          = ptr_serialize(self.state),
+		mutex_addr          = ptr_serialize(self.mutex),
+		cond_not_full_addr  = ptr_serialize(self.cond_not_full),
+		cond_not_empty_addr = ptr_serialize(self.cond_not_empty),
 		maxlen              = self.maxlen,
 	}
 end
 
-function queue.decode(t)
+function queue.deserialize(t)
 	return setmetatable({
-		state          = ptr_decode('lua_State*',       t.state_addr),
-		mutex          = ptr_decode('pthread_mutex_t*', t.mutex_addr),
-		cond_not_full  = ptr_decode('pthread_cond_t*',  t.cond_not_full_addr),
-		cond_not_empty = ptr_decode('pthread_cond_t*',  t.cond_not_empty_addr),
+		state          = ptr_deserialize('lua_State*',       t.state_addr),
+		mutex          = ptr_deserialize('pthread_mutex_t*', t.mutex_addr),
+		cond_not_full  = ptr_deserialize('pthread_cond_t*',  t.cond_not_full_addr),
+		cond_not_empty = ptr_deserialize('pthread_cond_t*',  t.cond_not_empty_addr),
 		maxlen         = t.maxlen,
 	}, queue)
 end
@@ -421,25 +421,23 @@ function os_thread(func, ...)
 		require'pthread'
 		require'luastate'
 		require'os_thread'
-	   local cast = cast
-	   local addr = addr
 
 		local function pass(ok, ...)
-			local retvals = ok and _os_thread_encode_args(pack(...)) or {err = ...}
+			local retvals = _os_thread_serialize_args(pack(ok, ...))
 			rawset(_G, '__ret', retvals) --is this the only way to get them out?
 		end
 	   local function worker()
-	   	local t = _os_thread_decode_args(args)
+	   	local t = _os_thread_deserialize_args(args)
 	   	pass(pcall(func, unpack(t)))
 	   end
 
 		--worker_cb is anchored by luajit along with the function it frames.
 	   local worker_cb = cast('void *(*)(void *)', worker)
-	   return ptr_encode(worker_cb)
+	   return ptr_serialize(worker_cb)
 	end)
 	local args = pack(...)
-	local encoded_args = _os_thread_encode_args(args)
-	local worker_cb_ptr = ptr_decode(state:call(func, encoded_args))
+	local serialized_args = _os_thread_serialize_args(args)
+	local worker_cb_ptr = ptr_deserialize(state:call(func, serialized_args))
 	local pthread = pthread(worker_cb_ptr)
 
 	return setmetatable({
@@ -456,30 +454,31 @@ function thread:join()
 	self.state:getglobal'__ret'
 	local retvals = self.state:get()
 	self.state:close()
-	--propagate the error
-	if retvals.err then
-		error(retvals.err, 2)
+	--propagate the error.
+	retvals = _os_thread_deserialize_args(retvals)
+	if not retvals[1] then
+		error(retvals[2], 2)
 	end
-	return unpack(_os_thread_decode_args(retvals))
+	return unpack(retvals, 2)
 end
 
 --threads / shareable interface
 
-function thread:identify()
-	return getmetatable(self) == thread
+function thread.identify(t)
+	return getmetatable(t) == thread
 end
 
-function thread:encode()
+function thread:serialize()
 	return {
-		pthread_addr = ptr_encode(self.pthread),
-		state_addr   = ptr_encode(self.state),
+		pthread_addr = ptr_serialize(self.pthread),
+		state_addr   = ptr_serialize(self.state),
 	}
 end
 
-function thread.decode(t)
+function thread.deserialize(t)
 	return setmetatable({
-		pthread = ptr_decode('pthread_t*', t.thread_addr),
-		state   = ptr_decode('lua_State*', t.state_addr),
+		pthread = ptr_deserialize('pthread_t*', t.thread_addr),
+		state   = ptr_deserialize('lua_State*', t.state_addr),
 	}, thread)
 end
 
@@ -521,3 +520,6 @@ function pool:push(task, timeout)
 	return self.queue:push(task, timeout)
 end
 
+--passing structured errors out of threads -----------------------------------
+
+shared_object('error', Error)

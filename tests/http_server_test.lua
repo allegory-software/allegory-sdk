@@ -1,17 +1,19 @@
+--go@ plink d10 -t -batch sdk/bin/linux/luajit sdk/tests/http_server_test.lua
 require'glue'
 require'http_server'
 logging.debug = true
+local zero6 = Linux
 
 local server = http_server{
 	listen = {
 		{
 			host = 'localhost',
-			addr = '127.0.0.1',
+			addr = zero6 and '10.0.0.6' or '127.0.0.1',
 			port = 80,
 		},
 		{
 			host = 'localhost',
-			addr = '127.0.0.1',
+			addr = zero6 and '10.0.0.6' or '127.0.0.1',
 			port = 443,
 			tls = true,
 			tls_options = {

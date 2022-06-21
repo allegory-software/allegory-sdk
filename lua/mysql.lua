@@ -113,8 +113,6 @@ local
 	band, xor, bor, shl, shr, u8a, copy, dynarray =
 	band, xor, bor, shl, shr, u8a, copy, dynarray
 
-local check_io, checkp, _, protect = tcp_protocol_errors'mysql'
-
 local COM_QUIT         = 0x01
 local COM_QUERY        = 0x03
 local COM_STMT_PREPARE = 0x16
@@ -886,22 +884,18 @@ local function send_packet(self, send_buf)
 	local buf = send_buffer(4)
 	set_u24(buf, send_len)
 	set_u8(buf, band(self.packet_no, 0xff))
-	check_io(self, self.tcp:send(buf(0)))
-	check_io(self, self.tcp:send(send_buf, send_len))
+	self.f:send(buf(0))
+	self.f:send(send_buf, send_len)
 end
 
 local function recv(self, sz)
-	local buf = self.buf
-	if not buf then
-		buf = buffer'uint8_t[?]'
-		self.buf = buf
-	end
-	local buf = buf(sz)
-	check_io(self, self.tcp:recvn(buf, sz))
+	local buf = self.buf(sz)
+	local f, checkp = self.f, self.f.checkp
+	f:recvn(buf, sz)
 	local i = 0
 	return function(n, err)
 		n = n or sz-i
-		checkp(self, i + n <= sz, err or 'short read')
+		checkp(f, i + n <= sz, err or 'short read')
 		i = i + n
 		return buf, i-n, n
 	end
@@ -910,8 +904,8 @@ end
 local function recv_packet(self)
 	local buf = recv(self, 4) --packet header
 	local len = get_u24(buf)
-	checkp(self, len > 0, 'empty packet')
-	checkp(self, len <= self.max_packet_size, 'packet too big')
+	self.f:checkp(len > 0, 'empty packet')
+	self.f:checkp(len <= self.max_packet_size, 'packet too big')
 	self.packet_no = get_u8(buf)
 	local buf = recv(self, len)
 	local field_count = get_u8(buf)
@@ -1047,7 +1041,7 @@ local function recv_field_packets(self, field_count, field_attrs, opt)
 	to_lua = to_lua or self.to_lua
 	for i = 1, field_count do
 		local typ, buf = recv_packet(self)
-		checkp(self, typ == 'DATA', 'bad packet type')
+		self.f:checkp(typ == 'DATA', 'bad packet type')
 		local field = get_field_packet(buf)
 		field.mysql_to_lua = to_lua or (field.type == 'number' and tonum or nil)
 		field.index = i
@@ -1056,7 +1050,7 @@ local function recv_field_packets(self, field_count, field_attrs, opt)
 	end
 	if field_count > 0 then
 		local typ, buf = recv_packet(self)
-		checkp(self, typ == 'EOF', 'bad packet type')
+		self.f:checkp(typ == 'EOF', 'bad packet type')
 		get_eof_packet(buf)
 	end
 	if isfunc(field_attrs) then
@@ -1096,9 +1090,9 @@ function mysql_connect(opt)
 	log('note', 'mysql', 'connect', '%s:%s user=%s db=%s',
 		host, port, opt.user or '', opt.db or '')
 
-	local tcp = tcp()
-
-	local self = setmetatable({tcp = tcp, host = host, port = port, tracebacks = opt.tracebacks}, conn_mt)
+	local f = tcp()
+	f.tracebacks = opt.tracebacks
+	local self = setmetatable({f = f, host = host, port = port}, conn_mt)
 
 	self.max_packet_size = opt.max_packet_size or 16 * 1024 * 1024 --16 MB
 	local ok, err
@@ -1117,7 +1111,9 @@ function mysql_connect(opt)
 	end
 	assert(self.collation, 'charset or collation required')
 
-	check_io(self, tcp:connect(host, port))
+	f:connect(host, port)
+
+	self.buf = buffer(u8a)
 
 	local typ, buf = recv_packet(self)
 	if typ == 'ERR' then
@@ -1141,13 +1137,13 @@ function mysql_connect(opt)
 	local use_ssl = opt.ssl or ssl_verify
 	local buf = send_buffer(64)
 	if use_ssl then
-		checkp(self, band(capabilities, CLIENT_SSL) ~= 0, 'no_ssl')
+		self.f:checkp(band(capabilities, CLIENT_SSL) ~= 0, 'no_ssl')
 		set_u32(buf, bor(client_flags, CLIENT_SSL))
 		set_u32(buf, self.max_packet_size)
 		set_u8(buf, collation)
 		buf(23)
 		send_packet(self, buf)
-		check_io(self, self.tcp:sslhandshake(false, nil, ssl_verify))
+		error'NYI'
 	end
 	set_u32(buf, client_flags)
 	set_u32(buf, self.max_packet_size)
@@ -1164,7 +1160,7 @@ function mysql_connect(opt)
 	elseif typ == 'EOF' then
 		return nil, 'old pre-4.1 authentication protocol not supported'
 	end
-	checkp(self, typ == 'OK', 'bad packet type')
+	self.f:checkp(typ == 'OK', 'bad packet type')
 
 	self.to_lua = mysql_to_lua
 	self.state = 'ready'
@@ -1173,26 +1169,26 @@ function mysql_connect(opt)
 	self.db = opt.db
 	self.user = opt.user
 
-	liveadd(tcp, 'mysql user=%s db=%s %s', opt.user or '', opt.db or '',
+	liveadd(f, 'mysql user=%s db=%s %s', opt.user or '', opt.db or '',
 		currentthread())
 
 	return self
 end
-try_mysql_connect = protect(mysql_connect)
+try_mysql_connect = protect_io(mysql_connect)
 
 function conn:close()
 	if self.state then
 		log('note', 'mysql', 'close', '%s:%s', self.host, self.port)
+		self.state = nil
+		self.sql = nil
 		local buf = send_buffer(1)
 		set_u8(buf, COM_QUIT)
 		send_packet(self, buf)
-		check_io(self, self.tcp:close())
-		self.state = nil
-		self.sql = nil
+		self.f:close()
 	end
 	return true
 end
-conn.try_close = protect(conn.close)
+conn.try_close = protect_io(conn.close)
 
 function conn:closed()
 	return not self.state
@@ -1213,7 +1209,7 @@ function conn.send_query(self, sql, quiet)
 	self.sql = sql
 	return true
 end
-conn.try_send_query = protect(conn.send_query)
+conn.try_send_query = protect_io(conn.send_query)
 
 function conn.read_result(self, opt)
 	assert(self.state == 'read' or self.state == 'read_binary')
@@ -1241,7 +1237,7 @@ function conn.read_result(self, opt)
 			return res
 		end
 	end
-	checkp(self, typ == 'DATA', 'bad packet type')
+	self.f:checkp(typ == 'DATA', 'bad packet type')
 
 	local field_count = get_uint(buf)
 	local extra = buf_len(buf) > 0 and get_uint(buf) or nil --not used.
@@ -1277,7 +1273,7 @@ function conn.read_result(self, opt)
 		local row = not to_array and {} or nil
 
 		if self.state == 'read_binary' then
-			checkp(get_u8(buf) == 0, 'invalid row packet')
+			self.f:checkp(get_u8(buf) == 0, 'invalid row packet')
 			local nulls_len = floor((#cols + 7 + 2) / 8)
 			local nulls, nulls_offset = buf(nulls_len)
 			for i, col in ipairs(cols) do
@@ -1307,7 +1303,7 @@ function conn.read_result(self, opt)
 					elseif bt == 'time' then
 						v = get_time(buf, time_format)
 					else
-						checkp(self, false, 'unsupported param type %s', bt)
+						self.f:checkp(false, 'unsupported param type %s', bt)
 					end
 					local to_lua = col.mysql_to_lua
 					if to_lua then
@@ -1353,7 +1349,7 @@ function conn.read_result(self, opt)
 	self.sql = nil
 	return rows, nil, cols
 end
-conn.try_read_result = protect(conn.read_result)
+conn.try_read_result = protect_io(conn.read_result)
 
 function conn.query(self, sql, opt)
 	if opt and opt.dry then
@@ -1412,7 +1408,7 @@ function conn:prepare(query, opt)
 	if typ == 'ERR' then
 		return nil, get_err_packet(buf)
 	end
-	checkp(self, typ == 'OK', 'bad packet type')
+	self.f:checkp(typ == 'OK', 'bad packet type')
 	buf(1) --status: OK
 	local stmt = update({conn = self}, stmt)
 	stmt.id            = get_u32(buf)
@@ -1425,7 +1421,7 @@ function conn:prepare(query, opt)
 	stmt.cursor = assert(cursor_types[opt and opt.cursor or 'none'])
 	return stmt
 end
-conn.try_prepare = protect(conn.prepare)
+conn.try_prepare = protect_io(conn.prepare)
 
 function stmt:free()
 	local self, stmt = self.conn, self
@@ -1436,7 +1432,7 @@ function stmt:free()
 	set_u32(buf, stmt.id)
 	return true
 end
-stmt.try_free = protect(stmt.free)
+stmt.try_free = protect_io(stmt.free)
 
 function stmt:exec(...)
 	local self, stmt = self.conn, self
@@ -1510,7 +1506,7 @@ function stmt:exec(...)
 				elseif bt == 'time' then
 					set_time(buf, val)
 				else
-					checkp(self, false, 'unsupported param type %s', bt)
+					self.f:checkp(false, 'unsupported param type %s', bt)
 				end
 			end
 		end
@@ -1520,7 +1516,7 @@ function stmt:exec(...)
 	self.state = 'read_binary'
 	return true
 end
-stmt.try_exec = protect(stmt.exec)
+stmt.try_exec = protect_io(stmt.exec)
 
 local function cont(self, opt, ok, ...)
 	if not ok then return nil, ... end

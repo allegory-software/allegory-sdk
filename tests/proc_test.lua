@@ -33,9 +33,16 @@ function test.env()
 	assert(t.Zz == '321')
 end
 
-function test.exec_luafile()
-	local p = exec_luafile('test.lua')
-	p:forget()
+function test.exec_lua()
+	local p = exec_lua[[
+		print'hello from subprocess'
+		os.exit(123)
+	]]
+	run(function()
+		p:wait()
+		assert(p:exit_code() == 123)
+		p:forget()
+	end)
 end
 
 function test.kill()
@@ -45,16 +52,17 @@ function test.kill()
 		{luajit, '-e', 'local n=.12; for i=1,1000000000 do n=n*0.5321 end; print(n); os.exit(123)'},
 		--{'-e', 'print(os.getenv\'XX\', require\'fs\'.cd()); os.exit(123)'},
 		{XX = 55},
-		'bin'
+		exedir()
 	)
 	if not p then print(err, errno) end
 	assert(p)
-	print('pid:', p.id)
+	print('pid:', p.pid)
 	print'sleeping'
 	sleep(.5)
 	print'killing'
 	assert(p:kill())
-	assert(p:kill())
+	sleep(.5)
+	assert(select(2, p:kill()) == 'killed')
 	sleep(.5)
 	print('exit code', p:exit_code())
 	print('exit code', p:exit_code())
@@ -97,7 +105,7 @@ os.exit(123)
 
 	run(function()
 
-		local p = assert(exec_luafile({
+		local p = assert(exec_lua_file({
 			script = 'proc_test_pipe.lua',
 			stdin = true,
 			stdout = true,
@@ -199,4 +207,6 @@ end
 --test.esc()
 --test.pipe()
 --test.autokill()
+--test.kill()
+--test.exec_lua()
 test_all()

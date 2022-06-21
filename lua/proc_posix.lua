@@ -44,26 +44,9 @@ local EAGAIN = 11
 local EINTR  = 4
 local ERANGE = 34
 
-local error_classes = {
-	[ 1] = 'access_denied', --EPERM (need root)
-	[ 2] = 'not_found', --ENOENT
-	[13] = 'access_denied', --EACCES (file perms)
-}
-
 local C = C
 
 local u8pa = typeof'char*[?]'
-
-local function check(ret, errno)
-	if ret then return ret end
-	if isstr(errno) then return nil, errno end
-	errno = errno or errno()
-	local s = error_classes[errno]
-	if s then return nil, s end
-	local s = C.strerror(errno)
-	local s = str(s) or 'Error '..errno
-	return nil, s
-end
 
 function env(k, v)
 	if k then
@@ -95,7 +78,7 @@ local function getcwd()
 	while true do
 		if C.getcwd(buf, sz) == nil then
 			if errno() ~= ERANGE then
-				return check()
+				return check_errno()
 			else
 				sz = sz * 2
 				buf = u8a(sz)
@@ -197,12 +180,10 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	local out_rf, out_wf
 	local err_rf, err_wf
 
-	local check_ = check
-
 	local function check(ret, err)
 
 		if ret then return ret end
-		local ret, err = check_(ret, err)
+		local ret, err = check_errno(ret, err)
 
 		if self.stdin then
 			assert(inp_rf:close())
@@ -217,8 +198,8 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 			assert(err_wf:close())
 		end
 
-		if errno_r_fd then assert(check_(close_fd(errno_r_fd))) end
-		if errno_w_fd then assert(check_(close_fd(errno_w_fd))) end
+		if errno_r_fd then assert(check_errno(close_fd(errno_r_fd))) end
+		if errno_w_fd then assert(check_errno(close_fd(errno_w_fd))) end
 
 		return ret, err
 	end
@@ -367,8 +348,10 @@ end
 function proc:kill()
 	if not self.pid then
 		return nil, 'forgotten'
+	elseif self:status() == 'killed' then
+		return nil, 'killed'
 	end
-	return check(C.kill(self.pid, SIGKILL) ~= 0)
+	return check_errno(C.kill(self.pid, SIGKILL) == 0)
 end
 
 function proc:exit_code()
@@ -383,7 +366,7 @@ function proc:exit_code()
 	local status = u32a(1)
 	local pid = C.waitpid(self.pid, status, WNOHANG)
 	if pid < 0 then
-		return check()
+		return check_errno()
 	end
 	if pid == 0 then
 		return nil, 'active'

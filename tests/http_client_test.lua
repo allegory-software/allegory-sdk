@@ -2,7 +2,7 @@ require'glue'
 require'http_client'
 logging.verbose = true
 --logging.debug = true
---config('getpage_debug', 'protocol')
+--config('getpage_debug', 'protocol stream')
 logging.filter.tls = true
 config('ca_file', exedir()..'/../../tests/cacert.pem')
 
@@ -20,10 +20,10 @@ function test_getpage(url, n)
 	local b = 0
 	for i=1,n do
 		resume(thread(function()
-			local s, err = getpage(url)
+			local s, err = getpage{url = url}
 			b = b + (s and #s or 0)
 			say('%-10s %s', s and kbytes(#s) or err, url)
-		end))
+		end, 'P'..i))
 	end
 	local t0 = clock()
 	start()
@@ -32,4 +32,4 @@ function test_getpage(url, n)
 end
 
 --test_update_ca_file()
-test_getpage('https://luapower.com/', 10)
+test_getpage('http://luapower.com/', 1)

@@ -72,6 +72,7 @@ scripts for new libraries.
   * [lpeglabel](c/lpeglabel/lpeglabel.md) - PEG (Parsing Expression Grammars) parser with labels
   * [daemon](lua/daemon.lua)           - Scaffold/boilerplate for writing server apps
   * [cmdline](lua/cmdline.lua)         - Command-line arg processing
+  * [pbuffer](lua/pbuffer.lua)         - Dynamic binary buffer for decoding and encoding
 * __Platform APIs__
   * [fs](lua/fs.lua)                   - Filesystems, pipes, memory mapping
   * [proc](lua/proc.lua)               - Async process execution with I/O redirection
@@ -87,7 +88,6 @@ scripts for new libraries.
 * __Networking__
   * [sock](lua/sock.lua)               - Sockets & async scheduler for sockets & pipes
   * [sock_libtls](lua/sock_libtls.lua) - TLS-encrypted async TCP sockets
-  * [linebuffer](lua/linebuffer.lua)   - Line buffer for text-based network protocols
   * [connpool](lua/connpool.lua)       - Connection pools
   * [resolver](lua/resolver.lua)       - Async DNS resolver
   * [http_client](lua/http_client.lua) - Async HTTP(s) 1.1 client for high-volume web scraping

@@ -28,16 +28,16 @@ STDIO STREAMS
 MEMORY STREAMS
 	open_buffer(buf, [size], [mode]) -> f         create a memory stream
 FILE I/O
-	f:read(buf, len) -> readlen                   read data from file
-	f:readn(buf, n) -> true                       read exactly n bytes
-	f:readall([expires], [ignore_file_size]) -> buf, len    read until EOF into a buffer
-	f:write(s | buf,len) -> true                  write data to file
-	f:flush()                                     flush buffers
-	f:seek([whence] [, offset]) -> pos            get/set the file pointer
-	f:truncate([opt])                             truncate file to current file pointer
+	f:[try_]read(buf, len) -> readlen             read data from file
+	f:[try_]readn(buf, n) -> buf, n               read exactly n bytes
+	f:[try_]readall([ignore_file_size]) -> buf, len    read until EOF into a buffer
+	f:[try_]write(s | buf,len) -> true            write data to file
+	f:[try_]flush()                               flush buffers
+	f:[try_]seek([whence] [, offset]) -> pos      get/set the file pointer
+	f:[try_]truncate([opt])                       truncate file to current file pointer
 	f:[un]buffered_reader([bufsize]) -> read(buf, sz)   get read(buf, sz)
 OPEN FILE ATTRIBUTES
-	f:[try_]attr([attr]) -> val|t                 get/set attribute(s) of open file
+	f:attr([attr]) -> val|t                       get/set attribute(s) of open file
 	f:size() -> n                                 get file size
 DIRECTORY LISTING
 	ls(dir, [opt]) -> d, next                     directory contents iterator
@@ -252,7 +252,7 @@ f:stream(mode) -> fs
 	Open a `FILE*` object from a file. The file should not be used anymore while
 	a stream is open on it and `fs:close()` should be called to close the file.
 
-fs:close()
+fs:[try_]close()
 
 	Close the `FILE*` object and the underlying file object.
 
@@ -265,34 +265,34 @@ open_buffer(buf, [size], [mode]) -> f
 
 File I/O ---------------------------------------------------------------------
 
-f:read(buf, len, [expires]) -> readlen
+f:[try_]read(buf, len) -> readlen
 
 	Read data from file. Returns (and keeps returning) 0 on EOF or broken pipe.
 
-f:readn(buf, len, [expires]) -> true
+f:[try_]readn(buf, len) -> buf, len
 
 	Read data from file until `len` is read.
 	Partial reads are signaled with `nil, err, readlen`.
 
-f:readall([expires]) -> buf, len
+f:[try_]readall() -> buf, len
 
 	Read until EOF into a buffer.
 
-f:write(s | buf,len) -> true
+f:[try_]write(s | buf,len) -> true
 
 	Write data to file.
 	Partial writes are signaled with `nil, err, writelen`.
 
-f:flush()
+f:[try_]flush()
 
 	Flush buffers.
 
-f:seek([whence] [, offset]) -> pos
+f:[try_]seek([whence] [, offset]) -> pos
 
 	Get/set the file pointer. Same semantics as standard `io` module seek
 	i.e. `whence` defaults to `'cur'` and `offset` defaults to `0`.
 
-f:truncate(size, [opt])
+f:[try_]truncate(size, [opt])
 
 	Truncate file to given `size` and move the current file pointer to `EOF`.
 	This can be done both to shorten a file and thus free disk space, or to
@@ -467,9 +467,9 @@ Memory Mapping ---------------------------------------------------------------
 	  this API unsuitable for mapping files from removable media or recovering
 	  from write failures in general. For all other uses it is fine.
 
-mmap(args_t) -> map
-mmap(path, [access], [size], [offset], [addr], [tagname], [perms]) -> map
-f:map([offset], [size], [addr], [access])
+[try_]mmap(args_t) -> map
+[try_]mmap(path, [access], [size], [offset], [addr], [tagname], [perms]) -> map
+f:[try_]map([offset], [size], [addr], [access])
 
 	Create a memory map object. Args:
 
@@ -536,7 +536,7 @@ map:free()
 	Free the memory and all associated resources and close the file
 	if it was opened by the `mmap()` call.
 
-map:flush([async, ][addr, size]) -> true | nil,err
+map:[try_]flush([async, ][addr, size]) -> true | nil,err
 
 	Flush (part of) the memory to disk. If the address is not aligned,
 	it will be automatically aligned to the left. If `async` is true,
@@ -582,8 +582,6 @@ Async I/O --------------------------------------------------------------------
 Named pipes can be opened with `async = true` option which opens them
 in async mode, which uses the sock scheduler to multiplex the I/O
 which means all I/O then must be performed inside sock threads.
-In this mode, the `read()` and `write()` methods take an additional `expires`
-arg that behaves just like with sockets.
 
 Programming Notes ------------------------------------------------------------
 
@@ -635,38 +633,9 @@ local file = {}; file.__index = file --file object methods
 local stream = {}; stream.__index = stream --FILE methods
 local dir = {}; dir.__index = dir --dir listing object methods
 
---error reporting ------------------------------------------------------------
-
-cdef'char *strerror(int errnum);'
-
-local errors = {
-	[2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
-	                   --rmdir(), opendir(), rename(), unlink()
-	[5] = 'io_error', --EIO, readlink(), read()
-	[13] = 'access_denied', --EACCESS, mkdir() etc.
-	[17] = 'already_exists', --EEXIST, open(), mkdir()
-	[20] = 'not_found', --ENOTDIR, opendir()
-	[21] = 'is_dir', --EISDIR, unlink()
-	[Linux and 39 or OSX and 66 or ''] = 'not_empty', --ENOTEMPTY, rmdir()
-	[28] = 'disk_full', --ENOSPC: fallocate()
-	[Linux and 95 or ''] = 'not_supported', --EOPNOTSUPP: fallocate()
-	[Linux and 32 or ''] = 'eof', --EPIPE: write()
-}
-
-local function check_errno(ret, errno, xtra_errors)
-	if ret then return ret end
-	errno = errno or ffi.errno()
-	local err = errors[errno] or (xtra_errors and xtra_errors[errno])
-	if not err then
-		local s = C.strerror(errno)
-		err = s ~= nil and str(s) or 'Error '..errno
-	end
-	return ret, err
-end
-
 --file objects ---------------------------------------------------------------
 
-local function isfile(f, type)
+function isfile(f, type)
 	local mt = getmetatable(f)
 	return istab(mt) and rawget(mt, '__index') == file and (not type or f.type == type)
 end
@@ -676,7 +645,9 @@ function try_open(path, mode_opt, quiet)
 	local opt = istab(mode_opt) and mode_opt or nil
 	local mode = isstr(mode_opt) and mode_opt or opt and opt.mode
 	local mopt = mode and assertf(_open_mode_opt[mode], 'invalid open mode: %s', mode)
-	return _open(path, opt and mopt and update({}, mopt, opt) or opt or mopt, quiet)
+	local f, err = _open(path, opt and mopt and update({}, mopt, opt) or opt or mopt, quiet)
+	if not f then return nil, err end
+	return f
 end
 
 function open(path, mode_opt, quiet)
@@ -685,11 +656,24 @@ function open(path, mode_opt, quiet)
 	return f
 end
 
+file.check_io = check_io
+file.checkp   = checkp
+
+function file:onclose(fn)
+	local try_close = self.try_close
+	function self:try_close()
+		local ok, err = try_close(self)
+		fn()
+		if not ok then return false, err end
+		return true
+	end
+end
+
 function file.unbuffered_reader(f)
 	return function(buf, sz)
 		if not buf then
-			local i, err = f:seek('cur',  0); if not i then return nil, err end
-			local j, err = f:seek('cur', sz); if not i then return nil, err end
+			local i, err = f:try_seek('cur',  0); if not i then return nil, err end
+			local j, err = f:try_seek('cur', sz); if not i then return nil, err end
 			return j - i
 		else
 			return f:read(buf, sz) --skip bytes (libjpeg semantics)
@@ -701,7 +685,7 @@ function file.buffered_reader(f, bufsize)
 	local ptr_ct = u8p
 	local buf_ct = u8a
 	local o1, err = f:size()
-	local o0, err = f:seek'cur'
+	local o0, err = f:try_seek'cur'
 	if not (o0 and o1) then
 		return function() return nil, err end
 	end
@@ -711,8 +695,8 @@ function file.buffered_reader(f, bufsize)
 	local eof = false
 	return function(dst, sz)
 		if not dst then --skip bytes (libjpeg semantics)
-			local i, err = f:seek('cur',  0); if not i then return nil, err end
-			local j, err = f:seek('cur', sz); if not j then return nil, err end
+			local i, err = f:try_seek('cur',  0); if not i then return nil, err end
+			local j, err = f:try_seek('cur', sz); if not j then return nil, err end
 			return j - i
 		end
 		local rsz = 0
@@ -759,8 +743,19 @@ end
 
 --i/o ------------------------------------------------------------------------
 
+function file:setexpires(rw, expires)
+	if not isstr(rw) then rw, expires = nil, rw end
+	local r = rw == 'r' or not rw
+	local w = rw == 'w' or not rw
+	if r then self.recv_expires = expires end
+	if w then self.send_expires = expires end
+end
+function file:settimeout(s, rw)
+	self:setexpires(s and clock() + s, rw)
+end
+
 local whences = {set = 0, cur = 1, ['end'] = 2} --FILE_*
-function file:seek(whence, offset)
+function file:try_seek(whence, offset)
 	if tonumber(whence) and not offset then --middle arg missing
 		whence, offset = 'cur', tonumber(whence)
 	end
@@ -770,12 +765,12 @@ function file:seek(whence, offset)
 	return self:_seek(whence, offset)
 end
 
-function file:write(buf, sz, expires)
+function file:try_write(buf, sz)
 	sz = sz or #buf
 	if sz == 0 then return true end --mask out null writes
 	local sz0 = sz
 	while true do
-		local len, err = self:_write(buf, sz, expires)
+		local len, err = self:_write(buf, sz)
 		if len == sz then
 			break
 		elseif not len then --short write
@@ -791,10 +786,10 @@ function file:write(buf, sz, expires)
 	return true
 end
 
-function file:readn(buf, sz, expires)
+function file:try_readn(buf, sz)
 	local buf0, sz0 = buf, sz
 	while sz > 0 do
-		local len, err = self:read(buf, sz, expires)
+		local len, err = self:read(buf, sz)
 		if not len then --short read
 			return nil, err, sz0 - sz
 		elseif len == 0 then --eof
@@ -806,13 +801,13 @@ function file:readn(buf, sz, expires)
 	return buf0, sz0
 end
 
-function file:readall(expires, ignore_file_size)
+function file:try_readall(ignore_file_size)
 	if self.type == 'pipe' or ignore_file_size then
-		return readall(self.read, self, expires)
+		return readall(self.read, self)
 	end
 	assert(self.type == 'file')
 	local size, err = self:attr'size'; if not size then return nil, err end
-	local offset, err = self:seek(); if not offset then return nil, err end
+	local offset, err = self:try_seek(); if not offset then return nil, err end
 	local sz = size - offset
 	local buf = u8a(sz)
 	local n, err = self:read(buf, sz)
@@ -1251,7 +1246,7 @@ end
 
 function ls(dir, opt)
 	local skip_dot_dirs = not (opt and opt:find('..', 1, true))
-	return fs_dir(dir or '.', skip_dot_dirs)
+	return _ls(dir or '.', skip_dot_dirs)
 end
 
 function dir.path(dir)
@@ -1420,7 +1415,7 @@ function check_tagname(tagname)
 	return tagname
 end
 
-function file.mmap(f, ...)
+function file.try_mmap(f, ...)
 	local access, size, offset, addr
 	if istab(t) then
 		access, size, offset, addr = t.access, t.size, t.offset, t.addr
@@ -1429,8 +1424,11 @@ function file.mmap(f, ...)
 	end
 	return mmap(f, access or f.access, size, offset, addr)
 end
+function file:mmap(...)
+	self:check_io(self:try_mmap(...))
+end
 
-function mmap(t,...)
+function try_mmap(t,...)
 	local file, access, size, offset, addr, tagname, perms
 	if istab(t) then
 		file, access, size, offset, addr, tagname, perms =
@@ -1449,23 +1447,27 @@ function mmap(t,...)
 	assert(not addr or addr == aligned_addr(addr), 'addr not page-aligned')
 	assert(not (file and tagname), 'cannot have both file and tagname')
 	assert(not tagname or not tagname:find'\\', 'tagname cannot contain `\\`')
-	return fs_map(file, access, size, offset, addr, tagname, perms)
+	return _mmap(file, access, size, offset, addr, tagname, perms)
+end
+function mmap(...)
+	return check_io(nil, try_mmap(...))
 end
 
 --memory streams -------------------------------------------------------------
 
 local vfile = {}
 
+vfile.check_io = check_io
+vfile.checkp   = checkp
+
 function open_buffer(buf, sz, mode)
 	sz = sz or #buf
 	mode = mode or 'r'
 	assertf(mode == 'r' or mode == 'w', 'invalid mode: "%s"', mode)
 	local f = {
-		buffer = cast(u8p, buf),
-		size = sz,
+		b = string_buffer():set(buf, sz),
 		offset = 0,
 		mode = mode,
-		_buffer = buf, --anchor it
 		w = 0,
 		r = 0,
 		__index = vfile,
@@ -1473,68 +1475,112 @@ function open_buffer(buf, sz, mode)
 	return setmetatable(f, f)
 end
 
-function vfile.close(f) f._closed = true; return true end
+function vfile.try_close(f) f._closed = true; return true end
 function vfile.closed(f) return f._closed end
 
-function vfile.flush(f)
+vfile.onclose = file.onclose
+
+function vfile:try_attr(attr)
+	assert(not istab(attr))
+	if attr == 'size' then
+		return #self.b
+	else
+		assert(false)
+	end
+end
+
+function vfile.try_flush(f)
 	if f._closed then
 		return nil, 'access_denied'
 	end
 	return true
 end
 
-function vfile.read(f, buf, sz)
+function vfile:flush()
+	self:check_io(self:try_flush())
+end
+
+function vfile.try_read(f, buf, sz)
 	if f._closed then
 		return nil, 'access_denied'
 	end
-	sz = min(max(0, sz), max(0, f.size - f.offset))
-	copy(buf, f.buffer + f.offset, sz)
+	sz = min(max(0, sz), max(0, #f.b - f.offset))
+	copy(buf, f.b:ref() + f.offset, sz)
 	f.offset = f.offset + sz
 	f.r = f.r + sz
 	return sz
 end
 
-function vfile.write(f, buf, sz)
+vfile.try_readn   = file.try_readn
+vfile.try_readall = file.try_readall
+
+function vfile.try_write(f, buf, sz)
 	if f._closed then
 		return nil, 'access_denied'
 	end
 	if f.mode ~= 'w' then
 		return nil, 'access_denied'
 	end
-	sz = min(max(0, sz), max(0, f.size - f.offset))
-	copy(f.buffer + f.offset, buf, sz)
+	sz = max(0, sz)
+	local sz0 = #f.b
+	local sz1 = f.offset + sz
+	local grow = sz1 - sz0
+	if grow > 0 then
+		f.b:reserve(grow)
+		f.b:commit(grow)
+	end
+	copy(f.b:ref() + f.offset, buf, sz)
 	f.offset = f.offset + sz
 	f.w = f.w + sz
 	return sz
 end
 
-vfile.seek = file.seek
-
 function vfile._seek(f, whence, offset)
 	if whence == 1 then --cur
 		offset = f.offset + offset
 	elseif whence == 2 then --end
-		offset = f.size + offset
+		offset = #f.b + offset
 	end
 	offset = max(offset, 0)
 	f.offset = offset
 	return offset
 end
 
-function vfile:truncate(size)
-	local pos, err = f:seek(size)
+vfile.try_seek = file.try_seek
+
+function vfile:try_truncate(n)
+	local pos, err = f:try_seek(n)
 	if not pos then return nil, err end
-	f.size = size
+	local n0 = #f.b
+	if n == 0 then
+		b:reset()
+	elseif n > n0 then
+		local n = n - n0
+		local p = b:reserve(n)
+		fill(b, n)
+		b:commit(n)
+	elseif n < n0 then
+		return nil, 'NYI'
+	end
 	return true
 end
 
 vfile.unbuffered_reader = file.unbuffered_reader
 vfile  .buffered_reader = file  .buffered_reader
 
+vfile.close    = unprotect_io(vfile.try_close)
+vfile.read     = unprotect_io(vfile.try_read)
+vfile.write    = unprotect_io(vfile.try_write)
+vfile.readn    = unprotect_io(vfile.try_readn)
+vfile.readall  = unprotect_io(vfile.try_readall)
+vfile.flush    = unprotect_io(vfile.try_flush)
+vfile.truncate = unprotect_io(vfile.try_truncate)
+vfile.seek     = unprotect_io(vfile.try_seek)
+
 --hi-level APIs --------------------------------------------------------------
 
-function file:buffer(filetype)
-	return protocol_buffer({f = self}, filetype)
+function file:pbuffer()
+	return pbuffer{f = self}
 end
 
 ABORT = {} --error signal to pass to save()'s reader function.
@@ -1784,7 +1830,6 @@ end
 
 _fs_file = file
 _fs_dir = dir
-_fs_check_errno = check_errno
 
 if win then
 	require'fs_win'
@@ -1793,6 +1838,15 @@ elseif Linux or OSX then
 else
 	error'unsupported platform'
 end
+
+file.close    = unprotect_io(file.try_close)
+file.read     = unprotect_io(file.try_read)
+file.write    = unprotect_io(file.try_write)
+file.readn    = unprotect_io(file.try_readn)
+file.readall  = unprotect_io(file.try_readall)
+file.flush    = unprotect_io(file.try_flush)
+file.truncate = unprotect_io(file.try_truncate)
+file.seek     = unprotect_io(file.try_seek)
 
 metatype(stream_ct, stream)
 metatype(dir_ct, dir)
