@@ -109,6 +109,7 @@ STRINGS
 	esc(s [,mode]) -> pat          escape string to use in regex
 	tohex(s|n [,upper]) -> s       string or number to hex
 	fromhex(s[, isvalid]) -> s     hex to string
+	hexblock(s)                    string to hex block
 	starts(s, prefix) -> t|f       find if string starts with prefix
 	ends(s, suffix) -> t|f         find if string ends with suffix
 	subst(s, t) -> s               string interpolation pattern
@@ -1190,6 +1191,19 @@ function fromhex(s, isvalid)
 	end))
 end
 string.fromhex = fromhex
+
+function hexblock(s)
+	local n = 16
+	local t = {}
+	for i = 1, #s, n do
+		local s = s:sub(i, i+n-1)
+		s = s:tohex():gsub('(..)', '%1 '):rpad(49)
+			.. s:gsub('[%z\1-\31\127-\255]', '.')
+		add(t, s)
+	end
+	return cat(t, '\n')
+end
+string.hexblock = hexblock
 
 function starts(s, p) --5x faster than s:find'^...' in LuaJIT 2.1
 	return s:sub(1, #p) == p

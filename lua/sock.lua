@@ -2289,24 +2289,32 @@ function socket:debug(protocol)
 
 	local function ds(event, s)
 		log('', protocol or '', event, '%-4s %5s %s',
-			self, s and #s or '', s or '')
+			self, s and #s or '',
+			s and (s:find'[%0\1-\7\9\11\12\14-\31\127-\255]'
+				and hexblock(s) or s) or '')
 	end
 
-	override(self, 'recv', function(inherited, self, buf, ...)
+	override(self, 'try_recv', function(inherited, self, buf, ...)
 		local sz, err = inherited(self, buf, ...)
 		if not sz then return nil, err end
 		ds('<', str(buf, sz))
 		return sz
 	end)
+	self.recv = protect_io(self.try_recv)
+	self.try_read = self.try_recv
+	self.read = self.recv
 
-	override(self, 'send', function(inherited, self, buf, sz, ...)
+	override(self, 'try_send', function(inherited, self, buf, sz, ...)
 		local ok, err = inherited(self, buf, sz, ...)
 		if not ok then return nil, err end
 		ds('>', str(buf, sz or #buf))
 		return ok
 	end)
+	self.send = protect_io(self.try_send)
+	self.try_write = self.try_send
+	self.write = self.send
 
-	override(self, 'close', function(inherited, self, ...)
+	override(self, 'try_close', function(inherited, self, ...)
 		local ok, err = inherited(self, ...)
 		if not ok then return nil, err  end
 		ds('CC')
