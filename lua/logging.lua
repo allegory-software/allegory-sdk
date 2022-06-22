@@ -10,9 +10,8 @@ LOGGING
 	pr(...)
 UTILS
 	logging.arg(v) -> s
-	logging.printarg(v) -> s
+	logging.print(v) -> s
 	logging.args(...) -> ...
-	logging.printargs(...) -> ...
 CONFIG
 	logging.deploy            app deployment name (logged to server)
 	logging.machine           app machine name (logged to server)
@@ -42,13 +41,15 @@ LOGGING API
 	logliveadd(e, fmt, ...)
 
 	logarg(v) -> s
-	logprintarg(v) -> s
 	logargs(...) -> ...
-	logprintargs(...) -> ...
 
 ]]
 
 require'glue'
+
+local
+	type, istab, rawget =
+	type, istab, rawget
 
 logging = {
 	quiet = false,
@@ -140,8 +141,8 @@ function logging:toserver(host, port, queue_size, timeout)
 	local function connect()
 		if chan then return chan end
 		while not stop do
-			local exp = timeout and clock() + timeout
-			chan = mess_connect(host, port, exp)
+			local exp = clock() + timeout
+			chan = try_mess_connect(host, port, timeout)
 
 			if chan then
 
@@ -307,56 +308,43 @@ local pp_opt_compact = {
 	onerror = pp_onerror,
 	indent = false,
 }
-local function pp_compact(v)
-	local s = pp(v, pp_opt)
-	return #s < 50 and pp(v, pp_opt_compact) or s
-end
-
-local function debug_arg(v)
+local function logarg(v)
 	if v == nil then return 'nil' end
 	if type(v) == 'boolean' then return v and 'Y' or 'N' end
-	if type(v) == 'number' then return _('%.17g', v) end
-	if type(v) == 'string' then return v end
+	if type(v) == 'number' then return v end
 	local name = names[v]
 	if name then return name end
 	local mt = getmetatable(v)
-	if istab(mt) then
-		if mt.__tostring then return tostring(v) end
+	if istab(mt) and mt.__tostring then
+		v = tostring(v)
+	elseif istab(v) and not (mt and (mt.type or mt.debug_prefix)) then
+		local s = pp(v, pp_opt)
+		return #s < 50 and pp(v, pp_opt_compact) or s
+	elseif type(v) ~= 'string' then
+		return debug_id(v)
 	end
-	if istab(v) and not (mt and (mt.type or mt.debug_prefix)) then
-		return pp_compact(v)
-	end
-	return (debug_id(v))
-end
-local function debug_arg_pp(v)
-	local v = debug_arg(v)
-	if v:find('\n', 1, true) then --multiline, make room for it.
-		v = v:gsub('\r\n', '\n')
-		v = outdent(v)
-		v = v:gsub('\t', '   ')
+	if v:find'[%z\1-\8\11\12\14-\31\127-\255]' then --binary, make it hexblock
+		v = '\n\n'..hexblock(v)
+	elseif v:find('\n', 1, true) then --multiline, make room for it.
+		v = v:gsub('\r\n', '\n'):gsub('\n+$', '')
+		v = outdent(v):gsub('\t', '   ')
 		v = '\n\n'..v..'\n'
 	end
-	--avoid messing up the terminal when tailing logs.
-	v = v:gsub('[%z\1-\8\11-\31\128-\255]', '.')
 	return v
 end
-logging.arg       = debug_arg_pp
-logging.printarg  = debug_arg
+logging.arg = logarg
 
-local function logging_args_func(debug_arg)
-	return function(...)
-		if select('#', ...) == 1 then
-			return debug_arg((...))
-		end
-		local args, n = {...}, select('#',...)
-		for i=1,n do
-			args[i] = debug_arg(args[i])
-		end
-		return unpack(args, 1, n)
+function logging.args(...)
+	local n = select('#', ...)
+	if n == 1 then
+		return logarg((...))
 	end
+	local args = {...}
+	for i=1,n do
+		args[i] = logarg(args[i])
+	end
+	return unpack(args, 1, n)
 end
-logging.args      = logging_args_func(debug_arg_pp)
-logging.printargs = logging_args_func(debug_arg)
 
 local function fmtargs(self, fmt, ...)
 	return _(fmt, self.args(...))
@@ -386,7 +374,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
 				env, date('%Y-%m-%d %H:%M:%S', time), severity,
 				module or '', (event or ''):sub(1, 8),
-				debug_arg_pp((coroutine.running())), msg)
+				logarg((coroutine.running())), msg)
 		if tofile and self.logtofile then
 			self:logtofile(entry)
 		end
@@ -461,7 +449,7 @@ function logging.livelist()
 	for type, ids in pairs(ids_db) do
 		for o, s in pairs(ids.live) do
 			t[#t+1] = type
-			t[#t+1] = debug_arg(o)
+			t[#t+1] = logarg(o)
 			t[#t+1] = s
 		end
 	end
@@ -522,7 +510,7 @@ function logging.printlive(custom_print)
 		print(('%-12s: %d'):format(ty, ids.live_count))
 		local ids, ss = {}, {}
 		for o in pairs(live) do
-			local id = debug_arg(o)
+			local id = logarg(o)
 			ids[#ids+1] = id
 			ss[id] = live[o]
 		end
@@ -546,9 +534,7 @@ _G.log          = logging.log
 _G.live         = logging.live
 _G.liveadd      = logging.liveadd
 _G.logarg       = logging.arg
-_G.logprintarg  = logging.printarg
 _G.logargs      = logging.args
-_G.logprintargs = logging.printargs
 
 
 if not ... then

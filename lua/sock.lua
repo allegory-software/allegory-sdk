@@ -2289,9 +2289,7 @@ function socket:debug(protocol)
 
 	local function ds(event, s)
 		log('', protocol or '', event, '%-4s %5s %s',
-			self, s and #s or '',
-			s and (s:find'[%0\1-\7\9\11\12\14-\31\127-\255]'
-				and hexblock(s) or s) or '')
+			self, s and #s or '', s or '')
 	end
 
 	override(self, 'try_recv', function(inherited, self, buf, ...)
@@ -2405,10 +2403,8 @@ function try_connect(host, port, timeout)
 	self:settimeout(nil)
 	return self
 end
-function connect(host, port, timeout)
-	local self = create_tcp()
-	self:settimeout(timeout)
-	return self:connect(host, port)
+function connect(...)
+	return check_io(nil, try_connect(...))
 end
 
 function listen(host, port)
@@ -2612,7 +2608,7 @@ end
 local _stop = false
 local running = false
 function stop() _stop = true end
-function start()
+function try_start()
 	if running then
 		return
 	end
@@ -2633,6 +2629,9 @@ function start()
 	_stop = false
 	return true
 end
+function start()
+	assert(try_start())
+end
 
 function run(f, ...)
 	if running then
@@ -2643,7 +2642,7 @@ function run(f, ...)
 			ret = pack(f(...))
 		end
 		resume(thread(wrapper, 'sock-run'), ...)
-		assert(start())
+		start()
 		return ret and unpack(ret)
 	end
 end

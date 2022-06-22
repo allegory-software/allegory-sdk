@@ -17,9 +17,8 @@ SERVER
 	server:stop()
 
 CLIENT
-	mess_connect(host, port, [opt]) -> channel
+	[try_]mess_connect(host, port, [timeout], [opt]) -> channel
 		opt.debug
-		opt.timeout
 
 CHANNEL
 	channel:send(msg, [expires]) -> ok | false,err
@@ -140,13 +139,14 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 	return server
 end
 
-function mess_connect(host, port, opt)
+function mess_connect(host, port, timeout, opt)
 	local tcp = tcp()
 	if opt and opt.debug then
 		tcp:debug'mess'
 	end
-	tcp:settimeout(opt and opt.timeout)
+	tcp:settimeout(timeout)
 	tcp:connect(host, port)
+	tcp:settimeout(nil)
 	return mess_protocol(tcp)
 end
 try_mess_connect = protect_io(mess_connect)

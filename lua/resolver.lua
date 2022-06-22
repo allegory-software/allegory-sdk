@@ -348,7 +348,7 @@ rs.servers = {
 rs.max_cache_entries = 1e5
 
 local function threadname(thread)
-	return logprintarg(thread or currentthread())
+	return logarg(thread or currentthread())
 end
 
 function rs:_dbg(ns, q, ...)

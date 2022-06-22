@@ -244,7 +244,7 @@ CONFIG
 DEBUGGING
 	traceback                    = debug.traceback
    trace()                        print current stack trace to stderr
-	pr(...)                        print to stderr with logprintargs
+	pr(...)                        print to stderr with logargs
 LOGGING
 	see logging.lua
 
@@ -1201,6 +1201,7 @@ function hexblock(s)
 			.. s:gsub('[%z\1-\31\127-\255]', '.')
 		add(t, s)
 	end
+	add(t, '')
 	return cat(t, '\n')
 end
 string.hexblock = hexblock
@@ -2727,9 +2728,12 @@ function trace()
 end
 
 function pr(...)
-	for i=1,select('#',...) do
-		io_stderr:write(logprintarg((select(i,...))))
-		io_stderr:write'\t'
+	local n = select('#',...)
+	for i=1,n do
+		io_stderr:write((logarg((select(i,...)))))
+		if i < n then
+			io_stderr:write'\t'
+		end
 	end
 	io_stderr:write'\n'
 	io_stderr:flush()

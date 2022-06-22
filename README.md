@@ -1,7 +1,7 @@
 
 # :candy: The Allegory SDK
 
-The **Allegory SDK** is a self-contained cross-platform low-code programming
+The **Allegory SDK** is a self-contained cross-platform programming
 environment for developing web-based **database-driven business apps** in
 **LuaJIT** and **JavaScript**.
 

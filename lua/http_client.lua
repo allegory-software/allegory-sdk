@@ -572,7 +572,7 @@ end
 
 function client:log(target, severity, module, event, fmt, ...)
 	if logging.filter[severity] then return end
-	local s = fmt and _(fmt, logging.args(...)) or ''
+	local s = fmt and _(fmt, logargs(...)) or ''
 	log(severity, module, event, '%-4s %s', target or '', s)
 end
 
