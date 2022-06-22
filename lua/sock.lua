@@ -26,8 +26,8 @@ SOCKETS
 	tcp([family], [protocol]) -> tcp           make a TCP socket
 	udp([family], [protocol]) -> udp           make a UDP socket
 	rawsocket([family][, protocol]) -> raw     make a raw socket
-	[try_]connect(host, port, [timeout]) -> tcp     create tcp socket and connect
-	listen([backlog, ]host, port) -> tcp            create tcp socket and listen
+	[try_]connect(host, port, [timeout]) -> tcp         create tcp socket and connect
+	listen([backlog, ]host, port, [onaccept]) -> tcp    create tcp socket and listen
 	s:socktype() -> s                               socket type: 'tcp', ...
 	s:family() -> s                                 address family: 'inet', ...
 	s:protocol() -> s                               protocol: 'tcp', 'icmp', ...
@@ -41,7 +41,7 @@ SOCKETS
 	tcp:[try_]send(s|buf, [len]) -> true            send bytes to connected address
 	udp:[try_]send(s|buf, [len]) -> len             send bytes to connected address
 	tcp|udp:[try_]recv(buf, maxlen) -> len          receive bytes
-	tcp:[try_]listen([backlog, ]host, port, [af])   put socket in listening mode
+	tcp:[try_]listen([backlog, ]host, port, [onaccept], [af])   put socket in listening mode
 	tcp:[try_]accept() -> ctcp | nil,err,[retry]    accept a client connection
 	tcp:[try_]recvn(buf, n) -> buf, n               receive n bytes
 	tcp:[try_]recvall() -> buf, len                 receive until closed
@@ -196,7 +196,7 @@ tcp|udp:[try_]recv(buf, maxlen, [flags]) -> len
 	With TCP, returning 0 means that the socket was closed on the other side.
 	With UDP it just means that an empty packet was received.
 
-tcp:[try_]listen([backlog, ]host, port, [af])
+tcp:[try_]listen([backlog, ]host, port, [onaccept], [af])
 
 	Put the socket in listening mode, binding the socket if not bound already
 	(in which case `host` and `port` args are ignored). The `backlog` defaults
@@ -1886,9 +1886,9 @@ cdef[[
 int listen(SOCKET s, int backlog);
 ]]
 
-function tcp:try_listen(backlog, host, port, addr_flags)
+function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 	if not isnum(backlog) then
-		backlog, host, port = 1/0, backlog, host
+		backlog, host, port, onaccept, addr_flags = 1/0, backlog, host, port, onaccept
 	end
 	if not self.bound_addr then
 		local ok, err = self:try_bind(host, port, addr_flags)
@@ -1900,6 +1900,26 @@ function tcp:try_listen(backlog, host, port, addr_flags)
 	log('', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
 	live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0 --live client connection count
+
+	if onaccept then
+		repeat
+			local ctcp, err = self:accept()
+			if not ctcp then
+				if not self:closed() then
+					--transient error. let it retry but pause a little
+					--to avoid killing the CPU while the error persists.
+					wait(.2)
+				end
+			else
+				resume(thread(function()
+					local ok, err = pcall(onaccept, self, ctcp)
+					ctcp:close()
+					ctcp:checkp(ok or iserror(err, 'io'), '%s', err)
+				end, 'accept %s %s', self, ctcp))
+			end
+		until self:closed()
+	end
+
 	return true
 end
 
@@ -2407,10 +2427,10 @@ function connect(...)
 	return check_io(nil, try_connect(...))
 end
 
-function listen(host, port)
+function listen(host, port, onaccept)
 	local self = create_tcp()
 	self:setopt('reuseaddr', true)
-	self:listen(host, port)
+	self:listen(host, port, onaccept)
 	return self
 end
 
