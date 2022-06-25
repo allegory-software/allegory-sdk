@@ -26,7 +26,6 @@
 
 	pb:[try_]connect(host, port, [timeout])  TCP-connect
 	pb:[try_]open(file)                      open file
-	pb:[try_]open_buffer(buf, sz, [mode])    open memory file
 
 	pb:[try_]read(buf, size) -> read_n   read once to external buffer
 	pb:[try_]readn(buf, n) -> buf, n     read n bytes to external buffer
@@ -162,6 +161,14 @@ end
 
 --I/O
 
+pb.f = {}
+function pb.f:read() return 0 end
+function pb.f:seek(offset)
+	assert(offset == 0)
+	return 0
+end
+pb.f.try_close = noop
+
 function pb:try_open(...)
 	local f, err = try_open(...)
 	if not f then return nil, err end
@@ -183,11 +190,6 @@ end
 
 function pb:connect(...)
 	self.f = connect(...)
-	return self
-end
-
-function pb:open_buffer(buf, sz, mode)
-	self.f = open_buffer(buf, sz, mode or 'w')
 	return self
 end
 

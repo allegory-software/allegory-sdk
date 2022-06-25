@@ -2318,7 +2318,7 @@ function socket:debug(protocol)
 		ds('<', str(buf, sz))
 		return sz
 	end)
-	self.recv = protect_io(self.try_recv)
+	self.recv = unprotect_io(self.try_recv)
 	self.try_read = self.try_recv
 	self.read = self.recv
 
@@ -2328,7 +2328,7 @@ function socket:debug(protocol)
 		ds('>', str(buf, sz or #buf))
 		return ok
 	end)
-	self.send = protect_io(self.try_send)
+	self.send = unprotect_io(self.try_send)
 	self.try_write = self.try_send
 	self.write = self.send
 
