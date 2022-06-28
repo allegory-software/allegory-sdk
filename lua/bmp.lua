@@ -624,7 +624,7 @@ function bmp_save(bmp, write)
 		'\x00\xff\x00\x00'..  --G
 		'\xff\x00\x00\x00'..  --B
 		'\x00\x00\x00\xff'    --A
-	copy(fh.magic, 'BM', 2)
+	copy(fh.magic, 'BM')
 	fh.image_offset = sizeof(fh) + sizeof(h) + #masks
 	fh.size = fh.image_offset + image_size
 	fh.header_size = sizeof(h) + 4
@@ -644,5 +644,12 @@ function bmp_save(bmp, write)
 		bitmap_paint(row_bmp, src_row_bmp)
 		write(row_bmp.data, row_bmp.stride)
 	end
+	write(nil, 0) --signal eof.
 end
-try_bmp_save = protect(bmp_save)
+try_bmp_save = protect('bmp', bmp_save)
+
+function try_bmp_save_file(file, bmp)
+	local write, err = file_saver(file)
+	if not write then return nil, err end
+	return try_bmp_save(bmp, write)
+end

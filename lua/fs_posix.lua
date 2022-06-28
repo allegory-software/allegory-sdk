@@ -168,7 +168,6 @@ end
 function file.try_close(f)
 	if f:closed() then return true end
 	if f._async then
-		require'sock'
 		_sock_unregister(f)
 	end
 	local ok = C.close(f.fd) == 0

@@ -163,7 +163,8 @@ end
 
 pb.f = {}
 function pb.f:read() return 0 end
-function pb.f:seek(offset)
+function pb.f:seek(whence, offset)
+	assert(whence == 'set')
 	assert(offset == 0)
 	return 0
 end

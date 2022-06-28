@@ -560,8 +560,8 @@ local function combinable(type1, type2)
 	end
 end
 function path_combine(s1, s2, pl, sep, default_sep)
-	local type1, p1, drive1 = path_parse(s1, pl)
-	local type2, p2, drive2 = path_parse(s2, pl)
+	local type1, p1, drive1 = path_parse(tostring(s1), pl)
+	local type2, p2, drive2 = path_parse(tostring(s2), pl)
 	if not combinable(type1, type2) then
 		if combinable(type2, type1) then
 			type1, type2, s1, s2, p1, p2, drive1, drive2 =

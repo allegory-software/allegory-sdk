@@ -143,7 +143,7 @@ function connpool(opt)
 			pool[c] = true
 			n = n + 1
 			dbg'put'
-			before(s, 'close', function()
+			s:onclose(function()
 				pool[c] = nil
 				n = n - 1
 				dbg'close'

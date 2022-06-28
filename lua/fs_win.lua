@@ -410,7 +410,6 @@ end
 function file.try_close(f)
 	if f:closed() then return true end
 	if f._read_async or f._write_async then
-		require'sock'
 		_sock_unregister(f)
 	end
 	local ok, err = checknz(C.CloseHandle(f.handle))

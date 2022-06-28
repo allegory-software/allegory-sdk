@@ -31,6 +31,7 @@
 	  pixels of early progression stages for progressive JPEGs.
 	jpg.partial                       JPEG file is truncated (see after loading)
 	jpg:free()                        free the image
+	jpeg_decoder() -> decode()        create a push-style decode function.
 	[try_]jpeg_save(opt)              compress a bitmap into a JPEG image
 
 jpeg_open(opt | read) -> jpg
@@ -180,8 +181,8 @@ local JPEG_EOI = char(0xff, 0xD9):rep(32)
 
 local dct_methods = {
 	accurate = C.JDCT_ISLOW,
-	fast = C.JDCT_IFAST,
-	float = C.JDCT_FLOAT,
+	fast     = C.JDCT_IFAST,
+	float    = C.JDCT_FLOAT,
 }
 
 local ccptr_ct = typeof'const uint8_t*' --const prevents copying
@@ -265,11 +266,6 @@ local function jpeg_finish_decompress(cinfo)
 end
 jit.off(jpeg_finish_decompress)
 
-local function check(ret, err)
-	if ret then return ret end
-	raise('jpeg', '%s', err)
-end
-
 function try_jpeg_open(opt)
 
 	--normalize args
@@ -314,6 +310,12 @@ function try_jpeg_open(opt)
 
 	gc(cinfo, free)
 
+	local function check(ret, err)
+		if ret then return ret end
+		free()
+		raise('jpeg', '%s', err)
+	end
+
 	--create the buffer filling function for suspended I/O
 	local partial_loading = opt.partial_loading ~= false
 	local sz   = opt.read_buffer_size or 64 * 1024
@@ -329,7 +331,7 @@ function try_jpeg_open(opt)
 
 	local function fill_input_buffer()
 		while bytes_to_skip > 0 do
-			local sz = math.min(skip_buf_sz, bytes_to_skip)
+			local sz = min(skip_buf_sz, bytes_to_skip)
 			local readsz = check(read(skip_buf, sz))
 			check(readsz > 0, 'eof')
 			bytes_to_skip = bytes_to_skip - readsz
@@ -474,7 +476,7 @@ function try_jpeg_open(opt)
 
 				--read several scanlines at once, depending on the size of the output buffer
 				local i = cinfo.output_scanline
-				local n = math.min(bmp.h - i, cinfo.rec_outbuf_height)
+				local n = min(bmp.h - i, cinfo.rec_outbuf_height)
 				while jpeg_read_scanlines(cinfo, bmp.rows + i, n) < n do
 					fill_input_buffer()
 				end
@@ -502,6 +504,33 @@ function try_jpeg_open(opt)
 	return img
 end
 jpeg_open = protect('jpeg', try_jpeg_open)
+
+--returns a `decode(buf, len) -> nil,'more' | bmp` function to be called
+--repeatedly while `nil,'more'` is returned and then a bitmap is returned.
+function jpeg_decoder()
+	require'sock'
+	local decode = cowrap(function(yield)
+		local jp, err = try_jpeg_open(yield)
+		if not jp then return nil, err end
+		local bmp = jp:load()
+		jp:free()
+		return true, bmp
+	end)
+	local buf, sz = decode()
+	if not buf then return nil, sz end
+	return function(p, len)
+		while len > 0 do
+			local n = min(len, sz)
+			copy(buf, p, n)
+			buf, sz = decode(n)
+			if buf == true then return sz end --return bmp
+			if not buf then return nil, sz end --error
+			len = len - n
+			p = p + n
+		end
+		return nil, 'more' --signal "need more data"
+	end
+end
 
 function try_jpeg_save(opt)
 	return fpcall(function(finally)
@@ -607,4 +636,3 @@ jit.off(try_jpeg_save, true)
 function jpeg_save(...)
 	return assert(try_jpeg_save(...))
 end
-

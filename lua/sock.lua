@@ -2577,6 +2577,8 @@ function resume(thread, ...)
 end
 end
 
+yield = coro.yield
+
 local function rets_tostring(rets)
 	local t = {}
 	for i,ret in ipairs(rets) do

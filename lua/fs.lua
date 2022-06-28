@@ -13,7 +13,7 @@ FEATURES
 
 FILE OBJECTS
 	[try_]open(path[, mode|opt]) -> f             open file
-	f:close()                                     close file
+	f:[try_]close()                               close file
 	f:closed() -> true|false                      check if file is closed
 	isfile(f [,'file'|'pipe']) -> true|false      check if f is a file or pipe
 	f.handle -> HANDLE                            Windows HANDLE (Windows platforms)
@@ -24,7 +24,7 @@ PIPES
 	pipe({path=,mode=} | path[,mode]) -> true     create a named pipe (POSIX)
 STDIO STREAMS
 	f:stream(mode) -> fs                          open a FILE* object from a file
-	fs:close()                                    close the FILE* object
+	fs:[try_]close()                              close the FILE* object
 MEMORY STREAMS
 	open_buffer(buf, [size], [mode]) -> f         create a memory stream
 FILE I/O
@@ -34,6 +34,7 @@ FILE I/O
 	f:[try_]write(s | buf,len) -> true            write data to file
 	f:[try_]flush()                               flush buffers
 	f:[try_]seek([whence] [, offset]) -> pos      get/set the file pointer
+	f:[try_]skip(n) -> n                          skip bytes
 	f:[try_]truncate([opt])                       truncate file to current file pointer
 	f:[un]buffered_reader([bufsize]) -> read(buf, sz)   get read(buf, sz)
 OPEN FILE ATTRIBUTES
@@ -669,14 +670,18 @@ function file:onclose(fn)
 	end
 end
 
+function file:try_skip(n)
+	local i, err = f:try_seek('cur', 0); if not i then return nil, err end
+	local j, err = f:try_seek('cur', n); if not i then return nil, err end
+	return j - i
+end
+
 function file.unbuffered_reader(f)
 	return function(buf, sz)
-		if not buf then
-			local i, err = f:try_seek('cur',  0); if not i then return nil, err end
-			local j, err = f:try_seek('cur', sz); if not i then return nil, err end
-			return j - i
+		if not buf then --skip bytes (libjpeg semantics)
+			return f:skip(sz)
 		else
-			return f:read(buf, sz) --skip bytes (libjpeg semantics)
+			return f:read(buf, sz)
 		end
 	end
 end
@@ -695,9 +700,7 @@ function file.buffered_reader(f, bufsize)
 	local eof = false
 	return function(dst, sz)
 		if not dst then --skip bytes (libjpeg semantics)
-			local i, err = f:try_seek('cur',  0); if not i then return nil, err end
-			local j, err = f:try_seek('cur', sz); if not j then return nil, err end
-			return j - i
+			return f:skip(sz)
 		end
 		local rsz = 0
 		while sz > 0 do
@@ -735,11 +738,12 @@ int fclose(FILE*);
 
 stream_ct = typeof'struct FILE'
 
-function stream.close(fs)
+function stream.try_close(fs)
 	local ok = C.fclose(fs) == 0
 	if not ok then return check_errno(false) end
 	return true
 end
+stream.close = unprotect_io(stream.try_close)
 
 --i/o ------------------------------------------------------------------------
 
@@ -1137,8 +1141,8 @@ vardir = memoize(function()
 	return config'vardir' or indir(scriptdir(), 'var')
 end)
 
-function varpath(file)
-	return indir(vardir(), file)
+function varpath(file, ...)
+	return indir(vardir(), file, ...)
 end
 
 --file attributes ------------------------------------------------------------
@@ -1545,8 +1549,8 @@ function vfile._seek(f, whence, offset)
 	f.offset = offset
 	return offset
 end
-
 vfile.try_seek = file.try_seek
+vfile.try_skip = file.try_skip
 
 function vfile:try_truncate(n)
 	local pos, err = f:try_seek(n)
@@ -1576,6 +1580,7 @@ vfile.readall  = unprotect_io(vfile.try_readall)
 vfile.flush    = unprotect_io(vfile.try_flush)
 vfile.truncate = unprotect_io(vfile.try_truncate)
 vfile.seek     = unprotect_io(vfile.try_seek)
+vfile.skip     = unprotect_io(vfile.try_skip)
 
 --hi-level APIs --------------------------------------------------------------
 
@@ -1639,15 +1644,16 @@ local function _save(file, s, sz, perms)
 	local ok, err = true
 	if istab(s) then --array of stringables
 		for i = 1, #s do
-			ok, err = f:write(tostring(s[i]))
+			ok, err = f:try_write(tostring(s[i]))
 			if not ok then break end
 		end
 	elseif isfunc(s) then --reader of buffers or stringables
 		local read = s
 		while true do
 			local s, sz
-			ok, s, sz = pcall(read)
+			ok, s, sz = pcall(read, true)
 			if not ok then err = s; break end
+			if sz == 0 then break end --eof
 			if s == nil then
 				if sz ~= nil then ok = false end --error, not eof
 				break
@@ -1655,16 +1661,16 @@ local function _save(file, s, sz, perms)
 			if not iscdata(s) then
 				s = tostring(s)
 			end
-			ok, err = f:write(s, sz)
+			ok, err = f:try_write(s, sz)
 			if not ok then break end
 		end
 	elseif s ~= nil and s ~= '' then --buffer or stringable
 		if not iscdata(s) then
 			s = tostring(s)
 		end
-		ok, err = f:write(s, sz)
+		ok, err = f:try_write(s, sz)
 	end
-	local close_ok, close_err = f:close()
+	local close_ok, close_err = f:try_close()
 	if ok then --I/O errors can also be reported by close().
 		ok, err = close_ok, close_err
 	end
@@ -1705,13 +1711,14 @@ function save(file, s, sz, perms, quiet)
 	check('fs', 'save', ok, '%s: %s', file, err)
 end
 
-function file_saver(file)
-	local coro = require'coro'
-	local write = coro.wrap(function()
-		return try_save(file, coro.yield)
-	end)
+--return a `try_write(v | buf,len | t | nil) -> true | false,err` function.
+function file_saver(file, thread_name)
+	require'sock'
+	local write = cowrap(function(yield)
+		return try_save(file, yield)
+	end, thread_name or 'file-saver %s', file)
 	local ok, err = write()
-	if not ok then return false, err end
+	if not ok then return nil, err end
 	return write
 end
 
@@ -1847,6 +1854,7 @@ file.readall  = unprotect_io(file.try_readall)
 file.flush    = unprotect_io(file.try_flush)
 file.truncate = unprotect_io(file.try_truncate)
 file.seek     = unprotect_io(file.try_seek)
+file.skip     = unprotect_io(file.try_skip)
 
 metatype(stream_ct, stream)
 metatype(dir_ct, dir)

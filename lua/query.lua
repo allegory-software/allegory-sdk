@@ -171,7 +171,7 @@ function db(ns, without_current_db)
 					opt.db = nil
 				end
 				db = opt.sqlpp.connect(opt)
-				pool:put(key, db, db.rawconn.tcp)
+				pool:put(key, db, db.rawconn.f)
 				dbs[key] = db
 			else
 				assert(nil, err)
