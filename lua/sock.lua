@@ -14,7 +14,7 @@ ADDRESS LOOKUP
 	ai:protocol() -> s                         protocol: 'tcp', 'icmp', ...
 	ai:name() -> s                             cannonical name
 	ai:tostring() -> s                         formatted address
-	ai.addr -> sa                              address object
+	ai.addr -> sa                              first address object
 	sa:family() -> s                           address family: 'inet', ...
 	sa:port() -> n                             address port
 	sa:tostring() -> s                         'ip:port'
@@ -1193,14 +1193,12 @@ do
 		local o, job = overlapped(self, return_true, self.recv_expires)
 		local ok = ConnectEx(self.s, ai.addr, ai.addrlen, nil, 0, nil, o) == 1
 		local ok, err = check_pending(ok, job)
-		if not ok then
-			if not ext_ai then ai:free() end
-			return false, err
-		end
-		local ip = ai:tostring()
-		log('', 'sock', 'connectd', '%-4s %s', self, ip)
-		live(self, 'connected %s', ip)
+		self.remote_addr = ok and ai.addr:addr():tostring() or nil
+		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
+		if not ok then return false, err end
+		log('', 'sock', 'connectd', '%-4s %s', self, self.remote_addr)
+		live(self, 'connected %s', self.remote_addr)
 		return true
 	end
 
@@ -1208,9 +1206,12 @@ do
 		local ai, ext_ai = self:addr(host, port, addr_flags)
 		if not ai then return nil, ext_ai end
 		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
+		self.remote_addr = ok and ai.addr:addr():tostring() or nil
+		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		log('', 'sock', 'connected', '%-4s %s', self, ai:tostring())
+		log('', 'sock', 'connectd', '%-4s %s', self, self.remote_addr)
+		live(self, 'connected %s', self.remote_addr)
 		return true
 	end
 
