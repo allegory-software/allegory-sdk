@@ -589,9 +589,9 @@ function record(f, ...)
 	return pass_record(f(...))
 end
 
-function outfile_function(path)
+function outfile_function(path, offset, len)
 
-	local mtime = assert(mtime(path))
+	local mtime = mtime(path)
 	check_etag(tostring(mtime))
 
 	local f = open(path)
@@ -599,22 +599,19 @@ function outfile_function(path)
 		return
 	end
 
-	local file_size, err = f:attr'size'
-	if not file_size then
-		f:close()
-		error(err)
+	offset = offset or 0
+	len = len or f:attr'size' - offset
+	if offset ~= 0 then
+		f:seek('set', offset)
 	end
 
 	return function()
-		setcontentsize(file_size)
-		local filebuf_size = min(file_size, 65536)
+		setcontentsize(len)
+		local filebuf_size = min(len, 65536)
 		local filebuf = u8a(filebuf_size)
 		while true do
-			local len, err = f:read(filebuf, filebuf_size)
-			if not len then
-				f:close()
-				error(err)
-			elseif len == 0 then
+			local len = f:read(filebuf, filebuf_size)
+			if len == 0 then
 				f:close()
 				break
 			else
@@ -629,8 +626,8 @@ function outfile_function(path)
 	end
 end
 
-function outfile(path)
-	assert(outfile_function(path))()
+function outfile(...)
+	assert(outfile_function(...))()
 end
 
 function setheader(name, val)
@@ -694,8 +691,6 @@ function wwwpath(file, type)
 	if abs_path and file_is(abs_path, type) then return abs_path end
 	return nil, file..' not found'
 end
-
-function varpath(file) return indir(vardir(), file) end
 
 local function file_object(findfile) --{filename -> content | handler(filename)}
 	return setmetatable({}, {
