@@ -1196,19 +1196,19 @@ function _G.sqlpp(init)
 		raise(err)
 	end
 
-	local function init_conn(self, opt, rawconn)
-		self.rawconn = rawconn
-		self.db = rawconn.db
+	local function set_schema(self, schema)
+		self.db = self.rawconn.db
 		self.schemas = attr(self:server_cache(), 'schemas')
-		if self.db and opt.schema then
-			self.schemas[self.db] = opt.schema
+		if self.db and schema then
+			self.schemas[self.db] = schema
 		end
-		return self
 	end
 
 	function spp.connect(opt)
 		local self = update({}, cmd)
-		return init_conn(self, opt, self:assert(self:rawconnect(opt)))
+		self.rawconn = self:assert(self:rawconnect(opt))
+		set_schema(self, opt.schema)
+		return self
 	end
 
 	function cmd:close()
@@ -1218,16 +1218,14 @@ function _G.sqlpp(init)
 	function cmd:use(db, schema, opt)
 		opt = opt and opt.dry and {dry = true} or nil
 		self:assert(self.rawconn:use(db, opt))
-		self.db = self.rawconn.db
-		if self.db and schema then
-			self.schemas[self.db] = schema
-		end
+		set_schema(self, schema)
 		return self
 	end
 
-	function spp.use(rawconn)
+	function spp.use(rawconn, opt)
 		local self = update({}, cmd)
-		return init_conn(self, self:rawuse(rawconn))
+		self.rawconn = self:rawuse(rawconn)
+		set_schema(self)
 	end
 
 	local function query_opt(self, opt)
@@ -1410,10 +1408,13 @@ function _G.sqlpp(init)
 		return pass(self:assert(self:rawprepare(sql, opt)))
 	end
 
-	function cmd:atomic(f, ...)
+	function cmd:atomic(f, onerror, ...)
 		self:query('start transaction')
 		local function pass(ok, ...)
 			self:query(ok and 'commit' or 'rollback')
+			if not ok and onerror then
+				onerror()
+			end
 			return assert(ok, ...)
 		end
 		return pass(pcall(f, ...))
@@ -1656,16 +1657,14 @@ function _G.sqlpp(init)
 		return sql
 	end
 
-	local function set_sql(self, vals, col_map, fields, exclude_col)
+	local function set_sql(self, vals, col_map, fields)
 		local t = {}
 		for _, field in ipairs(fields) do
-			if field.col ~= exclude_col then
-				local val_name = col_map[field.col]
-				if val_name then
-					local v = vals[val_name]
-					if v ~= nil then
-						add(t, self:sqlname(field.col)..' = '..self:sqlval(v, field))
-					end
+			local val_name = col_map[field.col]
+			if val_name then
+				local v = vals[val_name]
+				if v ~= nil then
+					add(t, self:sqlname(field.col)..' = '..self:sqlval(v, field))
 				end
 			end
 		end
@@ -1693,11 +1692,14 @@ function _G.sqlpp(init)
 		local tdef = assertf(self:table_def(tbl), 'invalid table: %s', tbl)
 		local ai_col = auto_increment_col(tdef)
 		local col_map = col_map_arg(col_map, vals)
-		local set_sql = set_sql(self, vals, col_map, tdef.fields, ai_col)
+		local set_sql = set_sql(self, vals, col_map, tdef.fields)
 		local sql
 		if not set_sql then --no fields, special syntax.
 			sql = fmt('insert into %s values ()', self:sqlname(tbl))
 		else
+			if ai_col and vals[col_map[ai_col]] == nil then
+				set_sql = _('%s = last_insert_id(%s), %s', ai_col, ai_col, set_sql)
+			end
 			sql = fmt(outdent(or_update and [[
 				insert into %s set
 					%s
