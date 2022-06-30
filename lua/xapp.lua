@@ -90,6 +90,9 @@ local function xapp(...)
 		start()
 	end
 
+	app.before = before
+	app.after = after
+
 	function app:run_cmd(cmd_name, cmd_fn, ...)
 		if cmd_name == 'run' then
 			return cmd_fn(cmd_name, ...)
