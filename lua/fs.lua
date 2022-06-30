@@ -76,8 +76,8 @@ FILESYSTEM OPS
 	[try_]mkdir(dir, [recursive], [perms], [quiet]) -> dir    make directory
 	[try_]rm[dir|file](path, [quiet])             remove directory or file
 	[try_]rm_rf(path, [quiet])                    like `rm -rf`
-	[try_]mkdirs(file, [quiet]) -> file           make file's dir
-	[try_]mv(old_path, new_path, [quiet])         rename/move file or dir on the same filesystem
+	[try_]mkdirs(file, [perms], [quiet]) -> file     make file's dir
+	[try_]mv(old_path, new_path, [perms], [quiet])   rename/move file or dir on the same filesystem
 SYMLINKS & HARDLINKS
 	[try_]mksymlink(symlink, path, is_dir, [quiet])  create a symbolic link for a file or dir
 	[try_]mkhardlink(hardlink, path, [quiet])     create a hard link for a file
@@ -90,7 +90,7 @@ COMMON PATHS
 	appdir([appname]) -> path                     get the current user's app data dir
 	scriptdir() -> path                           get the directory of the main script
 	vardir() -> path                              get script's private r/w directory
-	varpath(file) -> path                         get vardir-relative path
+	varpath(...) -> path                          get vardir-relative path
 LOW LEVEL
 	file_wrap_handle(HANDLE) -> f                 wrap opened HANDLE (Windows)
 	file_wrap_fd(fd) -> f                         wrap opened file descriptor
@@ -870,8 +870,8 @@ function try_mkdir(dir, recursive, perms, quiet)
 	end
 end
 
-function try_mkdirs(file)
-	local ok, err = try_mkdir(assert(path_dir(file)))
+function try_mkdirs(file, perms, quiet)
+	local ok, err = try_mkdir(assert(path_dir(file)), true, perms, quiet)
 	if not ok then return nil, err end
 	return file
 end
@@ -950,7 +950,9 @@ local function try_rm_rf(path, quiet)
 	return try_rmdir_recursive(path, quiet)
 end
 
-function try_mv(old_path, new_path, quiet)
+function try_mv(old_path, new_path, perms, quiet)
+	local ok, err = try_mkdirs(new_path, perms, quiet)
+	if not ok then return false, err end
 	local ok, err = _mv(old_path, new_path)
 	if not ok then return false, err end
 	log(quiet and '' or 'note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
@@ -1141,8 +1143,8 @@ vardir = memoize(function()
 	return config'vardir' or indir(scriptdir(), 'var')
 end)
 
-function varpath(file, ...)
-	return indir(vardir(), file, ...)
+function varpath(...)
+	return indir(vardir(), ...)
 end
 
 --file attributes ------------------------------------------------------------
