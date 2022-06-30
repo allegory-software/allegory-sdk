@@ -592,10 +592,14 @@ function path_combine(s1, s2, pl, sep, default_sep)
 end
 
 --make a path by combining dir with one or more path components.
-function indir(dir, file, ...)
-	if not file then return dir end
-	local p = assert(path_combine(dir, file))
-	return indir(p, ...)
+local type, select = type, select
+function indir(dir, ...)
+	if select('#', ...) == 0 then return dir end
+	local s = ...
+	local ts = type(s)
+	assert(ts == 'number' or ts == 'string', 'indir: invalid arg type')
+	local p = assert(path_combine(dir, s))
+	return indir(p, select(2, ...))
 end
 
 --Convert a path (of any type) into a rel path that is relative to `pwd`.
