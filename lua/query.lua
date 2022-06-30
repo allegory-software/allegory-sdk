@@ -187,7 +187,8 @@ function create_db(ns)
 	local db = db(ns, true)
 	local dbname = dbname(ns)
 	db:create_db(dbname)
-	db:use(dbname)
+	local schema = conn_opt(ns or false).schema
+	db:use(dbname, schema)
 	return db
 end
 
