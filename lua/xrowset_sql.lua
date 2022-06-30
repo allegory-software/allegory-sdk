@@ -180,6 +180,9 @@ function sql_rowset(...)
 			assert(rs.select_all, 'select_all missing')
 			function rs:load_rows(res, param_vals)
 				local db = isfunc(rs.db) and rs.db(param_vals) or db(rs.db)
+				if rs.get_params then
+					param_vals = rs:get_params(param_vals)
+				end
 				local rows, fields, params = db:query(load_opt, rs.select_all, param_vals)
 				if configure then
 					configure(fields)
@@ -273,14 +276,22 @@ function table_rowset(tbl, opt)
 	opt = opt or empty
 	local tdef = table_def(tbl)
 	local rw_cols = opt.rw_cols
-	if not rw_cols then
+	local cols = opt.cols
+	if not cols then
 		for i,f in ipairs(tdef.fields) do
-			--
+			add(cols, f.col)
 		end
 	end
+	if not rw_cols then
+		rw_cols = {}
+		for i,f in ipairs(tdef.fields) do
+			add(rw_cols, f.col)
+		end
+		rw_cols = cat(rw_cols, ' ')
+	end
 	return sql_rowset(update({
-		select = format('select %s from %s', sqlnames, sqlname(tbl)),
-		where = opt.detail and '%s in (:param:filter)',
+		select = format('select %s from %s', cat(cols, ', '), sqlname(tbl)),
+		where_all = opt.detail and '%s in (:param:filter)',
 		pk = tdef.pk,
 		hide_cols = opt.detail and tdef.pk..(' '..opt.hide_cols or ''),
 		insert_row = function(self, row)
