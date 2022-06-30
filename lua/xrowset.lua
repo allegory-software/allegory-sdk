@@ -567,7 +567,7 @@ action['xrowset.events'] = function()
 		--the sending thread if suspended and finish it so the server can
 		--clean up the accept thread. this works because the client shouldn't
 		--send anything anymore so recv() should only return on close.
-		local tcp = http_req().http.tcp
+		local tcp = http_req().http.f
 		local buf = u8a(1)
 		while tcp:recv(buf, 1) == 1 do
 			--this shouldn't happen, but sometimes we do get data on this pipe.
