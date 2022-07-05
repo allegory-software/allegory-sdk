@@ -834,12 +834,16 @@ dir_ct = typeof[[
 	}
 ]]
 
-function dir.close(dir)
+function dir.try_close(dir)
 	if dir:closed() then return true end
 	local ok = C.closedir(dir._dirp) == 0
 	if not ok then return check(false) end
 	dir._dirp = nil
 	return true
+end
+
+function dir.close(dir)
+	assert(dir:try_close())
 end
 
 function dir_ready(dir)

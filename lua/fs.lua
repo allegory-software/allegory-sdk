@@ -50,7 +50,7 @@ DIRECTORY LISTING
 	  d:path() -> s                               full path of the dir entry
 	  d:attr([attr, ][deref]) -> t|val            get/set dir entry attribute(s)
 	  d:is(type, [deref]) -> t|f                  check if dir entry is of type
-	scandir([path]) -> iter() -> sc               recursive dir iterator
+	scandir(path|{path1,...}, [dive]) -> iter() -> sc     recursive dir iterator
 	  sc:close()
 	  sc:closed() -> true|false
 	  sc:name([depth]) -> s
@@ -59,7 +59,6 @@ DIRECTORY LISTING
 	  sc:relpath([depth]) -> s
 	  sc:attr([attr, ][deref]) -> t|val
 	  sc:depth([n]) -> n (from 1)
-	searchpaths({path1,...}, file, [type]) -> path
 FILE ATTRIBUTES
 	[try_]file_attr(path, [attr, ][deref]) -> t|val     get/set file attribute(s)
 	file_is(path, [type], [deref]) -> t|f         check if file exists or is of a certain type
@@ -112,7 +111,7 @@ MEMORY MAPPING
 FILESYSTEM INFO
 	fs_info(path) -> {size=, free=}               get free/total disk space for a path
 HI-LEVEL APIs
-	[try_]load[_tobuffer](path, [ignore_fsize]) -> buf,len  read file to string or buffer
+	[try_]load[_tobuffer](path, [default], [ignore_fsize]) -> buf,len  read file to string or buffer
 	[try_]save(path, s, [sz], [perms], [quiet])   atomic save value/buffer/array/read-results
 	file_saver(path) -> f(v | buf,len | t | read) atomic save writer function
 	touch(file, [mtime], [btime], [quiet])
@@ -401,11 +400,13 @@ ls([dir], [opt]) -> d, next
 
 		Check if dir entry is of type.
 
-scandir([path]) -> iter() -> sc
+scandir(path|{path1,...}, [dive]) -> iter() -> sc
 
-	Recursive dir walker. All sc methods return `nil, err` if an error occured
-	on the current dir entry, but the iteration otherwise continues.
-	`depth` arg can be 0=sc:depth(), 1=first-level, -1=parent-level, etc.
+	Recursive dir walker. All sc methods return `nil,err` if an error occured
+	on the current dir entry, but the iteration otherwise continues, unless
+	you call close() to stop it.
+	* `depth` arg can be 0=sc:depth(), 1=first-level, -1=parent-level, etc.
+	* `dive(sc) -> true` is an optional filter to skip from diving into dirs.
 
 	sc:close()
 	sc:closed() -> true|false
@@ -1055,8 +1056,8 @@ function rm_rf(path, quiet)
 	check('fs', 'rm_rf', ok, '%s: %s', path, err)
 end
 
-function mv(old_path, new_path, quiet)
-	local ok, err = try_mv(old_path, new_path, quiet)
+function mv(old_path, new_path, perms, quiet)
+	local ok, err = try_mv(old_path, new_path, perms, quiet)
 	if ok then return new_path, err end
 	check('fs', 'mv', ok, 'old: %s\nnew: %s\nerror: %s',
 		old_path, new_path, err)
@@ -1299,7 +1300,7 @@ function dir.is(dir, type, deref)
 	return dir:attr('type', deref) == type
 end
 
-function scandir(path)
+local function scandir1(path, dive)
 	local pds = {}
 	local next, d = ls(path)
 	local name, err
@@ -1341,31 +1342,42 @@ function scandir(path)
 	local function iter()
 		if not d then return nil end --closed
 		if name and d:is('dir', false) then
-			local next1, d1 = ls(d:path())
-			assert(next1 == next)
-			push(pds, d)
-			d = d1
+			if not dive or dive(d) then
+				local next1, d1 = ls(d:path())
+				assert(next1 == next)
+				push(pds, d)
+				d = d1
+			end
 		end
+		--TODO: error reporting!
 		name, err = next(d)
 		if name == nil then
 			d = pop(pds)
-			if d then
-				return iter()
-			else
-				return nil
-			end
+			return iter()
 		end
 		return sc
 	end
 	return iter
 end
-
-function searchpaths(paths, file, type)
-	for _,path in ipairs(paths) do
-		local abs_path = indir(path, file)
-		if file_is(abs_path, type) then
-			return abs_path
+function scandir(arg)
+	if isstr(arg) then
+		return scandir1(arg)
+	elseif istab(arg) then
+		local i, n = 1, arg.n or #arg
+		local iter = scandir1(arg[i])
+		return function()
+			::again::
+			local sc = iter()
+			if not sc then
+				if i == n then return nil end
+				i = i + 1
+				iter = scandir1(arg[i])
+				goto again
+			end
+			return sc
 		end
+	else
+		assertf(false, 'string or table expected, got: %s', type(arg))
 	end
 end
 
@@ -1605,8 +1617,8 @@ function try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
 	return buf, len
 end
 
-function try_load(file, ignore_file_size)
-	local buf, len = try_load_tobuffer(file, ignore_file_size)
+function try_load(file, default, ignore_file_size)
+	local buf, len = try_load_tobuffer(file, default, ignore_file_size)
 	if not buf then return nil, len end
 	return str(buf, len)
 end
@@ -1686,7 +1698,7 @@ local function _save(file, s, sz, perms)
 		return false, _(err_msg, tmpfile, err, rm_err)
 	end
 
-	local ok, err = try_mv(tmpfile, file, true)
+	local ok, err = try_mv(tmpfile, file, nil, true)
 	if not ok then
 		local err_msg = 'could not move file %s -> %s: %s'
 		local ok, rm_err = try_rmfile(tmpfile, true)
