@@ -7,12 +7,13 @@ SESSIONS
 
 	login([auth][, switch_user]) -> usr       login and set lang (if not set)
 	usr([field|'*']) -> val | t | usr         get current user field(s) or id
+	tenant()                                  get current tenant
 	admin([role]) -> t|f                      user has admin rights or role
 	touch_usr()                               update user's atime
 	gen_auth_token(email) -> token            generate a one-time long-lived auth token
 	gen_auth_code('email', email) -> code     generate a one-time short-lived auth code
 	gen_auth_code('phone', phone) -> code     generate a one-time short-lived auth code
-	create_user([email], [roles]) -> usr      create an authenicable user with assigned roles
+	create_or_update_user({k->v}) -> usr      create an authenicable user with assigned roles
 	clear_userinfo_cache([usr])               clear usr table cache
 
 SCHEMA
@@ -26,7 +27,6 @@ CONFIG
 	session_cookie_secure_flag   true        set Secure flag to cookie
 	auto_create_user             true        auto-create anonymous users
 	allow_create_user            true        allow create new users on auth
-	dev_email                    'dev@HOST'  dev (i.e. super-admin) email
 
 	auth_token_lifetime          3600        forgot-password token lifetime
 	auth_token_maxcount          2           max unexpired tokens allowed
@@ -161,8 +161,16 @@ function auth_schema()
 
 	import'schema_std'
 
+	tables.tenant = {
+		tenant      , idpk,
+		name        , name,
+		active      , bool1,
+		ctime       , ctime,
+	}
+
 	tables.usr = {
 		usr         , idpk    ,
+		tenant      , id      , fk,
 		anonymous   , bool1   ,
 		email       , email   , uk,
 		emailvalid  , bool0   ,
@@ -202,7 +210,7 @@ function auth_schema()
 
 	if _G.multilang() then
 
-		import'webb_lang'
+		import'lang'
 
 		add_cols('usr after note', {
 			lang        , lang    , weak_fk,
@@ -213,23 +221,28 @@ function auth_schema()
 
 end
 
-function create_user(email, roles)
-	email = email or config'dev_email' or config'host' and 'dev@'..config'host'
-	query([[
-		insert into usr
-			(anonymous, email, emailvalid, roles)
-		values
-			(0, ?, 0, ?) as new
-		on duplicate key update
-			anonymous  = new.anonymous,
-			email      = new.email,
-			emailvalid = new.emailvalid,
-			roles      = new.roles
-		]], email, roles or 'dev admin')
+--RULE: 'admin' roles can only create and update users with the same tenant as them.
+--RULE: 'dev' roles can create and update users with any tenant including no tenant.
+--RULE: 'admin' roles cannot create or update 'dev' roles.
+function create_or_update_user(t)
+	t = update({}, t)
+	t.anonymous = false
+	t.roles = isstr(t.roles) and index(words(t.roles)) or t.roles
+	local roles = http_request() and usr'roles' or {dev = true, admin = true}
+	allow(roles.admin or roles.dev, 'must be admin or dev to create user')
+	allow(roles.dev or not (t.roles and t.roles.dev), 'only devs can create/update devs')
+	allow(roles.dev or t.tenant == tenant())
+	t.roles = t.roles ~= nil and cat(t.roles, ' ') or nil
+	local usr = insert_or_update_row('usr', t)
+	clear_userinfo_cache(usr)
 end
 
 qmacro.usr = function()
 	return sqlval(usr())
+end
+
+qmacro.tenant = function()
+	return sqlval(tenant())
 end
 
 --config ---------------------------------------------------------------------
@@ -299,7 +312,7 @@ local function load_session()
 		return {id = sid, usr = usr}
 	end
 end
-local session = http_once_per_req(function()
+local session = http_once_per_request(function()
 	return load_session() or {}
 end)
 
@@ -402,6 +415,7 @@ local userinfo = memoize(function(usr)
 	local t = first_row([[
 		select
 			usr,
+			tenant,
 			anonymous,
 			email,
 			emailvalid,
@@ -447,6 +461,7 @@ local function create_user()
 	wait(0.1) --make flooding up the table a bit slower
 	local usr = query([[
 		insert into usr set
+			tenant = $tenant(),
 			clientip = :clientip,
 			#if multilang()
 			lang = :lang,
@@ -485,8 +500,13 @@ end
 
 local function email_pass_usr(email, pass)
 	local u = first_row([[
-		select usr, pass from usr where
-			active = 1 and email = ?
+		select u.usr, u.pass
+		from usr u
+		left join tenant t on t.tenant = u.tenant
+		where
+			u.active = 1
+			and coalesce(t.active, 1) = 1
+			and u.email = ?
 		]], email, bcrypt_hash(pass))
 	return u and bcrypt_verify(pass, u.pass) and u.usr or nil
 end
@@ -513,8 +533,13 @@ end
 function auth.nopass(auth)
 	if false then
 		return first_row([[
-			select usr from usr where
-				active = 1 and email = ?
+			select u.usr
+			from usr u
+			left join tenant t on t.tenant = u.tenant
+			where
+				u.active = 1
+				and coalesce(t.active, 1) = 1
+				and email = ?
 			]], auth.email)
 	end
 end
@@ -644,8 +669,12 @@ local function token_usr(token)
 		select ut.usr, ut.validates from
 			usrtoken ut
 			inner join usr u on u.usr = ut.usr
+			left join tenant t on t.tenant = u.tenant
 		where
-			u.active = 1 and ut.expires > now() and ut.token = ?
+			u.active = 1
+			and coalesce(t.tenant, 1) = 1
+			and ut.expires > now()
+			and ut.token = ?
 		]], secret_hash(token))
 	if not t then return end
 	return t.usr, t.validates
@@ -703,6 +732,7 @@ function login(auth, switch_user)
 		save_usr(usr)
 		setlang(userinfo(usr).lang) --user lang has priority over action lang.
 	end
+	settenant(1) --TODO: remove this
 	return usr, err
 end
 
@@ -718,6 +748,15 @@ function usr(attr)
 	else
 		return usr
 	end
+end
+
+function tenant()
+	login() --force login
+	return getthreadenv()._tenant or usr'tenant'
+end
+
+function settenant(tenant)
+	getownthreadenv()._tenant = tenant
 end
 
 function admin(role)

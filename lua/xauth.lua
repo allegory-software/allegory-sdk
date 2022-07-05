@@ -31,12 +31,6 @@ require'xrowset_sql'
 jsfile'x-auth.js'
 cssfile'x-auth.css'
 
-Sfile[[
-webb_auth.lua
-x-auth.js
-xauth.lua
-]]
-
 wwwfile['x-auth.css'] = [[
 
 .breadcrumbs {
@@ -192,7 +186,7 @@ action['sign_in_email.json'] = function()
 	local subj = S('sign_in_email_subject', 'Your sign-in code')
 	local text = render('sign_in_email_text', {code = code, host = host()})
 	local html = render('sign_in_email_html', {code = code, host = host()})
-	sendmail{from = noreply, to = email, subject = subj, text = text, html = html}
+	try_sendmail{from = noreply, to = email, subject = subj, text = text, html = html}
 	return {ok = true}
 end
 
@@ -210,6 +204,7 @@ rowset.users = sql_rowset{
 	allow = 'admin',
 	select = [[
 		select
+			tenant      ,
 			usr         ,
 			active      ,
 			emailvalid  ,
@@ -240,21 +235,13 @@ rowset.users = sql_rowset{
 	},
 	where_all = 'anonymous = 0',
 	pk = 'usr',
-	order_by = 'active desc, ctime desc',
+	order_by = 'tenant, active desc, ctime desc',
 	insert_row = function(self, row)
-		row.anonymous = false
-		self:insert_into('usr', row, [[
-			active emailvalid email title name phonevalid phone sex birthday
-			newsletter roles note anonymous
-		]])
-		clear_userinfo_cache(row['usr:old'])
+		create_or_update_user(row)
 	end,
 	update_row = function(self, row)
-		self:update_into('usr', row, [[
-			active emailvalid email title name phonevalid phone sex birthday
-			newsletter roles note
-		]])
-		clear_userinfo_cache(row['usr:old'])
+		row.usr = row['usr:old']
+		create_or_update_user(row)
 	end,
 	delete_row = function(self, row)
 		self:delete_from('usr', row)
