@@ -152,10 +152,6 @@ TIME & DATES
 	day    ([utc, ][t], [plus_days]) -> ts     time at day's beginning from t
 	month  ([utc, ][t], [plus_months]) -> ts   time at month's beginning from t
 	year   ([utc, ][t], [plus_years]) -> ts    time at year's beginning from t
-	duration(s, ['approx[+s]'|'long']) -> s    format a duration in seconds
-	timeago([utc, ]t[, from_t]) -> s           format relative time
-	timeofday(seconds) -> s                    format time of day
-	week_start(country) -> n                   week start in country; 0=Sunday
 ERRORS
 	assertf(v[,fmt,...]) -> v      assert with error message formatting
 	fpcall(f, ...) -> ok,...       pcall with finally/onerror
@@ -174,7 +170,6 @@ ERRORS
 	pcall(f, ...) -> ok,...                 pcall that stores traceback in `e.traceback`
 	lua_pcall(f, ...) -> ok,...             Lua's pcall renamed (no tracebacks)
 	protect([classes, ]f, [oncaught]) -> f  turn raising f into nil,err-returning
-
 MODULES
 	module([name, ][parent]) -> M  create a module
 	autoload(t, submodules) -> M   autoload table keys from submodules
@@ -1603,82 +1598,6 @@ function year(utc, t, offset)
 	return time(false, d.year + (offset or 0))
 end
 
-do
-local t = {}
-function duration(s, format) -- approx[+s] | long | nil
-	if format == 'approx' then
-		if s > 2 * 365 * 24 * 3600 then
-			return format('%d years', floor(s / (365 * 24 * 3600)))
-		elseif s > 2 * 30.5 * 24 * 3600 then
-			return format('%d months', floor(s / (30.5 * 24 * 3600)))
-		elseif s > 1.5 * 24 * 3600 then
-			return format('%d days', floor(s / (24 * 3600)))
-		elseif s > 2 * 3600 then
-			return format('%d hours', floor(s / 3600))
-		elseif s > 2 * 60 then
-			return format('%d minutes', floor(s / 60))
-		elseif s > 60 then
-			return '1 minute'
-		elseif format == 'approx+s' then
-			return format('%d seconds', s)
-		else
-			return 'seconds'
-		end
-	else
-		local d = floor(s / (24 * 3600))
-		local s = s - d * 24 * 3600
-		local h = floor(s / 3600)
-		local s = s - h * 3600
-		local m = floor(s / 60)
-		local s = s - m * 60
-		if format == 'long' then
-			for i=#t,1,-1 do t[i]=nil end
-			local i=1
-			if d ~= 0            then t[i] = d; t[i+1] = d > 1 and 'days'    or 'day'   ; i=i+2 end
-			if h ~= 0            then t[i] = h; t[i+1] = h > 1 and 'hours'   or 'hour'  ; i=i+2 end
-			if m ~= 0            then t[i] = m; t[i+1] = m > 1 and 'minutes' or 'minute'; i=i+2 end
-			if s ~= 0 or #t == 0 then t[i] = s; t[i+1] = s > 1 and 'seconds' or 'second'; i=i+2 end
-			return concat(t, ' ')
-		else
-			if d ~= 0 then return format('%dd%02dh%02dm%02ds', d, h, m, s) end
-			if h ~= 0 then return format('%dh%02dm%02ds', h, m, s) end
-			if m ~= 0 then return format('%dm%02ds', m, s) end
-			if 1 ~= 0 then return format('%ds', s) end
-		end
-	end
-end
-end
-
---format relative time, eg. `3 hours ago` or `in 2 weeks`.
-local duration = duration
-local abs = math.abs
-function timeago(utc, time, from_time)
-	if type(utc) ~= 'boolean' then --shift arg#1
-		utc, time, from_time = false, utc, time, from_time
-	end
-	local s = (from_time or time(utc)) - time
-	return format(s > 0 and '%s ago' or 'in %s', duration(abs(s), 'approx'))
-end
-
-function timeofday(t, with_seconds)
-	local h = floor(t / 3600) % 24
-	local m = floor(t / 60) % 60
-	local s = t % 60
-	return format(with_seconds and '%02d:%02d:%02d' or '%02d:%02d', h, m, s)
-end
-
-local wso = { -- fri=1, sat=2, sun=3
-	MV=1,
-	AE=2,AF=2,BH=2,DJ=2,DZ=2,EG=2,IQ=2,IR=2,JO=2,KW=2,LY=2,OM=2,QA=2,SD=2,SY=2,
-	AG=3,AS=3,AU=3,BD=3,BR=3,BS=3,BT=3,BW=3,BZ=3,CA=3,CN=3,CO=3,DM=3,DO=3,ET=3,
-	GT=3,GU=3,HK=3,HN=3,ID=3,IL=3,IN=3,JM=3,JP=3,KE=3,KH=3,KR=3,LA=3,MH=3,MM=3,
-	MO=3,MT=3,MX=3,MZ=3,NI=3,NP=3,PA=3,PE=3,PH=3,PK=3,PR=3,PT=3,PY=3,SA=3,SG=3,
-	SV=3,TH=3,TT=3,TW=3,UM=3,US=3,VE=3,VI=3,WS=3,YE=3,ZA=3,ZW=3,
-}
-function week_start(country) --sun=0, mon=1, sat=-1, fri=-2
-	return (wso[country] or 4) - 3
-end
-
 --error handling -------------------------------------------------------------
 
 local xpcall = xpcall
@@ -2197,15 +2116,25 @@ end
 --interpreter ----------------------------------------------------------------
 
 local loadstring = loadstring
-function eval(s, ...)
-	local f = assert(loadstring('return '..s))
-	return f(...)
-end
-
-function peval(s, ...)
+function try_eval(s, ...)
 	local f, err = loadstring('return '..s)
 	if not f then return false, err end
 	return pcall(f, ...)
+end
+function eval(s, ...)
+	return assert(loadstring('return '..s))(...)
+end
+
+local loadfile = loadfile
+function try_eval_file(s, ...)
+	local f, err = loadfile(s)
+	if not f then return false, err end
+	local ok, ret = pcall(f, ...)
+	if not ok then return nil, ret end
+	return ret
+end
+function eval_file(s, ...)
+	return assert(loadfile(s))(...)
 end
 
 --bits -----------------------------------------------------------------------
