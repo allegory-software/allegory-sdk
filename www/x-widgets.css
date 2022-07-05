@@ -118,7 +118,7 @@
 	--x-bg-grid-editor             : var(--x-bg-popup);
 
 	--x-item-border-width          : 1px; /* needed to show rows with errors */
-	--x-grid-cell-line-height      : 1.1em;
+	--x-grid-cell-line-height      : 1.2em;  /* TODO: this is brittle */
 
 }
 
@@ -1960,6 +1960,13 @@ textarea.x-editbox-input {
 
 }
 
+x-tabs-fixed-header {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+}
+
 .x-tabs[tabs_side=left ],
 .x-tabs[tabs_side=right] { flex-flow: row; }
 
@@ -1989,7 +1996,7 @@ textarea.x-editbox-input {
 }
 
 .x-tabs-title {
-	padding: .5em 1em;
+	padding: .5em .8em .3em .8em;
 	white-space: nowrap;
 	text-overflow: ellipsis;
 	overflow: hidden;
