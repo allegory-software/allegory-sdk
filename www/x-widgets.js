@@ -1836,7 +1836,7 @@ widget_items_widget = function(e) {
 
 	function diff_items(t, cur_items) {
 
- 		t = isstr(t) ? t.names() : t
+		t = isstr(t) ? t.words() : t
 
 		if (same_items(t, cur_items))
 			return cur_items
@@ -1928,6 +1928,10 @@ component('x-tabs', 'Containers', function(e) {
 	serializable_widget(e)
 	let html_items = widget_items_widget(e)
 
+	e.fixed_header = html_items.find(e => e.tag == 'x-tabs-fixed-header')
+	if (e.fixed_header)
+		html_items.remove_value(e.fixed_header)
+
 	e.prop('tabs_side', {store: 'var', type: 'enum', enum_values: ['top', 'bottom', 'left', 'right'], default: 'top', attr: true})
 
 	e.prop('can_rename_items', {store: 'var', type: 'bool', default: false})
@@ -1941,7 +1945,7 @@ component('x-tabs', 'Containers', function(e) {
 
 	e.selection_bar = div({class: 'x-tabs-selection-bar'})
 	e.add_button = div({class: 'x-tabs-tab x-tabs-add-button fa fa-plus', tabindex: 0})
-	e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.add_button)
+	e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.add_button, e.fixed_header)
 	e.content = div({class: 'x-tabs-content x-container'})
 	e.add(e.header, e.content)
 
@@ -1990,8 +1994,7 @@ component('x-tabs', 'Containers', function(e) {
 		e.header.clear()
 		for (let item of e.items)
 			add_item(item)
-		e.header.add(e.selection_bar)
-		e.header.add(e.add_button)
+		e.header.add(e.selection_bar, e.add_button, e.fixed_header)
 
 		if (sel_tab && sel_tab.parent) // tab was kept
 			select_tab(sel_tab)
@@ -2597,7 +2600,7 @@ component('x-action-band', 'Input', function(e) {
 
 	e.init = function() {
 		let ct = e
-		for (let s of e.layout.names()) {
+		for (let s of e.layout.words()) {
 			if (s == '<') {
 				ct = div({style: `
 						flex: auto;
