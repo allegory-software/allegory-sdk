@@ -3,7 +3,7 @@
 	daemon apps
 	Written by Cosmin Apreutesei. Public Domain.
 
-	daemon(app_name, cmdline_args...) -> app
+	daemon(cmdline_args...) -> app
 
 	cmd_server     cmdline section for server control
 
