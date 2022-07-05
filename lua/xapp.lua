@@ -22,10 +22,6 @@ require'xrowset'
 require'xmodule'
 require'schema'
 
-Sfile[[
-schema_std.lua
-]]
-
 function load_opensans()
 	css[[
 	body {
@@ -56,19 +52,6 @@ x-widgets.css
 jsfile[[
 markdown-it.js
 markdown-it-easy-tables.js
-x-widgets.js
-x-nav.js
-x-input.js
-x-listbox.js
-x-grid.js
-x-module.js
-]]
-
-Sfile[[
-webb.lua
-webb_query.lua
-webb_spa.lua
-xapp.lua
 x-widgets.js
 x-nav.js
 x-input.js
@@ -112,8 +95,6 @@ local function xapp(...)
 	end)
 
 	config('body_classes', 'x-container')
-
-	Sfile(scriptname..'.lua')
 
 	app.schema = schema()
 

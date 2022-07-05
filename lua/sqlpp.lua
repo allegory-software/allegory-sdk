@@ -201,7 +201,7 @@ macros.
 Select queries return `cols` as a second return value which contains the
 metadata for the fields of the result set. For fields that can be traced
 back to their origin tables, the metadata will be augmented with information
-from the [schema] at `cmd.schemas.DB` which you have to assign yourself.
+from the schema at `cmd.schemas.DB` which you have to assign yourself.
 The schema can be defined manually or it can be taken from the server.
 
 #### Example
@@ -1652,7 +1652,7 @@ function _G.sqlpp(init)
 		end
 		local sql = cat(t)
 		if security_filter then
-			sql = '('..sql..') and ('..security_filter..')'
+			sql = '('..sql..') and ('..self:sqlquery(security_filter)..')'
 		end
 		return sql
 	end

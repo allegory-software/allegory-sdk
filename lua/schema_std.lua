@@ -118,32 +118,44 @@ return function()
 	types.timeofday = {type = 'timeofday', align = 'center', mysql_type = 'time', tarantool_type = 'number',
 		to_number   = time_to_seconds,
 		from_number = seconds_to_time,
+		has_seconds = false,
 	}
-	types.timeofday_s = {timeofday, has_seconds = true}
+	types.timeofday_s = {timeofday}
 
-	types.timeofday_in_seconds = {type = 'timeofday_in_seconds', align = 'center', mysql_type = 'double', tarantool_type = 'number'}
-	types.timeofday_in_seconds_s = {timeofday_in_seconds, has_seconds = true}
+	types.timeofday_in_seconds = {
+		type = 'timeofday_in_seconds',
+		align = 'center', mysql_type = 'double', tarantool_type = 'number',
+		has_seconds = false,
+	}
+	types.timeofday_in_seconds_s = {timeofday_in_seconds}
 
 	types.date      = {type = 'date', mysql_type = 'date', tarantool_type = 'number',
+		w = 80,
 		mysql_to_sql       = date_to_sql,
 		mysql_to_tarantool = datetime_to_timestamp,
 		to_number          = datetime_to_timestamp,
 		from_number        = timestamp_to_datetime,
+		has_time = false,
+		has_seconds = false,
 	}
-	types.datetime   = {date, mysql_type = 'datetime', has_time = true, w = 80}
-	types.datetime_s = {datetime, has_seconds = true}
+	types.datetime   = {date, mysql_type = 'datetime',
+		w = 140,
+		has_time = true,
+		has_seconds = false,
+	}
+	types.datetime_s = {datetime, has_seconds = true, w = 160}
 	types.timeago    = {datetime_s, timeago = true}
 
 	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `datetime` instead,
 	--which works the same as `timestamp` as long as you set the server timezone to UTC.
-	--types.timestamp   = {date, mysql_type = 'timestamp', has_time = true}
-	--types.timestamp_s = {date, mysql_type = 'timestamp', has_time = true, has_seconds = true}
+	--types.timestamp   = {date, mysql_type = 'timestamp', has_time = true, has_seconds = false}
+	--types.timestamp_s = {date, mysql_type = 'timestamp', has_time = true}
 
 	--timestamp-based types to use in virtual rowsets (no parsing, holds time() values).
 	types.time_date    = {double, type = 'time', align = 'center', tarantool_type = 'number'}
-	types.time         = {time_date, has_time = true, w = 80}
-	types.time_s       = {time, has_seconds = true}
-	types.time_ms      = {time, has_ms = true}
+	types.time         = {time_date, has_time = true, has_seconds = false, has_ms = false, w = 80}
+	types.time_s       = {time, has_ms = false}
+	types.time_ms      = {time}
 	types.time_timeago = {time_s, timeago = true}
 
 	types.duration   = {double, type = 'duration', align = 'right'}
