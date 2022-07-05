@@ -630,10 +630,10 @@ function nav_widget(e) {
 
 	// fields utils -----------------------------------------------------------
 
-	let fld     = col => isstr(col) || isnum(col) ? assert(e.all_fields[col]) : col
-	let optfld  = col => isstr(col) || isnum(col) ? e.all_fields[col] : col
+	let fld = col => (isstr(col) || isnum(col)) ? assert(e.all_fields[col], 'invalid col: {0}', col) : col
+	let optfld  = col => (isstr(col) || isnum(col)) ? e.all_fields[col] : col
 	let fldname = col => fld(col).name
-	let colsarr = cols => isstr(cols) ? cols.names() : cols
+	let colsarr = cols => isstr(cols) ? cols.words() : cols
 
 	function flds(cols) {
 		let fields = cols && colsarr(cols).map(fld)
@@ -989,14 +989,14 @@ function nav_widget(e) {
 
 	let user_cols = () =>
 		e.cols != null &&
-		e.cols.names().filter(function(col) {
+		e.cols.words().filter(function(col) {
 			let f = e.all_fields[col]
 			return f && !f.internal
 		})
 
 	let rowset_cols = () =>
 		e.rowset && e.rowset.cols &&
-		e.rowset.cols.names().filter(function(col) {
+		e.rowset.cols.words().filter(function(col) {
 			let f = e.all_fields[col]
 			return f && !f.internal
 		})
@@ -1165,7 +1165,7 @@ function nav_widget(e) {
 
 	function param_map(params) {
 		let m = map()
-		for (let s of params.names()) {
+		for (let s of params.words()) {
 			let p = s.split('=')
 			let param = p && p[0] || s
 			let col = p && (p[1] || p[0]) || param
@@ -1929,7 +1929,7 @@ function nav_widget(e) {
 			return
 		let tree = e.tree_index(all_cols, opt.range_defs, opt.rows).tree()
 		let root_group = []
-		let depth = col_groups[0].names().length-1
+		let depth = col_groups[0].words().length-1
 		function add_group(t, path, text_path, parent_group, parent_group_level) {
 			let group = []
 			group.key_cols = col_groups[parent_group_level]
@@ -1939,7 +1939,7 @@ function nav_widget(e) {
 			let level = parent_group_level + 1
 			let col_group = col_groups[level]
 			if (col_group) { // more group levels down...
-				let depth = col_group.names().length-1
+				let depth = col_group.words().length-1
 				flatten(t, [], [], depth, add_group, group, level)
 			} else { // last group level, t is the array of rows.
 				group.push(...t)
@@ -2258,7 +2258,7 @@ function nav_widget(e) {
 			field.sort_dir = null
 			field.sort_priority = null
 		}
-		for (let s1 of (order_by || '').names()) {
+		for (let s1 of (order_by || '').words()) {
 			let m = s1.split(':')
 			let name = m[0]
 			let field = e.all_fields[name]
@@ -2379,7 +2379,7 @@ function nav_widget(e) {
 	e.and_expr = function(cols, vals) {
 		let expr = ['&&']
 		let i = 0
-		for (let col of cols.names())
+		for (let col of cols.words())
 			expr.push(['===', col, vals[i++]])
 		return expr
 	}
@@ -3095,7 +3095,7 @@ function nav_widget(e) {
 		if (field.lookup_nav_reset) {
 			ln.on('reset'       , field.lookup_nav_reset, on)
 			ln.on('rows_changed', field.lookup_nav_display_vals_changed, on)
-			for (let col of field.lookup_cols.names())
+			for (let col of field.lookup_cols.words())
 				ln.on('cell_state_changed_for_'+col, field.lookup_nav_cell_state_changed, on)
 			if (field.display_field)
 				ln.on('cell_state_changed_for_'+field.display_field.name,
@@ -4922,7 +4922,7 @@ component('x-lookup-dropdown', function(e) {
 	date.to_text = function(v) {
 		let t = this.to_time(v, true)
 		if (t == null) return v
-		return t.date(null, this.has_time)
+		return t.date(null, this.has_time, this.has_seconds)
 	}
 
 	date.from_text = function(s) {
@@ -5160,7 +5160,7 @@ component('x-lookup-dropdown', function(e) {
 
 	enm.editor = function(opt) {
 		return list_dropdown(assign_opt({
-			items: this.enum_values,
+			items: words(this.enum_values),
 			format: enm.format,
 			mode: opt.embedded ? 'fixed' : null,
 			val_col: 0,
@@ -5183,10 +5183,8 @@ component('x-lookup-dropdown', function(e) {
 		}, opt))
 	}
 
-	tags.convert = function(v) {
-		if (!(v && v.length))
-			return null
-		return [...set(v)]
+	tags.format = function(v) {
+		return isarray(v) ? v.join(' ') : v
 	}
 
 	// colors
@@ -5363,8 +5361,8 @@ function init_rowset_events() {
 	if (es) return
 	es = new EventSource('/xrowset.events')
 	es.onmessage = function(ev) {
-		let a = ev.data.names()
-		let [rowset_name, filter] = a.shift().replaceAll(':', ' ').names()
+		let a = ev.data.words()
+		let [rowset_name, filter] = a.shift().replaceAll(':', ' ').words()
 		let navs = rowset_navs[rowset_name]
 		if (navs)
 			for (let nav of navs)
