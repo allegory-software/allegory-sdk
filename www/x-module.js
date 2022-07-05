@@ -207,12 +207,12 @@ function init_xmodule(opt) {
 			return
 		module = xm.selected_module || module
 		let layer = module && xm.active_layers[module+':'+slot]
-		if (!layer) {
-			warn('prop-val-lost', '['+module+':'+slot+']', id, k, json(v))
-			return
-		}
 		if (serialize)
 			v = serialize(k, v)
+		if (!layer) {
+			warn('prop-val-lost', '['+module+':'+slot+']', id, k, v)
+			return
+		}
 		let t = attr(layer.props, id)
 		if (t[k] === v) // value already stored.
 			return
