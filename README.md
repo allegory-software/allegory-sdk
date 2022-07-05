@@ -73,6 +73,7 @@ scripts for new libraries.
   * [daemon](lua/daemon.lua)           - Scaffold/boilerplate for writing server apps
   * [cmdline](lua/cmdline.lua)         - Command-line arg processing
   * [pbuffer](lua/pbuffer.lua)         - Dynamic binary buffer for decoding and encoding
+  * [lang](lua/lang.lua)               - Multi-language, country and currency support
 * __Platform APIs__
   * [fs](lua/fs.lua)                   - Filesystems, pipes, memory mapping
   * [proc](lua/proc.lua)               - Async process execution with I/O redirection
