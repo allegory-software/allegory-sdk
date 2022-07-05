@@ -578,9 +578,9 @@ action['xrowset.events'] = function()
 		end
 	end, 'xrowset.events-wait'))
 	local rowsets = {}
-	local req = http_req()
+	local req = http_request()
 	changed_rowsets[req] = rowsets
-	onrequestfinish(function()
+	http_request():onfinish(function()
 		changed_rowsets[req] = nil
 	end)
 	while true do

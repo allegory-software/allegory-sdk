@@ -157,7 +157,7 @@ function db(ns, without_current_db)
 	local renv = tenv and tenv.http_request
 	if renv and thread == renv.thread then
 		if not renv._release_dbs then
-			onrequestfinish(release_dbs)
+			http_request():onfinish(release_dbs)
 			renv._release_dbs = true
 		end
 	end

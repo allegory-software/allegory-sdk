@@ -51,6 +51,7 @@ CONFIG
 ]==]
 
 require'webb_action'
+require'lang'
 
 local client_configs = {}
 
@@ -97,12 +98,13 @@ end
 
 --simple API to add js and css snippets and files from server-side code
 
-local function sepbuffer(sep)
+local function sepbuffer(sep, onadd)
 	local buf = stringbuffer()
 	return function(s, sz)
 		if s then
 			buf(s, sz)
 			buf(sep)
+			if onadd then onadd(s, sz) end
 		else
 			return buf()
 		end
@@ -114,12 +116,24 @@ wwwfile['all.css.cat'] = function()
 	return cssfile() .. ' inline.css' --append inline code at the end
 end
 
-jsfile = sepbuffer'\n'
+jsfile = sepbuffer('\n', function(files)
+	for _,file in ipairs(catlist_files(files)) do
+		if not action[file] then --won't run actions for this.
+			S_ids_add_js(file, wwwfile(file))
+		end
+	end
+end)
 wwwfile['all.js.cat'] = function()
 	return jsfile() .. ' inline.js' --append inline code at the end
 end
 
-htmlfile = sepbuffer'\n'
+htmlfile = sepbuffer('\n', function(files)
+	for _,file in ipairs(catlist_files(files)) do
+		if not action[file] then --won't run actions for this.
+			S_ids_add_html(file, wwwfile(file))
+		end
+	end
+end)
 wwwfile['_all.html.cat'] = function()
 	return htmlfile() .. ' _inline.html'
 end
@@ -136,12 +150,16 @@ wwwfile['inline.css'] = function()
 	return css()
 end
 
-js = sepbuffer';\n'
+js = sepbuffer(';\n', function(s)
+	S_ids_add_js('inline.js', s)
+end)
 wwwfile['inline.js'] = function()
 	return js()
 end
 
-html = sepbuffer'\n'
+html = sepbuffer('\n', function(s)
+	S_ids_add_html('_inline.html', s)
+end)
 wwwfile['_inline.html'] = function()
 	return html()
 end
@@ -240,7 +258,7 @@ function spa_action()
 	t.country = country()
 
 	local html = record(outcatlist, '_all.html.cat')
-	t.body = filter_lang(html, lang())
+	t.body = html_filter_lang(html, lang())
 	t.body_classes = config'body_classes'
 	t.body_attrs = config'body_attrs'
 	t.head = config'head'

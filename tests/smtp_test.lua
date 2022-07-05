@@ -10,11 +10,10 @@ config('ca_file', exedir()..'/../../tests/cacert.pem')
 logging.debug = true
 
 config('smtp_host' , 'mail.bpnpart.com')
---config('smtp_port' , 587)
 --config('smtp_tls'  , false)
 config('smtp_user' , 'admin@bpnpart.com')
 config('smtp_pass' , 'Bpnpart@0@0')
-config('smtp_debug', 'protocol errors stream tracebacks')
+config('smtp_debug', 'protocol stream')
 
 run(function()
 

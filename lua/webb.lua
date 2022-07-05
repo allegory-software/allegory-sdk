@@ -12,47 +12,21 @@ FEATURES
   * standalone operation without a web server for debugging and offline scripts
   * output buffering stack
   * file serving with cache control
-  * http error responses via exceptions
   * rendering with mustache templates, php-like templates and Lua scripts
   * multi-language html with server-side language filtering
   * online js and css bundling and minification
-  * multipart email sending via SMTP
 
   * webb_action : action-based routing module with multi-language URLs
-  * webb_query  : SQL query module with implicit connection pool
   * webb_spa    : SPA module with client-side action-based routing
   * webb_auth   : Session-based authentication module
-
-MULTI-LANGUAGE & MULTI-COUNTRY SUPPORT
-
-	lang([k])                               get lang or lang property for current request
-	setlang(lang)                           set lang of current request
-	default_lang()                          get the default lang
-	multilang()                             check if the app is multilanguage
-	langinfo[lang] -> {k->v}                static language property table
-
-	country([k])                            get country or country property for current request
-	setcountry(country, [if_not_set])       set country of current request
-	default_country()                       get the default country
-	countryinfo[country] -> {k->v}          static country property table
-
-MULTI-LANGUAGE STRINGS IN SOURCE CODE
-
-	S(id, en_s, ...) -> s                   get Lua string in current language
-	Sf(id, en_s) -> f(...) -> s             create a getter for a string in current language
-	S_for(ext, id, en_s, ...) -> s          get Lua/JS/HTML string in current language
-	S_texts(lang, ext) -> s                 get stored translated strings
-	update_S_texts(lang, ext, {id->s})      update stored translated strings
-	Sfile'file1 ...'                        register source code file
-	Sfile_ids() -> {id->{file=,n=,en_s=}    parse source code files for S() calls
 
 REQUEST CONTEXT
 
 	http_request() -> req                   get current request's shared context
 	  req.fake -> t|f                       context is fake (we're on cmdline)
-	  req.request_id                        unique request id (for naming temp files)
-	once(f, ...)                            memoize for current request
-	once_per_conn(f, ...)                   memoize for current connection
+	http_request_env()
+	http_once_per_request(f, ...)           memoize for current request
+	http_once_per_connection(f, ...)        memoize for current connection
 
 REQUEST
 
@@ -103,24 +77,21 @@ URL ENCODING
 
 RESPONSE
 
-	http_error(res)                         raise a http error
-	redirect(url[, status])                 exit with "302 Moved temporarily"
 	checkfound(ret, err) -> ret             exit with "404 Not found"
 	checkarg(ret, err) -> ret               exit with "400 Bad request"
 	check500(ret, err) -> ret               exit with "500 Server error"
 	allow(ret, err) -> ret                  exit with "403 Forbidden"
 	check_etag(s)                           exit with "304 Not modified"
-	onrequestfinish(f)                      add a request finalizer
 	setconnectionclose()                    close the connection after this request.
 
 FILESYSTEM
 
+	wwwdir(), libwwwdir()                   www paths
 	wwwpath(file, [type]) -> path           get www subpath (and check if exists)
 	wwwfile(file, [default]) -> s           get www file contents
 	wwwfile.filename <- s|f(filename)       set virtual www file contents
 	wwwfiles([filter]) -> {name->true}      list www files
 	tmppath([pattern], [t]) -> path         make a tmp file path
-	outfile(file)                           output a file with mtime-based etag checking
 
 MUSTACHE TEMPLATES
 
@@ -143,8 +114,8 @@ LUA SCRIPTS
 
 HTML FILTERS
 
-	filter_lang(s, lang) -> s               filter <t> tags and foo:lang attrs
-	filter_comments(s) -> s                 filter <!-- --> comments
+	html_filter_lang(s, lang) -> s          filter <t> tags and foo:lang attrs
+	html_filter_comments(s) -> s            filter <!-- --> comments
 
 FILE CONCATENATION LISTS
 
@@ -168,6 +139,8 @@ require'rect'
 require'mustache'
 require'xxhash'
 require'http_server'
+require'smtp'
+require'resolver'
 
 --http server wiring ---------------------------------------------------------
 
@@ -176,7 +149,7 @@ local function req()
 	local tenv = getthreadenv()
 	return tenv and tenv.http_request
 end
-http_req = req
+http_request = req
 
 local function respond(req)
 	req.res = {headers = {}}
@@ -197,12 +170,8 @@ end
 
 --context-free utils ---------------------------------------------------------
 
-function onrequestfinish(f)
-	req():onfinish(f)
-end
-
 --per-request memoization.
-function http_once_per_req(f)
+function http_once_per_request(f)
 	return function(...)
 		local req = req()
 		local mf = req[f]
@@ -215,7 +184,7 @@ function http_once_per_req(f)
 end
 
 --per-connection memoization.
-function http_once_per_conn(f)
+function http_once_per_connection(f)
 	return function(...)
 		local req = req()
 		local mf = req.http[f]
@@ -415,11 +384,6 @@ checkfound = checkfunc(404, 'not found')
 checkarg   = checkfunc(400, 'invalid argument')
 allow      = checkfunc(403, 'not allowed')
 check500   = checkfunc(500, 'internal error')
-
-function redirect(url)
-	--TODO: make it work with relative paths
-	http_error{status = 303, headers = {location = url}}
-end
 
 function check_etag(s)
 	if not method'get' then return s end
@@ -661,14 +625,14 @@ end
 
 --filesystem API -------------------------------------------------------------
 
-local function wwwdir()
+function wwwdir()
 	return config'www_dir'
 		or config('www_dir', indir(scriptdir(), 'www'))
 end
 
-local function libwwwdir()
+function libwwwdir()
 	return config'libwww_dir'
-		or config('libwww_dir', indir(scriptdir(), 'sdk', 'www'))
+		or config('libwww_dir', indir(exedir(), '..', '..', 'www'))
 end
 
 function tmppath(patt, t)
@@ -701,8 +665,13 @@ local function file_object(findfile) --{filename -> content | handler(filename)}
 			elseif f then
 				return f
 			else
-				local file = findfile(file)
-				return file and load(file, default)
+				local file, err = findfile(file)
+				if file then
+					return load(file, default)
+				else
+					assert(default ~= nil, err)
+					return default
+				end
 			end
 		end,
 	})
@@ -740,202 +709,6 @@ function wwwfiles(filter)
 	end
 	return t
 end
-
---multi-language support with stubs ------------------------------------------
-
-langinfo = {
-	en = {
-		rtl = false,
-		en_name = 'English',
-		name = 'English',
-		decimal_separator = ',',
-		thousands_separator = '.',
-	},
-}
-
-function default_lang()
-	return config('default_lang', 'en')
-end
-
-function lang(k)
-	local req = req()
-	local lang = req and req.lang or default_lang()
-	if not k then return lang end
-	local t = assert(langinfo[lang])
-	local v = t[k]
-	assert(v ~= nil)
-	return v
-end
-
-function setlang(lang)
-	if not lang or not langinfo[lang] then return end --missing or invalid lang: ignore.
-	req().lang = lang
-end
-
-countryinfo = {
-	US = {
-		lang = 'en',
-		currency = 'USD',
-		imperial_system = true,
-		week_start_offset = 0,
-		en_name = 'United States',
-		date_format = 'mm-dd-yyyy',
-	},
-}
-
-function default_country()
-	return config('default_country', 'US')
-end
-
-function country(k)
-	local country = req().country or default_country()
-	if not k then return country end
-	local t = assert(countryinfo[country])
-	local v = t[k]
-	assert(v ~= nil)
-	return v
-end
-
-function setcountry(country, if_not_set)
-	local req = req()
-	if if_not_set and req.country then return end
-	req.country = country and countryinfo(country) and country or default_country()
-end
-
-function multilang()
-	return config('multilang', true)
-end
-
---multi-language strings in source code files --------------------------------
-
-do
-
-local files = {}
-local ids --{id->{files=,n=,en_s}}
-
-function Sfile(filenames)
-	update(files, index(collect(words(filenames))))
-	ids = nil
-end
-
-function Sfile_template(ids, file, s)
-
-	local function add_id(id, en_s)
-		local ext_id ='html:'..id
-		local t = ids[ext_id]
-		if not t then
-			t = {files = file, n = 1, en_s = en_s}
-			ids[ext_id] = t
-		else
-			t.files = t.files .. ' ' .. file
-			t.n = t.n + 1
-		end
-	end
-
-	--<t s=ID>EN_S</t>
-	for id, en_s in s:gmatch'<t%s+s=([%w_%-]+).->(.-)</t>' do
-		add_id(id, en_s)
-	end
-
-	--replace attr:s:ID="EN_S" and attr:s:ID=EN_S
-	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=(%b"")' do
-		en_s = en_s:sub(2, -2)
-		add_id(id, en_s)
-	end
-	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=([^%s>]*)' do
-		add_id(id, en_s)
-	end
-end
-
-function Sfile_ids()
-	if not ids then
-		ids = {}
-		for file in pairs(files) do
-			local ext = path_fileext(file)
-			local s
-			if ext == 'js' then
-				s = wwwfile(file)
-			elseif ext == 'lua' then
-				s = load(indir(config'app_dir', file), false)
-						or load(indir(config'app_dir', 'sdk', 'lua', file))
-			end
-			for id, en_s in s:gmatch"[^%w_]Sf?%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
-				local ext_id = ext..':'..id
-				local t = ids[ext_id]
-				if not t then
-					t = {files = file, n = 1, en_s = en_s}
-					ids[ext_id] = t
-				else
-					t.files = t.files .. ' ' .. file
-					t.n = t.n + 1
-				end
-			end
-		end
-		for i,k in ipairs(template()) do
-			local s = template(k)
-			if isfunc(s) then --template getter/generator
-				s = s()
-			end
-			Sfile_template(ids, k, s)
-		end
-	end
-	return ids
-end
-
---using a different file for js strings so that strings.js only sends
---js strings to the client for client-side translation.
-local function s_file(lang, ext)
-	return varpath(format('%s-s-%s%s.lua', config'app_name', lang,
-		ext == 'lua' and '' or '-'..ext))
-end
-
---TODO: invalidate this cache based on file's mtime but don't check too often.
-S_texts = function(lang, ext)
-	local s = load(s_file(lang, ext), false)
-	return s and loadstring(s)() or {}
-end
-
-local function save_S_texts(lang, ext, t)
-	save(s_file(lang, ext), 'return '..pp(t, '\t'))
-end
-
-function update_S_texts(lang, ext, t)
-	local texts = S_texts(lang, ext)
-	for k,v in pairs(t) do
-		texts[k] = v or nil
-	end
-	save_S_texts(lang, ext, texts)
-end
-
-function S_for(ext, id, en_s, ...)
-	local lang = lang()
-	local t = S_texts(lang, ext)
-	local s = t[id]
-	if not s then
-		local dlang = default_lang()
-		if dlang ~= 'en' and dlang ~= lang then
-			s = S_texts(dlang, ext)
-		end
-	end
-	s = s or en_s or ''
-	if select('#', ...) > 0 then
-		return subst(s, ...)
-	else
-		return s
-	end
-end
-
-function S(...)
-	return S_for('lua', ...)
-end
-
-function Sf(id, en_s)
-	return function(...)
-		return S_for('lua', id, en_s, ...)
-	end
-end
-
-end --do
 
 --arg validation & decoding --------------------------------------------------
 
@@ -1173,34 +946,61 @@ function run_lua_file(file, env, ...)
 	return compile_lua_file(file)(env, ...)
 end
 
---html filters ---------------------------------------------------------------
+--lang integration -----------------------------------------------------------
 
-function filter_lang(s, lang)
+function S_ids_add_js(file, s)
+	for id, en_s in s:gmatch"[^%w_]Sf?%(%s*'([%w_]+)'%s*,%s*'(.-)'%s*[,%)]" do
+		S_ids_add_id('js', file, id, en_s)
+	end
+end
+
+function S_ids_add_html(file, s)
+
+	local function add_id(id, en_s)
+		S_ids_add_id('html', file, id, en_s)
+	end
+
+	--<t s=ID>EN_S</t>
+	for id, en_s in s:gmatch'<t%s+s=([%w_%-]+).->(.-)</t>' do
+		add_id(id, en_s)
+	end
+
+	--replace attr:s:ID="EN_S" and attr:s:ID=EN_S
+	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=(%b"")' do
+		en_s = en_s:sub(2, -2)
+		add_id(id, en_s)
+	end
+	for id, en_s in s:gmatch'%s[%w_%-]+%:s%:([%w_%-]+)=([^%s>]*)' do
+		add_id(id, en_s)
+	end
+end
+
+function html_filter_lang(s, lang)
 
 	local lang0 = lang
 
 	if config('lang_filter', false) == 'explicit' then
 
-		local function repl_lang(lang)
+		local function remove_lang(lang)
 			if lang ~= lang0 then return '' end
 			return false
 		end
 
-		--replace <t lang=LANG> which can also be hidden via CSS with this syntax.
-		s = s:gsub('<t%s+lang=(%w%w).->.-</t>', repl_lang)
+		--remove `<t lang=LANG>` (can also be hidden via CSS with this syntax).
+		s = s:gsub('<t%s+lang=(%w%w).->.-</t>', remove_lang)
 
-		--replace attr:LANG="TEXT" and attr:LANG=TEXT
-		s = s:gsub('%s[%w_%:%-]+%:(%a%a)=%b""'   , repl_lang)
-		s = s:gsub('%s[%w_%:%-]+%:(%a%a)=[^%s>]*', repl_lang)
+		--remove `attr:LANG="TEXT"` and `attr:LANG=TEXT`.
+		s = s:gsub('%s[%w_%:%-]+%:(%a%a)=%b""'   , remove_lang)
+		s = s:gsub('%s[%w_%:%-]+%:(%a%a)=[^%s>]*', remove_lang)
 
 	end
 
-	--replace `<t s=ID>EN_S</t>` with `S(ID, EN_S)`.
+	--replace `<t s=ID>EN_S</t>`.
 	s = s:gsub('<t%s+s=([%w_%-]+).->(.-)</t>', function(id, en_s)
 		return S_for('html', id, en_s)
 	end)
 
-	--replace attr:s:ID="EN_S" and attr:s:ID=EN_S
+	--replace `attr:s:ID="EN_S"` and `attr:s:ID=EN_S`
 	local function repl_quoted_attr(attr, id, en_s)
 		return attr .. '="' .. S_for('html', id, en_s:sub(2, -2)) .. '"'
 	end
@@ -1213,7 +1013,7 @@ function filter_lang(s, lang)
 	return s
 end
 
-function filter_comments(s)
+function html_filter_comments(s)
 	return (s:gsub('<!%-%-.-%-%->', ''))
 end
 

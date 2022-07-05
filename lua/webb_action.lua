@@ -132,17 +132,17 @@ function setlinks(s)
 	return s
 end
 
---override redirect to automatically translate URLs.
-local webb_redirect = redirect
-function redirect(url, ...)
-	return webb_redirect(href(url), ...)
+--override http_redirect() to automatically translate URLs.
+local _http_redirect = http_redirect
+function http_redirect(url, ...)
+	return _http_redirect(href(url), ...)
 end
 
 --output filters -------------------------------------------------------------
 
 local function html_filter(handler, ...)
 	local s = record(handler, ...)
-	local s = setlinks(filter_lang(filter_comments(s), lang()))
+	local s = setlinks(html_filter_lang(html_filter_comments(s), lang()))
 	check_etag(s)
 	outall(s)
 end

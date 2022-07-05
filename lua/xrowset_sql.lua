@@ -264,6 +264,10 @@ function sql_rowset(...)
 			return pass(self, tbl, update_row(tbl, ...))
 		end
 
+		function rs:insert_or_update_into(tbl, ...)
+			return pass(self, tbl, insert_or_update_row(tbl, ...))
+		end
+
 		function rs:delete_from(tbl, ...)
 			return pass(self, tbl, delete_row(tbl, ...))
 		end
