@@ -56,7 +56,7 @@ let init_usr_nav = function() {
 		let usr = this.row_state_map(this.rows[0], 'val')
 
 		pr('login', usr.usr, usr.email || '(no email)',
-			usr.roles ? usr.roles.names().join(',') : '(no roles)')
+			usr.roles ? usr.roles.words().join(',') : '(no roles)')
 		setglobal('usr', usr)
 
 		if (window.xmodule)
@@ -139,7 +139,7 @@ component('x-usr-button', function(e) {
 	e.bare = true
 	e.text = ''
 	e.icon = 'fa fa-user-circle'
-	e.tabindex = -1
+	e.focusable = false
 
 	let tt
 	e.on('activate', function() {
