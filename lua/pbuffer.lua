@@ -9,7 +9,7 @@
 	pbuffer(pb) -> pb
 		pb.f                              opened file or socket
 		pb.minsize                        read-ahead size (64K)
-		pb.linesize                       max. line size for readline() (8K)
+		pb.linesize                       max. line size for haveline() (8K)
 		pb.lineterm                       line terminator ('\r\n')
 		pb.dict, pb.metatable             see string.buffer doc
 
@@ -38,7 +38,8 @@
 	pb:skip(n, [past_buffer])            skip n bytes
 	pb:seek(offset)                      seek to offset
 
-	pb:readline() -> s                   read line
+	pb:needline() -> s                   read line
+	pb:haveline() -> s                   read line if there is one
 	pb:readn_to(n, write)                read n bytes calling write on each read
 	pb:readall_to(write)                 read to eof calling write on each read
 
@@ -259,7 +260,7 @@ function pb:have(n)
 end
 
 function pb:need(n)
-	self:checkp(self:have(n))
+	self:check_io(self:have(n))
 	return self
 end
 
@@ -302,15 +303,23 @@ end
 
 pb.linesize = 8192
 pb.lineterm = '\r\n'
-function pb:readline() --for line-based protocols like http.
+function pb:haveline() --for line-based protocols like http.
 	local i = 0
 	::again::
 	local s = self:getto(self.lineterm, i, self.linesize)
 	if s then return s end
-	self:checkp(#self < self.linesize, 'line too long')
 	i = #self
-	self:need(#self + 1)
+	self:checkp(i < self.linesize, 'line too long')
+	if i > 0 then --line already started, need to end it
+		self:need(i + 1)
+	elseif not self:have(1) then
+		return nil, 'eof'
+	end
 	goto again
+end
+
+function pb:needline()
+	return self:check_io(self:haveline())
 end
 
 function pb:readn_to(n, write)
