@@ -186,7 +186,7 @@ method(Element, 'class', function(names, enable) {
 	if (arguments.length < 2)
 		enable = true
 	if (names.includes(' ')) {
-		for (let name of names.names())
+		for (let name of names.words())
 			if (enable)
 				this.classList.add(name)
 			else
@@ -216,7 +216,7 @@ property(Element, 'classes', {
 	},
 	set: function(s) {
 		if (s)
-			for (s of s.names())
+			for (s of s.words())
 				this.class(s, true)
 	}
 })
@@ -314,6 +314,7 @@ function bind_component(tag, init, selector) {
 }
 
 method(Element, 'init_component', function() {
+	this.init_child_components()
 	let tagName = this.tagName
 	let init = component_init[tagName]
 	let sel = component_selector[tagName]
@@ -325,15 +326,18 @@ method(Element, 'init_child_components', function() {
 	let n = this.len
 	if (!n)
 		return
-	if (n == 1) { // must be a wrapper
-		let ce = this.at[0]
-		ce.init_child_components()
-		ce.init_component()
+	if (n == 1) { // fast path (must be a wrapper)
+		this.at[0].init_component()
 		return
 	}
 	let children = this.$(component_query)
-	for (let ce of children) // depth-first, so creates children first.
+	// CSS queries are depth-first, but we need to create children first.
+	// Note that reversing the list initializes siblings in reverse order,
+	// that's ok, we don't care about sibling init order.
+	for (let i = children.length-1; i >= 0; i--) {
+		let ce = children[i]
 		component_init[ce.tagName](ce)
+	}
 })
 }
 
@@ -419,7 +423,6 @@ function html(s) {
 // create a HTML element from an attribute map and a list of child nodes.
 function tag(tag, attrs, ...children) {
 	let e = document.createElement(tag)
-	e.init_child_components()
 	e.init_component()
 	e.attrs = attrs
 	if (children)
@@ -764,7 +767,6 @@ function init_components() {
 	root = document.documentElement  // for debugging, don't use in code.
 	body = document.body // for debugging, don't use in code.
 	head = document.head // for debugging, don't use in code.
-	root.init_child_components()
 	root.init_component()
 	root.bind(true)
 }
