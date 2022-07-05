@@ -23,7 +23,6 @@ require'multipart'
 local client = {
 	type = 'smtp_client', debug_prefix = 'm',
 	host = '127.0.0.1',
-	port = 465,
 	tls = true,
 	connect_timeout = 5,
 	sendmail_timeout = 60,
@@ -40,7 +39,7 @@ function smtp_connect(t)
 	self.host_addr = check_io(nil, try_resolve(self.host))
 	self.f = tcp()
 	self.f:settimeout(self.connect_timeout)
-	self.f:connect(self.host_addr, self.port)
+	self.f:connect(self.host_addr, self.port or self.tls and 465 or 587)
 	if self.tls then
 		self.f = self.f:check_io(client_stcp(self.f, self.host, self.tls_options))
 	end
@@ -64,7 +63,7 @@ function smtp_connect(t)
 
 	local function check_reply(match)
 		while true do
-			local s = self.b:readline()
+			local s = self.b:needline()
 			local code, sep = s:match'^(%d%d%d)(.?)'
 			self.f:checkp(tonumber(code), 'invalid response line: %s', s)
 			if sep == ' ' then
