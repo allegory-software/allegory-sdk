@@ -119,8 +119,8 @@ function http:send_request_line(method, uri, http_version)
 end
 
 function http:read_request_line()
-	local method, uri, http_version =
-		self.b:readline():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
+	local line = self.b:needline()
+	local method, uri, http_version = line:match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
 	self:dp('<=', '%s %s HTTP/%s', method, uri, http_version)
 	self.f:checkp(method and (http_version == '1.0' or http_version == '1.1'), 'invalid request line')
 	return http_version, method, uri
@@ -138,7 +138,8 @@ function http:send_status_line(status, message, http_version)
 end
 
 function http:read_status_line()
-	local line = self.b:readline()
+	local line, err = self.b:needline()
+	if not line then return nil, err end
 	local http_version, status, status_message
 		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
 	self:dp('<=', '%s %s %s', status, status_message, http_version)
@@ -188,15 +189,15 @@ end
 
 function http:read_headers(rawheaders)
 	local line, name, value
-	line = self.b:readline()
+	line = self.b:needline()
 	while line ~= '' do --headers end up with a blank line
 		name, value = line:match'^([^:]+):%s*(.*)'
 		self.f:checkp(name, 'invalid header')
 		name = name:lower() --header names are case-insensitive
-		line = self.b:readline()
+		line = self.b:needline()
 		while line:find'^%s' do --unfold any folded values
 			value = value .. line
-			line = self.b:readline()
+			line = self.b:needline()
 		end
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
@@ -241,17 +242,17 @@ function http:read_chunks(write_content)
 	local chunk_num = 0
 	while true do
 		chunk_num = chunk_num + 1
-		local line = self.b:readline()
+		local line = self.b:needline()
 		local len = tonumber(line:gsub(';.*', ''), 16) --len[; extension]
 		self.f:checkp(len, 'invalid chunk size')
 		total = total + len
 		self:dp('<<', '%7d bytes; chunk %d', len, chunk_num)
 		if len == 0 then --last chunk (trailers not supported)
-			self.b:readline()
+			self.b:needline()
 			break
 		end
 		self.b:readn_to(len, write_content)
-		self.b:readline()
+		self.b:needline()
 	end
 	self:dp('<<', '%7d bytes in %d chunks', total, chunk_num)
 end

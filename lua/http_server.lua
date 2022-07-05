@@ -19,6 +19,9 @@ server:new(opt) -> server         Create a server object
 		req:onfinish(f)             add code to run when request finishes
 		req.thread                  the thread that handled the request
 
+http_error(t | status,[content])  raise http error
+http_redirect(url, [status=303])  raise http redirect error
+
 ]=]
 
 if not ... then require'http_server_test'; return end
@@ -282,4 +285,9 @@ function http_error(status, content) --status,[content] | http_response
 		assert(false)
 	end
 	raise(3, 'http_response', err)
+end
+
+--TODO: make it work with relative paths
+function http_redirect(url, status)
+	http_error{status = status or 303, headers = {location = url}}
 end

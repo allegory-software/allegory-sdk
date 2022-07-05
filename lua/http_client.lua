@@ -445,7 +445,7 @@ end
 function client:load_cookies(file)
 	local s, err = try_load(file)
 	if not s then return nil, err end
-	local t, err = peval(s)
+	local t, err = try_eval(s)
 	if not t then return nil, err end
 	self.cookies = t
 end
