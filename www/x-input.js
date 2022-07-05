@@ -55,8 +55,8 @@ function row_widget(e, enabled_without_nav) {
 	e.do_update = function() {
 		let row = e.row
 		e.xoff()
-		e.disable('no_nav', !enabled_without_nav)
 		e.readonly = e.nav && !e.nav.can_change_val(row)
+		e.disable('no_nav', !e.nav && !enabled_without_nav)
 		e.xon()
 		e.do_update_row(row)
 	}
@@ -1687,23 +1687,18 @@ component('x-tagsedit', 'Input', function(e) {
 	e.focus_box = div({class: 'x-focus-box'}, e.input, e.label_box, e.tags_box, e.expand_button)
 	e.add(e.focus_box)
 
-	e.prop('format', {store: 'var', type: 'enum', enum_values: ['names', 'json'], default: 'json', attr: true})
+	e.prop('format', {store: 'var', type: 'enum', enum_values: ['words', 'json'], default: 'json', attr: true})
 
 	function input_val_slice() {
 		let v = e.input_val
-		if (v == null)
-			return []
-		else if (e.format == 'names')
-			return v.names()
-		else
-			return v.slice()
+		v = isstr(v) ? v.words() : v
+		return v == null ? [] : v.slice()
 	}
 
 	function set_val(v, ev) {
-		if (!v.length)
-			v = null
-		else if (e.format == 'names')
-			v = v.remove_duplicates().join(' ')
+		v = v.remove_duplicates()
+		v = e.format == 'words' ? v.join(' ') : v
+		v = v.length ? v : null
 		e.set_val(v, ev)
 	}
 
@@ -3042,7 +3037,7 @@ component('x-chart', 'Input', function(e) {
 		// parse `sum_cols`: `COL1[/AVG|MIN|MAX|SUM][..COL2]`.
 		// the `..` operator ties two line graphs together into a closed shape.
 		let tied_back = false
-		for (let col of e.sum_cols.replaceAll('..', '.. ').names()) {
+		for (let col of e.sum_cols.replaceAll('..', '.. ').words()) {
 			let tied = col.includes('..')
 			col = col.replace('..', '')
 			let agg = 'avg'; col.replace(/\/[^\/]+$/, k => { agg = k; return '' })
@@ -3718,15 +3713,15 @@ component('x-mu', function(e) {
 
 	let load_req
 
-	function load_event(name, ...args) {
+	function load_done(how, ...args) {
 
-		if (name == 'success')
+		if (how == 'success')
 			e.render(args[0], this)
 
-		if (name == 'done')
+		if (how == 'done')
 			load_req = null
 
-		let ev = 'load_'+name
+		let ev = 'load_'+how
 		e.fire(ev, ...args)
 		if (e[ev])
 			e[ev](...args)
@@ -3756,7 +3751,7 @@ component('x-mu', function(e) {
 
 		load_req = ajax(assign({
 			dont_send: true,
-			event: load_event,
+			done: load_done,
 			url: data_url,
 		}, req))
 
