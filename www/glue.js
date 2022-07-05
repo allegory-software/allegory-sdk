@@ -62,7 +62,7 @@ STRINGS
 	s.num(z)
 	s.display_name()
 	s.cat(sep, ...)
-	s.names([sep]) -> a
+	s.words() -> a
 MULTI-LANGUAGE STUBS
 	S(id, default)                         get labeled string in current language
 	lang()                                 get current language
@@ -399,9 +399,13 @@ method(String, 'esc', function() {
 	return this.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // $& means the whole matched string
 })
 
-method(String, 'names', function() {
+method(String, 'words', function() {
 	return this.trim().split(/\s+/)
 })
+
+function words(s) {
+	return isstr(s) ? s.words() : s
+}
 
 // multi-language stubs replaced in webb_spa.js ------------------------------
 
@@ -1704,6 +1708,7 @@ function ajax(req) {
 	}
 
 	function fire(name, arg1, ...rest) {
+
 		if (name == 'done')
 			fire(arg1, ...rest)
 

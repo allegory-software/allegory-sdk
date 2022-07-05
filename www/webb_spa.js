@@ -325,8 +325,8 @@ flap = {}
 function setflaps(new_cx) {
 	if (cur_cx == new_cx)
 		return
-	let cx0 = cur_cx && cur_cx.names().tokeys() || empty
-	let cx1 = new_cx && new_cx.names().tokeys() || empty
+	let cx0 = cur_cx && cur_cx.words().tokeys() || empty
+	let cx1 = new_cx && new_cx.words().tokeys() || empty
 	for (let cx in cx0)
 		if (!cx1[cx]) {
 			let handler = flap[cx]
