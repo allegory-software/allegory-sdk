@@ -417,22 +417,21 @@ function try_pp_save(write, v, ...)
 	if type(write) == 'string' then --path
 		require'fs'
 		local write_protected = assert(file_saver(write))
-		local function write(s)
-			return assert(write_protected(s))
+		function write(s)
+			assert(write_protected(s))
 		end
 	elseif type(write) ~= 'function' then --assume io or fs file object
 		local f = write
-		write = function(s) assert(f:write(s)) end
+		function write(s)
+			assert(f:write(s))
+		end
 	end
 	write'return '
-	local ok, err = pcall(pretty, v, write, 1, nil, args(...))
-	if not ok then
-		local ok1, err1 = write_protected(ABORT)
-		if not ok1 then return false, err1 end
-		return false, err
-	else
+	return pcall(function(...)
+		pretty(v, write, 1, nil, args(...))
+		write()
 		return true
-	end
+	end, ...)
 end
 
 function pp_save(write, v, ...)
