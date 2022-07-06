@@ -105,7 +105,7 @@ end
 
 local client_field_attrs = {
 	internal=1, hidden=1, readonly=1, null_text=1,
-	name=1, type=1, text=1, hint=1, default=1, align=1,
+	name=1, type=1, text=1, hint=1, default=1, client_default=1, align=1,
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, display_width=1,
@@ -124,6 +124,10 @@ function virtual_rowset(init, ...)
 
 	local update_computed_fields
 
+	rs.after = after
+	rs.before = before
+	rs.override = override
+
 	function rs.init_fields(rs)
 
 		local schema = config'db_schema'
@@ -132,8 +136,8 @@ function virtual_rowset(init, ...)
 		end
 
 		local hide_cols = index(collect(words(rs.hide_cols) or empty))
-		local   ro_cols = index(collect(words(rs.  ro_cols) or empty))
-		local   rw_cols = rs.rw_cols and index(collect(words(rs.rw_cols)))
+		local ro_cols = index(collect(words(rs.ro_cols) or empty))
+		local rw_cols = rs.rw_cols and index(collect(words(rs.rw_cols)))
 
 		if rs.pos_col == nil and rs.fields.pos then
 			rs.pos_col = 'pos'
@@ -480,9 +484,9 @@ function virtual_rowset(init, ...)
 	function rs:respond(rowset_name, out_format)
 		rs.name = rowset_name
 		if isfunc(rs.allow) then
-			allow(rs.allow())
+			allow(rs:allow())
 		elseif isstr(rs.allow) then
-			allow(admin(rs.allow))
+			allow(usr('roles')[rs.allow])
 		end
 		local filter = json_decode(args'filter') or {}
 		local params = {}

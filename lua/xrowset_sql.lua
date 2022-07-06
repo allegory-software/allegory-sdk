@@ -293,10 +293,12 @@ function table_rowset(tbl, opt)
 		end
 		rw_cols = cat(rw_cols, ' ')
 	end
-	return sql_rowset(update({
+
+	local rs = sql_rowset(update({
 		select = format('select %s from %s', cat(cols, ', '), sqlname(tbl)),
 		where_all = opt.detail and '%s in (:param:filter)',
 		pk = tdef.pk,
+		order_by = cat(imap(tdef.pk, sqlname), ', '),
 		hide_cols = opt.detail and tdef.pk..(' '..opt.hide_cols or ''),
 		insert_row = function(self, row)
 			self:insert_into(tbl, row, rw_cols)
@@ -308,4 +310,6 @@ function table_rowset(tbl, opt)
 			self:delete_from(tbl, row)
 		end,
 	}, opt))
+
+	return rs
 end
