@@ -2881,7 +2881,7 @@ component('x-image', 'Input', function(e) {
 
 	e.download_btn.on('click', function() {
 		let href = format_url()
-		let name = url(href).segments.last
+		let name = url_decode(href).segments.last
 		let link = tag('a', {href: href, download: name, style: 'display: none'})
 		e.add(link)
 		link.click()

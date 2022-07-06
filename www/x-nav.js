@@ -3736,10 +3736,10 @@ function nav_widget(e) {
 		let s = href(u)
 		let filter = param_vals_filter()
 		if (filter) {
-			let u = url_arg(s)
+			let u = url_decode(s)
 			u.args = u.args || obj()
 			u.args.filter = filter
-			s = url(u)
+			s = url_encode(u)
 		}
 		return s
 	}
