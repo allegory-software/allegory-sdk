@@ -123,10 +123,15 @@ let set_signed_in = function() {
 	let usr = window.usr
 	let signed_out = usr === null
 	let signed_in = usr && usr.anonymous == false || false
-	let signed_in_dev = usr && (usr.roles || '').words().tokeys().dev != null || false
-	setglobal('signed_in', signed_in)
+	let    roles = (usr && usr.roles || '').words().tokeys()
+	let ru_roles = (usr && usr.realusr_roles || '').words().tokeys()
+	setglobal('signed_in' , signed_in)
 	setglobal('signed_out', signed_out)
-	setglobal('signed_in_dev', signed_in_dev)
+	setglobal('signed_in_dev'  , !!(roles && roles.dev))
+	setglobal('signed_in_admin', !!(roles && roles.admin))
+	setglobal('signed_in_realusr_dev'  , !!(ru_roles && ru_roles.dev))
+	setglobal('signed_in_realusr_admin', !!(ru_roles && ru_roles.admin))
+	setglobal('signed_in_anonymous', !!(usr && usr.anonymous))
 }
 
 function init_auth() {
@@ -175,6 +180,17 @@ on('auth_sign_in_button.init', function(e) {
 
 on('auth_sign_out_button.init', function(e) {
 	e.on('activate', function() { sign_out({notify: e}) })
+})
+
+on('usr_usr_dropdown.init', function(e) {
+	e.val = id_arg(current_url.args.usr)
+	e.on('state_changed', function(changes, ev) {
+		if (changes.input_val) {
+			let url = assign(obj(), current_url)
+			url.usr = changes.input_val[0]
+			exec(url_encode(url), {refresh: true})
+		}
+	})
 })
 
 // sign-in form --------------------------------------------------------------

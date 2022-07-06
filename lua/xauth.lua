@@ -105,6 +105,15 @@ template.usr_form = function()
 		<x-if global=signed_in_dev>
 			<x-lookup-dropdown col=tenant></x-lookup-dropdown>
 		</x-if>
+		<x-if global=signed_in_realusr_admin>
+			<x-list-dropdown
+				id=usr_usr_dropdown
+				label:s:en="Impersonate User"
+				rowset_name=usr
+				val_col=usr
+				display_col=email
+			></x-list-dropdown>
+		</x-if>
 		<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
 			<t s=log_out>Log out</t>
 		</x-button>
@@ -296,6 +305,7 @@ rowset.usr = sql_rowset{
 		select
 			tenant      ,
 			usr         ,
+			0 as realusr,
 			anonymous   ,
 			emailvalid  ,
 			email       ,
@@ -307,6 +317,7 @@ rowset.usr = sql_rowset{
 			birthday    ,
 			newsletter  ,
 			roles       ,
+			'' as realusr_roles,
 			#if multilang()
 			lang        ,
 			country     ,
@@ -319,6 +330,8 @@ rowset.usr = sql_rowset{
 			usr
 	]],
 	field_attrs = {
+		realusr = {compute = function() return realusr() end},
+		realusr_roles = {compute = function() return cat(index(realusr'roles'), ' ') end},
 		theme = {
 			type = 'enum',
 			enum_values = {'dark', 'default'},
