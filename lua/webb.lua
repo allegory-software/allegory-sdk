@@ -320,7 +320,7 @@ function scheme(s)
 		return scheme() == s
 	end
 	return headers'x-forwarded-proto'
-		or (req().http.tcp.istlssocket and 'https' or 'http')
+		or (req().http.f.istlssocket and 'https' or 'http')
 end
 
 function host(s)
@@ -330,7 +330,7 @@ function host(s)
 	return headers'x-forwarded-host'
 		or (headers'host' and headers'host'.host)
 		or config'host'
-		or req().http.tcp.local_addr
+		or req().http.f.local_addr
 end
 
 function port(p)
@@ -338,7 +338,7 @@ function port(p)
 		return port() == tonumber(p)
 	end
 	return headers'x-forwarded-port'
-		or req().http.tcp.local_port
+		or req().http.f.local_port
 end
 
 function email(user)
@@ -347,7 +347,7 @@ end
 
 function client_ip()
 	return headers'x-forwarded-for'
-		or req().http.tcp.remote_addr
+		or req().http.f.remote_addr
 end
 
 function isgooglebot()
