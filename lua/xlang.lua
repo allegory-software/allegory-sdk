@@ -299,6 +299,7 @@ end
 --lang picker rowset ---------------------------------------------------------
 
 rowset.lang = sql_rowset{
+	allow = 'admin',
 	select = [[
 		select
 			lang,
