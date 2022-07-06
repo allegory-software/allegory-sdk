@@ -1109,7 +1109,7 @@ do
 					if not job then
 						break
 					end
-					if abs(t - job.expires) <= .05 then --arbitrary threshold.
+					if job.expires - t <= .05 then --arbitrary threshold.
 						expires_heap:pop()
 						job.expires = nil
 						if job.socket then
