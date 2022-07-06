@@ -210,7 +210,8 @@ function init_xmodule(opt) {
 		if (serialize)
 			v = serialize(k, v)
 		if (!layer) {
-			warn('prop-val-lost', '['+module+':'+slot+']', id, k, v)
+			if (module)
+				warn('prop-val-lost', '['+module+':'+slot+']', id, k, v)
 			return
 		}
 		let t = attr(layer.props, id)
