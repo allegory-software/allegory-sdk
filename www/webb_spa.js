@@ -172,12 +172,12 @@ function page_loading() {
 
 let ignore_url_changed
 
-current_url = url_decode(location.href) // this is global
+current_url = url_decode(location.pathname + location.search) // this is global
 
 let url_changed = function(ev) {
 	if (ignore_url_changed)
 		return
-	current_url = url_decode(location.href)
+	current_url = url_decode(location.pathname + location.search)
 	let opt = ev && ev.detail || empty
 	fire('url_changed', opt)
 	let handler = action_handler(current_url)
