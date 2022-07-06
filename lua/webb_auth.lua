@@ -5,15 +5,14 @@
 
 SESSIONS
 
-	login([auth][, switch_user]) -> usr       login and set lang (if not set)
+	login([auth][, switch_user]) -> realusr   login and set lang (if not set)
 	usr([field|'*']) -> val | t | usr         get current user field(s) or id
 	tenant()                                  get current tenant
-	admin([role]) -> t|f                      user has admin rights or role
-	touch_usr()                               update user's atime
+	touch_usr([usr])                          update (current) user's atime
 	gen_auth_token(email) -> token            generate a one-time long-lived auth token
 	gen_auth_code('email', email) -> code     generate a one-time short-lived auth code
 	gen_auth_code('phone', phone) -> code     generate a one-time short-lived auth code
-	create_or_update_user({k->v}) -> usr      create an authenicable user with assigned roles
+	create_or_update_user({k->v}) -> usr      create or update a user
 	clear_userinfo_cache([usr])               clear usr table cache
 
 SCHEMA
@@ -39,23 +38,19 @@ API DOC
 
 	Login using an auth object (see below).
 
-usr() -> usr | nil, err
+[real]usr() -> usr | nil, err
 
 	Get the current user id. Same as calling `login()` without args but
 	caches the usr so it can be called multiple times without actually
 	performing the login.
 
-usr(field) -> v | nil, err
+[real]usr(field) -> v | nil, err
 
 	Get the value of a a specific field from the user info.
 
-usr'*' -> t | nil, err
+[real]usr'*' -> t | nil, err
 
 	Get full user info.
-
-admin([role]) -> t|f
-
-	Returns true if the user has the admin rights or a certain role.
 
 touch_usr()
 
@@ -170,7 +165,7 @@ function auth_schema()
 
 	tables.usr = {
 		usr         , idpk    ,
-		tenant      , id      , fk,
+		tenant      , id      , not_null, fk,
 		anonymous   , bool1   ,
 		email       , email   , uk,
 		emailvalid  , bool0   ,
@@ -180,7 +175,7 @@ function auth_schema()
 		name        , name    ,
 		phone       , strid   ,
 		phonevalid  , bool0   ,
-		sex         , enum'M F',
+		sex         , enum'M F O',
 		birthday    , date    ,
 		newsletter  , bool0   ,
 		roles       , text    ,
@@ -222,11 +217,10 @@ function auth_schema()
 end
 
 --RULE: 'admin' roles can only create and update users with the same tenant as them.
---RULE: 'dev' roles can create and update users with any tenant including no tenant.
+--RULE: 'dev' roles can create and update users with any tenant.
 --RULE: 'admin' roles cannot create or update 'dev' roles.
 function create_or_update_user(t)
-	t = update({}, t)
-	t.anonymous = false
+	t = update({anonymous = false}, t)
 	t.roles = isstr(t.roles) and index(words(t.roles)) or t.roles
 	local roles = http_request() and usr'roles' or {dev = true, admin = true}
 	allow(roles.admin or roles.dev, 'must be admin or dev to create user')
@@ -235,6 +229,7 @@ function create_or_update_user(t)
 	t.roles = t.roles ~= nil and cat(t.roles, ' ') or nil
 	local usr = insert_or_update_row('usr', t)
 	clear_userinfo_cache(usr)
+	return usr
 end
 
 qmacro.usr = function()
@@ -732,14 +727,39 @@ function login(auth, switch_user)
 		save_usr(usr)
 		setlang(userinfo(usr).lang) --user lang has priority over action lang.
 	end
-	settenant(1) --TODO: remove this
 	return usr, err
 end
 
-function usr(attr)
+function realusr(attr)
 	local usr, err = login()
 	if not usr then
 		return nil, err
+	end
+	local t = userinfo(usr)
+	t.realusr = realusr
+	if attr == '*' then
+		return t
+	elseif attr then
+		return t[attr]
+	else
+		return usr
+	end
+end
+
+function usr(attr)
+	local realusr, err = login()
+	if not realusr then
+		return nil, err
+	end
+	local usr = args'usr' --impersonated user
+	if usr then
+		usr = checkarg(id_arg(usr))
+		local  u = userinfo(usr)
+		local ru = userinfo(realusr)
+		allow(ru.roles.dev or ru.roles.admin and ru.tenant == u.tenant,
+			'user impersonation denied')
+	else
+		usr = realusr
 	end
 	if attr == '*' then
 		return userinfo(usr)
@@ -751,24 +771,15 @@ function usr(attr)
 end
 
 function tenant()
-	login() --force login
-	return getthreadenv()._tenant or usr'tenant'
+	return usr'tenant'
 end
 
-function settenant(tenant)
-	getownthreadenv()._tenant = tenant
-end
-
-function admin(role)
-	return userinfo(usr()).roles[role or 'admin']
-end
-
-function touch_usr()
+function touch_usr(usr)
 	--only touch usr on page requests
 	if args(1):find'%.' and not args(1):find'%.html$' then
 		return
 	end
-	local usr = session_usr()
+	usr = usr or session_usr()
 	if not usr then return end
 	query([[
 		update usr set
