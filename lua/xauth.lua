@@ -105,11 +105,11 @@ template.usr_form = function()
 		<x-if global=signed_in_dev>
 			<x-lookup-dropdown col=tenant></x-lookup-dropdown>
 		</x-if>
-		<x-if global=signed_in_realusr_admin>
+		<x-if global=signed_in_realusr_dev>
 			<x-list-dropdown
 				id=usr_usr_dropdown
 				label:s:en="Impersonate User"
-				rowset_name=usr
+				rowset_name=impersonate_users
 				val_col=usr
 				display_col=email
 			></x-list-dropdown>
@@ -250,7 +250,7 @@ rowset.users = sql_rowset{
 		email    = {not_null = true},
 		roles    = {type = 'tags'},
 	},
-	where_all = 'anonymous = 0',
+	where_all = 'anonymous = 0 and tenant = $tenant()',
 	pk = 'usr',
 	order_by = 'tenant, active desc, ctime desc',
 	insert_row = function(self, row)
@@ -271,6 +271,20 @@ rowset.users = sql_rowset{
 		self:delete_from('usr', row)
 		clear_userinfo_cache(row['usr:old'])
 	end,
+}
+
+rowset.impersonate_users = sql_rowset{
+	allow = function() return realusr'roles'.dev end,
+	select = [[
+		select
+			tenant,
+			usr,
+			email
+		from usr
+	]],
+	where_all = 'anonymous = 0 and usr <> $realusr()',
+	order_by = 'tenant, usr',
+	pk = 'usr',
 }
 
 rowset.tenants = sql_rowset{
@@ -329,6 +343,8 @@ rowset.usr = sql_rowset{
 		from
 			usr
 	]],
+	where_all = 'usr = $usr()',
+	pk = 'usr',
 	field_attrs = {
 		realusr = {compute = function() return realusr() end},
 		realusr_roles = {compute = function() return cat(index(realusr'roles'), ' ') end},
@@ -344,8 +360,6 @@ rowset.usr = sql_rowset{
 			lookup_rowset_name = 'pick_lang',
 		},
 	},
-	where_all = 'usr = $usr()',
-	pk = 'usr',
 	rw_cols = 'tenant name theme lang country',
 	update_row = function(self, row)
 		local is_dev = usr'roles'.dev --only devs can change their tenant

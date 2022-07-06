@@ -330,14 +330,11 @@ method(Element, 'init_child_components', function() {
 		this.at[0].init_component()
 		return
 	}
-	let children = this.$(component_query)
-	// CSS queries are depth-first, but we need to create children first.
-	// Note that reversing the list initializes siblings in reverse order,
-	// that's ok, we don't care about sibling init order.
-	for (let i = children.length-1; i >= 0; i--) {
-		let ce = children[i]
+	// CSS queries are depth-first, so parents are initialized first,
+	// which gives them a chance to remove their children declared in html
+	// before they are initialized as components.
+	for (let ce of this.$(component_query))
 		component_init[ce.tagName](ce)
-	}
 })
 }
 

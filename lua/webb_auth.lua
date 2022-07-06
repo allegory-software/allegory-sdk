@@ -233,13 +233,9 @@ function create_or_update_user(t)
 	return usr
 end
 
-qmacro.usr = function()
-	return sqlval(usr())
-end
-
-qmacro.tenant = function()
-	return sqlval(tenant())
-end
+qmacro.usr     = function() return sqlval(usr()) end
+qmacro.realusr = function() return sqlval(realusr()) end
+qmacro.tenant  = function() return sqlval(tenant()) end
 
 --config ---------------------------------------------------------------------
 
@@ -462,9 +458,6 @@ local function create_user()
 	local tenant = check500(first_row([[
 		select tenant from tenant where host = ?
 	]], host()), 'no tenant for host %s', host())
-	pr'4'
-
-	pr('create_user', tenant)
 
 	local usr = query([[
 		insert into usr set
@@ -769,21 +762,19 @@ function usr(attr)
 		return nil, err
 	end
 	local usr = args'usr' --impersonated user
-	if usr then
-		usr = checkarg(id_arg(usr))
-		local  u = userinfo(usr)
-		local ru = userinfo(realusr)
+	usr = usr and checkarg(id_arg(usr)) or realusr
+	local u  = userinfo(usr)
+	local ru = userinfo(realusr)
+	if usr ~= realusr then
 		allow(ru.roles.dev or ru.roles.admin and ru.tenant == u.tenant,
 			'user impersonation denied')
-		u.realuser = realusr
-		u.realuser_roles = ru.roles
-	else
-		usr = realusr
 	end
+	u.realusr = realusr
+	u.realusr_roles = ru.roles
 	if attr == '*' then
-		return userinfo(usr)
+		return u
 	elseif attr then
-		return userinfo(usr)[attr]
+		return u[attr]
 	else
 		return usr
 	end

@@ -315,11 +315,11 @@ function slug(id, s) {
 
 function id_arg(s) {
 	s = s && s.match(/\d+$/)
-	return s && num(s) || ''
+	return s && num(s) || null
 }
 
 function opt_arg(s) {
-	return s && ('/' + s) || ''
+	return s && ('/' + s) || null
 }
 
 // page flaps ----------------------------------------------------------------

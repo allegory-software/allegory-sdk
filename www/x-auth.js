@@ -127,10 +127,10 @@ let set_signed_in = function() {
 	let ru_roles = (usr && usr.realusr_roles || '').words().tokeys()
 	setglobal('signed_in' , signed_in)
 	setglobal('signed_out', signed_out)
-	setglobal('signed_in_dev'  , !!(roles && roles.dev))
-	setglobal('signed_in_admin', !!(roles && roles.admin))
-	setglobal('signed_in_realusr_dev'  , !!(ru_roles && ru_roles.dev))
-	setglobal('signed_in_realusr_admin', !!(ru_roles && ru_roles.admin))
+	setglobal('signed_in_dev'  , !!roles.dev)
+	setglobal('signed_in_admin', !!roles.admin)
+	setglobal('signed_in_realusr_dev'  , !!ru_roles.dev)
+	setglobal('signed_in_realusr_admin', !!ru_roles.admin)
 	setglobal('signed_in_anonymous', !!(usr && usr.anonymous))
 }
 
@@ -184,10 +184,11 @@ on('auth_sign_out_button.init', function(e) {
 
 on('usr_usr_dropdown.init', function(e) {
 	e.val = id_arg(current_url.args.usr)
+	pr(e.val, id_arg(current_url.args.usr))
 	e.on('state_changed', function(changes, ev) {
 		if (changes.input_val) {
 			let url = assign(obj(), current_url)
-			url.usr = changes.input_val[0]
+			url.args.usr = changes.input_val[0]
 			exec(url_encode(url), {refresh: true})
 		}
 	})

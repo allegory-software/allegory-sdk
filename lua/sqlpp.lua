@@ -19,7 +19,7 @@ Preprocessor features
 	* `?` and `:foo` quoted-value substitutions
 	* `??` and `::foo` quoted-name substitutions
 	* `{foo}` unquoted substitutions
-	* symbol substitutions (for encoding `null` and `default`)
+	* symbol (object) substitutions (for encoding `null` and `default`)
 	* removing double-dash comments (for [mysql])
 
 Backends & writing your own
