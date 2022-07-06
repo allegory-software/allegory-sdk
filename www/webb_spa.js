@@ -15,7 +15,7 @@ CONFIG API
 ACTIONS
 
 	href(url, [lang]) -> url               traslate a URL
-	current_url() -> url                   current URL in the URL bar
+	current_url -> url                     current URL in the URL bar
 	e.sethref([url])                       hook an action to a link
 	e.sethrefs()                           hook actions to all links
 	page_loading() -> t|f                  was current page loaded or exec()'ed?
@@ -93,17 +93,24 @@ let url_action = function(t) {
 // (or current) language if any, or add ?lang= if the given language
 // is not the default language.
 function href(url_s, target_lang) {
-	let t = url_arg(url_s)
-	let default_lang = config('default_lang')
+	let t = url_decode(url_s)
+
+	// add impersonated user if any
+	if (!t.args.usr && current_url.args.usr)
+		t.args.usr = current_url.args.usr
+
 	target_lang = target_lang || t.args.lang || lang()
 	let action = url_action(t)
+
 	if (action === undefined)
-		return url(t)
+		return url_encode(t)
+
 	let is_root = t.segments[1] == ''
 	if (is_root)
 		action = action_name(config('root_action'))
 	let at = config('aliases').to_lang[action]
 	let lang_action = at && at[target_lang]
+	let default_lang = config('default_lang')
 	if (lang_action) {
 		if (!(is_root && target_lang == default_lang))
 			t.segments[1] = lang_action
@@ -112,15 +119,14 @@ function href(url_s, target_lang) {
 			t.args.lang = target_lang
 		}
 	}
-	return url(t)
+	return url_encode(t)
 }
 
 action = obj() // {name->handler}
 
 // given a url (in encoded form), find its action and return the handler.
-let action_handler = function(url_s) {
-	let t = url_arg(url_s)
-	let act = url_action(t)
+let action_handler = function(url) {
+	let act = url_action(url)
 	if (act === undefined)
 		return
 	if (act == '')
@@ -148,12 +154,12 @@ let action_handler = function(url_s) {
 	}
 	if (!handler)
 		return
-	let segs = t.segments
+	let segs = url.segments
 	segs.shift() // remove /
 	segs.shift() // remove act
 	return function(opt) {
-		assign(t, opt)
-		handler.call(null, segs, t)
+		assign(url, opt)
+		handler.call(null, segs, url)
 	}
 }
 
@@ -164,18 +170,17 @@ function page_loading() {
 	return loading
 }
 
-function current_url() {
-	return location.pathname + location.search + location.hash
-}
-
 let ignore_url_changed
+
+current_url = url_decode(location.href) // this is global
 
 let url_changed = function(ev) {
 	if (ignore_url_changed)
 		return
+	current_url = url_decode(location.href)
 	let opt = ev && ev.detail || empty
 	fire('url_changed', opt)
-	let handler = action_handler(current_url())
+	let handler = action_handler(current_url)
 	if (handler)
 		handler(opt)
 	else
@@ -269,7 +274,7 @@ method(Element, 'sethref', function(url, opt) {
 	}
 	url = href(url)
 	this.attr('href', url)
-	let handler = action_handler(url)
+	let handler = action_handler(url_decode(url))
 	if (!handler)
 		return
 	this.on('click', function(ev) {
@@ -296,7 +301,7 @@ bind_component('a', function(e) {
 function settitle(title) {
 	title = title
 		|| $('h1').html()
-		|| url(location.pathname).segments[1].replace(/[-_]/g, ' ')
+		|| url_decode(location.pathname).segments[1].replace(/[-_]/g, ' ')
 	if (title)
 		document.title = title + config('page_title_suffix')
 }
