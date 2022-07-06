@@ -159,6 +159,7 @@ function auth_schema()
 	tables.tenant = {
 		tenant      , idpk,
 		name        , name,
+		host        , name,
 		active      , bool1,
 		ctime       , ctime,
 	}
@@ -221,7 +222,7 @@ end
 --RULE: 'admin' roles cannot create or update 'dev' roles.
 function create_or_update_user(t)
 	t = update({anonymous = false}, t)
-	t.roles = isstr(t.roles) and index(words(t.roles)) or t.roles
+	t.roles = isstr(t.roles) and index(collect(words(t.roles))) or t.roles
 	local roles = http_request() and usr'roles' or {dev = true, admin = true}
 	allow(roles.admin or roles.dev, 'must be admin or dev to create user')
 	allow(roles.dev or not (t.roles and t.roles.dev), 'only devs can create/update devs')
@@ -423,7 +424,10 @@ local userinfo = memoize(function(usr)
 			lang,
 			country,
 			#endif
-			theme
+			theme,
+			atime,
+			ctime,
+			mtime
 		from
 			usr
 		where
@@ -454,9 +458,17 @@ end
 local function create_user()
 	allow(config('allow_create_user', true))
 	wait(0.1) --make flooding up the table a bit slower
+
+	local tenant = check500(first_row([[
+		select tenant from tenant where host = ?
+	]], host()), 'no tenant for host %s', host())
+	pr'4'
+
+	pr('create_user', tenant)
+
 	local usr = query([[
 		insert into usr set
-			tenant = $tenant(),
+			tenant = :tenant,
 			clientip = :clientip,
 			#if multilang()
 			lang = :lang,
@@ -464,8 +476,14 @@ local function create_user()
 			atime = now(),
 			ctime = now(),
 			mtime = now()
-	]], {clientip = client_ip(), lang = lang()}).insert_id
+	]], {
+		tenant = tenant,
+		clientip = client_ip(),
+		lang = lang(),
+	}).insert_id
+
 	session().usr = usr
+
 	return usr
 end
 
@@ -736,7 +754,6 @@ function realusr(attr)
 		return nil, err
 	end
 	local t = userinfo(usr)
-	t.realusr = realusr
 	if attr == '*' then
 		return t
 	elseif attr then
@@ -758,6 +775,8 @@ function usr(attr)
 		local ru = userinfo(realusr)
 		allow(ru.roles.dev or ru.roles.admin and ru.tenant == u.tenant,
 			'user impersonation denied')
+		u.realuser = realusr
+		u.realuser_roles = ru.roles
 	else
 		usr = realusr
 	end
