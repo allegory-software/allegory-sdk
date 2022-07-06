@@ -141,8 +141,8 @@ LOCAL STORAGE
 	save(key, s)
 	load(key) -> s
 URL DECODING, ENCODING AND UPDATING
-	url_arg(s) -> t
-	url(t) -> s
+	url_decode(s) -> t
+	url_envode(t) -> s
 EVENTS
 	event(name|ev, [bubbles], ...args) -> ev
 	e.on   (name|ev, f, [enable], [capture])
@@ -1324,7 +1324,7 @@ function load(key) {
 
 // URL encoding & decoding ---------------------------------------------------
 
-function url_arg(s) {
+function url_decode(s) {
 
 	if (!isstr(s))
 		return s
@@ -1372,7 +1372,7 @@ function url_arg(s) {
 	return {path: path, segments: a, query: query, args: t, fragment: fragment}
 }
 
-function url(t) {
+function url_encode(t) {
 
 	if (!isobject(t))
 		return t
@@ -1595,7 +1595,7 @@ function ajax(req) {
 	let method = req.method || (req.upload ? 'POST' : 'GET')
 	let async = req.async !== false // NOTE: this is deprecated but that's ok.
 
-	xhr.open(method, url(req.url), async, req.user, req.pass)
+	xhr.open(method, url_encode(req.url), async, req.user, req.pass)
 
 	let upload = req.upload
 	if (isobj(upload) || isarray(upload)) {
