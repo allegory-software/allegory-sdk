@@ -1372,6 +1372,7 @@ function url_decode(s) {
 	return {path: path, segments: a, query: query, args: t, fragment: fragment}
 }
 
+// TODO: this only works on urls without scheme and host !
 function url_encode(t) {
 
 	if (!isobject(t))
