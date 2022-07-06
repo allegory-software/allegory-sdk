@@ -14,7 +14,6 @@ TEMPLATES
 ACTIONS
 
 	x-auth.css
-	login.json
 	sign_in_email.json
 	sign_in_phone.json
 
@@ -103,6 +102,9 @@ template.usr_form = function()
 		<x-lookup-dropdown col=country  ></x-lookup-dropdown>
 		{{/multilang}}
 		<x-enum-dropdown col=theme></x-enum-dropdown>
+		<x-if global=signed_in_dev>
+			<x-lookup-dropdown col=tenant></x-lookup-dropdown>
+		</x-if>
 		<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
 			<t s=log_out>Log out</t>
 		</x-button>
@@ -225,8 +227,14 @@ rowset.users = sql_rowset{
 		from
 			usr
 	]],
-	cols = 'usr email title name roles active birthday newsletter atime ctime mtime',
+	cols = [[
+		tenant usr email title name roles active birthday newsletter atime ctime mtime
+	]],
 	field_attrs = {
+		tenant   = {
+			default = function() return tenant() end,
+			readonly = function() return not usr'roles'.dev end,
+		},
 		note     = {hidden = true  },
 		clientip = {hidden = true  },
 		name     = {not_null = true},
@@ -237,16 +245,47 @@ rowset.users = sql_rowset{
 	pk = 'usr',
 	order_by = 'tenant, active desc, ctime desc',
 	insert_row = function(self, row)
-		create_or_update_user(row)
+		row.tenant = row.tenant or tenant()
+		allow(usr'roles'.dev or row.tenant == tenant(),
+			'only devs can create users of other tenants')
+		row.usr = create_or_update_user(row)
 	end,
 	update_row = function(self, row)
 		row.usr = row['usr:old']
+		allow(usr'roles'.dev or row.tenant == tenant(),
+			'only devs can move users to other tenants')
 		create_or_update_user(row)
 	end,
 	delete_row = function(self, row)
+		allow(usr'roles'.dev or row.tenant == tenant(),
+			'only devs can remove users of other tenants')
 		self:delete_from('usr', row)
 		clear_userinfo_cache(row['usr:old'])
 	end,
+}
+
+rowset.tenants = sql_rowset{
+	allow = 'dev',
+	select = [[
+		select
+			tenant,
+			active,
+			name,
+			ctime
+		from tenant
+	]],
+	pk = 'tenant',
+	rw_cols = 'active name',
+	order_by = 'tenant',
+	insert_row = function(self, row)
+		self:insert_into('tenant', row, 'active name')
+	end,
+	update_row = function(self, row)
+		self:update_into('tenant', row, 'active name')
+	end,
+	delete_row = function(self, row)
+		self:delete_from('tenant', row)
+	end
 }
 
 rowset.usr = sql_rowset{
@@ -255,6 +294,7 @@ rowset.usr = sql_rowset{
 	end,
 	select = [[
 		select
+			tenant      ,
 			usr         ,
 			anonymous   ,
 			emailvalid  ,
@@ -282,7 +322,10 @@ rowset.usr = sql_rowset{
 		theme = {
 			type = 'enum',
 			enum_values = {'dark', 'default'},
-			enum_texts = {dark = 'Dark', default = 'Default'},
+			enum_texts = {
+				dark = S('theme_dark', 'Dark'),
+				default = S('theme_default', 'Default'),
+			},
 		},
 		lang = {
 			lookup_rowset_name = 'pick_lang',
@@ -290,10 +333,10 @@ rowset.usr = sql_rowset{
 	},
 	where_all = 'usr = $usr()',
 	pk = 'usr',
-	rw_cols = 'name theme lang country',
+	rw_cols = 'tenant name theme lang country',
 	update_row = function(self, row)
-		self:update_into('usr', row, 'name theme lang country')
+		local is_dev = usr'roles'.dev --only devs can change their tenant
+		self:update_into('usr', row, 'name theme lang country '..(is_dev and 'tenant' or ''))
 		clear_userinfo_cache(row['usr:old'])
 	end,
 }
-
