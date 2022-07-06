@@ -254,22 +254,17 @@ rowset.users = sql_rowset{
 	pk = 'usr',
 	order_by = 'tenant, active desc, ctime desc',
 	insert_row = function(self, row)
-		row.tenant = row.tenant or tenant()
-		allow(usr'roles'.dev or row.tenant == tenant(),
-			'only devs can create users of other tenants')
-		row.usr = create_or_update_user(row)
+		row.usr = usr_create(row)
+		self:rowset_changed'usr'
 	end,
 	update_row = function(self, row)
 		row.usr = row['usr:old']
-		allow(usr'roles'.dev or row.tenant == tenant(),
-			'only devs can move users to other tenants')
-		create_or_update_user(row)
+		usr_update(row)
+		self:rowset_changed'usr'
 	end,
 	delete_row = function(self, row)
-		allow(usr'roles'.dev or row.tenant == tenant(),
-			'only devs can remove users of other tenants')
-		self:delete_from('usr', row)
-		clear_userinfo_cache(row['usr:old'])
+		usr_delete(row['usr:old'])
+		self:rowset_changed'usr'
 	end,
 }
 

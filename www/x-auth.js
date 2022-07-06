@@ -184,7 +184,6 @@ on('auth_sign_out_button.init', function(e) {
 
 on('usr_usr_dropdown.init', function(e) {
 	e.val = id_arg(current_url.args.usr)
-	pr(e.val, id_arg(current_url.args.usr))
 	e.on('state_changed', function(changes, ev) {
 		if (changes.input_val) {
 			let url = assign(obj(), current_url)
