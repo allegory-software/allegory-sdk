@@ -24,6 +24,11 @@ let init_usr_nav = function() {
 			location.reload()
 	}
 
+	set.tenant = function(v, ev) {
+		if (ev && ev.input)
+			location.reload()
+	}
+
 	function set_val(k, v, ev) {
 		if (set[k])
 			set[k](v, ev)
@@ -56,15 +61,14 @@ let init_usr_nav = function() {
 		let usr = this.row_state_map(this.rows[0], 'val')
 
 		pr('login', usr.usr, usr.email || '(no email)',
-			usr.roles ? usr.roles.words().join(',') : '(no roles)')
+			usr.roles ? (usr.roles || '').words().join(',') : '(no roles)')
 		setglobal('usr', usr)
 
 		if (window.xmodule)
 			xmodule.set_layer(config('app_name'), 'user',
 				config('app_name') + '-user-'+usr.usr)
 
-		let signed_in = usr.anonymous == false
-		set_signed_in(signed_in, !signed_in)
+		set_signed_in()
 
 		for (let field of nav.all_fields)
 			set_val(field.name, nav.cell_val(nav.rows[0], field))
@@ -115,13 +119,18 @@ let init_usr_nav = function() {
 	head.add(nav)
 }
 
-let set_signed_in = function(signed_in, signed_out) {
+let set_signed_in = function() {
+	let usr = window.usr
+	let signed_out = usr === null
+	let signed_in = usr && usr.anonymous == false || false
+	let signed_in_dev = usr && (usr.roles || '').words().tokeys().dev != null || false
 	setglobal('signed_in', signed_in)
 	setglobal('signed_out', signed_out)
+	setglobal('signed_in_dev', signed_in_dev)
 }
 
 function init_auth() {
-	set_signed_in(false, false)
+	set_signed_in()
 	init_usr_nav()
 }
 
@@ -231,7 +240,8 @@ let dialog = memoize(function() {
 })
 
 function sign_in() {
-	set_signed_in(false, true)
+	setglobal('usr', null)
+	set_signed_in()
 	let d = dialog()
 	d.email_edit.val = null
 	d.code_edit.val = null
