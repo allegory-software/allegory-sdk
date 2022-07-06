@@ -4614,7 +4614,7 @@ function nav_widget(e) {
 			return 'no val col'
 		if (!e.val_field) // not loaded yet
 			return
-		let row = e.lookup(e.val_field, [v])[0]
+		let row = e.lookup(e.val_col, [v])[0]
 		return e.row_display_val(row)
 	}
 
