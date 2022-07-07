@@ -64,9 +64,7 @@ local load_s_ids = memoize(function()
 
 	--scan virtual www paths for the same.
 	for file,s in pairs(wwwfile) do
-		if isfunc(s) then
-			s = s()
-		end
+		s = call(s)
 		local ext = path_ext(file)
 		if ext == 'html' then
 			S_ids_add_html(file, s)
@@ -74,6 +72,31 @@ local load_s_ids = memoize(function()
 			S_ids_add_js(file, s)
 		elseif ext == 'lua' then
 			S_ids_add_lua(file, s)
+		end
+	end
+
+	--scan schema for field texts and info texts.
+	local function add_row(texts, tbl_type, tbl_name, fld, col, attr)
+		local text = texts[tbl_type..'.'..tbl_name..'.'..col]
+		add(rs.rows, {tbl_type, tbl_name, col, attr, en_text, text})
+	end
+	local field_names = {}
+	for i,attr in ipairs{'text', 'info'} do
+		for tbl_name, tbl in sortedpairs(config'db_schema'.tables) do
+			for i, fld in ipairs(tbl.fields) do
+				local en_text = call(fld[attr])
+				S_ids_add_id('lua', 'field', _('%s:%s', attr, fld.col), en_text)
+				S_ids_add_id('lua', 'table', _('table.%s:%s.%s', attr, tbl_name, fld.col), en_text)
+			end
+		end
+		for rs_name, rs in sortedpairs(rowset) do
+			if rs.client_fields then
+				for i, fld in ipairs(rs.client_fields) do
+					local en_text = call(fld[attr])
+					S_ids_add_id('lua', 'field', _('%s:%s', attr, fld.name), en_text)
+					S_ids_add_id('lua', 'rowset', _('rowset.%s:%s.%s', attr, rs_name, fld.name), en_text)
+				end
+			end
 		end
 	end
 
@@ -131,170 +154,6 @@ rowset.S = virtual_rowset(function(self, ...)
 	end
 
 end)
-
---S_schema_fields translation rowset -----------------------------------------
-
-local function S_schema_file(lang, attr)
-	return varpath(_('%s-s-%s-col-%s.lua', scriptname, lang, attr))
-end
-
-local function S_schema_texts(lang, attr)
-	local file = S_schema_file(lang, attr)
-	if not exists(file) then return {} end
-	return eval_file(file)
-end
-
-local function save_S_schema_texts(lang, attr, t)
-	save(S_schema_file(lang, attr), 'return '..pp(t, '\t'))
-end
-
-local ml_attrs --multi-language field attrs
-
-rowset.S_schema_attrs = virtual_rowset(function(self, ...)
-
-	self.allow = 'admin'
-
-	self.fields = {
-		{name = 'attr', },
-		{name = 'info', hidden = true},
-	}
-	self.pk = 'attr'
-
-	local rows = {
-		{'text', Sf('field_attr_info_text', 'The name of field as it appears in grid headers')},
-		{'info', Sf('field_attr_info_info', 'The long description of the field')},
-	}
-	function self:load_rows(rs)
-		rs.rows = {}
-		for i,row in ipairs(rows) do
-			rs.rows[i] = {row[1], row[2]()}
-		end
-	end
-
-	ml_attrs = imap(rows, 1)
-	update(ml_attrs, index(ml_attrs))
-
-end)
-
-local function db_schema()
-	return config('db_schema')
-end
-
-rowset.S_schema_fields = virtual_rowset(function(self, ...)
-
-	self.allow = 'admin'
-
-	self.fields = {
-		{name = 'type'   , readonly = true , },
-		{name = 'table'  , readonly = true , },
-		{name = 'col'    , readonly = true , },
-		{name = 'attr'   , readonly = true , },
-		{name = 'en_text', readonly = true , text = text_in_english},
-		{name = 'text'   , readonly = false, text = text_in_current_language},
-	}
-
-	self.pk = 'type table col attr'
-	self.cols = 'type table col en_text text'
-	function self:load_rows(rs, params)
-		local attrs = params['param:filter']
-		rs.rows = {}
-		local function add_row(texts, tbl_type, tbl_name, fld, col, attr)
-			local en_text = fld[attr]
-			if isfunc(en_text) then --getter/generator
-				en_text = en_text()
-			end
-			local text = texts[tbl_type..'.'..tbl_name..'.'..col]
-			add(rs.rows, {tbl_type, tbl_name, col, attr, en_text, text})
-		end
-		for i,attr in ipairs(attrs) do
-			local texts = S_schema_texts(lang(), attr)
-			for tbl_name, tbl in sortedpairs(db_schema().tables) do
-				for i, fld in ipairs(tbl.fields) do
-					add_row(texts, 'table', tbl_name, fld, fld.col, attr)
-				end
-			end
-			for rs_name, rs in sortedpairs(rowset) do
-				if rs.client_fields then
-					for i, fld in ipairs(rs.client_fields) do
-						add_row(texts, 'rowset', rs_name, fld, fld.name, attr)
-					end
-				end
-			end
-		end
-	end
-
-	local function checkargs(vals)
-		local typ  = checkarg(str_arg(vals['type:old']))
-		local tbl  = checkarg(str_arg(vals['table:old']))
-		local col  = checkarg(str_arg(vals['col:old']))
-		local attr = checkarg(str_arg(vals['attr:old']))
-		local text = str_arg(vals['text'])
-		assert(ml_attrs[attr])
-		local en_text =
-			typ == 'table' and db_schema().tables[tbl].fields[col][attr]
-			or typ == 'rowset' and rowset[tbl].fields[col][attr]
-			or nil
-		if isfunc(en_text) then --getter/generator
-			en_text = en_text()
-		end
-		return typ, tbl, col, attr, text, en_text
-	end
-
-	function self:update_row(vals)
-		local typ, tbl, col, attr, text = checkargs(vals)
-		local texts = S_schema_texts(lang(), attr)
-		texts[typ..'.'..tbl..'.'..col] = text
-		save_S_schema_texts(lang(), attr, texts)
-	end
-
-	function self:load_row(vals)
-		local typ, tbl, col, attr, text, en_text = checkargs(vals)
-		local texts = S_schema_texts(lang(), attr)
-		return {typ, tbl, col, attr, en_text, text}
-	end
-
-end)
-
-local function S_col(tbl_col, attr)
-	local texts = S_schema_texts(lang(), attr)
-	return texts[tbl_col]
-end
-
-local function update_S_texts(tbl, fld, col, attr)
-	local en_text = fld[attr]
-	fld['en_'..attr] = en_text
-	local tbl_col = tbl..'.'..col
-	fld[attr] = function()
-		local s = S_col(tbl_col, attr)
-		if s then
-			return s
-		end
-		s = en_text
-		if isfunc(s) then
-			s = s()
-		end
-		return s
-	end
-end
-
-function update_S_schema_texts()
-	local sc = db_schema()
-	for _,attr in ipairs(ml_attrs) do
-		for tbl_name, tbl in pairs(db_schema().tables) do
-			for _,fld in ipairs(tbl.fields) do
-				update_S_texts('table.'..tbl_name, fld, fld.col, attr)
-			end
-		end
-		for rs_name, rs in pairs(rowset) do
-			break
-			if rs.client_fields then
-				for _,fld in ipairs(rs.client_fields) do --virtual rowset
-					update_S_texts('rowset.'..rs_name, fld, fld.name, attr)
-				end
-			end
-		end
-	end
-end
 
 --lang picker rowset ---------------------------------------------------------
 
