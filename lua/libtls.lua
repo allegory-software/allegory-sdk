@@ -233,8 +233,7 @@ do
 
 		local t = {}
 		for k,v in pairs(t1) do
-			if isfunc(v) then v = v() end --getter
-			t[k] = v
+			t[k] = call(v)
 		end
 		load_files(t)
 		if t.keypairs then

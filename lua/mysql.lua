@@ -1053,9 +1053,7 @@ local function recv_field_packets(self, field_count, field_attrs, opt)
 		self.f:checkp(typ == 'EOF', 'bad packet type')
 		get_eof_packet(buf)
 	end
-	if isfunc(field_attrs) then
-		field_attrs = field_attrs(self, fields, opt)
-	end
+	field_attrs = call(field_attrs, self, fields, opt)
 	if field_attrs then
 		for name, attrs in pairs(field_attrs) do
 			if fields[name] then

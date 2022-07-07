@@ -205,11 +205,7 @@ function client:stcp_options(host, port)
 	if not self._tls_config then
 		local t = {}
 		for k,v in pairs(self.tls_options) do
-			if isfunc(v) then
-				t[k] = v(self, k) --option getter
-			else
-				t[k] = v
-			end
+			t[k] = call(v, self, k)
 		end
 		self._tls_config = tls_config(t)
 	end

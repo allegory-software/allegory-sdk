@@ -659,10 +659,8 @@ end
 local function file_object(findfile) --{filename -> content | handler(filename)}
 	return setmetatable({}, {
 		__call = function(self, file, default)
-			local f = self[file]
-			if isfunc(f) then
-				return f()
-			elseif f then
+			local f = call(self[file])
+			if f then
 				return f
 			else
 				local file, err = findfile(file)
@@ -836,11 +834,7 @@ local function template_call(template, name)
 		return template_names
 	else
 		name = underscores(name)
-		local s = assertf(template[name], 'template not found: %s', name)
-		if isfunc(s) then --template getter/generator
-			s = s()
-		end
-		return s
+		return call(assertf(template[name], 'template not found: %s', name))
 	end
 end
 
