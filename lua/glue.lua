@@ -127,6 +127,7 @@ ITERATORS
 CALLBACKS
 	pass(...) -> ...               does nothing, returns back all arguments
 	noop(...)                      does nothing, returns nothing
+	call(f, ...)                   calls f if f is a func, otherwise returns args
 OBJECTS
 	object([super][, t], ...) -> t    create a class or object
 	before(class, method_name, f)     call f at the beginning of a method
@@ -1387,6 +1388,11 @@ end
 
 function pass(...) return ... end
 function noop() return end
+
+function call(f, ...)
+	if isfunc(f) then return f(...) end
+	return f, ...
+end
 
 --objects --------------------------------------------------------------------
 
