@@ -128,11 +128,11 @@ function virtual_rowset(init, ...)
 	rs.before = before
 	rs.override = override
 
-	function rs.init_fields(rs)
+	function rs.init_fields(rs, check_duplicates)
 
 		local schema = config'db_schema'
 		if schema then
-			schema:resolve_types(rs.fields)
+			schema:resolve_types(rs.fields, rs.name, check_duplicates)
 		end
 
 		local hide_cols = index(collect(words(rs.hide_cols) or empty))
@@ -529,7 +529,7 @@ function virtual_rowset(init, ...)
 
 	init(rs, ...)
 	if not rs.manual_init_fields then
-		rs:init_fields()
+		rs:init_fields(true)
 	end
 
 	rs.__call = rs.respond
