@@ -2124,8 +2124,15 @@ function nav_widget(e) {
 
 	e.compare_rows = function(row1, row2) {
 		// invalid rows come first.
-		if (!row1.errors != !row2.errors)
-			return row1.errors ? -1 : 1
+		let e1 = row1.errors && !row1.errors.passed || false
+		let e2 = row2.errors && !row2.errors.passed || false
+		if (e1 < e2) return -1
+		if (e1 > e2) return  1
+		// modified rows come second.
+		let m1 = !!row1.modified
+		let m2 = !!row2.modified
+		if (m1 < m2) return -1
+		if (m1 > m2) return  1
 		return 0
 	}
 
@@ -2145,21 +2152,15 @@ function nav_widget(e) {
 
 	function field_comparator(field) {
 
-		let compare_rows = e.compare_rows
 		let compare_types = field.compare_types  || e.compare_types
 		let compare_vals = field.compare_vals || e.compare_vals
-		let field_index = field.val_index
+		let val_index = field.val_index
 
 		return function(row1, row2) {
-			let r1 = compare_rows(row1, row2)
-			if (r1) return r1
-
-			let v1 = row1[field_index]
-			let v2 = row2[field_index]
-
-			let r2 = compare_types(v1, v2)
-			if (r2) return r2
-
+			let v1 = row1[val_index]
+			let v2 = row2[val_index]
+			let r = compare_types(v1, v2)
+			if (r) return r
 			return compare_vals(v1, v2)
 		}
 	}
@@ -2184,29 +2185,6 @@ function nav_widget(e) {
 			cmps[i] = field_comparator(field)
 			let r = dir == 'desc' ? -1 : 1
 			let errors_i = cell_state_val_index('errors', field)
-			if (field != e.pos_field) {
-				// invalid rows come first
-				s.push('{')
-				s.push('  let v1 = r1.errors == null')
-				s.push('  let v2 = r2.errors == null')
-				s.push('  if (v1 < v2) return -1')
-				s.push('  if (v1 > v2) return  1')
-				s.push('}')
-				// invalid vals come after
-				s.push('{')
-				s.push('  let v1 = r1['+errors_i+'] == null')
-				s.push('  let v2 = r2['+errors_i+'] == null')
-				s.push('  if (v1 < v2) return -1')
-				s.push('  if (v1 > v2) return  1')
-				s.push('}')
-				// modified rows come after
-				s.push('{')
-				s.push('  let v1 = !r1.modified')
-				s.push('  let v2 = !r2.modified')
-				s.push('  if (v1 < v2) return -1')
-				s.push('  if (v1 > v2) return  1')
-				s.push('}')
-			}
 			// compare vals using the value comparator
 			s.push('{')
 			s.push('let cmp = cmps['+i+']')
@@ -2231,7 +2209,14 @@ function nav_widget(e) {
 			cmp = cmp+'let cmp_direct = cmp; cmp = function(r1, r2) {\n\t' + s.join('\n\t') + '\n}\n; cmp;\n'
 		}
 
-		return eval(cmp)
+		cmp = eval(cmp)
+
+		let compare_rows = e.compare_rows
+		return function(r1, r2) {
+			let r = compare_rows(r1, r2)
+			if (r) return r
+			return cmp(r1, r2)
+		}
 	}
 
 	function sort_rows(force) {
@@ -2246,7 +2231,7 @@ function nav_widget(e) {
 	e.sort_rows = function(rows, order_by) {
 		let order_by_map = map()
 		update_order_by_map(order_by, order_by_map)
-		ros.sort(row_comparator(order_by_map))
+		rows.sort(row_comparator(order_by_map))
 	}
 
 	// changing the sort order ------------------------------------------------
