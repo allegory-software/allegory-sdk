@@ -333,7 +333,7 @@ editing:
 		exit_edit_on_lost_focus
 	publishes:
 		e.editor
-		e.enter_edit()
+		e.enter_edit([editor_state], [focus])
 		e.exit_edit([{cancel: true}])
 		e.exit_row([{cancel: true}])
 	calls:
@@ -385,9 +385,9 @@ loading & saving from/to memory:
 
 display val & text val:
 	publishes:
-		e.cell_display_val_for()
-		e.cell_display_val()
-		e.cell_text_val()
+		e.cell_display_val_for(row, field, v, v0)
+		e.cell_display_val(row, field)
+		e.cell_text_val(row, field)
 	calls:
 		^display_vals_changed()
 		^display_vals_changed_for_COL()

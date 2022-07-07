@@ -275,8 +275,7 @@ let component_deferred_updating = function(e) {
 		assert(e.updating)
 		e.updating--
 		if (!e.updating)
-			if (opt)
-				e.update(opt)
+			e.update()
 	}
 
 	e.do_update = noop
