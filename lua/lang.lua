@@ -720,7 +720,7 @@ function S_for(ext, id, en_s)
 		t = S_texts(default_lang(), ext)
 		s = t[id]
 	end
-	return s or en_s or id
+	return s or en_s
 end
 
 function S(id, en_s)
