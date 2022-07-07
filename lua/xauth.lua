@@ -108,7 +108,7 @@ template.usr_form = function()
 		<x-if global=signed_in_realusr_dev>
 			<x-list-dropdown
 				id=usr_usr_dropdown
-				label:s:en="Impersonate User"
+				label:s:field_label_impersonate_user="Impersonate User"
 				rowset_name=impersonate_users
 				val_col=usr
 				display_col=email
