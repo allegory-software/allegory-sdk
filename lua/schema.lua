@@ -118,9 +118,7 @@ local function resolve_type(self, fld, t, i, n, fld_ct, allow_types, allow_flags
 			end
 		end
 		assertf(v ~= nil, 'unknown flag or type name `%s`', k)
-		if isfunc(v) then --type generator
-			v = v(self, fld_ct, fld)
-		end
+		v = call(v, self, fld_ct, fld)
 		if v then
 			resolve_type(self, fld, v, 1, #v, fld_ct, true, true) --recurse
 			for k,v in pairs(v) do --copy named attrs
@@ -159,6 +157,7 @@ local function parse_cols(self, t, dt, loc1, fld_ct)
 		end
 		col = t[i]
 		assertf(isstr(col), 'column name expected for `%s`, got %s', loc1, type(col))
+		assertf(not dt[col], 'duplicate field name: %s.%s', loc1, col)
 		i = i + 1
 		local fld = {col = col, mode = mode}
 		insert(dt, dt_i, fld); dt_i = dt_i + 1
@@ -881,17 +880,37 @@ function diff:pp(opt)
 end
 
 function schema:resolve_type(t) --{attr = val, flag1, ...}
+
 	resolve_type(self, t, t, 1, #t, empty, true, true)
 	update_type(self, t)
 	for i=#t,1,-1 do t[i] = nil end --remove flags
+
+	--add translatable fields.
+	for i,attr in ipairs{'text', 'info'} do
+		local en_attr = 'en_'..attr
+		t[attr] = function()
+			local name = t.name
+			return
+					S(_('%s:%s', attr, name))
+				or S(_('%s.%s:%s.%s', tbl_type, attr, tbl, name))
+				or call(t[en_attr])
+		end
+	end
+
 	return t
 end
 
-function schema:resolve_types(fields) --{field1, ...}
-	for i,t in ipairs(fields) do
-		t[i] = self:resolve_type(t)
+function schema:resolve_types(fields, tbl_name, check_duplicates) --{field1, ...}
+	for i,f in ipairs(fields) do
+		local f = self:resolve_type(f)
+		if check_duplicates then
+			assertf(isstr(f.name), 'field name not a string: %s: %s', tbl_name, type(f.name))
+			assertf(not fields[f.name], 'duplicate field name: %s.%s', tbl_name, f.name)
+		end
+		fields[i] = f
+		fields[f.name] = f
 	end
-	return t
+	return fields
 end
 
 return schema
