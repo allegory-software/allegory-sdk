@@ -2002,8 +2002,6 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 				e.enter_edit('click')
 				return false
 			} else {
-				if (e.exit_edit_on_enter)
-					e.exit_edit()
 				if (e.advance_on_enter == 'next_row')
 					e.focus_cell(true, true, 1, 0, {
 						input: e,
@@ -2018,6 +2016,8 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 						editor_state: 'select_all',
 						must_move: true,
 					})
+				else if (e.exit_edit_on_enter)
+					e.exit_edit()
 				return false
 			}
 		}
@@ -2098,6 +2098,21 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 			e.save()
 			return false
 		}
+
+		if (ctrl && !e.editor)
+			if (key == 'c') {
+				let row = e.focused_row
+				let fld = e.focused_field
+				if (row && fld)
+					copy_to_clipboard(e.cell_text_val(row, fld))
+				return false
+			} else if (key == 'x') {
+
+				return false
+			} else if (key == 'v') {
+
+				return false
+			}
 
 	})
 
