@@ -179,13 +179,13 @@ return function()
 	types.ctime     = {datetime, not_null, mysql_default = current_timestamp, readonly = true}
 	types.mtime     = {datetime, not_null, mysql_default = current_timestamp, readonly = true, mysql_on_update = current_timestamp}
 
-	types.ctime.text = Sf('ctime_text', 'Created At')
-	types.mtime.text = Sf('mtime_text', 'Last Modified At')
-	types.atime.text = Sf('atime_text', 'Last Accessed At')
+	types.ctime.en_text = 'Created At'
+	types.mtime.en_text = 'Last Modified At'
+	types.atime.en_text = 'Last Accessed At'
 
-	types.time_atime = {time, not_null, readonly = true, text = types.atime.text}
-	types.time_ctime = {time, not_null, readonly = true, text = types.ctime.text}
-	types.time_mtime = {time, not_null, readonly = true, text = types.mtime.text}
+	types.time_atime = {time, not_null, readonly = true, en_text = types.atime.en_text}
+	types.time_ctime = {time, not_null, readonly = true, en_text = types.ctime.en_text}
+	types.time_mtime = {time, not_null, readonly = true, en_text = types.mtime.en_text}
 
 	types.money     = {                  dec, digits = 15, decimals = 3} -- 999 999 999 999 . 999     (fits in a double)
 	types.qty       = {                  dec, digits = 15, decimals = 6} --     999 999 999 . 999 999 (fits in a double)
