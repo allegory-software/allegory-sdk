@@ -59,6 +59,12 @@ QUERYING
 
 		Change current database
 
+	cn:[try_]start_transaction()                      start transaction
+	cn:[try_]end_transaction('commit'|'rollback')     end transaction
+	cn:[try_]commit()                                 commit
+	cn:[try_]rollback()                               rollback
+	cn:in_transaction() -> true|false                 check if in transaction
+
 PREPARED STATEMENTS
 
 	cn:[try_]prepare(query, [opt]) -> stmt
@@ -1367,6 +1373,33 @@ function conn.try_query(self, sql, opt)
 	if not ok then return nil, err end
 	return self:try_read_result(opt)
 end
+
+--NOTE: mysql commits the current transaction first before starting a new one!
+function conn.start_transaction(self)
+	local res = self:query'start transaction'
+	self._in_transaction = true
+	return res
+end
+
+function conn.end_transaction(self, with)
+	assert(with == 'commit' or 'rollback', '"commit" or "rollback" expected')
+	assert(self.in_transaction, 'not_started')
+	local res = self:query(with)
+	self._in_transaction = false
+	return res
+end
+
+function conn:commit  () return self:end_transaction'commit'   end
+function conn:rollback() return self:end_transaction'rollback' end
+
+function conn:in_transaction()
+	return self._in_transaction or false
+end
+
+conn.try_start_transaction = protect_io(conn.start_transaction)
+conn.try_end_transaction   = protect_io(conn.end_transaction)
+conn.try_commit            = protect_io(conn.commit)
+conn.try_rollback          = protect_io(conn.rollback)
 
 local function cont(self, db, ret, ...)
 	if not ret then return nil, ... end
