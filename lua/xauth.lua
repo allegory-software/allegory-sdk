@@ -135,35 +135,54 @@ template.sign_in_dialog = function()
 		<x-slides class=sign-in-slides>
 
 			<x-form>
-				<div class=x-dialog-heading>
+				<div class=x-dialog-heading><t s=heading_sign_in>
 					Sign-in
-				</div>
-				<p small s=sign_in_greet><t s=sign_in_greet>
+				</t></div>
+				<p small><t s=sign_in_greet>
 					The security of your account is important to us.
 					That is why instead of having you set up a hard-to-remember password,
 					we will send you a one-time activation code every time
 					you need to sign in.
 				</t></p>
 				{{#multilang}}
-				<x-list-dropdown class=sign-in-lang-dropdown label=Language val_col=lang display_col=name rowset_name=pick_lang></x-list-dropdown>
+				<x-list-dropdown
+					class=sign-in-lang-dropdown
+					val_col=lang
+					display_col=name
+					rowset_name=pick_lang
+				></x-list-dropdown>
 				{{/multilang}}
-				<x-textedit class=sign-in-email-edit field_type=email label="Email address" focusfirst></x-textedit>
-				<x-button primary class=sign-in-email-button>E-mail me a sign-in code</x-button>
+				<x-textedit
+					class=sign-in-email-edit
+					field_type=email
+					label:s:textedit_label_sign_in_email="E-mail address" focusfirst
+				></x-textedit>
+				<x-button primary
+					class=sign-in-email-button
+					text:s:button_text_sign_in_email="E-mail me a sign-in code"
+				></x-button>
 			</x-form>
 
 			<x-form>
-				<div class=x-dialog-heading>
+				<div class=x-dialog-heading><t s=heading_sign_in_enter_code>
 					Enter code
-				</div>
-				<p small><t label=sign_in_email_sent>
+				</t></div>
+				<p small><t s=sign_in_email_sent>
 					An e-mail was sent to you with a 6-digit sign-in code.
-					Enter the code below to sign-in.
+					Enter the code in the box below to sign-in.
 					<br>
 					If you haven't received an email even after
 					a few minutes, please <a href="/sign-in">try again</a>.
 				</t></p>
-				<x-textedit class=sign-in-code-edit field_type=sign_in_code label="6-digit sign-in code" focusfirst></x-textedit>
-				<x-button primary class=sign-in-code-button>Sign-in</x-button>
+				<x-textedit
+					class=sign-in-code-edit
+					field_type=sign_in_code
+					label:s:textedit_label_sign_in_code="6-digit sign-in code"
+					focusfirst></x-textedit>
+				<x-button primary
+					class=sign-in-code-button
+					text:s:button_text_sign_in="Sign-in"
+				></x-button>
 			</x-form>
 
 		</x-slides>
