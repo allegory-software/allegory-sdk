@@ -1453,7 +1453,7 @@ local function install(self, combine, method_name, hook)
 	rawset(self, method_name, combine(self[method_name], hook))
 end
 local function _before(method, hook)
-	if method then
+	if repl(method, noop) then
 		return function(self, ...)
 			hook(self, ...)
 			return method(self, ...)
@@ -1466,7 +1466,7 @@ function before(self, method_name, hook)
 	install(self, _before, method_name, hook)
 end
 local function _after(method, hook)
-	if method then
+	if repl(method, noop) then
 		return function(self, ...)
 			method(self, ...)
 			return hook(self, ...)
