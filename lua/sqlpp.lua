@@ -73,6 +73,7 @@ QUERY EXECUTION
 	stmt:each_group(col, ...) -> iter            query, group by col and iterate groups
 	cmd:atomic(fn, ...) -> ...                   call a function inside a transaction
 	cmd:has_ddl(sql) -> true|false               check if an expanded query has DDL commands in it
+	cmd:on_table_changed(f)                      call f(sch, tbl) on update queries
 GROUPING
 	spp.groups(col, rows|groups) -> groups       group rows
 	spp.each_group(col, rows|groups) -> iter     group rows and iterate groups
@@ -102,11 +103,11 @@ DDL COMMANDS
 	cmd:sync_schema(source_schema)               sync schema with a source schema
 
 MDL COMMANDS
-	cmd:insert_row(tbl, vals, col_map)           insert a row
-	cmd:insert_or_update_row(tbl, vals, col_map) insert or update row
-	cmd:insert_rows(tbl, rows, col_map, compact) insert rows with one query
-	cmd:update_row(tbl, vals, col_map, [filter]) update row
-	cmd:delete_row(tbl, vals, col_map, [filter]) delete row
+	cmd:insert_row(tbl, vals, [col_map])         insert a row
+	cmd:insert_or_update_row(tbl, vals, [col_map], [compact], [opt]) insert or update row
+	cmd:insert_rows(tbl, rows, [col_map], [opt]) insert rows with one query
+	cmd:update_row(tbl, vals, col_map, [scurity_filter], [opt]) update row
+	cmd:delete_row(tbl, vals, col_map, [scurity_filter], [opt]) delete row
 
 MODULE SYSTEM
 	function sqlpp_package.NAME(spp) end         extend the preprocessor with a module
@@ -1250,7 +1251,10 @@ function _G.sqlpp(init)
 		return opt
 	end
 
-	cmd.table_changed = noop --stub
+	cmd.table_changed = noop
+	function cmd:on_table_changed(f) --not yet used.
+		after(self, 'table_changed', f)
+	end
 
 	--NOTE: schema or table names with spaces or dots inside are not supported!
 	local m1 = '^%s*'..esc('insert', '*i')..'%s+'..esc('into', '*i')..'%s+([^%s]+)'
@@ -1262,7 +1266,7 @@ function _G.sqlpp(init)
 		local rows, again, fields = ret, ...
 		if rows == true then return true end --dry
 		if not fields then --update query
-			if rows.affected_rows > 0 then --that affected rows...
+			if rows.affected_rows > 0 then
 				local s = sql:match(m1) or sql:match(m2) or sql:match(m3)
 				if s then
 					local q = self.sqlname_quote
@@ -1409,9 +1413,9 @@ function _G.sqlpp(init)
 	end
 
 	function cmd:atomic(f, onerror, ...)
-		self:query('start transaction')
+		self:start_transaction()
 		local function pass(ok, ...)
-			self:query(ok and 'commit' or 'rollback')
+			self:end_transaction(ok and 'commit' or 'rollback')
 			if not ok and onerror then
 				onerror()
 			end
@@ -1419,6 +1423,11 @@ function _G.sqlpp(init)
 		end
 		return pass(pcall(f, ...))
 	end
+
+	function cmd:start_transaction(...) self.rawconn:start_transaction(...) end
+	function cmd:  end_transaction(...) self.rawconn:  end_transaction(...) end
+	function cmd:commit  () self.rawconn:commit  () end
+	function cmd:rollback() self.rawconn:rollback() end
 
 	--schema reflection -------------------------------------------------------
 
@@ -1622,19 +1631,21 @@ function _G.sqlpp(init)
 				t[k] = k
 			end
 			return t
-		end
-		if type(s) ~= 'string' then
-			return s or empty
-		end
-		local t = {}
-		for s in words(s) do
-			local col, val_name = s:match'^(.-)=(.*)'
-			if not col then
-				col, val_name = s, s
+		elseif isstr(s) then --explicit col_map.
+			local t = {}
+			for s in words(s) do
+				local col, val_name = s:match'^(.-)=(.*)'
+				if not col then
+					col, val_name = s, s
+				end
+				t[col] = val_name
 			end
-			t[col] = val_name
+			return t
+		elseif istab(s) then
+			return s
+		else
+			assert(false)
 		end
-		return t
 	end
 
 	local function where_sql(self, vals, col_map, pk, fields, security_filter)
@@ -1710,7 +1721,8 @@ function _G.sqlpp(init)
 					%s
 			]]), self:sqlname(tbl), set_sql, set_sql)
 		end
-		local id = repl(self:query(update({parse = false}, opt), sql).insert_id, 0, nil)
+		local ret = self:query(update({parse = false}, opt), sql)
+		local id = repl(ret.insert_id, 0, nil)
 		if id then
 			assert(ai_col)
 			vals[col_map[ai_col] or ai_col] = id
