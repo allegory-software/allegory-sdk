@@ -84,17 +84,17 @@ local load_s_ids = memoize(function()
 	for i,attr in ipairs{'text', 'info'} do
 		for tbl_name, tbl in sortedpairs(config'db_schema'.tables) do
 			for i, fld in ipairs(tbl.fields) do
-				local en_text = call(fld[attr])
+				local en_text = call(fld['en_'..attr])
 				S_ids_add_id('lua', 'field', _('%s:%s', attr, fld.col), en_text)
-				S_ids_add_id('lua', 'table', _('table.%s:%s.%s', attr, tbl_name, fld.col), en_text)
+				S_ids_add_id('lua', 'table', _('%s:%s.%s.table', attr, fld.col, tbl_name), en_text)
 			end
 		end
 		for rs_name, rs in sortedpairs(rowset) do
 			if rs.client_fields then
 				for i, fld in ipairs(rs.client_fields) do
-					local en_text = call(fld[attr])
+					local en_text = call(fld['en_'..attr])
 					S_ids_add_id('lua', 'field', _('%s:%s', attr, fld.name), en_text)
-					S_ids_add_id('lua', 'rowset', _('rowset.%s:%s.%s', attr, rs_name, fld.name), en_text)
+					S_ids_add_id('lua', 'rowset', _('%s:%s.%s.rowset', attr, fld.name, rs_name), en_text)
 				end
 			end
 		end
