@@ -1201,7 +1201,10 @@ end
 
 function conn.send_query(self, sql, quiet)
 	sql = trim(sql)
-	local severity = (quiet or starts(sql, 'select') or starts(sql, 'show')) and '' or 'note'
+	local severity = (quiet
+			or starts(sql, 'select')
+			or starts(sql, 'show')
+		) and '' or 'note'
 	log(severity, 'mysql', 'query', '%s', sql)
 	assert(self.state == 'ready')
 	self.packet_no = -1
@@ -1220,7 +1223,8 @@ function conn.read_result(self, opt)
 	local typ, buf = recv_packet(self)
 	if typ == 'ERR' then
 		local message, errno, sqlstate = get_err_packet(buf)
-		log('ERROR', 'mysql', 'query', '%s\n\n%s [%d] [%s]', self.sql, message, errno, sqlstate)
+		log('ERROR', 'mysql', 'query', '%s\n\n%s [%d] [%s]',
+			self.sql, message, errno, sqlstate)
 		self.state = 'ready'
 		self.sql = nil
 		return nil, message, errno, sqlstate
