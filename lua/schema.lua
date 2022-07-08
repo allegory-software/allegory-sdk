@@ -892,7 +892,7 @@ function schema:resolve_type(t) --{attr = val, flag1, ...}
 			local name = t.name
 			return
 					S(_('%s:%s', attr, name))
-				or S(_('%s.%s:%s.%s', tbl_type, attr, tbl, name))
+				or S(_('%s:%s.%s.%s', attr, name, tbl, tbl_type))
 				or call(t[en_attr])
 		end
 	end
