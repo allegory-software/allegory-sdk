@@ -254,7 +254,8 @@ do
 				local sz = is_str and (t[k..'_size'] or #v) or nil
 				local ok, err = set_method(self, v, sz)
 				if not ok then return nil, err end
-				log('', 'tls', 'config', '%-25s %s', k, tostring(v))
+				log('', 'tls', 'config', '%-25s %s', k,
+					sz and sz <= 64 and tostring(v) or kbytes(sz))
 			end
 		end
 		return true
