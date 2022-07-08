@@ -713,14 +713,10 @@ function S_texts_save()
 end
 
 function S_for(ext, id, en_s)
-	local lang = lang()
-	local t = S_texts(lang, ext)
-	local s = t[id]
-	if not s then
-		t = S_texts(default_lang(), ext)
-		s = t[id]
-	end
-	return s or en_s
+	return
+		S_texts(lang(), ext)[id]
+		or S_texts(default_lang(), ext)[id]
+		or en_s
 end
 
 function S(id, en_s)
