@@ -28,7 +28,12 @@ EXECUTION
 	[db:]each_row([opt,]sql, ...) -> iter          query and iterate rows
 	[db:]each_row_vals([opt,]sql, ...) -> iter     query and iterate rows unpacked
 	[db:]each_group(col, [opt,]sql, ...) -> iter   query, group rows and and iterate groups
-	[db:]atomic(func)                              execute func in transaction
+	[db:]atomic(f)                                 run f in transaction
+	[db:]on_table_changed(f)                       run f(schema, table) when a table changes
+	[db:]start_transaction()                       start transaction
+	[db:]end_transaction('commit'|'rollback')      end transaction
+	[db:]commit()                                  commit
+	[db:]rollback()                                rollback
 
 	release_dbs()                                  release db connections back into the pool
 
@@ -121,14 +126,37 @@ end
 
 local DBS = {}
 
-function release_dbs()
-	local t = getownthreadenv(nil, false)
-	local dbs = t and rawget(t, DBS)
-	if not dbs then return end
+local function _release_dbs(dbs, ok)
+	for key, db in pairs(dbs) do
+		if db:in_transaction() then
+			db:end_transaction(ok and 'commit' or 'rollback')
+		end
+	end
 	for key, db in pairs(dbs) do
 		db:release()
 		dbs[key] = nil
 	end
+end
+
+local function getownthreaddbs(thread, create_env)
+	local env = getownthreadenv(thread, create_env)
+	local dbs = env and rawget(env, DBS)
+	if not dbs then
+		if create_env ~= false then
+			dbs = {}
+			rawset(env, DBS, dbs)
+			onthreadfinish(thread, function(thread, ok)
+				_release_dbs(dbs, ok)
+			end)
+		end
+	end
+	return dbs
+end
+
+function release_dbs()
+	local dbs = getownthreaddbs(nil, false)
+	if not dbs then return end
+	_release_dbs(dbs, true)
 end
 
 --NOTE: browsers keep multiple connections open, and even keep them
@@ -140,45 +168,30 @@ function db(ns, without_current_db)
 	local opt = conn_opt(ns or false)
 	local key = opt.pool_key
 	local thread = currentthread()
-	local env = getownthreadenv(thread)
-	local dbs = rawget(env, DBS)
-	if not dbs then
-		dbs = {}
-		rawset(env, DBS, dbs)
-		local function release_dbs()
-			for key, db in pairs(dbs) do
-				db:release()
-				dbs[key] = nil
-			end
-		end
-		onthreadfinish(release_dbs)
-	end
-	local tenv = getthreadenv()
-	local renv = tenv and tenv.http_request
-	if renv and thread == renv.thread then
-		if not renv._release_dbs then
-			http_request():onfinish(release_dbs)
-			renv._release_dbs = true
+	local dbs = getownthreaddbs(thread)
+	local req = _G.http_request and http_request(thread)
+	if req and thread == req.thread then
+		if not req._release_dbs_hooked then
+			http_request():onfinish(function(req, ok)
+				_release_dbs(dbs, ok)
+			end)
+			req._release_dbs_hooked = true
 		end
 	end
 	local db, err = dbs[key]
 	if not db then
 		db, err = pool:get(key)
 		if not db then
-			if err == 'empty' then
-				if without_current_db then
-					opt = update({}, opt)
-					opt.db = nil
-				end
-				db = opt.sqlpp.connect(opt)
-				pool:put(key, db, db.rawconn.f)
-				dbs[key] = db
-			else
-				assert(nil, err)
+			assert(err == 'empty', err)
+			if without_current_db then
+				opt = update({}, opt)
+				opt.db = nil
 			end
-		else
-			dbs[key] = db
+			db = opt.sqlpp.connect(opt)
+			pool:put(key, db, db.rawconn.f)
 		end
+		db:start_transaction()
+		dbs[key] = db
 	end
 	return db
 end
@@ -197,7 +210,8 @@ for method in pairs{
 	sqlval=1, sqlrows=1, sqlname=1, sqlparams=1, sqlquery=1,
 	--query execution
 	query=1, first_row=1, first_row_vals=1, each_row=1, each_row_vals=1, each_group=1,
-	atomic=1,
+	atomic=1, on_table_changed=1,
+	start_transaction=1, end_transaction=1, commit=1, rollback=1,
 	--schema reflection
 	dbs=1, db_exists=1, table_def=1,
 	--ddl
