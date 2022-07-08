@@ -22,9 +22,7 @@ FEATURES
 
 REQUEST CONTEXT
 
-	http_request() -> req                   get current request's shared context
-	  req.fake -> t|f                       context is fake (we're on cmdline)
-	http_request_env()
+	req.fake -> t|f                         context is fake (we're on cmdline)
 	http_once_per_request(f, ...)           memoize for current request
 	http_once_per_connection(f, ...)        memoize for current connection
 
@@ -145,15 +143,10 @@ require'resolver'
 --http server wiring ---------------------------------------------------------
 
 --http thread context for all context-free APIs below.
-local function req()
-	local tenv = getthreadenv()
-	return tenv and tenv.http_request
-end
-http_request = req
+local req = http_request
 
 local function respond(req)
 	req.res = {headers = {}}
-	getownthreadenv().http_request = req
 	http_log('', 'webb', 'request', '%s %s', req.method, url_unescape(req.uri))
 	local main = config('main_module', scriptname)
 	local main = isstr(main) and require(main) or main

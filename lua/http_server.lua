@@ -19,6 +19,7 @@ server:new(opt) -> server         Create a server object
 		req:onfinish(f)             add code to run when request finishes
 		req.thread                  the thread that handled the request
 
+http_request([thread]) -> req     (current) thread's http request object
 http_error(t | status,[content])  raise http error
 http_redirect(url, [status=303])  raise http redirect error
 
@@ -151,7 +152,7 @@ function http_server(...)
 
 		local ok, err = pcall(self.respond, req)
 		if req.finish then
-			req:finish()
+			req:finish(ok, err)
 		end
 
 		if not ok then
@@ -197,6 +198,7 @@ function http_server(...)
 		})
 		while not ctcp:closed() do
 			local req = assert(http:read_request())
+			getownthreadenv().http_request = req
 			handle_request(ctcp, http, req)
 		end
 	end
@@ -275,6 +277,11 @@ errortype'http_response'.__tostring = function(self)
 	return s
 end
 
+function http_request(thread)
+	local tenv = getthreadenv(thread)
+	return tenv and tenv.http_request
+end
+
 function http_error(status, content) --status,[content] | http_response
 	local err
 	if isnum(status) then
@@ -291,3 +298,4 @@ end
 function http_redirect(url, status)
 	http_error{status = status or 303, headers = {location = url}}
 end
+

@@ -11,6 +11,7 @@
 	http_client(opt) -> client           create a client object
 	client:request(opt) -> req, res      make a HTTP request
 	client:close_all()                   close all connections
+	getpage(...) -> ...                  perform a http request on a static client
 
 http_client(opt) -> client
 
