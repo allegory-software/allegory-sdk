@@ -1424,10 +1424,11 @@ function _G.sqlpp(init)
 		return pass(pcall(f, ...))
 	end
 
-	function cmd:start_transaction(...) self.rawconn:start_transaction(...) end
-	function cmd:  end_transaction(...) self.rawconn:  end_transaction(...) end
-	function cmd:commit  () self.rawconn:commit  () end
-	function cmd:rollback() self.rawconn:rollback() end
+	function cmd:start_transaction(...) return self.rawconn:start_transaction(...) end
+	function cmd:  end_transaction(...) return self.rawconn:  end_transaction(...) end
+	function cmd:commit  () return self.rawconn:commit  () end
+	function cmd:rollback() return self.rawconn:rollback() end
+	function cmd:in_transaction() return self.rawconn:in_transaction() end
 
 	--schema reflection -------------------------------------------------------
 
@@ -1742,7 +1743,7 @@ function _G.sqlpp(init)
 		local tdef = assertf(self:table_def(tbl), 'invalid table: %s', tbl)
 		local set_sql = set_sql(self, vals, col_map, tdef.fields)
 		if not set_sql then
-			return
+			return {affected_rows = 0}
 		end
 		local where_sql = where_sql(self, vals, col_map, tdef.pk, tdef.fields, security_filter)
 		local sql = fmt(outdent[[

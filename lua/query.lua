@@ -211,7 +211,7 @@ for method in pairs{
 	--query execution
 	query=1, first_row=1, first_row_vals=1, each_row=1, each_row_vals=1, each_group=1,
 	atomic=1, on_table_changed=1,
-	start_transaction=1, end_transaction=1, commit=1, rollback=1,
+	start_transaction=1, end_transaction=1, commit=1, rollback=1, in_transaction=1,
 	--schema reflection
 	dbs=1, db_exists=1, table_def=1,
 	--ddl
