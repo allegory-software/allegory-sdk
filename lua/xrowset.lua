@@ -297,6 +297,7 @@ function virtual_rowset(init, ...)
 				assert(false)
 			end
 		end
+		return not rt.error
 	end
 
 	function rs:validate_fields(values, only_present_values)
@@ -361,6 +362,7 @@ function virtual_rowset(init, ...)
 		local res = {rows = {}}
 		local self = object(rs)
 		self.changed_rowsets = {}
+		local rowset_changed = true
 
 		for _,row in ipairs(changes.rows) do
 			local rt = {type = row.type}
@@ -369,7 +371,9 @@ function virtual_rowset(init, ...)
 				if can ~= false then
 					local ok, err = catch('db', rs.insert_row, self, row.values)
 					if ok then
-						reload_row('insert', rt, row.values)
+						if reload_row('insert', rt, row.values) then
+							rowset_changed = true
+						end
 					else
 						if err.col then
 							rt.field_errors = {[err.col] = err.message}
@@ -386,15 +390,15 @@ function virtual_rowset(init, ...)
 				if can ~= false then
 					local ok, err = catch('db', rs.update_row, self, row.values)
 					if ok then
-						if rs.load_row then
-							--copy :foo:old to :foo so we can select the row back.
-							for k,v in pairs(row.values) do
-								local k1 = k:match'^(.-):old$'
-								if k1 and row.values[k1] == nil then
-									row.values[k1] = v
-								end
+						--copy :foo:old to :foo so we can select the row back.
+						for k,v in pairs(row.values) do
+							local k1 = k:match'^(.-):old$'
+							if k1 and row.values[k1] == nil then
+								row.values[k1] = v
 							end
-							reload_row('update', rt, row.values)
+						end
+						if reload_row('update', rt, row.values) then
+							rowset_changed = true
 						end
 					else
 						if err.col then
@@ -412,7 +416,9 @@ function virtual_rowset(init, ...)
 				if can ~= false then
 					local ok, err = catch('db', rs.delete_row, self, row.values)
 					if ok then
-						reload_row('delete', rt, row.values)
+						if reload_row('delete', rt, row.values) then
+							rowset_changed = true
+						end
 					else
 						rt.error = db_error(err)
 					end
@@ -427,7 +433,7 @@ function virtual_rowset(init, ...)
 			add(res.rows, rt)
 		end
 
-		if #res.rows > 0 then
+		if rowset_changed then
 			self:rowset_changed(rs.name, args'filter')
 		end
 		push_rowset_changed_events(self.changed_rowsets, update_id)
@@ -542,23 +548,28 @@ end
 local waiting_events_threads = {}
 local changed_rowsets = {} --{req->{rowset->'update_id1 ...'}}
 
-function rowset_changed(rowset_name, update_id)
+function rowset_changed(rowset_name, update_id, push_to_clients)
 	local rowsets = istab(rowset_name) and rowset_name or {[rowset_name] = true}
-	push_rowset_changed_events(rowsets, update_id or 'server')
+	push_rowset_changed_events(rowsets, update_id or 'server', push_to_clients)
 end
 
---[[local]] function push_rowset_changed_events(rowsets, update_id)
-	for rowset_name in pairs(rowsets) do
-		for _, rowsets in pairs(changed_rowsets) do
-			if not rowsets[rowset_name] then
-				rowsets[rowset_name] = update_id
-			else
-				rowsets[rowset_name] = rowsets[rowset_name] .. ' ' .. update_id
+function table_changed(table_name, update_id, push_to_clients)
+	local rowsets = rowset_tables[table_name]
+	push_rowset_changed_events(rowsets, update_id, push_to_clients)
+end
+
+--[[local]] function push_rowset_changed_events(rowsets, update_id, push_to_clients)
+	if rowsets then
+		for rowset_name in pairs(rowsets) do
+			for _, rt in pairs(changed_rowsets) do
+				rt[rowset_name] = catany(' ', rt[rowset_name], update_id)
 			end
 		end
 	end
-	for thread in pairs(waiting_events_threads) do
-		resume(thread)
+	if push_to_clients ~= false then
+		for thread in pairs(waiting_events_threads) do
+			resume(thread)
+		end
 	end
 end
 

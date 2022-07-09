@@ -16,8 +16,7 @@
 		- select_row    : instead of select + where_row.
 		- select_none   : instead of select_row or (select + 'where 1 = 0').
 
-	If all else fails, you can always implement the rowset's S/U/I/D methods
-	yourself. Just make sure to wrap multiple update queries in atomic().
+	If all else fails, you can always implement the rowset's S/U/I/D methods yourself.
 
 	Inferred field attributes:
 		name             : column alias.
@@ -67,7 +66,7 @@ function qmacro.filter(self, expr, filter)
 	for i,vals in ipairs(filter) do
 		t[i] = sqlparams(expr, vals)
 	end
-	return concat(t, ' or ')
+	return cat(t, ' or ')
 end
 
 --usage in sql: `$andor_filter(:param:filter)`
@@ -78,9 +77,9 @@ function qmacro.andor_filter(self, filter)
 		for k,v in sortedpairs(vals) do
 			add(tt, sqlname(k) .. ' <=> ' .. sqlval(v))
 		end
-		t[i] = concat(tt, ' and ')
+		t[i] = cat(tt, ' and ')
 	end
-	return concat(t, ' or ')
+	return cat(t, ' or ')
 end
 
 local function guess_name_col(tdef)
@@ -95,11 +94,11 @@ function lookup_rowset(tbl)
 		local tdef = checkfound(table_def(tbl))
 		local name_col = guess_name_col(tdef)
 		local t = extend({name_col}, tdef.pk)
-		local cols = concat(imap(t, sqlname), ', ')
-		local order_by = tdef.pos_col or concat(tdef.pk, ' ')
+		local cols = cat(imap(t, sqlname), ', ')
+		local order_by = tdef.pos_col or cat(tdef.pk, ' ')
 		rs = sql_rowset{
 			select = format('select %s from %s %s', cols, tbl, order_by),
-			pk = concat(tdef.pk, ' '),
+			pk = cat(tdef.pk, ' '),
 			name_col = name_col,
 		}
 		rawset(rowset, rs_name, rs)
@@ -192,23 +191,33 @@ function sql_rowset(...)
 			end
 		end
 
+		function rs:query(...)
+			return db(self.db):query(...)
+		end
+
 		local user_methods = {}
 		assert(rs.select_none, 'select_none missing')
 		local apply_changes = rs.apply_changes
 		function rs:apply_changes(...)
 			if configure then
-				local _, fields = db(rs.db):query(load_opt, rs.select_none)
+				local _, fields = self:query(load_opt, rs.select_none)
 				configure(fields)
 			end
 			return apply_changes(self, ...)
 		end
+
+		local rw_col_map
 
 		--[[local]] function configure(fields)
 
 			configure = nil --one-shot.
 
 			rs.fields = fields
+			rw_col_map = {}
 			for i,f in ipairs(fields) do
+				if not f.readonly then
+					add(rw_col_map, f.name)
+				end
 				if f.ref_table then
 					f.lookup_rowset_name, f.display_col = lookup_rowset(f.ref_table)
 					f.lookup_cols = f.ref_col
@@ -225,7 +234,7 @@ function sql_rowset(...)
 					if i > 1 then add(t, ' and ') end
 					add(t, where_col..' = :'..as_col)
 				end
-				return concat(t)
+				return cat(t)
 			end
 
 			if not rs.load_row then
@@ -241,35 +250,38 @@ function sql_rowset(...)
 
 		end
 
-		local function make_atomic(f)
-			if not f then return end
-			return function(...)
-				return atomic(f, ...)
+		function rs:insert_into(tbl, vals, col_map, opt)
+			local db = db(rs.db)
+			local id, ret = db:insert_row(tbl, vals, col_map or rw_col_map, opt)
+			if ret.affected_rows > 0 then
+				assert(ret.affected_schema == db.db)
+				self:table_changed(ret.affected_table)
 			end
-		end
-		make_atomic(rs.insert_row)
-		make_atomic(rs.update_row)
-		make_atomic(rs.delete_row)
-
-		local function pass(self, tbl, ...)
-			self:table_changed(tbl)
-			return ...
+			return id, ret
 		end
 
-		function rs:insert_into(tbl, ...)
-			return pass(self, tbl, insert_row(tbl, ...))
+		function rs:update_into(tbl, vals, col_map, security_filter, opt)
+			local db = db(rs.db)
+			local ret = db:update_row(tbl, vals, col_map or rw_col_map, security_filter, opt)
+			if ret.affected_rows > 0 then
+				assert(ret.affected_schema == db.db)
+				self:table_changed(ret.affected_table)
+			end
+			return ret
 		end
 
-		function rs:update_into(tbl, ...)
-			return pass(self, tbl, update_row(tbl, ...))
-		end
-
-		function rs:insert_or_update_into(tbl, ...)
-			return pass(self, tbl, insert_or_update_row(tbl, ...))
+		function rs:insert_or_update_into(tbl, vals, col_map, opt)
+			local db = db(rs.db)
+			local id, ret = db:insert_or_update_row(tbl, vals, col_map or rw_col_map, opt)
+			if ret.affected_rows > 0 then
+				assert(ret.affected_schema == db.db)
+				self:table_changed(ret.affected_table)
+			end
+			return id, ret
 		end
 
 		function rs:delete_from(tbl, ...)
-			return pass(self, tbl, delete_row(tbl, ...))
+			return delete_row(tbl, ...)
 		end
 
 	end, ...)
