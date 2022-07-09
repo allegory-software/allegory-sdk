@@ -216,7 +216,7 @@ function sql_rowset(...)
 			rw_col_map = {}
 			for i,f in ipairs(fields) do
 				if not f.readonly then
-					add(rw_col_map, f.name)
+					rw_col_map[f.name] = f.name
 				end
 				if f.ref_table then
 					f.lookup_rowset_name, f.display_col = lookup_rowset(f.ref_table)
