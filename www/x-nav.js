@@ -3721,10 +3721,10 @@ function nav_widget(e) {
 		let s = href(u)
 		let filter = param_vals_filter()
 		if (filter) {
-			let u = url_decode(s)
+			let u = url_parse(s)
 			u.args = u.args || obj()
 			u.args.filter = filter
-			s = url_encode(u)
+			s = url_format(u)
 		}
 		return s
 	}

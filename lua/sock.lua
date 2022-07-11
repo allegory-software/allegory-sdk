@@ -61,9 +61,8 @@ THREADS
 	threadstatus(co) -> s                  coroutine.status()
 	transfer(co, ...) -> ...               see coro.transfer()
 	cofinish(co, ...) -> ...               see coro.finish()
-	threadenv[co] -> t                     get a thread's own or inherited environment
-	getthreadenv([co]) -> t                get (current) thread's own enviornment
-	getownthreadenv([co], [create]) -> t   get/create (current) thread's own environment
+	threadenv([co]) -> t                   get (current) thread's own enviornment
+	ownthreadenv([co], [create]) -> t      get/create (current) thread's own environment
 	onthreadfinish(co, f)                  run `f(thread)` when thread finishes
 
 SCHEDULER
@@ -2494,26 +2493,25 @@ currentthread = coro.running
 threadstatus = coro.status
 cofinish = coro.finish
 
-local threadenv = setmetatable({}, weak_keys)
-local ownthreadenv = setmetatable({}, weak_keys)
-_G.threadenv = threadenv
+local threadenvs    = setmetatable({}, weak_keys)
+local ownthreadenvs = setmetatable({}, weak_keys)
 
-function getthreadenv(thread)
-	return threadenv[thread or currentthread()]
+function threadenv(thread)
+	return threadenvs[thread or currentthread()]
 end
 
-function getownthreadenv(thread, create)
+function ownthreadenv(thread, create)
 	thread = thread or currentthread()
-	local t = ownthreadenv[thread]
+	local t = ownthreadenvs[thread]
 	if not t and create ~= false then
 		t = {}
-		local pt = threadenv[thread]
+		local pt = threadenvs[thread]
 		if pt then --inherit parent env, if any.
 			t.__index = pt
 			setmetatable(t, t)
 		end
-		ownthreadenv[thread] = t
-		threadenv[thread] = t
+		ownthreadenvs[thread] = t
+		threadenvs[thread] = t
 	end
 	return t
 end
@@ -2534,7 +2532,7 @@ local function thread_onfinish(thread, ok, ...)
 end
 function thread(f, ...)
 	local thread = coro_create(f, thread_onfinish, ...)
-	threadenv[thread] = threadenv[currentthread()] --inherit threadenv.
+	threadenvs[thread] = threadenvs[currentthread()] --inherit threadenv.
 	return thread
 end
 
@@ -2549,7 +2547,7 @@ local function cowrap_onfinish(thread, ok, ...)
 end
 function cowrap(f, ...)
 	local wrapped, thread = coro_safewrap(f, cowrap_onfinish, ...)
-	threadenv[thread] = threadenv[currentthread()] --inherit threadenv.
+	threadenvs[thread] = threadenvs[currentthread()] --inherit threadenv.
 	return wrapped, thread
 end
 

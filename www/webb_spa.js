@@ -93,7 +93,7 @@ let url_action = function(t) {
 // (or current) language if any, or add ?lang= if the given language
 // is not the default language.
 function href(url_s, target_lang) {
-	let t = url_decode(url_s)
+	let t = url_parse(url_s)
 
 	// add impersonated user if any
 	if (!t.args.usr && current_url.args.usr)
@@ -103,7 +103,7 @@ function href(url_s, target_lang) {
 	let action = url_action(t)
 
 	if (action === undefined)
-		return url_encode(t)
+		return url_format(t)
 
 	let is_root = t.segments[1] == ''
 	if (is_root)
@@ -119,7 +119,7 @@ function href(url_s, target_lang) {
 			t.args.lang = target_lang
 		}
 	}
-	return url_encode(t)
+	return url_format(t)
 }
 
 action = obj() // {name->handler}
@@ -172,12 +172,12 @@ function page_loading() {
 
 let ignore_url_changed
 
-current_url = url_decode(location.pathname + location.search) // this is global
+current_url = url_parse(location.pathname + location.search) // this is global
 
 let url_changed = function(ev) {
 	if (ignore_url_changed)
 		return
-	current_url = url_decode(location.pathname + location.search)
+	current_url = url_parse(location.pathname + location.search)
 	let opt = ev && ev.detail || empty
 	fire('url_changed', opt)
 	let handler = action_handler(current_url)
@@ -274,7 +274,7 @@ method(Element, 'sethref', function(url, opt) {
 	}
 	url = href(url)
 	this.attr('href', url)
-	let handler = action_handler(url_decode(url))
+	let handler = action_handler(url_parse(url))
 	if (!handler)
 		return
 	this.on('click', function(ev) {
@@ -301,7 +301,7 @@ bind_component('a', function(e) {
 function settitle(title) {
 	title = title
 		|| $('h1').html()
-		|| url_decode(location.pathname).segments[1].replace(/[-_]/g, ' ')
+		|| url_parse(location.pathname).segments[1].replace(/[-_]/g, ' ')
 	if (title)
 		document.title = title + config('page_title_suffix')
 }

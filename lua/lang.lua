@@ -55,7 +55,7 @@ TODO:
 ]==]
 
 require'glue'
-require'sock'   --get[own]threadenv()
+require'sock'   --[own]threadenv()
 require'fs'     --load(), save()
 require'query'  --$lang() etc. macros
 require'schema' --lang_schema()
@@ -584,7 +584,7 @@ local function mkapi(name, names, rows, cols, default_val)
 	end
 	local private_name = '_'..name
 	local function get(k)
-		local te = getthreadenv()
+		local te = threadenv()
 		local v = te and te[private_name] or default()
 		if not k then return v end
 		local t = assert(t[v])
@@ -594,7 +594,7 @@ local function mkapi(name, names, rows, cols, default_val)
 	end
 	local function set(v)
 		if not v or not t[v] then return end --missing or invalid value: ignore.
-		getownthreadenv()[private_name] = v
+		ownthreadenv()[private_name] = v
 	end
 	_G[names] = t
 	_G[name] = get
@@ -776,8 +776,8 @@ end
 
 do
 local t = {}
-function duration(s, format) -- approx[+s] | long | nil
-	if format == 'approx' then
+function duration(s, fmt) -- approx[+s] | long | nil
+	if fmt == 'approx' then
 		if s > 2 * 365 * 24 * 3600 then
 			return format(S('n_years', '%d years'), floor(s / (365 * 24 * 3600)))
 		elseif s > 2 * 30.5 * 24 * 3600 then
@@ -790,7 +790,7 @@ function duration(s, format) -- approx[+s] | long | nil
 			return format(S('n_minutes', '%d minutes'), floor(s / 60))
 		elseif s > 60 then
 			return S('one_minute', '1 minute')
-		elseif format == 'approx+s' then
+		elseif fmt == 'approx+s' then
 			return format(S('n_seconds', '%d seconds'), s)
 		else
 			return S('seconds', 'seconds')
@@ -802,7 +802,7 @@ function duration(s, format) -- approx[+s] | long | nil
 		local s = s - h * 3600
 		local m = floor(s / 60)
 		local s = s - m * 60
-		if format == 'long' then
+		if fmt == 'long' then
 			for i=#t,1,-1 do t[i]=nil end
 			local i=1
 			if d ~= 0            then t[i] = d; t[i+1] = d > 1 and S'days'    or S'day'   ; i=i+2 end

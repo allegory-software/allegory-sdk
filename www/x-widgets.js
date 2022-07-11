@@ -2187,7 +2187,7 @@ component('x-tabs', 'Containers', function(e) {
 	}
 
 	function url_path_tab() {
-		let p = url_decode(location.pathname).segments.splice(2)
+		let p = url_parse(location.pathname).segments.splice(2)
 		let slug = p[url_path_level()]
 		for (let item of e.items) {
 			if (slug == item_slug(item))

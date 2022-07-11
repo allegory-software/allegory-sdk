@@ -141,8 +141,8 @@ LOCAL STORAGE
 	save(key, s)
 	load(key) -> s
 URL DECODING, ENCODING AND UPDATING
-	url_decode(s) -> t
-	url_envode(t) -> s
+	url_parse(s) -> t
+	url_format(t) -> s
 EVENTS
 	event(name|ev, [bubbles], ...args) -> ev
 	e.on   (name|ev, f, [enable], [capture])
@@ -1322,9 +1322,9 @@ function load(key) {
 	return localStorage.getItem(key)
 }
 
-// URL encoding & decoding ---------------------------------------------------
+// URL parsing & formatting --------------------------------------------------
 
-function url_decode(s) {
+function url_parse(s) {
 
 	if (!isstr(s))
 		return s
@@ -1373,7 +1373,7 @@ function url_decode(s) {
 }
 
 // TODO: this only works on urls without scheme and host !
-function url_encode(t) {
+function url_format(t) {
 
 	if (!isobject(t))
 		return t
@@ -1596,7 +1596,7 @@ function ajax(req) {
 	let method = req.method || (req.upload ? 'POST' : 'GET')
 	let async = req.async !== false // NOTE: this is deprecated but that's ok.
 
-	xhr.open(method, url_encode(req.url), async, req.user, req.pass)
+	xhr.open(method, url_format(req.url), async, req.user, req.pass)
 
 	let upload = req.upload
 	if (isobj(upload) || isarray(upload)) {

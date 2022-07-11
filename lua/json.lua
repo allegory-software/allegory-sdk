@@ -31,7 +31,7 @@ function json_asarray(t)
 end
 
 function json_pack(...)
-	local t = json_array{...}
+	local t = json_asarray{...}
 	for i=1,select('#',...) do
 		if t[i] == nil then
 			t[i] = null

@@ -14,7 +14,6 @@ FACTS
 	  task, or to the current terminal if the task has no parent.
 	* the current terminal is set to the task's terminal while the task is running.
 	* the main thread has a cmdline_terminal by default.
-	*
 
 TERMINALS
 	tasks.null_terminal(nt, opt...) -> nt
@@ -129,13 +128,16 @@ function nterm:print(...)
 	self:out_stdout'\n'
 end
 
-function nterm:pipe(term, on) --pipe out self to term.
+function nterm:pipe(term, on, filter) --pipe out self to term.
 	if on == false then
 		return self:off{'out', term}
 	end
 	self:on({'out', term}, function(self, src_term, chan, ...)
-		term:out(src_term, chan, ...)
+		if not filter or filter(self, chan, ...) then
+			term:out(src_term, chan, ...)
+		end
 	end)
+	return self
 end
 
 --recording terminal: records input and plays it back on another terminal.
@@ -212,6 +214,7 @@ local sterm = object(nil, nil, nterm)
 streaming_terminal = sterm
 
 function sterm:send_on(chan, s)
+	assert(#chan == 1)
 	self.send(format('%s%08x\n%s', chan, #s, s))
 end
 
@@ -219,9 +222,11 @@ sterm:after('out', function(self, src_term, chan, ...)
 	if     chan == 'stdout' then self:send_on('1', ...)
 	elseif chan == 'stderr' then self:send_on('2', ...)
 	elseif chan == 'notify' then
+		local kind = ...
 		self:send_on(
-				kind == 'info'  and 'N'
-			or kind == 'warn'  and 'W', ...)
+				kind == 'info' and 'N'
+			or kind == 'warn' and 'W'
+			or error(_('invalid notify kind: %s', kind)), select(2, ...))
 	else
 		self:send(chan, ...)
 	end
@@ -238,20 +243,21 @@ function streaming_terminal_reader(term)
 		::again::
 		if not size and #buf >= 10 then
 			chan = buf:get(1)
-			size = assert(tonumber(buf:get(9), 16))
+			local s = buf:get(9)
+			size = assert(tonumber(s, 16))
 		end
 		if size and #buf >= size then
 			local s = buf:get(size)
 			if chan == '1' then
-				term:out('stdout', s)
+				term:out(nil, 'stdout', s)
 			elseif chan == '2' then
-				term:out('stderr', s)
+				term:out(nil, 'stderr', s)
 			elseif chan == 'N' then
-				term:out('notify', 'info', s)
+				term:out(nil, 'notify', 'info', s)
 			elseif chan == 'W' then
-				term:out('notify', 'warn', s)
+				term:out(nil, 'notify', 'warn', s)
 			elseif chan == 'E' then
-				term:out('notify', 'error', s)
+				term:out(nil, 'notify', 'error', s)
 			elseif term.receive_on then
 				term:receive_on(chan, s)
 			end
@@ -263,14 +269,14 @@ end
 
 --current thread's terminal --------------------------------------------------
 
-local function current_terminal(thread)
-	local tenv = threadenv[thread or currentthread()]
-	return tenv and tenv.terminal
+function current_terminal(thread)
+	local env = threadenv(thread)
+	return env and env.terminal
 end
-current_terminal = current_terminal
+local current_terminal = current_terminal
 
 function set_current_terminal(term, thread)
-	local env = getownthreadenv(thread)
+	local env = ownthreadenv(thread)
 	local term0 = env.terminal
 	env.terminal = term
 	return term0
@@ -326,7 +332,7 @@ function task:init()
 		local pt = current_terminal()
 		if pt then
 			self.parent_terminal = pt
-			self.terminal:pipe(pt)
+			self.terminal:pipe(pt, true, self.out_filter)
 		end
 	end
 
@@ -452,7 +458,7 @@ function task_exec(cmd, opt)
 
 	local env = opt.env and update(env(), opt.env)
 
-	local p = assert(exec{
+	local p = exec{
 		cmd = cmd,
 		env = env,
 		async = true,
@@ -460,9 +466,15 @@ function task_exec(cmd, opt)
 		stdout = capture_stdout,
 		stderr = capture_stderr,
 		stdin = opt.stdin and true or false,
-	})
+	}
 
-	local task = task(update({}, opt))
+	local function out_filter(term, chan)
+		if not allow_out_stdout and chan == 'stdout' then return false end
+		if not allow_out_stderr and chan == 'stderr' then return false end
+		return true
+	end
+
+	local task = task(update({out_filter = out_filter}, opt))
 
 	task.cmd = cmd
 	task.process = p
@@ -495,10 +507,8 @@ function task_exec(cmd, opt)
 					elseif len == 0 then
 						break
 					end
-					if allow_out_stdout then
-						local s = str(buf, len)
-						out_stdout(s)
-					end
+					local s = str(buf, len)
+					out_stdout(s)
 				end
 				assert(p.stdout:close())
 			end, 'exec-stdout %s', p))
@@ -515,16 +525,15 @@ function task_exec(cmd, opt)
 					elseif len == 0 then
 						break
 					end
-					if allow_out_stderr then
-						local s = str(buf, len)
-						out_stderr(s)
-					end
+					local s = str(buf, len)
+					out_stderr(s)
 				end
 				assert(p.stderr:close())
 			end, 'exec-stderr %s', p))
 		end
 
 		local exit_code, err = p:wait()
+		self.exit_code = exit_code
 		if not exit_code then
 			if not (err == 'killed' and task.killed) then --crashed/killed from outside
 				add_error('proc.wait', err)

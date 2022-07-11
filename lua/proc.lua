@@ -5,8 +5,8 @@
 
 	Missing features: named mutexes, semaphores and events.
 
-	exec(opt | cmd,...) -> p                   spawn a child process in background
-	exec_luafile(opt | script,...) -> p        spawn a process running a Lua script
+	[try_]exec(opt | cmd,...) -> p                   spawn a child process in background
+	[try_]exec_luafile(opt | script,...) -> p        spawn a process running a Lua script
 	  p.pid                                    process ID
 	  p:kill()                                 kill process
 	  p:wait([expires]) -> status              wait for a process to finish
@@ -24,9 +24,10 @@
 	cmdline_quote_arg[_PLATFORM](s) -> s       quote as cmdline arg
 	cmdline_quote_args(platform, ...) -> s     quote as cmdline args
 	cmdline_quote_args[_PLATFORM](...) -> s    quote as cmdline args
+	cmdline_quote_cmd[_PLATFORM](cmd) -> s     quote command
 	cmdline_quote_vars({k->v}, [format], [platform]) -> s   quote as var assignments
 
-exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
+[try_]exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
 
 	Spawn a child process and return a process object to query and control the
 	process. Options can be given as separate args or in a table.
@@ -46,7 +47,7 @@ exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
 		autokill
 			kills the process when the calling process exits.
 
-exec_luafile(opt | script,...) -> p
+[try_]exec_luafile(opt | script,...) -> p
 
 	Spawn a process running a Lua script, using the same LuaJIT executable
 	as that of the running process. The process starts in the current directory
@@ -201,9 +202,26 @@ end
 function cmdline_quote_args_win (...) return cmdline_quote_args('win', ...) end
 function cmdline_quote_args_unix(...) return cmdline_quote_args('unix', ...) end
 
+function cmdline_quote_cmd(platform, cmd)
+	if not istab(cmd) then
+		return cmd
+	end
+	local t = {}
+	platform = platform or current_platform
+	t[1] = platform == 'win' and cmdline_quote_path_win(cmd[1]) or cmd[1]
+	for i = 2, cmd.n or #cmd do
+		if cmd[i] then --nil and false args are skipped. pass '' to inject empt args.
+			t[#t+1] = cmdline_quote_arg(cmd[i], platform)
+		end
+	end
+	return concat(t, ' ')
+end
+function cmdline_quote_cmd_win (...) return cmdline_quote_cmd('win', ...) end
+function cmdline_quote_cmd_unix(...) return cmdline_quote_cmd('unix', ...) end
+
 --cmd|{cmd,arg1,...}, env, ...
 --{cmd=cmd|{cmd,arg1,...}, env=, ...}
-function exec(t, ...)
+function try_exec(t, ...)
 	if istab(t) and t.cmd then
 		return _exec(t.cmd, t.env, t.dir, t.stdin, t.stdout, t.stderr,
 			t.autokill, t.inherit_handles)
@@ -214,7 +232,7 @@ end
 
 --script|{script,arg1,...}, env, ...
 --{script=, env=, ...}
-function exec_lua_file(arg, ...)
+function try_exec_lua_file(arg, ...)
 	local exepath = exepath()
 	local script = isstr(arg) and arg or arg.script
 	local cmd = isstr(script) and {exepath, script} or extend({exepath}, script)
@@ -227,7 +245,7 @@ function exec_lua_file(arg, ...)
 				t[k] = v
 			end
 		end
-		return exec(t)
+		return try_exec(t)
 	end
 end
 
@@ -245,7 +263,7 @@ function exec_lua(arg, ...)
 			end
 		end
 	end
-	local p, err = exec(t)
+	local p, err = try_exec(t)
 	if not p then return nil, err end
 	run(function()
 		p.stdin:write(script)
@@ -253,3 +271,15 @@ function exec_lua(arg, ...)
 	end)
 	return p
 end
+
+local function wrap(f)
+	return function(...)
+		local p, err = f(...)
+		if p then return p end
+		local t = ...; local cmd = istab(t) and t.cmd or t
+		check('proc', 'exec', nil, '%s: %s', cmdline_quote_cmd(nil, cmd), err)
+	end
+end
+exec          = wrap(try_exec)
+exec_lua_file = wrap(try_exec_lua_file)
+exec_lua      = wrap(try_exec_lua)

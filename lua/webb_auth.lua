@@ -12,8 +12,7 @@ SESSIONS
 	gen_auth_token(email) -> token            generate a one-time long-lived auth token
 	gen_auth_code('email', email) -> code     generate a one-time short-lived auth code
 	gen_auth_code('phone', phone) -> code     generate a one-time short-lived auth code
-	usr_create({k->v}) -> usr                 create a user
-	usr_update({k->v}) -> usr                 update a user
+	usr_[create|update|create_or_update]({k->v}) -> usr    create and/or update a user
 	usr_delete(usr)                           delete a user
 	clear_userinfo_cache([usr])               clear usr table cache
 
@@ -225,19 +224,20 @@ end
 local function usr_insert_or_update_args(t, dt)
 	t = update(dt or {}, t)
 	t.roles = isstr(t.roles) and index(collect(words(t.roles))) or t.roles
-	local roles = http_request() and usr'roles' or {dev = true, admin = true}
-	allow(roles.admin or roles.dev, 'must be admin or dev to create or update user')
-	allow(roles.dev or not (t.roles and t.roles.dev), 'only devs can create or update devs')
-	allow(roles.dev or t.tenant == tenant(), 'only devs can create/move users of/to other tenants')
-	t.roles = t.roles ~= nil and cat(t.roles, ' ') or nil
+	local roles = {dev = true, admin = true}
+	if http_request() then
+		t.tenant = t.tenant or tenant()
+		roles = usr'roles' or roles
+		allow(roles.admin or roles.dev, 'must be admin or dev to create or update user')
+		allow(roles.dev or not (t.roles and t.roles.dev), 'only devs can create or update devs')
+		allow(roles.dev or t.tenant == tenant(), 'only devs can create/move users of/to other tenants')
+	end
+	t.roles = t.roles ~= nil and cat(keys(t.roles, true), ' ') or nil
 	return t
 end
 
 function usr_create(t)
-	t = usr_insert_or_update_args(t, {
-		anonymous = false,
-		tenant = tenant(),
-	})
+	t = usr_insert_or_update_args(t, {anonymous = false})
 	return insert_row('usr', t)
 end
 
@@ -247,10 +247,19 @@ function usr_update(t)
 	clear_userinfo_cache(t.usr)
 end
 
+function usr_create_or_update(t)
+	t = usr_insert_or_update_args(t, {anonymous = false})
+	t.usr = insert_or_update_row('usr', t)
+	clear_userinfo_cache(t.usr)
+	return t.usr
+end
+
 function usr_delete(usr_to_delete)
-	local roles = usr'roles'
-	allow(roles.dev or roles.admin, 'only devs and admins can remove users')
-	allow(roles.dev or row.tenant == tenant(), 'only devs can remove users of other tenants')
+	if http_request() then
+		local roles = usr'roles'
+		allow(roles.dev or roles.admin, 'only devs and admins can remove users')
+		allow(roles.dev or row.tenant == tenant(), 'only devs can remove users of other tenants')
+	end
 	delete_row('usr', {['usr:old'] = usr_to_delete})
 	clear_userinfo_cache(usr_to_delete)
 end

@@ -708,7 +708,7 @@ local function static_resolve(self, host)
 end
 function rs:try_resolve(host)
 	local ip = static_resolve(self, host)
-	if ip then return ip end
+	if ip then return {ip} end
 	return self:try_lookup(host)
 end
 function rs:resolve(...)

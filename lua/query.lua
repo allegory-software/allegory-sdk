@@ -91,9 +91,9 @@ qmacro = sqlpps.mysql.macro
 ttsubst = sqlpps.tarantool.subst
 ttmacro = sqlpps.tarantool.macro
 
-local function pconfig(ns, k, default)
+local function pconfig(ns, k, default, use_default)
 	if ns then
-		return config(ns..'_'..k, config(k, default))
+		return config(ns..'_'..k, use_default ~= false and config(k, default) or nil)
 	else
 		return config(k, default)
 	end
@@ -108,6 +108,11 @@ local conn_opt = memoize(function(ns)
 	local t = {}
 	local engine = pconfig(ns, 'db_engine', 'mysql')
 	t.sqlpp      = assert(sqlpps[engine])
+	if ns then
+		local host = pconfig(ns, 'db_host', nil, false)
+		local port = pconfig(ns, 'db_port', nil, false)
+		assertf(host or port, 'host and/or port expected for %s', ns)
+	end
 	t.host       = pconfig(ns, 'db_host', '127.0.0.1')
 	t.port       = pconfig(ns, 'db_port', assert(default_port[engine]))
 	t.user       = pconfig(ns, 'db_user', 'root')
@@ -138,8 +143,8 @@ local function _release_dbs(dbs, ok)
 	end
 end
 
-local function getownthreaddbs(thread, create_env)
-	local env = getownthreadenv(thread, create_env)
+local function ownthreaddbs(thread, create_env)
+	local env = ownthreadenv(thread, create_env)
 	local dbs = env and rawget(env, DBS)
 	if not dbs then
 		if create_env ~= false then
@@ -154,7 +159,7 @@ local function getownthreaddbs(thread, create_env)
 end
 
 function release_dbs()
-	local dbs = getownthreaddbs(nil, false)
+	local dbs = ownthreaddbs(nil, false)
 	if not dbs then return end
 	_release_dbs(dbs, true)
 end
@@ -168,7 +173,7 @@ function db(ns, without_current_db)
 	local opt = conn_opt(ns or false)
 	local key = opt.pool_key
 	local thread = currentthread()
-	local dbs = getownthreaddbs(thread)
+	local dbs = ownthreaddbs(thread)
 	local req = _G.http_request and http_request(thread)
 	if req and thread == req.thread then
 		if not req._release_dbs_hooked then
@@ -180,6 +185,7 @@ function db(ns, without_current_db)
 	end
 	local db, err = dbs[key]
 	if not db then
+		::again::
 		db, err = pool:get(key)
 		if not db then
 			assert(err == 'empty', err)
@@ -190,7 +196,14 @@ function db(ns, without_current_db)
 			db = opt.sqlpp.connect(opt)
 			pool:put(key, db, db.rawconn.f)
 		end
-		db:start_transaction()
+		local ok, err = pcall(db.start_transaction, db)
+		if not ok then
+			if iserror(err, 'io') then --disconnected
+				goto again
+			else
+				error(err)
+			end
+		end
 		dbs[key] = db
 	end
 	return db
@@ -235,13 +248,13 @@ end
 
 function pqr(rows, fields)
 	local opt = rows.rows and rows or {rows = rows, fields = fields}
-	return mysql_print.result(opt)
+	return mysql_print_result(opt)
 end
 
 function outpqr(rows, fields)
 	local opt = rows.rows and update({}, rows) or {rows = rows, fields = fields}
 	opt.print = outprint
-	mysql_print.result(opt)
+	mysql_print_result(opt)
 end
 
 

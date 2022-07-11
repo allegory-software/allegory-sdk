@@ -102,7 +102,9 @@ cmd_server(Linux, 'stop', 'Stop the server', function()
 		return 1
 	end
 	sayn('Killing PID %d...', pid)
-	exec('kill %d', pid)
+	local p = exec(_('kill %d', pid))
+	p:wait()
+	p:forget()
 	for i=1,10 do
 		if not running() then
 			say'OK.'
@@ -123,7 +125,9 @@ cmd_server(Linux, 'restart', 'Restart the server', function()
 end)
 
 cmd_server('tail', 'tail -f the log file', function()
-	exec('tail -f %s', logfile)
+	local p = exec(_('tail -f %s', logfile))
+	p:wait()
+	p:forget()
 end)
 
 --init -----------------------------------------------------------------------

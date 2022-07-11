@@ -198,7 +198,7 @@ function http_server(...)
 		})
 		while not ctcp:closed() do
 			local req = assert(http:read_request())
-			getownthreadenv().http_request = req
+			ownthreadenv().http_request = req
 			handle_request(ctcp, http, req)
 		end
 	end
@@ -278,7 +278,7 @@ errortype'http_response'.__tostring = function(self)
 end
 
 function http_request(thread)
-	local tenv = getthreadenv(thread)
+	local tenv = threadenv(thread)
 	return tenv and tenv.http_request
 end
 

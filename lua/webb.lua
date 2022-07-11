@@ -593,7 +593,7 @@ end
 
 local _print = print_function(out)
 function outprint(...)
-	if req().res then setmime'txt' end
+	if req() then setmime'txt' end
 	_print(...)
 end
 

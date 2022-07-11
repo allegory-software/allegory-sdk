@@ -188,7 +188,7 @@ on('usr_usr_dropdown.init', function(e) {
 		if (changes.input_val) {
 			let url = assign(obj(), current_url)
 			url.args.usr = changes.input_val[0]
-			exec(url_encode(url), {refresh: true})
+			exec(url_format(url), {refresh: true})
 		}
 	})
 })

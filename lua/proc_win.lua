@@ -32,8 +32,8 @@ end
 local autokill_job
 
 local error_classes = {
-	[0x002] = 'not_found', --ERROR_FILE_NOT_FOUND
-	[0x005] = 'access_denied', --ERROR_ACCESS_DENIED
+	[0x002] = 'not_found'     , --ERROR_FILE_NOT_FOUND
+	[0x005] = 'access_denied' , --ERROR_ACCESS_DENIED
 }
 
 function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)

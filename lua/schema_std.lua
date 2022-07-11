@@ -18,6 +18,7 @@ local glue_timeago   = timeago
 local glue_timeofday = timeofday
 local glue_duration  = duration
 local glue_date      = date
+local string_format  = format
 
 local datetime_to_timestamp = function(s) return mysql_datetime_to_timestamp(s) end
 local timestamp_to_datetime = function(t) return mysql_timestamp_to_datetime(t) end
@@ -212,7 +213,7 @@ return function()
 		return '%.'..dec..'f' or '%.0f'
 	end)
 	function type_attrs.number.to_text(n, f)
-		return _(f.decimals and decfmt(f.decimals) or '%0.15g', n)
+		return string_format(f.decimals and decfmt(f.decimals) or '%0.15g', n)
 	end
 
 	function type_attrs.timeofday_in_seconds.to_text(s, f)
@@ -244,7 +245,7 @@ return function()
 		return '%.'..dec..'f%%' or '%.0f%$'
 	end)
 	function type_attrs.percent.to_text(p, f)
-		return  _(decfmt(f.decimals), p * 100)
+		return  string_format(decfmt(f.decimals), p * 100)
 	end
 
 end
