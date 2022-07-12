@@ -216,7 +216,7 @@ action['sign_in_email.json'] = function()
 	local subj = S('sign_in_email_subject', 'Your sign-in code')
 	local text = render('sign_in_email_text', {code = code, host = host()})
 	local html = render('sign_in_email_html', {code = code, host = host()})
-	try_sendmail{from = noreply, to = email, subject = subj, text = text, html = html}
+	sendmail{from = noreply, to = email, subject = subj, text = text, html = html}
 	return {ok = true}
 end
 

@@ -339,8 +339,8 @@ function email(user)
 end
 
 function client_ip()
-	return headers'x-forwarded-for'
-		or req().http.f.remote_addr
+	local xff = headers'x-forwarded-for'
+	return xff and xff[1] or req().http.f.remote_addr
 end
 
 function isgooglebot()
