@@ -1612,13 +1612,13 @@ function try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
 		end
 		return nil, err
 	end
-	local buf, len = f:readall(nil, ignore_file_size)
+	local buf, len = f:readall(ignore_file_size)
 	f:close()
 	return buf, len
 end
 
 function try_load(file, default, ignore_file_size)
-	local buf, len = try_load_tobuffer(file, default, ignore_file_size)
+	local buf, len = try_load_tobuffer(file, default, nil, ignore_file_size)
 	if not buf then return nil, len end
 	return str(buf, len)
 end
