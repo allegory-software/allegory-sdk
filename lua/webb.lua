@@ -241,7 +241,7 @@ function args(v)
 	local req = req()
 	local args, argc = req.args, req.argc
 	if not args then
-		local u = url_parse(req.uri)
+		local u = url_parse(req.uri, nil, true)
 		args = u.segments
 		remove(args, 1) -- /a/b -> a/b
 		argc = #args
@@ -355,10 +355,14 @@ end
 
 --responding with a http status message by raising an error.
 local function checkfunc(code, default_err)
+	local action = 'ck'..code
 	return function(ret, err, ...)
 		if ret then return ret end
 		err = err and format(err, ...) or default_err
 		local req = req()
+		if not req then --not in a request
+			check('webb', action, ret, '%s', err)
+		end
 		local ct = req.res.content_type
 		http_error{
 			status = code,

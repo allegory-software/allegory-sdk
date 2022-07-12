@@ -117,15 +117,8 @@ function nterm:out_stdout(s) self:out(self, 'stdout', s) end
 function nterm:out_stderr(s) self:out(self, 'stderr', s) end
 
 function nterm:print(...)
-	local n = select('#', ...)
-	for i=1,n do
-		local v = select(i, ...)
-		self:out_stdout(tostring(v))
-		if i < n then
-			self:out_stdout'\t'
-		end
-	end
-	self:out_stdout'\n'
+	self._print = self._print or print_function(function(s) self:out_stdout(s) end)
+	self._print(...)
 end
 
 function nterm:pipe(term, on, filter) --pipe out self to term.
@@ -290,6 +283,8 @@ function notify_error (...) current_terminal():notify_error (...) end
 function notify_warn  (...) current_terminal():notify_warn  (...) end
 function out_stdout(s) current_terminal():out_stdout(s) end
 function out_stderr(s) current_terminal():out_stderr(s) end
+out_stdout_print = print_function(out_stdout)
+out_stderr_print = print_function(out_stderr)
 
 --tasks ----------------------------------------------------------------------
 

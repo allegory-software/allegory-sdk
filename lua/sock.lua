@@ -1181,7 +1181,7 @@ do
 	end
 
 	function tcp:try_connect(host, port, addr_flags, ...)
-		log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
+		log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
 		if not self.bound_addr then
 			--ConnectEx requires binding first.
 			local ok, err = self:try_bind(...)
@@ -1196,7 +1196,7 @@ do
 		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return false, err end
-		log('', 'sock', 'connectd', '%-4s %s', self, self.remote_addr)
+		log('', 'sock', 'connect', '%-4s %s', self, self.remote_addr)
 		live(self, 'connected %s', self.remote_addr)
 		return true
 	end
@@ -1232,7 +1232,7 @@ do
 	local accept_buf = accept_buf_ct()
 	local sa_len = sizeof(accept_buf) / 2
 	function tcp:try_accept()
-		log('', 'sock', 'accept', '%-4s', self)
+		log('', 'sock', 'accept?', '%-4s', self)
 		local s = create_socket(tcp, 'tcp', self._af, self._pr)
 		live(s, 'wait-accept %s', self) --only shows in Windows.
 		local o, job = overlapped(self, return_true, self.recv_expires)
@@ -1495,7 +1495,7 @@ local _connect = make_async(true, false, function(self, ai)
 end, EINPROGRESS)
 
 function tcp:try_connect(host, port, addr_flags, ...)
-	log('', 'sock', 'connect', '%-4s %s:%s', self, host, port)
+	log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
 	local ai, ext_ai = self:addr(host, port, addr_flags)
 	if not ai then return false, ext_ai end
 	if not self.bound_addr then
@@ -1540,7 +1540,7 @@ do
 	end, EWOULDBLOCK)
 
 	function tcp:try_accept()
-		log('', 'sock', 'accept', '%-4s', self)
+		log('', 'sock', 'accept?', '%-4s', self)
 		local s, err, errno = tcp_accept(self)
 		local retry =
 			   errno == ENETDOWN
@@ -1890,6 +1890,7 @@ function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 	if not isnum(backlog) then
 		backlog, host, port, onaccept, addr_flags = 1/0, backlog, host, port, onaccept
 	end
+	log('', 'sock', 'listen?', '%-4s %s:%d', self, host, port)
 	if not self.bound_addr then
 		local ok, err = self:try_bind(host, port, addr_flags)
 		if not ok then return nil, err end
