@@ -14,6 +14,7 @@ function test_update_ca_file()
 	resume(thread(function()
 		update_ca_file()
 	end))
+	start()
 end
 
 function test_getpage(url, n)
@@ -31,5 +32,5 @@ function test_getpage(url, n)
 	pr(kbytes(b / (t1 - t0))..'/s')
 end
 
---test_update_ca_file()
-test_getpage('http://luapower.com/', 1)
+test_update_ca_file()
+--test_getpage('http://luapower.com/', 1)

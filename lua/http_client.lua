@@ -619,7 +619,7 @@ function getpage(...)
 end
 
 function update_ca_file()
-	local file = ca_file_path()
+	local file = config'ca_file' or varpath'cacert.pem'
 	local s, err = getpage{
 		url = 'https://curl.haxx.se/ca/cacert.pem',
 	}

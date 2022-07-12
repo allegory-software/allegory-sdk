@@ -11,8 +11,18 @@ local C = ffi.load(tls_libname or 'tls_bearssl')
 TLS_WANT_POLLIN  = C.TLS_WANT_POLLIN
 TLS_WANT_POLLOUT = C.TLS_WANT_POLLOUT
 
+local function P(s)
+	return exists(s) and s or nil
+end
 function ca_file_path()
-	return config'ca_file' or varpath'cacert.pem'
+	return config'ca_file'
+		or P(varpath'cacert.pem')
+		or P'/etc/ssl/certs/ca-certificates.crt'                --Debian/Ubuntu/Gentoo etc.
+		or P'/etc/pki/tls/certs/ca-bundle.crt'                  --Fedora/RHEL 6
+		or P'/etc/ssl/ca-bundle.pem'                            --OpenSUSE
+		or P'/etc/pki/tls/cacert.pem'                           --OpenELEC
+		or P'/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' --CentOS/RHEL 7
+		or P'/etc/ssl/cert.pem'                                 --Alpine Linux
 end
 
 local config = {}
