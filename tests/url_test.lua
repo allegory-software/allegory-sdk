@@ -14,8 +14,8 @@ test(url_format{scheme = 'http', host = 'dude.com', path = '/redirect',
 local function revtest(s, t, missing_t, missing_pt)
 	local pt = url_parse(s)
 	local s2 = url_format(pt)
-	glue.update(t, missing_t)
-	glue.update(pt, missing_pt)
+	update(t, missing_t)
+	update(pt, missing_pt)
 	test(pt, t)
 	test(s2, s)
 end

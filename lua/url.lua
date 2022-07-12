@@ -60,6 +60,8 @@ url_unescape(s) -> s
 
 ]=]
 
+if not ... then require'url_test'; return end
+
 require'glue'
 
 --formatting -----------------------------------------------------------------
@@ -165,12 +167,13 @@ end
 --[scheme:](([//[user[:pass]@]host[:port][/path])|path)[?query][#fragment]
 --NOTE: t.query is unusable if args names/values contain `&` or `=`.
 --NOTE: t.path is unusable if the path segments contain `/`.
-function url_parse(s, t)
+--NOTE: the `relative` flag is because the URL `//` is ambiguous.
+function url_parse(s, t, relative)
 	t = t or {}
-	s = s:gsub('^([a-zA-Z%+%-%.]*):', function(s)
+	s = not relative and s:gsub('^([a-zA-Z%+%-%.]*):', function(s)
 		t.scheme = unesc(s)
 		return ''
-	end)
+	end) or s
 	s = s:gsub('#(.*)', function(s)
 		t.fragment = unesc(s)
 		return ''
@@ -180,10 +183,10 @@ function url_parse(s, t)
 		t.args = url_parse_args(s)
 		return ''
 	end)
-	s = s:gsub('^//([^/]*)', function(s)
+	s = not relative and s:gsub('^//([^/]*)', function(s)
 		t.host = unesc(s)
 		return ''
-	end)
+	end) or s
 	if t.host then
 		t.host = t.host:gsub('^(.-)@', function(s)
 			t.user = unesc(s)
