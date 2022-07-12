@@ -1944,6 +1944,11 @@ local function get_str(buf, sz)
 	return str(C.strerror(buf.i))
 end
 
+local function get_error(buf)
+	local _, s = check_errno(nil, buf.i)
+	return s
+end
+
 local function set_bool(v) --BOOL aka DWORD
 	buf.u = v
 	return buf.c, 4
@@ -2018,7 +2023,7 @@ get_opt = {
 	connect_time       = get_uint,
 	dontlinger         = get_bool,
 	dontroute          = get_bool,
-	error              = get_uint,
+	error              = get_error,
 	exclusiveaddruse   = get_bool,
 	keepalive          = get_bool,
 	linger             = get_linger,
@@ -2142,7 +2147,7 @@ OPT = {
 }
 
 get_opt = {
-	error              = get_str,
+	error              = get_error,
 	reuseaddr          = get_bool,
 }
 
