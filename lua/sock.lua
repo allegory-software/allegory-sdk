@@ -1196,7 +1196,8 @@ do
 		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return false, err end
-		log('', 'sock', 'connect', '%-4s %s', self, self.remote_addr)
+		log('', 'sock', 'connectd', '%-4s %s:%s',
+			self, self.remote_addr, self.remote_port)
 		live(self, 'connected %s', self.remote_addr)
 		return true
 	end
@@ -1209,7 +1210,8 @@ do
 		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		log('', 'sock', 'connectd', '%-4s %s', self, self.remote_addr)
+		log('', 'sock', 'connectd', '%-4s %s:%s',
+			self, self.remote_addr, self.remote_port)
 		live(self, 'connected %s', self.remote_addr)
 		return true
 	end
@@ -1506,12 +1508,12 @@ function tcp:try_connect(host, port, addr_flags, ...)
 		end
 	end
 	local len, err = _connect(self, ai)
-	if not len then
-		if not ext_ai then ai:free() end
-		return false, err
-	end
-	local ip = ai:tostring()
-	log('', 'sock', 'connectd', '%-4s %s', self, ip)
+	self.remote_addr = len and ai.addr:addr():tostring() or nil
+	self.remote_port = len and ai.addr:port() or nil
+	if not ext_ai then ai:free() end
+	if not len then return false, err end
+	log('', 'sock', 'connectd', '%-4s %s:%s',
+		self, self.remote_addr, self.remote_port)
 	live(self, 'connected %s', ip)
 	if not ext_ai then ai:free() end
 	return true
