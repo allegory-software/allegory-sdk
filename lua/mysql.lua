@@ -1380,6 +1380,7 @@ end
 
 --NOTE: mysql commits the current transaction first before starting a new one!
 function conn.start_transaction(self)
+	assert(not self._in_transaction, 'already_started')
 	local res = self:query'start transaction'
 	self._in_transaction = true
 	return res
