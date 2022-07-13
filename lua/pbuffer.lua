@@ -252,15 +252,14 @@ function pb:have(n)
 	local have = #self
 	if n <= have then return true end
 	n = n - have
-	local maxsize = max(n, self.minsize - have)
-	local p, size = self:reserve(maxsize)
-	size = min(size, maxsize)
+	n = max(n, self.minsize - have)
+	local p = self:reserve(n)
 	while n > 0 do
-		local read_n = self:read(p, size)
+		local read_n = self:read(p, n)
 		if read_n == 0 then return false, 'eof' end
 		self:commit(read_n)
 		n = n - read_n
-		size = size - read_n
+		p = p + read_n
 	end
 	return true
 end
