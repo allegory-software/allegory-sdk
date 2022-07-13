@@ -253,7 +253,9 @@ function pb:have(n)
 	if n <= have then return true end
 	n = n - have
 	local max_n = max(n, self.minsize - have)
-	local p, max_n = self:reserve(max_n)
+	local p = self:reserve(max_n)
+	--NOTE: ignoring actually reserved size because we can't exceed self.minsize
+	--because self.minsize = 0 is meant to disable read-ahead completely.
 	while n > 0 do
 		local read_n = self:read(p, max_n)
 		if read_n == 0 then return false, 'eof' end
