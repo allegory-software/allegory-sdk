@@ -23,7 +23,7 @@ CONFIG
 	logging.max_disk_size     max disk size occupied by logging (16M)
 	logging.queue_size        queue size for when the server is slow (10000)
 	logging.timeout           timeout (5)
-	logging.filter.NAME = true    filter out messages of specific severity/module/event
+	logging.filter.NAME = true    filter out debug messages of specific module/event
 	logging.censor.name <- f(severity, module, ev, msg)  |set a function for censoring secrets in logs
 INIT
 	logging:tofile(logfile, max_disk_size)
@@ -351,9 +351,8 @@ local function fmtargs(self, fmt, ...)
 end
 
 local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
-	if self.filter[severity] then return end
-	if self.filter[module  ] then return end
-	if self.filter[event   ] then return end
+	if severity == '' and self.filter[module  ] then return end
+	if severity == '' and self.filter[event   ] then return end
 	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
 	local time = time()
 	local msg = fmt and fmtargs(self, fmt, ...) or ''
