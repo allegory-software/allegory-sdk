@@ -17,12 +17,15 @@ end
 function ca_file_path()
 	return config'ca_file'
 		or P(varpath'cacert.pem')
-		or P'/etc/ssl/certs/ca-certificates.crt'                --Debian/Ubuntu/Gentoo etc.
-		or P'/etc/pki/tls/certs/ca-bundle.crt'                  --Fedora/RHEL 6
-		or P'/etc/ssl/ca-bundle.pem'                            --OpenSUSE
-		or P'/etc/pki/tls/cacert.pem'                           --OpenELEC
-		or P'/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' --CentOS/RHEL 7
-		or P'/etc/ssl/cert.pem'                                 --Alpine Linux
+		or Linux and (
+			   P'/etc/ssl/certs/ca-certificates.crt'                --Debian/Ubuntu/Gentoo etc.
+			or P'/etc/pki/tls/certs/ca-bundle.crt'                  --Fedora/RHEL 6
+			or P'/etc/ssl/ca-bundle.pem'                            --OpenSUSE
+			or P'/etc/pki/tls/cacert.pem'                           --OpenELEC
+			or P'/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' --CentOS/RHEL 7
+			or P'/etc/ssl/cert.pem'                                 --Alpine Linux
+		)
+		or P(indir(exedir(), '..', '..', 'etc', 'ca-certificates.crt'))
 end
 
 local config = {}
@@ -265,7 +268,7 @@ do
 				local ok, err = set_method(self, v, sz)
 				if not ok then return nil, err end
 				log('', 'tls', 'config', '%-25s %s', k,
-					sz and sz <= 64 and tostring(v) or kbytes(sz))
+					sz and (sz <= 64 and tostring(v) or kbytes(sz)) or '')
 			end
 		end
 		return true

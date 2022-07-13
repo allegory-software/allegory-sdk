@@ -4,7 +4,6 @@ logging.verbose = true
 --logging.debug = true
 --config('getpage_debug', 'protocol stream')
 logging.filter.tls = true
-config('ca_file', exedir()..'/../../tests/cacert.pem')
 
 local function search_page_url(pn)
 	return 'https://luapower.com/'
@@ -32,5 +31,6 @@ function test_getpage(url, n)
 	pr(kbytes(b / (t1 - t0))..'/s')
 end
 
-test_update_ca_file()
+--test_update_ca_file()
 --test_getpage('http://luapower.com/', 1)
+test_getpage('https://mm.allegory.ro', 1)

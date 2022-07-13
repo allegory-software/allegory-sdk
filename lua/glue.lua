@@ -2035,18 +2035,19 @@ scriptname = arg0
 	and (win and arg0:gsub('%.exe$', '') or arg0)
 		:gsub('%.lua$', ''):match'[^/\\]+$'
 
-local function add_path(path_s, path, index, ext, init)
+local function add_path(path_s, path, index, ext, init, prefix)
 	index = index or 1
 	local psep = package.config:sub(1,1) --'/'
 	local tsep = package.config:sub(3,3) --';'
 	local wild = package.config:sub(5,5) --'?'
 	local ext = ext or path_s:match('%.([%a]+)%'..tsep..'?')
+	local prefix = prefix or ''
 	local paths = path_s and collect(split(path_s, tsep, nil, true)) or {}
 	local path = path:gsub('[/\\]', psep) --normalize slashes
 	if index == 'after' then index = 0 end
 	if index < 1 then index = #paths + 1 + index end
-	insert(paths, index, path..psep..wild..'.'..ext)
-	if init then insert(paths, path..psep..wild..psep..'init.'..ext) end
+	insert(paths, index, path..psep..prefix..wild..'.'..ext)
+	if init then insert(paths, path..psep..prefix..wild..psep..'init.'..ext) end
 	return concat(paths, tsep)
 end
 
@@ -2086,9 +2087,9 @@ function ffipath(path, index)
 		end
 	end
 	package.ffipath = add_path(package.ffipath, path, index,
-		win and 'dll'
-		or Linux and 'so'
-		or OSX and 'dylib')
+		win and 'dll' or Linux and 'so' or OSX and 'dylib',
+		(Linux or OSX) and 'lib'
+	)
 end
 
 --allocation -----------------------------------------------------------------
