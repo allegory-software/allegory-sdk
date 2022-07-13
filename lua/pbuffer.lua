@@ -8,7 +8,7 @@
 
 	pbuffer(pb) -> pb
 		pb.f                              opened file or socket
-		pb.minsize                        read-ahead size (64K)
+		pb.readahead                      read-ahead size (64K)
 		pb.linesize                       max. line size for haveline() (8K)
 		pb.lineterm                       line terminator ('\r\n')
 		pb.dict, pb.metatable             see string.buffer doc
@@ -31,7 +31,7 @@
 	pb:[try_]readn(buf, n) -> buf, n     read n bytes to external buffer
 	pb:[try_]write(p, n)                 write n bytes from external buffer
 	pb.offset                            length read or written
-	pb:pos()                             current position in file
+	pb:filepos()                         current position in file
 
 	pb:have(n) -> true|false             read n bytes up-to eof
 	pb:need(n) -> pb                     read n bytes, break on eof
@@ -243,19 +243,19 @@ function pb:write(p, n)
 	self.offset = self.offset + n
 end
 
-function pb:pos()
+function pb:filepos()
 	return self.offset - #self
 end
 
-pb.minsize = 65536 --set this to 0 to disable read-ahead.
+pb.readahead = 65536 --set this to 0 to disable read-ahead.
 function pb:have(n)
 	local have = #self
 	if n <= have then return true end
 	n = n - have
-	local max_n = max(n, self.minsize - have)
+	local max_n = max(n, self.readahead - have)
 	local p = self:reserve(max_n)
-	--NOTE: ignoring actually reserved size because we can't exceed self.minsize
-	--because self.minsize = 0 is meant to disable read-ahead completely.
+	--NOTE: ignoring actually reserved size because we're not allowed to
+	--exceed self.readahead so that self.readahead = 0 disables read-ahead.
 	while n > 0 do
 		local read_n = self:read(p, max_n)
 		if read_n == 0 then return false, 'eof' end
@@ -292,7 +292,7 @@ function pb:skip(n, past_buffer)
 			self:checkp(file_pos1 == file_pos + n, 'eof')
 			self.offset = self.offset + n
 		else
-			local n1 = min(n, max(self.minsize, 4096))
+			local n1 = min(n, max(self.readahead, 4096))
 			while n > 0 do
 				self:need(min(n, n1))
 				self:reset()

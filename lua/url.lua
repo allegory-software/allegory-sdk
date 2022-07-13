@@ -3,7 +3,7 @@
 	URL parsing and formatting.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	url_parse(s) -> t                   parse URL
+	url_parse(s, [t], [is_local]) -> t  parse URL
 	url_format(t) -> s                  format URL
 
 	url_escape(s, [reserved], [unreserved]) -> s   escape URL fragment
@@ -167,10 +167,10 @@ end
 --[scheme:](([//[user[:pass]@]host[:port][/path])|path)[?query][#fragment]
 --NOTE: t.query is unusable if args names/values contain `&` or `=`.
 --NOTE: t.path is unusable if the path segments contain `/`.
---NOTE: the `relative` flag is because the URL `//` is ambiguous.
-function url_parse(s, t, relative)
+--NOTE: the `is_local` flag is because the URL `//` is ambiguous.
+function url_parse(s, t, is_local)
 	t = t or {}
-	s = not relative and s:gsub('^([a-zA-Z%+%-%.]*):', function(s)
+	s = not is_local and s:gsub('^([a-zA-Z%+%-%.]*):', function(s)
 		t.scheme = unesc(s)
 		return ''
 	end) or s
@@ -183,7 +183,7 @@ function url_parse(s, t, relative)
 		t.args = url_parse_args(s)
 		return ''
 	end)
-	s = not relative and s:gsub('^//([^/]*)', function(s)
+	s = not is_local and s:gsub('^//([^/]*)', function(s)
 		t.host = unesc(s)
 		return ''
 	end) or s
