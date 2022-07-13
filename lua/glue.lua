@@ -2088,7 +2088,7 @@ function ffipath(path, index)
 	end
 	package.ffipath = add_path(package.ffipath, path, index,
 		win and 'dll' or Linux and 'so' or OSX and 'dylib',
-		(Linux or OSX) and 'lib'
+		nil, (Linux or OSX) and 'lib'
 	)
 end
 
