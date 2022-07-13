@@ -1515,7 +1515,6 @@ function tcp:try_connect(host, port, addr_flags, ...)
 	log('', 'sock', 'connectd', '%-4s %s:%s',
 		self, self.remote_addr, self.remote_port)
 	live(self, 'connected %s', ip)
-	if not ext_ai then ai:free() end
 	return true
 end
 udp.try_connect = tcp.try_connect
