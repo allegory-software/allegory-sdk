@@ -636,7 +636,7 @@ function tmppath(patt, t)
 	assert(not patt:find'[\\/]') --no subdirs
 	mkdir(tmpdir(), true)
 	t = t or {}
-	t.request_id = req().request_id
+	t.request_id = req() and req().request_id or 0
 	local file = subst(patt, t)
 	return path_combine(tmpdir(), file)
 end
