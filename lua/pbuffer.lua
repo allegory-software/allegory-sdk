@@ -30,6 +30,8 @@
 	pb:[try_]read(buf, size) -> read_n   read once to external buffer
 	pb:[try_]readn(buf, n) -> buf, n     read n bytes to external buffer
 	pb:[try_]write(p, n)                 write n bytes from external buffer
+	pb.offset                            length read or written
+	pb:pos()                             current position in file
 
 	pb:have(n) -> true|false             read n bytes up-to eof
 	pb:need(n) -> pb                     read n bytes, break on eof
@@ -239,6 +241,10 @@ end
 function pb:write(p, n)
 	self.f:write(p, n)
 	self.offset = self.offset + n
+end
+
+function pb:pos()
+	return self.offset - #self
 end
 
 pb.minsize = 65536 --set this to 0 to disable read-ahead.
