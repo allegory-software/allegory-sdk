@@ -129,7 +129,7 @@ CALLBACKS
 	noop(...)                      does nothing, returns nothing
 	call(f, ...)                   calls f if f is a func, otherwise returns args
 OBJECTS
-	object([super][, t], ...) -> t    create a class or object
+	object([super], [t], ...) -> t    create a class or object
 	before(class, method_name, f)     call f at the beginning of a method
 	after(class, method_name, f)      call f at the end of a method
 	override(class, method_name, f)   override a method

@@ -220,11 +220,11 @@ local
 	assert, type =
 	assert, type
 
-local sqlpp = {}
 local sqlpp_package = {}
 
 function issqlpp(v)
-	return type(v) == 'table' and rawget(v, 'issqlpp') or false
+	local mt = getmetatable(v)
+	return mt and rawget(mt, 'issqlpp') or false
 end
 
 function _G.sqlpp(init)
@@ -235,7 +235,8 @@ function _G.sqlpp(init)
 	end
 
 	local spp = {issqlpp = true}
-	local cmd = {spp = spp}
+	setmetatable(spp, spp)
+	local cmd = {spp = spp, type = 'sqlpp', debug_prefix = 'Q'}
 	spp.command = cmd
 
 	local avoid_code = string.byte'?' --because we're gonna match '?' alone later
@@ -1206,7 +1207,7 @@ function _G.sqlpp(init)
 	end
 
 	function spp.connect(opt)
-		local self = update({}, cmd)
+		local self = object(nil, nil, cmd)
 		self.rawconn = self:assert(self:rawconnect(opt))
 		set_schema(self, opt.schema)
 		return self
