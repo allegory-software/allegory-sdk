@@ -23,11 +23,11 @@ ADDRESS LOOKUP
 	ip:tostring() -> s                         IP address in string form
 
 SOCKETS
-	tcp([family], [protocol]) -> tcp           make a TCP socket
-	udp([family], [protocol]) -> udp           make a UDP socket
-	rawsocket([family][, protocol]) -> raw     make a raw socket
-	[try_]connect(host, port, [timeout]) -> tcp         create tcp socket and connect
-	listen([backlog, ]host, port, [onaccept]) -> tcp    create tcp socket and listen
+	tcp([opt], [family], [protocol]) -> tcp         make a TCP socket
+	udp([opt], [family], [protocol]) -> udp         make a UDP socket
+	rawsocket([opt], [family], [protocol]) -> raw   make a raw socket
+	[try_]connect([tcp, ]host, port, [timeout]) -> tcp   (create tcp socket and) connect
+	listen([tcp, ]host, port, ...) -> tcp           (create tcp socket and) listen
 	s:socktype() -> s                               socket type: 'tcp', ...
 	s:family() -> s                                 address family: 'inet', ...
 	s:protocol() -> s                               protocol: 'tcp', 'icmp', ...
@@ -137,15 +137,15 @@ NOTE: `getaddrinfo()` is blocking! Use resolve() to resolve hostnames first!
 
 SOCKETS ----------------------------------------------------------------------
 
-tcp([family][, protocol]) -> tcp
+tcp([opt], [family], [protocol]) -> tcp
 
 	Make a TCP socket. The default family is `'inet'`.
 
-udp([family][, protocol]) -> udp
+udp([opt], [family], [protocol]) -> udp
 
 	Make an UDP socket. The default family is `'inet'`.
 
-rawsocket([family][, protocol]) -> raw`
+rawsocket([opt], [family], [protocol]) -> raw`
 
 	Make a raw socket. The default family is `'inet'`.
 
@@ -360,7 +360,7 @@ assert(Windows or Linux or OSX, 'unsupported platform')
 
 local C = Windows and ffi.load'ws2_32' or C
 
-local socket = {issocket = true, debug_prefix = 'S'} --common socket methods
+local socket = {debug_prefix = 'S'} --common socket methods
 local tcp = {type = 'tcp_socket'}
 local udp = {type = 'udp_socket'}
 local raw = {type = 'raw_socket'}
@@ -380,11 +380,13 @@ function socket:try_close()
 	if self.listen_socket then
 		self.listen_socket.n = self.listen_socket.n - 1
 	end
+	self.live(self, nil)
 	local ok, err = self:_close()
-	live(self, nil)
-	self.s = nil --unsafe to close twice no matter the error.
+	if self._after_close then
+		self:_after_close()
+	end
 	if not ok then return false, err end
-	log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
+	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
 		self.n and ' live:'..self.n or '')
 	return true
 end
@@ -394,13 +396,7 @@ function socket:closed()
 end
 
 function socket:onclose(fn)
-	local try_close = self.try_close
-	function self:try_close()
-		local ok, err = try_close(self)
-		fn()
-		if not ok then return false, err end
-		return true
-	end
+	after(self, '_after_close', fn)
 end
 
 --getaddrinfo() --------------------------------------------------------------
@@ -966,7 +962,7 @@ do
 
 	_sock_unregister = noop --no need.
 
-	--[[local]] function create_socket(class, socktype, family, protocol)
+	--[[local]] function create_socket(opt, class, socktype, family, protocol)
 
 		local st, af, pr = socketargs(socktype, family or 'inet', protocol)
 		assert(st ~= 0, 'socket type required')
@@ -975,8 +971,8 @@ do
 		local s = C.WSASocketW(af, st, pr, nil, 0, flags)
 		assert(check(s ~= INVALID_SOCKET))
 
-		local s = wrap_socket(class, s, st, af, pr)
-		live(s, socktype)
+		local s = wrap_socket(opt, class, s, st, af, pr)
+		s.live(s, socktype)
 
 		local ok, err = _sock_register(s)
 		if not ok then
@@ -988,8 +984,10 @@ do
 	end
 end
 
+--NOTE: it is unsafe to close a socket twice no matter the error.
 function socket:_close()
-	return check(C.closesocket(self.s) == 0)
+	local s = self.s; self.s = nil
+	return check(C.closesocket(s) == 0)
 end
 
 local expires_heap = heap{
@@ -1181,7 +1179,7 @@ do
 	end
 
 	function tcp:try_connect(host, port, addr_flags, ...)
-		log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
+		self.log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
 		if not self.bound_addr then
 			--ConnectEx requires binding first.
 			local ok, err = self:try_bind(...)
@@ -1196,9 +1194,9 @@ do
 		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return false, err end
-		log('', 'sock', 'connectd', '%-4s %s:%s',
+		self.log('', 'sock', 'connectd', '%-4s %s:%s',
 			self, self.remote_addr, self.remote_port)
-		live(self, 'connected %s', self.remote_addr)
+		self.live(self, 'connected %s', self.remote_addr)
 		return true
 	end
 
@@ -1210,9 +1208,9 @@ do
 		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		log('', 'sock', 'connectd', '%-4s %s:%s',
+		self.log('', 'sock', 'connectd', '%-4s %s:%s',
 			self, self.remote_addr, self.remote_port)
-		live(self, 'connected %s', self.remote_addr)
+		self.live(self, 'connected %s', self.remote_addr)
 		return true
 	end
 
@@ -1233,10 +1231,10 @@ do
 	]]
 	local accept_buf = accept_buf_ct()
 	local sa_len = sizeof(accept_buf) / 2
-	function tcp:try_accept()
-		log('', 'sock', 'accept?', '%-4s', self)
-		local s = create_socket(tcp, 'tcp', self._af, self._pr)
-		live(s, 'wait-accept %s', self) --only shows in Windows.
+	function tcp:try_accept(opt)
+		self.log('', 'sock', 'accept?', '%-4s', self)
+		local s = create_socket(opt, tcp, 'tcp', self._af, self._pr)
+		self.live(s, 'wait-accept %s', self) --only shows in Windows.
 		local o, job = overlapped(self, return_true, self.recv_expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
 		local ok, msg, err = check_pending(ok, job)
@@ -1257,9 +1255,9 @@ do
 		local lp = accept_buf. local_addr:port()
 		self.n = self.n + 1
 		s.i = self.n
-		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1373,7 +1371,6 @@ if Linux or OSX then
 cdef[[
 typedef int SOCKET;
 int socket(int af, int type, int protocol);
-int accept(int s, struct sockaddr *addr, int *addrlen);
 int accept4(int s, struct sockaddr *addr, int *addrlen, int flags);
 int close(int s);
 int connect(int s, const struct sockaddr *name, int namelen);
@@ -1396,18 +1393,20 @@ ssize_t write(int fd, const void *buf, size_t count);
 
 local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
 
---[[local]] function create_socket(class, socktype, family, protocol)
+--[[local]] function create_socket(opt, class, socktype, family, protocol)
 	local st, af, pr = socketargs(socktype, family or 'inet', protocol)
 	local s = C.socket(af, bor(st, SOCK_NONBLOCK), pr)
 	assert(check(s ~= -1))
-	local s = wrap_socket(class, s, st, af, pr)
-	live(s, socktype)
+	local s = wrap_socket(opt, class, s, st, af, pr)
+	s.live(s, socktype)
 	return s
 end
 
+--NOTE: it is unsafe to close a socket twice no matter the error.
 function socket:_close()
-	local ok, err = check(C.close(self.s) == 0)
-	cancel_wait_io(self)
+	local s = self.s; self.s = nil
+	local ok, err = check(C.close(s) == 0)
+	cancel_wait_io(self) -- closed() is true here.
 	return ok, err
 end
 
@@ -1497,7 +1496,7 @@ local _connect = make_async(true, false, function(self, ai)
 end, EINPROGRESS)
 
 function tcp:try_connect(host, port, addr_flags, ...)
-	log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
+	self.log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
 	local ai, ext_ai = self:addr(host, port, addr_flags)
 	if not ai then return false, ext_ai end
 	if not self.bound_addr then
@@ -1507,14 +1506,15 @@ function tcp:try_connect(host, port, addr_flags, ...)
 			return false, err
 		end
 	end
-	local len, err = _connect(self, ai)
-	self.remote_addr = len and ai.addr:addr():tostring() or nil
-	self.remote_port = len and ai.addr:port() or nil
+	local ret, err = _connect(self, ai)
+	local ok = ret == 0
+	self.remote_addr = ok and ai.addr:addr():tostring() or nil
+	self.remote_port = ok and ai.addr:port() or nil
 	if not ext_ai then ai:free() end
-	if not len then return false, err end
-	log('', 'sock', 'connectd', '%-4s %s:%s',
+	if not ok then return false, err end
+	self.log('', 'sock', 'connectd', '%-4s %s:%s',
 		self, self.remote_addr, self.remote_port)
-	live(self, 'connected %s', ip)
+	self.live(self, 'connected %s', self.remote_addr)
 	return true
 end
 udp.try_connect = tcp.try_connect
@@ -1540,8 +1540,8 @@ do
 		return r
 	end, EWOULDBLOCK)
 
-	function tcp:try_accept()
-		log('', 'sock', 'accept?', '%-4s', self)
+	function tcp:try_accept(opt)
+		self.log('', 'sock', 'accept?', '%-4s', self)
 		local s, err, errno = tcp_accept(self)
 		local retry =
 			   errno == ENETDOWN
@@ -1555,7 +1555,7 @@ do
 		if not s then
 			return nil, err, retry
 		end
-		local s = wrap_socket(tcp, s, self._st, self._af, self._pr)
+		local s = wrap_socket(opt, tcp, s, self._st, self._af, self._pr)
 		local ok, err = _sock_register(s)
 		if not ok then
 			s:try_close()
@@ -1574,9 +1574,9 @@ do
 		local lp = accept_buf:port()
 		self.n = self.n + 1
 		s.i = self.n
-		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1891,7 +1891,7 @@ function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 	if not isnum(backlog) then
 		backlog, host, port, onaccept, addr_flags = 1/0, backlog, host, port, onaccept
 	end
-	log('', 'sock', 'listen?', '%-4s %s:%d', self, host, port)
+	self.log('', 'sock', 'listen?', '%-4s %s:%d', self, host, port)
 	if not self.bound_addr then
 		local ok, err = self:try_bind(host, port, addr_flags)
 		if not ok then return nil, err end
@@ -1899,8 +1899,8 @@ function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
 	local ok = C.listen(self.s, backlog) == 0
 	if not ok then return check() end
-	log('', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
-	live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
+	self.log('note', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
+	self.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0 --live client connection count
 
 	if onaccept then
@@ -2183,13 +2183,13 @@ local function parse_opt(k)
 	return opt, level
 end
 
+local szbuf = i32a(1, 4)
 function socket:try_getopt(k)
 	local opt, level = parse_opt(k)
 	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
-	local nbuf = i32a(1)
-	local ok, err = check(C.getsockopt(self.s, level, opt, buf.c, nbuf) == 0)
+	local ok, err = check(C.getsockopt(self.s, level, opt, buf.c, szbuf) == 0)
 	if not ok then return nil, err end
-	return get(buf, sz)
+	return get(buf, szbuf[0])
 end
 
 function socket:try_setopt(k, v)
@@ -2315,7 +2315,7 @@ end
 function socket:debug(protocol)
 
 	local function ds(event, s)
-		log('', protocol or '', event, '%-4s %5s %s',
+		self.log('', protocol or '', event, '%-4s %5s %s',
 			self, s and #s or '', s or '')
 	end
 
@@ -2396,18 +2396,20 @@ function socket:pbuffer()
 	return pbuffer{f = self}
 end
 
---[[local]] function wrap_socket(class, s, st, af, pr)
-	local s = {s = s, __index = class,
+--[[local]] function wrap_socket(opt, class, s, st, af, pr)
+	local s = object(class, {
+		s = s, issocket = true,
 		check_io = check_io, checkp = checkp,
 		protect = protect,
-		_st = st, _af = af, _pr = pr, r = 0, w = 0}
-	setmetatable(s, s)
-	log('', 'sock', 'create', '%-4s', s)
+		_st = st, _af = af, _pr = pr, r = 0, w = 0,
+		log = log, live = live, liveadd = liveadd,
+	}, opt)
+	s.log('', 'sock', 'create', '%-4s', s)
 	return s
 end
-function _G.tcp       (...) return create_socket(tcp, 'tcp', ...) end
-function _G.udp       (...) return create_socket(udp, 'udp', ...) end
-function _G.rawsocket (...) return create_socket(raw, 'raw', ...) end
+function _G.tcp       (opt, ...) return create_socket(opt, tcp, 'tcp', ...) end
+function _G.udp       (opt, ...) return create_socket(opt, udp, 'udp', ...) end
+function _G.rawsocket (opt, ...) return create_socket(opt, raw, 'raw', ...) end
 
 update(tcp, socket)
 update(udp, socket)
@@ -2419,8 +2421,10 @@ raw_class = raw
 
 local create_tcp = _G.tcp
 
-function try_connect(host, port, timeout)
-	local self = create_tcp()
+function try_connect(self, host, port, timeout)
+	if not issocket(self) then
+		return try_connect(create_tcp(), self, host, port)
+	end
 	self:settimeout(timeout)
 	local ok, err = self:try_connect(host, port)
 	if not ok then
@@ -2434,10 +2438,12 @@ function connect(...)
 	return check_io(nil, try_connect(...))
 end
 
-function listen(host, port, onaccept)
-	local self = create_tcp()
+function listen(self, ...)
+	if not issocket(self) then
+		return listen(create_tcp(), self, ...)
+	end
 	self:setopt('reuseaddr', true)
-	self:listen(host, port, onaccept)
+	self:listen(...)
 	return self
 end
 
