@@ -1091,7 +1091,7 @@ function mysql_connect(opt)
 	local host = opt.host or '127.0.0.1'
 	local port = opt.port or 3306
 
-	log('note', 'mysql', 'connect', '%s:%s user=%s db=%s',
+	log('', 'mysql', 'connect', '%s:%s user=%s db=%s',
 		host, port, opt.user or '', opt.db or '')
 
 	local f = tcp()
@@ -1204,6 +1204,8 @@ function conn.send_query(self, sql, quiet)
 	local severity = (quiet
 			or starts(sql, 'select')
 			or starts(sql, 'show')
+			or sql == 'commit'
+			or sql == 'start transaction'
 		) and '' or 'note'
 	log(severity, 'mysql', 'query', '%s', sql)
 	assert(self.state == 'ready')
