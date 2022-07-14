@@ -195,7 +195,7 @@ function coro.create(f, onfinish, fmt, ...)
 	if fmt then
 		coro.live(thread, fmt, ...)
 	else
-		coro.live(thread, '%s', traceback())
+		coro.live(thread, '%s', traceback'unnamed thread')
 	end
 	return thread
 end
