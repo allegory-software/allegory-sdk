@@ -7,7 +7,6 @@ LOGGING
 	logging.log(severity, module, event, fmt, ...)
 	logging.logvar(k, v)
 	logging.live(e, [fmt, ...] | nil)
-	pr(...)
 UTILS
 	logging.arg(v) -> s
 	logging.print(v) -> s
@@ -134,7 +133,7 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	local function check_io(ret, ...)
 		if ret then return ret, ... end
-		if chan then chan:close() end
+		if chan then chan:try_close() end
 		chan = nil
 	end
 
@@ -142,12 +141,17 @@ function logging:toserver(host, port, queue_size, timeout)
 		if chan then return chan end
 		while not stop do
 			local exp = clock() + timeout
-			chan = try_mess_connect(host, port, timeout)
+			local tcp = tcp{
+				log     = function(...) logto     ('f', ...) end,
+				live    = function(...) liveto    ('f', ...) end,
+				liveadd = function(...) liveaddto ('f', ...) end,
+			}
+			chan = try_mess_connect(host, port, timeout, {tcp = tcp})
 
 			if chan then
 
 				--send a first message so the server knows who we are.
-				if not check_io(chan:send(logvar_message(self, 'hello'))) then
+				if not check_io(chan:try_send(logvar_message(self, 'hello'))) then
 					break
 				end
 
@@ -155,7 +159,7 @@ function logging:toserver(host, port, queue_size, timeout)
 				self.liveadd(chan.tcp, 'logging')
 				resume(thread(function()
 					while not stop do
-						local ok, cmd_args = check_io(chan:recv())
+						local ok, cmd_args = check_io(chan:try_recv())
 						if not ok then break end
 						if istab(cmd_args) then
 							local f = self.rpc[cmd_args[1]]
@@ -186,7 +190,7 @@ function logging:toserver(host, port, queue_size, timeout)
 			local msg = queue:peek()
 			if msg then
 				if connect() and chan then
-					if check_io(chan:send(msg)) then
+					if check_io(chan:try_send(msg)) then
 						queue:pop()
 					end
 				end
@@ -350,7 +354,7 @@ local function fmtargs(self, fmt, ...)
 	return _(fmt, self.args(...))
 end
 
-local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
+local function logto(self, to, severity, module, event, fmt, ...)
 	if severity == '' and self.filter[module  ] then return end
 	if severity == '' and self.filter[event   ] then return end
 	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
@@ -369,6 +373,8 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 		end
 	end
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
+		local tofile   = to == 'f' or to == '*'
+		local toserver = to == 's' or to == '*'
 		local entry = (self.logtofile or not self.quiet)
 			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
 				env, date('%Y-%m-%d %H:%M:%S', time), severity,
@@ -391,7 +397,7 @@ local function logto(self, tofile, toserver, severity, module, event, fmt, ...)
 	end
 end
 local function log(self, ...)
-	logto(self, true, true, ...)
+	logto(self, '*', ...)
 end
 
 --[[local]] function logvar_message(self, k, v)
@@ -408,7 +414,7 @@ local function logvar(self, k, v)
 	end
 end
 
-local function live(self, o, fmt, ...)
+local function liveto(self, to, o, fmt, ...)
 	local id, ids = debug_id(o)
 	local s = fmt and fmtargs(self, fmt, ...)
 	local was_live = ids.live[o] ~= nil
@@ -422,23 +428,31 @@ local function live(self, o, fmt, ...)
 		ids.live_count = ids.live_count - 1
 		event = '-'
 	end
-	self.log('', 'log', event, '%-4s %s live=%d', o, s or ids.live[o], ids.live_count)
+	self.logto(to, '', 'log', event, '%-4s %s live=%d', o, s or ids.live[o], ids.live_count)
 	ids.live[o] = s
 end
+local function live(self, ...)
+	liveto(self, '*', ...)
+end
 
-local function liveadd(self, o, fmt, ...)
+local function liveaddto(self, to, o, fmt, ...)
 	local id, ids = debug_id(o)
 	local s = assert(ids.live[o]) .. ' ' .. fmtargs(self, fmt, ...)
+	self.logto(to, '', 'log', '~', '%-4s %s', o, s)
 	ids.live[o] = s
-	self.log('', 'log', '~', '%-4s %s', o, s)
+end
+local function liveadd(self, ...)
+	liveaddto(self, '*', ...)
 end
 
 local function init(self)
-	self.logto    = function(...) return logto    (self, ...) end
-	self.log      = function(...) return log      (self, ...) end
-	self.logvar   = function(...) return logvar   (self, ...) end
-	self.live     = function(...) return live     (self, ...) end
-	self.liveadd  = function(...) return liveadd  (self, ...) end
+	self.logto     = function(...) return logto      (self, ...) end
+	self.liveto    = function(...) return liveto     (self, ...) end
+	self.liveaddto = function(...) return liveaddto  (self, ...) end
+	self.log       = function(...) return log        (self, ...) end
+	self.logvar    = function(...) return logvar     (self, ...) end
+	self.live      = function(...) return live       (self, ...) end
+	self.liveadd   = function(...) return liveadd    (self, ...) end
 	return self
 end
 
@@ -529,6 +543,8 @@ function logging.new()
 end
 
 _G.logto        = logging.logto
+_G.liveto       = logging.liveto
+_G.liveaddto    = logging.liveaddto
 _G.log          = logging.log
 _G.live         = logging.live
 _G.liveadd      = logging.liveadd
