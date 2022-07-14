@@ -121,6 +121,7 @@ function file_wrap_fd(fd, async, is_pipe_end, path)
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
 		__index = file,
+		quiet = is_pipe_end or nil,
 	}
 	setmetatable(f, f)
 	live(f, path or '')

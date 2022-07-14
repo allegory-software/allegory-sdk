@@ -436,6 +436,7 @@ function file_wrap_handle(h, read_async, write_async, is_pipe_end, path)
 		_write_async = write_async and true or false,
 		w = 0, r = 0,
 		__index = file,
+		quiet = is_pipe_end or nil,
 	}
 	setmetatable(f, f)
 	live(f, path or '')
