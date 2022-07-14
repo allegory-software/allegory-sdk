@@ -10,27 +10,30 @@
 		- raising & catching errors in event handlers
 
 SERVER
-	mess_listen(host, port, onaccept, [onerror], [server_name]) -> server
+	mess_listen([tcp, ]host, port, onaccept, [onerror], [server_name]) -> server
 	onaccept(server, channel)
 	onerror(server, error)
 
 	server:stop()
 
 CLIENT
-	[try_]mess_connect(host, port, [timeout], [opt]) -> channel
-		opt.debug
+	[try_]mess_connect([tcp, ]host, port, [timeout]) -> channel
 
 CHANNEL
-	channel:send(msg, [expires]) -> ok | false,err
-	channel:recv([expires]) -> ok,msg | nil,err
+	channel:[try_]send(msg, [expires]) -> ok | false,err
+	channel:[try_]recv([expires]) -> ok,msg | nil,err
 
 	channel:recvall(onmessage, [onerror])
 	onmessage(channel, msg)
 	onerror(channel, err)
 
-	channel:close()
+	channel:[try_]close()
 	channel:closed()
 	channel:onclose(fn)
+
+	channel:wait_job()
+	channel:wait_until(expires)
+	channel:wait(timeout)
 
 PROTOCOL
 	mess_protocol(tcp) -> channel
@@ -93,35 +96,37 @@ local function wrapfn(event, fn, onerror, self)
 	end
 end
 
-function mess_listen(host, port, onaccept, onerror, server_name)
+function mess_listen(s, host, port, onaccept, onerror, server_name)
+
+	if not issocket(s) then
+		return mess_listen(tcp(), s, host, port, onaccept, onerror)
+	end
 
 	server_name = server_name or 'mess'
 
-	local tcp = tcp()
+	local server = {tcp = s}
 
-	local server = {tcp = tcp}
+	s:setopt('reuseaddr', true)
+	s:listen(host, port)
 
-	tcp:setopt('reuseaddr', true)
-	tcp:listen(host, port)
-
-	liveadd(tcp, server_name)
+	liveadd(s, server_name)
 
 	local stop
 	function server:stop()
 		stop = true
-		tcp:shutdown'r'
-		tcp:close()
+		s:shutdown'r'
+		s:close()
 	end
 
 	local onaccept = wrapfn('accept', onaccept, onerror, server)
 	resume(thread(function()
 		while not stop do
-			local ctcp, err, retry = tcp:try_accept()
+			local ctcp, err, retry = s:try_accept()
 			if not ctcp then
-				if tcp:closed() then --stop() called.
+				if s:closed() then --stop() called.
 					break
 				end
-				tcp:check_io(retry, err)
+				s:check_io(retry, err)
 				--temporary network error. retry without killing the CPU.
 				wait(0.2)
 				goto skip
@@ -134,20 +139,19 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 			end, server_name..'-accepted %s', ctcp))
 			::skip::
 		end
-	end, server_name..'-listen %s', tcp))
+	end, server_name..'-listen %s', s))
 
 	return server
 end
 
-function mess_connect(host, port, timeout, opt)
-	local tcp = tcp()
-	if opt and opt.debug then
-		tcp:debug'mess'
+function mess_connect(s, host, port, timeout)
+	if not issocket(s) then
+		return mess_connect(tcp(), s, host, port)
 	end
-	tcp:settimeout(timeout)
-	tcp:connect(host, port)
-	tcp:settimeout(nil)
-	return mess_protocol(tcp)
+	s:settimeout(timeout)
+	s:connect(host, port)
+	s:settimeout(nil)
+	return mess_protocol(s)
 end
 try_mess_connect = protect_io(mess_connect)
 
@@ -159,7 +163,7 @@ function channel:wait_job    ()        return self.tcp:wait_job() end
 function channel:wait_until  (expires) return self.tcp:wait_until(expires) end
 function channel:wait        (timeout) return self.tcp:wait(timeout) end
 
-function channel:recvall(onmessage, onerror)
+function channel:try_recvall(onmessage, onerror)
 	local onmessage = wrapfn('recvall', onmessage, onerror, self)
 	while not self:closed() do
 		local msg, err = self:try_recv()
@@ -167,12 +171,17 @@ function channel:recvall(onmessage, onerror)
 			if iserror(err, 'io') and err.message == 'eof' then
 				break
 			else
-				log('ERROR', 'mess', 'recv', '%s', err)
+				return nil, err
 			end
 		else
 			onmessage(self, msg)
 		end
 	end
+	return true
+end
+
+function channel:recvall(...)
+	return assert(self:try_recvall(...))
 end
 
 if not ... then
@@ -180,21 +189,17 @@ if not ... then
 	logging.verbose = true
 	logging.debug = true
 
-	resume(thread(function()
-
-		local server = mess_listen('127.0.0.1', '5555', function(self, chan)
-			chan:recvall(function(self, msg)
-				self:send(msg)
-			end)
-			chan:close()
-			self:stop()
+	local server = mess_listen('127.0.0.1', '5555', function(self, chan)
+		chan:recvall(function(self, msg)
+			self:send(msg)
 		end)
-
-	end, 'server'))
+		chan:close()
+		self:stop()
+	end)
 
 	resume(thread(function()
 
-		local chan = mess_connect('127.0.0.1', '5555', {timeout = 1})
+		local chan = mess_connect('127.0.0.1', '5555', 1)
 		for i = 1, 20 do
 			chan:send{a = i, b = 2*i, s = tostring(i)}
 			local t = chan:recv()
