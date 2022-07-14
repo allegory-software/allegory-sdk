@@ -139,6 +139,7 @@ local traceback = debug.traceback
 local resume    = coroutine.resume
 local yield     = coroutine.yield
 local cocreate  = coroutine.create
+local status    = coroutine.status
 
 local function onfinish_pass(thread, ...) return ... end
 
@@ -204,7 +205,7 @@ function coro.running()
 	return current, current == main
 end
 
-coro.status = coroutine.status
+coro.status = status
 
 local function go(thread, ok, ...)
 	current = thread
@@ -217,9 +218,7 @@ local function go(thread, ok, ...)
 end
 
 local function transfer_with(thread, ok, ...)
-	if type(thread) ~= 'thread' then
-		error('coroutine expected, got: '..type(thread), 2)
-	end
+	assert(status(thread) ~= 'dead', 'cannot transfer to a dead coroutine')
 	assert(thread ~= current, 'trying to transfer to the running thread')
 	if current ~= main then
 		--we're inside a coroutine: signal the transfer request by yielding.
