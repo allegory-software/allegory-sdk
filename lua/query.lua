@@ -132,7 +132,6 @@ end
 local DBS = {}
 
 local function _release_dbs(dbs, ok)
-	pr('RELEASE DBS', ok)
 	for key, db in pairs(dbs) do
 		if db:in_transaction() then
 			db:end_transaction(ok and 'commit' or 'rollback')
