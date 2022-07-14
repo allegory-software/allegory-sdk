@@ -94,6 +94,7 @@ scripts for new libraries.
   * [http_client](lua/http_client.lua) - Async HTTP(s) 1.1 client for high-volume web scraping
   * [http_server](lua/http_server.lua) - Async HTTP(s) 1.1 server
   * [smtp](lua/smtp.lua)               - Async SMTP(s) client
+  * [mess](lua/mess.lua)               - simple TCP-based protocol for Lua programs
   * [url](lua/url.lua)                 - URL parsing and formatting
   * [ipv6](lua/ipv6.lua)               - IPv6 conversion routines
 * __Data Exchange__
