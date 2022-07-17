@@ -217,8 +217,9 @@ sterm:after('out', function(self, src_term, chan, ...)
 	elseif chan == 'notify' then
 		local kind = ...
 		self:send_on(
-				kind == 'info' and 'N'
-			or kind == 'warn' and 'W'
+				kind == 'info'  and 'N'
+			or kind == 'warn'  and 'W'
+			or kind == 'error' and 'E'
 			or error(_('invalid notify kind: %s', kind)), select(2, ...))
 	else
 		self:send(chan, ...)
