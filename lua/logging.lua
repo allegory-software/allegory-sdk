@@ -140,13 +140,24 @@ function logging:toserver(host, port, queue_size, timeout)
 	local function connect()
 		if chan then return chan end
 		while not stop do
+
 			local exp = clock() + timeout
+
+			--wait _before_ reconnecting (instead of after) because ssh tunnels
+			--accept connections even after the other end is no longer listening.
+			--also because 'connection_refused' error comes instantly on Linux.
+			if not stop and exp > clock() + 0.2 then
+				reconn_wait_job = wait_job()
+				reconn_wait_job:wait_until(exp)
+				reconn_wait_job = nil
+			end
+
 			local tcp = tcp{
 				log     = function(...) logto     ('f', ...) end,
 				live    = function(...) liveto    ('f', ...) end,
 				liveadd = function(...) liveaddto ('f', ...) end,
 			}
-			chan = try_mess_connect(host, port, timeout, {tcp = tcp})
+			chan = try_mess_connect(tcp, host, port, timeout)
 
 			if chan then
 
@@ -171,12 +182,6 @@ function logging:toserver(host, port, queue_size, timeout)
 				return true
 			end
 
-			--wait because 'connection_refused' error comes instantly on Linux.
-			if not stop and exp > clock() + 0.2 then
-				reconn_wait_job = wait_job()
-				reconn_wait_job:wait_until(exp)
-				reconn_wait_job = nil
-			end
 		end
 		return false
 	end
