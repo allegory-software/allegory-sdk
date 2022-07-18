@@ -170,8 +170,8 @@ function logging:toserver(host, port, queue_size, timeout)
 				self.liveadd(chan.tcp, 'logging')
 				resume(thread(function()
 					while not stop do
-						local ok, cmd_args = check_io(chan:try_recv())
-						if not ok then break end
+						local cmd_args = check_io(chan:try_recv())
+						if not cmd_args then break end
 						if istab(cmd_args) then
 							local f = self.rpc[cmd_args[1]]
 							if f then f(self, unpack(cmd_args, 2)) end

@@ -576,6 +576,7 @@ end
 action['xrowset.events'] = function()
 	setheader('cache-control', 'no-cache')
 	setconnectionclose()
+	setcompress(false)
 	local waiting_thread
 	resume(thread(function()
 		--hack to wait for client to close the connection so we can wake up

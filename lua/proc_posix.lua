@@ -417,7 +417,7 @@ local loader = memoize(function(path)
 				return nil, err
 			end
 		end
-		local buf, len = f:readall(nil, true)
+		local buf, len = f:readall(true)
 		if not buf then
 			f:close()
 			f = nil

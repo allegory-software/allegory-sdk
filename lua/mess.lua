@@ -76,8 +76,7 @@ function mess_protocol(tcp)
 		local p = buf:reset():reserve(len)
 		tcp:recvn(p, len)
 		buf:commit(len)
-		local t = buf:decode()
-		return t
+		return buf:decode()
 	end
 	chan.try_recv = protect_io(chan.recv)
 
