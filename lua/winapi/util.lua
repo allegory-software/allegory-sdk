@@ -35,7 +35,7 @@ SetLastError = C.SetLastError
 FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000
 
 --get the error message from GetLastError().
-local function get_error_message(id)
+function get_error_message(id)
 	if id == 8 then
 		error'out of memory' --we might not be able to allocate further memory so let's drop it here
 	end

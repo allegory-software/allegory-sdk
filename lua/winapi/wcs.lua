@@ -54,7 +54,7 @@ local MB = 0        --MB_* flags
 
 --accept and convert a utf8-encoded Lua string to a WCHAR[?] buffer.
 --anything not a string passes through untouched.
---return the cdata and the size in WCHARs (not bytes) minus the null terminator.
+--return the cdata and the size in WCHARs (not bytes) including the null terminator.
 function wcs_sz(s)
 	if type(s) ~= 'string' then return s end
 	local sz = #s + 1 --assume 1 byte per character + null terminator
