@@ -50,6 +50,7 @@ TASKS
 		opt.free_after            free after N seconds (10). false = 1/0.
 		opt.name                  task name (for listing and for debugging).
 		opt.stdin                 stdin (for exec() tasks)
+		opt.restart_after         restart after s seconds in case of error
 	t.id
 	tasks -> {ta->true}        root task list
 	tasks_by_id -> {id->ta}    root task list mapped by id
@@ -319,6 +320,7 @@ function task:init()
 	self.child_tasks = {} --{task1,...}
 	self.name = self.name or self.id
 	self.terminal = recording_terminal()
+	self.restart_count = 0
 	tasks[self] = true
 	tasks_by_id[self.id] = self
 
@@ -333,6 +335,7 @@ function task:init()
 	end
 
 	function self:try_run()
+		::again::
 		self.start_time = time()
 		self.status = 'running'
 		self:fire_up('setstatus', 'running')
@@ -342,6 +345,16 @@ function task:init()
 		self.duration = time() - self.start_time
 		self.status = 'finished'
 		self:fire_up('setstatus', 'finished')
+		if not ok and not self.killed then
+			log('ERROR', 'tasks', 'run', '%s%s', tostring(ret):trim(),
+				self.restart_after and _('\nrestarting in %ds, restarted %d times before',
+					self.restart_after, self.restart_count))
+			if self.restart_after then
+				wait(self.restart_after)
+				self.restart_count = self.restart_count + 1
+				goto again
+			end
+		end
 		runafter(self.free_after or 1/0, function()
 			while not self:free() do
 				wait(1)
@@ -349,17 +362,16 @@ function task:init()
 		end, 'task-zombie %s', self.name)
 		return self, ok, ret
 	end
+	function self:run()
+		return assert(self:try_run())
+	end
 
 	function self:start()
 		if self.start_time then
 			return self --already started
 		end
-		resume(thread(self.try_run, 'task %s', self.name), self)
+		resume(thread(self.run, 'task %s', self.name), self)
 		return self
-	end
-
-	function self:run()
-		return assert(self:try_run())
 	end
 
 	return self
@@ -422,6 +434,7 @@ function task:kill()
 			return false
 		end
 	end
+	self.killed = true
 	return true
 end
 
@@ -454,16 +467,6 @@ function task_exec(cmd, opt)
 
 	local env = opt.env and update(env(), opt.env)
 
-	local p = exec{
-		cmd = cmd,
-		env = env,
-		async = true,
-		autokill = opt.autokill ~= false,
-		stdout = capture_stdout,
-		stderr = capture_stderr,
-		stdin = opt.stdin and true or false,
-	}
-
 	local function out_filter(term, chan)
 		if not allow_out_stdout and chan == 'stdout' then return false end
 		if not allow_out_stderr and chan == 'stderr' then return false end
@@ -473,14 +476,24 @@ function task_exec(cmd, opt)
 	local task = task(update({out_filter = out_filter}, opt))
 
 	task.cmd = cmd
-	task.process = p
-
-	local errors = {}
-	local function add_error(method, err)
-		add(errors, method..': '..err)
-	end
 
 	function task:action()
+
+		local p = exec{
+			cmd = cmd,
+			env = env,
+			autokill = opt.autokill ~= false,
+			stdout = capture_stdout,
+			stderr = capture_stderr,
+			stdin = opt.stdin and true or false,
+		}
+
+		task.process = p
+
+		local errors = {}
+		local function add_error(method, err)
+			add(errors, method..': '..err)
+		end
 
 		if p.stdin then
 			resume(thread(function()
@@ -561,14 +574,15 @@ function task_exec(cmd, opt)
 		end
 
 		if #errors > 0 then
-			error(cat(errors, '\n'))
+			raise('task', '%s', cat(errors, '\n'))
 		end
 
 		return exit_code
 	end
 
 	function task:do_kill()
-		return p:kill()
+		if not self.process then return end
+		return self.process:kill()
 	end
 
 	if task.bg then
