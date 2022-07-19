@@ -12,7 +12,7 @@ FEATURES
   * platform-specific functionality exposed
 
 FILE OBJECTS
-	[try_]open(path[, mode|opt]) -> f             open file
+	[try_]open(path|opt, [mode|opt], [quiet|opt], [opt]) -> f    open file
 	f:[try_]close()                               close file
 	f:closed() -> true|false                      check if file is closed
 	isfile(f [,'file'|'pipe']) -> true|false      check if f is a file or pipe
@@ -20,8 +20,8 @@ FILE OBJECTS
 	f.fd -> fd                                    POSIX file descriptor (POSIX platforms)
 PIPES
 	pipe() -> rf, wf                              create an anonymous pipe
-	pipe({path=,<opt>=} | path[,options]) -> pf   create a named pipe (Windows)
-	pipe({path=,mode=} | path[,mode]) -> true     create a named pipe (POSIX)
+	pipe(path|opt, [flags|opt], [opt]) -> pf      create a named pipe (Windows)
+	pipe(path|opt, [perms|opt], [opt]) -> true    create a named pipe (POSIX)
 STDIO STREAMS
 	f:stream(mode) -> fs                          open a FILE* object from a file
 	fs:[try_]close()                              close the FILE* object
@@ -91,9 +91,9 @@ COMMON PATHS
 	vardir() -> path                              get script's private r/w directory
 	varpath(...) -> path                          get vardir-relative path
 LOW LEVEL
-	file_wrap_handle(HANDLE) -> f                 wrap opened HANDLE (Windows)
-	file_wrap_fd(fd) -> f                         wrap opened file descriptor
-	file_wrap_file(FILE*) -> f                    wrap opened FILE* object
+	file_wrap_handle(HANDLE, [opt]) -> f          wrap opened HANDLE (Windows)
+	file_wrap_fd(fd, [opt]) -> f                  wrap opened file descriptor
+	file_wrap_file(FILE*, [opt]) -> f             wrap opened FILE* object
 	fileno(FILE*) -> fd                           get stream's file descriptor
 MEMORY MAPPING
 	mmap(...) -> map                              create a memory mapping
@@ -188,7 +188,7 @@ NORMALIZED ERROR MESSAGES
 
 File Objects -----------------------------------------------------------------
 
-[try_]open(path[, mode|opt]) -> f
+[try_]open(path|opt, [mode|opt], [quiet|opt]) -> f
 
 Open/create a file for reading and/or writing. The second arg can be a string:
 
@@ -214,9 +214,9 @@ Open/create a file for reading and/or writing. The second arg can be a string:
  attrs     | Windows      | `CreateFile() / dwFlagsAndAttributes`  | ''
  flags     | Windows      | `CreateFile() / dwFlagsAndAttributes`  | ''
  flags     | Linux, OSX   | `open() / flags`                       | 'rdonly'
- mode      | Linux, OSX   | `octal or symbolic perms`              | '0666' / 'rwx'
+ perms     | Linux, OSX   | `octal or symbolic perms`              | '0666' / 'rwx'
 
-The `mode` arg is passed to `unixperms_parse()`.
+The `perms` arg is passed to `unixperms_parse()`.
 
 Pipes ------------------------------------------------------------------------
 
@@ -230,7 +230,7 @@ pipe() -> rf, wf
 	`lua_state_id` per Lua state to distinguish them. That is because
 	in Windows, async anonymous pipes are emulated using named pipes.
 
-pipe({path=,<opt>=} | path[,options]) -> pf
+pipe(path|opt, [flags|opt], [opt]) -> pf
 
 	Create or open a named pipe (Windows). Named pipes on Windows cannot
 	be created in any directory like on POSIX systems, instead they must be
@@ -240,7 +240,7 @@ pipe({path=,<opt>=} | path[,options]) -> pf
 	Named pipes on Windows cannot be removed and are not persistent. They are
 	destroyed automatically when the process that created them exits.
 
-pipe({path=,mode=} | path[,mode]) -> true
+pipe(path|opt, [perms|opt], [opt]) -> true
 
 	Create a named pipe (POSIX). Named pipes on POSIX are persistent and can be
 	created in any directory as they are just a type of file.
@@ -642,18 +642,38 @@ function isfile(f, type)
 	return istab(mt) and rawget(mt, '__index') == file and (not type or f.type == type)
 end
 
-function try_open(path, mode_opt, quiet)
+function try_open(path_opt, mode_opt, quiet, extra_opt)
+	local opt
+	if isstr(path_opt) then --path, ...
+		opt = {path = path_opt}
+	else --opt, ...
+		opt = update({}, path_opt)
+	end
 	mode_opt = mode_opt or 'r'
-	local opt = istab(mode_opt) and mode_opt or nil
-	local mode = isstr(mode_opt) and mode_opt or opt and opt.mode
-	local mopt = mode and assertf(_open_mode_opt[mode], 'invalid open mode: %s', mode)
-	local f, err = _open(path, opt and mopt and update({}, mopt, opt) or opt or mopt, quiet)
+	if isstr(mode_opt) then --arg1, mode, ...
+		opt.mode = mode_opt
+	else --arg1, opt, ...
+		update(opt, mode_opt)
+	end
+	local mode = opt.mode
+	if mode then
+		update(opt, assertf(_open_mode_opt[mode], 'invalid open mode: %s', mode))
+	end
+	if isbool(quiet) then --arg1, arg2, quiet
+		opt.quiet = quiet
+	else --arg1, arg2, opt
+		update(opt, quiet)
+	end
+	update(opt, extra_opt)
+	assert(opt.path, 'path required')
+	local f, err = _open(opt.path, opt)
 	if not f then return nil, err end
 	return f
 end
 
-function open(path, mode_opt, quiet)
-	local f, err = try_open(path, mode_opt, quiet)
+function open(arg1, ...)
+	local f, err = try_open(arg1, ...)
+	local path = isstr(arg1) and arg1 or arg1.path
 	check('fs', 'open', f, '%s: %s', path, err)
 	return f
 end

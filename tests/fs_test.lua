@@ -729,7 +729,6 @@ function test.dir_not_found()
 	local n = 0
 	local err
 	for file, err1 in ls'nonexistent_dir' do
-		pr('>>', file, err1)
 		if not file then
 			err = err1
 			break

@@ -107,26 +107,29 @@ local function make_async(f)
 	require'sock'
 	local ok, err = _sock_register(f)
 	if not ok then return nil, err end
-	f._async = true
 	return true
 end
 
-function file_wrap_fd(fd, async, is_pipe_end, path)
+function file_wrap_fd(fd, opt, async, is_pipe_end, path)
 
-	local f = {
+	--make `if f.seek then` the idiom for checking if a file is seekable.
+	local seek; if is_pipe_end then seek = false end
+
+	local f = object(file, {
 		fd = fd,
 		s = fd, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
-		path = path,
+		seek = seek,
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
-		__index = file,
 		quiet = is_pipe_end or nil,
-	}
-	setmetatable(f, f)
-	live(f, path or '')
+		log = log, live = live, liveadd = liveadd,
+		path = path,
+	}, opt)
+	if async ~= nil then f.async = async end
+	live(f, f.path or '')
 
-	if async then
+	if f.async then
 		local ok, err = make_async(f)
 		if not ok then
 			assert(f:close())
@@ -137,15 +140,16 @@ function file_wrap_fd(fd, async, is_pipe_end, path)
 	return f
 end
 
-function _open(path, opt, quiet)
+function _open(path, opt)
 	local flags = bitflags(opt.flags or 'rdonly', o_bits)
 	flags = bor(flags, opt.async and O_NONBLOCK or 0)
-	local mode = parse_perms(opt.perms)
+	local perms = parse_perms(opt.perms)
 	local open = opt.open or C.open
-	local fd = open(path, flags, mode)
+	local fd = open(path, flags, perms)
 	if fd == -1 then return check() end
-	local f, err = file_wrap_fd(fd, opt.async, opt.is_pipe_end, path)
+	local f, err = file_wrap_fd(fd, opt, false, false, path)
 	if not f then return nil, err end
+	if f.quiet == nil and not w then f.quiet = true end
 	if opt.seek_end then
 		local pos, err = f:seek('end', 0)
 		if not pos then
@@ -156,8 +160,7 @@ function _open(path, opt, quiet)
 	f.shm = opt.shm and true or false
 	local r = band(flags, o_bits.rdonly) == o_bits.rdonly
 	local w = band(flags, o_bits.wronly) == o_bits.wronly
-	f.quiet = quiet or not w
-	log(f.quiet and '' or 'note', 'fs', 'open',
+	f.log(f.quiet and '' or 'note', 'fs', 'open',
 		'%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
 	return f
 end
@@ -168,7 +171,7 @@ end
 
 function file.try_close(f)
 	if f:closed() then return true end
-	if f._async then
+	if f.async then
 		_sock_unregister(f)
 	end
 	local ok = C.close(f.fd) == 0
@@ -189,10 +192,10 @@ function fileno(file)
 	return fd
 end
 
-function file_wrap_file(file, ...)
+function file_wrap_file(file, opt)
 	local fd = C.fileno(file)
 	if fd == -1 then return check() end
-	return file_wrap_fd(fd, ...)
+	return file_wrap_fd(fd, opt)
 end
 
 function file.set_inheritable(file, inheritable)
@@ -206,16 +209,24 @@ int pipe(int[2]);
 int mkfifo(const char *pathname, mode_t mode);
 ]]
 
-function pipe(path, mode, opt)
-	if istab(path) then
-		path, mode, opt = path.path, path.mode, path
+function pipe(path_opt, perms_opt, extra_opt)
+	local opt
+	if isstr(path_opt) then --path, ...
+		opt = {path = path_opt}
+	else --opt, ...
+		opt = update({}, path_opt)
 	end
-	opt = opt or {}
-	mode = parse_perms(mode)
+	perms_opt = perms_opt or '0660'
+	if isstr(perms_opt) then --arg1, perms, ...
+		opt.perms = parse_perms(perms_opt)
+	else --arg1, opt, ...
+		update(opt, perms_opt)
+	end
+	update(opt, extra_opt)
 	if path then
-		local fd = C.mkfifo(path, mode)
+		local fd = C.mkfifo(path, opt.perms)
 		if fd == -1 then return check() end
-		local f, err = file_wrap_fd(fd, opt.async, true, path)
+		local f, err = file_wrap_fd(fd, opt, nil, true, path)
 		if not f then return nil, err end
 		log('', 'fs', 'pipe', '%-4s %s', f, path)
 		return f
@@ -223,18 +234,16 @@ function pipe(path, mode, opt)
 		local fds = new'int[2]'
 		local ok = C.pipe(fds) == 0
 		if not ok then return check() end
-		local r_async = opt.async or opt.read_async
-		local w_async = opt.async or opt.write_async
-		local rf, err1 = file_wrap_fd(fds[0], r_async, true, 'pipe.r')
-		local wf, err2 = file_wrap_fd(fds[1], w_async, true, 'pipe.w')
+		local rf, err1 = file_wrap_fd(fds[0], opt, opt.async_read , true, 'pipe.r')
+		local wf, err2 = file_wrap_fd(fds[1], opt, opt.async_write, true, 'pipe.w')
 		if not (rf and wf) then
 			if rf then assert(rf:close()) end
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
 		end
 		log('', 'fs', 'pipe', 'r=%s%s w=%s%s %o',
-			rf, r_async and '' or ',blocking',
-			wf, w_async and '' or ',blocking', mode)
+			rf, rf.async and '' or ',blocking',
+			wf, wf.async and '' or ',blocking', opt.perms)
 		return rf, wf
 	end
 end
@@ -261,8 +270,7 @@ int64_t lseek(int fd, int64_t offset, int whence) asm("lseek%s");
 --NOTE: always ask for more than 0 bytes from a pipe or you'll not see EOF.
 function file.try_read(f, buf, sz)
 	if sz == 0 then return 0 end --masked for compat.
-	if f._async then
-		require'sock'
+	if f.async then
 		return _file_async_read(f, buf, sz)
 	else
 		local n = C.read(f.fd, buf, sz)
@@ -274,8 +282,7 @@ function file.try_read(f, buf, sz)
 end
 
 function file._write(f, buf, sz)
-	if f._async then
-		require'sock'
+	if f.async then
 		return _file_async_write(f, buf, sz)
 	else
 		local n = C.write(f.fd, buf, sz or #buf)
@@ -1004,27 +1011,28 @@ local MAP_PRIVATE = 2 --copy-on-write
 local MAP_FIXED   = 0x0010
 local MAP_ANON    = OSX and 0x1000 or 0x0020
 
-function _mmap(file, access, size, offset, addr, tagname, perms)
+function _mmap(path, access, size, offset, addr, tagname, perms)
 
 	local write, exec, copy = parse_access(access or '')
 
+	path = path or tagname and check_tagname(tagname)
+
 	--open the file, if any.
 
+	local file
 	local function exit(err)
 		if file then file:try_close() end
 		return nil, err
 	end
 
-	file = file or tagname and check_tagname(tagname)
-
-	if isstr(file) then
+	if isstr(path) then
 		local flags = write and 'rdwr creat' or 'rdonly'
 		local perms = perms and parse_perms(perms)
 			or tonumber('400', 8) +
 				(write and tonumber('200', 8) or 0) +
 				(exec  and tonumber('100', 8) or 0)
 		local err
-		file, err = _open(file, {
+		file, err = _open(path, {
 				flags = flags, perms = perms,
 				open = tagname and librt.shm_open,
 				shm = tagname and true or nil,
