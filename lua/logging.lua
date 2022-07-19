@@ -72,7 +72,11 @@ function logging:tofile(logfile, max_size)
 
 	local function try_open_logfile()
 		if f ~= nil then return true end
-		f = try_open(logfile, 'a')
+		f = try_open(logfile, 'a', {
+			log     = function(...) logto     ('s', ...) end,
+			live    = function(...) liveto    ('s', ...) end,
+			liveadd = function(...) liveaddto ('s', ...) end,
+		})
 		if not f then return end
 		size = f:attr'size'
 		if not f then return end
@@ -560,7 +564,6 @@ _G.logargs      = logging.args
 if not ... then
 
 	require'sock'
-	require'fs'
 
 	local log = _G.log
 
