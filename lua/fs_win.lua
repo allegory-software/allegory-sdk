@@ -510,8 +510,8 @@ DWORD GetCurrentThreadId();
 
 --NOTE: FILE_FLAG_FIRST_PIPE_INSTANCE == WRITE_OWNER wtf?
 local pipe_flag_bits = update({
-	r               = 0x00000001, --PIPE_ACCESS_INBOUND
-	w               = 0x00000002, --PIPE_ACCESS_OUTBOUND
+	readonly        = 0x00000001, --PIPE_ACCESS_INBOUND
+	writeonly       = 0x00000002, --PIPE_ACCESS_OUTBOUND
 	rw              = 0x00000003, --PIPE_ACCESS_DUPLEX
 	single_instance = 0x00080000, --FILE_FLAG_FIRST_PIPE_INSTANCE
 	write_through   = 0x80000000, --FILE_FLAG_WRITE_THROUGH
@@ -531,18 +531,26 @@ function pipe(path_opt, flags_opt, extra_opt)
 	end
 	flags_opt = flags_opt or 'rw'
 	if isstr(flags_opt) then --arg1, flags, ...
-		opt.flags = flags_opt
+		--parsed below...
 	else --arg1, opt, ...
 		update(opt, flags_opt)
 	end
 	update(opt, extra_opt)
+
+	local path = opt.path
 	local async = opt.async or opt.async_read or opt.async_write
 
 	if path then --named pipe
 
+		local flags = async and FILE_FLAG_OVERLAPPED or 0
+		flags = bitflags(opt, pipe_flag_bits, flags)
+		if isstr(flags_opt) then
+			flags = bitflags(flags_opt, pipe_flag_bits, flags)
+		end
+
 		local h, err = checkh(C.CreateNamedPipeW(
 			wcs(path),
-			bitflags(opt.flags, pipe_flag_bits, async and FILE_FLAG_OVERLAPPED or 0),
+			flags,
 			0, --nothing interesting here
 			opt.max_instances or 255,
 			opt.write_buffer_size or 8192,
@@ -569,7 +577,7 @@ function pipe(path_opt, flags_opt, extra_opt)
 
 			local rf, err = pipe{
 				path = path,
-				r = true,
+				readonly = true,
 				async_read = opt.async_read or opt.async,
 				inheritable = opt.read_inheritable  or opt.inheritable,
 				max_instances = 1,
