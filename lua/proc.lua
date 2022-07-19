@@ -249,11 +249,10 @@ function try_exec_lua_file(arg, ...)
 	end
 end
 
-function exec_lua(arg, ...)
+function try_exec_lua(arg, ...)
 	local exepath = exepath()
 	local script = isstr(arg) and arg or arg.script
-	local cmd = isstr(script) and {exepath, '-'} or extend({exepath}, '-')
-	local t = {cmd = cmd, stdin = true}
+	local t = {cmd = {exepath, '-'}, stdin = true}
 	if isstr(arg) then
 		t.env, t.dir, t.stdout, t.stderr, t.autokill, t.inherit_handles = ...
 	else
