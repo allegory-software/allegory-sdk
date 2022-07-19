@@ -164,17 +164,17 @@ function release_dbs()
 	_release_dbs(dbs, true)
 end
 
---NOTE: browsers keep multiple connections open, and even keep them
---open for a while after closing the last browser window(!), and
---we don't want to hold on to pooled resources like db connections
---on idle http connections, so we're releasing them after each request.
-
 function db(ns, without_current_db)
 	local opt = conn_opt(ns or false)
 	local key = opt.pool_key
 	local thread = currentthread()
 	local dbs = ownthreaddbs(thread)
 	local req = _G.http_request and http_request(thread)
+
+	--NOTE: browsers keep multiple connections open, and even keep them
+	--open for a while after closing the last browser window(!), and
+	--we don't want to hold on to pooled resources like db connections
+	--on idle http connections, so we're releasing them after each request.
 	if req and thread == req.thread then
 		if not req._release_dbs_hooked then
 			http_request():onfinish(function(req, ok)
@@ -183,6 +183,7 @@ function db(ns, without_current_db)
 			req._release_dbs_hooked = true
 		end
 	end
+
 	local db, err = dbs[key]
 	if not db then
 		::again::
