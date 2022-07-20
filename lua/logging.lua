@@ -72,11 +72,13 @@ function logging:tofile(logfile, max_size)
 
 	local function try_open_logfile()
 		if f ~= nil then return true end
-		f = try_open(logfile, 'a', {
+		f = try_open{
+			path = logfile,
+			mode = 'a',
 			log     = function(...) logto     ('s', ...) end,
 			live    = function(...) liveto    ('s', ...) end,
 			liveadd = function(...) liveaddto ('s', ...) end,
-		})
+		}
 		if not f then return end
 		size = f:attr'size'
 		if not f then return end
@@ -88,7 +90,7 @@ function logging:tofile(logfile, max_size)
 	local function try_rotate(len)
 		if max_size and size + len > max_size / 2 then
 			f:close(); f = nil
-			if not try_mv(logfile, logfile0) then return end
+			if not try_mv(logfile, logfile0, false, nil, 's') then return end
 			if not try_open_logfile() then return end
 		end
 		return true
@@ -382,8 +384,8 @@ local function logto(self, to, severity, module, event, fmt, ...)
 		end
 	end
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
-		local tofile   = to == 'f' or to == '*'
-		local toserver = to == 's' or to == '*'
+		local tofile   = to == 'f' or to == nil
+		local toserver = to == 's' or to == nil
 		local entry = (self.logtofile or not self.quiet)
 			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
 				env, date('%Y-%m-%d %H:%M:%S', time), severity,
@@ -406,7 +408,7 @@ local function logto(self, to, severity, module, event, fmt, ...)
 	end
 end
 local function log(self, ...)
-	logto(self, '*', ...)
+	logto(self, nil, ...)
 end
 
 --[[local]] function logvar_message(self, k, v)
@@ -441,7 +443,7 @@ local function liveto(self, to, o, fmt, ...)
 	ids.live[o] = s
 end
 local function live(self, ...)
-	liveto(self, '*', ...)
+	liveto(self, nil, ...)
 end
 
 local function liveaddto(self, to, o, fmt, ...)
@@ -451,7 +453,7 @@ local function liveaddto(self, to, o, fmt, ...)
 	ids.live[o] = s
 end
 local function liveadd(self, ...)
-	liveaddto(self, '*', ...)
+	liveaddto(self, nil, ...)
 end
 
 local function init(self)

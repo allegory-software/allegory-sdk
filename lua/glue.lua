@@ -2406,7 +2406,7 @@ local errno_msgs = {
 	                     --rmdir(), opendir(), rename(), unlink()
 	[  5] = 'io_error', --EIO, readlink(), read()
 	[ 13] = 'access_denied', --EACCESS, mkdir() etc.
-	[ 17] = 'already_exists', --EEXIST, open(), mkdir()
+	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo()
 	[ 20] = 'not_found', --ENOTDIR, opendir()
 	[ 21] = 'is_dir', --EISDIR, unlink()
 	[Linux and 39 or OSX and 66 or ''] = 'not_empty', --ENOTEMPTY, rmdir()
