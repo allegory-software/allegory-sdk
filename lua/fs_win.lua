@@ -5,6 +5,7 @@
 if not ... then require'fs_test'; return end
 
 require'glue'
+
 assert(win, 'platform not Windows')
 assert(package.loaded.fs)
 
@@ -366,9 +367,8 @@ local function sec_attr(inheritable)
 	return sa
 end
 
-function _open(path, opt, is_pipe_end)
-	local async = opt.async or opt.async_read or opt.async_write
-	assert(not async or is_pipe_end, 'only pipes can be async')
+function _open(path, opt, quiet, is_pipe_end)
+	local async = opt.async --files are sync by default
 	local access   = bitflags(opt.access or 'read', access_bits, nil, true)
 	local sharing  = bitflags(opt.sharing or 'read', sharing_bits, nil, true)
 	local creation = bitflags(opt.creation or 'open_existing', creation_bits, nil, true)
@@ -377,11 +377,14 @@ function _open(path, opt, is_pipe_end)
 	local flagbits = bitflags(opt.flags, flag_bits)
 	local attflags = bor(attrbits, flagbits, async and FILE_FLAG_OVERLAPPED or 0)
 	local sa = sec_attr(opt.inheritable)
+	local r = getbit(access, access_bits.read ) or getbit(access, access_bits.generic_read)
+	local w = getbit(access, access_bits.write) or getbit(access, access_bits.generic_write)
+	quiet = repl(quiet, nil, not w or nil) --r/o opens are quiet
 	local h, err = checkh(C.CreateFileW(
 		wcs(path), access, sharing, sa, creation, attflags, nil
 	))
 	if not h then return nil, err end
-	local f, err = file_wrap_handle(h, opt, is_pipe_end, path)
+	local f, err = file_wrap_handle(h, opt, async, is_pipe_end, path, quiet)
 	if not f then return nil, err end
 	if f.quiet == nil and not w then f.quiet = true end
 	if opt.seek_end then
@@ -391,9 +394,6 @@ function _open(path, opt, is_pipe_end)
 			return nil, err
 		end
 	end
-	local getbit = getbit
-	local r = getbit(access, access_bits.read ) or getbit(access, access_bits.generic_read)
-	local w = getbit(access, access_bits.write) or getbit(access, access_bits.generic_write)
 	log(f.quiet and '' or 'note', 'fs', 'open', '%-4s %s%s %s', f,
 		r and 'r' or '', w and 'w' or '', path)
 	return f
@@ -405,7 +405,7 @@ end
 
 function file.try_close(f)
 	if f:closed() then return true end
-	if f.async_read or f.async_write then
+	if f.async then
 		_sock_unregister(f)
 	end
 	local ok, err = checknz(C.CloseHandle(f.handle))
@@ -416,30 +416,28 @@ function file.try_close(f)
 	return true
 end
 
-function file_wrap_handle(h, opt, is_pipe_end, path)
+function file_wrap_handle(h, opt, async, is_pipe_end, path, quiet)
 
 	opt = opt or empty
 
 	--make `if f.seek then` the idiom for checking if a file is seekable.
-	local seek; if is_pipe_end then seek = false end
+	local seek; if is_pipe_end or async then seek = false end
 
 	local f = object(file, {
 		handle = h,
 		s = h, --for async use with sock
 		type = is_pipe_end and 'pipe' or 'file',
+		async = async,
 		seek = seek,
 		path = path,
 		debug_prefix = is_pipe_end and 'P' or 'F',
-		async_read  = opt.async,
-		async_write = opt.async,
 		w = 0, r = 0,
-		quiet = is_pipe_end or nil,
+		quiet = repl(quiet, nil, is_pipe_end) or nil,
 		log = log, live = live, liveadd = liveadd,
 	}, opt)
 	live(f, path or '')
 
-	if f.async_read or f.async_write then
-		require'sock'
+	if f.async then
 		local ok, err = _sock_register(f)
 		if not ok then
 			f:close()
@@ -522,30 +520,16 @@ local pipe_flag_bits = update({
 
 local serial = 0
 
-function pipe(path_opt, flags_opt, extra_opt)
-	local opt
-	if isstr(path_opt) then --path, ...
-		opt = {path = path_opt}
-	else --opt, ...
-		opt = update({}, path_opt)
-	end
-	flags_opt = flags_opt or 'rw'
-	if isstr(flags_opt) then --arg1, flags, ...
-		--parsed below...
-	else --arg1, opt, ...
-		update(opt, flags_opt)
-	end
-	update(opt, extra_opt)
+function _pipe(path, opt)
 
-	local path = opt.path
-	local async = opt.async or opt.async_read or opt.async_write
+	local async = repl(opt.async, nil, true) --pipes are async by default.
 
 	if path then --named pipe
 
 		local flags = async and FILE_FLAG_OVERLAPPED or 0
 		flags = bitflags(opt, pipe_flag_bits, flags)
-		if isstr(flags_opt) then
-			flags = bitflags(flags_opt, pipe_flag_bits, flags)
+		if not (opt.readonly or opt.writeonly) then
+			flags = bor(flags, pipe_flag_bits.rw)
 		end
 
 		local h, err = checkh(C.CreateNamedPipeW(
@@ -560,7 +544,7 @@ function pipe(path_opt, flags_opt, extra_opt)
 		))
 		if not h then return nil, err end
 
-		local f, err = file_wrap_handle(h, opt, true, path)
+		local f, err = file_wrap_handle(h, opt, async, true, path)
 		if not f then return nil, err end
 		log('', 'fs', 'pipe', '%s%s %s', f, async and '' or ',blocking', path)
 		return f
@@ -575,13 +559,16 @@ function pipe(path_opt, flags_opt, extra_opt)
 			local path = format([[\\.\pipe\LuaPipe.%08x.%08x.%08x]],
 				C.GetCurrentThreadId(), lua_state_id or 0, serial)
 
+			local r_async = repl(opt.async_read , nil, true)
+			local w_async = repl(opt.async_write, nil, true)
+
 			local rf, err = pipe{
 				path = path,
 				readonly = true,
-				async_read = opt.async_read or opt.async,
 				inheritable = opt.read_inheritable  or opt.inheritable,
 				max_instances = 1,
 				timeout = opt.timeout or 120,
+				async = r_async,
 			}
 			if not rf then
 				return nil, err
@@ -591,9 +578,9 @@ function pipe(path_opt, flags_opt, extra_opt)
 				access = 'generic_write',
 				creation = 'open_existing',
 				sharing = '',
-				async_write = opt.async_write or opt.async,
 				inheritable = opt.write_inheritable or opt.inheritable,
-			}, true)
+				async = w_async,
+			}, nil, true)
 			if not wf then
 				rf:close()
 				return nil, err
@@ -612,8 +599,8 @@ function pipe(path_opt, flags_opt, extra_opt)
 			)
 			local ok, err = checknz(C.CreatePipe(hs, hs+1, sa, 0))
 			if not ok then return nil, err end
-			local rf = file_wrap_handle(hs[0], opt, true, 'pipe.r')
-			local wf = file_wrap_handle(hs[1], opt, true, 'pipe.w')
+			local rf = file_wrap_handle(hs[0], opt, false, true, 'pipe.r')
+			local wf = file_wrap_handle(hs[1], opt, false, true, 'pipe.w')
 			if opt.inheritable or opt.read_inheritable  then rf:set_inheritable(true) end
 			if opt.inheritable or opt.write_inheritable then wf:set_inheritable(true) end
 			log('', 'fs', 'pipe', 'r=%s w=%s sync', rf, wf)
@@ -686,7 +673,7 @@ local function mask_eof(ret, err)
 end
 function file.try_read(f, buf, sz)
 	if sz == 0 then return 0 end --masked for compat.
-	if f.async_read then
+	if f.async then
 		return mask_eof(_file_async_read(f, read_overlapped, buf, sz))
 	else
 		local ok, err = mask_eof(checknz(C.ReadFile(f.handle, buf, sz, dwbuf, nil)))
@@ -698,7 +685,7 @@ function file.try_read(f, buf, sz)
 end
 
 function file._write(f, buf, sz)
-	if f.async_write then
+	if f.async then
 		return _file_async_write(f, write_overlapped, buf, sz)
 	else
 		local ok, err = checknz(C.WriteFile(f.handle, buf, sz or #buf, dwbuf, nil))
@@ -779,11 +766,11 @@ end
 
 local move_bits = {
 	--MOVEFILE_*
-	replace_existing      =  0x1,
-	copy_allowed          =  0x2,
-	delay_until_reboot    =  0x4,
+	replace_existing      = 0x01,
+	copy_allowed          = 0x02,
+	delay_until_reboot    = 0x04,
+	write_through         = 0x08, --for when copy_allowed
 	fail_if_not_trackable = 0x20,
-	write_through         =  0x8, --for when copy_allowed
 }
 
 --NOTE: MoveFileExW is atomic if both files are on the same NTFS volume.
@@ -1522,15 +1509,16 @@ function _mmap(file, access, size, offset, addr, tagname)
 	end
 
 	if isstr(file) then
-		local open_opt = {
+		local err
+		file, err = try_open{
+			path = file,
+			mode = false,
 			access = 'read'
 				.. (exec  and ' execute' or '')
 				.. (write and ' write'   or ''),
 			sharing = 'read write delete',
 			creation = write and 'open_always' or 'open_existing',
 		}
-		local err
-		file, err = try_open(file, open_opt)
 		if not file then
 			return nil, err
 		end

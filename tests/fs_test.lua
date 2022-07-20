@@ -38,12 +38,16 @@ function test.open_already_exists_file()
 	local testfile = 'fs_testfile'
 	local f = try_open(testfile, 'w')
 	f:close()
-	local f, err = try_open(testfile,
+	local f, err = try_open(
 		win and {
+			path = testfile,
+			mode = false,
 			access = 'write',
 			creation = 'create_new',
 			flags = 'backup_semantics'
 		} or {
+			path = testfile,
+			mode = false,
 			flags = 'creat excl'
 		})
 	assert(not f)
@@ -55,13 +59,17 @@ function test.open_already_exists_dir()
 	local testfile = 'fs_test_dir_already_exists'
 	rmdir(testfile)
 	mkdir(testfile)
-	local f, err = try_open(testfile,
+	local f, err = try_open(
 		win and {
+			path = testfile,
 			access = 'write',
 			creation = 'create_new',
-			flags = 'backup_semantics'
+			flags = 'backup_semantics',
+			mode = false,
 		} or {
-			flags = 'creat excl'
+			path = testfile,
+			flags = 'creat excl',
+			mode = false,
 		})
 	assert(not f)
 	assert(err == 'already_exists')
@@ -105,31 +113,34 @@ end
 --pipes ----------------------------------------------------------------------
 
 function test.pipe() --I/O test in proc_test.lua
-	local rf, wf = pipe()
+	local rf, wf = pipe{async = false}
 	rf:close()
 	wf:close()
 end
 
 --NOTE: I/O tests in proc_test.lua!
-function test.named_pipe_win()
-	if not win then return end
-	local opt = 'rw' --'rw single_instance'
-	local name = [[\\.\pipe\fs_test_pipe]]
-	local p1 = pipe(name, opt)
-	local p2 = pipe(name, opt)
+function test.named_pipe()
+	require'sock'
+	local path = win and [[\\.\pipe\fs_test_pipe]] or 'fs_test_pipe'
+	if not win then rmfile(path) end
+	local p1, err1 = assert(pipe(path))
+	local p2, err2 = assert(pipe(path))
+	assert(not err1)
+	assert(not err2)
 	p1:close()
 	p2:close()
+	if not win then rmfile(path) end
 end
 
---NOTE: I/O tests in proc_test.lua!
-function test.named_pipe_posix()
+function test.mkfifo()
 	if win then return end
-	local opt = 'rw'
-	local file = 'fs_test_pipe'
-	rmfile(file)
-	local p = pipe(name, opt)
-	p:close()
-	rmfile(file)
+	local path = 'fs_test_pipe'
+	rmfile(path)
+	local _, err1 = assert(mkfifo(path))
+	local _, err2 = assert(mkfifo(path))
+	assert(not err1)
+	assert(err2 == 'already_exists')
+	rmfile(path)
 end
 
 --i/o ------------------------------------------------------------------------
@@ -1069,7 +1080,7 @@ if not name or name == 'fs_test' then
 			print('test.'..k)
 			local ok, err = xpcall(test[k], debug.traceback)
 			if not ok then
-				print(err)
+				print('FAILED: ', err)
 				n=n+1
 			else
 				m=m+1

@@ -5,6 +5,7 @@
 if not ... then require'fs_test'; return end
 
 require'glue'
+require'unixperms'
 
 --POSIX does not define an ABI and platfoms have different cdefs thus we have
 --to limit support to the platforms and architectures we actually tested for.
@@ -40,10 +41,9 @@ local cbuf = buffer'char[?]'
 
 local function parse_perms(s, base)
 	if isstr(s) then
-		require'unixperms'
 		return unixperms_parse(s, base)
 	else --pass-through
-		return s or tonumber('600', 8), false
+		return s or tonumber('660', 8), false
 	end
 end
 
@@ -104,16 +104,15 @@ local O_NONBLOCK  = 0x800
 local function make_async(f)
 	local fl = C.fcntl(f.fd, F_GETFL)
 	assert(check(C.fcntl(f.fd, F_SETFL, cast('int', bor(fl, O_NONBLOCK))) == 0))
-	require'sock'
 	local ok, err = _sock_register(f)
 	if not ok then return nil, err end
 	return true
 end
 
-function file_wrap_fd(fd, opt, async, is_pipe_end, path)
+function file_wrap_fd(fd, opt, async, is_pipe_end, path, quiet)
 
 	--make `if f.seek then` the idiom for checking if a file is seekable.
-	local seek; if is_pipe_end then seek = false end
+	local seek; if is_pipe_end or async then seek = false end
 
 	local f = object(file, {
 		fd = fd,
@@ -122,11 +121,11 @@ function file_wrap_fd(fd, opt, async, is_pipe_end, path)
 		seek = seek,
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
-		quiet = is_pipe_end or nil,
+		quiet = repl(quiet, nil, is_pipe_end) or nil,
 		log = log, live = live, liveadd = liveadd,
 		path = path,
+		async = async,
 	}, opt)
-	if async ~= nil then f.async = async end
 	live(f, f.path or '')
 
 	if f.async then
@@ -140,16 +139,26 @@ function file_wrap_fd(fd, opt, async, is_pipe_end, path)
 	return f
 end
 
-function _open(path, opt)
+function _open(path, opt, quiet, is_pipe_end)
+	local async = opt.async --files are sync by defualt
 	local flags = bitflags(opt.flags or 'rdonly', o_bits)
-	flags = bor(flags, opt.async and O_NONBLOCK or 0)
+	flags = bor(flags, async and O_NONBLOCK or 0)
+	local r = band(flags, o_bits.rdonly) == o_bits.rdonly
+	local w = band(flags, o_bits.wronly) == o_bits.wronly
+	quiet = repl(quiet, nil, not w or nil) --r/o opens are quiet
 	local perms = parse_perms(opt.perms)
 	local open = opt.open or C.open
 	local fd = open(path, flags, perms)
-	if fd == -1 then return check() end
-	local f, err = file_wrap_fd(fd, opt, false, false, path)
-	if not f then return nil, err end
-	if f.quiet == nil and not w then f.quiet = true end
+	if fd == -1 then
+		return check()
+	end
+	local f, err = file_wrap_fd(fd, opt, async, is_pipe_end, path, quiet)
+	if not f then
+		return nil, err
+	end
+	f.log(f.quiet and '' or 'note', 'fs', 'open',
+		'%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
+
 	if opt.seek_end then
 		local pos, err = f:seek('end', 0)
 		if not pos then
@@ -157,11 +166,7 @@ function _open(path, opt)
 			return nil, err
 		end
 	end
-	f.shm = opt.shm and true or false
-	local r = band(flags, o_bits.rdonly) == o_bits.rdonly
-	local w = band(flags, o_bits.wronly) == o_bits.wronly
-	f.log(f.quiet and '' or 'note', 'fs', 'open',
-		'%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
+
 	return f
 end
 
@@ -177,7 +182,7 @@ function file.try_close(f)
 	local ok = C.close(f.fd) == 0
 	f.fd = -1 --fd is gone no matter the error.
 	if not ok then return check(false) end
-	log(f.quiet and '' or 'note', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	f.log(f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil)
 	return true
 end
@@ -209,41 +214,46 @@ int pipe(int[2]);
 int mkfifo(const char *pathname, mode_t mode);
 ]]
 
-function pipe(path_opt, perms_opt, extra_opt)
-	local opt
-	if isstr(path_opt) then --path, ...
-		opt = {path = path_opt}
-	else --opt, ...
-		opt = update({}, path_opt)
-	end
-	perms_opt = perms_opt or '0660'
-	if isstr(perms_opt) then --arg1, perms, ...
-		opt.perms = parse_perms(perms_opt)
-	else --arg1, opt, ...
-		update(opt, perms_opt)
-	end
-	update(opt, extra_opt)
-	if path then
-		local fd = C.mkfifo(path, opt.perms)
-		if fd == -1 then return check() end
-		local f, err = file_wrap_fd(fd, opt, nil, true, path)
-		if not f then return nil, err end
-		log('', 'fs', 'pipe', '%-4s %s', f, path)
-		return f
+function try_mkfifo(path, perms, quiet)
+	perms = parse_perms(perms)
+	local ok, err = check(C.mkfifo(path, perms) == 0)
+	if not ok and err ~= 'already_exists' then return nil, err end
+	log(quiet and '' or 'note', 'fs', 'mkfifo', '%s %o', path, perms)
+	if err == 'already_exists' then return true, err end
+	return ok
+end
+
+function mkfifo(path, perms)
+	local ok, err = try_mkfifo(path, perms)
+	check('fs', 'mkfifo', ok, '%s %o', path, parse_perms(perms))
+	if err then return ok, err end
+	return ok
+end
+
+function _pipe(path, opt)
+	local async = repl(opt.async, nil, true) --pipes are async by default
+	if path then --named pipe
+		local ok, err = try_mkfifo(path, perms, opt.quiet)
+		if not ok then return nil, err end
+		return _open(path, update({
+			async = async,
+		}, opt), true, true)
 	else --unnamed pipe
 		local fds = new'int[2]'
 		local ok = C.pipe(fds) == 0
 		if not ok then return check() end
-		local rf, err1 = file_wrap_fd(fds[0], opt, opt.async_read , true, 'pipe.r')
-		local wf, err2 = file_wrap_fd(fds[1], opt, opt.async_write, true, 'pipe.w')
+		local r_async = repl(opt.async_read , nil, async)
+		local w_async = repl(opt.async_write, nil, async)
+		local rf, err1 = file_wrap_fd(fds[0], opt, r_async, true, 'pipe.r')
+		local wf, err2 = file_wrap_fd(fds[1], opt, w_async, true, 'pipe.w')
 		if not (rf and wf) then
 			if rf then assert(rf:close()) end
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
 		end
-		log('', 'fs', 'pipe', 'r=%s%s w=%s%s %o',
+		rf.log('', 'fs', 'pipe', 'r=%s%s w=%s%s',
 			rf, rf.async and '' or ',blocking',
-			wf, wf.async and '' or ',blocking', opt.perms)
+			wf, wf.async and '' or ',blocking')
 		return rf, wf
 	end
 end

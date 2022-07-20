@@ -12,16 +12,16 @@ FEATURES
   * platform-specific functionality exposed
 
 FILE OBJECTS
-	[try_]open(path|opt, [mode|opt], [quiet|opt], [opt]) -> f    open file
+	[try_]open(opt | path,[mode],[quiet]) -> f    open file
 	f:[try_]close()                               close file
 	f:closed() -> true|false                      check if file is closed
 	isfile(f [,'file'|'pipe']) -> true|false      check if f is a file or pipe
 	f.handle -> HANDLE                            Windows HANDLE (Windows platforms)
 	f.fd -> fd                                    POSIX file descriptor (POSIX platforms)
 PIPES
-	pipe() -> rf, wf                              create an anonymous pipe
-	pipe(path|opt, [flags|opt], [opt]) -> pf      create a named pipe (Windows)
-	pipe(path|opt, [perms|opt], [opt]) -> true    create a named pipe (POSIX)
+	[try_]pipe([opt]) -> rf, wf                   create an anonymous pipe
+	[try_]pipe(path|{path=,...}) -> pf            create/open a named pipe
+	[try_]mkfifo(path|{path=,...}) -> true        create a named pipe (POSIX)
 STDIO STREAMS
 	f:stream(mode) -> fs                          open a FILE* object from a file
 	fs:[try_]close()                              close the FILE* object
@@ -76,7 +76,7 @@ FILESYSTEM OPS
 	[try_]rm[dir|file](path, [quiet])             remove directory or file
 	[try_]rm_rf(path, [quiet])                    like `rm -rf`
 	[try_]mkdirs(file, [perms], [quiet]) -> file     make file's dir
-	[try_]mv(old_path, new_path, [perms], [quiet])   rename/move file or dir on the same filesystem
+	[try_]mv(old_path, new_path, [dst_dirs_perms], [quiet])   rename/move file or dir on the same filesystem
 SYMLINKS & HARDLINKS
 	[try_]mksymlink(symlink, path, is_dir, [quiet])  create a symbolic link for a file or dir
 	[try_]mkhardlink(hardlink, path, [quiet])     create a hard link for a file
@@ -188,7 +188,7 @@ NORMALIZED ERROR MESSAGES
 
 File Objects -----------------------------------------------------------------
 
-[try_]open(path|opt, [mode|opt], [quiet|opt]) -> f
+[try_]open(opt | path,[mode],[quiet]) -> f
 
 Open/create a file for reading and/or writing. The second arg can be a string:
 
@@ -206,44 +206,45 @@ Open/create a file for reading and/or writing. The second arg can be a string:
 	`FILE_SHARE_READ | FILE_SHARE_WRITE` on Windows.
 	All fields and flags are documented in the code.
 
- field     | OS           | reference                              | default
- ----------+--------------+----------------------------------------+----------
- access    | Windows      | `CreateFile() / dwDesiredAccess`       | 'file_read'
- sharing   | Windows      | `CreateFile() / dwShareMode`           | 'file_read'
- creation  | Windows      | `CreateFile() / dwCreationDisposition` | 'open_existing'
- attrs     | Windows      | `CreateFile() / dwFlagsAndAttributes`  | ''
- flags     | Windows      | `CreateFile() / dwFlagsAndAttributes`  | ''
- flags     | Linux, OSX   | `open() / flags`                       | 'rdonly'
- perms     | Linux, OSX   | `octal or symbolic perms`              | '0666' / 'rwx'
+ field     | OS           | reference                            | default
+ ----------+--------------+--------------------------------------+----------
+ access    | Windows      | CreateFile() / dwDesiredAccess       | 'file_read'
+ sharing   | Windows      | CreateFile() / dwShareMode           | 'file_read'
+ creation  | Windows      | CreateFile() / dwCreationDisposition | 'open_existing'
+ attrs     | Windows      | CreateFile() / dwFlagsAndAttributes  | ''
+ flags     | Windows      | CreateFile() / dwFlagsAndAttributes  | ''
+ flags     | Linux, OSX   | open() / flags                       | 'rdonly'
+ perms     | Linux, OSX   | octal or symbolic perms              | '0666' / 'rwx'
 
-The `perms` arg is passed to `unixperms_parse()`.
+The `perms` arg is passed to unixperms_parse().
 
 Pipes ------------------------------------------------------------------------
 
-pipe() -> rf, wf
+[try_]pipe([opt]) -> rf, wf
 
 	Create an anonymous (unnamed) pipe. Return two files corresponding to the
 	read and write ends of the pipe.
 
 	NOTE: If you're using async anonymous pipes in Windows _and_ you're
-	also creating multiple Lua states _per OS thread_, make sure to set a unique
-	`lua_state_id` per Lua state to distinguish them. That is because
+	also creating multiple Lua states _per OS thread_, make sure to set
+	a unique `lua_state_id` per Lua state to distinguish them. That is because
 	in Windows, async anonymous pipes are emulated using named pipes.
 
-pipe(path|opt, [flags|opt], [opt]) -> pf
+[try_]pipe(path|{path=,...}) -> pf
 
-	Create or open a named pipe (Windows). Named pipes on Windows cannot
-	be created in any directory like on POSIX systems, instead they must be
-	created in the special directory called `\\.\pipe`. After creation,
-	named pipes can be opened for reading and writing like normal files.
+	Create and open a named pipe.
 
-	Named pipes on Windows cannot be removed and are not persistent. They are
-	destroyed automatically when the process that created them exits.
+	On Windows, named pipes must be created in the special hidden directory
+	`\\.\pipe`. After creation they can be opened for reading and writing
+	from any process like normal files. They cannot be removed and are not
+	persistent. A named pipe is freed when the last handle to it is closed.
 
-pipe(path|opt, [perms|opt], [opt]) -> true
+	On POSIX systems, named pipes are persistent and can be created in any
+	directory as they are just a type of file.
 
-	Create a named pipe (POSIX). Named pipes on POSIX are persistent and can be
-	created in any directory as they are just a type of file.
+[try_]mkfifo(path, [perms], [quiet]) -> true[,'already_exists']
+
+	Create a named pipe (POSIX).
 
 Stdio Streams ----------------------------------------------------------------
 
@@ -431,7 +432,7 @@ Filesystem operations --------------------------------------------------------
 
 mkdir(path, [recursive], [perms])
 
-	Make directory. `perms` can be a number or a string passed to `unixperms_parse()`.
+	Make directory. `perms` can be a number or a string passed to unixperms_parse().
 
 	NOTE: In recursive mode, if the directory already exists this function
 	returns `true, 'already_exists'`.
@@ -642,31 +643,25 @@ function isfile(f, type)
 	return istab(mt) and rawget(mt, '__index') == file and (not type or f.type == type)
 end
 
-function try_open(path_opt, mode_opt, quiet, extra_opt)
+function try_open(path, mode, quiet)
 	local opt
-	if isstr(path_opt) then --path, ...
-		opt = {path = path_opt}
-	else --opt, ...
-		opt = update({}, path_opt)
+	if not isstr(path) then --try_open{path=,...}
+		opt = path
+		path = opt.path
+		mode = opt.mode
+		quiet = opt.quiet
 	end
-	mode_opt = mode_opt or 'r'
-	if isstr(mode_opt) then --arg1, mode, ...
-		opt.mode = mode_opt
-	else --arg1, opt, ...
-		update(opt, mode_opt)
-	end
-	local mode = opt.mode
+	assert(path, 'path required')
+	mode = repl(mode, nil, 'r') --use `false` for no mode.
 	if mode then
-		update(opt, assertf(_open_mode_opt[mode], 'invalid open mode: %s', mode))
+		local mode_opt = assertf(_open_mode_opt[mode], 'invalid open mode: %s', mode)
+		if opt then
+			merge(opt, mode_opt)
+		else
+			opt = mode_opt
+		end
 	end
-	if isbool(quiet) then --arg1, arg2, quiet
-		opt.quiet = quiet
-	else --arg1, arg2, opt
-		update(opt, quiet)
-	end
-	update(opt, extra_opt)
-	assert(opt.path, 'path required')
-	local f, err = _open(opt.path, opt)
+	local f, err = _open(path, opt or empty, quiet)
 	if not f then return nil, err end
 	return f
 end
@@ -674,8 +669,7 @@ end
 function open(arg1, ...)
 	local f, err = try_open(arg1, ...)
 	local path = isstr(arg1) and arg1 or arg1.path
-	check('fs', 'open', f, '%s: %s', path, err)
-	return f
+	return check('fs', 'open', f, '%s: %s', path, err)
 end
 
 file.check_io = check_io
@@ -748,6 +742,28 @@ function file.buffered_reader(f, bufsize)
 		end
 		return rsz
 	end
+end
+
+--pipes ----------------------------------------------------------------------
+
+local function pipe_args(path_opt)
+	if istab(path_opt) then
+		return path_opt.path, path_opt
+	else
+		return path_opt, empty
+	end
+end
+
+function try_pipe(...)
+	return _pipe(pipe_args(...))
+end
+
+function pipe(...)
+	local path, opt = pipe_args(...)
+	local ret, err = _pipe(path, opt)
+	check('fs', 'pipe', ret, '%s: %s', path or '', err)
+	if not path then return ret, err end --actually rf, wf
+	return ret --pf
 end
 
 --stdio streams --------------------------------------------------------------
@@ -971,12 +987,14 @@ local function try_rm_rf(path, quiet)
 	return try_rmdir_recursive(path, quiet)
 end
 
-function try_mv(old_path, new_path, perms, quiet)
-	local ok, err = try_mkdirs(new_path, perms, quiet)
-	if not ok then return false, err end
+function try_mv(old_path, new_path, dst_dirs_perms, quiet, to)
+	if dst_dirs_perms ~= false then
+		local ok, err = try_mkdirs(new_path, dst_dirs_perms, quiet)
+		if not ok then return false, err end
+	end
 	local ok, err = _mv(old_path, new_path)
 	if not ok then return false, err end
-	log(quiet and '' or 'note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
+	logto(to, quiet and '' or 'note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
 	return true
 end
 
@@ -1670,7 +1688,7 @@ local function _save(file, s, sz, perms)
 		end
 	end
 
-	local f, err = try_open(tmpfile, perms and {mode = 'w', perms = perms} or 'w', true)
+	local f, err = try_open{path = tmpfile, mode = 'w', perms = perms, quiet = true}
 	if not f then
 		return false, _('could not open file %s: %s', tmpfile, err)
 	end
