@@ -377,17 +377,17 @@ local check, _poll, wait_io, cancel_wait_io, create_socket, wrap_socket
 function socket:try_close()
 	if not self.s then return true end
 	_sock_unregister(self)
+	local ok, err = self:_close()
 	if self.listen_socket then
 		self.listen_socket.n = self.listen_socket.n - 1
 	end
-	self.live(self, nil)
-	local ok, err = self:_close()
 	if self._after_close then
 		self:_after_close()
 	end
 	if not ok then return false, err end
 	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
 		self.n and ' live:'..self.n or '')
+	self.live(self, nil)
 	return true
 end
 
@@ -1723,6 +1723,8 @@ do
 
 	local ENOENT = 2
 
+	--NOTE: since close() is always called after this, we let the kernel
+	--call epoll_ctl(EPOLL_CTL_DEL) for us.
 	function _sock_unregister(s)
 		local i = s._i
 		if not i then return end --closing before bind() was called.
