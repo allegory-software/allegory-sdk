@@ -219,7 +219,7 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
  	end
 
 	if stdin == true then
-		inp_rf, inp_wf = pipe{async_write = true}
+		inp_rf, inp_wf = pipe{async_read = false}
 		if not inp_rf then
 			return check(nil, inp_wf)
 		end
@@ -229,7 +229,7 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	end
 
 	if stdout == true then
-		out_rf, out_wf = pipe{async_read = true}
+		out_rf, out_wf = pipe{async_write = false}
 		if not out_rf then
 			return check(nil, out_wf)
 		end
@@ -239,7 +239,7 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	end
 
 	if stderr == true then
-		err_rf, err_wf = pipe{async_read = true}
+		err_rf, err_wf = pipe{async_write = false}
 		if not err_rf then
 			return check(nil, err_wf)
 		end

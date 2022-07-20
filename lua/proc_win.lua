@@ -76,7 +76,7 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 		if stdin == true then
 			inp_rf, inp_wf = pipe{
-				async_write = true,
+				async_read = false,
 				read_inheritable = true,
 			}
 			if not inp_rf then
@@ -92,7 +92,7 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 		if stdout == true then
 			out_rf, out_wf = pipe{
-				async_read = true,
+				async_write = false,
 				write_inheritable = true,
 			}
 			if not out_rf then
@@ -108,7 +108,7 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 		if stderr == true then
 			err_rf, err_wf = pipe{
-				async_read = true,
+				async_write = false,
 				write_inheritable = true,
 			}
 			if not err_rf then
