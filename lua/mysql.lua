@@ -1173,8 +1173,7 @@ function mysql_connect(opt)
 	self.db = opt.db
 	self.user = opt.user
 
-	liveadd(f, 'mysql user=%s db=%s %s', opt.user or '', opt.db or '',
-		currentthread())
+	liveadd(f, 'mysql user=%s db=%s', opt.user or '', opt.db or '')
 
 	return self
 end
@@ -1182,7 +1181,7 @@ try_mysql_connect = protect_io(mysql_connect)
 
 function conn:close()
 	if self.state then
-		log('note', 'mysql', 'close', '%s:%s', self.host, self.port)
+		log('note', 'mysql', 'close', '%s %s:%s', self.f, self.host, self.port)
 		self.state = nil
 		self.sql = nil
 		local buf = send_buffer(1)
