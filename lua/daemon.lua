@@ -173,7 +173,7 @@ function daemon(...)
 		local stop, sleeper
 		function start_heartbeat()
 			resume(thread(function()
-				sleeper = wait_job(1)
+				sleeper = wait_job()
 				while not stop do
 					logging.logvar('live', time())
 					sleeper:wait(1)
