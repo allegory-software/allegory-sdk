@@ -247,7 +247,7 @@ function pb:filepos()
 	return self.offset - #self
 end
 
-pb.readahead = 65536 --set this to 0 to disable read-ahead.
+pb.readahead = 64 * 1024 --set this to 0 to disable read-ahead.
 function pb:have(n)
 	local have = #self
 	if n <= have then return true end
