@@ -50,7 +50,7 @@ ARRAYS
 	insert                       = table.insert
 	remove                       = table.remove
 	pop                          = remove
-	sort                         = table.sort
+	sort(t,[cmp]) -> t           = table.sort
 	add(t, v)                      insert(t, v)
 	push(t, v)                   = add
 	extend(dt, t1, ...) -> dt      extend an array
@@ -261,9 +261,14 @@ local format = string.format
 local concat = table.concat
 local insert = table.insert
 local remove = table.remove
-local sort   = table.sort
 local gsub   = string.gsub
 local io_stderr = io.stderr
+
+local table_sort = table.sort
+function sort(t, cmp)
+	table_sort(t, cmp)
+	return t
+end
 
 local ffi_string = ffi.string
 local function str(s, len)
@@ -394,7 +399,6 @@ _G.cat    = table.concat
 _G.insert = table.insert
 _G.remove = table.remove
 _G.pop    = table.remove
-_G.sort   = table.sort
 
 function add(t, v)
 	return insert(t, v)
@@ -419,6 +423,13 @@ function indexof(v, t, eq, i, j)
 			end
 		end
 	end
+end
+
+function remove_value(t, v)
+	local i = indexof(v, t)
+	if not i then return nil end
+	remove(t, i)
+	return i
 end
 
 --reverse elements of a list in place. works with ffi arrays too given i and j.
@@ -566,16 +577,16 @@ function keys(t, cmp)
 		dt[#dt+1]=k
 	end
 	if cmp == true then
-		sort(dt)
+		table_sort(dt)
 	elseif cmp == false then
-		sort(dt, desc_cmp)
+		table_sort(dt, desc_cmp)
 	elseif type(cmp) == 'string' then
 		cmp = glue_cmp(cmp)
-		sort(dt, function(k1, k2)
+		table_sort(dt, function(k1, k2)
 			return cmp(t[k1], t[k2])
 		end)
 	elseif cmp then
-		sort(dt, cmp)
+		table_sort(dt, cmp)
 	end
 	return dt
 end
