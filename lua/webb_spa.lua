@@ -92,7 +92,7 @@ end
 
 action['strings.js'] = function()
 	local t = S_texts(lang(), 'js')
-	if not next(t) then return end
+	if isempty(t) then return end
 	out'assign(S_texts, '; out(json_encode(t)); out')'
 end
 

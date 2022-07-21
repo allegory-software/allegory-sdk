@@ -499,7 +499,7 @@ function schema:add_cols(tbl_name, t)
 end
 
 function schema:check_refs()
-	if not self.table_refs or not next(self.table_refs) then return end
+	if not self.table_refs or isempty(self.table_refs) then return end
 	assertf(false, 'unresolved refs to tables: %s', cat(keys(self.table_refs, true), ', '))
 end
 
