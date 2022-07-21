@@ -1531,8 +1531,17 @@ function open_buffer(buf, sz, mode)
 	return setmetatable(f, f)
 end
 
-function vfile.try_close(f) f._closed = true; return true end
-function vfile.closed(f) return f._closed end
+function vfile.closed(f)
+	return not f.b
+end
+
+function vfile.try_close(f)
+	if f.b then
+		f.b:free()
+		f.b = nil
+	end
+	return true
+end
 
 vfile.onclose = file.onclose
 
