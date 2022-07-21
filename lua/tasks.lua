@@ -476,6 +476,7 @@ function task_exec(cmd, opt)
 	local task = task(update({out_filter = out_filter}, opt))
 
 	task.cmd = cmd
+	task.poll_interval = 1
 
 	function task:action()
 
@@ -541,7 +542,7 @@ function task_exec(cmd, opt)
 			end, 'exec-stderr %s', p))
 		end
 
-		local exit_code, err = p:wait()
+		local exit_code, err = p:wait(nil, self.poll_interval)
 		self.exit_code = exit_code
 		if not exit_code then
 			if not (err == 'killed' and task.killed) then --crashed/killed from outside

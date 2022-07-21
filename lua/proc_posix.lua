@@ -374,12 +374,12 @@ function proc:exit_code()
 	return self:exit_code()
 end
 
-function proc:wait(expires)
+function proc:wait(expires, poll_interval)
 	if not self.pid then
 		return nil, 'forgotten'
 	end
 	while self:status() == 'active' and clock() < (expires or 1/0) do
-		wait(0.1)
+		wait(poll_interval or .1)
 	end
 	local exit_code, err = self:exit_code()
 	if exit_code then
