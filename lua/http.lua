@@ -763,3 +763,7 @@ function _G.http(t)
 
 	return self
 end
+
+function http:free()
+	self.b:free()
+end
