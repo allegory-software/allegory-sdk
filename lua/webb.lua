@@ -568,7 +568,7 @@ function outfile_function(path, offset, len)
 
 	return function()
 		setcontentsize(len)
-		local filebuf_size = min(len, 65536)
+		local filebuf_size = min(len, 64 * 1024)
 		local filebuf = u8a(filebuf_size)
 		while true do
 			local len = f:read(filebuf, filebuf_size)
