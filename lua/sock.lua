@@ -66,8 +66,8 @@ THREADS
 	onthreadfinish(co, f)                  run `f(thread)` when thread finishes
 
 SCHEDULER
-	poll()                                 poll for I/O
-	start()                                keep polling until all threads finish
+	poll([ignore_interrupts])              poll for I/O
+	start([ignore_interrupts])             keep polling until all threads finish
 	stop()                                 stop polling
 	run(f, ...) -> ...                     run a function inside a thread
 
@@ -281,14 +281,11 @@ suspend(...) -> ...
 
 	Suspend current thread, transfering to the polling thread (but see resume()).
 
-poll(timeout) -> true | false,'timeout'
+poll([ignore_interrupts]) -> true | false,'empty'
 
 	Poll for the next I/O event and resume the coroutine that waits for it.
 
-	Timeout is in seconds with anything beyond 2^31-1 taken as infinte
-	and defaults to infinite.
-
-start()
+start([ignore_interrupts])
 
 	Start polling. Stops when no more I/O or `stop()` was called.
 
@@ -2515,11 +2512,20 @@ end
 	end
 end
 
-function poll()
+function poll(ignore_interrupts)
 	if wait_count == 0 then
 		return nil, 'empty'
 	end
-	return _poll()
+	local ok, err = _poll()
+	if ok then return true end
+	if err == 'interrupted' then
+		log('note', 'sock', 'poll', 'interrupted: %s.',
+			ignore_interrupts and 'ignoring' or 'breaking')
+		if ignore_interrupts then
+			return true, err
+		end
+	end
+	return false, err
 end
 
 local threadfinish = setmetatable({}, weak_keys)
@@ -2667,16 +2673,19 @@ end
 local _stop = false
 local running = false
 function stop() _stop = true end
-function try_start()
+function try_start(ignore_interrupts)
 	if running then
 		return
 	end
 	poll_thread = currentthread()
 	repeat
 		running = true
-		local ret, err = poll()
+		local ret, err = poll(ignore_interrupts)
 		if not ret then
 			stop()
+			if err == 'interrupted' then
+				return true, err
+			end
 			if err ~= 'empty' then
 				running = false
 				_stop = false
@@ -2688,8 +2697,8 @@ function try_start()
 	_stop = false
 	return true
 end
-function start()
-	assert(try_start())
+function start(...)
+	assert(try_start(...))
 end
 
 function run(f, ...)

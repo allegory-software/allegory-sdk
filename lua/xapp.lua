@@ -70,7 +70,7 @@ local function xapp(...)
 
 	function app:run_server()
 		app.server = webb_http_server()
-		start()
+		start(config('ignore_interrupts', true))
 	end
 
 	function logging.rpc:close_all_sockets()

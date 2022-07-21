@@ -2415,6 +2415,7 @@ local errno_msgs = {
 	[  1] = 'access_denied', --EPERM
 	[  2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
 	                     --rmdir(), opendir(), rename(), unlink()
+	[  4] = 'interrupted', --EINTR, epoll_wait()
 	[  5] = 'io_error', --EIO, readlink(), read()
 	[ 13] = 'access_denied', --EACCESS, mkdir() etc.
 	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo()
