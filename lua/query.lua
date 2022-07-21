@@ -130,6 +130,14 @@ function sqlpp(ns)
 end
 
 local DBS = {}
+local all_dbs = {}
+
+function close_all_dbs()
+	for db in pairs(all_dbs) do
+		db:close()
+	end
+	assert(isempty(all_dbs))
+end
 
 local function _release_dbs(dbs, ok)
 	for key, db in pairs(dbs) do
@@ -138,7 +146,7 @@ local function _release_dbs(dbs, ok)
 		end
 	end
 	for key, db in pairs(dbs) do
-		db:release()
+		db:release_to_pool()
 		dbs[key] = nil
 	end
 end
@@ -195,6 +203,10 @@ function db(ns, without_current_db)
 				opt.db = nil
 			end
 			db = opt.sqlpp.connect(opt)
+			all_dbs[db] = true
+			db.rawconn.f:onclose(function()
+				all_dbs[db] = nil
+			end)
 			pool:put(key, db, db.rawconn.f)
 		end
 		local ok, err = pcall(db.start_transaction, db)

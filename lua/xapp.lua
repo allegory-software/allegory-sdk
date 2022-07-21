@@ -73,6 +73,11 @@ local function xapp(...)
 		start()
 	end
 
+	function logging.rpc:close_all_sockets()
+		app.server:close_all_sockets()
+		close_all_dbs()
+	end
+
 	app.before = before
 	app.after = after
 
