@@ -231,7 +231,6 @@ function http_server(...)
 			live(stcp, 'listen %s:%d', tcp.bound_addr, tcp.bound_port)
 			tcp = stcp
 		end
-		liveadd(tcp, tls and 'https' or 'http')
 		push(self.sockets, tcp)
 
 		local function accept_connection()
@@ -247,12 +246,19 @@ function http_server(...)
 					return
 				end
 			end
-			liveadd(ctcp, tls and 'https' or 'http')
 			resume(thread(function()
 				local ok, err = pcall(handle_connection, tcp, ctcp)
 				self:check(ctcp, ok or iserror(err, 'io'), 'handler', '%s', err)
 				ctcp:close()
 			end, 'http-server-client %s', ctcp))
+		end
+
+		function self:close_all_sockets()
+			self:log(tcp, 'note', 'htsrv', 'kill-all', '%s',
+				cat(sort(imap(keys(tcp.sockets), logarg)), ' '))
+			for s in pairs(tcp.sockets) do
+				s:close()
+			end
 		end
 
 		resume(thread(function()
@@ -298,4 +304,3 @@ end
 function http_redirect(url, status)
 	http_error{status = status or 303, headers = {location = url}}
 end
-
