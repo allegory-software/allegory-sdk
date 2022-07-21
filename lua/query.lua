@@ -139,7 +139,7 @@ function close_all_dbs()
 	assert(isempty(all_dbs))
 end
 
-local function _release_dbs(dbs, ok)
+local function _release_dbs(dbs, ok, err)
 	for key, db in pairs(dbs) do
 		if db:in_transaction() then
 			db:end_transaction(ok and 'commit' or 'rollback')
@@ -158,8 +158,8 @@ local function ownthreaddbs(thread, create_env)
 		if create_env ~= false then
 			dbs = {}
 			rawset(env, DBS, dbs)
-			onthreadfinish(thread, function(thread, ok)
-				_release_dbs(dbs, ok)
+			onthreadfinish(thread, function(thread, ok, err)
+				_release_dbs(dbs, ok, err)
 			end)
 		end
 	end
@@ -185,8 +185,8 @@ function db(ns, without_current_db)
 	--on idle http connections, so we're releasing them after each request.
 	if req and thread == req.thread then
 		if not req._release_dbs_hooked then
-			http_request():onfinish(function(req, ok)
-				_release_dbs(dbs, ok)
+			http_request():onfinish(function(req, ok, err)
+				_release_dbs(dbs, ok, err)
 			end)
 			req._release_dbs_hooked = true
 		end
