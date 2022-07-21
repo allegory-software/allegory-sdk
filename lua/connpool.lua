@@ -56,10 +56,6 @@ require'glue'
 require'sock'
 require'queue'
 
-local function dbg(event)
-	log('', 'cnpool', event)
-end
-
 function connpool(opt)
 
 	local all_limit = opt and opt.max_connections or 100
@@ -82,6 +78,11 @@ function connpool(opt)
 		local free = {}
 		local limit = all_limit
 		local waitlist_limit = all_waitlist_limit
+
+		local function dbg(event, c)
+			log('', 'cnpool', event, '%-4s %-4s n=%d free=%d',
+				currentthread(), c or '', n, #free)
+		end
 
 		function pool:setlimits(opt)
 			limit = opt.max_connections or limit
@@ -118,16 +119,18 @@ function connpool(opt)
 		end
 
 		function pool:get(expires)
-			dbg'get'
 			local c = pop(free)
 			if c then
+				dbg('pop', c)
 				return c
 			end
 			if n >= limit then
+				dbg('wait', _('%.2ds', expires - clock()))
 				local ok, err = wait(expires)
 				if not ok then return nil, err end
 				local c = pop(free)
 				if c then
+					dbg('pop', c)
 					return c
 				end
 				if n >= limit then
@@ -135,25 +138,30 @@ function connpool(opt)
 					return nil, 'busy'
 				end
 			end
+			dbg'empty'
 			return nil, 'empty'
 		end
 
 		function pool:put(c, s)
 			assert(n < limit)
+			assert(not pool[c])
 			pool[c] = true
 			n = n + 1
 			dbg'put'
-			s:onclose(function()
-				pool[c] = nil
-				n = n - 1
-				dbg'close'
-				check_waitlist()
-			end)
-			function c:release()
+			function c:release_to_pool()
+				local c = self
 				add(free, c)
-				dbg'release'
+				dbg('release', c)
 				check_waitlist()
 			end
+			s:onclose(function()
+				assert(pool[c])
+				pool[c] = nil
+				n = n - 1
+				remove_value(free, c)
+				dbg('close', c)
+				check_waitlist()
+			end)
 			return c
 		end
 
