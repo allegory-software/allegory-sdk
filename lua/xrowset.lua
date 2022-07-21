@@ -578,29 +578,21 @@ action['xrowset.events'] = function()
 	setconnectionclose()
 	setcompress(false)
 	local waiting_thread
-	resume(thread(function()
-		--hack to wait for client to close the connection so we can wake up
-		--the sending thread if suspended and finish it so the server can
-		--clean up the accept thread. this works because the client shouldn't
-		--send anything anymore so recv() should only return on close.
-		local tcp = http_request().http.f
-		local buf = u8a(1)
-		while tcp:recv(buf, 1) == 1 do
-			--this shouldn't happen, but sometimes we do get data on this pipe.
-			--we should figure out why but for now it doesn't break anything.
-		end
-		if waiting_thread then
-			return cofinish(waiting_thread, 'closed')
-		end
-	end, 'xrowset.events-wait'))
 	local rowsets = {}
 	local req = http_request()
 	changed_rowsets[req] = rowsets
-	http_request():onfinish(function()
+	local function resume_waiting_thread()
 		changed_rowsets[req] = nil
-	end)
+		if waiting_thread then
+			return resume(waiting_thread, 'closed')
+		end
+	end
+	--when client closes the socket...
+	http_request():onfinish(resume_waiting_thread)
+	--when we close the socket form another thread...
+	http_request().http.f:onclose(resume_waiting_thread)
 	while true do
-		if not next(rowsets) then
+		if isempty(rowsets) then
 			local thread = currentthread()
 			waiting_events_threads[thread] = true
 			waiting_thread = thread
