@@ -378,8 +378,16 @@ function socket:try_close()
 	if not self.s then return true end
 	_sock_unregister(self)
 	local ok, err = self:_close()
-	if self.listen_socket then
-		self.listen_socket.n = self.listen_socket.n - 1
+	local ps = self.listen_socket
+	if ps then
+		ps.n = ps.n - 1
+		ps.sockets[self] = nil
+	end
+	if self.sockets then --close all accepted sockets if any.
+		for s in pairs(self.sockets) do
+			s:try_close()
+		end
+		assert(isempty(self.sockets))
 	end
 	if self._after_close then
 		self:_after_close()
@@ -1232,7 +1240,6 @@ do
 	local accept_buf = accept_buf_ct()
 	local sa_len = sizeof(accept_buf) / 2
 	function tcp:try_accept(opt)
-		self.log('', 'sock', 'accept?', '%-4s', self)
 		local s = create_socket(opt, tcp, 'tcp', self._af, self._pr)
 		self.live(s, 'wait-accept %s', self) --only shows in Windows.
 		local o, job = overlapped(self, return_true, self.recv_expires)
@@ -1254,7 +1261,9 @@ do
 		local la = accept_buf. local_addr:addr():tostring()
 		local lp = accept_buf. local_addr:port()
 		self.n = self.n + 1
-		s.i = self.n
+		self.sockets[s] = true
+		self.next_i = (self.next_i or 0) + 1
+		s.i = self.next_i
 		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
 		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
@@ -1541,7 +1550,6 @@ do
 	end, EWOULDBLOCK)
 
 	function tcp:try_accept(opt)
-		self.log('', 'sock', 'accept?', '%-4s', self)
 		local s, err, errno = tcp_accept(self)
 		local retry =
 			   errno == ENETDOWN
@@ -1573,7 +1581,9 @@ do
 		local la = accept_buf:addr():tostring()
 		local lp = accept_buf:port()
 		self.n = self.n + 1
-		s.i = self.n
+		self.sockets[s] = true
+		self.next_i = (self.next_i or 0) + 1
+		s.i = self.next_i
 		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
 		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
@@ -1581,6 +1591,7 @@ do
 		s.remote_port = rp
 		s. local_addr = la
 		s. local_port = lp
+		s.listen_socket = self
 		return s
 	end
 end
@@ -1903,7 +1914,8 @@ function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 	if not ok then return check() end
 	self.log('note', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
 	self.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
-	self.n = 0 --live client connection count
+	self.n = 0  --live client connection count
+	self.sockets = {} --live client connections: {socket->true}
 
 	if onaccept then
 		repeat
