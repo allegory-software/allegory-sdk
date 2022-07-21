@@ -57,7 +57,7 @@ logging = {
 	flush = false, --too slow (but you can tail)
 	censor = {},
 	max_disk_size = 16 * 1024^2,
-	queue_size = 10000,
+	queue_size = 1000,
 	timeout = 5,
 }
 
@@ -282,7 +282,7 @@ local function debug_id(v)
 	if not ids then
 		ids = setmetatable({
 			live_count = 0,
-			live = {} --setmetatable({}, mode_k)
+			live = setmetatable({}, mode_k)
 			-- ^^ this table is weak because threads can be abandoned
 			-- in suspended state so live(nil) never gets called on them.
 		}, mode_k)
@@ -489,6 +489,7 @@ function logging.rpc:get_procinfo()
 	local t  = proc_info()
 	local pt = os_info()
 	local ft = fs_info'/'
+	collectgarbage()
 	self.logvar('procinfo', {
 		clock    = clock(),
 		utime    = t and t.utime,
@@ -503,6 +504,7 @@ function logging.rpc:get_procinfo()
 		ram_free = pt and pt.ram_free,
 		hdd_size = ft and ft.size,
 		hdd_free = ft and ft.free,
+		lua_heap = (collectgarbage'count') * 1024,
 	})
 end
 
