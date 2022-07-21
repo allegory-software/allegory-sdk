@@ -123,6 +123,7 @@ function http_server(...)
 
 		local function send_response(opt)
 			send_started = true
+			opt = opt or {}
 			local res = http:build_response(req, opt, time())
 			assert(http:send_response(res))
 			send_finished = true
@@ -190,12 +191,7 @@ function http_server(...)
 
 	end
 
-	local function handle_connection(stcp, ctcp)
-		local http = http({
-			debug = self.debug,
-			max_line_size = self.max_line_size,
-			f = ctcp,
-		})
+	local function handle_connection(stcp, ctcp, http)
 		while not ctcp:closed() do
 			local req = assert(http:read_request())
 			ownthreadenv().http_request = req
@@ -247,7 +243,13 @@ function http_server(...)
 				end
 			end
 			resume(thread(function()
-				local ok, err = pcall(handle_connection, tcp, ctcp)
+				local http = http({
+					debug = self.debug,
+					max_line_size = self.max_line_size,
+					f = ctcp,
+				})
+				local ok, err = pcall(handle_connection, tcp, ctcp, http)
+				http:free()
 				self:check(ctcp, ok or iserror(err, 'io'), 'handler', '%s', err)
 				ctcp:close()
 			end, 'http-server-client %s', ctcp))
