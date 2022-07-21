@@ -364,6 +364,7 @@ local socket = {debug_prefix = 'S'} --common socket methods
 local tcp = {type = 'tcp_socket'}
 local udp = {type = 'udp_socket'}
 local raw = {type = 'raw_socket'}
+local wait_job_class = {type = 'wait_job', debug_prefix = 'W'}
 
 function issocket(s)
 	local mt = getmetatable(s)
@@ -1027,8 +1028,13 @@ local function cancel(job)
 	job_resume(job, CANCEL)
 end
 function wait_job()
-	return {wait = wait, wait_until = wait_until, resume = job_resume,
-		cancel = cancel, CANCEL = CANCEL}
+	local self = object(wait_job_class, {
+		wait = wait, wait_until = wait_until, resume = job_resume,
+		cancel = cancel, CANCEL = CANCEL,
+		log = log, live = live, liveadd = liveadd,
+	})
+	self.log('', 'sock', 'wait-job', '%s', self)
+	return self
 end
 end
 
@@ -1459,8 +1465,13 @@ local function cancel(job)
 	job_resume(job, CANCEL)
 end
 function wait_job()
-	return {wait = wait, wait_until = wait_until, resume = job_resume,
-		cancel = cancel, CANCEL = CANCEL}
+	local self = object(wait_job_class, {
+		wait = wait, wait_until = wait_until, resume = job_resume,
+		cancel = cancel, CANCEL = CANCEL,
+		log = log, live = live, liveadd = liveadd,
+	})
+	self.log('', 'sock', 'wait-job', '%s', self)
+	return self
 end
 end
 
@@ -2531,7 +2542,7 @@ function ownthreadenv(thread, create)
 	thread = thread or currentthread()
 	local t = ownthreadenvs[thread]
 	if not t and create ~= false then
-		t = {}
+		t = {thread = thread}
 		local pt = threadenvs[thread]
 		if pt then --inherit parent env, if any.
 			t.__index = pt
