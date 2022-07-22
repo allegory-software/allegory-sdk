@@ -57,7 +57,7 @@ function mess_protocol(tcp)
 	tcp:onclose(function()
 		buf:free()
 		buf = nil
-	end
+	end)
 
 	function chan:send(msg, exp)
 		buf:reset()
@@ -75,7 +75,7 @@ function mess_protocol(tcp)
 	tcp:onclose(function()
 		buf:free()
 		buf = nil
-	end
+	end)
 
 	function chan:recv()
 		buf:reset()
