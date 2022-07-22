@@ -44,6 +44,10 @@ function smtp_connect(t)
 		self.f = self.f:check_io(client_stcp(self.f, self.host, self.tls_options))
 	end
 	self.b = pbuffer{f = self.f}
+	self.f:onclose(function()
+		self.b:free()
+		self.b = nil
+	end)
 
 	--logging & debugging
 	if self.debug and self.debug.tracebacks then

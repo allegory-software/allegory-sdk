@@ -10,6 +10,7 @@ server:new(opt) -> server         Create a server object
 	opt.listen                     {{host=, port=, tls=t|f, tls_options=},...}
 	opt.tls_options             -> tls_config()
 	opt.max_line_size           -> http.max_line_size
+	opt.recv_buffer_size        -> http.recv_buffer_size
 	opt.debug                   -> http.debug
 	opt.respond(server, req)
 		req                      <- http:read_request()
@@ -123,7 +124,6 @@ function http_server(...)
 
 		local function send_response(opt)
 			send_started = true
-			opt = opt or {}
 			local res = http:build_response(req, opt, time())
 			assert(http:send_response(res))
 			send_finished = true
@@ -246,6 +246,7 @@ function http_server(...)
 				local http = http({
 					debug = self.debug,
 					max_line_size = self.max_line_size,
+					recv_buffer_size = self.recv_buffer_size,
 					f = ctcp,
 				})
 				local ok, err = pcall(handle_connection, tcp, ctcp, http)

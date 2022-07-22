@@ -280,10 +280,10 @@ function http:send_chunked(read_content)
 end
 
 function http:gzip_decoder(format, write)
-	--NOTE: gzip threads are abandoned in suspended state on errors.
+	--NOTE: gzip decoder threads are abandoned in suspended state on errors.
 	--That doesn't leak them but don't expect them to finish!
 	local decode = cowrap(function(yield)
-		assert(inflate(yield, write, nil, format))
+		assert(inflate(yield, write, self.recv_buffer_size, format))
 	end, 'http-gzip-decode %s', self.f)
 	decode()
 	return decode
@@ -323,10 +323,10 @@ function http:gzip_encoder(format, content, content_size)
 		--from the logging.live list immediately.
 		local content, gzip_thread = cowrap(function(yield, s)
 			if s == false then return end --abort on entry
-			local ok, err = deflate(content, yield, nil, format)
+			local ok, err = deflate(content, yield, self.recv_buffer_size, format)
 			assert(ok or err == 'abort', err)
 		end, 'http-gzip-encode %s', self.f)
-		function self:after_send_response()
+		function self:after_send_response() --called on errors too.
 			if threadstatus(gzip_thread) ~= 'dead' then
 				content(false, 'abort')
 			end
@@ -759,7 +759,13 @@ function _G.http(t)
 		self.f:debug'http'
 	end
 
-	self.b = pbuffer{f = self.f} --for reading only
+	--NOTE: 128k on Debian 10, 64k on Windows 10.
+	self.recv_buffer_size = self.recv_buffer_size or self.f:getopt'rcvbuf'
+
+	self.b = pbuffer{
+		f = self.f,
+		readahead = self.recv_buffer_size,
+	} --for reading only
 
 	return self
 end

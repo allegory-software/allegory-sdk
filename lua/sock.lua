@@ -2172,10 +2172,14 @@ OPT = {
 get_opt = {
 	error              = get_error,
 	reuseaddr          = get_bool,
+	rcvbuf             = get_uint,
+	sndbuf             = get_uint,
 }
 
 set_opt = {
 	reuseaddr          = set_bool,
+	rcvbuf             = set_uint,
+	sndbuf             = set_uint,
 }
 
 elseif OSX then --TODO
@@ -2216,7 +2220,7 @@ end
 
 function socket:try_setopt(k, v)
 	local opt, level = parse_opt(k)
-	local set = assert(set_opt[k], 'read-only socket option')
+	local set = assertf(set_opt[k], 'read-only socket option: %s', k)
 	local buf, sz = set(v)
 	return check(C.setsockopt(self.s, level, opt, buf, sz))
 end

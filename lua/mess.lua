@@ -54,6 +54,11 @@ function mess_protocol(tcp)
 	local chan = update({tcp = tcp}, channel)
 
 	local buf = string_buffer()
+	tcp:onclose(function()
+		buf:free()
+		buf = nil
+	end
+
 	function chan:send(msg, exp)
 		buf:reset()
 		buf:reserve(4)
@@ -67,6 +72,11 @@ function mess_protocol(tcp)
 	chan.try_send = protect_io(chan.send)
 
 	local buf = string_buffer()
+	tcp:onclose(function()
+		buf:free()
+		buf = nil
+	end
+
 	function chan:recv()
 		buf:reset()
 		local plen = buf:reserve(4)
