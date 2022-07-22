@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 	Based on LuaJIT 2.1's string.buffer, see:
-		https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html
+		https://luapower.com/files/luapower/csrc/luajit/src/doc/ext_buffer.html
 
 	pbuffer(pb) -> pb
 		pb.f                              opened file or socket
