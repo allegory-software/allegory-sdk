@@ -29,7 +29,7 @@ cdef[[
 int setsid(void);
 int fork(void);
 unsigned int umask(unsigned int mask);
-int close(int fd);
+int kill(pid_t pid, int sig);
 ]]
 
 local pidfile
@@ -80,15 +80,14 @@ cmd_server(Linux, 'start', 'Start the server', function()
 		os.exit(0)
 	else --child process
 		C.umask(0)
-		local sid = C.setsid() --prevent killing the child when parent is killed.
-		assert(sid >= 0)
-		logging.quiet = true
+		assert(C.setsid() >= 0) --prevent killing the child when parent is killed.
 		io.stdin:close()
 		io.stdout:close()
 		io.stderr:close()
 		C.close(0)
 		C.close(1)
 		C.close(2)
+		logging.quiet = true
 		local ok = pcall(run_server)
 		rm(pidfile)
 		os.exit(ok and 0 or 1)
@@ -99,12 +98,10 @@ cmd_server(Linux, 'stop', 'Stop the server', function()
 	local is_running, pid = running()
 	if not is_running then
 		say'Not running.'
-		return 1
+		return 0
 	end
 	sayn('Killing PID %d...', pid)
-	local p = exec(_('kill %d', pid))
-	p:wait()
-	p:forget()
+	local p = C.kill(pid, 9)
 	for i=1,10 do
 		if not running() then
 			say'OK.'
