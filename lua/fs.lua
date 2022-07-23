@@ -645,13 +645,13 @@ end
 
 function try_open(path, mode, quiet)
 	local opt
-	if not isstr(path) then --try_open{path=,...}
+	if istab(path) then --try_open{path=,...}
 		opt = path
 		path = opt.path
 		mode = opt.mode
 		quiet = opt.quiet
 	end
-	assert(path, 'path required')
+	assert(isstr(path), 'path required')
 	mode = repl(mode, nil, 'r') --use `false` for no mode.
 	if mode then
 		local mode_opt = assertf(_open_mode_opt[mode], 'invalid open mode: %s', mode)
@@ -1676,8 +1676,8 @@ function load_tobuffer(file, default_buf, default_len, ignore_file_size)
 	return buf, len
 end
 
-function load(path, default, ignore_file_size) --load a file into a string.
-	local buf, len = load_tobuffer(path, default, nil, ignore_file_size)
+function load(file, default, ignore_file_size) --load a file into a string.
+	local buf, len = load_tobuffer(file, default, nil, ignore_file_size)
 	if buf == default then return default end
 	return str(buf, len)
 end

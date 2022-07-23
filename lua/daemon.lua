@@ -22,6 +22,11 @@ require'cmdline'
 
 --daemonize (Linux only) -----------------------------------------------------
 
+local pidfile
+local run_server
+
+if Linux then
+
 cmd_server = cmdsection'SERVER CONTROL'
 
 cdef[[
@@ -29,9 +34,9 @@ int setsid(void);
 int fork(void);
 unsigned int umask(unsigned int mask);
 int kill(pid_t pid, int sig);
+int open(const char *pathname, int flags, mode_t mode);
+int close(int fd);
 ]]
-
-local pidfile
 
 local function findpid(pid, cmd)
 	local s = load(_('/proc/%s/cmdline', pid), false, true)
@@ -44,11 +49,11 @@ local function running()
 	return findpid(pid, arg[0]), pid
 end
 
-cmd_server(Linux, 'running', 'Check if the server is running', function()
+cmd_server('running', 'Check if the server is running', function()
 	return running() and 0 or 1
 end)
 
-cmd_server(Linux, 'status', 'Show server status', function()
+cmd_server('status', 'Show server status', function()
 	local is_running, pid = running()
 	if is_running then
 		say('Running. PID: %d', pid)
@@ -58,12 +63,11 @@ cmd_server(Linux, 'status', 'Show server status', function()
 	end
 end)
 
-local run_server
 cmd_server('run', 'Run server in foreground', function()
 	run_server()
 end)
 
-cmd_server(Linux, 'start', 'Start the server', function()
+cmd_server('start', 'Start the server', function()
 	local is_running, pid = running()
 	if is_running then
 		say('Already running. PID: %d', pid)
@@ -95,7 +99,7 @@ cmd_server(Linux, 'start', 'Start the server', function()
 	end
 end)
 
-cmd_server(Linux, 'stop', 'Stop the server', function()
+cmd_server('stop', 'Stop the server', function()
 	local is_running, pid = running()
 	if not is_running then
 		say'Not running.'
@@ -116,7 +120,7 @@ cmd_server(Linux, 'stop', 'Stop the server', function()
 	return 1
 end)
 
-cmd_server(Linux, 'restart', 'Restart the server', function()
+cmd_server('restart', 'Restart the server', function()
 	if cmd_server.stop.fn() == 0 then
 		cmd_server.start.fn()
 	end
@@ -127,6 +131,8 @@ cmd_server('tail', 'tail -f the log file', function()
 	p:wait()
 	p:forget()
 end)
+
+end --Linux
 
 --init -----------------------------------------------------------------------
 
