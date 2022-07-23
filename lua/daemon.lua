@@ -19,7 +19,6 @@
 
 require'glue'
 require'cmdline'
-require'sock'
 
 --daemonize (Linux only) -----------------------------------------------------
 
@@ -80,14 +79,16 @@ cmd_server(Linux, 'start', 'Start the server', function()
 		os.exit(0)
 	else --child process
 		C.umask(0)
-		assert(C.setsid() >= 0) --prevent killing the child when parent is killed.
-		io.stdin:close()
-		io.stdout:close()
-		io.stderr:close()
-		C.close(0)
-		C.close(1)
-		C.close(2)
-		logging.quiet = true
+		--prevent killing the child when parent is killed.
+		assert(C.setsid() >= 0)
+		--redirect stdin/out/err to /dev/null.
+		assert(C.close(0) == 0)
+		assert(C.close(1) == 0)
+		assert(C.close(2) == 0)
+		assert(C.open('/dev/null', 0, 0) == 0)
+		assert(C.open('/dev/null', 0, 1) == 1)
+		assert(C.open('/dev/null', 0, 1) == 2)
+		logging.quiet = true --no point logging to /dev/null.
 		local ok = pcall(run_server)
 		rm(pidfile)
 		os.exit(ok and 0 or 1)
@@ -166,25 +167,6 @@ function daemon(...)
 	logging.machine = config'machine'
 	logging.env     = config'env'
 
-	local start_heartbeat, stop_heartbeat do
-		local stop, sleeper
-		function start_heartbeat()
-			resume(thread(function()
-				sleeper = wait_job()
-				while not stop do
-					logging.logvar('live', time())
-					sleeper:wait(1)
-				end
-			end, 'logging-heartbeat'))
-		end
-		function stop_heartbeat()
-			stop = true
-			if sleeper then
-				sleeper:resume()
-			end
-		end
-	end
-
 	function run_server() --fw. declared.
 		server_running = true
 		env('TZ', ':/etc/localtime')
@@ -193,13 +175,32 @@ function daemon(...)
 		logging.flush = logging.debug
 		local logtoserver = config'log_host' and config'log_port'
 		if logtoserver then
+			require'sock'
+			local start_heartbeat, stop_heartbeat do
+				local stop, sleeper
+				function start_heartbeat()
+					resume(thread(function()
+						sleeper = wait_job()
+						while not stop do
+							logging.logvar('live', time())
+							sleeper:wait(1)
+						end
+					end, 'logging-heartbeat'))
+				end
+				function stop_heartbeat()
+					stop = true
+					if sleeper then
+						sleeper:resume()
+					end
+				end
+			end
 			logging:toserver(config'log_host', config'log_port')
 			start_heartbeat()
-		end
-		app:run_server()
-		if logtoserver then
+			app:run_server()
 			stop_heartbeat()
 			logging:toserver_stop()
+		else
+			app:run_server()
 		end
 		logging:tofile_stop()
 	end
