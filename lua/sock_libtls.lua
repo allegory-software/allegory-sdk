@@ -204,7 +204,11 @@ local function wrap_stcp(stcp_class, tcp, tls, buf_slot, name)
 		tcp = tcp,
 		tls = tls,
 		buf_slot = buf_slot,
+		--make it work like a socket
+		s = tcp.s, --for getopt()
 		check_io = check_io, checkp = checkp,
+		log = tcp.log, live = tcp.live, liveadd = tcp.liveadd,
+		r = 0, w = 0, --TODO: fill these on recv and send
 	})
 	live(stcp, name or stcp_class.type)
 	return stcp
