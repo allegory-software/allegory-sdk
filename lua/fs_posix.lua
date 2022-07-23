@@ -39,11 +39,14 @@ end
 
 local cbuf = buffer'char[?]'
 
+local default_file_perms = tonumber('644', 8)
+local default_dir_perms  = tonumber('755', 8)
+
 local function parse_perms(s, base)
 	if isstr(s) then
 		return unixperms_parse(s, base)
 	else --pass-through
-		return s or tonumber('660', 8), false
+		return s or default_file_perms, false
 	end
 end
 
@@ -407,7 +410,7 @@ int rename(const char *oldpath, const char *newpath);
 ]]
 
 function _mkdir(path, perms)
-	return check(C.mkdir(path, perms or 0x1ff) == 0) --0x1ff=0777
+	return check(C.mkdir(path, perms or default_dir_perms) == 0)
 end
 
 function _rmdir(path)
