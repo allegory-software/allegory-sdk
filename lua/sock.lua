@@ -1773,7 +1773,7 @@ do
 			socket.recv_thread = nil
 		end
 		if has_err then
-			local err = socket:try_getopt'error'
+			local err = socket:try_getopt'error' --NOTE: this clears the error!
 			coro_transfer(thread, nil, err or 'socket error')
 		else
 			coro_transfer(thread, true)
@@ -2133,20 +2133,20 @@ OPT = {
 	get_filter        = 26, --attach_filter
 	peername          = 28,
 	timestamp         = 29,
-	scm_timestamp        = 29, --timestamp
-	acceptconn        = 30,
+	scm_timestamp     = 29, --timestamp
+	acceptconn        = 30, --socket is listening
 	peersec           = 31,
 	passsec           = 34,
 	timestampns       = 35,
-	scm_timestampns      = 35, --timestampns
+	scm_timestampns   = 35, --timestampns
 	mark              = 36,
 	timestamping      = 37,
-	scm_timestamping     = 37, --timestamping
+	scm_timestamping  = 37, --timestamping
 	protocol          = 38,
 	domain            = 39,
 	rxq_ovfl          = 40,
 	wifi_status       = 41,
-	scm_wifi_status      = 41, --wifi_status
+	scm_wifi_status   = 41, --wifi_status
 	peek_off          = 42,
 	nofcs             = 43,
 	lock_filter       = 44,
@@ -2170,16 +2170,82 @@ OPT = {
 }
 
 get_opt = {
-	error              = get_error,
-	reuseaddr          = get_bool,
-	rcvbuf             = get_uint,
-	sndbuf             = get_uint,
+	error             = get_error,
+	reuseaddr         = get_bool,
+	rcvbuf            = get_uint,
+	sndbuf            = get_uint,
+	debug             = get_bool,
+	--type              = ,
+	dontroute         = get_bool,
+	broadcast         = get_bool,
+	--sndbufforce       = ,
+	--rcvbufforce       = ,
+	keepalive         = get_bool,
+	--oobinline         = ,
+	--no_check          = ,
+	--priority          = ,
+	--linger            = ,
+	--bsdcompat         = ,
+	--reuseport         = ,
+	--passcred          = ,
+	--peercred          = ,
+	--rcvlowat          = ,
+	--sndlowat          = ,
+	--rcvtimeo          = ,
+	--sndtimeo          = ,
+	--security_authentication       = ,
+	--security_encryption_transport = ,
+	--security_encryption_network   = ,
+	--bindtodevice      = ,
+	--attach_filter     = ,
+	--detach_filter     = ,
+	--get_filter        = , --attach_filter
+	--peername          = ,
+	--timestamp         = ,
+	--scm_timestamp     = , --timestamp
+	acceptconn        = get_bool, --socket is listening
+	--peersec           = ,
+	--passsec           = ,
+	--timestampns       = ,
+	--scm_timestampns   = , --timestampns
+	--mark              = ,
+	--timestamping      = ,
+	--scm_timestamping  = , --timestamping
+	--protocol          = ,
+	--domain            = ,
+	--rxq_ovfl          = ,
+	--wifi_status       = ,
+	--scm_wifi_status   = , --wifi_status
+	--peek_off          = ,
+	--nofcs             = ,
+	--lock_filter       = ,
+	--select_err_queue  = ,
+	--busy_poll         = ,
+	--max_pacing_rate   = ,
+	--bpf_extensions    = ,
+	--incoming_cpu      = ,
+	--attach_bpf        = ,
+	--detach_bpf        = , --detach_filter
+	--attach_reuseport_cbpf = ,
+	--attach_reuseport_ebpf = ,
+	--cnx_advice        = ,
+	--scm_timestamping_opt_stats = ,
+	--meminfo           = ,
+	--incoming_napi_id  = ,
+	--cookie            = ,
+	--scm_timestamping_pktinfo = ,
+	--peergroups        = ,
+	--zerocopy          = ,
 }
 
 set_opt = {
-	reuseaddr          = set_bool,
-	rcvbuf             = set_uint,
-	sndbuf             = set_uint,
+	reuseaddr         = set_bool,
+	rcvbuf            = set_uint,
+	sndbuf            = set_uint,
+	broadcast         = set_bool,
+	debug             = set_bool,
+	dontroute         = set_bool,
+	keepalive         = set_bool,
 }
 
 elseif OSX then --TODO
