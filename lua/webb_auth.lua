@@ -5,7 +5,7 @@
 
 SESSIONS
 
-	login([auth][, switch_user]) -> realusr   login and set lang (if not set)
+	[try_]login([auth][, switch_user]) -> realusr   login and set lang (if not set)
 	usr([field|'*']) -> val | t | usr         get current user field(s) or id
 	tenant()                                  get current tenant
 	touch_usr([usr])                          update (current) user's atime
@@ -35,21 +35,19 @@ CONFIG
 
 API DOC
 
-	login([auth][, switch_user]) -> usr | nil, err
+	[try_]login([auth][, switch_user]) -> usr
 
 	Login using an auth object (see below).
 
-[real]usr() -> usr | nil, err
+[real]usr() -> usr
 
-	Get the current user id. Same as calling `login()` without args but
-	caches the usr so it can be called multiple times without actually
-	performing the login.
+	Get the current user id. Same as calling `login()` without args.
 
-[real]usr(field) -> v | nil, err
+[real]usr(field) -> v
 
 	Get the value of a a specific field from the user info.
 
-[real]usr'*' -> t | nil, err
+[real]usr'*' -> t
 
 	Get full user info.
 
@@ -224,12 +222,11 @@ end
 local function usr_insert_or_update_args(t, dt)
 	t = update(dt or {}, t)
 	t.roles = isstr(t.roles) and index(collect(words(t.roles))) or t.roles
-	local roles = {dev = true, admin = true}
 	if http_request() then
+		local roles = usr'roles'
 		t.tenant = t.tenant or tenant()
-		roles = usr'roles' or roles
 		allow(roles.admin or roles.dev, 'must be admin or dev to create or update user')
-		allow(roles.dev or not (t.roles and t.roles.dev), 'only devs can create or update devs')
+		allow(roles.dev or not t.roles.dev, 'only devs can create or update devs')
 		allow(roles.dev or t.tenant == tenant(), 'only devs can create/move users of/to other tenants')
 	end
 	t.roles = t.roles ~= nil and cat(keys(t.roles, true), ' ') or nil
@@ -432,10 +429,7 @@ end
 local weak_vals_mt = {__mode = 'v'}
 
 local userinfo = memoize(function(usr)
-	if not usr then
-		return {roles = {}}
-	end
-	local t = first_row([[
+	local t = usr and first_row([[
 		select
 			usr,
 			tenant,
@@ -460,7 +454,9 @@ local userinfo = memoize(function(usr)
 		where
 			active = 1 and usr = ?
 		]], usr)
-	if not t then return {} end
+	if not t then
+		return {roles = {}}
+	end
 	t.haspass = tonumber(t.haspass) == 1
 	t.roles = index(collect(words(t.roles) or {}))
 	t.admin = t.roles.admin
@@ -753,7 +749,7 @@ end
 
 --authentication logic -------------------------------------------------------
 
-function login(auth, switch_user)
+function try_login(auth, switch_user)
 	switch_user = switch_user or pass
 	local usr, err = authenticate(auth)
 	if usr then
@@ -771,12 +767,12 @@ function login(auth, switch_user)
 	end
 	return usr, err
 end
+function login(...)
+	return allow(try_login(...))
+end
 
 function realusr(attr)
-	local usr, err = login()
-	if not usr then
-		return nil, err
-	end
+	local usr = login()
 	local t = userinfo(usr)
 	if attr == '*' then
 		return t
@@ -788,10 +784,7 @@ function realusr(attr)
 end
 
 function usr(attr)
-	local realusr, err = login()
-	if not realusr then
-		return nil, err
-	end
+	local realusr = login()
 	local usr = args'usr' --impersonated user
 	usr = usr and checkarg(id_arg(usr)) or realusr
 	local u  = userinfo(usr)
