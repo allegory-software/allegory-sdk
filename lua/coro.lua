@@ -174,14 +174,18 @@ local function finish(thread, ok, ...)
 	end
 	coro.live(thread, nil)
 	local caller = callers[thread]
+	callers[thread] = nil
 	if not caller then
 		if ok then
 			return main, false, 'coroutine ended without transferring control'
 		else
 			caller = main
 		end
+	elseif caller == thread then
+		return main, false, 'coroutine ended by transferring control to itself'
+	elseif caller ~= main and status(caller) == 'dead' then
+		return main, false, 'coroutine ended by transferring control to a dead coroutine'
 	end
-	callers[thread] = nil
 	return caller, ok, ...
 end
 function coro.create(f, onfinish, fmt, ...)
