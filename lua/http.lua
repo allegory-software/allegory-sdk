@@ -388,6 +388,9 @@ function http:read_body_to_writer(headers, write, from_server, close, state)
 		self:dp('<<', '%7d bytes total', len)
 		self.b:readn_to(len, write)
 	elseif from_server and close then
+		--NOTE: not allowing this by default to prevent truncation attacks.
+		self.f:checkp(config'http_allow_read_until_closed',
+			'non-self-terminating request')
 		self:dp('<<', '?? bytes (reading until closed)')
 		self.b:readall_to(write)
 	end
