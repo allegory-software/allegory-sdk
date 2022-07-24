@@ -185,6 +185,17 @@ function logging:toserver(host, port, queue_size, timeout)
 					end
 				end, 'logging-rpc %s', chan.tcp))
 
+				--create sending loop.
+				resume(thread(function()
+					while not stop do
+						if send_thread_suspended then
+							resume(send_thread)
+						else
+							wait(.2)
+						end
+					end
+				end, 'logging-send %s', chan.tcp))
+
 				return true
 			end
 
@@ -218,9 +229,6 @@ function logging:toserver(host, port, queue_size, timeout)
 		if not queue:push(msg) then
 			queue:pop()
 			queue:push(msg)
-		end
-		if send_thread_suspended then
-			resume(send_thread)
 		end
 	end
 
