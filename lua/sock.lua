@@ -1944,7 +1944,7 @@ function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 		until self:closed()
 	end
 
-	return true
+	return self
 end
 
 do --getopt() & setopt() -----------------------------------------------------
@@ -2535,8 +2535,7 @@ function listen(self, ...)
 		return listen(create_tcp(), self, ...)
 	end
 	self:setopt('reuseaddr', true)
-	self:listen(...)
-	return self
+	return self:listen(...)
 end
 
 --coroutine-based scheduler --------------------------------------------------
