@@ -481,32 +481,32 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 		return true
 	end
 
+	self.poll_interval = .1
+
 	inherited(self, opt)
 
-	local capture_stdout = opt.capture_stdout ~= false
-	local capture_stderr = opt.capture_stderr ~= false
-
-	local env = opt.env and update(env(), opt.env)
-
+	self.autokill = self.autokill ~= false
+	self.capture_stdout = self.capture_stdout ~= false
+	self.capture_stderr = self.capture_stderr ~= false
+	self.env = self.env and update(env(), self.env)
 	self.cmd = cmd
-	self.poll_interval = 1
 
 	function self:action()
 
 		local p = exec{
-			cmd = cmd,
-			env = env,
-			autokill = opt.autokill ~= false,
-			stdout = capture_stdout,
-			stderr = capture_stderr,
-			stdin = opt.stdin and true or false,
+			cmd = self.cmd,
+			env = self.env,
+			autokill = self.autokill,
+			stdout = self.capture_stdout,
+			stderr = self.capture_stderr,
+			stdin = self.stdin and true or false,
 		}
 
 		self.process = p
 
 		if p.stdin then
 			resume(thread(function()
-				local ok, err = p.stdin:write(opt.stdin)
+				local ok, err = p.stdin:write(self.stdin)
 				if not ok then
 					notify_error('stdin:write(): %s', err)
 				end
@@ -572,7 +572,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 			if self.stdin then
 				s = s .. '\nSTDIN:\n' .. self.stdin
 			end
-			if opt.env then
+			if self.env then
 				local dt = {}
 				for k,v in sortedpairs(t) do
 					add(dt, _('%s = %s', k, v))
