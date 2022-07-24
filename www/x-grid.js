@@ -40,7 +40,7 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 	e.header_w = 120            // vertical grid
 	e.cell_w = 120              // vertical grid
 
-	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: true}) // horizontal grid
+	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: false}) // horizontal grid
 
 	e.set_auto_cols_w = function() {
 		e.update({sizes: true})
