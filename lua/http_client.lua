@@ -30,9 +30,9 @@ http_client(opt) -> client
 	### Pipelined requests
 
 	A pipelined request is a request that is sent in advance of receiving the
-	response for the previous request. Most HTTP servers accept these but
-	in a limited number. Browsers don't have them though so if you use them
-	you'll look like the robot that you really are to the servers.
+	response for the previous request on the same connection. Most HTTP servers
+	accept these but in a limited number. Browsers don't have them though so if
+	you use them you'll look like the robot that you really are to the servers.
 
 	Spawning a new connection for a new request has a lot more initial latency
 	than pipelining the request on an existing connection. On the other hand,
@@ -139,8 +139,8 @@ function client:inc_conn_count(target, n)
 	n = n or 1
 	self.conn_count = (self.conn_count or 0) + n
 	target.conn_count = (target.conn_count or 0) + n
-	self:dp(target, (n > 0 and '+' or '-')..'CO', '%s=%d, total=%d',
-		target, target.conn_count, self.conn_count)
+	self:dp(target, (n > 0 and '+' or '-')..'CO', '=%d, total=%d',
+		target.conn_count, self.conn_count)
 end
 
 function client:dec_conn_count(target)
@@ -179,7 +179,7 @@ function client:pull_matching_wait_conn_thread(target)
 	if not queue then return end
 	for i,t in ipairs(queue) do
 		if t[2] == target then
-			table.remove(queue, i)
+			remove(queue, i)
 			local thread = t[1]
 			self:dp(target, '-WAIT_CO', '%s: %s Q: %d', target, thread, #queue)
 			return thread
@@ -233,17 +233,6 @@ function client:connect_now(target)
 		self:dec_conn_count(target)
 		return nil, err
 	end
-	local function pass(closed, ...)
-		if not closed then
-			self:dp(target, '-CO', '%s', tcp)
-			self:dec_conn_count(target)
-			self:resume_next_wait_conn_thread()
-		end
-		return ...
-	end
-	override(tcp, 'close', function(inherited, tcp, ...)
-		return pass(tcp:closed(), inherited(tcp, ...))
-	end)
 	if target.http_args.https then
 		local stcp, err = client_stcp(tcp, host, self:stcp_options(host, port))
 		self:dp(target, ' TLS', '%s %s %s', stcp, http, err or '')
@@ -252,6 +241,11 @@ function client:connect_now(target)
 		end
 		tcp = stcp
 	end
+	tcp:onclose(function(tcp)
+		self:dp(target, '-CO', '%s', tcp)
+		self:dec_conn_count(target)
+		self:resume_next_wait_conn_thread()
+	end)
 	target.http_args.f = tcp
 	local http = http(target.http_args)
 	self:dp(target, ' BIND', '%s %s', tcp, http)
@@ -453,7 +447,7 @@ function client:request(t)
 
 	local target = self:target(t)
 
-	self:dp(target, '+RQ', '%s = %s', target, tostring(target))
+	self:dp(target, '+RQ')
 
 	local http, err = self:get_conn(target)
 	if not http then return nil, err end
@@ -496,21 +490,20 @@ function client:request(t)
 
 	self:store_cookies(target, req, res)
 
-	if not taken and not http.closed then
+	if not taken and not http.f:closed() then
 		if not self:resume_matching_wait_conn_thread(target, http) then
 			self:push_ready_conn(target, http)
 		end
 	end
 
-	if not http.closed then
+	if not http.f:closed() then
 		local thread = self:pull_wait_response_thread(http, target)
 		if thread then
 			resume(thread)
 		end
 	end
 
-	self:dp(target, '-RQ', '%s.%s.%s body: %d bytes',
-		target, http, req,
+	self:dp(target, '-RQ', '%s.%s body: %d bytes', http, req,
 		res and isstr(res.content) and #res.content or 0)
 
 	if res and res.redirect_location then
