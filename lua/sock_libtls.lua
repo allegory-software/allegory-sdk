@@ -107,6 +107,10 @@ local function free_buf_slot(i)
 	buf_freelist[buf_freelist_n] = i
 end
 
+local
+	tonumber, assert, TLS_WANT_POLLIN, TLS_WANT_POLLOUT =
+	tonumber, assert, TLS_WANT_POLLIN, TLS_WANT_POLLOUT
+
 local read_cb = cast('tls_read_cb', function(tls, buf, sz, i)
 	sz = tonumber(sz)
 	i = tonumber(i)
@@ -166,17 +170,17 @@ local function checkio(self, tls_ret, tls_err)
 end
 
 function client_stcp:try_recv(buf, sz)
-	if self._closed then return 0 end
+	if self._closed then return nil, 'closed' end
 	while true do
-		local recall, ret, err = checkio(self, self.tls:recv(buf, sz))
+		local recall, ret, err = checkio(self, self.tls:try_recv(buf, sz))
 		if not recall then return ret, err end
 	end
 end
 
 function client_stcp:_send(buf, sz)
-	if self._closed then return nil, 'eof' end
+	if self._closed then return nil, 'closed' end
 	while true do
-		local recall, ret, err = checkio(self, self.tls:send(buf, sz))
+		local recall, ret, err = checkio(self, self.tls:try_send(buf, sz))
 		if not recall then return ret, err end
 	end
 end
@@ -186,17 +190,27 @@ function stcp:try_close()
 	self._closed = true --close barrier.
 	local recall, tls_ok, tls_err
 	repeat
-		recall, tls_ok, tls_err = checkio(self, self.tls:close())
+		recall, tls_ok, tls_err = checkio(self, self.tls:try_close())
 	until not recall
 	live(self, nil)
 	self.tls:free()
 	local tcp_ok, tcp_err = self.tcp:try_close()
 	self.tls = nil
 	self.tcp = nil
+	self.s = nil
 	free_buf_slot(self.buf_slot)
 	if not tls_ok then return false, tls_err end
 	if not tcp_ok then return false, tcp_err end
 	return true
+end
+
+function stcp:onclose(fn)
+	if self._closed then return end
+	after(self.tcp, '_after_close', fn)
+end
+
+function stcp:closed()
+	return self._closed or false
 end
 
 local function wrap_stcp(stcp_class, tcp, tls, buf_slot, name)
@@ -217,7 +231,7 @@ end
 function _G.client_stcp(tcp, servername, opt)
 	local tls = tls_client(opt)
 	local buf_slot = alloc_buf_slot()
-	local ok, err = tls:connect(servername, read_cb, write_cb, buf_slot)
+	local ok, err = tls:try_connect(servername, read_cb, write_cb, buf_slot)
 	if not ok then
 		tls:free()
 		return nil, err
@@ -237,16 +251,12 @@ function server_stcp:try_accept()
 		return nil, err
 	end
 	local buf_slot = alloc_buf_slot()
-	local ctls, err = self.tls:accept(read_cb, write_cb, buf_slot)
+	local ctls, err = self.tls:try_accept(read_cb, write_cb, buf_slot)
 	if not ctls then
 		free_buf_slot(buf_slot)
 		return nil, err
 	end
 	return wrap_stcp(client_stcp, ctcp, ctls, buf_slot)
-end
-
-function stcp:closed()
-	return self._closed or false
 end
 
 function stcp:try_shutdown(mode)

@@ -315,13 +315,13 @@ function tls:free()
 end
 
 local ctls_buf = new'struct tls*[1]'
-function tls:accept(read_cb, write_cb, cb_arg)
+function tls:try_accept(read_cb, write_cb, cb_arg)
 	local ok, err = check(self, C.tls_accept_cbs(self, ctls_buf, read_cb, write_cb, cb_arg))
 	if not ok then return nil, err end
 	return ctls_buf[0]
 end
 
-function tls:connect(vhost, read_cb, write_cb, cb_arg)
+function tls:try_connect(vhost, read_cb, write_cb, cb_arg)
 	return check(self, C.tls_connect_cbs(self, read_cb, write_cb, cb_arg, vhost))
 end
 
@@ -333,15 +333,15 @@ local function checklen(self, ret)
 	return nil, str(C.tls_error(self))
 end
 
-function tls:recv(buf, sz)
+function tls:try_recv(buf, sz)
 	return checklen(self, C.tls_read(self, buf, sz))
 end
 
-function tls:send(buf, sz)
+function tls:try_send(buf, sz)
 	return checklen(self, C.tls_write(self, buf, sz or #buf))
 end
 
-function tls:close()
+function tls:try_close()
 	local len, err = checklen(self, C.tls_close(self))
 	if not len then return nil, err end
 	return true
