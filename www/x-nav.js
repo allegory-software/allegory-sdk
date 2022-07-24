@@ -2754,13 +2754,9 @@ function nav_widget(e) {
 
 		e.begin_set_state(row, ev)
 
-		// server merge-updates should not reset current input vals.
 		if (ev && ev.diff_merge) {
+			// server merge-updates should not reset input vals.
 			e.set_cell_state(field, 'val', val)
-			if (!e.cell_modified(row, field)) {
-				e.set_cell_state(field, 'errors', undefined)
-				e.set_row_state('errors', undefined)
-			}
 		} else {
 			e.set_cell_state(field, 'val', val)
 			e.set_cell_state(field, 'input_val', val, old_val)

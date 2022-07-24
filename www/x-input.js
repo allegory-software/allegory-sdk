@@ -166,10 +166,12 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		if (e.updating)
 			return
 		bind_field(true)
-		if (changes.input_val) {
-			e.do_update_val(changes.input_val[0], ev)
+		let val_changes = changes.val || changes.input_val
+		if (val_changes) {
+			let val = val_changes[0]
+			e.do_update_val(val, ev)
 			e.class('modified', e.nav.cell_modified(row, field))
-			e.fire('input_val_changed', changes.input_val[0], ev)
+			e.fire('input_val_changed', val, ev)
 		}
 		if (changes.errors) {
 			e.invalid = e.nav.cell_has_errors(row, field)
