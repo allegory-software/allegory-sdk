@@ -80,7 +80,6 @@ require'proc'
 require'sock'
 require'events'
 require'json'
-local string_buffer = require'string.buffer'.new
 
 --terminals ------------------------------------------------------------------
 
@@ -94,8 +93,8 @@ nterm.override = override
 nterm.before = before
 nterm.after = after
 
-function nterm:__call(opt, ...)
-	local self = object(self, opt, ...)
+function nterm:__call(...)
+	local self = object(self, ...)
 	self:init()
 	return self
 end
@@ -141,15 +140,15 @@ local rterm = object(nil, nil, nterm)
 recording_terminal = rterm
 
 function rterm:init()
-	self.buffer = {}
+	self.tape = {}
 end
 
 rterm:after('out', function(self, src_term, chan, ...)
-	add(self.buffer, pack(src_term, chan, ...))
+	add(self.tape, pack(src_term, chan, ...))
 end)
 
 function rterm:playback(term)
-	for _,t in ipairs(self.buffer) do
+	for _,t in ipairs(self.tape) do
 		term:out(unpack(t))
 	end
 end
@@ -157,7 +156,7 @@ end
 do
 local function add_some(self, maybe_add)
 	local dt = {}
-	for _,t in ipairs(self.buffer) do
+	for _,t in ipairs(self.tape) do
 		maybe_add(dt, unpack(t))
 	end
 	return dt
@@ -300,30 +299,35 @@ task.override = override
 task.before = before
 task.after = after
 
-function task:__call(opt, ...)
-	local self = object(self, opt, ...)
-	self:init()
+function task:__call(...)
+	local self = object(self)
+	self:init(...)
+	if self.autostart then
+		self:start_or_run()
+	end
 	return self
 end
 
 task.module = 'task' --default
 task.free_after = 10
 
-function task:stdout() return self.terminal:stdout() end
-function task:stderr() return self.terminal:stderr() end
+function task:stdout        () return self.terminal:stdout        () end
+function task:stderr        () return self.terminal:stderr        () end
+function task:stdouterr     () return self.terminal:stdouterr     () end
+function task:notifications () return self.terminal:notifications () end
 
-function task:init()
-
+function task:init(...)
 	last_task_id = last_task_id + 1
+	self.visible = true
+	self.name = last_task_id
+	update(self, ...)
 	self.id = last_task_id
 	self.status = 'not started'
 	self.child_tasks = {} --{task1,...}
-	self.name = self.name or self.id
 	self.terminal = recording_terminal()
 	self.restart_count = 0
 	tasks[self] = true
 	tasks_by_id[self.id] = self
-
 	if self.parent_task then
 		self.parent_task:add_task(self)
 	else
@@ -333,48 +337,54 @@ function task:init()
 			self.terminal:pipe(pt, true, self.out_filter)
 		end
 	end
+end
 
-	function self:try_run()
-		::again::
-		self.start_time = time()
-		self.status = 'running'
-		self:fire_up('setstatus', 'running')
-		local term0 = set_current_terminal(self.terminal)
-		local ok, ret = pcall(self.action, self)
-		set_current_terminal(term0)
-		self.duration = time() - self.start_time
-		self.status = 'finished'
-		self:fire_up('setstatus', 'finished')
-		if not ok and not self.killed then
-			log('ERROR', 'tasks', 'run', '%s%s', tostring(ret):trim(),
-				self.restart_after and _('\nrestarting in %ds, restarted %d times before',
-					self.restart_after, self.restart_count))
-			if self.restart_after then
-				wait(self.restart_after)
-				self.restart_count = self.restart_count + 1
-				goto again
-			end
+function task:try_run()
+	::again::
+	self.start_time = time()
+	self.status = 'running'
+	self:fire_up('setstatus', 'running')
+	local term0 = set_current_terminal(self.terminal)
+	local ok, ret = pcall(self.action, self)
+	set_current_terminal(term0)
+	self.duration = time() - self.start_time
+	self.status = 'finished'
+	self:fire_up('setstatus', 'finished')
+	if not ok and not self.killed then
+		log('ERROR', 'tasks', 'run', '%s%s', tostring(ret):trim(),
+			self.restart_after and _('\nrestarting in %ds, restarted %d times before',
+				self.restart_after, self.restart_count))
+		if self.restart_after then
+			wait(self.restart_after)
+			self.restart_count = self.restart_count + 1
+			goto again
 		end
-		runafter(self.free_after or 1/0, function()
-			while not self:free() do
-				wait(1)
-			end
-		end, 'task-zombie %s', self.name)
-		return self, ok, ret
 	end
-	function self:run()
-		return assert(self:try_run())
-	end
-
-	function self:start()
-		if self.start_time then
-			return self --already started
+	runafter(self.free_after or 1/0, function()
+		while not self:free() do
+			wait(1)
 		end
-		resume(thread(self.run, 'task %s', self.name), self)
-		return self
-	end
+	end, 'task-zombie %s', self.name)
+	return self, ok, ret
+end
+function task:run()
+	return assert(self:try_run())
+end
 
+function task:start()
+	if self.start_time then
+		return self --already started
+	end
+	resume(thread(self.run, 'task %s', self.name), self)
 	return self
+end
+
+function task:start_or_run()
+	if self.bg then
+		return self:start()
+	else
+		return self:run()
+	end
 end
 
 --events
@@ -416,6 +426,7 @@ function task:free()
 	tasks[self] = nil
 	tasks_by_id[self.id] = nil
 	self.freed = true
+	self:fire_up('free')
 	return true
 end
 
@@ -456,29 +467,31 @@ end
 
 --async process tasks with stdout/err capturing ------------------------------
 
-function task_exec(cmd, opt)
+exec_task = task:subclass{autostart = true}
+
+exec_task:override('init', function(inherited, self, cmd, opt)
 
 	opt = opt or empty
 
-	local capture_stdout = opt.capture_stdout ~= false
-	local capture_stderr = opt.capture_stderr ~= false
 	local allow_out_stdout = opt.out_stdout ~= false
 	local allow_out_stderr = opt.out_stderr ~= false
-
-	local env = opt.env and update(env(), opt.env)
-
-	local function out_filter(term, chan)
+	function self:out_filter(term, chan)
 		if not allow_out_stdout and chan == 'stdout' then return false end
 		if not allow_out_stderr and chan == 'stderr' then return false end
 		return true
 	end
 
-	local task = task(update({out_filter = out_filter}, opt))
+	inherited(self, opt)
 
-	task.cmd = cmd
-	task.poll_interval = 1
+	local capture_stdout = opt.capture_stdout ~= false
+	local capture_stderr = opt.capture_stderr ~= false
 
-	function task:action()
+	local env = opt.env and update(env(), opt.env)
+
+	self.cmd = cmd
+	self.poll_interval = 1
+
+	function self:action()
 
 		local p = exec{
 			cmd = cmd,
@@ -489,18 +502,13 @@ function task_exec(cmd, opt)
 			stdin = opt.stdin and true or false,
 		}
 
-		task.process = p
-
-		local errors = {}
-		local function add_error(method, err)
-			add(errors, method..': '..err)
-		end
+		self.process = p
 
 		if p.stdin then
 			resume(thread(function()
 				local ok, err = p.stdin:write(opt.stdin)
 				if not ok then
-					add_error('stdinwr', err)
+					notify_error('stdin:write(): %s', err)
 				end
 				assert(p.stdin:close()) --signal eof
 			end, 'exec-stdin %s', p))
@@ -512,7 +520,7 @@ function task_exec(cmd, opt)
 				while true do
 					local len, err = p.stdout:read(buf, sz)
 					if not len then
-						add_error('stdout.read', err)
+						notify_error('stdout:read(): %s', err)
 						break
 					elseif len == 0 then
 						break
@@ -530,7 +538,7 @@ function task_exec(cmd, opt)
 				while true do
 					local len, err = p.stderr:read(buf, sz)
 					if not len then
-						add_error('stderr.read', err)
+						notify_error('stderr:read(): %s', err)
 						break
 					elseif len == 0 then
 						break
@@ -545,8 +553,8 @@ function task_exec(cmd, opt)
 		local exit_code, err = p:wait(nil, self.poll_interval)
 		self.exit_code = exit_code
 		if not exit_code then
-			if not (err == 'killed' and task.killed) then --crashed/killed from outside
-				add_error('proc.wait', err)
+			if not (err == 'killed' and self.killed) then --crashed/killed from outside
+				notify_error('proc:wait(): %s', err)
 			end
 		end
 		while not (
@@ -561,8 +569,8 @@ function task_exec(cmd, opt)
 		if not self.bg and not self.allow_fail and exit_code ~= 0 then
 			local cmd_s = isstr(cmd) and cmd or cmdline_quote_args(nil, unpack(cmd))
 			local s = _('%s [%s]', cmd_s, exit_code)
-			if task.stdin then
-				s = s .. '\nSTDIN:\n' .. task.stdin
+			if self.stdin then
+				s = s .. '\nSTDIN:\n' .. self.stdin
 			end
 			if opt.env then
 				local dt = {}
@@ -571,32 +579,17 @@ function task_exec(cmd, opt)
 				end
 				s = s .. '\nENV:\n' .. cat(dt, '\n')
 			end
-			add_error('proc.exec', s)
-		end
-
-		if #errors > 0 then
-			raise('task', '%s', cat(errors, '\n'))
+			notify_error('proc:exec(): %s', s)
 		end
 
 		return exit_code
 	end
 
-	function task:do_kill()
-		if not self.process then return end
-		return self.process:kill()
-	end
+end)
 
-	if task.bg then
-		if task.autostart ~= false then
-			return task:start()
-		end
-	else
-		if task.autostart ~= false then
-			return task:run()
-		end
-	end
-
-	return task
+function exec_task:do_kill()
+	if not self.process then return end
+	return self.process:kill()
 end
 
 --scheduled tasks ------------------------------------------------------------
