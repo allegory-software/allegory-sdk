@@ -1030,7 +1030,7 @@ function wait_job()
 		cancel = cancel, CANCEL = CANCEL,
 		log = log, live = live, liveadd = liveadd,
 	})
-	self.log('', 'sock', 'wait-job', '%s', self)
+	--self.log('', 'sock', 'wait-job', '%s', self)
 	return self
 end
 end
@@ -1467,7 +1467,7 @@ function wait_job()
 		cancel = cancel, CANCEL = CANCEL,
 		log = log, live = live, liveadd = liveadd,
 	})
-	self.log('', 'sock', 'wait-job', '%s', self)
+	--self.log('', 'sock', 'wait-job', '%s', self)
 	return self
 end
 end
