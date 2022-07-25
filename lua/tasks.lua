@@ -127,7 +127,15 @@ function nterm:pipe(term, on, filter) --pipe out self to term.
 	end
 	self:on({'out', term}, function(self, src_term, chan, ...)
 		if not filter or filter(self, chan, ...) then
-			term:out(src_term, chan, ...)
+			local ok, err = pcall(term.out, term, src_term, chan, ...)
+			if not ok then --if the output terminal breaks, unpipe it.
+				self:pipe(term, false)
+				local task = src_term.task
+				log('ERROR', 'tasks', 'out', '[%d] %s: %s',
+					task and task.id or '?',
+					task and task.name or '?',
+					err)
+			end
 		end
 	end)
 	return self
@@ -325,6 +333,7 @@ function task:init(...)
 	self.status = 'not started'
 	self.child_tasks = {} --{task1,...}
 	self.terminal = recording_terminal()
+	self.terminal.task = self
 	self.restart_count = 0
 	tasks[self] = true
 	tasks_by_id[self.id] = self
@@ -345,15 +354,20 @@ function task:try_run()
 	self.status = 'running'
 	self:fire_up('setstatus', 'running')
 	local term0 = set_current_terminal(self.terminal)
+	log('', 'tasks', 'run', '[%d] %s', self.id, self.name)
 	local ok, ret = pcall(self.action, self)
 	set_current_terminal(term0)
 	self.duration = time() - self.start_time
 	self.status = 'finished'
 	self:fire_up('setstatus', 'finished')
+	local err = not ok and tostring(ret):trim() or nil
+	log('', 'tasks', 'finished', '[%d] %s: %s, took %s', self.id, self.name,
+		ok and 'OK' or err, duration()
 	if not ok and not self.killed then
-		log('ERROR', 'tasks', 'run', '%s%s', tostring(ret):trim(),
-			self.restart_after and _('\nrestarting in %ds, restarted %d times before',
-				self.restart_after, self.restart_count))
+		log('ERROR', 'tasks', 'run', '%s%s', err,
+			self.restart_after
+				and _('\nrestarting in %ds, restarted %d times before',
+					self.restart_after, self.restart_count))
 		if self.restart_after then
 			wait(self.restart_after)
 			self.restart_count = self.restart_count + 1
@@ -644,7 +658,6 @@ local function run_tasks()
 
 			if now >= min_time and not sched.running then
 				local rearm = run_every and true or false
-				log('note', 'tasks', 'run-task', '%s', name)
 				sched.last_run = now
 				save_task_data(name, {last_run = now})
 				task(sched):start()
@@ -657,7 +670,7 @@ end
 local sched_job
 function task_scheduler(cmd)
 	if cmd == 'start' and not sched_job then
-		sched_job = runevery(1, run_tasks)
+		sched_job = runevery(1, run_tasks, 'tasks-sched')
 	elseif cmd == 'stop' and sched_job then
 		sched_job:resume()
 		sched_job = nil
@@ -673,7 +686,7 @@ if not ... then
 	logging.debug = true
 	run(function()
 
-		local ta = task_exec('echo hello', {
+		local ta = exec_task('echo hello', {
 			free_after = 0,
 			bg = true,
 			autostart = false,
@@ -693,4 +706,5 @@ if not ... then
 
 		task_scheduler'start'
 	end)
+
 end
