@@ -821,11 +821,12 @@ end
 end
 
 --format relative time, eg. `3 hours ago` or `in 2 weeks`.
+local lua_time = time
 function timeago(utc, time, from_time)
 	if type(utc) ~= 'boolean' then --shift arg#1
-		utc, time, from_time = false, utc, time, from_time
+		utc, time, from_time = false, utc, time
 	end
-	local s = (from_time or time(utc)) - time
+	local s = (from_time or lua_time(utc)) - time
 	return format(s > 0 and S('time_ago', '%s ago') or S('time_in', 'in %s'),
 		duration(abs(s), 'approx'))
 end
