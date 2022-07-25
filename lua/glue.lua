@@ -1556,22 +1556,25 @@ end
 --something else for historical dates because these functions don't work
 --with negative timestamps. They're Y2038-safe though.
 function time(utc, y, m, d, h, M, s, isdst)
-	if utc == nil then --shortcut: just get the current time
-		return now()
+	if utc ~= nil and utc ~= true and utc ~= false then --shift arg#1
+		       utc, y, m, d, h, M, s, isdst =
+		false, utc, y, m, d, h, M, s
 	end
-	if type(utc) ~= 'boolean' then --shift arg#1
-		utc, y, m, d, h, M, s, isdst = nil, utc, y, m, d, h, M, s
+	local t
+	if y then
+		if type(y) == 'table' then
+			local t = y
+			if utc == nil then utc = t.utc end
+			y, m, d, h, M, s, isdst = t.year, t.month, t.day, t.hour, t.min, t.sec, t.isdst
+		end
+		s = s or 0
+		t = os_time{year = y, month = m or 1, day = d or 1, hour = h or 0,
+			min = M or 0, sec = s, isdst = isdst}
+		if not t then return nil end
+		t = t + s - floor(s)
+	else
+		t = now()
 	end
-	if type(y) == 'table' then
-		local t = y
-		if utc == nil then utc = t.utc end
-		y, m, d, h, M, s, isdst = t.year, t.month, t.day, t.hour, t.min, t.sec, t.isdst
-	end
-	s = s or 0
-	local t = os_time{year = y, month = m or 1, day = d or 1, hour = h or 0,
-		min = M or 0, sec = s, isdst = isdst}
-	if not t then return nil end
-	t = t + s - floor(s)
 	local d = not utc and 0 or utc_diff(t)
 	if not d then return nil end
 	return t + d
