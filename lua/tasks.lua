@@ -361,8 +361,11 @@ function task:try_run()
 	self.status = 'finished'
 	self:fire_up('setstatus', 'finished')
 	local err = not ok and tostring(ret):trim() or nil
-	log('', 'tasks', 'finished', '[%d] %s: %s, took %s', self.id, self.name,
-		ok and 'OK' or err, duration()
+	log('', 'tasks', 'finished', '[%d] %s: %s, took %s, %s', self.id, self.name,
+		ok and 'OK' or err, duration(self.duration),
+		self.killed and 'killed'
+			or self.exit_code and 'exit code: '..self.exit_code
+				or 'no exit code')
 	if not ok and not self.killed then
 		log('ERROR', 'tasks', 'run', '%s%s', err,
 			self.restart_after
