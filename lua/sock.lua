@@ -339,7 +339,6 @@ if not ... then require'sock_test'; return end
 
 require'glue'
 require'heap'
-require'logging'
 local coro = require'coro'
 coro.live  = live
 coro.pcall = pcall
