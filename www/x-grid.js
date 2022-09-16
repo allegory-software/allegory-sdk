@@ -2046,7 +2046,15 @@ component('x-grid', 'Input', function(e, is_val_widget) {
 
 		// insert key: insert row
 		if (key == 'Insert') {
-			if (e.insert_rows(1, {
+			let insert_arg = 1 // add one row
+
+			if (ctrl && e.focused_row) { // add a row filled with focused row's values
+				let row = e.serialize_row_vals(e.focused_row)
+				e.pk_fields.map((f) => delete row[f.name])
+				insert_arg = [row]
+			}
+
+			if (e.insert_rows(insert_arg, {
 				input: e,
 				at_focused_row: true,
 				focus_it: true,
