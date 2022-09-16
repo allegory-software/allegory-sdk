@@ -251,7 +251,7 @@ end
 
 function spa_action()
 	if _G.login then
-		login() --sets lang from user profile.
+		try_login() --sets lang from user profile.
 	end
 	local t = {}
 	t.lang = lang()
