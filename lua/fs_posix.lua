@@ -751,15 +751,15 @@ int lchmod(const char *path, mode_t mode);
 ]]
 
 local function wrap(chmod_func, stat_func)
-	return function(arg, perms)
+	return function(f, perms)
 		local cur_perms
 		local _, is_rel = parse_perms(perms)
 		if is_rel then
-			local cur_perms, err = stat_func(arg, 'perms')
+			local cur_perms, err = stat_func(f, 'perms')
 			if not cur_perms then return nil, err end
 		end
 		local mode = parse_perms(perms, cur_perms)
-		return chmod_func(f.fd, mode) == 0
+		return chmod_func(f, mode) == 0
 	end
 end
 local fchmod = wrap(function(f, mode) return C.fchmod(f.fd, mode) end, fstat)
