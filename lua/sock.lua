@@ -1730,6 +1730,7 @@ do
 	local free_indices = {} --{i1, ...}
 
 	local e = new'struct epoll_event'
+
 	function _sock_register(s)
 		local i = pop(free_indices) or #sockets + 1
 		s._i = i
@@ -1741,11 +1742,12 @@ do
 
 	local ENOENT = 2
 
-	--NOTE: since close() is always called after this, we let the kernel
-	--call epoll_ctl(EPOLL_CTL_DEL) for us.
 	function _sock_unregister(s)
 		local i = s._i
 		if not i then return end --closing before bind() was called.
+		e.data.u32 = i
+		e.events = EPOLLIN + EPOLLOUT + EPOLLET
+		assert(check(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, s.s, e) == 0))
 		sockets[i] = false
 		push(free_indices, i)
 	end
