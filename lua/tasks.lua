@@ -587,7 +587,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 			local cmd_s = isstr(cmd) and cmd or cmdline_quote_args(nil, unpack(cmd))
 			local s = _('%s [%s]', cmd_s, exit_code)
 			if self.stdin then
-				s = s .. '\nSTDIN:\n' .. self.stdin
+				--s = s .. '\nSTDIN:\n' .. self.stdin
 			end
 			if self.env then
 				local dt = {}
