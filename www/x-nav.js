@@ -3133,16 +3133,17 @@ function nav_widget(e) {
 
 	// row adding & removing --------------------------------------------------
 
-	e.insert_rows = function(row_vals, ev) {
+	e.insert_rows = function(arg1, ev) {
 		ev = ev || empty
 		let from_server = ev.from_server
 		if (!from_server && !e.can_actually_add_rows())
 			return 0
-		let row_num
-		if (isarray(row_vals)) {
-			row_num = row_vals.length
+		let row_vals, row_num
+		if (isarray(arg1)) { // arg#1 is row_vals
+			row_vals = arg1
+			row_num  = arg1.length
 		} else { // arg#1 is row_num
-			row_num = row_vals
+			row_num = arg1
 			row_vals = null
 		}
 		if (row_num <= 0)
