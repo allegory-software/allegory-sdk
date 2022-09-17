@@ -167,10 +167,12 @@ ERRORS
 	  e.traceback                           traceback at error site
 	iserror(v[, classes]) -> true|false     check an error object type
 	raise([level, ]classname,... | e)      (create and) raise an error
+	check(errorclass, event, v, ...)        assert with structured errors and logging
 	catch([classes], f, ...) -> true,... | false,e    pcall `f` and catch errors
 	pcall(f, ...) -> ok,...                 pcall that stores traceback in `e.traceback`
 	lua_pcall(f, ...) -> ok,...             Lua's pcall renamed (no tracebacks)
 	protect([classes, ]f, [oncaught]) -> f  turn raising f into nil,err-returning
+	check{_io|p|np}(self, val, format, format_args...) -> val
 MODULES
 	module([name, ][parent]) -> M  create a module
 	autoload(t, submodules) -> M   autoload table keys from submodules
@@ -2522,7 +2524,7 @@ string_buffer = require'string.buffer'.new
 
 --[=[ error handling for network protocols and file decoders -----------------
 
-check[_io|p|np](self, val, format, format_args...) -> val
+check{_io|p|np}(self, val, format, format_args...) -> val
 
 This is an error-handling discipline to use when writing TCP-based protocols
 as well as file decoders and encoders. Instead of using standard `assert()`
@@ -2558,8 +2560,8 @@ confusion about when to raise and when not to or forgetting to handle an error).
 Your object must have a try_close() method which will be called by check_io()
 and checkp() (but not by checknp()) on failure.
 
-Note that protect() only catches errors raised by check*(), other Lua errors
-pass through and the connection isn't closed either.
+Note that protect_io() only catches errors raised by check*(), other Lua
+errors pass through and the connection isn't closed either.
 
 TODO: Currently try_*() methods on sock and fs modules do not break on usage
 errors coming from the OS, so those errors come up as retriable I/O errors
