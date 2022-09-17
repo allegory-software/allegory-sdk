@@ -1007,16 +1007,17 @@ local function wait_until(job, expires)
 	job.thread = currentthread()
 	job.expires = expires
 	expires_heap:push(job)
-	return wait_io(false)
+	return wait_io(job)
 end
 local function wait(job, timeout)
 	return wait_until(job, clock() + timeout)
 end
 local function job_resume(job, ...)
-	if not expires_heap:remove(job) then
-		return false
-	end
-	resume(job.thread, ...)
+	local thread = job.thread
+	assert(waiting[thread] == job, 'thread not waiting (on this wait job)')
+	assert(expires_heap:remove(job))
+	waiting[thread] = nil
+	resume(thread, ...)
 	return true
 end
 local CANCEL = {}
@@ -1126,6 +1127,7 @@ do
 							if not ok then
 								local err = WSAGetLastError()
 								if err == ERROR_NOT_FOUND then --too late, already gone
+									--TODO: https://learn.microsoft.com/en-us/answers/questions/116109/
 									free_overlapped(o)
 									coro_transfer(job.thread, nil, 'timeout')
 								else
@@ -1157,7 +1159,7 @@ do
 			else
 				local err = WSAGetLastError()
 				if err == ERROR_OPERATION_ABORTED then --canceled
-					coro_transfer(job.thread, nil, 'timeout')
+					coro_transfer(job.thread, nil, job.socket.s and 'timeout' or 'closed')
 				else
 					if job.expires then
 						assert(expires_heap:remove(job))
@@ -1444,16 +1446,17 @@ local function wait_until(job, expires)
 	job.recv_thread = currentthread()
 	job.recv_expires = expires
 	recv_expires_heap:push(job)
-	return wait_io(false)
+	return wait_io(job)
 end
 local function wait(job, timeout)
 	return wait_until(job, clock() + timeout)
 end
 local function job_resume(job, ...)
-	if not recv_expires_heap:remove(job) then
-		return false
-	end
-	resume(job.recv_thread, ...)
+	local thread = job.recv_thread
+	assert(waiting[thread] == job, 'thread not waiting (on this wait job)')
+	assert(recv_expires_heap:remove(job))
+	waiting[thread] = nil
+	resume(thread, ...)
 	return true
 end
 local CANCEL = {}
@@ -2553,14 +2556,12 @@ local function wait_io_cont(thread, ...)
 	waiting[thread] = nil
 	return ...
 end
---[[local]] function wait_io(register)
+--[[local]] function wait_io(job)
 	local thread, is_main = currentthread()
 	assert(poll_thread, 'poll loop not started')
 	assert(not is_main, 'trying to perform I/O from the main thread')
 	wait_count = wait_count + 1
-	if register ~= false then
-		waiting[thread] = true
-	end
+	waiting[thread] = job or true
 	return wait_io_cont(thread, coro_transfer(poll_thread))
 end
 
@@ -2568,17 +2569,17 @@ end
 --silently removed from the epoll list, thus we have to wake up any waiting
 --threads manually when the socket is closed from another thread.
 --[[local]] function cancel_wait_io(self)
-	local t = self.recv_thread
-	if t then
-		waiting[t] = nil
+	local thread = self.recv_thread
+	if thread then
+		waiting[thread] = nil
 		self.recv_thread = nil
-		resume(t, nil, 'closed')
+		resume(thread, nil, 'closed')
 	end
-	local t = self.send_thread
-	if t then
-		waiting[t] = nil
+	local thread = self.send_thread
+	if thread then
+		waiting[thread] = nil
 		self.send_thread = nil
-		resume(t, nil, 'closed')
+		resume(thread, nil, 'closed')
 	end
 end
 
@@ -2666,7 +2667,7 @@ function cowrap(f, ...)
 end
 
 function transfer(thread, ...)
-	assert(not waiting[thread], 'attempt to resume a thread that is waiting on I/O')
+	assert(not waiting[thread], 'attempt to resume a waiting thread')
 	return coro_transfer(thread, ...)
 end
 
@@ -2681,7 +2682,7 @@ local function cont(real_poll_thread, ...)
 	return ...
 end
 function resume(thread, ...)
-	assert(not waiting[thread], 'attempt to resume a thread that is waiting on I/O')
+	assert(not waiting[thread], 'attempt to resume a waiting thread')
 	local real_poll_thread = poll_thread
 	--change poll_thread temporarily so that we get back here
 	--from the first call to suspend() or wait_io().
