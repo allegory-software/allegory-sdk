@@ -61,57 +61,87 @@ logging = {
 	timeout = 5,
 }
 
-function logging:tofile(logfile, max_size)
+function logging:tofile(logfile, max_size, queue_size)
 
 	require'fs'
+	require'queue'
 
 	local logfile0 = logfile:gsub('(%.[^%.]+)$', '0%1')
 	if logfile0 == logfile then logfile0 = logfile..'0' end
 
 	local f, size
 
-	local function try_open_logfile()
-		if f ~= nil then return true end
-		f = try_open{
-			path = logfile,
-			mode = 'a',
-			log     = function(...) logto     ('s', ...) end,
-			live    = function(...) liveto    ('s', ...) end,
-			liveadd = function(...) liveaddto ('s', ...) end,
-		}
-		if not f then return end
+	local function open_logfile()
+		if f then return end
+		f = open(logfile, 'a')
 		size = f:attr'size'
-		if not f then return end
-		return true
 	end
 
 	max_size = max_size or self.max_disk_size
 
-	local function try_rotate(len)
+	local function rotate_logfile(len)
 		if max_size and size + len > max_size / 2 then
-			f:close(); f = nil
-			if not try_mv(logfile, logfile0, false, nil, 's') then return end
-			if not try_open_logfile() then return end
+			f:close()
+			f = nil
+			mv(logfile, logfile0)
+			open_logfile()
 		end
+	end
+
+	local function save_message(s)
+		open_logfile()
+		rotate_logfile(#s + 1)
+		size = size + #s + 1
+		f:write(s)
 		return true
 	end
 
-	local logging_tofile
-	function self:logtofile(s)
-		if logging_tofile then return end --prevent recursion
-		logging_tofile = true
-		if not try_open_logfile() then f = false; return end
-		if not try_rotate(#s + 1) then f = false; return end
-		size = size + #s + 1
-		if not f:write(s) then self:tofile_stop(); return end
-		if self.flush then f:flush() end
-		logging_tofile = false
-	end
-
-	function self:tofile_stop()
+	local function try_close_file()
 		if not f then return end
 		f:try_close()
-		f = nil
+		f, size = nil
+	end
+
+	local try_save_message = protect_io(save_message, try_close_file)
+
+	local queue_size = queue_size or logging.queue_size
+	local queue = queue(queue_size or 1/0)
+
+	function self:logtofile(s)
+		if not queue:push(s) then
+			queue:pop()
+			queue:push(s)
+		end
+	end
+
+	resume(thread(function()
+		while self.logtofile do
+			local s = queue:peek()
+			if s then
+				if try_save_message(s) then
+					queue:pop()
+				else --wait for user to fix the fs issue.
+					save_wait_job = wait_job()
+					save_wait_job:wait(5)
+					save_wait_job = nil
+				end
+			else
+				if self.flush then
+					f:flush()
+				end
+				save_wait_job = wait_job()
+				save_wait_job:wait(.2)
+				save_wait_job = nil
+			end
+		end
+	end, 'logging-save'))
+
+	function self:tofile_stop()
+		self.logtofile = nil
+		try_close_file()
+		if save_wait_job then
+			save_wait_job:resume()
+		end
 	end
 
 	return self
@@ -130,7 +160,6 @@ function logging:toserver(host, port, queue_size, timeout)
 	require'queue'
 	require'mess'
 
-	queue_size = queue_size or logging.queue_size
 	timeout = timeout or logging.timeout
 
 	local chan
@@ -158,11 +187,8 @@ function logging:toserver(host, port, queue_size, timeout)
 				reconn_wait_job = nil
 			end
 
-			local tcp = tcp{
-				log     = function(...) logto     ('f', ...) end,
-				live    = function(...) liveto    ('f', ...) end,
-				liveadd = function(...) liveaddto ('f', ...) end,
-			}
+			local tcp = tcp()
+
 			chan = try_mess_connect(tcp, host, port, timeout)
 
 			if chan then
@@ -185,17 +211,6 @@ function logging:toserver(host, port, queue_size, timeout)
 					end
 				end, 'logging-rpc %s', chan.tcp))
 
-				--create sending loop.
-				resume(thread(function()
-					while not stop do
-						if send_thread_suspended then
-							resume(send_thread)
-						else
-							wait(.2)
-						end
-					end
-				end, 'logging-send %s', chan.tcp))
-
 				return true
 			end
 
@@ -203,11 +218,11 @@ function logging:toserver(host, port, queue_size, timeout)
 		return false
 	end
 
+	local queue_size = queue_size or logging.queue_size
 	local queue = queue(queue_size or 1/0)
-	local send_thread_suspended = true
+	local send_wait_job
 
-	local send_thread = thread(function()
-		send_thread_suspended = false
+	resume(thread(function()
 		while not stop do
 			local msg = queue:peek()
 			if msg then
@@ -217,13 +232,13 @@ function logging:toserver(host, port, queue_size, timeout)
 					end
 				end
 			else
-				send_thread_suspended = true
-				suspend()
-				send_thread_suspended = false
+				send_wait_job = wait_job()
+				send_wait_job:wait(.2)
+				send_wait_job = nil
 			end
 		end
 		self.logtoserver = nil
-	end, 'logging-send')
+	end, 'logging-send'))
 
 	function self:logtoserver(msg)
 		if not queue:push(msg) then
@@ -235,8 +250,8 @@ function logging:toserver(host, port, queue_size, timeout)
 	function self:toserver_stop()
 		stop = true
 		check_io()
-		if send_thread_suspended then
-			resume(send_thread)
+		if send_wait_job then
+			send_wait_job:resume()
 		elseif reconn_wait_job then
 			reconn_wait_job:resume()
 		end
@@ -373,7 +388,7 @@ local function fmtargs(self, fmt, ...)
 	return _(fmt, self.args(...))
 end
 
-local function logto(self, to, severity, module, event, fmt, ...)
+local function log(self, severity, module, event, fmt, ...)
 	if severity == '' and self.filter[module  ] then return end
 	if severity == '' and self.filter[event   ] then return end
 	local env = logging.env and logging.env:sub(1, 1):upper() or 'D'
@@ -392,17 +407,15 @@ local function logto(self, to, severity, module, event, fmt, ...)
 		end
 	end
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
-		local tofile   = to == 'f' or to == nil
-		local toserver = to == 's' or to == nil
 		local entry = (self.logtofile or not self.quiet)
 			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
 				env, date('%Y-%m-%d %H:%M:%S', time), severity,
 				module or '', (event or ''):sub(1, 8),
 				logarg((coroutine.running())), msg)
-		if tofile and self.logtofile then
+		if self.logtofile then
 			self:logtofile(entry)
 		end
-		if toserver and self.logtoserver then
+		if self.logtoserver then
 			self:logtoserver{
 				deploy = self.deploy, env = logging.env, time = time,
 				severity = severity, module = module, event = event,
@@ -414,9 +427,6 @@ local function logto(self, to, severity, module, event, fmt, ...)
 			io.stderr:flush()
 		end
 	end
-end
-local function log(self, ...)
-	logto(self, nil, ...)
 end
 
 --[[local]] function logvar_message(self, k, v)
@@ -433,7 +443,7 @@ local function logvar(self, k, v)
 	end
 end
 
-local function liveto(self, to, o, fmt, ...)
+local function live(self, o, fmt, ...)
 	local id, ids = debug_id(o)
 	local s = fmt and fmtargs(self, fmt, ...)
 	local was_live = ids.live[o] ~= nil
@@ -447,27 +457,18 @@ local function liveto(self, to, o, fmt, ...)
 		ids.live_count = ids.live_count - 1
 		event = '-'
 	end
-	self.logto(to, '', 'log', event, '%-4s %s live=%d', o, s or ids.live[o], ids.live_count)
+	self.log('', 'log', event, '%-4s %s live=%d', o, s or ids.live[o], ids.live_count)
 	ids.live[o] = s
-end
-local function live(self, ...)
-	liveto(self, nil, ...)
 end
 
-local function liveaddto(self, to, o, fmt, ...)
+local function liveadd(self, o, fmt, ...)
 	local id, ids = debug_id(o)
 	local s = assert(ids.live[o]) .. ' ' .. fmtargs(self, fmt, ...)
-	self.logto(to, '', 'log', '~', '%-4s %s', o, s)
+	self.log('', 'log', '~', '%-4s %s', o, s)
 	ids.live[o] = s
-end
-local function liveadd(self, ...)
-	liveaddto(self, nil, ...)
 end
 
 local function init(self)
-	self.logto     = function(...) return logto      (self, ...) end
-	self.liveto    = function(...) return liveto     (self, ...) end
-	self.liveaddto = function(...) return liveaddto  (self, ...) end
 	self.log       = function(...) return log        (self, ...) end
 	self.logvar    = function(...) return logvar     (self, ...) end
 	self.live      = function(...) return live       (self, ...) end
@@ -563,9 +564,6 @@ function logging.new()
 	return init(setmetatable({}, logging))
 end
 
-_G.logto        = logging.logto
-_G.liveto       = logging.liveto
-_G.liveaddto    = logging.liveaddto
 _G.log          = logging.log
 _G.live         = logging.live
 _G.liveadd      = logging.liveadd

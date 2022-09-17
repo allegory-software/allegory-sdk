@@ -368,7 +368,7 @@ function issocket(s)
 end
 
 --forward declarations
-local check, _poll, wait_io, cancel_wait_io, create_socket, wrap_socket
+local check, _poll, wait_io, cancel_wait_io, create_socket, wrap_socket, waiting
 
 --NOTE: close() returns `false` on error but it should be ignored.
 function socket:try_close()
@@ -390,9 +390,9 @@ function socket:try_close()
 		self:_after_close()
 	end
 	if not ok then return false, err end
-	self.log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
+	log('', 'sock', 'closed', '%-4s r:%d w:%d%s', self, self.r, self.w,
 		self.n and ' live:'..self.n or '')
-	self.live(self, nil)
+	live(self, nil)
 	return true
 end
 
@@ -977,7 +977,7 @@ do
 		assert(check(s ~= INVALID_SOCKET))
 
 		local s = wrap_socket(opt, class, s, st, af, pr)
-		s.live(s, socktype)
+		live(s, socktype)
 
 		local ok, err = _sock_register(s)
 		if not ok then
@@ -1028,9 +1028,8 @@ function wait_job()
 	local self = object(wait_job_class, {
 		wait = wait, wait_until = wait_until, resume = job_resume,
 		cancel = cancel, CANCEL = CANCEL,
-		log = log, live = live, liveadd = liveadd,
 	})
-	--self.log('', 'sock', 'wait-job', '%s', self)
+	--log('', 'sock', 'wait-job', '%s', self)
 	return self
 end
 end
@@ -1191,7 +1190,7 @@ do
 	end
 
 	function tcp:try_connect(host, port, addr_flags, ...)
-		self.log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
+		log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
 		if not self.bound_addr then
 			--ConnectEx requires binding first.
 			local ok, err = self:try_bind(...)
@@ -1206,9 +1205,9 @@ do
 		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return false, err end
-		self.log('', 'sock', 'connectd', '%-4s %s:%s',
+		log('', 'sock', 'connectd', '%-4s %s:%s',
 			self, self.remote_addr, self.remote_port)
-		self.live(self, 'connected %s', self.remote_addr)
+		live(self, 'connected %s', self.remote_addr)
 		return true
 	end
 
@@ -1220,9 +1219,9 @@ do
 		self.remote_port = ok and ai.addr:port() or nil
 		if not ext_ai then ai:free() end
 		if not ok then return check(ok) end
-		self.log('', 'sock', 'connectd', '%-4s %s:%s',
+		log('', 'sock', 'connectd', '%-4s %s:%s',
 			self, self.remote_addr, self.remote_port)
-		self.live(self, 'connected %s', self.remote_addr)
+		live(self, 'connected %s', self.remote_addr)
 		return true
 	end
 
@@ -1245,7 +1244,7 @@ do
 	local sa_len = sizeof(accept_buf) / 2
 	function tcp:try_accept(opt)
 		local s = create_socket(opt, tcp, 'tcp', self._af, self._pr)
-		self.live(s, 'wait-accept %s', self) --only shows in Windows.
+		live(s, 'wait-accept %s', self) --only shows in Windows.
 		local o, job = overlapped(self, return_true, self.recv_expires)
 		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
 		local ok, msg, err = check_pending(ok, job)
@@ -1268,9 +1267,9 @@ do
 		self.sockets[s] = true
 		self.next_i = (self.next_i or 0) + 1
 		s.i = self.next_i
-		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1411,7 +1410,7 @@ local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
 	local s = C.socket(af, bor(st, SOCK_NONBLOCK), pr)
 	assert(check(s ~= -1))
 	local s = wrap_socket(opt, class, s, st, af, pr)
-	s.live(s, socktype)
+	live(s, socktype)
 	return s
 end
 
@@ -1467,9 +1466,8 @@ function wait_job()
 	local self = object(wait_job_class, {
 		wait = wait, wait_until = wait_until, resume = job_resume,
 		cancel = cancel, CANCEL = CANCEL,
-		log = log, live = live, liveadd = liveadd,
 	})
-	--self.log('', 'sock', 'wait-job', '%s', self)
+	--log('', 'sock', 'wait-job', '%s', self)
 	return self
 end
 end
@@ -1515,7 +1513,7 @@ local _connect = make_async(true, false, function(self, ai)
 end, EINPROGRESS)
 
 function tcp:try_connect(host, port, addr_flags, ...)
-	self.log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
+	log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
 	local ai, ext_ai = self:addr(host, port, addr_flags)
 	if not ai then return false, ext_ai end
 	if not self.bound_addr then
@@ -1531,9 +1529,9 @@ function tcp:try_connect(host, port, addr_flags, ...)
 	self.remote_port = ok and ai.addr:port() or nil
 	if not ext_ai then ai:free() end
 	if not ok then return false, err end
-	self.log('', 'sock', 'connectd', '%-4s %s:%s',
+	log('', 'sock', 'connectd', '%-4s %s:%s',
 		self, self.remote_addr, self.remote_port)
-	self.live(self, 'connected %s', self.remote_addr)
+	live(self, 'connected %s', self.remote_addr)
 	return true
 end
 udp.try_connect = tcp.try_connect
@@ -1594,9 +1592,9 @@ do
 		self.sockets[s] = true
 		self.next_i = (self.next_i or 0) + 1
 		s.i = self.next_i
-		self.log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
+		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		self.live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
@@ -1916,7 +1914,7 @@ function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 	if not isnum(backlog) then
 		backlog, host, port, onaccept, addr_flags = 1/0, backlog, host, port, onaccept
 	end
-	self.log('', 'sock', 'listen?', '%-4s %s:%d', self, host, port)
+	log('', 'sock', 'listen?', '%-4s %s:%d', self, host, port)
 	if not self.bound_addr then
 		local ok, err = self:try_bind(host, port, addr_flags)
 		if not ok then return nil, err end
@@ -1924,8 +1922,8 @@ function tcp:try_listen(backlog, host, port, onaccept, addr_flags)
 	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
 	local ok = C.listen(self.s, backlog) == 0
 	if not ok then return check() end
-	self.log('note', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
-	self.live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
+	log('note', 'sock', 'listen', '%-4s %s:%d', self, self.bound_addr, self.bound_port)
+	live(self, 'listen %s:%d', self.bound_addr, self.bound_port)
 	self.n = 0  --live client connection count
 	self.sockets = {} --live client connections: {socket->true}
 
@@ -2411,7 +2409,7 @@ end
 function socket:debug(protocol)
 
 	local function ds(event, s)
-		self.log('', protocol or '', event, '%-4s %5s %s',
+		log('', protocol or '', event, '%-4s %5s %s',
 			self, s and #s or '', s or '')
 	end
 
@@ -2498,9 +2496,8 @@ end
 		check_io = check_io, checkp = checkp,
 		protect = protect,
 		_st = st, _af = af, _pr = pr, r = 0, w = 0,
-		log = log, live = live, liveadd = liveadd,
 	}, opt)
-	s.log('', 'sock', 'create', '%-4s', s)
+	log('', 'sock', 'create', '%-4s', s)
 	return s
 end
 function _G.tcp       (opt, ...) return create_socket(opt, tcp, 'tcp', ...) end
@@ -2549,7 +2546,7 @@ local weak_keys = {__mode = 'k'}
 local poll_thread
 
 local wait_count = 0
-local waiting = setmetatable({}, weak_keys) --{thread -> true}
+waiting = setmetatable({}, weak_keys) --{thread -> true}
 
 local function wait_io_cont(thread, ...)
 	wait_count = wait_count - 1

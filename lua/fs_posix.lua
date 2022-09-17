@@ -125,7 +125,6 @@ function file_wrap_fd(fd, opt, async, is_pipe_end, path, quiet)
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
 		quiet = repl(quiet, nil, is_pipe_end) or nil,
-		log = log, live = live, liveadd = liveadd,
 		path = path,
 		async = async,
 	}, opt)
@@ -159,7 +158,7 @@ function _open(path, opt, quiet, is_pipe_end)
 	if not f then
 		return nil, err
 	end
-	f.log(f.quiet and '' or 'note', 'fs', 'open',
+	log(f.quiet and '' or 'note', 'fs', 'open',
 		'%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
 
 	if opt.seek_end then
@@ -185,7 +184,7 @@ function file.try_close(f)
 	local ok = C.close(f.fd) == 0
 	f.fd = -1 --fd is gone no matter the error.
 	if not ok then return check(false) end
-	f.log(f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
+	log(f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil)
 	return true
 end
@@ -254,7 +253,7 @@ function _pipe(path, opt)
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
 		end
-		rf.log('', 'fs', 'pipe', 'r=%s%s w=%s%s',
+		log('', 'fs', 'pipe', 'r=%s%s w=%s%s',
 			rf, rf.async and '' or ',blocking',
 			wf, wf.async and '' or ',blocking')
 		return rf, wf

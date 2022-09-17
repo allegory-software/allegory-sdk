@@ -433,7 +433,6 @@ function file_wrap_handle(h, opt, async, is_pipe_end, path, quiet)
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
 		quiet = repl(quiet, nil, is_pipe_end) or nil,
-		log = log, live = live, liveadd = liveadd,
 	}, opt)
 	live(f, path or '')
 

@@ -987,14 +987,14 @@ local function try_rm_rf(path, quiet)
 	return try_rmdir_recursive(path, quiet)
 end
 
-function try_mv(old_path, new_path, dst_dirs_perms, quiet, to)
+function try_mv(old_path, new_path, dst_dirs_perms, quiet)
 	if dst_dirs_perms ~= false then
 		local ok, err = try_mkdirs(new_path, dst_dirs_perms, quiet)
 		if not ok then return false, err end
 	end
 	local ok, err = _mv(old_path, new_path)
 	if not ok then return false, err end
-	logto(to, quiet and '' or 'note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
+	log(quiet and '' or 'note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
 	return true
 end
 
