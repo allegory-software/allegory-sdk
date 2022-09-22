@@ -1067,9 +1067,9 @@ let date_parser = memoize(function(locale) {
 		if (p.type == 'month') mi = i++
 		if (p.type == 'year' ) yi = i++
 	}
-	let t1_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)\s*:\s*([\.\d]+)$/
-	let t2_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)$/
-	let d_re  = /^(\d+)[^\d]+(\d+)[^\d]+(\d+)$/
+	let t1_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)\s*:\s*([\.\d]+)$/;
+	let t2_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)$/;
+	let d_re  = /^(\d+)[^\d]+(\d+)[^\d]+(\d+)$/;
 	return function(s, validate) {
 		s = s.trim()
 		let tm = t1_re.exec(s) || t2_re.exec(s)
