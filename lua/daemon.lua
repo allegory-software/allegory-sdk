@@ -132,7 +132,13 @@ cmd_server('tail', 'tail -f the log file', function()
 	p:forget()
 end)
 
-end --Linux
+else --Linux
+
+cmd('run', 'Run server in foreground', function()
+	run_server()
+end)
+
+end
 
 --init -----------------------------------------------------------------------
 
