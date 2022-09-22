@@ -835,14 +835,9 @@ function _G.sqlpp(init)
 		--update tables.
 		if diff.tables and diff.tables.update then
 
-
 			for old_tbl_name, d in sortedpairs(diff.tables.update) do
 
 				--remove constraints, indexes and triggers.
-
-				if d.remove_pk then
-					P('alter  table %-16s drop primary key', N(old_tbl_name))
-				end
 
 				if d.uks and d.uks.remove then
 					for uk_name in sortedpairs(d.uks.remove) do
@@ -869,11 +864,16 @@ function _G.sqlpp(init)
 					end
 				end
 
-				if d.fields then
+				--doing table changes in a single statement allows both column
+				--name changes and column position changes without conflicts,
+				--and also changing the pk on autoinc fields without mysql whining.
+				local changes = {}
 
-					--doing table changes in a single statement allows both column
-					--name changes and column position changes without conflicts.
-					local changes = {}
+				if d.remove_pk then
+					add(changes, 'drop primary key')
+				end
+
+				if d.fields then
 
 					--remove columns.
 					if d.fields.remove then
@@ -912,12 +912,16 @@ function _G.sqlpp(init)
 						end
 					end
 
-					if #changes > 0 then
-						P('alter  table %-16s\n\t%s',
-							N(old_tbl_name), concat(changes, ',\n\t'))
-					end
-
 				end --d.fields
+
+				if d.add_pk then
+					add(changes, _('add %s', self:sqlpk(d.add_pk, old_tbl_name)))
+				end
+
+				if #changes > 0 then
+					P('alter  table %-16s\n\t%s',
+						N(old_tbl_name), concat(changes, ',\n\t'))
+				end
 
 				--rename table before adding constraints back.
 
@@ -928,11 +932,6 @@ function _G.sqlpp(init)
 				end
 
 				--add constraints, indexes and triggers.
-
-				if d.add_pk then
-					P('alter  table %-16s add %s', N(new_tbl_name),
-						self:sqlpk(d.add_pk, new_tbl_name))
-				end
 
 				if d.uks and d.uks.add then
 					for uk_name, uk in sortedpairs(d.uks.add) do
