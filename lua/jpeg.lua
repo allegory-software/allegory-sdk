@@ -568,12 +568,12 @@ function try_jpeg_save(opt)
 		end
 
 		function cb.term_destination(cinfo)
-			check(write(buf, sz - tonumber(cinfo.dest.free_in_buffer)))
+			assert(write(buf, sz - tonumber(cinfo.dest.free_in_buffer)))
 			finish()
 		end
 
 		function cb.empty_output_buffer(cinfo)
-			check(write(buf, sz))
+			assert(write(buf, sz))
 			cb.init_destination(cinfo)
 			return true
 		end
@@ -587,9 +587,9 @@ function try_jpeg_save(opt)
 		cinfo.image_width  = opt.bitmap.w
 		cinfo.image_height = opt.bitmap.h
 		cinfo.in_color_space =
-			check(color_spaces[opt.bitmap.format], 'invalid source format')
+			assert(color_spaces[opt.bitmap.format], 'invalid source format')
 		cinfo.input_components =
-			check(channel_count[opt.bitmap.format], 'invalid source format')
+			assert(channel_count[opt.bitmap.format], 'invalid source format')
 
 		--set the default compression options based on in_color_space
 		C.jpeg_set_defaults(cinfo)
@@ -597,7 +597,7 @@ function try_jpeg_save(opt)
 		--set compression options
 		if opt.format then
 			C.jpeg_set_colorspace(cinfo,
-				check(color_spaces[opt.format], 'invalid destination format'))
+				assert(color_spaces[opt.format], 'invalid destination format'))
 		end
 		if opt.quality then
 			C.jpeg_set_quality(cinfo, opt.quality, true)
@@ -607,7 +607,7 @@ function try_jpeg_save(opt)
 		end
 		if opt.dct_method then
 			cinfo.dct_method =
-				check(dct_methods[opt.dct_method], 'invalid dct_method')
+				assert(dct_methods[opt.dct_method], 'invalid dct_method')
 		end
 		if opt.optimize_coding then
 			cinfo.optimize_coding = opt.optimize_coding
