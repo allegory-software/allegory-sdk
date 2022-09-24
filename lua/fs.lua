@@ -64,7 +64,7 @@ FILE ATTRIBUTES
 	file_is(path, [type], [deref]) -> t|f         check if file exists or is of a certain type
 	exists                                      = file_is
 	checkexists(path, [type], [deref])            assert that file exists
-	mtime(path, [deref]) -> ts                    get file's modification time
+	[try_]mtime(path, [deref]) -> ts              get file's modification time
 	[try_]chmod(path, perms, [quiet]) -> path     change a file or dir's permissions
 FILESYSTEM OPS
 	cwd() -> path                                 get current working directory

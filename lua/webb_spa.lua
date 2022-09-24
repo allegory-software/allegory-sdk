@@ -259,8 +259,8 @@ function spa_action()
 
 	local html = record(outcatlist, '_all.html.cat')
 	t.body = html_filter_lang(html, lang())
-	t.body_classes = config'body_classes'
-	t.body_attrs = config'body_attrs'
+	t.body_classes = call(config'body_classes')
+	t.body_attrs = call(config'body_attrs')
 	t.head = config'head'
 	t.title = page_title(config'infer_page_title', t.body)
 	t.title_suffix = config('page_title_suffix', ' - '..host())
