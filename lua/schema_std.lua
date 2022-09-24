@@ -193,7 +193,7 @@ return function()
 	types.percent   = {type = 'percent', dec, digits =  8, decimals = 2} --         999 999 . 99
 	types.percent_int= {percent, decimals = 0}
 	types.count     = {uint, not_null, default(0)}
-	types.pos       = {uint}
+	types.pos       = {uint, en_text = 'Position in List'}
 
 	types.lang      = {chr, size = 2, maxlen = 2, ascii_ci}
 	types.currency  = {chr, size = 3, maxlen = 3, ascii_ci}
