@@ -82,7 +82,7 @@ end
 --(or current) language if any, or add ?lang= if the given language
 --is not the default language.
 function href(s, target_lang)
-	local t = url_parse(s)
+	local t = isstr(s) and url_parse(s) or s
 	local segs = t.segments
 	local action = not t.host and (segs and segs[1] == '' and segs[2] and action_name(segs[2])) or nil
 	if not action then
