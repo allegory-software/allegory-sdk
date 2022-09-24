@@ -1,54 +1,54 @@
 [submodule "c/luajit/src"]
 	path = c/luajit/src
-	url = git@github.com:allegory-software/allegory-sdk-luajit.git
+	url = ../allegory-sdk-luajit.git
 [submodule "c/zlib/src"]
 	path = c/zlib/src
-	url = git@github.com:allegory-software/allegory-sdk-zlib
+	url = ../allegory-sdk-zlib
 [submodule "c/xxhash/src"]
 	path = c/xxhash/src
-	url = git@github.com:allegory-software/allegory-sdk-xxhash.git
+	url = ../allegory-sdk-xxhash.git
 [submodule "c/blake3"]
 	path = c/blake3/src
-	url = git@github.com:allegory-software/allegory-sdk-blake3.git
+	url = ../allegory-sdk-blake3.git
 [submodule "c/cjson/src"]
 	path = c/cjson/src
-	url = git@github.com:allegory-software/allegory-sdk-lua-cjson.git
+	url = ../allegory-sdk-lua-cjson.git
 [submodule "c/ldecNumber/src"]
 	path = c/ldecNumber/src
-	url = git@github.com:allegory-software/allegory-sdk-ldecnumber.git
+	url = ../allegory-sdk-ldecnumber.git
 [submodule "c/libjpeg/src"]
 	path = c/libjpeg/src
-	url = git@github.com:allegory-software/allegory-sdk-libjpeg-turbo.git
+	url = ../allegory-sdk-libjpeg-turbo.git
 [submodule "c/libspng/src"]
 	path = c/libspng/src
-	url = git@github.com:allegory-software/allegory-sdk-libspng.git
+	url = ../allegory-sdk-libspng.git
 [submodule "c/lpeglabel/src"]
 	path = c/lpeglabel/src
-	url = git@github.com:allegory-software/allegory-sdk-lpeglabel.git
+	url = ../allegory-sdk-lpeglabel.git
 [submodule "c/minizip2/src"]
 	path = c/minizip2/src
-	url = git@github.com:allegory-software/allegory-sdk-minizip-ng.git
+	url = ../allegory-sdk-minizip-ng.git
 [submodule "c/bearssl/src"]
 	path = c/bearssl/src
-	url = git@github.com:allegory-software/allegory-sdk-bearssl.git
+	url = ../allegory-sdk-bearssl.git
 [submodule "c/libtls_bearssl/src"]
 	path = c/libtls_bearssl/src
-	url = git@github.com:allegory-software/allegory-sdk-libtls-bearssl.git
+	url = ../allegory-sdk-libtls-bearssl.git
 [submodule "c/lz4/src"]
 	path = c/lz4/src
-	url = git@github.com:allegory-software/allegory-sdk-lz4.git
+	url = ../allegory-sdk-lz4.git
 [submodule "c/pillow_simd/src"]
 	path = c/pillow_simd/src
-	url = git@github.com:allegory-software/allegory-sdk-pillow-simd.git
+	url = ../allegory-sdk-pillow-simd.git
 [submodule "c/expat/src"]
 	path = c/expat/src
-	url = git@github.com:allegory-software/allegory-sdk-expat.git
+	url = ../allegory-sdk-expat.git
 [submodule "c/zlib-ng/src"]
 	path = c/zlib-ng/src
-	url = git@github.com:allegory-software/allegory-sdk-zlib-ng.git
+	url = ../allegory-sdk-zlib-ng.git
 [submodule "c/blake3/src"]
 	path = c/blake3/src
-	url = git@github.com:allegory-software/allegory-sdk-blake3.git
+	url = ../allegory-sdk-blake3.git
 [submodule "c/bcrypt/src"]
 	path = c/bcrypt/src
-	url = git@github.com:allegory-software/allegory-sdk-bcrypt.git
+	url = ../allegory-sdk-bcrypt.git
