@@ -35,16 +35,16 @@ function resize_image(src_path, dst_path, max_w, max_h)
 			if src_ext == 'jpg' or src_ext == 'jpeg' then
 
 				local read = f:buffered_reader()
-				local img = assert(jpeg_open{read = read})
+				local img = jpeg_open{read = read}
 				finally(function() if img then img:free() end end)
 
 				local w, h = rect_fit(img.w, img.h, max_w, max_h)
 				local sn = ceil(clamp(max(w / img.w, h / img.h) * 8, 1, 8))
-				bmp = assert(img:load{
+				bmp = img:load{
 					accept = {rgba8 = true},
 					scale_num = sn,
 					scale_denom = 8,
-				})
+				}
 				--img:free()
 				--img = nil
 
@@ -78,11 +78,11 @@ function resize_image(src_path, dst_path, max_w, max_h)
 
 			--we can't use file_saver() here because we can't yield from write().
 			local write, collect = dynarray_pump()
-			assert(jpeg_save{
+			jpeg_save{
 				bitmap = bmp,
 				write = write,
 				quality = 90,
-			})
+			}
 			local buf, sz = collect()
 			save(dst_path, buf, sz)
 
