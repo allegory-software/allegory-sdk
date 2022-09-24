@@ -264,7 +264,7 @@ function spa_action()
 	t.head = config'head'
 	t.title = page_title(config'infer_page_title', t.body)
 	t.title_suffix = config('page_title_suffix', ' - '..host())
-	t.favicon_href = config'favicon_href'
+	t.favicon_href = call(config'favicon_href')
 	t.client_action = config('client_action', true)
 	t.all_js  = record(jslist , 'all.js' , config('js_mode' , 'separate'))
 	t.all_css = record(csslist, 'all.css', config('css_mode', 'separate'))
