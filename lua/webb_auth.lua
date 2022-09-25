@@ -373,7 +373,6 @@ local function save_session(sess)
 				value = '1|'..sess.id..'|'..sig,
 				attrs = {
 					Path = '/',
-					Domain = host(),
 					Expires = sess.expires,
 					Secure = secure_flag or nil,
 					HttpOnly = true,
