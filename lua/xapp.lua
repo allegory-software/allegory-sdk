@@ -118,46 +118,28 @@ local function xapp(...)
 		require'xlang'
 	end
 
-	return app
-end
-
---[==[
-
-TODO
-
---e2e testing ----------------------------------------------------------------
-
-function xapp_request(uri)
-	run(function()
-		resume(thread(function()
-			webb_http_server{
-				listen = {
-					{host = 'localhost', addr = '127.0.0.1', port = 12345},
-				},
-			}
-		end))
-		resume(thread(function()
-			getpage('http://localhost:12345'..uri)
-		end))
+	cmd('install [forealz]', 'Install or migrate the app', function(opt, doit)
+		create_db()
+		local dry = doit ~= 'forealz'
+		db():sync_schema(app.schema, {dry = dry})
+		if not dry then
+			insert_or_update_row('tenant', {
+				tenant = 1,
+				name = 'default',
+				host = config'host',
+			})
+			if config'dev_email' then
+				usr_create_or_update{
+					tenant = 1,
+					email = config'dev_email',
+					roles = 'dev admin',
+				}
+			end
+		end
+		say'Install done.'
 	end)
 
+	return app
 end
-
-if not ... then
-
-	load_config_string[[
-db_host = '10.0.0.5'
-db_port = 3307
-db_pass = 'root'
-db_name = 'mm'
-]]
-
-	local app = xapp()
-	app:run_server()
-
-	return
-end
-
-]==]
 
 return xapp

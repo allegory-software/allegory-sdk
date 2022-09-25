@@ -19,13 +19,14 @@ WIDGETS
 	pagenav
 	richtext
 	if
-	setglobal
+	ct
 
 GLOBALS
 
 	component(tag[, category], cons)
 	notify(text, ['search'|'info'|'error'], [timeout])
 	set_theme(theme|null)
+	setglobal(k, v)
 
 */
 

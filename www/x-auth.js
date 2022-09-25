@@ -172,6 +172,14 @@ component('x-usr-button', function(e) {
 		}
 	})
 
+	function signed_in_changed(signed_in) {
+		// e.text = signed_in ? S('account', 'Account') : S('sign_in', 'Sign in')
+	}
+
+	e.on('bind', function(on) {
+		window.on('signed_in_changed', signed_in_changed, on)
+	})
+
 })
 
 on('auth_sign_in_button.init', function(e) {
