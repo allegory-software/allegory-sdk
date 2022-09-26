@@ -454,7 +454,7 @@ component('x-button', 'Input', function(e) {
 			exec(e.href)
 			return
 		}
-		// action can be set directly or can be a global with a maching name.
+		// action can be set directly and/or can be a global with a matching name.
 		if (e.action)
 			e.action()
 		let action_name = e.action_name || (e.id && e.id+'_action')

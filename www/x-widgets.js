@@ -2553,6 +2553,7 @@ component('x-toaster', function(e) {
 			timeout: strict_or(timeout, e.timeout),
 			check: popup_check,
 			close_button: true,
+			local_z: 1000, // hack to show over modals which are at popup_level 10.
 		})
 		t.on('popup_bind', function(on) {
 			if (!on) {
@@ -2731,7 +2732,7 @@ component('x-dialog', function(e) {
 		e.cancel()
 	}
 
-	e.on('keyup', function(key) {
+	e.on('keydown', function(key) {
 		if (key == 'Enter') {
 			e.ok()
 			return false
@@ -2745,15 +2746,6 @@ component('x-dialog', function(e) {
 		e.fire('close', ok != false)
 	}
 
-	function press_buttons(sel) {
-		for (let btn of e.$(sel)) {
-			if (!(btn.effectively_hidden || btn.effectively_disabled)) {
-				btn.activate()
-				return true
-			}
-		}
-	}
-
 	e.cancel = function() {
 		if (!e.cancelable)
 			return false
@@ -2762,10 +2754,13 @@ component('x-dialog', function(e) {
 	}
 
 	e.ok = function() {
-		if (press_buttons('x-button[primary]'))
-			return true
-		e.close()
-		return true
+		for (let btn of e.$('x-button[primary]')) {
+			if (!(btn.effectively_hidden || btn.effectively_disabled)) {
+				btn.activate()
+				return true
+			}
+		}
+		return false
 	}
 
 })

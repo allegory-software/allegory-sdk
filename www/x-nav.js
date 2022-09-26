@@ -2483,7 +2483,7 @@ function nav_widget(e) {
 		e.fire('row_state_changed', row, rsc, ev)
 		if (row == e.focused_row)
 			e.fire('focused_row_state_changed', row, rsc, ev)
-		let changed = !!(count_keys(rsc, 1) && csc.size)
+		let changed = !!(count_keys(rsc, 1) || csc.size)
 		csc = null
 		rsc = null
 		row = null
