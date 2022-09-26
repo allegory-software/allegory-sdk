@@ -2483,11 +2483,13 @@ function nav_widget(e) {
 		e.fire('row_state_changed', row, rsc, ev)
 		if (row == e.focused_row)
 			e.fire('focused_row_state_changed', row, rsc, ev)
+		let changed = !!(count_keys(rsc, 1) && csc.size)
 		csc = null
 		rsc = null
 		row = null
 		ev = null
 		depth = null
+		return changed
 	}
 
 	e.set_cell_state = function(field, key, val, default_val) {
@@ -2771,7 +2773,7 @@ function nav_widget(e) {
 		if (val !== old_val)
 			update_indices('val_changed', row, field, val)
 
-		e.end_set_state()
+		return e.end_set_state()
 	}
 
 	// responding to val changes ----------------------------------------------
@@ -2951,7 +2953,7 @@ function nav_widget(e) {
 	}
 
 	e.revert_cell = function(row, field, ev) {
-		e.reset_cell_val(row, field, e.cell_val(row, field), ev)
+		return e.reset_cell_val(row, field, e.cell_val(row, field), ev)
 	}
 
 	e.revert_row = function(row) {
