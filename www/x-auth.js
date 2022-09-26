@@ -160,7 +160,9 @@ component('x-usr-button', function(e) {
 		if (tt && tt.target) {
 			tt.close()
 		} else {
-			let usr_form = unsafe_html(render('usr_form'))
+			let usr_form = unsafe_html(render('usr_form', {
+				multilang: config('multilang', true),
+			}))
 			tt = tooltip({
 				classes: 'x-usr-tooltip',
 				target: e, side: 'bottom', align: 'start',
