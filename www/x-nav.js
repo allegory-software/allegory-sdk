@@ -11,6 +11,13 @@ implements:
 		as the dropdown and it changes the dropdown's cell value by itself
 		without the need to coordinate with the dropdown.
 
+field types:
+	password number filesize bool enum tags color percent icon
+	button place url phone email
+	date time timeofday timeofday_in_seconds duration
+	col
+	secret_key public_key  private_key
+
 typing:
 	isnav: t
 
@@ -4885,7 +4892,6 @@ component('x-lookup-dropdown', function(e) {
 	// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
 	let date = {align: 'right'}
-	field_types.date = date
 
 	date.to_time = function(s, validate) {
 		if (s == null || s == '')
@@ -4942,6 +4948,7 @@ component('x-lookup-dropdown', function(e) {
 
 	let ts = {align: 'right'}
 	field_types.time = ts
+	field_types.date = date
 
 	ts.has_time = true // for x-calendar
 
@@ -5260,7 +5267,8 @@ component('x-lookup-dropdown', function(e) {
 	field_types.url = url
 
 	url.format = function(v) {
-		let a = tag('a', {href: v, target: '_blank'}, v)
+		let href = v.match('://') ? v : 'http://' + v
+		let a = tag('a', {href: href, target: '_blank'}, v)
 		return a
 	}
 
