@@ -3303,7 +3303,7 @@ function richtext_widget_editing(e) {
 
 component('x-if', 'Containers', function(e) {
 
-	let content = e.at[0] || e.firstChild
+	let content = [...e.childNodes]
 	e.clear()
 	e.hide()
 
@@ -3313,17 +3313,25 @@ component('x-if', 'Containers', function(e) {
 		return !!v
 	}
 
+	function content_effectively_hidden() {
+		for (let node of content)
+			if (!node.effectively_hidden)
+				return false
+		return true
+	}
+
 	function apply(v) {
 		let on = e.cond(v)
-		let was_hidden = content.effectively_hidden
+		let was_hidden = content_effectively_hidden()
 		if (on) {
-			if (content.parent != e)
-				e.add(content)
+			if (!e.len)
+				for (node of content)
+					e.add(node)
 		} else {
-			content.remove()
+			e.clear()
 		}
 		e.show(on)
-		if (content.effectively_hidden != was_hidden)
+		if (content_effectively_hidden() != was_hidden)
 			document.fire('layout_changed')
 	}
 
