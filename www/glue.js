@@ -96,6 +96,7 @@ HASH MAPS
 	assign_opt(dt, t1, ...)
 	attr(t, k[, cons])
 	memoize(f)
+	count_keys(t, [max_n]) -> n
 TYPED ARRAYS
 	[dyn_][f32|i8|u8|i16|u16|i32|u32]arr(arr|[...]|capacity, [nc]) -> [dyn]arr
 		.set(in_arr, [offset=0], [len], [in_offset=0])
@@ -631,6 +632,16 @@ function memoize(f) {
 			return y
 		}
 	}
+}
+
+function count_keys(t, max_n) {
+	let n = 0
+	for(let i in t) {
+		if (n === max_n)
+			break
+		n++
+	}
+	return n
 }
 
 // typed arrays --------------------------------------------------------------
