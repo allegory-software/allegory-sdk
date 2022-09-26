@@ -201,6 +201,12 @@ on('usr_usr_dropdown.init', function(e) {
 	})
 })
 
+component('x-usr-lang-dropdown', function(e) {
+
+	lookup_dropdown.construct(e)
+
+})
+
 // sign-in form --------------------------------------------------------------
 
 let dialog = memoize(function() {

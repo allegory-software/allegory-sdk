@@ -24,7 +24,7 @@ require'schema'
 
 function load_opensans()
 	css[[
-	body {
+	[opensans] {
 		font-family: opensans, Arial, sans-serif;
 	}
 	]]

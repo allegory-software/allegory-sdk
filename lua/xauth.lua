@@ -117,9 +117,21 @@ template.usr_form = function()
 		<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
 			<t s=log_out>Log out</t>
 		</x-button>
+	</x-form>
+</x-if>
+<x-if global=signed_in_anonymous>
+	<x-form id=usr_form nav_id=usr_nav>
+		{{#multilang}}
+		<x-lookup-dropdown col=lang     ></x-lookup-dropdown>
+		<x-lookup-dropdown col=country  ></x-lookup-dropdown>
+		{{/multilang}}
+		<x-enum-dropdown col=theme></x-enum-dropdown>
+	</x-form>
+	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
 </x-if>
 <x-if global=signed_out>
 	<x-form id=usr_form nav_id=usr_nav>
+	</x-form>
 	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
 </x-if>
 ]], {multilang = multilang()})
