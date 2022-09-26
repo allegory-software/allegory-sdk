@@ -365,6 +365,7 @@ function render_string(s, data) {
 
 function render(template_name, data) {
 	let s = template(template_name)
+	assert(s != null, 'template not found: {0}', template_name)
 	return render_string(s, data)
 }
 
