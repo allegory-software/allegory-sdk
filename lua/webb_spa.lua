@@ -64,6 +64,7 @@ function client_config(name, default)
 end
 
 client_config'app_name'
+client_config'multilang'
 client_config'default_lang'
 client_config'aliases'
 client_config'root_action'
