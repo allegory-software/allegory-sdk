@@ -1,3 +1,9 @@
+<style>
+.x-usr-tooltip .x-tooltip-content {
+	min-width: 300px;
+	margin-top: 1em;
+}
+</style>
 <x-if global=signed_in>
 	<x-form id=usr_form nav_id=usr_nav>
 		<x-input col=email ></x-input>

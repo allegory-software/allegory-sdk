@@ -213,7 +213,9 @@ component('x-usr-lang-dropdown', function(e) {
 
 let dialog = memoize(function() {
 
-	let e = unsafe_html(render('sign_in_dialog'))
+	let e = unsafe_html(render('sign_in_dialog', {
+		multilang: config('multilang', true),
+	}))
 
 	e.lang_dropdown = e.$1('.sign-in-lang-dropdown')
 	e.slides        = e.$1('.sign-in-slides')
@@ -272,15 +274,13 @@ let dialog = memoize(function() {
 })
 
 function sign_in() {
-	setglobal('usr', null)
-	set_signed_in()
 	let d = dialog()
 	d.email_edit.val = null
 	d.code_edit.val = null
 	d.slides.slide(0)
 	d.modal()
 	// adding this dynamically to prevent loading the background needlessly.
-	$1('.modal-dialog').class('sign-in-splash-img')
+	$1('.modal-dialog').class('sign-in-splash-img', !signed_in && !signed_in_anonymous)
 	return d
 }
 
