@@ -2738,31 +2738,34 @@ component('x-dialog', function(e) {
 		}
 	})
 
-	e.close = function() {
+	e.close = function(ok) {
 		e.modal(false)
 		if (e.x_button)
 			e.x_button.class('active', false)
-		e.fire('close')
+		e.fire('close', ok != false)
+	}
+
+	function press_buttons(sel) {
+		for (let btn of e.$(sel)) {
+			if (!(btn.effectively_hidden || btn.effectively_disabled)) {
+				btn.activate()
+				return true
+			}
+		}
 	}
 
 	e.cancel = function() {
 		if (!e.cancelable)
-			return
-		let cancel_btn = e.$1('x-button[cancel]')
-		if (cancel_btn)
-			cancel_btn.activate()
-		else
-			e.close()
+			return false
+		e.close(false)
+		return true
 	}
 
 	e.ok = function() {
-		for (let btn of e.$('x-button[primary]')) {
-			if (!(btn.effectively_hidden || btn.effectively_disabled)) {
-				btn.activate()
-				return
-			}
-		}
+		if (press_buttons('x-button[primary]'))
+			return true
 		e.close()
+		return true
 	}
 
 })
