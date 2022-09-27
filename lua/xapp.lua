@@ -13,6 +13,13 @@ USAGE
 	....
 	return myapp:run(...)
 
+PUBLISHES
+
+	myapp.schema
+
+USES
+
+	function myapp:install() end
 
 ]==]
 
@@ -134,6 +141,9 @@ local function xapp(...)
 					email = config'dev_email',
 					roles = 'dev admin',
 				}
+			end
+			if app.install then
+				app:install()
 			end
 		end
 		say'Install done.'
