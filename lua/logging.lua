@@ -126,7 +126,7 @@ function logging:tofile(logfile, max_size, queue_size)
 					save_wait_job = nil
 				end
 			else
-				if self.flush then
+				if f and self.autoflush then
 					f:flush()
 				end
 				save_wait_job = wait_job()
@@ -142,6 +142,9 @@ function logging:tofile(logfile, max_size, queue_size)
 			local s = queue:pop()
 			if not s then break end
 			if not try_save_message(s) then break end
+			if f and self.autoflush then
+				f:flush()
+			end
 		end
 	end
 
