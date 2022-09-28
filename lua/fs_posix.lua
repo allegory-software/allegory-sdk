@@ -226,8 +226,9 @@ function try_mkfifo(path, perms, quiet)
 end
 
 function mkfifo(path, perms)
+	perms = parse_perms(perms)
 	local ok, err = try_mkfifo(path, perms)
-	check('fs', 'mkfifo', ok, '%s %o', path, parse_perms(perms))
+	check('fs', 'mkfifo', ok, '%s %o', path, perms)
 	if err then return ok, err end
 	return ok
 end
@@ -409,7 +410,8 @@ int rename(const char *oldpath, const char *newpath);
 ]]
 
 function _mkdir(path, perms)
-	return check(C.mkdir(path, perms or default_dir_perms) == 0)
+	perms = parse_perms(perms) or default_dir_perms
+	return check(C.mkdir(path, perms) == 0)
 end
 
 function _rmdir(path)
