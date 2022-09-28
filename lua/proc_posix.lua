@@ -542,8 +542,10 @@ end
 
 --https://www.freedesktop.org/software/systemd/man/daemon.html#SysV%20Daemons
 function daemonize()
-	--1. close all fds above 0, 1, 2.
-	assert(not close_fd(3)) --just check the no files are open.
+	--1. close all fds above 0, 1, 2 (there shouldn't be any).
+	for i = 3, 10 do
+		assertf(not close_fd(i), 'fd open: %d', i)
+	end
 	--2. no need to reset all signal handlers as LuaJIT doesn't set them.
 	--3. no need to call sigprocmask() as LuaJIT doesn't change them.
 	--4. no need to sanitize the environment block.
@@ -565,6 +567,8 @@ function daemonize()
 	end
 	--child process
 	--9. redirect stdin/out/err to /dev/null.
+	io.stdout:close()
+	io.stderr:close()
 	close_fd(0)
 	close_fd(1)
 	close_fd(2)
