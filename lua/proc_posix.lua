@@ -29,8 +29,17 @@ char *getcwd(char *buf, size_t size);
 int dup2(int oldfd, int newfd);
 pid_t getpid(void);
 pid_t getppid(void);
-int prctl(int option, unsigned long arg2, unsigned long arg3,
-	unsigned long arg4, unsigned long arg5);
+int prctl(
+	int option,
+	unsigned long arg2,
+	unsigned long arg3,
+	unsigned long arg4,
+	unsigned long arg5
+);
+int setsid();
+unsigned int umask(unsigned int mask);
+int open(const char *pathname, int flags, mode_t mode);
+int close(int fd);
 ]]
 
 local F_GETFD = 1
@@ -529,4 +538,42 @@ function os_info()
 		uptime   = uptime,  --in seconds
 		cputimes = cputimes, --per-cpu times
 	}
+end
+
+--https://www.freedesktop.org/software/systemd/man/daemon.html#SysV%20Daemons
+function daemonize()
+	--1. close all fds above 0, 1, 2.
+	assert(not close_fd(3)) --just check the no files are open.
+	--2. no need to reset all signal handlers as LuaJIT doesn't set them.
+	--3. no need to call sigprocmask() as LuaJIT doesn't change them.
+	--4. no need to sanitize the environment block.
+	--5. call fork.
+	local pid = C.fork()
+	assert(pid >= 0)
+	if pid > 0 then --parent process
+		C._exit(0)
+	end
+	--child process
+	--6. etach from any terminal and create an independent session.
+	assert(C.setsid() >= 0)
+	--7. call fork() again so that the daemon can never re-acquire a terminal.
+	local pid = C.fork()
+	assert(pid >= 0)
+	if pid > 0 then --parent process
+		--8. call exit() in the first child, so that only the second child stays around.
+		C._exit(0)
+	end
+	--child process
+	--9. redirect stdin/out/err to /dev/null.
+	close_fd(0)
+	close_fd(1)
+	close_fd(2)
+	assert(C.open('/dev/null', 0, 0) == 0)
+	assert(C.open('/dev/null', 1, 0) == 1)
+	assert(C.open('/dev/null', 1, 0) == 2)
+	logging.quiet = true --no point logging to /dev/null.
+	--10. reset the umask to 0.
+	C.umask(0)
+	--11. no need to chdir to `/`.
+	return C.getpid()
 end

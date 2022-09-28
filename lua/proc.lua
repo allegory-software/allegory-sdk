@@ -63,6 +63,10 @@ os_info() -> t
 
 	Get OS info.
 
+daemonize() -> pid
+
+	Daemonize current process (Linux).
+
 --NOTES ----------------------------------------------------------------------
 
 #### Env vars
