@@ -1207,7 +1207,7 @@ do
 		if not ok then return false, err end
 		log('', 'sock', 'connectd', '%-4s %s:%s',
 			self, self.remote_addr, self.remote_port)
-		live(self, 'connected %s', self.remote_addr)
+		live(self, 'connected %s:%s', self.remote_addr, self.remote_port)
 		return true
 	end
 
@@ -2409,7 +2409,7 @@ end
 function socket:debug(protocol)
 
 	local function ds(event, s)
-		log('', protocol or '', event, '%-4s %5s %s',
+		log('', protocol or 'sock', event, '%-4s %5s %s',
 			self, s and #s or '', s or '')
 	end
 

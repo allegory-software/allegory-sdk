@@ -103,9 +103,9 @@ cmd('help', 'Show this screen', function()
 	say''
 	say' OPTIONS'
 	say''
-	say'   -v         verbose'
-	say'   -q         quiet'
-	say'   --debug    debug'
+	say'   -v             verbose'
+	say'   -q             quiet'
+	say'   -vv|--debug    debug'
 	say''
 end)
 
