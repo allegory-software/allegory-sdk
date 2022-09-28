@@ -136,8 +136,19 @@ function logging:tofile(logfile, max_size, queue_size)
 		end
 	end, 'logging-save'))
 
+	function self:tofile_flush()
+		if not self.logtofile then return end
+		while 1 do
+			local s = queue:pop()
+			if not s then break end
+			if not try_save_message(s) then break end
+		end
+	end
+
 	function self:tofile_stop()
+		if not self.logtofile then return end
 		self.logtofile = nil
+		self:tofile_flush()
 		try_close_file()
 		if save_wait_job then
 			save_wait_job:resume()
