@@ -29,15 +29,6 @@ if Linux then
 
 cmd_server = cmdsection'SERVER CONTROL'
 
-cdef[[
-int setsid(void);
-int fork(void);
-unsigned int umask(unsigned int mask);
-int kill(pid_t pid, int sig);
-int open(const char *pathname, int flags, mode_t mode);
-int close(int fd);
-]]
-
 local function findpid(pid, cmd)
 	local s = load(_('/proc/%s/cmdline', pid), false, true)
 	return s and s:find(cmd, 1, true) and true or false
@@ -73,30 +64,17 @@ cmd_server('start', 'Start the server', function()
 		say('Already running. PID: %d', pid)
 		return 1
 	elseif pid then
-		say'Stale pid file found.'
-	end
-	local pid = C.fork()
-	assert(pid >= 0)
-	if pid > 0 then --parent process
-		save(pidfile, tostring(pid))
-		say('Started. PID: %d', pid)
-		os.exit(0)
-	else --child process
-		C.umask(0)
-		--prevent killing the child when parent is killed.
-		assert(C.setsid() >= 0)
-		--redirect stdin/out/err to /dev/null.
-		assert(C.close(0) == 0)
-		assert(C.close(1) == 0)
-		assert(C.close(2) == 0)
-		assert(C.open('/dev/null', 0, 0) == 0)
-		assert(C.open('/dev/null', 0, 1) == 1)
-		assert(C.open('/dev/null', 0, 1) == 2)
-		logging.quiet = true --no point logging to /dev/null.
-		local ok = pcall(run_server)
 		rm(pidfile)
-		os.exit(ok and 0 or 1)
+		say'Stale pid file found and removed.'
 	end
+	--step 1..11.
+	local pid = daemonize()
+	--12. save pid to pidfile.
+	save(pidfile, tostring(pid))
+	local ok = pcall(run_server)
+	logging:tofile_stop()
+	rm(pidfile)
+	exit(ok and 0 or 1)
 end)
 
 cmd_server('stop', 'Stop the server', function()
