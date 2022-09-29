@@ -58,18 +58,12 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	local self = setmetatable({cmd = cmd}, proc)
 
 	local function close_all()
-		if self.stdin then
-			assert(inp_rf:close())
-			assert(inp_wf:close())
-		end
-		if self.stdout then
-			assert(out_rf:close())
-			assert(out_wf:close())
-		end
-		if self.stderr then
-			assert(err_rf:close())
-			assert(err_wf:close())
-		end
+		if inp_rf then inp_rf:close() end
+		if inp_wf then inp_wf:close() end
+		if out_rf then out_rf:close() end
+		if out_wf then out_wf:close() end
+		if err_rf then err_rf:close() end
+		if err_wf then err_wf:close() end
 	end
 
 	local si
@@ -81,7 +75,7 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 		assert(inherit_handles)
 
 		if stdin == true then
-			inp_rf, inp_wf = pipe{
+			inp_rf, inp_wf = try_pipe{
 				async_read = false,
 				read_inheritable = true,
 			}
@@ -97,7 +91,7 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 		end
 
 		if stdout == true then
-			out_rf, out_wf = pipe{
+			out_rf, out_wf = try_pipe{
 				async_write = false,
 				write_inheritable = true,
 			}
@@ -113,7 +107,7 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 		end
 
 		if stderr == true then
-			err_rf, err_wf = pipe{
+			err_rf, err_wf = try_pipe{
 				async_write = false,
 				write_inheritable = true,
 			}
