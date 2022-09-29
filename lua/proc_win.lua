@@ -38,6 +38,8 @@ local error_classes = {
 
 function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
+	inherit_handles = repl(inherit_handles, nil, true)
+
 	if istab(cmd) then
 		local t = {}
 		t[1] = cmdline_quote_path_win(cmd[1])

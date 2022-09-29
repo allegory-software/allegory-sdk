@@ -103,6 +103,9 @@ end
 
 function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
+	inherit_handles = repl(inherit_handles, nil, true)
+	assert(inherit_handles) --Linux only has leaky handles.
+
 	local cmd, args
 	if istab(t) then
 		cmd = t[1]
@@ -228,7 +231,10 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
  	end
 
 	if stdin == true then
-		inp_rf, inp_wf = pipe{async_read = false}
+		inp_rf, inp_wf = pipe{
+			async_read = false,
+			read_inheritable = true,
+		}
 		if not inp_rf then
 			return check(nil, inp_wf)
 		end
@@ -238,7 +244,10 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	end
 
 	if stdout == true then
-		out_rf, out_wf = pipe{async_write = false}
+		out_rf, out_wf = pipe{
+			async_write = false,
+			write_inheritable = true,
+		}
 		if not out_rf then
 			return check(nil, out_wf)
 		end
@@ -248,7 +257,10 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	end
 
 	if stderr == true then
-		err_rf, err_wf = pipe{async_write = false}
+		err_rf, err_wf = pipe{
+			async_write = false,
+			write_inheritable = true,
+		}
 		if not err_rf then
 			return check(nil, err_wf)
 		end
