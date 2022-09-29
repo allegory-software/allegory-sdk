@@ -1403,11 +1403,12 @@ ssize_t write(int fd, const void *buf, size_t count);
 
 --[[local]] check = check_errno
 
-local SOCK_NONBLOCK = Linux and tonumber(4000, 8)
+local SOCK_NONBLOCK  = OSX and 0x000004 or 0x000800 --async I/O
+local SOCK_CLOEXEC   = OSX and     2^24 or 0x080000 --close-on-exec
 
 --[[local]] function create_socket(opt, class, socktype, family, protocol)
 	local st, af, pr = socketargs(socktype, family or 'inet', protocol)
-	local s = C.socket(af, bor(st, SOCK_NONBLOCK), pr)
+	local s = C.socket(af, bor(st, SOCK_NONBLOCK, SOCK_CLOEXEC), pr)
 	assert(check(s ~= -1))
 	local s = wrap_socket(opt, class, s, st, af, pr)
 	live(s, socktype)
@@ -1553,7 +1554,7 @@ do
 
 	local tcp_accept = make_async(false, false, function(self)
 		nbuf[0] = accept_buf_size
-		local r = C.accept4(self.s, accept_buf, nbuf, SOCK_NONBLOCK)
+		local r = C.accept4(self.s, accept_buf, nbuf, bor(SOCK_NONBLOCK, SOCK_CLOEXEC))
 		return r
 	end, EWOULDBLOCK)
 
