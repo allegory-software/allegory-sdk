@@ -18,6 +18,8 @@
 ]==]
 
 require'glue'
+require'proc'
+require'fs'
 require'cmdline'
 
 --daemonize (Linux only) -----------------------------------------------------
