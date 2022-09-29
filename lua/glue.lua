@@ -2190,7 +2190,7 @@ function setbit(yes, mask, over)
 end
 
 --set one or more bits of a value without affecting other bits.
-local function setbits(bits, mask, over)
+function setbits(bits, mask, over)
 	return over and bor(bits, band(over, bnot(mask))) or bits
 end
 
