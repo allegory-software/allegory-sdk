@@ -1411,7 +1411,7 @@ local SOCK_CLOEXEC   = OSX and     2^24 or 0x080000 --close-on-exec
 	local s = C.socket(af, bor(st, SOCK_NONBLOCK, SOCK_CLOEXEC), pr)
 	assert(check(s ~= -1))
 	local s = wrap_socket(opt, class, s, st, af, pr)
-	live(s, socktype)
+	live(s, '%s fd=%d', socktype, s.s)
 	return s
 end
 
@@ -1595,7 +1595,7 @@ do
 		s.i = self.next_i
 		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
 			s, self, s.i, la, lp, ra, rp, self.n)
-		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
+		live(s, 'accepted %s.%d %s:%s <- %s:%s fd=%d', self, s.i, la, lp, ra, rp, s.s)
 		s.remote_addr = ra
 		s.remote_port = rp
 		s. local_addr = la
