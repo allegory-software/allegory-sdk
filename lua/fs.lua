@@ -215,8 +215,12 @@ Open/create a file for reading and/or writing. The second arg can be a string:
  flags     | Windows      | CreateFile() / dwFlagsAndAttributes  | ''
  flags     | Linux, OSX   | open() / flags                       | 'rdonly'
  perms     | Linux, OSX   | octal or symbolic perms              | '0666' / 'rwx'
+ inheritable | all        | sub-processes inherit the fd/handle  | false
 
 The `perms` arg is passed to unixperms_parse().
+
+The `inheritable` flag is false by default on both files and pipes
+to prevent leaking them to sub-processes.
 
 Pipes ------------------------------------------------------------------------
 
@@ -224,6 +228,10 @@ Pipes ------------------------------------------------------------------------
 
 	Create an anonymous (unnamed) pipe. Return two files corresponding to the
 	read and write ends of the pipe.
+
+	Options:
+		* `inheritable`, `read_inheritable`, `write_inheritable`: make one
+		or both pipes inheritable by sub-processes.
 
 	NOTE: If you're using async anonymous pipes in Windows _and_ you're
 	also creating multiple Lua states _per OS thread_, make sure to set
@@ -582,9 +590,9 @@ pagesize() -> bytes
 
 Async I/O --------------------------------------------------------------------
 
-Named pipes can be opened with `async = true` option which opens them
-in async mode, which uses the sock scheduler to multiplex the I/O
-which means all I/O then must be performed inside sock threads.
+Pipes are opened in async mode by default, which uses the sock scheduler
+to multiplex the I/O which means that all I/O must be performed inside
+sock threads.
 
 Programming Notes ------------------------------------------------------------
 
@@ -1555,7 +1563,7 @@ function vfile:try_attr(attr)
 end
 
 function vfile.try_flush(f)
-	if f._closed then
+	if not f.b then
 		return nil, 'access_denied'
 	end
 	return true
@@ -1566,7 +1574,7 @@ function vfile:flush()
 end
 
 function vfile.try_read(f, buf, sz)
-	if f._closed then
+	if not f.b then
 		return nil, 'access_denied'
 	end
 	sz = min(max(0, sz), max(0, #f.b - f.offset))
@@ -1580,7 +1588,7 @@ vfile.try_readn   = file.try_readn
 vfile.try_readall = file.try_readall
 
 function vfile.try_write(f, buf, sz)
-	if f._closed then
+	if not f.b then
 		return nil, 'access_denied'
 	end
 	if f.mode ~= 'w' then
