@@ -74,6 +74,10 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 	if stdin or stdout or stderr then
 
+		--NOTE: there's no way to inherit only the std handles: all handles
+		--declared inheritable in the parent process will be inherited!
+		assert(inherit_handles)
+
 		if stdin == true then
 			inp_rf, inp_wf = pipe{
 				async_read = false,
@@ -128,9 +132,6 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 		si.hStdError  = err_wf and err_wf.handle or winapi.GetStdHandle(winapi.STD_ERROR_HANDLE)
 		si.dwFlags = winapi.STARTF_USESTDHANDLES
 
-		--NOTE: there's no way to inherit only the std handles: all handles
-		--declared inheritable in the parent process will be inherited!
-		inherit_handles = true
 	end
 
 	if autokill and not autokill_job then
