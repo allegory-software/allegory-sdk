@@ -1713,13 +1713,15 @@ local EPOLL_CTL_ADD = 1
 local EPOLL_CTL_DEL = 2
 local EPOLL_CTL_MOD = 3
 
+local EPOLL_CLOEXEC = 0x80000
+
 do
 	local epoll_fd
 	function _G.epoll_fd(shared_epoll_fd, flags)
 		if shared_epoll_fd then
 			epoll_fd = shared_epoll_fd
 		elseif not epoll_fd then
-			flags = flags or 0 --TODO: flags
+			flags = flags or EPOLL_CLOEXEC
 			epoll_fd = C.epoll_create1(flags)
 			assert(check(epoll_fd >= 0))
 		end
