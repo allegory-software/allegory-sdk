@@ -328,11 +328,9 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 
 		self.pid = pid
 
-		if logging then
-			local s = cmdline_quote_args(nil, cmd, unpack(args))
-			log('', 'proc', 'exec', '%s', s)
-			live(self, '%s', s)
-		end
+		local s = cmdline_quote_args(nil, cmd, unpack(args))
+		log('', 'proc', 'exec', '%s', s)
+		live(self, '%s', s)
 
 		return self
 	end
@@ -562,7 +560,7 @@ function daemonize()
 	local pid = C.fork()
 	assert(pid >= 0)
 	if pid > 0 then --parent process
-		--8. call exit() in the first child, so that only the second child stays around.
+		--8. exit the first child, so that only the second child stays around.
 		C._exit(0)
 	end
 	--child process
