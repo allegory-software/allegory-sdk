@@ -1,3 +1,4 @@
+--go@ plink d10 -t -batch /root/sdk/bin/linux/luajit /root/sdk/tests/fs_test.lua
 
 --Portable filesystem API for LuaJIT | Linux+OSX backend
 --Written by Cosmin Apreutesei. Public Domain.
@@ -31,10 +32,10 @@ typedef size_t time_t;
 typedef int64_t off64_t;
 ]]
 
+cdef'int fcntl(int fd, int cmd, ...);' --fallocate, set_inheritable
+
 if Linux then
 	cdef'long syscall(int number, ...);' --stat, fstat, lstat
-elseif OSX then
-	cdef'int fcntl(int fd, int cmd, ...);' --fallocate
 end
 
 local cbuf = buffer'char[?]'
@@ -69,13 +70,11 @@ local o_bits = {
 	excl      = OSX and 0x000800 or 0x000080, --create or fail (needs 'creat')
 	nofollow  = OSX and 0x000100 or 0x020000, --fail if file is a symlink
 	directory = OSX and 0x100000 or 0x010000, --open if directory or fail
-	nonblock  = OSX and 0x000004 or 0x000800, --non-blocking (not for files)
 	async     = OSX and 0x000040 or 0x002000, --enable signal-driven I/O
 	sync      = OSX and 0x000080 or 0x101000, --enable _file_ sync
 	fsync     = OSX and 0x000080 or 0x101000, --'sync'
 	dsync     = OSX and 0x400000 or 0x001000, --enable _data_ sync
 	noctty    = OSX and 0x020000 or 0x000100, --prevent becoming ctty
-	cloexec   = OSX and     2^24 or 0x080000, --set close-on-exec
 	--Linux only
 	direct    = Linux and 0x004000, --don't cache writes
 	noatime   = Linux and 0x040000, --don't update atime
@@ -98,15 +97,27 @@ _open_mode_opt = {
 	['a+'] = {flags = 'creat rdwr', seek_end = true},
 }
 
-cdef'int fcntl(int fd, int cmd, ...);'
-
 local F_GETFL     = 3
 local F_SETFL     = 4
-local O_NONBLOCK  = 0x800
+local O_NONBLOCK  = OSX and 0x000004 or 0x000800 --async I/O
+local O_CLOEXEC   = OSX and     2^24 or 0x080000 --close-on-exec
+
+local F_GETFD = 1
+local F_SETFD = 2
+local FD_CLOEXEC = 1
+
+local function fcntl_set_flags_func(GET, SET)
+	return function(f, mask, bits)
+		local cur_bits = C.fcntl(f.fd, GET)
+		local bits = setbits(bits, mask, cur_bits)
+		assert(check(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
+	end
+end
+local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
+local fcntl_set_fd_flags = fcntl_set_flags_func(F_GETFD, F_SETFD)
 
 local function make_async(f)
-	local fl = C.fcntl(f.fd, F_GETFL)
-	assert(check(C.fcntl(f.fd, F_SETFL, cast('int', bor(fl, O_NONBLOCK))) == 0))
+	fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
 	local ok, err = _sock_register(f)
 	if not ok then return nil, err end
 	return true
@@ -145,6 +156,9 @@ function _open(path, opt, quiet, is_pipe_end)
 	local async = opt.async --files are sync by defualt
 	local flags = bitflags(opt.flags or 'rdonly', o_bits)
 	flags = bor(flags, async and O_NONBLOCK or 0)
+	if not opt.inheritable then
+		flags = bor(flags, O_CLOEXEC)
+	end
 	local r = band(flags, o_bits.rdonly) == o_bits.rdonly
 	local w = band(flags, o_bits.wronly) == o_bits.wronly
 	quiet = repl(quiet, nil, not w or nil) --r/o opens are quiet
@@ -206,13 +220,13 @@ function file_wrap_file(file, opt)
 end
 
 function file.set_inheritable(file, inheritable)
-	--nothing to do.
+	fcntl_set_fd_flags(file, FD_CLOEXEC, inheritable and 0 or FD_CLOEXEC)
 end
 
 --pipes ----------------------------------------------------------------------
 
 cdef[[
-int pipe(int[2]);
+int pipe2(int[2], int flags);
 int mkfifo(const char *pathname, mode_t mode);
 ]]
 
@@ -243,7 +257,8 @@ function _pipe(path, opt)
 		}, opt), true, true)
 	else --unnamed pipe
 		local fds = new'int[2]'
-		local ok = C.pipe(fds) == 0
+		local flags = not opt.inheritable and O_CLOEXEC or 0
+		local ok = C.pipe2(fds, flags) == 0
 		if not ok then return check() end
 		local r_async = repl(opt.async_read , nil, async)
 		local w_async = repl(opt.async_write, nil, async)
@@ -253,6 +268,10 @@ function _pipe(path, opt)
 			if rf then assert(rf:close()) end
 			if wf then assert(wf:close()) end
 			return nil, err1 or err2
+		end
+		if not opt.inheritable then
+			if opt. read_inheritable then rf:set_inheritable(true) end
+			if opt.write_inheritable then wf:set_inheritable(true) end
 		end
 		log('', 'fs', 'pipe', 'r=%s%s w=%s%s',
 			rf, rf.async and '' or ',blocking',
