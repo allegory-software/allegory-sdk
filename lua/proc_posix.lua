@@ -198,16 +198,16 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 		local ret, err = check_errno(ret, err)
 
 		if self.stdin then
-			assert(inp_rf:close())
-			assert(inp_wf:close())
+			inp_rf:close()
+			inp_wf:close()
 		end
 		if self.stdout then
-			assert(out_rf:close())
-			assert(out_wf:close())
+			out_rf:close()
+			out_wf:close()
 		end
 		if self.stderr then
-			assert(err_rf:close())
-			assert(err_wf:close())
+			err_rf:close()
+			err_wf:close()
 		end
 
 		if errno_r_fd then assert(check_errno(close_fd(errno_r_fd))) end
@@ -334,9 +334,9 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 		--Let the child process have the only handles to their pipe ends,
 		--otherwise when the child process exits, the pipes will stay open on
 		--account of us (the parent process) holding a handle to them.
-		if inp_rf then assert(inp_rf:close()) end
-		if out_wf then assert(out_wf:close()) end
-		if err_wf then assert(err_wf:close()) end
+		if inp_rf then inp_rf:close() end
+		if out_wf then out_wf:close() end
+		if err_wf then err_wf:close() end
 
 		self.pid = pid
 
