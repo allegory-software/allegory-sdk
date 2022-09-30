@@ -80,8 +80,9 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 				read_inheritable = true,
 			}
 			if not inp_rf then
+				local err = inp_wf; inp_wf = nil
 				close_all()
-				return nil, inp_wf
+				return nil, err
 			end
 			self.stdin = inp_wf
 		elseif stdin then
@@ -96,8 +97,9 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 				write_inheritable = true,
 			}
 			if not out_rf then
+				local err = out_wf; out_wf = nil
 				close_all()
-				return nil, out_wf
+				return nil, err
 			end
 			self.stdout = out_rf
 		elseif stdout then
@@ -112,8 +114,9 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 				write_inheritable = true,
 			}
 			if not err_rf then
+				local err = err_wf; err_wf = nil
 				close_all()
-				return nil, err_wf
+				return nil, err
 			end
 			self.stderr = err_rf
 		elseif stderr then
@@ -161,9 +164,9 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	--Let the child process have the only handles to their pipe ends,
 	--otherwise when the child process exits, the pipes will stay open on
 	--account of us (the parent process) holding a handle to them.
-	if inp_rf then assert(inp_rf:close()) end
-	if out_wf then assert(out_wf:close()) end
-	if err_wf then assert(err_wf:close()) end
+	if inp_rf then inp_rf:close() end
+	if out_wf then out_wf:close() end
+	if err_wf then err_wf:close() end
 
 	self.handle             = pi.hProcess
 	self.main_thread_handle = pi.hThread
