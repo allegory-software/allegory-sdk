@@ -92,7 +92,7 @@ COMMON PATHS
 	varpath(...) -> path                          get vardir-relative path
 LOW LEVEL
 	file_wrap_handle(HANDLE, [opt]) -> f          wrap opened HANDLE (Windows)
-	file_wrap_fd(fd, [opt]) -> f                  wrap opened file descriptor
+	file_wrap_fd(fd, [opt], ...) -> f             wrap opened file descriptor
 	file_wrap_file(FILE*, [opt]) -> f             wrap opened FILE* object
 	fileno(FILE*) -> fd                           get stream's file descriptor
 MEMORY MAPPING

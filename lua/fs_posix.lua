@@ -123,19 +123,24 @@ local function make_async(f)
 	return true
 end
 
-function file_wrap_fd(fd, opt, async, is_pipe_end, path, quiet)
+function file_wrap_fd(fd, opt, async, file_type, path, quiet)
+
+	file_type = file_type or 'file'
 
 	--make `if f.seek then` the idiom for checking if a file is seekable.
-	local seek; if is_pipe_end or async then seek = false end
+	local seek; if file_type ~= 'file' or async then seek = false end
 
 	local f = object(file, {
 		fd = fd,
 		s = fd, --for async use with sock
-		type = is_pipe_end and 'pipe' or 'file',
+		type = file_type,
 		seek = seek,
-		debug_prefix = is_pipe_end and 'P' or 'F',
+		debug_prefix =
+			   file_type == 'file' and 'F'
+			or file_type == 'pipe' and 'P'
+			or file_type == 'pidfile' and 'D',
 		w = 0, r = 0,
-		quiet = repl(quiet, nil, is_pipe_end) or nil,
+		quiet = quiet,
 		path = path,
 		async = async,
 	}, opt)
@@ -152,7 +157,7 @@ function file_wrap_fd(fd, opt, async, is_pipe_end, path, quiet)
 	return f
 end
 
-function _open(path, opt, quiet, is_pipe_end)
+function _open(path, opt, quiet, file_type)
 	local async = opt.async --files are sync by defualt
 	local flags = bitflags(opt.flags or 'rdonly', o_bits)
 	flags = bor(flags, async and O_NONBLOCK or 0)
@@ -168,12 +173,12 @@ function _open(path, opt, quiet, is_pipe_end)
 	if fd == -1 then
 		return check()
 	end
-	local f, err = file_wrap_fd(fd, opt, async, is_pipe_end, path, quiet)
+	local f, err = file_wrap_fd(fd, opt, async, file_type, path, quiet)
 	if not f then
 		return nil, err
 	end
 	log(f.quiet and '' or 'note', 'fs', 'open',
-		'%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
+		'%-4s %s%s %s fd=%d', f, r and 'r' or '', w and 'w' or '', path, fd)
 
 	if opt.seek_end then
 		local pos, err = f:seek('end', 0)
@@ -254,7 +259,7 @@ function _pipe(path, opt)
 		if not ok then return nil, err end
 		return _open(path, update({
 			async = async,
-		}, opt), true, true)
+		}, opt), true, 'pipe')
 	else --unnamed pipe
 		local fds = new'int[2]'
 		local flags = not opt.inheritable and O_CLOEXEC or 0
@@ -262,8 +267,8 @@ function _pipe(path, opt)
 		if not ok then return check() end
 		local r_async = repl(opt.async_read , nil, async)
 		local w_async = repl(opt.async_write, nil, async)
-		local rf, err1 = file_wrap_fd(fds[0], opt, r_async, true, 'pipe.r')
-		local wf, err2 = file_wrap_fd(fds[1], opt, w_async, true, 'pipe.w')
+		local rf, err1 = file_wrap_fd(fds[0], opt, r_async, 'pipe', 'pipe.r')
+		local wf, err2 = file_wrap_fd(fds[1], opt, w_async, 'pipe', 'pipe.w')
 		if not (rf and wf) then
 			if rf then assert(rf:close()) end
 			if wf then assert(wf:close()) end
@@ -273,9 +278,9 @@ function _pipe(path, opt)
 			if opt. read_inheritable then rf:set_inheritable(true) end
 			if opt.write_inheritable then wf:set_inheritable(true) end
 		end
-		log('', 'fs', 'pipe', 'r=%s%s w=%s%s',
+		log('', 'fs', 'pipe', 'r=%s%s w=%s%s rfd=%d wfd=%d',
 			rf, rf.async and '' or ',blocking',
-			wf, wf.async and '' or ',blocking')
+			wf, wf.async and '' or ',blocking', rf.fd, wf.fd)
 		return rf, wf
 	end
 end
@@ -1279,5 +1284,27 @@ function fs_info(path)
 	t.free = tonumber(buf.f_bfree  * buf.f_bsize)
 	return t
 end
+
+--pollable pid files ---------------------------------------------------------
+
+--NOTE: Linux 5.3+ feature, not used yet. Intended to replace polling
+--for process status change in proc_posix.lua.
+
+local PIDFD_NONBLOCK = 0x000800
+
+function pidfd_open(pid, opt, quiet)
+	local async = not (opt and opt.async == false)
+	local flags = async and PIDFD_NONBLOCK or 0
+	local fd = syscall(434, pid, flags)
+	if fd == -1 then
+		return check()
+	end
+	local f, err = file_wrap_fd(fd, opt, async, 'pidfile', nil, quiet)
+	if not f then
+		return nil, err
+	end
+	return f
+end
+
 
 end --if Linux
