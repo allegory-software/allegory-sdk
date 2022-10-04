@@ -521,7 +521,7 @@ function logging.rpc:get_procinfo()
 	local t  = proc_info()
 	local pt = os_info()
 	local ft = fs_info'/'
-	collectgarbage()
+	--collectgarbage()
 	local clock = clock()
 	local lua_heap = collectgarbage'count' * 1024
 	self.logvar('procinfo', {
