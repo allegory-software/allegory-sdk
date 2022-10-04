@@ -500,7 +500,6 @@ local function init(self)
 end
 
 function logging.livelist()
-	collectgarbage()
 	local t = {cols = 3, o_type = 0, o_id = 1, o_descr = 2}
 	for type, ids in pairs(ids_db) do
 		for o, s in pairs(ids.live) do
@@ -521,7 +520,6 @@ function logging.rpc:get_procinfo()
 	local t  = proc_info()
 	local pt = os_info()
 	local ft = fs_info'/'
-	--collectgarbage()
 	local clock = clock()
 	local lua_heap = collectgarbage'count' * 1024
 	self.logvar('procinfo', {
@@ -557,7 +555,6 @@ function logging.rpc:get_osinfo()
 end
 
 function logging.printlive(custom_print)
-	collectgarbage()
 	local print = custom_print or print
 	local types = {}
 	for ty in pairs(ids_db) do
