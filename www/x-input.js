@@ -417,7 +417,7 @@ component('x-button', 'Input', function(e) {
 	e.set_text = function(s) {
 		e.update()
 	}
-	e.prop('text', {store: 'var', default: 'OK', slot: 'lang'})
+	e.prop('text', {store: 'var', default: '', slot: 'lang'})
 
 	e.do_after('init', function() {
 		if (html_text != null && html_text != e.text) {
@@ -2905,7 +2905,7 @@ component('x-mu-row', 'Input', function(e) {
 
 	e.do_update_row = function(row) {
 		let vals = row && e.nav.serialize_row_vals(row)
-		return e.render(vals)
+		e.render(vals)
 	}
 
 })
