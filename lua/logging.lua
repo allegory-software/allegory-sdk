@@ -522,8 +522,10 @@ function logging.rpc:get_procinfo()
 	local pt = os_info()
 	local ft = fs_info'/'
 	collectgarbage()
+	local clock = clock()
+	local lua_heap = collectgarbage'count' * 1024
 	self.logvar('procinfo', {
-		clock    = clock(),
+		clock    = clock,
 		utime    = t and t.utime,
 		stime    = t and t.stime,
 		rss      = t and t.rss,
@@ -536,7 +538,7 @@ function logging.rpc:get_procinfo()
 		ram_free = pt and pt.ram_free,
 		hdd_size = ft and ft.size,
 		hdd_free = ft and ft.free,
-		lua_heap = (collectgarbage'count') * 1024,
+		lua_heap = lua_heap,
 	})
 end
 
