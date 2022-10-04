@@ -1264,11 +1264,11 @@ function nav_widget(e) {
 	}
 
 	function reinit_rows() {
-		let refocus = refocus_state('row')
+		let fs = e.refocus_state('row')
 		init_rows()
 		e.begin_update()
 		e.update({rows: true})
-		refocus()
+		e.refocus(fs)
 		e.end_update()
 	}
 
@@ -1661,42 +1661,51 @@ function nav_widget(e) {
 		return e.selected_rows.has(row)
 	}
 
-	function refocus_state(how) {
-		let was_editing = !!e.editor
-		let focus_editor = e.editor && e.editor.hasfocus
-
-		let refocus_pk, refocus_row
-		if (how == 'pk')
-			refocus_pk = e.focused_row ? e.cell_vals(e.focused_row, e.pk_fields) : null
+	e.refocus_state = function(how) {
+		let fs = {how: how}
+		fs.was_editing = !!e.editor
+		fs.focus_editor = e.editor && e.editor.hasfocus
+		fs.col = e.focused_field && e.focused_field.name
+		fs.focused = e.hasfocus
+		if (how == 'pk' || how == 'val')
+			fs.pk_vals = e.focused_row ? e.cell_vals(e.focused_row, e.pk_fields) : null
 		else if (how == 'row')
-			refocus_row = e.focused_row
+			fs.row = e.focused_row
+		return fs
+	}
 
-		return function() {
-
-			let must_not_move_row = !e.auto_focus_first_cell
-			let ri, unfocus_if_not_found
-			if (how == 'val' && e.val_field && e.nav && e.field) {
+	e.refocus = function(fs) {
+		let how = fs.how
+		let must_not_move_row = !e.auto_focus_first_cell
+		let ri, unfocus_if_not_found
+		if (how == 'val') {
+			if (e.val_field && e.nav && e.field) {
 				ri = e.row_index(e.lookup(e.val_col, [e.input_val])[0])
 				unfocus_if_not_found = true
-			} else if (how == 'pk') {
-				ri = e.row_index(e.lookup(e.pk_fields, refocus_pk)[0])
-			} else if (how == 'row') {
-				ri = e.row_index(refocus_row)
-			} else if (!how) { // TODO: not used (unfocus)
-				ri = false
-				must_not_move_row = true
-				unfocus_if_not_found = true
+			} else if (fs.pk_vals) {
+				ri = e.row_index(e.lookup(e.pk_fields, fs.pk_vals)[0])
 			}
-
-			e.focus_cell(ri, true, 0, 0, {
-				must_not_move_row: must_not_move_row,
-				unfocus_if_not_found: unfocus_if_not_found,
-				enter_edit: e.auto_edit_first_cell,
-				was_editing: was_editing,
-				focus_editor: focus_editor,
-			})
-
+		} else if (how == 'pk') {
+			if (fs.pk_vals) {
+				ri = e.row_index(e.lookup(e.pk_fields, fs.pk_vals)[0])
+			}
+		} else if (how == 'row') {
+			ri = e.row_index(fs.row)
+		} else if (how == 'unfocus') { // TODO: not used
+			ri = false
+			must_not_move_row = true
+			unfocus_if_not_found = true
+		} else {
+			assert(false)
 		}
+		e.focus_cell(ri, fs.col, 0, 0, {
+			must_not_move_row: must_not_move_row,
+			unfocus_if_not_found: unfocus_if_not_found,
+			enter_edit: e.auto_edit_first_cell,
+			was_editing: fs.was_editing,
+			focus_editor: fs.focus_editor,
+			focused: fs.focused,
+		})
 	}
 
 	// vlookup ----------------------------------------------------------------
@@ -3192,7 +3201,8 @@ function nav_widget(e) {
 			if (e.param_vals) {
 				row = row || []
 				for (let k in e.param_vals[0]) {
-					let fi = e.all_fields[k].val_index
+					let fld = assert(e.all_fields[k], 'field missing for param: {0}', k)
+					let fi = fld.val_index
 					if (row[fi] === undefined)
 						row[fi] = e.param_vals[0][k]
 				}
@@ -3689,7 +3699,7 @@ function nav_widget(e) {
 
 		e.begin_update()
 
-		let refocus = refocus_state('val')
+		let fs = e.refocus_state('val') || e.refocus_state('pk')
 		e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
 
 		e.changed_rows = null // set(row)
@@ -3698,7 +3708,7 @@ function nav_widget(e) {
 		init_all()
 
 		e.update({fields: true, rows: true})
-		refocus()
+		e.refocus(fs)
 
 		e.end_update()
 		e.fire('reset', ev)
@@ -3781,13 +3791,6 @@ function nav_widget(e) {
 
 		e.abort_loading()
 
-		if (e.focused_row && e.pk_fields)
-			e.focus_state = {
-				pk_vals: e.cell_vals(e.focused_row, e.pk_fields),
-				col: e.focused_field && e.focused_field.name,
-				focused: e.hasfocus,
-			}
-
 		let req = ajax(assign_opt({
 			url: rowset_url(),
 			progress: load_progress,
@@ -3849,12 +3852,6 @@ function nav_widget(e) {
 			return
 		e.rowset = rs
 		e.reset(this.event)
-		if (e.focus_state != null && e.pk_fields) {
-			let fs = json_arg(e.focus_state)
-			e.focus_find_cell(e.pk_fields, fs.pk_vals, fs.col)
-			if (fs.focused)
-				e.focus()
-		}
 	}
 
 	// saving changes ---------------------------------------------------------
