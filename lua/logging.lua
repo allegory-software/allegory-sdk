@@ -59,6 +59,7 @@ logging = {
 	max_disk_size = 16 * 1024^2,
 	queue_size = 1000,
 	timeout = 5,
+	vars = {profiler_started = false},
 }
 
 function logging:tofile(logfile, max_size, queue_size)
@@ -207,9 +208,11 @@ function logging:toserver(host, port, queue_size, timeout)
 
 			if chan then
 
-				--send a first message so the server knows who we are.
-				if not check_io(chan:try_send(logvar_message(self, 'hello'))) then
-					break
+				--send current var states.
+				for k,v in pairs(self.vars) do
+					if not check_io(chan:try_send(logvar_message(self, k, v))) then
+						break
+					end
 				end
 
 				--create RPC thread/loop
@@ -457,6 +460,7 @@ end
 end
 
 local function logvar(self, k, v)
+	self.vars[k] = v
 	if self.logtoserver then
 		self:logtoserver(logvar_message(self, k, v))
 	end
@@ -575,16 +579,17 @@ function logging.printlive(custom_print)
 	end
 end
 
-local profile_lines
+local profiler_lines
+
 function logging.start_profiler(mode)
-	if profile_lines then return end
+	if profiler_lines then return end
 	local p = require'jit.p'
 	local io_open = io.open
-	profile_lines = {}
+	profiler_lines = {}
 	function io.open()
 		local f = {close = noop}
 		function f:write(s)
-			add(profile_lines, s)
+			add(profiler_lines, s)
 		end
 		return f
 	end
@@ -592,17 +597,17 @@ function logging.start_profiler(mode)
 	io.open = io_open
 	logging.log('note', 'log', 'prof_start', 'profiler started %s', mode or '')
 	logging.logvar('profiler_started', true)
-	logging.logvar('profiler_output', nil)
+	logging.logvar('profiler_output', 'Recording...')
 end
 
 function logging.stop_profiler()
-	if not profile_lines then return end
+	if not profiler_lines then return end
 	local p = require'jit.p'
 	p.stop()
 	logging.log('note', 'log', 'prof_stop', 'profiler stopped')
 	logging.logvar('profiler_started', false)
-	logging.logvar('profiler_output', cat(profile_lines))
-	profile_lines = nil
+	logging.logvar('profiler_output', cat(profiler_lines))
+	profiler_lines = nil
 end
 
 function logging.rpc:start_profiler(mode)
