@@ -201,7 +201,7 @@ function virtual_rowset(init, ...)
 				current_row = row
 				rs:compute_row_vals(vals)
 				for i,f in ipairs(computed_fields) do
-					row[f.index] = repl(f.compute(self, vals), nil, null)
+					row[f.index] = repl(f.compute(rs, vals), nil, null)
 				end
 				for k in pairs(vals) do
 					vals[k] = nil
