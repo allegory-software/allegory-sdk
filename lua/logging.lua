@@ -219,8 +219,13 @@ function logging:toserver(host, port, queue_size, timeout)
 						local cmd_args = check_io(chan:try_recv())
 						if not cmd_args then break end
 						if istab(cmd_args) then
-							local f = self.rpc[cmd_args[1]]
-							if f then f(self, unpack(cmd_args, 2)) end
+							local cmd = cmd_args[1]
+							local f = self.rpc[cmd]
+							if f then
+								f(self, unpack(cmd_args, 2))
+							else
+								self.log('ERROR', 'log', 'rpc', 'unknown RPC call: %s', cmd)
+							end
 						end
 					end
 				end, 'logging-rpc %s', chan.tcp))
@@ -568,6 +573,44 @@ function logging.printlive(custom_print)
 			print(('  %-4s: %s'):format(id, ss[id]))
 		end
 	end
+end
+
+local profile_lines
+function logging.start_profiler(mode)
+	if profile_lines then return end
+	local p = require'jit.p'
+	local io_open = io.open
+	profile_lines = {}
+	function io.open()
+		local f = {close = noop}
+		function f:write(s)
+			add(profile_lines, s)
+		end
+		return f
+	end
+	p.start(mode, true)
+	io.open = io_open
+	logging.log('note', 'log', 'prof_start', 'profiler started %s', mode or '')
+	logging.logvar('profiler_started', true)
+	logging.logvar('profiler_output', nil)
+end
+
+function logging.stop_profiler()
+	if not profile_lines then return end
+	local p = require'jit.p'
+	p.stop()
+	logging.log('note', 'log', 'prof_stop', 'profiler stopped')
+	logging.logvar('profiler_started', false)
+	logging.logvar('profiler_output', cat(profile_lines))
+	profile_lines = nil
+end
+
+function logging.rpc:start_profiler(mode)
+	logging.start_profiler(mode)
+end
+
+function logging.rpc:stop_profiler()
+	logging.stop_profiler()
 end
 
 init(logging)
