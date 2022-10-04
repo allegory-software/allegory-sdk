@@ -403,6 +403,13 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-items: center; /* no more baseline to align icon to */
 }
 
+.x-button-icon {
+	/* fixate icon container width */
+	min-width: 1em;
+	display: flex;
+	justify-content: center;
+}
+
 .x-button:not(.text-empty) > .x-button-icon {
 	margin-right: .5em;
 }
