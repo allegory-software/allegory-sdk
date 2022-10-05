@@ -231,12 +231,13 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
  	end
 
 	if stdin == true then
-		inp_rf, inp_wf = pipe{
+		inp_rf, inp_wf = try_pipe{
 			async_read = false,
 			read_inheritable = true,
 		}
 		if not inp_rf then
-			return check(nil, inp_wf)
+			local err = inp_wf; inp_wf = nil
+			return check(nil, err)
 		end
 		self.stdin = inp_wf
 	elseif stdin then
@@ -244,12 +245,13 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	end
 
 	if stdout == true then
-		out_rf, out_wf = pipe{
+		out_rf, out_wf = try_pipe{
 			async_write = false,
 			write_inheritable = true,
 		}
 		if not out_rf then
-			return check(nil, out_wf)
+			local err = out_wf; out_wf = nil
+			return check(nil, err)
 		end
 		self.stdout = out_rf
 	else
@@ -257,12 +259,13 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	end
 
 	if stderr == true then
-		err_rf, err_wf = pipe{
+		err_rf, err_wf = try_pipe{
 			async_write = false,
 			write_inheritable = true,
 		}
 		if not err_rf then
-			return check(nil, err_wf)
+			local err = err_wf; err_wf = nil
+			return check(nil, err)
 		end
 		self.stderr = err_rf
 	else
@@ -341,7 +344,7 @@ function _exec(t, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 		self.pid = pid
 
 		local s = cmdline_quote_args(nil, cmd, unpack(args))
-		log('', 'proc', 'exec', '%s', s)
+		log('', 'proc', 'exec', '%s %s', self, s)
 		live(self, '%s', s)
 
 		return self
@@ -352,9 +355,9 @@ function proc:forget()
 	if self.pid then
 		live(self, nil)
 	end
-	if self.stdin  then assert(self.stdin :close()) end
-	if self.stdout then assert(self.stdout:close()) end
-	if self.stderr then assert(self.stderr:close()) end
+	if self.stdin  then self.stdin :close() end
+	if self.stdout then self.stdout:close() end
+	if self.stderr then self.stderr:close() end
 	self.pid = false
 end
 
@@ -589,5 +592,6 @@ function daemonize()
 	--10. reset the umask to 0.
 	C.umask(0)
 	--11. no need to chdir to `/`.
+	daemonized = true
 	return C.getpid()
 end

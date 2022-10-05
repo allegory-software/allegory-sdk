@@ -64,6 +64,7 @@ os_info() -> t
 	Get OS info.
 
 daemonize() -> pid
+daemonized -> true | false
 
 	Daemonize current process (Linux).
 

@@ -173,16 +173,16 @@ function _exec(cmd, env, dir, stdin, stdout, stderr, autokill, inherit_handles)
 	self.pid                = pi.dwProcessId
 	self.main_thread_id     = pi.dwThreadId
 
-	log('', 'proc', 'exec', '%s', cmd)
+	log('', 'proc', 'exec', '%s %s', self, cmd)
 	live(self, '%s', cmd)
 
 	return self
 end
 
 function proc:forget()
-	if self.stdin  then assert(self.stdin :close()) end
-	if self.stdout then assert(self.stdout:close()) end
-	if self.stderr then assert(self.stderr:close()) end
+	if self.stdin  then self.stdin :close() end
+	if self.stdout then self.stdout:close() end
+	if self.stderr then self.stderr:close() end
 	if self.handle then
 		assert(winapi.CloseHandle(self.handle))
 		assert(winapi.CloseHandle(self.main_thread_handle))
