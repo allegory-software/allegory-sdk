@@ -24,7 +24,7 @@ TERMINALS
 		nt:notify_warn(fmt, ...)
 		nt:out_stdout(s)
 		nt:out_stderr(s)
-		nt:pipe(nt, [on])
+		nt:pipe(nt, [on], [filter])
 	tasks.recording_terminal(rt, opt...) -> rt
 		rt:playback(term)
 		rt:stdout()
@@ -126,7 +126,7 @@ function nterm:pipe(term, on, filter) --pipe out self to term.
 		return self:off{'out', term}
 	end
 	self:on({'out', term}, function(self, src_term, chan, ...)
-		if not filter or filter(self, chan, ...) then
+		if not filter or filter(self, src_term, chan, ...) then
 			local ok, err = pcall(term.out, term, src_term, chan, ...)
 			if not ok then --if the output terminal breaks, unpipe it.
 				self:pipe(term, false)
@@ -492,7 +492,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 
 	local allow_out_stdout = opt.out_stdout ~= false
 	local allow_out_stderr = opt.out_stderr ~= false
-	function self:out_filter(term, chan)
+	function self:out_filter(src_term, chan)
 		if not allow_out_stdout and chan == 'stdout' then return false end
 		if not allow_out_stderr and chan == 'stderr' then return false end
 		return true
@@ -527,7 +527,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 				if not ok then
 					notify_error('stdin:write(): %s', err)
 				end
-				assert(p.stdin:close()) --signal eof
+				p.stdin:close() --signal eof
 			end, 'exec-stdin %s', p))
 		end
 
@@ -545,7 +545,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 					local s = str(buf, len)
 					out_stdout(s)
 				end
-				assert(p.stdout:close())
+				p.stdout:close()
 			end, 'exec-stdout %s', p))
 		end
 
@@ -563,7 +563,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 					local s = str(buf, len)
 					out_stderr(s)
 				end
-				assert(p.stderr:close())
+				p.stderr:close()
 			end, 'exec-stderr %s', p))
 		end
 
