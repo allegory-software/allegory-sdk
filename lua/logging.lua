@@ -617,6 +617,13 @@ function logging.rpc:stop_profiler()
 	logging.stop_profiler()
 end
 
+function logging.rpc:collectgarbage()
+	local m0 = collectgarbage'count'
+	collectgarbage()
+	local m1 = collectgarbage'count'
+	logging.log('note', 'gc', 'collect', 'collected: %s', kbytes((m0 - m1) * 1024))
+end
+
 init(logging)
 
 logging.__index = logging
