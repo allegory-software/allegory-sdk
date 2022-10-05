@@ -204,7 +204,7 @@ focusing and selection:
 		e.selected_row, e.selected_field
 		e.last_focused_col
 		e.selected_rows: map(row -> true|Set(field))
-		e.focus_cell(ri|true|false|0, fi|true|false|0, rows, cols, ev)
+		e.focus_cell(ri|true|false|0, fi|col|true|false|0, rows, cols, ev)
 			ev.input
 			ev.cancel
 			ev.unfocus_if_not_found
@@ -226,7 +226,7 @@ focusing and selection:
 		e.can_select_cell()
 		e.is_row_selected()
 		e.is_last_row_focused()
-		e.first_focusable_cell(ri|true|0, fi|true|0, rows, cols, opt)
+		e.first_focusable_cell(ri|true|0, fi|col|true|0, rows, cols, opt)
 			opt.editable
 			opt.must_move
 			opt.must_not_move_row
@@ -1365,7 +1365,8 @@ function nav_widget(e) {
 		cols = abs(cols)
 
 		if (ri === true) ri = e.focused_row_index
-		if (fi === true) fi = e.field_index(e.all_fields[e.last_focused_col])
+		if (fi === true) fi = e.last_focused_col
+		if (isstr(fi)) fi = e.field_index(fld(fi))
 
 		// if starting from nowhere, include the first/last row/col into the count.
 		if (ri == null && rows)
