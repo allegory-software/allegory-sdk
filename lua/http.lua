@@ -448,7 +448,7 @@ function http:build_request(opt, cookies)
 		req.headers['connection'] = 'close'
 	end
 
-	if repl(opt.compress, self.compress) ~= false then
+	if repl(opt.compress, nil, self.compress) ~= false then
 		req.headers['accept-encoding'] = 'gzip, deflate'
 	end
 
@@ -649,7 +649,7 @@ function http:accept_content_encoding(req, opt)
 	if not accept then
 		return true
 	end
-	local compress = repl(opt.compress, self.compress) ~= false
+	local compress = repl(opt.compress, nil, self.compress) ~= false
 		and (content_size(opt) or 1/0) >= 1000
 		and (not opt.content_type or not self.nocompress_mime_types[opt.content_type])
 	if not compress then
