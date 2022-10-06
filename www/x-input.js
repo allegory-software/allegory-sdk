@@ -26,6 +26,7 @@ WIDGETS
 	chart
 	mu
 	switcher
+	label
 	input
 	form
 
@@ -593,6 +594,8 @@ publishes:
 	e.mode
 	e.info
 	e.infomode
+uses:
+	e.label_box
 calls:
 	add_info_button()
 	add_info_box()
@@ -941,7 +944,7 @@ function editbox_widget(e, opt) {
 			class: 'x-editbox-input',
 		})
 	else
-		e.val_box = div({class: 'x-editbox-input x-editbox-value'})
+		e.val_box = e.val_box || div({class: 'x-editbox-input x-editbox-value'})
 
 	focusable_widget(e, e.input)
 
@@ -1659,6 +1662,50 @@ component('x-spinedit', 'Input', function(e) {
 			return false
 		}
 	})
+
+})
+
+// ---------------------------------------------------------------------------
+// checkedit
+// ---------------------------------------------------------------------------
+
+component('x-checkedit', 'Input', function(e) {
+
+	editbox_widget(e, {input: false})
+
+	e.icon_box = span({class: 'x-markbox-icon x-checkbox-icon far fa-square'})
+	e.val_box.add(e.icon_box)
+
+	e.checked_val = true
+	e.unchecked_val = false
+
+	// model
+
+	e.get_checked = function() {
+		return e.input_val === e.checked_val
+	}
+	e.set_checked = function(v, ev) {
+		e.set_val(v ? e.checked_val : e.unchecked_val, ev)
+	}
+	e.prop('checked', {private: true})
+
+	// view
+
+	function update_icon() {
+		let ie = e.icon_box
+		ie.class('fa far fa-square fa-check-square fa-toggle-on fa-toggle-off', false)
+		if (e.button_style == 'toggle')
+			ie.classes = 'fa fa-toggle-'+(e.checked ? 'on' : 'off')
+		else
+			ie.classes = e.checked ? 'fa fa-check-square' : 'far fa-square'
+	}
+
+	e.set_button_style = update_icon
+	e.prop('button_style', {store: 'var', type: 'enum', enum_values: ['checkbox', 'toggle'], default: 'checkbox', attr: true})
+
+	e.do_update_val = function(v, ev) {
+		update_icon()
+	}
 
 })
 
@@ -3900,6 +3947,29 @@ component('x-switcher', 'Containers', function(e) {
 })
 
 // ---------------------------------------------------------------------------
+// x-label
+// ---------------------------------------------------------------------------
+
+component('x-label', function(e) {
+
+	editable_widget(e)
+	val_widget(e, false, false)
+
+	e.create_label_placeholder = function() {
+		return div({class: 'x-input-placeholder'})
+	}
+
+	e.do_update = function() {
+		let s = (e.field && e.field.text) || null
+		if (s != null && e.field && e.field.not_null && e.label_show_star != false)
+			s = s + ' *'
+		e.set(s || e.create_label_placeholder())
+		e.set(s, 'pre-wrap')
+	}
+
+})
+
+// ---------------------------------------------------------------------------
 // x-input
 // ---------------------------------------------------------------------------
 
@@ -3947,9 +4017,9 @@ component('x-input', 'Input', function(e) {
 
 	function each_widget_prop(f) {
 		for (let k in e) {
-			if (k.starts('widget.')) {
+			if (k.starts('.')) {
 				let v = e.get_prop(k)
-				k = k.replace(/^widget\./, '')
+				k = k.replace(/^\./, '')
 				if (v === '')
 					v = true
 				f(k, v)
@@ -3960,8 +4030,8 @@ component('x-input', 'Input', function(e) {
 	e.set_prop = function(k, v) {
 		let v0 = e[k]
 		e[k] = v
-		if (v !== v0 && e.widget && k.starts('widget.')) {
-			k = k.replace(/^widget\./, '')
+		if (v !== v0 && e.widget && k.starts('.')) {
+			k = k.replace(/^\./, '')
 			e.widget[k] = v
 			document.fire('prop_changed', e, k, v, v0, null)
 		}
@@ -3988,7 +4058,14 @@ component('x-form', 'Containers', function(e) {
 
 	let names = {}
 	function area_name(item) {
-		let s = item.attr('area') || item.col || item.attr('col') || item.id
+		let s = item.attr('area')
+		if (!s) {
+			s = item.col || item.attr('col')
+			if (item.tag == 'x-label')
+				s = s + '_label'
+		}
+		if (!s)
+			s = item.id
 		if (!s)
 			return ''
 		if (names[s]) {
@@ -4002,6 +4079,7 @@ component('x-form', 'Containers', function(e) {
 	// widget-items widget protocol.
 	e.do_init_items = function() {
 		for (let item of e.items) {
+			pr(item.tag, item.area_name)
 			if (!item.style['grid-area'])
 				item.style['grid-area'] = area_name(item)
 			e.add(item)
@@ -4023,7 +4101,7 @@ component('x-form', 'Containers', function(e) {
 	})
 
 	e.set_nav = function(nav) {
-		for (let ce of e.$('.x-input-widget, .x-input'))
+		for (let ce of e.$('.x-input-widget, .x-input, .x-label'))
 			ce.nav = nav
 	}
 	e.prop('nav', {store: 'var', private: true})
