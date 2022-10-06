@@ -556,8 +556,10 @@ end
 --https://www.freedesktop.org/software/systemd/man/daemon.html#SysV%20Daemons
 function daemonize()
 	--1. close all fds above 0, 1, 2 (there shouldn't be any).
-	for i = 3, 10 do
-		assertf(not close_fd(i), 'fd open: %d', i)
+	for fd = 3, 256 do
+		if not close_fd(fd) then
+			log('note', 'proc', 'daemonize', 'fd closed: %d', fd)
+		end
 	end
 	--2. no need to reset all signal handlers as LuaJIT doesn't set them.
 	--3. no need to call sigprocmask() as LuaJIT doesn't change them.
