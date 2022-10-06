@@ -35,7 +35,7 @@
 	--x-padding-x-input             : .5em; /* x-padding for inputs and grid cells */
 	--x-padding-y-input-top         : .4em; /* y-padding for inputs and grid cells */
 	--x-padding-y-input-bottom      : .3em; /* y-padding for inputs and grid cells */
-	--x-padding-y1-input-il-label-empty : .35em;  /* shift label to focus-box middle */
+	--x-padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
 	--x-padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
 	--x-padding-y2-input-il-dropdown-button : .5em;
 
@@ -43,7 +43,7 @@
 	--x-width-input                 : 12em;
 
 	--x-font-size-input-label        : 85%;
-	--x-font-size-input-label-empty  : 85%;
+	--x-font-size-input-label-empty  : 85%; /* put 100% for animating floating label */
 
 	--x-fg              : #000;  /* text on normal backgrounds */
 	--x-p               : #444;  /* multiline text on normal backgrounds */
@@ -789,6 +789,18 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-width: 0;
 }
 
+/* input labels ----------------------------------------------------------- */
+
+.x-label {
+	margin-left : var(--x-padding-x-input);
+	margin-right: var(--x-padding-x-input);
+	color: var(--x-fg-label);
+}
+
+.x-form[grid][baseline] {
+	align-items: baseline;
+}
+
 /* checkbox --------------------------------------------------------------- */
 
 .x-markbox {
@@ -802,11 +814,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-items: center;
 	flex-flow: row nowrap;
 	overflow: hidden;
+	padding-left  : var(--x-padding-x-input);
+	padding-right : var(--x-padding-x-input);
 }
 
 .x-markbox.with-label > .x-focus-box {
-	padding-left  : var(--x-padding-x-input);
-	padding-right : var(--x-padding-x-input);
 	line-height: initial;
 	align-items: center;
 }
@@ -833,6 +845,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-markbox-icon {
 	color: var(--x-markbox-icon-color);
 	font-size: 110%;
+	padding-top    : var(--x-padding-y-input-top);
+	padding-bottom : var(--x-padding-y-input-bottom);
 }
 
 .x-markbox-label,
@@ -863,8 +877,9 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-markbox[align=right] > .x-focus-box > .x-markbox-label { padding-right: .5em; }
 
 .x-markbox[button_style=toggle] > .x-focus-box > .x-markbox-label { flex: 1; }
-.x-markbox[button_style=toggle] > .x-focus-box > .x-markbox-icon  { order: 2; }
-.x-markbox[button_style=toggle] > .x-focus-box > .x-markbox-label { padding-left: 0; padding-right: .5em; }
+.x-markbox[button_style=toggle][align=right] > .x-focus-box > .x-markbox-icon  { order: 2; }
+.x-markbox[button_style=toggle][align=right] > .x-focus-box > .x-markbox-label { padding-left: 0; padding-right: .5em; }
+.x-markbox[button_style=toggle][align=left ] > .x-focus-box > .x-markbox-label { padding-left: .5em; padding-right: 0; }
 
 .x-markbox.grid-editor > .x-focus-box {
 	justify-content: center;
@@ -992,7 +1007,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	position: absolute;
 	top: 0; /* fixate to top so we only have to set the top padding */
 	font-size: var(--x-font-size-input-label-empty);
-	padding-top    : var(--x-padding-y1-input-il-label-empty);
+	padding-top: var(--x-padding-y1-input-il-label-empty);
 	opacity: 1;
 	animation: x-editbox-label-unfocused .1s;
 	color: var(--x-fg-label);
@@ -1054,6 +1069,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	font-weight: bold;
 	opacity: .5;
 }
+
+/* NOTE: remove the `disabled-` prefix to get animated inner labels */
 
 @keyframes disabled-x-editbox-label-unfocused {
 	from {
