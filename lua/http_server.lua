@@ -112,6 +112,7 @@ function http_server(...)
 
 	local self = object(server, {
 		listen = listen,
+		compress = config'http_compress',
 		debug = config'http_debug'
 			and index(collect(words(config'http_debug' or ''))),
 	}, ...)
@@ -247,6 +248,7 @@ function http_server(...)
 					debug = self.debug,
 					max_line_size = self.max_line_size,
 					recv_buffer_size = self.recv_buffer_size,
+					compress = self.compress,
 					f = ctcp,
 				})
 				local ok, err = pcall(handle_connection, tcp, ctcp, http)
