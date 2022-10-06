@@ -59,7 +59,10 @@ logging = {
 	max_disk_size = 16 * 1024^2,
 	queue_size = 1000,
 	timeout = 5,
-	vars = {profiler_started = false},
+	vars = {
+		profiler_started = false,
+		jit_on = jit.status(),
+	},
 }
 
 function logging:tofile(logfile, max_size, queue_size)
@@ -622,6 +625,17 @@ function logging.rpc:collectgarbage()
 	collectgarbage()
 	local m1 = collectgarbage'count'
 	logging.log('note', 'gc', 'collect', 'collected: %s', kbytes((m0 - m1) * 1024))
+end
+
+function logging.rpc:jit_onoff(on)
+	if on then jit.on() else jit.off() end
+	local on = jit.status()
+	logging.log('note', 'jit', on and 'on' or 'off')
+	logging.logvar('jit_on', on)
+end
+
+function logging.rpc:eval(s)
+	eval(s)
 end
 
 init(logging)
