@@ -557,7 +557,7 @@ end
 function daemonize()
 	--1. close all fds above 0, 1, 2 (there shouldn't be any).
 	for fd = 3, 256 do
-		if not close_fd(fd) then
+		if close_fd(fd) then
 			log('note', 'proc', 'daemonize', 'fd closed: %d', fd)
 		end
 	end
