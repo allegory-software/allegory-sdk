@@ -201,7 +201,7 @@ function init_xmodule(opt) {
 		return [module, slot, layer]
 	}
 
-	xm.set_val = function(e, id, k, v, v0, slot, module, serialize) {
+	xm.set_val = function(e, id, k, v, v0, slot, module, serialize, save) {
 		slot = xm.selected_slot || slot || 'base'
 		if (slot == 'none')
 			return
@@ -246,6 +246,9 @@ function init_xmodule(opt) {
 				e1.xon()
 			}
 		}
+
+		if (save)
+			xm.save()
 	}
 
 	document.on('prop_changed', function(e, k, v, v0, slot) {
@@ -253,7 +256,9 @@ function init_xmodule(opt) {
 			return
 		if (e.xmodule_noupdate)
 			return
-		xm.set_val(e, e.id, k, v, v0, slot, e.module, e.serialize_prop)
+		let pa = e.get_prop_attrs(k)
+		let save = !(pa && pa.nosave)
+		xm.set_val(e, e.id, k, v, v0, slot, e.module, e.serialize_prop, save)
 	})
 
 	// loading prop layers and assigning to slots -----------------------------
