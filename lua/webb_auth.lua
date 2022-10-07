@@ -762,7 +762,9 @@ function try_login(auth, switch_user)
 			end
 		end
 		save_usr(usr)
-		setlang(userinfo(usr).lang) --user lang has priority over action lang.
+		local ui = userinfo(usr)
+		setlang(ui.lang) --user lang has priority over action lang.
+		setcountry(ui.country)
 	end
 	return usr, err
 end
