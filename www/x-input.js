@@ -4079,7 +4079,6 @@ component('x-form', 'Containers', function(e) {
 	// widget-items widget protocol.
 	e.do_init_items = function() {
 		for (let item of e.items) {
-			pr(item.tag, item.area_name)
 			if (!item.style['grid-area'])
 				item.style['grid-area'] = area_name(item)
 			e.add(item)

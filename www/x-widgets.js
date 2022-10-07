@@ -313,10 +313,21 @@ uses:
 	e.prop(name, attrs)
 publishes:
 	e.<prop>
-	e.props: {prop -> attrs}
-		store: 'var'|'attr'|, private, default, convert,
-		type, ...,
-		style, style_format, style_parse, bind, resolve.
+	e.props: {prop->prop_attrs}
+		store: 'var'          value is stored in a variable.
+		attr: true            value is initialized-from/stored-to html attribute.
+		private:              value is not public in xmodule.
+		default:              default value.
+		convert(v1, v0):      convert value when setting the property.
+		type:                 type for object inspector.
+		style                 value is stored in css style.
+		style_format          format css style to set value.
+		style_parse           parse css style to get value.
+		from_attr             converter from html attr representation.
+		to_attr               converter to html attr representation.
+		bind_id               the prop represents an element id to dynamically link to.
+		resolve               custom reference resolver for object linking.
+		nosave                do not auto-save xmodule layers when prop changes.
 calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
@@ -349,7 +360,6 @@ let component_props = function(e, iprops) {
 		opt.name = prop
 		let convert = opt.convert || return_arg
 		let priv = opt.private
-		let serialize = opt.serialize
 		if (!e[setter])
 			e[setter] = noop
 		let prop_changed = fire_prop_changed

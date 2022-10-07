@@ -112,7 +112,7 @@ TIME & DATE
 	days(delta_ts) -> ds
 	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts)
 	set_[year|month|month_day|hours|minutes|seconds](ts)
-	locale
+	locale()
 	weekday_name (ts, ['long'], [locale])
 	month_name   (ts, ['long'], [locale])
 	month_year   (ts, ['long'], [locale])
