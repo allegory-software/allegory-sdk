@@ -30,7 +30,7 @@
 	--x-border-radius-button        : .3em;
 
 	--x-padding-y-button            : .4em;
-	--x-padding-x-button            : 1.2em;
+	--x-padding-x-button            : .7em;
 	--x-padding-x-button-icon       : .4em;
 	--x-padding-x-input             : .5em; /* x-padding for inputs and grid cells */
 	--x-padding-y-input-top         : .4em; /* y-padding for inputs and grid cells */
@@ -95,7 +95,7 @@
 
 	--x-stroke-dialog-xbutton       : #00000066;
 
-	--x-bg-tabs-bar: #66f;
+	--x-bg-tabs-selection-bar: #66f;
 
 	--x-selected-widget-outline-color         : #666;
 	--x-selected-widget-outline-color-focused : blue;
@@ -2053,7 +2053,7 @@ x-tabs-fixed-header {
 
 .x-tabs-selection-bar {
 	position: absolute;
-	background-color: var(--x-bg-tabs-bar);
+	background-color: var(--x-bg-tabs-selection-bar);
 	z-index: 2;  /* selection-bar = 2, moving-tab = 1 */
 	width: 2px;
 	height: 2px;
@@ -3327,7 +3327,7 @@ x-prop-inspector .x-grid-cell:not(.modified) {
 
 	--x-stroke-dialog-xbutton       : #000000cc;
 
-	--x-bg-tabs-bar: #ccc;
+	--x-bg-tabs-selection-bar: #ccc;
 
 	--x-selected-widget-outline-color         : #aaa;
 	--x-selected-widget-outline-color-focused : var(--x-markbox-icon-color);
