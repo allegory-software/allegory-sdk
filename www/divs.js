@@ -185,7 +185,7 @@ property(Element, 'tag', function() { return this.tagName.lower() })
 method(Element, 'class', function(names, enable) {
 	if (arguments.length < 2)
 		enable = true
-	if (names.includes(' ')) {
+	if (names.indexOf(' ') != -1) {
 		for (let name of names.words())
 			if (enable)
 				this.classList.add(name)
@@ -251,6 +251,16 @@ property(Element, 'index', {
 })
 }
 
+// dom tree navigation including text nodes ----------------------------------
+// also faster for when you know that you don't have text nodes!
+
+alias(Element , 'nodes'      , 'childNodes')
+alias(Element , 'first_node' , 'firstChild')
+alias(Element , 'last_node'  , 'lastChild')
+alias(Element , 'next_node'  , 'nextSibling')
+alias(Element , 'prev_node'  , 'previousSibling')
+alias(NodeList, 'len', 'length')
+
 // dom tree querying ---------------------------------------------------------
 
 function iselem(e) { return e instanceof Element }
@@ -273,9 +283,8 @@ method(NodeList, 'each', function(f) {
 	Array.prototype.forEach.call(this, f)
 })
 
-property(NodeList, 'last', function() {
-	return this[this.length-1]
-})
+property(NodeList, 'first', function() { return this[0] })
+property(NodeList, 'last' , function() { return this[this.length-1] })
 
 method(Element, 'positionally_contains', function(e) {
 	if (this.contains(e))
@@ -481,10 +490,10 @@ method(Element, 'clear', function() {
 method(Element, 'set', function(s, whitespace) {
 	if (typeof s == 'function')
 		s = s()
-	this.clear()
 	if (isnode(s)) {
 		if (iselem(s) && s.isConnected)
 			s.bind(false)
+		this.clear()
 		this.append(s)
 		if (iselem(s) && this.isConnected)
 			s.bind(true)
@@ -800,16 +809,16 @@ function px(v) {
 	return typeof v == 'number' ? v+'px' : v
 }
 
-property(Element, 'x1'   , { set: function(v) { this.style.left          = px(v) } })
-property(Element, 'y1'   , { set: function(v) { this.style.top           = px(v) } })
-property(Element, 'x2'   , { set: function(v) { this.style.right         = px(v) } })
-property(Element, 'y2'   , { set: function(v) { this.style.bottom        = px(v) } })
-property(Element, 'w'    , { set: function(v) { this.style.width         = px(v) } })
-property(Element, 'h'    , { set: function(v) { this.style.height        = px(v) } })
-property(Element, 'min_w', { set: function(v) { this.style['min-width' ] = px(v) } })
-property(Element, 'min_h', { set: function(v) { this.style['min-height'] = px(v) } })
-property(Element, 'max_w', { set: function(v) { this.style['max-width' ] = px(v) } })
-property(Element, 'max_h', { set: function(v) { this.style['max-height'] = px(v) } })
+property(Element, 'x1'   , { set: function(v) { if (v !== this.__x1) { this.__x1 = v; this.style.left          = px(v) } } })
+property(Element, 'y1'   , { set: function(v) { if (v !== this.__y1) { this.__y1 = v; this.style.top           = px(v) } } })
+property(Element, 'x2'   , { set: function(v) { if (v !== this.__x2) { this.__x2 = v; this.style.right         = px(v) } } })
+property(Element, 'y2'   , { set: function(v) { if (v !== this.__y2) { this.__y2 = v; this.style.bottom        = px(v) } } })
+property(Element, 'w'    , { set: function(v) { if (v !== this.__w ) { this.__w  = v; this.style.width         = px(v) } } })
+property(Element, 'h'    , { set: function(v) { if (v !== this.__h ) { this.__h  = v; this.style.height        = px(v) } } })
+property(Element, 'min_w', { set: function(v) { if (v !== this.__mw) { this.__mw = v; this.style['min-width' ] = px(v) } } })
+property(Element, 'min_h', { set: function(v) { if (v !== this.__mh) { this.__mh = v; this.style['min-height'] = px(v) } } })
+property(Element, 'max_w', { set: function(v) { if (v !== this.__Mw) { this.__Mw = v; this.style['max-width' ] = px(v) } } })
+property(Element, 'max_h', { set: function(v) { if (v !== this.__Mh) { this.__Mh = v; this.style['max-height'] = px(v) } } })
 
 alias(Element, 'x', 'x1')
 alias(Element, 'y', 'y1')
@@ -961,6 +970,17 @@ property(Element, 'effectively_hidden', {get: function() {
 	return false
 }})
 
+/* faster variant that doesn't check `display: none` and `visibility: hidden` from CSS */
+property(Element, 'effectively_hidden_nocss', {get: function() {
+	if (this.bool_attr('hidden'))
+		return true
+	if (!this.parent)
+		return true
+	if (this.parent.effectively_hidden_nocss)
+		return true
+	return false
+}})
+
 // text editing --------------------------------------------------------------
 
 alias(HTMLInputElement, 'select_range', 'setSelectionRange')
@@ -1012,10 +1032,10 @@ function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
 }
 
 method(Element, 'scroll_to_view_rect_offset', function(sx0, sy0, x, y, w, h) {
-	let pw  = this.clientWidth
-	let ph  = this.clientHeight
-	sx0 = or(sx0, this.scrollLeft)
-	sy0 = or(sy0, this.scrollTop )
+	let pw  = this.cw
+	let ph  = this.ch
+	if (sx0 == null) { sx0 = this.scrollLeft; }
+	if (sy0 == null) { sy0 = this.scrollTop ; }
 	let e = this
 	let [sx, sy] = scroll_to_view_rect(x, y, w, h, pw, ph, -sx0, -sy0)
 	return [-sx, -sy]
@@ -1023,7 +1043,8 @@ method(Element, 'scroll_to_view_rect_offset', function(sx0, sy0, x, y, w, h) {
 
 // scroll to make inside rectangle invisible.
 method(Element, 'scroll_to_view_rect', function(sx0, sy0, x, y, w, h) {
-	this.scroll(...this.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h))
+	let [sx, sy] = this.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
+	this.scroll(sx, sy)
 })
 
 method(Element, 'make_visible_scroll_offset', function(sx0, sy0, parent) {
@@ -1274,8 +1295,10 @@ let popup_state = function(e) {
 				init()
 			e.popup_target = target
 		}
-		if (target)
-			raf(update)
+		if (!should_show()) // prevent expensive raf() if hidden.
+			e.hide()
+		else
+			raf(do_update)
 	}
 
 	function init() {
@@ -1416,15 +1439,25 @@ let popup_state = function(e) {
 		return [x0, y0]
 	}
 
-	function update() {
+	function should_show() {
 		if (!target || !target.isConnected)
 			return
-
-		if (e.popup_target_visible)
-			e.show(!!e.popup_target_visible(target))
-
-		if (e.hidden || target.effectively_hidden)
+		if (target.effectively_hidden_nocss)
 			return
+		if (e.popup_target_visible)
+			if (!e.popup_target_visible(target))
+				return
+		return true
+	}
+
+	function do_update() {
+
+		if (!target.effectively_hidden) { // slow-to-calculate
+			e.hide()
+			return
+		} else {
+			e.show()
+		}
 
 		if (fixed == null)
 			fixed = e.css().position == 'fixed'
@@ -1490,6 +1523,14 @@ let popup_state = function(e) {
 		if (e.popup_target_updated)
 			e.popup_target_updated(target, side1, align1)
 
+	}
+
+	function update() {
+		if (!should_show()) {
+			e.hide()
+			return
+		}
+		do_update()
 	}
 
 	return s

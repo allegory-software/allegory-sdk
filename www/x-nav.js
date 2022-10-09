@@ -392,7 +392,7 @@ loading & saving from/to memory:
 
 display val & text val:
 	publishes:
-		e.cell_display_val_for(row, field, v, v0)
+		e.cell_display_val_for(row, field, v, display_val_to_update)
 		e.cell_display_val(row, field)
 		e.cell_text_val(row, field)
 	calls:
@@ -3006,6 +3006,7 @@ function nav_widget(e) {
 
 		e.do_update_cell_editing(e.focused_row_index, e.focused_field_index, false)
 
+		// TODO: causes reflow
 		if (had_focus)
 			e.focus()
 
@@ -3116,7 +3117,7 @@ function nav_widget(e) {
 		return ln.cell_display_val(ln_row, df)
 	}
 
-	e.cell_display_val_for = function(row, field, v, v0) {
+	e.cell_display_val_for = function(row, field, v, display_val_to_update) {
 		if (v == null)
 			return null_display_val(row, field)
 		if (v === '')
@@ -3127,7 +3128,7 @@ function nav_widget(e) {
 			if (row)
 				return ln.cell_display_val(row, field.display_field)
 		}
-		return field.format(v, row, v0)
+		return field.format(v, row, display_val_to_update)
 	}
 
 	e.cell_display_val = function(row, field) {
@@ -5231,28 +5232,31 @@ component('x-lookup-dropdown', function(e) {
 	let place = {}
 	field_types.place = place
 
-	place.format_pin = function(v) {
-		let pin = span({
+	place.format_pin = function() {
+		return span({
 			class: 'x-place-pin fa fa-map-marker-alt',
 			title: S('view_on_google_maps', 'View on Google Maps')
 		})
-		let place_id = isobject(v) && v.place_id
-		pin.class('disabled', !place_id)
-		if (place_id) {
-			pin.onpointerdown = function(ev) {
-				ev.preventDefault()
-				ev.stopPropagation()
-				ev.stopImmediatePropagation()
-				window.open('https://www.google.com/maps/place/?q=place_id:'+v.place_id, '_blank')
-				return false
-			}
-		}
-		return pin
 	}
 
-	place.format = function(v) {
-		let pin = this.format_pin(v)
-		return span(0, pin, isobject(v) ? v.description : v || '')
+	place.format = function(v, row, place) {
+		if (!place) {
+			let pin = this.format_pin()
+			pin.onpointerdown = function(ev) {
+				if (this.place_id) {
+					window.open('https://www.google.com/maps/place/?q=place_id:'+this.place_id, '_blank')
+					return false
+				}
+			}
+			let descr = span()
+			place = span(0, pin, descr)
+			place.pin = pin
+			place.descr = descr
+		}
+		place.pin.place_id = isobject(v) && v.place_id
+		place.pin.class('disabled', !place.pin.place_id)
+		place.descr.textContent = isobject(v) ? v.description : v || ''
+		return place
 	}
 
 	place.editor = function(opt) {

@@ -338,6 +338,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		e.class('modified', e.nav && row && field && e.nav.cell_modified(row, field))
 		e.invalid = e.nav && row && field && e.nav.cell_has_errors(row, field)
 		e.class('invalid', e.invalid)
+		// TODO: this is slow when scrolling a grid!
 		e.do_update_errors(e.errors)
 	}
 
@@ -1994,7 +1995,7 @@ component('x-placeedit', 'Input', function(e) {
 	editbox_widget(e)
 
 	e.pin_ct = span()
-	e.add(e.pin_ct)
+	e.focus_box.insert(0, e.pin_ct)
 
 	e.create_picker = function(opt) {
 
