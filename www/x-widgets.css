@@ -32,8 +32,8 @@
 	--x-padding-y-button            : .4em;
 	--x-padding-x-button            : .7em;
 	--x-padding-x-button-icon       : .4em;
-	--x-padding-x-input             : .5em; /* x-padding for inputs and grid cells */
-	--x-padding-y-input-top         :  4px; /* y-padding for inputs and grid cells */
+	--x-padding-x-input             :  5px; /* x-padding for inputs and grid cells; PIXELS ONLY! */
+	--x-padding-y-input-top         :  4px; /* y-padding for inputs and grid cells; PIXELS ONLY! */
 	--x-padding-y-input-bottom      :  2px; /* y-padding for inputs and grid cells */
 	--x-padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
 	--x-padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
@@ -120,8 +120,8 @@
 	--x-item-border-width          : 1px; /* needed to show rows with errors */
 
 	/* this is because Firefox refuses to set line-height for input tags */
-	--x-grid-cell-font-size        : 13px;
-	--x-grid-cell-line-height      : 18px; /* line-height of input tags for 13px font */
+	--x-grid-cell-font-size        : 13px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height      : 18px; /* PIXELS ONLY! line-height of input tags for 13px font */
 
 }
 
@@ -949,8 +949,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	/* layout content */
 	display: inline-flex;    /* the only way to get variable-width inputs */
 	align-items: baseline;   /* ...that are baseline-aligned */
-	padding-left  : calc(var(--x-item-border-width) + var(--x-padding-x-input));
-	padding-right : calc(var(--x-item-border-width) + var(--x-padding-x-input));
+	padding-top     : var(--x-padding-y-input-top);
+	padding-bottom  : var(--x-padding-y-input-bottom);
+	padding-left    : calc(var(--x-item-border-width) + var(--x-padding-x-input));
+	padding-right   : calc(var(--x-item-border-width) + var(--x-padding-x-input));
 	overflow: hidden;        /* label can overflow */
 }
 
@@ -966,8 +968,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	margin: 0;
 	border: 0;
 	padding: 0;
-	padding-top     : var(--x-padding-y-input-top);
-	padding-bottom  : var(--x-padding-y-input-bottom);
 	font-size: inherit;
 	font-family: inherit;
 	width: 100%;             /* stretch horizontally */
@@ -2887,7 +2887,11 @@ x-tabs-fixed-header {
 .x-widget.grid-editor > .x-focus-box {
 	border-radius: 0;
 	border: 0;
-	padding-top: var(--x-item-border-width); /* compensate, since we removed the border */
+	/* add border width, since we removed the border */
+	padding-top: calc(
+		var(--x-item-border-width) +
+		var(--x-padding-y-input-top)
+	);
 	background-color: var(--x-bg-grid-editor);
 }
 
