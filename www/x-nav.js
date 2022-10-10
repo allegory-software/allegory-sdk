@@ -321,8 +321,6 @@ updating row state:
 	publishes:
 		e.set_row_state(key, val, default_val)
 		e.revert_row()
-	calls:
-		e.do_update_row_state(ri, changes, ev)
 
 updating rowset:
 	publishes:
@@ -2463,7 +2461,6 @@ function nav_widget(e) {
 
 	{
 	e.do_update_cell_state = noop
-	e.do_update_row_state = noop
 
 	let csc, rsc, row, ev, depth
 
@@ -2496,7 +2493,6 @@ function nav_widget(e) {
 				e.fire('focused_row_cell_state_changed_for_'+field.name, row, field, changes, ev)
 			}
 		}
-		e.do_update_row_state(ri, rsc, ev)
 		e.fire('row_state_changed', row, rsc, ev)
 		if (row == e.focused_row)
 			e.fire('focused_row_state_changed', row, rsc, ev)
@@ -3104,8 +3100,9 @@ function nav_widget(e) {
 		}
 	}
 
-	function null_display_val(row, field) {
+	function get_or_draw_null_display_val(row, field, cx) {
 		let s = field.null_text
+		assert(s != null)
 		if (!field.null_lookup_col)
 			return s
 		let lf = e.all_fields[field.null_lookup_col]      ; if (!lf || !lf.lookup_cols) return s
@@ -3114,12 +3111,23 @@ function nav_widget(e) {
 		let ln_row = ln.lookup(lf.lookup_cols, [nfv])[0]  ; if (!ln_row) return s
 		let dcol = or(field.null_display_col, field.name)
 		let df = ln.all_fields[dcol]                      ; if (!df) return s
-		return ln.cell_display_val(ln_row, df)
+		if (cx) {
+			let v = ln.cell_input_val(ln_row, df)
+			ln.draw_cell_val(ln_row, df, v, cx)
+		} else {
+			return ln.cell_display_val(ln_row, df)
+		}
 	}
+	function draw_null_display_val(row, field, cx) {
+		let s = get_or_draw_null_display_val(row, field, cx)
+		if (s != null) // wasn't drawn
+			e.draw_cell_val(row, field, s, cx)
+	}
+	let get_null_display_val = get_or_draw_null_display_val
 
 	e.cell_display_val_for = function(row, field, v, display_val_to_update) {
 		if (v == null)
-			return null_display_val(row, field)
+			return get_null_display_val(row, field)
 		if (v === '')
 			return field.empty_text
 		let ln = field.lookup_nav
@@ -3129,6 +3137,26 @@ function nav_widget(e) {
 				return ln.cell_display_val(row, field.display_field)
 		}
 		return field.format(v, row, display_val_to_update)
+	}
+
+	e.draw_cell_val = function(row, field, v, cx) {
+		if (v == null) {
+			draw_null_display_val(row, field, cx)
+			return
+		}
+		if (v === '') {
+			field.draw(field.empty_text, cx, row)
+			return
+		}
+		let ln = field.lookup_nav
+		if (ln && field.lookup_fields && field.display_field) {
+			let row = ln.lookup(field.lookup_fields, [v])[0]
+			if (row) {
+				ln.draw_cell_val(row, field.display_field)
+				return
+			}
+		}
+		field.draw(v, cx, row)
 	}
 
 	e.cell_display_val = function(row, field) {
@@ -4812,6 +4840,23 @@ component('x-lookup-dropdown', function(e) {
 
 	all_field_types.format = function(v) {
 		return String(v)
+	}
+
+	all_field_types.draw = function(v, cx) {
+		let s = String(v)
+		if (cx.measure) {
+			cx.measured_width = cx.measureText(s).width
+			return
+		}
+		let x
+		if (this.align == 'right')
+			x = cx.cw
+		else if (this.align == 'center')
+			x = cx.cw / 2
+		else
+			x = 0
+		cx.textAlign = this.align
+		cx.fillText(s, x, cx.baseline)
 	}
 
 	all_field_types.editor = function(opt) {
