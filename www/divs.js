@@ -226,6 +226,8 @@ method(Element, 'css', function(prop, state) {
 	return prop ? css[prop] : css
 })
 
+alias(CSSStyleDeclaration, 'prop', 'getPropertyValue')
+
 // dom tree navigation for elements, skipping text nodes ---------------------
 
 alias(Element, 'at'     , 'children')
@@ -1131,7 +1133,30 @@ easing.bounce = function(t) {
 	}
 }
 
-raf = requestAnimationFrame
+function raf(f, last_id) {
+	return last_id == null ? requestAnimationFrame(f) : last_id
+}
+cancel_raf = cancelAnimationFrame
+
+raf_wrap.cancel = obj()
+
+function raf_wrap(f) {
+	let id
+	function wf() {
+		id = null
+		f()
+	}
+	return function(cancel) {
+		if (cancel == raf_wrap.cancel) {
+			if (id != null) {
+				cancel_raf(id)
+				id = null
+			}
+		} else {
+			id = raf(wf, id)
+		}
+	}
+}
 
 function transition(f, dt, y0, y1, ease_f, ease_way, ...ease_args) {
 	dt = or(dt, 1)
@@ -1142,7 +1167,7 @@ function transition(f, dt, y0, y1, ease_f, ease_way, ...ease_args) {
 	let e = {}
 	e.stop = function() {
 		if (raf_id)
-			cancelAnimationFrame(raf_id)
+			cancel_raf(raf_id)
 		finished = true
 	}
 	let wrapper = function(t) {
@@ -1622,7 +1647,8 @@ function live_move_mixin(e) {
 
 	let move_i1, move_i2, i1, i2, i1x, i2x, offsetx
 	let move_x, over_i, over_p, over_x
-	let sizes
+	let sizes = []
+	let positions = []
 
 	e.move_element_start = function(move_i, move_n, _i1, _i2, _i1x, _i2x, _offsetx) {
 		move_n = or(move_n, 1)
@@ -1636,7 +1662,8 @@ function live_move_mixin(e) {
 		i1x = _i1x
 		i2x = _i2x
 		offsetx = _offsetx || 0
-		sizes = []
+		sizes    .length = i2 - i1
+		positions.length = i2 - i1
 		for (let i = i1; i < i2; i++)
 			sizes[i] = e.movable_element_size(i)
 		if (i1x == null) {
@@ -1703,6 +1730,7 @@ function live_move_mixin(e) {
 	function set_moving_element_pos(x, moving) {
 		if (move_ri1 != null)
 			for (let i = move_ri1; i < move_ri2; i++) {
+				positions[i] = offsetx + x
 				e.set_movable_element_pos(i, offsetx + x, moving)
 				x += sizes[i]
 			}
@@ -1725,13 +1753,16 @@ function live_move_mixin(e) {
 						over_x = or(over_x, x)
 						move_ri1 = or(move_ri1, i)
 						move_ri2 = i+1
-					} else
+					} else {
+						positions[i] = offsetx + x
 						e.set_movable_element_pos(i, offsetx + x)
+					}
 					x += sizes[i]
 				})
 			}
 			set_moving_element_pos(move_x, true)
 		}
+		return positions
 	}
 
 	return e
