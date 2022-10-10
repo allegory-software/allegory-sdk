@@ -1247,7 +1247,10 @@ function editbox_widget(e, opt) {
 		}
 
 		e.set_text_min_w = function(w) {
-			e.focus_box.min_w = w
+			let ps = words(e.focus_box.css('padding'))
+			let px1 = or(num(ps[1]), 0)
+			let px2 = or(num(ps[3]), px1)
+			e.focus_box.min_w = w + px1 + px2
 		}
 
 	}
