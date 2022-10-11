@@ -62,6 +62,7 @@ component('x-grid', 'Input', function(e) {
 	e.bg_new                     = css.prop('--x-bg-new')
 	e.bg_modified                = css.prop('--x-bg-modified')
 	e.bg_new_modified            = css.prop('--x-bg-new-modified')
+	e.bg_moving                  = css.prop('--x-bg-moving')
 
 	e.auto_w = false
 	e.auto_h = false
@@ -625,7 +626,7 @@ component('x-grid', 'Input', function(e) {
 		cx.stroke()
 
 		// background & text color
-		let bg // drawing a background is slow, so we avoid it when we can.
+		let bg = moving && e.bg_moving // drawing a background is slow, so we avoid it when we can.
 		let fg = e.fg
 
 		if (cell_focused)
@@ -756,7 +757,8 @@ component('x-grid', 'Input', function(e) {
 
 	function update_cells() {
 		cx.clearRect(0, 0, e.cells.width, e.cells.height)
-		if (row_move_state) {
+		let s = row_move_state
+		if (s) {
 			update_cells_range(e.rows, s.vri1,      s.vri2     , 0, e.fields.length)
 			update_cells_range(s.rows, s.move_vri1, s.move_vri2, 0, e.fields.length, 'row')
 		} else if (col_move_fi != null) {

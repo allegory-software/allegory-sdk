@@ -49,6 +49,7 @@
 	--x-p               : #444;  /* multiline text on normal backgrounds */
 	--x-fg-inverted     : #fff;  /* text on inverted backgrounds */
 	--x-bg              : #fff;  /* bg for regions that need to be opaque */
+	--x-bg-moving       : #ffffffaa;
 	--x-bg-popup        : #fff;  /* bg for popups and inline grid editors */
 	--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
 	--x-fg-disabled     : #00000066;  /* faded text on light bg */
@@ -3310,6 +3311,7 @@ x-prop-inspector .x-grid-cell:not(.modified) {
 	--x-fg-inverted          : #fff;
 	--x-p                    : #bbb;
 	--x-bg                   : #0d1117;
+	--x-bg-moving            : #0d1117aa;
 	--x-fg-info              : var(--x-fg-inverted);
 	--x-bg-popup             : #1d2532;
 	--x-bg-popup2            : #11161e;
