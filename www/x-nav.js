@@ -3036,7 +3036,8 @@ function nav_widget(e) {
 		e.exit_edit(ev)
 		if (cancel)
 			return
-		e.validate_row(row)
+		if (row.modified || row.is_new)
+			e.validate_row(row)
 		if (e.save_on_exit_row)
 			e.save(ev)
 	}
