@@ -1477,7 +1477,7 @@ let popup_state = function(e) {
 
 	function do_update() {
 
-		if (!target.effectively_hidden) { // slow-to-calculate
+		if (target.effectively_hidden) { // slow-to-calculate
 			e.hide()
 			return
 		} else {
