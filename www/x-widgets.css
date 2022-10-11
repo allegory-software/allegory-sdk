@@ -103,21 +103,20 @@
 	--x-outline-focused            : #000;
 
 	/* these need to be opaque! */
-	--x-item-bg-unfocused          : #999;
-	--x-item-bg-focused            : #ddd;
-	--x-item-bg-unfocused-selected : #333;
-	--x-item-fg-unfocused-selected : var(--x-fg-inverted);
-	--x-item-bg-focused-selected   : #258;
-	--x-item-bg-focused-invalid    : #f33;
-	--x-item-bg-unselected         : #888;
-	--x-item-fg-unselected         : var(--x-fg-inverted);
-	--x-item-bg-selected           : #69c;
-	--x-item-fg-selected           : var(--x-fg-inverted);
-	--x-row-bg-focused             : #eee;
+	--x-bg-unfocused          : #999;
+	--x-bg-focused            : #ddd;
+	--x-bg-unfocused-selected : #333;
+	--x-fg-unfocused-selected : var(--x-fg-inverted);
+	--x-bg-focused-selected   : #258;
+	--x-bg-focused-invalid    : #f33;
+	--x-bg-unselected         : #888;
+	--x-bg-selected           : #69c;
+	--x-fg-selected           : var(--x-fg-inverted);
+	--x-bg-row-focused             : #eee;
 
 	--x-bg-grid-editor             : var(--x-bg-popup);
 
-	--x-item-border-width          : 1px; /* needed to show rows with errors */
+	--x-border-width-item          : 1px; /* PIXELS ONLY! needed to show rows with errors */
 
 	/* this is because Firefox refuses to set line-height for input tags */
 	--x-grid-cell-font-size        : 13px; /* PIXELS ONLY! */
@@ -283,38 +282,38 @@ don't show a focus outline on the entire widget, but only show an inside
 }
 
 .x-focusable-items .x-item:not(.focused).selected:not(.invalid) {
-	background-color: var(--x-item-bg-unselected);
+	background-color: var(--x-bg-unselected);
 	color: var(--x-fg-unselected);
 }
 
 .x-focusable-items:focus-within .x-item.selected:not(.invalid) {
-	background-color: var(--x-item-bg-selected);
-	color: var(--x-item-fg-selected);
+	background-color: var(--x-bg-selected);
+	color: var(--x-fg-selected);
 }
 
 .x-item.row-focused:not(.selected):not(.invalid) {
-	background-color: var(--x-row-bg-focused);
+	background-color: var(--x-bg-row-focused);
 }
 
 .x-focusable-items .x-item.focused:not(.invalid) {
-	background-color: var(--x-item-bg-unfocused);
+	background-color: var(--x-bg-unfocused);
 }
 
 .x-focusable-items:focus-within .x-item.focused:not(.invalid) {
-	background-color: var(--x-item-bg-focused);
+	background-color: var(--x-bg-focused);
 }
 
 .x-focusable-items .x-item.focused.selected:not(.invalid) {
-	background-color: var(--x-item-bg-unfocused-selected);
-	color: var(--x-item-fg-unfocused-selected);
+	background-color: var(--x-bg-unfocused-selected);
+	color: var(--x-fg-unfocused-selected);
 }
 
 .x-focusable-items:focus-within .x-item.focused.selected:not(.invalid) {
-	background-color: var(--x-item-bg-focused-selected);
+	background-color: var(--x-bg-focused-selected);
 }
 
 .x-focusable-items:focus-within .x-item.focused.invalid {
-	background-color: var(--x-item-bg-focused-invalid);
+	background-color: var(--x-bg-focused-invalid);
 }
 
 /* scrollbars ------------------------------------------------------------- */
@@ -951,8 +950,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-items: baseline;   /* ...that are baseline-aligned */
 	padding-top     : var(--x-padding-y-input-top);
 	padding-bottom  : var(--x-padding-y-input-bottom);
-	padding-left    : calc(var(--x-item-border-width) + var(--x-padding-x-input));
-	padding-right   : calc(var(--x-item-border-width) + var(--x-padding-x-input));
+	padding-left    : calc(var(--x-border-width-item) + var(--x-padding-x-input));
+	padding-right   : calc(var(--x-border-width-item) + var(--x-padding-x-input));
 	overflow: hidden;        /* label can overflow */
 }
 
@@ -1326,7 +1325,7 @@ textarea.x-editbox-input {
 .x-slider-fill {
 	position: absolute;
 	height: 100%;
-	background-color: var(--x-item-bg-unfocused);
+	background-color: var(--x-bg-unfocused);
 	border-radius: 10em;
 }
 
@@ -1358,11 +1357,11 @@ textarea.x-editbox-input {
 }
 
 .x-slider:focus > .x-slider-value-fill {
-	background-color: var(--x-item-bg-focused);
+	background-color: var(--x-bg-focused);
 }
 
 .x-slider:focus > .x-slider-thumb {
-	border: 1px solid var(--x-item-bg-focused);
+	border: 1px solid var(--x-bg-focused);
 	background-color: var(--x-smoke);
 }
 
@@ -1440,7 +1439,7 @@ textarea.x-editbox-input {
 }
 
 .x-tagsedit.invalid > .x-tagsedit-tag {
-	background-color: var(--x-item-bg-focused-invalid);
+	background-color: var(--x-bg-focused-invalid);
 }
 
 .x-tagsedit.invalid > .x-tagsedit-tag > .x-tagsedit-tag-xbutton {
@@ -1551,7 +1550,7 @@ textarea.x-editbox-input {
 	padding-right  : var(--x-padding-x-input);
 	padding-top    : var(--x-padding-y-input-top);
 	padding-bottom : var(--x-padding-y-input-bottom);
-	border: var(--x-item-border-width) solid transparent; /* to match grid row height */
+	border: var(--x-border-width-item) solid transparent; /* to match grid row height */
 	/* behavior */
 	cursor: default;
 	position: relative; /* for item moving */
@@ -1637,7 +1636,7 @@ textarea.x-editbox-input {
 .x-item-progress-bar {
 	position: absolute;
 	top: 0; left: 0; bottom: 0;
-	background-color: var(--x-item-bg-selected);
+	background-color: var(--x-bg-selected);
 }
 
 .x-item-progress-text {
@@ -1898,12 +1897,12 @@ textarea.x-editbox-input {
 }
 
 .x-menu-tr.focused > :not(.x-menu-table) {
-	background-color: var(--x-item-bg-unfocused-selected);
-	color: var(--x-item-fg-unfocused-selected);
+	background-color: var(--x-bg-unfocused-selected);
+	color: var(--x-fg-unfocused-selected);
 }
 
 .x-menu:focus-within .x-menu-tr.focused > :not(.x-menu-table) {
-	background-color: var(--x-item-bg-focused-selected);
+	background-color: var(--x-bg-focused-selected);
 }
 
 .x-menu-tr > td {
@@ -2642,7 +2641,7 @@ x-tabs-fixed-header {
 	padding-right  : var(--x-padding-x-input);
 	padding-top    : var(--x-padding-y-input-top);
 	padding-bottom : var(--x-padding-y-input-bottom);
-	border: var(--x-item-border-width) solid #00000000;
+	border: var(--x-border-width-item) solid #00000000;
 	border-right-color: var(--x-faint);
 	border-bottom-color: var(--x-faint);
 	min-width: 20px;
@@ -2889,7 +2888,7 @@ x-tabs-fixed-header {
 	border: 0;
 	/* add border width, since we removed the border */
 	padding-top: calc(
-		var(--x-item-border-width) +
+		var(--x-border-width-item) +
 		var(--x-padding-y-input-top)
 	);
 	background-color: var(--x-bg-grid-editor);
@@ -3283,7 +3282,7 @@ x-prop-layers-inspector > .x-grid-header {
 }
 
 x-prop-inspector .x-grid-cell:not(.focused):not(.selected):not(.invalid).modified {
-	background-color: var(--x-row-bg-focused);
+	background-color: var(--x-bg-row-focused);
 }
 
 x-prop-inspector .x-grid-cell:not(.modified) {
@@ -3347,10 +3346,10 @@ x-prop-inspector .x-grid-cell:not(.modified) {
 	--x-outline-focused: #999;
 
 	/* these need to be opaque! */
-	--x-item-bg-unfocused-selected : #3a3f42;
-	--x-item-bg-unselected         : #1d2021;
-	--x-item-bg-selected           : #15385c;
-	--x-row-bg-focused             : #222;
+	--x-bg-unfocused-selected : #3a3f42;
+	--x-bg-unselected         : #1d2021;
+	--x-bg-selected           : #15385c;
+	--x-bg-row-focused        : #222;
 
 	--x-bg-grid-editor: #495560;
 

@@ -321,6 +321,8 @@ updating row state:
 	publishes:
 		e.set_row_state(key, val, default_val)
 		e.revert_row()
+	calls:
+		e.do_update_row_state(ri, changes, ev)
 
 updating rowset:
 	publishes:
@@ -2461,6 +2463,7 @@ function nav_widget(e) {
 
 	{
 	e.do_update_cell_state = noop
+	e.do_update_row_state = noop
 
 	let csc, rsc, row, ev, depth
 
@@ -2493,15 +2496,22 @@ function nav_widget(e) {
 				e.fire('focused_row_cell_state_changed_for_'+field.name, row, field, changes, ev)
 			}
 		}
-		e.fire('row_state_changed', row, rsc, ev)
-		if (row == e.focused_row)
-			e.fire('focused_row_state_changed', row, rsc, ev)
-		let changed = !!(count_keys(rsc, 1) || csc.size)
+		let row_state_changed = count_keys(rsc, 1)
+		if (row_state_changed) {
+			e.do_update_row_state(ri, rsc, ev)
+			e.fire('row_state_changed', row, rsc, ev)
+			if (row == e.focused_row)
+				e.fire('focused_row_state_changed', row, rsc, ev)
+		}
+		let changed = !!(row_state_changed || csc.size)
+		let vals_changed = csc.input_val
 		csc = null
 		rsc = null
 		row = null
 		ev = null
 		depth = null
+		if (changed)
+			e.update({state: true, vals: vals_changed})
 		return changed
 	}
 
@@ -3609,24 +3619,23 @@ function nav_widget(e) {
 		}
 		ri2 -= move_n // adjust to after removal.
 
-		let move_rows = e.rows.splice(move_ri1, move_n)
+		let rows = e.rows.splice(move_ri1, move_n)
 
 		let state = {
 			move_ri1: move_ri1,
 			move_ri2: move_ri2,
 			move_n: move_n,
+			rows: rows,
 			parent_row: parent_row,
 			ri1: ri1,
 			ri2: ri2,
 		}
 
-		state.rows = move_rows
-
 		state.finish = function(insert_ri, parent_row) {
 
-			e.rows.splice(insert_ri, 0, ...move_rows)
+			e.rows.splice(insert_ri, 0, ...rows)
 
-			let row = move_rows[0]
+			let row = rows[0]
 			let old_parent_row = row.parent_row
 
 			change_row_parent(row, parent_row)
