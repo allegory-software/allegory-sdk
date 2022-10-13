@@ -3131,8 +3131,8 @@ function nav_widget(e) {
 	}
 	function draw_null_display_val(row, field, cx) {
 		let s = get_or_draw_null_display_val(row, field, cx)
-		if (s != null) // wasn't drawn
-			e.draw_cell_val(row, field, s, cx)
+		if (s != null) // wasn't drawn but returned to be drawn.
+			field.draw(s, cx, row)
 	}
 	let get_null_display_val = get_or_draw_null_display_val
 
@@ -4865,6 +4865,7 @@ component('x-lookup-dropdown', function(e) {
 			x = cx.cw / 2
 		else
 			x = 0
+		cx.font = cx.text_font
 		cx.textAlign = this.align
 		cx.fillText(s, x, cx.baseline)
 	}
