@@ -332,6 +332,7 @@ component('x-grid', 'Input', function(e) {
 	var hit_x
 	var hit_ri, hit_fi
 	var hit_dx
+	var hit_indent
 	var row_move_state
 	var col_move_fi
 
@@ -570,10 +571,8 @@ component('x-grid', 'Input', function(e) {
 		}
 	}
 
-	e.indent_size = 16
-
 	function indent_offset(indent) {
-		return 12 + indent * e.indent_size
+		return floor(e.font_size * 1.5 + (e.font_size * 1.2) * indent)
 	}
 
 	function measure_cell_width(row, field) {
@@ -620,7 +619,7 @@ component('x-grid', 'Input', function(e) {
 		let indent = 0
 		let collapsed
 		if (field_has_indent(field)) {
-			indent = floor(indent_offset(row_indent(row)) + e.font_size / 2)
+			indent = floor(indent_offset(row_indent(row)))
 			let has_children = row.child_rows.length > 0
 			if (has_children)
 				collapsed = !!row.collapsed
@@ -667,7 +666,9 @@ component('x-grid', 'Input', function(e) {
 
 		let fg = e.fg
 
-		if (cell_focused)
+		if (editing)
+			bg = e.row_bg_focused
+		else if (cell_focused)
 			if (cell_invalid)
 				bg = e.bg_focused_invalid
 			else if (selected)
@@ -729,7 +730,7 @@ component('x-grid', 'Input', function(e) {
 
 			// tree node sign
 			if (collapsed != null) {
-				cx.fillStyle = e.bg_selected
+				cx.fillStyle = selected ? fg : e.bg_focused_selected
 				cx.font = cx.icon_font
 				let x = indent - e.font_size - 4
 				cx.fillText(collapsed ? '\uf146' : '\uf0fe', x, cx.baseline)
@@ -1260,14 +1261,25 @@ component('x-grid', 'Input', function(e) {
 	// cell clicking ----------------------------------------------------------
 
 	function ht_cell_horiz(mx, my) {
+		hit_ri = floor(my / e.cell_h)
+		if (!(hit_ri >= 0 && hit_ri <= e.rows.length - 1))
+			return
+		let row = e.rows[hit_ri]
 		for (let fi = 0; fi < e.fields.length; fi++) {
 			let field = e.fields[fi]
 			let x = mx - field._x
 			if (x >= 0 && x <= field._w) {
 				hit_fi = fi
 				hit_x = x
-				hit_ri = floor(my / e.cell_h)
-				return hit_ri >= 0 && hit_ri <= e.rows.length - 1
+				hit_indent = false
+				if (field_has_indent(field)) {
+					let has_children = row.child_rows.length > 0
+					if (has_children) {
+						let indent = indent_offset(row_indent(row))
+						hit_indent = hit_x <= indent
+					}
+				}
+				return true
 			}
 		}
 	}
@@ -1299,15 +1311,13 @@ component('x-grid', 'Input', function(e) {
 
 	function md_row_drag(ev, mx, my, shift, ctrl) {
 
-		let over_indent // TODO
-
 		if (!e.hasfocus)
 			e.focus()
 
 		let row = e.rows[hit_ri]
 		let field = e.fields[hit_fi]
 
-		if (over_indent)
+		if (hit_indent)
 			e.toggle_collapsed(row, shift)
 
 		let already_on_it =
@@ -1323,7 +1333,7 @@ component('x-grid', 'Input', function(e) {
 		return e.focus_cell(hit_ri, hit_fi, 0, 0, {
 			must_not_move_col: true,
 			must_not_move_row: true,
-			enter_edit: !over_indent
+			enter_edit: !hit_indent
 				&& !ctrl && !shift
 				&& ((e.enter_edit_on_click || click)
 					|| (e.enter_edit_on_click_focused && already_on_it)),
@@ -2012,6 +2022,8 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	e.on('dblclick', function(ev) {
+		if (hit_indent)
+			return
 		let field = e.fields[hit_fi]
 		if (field.cell_dblclick) {
 			let row = e.rows[hit_ri]
