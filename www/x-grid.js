@@ -29,50 +29,55 @@ component('x-grid', 'Input', function(e) {
 	e.class('x-focusable-items')
 	stylable_widget(e)
 
-	let css = e.css()
+	function theme_changed() {
 
-	// css geometry
-	e.text_font_family = css['font-family']
-	e.icon_font_family = 'fontawesome'
-	e.font_size   = num(css['font-size'])
-	e.line_height = num(css.prop('--x-grid-cell-line-height'))
-	e.padding_x   = num(css.prop('--x-padding-x-input'))
-	e.padding_y1  = num(css.prop('--x-padding-y-input-top'))
-	e.padding_y2  = num(css.prop('--x-padding-y-input-bottom'))
-	e.cell_h      = num(css.prop('--x-grid-cell-h'))
+		let css = e.css()
 
-	// css colors
-	e.border_width               = num(css.prop('--x-border-width-item'))
-	e.border_color               = css.prop('--x-faint')
-	e.bg                         = css.prop('--x-bg')
-	e.fg                         = css.prop('--x-fg')
-	e.fg_disabled                = css.prop('--x-fg-disabled')
-	e.fg_search                  = css.prop('--x-fg-search')
-	e.bg_search                  = css.prop('--x-bg-search')
-	e.bg_error                   = css.prop('--x-bg-error')
-	e.bg_unfocused               = css.prop('--x-bg-unfocused')
-	e.bg_focused                 = css.prop('--x-bg-focused')
-	e.bg_unfocused_selected      = css.prop('--x-bg-unfocused-selected')
-	e.fg_unfocused_selected      = css.prop('--x-fg-unfocused-selected')
-	e.bg_focused_selected        = css.prop('--x-bg-focused-selected')
-	e.bg_focused_invalid         = css.prop('--x-bg-focused-invalid')
-	e.bg_unselected              = css.prop('--x-bg-unselected')
-	e.bg_selected                = css.prop('--x-bg-selected')
-	e.fg_selected                = css.prop('--x-fg-selected')
-	e.row_bg_focused             = css.prop('--x-bg-row-focused')
-	e.bg_new                     = css.prop('--x-bg-new')
-	e.bg_modified                = css.prop('--x-bg-modified')
-	e.bg_new_modified            = css.prop('--x-bg-new-modified')
-	e.bg_moving                  = css.prop('--x-bg-moving')
+		// css geometry
+		e.text_font_family = css['font-family']
+		e.icon_font_family = 'fontawesome'
+		e.font_size   = num(css['font-size'])
+		e.line_height = num(css.prop('--x-grid-cell-line-height'))
+		e.padding_x   = num(css.prop('--x-padding-x-input'))
+		e.padding_y1  = num(css.prop('--x-padding-y-input-top'))
+		e.padding_y2  = num(css.prop('--x-padding-y-input-bottom'))
+		e.cell_h      = num(css.prop('--x-grid-cell-h'))
 
-	e.auto_w = false
-	e.auto_h = false
-	e.header_w = 120            // vertical grid
-	e.cell_w = 120              // vertical grid
-	e.text_font = e.font_size + 'px ' + e.text_font_family
-	e.icon_font = e.font_size + 'px ' + e.icon_font_family
-	e.cell_h = e.cell_h || round(e.font_size * 2)
-	e.baseline = e.line_height - e.padding_y1
+		// css colors
+		e.border_width               = num(css.prop('--x-border-width-item'))
+		e.border_color               = css.prop('--x-faint')
+		e.bg                         = css.prop('--x-bg')
+		e.fg                         = css.prop('--x-fg')
+		e.fg_disabled                = css.prop('--x-fg-disabled')
+		e.fg_search                  = css.prop('--x-fg-search')
+		e.bg_search                  = css.prop('--x-bg-search')
+		e.bg_error                   = css.prop('--x-bg-error')
+		e.bg_unfocused               = css.prop('--x-bg-unfocused')
+		e.bg_focused                 = css.prop('--x-bg-focused')
+		e.bg_unfocused_selected      = css.prop('--x-bg-unfocused-selected')
+		e.fg_unfocused_selected      = css.prop('--x-fg-unfocused-selected')
+		e.bg_focused_selected        = css.prop('--x-bg-focused-selected')
+		e.bg_focused_invalid         = css.prop('--x-bg-focused-invalid')
+		e.bg_unselected              = css.prop('--x-bg-unselected')
+		e.bg_selected                = css.prop('--x-bg-selected')
+		e.fg_selected                = css.prop('--x-fg-selected')
+		e.row_bg_focused             = css.prop('--x-bg-row-focused')
+		e.bg_new                     = css.prop('--x-bg-new')
+		e.bg_modified                = css.prop('--x-bg-modified')
+		e.bg_new_modified            = css.prop('--x-bg-new-modified')
+		e.bg_moving                  = css.prop('--x-bg-moving')
+
+		e.auto_w = false
+		e.auto_h = false
+		e.header_w = 120            // vertical grid
+		e.cell_w = 120              // vertical grid
+		e.text_font = e.font_size + 'px ' + e.text_font_family
+		e.icon_font = e.font_size + 'px ' + e.icon_font_family
+		e.cell_h = e.cell_h || round(e.font_size * 2)
+		e.baseline = e.line_height - e.padding_y1
+
+		e.update({sizes: true})
+	}
 
 	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: false}) // horizontal grid
 
@@ -123,6 +128,8 @@ component('x-grid', 'Input', function(e) {
 
 	e.on('bind', function(on) {
 		document.on('layout_changed', layout_changed, on)
+		document.on('theme_changed', theme_changed, on)
+		theme_changed()
 	})
 
 	// cell widths ------------------------------------------------------------
