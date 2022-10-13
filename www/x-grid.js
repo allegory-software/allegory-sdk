@@ -18,8 +18,6 @@ uses:
 	...
 implements:
 	nav widget protocol.
-calls:
-	e.do_update_cell_val(cell, row, field, input_val, display_val)
 --------------------------------------------------------------------------- */
 
 component('x-grid', 'Input', function(e) {
@@ -49,6 +47,8 @@ component('x-grid', 'Input', function(e) {
 	e.bg                         = css.prop('--x-bg')
 	e.fg                         = css.prop('--x-fg')
 	e.fg_disabled                = css.prop('--x-fg-disabled')
+	e.fg_search                  = css.prop('--x-fg-search')
+	e.bg_search                  = css.prop('--x-bg-search')
 	e.bg_error                   = css.prop('--x-bg-error')
 	e.bg_unfocused               = css.prop('--x-bg-unfocused')
 	e.bg_focused                 = css.prop('--x-bg-focused')
@@ -561,16 +561,6 @@ component('x-grid', 'Input', function(e) {
 		e.empty_rt.hidden = e.rows.length > 0
 	}
 
-	e.do_update_cell_val = function(cell, row, field, input_val, display_val) {
-		let node = cell.nodes[cell.indent ? 1 : 0]
-		if (cell.qs_div) { // value is wrapped
-			node.replace(node.nodes[0], display_val)
-			cell.qs_div.clear()
-		} else {
-			cell.replace(node, display_val)
-		}
-	}
-
 	function indent_offset(indent) {
 		return floor(e.font_size * 1.5 + (e.font_size * 1.2) * indent)
 	}
@@ -616,34 +606,24 @@ component('x-grid', 'Input', function(e) {
 			w = max(w, measure_cell_width(row, field) + 2*px)
 		}
 
-		let indent = 0
+		let indent_x = 0
 		let collapsed
 		if (field_has_indent(field)) {
-			indent = floor(indent_offset(row_indent(row)))
+			indent_x = indent_offset(row_indent(row))
 			let has_children = row.child_rows.length > 0
 			if (has_children)
 				collapsed = !!row.collapsed
+			let s = row_move_state
+			if (s) {
+				// show minus sign on adopting parent.
+				if (row == s.hit_parent_row && collapsed == null)
+					collapsed = false
+
+				// shift indent on moving rows so it gets under the adopting parent.
+				if (draw_state == 'moving_rows')
+					indent_x += s.hit_indent_x - s.indent_x
+			}
 		}
-
-		/*
-		if (draw_state == 'moving_rows' && row && field_has_indent(e.fields[fi]))
-			indent = hit_indent
-				+ row_indent(row)
-				- row_indent(e.rows[row_move_state.move_ri1])
-
-		if (cell.ri != ri || ri == null)
-			update_cell_content(cell, row, ri, fi, focused, indent)
-		else if (cell.indent)
-			set_cell_indent(cell.indent, indent)
-
-		cell.class('moving-parent-cell',
-			row == hit_parent_row && field == e.tree_field)
-
-		if (ri != null && focused)
-			update_editor(
-				 horiz ? null : xy,
-				!horiz ? null : xy, hit_indent)
-		*/
 
 		cx.save()
 		cx.translate(x, y)
@@ -732,13 +712,14 @@ component('x-grid', 'Input', function(e) {
 			if (collapsed != null) {
 				cx.fillStyle = selected ? fg : e.bg_focused_selected
 				cx.font = cx.icon_font
-				let x = indent - e.font_size - 4
-				cx.fillText(collapsed ? '\uf146' : '\uf0fe', x, cx.baseline)
+				let x = indent_x - e.font_size - 4
+				cx.fillText(collapsed ? '\uf0fe' : '\uf146', x, cx.baseline)
 			}
 
 			// text
-			cx.translate(indent, 0)
-			cx.fillStyle = fg
+			cx.translate(indent_x, 0)
+			cx.fg_text = fg
+			cx.quicksearch_len = cell_focused && e.quicksearch_text.length || 0
 			e.draw_cell_val(row, field, input_val, cx)
 
 			cx.restore()
@@ -764,6 +745,13 @@ component('x-grid', 'Input', function(e) {
 		//  		.join('\n')
 		// cell.attr('title', s)
 		//
+
+		// TODO:
+		//if (ri != null && focused)
+		//	update_editor(
+		//		 horiz ? null : xy,
+		//		!horiz ? null : xy, hit_indent)
+
 
 	}
 
@@ -840,6 +828,8 @@ component('x-grid', 'Input', function(e) {
 		cx.text_font = e.text_font
 		cx.icon_font = e.icon_font
 		cx.baseline = e.baseline
+		cx.bg_search = e.bg_search
+		cx.fg_search = e.fg_search
 		if (hit_state == 'row_moving') {
 			let s = row_move_state
 			update_cells_range(e.rows, s.vri1,      s.vri2     , 0, e.fields.length)
@@ -863,7 +853,6 @@ component('x-grid', 'Input', function(e) {
 		// TODO: use e.begin_update() / e.update() instead of update_cells()
 		if (update_scroll())
 			update_cells()
-		update_quicksearch_cell()
 		update_row_error_tooltip_position()
 	}
 
@@ -912,35 +901,6 @@ component('x-grid', 'Input', function(e) {
 
 	e.do_focus_row = function(row) {
 		update_row_error_tooltip(row)
-	}
-
-	// quicksearch highlight --------------------------------------------------
-
-	let qs_div
-	function update_quicksearch_cell() {
-		if (qs_div)
-			qs_div.clear()
-		let row = e.focused_row
-		let field = e.quicksearch_field
-		let s = e.quicksearch_text
-		if (!(row && field))
-			return
-		let cell = e.cells.nodes[cell_index(e.row_index(row), field.index)]
-		if (!cell)
-			return
-		if (!isstr(cell.display_val))
-			return
-		let prefix = s ? e.cell_input_val(row, field).slice(0, s.length) : null
-		if (prefix && !cell.qs_div) {
-			cell.qs_div = div({class: 'x-grid-qs-text'})
-			let val_node = cell.nodes[cell.indent ? 1 : 0]
-			val_node.remove()
-			let wrapper = div({style: 'position: relative'}, val_node, cell.qs_div)
-			cell.add(wrapper)
-		}
-		if (cell.qs_div)
-			cell.qs_div.set(prefix)
-		qs_div = cell.qs_div
 	}
 
 	// resize guides ----------------------------------------------------------
@@ -1047,7 +1007,6 @@ component('x-grid', 'Input', function(e) {
 			cx.measure = false
 			e.editor.set_text_min_w(max(20, cx.measured_width))
 		}
-
 	}
 
 	let create_editor = e.create_editor
@@ -1123,8 +1082,6 @@ component('x-grid', 'Input', function(e) {
 			update_cells_async()
 		if (opt_sizes || opt.sort_order)
 			update_row_error_tooltip_position()
-		if (opt_rows || opt.state)
-			update_quicksearch_cell()
 		if (opt.val)
 			inh_do_update()
 		if (opt.enter_edit)
@@ -1275,8 +1232,8 @@ component('x-grid', 'Input', function(e) {
 				if (field_has_indent(field)) {
 					let has_children = row.child_rows.length > 0
 					if (has_children) {
-						let indent = indent_offset(row_indent(row))
-						hit_indent = hit_x <= indent
+						let indent_x = indent_offset(row_indent(row))
+						hit_indent = hit_x <= indent_x
 					}
 				}
 				return true
@@ -1374,6 +1331,8 @@ component('x-grid', 'Input', function(e) {
 
 		let s = e.start_move_selected_rows({input: e})
 		row_move_state = s
+		if (!s)
+			return
 
 		let ri1       = s.ri1
 		let ri2       = s.ri2
@@ -1388,7 +1347,6 @@ component('x-grid', 'Input', function(e) {
 		let hit_x
 		let hit_over_ri = move_ri1
 		let hit_parent_row = s.parent_row
-		let hit_indent
 
 		let xof       = (ri => ri * w)
 		let final_xof = (ri => xof(ri) + (ri < hit_over_ri ? 0 : move_n) * w)
@@ -1409,8 +1367,9 @@ component('x-grid', 'Input', function(e) {
 			return 1 + e.expanded_child_row_count(before_ri)
 		}
 
+		s.indent_x = indent_offset(row_indent(e.rows[move_ri1]))
+
 		function update_hit_parent_row(hit_p) {
-			hit_indent = null
 			hit_parent_row = e.rows[hit_over_ri] ? e.rows[hit_over_ri].parent_row : null
 			if (horiz && e.tree_field && e.can_change_parent) {
 				let row1 = e.rows[hit_over_ri-1]
@@ -1420,9 +1379,11 @@ component('x-grid', 'Input', function(e) {
 				// if the row can be a child of the row above,
 				// the indent right limit is increased one unit.
 				let ii1 = i1 + (row1 && !row1.collapsed && e.row_can_have_children(row1) ? 1 : 0)
-				hit_indent = min(floor(lerp(hit_p, 0, 1, ii1 + 1, i2)), ii1)
+				let hit_indent = min(floor(lerp(hit_p, 0, 1, ii1 + 1, i2)), ii1)
 				let parent_i = i1 - hit_indent
 				hit_parent_row = parent_i >= 0 ? row1 && row1.parent_rows[parent_i] : row1
+				s.hit_indent_x = indent_offset(hit_indent)
+				s.hit_parent_row = hit_parent_row
 			}
 		}
 
@@ -1635,6 +1596,7 @@ component('x-grid', 'Input', function(e) {
 
 		let scroll_timer = runevery(.1, mm_row_move)
 
+		return true
 	}
 
 	// column moving ----------------------------------------------------------
@@ -1886,9 +1848,10 @@ component('x-grid', 'Input', function(e) {
 			mm_col_move(mx, my)
 		} else if (hit_state == 'row_dragging') {
 			if (ht_row_move(mx, my)) {
-				hit_state = 'row_moving'
-				md_row_move(mx, my)
-				mm_row_move(mx, my)
+				if (md_row_move(mx, my)) {
+					hit_state = 'row_moving'
+					mm_row_move(mx, my)
+				}
 			}
 		} else if (hit_state == 'row_moving') {
 			mm_row_move(mx, my)
@@ -2015,11 +1978,6 @@ component('x-grid', 'Input', function(e) {
 		if (!(hit_ri != null && hit_fi != null)) return
 		e.fire('cell_click', hit_ri, hit_fi, ev)
 	})
-
-	let cell_val_node = function(cell) {
-		let node = cell.nodes[cell.indent ? 1 : 0]
-		return cell.qs_div ? node.nodes[0] : node
-	}
 
 	e.on('dblclick', function(ev) {
 		if (hit_indent)

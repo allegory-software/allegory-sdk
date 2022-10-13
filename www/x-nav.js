@@ -3695,6 +3695,17 @@ function nav_widget(e) {
 	e.start_move_selected_rows = function(ev) {
 		let focused_ri  = e.focused_row_index
 		let selected_ri = or(e.selected_row_index, focused_ri)
+		if (e.parent_field) {
+			// can only move items of the same parent
+			let ri1 = min(focused_ri, selected_ri)
+			let ri2 = max(focused_ri, selected_ri)
+			let parent_row = e.rows[ri1].parent_row
+			for (let ri = ri1; ri <= ri2; ri++) {
+				let row = e.rows[ri]
+				if (row.parent_row != parent_row)
+					return
+			}
+		}
 		return move_rows_state(focused_ri, selected_ri, ev)
 	}
 
@@ -4853,7 +4864,7 @@ component('x-lookup-dropdown', function(e) {
 	}
 
 	all_field_types.draw = function(v, cx) {
-		let s = String(v)
+		let s = this.to_text(v)
 		if (cx.measure) {
 			cx.measured_width = cx.measureText(s).width
 			return
@@ -4867,7 +4878,19 @@ component('x-lookup-dropdown', function(e) {
 			x = 0
 		cx.font = cx.text_font
 		cx.textAlign = this.align
+		cx.fillStyle = cx.fg_text
 		cx.fillText(s, x, cx.baseline)
+		if (cx.quicksearch_len) {
+			let s1 = s.slice(0, cx.quicksearch_len)
+			let m = cx.measureText(s1)
+			cx.fillStyle = cx.bg_search
+			cx.beginPath()
+			cx.rect(0, cx.baseline - m.fontBoundingBoxAscent, m.width,
+				m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
+			cx.fill()
+			cx.fillStyle = cx.fg_search
+			cx.fillText(s1, x, cx.baseline)
+		}
 	}
 
 	all_field_types.editor = function(opt) {

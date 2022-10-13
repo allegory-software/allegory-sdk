@@ -763,6 +763,7 @@ component('x-prop-inspector', function(e) {
 		e.fire('prop_inspector_changed')
 	}
 
+	// TODO: this is not in grid anymore...
 	let inh_do_update_cell_val = e.do_update_cell_val
 	e.do_update_cell_val = function(cell, row, field, input_val) {
 		inh_do_update_cell_val(cell, row, field, input_val)
