@@ -765,6 +765,7 @@ function render_file(file, data, partials)
 end
 
 function mustache_wrap(s, name)
+	s = s:gsub('</script>', '<{{undefined}}/script>')
 	return '<script type="text/x-mustache" id="'..name..
 		'_template">\n'..s..'\n</script>\n'
 end
