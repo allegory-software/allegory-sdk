@@ -29,6 +29,9 @@
 		e.classess = 'k1 k2 ...'
 	access to element computed styles:
 		e.css([k][, state])
+	css querying:
+		css_class_prop(class, prop) -> v
+		fontawesome_char(name) -> s
 	dom tree navigation excluding text nodes:
 		e.at[i], e.len, e.at.length
 		e.parent
@@ -126,11 +129,16 @@
 	hit testing:
 		hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h)
 		e.hit_test_sides(mx, my, [d1], [d2])
+	camvas:
+		e.clear()
 	UI patterns:
 		e.popup([target|false], [side], [align], [px], [py])
 		e.modal([on])
 		overlay(attrs, content)
 		live_move_mixin(e)
+		lazy-loading of <img data-src="">
+		auto-updating of <tag timeago time="">
+		exec-ing of <script runit> scripts from injected html
 
 */
 
@@ -221,12 +229,32 @@ property(Element, 'classes', {
 	}
 })
 
+// css querying --------------------------------------------------------------
+
 method(Element, 'css', function(prop, state) {
 	let css = getComputedStyle(this, state)
 	return prop ? css[prop] : css
 })
 
 alias(CSSStyleDeclaration, 'prop', 'getPropertyValue')
+
+function css_class_prop(selector, style) {
+	let sheets = document.styleSheets
+	for (let i = 0, l = sheets.length; i < l; i++) {
+		let sheet = sheets[i]
+		if(!sheet.cssRules)
+			continue
+		for (let j = 0, k = sheet.cssRules.length; j < k; j++) {
+			let rule = sheet.cssRules[j]
+			if (rule.selectorText && rule.selectorText.split(',').indexOf(selector) !== -1)
+				return rule.style[style]
+		}
+	}
+}
+
+fontawesome_char = memoize(function(icon) {
+	return css_class_prop('.'+icon+'::before', 'content').slice(1, -1)
+})
 
 // dom tree navigation for elements, skipping text nodes ---------------------
 
@@ -676,9 +704,18 @@ callers.click = function(ev, f) {
 	if (ev.target.effectively_disabled)
 		return false
 	if (ev.which == 1)
-		return f.call(this, ev, ev.detail, ev.clientX, ev.clientY)
+		return f.call(this, ev, ev.clientX, ev.clientY)
 	else if (ev.which == 3)
-		return this.fireup('rightclick', ev, ev.detail, ev.clientX, ev.clientY)
+		return this.fireup('rightclick', ev, ev.clientX, ev.clientY)
+}
+
+callers.dblclick = function(ev, f) {
+	if (ev.target.effectively_disabled)
+		return false
+	if (ev.which == 1)
+		return f.call(this, ev, ev.clientX, ev.clientY)
+	else if (ev.which == 3)
+		return this.fireup('rightdblclick', ev, ev.clientX, ev.clientY)
 }
 
 callers.pointerdown = function(ev, f) {
@@ -691,6 +728,7 @@ callers.pointerdown = function(ev, f) {
 		ret = this.fireup('rightpointerdown', ev, ev.clientX, ev.clientY)
 	if (ret == 'capture') {
 		this.setPointerCapture(ev.pointerId)
+		this.pointer_captured = true
 		ret = false
 	}
 	return ret
@@ -724,6 +762,7 @@ callers.pointerup = function(ev, f) {
 		else if (ev.which == 3)
 			ret = this.fireup('rightpointerup', ev, ev.clientX, ev.clientY)
 	} finally {
+		this.pointer_captured = false
 		if (this.hasPointerCapture(ev.pointerId))
 			this.releasePointerCapture(ev.pointerId)
 	}
@@ -1142,7 +1181,7 @@ raf_wrap.cancel = obj()
 
 function raf_wrap(f) {
 	let id
-	function wf() {
+	function raf_f() {
 		id = null
 		f()
 	}
@@ -1153,7 +1192,7 @@ function raf_wrap(f) {
 				id = null
 			}
 		} else {
-			id = raf(wf, id)
+			id = raf(raf_f, id)
 		}
 	}
 }
@@ -1228,6 +1267,12 @@ method(Element, 'hit_test_sides', function(mx, my, d1, d2) {
 })
 
 }
+
+// canvas --------------------------------------------------------------------
+
+method(CanvasRenderingContext2D, 'clear', function() {
+	this.clearRect(0, 0, this.canvas.width, this.canvas.height)
+})
 
 /* popup pattern -------------------------------------------------------------
 
@@ -1814,3 +1859,15 @@ setInterval(function() {
 	}
 }, 60 * 1000)
 
+
+// exec'ing js scripts inside html -------------------------------------------
+
+bind_component('script', function(e) {
+	if (e.type && e.type != 'javascript')
+		return
+	if (e.src)
+		return
+	if (!e.hasattr('runit'))
+		return
+	eval(e.text)
+})
