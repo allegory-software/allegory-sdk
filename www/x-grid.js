@@ -37,11 +37,11 @@ component('x-grid', 'Input', function(e) {
 		e.text_font_family = css['font-family']
 		e.icon_font_family = 'fontawesome'
 		e.font_size   = num(css['font-size'])
-		e.line_height = num(css.prop('--x-grid-cell-line-height'))
 		e.padding_x   = num(css.prop('--x-padding-x-input'))
 		e.padding_y1  = num(css.prop('--x-padding-y-input-top'))
 		e.padding_y2  = num(css.prop('--x-padding-y-input-bottom'))
 		e.cell_h      = num(css.prop('--x-grid-cell-h'))
+		e.header_h    = num(css.prop('--x-grid-header-h'))
 
 		// css colors
 		e.border_width               = num(css.prop('--x-border-width-item'))
@@ -66,20 +66,32 @@ component('x-grid', 'Input', function(e) {
 		e.bg_modified                = css.prop('--x-bg-modified')
 		e.bg_new_modified            = css.prop('--x-bg-new-modified')
 		e.bg_moving                  = css.prop('--x-bg-moving')
+		e.baseline                   = num(css.prop('--x-grid-cell-baseline'))
 
 		e.auto_w = false
 		e.auto_h = false
-		e.header_w = 120            // vertical grid
-		e.cell_w = 120              // vertical grid
 		e.text_font = e.font_size + 'px ' + e.text_font_family
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
-		e.cell_h = e.cell_h || round(e.font_size * 2)
-		e.baseline = e.line_height - e.padding_y1
+		e.cell_h   = or(e.cell_h  , round(e.font_size * 2))
+		e.header_h = or(e.header_h, e.cell_h * 2)
+
+		update_cx(cx)
+		update_cx(hcx)
 
 		e.update({sizes: true})
 	}
 
-	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: false}) // horizontal grid
+	e.prop('header_w', {store: 'var', type: 'number', default: 120, attr: true}) // vert-grid only
+	e.prop('cell_w', {store: 'var', type: 'number', default: 120, attr: true}) // vert-grid only
+	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: false, attr: true}) // horiz-grid only
+
+	e.set_header_w = function() {
+		e.update({sizes: true})
+	}
+
+	e.set_cell_w = function() {
+		e.update({sizes: true})
+	}
 
 	e.set_auto_cols_w = function() {
 		e.update({sizes: true})
@@ -113,18 +125,20 @@ component('x-grid', 'Input', function(e) {
 		horiz = !v
 		e.class('x-hgrid',  horiz)
 		e.class('x-vgrid', !horiz)
-		e.update({fields: true, rows: true, sizes: true})
+		e.update({sizes: true})
 	}
 	e.prop('vertical', {type: 'bool', attr: true})
 
-	e.header       = div({class: 'x-grid-header'})
-	e.cells        = tag('canvas', {class : 'x-grid-cells-canvas', width: 0, height: 0})
-	e.cells_ct     = div({class: 'x-grid-cells-ct'}, e.cells)
-	e.cells_view   = div({class: 'x-grid-cells-view'}, e.cells_ct)
-	e.progress_bar = div({class: 'x-grid-progress-bar'})
+	e.header_canvas = tag('canvas', {class : 'x-grid-header-canvas', width: 0, height: 0})
+	e.header        = div({class: 'x-grid-header'}, e.header_canvas)
+	e.cells_canvas  = tag('canvas', {class : 'x-grid-cells-canvas', width: 0, height: 0})
+	e.cells         = div({class: 'x-grid-cells'}, e.cells_canvas)
+	e.cells_view    = div({class: 'x-grid-cells-view'}, e.cells)
+	e.progress_bar  = div({class: 'x-grid-progress-bar'})
 	e.add(e.header, e.progress_bar, e.cells_view)
 
-	var cx = e.cells.getContext('2d')
+	var cx  = e.cells_canvas.getContext('2d')
+	var hcx = e.header_canvas.getContext('2d')
 
 	e.on('bind', function(on) {
 		document.on('layout_changed', layout_changed, on)
@@ -132,121 +146,112 @@ component('x-grid', 'Input', function(e) {
 		theme_changed()
 	})
 
-	// cell widths ------------------------------------------------------------
-
-	var cells_w // sum-width of all val cells (so excluding header)
-
-	function set_header_cell_xw(cell, field, x, w) {
-		cell.x  = x
-		cell.min_w = w
-		cell.w = w
-	}
-
-	function update_cell_widths_horiz(col_resizing) {
-
-		let cols_w = 0
-		for (let field of e.fields)
-			cols_w += field.w
-
-		let total_free_w = 0
-		let cw = cols_w
-		if (e.auto_cols_w && (!e.rowset || e.rowset.auto_cols_w != false) && !col_resizing) {
-			cw = e.cells_view.clientWidth
-			total_free_w = max(0, cw - cols_w)
-		}
-
-		let col_x = 0
-		for (let fi = 0; fi < e.fields.length; fi++) {
-			let field = e.fields[fi]
-			let hcell = e.header.at[fi]
-
-			let min_col_w = col_resizing ? field._w : field.w
-			let max_col_w = col_resizing ? field._w : field.max_w
-			let free_w = total_free_w * (min_col_w / cols_w)
-			let col_w = min(floor(min_col_w + free_w), max_col_w)
-			if (fi == e.fields.length - 1) {
-				let remaining_w = cw - col_x
-				if (total_free_w > 0)
-					// set width exactly to prevent showing the horizontal scrollbar.
-					col_w = remaining_w
-				else
-					// stretch last col to include leftovers from rounding.
-					col_w = max(col_w, remaining_w)
-			}
-
-			field._x = col_x
-			field._w = col_w
-
-			if (hcell.filter_dropdown)
-				hcell.filter_dropdown.w = hcell.clientWidth
-
-			col_x += col_w
-		}
-
-		let header_w = e.fields.length ? col_x : cw
-		e.header.w   = header_w
-		e.cells_ct.w = header_w
-		cells_w      = header_w
-
-		for (let fi = 0; fi < e.fields.length; fi++) {
-			let field = e.fields[fi]
-			each_header_cell_of_col(fi, set_header_cell_xw, field, field._x, field._w)
-		}
-	}
-
-	function update_cell_widths_vert() {
-		for (let fi = 0; fi < e.fields.length; fi++) {
-			let hcell = e.header.at[fi]
-			let [x, y, w, h] = cell_rect(0, fi)
-			set_header_cell_xw(hcell, e.fields[fi], x, w)
-		}
-	}
-
 	// view-size-derived state ------------------------------------------------
 
-	var cells_h // sum-height of all val cells (so excluding header).
-	var header_h // header height.
-	var cells_view_w, cells_view_h // viewport dimensions.
-	var page_row_count // how many rows in a page for pgup/pgdown navigation.
+	var cells_w, cells_h // cell grid dimensions.
+	var cells_view_w, cells_view_h // cell viewport dimensions.
+	var hcell_h // header cell height.
 	var vrn // how many rows are fully or partially in the viewport.
+	var page_row_count // how many rows in a page for pgup/pgdown navigation.
+
+	function resize_canvas(canvas, w, h, pw, ph) {
+		// pw & ph are size multiples for lowering the number of incremental resizes.
+		w = ceil(w / pw) * pw
+		h = ceil(h / ph) * ph
+		if (canvas.width  != w) canvas.width  = w
+		if (canvas.height != h) canvas.height = h
+	}
 
 	function update_sizes() {
 
+		if (hit_state == 'col_moving')
+			return
+
+		let col_moving = hit_state == 'col_resizing'
+
+		// let border_w = e.offsetWidth  - e.cw
+		// let border_h = e.offsetHeight - e.ch
+
 		if (horiz) {
 
-			// these must be reset when changing from !horiz to horiz.
 			e.header.w = null
-			e.header.h = null
-			if (e.cells)
-				e.cells.x = null
+			e.header.h = e.header_h
+
+			// these must be reset when changing from !horiz to horiz.
+			e.cells_canvas.x = null
 			e.cells_view.w = null
-			cells_view_w = e.cells_view.cw
 
-			cells_h = e.cell_h * e.rows.length
+			cells_view_w = floor(e.cells_view.cw)
 
-			let client_h = e.clientHeight
-			let border_h = e.offsetHeight - client_h
-			header_h = e.header.offsetHeight
-
+			/* TODO:
 			if (e.auto_w) {
 
 				let cols_w = 0
 				for (let field of e.fields)
 					cols_w += field.w
 
-				let client_w = e.cells_view.clientWidth
-				let border_w = e.offsetWidth - e.clientWidth
+				let client_w = e.cells_view.cw
+				let border_w = e.offsetWidth - e.cw
 				let vscrollbar_w = e.cells_view.offsetWidth - client_w
 				e.w = cols_w + border_w + vscrollbar_w
 			}
 
 			if (e.auto_h)
-				e.h = cells_h + header_h + border_h
+				e.h = cells_h + e.header_h + border_h
+			*/
 
-			cells_view_h = floor(e.cells_view.rect().h)
-			e.cells_ct.h = max(1, cells_h) // need at least 1px to show scrollbar.
-			vrn = ceil(cells_view_h / e.cell_h)
+			let cols_w = 0
+			for (let field of e.fields)
+				cols_w += field.w
+
+			let total_free_w = 0
+			let cw = cols_w
+			if (e.auto_cols_w && (!e.rowset || e.rowset.auto_cols_w != false) && !col_moving) {
+				cw = cells_view_w
+				total_free_w = max(0, cw - cols_w)
+			}
+
+			let col_x = 0
+			for (let fi = 0; fi < e.fields.length; fi++) {
+				let field = e.fields[fi]
+
+				let min_col_w = col_moving ? field._w : field.w
+				let max_col_w = col_moving ? field._w : field.max_w
+				let free_w = total_free_w * (min_col_w / cols_w)
+				let col_w = min(floor(min_col_w + free_w), max_col_w)
+				if (fi == e.fields.length - 1) {
+					let remaining_w = cw - col_x
+					if (total_free_w > 0)
+						// set width exactly to prevent showing the horizontal scrollbar.
+						col_w = remaining_w
+					else
+						// stretch last col to include leftovers from rounding.
+						col_w = max(col_w, remaining_w)
+				}
+
+				field._y = 0
+				field._x = col_x
+				field._w = col_w
+
+				if (field.filter_dropdown)
+					field.filter_dropdown.w = field._w
+
+				col_x += col_w
+			}
+
+			cells_w = col_x + e.border_width
+			cells_h = e.cell_h * e.rows.length + e.border_width
+
+			e.cells.w = max(1, cells_w) // need at least 1px to show scrollbar.
+			e.cells.h = max(1, cells_h) // need at least 1px to show scrollbar.
+
+			// compute cells view h now that cells.w is set which may or may not
+			// show a horizontal scrollbar. this triggers a reflow.
+
+			cells_view_h = floor(e.cells_view.ch)
 			page_row_count = floor(cells_view_h / e.cell_h)
+
+			vrn = floor(cells_view_h / e.cell_h) + 2 // 2 is right, think it!
 
 			/*
 			// TODO: finish this!
@@ -257,20 +262,14 @@ component('x-grid', 'Input', function(e) {
 
 		} else {
 
-			e.header.w = e.header_w
-			e.header.max_h = e.cell_h * e.fields.length
+			e.header.w = max(0, min(e.header_w, cells_view_w - 20))
+			e.header.h = null
 
-			cells_w = e.cell_w * e.rows.length
-			cells_h = e.cell_h * e.fields.length
-
-			let border_w = e.offsetWidth - e.clientWidth
-
+			/* TODO:
 			if (e.auto_w)
 				e.w = cells_w + e.header_w + border_w
 
 			let client_w = e.cw
-			border_w = e.offsetWidth - client_w
-			let header_w = e.header.offsetWidth
 
 			let client_h = e.cells_view.ch
 			if (e.auto_h) {
@@ -279,10 +278,10 @@ component('x-grid', 'Input', function(e) {
 				e.h = cells_h + border_h + hscrollbar_h
 			}
 
-			cells_view_w = client_w - header_w
+			cells_view_w = client_w - header.cw
 			cells_view_h = min(client_h, cells_h)
-			e.cells_ct.w = cells_w
-			e.cells_ct.h = cells_h
+			e.cells.w = cells_w
+			e.cells.h = cells_h
 			e.cells_view.w = cells_view_w
 			vrn = ceil(cells_view_w / e.cell_w)
 
@@ -290,15 +289,35 @@ component('x-grid', 'Input', function(e) {
 				let hcell = e.header.at[fi]
 				hcell.y = cell_y(0, fi)
 			}
+			*/
+
+			for (let fi = 0; fi < e.fields.length; fi++) {
+				let field = e.fields[fi]
+				let [x, y, w] = cell_rel_rect(fi)
+				field._x = x
+				field._y = y
+				field._w = w
+			}
+
+			cells_w = e.cell_w * e.rows.length
+			cells_h = e.cell_h * e.fields.length
 
 		}
 
 		vrn = min(vrn, e.rows.length)
+
+		let hr = e.header.rect()
+
+		hcell_h = horiz ? hr.h : e.cell_h
+
+		resize_canvas(e.cells_canvas, cells_view_w, cells_view_h, 200, 200)
+		resize_canvas(e.header_canvas, hr.w, hr.h, 200, horiz ? 1 : 200)
+
 	}
 
 	// view-scroll-derived state ----------------------------------------------
 
-	var vri1, vri2 // range of rows in the viewport.
+	var vri1, vri2 // visible row range.
 	var scroll_x, scroll_y // current scroll offsets.
 
 	function update_scroll() {
@@ -307,16 +326,15 @@ component('x-grid', 'Input', function(e) {
 		sx =  horiz ? sx : clamp(sx, 0, max(0, cells_w - cells_view_w))
 		sy = !horiz ? sy : clamp(sy, 0, max(0, cells_h - cells_view_h))
 		if (horiz) {
-			e.header.x = -sx
-			e.cells.y = sy
 			vri1 = floor(sy / e.cell_h)
-			e.cells.x = sx
 		} else {
-			e.header.y = -sy
-			e.cells.x = sx
 			vri1 = floor(sx / e.cell_w)
 		}
+		e.cells_canvas.x = sx
+		e.cells_canvas.y = sy
 		vri2 = vri1 + vrn
+		vri1 = max(0, min(vri1, e.rows.length - 1))
+		vri2 = max(0, min(vri2, e.rows.length))
 
 		if (scroll_x == sx && scroll_y == sy)
 			return
@@ -324,7 +342,7 @@ component('x-grid', 'Input', function(e) {
 		// hack because we don't get pointermove events on scroll when
 		// the mouse doesn't move but the div beneath the mouse pointer does.
 		if (hit_mx && hit_state == 'cell')
-			if (ht_cell(hit_mx, hit_my))
+			if (ht_cell(null, hit_mx, hit_my))
 				ht_cell_update()
 
 		scroll_x = sx
@@ -347,16 +365,17 @@ component('x-grid', 'Input', function(e) {
 	let r = [0, 0, 0, 0] // x, y, w, h
 	function row_rect(ri, draw_state) {
 		let s = row_move_state
+		let b = e.border_width
 		if (horiz) {
-			r[0] = 0
+			r[0] = b
 			if (s) {
 				if (draw_state == 'moving_rows') {
-					r[1] = s.x + ri * e.cell_h - s.vri1x
+					r[1] = b + s.x + ri * e.cell_h - s.vri1x
 				} else {
-					r[1] = s.xs[ri] - s.vri1x
+					r[1] = b + s.xs[ri] - s.vri1x
 				}
 			} else {
-				r[1] = ri * e.cell_h
+				r[1] = b + ri * e.cell_h
 			}
 			r[2] = cells_w
 			r[3] = e.cell_h
@@ -418,11 +437,6 @@ component('x-grid', 'Input', function(e) {
 		return row.parent_rows ? row.parent_rows.length : 0
 	}
 
-	function update_header_w(w) { // vgrid
-		e.header_w = max(0, w)
-		e.update({sizes: true})
-	}
-
 	e.scroll_to_cell = function(ri, fi) {
 		if (ri == null)
 			return
@@ -430,18 +444,14 @@ component('x-grid', 'Input', function(e) {
 		e.cells_view.scroll_to_view_rect(null, null, x, y, w, h)
 	}
 
-	function row_visible_rect(row) { // relative to cells_ct
+	function row_visible_rect(row) { // relative to cells
 		let ri = e.row_index(row)
 		let r = domrect(...row_rect(ri))
-		let c = e.cells_ct.rect()
+		let c = e.cells.rect()
 		let v = e.cells_view.rect()
 		v.x -= c.x
 		v.y -= c.y
 		return r.clip(v)
-	}
-
-	function each_header_cell_of_col(fi, f, ...args) {
-		f(e.header.at[fi], ...args)
 	}
 
 	// responding to layout changes -------------------------------------------
@@ -466,34 +476,7 @@ component('x-grid', 'Input', function(e) {
 
 	// rendering --------------------------------------------------------------
 
-	function create_fields() {
-		e.header.clear()
-		for (let fi = 0; fi < e.fields.length; fi++) {
-			let field = e.fields[fi]
-			let sort_icon     = span({class: 'fa x-grid-sort-icon'})
-			let sort_icon_pri = span({class: 'x-grid-header-sort-icon-pri'})
-			let title_div = tag('td', {class: 'x-grid-header-title-td'})
-			title_div.set(field.text)
-			title_div.title = field.hint || title_div.textContent
-			let sort_icon_div = tag('td', {class: 'x-grid-header-sort-icon-td'}, sort_icon, sort_icon_pri)
-			let e1 = title_div
-			let e2 = sort_icon_div
-			if (horiz && field.align == 'right')
-				[e1, e2] = [e2, e1]
-			e1.attr('align', 'left')
-			e2.attr('align', 'right')
-			let title_table = tag('table', {class: 'x-grid-header-cell-table'}, tag('tr', 0, e1, e2))
-			let hcell = div({class: 'x-grid-header-cell'}, title_table)
-			hcell.fi = fi
-			hcell.title_div = title_div
-			hcell.sort_icon = sort_icon
-			hcell.sort_icon_pri = sort_icon_pri
-			e.header.add(hcell)
-			create_filter(field, hcell)
-		}
-	}
-
-	function create_filter(field, hcell) {
+	function create_filter(field) {
 		if (!(horiz && e.filters_visible && field.filter_by))
 			return
 		let rs = e.filter_rowset(field)
@@ -534,39 +517,99 @@ component('x-grid', 'Input', function(e) {
 				this.pick_val()
 		})
 
-		hcell.filter_dropdown = dd
-		hcell.add(dd)
+		field.filter_dropdown = dd
+		e.add(dd)
 	}
 
-	function update_sort_icons() {
-		let asc  = horiz ? 'up' : 'left'
-		let desc = horiz ? 'down' : 'right'
+	function update_cx(cx) {
+		cx.font_size   = e.font_size
+		cx.text_font   = e.text_font
+		cx.icon_font   = e.icon_font
+		cx.bg_search   = e.bg_search
+		cx.fg_search   = e.fg_search
+		cx.fg_disabled = e.fg_disabled
+		cx.baseline    = e.baseline + (Firefox ? 1 : 0)
+	}
+
+	function draw_hcell_at(field, x0, y0, w, h) {
+
+		let cx = hcx
+
+		// static geometry
+		let px  = e.padding_x
+		let py1 = e.padding_y1
+		let py2 = e.padding_y2
+
+		cx.save()
+
+		cx.translate(x0, y0)
+
+		// border
+		let bw = w - .5
+		let bh = h - .5
+		cx.lineWidth = e.border_width
+		cx.strokeStyle = e.border_color
+		cx.beginPath()
+		cx.moveTo(bw,  0)
+		cx.lineTo(bw, bh)
+		cx.stroke()
+
+		// order sign
+		let dir = field.sort_dir
+		if (dir != null) {
+			let pri  = field.sort_priority
+			let asc  = horiz ? 'up'   : 'left'
+			let desc = horiz ? 'down' : 'right'
+			let right = field.align == 'right'
+			let icon_char = fontawesome_char('fa-angle'+(pri?'-double':'')+'-'+(dir== 'asc'?asc:desc))
+			cx.font = e.icon_font
+			let x = right ? px : w - px
+			let iw = e.font_size * 1.5
+			cx.textAlign = right ? 'left' : 'right'
+			cx.fillStyle = e.fg
+			cx.fillText(icon_char, x, cx.baseline + py1)
+			w -= iw
+			if (right)
+				cx.translate(iw, 0)
+		}
+
+		// clip
+		cx.beginPath()
+		cx.translate(px, py1)
+		let cw = w - px  - px
+		let ch = h - py1 - py2
+		cx.rect(0, 0, cw, ch)
+		cx.clip()
+
+		// text
+		let x = 0
+		if (horiz)
+			if (field.align == 'right')
+				x = cw
+			else if (field.align == 'center')
+				x = cw / 2
+
+		cx.font = 'bold ' + e.text_font
+		cx.textAlign = field.align
+		cx.fillStyle = e.fg
+		cx.fillText(field.text, x, cx.baseline)
+
+		cx.restore()
+
+	}
+
+	function update_header() {
+		hcx.clear()
+		hcx.save()
+		hcx.translate(horiz ? -scroll_x : 0, horiz ? 0 : -scroll_y)
 		for (let fi = 0; fi < e.fields.length; fi++) {
 			let field = e.fields[fi]
-			let hcell = e.header.at[fi]
-			let dir = field.sort_dir
-			let pri = field.sort_priority
-			hcell.sort_icon.class('fa-angle-'+asc        , false)
-			hcell.sort_icon.class('fa-angle-double-'+asc , false)
-			hcell.sort_icon.class('fa-angle-'+desc       , false)
-			hcell.sort_icon.class('fa-angle-double-'+desc, false)
-			hcell.sort_icon.class('fa-angle'+(pri?'-double':'')+'-'+asc , dir == 'asc')
-			hcell.sort_icon.class('fa-angle'+(pri?'-double':'')+'-'+desc, dir == 'desc')
-			hcell.sort_icon.parent.class('sorted', dir)
-			hcell.sort_icon_pri.set(pri > 1 ? pri : '')
+			let [x, y, w, h] = cell_rect(0, fi)
+			draw_hcell_at(field, x, y, w, hcell_h)
 		}
+		hcx.restore()
 	}
-
-	function update_cells_canvas() {
-		let w = cells_view_w
-		let h = cells_view_h
-		let p = 200 // size multiple for lowering the number of incremental resizes.
-		w = ceil(w / p) * p
-		h = ceil(h / p) * p
-		if (e.cells.width  != w) e.cells.width  = w
-		if (e.cells.height != h) e.cells.height = h
-		e.empty_rt.hidden = e.rows.length > 0
-	}
+	update_header_async = raf_wrap(update_header)
 
 	function indent_offset(indent) {
 		return floor(e.font_size * 1.5 + (e.font_size * 1.2) * indent)
@@ -586,8 +629,9 @@ component('x-grid', 'Input', function(e) {
 		let input_val = e.cell_input_val(row, field)
 
 		// static geometry
-		let px  = e.padding_x  + e.border_width
-		let py1 = e.padding_y1 + e.border_width
+		let b   = e.border_width
+		let px  = e.padding_x  + b
+		let py1 = e.padding_y1 + b
 		let py2 = e.padding_y2
 
 		// state
@@ -604,7 +648,7 @@ component('x-grid', 'Input', function(e) {
 		let sel_fields = e.selected_rows.get(row)
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
 		let editing = !!e.editor && cell_focused
-		let hovering = hit_ri == ri && hit_fi == fi
+		let hovering = hit_state == 'cell' && hit_ri == ri && hit_fi == fi
 		let full_width = cell_focused || hovering
 
 		if (full_width) {
@@ -635,20 +679,9 @@ component('x-grid', 'Input', function(e) {
 		cx.save()
 		cx.translate(x, y)
 
-		// border
-		let bw = w - .5
-		let bh = h - .5
-		cx.lineWidth = e.border_width
-		cx.strokeStyle = e.border_color
-		cx.beginPath()
-		cx.moveTo(bw,  0)
-		cx.lineTo(bw, bh)
-		cx.lineTo( 0, bh)
-		cx.stroke()
-
 		// background & text color
 		// drawing a background is slow, so we avoid it when we can.
-		let bg = (draw_state == 'col_moving' || draw_state == 'row_moving')
+		let bg = (draw_state == 'moving_cols' || draw_state == 'moving_rows')
 			&& e.bg_moving
 
 		let fg = e.fg
@@ -694,10 +727,13 @@ component('x-grid', 'Input', function(e) {
 		if (is_null || is_empty || disabled)
 			fg = e.fg_disabled
 
+		let bw = w - .5
+		let bh = h - .5
+
 		if (bg) {
 			cx.beginPath()
 			cx.fillStyle = bg
-			cx.rect(0, 0, w, h)
+			cx.rect(-b, -b, w+b, h+b)
 			cx.fill()
 		}
 
@@ -732,26 +768,18 @@ component('x-grid', 'Input', function(e) {
 			cx.restore()
 		}
 
-		// hover outline
-		if (hovering) {
-			cx.beginPath()
-			let b = e.border_width
-			cx.rect(-b + .5, -b + .5, bw + b + .5, bh + b + .5)
-			cx.lineWidth = b
-			cx.strokeStyle = e.fg
-			cx.setLineDash([1, 3])
-			cx.stroke()
-		}
+		// border
+		cx.lineWidth = b
+		cx.strokeStyle = e.border_color
+		cx.beginPath()
+		cx.moveTo(bw,  0)
+		cx.lineTo(bw, bh)
+		cx.lineTo( 0, bh)
+		if (!fi)
+			cx.lineTo(0, 0)
+		cx.stroke()
 
 		cx.restore()
-
-		// TODO:
-		// let s = invalid && errors
-		//  		.filter(e => !e.passed)
-		//  		.map(e => isnode(e.message) ? e.message.textContent : e.message)
-		//  		.join('\n')
-		// cell.attr('title', s)
-		//
 
 		// TODO:
 		//if (ri != null && focused)
@@ -759,7 +787,35 @@ component('x-grid', 'Input', function(e) {
 		//		 horiz ? null : xy,
 		//		!horiz ? null : xy, hit_indent)
 
+		return w
+	}
 
+	function draw_hover_outline(x, y, w, h) {
+
+		let b = e.border_width
+		let bw = w - .5
+		let bh = h - .5
+
+		cx.save()
+		cx.translate(x, y)
+
+		cx.lineWidth = b
+
+		// add a background to override the borders.
+		// cx.strokeStyle = e.bg
+		// cx.setLineDash(empty_array)
+		// cx.beginPath()
+		// cx.rect(-.5, -.5, bw + .5, bh + .5)
+		// cx.stroke()
+
+		// draw the actual hover outline.
+		cx.strokeStyle = e.fg
+		cx.setLineDash([1, 3])
+		cx.beginPath()
+		cx.rect(-.5, -.5, bw + .5, bh + .5)
+		cx.stroke()
+
+		cx.restore()
 	}
 
 	function draw_row_strike_line(row, ri,x, y, w, h, draw_state) {
@@ -790,14 +846,17 @@ component('x-grid', 'Input', function(e) {
 	function draw_cell(ri, fi, draw_state) {
 		let [x, y, w, h] = cell_rect(ri, fi, draw_state)
 		let row = e.rows[ri]
-		draw_cell_at(row, ri, fi, x, y, w, h, draw_state)
+		return draw_cell_at(row, ri, fi, x, y, w, h, draw_state)
 	}
 
 	function update_cells_range(rows, ri1, ri2, fi1, fi2, draw_state) {
 		cx.save()
 		cx.translate(-scroll_x, -scroll_y)
+
 		let foc_ri = e.focused_row_index
 		let foc_fi = e.focused_field_index
+		let hit_cell_w
+
 		for (let ri = ri1; ri < ri2; ri++) {
 
 			let row = rows[ri]
@@ -810,15 +869,16 @@ component('x-grid', 'Input', function(e) {
 				}
 			}
 
-			if (foc_ri == ri && foc_fi != null)
-				draw_cell(foc_ri, foc_fi, 'hit')
+			if (hit_state == 'cell' && hit_ri == ri)
+				hit_cell_w = draw_cell(hit_ri, hit_fi, 'hit')
 
-			if (hit_ri == ri && hit_fi != null && !(hit_ri == foc_ri && hit_fi == foc_fi))
-				draw_cell(hit_ri, hit_fi, 'hit')
+			if (foc_ri == ri && foc_fi != null && !(hit_ri == foc_ri && hit_fi == foc_fi))
+				draw_cell(foc_ri, foc_fi, 'focused')
 
 			if (row.removed)
 				draw_row_strike_line(row, ri, rx, ry, rw, rh, draw_state)
 		}
+
 		for (let ri = ri1; ri < ri2; ri++) {
 			let row = rows[ri]
 			let invalid = row.errors && !row.errors.passed
@@ -827,16 +887,18 @@ component('x-grid', 'Input', function(e) {
 				draw_row_invalid_border(row, ri, rx, ry, rw, rh, draw_state)
 			}
 		}
+
+		if (hit_state == 'cell') {
+			let [x, y, w, h] = cell_rect(hit_ri, hit_fi, draw_state)
+			w = hit_cell_w
+			draw_hover_outline(x, y, w, h)
+		}
+
 		cx.restore()
 	}
 
 	function update_cells() {
-		cx.clearRect(0, 0, e.cells.width, e.cells.height)
-		cx.text_font = e.text_font
-		cx.icon_font = e.icon_font
-		cx.baseline = e.baseline
-		cx.bg_search = e.bg_search
-		cx.fg_search = e.fg_search
+		cx.clear()
 		if (hit_state == 'row_moving') {
 			let s = row_move_state
 			update_cells_range(e.rows, s.vri1,      s.vri2     , 0, e.fields.length)
@@ -858,8 +920,10 @@ component('x-grid', 'Input', function(e) {
 
 	function cells_view_scroll() {
 		// TODO: use e.begin_update() / e.update() instead of update_cells()
-		if (update_scroll())
+		if (update_scroll()) {
+			update_header()
 			update_cells()
+		}
 		update_row_error_tooltip_position()
 	}
 
@@ -886,19 +950,23 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	function update_row_error_tooltip(row) {
-		return;
 		if (!e.error_tooltip) {
 			if (!row)
 				return
-			e.error_tooltip = tooltip({kind: 'error',
-				target: e.cells_ct,
-				check: e.do_error_tooltip_check})
+			e.error_tooltip = tooltip({
+				kind: 'error',
+				target: e.cells,
+				check: e.do_error_tooltip_check,
+				style: 'pointer-events: none',
+			})
 		}
 		let row_errors = row && e.row_errors(row)
 		error_tooltip_row = row_errors && row_errors.length > 0 ? row : null
 		e.error_tooltip.begin_update()
 		if (error_tooltip_row) {
-			e.error_tooltip.text = row_errors.ul({class: 'x-error-list'}, true)
+			e.error_tooltip.text =
+				e.row_errors(error_tooltip_row)
+					.ul({class: 'x-error-list'}, true)
 			update_row_error_tooltip_position()
 		} else {
 			e.error_tooltip.update()
@@ -908,43 +976,6 @@ component('x-grid', 'Input', function(e) {
 
 	e.do_focus_row = function(row) {
 		update_row_error_tooltip(row)
-	}
-
-	// resize guides ----------------------------------------------------------
-
-	let resize_guides
-
-	function update_resize_guides() {
-		if (!resize_guides)
-			return
-		for (let fi = 0; fi < e.fields.length; fi++) {
-			let field = e.fields[fi]
-			let guide = resize_guides.at[fi]
-			let hcell = e.header.at[fi]
-			guide.x = field.align == 'right'
-				? field._x + field._w - field.w
-				: field._x + field.w
-			guide.h = header_h + cells_view_h
-		}
-	}
-
-	function create_resize_guides() {
-		if (!horiz)
-			return
-		if (!e.auto_cols_w)
-			return
-		resize_guides = div({class: 'x-grid-resize-guides'})
-		for (let fi = 0; fi < e.fields.length; fi++)
-			resize_guides.add(div({class: 'x-grid-resize-guide'}))
-		e.add(resize_guides)
-		update_resize_guides()
-	}
-
-	function remove_resize_guides() {
-		if (!resize_guides)
-			return
-		resize_guides.remove()
-		resize_guides = null
 	}
 
 	// header_visible & filters_visible live properties -----------------------
@@ -1021,7 +1052,7 @@ component('x-grid', 'Input', function(e) {
 		let editor = create_editor.call(e, field, opt)
 		if (editor && opt && opt.embedded) {
 			editor.class('grid-editor')
-			e.cells_ct.add(editor)
+			e.cells.add(editor)
 		}
 		return editor
 	}
@@ -1064,29 +1095,21 @@ component('x-grid', 'Input', function(e) {
 			opt.fields = true
 		}
 
-		if (opt.fields)
-			create_fields()
-		if (opt.fields || opt.sort_order)
-			update_sort_icons()
 		let opt_rows = opt.rows || opt.fields
 		let opt_sizes = opt_rows || opt.sizes
+		let opt_cells = opt_sizes || opt_rows || opt.vals || opt.state
 		if (opt_sizes) {
 			update_sizes()
-			update_cells_canvas()
-		}
-		let opt_cells = opt_sizes || opt_rows || opt.vals || opt.state || opt.col_resizing
-		if (opt_sizes) {
 			if (update_scroll())
 				opt_cells = true
-			if (horiz)
-				update_cell_widths_horiz(opt.col_resizing)
-			else
-				update_cell_widths_vert()
 			update_editor()
-			update_resize_guides()
 		}
+		if (opt.fields || opt.sort_order || opt_sizes)
+			update_header_async()
 		if (opt_cells)
 			update_cells_async()
+		if (opt_rows)
+			e.empty_rt.hidden = e.rows.length > 0
 		if (opt_sizes || opt.sort_order)
 			update_row_error_tooltip_position()
 		if (opt.val)
@@ -1126,7 +1149,7 @@ component('x-grid', 'Input', function(e) {
 
 	// vgrid header resizing --------------------------------------------------
 
-	function ht_header_resize(mx, my) {
+	function ht_header_resize(ev, mx, my) {
 		if (horiz) return
 		let r = e.header.rect()
 		let x = mx - r.x2
@@ -1135,91 +1158,94 @@ component('x-grid', 'Input', function(e) {
 		return true
 	}
 
-	function mm_header_resize(mx, my) {
-		update_header_w(mx - hit_x)
+	function mm_header_resize(ev, mx, my) {
+		e.header_w = mx - hit_x
+	}
+
+	function mu_header_resize(ev, mx, my) {
+		e.class('col-resizing', false)
+		e.update({sizes: true})
+		hit_state = null
+		return false
+	}
+
+	function md_header_resize(ev, mx, my) {
+		hit_state = 'header_resizing'
+		e.class('col-resizing')
+		return e.capture_pointer(ev, mm_header_resize, mu_header_resize)
 	}
 
 	// col resizing -----------------------------------------------------------
 
-	function ht_col_resize_horiz(mx, my) {
-		for (let fi = 0; fi < e.fields.length; fi++) {
-			let field = e.fields[fi]
-			let x = mx - (field._x + field._w)
-			if (x >= -5 && x <= 5) {
-				hit_fi = fi
-				hit_x = x
-				return true
-			}
-		}
-	}
-
-	function ht_col_resize_vert(mx, my, max_h) {
-		if (my >= max_h)
-			return
-		if (mx > e.cell_w + 5)
-			return // only allow dragging the first row otherwise it's confusing.
-		let x = ((mx + 5) % e.cell_w) - 5
-		if (!(x >= -5 && x <= 5))
-			return
-		hit_ri = floor((mx - 6) / e.cell_w)
-		hit_dx = e.cell_w * hit_ri - scroll_x
-		let r = e.cells_view.rect()
-		hit_mx = r.x + hit_dx + x
-		return true
-	}
-
-	function ht_col_resize(mx, my) {
+	function ht_col_resize(ev, mx, my) {
 		if (horiz) {
 			let hr = e.header.rect()
 			if (!hr.contains(mx, my))
 				return
+			mx -= hr.x
+			mx += scroll_x
+			for (let fi = 0; fi < e.fields.length; fi++) {
+				let field = e.fields[fi]
+				let x = mx - (field._x + field._w)
+				if (x >= -5 && x <= 5) {
+					hit_fi = fi
+					hit_x = x
+					return true
+				}
+			}
+		} else {
+			let cr = e.cells.rect()
+			mx -= cr.x
+			my -= cr.y
+			if (mx > e.cell_w + 5)
+				return // only allow dragging the first row otherwise it's confusing.
+			let x = ((mx + 5) % e.cell_w) - 5
+			if (!(x >= -5 && x <= 5))
+				return
+			hit_ri = floor((mx - 6) / e.cell_w)
+			hit_dx = e.cell_w * hit_ri - scroll_x
+			let r = e.cells_view.rect()
+			hit_mx = r.x + hit_dx + x
+			return true
 		}
-		cr = e.cells_ct.rect()
-		mx -= cr.x
-		my -= cr.y
-		if (horiz)
-			return ht_col_resize_horiz(mx, my)
-		else
-			return ht_col_resize_vert(mx, my, cr.h)
 	}
 
-	let mm_col_resize, mu_col_resize
+	function md_col_resize(ev, mx, my) {
 
-	function md_col_resize(mx, my) {
+		hit_state = 'col_resizing'
+		e.class('col-resizing')
 
 		if (horiz) {
 
-			mm_col_resize = function(mx, my) {
-				let r = e.cells_ct.rect()
+			function mm_col_resize(ev, mx, my) {
+				let r = e.cells.rect()
 				let w = mx - r.x - e.fields[hit_fi]._x - hit_x
 				let field = e.fields[hit_fi]
 				field.w = clamp(w, field.min_w, field.max_w)
 				field._w = field.w
-				e.update({sizes: true, col_resizing: true})
+				e.update({sizes: true})
 			}
 
 		} else {
 
-			mm_col_resize = function(mx, my) {
+			function mm_col_resize(ev, mx, my) {
 				e.cell_w = max(20, mx - hit_mx)
 				let sx = hit_ri * e.cell_w - hit_dx
 				e.cells_view.scrollLeft = sx
-				e.update({sizes: true, col_resizing: true})
+				e.update({sizes: true})
 			}
 
 		}
 
-		e.class('col-resize', true)
-
-		mu_col_resize = function() {
+		function mu_col_resize(ev, mx, my) {
 			let field = e.fields[hit_fi]
-			mm_col_resize = null
-			mu_col_resize = null
 			e.class('col-resizing', false)
-			remove_resize_guides()
 			e.set_prop(`col.${field.name}.w`, field.w)
+			hit_state = null
+			return false
 		}
 
+		return e.capture_pointer(ev, mm_col_resize, mu_col_resize)
 	}
 
 	// cell clicking ----------------------------------------------------------
@@ -1236,7 +1262,7 @@ component('x-grid', 'Input', function(e) {
 				hit_fi = fi
 				hit_x = x
 				hit_indent = false
-				if (field_has_indent(field)) {
+				if (row && field_has_indent(field)) {
 					let has_children = row.child_rows.length > 0
 					if (has_children) {
 						let indent_x = indent_offset(row_indent(row))
@@ -1258,19 +1284,51 @@ component('x-grid', 'Input', function(e) {
 		return true
 	}
 
-	function ht_cell(mx, my, ev) {
-		if (ev)
-			if (!ev.target.closest('.x-grid-cells-canvas'))
-				return
+	function ht_cell(ev, mx, my) {
+		if (ev && (ev.hover_target || ev.target) != e.cells_canvas)
+			return
 		hit_mx = mx
 		hit_my = my
-		cr = e.cells_ct.rect()
-		mx -= cr.x
-		my -= cr.y
+		let r = e.cells.rect()
+		mx -= r.x
+		my -= r.y
 		if (horiz)
 			return ht_cell_horiz(mx, my)
 		else
 			return ht_cell_vert(mx, my)
+	}
+
+	function ht_col(ev, mx, my) {
+		if (ev && (ev.hover_target || ev.target) != e.header_canvas)
+			return
+		hit_mx = mx
+		hit_my = my
+		let r = e.cells.rect()
+		mx -= r.x
+		my -= r.y
+		if (horiz)
+			return ht_cell_horiz(mx, 0)
+		else
+			return ht_cell_vert(0, my)
+	}
+
+	function mm_row_drag(ev, mx, my) {
+		if (hit_state == 'row_moving')
+			return mm_row_move(ev, mx, my)
+		if (ht_row_move(ev, mx, my)) {
+			if (md_row_move(ev, mx, my)) {
+				hit_state = 'row_moving'
+				mm_row_move(ev, mx, my)
+			}
+		}
+	}
+
+	function mu_row_drag(ev, mx, my) {
+		if (hit_state == 'row_moving')
+			return mu_row_move(ev, mx, my)
+		e.pick_val()
+		hit_state = null
+		return false
 	}
 
 	function md_row_drag(ev, mx, my, shift, ctrl) {
@@ -1294,7 +1352,7 @@ component('x-grid', 'Input', function(e) {
 			&& !e.editor
 			&& e.cell_clickable(row, field)
 
-		return e.focus_cell(hit_ri, hit_fi, 0, 0, {
+		if (e.focus_cell(hit_ri, hit_fi, 0, 0, {
 			must_not_move_col: true,
 			must_not_move_row: true,
 			enter_edit: !hit_indent
@@ -1307,12 +1365,17 @@ component('x-grid', 'Input', function(e) {
 			expand_selection: shift,
 			invert_selection: ctrl,
 			input: e,
-		})
+		})) {
+			hit_state = 'row_dragging'
+			return e.capture_pointer(ev, mm_row_drag, mu_row_drag)
+		} else {
+			return false
+		}
 	}
 
 	// row moving -------------------------------------------------------------
 
-	function ht_row_move(mx, my) {
+	function ht_row_move(ev, mx, my) {
 		if (!e.can_actually_move_rows()) return
 		if (e.focused_row_index != hit_ri) return
 		if ( horiz && abs(hit_my - my) < 8) return
@@ -1322,19 +1385,19 @@ component('x-grid', 'Input', function(e) {
 		return true
 	}
 
-	let mm_row_move, mu_row_move, update_cells_moving
+	var mm_row_move, mu_row_move
 
 	function md_row_move(mx, my) {
 
 		// initial state
 
-		let cells_ct_r = e.cells_ct.rect()
+		let cells_r = e.cells.rect()
 
 		let focused_ri  = e.focused_row_index
 		let selected_ri = or(e.selected_row_index, focused_ri)
 		let [cx, cy, cw, ch] = cell_rect(min(focused_ri, selected_ri), hit_fi)
-		let hit_cell_mx = hit_mx - cells_ct_r.x - cx
-		let hit_cell_my = hit_my - cells_ct_r.y - cy
+		let hit_cell_mx = hit_mx - cells_r.x - cx
+		let hit_cell_my = hit_my - cells_r.y - cy
 
 		let s = e.start_move_selected_rows({input: e})
 		row_move_state = s
@@ -1530,7 +1593,7 @@ component('x-grid', 'Input', function(e) {
 		// mouse, scroll and animation controller
 
 		let af
-		update_cells_moving = function() {
+		function update_cells_moving() {
 			if (animate()) {
 				// TODO: use e.begin_update() / e.update() instead of update_cells()
 				update_cells()
@@ -1548,8 +1611,8 @@ component('x-grid', 'Input', function(e) {
 				mx0 = mx
 				my0 = my
 				hit_x = horiz
-					? my - cells_ct_r.y - hit_cell_my
-					: mx - cells_ct_r.x - hit_cell_mx
+					? my - cells_r.y - hit_cell_my
+					: mx - cells_r.x - hit_cell_mx
 				hit_x = clamp(hit_x, xof(ri1), xof(ri2))
 			}
 		}
@@ -1564,7 +1627,7 @@ component('x-grid', 'Input', function(e) {
 			e.cells_view.scroll_to_view_rect(null, null, x, y, w, h)
 		}
 
-		mm_row_move = function(mx, my) {
+		mm_row_move = function(ev, mx, my) {
 			let hit_x0 = hit_x
 			update_hit_x(mx, my)
 			if (hit_x0 == hit_x)
@@ -1582,15 +1645,17 @@ component('x-grid', 'Input', function(e) {
 
 			mm_row_move = null
 			mu_row_move = null
-			update_cells_moving = null
-			hit_state = null
 
 			e.class('row-moving', false)
 			if (e.editor)
 				e.editor.class('row-moving', false)
 
-			s.finish(hit_over_ri, hit_parent_row)
+			hit_state = null
 			row_move_state = null
+
+			s.finish(hit_over_ri, hit_parent_row)
+
+			return false
 		}
 
 		// post-init
@@ -1599,9 +1664,7 @@ component('x-grid', 'Input', function(e) {
 		if (e.editor)
 			e.editor.class('row-moving')
 
-		update_cells_canvas()
-
-		let scroll_timer = runevery(.1, mm_row_move)
+		let scroll_timer = runevery(.1, function() { mm_row_move() } )
 
 		return true
 	}
@@ -1618,39 +1681,53 @@ component('x-grid', 'Input', function(e) {
 	function set_cell_of_col_y(cell, field, y) { cell.y = y }
 	e.set_movable_element_pos = function(fi, x) {
 		e.fields[fi]._x = x
-		each_header_cell_of_col(fi, horiz ? set_cell_of_col_x : set_cell_of_col_y, e.fields[fi], x, cell_w(0, fi))
 		if (e.focused_field_index == fi)
 			update_editor(
 				 horiz ? x : null,
 				!horiz ? x : null)
 	}
 
-	function ht_col(mx, my, ev) {
-		let hcell = ev.target.closest('.x-grid-header-cell')
-		if (!hcell) return
-		hit_fi = hcell.index
-		hit_mx = mx
-		hit_my = my
-		return true
+	function mm_col_drag(ev, mx, my) {
+		if (hit_state == 'col_dragging')
+			if (e.can_reorder_fields && ht_col_move(ev, mx, my)) {
+				hit_state = 'col_moving'
+				col_move_fi = hit_fi
+			}
+		if (hit_state == 'col_moving')
+			mm_col_move(ev, mx, my)
 	}
 
-	function ht_col_move(mx, my) {
+	function mu_col_drag(ev, mx, my) {
+		if (hit_state == 'col_moving')
+			return mu_col_move(ev, mx, my)
+		if (e.can_sort_rows)
+			e.set_order_by_dir(e.fields[hit_fi], 'toggle', ev.shiftKey)
+		else if (e.focus_cell_on_click_header)
+			e.focus_cell(true, hit_fi)
+		hit_state = null
+		return false
+	}
+
+	function md_col_drag(ev, mx, my) {
+		hit_state = 'col_dragging'
+		return e.capture_pointer(ev, mm_col_drag, mu_col_drag)
+	}
+
+	function ht_col_move(ev, mx, my) {
 		if ( horiz && abs(hit_mx - mx) < 8) return
 		if (!horiz && abs(hit_my - my) < 8) return
 		let r = e.header.rect()
 		hit_mx -= r.x
 		hit_my -= r.y
 		hit_mx -= e.fields[hit_fi]._x
-		hit_my -= num(e.header.at[hit_fi].style.top)
 		e.class('col-moving')
-		each_header_cell_of_col(hit_fi, cell => cell.class('col-moving'))
 		if (e.editor && e.focused_field_index == hit_fi)
 			e.editor.class('col-moving')
 		e.move_element_start(hit_fi, 1, 0, e.fields.length)
 		return true
 	}
 
-	function mm_col_move(mx, my) {
+	function mm_col_move(ev, mx, my) {
 		let r = e.header.rect()
 		mx -= r.x
 		my -= r.y
@@ -1658,15 +1735,14 @@ component('x-grid', 'Input', function(e) {
 			? mx - hit_mx
 			: my - hit_my
 		e.move_element_update(x)
-		e.update({vals: true})
+		e.update({sizes: true})
 		e.cells_view.scroll_to_view_rect(null, null, horiz ? mx : 0, horiz ? 0 : my, 0, 0)
 	}
 
-	function mu_col_move() {
+	function mu_col_move(ev, mx, my) {
 		col_move_fi = null
 		let over_fi = e.move_element_stop() // sets x of moved element.
 		e.class('col-moving', false)
-		each_header_cell_of_col(hit_fi, cell => cell.class('col-moving', false))
 		if (e.editor)
 			e.editor.class('col-moving', false)
 		e.move_field(hit_fi, over_fi)
@@ -1723,7 +1799,7 @@ component('x-grid', 'Input', function(e) {
 		if (!hit_state)
 			pointermove(ev, mx, my)
 
-		if (!(hit_state == 'col' || hit_state == 'cell' || !hit_state) || !ev.ctrlKey) {
+		if (!(hit_state == 'col' || hit_state == 'cell') || !hit_state || !ev.ctrlKey) {
 			unselect_all_widgets()
 			return false
 		}
@@ -1837,99 +1913,75 @@ component('x-grid', 'Input', function(e) {
 		hit_state = 'cell'
 		let row = e.rows[hit_ri]
 		e.update({state: true})
-		update_row_error_tooltip(row)
+		update_row_error_tooltip(row, true)
 	}
 
-	function pointermove(ev, mx, my) {
-		if (hit_state == 'header_resizing') {
-			mm_header_resize(mx, my)
-		} else if (hit_state == 'col_resizing') {
-			mm_col_resize(mx, my)
-		} else if (hit_state == 'col_dragging') {
-			if (e.can_reorder_fields && ht_col_move(mx, my)) {
-				hit_state = 'col_moving'
-				col_move_fi = hit_fi
-				mm_col_move(mx, my)
-			}
-		} else if (hit_state == 'col_moving') {
-			mm_col_move(mx, my)
-		} else if (hit_state == 'row_dragging') {
-			if (ht_row_move(mx, my)) {
-				if (md_row_move(mx, my)) {
-					hit_state = 'row_moving'
-					mm_row_move(mx, my)
-				}
-			}
-		} else if (hit_state == 'row_moving') {
-			mm_row_move(mx, my)
-		} else {
-			hit_state = null
-			e.class('col-resize', false)
-			if (e.widget_editing) {
-				if (ht_col(mx, my, ev)) {
-					hit_state = 'col'
-				}
-			} else if (ht_header_resize(mx, my)) {
-				hit_state = 'header_resize'
-				e.class('col-resize', true)
-			} else if (ht_col_resize(mx, my)) {
-				hit_state = 'col_resize'
-				md_col_resize(mx, my)
-			} else if (ht_col(mx, my, ev)) {
+	function pointermove(ev, mx, my, set_hover_target) {
+
+		// NOTE: if pointer was captured on pointerdown, ev.target on click event
+		// is set to e, not the real target, so we set and use ev.hover_target
+		// instead, also because ev.target is not writable.
+		ev.hover_target = set_hover_target ? document.elementFromPoint(mx, my) : null
+
+		hit_state = null
+		e.class('col-resize', false)
+		e.class('col-move', false)
+		if (e.widget_editing) {
+			if (ht_col(ev, mx, my)) {
 				hit_state = 'col'
-			} else if (ht_cell(mx, my, ev)) {
-				ht_cell_update()
-			} else {
-				update_row_error_tooltip(null)
 			}
-			if (hit_state)
-				return false
+		} else if (ht_header_resize(ev, mx, my)) {
+			hit_state = 'header_resize'
+			e.class('col-resize')
+		} else if (ht_col_resize(ev, mx, my)) {
+			hit_state = 'col_resize'
+			e.class('col-resize')
+		} else if (ht_col(ev, mx, my)) {
+			hit_state = 'col'
+			e.class('col-move')
+		} else if (ht_cell(ev, mx, my)) {
+			ht_cell_update()
+		} else {
+			update_row_error_tooltip(null)
 		}
+		if (hit_state)
+			return false
 	}
 
-	function pointerdown(ev, mx, my) {
+	e.on('pointermove', function(ev, mx, my) {
+		if (!e.pointer_captured)
+			return pointermove(ev, mx, my)
+	})
 
+	e.on('pointerdown', function(ev, mx, my) {
 		if (e.widget_editing)
 			return
-
 		if (!hit_state)
 			pointermove(ev, mx, my)
-
 		e.focus()
-
 		if (!hit_state) {
 			if (ev.target == e.cells_view) // clicked on empty space.
 				e.exit_edit()
 			return
 		}
+		if (hit_state == 'header_resize')
+			return md_header_resize(ev, mx, my)
+		if (hit_state == 'col_resize')
+			return md_col_resize(ev, mx, my)
+		if (hit_state == 'col')
+			return md_col_drag(ev, mx, my)
+		if (hit_state == 'cell')
+			return md_row_drag(ev, mx, my, ev.shiftKey, ev.ctrlKey)
+		assert(false)
+	})
 
-		if (hit_state == 'header_resize') {
-			hit_state = 'header_resizing'
-			e.class('col-resizing')
-		} else if (hit_state == 'col_resize') {
-			hit_state = 'col_resizing'
-			e.class('col-resizing')
-			create_resize_guides()
-		} else if (hit_state == 'col') {
-			hit_state = 'col_dragging'
-		} else if (hit_state == 'cell') {
-			hit_state = 'row_dragging'
-			if (!md_row_drag(ev, mx, my, ev.shiftKey, ev.ctrlKey))
-				return false
-		} else
-			assert(false)
-
-		return this.capture_pointer(ev, pointermove, pointerup)
-	}
-
-	function rightpointerdown(ev, mx, my) {
+	e.on('rightpointerdown', function(ev, mx, my) {
 
 		if (e.widget_editing)
 			return
 		if (!hit_state)
-			pointermove(ev, mx, my)
-		if (!hit_state)
-			return
+			if (!pointermove(ev, mx, my))
+				return
 
 		e.focus()
 
@@ -1942,62 +1994,40 @@ component('x-grid', 'Input', function(e) {
 			})
 
 		return false
-	}
+	})
 
-	function pointerup(ev) {
-		if (e.widget_editing)
-			return
-		if (!hit_state)
-			return
-		if (hit_state == 'header_resizing') {
-			e.class('col-resizing', false)
-			e.update({sizes: true})
-		} else if (hit_state == 'col_resizing') {
-			mu_col_resize()
-		} else if (hit_state == 'col_dragging') {
-			if (e.can_sort_rows)
-				e.set_order_by_dir(e.fields[hit_fi], 'toggle', ev.shiftKey)
-			else if (e.focus_cell_on_click_header)
-				e.focus_cell(true, hit_fi)
-		} else if (hit_state == 'col_moving') {
-			mu_col_move()
-		} else if (hit_state == 'row_moving') {
-			mu_row_move()
-		} else if (hit_state == 'row_dragging') {
-			e.pick_val()
-		}
+	e.cells.on('pointerleave', function(ev) {
 		hit_state = null
-		return false
-	}
-
-	e.on('pointermove'     , pointermove)
-	e.on('pointerdown'     , pointerdown)
-	e.on('pointerup'       , pointerup)
-	e.on('pointerleave'    , pointerup)
-	e.on('rightpointerdown', rightpointerdown)
+		e.update({state: true})
+	})
 
 	e.on('contextmenu', function(ev) {
 		context_menu_popup(hit_fi, ev.clientX, ev.clientY)
 		return false
 	})
 
-	e.on('click', function(ev) {
-		if (!(hit_ri != null && hit_fi != null)) return
-		e.fire('cell_click', hit_ri, hit_fi, ev)
+	e.on('click', function(ev, mx, my) {
+		pointermove(ev, mx, my, true)
+		if (hit_state != 'cell')
+			return
+		if (e.fire('cell_click', hit_ri, hit_fi, ev) == false)
+			return false
 	})
 
-	e.on('dblclick', function(ev) {
+	e.on('dblclick', function(ev, mx, my) {
+		pointermove(ev, mx, my, true)
+		if (hit_state != 'cell')
+			return
 		if (hit_indent)
 			return
 		let field = e.fields[hit_fi]
 		if (field.cell_dblclick) {
 			let row = e.rows[hit_ri]
-			// TODO
 			if (field.cell_dblclick.call(e, cell_val_node(hit_cell), row, field) == false)
-				return
+				return false
 		}
-		if (!e.fire('cell_dblclick', hit_ri, hit_fi, ev))
-			return
+		if (e.fire('cell_dblclick', hit_ri, hit_fi, ev) == false)
+			return false
 		if (e.enter_edit_on_dblclick)
 			e.enter_edit('select_all')
 	})
