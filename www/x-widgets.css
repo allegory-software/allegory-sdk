@@ -119,9 +119,9 @@
 
 	--x-border-width-item          : 1px; /* PIXELS ONLY! needed to show rows with errors */
 
-	/* this is because Firefox refuses to set line-height for input tags */
-	--x-grid-cell-font-size        : 13px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height      : 18px; /* PIXELS ONLY! line-height of input tags for 13px font */
+	/* these two need to be matched in order to valign grid cells with cell editors */
+	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
 
 }
 
@@ -258,28 +258,6 @@ don't show a focus outline on the entire widget, but only show an inside
 
 .x-item:not(.focused):not(.selected):not(.invalid).new.modified {
 	background-color: var(--x-bg-new-modified);
-}
-
-.x-item.row-has-errors.x-grid-h {
-	border-top-color   : var(--x-bg-error);
-	border-bottom-color: var(--x-bg-error);
-}
-.x-item.row-has-errors.x-grid-h.x-grid-cell-first {
-	border-left-color: var(--x-bg-error);
-}
-.x-item.row-has-errors.x-grid-h.x-grid-cell-last {
-	border-right-color: var(--x-bg-error);
-}
-
-.x-item.row-has-errors.x-grid-v {
-	border-left-color : var(--x-bg-error);
-	border-right-color: var(--x-bg-error);
-}
-.x-item.row-has-errors.x-grid-v.x-grid-cell-first {
-	border-top-color: var(--x-bg-error);
-}
-.x-item.row-has-errors.x-grid-v.x-grid-cell-last {
-	border-bottom-color: var(--x-bg-error);
 }
 
 .x-focusable-items .x-item:not(.focused).selected:not(.invalid) {
@@ -745,7 +723,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-widget.with-label > .x-focus-box {
-	min-height: var(--x-min-height-input);  /* because line-height doesn't work on <input> */
+	min-height: var(--x-min-height-input);
 }
 
 .x-editbox.with-label > .x-focus-box {
@@ -2590,10 +2568,6 @@ x-tabs-fixed-header {
 
 /* grid ------------------------------------------------------------------- */
 
-:root {
-	--x-grid-header-height: 3.4em;
-}
-
 .x-grid {
 	/* layout self */
 	flex: 1;
@@ -2622,76 +2596,16 @@ x-tabs-fixed-header {
 	min-height: calc(var(--x-grid-header-height) + 1px);
 }
 
+.x-grid-header-canvas {
+	position: absolute;
+}
+
 .x-grid-header.with-filters {
 	min-height: calc(var(--x-grid-header-height) + 1px + .9em);
 }
 
 .x-vgrid > .x-grid-header {
 	border-bottom-width: 0;
-}
-
-/* grid header & row cell common styles that make them align */
-
-.x-grid-header-cell,
-.x-grid-cell {
-	position: relative;        /* qs-text is relative to it. */
-	white-space: nowrap;       /* row height is fixed */
-
-	/* sizing & styling */
-	padding-left   : var(--x-padding-x-input);
-	padding-right  : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input-top);
-	padding-bottom : var(--x-padding-y-input-bottom);
-	border: var(--x-border-width-item) solid #00000000;
-	border-right-color: var(--x-faint);
-	border-bottom-color: var(--x-faint);
-	min-width: 20px;
-}
-
-/* grid header cells */
-
-.x-grid-header-cell {
-	height: 100%;
-}
-
-.x-grid-header-cell {
-	position: absolute;
-}
-
-.x-vgrid > .x-grid-header > .x-grid-header-cell {
-	height: auto;
-}
-
-.x-hgrid > .x-grid-header > .x-grid-header-cell {
-	height: 100%;
-}
-
-.x-grid-header-cell-table {
-	width: 100%;               /* expand to fit column width */
-	table-layout: fixed;       /* don't expand based on content */
-	border-collapse: collapse; /* kill additional table borders */
-}
-
-.x-grid-header-title-td {
-	padding: 0;
-	overflow: hidden;          /* hide title under the sort icon */
-	font-weight: bold;
-}
-
-.x-grid-header-sort-icon-td {
-	padding: 0;
-	width: 0;
-	vertical-align: baseline;
-}
-
-.x-grid-header-sort-icon-td.sorted {
-	width: 1.2em;              /* make space for it */
-}
-
-.x-grid-header-sort-icon-pri {
-	padding-left: 2px;
-	padding-right: 2px;
-	font-size: 85%;
 }
 
 /* grid cells: grid > view > ct > (cells, editor) > cell */
@@ -2702,9 +2616,7 @@ x-tabs-fixed-header {
 	min-height: 0;
 	/* layout content */
 	display: grid;
-	overflow-x: auto;
-	/* ^^ what we want is `auto` but because of a chrome bug we enable it
-	from js only when needed */
+	overflow-x: auto;          /* TODO: fix for chrome bug */
 	overflow-y: scroll;        /* show scrollbars always */
 	position: relative;        /* anchor rows div */
 }
@@ -2714,7 +2626,7 @@ x-tabs-fixed-header {
 	overflow-y: auto;        /* same remark about `auto` */
 }
 
-.x-grid-cells-ct {
+.x-grid-cells {
 	grid-row-start: 1;
 	grid-column-start: 1;
 	overflow: hidden;          /* hide surplus bottom rows */
@@ -2722,96 +2634,8 @@ x-tabs-fixed-header {
 	z-index: 0;                /* stacking context for cell and editor */
 }
 
-.x-grid-cells {
-	position: absolute;        /* keep at y=0 while scrolling */
-}
-
 .x-grid-cells-canvas {
 	position: absolute;        /* keep at y=0 while scrolling */
-}
-.x-grid-cell {
-	position: absolute; /* positioned in code */
-	overflow: hidden;
-	display: flex;      /* because vertical-align doesn't work with `position: absolute` */
-	align-items: baseline; /* to align edited text with icons and tagsedit labels at baseline */
-	font-size: var(--x-grid-cell-font-size); /* must be fixed because line-height must be fixed */
-	line-height: var(--x-grid-cell-line-height); /* line heights between text and icons must match */
-	background-color: var(--x-bg); /* make opaque because it overflows other cells on hover */
-}
-
-.x-grid-cell .fa,
-.x-grid-cell .fa,
-.x-grid-cell .fas,
-.x-grid-cell .far,
-.x-grid-cell .fal,
-.x-grid-cell .fad,
-.x-grid-cell .fab
-{
-	line-height: inherit; /* for matching baseline with text of different fonts */
-}
-
-.x-grid-cell > .x-button[bare] {
-	padding: 0; /* no space for padding */
-}
-
-.x-grid-cell:hover,
-.x-grid-cell.focused {
-	overflow: visible;
-	/* TODO: changing z-index on hover is too slow in Chrome with 1000 cells */
-	z-index: 1; /* hover/focused = 1, moving = 1 */
-	width: auto !important;
-}
-
-.x-grid-cell:hover,
-.x-grid-cell:active
-{
-	outline: 1px dotted var(--x-fg-label);
-	outline-offset: -1px;
-}
-
-.x-grid-cell[align=center] { justify-content: center; }
-.x-grid-cell[align=right]  { justify-content: flex-end; }
-
-.x-grid-cell.x-grid-cell.row-invalid {
-	outline: 2px solid var(--x-bg-error);
-	outline-offset: -2px;
-}
-
-/* tree node indent */
-
-.x-grid-cell-indent {
-	display: inline-flex;
-	align-items: center;
-	justify-content: flex-end;
-	width: 0;
-	padding: 0 4px;
-	color: var(--x-fg-disabled);
-}
-
-.x-grid-cell-indent:empty::after {
-	content: '\200b'; /* zwsp to force line height */
-}
-
-.x-grid-cell-indent:hover::before {
-	color: #666;
-}
-
-.x-grid-cell.focused > .x-grid-cell-indent {
-	color: #ccc;
-}
-
-.x-grid-cell.focused > .x-grid-cell-indent:hover::before {
-	color: #eee;
-}
-
-/* quicksearch overlay text */
-
-.x-grid-qs-text { /* child of x-grid-cell */
-	position: absolute;
-	top: 0;
-	color: var(--x-fg-search);
-	background-color: var(--x-bg-search) !important;
-	z-index: 1; /* qs-text = 1 */
 }
 
 /* grid col moving */
@@ -2820,50 +2644,20 @@ x-tabs-fixed-header {
 	cursor: grabbing;
 }
 
-.x-grid-header-cell.col-moving,
-.x-grid-cell.col-moving {
-	opacity: .7;
-	z-index: 1; /* hover/focused = 1, moving = 1 */
-}
-
-.x-grid.col-moving .x-grid-header-cell:not(.col-moving),
-.x-grid.col-moving .x-grid-cell:not(.col-moving),
-.x-grid.col-moving .grid-editor:not(.col-moving) {
-	transition: top .1s, left .1s, right .1s;
-}
-
-/* grid row moving */
-
-.x-grid-cell.row-moving {
-	background-color: #eee;
-	opacity: .7;
-	z-index: 1; /* hover/focused = 1, moving = 1 */
-}
-
-.x-item.moving-parent-cell {
-	background-color: var(--x-smoke);
-}
-
 /* grid col resizing */
 
 /* NOTE: `col-resize` is almost invisible on a light background on Windows 7 */
 .x-grid.col-resize {
 	cursor: ew-resize;
 }
-.x-grid:not(.col-resize) .x-grid-header-cell {
-	cursor: pointer; /* resizing area is underneath */
+
+.x-grid.col-move {
+	cursor: pointer;
 }
 
 .x-grid-resize-guides {
 	position: absolute;
 	top: 0;
-}
-
-.x-grid-resize-guide {
-	position: absolute;
-	width: 0;
-	margin-left: -1px;  /* TODO: see why this is needed and remove it */
-	border-left: 1px dashed #aaa;
 }
 
 /* grid editing */
@@ -2905,10 +2699,6 @@ x-tabs-fixed-header {
 {
 	box-shadow: inset 2px 2px 6px -2px rgba(0,0,0,0.75);
 	outline: none;
-}
-
-.x-grid-cell.editing {
-	visibility: hidden;
 }
 
 /* load/save progress bar */
@@ -2995,13 +2785,7 @@ x-tabs-fixed-header {
 	outline: none; /* many edit modes, each marked in its own ways */
 }
 
-.x-grid-header-cell.editing.editing {
-	outline: 2px dotted red;
-	outline-offset: -2px;
-	cursor: initial;
-}
-
-.x-grid-cells-view.editing > .x-grid-cells-ct {
+.x-grid-cells-view.editing > .x-grid-cells {
 	display: none;
 }
 
@@ -3280,14 +3064,6 @@ x-tabs-fixed-header {
 
 x-prop-layers-inspector > .x-grid-header {
 	min-height: calc(2em + 1px);
-}
-
-x-prop-inspector .x-grid-cell:not(.focused):not(.selected):not(.invalid).modified {
-	background-color: var(--x-bg-row-focused);
-}
-
-x-prop-inspector .x-grid-cell:not(.modified) {
-	color: var(--x-fg-disabled);
 }
 
 /* ------------------------------------------------------------------------ */
