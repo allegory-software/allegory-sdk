@@ -158,6 +158,8 @@ AJAX REQUESTS
 	ajax(opt) -> req
 	get(url, success, [error], [opt]) -> req
 	post(url, data, [success], [error], [opt]) -> req
+BROWSER DETECTION
+	Firefox
 
 */
 
@@ -1782,3 +1784,5 @@ function post(url, upload, success, fail, opt) {
 		fail: fail,
 	}, opt))
 }
+
+Firefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
