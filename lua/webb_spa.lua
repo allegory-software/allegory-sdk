@@ -238,7 +238,7 @@ local spa_template = [[
 		var client_action = {{client_action}}
 	</{{undefined}}script>
 </head>
-<body {{body_attrs}} class="{{body_classes}}">
+<body {{#theme}}theme={{theme}}{{/theme}} {{body_attrs}} class="{{body_classes}}">
 {{{body}}}
 </body>
 </html>
@@ -250,15 +250,17 @@ local function page_title(infer, body)
 		or (args(1) or ''):gsub('[-_]', ' ')
 end
 
-function spa_action()
-	if _G.login then
-		try_login() --sets lang from user profile.
-	end
+function spa_action(opt)
+	opt = opt or empty
 	local t = {}
+	if _G.login then
+		if try_login() then --sets lang from user profile.
+			t.theme = usr'theme'
+		end
+	end
 	t.lang = lang()
 	t.country = country()
-
-	local html = record(outcatlist, '_all.html.cat')
+	local html = opt.html or record(outcatlist, '_all.html.cat')
 	t.body = html_filter_lang(html, lang())
 	t.body_classes = call(config'body_classes')
 	t.body_attrs = call(config'body_attrs')
@@ -275,7 +277,8 @@ function spa_action()
 		buf(mustache_wrap(template(name), name))
 	end
 	t.templates = buf()
-	out(render_string(spa_template, t))
+	update(t, opt)
+	out(render_string(opt.spa_template or spa_template, t))
 end
 
-action['404.html'] = spa_action
+action['404.html'] = function() spa_action() end
