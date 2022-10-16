@@ -1038,7 +1038,10 @@ function nav_widget(e) {
 		let cols = cols_array()
 		let col = cols.remove(fi)
 		cols.insert(insert_fi, col)
+		e.begin_update()
 		e.cols = cols_from_array(cols)
+		e.update({fields: true}) // in case cols haven't changed.
+		e.end_update()
 	}
 
 	// param nav --------------------------------------------------------------
@@ -4859,12 +4862,26 @@ component('x-lookup-dropdown', function(e) {
 			'Value must be in the list of allowed values.'),
 	})
 
-	all_field_types.format = function(v) {
+	all_field_types.to_text = function(v) {
 		return String(v)
 	}
 
+	all_field_types.from_text = function(s) {
+		s = s.trim()
+		return s !== '' ? s : null
+	}
+
+	all_field_types.format = function(s) {
+		return this.to_text(s)
+	}
+
+	all_field_types.format_text = function(s) {
+		return this.to_text(s)
+	}
+
 	all_field_types.draw = function(v, cx) {
-		let s = this.to_text(v)
+		let s = this.format_text(v)
+		cx.font = cx.text_font
 		if (cx.measure) {
 			cx.measured_width = cx.measureText(s).width
 			return
@@ -4876,17 +4893,18 @@ component('x-lookup-dropdown', function(e) {
 			x = cx.cw / 2
 		else
 			x = 0
-		cx.font = cx.text_font
 		cx.textAlign = this.align
 		cx.fillStyle = cx.fg_text
 		cx.fillText(s, x, cx.baseline)
 		if (cx.quicksearch_len) {
 			let s1 = s.slice(0, cx.quicksearch_len)
-			let m = cx.measureText(s1)
+			let m = cx.measureText(s)
+			let ascent  = m.actualBoundingBoxAscent
+			let descent = m.actualBoundingBoxDescent
+			let w = cx.measureText(s1).width
 			cx.fillStyle = cx.bg_search
 			cx.beginPath()
-			cx.rect(0, cx.baseline - m.fontBoundingBoxAscent, m.width,
-				m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)
+			cx.rect(0, cx.baseline - ascent, w, ascent + descent)
 			cx.fill()
 			cx.fillStyle = cx.fg_search
 			cx.fillText(s1, x, cx.baseline)
@@ -4895,15 +4913,6 @@ component('x-lookup-dropdown', function(e) {
 
 	all_field_types.editor = function(opt) {
 		return textedit(opt)
-	}
-
-	all_field_types.to_text = function(v) {
-		return String(v)
-	}
-
-	all_field_types.from_text = function(s) {
-		s = s.trim()
-		return s !== '' ? s : null
 	}
 
 	// passwords
@@ -4943,7 +4952,7 @@ component('x-lookup-dropdown', function(e) {
 		return x != null ? x : s
 	}
 
-	number.format = function(s) {
+	number.to_text = function(s) {
 		let x = num(s)
 		return x != null ? x.dec(this.decimals) : s
 	}
@@ -4953,15 +4962,38 @@ component('x-lookup-dropdown', function(e) {
 	let filesize = assign({}, number)
 	field_types.filesize = filesize
 
-	filesize.format = function(s) {
+	// TODO: filesize.from_text!
+
+	{
+	let ret = []
+	function fs_to_text(s) {
 		let x = num(s)
 		if (x == null)
-			return x
+			return s
 		let mag = this.filesize_magnitude
 		let dec = this.filesize_decimals || 0
 		let min = this.filesize_min || 1/10**dec
-		s = x.kbytes(dec, mag)
-		return x < min ? span({class: 'x-dba-insignificant-size'}, s) : s
+		ret[0] = x.kbytes(dec, mag)
+		ret[1] = x < min
+		return ret
+	}
+	}
+
+	filesize.to_text = function(s1) {
+		let [s, small] = fs_to_text(s1)
+		return s
+	}
+
+	filesize.format = function(s1) {
+		let [s, small] = fs_to_text(s1)
+		return small ? span({class: 'x-dba-insignificant-size'}, s) : s
+	}
+
+	filesize.draw = function(s1, cx) {
+		let [s, small] = fs_to_text(s1)
+		if (small)
+			cx.fg_text = cx.fg_disabled
+		all_field_types.draw.call(this, s, cx)
 	}
 
 	filesize.scale_base = 1024
@@ -5003,12 +5035,6 @@ component('x-lookup-dropdown', function(e) {
 	// range of MySQL DATETIME type
 	date.min = date.to_time('1000-01-01 00:00:00')
 	date.max = date.to_time('9999-12-31 23:59:59')
-
-	date.format = function(s) {
-		let t = this.to_time(s, true)
-		if (t == null) return s
-		return t.date(null, this.has_time, this.has_seconds)
-	}
 
 	date.editor = function(opt) {
 		return dateedit(assign_opt({
@@ -5052,6 +5078,15 @@ component('x-lookup-dropdown', function(e) {
 		if (isstr(t)) return t // invalid
 		if (this.timeago)
 			return span({timeago: '', time: t}, t.timeago())
+		return t.date(null, this.has_time, this.has_seconds)
+	}
+
+	// TODO: update all grids containing timeago fields every minute!
+
+	ts.format_text = function(t) {
+		if (isstr(t)) return t // invalid
+		if (this.timeago)
+			return t.timeago()
 		return t.date(null, this.has_time, this.has_seconds)
 	}
 
@@ -5113,8 +5148,6 @@ component('x-lookup-dropdown', function(e) {
 			+ ':' + (this.has_seconds ? t[2].base(10, 2) : '00')
 	}
 
-	td.format = td.to_text
-
 	td.validator_time = field => ({
 		validate : v => v == null || parse_hms(v, field.has_seconds) != null,
 		message  : field.has_seconds
@@ -5147,8 +5180,6 @@ component('x-lookup-dropdown', function(e) {
 		if (t == null) return s // invalid
 		return t[0] * 3600 + t[1] * 60 + t[2]
 	}
-
-	tds.format = tds.to_text
 
 	tds.validator_timeofday_in_seconds = field => ({
 		validate : v => v == null || tds_from_text(v, field.has_seconds),
@@ -5195,8 +5226,6 @@ component('x-lookup-dropdown', function(e) {
 		return d
 	}
 
-	d.format = d.to_text
-
 	// booleans
 
 	let bool = {align: 'center', min_w: 28}
@@ -5214,6 +5243,17 @@ component('x-lookup-dropdown', function(e) {
 
 	bool.format = function(v) {
 		return v ? this.true_text : this.false_text
+	}
+
+	bool.format_text = function(v) {
+		return v ? '\uf00c' : ''
+	}
+
+	bool.draw = function(v, cx) {
+		let text_font = cx.text_font
+		cx.text_font = cx.icon_font
+		all_field_types.draw.call(this, v, cx)
+		cx.text_font = text_font
 	}
 
 	bool.editor = function(opt) {
@@ -5236,7 +5276,7 @@ component('x-lookup-dropdown', function(e) {
 		}, opt))
 	}
 
-	enm.format = function(v) {
+	enm.to_text = function(v) {
 		let s = this.enum_texts ? this.enum_texts[v] : undefined
 		return s !== undefined ? s : v
 	}
@@ -5252,7 +5292,7 @@ component('x-lookup-dropdown', function(e) {
 		}, opt))
 	}
 
-	tags.format = function(v) {
+	tags.to_text = function(v) {
 		return isarray(v) ? v.join(' ') : v
 	}
 
@@ -5261,9 +5301,11 @@ component('x-lookup-dropdown', function(e) {
 	let color = {}
 	field_types.color = color
 
-	color.format = function(color) {
-		return div({class: 'x-item-color', style: 'background-color: '+color}, '\u00A0')
+	color.format = function(s) {
+		return div({class: 'x-item-color', style: 'background-color: '+s}, '\u00A0')
 	}
+
+	// TODO: color.draw = function(s) {}
 
 	color.editor = function(opt) {
 		return color_dropdown(assign_opt({
@@ -5276,13 +5318,18 @@ component('x-lookup-dropdown', function(e) {
 	let percent = {}
 	field_types.percent = percent
 
-	percent.format = function(p) {
+	percent.to_text = function(p) {
+		return isnum(p) ? (p * 100).dec(this.decimals) + '%' : p
+	}
+
+	percent.format = function(s) {
 		let bar = div({class: 'x-item-progress-bar'})
-		let txt = div({class: 'x-item-progress-text'},
-			isnum(p) ? (p * 100).dec(this.decimals) + '%' : p)
-		bar.style.right = (100 - (isnum(p) ? p * 100 : 0)) + '%'
+		let txt = div({class: 'x-item-progress-text'}, this.to_text(s))
+		bar.style.right = (100 - (isnum(s) ? s * 100 : 0)) + '%'
 		return div({class: 'x-item-progress'}, bar, txt)
 	}
+
+	// TODO: percent.draw = function(s) {}
 
 	// icons
 
@@ -5291,6 +5338,16 @@ component('x-lookup-dropdown', function(e) {
 
 	icon.format = function(icon) {
 		return div({class: 'fa '+icon})
+	}
+
+	icon.draw = function(s, cx) {
+		s = fontawesome_char(s)
+		if (!s)
+			return
+		let text_font = cx.text_font
+		cx.text_font = cx.icon_font
+		all_field_types.draw.call(this, s, cx)
+		cx.text_font = text_font
 	}
 
 	icon.editor = function(opt) {
@@ -5338,6 +5395,25 @@ component('x-lookup-dropdown', function(e) {
 		return place
 	}
 
+	place.draw = function(v, cx) {
+		let place_id = isobject(v) && v.place_id
+		let descr = isobject(v) ? v.description : v || ''
+		let icon_char = fontawesome_char('fa-map-marker-alt')
+		let indent_x = cx.font_size * 1.25
+		if (cx.measure) {
+			all_field_types.draw.call(this, descr, cx)
+			cx.measured_width += indent_x
+			return
+		}
+		cx.font = cx.icon_font
+		cx.fillStyle = place_id ? cx.fg_text : cx.fg_disabled
+		cx.fillText(icon_char, 0, cx.baseline)
+		cx.save()
+		cx.translate(indent_x, 0)
+		all_field_types.draw.call(this, descr, cx)
+		cx.restore()
+	}
+
 	place.editor = function(opt) {
 		return placeedit(opt)
 	}
@@ -5364,8 +5440,7 @@ component('x-lookup-dropdown', function(e) {
 	field_types.phone = phone
 
 	phone.validator_phone = function() {
-
-
+		// TODO
 	}
 
 	// email
@@ -5394,6 +5469,14 @@ component('x-lookup-dropdown', function(e) {
 				field.action.call(this, val, row, field)
 			},
 		}, this.button_options))
+	}
+
+	btn.draw = function(v, cx) {
+		// TODO
+	}
+
+	btn.click = function() {
+		// TODO
 	}
 
 	// public_key, secret_key, private_key
