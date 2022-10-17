@@ -120,8 +120,8 @@
 	--x-border-width-item          : 1px; /* PIXELS ONLY! needed to show rows with errors */
 
 	/* these two need to be matched in order to valign grid cells with cell editors */
-	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
+	--x-grid-cell-baseline    : 11px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
 
 }
 
@@ -141,31 +141,31 @@ hr {
 
 body {
 	font-family: arial, sans-serif;
-	font-size: 13px;
+	font-size: 12px;
 }
 
 /* opensans fonts --------------------------------------------------------- */
 
 @font-face {
 	font-family: "opensans";
-	src: url("/OpenSans-Regular.ttf");
+	src: url("/opensans-regular.woff2");
 }
 
 @font-face {
 	font-family: "opensans";
 	font-weight: bold;
-	src: url("/OpenSans-SemiBold.ttf");
+	src: url("/opensans-600.woff2");
 }
 
 @font-face {
-	font-family: "opensans-condensed";
-	src: url("/OpenSansCondensed-Light.ttf");
+	font-family: "opensanscondensed";
+	src: url("/opensanscondensed-light.woff2");
 }
 
 @font-face {
-	font-family: "opensans-condensed";
+	font-family: "opensanscondensed";
 	font-weight: bold;
-	src: url("/OpenSansCondensed-Bold.ttf");
+	src: url("/opensanscondensed-bold.woff2");
 }
 
 /* widget defaults -------------------------------------------------------- */
@@ -2577,6 +2577,24 @@ x-tabs-fixed-header {
 	cursor: default;           /* don't show caret over text */
 }
 
+body[large] {
+	font-size                 : 15px;
+	--x-grid-cell-baseline    : 15px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 20px; /* PIXELS ONLY! */
+}
+
+body[medium] {
+	font-size                 : 13px;
+	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
+}
+
+body[small] {
+	font-size                 : 11px;
+	--x-grid-cell-baseline    : 11px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
+}
+
 .x-vgrid {
 	flex-flow: row;
 }
@@ -3124,10 +3142,11 @@ x-prop-layers-inspector > .x-grid-header {
 	--x-outline-focused: #999;
 
 	/* these need to be opaque! */
-	--x-bg-unfocused-selected : #3a3f42;
+	--x-bg-unfocused-selected : #4c545d;
+	--x-bg-unfocused          : #2e3033;
 	--x-bg-unselected         : #1d2021;
-	--x-bg-selected           : #15385c;
-	--x-bg-row-focused        : #222;
+	--x-bg-selected           : #122f4d;
+	--x-bg-row-focused        : #222326;
 
 	--x-bg-grid-editor: #495560;
 
