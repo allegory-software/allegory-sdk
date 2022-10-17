@@ -977,15 +977,11 @@ function editbox_widget(e, opt) {
 			let s = e.to_text(v)
 			let maxlen = e.field && e.field.maxlen
 			e.input.value = s.slice(0, maxlen)
-			do_update_state(s)
 		} else {
-			let dval = e.picker && e.picker.dropdown_display_val
-			let text = dval && dval(v)
-			if (text == null)
-				text = e.display_val_for(v)
-			e.val_box.set(text)
-			do_update_state(text)
+			let s = e.display_val_for(v)
+			e.val_box.set(s)
 		}
+		do_update_state(v)
 	}
 
 	if (e.input) {
@@ -1099,6 +1095,8 @@ function editbox_widget(e, opt) {
 
 	// clicking outside the picker closes the picker.
 	function document_pointerdown(ev) {
+		// TODO: this is brittle because ev.target could be replaced on click
+		// so by the time we get here ev.target has no parent!
 		if (e.positionally_contains(ev.target)) // clicked inside the editbox.
 			return
 		if (e.spicker.positionally_contains(ev.target)) // clicked inside the picker.
@@ -1295,8 +1293,7 @@ function editbox_widget(e, opt) {
 		}
 
 		function popup_picker(show) {
-			e.picker.show(show)
-			e.picker.popup(e, 'bottom', e.align == 'right' ? 'end' : 'start')
+			e.picker.popup(show && e, 'bottom', e.align == 'right' ? 'end' : 'start')
 		}
 
 		function bind_picker(on) {
@@ -1391,6 +1388,8 @@ function editbox_widget(e, opt) {
 
 		// clicking outside the picker closes the picker.
 		function document_pointerdown(ev) {
+			// TODO: this is brittle because ev.target could be replaced on click
+			// so by the time we get here ev.target has no parent!
 			if (e.positionally_contains(ev.target)) // clicked inside the dropdown.
 				return
 			if (e.picker.positionally_contains(ev.target)) // clicked inside the picker.
