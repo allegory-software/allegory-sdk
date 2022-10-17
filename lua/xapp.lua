@@ -35,10 +35,10 @@ function load_opensans()
 		font-family: opensans, Arial, sans-serif;
 	}
 	]]
-	fontfile'OpenSans-Regular.ttf'
-	fontfile'OpenSans-SemiBold.ttf'
-	fontfile'OpenSansCondensed-Light.ttf'
-	fontfile'OpenSansCondensed-Bold.ttf'
+	fontfile'opensans-regular.woff2'
+	fontfile'opensans-600.woff2'
+	fontfile'opensanscondensed-light.woff2'
+	fontfile'opensanscondensed-bold.woff2'
 end
 
 js[[
@@ -67,7 +67,7 @@ x-grid.js
 x-module.js
 ]]
 
-fontfile'fa-solid-900.woff2'
+fontfile('fa-solid-900.woff2')
 
 require'xauth'
 
