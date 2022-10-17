@@ -912,7 +912,6 @@ method(DOMRectReadOnly, 'clip', function(r) { // from box2d.lua
 {
 let layout_changed = function() { document.fire('layout_changed') }
 window.on('resize', layout_changed)
-window.on('load'  , layout_changed) // because fonts load asynchronously.
 }
 
 method(Window, 'rect', function() {
@@ -1290,7 +1289,7 @@ to update the popup's position manually. We simply don't have an observer
 for tracking changes to an element's position on screen or relative to
 another element.
 
-`popup_target_visible` hook allows changing/animating popup's visibility
+Calls `popup_visible` to allow changing/animating popup's visibility
 based on target's hover state or focused state.
 
 */
@@ -1514,15 +1513,15 @@ let popup_state = function(e) {
 			return
 		if (target.effectively_hidden_nocss)
 			return
-		if (e.popup_target_visible)
-			if (!e.popup_target_visible(target))
+		if (e.popup_visible)
+			if (!e.popup_visible(target))
 				return
 		return true
 	}
 
 	function do_update() {
 
-		if (target.effectively_hidden) { // slow-to-calculate
+		if (!target || target.effectively_hidden) { // slow-to-calculate
 			e.hide()
 			return
 		} else {
@@ -1590,8 +1589,8 @@ let popup_state = function(e) {
 		e.x = fixed ? x0 : window.scrollX + x0
 		e.y = fixed ? y0 : window.scrollY + y0
 
-		if (e.popup_target_updated)
-			e.popup_target_updated(target, side1, align1)
+		if (e.popup_updated)
+			e.popup_updated(target, side1, align1)
 
 	}
 
