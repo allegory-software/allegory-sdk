@@ -216,7 +216,9 @@ end
 
 local function preloadlist()
 	for i,file in ipairs(fontfiles) do
-		out(format('\t<link rel="preload" href="%s" as="font" crossorigin>\n', href('/'..file)))
+		local file_ext = file:match'%.([^%.]+)$'
+		out(format('\t<link rel="preload" href="%s" as="font" type="font/%s" crossorigin>\n',
+			href('/'..file), file_ext))
 	end
 end
 
@@ -229,8 +231,8 @@ local spa_template = [[
 	<meta charset=utf-8>
 	<title>{{title}}{{title_suffix}}</title>
 	{{#favicon_href}}<link rel="icon" href="{{favicon_href}}">{{/favicon_href}}
-{{{preload}}}
 {{{all_css}}}
+{{{preload}}}
 {{{all_js}}}
 {{{head}}}
 	{{{templates}}}
