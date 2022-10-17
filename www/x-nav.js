@@ -403,7 +403,6 @@ picker:
 	publishes:
 		e.display_col
 		e.row_display_val()
-		e.dropdown_display_val()
 		e.pick_near_val()
 
 server-side properties:
@@ -3601,17 +3600,36 @@ function nav_widget(e) {
 
 		let move_ri1 = min(focused_ri, selected_ri)
 		let move_ri2 = max(focused_ri, selected_ri)
-		move_ri2 += 1 + e.expanded_child_row_count(move_ri2)
-		let move_n = move_ri2 - move_ri1
 
 		let top_row = e.rows[move_ri1]
 		let parent_row = top_row.parent_row
 
-		// check to see that all selected rows are siblings or children of the first one.
-		if (e.parent_field)
+		move_ri2++ // make range exclusive.
+
+		if (e.parent_field) {
+
+			let min_parent_count = top_row.parent_rows.length
+
+			// extend selection with all visible children which must be moved along.
+			// another way to compute this would be to find the last selected sibling
+			// of top_row and select up to all its extended_child_row_count().
+			while (1) {
+				let row = e.rows[move_ri2]
+				if (!row)
+					break
+				if (row.parent_rows.length <= min_parent_count) // sibling or unrelated
+					break
+				move_ri2++
+			}
+
+			// check to see that all selected rows are siblings or children of the first row.
 			for (let ri = move_ri1; ri < move_ri2; ri++)
-				if (e.rows[ri].parent_rows.length < top_row.parent_rows.length)
+				if (e.rows[ri].parent_rows.length < min_parent_count)
 					return
+
+		}
+
+		let move_n = move_ri2 - move_ri1
 
 		// compute allowed row range in which to move the rows.
 		let ri1 = 0
@@ -3698,17 +3716,6 @@ function nav_widget(e) {
 	e.start_move_selected_rows = function(ev) {
 		let focused_ri  = e.focused_row_index
 		let selected_ri = or(e.selected_row_index, focused_ri)
-		if (e.parent_field) {
-			// can only move items of the same parent
-			let ri1 = min(focused_ri, selected_ri)
-			let ri2 = max(focused_ri, selected_ri)
-			let parent_row = e.rows[ri1].parent_row
-			for (let ri = ri1; ri <= ri2; ri++) {
-				let row = e.rows[ri]
-				if (row.parent_row != parent_row)
-					return
-			}
-		}
 		return move_rows_state(focused_ri, selected_ri, ev)
 	}
 
@@ -4651,15 +4658,6 @@ function nav_widget(e) {
 		return e.cell_display_val(row, field)
 	}
 
-	e.dropdown_display_val = function(v) {
-		if (e.val_col == null) // not set up
-			return 'no val col'
-		if (!e.val_field) // not loaded yet
-			return
-		let row = e.lookup(e.val_col, [v])[0]
-		return e.row_display_val(row)
-	}
-
 	e.pick_near_val = function(delta, ev) {
 		if (e.focus_cell(true, true, delta, 0, ev))
 			if (!ev || ev.pick !== false)
@@ -4879,11 +4877,13 @@ component('x-lookup-dropdown', function(e) {
 		return this.to_text(s)
 	}
 
+	all_field_types.fixed_width = 0
+
 	all_field_types.draw = function(v, cx) {
 		let s = this.format_text(v)
 		cx.font = cx.text_font
 		if (cx.measure) {
-			cx.measured_width = cx.measureText(s).width
+			cx.measured_width = cx.measureText(s).width + this.fixed_width
 			return
 		}
 		let x
