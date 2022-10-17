@@ -140,9 +140,17 @@ component('x-grid', 'Input', function(e) {
 	var cx  = e.cells_canvas.getContext('2d')
 	var hcx = e.header_canvas.getContext('2d')
 
+	// Firefox loads fonts into canvas asynchronously, even though said fonts
+	// are already loaded and were preloaded using <link preload>.
+	// NOTE: this delay is only visible with the debugger on.
+	function fonts_loaded() {
+		e.update({rows: true})
+	}
+
 	e.on('bind', function(on) {
 		document.on('layout_changed', layout_changed, on)
 		document.on('theme_changed', theme_changed, on)
+		document.fonts.on('loadingdone', fonts_loaded, on)
 		theme_changed()
 	})
 
@@ -382,7 +390,7 @@ component('x-grid', 'Input', function(e) {
 		} else {
 			r[1] = 0
 			if (s) {
-				if (draw_state == 'moving_row') {
+				if (draw_state == 'moving_rows') {
 					r[0] = s.x + ri * e.cell_w - s.vri1x
 				} else {
 					r[0] = s.xs[ri] - s.vri1x
@@ -528,7 +536,9 @@ component('x-grid', 'Input', function(e) {
 		cx.bg_search   = e.bg_search
 		cx.fg_search   = e.fg_search
 		cx.fg_disabled = e.fg_disabled
-		cx.baseline    = e.baseline + (Firefox ? 1 : 0)
+		// with Arial the baseline adjustment is `1 : 0` but we're not using
+		// Arial because it renders poorly on canvas on Firefox Windows.
+		cx.baseline    = e.baseline + (Firefox ? 1 : 1)
 	}
 
 	function draw_hcell_at(field, x0, y0, w, h) {
@@ -649,13 +659,10 @@ component('x-grid', 'Input', function(e) {
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
 		let editing = !!e.editor && cell_focused
 		let hovering = hit_state == 'cell' && hit_ri == ri && hit_fi == fi
-		let full_width = cell_focused || hovering
+		let full_width = !draw_state && ((row_focused && field == e.focused_field) || hovering)
 
-		if (full_width) {
-			if (!draw_state)
-				return
+		if (full_width)
 			w = max(w, measure_cell_width(row, field) + 2*px)
-		}
 
 		let indent_x = 0
 		let collapsed
@@ -775,7 +782,7 @@ component('x-grid', 'Input', function(e) {
 		cx.moveTo(bw,  0)
 		cx.lineTo(bw, bh)
 		cx.lineTo( 0, bh)
-		if (!fi)
+		if (!fi || fi == col_move_fi)
 			cx.lineTo(0, 0)
 		cx.stroke()
 
@@ -853,8 +860,23 @@ component('x-grid', 'Input', function(e) {
 		cx.save()
 		cx.translate(-scroll_x, -scroll_y)
 
-		let foc_ri = e.focused_row_index
-		let foc_fi = e.focused_field_index
+		let hit_cell, foc_cell, foc_ri, foc_fi
+		if (!draw_state) {
+
+			foc_ri = e.focused_row_index
+			foc_fi = e.focused_field_index
+
+			hit_cell = hit_state == 'cell'
+				&& hit_ri >= ri1 && hit_ri <= ri2
+				&& hit_fi >= fi1 && hit_fi <= fi2
+
+			foc_cell = foc_ri != null && foc_fi != null
+
+			// when foc_cell and hit_cell are the same, don't draw them twice.
+			if (foc_cell && hit_cell && hit_ri == foc_ri && hit_fi == foc_fi)
+				foc_cell = null
+
+		}
 		let hit_cell_w
 
 		for (let ri = ri1; ri < ri2; ri++) {
@@ -862,18 +884,26 @@ component('x-grid', 'Input', function(e) {
 			let row = rows[ri]
 			let [rx, ry, rw, rh] = row_rect(ri, draw_state)
 
+			let hit_cell_now = hit_cell && hit_ri == ri
+			let foc_cell_now = foc_cell && foc_ri == ri
+
 			for (let fi = fi1; fi < fi2; fi++) {
-				if (draw_state == 'moving_cols' || fi != col_move_fi) {
-					let [x, y, w, h] = cell_rel_rect(fi, draw_state)
-					draw_cell_at(row, ri, fi, rx + x, ry + y, w, h, draw_state)
-				}
+				if (draw_state != 'moving_cols' && fi == col_move_fi)
+					continue
+				if (hit_cell_now && hit_fi == fi)
+					continue
+				if (foc_cell_now && foc_fi == fi)
+					continue
+
+				let [x, y, w, h] = cell_rel_rect(fi, draw_state)
+				draw_cell_at(row, ri, fi, rx + x, ry + y, w, h, draw_state)
 			}
 
-			if (hit_state == 'cell' && hit_ri == ri)
-				hit_cell_w = draw_cell(hit_ri, hit_fi, 'hit')
+			if (foc_cell_now)
+				draw_cell(foc_ri, foc_fi, draw_state)
 
-			if (foc_ri == ri && foc_fi != null && !(hit_ri == foc_ri && hit_fi == foc_fi))
-				draw_cell(foc_ri, foc_fi, 'focused')
+			if (hit_cell_now) // can overlap foc_cell, so we draw it after it.
+				hit_cell_w = draw_cell(hit_ri, hit_fi, draw_state)
 
 			if (row.removed)
 				draw_row_strike_line(row, ri, rx, ry, rw, rh, draw_state)
@@ -888,7 +918,7 @@ component('x-grid', 'Input', function(e) {
 			}
 		}
 
-		if (hit_state == 'cell') {
+		if (hit_cell_w != null) {
 			let [x, y, w, h] = cell_rect(hit_ri, hit_fi, draw_state)
 			w = hit_cell_w
 			draw_hover_outline(x, y, w, h)
@@ -899,16 +929,21 @@ component('x-grid', 'Input', function(e) {
 
 	function update_cells() {
 		cx.clear()
-		if (hit_state == 'row_moving') {
+
+		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
-			update_cells_range(e.rows, s.vri1,      s.vri2     , 0, e.fields.length)
+			update_cells_range(e.rows, s.vri1,      s.vri2     , 0, e.fields.length, 'non_moving_rows')
 			update_cells_range(s.rows, s.move_vri1, s.move_vri2, 0, e.fields.length, 'moving_rows')
-		} else if (hit_state == 'col_moving') {
-			update_cells_range(e.rows, vri1, vri2, 0, e.fields.length)
-			update_cells_range(e.rows, vri1, vri2, col_move_fi, col_move_fi + 1, 'moving_cols')
-		} else {
-			update_cells_range(e.rows, vri1, vri2, 0, e.fields.length)
+			return
 		}
+
+		if (hit_state == 'col_moving') { // draw fixed cols first and moving cols above them.
+			update_cells_range(e.rows, vri1, vri2, 0          , e.fields.length, 'non_moving_cols')
+			update_cells_range(e.rows, vri1, vri2, col_move_fi, col_move_fi + 1, 'moving_cols')
+			return
+		}
+
+		update_cells_range(e.rows, vri1, vri2, 0, e.fields.length)
 	}
 	var update_cells_async = raf_wrap(update_cells)
 
@@ -916,13 +951,13 @@ component('x-grid', 'Input', function(e) {
 		if (horiz)
 			return
 		e.cells_view.scrollBy(0, ev.deltaY)
-	})
+	}, true, {passive: true})
 
 	function cells_view_scroll() {
 		// TODO: use e.begin_update() / e.update() instead of update_cells()
 		if (update_scroll()) {
-			update_header()
-			update_cells()
+			update_header_async()
+			update_cells_async()
 		}
 		update_row_error_tooltip_position()
 	}
@@ -1064,15 +1099,10 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	e.do_cell_click = function(ri, fi) {
-		let cell = e.cells.nodes[cell_index(ri, fi)]
-		if (!cell)
-			return
-
 		let row = e.rows[ri]
 		let field = e.fields[fi]
 
 		// TODO: make clickability a feature of field type.
-
 		if (field.type == 'button') {
 			cell.at[0].activate()
 			return true
@@ -1395,7 +1425,8 @@ component('x-grid', 'Input', function(e) {
 
 		let focused_ri  = e.focused_row_index
 		let selected_ri = or(e.selected_row_index, focused_ri)
-		let [cx, cy, cw, ch] = cell_rect(min(focused_ri, selected_ri), hit_fi)
+		let top_ri = min(focused_ri, selected_ri)
+		let [cx, cy, cw, ch] = cell_rect(top_ri, hit_fi)
 		let hit_cell_mx = hit_mx - cells_r.x - cx
 		let hit_cell_my = hit_my - cells_r.y - cy
 
@@ -1437,24 +1468,29 @@ component('x-grid', 'Input', function(e) {
 			return 1 + e.expanded_child_row_count(before_ri)
 		}
 
-		s.indent_x = indent_offset(row_indent(e.rows[move_ri1]))
+		s.indent_x = indent_offset(row_indent(s.rows[0]))
 
 		function update_hit_parent_row(hit_p) {
-			hit_parent_row = e.rows[hit_over_ri] ? e.rows[hit_over_ri].parent_row : null
-			if (horiz && e.tree_field && e.can_change_parent) {
-				let row1 = e.rows[hit_over_ri-1]
-				let row2 = e.rows[hit_over_ri]
-				let i1 = row1 ? row_indent(row1) : 0
-				let i2 = row2 ? row_indent(row2) : 0
-				// if the row can be a child of the row above,
-				// the indent right limit is increased one unit.
-				let ii1 = i1 + (row1 && !row1.collapsed && e.row_can_have_children(row1) ? 1 : 0)
-				let hit_indent = min(floor(lerp(hit_p, 0, 1, ii1 + 1, i2)), ii1)
-				let parent_i = i1 - hit_indent
-				hit_parent_row = parent_i >= 0 ? row1 && row1.parent_rows[parent_i] : row1
-				s.hit_indent_x = indent_offset(hit_indent)
-				s.hit_parent_row = hit_parent_row
+			let hit_indent = 0
+			if (horiz && e.tree_field) {
+				if (e.can_change_parent) {
+					let row1 = e.rows[hit_over_ri-1]
+					let row2 = e.rows[hit_over_ri]
+					let i1 = row1 ? row_indent(row1) : 0
+					let i2 = row2 ? row_indent(row2) : 0
+					// if the row can be a child of the row above,
+					// the indent right limit is increased one unit.
+					let ii1 = i1 + (row1 && !row1.collapsed && e.row_can_have_children(row1) ? 1 : 0)
+					hit_indent = min(floor(lerp(hit_p, 0, 1, ii1 + 1, i2)), ii1)
+					let parent_i = i1 - hit_indent
+					hit_parent_row = parent_i >= 0 ? row1 && row1.parent_rows[parent_i] : row1
+				} else {
+					hit_indent = row_indent(s.parent_row) + 1
+					hit_parent_row = s.parent_row
+				}
 			}
+			s.hit_indent_x = indent_offset(hit_indent)
+			s.hit_parent_row = hit_parent_row
 		}
 
 		{
@@ -1996,7 +2032,9 @@ component('x-grid', 'Input', function(e) {
 		return false
 	})
 
-	e.cells.on('pointerleave', function(ev) {
+	e.cells_canvas.on('pointerleave', function(ev) {
+		if (hit_state != 'cell')
+			return
 		hit_state = null
 		e.update({state: true})
 	})
