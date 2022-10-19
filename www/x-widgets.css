@@ -2610,8 +2610,15 @@ body[small] {
 	border-width: 0;
 	border-color: var(--x-border-light);
 	border-style: solid;
-	border-bottom-width: 1px;
 	min-height: calc(var(--x-grid-header-height) + 1px);
+}
+
+.x-grid:not(.x-vgrid) > .x-grid-header {
+	border-bottom-width: 1px;
+}
+
+.x-grid.x-vgrid > .x-grid-header {
+	border-right-width: 1px;
 }
 
 .x-grid-header-canvas {
@@ -2658,19 +2665,21 @@ body[small] {
 
 /* grid col moving */
 
+.x-grid.col-move {
+	cursor: pointer;
+}
+
 .x-grid.col-moving {
 	cursor: grabbing;
 }
 
 /* grid col resizing */
 
-/* NOTE: `col-resize` is almost invisible on a light background on Windows 7 */
-.x-grid.col-resize {
+/* NOTE: `col-resize` cursor is almost invisible on a light background on Windows 7 */
+.x-grid.col-resize,
+.x-grid.header-resize
+{
 	cursor: ew-resize;
-}
-
-.x-grid.col-move {
-	cursor: pointer;
 }
 
 .x-grid-resize-guides {
