@@ -224,7 +224,7 @@ focusing and selection:
 		e.can_focus_cell()
 		e.is_cell_disabled()
 		e.can_select_cell()
-		e.is_row_selected()
+		e.is_row_selected(row)
 		e.is_last_row_focused()
 		e.first_focusable_cell(ri|true|0, fi|col|true|0, rows, cols, opt)
 			opt.editable
@@ -1236,10 +1236,10 @@ function nav_widget(e) {
 
 	function create_rows() {
 		e.rows = []
-		if (e.bound) {
+		if (e.bound && !e.parent_field) {
 			let i = 0
 			for (let row of e.all_rows)
-				if (!row.parent_collapsed && e.row_is_visible(row))
+				if (e.is_row_visible(row))
 					e.rows.push(row)
 		}
 	}
@@ -1785,6 +1785,7 @@ function nav_widget(e) {
 			function range_text(v, i, row) {
 				return e.cell_display_val(row, fld(cols_arr[i]))
 			}
+
 		}
 
 		function add_row(row) {
@@ -1835,6 +1836,7 @@ function nav_widget(e) {
 		}
 
 		idx.lookup = function(vals) {
+			assert(isarray(vals), 'lookup() array expected, got {0}', typeof vals)
 			if (!tree)
 				idx.rebuild()
 			let t = tree
@@ -2031,15 +2033,20 @@ function nav_widget(e) {
 		if (!child_rows)
 			return
 		child_rows.remove_value(row)
+		if (child_rows.unsorted)
+			child_rows.unsorted.remove_value(row)
 		if (row.parent_row && row.parent_row.child_rows.length == 0)
-			delete row.parent_row.collapsed
+			row.parent_row.collapsed = null
 		row.parent_row = null
 		remove_parent_rows_for(row)
 	}
 
 	function add_row_to_tree(row, parent_row) {
 		row.parent_row = parent_row
-		;(parent_row || e).child_rows.push(row)
+		let child_rows = (parent_row || e).child_rows
+		child_rows.push(row)
+		if (child_rows.unsorted)
+			child_rows.unsorted.push(row)
 	}
 
 	function init_tree() {
@@ -2062,11 +2069,11 @@ function nav_widget(e) {
 
 		if (!init_parent_rows_for_rows(e.child_rows)) {
 			// circular refs detected: revert to flat mode.
+			warn('Circular refs detected. Cannot present data as a tree.')
 			for (let row of e.all_rows) {
 				row.child_rows = null
 				row.parent_rows = null
 				row.parent_row = null
-				warn('circular ref detected')
 			}
 			e.child_rows = null
 			e.parent_field = null
@@ -2192,42 +2199,21 @@ function nav_widget(e) {
 		if (e.pos_field && order_by.size == 0)
 			order_by.set(e.pos_field, 'asc')
 
-		// the tree-building comparator requires a stable sort order
-		// for all parents so we must always compare rows by id after all.
-		if (e.parent_field && !(e.row_vals || e.row_states) && !order_by.has(e.id_field))
-			order_by.set(e.id_field, 'asc')
-
 		let s = []
 		let cmps = []
 		for (let [field, dir] of order_by) {
-			let i = field.val_index
-			cmps[i] = field_comparator(field)
+			cmps.push(field_comparator(field))
 			let r = dir == 'desc' ? -1 : 1
 			let errors_i = cell_state_val_index('errors', field)
 			// compare vals using the value comparator
 			s.push('{')
-			s.push('let cmp = cmps['+i+']')
+			s.push('let cmp = cmps['+(cmps.length-1)+']')
 			s.push('let r = cmp(r1, r2)')
 			s.push('if (r) return r * '+r)
 			s.push('}')
 		}
 		s.push('return 0')
 		let cmp = 'let cmp = function(r1, r2) {\n\t' + s.join('\n\t') + '\n}\n; cmp;\n'
-
-		// tree-building comparator: order elements by their position in the tree.
-		if (e.parent_field) {
-			// find the closest sibling ancestors of the two rows and compare them.
-			let s = []
-			s.push('let i1 = r1.parent_rows.length-1')
-			s.push('let i2 = r2.parent_rows.length-1')
-			s.push('while (i1 >= 0 && i2 >= 0 && r1.parent_rows[i1] == r2.parent_rows[i2]) { i1--; i2--; }')
-			s.push('let p1 = i1 >= 0 ? r1.parent_rows[i1] : r1')
-			s.push('let p2 = i2 >= 0 ? r2.parent_rows[i2] : r2')
-			s.push('if (p1 == p2) return i1 < i2 ? -1 : 1') // one is parent of another.
-			s.push('return cmp_direct(p1, p2)')
-			cmp = cmp+'let cmp_direct = cmp; cmp = function(r1, r2) {\n\t' + s.join('\n\t') + '\n}\n; cmp;\n'
-		}
-
 		cmp = eval(cmp)
 
 		let compare_rows = e.compare_rows
@@ -2238,11 +2224,36 @@ function nav_widget(e) {
 		}
 	}
 
+	function sort_child_rows(rows, cmp) {
+		if (!rows.unsorted)
+			rows.unsorted = rows.slice()
+		rows.sort(cmp)
+		for (let row of rows)
+			if (row.child_rows.length > 1)
+				sort_child_rows(row.child_rows, cmp)
+	}
+
+	function add_visible_child_rows(rows, unsorted) {
+		for (let row of (unsorted && rows.unsorted || rows))
+			if (e.is_row_visible(row)) {
+				e.rows.push(row)
+				add_visible_child_rows(row.child_rows, unsorted)
+			}
+	}
+
 	function sort_rows(force) {
 		let must_sort = !!(e.parent_field || e.pos_field || order_by_map.size)
-		if (must_sort)
-			e.rows.sort(row_comparator(order_by_map))
-		else if (force)
+		if (must_sort) {
+			if (e.parent_field) {
+				if (order_by_map.size) {
+					let cmp = row_comparator(order_by_map)
+					sort_child_rows(e.child_rows, cmp)
+				}
+				e.rows = []
+				add_visible_child_rows(e.child_rows, !order_by_map.size)
+			} else
+				e.rows.sort(cmp)
+		} else if (force)
 			create_rows()
 		update_row_index()
 	}
@@ -2250,7 +2261,7 @@ function nav_widget(e) {
 	e.sort_rows = function(rows, order_by) {
 		let order_by_map = map()
 		update_order_by_map(order_by, order_by_map)
-		rows.sort(row_comparator(order_by_map))
+		return rows.sort(row_comparator(order_by_map))
 	}
 
 	// changing the sort order ------------------------------------------------
@@ -2348,10 +2359,11 @@ function nav_widget(e) {
 		return eval(s)
 	}
 
+	let is_row_visible
 	function init_filters() {
 		e.is_filtered = false
 		if (e.param_vals === false) {
-			e.row_is_visible = return_false
+			is_row_visible = return_false
 			return
 		}
 		let expr = ['&&']
@@ -2377,7 +2389,11 @@ function nav_widget(e) {
 					expr.push(['!==', field.name, v])
 					e.is_filtered = true
 				}
-		e.row_is_visible = expr.length > 1 ? e.expr_filter(expr) : return_true
+		is_row_visible = expr.length > 1 ? e.expr_filter(expr) : return_true
+	}
+
+	e.is_row_visible = function(row) {
+		return !row.parent_collapsed && is_row_visible(row)
 	}
 
 	e.and_expr = function(cols, vals) {
@@ -2706,7 +2722,7 @@ function nav_widget(e) {
 		return false
 	}
 
-	e.row_is_user_modified = function(row, including_invalid_values) {
+	e.is_row_user_modified = function(row, including_invalid_values) {
 		if (!row.modified)
 			return false
 		for (let field of e.all_fields)
@@ -3301,7 +3317,10 @@ function nav_widget(e) {
 				if (e.parent_field) {
 					row.child_rows = []
 					row.parent_row = parent_row || null
-					;(row.parent_row || e).child_rows.push(row)
+					let child_rows = (row.parent_row || e).child_rows
+					child_rows.push(row)
+					if (child_rows.unsorted)
+						child_rows.unsorted.push(row)
 					if (row.parent_row) {
 						// set parent id to be the id of the parent row.
 						let parent_id = e.cell_val(row.parent_row, e.id_field)
@@ -3312,7 +3331,7 @@ function nav_widget(e) {
 
 				update_indices('row_added', row)
 
-				if (e.row_is_visible(row)) {
+				if (e.is_row_visible(row)) {
 					e.rows.insert(ri, row)
 					if (e.focused_row_index >= ri)
 						e.focused_row = e.rows[e.focused_row_index + 1]
@@ -3329,7 +3348,7 @@ function nav_widget(e) {
 		if (rows_added) {
 			update_row_index()
 			if (ev.input)
-				update_pos_field()
+				update_pos_field() // TODO: tree
 			e.fire('rows_added', added_rows)
 			e.fire('rows_changed')
 		}
@@ -3460,7 +3479,7 @@ function nav_widget(e) {
 			}
 
 			if (ev.input)
-				update_pos_field()
+				update_pos_field() // TODO: tree
 
 			e.fire('rows_removed', removed_rows)
 
@@ -3552,7 +3571,7 @@ function nav_widget(e) {
 
 	// row moving -------------------------------------------------------------
 
-	e.expanded_child_row_count = function(ri) {
+	e.expanded_child_row_count = function(ri) { // expanded means visible.
 		let n = 0
 		if (e.parent_field) {
 			let row = e.rows[ri]
@@ -3657,33 +3676,37 @@ function nav_widget(e) {
 
 			e.rows.splice(insert_ri, 0, ...rows)
 
-			let row = rows[0]
-			let old_parent_row = row.parent_row
+			let old_parent_row = rows[0].parent_row
 
-			change_row_parent(row, parent_row)
+			// move top siblings to new parent.
+			if (old_parent_row != parent_row) {
+				let parent_count = rows[0].parent_rows.length
+				for (let row of rows)
+					if (row.parent_rows.length == parent_count) // sibling of top row
+						change_row_parent(row, parent_row)
+			}
 
 			update_row_index()
 
 			e.focused_row_index = insert_ri + (move_ri1 == focused_ri ? 0 : move_n - 1)
 
 			if (is_client_nav() && e.param_vals) {
-				// move visible rows to index 0 in the unfiltered rows array
-				// so that move_ri1, move_ri2 and insert_ri point to the same rows
-				// in both unfiltered and filtered arrays.
-				let r1 = []
-				let r2 = []
-				for (let ri = 0; ri < e.all_rows.length; ri++) {
-					let visible = e.row_is_visible(e.all_rows[ri])
-					;(visible ? r1 : r2).push(e.all_rows[ri])
+				if (e.parent_field) {
+					// TODO:
+				} else {
+					// move visible rows to the top of the unfiltered rows array
+					// so that move_ri1, move_ri2 and insert_ri point to the same rows
+					// in both unfiltered and filtered arrays.
+					let r1 = []
+					let r2 = []
+					for (let ri = 0; ri < e.all_rows.length; ri++) {
+						let visible = e.is_row_visible(e.all_rows[ri])
+						;(visible ? r1 : r2).push(e.all_rows[ri])
+					}
+					e.all_rows = [].concat(r1, r2)
+					e.all_rows.move(move_ri1, move_n, insert_ri)
+					e.rows_moved(move_ri1, move_n, insert_ri, ev)
 				}
-				e.all_rows = [].concat(r1, r2)
-			}
-
-			if (e.parent_field) {
-				e.all_rows = e.rows.slice()
-			} else {
-				e.all_rows.move(move_ri1, move_n, insert_ri)
-				e.rows_moved(move_ri1, move_n, insert_ri, ev)
 			}
 
 			update_row_index()
