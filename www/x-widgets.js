@@ -332,7 +332,7 @@ calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
 fires:
-	document.'prop_changed' (e, prop, v1, v0, slot)
+	document.'prop_changed' (e, prop, v1, v0)
 --------------------------------------------------------------------------- */
 
 let component_props = function(e, iprops) {
@@ -340,8 +340,8 @@ let component_props = function(e, iprops) {
 	e.xon  = function() { e.xmodule_noupdate = false }
 	e.xoff = function() { e.xmodule_noupdate = true  }
 
-	function fire_prop_changed(e, prop, v1, v0, slot) {
-		document.fire('prop_changed', e, prop, v1, v0, slot)
+	function fire_prop_changed(e, prop, v1, v0) {
+		document.fire('prop_changed', e, prop, v1, v0)
 	}
 
 	function resolve_widget_id(id) {
@@ -363,7 +363,6 @@ let component_props = function(e, iprops) {
 		if (!e[setter])
 			e[setter] = noop
 		let prop_changed = fire_prop_changed
-		let slot = opt.slot
 		let dv = opt.default
 
 		opt.from_attr = from_attr_func(opt)
@@ -385,7 +384,7 @@ let component_props = function(e, iprops) {
 				if (set_attr)
 					set_attr(v1)
 				if (!priv)
-					prop_changed(e, prop, v1, v0, slot)
+					prop_changed(e, prop, v1, v0)
 				e.update()
 				e.end_update()
 			}
@@ -412,7 +411,7 @@ let component_props = function(e, iprops) {
 				e.begin_update()
 				e[setter](v, v0)
 				if (!priv)
-					prop_changed(e, prop, v, v0, slot)
+					prop_changed(e, prop, v, v0)
 				e.update()
 				e.end_update()
 			}
@@ -429,7 +428,7 @@ let component_props = function(e, iprops) {
 				e.begin_update()
 				e[setter](v, v0)
 				if (!priv)
-					prop_changed(e, prop, v, v0, slot)
+					prop_changed(e, prop, v, v0)
 				e.update()
 				e.end_update()
 			}
@@ -455,8 +454,8 @@ let component_props = function(e, iprops) {
 					e.on('bind', bind, id1 != null)
 				}
 			}
-			prop_changed = function(e, k, v1, v0, slot) {
-				fire_prop_changed(e, k, v1, v0, slot)
+			prop_changed = function(e, k, v1, v0) {
+				fire_prop_changed(e, k, v1, v0)
 				if (k == ID)
 					id_changed(v1, v0)
 			}
@@ -477,6 +476,10 @@ let component_props = function(e, iprops) {
 	e.get_prop = k => e[k] // stub
 	e.get_prop_attrs = k => e.props[k] // stub
 
+	e.save_prop = function(k) {
+		let v = e.get_prop(k)
+		fire_prop_changed(e, k, v, v)
+	}
 	// prop serialization.
 
 	e.serialize_prop = function(k, v, even_if_default) {
