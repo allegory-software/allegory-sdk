@@ -251,14 +251,14 @@ function init_xmodule(opt) {
 			xm.save()
 	}
 
-	document.on('prop_changed', function(e, k, v, v0, slot) {
+	document.on('prop_changed', function(e, k, v, v0) {
 		if (!e.id)
 			return
 		if (e.xmodule_noupdate)
 			return
 		let pa = e.get_prop_attrs(k)
 		let save = !(pa && pa.nosave)
-		xm.set_val(e, e.id, k, v, v0, slot, e.module, e.serialize_prop, save)
+		xm.set_val(e, e.id, k, v, v0, pa && pa.slot, e.module, e.serialize_prop, save)
 	})
 
 	// loading prop layers and assigning to slots -----------------------------
