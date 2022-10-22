@@ -741,6 +741,9 @@ function selectable_widget(e) {
 		if (!ev.ctrlKey)
 			return
 
+		if (e.ctrl_key_taken)
+			return
+
 		if (ev.shiftKey) {
 
 			// prevent accidentally clicking on the parent of any of the selected widgets.
