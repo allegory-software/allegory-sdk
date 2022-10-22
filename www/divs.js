@@ -1059,16 +1059,14 @@ method(HTMLElement, 'unselect', function() {
 
 // scrolling -----------------------------------------------------------------
 
-// box scroll-to-view box. from box2d.lua.
 function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
 	let min_sx = -x
 	let min_sy = -y
 	let max_sx = -(x + w - pw)
 	let max_sy = -(y + h - ph)
-	return [
-		clamp(sx, min_sx, max_sx),
-		clamp(sy, min_sy, max_sy)
-	]
+	sx = clamp(sx, min_sx, max_sx)
+	sy = clamp(sy, min_sy, max_sy)
+	return [sx, sy]
 }
 
 method(Element, 'scroll_to_view_rect_offset', function(sx0, sy0, x, y, w, h) {
