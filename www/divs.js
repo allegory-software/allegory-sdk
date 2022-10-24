@@ -867,6 +867,8 @@ alias(Element, 'rect', 'getBoundingClientRect')
 
 alias(Element, 'cw', 'clientWidth')
 alias(Element, 'ch', 'clientHeight')
+alias(HTMLElement, 'ow', 'offsetWidth')
+alias(HTMLElement, 'oh', 'offsetHeight')
 
 alias(HTMLElement, 'ox', 'offsetLeft')
 alias(HTMLElement, 'oy', 'offsetTop')
