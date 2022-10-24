@@ -556,7 +556,7 @@ function nav_widget(e) {
 
 	e.prop('exit_edit_on_lost_focus' , {store: 'var', type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
 	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
-	e.prop('action_band_visible'     , {store: 'var', type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true})
+	e.prop('action_band_visible'     , {store: 'var', type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true, slot: 'user'})
 
 	// init -------------------------------------------------------------------
 
@@ -839,14 +839,7 @@ function nav_widget(e) {
 		e.display_field = check_field(e.display_col) || e.name_field
 		e.quicksearch_field = check_field(e.quicksearch_col)
 
-		// tree-related fields
-		e.id_field = check_field(rs.id_col)
-		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
-			e.id_field = e.pk_fields[0]
-		e.parent_field = check_field(rs.parent_col)
-		e.tree_field = check_field(or(e.tree_col, rs.tree_col)) || e.name_field
-		if (!e.id_field || !e.parent_field || !e.tree_field || e.tree_field.hidden)
-			reset_tree_fields()
+		init_tree_fields()
 
 		for (let field of e.all_fields)
 			init_field_validators(field)
@@ -858,24 +851,49 @@ function nav_widget(e) {
 		init_rows()
 	}
 
+	function init_tree_fields() {
+		let rs = e.bound && e.rowset || empty
+		e.id_field = check_field(rs.id_col)
+		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
+			e.id_field = e.pk_fields[0]
+		e.parent_field = check_field(rs.parent_col)
+		e.tree_field = check_field(or(e.tree_col, rs.tree_col)) || e.name_field
+		if (!e.id_field || !e.parent_field || !e.tree_field || e.tree_field.hidden)
+			reset_tree_fields()
+	}
+
 	function reset_tree_fields() {
 		e.id_field = null
 		e.parent_field = null
 		e.tree_field = null
 	}
 
-	e.set_flat = function() {
+	function reset_tree() {
+		reset_tree_fields()
+		if (e.is_tree) {
+			for (let row of e.all_rows) {
+				row.child_rows = null
+				row.parent_rows = null
+				row.parent_row = null
+			}
+			e.child_rows = null
+			e.is_tree = false
+		}
+	}
+
+	function flat_changed() {
 		if (!e.bound) return
+		reset_tree()
+		init_tree_fields()
 		init_tree()
 		init_rows()
+		e.update({rows: true})
 	}
+
+	e.set_flat = flat_changed
 	e.prop('flat', {store: 'var', type: 'bool', slot: 'user', default: false})
 
-	e.set_must_be_flat = function() {
-		if (!e.bound) return
-		init_tree()
-		init_rows()
-	}
+	e.set_must_be_flat = flat_changed
 	e.prop('must_be_flat', {store: 'var', default: false, private: true})
 
 	// `*_col` properties
@@ -1328,6 +1346,8 @@ function nav_widget(e) {
 			return true
 		if (e.order_by || e.is_filtered || !e.selected_rows.size)
 			return false
+		if (e.can_be_tree && !e.is_tree)
+			return false
 		return true
 	}
 
@@ -1336,6 +1356,9 @@ function nav_widget(e) {
 			return S('cannot_move_records_sorted', 'Cannot move records while they are sorted')
 		if (e.is_filtered)
 			return S('cannot_move_records_filtered', 'Cannot move records while they are filtered')
+		if (e.can_be_tree && !e.is_tree)
+			return S('cannot_move_records_tree_is_flat',
+				'Cannot move records in a tree while the grid is not shown as a tree')
 		if (!e.selected_rows.size)
 			return S('no_records_selected', 'No records selected')
 	}
@@ -2064,12 +2087,12 @@ function nav_widget(e) {
 
 	function init_tree() {
 
-		e.is_tree = false
+		e.is_tree = true
 		e.can_be_tree = !!e.parent_field
-		e.child_rows = null
-
-		if (!e.can_be_tree || e.flat || e.must_be_flat)
+		if (!e.can_be_tree || e.flat || e.must_be_flat) {
+			reset_tree()
 			return
+		}
 
 		e.child_rows = []
 		for (let row of e.all_rows) {
@@ -2088,18 +2111,10 @@ function nav_widget(e) {
 		if (!init_parent_rows_for_rows(e.child_rows)) {
 			// circular refs detected: revert to flat mode.
 			warn('Circular refs detected. Cannot present data as a tree.')
-			for (let row of e.all_rows) {
-				row.child_rows = null
-				row.parent_rows = null
-				row.parent_row = null
-			}
 			e.can_be_tree = false
-			e.child_rows = null
-			reset_tree_fields()
+			reset_tree()
 			return
 		}
-
-		e.is_tree = true
 
 	}
 
@@ -2256,7 +2271,6 @@ function nav_widget(e) {
 		if (must_create_rows) {
 			e.rows = []
 			if (e.is_tree) {
-				pr(must_sort, !!cmp)
 				if (!must_sort)
 					init_tree()
 				if (cmp)

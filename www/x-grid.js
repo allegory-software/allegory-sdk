@@ -46,7 +46,8 @@ component('x-grid', 'Input', function(e) {
 
 		// css colors
 		e.border_width               = num(css.prop('--x-border-width-item'))
-		e.border_color               = css.prop('--x-faint')
+		e.hcell_border_color         = css.prop('--x-border-light')
+		e.cell_border_color          = css.prop('--x-faint')
 		e.bg                         = css.prop('--x-bg')
 		e.fg                         = css.prop('--x-fg')
 		e.fg_disabled                = css.prop('--x-fg-disabled')
@@ -69,8 +70,6 @@ component('x-grid', 'Input', function(e) {
 		e.bg_moving                  = css.prop('--x-bg-moving')
 		e.baseline                   = num(css.prop('--x-grid-cell-baseline'))
 
-		e.auto_w = false
-		e.auto_h = false
 		e.text_font = e.font_size + 'px ' + e.text_font_family
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
 		e.cell_h   = or(e.cell_h  , round(e.font_size * 2))
@@ -82,6 +81,8 @@ component('x-grid', 'Input', function(e) {
 		e.update({sizes: true})
 	}
 
+	e.prop('auto_w', {store: 'var', type: 'bool', default: false, attr: true})
+	e.prop('auto_h', {store: 'var', type: 'bool', default: false, attr: true})
 	e.prop('header_w', {store: 'var', type: 'number', default: 120, attr: true}) // vert-grid only
 	e.prop('cell_w', {store: 'var', type: 'number', default: 120, attr: true, slot: 'user'}) // vert-grid only
 	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: false, attr: true}) // horiz-grid only
@@ -187,29 +188,17 @@ component('x-grid', 'Input', function(e) {
 		e.cells_view.w = null
 		e.cells_view.h = null
 
+		let b = e.border_width
+
 		if (horiz) {
 
 			e.header.w = null
 			e.header.h = e.header_h
 
+			// e.cells_view.cw is fixed per css `overflow-y: scroll` so it
+			// doesn't circularly depend on cols width, unlike e.cells_view.ch
+			// which depends on whether the horizontal scrollbar appears or not.
 			cells_view_w = floor(e.cells_view.cw)
-
-			/* TODO:
-			if (e.auto_w) {
-
-				let cols_w = 0
-				for (let field of e.fields)
-					cols_w += field.w
-
-				let client_w = e.cells_view.cw
-				let border_w = e.offsetWidth - e.cw
-				let vscrollbar_w = e.cells_view.offsetWidth - client_w
-				e.w = cols_w + border_w + vscrollbar_w
-			}
-
-			if (e.auto_h)
-				e.h = cells_h + e.header_h + border_h
-			*/
 
 			let last_cells_w = cells_w
 
@@ -217,10 +206,20 @@ component('x-grid', 'Input', function(e) {
 			for (let field of e.fields)
 				cols_w += field.w
 
+			if (e.auto_w) {
+				let border_w = e.ow - e.cw
+				let vscrollbar_w = e.cells_view.ow - e.cells_view.cw
+				e.w = floor(cols_w + border_w + vscrollbar_w) + 1
+				cells_view_w = floor(e.cells_view.cw)
+			}
+
+			if (e.auto_h)
+				e.h = cells_h + e.header_h + b
+
 			let total_free_w = 0
 			let cw = cols_w
 			if (e.auto_cols_w && (!e.rowset || e.rowset.auto_cols_w != false) && !col_resizing) {
-				cw = cells_view_w
+				cw = cells_view_w - b
 				total_free_w = max(0, cw - cols_w)
 			}
 
@@ -252,16 +251,17 @@ component('x-grid', 'Input', function(e) {
 				col_x += col_w
 			}
 
-			cells_w = e.border_width + col_x
-			cells_h = e.border_width + e.cell_h * e.rows.length
+			cells_w = b + col_x
+			cells_h = b + e.cell_h * e.rows.length
 
-			if (col_resizing)
+			// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
+			if (col_resizing && !e.auto_w)
 				cells_w = max(cells_w, last_cells_w)
 
 			e.cells.w = max(1, cells_w) // need at least 1px to show scrollbar.
 			e.cells.h = max(1, cells_h) // need at least 1px to show scrollbar.
 
-			// compute cells view h now that cells.w is set which may or may not
+			// compute cells_view_h now that cells.w is set which may or may not
 			// show a horizontal scrollbar. this triggers a reflow.
 
 			cells_view_h = floor(e.cells_view.ch)
@@ -277,8 +277,14 @@ component('x-grid', 'Input', function(e) {
 
 		} else {
 
-			e.header.w = max(0, min(e.header_w, cells_view_w - 20))
+			e.cells.w = 1 // so we can get e.cells_view.ch without scrollbar.
 			e.header.h = null
+			e.header.w = max(0, min(e.header_w, e.cells_view.cw - 30))
+
+			// e.cells_view.ch is fixed per css `overflow-x: scroll`, unlike
+			// e.cells_view.cw which depends on whether the vertical scrollbar
+			// appears or not.
+			cells_view_h = floor(e.cells_view.ch)
 
 			/* TODO:
 			if (e.auto_w)
@@ -300,13 +306,13 @@ component('x-grid', 'Input', function(e) {
 				field._w = w
 			}
 
-			cells_w = e.border_width + e.cell_w * e.rows.length
-			cells_h = e.border_width + e.cell_h * e.fields.length
+			cells_w = b + e.cell_w * e.rows.length
+			cells_h = b + e.cell_h * e.fields.length
 
 			e.cells.w = max(1, cells_w) // need at least 1px to show scrollbar.
 			e.cells.h = max(1, cells_h) // need at least 1px to show scrollbar.
 
-			// compute cells view w now that cells.h is set which may or may not
+			// compute cells_view_w now that cells.h is set which may or may not
 			// show a vertical scrollbar. this triggers a reflow.
 
 			cells_view_w = floor(e.cells_view.cw)
@@ -557,6 +563,7 @@ component('x-grid', 'Input', function(e) {
 		let px  = e.padding_x
 		let py1 = e.padding_y1
 		let py2 = e.padding_y2
+		let b = e.border_width
 
 		cx.save()
 
@@ -564,10 +571,19 @@ component('x-grid', 'Input', function(e) {
 
 		// border
 		let first_field = !fi || draw_stage == 'moving_cols'
-		cx.lineWidth = e.border_width
-		cx.strokeStyle = e.border_color
+		cx.lineWidth = b
+		cx.strokeStyle = e.hcell_border_color
 		draw_cell_border_path(cx, first_field, w, h)
 		cx.stroke()
+
+		// background
+		let bg = draw_stage == 'moving_cols' ? e.bg_moving : null
+		if (bg) {
+			cx.beginPath()
+			cx.fillStyle = bg
+			cx.rect(0, 0, w-b, h-b)
+			cx.fill()
+		}
 
 		// order sign
 		let dir = field.sort_dir
@@ -623,7 +639,7 @@ component('x-grid', 'Input', function(e) {
 				continue
 			let field = e.fields[fi]
 			let [x, y, w, h] = hcell_rect(fi)
-			draw_hcell_at(field, fi, x, y, w, h)
+			draw_hcell_at(field, fi, x, y, w, h, draw_stage)
 		}
 		hcx.restore()
 	}
@@ -785,7 +801,7 @@ component('x-grid', 'Input', function(e) {
 		// border
 		let first_field = !fi || draw_stage == 'moving_cols'
 		cx.lineWidth = b
-		cx.strokeStyle = e.border_color
+		cx.strokeStyle = e.cell_border_color
 		draw_cell_border_path(cx, first_field, w, h)
 		cx.stroke()
 
@@ -1062,6 +1078,7 @@ component('x-grid', 'Input', function(e) {
 		let hcell = e.header.at[fi]
 		let iw = field_has_indent(field)
 			? indent_offset(or(indent, row_indent(row))) : 0
+		let b = e.border_width
 
 		let [x, y, w, h] = cell_rect(ri, fi)
 		w -= iw
@@ -1070,16 +1087,16 @@ component('x-grid', 'Input', function(e) {
 
 		if (field.align == 'right') {
 			e.editor.x1 = null
-			e.editor.x2 = cells_w - (x + w)
+			e.editor.x2 = cells_w - (x + w) + b
 		} else {
-			e.editor.x1 = x
+			e.editor.x1 = x + b
 			e.editor.x2 = null
 		}
 
 		// set min outer width to col width.
 		// width is set in css to 'min-content' to shrink to min inner width.
 		e.editor.min_w = w
-		e.editor.y = y
+		e.editor.y = y + b
 		e.editor.h = h
 
 		// set min inner width to cell's unclipped text width.
@@ -1535,10 +1552,10 @@ component('x-grid', 'Input', function(e) {
 	// row moving -------------------------------------------------------------
 
 	function ht_row_move(ev, mx, my) {
-		if (!e.can_actually_move_rows()) return
 		if (e.focused_row_index != hit_ri) return
 		if ( horiz && abs(hit_my - my) < 8) return
 		if (!horiz && abs(hit_mx - mx) < 8) return
+		if (!e.can_actually_move_rows()) return
 		if (e.editor) return
 		return true
 	}
@@ -2066,10 +2083,10 @@ component('x-grid', 'Input', function(e) {
 	})
 
 	e.on('contextmenu', function(ev) {
-		if (hit_state == 'cell' || hit_state == 'col')
+		if (!hit_state || hit_state == 'cell' || hit_state == 'col') {
 			context_menu_popup(hit_fi, ev.clientX, ev.clientY)
-		if (hit_state)
 			return false
+		}
 	})
 
 	e.on('click', function(ev, mx, my) {
@@ -2461,7 +2478,15 @@ component('x-grid', 'Input', function(e) {
 			})
 
 		items.push({
-			text: S('vertical_grid', 'Show as vertical grid'),
+			text: S('always_show_save_bar', 'Show action band at all times'),
+			checked: e.action_band_visible == 'always',
+			action: function(item) {
+				e.action_band_visible = item.checked ? 'always' : 'auto'
+			},
+		})
+
+		items.push({
+			text: S('show_as_vertical_grid', 'Show as vertical grid'),
 			checked: e.vertical,
 			action: function(item) {
 				e.vertical = item.checked
@@ -2469,7 +2494,7 @@ component('x-grid', 'Input', function(e) {
 		})
 
 		items.push({
-			text: S('vertical_grid', 'Show as flat grid'),
+			text: S('show_as_flat_grid', 'Show as flat grid'),
 			checked: e.flat,
 			enabled: e.can_be_tree,
 			action: function(item) {
@@ -2484,7 +2509,6 @@ component('x-grid', 'Input', function(e) {
 				e.auto_cols_w = item.checked
 			},
 		})
-
 
 		if (e.can_change_header_visibility)
 			items.push({

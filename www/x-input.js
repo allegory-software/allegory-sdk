@@ -1660,9 +1660,11 @@ component('x-spinedit', 'Input', function(e) {
 
 	e.on('keydown', function(key) {
 		if (key == 'ArrowDown' || key == 'ArrowUp') {
-			let inc = (key == 'ArrowDown' ? 1 : -1) * multiple()
-			increment_val(inc)
-			return false
+			if (!e.hasclass('grid-editor')) {
+				let inc = (key == 'ArrowDown' ? 1 : -1) * multiple()
+				increment_val(inc)
+				return false
+			}
 		}
 	})
 
