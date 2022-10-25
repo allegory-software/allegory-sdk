@@ -181,7 +181,9 @@ body {
 	display: grid;  /* layout content: use grid because grid-in-flex is buggy */
 	min-width : 0;  /* container can't overflow its container */
 	min-height: 0;  /* container can't overflow its container */
-	overflow: auto; /* emergency-scroll */
+	overflow: hidden;
+	/* ^^ because of a Chrome layouting bug that makes the scrollbar show
+	sometimes for a split-second even when it shouldn't show at all. */
 }
 
 .x-if, .x-switcher, .x-ct { /* purely-logical containers */
