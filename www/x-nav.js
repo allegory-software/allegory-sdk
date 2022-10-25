@@ -5054,7 +5054,6 @@ component('x-lookup-dropdown', function(e) {
 		ret[1] = x < min
 		return ret
 	}
-	}
 
 	filesize.to_text = function(s1) {
 		let [s, small] = fs_to_text(s1)
@@ -5071,6 +5070,7 @@ component('x-lookup-dropdown', function(e) {
 		if (small)
 			cx.fg_text = cx.fg_disabled
 		all_field_types.draw.call(this, s, cx)
+	}
 	}
 
 	filesize.scale_base = 1024
