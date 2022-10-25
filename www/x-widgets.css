@@ -2644,18 +2644,33 @@ body[small] {
 	min-height: 0;
 	/* layout content */
 	display: grid;
-	overflow-x: auto;          /* TODO: fix for chrome bug */
+	overflow-x: auto;
 	overflow-y: scroll;        /* show scrollbars always */
 	position: relative;        /* anchor rows div */
 }
 
 .x-grid[auto_h] > .x-grid-cells-view {
-	overflow-y: auto;          /* normally it shouldn't show */
+	overflow-y: hidden;      /* it grows to fit contents, so no need for scrollbars */
 }
 
 .x-vgrid .x-grid-cells-view {
-	overflow-x: scroll;        /* show scrollbars always */
+	overflow-x: scroll;      /* show scrollbars always */
 	overflow-y: auto;        /* same remark about `auto` */
+}
+
+@supports (overflow-y:overlay) {
+
+	/* not that we want to do this, but Chrome custom-styled scrollbars
+		(that we need for dark mode) are buggy when both vertical and
+		horizontal scrollbars are shown. */
+
+	.x-grid-cells-view,
+	.x-vgrid .x-grid-cells-view
+	{
+		overflow-x: overlay;
+		overflow-y: overlay;
+	}
+
 }
 
 .x-grid-cells {
