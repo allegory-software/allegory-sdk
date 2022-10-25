@@ -304,6 +304,7 @@ local function run_action(fallback, action, handler, ext, ...)
 	else
 		handler(...)
 	end
+	outall'' --avoid 404 if out() was not called in the action handler.
 	return true
 end
 

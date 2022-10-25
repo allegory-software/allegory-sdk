@@ -152,6 +152,7 @@ function http_server(...)
 		req.request_id = next_request_id
 		next_request_id = next_request_id + 1
 
+		--`self.respond(req)` needs to call `req:respond(opt)` or it's a 404.
 		local ok, err = pcall(self.respond, req)
 		if req.finish then
 			req:finish(ok, err)
@@ -180,7 +181,7 @@ function http_server(...)
 			if out then --out() thread waiting for eof
 				out() --signal eof
 			else --respond() not called
-				send_response{}
+				req:respond{status = 404}
 			end
 		end
 
