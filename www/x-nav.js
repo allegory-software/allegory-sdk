@@ -3219,8 +3219,9 @@ function nav_widget(e) {
 		if (ln && field.lookup_fields && field.display_field) {
 			let ln_row = ln.lookup(field.lookup_fields, [v])[0]
 			if (ln_row) {
+				let df = field.display_field
 				let v = ln.cell_input_val(ln_row, df)
-				ln.draw_cell_val(ln_row, field.display_field, v, cx)
+				ln.draw_cell_val(ln_row, df, v, cx)
 				return
 			}
 		}
