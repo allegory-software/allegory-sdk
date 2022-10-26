@@ -636,14 +636,14 @@ function nav_widget(e) {
 
 	// fields utils -----------------------------------------------------------
 
-	let fld = col => (isstr(col) || isnum(col)) ? assert(e.all_fields[col], 'invalid col: {0}', col) : col
+	let fld = col => (isstr(col) || isnum(col)) ? assert(e.all_fields[col], '{1}: invalid col: {0}', e.id, col) : col
 	let optfld  = col => (isstr(col) || isnum(col)) ? e.all_fields[col] : col
 	let fldname = col => fld(col).name
 	let colsarr = cols => isstr(cols) ? cols.words() : cols
 
 	function flds(cols) {
 		let fields = cols && colsarr(cols).map(fld)
-		assert(fields && fields.length)
+		assert(fields && fields.length, '{0} has no cols {1}', e.id, cols || '')
 		return fields
 	}
 
@@ -1710,9 +1710,10 @@ function nav_widget(e) {
 		fs.focus_editor = e.editor && e.editor.hasfocus
 		fs.col = e.focused_field && e.focused_field.name
 		fs.focused = e.hasfocus
-		if (how == 'pk' || how == 'val')
-			fs.pk_vals = e.focused_row ? e.cell_vals(e.focused_row, e.pk_fields) : null
-		else if (how == 'row')
+		if (how == 'pk' || how == 'val') {
+			if (e.pk_fields)
+				fs.pk_vals = e.focused_row ? e.cell_vals(e.focused_row, e.pk_fields) : null
+		} else if (how == 'row')
 			fs.row = e.focused_row
 		return fs
 	}
@@ -1729,9 +1730,8 @@ function nav_widget(e) {
 				ri = e.row_index(e.lookup(e.pk_fields, fs.pk_vals)[0])
 			}
 		} else if (how == 'pk') {
-			if (fs.pk_vals) {
+			if (fs.pk_vals)
 				ri = e.row_index(e.lookup(e.pk_fields, fs.pk_vals)[0])
-			}
 		} else if (how == 'row') {
 			ri = e.row_index(fs.row)
 		} else if (how == 'unfocus') { // TODO: not used
@@ -5042,17 +5042,21 @@ component('x-lookup-dropdown', function(e) {
 	// TODO: filesize.from_text!
 
 	{
-	let ret = []
+	let r = []
 	function fs_to_text(s) {
 		let x = num(s)
-		if (x == null)
-			return s
+		if (x == null) {
+			r[0] = s
+			r[1] = true
+			return r
+		}
 		let mag = this.filesize_magnitude
 		let dec = this.filesize_decimals || 0
 		let min = this.filesize_min || 1/10**dec
-		ret[0] = x.kbytes(dec, mag)
-		ret[1] = x < min
-		return ret
+		r[0] = x.kbytes(dec, mag)
+		r[1] = x < min
+		return r
+	}
 	}
 
 	filesize.to_text = function(s1) {
@@ -5070,7 +5074,6 @@ component('x-lookup-dropdown', function(e) {
 		if (small)
 			cx.fg_text = cx.fg_disabled
 		all_field_types.draw.call(this, s, cx)
-	}
 	}
 
 	filesize.scale_base = 1024

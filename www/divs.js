@@ -1174,9 +1174,8 @@ easing.bounce = function(t) {
 function raf(f, last_id) {
 	return last_id == null ? requestAnimationFrame(f) : last_id
 }
-cancel_raf = cancelAnimationFrame
 
-raf_wrap.cancel = obj()
+cancel_raf = cancelAnimationFrame
 
 function raf_wrap(f) {
 	let id
@@ -1184,16 +1183,16 @@ function raf_wrap(f) {
 		id = null
 		f()
 	}
-	return function(cancel) {
-		if (cancel == raf_wrap.cancel) {
-			if (id != null) {
-				cancel_raf(id)
-				id = null
-			}
-		} else {
-			id = raf(raf_f, id)
+	let wrapper = function() {
+		id = raf(raf_f, id)
+	}
+	wrapper.cancel = function() {
+		if (id != null) {
+			cancel_raf(id)
+			id = null
 		}
 	}
+	return wrapper
 }
 
 function transition(f, dt, y0, y1, ease_f, ease_way, ...ease_args) {

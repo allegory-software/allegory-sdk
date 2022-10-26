@@ -121,8 +121,10 @@
 
 	/* these two need to be matched in order to valign grid cells with cell editors */
 	/* NOTE: Firefox won't set a line height lower than the font allows on <input>! */
-	--x-grid-cell-baseline    : 12px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 17px; /* PIXELS ONLY! */
+	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
+	/* this is needed for Arial, must be zero for OpenSans */
+	--x-grid-cell-baseline-adjust-ff : 1;
 
 }
 
@@ -167,6 +169,11 @@ body {
 	font-family: "opensanscondensed";
 	font-weight: bold;
 	src: url("/opensanscondensed-bold.woff2");
+}
+
+[opensans] {
+	font-family: opensans, Arial, sans-serif;
+	--x-grid-cell-baseline-adjust-ff: 0;
 }
 
 /* widget defaults -------------------------------------------------------- */
@@ -2660,15 +2667,20 @@ body[small] {
 
 @supports (overflow-y:overlay) {
 
-	/* not that we want to do this, but Chrome custom-styled scrollbars
-		(that we need for dark mode) are buggy when both vertical and
-		horizontal scrollbars are shown. */
+	/*
+	not that we want to do this, but Chrome custom-styled scrollbars (that we
+	need for dark mode) are buggy when both vertical and horizontal scrollbars
+	are shown, so we use overlay (which only Chrome supports), but only for
+	scrolling rows. For scrolling columns, we use `auto` otherwise the overlay
+	scrollbar covers the last row and we can't click it.
+	*/
 
-	.x-grid-cells-view,
-	.x-vgrid .x-grid-cells-view
-	{
-		overflow-x: overlay;
+	.x-grid-cells-view {
 		overflow-y: overlay;
+	}
+
+	.x-vgrid .x-grid-cells-view {
+		overflow-x: overlay;
 	}
 
 }
@@ -3199,8 +3211,7 @@ body:not([theme=dark]) [theme=dark] {
 	border-color: transparent;
 }
 
-[theme=dark]::-webkit-scrollbar,
-[theme=dark] ::-webkit-scrollbar
+::-webkit-scrollbar
 {
 	/* enable browsers' lazy-work of custom-drawn scrollbars */
 	width : initial;

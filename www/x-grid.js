@@ -70,6 +70,11 @@ component('x-grid', 'Input', function(e) {
 		e.bg_moving                  = css.prop('--x-bg-moving')
 		e.baseline                   = num(css.prop('--x-grid-cell-baseline'))
 
+		// with Arial the baseline adjustment for Firefox is 1 but we're not
+		// using Arial because it renders poorly on canvas on Firefox Windows.
+		let baseline_adjust = num(css.prop('--x-grid-baseline-adjust-ff'))
+		e.baseline += Firefox ? e.baseline_adjust : 0
+
 		e.text_font = e.font_size + 'px ' + e.text_font_family
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
 		e.cell_h   = or(e.cell_h  , round(e.font_size * 2))
@@ -156,6 +161,8 @@ component('x-grid', 'Input', function(e) {
 		document.on('layout_changed', layout_changed, on)
 		document.on('theme_changed', theme_changed, on)
 		document.fonts.on('loadingdone', fonts_loaded, on)
+		if (!on)
+			update_cells_async.cancel()
 		theme_changed()
 	})
 
@@ -534,9 +541,7 @@ component('x-grid', 'Input', function(e) {
 		cx.bg_search   = e.bg_search
 		cx.fg_search   = e.fg_search
 		cx.fg_disabled = e.fg_disabled
-		// with Arial the baseline adjustment is `1 : 0` but we're not using
-		// Arial because it renders poorly on canvas on Firefox Windows.
-		cx.baseline    = e.baseline + (Firefox ? 1 : 1)
+		cx.baseline    = e.baseline
 	}
 
 	function draw_cell_border_path(cx, first_field, w, h) {
@@ -684,6 +689,7 @@ component('x-grid', 'Input', function(e) {
 		let hovering = hit_state == 'cell' && hit_ri == ri && hit_fi == fi
 		let full_width = !draw_stage && ((row_focused && field == e.focused_field) || hovering)
 
+		// geometry
 		if (full_width)
 			w = max(w, measure_cell_width(row, field) + 2*px)
 
@@ -705,9 +711,6 @@ component('x-grid', 'Input', function(e) {
 					indent_x += s.hit_indent_x - s.indent_x
 			}
 		}
-
-		cx.save()
-		cx.translate(x, y)
 
 		// background & text color
 		// drawing a background is slow, so we avoid it when we can.
@@ -757,13 +760,22 @@ component('x-grid', 'Input', function(e) {
 		if (is_null || is_empty || disabled)
 			fg = e.fg_disabled
 
-		let bw = w - .5
-		let bh = h - .5
+		// drawing
+
+		cx.save()
+		cx.translate(x, y)
+
+		// border
+		let first_field = !fi || draw_stage == 'moving_cols'
+		cx.lineWidth = b
+		cx.strokeStyle = e.cell_border_color
+		draw_cell_border_path(cx, first_field, w, h)
+		cx.stroke()
 
 		if (bg) {
 			cx.beginPath()
 			cx.fillStyle = bg
-			cx.rect(0, 0, w-b, h-b)
+			cx.rect(-b, -b, w+b, h+b)
 			cx.fill()
 		}
 
@@ -797,13 +809,6 @@ component('x-grid', 'Input', function(e) {
 
 			cx.restore()
 		}
-
-		// border
-		let first_field = !fi || draw_stage == 'moving_cols'
-		cx.lineWidth = b
-		cx.strokeStyle = e.cell_border_color
-		draw_cell_border_path(cx, first_field, w, h)
-		cx.stroke()
 
 		cx.restore()
 

@@ -143,6 +143,10 @@ function listbox_widget(e) {
 			opt.rows = true
 
 		if (opt.rows) {
+
+			if (!e.rows)
+				pr('HERE', e.bound)
+
 			e.clear()
 			for (let row of e.rows) {
 				let item = create_item(row)
