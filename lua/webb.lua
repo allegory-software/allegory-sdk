@@ -457,6 +457,7 @@ function outall(s, sz)
 		local req = req()
 		req.res.content = s
 		req.res.content_size = sz
+		req.respond_called = true
 		req:respond(req.res)
 	end
 end
@@ -472,6 +473,7 @@ local function default_outfunc(s, sz)
 	local req = req()
 	if not req.http_out then
 		req.res.want_out_function = true
+		req.respond_called = true
 		req.http_out = req:respond(req.res)
 	end
 	s = not iscdata(s) and tostring(s) or s

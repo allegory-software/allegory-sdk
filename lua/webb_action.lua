@@ -304,7 +304,9 @@ local function run_action(fallback, action, handler, ext, ...)
 	else
 		handler(...)
 	end
-	outall'' --avoid 404 if out() was not called in the action handler.
+	if not http_request().respond_called then
+		outall'' --avoid 404 if out() or outall() was not called in the action handler.
+	end
 	return true
 end
 
