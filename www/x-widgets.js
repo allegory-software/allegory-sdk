@@ -270,6 +270,7 @@ let component_deferred_updating = function(e) {
 
 	e.begin_update = function() {
 		e.updating++
+		update_async.cancel()
 	}
 
 	e.end_update = function() {
@@ -282,6 +283,13 @@ let component_deferred_updating = function(e) {
 	e.do_update = noop
 
 	let opt, in_update
+
+	let update_async = raf_wrap(function() {
+		in_update = true
+		e.do_update(opt)
+		in_update = false
+		opt = null
+	})
 
 	e.update = function(opt1) {
 		if (in_update)
@@ -297,10 +305,7 @@ let component_deferred_updating = function(e) {
 			opt = {val: true}
 		if (e.updating)
 			return
-		in_update = true
-		e.do_update(opt)
-		in_update = false
-		opt = null
+		update_async()
 	}
 
 }
@@ -2414,93 +2419,93 @@ component('x-split', 'Containers', function(e) {
 	e.prop('orientation', {store: 'var', type: 'enum', enum_values: ['horizontal', 'vertical'], default: 'horizontal', attr: true})
 	e.prop('fixed_side' , {store: 'var', type: 'enum', enum_values: ['first', 'second'], default: 'first', attr: true})
 	e.prop('resizeable' , {store: 'var', type: 'bool', default: true, attr: true})
-	e.prop('fixed_size' , {store: 'var', type: 'number', default: 200, attr: true})
+	e.prop('fixed_size' , {store: 'var', type: 'number', default: 200, attr: true, slot: 'user'})
 	e.prop('min_size'   , {store: 'var', type: 'number', default: 0})
 
 	// resizing ---------------------------------------------------------------
 
-	let hit, hit_x, mx0, w0, resizing, resist
+	let hit, hit_x, mx0, w0, resist
 	let resist_threshold = 0
 
 	e.on('pointermove', function(ev, rmx, rmy) {
-		if (resizing) {
-
+		if (e.pointer_captured)
+			return
+		if (!e.fixed_pane) // pointermove arrived before first animation frame
+			return
+		hit = false
+		if (e.rect().contains(rmx, rmy)) {
+			// ^^ mouse is not over some scrollbar.
 			let mx = horiz ? rmx : rmy
-			let w
-			if (left) {
-				let fpx1 = e.fixed_pane.rect()[horiz ? 'x' : 'y']
-				w = mx - (fpx1 + hit_x)
-			} else {
-				let ex2 = e.rect()[horiz ? 'x2' : 'y2']
-				let sw = e.sizer.rect()[horiz ? 'w' : 'h']
-				w = ex2 - mx + hit_x - sw
-			}
-
-			resist = resist && abs(mx - mx0) < resist_threshold
-			if (resist)
-				w = w0 + (w - w0) * .2 // show resistance
-
-			if (!e.fixed_pane.hasclass('collapsed')) {
-				if (w < min(max(e.min_size, 20), 30) - 5)
-					e.fixed_pane.class('collapsed', true)
-			} else {
-				if (w > max(e.min_size, 30))
-					e.fixed_pane.class('collapsed', false)
-			}
-
-			w = max(w, e.min_size)
-			if (e.fixed_pane.hasclass('collapsed'))
-				w = 0
-
-			e.fixed_size = round(w)
-
-			return false
-
-		} else {
-
-			// hit-test for split resizing.
-			hit = false
-			if (e.rect().contains(rmx, rmy)) {
-				// ^^ mouse is not over some scrollbar.
-				let mx = horiz ? rmx : rmy
-				let sr = e.sizer.rect()
-				let sx1 = horiz ? sr.x1 : sr.y1
-				let sx2 = horiz ? sr.x2 : sr.y2
-				w0 = e.fixed_pane.rect()[horiz ? 'w' : 'h']
-				hit_x = mx - sx1
-				hit = abs(hit_x - (sx2 - sx1) / 2) <= 5
-				resist = true
-				mx0 = mx
-			}
-			e.class('resize', hit)
-
-			if (hit)
-				return false
-
+			let sr = e.sizer.rect()
+			let sx1 = horiz ? sr.x1 : sr.y1
+			let sx2 = horiz ? sr.x2 : sr.y2
+			w0 = e.fixed_pane.rect()[horiz ? 'w' : 'h']
+			hit_x = mx - sx1
+			hit = abs(hit_x - (sx2 - sx1) / 2) <= 5
+			resist = true
+			mx0 = mx
 		}
+		e.class('resize', hit)
+		if (hit)
+			return false
 	})
+
+	e.on('pointerleave', function(ev) {
+		if (e.pointer_captured)
+			return
+		hit = false
+		e.class('resize', hit)
+	})
+
+	function mm_resize(ev, rmx, rmy) {
+		let mx = horiz ? rmx : rmy
+		let w
+		if (left) {
+			let fpx1 = e.fixed_pane.rect()[horiz ? 'x' : 'y']
+			w = mx - (fpx1 + hit_x)
+		} else {
+			let ex2 = e.rect()[horiz ? 'x2' : 'y2']
+			let sw = e.sizer.rect()[horiz ? 'w' : 'h']
+			w = ex2 - mx + hit_x - sw
+		}
+
+		resist = resist && abs(mx - mx0) < resist_threshold
+		if (resist)
+			w = w0 + (w - w0) * .2 // show resistance
+
+		if (!e.fixed_pane.hasclass('collapsed')) {
+			if (w < min(max(e.min_size, 20), 30) - 5)
+				e.fixed_pane.class('collapsed', true)
+		} else {
+			if (w > max(e.min_size, 30))
+				e.fixed_pane.class('collapsed', false)
+		}
+
+		w = max(w, e.min_size)
+		if (e.fixed_pane.hasclass('collapsed'))
+			w = 0
+
+		e.xoff()
+		e.fixed_size = round(w)
+		e.xon()
+	}
+
+	function mu_resize() {
+		e.class('resizing', false)
+		if (resist) { // reset width
+			e.xoff()
+			e.fixed_size = w0
+			e.xon()
+			return
+		}
+		e.save_prop('fixed_size')
+	}
 
 	e.on('pointerdown', function(ev) {
 		if (!hit)
 			return
-
-		resizing = true
 		e.class('resizing')
-
-		return 'capture'
-	})
-
-	e.on('pointerup', function() {
-		if (!resizing)
-			return
-
-		e.class('resizing', false)
-		resizing = false
-
-		if (resist) // reset width
-			e.fixed_size = w0
-
-		return false
+		return this.capture_pointer(ev, mm_resize, mu_resize)
 	})
 
 	// parent-of selectable widget protocol.
