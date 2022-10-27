@@ -192,6 +192,18 @@ tree:
 		e.row_and_each_child_row(row, f)
 		e.expanded_child_row_count(ri) -> n
 
+rendering:
+	calls:
+		e.update({
+			fields:  fields changed
+			rows:    row count changed
+			vals:    row values changed
+			state:   row/cell state changed
+			sort_order: sort order changed
+			scroll_to_focused_cell: scroll to focused cell
+			enter_edit: enter edit mode
+		})
+
 focusing and selection:
 	config:
 		can_focus_cells
@@ -576,8 +588,9 @@ function nav_widget(e) {
 		bind_param_nav(on)
 		bind_rowset_name(e.rowset_name, on)
 		if (on) {
+			init_all()
 			init_param_vals()
-			e.update({reload: true})
+			e.reload()
 		} else {
 			abort_all_requests()
 			e.unfocus_focused_cell({cancel: true})
@@ -756,6 +769,9 @@ function nav_widget(e) {
 
 		init_field_own_lookup_nav(field)
 		bind_lookup_nav(field, true)
+
+		if (field.timeago)
+			e.bool_attr('has-timeago', true)
 
 		return field
 	}
@@ -1202,7 +1218,7 @@ function nav_widget(e) {
 		bind_param_nav_cols(nav0, e.params, false)
 		bind_param_nav_cols(nav1, e.params, true)
 		if (init_param_vals())
-			e.update({reload: true})
+			e.reload()
 	}
 	e.prop('param_nav', {store: 'var', private: true})
 	e.prop('param_nav_id', {store: 'var', bind_id: 'param_nav', type: 'nav',
@@ -3887,10 +3903,8 @@ function nav_widget(e) {
 
 		opt = opt || empty
 
-		if (!e.bound) {
-			e.update({reload: true})
+		if (!e.bound)
 			return
-		}
 
 		if (!e.rowset_url || e.param_vals === false) {
 			// client-side rowset or param vals not available: reset it.
@@ -4002,7 +4016,7 @@ function nav_widget(e) {
 		else if (e.changed_rows.has(row))
 			return
 		e.changed_rows.add(row)
-		e.update({changes: true})
+		e.update({state: true})
 	}
 
 	function row_unchanged(row) {
@@ -4011,7 +4025,7 @@ function nav_widget(e) {
 		e.changed_rows.delete(row)
 		if (!e.changed_rows.size)
 			e.changed_rows = null
-		e.update({changes: true})
+		e.update({state: true})
 	}
 
 	function pack_changes() {
@@ -4143,7 +4157,7 @@ function nav_widget(e) {
 			dont_send: true,
 		})
 		rows_moved = false
-		e.update({changes: true})
+		e.update({state: true})
 		add_request(req)
 		set_save_state(source_rows, req)
 		e.fire('saving', true)
@@ -4221,7 +4235,7 @@ function nav_widget(e) {
 
 		e.changed_rows = null
 		rows_moved = false
-		e.update({changes: true})
+		e.update({state: true})
 
 		e.end_update()
 	}
@@ -4251,7 +4265,7 @@ function nav_widget(e) {
 
 		e.changed_rows = null
 		rows_moved = false
-		e.update({changes: true})
+		e.update({state: true})
 
 		e.end_update()
 	}
@@ -4489,7 +4503,7 @@ function nav_widget(e) {
 	// action bar -------------------------------------------------------------
 
 	e.set_action_band_visible = function(v) {
-		e.update({changes: true})
+		e.update({state: true})
 	}
 
 	function nrows(n) {
@@ -5041,37 +5055,30 @@ component('x-lookup-dropdown', function(e) {
 
 	// TODO: filesize.from_text!
 
-	{
-	let r = []
-	function fs_to_text(s) {
+	filesize.is_small = function(s) {
 		let x = num(s)
-		if (x == null) {
-			r[0] = s
-			r[1] = true
-			return r
-		}
-		let mag = this.filesize_magnitude
 		let dec = this.filesize_decimals || 0
 		let min = this.filesize_min || 1/10**dec
-		r[0] = x.kbytes(dec, mag)
-		r[1] = x < min
-		return r
-	}
+		return x == null || x < min
 	}
 
-	filesize.to_text = function(s1) {
-		let [s, small] = fs_to_text(s1)
-		return s
+	filesize.to_text = function(s) {
+		let x = num(s)
+		if (x == null)
+			return s
+		let mag = this.filesize_magnitude
+		let dec = this.filesize_decimals || 0
+		return x.kbytes(dec, mag)
 	}
 
-	filesize.format = function(s1) {
-		let [s, small] = fs_to_text(s1)
+	filesize.format = function(s) {
+		let small = this.is_small(s)
+		s = this.format_text(s)
 		return small ? span({class: 'x-dba-insignificant-size'}, s) : s
 	}
 
-	filesize.draw = function(s1, cx) {
-		let [s, small] = fs_to_text(s1)
-		if (small)
+	filesize.draw = function(s, cx) {
+		if (this.is_small(s))
 			cx.fg_text = cx.fg_disabled
 		all_field_types.draw.call(this, s, cx)
 	}
@@ -5082,6 +5089,7 @@ component('x-lookup-dropdown', function(e) {
 	// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
 	let date = {align: 'right'}
+	field_types.date = date
 
 	date.to_time = function(s, validate) {
 		if (s == null || s == '')
@@ -5099,9 +5107,9 @@ component('x-lookup-dropdown', function(e) {
 	date.to_num   = date.to_time
 	date.from_num = date.from_time
 
-	date.to_text = function(v) {
-		let t = this.to_time(v, true)
-		if (t == null) return v
+	date.to_text = function(s) {
+		let t = this.to_time(s, true)
+		if (t == null) return s // invalid
 		return t.date(null, this.has_time, this.has_seconds)
 	}
 
@@ -5110,6 +5118,14 @@ component('x-lookup-dropdown', function(e) {
 		let t = s.parse_date(null, true)
 		if (t == null) return s
 		return this.from_time(t)
+	}
+
+	date.format_text = function(s) {
+		let t = this.to_time(s, true)
+		if (t == null) return s // invalid
+		if (this.timeago)
+			return t.timeago()
+		return t.date(null, this.has_time, this.has_seconds)
 	}
 
 	// range of MySQL DATETIME type
@@ -5132,7 +5148,6 @@ component('x-lookup-dropdown', function(e) {
 
 	let ts = {align: 'right'}
 	field_types.time = ts
-	field_types.date = date
 
 	ts.has_time = true // for x-calendar
 
@@ -5160,8 +5175,6 @@ component('x-lookup-dropdown', function(e) {
 			return span({timeago: '', time: t}, t.timeago())
 		return t.date(null, this.has_time, this.has_seconds)
 	}
-
-	// TODO: update all grids containing timeago fields every minute!
 
 	ts.format_text = function(t) {
 		if (isstr(t)) return t // invalid
