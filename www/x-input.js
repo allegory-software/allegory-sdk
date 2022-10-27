@@ -3210,7 +3210,7 @@ component('x-chart', 'Input', function(e) {
 
 	let render = {} // {shape->func}
 	let tt
-	let pointermove
+	let pointermove = noop
 
 	function slice_color(i, n) {
 		return hsl_to_rgb(((i / n) * 360 - 120) % 180, .8, .7)
@@ -3290,6 +3290,10 @@ component('x-chart', 'Input', function(e) {
 
 	function line_color(i, n, alpha) {
 		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .8, .6, alpha)
+	}
+
+	function update_sizes() {
+
 	}
 
 	function render_line_or_columns(columns, rotate, dots, area) {
@@ -4124,7 +4128,6 @@ component('x-form', 'Containers', function(e) {
 				last_focused_input.focus()
 			else
 				e.focus_first()
-		return false
 	})
 
 	return {items: html_items}
