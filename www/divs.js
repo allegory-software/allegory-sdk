@@ -121,6 +121,8 @@
 		e.make_visible_scroll_offset(sx0, sy0[, parent])
 		e.make_visible()
 		e.is_in_viewport()
+		scrollbar_widths() -> [vs_w, hs_h]
+		scrollbox_client_dimensions(w, h, cw, ch, [overflow_x], [overflow_y], [cs_w], [hs_h])
 	animation easing:
 		raf(f) -> raf_id
 		transition(f, [dt], [x0], [x1], [easing]) -> tr
@@ -1085,6 +1087,7 @@ method(Element, 'scroll_to_view_rect_offset', function(sx0, sy0, x, y, w, h) {
 method(Element, 'scroll_to_view_rect', function(sx0, sy0, x, y, w, h) {
 	let [sx, sy] = this.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
 	this.scroll(sx, sy)
+	return [sx, sy]
 })
 
 method(Element, 'make_visible_scroll_offset', function(sx0, sy0, parent) {
@@ -1123,6 +1126,61 @@ method(Element, 'is_in_viewport', function(m) {
 		&& (r.y1 - m) <= window.innerHeight
 	)
 })
+
+scrollbar_widths = memoize(function() {
+	let d = div({style: `
+		position: absolute;
+		visibility: hidden;
+		overflow: scroll;
+	`}, div({
+		style: `
+		width: 100px;
+		height: 100px;
+	`}))
+	document.body.add(d)
+	let w = d.ow - d.cw
+	let h = d.oh - d.ch
+	d.remove()
+	return [w, h]
+})
+
+function scrollbox_client_dimensions(w, h, cw, ch, overflow_x, overflow_y, vscrollbar_w, hscrollbar_h) {
+
+	overflow_x = overflow_x || 'auto'
+	overflow_y = overflow_y || 'auto'
+	vscrollbar_w = or(vscrollbar_w, scrollbar_widths()[0])
+	hscrollbar_h = or(hscrollbar_h, scrollbar_widths()[1])
+
+	let hs
+	if (overflow_x == 'scroll')
+		hs = true
+	else if (overflow_x == 'hidden')
+		hs = false
+	else if (overflow_x == 'auto')
+		hs =
+			   (overflow_y == 'auto'   && w > cw - vscrollbar_w && h > ch)
+			|| (overflow_y == 'scroll' && w > cw - vscrollbar_w)
+			|| (overflow_y == 'hidden' && w > cw)
+	else
+		assert(false)
+
+	let vs
+	if (overflow_y == 'scroll')
+		vs = true
+	else if (overflow_y == 'hidden')
+		vs = false
+	else if (overflow_y == 'auto')
+		vs =
+			   (overflow_x == 'auto'   && h > ch - hscrollbar_h && w > cw)
+			|| (overflow_x == 'scroll' && h > ch - hscrollbar_h)
+			|| (overflow_x == 'hidden' && h > ch)
+	else
+		assert(false)
+
+	if (vs) cw -= vscrollbar_w
+	if (hs) ch -= hscrollbar_h
+	return [cw, ch]
+}
 
 // animation easing ----------------------------------------------------------
 
@@ -1302,14 +1360,14 @@ let popup_timer = function() {
 	let handlers = new Set()
 	let frequency = .25
 
-	function tick() {
+	function call_handlers() {
 		for (let f of handlers)
 			f()
 	}
 
 	tm.add = function(f) {
 		handlers.add(f)
-		timer_id = timer_id || setInterval(tick, frequency * 1000)
+		timer_id = timer_id || runevery(frequency, call_handlers)
 	}
 
 	tm.remove = function(f) {
@@ -1842,7 +1900,8 @@ bind_component('img', lazy_load, 'img[data-src]')
 
 // timeago auto-updating -----------------------------------------------------
 
-setInterval(function() {
+runevery(60, function() {
+
 	for (let e of $('[timeago]')) {
 		let t = num(e.attr('time'))
 		if (!t) {
@@ -1855,7 +1914,11 @@ setInterval(function() {
 		}
 		e.set(t.timeago())
 	}
-}, 60 * 1000)
+
+	for (let e of $('[has-timeago]'))
+		e.update()
+
+})
 
 
 // exec'ing js scripts inside html -------------------------------------------
