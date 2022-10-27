@@ -30,11 +30,6 @@ require'xmodule'
 require'schema'
 
 function load_opensans()
-	css[[
-	[opensans] {
-		font-family: opensans, Arial, sans-serif;
-	}
-	]]
 	fontfile'opensans-regular.woff2'
 	fontfile'opensans-600.woff2'
 	fontfile'opensanscondensed-light.woff2'
