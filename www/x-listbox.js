@@ -121,42 +121,15 @@ function listbox_widget(e) {
 
 	// responding to nav changes ----------------------------------------------
 
-	/* TODO: remove this
-	function rows_added(rows, ri1) {
-		for (let row of rows) {
-			let item = create_item(row)
-			e.insert(ri1++, item)
-		}
-	}
-	e.on('rows_added', rows_added)
-	*/
-
 	let inh_do_update = e.do_update
 	e.do_update = function(opt) {
 
-		if (opt.reload) {
-			e.reload()
-			opt.fields = true
-		}
-
-		if (opt.fields)
-			opt.rows = true
-
-		if (opt.rows) {
-
-			if (!e.rows)
-				pr('HERE', e.bound)
-
+		if (opt.fields || opt.rows || opt.val) {
 			e.clear()
 			for (let row of e.rows) {
 				let item = create_item(row)
 				e.add(item)
 			}
-			opt.vals = false
-			opt.state = true
-		}
-
-		if (opt.vals) {
 			for (let i = 0; i < e.rows.length; i++)
 				e.do_update_item(e.at[i], e.rows[i])
 			opt.state = true
@@ -174,7 +147,7 @@ function listbox_widget(e) {
 				item.class('selected', e.selected_rows.get(e.rows[i]))
 			}
 
-		if (opt.state || opt.changes)
+		if (opt.state)
 			e.update_action_band()
 
 		if (opt.scroll_to_focused_cell)
