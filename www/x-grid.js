@@ -45,7 +45,7 @@ component('x-grid', 'Input', function(e) {
 		e.header_h    = num(css.prop('--x-grid-header-h'))
 
 		// css colors
-		e.border_width               = num(css.prop('--x-border-width-item'))
+		e.cell_border_width          = num(css.prop('--x-border-width-item'))
 		e.hcell_border_color         = css.prop('--x-border-light')
 		e.cell_border_color          = css.prop('--x-faint')
 		e.bg                         = css.prop('--x-bg')
@@ -72,8 +72,8 @@ component('x-grid', 'Input', function(e) {
 
 		// with Arial the baseline adjustment for Firefox is 1 but we're not
 		// using Arial because it renders poorly on canvas on Firefox Windows.
-		let baseline_adjust = num(css.prop('--x-grid-baseline-adjust-ff'))
-		e.baseline += Firefox ? e.baseline_adjust : 0
+		let baseline_adjust = num(css.prop('--x-grid-cell-baseline-adjust-ff'))
+		e.baseline += Firefox ? baseline_adjust : 0
 
 		e.text_font = e.font_size + 'px ' + e.text_font_family
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
@@ -83,25 +83,28 @@ component('x-grid', 'Input', function(e) {
 		update_cx(cx)
 		update_cx(hcx)
 
-		e.update({sizes: true})
+		update_sizes()
 	}
 
-	e.prop('auto_w', {store: 'var', type: 'bool', default: false, attr: true})
-	e.prop('auto_h', {store: 'var', type: 'bool', default: false, attr: true})
 	e.prop('header_w', {store: 'var', type: 'number', default: 120, attr: true}) // vert-grid only
 	e.prop('cell_w', {store: 'var', type: 'number', default: 120, attr: true, slot: 'user'}) // vert-grid only
 	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: false, attr: true}) // horiz-grid only
+	e.prop('auto_expand', {store: 'var', type: 'bool', default: false, attr: true})
 
 	e.set_header_w = function() {
-		e.update({sizes: true})
+		update_sizes()
 	}
 
 	e.set_cell_w = function(v) {
-		e.update({sizes: true})
+		update_sizes()
 	}
 
 	e.set_auto_cols_w = function() {
-		e.update({sizes: true})
+		update_sizes()
+	}
+
+	e.set_auto_expand = function() {
+		update_sizes()
 	}
 
 	// keyboard behavior
@@ -134,7 +137,7 @@ component('x-grid', 'Input', function(e) {
 		e.class('x-vgrid', !horiz)
 		e.begin_update()
 		e.must_be_flat = !horiz
-		e.update({sizes: true})
+		theme_changed()
 		e.end_update()
 	}
 	e.prop('vertical', {type: 'bool', attr: true, slot: 'user'})
@@ -154,91 +157,101 @@ component('x-grid', 'Input', function(e) {
 	// are already loaded and were preloaded using <link preload>.
 	// NOTE: this delay is only visible with the debugger on.
 	function fonts_loaded() {
-		e.update({rows: true})
+		e.update()
 	}
 
 	e.on('bind', function(on) {
 		document.on('layout_changed', layout_changed, on)
 		document.on('theme_changed', theme_changed, on)
 		document.fonts.on('loadingdone', fonts_loaded, on)
-		if (!on)
-			update_cells_async.cancel()
-		theme_changed()
+		if (on)
+			theme_changed()
 	})
 
 	// view-size-derived state ------------------------------------------------
 
 	var cells_w, cells_h // cell grid dimensions.
-	var cells_view_w, cells_view_h // cell viewport dimensions.
+	var cells_view_ow, cells_view_oh // cell viewport dimensions.
+	var cells_view_w, cells_view_h // cell viewport dimensions inside scrollbars.
+	var cells_view_overflow_x, cells_view_overflow_y // cells viewport overflow setting.
+	var header_w, header_h // header viewport dimensions.
+	var grid_w // grid width, for vgrid header resizing
 	var hcell_h // header cell height.
 	var vrn // how many rows are fully or partially in the viewport.
 	var page_row_count // how many rows in a page for pgup/pgdown navigation.
 
-	function resize_canvas(canvas, w, h, pw, ph) {
-		// pw & ph are size multiples for lowering the number of incremental resizes.
-		w = ceil(w / pw) * pw
-		h = ceil(h / ph) * ph
-		if (canvas.width  != w) canvas.width  = w
-		if (canvas.height != h) canvas.height = h
-	}
-
-	function update_sizes() {
+	// NOTE: keep this raf-friendly, i.e. don't measure the DOM in here!
+	function update_internal_sizes() {
 
 		if (hit_state == 'col_moving')
 			return
 
 		let col_resizing = hit_state == 'col_resizing'
+		let b = e.cell_border_width
 
-		// these must be reset when changing from !horiz to horiz.
-		e.cells_canvas.x = null
-		e.cells_canvas.y = null
-		e.cells_view.w = null
-		e.cells_view.h = null
+		let auto_cols_w =
+			horiz
+			&& !e.auto_expand
+			&& e.auto_cols_w
+			&& (!e.rowset || e.rowset.auto_cols_w != false)
+			&& !col_resizing
 
-		let b = e.border_width
+		cells_view_overflow_x = e.auto_expand ? 'hidden' : 'auto'
+		cells_view_overflow_y = e.auto_expand ? 'hidden' : (auto_cols_w ? 'scroll' : 'auto')
+
+		cells_view_w = cells_view_ow
+		cells_view_h = cells_view_oh
 
 		if (horiz) {
 
-			e.header.w = null
-			e.header.h = e.header_h
-
-			// e.cells_view.cw is fixed per css `overflow-y: scroll` so it
-			// doesn't circularly depend on cols width, unlike e.cells_view.ch
-			// which depends on whether the horizontal scrollbar appears or not.
-			cells_view_w = floor(e.cells_view.cw)
-
 			let last_cells_w = cells_w
 
-			let cols_w = 0
+			let min_cols_w = 0
 			for (let field of e.fields)
-				cols_w += field.w
+				min_cols_w += col_resizing ? field._w : min(max(field.w, field.min_w), field.max_w)
 
-			if (e.auto_w) {
-				let border_w = e.ow - e.cw
-				let vscrollbar_w = e.cells_view.ow - e.cells_view.cw
-				e.w = floor(cols_w + border_w + vscrollbar_w) + 1
-				cells_view_w = floor(e.cells_view.cw)
+			cells_h = b + e.cell_h * e.rows.length
+
+			let min_cells_w = b + min_cols_w
+
+			// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
+			if (col_resizing && !e.auto_expand)
+				min_cells_w = max(min_cells_w, last_cells_w)
+
+			if (e.auto_expand) {
+				cells_view_w = min_cells_w
+				cells_view_h = cells_h
 			}
 
-			if (e.auto_h)
-				e.h = cells_h + e.header_h + b
+			hcell_h  = e.header_h
+			header_w = cells_view_w // before vscrollbar
+			header_h = e.header_h
+
+			;[cells_view_w, cells_view_h] =
+				scrollbox_client_dimensions(
+					min_cells_w,
+					cells_h,
+					cells_view_w,
+					cells_view_h,
+					cells_view_overflow_x,
+					cells_view_overflow_y
+				)
 
 			let total_free_w = 0
-			let cw = cols_w
-			if (e.auto_cols_w && (!e.rowset || e.rowset.auto_cols_w != false) && !col_resizing) {
+			let cw = min_cols_w
+			if (auto_cols_w) {
 				cw = cells_view_w - b
-				total_free_w = max(0, cw - cols_w)
+				total_free_w = max(0, cw - min_cols_w)
 			}
 
 			let col_x = 0
-			for (let fi = 0; fi < e.fields.length; fi++) {
-				let field = e.fields[fi]
+			for (let field of e.fields) {
 
-				let min_col_w = col_resizing ? field._w : field.w
+				let min_col_w = col_resizing ? field._w : max(field.min_w, field.w)
 				let max_col_w = col_resizing ? field._w : field.max_w
-				let free_w = total_free_w * (min_col_w / cols_w)
+				let free_w = total_free_w * (min_col_w / min_cols_w)
 				let col_w = min(floor(min_col_w + free_w), max_col_w)
-				if (fi == e.fields.length - 1) {
+				if (field == e.fields.last) {
 					let remaining_w = cw - col_x
 					if (total_free_w > 0)
 						// set width exactly to prevent showing the horizontal scrollbar.
@@ -252,58 +265,19 @@ component('x-grid', 'Input', function(e) {
 				field._x = col_x
 				field._w = col_w
 
-				if (field.filter_dropdown)
-					field.filter_dropdown.w = field._w
-
 				col_x += col_w
 			}
 
 			cells_w = b + col_x
-			cells_h = b + e.cell_h * e.rows.length
 
 			// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
-			if (col_resizing && !e.auto_w)
+			if (col_resizing && !e.auto_expand)
 				cells_w = max(cells_w, last_cells_w)
 
-			e.cells.w = max(1, cells_w) // need at least 1px to show scrollbar.
-			e.cells.h = max(1, cells_h) // need at least 1px to show scrollbar.
-
-			// compute cells_view_h now that cells.w is set which may or may not
-			// show a horizontal scrollbar. this triggers a reflow.
-
-			cells_view_h = floor(e.cells_view.ch)
 			page_row_count = floor(cells_view_h / e.cell_h)
 			vrn = floor(cells_view_h / e.cell_h) + 2 // 2 is right, think it!
 
-			/*
-			// TODO: finish this!
-			e.cells_view.style.overflowX =
-				e.cells_view.scrollWidth > e.cells_view.clientWidth + 100
-					? 'scroll' : 'hidden'
-			*/
-
 		} else {
-
-			e.cells.w = 1 // so we can get e.cells_view.ch without scrollbar.
-			e.header.h = null
-			e.header.w = max(0, min(e.header_w, e.cells_view.cw - 30))
-
-			// e.cells_view.ch is fixed per css `overflow-x: scroll`, unlike
-			// e.cells_view.cw which depends on whether the vertical scrollbar
-			// appears or not.
-			cells_view_h = floor(e.cells_view.ch)
-
-			/* TODO:
-			if (e.auto_w)
-				e.w = cells_w + e.header_w + border_w
-
-			let client_h = e.cells_view.ch
-			if (e.auto_h) {
-				let border_h = e.offsetHeight - e.ch
-				let hscrollbar_h = e.cells_view.offsetHeight - client_h
-				e.h = cells_h + border_h + hscrollbar_h
-			}
-			*/
 
 			for (let fi = 0; fi < e.fields.length; fi++) {
 				let field = e.fields[fi]
@@ -316,13 +290,26 @@ component('x-grid', 'Input', function(e) {
 			cells_w = b + e.cell_w * e.rows.length
 			cells_h = b + e.cell_h * e.fields.length
 
-			e.cells.w = max(1, cells_w) // need at least 1px to show scrollbar.
-			e.cells.h = max(1, cells_h) // need at least 1px to show scrollbar.
+			if (e.auto_expand) {
+				cells_view_w = cells_w
+				cells_view_h = cells_h
+			}
 
-			// compute cells_view_w now that cells.h is set which may or may not
-			// show a vertical scrollbar. this triggers a reflow.
+			hcell_h  = e.cell_h
+			header_w = min(e.header_w, grid_w - 20)
+			header_w = max(header_w, 20)
+			header_h = cells_view_h // before scrollbar
 
-			cells_view_w = floor(e.cells_view.cw)
+			;[cells_view_w, cells_view_h] =
+				scrollbox_client_dimensions(
+					cells_w,
+					cells_h,
+					cells_view_w,
+					cells_view_h,
+					cells_view_overflow_x,
+					cells_view_overflow_y
+				)
+
 			page_row_count = floor(cells_view_w / e.cell_w)
 			vrn = floor(cells_view_w / e.cell_w) + 2 // 2 is right, think it!
 
@@ -330,23 +317,39 @@ component('x-grid', 'Input', function(e) {
 
 		vrn = min(vrn, e.rows.length)
 
-		let hr = e.header.rect()
+		update_scroll(scroll_x, scroll_y)
+	}
 
-		hcell_h = horiz ? hr.h : e.cell_h
-
-		resize_canvas(e.cells_canvas, cells_view_w, cells_view_h, 200, 200)
-		resize_canvas(e.header_canvas, hr.w, hr.h, 200, horiz ? 1 : 200)
-
+	function update_sizes() {
+		if (!e.bound) {
+			cells_view_ow = null
+			cells_view_oh = null
+			scroll_x = null
+			scroll_y = null
+		} else {
+			if (e.auto_expand) {
+				cells_view_ow = 0
+				cells_view_oh = 0
+				scroll_x = 0
+				scroll_y = 0
+			} else {
+				grid_w = e.cw
+				cells_view_ow = e.cells_view.ow
+				cells_view_oh = e.cells_view.oh
+				scroll_x = e.cells_view.scrollLeft
+				scroll_y = e.cells_view.scrollTop
+			}
+			e.update({fields: true})
+		}
 	}
 
 	// view-scroll-derived state ----------------------------------------------
 
-	var vri1, vri2 // visible row range.
 	var scroll_x, scroll_y // current scroll offsets.
+	var vri1, vri2 // visible row range.
 
+	// NOTE: keep this raf-friendly, i.e. don't measure the DOM in here!
 	function update_scroll(sx, sy) {
-		if (sy == null) sy = e.cells_view.scrollTop
-		if (sx == null) sx = e.cells_view.scrollLeft
 		sx =  horiz ? sx : clamp(sx, 0, max(0, cells_w - cells_view_w))
 		sy = !horiz ? sy : clamp(sy, 0, max(0, cells_h - cells_view_h))
 		if (horiz) {
@@ -354,8 +357,6 @@ component('x-grid', 'Input', function(e) {
 		} else {
 			vri1 = floor(sx / e.cell_w)
 		}
-		e.cells_canvas.x = sx
-		e.cells_canvas.y = sy
 		vri2 = vri1 + vrn
 		vri1 = max(0, min(vri1, e.rows.length - 1))
 		vri2 = max(0, min(vri2, e.rows.length))
@@ -364,13 +365,13 @@ component('x-grid', 'Input', function(e) {
 
 		// hack because we don't get pointermove events on scroll when
 		// the mouse doesn't move but the div beneath the mouse pointer does.
-		if (hit_state == 'cell')
+		if (hit_state == 'cell') {
+			hit_state = null
 			ht_cell(null, hit_mx, hit_my)
-
-		return true
+		}
 	}
 
-	// ------------------------------------------------------------------------
+	// mouse-derived state ----------------------------------------------------
 
 	var hit_state // everything happens differently because on this.
 	var hit_mx, hit_my // last mouse coords, needed on scroll event.
@@ -444,7 +445,7 @@ component('x-grid', 'Input', function(e) {
 	function hcell_rect(fi) {
 		let r = cell_rel_rect(fi)
 		if (!horiz)
-			r[2] = e.header_w
+			r[2] = header_w
 		r[3] = hcell_h
 		return r
 	}
@@ -477,9 +478,10 @@ component('x-grid', 'Input', function(e) {
 	function row_visible_rect(row) { // relative to cells
 		let ri = e.row_index(row)
 		let r = domrect(...row_rect(ri))
-		let b = e.border_width
+		let b = e.cell_border_width
 		r.x += b
 		r.y += b
+		// TODO: don't measure!!!
 		let c = e.cells.rect()
 		let v = e.cells_view.rect()
 		v.x -= c.x
@@ -488,6 +490,14 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	// rendering --------------------------------------------------------------
+
+	function resize_canvas(canvas, w, h, pw, ph) {
+		// pw & ph are size multiples for lowering the number of resizes.
+		w = ceil(w / pw) * pw
+		h = ceil(h / ph) * ph
+		if (canvas.width  != w) canvas.width  = w
+		if (canvas.height != h) canvas.height = h
+	}
 
 	function create_filter(field) {
 		if (!(horiz && e.filters_visible && field.filter_by))
@@ -568,7 +578,7 @@ component('x-grid', 'Input', function(e) {
 		let px  = e.padding_x
 		let py1 = e.padding_y1
 		let py2 = e.padding_y2
-		let b = e.border_width
+		let b = e.cell_border_width
 
 		cx.save()
 
@@ -636,7 +646,7 @@ component('x-grid', 'Input', function(e) {
 
 	function draw_hcells_range(fi1, fi2, draw_stage) {
 		hcx.save()
-		let b = e.border_width
+		let b = e.cell_border_width
 		hcx.translate(horiz ? -scroll_x + b : 0, horiz ? 0 : -scroll_y + b)
 		let skip_moving_col = hit_state == 'col_moving' && draw_stage == 'non_moving_cols'
 		for (let fi = fi1; fi < fi2; fi++) {
@@ -667,7 +677,7 @@ component('x-grid', 'Input', function(e) {
 		let input_val = e.cell_input_val(row, field)
 
 		// static geometry
-		let b   = e.border_width
+		let b   = e.cell_border_width
 		let px  = e.padding_x  + b
 		let py1 = e.padding_y1 + b
 		let py2 = e.padding_y2
@@ -823,7 +833,7 @@ component('x-grid', 'Input', function(e) {
 
 	function draw_hover_outline(x, y, w, h) {
 
-		let b = e.border_width
+		let b = e.cell_border_width
 		let bw = w - .5
 		let bh = h - .5
 
@@ -882,7 +892,7 @@ component('x-grid', 'Input', function(e) {
 
 	function draw_cells_range(rows, ri1, ri2, fi1, fi2, draw_stage) {
 		cx.save()
-		let b = e.border_width
+		let b = e.cell_border_width
 		cx.translate(-scroll_x + b, -scroll_y + b)
 
 		let hit_cell, foc_cell, foc_ri, foc_fi
@@ -954,7 +964,35 @@ component('x-grid', 'Input', function(e) {
 		cx.restore()
 	}
 
-	function update_cells() {
+	// NOTE: keep this raf-friendly, i.e. don't measure the DOM in here!
+	function update_view() {
+
+		// dom changes
+
+		e.cells.w = max(1, cells_w) // need at least 1px to show scrollbar.
+		e.cells.h = max(1, cells_h) // need at least 1px to show scrollbar.
+
+		e.cells_view.w = e.auto_expand ? cells_view_w : null
+		e.cells_view.h = e.auto_expand ? cells_view_h : null
+
+		e.cells_view.style['overflow-x'] = cells_view_overflow_x
+		e.cells_view.style['overflow-y'] = cells_view_overflow_y
+
+		e.cells_canvas.x = scroll_x
+		e.cells_canvas.y = scroll_y
+
+		e.header.w = header_w
+		e.header.h = header_h
+
+		resize_canvas(e.cells_canvas, cells_view_w, cells_view_h, 200, 200)
+		resize_canvas(e.header_canvas, header_w, header_h, 200, horiz ? 1 : 200)
+
+		for (let field of e.fields)
+			if (field.filter_dropdown)
+				field.filter_dropdown.w = field._w
+
+		// canvas drawing
+
 		cx.clear()
 		hcx.clear()
 
@@ -977,20 +1015,20 @@ component('x-grid', 'Input', function(e) {
 		draw_cells_range(e.rows, vri1, vri2, 0, e.fields.length)
 		draw_hcells_range(0, e.fields.length)
 	}
-	var update_cells_async = raf_wrap(update_cells)
 
 	e.header.on('wheel', function(ev) {
 		if (horiz)
 			return
+		// TODO: this is not smooth scrolling!
 		e.cells_view.scrollBy(0, ev.deltaY)
 	}, true, {passive: true})
 
 	function cells_view_scroll() {
 		if (hit_state == 'row_moving')
 			return // because it interferes with the animation.
-		if (update_scroll())
-			update_cells_async()
-		update_row_error_tooltip_position()
+		scroll_x = e.cells_view.scrollLeft
+		scroll_y = e.cells_view.scrollTop
+		e.update({rows: true})
 	}
 
 	e.cells_view.on('scroll', cells_view_scroll)
@@ -1055,7 +1093,7 @@ component('x-grid', 'Input', function(e) {
 			v = !!v
 			header_visible = v
 			e.header.hidden = !v
-			e.update({sizes: true})
+			update_sizes()
 		}
 	)
 
@@ -1067,7 +1105,7 @@ component('x-grid', 'Input', function(e) {
 		function(v) {
 			filters_visible = !!v
 			e.header.class('with-filters', filters_visible)
-			e.update({sizes: true})
+			update_sizes()
 		}
 	)
 
@@ -1083,7 +1121,7 @@ component('x-grid', 'Input', function(e) {
 		let hcell = e.header.at[fi]
 		let iw = field_has_indent(field)
 			? indent_offset(or(indent, row_indent(row))) : 0
-		let b = e.border_width
+		let b = e.cell_border_width
 
 		let [x, y, w, h] = cell_rect(ri, fi)
 		w -= iw
@@ -1158,7 +1196,7 @@ component('x-grid', 'Input', function(e) {
 			if (w1 == 0 && h1 == 0)
 				return // hidden
 			if (h1 !== h0 || w1 !== w0)
-				e.update({sizes: true})
+				update_sizes()
 			w0 = w1
 			h0 = h1
 		}
@@ -1171,39 +1209,19 @@ component('x-grid', 'Input', function(e) {
 
 	let inh_do_update = e.do_update
 	e.do_update = function(opt) {
-
-		if (opt.reload) {
-			e.reload()
-			return
-		}
-
-		if (!e.rows)
-			return
-
-		let opt_rows = opt.rows || opt.fields
-		let opt_sizes = opt_rows || opt.sizes
-		let opt_cells = opt_sizes || opt_rows || opt.vals || opt.state
-		if (opt_sizes) {
-			update_sizes()
-			if (update_scroll())
-				opt_cells = true
-			update_editor()
-		}
-		if (opt_cells)
-			update_cells_async()
-		if (opt_rows)
-			e.empty_rt.hidden = e.rows.length > 0
-		if (opt_sizes || opt.sort_order)
+		inh_do_update()
+		if (opt.fields || opt.rows) {
+			update_internal_sizes()
 			update_row_error_tooltip_position()
-		if (opt.val)
-			inh_do_update()
+		}
+		update_view()
+		e.empty_rt.hidden = e.rows.length > 0
 		if (opt.enter_edit)
 			e.enter_edit(...opt.enter_edit)
-		if (opt_rows || opt.vals || opt.state || opt.changes)
+		if (opt.state)
 			e.update_action_band()
 		if (opt.scroll_to_focused_cell)
-				e.scroll_to_focused_cell()
-
+			e.scroll_to_focused_cell()
 	}
 
 	e.do_update_load_progress = function(p) {
@@ -1252,7 +1270,7 @@ component('x-grid', 'Input', function(e) {
 
 	function mu_header_resize(ev, mx, my) {
 		e.class('header-resizing', false)
-		e.update({sizes: true})
+		update_sizes()
 		hit_state = null
 		e.save_prop('header_w')
 		return false
@@ -1270,7 +1288,7 @@ component('x-grid', 'Input', function(e) {
 	let p = [0, 0]
 	function cells_point(mx, my) {
 		let r = e.cells.rect()
-		let b = e.border_width
+		let b = e.cell_border_width
 		mx -= r.x + b
 		my -= r.y + b
 		p[0] = mx
@@ -1325,7 +1343,7 @@ component('x-grid', 'Input', function(e) {
 				let field = e.fields[hit_fi]
 				field.w = clamp(w, field.min_w, field.max_w)
 				field._w = field.w
-				e.update({sizes: true})
+				update_sizes()
 			}
 
 		} else {
@@ -1346,7 +1364,7 @@ component('x-grid', 'Input', function(e) {
 				e.set_prop(`col.${field.name}.w`, field.w)
 			else
 				e.save_prop('cell_w')
-			e.update({sizes: true})
+			update_sizes()
 			return false
 		}
 
@@ -1395,7 +1413,7 @@ component('x-grid', 'Input', function(e) {
 			if (ht_cell_test(mx, my)) {
 				hit_state = 'cell'
 				let row = e.rows[hit_ri]
-				e.update({state: true})
+				e.update()
 				update_row_error_tooltip(row, true)
 			}
 	}
@@ -1422,6 +1440,7 @@ component('x-grid', 'Input', function(e) {
 			if (ht_col_test(mx, my))
 				hit_state = 'col'
 		e.class('col-move', hit_state == 'col')
+		e.header.title = hit_state == 'col' ? e.fields[hit_fi].text : ''
 	}
 
 	function mm_row_drag(ev, mx, my) {
@@ -1541,7 +1560,7 @@ component('x-grid', 'Input', function(e) {
 		mx -= hit_dx
 		my -= hit_dy
 		e.move_element_update(horiz ? mx : my)
-		e.update({sizes: true})
+		update_sizes()
 		e.scroll_to_cell(hit_ri, hit_fi)
 	}
 
@@ -1774,8 +1793,6 @@ component('x-grid', 'Input', function(e) {
 		function update_cells_moving() {
 			if (animate()) {
 
-				// TODO: the order of updating here makes scrolling up janky.
-
 				let [x, y, w, h] = cells_rect(s.move_vri1, hit_fi, s.move_vri2, hit_fi+1, 'moving_rows')
 				if ((horiz && h * .8 > cells_view_h) ||
 					(!horiz && w * .8 > cells_view_w)
@@ -1783,10 +1800,9 @@ component('x-grid', 'Input', function(e) {
 					// moving cells don't fit the view: scroll to view the hit row only.
 					;[x, y, w, h] = cells_rect(hit_ri, hit_fi, hit_ri+1, hit_fi+1)
 				}
-				let [sx, sy] = e.cells_view.scroll_to_view_rect_offset(null, null, x, y, w, h)
+				let [sx, sy] = e.cells_view.scroll_to_view_rect(scroll_x, scroll_y, x, y, w, h)
 				update_scroll(sx, sy)
-				update_cells()
-				e.cells_view.scroll_to_view_rect(scroll_x, scroll_y, x, y, w, h)
+				update_view()
 
 				af = raf(update_cells_moving)
 			} else {
@@ -2084,7 +2100,7 @@ component('x-grid', 'Input', function(e) {
 		if (hit_state != 'cell')
 			return
 		hit_state = null
-		e.update({state: true})
+		e.update()
 	})
 
 	e.on('contextmenu', function(ev) {
@@ -2120,7 +2136,7 @@ component('x-grid', 'Input', function(e) {
 			e.enter_edit('select_all')
 	})
 
-	function update_state() { e.update({state: true}) }
+	function update_state() { e.update() }
 	e.on('blur' , update_state)
 	e.on('focus', update_state)
 
@@ -2666,7 +2682,7 @@ component('x-row-form', function(e) {
 	}
 
 	function display_vals_changed() {
-		e.update({vals: true})
+		e.update()
 	}
 
 	function focused_row_cell_state_changed(row, nav_field, changes) {
@@ -2691,7 +2707,6 @@ component('x-row-form', function(e) {
 			e.nav.set_cell_val(nav_row, nav_field, changes.input_val[0])
 		}
 	})
-
 
 })
 
