@@ -83,6 +83,14 @@ local function usage()
 	say(' USAGE: %s [OPTIONS] COMMAND ...', arg[0]:match'([^/\\]+)%.lua$')
 end
 
+local help = noop
+function cmdhelp(f)
+	local help0 = help
+	help = function()
+		help0()
+		f()
+	end
+end
 cmd('help', 'Show this screen', function()
 	local function helpline(cmd)
 		local args = cmd.args
@@ -101,12 +109,15 @@ cmd('help', 'Show this screen', function()
 		end
 	end
 	say''
-	say' OPTIONS'
+	say'OPTIONS'
 	say''
 	say'   -v             verbose'
 	say'   -q             quiet'
 	say'   -vv|--debug    debug'
 	say''
+	if help then
+		help()
+	end
 end)
 
 local function run_action(action, opt, ...)
