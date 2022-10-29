@@ -781,7 +781,7 @@ typedef struct FILE FILE;
 int fclose(FILE*);
 ]]
 
-stream_ct = typeof'struct FILE'
+stream_ct = ctype'struct FILE'
 
 function stream.try_close(fs)
 	local ok = C.fclose(fs) == 0
@@ -1447,7 +1447,7 @@ end
 end
 
 function aligned_size(size, dir) --dir can be 'l' or 'r' (default: 'r')
-	if istype(u64, size) then --an uintptr_t on x64
+	if isctype(u64, size) then --an uintptr_t on x64
 		local pagesize = pagesize()
 		local hi, lo = split_uint64(size)
 		local lo = aligned_size(lo, dir)

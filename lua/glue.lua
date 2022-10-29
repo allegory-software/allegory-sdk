@@ -4,6 +4,7 @@
 	Written by Cosmin Apreutesei. Public domain.
 
 TYPES
+	typeof                       = type
 	isstr(v)                       is v a string
 	isnum(v)                       is v a number
 	isint(v)                       is v an integer (includes 1/0 and -1/0)
@@ -13,7 +14,7 @@ TYPES
 	isempty(v)                     is v a table and is it empty
 	isfunc(v)                      is v a function
 	iscdata(v)                     is v a cdata
-	istype(v, ctype)             = ffi.istype
+	isctype(v, ct)               = ffi.istype
 	iserror(v[, classes])          is v a structured error
 	inherits(v, class)             is v an object that inherits from class
 MATH
@@ -205,22 +206,22 @@ FFI
 	cast                         = ffi.cast
 	sizeof                       = ffi.sizeof
 	offsetof                     = ffi.offsetof
-	typeof                       = ffi.typeof
+	ctype                        = ffi.typeof
 	copy                         = ffi.copy
 	fill                         = ffi.fill
 	gc                           = ffi.gc
 	metatype                     = ffi.metatype
-	istype                       = ffi.istype
+	isctype                      = ffi.istype
 	errno                        = ffi.errno
 	check_errno(v[, err]) -> v | nil, s
 	str(buf, len)                = ffi.string(buf, len) if buf is not null
 	ptr(p)                       = p ~= nil and p  or nil
 	ptr_serialize(p) -> n|s             store pointer address in Lua value
-	ptr_deserialize([ctype,]n|s) -> p   convert address to pointer
+	ptr_deserialize([ct,]n|s) -> p      convert address to pointer
 FFI ALLOCATION
-	buffer([ctype]) -> alloc
+	buffer([ct]) -> alloc
 	  alloc(len) -> buf,len        alloc len and get a buffer
-	dynarray([ctype][,cap]) -> alloc
+	dynarray([ct][,cap]) -> alloc
 		alloc(len)->buf,len         alloc len and get a buffer, contents preserved
 	dynarray_pump([dynarray]) -> write, collect
 	  write(buf,len)               append to internal buffer
@@ -284,6 +285,7 @@ end
 
 --types ----------------------------------------------------------------------
 
+typeof   = type
 isstr    = function(v) return type(v) == 'string' end
 isnum    = function(v) return type(v) == 'number' end
 isint    = function(v) return type(v) == 'number' and floor(v) == v end
@@ -2262,54 +2264,54 @@ new    = ffi.new
 cast   = ffi.cast
 sizeof = ffi.sizeof
 offsetof = ffi.offsetof
-typeof = ffi.typeof
+ctype  = ffi.typeof
 copy   = ffi.copy
 fill   = ffi.fill
 gc     = ffi.gc
 metatype = ffi.metatype
-istype = ffi.istype
+isctype = ffi.istype
 errno  = ffi.errno
 _G.str = str
 _G[ffi.os] = true
 win    = Windows
 
 local
-	C, cast, copy, typeof =
-	C, cast, copy, typeof
+	C, cast, copy, ctype =
+	C, cast, copy, ctype
 
-i8p = typeof'int8_t*'
-i8a = typeof'int8_t[?]'
-u8p = typeof'uint8_t*'
-u8a = typeof'uint8_t[?]'
+i8p = ctype'int8_t*'
+i8a = ctype'int8_t[?]'
+u8p = ctype'uint8_t*'
+u8a = ctype'uint8_t[?]'
 
-i16p = typeof'int16_t*'
-i16a = typeof'int16_t[?]'
-u16p = typeof'uint16_t*'
-u16a = typeof'uint16_t[?]'
+i16p = ctype'int16_t*'
+i16a = ctype'int16_t[?]'
+u16p = ctype'uint16_t*'
+u16a = ctype'uint16_t[?]'
 
-i32p = typeof'int32_t*'
-i32a = typeof'int32_t[?]'
-u32p = typeof'uint32_t*'
-u32a = typeof'uint32_t[?]'
+i32p = ctype'int32_t*'
+i32a = ctype'int32_t[?]'
+u32p = ctype'uint32_t*'
+u32a = ctype'uint32_t[?]'
 
-i64p = typeof'int64_t*'
-i64a = typeof'int64_t[?]'
-u64p = typeof'uint64_t*'
-u64a = typeof'uint64_t[?]'
+i64p = ctype'int64_t*'
+i64a = ctype'int64_t[?]'
+u64p = ctype'uint64_t*'
+u64a = ctype'uint64_t[?]'
 
-f32p = typeof'float*'
-f32a = typeof'float[?]'
-f64p = typeof'double*'
-f64a = typeof'double[?]'
+f32p = ctype'float*'
+f32a = ctype'float[?]'
+f64p = ctype'double*'
+f64a = ctype'double[?]'
 
-i32 = typeof'int32_t'
-u32 = typeof'uint32_t'
-u64 = typeof'uint64_t'
-i64 = typeof'int64_t'
+i32 = ctype'int32_t'
+u32 = ctype'uint32_t'
+u64 = ctype'uint64_t'
+i64 = ctype'int64_t'
 
-voidp   = typeof'void*'
-intptr  = typeof'intptr_t'
-uintptr = typeof'uintptr_t'
+voidp   = ctype'void*'
+intptr  = ctype'intptr_t'
+uintptr = ctype'uintptr_t'
 
 cdef[[
 typedef   int8_t i8;
@@ -2341,7 +2343,7 @@ free = C.free
 
 --[[
 auto-growing buffer allocation pattern.
-- ctype must be a VLA: the returned buffer will have that type.
+- ct must be a VLA: the returned buffer will have that type.
 - the buffer only grows in powers-of-two steps.
 - alloc() returns the buffer's current capacity which can be equal or
   greater than the requested length.
@@ -2352,8 +2354,8 @@ auto-growing buffer allocation pattern.
   in order to copy the contents to the new buffer yourself.
 ]]
 local nextpow2 = nextpow2
-function buffer(ctype)
-	local vla = typeof(ctype or u8a)
+function buffer(ct)
+	local vla = ctype(ct or u8a)
 	local buf, len = nil, -1
 	return function(minlen)
 		if minlen == false then
@@ -2368,10 +2370,10 @@ end
 
 --like buffer() but preserves data on reallocations.
 --also returns minlen instead of capacity.
-function dynarray(ctype, min_capacity)
-	ctype = ctype or u8a
-	local buffer = buffer(ctype)
-	local elem_size = sizeof(ctype, 1)
+function dynarray(ct, min_capacity)
+	ct = ct or u8a
+	local buffer = buffer(ct)
+	local elem_size = sizeof(ct, 1)
 	local buf0, minlen0
 	return function(minlen)
 		local buf, len = buffer(max(min_capacity or 0, minlen))
@@ -2386,7 +2388,7 @@ end
 --convert a pointer's address to a Lua number or possibly string.
 --use case #1: hashing on pointer values i.e. using pointers as table keys.
 --use case #2: moving pointers in and out of Lua states when using luastate.lua.
-local intptr_a1 = typeof'intptr_t[1]'
+local intptr_a1 = ctype'intptr_t[1]'
 function ptr_serialize(p)
 	local np = cast(intptr, cast(voidp, p))
    local n = tonumber(np)
@@ -2398,15 +2400,15 @@ function ptr_serialize(p)
 end
 
 --convert a pointer address to a pointer, optionally specifying a ctype.
-local intptrp = typeof'const intptr_t*'
-function ptr_deserialize(ctype, addr)
+local intptrp = ctype'const intptr_t*'
+function ptr_deserialize(ct, addr)
 	if not addr then
-		ctype, addr = voidp, ctype
+		ct, addr = voidp, ct
 	end
 	if type(addr) == 'string' then
-		return cast(ctype, cast(voidp, cast(intptrp, addr)[0]))
+		return cast(ct, cast(voidp, cast(intptrp, addr)[0]))
 	else
-		return cast(ctype, addr)
+		return cast(ct, addr)
 	end
 end
 

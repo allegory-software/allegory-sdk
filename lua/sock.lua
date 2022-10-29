@@ -522,7 +522,7 @@ do
 
 	local hints = new'struct addrinfo'
 	local addrs = new'struct addrinfo*[1]'
-	local addrinfo_ct = typeof'struct addrinfo'
+	local addrinfo_ct = ctype'struct addrinfo'
 
 	local getaddrinfo_error
 	if Windows then
@@ -538,7 +538,7 @@ do
 
 	function try_getaddrinfo(host, port, socket_type, family, protocol, flags)
 		if host == '*' then host = '0.0.0.0' end --all.
-		if istype(addrinfo_ct, host) then
+		if isctype(addrinfo_ct, host) then
 			return host, true --pass-through and return "not owned" flag
 		elseif istab(host) then
 			local t = host
@@ -642,7 +642,7 @@ do
 
 end
 
-local sockaddr_ct = typeof'sockaddr'
+local sockaddr_ct = ctype'sockaddr'
 
 --Winsock2 & IOCP ------------------------------------------------------------
 
@@ -913,7 +913,7 @@ do
 	local SIO_GET_EXTENSION_FUNCTION_POINTER = bor(IOC_IN, IOC_OUT, IOC_WS2, 6)
 
 	function bind_winsock_func(socket, func_ct, func_guid)
-		local cbuf = new(typeof('$[1]', typeof(func_ct)))
+		local cbuf = new(ctype('$[1]', ctype(func_ct)))
 		assert(check(C.WSAIoctl(
 			socket, SIO_GET_EXTENSION_FUNCTION_POINTER,
 			func_guid, sizeof(func_guid),
@@ -1039,16 +1039,16 @@ do
 	local jobs = {} --{job1, ...}
 	local freed = {} --{job_index1, ...}
 
-	local overlapped_ct = typeof[[
+	local overlapped_ct = ctype[[
 		struct {
 			OVERLAPPED overlapped;
 			int job_index;
 		}
 	]]
-	local overlapped_ptr_ct = typeof('$*', overlapped_ct)
+	local overlapped_ptr_ct = ctype('$*', overlapped_ct)
 
-	local OVERLAPPED = typeof'OVERLAPPED'
-	local LPOVERLAPPED = typeof'LPOVERLAPPED'
+	local OVERLAPPED = ctype'OVERLAPPED'
+	local LPOVERLAPPED = ctype'LPOVERLAPPED'
 
 	function overlapped(socket, done, expires)
 		if #freed > 0 then
@@ -1232,7 +1232,7 @@ do
 	local WSAENOBUFS    = 10055
 	local WSATRY_AGAIN  = 11002
 
-	local accept_buf_ct = typeof[[
+	local accept_buf_ct = ctype[[
 		struct {
 			struct sockaddr local_addr;
 			char reserved[16];
@@ -1336,7 +1336,7 @@ do
 		return n
 	end
 
-	local int_buf_ct = typeof'int[1]'
+	local int_buf_ct = ctype'int[1]'
 	local sa_buf_len = sizeof(sockaddr_ct)
 
 	function udp:try_recvnext(buf, len, flags)

@@ -6,10 +6,10 @@ local conv = bitmap_converters
 
 bitmap_colortypes.rgbaf = {channels = 'rgba', max = 1}
 
-bitmap_formats.rgbaf = merge({bpp = 32 * 4, ctype = typeof'float',
+bitmap_formats.rgbaf = merge({bpp = 32 * 4, ctype = ctype'float',
 	colortype = 'rgbaf', bitmap_formats.rgba8})
 
-bitmap_formats.rgbad = merge({bpp = 64 * 4, ctype = typeof'double',
+bitmap_formats.rgbad = merge({bpp = 64 * 4, ctype = ctype'double',
 	colortype = 'rgbaf', bitmap_formats.rgba8})
 
 conv.rgbaf = {}

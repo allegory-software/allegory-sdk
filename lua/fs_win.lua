@@ -849,7 +849,7 @@ do
 		attrs = 'reparse_point',
 	}
 
-	local REPARSE_DATA_BUFFER = typeof[[
+	local REPARSE_DATA_BUFFER = ctype[[
 		struct {
 			ULONG  ReparseTag;
 			USHORT ReparseDataLength;
@@ -1102,7 +1102,7 @@ local function filetype(bits, reparse_tag)
 	end
 end
 
-local file_info_ct = typeof'BY_HANDLE_FILE_INFORMATION'
+local file_info_ct = ctype'BY_HANDLE_FILE_INFORMATION'
 local info
 local function file_get_info(f)
 	info = info or file_info_ct()
@@ -1111,7 +1111,7 @@ local function file_get_info(f)
 	return info
 end
 
-local file_basic_info_ct = typeof'FILE_BASIC_INFO'
+local file_basic_info_ct = ctype'FILE_BASIC_INFO'
 local binfo
 local function file_get_basic_info(f)
 	binfo = binfo or file_basic_info_ct()
@@ -1294,7 +1294,7 @@ BOOL FindNextFileW(HANDLE, LPWIN32_FIND_DATAW);
 BOOL FindClose(HANDLE);
 ]]
 
-dir_ct = typeof[[
+dir_ct = ctype[[
 	struct {
 		HANDLE _handle;
 		WIN32_FIND_DATAW _fdata;

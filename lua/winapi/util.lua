@@ -266,7 +266,7 @@ types = {}
 setmetatable(types, types)
 
 function types:__index(type_str)
-	local ctype = typeof(type_str)
+	local ctype = ffi.typeof(type_str)
 	self[type_str] = function(t,...)
 		if ffi.istype(ctype, t) then return t end
 		if t == nil then return ctype() end
@@ -284,7 +284,7 @@ end
 --retval since APIs usually need that. see arrays_test.lua for full semantics.
 arrays = setmetatable({}, {
 	__index = function(t,k)
-		local ctype = typeof(k..'[?]')
+		local ctype = ffi.typeof(k..'[?]')
 		t[k] = function(t,...)
 			local n
 			if type(t) == 'table' then --arr{elem1, elem2, ...} constructor

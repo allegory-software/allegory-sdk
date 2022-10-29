@@ -203,10 +203,10 @@ function cdataheap(h)
 
 	require'glue'
 
-	local ctype = typeof(h.ctype)
+	local ct = ctype(h.ctype)
 	local arr = h.dynarray
 	if not arr then
-		arr = dynarray(typeof('$[?]', ctype), h.min_capacity)
+		arr = dynarray(ctype('$[?]', ct), h.min_capacity)
 	end
 	local t, n = nil, 0
 
@@ -259,7 +259,7 @@ function cdataheap(h)
 		if box then
 			box[0] = t[i]
 		else
-			return ctype(t[i])
+			return ct(t[i])
 		end
 	end
 	function h:push(v)

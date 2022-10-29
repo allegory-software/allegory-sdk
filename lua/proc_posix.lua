@@ -55,7 +55,7 @@ local ERANGE = 34
 
 local C = C
 
-local u8pa = typeof'char*[?]'
+local u8pa = ctype'char*[?]'
 
 function env(k, v)
 	if k then

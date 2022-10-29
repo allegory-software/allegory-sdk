@@ -294,8 +294,8 @@ bitmap_colortypes = colortypes
 local formats = {}
 bitmap_formats = formats
 
-local function format(bpp, ctype, colortype, read, write, ...)
-	return {bpp = bpp, ctype = typeof(ctype),
+local function format(bpp, ct, colortype, read, write, ...)
+	return {bpp = bpp, ctype = ctype(ct),
 		colortype = colortype, read = read, write = write, ...}
 end
 
@@ -739,13 +739,13 @@ local function aligned_address(addr, align)
 	end
 	assert(align >= 2)
 	assert(band(align, align - 1) == 0) --must be power-of-two
-	if istype('uint64_t', addr) then
+	if isctype('uint64_t', addr) then
 		align = cast('uint64_t', align) --so that bnot() works
 	end
 	return band(addr + align - 1, bnot(align - 1)), align
 end
 
-local voidp_ct = typeof'void*'
+local voidp_ct = ctype'void*'
 local function aligned_pointer(ptr, align)
 	local addr = cast('uintptr_t', ptr)
 	return cast(voidp_ct, (aligned_address(addr, align)))
@@ -795,7 +795,7 @@ function bitmap(w, h, format, bottom_up, align, stride, alloc)
 	local size = ceil(stride * h)
 	assert(size > 0, 'invalid size')
 	local _size = size + (align - 1)
-	local _data = alloc and alloc(_size) or new(typeof('char[$]', _size))
+	local _data = alloc and alloc(_size) or new(ctype('char[$]', _size))
 	local data = aligned_pointer(_data, align)
 	return {w = w, h = h, format = format, bottom_up = bottom_up or nil,
 		stride = stride, data = data, _data = _data, size = size,
@@ -806,7 +806,7 @@ end
 
 local function data_interface(bmp)
 	local format = bitmap_format(bmp)
-	local data = cast(typeof('$*', typeof(format.ctype)), bmp.data)
+	local data = cast(ctype('$*', ctype(format.ctype)), bmp.data)
 	local stride_bytes = valid_stride(bmp.format, bmp.w, bmp.stride)
 	local stride_samples = stride_bytes / sizeof(format.ctype)
 	--NOTE: pixelsize is fractional for < 8bpp formats, that's ok.

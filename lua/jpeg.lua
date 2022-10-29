@@ -156,8 +156,8 @@ local function pad_stride(stride)
 end
 
 --create a callback manager object and its destructor.
-local function callback_manager(mgr_ctype, callbacks)
-	local mgr = new(mgr_ctype)
+local function callback_manager(mgr_ct, callbacks)
+	local mgr = new(mgr_ct)
 	local cbt = {}
 	for k,f in pairs(callbacks) do
 		if isfunc(f) then
@@ -185,7 +185,7 @@ local dct_methods = {
 	float    = C.JDCT_FLOAT,
 }
 
-local ccptr_ct = typeof'const uint8_t*' --const prevents copying
+local ccptr_ct = ctype'const uint8_t*' --const prevents copying
 
 --create and setup a error handling object.
 local function jpeg_err(t)

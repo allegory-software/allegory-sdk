@@ -139,21 +139,21 @@ local function best_fmt(raw_fmt, accept, gamma)
 end
 
 local function struct_getter(ct, get) --getter for a struct type
-	local ct = typeof(ct)
+	local ct = ctype(ct)
 	return function(ctx)
 		local s = ct()
 		return get(ctx, s) == 0 and s or nil
 	end
 end
 local function prim_getter(ct, get) --getter for a primitive type
-	local ct = typeof(ct)
+	local ct = ctype(ct)
 	return function(ctx)
 		local s = ct()
 		return get(ctx, s) == 0 and s[0] or nil
 	end
 end
 local function list_getter(ct, get) --getter for a list of structs
-	local ct = typeof(ct)
+	local ct = ctype(ct)
 	return function(ctx)
 		local n = u32a(1)
 		if get(ctx, nil, n) ~= 0 then return nil end
@@ -185,8 +185,8 @@ local chunk_decoders = {
 	unknown  =   list_getter('struct spng_unknown_chunk', C.spng_get_unknown_chunks),
 }
 
-local rw_fn_ct = typeof'spng_rw_fn*'
---^^ very important to typeof this to avoid "table overflow" !
+local rw_fn_ct = ctype'spng_rw_fn*'
+--^^ very important to ctype() this to avoid "table overflow" !
 
 local premultiply_funcs = {
 	rgba8  = C.spng_premultiply_alpha_rgba8,
@@ -345,21 +345,21 @@ function png_open(...)
 end
 
 local function struct_setter(ct, set) --setter for a struct type
-	local ct = typeof(ct)
+	local ct = ctype(ct)
 	return function(ctx, v)
 		local s = ct(v)
 		return set(ctx, s) == 0
 	end
 end
 local function prim_setter(ct, set) --setter for a primitive type
-	local ct = typeof(ct)
+	local ct = ctype(ct)
 	return function(ctx, v)
 		local s = ct(v)
 		return set(ctx, s) == 0
 	end
 end
 local function list_setter(ct, set) --setter for a list of structs
-	local ct = typeof(ct)
+	local ct = ctype(ct)
 	return function(ctx, v)
 		local t = ct(#v, v)
 		return set(ctx, t, #v) == 0

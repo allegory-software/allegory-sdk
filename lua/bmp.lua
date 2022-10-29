@@ -71,7 +71,7 @@ local
 	shr, shl, bor, band, bnot
 
 --BITMAPFILEHEADER
-local file_header = typeof[[struct __attribute__((__packed__)) {
+local file_header = ctype[[struct __attribute__((__packed__)) {
 	char     magic[2]; // 'BM'
 	uint32_t size;
 	uint16_t reserved1;
@@ -81,7 +81,7 @@ local file_header = typeof[[struct __attribute__((__packed__)) {
 }]]
 
 --BITMAPCOREHEADER, Windows 2.0 or later
-local core_header = typeof[[struct __attribute__((__packed__)) {
+local core_header = ctype[[struct __attribute__((__packed__)) {
 	// BITMAPCOREHEADER
 	uint16_t w;
 	uint16_t h;
@@ -90,7 +90,7 @@ local core_header = typeof[[struct __attribute__((__packed__)) {
 }]]
 
 --BITMAPINFOHEADER, Windows NT, 3.1x or later
-local info_header = typeof[[struct __attribute__((__packed__)) {
+local info_header = ctype[[struct __attribute__((__packed__)) {
 	int32_t  w;
 	int32_t  h;
 	uint16_t planes;       // 1
@@ -104,7 +104,7 @@ local info_header = typeof[[struct __attribute__((__packed__)) {
 }]]
 
 --BITMAPV2INFOHEADER, undocumented, Adobe Photoshop
-local v2_header = typeof([[struct __attribute__((__packed__)) {
+local v2_header = ctype([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t mask_r;
 	uint32_t mask_g;
@@ -112,13 +112,13 @@ local v2_header = typeof([[struct __attribute__((__packed__)) {
 }]], info_header)
 
 --BITMAPV3INFOHEADER, undocumented, Adobe Photoshop
-local v3_header = typeof([[struct __attribute__((__packed__)) {
+local v3_header = ctype([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t mask_a;
 }]], v2_header)
 
 --BITMAPV4HEADER, Windows NT 4.0, 95 or later
-local v4_header = typeof([[struct __attribute__((__packed__)) {
+local v4_header = ctype([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t cs_type;
 	struct { int32_t rx, ry, rz, gx, gy, gz, bx, by, bz; } endpoints;
@@ -128,7 +128,7 @@ local v4_header = typeof([[struct __attribute__((__packed__)) {
 }]], v3_header)
 
 --BITMAPV5HEADER, Windows NT 5.0, 98 or later
-local v5_header = typeof([[struct __attribute__((__packed__)) {
+local v5_header = ctype([[struct __attribute__((__packed__)) {
 	$;
 	uint32_t intent;
 	uint32_t profile_data;
@@ -136,13 +136,13 @@ local v5_header = typeof([[struct __attribute__((__packed__)) {
 	uint32_t reserved;
 }]], v4_header)
 
-local rgb_triple = typeof[[struct __attribute__((__packed__)) {
+local rgb_triple = ctype[[struct __attribute__((__packed__)) {
 	uint8_t b;
 	uint8_t g;
 	uint8_t r;
 }]]
 
-local rgb_quad = typeof([[struct __attribute__((__packed__)) {
+local rgb_quad = ctype([[struct __attribute__((__packed__)) {
 	$;
 	uint8_t a;
 }]], rgb_triple)
@@ -256,7 +256,7 @@ try_bmp_open = protect('bmp', function(read_bytes)
 	local pal
 	if palettized then
 		local pal_entry_ct = quad_pal and rgb_quad or rgb_triple
-		local pal_ct = typeof('$[?]', pal_entry_ct)
+		local pal_ct = ctype('$[?]', pal_entry_ct)
 		pal_count = floor(pal_size / sizeof(pal_entry_ct))
 		pal_count = min(pal_count, 2^bpp)
 		if pal_count > 0 then

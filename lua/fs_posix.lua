@@ -357,7 +357,7 @@ if OSX then
 	local F_PEOFPOSMODE    = 3
 	local F_ALLOCATEALL    = 4
 
-	local fstore_ct = typeof[[
+	local fstore_ct = ctype[[
 		struct {
 			uint32_t fst_flags;
 			int      fst_posmode;
@@ -367,7 +367,7 @@ if OSX then
 		}
 	]]
 
-	local void = typeof'void*'
+	local void = ctype'void*'
 	local store
 	function fallocate(fd, size)
 		store = store or fstore_ct(F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, 0)
@@ -639,7 +639,7 @@ local stat_getters = {
 				 function(st) return st_time(st.st_btime, st.st_btime_nsec) end,
 }
 
-local stat_ct = typeof'struct stat'
+local stat_ct = ctype'struct stat'
 local st
 local function wrap(stat_func)
 	return function(arg, attr)
@@ -659,8 +659,8 @@ local function wrap(stat_func)
 	end
 end
 if Linux then
-	local void = typeof'void*'
-	local int = typeof'int'
+	local void = ctype'void*'
+	local int = ctype'int'
 	fstat = wrap(function(f, st)
 		return C.syscall(5, cast(int, f.fd), cast(void, st))
 	end)
@@ -703,7 +703,7 @@ if Linux then
 
 	local AT_FDCWD = -100
 
-	local ts_ct = typeof'struct timespec[2]'
+	local ts_ct = ctype'struct timespec[2]'
 	local ts
 	function futimes(f, atime, mtime)
 		ts = ts or ts_ct()
@@ -747,7 +747,7 @@ elseif OSX then
 
 	--TODO: find a way to change btime too (probably with CF or Cocoa, which
 	--means many more LOC and more BS for setting one damn integer).
-	local tv_ct = typeof'struct timeval[2]'
+	local tv_ct = ctype'struct timeval[2]'
 	local tv
 	local function wrap(utimes_func, stat_func)
 		return function(arg, atime, mtime)
@@ -869,7 +869,7 @@ struct dirent *readdir(DIR *dirp) asm("%s");
 int closedir(DIR *dirp);
 ]], Linux and 'readdir64' or OSX and 'readdir$INODE64'))
 
-dir_ct = typeof[[
+dir_ct = ctype[[
 	struct {
 		DIR *_dirp;
 		struct dirent* _dentry;
@@ -1267,7 +1267,7 @@ struct statfs {
 	__fsword_t f_spare[4]; /* Padding bytes reserved for future use */
 };
 ]]
-local statfs_ct = typeof'struct statfs'
+local statfs_ct = ctype'struct statfs'
 local statfs_buf
 local function statfs(path)
 	statfs_buf = statfs_buf or statfs_ct()

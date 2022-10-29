@@ -189,8 +189,8 @@ cdef[[
 typedef struct minizip_reader_t;
 typedef struct minizip_writer_t;
 ]]
-local reader_ptr_ct = typeof'struct minizip_reader_t*'
-local writer_ptr_ct = typeof'struct minizip_writer_t*'
+local reader_ptr_ct = ctype'struct minizip_reader_t*'
+local writer_ptr_ct = ctype'struct minizip_writer_t*'
 
 local reader = {}; local reader_get = {}; local reader_set = {}
 local writer = {}; local writer_get = {}; local writer_set = {}
@@ -514,7 +514,7 @@ function writer:add_file(file, filename_in_zip)
 	return checkok(C.mz_zip_writer_add_file(self, file, filename_in_zip))
 end
 
-local void_ptr_ct = typeof'void*'
+local void_ptr_ct = ctype'void*'
 function writer:add_memfile(entry, ...)
 	if isstr(entry) then
 		local data, size = ...
