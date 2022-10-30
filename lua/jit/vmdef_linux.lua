@@ -404,6 +404,12 @@ ffnames = {
 "buffer.new",
 "buffer.encode",
 "buffer.decode",
+"misc.getmetrics",
+"misc.sysprof.start",
+"misc.sysprof.stop",
+"misc.sysprof.report",
+"misc.memprof.start",
+"misc.memprof.stop",
 },
 
 }
