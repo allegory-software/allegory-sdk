@@ -1133,7 +1133,7 @@ function nav_widget(e) {
 			return
 		e.param_vals = pv1
 		e.disable('no_param_vals', pv1 === false)
-		e.fire('caption_changed')
+		e.fire('label_changed')
 		return true
 	}
 
@@ -1243,30 +1243,30 @@ function nav_widget(e) {
 		return m
 	}
 
-	// label & caption --------------------------------------------------------
+	// label ------------------------------------------------------------------
 
 	e.prop('label', {store: 'var', slot: 'lang', attr: true})
 
 	e.set_label = function() {
-		e.fire('caption_changed')
+		e.fire('label_changed')
 	}
 
-	e.caption = function() {
+	e.get_label = function() {
 		let label = e.label || e.attr('label') || '{0}'
-		let view = e.param_vals && e.param_nav.selected_rows_caption() || ''
+		let view = e.param_vals && e.param_nav.selected_rows_label() || ''
 		return label.subst(view)
 	}
 
-	e.row_caption = function(row) {
+	e.row_label = function(row) {
 		return e.row_display_val(row)
 	}
 
-	e.selected_rows_caption = function() {
+	e.selected_rows_label = function() {
 		if (!e.selected_rows)
 			return S('no_rows_selected', 'No rows selected')
 		let caps = []
 		for (let [row, sel_fields] of e.selected_rows)
-			caps.push(e.row_caption(row))
+			caps.push(e.row_label(row))
 		return caps.join(', ')
 	}
 
