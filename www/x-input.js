@@ -665,13 +665,13 @@ function input_widget(e) {
 		return div({class: 'x-input-placeholder'})
 	}
 
-	e.caption = function() {
+	e.get_label = function() {
 		return e.label || e.attr('label') || (e.field && e.field.text) || null
 	}
 
 	e.set_label = function() {
 		e.update()
-		e.fire('caption_changed')
+		e.fire('label_changed')
 	}
 
 	e.do_after('do_update', function() {
@@ -3208,6 +3208,12 @@ component('x-chart', 'Input', function(e) {
 
 	// view -------------------------------------------------------------------
 
+	e.prop('text', {store: 'var', attr: true, slot: 'lang'})
+
+	e.header = div({class: 'x-chart-header'})
+	e.view   = div({class: 'x-chart-view'})
+	e.add(e.header, e.view)
+
 	let render = {} // {shape->func}
 	let tt
 	let pointermove = noop
@@ -3300,20 +3306,15 @@ component('x-chart', 'Input', function(e) {
 		if (!update_model()) return
 		let groups = all_split_groups
 
-		let css = e.css()
-		let r = e.rect()
-
-		let pad_x1 = num(css['padding-left'  ])
-		let pad_x2 = num(css['padding-right' ])
-		let pad_y1 = num(css['padding-top'   ])
-		let pad_y2 = num(css['padding-bottom'])
+		let r = e.view.rect()
+		let css = e.view.css()
 
 		let canvas = tag('canvas', {
 			class : 'x-chart-canvas',
-			width : r.w - pad_x1 - pad_x2,
-			height: r.h - pad_y1 - pad_y2,
+			width : r.w,
+			height: r.h,
 		})
-		e.set(canvas)
+		e.view.set(canvas)
 
 		let cx = canvas.getContext('2d')
 
@@ -3381,7 +3382,7 @@ component('x-chart', 'Input', function(e) {
 
 		// paddings to make room for axis markers.
 		let px1 = 40
-		let px2 = 30
+		let px2 = 10
 		let py1 = round(rotate ? line_h + 5 : 10)
 		let py2 = line_h * 1.5
 
@@ -3647,8 +3648,8 @@ component('x-chart', 'Input', function(e) {
 				let y1 = min(p1.y, p2.y, p3.y, p4.y)
 				let x2 = max(p1.x, p2.x, p3.x, p4.x)
 				let y2 = max(p1.y, p2.y, p3.y, p4.y)
-				tt.px = x1 + pad_x1
-				tt.py = y1 + pad_y1
+				tt.px = x1
+				tt.py = y1
 				tt.pw = x2 - x1
 				tt.ph = y2 - y1
 				tt.hit = true
@@ -3672,7 +3673,8 @@ component('x-chart', 'Input', function(e) {
 
 	e.do_update = function() {
 		pointermove = noop
-		e.clear()
+		e.header.set(e.text)
+		e.view.clear()
 		render[e.shape]()
 	}
 
@@ -4109,7 +4111,7 @@ component('x-form', 'Containers', function(e) {
 	})
 
 	e.set_nav = function(nav) {
-		for (let ce of e.$('.x-input-widget, .x-input, .x-label'))
+		for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart'))
 			ce.nav = nav
 	}
 	e.prop('nav', {store: 'var', private: true})
