@@ -1979,7 +1979,7 @@ component('x-tabs', 'Containers', function(e) {
 			update_tab_title(this._tab)
 	}
 
-	function item_caption_changed() {
+	function item_label_changed() {
 		update_tab_title(this._tab)
 	}
 
@@ -2000,7 +2000,7 @@ component('x-tabs', 'Containers', function(e) {
 			tab.item = item
 			item._tab = tab
 			item.on('bind', item_bound, true)
-			item.on('caption_changed', item_caption_changed)
+			item.on('label_changed', item_label_changed)
 			update_tab_title(tab)
 		}
 		item._tab.x = null
@@ -2046,13 +2046,13 @@ component('x-tabs', 'Containers', function(e) {
 		inh_replace_child_widget(old_widget, new_widget)
 	}
 
-	function item_caption(item) {
-		return item.caption ? item.caption() : item.attr('label')
+	function item_label(item) {
+		return item.get_label ? item.get_label() : item.attr('label')
 	}
 
 	function update_tab_title(tab) {
-		let caption = item_caption(tab.item)
-		tab.title_box.set(caption)
+		let label = item_label(tab.item)
+		tab.title_box.set(label)
 		tab.title_box.title = tab.title_box.textContent
 		update_selection_bar()
 	}
@@ -2150,12 +2150,12 @@ component('x-tabs', 'Containers', function(e) {
 	// selected-item persistent property --------------------------------------
 
 	function format_item(item) {
-		return item_caption(item) || item.id
+		return item_label(item) || item.id
 	}
 
 	function format_id(id) {
 		let item = e.items.find(item => item.id == id)
-		return item && item_caption(item) || id
+		return item && item_label(item) || id
 	}
 
 	function item_select_editor(...opt) {
@@ -2204,7 +2204,7 @@ component('x-tabs', 'Containers', function(e) {
 	}
 
 	function item_slug(item) {
-		let s = item.slug || item_caption(item) || ''
+		let s = item.slug || item_label(item) || ''
 		return s.replace(/[\- ]/g, '-').lower()
 	}
 
