@@ -10,7 +10,6 @@ TYPES
 	isint(v)                       is v an integer (includes 1/0 and -1/0)
 	istab(v)                       is v a table
 	isbool(v)                      is v a boolean
-	isarray(v)                     is v a table with only array elements
 	isempty(v)                     is v a table and is it empty
 	isfunc(v)                      is v a function
 	iscdata(v)                     is v a cdata
@@ -291,8 +290,7 @@ isnum    = function(v) return type(v) == 'number' end
 isint    = function(v) return type(v) == 'number' and floor(v) == v end
 istab    = function(v) return type(v) == 'table'  end
 isbool   = function(v) return v == true or v == false end
-isarray  = require'table.isarray'
-isempty  = require'table.isempty'
+isempty  = function(v) return next(v) == nil end
 isfunc   = function(v) return type(v) == 'function' end
 iscdata  = function(v) return type(v) == 'cdata'  end
 isthread = function(v) return type(v) == 'thread' end
