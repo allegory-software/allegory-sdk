@@ -525,21 +525,42 @@ function logging.rpc:get_procinfo()
 	local ft = fs_info'/'
 	local clock = clock()
 	local lua_heap = collectgarbage'count' * 1024
+	local counts = debug.counts or noop
+	local
+		lua_total, lua_freed, lua_allocated,
+		strings, tables, threads, udata, cdata,
+		traces, snap_restores, aborted_traces, mcode_size = counts()
 	self.logvar('procinfo', {
 		clock    = clock,
-		utime    = t and t.utime,
-		stime    = t and t.stime,
-		rss      = t and t.rss,
-		vsize    = t and t.vsize,
-		state    = t and t.state,
-		num_threads = t and t.num_threads,
+		--process
+		utime      = t and t.utime,
+		stime      = t and t.stime,
+		rss        = t and t.rss,
+		vsize      = t and t.vsize,
+		state      = t and t.state,
+		os_threads = t and t.num_threads,
+		--OS
 		uptime   = pt and pt.uptime,
 		cputimes = pt and pt.cputimes,
 		ram_size = pt and pt.ram_size,
 		ram_free = pt and pt.ram_free,
 		hdd_size = ft and ft.size,
 		hdd_free = ft and ft.free,
-		lua_heap = lua_heap,
+		--Lua state
+		lua_heap       = lua_heap       ,
+		--debug.counts()
+		lua_total      = lua_total      ,
+		lua_freed      = lua_freed      ,
+		lua_allocated  = lua_allocated  ,
+		strings        = strings        ,
+		tables         = tables         ,
+		threads        = threads        ,
+		udata          = udata          ,
+		cdata          = cdata          ,
+		traces         = traces         ,
+		snap_restores  = snap_restores  ,
+		aborted_traces = aborted_traces ,
+		mcode_size     = mcode_size     ,
 	})
 end
 
