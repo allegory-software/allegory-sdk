@@ -3031,8 +3031,17 @@ body[small] {
 
 .x-chart {
 	flex: 1 0 0;  /* stretch to fill container but not more */
-	padding: 1em;
+	padding: .5em;
 	overflow: hidden;
+	flex-flow: column;
+}
+
+.x-chart-header {
+	padding-left: 40px;
+}
+
+.x-chart-view {
+	flex: 1;
 }
 
 .x-chart-canvas {
