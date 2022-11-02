@@ -31,7 +31,7 @@ end
 local config = {}
 
 function tls_config(t)
-	if istype('struct tls_config', t) then
+	if isctype('struct tls_config', t) then
 		return t --pass-through
 	end
 	local self = assert(ptr(C.tls_config_new()))

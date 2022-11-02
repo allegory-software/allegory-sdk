@@ -122,7 +122,7 @@ local typemap = {} --{ctype_name = {identify=f, deserialize=f, serialize=f}}
 local function pointer_class(in_ctype, out_ctype)
 	local class = {}
 	function class.identify(p)
-		return istype(in_ctype, p)
+		return isctype(in_ctype, p)
 	end
 	function class.serialize(p)
 		return {addr = ptr_serialize(p)}

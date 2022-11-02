@@ -68,8 +68,8 @@ local
 	type, bor, band, shr, floor, noop, repl, update, dynarray =
 	type, bor, band, shr, floor, noop, repl, update, dynarray
 local
-	istype, copy, cast, ffi_string =
-	istype, copy, cast, ffi.string
+	isctype, copy, cast, ffi_string =
+	isctype, copy, cast, ffi.string
 local
 	u32, i64, u64, u8a, i8p, u8p, i16p, u16p, i32p, u32p, i64p, u64p, f32p, f64p =
 	u32, i64, u64, u8a, i8p, u8p, i16p, u16p, i32p, u32p, i64p, u64p, f32p, f64p
@@ -341,12 +341,12 @@ function mp:encoding_buffer(min_size)
 				cast(u64p, p+i+1)[0] = v
 				rev8(p, i+1)
 			end
-		elseif istype(i64, v) then
+		elseif isctype(i64, v) then
 			local p, i = b(9)
 			p[i] = 0xd3
 			cast(i64p, p+i+1)[0] = v
 			rev8(p, i+1)
-		elseif istype(u64, v) then
+		elseif isctype(u64, v) then
 			local p, i = b(9)
 			p[i] = 0xcf
 			cast(u64p, p+i+1)[0] = v
@@ -465,7 +465,7 @@ function mp:encoding_buffer(min_size)
 			else
 				self:encode_map(v)
 			end
-		elseif istype(i64, v) or istype(u64, v) then
+		elseif isctype(i64, v) or isctype(u64, v) then
 			self:encode_int(v)
 		else
 			error('invalid type '..type(v))
