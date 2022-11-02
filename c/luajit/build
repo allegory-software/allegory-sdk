@@ -1,4 +1,5 @@
 #go@ plink d10 -t sh sdk/c/luajit/build
+#go@ sh build
 #!/bin/sh
 cd "${0%build}" || exit 1
 
@@ -8,55 +9,52 @@ cd src/src || exit 1
 build() {
 
 	local CFLAGS="$CFLAGS \
-	-msse4.2 \
-	-DALLEGORY_BUILD \
-	-DLUAJIT_ENABLE_GC64 \
-	-DLUAJIT_ENABLE_LUA52COMPAT \
-	-DLUA_PATH_DEFAULT='\"$LUA_PATH_DEFAULT\"' \
-	-DLUA_CPATH_DEFAULT='\"$LUA_CPATH_DEFAULT\"' \
-	-I. \
-	-DLUAMISC_API=LUA_API \
-	"
+		-msse4.2 \
+		-DALLEGORY_BUILD \
+		-DLUAJIT_ENABLE_GC64 \
+		-DLUAJIT_ENABLE_LUA52COMPAT \
+		-DLUA_PATH_DEFAULT='\"$LUA_PATH_DEFAULT\"' \
+		-DLUA_CPATH_DEFAULT='\"$LUA_CPATH_DEFAULT\"' \
+		-I. \
+		-DLUAMISC_API=LUA_API \
+		"
 
-	local bindir=../../../../bin/$P
+	local B=../../../../bin/$P
+	local J=$B/../../lua/jit
 
-	#export SHELL='sh -x'
+	rm -f $B/$X
+	rm -f rm $B/$D
 
 	make clean
-	make HOST_CC=gcc amalg Q=" " LDFLAGS="$LDFLAGS" CFLAGS="$CFLAGS"
+	make HOST_CC=gcc amalg Q=" " \
+		LDFLAGS="$LDFLAGS" \
+		CFLAGS="$CFLAGS -DCOUNTS" \
+		DASM_XFLAGS="$DASM_XFLAGS"
 
-	[ "$X0" ] || X0=$X; cp -f $X0 "$bindir/$X"
-	[ "$D0" ] || D0=$D; cp -f $D0 "$bindir/$D"
+	[ "$X0" ] || X0=$X; cp -f $X0 $B/$X
+	[ "$D0" ] || D0=$D; cp -f $D0 $B/$D
 
-	local J=$bindir/../../lua/jit
 	mkdir -p $J
 	cp -f jit/*.lua $J/
-	rm -f $J/dis_mips*.lua
-	rm -f $J/dis_arm*.lua
-	rm -f $J/dis_ppc.lua
 	cp -f jit/vmdef.lua $J/vmdef_$P.lua
 	cp -f ../../vmdef.lua $J/vmdef.lua
-
-	[ "$OSTYPE" = "msys" ] && {
-		make clean
-		make HOST_CC=gcc amalg Q=" " \
-			BUILDMODE=static LDFLAGS="$LDFLAGS" CFLAGS="$CFLAGS"
-	}
 
 	make clean
 }
 
 if [ "$OSTYPE" = "msys" ]; then
-	export LUA_PATH_DEFAULT="!\\\\..\\\\..\\\\lua\\\\?.lua"
-	export LUA_CPATH_DEFAULT="!\\\\clib\\\\?.dll"
-	P=windows LDFLAGS="-s -static-libgcc" \
-	X=luajit.exe D=lua51.dll A=luajit.a build
+	LUA_PATH_DEFAULT="!\\\\..\\\\..\\\\lua\\\\?.lua" \
+	LUA_CPATH_DEFAULT="!\\\\clib\\\\?.dll" \
+	P=windows LDFLAGS="-static-libgcc" \
+	X=luajit.exe D=lua51.dll A=luajit.a \
+		build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
 	echo NYI
 else
 	export LUA_PATH_DEFAULT="!/../../lua/?.lua"
 	export LUA_CPATH_DEFAULT="!/clib/?.so"
-	P=linux CFLAGS="-pthread -DLJ_HASMEMPROF=1 -DLJ_HASRESOLVER=1" \
-	LDFLAGS="-pthread -s -static-libgcc -Wl,--disable-new-dtags -Wl,-rpath,'\$\$ORIGIN'" \
-	X=luajit D=libluajit.so A=libluajit.a build
+	P=linux CFLAGS="-pthread -DCOUNTS" \
+	LDFLAGS="-pthread -static-libgcc -Wl,--disable-new-dtags -Wl,-rpath,'\$\$ORIGIN'" \
+	X=luajit D=libluajit.so A=libluajit.a \
+		build
 fi

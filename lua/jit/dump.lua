@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------------
 -- LuaJIT compiler dump module.
 --
--- Copyright (C) 2005-2021 Mike Pall. All rights reserved.
+-- Copyright (C) 2005-2022 Mike Pall. All rights reserved.
 -- Released under the MIT license. See Copyright Notice in luajit.h
 ----------------------------------------------------------------------------
 --
@@ -603,9 +603,6 @@ local function dump_record(tr, func, pc, depth)
   if pc >= 0 then
     line = bcline(func, pc, recprefix)
     if dumpmode.H then line = gsub(line, "[<>&]", html_escape) end
-    if pc > 0 then
-      line = sub(line, 1, -2) .. "       (" .. fmtfunc(func, pc) .. ")\n"
-    end
   else
     line = "0000 "..recprefix.." FUNCC      \n"
   end
