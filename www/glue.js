@@ -594,6 +594,7 @@ method(Set, 'toarray', function() {
 })
 
 empty = obj()
+empty_set = set()
 
 keys = Object.keys
 

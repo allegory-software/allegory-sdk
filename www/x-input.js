@@ -147,8 +147,13 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 			e.fire('bind_field', true)
 	}
 
+	e.can_actually_change_val = function() {
+		return !!(e.row || (e.nav && !e.nav.all_rows.length && e.nav.can_actually_add_rows()))
+	}
+
 	function val_changed() {
 		bind_field(true)
+		e.disabled = !e.can_actually_change_val()
 		e.update()
 	}
 
@@ -170,6 +175,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		let val_changes = changes.val || changes.input_val
 		if (val_changes) {
 			let val = val_changes[0]
+			// TODO: this should be call from do_update()!
 			e.do_update_val(val, ev)
 			e.class('modified', e.nav.cell_modified(row, field))
 			e.fire('input_val_changed', val, ev)
@@ -283,9 +289,17 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		v = e.to_val(v)
 		if (v === undefined)
 			v = null
-		if (e.field && e.row)
-			e.nav.set_cell_val(e.row, e.field, v, ev)
-		else
+		let was_set
+		if (e.field) {
+			if (!e.row)
+				if (e.nav && !e.nav.all_rows.length)
+					e.nav.insert_rows(1, {focus_it: true})
+			if (e.row) {
+				e.nav.set_cell_val(e.row, e.field, v, ev)
+				was_set = true
+			}
+		}
+		if (!was_set)
 			initial_val = v
 	}
 	e.property('val', get_val, e.set_val)
@@ -329,7 +343,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		let field = e.field
 		let readonly = e.nav && !e.nav.can_change_val(row, field)
 		e.xoff()
-		e.disable('read_only', readonly && !e.set_readonly)
+		e.disable('readonly', readonly && !e.set_readonly)
 		e.readonly = readonly
 		e.xon()
 
@@ -4135,4 +4149,3 @@ component('x-form', 'Containers', function(e) {
 	return {items: html_items}
 
 })
-
