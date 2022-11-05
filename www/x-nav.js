@@ -244,7 +244,9 @@ focusing and selection:
 			opt.must_not_move_row
 			opt.must_not_move_col
 		e.do_focus_row(row, row0)
+		e.do_focus_cell(row, field, row0, field0)
 		^focused_row_changed(row, row0, ev)
+		^focused_cell_changed(row, field, row0, field0, ev)
 		^selected_rows_changed()
 
 scrolling:
@@ -580,6 +582,8 @@ function nav_widget(e) {
 	}
 
 	function init_all() {
+		e.changed_rows = null // set(row)
+		rows_moved = false
 		init_all_fields()
 		init_row_validators()
 	}
@@ -591,6 +595,7 @@ function nav_widget(e) {
 			init_all()
 			init_param_vals()
 			e.reload()
+			e.update_action_band()
 		} else {
 			abort_all_requests()
 			e.unfocus_focused_cell({cancel: true})
@@ -649,14 +654,15 @@ function nav_widget(e) {
 
 	// fields utils -----------------------------------------------------------
 
-	let fld = col => (isstr(col) || isnum(col)) ? assert(e.all_fields[col], '{1}: invalid col: {0}', e.id, col) : col
+	let fld = col => (isstr(col) || isnum(col)) ? assert(e.all_fields[col],
+		'{0} has no col: {1}', e.id, col) : col
 	let optfld  = col => (isstr(col) || isnum(col)) ? e.all_fields[col] : col
 	let fldname = col => fld(col).name
 	let colsarr = cols => isstr(cols) ? cols.words() : cols
 
 	function flds(cols) {
 		let fields = cols && colsarr(cols).map(fld)
-		assert(fields && fields.length, '{0} has no cols {1}', e.id, cols || '')
+		assert(fields && fields.length, '{0} has no cols: {1}', e.id, cols || '')
 		return fields
 	}
 
@@ -986,6 +992,15 @@ function nav_widget(e) {
 			return
 		}
 		e[prop] = v
+	}
+
+	e.get_props = function() {
+		let t = obj()
+		for (let k in e.props)
+			t[k] = true
+		for (let f of e.fields)
+			t['col.'+f.name] = true
+		return t
 	}
 
 	e.get_prop_attrs = function(prop) {
@@ -1490,6 +1505,7 @@ function nav_widget(e) {
 	}
 
 	e.do_focus_row = noop // stub
+	e.do_focus_cell = noop // stub
 
 	e.focus_cell = function(ri, fi, rows, cols, ev) {
 
@@ -1629,6 +1645,13 @@ function nav_widget(e) {
 		if (row_changed) {
 			e.do_focus_row(row, row0)
 			e.fire('focused_row_changed', row, row0, ev)
+		}
+
+		if (row_changed || field_changed) {
+			let field  = e.fields[fi]
+			let field0 = e.fields[fi0]
+			e.do_focus_cell(row, field, row0, field0)
+			e.fire('focused_cell_changed', row, field, row0, field0, ev)
 		}
 
 		let sel_rows_changed = map_keys_different(old_selected_rows, e.selected_rows)
@@ -3667,7 +3690,7 @@ function nav_widget(e) {
 	}
 
 	e.rows_moved = noop // stub
-	let rows_moved // flag in case there's no pos col and thus no e.changed_rows.
+	var rows_moved // flag in case there's no pos col and thus no e.changed_rows.
 
 	function move_rows_state(focused_ri, selected_ri, ev) {
 
@@ -3855,9 +3878,6 @@ function nav_widget(e) {
 
 		let fs = e.refocus_state('val') || e.refocus_state('pk')
 		e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
-
-		e.changed_rows = null // set(row)
-		rows_moved = false
 
 		init_all()
 
