@@ -8,6 +8,7 @@
 
 :root {
 
+	--x-border-light                  : #00000033;  /* normal borders */
 	--x-border-focused                :  #99d;
 	--x-border-focused-button         :  #aab;
 	--x-border-focused-button-primary :  #363;
@@ -54,7 +55,6 @@
 	--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
 	--x-fg-disabled     : #00000066;  /* faded text on light bg */
 	--x-fg-disabled-inverted : #ffffff66;  /* faded text on dark colored bg with the same color as bg */
-	--x-border-light    : #00000033;  /* normal borders */
 	--x-smoke           : #00000022;  /* light overlays */
 	--x-faint           : #00000011;  /* faint overlays and faint borders */
 	--x-fg-label        : #666;  /* text of input & chart labels */
@@ -2272,8 +2272,6 @@ x-tabs-fixed-header {
 /* form ------------------------------------------------------------------- */
 
 .x-form {
-	/* layout self */
-	flex: 1;
 
 	/* layout items */
 	display: flex;
