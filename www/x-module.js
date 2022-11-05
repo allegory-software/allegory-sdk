@@ -18,10 +18,8 @@ function init_xmodule(opt) {
 
 	xm.root_widget = null
 
-	// TODO: these are not used yet. are they needed?
 	xm.slots = opt.slots || {} // {name -> {color:, }}
 	xm.modules = opt.modules || {} // {name -> {icon:, }}
-
 	xm.layers = {} // {name -> {name:, props: {id -> {k -> v}}}}
 	xm.instances = {} // {id -> [e1,...]}
 	xm.selected_module = null
@@ -118,10 +116,11 @@ function init_xmodule(opt) {
 	xm.init_instance = function(e, opt) {
 		let pv
 		opt.id = opt.id || e.id
-		if (!opt.id)
+		if (!opt.id) {
 			delete opt.id
 			// ^^ because `e.id = ''` sets the id attribute instead of removing it.
-			// && because `e.id = null` sets the id to 'null' so we can't win.
+			// && because `e.id = null` sets the id to "null" so we can't win.
+		}
 		if (opt.id == '<new>') {
 			assert(e.type)
 			assert(opt.module)
@@ -134,16 +133,46 @@ function init_xmodule(opt) {
 		}
 		e.xoff()
 		e.begin_update()
+
+		// set static vals.
 		for (let k in opt)
 			e.set_prop(k, opt[k])
+
 		if (e.id) {
 			e.xmodule_generation = generation
-			e.__pv0 = {} // save prop vals before overrides.
-			for (let k in pv)
-				e.__pv0[k] = e.get_prop(k)
+
+			// save static prop vals so that when a prop gets set to its static
+			// value, we don't save that, we delete the value instead.
+
+			// NOTE: this assumes that init values i.e. html attrs as well as
+			// values passed to (or returned from) the constructor are static!
+			// If instead those values are dynamic for the same id, then they
+			// won't be saved right! To work around that, set nodefault="prop1 ..."
+			// for the props that don't have a static default value.
+
+			let nodefault = opt.nodefault ? set(words(opt.nodefault)) : empty_set
+
+			e.__spv = obj()
+			for (let k in e.get_props()) {
+				let pa = e.get_prop_attrs(k)
+				if (pa.slot) { // only save persistent vals.
+					let v = nodefault.has(k) ? undefined : e.get_prop(k)
+					if (v !== undefined)
+						e.__spv[k] = v
+				}
+			}
+
+			// save prop vals before overrides.
+			e.__pv0 = obj()
+			for (let k in pv) {
+				e.__pv0[k] = e.get_prop()
+			}
+
+			// override prop vals.
 			for (let k in pv)
 				e.set_prop(k, pv[k])
 		}
+
 		e.end_update()
 		e.xon()
 	}
@@ -207,7 +236,9 @@ function init_xmodule(opt) {
 			return
 		module = xm.selected_module || module
 		let layer = module && xm.active_layers[module+':'+slot]
-		if (serialize)
+		if (v === e.__spv[k])
+			v = undefined // don't save static vals.
+		else if (serialize)
 			v = serialize(k, v)
 		if (!layer) {
 			if (module)
@@ -239,7 +270,6 @@ function init_xmodule(opt) {
 			if (e1 != e) {
 				e1.xoff()
 				let pv0 = attr(e1, '__pv0')
-
 				if (!(k in pv0)) // save current val if it wasn't saved before.
 					pv0[k] = e1.get_prop(k)
 				e1.set_prop(k, v)
@@ -727,18 +757,20 @@ component('x-prop-inspector', function(e) {
 		prop_colors = {}
 
 		for (let te of widgets)
-			for (let prop in te.props)
-				if (widgets.size == 1 || !te.props[prop].unique) {
+			for (let prop in te.get_props()) {
+				let pa = te.get_prop_attrs(prop)
+				if (widgets.size == 1 || !pa.unique) {
 					prop_counts[prop] = (prop_counts[prop] || 0) + 1
 					defs[prop] = te.get_prop_attrs(prop)
-					let v1 = te.serialize_prop(prop, te[prop], true)
-					let v0 = te.serialize_prop(prop, defs[prop].default, true)
+					let v1 = te.serialize_prop(prop, te.get_prop(prop))
+					let v0 = te.serialize_prop(prop, defs[prop].default)
 					pv0[prop] = prop in pv0 && pv0[prop] !== v0 ? undefined : v0
 					pv1[prop] = prop in pv1 && pv1[prop] !== v1 ? undefined : v1
 					let [module, slot, layer] = xmodule.prop_module_slot_layer(te, prop)
 					let sl = xmodule.slots[slot]
 					prop_colors[prop] = sl && sl.color || '#f0f'
 				}
+			}
 
 		for (let prop in prop_counts)
 			if (prop_counts[prop] == widgets.size) {
