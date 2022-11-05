@@ -13,6 +13,7 @@ HTML INLINE STYLING
 	[flex]           horizontal flexbox
 	[flexwrap]       horizontal flexbox with auto-wrapping
 	[vflex]          vertical flexbox
+	[stretch]        flex: 1
 
 */
 
@@ -109,3 +110,4 @@ hr {
 [flex]     { display: flex; flex-flow: row; }
 [flexwrap] { display: flex; flex-flow: row wrap; }
 [vflex]    { display: flex; flex-flow: column; }
+[stretch]  { flex: 1; }
