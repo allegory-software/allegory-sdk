@@ -171,7 +171,7 @@ component('x-grid', 'Input', function(e) {
 	// view-size-derived state ------------------------------------------------
 
 	var cells_w, cells_h // cell grid dimensions.
-	var cells_view_ow, cells_view_oh // cell viewport dimensions.
+	var grid_w, grid_h // grid dimensions.
 	var cells_view_w, cells_view_h // cell viewport dimensions inside scrollbars.
 	var cells_view_overflow_x, cells_view_overflow_y // cells viewport overflow setting.
 	var header_w, header_h // header viewport dimensions.
@@ -199,12 +199,12 @@ component('x-grid', 'Input', function(e) {
 		cells_view_overflow_x = e.auto_expand ? 'hidden' : 'auto'
 		cells_view_overflow_y = e.auto_expand ? 'hidden' : (auto_cols_w ? 'scroll' : 'auto')
 
-		cells_view_w = cells_view_ow
-		cells_view_h = cells_view_oh
-
 		if (horiz) {
 
 			let last_cells_w = cells_w
+
+			hcell_h  = e.header_h
+			header_h = e.header_h
 
 			let min_cols_w = 0
 			for (let field of e.fields)
@@ -221,11 +221,12 @@ component('x-grid', 'Input', function(e) {
 			if (e.auto_expand) {
 				cells_view_w = min_cells_w
 				cells_view_h = cells_h
+			} else {
+				cells_view_w = grid_w // before vscrollbar.
+				cells_view_h = grid_h - header_h // before hscrollbar.
 			}
 
-			hcell_h  = e.header_h
 			header_w = cells_view_w // before vscrollbar
-			header_h = e.header_h
 
 			;[cells_view_w, cells_view_h] =
 				scrollbox_client_dimensions(
@@ -279,6 +280,10 @@ component('x-grid', 'Input', function(e) {
 
 		} else {
 
+			hcell_h  = e.cell_h
+			header_w = min(e.header_w, grid_w - 20)
+			header_w = max(header_w, 20)
+
 			for (let fi = 0; fi < e.fields.length; fi++) {
 				let field = e.fields[fi]
 				let [x, y, w] = cell_rel_rect(fi)
@@ -293,12 +298,12 @@ component('x-grid', 'Input', function(e) {
 			if (e.auto_expand) {
 				cells_view_w = cells_w
 				cells_view_h = cells_h
+ 			} else {
+				cells_view_w = grid_w - header_w // before vscrollbar.
+				cells_view_h = grid_h // before hscrollbar.
 			}
 
-			hcell_h  = e.cell_h
-			header_w = min(e.header_w, grid_w - 20)
-			header_w = max(header_w, 20)
-			header_h = cells_view_h // before scrollbar
+			header_h = cells_view_h // before hscrollbar.
 
 			;[cells_view_w, cells_view_h] =
 				scrollbox_client_dimensions(
@@ -322,20 +327,19 @@ component('x-grid', 'Input', function(e) {
 
 	function update_sizes() {
 		if (!e.bound) {
-			cells_view_ow = null
-			cells_view_oh = null
+			grid_w = null
+			grid_h = null
 			scroll_x = null
 			scroll_y = null
 		} else {
 			if (e.auto_expand) {
-				cells_view_ow = 0
-				cells_view_oh = 0
+				grid_w = 0
+				grid_h = 0
 				scroll_x = 0
 				scroll_y = 0
 			} else {
 				grid_w = e.cw
-				cells_view_ow = e.cells_view.ow
-				cells_view_oh = e.cells_view.oh
+				grid_h = e.ch
 				scroll_x = e.cells_view.scrollLeft
 				scroll_y = e.cells_view.scrollTop
 			}
@@ -373,7 +377,7 @@ component('x-grid', 'Input', function(e) {
 
 	// mouse-derived state ----------------------------------------------------
 
-	var hit_state // everything happens differently because on this.
+	var hit_state // this affects both rendering and behavior in many ways.
 	var hit_mx, hit_my // last mouse coords, needed on scroll event.
 	var hit_target // last mouse target, needed on click events.
 	var hit_dx, hit_dy // mouse coords relative to the dragged object.
@@ -472,21 +476,22 @@ component('x-grid', 'Input', function(e) {
 		if (ri == null)
 			return
 		let [x, y, w, h] = cell_rect(ri, fi || 0)
-		e.cells_view.scroll_to_view_rect(scroll_x, scroll_y, x, y, w, h)
+		e.cells_view.scroll_to_view_rect(null, null, x, y, w, h)
 	}
 
 	function row_visible_rect(row) { // relative to cells
-		let ri = e.row_index(row)
-		let r = domrect(...row_rect(ri))
 		let b = e.cell_border_width
-		r.x += b
-		r.y += b
-		// TODO: don't measure!!!
-		let c = e.cells.rect()
-		let v = e.cells_view.rect()
-		v.x -= c.x
-		v.y -= c.y
-		return r.clip(v)
+		let ri = e.row_index(row)
+		let [x, y, w, h] = row_rect(ri)
+		return clip_rect(x+b, y+b, scroll_x, scroll_y, cells_view_w, cells_view_h)
+	}
+
+	function cell_visible_rect(row, field) { // relative to cells
+		let b = e.cell_border_width
+		let ri = e.row_index(row)
+		let fi = e.field_index(field)
+		let [x, y, w, h] = cell_rect(ri, fi)
+		return clip_rect(x+b, y+b, w, h, scroll_x, scroll_y, cells_view_w, cells_view_h)
 	}
 
 	// rendering --------------------------------------------------------------
@@ -1033,81 +1038,98 @@ component('x-grid', 'Input', function(e) {
 
 	e.cells_view.on('scroll', cells_view_scroll)
 
-	// row error tooltip ------------------------------------------------------
+	// error tooltip ----------------------------------------------------------
 
-	let error_tooltip_row
-	e.do_error_tooltip_check = function() {
-		if (!error_tooltip_row) return false
-		if (e.editor && e.editor.do_error_tooltip_check()) return false
-		if (e.hasfocus) return true
-		return false
-	}
+	{
+		let row, field
 
-	function update_row_error_tooltip_position() {
-		if (!e.error_tooltip) return
-		if (!error_tooltip_row) return
-		let r = row_visible_rect(error_tooltip_row)
-		e.error_tooltip.begin_update()
-		e.error_tooltip.target_rect = r
-		e.error_tooltip.side = horiz ? 'top' : 'right'
-		e.error_tooltip.end_update()
-	}
-
-	function update_row_error_tooltip(row) {
-		if (!e.error_tooltip) {
-			if (!row)
-				return
-			e.error_tooltip = tooltip({
-				kind: 'error',
-				target: e.cells,
-				check: e.do_error_tooltip_check,
-				style: 'pointer-events: none',
-			})
+		e.do_error_tooltip_check = function() {
+			if (!row) return false
+			if (e.editor && e.editor.do_error_tooltip_check()) return false
+			if (e.hasfocus) return true
+			return false
 		}
-		let row_errors = row && e.row_errors(row)
-		error_tooltip_row = row_errors && row_errors.length > 0 ? row : null
-		e.error_tooltip.begin_update()
-		if (error_tooltip_row) {
-			e.error_tooltip.text =
-				e.row_errors(error_tooltip_row)
-					.ul({class: 'x-error-list'}, true)
-			update_row_error_tooltip_position()
-		} else {
-			e.error_tooltip.update()
-		}
-		e.error_tooltip.end_update()
-	}
 
-	e.do_focus_row = function(row) {
-		update_row_error_tooltip(row)
+		function update_error_tooltip_position() {
+			if (!e.error_tooltip) return
+			if (!row) return
+			let r = field
+				? domrect(...cell_visible_rect(row, field))
+				: domrect(...row_visible_rect(row))
+			e.error_tooltip.begin_update()
+			e.error_tooltip.target_rect = r
+			e.error_tooltip.side = horiz ? 'top' : 'right'
+			e.error_tooltip.end_update()
+		}
+
+		function update_error_tooltip() {
+			row = null
+			field = null
+			if (hit_state == 'cell') {
+				row = e.rows[hit_ri]
+				field = e.fields[hit_fi]
+			} else if (!hit_state) {
+				row = e.focused_row
+				field = e.focused_field
+			}
+			if (!e.error_tooltip) {
+				if (!row)
+					return
+				e.error_tooltip = tooltip({
+					kind: 'error',
+					target: e.cells,
+					check: e.do_error_tooltip_check,
+					style: 'pointer-events: none',
+				})
+			}
+			let errors
+			if (row && field) {
+				errors = e.cell_errors(row, field)
+				if (!(errors && errors.length)) {
+					errors = null
+					field = null
+				}
+			}
+			if (!errors && row) {
+				errors = e.row_errors(row)
+				if (!(errors && errors.length)) {
+					errors = null
+					row = null
+					field = null
+				}
+			}
+			e.error_tooltip.begin_update()
+			if (errors) {
+				e.error_tooltip.text = errors.map(e => e.message).ul({class: 'x-error-list'}, true)
+				update_error_tooltip_position()
+			} else {
+				e.error_tooltip.update()
+			}
+			e.error_tooltip.end_update()
+		}
+
+		e.do_focus_cell = function(row, field) {
+			update_error_tooltip()
+		}
+
 	}
 
 	// header_visible & filters_visible live properties -----------------------
 
-	let header_visible = true
-	e.property('header_visible',
-		function() {
-			return header_visible
-		},
-		function(v) {
-			v = !!v
-			header_visible = v
-			e.header.hidden = !v
-			update_sizes()
-		}
-	)
+	e.prop('header_visible', {store: 'var', type: 'bool', default: true, attr: true, slot: 'user'})
 
-	let filters_visible = false
-	e.property('filters_visible',
-		function() {
-			return filters_visible
-		},
-		function(v) {
-			filters_visible = !!v
-			e.header.class('with-filters', filters_visible)
-			update_sizes()
-		}
-	)
+	e.set_header_visible = function(v) {
+		v = !!v
+		e.header.hidden = !v
+		update_sizes()
+	}
+
+	e.prop('filters_visible', {store: 'var', type: 'bool', default: false, attr: true})
+
+	e.set_filters_visible = function(v) {
+		e.header.class('with-filters', filters_visible)
+		update_sizes()
+	}
 
 	// inline editing ---------------------------------------------------------
 
@@ -1212,7 +1234,7 @@ component('x-grid', 'Input', function(e) {
 		inh_do_update()
 		if (opt.fields || opt.rows) {
 			update_internal_sizes()
-			update_row_error_tooltip_position()
+			update_error_tooltip_position()
 		}
 		update_view()
 		e.empty_rt.hidden = e.rows.length > 0
@@ -1412,10 +1434,11 @@ component('x-grid', 'Input', function(e) {
 		if (!hit_state)
 			if (ht_cell_test(mx, my)) {
 				hit_state = 'cell'
-				let row = e.rows[hit_ri]
 				e.update()
-				update_row_error_tooltip(row, true)
+				update_error_tooltip()
 			}
+		if (!hit_state)
+			update_error_tooltip()
 	}
 
 	function ht_col_test(mx, my) {
@@ -2042,8 +2065,6 @@ component('x-grid', 'Input', function(e) {
 		ht_col_resize(ev, mx, my)
 		ht_col(ev, mx, my)
 		ht_cell(ev, mx, my)
-		if (!hit_state)
-			update_row_error_tooltip(null)
 		if (hit_state)
 			return false
 	}

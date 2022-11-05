@@ -57,6 +57,7 @@ function row_widget(e, enabled_without_nav) {
 		let row = e.row
 		e.xoff()
 		e.readonly = e.nav && !e.nav.can_change_val(row)
+		e.disable('readonly', e.readonly && !e.set_readonly)
 		e.disable('no_nav', !e.nav && !enabled_without_nav)
 		e.xon()
 		e.do_update_row(row)
@@ -148,12 +149,18 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	}
 
 	e.can_actually_change_val = function() {
-		return !!(e.row || (e.nav && !e.nav.all_rows.length && e.nav.can_actually_add_rows()))
+		if (e.row)
+			return e.nav.can_change_val(e.row, e.field)
+		else if (!e.nav)
+			return enabled_without_nav
+		else if (!e.nav.all_rows.length)
+			return e.nav.can_actually_add_rows()
+		else
+			return false
 	}
 
 	function val_changed() {
 		bind_field(true)
-		e.disabled = !e.can_actually_change_val()
 		e.update()
 	}
 
@@ -293,7 +300,8 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		if (e.field) {
 			if (!e.row)
 				if (e.nav && !e.nav.all_rows.length)
-					e.nav.insert_rows(1, {focus_it: true})
+					if (e.nav.can_actually_change_val())
+						e.nav.insert_rows(1, {focus_it: true})
 			if (e.row) {
 				e.nav.set_cell_val(e.row, e.field, v, ev)
 				was_set = true
@@ -341,7 +349,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	e.do_update = function() {
 		let row = e.row
 		let field = e.field
-		let readonly = e.nav && !e.nav.can_change_val(row, field)
+		let readonly = !e.can_actually_change_val()
 		e.xoff()
 		e.disable('readonly', readonly && !e.set_readonly)
 		e.readonly = readonly
