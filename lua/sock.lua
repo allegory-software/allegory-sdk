@@ -352,6 +352,43 @@ local coro_safewrap = coro.safewrap
 local coro_transfer = coro.transfer
 local coro_finish   = coro.finish
 
+do
+	local debug_getinfo = debug.getinfo
+	local string_format = string.format
+	local function trace_line(level, t)
+		local info = debug_getinfo(level + 1, 'nS')
+		local line = string_format('%s: %d',
+			info.source:match('[^\\/]-$'), info.linedefined)
+		t[line] = (t[line] or 0) + 1
+	end
+
+	local coro_create0   = coro_create
+	local coro_safewrap0 = coro_safewrap
+	local counts
+	function trace_coro()
+		counts = {}
+		function coro_create(...)
+			trace_line(3, counts)
+			return coro_create0(...)
+		end
+		function coro_safewrap(...)
+			trace_line(3, counts)
+			return coro_safewrap0(...)
+		end
+	end
+
+	function coro_counts()
+		return cat(imap(sort(keys(counts), function(k1, k2)
+			if counts[k1] == counts[k2] then
+				return k1 < k2
+			end
+			return counts[k1] < counts[k2]
+		end), function(k)
+			return format('%5d %s', counts[k], k)
+		end), '\n')
+	end
+end
+
 assert(Windows or Linux or OSX, 'unsupported platform')
 
 local C = Windows and ffi.load'ws2_32' or C
