@@ -514,7 +514,7 @@ function logging.livelist()
 	return t
 end
 
-function logging.rpc:poll_livelist()
+function logging.rpc:log_livelist()
 	self.logvar('livelist', self.livelist())
 end
 
@@ -656,7 +656,7 @@ function logging.rpc:jit_onoff(on)
 end
 
 function logging.rpc:eval(s)
-	eval(s)
+	logging.logvar('eval_result', {pcall(eval, s)})
 end
 
 init(logging)
