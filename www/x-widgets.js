@@ -354,7 +354,7 @@ let component_props = function(e, iprops) {
 		return isobject(e) && e.iswidget && e.bound && e.can_select_widget != false ? e : null
 	}
 
-	e.props = {}
+	e.props = obj()
 
 	e.prop = function(prop, opt) {
 		opt = opt || {}
@@ -480,6 +480,7 @@ let component_props = function(e, iprops) {
 	e.set_prop = function(k, v) { e[k] = v } // stub
 	e.get_prop = k => e[k] // stub
 	e.get_prop_attrs = k => e.props[k] // stub
+	e.get_props = function() { return e.props }
 
 	e.save_prop = function(k) {
 		let v = e.get_prop(k)
@@ -487,10 +488,8 @@ let component_props = function(e, iprops) {
 	}
 	// prop serialization.
 
-	e.serialize_prop = function(k, v, even_if_default) {
-		let def = e.props[k]
-		if (def && !even_if_default && v === def.default)
-			return undefined // undefined is not stored.
+	e.serialize_prop = function(k, v) {
+		let def = e.get_prop_attrs(k)
 		if (def && def.serialize)
 			v = def.serialize(v)
 		else if (isobject(v) && v.serialize)
@@ -1076,8 +1075,8 @@ function serializable_widget(e) {
 			return e.id
 		let t = {type: e.type}
 		if (e.props)
-			for (let prop in e.props) {
-				let v = e.serialize_prop(prop, e[prop])
+			for (let prop in e.get_props()) {
+				let v = e.serialize_prop(prop, e.get_prop(prop))
 				if (v !== undefined)
 					t[prop] = v
 			}
@@ -2389,8 +2388,7 @@ component('x-split', 'Containers', function(e) {
 
 	let horiz, left
 
-	e.do_update = function() {
-
+	function update_dom() {
 		if (!e.item1) e.item1 = widget_placeholder({module: e.module})
 		if (!e.item2) e.item2 = widget_placeholder({module: e.module})
 
@@ -2412,9 +2410,18 @@ component('x-split', 'Containers', function(e) {
 		e.fixed_pane[horiz ? 'min_w' : 'min_h'] = e.min_size
 		e.auto_pane.min_w = null
 		e.auto_pane.min_h = null
+	}
 
+	e.do_update = function() {
+		update_dom()
 		document.fire('layout_changed')
 	}
+
+	e.xoff()
+	if (html_item1) e.item1 = html_item1
+	if (html_item2) e.item2 = html_item2
+	update_dom()
+	e.xon()
 
 	e.prop('orientation', {store: 'var', type: 'enum', enum_values: ['horizontal', 'vertical'], default: 'horizontal', attr: true})
 	e.prop('fixed_side' , {store: 'var', type: 'enum', enum_values: ['first', 'second'], default: 'first', attr: true})
@@ -2524,9 +2531,6 @@ component('x-split', 'Containers', function(e) {
 		e[ITEM] = new_item
 		e.update()
 	}
-
-	if (html_item1) e.item1 = html_item1
-	if (html_item2) e.item2 = html_item2
 
 })
 
