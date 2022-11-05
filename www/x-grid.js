@@ -1085,14 +1085,14 @@ component('x-grid', 'Input', function(e) {
 			let errors
 			if (row && field) {
 				errors = e.cell_errors(row, field)
-				if (!(errors && errors.length)) {
+				if (!(errors && errors.passed == false)) {
 					errors = null
 					field = null
 				}
 			}
 			if (!errors && row) {
 				errors = e.row_errors(row)
-				if (!(errors && errors.length)) {
+				if (!(errors && errors.passed == false)) {
 					errors = null
 					row = null
 					field = null
@@ -1100,7 +1100,10 @@ component('x-grid', 'Input', function(e) {
 			}
 			e.error_tooltip.begin_update()
 			if (errors) {
-				e.error_tooltip.text = errors.map(e => e.message).ul({class: 'x-error-list'}, true)
+				e.error_tooltip.text = errors
+					.filter(e => !e.passed)
+					.map(e => e.message)
+					.ul({class: 'x-error-list'}, true)
 				update_error_tooltip_position()
 			} else {
 				e.error_tooltip.update()
