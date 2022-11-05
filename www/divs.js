@@ -848,6 +848,10 @@ function broadcast(topic, ...args) {
 
 // geometry wrappers ---------------------------------------------------------
 
+function domrect(...args) {
+	return new DOMRect(...args)
+}
+
 function px(v) {
 	return typeof v == 'number' ? v+'px' : v
 }
@@ -890,27 +894,8 @@ method(DOMRectReadOnly, 'contains', function(x, y) {
 		(y >= this.top  && y <= this.bottom))
 })
 
-method(DOMRectReadOnly, 'clip', function(r) { // from box2d.lua
-	let x1 = this.x
-	let y1 = this.y
-	let w1 = this.w
-	let h1 = this.h
-	let x2 = r.x
-	let y2 = r.y
-	let w2 = r.w
-	let h2 = r.h
-	// intersect on each dimension
-	// intersect_segs(ax1, ax2, bx1, bx2) => [max(ax1, bx1), min(ax2, bx2)]
-	// intersect_segs(x1, x1+w1, x2, x2+w2)
-	// intersect_segs(y1, y1+h1, y2, y2+h2)
-	let _x1 = max(x1   , x2)
-	let _x2 = min(x1+w1, x2+w2)
-	let _y1 = max(y1   , y2)
-	let _y2 = min(y1+h1, y2+h2)
-	// clamp size
-	let _w = max(_x2-_x1, 0)
-	let _h = max(_y2-_y1, 0)
-	return new DOMRect(_x1, _y1, _w, _h)
+method(DOMRectReadOnly, 'clip', function(r) {
+	return domrect(...clip_rect(this.x, this.y, this.w, this.h, r.x, r.y, r.w, r.h))
 })
 
 {
@@ -921,8 +906,6 @@ window.on('resize', layout_changed)
 method(Window, 'rect', function() {
 	return new DOMRect(0, 0, this.innerWidth, this.innerHeight)
 })
-
-function domrect(...args) { return new DOMRect(...args) }
 
 // common state wrappers -----------------------------------------------------
 

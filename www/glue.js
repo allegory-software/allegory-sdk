@@ -127,6 +127,7 @@ COLORS
 	hsl_to_rgb(h, s, L) -> '#rrggbb'
 GEOMETRY
 	point_around(cx, cy, r, angle) -> [x, y]
+	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) -> [x, y, w, h]
 TIMERS
 	runafter(t, f) -> tm
 	runevery(t, f) -> tm
@@ -1289,6 +1290,21 @@ function point_around(cx, cy, r, angle) {
 		cx + cos(angle) * r,
 		cy + sin(angle) * r
 	]
+}
+
+function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) {
+	// intersect on each dimension
+	// intersect_segs(ax1, ax2, bx1, bx2) => [max(ax1, bx1), min(ax2, bx2)]
+	// intersect_segs(x1, x1+w1, x2, x2+w2)
+	// intersect_segs(y1, y1+h1, y2, y2+h2)
+	let _x1 = max(x1   , x2)
+	let _x2 = min(x1+w1, x2+w2)
+	let _y1 = max(y1   , y2)
+	let _y2 = min(y1+h1, y2+h2)
+	// clamp size
+	let _w = max(_x2-_x1, 0)
+	let _h = max(_y2-_y1, 0)
+	return [_x1, _y1, _w, _h]
 }
 
 // timers --------------------------------------------------------------------
