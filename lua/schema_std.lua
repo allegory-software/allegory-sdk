@@ -113,6 +113,7 @@ return function()
 
 	types.bin       = {type = 'binary', mysql_type = 'varbinary', tarantool_type = 'string'}
 	types.text      = {str, mysql_type = 'text', size = 0xffff, maxlen = 0xffff, utf8_bin}
+	types.longtext  = {str, mysql_type = 'longtext', size = 0xffffffff, maxlen = 0xffffffff, utf8_bin}
 	types.chr       = {str, mysql_type = 'char', padded = true}
 	types.blob      = {type = 'binary', mysql_type = 'mediumblob', size = 0xffffff, tarantool_type = 'string', tarantool_collation = 'none'}
 
