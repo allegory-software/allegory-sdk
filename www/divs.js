@@ -705,7 +705,8 @@ installers.resize = function() {
 let attr_change_observer = new MutationObserver(function(mutations) {
 	for (let mut of mutations)
 		if (mut.type == 'attributes')
-			mut.target.fire('attr_changed', mut.attributeName)
+			mut.target.fire('attr_changed', mut.attributeName,
+				mut.target.attr(mut.attributeName), mut.oldValue)
 })
 installers.attr_changed = function() {
 	if (this.__detecting_attr_changes)
@@ -715,7 +716,10 @@ installers.attr_changed = function() {
 	function bind(on) {
 		if (on) {
 			if (!observing) {
-				attr_change_observer.observe(this, {attributes: true})
+				attr_change_observer.observe(this, {
+					attributes: true,
+					attributeOldValue: true,
+				})
 				observing = true
 			}
 		} else {

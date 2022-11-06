@@ -310,7 +310,9 @@ calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
 fires:
-	document.'prop_changed' (e, prop, v1, v0)
+	^document.'prop_changed' (e, prop, v1, v0)
+	^window.'widget_id_changed' (e, id, id0)
+	^window.'ID0.id_changed' (e, id, id0)
 --------------------------------------------------------------------------- */
 
 let component_props = function(e, iprops) {
@@ -322,7 +324,7 @@ let component_props = function(e, iprops) {
 		document.fire('prop_changed', e, prop, v1, v0)
 	}
 
-	e.resolve_widget_link = function(id) { // stub
+	e.resolve_linked_widget = function(id) { // stub
 		let e = window[id]
 		return isobject(e) && e.iswidget && e.bound && e.can_select_widget != false ? e : null
 	}
@@ -411,45 +413,31 @@ let component_props = function(e, iprops) {
 
 		// id-based dynamic binding of external widgets.
 		if (opt.bind_id) {
-
-			/*
-			// NOTE: this is an alternative implementation based on the
-			// more general but non-optimal widget_links(e) mixin.
-			//
-			let ID = prop
-			let REF = opt.bind_id
-			prop_changed = function(e, k, v1, v0) {
-				fire_prop_changed(e, k, v1, v0)
-				e.set_widget_link(REF, v1)
-			}
-			if (e[ID] != null)
-				e.set_widget_link(REF, e[ID])
-			e.do_after('bind_linked_widget', function(k, te, on) {
-				if (k == REF)
-					e[REF] = on ? te : null
-			})
-			*/
-
 			let ID = prop
 			let REF = opt.bind_id
 			function widget_bind(te, on) {
 				if (e[ID] == te.id)
 					e[REF] = on ? te : null
 			}
+			function widget_id_changed(te, id1, id0) {
+				e[ID] = id1
+			}
 			let bind
 			function id_changed(id1, id0) {
 				if (e.bound)
-					e[REF] = e.resolve_widget_link(id1)
-				if (bind) {
+					e[REF] = e.resolve_linked_widget(id1)
+				if (id0 != null) {
 					e.on('bind', bind, false)
 					bind = null
+					window.on(id0+'.id_changed', widget_id_changed, false)
 				}
 				if (id1 != null) {
 					bind = function(on) {
-						e[REF] = on ? e.resolve_widget_link(e[ID]) : null
+						e[REF] = on ? e.resolve_linked_widget(e[ID]) : null
 						window.on(ID+'.bind', widget_bind, on)
 					}
 					e.on('bind', bind, true)
+					window.on(id1+'.id_changed', widget_id_changed, true)
 				}
 			}
 			prop_changed = function(e, k, v1, v0) {
@@ -458,7 +446,6 @@ let component_props = function(e, iprops) {
 			}
 			if (e[ID] != null)
 				id_changed(e[ID])
-
 		}
 
 		e.property(prop, get, set)
@@ -488,6 +475,13 @@ let component_props = function(e, iprops) {
 		return v
 	}
 
+	e.on('attr_changed', function(k, v, v0) {
+		if (k == 'id') {
+			window.fire('widget_id_changed', e, v, v0)
+			window.fire(v0+'.id_changed', e, v, v0)
+		}
+	})
+
 }
 
 }
@@ -496,25 +490,27 @@ let component_props = function(e, iprops) {
 // dynamic widget binding mixin
 // ---------------------------------------------------------------------------
 provides:
-	e.set_widget_link(key, id)
+	e.set_linked_widget(key, id)
 calls:
-	e.resolve_widget_link(id) -> te
+	e.resolve_linked_widget(id) -> te
 	e.bind_linked_widget(key, te, on)
+	e.linked_widget_id_changed(key, id1, id0)
 --------------------------------------------------------------------------- */
 
 function widget_links(e) {
 
 	e.bind_linked_widget = noop
+	e.linked_widget_id_changed = noop
 
 	let links = map() // k->te
 	let all_keys = map() // id->set(K)
 
-	e.set_widget_link = function(k, id1) {
-		let te1 = id1 != null && e.resolve_widget_link(id1)
+	e.set_linked_widget = function(k, id1) {
+		let te1 = id1 != null && e.resolve_linked_widget(id1)
 		let te0 = links.get(k)
 		if (te0) {
 			let id0 = te0.id
-			if (id0 == id1)
+			if (te1 == te0)
 				return
 			let keys = all_keys.get(id0)
 			keys.delete(k)
@@ -530,10 +526,10 @@ function widget_links(e) {
 			e.bind_linked_widget(k, te1, true)
 	}
 
-	e.widget_bind = function(te, on) { // ^window.widget_bind
+	function widget_bind(te, on) { // ^window.widget_bind
 		let keys = all_keys.get(te.id)
 		if (!keys) return
-		te = e.resolve_widget_link(te.id)
+		te = e.resolve_linked_widget(te.id)
 		if (!te) return
 		for (let k of keys) {
 			links.set(k, on ? te : null)
@@ -541,11 +537,18 @@ function widget_links(e) {
 		}
 	}
 
+	function widget_id_changed(te, id1, id0) { // ^window.widget_id_changed
+		let keys = all_keys.get(id0)
+		if (keys)
+			for (let k of keys)
+				e.linked_widget_id_changed(k, id1, id0)
+	}
+
 	e.do_after('do_bind', function(on) {
 		for (let [id, keys] of all_keys) {
 			for (let k of keys) {
 				if (on) {
-					let te = e.resolve_widget_link(id)
+					let te = e.resolve_linked_widget(id)
 					if (te) {
 						links.set(k, te)
 						e.bind_linked_widget(k, te, true)
@@ -559,7 +562,8 @@ function widget_links(e) {
 				}
 			}
 		}
-		window.on('widget_bind', e.widget_bind, on)
+		window.on('widget_bind', widget_bind, on)
+		window.on('widget_id_changed', widget_id_changed, on)
 	})
 
 }
