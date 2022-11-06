@@ -702,6 +702,34 @@ installers.resize = function() {
 		bind.call(this, true)
 }
 
+let attr_change_observer = new MutationObserver(function(mutations) {
+	for (let mut of mutations)
+		if (mut.type == 'attributes')
+			mut.target.fire('attr_changed', mut.attributeName)
+})
+installers.attr_changed = function() {
+	if (this.__detecting_attr_changes)
+		return
+	this.__detecting_attr_changes = true
+	let observing
+	function bind(on) {
+		if (on) {
+			if (!observing) {
+				attr_change_observer.observe(this, {attributes: true})
+				observing = true
+			}
+		} else {
+			if (observing) {
+				attr_change_observer.disconnect(this)
+				observing = false
+			}
+		}
+	}
+	this.on('bind', bind)
+	if (this.isConnected)
+		bind.call(this, true)
+}
+
 callers.click = function(ev, f) {
 	if (ev.target.effectively_disabled)
 		return false
