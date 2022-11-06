@@ -546,7 +546,7 @@ function shared_nav(id, opt) {
 
 function nav_widget(e) {
 
-	e.isnav = true // for resolver
+	e.isnav = true
 
 	e.prop('can_add_rows'            , {store: 'var', type: 'bool', default: true})
 	e.prop('can_remove_rows'         , {store: 'var', type: 'bool', default: true})
