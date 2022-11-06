@@ -2581,6 +2581,7 @@ function nav_widget(e) {
 			return
 		}
 		let ri = e.row_index(row, ev && ev.row_index)
+		let vals_changed, errors_changed
 		for (let [field, changes] of csc) {
 			let fi = e.field_index(field)
 			e.do_update_cell_state(ri, fi, changes, ev)
@@ -2590,6 +2591,10 @@ function nav_widget(e) {
 				e.fire('focused_row_cell_state_changed', row, field, changes, ev)
 				e.fire('focused_row_cell_state_changed_for_'+field.name, row, field, changes, ev)
 			}
+			if (changes.input_val)
+				vals_changed = true
+			if (changes.errors)
+				errors_changed = true
 		}
 		let row_state_changed = count_keys(rsc, 1)
 		if (row_state_changed) {
@@ -2599,14 +2604,13 @@ function nav_widget(e) {
 				e.fire('focused_row_state_changed', row, rsc, ev)
 		}
 		let changed = !!(row_state_changed || csc.size)
-		let vals_changed = csc.input_val
 		csc = null
 		rsc = null
 		row = null
 		ev = null
 		depth = null
 		if (changed)
-			e.update({state: true, vals: vals_changed})
+			e.update({state: true, vals: vals_changed, errors: errors_changed})
 		return changed
 	}
 
