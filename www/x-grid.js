@@ -1239,6 +1239,8 @@ component('x-grid', 'Input', function(e) {
 			update_internal_sizes()
 			update_error_tooltip_position()
 		}
+		if (opt.errors)
+			update_error_tooltip()
 		update_view()
 		e.empty_rt.hidden = e.rows.length > 0
 		if (opt.enter_edit)
