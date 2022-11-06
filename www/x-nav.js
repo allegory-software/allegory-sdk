@@ -2602,6 +2602,8 @@ function nav_widget(e) {
 			e.fire('row_state_changed', row, rsc, ev)
 			if (row == e.focused_row)
 				e.fire('focused_row_state_changed', row, rsc, ev)
+			if (rsc.errors)
+				errors_changed = true
 		}
 		let changed = !!(row_state_changed || csc.size)
 		csc = null
