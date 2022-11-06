@@ -1268,7 +1268,7 @@ component('x-tooltip', function(e) {
 		e.popup(e.target, e.side, e.align, e.px, e.py, e.pw, e.ph)
 	}
 
-	e.popup_visible = function(target) {
+	e.popup_visible = function(target) { // popup protocol, see divs.js
 		return !!(!e.check || e.check(target))
 	}
 
