@@ -50,6 +50,7 @@
 	--x-p               : #444;  /* multiline text on normal backgrounds */
 	--x-fg-inverted     : #fff;  /* text on inverted backgrounds */
 	--x-bg              : #fff;  /* bg for regions that need to be opaque */
+	--x-bg-alt          : #eee;  /* bg for regions that need to be opaque */
 	--x-bg-moving       : #eeeeeeaa;
 	--x-bg-popup        : #fff;  /* bg for popups and inline grid editors */
 	--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
@@ -2585,24 +2586,6 @@ x-tabs-fixed-header {
 	cursor: default;           /* don't show caret over text */
 }
 
-body[large] {
-	font-size                 : 15px;
-	--x-grid-cell-baseline    : 15px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 20px; /* PIXELS ONLY! */
-}
-
-body[medium] {
-	font-size                 : 13px;
-	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
-}
-
-body[small] {
-	font-size                 : 11px;
-	--x-grid-cell-baseline    : 11px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
-}
-
 .x-vgrid {
 	flex-flow: row;
 }
@@ -3143,6 +3126,7 @@ x-prop-layers-inspector > .x-grid-header {
 	--x-fg-inverted          : #fff;
 	--x-p                    : #bbb;
 	--x-bg                   : #0d1117;
+	--x-bg-alt               : #090b0f;
 	--x-bg-moving            : #141a24aa;
 	--x-fg-info              : var(--x-fg-inverted);
 	--x-bg-popup             : #1d2532;
@@ -3257,5 +3241,46 @@ body:not([theme=dark]) [theme=dark] {
 [thin-scrollbars] ::-webkit-scrollbar-thumb:hover
 {
 	background-color: var(--x-fg-disabled);
+}
+
+/* large ------------------------------------------------------------------ */
+
+body[large] {
+	font-size                  : 15px;
+	--x-grid-cell-h            : 38px;
+	--x-grid-cell-baseline     : 15px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height  : 20px; /* PIXELS ONLY! */
+	--x-padding-y-input-top    : 8px;
+	--x-padding-y-input-bottom : 2px;
+	--x-padding-x-input        : 10px;
+}
+[large] .x-form {
+	grid-gap: 6px;
+	padding:  10px;
+}
+[large] .x-grid {
+	margin: 10px;
+}
+[large] .x-split-sizer {
+	min-width : 1px;
+	min-height: 1px;
+}
+[large] .x-split-sizer::before {
+	display: none;
+}
+[large] .x-editbox.with-label > .x-focus-box {
+	padding-top: 28px;
+}
+
+body[medium] {
+	font-size                 : 13px;
+	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
+}
+
+body[small] {
+	font-size                 : 11px;
+	--x-grid-cell-baseline    : 11px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
 }
 

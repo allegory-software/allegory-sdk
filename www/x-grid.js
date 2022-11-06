@@ -49,6 +49,7 @@ component('x-grid', 'Input', function(e) {
 		e.hcell_border_color         = css.prop('--x-border-light')
 		e.cell_border_color          = css.prop('--x-faint')
 		e.bg                         = css.prop('--x-bg')
+		e.bg_alt                     = css.prop('--x-bg-alt')
 		e.fg                         = css.prop('--x-fg')
 		e.fg_disabled                = css.prop('--x-fg-disabled')
 		e.fg_search                  = css.prop('--x-fg-search')
@@ -674,6 +675,8 @@ component('x-grid', 'Input', function(e) {
 		return cx.measured_width
 	}
 
+	let draw_cell_x
+	let draw_cell_w
 	function draw_cell_at(row, ri, fi, x, y, w, h, draw_stage) {
 
 		let field = e.fields[fi]
@@ -703,8 +706,14 @@ component('x-grid', 'Input', function(e) {
 		let full_width = !draw_stage && ((row_focused && field == e.focused_field) || hovering)
 
 		// geometry
-		if (full_width)
-			w = max(w, measure_cell_width(row, field) + 2*px)
+		if (full_width) {
+			let w1 = max(w, measure_cell_width(row, field) + 2*px)
+			if (field.align == 'right')
+				x -= (w1 - w)
+			else if (field.align == 'center')
+				x -= round((w1 - w) / 2)
+			w = w1
+		}
 
 		let indent_x = 0
 		let collapsed
@@ -767,8 +776,11 @@ component('x-grid', 'Input', function(e) {
 		else if (row_focused)
 			bg = e.row_bg_focused
 
-		if (full_width && !bg)
-			bg = e.bg
+		if (!bg)
+			if ((ri & 1) == 0)
+				bg = e.bg_alt
+			else if (full_width)
+				bg = e.bg
 
 		if (is_null || is_empty || disabled)
 			fg = e.fg_disabled
@@ -831,7 +843,8 @@ component('x-grid', 'Input', function(e) {
 		//		 horiz ? null : xy,
 		//		!horiz ? null : xy, hit_indent)
 
-		return w
+		draw_cell_x = x
+		draw_cell_w = w
 	}
 
 	function draw_hover_outline(x, y, w, h) {
@@ -890,7 +903,7 @@ component('x-grid', 'Input', function(e) {
 	function draw_cell(ri, fi, draw_stage) {
 		let [x, y, w, h] = cell_rect(ri, fi, draw_stage)
 		let row = e.rows[ri]
-		return draw_cell_at(row, ri, fi, x, y, w, h, draw_stage)
+		draw_cell_at(row, ri, fi, x, y, w, h, draw_stage)
 	}
 
 	function draw_cells_range(rows, ri1, ri2, fi1, fi2, draw_stage) {
@@ -915,7 +928,6 @@ component('x-grid', 'Input', function(e) {
 				foc_cell = null
 
 		}
-		let hit_cell_w
 		let skip_moving_col = hit_state == 'col_moving' && draw_stage == 'non_moving_cols'
 
 		for (let ri = ri1; ri < ri2; ri++) {
@@ -946,8 +958,10 @@ component('x-grid', 'Input', function(e) {
 			draw_cell(foc_ri, foc_fi, draw_stage)
 
 		// hit_cell can overlap foc_cell, so we draw it after it.
+		draw_cell_x = null
+		draw_cell_w = null
 		if (hit_cell && hit_ri >= ri1 && hit_ri <= ri2 && hit_fi >= fi1 && hit_fi <= fi2)
-			hit_cell_w = draw_cell(hit_ri, hit_fi, draw_stage)
+			draw_cell(hit_ri, hit_fi, draw_stage)
 
 		for (let ri = ri1; ri < ri2; ri++) {
 			let row = rows[ri]
@@ -958,9 +972,10 @@ component('x-grid', 'Input', function(e) {
 			}
 		}
 
-		if (hit_cell_w != null) {
+		if (draw_cell_w != null) {
 			let [x, y, w, h] = cell_rect(hit_ri, hit_fi, draw_stage)
-			w = hit_cell_w
+			x = draw_cell_x
+			w = draw_cell_w
 			draw_hover_outline(x, y, w, h)
 		}
 
@@ -1433,8 +1448,10 @@ component('x-grid', 'Input', function(e) {
 		if (!hit_state)
 			if (ht_cell_test(mx, my)) {
 				hit_state = 'cell'
-				e.update()
-				update_error_tooltip()
+				if (ev) {
+					e.update()
+					update_error_tooltip()
+				}
 			}
 		if (!hit_state)
 			update_error_tooltip()
