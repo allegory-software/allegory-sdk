@@ -1112,10 +1112,8 @@ function nav_widget(e) {
 		let cols = cols_array()
 		let col = cols.remove(fi)
 		cols.insert(insert_fi, col)
-		e.begin_update()
 		e.cols = cols_from_array(cols)
 		e.update({fields: true}) // in case cols haven't changed.
-		e.end_update()
 	}
 
 	// param nav --------------------------------------------------------------
@@ -1163,12 +1161,10 @@ function nav_widget(e) {
 		if (!init_param_vals())
 			return
 		if (!e.rowset_url) { // re-filter and re-focus.
-			e.begin_update()
 			e.unfocus_focused_cell({cancel: true})
 			init_rows()
 			e.update({rows: true})
 			e.focus_cell()
-			e.end_update()
 		} else {
 			e.reload()
 		}
@@ -1330,10 +1326,8 @@ function nav_widget(e) {
 	function reinit_rows() {
 		let fs = e.refocus_state('row')
 		init_rows()
-		e.begin_update()
 		e.update({rows: true})
 		e.refocus(fs)
-		e.end_update()
 	}
 
 	// editing utils ----------------------------------------------------------
@@ -1667,8 +1661,6 @@ function nav_widget(e) {
 			qs_changed = true
 		}
 
-		e.begin_update()
-
 		if (row_changed || sel_rows_changed || field_changed || qs_changed)
 			e.update({state: true})
 
@@ -1679,8 +1671,6 @@ function nav_widget(e) {
 		if (ev.make_visible != false)
 			if (e.focused_row)
 				e.update({scroll_to_focused_cell: true})
-
-		e.end_update()
 
 		return true
 	}
@@ -3327,8 +3317,6 @@ function nav_widget(e) {
 				return 0
 		}
 
-		e.begin_update()
-
 		let rows_added, rows_updated
 		let added_rows = set()
 
@@ -3447,8 +3435,6 @@ function nav_widget(e) {
 				if (e.save_on_add_row)
 					e.save(ev)
 
-		e.end_update()
-
 		return added_rows.size
 	}
 
@@ -3493,8 +3479,6 @@ function nav_widget(e) {
 					'Are you sure you want to delete {0:record:records}?',
 						rows_to_remove.length))
 			) return false
-
-		e.begin_update()
 
 		let removed_rows = set()
 		let marked_rows = set()
@@ -3583,8 +3567,6 @@ function nav_widget(e) {
 			if (e.save_on_remove_row)
 				e.save(ev)
 
-		e.end_update()
-
 		return !!(rows_changed || removed_rows.size)
 	}
 
@@ -3623,8 +3605,6 @@ function nav_widget(e) {
 		if (e.is_tree)
 			return false
 
-		e.begin_update()
-
 		let rows_added = e.insert_rows(rs.rows, {
 				from_server: true,
 				diff_merge: true,
@@ -3646,8 +3626,6 @@ function nav_widget(e) {
 			rows: rows_added || rm_rows.length || undefined,
 			vals: rows_updated || undefined,
 		})
-
-		e.end_update()
 
 		return true
 	}
@@ -3810,8 +3788,6 @@ function nav_widget(e) {
 
 			update_row_index()
 
-			e.begin_update()
-
 			update_pos_field(old_parent_row, parent_row)
 
 			rows_moved = true
@@ -3819,9 +3795,6 @@ function nav_widget(e) {
 				e.save(ev)
 
 			e.update({rows: true})
-
-			e.end_update()
-
 		}
 
 		state.finish_up = function() {
@@ -3880,8 +3853,6 @@ function nav_widget(e) {
 
 		abort_all_requests()
 
-		e.begin_update()
-
 		let fs = e.refocus_state('val') || e.refocus_state('pk')
 		e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
 
@@ -3890,7 +3861,6 @@ function nav_widget(e) {
 		e.update({fields: true, rows: true})
 		e.refocus(fs)
 
-		e.end_update()
 		e.fire('reset', ev)
 
 	}
@@ -4106,8 +4076,6 @@ function nav_widget(e) {
 	}
 
 	function apply_result(result, source_rows, ev) {
-		e.begin_update()
-
 		let rows_to_remove = []
 		for (let i = 0; i < result.rows.length; i++) {
 			let rt = result.rows[i]
@@ -4147,8 +4115,6 @@ function nav_widget(e) {
 
 		if (result.sql_trace && result.sql_trace.length)
 			debug(result.sql_trace.join('\n'))
-
-		e.end_update()
 
 		notify_errors(ev)
 	}
@@ -4240,8 +4206,6 @@ function nav_widget(e) {
 		if (!e.changed_rows)
 			return
 
-		e.begin_update()
-
 		abort_all_requests()
 
 		let rows_to_remove = []
@@ -4262,15 +4226,11 @@ function nav_widget(e) {
 		e.changed_rows = null
 		rows_moved = false
 		e.update({state: true})
-
-		e.end_update()
 	}
 
 	e.commit_changes = function() {
 		if (!e.changed_rows)
 			return
-
-		e.begin_update()
 
 		abort_all_requests()
 
@@ -4292,8 +4252,6 @@ function nav_widget(e) {
 		e.changed_rows = null
 		rows_moved = false
 		e.update({state: true})
-
-		e.end_update()
 	}
 
 	// row (de)serialization --------------------------------------------------

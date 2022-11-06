@@ -135,10 +135,8 @@ component('x-grid', 'Input', function(e) {
 		horiz = !v
 		e.class('x-hgrid',  horiz)
 		e.class('x-vgrid', !horiz)
-		e.begin_update()
 		e.must_be_flat = !horiz
 		theme_changed()
-		e.end_update()
 	}
 	e.prop('vertical', {type: 'bool', attr: true, slot: 'user'})
 
@@ -1056,10 +1054,8 @@ component('x-grid', 'Input', function(e) {
 			let r = field
 				? domrect(...cell_visible_rect(row, field))
 				: domrect(...row_visible_rect(row))
-			e.error_tooltip.begin_update()
 			e.error_tooltip.target_rect = r
 			e.error_tooltip.side = horiz ? 'top' : 'right'
-			e.error_tooltip.end_update()
 		}
 
 		function update_error_tooltip() {
@@ -1098,7 +1094,6 @@ component('x-grid', 'Input', function(e) {
 					field = null
 				}
 			}
-			e.error_tooltip.begin_update()
 			if (errors) {
 				e.error_tooltip.text = errors
 					.filter(e => !e.passed)
@@ -1108,7 +1103,6 @@ component('x-grid', 'Input', function(e) {
 			} else {
 				e.error_tooltip.update()
 			}
-			e.error_tooltip.end_update()
 		}
 
 		e.do_focus_cell = function(row, field) {

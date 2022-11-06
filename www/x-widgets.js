@@ -48,8 +48,11 @@ publishes:
 	e.iswidget: t
 	e.type
 	e.initialized: t|f
+	e.updating
+	e.update([opt])
 calls:
 	e.init()
+	e.do_update([opt])
 fires:
 	^window.'widget_bind' (e, on)
 	^window.'ID.bind' (e, on)
@@ -112,6 +115,39 @@ function component(tag, category, cons) {
 
 	function initialize(e, ...args) {
 
+		// async updating with animation frames.
+		{
+		e.do_update = noop
+		let opt
+
+		var update_frame = raf_wrap(function() {
+			e.updating = true
+			e.do_update(opt)
+			e.updating = false
+			opt = null
+		})
+
+		e.update = function(opt1) {
+			if (!e.bound)
+				return
+			if (e.updating) { // update() called inside do_update()
+				pr('nested update() call')
+				trace()
+				return
+			}
+			if (opt)
+				if (opt1)
+					assign_opt(opt, opt1)
+				else
+					opt.val = true
+			else if (opt1)
+				opt = opt1
+			else
+				opt = {val: true}
+			update_frame()
+		}
+		}
+
 		e.bool_attr('_bind', true)
 
 		e.do_bind = function(on) {
@@ -132,11 +168,11 @@ function component(tag, category, cons) {
 						debug((dt).dec().padStart(3, ' ')+'ms', this.debug_name())
 				}
 
-				this.end_update()
+				e.update()
 
 			} else {
 
-				this.begin_update()
+				update_frame.cancel()
 
 				this.fire('bind', false)
 				if (this.id) {
@@ -146,11 +182,6 @@ function component(tag, category, cons) {
 
 			}
 		}
-
-		component_deferred_updating(e)
-
-		e.begin_update() // bind(true) calls end_update().
-		e.update() // ...deferred on first call to bind().
 
 		if (DEBUG_ATTACH_TIME)
 			e.debug_name = function(prefix) {
@@ -253,64 +284,6 @@ component.create = function(t, e0) {
 }
 
 /* ---------------------------------------------------------------------------
-// component partial deferred updating mixin
-// ---------------------------------------------------------------------------
-publishes:
-	e.updating
-	e.begin_update()
-	e.end_update()
-	e.update([opt])
-calls:
-	e.do_update([opt])
---------------------------------------------------------------------------- */
-
-let component_deferred_updating = function(e) {
-
-	e.updating = 0
-
-	e.begin_update = function() {
-		e.updating++
-		update_async.cancel()
-	}
-
-	e.end_update = function() {
-		assert(e.updating)
-		e.updating--
-		if (!e.updating)
-			e.update()
-	}
-
-	e.do_update = noop
-
-	let opt, in_update
-
-	let update_async = raf_wrap(function() {
-		in_update = true
-		e.do_update(opt)
-		in_update = false
-		opt = null
-	})
-
-	e.update = function(opt1) {
-		if (in_update)
-			return
-		if (opt)
-			if (opt1)
-				assign_opt(opt, opt1)
-			else
-				opt.val = true
-		else if (opt1)
-			opt = opt1
-		else
-			opt = {val: true}
-		if (e.updating)
-			return
-		update_async()
-	}
-
-}
-
-/* ---------------------------------------------------------------------------
 // component property system mixin
 // ---------------------------------------------------------------------------
 uses:
@@ -384,14 +357,13 @@ let component_props = function(e, iprops) {
 				if (v1 === v0)
 					return
 				v = v1
-				e.begin_update()
 				e[setter](v1, v0)
 				if (set_attr)
 					set_attr(v1)
 				if (!priv)
 					prop_changed(e, prop, v1, v0)
-				e.update()
-				e.end_update()
+				if (!e.updating)
+					e.update()
 			}
 			if (set_attr && !e.hasattr(prop))
 				set_attr(dv)
@@ -413,12 +385,11 @@ let component_props = function(e, iprops) {
 				v = get.call(e) // take it again (browser only sets valid values)
 				if (v == v0)
 					return
-				e.begin_update()
 				e[setter](v, v0)
 				if (!priv)
 					prop_changed(e, prop, v, v0)
-				e.update()
-				e.end_update()
+				if (!e.updating)
+					e.update()
 			}
 		} else {
 			assert(!('default' in opt))
@@ -430,12 +401,11 @@ let component_props = function(e, iprops) {
 				v = convert(v, v0)
 				if (v === v0)
 					return
-				e.begin_update()
 				e[setter](v, v0)
 				if (!priv)
 					prop_changed(e, prop, v, v0)
-				e.update()
-				e.end_update()
+				if (!e.updating)
+					e.update()
 			}
 		}
 
@@ -499,19 +469,16 @@ let component_props = function(e, iprops) {
 	}
 
 	// dynamic properties.
-
 	e.set_prop = function(k, v) { e[k] = v } // stub
 	e.get_prop = k => e[k] // stub
 	e.get_prop_attrs = k => e.props[k] // stub
 	e.get_props = function() { return e.props }
-
 	e.save_prop = function(k) {
 		let v = e.get_prop(k)
 		fire_prop_changed(e, k, v, v)
 	}
 
 	// prop serialization.
-
 	e.serialize_prop = function(k, v) {
 		let pa = e.get_prop_attrs(k)
 		if (pa && pa.serialize)
@@ -1422,7 +1389,8 @@ component('x-tooltip', function(e) {
 
 	override_property_setter(e, 'hidden', function(inherited, v) {
 		inherited.call(this, v)
-		e.update()
+		if (!e.updating)
+			e.update()
 	})
 
 	e.property('visible',
@@ -2985,7 +2953,6 @@ component('x-toolbox', function(e) {
 		return e.capture_pointer(ev, function(ev, mx, my) {
 			let dx = mx - mx0
 			let dy = my - my0
-			e.begin_update()
 			e.update({input: e})
 			let x1 = r.x1
 			let y1 = r.y1
@@ -3001,7 +2968,6 @@ component('x-toolbox', function(e) {
 			e.py = my2py(y1, h)
 			e.pw = w
 			e.ph = h
-			e.end_update()
 		}, function() {
 			down = false
 		})
@@ -3037,11 +3003,9 @@ component('x-toolbox', function(e) {
 			}
 			mx -= dx
 			my -= dy
-			e.begin_update()
 			e.update({input: e})
 			e.px = mx2px(mx, r.w)
 			e.py = my2py(my, r.h)
-			e.end_update()
 		}, function() {
 			down = false
 		})

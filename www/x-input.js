@@ -3660,7 +3660,6 @@ component('x-chart', 'Input', function(e) {
 					check: function() { return this.hit }
 				})
 				tt.side = rotate ? 'right' : 'top'
-				tt.begin_update()
 				tt.text = sum_label('x-chart-tooltip-label', TC(xg.text), xg.sum)
 				let tm = cx.getTransform()
 				let p1 = new DOMPoint(x    , y    ).matrixTransform(tm)
@@ -3676,7 +3675,6 @@ component('x-chart', 'Input', function(e) {
 				tt.pw = x2 - x1
 				tt.ph = y2 - y1
 				tt.hit = true
-				tt.end_update()
 				return
 			}
 			if (tt) {

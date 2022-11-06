@@ -132,7 +132,6 @@ function init_xmodule(opt) {
 			opt.module = opt.id.match(/^[^_\d]+/)[0]
 		}
 		e.xoff()
-		e.begin_update()
 
 		// set static vals.
 		for (let k in opt)
@@ -173,7 +172,6 @@ function init_xmodule(opt) {
 				e.set_prop(k, pv[k])
 		}
 
-		e.end_update()
 		e.xon()
 	}
 
@@ -183,7 +181,6 @@ function init_xmodule(opt) {
 		assert(e.id)
 		e.xmodule_generation = generation
 		e.xoff()
-		e.begin_update()
 		let pv = prop_vals(e.id)
 		let pv0 = attr(e, '__pv0') // initial vals of overridden props.
 		// restore prop vals that are not present in this override.
@@ -198,7 +195,6 @@ function init_xmodule(opt) {
 				pv0[k] = e.get_prop(k)
 			e.set_prop(k, pv[k])
 		}
-		e.end_update()
 		e.xon()
 	}
 
@@ -544,7 +540,6 @@ component('x-prop-layers-inspector', function(e) {
 		xmodule.selected_module = sel_module
 		xmodule.selected_slot   = sel_slot
 
-		e.begin_update()
 		let active = true
 		for (let row of e.rows) {
 			set_layer(row, active)
@@ -557,7 +552,6 @@ component('x-prop-layers-inspector', function(e) {
 				active = false
 		}
 		e.update({vals: true})
-		e.end_update()
 
 		if (e.state_tooltip)
 			e.state_tooltip.close()
