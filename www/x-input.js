@@ -2970,10 +2970,11 @@ component('x-image', 'Input', function(e) {
 
 component('x-mu-row', 'Input', function(e) {
 
-	assert(e.at[0] && e.at[0].tag == 'script',
-		'mustache widget is missing the <script> tag')
+	e.template_string = e.at[0] && e.at[0].tag == 'script'
+		? e.at[0].html // text template as text inside <script> tag
+		: e.html // text template as dom tree, convert it back to html
 
-	e.template_string = e.at[0].html
+	e.clear()
 
 	row_widget(e)
 
@@ -3773,14 +3774,13 @@ component('x-chart', 'Input', function(e) {
 // mustache widget mixin
 // ---------------------------------------------------------------------------
 
-// TODO: convert this into a row_widget
-
 component('x-mu', function(e) {
 
-	assert(e.at[0] && e.at[0].tag == 'script',
-		'mustache widget is missing the <script> tag')
+	e.template_string = e.at[0] && e.at[0].tag == 'script'
+		? e.at[0].html // text template as text inside <script> tag
+		: e.html // text template as dom tree, convert it back to html
 
-	e.template_string = e.at[0].html
+	e.clear()
 
 	e.class('x-mu')
 
@@ -3807,9 +3807,6 @@ component('x-mu', function(e) {
 			e[ev](...args)
 
 	}
-
-	// function progress()
-
 
 	let last_data_url, placeholder_set
 
