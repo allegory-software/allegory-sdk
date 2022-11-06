@@ -349,7 +349,7 @@ let component_props = function(e, iprops) {
 		document.fire('prop_changed', e, prop, v1, v0)
 	}
 
-	function resolve_widget_id(id) {
+	e.resolve_widget_link = function(id) { // stub
 		let e = window[id]
 		return isobject(e) && e.iswidget && e.bound && e.can_select_widget != false ? e : null
 	}
@@ -439,33 +439,56 @@ let component_props = function(e, iprops) {
 			}
 		}
 
-		// id-based dynamic binding.
+		// id-based dynamic binding of external widgets.
 		if (opt.bind_id) {
-			let resolve = opt.resolve || resolve_widget_id
+
+			/*
+			// NOTE: this is an alternative implementation based on the
+			// more general but non-optimal widget_links(e) mixin.
+			//
+			let ID = prop
+			let REF = opt.bind_id
+			prop_changed = function(e, k, v1, v0) {
+				fire_prop_changed(e, k, v1, v0)
+				e.set_widget_link(REF, v1)
+			}
+			if (e[ID] != null)
+				e.set_widget_link(REF, e[ID])
+			e.do_after('bind_linked_widget', function(k, te, on) {
+				if (k == REF)
+					e[REF] = on ? te : null
+			})
+			*/
+
 			let ID = prop
 			let REF = opt.bind_id
 			function widget_bind(te, on) {
 				if (e[ID] == te.id)
 					e[REF] = on ? te : null
 			}
-			function bind(on) {
-				e[REF] = on ? resolve(e[ID]) : null
-				window.on('widget_bind', widget_bind, on)
-			}
+			let bind
 			function id_changed(id1, id0) {
 				if (e.bound)
-					e[REF] = resolve(id1)
-				if ((id1 != null) != (id0 != null)) {
-					e.on('bind', bind, id1 != null)
+					e[REF] = e.resolve_widget_link(id1)
+				if (bind) {
+					e.on('bind', bind, false)
+					bind = null
+				}
+				if (id1 != null) {
+					bind = function(on) {
+						e[REF] = on ? e.resolve_widget_link(e[ID]) : null
+						window.on(ID+'.bind', widget_bind, on)
+					}
+					e.on('bind', bind, true)
 				}
 			}
 			prop_changed = function(e, k, v1, v0) {
 				fire_prop_changed(e, k, v1, v0)
-				if (k == ID)
-					id_changed(v1, v0)
+				id_changed(v1, v0)
 			}
 			if (e[ID] != null)
 				id_changed(e[ID])
+
 		}
 
 		e.property(prop, get, set)
@@ -486,12 +509,13 @@ let component_props = function(e, iprops) {
 		let v = e.get_prop(k)
 		fire_prop_changed(e, k, v, v)
 	}
+
 	// prop serialization.
 
 	e.serialize_prop = function(k, v) {
-		let def = e.get_prop_attrs(k)
-		if (def && def.serialize)
-			v = def.serialize(v)
+		let pa = e.get_prop_attrs(k)
+		if (pa && pa.serialize)
+			v = pa.serialize(v)
 		else if (isobject(v) && v.serialize)
 			v = v.serialize()
 		return v
@@ -500,6 +524,79 @@ let component_props = function(e, iprops) {
 }
 
 }
+
+/* ---------------------------------------------------------------------------
+// dynamic widget binding mixin
+// ---------------------------------------------------------------------------
+provides:
+	e.set_widget_link(key, id)
+calls:
+	e.resolve_widget_link(id) -> te
+	e.bind_linked_widget(key, te, on)
+--------------------------------------------------------------------------- */
+
+function widget_links(e) {
+
+	e.bind_linked_widget = noop
+
+	let links = map() // k->te
+	let all_keys = map() // id->set(K)
+
+	e.set_widget_link = function(k, id1) {
+		let te1 = id1 != null && e.resolve_widget_link(id1)
+		let te0 = links.get(k)
+		if (te0) {
+			let id0 = te0.id
+			if (id0 == id1)
+				return
+			let keys = all_keys.get(id0)
+			keys.delete(k)
+			if (!keys.size)
+				all_keys.delete(id0)
+			if (te0.bound)
+				e.bind_linked_widget(k, te0, false)
+		}
+		links.set(k, te1)
+		if (id1)
+			attr(all_keys, id1, set).add(k)
+		if (te1)
+			e.bind_linked_widget(k, te1, true)
+	}
+
+	e.widget_bind = function(te, on) { // ^window.widget_bind
+		let keys = all_keys.get(te.id)
+		if (!keys) return
+		te = e.resolve_widget_link(te.id)
+		if (!te) return
+		for (let k of keys) {
+			links.set(k, on ? te : null)
+			e.bind_linked_widget(k, te, on)
+		}
+	}
+
+	e.do_after('do_bind', function(on) {
+		for (let [id, keys] of all_keys) {
+			for (let k of keys) {
+				if (on) {
+					let te = e.resolve_widget_link(id)
+					if (te) {
+						links.set(k, te)
+						e.bind_linked_widget(k, te, true)
+					}
+				} else {
+					let te = links.get(k)
+					if (te) {
+						links.set(k, null)
+						e.bind_linked_widget(k, te, false)
+					}
+				}
+			}
+		}
+		window.on('widget_bind', e.widget_bind, on)
+	})
+
+}
+
 
 /* ---------------------------------------------------------------------------
 // undo stack, selected widgets, editing widget and clipboard.
