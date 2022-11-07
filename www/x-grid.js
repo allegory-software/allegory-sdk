@@ -37,12 +37,11 @@ component('x-grid', 'Input', function(e) {
 		// css geometry
 		e.text_font_family = css['font-family']
 		e.icon_font_family = 'fontawesome'
-		e.font_size   = num(css['font-size'])
-		e.padding_x   = num(css.prop('--x-padding-x-input'))
-		e.padding_y1  = num(css.prop('--x-padding-y-input-top'))
-		e.padding_y2  = num(css.prop('--x-padding-y-input-bottom'))
-		e.cell_h      = num(css.prop('--x-grid-cell-h'))
-		e.header_h    = num(css.prop('--x-grid-header-h'))
+		e.font_size = num(css['font-size'])
+		e.padding_x = num(css.prop('--x-padding-x-input'))
+		e.padding_y = num(css.prop('--x-padding-y-input'))
+		e.cell_h    = num(css.prop('--x-grid-cell-h'))
+		e.header_h  = num(css.prop('--x-grid-header-h'))
 
 		// css colors
 		e.cell_border_width          = num(css.prop('--x-border-width-item'))
@@ -579,9 +578,8 @@ component('x-grid', 'Input', function(e) {
 		let cx = hcx
 
 		// static geometry
-		let px  = e.padding_x
-		let py1 = e.padding_y1
-		let py2 = e.padding_y2
+		let px = e.padding_x
+		let py = e.padding_y
 		let b = e.cell_border_width
 
 		cx.save()
@@ -617,7 +615,7 @@ component('x-grid', 'Input', function(e) {
 			let iw = e.font_size * 1.5
 			cx.textAlign = right ? 'left' : 'right'
 			cx.fillStyle = e.fg
-			cx.fillText(icon_char, x, cx.baseline + py1)
+			cx.fillText(icon_char, x, cx.baseline + py)
 			w -= iw
 			if (right)
 				cx.translate(iw, 0)
@@ -625,9 +623,9 @@ component('x-grid', 'Input', function(e) {
 
 		// clip
 		cx.beginPath()
-		cx.translate(px, py1)
-		let cw = w - px  - px
-		let ch = h - py1 - py2
+		cx.translate(px, py)
+		let cw = w - px - px
+		let ch = h - py - py
 		cx.rect(0, 0, cw, ch)
 		cx.clip()
 
@@ -683,10 +681,9 @@ component('x-grid', 'Input', function(e) {
 		let input_val = e.cell_input_val(row, field)
 
 		// static geometry
-		let b   = e.cell_border_width
-		let px  = e.padding_x  + b
-		let py1 = e.padding_y1 + b
-		let py2 = e.padding_y2
+		let b  = e.cell_border_width
+		let px = e.padding_x + b
+		let py = e.padding_y + b
 
 		// state
 		let grid_focused = e.focused
@@ -810,9 +807,9 @@ component('x-grid', 'Input', function(e) {
 
 			// clip
 			cx.beginPath()
-			cx.translate(px, py1)
-			let cw = w - px  - px
-			let ch = h - py1 - py2
+			cx.translate(px, py)
+			let cw = w - px - px
+			let ch = h - py - py
 			cx.cw = cw
 			cx.ch = ch
 			cx.rect(0, 0, cw, ch)

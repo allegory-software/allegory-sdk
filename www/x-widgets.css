@@ -8,6 +8,21 @@
 
 :root {
 
+	/*
+	NOTE: in order to valign the text of the grid cell with its inline editor,
+	`grid-cell-baseline` must be set to match the baseline set implicitly by
+	`input-line-height`. Don't try to vcenter the text on the cell with these
+	two parameters, use `padding-y-input` for that.
+	NOTE: Firefox won't set a line height lower than the font allows on <input>!
+	*/
+	--x-grid-cell-h           : 24px; /* PIXELS ONLY! */
+	--x-grid-cell-baseline    : 12px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
+	/* sometimes Firefox needs some help aligning the basline... */
+	--x-grid-cell-baseline-adjust-ff : 0;
+	--x-padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
+	--x-padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
+
 	--x-border-light                  : #00000033;  /* normal borders */
 	--x-border-focused                :  #99d;
 	--x-border-focused-button         :  #aab;
@@ -30,12 +45,11 @@
 	--x-border-radius-window        : .5em;
 	--x-border-radius-button        : .3em;
 
-	--x-padding-y-button            : .4em;
 	--x-padding-x-button            : .7em;
-	--x-padding-x-button-icon       : .4em;
-	--x-padding-x-input             :  5px; /* x-padding for inputs and grid cells; PIXELS ONLY! */
-	--x-padding-y-input-top         :  3px; /* y-padding for inputs and grid cells; PIXELS ONLY! */
-	--x-padding-y-input-bottom      :  2px; /* y-padding for inputs and grid cells */
+	--x-padding-y-button            : .4em;
+	--x-padding-x-button-icon       : .4em; /* for buttons with icon only */
+	--x-padding-y-input-top         : 22px; /* for inputs with label */
+	--x-padding-y-input-bottom      :  2px; /* for inputs with label */
 	--x-padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
 	--x-padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
 	--x-padding-y2-input-il-dropdown-button : .5em;
@@ -50,7 +64,7 @@
 	--x-p               : #444;  /* multiline text on normal backgrounds */
 	--x-fg-inverted     : #fff;  /* text on inverted backgrounds */
 	--x-bg              : #fff;  /* bg for regions that need to be opaque */
-	--x-bg-alt          : #eee;  /* bg for regions that need to be opaque */
+	--x-bg-alt          : #f3f3f3;  /* bg for regions that need to be opaque */
 	--x-bg-moving       : #eeeeeeaa;
 	--x-bg-popup        : #fff;  /* bg for popups and inline grid editors */
 	--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
@@ -114,19 +128,11 @@
 	--x-bg-unselected         : #888;
 	--x-bg-selected           : #69c;
 	--x-fg-selected           : var(--x-fg-inverted);
-	--x-bg-row-focused             : #eee;
+	--x-bg-row-focused        : #ddd;
 
 	--x-bg-grid-editor             : var(--x-bg-popup);
 
-	--x-border-width-item          : 1px; /* PIXELS ONLY! needed to show rows with errors */
-
-	/* these two need to be matched in order to valign grid cells with cell editors */
-	/* NOTE: Firefox won't set a line height lower than the font allows on <input>! */
-	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
-	/* sometimes Firefox needs some help aligning the basline... */
-	--x-grid-cell-baseline-adjust-ff : 0;
-
+	--x-border-width-item          : 1px; /* PIXELS ONLY! grid cells and editboxes */
 }
 
 /* reset ------------------------------------------------------------------ */
@@ -735,6 +741,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-widget.with-label > .x-focus-box {
 	min-height: var(--x-min-height-input);
+	--x-padding-y-button: 0; /* inline buttons should not affect box height */
 }
 
 .x-editbox.with-label > .x-focus-box {
@@ -806,10 +813,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-items: center;
 	flex-flow: row nowrap;
 	overflow: hidden;
-	padding-left  : var(--x-padding-x-input);
-	padding-right : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input-top);
-	padding-bottom : var(--x-padding-y-input-bottom);
+	padding-left   : var(--x-padding-x-input);
+	padding-right  : var(--x-padding-x-input);
+	padding-top    : var(--x-padding-y-input);
+	padding-bottom : var(--x-padding-y-input);
 }
 
 .x-markbox.with-label > .x-focus-box {
@@ -938,11 +945,16 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	/* layout content */
 	display: inline-flex;    /* the only way to get variable-width inputs */
 	align-items: baseline;   /* ...that are baseline-aligned */
-	padding-top     : var(--x-padding-y-input-top);
-	padding-bottom  : var(--x-padding-y-input-bottom);
+	padding-top     : var(--x-padding-y-input);
+	padding-bottom  : var(--x-padding-y-input);
 	padding-left    : calc(var(--x-padding-x-input) + var(--x-border-width-item));
 	padding-right   : calc(var(--x-padding-x-input) - var(--x-border-width-item));
 	overflow: hidden;        /* label can overflow */
+}
+
+.x-editbox.with-label > .x-focus-box {
+	padding-top     : var(--x-padding-y-input-top);
+	padding-bottom  : var(--x-padding-y-input-bottom);
 }
 
 .x-input-placeholder {
@@ -1538,8 +1550,8 @@ textarea.x-editbox-input {
 	/* sizing */
 	padding-left   : var(--x-padding-x-input);
 	padding-right  : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input-top);
-	padding-bottom : var(--x-padding-y-input-bottom);
+	padding-top    : var(--x-padding-y-input);
+	padding-bottom : var(--x-padding-y-input);
 	border: var(--x-border-width-item) solid transparent; /* to match grid row height */
 	/* behavior */
 	cursor: default;
@@ -2601,7 +2613,6 @@ x-tabs-fixed-header {
 	border-width: 0;
 	border-color: var(--x-border-light);
 	border-style: solid;
-	min-height: calc(var(--x-grid-header-height) + 1px);
 }
 
 .x-grid:not(.x-vgrid) > .x-grid-header {
@@ -2614,10 +2625,6 @@ x-tabs-fixed-header {
 
 .x-grid-header-canvas {
 	position: absolute;
-}
-
-.x-grid-header.with-filters {
-	min-height: calc(var(--x-grid-header-height) + 1px + .9em);
 }
 
 .x-vgrid > .x-grid-header {
@@ -2714,7 +2721,7 @@ x-tabs-fixed-header {
 	/* add border width, since we removed the border */
 	padding-top: calc(
 		var(--x-border-width-item) +
-		var(--x-padding-y-input-top)
+		var(--x-padding-y-input)
 	);
 	background-color: var(--x-bg-grid-editor);
 }
@@ -2735,7 +2742,7 @@ x-tabs-fixed-header {
 
 .x-grid-progress-bar {
 	position: absolute;
-	top: calc(var(--x-grid-header-height) - 2px);
+	top: -2px;
 	width: 0%;
 	height: 2px;
 	pointer-events: none;
@@ -3245,18 +3252,23 @@ body:not([theme=dark]) [theme=dark] {
 
 /* large ------------------------------------------------------------------ */
 
-body[large] {
+[large] {
 	font-size                  : 15px;
-	--x-grid-cell-h            : 38px;
-	--x-grid-cell-baseline     : 15px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height  : 20px; /* PIXELS ONLY! */
+	--x-grid-cell-h            : 42px;
+	--x-grid-cell-baseline     : 17px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height  : 24px; /* PIXELS ONLY! */
+	--x-padding-y-input        : 8px;
 	--x-padding-y-input-top    : 8px;
-	--x-padding-y-input-bottom : 2px;
+	--x-padding-y-input-bottom : 0px;
 	--x-padding-x-input        : 10px;
+	--x-padding-y-button       : .7em;
+	--x-padding-x-button       : .7em;
+	--x-padding-x-button-icon  : .4em;
+	--x-border-radius-button   : 0;
 }
 [large] .x-form {
 	grid-gap: 6px;
-	padding:  10px;
+	margin:  10px;
 }
 [large] .x-grid {
 	margin: 10px;
@@ -3271,12 +3283,38 @@ body[large] {
 [large] .x-editbox.with-label > .x-focus-box {
 	padding-top: 28px;
 }
-
-body[medium] {
-	font-size                 : 13px;
-	--x-grid-cell-baseline    : 13px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 18px; /* PIXELS ONLY! */
+[large] .x-tabs-title {
+	padding: .9em .8em .7em .8em;
 }
+
+/* medium ----------------------------------------------------------------- */
+
+[medium] {
+	font-size                  : 13px;
+	--x-grid-cell-h            : 30px;
+	--x-grid-cell-baseline     : 12px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height  : 15px; /* PIXELS ONLY! */
+	--x-padding-y-input        : 6px;
+	--x-padding-y-input-top    : 25px;
+	--x-padding-y-input-bottom : 2px;
+	--x-padding-x-input        : 10px;
+	--x-padding-y-button       : .5em;
+	--x-padding-x-button       : .7em;
+	--x-padding-x-button-icon  : .4em;
+	--x-border-radius-button   : 0;
+}
+[medium] .x-tabs-title {
+	padding: 1em .8em .8em .8em;
+}
+[medium] .x-split-sizer {
+	min-width : 1px;
+	min-height: 1px;
+}
+[medium] .x-split-sizer::before {
+	display: none;
+}
+
+/* small ------------------------------------------------------------------ */
 
 body[small] {
 	font-size                 : 11px;
