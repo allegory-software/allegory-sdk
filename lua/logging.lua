@@ -514,7 +514,7 @@ function logging.livelist()
 	return t
 end
 
-function logging.rpc:log_livelist()
+function logging.rpc:get_livelist()
 	self.logvar('livelist', self.livelist())
 end
 
@@ -564,18 +564,12 @@ function logging.rpc:get_procinfo()
 	})
 end
 
-function logging.rpc:get_osinfo()
-	local pt = proc.osinfo()
-	local ft = fs_info'/'
-	self.logvar('osinfo', {
-		clock    = clock(),
-		uptime   = pt and pt.uptime,
-		cputimes = pt and pt.cputimes,
-		ram_size = pt and pt.ram_size,
-		ram_free = pt and pt.ram_free,
-		hdd_size = ft and ft.size,
-		hdd_free = ft and ft.free,
-	})
+function logging.rpc:get_livelist()
+	self.logvar('livelist', self.livelist())
+end
+
+function logging.rpc:get_env()
+	self.logvar('env', env())
 end
 
 function logging.printlive(custom_print)
