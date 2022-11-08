@@ -291,7 +291,7 @@ function coro.safewrap(f, onfinish, fmt, ...)
 	if fmt then
 		coro.live(yt, fmt, ...)
 	else
-		coro.live(yt, '%s', traceback())
+		coro.live(yt, '%s', traceback'unnamed thread')
 	end
 	return function(...)
 		assert(yt, 'cannot resume dead coroutine')
