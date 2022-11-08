@@ -71,7 +71,7 @@ TASKS
 	^remove_task(parent_ta, child_ta)
 
 PROCESS TASK
-	task_exec(cmd_args|{cmd,arg1,...}, opt) -> ta
+	exec_task(cmd_args|{cmd,arg1,...}, opt) -> ta
 
 ]]
 
