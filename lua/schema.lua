@@ -885,7 +885,7 @@ function schema:resolve_type(t) --{attr = val, flag1, ...}
 	update_type(self, t)
 	for i=#t,1,-1 do t[i] = nil end --remove flags
 
-	--add translatable fields.
+	--add translatable field attributes.
 	for i,attr in ipairs{'text', 'info'} do
 		local en_attr = 'en_'..attr
 		t[attr] = function()
