@@ -2684,7 +2684,7 @@ function ownthreadenv(thread, create)
 	thread = thread or currentthread()
 	local t = ownthreadenvs[thread]
 	if not t and create ~= false then
-		t = {thread = thread}
+		t = {}
 		local pt = threadenvs[thread]
 		if pt then --inherit parent env, if any.
 			t.__index = pt
