@@ -494,7 +494,7 @@ function virtual_rowset(init, ...)
 		elseif isstr(rs.allow) then
 			allow(usr('roles')[rs.allow])
 		end
-		local filter = json_decode(args'filter') or {}
+		local filter = json_decode(args'filter', null) or {}
 		local params = {}
 		--params are prefixed so that they can be used in col_maps.
 		--:old variants are added too for update where sql.

@@ -282,7 +282,7 @@ function post(v)
 				if ct.media_type == 'application/x-www-form-urlencoded' then
 					s = url_parse_args(s)
 				elseif ct.media_type == 'application/json' then --prevent ENCTYPE CORS
-					s = json_decode(s)
+					s = json_decode(s, null)
 				end
 			end
 		end
