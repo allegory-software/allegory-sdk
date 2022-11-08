@@ -494,14 +494,6 @@ component('x-grid', 'Input', function(e) {
 
 	// rendering --------------------------------------------------------------
 
-	function resize_canvas(canvas, w, h, pw, ph) {
-		// pw & ph are size multiples for lowering the number of resizes.
-		w = ceil(w / pw) * pw
-		h = ceil(h / ph) * ph
-		if (canvas.width  != w) canvas.width  = w
-		if (canvas.height != h) canvas.height = h
-	}
-
 	function create_filter(field) {
 		if (!(horiz && e.filters_visible && field.filter_by))
 			return
@@ -787,19 +779,20 @@ component('x-grid', 'Input', function(e) {
 		cx.save()
 		cx.translate(x, y)
 
+		// background
+		if (bg) {
+			cx.beginPath()
+			cx.fillStyle = bg
+			cx.rect(0, 0, w, h)
+			cx.fill()
+		}
+
 		// border
 		let first_field = !fi || draw_stage == 'moving_cols'
 		cx.lineWidth = b
 		cx.strokeStyle = e.cell_border_color
 		draw_cell_border_path(cx, first_field, w, h)
 		cx.stroke()
-
-		if (bg) {
-			cx.beginPath()
-			cx.fillStyle = bg
-			cx.rect(-b, -b, w+b, h+b)
-			cx.fill()
-		}
 
 		if (!editing) {
 
@@ -999,8 +992,8 @@ component('x-grid', 'Input', function(e) {
 		e.header.w = header_w
 		e.header.h = header_h
 
-		resize_canvas(e.cells_canvas, cells_view_w, cells_view_h, 200, 200)
-		resize_canvas(e.header_canvas, header_w, header_h, 200, horiz ? 1 : 200)
+		e.cells_canvas.resize(cells_view_w, cells_view_h, 200, 200)
+		e.header_canvas.resize(header_w, header_h, 200, horiz ? 1 : 200)
 
 		for (let field of e.fields)
 			if (field.filter_dropdown)
