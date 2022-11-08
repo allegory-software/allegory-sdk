@@ -131,8 +131,7 @@ function component(tag, category, cons) {
 			if (!e.bound)
 				return
 			if (e.updating) { // update() called inside do_update()
-				pr('nested update() call')
-				trace()
+				// TOOD: pr('nested update() call')
 				return
 			}
 			if (opt)

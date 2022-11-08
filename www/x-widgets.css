@@ -3255,6 +3255,7 @@ body:not([theme=dark]) [theme=dark] {
 [large] {
 	font-size                  : 15px;
 	--x-grid-cell-h            : 42px;
+	--x-grid-header-h          : 62px;
 	--x-grid-cell-baseline     : 17px; /* PIXELS ONLY! */
 	--x-grid-cell-line-height  : 24px; /* PIXELS ONLY! */
 	--x-padding-y-input        : 8px;
@@ -3291,13 +3292,14 @@ body:not([theme=dark]) [theme=dark] {
 
 [medium] {
 	font-size                  : 13px;
-	--x-grid-cell-h            : 30px;
-	--x-grid-cell-baseline     : 12px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height  : 15px; /* PIXELS ONLY! */
-	--x-padding-y-input        : 6px;
+	--x-grid-cell-h            : 38px;
+	--x-grid-header-h          : 58px;
+	--x-grid-cell-baseline     : 13px; /* PIXELS ONLY! */
+	--x-grid-cell-line-height  : 17px; /* PIXELS ONLY! */
+	--x-padding-x-input        : 6px;
+	--x-padding-y-input        : 10px;
 	--x-padding-y-input-top    : 25px;
 	--x-padding-y-input-bottom : 2px;
-	--x-padding-x-input        : 10px;
 	--x-padding-y-button       : .5em;
 	--x-padding-x-button       : .7em;
 	--x-padding-x-button-icon  : .4em;
@@ -3313,12 +3315,3 @@ body:not([theme=dark]) [theme=dark] {
 [medium] .x-split-sizer::before {
 	display: none;
 }
-
-/* small ------------------------------------------------------------------ */
-
-body[small] {
-	font-size                 : 11px;
-	--x-grid-cell-baseline    : 11px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
-}
-
