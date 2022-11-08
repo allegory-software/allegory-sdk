@@ -1147,6 +1147,7 @@ function nav_widget(e) {
 		e.param_vals = pv1
 		e.disable('no_param_vals', pv1 === false)
 		e.fire('label_changed')
+		e.fire('params_changed')
 		return true
 	}
 
@@ -1218,6 +1219,7 @@ function nav_widget(e) {
 		for (let [col, param] of param_map(params)) {
 			nav.on('cell_state_changed_for_'+col, param_nav_cell_state_changed, on)
 		}
+		// TODO: refactor this: use ^row_state_changed, etc !
 		nav.on('row_removed_changed', param_nav_row_removed_changed, on)
 	}
 
@@ -5015,9 +5017,7 @@ component('x-lookup-dropdown', function(e) {
 	})
 
 	number.editor = function(opt) {
-		return spinedit(assign_opt({
-			button_placement: 'left',
-		}, opt))
+		return numedit(opt)
 	}
 
 	number.from_text = function(s) {
