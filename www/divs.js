@@ -234,6 +234,9 @@ property(Element, 'classes', {
 // css querying --------------------------------------------------------------
 
 method(Element, 'css', function(prop, state) {
+	// TODO:
+	// if (in_raf)
+	// 	pr('css() called inside animation frame')
 	let css = getComputedStyle(this, state)
 	return prop ? css[prop] : css
 })
@@ -901,7 +904,12 @@ property(Element, 'max_h', { set: function(v) { if (v !== this.__Mh) { this.__Mh
 
 alias(Element, 'x', 'x1')
 alias(Element, 'y', 'y1')
-alias(Element, 'rect', 'getBoundingClientRect')
+method(Element, 'rect', function() {
+	// TODO:
+	// if (in_raf)
+	// 	pr('rect() called inside animation frame')
+	return this.getBoundingClientRect()
+})
 
 alias(Element, 'cw', 'clientWidth')
 alias(Element, 'ch', 'clientHeight')
@@ -1250,11 +1258,14 @@ function raf(f, last_id) {
 
 cancel_raf = cancelAnimationFrame
 
+var in_raf = false
 function raf_wrap(f) {
 	let id
 	function raf_f() {
 		id = null
+		in_raf = true
 		f()
+		in_raf = false
 	}
 	let wrapper = function() {
 		id = raf(raf_f, id)
@@ -1946,4 +1957,14 @@ bind_component('script', function(e) {
 	if (!e.hasattr('runit'))
 		return
 	eval(e.text)
+})
+
+// canvas helpers ------------------------------------------------------------
+
+// pw & ph are size multiples for lowering the number of resizes.
+method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
+	w = ceil(w / pw) * pw
+	h = ceil(h / ph) * ph
+	if (this.width  != w) this.width  = w
+	if (this.height != h) this.height = h
 })
