@@ -3036,6 +3036,22 @@ x-tabs-fixed-header {
 	position: absolute;
 }
 
+.x-chart-tooltip {
+	pointer-events: none !important; /* prevent hitting the tooltip itself */
+}
+
+.x-chart-tooltip > .x-tooltip-body {
+	padding: .2em 0;
+	line-height: 1.2;
+}
+
+.x-chart-tooltip-label {
+	display: grid;
+	grid-template-columns: repeat(2, auto);
+	column-gap: 1em;
+	justify-items: start;
+}
+
 .x-chart-pie {
 	position: absolute;
 	border-radius: 50%;
