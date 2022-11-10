@@ -59,7 +59,7 @@ function row_widget(e, enabled_without_nav) {
 		e.xoff()
 		e.readonly = e.nav && !e.nav.can_change_val(row)
 		e.disable('readonly', e.readonly && !e.set_readonly)
-		e.disable('no_nav', !e.nav && !enabled_without_nav)
+		e.disable('no_row', !(enabled_without_nav || e.row))
 		e.xon()
 		e.do_update_row(row)
 	}
@@ -598,7 +598,6 @@ component('x-button', 'Input', function(e) {
 	// row changing -----------------------------------------------------------
 
 	e.do_update_row = function(row) {
-		e.disabled = e.nav && !row
 		update_text()
 	}
 
@@ -3181,6 +3180,8 @@ component('x-chart', 'Input', function(e) {
 
 				split_group.tied_back = sum_def.tied_back
 				split_group.tied = sum_def.tied
+
+				split_group.sum_def = sum_def
 			}
 
 			all_split_groups.extend(split_groups)
@@ -3355,9 +3356,125 @@ component('x-chart', 'Input', function(e) {
 		e.view.set(canvas)
 		let cx = canvas.getContext('2d')
 
+		cx.font = view_css['font-size'] + ' ' + view_css.font
+
+		let line_h; {
+			let m = cx.measureText('M')
+			line_h = (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) * 1.5
+		}
+
+		// paddings to make room for axis markers.
+		let px1 = 40
+		let px2 = 10
+		let py1 = round(rotate ? line_h + 5 : 10)
+		let py2 = line_h * 1.5
+
+		let hit_cg, hit_xg
+		let hit_x, hit_y, hit_w, hit_h
+
+		function hit_test_columns(mx, my) {
+			let cgi = 0
+			for (let cg of all_split_groups) {
+				for (let xg of cg) {
+					if (xg.visible) {
+						let [x, y, w, h] = bar_rect(cgi, xg)
+						if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+							hit_cg = cg
+							hit_xg = xg
+							hit_x = x
+							hit_y = y
+							hit_w = w
+							hit_h = h
+							return true
+						}
+					}
+				}
+				cgi++
+			}
+		}
+
+		function hit_test_dots(mx, my) {
+			let max_d2 = 16**2
+			let min_d2 = 1/0
+			for (let cg of all_split_groups) {
+				for (let xg of cg) {
+					if (xg.visible) {
+						let dx = abs(mx - xg.x)
+						let dy = abs(my - xg.y)
+						let d2 = dx**2 + (all_split_groups.length > 1 ? dy**2 : 0)
+						if (d2 <= min(min_d2, max_d2)) {
+							min_d2 = d2
+							hit_cg = cg
+							hit_xg = xg
+							hit_x = hit_xg.x
+							hit_y = hit_xg.y
+							hit_w = 0
+							hit_h = 0
+						}
+					}
+				}
+			}
+			return !!hit_cg
+		}
+
+		pointermove = function(ev, mx, my) {
+			let r = canvas.rect()
+			mx -= r.x
+			my -= r.y
+			let cxm = cx.getTransform().translate(px1, py1)
+			let mp = new DOMPoint(mx, my).matrixTransform(cxm.invertSelf())
+			mx = mp.x
+			my = mp.y
+			hit_cg = null
+			hit_xg = null
+			let hit = columns ? hit_test_columns(mx, my) : hit_test_dots(mx, my)
+			if (hit) {
+				let er = e.rect()
+				tt = tt || tooltip({
+					target: e,
+					align   : 'center',
+					kind    : 'info',
+					classes : 'x-chart-tooltip',
+					check   : function() { return this.hit }
+				})
+				tt.side = rotate ? 'right' : 'top'
+
+				let sum_fld = hit_cg.sum_def.field
+				let s = e.nav.cell_display_val_for(null, sum_fld, hit_xg.sum)
+				let key_flds = e.nav.flds(hit_xg.key_cols)
+				let key_flds_align = key_flds.length > 1 ? 'start' : key_flds[0].align
+				tt.text = div({class: 'x-chart-tooltip-label'},
+					div(0, hit_xg.key_cols),
+					div({style: 'justify-self: '+key_flds_align}, TC(hit_xg.text)),
+					div(0, sum_fld.text),
+					div({style: 'justify-self: '+sum_fld.align}, s)
+				)
+
+				let tm = cx.getTransform()
+					.translate(px1, py1)
+					.translate(r.x - er.x, r.y - er.y)
+				let p1 = new DOMPoint(hit_x        , hit_y        ).matrixTransform(tm)
+				let p2 = new DOMPoint(hit_x + hit_w, hit_y + hit_h).matrixTransform(tm)
+				let p3 = new DOMPoint(hit_x + hit_w, hit_y        ).matrixTransform(tm)
+				let p4 = new DOMPoint(hit_x        , hit_y + hit_h).matrixTransform(tm)
+				let x1 = min(p1.x, p2.x, p3.x, p4.x)
+				let y1 = min(p1.y, p2.y, p3.y, p4.y)
+				let x2 = max(p1.x, p2.x, p3.x, p4.x)
+				let y2 = max(p1.y, p2.y, p3.y, p4.y)
+				tt.px = x1
+				tt.py = y1
+				tt.pw = x2 - x1
+				tt.ph = y2 - y1
+				tt.hit = true
+			} else if (tt) {
+				tt.hit = false
+				tt.update()
+			}
+			e.update()
+		}
+
 		return function() {
 			if (!update_model()) return
-			let groups = all_split_groups
 
 			let w = view_w
 			let h = view_h
@@ -3375,7 +3492,7 @@ component('x-chart', 'Input', function(e) {
 			let max_sum = -1/0
 			let user_min_val = or(e.min_val, -1/0)
 			let user_max_val = or(e.max_val,  1/0)
-			for (let cg of groups) {
+			for (let cg of all_split_groups) {
 				for (let xg of cg) {
 					let sum = xg.sum
 					let val = xg.key_vals[0] // TODO: only works for numbers!
@@ -3418,19 +3535,6 @@ component('x-chart', 'Input', function(e) {
 				;[val_step, min_val, max_val] = compute_step_and_range(max_n, min_val, max_val)
 			}
 
-			cx.font = view_css['font-size'] + ' ' + view_css.font
-
-			let line_h; {
-				let m = cx.measureText('M')
-				line_h = (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) * 1.5
-			}
-
-			// paddings to make room for axis markers.
-			let px1 = 40
-			let px2 = 10
-			let py1 = round(rotate ? line_h + 5 : 10)
-			let py2 = line_h * 1.5
-
 			w -= px1 + px2
 			h -= py1 + py2
 			cx.translate(px1, py1)
@@ -3442,7 +3546,7 @@ component('x-chart', 'Input', function(e) {
 			}
 
 			// compute polygon's points.
-			for (let cg of groups) {
+			for (let cg of all_split_groups) {
 				let xgi = 0
 				for (let xg of cg) {
 					let val = xg.key_vals[0]
@@ -3548,7 +3652,7 @@ component('x-chart', 'Input', function(e) {
 
 			if (columns) {
 
-				let cn = groups.length
+				let cn = all_split_groups.length
 				let bar_w = round(w / (xgs.size - 1) / cn / 3)
 				let half_w = round((bar_w * cn + 2 * (cn - 1)) / 2)
 
@@ -3570,9 +3674,9 @@ component('x-chart', 'Input', function(e) {
 			cx.clip()
 
 			let cgi = 0
-			for (let cg of groups) {
+			for (let cg of all_split_groups) {
 
-				let color = line_color(cgi, groups.length)
+				let color = line_color(cgi, all_split_groups.length)
 
 				if (columns) {
 
@@ -3609,7 +3713,7 @@ component('x-chart', 'Input', function(e) {
 					}
 
 					if (area && !cg.tied) {
-						cx.fillStyle = line_color(cgi, groups.length, .5)
+						cx.fillStyle = line_color(cgi, all_split_groups.length, .5)
 						cx.fill()
 					}
 
@@ -3631,82 +3735,19 @@ component('x-chart', 'Input', function(e) {
 				cgi++
 			}
 
+			// draw the hit line.
+
+			if (hit_cg) {
+				cx.beginPath()
+				cx.moveTo(hit_x + .5, .5)
+				cx.lineTo(hit_x + .5, h - py2 + 4.5)
+				cx.strokeStyle = label_color
+				cx.setLineDash([3, 2])
+				cx.stroke()
+				cx.setLineDash(empty_array)
+			}
+
 			cx.restore()
-
-			function hit_test_columns(mx, my) {
-				let cgi = 0
-				for (let cg of groups) {
-					for (let xg of cg) {
-						let [x, y, w, h] = bar_rect(cgi, xg)
-						if (mx >= x && mx <= x + w && my >= y && my <= y + h)
-							return [cg, xg, x, y, w, h]
-					}
-					cgi++
-				}
-			}
-
-			function hit_test_dots(mx, my) {
-				let max_d = 16**2
-				let min_d = 1/0
-				let hit_cg, hit_xg
-				for (let cg of groups) {
-					for (let xg of cg) {
-						let dx = abs(mx - xg.x)
-						let dy = abs(my - xg.y)
-						let d = dx**2 + dy**2
-						if (d <= min(min_d, max_d)) {
-							min_d = d
-							hit_cg = cg
-							hit_xg = xg
-						}
-					}
-				}
-				if (hit_cg)
-					return [hit_cg, hit_xg, hit_xg.x, hit_xg.y, 0, 0]
-			}
-
-			pointermove = function(ev, mx, my) {
-				let r = canvas.rect()
-				mx -= r.x
-				my -= r.y
-				let mp = new DOMPoint(mx, my).matrixTransform(cx.getTransform().invertSelf())
-				mx = mp.x
-				my = mp.y
-				let hit = columns ? hit_test_columns(mx, my) : hit_test_dots(mx, my)
-				if (hit) {
-					let [cg, xg, x, y, w, h] = hit
-					tt = tt || tooltip({
-						target: e,
-						align: 'center',
-						kind: 'info',
-						classes: 'x-chart-tooltip',
-						style: 'pointer-events: none', // prevent hitting the tooltip itself.
-						check: function() { return this.hit }
-					})
-					tt.side = rotate ? 'right' : 'top'
-					tt.text = sum_label('x-chart-tooltip-label', TC(xg.text), xg.sum)
-					let tm = cx.getTransform()
-					let p1 = new DOMPoint(x    , y    ).matrixTransform(tm)
-					let p2 = new DOMPoint(x + w, y + h).matrixTransform(tm)
-					let p3 = new DOMPoint(x + w, y    ).matrixTransform(tm)
-					let p4 = new DOMPoint(x    , y + h).matrixTransform(tm)
-					let x1 = min(p1.x, p2.x, p3.x, p4.x)
-					let y1 = min(p1.y, p2.y, p3.y, p4.y)
-					let x2 = max(p1.x, p2.x, p3.x, p4.x)
-					let y2 = max(p1.y, p2.y, p3.y, p4.y)
-					tt.px = x1
-					tt.py = y1
-					tt.pw = x2 - x1
-					tt.ph = y2 - y1
-					tt.hit = true
-					return
-				}
-				if (tt) {
-					tt.hit = false
-					tt.update()
-				}
-			}
-
 		}
 	}
 
@@ -3719,10 +3760,10 @@ component('x-chart', 'Input', function(e) {
 
 	let shape, render
 	e.do_update = function() {
-		pointermove = noop
 		e.header.set(e.text)
 		if (shape != e.shape) {
 			render = null
+			pointermove = noop
 			shape = e.shape
 		}
 		if (!render)
