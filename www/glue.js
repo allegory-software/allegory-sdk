@@ -122,7 +122,7 @@ TIME & DATE
 	ts.date([locale], [with_time], [with_seconds]) -> s
 	s.parse_date([locale]) -> ts
 FILE SIZE FORMATTING
-	x.kbytes(x, [dec], [mag]) -> s
+	x.kbytes(x, [dec], [mag], [mul = 1024]) -> s
 COLORS
 	hsl_to_rgb(h, s, L) -> '#rrggbb'
 GEOMETRY
@@ -1187,22 +1187,23 @@ method(Number, 'date', function(locale1, with_time, with_seconds) {
 {
 let a = []
 method(Number, 'duration', function(format) {  // approx[+s] | long | null
-	let s = this
+	let ss = this
+	let s = abs(this)
 	if (format == 'approx') {
 		if (s > 2 * 365 * 24 * 3600)
-			return S('n_years', '{0} years', s / (365 * 24 * 3600).dec())
+			return S('n_years', '{0} years', ss / (365 * 24 * 3600).dec())
 		else if (s > 2 * 30.5 * 24 * 3600)
-			return S('n_months', '{0} months', (s / (30.5 * 24 * 3600)).dec())
+			return S('n_months', '{0} months', (ss / (30.5 * 24 * 3600)).dec())
 		else if (s > 1.5 * 24 * 3600)
-			return S('n_days', '{0} days', (s / (24 * 3600)).dec())
+			return S('n_days', '{0} days', (ss / (24 * 3600)).dec())
 		else if (s > 2 * 3600)
-			return S('n_hours', '{0} hours', (s / 3600).dec())
+			return S('n_hours', '{0} hours', (ss / 3600).dec())
 		else if (s > 2 * 60)
-			return S('n_minutes', '{0} minutes', (s / 60).dec())
+			return S('n_minutes', '{0} minutes', (ss / 60).dec())
 		else if (s >= 60)
 			return S('one_minute', '1 minute')
 		else if (format == 'approx+s')
-			return S('n_seconds', '{0} seconds', s.dec())
+			return S('n_seconds', '{0} seconds', ss.dec())
 		else
 			return S('seconds', 'seconds')
 	} else {
@@ -1214,10 +1215,11 @@ method(Number, 'duration', function(format) {  // approx[+s] | long | null
 		s -= m * 60
 		s = round(s)
 		a.length = 0
+		if (ss < 0) a.push('-')
 		if (format == 'long') {
-			if (d) { a.push(d); a.push(d > 1 ? S('days'   , 'days'   ) : S('day'   , 'day'   )); }
-			if (h) { a.push(h); a.push(d > 1 ? S('hours'  , 'hours'  ) : S('hour'  , 'hour'  )); }
-			if (m) { a.push(m); a.push(d > 1 ? S('minutes', 'minutes') : S('minute', 'minute')); }
+			if (d) { a.push(d); a.push(abs(d) > 1 ? S('days'   , 'days'   ) : S('day'   , 'day'   )); }
+			if (h) { a.push(h); a.push(abs(d) > 1 ? S('hours'  , 'hours'  ) : S('hour'  , 'hour'  )); }
+			if (m) { a.push(m); a.push(abs(d) > 1 ? S('minutes', 'minutes') : S('minute', 'minute')); }
 			if (s || !a.length) { a.push(s); a.push(S('seconds', 'seconds')); }
 			return a.join(' ')
 		} else {
@@ -1246,6 +1248,17 @@ method(Number, 'kbytes', function(dec, mag) {
 	dec = dec || 0
 	let i = mag ? magnitudes[mag] : clamp(floor(logbase(this, 1024)), 0, suffixes.length-1)
 	let z = this / 1024**i
+	return z.dec(dec) + suffixes[i]
+})
+}
+
+{
+let suffixes = ['', 'K', 'M', 'G', 'T', 'P', 'E']
+let magnitudes = {K: 1, M: 2, G: 3, T: 4, P: 5, E: 6}
+method(Number, 'kcount', function(dec, mag, mul) {
+	dec = dec || 0
+	let i = mag ? magnitudes[mag] : clamp(floor(logbase(this, 1000)), 0, suffixes.length-1)
+	let z = this / 1000**i
 	return z.dec(dec) + suffixes[i]
 })
 }
