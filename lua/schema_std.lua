@@ -193,7 +193,8 @@ return function()
 	types.qty       = {                  dec, digits = 15, decimals = 6} --     999 999 999 . 999 999 (fits in a double)
 	types.percent   = {type = 'percent', dec, digits =  8, decimals = 2} --         999 999 . 99
 	types.percent_int= {percent, decimals = 0}
-	types.count     = {uint, not_null, default(0)}
+	types.count     = {uint  , type = 'count', default(0)}
+	types.bigcount  = {uint52, type = 'count', default(0)}
 	types.pos       = {uint, en_text = 'Position in List'}
 
 	types.lang      = {chr, size = 2, maxlen = 2, ascii_ci}
