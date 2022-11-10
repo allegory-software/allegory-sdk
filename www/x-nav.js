@@ -5041,9 +5041,12 @@ component('x-lookup-dropdown', function(e) {
 
 	filesize.is_small = function(s) {
 		let x = num(s)
-		let dec = this.filesize_decimals || 0
-		let min = this.filesize_min || 1/10**dec
-		return x == null || x < min
+		if (x == null)
+			return true
+		let min = this.filesize_min
+		if (min == null)
+			min = 1/10**(this.filesize_decimals || 0)
+		return x < min
 	}
 
 	filesize.to_text = function(s) {
@@ -5069,6 +5072,20 @@ component('x-lookup-dropdown', function(e) {
 
 	filesize.scale_base = 1024
 	filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
+
+	// counts
+
+	let count = assign({}, number)
+	field_types.count = count
+
+	count.to_text = function(s) {
+		let x = num(s)
+		if (x == null)
+			return s
+		let mag = this.magnitude
+		let dec = this.decimals || 0
+		return x.kcount(dec, mag)
+	}
 
 	// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
