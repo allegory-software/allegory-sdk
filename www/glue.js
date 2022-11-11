@@ -1213,21 +1213,20 @@ method(Number, 'duration', function(format) {  // approx[+s] | long | null
 		s -= h * 3600
 		let m = floor(s / 60)
 		s -= m * 60
-		s = round(s)
+		s = floor(s)
 		a.length = 0
-		if (ss < 0) a.push('-')
 		if (format == 'long') {
 			if (d) { a.push(d); a.push(abs(d) > 1 ? S('days'   , 'days'   ) : S('day'   , 'day'   )); }
 			if (h) { a.push(h); a.push(abs(d) > 1 ? S('hours'  , 'hours'  ) : S('hour'  , 'hour'  )); }
 			if (m) { a.push(m); a.push(abs(d) > 1 ? S('minutes', 'minutes') : S('minute', 'minute')); }
 			if (s || !a.length) { a.push(s); a.push(S('seconds', 'seconds')); }
-			return a.join(' ')
+			return (ss < 0 ? '-' : '') + a.join(' ')
 		} else {
 			if (d               ) { a.push(d                               + S('days_short'   , 'd')); }
 			if (d || h          ) { a.push(h.base(10, d           ? 2 : 0) + S('hours_short'  , 'h')); }
 			if (d || h || m     ) { a.push(m.base(10, d || h      ? 2 : 0) + S('minutes_short', 'm')); }
 			if (1               ) { a.push(s.base(10, d || h || m ? 2 : 0) + S('seconds_short', 's')); }
-			return a.join(' ')
+			return (ss < 0 ? '-' : '') + a.join(' ')
 		}
 	}
 })
