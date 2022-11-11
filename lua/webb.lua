@@ -272,7 +272,7 @@ function post(v)
 	end
 	local req = req()
 	local s = req.post
-	if not s then
+	if s == nil then
 		s = req:read_body'string'
 		if s == '' then
 			s = nil
@@ -288,7 +288,7 @@ function post(v)
 		end
 		req.post = s
 	end
-	if v and istab(s) then
+	if v ~= nil and istab(s) then
 		return s[v]
 	else
 		return s
