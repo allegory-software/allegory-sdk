@@ -486,10 +486,10 @@ component('x-prop-layers-inspector', function(e) {
 			return s && s.icon ? div({class: 'fa fa-'+s.icon, title: slot}) : slot
 		}
 		function format_selected(_, row) {
-			let act = e.cell_val(row, e.all_fields.active)
+			let act = e.cell_val(row, e.all_fields_map.active)
 			if (!act) return ''
-			let sel_module = e.cell_val(row, e.all_fields.module) == xmodule.selected_module
-			let sel_slot   = e.cell_val(row, e.all_fields.slot)   == xmodule.selected_slot
+			let sel_module = e.cell_val(row, e.all_fields_map.module) == xmodule.selected_module
+			let sel_slot   = e.cell_val(row, e.all_fields_map.slot)   == xmodule.selected_slot
 			return div({class: 'fa fa-chevron'+(sel_module && sel_slot ? '-circle' : '')+'-right'})
 		}
 		function render_eye_icon() {
@@ -514,7 +514,7 @@ component('x-prop-layers-inspector', function(e) {
 	e.can_change_val = function(row, field) {
 		return can_change_val(row, field)
 			// TODO: restrict hiding `base` slots?
-			//&& (!row || !field || e.cell_val(row, e.all_fields.slot) != 'base'
+			//&& (!row || !field || e.cell_val(row, e.all_fields_map.slot) != 'base'
 			//		|| field.name == 'selected' || field.name == 'active')
 	}
 
@@ -524,10 +524,10 @@ component('x-prop-layers-inspector', function(e) {
 	})
 
 	function set_layer(row, active) {
-		let module   = e.cell_val(row, e.all_fields.module)
-		let slot     = e.cell_val(row, e.all_fields.slot)
-		let layer    = e.cell_val(row, e.all_fields.layer)
-		let internal = e.cell_val(row, e.all_fields.internal)
+		let module   = e.cell_val(row, e.all_fields_map.module)
+		let slot     = e.cell_val(row, e.all_fields_map.slot)
+		let layer    = e.cell_val(row, e.all_fields_map.layer)
+		let internal = e.cell_val(row, e.all_fields_map.internal)
 		let layer_obj = xmodule.layers[layer]
 		xmodule.set_layer(module, slot, active && internal ? null : layer)
 	}
@@ -543,11 +543,11 @@ component('x-prop-layers-inspector', function(e) {
 		let active = true
 		for (let row of e.rows) {
 			set_layer(row, active)
-			let module   = e.cell_val(row, e.all_fields.module)
-			let slot     = e.cell_val(row, e.all_fields.slot)
-			let selected = e.cell_val(row, e.all_fields.selected)
-			e.reset_cell_val(row, e.all_fields.active   , active)
-			e.reset_cell_val(row, e.all_fields.selected , selected)
+			let module   = e.cell_val(row, e.all_fields_map.module)
+			let slot     = e.cell_val(row, e.all_fields_map.slot)
+			let selected = e.cell_val(row, e.all_fields_map.selected)
+			e.reset_cell_val(row, e.all_fields_map.active   , active)
+			e.reset_cell_val(row, e.all_fields_map.selected , selected)
 			if (module == sel_module && slot == sel_slot)
 				active = false
 		}
@@ -573,8 +573,8 @@ component('x-prop-layers-inspector', function(e) {
 	}
 
 	e.on('cell_val_changed_for_selected', function(row, field, val) {
-		let sel_module = e.cell_val(row, e.all_fields.module)
-		let sel_slot   = e.cell_val(row, e.all_fields.slot)
+		let sel_module = e.cell_val(row, e.all_fields_map.module)
+		let sel_slot   = e.cell_val(row, e.all_fields_map.slot)
 		set_selected_module_slot(sel_module, sel_slot)
 	})
 
@@ -582,20 +582,20 @@ component('x-prop-layers-inspector', function(e) {
 		if (barrier)
 			return
 		barrier = true
-		let active = e.cell_val(row, e.all_fields.active)
+		let active = e.cell_val(row, e.all_fields_map.active)
 		set_layer(row, active)
 		barrier = false
 	})
 
 	e.on('cell_val_changed_for_color', function(row, field, val) {
-		let slot = e.cell_val(row, e.all_fields.slot)
+		let slot = e.cell_val(row, e.all_fields_map.slot)
 		xmodule.slots[slot].color = val
 		document.fire('selected_widgets_changed')
 	})
 
 	e.reset_to_default = function() {
 		for (let row of e.rows)
-			e.reset_cell_val(row, !e.all_fields.internal, true)
+			e.reset_cell_val(row, !e.all_fields_map.internal, true)
 		if (e.state_tooltip)
 			e.state_tooltip.close()
 	}
@@ -705,7 +705,7 @@ component('x-prop-inspector', function(e) {
 	function prop_changed(te, k, v) {
 		if (!widgets.has(te))
 			return
-		let field = e.all_fields[k]
+		let field = e.all_fields_map[k]
 		if (!field)
 			return
 		if (e.editor && e.focused_field == field)

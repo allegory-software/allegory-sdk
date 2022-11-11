@@ -139,7 +139,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		assert(!(on && !e.bound))
 		assert(e.owns_field != null) // can't call this before init().
 		let field0 = e.field
-		let field1 = on && e.nav && e.nav.all_fields[e.col] || null
+		let field1 = on && e.nav && e.nav.optfld(e.col) || null
 		if (field0 == field1)
 			return
 		if (field0)

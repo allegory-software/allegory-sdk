@@ -145,7 +145,8 @@ row attributes:
 
 fields:
 	publishes:
-		e.all_fields[col|fi] -> field
+		e.all_fields_map[col] -> field
+		e.all_fields[fi] -> field
 		e.add_field(field)
 		e.remove_field(field)
 		e.get_prop('col.ATTR') -> val
@@ -654,9 +655,22 @@ function nav_widget(e) {
 
 	// fields utils -----------------------------------------------------------
 
-	let fld = col => (isstr(col) || isnum(col)) ? assert(e.all_fields[col],
-		'{0} has no col: {1}', e.id, col) : col
-	let optfld  = col => (isstr(col) || isnum(col)) ? e.all_fields[col] : col
+	let fld = function(col) {
+		if (isstr(col))
+			return assert(e.all_fields_map[col], '{0} has no col: {1}', e.id, col)
+		else if (isnum(col))
+			return assert(e.all_fields[col], '{0} has no col: {1}', e.id, col)
+		else
+			return col
+	}
+	let optfld  = function(col) {
+		if (isstr(col))
+			return e.all_fields_map[col]
+		else if (isnum(col))
+			return e.all_fields[col]
+		else
+			return col
+	}
 	let fldname = col => fld(col).name
 	let colsarr = cols => isstr(cols) ? cols.words() : cols
 
@@ -755,9 +769,9 @@ function nav_widget(e) {
 
 		// disambiguate field name.
 		let name = (f.name || 'f'+fi)
-		if (name in e.all_fields) {
+		if (name in e.all_fields_map) {
 			let suffix = 2
-			while (name+suffix in e.all_fields)
+			while (name+suffix in e.all_fields_map)
 				suffix++
 			name += suffix
 		}
@@ -771,7 +785,7 @@ function nav_widget(e) {
 		field.nav = e
 
 		e.all_fields[fi] = field
-		e.all_fields[name] = field
+		e.all_fields_map[name] = field
 
 		init_field_own_lookup_nav(field)
 		bind_lookup_nav(field, true)
@@ -810,7 +824,7 @@ function nav_widget(e) {
 	e.remove_field = function(field) {
 		let fi = field.val_index
 		e.all_fields.remove(fi)
-		delete e.all_fields[field.name]
+		delete e.all_fields_map[field.name]
 		for (let i = fi; i < e.all_fields.length; i++)
 			e.all_fields[i].val_index = i
 		let fn = e.all_fields.length
@@ -828,10 +842,10 @@ function nav_widget(e) {
 	function check_field(col) {
 		if (col == null) return
 		if (!e.bound) return
-		let f = e.all_fields[col]
-		if (!f)
-			warn(col+' not selected for rowset '+e.rowset_name)
-		return f
+		let field = e.fld(col)
+		if (!field)
+			warn(col+' not in rowset '+e.rowset_name)
+		return field
 	}
 
 	function init_all_fields() {
@@ -841,6 +855,7 @@ function nav_widget(e) {
 				free_field(field)
 
 		e.all_fields = [] // fields in row value order.
+		e.all_fields_map = obj() // {col->field}
 
 		// not creating fields and rows unless bound because we don't get
 		// events while not attached to DOM so the nav might get stale.
@@ -958,7 +973,7 @@ function nav_widget(e) {
 			return
 		attr(attr(e, 'prop_col_attrs'), col)[k] = v
 
-		let field = e.all_fields[col]
+		let field = e.all_fields_map[col]
 		if (field) {
 			set_field_attr(field, k, v)
 			e.update({fields: true})
@@ -1029,7 +1044,7 @@ function nav_widget(e) {
 			e.focused_field = null
 		if (e.selected_field && e.selected_field.index == null)
 			e.selected_field = null
-		let lff = e.all_fields[e.last_focused_col]
+		let lff = e.all_fields_map[e.last_focused_col]
 		if (lff && lff.index == null)
 			e.last_focused_col = null
 		if (e.quicksearch_field && e.quicksearch_field.index == null)
@@ -1071,14 +1086,14 @@ function nav_widget(e) {
 	let user_cols = () =>
 		e.cols != null &&
 		e.cols.words().filter(function(col) {
-			let f = e.all_fields[col]
+			let f = e.all_fields_map[col]
 			return f && !f.internal
 		})
 
 	let rowset_cols = () =>
 		e.rowset && e.rowset.cols &&
 		e.rowset.cols.words().filter(function(col) {
-			let f = e.all_fields[col]
+			let f = e.all_fields_map[col]
 			return f && !f.internal
 		})
 
@@ -1131,7 +1146,7 @@ function nav_widget(e) {
 			for (let [row] of e.param_nav.selected_rows) {
 				let vals = obj()
 				for (let [col, param] of pmap) {
-					let field = e.param_nav.all_fields[col]
+					let field = e.param_nav.all_fields_map[col]
 					if (!field)
 						warn('param nav is missing col', col)
 					let v = field && row ? e.param_nav.cell_val(row, field) : null
@@ -1188,9 +1203,9 @@ function nav_widget(e) {
 
 	function param_vals_match(master_nav, e, params, master_row, row) {
 		for (let [master_col, col] of params) {
-			let master_field = master_nav.all_fields[master_col]
+			let master_field = master_nav.all_fields_map[master_col]
 			let master_val = master_nav.cell_val(master_row, master_field)
-			let field = e.all_fields[col]
+			let field = e.all_fields_map[col]
 			let val = e.cell_val(row, field)
 			if (master_val !== val)
 				return false
@@ -2345,8 +2360,8 @@ function nav_widget(e) {
 		}
 		for (let s1 of (order_by || '').words()) {
 			let m = s1.split(':')
-			let name = m[0]
-			let field = e.all_fields[name]
+			let col = m[0]
+			let field = e.all_fields_map[col]
 			if (field && field.sortable) {
 				let dir = m[1] || 'asc'
 				if (dir == 'asc' || dir == 'desc') {
@@ -2418,7 +2433,7 @@ function nav_widget(e) {
 				push_expr(expr[1])
 				s.push('))')
 			} else {
-				s.push('row['+e.all_fields[expr[1]].val_index+'] '+expr[0]+' '+json(expr[2]))
+				s.push('row['+e.all_fields_map[expr[1]].val_index+'] '+expr[0]+' '+json(expr[2]))
 			}
 		}
 		push_expr(expr)
@@ -3209,12 +3224,12 @@ function nav_widget(e) {
 		assert(s != null)
 		if (!field.null_lookup_col)
 			return s
-		let lf = e.all_fields[field.null_lookup_col]      ; if (!lf || !lf.lookup_cols) return s
+		let lf = e.all_fields_map[field.null_lookup_col]  ; if (!lf || !lf.lookup_cols) return s
 		let ln = lf.lookup_nav                            ; if (!ln) return s
 		let nfv = e.cell_val(row, lf)
 		let ln_row = ln.lookup(lf.lookup_cols, [nfv])[0]  ; if (!ln_row) return s
 		let dcol = or(field.null_display_col, field.name)
-		let df = ln.all_fields[dcol]                      ; if (!df) return s
+		let df = ln.all_fields_map[dcol]                  ; if (!df) return s
 		if (cx) {
 			let v = ln.cell_input_val(ln_row, df)
 			ln.draw_cell_val(ln_row, df, v, cx)
@@ -3335,8 +3350,8 @@ function nav_widget(e) {
 			if (e.param_vals) {
 				row = row || []
 				for (let k in e.param_vals[0]) {
-					let fld = assert(e.all_fields[k], 'field missing for param: {0}', k)
-					let fi = fld.val_index
+					let field = fld(k)
+					let fi = field.val_index
 					if (row[fi] === undefined)
 						row[fi] = e.param_vals[0][k]
 				}
@@ -4104,7 +4119,7 @@ function nav_widget(e) {
 				}
 				if (rt.values) {
 					for (let k in rt.values)
-						e.reset_cell_val(row, e.all_fields[k], rt.values[k])
+						e.reset_cell_val(row, e.all_fields_map[k], rt.values[k])
 				}
 
 				e.end_set_state()
@@ -4354,7 +4369,7 @@ function nav_widget(e) {
 			if (state.cells) {
 				e.begin_set_state(row)
 				for (let col of state.cells) {
-					let field = e.all_fields[col]
+					let field = e.all_fields_map[col]
 					if (field) {
 						let t = state.cells[col]
 						for (let k in t)
@@ -4687,7 +4702,7 @@ function nav_widget(e) {
 
 		s = s.lower()
 
-		let field = e.focused_field || (e.quicksearch_col && e.all_fields[e.quicksearch_col])
+		let field = e.focused_field || (e.quicksearch_col && e.all_fields_map[e.quicksearch_col])
 		if (!field)
 			return
 
@@ -4791,7 +4806,7 @@ component('x-nav', function(e) {
 			e.reload()
 			return
 		}
-		if (!opt || opt.val) {
+		if (opt.all) {
 			val_widget_do_update()
 			return
 		}

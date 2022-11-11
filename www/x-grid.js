@@ -2695,7 +2695,7 @@ component('x-row-form', function(e) {
 	e.prop('nav_id' , {store: 'var', bind_id: 'nav', type: 'nav'})
 
 	function reset() {
-		e.rowset.fields = e.nav.all_fields
+		e.rowset.fields = e.nav.all_fields_map
 		e.rowset.rows = [e.nav.focused_row]
 		e.reset()
 		e.row = e.all_rows[0]

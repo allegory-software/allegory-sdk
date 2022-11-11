@@ -124,7 +124,7 @@ function listbox_widget(e) {
 	let inh_do_update = e.do_update
 	e.do_update = function(opt) {
 
-		if (opt.fields || opt.rows || opt.val) {
+		if (opt.fields || opt.rows || opt.all) {
 			e.clear()
 			for (let row of e.rows) {
 				let item = create_item(row)
@@ -135,7 +135,7 @@ function listbox_widget(e) {
 			opt.state = true
 		}
 
-		if (opt.val) {
+		if (opt.all) {
 			inh_do_update()
 			opt.state = true
 		}

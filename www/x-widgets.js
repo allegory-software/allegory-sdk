@@ -128,8 +128,6 @@ function component(tag, category, cons) {
 		})
 
 		e.update = function(opt1) {
-			if (!e.bound)
-				return
 			if (e.updating) { // update() called inside do_update()
 				// TOOD: pr('nested update() call')
 				return
@@ -138,12 +136,13 @@ function component(tag, category, cons) {
 				if (opt1)
 					assign_opt(opt, opt1)
 				else
-					opt.val = true
+					opt.all = true
 			else if (opt1)
 				opt = opt1
 			else
-				opt = {val: true}
-			update_frame()
+				opt = {all: true}
+			if (e.bound)
+				update_frame()
 		}
 		}
 
@@ -1364,7 +1363,7 @@ component('x-tooltip', function(e) {
 		let icon_classes = e.icon_visible && tooltip.icon_classes[e.kind]
 		e.icon_box.attr('class', icon_classes ? ('x-tooltip-icon ' + icon_classes) : null)
 		e.popup(e.target, e.side, e.align, e.px, e.py, e.pw, e.ph)
-		if (opt && opt.reset_timer)
+		if (opt.reset_timer)
 			reset_timeout_timer()
 		if (e.target)
 			last_popup_time = time()
@@ -1380,14 +1379,14 @@ component('x-tooltip', function(e) {
 		e.update({reset_timer: true})
 	}
 
-	let remove_timer = timer(close)
+	let close_timer = timer(close)
 	function reset_timeout_timer() {
 		let t = e.timeout
 		if (t == 'auto')
 			t = clamp((e.content.textContent).length / (tooltip.reading_speed / 60), 1, 10)
 		else
 			t = num(t)
-		remove_timer(t)
+		close_timer(t)
 	}
 
 	override_property_setter(e, 'hidden', function(inherited, v) {
