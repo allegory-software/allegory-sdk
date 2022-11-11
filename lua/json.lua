@@ -9,6 +9,7 @@
 	json_asarray(t) -> t                mark t to be encoded as a json array
 	json_pack(...) -> t                 like pack() but nils become null
 	json_unpack(t) -> ...               like unpack() but nulls become nil
+	repl_nulls(t) -> t                  replace `null` values in `t` recursively
 
 ]==]
 
@@ -74,7 +75,7 @@ local function repl_nulls_t(t, null_val)
 	end
 	return t
 end
-local function repl_nulls(v, null_val)
+function repl_nulls(v, null_val)
 	if null_val == null then return v end
 	if type(v) == 'table' then
 		return repl_nulls_t(v)
@@ -84,6 +85,7 @@ local function repl_nulls(v, null_val)
 		return v
 	end
 end
+local repl_nulls = repl_nulls
 
 function json_decode(v, null_val)
 	if type(v) ~= 'string' then return v end
