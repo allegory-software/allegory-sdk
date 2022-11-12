@@ -61,8 +61,9 @@ STRINGS
 	s.lower()
 	s.num(z)
 	s.display_name()
-	s.catany(sep, ...)
 	s.words() -> a
+	catany(sep, ...); sep.catany(...)
+	catall(...)
 MULTI-LANGUAGE STUBS
 	S(id, default)                         get labeled string in current language
 	lang()                                 get current language
