@@ -386,25 +386,20 @@ method(Element, 'bind_children', function(on) {
 	if (!this.len)
 		return
 	assert(isbool(on))
-	// $() is depth-first so we iterate in normal order for bind and in reverse
-	// order for unbind (bind children first, unbind them last).
-	let children = this.$('[_bind]')
-	if (on)
-		for (let ci of children)
-			ci.bind(on)
-	else
-		for (let i = children.length-1; i >= 0; i--)
-			children[i].bind(false)
+	for (let ce of this.at)
+		ce.bind(on)
 })
 
 method(Element, 'bind', function(on) {
 	assert(isbool(on))
-	if (!this.bound == !on)
-		return
-	if (this.do_bind) { // component
+	if (this.do_bind) { // any tag that added a do_bind() method
+		if (!this.bound == !on)
+			return
 		this.bound = on
 		this.do_bind(on)
-	} else if (this.hasattr('_bind')) { // any tag that registered a bind event
+	} else if (this._bind) { // any tag that registered a bind event
+		if (!this.bound == !on)
+			return
 		this.bound = on
 		this.fire('bind', on)
 	}
@@ -673,7 +668,7 @@ let installers = on.installers
 let callers = on.callers
 
 installers.bind = function() {
-	this.bool_attr('_bind', true)
+	this._bind = true
 }
 
 let resize_observer = new ResizeObserver(function(entries) {
