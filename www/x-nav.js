@@ -590,6 +590,8 @@ function nav_widget(e) {
 	}
 
 	e.on('bind', function(on) {
+		if (on && e.id == 'mm_actions_listbox')
+			pr('LB BIND')
 		bind_param_nav(on)
 		bind_rowset_name(e.rowset_name, on)
 		if (on) {

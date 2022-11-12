@@ -30,8 +30,8 @@ GLOBALS
 
 */
 
-PROFILE_ATTACH_TIME = true
-SLOW_ATTACH_TIME_MS = 10
+PROFILE_BIND_TIME = false
+SLOW_BIND_TIME_MS = 10
 
 function set_theme(theme) {
 	on_dom_load(function() {
@@ -151,16 +151,16 @@ function component(tag, category, cons) {
 
 		e.do_bind = function(on) {
 			if (on) {
-				let t0 = PROFILE_ATTACH_TIME && time()
+				let t0 = PROFILE_BIND_TIME && time()
 				this.fire('bind', true)
 				if (this.id) {
 					window.fire('widget_bind', this, true)
 					window.fire(this.id+'.bind', this, true)
 				}
-				if (PROFILE_ATTACH_TIME) {
+				if (PROFILE_BIND_TIME) {
 					let t1 = time()
 					let dt = (t1 - t0) * 1000
-					if (dt >= SLOW_ATTACH_TIME_MS)
+					if (dt >= SLOW_BIND_TIME_MS)
 						debug((dt).dec().padStart(3, ' ')+'ms', this.debug_name())
 				}
 				e.update()
@@ -174,7 +174,7 @@ function component(tag, category, cons) {
 			}
 		}
 
-		if (PROFILE_ATTACH_TIME)
+		if (PROFILE_BIND_TIME)
 			e.debug_name = function(prefix) {
 				prefix = catany(' < ', prefix, this.id || this.type)
 				if (this.id) // enough context
@@ -207,7 +207,9 @@ function component(tag, category, cons) {
 
 		opt = assign_opt(attr_val_opt(e), cons_opt, opt)
 
-		e.initialized = false // setter barrier to delay init to e.init().
+		// use this barrier in prop setters to prevent trying to modify
+		// the component while it's not yet fully initialized.
+		e.initialized = false
 
 		// register events from the options directly.
 		if (opt.on) {
@@ -232,7 +234,7 @@ function component(tag, category, cons) {
 			window.fire(e.id+'.init', e)
 	}
 
-	bind_component(tag, initialize)
+	register_component(tag, initialize)
 
 	function create(...args) {
 		let e = document.createElement(tag)
@@ -1990,8 +1992,9 @@ widget_items_widget = function(e) {
 		e.items = items
 	}
 
-	if (e.at.length) {
-		let html_items = [...e.at]
+	if (e.len) {
+		e.init_child_components()
+		let html_items = [...e.children]
 		e.clear()
 		return html_items
 	}
@@ -2434,6 +2437,7 @@ component('x-split', 'Containers', function(e) {
 	selectable_widget(e)
 	contained_widget(e)
 
+	e.init_child_components()
 	let html_item1 = e.at[0]
 	let html_item2 = e.at[1]
 	e.clear()
@@ -2762,6 +2766,7 @@ component('x-dialog', function(e) {
 
 	e.init = function() {
 
+		e.init_child_components()
 		e.header  = e.header  || e.$1('header' ) || tag('header', {hidden: true})
 		e.content = e.content || e.$1('content') || tag('content')
 		e.footer  = e.footer  || e.$1('footer' ) || tag('footer', {hidden: true})
@@ -3385,6 +3390,7 @@ function richtext_widget_editing(e) {
 
 component('x-if', 'Containers', function(e) {
 
+	e.init_child_components()
 	let content = [...e.childNodes]
 	e.clear()
 	e.hide()

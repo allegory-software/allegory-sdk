@@ -81,6 +81,8 @@ function row_widget(e, enabled_without_nav) {
 		nav.on('col_text_changed', row_changed, on)
 		nav.on('col_info_changed', row_changed, on)
 		e.fire('bind_nav', nav, on)
+		if (on)
+			row_changed()
 	}
 
 	e.set_nav = function(nav1, nav0) {
@@ -96,6 +98,13 @@ function row_widget(e, enabled_without_nav) {
 	e.val = function(col) {
 		return e.nav && e.nav.cell_val(e.row, col)
 	}
+
+	e.on('bind', function(on) {
+		if (on && e.nav_id == 'mm_actions_listbox')
+			pr('SWITCHER BIND')
+		// pr('row_widget_bind', on, e.tag, e.nav_id, !!e.nav)
+		bind_nav(e.nav, on)
+	})
 
 }
 
@@ -3207,7 +3216,6 @@ component('x-chart', 'Input', function(e) {
 	}
 
 	function pie_slices() {
-		if (!update_model()) return
 		let groups = all_split_groups[0] // TODO: draw multiple pies for each split group
 
 		let slices = []
@@ -3474,7 +3482,6 @@ component('x-chart', 'Input', function(e) {
 		}
 
 		return function() {
-			if (!update_model()) return
 
 			let w = view_w
 			let h = view_h
@@ -3774,10 +3781,11 @@ component('x-chart', 'Input', function(e) {
 	e.on('pointermove' , function(...args) { pointermove(...args) })
 	e.on('pointerleave', function(...args) { pointermove(...args) })
 
-	// config -----------------------------------------------------------------
+	// data binding -----------------------------------------------------------
 
-	function redraw() {
-		e.update()
+	function data_changed() {
+		if (update_model())
+			e.update()
 	}
 
 	function bind_nav(nav, on) {
@@ -3785,10 +3793,12 @@ component('x-chart', 'Input', function(e) {
 			return
 		if (!nav)
 			return
-		nav.on('reset'               , redraw, on)
-		nav.on('rows_changed'        , redraw, on)
-		nav.on('cell_state_changed'  , redraw, on)
-		nav.on('display_vals_changed', redraw, on)
+		nav.on('reset'               , data_changed, on)
+		nav.on('rows_changed'        , data_changed, on)
+		nav.on('cell_state_changed'  , data_changed, on)
+		nav.on('display_vals_changed', data_changed, on)
+		if (on)
+			data_changed()
 	}
 
 	e.on('bind', function(on) {
@@ -3804,24 +3814,25 @@ component('x-chart', 'Input', function(e) {
 	e.on('resize', measure)
 
 	e.set_nav = function(nav1, nav0) {
-		assert(nav1 != e)
+		assert(!nav1 || nav1.isnav)
 		bind_nav(nav0, false)
 		bind_nav(nav1, true)
-		redraw()
 	}
 
 	e.prop('nav', {store: 'var', private: true})
 	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav'})
 
-	e.set_split_cols      = redraw
-	e.set_group_cols      = redraw
-	e.set_sum_cols        = redraw
-	e.set_min_val         = redraw
-	e.set_max_val         = redraw
-	e.set_min_sum         = redraw
-	e.set_max_sum         = redraw
-	e.set_other_threshold = redraw
-	e.set_other_text      = redraw
+	// config -----------------------------------------------------------------
+
+	e.set_split_cols      = data_changed
+	e.set_group_cols      = data_changed
+	e.set_sum_cols        = data_changed
+	e.set_min_val         = data_changed
+	e.set_max_val         = data_changed
+	e.set_min_sum         = data_changed
+	e.set_max_sum         = data_changed
+	e.set_other_threshold = data_changed
+	e.set_other_text      = data_changed
 
 	e.prop('split_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
 	e.prop('group_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
@@ -3969,55 +3980,19 @@ component('x-mu', function(e) {
 
 component('x-switcher', 'Containers', function(e) {
 
-	serializable_widget(e)
-	selectable_widget(e)
-	contained_widget(e)
+	row_widget(e)
 	let html_items = widget_items_widget(e)
-
-	// nav dynamic binding ----------------------------------------------------
-
-	function update() {
-		e.update()
-	}
-
-	function bind_nav(nav, on) {
-		if (!nav)
-			return
-		if (!e.bound)
-			return
-		nav.on('focused_row_changed'     , update, on)
-		nav.on('focused_row_val_changed' , update, on)
-		nav.on('reset'                   , update, on)
-	}
-
-	e.on('bind', function(on) {
-		bind_nav(e.nav, on)
-	})
-
-	e.set_nav = function(nav1, nav0) {
-		assert(nav1 != e)
-		bind_nav(nav0, false)
-		bind_nav(nav1, true)
-	}
-	e.prop('nav', {store: 'var', private: true})
-	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav'})
-
-	// view -------------------------------------------------------------------
-
-	// widget-items widget protocol.
-	e.do_init_items = function() {
-		e.clear()
-	}
 
 	e.prop('item_id_format', {store: 'var', attr: true, default: ''})
 
 	e.format_item_id = function(vals) {
-		return ('_').cat(e.module, e.item_id_format.subst(vals))
+		return catany('_', e.module, e.item_id_format.subst(vals))
 	}
 
 	e.match_item = function(item, vals) { // stub
 		// special case: listbox with html elements with "action" attr
 		// and the switcher's items also have the "action" attr, so match those.
+		pr(e.items.length, item.id, e.format_item_id(vals), '', item.attr('action'), vals.f0 && vals.f0.attr('action'))
 		if (item.hasattr('action') && vals.f0 && iselem(vals.f0) && vals.f0.hasattr('action'))
 			return item.attr('action') == vals.f0.attr('action')
 		return item.id == e.format_item_id(vals)
@@ -4036,10 +4011,10 @@ component('x-switcher', 'Containers', function(e) {
 		let item = id ? component.create(assign_opt({id: id}, e.item_create_options(vals))) : null
 	}
 
-	e.do_update = function() {
-		let row = e.nav && e.nav.focused_row
+	e.do_update_row = function(row) {
 		let vals = row && e.nav.serialize_row_vals(row)
 		let item = vals && (e.find_item(vals) || e.create_item(vals))
+		//pr('do_update_row', e.items.length, vals, e.items)
 		e.set(item)
 	}
 

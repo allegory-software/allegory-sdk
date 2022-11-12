@@ -294,7 +294,7 @@ method(Element, 'sethrefs', function(selector) {
 	return this
 })
 
-bind_component('a', function(e) {
+register_component('a', function(e) {
 	e.sethref()
 }, 'a[href]')
 

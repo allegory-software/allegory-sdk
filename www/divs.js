@@ -63,17 +63,19 @@
 		div(...)
 		span(...)
 		[].join_nodes([separator])
-	components:
-		bind_component(tag, initializer, [selector])
-		e.bind(t|f)
-		e.do_bind()
-		e.do_move()
-		^bind(on)
-		e.bound -> t|f
+	element properties & methods:
 		e.property(name, [get],[set] | descriptor)
 		e.override(method, f)
 		e.do_before(method, f)
 		e.do_after(method, f)
+	components:
+		register_component(tag, initializer, [selector])
+		e.bind(t|f)
+		e.do_bind()
+		e.do_move()
+		e.init_child_components()
+		^bind(on)
+		e.bound -> t|f
 	events:
 		broadcast (name, ...args)
 		^[right]click       (ev, nclicks, mx, my)
@@ -338,47 +340,39 @@ method(Element, 'positionally_contains', function(e) {
 /* dom tree manipulation with lifecycle management ---------------------------
 
 The "lifecycle management" part of this is basically poor man's web components.
-The reason we're reinventing web components in this inefficient way via DOM
-querying is because the actual web components API built into the browser is
-unusable. Needless to say, all DOM manipulation needs to be done through this
-API exclusively for components to work.
+The reason we're reinventing web components is because the actual web components
+API built into the browser is unusable. Needless to say, all DOM manipulation
+needs to be done through this API exclusively for components to work.
 
 */
 
 {
 let component_init = obj() // {tag->init}
 let component_selector = obj() // {tag->selector}
-let component_query = ''
-function bind_component(tag, init, selector) {
+function register_component(tag, init, selector) {
 	selector = selector || tag
 	let tagName = tag.upper()
 	component_init[tagName] = init
 	component_selector[tagName] = selector
-	component_query = component_query ? component_query + ',' + selector : selector
 }
 
 method(Element, 'init_component', function() {
-	this.init_child_components()
 	let tagName = this.tagName
 	let init = component_init[tagName]
 	let sel = component_selector[tagName]
+	// pr(tagName, sel, !!init, this.len)
 	if (init && (sel == tagName || this.matches(sel)))
 		init(this)
+	else
+		this.init_child_components()
 })
 
+// the component is responsible for calling init_child_components()
+// in its init function if it knows it can have components as children.
 method(Element, 'init_child_components', function() {
-	let n = this.len
-	if (!n)
-		return
-	if (n == 1) { // fast path (must be a wrapper)
-		this.at[0].init_component()
-		return
-	}
-	// CSS queries are depth-first, so parents are initialized first,
-	// which gives them a chance to remove their children declared in html
-	// before they are initialized as components.
-	for (let ce of this.$(component_query))
-		component_init[ce.tagName](ce)
+	if (this.len)
+		for (let ce of this.children)
+			ce.init_component()
 })
 }
 
@@ -386,7 +380,7 @@ method(Element, 'bind_children', function(on) {
 	if (!this.len)
 		return
 	assert(isbool(on))
-	for (let ce of this.at)
+	for (let ce of this.children)
 		ce.bind(on)
 })
 
@@ -398,6 +392,7 @@ method(Element, 'bind', function(on) {
 		this.bound = on
 		this.do_bind(on)
 	} else if (this._bind) { // any tag that registered a bind event
+		pr('BIND', this.id, trace())
 		if (!this.bound == !on)
 			return
 		this.bound = on
@@ -620,9 +615,9 @@ Array.prototype.ol = function(attrs, only_if_many) { return ul(this, 'ol', attrs
 
 NOTE: unlike global override(), e.override() cannot override built-in methods.
 You can still use the global override() to override built-in methods in an
-instance without disturbing the prototype, and just the same you can use
+instance without affecting the prototype, and just the same you can use
 override_property_setter() to override a setter in an instance without
-disturbing the prototype.
+affecting the prototype.
 
 */
 
@@ -846,7 +841,9 @@ function init_components() {
 	root = document.documentElement  // for debugging, don't use in code.
 	body = document.body // for debugging, don't use in code.
 	head = document.head // for debugging, don't use in code.
+	pr('ROOT INIT')
 	root.init_component()
+	pr('ROOT BIND')
 	root.bind(true)
 }
 
@@ -1916,7 +1913,7 @@ let lazy_load = function(img) {
 		img.attr('src', src)
 	}
 }
-bind_component('img', lazy_load, 'img[data-src]')
+register_component('img', lazy_load, 'img[data-src]')
 }
 
 // timeago auto-updating -----------------------------------------------------
@@ -1944,7 +1941,7 @@ runevery(60, function() {
 
 // exec'ing js scripts inside html -------------------------------------------
 
-bind_component('script', function(e) {
+register_component('script', function(e) {
 	if (e.type && e.type != 'javascript')
 		return
 	if (e.src)

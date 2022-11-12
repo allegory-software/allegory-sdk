@@ -400,6 +400,13 @@ function catany(sep, ...args) {
 		return null
 	if (args.length == 1)
 		return args[0] != null ? args[0] : null
+	else if (args.length == 2)
+		return (
+			  args[0] != null && args[1] != null ? args[0] + sep + args[1]
+			: args[0] != null ? args[0]
+			: args[1] != null ? args[1]
+			: null
+		)
 	let a = args.filter(non_null)
 	return a.length ? a.join(sep) : null
 }
