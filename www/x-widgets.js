@@ -30,7 +30,8 @@ GLOBALS
 
 */
 
-DEBUG_ATTACH_TIME = false
+PROFILE_ATTACH_TIME = true
+SLOW_ATTACH_TIME_MS = 10
 
 function set_theme(theme) {
 	on_dom_load(function() {
@@ -150,40 +151,34 @@ function component(tag, category, cons) {
 
 		e.do_bind = function(on) {
 			if (on) {
-
-				let t0 = DEBUG_ATTACH_TIME && time()
-
+				let t0 = PROFILE_ATTACH_TIME && time()
 				this.fire('bind', true)
 				if (this.id) {
 					window.fire('widget_bind', this, true)
 					window.fire(this.id+'.bind', this, true)
 				}
-
-				if (DEBUG_ATTACH_TIME) {
+				if (PROFILE_ATTACH_TIME) {
 					let t1 = time()
 					let dt = (t1 - t0) * 1000
-					if (dt > 10)
+					if (dt >= SLOW_ATTACH_TIME_MS)
 						debug((dt).dec().padStart(3, ' ')+'ms', this.debug_name())
 				}
-
 				e.update()
-
 			} else {
-
 				update_frame.cancel()
-
 				this.fire('bind', false)
 				if (this.id) {
 					window.fire('widget_bind', this, false)
 					window.fire(this.id+'.bind', this, false)
 				}
-
 			}
 		}
 
-		if (DEBUG_ATTACH_TIME)
+		if (PROFILE_ATTACH_TIME)
 			e.debug_name = function(prefix) {
-				prefix = (prefix && prefix + ' < ' || '') + this.type + (this.id ? ' ' + this.id : '')
+				prefix = catany(' < ', prefix, this.id || this.type)
+				if (this.id) // enough context
+					return prefix
 				let p = this; do { p = p.popup_target || p.parent } while (p && !p.debug_name)
 				if (!(p && p.debug_name))
 					return prefix
@@ -2175,7 +2170,8 @@ component('x-tabs', 'Containers', function(e) {
 
 	e.on('bind', function(on) {
 		if (on)
-			select_default_tab()
+			if (!e.selected_tab)
+				select_default_tab()
 		document.on('layout_changed', update_selection_bar, on)
 	})
 
