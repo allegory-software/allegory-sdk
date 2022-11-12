@@ -842,7 +842,7 @@ function nav_widget(e) {
 	function check_field(col) {
 		if (col == null) return
 		if (!e.bound) return
-		let field = e.fld(col)
+		let field = e.optfld(col)
 		if (!field)
 			warn(col+' not in rowset '+e.rowset_name)
 		return field
@@ -4118,8 +4118,8 @@ function nav_widget(e) {
 					}
 				}
 				if (rt.values) {
-					for (let k in rt.values)
-						e.reset_cell_val(row, e.all_fields_map[k], rt.values[k])
+					for (let fi = 0; fi < rt.values.length; fi++)
+						e.reset_cell_val(row, e.all_fields[fi], rt.values[fi])
 				}
 
 				e.end_set_state()
