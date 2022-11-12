@@ -61,7 +61,7 @@ STRINGS
 	s.lower()
 	s.num(z)
 	s.display_name()
-	s.cat(sep, ...)
+	s.catany(sep, ...)
 	s.words() -> a
 MULTI-LANGUAGE STUBS
 	S(id, default)                         get labeled string in current language
@@ -392,11 +392,25 @@ method(String, 'display_name', function() {
 }
 
 {
+// concat args, skipping null ones. returns null if all args are null.
 let non_null = (s) => s != null
-function catargs(sep, ...args) {
-	return args.filter(non_null).join(sep)
+function catany(sep, ...args) {
+	if (args.length == 0)
+		return null
+	if (args.length == 1)
+		return args[0] != null ? args[0] : null
+	let a = args.filter(non_null)
+	return a.length ? a.join(sep) : null
 }
-method(String, 'cat', function(...args) { return catargs(this, ...args) })
+method(String, 'catany', function(...args) { return catany(this, ...args) })
+}
+
+// concat args. if any arg is null return nothing.
+function catall(...args) {
+	for (let i = 0, n = args.length; i < n; i++)
+		if (args[i] == null)
+			return
+	return catany('', ...args)
 }
 
 method(String, 'esc', function() {
