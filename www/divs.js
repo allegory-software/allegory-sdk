@@ -611,6 +611,31 @@ Array.prototype.ul = function(attrs, only_if_many) { return ul(this, 'ul', attrs
 Array.prototype.ol = function(attrs, only_if_many) { return ul(this, 'ol', attrs, only_if_many) }
 }
 
+/* Virtual DOM: WIP ------------------------------------------------------- */
+
+function V(tag, attrs, ...child_nodes) {
+	return {tag: tag, attrs: attrs, child_nodes: child_nodes}
+}
+
+(function() {
+	function same_nodes(t, items) {
+		if (t.length != items.length)
+			return false
+		for (let i = 0; i < t.length; i++) {
+			let id0 = items[i].id
+			let id1 = isstr(t[i]) ? t[i] : t[i].id
+			if (!id1 || !id0 || id1 != id0)
+				return false
+		}
+		return true
+	}
+	method(Element, 'set_vdom', function(vdom_nodes) {
+		for (let i = 0, n = vdom_nodes.length; i < n; i++) {
+			let v = vdom_nodes[i]
+		}
+	})
+})()
+
 /* instance method overriding for components ---------------------------------
 
 NOTE: unlike global override(), e.override() cannot override built-in methods.
@@ -1244,10 +1269,10 @@ easing.bounce = function(t) {
 	}
 }
 
+// TODO: remove these, use raf_wrap() only!
 function raf(f, last_id) {
 	return last_id == null ? requestAnimationFrame(f) : last_id
 }
-
 cancel_raf = cancelAnimationFrame
 
 var in_raf = false

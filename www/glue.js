@@ -488,6 +488,10 @@ method(Array, 'set', function(a) {
 	return this
 })
 
+method(Array, 'copy', function() {
+	return [].extend(this)
+})
+
 method(Array, 'insert', function(i, v) {
 	if (i == null)
 		this.push(v)
@@ -572,9 +576,9 @@ method(Array, 'binsearch', function(v, cmp, i1, i2) {
 
 alias(Array, 'each', 'forEach')
 
-method(Array, 'tokeys', function(v) {
+method(Array, 'tokeys', function(v, cons) {
 	v = or(v, true)
-	let t = obj()
+	let t = cons || obj()
 	for (let k of this)
 		t[k] = v
 	return t

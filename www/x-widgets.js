@@ -1832,9 +1832,12 @@ component('x-context-menu', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
 // widget placeholder
 // ---------------------------------------------------------------------------
+calls:
+	e.replace_child_widget()
+*/
 
 component('x-widget-placeholder', function(e) {
 
@@ -1892,16 +1895,16 @@ component('x-widget-placeholder', function(e) {
 })
 
 // ---------------------------------------------------------------------------
-// widget-items widget mixin
+// "widget containing a list of items that are widgets" mixin
 // ---------------------------------------------------------------------------
 // publishes:
 //   e.items
 // implements:
 //   e.child_widgets()
+//   e.replace_child_widget()
 //   e.remove_child_widget()
 // calls:
-//   e.do_init_items()
-//   e.do_remove_item(item)
+//   e.update({new_items:, removed_items:, items:})
 // ---------------------------------------------------------------------------
 
 widget_items_widget = function(e) {
@@ -1927,9 +1930,11 @@ widget_items_widget = function(e) {
 
 		// diff between t and cur_items keyed on id or item identity.
 
+		let new_items, removed_items
+
 		// map current items by identity and by id.
-		let cur_set = new Set()
-		let cur_by_id = new Map()
+		let cur_set = set()
+		let cur_by_id = map()
 		for (let item of cur_items) {
 			cur_set.add(item)
 			if (item.id)
@@ -1937,20 +1942,34 @@ widget_items_widget = function(e) {
 		}
 
 		// create new items or reuse-by-id.
-		let items = new Set()
+		let items = set()
 		for (let v of t) {
-			// v is either an item from cur_items, an id, or the attrs for a new item.
+			// v is either an item from cur_items, an id, or the opts for a new item.
 			let cur_item = cur_set.has(v) ? v : cur_by_id.get(v)
-			items.add(component.create(v, cur_item))
+			let item = component.create(v, cur_item)
+			items.add(item)
+			if (!cur_item) {
+				if (!new_items)
+					new_items = []
+				new_items.push(item)
+			}
 		}
 
 		// remove items that are missing from the new set.
 		for (let item of cur_items)
-			if (!items.has(item))
-				e.do_remove_item(item)
+			if (!items.has(item)) {
+				if (!remove_items)
+					removed_items = []
+				removed_items.push(item)
+			}
 
-		items = [...items]
-		return items
+		e.update({
+			new_items     : new_items,
+			removed_items : removed_items,
+			items         : items,
+		})
+
+		return items.toarray()
 	}
 
 	function serialize_items(items) {
@@ -1958,16 +1977,6 @@ widget_items_widget = function(e) {
 		for (let item of items)
 			t.push(item.serialize())
 		return t
-	}
-
-	e.do_init_items = noop // stub
-
-	e.do_remove_item = function(item) { // stub
-		item.remove()
-	}
-
-	e.set_items = function() {
-		e.do_init_items()
 	}
 
 	e.prop('items', {store: 'var', convert: diff_items, serialize: serialize_items, default: []})
@@ -1980,14 +1989,14 @@ widget_items_widget = function(e) {
 	// parent-of selectable widget protocol.
 	e.replace_child_widget = function(old_item, new_item) {
 		let i = e.items.indexOf(old_item)
-		let items = [...e.items]
+		let items = e.items.copy()
 		items[i] = new_item
 		e.items = items
 	}
 
 	// parent-of selectable widget protocol.
 	e.remove_child_widget = function(item) {
-		let items = [...e.items]
+		let items = e.items.copy()
 		items.remove_value(item)
 		e.items = items
 	}
@@ -2017,7 +2026,8 @@ component('x-tabs', 'Containers', function(e) {
 	if (e.fixed_header)
 		html_items.remove_value(e.fixed_header)
 
-	e.prop('tabs_side', {store: 'var', type: 'enum', enum_values: ['top', 'bottom', 'left', 'right'], default: 'top', attr: true})
+	e.prop('tabs_side', {store: 'var', type: 'enum',
+			enum_values: ['top', 'bottom', 'left', 'right'], default: 'top', attr: true})
 
 	e.prop('can_rename_items', {store: 'var', type: 'bool', default: false})
 	e.prop('can_add_items'   , {store: 'var', type: 'bool', default: false})
@@ -2028,14 +2038,32 @@ component('x-tabs', 'Containers', function(e) {
 
 	e.prop('header_width', {store: 'var', type: 'number'})
 
-	e.selection_bar = div({class: 'x-tabs-selection-bar'})
-	e.add_button = div({class: 'x-tabs-tab x-tabs-add-button fa fa-plus', tabindex: 0})
-	e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.add_button, e.fixed_header)
-	e.content = div({class: 'x-tabs-content x-container'})
-	e.add(e.header, e.content)
-
 	e.set_header_width = function(v) {
 		e.header.w = v
+	}
+
+	e.do_update = function(opt) {
+
+		if (!e.selection_bar) {
+			e.selection_bar = div({class: 'x-tabs-selection-bar'})
+			e.add_button = div({class: 'x-tabs-tab x-tabs-add-button fa fa-plus', tabindex: 0})
+			e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.add_button, e.fixed_header)
+			e.content = div({class: 'x-tabs-content x-container'})
+			e.add(e.header, e.content)
+		}
+
+		if (opt.new_items) {
+
+		}
+
+		if (opt.removed_items) {
+
+		}
+
+		if (opt.items) {
+
+		}
+
 	}
 
 	function item_bound(on) {
