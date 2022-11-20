@@ -4651,7 +4651,7 @@ function nav_widget(e) {
 					: e.can_actually_move_rows_error()
 			}
 
-			let s = '\n'.cat(
+			let s = catany('\n',
 				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
 				an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
 				un > 0 ? un + ' ' + nrows(un) + ' ' + S('modified', 'modified') : null,

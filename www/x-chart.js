@@ -42,20 +42,23 @@ component('x-chart', 'Input', function(e) {
 
 	// model ------------------------------------------------------------------
 
-	function compute_step_and_range(wanted_n, min_sum, max_sum, scale_base, scales) {
+	function compute_step_and_range(wanted_n, min_sum, max_sum, scale_base, scales, decimals) {
 		scale_base = scale_base || 10
 		scales = scales || [1, 2, 2.5, 5]
 		let d = max_sum - min_sum
 		let min_scale_exp = floor((d ? logbase(d, scale_base) : 0) - 2)
 		let max_scale_exp = floor((d ? logbase(d, scale_base) : 0) + 2)
 		let n0, step
+		let step_multiple = decimals != null ? 10**(-decimals) : null
 		for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
 			for (let scale of scales) {
 				let step1 = scale_base ** scale_exp * scale
 				let n = d / step1
 				if (n0 == null || abs(n - wanted_n) < n0) {
-					n0 = n
-					step = step1
+					if (step_multiple == null || floor(step1 / step_multiple) == step1) {
+						n0 = n
+						step = step1
+					}
 				}
 			}
 		}
@@ -100,14 +103,12 @@ component('x-chart', 'Input', function(e) {
 	let sum_defs, group_cols, all_split_groups
 
 	function reset_model() {
-		sum_defs = []
+		sum_defs = null
 		group_cols = null
-		all_split_groups = []
+		all_split_groups = null
 	}
 
-	function update_model() {
-
-		reset_model()
+	function try_update_model() {
 
 		if (!e.nav) return
 		if (e.sum_cols == null) return
@@ -115,17 +116,19 @@ component('x-chart', 'Input', function(e) {
 
 		// parse `sum_cols`: `COL1[/AVG|MIN|MAX|SUM][..COL2]`.
 		// the `..` operator ties two line graphs together into a closed shape.
+		sum_defs = []
 		let tied_back = false
 		for (let col of e.sum_cols.replaceAll('..', '.. ').words()) {
 			let tied = col.includes('..')
 			col = col.replace('..', '')
 			let agg = 'avg'; col.replace(/\/[^\/]+$/, k => { agg = k; return '' })
 			let fld = e.nav.optfld(col)
-			if (fld)  // it's enough for one sum_col to be valid.
+			if (fld) // it's enough for one sum_col to be valid.
 				sum_defs.push({field: fld, tied: tied, tied_back: tied_back, agg: agg})
 			tied_back = fld ? tied : false
 		}
-		if (!sum_defs.length) return
+		if (!sum_defs.length)
+			return
 
 		// parse `group_cols`: `COL[/OFFSET][/UNIT][/FREQ]`.
 		group_cols = []
@@ -136,10 +139,8 @@ component('x-chart', 'Input', function(e) {
 			col = col.replace(/\/[^\/]+$/, k => { unit   = k.substring(1); return '' })
 			col = col.replace(/\/[^\/]+$/, k => { offset = k.substring(1).num(); return '' })
 			let fld = e.nav.optfld(col)
-			if (!fld) {
-				reset_model()
-				return // all group_cols must be valid.
-			}
+			if (!fld)
+				return
 			group_cols.push(col)
 			if (freq != null || offset != null || unit != null) {
 				range_defs[col] = {
@@ -149,15 +150,21 @@ component('x-chart', 'Input', function(e) {
 				}
 			}
 		}
+		if (!group_cols.length)
+			return
+
+		if (!e.nav.rows.length)
+			return true
 
 		// group rows and compute the sums on each group.
 		// all_split_groups : [split_group1, ...]   split groups (cgs) => superimposed graphs.
 		// split_group      : [row_group1, ...]     row groups (xgs) => one graph of sum points.
 		// row_group        : [row1, ...]           each row group => one sum point.
+		all_split_groups = []
 		for (let sum_def of sum_defs) {
 
 			let split_groups = e.nav.row_groups({
-				col_groups : (e.split_cols ? e.split_cols+'>' : '') + group_cols,
+				col_groups : catany('>', e.split_cols, group_cols.join(' ')),
 				range_defs : range_defs,
 				rows       : e.nav.rows,
 			})
@@ -179,6 +186,13 @@ component('x-chart', 'Input', function(e) {
 			all_split_groups.extend(split_groups)
 		}
 
+		return true
+	}
+
+	function update_model() {
+		reset_model()
+		if (!try_update_model())
+			reset_model()
 		e.update()
 	}
 
@@ -199,6 +213,10 @@ component('x-chart', 'Input', function(e) {
 	}
 
 	function pie_slices() {
+
+		if (!all_split_groups)
+			return
+
 		let groups = all_split_groups[0] // TODO: draw multiple pies for each split group
 
 		let slices = []
@@ -408,6 +426,8 @@ component('x-chart', 'Input', function(e) {
 		}
 
 		pointermove = function(ev, mx, my) {
+			if (!all_split_groups)
+				return
 			let r = canvas.rect()
 			mx -= r.x
 			my -= r.y
@@ -475,34 +495,39 @@ component('x-chart', 'Input', function(e) {
 			// compute vertical (sum) and horizontal (val) ranges.
 			// also compute a map of
 			let xgs = map() // {x_key -> xg}
-			let min_val =  1/0
-			let max_val = -1/0
-			let min_sum =  1/0
-			let max_sum = -1/0
-			let sum_step
-			let user_min_val = or(e.min_val, -1/0)
-			let user_max_val = or(e.max_val,  1/0)
-			for (let cg of all_split_groups) {
-				for (let xg of cg) {
-					let sum = xg.sum
-					let val = xg.key_vals[0] // TODO: only works for numbers!
-					min_sum = min(min_sum, sum)
-					max_sum = max(max_sum, sum)
-					min_val = min(min_val, val)
-					max_val = max(max_val, val)
-					xg.visible = val >= user_min_val && val <= user_max_val
-					xgs.set(val, xg)
+			let min_val  = 0
+			let max_val  = 1
+			let min_sum  = 0
+			let max_sum  = 1
+			let sum_step = 1
+			if (all_split_groups) {
+				min_val =  1/0
+				max_val = -1/0
+				min_sum =  1/0
+				max_sum = -1/0
+				let user_min_val = or(e.min_val, -1/0)
+				let user_max_val = or(e.max_val,  1/0)
+				for (let cg of all_split_groups) {
+					for (let xg of cg) {
+						let sum = xg.sum
+						let val = xg.key_vals[0] // TODO: only works for numbers!
+						min_sum = min(min_sum, sum)
+						max_sum = max(max_sum, sum)
+						min_val = min(min_val, val)
+						max_val = max(max_val, val)
+						xg.visible = val >= user_min_val && val <= user_max_val
+						xgs.set(val, xg)
+					}
 				}
 			}
 
 			// clip/stretch ranges to given fixed values.
-			min_val = or(e.min_val, min_val)
-			max_val = or(e.max_val, max_val)
-			min_sum = or(e.min_sum, min_sum)
-			max_sum = or(e.max_sum, max_sum)
-			sum_step = or(e.sum_step, sum_step)
+			min_val  = or(e.min_val, min_val)
+			max_val  = or(e.max_val, max_val)
+			min_sum  = or(e.min_sum, min_sum)
+			max_sum  = or(e.max_sum, max_sum)
 
-			if (columns) {
+			if (columns && all_split_groups) {
 				let val_unit = (max_val - min_val) / xgs.size
 				min_val -= val_unit / 2
 				max_val += val_unit / 2
@@ -510,12 +535,12 @@ component('x-chart', 'Input', function(e) {
 
 			// compute min, max and step of y-axis markers so that 1) the step is
 			// on a module and the spacing between lines is the closest to an ideal.
-			if (sum_defs.length) {
+			if (sum_defs) {
 				let y_spacing = rotate ? 80 : 40 // wanted space between y-axis markers
 				let target_n = round(h / y_spacing) // wanted number of y-axis markers
 				let fld = sum_defs[0].field
 				;[sum_step, min_sum, max_sum] =
-					compute_step_and_range(target_n, min_sum, max_sum, fld.scale_base, fld.scales)
+					compute_step_and_range(target_n, min_sum, max_sum, fld.scale_base, fld.scales, fld.decimals)
 			}
 
 			// compute min, max and step of x-axis markers so that 1) the step is
@@ -537,17 +562,18 @@ component('x-chart', 'Input', function(e) {
 			}
 
 			// compute polygon's points.
-			for (let cg of all_split_groups) {
-				let xgi = 0
-				for (let xg of cg) {
-					let val = xg.key_vals[0]
-					xg.x = round(lerp(val, min_val, max_val, 0, w))
-					xg.y = round(lerp(xg.sum, min_sum, max_sum, h - py2, 0))
-					if (xg.y != xg.y)
-						xg.y = xg.sum
-					xgi++
+			if (all_split_groups)
+				for (let cg of all_split_groups) {
+					let xgi = 0
+					for (let xg of cg) {
+						let val = xg.key_vals[0]
+						xg.x = round(lerp(val, min_val, max_val, 0, w))
+						xg.y = round(lerp(xg.sum, min_sum, max_sum, h - py2, 0))
+						if (xg.y != xg.y)
+							xg.y = xg.sum
+						xgi++
+					}
 				}
-			}
 
 			// draw x-axis labels & reference lines.
 
@@ -602,34 +628,34 @@ component('x-chart', 'Input', function(e) {
 
 			// draw y-axis labels & reference lines.
 
-			if (sum_step != null)
-			for (let sum = min_sum; sum <= max_sum; sum += sum_step) {
-				// draw y-axis label.
-				let y = round(lerp(sum, min_sum, max_sum, h - py2, 0))
-				let s = sum_label(null, null, sum)
-				s = isnode(s) ? s.textContent : s
-				let m = cx.measureText(s)
-				let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
-				cx.save()
-				if (rotate) {
-					let px = -5
-					let py = round(y + m.width / 2)
-					cx.translate(px, py)
-					cx.rotate(rad * -90)
-				} else {
-					let px = -m.width - 10
-					let py = round(y + text_h / 2)
-					cx.translate(px, py)
+			if (sum_defs)
+				for (let sum = min_sum; sum <= max_sum; sum += sum_step) {
+					// draw y-axis label.
+					let y = round(lerp(sum, min_sum, max_sum, h - py2, 0))
+					let s = sum_label(null, null, sum)
+					s = isnode(s) ? s.textContent : s
+					let m = cx.measureText(s)
+					let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
+					cx.save()
+					if (rotate) {
+						let px = -5
+						let py = round(y + m.width / 2)
+						cx.translate(px, py)
+						cx.rotate(rad * -90)
+					} else {
+						let px = -m.width - 10
+						let py = round(y + text_h / 2)
+						cx.translate(px, py)
+					}
+					cx.fillText(s, 0, 0)
+					cx.restore()
+					// draw y-axis strike-through line marker.
+					cx.strokeStyle = ref_line_color
+					cx.beginPath()
+					cx.moveTo(0 + .5, y - .5)
+					cx.lineTo(w + .5, y - .5)
+					cx.stroke()
 				}
-				cx.fillText(s, 0, 0)
-				cx.restore()
-				// draw y-axis strike-through line marker.
-				cx.strokeStyle = ref_line_color
-				cx.beginPath()
-				cx.moveTo(0 + .5, y - .5)
-				cx.lineTo(w + .5, y - .5)
-				cx.stroke()
-			}
 
 			// draw the axis.
 			cx.strokeStyle = ref_line_color
@@ -662,85 +688,91 @@ component('x-chart', 'Input', function(e) {
 
 			// draw the chart lines or columns.
 
-			cx.rect(0, 0, w, h)
-			cx.clip()
+			if (all_split_groups) {
 
-			let cgi = 0
-			for (let cg of all_split_groups) {
+				cx.rect(0, 0, w, h)
+				cx.clip()
 
-				let color = line_color(cgi, all_split_groups.length)
+				let cgi = 0
+				for (let cg of all_split_groups) {
 
-				if (columns) {
+					let color = line_color(cgi, all_split_groups.length)
 
-					cx.fillStyle = color
-					for (let xg of cg) {
-						let [x, y, w, h] = bar_rect(cgi, xg)
-						cx.beginPath()
-						cx.rect(x, y, w, h)
-						cx.fill()
-					}
+					if (columns) {
 
-				} else {
-
-					// draw the line.
-
-					if (!cg.tied_back)
-						cx.beginPath()
-
-					let x0, x
-					for (let xg of (cg.tied_back ? cg.reverse() : cg)) {
-						x = xg.x
-						if (x0 == null && !cg.tied_back) {
-							x0 = x
-							cx.moveTo(x + .5, xg.y + .5)
-						} else {
-							cx.lineTo(x + .5, xg.y + .5)
-						}
-					}
-
-					if (area && !cg.tied && !cg.tied_back) {
-						cx.lineTo(x  + .5, h - py2 + .5)
-						cx.lineTo(x0 + .5, h - py2 + .5)
-						cx.closePath()
-					}
-
-					if (area && !cg.tied) {
-						cx.fillStyle = line_color(cgi, all_split_groups.length, .5)
-						cx.fill()
-					}
-
-					cx.strokeStyle = color
-					cx.stroke()
-
-					// draw a dot on each line cusp.
-					if (dots) {
-						cx.fillStyle = cx.strokeStyle
+						cx.fillStyle = color
 						for (let xg of cg) {
+							let [x, y, w, h] = bar_rect(cgi, xg)
 							cx.beginPath()
-							cx.arc(xg.x, xg.y, 3, 0, 2*PI)
+							cx.rect(x, y, w, h)
 							cx.fill()
 						}
+
+					} else {
+
+						// draw the line.
+
+						if (!cg.tied_back)
+							cx.beginPath()
+
+						let x0, x
+						for (let xg of (cg.tied_back ? cg.reverse() : cg)) {
+							x = xg.x
+							if (x0 == null && !cg.tied_back) {
+								x0 = x
+								cx.moveTo(x + .5, xg.y + .5)
+							} else {
+								cx.lineTo(x + .5, xg.y + .5)
+							}
+						}
+
+						if (area && !cg.tied && !cg.tied_back) {
+							cx.lineTo(x  + .5, h - py2 + .5)
+							cx.lineTo(x0 + .5, h - py2 + .5)
+							cx.closePath()
+						}
+
+						if (area && !cg.tied) {
+							cx.fillStyle = line_color(cgi, all_split_groups.length, .5)
+							cx.fill()
+						}
+
+						cx.strokeStyle = color
+						cx.stroke()
+
+						// draw a dot on each line cusp.
+						if (dots) {
+							cx.fillStyle = cx.strokeStyle
+							for (let xg of cg) {
+								cx.beginPath()
+								cx.arc(xg.x, xg.y, 3, 0, 2*PI)
+								cx.fill()
+							}
+						}
+
 					}
 
+					cgi++
 				}
 
-				cgi++
-			}
+				// draw the hit line.
 
-			// draw the hit line.
+				if (hit_cg) {
+					cx.beginPath()
+					cx.moveTo(hit_x + .5, .5)
+					cx.lineTo(hit_x + .5, h - py2 + 4.5)
+					cx.strokeStyle = label_color
+					cx.setLineDash([3, 2])
+					cx.stroke()
+					cx.setLineDash(empty_array)
+				}
 
-			if (hit_cg) {
-				cx.beginPath()
-				cx.moveTo(hit_x + .5, .5)
-				cx.lineTo(hit_x + .5, h - py2 + 4.5)
-				cx.strokeStyle = label_color
-				cx.setLineDash([3, 2])
-				cx.stroke()
-				cx.setLineDash(empty_array)
 			}
 
 			cx.restore()
+
 		}
+
 	}
 
 	renderer.line      = () => renderer_line_or_columns()
