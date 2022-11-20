@@ -40,7 +40,7 @@ let init_usr_nav = function() {
 		save_on_input: true,
 	})
 
-	nav.on('reset', function(event) {
+	nav.on('reset', function usr_nav_reset(event) {
 
 		if (event == 'logout') {
 			// logout has created an anonymous user + session for us.
@@ -119,19 +119,19 @@ let init_usr_nav = function() {
 	head.add(nav)
 }
 
-let set_signed_in = function() {
+let set_signed_in = function set_signed_in() {
 	let usr = window.usr
 	let signed_out = usr === null
 	let signed_in = usr && usr.anonymous == false || false
 	let    roles = (usr && usr.roles || '').words().tokeys()
 	let ru_roles = (usr && usr.realusr_roles || '').words().tokeys()
-	setglobal('signed_in' , signed_in)
-	setglobal('signed_out', signed_out)
-	setglobal('signed_in_dev'  , !!roles.dev)
-	setglobal('signed_in_admin', !!roles.admin)
-	setglobal('signed_in_realusr_dev'  , !!ru_roles.dev)
-	setglobal('signed_in_realusr_admin', !!ru_roles.admin)
-	setglobal('signed_in_anonymous', !!(usr && usr.anonymous))
+	setglobal('signed_in'              , signed_in, false)
+	setglobal('signed_out'             , signed_out, false)
+	setglobal('signed_in_dev'          , !!roles.dev, false)
+	setglobal('signed_in_admin'        , !!roles.admin, false)
+	setglobal('signed_in_realusr_dev'  , !!ru_roles.dev, false)
+	setglobal('signed_in_realusr_admin', !!ru_roles.admin, false)
+	setglobal('signed_in_anonymous'    , !!(usr && usr.anonymous), false)
 }
 
 function init_auth() {
