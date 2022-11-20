@@ -37,7 +37,7 @@ function load_opensans()
 end
 
 js[[
-on_dom_load(function() {
+on_dom_load(function init_all() {
 	init_xmodule({layers: []})
 	init_components()
 	init_root_widget()
@@ -59,6 +59,7 @@ x-nav.js
 x-input.js
 x-listbox.js
 x-grid.js
+x-chart.js
 x-module.js
 ]]
 
