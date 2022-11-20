@@ -10,11 +10,18 @@
 		[hidden]
 		[disabled]
 		.popup
+		.modal
 		.modal-dialog
 
 	Init requirements:
 		init_components()
 
+	debugging:
+		e.debug_if()
+		e.debug_open_if()
+		e.debug_close_if()
+		e.debug_name()
+		e.debug_anon_name()
 	element attribute manipulation:
 		e.hasattr(k)
 		e.attr(k[, v]) -> v
@@ -37,7 +44,6 @@
 		e.parent
 		e.index
 		e.first, e.last, e.next, e.prev
-		e.positionally_contains(ce) -> t|f
 	dom tree querying:
 		iselem(v) -> t|f
 		isnode(v) -> t|f
@@ -136,7 +142,6 @@
 	camvas:
 		e.clear()
 	UI patterns:
-		e.popup([target|false], [side], [align], [px], [py])
 		e.modal([on])
 		overlay(attrs, content)
 		live_move_mixin(e)
@@ -145,6 +150,46 @@
 		exec-ing of <script runit> scripts from injected html
 
 */
+
+// debugging -----------------------------------------------------------------
+
+{
+let debug_indent = ''
+let e = Element.prototype
+e.debug_anon_name = function() { return this.tag }
+e.debug_name = function(suffix) {
+	suffix = catany('>', this.id || this.debug_anon_name(), suffix)
+	if (this.id) // enough context
+		return suffix
+	let p = this
+	do {
+		p = p.popup_target || p.parent
+	} while (p && !p.debug_name)
+	if (!(p && p.debug_name))
+		return suffix
+	return p.debug_name(suffix)
+}
+
+e.debug = function(action, ...args) {
+	debug(debug_indent + (action || ''), this.debug_name(), ...args)
+}
+
+e.debug_if = function(cond, ...args) {
+	if (!cond) return
+	this.debug(...args)
+}
+
+e.debug_open_if = function(cond, ...args) {
+	if (!cond) return
+	this.debug(...args)
+	debug_indent += '  '
+}
+
+e.debug_close_if = function(cond) {
+	if (!cond) return
+	debug_indent = debug_indent.slice(2)
+}
+}
 
 // element attribute manipulation --------------------------------------------
 
@@ -236,9 +281,6 @@ property(Element, 'classes', {
 // css querying --------------------------------------------------------------
 
 method(Element, 'css', function(prop, state) {
-	// TODO:
-	// if (in_raf)
-	// 	pr('css() called inside animation frame')
 	let css = getComputedStyle(this, state)
 	return prop ? css[prop] : css
 })
@@ -323,20 +365,6 @@ method(NodeList, 'each', function(f) {
 property(NodeList, 'first', function() { return this[0] })
 property(NodeList, 'last' , function() { return this[this.length-1] })
 
-method(Element, 'positionally_contains', function(e) {
-	if (this.contains(e))
-		return true
-	let pe = e
-	while(1) {
-		pe = pe.popup_target || pe.parent
-		if (!pe)
-			break
-		if (pe == this)
-			return true
-	}
-	return false
-})
-
 /* dom tree manipulation with lifecycle management ---------------------------
 
 The "lifecycle management" part of this is basically poor man's web components.
@@ -350,8 +378,8 @@ needs to be done through this API exclusively for components to work.
 let component_init = obj() // {tag->init}
 let component_selector = obj() // {tag->selector}
 function register_component(tag, init, selector) {
-	selector = selector || tag
 	let tagName = tag.upper()
+	selector = selector || tagName
 	component_init[tagName] = init
 	component_selector[tagName] = selector
 }
@@ -360,7 +388,6 @@ method(Element, 'init_component', function() {
 	let tagName = this.tagName
 	let init = component_init[tagName]
 	let sel = component_selector[tagName]
-	// pr(tagName, sel, !!init, this.len)
 	if (init && (sel == tagName || this.matches(sel)))
 		init(this)
 	else
@@ -368,7 +395,7 @@ method(Element, 'init_component', function() {
 })
 
 // the component is responsible for calling init_child_components()
-// in its init function if it knows it can have components as children.
+// in its constructor if it knows it can have components as children.
 method(Element, 'init_child_components', function() {
 	if (this.len)
 		for (let ce of this.children)
@@ -376,7 +403,7 @@ method(Element, 'init_child_components', function() {
 })
 }
 
-method(Element, 'bind_children', function(on) {
+method(Element, 'bind_children', function bind_children(on) {
 	if (!this.len)
 		return
 	assert(isbool(on))
@@ -384,7 +411,7 @@ method(Element, 'bind_children', function(on) {
 		ce.bind(on)
 })
 
-method(Element, 'bind', function(on) {
+method(Element, 'bind', function bind(on) {
 	assert(isbool(on))
 	if (this.do_bind) { // any tag that added a do_bind() method
 		if (!this.bound == !on)
@@ -392,7 +419,6 @@ method(Element, 'bind', function(on) {
 		this.bound = on
 		this.do_bind(on)
 	} else if (this._bind) { // any tag that registered a bind event
-		pr('BIND', this.id, trace())
 		if (!this.bound == !on)
 			return
 		this.bound = on
@@ -512,10 +538,12 @@ method(Element, 'clear', function() {
 	return this
 })
 
-method(Element, 'set', function(s, whitespace) {
+method(Element, 'set', function E_set(s, whitespace) {
 	if (typeof s == 'function')
 		s = s()
 	if (isnode(s)) {
+		if (this.nodes.length == 1 && this.nodes[0] == s)
+			return this
 		if (iselem(s) && s.isConnected)
 			s.bind(false)
 		this.clear()
@@ -530,7 +558,7 @@ method(Element, 'set', function(s, whitespace) {
 	return this
 })
 
-method(Element, 'add', function(...args) {
+method(Element, 'add', function E_add(...args) {
 	for (let s of args)
 		if (s != null) {
 			s = T(s)
@@ -545,7 +573,7 @@ method(Element, 'add', function(...args) {
 	return this
 })
 
-method(Element, 'insert', function(i0, ...args) {
+method(Element, 'insert', function E_insert(i0, ...args) {
 	for (let i = args.length-1; i >= 0; i--) {
 		let s = args[i]
 		if (s != null) {
@@ -562,13 +590,13 @@ method(Element, 'insert', function(i0, ...args) {
 	return this
 })
 
-override(Element, 'remove', function(inherited) {
+override(Element, 'remove', function E_remove(inherited) {
 	this.bind(false)
 	inherited.call(this)
 	return this
 })
 
-method(Element, 'replace', function(e0, s) {
+method(Element, 'replace', function E_replace(e0, s) {
 	s = T(s)
 	if (e0 != null) {
 		if (s === e0)
@@ -586,7 +614,7 @@ method(Element, 'replace', function(e0, s) {
 
 // move element to a new parent and/or index without rebinding, unless
 // the widget requires rebinding by returning false from `.do_move()`.
-method(Element, 'move', function(pe, i) {
+method(Element, 'move', function E_move(pe, i) {
 	assert(this.isConnected)
 	pe = pe || this.parent
 	let must_unbind = this.do_move && !this.do_move(pe, i)
@@ -866,9 +894,9 @@ function init_components() {
 	root = document.documentElement  // for debugging, don't use in code.
 	body = document.body // for debugging, don't use in code.
 	head = document.head // for debugging, don't use in code.
-	pr('ROOT INIT')
 	root.init_component()
-	pr('ROOT BIND')
+	if (DEBUG_BIND)
+		debug('ROOT BIND ---------------------------------')
 	root.bind(true)
 }
 
@@ -974,6 +1002,7 @@ method(Element, 'hide', function(on) {
 	if (this.hidden == on)
 		return
 	this.hidden = on
+	this.fire('show', !on)
 })
 
 method(Element, 'show', function(on) {
@@ -1039,28 +1068,13 @@ property(Element, 'effectively_disabled', {get: function() {
 		|| (this.parent && this.parent.effectively_disabled) || false
 }})
 
+/* NOTE: doesn't check `display: none` and `visibility: hidden` from CSS ! */
 property(Element, 'effectively_hidden', {get: function() {
 	if (this.bool_attr('hidden'))
-		return true
-	let css = this.css()
-	if (css.display == 'none')
-		return true
-	if (css.visibility == 'hidden')
 		return true
 	if (!this.parent)
 		return true
 	if (this.parent.effectively_hidden)
-		return true
-	return false
-}})
-
-/* faster variant that doesn't check `display: none` and `visibility: hidden` from CSS */
-property(Element, 'effectively_hidden_nocss', {get: function() {
-	if (this.bool_attr('hidden'))
-		return true
-	if (!this.parent)
-		return true
-	if (this.parent.effectively_hidden_nocss)
 		return true
 	return false
 }})
@@ -1284,7 +1298,7 @@ function raf_wrap(f) {
 		f()
 		in_raf = false
 	}
-	let wrapper = function() {
+	let wrapper = function raf_wrapper() {
 		id = raf(raf_f, id)
 	}
 	wrapper.cancel = function() {
@@ -1372,345 +1386,6 @@ method(Element, 'hit_test_sides', function(mx, my, d1, d2) {
 method(CanvasRenderingContext2D, 'clear', function() {
 	this.clearRect(0, 0, this.canvas.width, this.canvas.height)
 })
-
-/* popup pattern -------------------------------------------------------------
-
-Why is this so complicated? Because the forever not-quite-there-yet web
-platform doesn't have the notion of a global z-index so we can't have
-relatively positioned and styled popups that are also painted last i.e.
-on top of everything, so we have to choose between popups that are
-well-positioned but most probably clipped or obscured by other elements,
-or popups that stay on top but have to be manually positioned and styled,
-and kept in sync with the position of their target. We choose the latter
-since we have a lot of implicit "stacking contexts" (read: abstraction
-leaks of the graphics engine) and we try to auto-update the popup position
-the best we can, but there will be cases where you'll have to call popup()
-to update the popup's position manually. We simply don't have an observer
-for tracking changes to an element's position on screen or relative to
-another element.
-
-Calls `popup_visible` to allow changing/animating popup's visibility
-based on target's hover state or focused state.
-
-*/
-
-{
-
-let popup_timer = function() {
-
-	let tm = {}
-	let timer_id
-	let handlers = new Set()
-	let frequency = .25
-
-	function call_handlers() {
-		for (let f of handlers)
-			f()
-	}
-
-	tm.add = function(f) {
-		handlers.add(f)
-		timer_id = timer_id || runevery(frequency, call_handlers)
-	}
-
-	tm.remove = function(f) {
-		handlers.delete(f)
-		if (!handlers.size) {
-			clearInterval(timer_id)
-			timer_id = null
-		}
-	}
-
-	return tm
-}
-
-popup_timer = popup_timer()
-
-property(Element, 'popup_level',
-	function() {
-		if (this._popup_level != null)
-			return this._popup_level
-		if (iselem(this.parent))
-			return this.parent.popup_level
-		else
-			return 0
-	},
-	function(n) {
-		this._popup_level = n
-	}
-)
-
-let popup_state = function(e) {
-
-	let s = {}
-
-	let target, side, align, px, py, pw, ph, ox, oy
-
-	s.update = function(target1, side1, align1, px1, py1, pw1, ph1, ox1, oy1) {
-		side  = or(side1, side)
-		align = or(align1, align)
-		px    = or(px1, px)
-		py    = or(py1, py)
-		pw    = or(pw1, pw)
-		ph    = or(ph1, ph)
-		ox    = or(ox1, ox)
-		oy    = or(oy1, oy)
-		target1 = strict_or(target1, target) // because `null` means remove...
-		if (target1 != target) {
-			if (target)
-				free()
-			target = target1 && E(target1)
-			if (target)
-				init()
-			e.popup_target = target
-		}
-		if (!should_show()) // prevent expensive raf() if hidden.
-			e.hide()
-		else
-			raf(do_update)
-	}
-
-	function init() {
-		if (target != document.body) { // prevent infinite recursion.
-			target.on('bind', target_bind)
-		}
-		if (target.isConnected || target.bound)
-			target_bind(true)
-	}
-
-	function free() {
-		if (target) {
-			target_bind(false)
-			target.off('bind', target_bind)
-			target = null
-		}
-	}
-
-	function window_scroll(ev) {
-		if (target && ev.target.contains(target))
-			raf(update)
-	}
-
-	let fixed
-
-	function target_bind(on) {
-		fixed = null
-		if (on) {
-			let css = target.css()
-			// simulate css font inheritance.
-			// NOTE: this overrides the same properties declared in css when
-			// the element is displayed as a popup, which leaves `!important`
-			// as the only way to override back these properties from css.
-			e.__css_inherited = obj()
-			for (let k of ['font-family', 'font-size', 'line-height']) {
-				if (!e.style[k]) {
-					e.style[k] = css[k]
-					e.__css_inherited[k] = true
-				}
-			}
-			e.class('popup')
-			document.body.add(e)
-			if (e.local_z == null) // get local z-index from css on first bind.
-				e.local_z = num(e.css('z-index'), 0)
-			e.popup_level = target.popup_level + 1
-			// NOTE: this limits local z-index range to 0..9.
-			e.style.zIndex = e.popup_level * 10 + e.local_z
-			update()
-			popup_timer.add(update)
-		} else {
-			for (let k in e.__css_inherited)
-				e.style[k] = null
-			e.remove()
-			e.popup_level = null
-			e.local_z = null
-			e.class('popup', false)
-			popup_timer.remove(update)
-		}
-		e.fire('popup_bind', on, target)
-
-		// changes in target size updates the popup position.
-		if (target.detect_resize) {
-			target.detect_resize()
-			target.on('resize', update, on)
-		}
-
-		// allow popup_update() to change popup visibility on target hover.
-		// NOTE: this doesn't work for inner alignments, it will flicker!
-		target.on('pointerenter', update, on)
-		target.on('pointerleave', update, on)
-
-		// allow popup_update() to change popup visibility on target focus.
-		target.on('focusin' , update, on)
-		target.on('focusout', update, on)
-
-		// scrolling on any of the target's parents updates the popup position.
-		window.on('scroll', window_scroll, on, true)
-
-		// layout changes update the popup position.
-		document.on('layout_changed', update, on)
-	}
-
-	function layout(w, h, side, align) {
-
-		let tr = target.rect()
-
-		let x = ox || 0
-		let y = oy || 0
-		let tx1 = tr.x + or(px, 0)
-		let ty1 = tr.y + or(py, 0)
-		let tx2 = tx1 + or(pw, tr.w)
-		let ty2 = ty1 + or(ph, tr.h)
-		let tw = tx2 - tx1
-		let th = ty2 - ty1
-
-		let x0, y0
-		if (side == 'right') {
-			;[x0, y0] = [tx2, ty1]
-		} else if (side == 'left') {
-			;[x0, y0] = [tx1 - w, ty1]
-		} else if (side == 'top') {
-			;[x0, y0] = [tx1, ty1 - h]
-		} else if (side == 'bottom') {
-			side = 'bottom'
-			;[x0, y0] = [tx1, ty2]
-		} else if (side == 'inner-right') {
-		 	;[x0, y0] = [tx2 - w, ty1]
-		} else if (side == 'inner-left') {
-		 	;[x0, y0] = [tx1, ty1]
-		} else if (side == 'inner-top') {
-		 	;[x0, y0] = [tx1, ty1]
-		} else if (side == 'inner-bottom') {
-		 	;[x0, y0] = [tx1, ty2 - h]
-		} else if (side == 'inner-center') {
-			;[x0, y0] = [
-				tx1 + (tw - w) / 2,
-				ty1 + (th - h) / 2
-			]
-		} else {
-			assert(false)
-		}
-
-		let sd = side.replace('inner-', '')
-		let sdx = sd == 'left' || sd == 'right'
-		let sdy = sd == 'top'  || sd == 'bottom'
-		if (align == 'center' && sdy)
-			x0 = x0 + (tw - w) / 2
-		else if (align == 'center' && sdx)
-			y0 = y0 + (th - h) / 2
-		else if (align == 'end' && sdy)
-			x0 = x0 + tw - w
-		else if (align == 'end' && sdx)
-			y0 = y0 + th - h
-
-		x0 += (side == 'inner-right'  || (sdy && align == 'end')) ? -x : x
-		y0 += (side == 'inner-bottom' || (sdx && align == 'end')) ? -y : y
-
-		return [x0, y0]
-	}
-
-	function should_show() {
-		if (!target || !target.isConnected)
-			return
-		if (target.effectively_hidden_nocss)
-			return
-		if (e.popup_visible)
-			if (!e.popup_visible(target))
-				return
-		return true
-	}
-
-	function do_update() {
-
-		if (!target || target.effectively_hidden) { // slow-to-calculate
-			e.hide()
-			return
-		} else {
-			e.show()
-		}
-
-		if (fixed == null)
-			fixed = e.css().position == 'fixed'
-
-		let er = e.rect()
-		let w = er.w
-		let h = er.h
-
-		let side1 = side
-		let align1 = align
-		let [x0, y0] = layout(w, h, side1, align1)
-
-		// if popup doesn't fit the screen, first try to change its side
-		// or alignment and relayout, and if that didn't work, its offset.
-
-		let br = window.rect()
-		let d = 10
-		let bw = br.w
-		let bh = br.h
-
-		let out_x1 = x0 < d
-		let out_y1 = y0 < d
-		let out_x2 = x0 + w > (bw - d)
-		let out_y2 = y0 + h > (bh - d)
-
-		let re
-		if (side1 == 'bottom' && out_y2) {
-			re = 1; side1 = 'top'
-		} else if (side1 == 'top' && out_y1) {
-			re = 1; side1 = 'bottom'
-		} else if (side1 == 'right' && out_x2) {
-			re = 1; side1 = 'left'
-		} else if (side1 == 'top' && out_x1) {
-			re = 1; side1 = 'bottom'
-		}
-
-		let vert =
-			   side1 == 'bottom'
-			|| side1 == 'top'
-			|| side1 == 'inner-bottom'
-			|| side1 == 'inner-top'
-
-		if (align1 == 'end' && ((vert && out_x2) || (!vert && out_y2))) {
-			re = 1; align1 = 'start'
-		} else if (align1 == 'start' && ((vert && out_x1) || (!vert && out_y1))) {
-			re = 1; align1 = 'end'
-		}
-
-		if (re)
-			[x0, y0] = layout(w, h, side1, align1)
-
-		// if nothing else works, adjust the offset to fit the screen.
-		let ox2 = max(0, x0 + w - (bw - d))
-		let ox1 = min(0, x0)
-		let oy2 = max(0, y0 + h - (bh - d))
-		let oy1 = min(0, y0)
-		x0 -= ox1 ? ox1 : ox2
-		y0 -= oy1 ? oy1 : oy2
-
-		e.x = fixed ? x0 : window.scrollX + x0
-		e.y = fixed ? y0 : window.scrollY + y0
-
-		if (e.popup_updated)
-			e.popup_updated(target, side1, align1)
-
-	}
-
-	function update() {
-		if (!should_show()) {
-			e.hide()
-			return
-		}
-		do_update()
-	}
-
-	return s
-}
-
-method(HTMLElement, 'popup', function(target, side, align, px, py, pw, ph, ox, oy) {
-	this.__popup_state = this.__popup_state || popup_state(this)
-	this.__popup_state.update(target, side || 'bottom', align || 'start', px, py, pw, ph, ox, oy)
-})
-
-}
 
 // modal window pattern ------------------------------------------------------
 
