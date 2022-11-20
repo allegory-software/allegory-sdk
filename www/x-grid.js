@@ -1895,14 +1895,6 @@ component('x-grid', 'Input', function(e) {
 
 	// empty placeholder text -------------------------------------------------
 
-	e.empty_rt = richtext({
-		classes: 'x-grid-empty-rt',
-		align_x: 'center',
-		align_y: 'center',
-	})
-	e.empty_rt.hidden = true
-	e.cells_view.add(e.empty_rt)
-
 	let barrier
 	e.set_empty_text = function(s) {
 		if (barrier) return
@@ -1910,13 +1902,25 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	e.on('bind', function(on) {
-		document.on('prop_changed', function(te, k, v) {
-			if (te == e.empty_rt && k == 'content') {
-				barrier = true
-				e.empty_text = v
-				barrier = false
-			}
-		})
+
+		if (on && !e.empty_rt) {
+			e.empty_rt = richtext({
+				classes: 'x-grid-empty-rt',
+				align_x: 'center',
+				align_y: 'center',
+			})
+			e.empty_rt.hidden = true
+			e.cells_view.add(e.empty_rt)
+
+			document.on('prop_changed', function(te, k, v) {
+				if (te == e.empty_rt && k == 'content') {
+					barrier = true
+					e.empty_text = v
+					barrier = false
+				}
+			})
+		}
+
 	})
 
 	e.prop('empty_text', {store: 'var', slot: 'lang'})
