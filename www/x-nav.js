@@ -573,6 +573,8 @@ function nav_widget(e) {
 	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
 	e.prop('action_band_visible'     , {store: 'var', type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true, slot: 'user'})
 
+	e.debug_anon_name = () => catany('', e.type, catall(':', e.rowset_name))
+
 	// init -------------------------------------------------------------------
 
 	let init = e.init
@@ -589,9 +591,7 @@ function nav_widget(e) {
 		init_row_validators()
 	}
 
-	e.on('bind', function(on) {
-		if (on && e.id == 'mm_actions_listbox')
-			pr('LB BIND')
+	e.on('bind', function nav_bind(on) {
 		bind_param_nav(on)
 		bind_rowset_name(e.rowset_name, on)
 		if (on) {
@@ -4800,19 +4800,7 @@ component('x-nav', function(e) {
 
 	nav_widget(e)
 
-	e.hidden = true
-
-	let val_widget_do_update = e.do_update
-	e.do_update = function(opt) {
-		if (opt.reload) {
-			e.reload()
-			return
-		}
-		if (opt.all) {
-			val_widget_do_update()
-			return
-		}
-	}
+	return {hidden: true}
 
 })
 
