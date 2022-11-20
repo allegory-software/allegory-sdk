@@ -30,7 +30,11 @@ GLOBALS
 
 */
 
-PROFILE_BIND_TIME = false
+DEBUG_INIT = false
+DEBUG_BIND = false
+DEBUG_UPDATE = false
+DEBUG_WIDGET_BIND = false
+PROFILE_BIND_TIME = true
 SLOW_BIND_TIME_MS = 10
 
 function set_theme(theme) {
@@ -61,6 +65,8 @@ fires:
 --------------------------------------------------------------------------- */
 
 {
+
+// attr <-> prop conversions -------------------------------------------------
 
 let set_attr_func = function(e, k, opt) {
 	if (opt.to_attr)
@@ -97,6 +103,70 @@ let attr_val_opt = function(e) {
 	return opt
 }
 
+// deferred DOM updating with popup support ----------------------------------
+
+method(Element, 'positionally_contains', function(e) {
+	if (this.contains(e))
+		return true
+	let pe = e
+	while(1) {
+		pe = pe.popup_target || pe.parent
+		if (!pe)
+			break
+		if (pe == this)
+			return true
+	}
+	return false
+})
+
+let updating = false
+let update_set = set() // {widget}
+let position_set = set() // {widget}
+
+let position_with_parents = function(e) {
+	if (position_set.has(e)) {
+		position_with_parents(pe.popup_target || pe.parent)
+		pe.debug_if(DEBUG_UPDATE, 'M')
+		pe.do_measure()
+		pe.debug_if(DEBUG_UPDATE, 'P')
+		pe.do_position()
+		position_set.delete(e)
+	}
+}
+
+let update_all = raf_wrap(function update_all() {
+
+	updating = true
+
+	// NOTE: do_update() can add widgets which calls bind() on them which calls
+	// update() which adds more widgets to update_set while iterating it.
+	// The iterator will iterate over those as well (tested on FF & Chrome).
+	for (let e of update_set)
+		e._do_update()
+
+	// DOM updates done. We can now positon any elements that require measuring
+	// the DOM to position themselves. For each element that wants to measure
+	// the DOM, we make sure that all its parents/popup-targets are measured
+	// and positioned first, in top-to-bottom order.
+	for (let e of position_set)
+		position_with_parents(e.popup_target || e.parent)
+
+	// only leafs left to measure & position: measure all first, then position.
+	for (let e of position_set) {
+		e.debug_if(DEBUG_UPDATE, 'M')
+		e.do_measure()
+	}
+	for (let e of position_set) {
+		e.debug_if(DEBUG_UPDATE, 'P')
+		e.do_position()
+	}
+
+	update_set.clear()
+	position_set.clear()
+
+	updating = false
+})
+
 // component(tag[, category], cons) -> create({option: value}) -> element.
 function component(tag, category, cons) {
 
@@ -116,74 +186,81 @@ function component(tag, category, cons) {
 
 	function initialize(e, ...args) {
 
+		e.debug_anon_name = function() { return this.type }
+
 		// async updating with animation frames.
-		{
 		e.do_update = noop
-		let opt
-
-		var update_frame = raf_wrap(function() {
-			e.updating = true
-			e.do_update(opt)
-			e.updating = false
-			opt = null
-		})
-
-		e.update = function(opt1) {
-			if (e.updating) { // update() called inside do_update()
-				// TOOD: pr('nested update() call')
-				return
-			}
-			if (opt)
-				if (opt1)
-					assign_opt(opt, opt1)
+		let update_opt
+		e.update = function(opt) {
+			if (update_opt)
+				if (opt)
+					assign_opt(update_opt, opt)
 				else
-					opt.all = true
-			else if (opt1)
-				opt = opt1
+					update_opt.all = true
+			else if (opt)
+				update_opt = opt
 			else
-				opt = {all: true}
-			if (e.bound)
-				update_frame()
+				update_opt = {all: true}
+			if (!e.bound)
+				return
+			if (e.hidden && !update_opt.show)
+				return
+			if (update_set.has(e)) // update() inside do_update(), eg. a prop was set.
+				return
+			update_set.add(e)
+			if (updating)
+				return
+			// ^^ update() called while updating: the update_set iterator will
+			// call do_update() in this frame, no need to ask for another frame.
+			update_all()
 		}
+		e._do_update = function() {
+			let opt = update_opt
+			update_opt = null
+			e.debug_open_if(DEBUG_UPDATE, '*', Object.keys(opt).join(','))
+			e.do_update(opt)
+			e.position()
+			e.debug_close_if(DEBUG_UPDATE)
 		}
-
-		e.bool_attr('_bind', true)
+		e.position = function() {
+			if (!e.do_position)
+				return
+			position_set.add(e)
+			if (updating)
+				return
+			// ^^ position() called while updating: no need to ask for another frame.
+			update_all()
+		}
 
 		e.do_bind = function(on) {
 			if (on) {
+				e.debug_open_if(DEBUG_BIND, '+')
 				let t0 = PROFILE_BIND_TIME && time()
-				this.fire('bind', true)
-				if (this.id) {
-					window.fire('widget_bind', this, true)
-					window.fire(this.id+'.bind', this, true)
+				e.fire('bind', true)
+				if (e.id) {
+					window.fire('widget_bind', e, true)
+					window.fire(e.id+'.bind', e, true)
 				}
 				if (PROFILE_BIND_TIME) {
 					let t1 = time()
 					let dt = (t1 - t0) * 1000
 					if (dt >= SLOW_BIND_TIME_MS)
-						debug((dt).dec().padStart(3, ' ')+'ms', this.debug_name())
+						debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name())
 				}
 				e.update()
+				e.debug_close_if(DEBUG_BIND)
 			} else {
-				update_frame.cancel()
-				this.fire('bind', false)
-				if (this.id) {
-					window.fire('widget_bind', this, false)
-					window.fire(this.id+'.bind', this, false)
+				e.debug_open_if(DEBUG_BIND, '-')
+				update_set.delete(e)
+				position_set.delete(e)
+				e.fire('bind', false)
+				if (e.id) {
+					window.fire('widget_bind', e, false)
+					window.fire(e.id+'.bind', e, false)
 				}
+				e.debug_close_if(DEBUG_BIND)
 			}
 		}
-
-		if (PROFILE_BIND_TIME)
-			e.debug_name = function(prefix) {
-				prefix = catany(' < ', prefix, this.id || this.type)
-				if (this.id) // enough context
-					return prefix
-				let p = this; do { p = p.popup_target || p.parent } while (p && !p.debug_name)
-				if (!(p && p.debug_name))
-					return prefix
-				return p.debug_name(prefix)
-			}
 
 		e.initialized = null // for log_add_event().
 
@@ -202,6 +279,8 @@ function component(tag, category, cons) {
 		e.class('x-widget')
 
 		disablable_widget(e)
+
+		e.debug_open_if(DEBUG_INIT, '^')
 
 		let cons_opt = construct(e)
 
@@ -232,6 +311,8 @@ function component(tag, category, cons) {
 
 		if (e.id)
 			window.fire(e.id+'.init', e)
+
+		e.debug_close_if(DEBUG_INIT)
 	}
 
 	register_component(tag, initialize)
@@ -359,8 +440,7 @@ let component_props = function(e, iprops) {
 					set_attr(v1)
 				if (!priv)
 					prop_changed(e, prop, v1, v0)
-				if (!e.updating)
-					e.update()
+				e.update()
 			}
 			if (set_attr && !e.hasattr(prop))
 				set_attr(dv)
@@ -385,8 +465,7 @@ let component_props = function(e, iprops) {
 				e[setter](v, v0)
 				if (!priv)
 					prop_changed(e, prop, v, v0)
-				if (!e.updating)
-					e.update()
+				e.update()
 			}
 		} else {
 			assert(!('default' in opt))
@@ -401,46 +480,48 @@ let component_props = function(e, iprops) {
 				e[setter](v, v0)
 				if (!priv)
 					prop_changed(e, prop, v, v0)
-				if (!e.updating)
-					e.update()
+				e.update()
 			}
 		}
 
 		// id-based dynamic binding of external widgets.
 		if (opt.bind_id) {
 			let ID = prop
+			let DEBUG_ID = DEBUG_WIDGET_BIND && '['+ID+']'
 			let REF = opt.bind_id
 			function widget_bind(te, on) {
 				if (e[ID] == te.id)
 					e[REF] = on ? te : null
+					e.debug_if(DEBUG_WIDGET_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
 			}
 			function widget_id_changed(te, id1, id0) {
 				e[ID] = id1
 			}
-			let bind
-			function id_changed(id1, id0) {
-				if (e.bound)
-					e[REF] = e.resolve_linked_widget(id1)
+			let bind_widget
+			function id_prop_changed(id1, id0) {
 				if (id0 != null) {
-					e.on('bind', bind, false)
-					bind = null
-					window.on(id0+'.id_changed', widget_id_changed, false)
+					bind_widget(false)
+					e.on('bind', bind_widget, false)
+					bind_widget = null
 				}
 				if (id1 != null) {
-					bind = function(on) {
+					bind_widget = function(on) {
 						e[REF] = on ? e.resolve_linked_widget(e[ID]) : null
-						window.on(ID+'.bind', widget_bind, on)
+						e.debug_if(DEBUG_WIDGET_BIND, on ? '==' : '=/=', DEBUG_ID, e[ID])
+						window.on(id1+'.bind', widget_bind, on)
+						window.on(id1+'.id_changed', widget_id_changed, true)
 					}
-					e.on('bind', bind, true)
-					window.on(id1+'.id_changed', widget_id_changed, true)
+					e.on('bind', bind_widget, true)
 				}
+				if (bind_widget && e.bound)
+					bind_widget(true)
 			}
 			prop_changed = function(e, k, v1, v0) {
 				fire_prop_changed(e, k, v1, v0)
-				id_changed(v1, v0)
+				id_prop_changed(v1, v0)
 			}
 			if (e[ID] != null)
-				id_changed(e[ID])
+				id_prop_changed(e[ID])
 		}
 
 		e.property(prop, get, set)
@@ -1290,17 +1371,299 @@ function stylable_widget(e) {
 	e.prop('theme', {store: 'var', attr: true})
 }
 
+/* ---------------------------------------------------------------------------
+// popup widget mixin
+// ---------------------------------------------------------------------------
+publishes:
+	e.popup_target
+	e.popup_side
+	e.popup_align
+	e.popup_{px,py,pw,ph}
+	e.popup_{ox,oy}
+	e.popup_level
+	e.inherit_font
+// ---------------------------------------------------------------------------
+
+/*
+Why are popups so complicated? Because the forever not-quite-there-yet web
+platform doesn't have the notion of a global z-index so we can't have
+relatively positioned (and styled) popups that are also painted last i.e.
+on top of everything, so we have to choose between popups that are
+browser-positioned but most probably clipped or obscured by other elements,
+or popups that stay on top but their position needs to be manually calculated
+and kept in sync with the position of their target. Because we have a lot of
+implicit "stacking contexts" (read: abstraction leaks of the graphics engine),
+we cannot put popups in the DOM inside their target as clipping would be
+inevitable in that case, so manual positioning is the only option really.
+*/
+
+function popup_widget(e) {
+
+	// view -------------------------------------------------------------------
+
+	let er, tr, br, css, tcss
+	let window_scroll_x
+	let window_scroll_y
+
+	e.do_measure = function() {
+		er = e.rect()
+		tr = e.popup_target && e.popup_target.rect()
+		br = window.rect()
+		css = e.css()
+		tcss = e.popup_target && e.popup_target.css()
+		window_scroll_x = window.scrollX
+		window_scroll_y = window.scrollY
+	}
+
+	function layout(w, h, side, align) {
+
+		let x = e.popup_ox || 0
+		let y = e.popup_oy || 0
+		let tx1 = tr.x + or(e.popup_px, 0)
+		let ty1 = tr.y + or(e.popup_py, 0)
+		let tx2 = tx1 + or(e.popup_pw, tr.w)
+		let ty2 = ty1 + or(e.popup_ph, tr.h)
+		let tw = tx2 - tx1
+		let th = ty2 - ty1
+
+		let x0, y0
+		if (side == 'right') {
+			;[x0, y0] = [tx2, ty1]
+		} else if (side == 'left') {
+			;[x0, y0] = [tx1 - w, ty1]
+		} else if (side == 'top') {
+			;[x0, y0] = [tx1, ty1 - h]
+		} else if (side == 'bottom') {
+			side = 'bottom'
+			;[x0, y0] = [tx1, ty2]
+		} else if (side == 'inner-right') {
+		 	;[x0, y0] = [tx2 - w, ty1]
+		} else if (side == 'inner-left') {
+		 	;[x0, y0] = [tx1, ty1]
+		} else if (side == 'inner-top') {
+		 	;[x0, y0] = [tx1, ty1]
+		} else if (side == 'inner-bottom') {
+		 	;[x0, y0] = [tx1, ty2 - h]
+		} else if (side == 'inner-center') {
+			;[x0, y0] = [
+				tx1 + (tw - w) / 2,
+				ty1 + (th - h) / 2
+			]
+		} else {
+			assert(false)
+		}
+
+		let sd = e.popup_side.replace('inner-', '')
+		let sdx = sd == 'left' || sd == 'right'
+		let sdy = sd == 'top'  || sd == 'bottom'
+		if (align == 'center' && sdy)
+			x0 = x0 + (tw - w) / 2
+		else if (align == 'center' && sdx)
+			y0 = y0 + (th - h) / 2
+		else if (align == 'end' && sdy)
+			x0 = x0 + tw - w
+		else if (align == 'end' && sdx)
+			y0 = y0 + th - h
+
+		x0 += (side == 'inner-right'  || (sdy && align == 'end')) ? -x : x
+		y0 += (side == 'inner-bottom' || (sdx && align == 'end')) ? -y : y
+
+		return [x0, y0]
+	}
+
+	function should_show() {
+		if (!(e.popup_target && e.popup_target.isConnected))
+			return false
+		if (e.popup_target.effectively_hidden)
+			return false
+		if (e.popup_visible)
+			if (!e.popup_visible(e.popup_target))
+				return false
+		return true
+	}
+
+	e.do_update = function() {
+		e.show(should_show())
+	}
+
+	e.do_position = function() {
+
+		let w = er.w
+		let h = er.h
+
+		let side  = e.popup_side
+		let align = e.popup_align
+		let [x0, y0] = layout(w, h, side, align)
+
+		// if popup doesn't fit the screen, first try to change its side
+		// or alignment and relayout, and if that didn't work, its offset.
+
+		let d = 10
+		let bw = br.w
+		let bh = br.h
+
+		let out_x1 = x0 < d
+		let out_y1 = y0 < d
+		let out_x2 = x0 + w > (bw - d)
+		let out_y2 = y0 + h > (bh - d)
+
+		let re
+		if (side == 'bottom' && out_y2) {
+			re = 1; side = 'top'
+		} else if (side == 'top' && out_y1) {
+			re = 1; side = 'bottom'
+		} else if (side == 'right' && out_x2) {
+			re = 1; side = 'left'
+		} else if (side == 'top' && out_x1) {
+			re = 1; side = 'bottom'
+		}
+
+		let vert =
+			   side == 'bottom'
+			|| side == 'top'
+			|| side == 'inner-bottom'
+			|| side == 'inner-top'
+
+		if (align == 'end' && ((vert && out_x2) || (!vert && out_y2))) {
+			re = 1; align = 'start'
+		} else if (align == 'start' && ((vert && out_x1) || (!vert && out_y1))) {
+			re = 1; align = 'end'
+		}
+
+		if (re)
+			[x0, y0] = layout(w, h, side, align)
+
+		// if nothing else works, adjust the offset to fit the screen.
+		let ox2 = max(0, x0 + w - (bw - d))
+		let ox1 = min(0, x0)
+		let oy2 = max(0, y0 + h - (bh - d))
+		let oy1 = min(0, y0)
+		x0 -= ox1 ? ox1 : ox2
+		y0 -= oy1 ? oy1 : oy2
+
+		let fixed = css.position == 'fixed'
+
+		e.x = fixed ? x0 : window_scroll_x + x0
+		e.y = fixed ? y0 : window_scroll_y + y0
+
+		if (e.do_position_popup)
+			e.do_position_popup(target, side, align)
+
+	}
+
+	// controller -------------------------------------------------------------
+
+	e.prop('popup_target' , {store: 'var', private: true, convert: (v1, v0) => E(v1) })
+	e.prop('popup_side'   , {store: 'var', private: true})
+	e.prop('popup_align'  , {store: 'var', private: true})
+	e.prop('popup_px'     , {store: 'var', private: true})
+	e.prop('popup_py'     , {store: 'var', private: true})
+	e.prop('popup_pw'     , {store: 'var', private: true})
+	e.prop('popup_ph'     , {store: 'var', private: true})
+	e.prop('popup_ox'     , {store: 'var', private: true})
+	e.prop('popup_oy'     , {store: 'var', private: true})
+	e.prop('inherit_font' , {store: 'var', private: true, type: 'bool'})
+
+	e.property('popup_level',
+		function() {
+			if (this._popup_level != null)
+				return this._popup_level
+			if (iselem(this.parent))
+				return this.parent.popup_level
+			else
+				return 0
+		},
+		function(n) {
+			this._popup_level = n
+			this.position()
+		}
+	)
+
+	function window_scroll(ev) {
+		if (e.popup_target && ev.target.contains(e.popup_target))
+			e.position()
+	}
+
+	function update() {
+		e.update()
+	}
+
+	function target_bind(target, on) {
+		if (on) {
+			// simulate css font inheritance.
+			// NOTE: this overrides the same properties declared in css when
+			// the element is displayed as a popup, which leaves `!important`
+			// as the only way to override back these properties from css.
+			if (e.inherit_font)
+				e.__css_inherited = obj()
+				for (let k of ['font-family', 'font-size', 'line-height']) {
+					if (!e.style[k]) {
+						e.style[k] = tcss[k]
+						e.__css_inherited[k] = true
+					}
+				}
+			e.class('popup')
+			document.body.add(e)
+			if (e.local_z == null) // get local z-index from css on first bind.
+				e.local_z = num(css['z-index'], 0)
+			e.popup_level = target.popup_level + 1
+			// NOTE: this limits local z-index range to 0..9.
+			e.style.zIndex = e.popup_level * 10 + e.local_z
+			e.position()
+		} else {
+			if (e.__css_inherited)
+				for (let k in e.__css_inherited)
+					e.style[k] = null
+			e.remove()
+			e.popup_level = null
+			e.local_z = null
+			e.class('popup', false)
+		}
+
+		e.fire('popup_bind', on, target)
+
+		// changes in target size updates the popup position.
+		target.on('resize', update, on)
+
+		// allow popup_update() to change popup visibility on target hover.
+		// NOTE: this doesn't work for inner alignments, it will flicker!
+		target.on('pointerenter', update, on)
+		target.on('pointerleave', update, on)
+
+		// allow popup_update() to change popup visibility on target focus.
+		target.on('focusin' , update, on)
+		target.on('focusout', update, on)
+
+		// scrolling on any of the target's parents updates the popup position.
+		window.on('scroll', window_scroll, on, true)
+
+		// layout changes update the popup position.
+		document.on('layout_changed', update, on)
+	}
+
+	e.set_popup_target = function(te1, te0) {
+		if (te0) {
+			target_bind(te0, false)
+			te0.off('bind', target_bind)
+		}
+		if (te1) {
+			if (te1 != document.body) // prevent infinite recursion.
+				te1.on('bind', target_bind)
+			if (te1.isConnected || te1.bound)
+				target_bind(te1, true)
+		}
+		e.show(should_show()) // prevent DOM measuring while hidden.
+	}
+
+}
+
 // ---------------------------------------------------------------------------
 // tooltip
 // ---------------------------------------------------------------------------
 
 component('x-tooltip', function(e) {
 
-	e.content = div({class: 'x-tooltip-content'})
-	e.icon_box = div()
-	e.body = div({class: 'x-tooltip-body'}, e.icon_box, e.content)
-	e.pin = div({class: 'x-tooltip-tip'})
-	e.add(e.body, e.pin)
+	popup_widget(e)
 
 	e.prop('target'      , {store: 'var', private: true})
 	e.prop('text'        , {store: 'var', slot: 'lang'})
@@ -1328,14 +1691,16 @@ component('x-tooltip', function(e) {
 
 	e.init = function() {
 		e.update({reset_timer: true})
-		e.popup(e.target, e.side, e.align, e.px, e.py, e.pw, e.ph)
+		// TODO
+		// e.popup(e.target, e.side, e.align, e.px, e.py, e.pw, e.ph)
 	}
 
 	e.popup_visible = function(target) { // popup protocol, see divs.js
 		return !!(!e.check || e.check(target))
 	}
 
-	e.popup_updated = function(target, side) {
+	e.do_position_popup = function(target, side, align) {
+		// slide-in + fade-in with css.
 		e.class('visible', !e.hidden)
 		e.attr('side', side)
 	}
@@ -1350,6 +1715,14 @@ component('x-tooltip', function(e) {
 	let last_popup_time
 
 	e.do_update = function(opt) {
+		if (!e.content) {
+			e.content = div({class: 'x-tooltip-content'})
+			e.icon_box = div()
+			e.body = div({class: 'x-tooltip-body'}, e.icon_box, e.content)
+			e.pin = div({class: 'x-tooltip-tip'})
+			e.add(e.body, e.pin)
+			e.content.on('pointerdown', content_pointerdown)
+		}
 		if (e.close_button && !e.xbutton) {
 			e.xbutton = div({class: 'x-tooltip-xbutton fa fa-times'})
 			e.xbutton.on('pointerup', close)
@@ -1364,6 +1737,8 @@ component('x-tooltip', function(e) {
 			reset_timeout_timer()
 		if (e.target)
 			last_popup_time = time()
+		if (opt.text)
+			e.content.set(opt.text, 'pre-wrap')
 	}
 
 	e.set_target = function() {
@@ -1372,8 +1747,7 @@ component('x-tooltip', function(e) {
 	}
 
 	e.set_text = function(s) {
-		e.content.set(s, 'pre-wrap')
-		e.update({reset_timer: true})
+		e.update({text: s, reset_timer: true})
 	}
 
 	let close_timer = timer(close)
@@ -1388,8 +1762,7 @@ component('x-tooltip', function(e) {
 
 	override_property_setter(e, 'hidden', function(inherited, v) {
 		inherited.call(this, v)
-		if (!e.updating)
-			e.update()
+		e.update()
 	})
 
 	e.property('visible',
@@ -1406,7 +1779,7 @@ component('x-tooltip', function(e) {
 		}
 	})
 
-	e.content.on('pointerdown', function(ev) {
+	function content_pointerdown(ev) {
 		if (ev.target != this)
 			return // clicked inside the tooltip.
 
@@ -1417,7 +1790,7 @@ component('x-tooltip', function(e) {
 		first_focusable.focus()
 
 		return false
-	})
+	}
 
 	// autoclose --------------------------------------------------------------
 
@@ -1647,6 +2020,8 @@ component('x-menu', function(e) {
 		document.on('pointerdown', document_pointerdown, on)
 		document.on('rightpointerdown', document_pointerdown, on)
 		document.on('stopped_event', document_stopped_event, on)
+		if (on && target && select_first_item)
+			select_next_item(e.table)
 	})
 
 	function document_pointerdown(ev) {
@@ -1663,23 +2038,13 @@ component('x-menu', function(e) {
 			e.close()
 	}
 
-	let popup_target
-
 	e.close = function(focus_target) {
-		let target = popup_target
-		e.popup(false)
+		let target = e.popup_target
+		e.popup_target = null
 		select_item(e.table, null)
 		if (target && focus_target)
 			target.focus()
 	}
-
-	override(e, 'popup', function(inherited, target, side, align, px, py, pw, ph, ox, oy, select_first_item) {
-		popup_target = target
-		inherited.call(this, target, side, align, px, py, pw, ph, ox, oy)
-		if (select_first_item)
-			select_next_item(e.table)
-		e.table.focus()
-	})
 
 	// navigation
 
@@ -2020,6 +2385,7 @@ component('x-tabs', 'Containers', function(e) {
 	editable_widget(e)
 	contained_widget(e)
 	serializable_widget(e)
+
 	let html_items = widget_items_widget(e)
 
 	e.fixed_header = html_items.find(e => e.tag == 'x-tabs-fixed-header')
@@ -2038,9 +2404,24 @@ component('x-tabs', 'Containers', function(e) {
 
 	e.prop('header_width', {store: 'var', type: 'number'})
 
-	e.set_header_width = function(v) {
-		e.header.w = v
+	// view -------------------------------------------------------------------
+
+	function item_label_changed() {
+		e.update({title_of: this})
 	}
+
+	function update_tab_title(tab) {
+		let label = item_label(tab.item)
+		tab.title_box.set(label)
+		tab.title_box.title = tab.title_box.textContent
+	}
+
+	function update_tab_state(tab, select) {
+		tab.xbutton.hidden = !(select && (e.can_remove_items || e.widget_editing))
+		tab.title_box.contenteditable = select && (e.widget_editing || e.renaming)
+	}
+
+	let selected_tab = null
 
 	e.do_update = function(opt) {
 
@@ -2050,116 +2431,93 @@ component('x-tabs', 'Containers', function(e) {
 			e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.add_button, e.fixed_header)
 			e.content = div({class: 'x-tabs-content x-container'})
 			e.add(e.header, e.content)
+			e.add_button.on('click', add_button_click)
 		}
 
 		if (opt.new_items) {
-
+			for (let item of opt.new_items) {
+				let xbutton = div({class: 'x-tabs-xbutton fa fa-times'})
+				xbutton.hidden = true
+				let title_box = div({class: 'x-tabs-title'})
+				let tab = div({class: 'x-tabs-tab', tabindex: 0}, title_box, xbutton)
+				tab.title_box = title_box
+				tab.xbutton = xbutton
+				tab.on('pointerdown' , tab_pointerdown)
+				tab.on('dblclick'    , tab_dblclick)
+				tab.on('keydown'     , tab_keydown)
+				title_box.on('input' , update_title)
+				title_box.on('blur'  , title_blur)
+				xbutton.on('pointerdown', xbutton_pointerdown)
+				tab.item = item
+				item._tab = tab
+				item.on('label_changed', item_label_changed)
+				update_tab_title(tab)
+				item._tab.x = null
+				e.header.add(item._tab)
+			}
 		}
 
 		if (opt.removed_items) {
-
+			for (let item of opt.removed_items) {
+				e.header.remove(item._tab)
+				item.remove()
+				item._tab = null
+				item.on('label_changed', item_label_changed, false)
+			}
 		}
 
 		if (opt.items) {
-
+			e.header.innerHTML = null
+			for (let item of opt.items)
+				e.header.append(item._tab)
+			e.header.append(e.selection_bar) // , e.add_button, e.fixed_header)
 		}
 
-	}
+		e.header.w = e.header_width
 
-	function item_bound(on) {
-		if (on)
-			update_tab_title(this._tab)
-	}
+		if (opt.title_of)
+			update_tab_title(opt.title_of._tab)
 
-	function item_label_changed() {
-		update_tab_title(this._tab)
-	}
+		let tab = selected_item && selected_item._tab
 
-	function add_item(item) {
-		if (!item._tab) {
-			let xbutton = div({class: 'x-tabs-xbutton fa fa-times'})
-			xbutton.hidden = true
-			let title_box = div({class: 'x-tabs-title'})
-			let tab = div({class: 'x-tabs-tab', tabindex: 0}, title_box, xbutton)
-			tab.title_box = title_box
-			tab.xbutton = xbutton
-			tab.on('pointerdown' , tab_pointerdown)
-			tab.on('dblclick'    , tab_dblclick)
-			tab.on('keydown'     , tab_keydown)
-			title_box.on('input' , update_title)
-			title_box.on('blur'  , title_blur)
-			xbutton.on('pointerdown', xbutton_pointerdown)
-			tab.item = item
-			item._tab = tab
-			item.on('bind', item_bound, true)
-			item.on('label_changed', item_label_changed)
-			update_tab_title(tab)
+		if (selected_tab != tab) {
+
+			if (selected_tab) {
+				selected_tab.class('selected', false)
+				e.content.clear()
+				update_tab_state(selected_tab, false)
+			}
+			selected_tab = tab
+			if (tab) {
+				tab.class('selected', true)
+				e.content.set(tab.item)
+			}
 		}
-		item._tab.x = null
-		e.header.add(item._tab)
-	}
 
-	// widget-items widget protocol.
-	e.do_init_items = function() {
-
-		let sel_tab = e.selected_tab
-
-		e.header.clear()
-		for (let item of e.items)
-			add_item(item)
-		e.header.add(e.selection_bar, e.add_button, e.fixed_header)
-
-		if (sel_tab && sel_tab.parent) // tab was kept
-			select_tab(sel_tab)
-		else {
-			e.selected_tab = null
-			select_default_tab()
+		if (opt.enter_editing) {
+			e.widget_editing = true
+			return
 		}
+
+		if (tab && !e.widget_editing && opt.focus_tab != false && e.auto_focus_first_item)
+			tab.item.focus_first()
+
+		if (tab)
+			update_tab_state(tab, true)
+
+		e.add_button.hidden = !(e.can_add_items || e.widget_editing)
+
 	}
 
-	// widget-items widget protocol.
-	e.do_remove_item = function(item) {
-		let tab = item._tab
-		tab.remove()
-		item.remove()
-		item._tab = null
-		item.on('bind', item_bound, false)
+	let hr, cr
+
+	e.do_measure = function() {
+		hr = e.header.rect()
+		cr = selected_tab && selected_tab.at[0].rect()
 	}
 
-	// widget placeholder protocol.
-	let inh_replace_child_widget = e.replace_child_widget
-	e.replace_child_widget = function(old_widget, new_widget) {
-		let i = e.items.indexOf(old_widget)
-		let tab = e.items[i]._tab
-		tab.item = new_widget
-		new_widget._tab = tab
-		e.content.set(tab.item)
-		update_tab_title(tab)
-		inh_replace_child_widget(old_widget, new_widget)
-	}
-
-	function item_label(item) {
-		return item.get_label ? item.get_label() : item.attr('label')
-	}
-
-	function update_tab_title(tab) {
-		let label = item_label(tab.item)
-		tab.title_box.set(label)
-		tab.title_box.title = tab.title_box.textContent
-		update_selection_bar()
-	}
-
-	function update_tab_state(tab, select) {
-		tab.xbutton.hidden = !(select && (e.can_remove_items || e.widget_editing))
-		tab.title_box.contenteditable = select && (e.widget_editing || e.renaming)
-	}
-
-	function update_selection_bar() {
-		let tab = e.selected_tab
+	e.do_position = function() {
 		let b = e.selection_bar
-		let hr = e.header.rect()
-		let cr = tab && tab.at[0].rect()
-		let br = b.rect()
 		if (e.tabs_side == 'left') {
 			b.x1 = null
 			b.x2 = 0
@@ -2189,65 +2547,57 @@ component('x-tabs', 'Containers', function(e) {
 			b.w  = cr ? cr.w : 0
 			b.h  = null
 		}
-		b.hidden = !tab
+		b.hidden = !selected_tab
 	}
 
-	e.do_update = function() {
-		if (e.selected_tab)
-			update_tab_state(e.selected_tab, true)
-		e.add_button.hidden = !(e.can_add_items || e.widget_editing)
-		update_selection_bar()
+	// controller -------------------------------------------------------------
+
+	function resized() {
+		e.position()
 	}
+
+	var selected_item = null
 
 	e.on('bind', function(on) {
-		if (on)
-			if (!e.selected_tab)
-				select_default_tab()
-		document.on('layout_changed', update_selection_bar, on)
+		e.on('resize', resized, on)
 	})
 
 	function select_tab(tab, focus_tab, enter_editing) {
-		if (e.selected_tab != tab) {
-			if (e.selected_tab) {
-				e.selected_tab.class('selected', false)
-				e.fire('close', e.selected_tab.index)
-				e.content.clear()
-				update_tab_state(e.selected_tab, false)
-			}
-			e.selected_tab = tab
-			if (tab) {
-				tab.class('selected', true)
-				e.fire('open', tab.index)
-				e.content.set(tab.item)
-			}
-			e.update()
-		}
-		if (enter_editing) {
-			e.widget_editing = true
-			return
-		}
-		if (!e.widget_editing && focus_tab != false && e.auto_focus_first_item)
-			tab.item.focus_first()
+		selected_item = tab ? tab.item : null
+		e.update({focus_tab: focus_tab, enter_editing: enter_editing})
 	}
 
-	e.property('selected_index',
-		function() {
-			return e.selected_tab ? e.selected_tab.index : null
-		},
-		function(i) {
-			let tab = i != null ? e.header.at[clamp(i, 0, e.items.length-1)] : null
-			select_tab(tab)
-		}
-	)
+	e.set_items = function() {
+		let i = find_item_index(e.selected_item_id)
+		if (i == null)
+			selected_item = url_path_item()
+		if (!selected_item)
+			selected_item = e.items[i || 0]
+	}
 
-	// selected-item persistent property --------------------------------------
+	// selected_item_id persistent property -----------------------------------
+
+	function item_label(item) {
+		return item.get_label ? item.get_label() : item.attr('label')
+	}
 
 	function format_item(item) {
 		return item_label(item) || item.id
 	}
 
+	function find_item_index(id) {
+		if (!id)
+			return
+		let i = 0
+		for (let item of e.items) {
+			if (item.id == id) return i
+			i++
+		}
+	}
+
 	function format_id(id) {
-		let item = e.items.find(item => item.id == id)
+		let i = find_item_index(id)
+		let item = i != null ? e.items[i] : null
 		return item && item_label(item) || id
 	}
 
@@ -2274,16 +2624,6 @@ component('x-tabs', 'Containers', function(e) {
 	e.prop('selected_item_id', {store: 'var', text: 'Selected Item',
 		editor: item_select_editor, format: format_id})
 
-	function select_default_tab() {
-		if (e.selected_item_id) {
-			let item = e.items.find(item => item.id == e.selected_item_id)
-			if (item)
-				select_tab(item._tab)
-		} else if (e.items.length) {
-			select_tab(url_path_tab() || e.header.at[0])
-		}
-	}
-
 	// url --------------------------------------------------------------------
 
 	function url_path_level() {
@@ -2301,13 +2641,12 @@ component('x-tabs', 'Containers', function(e) {
 		return s.replace(/[\- ]/g, '-').lower()
 	}
 
-	function url_path_tab() {
+	function url_path_item() {
 		let p = url_parse(location.pathname).segments.splice(2)
 		let slug = p[url_path_level()]
-		for (let item of e.items) {
+		for (let item of e.items)
 			if (slug == item_slug(item))
-				return item._tab
-		}
+				return item
 	}
 
 	// drag-move tabs ---------------------------------------------------------
@@ -2347,11 +2686,11 @@ component('x-tabs', 'Containers', function(e) {
 				drag_mx = down_mx - this.ox
 				e.class('moving', true)
 				this.class('moving', true)
-				update_selection_bar()
+				e.position()
 			}
 		} else {
 			e.move_element_update(mx - drag_mx)
-			update_selection_bar()
+			e.position()
 		}
 	}
 
@@ -2371,14 +2710,13 @@ component('x-tabs', 'Containers', function(e) {
 			dragging = false
 		}
 		select_tab(this)
-		update_selection_bar()
 	}
 
 	// key bindings -----------------------------------------------------------
 
 	function set_renaming(renaming) {
 		e.renaming = !!renaming
-		e.selected_tab.title_box.contenteditable = e.renaming
+		selected_tab.title_box.contenteditable = e.renaming
 	}
 
 	function tab_keydown(key, shift, ctrl) {
@@ -2408,8 +2746,8 @@ component('x-tabs', 'Containers', function(e) {
 			}
 			if (key == 'ArrowRight' || key == 'ArrowLeft') {
 				e.selected_index += (key == 'ArrowRight' ? 1 : -1)
-				if (e.selected_tab)
-					e.selected_tab.focus()
+				if (selected_tab)
+					selected_tab.focus()
 				return false
 			}
 		}
@@ -2420,12 +2758,12 @@ component('x-tabs', 'Containers', function(e) {
 			update_title()
 	}
 
-	e.add_button.on('click', function() {
-		if (e.selected_tab == this)
+	function add_button_click() {
+		if (selected_tab == this)
 			return
 		e.items = [...e.items, widget_placeholder({title: 'New', module: e.module})]
 		return false
-	})
+	}
 
 	function tab_dblclick() {
 		if (e.renaming || !e.can_rename_items)
@@ -2436,8 +2774,8 @@ component('x-tabs', 'Containers', function(e) {
 	}
 
 	function update_title() {
-		if (e.selected_tab)
-			e.selected_tab.item.label = e.selected_tab.title_box.innerText
+		if (selected_tab)
+			selected_tab.item.label = selected_tab.title_box.innerText
 		e.update()
 	}
 
@@ -2475,17 +2813,20 @@ component('x-split', 'Containers', function(e) {
 	e.sizer = div({class: 'x-split-sizer'})
 	e.add(e.pane1, e.sizer, e.pane2)
 
-	e.set_item1 = function(ce) { e.pane1.set(ce) }
-	e.set_item2 = function(ce) { e.pane2.set(ce) }
-
 	e.prop('item1', {store: 'var', type: 'widget', convert: component.create})
 	e.prop('item2', {store: 'var', type: 'widget', convert: component.create})
 
 	let horiz, left
 
-	function update_dom() {
+	e.do_update = function() {
+
+		e.xoff()
 		if (!e.item1) e.item1 = widget_placeholder({module: e.module})
 		if (!e.item2) e.item2 = widget_placeholder({module: e.module})
+		e.xon()
+
+		e.pane1.set(e.item1)
+		e.pane2.set(e.item2)
 
 		horiz = e.orientation == 'horizontal'
 		left = e.fixed_side == 'first'
@@ -2505,18 +2846,9 @@ component('x-split', 'Containers', function(e) {
 		e.fixed_pane[horiz ? 'min_w' : 'min_h'] = e.min_size
 		e.auto_pane.min_w = null
 		e.auto_pane.min_h = null
-	}
 
-	e.do_update = function() {
-		update_dom()
 		document.fire('layout_changed')
 	}
-
-	e.xoff()
-	if (html_item1) e.item1 = html_item1
-	if (html_item2) e.item2 = html_item2
-	update_dom()
-	e.xon()
 
 	e.prop('orientation', {store: 'var', type: 'enum', enum_values: ['horizontal', 'vertical'], default: 'horizontal', attr: true})
 	e.prop('fixed_side' , {store: 'var', type: 'enum', enum_values: ['first', 'second'], default: 'first', attr: true})
@@ -2627,11 +2959,17 @@ component('x-split', 'Containers', function(e) {
 		e.update()
 	}
 
+	return {
+		item1: html_item1,
+		item2: html_item2,
+	}
+
 })
 
 component('x-vsplit', function(e) {
-	split.construct(e)
-	return {orientation: 'vertical'}
+	let opt = split.construct(e)
+	opt.orientation = 'vertical'
+	return opt
 })
 
 // ---------------------------------------------------------------------------
@@ -3418,8 +3756,7 @@ function richtext_widget_editing(e) {
 
 component('x-if', 'Containers', function(e) {
 
-	e.init_child_components()
-	let content = [...e.childNodes]
+	let html_content = e.html
 	e.clear()
 	e.hide()
 
@@ -3429,49 +3766,55 @@ component('x-if', 'Containers', function(e) {
 		return !!v
 	}
 
-	function content_effectively_hidden() {
-		for (let node of content)
-			if (!node.effectively_hidden)
-				return false
-		return true
-	}
-
-	function apply(v) {
-		let on = e.cond(v)
-		let was_hidden = content_effectively_hidden()
+	e.do_update = function(opt) {
+		let on = opt.show
+		let on0 = !e.hidden
+		if (on == on0)
+			return
 		if (on) {
-			if (!e.len)
-				for (node of content)
-					e.add(node)
+			e.unsafe_html = html_content
 		} else {
 			e.clear()
 		}
 		e.show(on)
-		if (content_effectively_hidden() != was_hidden)
-			document.fire('layout_changed')
+		document.fire('layout_changed')
+	}
+
+	function global_changed() {
+		let k = e.global
+		if (!k) return
+		let on = e.cond(window[k])
+		e.update({show: on})
 	}
 
 	function bind_global(k, on) {
 		if (!k) return
-		window.on(k+'_changed', apply, on)
+		window.on(k+'_changed', global_changed, on)
 	}
 
 	e.set_global = function(k1, k0) {
+		if (!e.bound) return
 		bind_global(k0, false)
 		bind_global(k1, true)
-		apply(window[k1])
+		global_changed()
 	}
 
 	e.on('bind', function(on) {
 		bind_global(e.global, on)
-		if (on)
-			apply(window[e.global])
+		if (on) {
+			global_changed()
+		} else {
+			e.hide()
+			e.clear()
+		}
 	})
 
 })
 
-function setglobal(k, v) {
-	let v0 = window[k]
+function setglobal(k, v, default_v) {
+	let v0 = strict_or(window[k], default_v)
+	if (v === v0)
+		return
 	window[k] = v
 	broadcast('global_changed', k, v, v0)
 	broadcast(k+'_changed', v, v0)
@@ -3479,4 +3822,6 @@ function setglobal(k, v) {
 
 // container widget with `display: content`. useful to group together
 // an invisible widget like an x-nav with a visible one to make a tab.
-component('x-ct', 'Containers', noop)
+component('x-ct', 'Containers', function(e) {
+	e.init_child_components()
+})
