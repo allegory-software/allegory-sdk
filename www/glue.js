@@ -43,8 +43,8 @@ CALLBACKS
 ERRORS
 	pr[int](...)
 	warn(...)
-	debug(...)
-	trace()
+	debug(...); debug_if(cond, ...)
+	trace(...); trace_if(cond, ...)
 	assert(v, err, ...) -> v
 	stacktrace()
 EXTENDING BUILT-IN OBJECTS
@@ -165,6 +165,8 @@ BROWSER DETECTION
 
 */
 
+DEBUG_AJAX = false
+
 // types ---------------------------------------------------------------------
 
 isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
@@ -265,6 +267,16 @@ pr    = console.log
 warn  = console.log
 debug = console.log
 trace = console.trace
+
+function trace_if(cond, ...args) {
+	if (!cond) return
+	console.trace(...args)
+}
+
+function debug_if(cond, ...args) {
+	if (!cond) return
+	debug(...args)
+}
 
 function assert(ret, err, ...args) {
 	if (ret == null || ret === false) {
@@ -1522,15 +1534,6 @@ let log_remove_event = function(target, name, f, capture) {
 
 let hidden_events = {prop_changed: 1, attr_changed: 1, stopped_event: 1}
 
-function passthrough_caller(ev, f) {
-	if (isobject(ev.detail) && ev.detail.args) {
-		//if (!(ev.type in hidden_events))
-		//debug(ev.type, ...ev.detail.args)
-		return f.call(this, ...ev.detail.args, ev)
-	} else
-		return f.call(this, ev)
-}
-
 let on = function(name, f, enable, capture) {
 	assert(enable === undefined || typeof enable == 'boolean')
 	if (enable == false) {
@@ -1547,9 +1550,17 @@ let on = function(name, f, enable, capture) {
 	} else {
 		listener = f.listener
 		if (!listener) {
-			let caller = callers[name] || passthrough_caller
+			let caller = callers[name]
 			listener = function(ev) {
-				let ret = caller.call(this, ev, f)
+				let ret
+				if (caller)
+					ret = caller.call(this, ev, f)
+				else if (isobject(ev.detail) && ev.detail.args) {
+					//if (!(ev.type in hidden_events))
+						//debug(ev.type, ...ev.detail.args)
+					ret = f.call(this, ...ev.detail.args, ev)
+				} else
+					ret = f.call(this, ev)
 				if (ret === false) { // like jquery
 					ev.preventDefault()
 					ev.stopPropagation()
@@ -1655,6 +1666,7 @@ on.callers = callers
 	  a field called `notify` (to be set by user).
 
 */
+
 function ajax(req) {
 
 	req = assign_opt(new EventTarget(), {slow_timeout: 4}, req)
@@ -1663,8 +1675,9 @@ function ajax(req) {
 
 	let method = req.method || (req.upload ? 'POST' : 'GET')
 	let async = req.async !== false // NOTE: this is deprecated but that's ok.
+	let url = url_format(req.url)
 
-	xhr.open(method, url_format(req.url), async, req.user, req.pass)
+	xhr.open(method, url, async, req.user, req.pass)
 
 	let upload = req.upload
 	if (isobj(upload) || isarray(upload)) {
@@ -1759,10 +1772,12 @@ function ajax(req) {
 						res = json_arg(res)
 				req.response = res
 				if (status == 200) {
+					debug_if(DEBUG_AJAX, '$', method, url)
 					fire('done', 'success', res)
 				} else {
 					req.failtype = 'http'
 					let status_message = xhr.statusText
+					debug_if(DEBUG_AJAX, '!', method, url)
 					fire('done', 'fail',
 						req.error_message('http', status, status_message, res),
 						'http', status, status_message, res)
