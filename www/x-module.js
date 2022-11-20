@@ -164,7 +164,7 @@ function init_xmodule(opt) {
 			// save prop vals before overrides.
 			e.__pv0 = obj()
 			for (let k in pv) {
-				e.__pv0[k] = e.get_prop()
+				e.__pv0[k] = e.get_prop(k)
 			}
 
 			// override prop vals.
