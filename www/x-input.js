@@ -1,6 +1,6 @@
 /*
 
-	Model-driven single-value input widgets.
+	Model-driven single-value and single-row input widgets.
 	Written by Cosmin Apreutesei. Public Domain.
 
 WIDGETS
@@ -24,7 +24,6 @@ WIDGETS
 	richedit
 	image
 	sql_editor
-	chart
 	mu
 	switcher
 	label
@@ -81,8 +80,6 @@ function row_widget(e, enabled_without_nav) {
 		nav.on('col_text_changed', row_changed, on)
 		nav.on('col_info_changed', row_changed, on)
 		e.fire('bind_nav', nav, on)
-		if (on)
-			row_changed()
 	}
 
 	e.set_nav = function(nav1, nav0) {
@@ -100,9 +97,6 @@ function row_widget(e, enabled_without_nav) {
 	}
 
 	e.on('bind', function(on) {
-		if (on && e.nav_id == 'mm_actions_listbox')
-			pr('SWITCHER BIND')
-		// pr('row_widget_bind', on, e.tag, e.nav_id, !!e.nav)
 		bind_nav(e.nav, on)
 	})
 
@@ -649,6 +643,10 @@ function input_widget(e) {
 	e.add_info_button = e.add // stub
 	e.add_info_box = e.add // stub
 
+	e.debug_anon_name = function() {
+		return catany('', e.type, catall(':' + e.col))
+	}
+
 	function update_info() {
 		let info = e.info || (e.field && e.field.info)
 
@@ -1143,8 +1141,10 @@ function editbox_widget(e, opt) {
 
 	// copy-to-clipboard button -----------------------------------------------
 
-	e.set_copy = function(v) {
-		if (v && !e.copy_button) {
+	function update_copy_button() {
+		if (!e.bound)
+			return
+		if (e.copy && !e.copy_button) {
 			e.copy_button = button({
 				classes: 'x-editbox-copy-to-clipboard-button',
 				icon: 'far fa-clipboard',
@@ -1160,13 +1160,20 @@ function editbox_widget(e, opt) {
 				},
 			})
 			e.focus_box.add(e.copy_button)
-		} else if (!v && e.copy_button) {
+		} else if (!e.copy && e.copy_button) {
 			e.copy_button.remove()
 			e.copy_button = null
 		}
 	}
 
+	e.on('bind', function(on) {
+		if (on)
+			update_copy_button()
+	})
+
 	e.prop('copy', {store: 'var', type: 'bool', attr: true})
+
+	e.set_copy = update_copy_button
 
 	// more button ------------------------------------------------------------
 
@@ -1324,7 +1331,9 @@ function editbox_widget(e, opt) {
 		}
 
 		function popup_picker(show) {
-			e.picker.popup(show && e, 'bottom', e.align == 'right' ? 'end' : 'start')
+			e.picker.popup_target = show && e
+			e.picker.side = 'bottom'
+			e.picker.align = e.align == 'right' ? 'end' : 'start'
 		}
 
 		function bind_picker(on) {
@@ -1563,29 +1572,31 @@ component('x-passedit', 'Input', function(e) {
 	editbox_widget(e)
 	e.input.attr('type', 'password')
 
-	e.view_password_button = button({
-		classes: 'x-passedit-eye-icon',
-		icon: 'far fa-eye-slash',
-		text: '',
-		bare: true,
-		focusable: false,
-		title: S('view_password', 'View password'),
-	})
-	e.focus_box.add(e.view_password_button)
-
-	e.view_password_button.on('active', function(on) {
-		let s1 = e.input.selectionStart
-		let s2 = e.input.selectionEnd
-		e.input.attr('type', on ? null : 'password')
-		this.icon = 'far fa-eye' + (on ? '' : '-slash')
-		if (!on) {
-			runafter(0, function() {
-				e.input.selectionStart = s1
-				e.input.selectionEnd   = s2
+	e.on('bind', function(on) {
+		if (on && !e.view_password_button) {
+			e.view_password_button = button({
+				classes: 'x-passedit-eye-icon',
+				icon: 'far fa-eye-slash',
+				text: '',
+				bare: true,
+				focusable: false,
+				title: S('view_password', 'View password'),
+			})
+			e.focus_box.add(e.view_password_button)
+			e.view_password_button.on('active', function(on) {
+				let s1 = e.input.selectionStart
+				let s2 = e.input.selectionEnd
+				e.input.attr('type', on ? null : 'password')
+				this.icon = 'far fa-eye' + (on ? '' : '-slash')
+				if (!on) {
+					runafter(0, function() {
+						e.input.selectionStart = s1
+						e.input.selectionEnd   = s2
+					})
+				}
 			})
 		}
 	})
-
 })
 
 // ---------------------------------------------------------------------------
@@ -3045,814 +3056,6 @@ component('x-sql-editor', 'Input', function(e) {
 })
 
 // ---------------------------------------------------------------------------
-// chart
-// ---------------------------------------------------------------------------
-
-component('x-chart', 'Input', function(e) {
-
-	contained_widget(e)
-	serializable_widget(e)
-	selectable_widget(e)
-
-	// model ------------------------------------------------------------------
-
-	function compute_step_and_range(wanted_n, min_sum, max_sum, scale_base, scales) {
-		scale_base = scale_base || 10
-		scales = scales || [1, 2, 2.5, 5]
-		let d = max_sum - min_sum
-		let min_scale_exp = floor((d ? logbase(d, scale_base) : 0) - 2)
-		let max_scale_exp = floor((d ? logbase(d, scale_base) : 0) + 2)
-		let n0, step
-		for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
-			for (let scale of scales) {
-				let step1 = scale_base ** scale_exp * scale
-				let n = d / step1
-				if (n0 == null || abs(n - wanted_n) < n0) {
-					n0 = n
-					step = step1
-				}
-			}
-		}
-		min_sum = floor (min_sum / step) * step
-		max_sum = ceil  (max_sum / step) * step
-		return [step, min_sum, max_sum]
-	}
-
-	function compute_sums(sum_def, row_group) {
-		let agg = sum_def.agg
-		let fi = sum_def.field.val_index
-		let n
-		let i = 0
-		if (agg == 'sum' || agg == 'avg') {
-			n = 0
-			for (let row of row_group)
-				if (row[fi] != null) {
-					n += row[fi]
-					i++
-				}
-			if (i && agg == 'avg')
-				n /= i
-		} else if (agg == 'min') {
-			n = 1/0
-			for (let row of row_group)
-				if (row[fi] != null) {
-					n = min(n, row[fi])
-					i++
-				}
-		} else if (agg == 'max') {
-			n = -1/0
-			for (let row of row_group)
-				if (row[fi] != null) {
-					n = max(n, row[fi])
-					i++
-				}
-		}
-		if (i)
-			row_group.sum = n
-	}
-
-	let sum_defs, group_cols, all_split_groups
-
-	function reset_model() {
-		sum_defs = null
-		group_cols = null
-		all_split_groups = null
-	}
-
-	function update_model() {
-
-		reset_model()
-
-		if (!e.nav) return
-		if (e.sum_cols == null) return
-		if (e.group_cols == null) return
-
-		// parse `sum_cols`: `COL1[/AVG|MIN|MAX|SUM][..COL2]`.
-		// the `..` operator ties two line graphs together into a closed shape.
-		let tied_back = false
-		for (let col of e.sum_cols.replaceAll('..', '.. ').words()) {
-			let tied = col.includes('..')
-			col = col.replace('..', '')
-			let agg = 'avg'; col.replace(/\/[^\/]+$/, k => { agg = k; return '' })
-			let fld = e.nav.optfld(col)
-			if (fld) { // it's enough for one sum_col to be valid.
-				sum_defs = sum_defs || []
-				sum_defs.push({field: fld, tied: tied, tied_back: tied_back, agg: agg})
-			}
-			tied_back = fld ? tied : false
-		}
-		if (!sum_defs) return
-
-		// parse `group_cols`: `COL[/OFFSET][/UNIT][/FREQ]`.
-		group_cols = []
-		let range_defs = obj()
-		for (let col of e.group_cols.trim().split(/\s+/)) {
-			let freq, offset, unit
-			col = col.replace(/\/[^\/]+$/, k => { freq   = k.substring(1).num(); return '' })
-			col = col.replace(/\/[^\/]+$/, k => { unit   = k.substring(1); return '' })
-			col = col.replace(/\/[^\/]+$/, k => { offset = k.substring(1).num(); return '' })
-			let fld = e.nav.optfld(col)
-			if (!fld) {
-				reset_model()
-				return // all group_cols must be valid.
-			}
-			group_cols.push(col)
-			if (freq != null || offset != null || unit != null) {
-				range_defs[col] = {
-					freq   : freq,
-					offset : offset,
-					unit   : unit,
-				}
-			}
-		}
-
-		// group rows and compute the sums on each group.
-		// all_split_groups : [split_group1, ...]   split groups (cgs) => superimposed graphs.
-		// split_group      : [row_group1, ...]     row groups (xgs) => one graph of sum points.
-		// row_group        : [row1, ...]           each row group => one sum point.
-		all_split_groups = []
-		for (let sum_def of sum_defs) {
-
-			let split_groups = e.nav.row_groups({
-				col_groups : (e.split_cols ? e.split_cols+'>' : '') + group_cols,
-				range_defs : range_defs,
-				rows       : e.nav.rows,
-			})
-
-			if (!e.split_cols)
-				split_groups = [split_groups]
-
-			for (let split_group of split_groups) {
-
-				for (let row_group of split_group)
-					compute_sums(sum_def, row_group)
-
-				split_group.tied_back = sum_def.tied_back
-				split_group.tied = sum_def.tied
-
-				split_group.sum_def = sum_def
-			}
-
-			all_split_groups.extend(split_groups)
-		}
-
-		return true
-	}
-
-	// compute label for a sum point.
-	function sum_label(cls, text, sum) {
-		let sum_fld = sum_defs[0].field
-		let a = []
-		if (text)
-			a.push(text)
-		a.push(e.nav.cell_display_val_for(null, sum_fld, sum))
-		return a.join_nodes(tag('br'), cls && div({class: cls}))
-	}
-
-	function val_text(val) {
-		let val_fld = e.nav.fld(group_cols[0]) // TODO: only works for single-col groups!
-		let s = e.nav.cell_display_val_for(null, val_fld, val)
-		return isnode(s) ? s.textContent : s
-	}
-
-	function pie_slices() {
-		let groups = all_split_groups[0] // TODO: draw multiple pies for each split group
-
-		let slices = []
-		slices.total = 0
-		for (let group of groups) {
-			let slice = {}
-			let sum = group.sum
-			slice.sum = sum
-			slice.label = sum_label('x-chart-label', group.text, sum)
-			slices.push(slice)
-			slices.total += sum
-		}
-
-		// sum small slices into a single "other" slice.
-		let big_slices = []
-		let other_slice
-		for (let slice of slices) {
-			slice.size = slice.sum / slices.total
-			if (slice.size < e.other_threshold) {
-				other_slice = other_slice || {sum: 0}
-				other_slice.sum += slice.sum
-			} else
-				big_slices.push(slice)
-		}
-		if (other_slice) {
-			other_slice.size = other_slice.sum / slices.total
-			other_slice.label = sum_label('x-chart-label', e.other_text, other_slice.sum)
-			big_slices.push(other_slice)
-		}
-		return big_slices
-	}
-
-	// view -------------------------------------------------------------------
-
-	e.prop('text', {store: 'var', attr: true, slot: 'lang'})
-
-	e.header = div({class: 'x-chart-header'})
-	e.view   = div({class: 'x-chart-view'})
-	e.add(e.header, e.view)
-
-	let renderer = {} // {shape->cons(...)->update()}
-	let tt
-	let pointermove = noop
-
-	let view_w, view_h, view_css
-
-	function measure() {
-		let r = e.view.rect()
-		view_w = floor(r.w)
-		view_h = floor(r.h)
-		view_css = e.view.css()
-		e.update()
-	}
-
-	function slice_color(i, n) {
-		return hsl_to_rgb(((i / n) * 360 - 120) % 180, .8, .7)
-	}
-
-	renderer.stack = function() {
-
-		let slices = pie_slices()
-		if (!slices)
-			return
-
-		let stack = div({class: 'x-chart-stack'})
-		let labels = div({style: 'position: absolute;'})
-		e.add(stack, labels)
-
-		return function() {
-			let i = 0
-			for (let slice of slices) {
-				let cdiv = div({class: 'x-chart-stack-slice'})
-				let sdiv = div({class: 'x-chart-stack-slice-ct'}, cdiv, slice.label)
-				sdiv.style.flex = slice.size
-				cdiv.style['background-color'] = slice_color(i, slices.length)
-				stack.add(sdiv)
-				i++
-			}
-		}
-	}
-
-	renderer.pie = function() {
-
-		let slices = pie_slices()
-		if (!slices)
-			return
-
-		let pie = div({class: 'x-chart-pie'})
-		let labels = div({style: 'position: absolute;'})
-		e.add(pie, labels)
-
-		return function() {
-
-			let w = e.clientWidth
-			let h = e.clientHeight
-			let pw = (w / h < 1 ? w : h) * .5
-
-			pie.w = pw
-			pie.h = pw
-			pie.x = (w - pw) / 2
-			pie.y = (h - pw) / 2
-
-			let s = []
-			let angle = 0
-			let i = 0
-			for (let slice of slices) {
-				let arclen = slice.size * 360
-
-				// generate a gradient step for this slice.
-				let color = slice_color(i, slices.length)
-				s.push(color + ' ' + angle.dec()+'deg '+(angle + arclen).dec()+'deg')
-
-				// add the label and position it around the pie.
-				labels.add(slice.label)
-				let pad = 5
-				let center_angle = angle + arclen / 2
-				let [x, y] = point_around(w / 2, h / 2, pw / 2, center_angle - 90)
-				slice.label.x = x + pad
-				slice.label.y = y + pad
-				let left = center_angle > 180
-				let top  = center_angle < 90 || center_angle > 3 * 90
-				if (left)
-					slice.label.x = x - slice.label.clientWidth - pad
-				if (top)
-					slice.label.y = y - slice.label.clientHeight - pad
-
-				angle += arclen
-				i++
-			}
-
-			pie.style['background-image'] = 'conic-gradient(' + s.join(',') + ')'
-		}
-	}
-
-	function line_color(i, n, alpha) {
-		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .8, .6, alpha)
-	}
-
-	function renderer_line_or_columns(columns, rotate, dots, area) {
-
-		let canvas = tag('canvas', {
-			class : 'x-chart-canvas',
-			width : view_w,
-			height: view_h,
-		})
-		e.view.set(canvas)
-		let cx = canvas.getContext('2d')
-
-		cx.font = view_css['font-size'] + ' ' + view_css.font
-
-		let line_h; {
-			let m = cx.measureText('M')
-			line_h = (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) * 1.5
-		}
-
-		// paddings to make room for axis markers.
-		let px1 = 40
-		let px2 = 10
-		let py1 = round(rotate ? line_h + 5 : 10)
-		let py2 = line_h * 1.5
-
-		let hit_cg, hit_xg
-		let hit_x, hit_y, hit_w, hit_h
-
-		function hit_test_columns(mx, my) {
-			let cgi = 0
-			for (let cg of all_split_groups) {
-				for (let xg of cg) {
-					if (xg.visible) {
-						let [x, y, w, h] = bar_rect(cgi, xg)
-						if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
-							hit_cg = cg
-							hit_xg = xg
-							hit_x = x
-							hit_y = y
-							hit_w = w
-							hit_h = h
-							return true
-						}
-					}
-				}
-				cgi++
-			}
-		}
-
-		function hit_test_dots(mx, my) {
-			let max_d2 = 16**2
-			let min_d2 = 1/0
-			for (let cg of all_split_groups) {
-				for (let xg of cg) {
-					if (xg.visible) {
-						let dx = abs(mx - xg.x)
-						let dy = abs(my - xg.y)
-						let d2 = dx**2 + (all_split_groups.length > 1 ? dy**2 : 0)
-						if (d2 <= min(min_d2, max_d2)) {
-							min_d2 = d2
-							hit_cg = cg
-							hit_xg = xg
-							hit_x = hit_xg.x
-							hit_y = hit_xg.y
-							hit_w = 0
-							hit_h = 0
-						}
-					}
-				}
-			}
-			return !!hit_cg
-		}
-
-		pointermove = function(ev, mx, my) {
-			let r = canvas.rect()
-			mx -= r.x
-			my -= r.y
-			let cxm = cx.getTransform().translate(px1, py1)
-			let mp = new DOMPoint(mx, my).matrixTransform(cxm.invertSelf())
-			mx = mp.x
-			my = mp.y
-			hit_cg = null
-			hit_xg = null
-			let hit = columns ? hit_test_columns(mx, my) : hit_test_dots(mx, my)
-			if (hit) {
-				let er = e.rect()
-				tt = tt || tooltip({
-					target: e,
-					align   : 'center',
-					kind    : 'info',
-					classes : 'x-chart-tooltip',
-					check   : function() { return this.hit }
-				})
-				tt.side = rotate ? 'right' : 'top'
-
-				let sum_fld = hit_cg.sum_def.field
-				let s = e.nav.cell_display_val_for(null, sum_fld, hit_xg.sum)
-				let key_flds = e.nav.flds(hit_xg.key_cols)
-				let key_flds_align = key_flds.length > 1 ? 'start' : key_flds[0].align
-				tt.text = div({class: 'x-chart-tooltip-label'},
-					div(0, hit_xg.key_cols),
-					div({style: 'justify-self: '+key_flds_align}, TC(hit_xg.text)),
-					div(0, sum_fld.text),
-					div({style: 'justify-self: '+sum_fld.align}, s)
-				)
-
-				let tm = cx.getTransform()
-					.translate(px1, py1)
-					.translate(r.x - er.x, r.y - er.y)
-				let p1 = new DOMPoint(hit_x        , hit_y        ).matrixTransform(tm)
-				let p2 = new DOMPoint(hit_x + hit_w, hit_y + hit_h).matrixTransform(tm)
-				let p3 = new DOMPoint(hit_x + hit_w, hit_y        ).matrixTransform(tm)
-				let p4 = new DOMPoint(hit_x        , hit_y + hit_h).matrixTransform(tm)
-				let x1 = min(p1.x, p2.x, p3.x, p4.x)
-				let y1 = min(p1.y, p2.y, p3.y, p4.y)
-				let x2 = max(p1.x, p2.x, p3.x, p4.x)
-				let y2 = max(p1.y, p2.y, p3.y, p4.y)
-				tt.px = x1
-				tt.py = y1
-				tt.pw = x2 - x1
-				tt.ph = y2 - y1
-				tt.hit = true
-			} else if (tt) {
-				tt.hit = false
-				tt.update()
-			}
-			e.update()
-		}
-
-		return function() {
-
-			let w = view_w
-			let h = view_h
-
-			canvas.resize(w, h, 100, 100)
-			cx.clear()
-			cx.save()
-
-			// compute vertical (sum) and horizontal (val) ranges.
-			// also compute a map of
-			let xgs = map() // {x_key -> xg}
-			let min_val =  1/0
-			let max_val = -1/0
-			let min_sum =  1/0
-			let max_sum = -1/0
-			let user_min_val = or(e.min_val, -1/0)
-			let user_max_val = or(e.max_val,  1/0)
-			for (let cg of all_split_groups) {
-				for (let xg of cg) {
-					let sum = xg.sum
-					let val = xg.key_vals[0] // TODO: only works for numbers!
-					min_sum = min(min_sum, sum)
-					max_sum = max(max_sum, sum)
-					min_val = min(min_val, val)
-					max_val = max(max_val, val)
-					xg.visible = val >= user_min_val && val <= user_max_val
-					xgs.set(val, xg)
-				}
-			}
-
-			// clip/stretch ranges to given fixed values.
-			if (e.min_val != null) min_val = e.min_val
-			if (e.max_val != null) max_val = e.max_val
-			if (e.min_sum != null) min_sum = e.min_sum
-			if (e.max_sum != null) max_sum = e.max_sum
-
-			if (columns) {
-				let val_unit = (max_val - min_val) / xgs.size
-				min_val -= val_unit / 2
-				max_val += val_unit / 2
-			}
-
-			// compute min, max and step of y-axis markers so that 1) the step is
-			// on a module and the spacing between lines is the closest to an ideal.
-			let sum_step; {
-				let y_spacing = rotate ? 80 : 40 // wanted space between y-axis markers
-				let target_n = round(h / y_spacing) // wanted number of y-axis markers
-				let fld = sum_defs[0].field
-				;[sum_step, min_sum, max_sum] =
-					compute_step_and_range(target_n, min_sum, max_sum, fld.scale_base, fld.scales)
-			}
-
-			// compute min, max and step of x-axis markers so that 1) the step is
-			// on a module and the spacing between markers is the closest to an ideal.
-			let val_step; {
-				let min_w = 20    // min element width
-				let max_n = max(1, floor(w / min_w)) // max number of elements
-				;[val_step, min_val, max_val] = compute_step_and_range(max_n, min_val, max_val)
-			}
-
-			w -= px1 + px2
-			h -= py1 + py2
-			cx.translate(px1, py1)
-
-			if (rotate) {
-				cx.translate(w, 0)
-				cx.rotate(rad * 90)
-				;[w, h] = [h, w]
-			}
-
-			// compute polygon's points.
-			for (let cg of all_split_groups) {
-				let xgi = 0
-				for (let xg of cg) {
-					let val = xg.key_vals[0]
-					xg.x = round(lerp(val, min_val, max_val, 0, w))
-					xg.y = round(lerp(xg.sum, min_sum, max_sum, h - py2, 0))
-					if (xg.y != xg.y)
-						xg.y = xg.sum
-					xgi++
-				}
-			}
-
-			// draw x-axis labels & reference lines.
-
-			let ref_line_color = view_css.prop('--x-border-light')
-			let label_color    = view_css.prop('--x-fg-label')
-			cx.fillStyle   = label_color
-			cx.strokeStyle = ref_line_color
-
-			function draw_xaxis_label(xg_x, text) {
-				let m = cx.measureText(text)
-				cx.save()
-				if (rotate) {
-					let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
-					let x = round(xg_x + text_h / 2)
-					let y = h + m.width
-					cx.translate(x, y)
-					cx.rotate(rad * -90)
-				} else {
-					let x = xg_x - m.width / 2
-					let y = round(h)
-					cx.translate(x, y)
-				}
-				cx.fillText(text, 0, 0)
-				cx.restore()
-				// draw x-axis center line marker.
-				cx.beginPath()
-				cx.moveTo(xg_x + .5, h - py2 + 0.5)
-				cx.lineTo(xg_x + .5, h - py2 + 4.5)
-				cx.stroke()
-			}
-
-			// draw x-axis labels.
-
-			let discrete = e.min_val == null || e.max_val == null
-			if (discrete) {
-				let i = 0
-				for (let xg of xgs.values()) {
-					if (i % val_step == 0 && xg.visible) {
-						// TODO: draw the element as a html overlay
-						let text = isnode(xg.text) ? xg.text.textContent : xg.text
-						draw_xaxis_label(xg.x, text)
-					}
-					i++
-				}
-			} else {
-				for (let val = min_val; val <= max_val; val += val_step) {
-					let text = val_text(val)
-					let x = round(lerp(val, min_val, max_val, 0, w))
-					draw_xaxis_label(x, text)
-				}
-			}
-
-			// draw y-axis labels & reference lines.
-
-			for (let sum = min_sum; sum <= max_sum; sum += sum_step) {
-				// draw y-axis label.
-				let y = round(lerp(sum, min_sum, max_sum, h - py2, 0))
-				let s = sum_label(null, null, sum)
-				s = isnode(s) ? s.textContent : s
-				let m = cx.measureText(s)
-				let text_h = m.actualBoundingBoxAscent - m.actualBoundingBoxDescent
-				cx.save()
-				if (rotate) {
-					let px = -5
-					let py = round(y + m.width / 2)
-					cx.translate(px, py)
-					cx.rotate(rad * -90)
-				} else {
-					let px = -m.width - 10
-					let py = round(y + text_h / 2)
-					cx.translate(px, py)
-				}
-				cx.fillText(s, 0, 0)
-				cx.restore()
-				// draw y-axis strike-through line marker.
-				cx.strokeStyle = ref_line_color
-				cx.beginPath()
-				cx.moveTo(0 + .5, y - .5)
-				cx.lineTo(w + .5, y - .5)
-				cx.stroke()
-			}
-
-			// draw the axis.
-			cx.strokeStyle = ref_line_color
-			cx.beginPath()
-			// y-axis
-			cx.moveTo(.5, round(lerp(min_sum, min_sum, max_sum, h - py2, 0)) + .5)
-			cx.lineTo(.5, round(lerp(max_sum, min_sum, max_sum, h - py2, 0)) + .5)
-			// x-axis
-			cx.moveTo(round(lerp(min_val, min_val, max_val, 0, w)) + .5, round(h - py2) - .5)
-			cx.lineTo(round(lerp(max_val, min_val, max_val, 0, w)) + .5, round(h - py2) - .5)
-			cx.stroke()
-
-			if (columns) {
-
-				let cn = all_split_groups.length
-				let bar_w = round(w / (xgs.size - 1) / cn / 3)
-				let half_w = round((bar_w * cn + 2 * (cn - 1)) / 2)
-
-				function bar_rect(cgi, xg) {
-					let x = xg.x
-					let y = xg.y
-					return [
-						x + cgi * (bar_w + 2) - half_w,
-						y,
-						bar_w,
-						h - py2 - y
-					]
-				}
-			}
-
-			// draw the chart lines or columns.
-
-			cx.rect(0, 0, w, h)
-			cx.clip()
-
-			let cgi = 0
-			for (let cg of all_split_groups) {
-
-				let color = line_color(cgi, all_split_groups.length)
-
-				if (columns) {
-
-					cx.fillStyle = color
-					for (let xg of cg) {
-						let [x, y, w, h] = bar_rect(cgi, xg)
-						cx.beginPath()
-						cx.rect(x, y, w, h)
-						cx.fill()
-					}
-
-				} else {
-
-					// draw the line.
-
-					if (!cg.tied_back)
-						cx.beginPath()
-
-					let x0, x
-					for (let xg of (cg.tied_back ? cg.reverse() : cg)) {
-						x = xg.x
-						if (x0 == null && !cg.tied_back) {
-							x0 = x
-							cx.moveTo(x + .5, xg.y + .5)
-						} else {
-							cx.lineTo(x + .5, xg.y + .5)
-						}
-					}
-
-					if (area && !cg.tied && !cg.tied_back) {
-						cx.lineTo(x  + .5, h - py2 + .5)
-						cx.lineTo(x0 + .5, h - py2 + .5)
-						cx.closePath()
-					}
-
-					if (area && !cg.tied) {
-						cx.fillStyle = line_color(cgi, all_split_groups.length, .5)
-						cx.fill()
-					}
-
-					cx.strokeStyle = color
-					cx.stroke()
-
-					// draw a dot on each line cusp.
-					if (dots) {
-						cx.fillStyle = cx.strokeStyle
-						for (let xg of cg) {
-							cx.beginPath()
-							cx.arc(xg.x, xg.y, 3, 0, 2*PI)
-							cx.fill()
-						}
-					}
-
-				}
-
-				cgi++
-			}
-
-			// draw the hit line.
-
-			if (hit_cg) {
-				cx.beginPath()
-				cx.moveTo(hit_x + .5, .5)
-				cx.lineTo(hit_x + .5, h - py2 + 4.5)
-				cx.strokeStyle = label_color
-				cx.setLineDash([3, 2])
-				cx.stroke()
-				cx.setLineDash(empty_array)
-			}
-
-			cx.restore()
-		}
-	}
-
-	renderer.line      = () => renderer_line_or_columns()
-	renderer.line_dots = () => renderer_line_or_columns(false, false, true)
-	renderer.area      = () => renderer_line_or_columns(false, false, false, true)
-	renderer.area_dots = () => renderer_line_or_columns(false, false, true, true)
-	renderer.column    = () => renderer_line_or_columns(true)
-	renderer.bar       = () => renderer_line_or_columns(true, true)
-
-	let shape, render
-	e.do_update = function() {
-		e.header.set(e.text)
-		if (shape != e.shape) {
-			render = null
-			pointermove = noop
-			shape = e.shape
-		}
-		if (!render)
-			render = renderer[e.shape]()
-		render()
-	}
-
-	e.on('pointermove' , function(...args) { pointermove(...args) })
-	e.on('pointerleave', function(...args) { pointermove(...args) })
-
-	// data binding -----------------------------------------------------------
-
-	function data_changed() {
-		if (update_model())
-			e.update()
-	}
-
-	function bind_nav(nav, on) {
-		if (!e.bound)
-			return
-		if (!nav)
-			return
-		nav.on('reset'               , data_changed, on)
-		nav.on('rows_changed'        , data_changed, on)
-		nav.on('cell_state_changed'  , data_changed, on)
-		nav.on('display_vals_changed', data_changed, on)
-		if (on)
-			data_changed()
-	}
-
-	e.on('bind', function(on) {
-		bind_nav(e.nav, on)
-		document.on('layout_changed', measure, on)
-		if (!on && tt) {
-			tt.close()
-			tt = null
-		}
-		measure()
-	})
-
-	e.on('resize', measure)
-
-	e.set_nav = function(nav1, nav0) {
-		assert(!nav1 || nav1.isnav)
-		bind_nav(nav0, false)
-		bind_nav(nav1, true)
-	}
-
-	e.prop('nav', {store: 'var', private: true})
-	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav'})
-
-	// config -----------------------------------------------------------------
-
-	e.set_split_cols      = data_changed
-	e.set_group_cols      = data_changed
-	e.set_sum_cols        = data_changed
-	e.set_min_val         = data_changed
-	e.set_max_val         = data_changed
-	e.set_min_sum         = data_changed
-	e.set_max_sum         = data_changed
-	e.set_other_threshold = data_changed
-	e.set_other_text      = data_changed
-
-	e.prop('split_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('group_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('sum_cols'   , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('min_sum'    , {store: 'var', type: 'number', attr: true})
-	e.prop('max_sum'    , {store: 'var', type: 'number', attr: true})
-	e.prop('min_val'    , {store: 'var', type: 'number', attr: true})
-	e.prop('max_val'    , {store: 'var', type: 'number', attr: true})
-	e.prop('other_threshold', {store: 'var', type: 'number', default: .05, decimals: null, attr: true})
-	e.prop('other_text', {store: 'var', default: 'Other', attr: true})
-	e.prop('shape', {
-		store: 'var', type: 'enum',
-		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots',
-			'column', 'bar', 'stackbar', 'bubble', 'scatter'],
-		default: 'pie', attr: true,
-	})
-
-})
-
-// ---------------------------------------------------------------------------
 // mustache widget mixin
 // ---------------------------------------------------------------------------
 
@@ -3992,7 +3195,6 @@ component('x-switcher', 'Containers', function(e) {
 	e.match_item = function(item, vals) { // stub
 		// special case: listbox with html elements with "action" attr
 		// and the switcher's items also have the "action" attr, so match those.
-		pr(e.items.length, item.id, e.format_item_id(vals), '', item.attr('action'), vals.f0 && vals.f0.attr('action'))
 		if (item.hasattr('action') && vals.f0 && iselem(vals.f0) && vals.f0.hasattr('action'))
 			return item.attr('action') == vals.f0.attr('action')
 		return item.id == e.format_item_id(vals)
@@ -4014,7 +3216,6 @@ component('x-switcher', 'Containers', function(e) {
 	e.do_update_row = function(row) {
 		let vals = row && e.nav.serialize_row_vals(row)
 		let item = vals && (e.find_item(vals) || e.create_item(vals))
-		//pr('do_update_row', e.items.length, vals, e.items)
 		e.set(item)
 	}
 
@@ -4134,7 +3335,7 @@ component('x-form', 'Containers', function(e) {
 
 	let names = {}
 	function area_name(item) {
-		let s = item.attr('area')
+		let s = item.style['grid-area'] || item.attr('area')
 		if (!s) {
 			s = item.col || item.attr('col')
 			if (item.tag == 'x-label')
@@ -4152,13 +3353,28 @@ component('x-form', 'Containers', function(e) {
 		return s
 	}
 
-	// widget-items widget protocol.
-	e.do_init_items = function() {
-		for (let item of e.items) {
-			if (!item.style['grid-area'])
+	e.do_update = function(opt) {
+
+		if (opt.new_items)
+			for (let item of opt.new_items) {
 				item.style['grid-area'] = area_name(item)
-			e.add(item)
+				e.add(item)
+			}
+
+		if (opt.removed_items)
+			for (let item of opt.removed_items)
+				item.remove()
+
+		if (opt.items) {
+			e.innerHTML = null
+			for (let item of opt.items)
+				e.append(item)
 		}
+
+		if (opt.nav)
+			for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart'))
+				ce.nav = e.nav
+
 	}
 
 	e.on('resize', function(r) {
@@ -4171,15 +3387,19 @@ component('x-form', 'Containers', function(e) {
 	})
 
 	e.on('bind', function(on) {
-		if (on)
+		if (on) {
 			e.fire('resize', e.rect())
+			e.update({nav: true})
+		}
 	})
 
-	e.set_nav = function(nav) {
-		for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart'))
-			ce.nav = nav
+	function update_nav() {
+		e.update({nav: true})
 	}
-	e.prop('nav', {store: 'var', private: true})
+
+	e.set_nav = update_nav
+
+	e.prop('nav'   , {store: 'var', private: true})
 	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav', attr: true})
 
 	// clicking on blank areas of the form focuses the last focused input element.
