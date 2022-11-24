@@ -285,14 +285,6 @@ function assert(ret, err, ...args) {
 	return ret
 }
 
-function stacktrace() {
-	try {
-		throw new Error()
-	} catch(e) {
-		return e.stack
-	}
-}
-
 /* extending built-in objects ------------------------------------------------
 
 NOTE: built-in methods are actually "data properties" that shadow normal
