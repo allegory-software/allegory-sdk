@@ -6,7 +6,7 @@
 	Dependencies:
 		glue.js
 
-	CSS Requirements (see divs.js):
+	CSS Requirements (see divs.css):
 		[hidden]
 		[disabled]
 		.popup
@@ -82,6 +82,9 @@
 		e.init_child_components()
 		^bind(on)
 		e.bound -> t|f
+	popups:
+		.popup_level
+		.popup_target
 	events:
 		broadcast (name, ...args)
 		^[right]click       (ev, nclicks, mx, my)
@@ -131,8 +134,13 @@
 		e.is_in_viewport()
 		scrollbar_widths() -> [vs_w, hs_h]
 		scrollbox_client_dimensions(w, h, cw, ch, [overflow_x], [overflow_y], [cs_w], [hs_h])
-	animation easing:
+	animation frames:
 		raf(f) -> raf_id
+		cancel_raf(raf_id)
+		raf_wrap(f) -> wf
+			wf()
+			wf.cancel()
+	animation easing:
 		transition(f, [dt], [x0], [x1], [easing]) -> tr
 			tr.stop()
 			tr.finish = func
@@ -403,6 +411,13 @@ method(Element, 'init_child_components', function() {
 })
 }
 
+let initializing = true // prevent bind() calls while initializing components.
+property(Element, 'is_connected', {
+	get: function() {
+		return !initializing && this.isConnected
+	}
+})
+
 method(Element, 'bind_children', function bind_children(on) {
 	if (!this.len)
 		return
@@ -527,8 +542,10 @@ property(Element, 'unsafe_html', {
 	set: function(s) {
 		this.bind_children(false)
 		this.innerHTML = s
+		initializing = true // prevent bind() calls while initializing.
 		this.init_child_components()
-		if (this.isConnected)
+		initializing = false
+		if (this.is_connected)
 			this.bind_children(true)
 	},
 })
@@ -544,11 +561,11 @@ method(Element, 'set', function E_set(s, whitespace) {
 	if (isnode(s)) {
 		if (this.nodes.length == 1 && this.nodes[0] == s)
 			return this
-		if (iselem(s) && s.isConnected)
+		if (iselem(s) && s.is_connected)
 			s.bind(false)
 		this.clear()
 		this.append(s)
-		if (iselem(s) && this.isConnected)
+		if (iselem(s) && this.is_connected)
 			s.bind(true)
 	} else {
 		this.textContent = s
@@ -562,11 +579,11 @@ method(Element, 'add', function E_add(...args) {
 	for (let s of args)
 		if (s != null) {
 			s = T(s)
-			if (iselem(s) && s.isConnected)
+			if (iselem(s) && s.is_connected)
 				s.bind(false)
 			this.append(s)
 			if (iselem(s)) {
-				if (this.isConnected)
+				if (this.is_connected)
 					s.bind(true)
 			}
 		}
@@ -578,11 +595,11 @@ method(Element, 'insert', function E_insert(i0, ...args) {
 		let s = args[i]
 		if (s != null) {
 			s = T(s)
-			if (iselem(s) && s.isConnected)
+			if (iselem(s) && s.is_connected)
 				s.bind(false)
 			this.insertBefore(s, this.at[max(0, or(i0, 1/0))])
 			if (iselem(s)) {
-				if (this.isConnected)
+				if (this.is_connected)
 					s.bind(true)
 			}
 		}
@@ -607,15 +624,15 @@ method(Element, 'replace', function E_replace(e0, s) {
 	} else {
 		this.appendChild(s)
 	}
-	if (iselem(s) && this.isConnected)
+	if (iselem(s) && this.is_connected)
 		s.bind(true)
 	return this
 })
 
 // move element to a new parent and/or index without rebinding, unless
-// the widget requires rebinding by returning false from `.do_move()`.
+// the component requires rebinding by returning false from `.do_move()`.
 method(Element, 'move', function E_move(pe, i) {
-	assert(this.isConnected)
+	assert(this.is_connected)
 	pe = pe || this.parent
 	let must_unbind = this.do_move && !this.do_move(pe, i)
 	if (must_unbind)
@@ -686,7 +703,7 @@ method(Element, 'override', function(method, func) {
 })
 
 method(Element, 'do_before', function(method, func) {
-	let inherited = this[method]
+	let inherited = repl(this[method], noop)
 	this[method] = inherited && function(...args) {
 		func.call(this, ...args)
 		inherited.call(this, ...args)
@@ -694,7 +711,7 @@ method(Element, 'do_before', function(method, func) {
 })
 
 method(Element, 'do_after', function(method, func) {
-	let inherited = this[method]
+	let inherited = repl(this[method], noop)
 	this[method] = inherited && function(...args) {
 		inherited.call(this, ...args)
 		func.call(this, ...args)
@@ -744,7 +761,7 @@ installers.resize = function() {
 		}
 	}
 	this.on('bind', bind)
-	if (this.isConnected)
+	if (this.is_connected)
 		bind.call(this, true)
 }
 
@@ -776,7 +793,7 @@ installers.attr_changed = function() {
 		}
 	}
 	this.on('bind', bind)
-	if (this.isConnected)
+	if (this.is_connected)
 		bind.call(this, true)
 }
 
@@ -895,6 +912,7 @@ function init_components() {
 	body = document.body // for debugging, don't use in code.
 	head = document.head // for debugging, don't use in code.
 	root.init_component()
+	initializing = false
 	if (DEBUG_BIND)
 		debug('ROOT BIND ---------------------------------')
 	root.bind(true)
@@ -950,9 +968,6 @@ property(Element, 'max_h', { set: function(v) { if (v !== this.__Mh) { this.__Mh
 alias(Element, 'x', 'x1')
 alias(Element, 'y', 'y1')
 method(Element, 'rect', function() {
-	// TODO:
-	// if (in_raf)
-	// 	pr('rect() called inside animation frame')
 	return this.getBoundingClientRect()
 })
 
@@ -1070,7 +1085,7 @@ property(Element, 'effectively_disabled', {get: function() {
 
 /* NOTE: doesn't check `display: none` and `visibility: hidden` from CSS ! */
 property(Element, 'effectively_hidden', {get: function() {
-	if (this.bool_attr('hidden'))
+	if (this.hidden)
 		return true
 	if (!this.parent)
 		return true
@@ -1236,6 +1251,52 @@ function scrollbox_client_dimensions(w, h, cw, ch, overflow_x, overflow_y, vscro
 	return [cw, ch]
 }
 
+// popups --------------------------------------------------------------------
+
+property(Element, 'popup_level', {
+	get: function() {
+		let e = this
+		let n = 0
+		while (e != document) {
+			if (e.hasclass('popup'))
+				n++
+			if (e.hasclass('modal')) // a modal is above 10 normal popups
+				n += 10
+			e = e.popup_target || e.parent
+		}
+		return n
+	}
+})
+
+// animation frames ----------------------------------------------------------
+
+// TODO: remove these, use raf_wrap() only!
+function raf(f, last_id) {
+	return last_id == null ? requestAnimationFrame(f) : last_id
+}
+cancel_raf = cancelAnimationFrame
+
+var in_raf = false
+function raf_wrap(f) {
+	let id
+	function raf_f() {
+		id = null
+		in_raf = true
+		f()
+		in_raf = false
+	}
+	let wrapper = function raf_wrapper() {
+		id = raf(raf_f, id)
+	}
+	wrapper.cancel = function() {
+		if (id != null) {
+			cancel_raf(id)
+			id = null
+		}
+	}
+	return wrapper
+}
+
 // animation easing ----------------------------------------------------------
 
 easing = obj() // from easing.lua
@@ -1281,33 +1342,6 @@ easing.bounce = function(t) {
  		t = t - 2.625 / 2.75
 		return 7.5625 * t**2 + 0.984375
 	}
-}
-
-// TODO: remove these, use raf_wrap() only!
-function raf(f, last_id) {
-	return last_id == null ? requestAnimationFrame(f) : last_id
-}
-cancel_raf = cancelAnimationFrame
-
-var in_raf = false
-function raf_wrap(f) {
-	let id
-	function raf_f() {
-		id = null
-		in_raf = true
-		f()
-		in_raf = false
-	}
-	let wrapper = function raf_wrapper() {
-		id = raf(raf_f, id)
-	}
-	wrapper.cancel = function() {
-		if (id != null) {
-			cancel_raf(id)
-			id = null
-		}
-	}
-	return wrapper
 }
 
 function transition(f, dt, y0, y1, ease_f, ease_way, ...ease_args) {
@@ -1401,7 +1435,6 @@ method(Element, 'modal', function(on) {
 		let dialog = div({class: 'modal-dialog'}, e)
 		e.dialog = dialog
 		e.class('modal')
-		dialog.popup_level = 10 // make popups aware of our level.
 		document.body.add(dialog)
 		dialog.focus_first()
 	}
