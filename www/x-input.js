@@ -22,6 +22,7 @@ WIDGETS
 	timepicker
 	timeofdayedit
 	richedit
+	lookup
 	image
 	sql_editor
 	mu
@@ -117,7 +118,7 @@ publishes:
 	e.modified
 	e.set_val(v, ev)
 	e.reset_val(v, ev)
-	e.display_val_for()
+	e.display_val_for(v)
 implements:
 	e.do_update([opt])
 calls:
@@ -168,37 +169,16 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		e.update()
 	}
 
-	function nav_reset() {
-		bind_field(true)
-		e.update()
-	}
-
 	function col_attr_changed() {
 		e.update()
 	}
 
-	e.do_update_val = noop
-
 	function cell_state_changed(row, field, changes, ev) {
-		if (e.updating)
-			return
 		bind_field(true)
-		let val_changes = changes.val || changes.input_val
-		if (val_changes) {
-			let val = val_changes[0]
-			// TODO: this should be call from do_update()!
-			e.do_update_val(val, ev)
-			e.class('modified', e.nav.cell_modified(row, field))
-			e.fire('input_val_changed', val, ev)
-		}
-		if (changes.errors) {
-			e.invalid = e.nav.cell_has_errors(row, field)
-			e.class('invalid', e.invalid)
-			e.do_update_errors(changes.errors[0], ev)
-		}
+		e.update({changes: changes, ev: ev})
 		// state_changed events are only fired in standalone mode!
 		if (e.owns_field)
-			e.fire('state_changed', changes)
+			e.fire('state_changed', changes, ev)
 	}
 
 	function bind_nav(nav, col, on) {
@@ -209,15 +189,14 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		nav.on('focused_row_changed', val_changed, on)
 		nav.on('focused_row_cell_state_changed_for_'+col, cell_state_changed, on)
 		nav.on('display_vals_changed_for_'+col, val_changed, on)
-		nav.on('reset', nav_reset, on)
+		nav.on('reset', val_changed, on)
 		nav.on('col_text_changed_for_'+col, col_attr_changed, on)
 		nav.on('col_info_changed_for_'+col, col_attr_changed, on)
 		bind_field(on)
 	}
 
 	let field_opt
-	let init = e.init
-	e.init = function() {
+	e.do_before('init', function() {
 		if (!e.nav && !e.nav_id && !e.col) { // standalone mode.
 			field_opt = e.field || {}
 			field_opt.type = or(field_opt.type, e.field_type)
@@ -225,8 +204,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		} else {
 			e.owns_field = false
 		}
-		init()
-	}
+	})
 
 	e.on('bind', function val_widget_bind(on) {
 		if (e.owns_field) {
@@ -350,22 +328,38 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 	e.prop('readonly', {store: 'var', type: 'bool', attr: true, default: false})
 
-	e.do_update = function() {
+	e.do_update_val = noop
+
+	e.do_update = function(opt) {
 		let row = e.row
 		let field = e.field
-		let readonly = !e.can_actually_change_val()
-		e.xoff()
-		e.disable('readonly', readonly && !e.set_readonly)
-		e.readonly = readonly
-		e.xon()
+		if (opt.changes) {
+			let val_changes = opt.changes.val || opt.changes.input_val
+			if (val_changes) {
+				let val = val_changes[0]
+				e.do_update_val(val, opt.ev)
+				e.class('modified', e.nav.cell_modified(row, field))
+				e.fire('input_val_changed', val, opt.ev)
+			}
+			if (opt.changes.errors) {
+				e.invalid = e.nav.cell_has_errors(row, field)
+				e.class('invalid', e.invalid)
+				e.do_update_errors(opt.changes.errors[0], opt.ev)
+			}
+		} else {
+			let readonly = !e.can_actually_change_val()
+			e.xoff()
+			e.disable('readonly', readonly && !e.set_readonly)
+			e.readonly = readonly
+			e.xon()
 
-		bind_field(true)
-		e.do_update_val(e.input_val)
-		e.class('modified', e.nav && row && field && e.nav.cell_modified(row, field))
-		e.invalid = e.nav && row && field && e.nav.cell_has_errors(row, field)
-		e.class('invalid', e.invalid)
-		// TODO: this is slow when scrolling a grid!
-		e.do_update_errors(e.errors)
+			e.do_update_val(e.input_val)
+			e.class('modified', e.nav && row && field && e.nav.cell_modified(row, field))
+			e.invalid = e.nav && row && field && e.nav.cell_has_errors(row, field)
+			e.class('invalid', e.invalid)
+			// TODO: this is slow when scrolling a grid!
+			e.do_update_errors(e.errors)
+		}
 	}
 
 	e.do_error_tooltip_check = function() {
@@ -1058,12 +1052,17 @@ function editbox_widget(e, opt) {
 			})
 			if (!e.spicker)
 				return
+			let p = popup()
+			p.set(e.spicker)
+			e.spicker.popup = p
+			p.popup_target = e
+			p.popup_side = 'bottom'
+			p.popup_align = e.align
+			p.spicker.hide()
 			e.spicker.class('picker', true)
-			e.spicker.bind(true)
 			e.spicker.on('val_picked', spicker_val_picked)
 		} else if (e.spicker) {
-			e.spicker.popup(false)
-			e.spicker.bind(false)
+			e.spicker.popup.popup_target = null
 			e.spicker = null
 		}
 		document.on('pointerdown'     , document_pointerdown, on)
@@ -1079,17 +1078,14 @@ function editbox_widget(e, opt) {
 			return
 		e.class('open spicker_open', open)
 		if (open) {
-			e.spicker_cancel_val = e.input_val
 			e.spicker.min_w = e.rect().w
 			if (e.spicker_w)
 				e.spicker.auto_w = false
 			e.spicker.w = e.spicker_w
-			e.spicker.hidden = false
-			e.spicker.popup(e, 'bottom', e.align)
-		} else {
-			e.spicker_cancel_val = null
-			e.spicker.hidden = true
 		}
+		e.spicker_cancel_val = open ? e.input_val : null
+		e.spicker.show(open)
+		e.spicker.popup.update()
 	}
 
 	e.open_spicker   = function() { e.set_spicker_isopen(true) }
@@ -1330,12 +1326,6 @@ function editbox_widget(e, opt) {
 				e.picker.col = v
 		}
 
-		function popup_picker(show) {
-			e.picker.popup_target = show && e
-			e.picker.side = 'bottom'
-			e.picker.align = e.align == 'right' ? 'end' : 'start'
-		}
-
 		function bind_picker(on) {
 			if (!e.create_picker)
 				return
@@ -1349,12 +1339,18 @@ function editbox_widget(e, opt) {
 					col: e.col,
 					can_select_widget: false,
 				})
+				let p = popup()
+				p.set(e.picker)
+				e.picker.popup = p
+				p.popup_target = e
+				p.popup_side = 'bottom'
+				p.popup_align = e.align == 'right' ? 'end' : 'start'
+				e.picker.hide()
 				e.picker.class('picker', true)
 				e.picker.on('val_picked', picker_val_picked)
 				e.picker.on('keydown'   , picker_keydown)
-				popup_picker(false)
 			} else if (e.picker) {
-				e.picker.popup(false)
+				e.picker.popup_target = null
 				e.picker = null
 			}
 			document.on('pointerdown'     , document_pointerdown, on)
@@ -1389,15 +1385,18 @@ function editbox_widget(e, opt) {
 					if (e.picker_w)
 						e.picker.auto_w = false
 					e.picker.w = e.picker_w
-					popup_picker(true)
+					e.picker.update({show: true})
 					e.fire('opened')
 					e.picker.fire('dropdown_opened')
+					e.picker.popup.update({show: true})
 				} else {
 					e.cancel_val = null
-					popup_picker(false)
 					e.fire('closed')
-					if (e.picker)
+					if (e.picker) {
+						e.picker.hide()
 						e.picker.fire('dropdown_closed')
+						e.picker.popup.update()
+					}
 					if (!focus)
 						e.fire('lost_focus') // grid editor protocol
 				}
@@ -1411,6 +1410,7 @@ function editbox_widget(e, opt) {
 
 		function picker_val_picked(ev) {
 			e.close(!(ev && ev.input == e))
+			e.fire('val_picked', ev)
 		}
 
 		// focusing
@@ -1639,10 +1639,7 @@ component('x-spinedit', 'Input', function(e) {
 	e.up   = div({class: 'x-spinedit-button fa'})
 	e.down = div({class: 'x-spinedit-button fa'})
 
-	let inh_do_update = e.do_update
-	e.do_update = function() {
-
-		inh_do_update()
+	e.do_after('do_update', function() {
 
 		let bs = e.button_style
 		let bp = e.button_placement
@@ -1677,7 +1674,7 @@ component('x-spinedit', 'Input', function(e) {
 			e.up  .class('left')
 		}
 
-	}
+	})
 
 	let multiple = () => or(1 / 10 ** (e.field.decimals || 0), 1)
 
@@ -2157,11 +2154,9 @@ component('x-slider', 'Input', function(e) {
 
 	val_widget(e)
 
-	let inh_do_update = e.do_update
-	e.do_update = function() {
-		inh_do_update()
+	e.do_after('do_update', function() {
 		e.class('animated', false) // TODO: decide when to animate!
-	}
+	})
 
 	function progress_for(v) {
 		return clamp(lerp(v, e.from, e.to, 0, 1), 0, 1)
@@ -2836,6 +2831,59 @@ component('x-richedit', 'Input', function(e) {
 })
 
 // ---------------------------------------------------------------------------
+// lookup dropdown (for fields with `lookup_nav_id` or `lookup_rowset*`)
+// ---------------------------------------------------------------------------
+
+component('x-lookup', function(e) {
+
+	editbox_widget(e, {input: false, picker: true})
+
+	e.create_picker = function(opt) {
+
+		let ln_id = e.field.lookup_nav_id
+		if (ln_id) {
+			opt.id = ln_id
+		} else {
+			opt.type = 'listbox'
+			opt.rowset      = e.field.lookup_rowset
+			opt.rowset_name = e.field.lookup_rowset_name
+			opt.rowset_url  = e.field.lookup_rowset_url
+		}
+
+		opt.val_col     = e.field.lookup_cols
+		opt.display_col = e.field.display_col
+		opt.theme       = e.theme
+
+		let picker = component.create(opt)
+		picker.id = null // not saving into the original.
+		return picker
+	}
+
+	e.on('opened', function() {
+		if (!e.picker) return
+		e.picker.scroll_to_focused_cell()
+	})
+
+	// TODO:
+	e.prop('lookup_rowset_name', {attr: 'rowset'})
+	e.prop('lookup_cols'       , {attr: true})
+	e.prop('display_col'       , {attr: true})
+
+	e.set_lookup_rowset_name = function() {
+		//
+	}
+
+	e.set_lookup_cols = function() {
+		//
+	}
+
+	e.set_display_col = function() {
+		//
+	}
+
+})
+
+// ---------------------------------------------------------------------------
 // image
 // ---------------------------------------------------------------------------
 
@@ -3331,7 +3379,8 @@ component('x-form', 'Containers', function(e) {
 	selectable_widget(e)
 	editable_widget(e)
 	contained_widget(e)
-	let html_items = widget_items_widget(e)
+
+	e.init_child_components()
 
 	let names = {}
 	function area_name(item) {
@@ -3355,25 +3404,11 @@ component('x-form', 'Containers', function(e) {
 
 	e.do_update = function(opt) {
 
-		if (opt.new_items)
-			for (let item of opt.new_items) {
-				item.style['grid-area'] = area_name(item)
-				e.add(item)
-			}
-
-		if (opt.removed_items)
-			for (let item of opt.removed_items)
-				item.remove()
-
-		if (opt.items) {
-			e.innerHTML = null
-			for (let item of opt.items)
-				e.append(item)
-		}
-
-		if (opt.nav)
-			for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart'))
+		for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart'))
+			if (ce.closest('x-form') == e) {
 				ce.nav = e.nav
+				ce.style['grid-area'] = area_name(ce)
+			}
 
 	}
 
@@ -3389,12 +3424,12 @@ component('x-form', 'Containers', function(e) {
 	e.on('bind', function(on) {
 		if (on) {
 			e.fire('resize', e.rect())
-			e.update({nav: true})
+			e.update()
 		}
 	})
 
 	function update_nav() {
-		e.update({nav: true})
+		e.update()
 	}
 
 	e.set_nav = update_nav
@@ -3416,7 +3451,5 @@ component('x-form', 'Containers', function(e) {
 			else
 				e.focus_first()
 	})
-
-	return {items: html_items}
 
 })

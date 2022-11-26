@@ -41,7 +41,7 @@
 		}
 
 		.sign-in-splash-img {
-			background-image: url("https://source.unsplash.com/random/1920x1080?abstract");
+			background-image: url("/login-bg.jpg");
 			background-position: center;
 		}
 
@@ -56,7 +56,7 @@
 		</style>
 		<img class=sign-in-logo src=/sign-in-logo.png onerror="this.style.display='none'">
 		<x-slides class=sign-in-slides>
-			<x-form>
+			<div class="x-form">
 				<div class=x-dialog-head-split>
 					<div class=x-dialog-heading>
 						<t s=heading_sign_in>
@@ -68,7 +68,7 @@
 						class=sign-in-lang-dropdown
 						val_col=lang
 						display_col=name
-						rowset_name=pick_lang
+						rowset=pick_lang
 					></x-list-dropdown>
 					{{/multilang}}
 				</div>
@@ -87,9 +87,9 @@
 					class=sign-in-email-button
 					text:s:button_text_sign_in_email="E-mail me a sign-in code"
 				></x-button>
-			</x-form>
+			</div>
 
-			<x-form>
+			<div class="x-form">
 				<div class=x-dialog-heading><t s=heading_sign_in_enter_code>
 					Enter code
 				</t></div>
@@ -109,7 +109,7 @@
 					class=sign-in-code-button
 					text:s:button_text_sign_in="Sign-in"
 				></x-button>
-			</x-form>
+			</div>
 
 		</x-slides>
 	</content>

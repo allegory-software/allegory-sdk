@@ -373,12 +373,27 @@ method(NodeList, 'each', function(f) {
 property(NodeList, 'first', function() { return this[0] })
 property(NodeList, 'last' , function() { return this[this.length-1] })
 
-/* dom tree manipulation with lifecycle management ---------------------------
+/* DOM manipulation with lifecycle management --------------------------------
 
 The "lifecycle management" part of this is basically poor man's web components.
 The reason we're reinventing web components is because the actual web components
 API built into the browser is unusable. Needless to say, all DOM manipulation
 needs to be done through this API exclusively for components to work.
+
+Components can be either attached to the DOM (bound) or not. When bound they
+become alive, when unbound they die and must uninstall any event handlers
+to document, window or other components.
+
+When a component is initialized, its parents are only partially initialized
+so take that into account if you mess with them at that stage.
+
+When a component is bound, its parents are already bound and its children unbound.
+When a component is unbound, its children are still bound and its parents unbound.
+
+Components are always initialized unbound even when they are already attached
+to the DOM, guaranteeing that any children that are added in init are never
+bound while their parent is initializing, so that later children can rely on
+a fully bound parent chain when they are getting bound.
 
 */
 
@@ -439,10 +454,10 @@ method(Element, 'bind', function bind(on) {
 		this.bound = on
 		this.fire('bind', on)
 	}
-	// bind children after the bound event to allow components to remove their
-	// children inside the bind event handler before them getting bound, and
-	// also so that children see a bound parent when they are getting bound.
-	this.bind_children(on)
+	// bind children after they parent is bound to allow components to remove
+	// their children inside the bind event handler before them getting bound,
+	// and also so that children see a bound parent when they are getting bound.
+	this.bind_children(true)
 })
 
 // create a text node from a string, quoting it automatically, with wrapping control.

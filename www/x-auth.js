@@ -217,61 +217,70 @@ let dialog = memoize(function() {
 		multilang: config('multilang', true),
 	}))
 
-	e.lang_dropdown = e.$1('.sign-in-lang-dropdown')
-	e.slides        = e.$1('.sign-in-slides')
-	e.email_edit    = e.$1('.sign-in-email-edit')
-	e.code_edit     = e.$1('.sign-in-code-edit')
-	e.email_button  = e.$1('.sign-in-email-button')
-	e.code_button   = e.$1('.sign-in-code-button')
+	e.slides = e.$1('.sign-in-slides')
 
-	e.email_edit.field = {not_null: true}
-	e.code_edit.field = {not_null: true}
+	let p1 = e.slides.items[0]
+	e.lang_dropdown = p1.$1('.sign-in-lang-dropdown')
+	e.email_edit    = p1.$1('.sign-in-email-edit')
+	e.email_button  = p1.$1('.sign-in-email-button')
 
-	if (e.lang_dropdown) {
-		e.lang_dropdown.val = lang()
-		e.lang_dropdown.on('state_changed', function(changes) {
-			if (changes.input_val) {
-				exec('/sign-in', {lang: changes.input_val[0], refresh: true})
-			}
-		})
-	}
+	let p2 = e.slides.items[1]
+	e.code_edit     = p2.$1('.sign-in-code-edit')
+	e.code_button   = p2.$1('.sign-in-code-button')
 
-	e.email_edit.on('state_changed', function(changes) {
-		if (changes.input_val)
-			e.email_button.disabled = e.email_edit.invalid
+	e.lang_dropdown.val = lang()
+	e.lang_dropdown.on('val_picked', function() {
+		exec('/sign-in', {lang: this.input_val, refresh: true})
 	})
 
-	e.email_button.action = function() {
-		let d = dialog()
-		e.email_button.post(href('/sign-in-email.json'), {
-			email: e.email_edit.input_val,
-		}, function() {
-			d.code_edit.errors = null
-			d.slides.slide(1)
-		}, function(err) {
-			e.email_edit.errors = [{message: err, passed: false}]
-			e.email_edit.focus()
-		})
-	}
-
-	e.code_button.action = function() {
-		let d = dialog()
-		usr_nav.reload({
-			upload: {
-				type: 'code',
-				code: e.code_edit.input_val,
-			},
-			notify: e.code_button,
-			event: 'login',
-			fail: function(err) {
-				e.code_edit.errors = [{message: err, passed: false}]
-				e.code_edit.focus()
-			},
-		})
-	}
+	e.do_after('do_update', function(opt) {
+		// adding this dynamically to prevent loading the background needlessly.
+		e.dialog.class('sign-in-splash-img', !window.signed_in && !window.signed_in_anonymous)
+	})
 
 	return e
 })
+
+/*
+on('sign_in_slides.bind', function(e) {
+
+// e.email_edit.field = {not_null: true}
+// e.code_edit.field = {not_null: true}
+
+e.email_edit.on('state_changed', function(changes) {
+	if (changes.input_val)
+		e.email_button.disabled = e.email_edit.invalid
+})
+
+e.email_button.action = function() {
+	let d = dialog()
+	e.email_button.post(href('/sign-in-email.json'), {
+		email: e.email_edit.input_val,
+	}, function() {
+		d.code_edit.errors = null
+		d.slides.slide(1)
+	}, function(err) {
+		e.email_edit.errors = [{message: err, passed: false}]
+		e.email_edit.focus()
+	})
+}
+
+e.code_button.action = function() {
+	let d = dialog()
+	usr_nav.reload({
+		upload: {
+			type: 'code',
+			code: e.code_edit.input_val,
+		},
+		notify: e.code_button,
+		event: 'login',
+		fail: function(err) {
+			e.code_edit.errors = [{message: err, passed: false}]
+			e.code_edit.focus()
+		},
+	})
+}
+*/
 
 function sign_in() {
 	let d = dialog()
@@ -279,8 +288,6 @@ function sign_in() {
 	d.code_edit.val = null
 	d.slides.slide(0)
 	d.modal()
-	// adding this dynamically to prevent loading the background needlessly.
-	$1('.modal-dialog').class('sign-in-splash-img', !signed_in && !signed_in_anonymous)
 	return d
 }
 

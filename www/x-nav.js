@@ -508,7 +508,6 @@ let prefix = (p, s) => s ? p + ':' + s : null
 function shared_nav(id, opt) {
 
 	let name = prefix('id', id)
-		|| prefix('rowset_id', opt.rowset_id)
 		|| prefix('rowset_name', opt.rowset_name)
 		|| prefix('rowset_url', opt.rowset_url)
 
@@ -647,13 +646,7 @@ function nav_widget(e) {
 		e.rowset_url = v ? '/rowset.json/' + v : null
 		e.reload()
 	}
-	e.prop('rowset_name', {store: 'var', type: 'rowset'})
-
-	e.set_rowset_id = function(v) {
-		e.rowset = xmodule.rowset(v)
-		e.reload()
-	}
-	e.prop('rowset_id', {store: 'var', type: 'rowset'})
+	e.prop('rowset_name', {store: 'var', type: 'rowset', attr: 'rowset'})
 
 	// fields utils -----------------------------------------------------------
 
@@ -1574,7 +1567,7 @@ function nav_widget(e) {
 		if (e.focused_field != null)
 			e.last_focused_col = e.focused_field.name
 
-		if (e.val_field && ev.input) {
+		if (ev.set_val != false && e.val_field && ev.input) {
 			let val = row ? e.cell_val(row, e.val_field) : null
 			e.set_val(val, assign({input: e}, ev))
 		}
@@ -2918,11 +2911,12 @@ function nav_widget(e) {
 			return // fields not initialized yet.
 		let row = e.lookup(e.val_col, [v])[0]
 		let ri = e.row_index(row)
-		e.focus_cell(ri, true, 0, 0,
-			assign({
+		let focus_opt = assign({
 				must_not_move_row: true,
 				unfocus_if_not_found: true,
-			}, ev))
+			}, ev)
+		focus_opt.set_val = false // avoid recursion.
+		e.focus_cell(ri, true, 0, 0, focus_opt)
 	}
 
 	// editing ----------------------------------------------------------------
@@ -2947,7 +2941,6 @@ function nav_widget(e) {
 
 		if (
 				field.lookup_nav_id
-			|| field.lookup_rowset_id
 			|| field.lookup_rowset_name
 			|| field.lookup_rowset_url
 			|| field.lookup_rowset
@@ -3164,13 +3157,11 @@ function nav_widget(e) {
 		if (field.lookup_nav) // linked lookup nav (not owned).
 			return
 		if (  field.lookup_rowset
-			|| field.lookup_rowset_id
 			|| field.lookup_rowset_name
 			|| field.lookup_rowset_url
 		) {
 			field.lookup_nav = shared_nav(field.lookup_nav_id, {
 				rowset      : field.lookup_rowset,
-				rowset_id   : field.lookup_rowset_id,
 				rowset_name : field.lookup_rowset_name,
 				rowset_url  : field.lookup_rowset_url,
 			})
@@ -4847,7 +4838,7 @@ function nav_dropdown_widget(e) {
 		if (!e.picker) return
 		e.picker.rowset_name = v
 	}
-	e.prop('rowset_name', {store: 'var', type: 'rowset'})
+	e.prop('rowset_name', {store: 'var', type: 'rowset', attr: 'rowset'})
 
 	e.on('opened', function() {
 		if (!e.picker) return
@@ -4855,43 +4846,6 @@ function nav_dropdown_widget(e) {
 	})
 
 }
-
-// ---------------------------------------------------------------------------
-// lookup dropdown (for binding to fields with `lookup_nav_id` or `lookup_rowset*`)
-// ---------------------------------------------------------------------------
-
-component('x-lookup-dropdown', function(e) {
-
-	editbox_widget(e, {input: false, picker: true})
-
-	e.create_picker = function(opt) {
-
-		let ln_id = e.field.lookup_nav_id
-		if (ln_id) {
-			opt.id = ln_id
-		} else {
-			opt.type = 'listbox'
-			opt.rowset      = e.field.lookup_rowset
-			opt.rowset_id   = e.field.lookup_rowset_id
-			opt.rowset_name = e.field.lookup_rowset_name
-			opt.rowset_url  = e.field.lookup_rowset_url
-		}
-
-		opt.val_col     = e.field.lookup_cols
-		opt.display_col = e.field.display_col
-		opt.theme       = e.theme
-
-		let picker = component.create(opt)
-		picker.id = null // not saving into the original.
-		return picker
-	}
-
-	e.on('opened', function() {
-		if (!e.picker) return
-		e.picker.scroll_to_focused_cell()
-	})
-
-})
 
 /* ---------------------------------------------------------------------------
 // field type definitions

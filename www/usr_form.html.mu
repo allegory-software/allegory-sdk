@@ -9,8 +9,8 @@
 		<x-input col=email ></x-input>
 		<x-input col=name  ></x-input>
 		{{#multilang}}
-		<x-lookup-dropdown col=lang     ></x-lookup-dropdown>
-		<x-lookup-dropdown col=country  ></x-lookup-dropdown>
+		<x-lookup col=lang     ></x-lookup>
+		<x-lookup col=country  ></x-lookup>
 		{{/multilang}}
 		<x-enum-dropdown col=theme></x-enum-dropdown>
 		<x-if global=signed_in_dev>

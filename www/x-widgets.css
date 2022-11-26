@@ -2536,6 +2536,11 @@ x-tabs-fixed-header {
 	visibility: hidden;
 }
 
+.x-slides > .x-ct > . {
+	grid-column-start: 1;
+	grid-row-start: 1;
+}
+
 .x-slide:not(.x-slide-selected),
 .x-slide:not(.x-slide-selected) *
 {

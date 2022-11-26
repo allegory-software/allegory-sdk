@@ -121,8 +121,7 @@ function listbox_widget(e) {
 
 	// responding to nav changes ----------------------------------------------
 
-	let inh_do_update = e.do_update
-	e.do_update = function(opt) {
+	e.do_after('do_update',  function(opt) {
 
 		if (opt.fields || opt.rows || opt.all) {
 			e.clear()
@@ -135,10 +134,8 @@ function listbox_widget(e) {
 			opt.state = true
 		}
 
-		if (opt.all) {
-			inh_do_update()
+		if (opt.all)
 			opt.state = true
-		}
 
 		if (opt.state && e.len)
 			for (let i = 0; i < e.rows.length; i++) {
@@ -150,9 +147,14 @@ function listbox_widget(e) {
 		if (opt.state)
 			e.update_action_band()
 
-		if (opt.scroll_to_focused_cell)
+		if (opt.scroll_index) {
+			let item = e.at[opt.scroll_index]
+			item.make_visible()
+		} else if (opt.scroll_to_focused_cell) {
 			e.scroll_to_focused_cell()
-	}
+		}
+
+	})
 
 	e.do_update_cell_state = function(ri, fi, prop, val) {
 		e.do_update_item(e.at[ri], e.rows[ri])
@@ -366,8 +368,7 @@ function listbox_widget(e) {
 	})
 
 	e.scroll_to_cell = function(ri, fi) {
-		let item = e.at[ri]
-		item.make_visible()
+		e.update({scroll_index: ri})
 	}
 
 	e.on('keypress', function(c) {
@@ -419,16 +420,14 @@ component('x-list-dropdown', function(e) {
 			theme: e.theme,
 		}, e.listbox))
 
-		// in the rare case that the rows in the listbox are updated while
-		// the listbox is serving as the picker for the dropdown,
-		// update the display value in the dropdown.
-		function update(...args) {
-			e.do_update_val(e.input_val)
-		}
-		lb.on('focused_row_cell_state_changed', update)
-		lb.on('focused_row_state_changed', update)
-		lb.on('display_vals_changed', update)
-		lb.on('reset', update)
+		// function update() {
+		// 	e.update()
+		// }
+
+		// lb.on('focused_row_cell_state_changed', update)
+		// lb.on('focused_row_state_changed', update)
+		// lb.on('display_vals_changed', update)
+		// lb.on('reset', update)
 
 		lb.on('wheel', function(ev, dy) {
 			lb.pick_near_val(dy, {input: e, pick: false})
