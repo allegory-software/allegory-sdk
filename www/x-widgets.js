@@ -1435,8 +1435,8 @@ publishes:
 // ---------------------------------------------------------------------------
 
 /*
-Why are popups so complicated? Because the forever not-quite-there-yet web
-platform doesn't have the notion of a global z-index so we can't have
+Why are popups so complicated? Because the forever not-quite-there-yet[1]
+web platform doesn't have the notion of a global z-index so we can't have
 relatively positioned (and styled) popups that are also painted last i.e.
 on top of everything, so we have to choose between popups that are
 browser-positioned but most probably clipped or obscured by other elements,
@@ -1445,6 +1445,8 @@ and kept in sync with the position of their target. Because we have a lot of
 implicit "stacking contexts" (read: abstraction leaks of the graphics engine),
 we cannot put popups in the DOM inside their target as clipping would be
 inevitable in that case, so manual positioning is the only option really.
+
+[1] https://github.com/w3c/csswg-drafts/issues/4092
 */
 
 function popup_widget(e, is_container) {
