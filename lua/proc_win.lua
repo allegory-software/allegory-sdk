@@ -14,7 +14,7 @@ require'winapi.thread'
 function env(k, v)
 	if k then
 		if v ~= nil then
-			assert(winapi.SetEnvironmentVariable(k, v))
+			winapi.SetEnvironmentVariable(k, v)
 		else
 			return winapi.GetEnvironmentVariable(k)
 		end

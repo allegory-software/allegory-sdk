@@ -180,7 +180,8 @@ MODULES
 	rel_scriptdir                  get the script's directory
 	scriptname                     get the script's name
 	luapath(path [,index [,ext]])  insert a path in package.path
-	cpath(path [,index])           insert a path in package.cpath
+	luacpath(path [,index])        insert a path in package.cpath
+	sopath(path)                   set shared library path for ffi.load()
 LUA ALLOCATION
 	freelist([create], [destroy]) -> alloc,free   freelist allocation pattern
 INTERPRETER
@@ -2077,35 +2078,19 @@ end
 --portable way to add more paths to package.cpath, at any place in the list.
 --negative indices count from the end of the list like string.sub().
 --index 'after' means 0.
-function cpath(path, index)
+function luacpath(path, index)
 	package.cpath = add_path(package.cpath, path, index)
 end
 
---this crap is because Windows doesn't have LD_LOAD_LIBRARY.
-local ffi_load
-function ffipath(path, index)
-	if not ffi_load then
-		ffi_load = ffi.load
-		local tsep = package.config:sub(3,3) --';'
-		local split_patt = '[^'..esc(tsep)..']+'
-		ffi.load = function(name, global)
-			local path = name
-			if not name:find'[\\/]' then
-				for path_patt in package.ffipath:gmatch(split_patt) do
-					local path1 = path_patt:gsub('%?', name)
-					if exists(path1) then
-						path = path1
-						break
-					end
-				end
-			end
-			return ffi_load(path, global)
-		end
+--NOTE: unlike luapath() and luacpath(), calling this repeatedly doesn't add
+--new paths to search, but replaces the path every time!
+function sopath(path)
+	if win then
+		require'winapi'.SetDllDirectory(path)
+	else
+		require'proc'
+		env('LD_LIBRARY_PATH', path)
 	end
-	package.ffipath = add_path(package.ffipath, path, index,
-		win and 'dll' or Linux and 'so' or OSX and 'dylib',
-		nil, (Linux or OSX) and 'lib'
-	)
 end
 
 --allocation -----------------------------------------------------------------

@@ -49,3 +49,12 @@ function CloseHandle(h)
 	return retnz(C.CloseHandle(h))
 end
 
+ffi.cdef[[
+BOOL SetDllDirectoryW(
+	LPCWSTR lpPathName
+);
+]]
+
+function SetDllDirectory(s)
+	checknz(C.SetDllDirectoryW(wcs(s)))
+end
