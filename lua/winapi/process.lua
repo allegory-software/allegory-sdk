@@ -219,7 +219,7 @@ function GetEnvironmentVariable(k) --note: os.getenv() can do the same.
 end
 
 function SetEnvironmentVariable(k, v)
-	return checknz(C.SetEnvironmentVariableW(wcs(k), v and wcs(tostring(v)) or nil))
+	checknz(C.SetEnvironmentVariableW(wcs(k), v and wcs(tostring(v)) or nil))
 end
 
 STD_INPUT_HANDLE  = tonumber(ffi.cast('DWORD', -10))
