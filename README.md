@@ -172,7 +172,7 @@ scripts for new libraries.
   * [x-grid.js](www/x-grid.js)         - Nav-based virtual tree-grid widget
   * [x-listbox.js](www/x-listbox.js)   - Nav-based listbox widget
   * [x-input.js](www/x-input.js)       - Nav-based single-value (scalar) widgets
-  * [x-chart.js](www/x-grid.js)        - Nav-based graphs & charts
+  * [x-chart.js](www/x-chart.js)       - Nav-based graphs & charts
   * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
 * __Web / Client side / Third-party libs__
   * [mustache.js](www/mustache.js)         - Logic-less templates - [Mustache](https://mustache.github.io/) on client-side
