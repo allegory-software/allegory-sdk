@@ -39,11 +39,21 @@ changes made on a cell by one widget are reflected instantly in other widgets
 (aka 2-way binding). The nav widget then gathers the changes made to one
 or more rows/cells and can push them to a server (aka 3-way binding).
 
+## Docs / Demo
+
+Like usual, docs are in the code but this time there's also a [demo (master)]
+(and [demo (dev)]).
+
+[demo (master)]: https://raw.githack.com/allegory-software/allegory-sdk/master/www/x-widgets-demo.html
+[demo (dev)]:    https://raw.githack.com/allegory-software/allegory-sdk/dev/www/x-widgets-demo.html
+
 ## Installation
 
 There is no installation step and no offline preprocessing or packing tools
 are used or necessary. Just make sure you load both the js and css files
-in order (see [xapp.lua](lua/xapp.lua) for that).
+in order like [x-widgets-demo.html] does.
+
+[x-widgets-demo.html]: https://github.com/allegory-software/allegory-sdk/tree/dev/www/x-widgets-demo.html
 
 ## Styling
 
