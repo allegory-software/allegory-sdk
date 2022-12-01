@@ -35,62 +35,35 @@ Generally just use `\n`.
 
 ## Modules
 
-Keep Mr. _G clean, don't use `module()`. Use one of these patterns instead:
-
-```lua
-local M = {}
-
-function M.foo()
-	...
-end
-
-function M.bar()
-	...
-end
-
-return M
-```
-
-or:
-
-```lua
-local function foo()
-	...
-end
-
-local function bar()
-	...
-end
-
-return {
-	foo = foo,
-	bar = bar,
-}
-```
+Don't use `module()`, it's not necessary. Just make things global, that's ok,
+it forces you find good names and it makes user code easier to read because
+there's no renaming involved.
 
 ## Submodules
 
 Split optional functionality into submodules. Submodules can either have
-their own namespace or can extend the main module's namespace.
+their own namespace or can extend the main module's namespace, or can just
+add globals.
 
-Name submodules of `foo` `foo_bar.lua` instead of `foo/bar.lua`.
+Name submodules of `foo` `foo_bar.lua` instead of `foo/bar.lua`. In general,
+*don't make directories* unless you really really have to.
 
 Submodules can be loaded manually by the user with require() or they can be
-set up to be loaded automatically with `glue.autoload`.
+set up to be loaded automatically with `autoload()`.
 
 ## Naming
 
 Take time to find good names and take time to _re-factor those names_
 as much as necessary. As a wise stackoverflow user once said,
 the process of naming makes you face the horrible fact that you have
-no idea what the hell you're doing.
+no idea what you're doing.
 
 Use Lua's naming conventions `foo_bar` and `foobar` instead of `FooBar` or `fooBar`.
 
 ### Temporary variables
 
   * `t` is for tables
-  * `dt` is for destination (accumulation) tables (and for time diffs)
+  * `dt` is for destination (accumulation) tables
   * `i` and `j` are for indexing
   * `n` is for counting
   * `k, v` is what you get out of pairs()
@@ -100,8 +73,8 @@ Use Lua's naming conventions `foo_bar` and `foobar` instead of `FooBar` or `fooB
   * `x` is for generic math quantities
   * `s` is for strings
   * `c` is for 1-char strings
-  * `f` is for files
   * `f`, `fn`, `func` are for functions
+  * `f` is also for files
   * `o` is for objects
   * `ret` is for return values
   * `ok, ret` is what you get out of `pcall`
@@ -122,7 +95,7 @@ problem: you're not being lazy for using them.
 ## Comments
 
 Assume your readers already know Lua so try not to teach that to them
-(it would show that you're really trying to teach it to yourself).
+(it would only show that you're really trying to teach it to yourself).
 But don't tell them that the code "speaks for itself" either because
 it doesn't. Take time to document the tricky parts of the code.
 If there's an underlying narrative on how you solved a problem, take time
@@ -137,7 +110,7 @@ is _much more important_ than the nitty-gritty details and it's too often missin
 * use `foo'bar'` instead of `foo"bar"`, `foo "bar"` or `foo("bar")`.
 * use `foo.bar` instead of `foo['bar']`.
 * use `local function foo() end` instead of `local foo = function() end`.
-(this sugar shouldn't have existed, but it's too late now).
+(this sugar shouldn't have existed, but it's too late now, use it).
 * put a comma after the last element of vertical lists.
 
 ## FFI Declarations
@@ -167,21 +140,12 @@ to the [glue](lua/glue.lua) library.
 | __logic__                                   |
 | `not a == not b`                            | both or none
 | __numbers__                                 |
-| `math.min(math.max(x, min), max)`           | clamp x (upper limit takes precedence)
+| `min(max(x, x0), x1)`                       | clamp x (upper limit takes precedence)
 | `x ~= x`                                    | number is NaN
 | `1/0`                                       | inf
 | `-1/0`                                      | -inf
-| `math.huge == math.huge-1`                  | check if inf is available without dividing by zero
-| `x % 1`                                     | fractional part (always positive)
-| `x % 1 == 0`                                | number is integer; `math.floor(x) == x`
-| `x - x % 1`                                 | integer part; but better use `math.floor(x)`
-| `x - x % 0.01`                              | x floored to two decimal digits
-| `x - x % n`                                 | closest to `x` smaller than `x` multiple of `n`
-| `math.modf(x)`                              | integer part and fractional part
-| `math.floor(x+.5)`                          | round
+| `floor(x+.5)`                               | round
 | `(x >= 0 and 1 or -1)`                      | sign
-| `y0 + (x-x0) * ((y1-y0) / (x1 - x0))`       | linear interpolation
-| `math.fmod(angle, 2*math.pi)`               | normalize an angle
 | __tables__                                  |
 | `next(t) == nil`                            | table is empty
 | __strings__                                 |
@@ -190,102 +154,6 @@ to the [glue](lua/glue.lua) library.
 | `s:match'["\'](.-)%1'`                      | match pairs of single or double quotes
 | __i/o__                                     |
 | `f:read(4096, '*l')`                        | read lines efficiently
-
-## Code patterns
-
-Sometimes the drive to compress and compact the code goes against clarity,
-obscuring the programmer's intention. Here's a few patterns of code that can
-be improved in that regard:
-
-<table>
-<tr><td> <b>Intention</b> </td><td> <b>Unclear way</b> </td><td> <b>Slightly better way</b> </td></tr>
-
-<tr><td> break the code	</td><td>
-
-```lua
-return last_func_call()
-```
-
-</td><td>
-
-```lua
-last_func_call()
-return
-```
-
-</td></tr>
-
-<tr><td> declaring unrelated variables </td><td>
-
-```lua
-local var1, var2 = val1, val2
-```
-
-</td><td>
-
-```lua
-local var1 = val1
-local var2 = val2
-```
-
-</td></tr>
-
-<tr><td> private methods </td><td>
-
-```lua
-local function foo(self, ...) end`
-foo(self, ...)
-```
-
-</td><td>
-
-```lua
-function obj:_foo(...) end
-self:_foo(...)
-```
-
-</td></tr>
-
-<tr><td> dealing with simple cases </td><td>
-
-```lua
-if simple_case then
-  return simple answer
-else
-  hard case ...
-end
-```
-
-</td><td>
-
-```lua
-if simple_case then
-  return simple_answer
-end
-hard case ...
-```
-
-</td></tr>
-
-<tr><td> emulating bool() </td><td>
-
-```lua
-not not x
-```
-
-</td><td>
-
-```lua
-x and true or false
-```
-
-</td></tr>
-</table>
-
-## Strict mode
-
-Use `require'strict'` when developing, but make sure to __remove it__
-before publishing your code to avoid breaking other people's code.
 
 ------------------------------------------------------------------------------
 
@@ -439,11 +307,15 @@ Switching endianness of a 64bit integer (to use in conjunction with
 
 ## The golden rule
 
-Design your APIs from the point of view of the user, not to satisfy
-implementation requirements. Start with the usage code first. Real usage code,
-not fake usage code like unit tests. This is probably the number one reason
-why APIs suck, because their authors haven't put themselves in the shoes
-of the user to really see how it feels.
+Design is overrated. An API that is refactored and tweaked many times by the
+person that is using it for something serious will always be superior to
+an API "designed" on imagined use cases. It's the same with programming
+languages and everything. So don't worry about getting your API right, you
+will never get it perfect, which is why you need to own as much of your stack
+as you possibly can, so that you can constantly re-fit things so that they
+work better together with less friction, and for that you need to be able to
+change things at every level of the stack. The lower down the stack you can
+fix something, the better it is for everything that sits on it.
 
 ## Compact your API
 
@@ -451,7 +323,7 @@ Structuring your API semantically makes it easier to learn and later
 to recall because humans work best with semantic hierarchies.
 Here's a few techniques you can use:
 
-  * group functions into namespaces (the easy one)
+  * group functions into namespaces (the easy one, and the wrong approach!)
   * group semantic variations into a single function using parameter
   polymorphism (aka function overloading)
 
