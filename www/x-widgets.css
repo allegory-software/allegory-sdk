@@ -28,9 +28,6 @@
 	--x-border-focused-button         :  #aab;
 	--x-border-focused-button-primary :  #363;
 
-	--x-shadow-focused                :  0px  0px  0px  0px var(--x-border-focused);
-	--x-shadow-focused-button         :  0px  0px  0px  1px var(--x-border-focused-button);
-	--x-shadow-focused-button-primary :  0px  0px  0px  1px var(--x-border-focused-button-primary);
 	--x-shadow-popup                  :  2px  2px  2px      #000000aa; /* sharply angled shadow */
 	--x-shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 	--x-shadow-button                 :  0px  0px  8px  0px #00000011;
@@ -91,14 +88,16 @@
 	--x-fg-link-visited : var(--x-fg);
 
 	--x-bg-button                 : #eff3f6;
-	--x-bg-button-hover           : #eff3f6; /* TODO: use this */
-	--x-bg-button-active          : #eff3f6; /* TODO: use this */
+	--x-bg-button-hover           : #f5f8f9;
+	--x-bg-button-pressed         : #f5f8f9;
 	--x-fg-button                 : var(--x-fg-inverted);
 	--x-bg-button-primary         : #28a745;
 	--x-fg-button-primary         : var(--x-fg-inverted);
 	--x-bg-button-primary-hover   : #199134;
 	--x-bg-button-primary-pressed : #147a2b;
 	--x-bg-button-danger          : var(--x-bg-button);
+	--x-bg-button-danger-hover    : var(--x-bg-button-hover);
+	--x-bg-button-danger-pressed  : var(--x-bg-button-pressed);
 	--x-fg-button-danger          : #a33;
 
 	--x-bg-select-button: var(--x-bg-button);
@@ -186,8 +185,7 @@ body {
 /* widget defaults -------------------------------------------------------- */
 
 .x-widget {
-	display: flex;
-	z-index: 0; /* make `z-index` of children context-free */
+	display: inline-flex;
 	position: relative; /* make `position: absolute` of children context-free */
 }
 
@@ -205,7 +203,7 @@ body {
 }
 
 .x-widget:focus-visible {
-	outline: none; /* disable browser auto-focus-ring heuristic BS */
+	outline: none; /* disable browser auto-focus-ring heuristic used for buttons */
 }
 
 /* widget editing --------------------------------------------------------- */
@@ -373,8 +371,15 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* button ----------------------------------------------------------------- */
 
 .x-button {
+	/* layout focus-box and info-box */
+	display: inline-flex;
+	flex-flow: column;
+}
+
+.x-button > .x-button-focus-box {
 
 	/* layout content */
+	display: inline-flex;
 	align-items: baseline;     /* align icons to text */
 	justify-content: center;   /* center the content if the button is made wider */
 
@@ -383,6 +388,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding-right  : var(--x-padding-x-button);
 	padding-top    : var(--x-padding-y-button);
 	padding-bottom : var(--x-padding-y-button);
+
 	font-weight: bold;
 	line-height: 1;
 
@@ -395,7 +401,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	cursor: initial;
 }
 
-.x-button.text-empty { /* icon-only */
+.x-button.text-empty > .x-button-focus-box { /* icon-only */
 	padding-left  : var(--x-padding-x-button-icon);
 	padding-right : var(--x-padding-x-button-icon);
 	align-items: center; /* no more baseline to align icon to */
@@ -408,13 +414,13 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	justify-content: center;
 }
 
-.x-button:not(.text-empty) > .x-button-icon {
+.x-button:not(.text-empty) > .x-button-focus-box > .x-button-icon {
 	margin-right: .5em;
 }
 
 /* styling (from github) */
 
-.x-button {
+.x-button > .x-button-focus-box {
 	border-width: 1px;
 	border-style: solid;
 	border-color: var(--x-faint);
@@ -423,59 +429,72 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	box-shadow: var(--x-shadow-button);
 }
 
-.x-button[primary] {
+.x-button[primary] > .x-button-focus-box {
 	background-color: var(--x-bg-button-primary);
 	color: var(--x-fg-button-primary);
 }
 
-.x-button[primary] {
-	background-color: var(--x-bg-button-primary);
-	color: var(--x-fg-button-primary);
-}
-
-.x-button[danger] {
+.x-button[danger] > .x-button-focus-box {
 	background-color: var(--x-bg-button-danger);
 	color: var(--x-fg-button-danger);
 }
 
-.x-button:focus {
+.x-button:focus-visible > .x-button-focus-box {
 	border-color: var(--x-border-focused-button);
-	box-shadow  : var(--x-shadow-focused-button), var(--x-shadow-button);
+	outline: 2px solid var(--x-outline-focused);
+	outline-offset: -2px;
 }
 
-.x-button[primary]:focus {
+.x-button[primary]:focus-visible > .x-button-focus-box {
 	border-color: var(--x-border-focused-button-primary);
-	box-shadow  : var(--x-shadow-focused-button-primary), var(--x-shadow-button);
 }
 
-.x-button:not([disabled]):not(.widget-editing):not(.widget-selected):hover {
-	filter: brightness(95%);
+.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
+	background-color: var(--x-bg-button-hover);
 }
 
-.x-button:not([disabled]):not(.widget-editing):not(.widget-selected):active,
-.x-button:not([disabled]):not(.widget-editing):not(.widget-selected).active {
-	filter: brightness(90%);
+.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
+	background-color: var(--x-bg-button-primary-hover);
+}
+
+.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
+	background-color: var(--x-bg-button-danger-hover);
+}
+
+.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
+.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active {
+	background-color: var(--x-bg-button-pressed);
 	box-shadow: var(--x-shadow-button-pressed);
+}
+
+.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
+.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active {
+	background-color: var(--x-bg-button-primary-pressed);
+}
+
+.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
+.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active {
+	background-color: var(--x-bg-button-danger-pressed);
 }
 
 /* bare buttons (no borders) */
 
-.x-button[bare] {
+.x-button[bare] > .x-button-focus-box {
 	background: none;
 }
 
-.x-button[bare]:not(:focus) {
+.x-button[bare]:not(:focus-visible) > .x-button-focus-box {
 	border-color: transparent;
 	box-shadow: none;
 	border-radius: 0;
 }
 
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):hover {
+.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
 	filter: contrast(.7);
 }
 
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):active,
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected).active
+.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
+.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active
 {
 	box-shadow: none;
 	filter: contrast(.4);
@@ -560,12 +579,13 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-tooltip-body {
 	display: flex;
 	padding: .5em 0;
+	align-items: baseline;
 
 	/* styling */
 	border-radius: var(--x-border-radius-window);
 	background-color: var(--x-bg-popup);
 	box-shadow: var(--x-shadow-tooltip);
-	line-height: 1.5;
+	line-height: 1.4;
 }
 
 /* visibility animation */
@@ -734,9 +754,8 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-widget:focus-within > .x-focus-box {
 	/* TODO: border-color: var(--x-border-focused); */
 	border-color: transparent;
-	box-shadow  : var(--x-shadow-focused);
 	outline: 2px solid var(--x-outline-focused);
-	outline-offset: 0px;
+	outline-offset: -2px;
 }
 
 .x-widget.with-label > .x-focus-box {
@@ -800,7 +819,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	align-items: baseline;
 }
 
-/* checkbox --------------------------------------------------------------- */
+/* checkbox & radio item -------------------------------------------------- */
 
 .x-markbox {
 	/* shrink-wrap sizing */
@@ -845,7 +864,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-markbox-icon {
 	color: var(--x-markbox-icon-color);
-	font-size: 110%;
 }
 
 .x-markbox-label,
@@ -897,6 +915,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	flex-flow: row nowrap;
 }
 
+.x-checkbox-icon {
+	font-size: 120%;
+}
+
 .x-checkbox-label {
 	display: none;
 }
@@ -904,19 +926,16 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* radiogroup ------------------------------------------------------------- */
 
 .x-radiogroup {
-	flex-wrap: wrap;
-	margin: 0;
-	border: 0;
-	border-radius: 0;
+	flex-flow: column;
 }
 
 .x-radio-item {
 	align-items: baseline;
-	margin-left: 0;
-	margin-right: 0;
-	margin: 0;
-	padding-left  : var(--x-padding-x-input);
-	padding-right : var(--x-padding-x-input);
+	padding-left   : var(--x-padding-x-input);
+	padding-right  : var(--x-padding-x-input);
+	padding-top    : var(--x-padding-y-input);
+	padding-bottom : var(--x-padding-y-input);
+	user-select: none; /* make drag-select skip over button labels */
 }
 
 .x-radiogroup.invalid > .x-markbox,
@@ -925,13 +944,19 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	color: var(--x-fg-error);
 }
 
-.x-radiogroup.invalid > .x-markbox:focus {
+.x-radiogroup > .x-markbox:focus-visible {
+	outline: 2px solid var(--x-outline-focused);
+	outline-offset: -2px;
+}
+
+.x-radiogroup.invalid > .x-markbox:focus-visible {
 	border-color: var(--x-fg-error);
 }
 
-.x-radiogroup[align=right] > .x-markbox {
-	justify-content: flex-end;
-}
+.x-radiogroup[align=right] > .x-markbox { justify-content: flex-end; }
+.x-radiogroup[align=right] > .x-markbox > .x-markbox-icon  { order: 2; }
+.x-radiogroup[align=left ] > .x-markbox > .x-markbox-label { padding-left : .5em; }
+.x-radiogroup[align=right] > .x-markbox > .x-markbox-label { padding-right: .5em; }
 
 /* editbox ---------------------------------------------------------------- */
 
@@ -1244,7 +1269,7 @@ textarea.x-editbox-input {
 	z-index: 3; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
 
 	border-color: var(--x-border-focused);
-	box-shadow  : var(--x-shadow-popup-picker), var(--x-shadow-focused);
+	box-shadow  : var(--x-shadow-popup-picker);
 }
 
 /* passedit --------------------------------------------------------------- */
@@ -1675,10 +1700,6 @@ textarea.x-editbox-input {
 	font-weight: normal;
 }
 
-.x-calendar:focus .x-calendar-day.focused {
-	box-shadow: var(--x-shadow-focused);
-}
-
 .x-calendar-day,
 .x-calendar-weekday
 {
@@ -1851,12 +1872,9 @@ textarea.x-editbox-input {
 
 .x-menu {
 
-	--font-family: arial, sans-serif;
-	--font-size: 12px;
-	--line-height: 1.5;
-	font-family : var(--font-family );
-	font-size   : var(--font-size   );
-	line-height : var(--line-height );
+	font-family : arial, sans-serif;
+	font-size   : 12px;
+	line-height : 1.5;
 
 	/* layout self */
 	position: absolute; /* submenus are positioned in code */
@@ -1879,13 +1897,6 @@ textarea.x-editbox-input {
 	color: inherit;
 	color: var(--x-fg); /* prevent inheritance by the .focused rule below */
 
-}
-
-.x-menu.popup {
-	/* avoid using !important unless it's displayed as a popup */
-	font-family : var(--font-family ) !important;
-	font-size   : var(--font-size   ) !important;
-	line-height : var(--line-height ) !important;
 }
 
 .x-menu, .x-menu:focus-within {
@@ -2289,10 +2300,13 @@ x-tabs-fixed-header {
 	/* layout items */
 	display: flex;
 	flex-flow: column;
-	padding: 2px;
 	align-content: start;
 
-	grid-gap: 2px; /* works on both flex and grid */
+	grid-gap: var(--x-border-width-item); /* works on both flex and grid */
+	/*
+	TODO: we'd like to use background as gap color (interstitial border).
+	background-color: var(--x-border-light);
+	*/
 
 	/* this enables scrolling within children (it's like Harry Potter in here) */
 	overflow: auto;
@@ -2347,8 +2361,10 @@ x-tabs-fixed-header {
 }
 
 .x-notify-toaster {
+	/*
 	position: fixed;
 	transition: top .2s;
+	*/
 }
 
 /* dialog ----------------------------------------------------------------- */
@@ -2435,10 +2451,6 @@ x-tabs-fixed-header {
 	border: 0;
 	border-radius: var(--x-border-radius-window);
 	box-shadow: var(--x-shadow-toolbox);
-}
-
-.x-toolbox.popup {
-	position: fixed !important;
 }
 
 .x-toolbox.pinned,
@@ -2671,7 +2683,6 @@ x-tabs-fixed-header {
 	grid-column-start: 1;
 	overflow: hidden;          /* hide surplus bottom rows */
 	position: relative;        /* activates `overflow: hidden` on abs. pos. child */
-	z-index: 0;                /* stacking context for cell and editor */
 }
 
 .x-grid-cells-canvas {
@@ -3143,11 +3154,6 @@ x-prop-layers-inspector > .x-grid-header {
 	--x-border-focused-button         :  #999;
 	--x-border-focused-button-primary :  #5bde5b;
 
-	/* copy-pasted from the light theme to re-evaluate `--x-border-*` vars */
-	--x-shadow-focused                :  0    0    0   0px var(--x-border-focused);
-	--x-shadow-focused-button         :  0    0    0px 1px var(--x-border-focused-button);
-	--x-shadow-focused-button-primary :  0    0    0px 1px var(--x-border-focused-button-primary);
-
 	--x-shadow-button-pressed         : inset 0 0.15em 0.5em #1b1f2377;
 
 	--x-fg                   : #fff;
@@ -3174,7 +3180,11 @@ x-prop-layers-inspector > .x-grid-header {
 	--x-markbox-icon-color: #75b7fa;
 
 	--x-bg-button                 : #21262d;
+	--x-bg-button-hover           : #333c47;
+	--x-bg-button-pressed         : #404b59;
 	--x-bg-button-danger          : var(--x-bg-button);
+	--x-bg-button-danger-hover    : var(--x-bg-button-hover);
+	--x-bg-button-danger-pressed  : var(--x-bg-button-pressed);
 	--x-fg-button-danger          : #a33;
 
 	--x-bg-select-button: var(--x-faint);

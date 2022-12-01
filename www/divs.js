@@ -3,17 +3,18 @@
 	DOM API & web components.
 	Written by Cosmin Apreutesei. Public domain.
 
-	Dependencies:
+	Depends on:
 		glue.js
+		divs.css
 
-	CSS Requirements (see divs.css):
+	CSS:
 		[hidden]
 		[disabled]
 		.popup
 		.modal
 		.modal-dialog
 
-	Init requirements:
+	Must call on DOM load:
 		init_components()
 
 	debugging:
@@ -77,14 +78,14 @@
 	components:
 		register_component(tag, initializer, [selector])
 		e.bind(t|f)
-		e.do_bind()
+		e.on_bind(f)
 		e.do_move()
 		e.init_child_components()
-		^bind(on)
+		^e.bind(on)
+		^window.element_bind(e, on)
+		^window['ID.bind'](e, on)
 		e.bound -> t|f
-	popups:
-		.popup_level
-		.popup_target
+		e.parent_bound -> t|f
 	events:
 		broadcast (name, ...args)
 		^[right]click       (ev, nclicks, mx, my)
@@ -137,6 +138,7 @@
 	animation frames:
 		raf(f) -> raf_id
 		cancel_raf(raf_id)
+		in_raf -> t|f
 		raf_wrap(f) -> wf
 			wf()
 			wf.cancel()
@@ -147,7 +149,7 @@
 	hit testing:
 		hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h)
 		e.hit_test_sides(mx, my, [d1], [d2])
-	camvas:
+	canvas:
 		e.clear()
 	UI patterns:
 		e.modal([on])
@@ -156,26 +158,50 @@
 		lazy-loading of <img data-src="">
 		auto-updating of <tag timeago time="">
 		exec-ing of <script runit> scripts from injected html
+	props:
+		e.property(name, get, [set])
+		e.prop(name, attrs)
+		e.notify_id_changed()
+	deferred DOM updating:
+		e.update([opt])
+		e.on_update(f)
+		e.on_measure(f)
+		e.on_position(f)
+	popup:
+		e.popup()
+		e.popup_side
+		e.popup_align
+		e.popup_{x1,y1,x2,y2}
+		e.popup_fixed
 
 */
 
+{
+
 // debugging -----------------------------------------------------------------
 
-{
-let debug_indent = ''
+DEBUG_INIT = false
+DEBUG_BIND = false
+DEBUG_ELEMENT_BIND = false
+PROFILE_BIND_TIME = true
+SLOW_BIND_TIME_MS = 10
+DEBUG_UPDATE = false
+
 let e = Element.prototype
-e.debug_anon_name = function() { return this.tag }
+
+let debug_indent = ''
+
+e.debug_anon_name = function() {  // stub
+	return this.tag
+}
+
 e.debug_name = function(suffix) {
 	suffix = catany('>', this.id || this.debug_anon_name(), suffix)
 	if (this.id) // enough context
 		return suffix
-	let p = this
-	do {
-		p = p.popup_target || p.parent
-	} while (p && !p.debug_name)
-	if (!(p && p.debug_name))
+	if (!repl(this.parent, document))
 		return suffix
-	return p.debug_name(suffix)
+	return this.parent.debug_name(suffix)
 }
 
 e.debug = function(action, ...args) {
@@ -196,7 +222,6 @@ e.debug_open_if = function(cond, ...args) {
 e.debug_close_if = function(cond) {
 	if (!cond) return
 	debug_indent = debug_indent.slice(2)
-}
 }
 
 // element attribute manipulation --------------------------------------------
@@ -323,21 +348,6 @@ alias(Element, 'last'   , 'lastElementChild')
 alias(Element, 'next'   , 'nextElementSibling')
 alias(Element, 'prev'   , 'previousElementSibling')
 
-{
-let indexOf = Array.prototype.indexOf
-property(Element, 'index', {
-	get: function() {
-		return indexOf.call(this.parentNode.children, this)
-	},
-	set: function(i) {
-		let sx = this.scrollLeft
-		let sy = this.scrollTop
-		this.parent.insertBefore(this, this.at[max(i, 0)])
-		this.scroll(sx, sy)
-	}
-})
-}
-
 // dom tree navigation including text nodes ----------------------------------
 // also faster for when you know that you don't have text nodes!
 
@@ -382,7 +392,7 @@ needs to be done through this API exclusively for components to work.
 
 Components can be either attached to the DOM (bound) or not. When bound they
 become alive, when unbound they die and must uninstall any event handlers
-to document, window or other components.
+they installed in document, window or other components.
 
 When a component is initialized, its parents are only partially initialized
 so take that into account if you mess with them at that stage.
@@ -390,10 +400,8 @@ so take that into account if you mess with them at that stage.
 When a component is bound, its parents are already bound and its children unbound.
 When a component is unbound, its children are still bound and its parents unbound.
 
-Components are always initialized unbound even when they are already attached
-to the DOM, guaranteeing that any children that are added in init are never
-bound while their parent is initializing, so that later children can rely on
-a fully bound parent chain when they are getting bound.
+Adding children to an unbound compnent (eg. in its init function) does not
+bind them immediately, even if the component is actually connected to the DOM.
 
 */
 
@@ -426,10 +434,10 @@ method(Element, 'init_child_components', function() {
 })
 }
 
-let initializing = true // prevent bind() calls while initializing components.
-property(Element, 'is_connected', {
+property(Element, 'parent_bound', {
 	get: function() {
-		return !initializing && this.isConnected
+		let p = this.parent
+		return this.isConnected && (p == document || p.bound != null || p.parent_bound)
 	}
 })
 
@@ -443,21 +451,21 @@ method(Element, 'bind_children', function bind_children(on) {
 
 method(Element, 'bind', function bind(on) {
 	assert(isbool(on))
-	if (this.do_bind) { // any tag that added a do_bind() method
-		if (!this.bound == !on)
+	if (this.bound != null) { // any tag that called on('bind') or on_bind()
+		if (this.bound == on)
 			return
 		this.bound = on
 		this.do_bind(on)
-	} else if (this._bind) { // any tag that registered a bind event
-		if (!this.bound == !on)
-			return
-		this.bound = on
-		this.fire('bind', on)
 	}
 	// bind children after they parent is bound to allow components to remove
 	// their children inside the bind event handler before them getting bound,
 	// and also so that children see a bound parent when they are getting bound.
-	this.bind_children(true)
+	this.bind_children(on)
+})
+
+method(Element, 'on_bind', function(f) {
+	this.bound = this.bound || false
+	this.do_after('do_bind', f)
 })
 
 // create a text node from a string, quoting it automatically, with wrapping control.
@@ -555,12 +563,14 @@ property(Element, 'html', {
 
 property(Element, 'unsafe_html', {
 	set: function(s) {
-		this.bind_children(false)
+		let bound = this.bound
+		if (bound || bound == null)
+			this.bind_children(false)
 		this.innerHTML = s
-		initializing = true // prevent bind() calls while initializing.
+		this.bound = false // prevent bind in init for children.
 		this.init_child_components()
-		initializing = false
-		if (this.is_connected)
+		this.bound = bound
+		if (this.parent_bound)
 			this.bind_children(true)
 	},
 })
@@ -576,11 +586,11 @@ method(Element, 'set', function E_set(s, whitespace) {
 	if (isnode(s)) {
 		if (this.nodes.length == 1 && this.nodes[0] == s)
 			return this
-		if (iselem(s) && s.is_connected)
+		if (iselem(s) && s.parent_bound)
 			s.bind(false)
 		this.clear()
 		this.append(s)
-		if (iselem(s) && this.is_connected)
+		if (iselem(s) && this.parent_bound)
 			s.bind(true)
 	} else {
 		this.textContent = s
@@ -594,11 +604,11 @@ method(Element, 'add', function E_add(...args) {
 	for (let s of args)
 		if (s != null) {
 			s = T(s)
-			if (iselem(s) && s.is_connected)
+			if (iselem(s) && s.parent_bound)
 				s.bind(false)
 			this.append(s)
 			if (iselem(s)) {
-				if (this.is_connected)
+				if (this.parent_bound)
 					s.bind(true)
 			}
 		}
@@ -610,11 +620,11 @@ method(Element, 'insert', function E_insert(i0, ...args) {
 		let s = args[i]
 		if (s != null) {
 			s = T(s)
-			if (iselem(s) && s.is_connected)
+			if (iselem(s) && s.parent_bound)
 				s.bind(false)
 			this.insertBefore(s, this.at[max(0, or(i0, 1/0))])
 			if (iselem(s)) {
-				if (this.is_connected)
+				if (this.parent_bound)
 					s.bind(true)
 			}
 		}
@@ -639,7 +649,7 @@ method(Element, 'replace', function E_replace(e0, s) {
 	} else {
 		this.appendChild(s)
 	}
-	if (iselem(s) && this.is_connected)
+	if (iselem(s) && this.parent_bound)
 		s.bind(true)
 	return this
 })
@@ -647,7 +657,7 @@ method(Element, 'replace', function E_replace(e0, s) {
 // move element to a new parent and/or index without rebinding, unless
 // the component requires rebinding by returning false from `.do_move()`.
 method(Element, 'move', function E_move(pe, i) {
-	assert(this.is_connected)
+	assert(this.parent_bound)
 	pe = pe || this.parent
 	let must_unbind = this.do_move && !this.do_move(pe, i)
 	if (must_unbind)
@@ -659,6 +669,21 @@ method(Element, 'move', function E_move(pe, i) {
 	if (must_unbind)
 		this.bind(true)
 })
+
+{
+let indexOf = Array.prototype.indexOf
+property(Element, 'index', {
+	get: function() {
+		return indexOf.call(this.parentNode.children, this)
+	},
+	set: function(i) {
+		let sx = this.scrollLeft
+		let sy = this.scrollTop
+		this.parent.insertBefore(this, this.at[max(i, 0)])
+		this.scroll(sx, sy)
+	}
+})
+}
 
 // util to convert an array to a html bullet list.
 {
@@ -696,43 +721,6 @@ function V(tag, attrs, ...child_nodes) {
 	})
 })()
 
-/* instance method overriding for components ---------------------------------
-
-NOTE: unlike global override(), e.override() cannot override built-in methods.
-You can still use the global override() to override built-in methods in an
-instance without affecting the prototype, and just the same you can use
-override_property_setter() to override a setter in an instance without
-affecting the prototype.
-
-*/
-
-method(Element, 'property', function(name, get, set) {
-	return property(this, name, get, set)
-})
-
-method(Element, 'override', function(method, func) {
-	let inherited = this[method] || noop
-	this[method] = function(...args) {
-		return func.call(this, inherited, ...args)
-	}
-})
-
-method(Element, 'do_before', function(method, func) {
-	let inherited = repl(this[method], noop)
-	this[method] = inherited && function(...args) {
-		func.call(this, ...args)
-		inherited.call(this, ...args)
-	} || func
-})
-
-method(Element, 'do_after', function(method, func) {
-	let inherited = repl(this[method], noop)
-	this[method] = inherited && function(...args) {
-		inherited.call(this, ...args)
-		func.call(this, ...args)
-	} || func
-})
-
 /* events & event wrappers ---------------------------------------------------
 
 NOTE: these wrappers block mouse events on any target that has attr `disabled`
@@ -741,14 +729,14 @@ a solution because it makes click-through popups.
 
 NOTE: preventing focusing is a matter of not-setting/removing attr `tabindex`
 except for input elements that must have an explicit `tabindex=-1`.
+
 */
 
-{
 let installers = on.installers
 let callers = on.callers
 
 installers.bind = function() {
-	this._bind = true
+	this.bound = this.bound || false
 }
 
 let resize_observer = new ResizeObserver(function(entries) {
@@ -775,8 +763,8 @@ installers.resize = function() {
 			}
 		}
 	}
-	this.on('bind', bind)
-	if (this.is_connected)
+	this.on_bind(bind)
+	if (this.parent_bound)
 		bind.call(this, true)
 }
 
@@ -807,8 +795,8 @@ installers.attr_changed = function() {
 			}
 		}
 	}
-	this.on('bind', bind)
-	if (this.is_connected)
+	this.on_bind(bind)
+	if (this.parent_bound)
 		bind.call(this, true)
 }
 
@@ -926,11 +914,14 @@ function init_components() {
 	root = document.documentElement  // for debugging, don't use in code.
 	body = document.body // for debugging, don't use in code.
 	head = document.head // for debugging, don't use in code.
+	if (DEBUG_INIT)
+		debug('ROOT INIT ---------------------------------')
 	root.init_component()
-	initializing = false
 	if (DEBUG_BIND)
 		debug('ROOT BIND ---------------------------------')
 	root.bind(true)
+	if (DEBUG_BIND)
+		debug('ROOT BIND DONE ----------------------------')
 }
 
 // inter-window event broadcasting.
@@ -955,8 +946,6 @@ function broadcast(topic, ...args) {
 		args: args,
 	}))
 	save('__broadcast', '')
-}
-
 }
 
 // geometry wrappers ---------------------------------------------------------
@@ -986,13 +975,14 @@ method(Element, 'rect', function() {
 	return this.getBoundingClientRect()
 })
 
+alias(Element, 'cx', 'clientLeft')
+alias(Element, 'cy', 'clientTop')
 alias(Element, 'cw', 'clientWidth')
 alias(Element, 'ch', 'clientHeight')
-alias(HTMLElement, 'ow', 'offsetWidth')
-alias(HTMLElement, 'oh', 'offsetHeight')
-
 alias(HTMLElement, 'ox', 'offsetLeft')
 alias(HTMLElement, 'oy', 'offsetTop')
+alias(HTMLElement, 'ow', 'offsetWidth')
+alias(HTMLElement, 'oh', 'offsetHeight')
 
 alias(DOMRectReadOnly, 'x' , 'left')
 alias(DOMRectReadOnly, 'y' , 'top')
@@ -1013,10 +1003,9 @@ method(DOMRectReadOnly, 'clip', function(r) {
 	return domrect(...clip_rect(this.x, this.y, this.w, this.h, r.x, r.y, r.w, r.h))
 })
 
-{
-let layout_changed = function() { document.fire('layout_changed') }
-window.on('resize', layout_changed)
-}
+window.on('resize', function window_resize() {
+	document.fire('layout_changed')
+})
 
 method(Window, 'rect', function() {
 	return new DOMRect(0, 0, this.innerWidth, this.innerHeight)
@@ -1266,23 +1255,6 @@ function scrollbox_client_dimensions(w, h, cw, ch, overflow_x, overflow_y, vscro
 	return [cw, ch]
 }
 
-// popups --------------------------------------------------------------------
-
-property(Element, 'popup_level', {
-	get: function() {
-		let e = this
-		let n = 0
-		while (e != document) {
-			if (e.hasclass('popup'))
-				n++
-			if (e.hasclass('modal')) // a modal is above 10 normal popups
-				n += 10
-			e = e.popup_target || e.parent
-		}
-		return n
-	}
-})
-
 // animation frames ----------------------------------------------------------
 
 // TODO: remove these, use raf_wrap() only!
@@ -1291,7 +1263,8 @@ function raf(f, last_id) {
 }
 cancel_raf = cancelAnimationFrame
 
-var in_raf = false
+in_raf = false // public
+
 function raf_wrap(f) {
 	let id
 	function raf_f() {
@@ -1392,8 +1365,6 @@ function transition(f, dt, y0, y1, ease_f, ease_way, ...ease_args) {
 
 // hit-testing ---------------------------------------------------------------
 
-{
-
 // check if a point (x0, y0) is inside rect (x, y, w, h)
 // offseted by d1 internally and d2 externally.
 let hit = function(x0, y0, d1, d2, x, y, w, h) {
@@ -1427,8 +1398,6 @@ method(Element, 'hit_test_sides', function(mx, my, d1, d2) {
 	let r = this.rect()
 	return hit_test_rect_sides(mx, my, or(d1, 5), or(d2, 5), r.x, r.y, r.w, r.h)
 })
-
-}
 
 // canvas --------------------------------------------------------------------
 
@@ -1638,7 +1607,6 @@ function live_move_mixin(e) {
 
 // lazy image loading --------------------------------------------------------
 
-{
 let lazy_load_all = function() {
 	for (let img of $('img[data-src]')) {
 		if (img.is_in_viewport(300)) {
@@ -1662,7 +1630,6 @@ let lazy_load = function(img) {
 	}
 }
 register_component('img', lazy_load, 'img[data-src]')
-}
 
 // timeago auto-updating -----------------------------------------------------
 
@@ -1686,7 +1653,6 @@ runevery(60, function() {
 
 })
 
-
 // exec'ing js scripts inside html -------------------------------------------
 
 register_component('script', function(e) {
@@ -1694,10 +1660,15 @@ register_component('script', function(e) {
 		return
 	if (e.src)
 		return
-	if (!e.hasattr('runit'))
-		return
-	eval(e.text)
-})
+	// calling with `e` as `this` allows `this.on('bind',...)` inside the script
+	// and also attaching other elements to the script for lifetime control!
+	//console.log(e.text)
+	(function() { eval.call(window, e.text) }).call(e)
+}, '[run]')
+
+// not initializing components inside the template tag -----------------------
+
+register_component('template', noop) // do not init child components.
 
 // canvas helpers ------------------------------------------------------------
 
@@ -1708,3 +1679,817 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 	if (this.width  != w) this.width  = w
 	if (this.height != h) this.height = h
 })
+
+/* element method overriding -------------------------------------------------
+
+NOTE: unlike global override(), e.override() cannot override built-in methods.
+You can still use the global override() to override built-in methods in an
+instance without affecting the prototype, and just the same you can use
+override_property_setter() to override a setter in an instance without
+affecting the prototype.
+
+*/
+
+method(Element, 'override', function(method, func) {
+	let inherited = this[method] || noop
+	this[method] = function(...args) {
+		return func.call(this, inherited, ...args)
+	}
+})
+
+method(Element, 'do_before', function(method, func) {
+	let inherited = repl(this[method], noop)
+	this[method] = inherited && function(...args) {
+		func.call(this, ...args)
+		inherited.call(this, ...args)
+	} || func
+})
+
+method(Element, 'do_after', function(method, func) {
+	let inherited = repl(this[method], noop)
+	this[method] = inherited && function(...args) {
+		inherited.call(this, ...args)
+		func.call(this, ...args)
+	} || func
+})
+
+/* ---------------------------------------------------------------------------
+// component property system mixin
+// ---------------------------------------------------------------------------
+publishes:
+	e.property(name, get, [set])
+	e.prop(name, attrs)
+	e.<prop>
+	e.props: {prop->prop_attrs}
+		store: false          value is read by calling `e.get_<prop>()`.
+		attr: true|NAME       value is *also* stored into a html attribute.
+		style                 prop represents a css style.
+		private               document is not notifed of prop value changes.
+		default               default value.
+		convert(v1, v0)       convert value when setting the property.
+		type                  type for object inspector.
+		style_format          format css style to set value.
+		style_parse           parse css style to get value.
+		from_attr             converter from html attr representation.
+		to_attr               converter to html attr representation.
+		bind_id               the prop represents an element id to dynamically link to.
+		nosave                xmodule: do not auto-save layers when prop changes.
+calls:
+	e.get_<prop>() -> v
+	e.set_<prop>(v1, v0)
+fires:
+	^document.'prop_changed' (e, prop, v1, v0)
+	^window.'element_id_changed' (e, id, id0)
+	^window.'ID0.id_changed' (e, id, id0)
+--------------------------------------------------------------------------- */
+
+method(Element, 'property', function(name, get, set) {
+	return property(this, name, get, set)
+})
+
+method(Element, 'xon' , function() { this.xmodule_noupdate = false })
+method(Element, 'xoff', function() { this.xmodule_noupdate = true  })
+
+let fire_prop_changed = function(e, prop, v1, v0) {
+	document.fire('prop_changed', e, prop, v1, v0)
+}
+
+let resolve_linked_element = function(id) { // stub
+	let e = window[id]
+	return iselem(e) && e.bound ? e : null
+}
+
+// NOTE: all elements need to call this if they want to be linked-to!
+method(Element, 'notify_id_changed', function() {
+	if (this._notify_id_changed)
+		return
+	this._notify_id_changed = true
+	this.on('attr_changed', function(k, v, v0) {
+		if (k == 'id') {
+			window.fire('element_id_changed', this, v, v0)
+			window.fire(v0+'.id_changed', this, v, v0)
+		}
+	})
+})
+
+let from_bool_attr = v => repl(repl(v, '', true), 'false', false)
+
+let from_attr_func = function(opt) {
+	return opt.from_attr
+			|| (opt.type == 'bool'   && from_bool_attr)
+			|| (opt.type == 'number' && num)
+}
+
+let set_attr_func = function(e, k, opt) {
+	if (opt.to_attr)
+		return (v) => e.attr(k, v)
+	if (opt.type == 'bool')
+		return (v) => e.bool_attr(k, v || null)
+	return (v) => e.attr(k, v)
+}
+
+method(Element, 'prop', function(prop, opt) {
+	let e = this
+	opt = opt || {}
+	assign_opt(opt, e.props && e.props[prop])
+	let getter = 'get_'+prop
+	let setter = 'set_'+prop
+	let type = opt.type
+	opt.name = prop
+	let convert = opt.convert || return_arg
+	let priv = opt.private
+	if (!e[setter])
+		e[setter] = noop
+	let prop_changed = fire_prop_changed
+	let dv = opt.default
+
+	opt.from_attr = from_attr_func(opt)
+	let prop_attr = isstr(opt.attr) ? opt.attr : prop
+	let set_attr = opt.attr && set_attr_func(e, prop_attr, opt)
+	if (prop_attr != prop)
+		attr(e, 'attr_prop_map')[prop_attr] = prop
+
+	if (!(opt.store == false) && !opt.style) {
+		let v = dv
+		function get() {
+			return v
+		}
+		function set(v1) {
+			let v0 = v
+			v1 = convert(v1, v0)
+			if (v1 === v0)
+				return
+			v = v1
+			e[setter](v1, v0)
+			if (set_attr)
+				set_attr(v1)
+			if (!priv)
+				prop_changed(e, prop, v1, v0)
+			e.update()
+		}
+		if (dv != null && set_attr && !e.hasattr(prop_attr))
+			set_attr(dv)
+	} else if (opt.style) {
+		let style = opt.style
+		let format = opt.style_format || return_arg
+		let parse  = opt.style_parse  || type == 'number' && num || (v => repl(v, '', undefined))
+		if (dv != null && parse(e.style[style]) == null)
+			e.style[style] = format(dv)
+		function get() {
+			return parse(e.style[style])
+		}
+		function set(v) {
+			let v0 = get.call(e)
+			v = convert(v, v0)
+			if (v == v0)
+				return
+			e.style[style] = format(v)
+			v = get.call(e) // take it again (browser only sets valid values)
+			if (v == v0)
+				return
+			e[setter](v, v0)
+			if (!priv)
+				prop_changed(e, prop, v, v0)
+			e.update()
+		}
+	} else {
+		assert(!('default' in opt))
+		function get() {
+			return e[getter]()
+		}
+		function set(v) {
+			let v0 = e[getter]()
+			v = convert(v, v0)
+			if (v === v0)
+				return
+			e[setter](v, v0)
+			if (!priv)
+				prop_changed(e, prop, v, v0)
+			e.update()
+		}
+	}
+
+	// id-based dynamic binding of external elements.
+	if (opt.bind_id) {
+		assert(!priv)
+		let ID = prop
+		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
+		let REF = opt.bind_id
+		function element_bind(te, on) {
+			if (e[ID] == te.id)
+				e[REF] = on ? te : null
+				e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
+		}
+		function element_id_changed(te, id1, id0) {
+			e[ID] = id1
+		}
+		let bind_element
+		function id_prop_changed(id1, id0) {
+			if (id0 != null) {
+				bind_element(false)
+				e.on('bind', bind_element, false)
+				bind_element = null
+			}
+			if (id1 != null) {
+				bind_element = function(on) {
+					e[REF] = on ? resolve_linked_element(e[ID]) : null
+					e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, e[ID])
+					window.on(id1+'.bind', element_bind, on)
+					window.on(id1+'.id_changed', element_id_changed, true)
+				}
+				e.on('bind', bind_element, true)
+				if (e.bound)
+					bind_element(true)
+			}
+		}
+		prop_changed = function(e, k, v1, v0) {
+			fire_prop_changed(e, k, v1, v0)
+			id_prop_changed(v1, v0)
+		}
+		id_prop_changed(e[ID])
+	}
+
+	e.property(prop, get, set)
+
+	if (!priv)
+		attr(e, 'props')[prop] = opt
+
+})
+
+method(Element, 'alias', function(new_name, old_name) {
+	if (this.props)
+		this.props[new_name] = this.get_prop_attrs(old_name)
+	alias(this, new_name, old_name)
+})
+
+// dynamic properties.
+e.set_prop = function(k, v) { this[k] = v } // stub
+e.get_prop = function(k) { return this[k] } // stub
+e.get_prop_attrs = function(k) { return this.props[k] } // stub
+e.get_props = function() { return this.props }
+e.save_prop = function(k) {
+	let v = this.get_prop(k)
+	fire_prop_changed(this, k, v, v)
+}
+
+// prop serialization.
+e.serialize_prop = function(k, v) {
+	let pa = this.get_prop_attrs(k)
+	if (pa && pa.serialize)
+		v = pa.serialize(v)
+	else if (isobject(v) && v.serialize)
+		v = v.serialize()
+	return v
+}
+
+/* ---------------------------------------------------------------------------
+// dynamic element binding mixin
+// ---------------------------------------------------------------------------
+provides:
+	e.set_linked_element(key, id)
+calls:
+	e.bind_linked_element(key, te, on)
+	e.linked_element_id_changed(key, id1, id0)
+--------------------------------------------------------------------------- */
+
+method(Element, 'element_links', function() {
+
+	let e = this
+
+	e.bind_linked_element = noop
+	e.linked_element_id_changed = noop
+
+	let links = map() // k->te
+	let all_keys = map() // id->set(K)
+
+	e.set_linked_element = function(k, id1) {
+		let te1 = id1 != null && resolve_linked_element(id1)
+		let te0 = links.get(k)
+		if (te0) {
+			let id0 = te0.id
+			if (te1 == te0)
+				return
+			let keys = all_keys.get(id0)
+			keys.delete(k)
+			if (!keys.size)
+				all_keys.delete(id0)
+			if (te0.bound)
+				e.bind_linked_element(k, te0, false)
+		}
+		links.set(k, te1)
+		if (id1)
+			attr(all_keys, id1, set).add(k)
+		if (te1)
+			e.bind_linked_element(k, te1, true)
+	}
+
+	function element_bind(te, on) { // ^window.element_bind
+		let keys = all_keys.get(te.id)
+		if (!keys) return
+		te = resolve_linked_element(te.id)
+		if (!te) return
+		for (let k of keys) {
+			links.set(k, on ? te : null)
+			e.bind_linked_element(k, te, on)
+		}
+	}
+
+	function element_id_changed(te, id1, id0) { // ^window.element_id_changed
+		let keys = all_keys.get(id0)
+		if (keys)
+			for (let k of keys)
+				e.linked_element_id_changed(k, id1, id0)
+	}
+
+	e.on_bind(function(on) {
+		for (let [id, keys] of all_keys) {
+			for (let k of keys) {
+				if (on) {
+					let te = resolve_linked_element(id)
+					if (te) {
+						links.set(k, te)
+						e.bind_linked_element(k, te, true)
+					}
+				} else {
+					let te = links.get(k)
+					if (te) {
+						links.set(k, null)
+						e.bind_linked_element(k, te, false)
+					}
+				}
+			}
+		}
+		window.on('element_bind', element_bind, on)
+		window.on('element_id_changed', element_id_changed, on)
+	})
+
+})
+
+/* deferred DOM updating -----------------------------------------------------
+
+Rationale: some widgets need to measure the DOM in order to position
+themselves (eg. popups) or resize their canvas (eg. grid), which requires
+that the DOM that they depend on be fully updated for rect() to be correct.
+Solution: split DOM updating into stages. When widgets need to update their
+DOM, they call their update() method which adds them to a global update set.
+On the next animation frame, their do_update() method is called in which they
+update their DOM, or at least the part of their DOM that they can update
+without measuring the DOM in any way and without accessing the DOM of other
+widgets in any way. In do_update() widgets can call position() which asks to
+be allowed to measure the DOM later. In stage 2, for the widgets that called
+position(), their do_measure() is called in which they can call rect() but
+only on themselves and their parents. Stage 3, their do_position() method is
+called, in which they can update their DOM based on measurements kept from
+do_measure() (this causes a reflow on first measurement, and there might be
+a reflow after positioning as well).
+
+Outside of do_update() you can update the DOM freely but not measure it after.
+If you need to measure it (eg. in pointermove events), do it first!
+
+NOTE: Inside do_update() widgets should not access any parts of other widgets
+that those widgets update in their own do_update() method since the order of
+do_update() calls is undefined. Widgets can only be sure that their parents
+are positioned by the time their own do_measure() is called.
+
+NOTE: For widgets that asked to be positioned, their parents are positioned
+first, in top-down order, possibly causing multiple reflows.
+
+NOTE: The reason for splitting do_measure() and do_positon() into separate
+stages is to minimize reflows, otherwise the DOM doesn't change between
+do_measure() and do_position() as far as the widget is concerned.
+
+Enable DEBUG_UPDATE to trace the whole process.
+
+*/
+
+let updating = false
+let update_set = set() // {elem}
+let position_set = set() // {elem}
+
+let position_with_parents = function(e) {
+	if (position_set.has(e)) {
+		position_with_parents(e.parent)
+		e.debug_if(DEBUG_UPDATE, 'M')
+		e.do_measure()
+		e.debug_if(DEBUG_UPDATE, 'P')
+		e.do_position()
+		position_set.delete(e)
+	}
+}
+
+let update_all = raf_wrap(function update_all() {
+
+	updating = true
+
+	// NOTE: do_update() can add widgets which calls bind() on them which calls
+	// update() which adds more widgets to update_set while iterating it.
+	// The iterator will iterate over those as well (tested on FF & Chrome).
+	for (let e of update_set)
+		e._do_update()
+
+	// DOM updates done. We can now positon any elements that require measuring
+	// the DOM to position themselves. For each element that wants to measure
+	// the DOM, we make sure that all its parents are measured and positioned
+	// first, in top-to-bottom order.
+	for (let e of position_set)
+		position_with_parents(e.parent)
+
+	// only leaf widgets left to measure and position: measure all first,
+	// then position all.
+	for (let e of position_set) {
+		e.debug_if(DEBUG_UPDATE, 'M')
+		e.do_measure()
+	}
+	for (let e of position_set) {
+		e.debug_if(DEBUG_UPDATE, 'P')
+		e.do_position()
+	}
+
+	update_set.clear()
+	position_set.clear()
+
+	updating = false
+})
+
+method(Element, 'update', function(opt) {
+	let update_opt = this._update_opt
+	if (update_opt) {
+		if (opt)
+			assign_opt(update_opt, opt)
+		else
+			update_opt.all = true
+	} else if (opt) {
+		update_opt = opt
+		this._update_opt = update_opt
+	} else {
+		update_opt = {all: true}
+		this._update_opt = update_opt
+	}
+	if (!this.bound)
+		return
+	if (update_opt.show != null)
+		this.show(update_opt.show)
+	if (this.hidden)
+		return
+	if (update_set.has(this)) // update() inside do_update(), eg. a prop was set.
+		return
+	update_set.add(this)
+	if (updating)
+		return
+	// ^^ update() called while updating: the update_set iterator will
+	// call do_update() in this frame, no need to ask for another frame.
+	update_all()
+})
+
+method(Element, 'cancel_update', function() {
+	update_set.delete(e)
+	position_set.delete(e)
+})
+
+method(Element, 'on_update', function(f) {
+	this.bound = this.bound || false
+	this.do_after('do_update', f)
+})
+
+method(Element, '_do_update', function() {
+	let opt = this._update_opt
+	this._update_opt = null
+	this.debug_open_if(DEBUG_UPDATE, 'U', Object.keys(opt).join(','))
+	if (this.do_update)
+		this.do_update(opt)
+	if (opt.show)
+		this.show()
+	this.position()
+	this.debug_close_if(DEBUG_UPDATE)
+})
+
+method(Element, 'position', function() {
+	if (!this.do_position)
+		return
+	if (!this.bound)
+		return
+	if (this.hidden)
+		return
+	position_set.add(this)
+	if (updating)
+		return
+	// ^^ position() called while updating: no need to ask for another frame.
+	update_all()
+})
+
+method(Element, 'on_measure', function(f) {
+	this.bound = this.bound || false
+	this.do_after('do_measure', f)
+})
+
+method(Element, 'on_position', function(f) {
+	this.bound = this.bound || false
+	this.do_after('do_position', f)
+})
+
+e.do_bind = function(on) {
+	let e = this
+	assert(e.bound != null)
+	if (on) {
+		e.debug_open_if(DEBUG_BIND, '+')
+		let t0 = PROFILE_BIND_TIME && time()
+		e.fire('bind', true)
+		if (e.id) {
+			window.fire('element_bind', e, true)
+			window.fire(e.id+'.bind', e, true)
+		}
+		if (PROFILE_BIND_TIME) {
+			let t1 = time()
+			let dt = (t1 - t0) * 1000
+			if (dt >= SLOW_BIND_TIME_MS)
+				debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name())
+		}
+		e.update()
+		e.debug_close_if(DEBUG_BIND)
+	} else {
+		e.debug_open_if(DEBUG_BIND, '-')
+		e.cancel_update()
+		e.fire('bind', false)
+		if (e.id) {
+			window.fire('element_bind', e, false)
+			window.fire(e.id+'.bind', e, false)
+		}
+		e.debug_close_if(DEBUG_BIND)
+	}
+}
+
+/* popups --------------------------------------------------------------------
+
+Why are popups so complicated? Because the forever not-quite-there-yet
+web platform doesn't have the notion of a global z-index so we use the
+`display: fixed` hack[1] to escape the clipping region set by parents'
+`overflow: hidden`, which leaves us with having to position the popups
+manually every time the layout changes. The downside of this hack is that
+elements that create a stacking context indirectly by using `opacity`,
+`filter`, `transform`, etc. might still obscure a popup.
+
+[1] https://github.com/w3c/csswg-drafts/issues/4092
+*/
+
+property(Element, 'creates_stacking_context', function() {
+	if (this.parent == document)
+		return true
+	let css = this.css()
+	// TODO: `will-change` check is incomplete.
+	return (false
+		|| css['z-index'        ] != 'auto'
+		|| css['opacity'        ] != '1'
+		|| css['mix-blend-mode' ] != 'normal'
+		|| css['transform'      ] != 'none'
+		|| css['filter'         ] != 'none'
+		|| css['backdrop-filter'] != 'none'
+		|| css['perspective'    ] != 'none'
+		|| css['clip-path'      ] != 'none'
+		|| css['mask'           ] != 'none'
+		|| css['isolation'      ] == 'isolate'
+		|| css['contain'        ] == 'layout'
+		|| css['contain'        ] == 'paint'
+		|| css['contain'        ] == 'strict'
+		|| css['contain'        ] == 'content'
+		|| css['will-change'    ] == 'opacity'
+		|| css['will-change'    ] == 'transform'
+		|| css['will-change'    ] == 'filter'
+	)
+})
+
+let get_stacking_parent = function(p) {
+	if (p.creates_stacking_context)
+		return p
+	return get_stacking_parent(p.parent)
+}
+property(Element, 'stacking_parent', function() {
+	if (!this.isConnected)
+		return
+	if (this.parent == document)
+		return
+	return get_stacking_parent(this.parent)
+})
+
+method(Element, 'popup', function() {
+
+	let e = this
+	if (e.hasclass('popup'))
+		return
+
+	e.class('popup')
+
+	// view -------------------------------------------------------------------
+
+	let er, tr, br, fixed, sx, sy, spx, spy
+
+	e.on_measure(function() {
+		er = e.rect()
+		tr = (e.popup_target || e.parent).rect()
+		br = window.rect()
+		sx = window.scrollX
+		sy = window.scrollY
+		let sp = e.stacking_parent
+		trace_if(!sp, e.isConnected, e.bound, e.parent)
+		sr = sp.rect()
+		spx = sr.x + sp.cx
+		spy = sr.y + sp.cy
+	})
+
+	function layout(w, h, side, align) {
+
+		let tx1 = tr.x + or(e.popup_x1, 0)
+		let ty1 = tr.y + or(e.popup_y1, 0)
+		let tx2 = tr.x + or(e.popup_x2, tr.w)
+		let ty2 = tr.y + or(e.popup_y2, tr.h)
+		let tw = tx2 - tx1
+		let th = ty2 - ty1
+
+		let x, y
+		if (side == 'right') {
+			;[x, y] = [tx2, ty1]
+		} else if (side == 'left') {
+			;[x, y] = [tx1 - w, ty1]
+		} else if (side == 'top') {
+			;[x, y] = [tx1, ty1 - h]
+		} else if (side == 'bottom') {
+			side = 'bottom'
+			;[x, y] = [tx1, ty2]
+		} else if (side == 'inner-right') {
+		 	;[x, y] = [tx2 - w, ty1]
+		} else if (side == 'inner-left') {
+		 	;[x, y] = [tx1, ty1]
+		} else if (side == 'inner-top') {
+		 	;[x, y] = [tx1, ty1]
+		} else if (side == 'inner-bottom') {
+		 	;[x, y] = [tx1, ty2 - h]
+		} else if (side == 'inner-center') {
+			;[x, y] = [
+				tx1 + (tw - w) / 2,
+				ty1 + (th - h) / 2
+			]
+		} else {
+			assert(false)
+		}
+
+		let sd = side.replace('inner-', '')
+		let sdx = sd == 'left' || sd == 'right'
+		let sdy = sd == 'top'  || sd == 'bottom'
+		if (align == 'center' && sdy)
+			x = x + (tw - w) / 2
+		else if (align == 'center' && sdx)
+			y = y + (th - h) / 2
+		else if (align == 'end' && sdy)
+			x = x + tw - w
+		else if (align == 'end' && sdx)
+			y = y + th - h
+
+		return [x, y]
+	}
+
+	e.do_position_popup = noop
+
+	e.on_position(function() {
+
+		let w = er.w
+		let h = er.h
+
+		let side  = e.popup_side
+		let align = e.popup_align
+		let [x, y] = layout(w, h, side, align)
+
+		// if popup doesn't fit the screen, first try to change its side
+		// or alignment and relayout, and if that didn't work, its offset.
+
+		let d = 10
+		let bw = br.w
+		let bh = br.h
+
+		let out_x1 = x < d
+		let out_y1 = y < d
+		let out_x2 = x + w > (bw - d)
+		let out_y2 = y + h > (bh - d)
+
+		let re
+		if (side == 'bottom' && out_y2) {
+			re = 1; side = 'top'
+		} else if (side == 'top' && out_y1) {
+			re = 1; side = 'bottom'
+		} else if (side == 'right' && out_x2) {
+			re = 1; side = 'left'
+		} else if (side == 'top' && out_x1) {
+			re = 1; side = 'bottom'
+		}
+
+		let vert =
+			   side == 'bottom'
+			|| side == 'top'
+			|| side == 'inner-bottom'
+			|| side == 'inner-top'
+
+		if (align == 'end' && ((vert && out_x2) || (!vert && out_y2))) {
+			re = 1; align = 'start'
+		} else if (align == 'start' && ((vert && out_x1) || (!vert && out_y1))) {
+			re = 1; align = 'end'
+		}
+
+		if (re)
+			[x, y] = layout(w, h, side, align)
+
+		// if nothing else works, adjust the offset to fit the screen.
+		let ox2 = max(0, x + w - (bw - d))
+		let ox1 = min(0, x)
+		let oy2 = max(0, y + h - (bh - d))
+		let oy1 = min(0, y)
+		x -= ox1 ? ox1 : ox2
+		y -= oy1 ? oy1 : oy2
+
+		e.x = x + (e.popup_fixed ? sx : 0) - spx
+		e.y = y + (e.popup_fixed ? sy : 0) - spy
+
+		e.do_position_popup(side, align)
+
+	})
+
+	e.property('target_rect',
+		function() {
+			return domrect(
+				e.popup_x1,
+				e.popup_y1,
+				e.popup_x2 - e.popup_x1,
+				e.popup_y2 - e.popup_y1
+			)
+		}, function(r) {
+			e.popup_x1 = r.x1
+			e.popup_y1 = r.y1
+			e.popup_x2 = r.x2
+			e.popup_y2 = r.y2
+		}
+	)
+
+	// controller -------------------------------------------------------------
+
+	e.prop('popup_target' , {private: true})
+	e.prop('popup_side'   , {private: true, type: 'enum',
+			enum_values: [
+				'top', 'bottom', 'left', 'right',
+				'inner-top', 'inner-bottom', 'inner-left', 'inner-right', 'inner-center'
+			],
+			default: 'top'})
+	e.prop('popup_align'  , {private: true, type: 'enum',
+			enum_values: ['center', 'start', 'end'],
+			default: 'center'})
+	e.prop('popup_x1'     , {private: true, type: 'number'})
+	e.prop('popup_y1'     , {private: true, type: 'number'})
+	e.prop('popup_x2'     , {private: true, type: 'number'})
+	e.prop('popup_y2'     , {private: true, type: 'number'})
+	e.prop('popup_fixed'  , {private: true, type: 'bool', default: false})
+
+	function window_scroll(ev) {
+		if (ev.target.contains(e.parent))
+			e.position()
+	}
+
+	function update() {
+		e.update()
+	}
+
+	e.on_bind(function(on) {
+
+		// changes in parent size updates the popup position.
+		e.parent.on('resize', update, on)
+
+		// scrolling on any of the parents updates the popup position.
+		window.on('scroll', window_scroll, on, true)
+
+		// layout changes update the popup position.
+		document.on('layout_changed', update, on)
+
+		// hovering on target can make it a stacking context
+		// (eg. target sets opacity) which needs a popup update.
+		e.parent.on('pointerover' , update, on)
+		e.parent.on('pointerleave', update, on)
+
+	})
+
+})
+
+// lists ---------------------------------------------------------------------
+
+method(Element, 'make_list', function() {
+	let e = this
+	live_move_mixin(e)
+
+	// e.move_element_start(move_i, move_n, i1, i2[, x1, x2])
+	// e.move_element_update(elem_x, [i1, i2, x1, x2])
+
+	e.movable_element_size = function(elem_i) {
+		//
+	}
+
+	e.set_movable_element_pos = function(i, x, moving) {
+
+	}
+
+})
+
+}

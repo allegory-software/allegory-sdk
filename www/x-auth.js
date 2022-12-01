@@ -228,12 +228,12 @@ let dialog = memoize(function() {
 	e.code_edit     = p2.$1('.sign-in-code-edit')
 	e.code_button   = p2.$1('.sign-in-code-button')
 
-	e.lang_dropdown.val = lang()
+	// e.lang_dropdown.reset_val(lang())
 	e.lang_dropdown.on('val_picked', function() {
 		exec('/sign-in', {lang: this.input_val, refresh: true})
 	})
 
-	e.do_after('do_update', function(opt) {
+	e.on_update(function(opt) {
 		// adding this dynamically to prevent loading the background needlessly.
 		e.dialog.class('sign-in-splash-img', !window.signed_in && !window.signed_in_anonymous)
 	})

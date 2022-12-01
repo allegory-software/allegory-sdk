@@ -13,18 +13,18 @@ component('x-chart', 'Input', function(e) {
 
 	// config -----------------------------------------------------------------
 
-	e.prop('split_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('group_cols' , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('sum_cols'   , {store: 'var', type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('min_sum'    , {store: 'var', type: 'number', attr: true})
-	e.prop('max_sum'    , {store: 'var', type: 'number', attr: true})
-	e.prop('sum_step'   , {store: 'var', type: 'number', attr: true})
-	e.prop('min_val'    , {store: 'var', type: 'number', attr: true})
-	e.prop('max_val'    , {store: 'var', type: 'number', attr: true})
-	e.prop('other_threshold', {store: 'var', type: 'number', default: .05, decimals: null, attr: true})
-	e.prop('other_text', {store: 'var', default: 'Other', attr: true})
+	e.prop('split_cols' , {type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('group_cols' , {type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('sum_cols'   , {type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('min_sum'    , {type: 'number', attr: true})
+	e.prop('max_sum'    , {type: 'number', attr: true})
+	e.prop('sum_step'   , {type: 'number', attr: true})
+	e.prop('min_val'    , {type: 'number', attr: true})
+	e.prop('max_val'    , {type: 'number', attr: true})
+	e.prop('other_threshold', {type: 'number', default: .05, decimals: null, attr: true})
+	e.prop('other_text', {default: 'Other', attr: true})
 	e.prop('shape', {
-		store: 'var', type: 'enum',
+		type: 'enum',
 		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots',
 			'column', 'bar', 'stackbar', 'bubble', 'scatter'],
 		default: 'pie', attr: true,
@@ -251,7 +251,7 @@ component('x-chart', 'Input', function(e) {
 
 	// view -------------------------------------------------------------------
 
-	e.prop('text', {store: 'var', attr: true, slot: 'lang'})
+	e.prop('text', {attr: true, slot: 'lang'})
 
 	e.header = div({class: 'x-chart-header'})
 	e.view   = div({class: 'x-chart-view'})
@@ -263,12 +263,12 @@ component('x-chart', 'Input', function(e) {
 
 	let view_w, view_h, view_css
 
-	e.do_measure = function() {
+	e.on_measure(function() {
 		let r = e.view.rect()
 		view_w = floor(r.w)
 		view_h = floor(r.h)
 		view_css = e.view.css()
-	}
+	})
 
 	function slice_color(i, n) {
 		return hsl_to_rgb(((i / n) * 360 - 120) % 180, .8, .7)
@@ -782,12 +782,12 @@ component('x-chart', 'Input', function(e) {
 	renderer.column    = () => renderer_line_or_columns(true)
 	renderer.bar       = () => renderer_line_or_columns(true, true)
 
-	e.do_update = function() {
+	e.on_update(function() {
 		e.header.set(e.text)
-	}
+	})
 
 	let shape, render
-	e.do_position = function() {
+	e.on_position(function() {
 		if (shape != e.shape) {
 			render = null
 			pointermove = noop
@@ -796,7 +796,7 @@ component('x-chart', 'Input', function(e) {
 		if (!render)
 			render = renderer[e.shape]()
 		render()
-	}
+	})
 
 	e.on('pointermove' , function(...args) { pointermove(...args) })
 	e.on('pointerleave', function(...args) { pointermove(...args) })
@@ -837,8 +837,8 @@ component('x-chart', 'Input', function(e) {
 		bind_nav(nav1, true)
 	}
 
-	e.prop('nav', {store: 'var', private: true})
-	e.prop('nav_id', {store: 'var', bind_id: 'nav', type: 'nav'})
+	e.prop('nav', {private: true})
+	e.prop('nav_id', {bind_id: 'nav', type: 'nav'})
 
 })
 

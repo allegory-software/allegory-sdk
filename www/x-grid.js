@@ -86,10 +86,10 @@ component('x-grid', 'Input', function(e) {
 		update_sizes()
 	}
 
-	e.prop('header_w', {store: 'var', type: 'number', default: 120, attr: true}) // vert-grid only
-	e.prop('cell_w', {store: 'var', type: 'number', default: 120, attr: true, slot: 'user'}) // vert-grid only
-	e.prop('auto_cols_w', {store: 'var', type: 'bool', default: false, attr: true}) // horiz-grid only
-	e.prop('auto_expand', {store: 'var', type: 'bool', default: false, attr: true})
+	e.prop('header_w', {type: 'number', default: 120, attr: true}) // vert-grid only
+	e.prop('cell_w', {type: 'number', default: 120, attr: true, slot: 'user'}) // vert-grid only
+	e.prop('auto_cols_w', {type: 'bool', default: false, attr: true}) // horiz-grid only
+	e.prop('auto_expand', {type: 'bool', default: false, attr: true})
 
 	e.set_header_w = function() {
 		update_sizes()
@@ -111,23 +111,23 @@ component('x-grid', 'Input', function(e) {
 	e.auto_jump_cells = true    // jump to next/prev cell on caret limits with Ctrl.
 	e.tab_navigation = false    // disabled as it prevents jumping out of the grid.
 	e.advance_on_enter = 'next_row' // false|'next_row'|'next_cell'
-	e.prop('exit_edit_on_escape'           , {store: 'var', type: 'bool', default: true})
-	e.prop('exit_edit_on_enter'            , {store: 'var', type: 'bool', default: true})
+	e.prop('exit_edit_on_escape'           , {type: 'bool', default: true})
+	e.prop('exit_edit_on_enter'            , {type: 'bool', default: true})
 	e.quick_edit = false        // quick edit (vs. quick-search) when pressing a key
 
 	// mouse behavior
-	e.prop('can_reorder_fields'            , {store: 'var', type: 'bool', default: true})
-	e.prop('enter_edit_on_click'           , {store: 'var', type: 'bool', default: false})
-	e.prop('enter_edit_on_click_focused'   , {store: 'var', type: 'bool', default: false})
-	e.prop('enter_edit_on_dblclick'        , {store: 'var', type: 'bool', default: true})
-	e.prop('focus_cell_on_click_header'    , {store: 'var', type: 'bool', default: false})
-	e.prop('can_change_parent'             , {store: 'var', type: 'bool', default: true})
+	e.prop('can_reorder_fields'            , {type: 'bool', default: true})
+	e.prop('enter_edit_on_click'           , {type: 'bool', default: false})
+	e.prop('enter_edit_on_click_focused'   , {type: 'bool', default: false})
+	e.prop('enter_edit_on_dblclick'        , {type: 'bool', default: true})
+	e.prop('focus_cell_on_click_header'    , {type: 'bool', default: false})
+	e.prop('can_change_parent'             , {type: 'bool', default: true})
 
 	// context menu features
-	e.prop('enable_context_menu'           , {store: 'var', type: 'bool', default: true})
-	e.prop('can_change_header_visibility'  , {store: 'var', type: 'bool', default: true})
-	e.prop('can_change_filters_visibility' , {store: 'var', type: 'bool', default: true})
-	e.prop('can_change_fields_visibility'  , {store: 'var', type: 'bool', default: true})
+	e.prop('enable_context_menu'           , {type: 'bool', default: true})
+	e.prop('can_change_header_visibility'  , {type: 'bool', default: true})
+	e.prop('can_change_filters_visibility' , {type: 'bool', default: true})
+	e.prop('can_change_fields_visibility'  , {type: 'bool', default: true})
 
 	var horiz = true
 	e.get_vertical = function() { return !horiz }
@@ -138,7 +138,7 @@ component('x-grid', 'Input', function(e) {
 		e.must_be_flat = !horiz
 		theme_changed()
 	}
-	e.prop('vertical', {type: 'bool', attr: true, slot: 'user'})
+	e.prop('vertical', {store: false, type: 'bool', attr: true, slot: 'user'})
 
 	e.header_canvas = tag('canvas', {class : 'x-grid-header-canvas', width: 0, height: 0})
 	e.header        = div({class: 'x-grid-header'}, e.header_canvas)
@@ -1118,7 +1118,7 @@ component('x-grid', 'Input', function(e) {
 
 	// header_visible & filters_visible live properties -----------------------
 
-	e.prop('header_visible', {store: 'var', type: 'bool', default: true, attr: true, slot: 'user'})
+	e.prop('header_visible', {type: 'bool', default: true, attr: true, slot: 'user'})
 
 	e.set_header_visible = function(v) {
 		v = !!v
@@ -1126,7 +1126,7 @@ component('x-grid', 'Input', function(e) {
 		update_sizes()
 	}
 
-	e.prop('filters_visible', {store: 'var', type: 'bool', default: false, attr: true})
+	e.prop('filters_visible', {type: 'bool', default: false, attr: true})
 
 	e.set_filters_visible = function(v) {
 		e.header.class('with-filters', filters_visible)
@@ -1231,9 +1231,7 @@ component('x-grid', 'Input', function(e) {
 
 	// responding to rowset changes -------------------------------------------
 
-	let inh_do_update = e.do_update
-	e.do_update = function(opt) {
-		inh_do_update()
+	e.on_update(function(opt) {
 		if (opt.fields || opt.rows) {
 			update_internal_sizes()
 			update_error_tooltip_position()
@@ -1248,7 +1246,7 @@ component('x-grid', 'Input', function(e) {
 			e.update_action_band()
 		if (opt.scroll_to_focused_cell)
 			e.scroll_to_focused_cell()
-	}
+	})
 
 	e.do_update_load_progress = function(p) {
 		let dt = clock() - e.load_request_start_clock
@@ -1923,7 +1921,7 @@ component('x-grid', 'Input', function(e) {
 
 	})
 
-	e.prop('empty_text', {store: 'var', slot: 'lang'})
+	e.prop('empty_text', {slot: 'lang'})
 
 	// widget editing protocol ------------------------------------------------
 
@@ -2695,8 +2693,8 @@ component('x-row-form', function(e) {
 		reset()
 	}
 
-	e.prop('nav', {store: 'var', private: true})
-	e.prop('nav_id' , {store: 'var', bind_id: 'nav', type: 'nav'})
+	e.prop('nav', {private: true})
+	e.prop('nav_id' , {bind_id: 'nav', type: 'nav'})
 
 	function reset() {
 		e.rowset.fields = e.nav.all_fields_map

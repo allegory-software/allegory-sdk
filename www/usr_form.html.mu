@@ -9,12 +9,12 @@
 		<x-input col=email ></x-input>
 		<x-input col=name  ></x-input>
 		{{#multilang}}
-		<x-lookup col=lang     ></x-lookup>
-		<x-lookup col=country  ></x-lookup>
+		<x-input col=lang     ></x-input>
+		<x-input col=country  ></x-input>
 		{{/multilang}}
-		<x-enum-dropdown col=theme></x-enum-dropdown>
+		<x-input col=theme></x-input>
 		<x-if global=signed_in_dev>
-			<x-lookup-dropdown col=tenant></x-lookup-dropdown>
+			<x-input col=tenant></x-input>
 		</x-if>
 		<x-if global=signed_in_realusr_dev>
 			<x-list-dropdown
@@ -33,10 +33,10 @@
 <x-if global=signed_in_anonymous>
 	<x-form id=usr_form nav_id=usr_nav>
 		{{#multilang}}
-		<x-lookup-dropdown col=lang     ></x-lookup-dropdown>
-		<x-lookup-dropdown col=country  ></x-lookup-dropdown>
+		<x-input col=lang     ></x-input>
+		<x-input col=country  ></x-input>
 		{{/multilang}}
-		<x-enum-dropdown col=theme></x-enum-dropdown>
+		<x-input col=theme></x-input>
 	</x-form>
 	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
 </x-if>

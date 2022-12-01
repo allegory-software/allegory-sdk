@@ -53,8 +53,8 @@ component('x-cssgrid', 'Containers', function(e) {
 	e.get_sizes_y = function() { return get_sizes_for('y') }
 	e.set_sizes_x = function(s) { set_sizes_for('x', s) }
 	e.set_sizes_y = function(s) { set_sizes_for('y', s) }
-	e.prop('sizes_x')
-	e.prop('sizes_y')
+	e.prop('sizes_x', {store: false})
+	e.prop('sizes_y', {store: false})
 
 	// editable widget protocol.
 	e.set_widget_editing = function(v, ...args) {

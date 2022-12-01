@@ -326,7 +326,7 @@ function opt_arg(s) {
 
 {
 let cur_cx
-flap = {}
+flap = obj()
 function setflaps(new_cx) {
 	if (cur_cx == new_cx)
 		return

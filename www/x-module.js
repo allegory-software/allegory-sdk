@@ -18,13 +18,13 @@ function init_xmodule(opt) {
 
 	xm.root_widget = null
 
-	xm.slots = opt.slots || {} // {name -> {color:, }}
-	xm.modules = opt.modules || {} // {name -> {icon:, }}
-	xm.layers = {} // {name -> {name:, props: {id -> {k -> v}}}}
-	xm.instances = {} // {id -> [e1,...]}
+	xm.slots = opt.slots || obj() // {name -> {color:, }}
+	xm.modules = opt.modules || obj() // {name -> {icon:, }}
+	xm.layers = obj() // {name -> {name:, props: {id -> {k -> v}}}}
+	xm.instances = obj() // {id -> [e1,...]}
 	xm.selected_module = null
 	xm.selected_slot = null
-	xm.active_layers = {} // {'module:slot' -> layer} in override order
+	xm.active_layers = obj() // {'module:slot' -> layer} in override order
 
 	// init & changing root widget --------------------------------------------
 
@@ -92,7 +92,7 @@ function init_xmodule(opt) {
 	// loading layer prop vals into instances ---------------------------------
 
 	function prop_vals(id) {
-		let pv = {}
+		let pv = obj()
 		let layer0
 		for (let k in xm.active_layers) {
 			let layer = xm.active_layers[k]
@@ -126,7 +126,7 @@ function init_xmodule(opt) {
 			assert(opt.module)
 			opt.id = xm.next_id(opt.module)
 			xm.set_val(null, opt.id, 'type', e.type, null, null, opt.module)
-			pv = empty
+			pv = empty_obj
 		} else if (opt.id) {
 			pv = prop_vals(opt.id)
 			opt.module = opt.id.match(/^[^_\d]+/)[0]
@@ -235,7 +235,7 @@ function init_xmodule(opt) {
 		if (v === e.__spv[k])
 			v = undefined // don't save static vals.
 		else if (serialize)
-			v = serialize(k, v)
+			v = serialize.call(e, k, v)
 		if (!layer) {
 			if (module)
 				warn('prop-val-lost', '['+module+':'+slot+']', id, k, v)
@@ -339,7 +339,7 @@ function init_xmodule(opt) {
 					},
 				})
 			}
-			t = {name: name, props: props || {}}
+			t = {name: name, props: props || obj()}
 			t.root_id = t.props['<root>']
 			xm.layers[name] = t
 		}
@@ -392,7 +392,7 @@ function init_xmodule(opt) {
 // rowset types
 // ---------------------------------------------------------------------------
 
-field_types.rowset = {}
+field_types.rowset = obj()
 
 field_types.rowset.editor = function(...options) {
 	function more() {
@@ -411,7 +411,7 @@ field_types.rowset.editor = function(...options) {
 
 // col
 
-field_types.col = {}
+field_types.col = obj()
 
 /*
 field_types.col.editor = function(...options) {
@@ -632,7 +632,7 @@ function widget_select_editor(widgets_id_map, filter, ...options) {
 	return dd
 }
 
-field_types.nav = {}
+field_types.nav = obj()
 field_types.nav.editor = function(...args) {
 	return xmodule.nav_editor(...args)
 }
@@ -739,16 +739,16 @@ component('x-prop-inspector', function(e) {
 		for (let te of widgets) // for debugging...
 			window['$'+i++] = te
 
-		let rs = {}
+		let rs = obj()
 		rs.fields = []
 		let row = []
 		rs.rows = []
 
-		let prop_counts = {}
-		let defs = {}
-		let pv0 = {}
-		let pv1 = {}
-		prop_colors = {}
+		let prop_counts = obj()
+		let defs = obj()
+		let pv0 = obj()
+		let pv1 = obj()
+		prop_colors = obj()
 
 		for (let te of widgets)
 			for (let prop in te.get_props()) {
@@ -768,7 +768,7 @@ component('x-prop-inspector', function(e) {
 
 		for (let prop in prop_counts)
 			if (prop_counts[prop] == widgets.size) {
-				rs.fields.push(assign_opt({}, defs[prop], {convert: null}))
+				rs.fields.push(assign_opt(obj(), defs[prop], {convert: null}))
 				row.push(repl(pv0[prop], undefined, null))
 			}
 

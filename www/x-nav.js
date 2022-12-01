@@ -26,7 +26,9 @@ rowset:
 		e.rowset
 	publishes:
 		e.reset([ev])
+		e.ready
 	calls:
+		^ready()
 		^reset()
 
 rowset attributes:
@@ -151,8 +153,8 @@ fields:
 		e.remove_field(field)
 		e.get_prop('col.ATTR') -> val
 		e.set_prop('col.ATTR', val)
-		e.get_col_attr(attr) -> val
-		e.set_col_attr(attr, val)
+		e.get_col_attr(col, attr) -> val
+		e.set_col_attr(col, attr, val)
 	calls:
 		^col_attr_changed(col, attr, v)
 		^col_ATTR_changed_for_COL(col, attr, v)
@@ -458,7 +460,7 @@ let max_unused_nav_count = 20
 let max_unused_row_count =  1000000
 let max_unused_val_count = 10000000
 
-let shared_navs = obj() // {rowset_name: nav:}
+let shared_navs = obj() // {name: nav}
 
 let gclist = []
 let oldest_last = function(nav1, nav2) {
@@ -548,33 +550,35 @@ function nav_widget(e) {
 
 	e.isnav = true
 
-	e.prop('can_add_rows'            , {store: 'var', type: 'bool', default: true})
-	e.prop('can_remove_rows'         , {store: 'var', type: 'bool', default: true})
-	e.prop('can_change_rows'         , {store: 'var', type: 'bool', default: true})
-	e.prop('can_move_rows'           , {store: 'var', type: 'bool', default: false})
-	e.prop('can_sort_rows'           , {store: 'var', type: 'bool', default: true})
-	e.prop('can_focus_cells'         , {store: 'var', type: 'bool', default: true , hint: 'allow focusing individual cells vs entire rows'})
-	e.prop('can_select_multiple'     , {store: 'var', type: 'bool', default: true , hint: 'allow selecting multiple cells or rows'})
-	e.prop('can_select_non_siblings' , {store: 'var', type: 'bool', default: true , hint: 'allow multi-selecting rows of different parents'})
+	e.prop('can_add_rows'            , {type: 'bool', default: true})
+	e.prop('can_remove_rows'         , {type: 'bool', default: true})
+	e.prop('can_change_rows'         , {type: 'bool', default: true})
+	e.prop('can_move_rows'           , {type: 'bool', default: false})
+	e.prop('can_sort_rows'           , {type: 'bool', default: true})
+	e.prop('can_focus_cells'         , {type: 'bool', default: true , hint: 'allow focusing individual cells vs entire rows'})
+	e.prop('can_select_multiple'     , {type: 'bool', default: true , hint: 'allow selecting multiple cells or rows'})
+	e.prop('can_select_non_siblings' , {type: 'bool', default: true , hint: 'allow multi-selecting rows of different parents'})
 
-	e.prop('auto_advance_row'        , {store: 'var', type: 'bool', default: false, hint: 'jump row on horizontal navigation limits'})
-	e.prop('auto_focus_first_cell'   , {store: 'var', type: 'bool', default: true , hint: 'focus first cell automatically after loading'})
-	e.prop('auto_edit_first_cell'    , {store: 'var', type: 'bool', default: false, hint: 'automatically enter edit mode after loading'})
-	e.prop('stay_in_edit_mode'       , {store: 'var', type: 'bool', default: true , hint: 're-enter edit mode after navigating'})
+	e.prop('auto_advance_row'        , {type: 'bool', default: false, hint: 'jump row on horizontal navigation limits'})
+	e.prop('auto_focus_first_cell'   , {type: 'bool', default: true , hint: 'focus first cell automatically after loading'})
+	e.prop('auto_edit_first_cell'    , {type: 'bool', default: false, hint: 'automatically enter edit mode after loading'})
+	e.prop('stay_in_edit_mode'       , {type: 'bool', default: true , hint: 're-enter edit mode after navigating'})
 
-	e.prop('save_on_add_row'         , {store: 'var', type: 'bool', default: false})
-	e.prop('save_on_remove_row'      , {store: 'var', type: 'bool', default: true })
-	e.prop('save_on_input'           , {store: 'var', type: 'bool', default: false})
-	e.prop('save_on_exit_edit'       , {store: 'var', type: 'bool', default: false})
-	e.prop('save_on_exit_row'        , {store: 'var', type: 'bool', default: true })
+	e.prop('save_on_add_row'         , {type: 'bool', default: false})
+	e.prop('save_on_remove_row'      , {type: 'bool', default: true })
+	e.prop('save_on_input'           , {type: 'bool', default: false})
+	e.prop('save_on_exit_edit'       , {type: 'bool', default: false})
+	e.prop('save_on_exit_row'        , {type: 'bool', default: true })
 
-	e.prop('exit_edit_on_lost_focus' , {store: 'var', type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
-	e.prop('save_row_states'         , {store: 'var', type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
-	e.prop('action_band_visible'     , {store: 'var', type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true, slot: 'user'})
+	e.prop('exit_edit_on_lost_focus' , {type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
+	e.prop('save_row_states'         , {type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
+	e.prop('action_band_visible'     , {type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true, slot: 'user'})
 
 	e.debug_anon_name = () => catany('', e.type, catall(':', e.rowset_name))
 
 	// init -------------------------------------------------------------------
+
+	e.ready = false
 
 	let init = e.init
 	e.init = function() {
@@ -599,6 +603,8 @@ function nav_widget(e) {
 			e.reload()
 			e.update_action_band()
 		} else {
+			e.ready = false
+			e.fire('ready_changed')
 			abort_all_requests()
 			e.unfocus_focused_cell({cancel: true})
 			init_all()
@@ -610,19 +616,19 @@ function nav_widget(e) {
 		e.rowset = rs
 		e.reload()
 	}
-	e.prop('static_rowset', {store: 'var'})
+	e.prop('static_rowset', {})
 
 	e.set_row_vals = function() {
 		if (save_barrier) return
 		e.reload()
 	}
-	e.prop('row_vals', {store: 'var', slot: 'app'})
+	e.prop('row_vals', {slot: 'app'})
 
 	e.set_row_states = function() {
 		if (save_barrier) return
 		e.reload()
 	}
-	e.prop('row_states', {store: 'var', slot: 'app'})
+	e.prop('row_states', {slot: 'app'})
 
 	function bind_rowset_name(name, on) {
 		if (on)
@@ -646,15 +652,15 @@ function nav_widget(e) {
 		e.rowset_url = v ? '/rowset.json/' + v : null
 		e.reload()
 	}
-	e.prop('rowset_name', {store: 'var', type: 'rowset', attr: 'rowset'})
+	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
 
 	// fields utils -----------------------------------------------------------
 
 	let fld = function(col) {
 		if (isstr(col))
-			return assert(e.all_fields_map[col], '{0} has no col: {1}', e.id, col)
+			return assert(e.all_fields_map[col], '{0} has no col: {1}', e.debug_name(), col)
 		else if (isnum(col))
-			return assert(e.all_fields[col], '{0} has no col: {1}', e.id, col)
+			return assert(e.all_fields[col], '{0} has no col: {1}', e.debug_name(), col)
 		else
 			return col
 	}
@@ -817,6 +823,7 @@ function nav_widget(e) {
 	}
 
 	e.remove_field = function(field) {
+		free_field(field)
 		let fi = field.val_index
 		e.all_fields.remove(fi)
 		delete e.all_fields_map[field.name]
@@ -834,12 +841,13 @@ function nav_widget(e) {
 		e.update({fields: true})
 	}
 
-	function check_field(col) {
+	function check_field(which, col) {
 		if (col == null) return
 		if (!e.bound) return
+		if (!e.ready) return
 		let field = e.optfld(col)
 		if (!field)
-			warn(col+' not in rowset '+e.rowset_name)
+			warn(which+' "'+col+'" not in rowset "'+e.rowset_name+'"')
 		return field
 	}
 
@@ -855,6 +863,7 @@ function nav_widget(e) {
 		// not creating fields and rows unless bound because we don't get
 		// events while not attached to DOM so the nav might get stale.
 		let rs = e.bound && e.rowset || empty
+		e.ready = rs != empty
 
 		if (rs.fields)
 			for (let fi = 0; fi < rs.fields.length; fi++)
@@ -863,13 +872,13 @@ function nav_widget(e) {
 		e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
 		e.pk_fields = optflds(e.pk)
 		init_find_row()
-		e.val_field = check_field(e.val_col)
-		e.pos_field = check_field(rs.pos_col)
-		e.name_field = check_field(or(e.name_col, rs.name_col))
+		e.val_field = check_field('val_col', e.val_col)
+		e.pos_field = check_field('pos_col', rs.pos_col)
+		e.name_field = check_field('name_col', or(e.name_col, rs.name_col))
 		if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
 			e.name_field = e.pk_fields[0]
-		e.display_field = check_field(e.display_col) || e.name_field
-		e.quicksearch_field = check_field(e.quicksearch_col)
+		e.display_field = check_field('display_col', e.display_col) || e.name_field
+		e.quicksearch_field = check_field('quicksearch_col', e.quicksearch_col)
 
 		init_tree_fields()
 
@@ -881,15 +890,18 @@ function nav_widget(e) {
 
 		init_fields()
 		init_rows()
+
+		if (e.ready)
+			e.fire('ready_changed')
 	}
 
 	function init_tree_fields() {
 		let rs = e.bound && e.rowset || empty
-		e.id_field = check_field(rs.id_col)
+		e.id_field = check_field('id_col', rs.id_col)
 		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
 			e.id_field = e.pk_fields[0]
-		e.parent_field = check_field(rs.parent_col)
-		e.tree_field = check_field(or(e.tree_col, rs.tree_col)) || e.name_field
+		e.parent_field = check_field('parent_col', rs.parent_col)
+		e.tree_field = check_field('tree_col', or(e.tree_col, rs.tree_col)) || e.name_field
 		if (!e.id_field || !e.parent_field || !e.tree_field || e.tree_field.hidden)
 			reset_tree_fields()
 	}
@@ -923,10 +935,10 @@ function nav_widget(e) {
 	}
 
 	e.set_flat = flat_changed
-	e.prop('flat', {store: 'var', type: 'bool', slot: 'user', default: false})
+	e.prop('flat', {type: 'bool', slot: 'user', default: false})
 
 	e.set_must_be_flat = flat_changed
-	e.prop('must_be_flat', {store: 'var', default: false, private: true})
+	e.prop('must_be_flat', {default: false, private: true})
 
 	// `*_col` properties
 
@@ -934,35 +946,35 @@ function nav_widget(e) {
 		if (!e.bound) return
 		init_all_fields()
 	}
-	e.prop('val_col', {store: 'var', type: 'col'})
+	e.prop('val_col', {type: 'col'})
 
 	e.set_tree_col = function() {
 		if (!e.bound) return
 		init_all_fields()
 	}
-	e.prop('tree_col', {store: 'var', type: 'col'})
+	e.prop('tree_col', {type: 'col'})
 
 	e.set_name_col = function(v) {
 		if (!e.bound) return
 		init_all_fields()
 	}
-	e.prop('name_col', {store: 'var', type: 'col'})
+	e.prop('name_col', {type: 'col'})
 
 	e.set_quicksearch_col = function(v) {
 		if (!e.bound) return
-		e.quicksearch_field = check_field(v)
+		e.quicksearch_field = check_field('quicksearch_col', v)
 		reset_quicksearch()
 		e.update({state: true})
 	}
-	e.prop('quicksearch_col', {store: 'var', type: 'col'})
+	e.prop('quicksearch_col', {type: 'col'})
 
 	// field attributes exposed as `col.*` props
 
 	e.get_col_attr = function(col, k) {
-		return e.prop_col_attrs && e.prop_col_attrs[col] ? e.prop_col_attrs[col][k] : undefined
+		return e.prop_col_attrs && e.prop_col_attrs[col] && e.prop_col_attrs[col][k]
 	}
 
-	e.set_col_attr = function(prop, col, k, v) {
+	e.set_col_attr = function(col, k, v) {
 		let v0 = e.get_col_attr(col, k)
 		if (v === v0)
 			return
@@ -979,6 +991,7 @@ function nav_widget(e) {
 
 		let attrs = field_prop_attrs[k]
 		let slot = attrs && attrs.slot
+		let prop = 'col.' + col + '.' + k
 		document.fire('prop_changed', e, prop, v, v0, slot)
 	}
 
@@ -998,7 +1011,7 @@ function nav_widget(e) {
 	e.set_prop = function(prop, v) {
 		if (prop.starts('col.')) {
 			let [col, k] = parse_col_prop_name(prop)
-			e.set_col_attr(prop, col, k, v)
+			e.set_col_attr(col, k, v)
 			return
 		}
 		e[prop] = v
@@ -1027,7 +1040,7 @@ function nav_widget(e) {
 		e.fields = []
 		if (e.all_fields.length)
 			for (let col of cols_array()) {
-				let field = check_field(col)
+				let field = check_field('col', col)
 				if (field && !field.internal)
 					e.fields.push(field)
 			}
@@ -1071,10 +1084,10 @@ function nav_widget(e) {
 		init_fields()
 		e.update({fields: true})
 	}
-	e.prop('cols', {store: 'var', slot: 'user'})
+	e.prop('cols', {slot: 'user'})
 
 	function visible_col(col) {
-		let field = check_field(col)
+		let field = check_field('col', col)
 		return field && !field.internal
 	}
 
@@ -1243,9 +1256,9 @@ function nav_widget(e) {
 		if (init_param_vals())
 			e.reload()
 	}
-	e.prop('param_nav', {store: 'var', private: true})
-	e.prop('param_nav_id', {store: 'var', bind_id: 'param_nav', type: 'nav',
-			text: 'Param Nav', attr: true})
+	e.prop('param_nav', {private: true})
+	e.prop('param_nav_id', {bind_id: 'param_nav', type: 'nav',
+			text: 'Param Nav', attr: 'param_nav'})
 
 	e.set_params = function(params1, params0) {
 		bind_param_nav_cols(e.param_nav, params0, false)
@@ -1253,7 +1266,7 @@ function nav_widget(e) {
 		if (init_param_vals())
 			e.reload()
 	}
-	e.prop('params', {store: 'var', attr: true})
+	e.prop('params', {attr: true})
 
 	function param_map(params) {
 		let m = map()
@@ -1268,7 +1281,7 @@ function nav_widget(e) {
 
 	// label ------------------------------------------------------------------
 
-	e.prop('label', {store: 'var', slot: 'lang', attr: true})
+	e.prop('label', {slot: 'lang', attr: true})
 
 	e.set_label = function() {
 		e.fire('label_changed')
@@ -2387,7 +2400,7 @@ function nav_widget(e) {
 		sort_rows()
 		e.update({vals: true, state: true, sort_order: true})
 	}
-	e.prop('order_by', {store: 'var', slot: 'user'})
+	e.prop('order_by', {slot: 'user'})
 
 	e.set_order_by_dir = function(field, dir, keep_others) {
 		if (!field.sortable)
@@ -2963,7 +2976,7 @@ function nav_widget(e) {
 			return
 		if (!ev.target.effectively_disabled)
 			return
-		if (e.positionally_contains(ev.target))
+		if (e.contains(ev.target))
 			return // disabled but inside self
 		if (e.action_band) {
 			e.action_band.buttons.save.draw_attention()
@@ -3017,7 +3030,7 @@ function nav_widget(e) {
 		let skip_popups = set()
 		for (let ce of $('.x-widget.popup'))
 			for (let se of skip_all)
-				if (se.positionally_contains(ce))
+				if (se.contains(ce))
 					skip_popups.add(ce)
 		skip_all.addset(skip_popups)
 		skip_all.addset(skip_parents)
@@ -3858,8 +3871,6 @@ function nav_widget(e) {
 
 		if (!e.bound)
 			return
-		if (!e.rowset)
-			return
 
 		abort_all_requests()
 
@@ -4003,7 +4014,7 @@ function nav_widget(e) {
 		return e.fire('load_fail', err, type, status, message, body, this)
 	}
 
-	e.prop('focus_state', {store: 'var', slot: 'user'})
+	e.prop('focus_state', {slot: 'user'})
 
 	function load_success(rs) {
 		if (this.allow_diff_merge && e.diff_merge(rs))
@@ -4474,7 +4485,7 @@ function nav_widget(e) {
 			})
 			band.at[1].hide()
 			let error_icon = span({class: 'x-loading-error-icon fa fa-exclamation-circle'})
-			oe.content.add(div({}, error_icon, text, more_div, band))
+			oe.content.add(div(0, error_icon, text, more_div, band))
 			focus_e = band.last.prev
 		} else if (cls == 'waiting') {
 			let cancel = button({
@@ -4719,8 +4730,8 @@ function nav_widget(e) {
 
 	// picker protocol --------------------------------------------------------
 
-	e.prop('row_display_val_template', {store: 'var', private: true})
-	e.prop('row_display_val_template_name', {store: 'var', attr: true})
+	e.prop('row_display_val_template', {private: true})
+	e.prop('row_display_val_template_name', {attr: 'row_display_val_template'})
 
 	e.row_display_val = function(row) { // stub
 		if (window.template) { // have webb_spa.js
@@ -4751,9 +4762,9 @@ function nav_widget(e) {
 
 	e.set_display_col = function() {
 		reset_quicksearch()
-		e.update({vals: true, state: true})
+		e.display_field = check_field('display_col', e.display_col) || e.name_field
 	}
-	e.prop('display_col', {store: 'var', type: 'col'})
+	e.prop('display_col', {type: 'col'})
 
 	init_all()
 
@@ -4768,18 +4779,18 @@ function nav_widget(e) {
 
 	e.set_sql_select = e.reload
 
-	e.prop('sql_select_all'        , {store: 'var', slot: 'server'})
-	e.prop('sql_select'            , {store: 'var', slot: 'server'})
-	e.prop('sql_select_one'        , {store: 'var', slot: 'server'})
-	e.prop('sql_select_one_update' , {store: 'var', slot: 'server'})
-	e.prop('sql_pk'                , {store: 'var', slot: 'server'})
-	e.prop('sql_insert_fields'     , {store: 'var', slot: 'server'})
-	e.prop('sql_update_fields'     , {store: 'var', slot: 'server'})
-	e.prop('sql_where'             , {store: 'var', slot: 'server'})
-	e.prop('sql_where_row'         , {store: 'var', slot: 'server'})
-	e.prop('sql_where_row_update'  , {store: 'var', slot: 'server'})
-	e.prop('sql_schema'            , {store: 'var', slot: 'server'})
-	e.prop('sql_db'                , {store: 'var', slot: 'server'})
+	e.prop('sql_select_all'        , {slot: 'server'})
+	e.prop('sql_select'            , {slot: 'server'})
+	e.prop('sql_select_one'        , {slot: 'server'})
+	e.prop('sql_select_one_update' , {slot: 'server'})
+	e.prop('sql_pk'                , {slot: 'server'})
+	e.prop('sql_insert_fields'     , {slot: 'server'})
+	e.prop('sql_update_fields'     , {slot: 'server'})
+	e.prop('sql_where'             , {slot: 'server'})
+	e.prop('sql_where_row'         , {slot: 'server'})
+	e.prop('sql_where_row_update'  , {slot: 'server'})
+	e.prop('sql_schema'            , {slot: 'server'})
+	e.prop('sql_db'                , {slot: 'server'})
 
 }
 
@@ -4826,19 +4837,19 @@ function nav_dropdown_widget(e) {
 		if (!e.picker) return
 		e.picker.val_col = v
 	}
-	e.prop('val_col', {store: 'var', type: 'col'})
+	e.prop('val_col', {type: 'col'})
 
 	e.set_display_col = function(v) {
 		if (!e.picker) return
 		e.picker.display_col = v
 	}
-	e.prop('display_col', {store: 'var', type: 'col'})
+	e.prop('display_col', {type: 'col'})
 
 	e.set_rowset_name = function(v) {
 		if (!e.picker) return
 		e.picker.rowset_name = v
 	}
-	e.prop('rowset_name', {store: 'var', type: 'rowset', attr: 'rowset'})
+	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
 
 	e.on('opened', function() {
 		if (!e.picker) return
@@ -4891,7 +4902,8 @@ function nav_dropdown_widget(e) {
 
 	all_field_types.validator_lookup = field => (field.lookup_nav && {
 		validate : v => v == null
-			|| field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
+			|| (field.lookup_nav.ready
+				&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0),
 		message  : S('validation_lookup',
 			'Value must be in the list of allowed values.'),
 	})
@@ -4953,7 +4965,7 @@ function nav_dropdown_widget(e) {
 
 	// passwords
 
-	let pwd = {}
+	let pwd = obj()
 	field_types.password = pwd
 
 	pwd.editor = function(opt) {
@@ -4993,7 +5005,7 @@ function nav_dropdown_widget(e) {
 
 	// file sizes
 
-	let filesize = assign({}, number)
+	let filesize = assign(obj(), number)
 	field_types.filesize = filesize
 
 	// TODO: filesize.from_text!
@@ -5034,7 +5046,7 @@ function nav_dropdown_widget(e) {
 
 	// counts
 
-	let count = assign({}, number)
+	let count = assign(obj(), number)
 	field_types.count = count
 
 	count.to_text = function(s) {
@@ -5317,7 +5329,7 @@ function nav_dropdown_widget(e) {
 
 	// enums
 
-	let enm = {}
+	let enm = obj()
 	field_types.enum = enm
 
 	enm.editor = function(opt) {
@@ -5336,7 +5348,7 @@ function nav_dropdown_widget(e) {
 
 	// tag lists
 
-	let tags = {}
+	let tags = obj()
 	field_types.tags = tags
 
 	tags.editor = function(opt) {
@@ -5351,7 +5363,7 @@ function nav_dropdown_widget(e) {
 
 	// colors
 
-	let color = {}
+	let color = obj()
 	field_types.color = color
 
 	color.format = function(s) {
@@ -5368,7 +5380,7 @@ function nav_dropdown_widget(e) {
 
 	// percent
 
-	let percent = {}
+	let percent = obj()
 	field_types.percent = percent
 
 	percent.to_text = function(p) {
@@ -5386,7 +5398,7 @@ function nav_dropdown_widget(e) {
 
 	// icons
 
-	let icon = {}
+	let icon = obj()
 	field_types.icon = icon
 
 	icon.format = function(icon) {
@@ -5411,14 +5423,14 @@ function nav_dropdown_widget(e) {
 
 	// columns
 
-	let col = {}
+	let col = obj()
 	field_types.col = col
 
 	col.convert = v => or(num(v), v)
 
 	// google maps places
 
-	let place = {}
+	let place = obj()
 	field_types.place = place
 
 	place.format_pin = function() {
@@ -5473,7 +5485,7 @@ function nav_dropdown_widget(e) {
 
 	// url
 
-	let url = {}
+	let url = obj()
 	field_types.url = url
 
 	url.format = function(v) {
@@ -5489,7 +5501,7 @@ function nav_dropdown_widget(e) {
 
 	// phone
 
-	let phone = {}
+	let phone = obj()
 	field_types.phone = phone
 
 	phone.validator_phone = function() {
@@ -5498,7 +5510,7 @@ function nav_dropdown_widget(e) {
 
 	// email
 
-	let email = {}
+	let email = obj()
 	field_types.email = email
 
 	email.validator_email = function(field) {
@@ -5562,7 +5574,7 @@ function nav_dropdown_widget(e) {
 
 // reload push-notifications -------------------------------------------------
 
-rowset_navs = {} // {rowset_name -> set(nav)}
+rowset_navs = obj() // {rowset_name -> set(nav)}
 
 {
 let es

@@ -21,7 +21,7 @@ HTML INLINE STYLING
 
 * { box-sizing: border-box; }
 
-html, body, table, tr, td, div, img, button {
+html, body, table, tr, td, div, img {
 	margin: 0;
 	padding: 0;
 	border: 0;
@@ -75,7 +75,7 @@ hr {
 }
 
 .popup {
-	position: absolute !important;
+	position: fixed !important; /* hack to escape parents' `overflow: hidden` */
 	white-space: nowrap; /* expand width to fit contents for `absolute` elements. I know... */
 }
 
@@ -89,7 +89,7 @@ hr {
 	display: grid;
 	justify-content: center;
 	align-content: center;
-	z-index: 100; /* show over 10 levels of popups */
+	z-index: 1;
 }
 
 /* vocabulary for inline styling in html ---------------------------------- */

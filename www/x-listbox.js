@@ -33,7 +33,7 @@ function listbox_widget(e) {
 	e.display_col = 0
 	e.xon()
 
-	e.prop('orientation', {store: 'var', type: 'enum', enum_values: ['vertical', 'horizontal'], default: 'vertical', attr: true})
+	e.prop('orientation', {type: 'enum', enum_values: ['vertical', 'horizontal'], default: 'vertical', attr: true})
 
 	// embedded template: doesn't work if the listbox itself is declared in a template.
 	let item_template = e.$('script[type="text/x-mustache"]')[0]
@@ -67,7 +67,7 @@ function listbox_widget(e) {
 		e.replace(item, create_item(row))
 	}
 
-	e.prop('items', {store: 'var', private: true})
+	e.prop('items', {private: true})
 
 	function update_item_field() {
 		let field = assign({format: (val, row) => format_item(row, val)}, e.item_field)
@@ -99,7 +99,7 @@ function listbox_widget(e) {
 	}
 
 	e.set_item_field = update_item_field
-	e.prop('item_field', {store: 'var'})
+	e.prop('item_field', {})
 
 	e.child_widgets = function() {
 		let widgets = []
@@ -121,7 +121,7 @@ function listbox_widget(e) {
 
 	// responding to nav changes ----------------------------------------------
 
-	e.do_after('do_update',  function(opt) {
+	e.on_update(function(opt) {
 
 		if (opt.fields || opt.rows || opt.all) {
 			e.clear()
@@ -499,7 +499,7 @@ component('x-color-dropdown', function(e) {
 		e.picker.rowset.rows = t.map(s => [s])
 		e.picker.reset()
 	}
-	e.prop('colors', {store: 'var', default: default_colors})
+	e.prop('colors', {default: default_colors})
 	e.set_colors(default_colors)
 
 })
@@ -552,6 +552,6 @@ component('x-icon-dropdown', function(e) {
 		e.picker.rowset.rows = t.map(s => [s])
 		e.picker.reset()
 	}
-	e.prop('colors', {store: 'var', default: default_icons()})
+	e.prop('colors', {default: default_icons()})
 	e.set_icons(default_icons())
 })

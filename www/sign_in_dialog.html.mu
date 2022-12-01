@@ -54,6 +54,24 @@
 			margin-left: 1em;
 		}
 		</style>
+		<script runit>
+			this.add(bare_nav({
+				id: 'auth_pick_lang_nav',
+				rowset: {
+					fields: [
+						{
+							name: 'lang',
+							lookup_rowset_name: 'pick_lang',
+							lookup_cols: 'lang',
+							display_col: 'name',
+						}
+					],
+					rows: [
+						[lang()],
+					],
+				},
+			}))
+		</script>
 		<img class=sign-in-logo src=/sign-in-logo.png onerror="this.style.display='none'">
 		<x-slides class=sign-in-slides>
 			<div class="x-form">
@@ -64,12 +82,12 @@
 						</t>
 					</div>
 					{{#multilang}}
-					<x-list-dropdown
-						class=sign-in-lang-dropdown
-						val_col=lang
-						display_col=name
-						rowset=pick_lang
-					></x-list-dropdown>
+					<x-lookup-dropdown class=sign-in-lang-dropdown
+						xnav=auth_pick_lang_nav
+						xcol=lang
+						rowset=pick_lang lookup_cols=lang display_col=name
+						.nolabel
+					></x-lookup-dropdown>
 					{{/multilang}}
 				</div>
 				<p small><t s=sign_in_greet>

@@ -48,11 +48,11 @@ ERRORS
 	assert(v, err, ...) -> v
 	stacktrace()
 EXTENDING BUILT-IN OBJECTS
-	property(cls, prop, descriptor | get,set)
-	method(cls, method, func)
-	override(cls, method, func)
-	alias(cls, new_name, old_name)
-	override_property_setter(cls, prop, set)
+	property(class|instance, prop, descriptor | get,set)
+	method(class|instance, method, func)
+	override(class|instance, method, func)
+	alias(class|instance, new_name, old_name)
+	override_property_setter(class|instance, prop, set)
 STRINGS
 	s.subst('{0} {1}', a0, a1, ...)
 	s.starts(s)
@@ -91,7 +91,9 @@ HASH MAPS
 	map(iter) -> m
 	m.first_key
 	m.toarray() -> a
-	empty
+	empty -> {}
+	empty_obj -> obj()
+	empty_set -> set()
 	keys(t)
 	assign(dt, t1, ...)
 	assign_opt(dt, t1, ...)
@@ -141,7 +143,7 @@ SERIALIZATION
 CLIPBOARD
 	copy_to_clipboard(text, done_func)
 LOCAL STORAGE
-	save(key, s)
+	save(key, [s])
 	load(key) -> s
 URL DECODING, ENCODING AND UPDATING
 	url_parse(s) -> t
@@ -296,14 +298,17 @@ enumerables into it.
 */
 
 // extend an object with a property, checking for upstream name clashes.
+// NOTE: shadows both instance and prototype fields.
 function property(cls, prop, get, set) {
 	let proto = cls.prototype || cls
-	assert(!(prop in proto), '{0}.{1} already exists', cls.type || cls.name, prop)
+	assert(!(prop in proto), '{0}.{1} already exists and it\'s set to: {2}',
+		cls.type || cls.name, prop, proto[prop])
 	let descriptor = isobject(get) ? get : {get: get, set: set}
 	Object.defineProperty(proto, prop, descriptor)
 }
 
 // extend an object with a method, checking for upstream name clashes.
+// NOTE: shadows both instance and prototype methods!
 function method(cls, meth, func) {
 	property(cls, meth, {
 		value: func,
@@ -315,7 +320,7 @@ function method(cls, meth, func) {
 function override(cls, meth, func) {
 	let proto = cls.prototype || cls
 	let inherited = proto[meth]
-	assert(inherited, '{0}.{1} does not exists', cls.type || cls.name, meth)
+	assert(inherited, '{0}.{1} does not exist', cls.type || cls.name, meth)
 	function wrapper(...args) {
 		return func.call(this, inherited, ...args)
 	}
@@ -623,7 +628,8 @@ method(Set, 'toarray', function() {
 	return Array.from(this)
 })
 
-empty = obj()
+empty = {}
+empty_obj = obj()
 empty_set = set()
 
 keys = Object.keys
@@ -1387,7 +1393,13 @@ function copy_to_clipboard(text, done) {
 // local storage -------------------------------------------------------------
 
 function save(key, s) {
-	localStorage.setItem(key, s)
+	if (s == null) {
+		debug('REMOVE', key)
+		localStorage.removeItem(key)
+	} else {
+		debug_if(!key.starts('__'), 'SET', key, s)
+		localStorage.setItem(key, s)
+	}
 }
 
 function load(key) {
