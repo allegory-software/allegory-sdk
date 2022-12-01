@@ -164,7 +164,7 @@ scripts for new libraries.
   * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
 * __Web / Client side__
   * [X-Widgets](X-WIDGETS.md)          - Overview of the web components suite
-  * [X-Widgets Demo]                   - X-Widgets Demo (dev branch; http server not required to run it!)
+  * [X-Widgets Demo][x-widgets-demo]   - X-Widgets Demo (dev branch; http server not required to run it!)
   * [glue.js](www/glue.js)             - JS "assorted lenghs of wire" library
   * [divs.js](www/divs.js)             - DOM API and mechanism for web components
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
@@ -183,7 +183,7 @@ scripts for new libraries.
   * [fontawesome.css](www/fontawesome.css) - Icons                ([Font Awesome](https://fontawesome.com/icons?m=free))
   * [opensans](www/divs.css)               - OpenSans fonts
 
-[x-widgets-demo.html]: https://raw.githack.com/allegory-software/allegory-sdk/dev/www/x-widgets-demo.html
+[x-widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/www/x-widgets-demo.html
 
 # Contributing
 
