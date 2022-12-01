@@ -202,7 +202,7 @@ The Allegory SDK is MIT Licensed.
 
 # FAQ
 
-Q: Why Lua (for web apps)?
+## Q: Why Lua (for web apps)?
 
 A: Because Lua is like modern JavaScript, except
 [it got there 10 years earlier](https://stackoverflow.com/questions/1022560#1022683)
@@ -213,7 +213,7 @@ hash maps, a garbage collector, a better ffi than we could ever ask for,
 and an overall non-opinionated design that doesn't pretend to know better
 than its user.
 
-Q: Why not OpenResty?
+## Q: Why not OpenResty?
 
 A: We actually used OpenResty in the past, nothing wrong with it. It's
 probably even faster. It definitely has more features. Nginx is however quite
