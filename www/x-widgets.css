@@ -153,29 +153,7 @@ body {
 	font-size: 12px;
 }
 
-/* opensans fonts --------------------------------------------------------- */
-
-@font-face {
-	font-family: "opensans";
-	src: url("/opensans-regular.woff2");
-}
-
-@font-face {
-	font-family: "opensans";
-	font-weight: bold;
-	src: url("/opensans-600.woff2");
-}
-
-@font-face {
-	font-family: "opensanscondensed";
-	src: url("/opensanscondensed-light.woff2");
-}
-
-@font-face {
-	font-family: "opensanscondensed";
-	font-weight: bold;
-	src: url("/opensanscondensed-bold.woff2");
-}
+/* opensans font 0--------------------------------------------------------- */
 
 [opensans] {
 	font-family: opensans, Arial, sans-serif;
