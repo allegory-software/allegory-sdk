@@ -1,4 +1,5 @@
---mz.h & mz_zip.h 2.9.1 Zip manipulation
+--mz.h & mz_zip.h 3.0.4 Zip manipulation
+--NOTE: Upgraded from 2.9.1 based on changelog only (no changes)!
 local ffi = require'ffi'
 ffi.cdef[[
 enum {

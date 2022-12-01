@@ -26,6 +26,18 @@ The **client-side stack** is written from scratch in JavaScript and contains:
 * layouting widgets for split-pane layouts common in data-dense business applications.
 * a mechanism for web components better than the native one.
 
+# Who is this for?
+
+This is for people who could write the whole thing themselves if they wanted
+to but just don't have the time and could use a head start of about 2-5 years
+depending on experience. You will have to read the code while you're using it
+and gradually start to _own it_ so that in time you gain the ability and the
+freedom to work on it like you wrote it yourself. This is a mechanics' car
+not a Toyota with a 10 year warranty that you never have to open the hood on.
+So even though this is more-less a web-framework-with-a-server type of deal,
+if you think you're too far away from making your own full stack from scratch,
+server and all, this is probably not for you.
+
 # Status
 
 Follow the [releases](https://github.com/allegory-software/allegory-sdk/tags)
@@ -116,7 +128,7 @@ scripts for new libraries.
   * [bcrypt](lua/bcrypt.lua)           - Password hashing
 * __Compression__
   * [gzip](lua/gzip.lua)               - DEFLATE & GZIP (based on [zlib-ng](https://github.com/zlib-ng/zlib-ng))
-  * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating (based on [minizip-ng](https://github.com/zlib-ng/minizip-ng))
+  * [zip](lua/zip.lua)                 - ZIP file reading, creating and updating (based on [minizip-ng](https://github.com/zlib-ng/minizip-ng))
 * __Databases__
   * [sqlpp](lua/sqlpp.lua)             - SQL preprocessor
   * [mysql](lua/mysql.lua)             - MySQL async driver

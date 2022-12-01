@@ -394,8 +394,8 @@ function _open(path, opt, quiet, is_pipe_end)
 			return nil, err
 		end
 	end
-	log(f.quiet and '' or 'note', 'fs', 'open', '%-4s %s%s %s', f,
-		r and 'r' or '', w and 'w' or '', path)
+	log(f.quiet and '' or 'note', 'fs', 'open',
+		'%-4s %s%s %s', f, r and 'r' or '', w and 'w' or '', path)
 	return f
 end
 
@@ -411,7 +411,7 @@ function file.try_close(f)
 	local ok, err = checknz(C.CloseHandle(f.handle))
 	f.handle = INVALID_HANDLE_VALUE --handle is gone no matter the error.
 	if not ok then return false, err end
-	log(f.quiet and '' or 'note', 'fs', 'close', '%-4s r:%d w:%d', f, f.r, f.w)
+	log(f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil)
 	return true
 end
@@ -432,7 +432,7 @@ function file_wrap_handle(h, opt, async, is_pipe_end, path, quiet)
 		path = path,
 		debug_prefix = is_pipe_end and 'P' or 'F',
 		w = 0, r = 0,
-		quiet = repl(quiet, nil, is_pipe_end) or nil,
+		quiet = repl(quiet, nil, is_pipe_end) or nil, --pipes are quiet
 	}, opt)
 	live(f, path or '')
 
@@ -545,7 +545,8 @@ function _pipe(path, opt)
 
 		local f, err = file_wrap_handle(h, opt, async, true, path)
 		if not f then return nil, err end
-		log('', 'fs', 'pipe', '%s%s %s', f, async and '' or ',blocking', path)
+		log(f.quiet and '' or 'note',
+			'fs', 'pipe', '%s%s %s', f, async and '' or ',blocking', path)
 		return f
 
 	else --unnamed pipe, return both ends

@@ -140,7 +140,7 @@ function file_wrap_fd(fd, opt, async, file_type, path, quiet)
 			or file_type == 'pipe' and 'P'
 			or file_type == 'pidfile' and 'D',
 		w = 0, r = 0,
-		quiet = quiet,
+		quiet = repl(quiet, nil, file_type == 'pipe' or nil), --pipes are quiet
 		path = path,
 		async = async,
 	}, opt)
@@ -278,7 +278,8 @@ function _pipe(path, opt)
 			if opt. read_inheritable then rf:set_inheritable(true) end
 			if opt.write_inheritable then wf:set_inheritable(true) end
 		end
-		log('', 'fs', 'pipe', 'r=%s%s w=%s%s rfd=%d wfd=%d',
+		log(rf.quiet and '' or 'note',
+			'fs', 'pipe', 'r=%s%s w=%s%s rfd=%d wfd=%d',
 			rf, rf.async and '' or ',blocking',
 			wf, wf.async and '' or ',blocking', rf.fd, wf.fd)
 		return rf, wf
