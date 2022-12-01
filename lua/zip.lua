@@ -289,7 +289,7 @@ local function open_writer(t)
 	if t.file then
 		err = C.mz_zip_writer_open_file(z, t.file, t.disk_size or 0, t.mode == 'a')
 	else
-		--TODO: int32_t mz_zip_writer_open(void *handle, void *stream);
+		--TODO: int32_t mz_zip_writer_open(void *handle, void *stream, uint8_t append);
 		assert(false)
 	end
 

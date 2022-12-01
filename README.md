@@ -128,7 +128,7 @@ scripts for new libraries.
   * [bcrypt](lua/bcrypt.lua)           - Password hashing
 * __Compression__
   * [gzip](lua/gzip.lua)               - DEFLATE & GZIP (based on [zlib-ng](https://github.com/zlib-ng/zlib-ng))
-  * [minizip2](lua/minizip2.lua)       - ZIP file reading, creating and updating (based on [minizip-ng](https://github.com/zlib-ng/minizip-ng))
+  * [zip](lua/zip.lua)                 - ZIP file reading, creating and updating (based on [minizip-ng](https://github.com/zlib-ng/minizip-ng))
 * __Databases__
   * [sqlpp](lua/sqlpp.lua)             - SQL preprocessor
   * [mysql](lua/mysql.lua)             - MySQL async driver

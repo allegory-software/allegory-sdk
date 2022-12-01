@@ -1,4 +1,5 @@
---mz_strm.h 2.9.1 Stream interface
+--mz_strm.h 3.0.4 Stream interface
+--NOTE: Upgraded from 2.9.1 based on changelog only (no changes)!
 local ffi = require'ffi'
 ffi.cdef[[
 /***************************************************************************/
