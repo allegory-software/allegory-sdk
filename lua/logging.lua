@@ -413,6 +413,12 @@ local function fmtargs(self, fmt, ...)
 	return _(fmt, self.args(...))
 end
 
+local severity_symbol = {
+	note  = '!',
+	warn  = 'W',
+	ERROR = 'E',
+}
+
 local function log(self, severity, module, event, fmt, ...)
 	if severity == '' and self.filter[module  ] then return end
 	if severity == '' and self.filter[event   ] then return end
@@ -433,8 +439,9 @@ local function log(self, severity, module, event, fmt, ...)
 	end
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
 		local entry = (self.logtofile or not self.quiet)
-			and _('%s %s %-6s %-6s %-8s %-4s %s\n',
-				env, date('%Y-%m-%d %H:%M:%S', time), severity,
+			and _('%s %s %s %-6s %-8s %-4s %s\n',
+				env, date('%Y-%m-%d %H:%M:%S', time),
+				severity_symbol[severity] or severity,
 				module or '', (event or ''):sub(1, 8),
 				logarg((coroutine.running())), msg)
 		if self.logtofile then
