@@ -175,10 +175,10 @@ scripts for new libraries.
   * [x-chart.js](www/x-chart.js)       - Nav-based graphs & charts
   * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
 * __Web / Client side / Third-party libs__
-  * [mustache.js](www/mustache.js)         - Logic-less templates - [Mustache](https://mustache.github.io/) on client-side
+  * [mustache.js](www/mustache.js)         - Logic-less templates - [Mustache](https://mustache.github.io/)
   * [purify.js](www/purify.js)             - HTML sanitizer       - [DOMPurify](https://github.com/cure53/DOMPurify)
-  * [markdown-it.js](www/markdown-it.js)   - Markdown parser      - [Markdown-it](https://github.com/markdown-it/markdown-it)
-  * [ace/ace.js](www/ace/ace.js)           - Code editor          - [ACE](https://ace.c9.io/)
+  * [markdown-it.js](www/markdown-it.js)   - Markdown parser      - [Markdown-it](https://github.com/markdown-it/markdown-it) (6 KLOC but extensible and does tables)
+  * [ace/ace.js](www/ace/ace.js)           - Code editor          - [ACE](https://ace.c9.io/) (huge, only load when needed)
   * [fontawesome.css](www/fontawesome.css) - Icons                - [Font Awesome](https://fontawesome.com/icons?m=free)
   * [opensans](www/divs.css)               - OpenSans fonts
 
