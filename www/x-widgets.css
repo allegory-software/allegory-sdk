@@ -496,7 +496,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-action-band > .x-button {
-	margin: var(--x-margin);
+	margin: 0 var(--x-margin);
 }
 
 .x-action-band > .x-button > .x-button-text {
@@ -2338,11 +2338,14 @@ x-tabs-fixed-header {
 	display: none;  /* don't mess up the layout */
 }
 
-.x-notify-toaster {
-	/*
-	position: fixed;
-	transition: top .2s;
-	*/
+.x-toaster-message {
+	opacity: 1;
+	transition: opacity .2s, top .2s;
+}
+
+.x-toaster-message.remove {
+	opacity: 0;
+	transition: opacity .2s;
 }
 
 /* dialog ----------------------------------------------------------------- */
@@ -2383,10 +2386,14 @@ x-tabs-fixed-header {
 	-webkit-text-stroke: 1px var(--x-stroke-dialog-xbutton);
 }
 
-.x-dialog-xbutton:hover,
+.x-dialog-xbutton:hover {
+	background-color: var(--x-bg-button-hover);
+}
+
+.x-dialog-xbutton:active,
 .x-dialog-xbutton.active
 {
-	background-color: var(--x-bg-button);
+	background-color: var(--x-bg-button-pressed);
 }
 
 .x-dialog-header {

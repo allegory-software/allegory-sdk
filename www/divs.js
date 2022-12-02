@@ -2276,6 +2276,7 @@ method(Element, 'popup', function() {
 	if (e.hasclass('popup'))
 		return
 
+	e.ispopup = true
 	e.class('popup')
 
 	// view -------------------------------------------------------------------

@@ -49,7 +49,7 @@ button {
 	border-bottom: 1px solid #333;
 }
 
-#demo_list { overflow: hidden auto; padding-top: .5em; }
+#demo_list { overflow: hidden auto; padding-top: .5em; user-select: none; }
 #code      { flex: 1; }
 #result    { flex: 1; padding: 1em; }
 #inspect   { flex: 1; border-top: 1px solid #333; }
@@ -289,9 +289,7 @@ b3.add(tooltip({text: html(s3), side: 'left'  , align: 'end', kind: 'error', clo
 <div id=main></div>
 <script run>
 
-t = toaster({
-	//
-})
+t = toaster()
 
 main.add(t)
 
@@ -323,9 +321,9 @@ notify('There!', 'error', 2)
 <script run>
 
 win = dialog({
-	title: 'I\'m playing the title',
-	content: div({}, 'I\'m just here for the demo.'),
-	footer: 'some-button < yes no > apply:ok cancel',
+	heading: 'I\'m playing the title',
+	content: div({}, 'I\'m just here for the demo.', tag('br'), 'What do you think?'),
+	buttons_layout: 'some-button < yes no > apply:ok cancel',
 	buttons: {
 		yes: { icon: 'fa fa-thumbs-up' },
 		no: { icon: 'fa fa-thumbs-down' },
@@ -403,8 +401,17 @@ m = menu({
 b = button({
 	text: 'Click for menu',
 	primary: true,
-	action: function() { m.popup(b, 'bottom', 'left', 0, 2) },
+	action: function() {
+		m.show(m.hidden)
+	},
 })
+
+m.popup()
+m.popup_side = 'bottom'
+m.popup_align = 'left'
+m.popup_y1 = 2
+m.hide()
+b.add(m)
 
 main.add(b)
 
@@ -428,7 +435,7 @@ main.add(r)
 
 <!--------------------------------------------------------------------------->
 
-<template id=editbox_demo>
+<template id=textedit_demo>
 <div id=main></div>
 <script run>
 
@@ -443,14 +450,14 @@ function say_my_name_long(v) {
 			'wraps decently and stays centered.'
 }
 
-main.add(div({}, 'type in "Klaus" to validate: ', editbox({
+main.add(div({}, 'type in "Klaus" to validate: ', textedit({
 	field: {
 		validate: say_my_name,
 	},
 	val: 'wrong',
 })))
 
-main.add(div({}, 'type in "Klaus" to validate: ', editbox({
+main.add(div({}, 'type in "Klaus" to validate: ', textedit({
 	field: {validate: say_my_name_long},
 	copy_to_clipboard_button: true,
 })))
@@ -459,10 +466,10 @@ main.add(
 	div({style: 'padding-top: 2em'},
 		'Check out these inner labels:',
 		div({},
-			editbox({
+			textedit({
 				field: {name: "santa's_name", validate: say_my_name},
 			}),
-			editbox({
+			textedit({
 				field: {text: "devil's name"},
 				val: 'Anything goes',
 			})

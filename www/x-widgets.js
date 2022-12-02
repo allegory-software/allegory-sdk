@@ -7,12 +7,12 @@ WIDGETS
 
 	popup
 	tooltip
+	toaster
 	button
 	menu
 	tabs
 	split vsplit
 	slides
-	toaster
 	action_band
 	dialog
 	toolbox
@@ -964,8 +964,14 @@ component('x-tooltip', function(e) {
 	}
 
 	e.close = function() {
-		if (e.fire('closed'))
-			e.remove()
+		if (e.fire('close')) {
+			e.class('remove')
+			runafter(.2, function() {
+				e.remove()
+			})
+			return true
+		}
+		return false
 	}
 
 	function close() { e.close() }
@@ -1102,6 +1108,85 @@ tooltip.icon_classes = {
 	error  : 'fa fa-exclamation-circle',
 	warn   : 'fa fa-exclamation-triangle',
 }
+
+// ---------------------------------------------------------------------------
+// toaster
+// ---------------------------------------------------------------------------
+
+component('x-toaster', function(e) {
+
+	e.tooltips = set()
+
+	e.target = document.body
+	e.side = 'inner-top'
+	e.align = 'center'
+	e.timeout = 'auto'
+	e.spacing = 6
+
+	e.on_measure(function() {
+		let y = e.spacing
+		for (let t of e.tooltips) {
+			t._y = y
+			y += t.rect().h + e.spacing
+		}
+	})
+
+	e.on_position(function() {
+		for (let t of e.tooltips) {
+			t.popup_y1 = t._y
+			t.do_position() // it being our child it's ok to force it.
+		}
+	})
+
+	function close() {
+		e.tooltips.delete(this)
+		e.update()
+	}
+
+	e.post = function(text, kind, timeout) {
+		let t = tooltip({
+			classes: 'x-toaster-message',
+			kind: kind,
+			icon_visible: true,
+			text: text,
+			side: e.side,
+			align: e.align,
+			timeout: strict_or(timeout, e.timeout),
+			close_button: true,
+			zIndex: 1000, // TODO: show over modals.
+		})
+		t.on('close', close)
+		e.tooltips.add(t)
+		e.target.add(t)
+		e.update()
+		return t
+	}
+
+	e.close_all = function() {
+		for (let t of e.tooltips)
+			t.close()
+	}
+
+	e.on_bind(function(on) {
+		if (!on)
+			e.close_all()
+	})
+
+})
+
+// global notify function.
+let notify_toaster
+function notify(...args) {
+	if (!notify_toaster) {
+		notify_toaster = toaster()
+		document.body.add(notify_toaster)
+	}
+	let tt = notify_toaster.post(...args)
+	console.log('NOTIFY', iselem(args[0]) ? args[0].textContent : args[0])
+	return tt
+}
+ajax.notify_error  = (err) => notify(err, 'error')
+ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
 // ---------------------------------------------------------------------------
 // menu
@@ -1265,7 +1350,7 @@ component('x-menu', function(e) {
 		document.on('pointerdown', document_pointerdown, on)
 		document.on('rightpointerdown', document_pointerdown, on)
 		document.on('stopped_event', document_stopped_event, on)
-		if (on && select_first_item)
+		if (on && e.select_first_item)
 			select_next_item(e.table)
 	})
 
@@ -2154,85 +2239,6 @@ component('x-vsplit', function(e) {
 	opt.orientation = 'vertical'
 	return opt
 })
-
-// ---------------------------------------------------------------------------
-// toaster
-// ---------------------------------------------------------------------------
-
-component('x-toaster', function(e) {
-
-	e.tooltips = set()
-
-	e.target = document.body
-	e.side = 'inner-top'
-	e.align = 'center'
-	e.timeout = 'auto'
-	e.spacing = 6
-
-	e.on_measure(function() {
-		let y = e.spacing
-		for (let t of e.tooltips) {
-			t._y = y
-			y += t.rect().h + e.spacing
-		}
-	})
-
-	e.on_position(function() {
-		for (let t of e.tooltips) {
-			t.popup_y1 = t._y
-			t.position()
-		}
-	})
-
-	e.post = function(text, kind, timeout) {
-		let t = tooltip({
-			classes: 'x-toaster-message',
-			kind: kind,
-			icon_visible: true,
-			text: text,
-			side: e.side,
-			align: e.align,
-			timeout: strict_or(timeout, e.timeout),
-			close_button: true,
-			local_z: 1000, // hack to show over modals which are at popup_level 10.
-		})
-		t.on_bind(function(on) {
-			if (!on) {
-				e.tooltips.delete(this)
-				e.update()
-			}
-		})
-		t.on('close', close)
-		e.tooltips.add(t)
-		e.target.add(t)
-		e.update()
-		return t
-	}
-
-	e.close_all = function() {
-		for (let t of e.tooltips)
-			t.remove()
-	}
-
-	e.on_bind(function(on) {
-		if (!on)
-			e.close_all()
-	})
-
-})
-
-// global notify function.
-{
-	let ts
-	function notify(...args) {
-		ts = ts || toaster({classes: 'x-notify-toaster'})
-		let tt = ts.post(...args)
-		console.log('NOTIFY', iselem(args[0]) ? args[0].textContent : args[0])
-		return tt
-	}
-	ajax.notify_error  = (err) => notify(err, 'error')
-	ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
-}
 
 // ---------------------------------------------------------------------------
 // action band
