@@ -176,8 +176,8 @@ component.types = {} // {type -> create}
 component.categories = {} // {cat -> {craete1,...}}
 
 component.create = function(t, e0) {
-	if (iselem(t) || (isobject(t) && t.iswidget))
-		return t // instances pass through.
+	if (isnode(t))
+		return t // nodes pass through.
 	let id = isstr(t) ? t : t.id
 	if (e0 && e0.id == id)
 		return e0  // already created (called from a prop's `convert()`).
@@ -542,8 +542,8 @@ function cssgrid_item_widget(e) {
 	e.prop('pos_y'  , {style: 'grid-row-start'    , type: 'number'})
 	e.prop('span_x' , {style: 'grid-column-end'   , type: 'number', style_format: v => 'span '+v, style_parse: v => num((v || 'span 1').replace('span ', '')) })
 	e.prop('span_y' , {style: 'grid-row-end'      , type: 'number', style_format: v => 'span '+v, style_parse: v => num((v || 'span 1').replace('span ', '')) })
-	e.prop('align_x', {style: 'justify-self'      , type: 'enum', enum_values: ['start', 'end', 'center', 'stretch']})
-	e.prop('align_y', {style: 'align-self'        , type: 'enum', enum_values: ['start', 'end', 'center', 'stretch']})
+	e.prop('align_x', {style: 'justify-self'      , type: 'enum', enum_values: 'start end center stretch'})
+	e.prop('align_y', {style: 'align-self'        , type: 'enum', enum_values: 'start end center stretch'})
 
 	let do_select_widget = e.do_select_widget
 	let do_unselect_widget = e.do_unselect_widget
@@ -826,7 +826,8 @@ function disablable_widget(e) {
 	e.set_disabled = function(disabled) {
 		// add/remove this widget as a reason for the child widget to be disabled.
 		for (let ce of this.$('.x-widget'))
-			ce.disable(this, disabled)
+			if (ce.disable) // css classes are not to be trusted
+				ce.disable(this, disabled)
 	}
 
 	e.property('disabled',
@@ -842,18 +843,19 @@ function disablable_widget(e) {
 			e.set_disabled(disabled, disabled0)
 		})
 
-	let df
+	let dr
 	e.disable = function(reason, disabled) {
 		if (disabled) {
-			df = df || set()
-			df.add(reason)
+			dr = dr || set()
+			dr.add(reason)
 			e.disabled = true
-		} else if (df) {
-			df.delete(reason)
-			if (!df.size) {
+		} else if (dr) {
+			dr.delete(reason)
+			if (!dr.size) {
 				e.disabled = false
 			}
 		}
+		e.disabled_reasons = dr
 	}
 }
 
@@ -946,9 +948,9 @@ component('x-tooltip', function(e) {
 
 	e.prop('text'        , {slot: 'lang'})
 	e.prop('icon_visible', {type: 'bool'})
-	e.prop('kind'        , {type: 'enum', enum_values: [
-			'default', 'search', 'info', 'warn', 'error', 'cursor'
-		], default: 'default', attr: true})
+	e.prop('kind'        , {type: 'enum',
+			enum_values: 'default search info warn error cursor',
+			default: 'default', attr: true})
 	e.prop('timeout'     , {type: 'number'})
 	e.prop('close_button', {type: 'bool'})
 
@@ -1578,7 +1580,7 @@ widget_items_widget = function(e) {
 		let items = set()
 		for (let v of t) {
 			// v is either an item from cur_items, an id, or the opts for a new item.
-			let cur_item = cur_set.has(v) ? v : cur_by_id.get(v)
+			let cur_item = cur_set.has(v) ? v : cur_by_id.get(isobj(v) ? v.id : v)
 			let item = component.create(v, cur_item)
 			items.add(item)
 			if (!cur_item) {
@@ -1605,14 +1607,18 @@ widget_items_widget = function(e) {
 		return items.toarray()
 	}
 
-	function serialize_items(items) {
+	e.serialize_items = function(items) {
 		let t = []
 		for (let item of items)
 			t.push(item.serialize())
 		return t
 	}
 
-	e.prop('items', {convert: diff_items, serialize: serialize_items, default: []})
+	// e.prop('_items', {private: true, convert: diff_items, default: []})
+	// e.set_items = function(items) {
+	// 	e._items = items
+	// }
+	e.prop('items', {type: 'nodes', serialize: e.serialize_items, convert: diff_items, default: []})
 
 	// parent-of selectable widget protocol.
 	e.child_widgets = function() {
@@ -1661,7 +1667,7 @@ component('x-tabs', 'Containers', function(e) {
 		html_items.remove_value(e.fixed_header)
 
 	e.prop('tabs_side', {type: 'enum',
-			enum_values: ['top', 'bottom', 'left', 'right'], default: 'top', attr: true})
+			enum_values: 'top bottom left right', default: 'top', attr: true})
 
 	e.prop('can_rename_items', {type: 'bool', default: false})
 	e.prop('can_add_items'   , {type: 'bool', default: false})
@@ -2118,8 +2124,8 @@ component('x-split', 'Containers', function(e) {
 		document.fire('layout_changed')
 	}
 
-	e.prop('orientation', {type: 'enum', enum_values: ['horizontal', 'vertical'], default: 'horizontal', attr: true})
-	e.prop('fixed_side' , {type: 'enum', enum_values: ['first', 'second'], default: 'first', attr: true})
+	e.prop('orientation', {type: 'enum', enum_values: 'horizontal vertical', default: 'horizontal', attr: true})
+	e.prop('fixed_side' , {type: 'enum', enum_values: 'first second', default: 'first', attr: true})
 	e.prop('resizeable' , {type: 'bool', default: true, attr: true})
 	e.prop('fixed_size' , {type: 'number', default: 200, attr: true, slot: 'user'})
 	e.prop('min_size'   , {type: 'number', default: 0})
@@ -2318,44 +2324,66 @@ component('x-action-band', 'Input', function(e) {
 
 component('x-dialog', function(e) {
 
-	e.prop('heading', {attr: true}) // because title is taken
-	e.prop('cancelable', {type: 'bool', attr: true, default: true})
+	e.init_child_components()
 
-	e.init = function() {
+	let html_heading = e.$1('heading')
+	let html_header  = e.$1('header' )
+	let html_content = e.$1('content')
+	let html_footer  = e.$1('footer' )
 
-		e.init_child_components()
-		e.header  = e.header  || e.$1('header' ) || tag('header', {hidden: true})
-		e.content = e.content || e.$1('content') || tag('content')
-		e.footer  = e.footer  || e.$1('footer' ) || tag('footer', {hidden: true})
+	e.prop('heading'        , {attr: true}) // because title is taken
+	e.prop('cancelable'     , {type: 'bool', attr: true, default: true})
+	e.prop('buttons'        , {})
+	e.prop('buttons_layout' , {})
+
+	e.prop('header' , {type: 'html'})
+	e.prop('content', {type: 'html'})
+	e.prop('footer' , {type: 'html'})
+
+	e.on_update(function() {
+
 		e.clear()
 
-		e.header  .classes = 'x-dialog-header'
-		e.content .classes = 'x-dialog-content'
-		e.footer  .classes = 'x-dialog-footer'
+		e._header  = e.header
+		e._content = e.content
+		e._footer  = e.footer || div()
 
-		if (e.heading != null) {
-			let heading = div({class: 'x-dialog-heading'}, e.heading)
-			e.header.add(heading)
-			e.header.hidden = false
-		}
+		if (!e.header)
+			if (e.heading) {
+				e._heading = e._heading || div()
+				e._header = e._header || div()
+				e._header.set(e._heading)
+				e._heading.set(e.heading)
+			} else if (e._header)
+				e._header.hide()
 
-		if (e.buttons || e.buttons_layout) {
-			e.footer.set(action_band({
-				layout: e.buttons_layout, buttons: e.buttons
-			}))
-			e.footer.hidden = false
-		}
+		if (!e.footer)
+			if (e.buttons || e.buttons_layout) {
+				e._footer = e._footer || div()
+				e._footer.set(action_band({
+					layout: e.buttons_layout, buttons: e.buttons
+				}))
+			} else if (e._footer)
+				e._footer.hide()
 
-		e.add(e.header, e.content, e.footer)
+		if (e._heading ) e._heading .class('x-dialog-heading')
+		if (e._header  ) e._header  .class('x-dialog-header')
+		if (e._content ) e._content .class('x-dialog-content')
+		if (e._footer  ) e._footer  .class('x-dialog-footer')
 
-		if (e.cancelable) {
+		if (e.cancelable && !e.x_button) {
 			e.x_button = div({class: 'x-dialog-xbutton fa fa-times'})
 			e.x_button.on('click', function() {
 				e.cancel()
 			})
 			e.add(e.x_button)
 		}
-	}
+		if (e.x_button)
+			e.x_button.show(e.cancelable)
+
+		e.add(e._header, e._content, e._footer, e.x_button)
+
+	})
 
 	e.on_bind(function(on) {
 		document.on('keydown', doc_keydown, on)
@@ -2379,7 +2407,15 @@ component('x-dialog', function(e) {
 	function doc_pointerdown(ev) {
 		if (e.contains(ev.target)) // clicked inside the dialog
 			return
+		if (!e.cancelable)
+			e.animate([
+					{transform: 'scale(1.05)'},
+				], {
+					// easing: '',
+					duration: 100,
+				})
 		e.cancel()
+		return false
 	}
 
 	e.on('keydown', function(key) {
@@ -2413,6 +2449,13 @@ component('x-dialog', function(e) {
 		return false
 	}
 
+	return {
+		heading : html_heading,
+		header  : html_header,
+		content : html_content,
+		footer  : html_footer,
+	}
+
 })
 
 // ---------------------------------------------------------------------------
@@ -2436,7 +2479,7 @@ component('x-toolbox', function(e) {
 
 	e.set_label = function(v) { e.title_box.set(v) }
 
-	e.prop('side'  , {type: 'enum', enum_values: ['left', 'right'], default: 'right'})
+	e.prop('side'  , {type: 'enum', enum_values: 'left right', default: 'right'})
 	e.prop('px'    , {type: 'number', slot: 'user'})
 	e.prop('py'    , {type: 'number', slot: 'user'})
 	e.prop('pw'    , {type: 'number', slot: 'user'})

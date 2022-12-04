@@ -32,7 +32,7 @@
 	--x-shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 	--x-shadow-button                 :  0px  0px  8px  0px #00000011;
 	--x-shadow-tooltip                :  2px  2px  9px      #00000044;
-	--x-shadow-dialog                 :  2px  2px 10px      #00000088;
+	--x-shadow-dialog                 :  2px  5px 10px      #00000088;
 	--x-shadow-toolbox                :  1px  1px  4px      #000000aa;
 	--x-shadow-slider-thumb           :  1px  1px  2px      #000000aa;
 	--x-shadow-button-pressed         : inset 0 0.15em 0.3em #1b1f2333;
@@ -88,8 +88,8 @@
 	--x-fg-link-visited : var(--x-fg);
 
 	--x-bg-button                 : #eff3f6;
-	--x-bg-button-hover           : #f5f8f9;
-	--x-bg-button-pressed         : #f5f8f9;
+	--x-bg-button-hover           : #dee6ed;
+	--x-bg-button-pressed         : #ced9e4;
 	--x-fg-button                 : var(--x-fg-inverted);
 	--x-bg-button-primary         : #28a745;
 	--x-fg-button-primary         : var(--x-fg-inverted);
@@ -158,6 +158,18 @@ body {
 [opensans] {
 	font-family: opensans, Arial, sans-serif;
 	--x-grid-cell-baseline-adjust-ff: 0;
+}
+
+/* info boxes ------------------------------------------------------------- */
+
+info {
+	display: flex;
+	font-size: 90%;
+	color: var(--x-fg-label);
+	margin: .5em 0;
+	padding-left  : var(--x-padding-x-input);
+	padding-right : var(--x-padding-x-input);
+	cursor: default;
 }
 
 /* widget defaults -------------------------------------------------------- */
@@ -777,6 +789,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	cursor: default;
 }
 
+.x-input-info > info {
+	display: contents;
+	font-size: 100%;
+}
+
 .x-widget:focus-within > .x-input-info {
 	opacity: initial;
 }
@@ -842,23 +859,25 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-markbox-icon {
 	color: var(--x-markbox-icon-color);
+	justify-self: center;
 }
 
 .x-markbox-label,
+.x-markbox-label *,
 .x-markbox-icon
 {
 	cursor: pointer;
 }
 
-.x-markbox-label:hover,
-.x-markbox-icon:hover
+.x-markbox-icon:hover,
+.x-markbox-label:hover
 {
 	filter: contrast(60%);
 }
 
 .x-markbox.invalid > .x-focus-box > .x-markbox-label,
 .x-markbox.invalid > .x-focus-box > .x-markbox-icon {
-	color: var(--x-fg-error);
+	color: var(--x-bg-error);
 }
 
 .x-markbox[align=right] > .x-focus-box > .x-markbox-icon {
@@ -907,34 +926,58 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	flex-flow: column;
 }
 
+.x-radio-items {
+	display: flex;
+	flex-flow: column;
+}
+
+.x-radiogroup[readonly] > .x-radio-items > .x-markbox > .x-markbox-icon,
+.x-radiogroup[readonly] > .x-radio-items > .x-markbox > .x-markbox-label
+{
+	filter: none;
+}
+
 .x-radio-item {
+	/* shrink-wrap sizing */
+	width: auto;
+	min-width: 1em;
 	align-items: baseline;
 	padding-left   : var(--x-padding-x-input);
 	padding-right  : var(--x-padding-x-input);
 	padding-top    : var(--x-padding-y-input);
 	padding-bottom : var(--x-padding-y-input);
+}
+
+.x-radio-label {
 	user-select: none; /* make drag-select skip over button labels */
 }
 
-.x-radiogroup.invalid > .x-markbox,
-.x-radiogroup.invalid > .x-markbox > .x-radio-icon
+.x-radiogroup > .x-radio-items > .x-radio-item.invalid > .x-radio-label,
+.x-radiogroup > .x-radio-items > .x-radio-item.invalid > .x-radio-icon
 {
-	color: var(--x-fg-error);
+	color: var(--x-bg-error);
 }
 
-.x-radiogroup > .x-markbox:focus-visible {
+.x-radio-label:focus-visible {
+	outline: none;
+}
+
+.x-radio-item:has(> .x-radio-label:focus-visible) {
 	outline: 2px solid var(--x-outline-focused);
 	outline-offset: -2px;
 }
 
-.x-radiogroup.invalid > .x-markbox:focus-visible {
-	border-color: var(--x-fg-error);
-}
+.x-radiogroup[align=right] > .x-radio-items > .x-radio-item { justify-content: flex-end; }
+.x-radiogroup[align=right] > .x-radio-items > .x-radio-item > .x-markbox-icon  { order: 2; }
+.x-radiogroup[align=left ] > .x-radio-items > .x-radio-item > .x-markbox-label { padding-left : .5em; }
+.x-radiogroup[align=right] > .x-radio-items > .x-radio-item > .x-markbox-label { padding-right: .5em; }
 
-.x-radiogroup[align=right] > .x-markbox { justify-content: flex-end; }
-.x-radiogroup[align=right] > .x-markbox > .x-markbox-icon  { order: 2; }
-.x-radiogroup[align=left ] > .x-markbox > .x-markbox-label { padding-left : .5em; }
-.x-radiogroup[align=right] > .x-markbox > .x-markbox-label { padding-right: .5em; }
+.x-linear-form > 	.x-radiogroup { display: contents; }
+.x-linear-form > .x-radiogroup > .x-radio-items { display: contents; }
+.x-linear-form > .x-radiogroup > .x-radio-items > .x-radio-item { display: contents; }
+.x-linear-form > .x-radiogroup > .x-radio-items > .x-radio-item > .x-radio-label:focus-visible {
+	outline: 2px solid var(--x-outline-focused);
+}
 
 /* editbox ---------------------------------------------------------------- */
 
@@ -2332,6 +2375,21 @@ x-tabs-fixed-header {
 	outline-offset: -2px;
 }
 
+/* x-linear-form ----------------------------------------------------------
+
+	A linear form puts its children on a 2-column grid. The children are
+	responsible for changing their layouting with `display: contents`
+	until exactly two in-layout elements remain: an icon and a content.
+
+*/
+
+.x-linear-form {
+	display: grid;
+	grid-template-columns: 2em 1fr;
+	align-items: first baseline;
+	grid-gap: .25em 0;
+}
+
 /* toaster ---------------------------------------------------------------- */
 
 .x-toaster {
@@ -2362,6 +2420,13 @@ x-tabs-fixed-header {
 	box-shadow: var(--x-shadow-dialog);
 }
 
+.x-dialog-header,
+.x-dialog-footer,
+.x-dialog-content {
+	display: flex;
+	padding: 1em 0;
+}
+
 .x-dialog-heading {
 	color: var(--x-fg-disabled);
 	font-size: 200%;
@@ -2384,6 +2449,7 @@ x-tabs-fixed-header {
 	justify-content: center;
 	color: var(--x-fg-button);
 	-webkit-text-stroke: 1px var(--x-stroke-dialog-xbutton);
+	cursor: pointer;
 }
 
 .x-dialog-xbutton:hover {
@@ -2394,16 +2460,6 @@ x-tabs-fixed-header {
 .x-dialog-xbutton.active
 {
 	background-color: var(--x-bg-button-pressed);
-}
-
-.x-dialog-header {
-}
-
-.x-dialog-header,
-.x-dialog-footer,
-.x-dialog-content {
-	display: flex;
-	padding: 1em 0;
 }
 
 .x-dialog-content {

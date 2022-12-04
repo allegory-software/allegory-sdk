@@ -56,8 +56,8 @@ function row_widget(e, enabled_without_nav) {
 	e.do_update = function() {
 		let row = e.row
 		e.xoff()
-		e.readonly = e.nav && !e.nav.can_change_val(row)
-		e.disable('readonly', e.readonly && !e.set_readonly)
+		e.readonly = e._nav && !e._nav.can_change_val(row)
+		e.disable('readonly', e.readonly && !e.enabled_on_readonly)
 		e.disable('no_row', !(enabled_without_nav || e.row))
 		e.xon()
 		e.do_update_row(row)
@@ -67,9 +67,8 @@ function row_widget(e, enabled_without_nav) {
 		e.update()
 	}
 
-	function bind_nav(nav, on) {
-		if (!e.bound)
-			return
+	function bind_nav(on) {
+		let nav = e._nav
 		if (!nav)
 			return
 		nav.on('focused_row_changed', row_changed, on)
@@ -79,26 +78,41 @@ function row_widget(e, enabled_without_nav) {
 		nav.on('reset', row_changed, on)
 		nav.on('col_text_changed', row_changed, on)
 		nav.on('col_info_changed', row_changed, on)
-		e.fire('bind_nav', nav, on)
+		e.fire('bind_nav', on)
 	}
 
-	e.set_nav = function(nav1, nav0) {
-		assert(nav1 != e)
-		bind_nav(nav0, false)
-		bind_nav(nav1, true)
+	function bind_row_widget(on) {
+		if (!on) {
+			bind_nav(false)
+			e._nav = null
+		} else if (!e._nav) {
+			assert(!e._nav)
+			e._nav = e.nav || e._nav_id_nav || null
+			bind_nav(true)
+		}
 	}
+
+	e.on_bind(bind_row_widget)
+
+	function nav_changed() {
+		if (!e.bound)
+			return
+		bind_row_widget(false)
+		bind_row_widget(true)
+	}
+
+	e.set_nav = nav_changed
 	e.prop('nav', {private: true})
-	e.prop('nav_id', {bind_id: 'nav', type: 'nav', attr: 'nav'})
 
-	e.property('row', () => e.nav && e.nav.focused_row)
+	e.set__nav_id_nav = nav_changed
+	e.prop('_nav_id_nav', {private: true})
+	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
+
+	e.property('row', () => e._nav && e._nav.focused_row)
 
 	e.val = function(col) {
-		return e.nav && e.nav.cell_val(e.row, col)
+		return e.nav && e._nav.cell_val(e.row, col)
 	}
-
-	e.on('bind', function(on) {
-		bind_nav(e.nav, on)
-	})
 
 }
 
@@ -138,147 +152,143 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 	// nav dynamic binding ----------------------------------------------------
 
-	var field
-	function bind_field(on) {
-		assert(!(on && !e.bound))
-		let field0 = field
-		let field1 = on && e.nav && e.nav.optfld(e.col) || null
-		if (field0 == field1)
-			return
-		if (field0)
-			e.fire('bind_field', false)
-		field = field1
-		if (field)
-			e.fire('bind_field', true)
-	}
-
 	e.can_actually_change_val = function() {
 		if (e.row)
-			return e.nav.can_change_val(e.row, e.field)
-		else if (!e.nav)
+			return e._nav.can_change_val(e.row, e._field)
+		else if (!e._nav)
 			return enabled_without_nav
-		else if (!e.nav.all_rows.length)
-			return e.nav.can_actually_add_rows()
+		else if (!e._nav.all_rows.length)
+			return e._nav.can_actually_add_rows()
 		else
 			return false
 	}
 
-	function val_changed() {
-		bind_field(true)
+	function bind_ext_field(on) {
+		if (on) {
+			e._field = e._nav && e._nav.optfld(e.col) || null
+			if (!e._field)
+				return
+			e._col = e._field.name
+			e.fire('bind_field', true)
+		} else {
+			e._field = null
+			e._col = null
+			e.fire('bind_field', false)
+		}
+	}
+
+	function update() {
 		e.update()
 	}
 
-	function col_attr_changed() {
+	function reset() {
+		bind_ext_field(true)
 		e.update()
 	}
 
 	function cell_state_changed(row, field, changes, ev) {
-		bind_field(true)
 		e.update({changes: changes, ev: ev})
-		// state_changed events are only fired in standalone mode!
-		if (field_opt)
-			e.fire('state_changed', changes, ev)
+		e.fire('state_changed', changes, ev)
 	}
 
-	function bind_nav_col(nav, col, on) {
-		if (on && !e.bound)
-			return
-		if (!(nav && col != null))
-			return
-		nav.on('focused_row_changed', val_changed, on)
+	function bind_ext_nav(on) {
+		let nav = e._nav
+		let col = e._col
+		nav.on('focused_row_changed', update, on)
 		nav.on('focused_row_cell_state_changed_for_'+col, cell_state_changed, on)
-		nav.on('display_vals_changed_for_'+col, val_changed, on)
-		nav.on('reset', val_changed, on)
-		nav.on('col_text_changed_for_'+col, col_attr_changed, on)
-		nav.on('col_info_changed_for_'+col, col_attr_changed, on)
-		bind_field(on)
+		nav.on('display_vals_changed_for_'+col, update, on)
+		nav.on('reset', reset, on)
+		nav.on('col_text_changed_for_'+col, update, on)
+		nav.on('col_info_changed_for_'+col, update, on)
 	}
 
-	function bind_own_field(field_opt, on) {
-		if (on && !e.bound)
-			return
-		if (!field_opt)
-			return
-		if (on) {
-			let nav = global_val_nav()
-			let field = nav.add_field(field_opt)
-			if (initial_val !== undefined)
-				nav.set_cell_val(nav.all_rows[0], field, initial_val)
-			initial_val = undefined
-			e.xoff()
-			e.nav = nav
-			e.col = field.name
-			e.xon()
+	function bind_global_nav(on) {
+		let nav = e._nav
+		let col = e._col
+		nav.on('focused_row_cell_state_changed_for_'+col, cell_state_changed, on)
+		nav.on('display_vals_changed_for_'+col, update, on)
+	}
+
+	function bind_nav(on) {
+		if (!on) {
+			if (e._nav) {
+				if (e._nav != global_val_nav()) { // nav-bound
+					bind_ext_nav(false)
+					bind_ext_field(false)
+				} else { // standalone
+					bind_global_nav(false)
+					e._nav.remove_field(e._field)
+				}
+				e._nav = null
+				e._field = null
+				e._col = null
+			}
 		} else {
-			let nav = e.nav
-			let field = e.field
-			e.xoff()
-			e.nav = null
-			e.col = null
-			e.xon()
-			if (nav && field)
-				nav.remove_field(field)
+			if (!e._nav) {
+				let nav = e.nav || e._nav_id_nav || null
+				if (nav && e.col != null) { // nav-bound
+					e._nav = nav
+					e._col = e.col
+					bind_ext_nav(true)
+					bind_ext_field(true)
+				} else { // standalone
+					e._nav = global_val_nav()
+					let field_opt = assign_opt({owner: e}, e.field_options, e.field)
+					e._field = e._nav.add_field(field_opt)
+					e._col = e._field.name
+					bind_global_nav(true)
+					if (initial_val !== undefined)
+						e._nav.set_cell_val(e._nav.all_rows[0], e._field, initial_val)
+				}
+			}
 		}
 	}
 
-	e.on('bind', function val_widget_bind(on) {
-		if (field_opt) {
-			bind_own_field(field_opt, on)
-		} else {
-			bind_nav_col(e.nav, e.col, on)
-		}
-	})
+	e.on_bind(bind_nav)
 
-	function set_nav_col(nav1, nav0, col1, col0) {
-		bind_nav_col(nav0, col0, false)
-		bind_nav_col(nav1, col1, true)
+	function nav_changed() {
+		if (!e.bound)
+			return
+		bind_nav(false)
+		bind_nav(true)
 	}
 
-	e.set_nav = function(nav1, nav0) {
-		assert(nav1 != e)
-		set_nav_col(nav1, nav0, e.col, e.col)
-	}
+	e.set_nav = nav_changed
 	e.prop('nav', {private: true})
-	e.prop('nav_id', {bind_id: 'nav', type: 'nav', attr: 'nav'})
 
-	e.set_col = function(col1, col0) {
-		set_nav_col(e.nav, e.nav, col1, col0)
-	}
+	e.set__nav_id_nav = nav_changed
+	e.prop('_nav_id_nav', {private: true})
+	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
+
+	e.set_col = nav_changed
 	e.prop('col', {type: 'col', col_nav: () => e.nav})
 
-	var field_opt
-	e.get_field = function() {
-		return field
-	}
-	e.set_field = function(f1, f0) {
-		field_opt = f1
-		bind_own_field(f0, false)
-		bind_own_field(f1, true)
-	}
-	e.prop('field', {store: false, private: true})
+	// field options for own field in global nav.
+	e.set_field = nav_changed
+	e.prop('field', {private: true})
 
 	// model ------------------------------------------------------------------
 
 	e.to_val   = function(v) { return v; }
 	e.from_val = function(v) { return v; }
 
-	e.property('row', () => e.nav && e.nav.focused_row)
+	e.property('row', () => e._nav && e._nav.focused_row)
 
 	function get_val() {
 		let row = e.row
-		return row && e.field ? e.from_val(e.nav.cell_val(row, e.field)) : null
+		return row && e._field ? e.from_val(e._nav.cell_val(row, e._field)) : null
 	}
 	function get_input_val() {
 		let row = e.row
-		return row && e.field ? e.from_val(e.nav.cell_input_val(row, e.field)) : null
+		return row && e._field ? e.from_val(e._nav.cell_input_val(row, e._field)) : null
 	}
 
 	e.reset_val = function(v, ev) {
 		v = e.to_val(v)
 		if (v === undefined)
 			v = null
-		if (e.row && e.field)
-			e.nav.reset_cell_val(e.row, e.field, v, ev)
+		if (e.row && e._field)
+			e._nav.reset_cell_val(e.row, e._field, v, ev)
 	}
 
 	let initial_val
@@ -287,13 +297,13 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		if (v === undefined)
 			v = null
 		let was_set
-		if (e.field) {
+		if (e._field) {
 			if (!e.row)
-				if (e.nav && !e.nav.all_rows.length)
-					if (e.nav.can_actually_change_val())
-						e.nav.insert_rows(1, {focus_it: true})
+				if (e._nav && !e._nav.all_rows.length)
+					if (e._nav.can_actually_change_val())
+						e._nav.insert_rows(1, {focus_it: true})
 			if (e.row) {
-				e.nav.set_cell_val(e.row, e.field, v, ev)
+				e._nav.set_cell_val(e.row, e._field, v, ev)
 				was_set = true
 			}
 		}
@@ -306,20 +316,20 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	e.property('errors',
 		function() {
 			let row = e.row
-			return row && e.field ? e.nav.cell_errors(row, e.field) : undefined
+			return row && e._field ? e._nav.cell_errors(row, e._field) : undefined
 		},
 		function(errors) {
-			if (e.row && e.field) {
-				e.nav.begin_set_state(e.row)
-				e.nav.set_cell_state(e.col, 'errors', errors)
-				e.nav.end_set_state()
+			if (e.row && e._field) {
+				e._nav.begin_set_state(e.row)
+				e._nav.set_cell_state(e.col, 'errors', errors)
+				e._nav.end_set_state()
 			}
 		},
 	)
 
 	e.property('modified', function() {
 		let row = e.row
-		return row && e.field ? e.nav.cell_modified(row, e.field) : false
+		return row && e._field ? e._nav.cell_modified(row, e._field) : false
 	})
 
 	// view -------------------------------------------------------------------
@@ -329,45 +339,46 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	}
 
 	e.display_val_for = function(v) {
-		if (!e.row || !e.field)
+		if (!e.row || !e._field)
 			return e.placeholder_display_val()
-		return e.nav.cell_display_val_for(e.row, e.field, v)
+		return e._nav.cell_display_val_for(e.row, e._field, v)
 	}
 
 	e.prop('readonly', {type: 'bool', attr: true, default: false})
 
 	e.do_update_val = noop
 
-	e.do_update = function(opt) {
+	e.on_update(function(opt) {
 		let row = e.row
-		let field = e.field
+		let field = e._field
 		if (opt.changes) {
 			let val_changes = opt.changes.val || opt.changes.input_val
 			if (val_changes) {
 				let val = val_changes[0]
 				e.do_update_val(val, opt.ev)
-				e.class('modified', e.nav.cell_modified(row, field))
+				e.class('modified', e._nav.cell_modified(row, field))
 				e.fire('input_val_changed', val, opt.ev)
 			}
 			if (opt.changes.errors) {
-				e.invalid = e.nav.cell_has_errors(row, field)
+				e.invalid = e._nav.cell_has_errors(row, field)
 				e.class('invalid', e.invalid)
 				e.do_update_errors(opt.changes.errors[0], opt.ev)
 			}
 		} else {
 			let readonly = !e.can_actually_change_val()
 			e.xoff()
-			e.disable('readonly', readonly && !e.set_readonly)
 			e.readonly = readonly
+			e.disable('readonly', readonly && !e.enabled_on_readonly)
+			e.disable('no_row', !(enabled_without_nav || e.row))
 			e.xon()
 
 			e.do_update_val(e.input_val)
-			e.class('modified', e.nav && row && field && e.nav.cell_modified(row, field))
-			e.invalid = e.nav && row && field && e.nav.cell_has_errors(row, field)
+			e.class('modified', e._nav && row && field && e._nav.cell_modified(row, field))
+			e.invalid = e._nav && row && field && e._nav.cell_has_errors(row, field)
 			e.class('invalid', e.invalid)
 			e.do_update_errors(e.errors)
 		}
-	}
+	})
 
 	e.do_update_errors = function(errors) {
 		if (show_error_tooltip === false)
@@ -415,9 +426,8 @@ component('x-button', 'Input', function(e) {
 
 	e.icon_box = span({class: 'x-button-icon'})
 	e.text_box = span({class: 'x-button-text'})
-	e.focus_box = div({class: 'x-button-focus-box'}, e.icon_box, e.label_box)
+	e.focus_box = div({class: 'x-button-focus-box'}, e.icon_box, e.text_box)
 	e.icon_box.hidden = true
-	e.focus_box.add(e.icon_box, e.text_box)
 	e.add(e.focus_box)
 
 	e.prop('href', {store:'var', attr: true})
@@ -440,21 +450,18 @@ component('x-button', 'Input', function(e) {
 	e.format_text = function(s) {
 		let row = e.row
 		if (!row) return s
-		return render_string(s, e.nav.serialize_row_vals(row))
+		return render_string(s, e._nav.serialize_row_vals(row))
 	}
 
 	function update_text() {
-		s = e.format_text(e.text)
-		e.text_box.set(s, 'pre-wrap')
+		let s = e.format_text(e.text)
+		e.text_box.set(s, 'pre-line')
 		e.class('text-empty', !s)
 		if (e.link)
 			e.link.set(TC(s))
 	}
 
-	e.set_text = function(s) {
-		e.update()
-	}
-	e.prop('text', {default: '', slot: 'lang'})
+	e.prop('text', {type: 'html', default: '', slot: 'lang'})
 
 	e.set_icon = function(v) {
 		if (isstr(v))
@@ -631,15 +638,20 @@ calls:
 
 function input_widget(e) {
 
+	e.init_child_components()
+
+	let html_info = e.$1('info')
+	if (html_info)
+		html_info.remove()
+
 	e.class('x-input-widget')
 
 	e.prop('label'   , {slot: 'lang', attr: true})
 	e.prop('nolabel' , {type: 'bool', attr: true})
-	e.prop('align'   , {type: 'enum', enum_values: ['left', 'right'], default: 'left', attr: true})
-	e.prop('mode'    , {type: 'enum', enum_values: ['default', 'inline'], default: 'default', attr: true})
+	e.prop('align'   , {type: 'enum', enum_values: 'left right', default: 'left', attr: true})
+	e.prop('mode'    , {type: 'enum', enum_values: 'default inline', default: 'default', attr: true})
 	e.prop('info'    , {slot: 'lang', attr: true})
-	e.prop('infomode', {slot: 'lang', type: 'enum', enum_values: ['under', 'button', 'hidden'], attr: true, default: 'under'})
-	e.prop('field_type', {attr: true, internal: true})
+	e.prop('infomode', {slot: 'lang', type: 'enum', enum_values: 'under button hidden', attr: true, default: 'under'})
 
 	e.add_info_button = e.add // stub
 	e.add_info_box = e.add // stub
@@ -648,14 +660,13 @@ function input_widget(e) {
 		return catany('', e.type, catall(':' + e.col))
 	}
 
-
 	e.do_after('do_update_errors', function() {
 		if (e.error_tooltip)
-			e.error_tooltip.popup_align = e.align
+			e.error_tooltip.popup_align = e.align == 'right' ? 'end' : 'start'
 	})
 
 	function update_info() {
-		let info = e.info || (e.field && e.field.info)
+		let info = e.info || (e._field && e._field.info)
 
 		if (info && e.infomode == 'button' && !e.info_button) {
 			e.info_button = button({
@@ -691,8 +702,8 @@ function input_widget(e) {
 			e.add_info_box(e.info_box)
 		}
 		if (e.info_box) {
-			e.info_box.set(info)
-			e.info_box.hidden = !(e.infomode == 'under' && !!info)
+			e.info_box.set(T(info, 'pre-line'))
+			e.info_box.hide(!(e.infomode == 'under' && !!info))
 		}
 
 	}
@@ -702,7 +713,7 @@ function input_widget(e) {
 	}
 
 	e.get_label = function() {
-		return e.label || e.attr('label') || (e.field && e.field.text) || null
+		return e.label || e.attr('label') || (e._field && e._field.text) || null
 	}
 
 	e.set_label = function() {
@@ -712,8 +723,8 @@ function input_widget(e) {
 
 	e.on_update(function() {
 		update_info()
-		let s = !e.nolabel && (e.label || e.attr('label') || (e.field && e.field.text)) || null
-		if (s != null && e.field && e.field.not_null && e.label_show_star != false)
+		let s = !e.nolabel && (e.label || e.attr('label') || (e._field && e._field.text)) || null
+		if (s != null && e._field && e._field.not_null && e.label_show_star != false)
 			s = s + ' *'
 		e.class('with-label', !!s)
 		e.label_box.set(!e.nolabel ? s || e.create_label_placeholder() : null)
@@ -728,8 +739,8 @@ function input_widget(e) {
 		}
 
 		if (ctrl && key == 's') {
-			if (e.nav)
-				e.nav.save()
+			if (e._nav)
+				e._nav.save()
 			return false
 		}
 
@@ -746,6 +757,7 @@ function input_widget(e) {
 		}
 	})
 
+	return {info: html_info}
 }
 
 // ---------------------------------------------------------------------------
@@ -785,7 +797,7 @@ component('x-checkbox', 'Input', function(e) {
 	}
 
 	e.set_button_style = update_icon
-	e.prop('button_style', {type: 'enum', enum_values: ['checkbox', 'toggle'], default: 'checkbox', attr: true})
+	e.prop('button_style', {type: 'enum', enum_values: 'checkbox toggle', default: 'checkbox', attr: true})
 
 	// model
 
@@ -803,7 +815,7 @@ component('x-checkbox', 'Input', function(e) {
 		let c = e.checked
 		e.class('checked', c)
 		update_icon()
-		e.class('no-field', !e.field)
+		e.class('no-field', !e._field)
 	}
 
 	// controller
@@ -888,75 +900,160 @@ component('x-checkbox', 'Input', function(e) {
 
 component('x-radiogroup', 'Input', function(e) {
 
+	e.init_child_components()
+
+	let html_info = e.$1('info')
+	if (html_info)
+		html_info.remove()
+
 	editable_widget(e)
 	val_widget(e)
+	let html_items = widget_items_widget(e)
 
-	e.set_items = function(items) {
-		for (let item of items) {
-			if (isstr(item) || isnode(item))
-				item = {text: item}
-			let radio_box = span({class: 'x-markbox-icon x-radio-icon far fa-circle'})
-			let text_box = span({class: 'x-markbox-label x-radio-label'})
-			text_box.set(item.text)
-			let idiv = div({class: 'x-widget x-markbox x-radio-item', tabindex: 0},
-				radio_box, text_box)
-			idiv.attr('align', e.align)
-			idiv.item = item
-			idiv.on('pointerdown', idiv_click)
-			idiv.on('keydown', idiv_keydown)
-			e.add(idiv)
+	e.prop('info', {slot: 'lang', attr: true})
+
+	e.items_box = div({class: 'x-radio-items'})
+	e.add(e.items_box)
+
+	// do_update_val() must be called after the items are added!
+	e.do_before('do_update', function(opt) {
+
+		if (opt.new_items) {
+			for (let item of opt.new_items) {
+				let ri = div({class: 'x-widget x-radio-item'})
+				ri.icon_box = span({class: 'x-markbox-icon x-radio-icon far fa-circle'})
+				ri.label_box = item
+				ri.label_box.attr('tabindex', 0)
+				ri.label_box.class('x-markbox-label x-radio-label')
+				item._radio_item = ri
+				ri.attr('align', e.align)
+				ri.item = item
+				ri.add(ri.icon_box, ri.label_box)
+				ri.on('pointerdown', radio_item_pointerdown)
+				ri.on('keydown', radio_item_keydown)
+				e.items_box.add(ri)
+			}
 		}
-	}
-	e.prop('items', {default: []})
+
+		if (opt.removed_items)
+			for (let item of opt.removed_items)
+				item._radio_item.remove()
+
+		if (opt.items) {
+			e.items_box.innerHTML = null
+			for (let item of opt.items) {
+				e.items_box.append(item._radio_item)
+			}
+		}
+
+		let info = e._field && e._field.info || e.info
+		if (info && !e.info_box) {
+			e.info_box = div({class: 'x-input-info'})
+			e.add(div(), e.info_box) // the empty div is a shim for .x-linear-form.
+		}
+		if (e.info_box) {
+			e.info_box.set(info)
+			e.info_box.hide(!info)
+		}
+
+	})
 
 	e.set_align = function(align) {
-		for (let idiv of e.children)
-			idiv.attr('align', align)
+		for (let ri of e.items_box.children)
+			ri.attr('align', align)
 	}
-	e.prop('align', {type: 'enum', enum_values: ['left', 'right'], default: 'left', attr: true})
+	e.prop('align', {type: 'enum', enum_values: 'left right', default: 'left', attr: true})
 
-	let sel_item
+	e.do_after('do_update_errors', function() {
+		if (e.error_tooltip)
+			e.error_tooltip.popup_align = e.align == 'right' ? 'end' : 'start'
+	})
 
-	e.do_update_val = function(i) {
-		if (sel_item) {
-			sel_item.class('selected', false)
-			sel_item.at[0].class('fa-dot-circle', false)
-			sel_item.at[0].class('fa-circle', true)
-		}
-		sel_item = i != null ? e.at[i] : null
-		if (sel_item) {
-			sel_item.class('selected', true)
-			sel_item.at[0].class('fa-dot-circle', true)
-			sel_item.at[0].class('fa-circle', false)
-		}
+	let sel_ri // selected radio item
+
+	function item_val(item) {
+		return e._field.from_text(item.attr('val') || '')
 	}
 
-	function select_item(item, focus) {
-		e.set_val(item.index, {input: e})
+	function find_item(val) {
+		if (!e._field)
+			return
+		for (let item of e._items) {
+			if (item_val(item) === val)
+				return item
+		}
+	}
+
+	e.do_update_val = function(val) {
+		if (sel_ri) {
+			sel_ri.class('selected', false)
+			sel_ri.at[0].class('fa-dot-circle', false)
+			sel_ri.at[0].class('fa-circle', true)
+			sel_ri.class('invalid', false)
+		}
+		let item = find_item(val)
+		if (item) {
+			sel_ri = item._radio_item
+			sel_ri.class('selected', true)
+			sel_ri.at[0].class('fa-dot-circle', true)
+			sel_ri.at[0].class('fa-circle', false)
+			sel_ri.class('invalid', e.invalid)
+		}
+	}
+
+	e.do_after('do_update_errors', function() {
+		if (sel_ri)
+			sel_ri.class('invalid', e.invalid)
+	})
+
+	function select_radio_item(radio_item, focus) {
+		e.set_val(item_val(radio_item.item), {input: e})
 		if (focus != false)
-			item.focus()
+			radio_item.label_box.focus()
 	}
 
-	function idiv_click() {
-		select_item(this, false)
-		// return false
+	function radio_item_pointerdown() {
+		select_radio_item(this, false)
 	}
 
-	function idiv_keydown(key) {
+	function radio_item_keydown(key) {
 		if (key == ' ' || key == 'Enter') {
-			select_item(this)
+			select_radio_item(this)
 			return false
 		}
 		if (key == 'ArrowUp' || key == 'ArrowDown') {
-			let item = e.focused_element
-			let next_item = item
-				&& (key == 'ArrowUp' ? (item.prev || e.last) : (item.next || e.first))
-			if (next_item)
-				select_item(next_item)
+			let ri = e.focused_element
+			ri = ri && e.items_box.contains(ri) && ri.parent
+			let next_ri = ri
+				&& (key == 'ArrowUp'
+					? (ri.prev || e.items_box.last)
+					: (ri.next || e.items_box.first))
+			if (next_ri)
+				select_radio_item(next_ri)
 			return false
 		}
 	}
 
+	e.on('bind_field', function(on) {
+		if (on && !e.items.length)
+			if (e._field.type == 'enum' && e._field.enum_values) {
+				let texts = e._field.enum_texts
+				let info = e._field.enum_info
+				let items = []
+				for (let v of words(e._field.enum_values))
+					items.push(div({val: v}, T(texts[v] || v, 'pre-line')))
+				e._items = items
+				// e.update({new_items: e._items})
+			}
+	})
+
+	e.prop('_items', {convert: diff_items, serialize: e.serialize_items, default: []})
+
+	e.set_items = function(items) {
+		e._items = items
+	}
+
+	return {items: html_items, info: html_info}
 })
 
 // ---------------------------------------------------------------------------
@@ -972,7 +1069,7 @@ function editbox_widget(e, opt) {
 	input_widget(e)
 	stylable_widget(e)
 
-	e.props.mode.enum_values = ['default', 'inline', 'wrap', 'fixed']
+	e.props.mode.enum_values = 'default inline wrap fixed'
 
 	e.class('x-editbox')
 	e.class('x-dropdown', has_picker)
@@ -995,15 +1092,15 @@ function editbox_widget(e, opt) {
 	e.add(e.focus_box)
 
 	e.from_text = function(s) {
-		return e.field.from_text(s)
+		return e._field.from_text(s)
 	}
 
 	e.to_text = function(v) {
-		if (!e.field)
+		if (!e._field)
 			return ''
 		if (v == null)
 			return ''
-		return e.field.to_text(v)
+		return e._field.to_text(v)
 	}
 
 	e.do_update_val = function(v, ev) {
@@ -1011,7 +1108,7 @@ function editbox_widget(e, opt) {
 			if (ev && ev.input == e && ev.typing)
 				return
 			let s = e.to_text(v)
-			let maxlen = e.field && e.field.maxlen
+			let maxlen = e._field && e._field.maxlen
 			e.input.value = s.slice(0, maxlen)
 		} else {
 			let s = e.display_val_for(v)
@@ -1023,6 +1120,7 @@ function editbox_widget(e, opt) {
 
 	if (e.input) {
 
+		e.enabled_on_readonly = true
 		e.set_readonly = function(v) {
 			e.input.bool_attr('readonly', v || null)
 		}
@@ -1033,14 +1131,14 @@ function editbox_widget(e, opt) {
 		})
 
 		e.on('bind_field', function(on) {
-			e.input.attr('maxlength', on ? e.field.maxlen : null)
+			e.input.attr('maxlength', on ? e._field.maxlen : null)
 			bind_spicker(on)
 		})
 
 		e.on('keydown', function(key, shift, ctrl) {
 			if (key == 'Escape' && !e.hasclass('grid-editor'))
-				if (e.field && e.row)
-					if (e.nav.revert_cell(e.row, e.field, {input: e}))
+				if (e._field && e.row)
+					if (e._nav.revert_cell(e.row, e._field, {input: e}))
 						return false
 		})
 
@@ -1058,8 +1156,8 @@ function editbox_widget(e, opt) {
 			e.spicker = e.create_spicker({
 				id: e.id ? e.id + '.spicker' : null,
 				dropdown: e,
-				nav: e.nav,
-				col: e.col,
+				nav: e._nav,
+				col: e._col,
 				can_select_widget: false,
 				focusable: false,
 			})
@@ -1067,7 +1165,7 @@ function editbox_widget(e, opt) {
 				return
 			e.spicker.popup()
 			e.spicker.popup_side = 'bottom'
-			e.spicker.popup_align = e.align
+			e.spicker.popup_align = e.align == 'right' ? 'end' : 'start'
 			e.spicker.hide()
 			e.spicker.class('picker', true)
 			e.spicker.on('val_picked', spicker_val_picked)
@@ -1162,7 +1260,7 @@ function editbox_widget(e, opt) {
 				action: function() {
 					copy_to_clipboard(e.to_text(e.input_val), function() {
 						notify(S('copied_to_clipboard',
-							'{0} copied to clipboard', e.field.text), 'info')
+							'{0} copied to clipboard', e._field.text), 'info')
 					})
 				},
 			})
@@ -1346,8 +1444,8 @@ function editbox_widget(e, opt) {
 				e.picker = e.create_picker({
 					id: e.id ? e.id + '.picker' : null,
 					dropdown: e,
-					nav: e.nav,
-					col: e.col,
+					nav: e._nav,
+					col: e._col,
 					can_select_widget: false,
 				})
 				e.picker.popup()
@@ -1621,13 +1719,13 @@ component('x-passedit', 'Input', function(e) {
 component('x-numedit', 'Input', function(e) {
 
 	e.props.align = {default: 'right'}
-	e.props.field_type = {default: 'number'}
+	e.field_options = {type: 'number'}
 
 	editbox_widget(e)
 
 	function increment_val(increment) {
 		let v = e.input_val + increment
-		let m = or(1 / 10 ** (e.field.decimals || 0), 1)
+		let m = or(1 / 10 ** (e._field.decimals || 0), 1)
 		let r = v % m
 		e.set_val(v - r, {input: e})
 		e.input.select_range(0, -1)
@@ -1648,8 +1746,8 @@ component('x-spinedit', 'Input', function(e) {
 
 	numedit.construct(e)
 
-	e.prop('button_style'    , {type: 'enum', enum_values: ['plus-minus', 'up-down', 'left-right'], default: 'plus-minus', attr: true})
-	e.prop('button_placement', {type: 'enum', enum_values: ['each-side', 'left', 'right'], default: 'each-side', attr: true})
+	e.prop('button_style'    , {type: 'enum', enum_values: 'plus-minus up-down left-right', default: 'plus-minus', attr: true})
+	e.prop('button_placement', {type: 'enum', enum_values: 'each-side left right', default: 'each-side', attr: true})
 
 	e.up   = div({class: 'x-spinedit-button fa'})
 	e.down = div({class: 'x-spinedit-button fa'})
@@ -1691,7 +1789,7 @@ component('x-spinedit', 'Input', function(e) {
 
 	})
 
-	let multiple = () => or(1 / 10 ** (e.field.decimals || 0), 1)
+	let multiple = () => or(1 / 10 ** (e._field.decimals || 0), 1)
 
 	// increment buttons click
 
@@ -1769,7 +1867,7 @@ component('x-checkedit', 'Input', function(e) {
 	}
 
 	e.set_button_style = update_icon
-	e.prop('button_style', {type: 'enum', enum_values: ['checkbox', 'toggle'], default: 'checkbox', attr: true})
+	e.prop('button_style', {type: 'enum', enum_values: 'checkbox toggle', default: 'checkbox', attr: true})
 
 	e.do_update_val = function(v, ev) {
 		update_icon()
@@ -1785,7 +1883,7 @@ component('x-tagsedit', 'Input', function(e) {
 
 	e.class('x-editbox')
 
-	e.props.field_type = {default: 'tags'}
+	e.field_options = {type: tags}
 
 	val_widget(e)
 	input_widget(e)
@@ -1802,7 +1900,7 @@ component('x-tagsedit', 'Input', function(e) {
 	e.focus_box = div({class: 'x-focus-box'}, e.input, e.label_box, e.tags_box, e.expand_button)
 	e.add(e.focus_box)
 
-	e.prop('format', {type: 'enum', enum_values: ['words', 'json'], default: 'json', attr: true})
+	e.prop('format', {type: 'enum', enum_values: 'words json', default: 'json', attr: true})
 
 	function input_val_slice() {
 		let v = e.input_val
@@ -1863,7 +1961,7 @@ component('x-tagsedit', 'Input', function(e) {
 		else
 			e.input.value = null
 
-		e.input.attr('maxlength', e.field ? e.field.maxlen : null)
+		e.input.attr('maxlength', e._field ? e._field.maxlen : null)
 	}
 
 	// expanded bubble.
@@ -2057,7 +2155,7 @@ component('x-tagsedit', 'Input', function(e) {
 
 component('x-placeedit', 'Input', function(e) {
 
-	e.props.field_type = {default: 'place'}
+	e._field_options = {type: 'place'}
 
 	editbox_widget(e)
 
@@ -2100,7 +2198,7 @@ component('x-placeedit', 'Input', function(e) {
 
 	e.override('do_update_val', function(inherited, v, ev) {
 		inherited.call(this, v, ev)
-		let pin = e.field && e.field.format_pin(v)
+		let pin = e._field && e._field.format_pin(v)
 		e.pin_ct.set(pin)
 		if (e.val && !e.place_id)
 			pin.title = S('find_place', 'Find this place on Google Maps')
@@ -2127,7 +2225,7 @@ component('x-placeedit', 'Input', function(e) {
 
 component('x-googlemaps', 'Input', function(e) {
 
-	e.props.field_type = {default: 'place'}
+	e.field_options = {type: 'place'}
 
 	val_widget(e)
 
@@ -2152,7 +2250,7 @@ component('x-googlemaps', 'Input', function(e) {
 
 component('x-slider', 'Input', function(e) {
 
-	e.props.field_type = {default: 'number'}
+	e.field_options = {type: 'number'}
 
 	focusable_widget(e)
 
@@ -2177,14 +2275,14 @@ component('x-slider', 'Input', function(e) {
 		return clamp(lerp(v, e.from, e.to, 0, 1), 0, 1)
 	}
 
-	function cmin() { return max(or(e.field && e.field.min, -1/0), e.from) }
-	function cmax() { return min(or(e.field && e.field.max, 1/0), e.to) }
+	function cmin() { return max(or(e._field && e._field.min, -1/0), e.from) }
+	function cmax() { return min(or(e._field && e._field.max, 1/0), e.to) }
 
-	let multiple = () => or(1 / 10 ** e.field.decimals, 1)
+	let multiple = () => or(1 / 10 ** e._field.decimals, 1)
 
 	e.set_progress = function(p, ev) {
 		let v = lerp(p, 0, 1, e.from, e.to)
-		if (e.field.decimals != null)
+		if (e._field.decimals != null)
 			v = floor(v / multiple() + .5) * multiple()
 		e.set_val(clamp(v, cmin(), cmax()), ev)
 	}
@@ -2362,9 +2460,9 @@ component('x-calendar', 'Input', function(e) {
 
 	e.on('bind_field', function(on) {
 		if (on) {
-			e.time_box.hidden = !(e.field.has_time || false)
+			e.time_box.hidden = !(e._field.has_time || false)
 			for (let ce of [e.time_box.last.prev, e.time_box.last])
-				ce.hidden = !(e.field.has_seconds || false)
+				ce.hidden = !(e._field.has_seconds || false)
 		}
 	})
 
@@ -2373,7 +2471,7 @@ component('x-calendar', 'Input', function(e) {
 	})
 
 	function as_ts(v) {
-		return e.field && e.field.to_time ? e.field.to_time(v) : v
+		return e._field && e._field.to_time ? e._field.to_time(v) : v
 	}
 
 	function daytime(t) {
@@ -2381,7 +2479,7 @@ component('x-calendar', 'Input', function(e) {
 	}
 
 	function as_dt(t) {
-		return e.field.from_time ? e.field.from_time(t) : t
+		return e._field.from_time ? e._field.from_time(t) : t
 	}
 
 	function update_sel_day(t) {
@@ -2719,15 +2817,15 @@ component('x-timepicker', 'Input', function(e) {
 			})
 		}
 
-		e.sel_h = gen_sel('x-timepicker-sel-h', 24, or(e.field.hour_step  , 1))
-		e.sel_m = gen_sel('x-timepicker-sel-m', 60, or(e.field.minute_step, 1))
-		e.sel_s = gen_sel('x-timepicker-sel-s', 60, or(e.field.second_step, 1))
+		e.sel_h = gen_sel('x-timepicker-sel-h', 24, or(e._field.hour_step  , 1))
+		e.sel_m = gen_sel('x-timepicker-sel-m', 60, or(e._field.minute_step, 1))
+		e.sel_s = gen_sel('x-timepicker-sel-s', 60, or(e._field.second_step, 1))
 
 		let hh = div({class: 'x-timepicker-heading x-timepicker-heading-h'}, S('hour'  , 'Hour'))
 		let hm = div({class: 'x-timepicker-heading x-timepicker-heading-m'}, S('minute', 'Minute'))
 		let hs = div({class: 'x-timepicker-heading x-timepicker-heading-s'}, S('second', 'Second'))
 
-		e.bool_attr('has_seconds', e.field.has_seconds || null)
+		e.bool_attr('has_seconds', e._field.has_seconds || null)
 
 		function set_val(_, ev) {
 			if (!(ev && ev.input))
@@ -2845,17 +2943,17 @@ component('x-lookup-dropdown', function(e) {
 
 	e.create_picker = function(opt) {
 
-		let ln_id = e.field.lookup_nav_id
+		let ln_id = e._field.lookup_nav_id
 		if (ln_id) {
 			opt.id = ln_id
 		} else {
 			opt.type = 'listbox'
-			opt.rowset      = e.field.lookup_rowset
-			opt.rowset_name = e.field.lookup_rowset_name
-			opt.rowset_url  = e.field.lookup_rowset_url
+			opt.rowset      = e._field.lookup_rowset
+			opt.rowset_name = e._field.lookup_rowset_name
+			opt.rowset_url  = e._field.lookup_rowset_url
 		}
-		opt.val_col     = e.field.lookup_cols
-		opt.display_col = e.field.display_col
+		opt.val_col     = e._field.lookup_cols
+		opt.display_col = e._field.display_col
 		opt.theme       = e.theme
 
 		let picker = component.create(opt)
@@ -2876,15 +2974,15 @@ component('x-lookup-dropdown', function(e) {
 
 	function update_field() {
 
-		e.field = e.lookup_rowset_name && {
+		e._field = e.lookup_rowset_name && {
 			lookup_rowset_name : e.lookup_rowset_name,
 			lookup_cols        : e.lookup_cols,
 			display_col        : e.display_col,
 		}
 
 		if (e.picker) {
-			e.picker.rowset_name = e.field.lookup_rowset_name
-			e.picker.val_col     = e.field.lookup_cols
+			e.picker.rowset_name = e._field.lookup_rowset_name
+			e.picker.val_col     = e._field.lookup_cols
 			e.picker.display_col = e.display_col
 		}
 	}
@@ -2957,7 +3055,7 @@ component('x-image', 'Input', function(e) {
 	}
 
 	function format_url(purpose) {
-		let vals = e.row && e.nav.serialize_row_vals(e.row)
+		let vals = e.row && e._nav.serialize_row_vals(e.row)
 		return vals && e.format_url(vals, purpose)
 	}
 
@@ -3068,7 +3166,7 @@ component('x-mu-row', 'Input', function(e) {
 	row_widget(e)
 
 	e.do_update_row = function(row) {
-		let vals = row && e.nav.serialize_row_vals(row)
+		let vals = row && e._nav.serialize_row_vals(row)
 		e.render(vals)
 	}
 
@@ -3185,8 +3283,8 @@ component('x-mu', function(e) {
 	// nav & params binding ---------------------------------------------------
 
 	e.computed_data_url = function() {
-		if (e.nav && e.nav.focused_row && e.data_url)
-			return e.data_url.subst(e.nav.serialize_row_vals(e.nav.focused_row))
+		if (e._nav && e._nav.focused_row && e.data_url)
+			return e.data_url.subst(e._nav.serialize_row_vals(e._nav.focused_row))
 		else
 			return e.data_url
 	}
@@ -3239,8 +3337,6 @@ component('x-mu', function(e) {
 // widget switcher
 // ---------------------------------------------------------------------------
 
-// TODO: convert this into a row_widget
-
 component('x-switcher', 'Containers', function(e) {
 
 	row_widget(e)
@@ -3274,7 +3370,7 @@ component('x-switcher', 'Containers', function(e) {
 	}
 
 	e.do_update_row = function(row) {
-		let vals = row && e.nav.serialize_row_vals(row)
+		let vals = row && e._nav.serialize_row_vals(row)
 		let item = vals && (e.find_item(vals) || e.create_item(vals))
 		e.set(item)
 	}
@@ -3297,8 +3393,8 @@ component('x-label', function(e) {
 	}
 
 	e.do_update = function() {
-		let s = (e.field && e.field.text) || null
-		if (s != null && e.field && e.field.not_null && e.label_show_star != false)
+		let s = (e._field && e._field.text) || null
+		if (s != null && e._field && e._field.not_null && e.label_show_star != false)
 			s = s + ' *'
 		e.set(s || e.create_label_placeholder())
 		e.set(s, 'pre-wrap')
@@ -3317,8 +3413,10 @@ component('x-input', 'Input', function(e) {
 	e.prop('widget_type', {type: 'enum', enum_values: []})
 
 	e.create_editor = function(field, opt) {
-		return e.nav.create_editor(field, opt)
+		return e._nav.create_editor(field, opt)
 	}
+
+	e.enabled_on_readonly = true
 
 	function bind_field(on) {
 		if (on) {
@@ -3327,7 +3425,7 @@ component('x-input', 'Input', function(e) {
 				embedded: false,
 			}
 			each_widget_prop(function(k, v) { opt[k] = v })
-			e.widget = e.create_editor(e.field, opt)
+			e.widget = e.create_editor(e._field, opt)
 			e.set(e.widget)
 		} else {
 			if (e.widget) {
@@ -3342,7 +3440,7 @@ component('x-input', 'Input', function(e) {
 	e.set_widget_type = function(v) {
 		if (!e.initialized)
 			return
-		if (!e.field)
+		if (!e._field)
 			return
 		if (widget_type(v) == widget_type(e.widget_type))
 			return
@@ -3418,7 +3516,7 @@ component('x-form', 'Containers', function(e) {
 
 		for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart'))
 			if (ce.closest('x-form') == e) {
-				ce.nav = e.nav
+				ce.nav_id = e.nav_id
 				ce.style['grid-area'] = area_name(ce)
 			}
 

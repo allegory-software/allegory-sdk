@@ -450,8 +450,8 @@ component('x-enum-dropdown', function(e) {
 	e.val_col = 0
 
 	e.override('create_picker', function(inherited, opt) {
-		opt.item_field = e.field
-		opt.items = e.field.enum_values
+		opt.item_field = e._field
+		opt.items = e._field.enum_values
 		return inherited(opt)
 	})
 })

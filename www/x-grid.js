@@ -2682,7 +2682,7 @@ component('x-row-form', function(e) {
 	}
 
 	e.on('bind', function(on) {
-		bind_nav(e.nav, on)
+		bind_nav(e._nav, on)
 		document.on('layout_changed', redraw, on)
 	})
 
@@ -2693,12 +2693,12 @@ component('x-row-form', function(e) {
 		reset()
 	}
 
-	e.prop('nav', {private: true})
+	e.prop('nav'    , {private: true})
 	e.prop('nav_id' , {bind_id: 'nav', type: 'nav'})
 
 	function reset() {
-		e.rowset.fields = e.nav.all_fields_map
-		e.rowset.rows = [e.nav.focused_row]
+		e.rowset.fields = e._nav.all_fields_map
+		e.rowset.rows = [e._nav.focused_row]
 		e.reset()
 		e.row = e.all_rows[0]
 	}
@@ -2731,9 +2731,9 @@ component('x-row-form', function(e) {
 
 	e.on('cell_state_changed', function(row, field, changes) {
 		if (changes.input_val) {
-			let nav_row = e.nav.all_rows[e.row_index(row)]
-			let nav_field = e.nav.all_fields[e.field_index(field)]
-			e.nav.set_cell_val(nav_row, nav_field, changes.input_val[0])
+			let nav_row = e._nav.all_rows[e.row_index(row)]
+			let nav_field = e._nav.all_fields[e.field_index(field)]
+			e._nav.set_cell_val(nav_row, nav_field, changes.input_val[0])
 		}
 	})
 

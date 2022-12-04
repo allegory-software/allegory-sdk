@@ -11,6 +11,8 @@
 
 function init_xmodule(opt) {
 
+	opt = opt || {layers: []}
+
 	let xm = {}
 	xmodule = xm // singleton.
 

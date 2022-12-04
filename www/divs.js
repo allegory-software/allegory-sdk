@@ -18,10 +18,13 @@
 		init_components()
 
 	debugging:
+		e.debug()
 		e.debug_if()
 		e.debug_open_if()
 		e.debug_close_if()
-		e.debug_name()
+		e.trace()
+		e.trace_if()
+		e.debug_name
 		e.debug_anon_name()
 	element attribute manipulation:
 		e.hasattr(k)
@@ -48,10 +51,11 @@
 	dom tree querying:
 		iselem(v) -> t|f
 		isnode(v) -> t|f
-		e.$(sel) -> ea
-		$(sel) -> ea
-		E(sel|e)
-		ea.each(f)
+		e.$(sel) -> nlist
+		e.$1(sel|e) -> e
+		$(sel) -> nlist
+		$1(sel|e) -> e
+		nlist.each(f)
 		root, body, head
 	dom tree de/serialization:
 		e.html -> s
@@ -60,7 +64,7 @@
 	safe dom tree manipulation:
 		T[C](te[,whitespace]) where `te` is f|e|text_str
 		e.clone()
-		e.set(te[,whitespace])
+		e.set(te)
 		e.add(te1,...)
 		e.insert(i, te1,...)
 		e.replace([e0], te)
@@ -69,6 +73,7 @@
 		tag(s, [attrs], te1,...)
 		div(...)
 		span(...)
+		element(tag, options...)
 		[].join_nodes([separator])
 	element properties & methods:
 		e.property(name, [get],[set] | descriptor)
@@ -77,15 +82,14 @@
 		e.do_after(method, f)
 	components:
 		register_component(tag, initializer, [selector])
+		e.init_child_components()
+		e.initialized -> t|f
 		e.bind(t|f)
 		e.on_bind(f)
-		e.do_move()
-		e.init_child_components()
 		^e.bind(on)
 		^window.element_bind(e, on)
 		^window['ID.bind'](e, on)
 		e.bound -> t|f
-		e.parent_bound -> t|f
 	events:
 		broadcast (name, ...args)
 		^[right]click       (ev, nclicks, mx, my)
@@ -195,17 +199,18 @@ e.debug_anon_name = function() {  // stub
 	return this.tag
 }
 
-e.debug_name = function(suffix) {
-	suffix = catany('>', this.id || this.debug_anon_name(), suffix)
-	if (this.id) // enough context
+let debug_name = function(e, suffix) {
+	suffix = catany('>', e.id || e.debug_anon_name(), suffix)
+	if (e.id) // enough context
 		return suffix
-	if (!repl(this.parent, document))
+	if (!repl(e.parent, document))
 		return suffix
-	return this.parent.debug_name(suffix)
+	return debug_name(e.parent, suffix)
 }
+property(e, 'debug_name', function() { return debug_name(this) })
 
 e.debug = function(action, ...args) {
-	debug(debug_indent + (action || ''), this.debug_name(), ...args)
+	debug(debug_indent + (action || ''), this.debug_name, ...args)
 }
 
 e.debug_if = function(cond, ...args) {
@@ -222,6 +227,15 @@ e.debug_open_if = function(cond, ...args) {
 e.debug_close_if = function(cond) {
 	if (!cond) return
 	debug_indent = debug_indent.slice(2)
+}
+
+e.trace = function(...args) {
+	trace(this.debug_name, ...args)
+}
+
+e.trace_if = function(cond, ...args) {
+	if (!cond) return
+	trace(this.debug_name, ...args)
 }
 
 // element attribute manipulation --------------------------------------------
@@ -338,24 +352,25 @@ fontawesome_char = memoize(function(icon) {
 	return css_class_prop('.'+icon+'::before', 'content').slice(1, -1)
 })
 
-// dom tree navigation for elements, skipping text nodes ---------------------
+// dom tree navigation for elements, skipping over text nodes ----------------
 
 alias(Element, 'at'     , 'children')
 alias(Element, 'len'    , 'childElementCount')
-alias(Element, 'parent' , 'parentNode')
 alias(Element, 'first'  , 'firstElementChild')
 alias(Element, 'last'   , 'lastElementChild')
 alias(Element, 'next'   , 'nextElementSibling')
 alias(Element, 'prev'   , 'previousElementSibling')
 
-// dom tree navigation including text nodes ----------------------------------
-// also faster for when you know that you don't have text nodes!
+// dom tree navigation for nodes ---------------------------------------------
+// also faster for elements when you know that you don't have text nodes.
 
-alias(Element , 'nodes'      , 'childNodes')
-alias(Element , 'first_node' , 'firstChild')
-alias(Element , 'last_node'  , 'lastChild')
-alias(Element , 'next_node'  , 'nextSibling')
-alias(Element , 'prev_node'  , 'previousSibling')
+alias(Node, 'parent'     , 'parentNode')
+alias(Node, 'nodes'      , 'childNodes')
+alias(Node, 'first_node' , 'firstChild')
+alias(Node, 'last_node'  , 'lastChild')
+alias(Node, 'next_node'  , 'nextSibling')
+alias(Node, 'prev_node'  , 'previousSibling')
+
 alias(NodeList, 'len', 'length')
 
 // dom tree querying ---------------------------------------------------------
@@ -370,20 +385,17 @@ function $(s) { return document.querySelectorAll(s) }
 
 alias(Element         , '$1', 'querySelector')
 alias(DocumentFragment, '$1', 'querySelector')
-function $1(s) { return document.querySelector(s) }
+function $1(s) { return typeof s == 'string' ? document.querySelector(s) : s }
 
-function E(s) {
-	return typeof s == 'string' ? document.querySelector(s) : s
-}
-
-method(NodeList, 'each', function(f) {
-	Array.prototype.forEach.call(this, f)
-})
+method(NodeList, 'each', Array.prototype.forEach)
 
 property(NodeList, 'first', function() { return this[0] })
 property(NodeList, 'last' , function() { return this[this.length-1] })
 
 /* DOM manipulation with lifecycle management --------------------------------
+
+The DOM API works with strings, nodes, arrays of nodes and also functions
+that will be called to return those objects (we call those constructors).
 
 The "lifecycle management" part of this is basically poor man's web components.
 The reason we're reinventing web components is because the actual web components
@@ -391,8 +403,8 @@ API built into the browser is unusable. Needless to say, all DOM manipulation
 needs to be done through this API exclusively for components to work.
 
 Components can be either attached to the DOM (bound) or not. When bound they
-become alive, when unbound they die and must uninstall any event handlers
-they installed in document, window or other components.
+become alive, when unbound they die and must remove all event handlers that
+they registered in document, window or other external components.
 
 When a component is initialized, its parents are only partially initialized
 so take that into account if you mess with them at that stage.
@@ -400,14 +412,15 @@ so take that into account if you mess with them at that stage.
 When a component is bound, its parents are already bound and its children unbound.
 When a component is unbound, its children are still bound and its parents unbound.
 
-Adding children to an unbound compnent (eg. in its init function) does not
-bind them immediately, even if the component is actually connected to the DOM.
+Moving bound elements to an unbound tree will unbind them.
+Adding unbound elements to the bound tree will bind them.
+Moving elements around in the bound tree will *not* rebind them.
 
 */
 
-{
 let component_init = obj() // {tag->init}
 let component_selector = obj() // {tag->selector}
+
 function register_component(tag, init, selector) {
 	let tagName = tag.upper()
 	selector = selector || tagName
@@ -415,32 +428,47 @@ function register_component(tag, init, selector) {
 	component_selector[tagName] = selector
 }
 
-method(Element, 'init_component', function() {
+// NOT for users to call!
+method(Element, 'init_component', function(...args) {
+	if (this.initialized)
+		return
 	let tagName = this.tagName
 	let init = component_init[tagName]
 	let sel = component_selector[tagName]
-	if (init && (sel == tagName || this.matches(sel)))
-		init(this)
-	else
+	if (init && (sel == tagName || this.matches(sel))) {
+		init(this, ...args)
+		this.initialized = true
+	} else {
 		this.init_child_components()
+	}
 })
 
 // the component is responsible for calling init_child_components()
-// in its constructor if it knows it can have components as children.
+// in its initializer if it knows it can have components as children.
 method(Element, 'init_child_components', function() {
 	if (this.len)
 		for (let ce of this.children)
 			ce.init_component()
 })
-}
 
-property(Element, 'parent_bound', {
+// NOT for users to call!
+property(Element, 'bound', {
 	get: function() {
+		if (this._bound != null)
+			return this._bound
 		let p = this.parent
-		return this.isConnected && (p == document || p.bound != null || p.parent_bound)
+		if (!p)
+			return false
+		if (p == document)
+			return true
+		return p.bound
+	},
+	set: function(bound) {
+		this._bound = bound
 	}
 })
 
+// NOT for users to call!
 method(Element, 'bind_children', function bind_children(on) {
 	if (!this.len)
 		return
@@ -449,63 +477,64 @@ method(Element, 'bind_children', function bind_children(on) {
 		ce.bind(on)
 })
 
+// NOT for users to call!
 method(Element, 'bind', function bind(on) {
 	assert(isbool(on))
-	if (this.bound != null) { // any tag that called on('bind') or on_bind()
-		if (this.bound == on)
+	if (this._bound != null) { // any tag that called on('bind') or on_bind()
+		if (this._bound == on)
 			return
-		this.bound = on
+		this._bound = on
 		this.do_bind(on)
 	}
-	// bind children after they parent is bound to allow components to remove
+	// bind children after their parent is bound to allow components to remove
 	// their children inside the bind event handler before them getting bound,
 	// and also so that children see a bound parent when they are getting bound.
 	this.bind_children(on)
 })
 
 method(Element, 'on_bind', function(f) {
-	this.bound = this.bound || false
+	this._bound = this._bound || false
 	this.do_after('do_bind', f)
 })
 
-// create a text node from a string, quoting it automatically, with wrapping control.
-// can also take a constructor or an existing node as argument.
+// create a text node from a stringable. calls a constructor first.
+// wraps the node in a span if wrapping control is specified.
+// elements and nulls pass-through regardless of wrapping control.
+// TODO: remove this!
 function T(s, whitespace) {
-	if (typeof s == 'function')
+	if (isfunc(s)) // constructor
 		s = s()
-	if (isnode(s))
+	if (s == null || iselem(s)) // pass-through
 		return s
-	else if (whitespace) {
-		let e = document.createElement('span')
-		e.style['white-space'] = whitespace
-		e.textContent = s
-		return e
-	} else
-		return document.createTextNode(s)
+	// node or string or stringable: pass-through or create node.
+	s = isnode(s) ? s : document.createTextNode(s)
+	if (whitespace) // wrap in span to set whitespace
+		s = document.createElement('span').set(s, whitespace)
+	return s
 }
 
 // like T() but clones nodes instead of passing them through.
+// TODO: remove this!
 function TC(s, whitespace) {
 	if (typeof s == 'function')
 		s = s()
 	if (isnode(s))
-		return s.clone()
-	else
-		return T(s, whitespace)
+		s = s.clone()
+	return T(s, whitespace)
 }
 
 // create a html element or text node from a html string.
-// if the string contains more than one element or text node, wrap them in a span.
+// if the string contains more than one node, return an array of nodes.
 function unsafe_html(s) {
-	if (typeof s != 'string') // pass-through nulls and elements
+	if (typeof s != 'string') // pass-through: nulls, elements, etc.
 		return s
 	let span = document.createElement('span')
 	span.unsafe_html = s.trim()
-	return span.childNodes.length > 1 ? span : span.firstChild
+	return span.childNodes.length > 1 ? [...span.nodes] : span.firstChild
 }
 
 function sanitize_html(s) {
-	if (typeof s != 'string') // pass-through nulls and elements
+	if (typeof s != 'string') // pass-through: nulls, elements, etc.
 		return s
 	assert(DOMPurify.isSupported)
 	return DOMPurify.sanitize(s)
@@ -516,17 +545,33 @@ function html(s) {
 }
 
 // create a HTML element from an attribute map and a list of child nodes.
+// skips nulls, calls constructors, expands arrays.
 function tag(tag, attrs, ...children) {
 	let e = document.createElement(tag)
-	e.init_component()
 	e.attrs = attrs
-	if (children)
-		e.add(...children)
+	for (let s of children) {
+		if (isfunc(s))
+			s = s()
+		if (s == null)
+			continue
+		if (isarray(s))
+			for (let cs of s)
+				e.append(cs)
+		else
+			e.append(s)
+	}
+	e.init_component()
 	return e
 }
 
 div  = (...a) => tag('div' , ...a)
 span = (...a) => tag('span', ...a)
+
+function element(tag, ...args) {
+	let e = document.createElement(tag)
+	e.init_component(...args)
+	return e
+}
 
 Array.prototype.join_nodes = function(sep, parent_node) {
 
@@ -548,8 +593,28 @@ Array.prototype.join_nodes = function(sep, parent_node) {
 	return parent_node
 }
 
+// NOTE: you can end up with duplicate ids after this!
 method(Node, 'clone', function() {
-	return this.cloneNode(true)
+	let cloned = this.cloneNode(true)
+	cloned.init_component()
+	return cloned
+})
+
+alias(Element, 'as_html', 'outerHTML')
+
+property(Element, 'unsafe_html', {
+	set: function(s) {
+		let _bound = this._bound
+		let bound = this.bound
+		if (bound)
+			this.bind_children(false)
+		this.innerHTML = s
+		this._bound = false // prevent bind in init for children.
+		this.init_child_components()
+		this._bound = _bound
+		if (bound)
+			this.bind_children(true)
+	},
 })
 
 property(Element, 'html', {
@@ -561,73 +626,99 @@ property(Element, 'html', {
 	}
 })
 
-property(Element, 'unsafe_html', {
-	set: function(s) {
-		let bound = this.bound
-		if (bound || bound == null)
-			this.bind_children(false)
-		this.innerHTML = s
-		this.bound = false // prevent bind in init for children.
-		this.init_child_components()
-		this.bound = bound
-		if (this.parent_bound)
-			this.bind_children(true)
-	},
-})
-
 method(Element, 'clear', function() {
 	this.unsafe_html = null
 	return this
 })
 
-method(Element, 'set', function E_set(s, whitespace) {
-	if (typeof s == 'function')
+// set element contents to: text, node, null.
+// calls constructors, expands arrays.
+method(Element, 'set', function E_set(s) {
+	if (isfunc(s)) // constructor
 		s = s()
-	if (isnode(s)) {
-		if (this.nodes.length == 1 && this.nodes[0] == s)
-			return this
-		if (iselem(s) && s.parent_bound)
-			s.bind(false)
+	if (s == null) {
 		this.clear()
-		this.append(s)
-		if (iselem(s) && this.parent_bound)
-			s.bind(true)
-	} else {
+	} else if (isnode(s)) { // s->[..s?..]
+		if (s.parent == this) {
+			if (this.nodes.length == 1) // s->[s]
+				return this
+			for (let node of this.nodes) // s->[..s..]
+				if (node != s)
+					node.remove()
+		} else { // s->[...]
+			this.clear()
+			this.add(s)
+		}
+	} else if (isarray(s)) { // [..]->[..], diff it
+		if (!this.bound) {
+			for (let s1 of s)
+				if (s1 != null)
+					s1.bind(false)
+			this.innerHTML = null
+			for (let s1 of s)
+				if (s1 != null)
+					this.append(s1)
+		} else {
+			// unbind nodes that are not in the new list.
+			for (let node of this.nodes)
+				if (s.indexOf(node) == -1)
+					node.bind(false)
+			this.innerHTML = null
+			for (let s1 of s)
+				if (s1 != null)
+					this.append(s1)
+			// bind any unbound new elements.
+			this.bind_children(true)
+		}
+	} else { // string or stringable: set as text.
+		this.clear() // unbind children
 		this.textContent = s
-		if (whitespace)
-			this.style['white-space'] = whitespace
 	}
 	return this
 })
 
+// append nodes to an element.
+// skips nulls, calls constructors, expands arrays.
 method(Element, 'add', function E_add(...args) {
-	for (let s of args)
-		if (s != null) {
-			s = T(s)
-			if (iselem(s) && s.parent_bound)
-				s.bind(false)
-			this.append(s)
-			if (iselem(s)) {
-				if (this.parent_bound)
-					s.bind(true)
-			}
+	for (let s of args) {
+		if (isfunc(s)) // constructor
+			s = s()
+		if (s == null)
+			continue
+		if (isarray(s)) {
+			this.add(...s)
+			continue
 		}
+		let bind = iselem(s) ? this.bound : null
+		if (bind == false)
+			s.bind(false)
+		this.append(s)
+		if (bind == true)
+			s.bind(true)
+	}
 	return this
 })
 
+// insert nodes into an element at a position.
+// skips nulls, calls constructors, expands arrays.
 method(Element, 'insert', function E_insert(i0, ...args) {
+	i0 = max(0, or(i0, 1/0))
 	for (let i = args.length-1; i >= 0; i--) {
 		let s = args[i]
-		if (s != null) {
-			s = T(s)
-			if (iselem(s) && s.parent_bound)
-				s.bind(false)
-			this.insertBefore(s, this.at[max(0, or(i0, 1/0))])
-			if (iselem(s)) {
-				if (this.parent_bound)
-					s.bind(true)
-			}
+		if (isfunc(s))
+			s = s()
+		if (s == null)
+			continue
+		if (isarray(s)) {
+			this.insert(i0, ...s)
+			continue
 		}
+		let bind = iselem(s) ? this.bound : null
+		if (bind == false)
+			s.bind(false)
+		this.insertBefore(s, this.at[i0])
+		if (bind == true)
+			s.bind(true)
 	}
 	return this
 })
@@ -638,39 +729,41 @@ override(Element, 'remove', function E_remove(inherited) {
 	return this
 })
 
+// replace child node with: text, node, null (or a constructor returning those).
+// if the node to be replaced is null, the new node is appended instead.
+// if the new node is null, the old node is removed.
 method(Element, 'replace', function E_replace(e0, s) {
+	if (isfunc(s))
+		s = s()
 	s = T(s)
 	if (e0 != null) {
+		assert(e0.parent == this)
 		if (s === e0)
 			return this
+		if (s == null) {
+			e0.remove()
+			return this
+		}
 		if (iselem(e0))
 			e0.bind(false)
+		let bind = iselem(s) ? this.bound : null
+		if (bind == false)
+			s.bind(false)
 		this.replaceChild(s, e0)
-	} else {
+		if (bind == true)
+			s.bind(true)
+	} else if (s != null) {
+		let bind = iselem(s) ? this.bound : null
+		if (bind == false)
+			s.bind(false)
 		this.appendChild(s)
+		if (bind == true)
+			s.bind(true)
 	}
-	if (iselem(s) && this.parent_bound)
-		s.bind(true)
 	return this
 })
 
-// move element to a new parent and/or index without rebinding, unless
-// the component requires rebinding by returning false from `.do_move()`.
-method(Element, 'move', function E_move(pe, i) {
-	assert(this.parent_bound)
-	pe = pe || this.parent
-	let must_unbind = this.do_move && !this.do_move(pe, i)
-	if (must_unbind)
-		this.bind(false)
-	if (pe == this.parent) // change index preserving current scroll.
-		this.index == or(i, 1/0)
-	else // change parent and index.
-		pe.insertBefore(this, pe.at[max(0, or(i, 1/0))])
-	if (must_unbind)
-		this.bind(true)
-})
-
-{
+// move an element into a new position in its parent preserving the scroll position.
 let indexOf = Array.prototype.indexOf
 property(Element, 'index', {
 	get: function() {
@@ -683,7 +776,6 @@ property(Element, 'index', {
 		this.scroll(sx, sy)
 	}
 })
-}
 
 // util to convert an array to a html bullet list.
 {
@@ -736,7 +828,7 @@ let installers = on.installers
 let callers = on.callers
 
 installers.bind = function() {
-	this.bound = this.bound || false
+	this._bound = this._bound || false
 }
 
 let resize_observer = new ResizeObserver(function(entries) {
@@ -764,7 +856,7 @@ installers.resize = function() {
 		}
 	}
 	this.on_bind(bind)
-	if (this.parent_bound)
+	if (this.bound)
 		bind.call(this, true)
 }
 
@@ -796,7 +888,7 @@ installers.attr_changed = function() {
 		}
 	}
 	this.on_bind(bind)
-	if (this.parent_bound)
+	if (this.bound)
 		bind.call(this, true)
 }
 
@@ -2202,7 +2294,7 @@ e.do_bind = function(on) {
 			let t1 = time()
 			let dt = (t1 - t0) * 1000
 			if (dt >= SLOW_BIND_TIME_MS)
-				debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name())
+				debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name)
 		}
 		e.update()
 		e.debug_close_if(DEBUG_BIND)

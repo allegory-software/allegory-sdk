@@ -80,8 +80,9 @@ field attributes:
 		from_text      : f(s) -> v
 		to_text        : f(v) -> s
 
-		enum_values    : enum type: [v1, ...]
-		enum_texts     : enum type: [t1, ...]
+		enum_values    : enum type: 'v1 ...' | ['v1', ...]
+		enum_texts     : enum type: {v->text}
+		enum_info      : enum type: {v->info}
 
 	validation:
 		not_null       : don't allow null (false).
@@ -572,7 +573,7 @@ function nav_widget(e) {
 
 	e.prop('exit_edit_on_lost_focus' , {type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
 	e.prop('save_row_states'         , {type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
-	e.prop('action_band_visible'     , {type: 'enum', enum_values: ['auto', 'always', 'no'], default: 'auto', attr: true, slot: 'user'})
+	e.prop('action_band_visible'     , {type: 'enum', enum_values: 'auto always no', default: 'auto', attr: true, slot: 'user'})
 
 	e.debug_anon_name = () => catany('', e.type, catall(':', e.rowset_name))
 
@@ -658,9 +659,9 @@ function nav_widget(e) {
 
 	let fld = function(col) {
 		if (isstr(col))
-			return assert(e.all_fields_map[col], '{0} has no col: {1}', e.debug_name(), col)
+			return assert(e.all_fields_map[col], '{0} has no col: {1}', e.debug_name, col)
 		else if (isnum(col))
-			return assert(e.all_fields[col], '{0} has no col: {1}', e.debug_name(), col)
+			return assert(e.all_fields[col], '{0} has no col: {1}', e.debug_name, col)
 		else
 			return col
 	}
@@ -1777,7 +1778,7 @@ function nav_widget(e) {
 		let must_not_move_row = !e.auto_focus_first_cell
 		let ri, unfocus_if_not_found
 		if (how == 'val') {
-			if (e.val_field && e.nav && e.field) {
+			if (e.val_field && e._nav && e._field) {
 				ri = e.row_index(e.lookup(e.val_col, [e.input_val])[0])
 				unfocus_if_not_found = true
 			} else if (fs.pk_vals) {
@@ -3006,7 +3007,7 @@ function nav_widget(e) {
 		skip.add(e)
 		// skip others with same nav or same edit group
 		for (let ce of all_widgets) {
-			if (e.nav && ce.nav == e)
+			if (e._nav && ce._nav == e)
 				skip.add(ce)
 			if (e.edit_group && ce.edit_group == e.edit_group)
 				skip.add(ce)
@@ -5345,6 +5346,14 @@ function nav_dropdown_widget(e) {
 		let s = this.enum_texts ? this.enum_texts[v] : undefined
 		return s !== undefined ? s : v
 	}
+
+	enm.validator_enum = field => ({
+		validate : v => v == null
+			|| !field.enum_values
+			|| !!words(field.enum_values).tokeys()[v],
+		message  : S('validation_enum',
+			'Value must be in the list of allowed values.'),
+	})
 
 	// tag lists
 

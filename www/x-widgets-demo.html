@@ -13,6 +13,7 @@
 <script src="x-listbox.js"></script>
 <script src="x-grid.js"></script>
 <script src="x-chart.js"></script>
+<script src="x-module.js"></script>
 <script src="ace/ace.js"></script>
 
 <link rel="stylesheet" type="text/css" href="fontawesome.css">
@@ -122,6 +123,15 @@ file from any CDN like githack.com.
 
 <body>
 
+<script>
+
+on_dom_load(function() {
+	init_xmodule()
+	init_components()
+})
+
+</script>
+
 <div id=layout>
 	<div id=demo_list></div>
 	<div id=code_split>
@@ -155,22 +165,22 @@ main.add(
 	button({
 		text: 'Click me!',
 		primary: true,
-		action: function() { pr('clicked', this.debug_name()) },
+		action: function() { pr('clicked', this.debug_name) },
 	}),
 	button({
 		text: html('Click&nbsp;<i>me</i>&nbsp;too!'),
 		icon: 'fa fa-biohazard',
-		action: function() { pr('clicked', this.debug_name()) },
+		action: function() { pr('clicked', this.debug_name) },
 	}),
 	button({
 		text: html('Multiline text<br>works too!'),
 		icon: 'fa fa-folder-open',
-		action: function() { pr('clicked', this.debug_name()) },
+		action: function() { pr('clicked', this.debug_name) },
 	})
 )
 
 function wasup_button_action() {
-	pr('clicked', this.debug_name())
+	pr('clicked', this.debug_name)
 }
 
 </script>
@@ -179,6 +189,7 @@ function wasup_button_action() {
 <!--------------------------------------------------------------------------->
 
 <template id=checkbox_demo>
+<x-checkbox></x-checkbox>
 <div id=main></div>
 <script run>
 
@@ -215,35 +226,61 @@ main.add(c2)
 <!--------------------------------------------------------------------------->
 
 <template id=radiogroup_demo>
+<div class="x-linear-form">
+	<x-radiogroup id=r1 val=1>
+		<info>Info box, can put any HTML in here.<br>But it will be gray and small.</info>
+		<div val=1>Choose me!</div>
+		<div val=2>Me, me<br>me, me, me!</div>
+	</x-radiogroup>
+</div>
 <div id=main></div>
 <script run>
 
-main.add(
-	radiogroup({
-		items: [
-			'Option 1',
-			'Option 2',
-			html('Option 3<br>Multiple lines'),
-		],
-		field: {},
-		val: 1,
-	}),
-	radiogroup({
-		align: 'right',
-		items: [
-			'Option 1',
-			'Option 2',
-			html('Option 3<br>Multiple lines long text'),
-		],
-		val: 1/0,
-		field: {
-			validate: function(v) {
-				return v >= 0 && v < 3 || 'Selected option out of range'
-			},
+main.add(radiogroup({
+	val: 'b',
+	field: {
+		type: 'enum',
+		enum_values: 'a b c',
+		enum_texts: {
+			a: 'Option a',
+			b: 'Option b',
+			c: 'Option c',
 		},
-	})
-)
+	}
+}))
 
+main.add(radiogroup({
+	items: [
+		unsafe_html('<div val=option_1>Option 1</div>'),
+		div({val: 'option_2'}, 'Option 2'),
+		div({val: 'option_3'}, T('Option 3\nMultiple lines', 'pre-line')),
+	],
+	val: 'wrong_option',
+	field: {type: 'enum', enum_values: 'option_1 option_2 option_3'},
+}))
+
+main.add(radiogroup({
+	align: 'right',
+	items: [
+		unsafe_html(`
+			<div val=1>
+				Option 1
+				<info>So this is the first option and it ain\'t good</info>
+			</div>
+		`),
+		unsafe_html('<div val=2>Option 2<info>This one is better</info></div>'),
+		unsafe_html('<div val=3>Option 3<br>Multiple lines long text</div>'),
+	],
+	val: 3,
+	field: {
+		type: 'number',
+		info: T('There you go, some info on the whole thing.\nDon\'t lose it!', 'pre-line'),
+		validator_good: field => ({
+			validate: v => v != 1,
+			message: 'Told you it wasn\'t good',
+		}),
+	},
+}))
 
 </script>
 </template>
@@ -333,6 +370,15 @@ win = dialog({
 main.add(button({
 	text: 'Click for modal',
 	action: function() {
+		win.cancelable = true
+		win.modal()
+	}
+}))
+
+main.add(button({
+	text: 'Modal that you can\'t close',
+	action: function() {
+		win.cancelable = false
 		win.modal()
 	}
 }))

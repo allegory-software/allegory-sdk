@@ -74,6 +74,7 @@ ARRAYS
 	empty_array
 	a.set(a1) -> s
 	a.extend(a1)
+	a.copy() -> a1
 	a.insert(i, v)
 	a.remove(i) -> v
 	a.remove_value(v) -> i
