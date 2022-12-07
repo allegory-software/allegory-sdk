@@ -595,6 +595,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-tooltip.visible[side=top]    { animation-name: x-tooltip-top; }
 .x-tooltip.visible[side=bottom] { animation-name: x-tooltip-bottom; }
 
+.x-tooltip.remove {
+	opacity: .5;
+	transition: opacity 1s;
+}
+
 .x-tooltip-content {
 	/* layouting */
 	display: inline-block; /* shrink-wrap and also word-wrap when reaching container width */
@@ -2399,11 +2404,6 @@ x-tabs-fixed-header {
 .x-toaster-message {
 	opacity: 1;
 	transition: opacity .2s, top .2s;
-}
-
-.x-toaster-message.remove {
-	opacity: 0;
-	transition: opacity .2s;
 }
 
 /* dialog ----------------------------------------------------------------- */

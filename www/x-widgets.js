@@ -965,12 +965,17 @@ component('x-tooltip', function(e) {
 		e.attr('align', align)
 	}
 
-	e.close = function() {
+	e.close = function(delay) {
 		if (e.fire('close')) {
-			e.class('remove')
-			runafter(.2, function() {
+			if (1 || delay) {
+				e.class('visible')
+				e.class('remove')
+				runafter(10, function() {
+					pr('REMOVE')
+					e.remove()
+				})
+			} else
 				e.remove()
-			})
 			return true
 		}
 		return false
@@ -1003,15 +1008,18 @@ component('x-tooltip', function(e) {
 			reset_timeout_timer()
 		if (e.parent)
 			last_popup_time = time()
-		if (opt.text)
-			e.content.set(opt.text, 'pre-wrap')
+		if (opt.text) {
+			e.content.set(opt.text)
+		}
 	})
 
 	e.set_text = function(s) {
 		e.update({text: s, reset_timer: true})
 	}
 
-	let close_timer = timer(close)
+	function delayed_close() { e.close(.2) }
+
+	let close_timer = timer(delayed_close)
 	function reset_timeout_timer() {
 		let t = e.timeout
 		if (t == 'auto')
@@ -1136,6 +1144,7 @@ component('x-toaster', function(e) {
 	e.on_position(function() {
 		for (let t of e.tooltips) {
 			t.popup_y1 = t._y
+			t.do_measure()
 			t.do_position() // it being our child it's ok to force it.
 		}
 	})

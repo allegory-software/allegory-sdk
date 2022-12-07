@@ -838,7 +838,7 @@ component('x-chart', 'Input', function(e) {
 	}
 
 	e.prop('nav', {private: true})
-	e.prop('nav_id', {bind_id: 'nav', type: 'nav'})
+	e.prop('nav_id', {bind_id: 'nav', type: 'nav', attr: 'nav'})
 
 })
 

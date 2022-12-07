@@ -30,12 +30,12 @@
 		e.hasattr(k)
 		e.attr(k[, v]) -> v
 		e.bool_attr(k[, v]) -> v
-		e.closest_attr(k)
+		e.closest_attr(k) -> v
 		e.attrs = {k: v}
 		e.tag
 	element css class list manipulation:
-		e.class('k1 ...'[, enable])
 		e.hasclass(k)
+		e.class('k1 ...'[, enable])
 		e.switch_class(k1, k2, normal)
 		e.classess = 'k1 k2 ...'
 	access to element computed styles:
@@ -43,9 +43,11 @@
 	css querying:
 		css_class_prop(class, prop) -> v
 		fontawesome_char(name) -> s
+	dom tree navigation including text nodes:
+		n.nodes -> nlist, n.nodes[i], n.nodes.len, n.parent
+		n.first_node, n.last_node, n.next_node, n.prev_node
 	dom tree navigation excluding text nodes:
-		e.at[i], e.len, e.at.length
-		e.parent
+		e.at[i], e.len, e.at.length, e.parent
 		e.index
 		e.first, e.last, e.next, e.prev
 	dom tree querying:
@@ -493,7 +495,8 @@ method(Element, 'bind', function bind(on) {
 })
 
 method(Element, 'on_bind', function(f) {
-	this._bound = this._bound || false
+	if (this._bound == null)
+		this._bound = this.bound
 	this.do_after('do_bind', f)
 })
 
@@ -652,7 +655,7 @@ method(Element, 'set', function E_set(s) {
 	} else if (isarray(s)) { // [..]->[..], diff it
 		if (!this.bound) {
 			for (let s1 of s)
-				if (s1 != null)
+				if (iselem(s1))
 					s1.bind(false)
 			this.innerHTML = null
 			for (let s1 of s)
@@ -661,7 +664,7 @@ method(Element, 'set', function E_set(s) {
 		} else {
 			// unbind nodes that are not in the new list.
 			for (let node of this.nodes)
-				if (s.indexOf(node) == -1)
+				if (iselem(node) && s.indexOf(node) == -1)
 					node.bind(false)
 			this.innerHTML = null
 			for (let s1 of s)
@@ -828,7 +831,8 @@ let installers = on.installers
 let callers = on.callers
 
 installers.bind = function() {
-	this._bound = this._bound || false
+	if (this._bound == null)
+		this._bound = this.bound
 }
 
 let resize_observer = new ResizeObserver(function(entries) {

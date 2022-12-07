@@ -2694,7 +2694,7 @@ component('x-row-form', function(e) {
 	}
 
 	e.prop('nav'    , {private: true})
-	e.prop('nav_id' , {bind_id: 'nav', type: 'nav'})
+	e.prop('nav_id' , {bind_id: 'nav', type: 'nav', attr: 'nav'})
 
 	function reset() {
 		e.rowset.fields = e._nav.all_fields_map

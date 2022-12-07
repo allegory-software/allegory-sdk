@@ -57,9 +57,9 @@ function row_widget(e, enabled_without_nav) {
 		let row = e.row
 		e.xoff()
 		e.readonly = e._nav && !e._nav.can_change_val(row)
+		e.xon()
 		e.disable('readonly', e.readonly && !e.enabled_on_readonly)
 		e.disable('no_row', !(enabled_without_nav || e.row))
-		e.xon()
 		e.do_update_row(row)
 	}
 
@@ -67,10 +67,8 @@ function row_widget(e, enabled_without_nav) {
 		e.update()
 	}
 
-	function bind_nav(on) {
+	function bind_ext_nav(on) {
 		let nav = e._nav
-		if (!nav)
-			return
 		nav.on('focused_row_changed', row_changed, on)
 		nav.on('focused_row_state_changed', row_changed, on)
 		nav.on('focused_row_cell_state_changed', row_changed, on)
@@ -81,24 +79,24 @@ function row_widget(e, enabled_without_nav) {
 		e.fire('bind_nav', on)
 	}
 
-	function bind_row_widget(on) {
-		if (!on) {
-			bind_nav(false)
+	function bind_nav(on) {
+		if (!on && e._nav) {
+			bind_ext_nav(false)
 			e._nav = null
-		} else if (!e._nav) {
-			assert(!e._nav)
+		} else if (on && !e._nav) {
 			e._nav = e.nav || e._nav_id_nav || null
-			bind_nav(true)
+			if (e._nav)
+				bind_ext_nav(true)
 		}
 	}
 
-	e.on_bind(bind_row_widget)
+	e.on_bind(bind_nav)
 
 	function nav_changed() {
 		if (!e.bound)
 			return
-		bind_row_widget(false)
-		bind_row_widget(true)
+		bind_nav(false)
+		bind_nav(true)
 	}
 
 	e.set_nav = nav_changed
@@ -111,7 +109,7 @@ function row_widget(e, enabled_without_nav) {
 	e.property('row', () => e._nav && e._nav.focused_row)
 
 	e.val = function(col) {
-		return e.nav && e._nav.cell_val(e.row, col)
+		return e._nav && e._nav.cell_val(e.row, col)
 	}
 
 }
@@ -203,6 +201,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	}
 
 	function bind_global_nav(on) {
+		// e.debug('BGN', e.col)
 		let nav = e._nav
 		let col = e._col
 		nav.on('focused_row_cell_state_changed_for_'+col, cell_state_changed, on)
@@ -210,7 +209,27 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	}
 
 	function bind_nav(on) {
-		if (!on) {
+		if (on) {
+			if (!e._nav) {
+				let nav = e.nav || e._nav_id_nav || null
+				if (e.col != null) { // nav-bound
+					if (nav) {
+						e._nav = nav
+						e._col = e.col
+						bind_ext_nav(true)
+						bind_ext_field(true)
+					}
+				} else { // standalone
+					e._nav = global_val_nav()
+					let field_opt = assign_opt({owner: e}, e.field_options, e.field)
+					e._field = e._nav.add_field(field_opt)
+					e._col = e._field.name
+					bind_global_nav(true)
+					if (initial_val !== undefined)
+						e._nav.set_cell_val(e._nav.all_rows[0], e._field, initial_val)
+				}
+			}
+		} else {
 			if (e._nav) {
 				if (e._nav != global_val_nav()) { // nav-bound
 					bind_ext_nav(false)
@@ -222,24 +241,6 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 				e._nav = null
 				e._field = null
 				e._col = null
-			}
-		} else {
-			if (!e._nav) {
-				let nav = e.nav || e._nav_id_nav || null
-				if (nav && e.col != null) { // nav-bound
-					e._nav = nav
-					e._col = e.col
-					bind_ext_nav(true)
-					bind_ext_field(true)
-				} else { // standalone
-					e._nav = global_val_nav()
-					let field_opt = assign_opt({owner: e}, e.field_options, e.field)
-					e._field = e._nav.add_field(field_opt)
-					e._col = e._field.name
-					bind_global_nav(true)
-					if (initial_val !== undefined)
-						e._nav.set_cell_val(e._nav.all_rows[0], e._field, initial_val)
-				}
 			}
 		}
 	}
@@ -253,6 +254,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		bind_nav(true)
 	}
 
+	e.set_col = nav_changed
+	e.prop('col', {type: 'col', col_nav: () => e.nav})
+
 	e.set_nav = nav_changed
 	e.prop('nav', {private: true})
 
@@ -260,10 +264,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	e.prop('_nav_id_nav', {private: true})
 	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
 
-	e.set_col = nav_changed
-	e.prop('col', {type: 'col', col_nav: () => e.nav})
-
-	// field options for own field in global nav.
+	// field options for standalone mode (own field in global nav).
 	e.set_field = nav_changed
 	e.prop('field', {private: true})
 
@@ -978,7 +979,7 @@ component('x-radiogroup', 'Input', function(e) {
 	function find_item(val) {
 		if (!e._field)
 			return
-		for (let item of e._items) {
+		for (let item of e.items) {
 			if (item_val(item) === val)
 				return item
 		}
@@ -1047,11 +1048,10 @@ component('x-radiogroup', 'Input', function(e) {
 			}
 	})
 
-	e.prop('_items', {convert: diff_items, serialize: e.serialize_items, default: []})
-
-	e.set_items = function(items) {
-		e._items = items
-	}
+	// e.prop('_items', {convert: diff_items, serialize: e.serialize_items, default: []})
+	// e.set_items = function(items) {
+	// 	e._items = items
+	// }
 
 	return {items: html_items, info: html_info}
 })
@@ -3492,34 +3492,39 @@ component('x-form', 'Containers', function(e) {
 
 	e.init_child_components()
 
-	let names = {}
+	let names // {name->true}
 	function area_name(item) {
 		let s = item.style['grid-area'] || item.attr('area')
-		if (!s) {
-			s = item.col || item.attr('col')
-			if (item.tag == 'x-label')
-				s = s + '_label'
-		}
+		if (s)
+			return s
+		// make-up a name based on col names.
+		s = item.col || item.attr('col')
+		if (item.tag == 'x-label')
+			s = s + '_label'
 		if (!s)
 			s = item.id
 		if (!s)
 			return ''
-		if (names[s]) {
-			let x = num(names[s][2]) || 1
-			do { s = s.slice(0, 2) + (x + 1) } while (names[s])
+		let i = 1
+		while (names[s]) {
+			s = s.replace(/\d+$/, '') + i
+			i++
+			pr(s)
 		}
 		names[s] = true
 		return s
 	}
 
 	e.do_update = function(opt) {
-
-		for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart'))
-			if (ce.closest('x-form') == e) {
-				ce.nav_id = e.nav_id
-				ce.style['grid-area'] = area_name(ce)
+		if (opt.nav) {
+			names = obj()
+			for (let ce of e.$('.x-input-widget, .x-input, .x-label, .x-chart')) {
+				if (ce.closest('x-form') == e) {
+					ce.nav = e._nav
+					ce.style['grid-area'] = area_name(ce)
+				}
 			}
-
+		}
 	}
 
 	e.on('resize', function(r) {
@@ -3531,21 +3536,31 @@ component('x-form', 'Containers', function(e) {
 		e.class('compact', r.w < 200)
 	})
 
-	e.on('bind', function(on) {
-		if (on) {
-			e.fire('resize', e.rect())
-			e.update()
+	function bind_nav(on) {
+		if (!on && e._nav) {
+			e._nav = null
+			e.update({nav: true})
+		} else if (on && !e._nav) {
+			e._nav = e.nav || e._nav_id_nav || null
+			e.update({nav: true})
 		}
-	})
-
-	function update_nav() {
-		e.update()
 	}
 
-	e.set_nav = update_nav
+	e.on_bind(bind_nav)
 
-	e.prop('nav'   , {private: true})
-	e.prop('nav_id', {bind_id: 'nav', type: 'nav', attr: 'nav'})
+	function nav_changed() {
+		if (!e.bound)
+			return
+		bind_nav(false)
+		bind_nav(true)
+	}
+
+	e.set_nav = nav_changed
+	e.prop('nav', {private: true})
+
+	e.set__nav_id_nav = nav_changed
+	e.prop('_nav_id_nav', {private: true})
+	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
 
 	// clicking on blank areas of the form focuses the last focused input element.
 	let last_focused_input
