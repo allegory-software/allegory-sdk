@@ -27,8 +27,8 @@
 	Field attributes sent to client:
 		name             : 'col'         name for use in code
 		type             : 'number'|...  client-side type
-		text             : 'Foo Bar'     input-box label / grid column header
-		hint             : '...'         tooltip
+		label            : 'Foo Bar'     input-box label / grid column label
+		info             : '...'         input-box info / grid column info
 		default          : val           default value (if it's a constant)
 		internal         : t             cannot be made visible
 		hidden           : t             not visible by default
@@ -105,7 +105,7 @@ end
 
 local client_field_attrs = {
 	internal=1, hidden=1, readonly=1, null_text=1,
-	name=1, type=1, text=1, hint=1, default=1, client_default=1, align=1,
+	name=1, type=1, label=1, info=1, default=1, client_default=1, align=1,
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, display_width=1,
@@ -456,7 +456,7 @@ function virtual_rowset(init, ...)
 			local dt   = wb:add_format({num_format = country('date_format')..' hh:mm'})
 			local dts  = wb:add_format({num_format = country('date_format')..' hh:mm:ss'})
 			for i,field in ipairs(rs.fields) do
-				ws:write(0, i-1, field.text or capitalize(field.name), bold)
+				ws:write(0, i-1, field.label or capitalize(field.name), bold)
 				local w = field.display_width
 				w = field.hidden and 1 or w and min(32, w)
 				local fmt
