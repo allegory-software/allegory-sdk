@@ -1861,7 +1861,7 @@ component('x-tabs', 'Containers', function(e) {
 	// selected_item_id persistent property -----------------------------------
 
 	function item_label(item) {
-		return item.get_label ? item.get_label() : item.attr('label')
+		return item._label || item.attr('label')
 	}
 
 	function format_item(item) {

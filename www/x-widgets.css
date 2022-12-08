@@ -175,7 +175,7 @@ info {
 /* widget defaults -------------------------------------------------------- */
 
 .x-widget {
-	display: inline-flex;
+	display: flex; /* x-input-widget is inline-flex */
 	position: relative; /* make `position: absolute` of children context-free */
 }
 
@@ -739,6 +739,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-focus-box {
 	flex: 1; /* stretch vertically */
+	position: relative; /* for abs. pos. animated labels */
 	border-width: 1px;
 	border-style: dotted;
 	border-color: var(--x-border-light);
@@ -925,6 +926,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	display: none;
 }
 
+.x-linear-form > .x-checkbox { display: contents; }
+.x-linear-form > .x-checkbox > .x-focus-box { display: contents; }
+.x-linear-form > .x-checkbox > .x-focus-box > .x-checkbox-label:focus-visible {
+	outline: 2px solid var(--x-outline-focused);
+}
+
 /* radiogroup ------------------------------------------------------------- */
 
 .x-radiogroup {
@@ -977,7 +984,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-radiogroup[align=left ] > .x-radio-items > .x-radio-item > .x-markbox-label { padding-left : .5em; }
 .x-radiogroup[align=right] > .x-radio-items > .x-radio-item > .x-markbox-label { padding-right: .5em; }
 
-.x-linear-form > 	.x-radiogroup { display: contents; }
+.x-linear-form > .x-radiogroup { display: contents; }
 .x-linear-form > .x-radiogroup > .x-radio-items { display: contents; }
 .x-linear-form > .x-radiogroup > .x-radio-items > .x-radio-item { display: contents; }
 .x-linear-form > .x-radiogroup > .x-radio-items > .x-radio-item > .x-radio-label:focus-visible {
@@ -1048,6 +1055,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-editbox.invalid.invalid > .x-focus-box { /* specificity over .x-widget.grid-editor */
 	background-color: var(--x-bg-error);
 	color: var(--x-fg-error);
+}
+
+.x-linear-form > .x-editbox { display: contents; }
+/* .x-linear-form > .x-editbox > .x-focus-box { display: contents; } */
+.x-linear-form > .x-editbox > .x-focus-box > .x-editbox-label:focus-visible {
+	outline: 2px solid var(--x-outline-focused);
 }
 
 /* editbox with animated inner label/placeholder -------------------------- */

@@ -6,6 +6,7 @@
 WIDGETS
 
 	checkbox
+	toggle
 	radiogroup
 	textedit
 	textarea
@@ -196,7 +197,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		nav.on('focused_row_cell_state_changed_for_'+col, cell_state_changed, on)
 		nav.on('display_vals_changed_for_'+col, update, on)
 		nav.on('reset', reset, on)
-		nav.on('col_text_changed_for_'+col, update, on)
+		nav.on('col_label_changed_for_'+col, update, on)
 		nav.on('col_info_changed_for_'+col, update, on)
 	}
 
@@ -478,6 +479,7 @@ component('x-button', 'Input', function(e) {
 	e.prop('bare'   , {type: 'bool', attr: true})
 	e.prop('danger' , {type: 'bool', attr: true})
 	e.prop('confirm', {attr: true})
+	e.prop('action_name', {attr: 'action'})
 
 	e.activate = function() {
 		if (e.effectively_hidden || e.effectively_disabled)
@@ -641,21 +643,27 @@ function input_widget(e) {
 
 	e.init_child_components()
 
-	let html_info = e.$1('info')
+	let html_info = e.$1(':scope>info')
 	if (html_info)
 		html_info.remove()
 
+	let html_label = e.nodes.trim()
+	e.clear()
+
 	e.class('x-input-widget')
 
-	e.prop('label'   , {slot: 'lang', attr: true})
+	e.prop('label'   , {slot: 'lang'})
 	e.prop('nolabel' , {type: 'bool', attr: true})
 	e.prop('align'   , {type: 'enum', enum_values: 'left right', default: 'left', attr: true})
 	e.prop('mode'    , {type: 'enum', enum_values: 'default inline', default: 'default', attr: true})
-	e.prop('info'    , {slot: 'lang', attr: true})
+	e.prop('info'    , {slot: 'lang'})
 	e.prop('infomode', {slot: 'lang', type: 'enum', enum_values: 'under button hidden', attr: true, default: 'under'})
 
 	e.add_info_button = e.add // stub
-	e.add_info_box = e.add // stub
+
+	e.add_info_box = function(info_box) { // stub
+		e.insert(1/0, div(), info_box)
+	}
 
 	e.debug_anon_name = function() {
 		return catany('', e.type, catall(':' + e.col))
@@ -713,22 +721,22 @@ function input_widget(e) {
 		return div({class: 'x-input-placeholder'})
 	}
 
-	e.get_label = function() {
-		return e.label || e.attr('label') || (e._field && e._field.text) || null
+	e.get__label = function() {
+		return e.label || e.attr('label') || (e._field && e._field.label) || null
 	}
+	e.prop('_label', {store: false, private: true})
 
 	e.set_label = function() {
-		e.update()
 		e.fire('label_changed')
 	}
 
 	e.on_update(function() {
-		update_info()
-		let s = !e.nolabel && (e.label || e.attr('label') || (e._field && e._field.text)) || null
+		let s = !e.nolabel && e._label || null
 		if (s != null && e._field && e._field.not_null && e.label_show_star != false)
 			s = s + ' *'
 		e.class('with-label', !!s)
 		e.label_box.set(!e.nolabel ? s || e.create_label_placeholder() : null)
+		update_info()
 	})
 
 	e.on('keydown', function(key, shift, ctrl) {
@@ -758,7 +766,7 @@ function input_widget(e) {
 		}
 	})
 
-	return {info: html_info}
+	return {label: html_label, info: html_info}
 }
 
 // ---------------------------------------------------------------------------
@@ -767,10 +775,9 @@ function input_widget(e) {
 
 component('x-checkbox', 'Input', function(e) {
 
-	focusable_widget(e)
 	editable_widget(e)
 	val_widget(e)
-	input_widget(e)
+	let cons_opt = input_widget(e)
 
 	e.class('x-markbox')
 
@@ -782,6 +789,8 @@ component('x-checkbox', 'Input', function(e) {
 	e.label_box = span({class: 'x-markbox-label x-checkbox-label'})
 	e.focus_box = div({class: 'x-focus-box'}, e.icon_box, e.label_box)
 	e.add(e.focus_box)
+
+	focusable_widget(e, e.label_box)
 
 	e.add_info_button = function(btn) {
 		btn.attr('bare', true)
@@ -797,8 +806,8 @@ component('x-checkbox', 'Input', function(e) {
 			ie.classes = e.checked ? 'fa fa-check-square' : 'far fa-square'
 	}
 
-	e.set_button_style = update_icon
-	e.prop('button_style', {type: 'enum', enum_values: 'checkbox toggle', default: 'checkbox', attr: true})
+	e.prop('button_style', {type: 'enum', enum_values: 'checkbox toggle',
+			default: 'checkbox', attr: true})
 
 	// model
 
@@ -893,6 +902,14 @@ component('x-checkbox', 'Input', function(e) {
 		e.widget_editing = false
 	})
 
+	return cons_opt
+
+})
+
+component('x-toggle', 'Input', function(e) {
+	e.props.button_style = {default: 'toggle'}
+	e.props.align        = {default: 'right'}
+	return checkbox.construct(e)
 })
 
 // ---------------------------------------------------------------------------
@@ -903,7 +920,7 @@ component('x-radiogroup', 'Input', function(e) {
 
 	e.init_child_components()
 
-	let html_info = e.$1('info')
+	let html_info = e.$1(':scope>info')
 	if (html_info)
 		html_info.remove()
 
@@ -911,7 +928,7 @@ component('x-radiogroup', 'Input', function(e) {
 	val_widget(e)
 	let html_items = widget_items_widget(e)
 
-	e.prop('info', {slot: 'lang', attr: true})
+	e.prop('info', {slot: 'lang'})
 
 	e.items_box = div({class: 'x-radio-items'})
 	e.add(e.items_box)
@@ -1066,7 +1083,7 @@ function editbox_widget(e, opt) {
 	let has_picker = or(opt && opt.picker, false)
 
 	val_widget(e)
-	input_widget(e)
+	let cons_opt = input_widget(e)
 	stylable_widget(e)
 
 	e.props.mode.enum_values = 'default inline wrap fixed'
@@ -1089,7 +1106,7 @@ function editbox_widget(e, opt) {
 
 	e.label_box = div({class: 'x-editbox-label'})
 	e.focus_box = div({class: 'x-focus-box'}, e.input_box, e.label_box)
-	e.add(e.focus_box)
+	e.add(div(), e.focus_box)
 
 	e.from_text = function(s) {
 		return e._field.from_text(s)
@@ -1260,7 +1277,7 @@ function editbox_widget(e, opt) {
 				action: function() {
 					copy_to_clipboard(e.to_text(e.input_val), function() {
 						notify(S('copied_to_clipboard',
-							'{0} copied to clipboard', e._field.text), 'info')
+							'{0} copied to clipboard', e._field.label), 'info')
 					})
 				},
 			})
@@ -1654,6 +1671,7 @@ function editbox_widget(e, opt) {
 		e.close(true)
 	}
 
+	return cons_opt
 }
 
 // ---------------------------------------------------------------------------
@@ -1661,7 +1679,7 @@ function editbox_widget(e, opt) {
 // ---------------------------------------------------------------------------
 
 component('x-textedit', 'Input', function(e) {
-	editbox_widget(e)
+	return editbox_widget(e)
 })
 
 // ---------------------------------------------------------------------------
@@ -1669,11 +1687,12 @@ component('x-textedit', 'Input', function(e) {
 // ---------------------------------------------------------------------------
 
 component('x-textarea', 'Input', function(e) {
-	editbox_widget(e, {input_tag: 'textarea'})
+	let cons_opt = editbox_widget(e, {input_tag: 'textarea'})
 	e.do_after('init', function() {
 		e.input.rows = e.rows
 		e.input.cols = e.cols
 	})
+	return cons_opt
 })
 
 // ---------------------------------------------------------------------------
@@ -1682,7 +1701,7 @@ component('x-textarea', 'Input', function(e) {
 
 component('x-passedit', 'Input', function(e) {
 
-	editbox_widget(e)
+	let cons_opt = editbox_widget(e)
 	e.input.attr('type', 'password')
 
 	e.on('bind', function(on) {
@@ -1710,6 +1729,8 @@ component('x-passedit', 'Input', function(e) {
 			})
 		}
 	})
+
+	return cons_opt
 })
 
 // ---------------------------------------------------------------------------
@@ -1721,7 +1742,7 @@ component('x-numedit', 'Input', function(e) {
 	e.props.align = {default: 'right'}
 	e.field_options = {type: 'number'}
 
-	editbox_widget(e)
+	let cons_opt = editbox_widget(e)
 
 	function increment_val(increment) {
 		let v = e.input_val + increment
@@ -1736,6 +1757,7 @@ component('x-numedit', 'Input', function(e) {
 		return false
 	})
 
+	return cons_opt
 })
 
 // ---------------------------------------------------------------------------
@@ -1828,50 +1850,6 @@ component('x-spinedit', 'Input', function(e) {
 			}
 		}
 	})
-
-})
-
-// ---------------------------------------------------------------------------
-// checkedit
-// ---------------------------------------------------------------------------
-
-component('x-checkedit', 'Input', function(e) {
-
-	editbox_widget(e, {input: false})
-
-	e.icon_box = span({class: 'x-markbox-icon x-checkbox-icon far fa-square'})
-	e.val_box.add(e.icon_box)
-
-	e.checked_val = true
-	e.unchecked_val = false
-
-	// model
-
-	e.get_checked = function() {
-		return e.input_val === e.checked_val
-	}
-	e.set_checked = function(v, ev) {
-		e.set_val(v ? e.checked_val : e.unchecked_val, ev)
-	}
-	e.prop('checked', {store: false, private: true})
-
-	// view
-
-	function update_icon() {
-		let ie = e.icon_box
-		ie.class('fa far fa-square fa-check-square fa-toggle-on fa-toggle-off', false)
-		if (e.button_style == 'toggle')
-			ie.classes = 'fa fa-toggle-'+(e.checked ? 'on' : 'off')
-		else
-			ie.classes = e.checked ? 'fa fa-check-square' : 'far fa-square'
-	}
-
-	e.set_button_style = update_icon
-	e.prop('button_style', {type: 'enum', enum_values: 'checkbox toggle', default: 'checkbox', attr: true})
-
-	e.do_update_val = function(v, ev) {
-		update_icon()
-	}
 
 })
 
@@ -2157,7 +2135,7 @@ component('x-placeedit', 'Input', function(e) {
 
 	e._field_options = {type: 'place'}
 
-	editbox_widget(e)
+	let cons_opt = editbox_widget(e)
 
 	e.pin_ct = span()
 	e.focus_box.insert(0, e.pin_ct)
@@ -2217,6 +2195,7 @@ component('x-placeedit', 'Input', function(e) {
 		}
 	})
 
+	return cons_opt
 })
 
 // ---------------------------------------------------------------------------
@@ -3393,11 +3372,11 @@ component('x-label', function(e) {
 	}
 
 	e.do_update = function() {
-		let s = (e._field && e._field.text) || null
+		let s = (e._field && e._field.label) || null
 		if (s != null && e._field && e._field.not_null && e.label_show_star != false)
 			s = s + ' *'
 		e.set(s || e.create_label_placeholder())
-		e.set(s, 'pre-wrap')
+		e.set(s)
 	}
 
 })

@@ -189,14 +189,18 @@ function wasup_button_action() {
 <!--------------------------------------------------------------------------->
 
 <template id=checkbox_demo>
-<x-checkbox></x-checkbox>
+<x-checkbox>
+	Do it!
+	<info>This checkbox does something</info>
+</x-checkbox>
+<x-toggle>This is the same</x-toggle>
 <div id=main></div>
 <script run>
 
 main.add(checkbox({
 	val: 'wrong',
 	field: {
-		text: 'Wassup homie',
+		label: 'Wassup homie',
 		validators: [
 			{
 				message: 'Value must be a boolean',
@@ -211,7 +215,7 @@ main.add(checkbox({
 c2 = checkbox({
 	align: 'right',
 	field: {
-		text: html('Yo wasup<br>I am multiline and right-aligned.'),
+		label: html('Yo wasup<br>I am multiline and right-aligned.'),
 	},
 	val: true,
 })
@@ -226,13 +230,6 @@ main.add(c2)
 <!--------------------------------------------------------------------------->
 
 <template id=radiogroup_demo>
-<div class="x-linear-form">
-	<x-radiogroup id=r1 val=1>
-		<info>Info box, can put any HTML in here.<br>But it will be gray and small.</info>
-		<div val=1>Choose me!</div>
-		<div val=2>Me, me<br>me, me, me!</div>
-	</x-radiogroup>
-</div>
 <div id=main></div>
 <script run>
 
@@ -283,6 +280,28 @@ main.add(radiogroup({
 }))
 
 </script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=linear_form_demo>
+<div class="x-linear-form">
+	<x-checkbox id=c1 val=1>
+		Check me baby
+		<info>
+			...because if you won't<br>
+			somebody else will
+		</info>
+	</x-checkbox>
+	<x-radiogroup id=r1 val=1>
+		<info>Info box, can put any HTML in here.<br>But it will be gray and small.</info>
+		<div val=1>Choose me!</div>
+		<div val=2>Me, me<br>me, me, me!</div>
+	</x-radiogroup>
+	<x-textedit label=Wasup>
+		<info>Wasa bii</info>
+	</x-textedit>
+</div>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -516,7 +535,7 @@ main.add(
 				field: {name: "santa's_name", validate: say_my_name},
 			}),
 			textedit({
-				field: {text: "devil's name"},
+				field: {label: "devil's name"},
 				val: 'Anything goes',
 			})
 		)
@@ -526,7 +545,7 @@ main.add(
 main.add(passedit({
 	field: {
 		validate: say_my_name,
-		text: 'Password',
+		label: 'Password',
 	},
 	val: 'Klaus',
 }))
@@ -542,19 +561,19 @@ main.add(passedit({
 
 main.add(div({},
 	spinedit({field: {val: 42}}),
-	spinedit({field: {val: 42, text: 'Heeey'}})
+	spinedit({field: {val: 42, label: 'Heeey'}})
 ))
 main.add(div({},
 	spinedit({button_style: 'up-down', field: {val: 42}}),
-	spinedit({button_style: 'up-down', field: {text: 'Hey hey'}})
+	spinedit({button_style: 'up-down', field: {label: 'Hey hey'}})
 ))
 main.add(div({},
 	spinedit({button_style: 'left-right', field: {val: 42}}),
-	spinedit({button_style: 'left-right', field: {text: 'Dis look good?'}})
+	spinedit({button_style: 'left-right', field: {label: 'Dis look good?'}})
 ))
 main.add(div({},
 	spinedit({field: {min: -2, max: 5, multiple_of: 1.5, val: 1}, button_placement: 'right'}),
-	spinedit({field: {min: -2, max: 5, multiple_of: 1.5, text: 'How bout dis?'}, button_placement: 'right'}),
+	spinedit({field: {min: -2, max: 5, multiple_of: 1.5, label: 'How bout dis?'}, button_placement: 'right'}),
 ))
 
 </script>
@@ -805,7 +824,7 @@ let fields = [
 	{name: 'active'    , w:  30, type: 'bool', true_text: checked, false_text: ''},
 	{name: 'name'      , w: 150, min_w:  50, max_w: 400, validate: starts_with_a, filter_by: true},
 	{name: 'parent_id' , w:  50, min_w:  50, type: 'number', allow_null: true, editable: false, focusable: false},
-	{name: 'random_num', w: 130, allow_null: true, type: 'number', text: () => html('<i>Random</i><br>Number')},
+	{name: 'random_num', w: 130, allow_null: true, type: 'number', label: () => html('<i>Random</i><br>Number')},
 	{name: 'date'      , w: 120, allow_null: true, type: 'date', filter_by: true},
 ]
 
@@ -868,7 +887,7 @@ rowset = {
 		{name: 'index'     , w:  60, type: 'number', editable: false},
 		{name: 'active'    , w:  30, type: 'bool', true_text: checked, false_text: ''},
 		{name: 'name'      , w:  70, min_w:  50, max_w: 200, filter_by: true},
-		{name: 'random_num', w: 130, allow_null: true, type: 'number', text: () => html('<i>Random</i> Number')},
+		{name: 'random_num', w: 130, allow_null: true, type: 'number', label: () => html('<i>Random</i> Number')},
 		{name: 'date'      , w: 140, allow_null: true, type: 'date', filter_by: true},
 	],
 	pk: 'id',
@@ -1205,7 +1224,7 @@ main.add(grid({w: 200, h: 200, rowset: fruits}))
 
 r = rowset({
 	fields: [
-		{w: 100, name: 'fruit_id', type: 'number', align: 'left', text: 'fruit',
+		{w: 100, name: 'fruit_id', type: 'number', align: 'left', label: 'fruit',
 			lookup_rowset: fruits,
 			lookup_col: 'id',
 			display_col: 'name',

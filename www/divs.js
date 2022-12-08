@@ -58,6 +58,7 @@
 		$(sel) -> nlist
 		$1(sel|e) -> e
 		nlist.each(f)
+		nlist.trim() -> [n1,...]|null
 		root, body, head
 	dom tree de/serialization:
 		e.html -> s
@@ -374,6 +375,17 @@ alias(Node, 'next_node'  , 'nextSibling')
 alias(Node, 'prev_node'  , 'previousSibling')
 
 alias(NodeList, 'len', 'length')
+
+method(NodeList, 'trim', function() {
+	let a = []
+	let i1 = 0
+	while (this[i1] instanceof Text && !this[i1].textContent.trim()) i1++
+	let i2 = this.length-1
+	while (this[i2] instanceof Text && !this[i2].textContent.trim()) i2--
+	for (; i1 <= i2; i1++)
+		a.push(this[i1])
+	return a.length ? a : null
+})
 
 // dom tree querying ---------------------------------------------------------
 
@@ -705,7 +717,7 @@ method(Element, 'add', function E_add(...args) {
 // insert nodes into an element at a position.
 // skips nulls, calls constructors, expands arrays.
 method(Element, 'insert', function E_insert(i0, ...args) {
-	i0 = max(0, or(i0, 1/0))
+	i0 = max(0, min(or(i0, 1/0), this.nodes.length))
 	for (let i = args.length-1; i >= 0; i--) {
 		let s = args[i]
 		if (isfunc(s))

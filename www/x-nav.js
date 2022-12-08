@@ -62,7 +62,7 @@ field attributes:
 			col
 
 	rendering:
-		text           : field name for display purposes (auto-generated default).
+		label          : field name for display purposes (auto-generated default).
 		internal       : field cannot be made visible in a grid (false).
 		hidden         : field is hidden by default but can be made visible (false).
 		w              : field's width.
@@ -632,25 +632,25 @@ function nav_widget(e) {
 	e.prop('row_states', {slot: 'app'})
 
 	function bind_rowset_name(name, on) {
-		if (on)
+		if (!name)
+			return
+		if (on) {
 			init_rowset_events()
-		if (name)
-			if (on) {
-				attr(rowset_navs, name, set).add(e)
-			} else {
-				let navs = rowset_navs[name]
-				if (navs) {
-					navs.delete(e)
-					if (!navs.size)
-						delete rowset_navs[name]
-				}
+			attr(rowset_navs, name, set).add(e)
+		} else {
+			let navs = rowset_navs[name]
+			if (navs) {
+				navs.delete(e)
+				if (!navs.size)
+					delete rowset_navs[name]
 			}
+		}
 	}
 
-	e.set_rowset_name = function(v, v0) {
+	e.set_rowset_name = function(v1, v0) {
 		bind_rowset_name(v0, false)
-		bind_rowset_name(v, true)
-		e.rowset_url = v ? '/rowset.json/' + v : null
+		bind_rowset_name(v1, true)
+		e.rowset_url = v1 ? '/rowset.json/' + v1 : null
 		e.reload()
 	}
 	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
@@ -709,7 +709,7 @@ function nav_widget(e) {
 
 	let convert_field_attr = obj()
 
-	convert_field_attr.text = function(field, v, f) {
+	convert_field_attr.label = function(field, v, f) {
 		return v == null ? f.name && f.name.display_name() : v
 	}
 
@@ -1282,14 +1282,9 @@ function nav_widget(e) {
 
 	// label ------------------------------------------------------------------
 
-	e.prop('label', {slot: 'lang', attr: true})
-
-	e.set_label = function() {
-		e.fire('label_changed')
-	}
-
-	e.get_label = function() {
-		let label = e.label || e.attr('label') || '{0}'
+	let inh_get__label = e.get__label
+	e.get__label = function() {
+		let label = inh_get__label() || '{0}'
 		let view = e.param_vals && e.param_nav.selected_rows_label() || ''
 		return label.subst(view)
 	}
@@ -1821,43 +1816,43 @@ function nav_widget(e) {
 		if (range_defs) {
 
 			let range_val_funcs = obj() // {col->f}
-			let range_text_funcs = obj() // {col->text}
+			let range_label_funcs = obj() // {col->text}
 
 			for (let col in range_defs) {
 				let range = range_defs[col]
 				let freq = range.freq
 				let unit = range.unit
 				let range_val
-				let range_text
+				let range_label
 				if (unit && freq == null)
 					freq = 1
 				if (freq) {
 					let offset = range.offset || 0
 					if (!unit) {
-						range_val  = v => (floor((v - offset) / freq) + offset) * freq
-						range_text = v => freq != 1 ? v + ' .. ' + (v + freq - 1) : v
+						range_val   = v => (floor((v - offset) / freq) + offset) * freq
+						range_label = v => freq != 1 ? v + ' .. ' + (v + freq - 1) : v
 					} else if (unit == 'month') {
 						freq = floor(freq)
 						if (freq > 1) {
-							range_val  = v => month(v, offset) // TODO
-							range_text = v => month_year(v) + ' .. ' + (month_year(month(v, freq - 1)))
+							range_val   = v => month(v, offset) // TODO
+							range_label = v => month_year(v) + ' .. ' + (month_year(month(v, freq - 1)))
 						} else {
-							range_val  = v => month(v, offset)
-							range_text = v => month_year(v)
+							range_val   = v => month(v, offset)
+							range_label = v => month_year(v)
 						}
 					} else if (unit == 'year') {
 						freq = floor(freq)
 						if (freq > 1) {
-							range_val  = v => year(v, offset) // TODO
-							range_text = v => v + ' .. ' + year(v, freq - 1)
+							range_val   = v => year(v, offset) // TODO
+							range_label = v => v + ' .. ' + year(v, freq - 1)
 						} else {
-							range_val  = v => year(v, offset)
-							range_text = v => year_of(v)
+							range_val   = v => year(v, offset)
+							range_label = v => year_of(v)
 						}
 					}
 				}
 				range_val_funcs[col] = range_val
-				range_text_funcs[col] = range_text
+				range_label_funcs[col] = range_label
 			}
 
 			function range_val(v, i) {
@@ -1868,8 +1863,8 @@ function nav_widget(e) {
 				return v
 			}
 
-			function range_text(v, i, row) {
-				let f = range_text_funcs[cols_arr[i]]
+			function range_label(v, i, row) {
+				let f = range_label_funcs[cols_arr[i]]
 				return f ? f(v) : e.cell_display_val(row, fld(cols_arr[i]))
 			}
 
@@ -1877,7 +1872,7 @@ function nav_widget(e) {
 
 			var range_val = return_arg
 
-			function range_text(v, i, row) {
+			function range_label(v, i, row) {
 				return e.cell_display_val(row, fld(cols_arr[i]))
 			}
 
@@ -1893,7 +1888,7 @@ function nav_widget(e) {
 				if (!t1) {
 					t1 = fi == last_fi ? [] : map()
 					t0.set(v, t1)
-					t1.text = range_text(v, i, row)
+					t1.label = range_label(v, i, row)
 				}
 				t0 = t1
 				i++
@@ -2016,26 +2011,26 @@ function nav_widget(e) {
 		return groups
 	}
 
-	function flatten(t, path, text_path, depth, add_group, arg1, arg2) {
+	function flatten(t, path, label_path, depth, add_group, arg1, arg2) {
 		let path_pos = path.length
 		for (let [k, t1] of t) {
 			path[path_pos] = k
-			text_path[path_pos] = t1.text
+			label_path[path_pos] = t1.label
 			if (depth)
-				flatten(t1, path, text_path, depth-1, add_group, arg1, arg2)
+				flatten(t1, path, label_path, depth-1, add_group, arg1, arg2)
 			else
-				add_group(t1, path, text_path, arg1, arg2)
+				add_group(t1, path, label_path, arg1, arg2)
 		}
 		path.remove(path_pos)
 	}
 
 	// opt:
-	//   col_groups     : 'col1 col2 > col3 col4 > ...'
-	//   range_defs     : {col->{freq:, unit:, offset:}}
-	//   rows           : [row1,...]
-	//   group_text_sep : separator for multi-col group labels
+	//   col_groups      : 'col1 col2 > col3 col4 > ...'
+	//   range_defs      : {col->{freq:, unit:, offset:}}
+	//   rows            : [row1,...]
+	//   group_label_sep : separator for multi-col group labels
 	e.row_groups = function(opt) {
-		let group_text_sep = or(opt.group_text_sep, ' / ')
+		let group_label_sep = or(opt.group_label_sep, ' / ')
 		let col_groups = opt.col_groups.split(/\s*>\s*/)
 		if (false && col_groups.length == 1) // TODO: enable this optimization again?
 			return row_groups_one_level(opt.col_groups, opt.range_defs, opt.rows)
@@ -2046,11 +2041,11 @@ function nav_widget(e) {
 		let tree = e.tree_index(all_cols, opt.range_defs, opt.rows).tree()
 		let root_group = []
 		let depth = col_groups[0].words().length-1
-		function add_group(t, path, text_path, parent_group, parent_group_level) {
+		function add_group(t, path, label_path, parent_group, parent_group_level) {
 			let group = []
 			group.key_cols = col_groups[parent_group_level]
 			group.key_vals = path.slice()
-			group.text = text_path.join_nodes(group_text_sep)
+			group.label = label_path.join_nodes(group_label_sep)
 			parent_group.push(group)
 			let level = parent_group_level + 1
 			let col_group = col_groups[level]
@@ -2715,7 +2710,7 @@ function nav_widget(e) {
 				return rows.length < 1
 			},
 			message: S('validation_unique', '{0} must be unique')
-				.subst(e.pk_fields && e.pk_fields.map(field => field.text).join(' + ') || ''),
+				.subst(e.pk_fields && e.pk_fields.map(field => field.label).join(' + ') || ''),
 		}
 	}
 
@@ -2757,7 +2752,7 @@ function nav_widget(e) {
 			for (let f of e.all_fields)
 				for (let err of (e.cell_errors(row, f) || empty_array))
 					if (!err.passed && err.message)
-						a.push(f.text + ': ' + err.message)
+						a.push(f.label + ': ' + err.message)
 		return a
 	}
 
@@ -4865,8 +4860,8 @@ function nav_dropdown_widget(e) {
 
 {
 	field_prop_attrs = {
-		text : {slot: 'lang'},
-		w    : {slot: 'user'},
+		label : {slot: 'lang'},
+		w     : {slot: 'user'},
 	}
 
 	all_field_types = {
@@ -5585,11 +5580,8 @@ function nav_dropdown_widget(e) {
 
 rowset_navs = obj() // {rowset_name -> set(nav)}
 
-{
-let es
-function init_rowset_events() {
-	if (es) return
-	es = new EventSource('/xrowset.events')
+init_rowset_events = memoize(function() {
+	let es = new EventSource('/xrowset.events')
 	es.onmessage = function(ev) {
 		let a = ev.data.words()
 		let [rowset_name, filter] = a.shift().replaceAll(':', ' ').words()
@@ -5598,5 +5590,4 @@ function init_rowset_events() {
 			for (let nav of navs)
 				nav.reload({allow_diff_merge: true, update_ids: a, if_filter: filter})
 	}
-}
-}
+})

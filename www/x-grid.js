@@ -632,7 +632,7 @@ component('x-grid', 'Input', function(e) {
 		cx.font = 'bold ' + e.text_font
 		cx.textAlign = horiz ? field.align : 'left'
 		cx.fillStyle = e.fg
-		cx.fillText(field.text, x, cx.baseline)
+		cx.fillText(field.label, x, cx.baseline)
 
 		cx.restore()
 
@@ -1467,7 +1467,7 @@ component('x-grid', 'Input', function(e) {
 			if (ht_col_test(mx, my))
 				hit_state = 'col'
 		e.class('col-move', hit_state == 'col')
-		e.header.title = hit_state == 'col' ? e.fields[hit_fi].text : ''
+		e.header.title = hit_state == 'col' ? e.fields[hit_fi].field : ''
 	}
 
 	function mm_row_drag(ev, mx, my) {
@@ -2016,7 +2016,7 @@ component('x-grid', 'Input', function(e) {
 		title_div.on('keydown'         , editing_field_keydown, on)
 		if (!on) {
 			let s = title_div.textContent
-			e.set_prop(`col.${editing_field.name}.text`, s)
+			e.set_prop(`col.${editing_field.name}.label`, s)
 			editing_field = null
 			if (window.xmodule)
 				xmodule.save()
@@ -2576,7 +2576,7 @@ component('x-grid', 'Input', function(e) {
 					e.show_field(item.field, false)
 				}
 				let field = e.fields[fi]
-				let hide_text = span({}, S('hide_field', 'Hide field'), ' "', field.text, '"')
+				let hide_text = span({}, S('hide_field', 'Hide field'), ' "', field.label, '"')
 				items.push({
 					field: field,
 					text: hide_text,
@@ -2593,7 +2593,7 @@ component('x-grid', 'Input', function(e) {
 				if (!field.internal)
 					field_items.push({
 						field: field,
-						text: field.text,
+						text: field.label,
 						action: show_field,
 						checked: e.field_index(field) != null,
 					})
