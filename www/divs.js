@@ -1130,12 +1130,14 @@ method(Element, 'hide', function(on) {
 		return
 	this.hidden = on
 	this.fire('show', !on)
+	return this
 })
 
 method(Element, 'show', function(on) {
 	if (!arguments.length)
 		on = true
 	this.hide(!on)
+	return this
 })
 
 property(Element, 'hovered', function() {

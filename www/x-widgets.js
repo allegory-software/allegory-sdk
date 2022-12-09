@@ -2473,7 +2473,11 @@ component('x-dialog', function(e) {
 
 component('x-toolbox', function(e) {
 
+	let html_content = [...e.nodes]
+	e.clear()
+
 	focusable_widget(e)
+	e.popup()
 
 	e.istoolbox = true
 	e.class('pinned')
@@ -2488,12 +2492,25 @@ component('x-toolbox', function(e) {
 
 	e.set_label = function(v) { e.title_box.set(v) }
 
-	e.prop('side'  , {type: 'enum', enum_values: 'left right', default: 'right'})
+	e.alias('target' , 'popup_target')
+	e.alias('align'  , 'popup_align')
+	e.alias('side'   , 'popup_side')
+
+	e.props.side  = {private: true, default: 'inner-top'}
+	e.props.align = {private: true, default: 'start'}
+
 	e.prop('px'    , {type: 'number', slot: 'user'})
 	e.prop('py'    , {type: 'number', slot: 'user'})
 	e.prop('pw'    , {type: 'number', slot: 'user'})
 	e.prop('ph'    , {type: 'number', slot: 'user'})
 	e.prop('pinned', {type: 'bool'  , slot: 'user'})
+
+	e.set_px = (x) => e.popup_x1 = x
+	e.set_py = (y) => e.popup_y1 = y
+	e.set_pw = (w) => e.popup_x2 = w - e.px
+	e.set_ph = (h) => e.popup_y2 = h - e.py
+
+	e.prop('content', {type: 'html'})
 
 	function is_top() {
 		let last = document.body.last
@@ -2506,29 +2523,30 @@ component('x-toolbox', function(e) {
 		}
 	}
 
-	e.do_update = function(opt) {
+	let r, br, px, py
+	e.on_measure(function() {
+		r = e.rect()
+		br = document.body.rect()
+		px = clamp(e.px, 0, window.innerWidth  - r.w) - br.x
+		py = clamp(e.py, 0, window.innerHeight - r.h) - br.y
+	})
 
+	e.on_update(function(opt) {
+
+		e.x = px
+		e.y = py
 		e.w = e.pw
 		e.h = e.ph
 
-		let r = e.rect()
-		let br = document.body.rect()
-		let px = clamp(e.px, 0, window.innerWidth  - r.w) - br.x
-		let py = clamp(e.py, 0, window.innerHeight - r.h) - br.y
-
-		e.popup(document.body, 'inner-'+e.side, 'start', null, null, null, null, px, py)
+		// document.body, 'inner-'+e.side, 'start', null, null, null, null, px, py)
 
 		// move to top if the update was user-triggered not layout-triggered.
 		if (opt && opt.input == e && !is_top())
 			e.index = 1/0
 
-	}
-
-	e.init = function() {
 		e.content_box.set(e.content)
-		e.hidden = true
-		e.bind(true)
-	}
+
+	})
 
 	e.on('focusin', function(ev) {
 		// TODO: moving the div loses mouse events!
@@ -2625,7 +2643,7 @@ component('x-toolbox', function(e) {
 	})
 
 	e.xbutton.on('pointerup', function() {
-		e.hidden = true
+		e.hide()
 		return false
 	})
 
@@ -2637,6 +2655,8 @@ component('x-toolbox', function(e) {
 	e.on('resize', function() {
 		document.fire('layout_changed', e)
 	})
+
+	return {content: html_content}
 
 })
 

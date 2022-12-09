@@ -425,8 +425,8 @@ tb = toolbox({
 b = button({
 	text: 'Click to show toolbox',
 	action: function() {
-		tb.show()
-		tb.focus()
+		main.add(tb)
+		tb.show().focus()
 	}
 })
 
@@ -825,7 +825,7 @@ let fields = [
 	{name: 'name'      , w: 150, min_w:  50, max_w: 400, validate: starts_with_a, filter_by: true},
 	{name: 'parent_id' , w:  50, min_w:  50, type: 'number', allow_null: true, editable: false, focusable: false},
 	{name: 'random_num', w: 130, allow_null: true, type: 'number', label: () => html('<i>Random</i><br>Number')},
-	{name: 'date'      , w: 120, allow_null: true, type: 'date', filter_by: true},
+	{name: 'date'      , w: 120, allow_null: true, type: 'time', filter_by: true},
 ]
 
 let rows = []
@@ -852,8 +852,6 @@ g = grid({
 	},
 	order_by: 'active name:desc',
 	tree_col: 'name',
-	w: 606,
-	h: 400,
 	//can_edit: false,
 	can_change_header_visibility: true,
 	//can_focus_cells: false,
@@ -863,12 +861,11 @@ g = grid({
 	//can_change_parent: false,
 })
 
-g.style.resize = 'both'
+// g.style.resize = 'both'
 
+result.classes = 'x-container'
+main.classes = 'x-container'
 main.add(g)
-
-log = tag('pre')
-main.add(log)
 
 </script>
 </template>
