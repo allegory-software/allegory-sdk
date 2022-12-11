@@ -49,6 +49,7 @@ component('x-grid', 'Input', function(e) {
 		e.cell_border_color          = css.prop('--x-faint')
 		e.bg                         = css.prop('--x-bg')
 		e.bg_alt                     = css.prop('--x-bg-alt')
+		e.bg_header                  = css.prop('--x-bg-grid-header')
 		e.fg                         = css.prop('--x-fg')
 		e.fg_disabled                = css.prop('--x-fg-disabled')
 		e.fg_search                  = css.prop('--x-fg-search')
@@ -586,7 +587,7 @@ component('x-grid', 'Input', function(e) {
 		cx.stroke()
 
 		// background
-		let bg = draw_stage == 'moving_cols' ? e.bg_moving : null
+		let bg = draw_stage == 'moving_cols' ? e.bg_moving : e.bg_header
 		if (bg) {
 			cx.beginPath()
 			cx.fillStyle = bg
@@ -1467,7 +1468,7 @@ component('x-grid', 'Input', function(e) {
 			if (ht_col_test(mx, my))
 				hit_state = 'col'
 		e.class('col-move', hit_state == 'col')
-		e.header.title = hit_state == 'col' ? e.fields[hit_fi].field : ''
+		e.header.title = hit_state == 'col' && e.fields[hit_fi].info || ''
 	}
 
 	function mm_row_drag(ev, mx, my) {

@@ -395,7 +395,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 			e.error_tooltip.update({show: show})
 		}
 		if (!e.error_tooltip) {
-			e.error_tooltip = tooltip({kind: 'error'})
+			e.error_tooltip = tooltip({kind: 'error', classes: 'x-error-tooltip'})
 			e.add(e.error_tooltip)
 			e.on('focusin'      , update)
 			e.on('focusout'     , update)
@@ -662,7 +662,7 @@ function input_widget(e) {
 	e.add_info_button = e.add // stub
 
 	e.add_info_box = function(info_box) { // stub
-		e.insert(1/0, div(), info_box)
+		e.insert(1/0, div({class: 'x-linear-form-filler'}), info_box)
 	}
 
 	e.debug_anon_name = function() {
@@ -947,7 +947,11 @@ component('x-radiogroup', 'Input', function(e) {
 				ri.attr('align', e.align)
 				ri.item = item
 				ri.add(ri.icon_box, ri.label_box)
-				ri.on('pointerdown', radio_item_pointerdown)
+				function pointerdown() {
+					select_radio_item(ri, false)
+				}
+				ri.icon_box .on('pointerdown', pointerdown)
+				ri.label_box.on('pointerdown', pointerdown)
 				ri.on('keydown', radio_item_keydown)
 				e.items_box.add(ri)
 			}
@@ -967,7 +971,7 @@ component('x-radiogroup', 'Input', function(e) {
 		let info = e._field && e._field.info || e.info
 		if (info && !e.info_box) {
 			e.info_box = div({class: 'x-input-info'})
-			e.add(div(), e.info_box) // the empty div is a shim for .x-linear-form.
+			e.add(div({class: 'x-linear-form-filler'}), e.info_box)
 		}
 		if (e.info_box) {
 			e.info_box.set(info)
@@ -1028,10 +1032,6 @@ component('x-radiogroup', 'Input', function(e) {
 		e.set_val(item_val(radio_item.item), {input: e})
 		if (focus != false)
 			radio_item.label_box.focus()
-	}
-
-	function radio_item_pointerdown() {
-		select_radio_item(this, false)
 	}
 
 	function radio_item_keydown(key) {
@@ -1106,7 +1106,7 @@ function editbox_widget(e, opt) {
 
 	e.label_box = div({class: 'x-editbox-label'})
 	e.focus_box = div({class: 'x-focus-box'}, e.input_box, e.label_box)
-	e.add(div(), e.focus_box)
+	e.add(div({class: 'x-linear-form-filler'}), e.focus_box)
 
 	e.from_text = function(s) {
 		return e._field.from_text(s)
@@ -1766,7 +1766,7 @@ component('x-numedit', 'Input', function(e) {
 
 component('x-spinedit', 'Input', function(e) {
 
-	numedit.construct(e)
+	let cons_opt = numedit.construct(e)
 
 	e.prop('button_style'    , {type: 'enum', enum_values: 'plus-minus up-down left-right', default: 'plus-minus', attr: true})
 	e.prop('button_placement', {type: 'enum', enum_values: 'each-side left right', default: 'each-side', attr: true})
@@ -1851,6 +1851,7 @@ component('x-spinedit', 'Input', function(e) {
 		}
 	})
 
+	return cons_opt
 })
 
 // ---------------------------------------------------------------------------
@@ -1864,7 +1865,7 @@ component('x-tagsedit', 'Input', function(e) {
 	e.field_options = {type: tags}
 
 	val_widget(e)
-	input_widget(e)
+	let cons_opt = input_widget(e)
 
 	let S_expand = S('expand', 'expand') + ' (Enter)'
 	let S_condense = S('condense', 'condense') + ' (Enter)'
@@ -2027,6 +2028,7 @@ component('x-tagsedit', 'Input', function(e) {
 		// TODO:
 	}
 
+	return cons_opt
 })
 
 // ---------------------------------------------------------------------------

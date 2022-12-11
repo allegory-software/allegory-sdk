@@ -80,7 +80,6 @@ hr {
 
 .popup {
 	position: fixed !important; /* hack to escape parents' `overflow: hidden` */
-	white-space: nowrap; /* expand width to fit contents for `absolute` elements. I know... */
 }
 
 .modal-dialog {

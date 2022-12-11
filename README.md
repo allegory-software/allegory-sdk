@@ -183,7 +183,7 @@ scripts for new libraries.
   * [fontawesome.css](www/fontawesome.css) - Icons                ([Font Awesome](https://fontawesome.com/icons?m=free))
   * [opensans](www/divs.css)               - OpenSans fonts
 
-[x-widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/www/x-widgets-demo.html
+[x-widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/x-widgets-demo.html
 
 # Contributing
 

@@ -33,24 +33,24 @@
 		e.closest_attr(k) -> v
 		e.attrs = {k: v}
 		e.tag
-	element css class list manipulation:
+	element CSS class list manipulation:
 		e.hasclass(k)
 		e.class('k1 ...'[, enable])
 		e.switch_class(k1, k2, normal)
 		e.classess = 'k1 k2 ...'
 	access to element computed styles:
 		e.css([k][, state])
-	css querying:
+	CSS querying:
 		css_class_prop(class, prop) -> v
 		fontawesome_char(name) -> s
-	dom tree navigation including text nodes:
+	DOM navigation including text nodes:
 		n.nodes -> nlist, n.nodes[i], n.nodes.len, n.parent
 		n.first_node, n.last_node, n.next_node, n.prev_node
-	dom tree navigation excluding text nodes:
+	DOM navigation excluding text nodes:
 		e.at[i], e.len, e.at.length, e.parent
 		e.index
 		e.first, e.last, e.next, e.prev
-	dom tree querying:
+	DOM querying:
 		iselem(v) -> t|f
 		isnode(v) -> t|f
 		e.$(sel) -> nlist
@@ -60,11 +60,11 @@
 		nlist.each(f)
 		nlist.trim() -> [n1,...]|null
 		root, body, head
-	dom tree de/serialization:
+	DOM de/serialization:
 		e.html -> s
 		[unsafe_]html(s) -> e
 		e.[unsafe_]html = s
-	safe dom tree manipulation:
+	DOM manipulation with lifecycle management:
 		T[C](te[,whitespace]) where `te` is f|e|text_str
 		e.clone()
 		e.set(te)
@@ -78,11 +78,28 @@
 		span(...)
 		element(tag, options...)
 		[].join_nodes([separator])
-	element properties & methods:
-		e.property(name, [get],[set] | descriptor)
+	method overriding:
 		e.override(method, f)
 		e.do_before(method, f)
 		e.do_after(method, f)
+	properties:
+		e.property(name, [get],[set] | descriptor)
+		e.prop(name, attrs)
+		e.alias(new_name, existing_name)
+		e.notify_id_changed()
+		e.xon(), e.xoff()
+		e.set_prop(k, v)
+		e.get_prop(k) -> v
+		e.get_prop_attrs(k) -> {attr->val}
+		e.get_props() -> {k->attrs}
+		e.save_prop(k)
+		e.serialize_prop(k) -> s
+		e.element_links()
+	deferred DOM updating:
+		e.update([opt])
+		e.on_update(f)
+		e.on_measure(f)
+		e.on_position(f)
 	components:
 		register_component(tag, initializer, [selector])
 		e.init_child_components()
@@ -164,22 +181,15 @@
 		live_move_mixin(e)
 		lazy-loading of <img data-src="">
 		auto-updating of <tag timeago time="">
-		exec-ing of <script runit> scripts from injected html
-	props:
-		e.property(name, get, [set])
-		e.prop(name, attrs)
-		e.notify_id_changed()
-	deferred DOM updating:
-		e.update([opt])
-		e.on_update(f)
-		e.on_measure(f)
-		e.on_position(f)
-	popup:
+		exec-ing of <script run> scripts from injected html
+	popups:
 		e.popup()
 		e.popup_side
 		e.popup_align
 		e.popup_{x1,y1,x2,y2}
 		e.popup_fixed
+	lists:
+		e.make_list()
 
 */
 
@@ -406,7 +416,7 @@ method(NodeList, 'each', Array.prototype.forEach)
 property(NodeList, 'first', function() { return this[0] })
 property(NodeList, 'last' , function() { return this[this.length-1] })
 
-/* DOM manipulation with lifecycle management --------------------------------
+/* safe DOM manipulation with lifecycle management ---------------------------
 
 The DOM API works with strings, nodes, arrays of nodes and also functions
 that will be called to return those objects (we call those constructors).
@@ -803,30 +813,543 @@ Array.prototype.ul = function(attrs, only_if_many) { return ul(this, 'ul', attrs
 Array.prototype.ol = function(attrs, only_if_many) { return ul(this, 'ol', attrs, only_if_many) }
 }
 
-/* Virtual DOM: WIP ------------------------------------------------------- */
+/* element method overriding -------------------------------------------------
 
-function V(tag, attrs, ...child_nodes) {
-	return {tag: tag, attrs: attrs, child_nodes: child_nodes}
+NOTE: unlike global override(), e.override() cannot override built-in methods.
+You can still use the global override() to override built-in methods in an
+instance without affecting the prototype, and just the same you can use
+override_property_setter() to override a setter in an instance without
+affecting the prototype.
+
+*/
+
+method(Element, 'override', function(method, func) {
+	let inherited = this[method] || noop
+	this[method] = function(...args) {
+		return func.call(this, inherited, ...args)
+	}
+})
+
+method(Element, 'do_before', function(method, func) {
+	let inherited = repl(this[method], noop)
+	this[method] = inherited && function(...args) {
+		func.call(this, ...args)
+		inherited.call(this, ...args)
+	} || func
+})
+
+method(Element, 'do_after', function(method, func) {
+	let inherited = repl(this[method], noop)
+	this[method] = inherited && function(...args) {
+		inherited.call(this, ...args)
+		func.call(this, ...args)
+	} || func
+})
+
+/* ---------------------------------------------------------------------------
+// element virtual properties
+// ---------------------------------------------------------------------------
+publishes:
+	e.property(name, get, [set])
+	e.prop(name, attrs)
+	e.<prop>
+	e.props: {prop->prop_attrs}
+		store: false          value is read by calling `e.get_<prop>()`.
+		attr: true|NAME       value is *also* stored into a html attribute.
+		style                 prop represents a css style.
+		private               document is not notifed of prop value changes.
+		default               default value.
+		convert(v1, v0)       convert value when setting the property.
+		type                  type for object inspector.
+		style_format          format css style to set value.
+		style_parse           parse css style to get value.
+		from_attr             converter from html attr representation.
+		to_attr               converter to html attr representation.
+		bind_id               the prop represents an element id to dynamically link to.
+		nosave                xmodule: do not auto-save layers when prop changes.
+calls:
+	e.get_<prop>() -> v
+	e.set_<prop>(v1, v0)
+fires:
+	^document.'prop_changed' (e, prop, v1, v0)
+	^window.'element_id_changed' (e, id, id0)
+	^window.'ID0.id_changed' (e, id, id0)
+--------------------------------------------------------------------------- */
+
+method(Element, 'property', function(name, get, set) {
+	return property(this, name, get, set)
+})
+
+method(Element, 'xon' , function() { this.xmodule_noupdate = false })
+method(Element, 'xoff', function() { this.xmodule_noupdate = true  })
+
+let fire_prop_changed = function(e, prop, v1, v0) {
+	document.fire('prop_changed', e, prop, v1, v0)
 }
 
-(function() {
-	function same_nodes(t, items) {
-		if (t.length != items.length)
-			return false
-		for (let i = 0; i < t.length; i++) {
-			let id0 = items[i].id
-			let id1 = isstr(t[i]) ? t[i] : t[i].id
-			if (!id1 || !id0 || id1 != id0)
-				return false
-		}
-		return true
-	}
-	method(Element, 'set_vdom', function(vdom_nodes) {
-		for (let i = 0, n = vdom_nodes.length; i < n; i++) {
-			let v = vdom_nodes[i]
+let resolve_linked_element = function(id) { // stub
+	let e = window[id]
+	return iselem(e) && e.bound ? e : null
+}
+
+// NOTE: all elements need to call this if they want to be linked-to!
+method(Element, 'notify_id_changed', function() {
+	if (this._notify_id_changed)
+		return
+	this._notify_id_changed = true
+	this.on('attr_changed', function(k, v, v0) {
+		if (k == 'id') {
+			window.fire('element_id_changed', this, v, v0)
+			window.fire(v0+'.id_changed', this, v, v0)
 		}
 	})
-})()
+})
+
+let from_bool_attr = v => repl(repl(v, '', true), 'false', false)
+
+let from_attr_func = function(opt) {
+	return opt.from_attr
+			|| (opt.type == 'bool'   && from_bool_attr)
+			|| (opt.type == 'number' && num)
+}
+
+let set_attr_func = function(e, k, opt) {
+	if (opt.to_attr)
+		return (v) => e.attr(k, v)
+	if (opt.type == 'bool')
+		return (v) => e.bool_attr(k, v || null)
+	return (v) => e.attr(k, v)
+}
+
+method(Element, 'prop', function(prop, opt) {
+	let e = this
+	opt = opt || {}
+	assign_opt(opt, e.props && e.props[prop])
+	let getter = 'get_'+prop
+	let setter = 'set_'+prop
+	let type = opt.type
+	opt.name = prop
+	let convert = opt.convert || return_arg
+	let priv = opt.private
+	if (!e[setter])
+		e[setter] = noop
+	let prop_changed = fire_prop_changed
+	let dv = opt.default
+
+	opt.from_attr = from_attr_func(opt)
+	let prop_attr = isstr(opt.attr) ? opt.attr : prop
+	let set_attr = opt.attr && set_attr_func(e, prop_attr, opt)
+	if (prop_attr != prop)
+		attr(e, 'attr_prop_map')[prop_attr] = prop
+
+	if (!(opt.store == false) && !opt.style) {
+		let v = dv
+		function get() {
+			return v
+		}
+		function set(v1) {
+			let v0 = v
+			v1 = convert(v1, v0)
+			if (v1 === v0)
+				return
+			v = v1
+			e[setter](v1, v0)
+			if (set_attr)
+				set_attr(v1)
+			if (!priv)
+				prop_changed(e, prop, v1, v0)
+			e.update()
+		}
+		if (dv != null && set_attr && !e.hasattr(prop_attr))
+			set_attr(dv)
+	} else if (opt.style) {
+		let style = opt.style
+		let format = opt.style_format || return_arg
+		let parse  = opt.style_parse  || type == 'number' && num || (v => repl(v, '', undefined))
+		if (dv != null && parse(e.style[style]) == null)
+			e.style[style] = format(dv)
+		function get() {
+			return parse(e.style[style])
+		}
+		function set(v) {
+			let v0 = get.call(e)
+			v = convert(v, v0)
+			if (v == v0)
+				return
+			e.style[style] = format(v)
+			v = get.call(e) // take it again (browser only sets valid values)
+			if (v == v0)
+				return
+			e[setter](v, v0)
+			if (!priv)
+				prop_changed(e, prop, v, v0)
+			e.update()
+		}
+	} else {
+		assert(!('default' in opt))
+		function get() {
+			return e[getter]()
+		}
+		function set(v) {
+			let v0 = e[getter]()
+			v = convert(v, v0)
+			if (v === v0)
+				return
+			e[setter](v, v0)
+			if (!priv)
+				prop_changed(e, prop, v, v0)
+			e.update()
+		}
+	}
+
+	// id-based dynamic binding of external elements.
+	if (opt.bind_id) {
+		assert(!priv)
+		let ID = prop
+		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
+		let REF = opt.bind_id
+		function element_bind(te, on) {
+			if (e[ID] == te.id)
+				e[REF] = on ? te : null
+				e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
+		}
+		function element_id_changed(te, id1, id0) {
+			e[ID] = id1
+		}
+		let bind_element
+		function id_prop_changed(id1, id0) {
+			if (id0 != null) {
+				bind_element(false)
+				e.on('bind', bind_element, false)
+				bind_element = null
+			}
+			if (id1 != null) {
+				bind_element = function(on) {
+					e[REF] = on ? resolve_linked_element(e[ID]) : null
+					e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, e[ID])
+					window.on(id1+'.bind', element_bind, on)
+					window.on(id1+'.id_changed', element_id_changed, true)
+				}
+				e.on('bind', bind_element, true)
+				if (e.bound)
+					bind_element(true)
+			}
+		}
+		prop_changed = function(e, k, v1, v0) {
+			fire_prop_changed(e, k, v1, v0)
+			id_prop_changed(v1, v0)
+		}
+		id_prop_changed(e[ID])
+	}
+
+	e.property(prop, get, set)
+
+	if (!priv)
+		attr(e, 'props')[prop] = opt
+
+})
+
+method(Element, 'alias', function(new_name, old_name) {
+	if (this.props)
+		this.props[new_name] = this.get_prop_attrs(old_name)
+	alias(this, new_name, old_name)
+})
+
+// dynamic properties.
+e.set_prop = function(k, v) { this[k] = v } // stub
+e.get_prop = function(k) { return this[k] } // stub
+e.get_prop_attrs = function(k) { return this.props[k] } // stub
+e.get_props = function() { return this.props }
+e.save_prop = function(k) {
+	let v = this.get_prop(k)
+	fire_prop_changed(this, k, v, v)
+}
+
+// prop serialization.
+e.serialize_prop = function(k, v) {
+	let pa = this.get_prop_attrs(k)
+	if (pa && pa.serialize)
+		v = pa.serialize(v)
+	else if (isobject(v) && v.serialize)
+		v = v.serialize()
+	return v
+}
+
+/* ---------------------------------------------------------------------------
+// dynamic element binding mixin
+// ---------------------------------------------------------------------------
+provides:
+	e.set_linked_element(key, id)
+calls:
+	e.bind_linked_element(key, te, on)
+	e.linked_element_id_changed(key, id1, id0)
+--------------------------------------------------------------------------- */
+
+method(Element, 'element_links', function() {
+
+	let e = this
+
+	e.bind_linked_element = noop
+	e.linked_element_id_changed = noop
+
+	let links = map() // k->te
+	let all_keys = map() // id->set(K)
+
+	e.set_linked_element = function(k, id1) {
+		let te1 = id1 != null && resolve_linked_element(id1)
+		let te0 = links.get(k)
+		if (te0) {
+			let id0 = te0.id
+			if (te1 == te0)
+				return
+			let keys = all_keys.get(id0)
+			keys.delete(k)
+			if (!keys.size)
+				all_keys.delete(id0)
+			if (te0.bound)
+				e.bind_linked_element(k, te0, false)
+		}
+		links.set(k, te1)
+		if (id1)
+			attr(all_keys, id1, set).add(k)
+		if (te1)
+			e.bind_linked_element(k, te1, true)
+	}
+
+	function element_bind(te, on) { // ^window.element_bind
+		let keys = all_keys.get(te.id)
+		if (!keys) return
+		te = resolve_linked_element(te.id)
+		if (!te) return
+		for (let k of keys) {
+			links.set(k, on ? te : null)
+			e.bind_linked_element(k, te, on)
+		}
+	}
+
+	function element_id_changed(te, id1, id0) { // ^window.element_id_changed
+		let keys = all_keys.get(id0)
+		if (keys)
+			for (let k of keys)
+				e.linked_element_id_changed(k, id1, id0)
+	}
+
+	e.on_bind(function(on) {
+		for (let [id, keys] of all_keys) {
+			for (let k of keys) {
+				if (on) {
+					let te = resolve_linked_element(id)
+					if (te) {
+						links.set(k, te)
+						e.bind_linked_element(k, te, true)
+					}
+				} else {
+					let te = links.get(k)
+					if (te) {
+						links.set(k, null)
+						e.bind_linked_element(k, te, false)
+					}
+				}
+			}
+		}
+		window.on('element_bind', element_bind, on)
+		window.on('element_id_changed', element_id_changed, on)
+	})
+
+})
+
+/* deferred DOM updating -----------------------------------------------------
+
+Rationale: some widgets need to measure the DOM in order to position
+themselves (eg. popups) or resize their canvas (eg. grid), which requires
+that the DOM that they depend on be fully updated for rect() to be correct.
+Solution: split DOM updating into stages. When widgets need to update their
+DOM, they call their update() method which adds them to a global update set.
+On the next animation frame, their do_update() method is called in which they
+update their DOM, or at least the part of their DOM that they can update
+without measuring the DOM in any way and without accessing the DOM of other
+widgets in any way. In do_update() widgets can call position() which asks to
+be allowed to measure the DOM later. In stage 2, for the widgets that called
+position(), their do_measure() is called in which they can call rect() but
+only on themselves and their parents. Stage 3, their do_position() method is
+called, in which they can update their DOM based on measurements kept from
+do_measure() (this causes a reflow on first measurement, and there might be
+a reflow after positioning as well).
+
+Outside of do_update() you can update the DOM freely but not measure it after.
+If you need to measure it (eg. in pointermove events), do it first!
+
+NOTE: Inside do_update() widgets should not access any parts of other widgets
+that those widgets update in their own do_update() method since the order of
+do_update() calls is undefined. Widgets can only be sure that their parents
+are positioned by the time their own do_measure() is called.
+
+NOTE: For widgets that asked to be positioned, their parents are positioned
+first, in top-down order, possibly causing multiple reflows.
+
+NOTE: The reason for splitting do_measure() and do_positon() into separate
+stages is to minimize reflows, otherwise the DOM doesn't change between
+do_measure() and do_position() as far as the widget is concerned.
+
+Enable DEBUG_UPDATE to trace the whole process.
+
+*/
+
+let updating = false
+let update_set = set() // {elem}
+let position_set = set() // {elem}
+
+let position_with_parents = function(e) {
+	if (position_set.has(e)) {
+		position_with_parents(e.parent)
+		e.debug_if(DEBUG_UPDATE, 'M')
+		e.do_measure()
+		e.debug_if(DEBUG_UPDATE, 'P')
+		e.do_position()
+		position_set.delete(e)
+	}
+}
+
+let update_all = raf_wrap(function update_all() {
+
+	updating = true
+
+	// NOTE: do_update() can add widgets which calls bind() on them which calls
+	// update() which adds more widgets to update_set while iterating it.
+	// The iterator will iterate over those as well (tested on FF & Chrome).
+	for (let e of update_set)
+		e._do_update()
+
+	// DOM updates done. We can now positon any elements that require measuring
+	// the DOM to position themselves. For each element that wants to measure
+	// the DOM, we make sure that all its parents are measured and positioned
+	// first, in top-to-bottom order.
+	for (let e of position_set)
+		position_with_parents(e.parent)
+
+	// only leaf widgets left to measure and position: measure all first,
+	// then position all.
+	for (let e of position_set) {
+		e.debug_if(DEBUG_UPDATE, 'M')
+		e.do_measure()
+	}
+	for (let e of position_set) {
+		e.debug_if(DEBUG_UPDATE, 'P')
+		e.do_position()
+	}
+
+	update_set.clear()
+	position_set.clear()
+
+	updating = false
+})
+
+method(Element, 'update', function(opt) {
+	let update_opt = this._update_opt
+	if (update_opt) {
+		if (opt)
+			assign_opt(update_opt, opt)
+		else
+			update_opt.all = true
+	} else if (opt) {
+		update_opt = opt
+		this._update_opt = update_opt
+	} else {
+		update_opt = {all: true}
+		this._update_opt = update_opt
+	}
+	if (!this.bound)
+		return
+	if (update_opt.show != null)
+		this.show(update_opt.show)
+	if (this.hidden)
+		return
+	if (update_set.has(this)) // update() inside do_update(), eg. a prop was set.
+		return
+	update_set.add(this)
+	if (updating)
+		return
+	// ^^ update() called while updating: the update_set iterator will
+	// call do_update() in this frame, no need to ask for another frame.
+	update_all()
+})
+
+method(Element, 'cancel_update', function() {
+	update_set.delete(e)
+	position_set.delete(e)
+})
+
+method(Element, 'on_update', function(f) {
+	this.bound = this.bound || false
+	this.do_after('do_update', f)
+})
+
+method(Element, '_do_update', function() {
+	let opt = this._update_opt
+	this._update_opt = null
+	this.debug_open_if(DEBUG_UPDATE, 'U', Object.keys(opt).join(','))
+	if (this.do_update)
+		this.do_update(opt)
+	if (opt.show)
+		this.show()
+	this.position()
+	this.debug_close_if(DEBUG_UPDATE)
+})
+
+method(Element, 'position', function() {
+	if (!this.do_position)
+		return
+	if (!this.bound)
+		return
+	if (this.hidden)
+		return
+	position_set.add(this)
+	if (updating)
+		return
+	// ^^ position() called while updating: no need to ask for another frame.
+	update_all()
+})
+
+method(Element, 'on_measure', function(f) {
+	this.bound = this.bound || false
+	this.do_after('do_measure', f)
+})
+
+method(Element, 'on_position', function(f) {
+	this.bound = this.bound || false
+	this.do_after('do_position', f)
+})
+
+e.do_bind = function(on) {
+	let e = this
+	assert(e.bound != null)
+	if (on) {
+		e.debug_open_if(DEBUG_BIND, '+')
+		let t0 = PROFILE_BIND_TIME && time()
+		e.fire('bind', true)
+		if (e.id) {
+			window.fire('element_bind', e, true)
+			window.fire(e.id+'.bind', e, true)
+		}
+		if (PROFILE_BIND_TIME) {
+			let t1 = time()
+			let dt = (t1 - t0) * 1000
+			if (dt >= SLOW_BIND_TIME_MS)
+				debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name)
+		}
+		e.update()
+		e.debug_close_if(DEBUG_BIND)
+	} else {
+		e.debug_open_if(DEBUG_BIND, '-')
+		e.cancel_update()
+		e.fire('bind', false)
+		if (e.id) {
+			window.fire('element_bind', e, false)
+			window.fire(e.id+'.bind', e, false)
+		}
+		e.debug_close_if(DEBUG_BIND)
+	}
+}
 
 /* events & event wrappers ---------------------------------------------------
 
@@ -1397,6 +1920,8 @@ function raf_wrap(f) {
 
 // animation easing ----------------------------------------------------------
 
+// TODO: reimplement this over the Web Animation API, but keep this API.
+
 easing = obj() // from easing.lua
 
 easing.reverse = (f, t, ...args) => 1 - f(1 - t, ...args)
@@ -1714,7 +2239,6 @@ function live_move_mixin(e) {
 	return e
 }
 
-
 // lazy image loading --------------------------------------------------------
 
 let lazy_load_all = function() {
@@ -1772,8 +2296,7 @@ register_component('script', function(e) {
 		return
 	// calling with `e` as `this` allows `this.on('bind',...)` inside the script
 	// and also attaching other elements to the script for lifetime control!
-	//console.log(e.text)
-	(function() { eval.call(window, e.text) }).call(e)
+	(new Function('', e.text)).call(e)
 }, '[run]')
 
 // not initializing components inside the template tag -----------------------
@@ -1789,544 +2312,6 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 	if (this.width  != w) this.width  = w
 	if (this.height != h) this.height = h
 })
-
-/* element method overriding -------------------------------------------------
-
-NOTE: unlike global override(), e.override() cannot override built-in methods.
-You can still use the global override() to override built-in methods in an
-instance without affecting the prototype, and just the same you can use
-override_property_setter() to override a setter in an instance without
-affecting the prototype.
-
-*/
-
-method(Element, 'override', function(method, func) {
-	let inherited = this[method] || noop
-	this[method] = function(...args) {
-		return func.call(this, inherited, ...args)
-	}
-})
-
-method(Element, 'do_before', function(method, func) {
-	let inherited = repl(this[method], noop)
-	this[method] = inherited && function(...args) {
-		func.call(this, ...args)
-		inherited.call(this, ...args)
-	} || func
-})
-
-method(Element, 'do_after', function(method, func) {
-	let inherited = repl(this[method], noop)
-	this[method] = inherited && function(...args) {
-		inherited.call(this, ...args)
-		func.call(this, ...args)
-	} || func
-})
-
-/* ---------------------------------------------------------------------------
-// component property system mixin
-// ---------------------------------------------------------------------------
-publishes:
-	e.property(name, get, [set])
-	e.prop(name, attrs)
-	e.<prop>
-	e.props: {prop->prop_attrs}
-		store: false          value is read by calling `e.get_<prop>()`.
-		attr: true|NAME       value is *also* stored into a html attribute.
-		style                 prop represents a css style.
-		private               document is not notifed of prop value changes.
-		default               default value.
-		convert(v1, v0)       convert value when setting the property.
-		type                  type for object inspector.
-		style_format          format css style to set value.
-		style_parse           parse css style to get value.
-		from_attr             converter from html attr representation.
-		to_attr               converter to html attr representation.
-		bind_id               the prop represents an element id to dynamically link to.
-		nosave                xmodule: do not auto-save layers when prop changes.
-calls:
-	e.get_<prop>() -> v
-	e.set_<prop>(v1, v0)
-fires:
-	^document.'prop_changed' (e, prop, v1, v0)
-	^window.'element_id_changed' (e, id, id0)
-	^window.'ID0.id_changed' (e, id, id0)
---------------------------------------------------------------------------- */
-
-method(Element, 'property', function(name, get, set) {
-	return property(this, name, get, set)
-})
-
-method(Element, 'xon' , function() { this.xmodule_noupdate = false })
-method(Element, 'xoff', function() { this.xmodule_noupdate = true  })
-
-let fire_prop_changed = function(e, prop, v1, v0) {
-	document.fire('prop_changed', e, prop, v1, v0)
-}
-
-let resolve_linked_element = function(id) { // stub
-	let e = window[id]
-	return iselem(e) && e.bound ? e : null
-}
-
-// NOTE: all elements need to call this if they want to be linked-to!
-method(Element, 'notify_id_changed', function() {
-	if (this._notify_id_changed)
-		return
-	this._notify_id_changed = true
-	this.on('attr_changed', function(k, v, v0) {
-		if (k == 'id') {
-			window.fire('element_id_changed', this, v, v0)
-			window.fire(v0+'.id_changed', this, v, v0)
-		}
-	})
-})
-
-let from_bool_attr = v => repl(repl(v, '', true), 'false', false)
-
-let from_attr_func = function(opt) {
-	return opt.from_attr
-			|| (opt.type == 'bool'   && from_bool_attr)
-			|| (opt.type == 'number' && num)
-}
-
-let set_attr_func = function(e, k, opt) {
-	if (opt.to_attr)
-		return (v) => e.attr(k, v)
-	if (opt.type == 'bool')
-		return (v) => e.bool_attr(k, v || null)
-	return (v) => e.attr(k, v)
-}
-
-method(Element, 'prop', function(prop, opt) {
-	let e = this
-	opt = opt || {}
-	assign_opt(opt, e.props && e.props[prop])
-	let getter = 'get_'+prop
-	let setter = 'set_'+prop
-	let type = opt.type
-	opt.name = prop
-	let convert = opt.convert || return_arg
-	let priv = opt.private
-	if (!e[setter])
-		e[setter] = noop
-	let prop_changed = fire_prop_changed
-	let dv = opt.default
-
-	opt.from_attr = from_attr_func(opt)
-	let prop_attr = isstr(opt.attr) ? opt.attr : prop
-	let set_attr = opt.attr && set_attr_func(e, prop_attr, opt)
-	if (prop_attr != prop)
-		attr(e, 'attr_prop_map')[prop_attr] = prop
-
-	if (!(opt.store == false) && !opt.style) {
-		let v = dv
-		function get() {
-			return v
-		}
-		function set(v1) {
-			let v0 = v
-			v1 = convert(v1, v0)
-			if (v1 === v0)
-				return
-			v = v1
-			e[setter](v1, v0)
-			if (set_attr)
-				set_attr(v1)
-			if (!priv)
-				prop_changed(e, prop, v1, v0)
-			e.update()
-		}
-		if (dv != null && set_attr && !e.hasattr(prop_attr))
-			set_attr(dv)
-	} else if (opt.style) {
-		let style = opt.style
-		let format = opt.style_format || return_arg
-		let parse  = opt.style_parse  || type == 'number' && num || (v => repl(v, '', undefined))
-		if (dv != null && parse(e.style[style]) == null)
-			e.style[style] = format(dv)
-		function get() {
-			return parse(e.style[style])
-		}
-		function set(v) {
-			let v0 = get.call(e)
-			v = convert(v, v0)
-			if (v == v0)
-				return
-			e.style[style] = format(v)
-			v = get.call(e) // take it again (browser only sets valid values)
-			if (v == v0)
-				return
-			e[setter](v, v0)
-			if (!priv)
-				prop_changed(e, prop, v, v0)
-			e.update()
-		}
-	} else {
-		assert(!('default' in opt))
-		function get() {
-			return e[getter]()
-		}
-		function set(v) {
-			let v0 = e[getter]()
-			v = convert(v, v0)
-			if (v === v0)
-				return
-			e[setter](v, v0)
-			if (!priv)
-				prop_changed(e, prop, v, v0)
-			e.update()
-		}
-	}
-
-	// id-based dynamic binding of external elements.
-	if (opt.bind_id) {
-		assert(!priv)
-		let ID = prop
-		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
-		let REF = opt.bind_id
-		function element_bind(te, on) {
-			if (e[ID] == te.id)
-				e[REF] = on ? te : null
-				e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
-		}
-		function element_id_changed(te, id1, id0) {
-			e[ID] = id1
-		}
-		let bind_element
-		function id_prop_changed(id1, id0) {
-			if (id0 != null) {
-				bind_element(false)
-				e.on('bind', bind_element, false)
-				bind_element = null
-			}
-			if (id1 != null) {
-				bind_element = function(on) {
-					e[REF] = on ? resolve_linked_element(e[ID]) : null
-					e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, e[ID])
-					window.on(id1+'.bind', element_bind, on)
-					window.on(id1+'.id_changed', element_id_changed, true)
-				}
-				e.on('bind', bind_element, true)
-				if (e.bound)
-					bind_element(true)
-			}
-		}
-		prop_changed = function(e, k, v1, v0) {
-			fire_prop_changed(e, k, v1, v0)
-			id_prop_changed(v1, v0)
-		}
-		id_prop_changed(e[ID])
-	}
-
-	e.property(prop, get, set)
-
-	if (!priv)
-		attr(e, 'props')[prop] = opt
-
-})
-
-method(Element, 'alias', function(new_name, old_name) {
-	if (this.props)
-		this.props[new_name] = this.get_prop_attrs(old_name)
-	alias(this, new_name, old_name)
-})
-
-// dynamic properties.
-e.set_prop = function(k, v) { this[k] = v } // stub
-e.get_prop = function(k) { return this[k] } // stub
-e.get_prop_attrs = function(k) { return this.props[k] } // stub
-e.get_props = function() { return this.props }
-e.save_prop = function(k) {
-	let v = this.get_prop(k)
-	fire_prop_changed(this, k, v, v)
-}
-
-// prop serialization.
-e.serialize_prop = function(k, v) {
-	let pa = this.get_prop_attrs(k)
-	if (pa && pa.serialize)
-		v = pa.serialize(v)
-	else if (isobject(v) && v.serialize)
-		v = v.serialize()
-	return v
-}
-
-/* ---------------------------------------------------------------------------
-// dynamic element binding mixin
-// ---------------------------------------------------------------------------
-provides:
-	e.set_linked_element(key, id)
-calls:
-	e.bind_linked_element(key, te, on)
-	e.linked_element_id_changed(key, id1, id0)
---------------------------------------------------------------------------- */
-
-method(Element, 'element_links', function() {
-
-	let e = this
-
-	e.bind_linked_element = noop
-	e.linked_element_id_changed = noop
-
-	let links = map() // k->te
-	let all_keys = map() // id->set(K)
-
-	e.set_linked_element = function(k, id1) {
-		let te1 = id1 != null && resolve_linked_element(id1)
-		let te0 = links.get(k)
-		if (te0) {
-			let id0 = te0.id
-			if (te1 == te0)
-				return
-			let keys = all_keys.get(id0)
-			keys.delete(k)
-			if (!keys.size)
-				all_keys.delete(id0)
-			if (te0.bound)
-				e.bind_linked_element(k, te0, false)
-		}
-		links.set(k, te1)
-		if (id1)
-			attr(all_keys, id1, set).add(k)
-		if (te1)
-			e.bind_linked_element(k, te1, true)
-	}
-
-	function element_bind(te, on) { // ^window.element_bind
-		let keys = all_keys.get(te.id)
-		if (!keys) return
-		te = resolve_linked_element(te.id)
-		if (!te) return
-		for (let k of keys) {
-			links.set(k, on ? te : null)
-			e.bind_linked_element(k, te, on)
-		}
-	}
-
-	function element_id_changed(te, id1, id0) { // ^window.element_id_changed
-		let keys = all_keys.get(id0)
-		if (keys)
-			for (let k of keys)
-				e.linked_element_id_changed(k, id1, id0)
-	}
-
-	e.on_bind(function(on) {
-		for (let [id, keys] of all_keys) {
-			for (let k of keys) {
-				if (on) {
-					let te = resolve_linked_element(id)
-					if (te) {
-						links.set(k, te)
-						e.bind_linked_element(k, te, true)
-					}
-				} else {
-					let te = links.get(k)
-					if (te) {
-						links.set(k, null)
-						e.bind_linked_element(k, te, false)
-					}
-				}
-			}
-		}
-		window.on('element_bind', element_bind, on)
-		window.on('element_id_changed', element_id_changed, on)
-	})
-
-})
-
-/* deferred DOM updating -----------------------------------------------------
-
-Rationale: some widgets need to measure the DOM in order to position
-themselves (eg. popups) or resize their canvas (eg. grid), which requires
-that the DOM that they depend on be fully updated for rect() to be correct.
-Solution: split DOM updating into stages. When widgets need to update their
-DOM, they call their update() method which adds them to a global update set.
-On the next animation frame, their do_update() method is called in which they
-update their DOM, or at least the part of their DOM that they can update
-without measuring the DOM in any way and without accessing the DOM of other
-widgets in any way. In do_update() widgets can call position() which asks to
-be allowed to measure the DOM later. In stage 2, for the widgets that called
-position(), their do_measure() is called in which they can call rect() but
-only on themselves and their parents. Stage 3, their do_position() method is
-called, in which they can update their DOM based on measurements kept from
-do_measure() (this causes a reflow on first measurement, and there might be
-a reflow after positioning as well).
-
-Outside of do_update() you can update the DOM freely but not measure it after.
-If you need to measure it (eg. in pointermove events), do it first!
-
-NOTE: Inside do_update() widgets should not access any parts of other widgets
-that those widgets update in their own do_update() method since the order of
-do_update() calls is undefined. Widgets can only be sure that their parents
-are positioned by the time their own do_measure() is called.
-
-NOTE: For widgets that asked to be positioned, their parents are positioned
-first, in top-down order, possibly causing multiple reflows.
-
-NOTE: The reason for splitting do_measure() and do_positon() into separate
-stages is to minimize reflows, otherwise the DOM doesn't change between
-do_measure() and do_position() as far as the widget is concerned.
-
-Enable DEBUG_UPDATE to trace the whole process.
-
-*/
-
-let updating = false
-let update_set = set() // {elem}
-let position_set = set() // {elem}
-
-let position_with_parents = function(e) {
-	if (position_set.has(e)) {
-		position_with_parents(e.parent)
-		e.debug_if(DEBUG_UPDATE, 'M')
-		e.do_measure()
-		e.debug_if(DEBUG_UPDATE, 'P')
-		e.do_position()
-		position_set.delete(e)
-	}
-}
-
-let update_all = raf_wrap(function update_all() {
-
-	updating = true
-
-	// NOTE: do_update() can add widgets which calls bind() on them which calls
-	// update() which adds more widgets to update_set while iterating it.
-	// The iterator will iterate over those as well (tested on FF & Chrome).
-	for (let e of update_set)
-		e._do_update()
-
-	// DOM updates done. We can now positon any elements that require measuring
-	// the DOM to position themselves. For each element that wants to measure
-	// the DOM, we make sure that all its parents are measured and positioned
-	// first, in top-to-bottom order.
-	for (let e of position_set)
-		position_with_parents(e.parent)
-
-	// only leaf widgets left to measure and position: measure all first,
-	// then position all.
-	for (let e of position_set) {
-		e.debug_if(DEBUG_UPDATE, 'M')
-		e.do_measure()
-	}
-	for (let e of position_set) {
-		e.debug_if(DEBUG_UPDATE, 'P')
-		e.do_position()
-	}
-
-	update_set.clear()
-	position_set.clear()
-
-	updating = false
-})
-
-method(Element, 'update', function(opt) {
-	let update_opt = this._update_opt
-	if (update_opt) {
-		if (opt)
-			assign_opt(update_opt, opt)
-		else
-			update_opt.all = true
-	} else if (opt) {
-		update_opt = opt
-		this._update_opt = update_opt
-	} else {
-		update_opt = {all: true}
-		this._update_opt = update_opt
-	}
-	if (!this.bound)
-		return
-	if (update_opt.show != null)
-		this.show(update_opt.show)
-	if (this.hidden)
-		return
-	if (update_set.has(this)) // update() inside do_update(), eg. a prop was set.
-		return
-	update_set.add(this)
-	if (updating)
-		return
-	// ^^ update() called while updating: the update_set iterator will
-	// call do_update() in this frame, no need to ask for another frame.
-	update_all()
-})
-
-method(Element, 'cancel_update', function() {
-	update_set.delete(e)
-	position_set.delete(e)
-})
-
-method(Element, 'on_update', function(f) {
-	this.bound = this.bound || false
-	this.do_after('do_update', f)
-})
-
-method(Element, '_do_update', function() {
-	let opt = this._update_opt
-	this._update_opt = null
-	this.debug_open_if(DEBUG_UPDATE, 'U', Object.keys(opt).join(','))
-	if (this.do_update)
-		this.do_update(opt)
-	if (opt.show)
-		this.show()
-	this.position()
-	this.debug_close_if(DEBUG_UPDATE)
-})
-
-method(Element, 'position', function() {
-	if (!this.do_position)
-		return
-	if (!this.bound)
-		return
-	if (this.hidden)
-		return
-	position_set.add(this)
-	if (updating)
-		return
-	// ^^ position() called while updating: no need to ask for another frame.
-	update_all()
-})
-
-method(Element, 'on_measure', function(f) {
-	this.bound = this.bound || false
-	this.do_after('do_measure', f)
-})
-
-method(Element, 'on_position', function(f) {
-	this.bound = this.bound || false
-	this.do_after('do_position', f)
-})
-
-e.do_bind = function(on) {
-	let e = this
-	assert(e.bound != null)
-	if (on) {
-		e.debug_open_if(DEBUG_BIND, '+')
-		let t0 = PROFILE_BIND_TIME && time()
-		e.fire('bind', true)
-		if (e.id) {
-			window.fire('element_bind', e, true)
-			window.fire(e.id+'.bind', e, true)
-		}
-		if (PROFILE_BIND_TIME) {
-			let t1 = time()
-			let dt = (t1 - t0) * 1000
-			if (dt >= SLOW_BIND_TIME_MS)
-				debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name)
-		}
-		e.update()
-		e.debug_close_if(DEBUG_BIND)
-	} else {
-		e.debug_open_if(DEBUG_BIND, '-')
-		e.cancel_update()
-		e.fire('bind', false)
-		if (e.id) {
-			window.fire('element_bind', e, false)
-			window.fire(e.id+'.bind', e, false)
-		}
-		e.debug_close_if(DEBUG_BIND)
-	}
-}
 
 /* popups --------------------------------------------------------------------
 

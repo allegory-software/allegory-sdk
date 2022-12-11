@@ -44,8 +44,8 @@ or more rows/cells and can push them to a server (aka 3-way binding).
 Like usual, docs are in the code but this time there's also a [demo (master)]
 (and [demo (dev)]).
 
-[demo (master)]: https://raw.githack.com/allegory-software/allegory-sdk/master/www/x-widgets-demo.html
-[demo (dev)]:    https://raw.githack.com/allegory-software/allegory-sdk/dev/www/x-widgets-demo.html
+[demo (master)]: https://raw.githack.com/allegory-software/allegory-sdk/master/tests/www/x-widgets-demo.html
+[demo (dev)]:    https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/x-widgets-demo.html
 
 ## Installation
 

@@ -179,7 +179,7 @@ indexing:
 		ix.tree() -> index_tree
 		ix.lookup(vals) -> [row1,...]
 		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
-		e.row_groups({col_groups:, [range_defs:], [rows:], [group_text_sep:]}) -> [row1, ...]
+		e.row_groups({col_groups:, [range_defs:], [rows:], [group_label_sep:]}) -> [row1, ...]
 
 master-detail:
 	needs:
@@ -2024,8 +2024,24 @@ function nav_widget(e) {
 		path.remove(path_pos)
 	}
 
+	// parse `COL[/OFFSET][/UNIT][/FREQ]`
+	function parse_range_def(col, range_defs) {
+		let freq, offset, unit
+		col = col.replace(/\/[^\/]+$/, k => { freq   = k.substring(1).num(); return '' })
+		col = col.replace(/\/[^\/]+$/, k => { unit   = k.substring(1); return '' })
+		col = col.replace(/\/[^\/]+$/, k => { offset = k.substring(1).num(); return '' })
+		if (freq != null || offset != null || unit != null) {
+			range_defs[col] = {
+				freq   : freq,
+				offset : offset,
+				unit   : unit,
+			}
+		}
+		return col
+	}
+
 	// opt:
-	//   col_groups      : 'col1 col2 > col3 col4 > ...'
+	//   col_groups      : 'col1[/...] col2 > col3 col4 > ...'
 	//   range_defs      : {col->{freq:, unit:, offset:}}
 	//   rows            : [row1,...]
 	//   group_label_sep : separator for multi-col group labels
@@ -2034,11 +2050,17 @@ function nav_widget(e) {
 		let col_groups = opt.col_groups.split(/\s*>\s*/)
 		if (false && col_groups.length == 1) // TODO: enable this optimization again?
 			return row_groups_one_level(opt.col_groups, opt.range_defs, opt.rows)
-		let all_cols = opt.col_groups.replaceAll('>', ' ')
+		let range_defs = obj()
+		if (opt.range_defs)
+			assign(range_defs, opt.range_defs.map(def => assign(obj(), def)))
+		let i = 0
+		for (let col of col_groups)
+			col_groups[i++] = parse_range_def(col, range_defs)
+		let all_cols = col_groups.join(' ')
 		let fields = optflds(all_cols)
 		if (!fields)
 			return
-		let tree = e.tree_index(all_cols, opt.range_defs, opt.rows).tree()
+		let tree = e.tree_index(all_cols, range_defs, opt.rows).tree()
 		let root_group = []
 		let depth = col_groups[0].words().length-1
 		function add_group(t, path, label_path, parent_group, parent_group_level) {
@@ -4795,11 +4817,8 @@ function nav_widget(e) {
 // ---------------------------------------------------------------------------
 
 component('x-nav', function(e) {
-
 	nav_widget(e)
-
 	return {hidden: true}
-
 })
 
 bare_nav = nav // synonim, better use this in js code (but use x-nav in html).
@@ -4819,6 +4838,50 @@ global_val_nav = function() {
 	document.head.add(nav)
 	nav.focus_cell(true, false)
 	return nav
+}
+
+/* ---------------------------------------------------------------------------
+mixin: widget that has a nav as its data model. the nav can be either
+external, internal, or missing (in which case the widget is disabled).
+
+// ------------------------------------------------------------------------ */
+
+function data_nav_widget(e) {
+
+	function update_data_nav() {
+
+		let internal0 = !!(e._data_nav && e._data_nav.parent == e)
+		let internal1 = !(e.rowset_name || e.rowset)
+
+		e.bind_data_nav(false)
+
+		if (internal1 != internal0) {
+			if (internal0)
+				e._data_nav.remove()
+			if (internal1)
+				e._data_nav = bare_nav()
+		}
+
+		let internal = e.rowset_name || e.rowset
+		let data_nav = e.data_nav || e._data_nav_id_nav
+
+		e.bind_data_nav(true)
+	}
+
+	// external nav, statically bound
+	e.set_data_nav = update_data_nav
+	e.prop('data_nav', {private: true, type: 'nav'})
+
+	// external nav, dynamically bound
+	e.set__data_nav_id_nav = update_data_nav
+	e.prop('data_nav_id', {type: 'nav', attr: 'data_nav', bind_id: '_data_nav_id_nav'})
+
+	// internal nav: local rowset binding
+	e.set_rowset = update_data_nav
+	e.prop('rowset', {private: true, type: 'rowset'})
+
+	// internal nav: remote rowset binding
+	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
 }
 
 // ---------------------------------------------------------------------------

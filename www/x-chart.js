@@ -3,6 +3,13 @@
 	Chart widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
+SHAPES
+	stack
+	pie
+	line line_dots area area_dots
+	column
+	bar
+
 */
 
 component('x-chart', 'Input', function(e) {
@@ -13,9 +20,9 @@ component('x-chart', 'Input', function(e) {
 
 	// config -----------------------------------------------------------------
 
-	e.prop('split_cols' , {type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('group_cols' , {type: 'col', col_nav: () => e.nav, attr: true})
-	e.prop('sum_cols'   , {type: 'col', col_nav: () => e.nav, attr: true})
+	e.prop('split_cols' , {type: 'col', col_nav: () => e._nav, attr: true})
+	e.prop('group_cols' , {type: 'col', col_nav: () => e._nav, attr: true})
+	e.prop('sum_cols'   , {type: 'col', col_nav: () => e._nav, attr: true})
 	e.prop('min_sum'    , {type: 'number', attr: true})
 	e.prop('max_sum'    , {type: 'number', attr: true})
 	e.prop('sum_step'   , {type: 'number', attr: true})
@@ -110,7 +117,7 @@ component('x-chart', 'Input', function(e) {
 
 	function try_update_model() {
 
-		if (!e.nav) return
+		if (!e._nav) return
 		if (e.sum_cols == null) return
 		if (e.group_cols == null) return
 
@@ -122,7 +129,7 @@ component('x-chart', 'Input', function(e) {
 			let tied = col.includes('..')
 			col = col.replace('..', '')
 			let agg = 'avg'; col.replace(/\/[^\/]+$/, k => { agg = k; return '' })
-			let fld = e.nav.optfld(col)
+			let fld = e._nav.optfld(col)
 			if (fld) // it's enough for one sum_col to be valid.
 				sum_defs.push({field: fld, tied: tied, tied_back: tied_back, agg: agg})
 			tied_back = fld ? tied : false
@@ -130,30 +137,11 @@ component('x-chart', 'Input', function(e) {
 		if (!sum_defs.length)
 			return
 
-		// parse `group_cols`: `COL[/OFFSET][/UNIT][/FREQ]`.
-		group_cols = []
-		let range_defs = obj()
-		for (let col of e.group_cols.trim().split(/\s+/)) {
-			let freq, offset, unit
-			col = col.replace(/\/[^\/]+$/, k => { freq   = k.substring(1).num(); return '' })
-			col = col.replace(/\/[^\/]+$/, k => { unit   = k.substring(1); return '' })
-			col = col.replace(/\/[^\/]+$/, k => { offset = k.substring(1).num(); return '' })
-			let fld = e.nav.optfld(col)
-			if (!fld)
-				return
-			group_cols.push(col)
-			if (freq != null || offset != null || unit != null) {
-				range_defs[col] = {
-					freq   : freq,
-					offset : offset,
-					unit   : unit,
-				}
-			}
-		}
+		group_cols = words(e.group_cols).map(s => s.match(/^[^/]+/)[0])
 		if (!group_cols.length)
 			return
 
-		if (!e.nav.rows.length)
+		if (!e._nav.rows.length)
 			return true
 
 		// group rows and compute the sums on each group.
@@ -163,10 +151,9 @@ component('x-chart', 'Input', function(e) {
 		all_split_groups = []
 		for (let sum_def of sum_defs) {
 
-			let split_groups = e.nav.row_groups({
-				col_groups : catany('>', e.split_cols, group_cols.join(' ')),
-				range_defs : range_defs,
-				rows       : e.nav.rows,
+			let split_groups = e._nav.row_groups({
+				col_groups : catany('>', e.split_cols, e.group_cols),
+				rows       : e._nav.rows,
 			})
 
 			if (!e.split_cols)
@@ -193,22 +180,22 @@ component('x-chart', 'Input', function(e) {
 		reset_model()
 		if (!try_update_model())
 			reset_model()
-		e.update()
+		e.update({model: true})
 	}
 
 	// compute label for a sum point.
-	function sum_label(cls, text, sum) {
+	function sum_label(cls, label, sum) {
 		let sum_fld = sum_defs[0].field
 		let a = []
-		if (text)
-			a.push(text)
-		a.push(e.nav.cell_display_val_for(null, sum_fld, sum))
+		if (label)
+			a.push(label)
+		a.push(e._nav.cell_display_val_for(null, sum_fld, sum))
 		return a.join_nodes(tag('br'), cls && div({class: cls}))
 	}
 
 	function val_text(val) {
-		let val_fld = e.nav.fld(group_cols[0]) // TODO: only works for single-col groups!
-		let s = e.nav.cell_display_val_for(null, val_fld, val)
+		let val_fld = e._nav.fld(group_cols[0]) // TODO: only works for single-col groups!
+		let s = e._nav.cell_display_val_for(null, val_fld, val)
 		return isnode(s) ? s.textContent : s
 	}
 
@@ -225,7 +212,7 @@ component('x-chart', 'Input', function(e) {
 			let slice = {}
 			let sum = group.sum
 			slice.sum = sum
-			slice.label = sum_label('x-chart-label', group.text, sum)
+			slice.label = group.label
 			slices.push(slice)
 			slices.total += sum
 		}
@@ -243,9 +230,11 @@ component('x-chart', 'Input', function(e) {
 		}
 		if (other_slice) {
 			other_slice.size = other_slice.sum / slices.total
-			other_slice.label = sum_label('x-chart-label', e.other_text, other_slice.sum)
+			other_slice.label = e.other_text
 			big_slices.push(other_slice)
 		}
+		for (let slice of big_slices)
+			slice.percent = (slice.size * 100).dec(0) + '%'
 		return big_slices
 	}
 
@@ -255,11 +244,79 @@ component('x-chart', 'Input', function(e) {
 
 	e.header = div({class: 'x-chart-header'})
 	e.view   = div({class: 'x-chart-view'})
-	e.add(e.header, e.view)
+	e.legend = div({class: 'x-chart-legend'})
+	e.add(e.header, div({class: 'x-chart-split'}, e.view, e.legend))
+
+	let legend_hit_slice
+
+	function do_update_legend_slices(slices) {
+		let i = 0
+		e.legend.clear()
+		for (let slice of slices) {
+			let color = split_color(i, slices.length)
+			let bullet = div({
+					class: 'x-chart-legend-bullet',
+					style: 'background-color: '+color,
+				})
+			let label   = div({class: 'x-chart-legend-label'}, slice.label)
+			let percent = div({class: 'x-chart-legend-percent'}, slice.percent)
+			e.legend.add(bullet, label, percent)
+			label.on('pointerenter', function() {
+				legend_hit_slice = slice
+				e.update()
+			})
+			label.on('pointerleave', function() {
+				legend_hit_slice = null
+				e.update()
+			})
+			i++
+		}
+	}
+
+	let legend_hit_cg
+
+	function do_update_legend_split_groups() {
+		let cgi = 0
+		e.legend.clear()
+		let groups = all_split_groups
+		for (let cg of groups) {
+			let color = split_color(cgi, groups.length)
+			let bullet = div({
+					class: 'x-chart-legend-bullet',
+					style: 'background-color: '+color,
+				})
+			let label = div({class: 'x-chart-legend-label'}, TC(cg.label))
+			e.legend.add(bullet, label)
+			label.on('pointerenter', function() {
+				legend_hit_cg = cg
+				e.update()
+			})
+			label.on('pointerleave', function() {
+				legend_hit_cg = null
+				e.update()
+			})
+			cgi++
+		}
+	}
 
 	let renderer = {} // {shape->cons(...)->update()}
+	let do_update
+	let do_measure
+	let do_position
 	let tt
 	let pointermove = noop
+
+	let shape
+	e.on_update(function(opt) {
+		if (shape != e.shape) {
+			pointermove = noop
+			shape = e.shape
+			assert(renderer[shape], 'invalid shape: {0}', e.shape)()
+		}
+		e.header.set(e.text)
+		if (do_update)
+			do_update(opt)
+	})
 
 	let view_w, view_h, view_css
 
@@ -268,10 +325,17 @@ component('x-chart', 'Input', function(e) {
 		view_w = floor(r.w)
 		view_h = floor(r.h)
 		view_css = e.view.css()
+		if (do_measure)
+			do_measure()
 	})
 
-	function slice_color(i, n) {
-		return hsl_to_rgb(((i / n) * 360 - 120) % 180, .8, .7)
+	e.on_position(function() {
+		if (do_position)
+			do_position()
+	})
+
+	function split_color(i, n, alpha) {
+		return hsl_to_rgb(((i / n) * 360 - 120) % 360, .8, .6, alpha)
 	}
 
 	renderer.stack = function() {
@@ -281,16 +345,18 @@ component('x-chart', 'Input', function(e) {
 			return
 
 		let stack = div({class: 'x-chart-stack'})
-		let labels = div({style: 'position: absolute;'})
+		let labels = div({class: 'x-chart-stack-labels'})
 		e.add(stack, labels)
 
 		return function() {
 			let i = 0
+			stack.clear()
+			e.legend.clear()
 			for (let slice of slices) {
 				let cdiv = div({class: 'x-chart-stack-slice'})
 				let sdiv = div({class: 'x-chart-stack-slice-ct'}, cdiv, slice.label)
 				sdiv.style.flex = slice.size
-				cdiv.style['background-color'] = slice_color(i, slices.length)
+				cdiv.style['background-color'] = split_color(i, slices.length)
 				stack.add(sdiv)
 				i++
 			}
@@ -303,55 +369,84 @@ component('x-chart', 'Input', function(e) {
 		if (!slices)
 			return
 
-		let pie = div({class: 'x-chart-pie'})
-		let labels = div({style: 'position: absolute;'})
-		e.add(pie, labels)
+		let canvas = tag('canvas', {
+			class : 'x-chart-canvas',
+			width : 0,
+			height: 0,
+		})
 
-		return function() {
+		let cx = canvas.getContext('2d')
 
-			let w = e.clientWidth
-			let h = e.clientHeight
-			let pw = (w / h < 1 ? w : h) * .5
+		// let pie0 = div({class: 'x-chart-pie-selected'})
+		// let pie1 = div({class: 'x-chart-pie'})
+		let labels = div({class: 'x-chart-pie-labels'})
+		e.view.add(canvas, labels)
 
-			pie.w = pw
-			pie.h = pw
-			pie.x = (w - pw) / 2
-			pie.y = (h - pw) / 2
+		do_update = function(opt) {
+			if (opt.model)
+				do_update_legend_slices(slices)
 
-			let s = []
+			labels.clear()
+			for (let slice of slices) {
+				slice.label = div({class: 'x-chart-pie-label'}, slice.percent)
+				labels.add(slice.label)
+			}
+		}
+
+		do_measure = function() {
+			for (let slice of slices) {
+				slice.label_w = slice.label.cw
+				slice.label_h = slice.label.ch
+			}
+		}
+
+		do_position = function() {
+
+			let sel_thickness = 14
+			let pw = min(view_w, view_h) - sel_thickness
+			let px = (view_w - pw) / 2
+			let py = (view_h - pw) / 2
+
+			canvas.resize(pw, pw, 100, 100)
+
+			// pie1.w = pw
+			// pie1.h = pw
+			// pie1.x = px
+			// pie1.y = py
+			//
+			// pie0.w = pw + sel_thickness
+			// pie0.h = pw + sel_thickness
+			// pie0.x = px - sel_thickness / 2
+			// pie0.y = py - sel_thickness / 2
+
+			let s1 = []
+			let s0 = []
 			let angle = 0
 			let i = 0
 			for (let slice of slices) {
 				let arclen = slice.size * 360
 
 				// generate a gradient step for this slice.
-				let color = slice_color(i, slices.length)
-				s.push(color + ' ' + angle.dec()+'deg '+(angle + arclen).dec()+'deg')
+				let color1 = split_color(i, slices.length)
+				let color0 = legend_hit_slice == slice
+					? split_color(i, slices.length, .5)
+					: '#ffffff00'
+				let arc = angle.dec()+'deg '+(angle + arclen).dec()+'deg'
+				s1.push(color1 + ' ' + arc)
+				s0.push(color0 + ' ' + arc)
 
-				// add the label and position it around the pie.
-				labels.add(slice.label)
-				let pad = 5
+				// add the percent label and position it inside the pie.
 				let center_angle = angle + arclen / 2
-				let [x, y] = point_around(w / 2, h / 2, pw / 2, center_angle - 90)
-				slice.label.x = x + pad
-				slice.label.y = y + pad
-				let left = center_angle > 180
-				let top  = center_angle < 90 || center_angle > 3 * 90
-				if (left)
-					slice.label.x = x - slice.label.clientWidth - pad
-				if (top)
-					slice.label.y = y - slice.label.clientHeight - pad
-
+				let [x, y] = point_around(px + pw / 2, py + pw / 2, pw / 2.7, center_angle - 90)
+				slice.label.x = x - slice.label_w / 2
+				slice.label.y = y - slice.label_h / 2
 				angle += arclen
 				i++
 			}
 
-			pie.style['background-image'] = 'conic-gradient(' + s.join(',') + ')'
+			// pie1.style['background-image'] = 'conic-gradient(' + s1.join(',') + ')'
+			// pie0.style['background-image'] = 'conic-gradient(' + s0.join(',') + ')'
 		}
-	}
-
-	function line_color(i, n, alpha) {
-		return hsl_to_rgb(((i / n) * 180 - 210) % 360, .8, .6, alpha)
 	}
 
 	function renderer_line_or_columns(columns, rotate, dots, area) {
@@ -363,8 +458,6 @@ component('x-chart', 'Input', function(e) {
 		})
 		e.view.set(canvas)
 		let cx = canvas.getContext('2d')
-
-		cx.font = view_css['font-size'] + ' ' + view_css.font
 
 		let line_h; {
 			let m = cx.measureText('M')
@@ -393,6 +486,7 @@ component('x-chart', 'Input', function(e) {
 							hit_y = y
 							hit_w = w
 							hit_h = h
+							legend_hit_cg = null
 							return true
 						}
 					}
@@ -418,6 +512,7 @@ component('x-chart', 'Input', function(e) {
 							hit_y = hit_xg.y
 							hit_w = 0
 							hit_h = 0
+							legend_hit_cg = null
 						}
 					}
 				}
@@ -440,25 +535,41 @@ component('x-chart', 'Input', function(e) {
 			let hit = columns ? hit_test_columns(mx, my) : hit_test_dots(mx, my)
 			if (hit) {
 				let er = e.rect()
-				tt = tt || tooltip({
-					target: e,
-					align   : 'center',
-					kind    : 'info',
-					classes : 'x-chart-tooltip',
-					check   : function() { return this.hit }
-				})
+				if (!tt) {
+					tt = tooltip({
+						align   : 'center',
+						kind    : 'info',
+						classes : 'x-chart-tooltip',
+					})
+					e.add(tt)
+					tt.spl_cols_div = div()
+					tt.key_cols_div = div()
+					tt.sum_cols_div = div()
+					tt.spl_div = div({style: 'justify-self: end'})
+					tt.key_div = div({style: 'justify-self: end'})
+					tt.sum_div = div({style: 'justify-self: end'})
+					tt.text = div({class: 'x-chart-tooltip-label'},
+						tt.spl_cols_div, tt.spl_div,
+						tt.key_cols_div, tt.key_div,
+						tt.sum_cols_div, tt.sum_div
+					)
+				}
 				tt.side = rotate ? 'right' : 'top'
 
-				let sum_fld = hit_cg.sum_def.field
-				let s = e.nav.cell_display_val_for(null, sum_fld, hit_xg.sum)
-				let key_flds = e.nav.flds(hit_xg.key_cols)
-				let key_flds_align = key_flds.length > 1 ? 'start' : key_flds[0].align
-				tt.text = div({class: 'x-chart-tooltip-label'},
-					div(0, hit_xg.key_cols),
-					div({style: 'justify-self: '+key_flds_align}, TC(hit_xg.text)),
-					div(0, sum_fld.text),
-					div({style: 'justify-self: '+sum_fld.align}, s)
-				)
+				let spl_flds = e._nav.flds(hit_cg.key_cols)
+				let key_flds = e._nav.flds(hit_xg.key_cols)
+				let spl_cols = spl_flds.map(f => f.label).join_nodes(' / ')
+				let key_cols = key_flds.map(f => f.label).join_nodes(' / ')
+
+				let sum_fld  = hit_cg.sum_def.field
+				let s = e._nav.cell_display_val_for(null, sum_fld, hit_xg.sum)
+
+				tt.spl_cols_div.set(spl_cols)
+				tt.key_cols_div.set(key_cols)
+				tt.spl_div.set(hit_cg.label)
+				tt.key_div.set(TC(hit_xg.label))
+				tt.sum_cols_div.set(sum_fld.label)
+				tt.sum_div.set(s)
 
 				let tm = cx.getTransform()
 					.translate(px1, py1)
@@ -471,35 +582,52 @@ component('x-chart', 'Input', function(e) {
 				let y1 = min(p1.y, p2.y, p3.y, p4.y)
 				let x2 = max(p1.x, p2.x, p3.x, p4.x)
 				let y2 = max(p1.y, p2.y, p3.y, p4.y)
-				tt.px = x1
-				tt.py = y1
-				tt.pw = x2 - x1
-				tt.ph = y2 - y1
-				tt.hit = true
+				tt.popup_x1 = x1
+				tt.popup_y1 = y1
+				tt.popup_x2 = x2
+				tt.popup_y2 = y2
+				tt.update({show: true})
 			} else if (tt) {
-				tt.hit = false
-				tt.update()
+				tt.update({show: false})
 			}
 			e.update()
 		}
 
-		return function() {
+		do_update = function(opt) {
+			if (opt.model)
+				do_update_legend_split_groups()
+		}
 
-			let w = view_w
-			let h = view_h
+		do_position = function() {
 
-			canvas.resize(w, h, 100, 100)
+			cx.font = view_css['font-size'] + ' ' + view_css.font
+
+			let discrete = columns || e.min_val == null || e.max_val == null
+
+			let w = view_w - (px1 + px2)
+			let h = view_h - (py1 + py2)
+
+			canvas.resize(view_w, view_h, 100, 100)
 			cx.clear()
 			cx.save()
+
+			cx.translate(px1, py1)
+
+			if (rotate) {
+				cx.translate(w, 0)
+				cx.rotate(rad * 90)
+				;[w, h] = [h, w]
+			}
 
 			// compute vertical (sum) and horizontal (val) ranges.
 			// also compute a map of
 			let xgs = map() // {x_key -> xg}
 			let min_val  = 0
 			let max_val  = 1
+			let val_step
 			let min_sum  = 0
 			let max_sum  = 1
-			let sum_step = 1
+			let sum_step = e.sum_step || 1
 			if (all_split_groups) {
 				min_val =  1/0
 				max_val = -1/0
@@ -507,25 +635,28 @@ component('x-chart', 'Input', function(e) {
 				max_sum = -1/0
 				let user_min_val = or(e.min_val, -1/0)
 				let user_max_val = or(e.max_val,  1/0)
+				let val0
 				for (let cg of all_split_groups) {
 					for (let xg of cg) {
 						let sum = xg.sum
-						let val = xg.key_vals[0] // TODO: only works for numbers!
+						let key_flds = e._nav.flds(xg.key_cols)
+						let val = key_flds[0].to_num(xg.key_vals[0])
 						min_sum = min(min_sum, sum)
 						max_sum = max(max_sum, sum)
 						min_val = min(min_val, val)
 						max_val = max(max_val, val)
 						xg.visible = val >= user_min_val && val <= user_max_val
 						xgs.set(val, xg)
+						val0 = val
 					}
 				}
 			}
 
 			// clip/stretch ranges to given fixed values.
-			min_val  = or(e.min_val, min_val)
-			max_val  = or(e.max_val, max_val)
-			min_sum  = or(e.min_sum, min_sum)
-			max_sum  = or(e.max_sum, max_sum)
+			min_val = or(e.min_val, min_val)
+			max_val = or(e.max_val, max_val)
+			min_sum = or(e.min_sum, min_sum)
+			max_sum = or(e.max_sum, max_sum)
 
 			if (columns && all_split_groups) {
 				let val_unit = (max_val - min_val) / xgs.size
@@ -540,25 +671,17 @@ component('x-chart', 'Input', function(e) {
 				let target_n = round(h / y_spacing) // wanted number of y-axis markers
 				let fld = sum_defs[0].field
 				;[sum_step, min_sum, max_sum] =
-					compute_step_and_range(target_n, min_sum, max_sum, fld.scale_base, fld.scales, fld.decimals)
+					compute_step_and_range(target_n, min_sum, max_sum,
+						fld.scale_base, fld.scales, fld.decimals)
 			}
+
+			let min_elem_w = 60
 
 			// compute min, max and step of x-axis markers so that 1) the step is
 			// on a module and the spacing between markers is the closest to an ideal.
-			let val_step; {
-				let min_w = 20    // min element width
-				let max_n = max(1, floor(w / min_w)) // max number of elements
+			if (!discrete) {
+				let max_n = max(1, floor(w / min_elem_w)) // max number of elements
 				;[val_step, min_val, max_val] = compute_step_and_range(max_n, min_val, max_val)
-			}
-
-			w -= px1 + px2
-			h -= py1 + py2
-			cx.translate(px1, py1)
-
-			if (rotate) {
-				cx.translate(w, 0)
-				cx.rotate(rad * 90)
-				;[w, h] = [h, w]
 			}
 
 			// compute polygon's points.
@@ -566,7 +689,8 @@ component('x-chart', 'Input', function(e) {
 				for (let cg of all_split_groups) {
 					let xgi = 0
 					for (let xg of cg) {
-						let val = xg.key_vals[0]
+						let key_flds = e._nav.flds(xg.key_cols)
+						let val = key_flds[0].to_num(xg.key_vals[0])
 						xg.x = round(lerp(val, min_val, max_val, 0, w))
 						xg.y = round(lerp(xg.sum, min_sum, max_sum, h - py2, 0))
 						if (xg.y != xg.y)
@@ -582,7 +706,7 @@ component('x-chart', 'Input', function(e) {
 			cx.fillStyle   = label_color
 			cx.strokeStyle = ref_line_color
 
-			function draw_xaxis_label(xg_x, text) {
+			function draw_xaxis_label(xg_x, text, is_first, is_last) {
 				let m = cx.measureText(text)
 				cx.save()
 				if (rotate) {
@@ -592,7 +716,7 @@ component('x-chart', 'Input', function(e) {
 					cx.translate(x, y)
 					cx.rotate(rad * -90)
 				} else {
-					let x = xg_x - m.width / 2
+					let x = is_first ? xg_x : is_last ? xg_x - m.width : xg_x - m.width / 2
 					let y = round(h)
 					cx.translate(x, y)
 				}
@@ -607,22 +731,24 @@ component('x-chart', 'Input', function(e) {
 
 			// draw x-axis labels.
 
-			let discrete = e.min_val == null || e.max_val == null
 			if (discrete) {
 				let i = 0
+				let n = xgs.size
+				let xg0
 				for (let xg of xgs.values()) {
-					if (i % val_step == 0 && xg.visible) {
+					if (xg.visible && (!xg0 || (xg.x - xg0.x) >= min_elem_w)) {
 						// TODO: draw the element as a html overlay
-						let text = isnode(xg.text) ? xg.text.textContent : xg.text
-						draw_xaxis_label(xg.x, text)
+						let text = isnode(xg.label) ? xg.label.textContent : xg.label
+						draw_xaxis_label(xg.x, text, i == 0, i == n-1)
+						xg0 = xg
 					}
 					i++
 				}
-			} if (group_cols) {
+			} else {
 				for (let val = min_val; val <= max_val; val += val_step) {
 					let text = val_text(val)
 					let x = round(lerp(val, min_val, max_val, 0, w))
-					draw_xaxis_label(x, text)
+					draw_xaxis_label(x, text, val == min_val, !(val + val_step <= max_val))
 				}
 			}
 
@@ -691,12 +817,11 @@ component('x-chart', 'Input', function(e) {
 			if (all_split_groups) {
 
 				cx.rect(0, 0, w, h)
-				cx.clip()
 
 				let cgi = 0
 				for (let cg of all_split_groups) {
 
-					let color = line_color(cgi, all_split_groups.length)
+					let color = split_color(cgi, all_split_groups.length)
 
 					if (columns) {
 
@@ -711,6 +836,8 @@ component('x-chart', 'Input', function(e) {
 					} else {
 
 						// draw the line.
+
+						cx.lineWidth = cg == legend_hit_cg ? 2 : 1
 
 						if (!cg.tied_back)
 							cx.beginPath()
@@ -733,7 +860,8 @@ component('x-chart', 'Input', function(e) {
 						}
 
 						if (area && !cg.tied) {
-							cx.fillStyle = line_color(cgi, all_split_groups.length, .5)
+							cx.fillStyle = split_color(cgi, all_split_groups.length,
+								legend_hit_cg == cg ? .7 : .5)
 							cx.fill()
 						}
 
@@ -782,22 +910,6 @@ component('x-chart', 'Input', function(e) {
 	renderer.column    = () => renderer_line_or_columns(true)
 	renderer.bar       = () => renderer_line_or_columns(true, true)
 
-	e.on_update(function() {
-		e.header.set(e.text)
-	})
-
-	let shape, render
-	e.on_position(function() {
-		if (shape != e.shape) {
-			render = null
-			pointermove = noop
-			shape = e.shape
-		}
-		if (!render)
-			render = renderer[e.shape]()
-		render()
-	})
-
 	e.on('pointermove' , function(...args) { pointermove(...args) })
 	e.on('pointerleave', function(...args) { pointermove(...args) })
 
@@ -820,8 +932,8 @@ component('x-chart', 'Input', function(e) {
 		e.update()
 	}
 
-	e.on('bind', function(on) {
-		bind_nav(e.nav, on)
+	e.on_bind(function(on) {
+		bind_nav(e._nav, on)
 		document.on('layout_changed', update_view, on)
 		if (!on && tt) {
 			tt.close()
@@ -831,14 +943,17 @@ component('x-chart', 'Input', function(e) {
 
 	e.on('resize', update_view)
 
-	e.set_nav = function(nav1, nav0) {
-		assert(!nav1 || nav1.isnav)
-		bind_nav(nav0, false)
-		bind_nav(nav1, true)
+	function nav_changed() {
+		bind_nav(e._nav, false)
+		e._nav = e.nav || e._nav_id_nav
+		bind_nav(e._nav, true)
 	}
 
+	e.set_nav = nav_changed
+	e.set__nav_id_nav = nav_changed
+
 	e.prop('nav', {private: true})
-	e.prop('nav_id', {bind_id: 'nav', type: 'nav', attr: 'nav'})
+	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
 
 })
 

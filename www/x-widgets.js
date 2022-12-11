@@ -965,17 +965,9 @@ component('x-tooltip', function(e) {
 		e.attr('align', align)
 	}
 
-	e.close = function(delay) {
+	e.close = function() {
 		if (e.fire('close')) {
-			if (1 || delay) {
-				e.class('visible')
-				e.class('remove')
-				runafter(10, function() {
-					pr('REMOVE')
-					e.remove()
-				})
-			} else
-				e.remove()
+			e.remove()
 			return true
 		}
 		return false
@@ -1017,9 +1009,7 @@ component('x-tooltip', function(e) {
 		e.update({text: s, reset_timer: true})
 	}
 
-	function delayed_close() { e.close(.2) }
-
-	let close_timer = timer(delayed_close)
+	let close_timer = timer(close)
 	function reset_timeout_timer() {
 		let t = e.timeout
 		if (t == 'auto')
@@ -1127,7 +1117,6 @@ component('x-toaster', function(e) {
 
 	e.tooltips = set()
 
-	e.target = document.body
 	e.side = 'inner-top'
 	e.align = 'center'
 	e.timeout = 'auto'
@@ -1168,7 +1157,7 @@ component('x-toaster', function(e) {
 		})
 		t.on('close', close)
 		e.tooltips.add(t)
-		e.target.add(t)
+		e.parent.add(t)
 		e.update()
 		return t
 	}
@@ -1495,49 +1484,6 @@ component('x-menu', function(e) {
 
 })
 
-
-// ---------------------------------------------------------------------------
-// context menu
-// ---------------------------------------------------------------------------
-
-component('x-context-menu', function(e) {
-
-	// TODO:
-
-	let cmenu
-
-	function close_context_menu() {
-		if (cmenu) {
-			cmenu.close()
-			cmenu = null
-		}
-	}
-
-	e.on('rightpointerdown', close_context_menu)
-
-	e.on('contextmenu', function(ev) {
-
-		close_context_menu()
-
-		if (update_mouse(ev))
-			fire_pointermove()
-
-		let items = []
-
-		if (tool.context_menu)
-			items.extend(tool.context_menu())
-
-		cmenu = menu({
-			items: items,
-		})
-
-		cmenu.popup(e, 'inner-top', null, null, null, null, null, mouse.x, mouse.y)
-
-		return false
-	})
-
-})
-
 // ---------------------------------------------------------------------------
 // "widget containing a list of items that are widgets" mixin
 // ---------------------------------------------------------------------------
@@ -1602,7 +1548,7 @@ widget_items_widget = function(e) {
 		// remove items that are missing from the new set.
 		for (let item of cur_items)
 			if (!items.has(item)) {
-				if (!remove_items)
+				if (!removed_items)
 					removed_items = []
 				removed_items.push(item)
 			}
@@ -1678,6 +1624,7 @@ component('x-tabs', 'Containers', function(e) {
 	e.prop('tabs_side', {type: 'enum',
 			enum_values: 'top bottom left right', default: 'top', attr: true})
 
+	// TODO:
 	e.prop('can_rename_items', {type: 'bool', default: false})
 	e.prop('can_add_items'   , {type: 'bool', default: false})
 	e.prop('can_remove_items', {type: 'bool', default: false})
@@ -1711,7 +1658,8 @@ component('x-tabs', 'Containers', function(e) {
 		if (!e.selection_bar) {
 			e.selection_bar = div({class: 'x-tabs-selection-bar'})
 			e.add_button = div({class: 'x-tabs-tab x-tabs-add-button fa fa-plus', tabindex: 0})
-			e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.add_button, e.fixed_header)
+			e.tabs = div({class: 'x-tabs-tabs'})
+			e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.tabs, e.fixed_header, e.add_button)
 			e.content = div({class: 'x-tabs-content x-container'})
 			e.add(e.header, e.content)
 			e.add_button.on('click', add_button_click)
@@ -1736,13 +1684,13 @@ component('x-tabs', 'Containers', function(e) {
 				item.on('label_changed', item_label_changed)
 				update_tab_title(tab)
 				item._tab.x = null
-				e.header.add(item._tab)
+				e.tabs.add(item._tab)
 			}
 		}
 
 		if (opt.removed_items) {
 			for (let item of opt.removed_items) {
-				e.header.remove(item._tab)
+				e.tabs.remove(item._tab)
 				item.remove()
 				item._tab = null
 				item.on('label_changed', item_label_changed, false)
@@ -1750,10 +1698,9 @@ component('x-tabs', 'Containers', function(e) {
 		}
 
 		if (opt.items) {
-			e.header.innerHTML = null
+			e.tabs.innerHTML = null
 			for (let item of opt.items)
-				e.header.append(item._tab)
-			e.header.append(e.selection_bar) // , e.add_button, e.fixed_header)
+				e.tabs.append(item._tab)
 		}
 
 		e.header.w = e.header_width
@@ -1782,8 +1729,11 @@ component('x-tabs', 'Containers', function(e) {
 			return
 		}
 
-		if (tab && !e.widget_editing && opt.focus_tab != false && e.auto_focus_first_item)
-			tab.item.focus_first()
+		if (tab && !e.widget_editing)
+			if (opt.focus_tab)
+				tab.focus()
+			else if (opt.focus_tab_content != false && e.auto_focus_first_item)
+				tab.item.focus_first()
 
 		if (tab)
 			update_tab_state(tab, true)
@@ -1792,10 +1742,10 @@ component('x-tabs', 'Containers', function(e) {
 
 	}
 
-	let hr, cr
+	let tr, cr
 
 	e.do_measure = function() {
-		hr = e.header.rect()
+		tr = e.tabs.rect()
 		cr = selected_tab && selected_tab.at[0].rect()
 	}
 
@@ -1804,26 +1754,26 @@ component('x-tabs', 'Containers', function(e) {
 		if (e.tabs_side == 'left') {
 			b.x1 = null
 			b.x2 = 0
-			b.y1 = cr ? cr.y - hr.y : 0
+			b.y1 = cr ? cr.y - tr.y : 0
 			b.y2 = null
 			b.w  = null
 			b.h  = cr ? cr.h : 0
 		} else if (e.tabs_side == 'right') {
 			b.x1 = 0
 			b.x2 = null
-			b.y1 = cr ? cr.y - hr.y : 0
+			b.y1 = cr ? cr.y - tr.y : 0
 			b.y2 = null
 			b.w  = null
 			b.h  = cr ? cr.h : 0
 		} else if (e.tabs_side == 'top') {
-			b.x1 = cr ? cr.x - hr.x : 0
+			b.x1 = cr ? cr.x - tr.x : 0
 			b.x2 = null
 			b.y1 = null
 			b.y2 = 0
 			b.w  = cr ? cr.w : 0
 			b.h  = null
 		} else if (e.tabs_side == 'bottom') {
-			b.x1 = cr ? cr.x - hr.x : 0
+			b.x1 = cr ? cr.x - tr.x : 0
 			b.x2 = null
 			b.y1 = 0
 			b.y2 = null
@@ -1845,9 +1795,9 @@ component('x-tabs', 'Containers', function(e) {
 		e.on('resize', resized, on)
 	})
 
-	function select_tab(tab, focus_tab, enter_editing) {
+	function select_tab(tab, opt) {
 		selected_item = tab ? tab.item : null
-		e.update({focus_tab: focus_tab, enter_editing: enter_editing})
+		e.update(opt)
 	}
 
 	e.set_items = function() {
@@ -1952,7 +1902,7 @@ component('x-tabs', 'Containers', function(e) {
 			ev.stopPropagation()
 			return
 		}
-		select_tab(this, true)
+		select_tab(this)
 		if (ev.ctrlKey)
 			return // bubble-up to enter editing mode.
 		this.focus()
@@ -1989,6 +1939,9 @@ component('x-tabs', 'Containers', function(e) {
 
 			e.class('moving', false)
 			this.class('moving', false)
+
+			for (let item of e.items)
+				item._tab.x = null
 
 			dragging = false
 		}
@@ -2028,9 +1981,9 @@ component('x-tabs', 'Containers', function(e) {
 				return false
 			}
 			if (key == 'ArrowRight' || key == 'ArrowLeft') {
-				e.selected_index += (key == 'ArrowRight' ? 1 : -1)
-				if (selected_tab)
-					selected_tab.focus()
+				let i = (selected_tab ? selected_tab.index : -1) + (key == 'ArrowRight' ? 1 : -1)
+				let tab = e.tabs.at[clamp(i, 0, e.len-1)]
+				select_tab(tab, {focus_tab: true})
 				return false
 			}
 		}
@@ -2141,8 +2094,7 @@ component('x-split', 'Containers', function(e) {
 
 	// resizing ---------------------------------------------------------------
 
-	let hit, hit_x, mx0, w0, resist
-	let resist_threshold = 0
+	let hit, hit_x, mx0, w0
 
 	e.on('pointermove', function(ev, rmx, rmy) {
 		if (e.pointer_captured)
@@ -2159,7 +2111,6 @@ component('x-split', 'Containers', function(e) {
 			w0 = e.fixed_pane.rect()[horiz ? 'w' : 'h']
 			hit_x = mx - sx1
 			hit = abs(hit_x - (sx2 - sx1) / 2) <= 5
-			resist = true
 			mx0 = mx
 		}
 		e.class('resize', hit)
@@ -2186,35 +2137,27 @@ component('x-split', 'Containers', function(e) {
 			w = ex2 - mx + hit_x - sw
 		}
 
-		resist = resist && abs(mx - mx0) < resist_threshold
-		if (resist)
-			w = w0 + (w - w0) * .2 // show resistance
-
 		if (!e.fixed_pane.hasclass('collapsed')) {
-			if (w < min(max(e.min_size, 20), 30) - 5)
+			if (w < min(max(e.min_size, 20), 30) - 5) {
 				e.fixed_pane.class('collapsed', true)
+				e.class('collapsed', true)
+			}
 		} else {
-			if (w > max(e.min_size, 30))
+			if (w > max(e.min_size, 30)) {
 				e.fixed_pane.class('collapsed', false)
+				e.class('collapsed', false)
+			}
 		}
 
 		w = max(w, e.min_size)
 		if (e.fixed_pane.hasclass('collapsed'))
 			w = 0
 
-		e.xoff()
 		e.fixed_size = round(w)
-		e.xon()
 	}
 
 	function mu_resize() {
 		e.class('resizing', false)
-		if (resist) { // reset width
-			e.xoff()
-			e.fixed_size = w0
-			e.xon()
-			return
-		}
 		e.save_prop('fixed_size')
 	}
 
@@ -2658,14 +2601,6 @@ component('x-toolbox', function(e) {
 
 	return {content: html_content}
 
-})
-
-// ---------------------------------------------------------------------------
-// progress
-// ---------------------------------------------------------------------------
-
-component('x-progress', function() {
-	// TODO
 })
 
 // ---------------------------------------------------------------------------
