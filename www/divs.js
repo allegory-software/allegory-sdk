@@ -73,11 +73,17 @@
 		e.replace([e0], te)
 		e.move([pe], [i0])
 		e.clear()
-		tag(s, [attrs], te1,...)
+		tag(tag, [attrs], e1,...)
 		div(...)
 		span(...)
 		element(tag, options...)
 		[].join_nodes([separator])
+	SVG elements:
+		svg_tag(tag, [attrs], e1,...)
+		svg([attrs], e1, ...) -> svg
+		svg_arc_path(x, y, r, a1, a2, ['M'|'L'])
+		svg.path(attrs) -> svg_path
+		svg.text(attrs) -> svg_text
 	method overriding:
 		e.override(method, f)
 		e.do_before(method, f)
@@ -597,6 +603,46 @@ function element(tag, ...args) {
 	e.init_component(...args)
 	return e
 }
+
+function svg_tag(tag, attrs, ...children) {
+	let e = document.createElementNS('http://www.w3.org/2000/svg', tag)
+	e.attrs = attrs
+	for (let s of children) {
+		if (isfunc(s))
+			s = s()
+		if (s == null)
+			continue
+		if (isarray(s))
+			for (let cs of s)
+				e.append(cs)
+		else
+			e.append(s)
+	}
+	return e
+}
+
+function svg(...args) { return svg_tag('svg', ...args) }
+
+function svg_arc_path(x, y, r, a1, a2, start_cmd) {
+	let [x1, y1] = point_around(x, y, r, a1)
+	let [x2, y2] = point_around(x, y, r, a2)
+	let large_arc_flag = a2 - a1 <= 180 ? '0' : '1'
+	let a = start_cmd ? [start_cmd, x1, y1] : []
+	a.extend(['A', r, r, 0, large_arc_flag, 0, x2, y2])
+	return a.join(' ')
+}
+
+method(SVGElement, 'path', function(attrs) {
+	let p = svg_tag('path', attrs)
+	this.append(p)
+	return p
+})
+
+method(SVGElement, 'text', function(attrs, s) {
+	let t = svg_tag('text', attrs, s)
+	this.append(t)
+	return t
+})
 
 Array.prototype.join_nodes = function(sep, parent_node) {
 

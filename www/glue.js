@@ -1335,10 +1335,9 @@ function hsl_to_rgb(h, s, L, a) {
 
 // point at a specified angle on a circle.
 function point_around(cx, cy, r, angle) {
-	angle = rad * angle
 	return [
-		cx + cos(angle) * r,
-		cy + sin(angle) * r
+		cx + cos(rad * angle) * r,
+		cy + sin(rad * angle) * r
 	]
 }
 

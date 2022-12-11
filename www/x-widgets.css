@@ -3205,8 +3205,6 @@ x-tabs-fixed-header {
 
 .x-chart-pie {
 	position: absolute;
-	border-radius: 50%;
-	box-shadow: 2px 2px 6px #000000cc;
 }
 
 .x-chart-pie-selected {

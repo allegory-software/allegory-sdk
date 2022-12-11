@@ -247,7 +247,7 @@ component('x-chart', 'Input', function(e) {
 	e.legend = div({class: 'x-chart-legend'})
 	e.add(e.header, div({class: 'x-chart-split'}, e.view, e.legend))
 
-	let legend_hit_slice
+	let hit_slice
 
 	function do_update_legend_slices(slices) {
 		let i = 0
@@ -262,11 +262,11 @@ component('x-chart', 'Input', function(e) {
 			let percent = div({class: 'x-chart-legend-percent'}, slice.percent)
 			e.legend.add(bullet, label, percent)
 			label.on('pointerenter', function() {
-				legend_hit_slice = slice
+				hit_slice = slice
 				e.update()
 			})
 			label.on('pointerleave', function() {
-				legend_hit_slice = null
+				hit_slice = null
 				e.update()
 			})
 			i++
@@ -369,27 +369,67 @@ component('x-chart', 'Input', function(e) {
 		if (!slices)
 			return
 
-		let canvas = tag('canvas', {
-			class : 'x-chart-canvas',
-			width : 0,
-			height: 0,
+		let pie = svg({class: 'x-chart-pie', viewBox: '-1.1 -1.1 2.2 2.2'})
+		let labels = div({class: 'x-chart-pie-labels'})
+		e.view.add(pie, labels)
+
+		pie.on('pointermove', function(ev, mx, my) {
+			let path = ev.target
+			hit_slice = path.slice
+			e.update()
 		})
 
-		let cx = canvas.getContext('2d')
+		pie.on('pointerleave', function(ev, mx, my) {
+			hit_slice = null
+			e.update()
+		})
 
-		// let pie0 = div({class: 'x-chart-pie-selected'})
-		// let pie1 = div({class: 'x-chart-pie'})
-		let labels = div({class: 'x-chart-pie-labels'})
-		e.view.add(canvas, labels)
+		function do_update_pie() {
+			let angle = 0
+			let i = 0
+			pie.clear()
+			for (let slice of slices) {
+				let arclen = slice.size * 360
+				let color = split_color(i, slices.length)
+				let slice_path = pie.path({
+					d: 'M 0 0 '
+						+ svg_arc_path(0, 0, 1, angle + arclen - 90, angle - 90, 'L')
+						+ ' Z',
+					fill: color,
+					stroke: 'white',
+					['stroke-width']: 1,
+					['vector-effect']: 'non-scaling-stroke',
+				})
+				slice_path.slice = slice
+				let selection_path = pie.path({
+					d: svg_arc_path(0, 0, 1.05, angle + arclen - 90, angle - 90, 'M'),
+					fill: 'none',
+					stroke: split_color(i, slices.length, .6),
+					['stroke-width']: .08,
+				})
+				slice.path = selection_path
+
+				// add the percent label and position it inside the pie.
+				let center_angle = angle + arclen / 2
+				;[slice.label_x, slice.label_y] = point_around(0, 0, .7, center_angle - 90)
+
+				angle += arclen
+				i++
+			}
+		}
 
 		do_update = function(opt) {
-			if (opt.model)
+			if (opt.model) {
+
 				do_update_legend_slices(slices)
 
-			labels.clear()
-			for (let slice of slices) {
-				slice.label = div({class: 'x-chart-pie-label'}, slice.percent)
-				labels.add(slice.label)
+				do_update_pie()
+
+				labels.clear()
+				for (let slice of slices) {
+					slice.label = div({class: 'x-chart-pie-label'}, slice.percent)
+					labels.add(slice.label)
+				}
 			}
 		}
 
@@ -402,50 +442,28 @@ component('x-chart', 'Input', function(e) {
 
 		do_position = function() {
 
-			let sel_thickness = 14
-			let pw = min(view_w, view_h) - sel_thickness
-			let px = (view_w - pw) / 2
-			let py = (view_h - pw) / 2
+			let r = min(view_w, view_h) / 2
+			let x = view_w / 2 - r
+			let y = view_h / 2 - r
 
-			canvas.resize(pw, pw, 100, 100)
+			pie.w = r * 2
+			pie.h = r * 2
+			pie.style.left = px(x)
+			pie.style.top  = px(y)
 
-			// pie1.w = pw
-			// pie1.h = pw
-			// pie1.x = px
-			// pie1.y = py
-			//
-			// pie0.w = pw + sel_thickness
-			// pie0.h = pw + sel_thickness
-			// pie0.x = px - sel_thickness / 2
-			// pie0.y = py - sel_thickness / 2
-
-			let s1 = []
-			let s0 = []
-			let angle = 0
 			let i = 0
 			for (let slice of slices) {
-				let arclen = slice.size * 360
-
-				// generate a gradient step for this slice.
-				let color1 = split_color(i, slices.length)
-				let color0 = legend_hit_slice == slice
-					? split_color(i, slices.length, .5)
-					: '#ffffff00'
-				let arc = angle.dec()+'deg '+(angle + arclen).dec()+'deg'
-				s1.push(color1 + ' ' + arc)
-				s0.push(color0 + ' ' + arc)
-
-				// add the percent label and position it inside the pie.
-				let center_angle = angle + arclen / 2
-				let [x, y] = point_around(px + pw / 2, py + pw / 2, pw / 2.7, center_angle - 90)
-				slice.label.x = x - slice.label_w / 2
-				slice.label.y = y - slice.label_h / 2
-				angle += arclen
+				slice.label.x = x + r + slice.label_x * r - slice.label_w / 2
+				slice.label.y = y + r + slice.label_y * r - slice.label_h / 2
+				pie.nodes[2*i+1].style.display = 'none'
 				i++
 			}
 
-			// pie1.style['background-image'] = 'conic-gradient(' + s1.join(',') + ')'
-			// pie0.style['background-image'] = 'conic-gradient(' + s0.join(',') + ')'
+			if (hit_slice) {
+				let path = hit_slice.path
+				path.style.display = 'block'
+			}
+
 		}
 	}
 
