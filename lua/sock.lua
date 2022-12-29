@@ -53,9 +53,9 @@ SOCKETS
 
 THREADS
 	thread(func[, fmt, ...]) -> co         create a coroutine for async I/O
-	resume(thread, ...) -> ...             resume thread
+	resume(thread, ...)                    resume thread
 	yield(...) -> ...                      safe yield (see [coro])
-	suspend(...) -> ...                    suspend thread
+	suspend() -> ...                       suspend thread
 	cowrap(f) -> wrapper                   see coro.safewrap()
 	currentthread() -> co, is_main         current coroutine and whether it's the main one
 	threadstatus(co) -> s                  coroutine.status()
@@ -277,7 +277,7 @@ resume(thread, ...)
 	(send, recv, wait, suspend, etc.) gives control back to this thread.
 	_This_ is the trick to starting multiple threads before starting polling.
 
-suspend(...) -> ...
+suspend() -> ...
 
 	Suspend current thread, transfering to the polling thread (but see resume()).
 
@@ -2736,24 +2736,19 @@ function transfer(thread, ...)
 	return coro_transfer(thread, ...)
 end
 
-function suspend(...)
+function suspend()
 	assert(poll_thread, 'poll loop not started')
-	return coro_transfer(poll_thread, ...)
+	return coro_transfer(poll_thread)
 end
 
-do
-local function cont(real_poll_thread, ...)
-	poll_thread = real_poll_thread
-	return ...
-end
 function resume(thread, ...)
 	assert(not waiting[thread], 'attempt to resume a waiting thread')
 	local real_poll_thread = poll_thread
 	--change poll_thread temporarily so that we get back here
 	--from the first call to suspend() or wait_io().
 	poll_thread = currentthread()
-	return cont(real_poll_thread, coro_transfer(thread, ...))
-end
+	coro_transfer(thread, ...)
+	poll_thread = real_poll_thread
 end
 
 yield = coro.yield
@@ -2850,3 +2845,33 @@ function run(f, ...)
 		return ret and unpack(ret)
 	end
 end
+
+function chan() --golang-like unbuffered channels (untested)
+	local c = {}
+	local get_thread
+	local put_thread
+	local function reset(...)
+		get_thread = nil
+		return ...
+	end
+	function c:get()
+		assert(not get_thread)
+		get_thread = currentthread()
+		if put_thread then
+			return reset(transfer(put_thread))
+		end
+		return reset(suspend()) --wait for :put() to resume() us
+	end
+	function c:put(...)
+		assert(not put_thread)
+		if not get_thread then
+			put_thread = currentthread()
+			suspend() --wait for :get() to transfer() to us
+			put_thread = nil
+			assert(get_thread)
+		end
+		resume(get_thread, ...)
+	end
+	return c
+end
+
