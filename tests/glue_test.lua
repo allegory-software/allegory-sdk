@@ -422,9 +422,9 @@ assert(z == 1)
 assert(p == 1)
 
 luapath('foo')
-cpath('bar')
+luacpath('bar')
 luapath('baz', 'after')
-cpath('zab', 'after')
+luacpath('zab', 'after')
 local so = package.cpath:match'%.dll' and 'dll' or 'so'
 local norm = function(s) return s:gsub('/', package.config:sub(1,1)) end
 assert(package.path:match('^'..esc(norm'foo/?.lua;')))
