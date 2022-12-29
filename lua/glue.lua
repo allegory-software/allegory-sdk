@@ -179,6 +179,7 @@ MODULES
 	autoload(t, key, module|loader) -> t       autoload table key from module
 	rel_scriptdir                  get the script's directory
 	scriptname                     get the script's name
+	add_searchpath(searchpath, path, [index], [extension], [init], [prefix]) -> searchpath
 	luapath(path [,index [,ext]])  insert a path in package.path
 	luacpath(path [,index])        insert a path in package.cpath
 	sopath(path)                   set shared library path for ffi.load()
@@ -2052,14 +2053,14 @@ scriptname = arg0
 	and (win and arg0:gsub('%.exe$', '') or arg0)
 		:gsub('%.lua$', ''):match'[^/\\]+$'
 
-local function add_path(path_s, path, index, ext, init, prefix)
+function add_searchpath(searchpath, path, index, ext, init, prefix)
 	index = index or 1
 	local psep = package.config:sub(1,1) --'/'
 	local tsep = package.config:sub(3,3) --';'
 	local wild = package.config:sub(5,5) --'?'
-	local ext = ext or path_s:match('%.([%a]+)%'..tsep..'?')
+	local ext = ext or searchpath:match('%.([%a]+)%'..tsep..'?')
 	local prefix = prefix or ''
-	local paths = path_s and collect(split(path_s, tsep, nil, true)) or {}
+	local paths = searchpath and collect(split(searchpath, tsep, nil, true)) or {}
 	local path = path:gsub('[/\\]', psep) --normalize slashes
 	if index == 'after' then index = 0 end
 	if index < 1 then index = #paths + 1 + index end
@@ -2072,20 +2073,21 @@ end
 --negative indices count from the end of the list like string.sub().
 --index 'after' means 0. `ext` specifies the file extension to use.
 function luapath(path, index, ext)
-	package.path = add_path(package.path, path, index, ext or 'lua', true)
+	package.path = add_searchpath(package.path, path, index, ext or 'lua', true)
 end
 
 --portable way to add more paths to package.cpath, at any place in the list.
 --negative indices count from the end of the list like string.sub().
 --index 'after' means 0.
 function luacpath(path, index)
-	package.cpath = add_path(package.cpath, path, index)
+	package.cpath = add_searchpath(package.cpath, path, index)
 end
 
 --NOTE: unlike luapath() and luacpath(), calling this repeatedly doesn't add
 --new paths to search, but replaces the path every time!
 function sopath(path)
 	if win then
+		require'winapi.winbase'
 		require'winapi'.SetDllDirectory(path)
 	else
 		require'proc'
