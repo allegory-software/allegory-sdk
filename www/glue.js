@@ -29,7 +29,7 @@ MATH
 	sign(x)
 	strict_sign(x)
 	lerp(x, x0, x1, y0, y1)
-	num(s, z)
+	num(s[, z])
 	mod(a, b)
 	nextpow2(x)
 	x.dec([decimals])
@@ -43,8 +43,10 @@ CALLBACKS
 ERRORS
 	pr[int](...)
 	warn(...)
-	debug(...); debug_if(cond, ...)
-	trace(...); trace_if(cond, ...)
+	debug(...)
+	trace(...)
+	debug_if(cond, ...)
+	trace_if(cond, ...)
 	assert(v, err, ...) -> v
 	stacktrace()
 EXTENDING BUILT-IN OBJECTS
@@ -59,7 +61,7 @@ STRINGS
 	s.ends(s)
 	s.upper()
 	s.lower()
-	s.num(z)
+	s.num([z])
 	s.display_name()
 	s.words() -> a
 	catany(sep, ...); sep.catany(...)
