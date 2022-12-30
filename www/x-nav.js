@@ -700,6 +700,11 @@ function nav_widget(e) {
 			return cols.name
 	}
 
+	let fldlabel = f => f.label
+	e.fldlabels = function(cols) {
+		return e.flds(cols).map(fldlabel)
+	}
+
 	e.fld = fld
 	e.flds = flds
 	e.optfld = optfld
