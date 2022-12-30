@@ -261,7 +261,7 @@ e.trace_if = function(cond, ...args) {
 
 alias(Element, 'hasattr', 'hasAttribute')
 
-// NOTE: `true`, `false` and `undefined` cannot be stored specifically:
+// NOTE: JS values `true`, `false` and `undefined` cannot be stored in an attribute:
 // setting `true` gets back 'true' while `false` and `undefined` gets back `null`.
 // To store `true`, `false` and `null`, use bool_attr().
 method(Element, 'attr', function(k, v) {
@@ -296,6 +296,7 @@ property(Element, 'attrs', {
 	}
 })
 
+// get the attr value of the closest parent that has it.
 method(Element, 'closest_attr', function(attr) {
 	let e = this.closest('['+attr+']')
 	return e && e.attr(attr)
@@ -732,7 +733,7 @@ method(Element, 'set', function E_set(s) {
 		} else {
 			// unbind nodes that are not in the new list.
 			for (let node of this.nodes)
-				if (iselem(node) && s.indexOf(node) == -1)
+				if (iselem(node) && s.indexOf(node) == -1) // TODO: O(n^2) !
 					node.bind(false)
 			this.innerHTML = null
 			for (let s1 of s)
@@ -1055,9 +1056,10 @@ method(Element, 'prop', function(prop, opt) {
 		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
 		let REF = opt.bind_id
 		function element_bind(te, on) {
-			if (e[ID] == te.id)
+			if (e[ID] == te.id) {
 				e[REF] = on ? te : null
 				e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
+			}
 		}
 		function element_id_changed(te, id1, id0) {
 			e[ID] = id1
@@ -2353,10 +2355,11 @@ register_component('template', noop) // do not init child components.
 
 // pw & ph are size multiples for lowering the number of resizes.
 method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
+	let r = devicePixelRatio
 	w = ceil(w / pw) * pw
 	h = ceil(h / ph) * ph
-	if (this.width  != w) this.width  = w
-	if (this.height != h) this.height = h
+	if (this.width  != w) { this.width  = w * r; this.w = w; }
+	if (this.height != h) { this.height = h * r; this.h = h; }
 })
 
 /* popups --------------------------------------------------------------------
@@ -2545,8 +2548,8 @@ method(Element, 'popup', function() {
 		x -= ox1 ? ox1 : ox2
 		y -= oy1 ? oy1 : oy2
 
-		e.x = x + (e.popup_fixed ? sx : 0) - spx
-		e.y = y + (e.popup_fixed ? sy : 0) - spy
+		e.x = x + e.popup_ox + (e.popup_fixed ? sx : 0) - spx
+		e.y = y + e.popup_oy + (e.popup_fixed ? sy : 0) - spy
 
 		e.do_position_popup(side, align)
 
@@ -2584,6 +2587,8 @@ method(Element, 'popup', function() {
 	e.prop('popup_y1'     , {private: true, type: 'number'})
 	e.prop('popup_x2'     , {private: true, type: 'number'})
 	e.prop('popup_y2'     , {private: true, type: 'number'})
+	e.prop('popup_ox'     , {private: true, type: 'number', default: 0})
+	e.prop('popup_oy'     , {private: true, type: 'number', default: 0})
 	e.prop('popup_fixed'  , {private: true, type: 'bool', default: false})
 
 	function window_scroll(ev) {
