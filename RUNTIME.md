@@ -10,12 +10,13 @@ extensions:
    from [Lua 5.2](http://www.lua.org/manual/5.2/manual.html),
    including those enabled with `DLUAJIT_ENABLE_LUA52COMPAT`
  * [LuaJIT's string.buffer module](https://htmlpreview.github.io/?https://github.com/LuaJIT/LuaJIT/blob/v2.1/doc/ext_buffer.html)
+ * `!` can be used in `package.path` and `package.cpath` on Linux and OSX too.
 
 ## How it was built
 
  * `package.path` and `package.cpath` looks only in the SDK for modules.
- * built with `-msse4.2` so that it hashes strings with hardware CRC32.
  * built with `-pthread` so that pthread.lua can be used.
+ * built with `-msse4.2`.
 
 ## How to run Lua scripts with it
 
@@ -41,7 +42,8 @@ If your app also contains shared libraries, you need to make the OS aware
 of their location. You can't just give absolute paths to `ffi.load()`
 because if your shared libraries also depend on (that is, are dynamically
 linked to) other shared libraries, it's the OS that has to load those,
-not LuaJIT. Use `sopath()` before loading ffi libraries from your app dir.
+not LuaJIT. Either `sopath()` before loading shared libraries from your app dir,
+or call `ffi.load` with absolute paths on all dependencies to preload them.
 
 As for other files that you load explicitly, just make sure to only use paths
 that are relative to `scriptdir()` (eg. use `indir(scriptdir(), 'rel path')`).
