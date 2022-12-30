@@ -351,12 +351,11 @@ JOB_OBJECT_SECURITY_RESTRICTED_TOKEN    = 0x00000002
 JOB_OBJECT_SECURITY_ONLY_TOKEN          = 0x00000004
 JOB_OBJECT_SECURITY_FILTER_TOKENS       = 0x00000008
 
-JOBOBJECT_EXTENDED_LIMIT_INFORMATION = struct{
-	ctype = 'JOBOBJECT_EXTENDED_LIMIT_INFORMATION',
-}
+JOBOBJECT_EXTENDED_LIMIT_INFORMATION = ffi.typeof'JOBOBJECT_EXTENDED_LIMIT_INFORMATION'
 
 function SetInformationJobObject(job, objinfoclass, objinfo)
-	objinfo = JOBOBJECT_EXTENDED_LIMIT_INFORMATION(objinfo)
+	objinfo = type(objinfo) == 'cdata' and objinfo
+		or JOBOBJECT_EXTENDED_LIMIT_INFORMATION(objinfo)
 	return checknz(C.SetInformationJobObject(job, objinfoclass,
 		objinfo, ffi.sizeof(objinfo)))
 end
@@ -378,6 +377,6 @@ if not ... then
 	assert(GetEnvironmentVariable'wa' == '555')
 	SetEnvironmentVariable'wa'
 	assert(not GetEnvironmentVariable'wa')
-	require'pp'(GetEnvironmentStrings())
+	pr(GetEnvironmentStrings())
 end
 
