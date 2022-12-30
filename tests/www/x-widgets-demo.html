@@ -1182,87 +1182,97 @@ main.add(grid({w: 200, h: 200, rowset: r}))
 <!--------------------------------------------------------------------------->
 
 <template id=charts_demo>
-<style>
-#result {
-	display: block;
-}
-</style>
-<script run>
-
-g = grid({
-	rowset: {
-		fields: [
-			{name: 'date', type: 'time', has_time: false, w: 60},
-			{name: 'country', w: 60},
-			{name: 'sector', w: 70},
-			{name: 'output', type: 'number', w: 40},
-		],
-		rows: [
-			[year(time(), 0), 'Algeria', 'Energy'        ,  80],
-			[year(time(), 1), 'Algeria', 'Chickens'      , 100],
-			[year(time(), 2), 'Algeria', 'Chickens'      , 150],
-			[year(time(), 0), 'Canada' , 'Chickens'      ,  20],
-			[year(time(), 1), 'Canada' , 'Geese'         ,  10],
-			[year(time(), 1), 'Canada' , 'Geese'         , 120],
-			[year(time(), 2), 'Canada' , 'Geese'         ,  50],
-			[year(time(), 0), 'Croatia', 'Science'       , 100],
-			[year(time(), 0), 'Croatia', 'Chickens'      , 200],
-			[year(time(), 1), 'Croatia', 'Energy'        , 150],
-			[year(time(), 1), 'Croatia', 'Energy'        , 120],
-			[year(time(), 2), 'Croatia', 'Chickens'      , 180],
-			[year(time(), 2), 'Croatia', 'Energy'        ,  50],
-		],
-	},
-	h: 200,
-})
-
-result.add(g)
-
-// if (0)
-result.add(chart({
-	nav: g,
-	sum_cols: 'output',
-	group_cols: 'country sector',
-	style: 'height: 500px',
-}))
-
-if (0)
-result.add(chart({
-	nav: g,
-	sum_cols: 'output',
-	group_cols: 'sector',
-	shape: 'stack',
-}))
-
-if (0)
-result.add(chart({
-	nav: g,
-	sum_cols: 'output',
-	split_cols: 'country',
-	group_cols: 'date/0/month/1',
-	shape: 'area_dots',
-	style: 'height: 250px',
-}))
-
-// result.add(chart({
-// 	nav: g,
-// 	sum_cols: 'output',
-// 	group_cols: 'country date',
-// 	['group_cols.date.range_freq']: 1,
-// 	['group_cols.date.range_unit']: 'month',
-// 	shape: 'column',
-// }))
-
-//result.add(chart({
-//	nav: g,
-//	sum_cols: 'output',
-//	group_cols: 'country date',
-//	['group_cols.date.range_freq']: 1,
-//	['group_cols.date.range_unit']: 'month',
-//	shape: 'bar',
-//}))
-
-</script>
+<x-vsplit>
+	<x-tabs>
+		<script run label=Grid>
+			let g = grid({
+				id: 'g',
+				_label: 'Grid',
+				rowset: {
+					fields: [
+						{name: 'date', type: 'time', has_time: false, w: 60},
+						{name: 'country', w: 60},
+						{name: 'sector', w: 70},
+						{name: 'output', type: 'number', w: 40},
+					],
+					rows: [
+						[year(time(), 0), 'Algeria', 'Energy'        ,  80],
+						[year(time(), 1), 'Algeria', 'Chickens'      , 100],
+						[year(time(), 2), 'Algeria', 'Chickens'      , 150],
+						[year(time(), 0), 'Canada' , 'Chickens'      ,  20],
+						[year(time(), 1), 'Canada' , 'Geese'         ,  10],
+						[year(time(), 1), 'Canada' , 'Geese'         , 120],
+						[year(time(), 2), 'Canada' , 'Geese'         ,  50],
+						[year(time(), 0), 'Croatia', 'Science'       , 100],
+						[year(time(), 0), 'Croatia', 'Chickens'      , 200],
+						[year(time(), 1), 'Croatia', 'Energy'        , 150],
+						[year(time(), 1), 'Croatia', 'Energy'        , 120],
+						[year(time(), 2), 'Croatia', 'Chickens'      , 180],
+						[year(time(), 2), 'Croatia', 'Energy'        ,  50],
+					],
+				},
+				h: 200,
+			})
+			this.parent.on_bind(function(on) {
+				if (on) {
+					this.items = [g, this.items[1]]
+				}
+			})
+		</script>
+		<div label=Empty id=empty_div>This is empty to disconnect the grid.</div>
+	</x-tabs>
+	<x-split fixed_side=second>
+		<x-tabs tabs_side=left>
+			<x-chart label=Pie nav=g
+				sum_cols=output
+				group_cols="country sector"
+			></x-chart>
+			<x-chart label="Areas" nav=g
+				shape=areas
+				sum_cols=output
+				split_cols=country
+				group_cols="date/0/month/1"
+			></x-chart>
+			<x-chart label="Areas+Dots" nav=g
+				shape=areas_dots
+				sum_cols=output
+				split_cols=country
+				group_cols="date/0/month/1"
+			></x-chart>
+			<x-chart label="Lines" nav=g
+				shape=lines
+				sum_cols=output
+				split_cols=country
+				group_cols="date/0/month/1"
+			></x-chart>
+			<x-chart label="Lines+Dots" nav=g
+				shape=lines_dots
+				sum_cols=output
+				split_cols=country
+				group_cols="date/0/month/1"
+			></x-chart>
+			<x-chart label=Columns nav=g
+				shape=columns
+				sum_cols=output
+				split_cols="country sector"
+				group_cols="date/0/month/1"
+			></x-chart>
+			<x-chart label=Bars nav=g
+				shape=bars
+				sum_cols=output
+				split_cols="country sector"
+				group_cols="date/0/month/1"
+			></x-chart>
+			<x-chart label=Stacks nav=g
+				shape=stacks
+				sum_cols=output
+				split_cols="country sector"
+				group_cols="date/0/month/1"
+			></x-chart>
+		</x-tabs>
+		<div></div>
+	</x-split>
+</x-vsplit>
 </template>
 
 <!--------------------------------------------------------------------------->
