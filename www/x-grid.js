@@ -1002,8 +1002,15 @@ component('x-grid', 'Input', function(e) {
 
 		// canvas drawing
 
-		cx.clear()
+		cx .clear()
 		hcx.clear()
+
+		cx .resetTransform()
+		hcx.resetTransform()
+
+		cx .scale(devicePixelRatio, devicePixelRatio)
+		hcx.scale(devicePixelRatio, devicePixelRatio)
+
 
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
