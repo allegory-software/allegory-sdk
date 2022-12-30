@@ -1,0 +1,116 @@
+BUGS
+------------------------------------------------------------------------------
+* TOLBOX moving
+* RICHTEXT demo
+* SPINEDIT demo
+* TAGSEDIT demo
+* SLIDER demo
+* IMAGE upload & download demo
+* PLACEEDIT demo
+* LIST demo
+* CALENDAR demo
+* DATE_DROPDOWN demo
+* LIST_DROPDOWN demo
+* GRID_DROPDOWN demo
+- WIDGET_ITEMS_WIDGET set_items() update
+- WIDGET_ITEMS_WIDGET _items
+	- RADIOGROUP set _items from enum spec
+	- LIST set _items from rowset
+- NAV revert bug (esp. tree)
+- NAV which widgets to disable when nav has unsaved changes ?
+
+
+FEATURES
+------------------------------------------------------------------------------
+- ALL auto-urls
+- ALL inherited props
+	* prop attr: inherits_from: <prop_name>
+	* needed for: nav, sql_db, ...
+	* in a prop_change hook check parent and sync the prop with that of the parent
+		add/remove the event hook when the prop is set/cleared
+* NAV data_nav: have a nav feed another with data so that we can have lookup dropdowns
+* LOOKUP dropdown
+- NAV group-by aggregates
+- NAV group-by "others" group
+- NAV group-by % column
+- NAV html field opt
+- NAV html rowset
+- VAL_WIDGET html field opt
+* NAV copy selection to clipboard as csv (test paste in Excel)
+* NAV paste csv at focused cell
+- NAV send a "rowset closed" request to server when a grid is unbound
+- NAV rowset.server_order_by (shown in grid header grayed)
+- NAV multi-col luookup (i.e. val_col -> val_cols)
+- BUTTON with menu or list dropdown
+* DROPDOWN [x] button to set null
+* DROPDOWN search
+- DROPDOWN quicksearch when picker is closed
+- CALENDAR select range
+- SLIDER select range
+* INPUT save on typing with delay: field attr "save_on_input" true or false
+- LIST select range
+- TABS auto-menu with items that don't fit the bar
+- TABS pop-out button
+* SPLIT % panes
+- SPLIT context menu: vertical/horizontal, %/fixed
+- LIST drag-move row to other list
+- CHART pie use % column and "others" group from nav
+- CHART bars, columns
+- CHART bar-stacks
+- CHART area-stack (for a % column)
+- CHART log scale
+- CHART pie total radius & orientation (left/right/top/bottom)
+- CHART master-detail with the second pie slice having the radius of
+	the selected slice in the first pie (rotate the first pie so that
+	the selected slice points to the detail slice).
+- CHART sub-unit log-1024-based steps
+* GRID quick filters
+* GRID checklist filters
+- GRID drag-move row to other grid
+- GRID inline editing of entire row (see chrome network throttling grid)
+- GRID put action bar on top, use bare buttons without labels (see jetbrain settings)
+- GRID move impossibility
+	* error notification: can’t move row becuz…
+	* invalid icon over bad targets
+- GRID give subtle visual feedback when refusing to enter edit mode because
+	the cell is read-only
+- GRID allow_exit_row: disable all other rows while editing
+- GRID allow_exit_edit: disable all other cells while editing
+* NAV multi-nav params
+	* params syntax: [nav_id.]field to map params from multiple navs
+		* param_nav_id becomes optional then.
+	* find a way to bind freestanding widgets too, based on id
+- NAV entity names
+	* what about translation? shouldn't this better be directly translatable?
+	* change "record" to entity name in button labels, messages, etc.
+	* add entity name to rowset too (infer plural)
+	* add entity name to tables too (infer singular)
+	* set 'label' prop
+- CHECKLIST
+* UPLOAD area/button with progress
+- new widget: scontenteditable-based auto-growing inline input box
+- LIST editing:
+	* move hit area + grab hand
+	* 3-dots icon for move area (left or right)
+	* X button for removing item (left or right)
+	* edit button for toggle enter/exit edit
+	* button for add item
+- LIST quick filters
+- LIST multi-letter quicksearch like grid
+
+??? map a widget to a param name, which assigns global nav and that widget's field
+in the global nav; unmap when the field is removed from the nav.
+
+
+SECURITY
+------------------------------------------------------------------------------
+CSRF:
+- no need for CRSF tokens, just send normal session cookie with `Secure; SameSite=Lax`.
+- on the server just check that the `Origin` header matches a static string on POST.
+
+
+AUTH
+------------------------------------------------------------------------------
+- (normal | large | xlarge) chooser
+- theme dropdown -> (light | dark)
+

@@ -1,0 +1,69 @@
+BUGS
+------------------------------------------------------------------------------
+* WEBB_ACTION dir/file.ext action/arg.json vs action.json/arg
+- SCHEMA SYNC make more robust
+	* FKs steal indexes (shared indexes)
+* CONNPOOL: retry
+* ROWSET filter push notifications on session
+
+
+FEATURES
+------------------------------------------------------------------------------
+- SCHEMA SYNC insert-or-update rows over existing table
+- ROWSET map error messages to fields on check constraint violations.
+- glue.lua subst() with varargs like js version
+- HTTP CLIENT cookie_default_path() extract fom URI
+- TARANTOOL finish extracting metadata
+- HTTP ranges on file serving
+- HTTP web sockets
+- XLS(X) parsing
+	- ithub.com/jjensen/lua-xlsx/blob/master/xlsx.lua
+	- https://github.com/jjensen/lua-xls
+	- https://github.com/bungle/lua-resty-libxl
+
+
+MULTILANGUAGE
+------------------------------------------------------------------------------
+TOPICS
+	1) identify & cover all sources of text
+	2) hot-reloading should update language
+	3) centralization of sources
+	4) translation UI
+	5) language switching UI
+SOURCES OF TEXT
+	- DONE Lua & JS code: S()  -> source code parser
+	- DONE manually adding entries to S_texts() for dynamic strings
+	- DONE spa inline html: html()  -> implicit html filter
+	- DONE html templates: template.NAME  -> implicit html filter
+	- DONE NEW labeled texts in html templates
+	- DONE schema field attrs (text, help, etc.) -> ?
+	* WIP rowset field_attrs -> ?
+	* TODO enum texts
+	* TODO rowset & schema attrs (entity_name, entity_names, etc.)
+	- DONE UI "lang" slot props -> lang json files
+
+
+SECURITY
+------------------------------------------------------------------------------
+- lookup tables are public
+	* add role to each restricted table in schema and check that in
+	rowset_sql on select -- we could even cut out columns from the result
+	set based on that or maybe that's too much
+
+
+QA
+------------------------------------------------------------------------------
+- Lua: use a linter
+- CI server
+	1. protocol for running unit tests: how to run them, how to isolate them,
+		and how to interpret the results in a standardized way (need a list
+		of test cases and pass/fail status for each).
+	2. test machine
+	3. use mm for running tests? use github's CI ?
+- HTTP stress test
+	- continuous random stress testing to find:
+	- memory leaks in app code
+	- memory fragmentation in tarantool
+	- burst stress testing to reach DoS limits and test recovery from DoS
+	- discard cookies to test session garbage collection
+- Lua: integrate strict.lua
