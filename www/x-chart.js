@@ -6,7 +6,7 @@
 SHAPES
 	stack
 	pie
-	line line_dots area area_dots
+	line line_dots area area_dots stacks
 	column
 	bar
 
@@ -29,13 +29,15 @@ component('x-chart', 'Input', function(e) {
 	e.prop('min_val'    , {type: 'number', attr: true})
 	e.prop('max_val'    , {type: 'number', attr: true})
 	e.prop('other_threshold', {type: 'number', default: .05, decimals: null, attr: true})
-	e.prop('other_text', {default: 'Other', attr: true})
+	e.prop('other_text' , {default: 'Other', slot: 'lang', attr: true})
 	e.prop('shape', {
 		type: 'enum',
-		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots',
+		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots', 'stacks',
 			'column', 'bar', 'stackbar', 'bubble', 'scatter'],
-		default: 'pie', attr: true,
+		default: 'pie',
 	})
+	e.prop('nolegend', {type: 'bool', default: false})
+	e.prop('text', {attr: true, slot: 'lang'})
 
 	e.set_split_cols      = update_model
 	e.set_group_cols      = update_model
@@ -173,6 +175,9 @@ component('x-chart', 'Input', function(e) {
 			all_split_groups.extend(split_groups)
 		}
 
+		// TODO: remove this
+		e.g = all_split_groups
+
 		return true
 	}
 
@@ -204,7 +209,7 @@ component('x-chart', 'Input', function(e) {
 		if (!all_split_groups)
 			return
 
-		let groups = all_split_groups[0] // TODO: draw multiple pies for each split group
+		let groups = all_split_groups[0]
 
 		let slices = []
 		slices.total = 0
@@ -215,6 +220,7 @@ component('x-chart', 'Input', function(e) {
 			slice.label = group.label
 			slices.push(slice)
 			slices.total += sum
+			slices.key_cols = group.key_cols
 		}
 
 		// sum small slices into a single "other" slice.
@@ -233,25 +239,94 @@ component('x-chart', 'Input', function(e) {
 			other_slice.label = e.other_text
 			big_slices.push(other_slice)
 		}
+
 		for (let slice of big_slices)
 			slice.percent = (slice.size * 100).dec(0) + '%'
+
+		big_slices.key_cols_label = e._nav.fldlabels(slices.key_cols).join_nodes(' / ')
+		big_slices.sum_field = groups.sum_def.field
+
 		return big_slices
 	}
 
 	// view -------------------------------------------------------------------
-
-	e.prop('text', {attr: true, slot: 'lang'})
 
 	e.header = div({class: 'x-chart-header'})
 	e.view   = div({class: 'x-chart-view'})
 	e.legend = div({class: 'x-chart-legend'})
 	e.add(e.header, div({class: 'x-chart-split'}, e.view, e.legend))
 
-	let hit_slice
+	e.set_nolegend = function(v) {
+		e.legend.hide(v)
+	}
 
-	function do_update_legend_slices(slices) {
+	let tt
+	function make_tooltip(opt) {
+		tt = tooltip(assign({
+			align   : 'center',
+			kind    : 'info',
+			classes : 'x-chart-tooltip',
+		}, opt))
+	}
+
+	// shape dispatcher
+
+	let renderer = obj() // {shape->cons()}
+	let do_update
+	let do_measure
+	let do_position
+	let pointermove = noop
+
+	let shape
+	e.on_update(function(opt) {
+		e.header.set(e.text)
+		if (shape != e.shape) {
+			if (tt) {
+				tt.remove()
+				tt = null
+			}
+			pointermove = noop
+			shape = e.shape
+			let init_renderer = renderer[shape]
+			if (init_renderer)
+				init_renderer()
+		}
+		if (do_update)
+			do_update(opt)
+	})
+
+	let view_w, view_h, view_css
+
+	e.on_measure(function() {
+		let r = e.view.rect()
+		view_w = floor(r.w)
+		view_h = floor(r.h)
+		view_css = e.view.css()
+		if (do_measure)
+			do_measure()
+	})
+
+	e.on_position(function() {
+		if (do_position)
+			do_position()
+	})
+
+	e.on('pointermove' , function(...args) { pointermove(...args) })
+	e.on('pointerleave', function(...args) { pointermove(...args) })
+
+	// common functionality
+
+	function split_color(i, n, alpha) {
+		return hsl_to_rgb(((i / n) * 360 - 120) % 360, .8, .6, alpha)
+	}
+
+	let legend_hit_slice
+
+	function update_legend_slices(slices) {
 		let i = 0
 		e.legend.clear()
+		if (e.nolegend)
+			return
 		for (let slice of slices) {
 			let color = split_color(i, slices.length)
 			let bullet = div({
@@ -262,11 +337,11 @@ component('x-chart', 'Input', function(e) {
 			let percent = div({class: 'x-chart-legend-percent'}, slice.percent)
 			e.legend.add(bullet, label, percent)
 			label.on('pointerenter', function() {
-				hit_slice = slice
+				legend_hit_slice = slice
 				e.update()
 			})
 			label.on('pointerleave', function() {
-				hit_slice = null
+				legend_hit_slice = null
 				e.update()
 			})
 			i++
@@ -275,9 +350,11 @@ component('x-chart', 'Input', function(e) {
 
 	let legend_hit_cg
 
-	function do_update_legend_split_groups() {
+	function update_legend_split_groups() {
 		let cgi = 0
 		e.legend.clear()
+		if (e.nolegend)
+			return
 		let groups = all_split_groups
 		for (let cg of groups) {
 			let color = split_color(cgi, groups.length)
@@ -299,68 +376,43 @@ component('x-chart', 'Input', function(e) {
 		}
 	}
 
-	let renderer = {} // {shape->cons(...)->update()}
-	let do_update
-	let do_measure
-	let do_position
-	let tt
-	let pointermove = noop
-
-	let shape
-	e.on_update(function(opt) {
-		if (shape != e.shape) {
-			pointermove = noop
-			shape = e.shape
-			assert(renderer[shape], 'invalid shape: {0}', e.shape)()
-		}
-		e.header.set(e.text)
-		if (do_update)
-			do_update(opt)
-	})
-
-	let view_w, view_h, view_css
-
-	e.on_measure(function() {
-		let r = e.view.rect()
-		view_w = floor(r.w)
-		view_h = floor(r.h)
-		view_css = e.view.css()
-		if (do_measure)
-			do_measure()
-	})
-
-	e.on_position(function() {
-		if (do_position)
-			do_position()
-	})
-
-	function split_color(i, n, alpha) {
-		return hsl_to_rgb(((i / n) * 360 - 120) % 360, .8, .6, alpha)
-	}
-
 	renderer.stack = function() {
 
 		let slices = pie_slices()
 		if (!slices)
 			return
 
-		let stack = div({class: 'x-chart-stack'})
+		let stacks = div({class: 'x-chart-stacks'})
 		let labels = div({class: 'x-chart-stack-labels'})
-		e.add(stack, labels)
+		e.view.add(stacks)
 
-		return function() {
-			let i = 0
-			stack.clear()
-			e.legend.clear()
-			for (let slice of slices) {
-				let cdiv = div({class: 'x-chart-stack-slice'})
-				let sdiv = div({class: 'x-chart-stack-slice-ct'}, cdiv, slice.label)
-				sdiv.style.flex = slice.size
-				cdiv.style['background-color'] = split_color(i, slices.length)
-				stack.add(sdiv)
-				i++
+		do_update = function(opt) {
+			if (opt.model) {
+				stacks.clear()
+				e.legend.clear()
+				if (!all_split_groups)
+					return
+				for (let cg of all_split_groups) {
+					let stack = div({class: 'x-chart-stack'})
+					stacks.add(stack)
+					let total = 0
+					for (let xg of cg)
+						total += xg.sum
+					for (let xg of cg) {
+						let i = 0
+						for (let slice of slices) {
+							let cdiv = div({class: 'x-chart-stack-slice'})
+							let sdiv = div({class: 'x-chart-stack-slice-ct'}, cdiv, slice.label)
+							sdiv.style.flex = slice.size
+							cdiv.style['background-color'] = split_color(i, slices.length)
+							stack.add(sdiv)
+							i++
+						}
+					}
+				}
 			}
 		}
+
 	}
 
 	renderer.pie = function() {
@@ -370,73 +422,114 @@ component('x-chart', 'Input', function(e) {
 			return
 
 		let pie = svg({class: 'x-chart-pie', viewBox: '-1.1 -1.1 2.2 2.2'})
-		let labels = div({class: 'x-chart-pie-labels'})
-		e.view.add(pie, labels)
+		let percent_divs = div({class: 'x-chart-pie-percents'})
+		e.attr('shape', 'pie')
+		e.view.add(pie, percent_divs)
+
+		let hit_slice
 
 		pie.on('pointermove', function(ev, mx, my) {
 			let path = ev.target
 			hit_slice = path.slice
-			e.update()
+			e.update({tooltip: true})
 		})
 
 		pie.on('pointerleave', function(ev, mx, my) {
 			hit_slice = null
-			e.update()
+			e.update({tooltip: true})
 		})
-
-		function do_update_pie() {
-			let angle = 0
-			let i = 0
-			pie.clear()
-			for (let slice of slices) {
-				let arclen = slice.size * 360
-				let color = split_color(i, slices.length)
-				let slice_path = pie.path({
-					d: 'M 0 0 '
-						+ svg_arc_path(0, 0, 1, angle + arclen - 90, angle - 90, 'L')
-						+ ' Z',
-					fill: color,
-					stroke: 'white',
-					['stroke-width']: 1,
-					['vector-effect']: 'non-scaling-stroke',
-				})
-				slice_path.slice = slice
-				let selection_path = pie.path({
-					d: svg_arc_path(0, 0, 1.05, angle + arclen - 90, angle - 90, 'M'),
-					fill: 'none',
-					stroke: split_color(i, slices.length, .6),
-					['stroke-width']: .08,
-				})
-				slice.path = selection_path
-
-				// add the percent label and position it inside the pie.
-				let center_angle = angle + arclen / 2
-				;[slice.label_x, slice.label_y] = point_around(0, 0, .7, center_angle - 90)
-
-				angle += arclen
-				i++
-			}
-		}
 
 		do_update = function(opt) {
 			if (opt.model) {
 
-				do_update_legend_slices(slices)
-
-				do_update_pie()
-
-				labels.clear()
+				// create pie.
+				let angle = 0
+				let i = 0
+				pie.clear()
 				for (let slice of slices) {
-					slice.label = div({class: 'x-chart-pie-label'}, slice.percent)
-					labels.add(slice.label)
+					let arclen = slice.size * 360
+					let color = split_color(i, slices.length)
+
+					let slice_path = pie.path({
+						d: 'M 0 0 '
+							+ svg_arc_path(0, 0, 1, angle + arclen - 90, angle - 90, 'L')
+							+ ' Z',
+						fill: color,
+						stroke: 'white',
+						['stroke-width']: 1,
+						['vector-effect']: 'non-scaling-stroke',
+					})
+					slice_path.slice = slice
+
+					let selection_path = pie.path({
+						d: svg_arc_path(0, 0, 1.05, angle + arclen - 90, angle - 90, 'M'),
+						fill: 'none',
+						stroke: split_color(i, slices.length, .6),
+						['stroke-width']: .08,
+					})
+					slice.selection_path = selection_path
+
+					// compute the percent div's unscaled position inside the pie.
+					let center_angle = angle + arclen / 2
+					;[slice.percent_div_x, slice.percent_div_y] =
+						point_around(0, 0, .65, center_angle - 90)
+
+					;[slice.center_x, slice.center_y] =
+						point_around(0, 0, .5, center_angle - 90)
+
+					angle += arclen
+					i++
+				}
+
+				// create percent divs.
+				percent_divs.clear()
+				for (let slice of slices) {
+					if (slice.size > 0.05) {
+						slice.percent_div = div({class: 'x-chart-pie-label'}, slice.percent)
+						percent_divs.add(slice.percent_div)
+					}
+				}
+
+				update_legend_slices(slices)
+			}
+
+			if (opt.tooltip) {
+				if (hit_slice) {
+					if (!tt) {
+						make_tooltip({target: pie, side: 'inner-center'})
+						e.view.add(tt)
+						tt.key_cols_div = div()
+						tt.sum_cols_div = div()
+						tt.key_div = div({style: 'justify-self: end'})
+						tt.sum_div = div({style: 'justify-self: end'})
+						tt.text = div({class: 'x-chart-tooltip-label'},
+							tt.key_cols_div, tt.key_div,
+							tt.sum_cols_div, tt.sum_div
+						)
+					}
+
+					let s = e._nav.cell_display_val_for(null, slices.sum_field, hit_slice.sum)
+
+					tt.key_cols_div.set(slices.key_cols_label)
+					tt.sum_cols_div.set(slices.sum_field.label)
+					tt.key_div.set(TC(hit_slice.label))
+					tt.sum_div.set([s, ' (', tag('b', 0, hit_slice.percent), ')'])
+
+					tt.update({show: true})
+				} else if (tt) {
+					tt.update({show: false})
 				}
 			}
+
 		}
 
 		do_measure = function() {
+			// measure percent divs
 			for (let slice of slices) {
-				slice.label_w = slice.label.cw
-				slice.label_h = slice.label.ch
+				if (slice.percent_div) {
+					slice.percent_div_w = slice.percent_div.cw
+					slice.percent_div_h = slice.percent_div.ch
+				}
 			}
 		}
 
@@ -446,34 +539,44 @@ component('x-chart', 'Input', function(e) {
 			let x = view_w / 2 - r
 			let y = view_h / 2 - r
 
+			// size and position the pie
 			pie.w = r * 2
 			pie.h = r * 2
 			pie.style.left = px(x)
 			pie.style.top  = px(y)
 
+			// position percent divs
 			let i = 0
 			for (let slice of slices) {
-				slice.label.x = x + r + slice.label_x * r - slice.label_w / 2
-				slice.label.y = y + r + slice.label_y * r - slice.label_h / 2
-				pie.nodes[2*i+1].style.display = 'none'
+				if (slice.percent_div) {
+					slice.percent_div.x = x + r + slice.percent_div_x * r - slice.percent_div_w / 2
+					slice.percent_div.y = y + r + slice.percent_div_y * r - slice.percent_div_h / 2
+				}
+				slice.selection_path.style.display = 'none'
 				i++
 			}
 
+			if (hit_slice || legend_hit_slice) {
+				let sel_path = (hit_slice || legend_hit_slice).selection_path
+				sel_path.style.display = 'block'
+			}
+
 			if (hit_slice) {
-				let path = hit_slice.path
-				path.style.display = 'block'
+				tt.popup_ox = hit_slice.center_x * r
+				tt.popup_oy = hit_slice.center_y * r
 			}
 
 		}
 	}
 
-	function renderer_line_or_columns(columns, rotate, dots, area) {
+	function renderer_line_or_columns(columns, rotate, dots, area, stacked) {
 
 		let canvas = tag('canvas', {
 			class : 'x-chart-canvas',
 			width : view_w,
 			height: view_h,
 		})
+		e.attr('shape', 'lines')
 		e.view.set(canvas)
 		let cx = canvas.getContext('2d')
 
@@ -490,6 +593,7 @@ component('x-chart', 'Input', function(e) {
 
 		let hit_cg, hit_xg
 		let hit_x, hit_y, hit_w, hit_h
+		let bar_rect
 
 		function hit_test_columns(mx, my) {
 			let cgi = 0
@@ -500,7 +604,7 @@ component('x-chart', 'Input', function(e) {
 						if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
 							hit_cg = cg
 							hit_xg = xg
-							hit_x = x
+							hit_x = x + w / 2
 							hit_y = y
 							hit_w = w
 							hit_h = h
@@ -613,7 +717,7 @@ component('x-chart', 'Input', function(e) {
 
 		do_update = function(opt) {
 			if (opt.model)
-				do_update_legend_split_groups()
+				update_legend_split_groups()
 		}
 
 		do_position = function() {
@@ -812,13 +916,29 @@ component('x-chart', 'Input', function(e) {
 			cx.lineTo(round(lerp(max_val, min_val, max_val, 0, w)) + .5, round(h - py2) - .5)
 			cx.stroke()
 
-			if (columns) {
+			if (stacked) {
+
+				let bar_w = round(w / (xgs.size - 1) / 3)
+
+				bar_rect = function(cgi, xg) {
+
+					let x = xg.x
+					let y = xg.y
+					return [
+						x - bar_w / 2,
+						y,
+						bar_w,
+						h - py2 - y
+					]
+				}
+
+			} else if (columns) {
 
 				let cn = all_split_groups.length
 				let bar_w = round(w / (xgs.size - 1) / cn / 3)
 				let half_w = round((bar_w * cn + 2 * (cn - 1)) / 2)
 
-				function bar_rect(cgi, xg) {
+				bar_rect = function(cgi, xg) {
 					let x = xg.x
 					let y = xg.y
 					return [
@@ -921,15 +1041,14 @@ component('x-chart', 'Input', function(e) {
 
 	}
 
-	renderer.line      = () => renderer_line_or_columns()
-	renderer.line_dots = () => renderer_line_or_columns(false, false, true)
-	renderer.area      = () => renderer_line_or_columns(false, false, false, true)
-	renderer.area_dots = () => renderer_line_or_columns(false, false, true, true)
-	renderer.column    = () => renderer_line_or_columns(true)
-	renderer.bar       = () => renderer_line_or_columns(true, true)
-
-	e.on('pointermove' , function(...args) { pointermove(...args) })
-	e.on('pointerleave', function(...args) { pointermove(...args) })
+	renderer.lines      = () => renderer_line_or_columns()
+	renderer.lines_dots = () => renderer_line_or_columns(false, false, true)
+	renderer.areas      = () => renderer_line_or_columns(false, false, false, true)
+	renderer.areas_dots = () => renderer_line_or_columns(false, false, true , true)
+	renderer.columns    = () => renderer_line_or_columns(true)
+	renderer.bars       = () => renderer_line_or_columns(true , true)
+	renderer.stacks     = () => renderer_line_or_columns(true , false, false, false, true)
+	renderer.hstacks    = () => renderer_line_or_columns(true , true , false, false, true)
 
 	// data binding -----------------------------------------------------------
 
@@ -969,8 +1088,8 @@ component('x-chart', 'Input', function(e) {
 
 	e.set_nav = nav_changed
 	e.set__nav_id_nav = nav_changed
-
 	e.prop('nav', {private: true})
+	e.prop('_nav_id_nav', {private: true})
 	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
 
 })
