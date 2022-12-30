@@ -398,14 +398,14 @@ end
 
 --tables ---------------------------------------------------------------------
 
-_G.concat = table.concat
-_G.cat    = table.concat
-_G.insert = table.insert
-_G.remove = table.remove
-_G.pop    = table.remove
+_G.concat = concat
+_G.cat    = concat
+_G.insert = insert
+_G.remove = remove
+_G.pop    = remove
 
 function add(t, v)
-	return insert(t, v)
+	insert(t, v)
 end
 push = add
 
