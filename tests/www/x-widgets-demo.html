@@ -317,25 +317,35 @@ main.add(button({
 <script run>
 
 tb = toolbox({
+	id: 'my_toolbox',
 	text: 'Imma toolbox',
-	xxx: 'yyy',
 	content: div({}, 'I\'m just here for the demo.'),
-	px: 400,
+	px: 100,
 	py: 100,
-	w: 150,
-	h: 300,
+	pw: 150,
+	ph: 300,
 })
 
+main.add(tb)
 
-b = button({
+main.add(button({
 	text: 'Click to show toolbox',
 	action: function() {
-		main.add(tb)
 		tb.show().focus()
 	}
-})
+}))
 
-main.add(b)
+main.add(button({
+	text: 'Click to show another toolbox',
+	action: function() {
+		main.add(toolbox({
+			text: 'Toolbox #'+main.len,
+			content: 'You can make more of me',
+			pw: 150,
+			ph: 200,
+		}))
+	}
+}))
 
 </script>
 </template>
