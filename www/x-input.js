@@ -370,9 +370,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 			let readonly = !e.can_actually_change_val()
 			e.xoff()
 			e.readonly = readonly
+			e.xon()
 			e.disable('readonly', readonly && !e.enabled_on_readonly)
 			e.disable('no_row', !(enabled_without_nav || e.row))
-			e.xon()
 
 			e.do_update_val(e.input_val)
 			e.class('modified', e._nav && row && field && e._nav.cell_modified(row, field))
