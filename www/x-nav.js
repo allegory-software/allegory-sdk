@@ -996,9 +996,13 @@ function nav_widget(e) {
 		e.fire('col_'+k+'_changed_for_'+col, col, k, v)
 
 		let attrs = field_prop_attrs[k]
-		let slot = attrs && attrs.slot
-		let prop = 'col.' + col + '.' + k
-		document.fire('prop_changed', e, prop, v, v0, slot)
+		if (e._xoff) {
+			attr(field_prop_attrs, k).default = v
+		} else {
+			let slot = attrs && attrs.slot
+			let prop = 'col.' + col + '.' + k
+			document.fire('prop_changed', e, prop, v, v0, slot)
+		}
 	}
 
 	function parse_col_prop_name(prop) {
@@ -4472,9 +4476,7 @@ function nav_widget(e) {
 			oe.remove()
 			oe = null
 		}
-		e.xoff()
 		e.disable('loading', on)
-		e.xon()
 		if (!on)
 			return
 		oe = overlay({class: 'x-loading-overlay'})
