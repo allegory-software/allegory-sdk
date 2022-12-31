@@ -1295,16 +1295,14 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	function mm_header_resize(ev, mx, my) {
-		e.xoff()
 		e.header_w = mx - hit_x
-		e.xon()
 	}
 
 	function mu_header_resize(ev, mx, my) {
 		e.class('header-resizing', false)
 		update_sizes()
 		hit_state = null
-		e.save_prop('header_w')
+		e.xsave()
 		return false
 	}
 
@@ -1381,9 +1379,7 @@ component('x-grid', 'Input', function(e) {
 		} else {
 
 			function mm_col_resize(ev, mx, my) {
-				e.xoff()
 				e.cell_w = max(20, mx - hit_dx)
-				e.xon()
 			}
 
 		}
@@ -1394,8 +1390,7 @@ component('x-grid', 'Input', function(e) {
 			e.class('col-resizing', false)
 			if (horiz)
 				e.set_prop(`col.${field.name}.w`, field.w)
-			else
-				e.save_prop('cell_w')
+			e.xsave()
 			update_sizes()
 			return false
 		}
