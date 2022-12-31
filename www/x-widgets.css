@@ -2543,10 +2543,10 @@ x-tabs-fixed-header {
 	align-items: baseline;
 	font-weight: bold;
 	font-size: 12px;
-	line-height: 2.2;
+	line-height: 2;
 	background-color: var(--x-toolbox-titlebar-bg);
 	cursor: move;
-	padding: 0 0 0 .5em;
+	padding: 0 .5em;
 }
 
 .x-toolbox:focus-within > .x-toolbox-titlebar {
@@ -2564,7 +2564,7 @@ x-tabs-fixed-header {
 .x-toolbox-button {
 	color: var(--x-fg-disabled);
 	flex: 0;
-	padding: .5em .5em;
+	padding: .25em .5em;
 	cursor: default;
 }
 
