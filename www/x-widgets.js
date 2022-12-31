@@ -532,232 +532,8 @@ function editable_widget(e) {
 
 }
 
-// ---------------------------------------------------------------------------
-// cssgrid item widget mixin
-// ---------------------------------------------------------------------------
-
-function cssgrid_item_widget(e) {
-
-	e.prop('pos_x'  , {style: 'grid-column-start' , type: 'number'})
-	e.prop('pos_y'  , {style: 'grid-row-start'    , type: 'number'})
-	e.prop('span_x' , {style: 'grid-column-end'   , type: 'number', style_format: v => 'span '+v, style_parse: v => num((v || 'span 1').replace('span ', '')) })
-	e.prop('span_y' , {style: 'grid-row-end'      , type: 'number', style_format: v => 'span '+v, style_parse: v => num((v || 'span 1').replace('span ', '')) })
-	e.prop('align_x', {style: 'justify-self'      , type: 'enum', enum_values: 'start end center stretch'})
-	e.prop('align_y', {style: 'align-self'        , type: 'enum', enum_values: 'start end center stretch'})
-
-	let do_select_widget = e.do_select_widget
-	let do_unselect_widget = e.do_unselect_widget
-
-	e.do_select_widget = function(focus) {
-		do_select_widget(focus)
-		let p = e.parent_widget
-		if (p && p.iswidget && p.type == 'cssgrid') {
-			cssgrid_item_widget_editing(e)
-			e.cssgrid_item_do_select_widget()
-		}
-	}
-
-	e.do_unselect_widget = function(focus_prev) {
-		let p = e.parent_widget
-		if (p && p.iswidget && p.type == 'cssgrid')
-			e.cssgrid_item_do_unselect_widget()
-		do_unselect_widget(focus_prev)
-	}
-
-}
-
 function contained_widget(e) {
-	cssgrid_item_widget(e)
-}
-
-// ---------------------------------------------------------------------------
-// editable widget protocol for cssgrid item
-// ---------------------------------------------------------------------------
-
-function cssgrid_item_widget_editing(e) {
-
-	function track_bounds() {
-		let i = e.pos_x-1
-		let j = e.pos_y-1
-		return e.parent_widget.cssgrid_track_bounds(i, j, i + e.span_x, j + e.span_y)
-	}
-
-	function set_span(axis, i1, i2) {
-		if (i1 !== false)
-			e['pos_'+axis] = i1+1
-		if (i2 !== false)
-			e['span_'+axis] = i2 - (i1 !== false ? i1 : e['pos_'+axis]-1)
-	}
-
-	function toggle_stretch_for(horiz) {
-		let attr = horiz ? 'align_x' : 'align_y'
-		let align = e[attr]
-		if (align == 'stretch')
-			align = e['_'+attr] || 'center'
-		else {
-			e['_'+attr] = align
-			align = 'stretch'
-		}
-		e[horiz ? 'w' : 'h'] = align == 'stretch' ? 'auto' : null
-		e[attr] = align
-		return align
-	}
-	function toggle_stretch(horiz, vert) {
-		if (horiz && vert) {
-			let stretch_x = e.align_x == 'stretch'
-			let stretch_y = e.align_y == 'stretch'
-			if (stretch_x != stretch_y) {
-				toggle_stretch(!stretch_x, !stretch_y)
-			} else {
-				toggle_stretch(true, false)
-				toggle_stretch(false, true)
-			}
-		} else if (horiz)
-			toggle_stretch_for(true)
-		else if (vert)
-			toggle_stretch_for(false)
-	}
-
-	e.cssgrid_item_do_select_widget = function() {
-
-		let p = e.parent_widget
-		if (!(p && p.iswidget && p.type == 'cssgrid'))
-			return
-
-		p.widget_editing = true
-
-		e.widget_selected_overlay.on('focus', function() {
-			p.widget_editing = true
-		})
-
-		let span_outline = div({class: 'x-cssgrid-span'},
-			div({class: 'x-cssgrid-span-handle', side: 'top'}),
-			div({class: 'x-cssgrid-span-handle', side: 'left'}),
-			div({class: 'x-cssgrid-span-handle', side: 'right'}),
-			div({class: 'x-cssgrid-span-handle', side: 'bottom'}),
-		)
-		span_outline.on('pointerdown', so_pointerdown)
-		p.add(span_outline)
-
-		function update_so() {
-			for (let s of ['grid-column-start', 'grid-column-end', 'grid-row-start', 'grid-row-end'])
-				span_outline.style[s] = e.style[s]
-		}
-		update_so()
-
-		function prop_changed(te, k) {
-			if (te == e)
-				if (k == 'pos_x' || k == 'span_x' || k == 'pos_y' || k == 'span_y')
-					update_so()
-		}
-
-		e.on_bind(function(on) {
-			document.on('prop_changed', prop_changed, on)
-		})
-
-		// drag-resize item's span outline => change item's grid area ----------
-
-		let drag_mx, drag_my, side
-
-		function resize_span(mx, my) {
-			let horiz = side == 'left' || side == 'right'
-			let axis = horiz ? 'x' : 'y'
-			let second = side == 'right' || side == 'bottom'
-			mx = horiz ? mx - drag_mx : my - drag_my
-			let i1 = e['pos_'+axis]-1
-			let i2 = e['pos_'+axis]-1 + e['span_'+axis]
-			let dx = 1/0
-			let closest_i
-			e.parent_widget.each_cssgrid_line(axis, function(i, x) {
-				if (second ? i > i1 : i < i2) {
-					if (abs(x - mx) < dx) {
-						dx = abs(x - mx)
-						closest_i = i
-					}
-				}
-			})
-			set_span(axis,
-				!second ? closest_i : i1,
-				 second ? closest_i : i2
-			)
-		}
-
-		function so_pointerdown(ev, mx, my) {
-			let handle = ev.target.closest('.x-cssgrid-span-handle')
-			if (!handle) return
-			side = handle.attr('side')
-
-			let [bx1, by1, bx2, by2] = track_bounds()
-			let second = side == 'right' || side == 'bottom'
-			drag_mx = mx - (second ? bx2 : bx1)
-			drag_my = my - (second ? by2 : by1)
-			resize_span(mx, my)
-
-			return this.capture_pointer(ev, so_pointermove)
-		}
-
-		function so_pointermove(ev, mx, my) {
-			resize_span(mx, my)
-		}
-
-		function overlay_keydown(key, shift, ctrl) {
-			if (key == 'Enter') { // toggle stretch
-				toggle_stretch(!shift, !ctrl)
-				return false
-			}
-			if (key == 'ArrowLeft' || key == 'ArrowRight' || key == 'ArrowUp' || key == 'ArrowDown') {
-				let horiz = key == 'ArrowLeft' || key == 'ArrowRight'
-				let fw = key == 'ArrowRight' || key == 'ArrowDown'
-				if (ctrl) { // change alignment
-					let attr = horiz ? 'align_x' : 'align_y'
-					let align = e[attr]
-					if (align == 'stretch')
-						align = toggle_stretch(horiz, !horiz)
-					let align_indices = {start: 0, center: 1, end: 2}
-					let align_map = keys(align_indices)
-					align = align_map[align_indices[align] + (fw ? 1 : -1)]
-					e[attr] = align
-				} else { // resize span or move to diff. span
-					let axis = horiz ? 'x' : 'y'
-					if (shift) { // resize span
-						let i1 = e['pos_'+axis]-1
-						let i2 = e['pos_'+axis]-1 + e['span_'+axis]
-						let i = max(i1+1, i2 + (fw ? 1 : -1))
-						set_span(axis, false, i)
-					} else {
-						let i = max(0, e['pos_'+axis]-1 + (fw ? 1 : -1))
-						set_span(axis, i, i+1)
-					}
-				}
-				return false
-			}
-
-		}
-		e.widget_selected_overlay.on('keydown', overlay_keydown)
-
-		e.cssgrid_item_do_unselect_widget = function() {
-			e.off('prop_changed', prop_changed)
-			e.widget_selected_overlay.off('keydown', overlay_keydown)
-			span_outline.remove()
-			e.cssgrid_item_do_unselect_widget = noop
-
-			// exit parent editing if this was the last item to be selected.
-			let p = e.parent_widget
-			if (p && p.widget_editing) {
-				let only_item = true
-				for (let e1 of selected_widgets)
-					if (e1 != e && e1.parent_widget == p) {
-						only_item = false
-						break
-					}
-				if (only_item)
-					p.widget_editing = false
-			}
-
-		}
-
-	}
-
+	//
 }
 
 /* ---------------------------------------------------------------------------
@@ -1642,7 +1418,7 @@ component('x-tabs', 'Containers', function(e) {
 
 	function update_tab_title(tab) {
 		let label = item_label(tab.item)
-		tab.title_box.set(label)
+		tab.title_box.set(TC(label))
 		tab.title_box.title = tab.title_box.textContent
 	}
 
@@ -1657,12 +1433,21 @@ component('x-tabs', 'Containers', function(e) {
 
 		if (!e.selection_bar) {
 			e.selection_bar = div({class: 'x-tabs-selection-bar'})
-			e.add_button = div({class: 'x-tabs-tab x-tabs-add-button fa fa-plus', tabindex: 0})
+			e.add_button = div({class: 'x-tabs-add-button fa fa-plus', tabindex: 0})
 			e.tabs = div({class: 'x-tabs-tabs'})
-			e.header = div({class: 'x-tabs-header'}, e.selection_bar, e.tabs, e.fixed_header, e.add_button)
+			e.header = div({class: 'x-tabs-header'},
+				e.selection_bar, e.tabs, e.fixed_header, e.add_button)
 			e.content = div({class: 'x-tabs-content x-container'})
 			e.add(e.header, e.content)
 			e.add_button.on('click', add_button_click)
+		}
+
+		if (opt.items) {
+			for (let item of e.items) {
+				if (!item._tab) {
+
+				}
+			}
 		}
 
 		if (opt.new_items) {
@@ -1690,10 +1475,12 @@ component('x-tabs', 'Containers', function(e) {
 
 		if (opt.removed_items) {
 			for (let item of opt.removed_items) {
-				e.tabs.remove(item._tab)
 				item.remove()
-				item._tab = null
 				item.on('label_changed', item_label_changed, false)
+				if (item._tab) {
+					item._tab.remove()
+					item._tab = null
+				}
 			}
 		}
 
@@ -2158,7 +1945,7 @@ component('x-split', 'Containers', function(e) {
 
 	function mu_resize() {
 		e.class('resizing', false)
-		e.save_prop('fixed_size')
+		e.xsave()
 	}
 
 	e.on('pointerdown', function(ev) {
@@ -2420,43 +2207,43 @@ component('x-toolbox', function(e) {
 	e.clear()
 
 	focusable_widget(e)
+
+	e.props.popup_align = {default: 'top'}
+	e.props.popup_side  = {default: 'inner-top'}
 	e.popup()
 
 	e.istoolbox = true
 	e.class('pinned')
 
-	e.pin_button = div({class: 'x-toolbox-button x-toolbox-button-pin fa fa-thumbtack'})
-	e.xbutton = div({class: 'x-toolbox-button x-toolbox-button-close fa fa-times'})
-	e.title_box = div({class: 'x-toolbox-title'})
-	e.titlebar = div({class: 'x-toolbox-titlebar'}, e.title_box, e.pin_button, e.xbutton)
-	e.content_box = div({class: 'x-toolbox-content x-container'})
+	e.pin_button     = div({class: 'x-toolbox-button x-toolbox-button-pin fa fa-thumbtack'})
+	e.xbutton        = div({class: 'x-toolbox-button x-toolbox-button-close fa fa-times'})
+	e.title_box      = div({class: 'x-toolbox-title'})
+	e.titlebar       = div({class: 'x-toolbox-titlebar'}, e.title_box, e.pin_button, e.xbutton)
+	e.content_box    = div({class: 'x-toolbox-content x-container'})
 	e.resize_overlay = div({class: 'x-toolbox-resize-overlay'})
 	e.add(e.titlebar, e.content_box, e.resize_overlay)
 
-	e.set_label = function(v) { e.title_box.set(v) }
-
-	e.alias('target' , 'popup_target')
-	e.alias('align'  , 'popup_align')
-	e.alias('side'   , 'popup_side')
-
-	e.props.side  = {private: true, default: 'inner-top'}
-	e.props.align = {private: true, default: 'start'}
+	e.alias('target', 'popup_target')
+	e.alias('align' , 'popup_align')
+	e.alias('side'  , 'popup_side')
 
 	e.prop('px'    , {type: 'number', slot: 'user'})
 	e.prop('py'    , {type: 'number', slot: 'user'})
 	e.prop('pw'    , {type: 'number', slot: 'user'})
 	e.prop('ph'    , {type: 'number', slot: 'user'})
-	e.prop('pinned', {type: 'bool'  , slot: 'user'})
+	e.prop('pinned', {type: 'bool'  , slot: 'user', default: true})
 
-	e.set_px = (x) => e.popup_x1 = x
-	e.set_py = (y) => e.popup_y1 = y
-	e.set_pw = (w) => e.popup_x2 = w - e.px
-	e.set_ph = (h) => e.popup_y2 = h - e.py
+	e.set_px = (x) => e.popup_ox = x
+	e.set_py = (y) => e.popup_oy = y
+	e.set_pw = (w) => e.w = w
+	e.set_ph = (h) => e.h = h
 
 	e.prop('content', {type: 'html'})
 
+	e.prop('text', {slot: 'lang'})
+
 	function is_top() {
-		let last = document.body.last
+		let last = e.parent && e.parent.last
 		while (last) {
 			if (e == last)
 				return true
@@ -2466,27 +2253,13 @@ component('x-toolbox', function(e) {
 		}
 	}
 
-	let r, br, px, py
-	e.on_measure(function() {
-		r = e.rect()
-		br = document.body.rect()
-		px = clamp(e.px, 0, window.innerWidth  - r.w) - br.x
-		py = clamp(e.py, 0, window.innerHeight - r.h) - br.y
-	})
-
 	e.on_update(function(opt) {
-
-		e.x = px
-		e.y = py
-		e.w = e.pw
-		e.h = e.ph
-
-		// document.body, 'inner-'+e.side, 'start', null, null, null, null, px, py)
 
 		// move to top if the update was user-triggered not layout-triggered.
 		if (opt && opt.input == e && !is_top())
 			e.index = 1/0
 
+		e.title_box.set(e.text)
 		e.content_box.set(e.content)
 
 	})
@@ -2506,10 +2279,11 @@ component('x-toolbox', function(e) {
 		e.resize_overlay.attr('hit_side', hit_side)
 	})
 
-	let mx2px = (mx, w) => e.side == 'right'  ? window.innerWidth  - mx - w : mx
-	let my2py = (my, h) => e.side == 'bottom' ? window.innerHeight - my - h : my
-
 	e.resize_overlay.on('pointerdown', function(ev, mx, my) {
+
+		let r = e.rect()
+		let mx0 = mx
+		let my0 = my
 
 		e.focus()
 		e.update({input: e}) // move-to-top
@@ -2518,31 +2292,29 @@ component('x-toolbox', function(e) {
 			return
 
 		down = true
+		let px0 = e.px
+		let py0 = e.py
 
-		let r = e.rect()
-		let mx0 = mx
-		let my0 = my
-
-		return e.capture_pointer(ev, function(ev, mx, my) {
+		return this.capture_pointer(ev, function(ev, mx, my) {
 			let dx = mx - mx0
 			let dy = my - my0
-			e.update({input: e})
-			let x1 = r.x1
-			let y1 = r.y1
-			let x2 = r.x2
-			let y2 = r.y2
+			let x1 = px0
+			let y1 = py0
+			let x2 = x1 + r.w
+			let y2 = y1 + r.h
 			if (hit_side.includes('top'   )) y1 += dy
 			if (hit_side.includes('bottom')) y2 += dy
 			if (hit_side.includes('right' )) x2 += dx
 			if (hit_side.includes('left'  )) x1 += dx
 			let w = x2 - x1
 			let h = y2 - y1
-			e.px = mx2px(x1, w)
-			e.py = my2py(y1, h)
+			e.px = x1
+			e.py = y1
 			e.pw = w
 			e.ph = h
 		}, function() {
 			down = false
+			e.xsave()
 		})
 
 	},)
@@ -2560,27 +2332,16 @@ component('x-toolbox', function(e) {
 			return
 
 		down = true
-		let r = e.rect()
-		let mx0 = mx
-		let my0 = my
-		let dx = mx - r.x
-		let dy = my - r.y
-		let dragging
+		let px0 = e.px
+		let py0 = e.py
 
-		return this.capture_pointer(ev, function(ev, mx, my) {
-			if (!dragging) {
-				if (max(abs(mx - mx0), abs(my - my0)) >= 20 || (ev.shiftKey || ev.ctrlKey))
-					dragging = true
-				else
-					return
-			}
-			mx -= dx
-			my -= dy
+		return this.capture_pointer(ev, function(ev, mx, my, mx0, my0) {
 			e.update({input: e})
-			e.px = mx2px(mx, r.w)
-			e.py = my2py(my, r.h)
+			e.px = px0 + mx - mx0
+			e.py = py0 + my - my0
 		}, function() {
 			down = false
+			e.xsave()
 		})
 
 	})
