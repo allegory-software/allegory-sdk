@@ -93,7 +93,9 @@
 		e.prop(name, attrs)
 		e.alias(new_name, existing_name)
 		e.notify_id_changed()
-		e.xon(), e.xoff()
+		e.xoff()
+		e.xon()
+		e.xsave()
 		e.set_prop(k, v)
 		e.get_prop(k) -> v
 		e.get_prop_attrs(k) -> {attr->val}
