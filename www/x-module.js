@@ -224,7 +224,8 @@ function init_xmodule(opt) {
 			v = serialize.call(e, k, v)
 		if (!layer) {
 			if (module)
-				debug_msgs[id+'.'+k] = 'prop-val-lost ['+module+':'+slot+'] '+id+'.'+k+' '+v
+				debug_msgs[id+'.'+k] = 'prop-val-lost ['+module+':'+slot+'] '
+					+id+'.'+k+' '+(repl(v, undefined, '[remove]'))
 			return
 		}
 		let t = attr(layer.props, id)

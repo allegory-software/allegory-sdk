@@ -174,7 +174,7 @@ on_dom_load(function() {
 
 <template id=split_demo>
 <x-split>
-	<x-vsplit fixed_side=first min_size=100>
+	<x-vsplit id=my_split fixed_side=first min_size=100>
 		<div style="background: gray">Stuff 1</div>
 		<div>Stuff 2</div>
 	</x-vsplit>
@@ -768,29 +768,6 @@ main.add(lb, hlb, div({}, html('<h3>select_button</h3>'), sb))
 
 <!--------------------------------------------------------------------------->
 
-<template id=cssgrid_demo>
-<div id=main></div>
-<script run>
-
-cg = cssgrid({
-	items: [
-		date_dropdown ({val: day(time()), pos_x: 3, pos_y: 1}),
-		input         ({val: 'hello1', pos_x: 2, pos_y: 2}),
-		input         ({val: 'hello2', pos_x: 1, pos_y: 3}),
-	],
-})
-
-cg.style.height = '100%'
-
-cg.widget_editing = true
-
-main.add(cg)
-
-</script>
-</template>
-
-<!--------------------------------------------------------------------------->
-
 <template id=calendar_demo>
 <div id=main></div>
 <script run>
@@ -855,6 +832,7 @@ for (let i = 0; i <= 10000; i++) {
 }
 
 g = grid({
+	id: 'my_grid',
 	rowset: {
 		fields: fields,
 		rows: rows,

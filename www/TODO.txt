@@ -1,6 +1,5 @@
 BUGS
 ------------------------------------------------------------------------------
-* TOOLBOX resizing
 * RICHTEXT demo
 * SPINEDIT demo
 * TAGSEDIT demo

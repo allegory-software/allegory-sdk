@@ -2532,7 +2532,7 @@ x-tabs-fixed-header {
 	box-shadow: var(--x-shadow-toolbox);
 }
 
-.x-toolbox.pinned,
+.x-toolbox[pinned],
 .x-toolbox:hover {
 	opacity: 1;
 	transition: opacity 0s;
@@ -2572,7 +2572,7 @@ x-tabs-fixed-header {
 	font-size: 85%;
 }
 
-.x-toolbox.pinned > .x-toolbox-titlebar > .x-toolbox-button-pin {
+.x-toolbox[pinned] > .x-toolbox-titlebar > .x-toolbox-button-pin {
 	color: var(--x-fg-label);
 }
 

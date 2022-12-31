@@ -1075,7 +1075,7 @@ method(Element, 'prop', function(prop, opt) {
 
 	if (!priv)
 		attr(e, 'props')[prop] = opt
-	else if (prop in e.props)
+	else if (e.props && prop in e.props)
 		delete e.props[prop]
 
 })

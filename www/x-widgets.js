@@ -2231,7 +2231,7 @@ component('x-toolbox', function(e) {
 	e.prop('py'    , {type: 'number', slot: 'user'})
 	e.prop('pw'    , {type: 'number', slot: 'user'})
 	e.prop('ph'    , {type: 'number', slot: 'user'})
-	e.prop('pinned', {type: 'bool'  , slot: 'user', default: true})
+	e.prop('pinned', {type: 'bool'  , slot: 'user', default: true, attr: true})
 
 	e.set_px = (x) => e.popup_ox = x
 	e.set_py = (y) => e.popup_oy = y
@@ -2352,7 +2352,8 @@ component('x-toolbox', function(e) {
 	})
 
 	e.pin_button.on('pointerup', function() {
-		e.class('pinned', !e.hasclass('pinned'))
+		e.pinned = !e.pinned
+		e.xsave()
 		return false
 	})
 
