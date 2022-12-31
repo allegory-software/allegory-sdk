@@ -98,7 +98,6 @@
 		e.get_prop(k) -> v
 		e.get_prop_attrs(k) -> {attr->val}
 		e.get_props() -> {k->attrs}
-		e.save_prop(k)
 		e.serialize_prop(k) -> s
 		e.element_links()
 	deferred DOM updating:
@@ -913,7 +912,6 @@ publishes:
 		from_attr             converter from html attr representation.
 		to_attr               converter to html attr representation.
 		bind_id               the prop represents an element id to dynamically link to.
-		nosave                xmodule: do not auto-save layers when prop changes.
 calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
@@ -927,11 +925,15 @@ method(Element, 'property', function(name, get, set) {
 	return property(this, name, get, set)
 })
 
-method(Element, 'xon' , function() { this.xmodule_noupdate = false })
-method(Element, 'xoff', function() { this.xmodule_noupdate = true  })
+method(Element, 'xoff', function() { this._xoff = true  })
+method(Element, 'xon' , function() { this._xoff = false })
 
 let fire_prop_changed = function(e, prop, v1, v0) {
-	document.fire('prop_changed', e, prop, v1, v0)
+	if (e._xoff) {
+		e.props[prop].default = v1
+	} else {
+		document.fire('prop_changed', e, prop, v1, v0)
+	}
 }
 
 let resolve_linked_element = function(id) { // stub
@@ -989,7 +991,7 @@ method(Element, 'prop', function(prop, opt) {
 	if (prop_attr != prop)
 		attr(e, 'attr_prop_map')[prop_attr] = prop
 
-	if (!(opt.store == false) && !opt.style) {
+	if (!(opt.store == false) && !opt.style) { // stored prop
 		let v = dv
 		function get() {
 			return v
@@ -1009,30 +1011,7 @@ method(Element, 'prop', function(prop, opt) {
 		}
 		if (dv != null && set_attr && !e.hasattr(prop_attr))
 			set_attr(dv)
-	} else if (opt.style) {
-		let style = opt.style
-		let format = opt.style_format || return_arg
-		let parse  = opt.style_parse  || type == 'number' && num || (v => repl(v, '', undefined))
-		if (dv != null && parse(e.style[style]) == null)
-			e.style[style] = format(dv)
-		function get() {
-			return parse(e.style[style])
-		}
-		function set(v) {
-			let v0 = get.call(e)
-			v = convert(v, v0)
-			if (v == v0)
-				return
-			e.style[style] = format(v)
-			v = get.call(e) // take it again (browser only sets valid values)
-			if (v == v0)
-				return
-			e[setter](v, v0)
-			if (!priv)
-				prop_changed(e, prop, v, v0)
-			e.update()
-		}
-	} else {
+	} else { // virtual prop with getter
 		assert(!('default' in opt))
 		function get() {
 			return e[getter]()
@@ -1094,12 +1073,17 @@ method(Element, 'prop', function(prop, opt) {
 
 	if (!priv)
 		attr(e, 'props')[prop] = opt
+	else if (prop in e.props)
+		delete e.props[prop]
 
 })
 
 method(Element, 'alias', function(new_name, old_name) {
-	if (this.props)
-		this.props[new_name] = this.get_prop_attrs(old_name)
+	if (this.props) {
+		let attrs = this.get_prop_attrs(old_name)
+		if (attrs)
+			this.props[new_name] = attrs
+	}
 	alias(this, new_name, old_name)
 })
 
@@ -1108,10 +1092,6 @@ e.set_prop = function(k, v) { this[k] = v } // stub
 e.get_prop = function(k) { return this[k] } // stub
 e.get_prop_attrs = function(k) { return this.props[k] } // stub
 e.get_props = function() { return this.props }
-e.save_prop = function(k) {
-	let v = this.get_prop(k)
-	fire_prop_changed(this, k, v, v)
-}
 
 // prop serialization.
 e.serialize_prop = function(k, v) {
@@ -1121,6 +1101,12 @@ e.serialize_prop = function(k, v) {
 	else if (isobject(v) && v.serialize)
 		v = v.serialize()
 	return v
+}
+
+e.xsave = function() {
+	let xm = window.xmodule
+	if (xm)
+		xm.save()
 }
 
 /* ---------------------------------------------------------------------------
