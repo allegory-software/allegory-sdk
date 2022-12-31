@@ -127,49 +127,31 @@ function init_xmodule(opt) {
 			assert(e.type)
 			assert(opt.module)
 			opt.id = xm.next_id(opt.module)
-			xm.set_val(null, opt.id, 'type', e.type, null, null, opt.module)
+			xm.set_val(null, opt.id, 'type', e.type, null, null, null, opt.module)
 			pv = empty_obj
 		} else if (opt.id) {
 			pv = prop_vals(opt.id)
 			opt.module = opt.id.match(/^[^_\d]+/)[0]
 		}
-		e.xoff()
 
-		// set static vals.
+		// set init values as default values, which assumes that init values
+		// i.e. html attrs as well as values passed to (or returned from) the
+		// constructor are static!
+		// If instead these values are dynamic for the same id, then they
+		// won't be saved right! To work around that, set nodefault="prop1 ..."
+		// for the props that you know not to have a static default value.
+		e.xoff()
 		for (let k in opt)
 			e.set_prop(k, opt[k])
+		e.xon()
 
 		if (e.id) {
 			e.xmodule_generation = generation
 
-			// save static prop vals so that when a prop gets set to its static
-			// value, we don't save that, we delete the value instead.
-
-			// NOTE: this assumes that init values i.e. html attrs as well as
-			// values passed to (or returned from) the constructor are static!
-			// If instead those values are dynamic for the same id, then they
-			// won't be saved right! To work around that, set nodefault="prop1 ..."
-			// for the props that don't have a static default value.
-
-			let nodefault = opt.nodefault ? set(words(opt.nodefault)) : empty_set
-
-			e.__spv = obj()
-			for (let k in e.get_props()) {
-				let pa = e.get_prop_attrs(k)
-				if (pa.slot) { // only save persistent vals.
-					let v = nodefault.has(k) ? undefined : e.get_prop(k)
-					if (v !== undefined)
-						e.__spv[k] = v
-				}
-			}
-
-			// save prop vals before overrides.
-			e.__pv0 = obj()
-			for (let k in pv) {
-				e.__pv0[k] = e.get_prop(k)
-			}
+			e.__nodefault = opt.nodefault ? set(words(opt.nodefault)) : empty_set
 
 			// override prop vals.
+			e.__pv0 = obj()
 			for (let k in pv)
 				e.set_prop(k, pv[k])
 		}
@@ -228,19 +210,21 @@ function init_xmodule(opt) {
 		return [module, slot, layer]
 	}
 
-	xm.set_val = function(e, id, k, v, v0, slot, module, serialize, save) {
+	let debug_msgs = obj()
+
+	xm.set_val = function(e, id, k, v, v0, dv, slot, module, serialize) {
 		slot = xm.selected_slot || slot || 'base'
 		if (slot == 'none')
 			return
 		module = xm.selected_module || module
 		let layer = module && xm.active_layers[module+':'+slot]
-		if (v === e.__spv[k])
-			v = undefined // don't save static vals.
+		if (v === dv && !e.__nodefault.has(k))
+			v = undefined // don't save defaults.
 		else if (serialize)
 			v = serialize.call(e, k, v)
 		if (!layer) {
 			if (module)
-				warn('prop-val-lost', '['+module+':'+slot+']', id, k, v)
+				debug_msgs[id+'.'+k] = 'prop-val-lost ['+module+':'+slot+'] '+id+'.'+k+' '+v
 			return
 		}
 		let t = attr(layer.props, id)
@@ -250,7 +234,7 @@ function init_xmodule(opt) {
 		let pv0 = e && attr(e, '__pv0')
 		if (v === undefined) { // `undefined` signals removal.
 			if (k in t) {
-				debug('prop-val-deleted', '['+module+':'+slot+'='+layer.name+']', id, k)
+				debug_msgs[id+'.'+k] = 'prop-val-deleted ['+module+':'+slot+'='+layer.name+'] '+id+' '+k
 				delete t[k]
 				if (pv0)
 					delete pv0[k] // no need to keep this anymore.
@@ -259,7 +243,7 @@ function init_xmodule(opt) {
 			if (pv0 && !(k in pv0)) // save current val if it wasn't saved before.
 				pv0[k] = v0
 			t[k] = v
-			debug('prop-val-set', '['+module+':'+slot+'='+layer.name+']', id, k, json(v))
+			debug_msgs[id+'.'+k] = 'prop-val-set ['+module+':'+slot+'='+layer.name+'] '+id+' '+k+' '+json(v)
 		}
 
 		// synchronize other instances of this id.
@@ -275,18 +259,15 @@ function init_xmodule(opt) {
 			}
 		}
 
-		if (save)
-			xm.save()
 	}
 
 	document.on('prop_changed', function(e, k, v, v0) {
 		if (!e.id)
 			return
-		if (e.xmodule_noupdate)
-			return
 		let pa = e.get_prop_attrs(k)
-		let save = !(pa && pa.nosave)
-		xm.set_val(e, e.id, k, v, v0, pa && pa.slot, e.module, e.serialize_prop, save)
+		if (!pa)
+			return
+		xm.set_val(e, e.id, k, v, v0, pa.default, pa.slot, e.module, e.serialize_prop)
 	})
 
 	// loading prop layers and assigning to slots -----------------------------
@@ -349,6 +330,9 @@ function init_xmodule(opt) {
 	}
 
 	xm.save = function() {
+		for (let k in debug_msgs)
+			debug(debug_msgs[k])
+		debug_msgs = obj()
 		for (let name in xm.layers) {
 			let t = xm.layers[name]
 			if (t.modified) {
@@ -833,7 +817,6 @@ component('x-widget-tree', function(e) {
 
 	let type_icons = {
 		grid: 'table',
-		cssgrid: 'th',
 		split: 'columns',
 		tabs: 'sitemap',
 	}
