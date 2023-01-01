@@ -131,7 +131,6 @@ component('x-grid', 'Input', function(e) {
 	e.prop('can_change_fields_visibility'  , {type: 'bool', default: true})
 
 	var horiz = true
-	e.get_vertical = function() { return !horiz }
 	e.set_vertical = function(v) {
 		horiz = !v
 		e.class('x-hgrid',  horiz)
@@ -139,7 +138,7 @@ component('x-grid', 'Input', function(e) {
 		e.must_be_flat = !horiz
 		theme_changed()
 	}
-	e.prop('vertical', {store: false, type: 'bool', attr: true, slot: 'user'})
+	e.prop('vertical', {type: 'bool', attr: true, slot: 'user', default: false})
 
 	e.header_canvas = tag('canvas', {class : 'x-grid-header-canvas', width: 0, height: 0})
 	e.header        = div({class: 'x-grid-header'}, e.header_canvas)
@@ -302,7 +301,7 @@ component('x-grid', 'Input', function(e) {
 				cells_view_h = grid_h // before hscrollbar.
 			}
 
-			header_h = cells_view_h // before hscrollbar.
+			header_h = min(e.cell_h * e.fields.length, cells_view_h) // before hscrollbar.
 
 			;[cells_view_w, cells_view_h] =
 				scrollbox_client_dimensions(
@@ -325,6 +324,8 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	function update_sizes() {
+		e.cells_view.w = 0
+		e.cells_view.h = 0
 		if (!e.bound) {
 			grid_w = null
 			grid_h = null
@@ -2529,6 +2530,7 @@ component('x-grid', 'Input', function(e) {
 				checked: e.filters_visible,
 				action: function(item) {
 					e.filters_visible = item.checked
+					e.xsave()
 				},
 			})
 
@@ -2537,6 +2539,7 @@ component('x-grid', 'Input', function(e) {
 			checked: e.action_band_visible == 'always',
 			action: function(item) {
 				e.action_band_visible = item.checked ? 'always' : 'auto'
+				e.xsave()
 			},
 		})
 
@@ -2545,6 +2548,7 @@ component('x-grid', 'Input', function(e) {
 			checked: e.vertical,
 			action: function(item) {
 				e.vertical = item.checked
+				e.xsave()
 			},
 		})
 
@@ -2554,6 +2558,7 @@ component('x-grid', 'Input', function(e) {
 			enabled: e.can_be_tree,
 			action: function(item) {
 				e.flat = item.checked
+				e.xsave()
 			},
 		})
 
@@ -2562,6 +2567,7 @@ component('x-grid', 'Input', function(e) {
 			checked: e.auto_cols_w,
 			action: function(item) {
 				e.auto_cols_w = item.checked
+				e.xsave()
 			},
 		})
 
@@ -2571,6 +2577,7 @@ component('x-grid', 'Input', function(e) {
 				checked: e.header_visible,
 				action: function(item) {
 					e.header_visible = item.checked
+					e.xsave()
 				},
 			})
 
@@ -2579,6 +2586,7 @@ component('x-grid', 'Input', function(e) {
 			if (fi != null) {
 				function hide_field(item) {
 					e.show_field(item.field, false)
+					e.xsave()
 				}
 				let field = e.fields[fi]
 				let hide_text = span({}, S('hide_field', 'Hide field'), ' "', field.label, '"')
@@ -2592,6 +2600,7 @@ component('x-grid', 'Input', function(e) {
 			let field_items = []
 			function show_field(item) {
 				e.show_field(item.field, item.checked, fi)
+				e.xsave()
 				return false
 			}
 			for (let field of e.all_fields) {

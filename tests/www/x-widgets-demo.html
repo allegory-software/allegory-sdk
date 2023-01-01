@@ -359,6 +359,9 @@ main.add(button({
 function act(item) { pr(item.text) }
 
 m = menu({
+	popup_side: 'bottom',
+	popup_align: 'left',
+	popup_y1: 2,
 	items: [
 		{text: 'Open', action: act, key: 'Ctrl+B', icon: 'fa fa-folder-open'},
 		{text: 'Close', disabled: true, icon: 'fa fa-window-close', action: act, separator: true},
@@ -386,10 +389,6 @@ b = button({
 	},
 })
 
-m.popup()
-m.popup_side = 'bottom'
-m.popup_align = 'left'
-m.popup_y1 = 2
 m.hide()
 b.add(m)
 

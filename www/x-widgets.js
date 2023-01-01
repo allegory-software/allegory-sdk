@@ -1146,11 +1146,10 @@ component('x-menu', function(e) {
 	}
 
 	e.close = function(focus_target) {
-		let target = e.popup_target
-		e.popup_target = null
+		e.remove()
 		select_item(e.table, null)
-		if (target && focus_target)
-			target.focus()
+		if (e.parent && focus_target)
+			e.parent.focus()
 	}
 
 	// navigation

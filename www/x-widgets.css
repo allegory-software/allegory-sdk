@@ -2702,6 +2702,10 @@ x-tabs-fixed-header {
 	flex-flow: column;
 }
 
+.x-vgrid > .x-grid-cells-view {
+	width: 0; /* CSS people are hopeless */
+}
+
 /* grid header */
 
 .x-grid-header {
