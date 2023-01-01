@@ -62,7 +62,7 @@ fires:
 let attr_val_opt = function(e) {
 	let opt = obj()
 	let pmap = e.attr_prop_map
-	for (let attr of e.attrs) {
+	for (let attr of e.attributes) {
 		let k = attr.name
 		// TODO: not cool that we must add all built-in attrs that we use for
 		// custom components here (so that they aren't set twice, and wrong too
