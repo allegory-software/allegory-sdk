@@ -843,9 +843,14 @@ property(Element, 'index', {
 		return indexOf.call(this.parentNode.children, this)
 	},
 	set: function(i) {
+		i = clamp(i, 0, this.parent.len-1)
+		let i0 = this.index
+		if (i == i0)
+			return
 		let sx = this.scrollLeft
 		let sy = this.scrollTop
-		this.parent.insertBefore(this, this.at[max(i, 0)])
+		let before_node = this.parent.nodes[i + (i0 <= i ? 1 : 0)]
+		this.parent.insertBefore(this, before_node)
 		this.scroll(sx, sy)
 	}
 })
