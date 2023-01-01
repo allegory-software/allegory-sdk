@@ -366,6 +366,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	/* layout focus-box and info-box */
 	display: inline-flex;
 	flex-flow: column;
+	margin: .2em 0;
 }
 
 .x-button > .x-button-focus-box {
@@ -441,31 +442,28 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-color: var(--x-border-focused-button-primary);
 }
 
-.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
+.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
 	background-color: var(--x-bg-button-hover);
 }
 
-.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
+.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
 	background-color: var(--x-bg-button-primary-hover);
 }
 
-.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
+.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
 	background-color: var(--x-bg-button-danger-hover);
 }
 
-.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
-.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active {
+.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box {
 	background-color: var(--x-bg-button-pressed);
 	box-shadow: var(--x-shadow-button-pressed);
 }
 
-.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
-.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active {
+.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box {
 	background-color: var(--x-bg-button-primary-pressed);
 }
 
-.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
-.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active {
+.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box {
 	background-color: var(--x-bg-button-danger-pressed);
 }
 
@@ -481,12 +479,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-radius: 0;
 }
 
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:hover {
+.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
 	filter: contrast(.7);
 }
 
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box:active,
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) > .x-button-focus-box.active
+.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box
 {
 	box-shadow: none;
 	filter: contrast(.4);
@@ -616,7 +613,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	cursor: pointer;
 }
 
-.x-tooltip-xbutton:hover {
+.x-tooltip-xbutton:not(.active):hover {
 	color: inherit;
 }
 
@@ -1273,7 +1270,7 @@ textarea.x-editbox-input {
 	font-size: 90%;
 }
 
-.x-dropdown-more-button:active {
+.x-dropdown-more-button.active {
 	color: var(--x-fg-disabled);
 }
 
@@ -2502,9 +2499,7 @@ x-tabs-fixed-header {
 	background-color: var(--x-bg-button-hover);
 }
 
-.x-dialog-xbutton:active,
-.x-dialog-xbutton.active
-{
+.x-dialog-xbutton.active {
 	background-color: var(--x-bg-button-pressed);
 }
 
@@ -2958,15 +2953,11 @@ x-tabs-fixed-header {
 	display: flex;
 
 	background-color: var(--x-bg-popup);
-	border-bottom: 1px solid rgba(10, 10, 10, 0.1);
 }
 
 .x-richtext-button {
-	color: inherit;
-	font-size: inherit;
-	cursor: pointer;
+	margin: 0;
 	height: 2em;
-	outline: 0;
 	width: 2em;
 	display: flex;
 	align-items: center;
@@ -3007,7 +2998,11 @@ x-tabs-fixed-header {
 	margin-top  : -1px;
 	margin-left : -1px;
 	background-color: var(--x-faint);
-	border: 0;
+	border-bottom: 1px solid var(--x-border-light);
+}
+
+.x-richtext-actionbar-embedded > button {
+	border-bottom: 0;
 }
 
 .x-richedit > .x-focus-box {

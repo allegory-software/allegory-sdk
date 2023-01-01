@@ -2510,6 +2510,9 @@ component('x-pagenav', function(e) {
 
 component('x-richtext', function(e) {
 
+	let html_content = [...e.nodes]
+	e.clear()
+
 	selectable_widget(e)
 	contained_widget(e)
 	serializable_widget(e)
@@ -2520,15 +2523,14 @@ component('x-richtext', function(e) {
 
 	// content property
 
-	e.get_content = function() {
-		return e.content_box.html
-	}
-
 	e.set_content = function(s) {
-		e.content_box.html = s
+		e.content_box.set(s)
 		e.fire('content_changed')
 	}
-	e.prop('content', {store: false, slot: 'lang'})
+	function serialize_content(s) {
+		return e.content_box.html
+	}
+	e.prop('content', {type: 'html', slot: 'lang', serialize: serialize_content})
 
 	// widget editing ---------------------------------------------------------
 
@@ -2537,9 +2539,15 @@ component('x-richtext', function(e) {
 		richtext_widget_editing(e)
 		e.set_widget_editing = function(v) {
 			e.editing = v
+			if (!v) {
+				e.content = [...e.content_box.nodes]
+				e.xsave()
+			}
 		}
 		e.editing = true
 	}
+
+	return {content: html_content}
 
 })
 
@@ -2642,7 +2650,9 @@ function richtext_widget_editing(e) {
 	let button_pressed
 	function press_button() { button_pressed = true }
 
-	e.actionbar = div({class: 'x-richtext-actionbar'}).popup(e, 'top', 'left')
+	e.actionbar = div({class: 'x-richtext-actionbar'})
+	if (!e.focus_box)
+		e.actionbar.popup(e, 'top', 'left')
 	for (let k in actions) {
 		let action = actions[k]
 		let button = tag('button', {class: 'x-richtext-button', title: action.title})

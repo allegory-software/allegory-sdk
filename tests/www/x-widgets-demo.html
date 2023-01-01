@@ -69,7 +69,7 @@ button {
 .demo-list-item.selected { background: #ddf; }
 [theme=dark] .demo-list-item.selected { background: #336; }
 button { border: 1px solid #555; }
-[theme=dark] button { background: #333; color: white; border: 1px solid #555; }
+[theme=dark] button { background: #333; color: white; border-color: #555; }
 
 button[pressed] { background: #ddf; }
 [theme=dark] button[pressed] { background: #336; }
@@ -356,22 +356,22 @@ main.add(button({
 <div id=main></div>
 <script run>
 
-function act(item) { pr(item.text) }
+function action(item) { pr(item.text) }
 
 m = menu({
 	popup_side: 'bottom',
 	popup_align: 'left',
 	popup_y1: 2,
 	items: [
-		{text: 'Open', action: act, key: 'Ctrl+B', icon: 'fa fa-folder-open'},
-		{text: 'Close', disabled: true, icon: 'fa fa-window-close', action: act, separator: true},
+		{text: 'Open', action: action, key: 'Ctrl+B', icon: 'fa fa-folder-open'},
+		{text: 'Close', disabled: true, icon: 'fa fa-window-close', action: action, separator: true},
 		{text: 'More', items: [
 			{text: 'Check', checked: true},
 			{text: 'Check No Close', checked: true,
 				action: function(a) { pr(a.checked); return false } },
 			{text: 'More Stuff', items: [
 				{text: 'More Stuff 1 this is a very long item text'},
-				{text: 'More Stuff 2', action: act},
+				{text: 'More Stuff 2', action: action},
 			]},
 		]},
 		{text: 'Even More', items: [
@@ -385,12 +385,9 @@ b = button({
 	text: 'Click for menu',
 	primary: true,
 	action: function() {
-		m.show(m.hidden)
+		b.add(m)
 	},
 })
-
-m.hide()
-b.add(m)
 
 main.add(b)
 
@@ -504,16 +501,20 @@ main.add(radiogroup({
 <!--------------------------------------------------------------------------->
 
 <template id=richtext_demo>
-<div id=main></div>
+<x-richtext id=my_r>
+	<b>Wasup</b> <i>homies</i> ?
+</x-richtext>
 <script run>
-
-r = richtext({content: 'hey'})
-
-r.widget_editing = true
-
-main.add(r)
-
+my_r.widget_editing = true
 </script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=richedit_demo>
+<x-richedit id=my_r>
+	<b>Wasup</b> <i>homies</i> ?
+</x-richedit>
 </template>
 
 <!--------------------------------------------------------------------------->

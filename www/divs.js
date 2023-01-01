@@ -532,12 +532,12 @@ method(Element, 'on_bind', function(f) {
 
 // create a text node from a stringable. calls a constructor first.
 // wraps the node in a span if wrapping control is specified.
-// elements and nulls pass-through regardless of wrapping control.
+// elements, nulls and arrays pass-through regardless of wrapping control.
 // TODO: remove this!
 function T(s, whitespace) {
 	if (isfunc(s)) // constructor
 		s = s()
-	if (s == null || iselem(s)) // pass-through
+	if (s == null || iselem(s) || isarray(s)) // pass-through
 		return s
 	// node or string or stringable: pass-through or create node.
 	s = isnode(s) ? s : document.createTextNode(s)

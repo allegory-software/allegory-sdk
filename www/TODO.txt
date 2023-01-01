@@ -1,6 +1,5 @@
 BUGS
 ------------------------------------------------------------------------------
-* RICHTEXT demo
 * SPINEDIT demo
 * TAGSEDIT demo
 * SLIDER demo

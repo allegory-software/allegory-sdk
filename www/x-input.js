@@ -501,10 +501,12 @@ component('x-button', 'Input', function(e) {
 		e.fire('activate')
 	}
 
-	function set_active(on) {
+	function set_active(on, cancel) {
+		if (!on && cancel == null)
+			cancel = !e.hasclass('active')
 		e.class('active', on)
 		e.fire('active', on)
-		if (!on)
+		if (!on && !cancel)
 			e.activate()
 	}
 
@@ -520,6 +522,10 @@ component('x-button', 'Input', function(e) {
 				}
 			}
 			return
+		}
+		if (key == 'Escape') {
+			set_active(false, true)
+			return false
 		}
 		if (key == ' ' || key == 'Enter') {
 			set_active(true)
@@ -2890,18 +2896,22 @@ component('x-timeofdayedit', 'Input', function(e) {
 
 component('x-richedit', 'Input', function(e) {
 
+	let html_val = [...e.nodes]
+	e.clear()
+
+	val_widget(e)
+	editable_widget(e)
+
 	e.content_box = div({class: 'x-richtext-content'})
 	e.focus_box = div({class: 'x-focus-box'}, e.content_box)
 	e.add(e.focus_box)
 
-	val_widget(e)
-	editable_widget(e)
 	richtext_widget_editing(e)
 
 	e.do_update_val = function(v, ev) {
 		if (ev && ev.input == e)
 			return
-		e.content_box.html = v
+		e.content_box.set(v)
 	}
 
 	e.on('content_changed', function() {
@@ -2914,7 +2924,59 @@ component('x-richedit', 'Input', function(e) {
 			e.editing = true
 	})
 
+	return html_val.length ? {val: html_val} : null
+
 })
+
+/*
+// ---------------------------------------------------------------------------
+// richtext
+// ---------------------------------------------------------------------------
+
+component('x-richtext', function(e) {
+
+	let html_content = [...e.nodes]
+	e.clear()
+
+	selectable_widget(e)
+	contained_widget(e)
+	serializable_widget(e)
+	editable_widget(e)
+
+	e.content_box = div({class: 'x-richtext-content'})
+	e.add(e.content_box)
+
+	// content property
+
+	e.set_content = function(s) {
+		e.content_box.set(s)
+		e.fire('content_changed')
+	}
+	function serialize_content(s) {
+		e.content_box.set(s)
+		return e.content_box.html
+	}
+	e.prop('content', {type: 'html', slot: 'lang', serialize: serialize_content})
+
+	// widget editing ---------------------------------------------------------
+
+	e.set_widget_editing = function(v) {
+		if (!v) return
+		richtext_widget_editing(e)
+		e.set_widget_editing = function(v) {
+			e.editing = v
+			if (!v) {
+				e.content = [...e.content_box.nodes]
+				e.xsave()
+			}
+		}
+		e.editing = true
+	}
+
+	return {content: html_content}
+
+})
+*/
 
 // ---------------------------------------------------------------------------
 // lookup dropdown (for fields with `lookup_nav_id` or `lookup_rowset*`)
