@@ -1561,9 +1561,10 @@ component('x-grid', 'Input', function(e) {
 	function mu_col_drag(ev, mx, my) {
 		if (hit_state == 'col_moving')
 			return mu_col_move(ev, mx, my)
-		if (e.can_sort_rows)
+		if (e.can_sort_rows) {
 			e.set_order_by_dir(e.fields[hit_fi], 'toggle', ev.shiftKey)
-		else if (e.focus_cell_on_click_header)
+			e.xsave()
+		} else if (e.focus_cell_on_click_header)
 			e.focus_cell(true, hit_fi)
 		hit_state = null
 		return false
@@ -1601,6 +1602,7 @@ component('x-grid', 'Input', function(e) {
 			e.editor.class('col-moving', false)
 		e.move_field(hit_fi, over_fi)
 		hit_state = null
+		e.xsave()
 	}
 
 	// row moving -------------------------------------------------------------
@@ -2632,11 +2634,14 @@ component('x-grid', 'Input', function(e) {
 			items: items,
 			id: e.id ? e.id + '.context_menu' : null,
 			grid: e,
+			popup_side: 'inner-top',
+			popup_align: 'left',
+			popup_target: document.body,
+			popup_ox: mx,
+			popup_oy: my,
 		})
-		let r = e.rect()
-		let px = mx - r.x
-		let py = my - r.y
-		e.context_menu.popup(e, 'inner-top', null, null, null, null, null, px, py)
+		e.add(e.context_menu)
+
 	}
 
 })

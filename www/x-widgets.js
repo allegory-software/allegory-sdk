@@ -972,6 +972,7 @@ component('x-menu', function(e) {
 
 	focusable_widget(e)
 	e.class('x-focusable-items')
+	e.popup()
 
 	// view
 
