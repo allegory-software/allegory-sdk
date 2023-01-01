@@ -2227,8 +2227,8 @@ component('x-toolbox', function(e) {
 	e.alias('align' , 'popup_align')
 	e.alias('side'  , 'popup_side')
 
-	e.prop('px'    , {type: 'number', slot: 'user'})
-	e.prop('py'    , {type: 'number', slot: 'user'})
+	e.prop('px'    , {type: 'number', slot: 'user', default: 0})
+	e.prop('py'    , {type: 'number', slot: 'user', default: 0})
 	e.prop('pw'    , {type: 'number', slot: 'user'})
 	e.prop('ph'    , {type: 'number', slot: 'user'})
 	e.prop('pinned', {type: 'bool'  , slot: 'user', default: true, attr: true})
@@ -2242,56 +2242,47 @@ component('x-toolbox', function(e) {
 
 	e.prop('text', {slot: 'lang'})
 
-	function is_top() {
-		let last = e.parent && e.parent.last
-		while (last) {
-			if (e == last)
-				return true
-			else if (last.istoolbox)
-				return false
-			last = last.prev
-		}
+	function focus() {
+		e.index = 1/0 // move to top
+		e.focus()
 	}
 
+	e.on('focusin', function(ev) {
+		e.index = 1/0 // move to top
+		ev.target.focus() // because changing index stops the focusing.
+	})
+
 	e.on_update(function(opt) {
-
-		// move to top if the update was user-triggered not layout-triggered.
-		if (opt && opt.input == e && !is_top())
-			e.index = 1/0
-
 		e.title_box.set(e.text)
 		e.content_box.set(e.content)
-
 	})
 
-	e.on('focusin', function(ev) {
-		// TODO: moving the div loses mouse events!
-		e.update({input: e}) // move-to-top
-		ev.target.focus()
-	})
+	let hit_side
+	function hit_test(mx, my) {
+		hit_side = e.resize_overlay.hit_test_sides(mx, my)
+		e.resize_overlay.attr('hit_side', hit_side)
+	}
 
-
-	let hit_side, down
+	let down
 	e.resize_overlay.on('pointermove', function(ev, mx, my) {
 		if (down)
 			return
-		hit_side = e.resize_overlay.hit_test_sides(mx, my)
-		e.resize_overlay.attr('hit_side', hit_side)
+		hit_test(mx, my)
 	})
 
 	e.resize_overlay.on('pointerdown', function(ev, mx, my) {
-
-		let r = e.rect()
-		let mx0 = mx
-		let my0 = my
-
-		e.focus()
-		e.update({input: e}) // move-to-top
 
 		if (!hit_side)
 			return
 
 		down = true
+
+		let r = e.rect()
+		let mx0 = mx
+		let my0 = my
+
+		focus()
+
 		let px0 = e.px
 		let py0 = e.py
 
@@ -2312,26 +2303,23 @@ component('x-toolbox', function(e) {
 			e.py = y1
 			e.pw = w
 			e.ph = h
-		}, function() {
+		}, function(ev, mx, my) {
 			down = false
 			e.xsave()
+			hit_test(mx, my)
 		})
 
 	},)
 
 	e.titlebar.on('pointerdown', function(ev, mx, my) {
 
-		e.focus()
-		e.update({input: e}) // move-to-top
-
-		let first_focusable = e.content_box.focusables()[0]
-		if (first_focusable)
-			first_focusable.focus()
-
 		if (ev.target != e.titlebar)
 			return
 
 		down = true
+
+		focus()
+
 		let px0 = e.px
 		let py0 = e.py
 
@@ -2339,9 +2327,12 @@ component('x-toolbox', function(e) {
 			e.update({input: e})
 			e.px = px0 + mx - mx0
 			e.py = py0 + my - my0
-		}, function() {
+		}, function(ev, mx, my) {
 			down = false
-			e.xsave()
+			let first_focusable = e.content_box.focusables()[0]
+			if (first_focusable)
+				first_focusable.focus()
+			hit_test(mx, my)
 		})
 
 	})
