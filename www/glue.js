@@ -1060,34 +1060,36 @@ function set_seconds(t, x) {
 }
 
 {
-	let weekday_names = memoize(function(locale1) {
-		let wd = {short: obj(), long: obj()}
-		for (let i = 0; i < 7; i++) {
-			_d.setTime(1000 * 3600 * 24 * (3 + i))
-			for (let how of ['short', 'long'])
-				wd[how][i] = _d.toLocaleDateString(locale1 || locale(), {weekday: how, timeZone: 'UTC'})
-		}
-		return wd
-	})
 
-	function weekday_name(t, how, locale1) {
-		if (t == null) return null
-		_d.setTime(t * 1000)
-		let wd = _d.getDay()
-		return weekday_names(locale1 || locale())[how || 'short'][wd]
+let weekday_names = memoize(function(locale1) {
+	let wd = {short: obj(), long: obj()}
+	for (let i = 0; i < 7; i++) {
+		_d.setTime(1000 * 3600 * 24 * (3 + i))
+		for (let how of ['short', 'long'])
+			wd[how][i] = _d.toLocaleDateString(locale1 || locale(), {weekday: how, timeZone: 'UTC'})
 	}
+	return wd
+})
 
-	function month_name(t, how, locale1) {
-		if (t == null) return null
-		_d.setTime(t * 1000)
-		return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short'})
-	}
+function weekday_name(t, how, locale1) {
+	if (t == null) return null
+	_d.setTime(t * 1000)
+	let wd = _d.getDay()
+	return weekday_names(locale1 || locale())[how || 'short'][wd]
+}
 
-	function month_year(t, how, locale1) {
-		if (t == null) return null
-		_d.setTime(t * 1000)
-		return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short', year: 'numeric'})
-	}
+function month_name(t, how, locale1) {
+	if (t == null) return null
+	_d.setTime(t * 1000)
+	return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short'})
+}
+
+function month_year(t, how, locale1) {
+	if (t == null) return null
+	_d.setTime(t * 1000)
+	return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short', year: 'numeric'})
+}
+
 }
 
 {
