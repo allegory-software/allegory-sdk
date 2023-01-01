@@ -288,7 +288,12 @@ method(Element, 'bool_attr', function(k, v) {
 // NOTE: setting this doesn't remove existing attrs!
 property(Element, 'attrs', {
 	get: function() {
-		return this.attributes
+		let t = obj()
+		for (var i = 0, n = this.attributes.length; i < n; i++) {
+			let attr = this.attributes[i]
+			t[attr.name] = attr.value
+		}
+		return t
 	},
 	set: function(attrs) {
 		if (attrs)
