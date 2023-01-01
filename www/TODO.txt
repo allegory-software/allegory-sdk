@@ -46,12 +46,10 @@ FEATURES
 - CALENDAR select range
 - SLIDER select range
 * INPUT save on typing with delay: field attr "save_on_input" true or false
-- LIST select range
 - TABS auto-menu with items that don't fit the bar
 - TABS pop-out button
 * SPLIT % panes
 - SPLIT context menu: vertical/horizontal, %/fixed
-- LIST drag-move row to other list
 - CHART pie use % column and "others" group from nav
 - CHART bars, columns
 - CHART bar-stacks
@@ -86,15 +84,17 @@ FEATURES
 	* set 'label' prop
 - CHECKLIST
 * UPLOAD area/button with progress
-- new widget: scontenteditable-based auto-growing inline input box
+- new widget: contenteditable-based auto-growing inline input box
 - LIST editing:
 	* move hit area + grab hand
 	* 3-dots icon for move area (left or right)
 	* X button for removing item (left or right)
 	* edit button for toggle enter/exit edit
 	* button for add item
-- LIST quick filters
+* LIST quick filters
 - LIST multi-letter quicksearch like grid
+- LIST select range
+- LIST drag-move row to other list
 
 ??? map a widget to a param name, which assigns global nav and that widget's field
 in the global nav; unmap when the field is removed from the nav.
