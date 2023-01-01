@@ -2433,16 +2433,18 @@ component('x-calendar', 'Input', function(e) {
 	e.weekview = tag('table', {class: 'x-calendar-weekview x-focusable-items',
 		tabindex: 0})
 
-	e.date_box = div({class: 'x-calendar-date-box'}, e.header, e.weekview)
-	e.time_box = span({class: 'x-calendar-time-box'},
+	e.timeview = tag('div', {class: 'x-calendar-timeview'},
 		e.sel_hour, ':', e.sel_minute, span(0, ':'), e.sel_second)
 
-	e.add(e.date_box, e.time_box)
+	e.datebox = div({class: 'x-calendar-datebox'}, e.header, e.weekview)
+	e.timebox = div({class: 'x-calendar-timebox'}, e.timeview)
+
+	e.add(e.datebox, e.timebox)
 
 	e.on('bind_field', function(on) {
 		if (on) {
-			e.time_box.hidden = !(e._field.has_time || false)
-			for (let ce of [e.time_box.last.prev, e.time_box.last])
+			e.timebox.hidden = !(e._field.has_time || false)
+			for (let ce of [e.timebox.last.prev, e.timebox.last])
 				ce.hidden = !(e._field.has_seconds || false)
 		}
 	})
@@ -2515,7 +2517,7 @@ component('x-calendar', 'Input', function(e) {
 			for (let weekday = 0; weekday < 7; weekday++) {
 				if (!week) {
 					let th = tag('th', {class: 'x-calendar-weekday'},
-						d != null ? weekday_name(day(d, weekday), 'short', lang()) : '???')
+						d != null ? weekday_name(day(d, weekday), 'short', lang())[0] : '?')
 					tr.add(th)
 				} else {
 					let s, n

@@ -1725,22 +1725,31 @@ textarea.x-editbox-input {
 .x-calendar {
 	display: inline-flex;
 	padding: 1em;
+	user-select: none;
 }
 
-.x-calendar-time-box {
-	margin-left: .5em;
-	padding-left: .5em;
-	border-left: 1px dotted var(--x-border-light);
-
-	/* layout content */
+.x-calendar-header,
+.x-calendar-timeview
+{
+	align-self: start;
 	display: flex;
-	flex-wrap: nowrap;
-	align-items: baseline;
+	min-height: 3.5em;
+	align-items: center;     /* vertical align */
 }
 
 .x-calendar-header {
-	display: flex;
-	align-items: center;     /* vertical align */
+	justify-content: space-between;
+}
+
+.x-calendar-timebox {
+	margin-left: .5em;
+	padding-left: .5em;
+	border-left: 1px dotted var(--x-border-light);
+}
+
+.x-calendar-weekview {
+	width: 100%;
+	border-spacing: 0;
 }
 
 .x-calendar-weekday {
@@ -1751,10 +1760,9 @@ textarea.x-editbox-input {
 .x-calendar-day,
 .x-calendar-weekday
 {
-	text-align: right;
-	padding-right: .4em;
-	min-width: 2.6em;
-	min-height: 1.5em;
+	font-size: 90%;
+	text-align: center;
+	padding: .5em;
 }
 
 .x-calendar-day                          { cursor: default; }
@@ -1773,7 +1781,7 @@ textarea.x-editbox-input {
 }
 
 .x-calendar-sel-day {
-	font-size: 300%;
+	font-size: 250%;
 }
 
 .x-calendar-sel-day-suffix {
