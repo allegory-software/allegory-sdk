@@ -2642,7 +2642,7 @@ function richtext_widget_editing(e) {
 	let button_pressed
 	function press_button() { button_pressed = true }
 
-	e.actionbar = div({class: 'x-richtext-actionbar'})
+	e.actionbar = div({class: 'x-richtext-actionbar'}).popup(e, 'top', 'left')
 	for (let k in actions) {
 		let action = actions[k]
 		let button = tag('button', {class: 'x-richtext-button', title: action.title})
@@ -2674,7 +2674,7 @@ function richtext_widget_editing(e) {
 	if (e.focus_box) // is richedit
 		e.focus_box.insert(0, e.actionbar)
 	else
-		e.actionbar.popup(e, 'top', 'left')
+		e.add(e.actionbar)
 
 	e.content_box.on('input', function(ev) {
 		let e1 = ev.target.first
