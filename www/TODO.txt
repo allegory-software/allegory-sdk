@@ -31,8 +31,6 @@ FEATURES
 - NAV group-by aggregates
 - NAV group-by "others" group
 - NAV group-by % column
-- NAV html field opt
-- NAV html rowset
 - VAL_WIDGET html field opt
 * NAV copy selection to clipboard as csv (test paste in Excel)
 * NAV paste csv at focused cell
