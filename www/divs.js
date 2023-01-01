@@ -190,7 +190,7 @@
 		auto-updating of <tag timeago time="">
 		exec-ing of <script run> scripts from injected html
 	popups:
-		e.popup()
+		e.popup([side], [align])
 		e.popup_side
 		e.popup_align
 		e.popup_{x1,y1,x2,y2}
@@ -2402,7 +2402,7 @@ property(Element, 'stacking_parent', function() {
 	return get_stacking_parent(this.parent)
 })
 
-method(Element, 'popup', function() {
+method(Element, 'popup', function(target, side, align) {
 
 	let e = this
 	if (e.hasclass('popup'))
@@ -2561,16 +2561,19 @@ method(Element, 'popup', function() {
 
 	// controller -------------------------------------------------------------
 
-	e.prop('popup_target' , {private: true})
+	e.prop('popup_target' , {private: true, default: target})
+
 	e.prop('popup_side'   , {private: true, type: 'enum',
 			enum_values: [
 				'top', 'bottom', 'left', 'right',
 				'inner-top', 'inner-bottom', 'inner-left', 'inner-right', 'inner-center'
 			],
-			default: 'top'})
+			default: side || 'top'})
+
 	e.prop('popup_align'  , {private: true, type: 'enum',
 			enum_values: ['center', 'start', 'end'],
-			default: 'center'})
+			default: align || 'center'})
+
 	e.prop('popup_x1'     , {private: true, type: 'number'})
 	e.prop('popup_y1'     , {private: true, type: 'number'})
 	e.prop('popup_x2'     , {private: true, type: 'number'})
@@ -2606,6 +2609,7 @@ method(Element, 'popup', function() {
 
 	})
 
+	return e
 })
 
 // lists ---------------------------------------------------------------------
