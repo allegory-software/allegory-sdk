@@ -44,6 +44,7 @@ rowset attributes:
 
 sources of field attributes, in order of precedence:
 
+	e.html_col_attrs          : {COL -> {attr->val}}
 	e.prop_col_attrs          : {COL -> {attr->val}}
 	e.col_attrs               : {COL -> {attr->val}}
 	window.rowset_field_attrs : {ROWSET_NAME.COL -> {attr->val}}
@@ -579,6 +580,37 @@ function nav_widget(e) {
 
 	// init -------------------------------------------------------------------
 
+	let rowset_tag = e.$1('rowset')
+	if (rowset_tag) {
+		let fields = []
+		let row_text_vals = []
+		e.rowset = rowset_tag.attrs
+		e.rowset.fields = fields
+		e.rowset.row_text_vals = row_text_vals
+		let field_map = obj() // {name->index}
+		for (let field_tag of rowset_tag.$('field')) {
+			let field = field_tag.attrs
+			let field_index = fields.length
+			if (field.name) {
+				field_map[field.name] = field_index
+				fields.push(field)
+			} else {
+				warn('field name missing')
+			}
+		}
+		for (let row_tag of rowset_tag.$('row'))
+			row_text_vals.push(row_tag.attrs)
+		rowset_tag.remove()
+	}
+
+	for (let field of e.$('field')) {
+		let t = field.attrs
+		if (t.name)
+			attr(e, 'html_col_attrs')[t.name] = t
+		else
+			warn('field name missing')
+	}
+
 	e.ready = false
 
 	let init = e.init
@@ -730,13 +762,14 @@ function nav_widget(e) {
 	function init_field_attrs(field, f, name) {
 
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
+		let ht = e.html_col_attrs && e.html_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
 		let rt = e.rowset_name && rowset_field_attrs[e.rowset_name+'.'+name]
-		let type = rt && rt.type || ct && ct.type || f.type
+		let type = rt && rt.type || ht && ht.type || ct && ct.type || f.type
 		let tt = field_types[type]
 		let att = all_field_types
 
-		assign(field, att, tt, f, rt, ct, pt)
+		assign(field, att, tt, f, rt, ct, ht, pt)
 
 		for (let k in convert_field_attr)
 			field[k] = convert_field_attr[k](field, field[k], f)
@@ -749,13 +782,15 @@ function nav_widget(e) {
 
 		if (v === undefined) {
 
+			let ht = e.html_col_attrs && e.html_col_attrs[name]
 			let ct = e.col_attrs && e.col_attrs[field.name]
 			let rt = e.rowset_name && rowset_field_attrs[e.rowset_name+'.'+field.name]
 			let type = f.type || (ct && ct.type) || (rt && rt.type)
 			let tt = type && field_types[type]
 			let att = all_field_types
 
-			v = ct && ct[k]
+			v = ht && ht[k]
+			v = strict_or(v, ct && ct[k])
 			v = strict_or(v, rt)
 			v = strict_or(v, f[k])
 			v = strict_or(v, tt && tt[k])
@@ -1327,6 +1362,7 @@ function nav_widget(e) {
 		e.all_rows = e.bound && e.rowset && (
 				   e.deserialize_all_row_states(e.row_states)
 				|| e.deserialize_all_row_vals(e.row_vals)
+				|| e.deserialize_all_row_vals(e.rowset.row_text_vals, true)
 				|| e.rowset.rows
 			) || []
 	}
@@ -4344,11 +4380,14 @@ function nav_widget(e) {
 		return vals
 	}
 
-	e.deserialize_row_vals = function(vals) {
+	e.deserialize_row_vals = function(vals, from_text) {
 		let row = []
 		for (let fi = 0; fi < e.all_fields.length; fi++) {
 			let field = e.all_fields[fi]
-			row[fi] = strict_or(vals[field.name], field.default)
+			let v = strict_or(vals[field.name], field.default)
+			if (from_text)
+				v = field.from_text(v)
+			row[fi] = v
 		}
 		return row
 	}
@@ -4364,12 +4403,12 @@ function nav_widget(e) {
 		return rows
 	}
 
-	e.deserialize_all_row_vals = function(row_vals) {
+	e.deserialize_all_row_vals = function(row_vals, from_text) {
 		if (!row_vals)
 			return
 		let rows = []
 		for (let vals of row_vals) {
-			let row = e.deserialize_row_vals(vals)
+			let row = e.deserialize_row_vals(vals, from_text)
 			rows.push(row)
 		}
 		return rows
