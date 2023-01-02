@@ -340,8 +340,8 @@ main.add(button({
 	action: function() {
 		main.add(toolbox({
 			text: 'Toolbox #'+main.len,
-			content: 'You can make more of me',
-			pw: 150,
+			content: tag('input'),
+			pw: 250,
 			ph: 200,
 		}))
 	}
@@ -854,6 +854,22 @@ g = grid({
 main.add(g)
 
 </script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=html_grid_demo>
+<x-grid>
+	<field name=id type=number></field>
+	<rowset pk=id>
+		<field name=id   ></field>
+		<field name=name ></field>
+		<field name=desc ></field>
+		<row id=1 name=Foo desc="Le Foo"></row>
+		<row id=2 name=Bar desc="Le Bar"></row>
+		<row id=3 name=Baz desc="Le Baz"></row>
+	</rowset>
+</x-grid>
 </template>
 
 <!--------------------------------------------------------------------------->
