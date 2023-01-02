@@ -44,13 +44,13 @@ rowset attributes:
 
 sources of field attributes, in order of precedence:
 
-	e.html_col_attrs          : {COL -> {attr->val}}
-	e.prop_col_attrs          : {COL -> {attr->val}}
-	e.col_attrs               : {COL -> {attr->val}}
-	window.rowset_field_attrs : {ROWSET_NAME.COL -> {attr->val}}
-	e.rowset.fields           : [{attr->val},...]
-	window.field_types        : {type -> {attr->val}}
-	window.all_field_types    : {attr->val}
+e.set_prop('col.COL.ATTR', VAL)
+	<field name=COL ATTR=VAL>
+	e.field_attrs = {COL: {ATTR: VAL}}
+	window.rowset_field_attrs['ROWSET_NAME.COL'] = {ATTR: VAL}
+	e.rowset.fields = [{ATTR: VAL},...]
+	window.field_types[TYPE] = {ATTR: VAL}
+	window.all_field_types[ATTR] = VAL
 
 field attributes:
 
@@ -408,6 +408,12 @@ loading & saving from/to memory:
 		e.row_states
 	cals
 		e.do_save_row(vals) -> true | 'skip'
+
+loading from html:
+	<rowset>
+		<field name=COL ATTR=VAL></field>
+		<row COL=VAL ...></row>
+	</rowset>
 
 display val & text val:
 	publishes:
