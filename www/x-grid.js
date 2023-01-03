@@ -324,8 +324,6 @@ component('x-grid', 'Input', function(e) {
 	}
 
 	function update_sizes() {
-		e.cells_view.w = 0
-		e.cells_view.h = 0
 		if (!e.bound) {
 			grid_w = null
 			grid_h = null
@@ -1233,8 +1231,6 @@ component('x-grid', 'Input', function(e) {
 			w0 = w1
 			h0 = h1
 		}
-
-		// detect w/h changes from resizing made with css 'resize: both'.
 		e.on('resize', layout_changed)
 	}
 
