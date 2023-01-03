@@ -1008,7 +1008,7 @@ component('x-menu', function(e) {
 		let title_td  = tag('td', {class: 'x-menu-title-td'})
 		title_td.set(item.text)
 		let key_td    = tag('td', {class: 'x-menu-key-td'}, item.key)
-		let sub_box   = div({class: 'x-menu-sub-div fa fa-caret-right'})
+		let sub_box   = div({class: 'x-menu-sub-div fa fa-angle-right'})
 		let sub_td    = tag('td', {class: 'x-menu-sub-td'}, sub_box)
 		sub_box.style.visibility = item.items ? null : 'hidden'
 		let tr = tag('tr', {class: 'x-item x-menu-tr'}, check_td, title_td, key_td, sub_td)
