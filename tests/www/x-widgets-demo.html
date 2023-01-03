@@ -45,14 +45,14 @@ button {
 	border-left: 1px solid #333;
 }
 
-#buttons {
+#buttons, #result_buttons {
 	display: flex;
 	border-bottom: 1px solid #333;
 }
 
 #demo_list { overflow: hidden auto; padding-top: .5em; user-select: none; }
 #code      { flex: 1; }
-#result    { flex: 1; padding: 1em; display: flex; flex-flow: column; }
+#result    { flex: 1; padding: 1em; }
 #inspect   { flex: 1; border-top: 1px solid #333; }
 
 #code:focus {
@@ -150,7 +150,10 @@ on_dom_load(function() {
 		<aceeditor id=code></aceeditor>
 	</div>
 	<div id=result_split>
-		<div id=result></div>
+		<div id=result_buttons>
+			<button id=inline_button>Inline</button>
+		</div>
+		<div id=result class=x-container></div>
 		<div id=inspect></div>
 	</div>
 </div>
@@ -215,13 +218,12 @@ on_dom_load(function() {
 <!--------------------------------------------------------------------------->
 
 <template id=tooltip_demo>
-<div id=main></div>
 <script run>
 
 b1 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
 b2 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
 b3 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
-main.add(div({style: 'text-align: center'}, div({}, b1), div({}, b2), div({}, b3)))
+result.add(div({style: 'text-align: center'}, div({}, b1), div({}, b2), div({}, b3)))
 
 b1.style['margin'] = '5em'
 b2.style['margin'] = '5em'
@@ -398,18 +400,11 @@ main.add(b)
 <!--------------------------------------------------------------------------->
 
 <template id=checkbox_demo>
-<style>
-#result {
-   grid-gap: 2px;
-	align-items: start;
-}
-</style>
 <x-checkbox>
 	Do it!
 	<info>This checkbox does something</info>
 </x-checkbox>
 <x-toggle>This is the same</x-toggle>
-
 <script run>
 
 result.add(checkbox({
@@ -520,12 +515,6 @@ my_r.widget_editing = true
 <!--------------------------------------------------------------------------->
 
 <template id=textedit_demo>
-<style>
-#result {
-   grid-gap: 2px;
-	align-items: start;
-}
-</style>
 <script run>
 
 function say_my_name(field) {
@@ -550,6 +539,7 @@ result.add(div({}, 'type in "Klaus" to validate'), textedit({
 		validator_name: say_my_name,
 	},
 	val: 'wrong',
+	info: 'Santa wants this field',
 }))
 
 result.add(div(0, 'type in "Klaus" to validate'), textedit({
@@ -580,6 +570,7 @@ result.add(passedit({
 		label: 'Password',
 	},
 	val: 'Klaus',
+	info: 'Don\'t tell anyone',
 }))
 
 </script>
@@ -588,25 +579,16 @@ result.add(passedit({
 <!--------------------------------------------------------------------------->
 
 <template id=spinedit_demo>
-<style>
-#result {
-   grid-gap: 2px;
-	align-items: start;
-}
-</style>
-
 <x-spinedit val=42></x-spinedit>
-<x-spinedit val=42>Heey</x-spinedit>
-
 <script run>
 
 result.add(div({},
-	spinedit({button_style: 'up-down', val: 42, field: {}}),
+	spinedit({button_style: 'up-down', val: 42}),
 	spinedit({button_style: 'up-down', field: {label: 'Hey hey'}})
 ))
 
 result.add(div({},
-	spinedit({button_style: 'left-right', val: 42, field: {}}),
+	spinedit({button_style: 'left-right', val: 42}),
 	spinedit({button_style: 'left-right', field: {label: 'Dis look good?'}})
 ))
 
@@ -640,6 +622,7 @@ main.add(
 <!--------------------------------------------------------------------------->
 
 <template id=slider_demo>
+<x-slider val=0.7 label="Slider" info="This is a slider"></x-slider>
 <script run>
 
 result.add(
@@ -687,13 +670,13 @@ main.add(
 <div id=main></div>
 <script run>
 
-let api = editbox({field: {}, val: 'AIzaSyAuM6W_Hh2IagBOi4zR6owafO5yNyJLGiM'})
+let api = editbox({val: 'AIzaSyAuM6W_Hh2IagBOi4zR6owafO5yNyJLGiM'})
 api.on('val_changed', function(v) {
 	if (v) init_google_places_api(v)
 })
 main.add(api)
 
-let addr = placeedit({field: {}, val: 'Somewhere'})
+let addr = placeedit({val: 'Somewhere'})
 main.add(addr)
 
 let gmap = googlemaps({nav: addr.nav, col: addr.col})
@@ -715,7 +698,6 @@ lb = listbox({
 		'Something Else Entirely',
 	],
 	val_col: 0,
-	field: {},
 	val: 'Bananas',
 })
 
@@ -735,7 +717,6 @@ sb = select_button({
 		'Us',
 	],
 	val_col: 0,
-	field: {},
 	val: 'One',
 })
 
@@ -772,9 +753,7 @@ main.add(lb, hlb, div({}, html('<h3>select_button</h3>'), sb))
 <div id=main></div>
 <script run>
 
-main.add(calendar({
-	field: {},
-}))
+main.add(calendar())
 
 /*
 main.add(calendar({
@@ -861,7 +840,7 @@ main.add(g)
 <template id=html_grid_demo>
 <x-grid>
 	<field name=id type=number></field>
-	<rowset pk=id>
+	<rowset pk=id can_change_rows=false>
 		<field name=id   ></field>
 		<field name=name ></field>
 		<field name=desc ></field>
@@ -970,7 +949,6 @@ main.add(
 		},
 		val_col: 'id',
 		display_col: 'name',
-		field: {},
 		val: 4,
 	})
 )
@@ -990,7 +968,6 @@ main.add(
 		},
 		val_col: 'id',
 		display_col: 'name',
-		field: {},
 		val: 42,
 	})
 )
@@ -1005,7 +982,6 @@ main.add(
 <script run>
 
 clb = countries_listbox({
-	field: {},
 	val: 'RO',
 })
 main.add(clb)
@@ -1020,7 +996,6 @@ main.add(clb)
 <script run>
 
 cd = country_dropdown({
-	field: {},
 	val: 'RO',
 })
 main.add(cd)
@@ -1050,22 +1025,22 @@ main.add(
 	p('default', 'variable-width, no-wrap with min-width aligned with other inputs'),
 	date_dropdown({field: {type: 'date'}, val: time()}),
 	div(),
-	list_dropdown({field: {}, items: items()}),
+	list_dropdown({items: items()}),
 
 	p('inline', 'variable-width, no-wrap, with no min-width (shrink-wrapped), baseline-aligned'),
 	date_dropdown({field: {type: 'date'}, mode: 'inline', val: time()}),
 	div(),
-	list_dropdown({field: {}, mode: 'inline', items: items()}),
+	list_dropdown({mode: 'inline', items: items()}),
 
 	p('wrap', 'fixed-width, auto-wrap'),
 	date_dropdown({field: {type: 'date'}, mode: 'wrap', val: time()}),
 	div(),
-	list_dropdown({field: {}, mode: 'wrap', items: items(), val: 'Something Else Entirely'}),
+	list_dropdown({mode: 'wrap', items: items(), val: 'Something Else Entirely'}),
 
 	p('fixed', 'fixed-width, no-wrap, overflow hidden'),
 	date_dropdown({field: {type: 'date'}, mode: 'fixed', val: time()}),
 	div(),
-	list_dropdown({id: 'xx', field: {}, mode: 'fixed', items: items(), val: 'Something Else Entirely'})
+	list_dropdown({id: 'xx', mode: 'fixed', items: items(), val: 'Something Else Entirely'})
 )
 
 </script>
@@ -1479,6 +1454,11 @@ lights_button.on('click', function() {
 	ace_editor.setTheme(dark ? 'ace/theme/tomorrow_night' : null)
 	save('dark_mode', dark)
 	document.fire('layout_changed')
+})
+
+inline_button.on('click', function() {
+	result.switch_class('inline', 'x-container', result.hasclass('inline'))
+	inline_button.bool_attr('pressed', result.hasclass('inline') || null)
 })
 
 function reset_size_buttons() {
