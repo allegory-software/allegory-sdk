@@ -1,8 +1,7 @@
 BUGS
 ------------------------------------------------------------------------------
-* SPINEDIT demo
-* TAGSEDIT demo
 * SLIDER demo
+* TAGSEDIT demo
 * IMAGE upload & download demo
 * PLACEEDIT demo
 * LIST demo
