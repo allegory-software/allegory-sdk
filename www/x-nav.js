@@ -4,14 +4,14 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 implements:
-	val widget mixin.
-		So any nav_widget (grid, listbox) can also act like a val_widget
-		(editbox), setting its cell value when navigating the rows. This is how
-		dropdowns work: the grid or listbox picker is bound to the same field
-		as the dropdown and it changes the dropdown's cell value by itself
-		without the need to coordinate with the dropdown.
+	val_widget_mixin:
+		So any nav_widget (grid, listbox) also acts like a val_widget (editbox),
+		setting its cell value when navigating the rows. This is how dropdowns
+		work: the grid or listbox picker is bound to the same field as the
+		dropdown and it changes the dropdown's cell value by itself without
+		the need to coordinate with the dropdown.
 
-field types:
+field types (see "field type definitions" at the end):
 	password number filesize bool enum tags color percent icon
 	button place url phone email
 	date time timeofday timeofday_in_seconds duration
@@ -46,8 +46,8 @@ sources of field attributes, in order of precedence:
 
 e.set_prop('col.COL.ATTR', VAL)
 	<field name=COL ATTR=VAL>
-	e.field_attrs = {COL: {ATTR: VAL}}
-	window.rowset_field_attrs['ROWSET_NAME.COL'] = {ATTR: VAL}
+	e.col_attrs = {COL: {ATTR: VAL}}
+	window.rowset_col_attrs['ROWSET_NAME.COL'] = {ATTR: VAL}
 	e.rowset.fields = [{ATTR: VAL},...]
 	window.field_types[TYPE] = {ATTR: VAL}
 	window.all_field_types[ATTR] = VAL
@@ -448,7 +448,7 @@ server-side properties:
 --------------------------------------------------------------------------- */
 
 field_types = obj()
-rowset_field_attrs = obj()
+rowset_col_attrs = obj()
 
 function map_keys_different(m1, m2) {
 	if (m1.size != m2.size)
@@ -593,6 +593,13 @@ function nav_widget(e) {
 		e.rowset = rowset_tag.attrs
 		e.rowset.fields = fields
 		e.rowset.row_text_vals = row_text_vals
+		function fix_bool(t, k) {
+			if (k in t)
+				t[k] = t[k] != 'false'
+		}
+		fix_bool(e.rowset, 'can_add_rows')
+		fix_bool(e.rowset, 'can_remove_rows')
+		fix_bool(e.rowset, 'can_change_rows')
 		let field_map = obj() // {name->index}
 		for (let field_tag of rowset_tag.$('field')) {
 			let field = field_tag.attrs
@@ -609,12 +616,13 @@ function nav_widget(e) {
 		rowset_tag.remove()
 	}
 
-	for (let field of e.$('field')) {
-		let t = field.attrs
+	for (let field_tag of e.$('field')) {
+		let t = field_tag.attrs
 		if (t.name)
 			attr(e, 'html_col_attrs')[t.name] = t
 		else
 			warn('field name missing')
+		field_tag.remove()
 	}
 
 	e.ready = false
@@ -770,7 +778,7 @@ function nav_widget(e) {
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
 		let ht = e.html_col_attrs && e.html_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
-		let rt = e.rowset_name && rowset_field_attrs[e.rowset_name+'.'+name]
+		let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+name]
 		let type = rt && rt.type || ht && ht.type || ct && ct.type || f.type
 		let tt = field_types[type]
 		let att = all_field_types
@@ -790,7 +798,7 @@ function nav_widget(e) {
 
 			let ht = e.html_col_attrs && e.html_col_attrs[name]
 			let ct = e.col_attrs && e.col_attrs[field.name]
-			let rt = e.rowset_name && rowset_field_attrs[e.rowset_name+'.'+field.name]
+			let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+field.name]
 			let type = f.type || (ct && ct.type) || (rt && rt.type)
 			let tt = type && field_types[type]
 			let att = all_field_types
@@ -4603,9 +4611,10 @@ function nav_widget(e) {
 		if (e.action_band_visible == 'auto' && !e.changed_rows && !e.action_band)
 			return
 
-		if (!e.action_band) {
+		let ab = e.action_band
+		if (!ab) {
 
-			e.action_band = action_band({
+			ab = action_band({
 				classes: 'x-grid-action-band',
 				layout: 'reload add delete move_up move_down info < > cancel:cancel save:ok',
 				buttons: {
@@ -4619,6 +4628,7 @@ function nav_widget(e) {
 						tabindex: -1,
 					}),
 					'add': button({
+						bare: true,
 						icon: 'fa fa-plus',
 						text: S('add', 'Add'),
 						title: S('add_new_record', 'Add a new record (Insert key)'),
@@ -4632,6 +4642,7 @@ function nav_widget(e) {
 						tabindex: -1,
 					}),
 					'delete': button({
+						bare: true,
 						danger: true,
 						icon: 'fa fa-minus',
 						action: function() {
@@ -4640,6 +4651,7 @@ function nav_widget(e) {
 						tabindex: -1,
 					}),
 					'move_up'   : button({
+						bare: true,
 						icon: 'fa fa-angle-up',
 						text: S('move_up', 'Move up'),
 						hidden: true,
@@ -4649,6 +4661,7 @@ function nav_widget(e) {
 						tabindex: -1,
 					}),
 					'move_down' : button({
+						bare: true,
 						icon: 'fa fa-angle-down',
 						text: S('move_down', 'Move Down'),
 						hidden: true,
@@ -4659,6 +4672,7 @@ function nav_widget(e) {
 					}),
 					'info': div({class: 'x-grid-action-band-info'}),
 					'cancel': button({
+						bare: true,
 						icon: 'fa fa-rotate-left',
 						text: S('cancel', 'Cancel'),
 						title: S('discard_changes', 'Discard changes'),
@@ -4669,7 +4683,8 @@ function nav_widget(e) {
 						tabindex: -1,
 					}),
 					'save': button({
-						icon: 'fa fa-cloud-upload-alt',
+						bare: true,
+						icon: 'fa fa-floppy-disk',
 						text: S('save', 'Save'),
 						title: S('save_changes', 'Save changes (Esc or Enter keys)'),
 						primary: true,
@@ -4681,63 +4696,90 @@ function nav_widget(e) {
 					}),
 				}
 			})
-			e.action_band.on('resize', function(r) {
-				this.class('noinfo', this.parent.cw < 380)
-				this.class('tight' , this.parent.cw < 815)
-			})
-			e.add(e.action_band)
-		}
+			e.action_band = ab
 
-		let sn = e.selected_rows.size
-		let an = count_changed_rows('is_new' )
-		let dn = count_changed_rows('removed')
-		let cn = e.changed_rows ? e.changed_rows.size : 0
-		let un = cn - an - dn
-
-		let b = e.action_band
-		if (b) {
-
-			b.buttons.reload.disable('nav_state', cn || !e.rowset_url)
-
-			b.buttons.add.disable('nav_state', !e.can_actually_add_rows())
-
-			b.buttons.delete.disable('nav_state', !sn)
-			let ds = sn > 1 ? S('delete_records', 'Delete {0} {1}', sn, nrows(sn)) : S('delete', 'Delete')
-			b.buttons.delete.text = ds
-			b.buttons.delete.title =
-				(sn > 1 ? ds : S('delete_focused_record', 'Delete focused record'))
-				+ ' (' + S('delete_key', 'Delete key') + ')'
-
-			let allow_move = e.can_actually_move_rows(true)
-			let can_move   = e.can_actually_move_rows(false)
-			b.buttons.move_up   .show(allow_move)
-			b.buttons.move_down .show(allow_move)
-			if (allow_move) {
-				b.buttons.move_up   .disable('nav_state', !can_move)
-				b.buttons.move_down .disable('nav_state', !can_move)
-				b.buttons.move_up   .title = can_move
-					? S('move_record_up', 'Move record up in list (you can also drag it into position)')
-					: e.can_actually_move_rows_error()
-				b.buttons.move_down .title = can_move
-					? S('move_record_down', 'Move record down in list (you can also drag it into position)')
-					: e.can_actually_move_rows_error()
+			for (let k in ab.buttons) {
+				let b = ab.buttons[k]
+				b.static_text = b.text
 			}
 
-			let s = catany('\n',
-				sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
-				an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
-				un > 0 ? un + ' ' + nrows(un) + ' ' + S('modified', 'modified') : null,
-				dn > 0 ? dn + ' ' + nrows(dn) + ' ' + S('deleted' , 'deleted' ) : null
-			)
-			b.buttons.info.set(s)
+			ab.on_update(function(opt) {
 
-			b.buttons.save  .disable('nav_state', !cn)
-			b.buttons.cancel.disable('nav_state', !cn)
+				let sn = e.selected_rows.size
+				let an = count_changed_rows('is_new' )
+				let dn = count_changed_rows('removed')
+				let cn = e.changed_rows ? e.changed_rows.size : 0
+				let un = cn - an - dn
 
-			b.show(e.action_band_visible != 'auto' || e.changed_rows)
+				ab.buttons.reload.disable('nav_state', cn || !e.rowset_url)
+
+				ab.buttons.add.disable('nav_state', !e.can_actually_add_rows())
+
+				let bd = ab.buttons.delete
+				bd.disable('nav_state', !sn)
+				let ds = sn > 1 ? S('delete_records', 'Delete {0} {1}', sn, nrows(sn)) : S('delete', 'Delete')
+				bd.text = ds
+				bd.static_text = ds
+				bd.title =
+					(sn > 1 ? ds : S('delete_focused_record', 'Delete focused record'))
+					+ ' (' + S('delete_key', 'Delete key') + ')'
+
+				let allow_move = e.can_actually_move_rows(true)
+				let can_move   = e.can_actually_move_rows(false)
+				ab.buttons.move_up   .show(allow_move)
+				ab.buttons.move_down .show(allow_move)
+				if (allow_move) {
+					ab.buttons.move_up   .disable('nav_state', !can_move)
+					ab.buttons.move_down .disable('nav_state', !can_move)
+					ab.buttons.move_up   .title = can_move
+						? S('move_record_up', 'Move record up in list (you can also drag it into position)')
+						: e.can_actually_move_rows_error()
+					ab.buttons.move_down .title = can_move
+						? S('move_record_down', 'Move record down in list (you can also drag it into position)')
+						: e.can_actually_move_rows_error()
+				}
+
+				let s = catany('\n',
+					sn > 1 ? sn + ' ' + nrows(sn) + ' ' + S('selected', 'selected') : null,
+					an > 0 ? an + ' ' + nrows(an) + ' ' + S('added'   , 'added'   ) : null,
+					un > 0 ? un + ' ' + nrows(un) + ' ' + S('modified', 'modified') : null,
+					dn > 0 ? dn + ' ' + nrows(dn) + ' ' + S('deleted' , 'deleted' ) : null
+				)
+				ab.buttons.info.set(s)
+
+				ab.buttons.save  .disable('nav_state', !cn)
+				ab.buttons.cancel.disable('nav_state', !cn)
+
+			})
+
+			let noinfo, tight
+			ab.on_measure(function() {
+				noinfo = this.parent.cw < 380
+				tight  = this.parent.cw < 815
+			})
+
+			ab.on_position(function() {
+				this.class('noinfo', noinfo)
+				this.class('tight' , tight)
+				for (let k in this.buttons) {
+					let b = this.buttons[k]
+					b.text = tight ? null : b.static_text
+				}
+				this.buttons.info.hide(noinfo)
+			})
+
+			ab.on('resize', function() {
+				this.update()
+			})
+
+			e.add(ab)
+
 		}
 
-		disable_all(!!cn)
+		let show = !!(e.action_band_visible != 'auto' || e.changed_rows)
+		ab.update({show: show})
+
+		disable_all(!!(e.changed_rows && e.changed_rows.size))
 
 	}
 
@@ -5088,7 +5130,7 @@ function nav_dropdown_widget(e) {
 	let number = {align: 'right', min: 0, max: 1/0, decimals: 0}
 	field_types.number = number
 
-	number.validator_number = field => (field.decimals && {
+	number.validator_number = field => ({
 		validate : v => v == null || (isnum(v) && v === v),
 		message  : S('validation_number', 'Value must be a number'),
 	})
