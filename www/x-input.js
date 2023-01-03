@@ -226,8 +226,13 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 					e._field = e._nav.add_field(field_opt)
 					e._col = e._field.name
 					bind_global_nav(true)
-					if (initial_val !== undefined)
+					if (initial_val !== undefined) {
+						if (initial_val == e.attr('val')) {
+							// initial_val comes in as text: convert it.
+							initial_val = e._field.from_text(initial_val)
+						}
 						e._nav.set_cell_val(e._nav.all_rows[0], e._field, initial_val)
+					}
 				}
 			}
 		} else {
@@ -463,6 +468,10 @@ component('x-button', 'Input', function(e) {
 			e.link.set(TC(s))
 	}
 
+	e.set_text = function(s) {
+		update_text()
+	}
+
 	e.prop('text', {type: 'html', default: '', slot: 'lang'})
 
 	e.set_icon = function(v) {
@@ -546,7 +555,7 @@ component('x-button', 'Input', function(e) {
 		}
 	})
 
-	e.on('pointerdown', function(ev) {
+	e.focus_box.on('pointerdown', function(ev) {
 		if (e.widget_editing)
 			return
 		e.focus()
@@ -649,7 +658,7 @@ function input_widget(e) {
 
 	e.init_child_components()
 
-	let html_info = e.$1(':scope>info')
+	let html_info = e.$1(':scope>info') || undefined
 	if (html_info)
 		html_info.remove()
 
@@ -805,9 +814,9 @@ component('x-checkbox', 'Input', function(e) {
 
 	function update_icon() {
 		let ie = e.icon_box
-		ie.class('fa far fa-square fa-check-square fa-toggle-on fa-toggle-off', false)
+		ie.class('toggle fa far fa-square fa-check-square fa-toggle-on fa-toggle-off', false)
 		if (e.button_style == 'toggle')
-			ie.classes = 'fa fa-toggle-'+(e.checked ? 'on' : 'off')
+			ie.classes = 'toggle fa fa-toggle-'+(e.checked ? 'on' : 'off')
 		else
 			ie.classes = e.checked ? 'fa fa-check-square' : 'far fa-square'
 	}
@@ -844,17 +853,17 @@ component('x-checkbox', 'Input', function(e) {
 		if (e.widget_editing)
 			return
 		ev.preventDefault() // prevent accidental selection by double-clicking.
-		e.focus()
 	})
 
 	function click(ev) {
 		if (e.widget_editing)
 			return
+		e.focus()
 		e.toggle({input: e})
 		return false
 	}
 
-	e.icon_box.on('click', click)
+	e.icon_box .on('click', click)
 	e.label_box.on('click', click)
 
 	e.on('keydown', function(key, shift, ctrl) {
@@ -954,7 +963,8 @@ component('x-radiogroup', 'Input', function(e) {
 				ri.item = item
 				ri.add(ri.icon_box, ri.label_box)
 				function pointerdown() {
-					select_radio_item(ri, false)
+					select_radio_item(ri)
+					return false
 				}
 				ri.icon_box .on('pointerdown', pointerdown)
 				ri.label_box.on('pointerdown', pointerdown)
@@ -1036,8 +1046,9 @@ component('x-radiogroup', 'Input', function(e) {
 
 	function select_radio_item(radio_item, focus) {
 		e.set_val(item_val(radio_item.item), {input: e})
-		if (focus != false)
+		if (focus != false) {
 			radio_item.label_box.focus()
+		}
 	}
 
 	function radio_item_keydown(key) {
@@ -1750,16 +1761,21 @@ component('x-numedit', 'Input', function(e) {
 
 	let cons_opt = editbox_widget(e)
 
-	function increment_val(increment) {
+	e.on_update(function(opt) {
+		if (opt.select_all)
+			e.input.select_range(0, -1)
+	})
+
+	e.increment_val = function(increment) {
 		let v = e.input_val + increment
 		let m = or(1 / 10 ** (e._field.decimals || 0), 1)
 		let r = v % m
 		e.set_val(v - r, {input: e})
-		e.input.select_range(0, -1)
+		e.update({select_all: true})
 	}
 
 	e.input.on('wheel', function(ev, dy) {
-		increment_val(dy)
+		e.increment_val(dy)
 		return false
 	})
 
@@ -1780,7 +1796,7 @@ component('x-spinedit', 'Input', function(e) {
 	e.up   = div({class: 'x-spinedit-button fa'})
 	e.down = div({class: 'x-spinedit-button fa'})
 
-	e.on_update(function() {
+	e.on_update(function(opt) {
 
 		let bs = e.button_style
 		let bp = e.button_placement
@@ -1823,12 +1839,12 @@ component('x-spinedit', 'Input', function(e) {
 
 	let increment
 	function increment_val_again() {
-		if (!e.matches(':active'))
-			return // prevent infinite loop if mouse capture fails.
+		// if (!e.matches(':active'))
+		// 	return // prevent infinite loop if mouse capture fails.
 		let v = e.input_val + increment
 		let r = v % multiple()
 		e.set_val(v - r, {input: e})
-		e.input.select_range(0, -1)
+		e.update({select_all: true})
 		increment_timer(.1)
 	}
 	let increment_timer = timer(increment_val_again)
@@ -1851,7 +1867,7 @@ component('x-spinedit', 'Input', function(e) {
 		if (key == 'ArrowDown' || key == 'ArrowUp') {
 			if (!e.hasclass('grid-editor')) {
 				let inc = (key == 'ArrowDown' ? 1 : -1) * multiple()
-				increment_val(inc)
+				e.increment_val(inc)
 				return false
 			}
 		}
@@ -2237,22 +2253,28 @@ component('x-googlemaps', 'Input', function(e) {
 
 component('x-slider', 'Input', function(e) {
 
-	e.field_options = {type: 'number'}
-
-	focusable_widget(e)
-
-	e.prop('from', {default: 0})
-	e.prop('to', {default: 1})
-
-	e.val_fill = div({class: 'x-slider-fill x-slider-value-fill'})
-	e.range_fill = div({class: 'x-slider-fill x-slider-range-fill'})
-	e.input_thumb = div({class: 'x-slider-thumb x-slider-input-thumb'})
-	e.val_thumb = div({class: 'x-slider-thumb x-slider-value-thumb'})
-	e.add(e.range_fill, e.val_fill, e.val_thumb, e.input_thumb)
-
-	// model
+	e.field_options = {type: 'number', decimals: 1}
 
 	val_widget(e)
+	let cons_opt = input_widget(e)
+	e.class('x-editbox')
+
+	e.prop('from', {default: 0})
+	e.prop('to'  , {default: 1})
+
+	e.label_box   = div({class: 'x-editbox-label'})
+	e.val_fill    = div({class: 'x-slider-fill x-slider-value-fill'})
+	e.range_fill  = div({class: 'x-slider-fill x-slider-range-fill'})
+	e.input_thumb = div({class: 'x-slider-thumb x-slider-input-thumb'})
+	e.val_thumb   = div({class: 'x-slider-thumb x-slider-value-thumb'})
+	e.slider_box  = div({class: 'x-slider-box'},
+			e.range_fill, e.val_fill, e.val_thumb, e.input_thumb)
+	e.focus_box   = div({class: 'x-slider-focus-box x-focus-box'}, e.label_box, e.slider_box)
+	e.add(div({class: 'x-linear-form-filler'}), e.focus_box)
+
+	focusable_widget(e, e.focus_box)
+
+	// model
 
 	e.on_update(function() {
 		e.class('animated', false) // TODO: decide when to animate!
@@ -2263,7 +2285,7 @@ component('x-slider', 'Input', function(e) {
 	}
 
 	function cmin() { return max(or(e._field && e._field.min, -1/0), e.from) }
-	function cmax() { return min(or(e._field && e._field.max, 1/0), e.to) }
+	function cmax() { return min(or(e._field && e._field.max,  1/0), e.to  ) }
 
 	let multiple = () => or(1 / 10 ** e._field.decimals, 1)
 
@@ -2284,7 +2306,7 @@ component('x-slider', 'Input', function(e) {
 	// view
 
 	function update_thumb(thumb, p, show) {
-		thumb.hidden = !show
+		thumb.hide(show == false)
 		thumb.style.left = (p * 100)+'%'
 	}
 
@@ -2299,7 +2321,7 @@ component('x-slider', 'Input', function(e) {
 		let diff = input_p != val_p
 		update_thumb(e.val_thumb, val_p, diff)
 		update_thumb(e.input_thumb, input_p)
-		e.val_thumb.class('different', diff)
+		e.val_thumb  .class('different', diff)
 		e.input_thumb.class('different', diff)
 		let p1 = progress_for(cmin())
 		let p2 = progress_for(cmax())
@@ -2309,20 +2331,20 @@ component('x-slider', 'Input', function(e) {
 
 	// controller
 
-	e.input_thumb.on('pointerdown', function(ev) {
+	e.slider_box.on('pointerdown', function(ev, mx) {
 		e.focus()
-		let r = e.input_thumb.rect()
-		let hit_x = ev.clientX - (r.x + r.w / 2)
-		return this.capture_pointer(ev, function(ev, mx, my) {
-			let r = e.rect()
-			e.set_progress((mx - r.x - hit_x) / r.w, {input: e})
-			return false
+		let r = this.rect()
+		let tt = tooltip()
+		e.input_thumb.add(tt)
+		function pointermove(ev, mx) {
+			e.set_progress((mx - r.x) / r.w, {input: e})
+			tt.text = e.display_val_for(e.input_val)
+			pr('tt.text set', e.display_val_for(e.input_val))
+		}
+		pointermove(ev, mx)
+		return this.capture_pointer(ev, pointermove, function() {
+			tt.remove()
 		})
-	})
-
-	e.on('pointerdown', function(ev) {
-		let r = e.rect()
-		e.set_progress((ev.clientX - r.x) / r.w, {input: e})
 	})
 
 	e.on('keydown', function(key, shift) {
@@ -2343,16 +2365,7 @@ component('x-slider', 'Input', function(e) {
 		}
 	})
 
-	e.inspect_fields = [
-
-		{name: 'from', type: 'number'},
-		{name: 'to', type: 'number'},
-		{name: 'decimals', type: 'number'},
-
-		{name: 'grid_area'},
-		{name: 'tabIndex', type: 'number'},
-
-	]
+	return cons_opt
 
 })
 

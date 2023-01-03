@@ -363,7 +363,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* button ----------------------------------------------------------------- */
 
 .x-button {
-	/* layout focus-box and info-box */
 	display: inline-flex;
 	flex-flow: column;
 	margin: .2em 0;
@@ -510,32 +509,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	margin: 0 var(--x-margin);
 }
 
-.x-action-band > .x-button > .x-button-text {
+.x-action-band > .x-button .x-button-text {
 	white-space: nowrap !important;
 }
 
-/* ---- tight width ---- */
-
-.x-action-band.tight > .x-button > .x-button-text {
-	display: none;
-}
-
-.x-action-band.tight > .x-button { /* same as .text-empty */
-	padding-left  : var(--x-padding-x-button-icon);
-	padding-right : var(--x-padding-x-button-icon);
-	align-items: center; /* no more baseline to align icon to */
-}
-
-.x-action-band.tight > .x-button:not([bare]) > .x-button-icon { /* same as .text-empty */
-	margin-right: .25em;
-	margin-left : .25em;
-}
-
-.x-action-band.noinfo > .x-grid-action-band-info {
-	display: none;
-}
-
-.x-action-band:not(.tight) > .x-dialog-button-cancel > .x-button-icon {
+.x-action-band:not(.tight) > .x-dialog-button-cancel .x-button-icon {
 	display: none;
 }
 
@@ -722,7 +700,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 /* all inputs ------------------------------------------------------------- */
 
 .x-input-widget {
-	/* layout self & content */
 	display: inline-flex; /* baseline-align in an inline context */
 	flex-flow: column;
 }
@@ -739,23 +716,18 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-color: var(--x-border-light);
 	border-radius: var(--x-border-radius-input);
 	background-color: var(--x-bg-input);
+	outline-offset: -2px;
 }
 
-.x-widget:focus-within > .x-focus-box {
-	/* TODO: border-color: var(--x-border-focused); */
+.x-widget:focus-within > .x-focus-box
+{
 	border-color: transparent;
 	outline: 2px solid var(--x-outline-focused);
-	outline-offset: -2px;
 }
 
 .x-widget.with-label > .x-focus-box {
 	min-height: var(--x-min-height-input);
 	--x-padding-y-button: 0; /* inline buttons should not affect box height */
-}
-
-.x-editbox.with-label > .x-focus-box {
-	line-height: initial;    /* prevent inheriting it */
-	padding-top: calc(var(--x-min-height-input) - 2.1em);
 }
 
 /* input info button */
@@ -839,7 +811,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-markbox.with-label > .x-focus-box {
 	line-height: initial;
-	align-items: center;
 }
 
 .x-markbox.with-label > .x-focus-box > .x-markbox-label {
@@ -854,15 +825,20 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-markbox:focus-within > .x-focus-box {
-	border-color: transparent;
-}
-
-.x-markbox > .x-focus-box > .x-markbox-label:focus {
-	border-color: transparent;
+	border-color: var(--x-border-light);
 	outline: none;
 }
 
-.x-markbox:focus.invalid > .x-focus-box {
+.x-markbox > .x-focus-box > .x-markbox-label:focus {
+	outline: none;
+}
+
+.x-markbox > .x-focus-box:has(> .x-markbox-label:focus-visible) {
+	border-color: transparent;
+	outline: 2px solid var(--x-outline-focused);
+}
+
+.x-markbox:focus-within.invalid > .x-focus-box {
 	border-color: var(--x-fg-error);
 }
 
@@ -892,6 +868,9 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-markbox[align=right] > .x-focus-box > .x-markbox-icon {
 	order: 2;
 }
+.x-markbox[align=right] > .x-focus-box {
+	justify-content: end;
+}
 .x-markbox[align=right] > .x-focus-box > .x-markbox-label {
 	text-align: right;
 }
@@ -915,14 +894,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 /* checkbox --------------------------------------------------------------- */
 
-.x-checkbox > .x-focus-box {
-	display: inline-flex;
-	align-items: center;
-	flex-flow: row nowrap;
-}
-
 .x-checkbox-icon {
 	font-size: 120%;
+}
+
+.x-checkbox-icon.toggle {
+	font-size: 200%;
 }
 
 .x-checkbox-label {
@@ -961,6 +938,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding-right  : var(--x-padding-x-input);
 	padding-top    : var(--x-padding-y-input);
 	padding-bottom : var(--x-padding-y-input);
+	outline-offset: -2px;
 }
 
 .x-radio-label {
@@ -979,7 +957,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-radio-item:has(> .x-radio-label:focus-visible) {
 	outline: 2px solid var(--x-outline-focused);
-	outline-offset: -2px;
 }
 
 .x-radiogroup[align=right] > .x-radio-items > .x-radio-item { justify-content: flex-end; }
@@ -1016,6 +993,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 .x-editbox.with-label > .x-focus-box {
 	padding-top     : var(--x-padding-y-input-top);
 	padding-bottom  : var(--x-padding-y-input-bottom);
+	line-height: initial;  /* prevent inheriting it */
 }
 
 .x-input-placeholder {
@@ -1375,50 +1353,44 @@ textarea.x-editbox-input {
 /* slider ----------------------------------------------------------------- */
 
 .x-slider {
-	/* inline layouting */
 	display: inline-block;
+	width: auto; /* shrink-wrap */
+}
+
+.x-slider-box {
 	vertical-align: middle;
 	margin: .75em;
-
-	/* shrink-wrap */
-	width: auto;
-	min-width: 1em;
-	height: 7px;
-
-	/* styling */
-	background-color: var(--x-smoke);
-	border: 0;
-	border-radius: 10em;
-
-	/* layouting content */
+	min-width: 8em;
+	height: 5px;
 	overflow: visible;
+	position: relative;
 }
 
 .x-slider-fill {
 	position: absolute;
 	height: 100%;
-	background-color: var(--x-bg-unfocused);
+	background-color: var(--x-bg-unfocused-selected);
 	border-radius: 10em;
 }
 
 .x-slider-range-fill {
 	background-color: var(--x-fg-disabled);
+	height: 3px;
 }
 
 .x-slider-thumb {
 
 	/* center vertically to track */
 	position: absolute;
-	top: 50%;
-	transform: translateX(-50%) translateY(-55%);
+	margin-top : calc(-.65em + 2px);
+	margin-left: calc(-.65em);
 
 	/* sizing */
-	width: 1em;
-	height: 1em;
+	width: 1.3em;
+	height: 1.3em;
 
 	/* styling */
-	background-color: var(--x-smoke);
-	border: 1px solid var(--x-border-light);
+	background-color: var(--x-bg-unfocused-selected);
 	box-shadow: var(--x-shadow-slider-thumb);
 	border-radius: 10em;
 
@@ -1428,26 +1400,25 @@ textarea.x-editbox-input {
 	opacity: .5;
 }
 
-.x-slider:focus > .x-slider-value-fill {
-	background-color: var(--x-bg-focused);
+.x-slider-focus-box:focus > .x-slider-box > .x-slider-value-fill {
+	background-color: var(--x-bg-focused-selected);
 }
 
-.x-slider:focus > .x-slider-thumb {
-	border: 1px solid var(--x-bg-focused);
-	background-color: var(--x-smoke);
+.x-slider-focus-box:focus > .x-slider-box > .x-slider-thumb {
+	background-color: var(--x-bg-focused-selected);
 }
 
-.x-slider.invalid > .x-slider-input-thumb {
+.x-slider.invalid > .x-slider-focus-box > .x-slider-box > .x-slider-input-thumb {
 	border: 1px solid var(--x-bg-error);
 	background-color: var(--x-bg-error);
 }
 
-.x-slider.invalid:focus > .x-slider-thumb {
+.x-slider.invalid > .x-slider-focus-box:focus > .x-slider-box > .x-slider-thumb {
 	border: 1px solid var(--x-disabled);
 }
 
-.x-slider.animated > .x-slider-thumb      { transition: left  .1s; }
-.x-slider.animated > .x-slider-value-fill { transition: width .1s; }
+.x-slider.animated > .x-slider-focus-box > .x-slider-box > .x-slider-thumb      { transition: left  .1s; }
+.x-slider.animated > .x-slider-focus-box > .x-slider-box > .x-slider-value-fill { transition: width .1s; }
 
 /* tagsedit --------------------------------------------------------------- */
 
@@ -1958,8 +1929,9 @@ textarea.x-editbox-input {
 	box-shadow: var(--x-shadow-popup);
 }
 
-.x-menu-sub-td {
+.x-menu-tr > .x-menu-sub-td {
 	position: relative; /* submenus are anchored to this td */
+	padding-right: .8em;
 }
 
 .x-menu-tr.focused > :not(.x-menu-table) {
