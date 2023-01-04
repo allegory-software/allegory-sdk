@@ -231,7 +231,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 							// initial_val comes in as text: convert it.
 							initial_val = e._field.from_text(initial_val)
 						}
-						e._nav.set_cell_val(e._nav.all_rows[0], e._field, initial_val)
+						e._nav.reset_cell_val(e._nav.all_rows[0], e._field, initial_val)
 					}
 				}
 			}
