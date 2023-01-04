@@ -603,51 +603,34 @@ result.add(div({},
 <!--------------------------------------------------------------------------->
 
 <template id=tagsedit_demo>
-<div id=main></div>
+<x-tagsedit id=t val="apples bananas mangos"></x-tagsedit>
 <script run>
-
-main.add(
-	tagsedit({
-		field: {
-			validate: function(v) {
-				return v.includes('bananas') || 'Can\'t renounce bananas'
-			},
+t.add_validator('bananas', function(field) {
+	return {
+		validate: function(v) {
+			return v.includes('bananas')
 		},
-		val: ['apples', 'bananas', 'mangos'],
-	}))
-
+		message: 'Can\'t renounce bananas',
+	}
+})
 </script>
 </template>
 
 <!--------------------------------------------------------------------------->
 
 <template id=slider_demo>
-<x-slider val=0.7 label="Slider" info="This is a slider"></x-slider>
+<x-slider val=0.7 label="Slider with a very very long label" info="This is a slider"></x-slider>
+<x-slider id=s1 val=0.5 label="Slider 1" info="This is another slider"></x-slider>
+<x-slider id=s2 val=1500 from=1000 to=2000
+	label="Slider 2" info="This is yet another slider">
+	<field min=1300 max=1700 decimals=2></field>
+</x-slider>
 <script run>
-
-result.add(
-	div({}, 'Slider 1'),
-	slider({
-		field: {
-			validator_custom: field => ({
-				valiate: v => v >= .2 && v <= .8,
-				message: 'Value not between .2 and .8',
-			}),
-		},
-		val: .5,
-	}))
-
-result.add(
-	div({}, 'Slider 2'),
-	slider({
-		from: 1000, to: 2000,
-		field: {
-			multiple_of: 200, min: 1300, max: 1700,
-		},
-		val: 1500,
+s1.add_validator('custom', field => ({
+		validate: v => isnum(v) && v >= .2 && v <= .8,
+		message: 'Value not between .2 and .8',
 	})
 )
-
 </script>
 </template>
 
