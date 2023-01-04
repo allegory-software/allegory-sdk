@@ -2328,6 +2328,8 @@ component('x-slider', 'Input', function(e) {
 		let p2 = progress_for(cmax())
 		update_fill(e.val_fill, max(p1, 0), min(p2, val_p))
 		update_fill(e.range_fill, p1, p2)
+		if (e.tooltip)
+			e.tooltip.text = e.display_val_for(v)
 	}
 
 	// controller
@@ -2335,16 +2337,18 @@ component('x-slider', 'Input', function(e) {
 	e.slider_box.on('pointerdown', function(ev, mx) {
 		e.focus()
 		let r = this.rect()
-		let tt = tooltip()
-		e.input_thumb.add(tt)
+		if (!e.tooltip) {
+			e.tooltip = tooltip()
+			e.input_thumb.add(e.tooltip)
+		} else
+			e.input_thumb.add(e.tooltip)
+		e.tooltip.text = e.display_val_for(e.input_val)
 		function pointermove(ev, mx) {
 			e.set_progress((mx - r.x) / r.w, {input: e})
-			tt.text = e.display_val_for(e.input_val)
-			pr('tt.text set', e.display_val_for(e.input_val))
 		}
 		pointermove(ev, mx)
 		return this.capture_pointer(ev, pointermove, function() {
-			tt.remove()
+			e.tooltip.remove()
 		})
 	})
 
