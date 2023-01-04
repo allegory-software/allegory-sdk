@@ -2740,7 +2740,9 @@ function nav_widget(e) {
 	e.cell_input_val  = (row, col) => e.cell_state(row, fld(col), 'input_val', e.cell_val(row, col))
 	e.cell_errors     = (row, col) => e.cell_state(row, fld(col), 'errors')
 	e.cell_has_errors = (row, col) => { let err = e.cell_errors(row, col); return err && !err.passed; }
-	e.cell_modified   = (row, col) => e.cell_input_val(row, col) !== e.cell_val(row, col)
+	e.cell_modified   = (row, col) => { let field = e.fld(col)
+		return !field.isequal(e.cell_input_val(row, field), e.cell_val(row, field))
+	}
 
 	e.cell_vals = function(row, cols) {
 		let fields = flds(cols)
@@ -2933,7 +2935,7 @@ function nav_widget(e) {
 		let cur_val = e.cell_val(row, field)
 		let errors = e.validate_cell(field, val, row, ev)
 		let invalid = !errors.passed
-		let cell_modified = val !== cur_val
+		let cell_modified = !field.isequal(val, cur_val)
 		let row_modified = cell_modified || cells_modified(row, field)
 
 		// update state fully without firing change events.
@@ -5034,6 +5036,7 @@ function nav_dropdown_widget(e) {
 		empty_text: S('empty_text', 'empty text'),
 		to_num: v => num(v, null),
 		from_num: return_arg,
+		isequal: (a, b) => a === b,
 	}
 
 	all_field_types.validator_not_null = field => (field.not_null && {
@@ -5511,6 +5514,20 @@ function nav_dropdown_widget(e) {
 
 	let tags = obj()
 	field_types.tags = tags
+
+	tags.isequal = function(a, b) {
+		a = words(a)
+		b = words(b)
+		pr(a, b)
+		if (!(isarray(a) && isarray(b)))
+			return a === b
+		if (a.length != b.length)
+			return false
+		for (let i = 0, n = a.length; i < n; i++)
+			if (a[i] !== b[i])
+				return false
+		return true
+	}
 
 	tags.editor = function(opt) {
 		return tagsedit(assign_opt({
