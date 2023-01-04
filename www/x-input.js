@@ -276,6 +276,8 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	e.set_field = nav_changed
 	e.prop('field', {private: true})
 
+	// TODO: this behaves differently with regards to overriding a validator
+	// when a field is already bound vs when it's not!
 	e.add_validator = function(name, t) {
 		if (e._field)
 			e._field.validators.push(t)
