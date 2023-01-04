@@ -133,6 +133,8 @@ publishes:
 	e.display_val_for(v)
 implements:
 	e.do_update([opt])
+uses:
+	e.field_options
 calls:
 	e.do_update_val(val, ev)
 	e.do_update_errors(errors, ev)
@@ -1885,7 +1887,7 @@ component('x-tagsedit', 'Input', function(e) {
 
 	e.class('x-editbox')
 
-	e.field_options = {type: tags}
+	e.field_options = {type: 'tags'}
 
 	val_widget(e)
 	let cons_opt = input_widget(e)
@@ -1946,8 +1948,8 @@ component('x-tagsedit', 'Input', function(e) {
 		}
 
 		if (e.expanded) {
-			e.bubble.content.add(e.tags_box)
-			e.bubble.popup()
+			e.bubble.text = null
+			e.bubble.text = e.tags_box
 		} else {
 			e.focus_box.insert(2, e.tags_box)
 		}
@@ -1973,9 +1975,10 @@ component('x-tagsedit', 'Input', function(e) {
 			expanded = false
 		e.class('expanded', expanded)
 		e.expand_button.switch_class('fa-caret-down', 'fa-caret-up', expanded)
-		if (expanded && !e.bubble)
-			e.bubble = tooltip({classes: 'x-tagsedit-bubble', target: e,
-					side: 'top', align: 'left'})
+		if (expanded && !e.bubble) {
+			e.bubble = tooltip({classes: 'x-tagsedit-bubble', side: 'top', align: 'left'})
+			e.add(e.bubble)
+		}
 		update_tags()
 		if (e.bubble)
 			e.bubble.hidden = !expanded
