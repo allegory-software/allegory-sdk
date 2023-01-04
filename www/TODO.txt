@@ -1,6 +1,6 @@
 BUGS
 ------------------------------------------------------------------------------
-* TAGSEDIT demo
+- add validators on html elements
 * IMAGE upload & download demo
 * PLACEEDIT demo
 * LIST demo
