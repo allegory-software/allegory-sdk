@@ -1,8 +1,8 @@
 BUGS
 ------------------------------------------------------------------------------
-* IMAGE upload & download demo
-* PLACEEDIT demo
 * LIST demo
+* PLACEEDIT demo
+* IMAGE upload & download demo
 * CALENDAR demo
 * DATE_DROPDOWN demo
 * LIST_DROPDOWN demo
