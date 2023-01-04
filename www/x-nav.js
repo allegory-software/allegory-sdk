@@ -447,6 +447,8 @@ server-side properties:
 
 --------------------------------------------------------------------------- */
 
+{
+
 field_types = obj()
 rowset_col_attrs = obj()
 
@@ -554,6 +556,38 @@ function shared_nav(id, opt) {
 }
 }
 
+let bool = v => repl(repl(v, '', true), 'false', false)
+
+let rowset_attr_convert = {
+	can_add_rows    : bool,
+	can_remove_rows : bool,
+	can_change_rows : bool,
+}
+
+let field_attr_convert = {
+	decimals : num,
+	min      : num,
+	max      : num,
+}
+
+let convert_text_attrs = function(t, convert) {
+	for (let k in t) {
+		let v = t[k]
+		if (k in convert)
+			v = convert[k](v)
+		t[k] = v
+	}
+	return t
+}
+
+function parse_field_tag(field_tag) {
+	return convert_text_attrs(field_tag.attrs, field_attr_convert)
+}
+
+let parse_rowset_tag = function(rowset_tag) {
+	return convert_text_attrs(rowset_tag.attrs, rowset_attr_convert)
+}
+
 function nav_widget(e) {
 
 	e.isnav = true
@@ -590,19 +624,12 @@ function nav_widget(e) {
 	if (rowset_tag) {
 		let fields = []
 		let row_text_vals = []
-		e.rowset = rowset_tag.attrs
+		e.rowset = parse_rowset_tag(rowset_tag)
 		e.rowset.fields = fields
 		e.rowset.row_text_vals = row_text_vals
-		function fix_bool(t, k) {
-			if (k in t)
-				t[k] = t[k] != 'false'
-		}
-		fix_bool(e.rowset, 'can_add_rows')
-		fix_bool(e.rowset, 'can_remove_rows')
-		fix_bool(e.rowset, 'can_change_rows')
 		let field_map = obj() // {name->index}
 		for (let field_tag of rowset_tag.$('field')) {
-			let field = field_tag.attrs
+			let field = parse_field_tag(field_tag)
 			let field_index = fields.length
 			if (field.name) {
 				field_map[field.name] = field_index
@@ -617,7 +644,7 @@ function nav_widget(e) {
 	}
 
 	for (let field_tag of e.$('field')) {
-		let t = field_tag.attrs
+		let t = parse_field_tag(field_tag)
 		if (t.name)
 			attr(e, 'html_col_attrs')[t.name] = t
 		else
@@ -5765,3 +5792,5 @@ init_rowset_events = memoize(function() {
 				nav.reload({allow_diff_merge: true, update_ids: a, if_filter: filter})
 	}
 })
+
+}
