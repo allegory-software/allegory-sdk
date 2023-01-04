@@ -568,6 +568,12 @@ let field_attr_convert = {
 	decimals : num,
 	min      : num,
 	max      : num,
+	w        : num,
+	min_w    : num,
+	max_w    : num,
+	not_null : bool,
+	sortable : bool,
+	maxlen   : num,
 }
 
 let convert_text_attrs = function(t, convert) {
