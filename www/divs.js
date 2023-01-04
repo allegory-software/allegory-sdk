@@ -12,7 +12,7 @@
 		[disabled]
 		.popup
 		.modal
-		.modal-dialog
+		.modal-overlay
 
 	Must call on DOM load:
 		init_components()
@@ -2097,7 +2097,7 @@ method(Element, 'modal', function(on) {
 			e.dialog = null
 		}
 	} else if (!e.dialog) {
-		let dialog = div({class: 'modal-dialog'}, e)
+		let dialog = div({class: 'modal-overlay'}, e)
 		e.dialog = dialog
 		e.class('modal')
 		document.body.add(dialog)
