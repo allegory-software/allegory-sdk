@@ -425,7 +425,6 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 component('x-button', 'Input', function(e) {
 
 	row_widget(e, true)
-	focusable_widget(e)
 	editable_widget(e)
 
 	let html_text = unsafe_html(e.html)
@@ -436,6 +435,8 @@ component('x-button', 'Input', function(e) {
 	e.focus_box = div({class: 'x-button-focus-box'}, e.icon_box, e.text_box)
 	e.icon_box.hidden = true
 	e.add(e.focus_box)
+
+	focusable_widget(e, e.focus_box)
 
 	e.prop('href', {store:'var', attr: true})
 	e.set_href = function(s) {
@@ -2269,10 +2270,10 @@ component('x-slider', 'Input', function(e) {
 	e.val_thumb   = div({class: 'x-slider-thumb x-slider-value-thumb'})
 	e.slider_box  = div({class: 'x-slider-box'},
 			e.range_fill, e.val_fill, e.val_thumb, e.input_thumb)
-	e.focus_box   = div({class: 'x-slider-focus-box x-focus-box'}, e.label_box, e.slider_box)
+	e.focus_box   = div({class: 'x-focus-box'}, e.label_box, e.slider_box)
 	e.add(div({class: 'x-linear-form-filler'}), e.focus_box)
 
-	focusable_widget(e, e.focus_box)
+	focusable_widget(e, e.input_thumb)
 
 	// model
 
