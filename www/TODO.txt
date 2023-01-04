@@ -1,6 +1,5 @@
 BUGS
 ------------------------------------------------------------------------------
-- add validators on html elements
 * IMAGE upload & download demo
 * PLACEEDIT demo
 * LIST demo
@@ -18,6 +17,7 @@ BUGS
 
 FEATURES
 ------------------------------------------------------------------------------
+- INPUT widgets add validators on html elements
 - ALL auto-urls
 - ALL inherited props
 	* prop attr: inherits_from: <prop_name>

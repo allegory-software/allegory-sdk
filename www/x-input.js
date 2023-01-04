@@ -276,6 +276,13 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	e.set_field = nav_changed
 	e.prop('field', {private: true})
 
+	e.add_validator = function(name, t) {
+		if (e._field)
+			e._field.validators.push(t)
+		else
+			attr(e, 'field_options')['validator_'+name] = t
+	}
+
 	// model ------------------------------------------------------------------
 
 	e.to_val   = function(v) { return v; }
