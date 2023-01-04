@@ -2,6 +2,18 @@
 
 	divs.css | css reset, divs.js requirements, html inline styling
 
+RESET
+
+	html body table tr td img hr
+
+STATES
+
+	[hidden]         hidden state
+	[disabled]       disabled state
+	.popup           popup positioning
+	.modal           modal dialog
+	.modal-overlay   modal overlay
+
 HTML INLINE STYLING
 
 	[nowrap]         fitted text with ellipsis
@@ -9,6 +21,7 @@ HTML INLINE STYLING
 	[small]          small text
 	[tight]          tight lines
 	[b] [i]          bold, italic
+	[opensans]       set OpenSans font
 
 	[flex]           horizontal flexbox
 	[flexwrap]       horizontal flexbox with auto-wrapping
@@ -16,6 +29,7 @@ HTML INLINE STYLING
 	[stretch]        flex: 1
 
 INCLUDED FONTS
+
 	opensans            OpenSans (regular, italic, bold)
 	opensanscondensed   OpenSans Condensed (regular, italic, bold)
 
@@ -25,7 +39,7 @@ INCLUDED FONTS
 
 * { box-sizing: border-box; }
 
-html, body, table, tr, td, div, img {
+html, body, table, tr, td, img {
 	margin: 0;
 	padding: 0;
 	border: 0;
@@ -53,11 +67,11 @@ body {
 }
 
 img {
-	display: block; /* don't align to surrounding text */
+	display: block; /* don't align to surrounding text, that never made sense */
 	max-width: 100%; /* make shrinkable */
 }
 
-hr {
+hr { /* style hrs with just `color` */
 	border: 0;
 	border-top-width: 1px;
 	border-top-style: solid;
@@ -82,7 +96,7 @@ hr {
 	position: fixed !important; /* hack to escape parents' `overflow: hidden` */
 }
 
-.modal-dialog {
+.modal-overlay {
 	position: fixed;
 	left: 0;
 	top: 0;
@@ -137,4 +151,9 @@ hr {
 	font-family: "opensanscondensed";
 	font-weight: bold;
 	src: url("/opensanscondensed-bold.woff2");
+}
+
+[opensans] {
+	font-family: opensans, Arial, sans-serif;
+	--x-grid-cell-baseline-adjust-ff: 0;
 }
