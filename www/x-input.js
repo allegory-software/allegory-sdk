@@ -151,6 +151,12 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 	e.isinput = true // auto-focused when tabs items are changed.
 
+	let field_tag = e.$1('field')
+	if (field_tag) {
+		e.html_field_options = parse_field_tag(field_tag)
+		field_tag.remove()
+	}
+
 	// nav dynamic binding ----------------------------------------------------
 
 	e.can_actually_change_val = function() {
@@ -223,8 +229,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 						bind_ext_field(true)
 					}
 				} else { // standalone
+					let field_opt = assign_opt({owner: e},
+						e.field_options, e.html_field_options, e.field)
 					e._nav = global_val_nav()
-					let field_opt = assign_opt({owner: e}, e.field_options, e.field)
 					e._field = e._nav.add_field(field_opt)
 					e._col = e._field.name
 					bind_global_nav(true)
@@ -2211,8 +2218,7 @@ component('x-placeedit', 'Input', function(e) {
 	e.from_text = function(s) { return s ? s : null }
 	e.to_text = function(v) { return (isobject(v) ? v.description : v) || '' }
 
-	e.override('do_update_val', function(inherited, v, ev) {
-		inherited.call(this, v, ev)
+	e.do_after('do_update_val', function(v, ev) {
 		let pin = e._field && e._field.format_pin(v)
 		e.pin_ct.set(pin)
 		if (e.val && !e.place_id)
@@ -2272,8 +2278,8 @@ component('x-slider', 'Input', function(e) {
 	let cons_opt = input_widget(e)
 	e.class('x-editbox')
 
-	e.prop('from', {default: 0})
-	e.prop('to'  , {default: 1})
+	e.prop('from', {type: 'number', default: 0})
+	e.prop('to'  , {type: 'number', default: 1})
 
 	e.label_box   = div({class: 'x-editbox-label'})
 	e.val_fill    = div({class: 'x-slider-fill x-slider-value-fill'})
@@ -2343,6 +2349,12 @@ component('x-slider', 'Input', function(e) {
 		if (e.tooltip)
 			e.tooltip.text = e.display_val_for(v)
 	}
+
+	e.do_after('do_update_errors', function() {
+		if (!e.error_tooltip) return
+		e.error_tooltip.target = e.input_thumb
+		e.error_tooltip.align = 'center'
+	})
 
 	// controller
 
