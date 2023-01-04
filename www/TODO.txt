@@ -1,6 +1,5 @@
 BUGS
 ------------------------------------------------------------------------------
-* SLIDER demo
 * TAGSEDIT demo
 * IMAGE upload & download demo
 * PLACEEDIT demo
