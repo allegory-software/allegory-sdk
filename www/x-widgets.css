@@ -11,7 +11,7 @@
 	/*
 	NOTE: in order to valign the text of the grid cell with its inline editor,
 	`grid-cell-baseline` must be set to match the baseline set implicitly by
-	`input-line-height`. Don't try to vcenter the text on the cell with these
+	`grid-cell-line-height`. Don't try to vcenter the text on the cell with these
 	two parameters, use `padding-y-input` for that.
 	NOTE: Firefox won't set a line height lower than the font allows on <input>!
 	*/
