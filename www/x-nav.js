@@ -16,7 +16,7 @@ field types (see "field type definitions" at the end):
 	button place url phone email
 	date time timeofday timeofday_in_seconds duration
 	col
-	secret_key public_key  private_key
+	secret_key public_key private_key
 
 typing:
 	isnav: t
@@ -44,10 +44,10 @@ rowset attributes:
 
 sources of field attributes, in order of precedence:
 
-e.set_prop('col.COL.ATTR', VAL)
+	e.set_prop('col.COL.ATTR', VAL)
 	<field name=COL ATTR=VAL>
 	e.col_attrs = {COL: {ATTR: VAL}}
-	window.rowset_col_attrs['ROWSET_NAME.COL'] = {ATTR: VAL}
+	window.rowset_col['ROWSET.COL'] = {ATTR: VAL}
 	e.rowset.fields = [{ATTR: VAL},...]
 	window.field_types[TYPE] = {ATTR: VAL}
 	window.all_field_types[ATTR] = VAL
@@ -88,7 +88,7 @@ field attributes:
 	validation:
 		not_null       : don't allow null (false).
 		validator_*    : f(field) -> {validate: f(v) -> true|false, message: text}
-		convert        : f(v) -> v
+		convert        : f(v, field, row) -> v
 		maxlen         : max text length (256).
 
 		min            : min value (0).
@@ -129,7 +129,7 @@ field attributes:
 	sorting:
 		sortable       : allow sorting (true).
 		compare_types  : f(v1, v2) -> -1|0|1  (for sorting)
-		compare_values : f(v1, v2) -> -1|0|1  (for sorting)
+		compare_vals   : f(v1, v2) -> -1|0|1  (for sorting)
 
 cell attributes:
 	row[i]             : cell value as last seen on the server (always valid).
@@ -449,8 +449,8 @@ server-side properties:
 
 {
 
-field_types = obj()
-rowset_col_attrs = obj()
+field_types = obj() // {TYPE->{k:v}}
+rowset_col = obj() // {ROWSET.COL->{k:v}}
 
 function map_keys_different(m1, m2) {
 	if (m1.size != m2.size)
@@ -811,7 +811,7 @@ function nav_widget(e) {
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
 		let ht = e.html_col_attrs && e.html_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
-		let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+name]
+		let rt = e.rowset_name && rowset_col[e.rowset_name+'.'+name]
 		let type = rt && rt.type || ht && ht.type || ct && ct.type || f.type
 		let tt = field_types[type]
 		let att = all_field_types
@@ -831,7 +831,7 @@ function nav_widget(e) {
 
 			let ht = e.html_col_attrs && e.html_col_attrs[name]
 			let ct = e.col_attrs && e.col_attrs[field.name]
-			let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+field.name]
+			let rt = e.rowset_name && rowset_col[e.rowset_name+'.'+field.name]
 			let type = f.type || (ct && ct.type) || (rt && rt.type)
 			let tt = type && field_types[type]
 			let att = all_field_types
@@ -2363,7 +2363,7 @@ function nav_widget(e) {
 		return v1 !== v2 ? (v1 < v2 ? -1 : 1) : 0
 	}
 
-	function field_comparator(field) {
+	function cell_comparator(field) {
 
 		let compare_types = field.compare_types  || e.compare_types
 		let compare_vals = field.compare_vals || e.compare_vals
@@ -2373,9 +2373,9 @@ function nav_widget(e) {
 		return function(row1, row2) {
 			let v1 = row1[input_val_index]; if (v1 === undefined) v1 = row1[val_index]
 			let v2 = row2[input_val_index]; if (v2 === undefined) v2 = row2[val_index]
-			let r = compare_types(v1, v2)
+			let r = compare_types(v1, v2, field)
 			if (r) return r
-			return compare_vals(v1, v2)
+			return compare_vals(v1, v2, field)
 		}
 	}
 
@@ -2393,7 +2393,7 @@ function nav_widget(e) {
 		let s = []
 		let cmps = []
 		for (let [field, dir] of order_by) {
-			cmps.push(field_comparator(field))
+			cmps.push(cell_comparator(field))
 			let r = dir == 'desc' ? -1 : 1
 			let errors_i = cell_state_val_index('errors', field)
 			// compare vals using the value comparator
@@ -2773,8 +2773,10 @@ function nav_widget(e) {
 	e.cell_input_val  = (row, col) => e.cell_state(row, fld(col), 'input_val', e.cell_val(row, col))
 	e.cell_errors     = (row, col) => e.cell_state(row, fld(col), 'errors')
 	e.cell_has_errors = (row, col) => { let err = e.cell_errors(row, col); return err && !err.passed; }
-	e.cell_modified   = (row, col) => { let field = e.fld(col)
-		return !field.isequal(e.cell_input_val(row, field), e.cell_val(row, field))
+	e.cell_modified   = (row, col) => {
+		let field = e.fld(col)
+		let compare_vals = field.compare_vals || e.compare_vals
+		return compare_vals(e.cell_input_val(row, field), e.cell_val(row, field), field) != 0
 	}
 
 	e.cell_vals = function(row, cols) {
@@ -2968,7 +2970,8 @@ function nav_widget(e) {
 		let cur_val = e.cell_val(row, field)
 		let errors = e.validate_cell(field, val, row, ev)
 		let invalid = !errors.passed
-		let cell_modified = !field.isequal(val, cur_val)
+		let compare_vals = field.compare_vals || e.compare_vals
+		let cell_modified = compare_vals(val, cur_val, field) != 0
 		let row_modified = cell_modified || cells_modified(row, field)
 
 		// update state fully without firing change events.
@@ -5069,7 +5072,6 @@ function nav_dropdown_widget(e) {
 		empty_text: S('empty_text', 'empty text'),
 		to_num: v => num(v, null),
 		from_num: return_arg,
-		isequal: (a, b) => a === b,
 	}
 
 	all_field_types.validator_not_null = field => (field.not_null && {
@@ -5548,19 +5550,7 @@ function nav_dropdown_widget(e) {
 	let tags = obj()
 	field_types.tags = tags
 
-	tags.isequal = function(a, b) {
-		a = words(a)
-		b = words(b)
-		pr(a, b)
-		if (!(isarray(a) && isarray(b)))
-			return a === b
-		if (a.length != b.length)
-			return false
-		for (let i = 0, n = a.length; i < n; i++)
-			if (a[i] !== b[i])
-				return false
-		return true
-	}
+	tags.tags_format = 'words' // words | array
 
 	tags.editor = function(opt) {
 		return tagsedit(assign_opt({
