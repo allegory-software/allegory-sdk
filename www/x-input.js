@@ -1920,8 +1920,6 @@ component('x-tagsedit', 'Input', function(e) {
 	e.focus_box = div({class: 'x-focus-box'}, e.input, e.label_box, e.tags_box, e.expand_button)
 	e.add(e.focus_box)
 
-	e.prop('format', {type: 'enum', enum_values: 'words json', default: 'json', attr: true})
-
 	function input_val_slice() {
 		let v = e.input_val
 		v = isstr(v) ? v.words() : v
@@ -1930,7 +1928,7 @@ component('x-tagsedit', 'Input', function(e) {
 
 	function set_val(v, ev) {
 		v = v.remove_duplicates()
-		v = e.format == 'words' ? v.join(' ') : v
+		v = e._field.tags_format == 'words' ? v.join(' ') : v
 		v = v.length ? v : null
 		e.set_val(v, ev)
 	}
