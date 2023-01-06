@@ -134,7 +134,8 @@ publishes:
 implements:
 	e.do_update([opt])
 uses:
-	e.field_options
+	e.field              instance field attrs
+	e.field_attrs        class field attrs
 calls:
 	e.do_update_val(val, ev)
 	e.do_update_errors(errors, ev)
@@ -151,9 +152,9 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 	e.isinput = true // auto-focused when tabs items are changed.
 
-	let field_tag = e.$1('field')
+	let field_tag = e.$1(':scope>field')
 	if (field_tag) {
-		e.html_field_options = parse_field_tag(field_tag)
+		e.html_field_attrs = parse_field_tag(field_tag)
 		field_tag.remove()
 	}
 
@@ -230,7 +231,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 					}
 				} else { // standalone
 					let field_opt = assign_opt({owner: e},
-						e.field_options, e.html_field_options, e.field)
+						e.field_attrs, e.html_field_attrs, e.field)
 					e._nav = global_val_nav()
 					e._field = e._nav.add_field(field_opt)
 					e._col = e._field.name
@@ -289,7 +290,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		if (e._field)
 			e._field.validators.push(t)
 		else
-			attr(e, 'field_options')['validator_'+name] = t
+			attr(e, 'field_attrs')['validator_'+name] = t
 	}
 
 	// model ------------------------------------------------------------------
@@ -1776,7 +1777,7 @@ component('x-passedit', 'Input', function(e) {
 component('x-numedit', 'Input', function(e) {
 
 	e.props.align = {default: 'right'}
-	e.field_options = {type: 'number'}
+	e.field_attrs = {type: 'number'}
 
 	let cons_opt = editbox_widget(e)
 
@@ -1903,7 +1904,7 @@ component('x-tagsedit', 'Input', function(e) {
 
 	e.class('x-editbox')
 
-	e.field_options = {type: 'tags'}
+	e.field_attrs = {type: 'tags'}
 
 	val_widget(e)
 	let cons_opt = input_widget(e)
@@ -2175,7 +2176,7 @@ component('x-tagsedit', 'Input', function(e) {
 
 component('x-placeedit', 'Input', function(e) {
 
-	e._field_options = {type: 'place'}
+	e.field_attrs = {type: 'place'}
 
 	let cons_opt = editbox_widget(e)
 
@@ -2245,7 +2246,7 @@ component('x-placeedit', 'Input', function(e) {
 
 component('x-googlemaps', 'Input', function(e) {
 
-	e.field_options = {type: 'place'}
+	e.field_attrs = {type: 'place'}
 
 	val_widget(e)
 
@@ -2270,7 +2271,7 @@ component('x-googlemaps', 'Input', function(e) {
 
 component('x-slider', 'Input', function(e) {
 
-	e.field_options = {type: 'number', decimals: 1}
+	e.field_attrs = {type: 'number', decimals: 1}
 
 	val_widget(e)
 	let cons_opt = input_widget(e)
