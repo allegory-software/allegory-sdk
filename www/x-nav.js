@@ -45,9 +45,9 @@ rowset attributes:
 sources of field attributes, in order of precedence:
 
 	e.set_prop('col.COL.ATTR', VAL)
-	<field name=COL ATTR=VAL>
+	<col-attrs for=COL ATTR=VAL>
 	e.col_attrs = {COL: {ATTR: VAL}}
-	window.rowset_col['ROWSET.COL'] = {ATTR: VAL}
+	window.rowset_col_attrs['ROWSET.COL'] = {ATTR: VAL}
 	e.rowset.fields = [{ATTR: VAL},...]
 	window.field_types[TYPE] = {ATTR: VAL}
 	window.all_field_types[ATTR] = VAL
@@ -135,6 +135,7 @@ cell attributes:
 	row[i]             : cell value as last seen on the server (always valid).
 	row[input_val_i]   : modified cell value, valid or not.
 	row[errors_i]      : [err1,...]; .passed is true if input value is valid.
+	row[#all_fields]   : row index.
 
 row attributes:
 	row.focusable      : row can be focused (true).
@@ -450,7 +451,7 @@ server-side properties:
 {
 
 field_types = obj() // {TYPE->{k:v}}
-rowset_col = obj() // {ROWSET.COL->{k:v}}
+rowset_col_attrs = obj() // {ROWSET.COL->{k:v}}
 
 function map_keys_different(m1, m2) {
 	if (m1.size != m2.size)
@@ -626,7 +627,7 @@ function nav_widget(e) {
 
 	// init -------------------------------------------------------------------
 
-	let rowset_tag = e.$1('rowset')
+	let rowset_tag = e.$1(':scope>rowset')
 	if (rowset_tag) {
 		let fields = []
 		let row_text_vals = []
@@ -634,7 +635,7 @@ function nav_widget(e) {
 		e.rowset.fields = fields
 		e.rowset.row_text_vals = row_text_vals
 		let field_map = obj() // {name->index}
-		for (let field_tag of rowset_tag.$('field')) {
+		for (let field_tag of rowset_tag.$(':scope>field')) {
 			let field = parse_field_tag(field_tag)
 			let field_index = fields.length
 			if (field.name) {
@@ -644,17 +645,19 @@ function nav_widget(e) {
 				warn('field name missing')
 			}
 		}
-		for (let row_tag of rowset_tag.$('row'))
+		for (let row_tag of rowset_tag.$(':scope>row'))
 			row_text_vals.push(row_tag.attrs)
 		rowset_tag.remove()
 	}
 
-	for (let field_tag of e.$('field')) {
+	for (let field_tag of e.$(':scope>col-attrs')) {
 		let t = parse_field_tag(field_tag)
-		if (t.name)
-			attr(e, 'html_col_attrs')[t.name] = t
+		let col = t['for']
+		delete t['for']
+		if (col)
+			attr(e, 'html_col_attrs')[col] = t
 		else
-			warn('field name missing')
+			warn('<col-attrs for=COL ...> COL missing')
 		field_tag.remove()
 	}
 
@@ -811,7 +814,7 @@ function nav_widget(e) {
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
 		let ht = e.html_col_attrs && e.html_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
-		let rt = e.rowset_name && rowset_col[e.rowset_name+'.'+name]
+		let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+name]
 		let type = rt && rt.type || ht && ht.type || ct && ct.type || f.type
 		let tt = field_types[type]
 		let att = all_field_types
@@ -831,7 +834,7 @@ function nav_widget(e) {
 
 			let ht = e.html_col_attrs && e.html_col_attrs[name]
 			let ct = e.col_attrs && e.col_attrs[field.name]
-			let rt = e.rowset_name && rowset_col[e.rowset_name+'.'+field.name]
+			let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+field.name]
 			let type = f.type || (ct && ct.type) || (rt && rt.type)
 			let tt = type && field_types[type]
 			let att = all_field_types
@@ -899,7 +902,7 @@ function nav_widget(e) {
 			let row = e.all_rows[ri]
 			// append a val slot to the row.
 			row.splice(fn, 0, null)
-			// insert a slot into all cell_state sub-arrays of the row.
+			// append a slot into all cell_state sub-arrays of the row.
 			fn++
 			for (let i = 2 * fn; i < row.length; i += fn)
 				row.splice(i, 0, null)
@@ -2395,7 +2398,6 @@ function nav_widget(e) {
 		for (let [field, dir] of order_by) {
 			cmps.push(cell_comparator(field))
 			let r = dir == 'desc' ? -1 : 1
-			let errors_i = cell_state_val_index('errors', field)
 			// compare vals using the value comparator
 			s.push('{')
 			s.push('let cmp = cmps['+(cmps.length-1)+']')
@@ -2669,7 +2671,11 @@ function nav_widget(e) {
 		return i
 	}
 
-	function cell_state_val_index(key, field) {
+	// row layout: [f1_val, f2_val, ..., row_index, f1_k1, f2_k1, ..., f1_k2, f2_k2, ...].
+	// a row grows dynamically for every new key that needs to be allocated:
+	//	value slots for that key are added the end of the row for all fields.
+	// the slot at `e.all_fields.length` is reserved for storing the row index.
+	function cell_state_val_index(key, field, allocate) {
 		if (key == 'val')
 			return field.val_index
 		let fn = e.all_fields.length
@@ -2743,7 +2749,7 @@ function nav_widget(e) {
 
 	e.set_cell_state = function(field, key, val, default_val) {
 		assert(row)
-		let vi = cell_state_val_index(key, field)
+		let vi = cell_state_val_index(key, field, true)
 		let old_val = row[vi]
 		if (old_val === undefined)
 			old_val = default_val

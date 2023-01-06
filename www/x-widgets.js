@@ -570,7 +570,7 @@ publishes:
 NOTE: The `disabled` state is a concerted effort located in multiple places:
 	- mouse events are blocked in divs.js.
 	- forcing the default cursor on the element and its children is done in css.
-	- showing the element with 50% transparency is done in css.
+	- showing the element grayed out with 50% transparency is done in css.
 	- keyboard focusing is disabled in focusable_widget().
 
 NOTE: `:hover` and `:active` still apply to a disabled widget so make sure
