@@ -61,6 +61,7 @@ STRINGS
 	s.ends(s)
 	s.upper()
 	s.lower()
+	s.len
 	s.num([z])
 	s.display_name()
 	s.words() -> a
@@ -82,6 +83,7 @@ ARRAYS
 	a.remove_value(v) -> i
 	a.remove_values(cond)
 	a.last
+	a.len
 	a.binsearch(v, cmp, i1, i2)
 	a.each(f)
 	a.tokeys([v]) -> t
@@ -388,6 +390,8 @@ alias(String, 'ends'  , 'endsWith')
 alias(String, 'upper' , 'toUpperCase')
 alias(String, 'lower' , 'toLowerCase')
 
+property(String, 'len', function() { return this.length })
+
 String.prototype.num = function(z) {
 	return num(this, z)
 }
@@ -562,6 +566,8 @@ method(Array, 'equals', function(a, i0, i1) {
 			return false
 	return true
 })
+
+property(Array, 'len', function() { return this.length })
 
 // binary search for an insert position that keeps the array sorted.
 // using '<' gives the first insert position, while '<=' gives the last.
