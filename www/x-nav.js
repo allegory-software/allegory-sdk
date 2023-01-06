@@ -2662,9 +2662,9 @@ function nav_widget(e) {
 	let next_key_index = 0
 	let key_index = obj() // {key->i}
 
-	function cell_state_key_index(key) {
+	function cell_state_key_index(key, allocate) {
 		let i = key_index[key]
-		if (i == null) {
+		if (i == null && allocate) {
 			i = next_key_index++
 			key_index[key] = i
 		}
@@ -2679,7 +2679,7 @@ function nav_widget(e) {
 		if (key == 'val')
 			return field.val_index
 		let fn = e.all_fields.length
-		return fn + 1 + cell_state_key_index(key) * fn + field.val_index
+		return fn + 1 + cell_state_key_index(key, allocate) * fn + field.val_index
 	}
 
 	e.cell_state = function(row, field, key, default_val) {
