@@ -2678,6 +2678,7 @@ function css_selector_specificity(s0) {
 			return next()
 		}
 		if (match(/^:not\(/  )) { cs.push(0); return next() }
+		if (match(/^:has\(/  )) { cs.push(0); return next() }
 		if (match(/^:where\(/)) { if (!z) z = cs.len; cs.push(0); return next() }
 		if (match(/^,/       )) { maxn = max(maxn, n); n = 0; return next() }
 		if (match(/^\[[^\]]*\]/) || match(/^[\.:#]?[:a-zA-Z\-_][a-zA-Z0-9\-_]*/)) {
