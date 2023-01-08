@@ -166,7 +166,7 @@ wwwfile['_inline.html'] = function()
 end
 
 cssfile[[
-divs.css
+styling.css
 ]]
 
 jsfile[[

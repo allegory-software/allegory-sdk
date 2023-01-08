@@ -17,7 +17,7 @@
 <script src="../../www/ace/ace.js"></script>
 
 <link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
-<link rel="stylesheet" type="text/css" href="../../www/divs.css">
+<link rel="stylesheet" type="text/css" href="../../www/styling.css">
 <link rel="stylesheet" type="text/css" href="../../www/x-widgets.css">
 
 <style>
@@ -195,6 +195,7 @@ on_dom_load(function() {
 	<p>
 		<x-button id=wasup_button>Wasup?</x-button>, says the button.
 		<x-button danger>Don't do it Jonny!</x-button>, says another.
+		<x-button icon="fa fa-recycle" bare></x-button>
 	</p>
 	<p>
 		<x-button primary>Click me!</x-button>
@@ -671,7 +672,6 @@ main.add(gmap)
 <!--------------------------------------------------------------------------->
 
 <template id=listbox_demo>
-<div id=main></div>
 <script run>
 
 lb = listbox({
@@ -703,7 +703,7 @@ sb = select_button({
 	val: 'One',
 })
 
-main.add(lb, hlb, div({}, html('<h3>select_button</h3>'), sb))
+result.add(lb, hlb, div({}, html('<h3>select_button</h3>'), sb))
 
 </script>
 </template>
@@ -822,7 +822,7 @@ main.add(g)
 
 <template id=html_grid_demo>
 <x-grid>
-	<field name=id type=number></field>
+	<col-attrs for=id type=number></col-attrs>
 	<rowset pk=id can_change_rows=false>
 		<field name=id   ></field>
 		<field name=name ></field>
@@ -1173,11 +1173,10 @@ main.add(grid({w: 200, h: 200, rowset: r}))
 						[year(time(), 2), 'Croatia', 'Energy'        ,  50],
 					],
 				},
-				h: 200,
 			})
 			this.parent.on_bind(function(on) {
 				if (on) {
-					this.items = [g, this.items[1]]
+					this.items = [g]
 				}
 			})
 		</script>
