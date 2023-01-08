@@ -1,0 +1,347 @@
+/*
+	Functional CSS library.
+	Written by Cosmin Apreutesei. Public Domain.
+
+	TEXT        nowrap gray small tight bold italic [b] [i]
+	POSITION    rel abs
+	FLEXBOX     h h-r h-r-c h-c h-sb h-l-c h-c-c h-c-b h-c-t
+		         v v-b v-b-c v-c v-sb v-t-c v-c-c v-c-r v-c-l
+					S
+	GRID        grid
+	SIZING
+	BORDERS      {b bl br bt bb}[0 2 4]
+	PADDINGS     {p pl pr pt pb px py}[0 s 2 4]
+	MARGINS      {m ml mr mt mb mx my}[0 s 2 4] ml-auto mr-auto mx-auto
+	OVERFLOW    scroll vscroll hscroll clip clipx clipy
+	COLORS
+	FONTS       opensans
+
+*/
+
+:root, .theme-light, .theme-dark .theme-inverted {
+
+	--fg                     : #000;
+	--fg-inverted            : #fff;  /* text on inverted backgrounds */
+	--fg-p                   : #444;  /* multiline text on normal backgrounds */
+	--fg-gray                : #999;
+	--fg-disabled            : #00000066;  /* faded text on light bg */
+	--fg-disabled-inverted   : #ffffff66;  /* faded text on dark colored bg with the same color as bg */
+
+	--bg                     : #fff;
+	--bg-faint               : #eee;
+
+	--border                 : #00000033;  /* normal borders */
+	--border-hover           : #666;
+
+	--x-shadow-menu            :  2px  2px  2px      #000000aa;
+	--x-shadow-popup           :  2px  2px  9px      #00000044;
+	--x-shadow-button          :  0px  0px  8px  0px #00000011;
+	--x-shadow-dialog          :  2px  5px 10px      #00000088;
+	--x-shadow-toolbox         :  1px  1px  4px      #000000aa;
+	--x-shadow-slider-thumb    :  1px  1px  2px      #000000aa;
+	--x-shadow-pressed         : inset 0 0.15em 0.3em #1b1f2333;
+
+	--space-s: .25em;
+	--space-1:  .5em;
+	--space-2: .75em;
+	--space-4:   1em;
+
+	color            : var(--fg);
+	background-color : var(--bg);
+
+}
+
+.theme-dark, .theme-light .theme-inverted {
+
+	--fg                     : #fff;
+	--fg-inverted            : #fff;
+	--fg-p                   : #bbb;
+	--fg-disabled            : #ffffff66;
+	--fg-disabled-inverted   : var(--fg-disabled);
+
+	--bg                     : #0d1117;
+	--bg-faint               : #333;
+
+	--border         : #ffffff22;
+	--border-hover   : #ffffff44;
+
+	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
+
+}
+
+.theme-large {
+	font-size: 16px;
+}
+
+.theme-small {
+	font-size: 12px;
+}
+
+/* RESET ------------------------------------------------------------------ */
+
+* { box-sizing: border-box; }
+
+html, body, table, tr, td, img {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+/* let `body` do the scrolling instead of `html` so that modals can cover the scrollbars */
+html {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+body {
+	width: 100%;
+	height: 100%;
+
+	/*
+	For document-style UIs use `overflow-y: scroll` to avoid the annoying
+	horizontal shifting of a centered page that happens between pages that fit
+	the height of the window and those that don't. For split-screen-style UIs
+	use `overflow-y: auto` or `hidden` instead because they use full-screen
+	splitters that do the scrolling instead so the body itself should never
+	have to scroll. We use `auto` by default to detect content overflow bugs.
+	*/
+	overflow: auto;
+	/* overflow-y: scroll; */
+
+	font-family: arial, sans-serif;
+	font-size: 13px;
+}
+
+img {
+	display: block; /* don't align to surrounding text, that never made sense */
+	max-width: 100%; /* make shrinkable */
+}
+
+hr { /* style hrs with just `color` */
+	border: 0;
+	border-top-width: 1px;
+	border-top-style: solid;
+	color: var(--border);
+}
+
+a, a:visited {
+	color: inherit;
+}
+
+p {
+	color: var(--fg-p);
+}
+
+/* TEXT ------------------------------------------------------------------- */
+
+[nowrap], .nowrap {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+[gray], .gray   { color: var(--fg-gray); }
+[small], .small { font-size: 95%; }
+[tight], .tight { line-height: 130%; }
+[b], .bold      { font-weight: bold; }
+[b], .italic    { font-style: italic; }
+
+/* POSITION --------------------------------------------------------------- */
+
+.rel { position: relative; }
+.abs { position: absolute; }
+
+/* ALIGN: FLEXBOX --------------------------------------------------------- */
+
+.h     { display: flex; }
+.h-r   { display: flex; justify-content: flex-end; }
+.h-r-c { display: flex; justify-content: flex-end; align-items: center; }
+.h-c   { display: flex; justify-content: center; }
+.h-sb  { display: flex; justify-content: space-between; }
+.h-l-c { display: flex; align-items: center; }
+.h-c-c { display: flex; justify-content: center; align-items: center; }
+.h-c-b { display: flex; justify-content: center; align-items: flex-end; }
+.h-c-t { display: flex; justify-content: center; align-items: flex-start; }
+
+.v     { display: flex; flex-flow: column; }
+.v-b   { display: flex; flex-flow: column; justify-content: flex-end; }
+.v-b-c { display: flex; flex-flow: column; justify-content: flex-end; align-items: center; }
+.v-c   { display: flex; flex-flow: column; justify-content: center; }
+.v-sb  { display: flex; flex-flow: column; justify-content: space-between; }
+.v-t-c { display: flex; flex-flow: column; align-items: center; }
+.v-c-c { display: flex; flex-flow: column; justify-content: center; align-items: center; }
+.v-c-r { display: flex; flex-flow: column; justify-content: center; }
+.v-c-l { display: flex; flex-flow: column; justify-content: center; }
+
+.S     { flex: 1; }
+
+/* ALIGN: GRID ------------------------------------------------------------ */
+
+.grid { display: grid; }
+
+/* SIZING ----------------------------------------------------------------- */
+
+.h200 { height: 200px; }
+.v200 { width : 200px; }
+
+/* BORDERS ---------------------------------------------------------------- */
+
+.b0 { border        : 0; }
+.b  { border        : 1px solid var(--border); }
+.b2 { border        : 2px solid var(--border); }
+.b4 { border        : 4px solid var(--border); }
+.bl { border-left   : 1px solid var(--border); }
+.br { border-right  : 1px solid var(--border); }
+.bt { border-top    : 1px solid var(--border); }
+.bb { border-bottom : 1px solid var(--border); }
+
+.dotted  { border-style: dotted; }
+.dashed  { border-style: dashed; }
+
+.ros   { border-radius: var(--space-s); }
+.ro    { border-radius: var(--space-1); }
+.ro2   { border-radius: var(--space-2); }
+.ro4   { border-radius: var(--space-4); }
+.round { border-radius: 9999px; }
+
+/* PADDINGS --------------------------------------------------------------- */
+
+.p0  { padding        : 0 }
+.pt0 { padding-top    : 0 }
+.pr0 { padding-right  : 0 }
+.pb0 { padding-bottom : 0 }
+.pl0 { padding-left   : 0 }
+.px0 { padding-left   : 0; padding-right  : 0 }
+.py0 { padding-top    : 0; padding-bottom : 0 }
+
+.ps  { padding:        var(--space-s) }
+.pts { padding-top:    var(--space-s) }
+.prs { padding-right:  var(--space-s) }
+.pbs { padding-bottom: var(--space-s) }
+.pls { padding-left:   var(--space-s) }
+.pys { padding-top:    var(--space-s); padding-bottom: var(--space-s) }
+.pxs { padding-left:   var(--space-s); padding-right:  var(--space-s) }
+
+.p   { padding:        var(--space-1) }
+.pt  { padding-top:    var(--space-1) }
+.pr  { padding-right:  var(--space-1) }
+.pb  { padding-bottom: var(--space-1) }
+.pl  { padding-left:   var(--space-1) }
+.py  { padding-top:    var(--space-1); padding-bottom: var(--space-1) }
+.px  { padding-left:   var(--space-1); padding-right:  var(--space-1) }
+
+.p2  { padding:        var(--space-2) }
+.pt2 { padding-top:    var(--space-2) }
+.pr2 { padding-right:  var(--space-2) }
+.pb2 { padding-bottom: var(--space-2) }
+.pl2 { padding-left:   var(--space-2) }
+.py2 { padding-top:    var(--space-2); padding-bottom: var(--space-2) }
+.px2 { padding-left:   var(--space-2); padding-right:  var(--space-2) }
+
+.p4  { padding:        var(--space-4) }
+.pt4 { padding-top:    var(--space-4) }
+.pr4 { padding-right:  var(--space-4) }
+.pb4 { padding-bottom: var(--space-4) }
+.pl4 { padding-left:   var(--space-4) }
+.py4 { padding-top:    var(--space-4); padding-bottom: var(--space-4) }
+.px4 { padding-left:   var(--space-4); padding-right:  var(--space-4) }
+
+/* MARGINS ---------------------------------------------------------------- */
+
+.m0  { margin:        0 }
+.mt0 { margin-top:    0 }
+.mr0 { margin-right:  0 }
+.mb0 { margin-bottom: 0 }
+.ml0 { margin-left:   0 }
+.mx0 { margin-left:   0; margin-right:  0 }
+.my0 { margin-top:    0; margin-bottom: 0 }
+
+.ms  { margin:        var(--space-s) }
+.mts { margin-top:    var(--space-s) }
+.mrs { margin-right:  var(--space-s) }
+.mbs { margin-bottom: var(--space-s) }
+.mls { margin-left:   var(--space-s) }
+.mxs { margin-left:   var(--space-s); margin-right:  var(--space-s) }
+.mys { margin-top:    var(--space-s); margin-bottom: var(--space-s) }
+
+.m  { margin:        var(--space-1) }
+.mt { margin-top:    var(--space-1) }
+.mr { margin-right:  var(--space-1) }
+.mb { margin-bottom: var(--space-1) }
+.ml { margin-left:   var(--space-1) }
+.mx { margin-left:   var(--space-1); margin-right:  var(--space-1) }
+.my { margin-top:    var(--space-1); margin-bottom: var(--space-1) }
+
+.m2  { margin:        var(--space-2) }
+.mt2 { margin-top:    var(--space-2) }
+.mr2 { margin-right:  var(--space-2) }
+.mb2 { margin-bottom: var(--space-2) }
+.ml2 { margin-left:   var(--space-2) }
+.mx2 { margin-left:   var(--space-2); margin-right:  var(--space-2) }
+.my2 { margin-top:    var(--space-2); margin-bottom: var(--space-2) }
+
+.m4  { margin:        var(--space-4) }
+.mt4 { margin-top:    var(--space-4) }
+.mr4 { margin-right:  var(--space-4) }
+.mb4 { margin-bottom: var(--space-4) }
+.ml4 { margin-left:   var(--space-4) }
+.mx4 { margin-left:   var(--space-4); margin-right:  var(--space-4) }
+.my4 { margin-top:    var(--space-4); margin-bottom: var(--space-4) }
+
+.ml-auto { margin-left: auto }
+.mr-auto { margin-right: auto }
+.mx-auto { margin-left: auto; margin-right: auto; }
+
+/* OVERFLOW --------------------------------------------------------------- */
+
+.vscroll   { overflow-y: scroll; }
+.hscroll   { overflow-x: scroll; }
+.scroll    { overflow: scroll; }
+.clip      { overflow: hidden; min-width: 0; min-height: 0; }
+.clipx     { overflow-x: hidden; min-width : 0; }
+.clipy     { overflow-y: hidden; min-height: 0; }
+
+/* BACKGROUNDS ------------------------------------------------------------ */
+
+.bg { background: var(--bg-faint); }
+
+/* COLORS ----------------------------------------------------------------- */
+
+.dark  { color: ; background: ; }
+.light { color: ; background: ; }
+
+/* CURSORS ---------------------------------------------------------------- */
+
+.cursor-hand { cursor: pointer; }
+.cursor-grab { cursor: pointer; }
+
+/* FONTS ------------------------------------------------------------------ */
+
+@font-face {
+	font-family: "opensans";
+	src: url("/opensans-regular.woff2");
+}
+
+@font-face {
+	font-family: "opensans";
+	font-weight: bold;
+	src: url("/opensans-600.woff2");
+}
+
+@font-face {
+	font-family: "opensanscondensed";
+	src: url("/opensanscondensed-light.woff2");
+}
+
+@font-face {
+	font-family: "opensanscondensed";
+	font-weight: bold;
+	src: url("/opensanscondensed-bold.woff2");
+}
+
+.opensans {
+	font-family: opensans, Arial, sans-serif;
+	--x-grid-cell-baseline-adjust-ff: 0;
+}
+

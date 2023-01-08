@@ -201,6 +201,8 @@
 		css_report_specificity(file, max_spec)
 	composable css:
 		`--inc: cls1 ...;` css declarations.
+	adding styles from css:
+		add_style(s)
 
 */
 
@@ -2683,7 +2685,7 @@ function css_selector_specificity(s0) {
 		if (match(/^,/       )) { maxn = max(maxn, n); n = 0; return next() }
 		if (match(/^\[[^\]]*\]/) || match(/^[\.:#]?[:a-zA-Z\-_][a-zA-Z0-9\-_]*/)) {
 			if (!z)
-				n += (sm[0] == '#' && 10 || sm[0] == '.' && 1 || sm[0] == ':' && 1 || .1)
+				n += (sm[0] == '#' && 10 || sm[0] == '.' && 1 || sm[0] == ':' && sm[1] != ':' && 1 || .1)
 			return next()
 		}
 		warn('invalid selector: '+s0, s)
@@ -2711,7 +2713,7 @@ function css_report_specificity(file, max_spec) {
 	example.css:
 		.foo { }
 		.bar { }
-		.baz { --inc: foo bar; }  # gets all properties from .foo and .bar
+		.baz { --inc: foo bar; }  # adds into .baz all properties from .foo and .bar
 
 */
 
@@ -2765,5 +2767,63 @@ on_dom_load(function() {
 		((t2 - t1) * 1000).dec(0)+'ms')
 
 })
+
+// required styles -----------------------------------------------------------
+
+function add_style(s) {
+	let style = tag('style')
+	style.textContent = s
+	document.head.add(style)
+}
+
+add_style(`
+
+[hidden] {
+	display: none !important;
+}
+
+/* using specificity 0-3-0 so that normal state styles don't accidentally undisable it. */
+/* NOTE: you still have to use :not([disabled]):hover to prevent :hover on
+   disabled widgets because we're not using pointer-events: none. */
+[disabled][disabled][disabled] {
+	opacity: .5;
+	filter: grayscale();
+}
+
+/* disabled child: reset opacity and filter. */
+/* TODO: is wrong to do this for widgets that set these in their normal
+   state but :not([disabled]) [disabled] would be too slow.
+	FIX: opacity is wrong anyway, find another filter that doesn't mix.
+*/
+[disabled] [disabled][disabled] {
+	opacity: unset;
+	filter: unset;
+}
+
+[disabled],
+[disabled] *
+{
+	cursor: default !important;
+}
+
+.popup {
+	/* hack to escape parents' overflow: hidden as long as none of them
+	creates a stacking context */
+	position: fixed !important;
+}
+
+.modal-overlay {
+	position: fixed;
+	left: 0;
+	top: 0;
+	width: 100%;
+	height: 100%;
+	background-color: rgba(0,0,0,0.6);
+	display: grid;
+	justify-content: center;
+	align-content: center;
+	z-index: 1;
+}
+`)
 
 }

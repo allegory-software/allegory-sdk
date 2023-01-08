@@ -483,7 +483,7 @@ component('x-button', 'Input', function(e) {
 	function update_text() {
 		let s = e.format_text(e.text)
 		e.text_box.set(s, 'pre-line')
-		e.class('text-empty', !s)
+		e.focus_box.class('text-empty', !s)
 		if (e.link)
 			e.link.set(TC(s))
 	}
@@ -533,7 +533,7 @@ component('x-button', 'Input', function(e) {
 	function set_active(on, cancel) {
 		if (!on && cancel == null)
 			cancel = !e.hasclass('active')
-		e.class('active', on)
+		e.focus_box.class('active', on)
 		e.fire('active', on)
 		if (!on && !cancel)
 			e.activate()
@@ -821,8 +821,8 @@ component('x-checkbox', 'Input', function(e) {
 
 	e.label_show_star = false
 	e.icon_box = span({class: 'x-markbox-icon x-checkbox-icon far fa-square'})
-	e.label_box = span({class: 'x-markbox-label x-checkbox-label'})
-	e.focus_box = div({class: 'x-focus-box'}, e.icon_box, e.label_box)
+	e.label_box = span({class: 'x-input-label x-markbox-label x-checkbox-label'})
+	e.focus_box = div({class: 'x-focus-box x-checkbox-focus-box'}, e.icon_box, e.label_box)
 	e.add(e.focus_box)
 
 	focusable_widget(e, e.label_box)
@@ -973,11 +973,11 @@ component('x-radiogroup', 'Input', function(e) {
 
 		if (opt.new_items) {
 			for (let item of opt.new_items) {
-				let ri = div({class: 'x-widget x-radio-item'})
+				let ri = div({class: 'x-radio-item'})
 				ri.icon_box = span({class: 'x-markbox-icon x-radio-icon far fa-circle'})
 				ri.label_box = item
 				ri.label_box.attr('tabindex', 0)
-				ri.label_box.class('x-markbox-label x-radio-label')
+				ri.label_box.class('x-input-label x-markbox-label x-radio-label')
 				item._radio_item = ri
 				ri.attr('align', e.align)
 				ri.item = item
@@ -1141,7 +1141,7 @@ function editbox_widget(e, opt) {
 
 	focusable_widget(e, e.input)
 
-	e.label_box = div({class: 'x-editbox-label'})
+	e.label_box = div({class: 'x-input-label x-editbox-label'})
 	e.focus_box = div({class: 'x-focus-box'}, e.input_box, e.label_box)
 	e.add(div({class: 'x-linear-form-filler'}), e.focus_box)
 

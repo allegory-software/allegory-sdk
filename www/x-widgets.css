@@ -2,6 +2,35 @@
 
 	x-widgets.css | x-widgets layouting and default styling
 
+SPECIFICITY
+	Use only specificity 0-1-0 and 0-2-0 everywhere. Use :where() to control it.
+	Spec 0-1-0 is for normal styling, spec 0-2-0 is for styling dynamic states.
+	This way you can restyle widgets without breaking state styles.
+	We could do this with `@layer base, states` but that's more verbose
+	and there's still specificity inside the layers to worry about.
+	NOTE: Generic states like `[disabled]` are spec 0-3-0 so that they don't get
+	overriden by other state selectors. Use `.bla.bla[disabled]` to restyle them.
+	CSS is a gallery of dumb things but specificity takes the cake.
+
+REUSE
+	Since CSS classes are not composable and we don't want to use silly preprocessors,
+	use var() for anything that is used in two places and is not a coincidence.
+
+STATES
+	State classes are applied only to the outermost element of a widget except
+	`:focus-visible` which is applied only to the innermost element.
+	Use `:where(.outer).state .inner` to select .state but style .inner
+	and `:where(.outer) .inner:has(:focus-visible)` to select :focus-visible
+	but style .inner which may be the focused element or one of its parents.
+	CAVEAT: For container widgets like tabs and split you have to use the ">"
+	combinator instead of " " to avoid selecting on child widgets of the same type.
+
+CONTEXTS
+	...
+
+RAD
+	`.widget-*` classes are for widget self-editing states.
+
 */
 
 /* variables -------------------------------------------------------------- */
@@ -30,7 +59,7 @@
 	--x-border-focused-button-primary : #363;
 	--x-outline-markbox-focused       : #88888866;
 
-	--x-shadow-popup                  :  2px  2px  2px      #000000aa; /* sharper shadow */
+	--x-shadow-menu                   :  2px  2px  2px      #000000aa; /* sharper shadow */
 	--x-shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 	--x-shadow-button                 :  0px  0px  8px  0px #00000011;
 	--x-shadow-tooltip                :  2px  2px  9px      #00000044;
@@ -86,8 +115,6 @@
 	--x-bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
 	--x-bg-today        : #f33;
 	--x-fg-today        : var(--x-fg-inverted);
-	--x-fg-link         : var(--x-fg);
-	--x-fg-link-visited : var(--x-fg);
 	--x-fg-clickable    : #207fdf; /* markbox icon, slider */
 
 	--x-bg-button                 : #eff3f6;
@@ -127,31 +154,13 @@
 	--x-bg-unselected         : #888;
 	--x-bg-selected           : #69c;
 	--x-fg-selected           : var(--x-fg-inverted);
+	--x-fg-focused            : var(--x-fg-inverted);
 	--x-bg-row-focused        : #ddd;
 
 	--x-bg-grid-editor        : var(--x-bg-popup);
 	--x-bg-grid-header        : var(--x-faint);
 
 	--x-border-width-item          : 1px; /* PIXELS ONLY! grid cells and editboxes */
-}
-
-/* reset ------------------------------------------------------------------ */
-
-a {
-	color: var(--x-fg-link);
-}
-
-a:visited {
-	color: var(--x-fg-link-visited);
-}
-
-hr {
-	color: var(--x-border-light);
-}
-
-body {
-	font-family: arial, sans-serif;
-	font-size: 12px;
 }
 
 /* info boxes ------------------------------------------------------------- */
@@ -188,7 +197,7 @@ info {
 
 /* widget editing --------------------------------------------------------- */
 
-.x-widget.x-widget.widget-editing {
+.x-widget.widget-editing {
 	outline: 2px dotted red;
 	outline-offset: -2px;
 }
@@ -221,76 +230,76 @@ info {
 /* widgets with multiple focusable items inside --------------------------- */
 
 /*
-.x-focusable-items are widgets containing multiple focusable items, so they
-don't show a focus outline on the entire widget, but only show an inside
-.x-item element as being focused instead.
+.x-focusable-items are widgets containing multiple focusable and selectable
+items, so they don't show a focus outline on the entire widget, but only show
+an inside .x-item element as being focused instead.
+NOTE: an .x-item cannot itself be an .x-focusable-items!
 */
 .x-focusable-items:focus {
 	outline: none;
 }
 
-.x-item a, .x-item a:visited { color: inherit; }
-/* ^^ unless you want to set specific colors for dark backgrounds too. */
-
-.x-item.disabled { color: var(--x-fg-disabled); }
-.x-item.disabled.focused { color: var(--x-fg-disabled-focused); }
+.x-item.disabled  { color: var(--x-fg-disabled); }
 .x-item.null      { color: var(--x-fg-disabled); }
 .x-item.empty     { color: var(--x-fg-disabled); }
-.x-item.removed   { text-decoration: line-through; }
+
+.x-item.row-focused {
+	background-color: var(--x-bg-row-focused);
+}
+
+.x-item.new {
+	background-color: var(--x-bg-new);
+}
+
+.x-item.modified {
+	background-color: var(--x-bg-modified);
+}
+
+:where(.x-item).new.modified {
+	background-color: var(--x-bg-new-modified);
+}
+
+.x-item.removed {
+	text-decoration: line-through;
+}
+
+.x-item.selected {
+	background-color: var(--x-bg-unselected);
+}
+
+.x-item.focused {
+	background-color: var(--x-bg-unfocused);
+}
+
+:where(.x-focusable-items:focus-within) .x-item.selected {
+	background-color : var(--x-bg-selected);
+	color            : var(--x-fg-selected);
+}
+
+:where(.x-focusable-items:focus-within) .x-item.focused {
+	background-color : var(--x-bg-focused);
+	color            : var(--x-fg-focused);
+}
+
+:where(.x-focusable-items .x-item).focused.selected {
+	background-color : var(--x-bg-unfocused-selected);
+	color            : var(--x-fg-unfocused-selected);
+}
+
+:where(.x-focusable-items:focus-within .x-item).focused.selected {
+	background-color: var(--x-bg-focused-selected);
+}
 
 .x-item.invalid {
 	background-color: var(--x-bg-error);
 	color: var(--x-fg-error);
 }
 
-.x-item:not(.focused):not(.selected):not(.invalid).new {
-	background-color: var(--x-bg-new);
-}
-
-.x-item:not(.focused):not(.selected):not(.invalid):not(.new).modified {
-	background-color: var(--x-bg-modified);
-}
-
-.x-item:not(.focused):not(.selected):not(.invalid).new.modified {
-	background-color: var(--x-bg-new-modified);
-}
-
-.x-focusable-items .x-item:not(.focused).selected:not(.invalid) {
-	background-color: var(--x-bg-unselected);
-	color: var(--x-fg-unselected);
-}
-
-.x-focusable-items:focus-within .x-item.selected:not(.invalid) {
-	background-color: var(--x-bg-selected);
-	color: var(--x-fg-selected);
-}
-
-.x-item.row-focused:not(.selected):not(.invalid) {
-	background-color: var(--x-bg-row-focused);
-}
-
-.x-focusable-items .x-item.focused:not(.invalid) {
-	background-color: var(--x-bg-unfocused);
-}
-
-.x-focusable-items:focus-within .x-item.focused:not(.invalid) {
-	background-color: var(--x-bg-focused);
-}
-
-.x-focusable-items .x-item.focused.selected:not(.invalid) {
-	background-color: var(--x-bg-unfocused-selected);
-	color: var(--x-fg-unfocused-selected);
-}
-
-.x-focusable-items:focus-within .x-item.focused.selected:not(.invalid) {
-	background-color: var(--x-bg-focused-selected);
-}
-
-.x-focusable-items:focus-within .x-item.focused.invalid {
+:where(.x-focusable-items:focus-within .x-item).focused.invalid {
 	background-color: var(--x-bg-focused-invalid);
 }
 
-/* scrollbars ------------------------------------------------------------- */
+/* custom scrollbars ------------------------------------------------------ */
 
 /*
 NOTE: scrollbar width and/or height must be set in order to enable custom scrollbars.
@@ -316,32 +325,28 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-style: solid;
 }
 
-.x-arrow[side=top],
-.x-arrow[side=top]:hover {
+.x-arrow:where([side=top]) {
 	border-right-color : transparent;
 	border-left-color  : transparent;
 	border-bottom-color: transparent;
 	margin-left: -.5em;
 }
 
-.x-arrow[side=bottom],
-.x-arrow[side=bottom]:hover {
+.x-arrow:where([side=bottom]) {
 	border-right-color : transparent;
 	border-left-color  : transparent;
 	border-top-color   : transparent;
 	margin-left: -.5em;
 }
 
-.x-arrow[side=left],
-.x-arrow[side=left]:hover {
+.x-arrow:where([side=left]) {
 	border-right-color : transparent;
 	border-top-color   : transparent;
 	border-bottom-color: transparent;
 	margin-top: -.5em;
 }
 
-.x-arrow[side=right],
-.x-arrow[side=right]:hover {
+.x-arrow:where([side=right]) {
 	border-left-color  : transparent;
 	border-top-color   : transparent;
 	border-bottom-color: transparent;
@@ -356,14 +361,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	margin: .2em 0;
 }
 
-.x-button > .x-button-focus-box {
+.x-button-focus-box {
 
-	/* layout content */
 	display: inline-flex;
 	align-items: baseline;     /* align icons to text */
 	justify-content: center;   /* center the content if the button is made wider */
 
-	/* sizing content */
 	padding-left   : var(--x-padding-x-button);
 	padding-right  : var(--x-padding-x-button);
 	padding-top    : var(--x-padding-y-button);
@@ -372,35 +375,27 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	font-weight: bold;
 	line-height: 1;
 
-	/* behavior */
 	user-select: none; /* make drag-select skip over button labels */
 	cursor: pointer;
 }
 
-.x-button.widget-editing {
-	cursor: initial;
-}
-
-.x-button.text-empty > .x-button-focus-box { /* icon-only */
+:where(.x-button-focus-box).text-empty { /* icon-only */
 	padding-left  : var(--x-padding-x-button-icon);
 	padding-right : var(--x-padding-x-button-icon);
 	align-items: center; /* no more baseline to align icon to */
 }
 
 .x-button-icon {
-	/* fixate icon container width */
-	min-width: 1em;
+	min-width: 1em; /* fixate icon container width to accomodate icon changes */
 	display: flex;
 	justify-content: center;
 }
 
-.x-button:not(.text-empty) > .x-button-focus-box > .x-button-icon {
+:where(.x-button-focus-box:not(.text-empty)) .x-button-icon {
 	margin-right: .5em;
 }
 
-/* styling (from github) */
-
-.x-button > .x-button-focus-box {
+.x-button-focus-box {
 	border-width: 1px;
 	border-style: solid;
 	border-color: var(--x-faint);
@@ -409,71 +404,71 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	box-shadow: var(--x-shadow-button);
 }
 
-.x-button[primary] > .x-button-focus-box {
+:where(.x-button[primary]) .x-button-focus-box {
 	background-color: var(--x-bg-button-primary);
 	color: var(--x-fg-button-primary);
 }
 
-.x-button[danger] > .x-button-focus-box {
+:where(.x-button[danger]) .x-button-focus-box {
 	background-color: var(--x-bg-button-danger);
 	color: var(--x-fg-button-danger);
 }
 
-.x-button > .x-button-focus-box:focus-visible {
+.x-button-focus-box:focus-visible {
 	border-color: var(--x-border-focused-button);
 	outline: 2px solid var(--x-outline-focused);
 	outline-offset: -2px;
 }
 
-.x-button[primary] > .x-button-focus-box:focus-visible {
+:where(.x-button[primary]) .x-button-focus-box:focus-visible {
 	border-color: var(--x-border-focused-button-primary);
 }
 
-.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
+:where(.x-button:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
 	background-color: var(--x-bg-button-hover);
 }
 
-.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
+:where(.x-button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
 	background-color: var(--x-bg-button-primary-hover);
 }
 
-.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
+:where(.x-button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
 	background-color: var(--x-bg-button-danger-hover);
 }
 
-.x-button:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box {
+:where(.x-button) .x-button-focus-box.active {
 	background-color: var(--x-bg-button-pressed);
 	box-shadow: var(--x-shadow-button-pressed);
 }
 
-.x-button[primary]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box {
+:where(.x-button[primary])) .x-button-focus-box.active {
 	background-color: var(--x-bg-button-primary-pressed);
 }
 
-.x-button[danger]:not([bare]):not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box {
+:where(.x-button[danger])) .x-button-focus-box.active {
 	background-color: var(--x-bg-button-danger-pressed);
 }
 
 /* bare buttons (no borders) */
 
-.x-button[bare] > .x-button-focus-box {
+:where(.x-button[bare]) .x-button-focus-box,
+:where(.x-button[bare]) .x-button-focus-box:is(:hover, .active) {
 	background: none;
 }
 
-.x-button[bare] > .x-button-focus-box:not(:focus-visible) {
+:where(.x-button[bare]) .x-button-focus-box:not(:focus-visible) {
 	border-color: transparent;
 	box-shadow: none;
 	border-radius: 0;
 }
 
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):not(.active) > .x-button-focus-box:hover {
+:where(.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
 	filter: contrast(.7);
 }
 
-.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected).active > .x-button-focus-box
-{
-	box-shadow: none;
+:where(.x-button[bare]) .x-button-focus-box.active {
 	filter: contrast(.4);
+	box-shadow: none;
 }
 
 /* attention animation */
@@ -486,6 +481,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	}
 }
 
+/* widget editing */
+
+.x-button.widget-editing {
+	cursor: initial;
+}
+
 /* action band ------------------------------------------------------------ */
 
 .x-action-band {
@@ -493,15 +494,16 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding: var(--x-margin);
 }
 
-.x-action-band > .x-button {
+:where(.x-action-band) .x-button {
 	margin: 0 var(--x-margin);
 }
 
-.x-action-band > .x-button .x-button-text {
+:where(.x-action-band) .x-button-text {
 	white-space: nowrap !important;
 }
 
-.x-action-band:not(.tight) > .x-dialog-button-cancel .x-button-icon {
+/* hide cancel button icon unless space is tight when text is hidden */
+:where(.x-action-band:not(.tight) .x-dialog-button-cancel) .x-button-icon {
 	display: none;
 }
 
@@ -545,7 +547,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 /* visibility animation */
 
-.x-tooltip.visible {
+:where(.x-tooltip).visible {
 	opacity: 1;
 	pointer-events: all;
 }
@@ -555,10 +557,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 @keyframes x-tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
 @keyframes x-tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
 
-.x-tooltip.visible[side=left]   { animation-name: x-tooltip-left; }
-.x-tooltip.visible[side=right]  { animation-name: x-tooltip-right; }
-.x-tooltip.visible[side=top]    { animation-name: x-tooltip-top; }
-.x-tooltip.visible[side=bottom] { animation-name: x-tooltip-bottom; }
+:where(.x-tooltip.visible)[side=left  ] { animation-name: x-tooltip-left; }
+:where(.x-tooltip.visible)[side=right ] { animation-name: x-tooltip-right; }
+:where(.x-tooltip.visible)[side=top   ] { animation-name: x-tooltip-top; }
+:where(.x-tooltip.visible)[side=bottom] { animation-name: x-tooltip-bottom; }
 
 .x-tooltip-content {
 	/* layouting */
@@ -579,7 +581,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	cursor: pointer;
 }
 
-.x-tooltip-xbutton:not(.active):hover {
+:where(.x-tooltip-xbutton):not(.active):hover {
 	color: inherit;
 }
 
@@ -601,67 +603,59 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	line-height: inherit !important; /* override fontawesome's !important */
 }
 
-.x-tooltip[side=left]   > .x-tooltip-tip { border-left-color   : inherit; }
-.x-tooltip[side=right]  > .x-tooltip-tip { border-right-color  : inherit; }
-.x-tooltip[side=top]    > .x-tooltip-tip { border-top-color    : inherit; }
-.x-tooltip[side=bottom] > .x-tooltip-tip { border-bottom-color : inherit; }
+:where(.x-tooltip[side=left  ]) > .x-tooltip-tip { border-left-color   : inherit; }
+:where(.x-tooltip[side=right ]) > .x-tooltip-tip { border-right-color  : inherit; }
+:where(.x-tooltip[side=top   ]) > .x-tooltip-tip { border-top-color    : inherit; }
+:where(.x-tooltip[side=bottom]) > .x-tooltip-tip { border-bottom-color : inherit; }
 
 /* side & align combinations */
 
-.x-tooltip[side=top],
-.x-tooltip[side=bottom]  { flex-flow: column; }
+:where(.x-tooltip):is([side=top],[side=bottom]) { flex-flow: column; }
 
-.x-tooltip[side=left]    { justify-content: flex-end; }
+:where(.x-tooltip)[side=left   ] { justify-content: flex-end; }
 
-.x-tooltip[align=end]    { align-items: flex-end; }
-.x-tooltip[align=center] { align-items: center; }
+:where(.x-tooltip)[align=end   ] { align-items: flex-end; }
+:where(.x-tooltip)[align=center] { align-items: center; }
 
-.x-tooltip[side=right]  > .x-tooltip-body,
-.x-tooltip[side=bottom] > .x-tooltip-body { order: 2; }
+:where(.x-tooltip:is([side=right],[side=bottom])) > .x-tooltip-body { order: 2; }
 
-.x-tooltip[side=top][align=center] > .x-tooltip-body > .x-tooltip-content,
-.x-tooltip[side=bottom][align=center] > .x-tooltip-body > .x-tooltip-content { text-align: center; }
+:where(.x-tooltip[align=center]:is([side=top],[side=bottom]) > .x-tooltip-body) > .x-tooltip-content { text-align: center; }
+:where(.x-tooltip[align=end   ]:is([side=top],[side=bottom]) > .x-tooltip-body) > .x-tooltip-content { text-align: right; }
 
-.x-tooltip[side=top][align=end] > .x-tooltip-body > .x-tooltip-content,
-.x-tooltip[side=bottom][align=end] > .x-tooltip-body > .x-tooltip-content { text-align: right; }
+:where(.x-tooltip:is([side=top],[side=bottom])) > .x-tooltip-tip { margin: 0 .5em; }
+:where(.x-tooltip:is([side=left],[side=right])) > .x-tooltip-tip { margin: .5em 0; }
 
-.x-tooltip[side=top] > .x-tooltip-tip,
-.x-tooltip[side=bottom] > .x-tooltip-tip { margin: 0 .5em; }
-
-.x-tooltip[side=left] > .x-tooltip-tip,
-.x-tooltip[side=right] > .x-tooltip-tip { margin: .5em 0; }
-
-.x-tooltip[side=right]  { margin-left   : -.25em; }
-.x-tooltip[side=left]   { margin-left   :  .25em; }
-.x-tooltip[side=top]    { margin-top    :  .25em; }
-.x-tooltip[side=bottom] { margin-top    : -.25em; }
+:where(.x-tooltip)[side=right ] { margin-left   : -.25em; }
+:where(.x-tooltip)[side=left  ] { margin-left   :  .25em; }
+:where(.x-tooltip)[side=top   ] { margin-top    :  .25em; }
+:where(.x-tooltip)[side=bottom] { margin-top    : -.25em; }
 
 /* styling based on kind attr */
 
-.x-tooltip[kind=search] > .x-tooltip-body { background-color: var(--x-bg-search); color: #000; }
-.x-tooltip[kind=search] > .x-tooltip-tip { color: var(--x-bg-search); }
+:where(.x-tooltip[kind=search]) > .x-tooltip-body { background-color: var(--x-bg-search); color: #000; }
+:where(.x-tooltip[kind=search]) > .x-tooltip-tip  { color: var(--x-bg-search); }
 
-.x-tooltip[kind=info] > .x-tooltip-body { background-color: var(--x-bg-info); color: var(--x-fg-info); }
-.x-tooltip[kind=info] > .x-tooltip-tip { color: var(--x-bg-info); }
-.x-tooltip[kind=info] > .x-tooltip-body > .x-tooltip-xbutton { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
-.x-tooltip[kind=info] > .x-tooltip-body > .x-tooltip-xbutton:hover { color: var(--x-fg-info); }
+:where(.x-tooltip[kind=info]) > .x-tooltip-body { background-color: var(--x-bg-info); color: var(--x-fg-info); }
+:where(.x-tooltip[kind=info]) > .x-tooltip-tip  { color: var(--x-bg-info); }
+:where(.x-tooltip[kind=info] > .x-tooltip-body) > .x-tooltip-xbutton       { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+:where(.x-tooltip[kind=info] > .x-tooltip-body) > .x-tooltip-xbutton:hover { color: var(--x-fg-info); }
 
-.x-tooltip[kind=error] > .x-tooltip-body { background-color: var(--x-bg-error); color: var(--x-fg-error); }
-.x-tooltip[kind=error] > .x-tooltip-tip { color: var(--x-bg-error); }
-.x-tooltip[kind=error] > .x-tooltip-body > .x-tooltip-xbutton { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
-.x-tooltip[kind=error] > .x-tooltip-body > .x-tooltip-xbutton:hover { color: var(--x-fg-error); }
+:where(.x-tooltip[kind=error]) > .x-tooltip-body { background-color: var(--x-bg-error); color: var(--x-fg-error); }
+:where(.x-tooltip[kind=error]) > .x-tooltip-tip  { color: var(--x-bg-error); }
+:where(.x-tooltip[kind=error] > .x-tooltip-body) > .x-tooltip-xbutton       { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+:where(.x-tooltip[kind=error] > .x-tooltip-body) > .x-tooltip-xbutton:hover { color: var(--x-fg-error); }
 
-.x-tooltip[kind=warn] > .x-tooltip-body { background-color: var(--x-bg-warn); color: var(--x-fg-warn); }
-.x-tooltip[kind=warn] > .x-tooltip-tip { color: var(--x-bg-warn); }
-.x-tooltip[kind=warn] > .x-tooltip-body > .x-tooltip-xbutton { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
-.x-tooltip[kind=warn] > .x-tooltip-body > .x-tooltip-xbutton:hover { color: var(--x-fg-warn); }
+:where(.x-tooltip[kind=warn]) > .x-tooltip-body { background-color: var(--x-bg-warn); color: var(--x-fg-warn); }
+:where(.x-tooltip[kind=warn]) > .x-tooltip-tip  { color: var(--x-bg-warn); }
+:where(.x-tooltip[kind=warn] > .x-tooltip-body) > .x-tooltip-xbutton       { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+:where(.x-tooltip[kind=warn] > .x-tooltip-body) > .x-tooltip-xbutton:hover { color: var(--x-fg-warn); }
 
-.x-tooltip[kind=cursor] {
+:where(.x-tooltip)[kind=cursor] {
 	margin-left: .75em;
 	margin-top : .75em;
 }
 
-.x-tooltip[kind=cursor] > .x-tooltip-body {
+:where(.x-tooltip[kind=cursor]) > .x-tooltip-body {
 	padding: .15em 0;
 	border: 1px solid #aaaa99;
 	color: #333;
@@ -671,12 +665,12 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-radius: 0;
 }
 
-.x-tooltip[kind=cursor] > .x-tooltip-body > .x-tooltip-content {
+:where(.x-tooltip[kind=cursor] > .x-tooltip-body) > .x-tooltip-content {
 	padding: 0 .5em;
 	white-space: pre !important;
 }
 
-.x-tooltip[kind=cursor] > .x-tooltip-tip { display: none; }
+:where(.x-tooltip[kind=cursor]) > .x-tooltip-tip { display: none; }
 
 .x-error-list {
 	margin: 0;
@@ -695,6 +689,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	opacity: .8;
 }
 
+.x-input-widget:not(.with-label) .x-input-label {
+	display: none;
+}
+
 .x-focus-box {
 	flex: 1; /* stretch vertically */
 	position: relative; /* for abs. pos. animated labels */
@@ -702,9 +700,6 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	border-style: dotted;
 	border-color: transparent; /* only editboxes set this */
 	border-radius: var(--x-border-radius-input);
-	outline-width: 2px;
-	outline-style: solid;
-	outline-color: transparent; /* set on focus */
 	outline-offset: -2px;
 }
 
@@ -714,10 +709,10 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 
 .x-focus-box:has(:focus-visible) {
 	border-color: transparent;
-	outline-color: var(--x-outline-focused);
+	outline: 2px solid var(--x-outline-focused);
 }
 
-.x-widget.with-label > .x-focus-box {
+:where(.x-input-widget.with-label) .x-focus-box {
 	min-height: var(--x-min-height-input);
 	--x-padding-y-button: 0; /* inline buttons should not affect box height */
 }
@@ -737,7 +732,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	color: var(--x-bg-info);
 }
 
-.x-input-info-button > .x-button-icon {
+:where(.x-input-info-button) .x-button-icon {
 	font-size: 110%;
 	opacity: .9;
 }
@@ -753,20 +748,20 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	cursor: default;
 }
 
-.x-input-info > info {
+:where(.x-input-info) info {
 	display: contents;
 	font-size: 100%;
 }
 
-.x-widget:focus-within > .x-input-info {
+:where(.x-input-widget):focus-within .x-input-info {
 	opacity: initial;
 }
 
-.x-container > .x-input-widget > .x-focus-box {
+:where(.x-container > .x-input-widget) .x-focus-box {
 	border-width: 0;
 }
 
-.x-input-widget:not(:focus-within) > .x-tooltip.x-error-tooltip {
+:where(.x-input-widget):not(:focus-within) .x-error-tooltip {
 	pointer-events: none;
 }
 
@@ -778,7 +773,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	color: var(--x-fg-label);
 }
 
-.x-form[grid][baseline] {
+:where(.x-form[grid])[baseline] {
 	align-items: baseline;
 }
 
@@ -789,7 +784,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	min-width: 1em;
 }
 
-.x-markbox > .x-focus-box {
+:where(.x-markbox) .x-focus-box {
 	display: inline-flex;
 	align-items: center;
 	flex-flow: row nowrap;
@@ -800,27 +795,22 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	padding-bottom : var(--x-padding-y-input);
 }
 
-.x-slider > .x-focus-box {
-	border-color: transparent;
-	background-color: transparent;
-}
-
-.x-markbox.with-label > .x-focus-box {
+:where(.x-markbox.with-label) .x-focus-box {
 	line-height: initial;
 }
 
-.x-markbox.with-label > .x-focus-box > .x-markbox-label {
+:where(.x-markbox.with-label) .x-markbox-label {
 	display: block;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 
-.x-markbox.no-field > .x-focus-box > .x-markbox-label {
+:where(.x-markbox.no-field) .x-markbox-label {
 	flex: 1;
 }
 
-.x-markbox:focus-within.invalid > .x-focus-box {
+:where(.x-markbox:focus-within).invalid .x-focus-box {
 	border-color: var(--x-fg-error);
 }
 
@@ -836,42 +826,37 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	cursor: pointer;
 }
 
-.x-markbox-icon:hover,
-.x-markbox-label:hover
-{
+:where(.x-input-widget:not([disabled]):not([readonly])) :is(.x-markbox-icon, .x-markbox-label):hover {
 	filter: contrast(60%);
 }
 
-.x-markbox.invalid > .x-focus-box > .x-markbox-label,
-.x-markbox.invalid > .x-focus-box > .x-markbox-icon {
+:where(.x-markbox).invalid :is(.x-markbox-label, .x-markbox-icon) {
 	color: var(--x-bg-error);
 }
 
-.x-markbox[align=right] > .x-focus-box > .x-markbox-icon {
-	order: 2;
-}
-.x-markbox[align=right] > .x-focus-box {
-	justify-content: end;
-}
-.x-markbox[align=right] > .x-focus-box > .x-markbox-label {
-	text-align: right;
-}
+:where(.x-markbox[align=right]) .x-focus-box     { justify-content: end; }
+:where(.x-markbox[align=right]) .x-markbox-icon  { order: 2; }
+:where(.x-markbox[align=right]) .x-markbox-label { text-align: right; }
 
-.x-markbox[align=left ] > .x-focus-box > .x-markbox-label { padding-left : .5em; }
-.x-markbox[align=right] > .x-focus-box > .x-markbox-label { padding-right: .5em; }
+:where(.x-markbox[align=left ]) .x-markbox-label { padding-left : .5em; }
+:where(.x-markbox[align=right]) .x-markbox-label { padding-right: .5em; }
 
-.x-markbox[button_style=toggle] > .x-focus-box > .x-markbox-label { flex: 1; }
-.x-markbox[button_style=toggle][align=right] > .x-focus-box > .x-markbox-icon  { order: 2; }
-.x-markbox[button_style=toggle][align=right] > .x-focus-box > .x-markbox-label { padding-left: 0; padding-right: .5em; }
-.x-markbox[button_style=toggle][align=left ] > .x-focus-box > .x-markbox-label { padding-left: .5em; padding-right: 0; }
+:where(.x-markbox[button_style=toggle]             ) .x-markbox-label { flex: 1; }
+:where(.x-markbox[button_style=toggle][align=right]) .x-markbox-icon  { order: 2; }
+:where(.x-markbox[button_style=toggle][align=right]) .x-markbox-label { padding-left:    0; padding-right: .5em; }
+:where(.x-markbox[button_style=toggle][align=left ]) .x-markbox-label { padding-left: .5em; padding-right:    0; }
 
-.x-markbox.grid-editor > .x-focus-box {
+:where(.x-markbox.grid-editor) .x-focus-box {
 	justify-content: center;
 }
 
-.x-markbox > .x-focus-box > .x-input-info-button {
+:where(.x-markbox) .x-input-info-button {
 	margin-left: auto;
 	padding-right: 0;
+}
+
+:where(.x-linear-form) .x-markbox-label:focus-visible {
+	outline: 2px solid var(--x-outline-focused);
 }
 
 /* checkbox --------------------------------------------------------------- */
@@ -880,19 +865,11 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	font-size: 120%;
 }
 
-.x-checkbox-icon.toggle {
+:where(.x-checkbox-icon).toggle {
 	font-size: 200%;
 }
 
-.x-checkbox-label {
-	display: none;
-}
-
-.x-linear-form > .x-checkbox { display: contents; }
-.x-linear-form > .x-checkbox > .x-focus-box { display: contents; }
-.x-linear-form > .x-checkbox > .x-focus-box > .x-checkbox-label:focus-visible {
-	outline: 2px solid var(--x-outline-focused);
-}
+:where(.x-linear-form) :is(.x-checkbox, .x-checkbox-focus-box) { display: contents; }
 
 /* radiogroup ------------------------------------------------------------- */
 
@@ -901,14 +878,9 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 }
 
 .x-radio-items {
+	position: relative;
 	display: flex;
 	flex-flow: column;
-}
-
-.x-radiogroup[readonly] > .x-radio-items > .x-markbox > .x-markbox-icon,
-.x-radiogroup[readonly] > .x-radio-items > .x-markbox > .x-markbox-label
-{
-	filter: none;
 }
 
 .x-radio-item {
@@ -927,9 +899,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	user-select: none; /* make drag-select skip over button labels */
 }
 
-.x-radiogroup > .x-radio-items > .x-radio-item.invalid > .x-radio-label,
-.x-radiogroup > .x-radio-items > .x-radio-item.invalid > .x-radio-icon
-{
+:where(.x-radio-item).invalid :is(.x-radio-label, .x-radio-icon) {
 	color: var(--x-bg-error);
 }
 
@@ -937,21 +907,20 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	outline: none;
 }
 
+:where(.x-radiogroup:not([disabled]):not([readonly])) :is(.x-radio-label, .x-radio-icon):hover {
+	filter: contrast(60%);
+}
+
 .x-radio-item:has(:focus-visible) {
 	outline: 2px solid var(--x-outline-focused);
 }
 
-.x-radiogroup[align=right] > .x-radio-items > .x-radio-item { justify-content: flex-end; }
-.x-radiogroup[align=right] > .x-radio-items > .x-radio-item > .x-markbox-icon  { order: 2; }
-.x-radiogroup[align=left ] > .x-radio-items > .x-radio-item > .x-markbox-label { padding-left : .5em; }
-.x-radiogroup[align=right] > .x-radio-items > .x-radio-item > .x-markbox-label { padding-right: .5em; }
+:where(.x-radiogroup[align=right]) .x-radio-item    { justify-content: flex-end; }
+:where(.x-radiogroup[align=right]) .x-markbox-icon  { order: 2; }
+:where(.x-radiogroup[align=left ]) .x-markbox-label { padding-left : .5em; }
+:where(.x-radiogroup[align=right]) .x-markbox-label { padding-right: .5em; }
 
-.x-linear-form > .x-radiogroup { display: contents; }
-.x-linear-form > .x-radiogroup > .x-radio-items { display: contents; }
-.x-linear-form > .x-radiogroup > .x-radio-items > .x-radio-item { display: contents; }
-.x-linear-form > .x-radiogroup > .x-radio-items > .x-radio-item > .x-radio-label:focus-visible {
-	outline: 2px solid var(--x-outline-focused);
-}
+:where(.x-linear-form) :is(.x-radiogroup, .x-radio-items, .x-radio-item) { display: contents; }
 
 /* editbox ---------------------------------------------------------------- */
 
@@ -961,7 +930,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	min-width: 1em;
 }
 
-.x-editbox > .x-focus-box {
+:where(.x-editbox) .x-focus-box {
 	/* layout content */
 	display: inline-flex;    /* the only way to get variable-width inputs */
 	align-items: baseline;   /* ...that are baseline-aligned */
@@ -974,7 +943,7 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	background-color: var(--x-bg-input);
 }
 
-.x-editbox.with-label > .x-focus-box {
+:where(.x-editbox.with-label) .x-focus-box {
 	padding-top     : var(--x-padding-y-input-top);
 	padding-bottom  : var(--x-padding-y-input-bottom);
 	line-height: initial;  /* prevent inheriting it */
@@ -1001,28 +970,28 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	text-align: left;
 }
 
-.x-editbox[align=right] > .x-focus-box > .x-editbox-input {
+:where(.x-editbox[align=right]) .x-editbox-input {
 	text-align: right;
 }
 
-.x-editbox[mono] > .x-focus-box > .x-editbox-input {
+:where(.x-editbox[mono]) .x-editbox-input {
 	font-family: monospace;
 }
 
-.x-editbox.modified.modified > .x-focus-box { /* specificity over .x-widget.grid-editor */
+:where(.x-editbox.modified) .x-focus-box {
 	background-color: var(--x-bg-modified);
 }
 
-.x-editbox.invalid.invalid > .x-focus-box { /* specificity over .x-widget.grid-editor */
-	background-color: var(--x-bg-error);
-	color: var(--x-fg-error);
+:where(.x-editbox.invalid) .x-focus-box {
+	background-color : var(--x-bg-error);
+	color            : var(--x-fg-error);
 }
 
-.x-linear-form > .x-editbox { display: contents; }
+:where(.x-linear-form) > .x-editbox { display: contents; }
 
 /* editbox with animated inner label/placeholder -------------------------- */
 
-.x-editbox.with-label[mode=inline] > .x-focus-box {
+:where(.x-editbox.with-label[mode=inline]) .x-focus-box {
 	border-radius: 0;
 }
 
@@ -1037,38 +1006,29 @@ Only setting custom scrollbars for the dark theme as it's the only way to darken
 	animation: x-editbox-label-unfocused .1s;
 	color: var(--x-fg-label);
 	white-space: nowrap;
-	visibility: hidden;
 	cursor: default;
 }
 
-.x-editbox.invalid > .x-focus-box > .x-editbox-label {
+:where(.x-editbox.invalid) .x-editbox-label {
 	color: var(--x-fg-error);
 }
 
-.x-editbox:not(.with-label) > .x-focus-box > .x-editbox-label {
-	display: none;
-}
-
-.x-editbox.with-label > .x-focus-box > .x-editbox-label {
-	visibility: visible;
-}
-
-.x-editbox[mode=inline] > .x-focus-box {
+:where(.x-editbox[mode=inline]) .x-focus-box {
 	border: 0;
 	border-radius: 0;
 }
 
-.x-editbox[mode=inline] > .x-focus-box {
+:where(.x-editbox[mode=inline]) .x-focus-box {
 	border-bottom-width: 1px;
 	border-bottom-style: dashed;
 	border-bottom-color: var(--x-fg);
 }
 
-.x-editbox[mode=inline] > .x-focus-box > .x-editbox-input {
+:where(.x-editbox[mode=inline]) .x-editbox-input {
 	padding-bottom: .1em;
 }
 
-.x-editbox[mode=inline]:focus-within > .x-focus-box {
+:where(.x-editbox[mode=inline]):focus-within .x-focus-box {
 	box-shadow: none;
 }
 
@@ -1330,6 +1290,11 @@ textarea.x-editbox-input {
 /* slider ----------------------------------------------------------------- */
 
 /* reset x-editbox */
+.x-slider > .x-focus-box {
+	border-color: transparent;
+	background-color: transparent;
+}
+
 .x-editbox.x-slider > .x-focus-box {
 	border-color: transparent;
 	background-color: transparent;
@@ -1384,7 +1349,7 @@ textarea.x-editbox-input {
 	outline: 6px solid var(--x-outline-markbox-focused);
 }
 
-.x-slider > .x-focus-box:has(:focus) {
+.x-slider-focus-box:focus-within {
 	outline-color: transparent;
 }
 
@@ -1918,7 +1883,7 @@ textarea.x-editbox-input {
 .x-menu, .x-menu:focus-within {
 	outline: 1px solid var(--x-border-light);
 	outline-offset: -1px;
-	box-shadow: var(--x-shadow-popup);
+	box-shadow: var(--x-shadow-menu);
 }
 
 .x-menu-tr > .x-menu-sub-td {
@@ -3288,8 +3253,6 @@ x-prop-layers-inspector > .x-grid-header {
 	--x-bg-new               : #2c2c5c;
 	--x-bg-modified          : #196119;
 	--x-bg-new-modified      : #293b34;
-	--x-fg-link              : var(--x-fg);
-	--x-fg-link-visited      : var(--x-fg);
 	--x-fg-clickable         : #75b7fa;
 
 	--x-bg-button                 : #21262d;
@@ -3338,7 +3301,7 @@ body:not([theme=dark]) [theme=dark] {
 	background-color: var(--x-bg);
 }
 
-[theme=dark] .x-focus-box {
+:where([theme=dark]) .x-focus-box {
 	background-color: #060606;
 	border-color: transparent;
 }
