@@ -65,8 +65,10 @@ STRINGS
 	s.num([z])
 	s.display_name()
 	s.words() -> a
+	words(s) -> a
 	catany(sep, ...); sep.catany(...)
 	catall(...)
+	s.captures(re) -> [capture1, ...]
 MULTI-LANGUAGE STUBS
 	S(id, default)                         get labeled string in current language
 	lang()                                 get current language
@@ -448,6 +450,12 @@ method(String, 'words', function() {
 function words(s) {
 	return isstr(s) ? s.words() : s
 }
+
+method(String, 'captures', function(re) {
+	let m = this.match(re)
+	if (m) m.remove(0)
+	return m || empty_array
+})
 
 // multi-language stubs replaced in webb_spa.js ------------------------------
 

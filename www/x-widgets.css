@@ -41,37 +41,14 @@ RAD
 
 	:where(:root) {
 
-		/*
-		NOTE: in order to valign the text of the grid cell with its inline editor,
-		`grid-cell-baseline` must be set to match the baseline set implicitly by
-		`grid-cell-line-height`. Don't try to vcenter the text on the cell with these
-		two parameters, use `padding-y-input` for that.
-		NOTE: Firefox won't set a line height lower than the font allows on <input>!
-		*/
-		--x-grid-cell-h           : 24px; /* PIXELS ONLY! */
-		--x-grid-cell-baseline    : 12px; /* PIXELS ONLY! */
-		--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
-		/* sometimes Firefox needs some help aligning the basline... */
-		--x-grid-cell-baseline-adjust-ff : 0;
 		--x-padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
 		--x-padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
 
 		--x-border-focused                : #99d; /* dropdown open */
 		--x-outline-markbox-focused       : #88888866;
 
-		--x-shadow-menu                   :  2px  2px  2px      #000000aa; /* sharper shadow */
 		--x-shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
-		--x-shadow-button                 :  0px  0px  8px  0px #00000011;
-		--x-shadow-tooltip                :  2px  2px  9px      #00000044;
-		--x-shadow-dialog                 :  2px  5px 10px      #00000088;
-		--x-shadow-toolbox                :  1px  1px  4px      #000000aa;
 		--x-shadow-slider-thumb           :  1px  1px  2px      #000000aa;
-		--x-shadow-button-pressed         : inset 0 0.15em 0.3em #1b1f2333;
-
-		--x-margin                      : .25em;
-		--x-border-radius-input         : 0;
-		--x-border-radius-window        : .5em;
-		--x-border-radius-button        : .3em;
 
 		--x-padding-x-button            : .7em;
 		--x-padding-y-button            : .4em;
@@ -88,28 +65,12 @@ RAD
 		--x-font-size-input-label        : var(--font-size-small);
 		--x-font-size-input-label-empty  : var(--font-size-small); /* put 100% for animating floating label */
 
-		--x-fg-inverted     : #fff;  /* text on inverted backgrounds */
-		--x-fg-label        : #666;  /* text of input & chart labels */
 		--x-bg-moving       : #eeeeeeaa;
 		--x-bg-popup        : #fff;  /* bg for popups and inline grid editors */
 		--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
-		--x-fg-disabled     : #00000066;  /* faded text on light bg */
-		--x-fg-disabled-inverted : #ffffff66;  /* faded text on dark colored bg with the same color as bg */
-		--x-smoke           : #00000022;  /* light overlays */
-		--x-bg-new          : #eeeeff;
-		--x-bg-modified     : #ddffdd;
-		--x-bg-new-modified : #ccf0f0;
-		--x-fg-search       : #000;  /* fg for quicksearch text */
-		--x-bg-search       : #ff9;  /* bg for quicksearch text */
-		--x-bg-info         : #069;  /* bg & fg for info bubbles */
-		--x-fg-info         : var(--x-fg-inverted);
-		--x-bg-error        : #a33; /* bg & fg for invalid inputs and error bubbles */
-		--x-fg-error        : var(--x-fg-inverted);
-		--x-bg-warn         : #ffa500;
-		--x-fg-warn         : var(--fg);
 		--x-bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
 		--x-bg-today        : #f33;
-		--x-fg-today        : var(--x-fg-inverted);
+		--x-fg-today        : var(--fg-inverted);
 		--x-fg-clickable    : #207fdf; /* markbox icon, slider */
 
 		--x-bg-select-button: var(--bg-button);
@@ -125,19 +86,6 @@ RAD
 		--x-selected-widget-outline-color-focused : blue;
 
 		--x-outline-focused            : #000;
-
-		/* these need to be opaque! */
-		--x-bg-unfocused          : #999;
-		--x-bg-focused            : #ddd;
-		--x-bg-unfocused-selected : #333;
-		--x-fg-unfocused-selected : var(--x-fg-inverted);
-		--x-bg-focused-selected   : #258;
-		--x-bg-focused-invalid    : #f33;
-		--x-bg-unselected         : #888;
-		--x-bg-selected           : #69c;
-		--x-fg-selected           : var(--x-fg-inverted);
-		--x-fg-focused            : var(--x-fg-inverted);
-		--x-bg-row-focused        : #ddd;
 
 		--x-bg-grid-editor        : var(--x-bg-popup);
 		--x-bg-grid-header        : var(--bg1);
@@ -155,7 +103,7 @@ RAD
 	:where(info) {
 		display: flex;
 		font-size: 90%;
-		color: var(--x-fg-label);
+		color: var(--fg-label);
 		margin: .5em 0;
 		padding-left  : var(--x-padding-x-input);
 		padding-right : var(--x-padding-x-input);
@@ -210,7 +158,7 @@ RAD
 		display: block;
 		position: absolute;
 		top: 0; left: 0; right: 0; bottom: 0;
-		background-color: var(--x-smoke);
+		background-color: var(--bg-smoke);
 		outline: 2px dotted var(--x-selected-widget-outline-color);
 		outline-offset: -2px;
 		pointer-events: all;
@@ -241,45 +189,45 @@ RAD
 		outline: none;
 	}
 
-	:where(.x-item.disabled)  { color: var(--x-fg-disabled); }
-	:where(.x-item.null    )  { color: var(--x-fg-disabled); }
-	:where(.x-item.empty   )  { color: var(--x-fg-disabled); }
+	:where(.x-item.disabled)  { color: var(--fg-gray); }
+	:where(.x-item.null    )  { color: var(--fg-gray); }
+	:where(.x-item.empty   )  { color: var(--fg-gray); }
 
-	:where(.x-item.row-focused ) { background-color: var(--x-bg-row-focused); }
-	:where(.x-item.new         ) { background-color: var(--x-bg-new); }
-	:where(.x-item.modified    ) { background-color: var(--x-bg-modified); }
-	:where(.x-item.new.modified) { background-color: var(--x-bg-new-modified); }
+	:where(.x-item.row-focused ) { background-color: var(--bg-row-focused); }
+	:where(.x-item.new         ) { background-color: var(--bg-new); }
+	:where(.x-item.modified    ) { background-color: var(--bg-modified); }
+	:where(.x-item.new.modified) { background-color: var(--bg-new-modified); }
 	:where(.x-item.removed     ) { text-decoration: line-through; }
 
-	:where(.x-item.selected) { background-color: var(--x-bg-unselected); }
-	:where(.x-item.focused ) { background-color: var(--x-bg-unfocused); }
+	:where(.x-item.selected) { background-color: var(--bg-unselected); }
+	:where(.x-item.focused ) { background-color: var(--bg-unfocused); }
 
 	:where(.x-focusable-items:focus-within .x-item.selected) {
-		background-color : var(--x-bg-selected);
-		color            : var(--x-fg-selected);
+		background-color : var(--bg-selected);
+		color            : var(--fg-selected);
 	}
 
 	:where(.x-focusable-items:focus-within .x-item.focused) {
-		background-color : var(--x-bg-focused);
-		color            : var(--x-fg-focused);
+		background-color : var(--bg-focused);
+		color            : var(--fg-focused);
 	}
 
 	:where(.x-focusable-items .x-item.focused.selected) {
-		background-color : var(--x-bg-unfocused-selected);
-		color            : var(--x-fg-unfocused-selected);
+		background-color : var(--bg-unfocused-selected);
+		color            : var(--fg-unfocused-selected);
 	}
 
 	:where(.x-focusable-items:focus-within .x-item.focused.selected) {
-		background-color: var(--x-bg-focused-selected);
+		background-color: var(--bg-focused-selected);
 	}
 
 	:where(.x-item.invalid) {
-		background-color: var(--x-bg-error);
-		color: var(--x-fg-error);
+		background-color: var(--bg-error);
+		color: var(--fg-error);
 	}
 
 	:where(.x-focusable-items:focus-within .x-item.focused.invalid) {
-		background-color: var(--x-bg-focused-invalid);
+		background-color: var(--bg-focused-error);
 	}
 
 }
@@ -372,8 +320,8 @@ RAD
 		border-style: solid;
 		border-color: var(--border);
 		background-color: var(--bg-button);
-		border-radius: var(--x-border-radius-button);
-		box-shadow: var(--x-shadow-button);
+		border-radius: var(--border-radius-button);
+		box-shadow: var(--shadow-button);
 	}
 
 	:where(.x-button[primary] .x-button-focus-box) {
@@ -405,7 +353,7 @@ RAD
 
 	:where(.x-button .x-button-focus-box.active) {
 		background-color: var(--bg-button-pressed);
-		box-shadow: var(--x-shadow-button-pressed);
+		box-shadow: var(--shadow-button-pressed);
 	}
 
 	:where(.x-button[primary] .x-button-focus-box.active) {
@@ -467,11 +415,11 @@ RAD
 
 	:where(.x-action-band) {
 		justify-content: flex-end;
-		padding: var(--x-margin);
+		padding: var(--space-s);
 	}
 
 	:where(.x-action-band .x-button) {
-		margin: 0 var(--x-margin);
+		margin: 0 var(--space-s);
 	}
 
 	:where(.x-action-band .x-button-text) {
@@ -519,9 +467,9 @@ RAD
 		align-items: baseline;
 
 		/* styling */
-		border-radius: var(--x-border-radius-window);
+		border-radius: var(--border-radius-window);
 		background-color: var(--x-bg-popup);
-		box-shadow: var(--x-shadow-tooltip);
+		box-shadow: var(--shadow-tooltip);
 		line-height: 1.4;
 	}
 
@@ -552,7 +500,7 @@ RAD
 		vertical-align: top;
 		align-self: stretch;
 		font-size: 80%;
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 		padding: .25em 1em;
 		border: 0 solid transparent;
 		border-left-width: 1px;
@@ -617,15 +565,15 @@ RAD
 
 	:where(.x-tooltip[kind=info  ] > .x-tooltip-body) { background-color: var(--x-bg-info); color: var(--x-fg-info); }
 	:where(.x-tooltip[kind=info  ] > .x-tooltip-tip ) { color: var(--x-bg-info); }
-	:where(.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+	:where(.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); }
 
 	:where(.x-tooltip[kind=error ] > .x-tooltip-body) { background-color: var(--x-bg-error); color: var(--x-fg-error); }
 	:where(.x-tooltip[kind=error ] > .x-tooltip-tip ) { color: var(--x-bg-error); }
-	:where(.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+	:where(.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); }
 
 	:where(.x-tooltip[kind=warn  ] > .x-tooltip-body) { background-color: var(--x-bg-warn); color: var(--x-fg-warn); }
 	:where(.x-tooltip[kind=warn  ] > .x-tooltip-tip ) { color: var(--x-bg-warn); }
-	:where(.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+	:where(.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); }
 
 	:where(.x-tooltip[kind=cursor]) {
 		margin-left: .75em;
@@ -688,7 +636,7 @@ RAD
 		border-width: 1px;
 		border-style: dotted;
 		border-color: transparent; /* only editboxes set this */
-		border-radius: var(--x-border-radius-input);
+		border-radius: var(--border-radius-input);
 		outline-offset: -2px;
 	}
 
@@ -721,7 +669,7 @@ RAD
 
 	:where(.x-input-info) {
 		font-size: 90%;
-		color: var(--x-fg-label);
+		color: var(--fg-label);
 		margin: .5em 0;
 		padding-left  : var(--x-padding-x-input);
 		padding-right : var(--x-padding-x-input);
@@ -768,7 +716,7 @@ RAD
 	:where(.x-label) {
 		margin-left : var(--x-padding-x-input);
 		margin-right: var(--x-padding-x-input);
-		color: var(--x-fg-label);
+		color: var(--fg-label);
 	}
 
 	:where(.x-form[grid][baseline]) {
@@ -989,7 +937,7 @@ RAD
 
 	:where(.x-input-placeholder) {
 		width: 100%;
-		background-color: var(--x-smoke);
+		background-color: var(--bg-smoke);
 	}
 	:where(.x-input-placeholder)::before {
 		content: '\200b'; /* zwsp */
@@ -1031,7 +979,7 @@ RAD
 		padding-top: var(--x-padding-y1-input-il-label-empty);
 		opacity: 1;
 		animation: x-editbox-label-unfocused .1s;
-		color: var(--x-fg-label);
+		color: var(--fg-label);
 		white-space: nowrap;
 		cursor: default;
 	}
@@ -1069,7 +1017,7 @@ RAD
 	:where(.x-editbox-copy-to-clipboard-button) {
 		margin: 0;
 		margin-right: calc(0px - var(--x-padding-x-input));
-		border-left: 1px solid var(--x-smoke);
+		border-left: 1px solid var(--bg-smoke);
 		border-radius: 0;
 	}
 
@@ -1197,7 +1145,7 @@ RAD
 		content: '\200b'; /* zwsp to force line height */
 	}
 
-	:where(.x-editbox-value.null) { color: var(--x-fg-disabled); }
+	:where(.x-editbox-value.null) { color: var(--fg-gray); }
 
 	:where(.x-dropdown-button) {
 		padding-left : .5em;
@@ -1272,7 +1220,7 @@ RAD
 	*/
 
 	:where(.x-dropdown-more-button.active) {
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 	}
 
 	:where(.x-dropdown[mode=inline]:is(:focus-within, .open) .x-focus-box) {
@@ -1442,10 +1390,6 @@ RAD
 		background-color: var(--x-bg-error);
 	}
 
-	:where(.x-slider.invalid .x-slider-focus-box:focus .x-slider-thumb) {
-		border-color: var(--x-disabled);
-	}
-
 	:where(.x-slider.animated .x-slider-thumb     ) { transition: left  .1s; }
 	:where(.x-slider.animated .x-slider-value-fill) { transition: width .1s; }
 
@@ -1510,7 +1454,7 @@ RAD
 		padding-right: .2em;
 		font-size: 70%;
 		align-self: center;
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 	}
 
 	/* fixed height mode */
@@ -1535,16 +1479,16 @@ RAD
 @layer state {
 
 	:where(.x-tagsedit.invalid .x-tagsedit-tag) {
-		background-color: var(--x-bg-focused-invalid);
+		background-color: var(--x-bg-focused-error);
 	}
 
 	:where(.x-tagsedit.invalid .x-tagsedit-tag-xbutton) {
-		color: var(--x-fg-disabled-inverted);
+		color: var(--fg-gray-inverted);
 	}
 
 	:where(.x-tagsedit:not([disabled]) .x-tagsedit-tag:hover) {
 		cursor: pointer;
-		background-color: var(--x-smoke);
+		background-color: var(--bg2);
 	}
 
 	:where(.x-tagsedit:not([disabled]) .x-tagsedit-tag:hover .x-tagsedit-tag-xbutton) {
@@ -1584,13 +1528,13 @@ RAD
 	:where(.x-googlemaps) {
 
 		/* layout self */
-		min-height: calc(var(--x-min-height-input) * 2 + var(--x-margin));
+		min-height: calc(var(--x-min-height-input) * 2 + var(--space-s));
 
 		/* layout map icon */
 		display: flex !important; /* override fontawesome !important */
 		justify-content: center;
 		align-items: center;
-		color: var(--x-smoke);
+		color: var(--fg-gray);
 
 		/* styling */
 		background-color: var(--bg1);
@@ -1705,13 +1649,13 @@ RAD
 	}
 
 	:where(.x-select-button .x-item:first-child) {
-		border-top-left-radius    : var(--x-border-radius-button);
-		border-bottom-left-radius : var(--x-border-radius-button);
+		border-top-left-radius    : var(--border-radius-button);
+		border-bottom-left-radius : var(--border-radius-button);
 	}
 
 	:where(.x-select-button .x-item:last-child) {
-		border-top-right-radius    : var(--x-border-radius-button);
-		border-bottom-right-radius : var(--x-border-radius-button);
+		border-top-right-radius    : var(--border-radius-button);
+		border-bottom-right-radius : var(--border-radius-button);
 	}
 
 	:where(.x-select-button .x-item:not(:first-child)) {
@@ -1723,11 +1667,11 @@ RAD
 @layer state {
 
 	:where(.x-select-button .x-item:hover) {
-		background-color: var(--x-smoke);
+		background-color: var(--bg-button-hover);
 	}
 
 	:where(.x-select-button .x-item.focused.selected) {
-		box-shadow: var(--x-shadow-button-pressed);
+		box-shadow: var(--shadow-button-pressed);
 	}
 
 }
@@ -1799,7 +1743,7 @@ RAD
 	}
 
 	:where(.x-calendar-weekday) {
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 		font-weight: normal;
 	}
 
@@ -1885,13 +1829,13 @@ RAD
 
 @layer state {
 
-	:where(.x-calendar-day:not(.current-month))         { color: var(--x-fg-disabled); }
+	:where(.x-calendar-day:not(.current-month))         { color: var(--fg-gray); }
 	:where(.x-calendar-day.today)                       { outline: 1px dashed var(--x-bg-today); }
 	:where(.x-calendar .x-calendar-day.today:hover)     { background-color: var(--x-bg-today); }
 	:where(.x-calendar.invalid .x-calendar-day.focused) { background-color: var(--x-bg-error); }
 
 	:where(.x-calendar-month-box:not(.focused) .x-calendar-month-num) {
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 	}
 
 }
@@ -1964,7 +1908,7 @@ RAD
 	:where(.x-timepicker-heading) {
 		padding: .5em;
 		font-size: 90%;
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 	}
 
 	:where(.x-timepicker-heading-m),
@@ -2044,7 +1988,7 @@ RAD
 	:where(.x-menu-heading) {
 		padding-left: 1em;
 		font-weight: bold;
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 		cursor: default;
 		padding-top   : .5em;
 		padding-bottom: .5em;
@@ -2072,7 +2016,7 @@ RAD
 	:where(.x-menu, .x-menu:focus-within) {
 		outline: 1px solid var(--border);
 		outline-offset: -1px;
-		box-shadow: var(--x-shadow-menu);
+		box-shadow: var(--shadow-menu);
 	}
 
 	:where(.x-menu-tr.focused > :not(.x-menu-table)) {
@@ -2098,7 +2042,7 @@ RAD
 		display: grid;
 		justify-content: safe center;
 		align-content: center;
-		outline: 1px dashed var(--x-smoke);
+		outline: 1px dashed var(--fg-gray);
 		outline-offset: -1px;
 	}
 
@@ -2175,7 +2119,7 @@ RAD
 	:where(.x-tabs-tab) {
 		position: relative;
 		line-height: 1.25;
-		color: var(--x-fg-label);
+		color: var(--fg-label);
 		cursor: default;
 		display: flex;
 	}
@@ -2204,7 +2148,7 @@ RAD
 		top: 2px;
 		right: 2px;
 		font-size: 70%;
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 		cursor: default;
 	}
 
@@ -2308,7 +2252,7 @@ RAD
 	:where(.x-split.collapsed > .x-split-sizer)::before {
 		content: '';
 		box-sizing: border-box;
-		border: 1px var(--x-fg-disabled);
+		border: 1px var(--fg-gray);
 	}
 
 	:where(.x-split.collapsed > .x-split-sizer)::before {
@@ -2443,8 +2387,8 @@ RAD
 		color: var(--fg);
 		background-color: var(--x-bg-popup);
 		border: 0;
-		border-radius: var(--x-border-radius-window);
-		box-shadow: var(--x-shadow-dialog);
+		border-radius: var(--border-radius-window);
+		box-shadow: var(--shadow-modal);
 	}
 
 	.x-dialog-header,
@@ -2456,7 +2400,7 @@ RAD
 	}
 
 	.x-dialog-heading {
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 		font-size: 200%;
 		font-weight: bold;
 		margin: .25em 0;
@@ -2466,8 +2410,8 @@ RAD
 		position: absolute;
 		right: 8px;
 		top: 0px;
-		border-bottom-right-radius: var(--x-border-radius-button);
-		border-bottom-left-radius : var(--x-border-radius-button);
+		border-bottom-right-radius: var(--border-radius-button);
+		border-bottom-left-radius : var(--border-radius-button);
 		border: 1px solid var(--border);
 		border-top: 0;
 		width: 52px;
@@ -2520,8 +2464,8 @@ RAD
 		transition: opacity .5s;
 
 		border: 0;
-		border-radius: var(--x-border-radius-window);
-		box-shadow: var(--x-shadow-toolbox);
+		border-radius: var(--border-radius-window);
+		box-shadow: var(--shadow-toolbox);
 	}
 
 	.x-toolbox[pinned],
@@ -2554,7 +2498,7 @@ RAD
 	}
 
 	.x-toolbox-button {
-		color: var(--x-fg-disabled);
+		color: var(--fg-gray);
 		flex: 0;
 		padding: .25em .5em;
 		cursor: default;
@@ -2565,7 +2509,7 @@ RAD
 	}
 
 	.x-toolbox[pinned] > :where(.x-toolbox-titlebar > .x-toolbox-button-pin) {
-		color: var(--x-fg-label);
+		color: var(--fg-label);
 	}
 
 	.x-toolbox-button-close:hover {
@@ -2668,13 +2612,13 @@ RAD
 	}
 
 	:where(.x-loading-overlay.error) {
-		background-color: var(--x-smoke);
+		background-color: var(--bg-smoke);
 	}
 
 	:where(.x-loading-overlay-message) {
 		padding: 1em 1em;
 		background-color: var(--x-bg-popup);
-		box-shadow: var(--x-shadow-tooltip);
+		box-shadow: var(--shadow-tooltip);
 	}
 
 	:where(.x-loading-overlay-message .x-button) {
@@ -2694,142 +2638,6 @@ RAD
 }
 
 /* grid ------------------------------------------------------------------- */
-
-@layer base {
-
-	:where(.x-grid) {
-		/* layout self */
-		flex: 1;
-		/* layout content */
-		flex-flow: column;
-		overflow: hidden;          /* hide header overflow */
-		cursor: default;           /* don't show caret over text */
-	}
-
-	:where(.x-vgrid) {
-		flex-flow: row;
-	}
-
-	:where(.x-vgrid .x-grid-action-band) {
-		flex-flow: column;
-	}
-
-	:where(.x-vgrid .x-grid-cells-view) {
-		width: 0; /* CSS people are hopeless */
-	}
-
-	/* grid header */
-
-	:where(.x-grid-header) {
-		position: relative;        /* make movable for scrolling horizontally */
-		border-width: 0;
-		border-color: var(--border);
-		border-style: solid;
-	}
-
-	:where(.x-grid:not(.x-vgrid) > .x-grid-header) {
-		border-bottom-width: 1px;
-	}
-
-	:where(.x-vgrid > .x-grid-header) {
-		border-right-width: 1px;
-	}
-
-	.x-grid-header-canvas {
-		position: absolute;
-	}
-
-	:where(.x-vgrid > .x-grid-header) {
-		border-bottom-width: 0;
-	}
-
-	/* grid cells: grid > view > ct > (cells, editor) > cell */
-
-	:where(.x-grid-cells-view) {
-		/* layout self */
-		flex: 1 0;                 /* stretch to fill container but not more */
-		min-height: 0;
-		/* layout content */
-		display: grid;
-		overflow-x: auto;
-		overflow-y: auto;
-		position: relative;        /* anchor rows div */
-	}
-
-	/*
-		Fix the damn Chrome bug with custom-drawn scrollbars !!
-		50px has the nice side effect of gradually hiding the header when the grid
-		height gets too small.
-	*/
-	:where(.x-grid-cells-view) {
-		flex-basis: 50px;
-	}
-
-	:where(.x-grid[auto_cols_w] > .x-grid-cells-view) {
-		overflow-y: scroll;      /* avoid col resizing based on row count */
-	}
-
-	:where(.x-grid[auto_h] > .x-grid-cells-view) {
-		overflow-y: hidden;      /* grid grows to fit contents, so no need for scrollbars */
-	}
-
-	:where(.x-grid-cells) {
-		grid-row-start: 1;
-		grid-column-start: 1;
-		overflow: hidden;          /* hide surplus bottom rows */
-		position: relative;        /* activates `overflow: hidden` on abs. pos. child */
-	}
-
-	:where(.x-grid-cells-canvas) {
-		position: absolute;        /* keep at y=0 while scrolling */
-	}
-
-	/* grid editing */
-
-	:where(.x-grid-error) {
-		position: absolute;
-	}
-
-	/* load/save progress bar */
-
-	:where(.x-grid-progress-bar) {
-		position: absolute;
-		top: -2px;
-		width: 0%;
-		height: 2px;
-		pointer-events: none;
-	}
-
-	:where(.x-grid.loading > .x-grid-progress-bar) {
-		background-color: green;
-	}
-
-	/* grid action band */
-
-	:where(.x-grid-action-band) {
-		border-top: 1px solid var(--border);
-		background-color: var(----bg);
-	}
-
-	:where(.x-grid-action-band-reload-button) {
-		font-size: 90%;
-		color: var(--x-fg-label);
-	}
-
-	:where(.x-grid-action-band-reload-button > .x-button-icon) {
-		padding-top: .2em;
-	}
-
-	:where(.x-grid-action-band-info) {
-		display: flex;
-		align-items: center;
-		font-size: 95%;
-		color: var(--x-fg-label);
-		margin-left: .5em;
-		white-space: pre;
-	}
-
-}
 
 @layer state {
 
@@ -2997,17 +2805,17 @@ RAD
 @layer state {
 
 	:where(.x-richtext-button:hover) {
-		background-color: var(--x-smoke);
+		background-color: var(--bg-button-hover);
 	}
 
 	:where(.x-richtext-button:active) {
-		background-color: var(--x-fg-disabled);
+		background-color: var(--fg-gray);
 	}
 
 	:where(.x-richtext-button.selected) {
-		box-shadow: var(--x-shadow-button-pressed);
-		background-color: var(--x-fg-disabled);
-		color: var(--x-fg-inverted);
+		box-shadow: var(--shadow-button-pressed);
+		background-color: var(--fg-gray);
+		color: var(--fg-inverted);
 	}
 
 }
@@ -3054,10 +2862,10 @@ RAD
 	:where(.x-image) {
 
 		/* layout self */
-		min-height: calc(var(--x-min-height-input) * 2 + var(--x-margin));
+		min-height: calc(var(--x-min-height-input) * 2 + var(--space-s));
 
 		/* styling */
-		border-radius: var(--x-border-radius-input);
+		border-radius: var(--border-radius-input);
 		background-color: #000;
 
 		/* layout missing icon */
@@ -3074,7 +2882,7 @@ RAD
 
 	:where(.x-image.empty) {
 		background-color: var(--bg1);
-		color: var(--x-smoke);
+		color: var(--bg-smoke); /* overlay icons */
 	}
 
 	:where(.x-image-img) {
@@ -3358,20 +3166,9 @@ RAD
 		--x-border-focused                :  #66a;
 		--x-outline-markbox-focused       :  #88888866;
 
-		--x-shadow-button-pressed         : inset 0 0.15em 0.5em #1b1f2377;
-
-		--x-fg-inverted          : #fff;
 		--x-bg-moving            : #141a24aa;
-		--x-fg-info              : var(--x-fg-inverted);
 		--x-bg-popup             : #1d2532;
 		--x-bg-popup2            : #11161e;
-		--x-fg-disabled          : #ffffff66;
-		--x-fg-disabled-inverted : var(--x-fg-disabled);
-		--x-smoke                : #ffffff22;
-		--x-fg-label             : #aaa;
-		--x-bg-new               : #2c2c5c;
-		--x-bg-modified          : #196119;
-		--x-bg-new-modified      : #293b34;
 		--x-fg-clickable         : #75b7fa;
 
 		--x-bg-select-button: var(--bg1);
@@ -3387,13 +3184,6 @@ RAD
 		--x-selected-widget-outline-color-focused : var(--x-fg-clickable);
 
 		--x-outline-focused: #999;
-
-		/* these need to be opaque! */
-		--x-bg-unfocused-selected : #4c545d;
-		--x-bg-unfocused          : #2e3033;
-		--x-bg-unselected         : #1d2021;
-		--x-bg-selected           : #122f4d;
-		--x-bg-row-focused        : #222326;
 
 		--x-bg-grid-editor        : #495560;
 		--x-bg-grid-header        : var(--bg1);
@@ -3418,7 +3208,7 @@ RAD
 	:where([theme=dark]::-webkit-resizer),
 	:where([theme=dark] ::-webkit-resizer)
 	{
-		background-color: var(--x-smoke);
+		background-color: var(--bg-smoke);
 	}
 
 	:where([theme=dark]::selection),
@@ -3459,7 +3249,7 @@ RAD
 	:where([thin-scrollbars]::-webkit-scrollbar-thumb:hover),
 	:where([thin-scrollbars] ::-webkit-scrollbar-thumb:hover)
 	{
-		background-color: var(--x-fg-disabled);
+		background-color: var(--fg-gray);
 	}
 
 }
@@ -3480,7 +3270,6 @@ RAD
 		--x-padding-y-button       : .7em;
 		--x-padding-x-button       : .7em;
 		--x-padding-x-button-icon  : .4em;
-		--x-border-radius-button   : 0;
 	}
 	:where(.theme-large .x-form) {
 		grid-gap: 6px;
@@ -3508,7 +3297,6 @@ RAD
 		--x-padding-y-button       : .5em;
 		--x-padding-x-button       : .7em;
 		--x-padding-x-button-icon  : .4em;
-		--x-border-radius-button   : 0;
 	}
 	:where([medium]) .x-tabs-title {
 		padding: 1em .8em .8em .8em;

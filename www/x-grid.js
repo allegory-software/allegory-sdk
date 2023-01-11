@@ -20,6 +20,82 @@ implements:
 	nav widget protocol.
 --------------------------------------------------------------------------- */
 
+// NOTE: in order to valign the text of the grid cell with its inline editor,
+// `grid-cell-baseline` must be set to match the baseline set implicitly by
+// `grid-cell-line-height`. Don't try to vcenter the text on the cell with these
+// two parameters, use `padding-y-input` for that.
+// NOTE: Firefox won't set a line height lower than the font allows on <input>!
+css(':root', '', `
+	--grid-cell-h           : 24px; /* PIXELS ONLY! */
+	--grid-cell-baseline    : 12px; /* PIXELS ONLY! */
+	--grid-cell-line-height : 16px; /* PIXELS ONLY! */
+`)
+
+css('.x-grid', 'v clip cursor-arrow')
+
+css('.x-vgrid', 'h')
+css('.x-vgrid > .x-grid-header', 'br bb0')
+css('.x-vgrid .x-grid-action-band', 'v')
+css('.x-vgrid .x-grid-cells-view', '', 'width: 0;') /* CSS people are hopeless */
+
+// grid header
+
+// rel makes header cols movable for scrolling horizontally
+css('.x-grid-header', 'rel b b0')
+
+css('.x-grid:not(.x-vgrid) > .x-grid-header', 'bb')
+
+css('.x-grid-header-canvas', 'abs')
+
+/* grid cells: grid > view > ct > (cells, editor) > cell */
+
+css('.x-grid-cells-view', 'rel grid scroll-auto', `
+	flex: 1 0;                 /* stretch to fill container but not more */
+	min-height: 0;
+`)
+
+// Fix the damn Chrome bug with custom-drawn scrollbars !!
+// 50px has the nice side effect of gradually hiding the header when the grid
+// height gets too small.
+css('.x-grid-cells-view', '', 'flex-basis: 50px;')
+
+// avoid col resizing based on row count
+css('.x-grid[auto_cols_w] > .x-grid-cells-view', 'vscroll')
+
+// grid grows to fit contents, so no need for scrollbars
+css('.x-grid[auto_h] > .x-grid-cells-view', 'clip-y')
+
+// clip: hide surplus bottom rows
+// rel: activates `overflow: hidden` on abs. pos. child.
+css('.x-grid-cells', 'rel clip', `
+	grid-row-start: 1;
+	grid-column-start: 1;
+`)
+
+css('.x-grid-cells-canvas', 'abs') // keep at y=0 while scrolling
+
+// grid editing
+
+css('.x-grid-error', 'abs')
+
+// load/save progress bar
+
+css('.x-grid-progress-bar', 'abs', `
+	top: -2px;
+	width: 0%;
+	height: 2px;
+	pointer-events: none;
+`)
+
+css('.x-grid.loading > .x-grid-progress-bar', '', 'background-color: green;')
+
+// grid action band
+
+css('.x-grid-action-band', 'bt bg')
+css('.x-grid-action-band-reload-button', 'small label')
+css('.x-grid-action-band-reload-button > .x-button-icon', 'pts')
+css('.x-grid-action-band-info', 'h-l-c ml small label pre')
+
 widget('x-grid', 'Input', function(e) {
 
 	val_widget(e, true)
@@ -40,40 +116,40 @@ widget('x-grid', 'Input', function(e) {
 		e.font_size = num(css['font-size'])
 		e.padding_x = num(css.prop('--x-padding-x-input'))
 		e.padding_y = num(css.prop('--x-padding-y-input'))
-		e.cell_h    = num(css.prop('--x-grid-cell-h'))
-		e.header_h  = num(css.prop('--x-grid-header-h'))
+		e.cell_h    = num(css.prop('--grid-cell-h'))
+		e.header_h  = num(css.prop('--grid-header-h'))
 
 		// css colors
-		e.cell_border_width          = num(css.prop('--x-border-width-item'))
-		e.hcell_border_color         = css.prop('--bg2')
-		e.cell_border_color          = css.prop('--bg1')
-		e.bg                         = css.prop('--bg')
-		e.bg_alt                     = css.prop('--bg-alt')
-		e.bg_header                  = css.prop('--x-bg-grid-header')
-		e.fg                         = css.prop('--fg')
-		e.fg_disabled                = css.prop('--x-fg-disabled')
-		e.fg_search                  = css.prop('--x-fg-search')
-		e.bg_search                  = css.prop('--x-bg-search')
-		e.bg_error                   = css.prop('--x-bg-error')
-		e.bg_unfocused               = css.prop('--x-bg-unfocused')
-		e.bg_focused                 = css.prop('--x-bg-focused')
-		e.bg_unfocused_selected      = css.prop('--x-bg-unfocused-selected')
-		e.fg_unfocused_selected      = css.prop('--x-fg-unfocused-selected')
-		e.bg_focused_selected        = css.prop('--x-bg-focused-selected')
-		e.bg_focused_invalid         = css.prop('--x-bg-focused-invalid')
-		e.bg_unselected              = css.prop('--x-bg-unselected')
-		e.bg_selected                = css.prop('--x-bg-selected')
-		e.fg_selected                = css.prop('--x-fg-selected')
-		e.row_bg_focused             = css.prop('--x-bg-row-focused')
-		e.bg_new                     = css.prop('--x-bg-new')
-		e.bg_modified                = css.prop('--x-bg-modified')
-		e.bg_new_modified            = css.prop('--x-bg-new-modified')
-		e.bg_moving                  = css.prop('--x-bg-moving')
-		e.baseline                   = num(css.prop('--x-grid-cell-baseline'))
+		e.cell_border_width      = num(css.prop('--x-border-width-item'))
+		e.hcell_border_color     = css.prop('--bg2')
+		e.cell_border_color      = css.prop('--bg1')
+		e.bg                     = css.prop('--bg')
+		e.bg_alt                 = css.prop('--bg-alt')
+		e.bg_header              = css.prop('--bg1')
+		e.fg                     = css.prop('--fg')
+		e.fg_gray                = css.prop('--fg-gray')
+		e.fg_search              = css.prop('--fg-search')
+		e.bg_search              = css.prop('--bg-search')
+		e.bg_error               = css.prop('--bg-error')
+		e.bg_unfocused           = css.prop('--bg-unfocused')
+		e.bg_focused             = css.prop('--bg-focused')
+		e.bg_unfocused_selected  = css.prop('--bg-unfocused-selected')
+		e.fg_unfocused_selected  = css.prop('--fg-unfocused-selected')
+		e.bg_focused_selected    = css.prop('--bg-focused-selected')
+		e.bg_focused_invalid     = css.prop('--bg-focused-invalid')
+		e.bg_unselected          = css.prop('--bg-unselected')
+		e.bg_selected            = css.prop('--bg-selected')
+		e.fg_selected            = css.prop('--fg-selected')
+		e.row_bg_focused         = css.prop('--bg-row-focused')
+		e.bg_new                 = css.prop('--bg-new')
+		e.bg_modified            = css.prop('--bg-modified')
+		e.bg_new_modified        = css.prop('--bg-new-modified')
+		e.bg_moving              = css.prop('--x-bg-moving')
+		e.baseline               = num(css.prop('--grid-cell-baseline'))
 
 		// with Arial the baseline adjustment for Firefox is 1 but we're not
 		// using Arial because it renders poorly on canvas on Firefox Windows.
-		let baseline_adjust = num(css.prop('--x-grid-cell-baseline-adjust-ff'))
+		let baseline_adjust = num(css.prop('--font-baseline-adjust-ff'))
 		e.baseline += Firefox ? baseline_adjust : 0
 
 		e.text_font = e.font_size + 'px ' + e.text_font_family
@@ -540,13 +616,13 @@ widget('x-grid', 'Input', function(e) {
 	}
 
 	function update_cx(cx) {
-		cx.font_size   = e.font_size
-		cx.text_font   = e.text_font
-		cx.icon_font   = e.icon_font
-		cx.bg_search   = e.bg_search
-		cx.fg_search   = e.fg_search
-		cx.fg_disabled = e.fg_disabled
-		cx.baseline    = e.baseline
+		cx.font_size = e.font_size
+		cx.text_font = e.text_font
+		cx.icon_font = e.icon_font
+		cx.bg_search = e.bg_search
+		cx.fg_search = e.fg_search
+		cx.fg_gray   = e.fg_gray
+		cx.baseline  = e.baseline
 	}
 
 	function draw_cell_border_path(cx, first_field, w, h) {
@@ -772,7 +848,7 @@ widget('x-grid', 'Input', function(e) {
 				bg = e.bg
 
 		if (is_null || is_empty || disabled)
-			fg = e.fg_disabled
+			fg = e.fg_gray
 
 		// drawing
 

@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 CSS CLASSES:
-	TEXT         nowrap gray small [x]large tight bold italic underline strike allcaps
+	TEXT         nowrap pre gray small [x]large tight bold italic underline strike allcaps
 	INLINE       va-m float-l float-r
 	POSITIONING  rel abs z{1 2 3 4 5}
 	FLEXBOX H    h h-r h-r-c h-c h-sb h-l-c h-c-c h-c-b h-c-t
@@ -22,7 +22,6 @@ CSS CLASSES:
 	CURSORS      cursor-{grab hand}
 	TRANSITIONS  ease0 ease -01s -05s -1s
 	INTERACTION  hover-darken hover-lighten hover-b
-	UI PATTERNS  overlay
 	FONTS        font-opensans
 HTML ATTRS:
 	gray nowrap
@@ -33,52 +32,82 @@ NOTES:
 
 */
 
-@layer base, role, state, role-state, generic-state;
+@layer base, role, state, role-state, generic-state; /* matching divs.js layers */
 
 @layer base {
 
 :root, .theme-light, .theme-dark .theme-inverted {
 
 	--fg             : hsl(0 0% 0%);
-	--fg-link        : #03a;
-	--fg-inverted    : #fff;  /* text on inverted backgrounds */
-	--fg-p           : #444;  /* multiline text on normal backgrounds */
-	--fg-gray        : #999;
-	--fg-disabled    : #00000066;  /* faded text on light bg */
-	--fg-disabled-inverted : #ffffff66;  /* faded text on dark colored bg */
+	--fg-inverted    : #fff;  /* text on dark or colored bg */
+	--fg-p           : #444;  /* multiline text on normal backgrounds (just a tad less bright than labels) */
+	--fg-gray        : #999;  /* faded text but clearly legible (disabled, info boxes) */
+	--fg-gray-inverted : #ffffff66;  /* faded text on dark or colored bg */
+	--fg-link        : #03a; /* anything clickable inside text: links, bare buttons, checkboxes */
+	--fg-label       : #666; /* between fg and gray (edit labels, chart labels) */
 
 	--bg             : #fff;
-	--bg1            : #eee;    /* seen on bg */
-	--bg2            : #aaa;    /* seen on bg1 */
-	--bg-alt         : #f3f3f3; /* alternating bg for grid rows */
-	--bg-gray        : #999;
+	--bg1            : #eee;    /* sits on bg */
+	--bg2            : #aaa;    /* sits on bg1 */
+	--bg-alt         : #f3f3f3; /* alternating bg for grid rows; must be lighter than bg1 */
+	--bg-smoke       : #00000022;  /* overlays bg */
 
-	--border         : hsl(0 0% 80%);
-	--border-hover   : hsl(0 0% 90%);
+	--border         : hsl(0 0% 80%); /* sits on bg */
+	--border-hover   : hsl(0 0% 90%); /* sits on bg */
+
+	--border-radius-button      : .3em;
+	--border-radius-input       : 0;
+	--border-radius-window      : .5em; /* modals & toolboxes */
+
+	--shadow-tooltip :  2px  2px  9px      #00000044;
+	--shadow-toolbox :  1px  1px  4px      #000000aa;
+	--shadow-menu    :  2px  2px  2px      #000000aa;
+	--shadow-button  :  0px  0px  8px  0px #00000011;
+	--shadow-modal   :  2px  5px 10px      #00000088;
+	--shadow-pressed : inset 0 0.15em 0.3em hsl(210 13% 12% / 51);
+	--shadow-thumb   :  1px  1px  2px      #000000aa; /* slider thumb */
+	--shadow-picker  :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 
 	--bg-button                 : hsl(206 28% 95%);
 	--bg-button-hover           : hsl(206 28% 90%);
 	--bg-button-pressed         : hsl(206 28% 85%);
 	--fg-button                 : var(--fg-inverted);
-
 	--bg-button-primary         : hsl(134 61% 41%); /* green bg */
 	--bg-button-primary-hover   : hsl(134 71% 33%);
 	--bg-button-primary-pressed : hsl(134 72% 28%);
 	--fg-button-primary         : var(--fg-inverted);
 	--border-button-primary     : hsl(134 61% 33%);
-
 	--bg-button-danger          : var(--bg-button);
 	--bg-button-danger-hover    : var(--bg-button-hover);
 	--bg-button-danger-pressed  : var(--bg-button-pressed);
 	--fg-button-danger          : hsl(0 54% 43%); /* red fg */
 
-	--shadow-popup   :  2px  2px  9px      #00000044;
-	--shadow-thumb   :  1px  1px  2px      #000000aa;
-	--shadow-menu    :  2px  2px  2px      #000000aa;
-	--shadow-button  :  0px  0px  8px  0px #00000011;
-	--shadow-modal   :  2px  5px 10px      #00000088;
-	--shadow-toolbox :  1px  1px  4px      #000000aa;
-	--shadow-pressed : inset 0 0.15em 0.3em #1b1f2333;
+	--fg-search       : var(--fg);  /* quicksearch text over quicksearch bg */
+	--bg-search       : #ff9;  /* quicksearch text bg */
+	--bg-info         : #069;  /* info bubbles */
+	--fg-info         : var(--x-fg-inverted);
+	--bg-error        : #a33; /* invalid inputs and error bubbles */
+	--fg-error        : var(--x-fg-inverted);
+	--bg-warn         : #ffa500; /* warning bubbles */
+	--fg-warn         : var(--fg);
+
+	/* grid cell data states */
+	--bg-new          : #eeeeff;
+	--bg-modified     : #ddffdd;
+	--bg-new-modified : #ccf0f0;
+
+	/* grid cell interaction states. these need to be opaque! */
+	--bg-unfocused          : #999;
+	--bg-focused            : #ddd;
+	--bg-unfocused-selected : #333;
+	--fg-unfocused-selected : var(--fg-inverted);
+	--bg-focused-selected   : #258;
+	--bg-focused-error      : #f33;
+	--bg-unselected         : #888;
+	--bg-selected           : #69c;
+	--fg-selected           : var(--fg-inverted);
+	--fg-focused            : var(--fg-inverted);
+	--bg-row-focused        : #ddd;
 
 	color            : var(--fg);
 	background-color : var(--bg);
@@ -88,16 +117,22 @@ NOTES:
 
 	--fg             : hsl(0 0% 100%);
 	--fg-inverted    : hsl(0 0% 100%);
-	--fg-link        : #99f;
 	--fg-p           : hsl(0 0% 90%);
-	--fg-disabled    : #ffffff66;
-	--fg-disabled-inverted : var(--fg-disabled);
+	--fg-gray        : #ffffff66;
+	--fg-gray-inverted : var(--fg-gray);
+	--fg-link        : #99f;
+	--fg-label       : #aaa;
 
 	--bg             : hsl(216 28% 7%);
 	--bg1            : hsl(216 28% 13%);
 	--bg2            : hsl(216 28% 16%);
 	--bg-alt         : hsl(216 28% 9%);
-	--bg-gray        : #666;
+	--bg-smoke       : #ffffff22;
+
+	--border         : hsl(0 0% 20%);
+	--border-hover   : hsl(0 0% 50%);
+
+	--shadow-pressed : inset 0 .15em .5em hsl(228 32% 15% / 46%);
 
 	--bg-button                 : hsl(215 15% 15%);
 	--bg-button-hover           : hsl(215 15% 24%);
@@ -108,8 +143,17 @@ NOTES:
 	--bg-button-danger-pressed  : var(--bg-button-pressed);
 	--fg-button-danger          : hsl(0 54% 43%);
 
-	--border         : hsl(0 0% 20%);
-	--border-hover   : hsl(0 0% 50%);
+	/* grid cell data states */
+	--bg-new               : #2c2c5c;
+	--bg-modified          : #196119;
+	--bg-new-modified      : #293b34;
+
+	/* grid cell interaction states. these need to be opaque! */
+	--bg-unfocused-selected : #4c545d;
+	--bg-unfocused          : #2e3033;
+	--bg-unselected         : #1d2021;
+	--bg-selected           : #122f4d;
+	--bg-row-focused        : #222326;
 
 	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
 
@@ -132,6 +176,8 @@ NOTES:
 	--font-size-h1     : 32px;
 	--font-size-h2     : 26px;
 	--font-size-h3     : 22px;
+
+	--font-baseline-adjust-ff: 0; /* set this to 1 depending on font */
 
 	font-size: var(--font-size-normal);
 
@@ -225,7 +271,7 @@ h3 { font-size: var(--font-size-h3); }
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-[gray], .gray { color: var(--fg-gray); }
+.pre { white-space: pre; }
 .small   { font-size: var(--font-size-small); }
 .normal  { font-size: var(--font-size-normal); }
 .large   { font-size: var(--font-size-large); }
@@ -239,6 +285,10 @@ h3 { font-size: var(--font-size-h3); }
 .underline { text-decoration: underline; }
 .strike    { text-decoration: line-through; }
 .allcaps   { text-transform: uppercase; }
+
+[gray], .gray { color: var(--fg-gray); }
+.label { color: var(--fg-label); }
+.link  { color: var(--fg-link); }
 
 /* ALIGN: INLINE ---------------------------------------------------------- */
 
@@ -260,15 +310,15 @@ h3 { font-size: var(--font-size-h3); }
 
 /* ALIGN: FLEXBOX --------------------------------------------------------- */
 
-.h     { display: inline-flex; }
-.h-r   { display: inline-flex; justify-content: flex-end; }
-.h-r-c { display: inline-flex; justify-content: flex-end; align-items: center; }
-.h-c   { display: inline-flex; justify-content: center; }
-.h-sb  { display: inline-flex; justify-content: space-between; }
-.h-l-c { display: inline-flex; align-items: center; }
-.h-c-c { display: inline-flex; justify-content: center; align-items: center; }
-.h-c-b { display: inline-flex; justify-content: center; align-items: flex-end; }
-.h-c-t { display: inline-flex; justify-content: center; align-items: flex-start; }
+.h     { display: inline-flex; flex-flow: row; justify-content: flex-start   ; }
+.h-r   { display: inline-flex; flex-flow: row; justify-content: flex-end     ; }
+.h-r-c { display: inline-flex; flex-flow: row; justify-content: flex-end     ; align-items: center    ; }
+.h-c   { display: inline-flex; flex-flow: row; justify-content: center       ; }
+.h-sb  { display: inline-flex; flex-flow: row; justify-content: space-between; }
+.h-l-c { display: inline-flex; flex-flow: row; justify-content: flex-start   ; align-items: center    ; }
+.h-c-c { display: inline-flex; flex-flow: row; justify-content: center       ; align-items: center    ; }
+.h-c-b { display: inline-flex; flex-flow: row; justify-content: center       ; align-items: flex-end  ; }
+.h-c-t { display: inline-flex; flex-flow: row; justify-content: center       ; align-items: flex-start; }
 
 .v     { display: inline-flex; flex-flow: column; }
 .v-b   { display: inline-flex; flex-flow: column; justify-content: flex-end; }
@@ -321,14 +371,18 @@ h3 { font-size: var(--font-size-h3); }
 
 /* BORDERS ---------------------------------------------------------------- */
 
-.b  { border        : 1px solid var(--border); }
-.b0 { border        : 0; }
-.b2 { border        : 2px solid var(--border); }
-.b4 { border        : 4px solid var(--border); }
-.bl { border-left   : 1px solid var(--border); }
-.br { border-right  : 1px solid var(--border); }
-.bt { border-top    : 1px solid var(--border); }
-.bb { border-bottom : 1px solid var(--border); }
+.b   { border        : 1px solid var(--border); }
+.b2  { border        : 2px solid var(--border); }
+.b4  { border        : 4px solid var(--border); }
+.bl  { border-left   : 1px solid var(--border); }
+.br  { border-right  : 1px solid var(--border); }
+.bt  { border-top    : 1px solid var(--border); }
+.bb  { border-bottom : 1px solid var(--border); }
+.b0  { border-width        : 0; }
+.bl0 { border-left-width   : 0; }
+.br0 { border-right-width  : 0; }
+.bt0 { border-top-width    : 0; }
+.bb0 { border-bottom-width : 0; }
 
 .dotted { border-style: dotted; }
 .dashed { border-style: dashed; }
@@ -460,10 +514,11 @@ h3 { font-size: var(--font-size-h3); }
 
 /* BACKGROUNDS ------------------------------------------------------------ */
 
-.bg  { background: var(--bg); }
-.bg1 { background: var(--bg1); }
-.bg2 { background: var(--bg2); }
-.bg-gray  { background: var(--bg-gray); }
+.bg       { background: var(--bg); }
+.bg1      { background: var(--bg1); }
+.bg2      { background: var(--bg2); }
+.bg-alt   { background: var(--bg-alt); }
+.bg-smoke { background: var(--bg-smoke); }
 .bg-fg    { background: var(--fg); }
 
 /* COLORS ----------------------------------------------------------------- */
@@ -478,8 +533,8 @@ h3 { font-size: var(--font-size-h3); }
 
 /* SHADOWS ---------------------------------------------------------------- */
 
-.shadow         { box-shadow: var(--shadow-popup  ); }
-.shadow-popup   { box-shadow: var(--shadow-popup  ); }
+.shadow         { box-shadow: var(--shadow-tooltip); }
+.shadow-tooltip { box-shadow: var(--shadow-tooltip); }
 .shadow-thumb   { box-shadow: var(--shadow-thumb  ); }
 .shadow-menu    { box-shadow: var(--shadow-menu   ); }
 .shadow-button  { box-shadow: var(--shadow-button ); }
@@ -502,8 +557,9 @@ h3 { font-size: var(--font-size-h3); }
 
 /* CURSORS ---------------------------------------------------------------- */
 
-.cursor-hand { cursor: pointer; }
-.cursor-grab { cursor: pointer; }
+.cursor-arrow { cursor: default; }
+.cursor-hand  { cursor: pointer; }
+.cursor-grab  { cursor: pointer; }
 
 /* INTERACTION ------------------------------------------------------------ */
 
@@ -511,20 +567,6 @@ h3 { font-size: var(--font-size-h3); }
 .hover-darken:hover  { filter: brightness(0.85); }
 .hover-lighten:hover { filter: brightness(1.15); }
 .hover-b:hover       { border-color : var(--border-hover); }
-
-/* UI PATTERNS ------------------------------------------------------------ */
-
-.overlay {
-	position: absolute;
-	left: 0;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	display: flex;
-	overflow: auto;
-	justify-content: center;
-	align-items: center;
-}
 
 /* FONTS ------------------------------------------------------------------ */
 

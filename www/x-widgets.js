@@ -34,6 +34,24 @@ GLOBALS
 	notify(text, ['search'|'info'|'error'], [timeout])
 	setglobal(k, v)
 
+WRITING CSS
+
+	REUSE
+		Use var() for anything that is used in two places and is not a coincidence.
+		Use utils classes over specific styles when you can.
+
+	STATES
+		State classes are set only on the outermost element of a widget except
+		`:focus-visible` which is set only to the innermost element (which has tabindex).
+		Use `.outer.state .inner` to style `.inner` on `.state`.
+		Use `.outer .inner:has(:focus-visible)` to style `.outer` on `:focus-visible`.
+
+	DESCENDANT COMBINATOR
+		For container widgets like tabs and split you have to use the ">" combinator
+		instead of " " at least until you reach a header or something, otherwise
+		you will accidentally select child widgets of the same type as the container.
+
+
 */
 
 function widget(tag, category, init) {

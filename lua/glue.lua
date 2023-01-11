@@ -53,7 +53,7 @@ ARRAYS
 	sort(t,[cmp]) -> t           = table.sort
 	add(t, v)                      insert(t, v)
 	push(t, v)                   = add
-	extend(dt, t1, ...) -> dt      extend an array
+	extend(dt, t1, ...) -> dt      extend an array with contents of other arrays
 	append(dt, v1, ...) -> dt      append non-nil values to an array
 	shift(t, i, n) -> t            shift array elements
 	slice(t, [i], [j]) -> t        slice an array

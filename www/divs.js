@@ -3,7 +3,7 @@
 	DOM API & web components.
 	Written by Cosmin Apreutesei. Public domain.
 
-DEPENDS
+Depends on:
 	glue.js
 
 You must call on DOM load:
@@ -19,8 +19,9 @@ Defines CSS rules for:
 Uses CSS classes on the <html> tag:
 	.theme-light .theme-dark .theme-small .theme-large
 
-Adding CSS at runtime:
-	css([layer], rules)
+CSS-IN-JS
+	css_layer(name) -> layer; layer(selector, includes, rules)
+	css[_state|_role|_role_state|_generic_state](selector, includes, rules)
 
 DOM load event:
 	on_dom_load(f)
@@ -255,12 +256,6 @@ LIVE-MOVE LIST ELEMENTS
 	live_move_mixin(e)
 	e.make_children_movable()
 
-CSS DEV TOOLS
-	css_report_specificity(css_file, max_spec)
-
-COMPOSABLE CSS
-	you can use the syntax `--inc: cls1 ...;` in css declarations.
-
 THEMING
 	is_theme_dark() -> t|f
 	set_theme_dark(dark)
@@ -336,58 +331,104 @@ function on_dom_load(fn) {
 		fn()
 }
 
-// adding CSS at runtime -----------------------------------------------------
+// CSS-in-JS -----------------------------------------------------------------
 
-let css_file = memoize(function(name) {
-	let style = document.createElement('style')
-	on_dom_load(function() {
-		document.head.add(style)
-	})
-	return style
+// Why this instead of pure CSS? First, all selectors get specificity 0 which
+// effectively disables this genius CSS feature so rules are applied in source
+// order in layers (what @layer and :where() would do in a CSS). Layers let
+// you restyle widgets without accidentally muting role/state-modifier styles.
+// Second, you get composable CSS without silly offline preprocessors.
+// Now you can style with utility classes inside arbitrary CSS selectors like
+// ones with :hover and :focus-visible. You can also use fontawesome icons
+// by name inside ::before rules. Third, because you get to put widget styles
+// near the widget code that they're coupled to. Fifth, because you get to
+// solve all these old problems with a page of JS. The cost is 1-3 frames
+// at startup for a site with some 3000 rules.
+
+class_rules = obj() // {class->rules} from all layers.
+
+on_dom_load(function() {
+	let t0 = time()
+	let n = 0
+	function add_rule(rule) {
+		let selector = rule.selectorText // this is slow on Chrome :(
+		if (!isstr(selector))
+			return
+		let [cls] = selector
+			.replace(/::before$/, '') // strip ::before (fontawesome)
+			.replace(/::after$/ , '') // strip ::after  (?)
+			.captures(/^\.([^ >#:\.+~]+)$/) // simple .class selector
+		if (!cls)
+			return
+		let rules = rule.cssText.slice(selector.length + 3, -2)
+		if (class_rules[cls])
+			pr('CSS duplicate: ', cls, '\n\n', class_rules[cls], '\n\n', rules)
+		class_rules[cls] = rules
+		n++
+	}
+	function add_rules(rules) {
+		for (let rule of rules) {
+			if (rule instanceof CSSLayerBlockRule) // @layer block
+				add_rules(rule.cssRules)
+			else
+				add_rule(rule)
+		}
+	}
+	for (let ss of document.styleSheets)
+		if (!ss.ownerNode.css_in_js_layer)
+			add_rules(ss.cssRules)
+		else
+			pr(ss)
+
+	let t1 = time()
+	debug('CSS ', n, 'rules,', floor((t1 - t0) * 1000), 'ms')
 })
 
-function css(layer, rules) {
-	if (rules == null) {
-		rules = layer
-		layer = 'inline'
+css_layer = memoize(function(layer) {
+
+	let pieces = ['@layer '+layer+' {\n\n']
+	let style = document.createElement('style')
+	style.css_in_js_layer = true // we map classes ourselves.
+
+	on_dom_load(function() {
+		pieces.push('\n} // layer')
+		let a = []
+		for (let p of pieces)
+			if (isfunc(p)) // expand includes
+				p(a)
+			else
+				a.push(p)
+		style.textContent = a.join('')
+		document.head.append(style)
+	})
+
+	return function(selector, includes, rules) {
+		// ::before needs to be after :where(), so we must split the selector.
+		let [prefix, suffix] = selector.captures(/^(.+?)(::[^ >#:\.+~]+)$/)
+		if (!prefix) {
+			prefix = selector
+			suffix = ''
+		}
+		pieces.push(':where(', prefix, ')', suffix, ' {\n')
+		if (includes)
+			pieces.push(function(pieces) {
+				for (let cls of includes.words())
+					pieces.push('\t', class_rules[cls], '\n')
+			})
+		pieces.push(rules)
+		pieces.push('}\n')
+		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // simple class
+		if (cls)
+			class_rules[cls] = rules
 	}
-	let style = css_file(layer)
-	style.textContent = style.textContent + '\n' + rules
-}
 
-// supporting styles ---------------------------------------------------------
+})
 
-css(`
-
-[hidden] {
-	display: none !important;
-}
-
-/* using specificity 0-3-0 so that normal state styles don't accidentally undisable it. */
-/* NOTE: you still have to use :not([disabled]):hover to prevent :hover on
-   disabled widgets because we're not using pointer-events: none. */
-[disabled][disabled][disabled] {
-	opacity: .5;
-	filter: grayscale();
-}
-
-/* disabled child: reset opacity and filter. */
-/* TODO: it's wrong to do this for widgets that set these in their normal
-   state but selector ":not([disabled]) [disabled]" would be too slow.
-	Opacity is wrong anyway, find another filter that doesn't mix.
-*/
-[disabled] [disabled][disabled] {
-	opacity: unset;
-	filter: unset;
-}
-
-[disabled],
-[disabled] *
-{
-	cursor: default !important;
-}
-
-`)
+css               = css_layer('base')
+css_state         = css_layer('state')
+css_role          = css_layer('role')
+css_role_state    = css_layer('role-state')
+css_generic_state = css_layer('generic-state')
 
 // element attribute manipulation --------------------------------------------
 
@@ -1504,6 +1545,26 @@ to add `:not([disabled])` in css on those selectors.
 NOTE: for non-widgets setting the `disabled` attr is enough to disable them.
 --------------------------------------------------------------------------- */
 
+// NOTE: you still have to use `:not([disabled]):hover` to prevent :hover
+// on disabled widgets because we're not using `pointer-events: none`.
+css_generic_state('[disabled]', '', `
+	opacity: .5;
+	filter: grayscale();
+`)
+
+// disabled child: reset opacity and filter.
+// TODO: it's wrong to do this for widgets that set these in their normal
+// state but selector `:not([disabled]) [disabled]` would be too slow.
+// Opacity is wrong anyway, find another filter that doesn't mix.
+css_generic_state('[disabled] [disabled]', '', `
+	opacity: unset;
+	filter: unset;
+`)
+
+css_generic_state('[disabled], [disabled] *', '', `
+	cursor: default !important;
+`)
+
 e.make_disablable = function() {
 
 	let e = this
@@ -1720,8 +1781,6 @@ e.update = function(opt) {
 		return
 	if (update_opt.show != null)
 		this.show(update_opt.show)
-	if (this.hidden)
-		return
 	if (update_set.has(this)) // update() inside do_update(), eg. a prop was set.
 		return
 	update_set.add(this)
@@ -1758,8 +1817,6 @@ e.position = function() {
 	if (!this.do_position)
 		return
 	if (!this.bound)
-		return
-	if (this.hidden)
 		return
 	position_set.add(this)
 	if (updating)
@@ -1888,6 +1945,28 @@ installers.attr_changed = function() {
 	this.on_bind(bind)
 	if (this.bound)
 		bind.call(this, true)
+}
+
+installers.hover = function() {
+	if (this.__hover_installed)
+		return
+	this.__hover_installed = true
+	this.on('pointerover', function(ev, mx, my) {
+		if (this.pointer_captured)
+			return
+		if (this.ev.buttons)
+			return
+		if (this.hasattr('disabled'))
+			return
+		this.fire('hover', ev, true, mx, my)
+	})
+	this.on('pointerleave', function(ev) {
+		if (this.pointer_captured)
+			return
+		if (this.hasattr('disabled'))
+			return
+		this.fire('hover', ev, false)
+	})
 }
 
 callers.click = function(ev, f) {
@@ -2079,6 +2158,10 @@ method(Window, 'rect', function() {
 })
 
 // common state wrappers -----------------------------------------------------
+
+css_generic_state('[hidden]', '', `
+	display: none !important;
+`)
 
 e.hide = function(on) {
 	if (!arguments.length)
@@ -2487,12 +2570,33 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 
 // modals & overlays ---------------------------------------------------------
 
+css_role('.overlay', '', `
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	display: grid;
+	justify-content: center;
+	align-content: center;
+	z-index: 1;
+`)
+
 function overlay(attrs, content) {
 	let e = div(attrs)
 	e.class('overlay')
 	e.set(content || div())
 	return e
 }
+
+css_role('.modal-overlay', '', `
+	position: fixed;
+	background-color: rgba(0,0,0,0.6);
+	display: grid;
+	justify-content: center;
+	align-content: center;
+	z-index: 1;
+`)
 
 e.modal = function(on) {
 	let e = this
@@ -2510,28 +2614,6 @@ e.modal = function(on) {
 	}
 	return e
 }
-
-css(`
-.overlay {
-	position: fixed;
-	left: 0;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	display: grid;
-	justify-content: center;
-	align-content: center;
-	z-index: 1;
-}
-
-.modal-overlay {
-	background-color: rgba(0,0,0,0.6);
-	display: grid;
-	justify-content: center;
-	align-content: center;
-	z-index: 1;
-}
-`)
 
 // tab cycling within the app, popups & modauls ------------------------------
 
@@ -2634,14 +2716,6 @@ elements that create a stacking context indirectly by using `opacity`,
 [1] https://github.com/w3c/csswg-drafts/issues/4092
 */
 
-css(`
-.popup {
-	/* hack to escape parents' overflow: hidden as long as none of them
-	creates a stacking context */
-	position: fixed !important;
-}
-`)
-
 property(Element, 'creates_stacking_context', function() {
 	if (this.parent == document)
 		return true
@@ -2680,6 +2754,12 @@ property(Element, 'stacking_parent', function() {
 		return
 	return get_stacking_parent(this.parent)
 })
+
+// hack to escape parents' `overflow: hidden` which works as long as
+// none of them creates a stacking context, so watch out for that!
+css_role('.popup', '', `
+	position: fixed !important;
+`)
 
 e.popup = function(target, side, align) {
 
@@ -3027,126 +3107,6 @@ function live_move_mixin(e) {
 
 	return e
 }
-
-// CSS specificity reporting -------------------------------------------------
-
-function css_selector_specificity(s0) {
-	let s = s0
-	let n = 0 // current specificity
-	let maxn = 0 // current max specificity
-	let cs = [0] // call stack: 1 for :is(), 0 for :not() and :where()
-	let ns = [] // specificity stack for :is()
-	let maxns = [] // max specificity stack for :is()
-	let z = 0 // call stack depth of first :where()
-	let sm // last matched string
-	function match(re) {
-		let m = s.match(re)
-		if (!m) return
-		sm = m[0]
-		assert(sm.len)
-		s = s.slice(sm.len)
-		return true
-	}
-	function next() {
-		if (!s.len) return max(maxn, n)
-		if (match(/^[ >+~*]+/ )) return next()
-		if (match(/^\)/      )) {
-			assert(cs.len > 1, 'unexpected )')
-			if (cs.pop()) { n = ns.pop() + max(maxn, n); maxn = maxns.pop() }
-			if (z == cs.len) z = 0; return next()
-		}
-		if (match(/^:is\(/   )) {
-			cs.push(1); ns.push(n); maxns.push(maxn); n = 0; maxn = 0
-			return next()
-		}
-		if (match(/^:not\(/  )) { cs.push(0); return next() }
-		if (match(/^:has\(/  )) { cs.push(0); return next() }
-		if (match(/^:where\(/)) { if (!z) z = cs.len; cs.push(0); return next() }
-		if (match(/^,/       )) { maxn = max(maxn, n); n = 0; return next() }
-		if (match(/^\[[^\]]*\]/) || match(/^[\.:#]?[:a-zA-Z\-_][a-zA-Z0-9\-_]*/)) {
-			if (!z)
-				n += (sm[0] == '#' && 10 || sm[0] == '.' && 1 || sm[0] == ':' && sm[1] != ':' && 1 || .1)
-			return next()
-		}
-		warn('invalid selector: '+s0, s)
-	}
-	return next()
-}
-
-function css_report_specificity(file, max_spec) {
-	for (let ss of document.styleSheets) {
-		if (!((ss.href || '').ends(file || '')))
-			continue
-		for (let r of ss.cssRules) {
-			let s = r.selectorText
-			if (!isstr(s))
-				continue
-			let spec = css_selector_specificity(s)
-			if (spec > max_spec)
-				debug('CSS spec', spec, s)
-		}
-	}
-}
-
-/* composable CSS ------------------------------------------------------------
-
-	example.css:
-		.foo { }
-		.bar { }
-		.baz { --inc: foo bar; }  # adds into .baz all properties from .foo and .bar
-
-*/
-
-on_dom_load(function() {
-
-	css_report_specificity('x-widgets.css', 0)
-
-	let t0 = time()
-
-	let n = 0
-	let class_rules = obj()
-	for (let ss of document.styleSheets) {
-		for (let r of ss.cssRules) {
-			let s = r.selectorText // this is slow on Chrome :(
-			if (!isstr(s))
-				continue
-			let m = s.match(/^\.([a-zA-Z0-9\-_]+)$/) // simple class
-			if (!m)
-			 	continue
-			class_rules[m[1]] = r
-			n++
-		}
-	}
-
-	let t1 = time()
-
-	for (let ss of document.styleSheets) {
-		for (let r of ss.cssRules) {
-			let sm = r.styleMap
-			if (!sm) continue
-			let inc = sm.get('--inc') // this is slow on Chrome :(
-			inc = inc && inc[0]
-			if (!inc) continue
-			for (let s of words(inc)) {
-				let cr = class_rules[s]
-				if (cr) {
-					debug('CSS', s, '->', r.selectorText)
-					for (let [k, v] of cr.styleMap)
-						r.style[k] = v
-				} else {
-					warn('class not found: '+s)
-				}
-			}
-		}
-	}
-
-	let t2 = time()
-
-	debug('CSS --inc', n, 'rules,',
-		floor((t1 - t0) * 1000), 'ms to map,',
-		floor((t2 - t1) * 1000), 'ms to update')
-
-})
 
 // theming -------------------------------------------------------------------
 
