@@ -17,7 +17,7 @@
 <script src="../../www/ace/ace.js"></script>
 
 <link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
-<link rel="stylesheet" type="text/css" href="../../www/styling.css">
+<link rel="stylesheet" type="text/css" href="../../www/utils.css">
 <link rel="stylesheet" type="text/css" href="../../www/x-widgets.css">
 
 <style>
@@ -65,14 +65,14 @@ button {
 }
 
 .demo-list-item:hover { background: #ddd; }
-[theme=dark] .demo-list-item:hover { background: #333; }
+.theme-dark .demo-list-item:hover { background: #333; }
 .demo-list-item.selected { background: #ddf; }
-[theme=dark] .demo-list-item.selected { background: #336; }
+.theme-dark .demo-list-item.selected { background: #336; }
 button { border: 1px solid #555; }
-[theme=dark] button { background: #333; color: white; border-color: #555; }
+.theme-dark button { background: #333; color: white; border-color: #555; }
 
 button[pressed] { background: #ddf; }
-[theme=dark] button[pressed] { background: #336; }
+.theme-dark button[pressed] { background: #336; }
 
 /*
 hack to get fontawesome fonts from a rel path so that we can serve this html
@@ -142,7 +142,7 @@ on_dom_load(function() {
 			<button id=run_button>Run</button>
 			<button id=reload_button>Reload</button>
 			<div style="flex: 1; text-align: right;">
-				<button id=medium_button>Medium</button>
+				<button id=small_button>Small</button>
 				<button id=large_button>Large</button>
 				<button id=lights_button>Lights</button>
 			</div>
@@ -1431,11 +1431,10 @@ reload_button.on('click', function() {
 })
 
 lights_button.on('click', function() {
-	let dark = body.attr('theme') != 'dark'
-	set_theme(dark ? 'dark' : null)
+	let dark = !is_theme_dark()
 	ace_editor.setTheme(dark ? 'ace/theme/tomorrow_night' : null)
 	save('dark_mode', dark)
-	document.fire('layout_changed')
+	set_theme_dark(dark)
 })
 
 inline_button.on('click', function() {
@@ -1444,33 +1443,31 @@ inline_button.on('click', function() {
 })
 
 function reset_size_buttons() {
-	body.attr('large', false)
-	body.attr('medium', false)
-	medium_button.attr('pressed', false)
+	small_button.attr('pressed', false)
 	large_button.attr('pressed', false)
 }
 
-medium_button.on('click', function() {
-	let v = !body.hasattr('medium')
+small_button.on('click', function() {
+	let v = get_theme_size() != 'small'
 	reset_size_buttons()
-	body.attr('medium', v)
 	this.attr('pressed', v)
 	save('size', v && 'medium' || null)
+	set_theme_size(v && 'small')
 })
 
 large_button.on('click', function() {
-	let v = !body.hasattr('large')
+	let v = get_theme_size() != 'large'
 	reset_size_buttons()
-	body.attr('large', v)
 	this.attr('pressed', v)
 	save('size', v && 'large' || null)
+	set_theme_size(v && 'large')
 })
 
 on_dom_load(function() {
 	if (load('dark_mode') == 'true')
 		lights_button.click()
 	if (load('size') == 'medium')
-		medium_button.click()
+		small_button.click()
 	else if (load('size') == 'large')
 		large_button.click()
 })

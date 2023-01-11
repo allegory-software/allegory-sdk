@@ -1,0 +1,558 @@
+/*
+
+	Functional CSS library & reset.
+	Written by Cosmin Apreutesei. Public Domain.
+
+CSS CLASSES:
+	TEXT         nowrap gray small [x]large tight bold italic underline strike allcaps
+	INLINE       va-m float-l float-r
+	POSITIONING  rel abs z{1 2 3 4 5}
+	FLEXBOX H    h h-r h-r-c h-c h-sb h-l-c h-c-c h-c-b h-c-t
+	FLEXBOX V	 v v-b v-b-c v-c v-sb v-t-c v-c-c v-c-r v-c-l
+	FLEXBOX      s[1-5] shrinks flex-wrap
+	GRID         grid
+	SIZING       ?
+	BORDERS      {b bl br bt bb}[0 2 4] dotted dashed bn ro[s 0 2 4] ro{l r t b}0 round
+	PADDINGS     {p pl pr pt pb px py}[0 s 2 4]
+	MARGINS      {m ml mr mt mb mx my}[0 s 2 4] {ml mr mx}-auto
+	OVERFLOW     scroll vscroll hscroll clip clip-x clip-y scroll-thin
+	BACKGROUNDS  bg[1 2]
+	COLORS       ...
+	FILTERS      darken lighten
+	CURSORS      cursor-{grab hand}
+	TRANSITIONS  ease0 ease -01s -05s -1s
+	INTERACTION  hover-darken hover-lighten hover-b
+	UI PATTERNS  overlay
+	FONTS        font-opensans
+HTML ATTRS:
+	gray nowrap
+
+NOTES:
+	You must do `<html class=theme-light>` for `.theme-inverted` to work!
+	Specificity is 0-1-0 except for state utils which get 0-2-0.
+
+*/
+
+@layer base, role, state, role-state, generic-state;
+
+@layer base {
+
+:root, .theme-light, .theme-dark .theme-inverted {
+
+	--fg             : hsl(0 0% 0%);
+	--fg-link        : #03a;
+	--fg-inverted    : #fff;  /* text on inverted backgrounds */
+	--fg-p           : #444;  /* multiline text on normal backgrounds */
+	--fg-gray        : #999;
+	--fg-disabled    : #00000066;  /* faded text on light bg */
+	--fg-disabled-inverted : #ffffff66;  /* faded text on dark colored bg */
+
+	--bg             : #fff;
+	--bg1            : #eee;    /* seen on bg */
+	--bg2            : #aaa;    /* seen on bg1 */
+	--bg-alt         : #f3f3f3; /* alternating bg for grid rows */
+	--bg-gray        : #999;
+
+	--border         : hsl(0 0% 80%);
+	--border-hover   : hsl(0 0% 90%);
+
+	--bg-button                 : hsl(206 28% 95%);
+	--bg-button-hover           : hsl(206 28% 90%);
+	--bg-button-pressed         : hsl(206 28% 85%);
+	--fg-button                 : var(--fg-inverted);
+
+	--bg-button-primary         : hsl(134 61% 41%); /* green bg */
+	--bg-button-primary-hover   : hsl(134 71% 33%);
+	--bg-button-primary-pressed : hsl(134 72% 28%);
+	--fg-button-primary         : var(--fg-inverted);
+	--border-button-primary     : hsl(134 61% 33%);
+
+	--bg-button-danger          : var(--bg-button);
+	--bg-button-danger-hover    : var(--bg-button-hover);
+	--bg-button-danger-pressed  : var(--bg-button-pressed);
+	--fg-button-danger          : hsl(0 54% 43%); /* red fg */
+
+	--shadow-popup   :  2px  2px  9px      #00000044;
+	--shadow-thumb   :  1px  1px  2px      #000000aa;
+	--shadow-menu    :  2px  2px  2px      #000000aa;
+	--shadow-button  :  0px  0px  8px  0px #00000011;
+	--shadow-modal   :  2px  5px 10px      #00000088;
+	--shadow-toolbox :  1px  1px  4px      #000000aa;
+	--shadow-pressed : inset 0 0.15em 0.3em #1b1f2333;
+
+	color            : var(--fg);
+	background-color : var(--bg);
+}
+
+.theme-dark, .theme-light .theme-inverted {
+
+	--fg             : hsl(0 0% 100%);
+	--fg-inverted    : hsl(0 0% 100%);
+	--fg-link        : #99f;
+	--fg-p           : hsl(0 0% 90%);
+	--fg-disabled    : #ffffff66;
+	--fg-disabled-inverted : var(--fg-disabled);
+
+	--bg             : hsl(216 28% 7%);
+	--bg1            : hsl(216 28% 13%);
+	--bg2            : hsl(216 28% 16%);
+	--bg-alt         : hsl(216 28% 9%);
+	--bg-gray        : #666;
+
+	--bg-button                 : hsl(215 15% 15%);
+	--bg-button-hover           : hsl(215 15% 24%);
+	--bg-button-pressed         : hsl(215 16% 30%);
+
+	--bg-button-danger          : var(--bg-button);
+	--bg-button-danger-hover    : var(--bg-button-hover);
+	--bg-button-danger-pressed  : var(--bg-button-pressed);
+	--fg-button-danger          : hsl(0 54% 43%);
+
+	--border         : hsl(0 0% 20%);
+	--border-hover   : hsl(0 0% 50%);
+
+	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
+
+	color            : var(--fg);
+	background-color : var(--bg);
+
+}
+
+:root {
+
+	--space-s : .25em;
+	--space-1 :  .5em;
+	--space-2 : .75em;
+	--space-4 :   1em;
+
+	--font-size-small  : 11px;
+	--font-size-normal : 13px;
+	--font-size-large  : 16px;
+	--font-size-xlarge : 22px;
+	--font-size-h1     : 32px;
+	--font-size-h2     : 26px;
+	--font-size-h3     : 22px;
+
+	font-size: var(--font-size-normal);
+
+}
+
+.theme-small {
+
+	--font-size-small  : 10px;
+	--font-size-normal : 12px;
+	--font-size-large  : 13px;
+	--font-size-xlarge : 18px;
+	--font-size-h1     : 26px;
+	--font-size-h2     : 22px;
+	--font-size-h3     : 18px;
+
+	font-size: var(--font-size-normal);
+
+}
+
+.theme-large {
+
+	--font-size-small  : 13px;
+	--font-size-normal : 15px;
+	--font-size-large  : 18px;
+	--font-size-xlarge : 22px;
+	--font-size-h1     : 32px;
+	--font-size-h2     : 26px;
+	--font-size-h3     : 22px;
+
+	font-size: var(--font-size-normal);
+
+}
+
+/* RESET ------------------------------------------------------------------ */
+
+* { box-sizing: border-box; }
+
+html, body, table, tr, td, img {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+/* let `body` do the scrolling instead of `html` so that modals can cover the scrollbars */
+html {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	font-family: arial, sans-serif;
+}
+
+body {
+	width: 100%;
+	height: 100%;
+
+	/*
+	For document-style UIs use `overflow-y: scroll` to avoid the annoying
+	horizontal shifting of a centered page that happens between pages that fit
+	the height of the window and those that don't. For split-screen-style UIs
+	use `overflow-y: auto` or `hidden` instead because they use full-screen
+	splitters that do the scrolling instead so the body itself should never
+	have to scroll. We use `auto` by default to detect content overflow bugs.
+	*/
+	overflow: auto;
+	/* overflow-y: scroll; */
+}
+
+img {
+	display: block; /* don't align to surrounding text, that never made sense */
+	max-width: 100%; /* make shrinkable */
+}
+
+hr { /* style hrs with just `color` */
+	border: 0;
+	border-top-width: 1px;
+	border-top-style: solid;
+	color: var(--border);
+}
+
+a, a:visited { color: var(--fg-link); }
+p { color: var(--fg-p); }
+
+h1 { font-size: var(--font-size-h1); }
+h2 { font-size: var(--font-size-h2); }
+h3 { font-size: var(--font-size-h3); }
+
+/* TEXT ------------------------------------------------------------------- */
+
+[nowrap], .nowrap {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+[gray], .gray { color: var(--fg-gray); }
+.small   { font-size: var(--font-size-small); }
+.normal  { font-size: var(--font-size-normal); }
+.large   { font-size: var(--font-size-large); }
+.xlarge  { font-size: var(--font-size-xlarge); }
+.h1      { font-size: var(--font-size-h1); }
+.h2      { font-size: var(--font-size-h2); }
+.h3      { font-size: var(--font-size-h3); }
+.tight   { line-height: 1.3; }
+.bold    { font-weight: bold; }
+.italic  { font-style: italic; }
+.underline { text-decoration: underline; }
+.strike    { text-decoration: line-through; }
+.allcaps   { text-transform: uppercase; }
+
+/* ALIGN: INLINE ---------------------------------------------------------- */
+
+.va-m { vertical-align: middle; }
+.float-l { float: left; }
+.float-r { float: right; }
+
+/* POSITIONING ------------------------------------------------------------ */
+
+.rel { position: relative; }
+.abs { position: absolute; }
+
+/* example: menu = z4, picker = z3, tooltip = z2, toolbox = z1 */
+.z1  { z-index: 1; }
+.z2  { z-index: 2; }
+.z3  { z-index: 3; }
+.z4  { z-index: 4; }
+.z5  { z-index: 5; }
+
+/* ALIGN: FLEXBOX --------------------------------------------------------- */
+
+.h     { display: inline-flex; }
+.h-r   { display: inline-flex; justify-content: flex-end; }
+.h-r-c { display: inline-flex; justify-content: flex-end; align-items: center; }
+.h-c   { display: inline-flex; justify-content: center; }
+.h-sb  { display: inline-flex; justify-content: space-between; }
+.h-l-c { display: inline-flex; align-items: center; }
+.h-c-c { display: inline-flex; justify-content: center; align-items: center; }
+.h-c-b { display: inline-flex; justify-content: center; align-items: flex-end; }
+.h-c-t { display: inline-flex; justify-content: center; align-items: flex-start; }
+
+.v     { display: inline-flex; flex-flow: column; }
+.v-b   { display: inline-flex; flex-flow: column; justify-content: flex-end; }
+.v-b-c { display: inline-flex; flex-flow: column; justify-content: flex-end; align-items: center; }
+.v-c   { display: inline-flex; flex-flow: column; justify-content: center; }
+.v-sb  { display: inline-flex; flex-flow: column; justify-content: space-between; }
+.v-t-c { display: inline-flex; flex-flow: column; align-items: center; }
+.v-c-c { display: inline-flex; flex-flow: column; justify-content: center; align-items: center; }
+.v-c-r { display: inline-flex; flex-flow: column; justify-content: center; }
+.v-c-l { display: inline-flex; flex-flow: column; justify-content: center; }
+
+.s  { flex: 1; }
+.s2 { flex: 2; }
+.s3 { flex: 3; }
+.s4 { flex: 4; }
+.s5 { flex: 5; }
+.s6 { flex: 6; }
+
+.flex-wrap { flex-wrap: wrap; }
+
+.shrinks {
+	flex-shrink : 1;
+	min-width   : 0;
+	min-height  : 0;
+}
+
+/* ALIGN: GRID ------------------------------------------------------------ */
+
+.grid { display: inline-grid; }
+
+/* SIZING ----------------------------------------------------------------- */
+
+.h200 { height: 200px; }
+.v200 { width : 200px; }
+
+/*
+.w10 { width: 10%; }
+.w20 { width: 20%; }
+.w25 { width: 25%; }
+.w30 { width: 30%; }
+.w40 { width: 40%; }
+.w50 { width: 50%; }
+.w60 { width: 60%; }
+.w75 { width: 75%; }
+.w80 { width: 80%; }
+.w90 { width: 90%; }
+.w33 { width: 33%; }
+.w67 { width: 67%; }
+*/
+
+/* BORDERS ---------------------------------------------------------------- */
+
+.b  { border        : 1px solid var(--border); }
+.b0 { border        : 0; }
+.b2 { border        : 2px solid var(--border); }
+.b4 { border        : 4px solid var(--border); }
+.bl { border-left   : 1px solid var(--border); }
+.br { border-right  : 1px solid var(--border); }
+.bt { border-top    : 1px solid var(--border); }
+.bb { border-bottom : 1px solid var(--border); }
+
+.dotted { border-style: dotted; }
+.dashed { border-style: dashed; }
+.bn     { border-style: none; }
+
+.ros   { border-radius: var(--space-s); }
+.ro    { border-radius: var(--space-1); }
+.ro2   { border-radius: var(--space-2); }
+.ro4   { border-radius: var(--space-4); }
+.round { border-radius: 9999px; }
+.ro0   { border-radius: 0; }
+.rol0  { border-top-left-radius   : 0; border-bottom-left-radius : 0; }
+.ror0  { border-top-right-radius  : 0; border-bottom-right-radius: 0; }
+.rot0  { border-top-left-radius   : 0; border-top-right-radius   : 0; }
+.rob0  { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+
+/* PADDINGS --------------------------------------------------------------- */
+
+.p   { padding:        var(--space-1) }
+.ps  { padding:        var(--space-s) }
+.p2  { padding:        var(--space-2) }
+.p4  { padding:        var(--space-4) }
+.p0  { padding        : 0 }
+
+.pts { padding-top:    var(--space-s) }
+.prs { padding-right:  var(--space-s) }
+.pbs { padding-bottom: var(--space-s) }
+.pls { padding-left:   var(--space-s) }
+.pys { padding-top:    var(--space-s); padding-bottom: var(--space-s) }
+.pxs { padding-left:   var(--space-s); padding-right:  var(--space-s) }
+
+.pt  { padding-top:    var(--space-1) }
+.pr  { padding-right:  var(--space-1) }
+.pb  { padding-bottom: var(--space-1) }
+.pl  { padding-left:   var(--space-1) }
+.py  { padding-top:    var(--space-1); padding-bottom: var(--space-1) }
+.px  { padding-left:   var(--space-1); padding-right:  var(--space-1) }
+
+.pt2 { padding-top:    var(--space-2) }
+.pr2 { padding-right:  var(--space-2) }
+.pb2 { padding-bottom: var(--space-2) }
+.pl2 { padding-left:   var(--space-2) }
+.py2 { padding-top:    var(--space-2); padding-bottom: var(--space-2) }
+.px2 { padding-left:   var(--space-2); padding-right:  var(--space-2) }
+
+.pt4 { padding-top:    var(--space-4) }
+.pr4 { padding-right:  var(--space-4) }
+.pb4 { padding-bottom: var(--space-4) }
+.pl4 { padding-left:   var(--space-4) }
+.py4 { padding-top:    var(--space-4); padding-bottom: var(--space-4) }
+.px4 { padding-left:   var(--space-4); padding-right:  var(--space-4) }
+
+.pt0 { padding-top    : 0 }
+.pr0 { padding-right  : 0 }
+.pb0 { padding-bottom : 0 }
+.pl0 { padding-left   : 0 }
+.px0 { padding-left   : 0; padding-right  : 0 }
+.py0 { padding-top    : 0; padding-bottom : 0 }
+
+/* MARGINS ---------------------------------------------------------------- */
+
+.m   { margin:        var(--space-1) }
+.ms  { margin:        var(--space-s) }
+.m2  { margin:        var(--space-2) }
+.m4  { margin:        var(--space-4) }
+.m0  { margin:        0 }
+
+.mts { margin-top:    var(--space-s) }
+.mrs { margin-right:  var(--space-s) }
+.mbs { margin-bottom: var(--space-s) }
+.mls { margin-left:   var(--space-s) }
+.mxs { margin-left:   var(--space-s); margin-right:  var(--space-s) }
+.mys { margin-top:    var(--space-s); margin-bottom: var(--space-s) }
+
+.mt { margin-top:    var(--space-1) }
+.mr { margin-right:  var(--space-1) }
+.mb { margin-bottom: var(--space-1) }
+.ml { margin-left:   var(--space-1) }
+.mx { margin-left:   var(--space-1); margin-right:  var(--space-1) }
+.my { margin-top:    var(--space-1); margin-bottom: var(--space-1) }
+
+.mt2 { margin-top:    var(--space-2) }
+.mr2 { margin-right:  var(--space-2) }
+.mb2 { margin-bottom: var(--space-2) }
+.ml2 { margin-left:   var(--space-2) }
+.mx2 { margin-left:   var(--space-2); margin-right:  var(--space-2) }
+.my2 { margin-top:    var(--space-2); margin-bottom: var(--space-2) }
+
+.mt4 { margin-top:    var(--space-4) }
+.mr4 { margin-right:  var(--space-4) }
+.mb4 { margin-bottom: var(--space-4) }
+.ml4 { margin-left:   var(--space-4) }
+.mx4 { margin-left:   var(--space-4); margin-right:  var(--space-4) }
+.my4 { margin-top:    var(--space-4); margin-bottom: var(--space-4) }
+
+.ml-auto { margin-left: auto }
+.mr-auto { margin-right: auto }
+.mx-auto { margin-left: auto; margin-right: auto; }
+
+.mt0 { margin-top:    0 }
+.mr0 { margin-right:  0 }
+.mb0 { margin-bottom: 0 }
+.ml0 { margin-left:   0 }
+.mx0 { margin-left:   0; margin-right:  0 }
+.my0 { margin-top:    0; margin-bottom: 0 }
+
+/* OVERFLOW --------------------------------------------------------------- */
+
+.scroll       { overflow  : scroll; }
+.hscroll      { overflow-x: scroll; }
+.vscroll      { overflow-y: scroll; }
+.scroll-auto  { overflow  : auto; }
+.hscroll-auto { overflow-x: auto; }
+.vscroll-auto { overflow-y: auto; }
+.clip         { overflow  : hidden; }
+.clip-x       { overflow-x: hidden; }
+.clip-y       { overflow-y: hidden; }
+
+/* THIN SCROLLBARS -------------------------------------------------------- */
+
+.scroll-thin::-webkit-scrollbar-track {
+	background-color: var(--bg1);
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+	background-color : var(--bg2);
+	border-color     : var(--bg2);
+}
+
+/* BACKGROUNDS ------------------------------------------------------------ */
+
+.bg  { background: var(--bg); }
+.bg1 { background: var(--bg1); }
+.bg2 { background: var(--bg2); }
+.bg-gray  { background: var(--bg-gray); }
+.bg-fg    { background: var(--fg); }
+
+/* COLORS ----------------------------------------------------------------- */
+
+
+
+/* FILTERS ---------------------------------------------------------------- */
+
+.dim     { opacity: .5; }
+.darken  { filter: brightness(0.85); }
+.lighten { filter: brightness(1.15); }
+
+/* SHADOWS ---------------------------------------------------------------- */
+
+.shadow         { box-shadow: var(--shadow-popup  ); }
+.shadow-popup   { box-shadow: var(--shadow-popup  ); }
+.shadow-thumb   { box-shadow: var(--shadow-thumb  ); }
+.shadow-menu    { box-shadow: var(--shadow-menu   ); }
+.shadow-button  { box-shadow: var(--shadow-button ); }
+.shadow-pressed { box-shadow: var(--shadow-pressed); }
+.shadow-modal   { box-shadow: var(--shadow-modal  ); }
+.shadow-toolbox { box-shadow: var(--shadow-toolbox); }
+
+/* TRANSITIONS ------------------------------------------------------------ */
+
+.ease     {
+	transition: top .2s ease;
+	transition-property:
+		top, left, right, bottom, transform,
+		filter, background-color, border-color;
+}
+.-01s     { transition-duration: .1s; }
+.-05s     { transition-duration: .5s; }
+.-1s      { transition-duration:  1s; }
+.ease0    { transition: all 0s; }
+
+/* CURSORS ---------------------------------------------------------------- */
+
+.cursor-hand { cursor: pointer; }
+.cursor-grab { cursor: pointer; }
+
+/* INTERACTION ------------------------------------------------------------ */
+
+.hover-dim:hover     { opacity .5; }
+.hover-darken:hover  { filter: brightness(0.85); }
+.hover-lighten:hover { filter: brightness(1.15); }
+.hover-b:hover       { border-color : var(--border-hover); }
+
+/* UI PATTERNS ------------------------------------------------------------ */
+
+.overlay {
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	display: flex;
+	overflow: auto;
+	justify-content: center;
+	align-items: center;
+}
+
+/* FONTS ------------------------------------------------------------------ */
+
+@font-face {
+	font-family: "opensans";
+	src: url("/opensans-regular.woff2");
+}
+
+@font-face {
+	font-family: "opensans";
+	font-weight: bold;
+	src: url("/opensans-600.woff2");
+}
+
+@font-face {
+	font-family: "opensanscondensed";
+	src: url("/opensanscondensed-light.woff2");
+}
+
+@font-face {
+	font-family: "opensanscondensed";
+	font-weight: bold;
+	src: url("/opensanscondensed-bold.woff2");
+}
+
+.font-opensans {
+	font-family: opensans, Arial, sans-serif;
+	--x-grid-cell-baseline-adjust-ff: 0;
+}
+
+}

@@ -3,210 +3,273 @@
 	DOM API & web components.
 	Written by Cosmin Apreutesei. Public domain.
 
-	Depends on:
-		glue.js
-		divs.css
+DEPENDS
+	glue.js
 
-	CSS:
-		[hidden]
-		[disabled]
-		.popup
-		.modal
-		.modal-overlay
+You must call on DOM load:
+	init_components()
 
-	Must call on DOM load:
-		init_components()
+Defines CSS rules for:
+	[hidden]
+	[disabled]
+	.popup
+	.modal
+	.modal-overlay
 
-	debugging:
-		e.debug()
-		e.debug_if()
-		e.debug_open_if()
-		e.debug_close_if()
-		e.trace()
-		e.trace_if()
-		e.debug_name
-		e.debug_anon_name()
-	element attribute manipulation:
-		e.hasattr(k)
-		e.attr(k[, v]) -> v
-		e.bool_attr(k[, v]) -> v
-		e.closest_attr(k) -> v
-		e.attrs = {k: v}
-		e.tag
-	element CSS class list manipulation:
-		e.hasclass(k)
-		e.class('k1 ...'[, enable])
-		e.switch_class(k1, k2, normal)
-		e.classess = 'k1 k2 ...'
-	access to element computed styles:
-		e.css([k][, state])
-	CSS querying:
-		css_class_prop(class, prop) -> v
-		fontawesome_char(name) -> s
-	DOM navigation including text nodes:
-		n.nodes -> nlist, n.nodes[i], n.nodes.len, n.parent
-		n.first_node, n.last_node, n.next_node, n.prev_node
-	DOM navigation excluding text nodes:
-		e.at[i], e.len, e.at.length, e.parent
-		e.index
-		e.first, e.last, e.next, e.prev
-	DOM querying:
-		iselem(v) -> t|f
-		isnode(v) -> t|f
-		e.$(sel) -> nlist
-		e.$1(sel|e) -> e
-		$(sel) -> nlist
-		$1(sel|e) -> e
-		nlist.each(f)
-		nlist.trim() -> [n1,...]|null
-		root, body, head
-	DOM de/serialization:
-		e.html -> s
-		[unsafe_]html(s) -> e
-		e.[unsafe_]html = s
-	DOM manipulation with lifecycle management:
-		T[C](te[,whitespace]) where `te` is f|e|text_str
-		e.clone()
-		e.set(te)
-		e.add(te1,...)
-		e.insert(i, te1,...)
-		e.replace([e0], te)
-		e.move([pe], [i0])
-		e.clear()
-		tag(tag, [attrs], e1,...)
-		div(...)
-		span(...)
-		element(tag, options...)
-		[].join_nodes([separator])
-	SVG elements:
-		svg_tag(tag, [attrs], e1,...)
-		svg([attrs], e1, ...) -> svg
-		svg_arc_path(x, y, r, a1, a2, ['M'|'L'])
-		svg.path(attrs) -> svg_path
-		svg.text(attrs) -> svg_text
-	method overriding:
-		e.override(method, f)
-		e.do_before(method, f)
-		e.do_after(method, f)
-	properties:
-		e.property(name, [get],[set] | descriptor)
-		e.prop(name, attrs)
-		e.alias(new_name, existing_name)
-		e.notify_id_changed()
-		e.xoff()
-		e.xon()
-		e.xsave()
-		e.set_prop(k, v)
-		e.get_prop(k) -> v
-		e.get_prop_attrs(k) -> {attr->val}
-		e.get_props() -> {k->attrs}
-		e.serialize_prop(k) -> s
-		e.element_links()
-	deferred DOM updating:
-		e.update([opt])
-		e.on_update(f)
-		e.on_measure(f)
-		e.on_position(f)
-	components:
-		register_component(tag, initializer, [selector])
-		e.init_child_components()
-		e.initialized -> t|f
-		e.bind(t|f)
-		e.on_bind(f)
-		^e.bind(on)
-		^window.element_bind(e, on)
-		^window['ID.bind'](e, on)
-		e.bound -> t|f
-	events:
-		broadcast (name, ...args)
-		^[right]click       (ev, nclicks, mx, my)
-		^[right]pointerdown (ev, mx, my)
-		^[right]pointerup   (ev, mx, my)
-		^pointermove        (ev, mx, my)
-		^wheel              (ev, dy, mx, my)
-		^keydown            (key, shift, ctrl, alt, ev)
-		^keyup              (key, shift, ctrl, alt, ev)
-		^keypress           (key, shift, ctrl, alt, ev)
-		^stopped_event      (stopped_ev, ev)
-		^layout_changed()
-		e.capture_pointer(ev, on_pointermove, on_pointerup)
-		on_dom_load(fn)
-	element geometry:
-		px(x)
-		e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h, e.ox, e.oy
-		e.min_w, e.min_h, e.max_w, e.max_h
-		e.rect() -> r
-		r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
-		r.contains(x, y)
-	element visibility:
-		e.hide([on])
-		e.show([on])
-		element state:
-		e.hovered
-		e.focused_element
-		e.focused
-		e.hasfocus
-		e.focusables()
-		e.effectively_disabled
-		e.effectively_hidden
-		e.focus_first()
-	text editing:
-		input.select_range(i, j)
-		e.select(i, j)
-		e.contenteditable
-		e.insert_at_caret(s)
-		e.select_all()
-		e.unselect()
-	scrolling:
-		scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
-		e.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
-		e.scroll_to_view_rect(sx0, sy0, x, y, w, h)
-		e.make_visible_scroll_offset(sx0, sy0[, parent])
-		e.make_visible()
-		e.is_in_viewport()
-		scrollbar_widths() -> [vs_w, hs_h]
-		scrollbox_client_dimensions(w, h, cw, ch, [overflow_x], [overflow_y], [cs_w], [hs_h])
-	animation frames:
-		raf(f) -> raf_id
-		cancel_raf(raf_id)
-		in_raf -> t|f
-		raf_wrap(f) -> wf
-			wf()
-			wf.cancel()
-	animation easing:
-		transition(f, [dt], [x0], [x1], [easing]) -> tr
-			tr.stop()
-			tr.finish = func
-	hit testing:
-		hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h)
-		e.hit_test_sides(mx, my, [d1], [d2])
-	canvas:
-		e.clear()
-	UI patterns:
-		e.modal([on])
-		overlay(attrs, content)
-		live_move_mixin(e)
-		lazy-loading of <img data-src="">
-		auto-updating of <tag timeago time="">
-		exec-ing of <script run> scripts from injected html
-	popups:
-		e.popup([side], [align])
-		e.popup_side
-		e.popup_align
-		e.popup_{x1,y1,x2,y2}
-		e.popup_fixed
-	lists:
-		e.make_list()
-	css dev tools:
-		css_report_specificity(file, max_spec)
-	composable css:
-		`--inc: cls1 ...;` css declarations.
-	adding styles from css:
-		add_style(s)
+Uses CSS classes on the <html> tag:
+	.theme-light .theme-dark .theme-small .theme-large
+
+Adding CSS at runtime:
+	css([layer], rules)
+
+DOM load event:
+	on_dom_load(f)
+
+DEBUGGING
+	e.debug(...)
+	e.debug_if(cond, ...)
+	e.debug_open_if(cond, ...)
+	e.debug_close_if(cond, ...)
+	e.trace(...)
+	e.trace_if(cond, ...)
+	e.debug_name
+	e.debug_anon_name()
+
+ELEMENT ATTRS
+	e.hasattr(k)
+	e.attr(k[, v]) -> v
+	e.bool_attr(k[, v]) -> v
+	e.closest_attr(k) -> v
+	e.attrs = {k: v}
+	e.tag
+
+ELEMENT CSS CLASSES
+	e.hasclass(k)
+	e.class('k1 ...'[, enable])
+	e.switch_class(k1, k2, normal)
+	e.classess = 'k1 k2 ...'
+
+ELEMENT COMPUTED STYLES
+	e.css([k][, state])
+
+CSS QUERYING
+	css_class_prop(selector, style) -> v
+	fontawesome_char(name) -> s
+
+DOM NAVIGATION INCLUDING TEXT NODES
+	n.nodes -> nlist, n.nodes[i], n.nodes.len, n.parent
+	n.first_node, n.last_node, n.next_node, n.prev_node
+
+DOM NAVIGATION EXCLUDING TEXT NODES
+	e.at[i], e.len, e.at.length, e.parent
+	e.index
+	e.first, e.last, e.next, e.prev
+
+DOM QUERYING
+	iselem(v) -> t|f
+	isnode(v) -> t|f
+	e.$(sel) -> nlist
+	e.$1(sel|e) -> e
+	$(sel) -> nlist
+	$1(sel|e) -> e
+	nlist.each(f)
+	nlist.trim() -> [n1,...]|null
+	root
+
+DOM <-> HTML
+	e.html -> s
+	[unsafe_]html(s) -> e
+	e.[unsafe_]html = s
+
+DOM MANIPULATION
+	T[C](te[,whitespace]) where `te` is f|e|text_str
+	e.clone()
+	e.set(te)
+	e.add(te1,...)
+	e.insert(i, te1,...)
+	e.replace([e0], te)
+	e.move([pe], [i0])
+	e.clear()
+	tag(tag, [attrs], e1,...)
+	div(...)
+	span(...)
+	element(tag, prop_vals, ...)
+	[].join_nodes([separator])
+
+SVG ELEMENTS
+	svg_tag(tag, [attrs], e1,...)
+	svg([attrs], e1, ...) -> svg
+	svg_arc_path(x, y, r, a1, a2, ['M'|'L'])
+	svg.path(attrs) -> svg_path
+	svg.text(attrs) -> svg_text
+
+ELEMENT METHOD OVERRIDING
+	e.override(method, f)
+	e.do_before(method, f)
+	e.do_after(method, f)
+
+ELEMENT PROPERTIES
+	e.property(name, [get],[set] | descriptor)
+	e.prop(name, attrs)
+	e.alias(new_name, existing_name)
+	e.set_prop(k, v)
+	e.get_prop(k) -> v
+	e.get_prop_attrs(k) -> {attr->val}
+	e.get_props() -> {k->attrs}
+	e.serialize_prop(k) -> s
+	e.element_links()
+
+PROPERTY PERSISTENCE
+	e.xoff()
+	e.xon()
+	e.xsave()
+
+DEFERRED DOM UPDATING
+	e.update([opt])
+	e.position()
+	e.on_update(f)
+	e.on_measure(f)
+	e.on_position(f)
+
+COMPONENTS
+	component(tag, [selector], initializer, [category])
+	e.init_child_components()
+	e.initialized -> null|t|f
+	init_components()
+	e.bind(t|f)
+	e.on_bind(f)
+	^e.bind(on)
+	^window.element_bind(e, on)
+	^window['ID.bind'](e, on)
+	^window['ID.init'](e)
+	e.bound -> t|f
+
+INPUT EVENTS
+	^[right]click       (ev, nclicks, mx, my)
+	^[right]pointerdown (ev, mx, my)
+	^[right]pointerup   (ev, mx, my)
+	^pointermove        (ev, mx, my)
+	^wheel              (ev, dy, mx, my)
+	this.capture_pointer(ev, [on_pointermove], [on_pointerup])
+		^on_pointermove (ev, mx, my, mx0, my0)
+		^on_pointerup   (ev, mx, my, mx0, my0)
+	^keydown            (key, shift, ctrl, alt, ev)
+	^keyup              (key, shift, ctrl, alt, ev)
+	^keypress           (key, shift, ctrl, alt, ev)
+	^document.stopped_event(stopped_ev, ev)
+
+LAYOUT CHANGE EVENT
+	^document.layout_changed()
+
+INTER-WINDOW COMMUNICATION
+	broadcast(name, ...args)
+
+ELEMENT GEOMETRY
+	px(x)
+	e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h, e.ox, e.oy
+	e.min_w, e.min_h, e.max_w, e.max_h
+	e.rect() -> r
+	r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
+	r.contains(x, y)
+
+ELEMENT STATE
+	e.hide([on])
+	e.show([on])
+	e.hovered
+	e.focused_element
+	e.focused
+	e.hasfocus
+	e.focusables()
+	e.effectively_disabled
+	e.effectively_hidden
+	e.focus_first()
+
+ELEMENT STATE MIXINS
+	e.make_disablable()
+		e.disabled
+		e.disable(reason, disabled)
+	e.make_focusable([focusable_element])
+		e.tabindex
+		e.focusable
+
+TEXT EDITING
+	input.select_range(i, j)
+	e.select(i, j)
+	e.contenteditable
+	e.insert_at_caret(s)
+	e.select_all()
+	e.unselect()
+
+SCROLLING
+	scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
+	e.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
+	e.scroll_to_view_rect(sx0, sy0, x, y, w, h)
+	e.make_visible_scroll_offset(sx0, sy0[, parent])
+	e.make_visible()
+	e.is_in_viewport()
+	scrollbar_widths() -> [vs_w, hs_h]
+	scrollbox_client_dimensions(w, h, cw, ch, [overflow_x], [overflow_y], [cs_w], [hs_h])
+
+ANIMATION FRAMES
+	raf(f) -> raf_id
+	cancel_raf(raf_id)
+	in_raf -> t|f
+	raf_wrap(f) -> wf
+		wf()
+		wf.cancel()
+
+ANIMATION EASING
+	transition(f, [dt], [x0], [x1], [easing]) -> tr
+		tr.stop()
+		tr.finish = func
+
+HIT-TESTING
+	hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h)
+	e.hit_test_sides(mx, my, [d1], [d2])
+
+CANVAS
+	cx.clear()
+	e.resize(w, h, [pw], [ph])
+
+MODALS & OVERLAYS
+	e.modal([on])
+	overlay(attrs, content)
+
+IMAGE LAZY LOADING
+	<img data-src=""> images are loaded when they come into view.
+
+TIME-AGO AUTO-UPDATING
+	<... timeago time=""> auto-updates every minute.
+
+EXECUTABLE SCRIPTS
+	<script run></script> scripts declared in html are executable.
+
+POPUPS
+	e.popup([side], [align])      make element a popup.
+	e.popup_side                  '[inner-]{top bottom left right center}'
+	e.popup_align                 'center start end'
+	e.popup_{x1,y1,x2,y2}
+	e.popup_fixed
+
+LIVE-MOVE LIST ELEMENTS
+	live_move_mixin(e)
+	e.make_children_movable()
+
+CSS DEV TOOLS
+	css_report_specificity(css_file, max_spec)
+
+COMPOSABLE CSS
+	you can use the syntax `--inc: cls1 ...;` in css declarations.
+
+THEMING
+	is_theme_dark() -> t|f
+	set_theme_dark(dark)
+	get_theme_size() -> cur_size
+	set_theme_size(['large'|'small'|'normal'])
 
 */
 
-{
+{ // module scope
 
 // debugging -----------------------------------------------------------------
 
@@ -264,6 +327,68 @@ e.trace_if = function(cond, ...args) {
 	trace(this.debug_name, ...args)
 }
 
+// DOM load event ------------------------------------------------------------
+
+function on_dom_load(fn) {
+	if (document.readyState === 'loading')
+		document.on('DOMContentLoaded', fn)
+	else // `DOMContentLoaded` already fired
+		fn()
+}
+
+// adding CSS at runtime -----------------------------------------------------
+
+let css_file = memoize(function(name) {
+	let style = document.createElement('style')
+	on_dom_load(function() {
+		document.head.add(style)
+	})
+	return style
+})
+
+function css(layer, rules) {
+	if (rules == null) {
+		rules = layer
+		layer = 'inline'
+	}
+	let style = css_file(layer)
+	style.textContent = style.textContent + '\n' + rules
+}
+
+// supporting styles ---------------------------------------------------------
+
+css(`
+
+[hidden] {
+	display: none !important;
+}
+
+/* using specificity 0-3-0 so that normal state styles don't accidentally undisable it. */
+/* NOTE: you still have to use :not([disabled]):hover to prevent :hover on
+   disabled widgets because we're not using pointer-events: none. */
+[disabled][disabled][disabled] {
+	opacity: .5;
+	filter: grayscale();
+}
+
+/* disabled child: reset opacity and filter. */
+/* TODO: it's wrong to do this for widgets that set these in their normal
+   state but selector ":not([disabled]) [disabled]" would be too slow.
+	Opacity is wrong anyway, find another filter that doesn't mix.
+*/
+[disabled] [disabled][disabled] {
+	opacity: unset;
+	filter: unset;
+}
+
+[disabled],
+[disabled] *
+{
+	cursor: default !important;
+}
+
+`)
+
 // element attribute manipulation --------------------------------------------
 
 alias(Element, 'hasattr', 'hasAttribute')
@@ -271,31 +396,31 @@ alias(Element, 'hasattr', 'hasAttribute')
 // NOTE: JS values `true`, `false` and `undefined` cannot be stored in an attribute:
 // setting `true` gets back 'true' while `false` and `undefined` gets back `null`.
 // To store `true`, `false` and `null`, use bool_attr().
-method(Element, 'attr', function(k, v) {
+e.attr = function(k, v) {
 	if (arguments.length < 2)
 		return this.getAttribute(k)
 	else if (v == null || v === false)
 		this.removeAttribute(k)
 	else
 		this.setAttribute(k, v)
-})
+}
 
 // NOTE: storing `false` explicitly allows setting the value `false` on
 // props whose default value is `true`.
-method(Element, 'bool_attr', function(k, v) {
+e.bool_attr = function(k, v) {
 	if (arguments.length < 2)
 		return repl(repl(this.getAttribute(k), '', true), 'false', false)
 	else if (v == null)
 		this.removeAttribute(k)
 	else
 		this.setAttribute(k, repl(repl(v, true, ''), false, 'false'))
-})
+}
 
 // NOTE: setting this doesn't remove existing attrs!
 property(Element, 'attrs', {
 	get: function() {
 		let t = obj()
-		for (var i = 0, n = this.attributes.length; i < n; i++) {
+		for (let i = 0, n = this.attributes.length; i < n; i++) {
 			let attr = this.attributes[i]
 			t[attr.name] = attr.value
 		}
@@ -309,16 +434,16 @@ property(Element, 'attrs', {
 })
 
 // get the attr value of the closest parent that has it.
-method(Element, 'closest_attr', function(attr) {
+e.closest_attr = function(attr) {
 	let e = this.closest('['+attr+']')
 	return e && e.attr(attr)
-})
+}
 
 property(Element, 'tag', function() { return this.tagName.lower() })
 
-// element css class list manipulation ---------------------------------------
+// element CSS class list manipulation ---------------------------------------
 
-method(Element, 'class', function(names, enable) {
+e.class = function(names, enable) {
 	if (arguments.length < 2)
 		enable = true
 	if (names.indexOf(' ') != -1) {
@@ -333,16 +458,16 @@ method(Element, 'class', function(names, enable) {
 		else
 			this.classList.remove(names)
 	}
-})
+}
 
-method(Element, 'hasclass', function(name) {
+e.hasclass = function(name) {
 	return this.classList.contains(name)
-})
+}
 
-method(Element, 'switch_class', function(s1, s2, normal) {
+e.switch_class = function(s1, s2, normal) {
 	this.class(s1, normal == false)
 	this.class(s2, normal != false)
-})
+}
 
 
 // NOTE: setting this doesn't remove existing classes!
@@ -357,12 +482,12 @@ property(Element, 'classes', {
 	}
 })
 
-// css querying --------------------------------------------------------------
+// CSS querying --------------------------------------------------------------
 
-method(Element, 'css', function(prop, state) {
+e.css = function(prop, state) {
 	let css = getComputedStyle(this, state)
 	return prop ? css[prop] : css
-})
+}
 
 alias(CSSStyleDeclaration, 'prop', 'getPropertyValue')
 
@@ -380,11 +505,12 @@ function css_class_prop(selector, style) {
 	}
 }
 
+// use this to to draw fontawesome icons on a canvas.
 fontawesome_char = memoize(function(icon) {
 	return css_class_prop('.'+icon+'::before', 'content').slice(1, -1)
 })
 
-// dom tree navigation for elements, skipping over text nodes ----------------
+// DOM navigation for elements, skipping over text nodes ---------------------
 
 alias(Element, 'at'     , 'children')
 alias(Element, 'len'    , 'childElementCount')
@@ -393,7 +519,7 @@ alias(Element, 'last'   , 'lastElementChild')
 alias(Element, 'next'   , 'nextElementSibling')
 alias(Element, 'prev'   , 'previousElementSibling')
 
-// dom tree navigation for nodes ---------------------------------------------
+// DOM navigation for nodes --------------------------------------------------
 // also faster for elements when you know that you don't have text nodes.
 
 alias(Node, 'parent'     , 'parentNode')
@@ -416,7 +542,7 @@ method(NodeList, 'trim', function() {
 	return a.length ? a : null
 })
 
-// dom tree querying ---------------------------------------------------------
+// DOM querying --------------------------------------------------------------
 
 function iselem(e) { return e instanceof Element }
 function isnode(e) { return e instanceof Node }
@@ -435,7 +561,7 @@ method(NodeList, 'each', Array.prototype.forEach)
 property(NodeList, 'first', function() { return this[0] })
 property(NodeList, 'last' , function() { return this[this.length-1] })
 
-/* safe DOM manipulation with lifecycle management ---------------------------
+/* DOM manipulation with lifecycle management --------------------------------
 
 The DOM API works with strings, nodes, arrays of nodes and also functions
 that will be called to return those objects (we call those constructors).
@@ -461,38 +587,182 @@ Moving elements around in the bound tree will *not* rebind them.
 
 */
 
+let buitin_tags = 'a,abbr,address,area,article,aside,audio,b,base,bdi,bdo,blockquote,body,br,button,canvas,caption,cite,code,col,colgroup,data,datalist,dd,del,details,dfn,dialog,div,dl,dt,em,embed,fieldset,figcaption,figure,footer,form,h1,h2,h3,h4,h5,h6,head,header,hgroup,hr,html,i,iframe,img,input,ins,kbd,label,legend,li,link,main,map,mark,menu,meta,meter,nav,noscript,object,ol,optgroup,option,output,p,picture,pre,progress,q,rp,rt,ruby,s,samp,script,section,select,slot,small,source,span,strong,style,sub,summary,sup,table,tbody,td,template,textarea,tfoot,th,thead,time,title,tr,track,u,ul,var,video,wbr'.split(',').tokeys(1)
+
 let component_init = obj() // {tag->init}
 let component_selector = obj() // {tag->selector}
 
-function register_component(tag, init, selector) {
+function component(tag, selector, init, category) {
+	if (!isstr(selector)) { // shift arg
+		category = init
+		init = selector
+		selector = null
+	}
 	let tagName = tag.upper()
-	selector = selector || tagName
+	assert(!component_init[tagName], 'component already registered: {0}', tag)
 	component_init[tagName] = init
 	component_selector[tagName] = selector
+
+	// TODO: remove this
+	let type = tag.replace(/^x-/, '').replaceAll('-', '_')
+	if (type != tag && !type in buitin_tags) {
+		let tagName = type.upper()
+		component_init[tagName] = init
+		component_selector[tagName] = selector
+	}
+
+	function create(prop_vals) {
+		return element(tag, prop_vals)
+	}
+	create.type = type // for serialization
+	create.construct = init // use as mixin in other components
+	attr(component.categories, category || 'Other', array).push(create)
+	component.types[type] = create
+	return create
+}
+
+component.types = {} // {type -> create}
+component.categories = {} // {cat -> {craete1,...}}
+
+component.init_instance = function(e, prop_vals) { // stub, see xmodule.js.
+	e.xoff()
+	for (let k in prop_vals)
+		e.set_prop(k, prop_vals[k])
+	e.xon()
+}
+
+component.instance_type = noop // stub, see xmodule.js.
+
+// component.create(id | {id:} | {type:} | e, [e0])
+component.create = function(t, e0) {
+	if (isnode(t))
+		return t // nodes pass through.
+	let id = isstr(t) ? t : t.id
+	if (e0 && e0.id == id)
+		return e0  // already created (called from a prop's `convert()`).
+	if (isstr(t)) // t is an id
+		t = {id: t}
+	if (!t.type) {
+		t.type = component.instance_type(id)
+		if (!t.type) {
+			warn('component id not found:', id)
+			return
+		}
+	}
+	let create = component.types[t.type]
+	if (!create) {
+		warn('invalid component type', t.type, 'for id', t.id)
+		return
+	}
+	return create(t)
+}
+
+// TODO: this way, e.property() props can't be set from html. Convert them
+// to e.prop() if you want them to be settable from html attrs!
+let attr_prop_vals = function(e) {
+	let prop_vals = obj()
+	let pmap = e.attr_prop_map
+	for (let attr of e.attributes) {
+		let k = attr.name
+		k = pmap && pmap[k] || k
+		let v = attr.value
+		let pa = e.get_prop_attrs(k)
+		if (!(pa && pa.from_attr))
+			continue
+		v = pa.from_attr(v)
+		if (k in prop_vals)
+			continue
+		prop_vals[k] = v
+	}
+	return prop_vals
 }
 
 // NOT for users to call!
-method(Element, 'init_component', function(...args) {
-	if (this.initialized)
+e.init_component = function(prop_vals) {
+
+	let e = this
+
+	if (e.initialized)
 		return
-	let tagName = this.tagName
+
+	// TODO: this way `element('img', {attrs: {'data-src': 'bla'}})`
+	// does not init the image but `tag('img', {'data-src': 'bla'})` does!
+	// For now, just don't use element() to create built-in tags, use tag() for that.
+	let tagName = e.tagName
 	let init = component_init[tagName]
-	let sel = component_selector[tagName]
-	if (init && (sel == tagName || this.matches(sel))) {
-		init(this, ...args)
-		this.initialized = true
-	} else {
-		this.init_child_components()
+	let sel = init && component_selector[tagName]
+	if (!(init && (!sel || e.matches(sel)))) {
+		if (prop_vals)
+			assign_opt(e, prop_vals)
+		e.init_child_components()
+		return
 	}
-})
+
+	e.debug_open_if(DEBUG_INIT, '^')
+
+	// prop attrs can be given as element({props: {prop: {k: v}}}).
+	// TODO: side effect of doing it this way is that now you need to use
+	// `attr(e.props, 'PROP').k = v` instead of `e.props.PROP = {...}` in init().
+	e.props = assign_opt(obj(), prop_vals && prop_vals.props)
+
+	e.initialized = null // for log_add_event(), see glue.js.
+
+	let cons_prop_vals = init(e)
+
+	// initial prop values come from multiple sources, in priority order:
+	// - element() args.
+	// - constructor return value.
+	// - html attributes.
+	prop_vals = assign_opt(attr_prop_vals(e), cons_prop_vals, prop_vals)
+
+	// register events from `on_EVENT` props.
+	for (let k in prop_vals) {
+		if (k.starts('on_')) {
+			let f = prop_vals[k]
+			delete prop_vals[k]
+			k = k.slice(3)
+			if (isstr(f)) { // set from html: name of global function.
+				let fname = f
+				f = function(...args) {
+					let f = window[fname]
+					if (!f) return
+					f.call(this, ...args)
+				}
+			}
+			e.on(k, f)
+		}
+	}
+
+	// set props to their initial values.
+	e.initialized = false // let prop setters know that we're not fully initialized.
+	component.init_instance(e, prop_vals)
+	e.initialized = true
+
+	// call the after-properties-are-set init function.
+	if (e.init)
+		e.init()
+
+	// NOTE: id must be given when the component is created, not set later!
+	if (e.id) {
+		e.on('attr_changed', function(k, v, v0) {
+			if (k == 'id') {
+				window.fire('element_id_changed', e, v, v0)
+				window.fire(v0+'.id_changed', e, v, v0)
+			}
+		})
+		window.fire(e.id+'.init', e)
+	}
+
+	e.debug_close_if(DEBUG_INIT)
+}
 
 // the component is responsible for calling init_child_components()
 // in its initializer if it knows it can have components as children.
-method(Element, 'init_child_components', function() {
+e.init_child_components = function() {
 	if (this.len)
 		for (let ce of this.children)
 			ce.init_component()
-})
+}
 
 // NOT for users to call!
 property(Element, 'bound', {
@@ -512,16 +782,16 @@ property(Element, 'bound', {
 })
 
 // NOT for users to call!
-method(Element, 'bind_children', function bind_children(on) {
+e.bind_children = function bind_children(on) {
 	if (!this.len)
 		return
 	assert(isbool(on))
 	for (let ce of this.children)
 		ce.bind(on)
-})
+}
 
 // NOT for users to call!
-method(Element, 'bind', function bind(on) {
+e.bind = function bind(on) {
 	assert(isbool(on))
 	if (this._bound != null) { // any tag that called on('bind') or on_bind()
 		if (this._bound == on)
@@ -533,13 +803,28 @@ method(Element, 'bind', function bind(on) {
 	// their children inside the bind event handler before them getting bound,
 	// and also so that children see a bound parent when they are getting bound.
 	this.bind_children(on)
-})
+}
 
-method(Element, 'on_bind', function(f) {
+e.on_bind = function(f) {
 	if (this._bound == null)
 		this._bound = this.bound
 	this.do_after('do_bind', f)
-})
+}
+
+root = document.documentElement
+
+function init_components() {
+	body = document.body // for debugging, don't use in code.
+	head = document.head // for debugging, don't use in code.
+	if (DEBUG_INIT)
+		debug('ROOT INIT ---------------------------------')
+	root.init_component()
+	if (DEBUG_BIND)
+		debug('ROOT BIND ---------------------------------')
+	root.bind(true)
+	if (DEBUG_BIND)
+		debug('ROOT BIND DONE ----------------------------')
+}
 
 // create a text node from a stringable. calls a constructor first.
 // wraps the node in a span if wrapping control is specified.
@@ -611,9 +896,12 @@ function tag(tag, attrs, ...children) {
 div  = (...a) => tag('div' , ...a)
 span = (...a) => tag('span', ...a)
 
+// TODO: for now, don't use this to create built-in tags, use tag() for that!
+// See init_component() for where this limitation comes from.
 function element(tag, ...args) {
 	let e = document.createElement(tag)
-	e.init_component(...args)
+	let prop_vals = args.length > 1 ? assign_opt(obj(), ...args) : args[0]
+	e.init_component(prop_vals)
 	return e
 }
 
@@ -710,14 +998,14 @@ property(Element, 'html', {
 	}
 })
 
-method(Element, 'clear', function() {
+e.clear = function() {
 	this.unsafe_html = null
 	return this
-})
+}
 
 // set element contents to: text, node, null.
 // calls constructors, expands arrays.
-method(Element, 'set', function E_set(s) {
+e.set = function E_set(s) {
 	if (isfunc(s)) // constructor
 		s = s()
 	if (s == null) {
@@ -759,11 +1047,11 @@ method(Element, 'set', function E_set(s) {
 		this.textContent = s
 	}
 	return this
-})
+}
 
 // append nodes to an element.
 // skips nulls, calls constructors, expands arrays.
-method(Element, 'add', function E_add(...args) {
+e.add = function E_add(...args) {
 	for (let s of args) {
 		if (isfunc(s)) // constructor
 			s = s()
@@ -781,11 +1069,11 @@ method(Element, 'add', function E_add(...args) {
 			s.bind(true)
 	}
 	return this
-})
+}
 
 // insert nodes into an element at a position.
 // skips nulls, calls constructors, expands arrays.
-method(Element, 'insert', function E_insert(i0, ...args) {
+e.insert = function E_insert(i0, ...args) {
 	i0 = max(0, min(or(i0, 1/0), this.nodes.length))
 	for (let i = args.length-1; i >= 0; i--) {
 		let s = args[i]
@@ -805,7 +1093,7 @@ method(Element, 'insert', function E_insert(i0, ...args) {
 			s.bind(true)
 	}
 	return this
-})
+}
 
 override(Element, 'remove', function E_remove(inherited) {
 	this.bind(false)
@@ -816,7 +1104,7 @@ override(Element, 'remove', function E_remove(inherited) {
 // replace child node with: text, node, null (or a constructor returning those).
 // if the node to be replaced is null, the new node is appended instead.
 // if the new node is null, the old node is removed.
-method(Element, 'replace', function E_replace(e0, s) {
+e.replace = function E_replace(e0, s) {
 	if (isfunc(s))
 		s = s()
 	s = T(s)
@@ -845,7 +1133,7 @@ method(Element, 'replace', function E_replace(e0, s) {
 			s.bind(true)
 	}
 	return this
-})
+}
 
 // move an element into a new position in its parent preserving the scroll position.
 let indexOf = Array.prototype.indexOf
@@ -887,32 +1175,31 @@ affecting the prototype.
 
 */
 
-method(Element, 'override', function(method, func) {
+e.override = function(method, func) {
 	let inherited = this[method] || noop
 	this[method] = function(...args) {
 		return func.call(this, inherited, ...args)
 	}
-})
+}
 
-method(Element, 'do_before', function(method, func) {
+e.do_before = function(method, func) {
 	let inherited = repl(this[method], noop)
 	this[method] = inherited && function(...args) {
 		func.call(this, ...args)
 		inherited.call(this, ...args)
 	} || func
-})
+}
 
-method(Element, 'do_after', function(method, func) {
+e.do_after = function(method, func) {
 	let inherited = repl(this[method], noop)
 	this[method] = inherited && function(...args) {
 		inherited.call(this, ...args)
 		func.call(this, ...args)
 	} || func
-})
+}
 
-/* ---------------------------------------------------------------------------
-// element virtual properties
-// ---------------------------------------------------------------------------
+/* element virtual properties ------------------------------------------------
+
 publishes:
 	e.property(name, get, [set])
 	e.prop(name, attrs)
@@ -937,14 +1224,15 @@ fires:
 	^document.'prop_changed' (e, prop, v1, v0)
 	^window.'element_id_changed' (e, id, id0)
 	^window.'ID0.id_changed' (e, id, id0)
---------------------------------------------------------------------------- */
 
-method(Element, 'property', function(name, get, set) {
+*/
+
+e.property = function(name, get, set) {
 	return property(this, name, get, set)
-})
+}
 
-method(Element, 'xoff', function() { this._xoff = true  })
-method(Element, 'xon' , function() { this._xoff = false })
+e.xoff = function() { this._xoff = true  }
+e.xon  = function() { this._xoff = false }
 
 let fire_prop_changed = function(e, prop, v1, v0) {
 	if (e._xoff) {
@@ -959,38 +1247,28 @@ let resolve_linked_element = function(id) { // stub
 	return iselem(e) && e.bound ? e : null
 }
 
-// NOTE: all elements need to call this if they want to be linked-to!
-method(Element, 'notify_id_changed', function() {
-	if (this._notify_id_changed)
-		return
-	this._notify_id_changed = true
-	this.on('attr_changed', function(k, v, v0) {
-		if (k == 'id') {
-			window.fire('element_id_changed', this, v, v0)
-			window.fire(v0+'.id_changed', this, v, v0)
-		}
-	})
-})
-
 let from_bool_attr = v => repl(repl(v, '', true), 'false', false)
 
 let from_attr_func = function(opt) {
+	if (opt.from_attr == false)
+		return false
 	return opt.from_attr
 			|| (opt.type == 'bool'   && from_bool_attr)
 			|| (opt.type == 'number' && num)
+			|| return_arg
 }
 
 let set_attr_func = function(e, k, opt) {
 	if (opt.to_attr)
-		return (v) => e.attr(k, v)
+		return v => e.attr(k, v)
 	if (opt.type == 'bool')
-		return (v) => e.bool_attr(k, v || null)
-	return (v) => e.attr(k, v)
+		return v => e.bool_attr(k, v || null)
+	return v => e.attr(k, v)
 }
 
-method(Element, 'prop', function(prop, opt) {
+e.prop = function(prop, opt) {
 	let e = this
-	opt = opt || {}
+	opt = opt || obj()
 	assign_opt(opt, e.props && e.props[prop])
 	let getter = 'get_'+prop
 	let setter = 'set_'+prop
@@ -1089,21 +1367,18 @@ method(Element, 'prop', function(prop, opt) {
 
 	e.property(prop, get, set)
 
-	if (!priv)
-		attr(e, 'props')[prop] = opt
-	else if (e.props && prop in e.props)
-		delete e.props[prop]
+	attr(e, 'props')[prop] = opt
 
-})
+}
 
-method(Element, 'alias', function(new_name, old_name) {
+e.alias = function(new_name, old_name) {
 	if (this.props) {
 		let attrs = this.get_prop_attrs(old_name)
 		if (attrs)
 			this.props[new_name] = attrs
 	}
 	alias(this, new_name, old_name)
-})
+}
 
 // dynamic properties.
 e.set_prop = function(k, v) { this[k] = v } // stub
@@ -1137,7 +1412,7 @@ calls:
 	e.linked_element_id_changed(key, id1, id0)
 --------------------------------------------------------------------------- */
 
-method(Element, 'element_links', function() {
+e.element_links = function() {
 
 	let e = this
 
@@ -1208,7 +1483,138 @@ method(Element, 'element_links', function() {
 		window.on('element_id_changed', element_id_changed, on)
 	})
 
-})
+}
+
+/* ---------------------------------------------------------------------------
+// element disablable mixin
+// ---------------------------------------------------------------------------
+publishes:
+	e.disabled
+	e.disable(reason, disabled)
+
+NOTE: The `disabled` state is a concerted effort located in multiple places:
+	- mouse events are blocked in divs.js.
+	- forcing the default cursor on the element and its children is done in css.
+	- showing the element grayed out with 50% transparency is done in css.
+	- keyboard focusing is disabled in make_focusable().
+
+NOTE: `:hover` and `:active` still apply to a disabled widget so make sure
+to add `:not([disabled])` in css on those selectors.
+
+NOTE: for non-widgets setting the `disabled` attr is enough to disable them.
+--------------------------------------------------------------------------- */
+
+e.make_disablable = function() {
+
+	let e = this
+
+	if (e.disable)
+		return
+
+	e.on_bind(function(on) {
+		// each disabled ancestor is a reason for this widget to be disabled.
+		if (on) {
+			let p = this.parent
+			while (p) {
+				if (p.disabled)
+					this.disable(p, true)
+				p = p.parent
+			}
+		} else {
+			let p = this.parent
+			while (p) {
+				this.disable(p, false)
+				p = p.parent
+			}
+		}
+	})
+
+	e.set_disabled = function(disabled) {
+		// add/remove this widget as a reason for the child widget to be disabled.
+		for (let ce of this.$('.x-widget'))
+			if (ce.disable) // css classes are not to be trusted
+				ce.disable(this, disabled)
+	}
+
+	e.property('disabled',
+		function() {
+			return this.hasattr('disabled')
+		},
+		function(disabled) {
+			disabled = !!disabled
+			let disabled0 = this.hasattr('disabled')
+			if (disabled0 == disabled)
+				return
+			this.bool_attr('disabled', disabled || null)
+			e.set_disabled(disabled, disabled0)
+		})
+
+	let dr
+	e.disable = function(reason, disabled) {
+		if (disabled) {
+			dr = dr || set()
+			dr.add(reason)
+			e.disabled = true
+		} else if (dr) {
+			dr.delete(reason)
+			if (!dr.size) {
+				e.disabled = false
+			}
+		}
+		e.disabled_reasons = dr
+	}
+}
+
+/* ---------------------------------------------------------------------------
+// element focusable mixin
+// ---------------------------------------------------------------------------
+publishes:
+	e.tabindex
+	e.focusable
+--------------------------------------------------------------------------- */
+
+e.make_focusable = function(fe) {
+
+	let e = this
+
+	if (e.props.tabindex)
+		return
+
+	fe = fe || e
+
+	let focusable = true
+
+	if (!fe.hasattr('tabindex'))
+		fe.attr('tabindex', 0)
+
+	function update() {
+		let can_be_focused = focusable && !e.disabled
+		fe.attr('tabindex', can_be_focused ? e.tabindex : (fe instanceof HTMLInputElement ? -1 : null))
+		if (!can_be_focused)
+			e.blur()
+	}
+
+	e.do_after('set_disabled', update)
+
+	e.set_tabindex = update
+	e.prop('tabindex', {type: 'number', default: 0})
+
+	e.property('focusable', () => focusable, function(v) {
+		v = !!v
+		if (v == focusable) return
+		focusable = v
+		update()
+	})
+
+	let inh_focus = e.focus
+	e.focus = function() {
+		if (fe == this || this.widget_selected)
+			inh_focus.call(this)
+		else
+			fe.focus()
+	}
+
+}
 
 /* deferred DOM updating -----------------------------------------------------
 
@@ -1296,7 +1702,7 @@ let update_all = raf_wrap(function update_all() {
 	updating = false
 })
 
-method(Element, 'update', function(opt) {
+e.update = function(opt) {
 	let update_opt = this._update_opt
 	if (update_opt) {
 		if (opt)
@@ -1324,19 +1730,19 @@ method(Element, 'update', function(opt) {
 	// ^^ update() called while updating: the update_set iterator will
 	// call do_update() in this frame, no need to ask for another frame.
 	update_all()
-})
+}
 
-method(Element, 'cancel_update', function() {
+e.cancel_update = function() {
 	update_set.delete(e)
 	position_set.delete(e)
-})
+}
 
-method(Element, 'on_update', function(f) {
+e.on_update = function(f) {
 	this.bound = this.bound || false
 	this.do_after('do_update', f)
-})
+}
 
-method(Element, '_do_update', function() {
+e._do_update = function() {
 	let opt = this._update_opt
 	this._update_opt = null
 	this.debug_open_if(DEBUG_UPDATE, 'U', Object.keys(opt).join(','))
@@ -1346,9 +1752,9 @@ method(Element, '_do_update', function() {
 		this.show()
 	this.position()
 	this.debug_close_if(DEBUG_UPDATE)
-})
+}
 
-method(Element, 'position', function() {
+e.position = function() {
 	if (!this.do_position)
 		return
 	if (!this.bound)
@@ -1360,17 +1766,17 @@ method(Element, 'position', function() {
 		return
 	// ^^ position() called while updating: no need to ask for another frame.
 	update_all()
-})
+}
 
-method(Element, 'on_measure', function(f) {
+e.on_measure = function(f) {
 	this.bound = this.bound || false
 	this.do_after('do_measure', f)
-})
+}
 
-method(Element, 'on_position', function(f) {
+e.on_position = function(f) {
 	this.bound = this.bound || false
 	this.do_after('do_position', f)
-})
+}
 
 e.do_bind = function(on) {
 	let e = this
@@ -1411,7 +1817,7 @@ or that has any ancestor with attr `disabled`. We're not using
 
 NOTE: preventing focusing is a matter of not-setting/removing attr `tabindex`
 except for input elements that must have an explicit `tabindex=-1`.
-This is not done here, see disablable_widget() and focusable_widget().
+This is not done here, see e.make_disablable() and e.make_focusable().
 
 */
 
@@ -1585,30 +1991,7 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 		document.fire('stopped_event', this)
 })
 
-// DOM load event.
-
-function on_dom_load(fn) {
-	if (document.readyState === 'loading')
-		document.on('DOMContentLoaded', fn)
-	else // `DOMContentLoaded` already fired
-		fn()
-}
-
-function init_components() {
-	root = document.documentElement  // for debugging, don't use in code.
-	body = document.body // for debugging, don't use in code.
-	head = document.head // for debugging, don't use in code.
-	if (DEBUG_INIT)
-		debug('ROOT INIT ---------------------------------')
-	root.init_component()
-	if (DEBUG_BIND)
-		debug('ROOT BIND ---------------------------------')
-	root.bind(true)
-	if (DEBUG_BIND)
-		debug('ROOT BIND DONE ----------------------------')
-}
-
-// inter-window event broadcasting.
+// inter-window event broadcasting -------------------------------------------
 
 window.addEventListener('storage', function(e) {
 	// decode the message.
@@ -1655,9 +2038,9 @@ property(Element, 'max_h', { set: function(v) { if (v !== this.__Mh) { this.__Mh
 
 alias(Element, 'x', 'x1')
 alias(Element, 'y', 'y1')
-method(Element, 'rect', function() {
+e.rect = function() {
 	return this.getBoundingClientRect()
-})
+}
 
 alias(Element, 'cx', 'clientLeft')
 alias(Element, 'cy', 'clientTop')
@@ -1697,7 +2080,7 @@ method(Window, 'rect', function() {
 
 // common state wrappers -----------------------------------------------------
 
-method(Element, 'hide', function(on) {
+e.hide = function(on) {
 	if (!arguments.length)
 		on = true
 	else
@@ -1707,14 +2090,14 @@ method(Element, 'hide', function(on) {
 	this.hidden = on
 	this.fire('show', !on)
 	return this
-})
+}
 
-method(Element, 'show', function(on) {
+e.show = function(on) {
 	if (!arguments.length)
 		on = true
 	this.hide(!on)
 	return this
-})
+}
 
 property(Element, 'hovered', function() {
 	return this.matches(':hover')
@@ -1741,7 +2124,7 @@ property(Element, 'effectively_focusable', function() {
 		) && !e.effectively_hidden && !e.effectively_disabled
 })
 
-method(Element, 'focusables', function() {
+e.focusables = function() {
 	let t = []
 	let sel = 'button, a[href] area[href], input, select, textarea, '
 		+ '[tabindex]:not([tabindex="-1"])'
@@ -1750,9 +2133,9 @@ method(Element, 'focusables', function() {
 			t.push(e)
 	}
 	return t
-})
+}
 
-method(Element, 'focus_first', function() {
+e.focus_first = function() {
 	if (this.effectively_focusable) {
 		this.focus()
 		return true
@@ -1766,7 +2149,7 @@ method(Element, 'focus_first', function() {
 		return true
 	}
 	return false
-})
+}
 
 property(Element, 'effectively_disabled', {get: function() {
 	return this.bool_attr('disabled')
@@ -1832,7 +2215,7 @@ function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
 	return [sx, sy]
 }
 
-method(Element, 'scroll_to_view_rect_offset', function(sx0, sy0, x, y, w, h) {
+e.scroll_to_view_rect_offset = function(sx0, sy0, x, y, w, h) {
 	let pw  = this.cw
 	let ph  = this.ch
 	if (sx0 == null) { sx0 = this.scrollLeft; }
@@ -1840,16 +2223,16 @@ method(Element, 'scroll_to_view_rect_offset', function(sx0, sy0, x, y, w, h) {
 	let e = this
 	let [sx, sy] = scroll_to_view_rect(x, y, w, h, pw, ph, -sx0, -sy0)
 	return [-sx, -sy]
-})
+}
 
 // scroll to make inside rectangle invisible.
-method(Element, 'scroll_to_view_rect', function(sx0, sy0, x, y, w, h) {
+e.scroll_to_view_rect = function(sx0, sy0, x, y, w, h) {
 	let [sx, sy] = this.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
 	this.scroll(sx, sy)
 	return [sx, sy]
-})
+}
 
-method(Element, 'make_visible_scroll_offset', function(sx0, sy0, parent) {
+e.make_visible_scroll_offset = function(sx0, sy0, parent) {
 	parent = this.parent
 	// TODO:
 	//parent = parent || this.parent
@@ -1857,25 +2240,25 @@ method(Element, 'make_visible_scroll_offset', function(sx0, sy0, parent) {
 	//let pr = parent.rect()
 	//let x = cr.x - pr.x
 	//let y = cr.y - pr.y
-	let x = this.offsetLeft
-	let y = this.offsetTop
-	let w = this.offsetWidth
-	let h = this.offsetHeight
+	let x = this.ox
+	let y = this.oy
+	let w = this.ow
+	let h = this.oh
 	return parent.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
-})
+}
 
 // scroll parent to make self visible.
-method(Element, 'make_visible', function() {
+e.make_visible = function() {
 	let parent = this.parent
 	while (parent && parent != document) {
 		parent.scroll(...this.make_visible_scroll_offset(null, null, parent))
 		parent = parent.parent
 		break
 	}
-})
+}
 
 // check if element is partially or fully visible.
-method(Element, 'is_in_viewport', function(m) {
+e.is_in_viewport = function(m) {
 	let r = this.rect()
 	m = m || 0
 	return (
@@ -1884,7 +2267,7 @@ method(Element, 'is_in_viewport', function(m) {
 		&& (r.x1 - m) <= window.innerWidth
 		&& (r.y1 - m) <= window.innerHeight
 	)
-})
+}
 
 scrollbar_widths = memoize(function() {
 	let d = div({style: `
@@ -2082,10 +2465,10 @@ function hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h) {
 		return 'right'
 }
 
-method(Element, 'hit_test_sides', function(mx, my, d1, d2) {
+e.hit_test_sides = function(mx, my, d1, d2) {
 	let r = this.rect()
 	return hit_test_rect_sides(mx, my, or(d1, 5), or(d2, 5), r.x, r.y, r.w, r.h)
-})
+}
 
 // canvas --------------------------------------------------------------------
 
@@ -2093,25 +2476,62 @@ method(CanvasRenderingContext2D, 'clear', function() {
 	this.clearRect(0, 0, this.canvas.width, this.canvas.height)
 })
 
-// modal window pattern ------------------------------------------------------
+// pw & ph are size multiples for lowering the number of resizes.
+method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
+	let r = devicePixelRatio
+	w = ceil(w / pw) * pw
+	h = ceil(h / ph) * ph
+	if (this.width  != w) { this.width  = w * r; this.w = w; }
+	if (this.height != h) { this.height = h * r; this.h = h; }
+})
 
-method(Element, 'modal', function(on) {
+// modals & overlays ---------------------------------------------------------
+
+function overlay(attrs, content) {
+	let e = div(attrs)
+	e.class('overlay')
+	e.set(content || div())
+	return e
+}
+
+e.modal = function(on) {
 	let e = this
 	if (on == false) {
-		if (e.dialog) {
+		if (e.modal_overlay) {
 			e.class('modal', false)
-			e.dialog.remove()
-			e.dialog = null
+			e.modal_overlay.remove()
+			e.modal_overlay = null
 		}
-	} else if (!e.dialog) {
-		let dialog = div({class: 'modal-overlay'}, e)
-		e.dialog = dialog
+	} else if (!e.overlay) {
+		e.modal_overlay = overlay({class: 'modal-overlay'}, e)
 		e.class('modal')
-		document.body.add(dialog)
-		dialog.focus_first()
+		document.body.add(e.modal_overlay)
+		e.modal_overlay.focus_first()
 	}
 	return e
-})
+}
+
+css(`
+.overlay {
+	position: fixed;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	display: grid;
+	justify-content: center;
+	align-content: center;
+	z-index: 1;
+}
+
+.modal-overlay {
+	background-color: rgba(0,0,0,0.6);
+	display: grid;
+	justify-content: center;
+	align-content: center;
+	z-index: 1;
+}
+`)
 
 // tab cycling within the app, popups & modauls ------------------------------
 
@@ -2134,174 +2554,11 @@ document.on('keydown', function(key, shift, ctrl, alt, ev) {
 	}
 })
 
-// quick overlays ------------------------------------------------------------
-
-function overlay(attrs, content) {
-	let e = div(attrs)
-	e.style = `
-		position: absolute;
-		left: 0;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		overflow: auto;
-		justify-content: center;
-	` + (attrs && attrs.style || '')
-	if (content == null)
-		content = div()
-	e.set(content)
-	e.content = e.at[0]
-	e.content.style['margin'] = 'auto' // center it.
-	return e
-}
-
-// live-move list element pattern --------------------------------------------
-
-// implements:
-//   move_element_start(move_i, move_n, i1, i2[, x1, x2])
-//   move_element_update(elem_x, [i1, i2, x1, x2])
-// uses:
-//   movable_element_size(elem_i) -> w
-//   set_movable_element_pos(i, x, moving)
-//
-function live_move_mixin(e) {
-
-	e = e || {}
-
-	let move_i1, move_i2, i1, i2, i1x, i2x, offsetx
-	let move_x, over_i, over_p, over_x
-	let sizes = []
-	let positions = []
-
-	e.move_element_start = function(move_i, move_n, _i1, _i2, _i1x, _i2x, _offsetx) {
-		move_n = or(move_n, 1)
-		move_i1 = move_i
-		move_i2 = move_i + move_n
-		move_x = null
-		over_i = null
-		over_x = null
-		i1  = _i1
-		i2  = _i2
-		i1x = _i1x
-		i2x = _i2x
-		offsetx = _offsetx || 0
-		sizes    .length = i2 - i1
-		positions.length = i2 - i1
-		for (let i = i1; i < i2; i++)
-			sizes[i] = e.movable_element_size(i)
-		if (i1x == null) {
-			assert(i1 == 0)
-			i1x = 0
-			i2x = i1x
-			for (let i = i1; i < i2; i++) {
-				if (i < move_i1 || i >= move_i2)
-					i2x += sizes[i]
-			}
-		}
-	}
-
-	e.move_element_stop = function() {
-		set_moving_element_pos(over_x)
-		return over_i
-	}
-
-	function hit_test(elem_x) {
-		let x = i1x
-		let x0 = i1x
-		let last_over_i = over_i
-		let new_over_i, new_over_p
-		for (let i = i1; i < i2; i++) {
-			if (i < move_i1 || i >= move_i2) {
-				let w = sizes[i]
-				let x1 = x + w / 2
-				if (elem_x < x1) {
-					new_over_i = i
-					new_over_p = lerp(elem_x, x0, x1, 0, 1)
-					over_i = new_over_i
-					over_p = new_over_p
-					return new_over_i != last_over_i
-				}
-				x += w
-				x0 = x1
-			}
-		}
-		new_over_i = i2
-		x1 = i2x
-		new_over_p = lerp(elem_x, x0, x1, 0, 1)
-		over_i = new_over_i
-		over_p = new_over_p
-		return new_over_i != last_over_i
-	}
-
- 	// `[i1..i2)` index generator with `[move_i1..move_i2)` elements moved.
-	function each_index(f) {
-		if (over_i < move_i1) { // moving upwards
-			for (let i = i1     ; i < over_i ; i++) f(i)
-			for (let i = move_i1; i < move_i2; i++) f(i, true)
-			for (let i = over_i ; i < move_i1; i++) f(i)
-			for (let i = move_i2; i < i2     ; i++) f(i)
-		} else {
-			for (let i = i1     ; i < move_i1; i++) f(i)
-			for (let i = move_i2; i < over_i ; i++) f(i)
-			for (let i = move_i1; i < move_i2; i++) f(i, true)
-			for (let i = over_i ; i <  i2    ; i++) f(i)
-		}
-	}
-
-	let move_ri1, move_ri2, move_vi1
-
-	function set_moving_element_pos(x, moving) {
-		if (move_ri1 != null)
-			for (let i = move_ri1; i < move_ri2; i++) {
-				positions[i] = offsetx + x
-				e.set_movable_element_pos(i, offsetx + x, moving)
-				x += sizes[i]
-			}
-	}
-
-	e.move_element_update = function(elem_x) {
-		elem_x = clamp(elem_x, i1x, i2x)
-		if (elem_x != move_x) {
-			move_x = elem_x
-			e.move_x = move_x
-			if (hit_test(move_x)) {
-				e.over_i = over_i
-				e.over_p = over_p
-				let x = i1x
-				move_ri1 = null
-				move_ri2 = null
-				over_x = null
-				each_index(function(i, moving) {
-					if (moving) {
-						over_x = or(over_x, x)
-						move_ri1 = or(move_ri1, i)
-						move_ri2 = i+1
-					} else {
-						positions[i] = offsetx + x
-						e.set_movable_element_pos(i, offsetx + x)
-					}
-					x += sizes[i]
-				})
-			}
-			set_moving_element_pos(move_x, true)
-		}
-		return positions
-	}
-
-	return e
-}
-
 // lazy image loading --------------------------------------------------------
 
 let lazy_load_all = function() {
-	for (let img of $('img[data-src]')) {
-		if (img.is_in_viewport(300)) {
-			let src = img.attr('data-src')
-			img.attr('data-src', null)
-			img.attr('src', src)
-		}
-	}
+	for (let e of $('img[data-src]'))
+		e.position()
 }
 window.on('scroll', lazy_load_all)
 window.on('resize', lazy_load_all)
@@ -2309,14 +2566,22 @@ on_dom_load(function() {
 	document.body.on('scroll', lazy_load_all)
 })
 
-let lazy_load = function(img) {
-	if (img.is_in_viewport(300)) {
-		let src = img.attr('data-src')
-		img.attr('data-src', null)
-		img.attr('src', src)
-	}
-}
-register_component('img', lazy_load, 'img[data-src]')
+component('img', '[data-src]', function(e) {
+	let is_in_viewport
+	let updated
+	e.on_measure(function() {
+		if (updated) return
+		is_in_viewport = this.is_in_viewport(300)
+	})
+	e.on_position(function() {
+		if (updated) return
+		if (!is_in_viewport) return
+		let src = e.attr('data-src')
+		e.attr('data-src', null)
+		e.attr('src', src)
+		updated = true
+	})
+})
 
 // timeago auto-updating -----------------------------------------------------
 
@@ -2342,7 +2607,7 @@ runevery(60, function() {
 
 // exec'ing js scripts inside html -------------------------------------------
 
-register_component('script', function(e) {
+component('script', '[run]', function(e) {
 	if (e.type && e.type != 'javascript')
 		return
 	if (e.src)
@@ -2350,22 +2615,11 @@ register_component('script', function(e) {
 	// calling with `e` as `this` allows `this.on('bind',...)` inside the script
 	// and also attaching other elements to the script for lifetime control!
 	(new Function('', e.text)).call(e)
-}, '[run]')
+})
 
 // not initializing components inside the template tag -----------------------
 
-register_component('template', noop) // do not init child components.
-
-// canvas helpers ------------------------------------------------------------
-
-// pw & ph are size multiples for lowering the number of resizes.
-method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
-	let r = devicePixelRatio
-	w = ceil(w / pw) * pw
-	h = ceil(h / ph) * ph
-	if (this.width  != w) { this.width  = w * r; this.w = w; }
-	if (this.height != h) { this.height = h * r; this.h = h; }
-})
+component('template', noop) // do not init child components.
 
 /* popups --------------------------------------------------------------------
 
@@ -2379,6 +2633,14 @@ elements that create a stacking context indirectly by using `opacity`,
 
 [1] https://github.com/w3c/csswg-drafts/issues/4092
 */
+
+css(`
+.popup {
+	/* hack to escape parents' overflow: hidden as long as none of them
+	creates a stacking context */
+	position: fixed !important;
+}
+`)
 
 property(Element, 'creates_stacking_context', function() {
 	if (this.parent == document)
@@ -2419,7 +2681,7 @@ property(Element, 'stacking_parent', function() {
 	return get_stacking_parent(this.parent)
 })
 
-method(Element, 'popup', function(target, side, align) {
+e.popup = function(target, side, align) {
 
 	let e = this
 	if (e.hasclass('popup'))
@@ -2627,26 +2889,144 @@ method(Element, 'popup', function(target, side, align) {
 	})
 
 	return e
-})
+}
 
-// lists ---------------------------------------------------------------------
+// live-move list elements ---------------------------------------------------
 
-method(Element, 'make_list', function() {
-	let e = this
-	live_move_mixin(e)
+// implements:
+//   e.move_element_start(move_i, move_n, i1, i2[, x1, x2, xoffset])
+//   e.move_element_update(elem_x, [i1, i2, x1, x2])
+//   e.move_element_stop() -> over_id
+// uses:
+//   e.movable_element_size(elem_i) -> w
+//   e.set_movable_element_pos(i, x, moving)
+//
+function live_move_mixin(e) {
 
-	// e.move_element_start(move_i, move_n, i1, i2[, x1, x2])
-	// e.move_element_update(elem_x, [i1, i2, x1, x2])
+	e = e || {}
 
-	e.movable_element_size = function(elem_i) {
-		//
+	let move_i1, move_i2, i1, i2, i1x, i2x, offsetx
+	let move_x, over_i, over_p, over_x
+	let sizes = []
+	let positions = []
+
+	e.move_element_start = function(move_i, move_n, _i1, _i2, _i1x, _i2x, _offsetx) {
+		move_n = or(move_n, 1)
+		move_i1 = move_i
+		move_i2 = move_i + move_n
+		move_x = null
+		over_i = null
+		over_x = null
+		i1  = _i1
+		i2  = _i2
+		i1x = _i1x
+		i2x = _i2x
+		offsetx = _offsetx || 0
+		sizes    .length = i2 - i1
+		positions.length = i2 - i1
+		for (let i = i1; i < i2; i++)
+			sizes[i] = e.movable_element_size(i)
+		if (i1x == null) {
+			assert(i1 == 0)
+			i1x = 0
+			i2x = i1x
+			for (let i = i1; i < i2; i++) {
+				if (i < move_i1 || i >= move_i2)
+					i2x += sizes[i]
+			}
+		}
 	}
 
-	e.set_movable_element_pos = function(i, x, moving) {
-
+	e.move_element_stop = function() {
+		set_moving_element_pos(over_x)
+		return over_i
 	}
 
-})
+	function hit_test(elem_x) {
+		let x = i1x
+		let x0 = i1x
+		let last_over_i = over_i
+		let new_over_i, new_over_p
+		for (let i = i1; i < i2; i++) {
+			if (i < move_i1 || i >= move_i2) {
+				let w = sizes[i]
+				let x1 = x + w / 2
+				if (elem_x < x1) {
+					new_over_i = i
+					new_over_p = lerp(elem_x, x0, x1, 0, 1)
+					over_i = new_over_i
+					over_p = new_over_p
+					return new_over_i != last_over_i
+				}
+				x += w
+				x0 = x1
+			}
+		}
+		new_over_i = i2
+		x1 = i2x
+		new_over_p = lerp(elem_x, x0, x1, 0, 1)
+		over_i = new_over_i
+		over_p = new_over_p
+		return new_over_i != last_over_i
+	}
+
+ 	// `[i1..i2)` index generator with `[move_i1..move_i2)` elements moved.
+	function each_index(f) {
+		if (over_i < move_i1) { // moving upwards
+			for (let i = i1     ; i < over_i ; i++) f(i)
+			for (let i = move_i1; i < move_i2; i++) f(i, true)
+			for (let i = over_i ; i < move_i1; i++) f(i)
+			for (let i = move_i2; i < i2     ; i++) f(i)
+		} else {
+			for (let i = i1     ; i < move_i1; i++) f(i)
+			for (let i = move_i2; i < over_i ; i++) f(i)
+			for (let i = move_i1; i < move_i2; i++) f(i, true)
+			for (let i = over_i ; i <  i2    ; i++) f(i)
+		}
+	}
+
+	let move_ri1, move_ri2, move_vi1
+
+	function set_moving_element_pos(x, moving) {
+		if (move_ri1 != null)
+			for (let i = move_ri1; i < move_ri2; i++) {
+				positions[i] = offsetx + x
+				e.set_movable_element_pos(i, offsetx + x, moving)
+				x += sizes[i]
+			}
+	}
+
+	e.move_element_update = function(elem_x) {
+		elem_x = clamp(elem_x, i1x, i2x)
+		if (elem_x != move_x) {
+			move_x = elem_x
+			e.move_x = move_x
+			if (hit_test(move_x)) {
+				e.over_i = over_i
+				e.over_p = over_p
+				let x = i1x
+				move_ri1 = null
+				move_ri2 = null
+				over_x = null
+				each_index(function(i, moving) {
+					if (moving) {
+						over_x = or(over_x, x)
+						move_ri1 = or(move_ri1, i)
+						move_ri2 = i+1
+					} else {
+						positions[i] = offsetx + x
+						e.set_movable_element_pos(i, offsetx + x)
+					}
+					x += sizes[i]
+				})
+			}
+			set_moving_element_pos(move_x, true)
+		}
+		return positions
+	}
+
+	return e
+}
 
 // CSS specificity reporting -------------------------------------------------
 
@@ -2719,7 +3099,7 @@ function css_report_specificity(file, max_spec) {
 
 on_dom_load(function() {
 
-	css_report_specificity('x-widgets.css', 2)
+	css_report_specificity('x-widgets.css', 0)
 
 	let t0 = time()
 
@@ -2762,68 +3142,45 @@ on_dom_load(function() {
 
 	let t2 = time()
 
-	debug('CSS --inc', n,
-		((t1 - t0) * 1000).dec(0)+'ms',
-		((t2 - t1) * 1000).dec(0)+'ms')
+	debug('CSS --inc', n, 'rules,',
+		floor((t1 - t0) * 1000), 'ms to map,',
+		floor((t2 - t1) * 1000), 'ms to update')
 
 })
 
-// required styles -----------------------------------------------------------
+// theming -------------------------------------------------------------------
 
-function add_style(s) {
-	let style = tag('style')
-	style.textContent = s
-	document.head.add(style)
+// NOTE: divs.js is independent of any css, including utils.css.
+// These class names are the only references to utils.css.
+
+function is_theme_dark() {
+	return root.hasclass('theme-dark')
 }
 
-add_style(`
-
-[hidden] {
-	display: none !important;
+function set_theme_dark(dark) {
+	root.class('theme-dark' , !!dark)
+	root.class('theme-light', !dark)
+	document.fire('theme_changed')
 }
 
-/* using specificity 0-3-0 so that normal state styles don't accidentally undisable it. */
-/* NOTE: you still have to use :not([disabled]):hover to prevent :hover on
-   disabled widgets because we're not using pointer-events: none. */
-[disabled][disabled][disabled] {
-	opacity: .5;
-	filter: grayscale();
+function get_theme_size() {
+	return root.hasclass('theme-large') && 'large'
+		|| root.hasclass('theme-small') && 'small'
+		|| 'normal'
 }
 
-/* disabled child: reset opacity and filter. */
-/* TODO: is wrong to do this for widgets that set these in their normal
-   state but :not([disabled]) [disabled] would be too slow.
-	FIX: opacity is wrong anyway, find another filter that doesn't mix.
-*/
-[disabled] [disabled][disabled] {
-	opacity: unset;
-	filter: unset;
+function set_theme_size(size) {
+	size = repl(size, 'normal')
+	root.class('theme-large theme-small', false)
+	if (size)
+		root.class('theme-'+size)
+	document.fire('theme_changed')
 }
 
-[disabled],
-[disabled] *
-{
-	cursor: default !important;
-}
+// make `.theme-inverted` work.
+if (!is_theme_dark())
+	root.class('theme-light')
 
-.popup {
-	/* hack to escape parents' overflow: hidden as long as none of them
-	creates a stacking context */
-	position: fixed !important;
-}
 
-.modal-overlay {
-	position: fixed;
-	left: 0;
-	top: 0;
-	width: 100%;
-	height: 100%;
-	background-color: rgba(0,0,0,0.6);
-	display: grid;
-	justify-content: center;
-	align-content: center;
-	z-index: 1;
-}
-`)
+} // module scope
 
-}

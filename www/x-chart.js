@@ -12,7 +12,7 @@ SHAPES
 
 */
 
-component('x-chart', 'Input', function(e) {
+widget('x-chart', 'Input', function(e) {
 
 	contained_widget(e)
 	serializable_widget(e)

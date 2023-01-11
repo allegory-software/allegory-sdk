@@ -3,8 +3,8 @@
 	webb.js | single-page apps | client-side API
 	Written by Cosmin Apreutesei. Public Domain.
 
-INIT
 
+You must call on DOM load:
 	init_action()
 
 CONFIG API
@@ -50,6 +50,8 @@ TEMPLATES
 */
 
 { // module scope.
+
+let e = Element.prototype
 
 // config --------------------------------------------------------------------
 
@@ -257,7 +259,7 @@ function setscroll(top) {
 	window.scrollTo(0, top)
 }
 
-method(Element, 'sethref', function(url, opt) {
+e.sethref = function(url, opt) {
 	if (this._hooked)
 		return
 	if (this.attr('target'))
@@ -286,17 +288,17 @@ method(Element, 'sethref', function(url, opt) {
 	})
 	this._hooked = true
 	return this
-})
+}
 
-method(Element, 'sethrefs', function(selector) {
+e.sethrefs = function(selector) {
 	for (let ce of this.$(selector || 'a[href]'))
 		ce.sethref()
 	return this
-})
+}
 
-register_component('a', function(e) {
+component('a', '[href]', function(e) {
 	e.sethref()
-}, 'a[href]')
+})
 
 function settitle(title) {
 	title = title
@@ -369,17 +371,17 @@ function render(template_name, data) {
 	return render_string(s, data)
 }
 
-method(Element, 'render_string', function(s, data, ev) {
+e.render_string = function(s, data, ev) {
 	this.unsafe_html = render_string(s, data)
 	this.fire('render', data, ev)
 	return this
-})
+}
 
-method(Element, 'render', function(data, ev) {
+e.render = function(data, ev) {
 	let s = this.template_string
 		|| template(this.template || this.attr('template') || this.id || this.tag)
 	return this.render_string(s, data, ev)
-})
+}
 
 // init ----------------------------------------------------------------------
 

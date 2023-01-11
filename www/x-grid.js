@@ -20,12 +20,12 @@ implements:
 	nav widget protocol.
 --------------------------------------------------------------------------- */
 
-component('x-grid', 'Input', function(e) {
+widget('x-grid', 'Input', function(e) {
 
 	val_widget(e, true)
 	nav_widget(e)
 	editable_widget(e)
-	focusable_widget(e)
+	e.make_focusable()
 	e.class('x-focusable-items')
 	stylable_widget(e)
 	e.ctrl_key_taken = true
@@ -45,12 +45,12 @@ component('x-grid', 'Input', function(e) {
 
 		// css colors
 		e.cell_border_width          = num(css.prop('--x-border-width-item'))
-		e.hcell_border_color         = css.prop('--x-border-light')
-		e.cell_border_color          = css.prop('--x-faint')
-		e.bg                         = css.prop('--x-bg')
-		e.bg_alt                     = css.prop('--x-bg-alt')
+		e.hcell_border_color         = css.prop('--bg2')
+		e.cell_border_color          = css.prop('--bg1')
+		e.bg                         = css.prop('--bg')
+		e.bg_alt                     = css.prop('--bg-alt')
 		e.bg_header                  = css.prop('--x-bg-grid-header')
-		e.fg                         = css.prop('--x-fg')
+		e.fg                         = css.prop('--fg')
 		e.fg_disabled                = css.prop('--x-fg-disabled')
 		e.fg_search                  = css.prop('--x-fg-search')
 		e.bg_search                  = css.prop('--x-bg-search')
@@ -1530,16 +1530,14 @@ component('x-grid', 'Input', function(e) {
 
 	// column moving ----------------------------------------------------------
 
-	live_move_mixin(e)
+	let col_mover = live_move_mixin()
 
-	e.movable_element_size = function(fi) {
+	col_mover.movable_element_size = function(fi) {
 		let [x, y, w, h] = cell_rect(0, fi)
 		return horiz ? w : h
 	}
 
-	function set_cell_of_col_x(cell, field, x, w) { set_header_cell_xw(cell, field, x, w) }
-	function set_cell_of_col_y(cell, field, y) { cell.y = y }
-	e.set_movable_element_pos = function(fi, x) {
+	col_mover.set_movable_element_pos = function(fi, x) {
 		e.fields[fi]._x = x
 		if (e.focused_field_index == fi)
 			update_editor(
@@ -1578,7 +1576,7 @@ component('x-grid', 'Input', function(e) {
 		e.class('col-moving')
 		if (e.editor && e.focused_field_index == hit_fi)
 			e.editor.class('col-moving')
-		e.move_element_start(hit_fi, 1, 0, e.fields.length)
+		col_mover.move_element_start(hit_fi, 1, 0, e.fields.length)
 		hit_state = 'col_moving'
 		return true
 	}
@@ -1587,13 +1585,13 @@ component('x-grid', 'Input', function(e) {
 		;[mx, my] = cells_point(mx, my)
 		mx -= hit_dx
 		my -= hit_dy
-		e.move_element_update(horiz ? mx : my)
+		col_mover.move_element_update(horiz ? mx : my)
 		update_sizes()
 		e.scroll_to_cell(hit_ri, hit_fi)
 	}
 
 	function mu_col_move(ev, mx, my) {
-		let over_fi = e.move_element_stop() // sets x of moved element.
+		let over_fi = col_mover.move_element_stop() // sets x of moved element.
 		e.class('col-moving', false)
 		if (e.editor)
 			e.editor.class('col-moving', false)
@@ -2655,7 +2653,7 @@ component('x-grid', 'Input', function(e) {
 // grid dropdown
 // ---------------------------------------------------------------------------
 
-component('x-grid-dropdown', function(e) {
+widget('x-grid-dropdown', function(e) {
 
 	nav_dropdown_widget(e)
 
@@ -2676,7 +2674,7 @@ component('x-grid-dropdown', function(e) {
 // row form
 // ---------------------------------------------------------------------------
 
-component('x-row-form', function(e) {
+widget('x-row-form', function(e) {
 
 	grid.props.vertical = {default: true}
 
@@ -2757,7 +2755,7 @@ component('x-row-form', function(e) {
 // grid profile
 // ---------------------------------------------------------------------------
 
-component('x-grid-profile', function(e) {
+widget('x-grid-profile', function(e) {
 
 	tabs_item_widget(e)
 

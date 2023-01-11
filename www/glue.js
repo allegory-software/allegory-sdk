@@ -137,11 +137,11 @@ GEOMETRY
 	point_around(cx, cy, r, angle) -> [x, y]
 	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) -> [x, y, w, h]
 TIMERS
-	runafter(t, f) -> tm
-	runevery(t, f) -> tm
-	runagainevery(t, f) -> tm
+	runafter(t, f) -> tid
+	runevery(t, f) -> tid
+	runagainevery(t, f) -> tid
 	clock()
-	timer(f)
+	timer(f) -> tm; tm(t) to rearm; tm() to cancel.
 SERIALIZATION
 	json_arg(s) -> t
 	json(t) -> s

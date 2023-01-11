@@ -2,31 +2,33 @@
 
 	x-widgets.css | x-widgets layouting and default styling
 
+USES
+	divs.js        for `--inc` directive.
+	utils.css      for @layer order and what we put in the `--inc directive`.
+
 SPECIFICITY
-	Use only specificity 0-1-0 and 0-2-0 everywhere. Use :where() to control it.
-	Spec 0-1-0 is for normal styling, spec 0-2-0 is for styling dynamic states.
-	This way you can restyle widgets without breaking state styles.
-	We could do this with `@layer base, states` but that's more verbose
-	and there's still specificity inside the layers to worry about.
-	NOTE: Generic states like `[disabled]` are spec 0-3-0 so that they don't get
-	overriden by other state selectors. Use `.bla.bla[disabled]` to restyle them.
-	CSS is a gallery of dumb things but specificity takes the cake.
+	Use only specificity 0 everywhere, i.e. put all selectors inside :where(),
+	which effectively disables this genius CSS feature. Put all rules inside
+	@layer scopes. Layers allows you to restyle widgets without accidentally
+	muting role/state-modifier styles.
+	NOTE: Rules outside @layer scopes take precedence over layered rules !
+	NOTE: It's `:where(...)::before`, not `:where(...::before)` !
 
 REUSE
-	Since CSS classes are not composable and we don't want to use silly preprocessors,
-	use var() for anything that is used in two places and is not a coincidence.
+	CSS rules are not composable and we don't want to use silly preprocessors,
+	so use var() for anything that is used in two places and is not a coincidence.
+	Use `--inc` to compose rules from utils classes but note the load-time penalty.
 
 STATES
 	State classes are applied only to the outermost element of a widget except
 	`:focus-visible` which is applied only to the innermost element.
-	Use `:where(.outer).state .inner` to select .state but style .inner
-	and `:where(.outer) .inner:has(:focus-visible)` to select :focus-visible
-	but style .inner which may be the focused element or one of its parents.
-	CAVEAT: For container widgets like tabs and split you have to use the ">"
-	combinator instead of " " to avoid selecting on child widgets of the same type.
+	Use `.outer.state .inner` to style `.inner` on `.state`.
+	Use `.outer .inner:has(:focus-visible)` to style `.outer` on `:focus-visible`.
 
-CONTEXTS
-	...
+DESCENDANT COMBINATOR
+	For container widgets like tabs and split you have to use the ">" combinator
+	instead of " " at least until you reach a header or something, otherwise
+	you will accidentally select child widgets of the same type as the container.
 
 RAD
 	`.widget-*` classes are for widget self-editing states.
@@ -35,2312 +37,2355 @@ RAD
 
 /* variables -------------------------------------------------------------- */
 
-:root {
+@layer base {
 
-	/*
-	NOTE: in order to valign the text of the grid cell with its inline editor,
-	`grid-cell-baseline` must be set to match the baseline set implicitly by
-	`grid-cell-line-height`. Don't try to vcenter the text on the cell with these
-	two parameters, use `padding-y-input` for that.
-	NOTE: Firefox won't set a line height lower than the font allows on <input>!
-	*/
-	--x-grid-cell-h           : 24px; /* PIXELS ONLY! */
-	--x-grid-cell-baseline    : 12px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
-	/* sometimes Firefox needs some help aligning the basline... */
-	--x-grid-cell-baseline-adjust-ff : 0;
-	--x-padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
-	--x-padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
+	:where(:root) {
 
-	--x-border-light                  : #00000033;  /* normal borders */
-	--x-border-light-hover            : #666;
-	--x-border-focused                : #99d;
-	--x-border-focused-button         : #aab;
-	--x-border-focused-button-primary : #363;
-	--x-outline-markbox-focused       : #88888866;
+		/*
+		NOTE: in order to valign the text of the grid cell with its inline editor,
+		`grid-cell-baseline` must be set to match the baseline set implicitly by
+		`grid-cell-line-height`. Don't try to vcenter the text on the cell with these
+		two parameters, use `padding-y-input` for that.
+		NOTE: Firefox won't set a line height lower than the font allows on <input>!
+		*/
+		--x-grid-cell-h           : 24px; /* PIXELS ONLY! */
+		--x-grid-cell-baseline    : 12px; /* PIXELS ONLY! */
+		--x-grid-cell-line-height : 16px; /* PIXELS ONLY! */
+		/* sometimes Firefox needs some help aligning the basline... */
+		--x-grid-cell-baseline-adjust-ff : 0;
+		--x-padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
+		--x-padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
 
-	--x-shadow-menu                   :  2px  2px  2px      #000000aa; /* sharper shadow */
-	--x-shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
-	--x-shadow-button                 :  0px  0px  8px  0px #00000011;
-	--x-shadow-tooltip                :  2px  2px  9px      #00000044;
-	--x-shadow-dialog                 :  2px  5px 10px      #00000088;
-	--x-shadow-toolbox                :  1px  1px  4px      #000000aa;
-	--x-shadow-slider-thumb           :  1px  1px  2px      #000000aa;
-	--x-shadow-button-pressed         : inset 0 0.15em 0.3em #1b1f2333;
+		--x-border-focused                : #99d; /* dropdown open */
+		--x-outline-markbox-focused       : #88888866;
 
-	--x-margin                      : .25em;
-	--x-border-radius-input         : 0;
-	--x-border-radius-window        : .5em;
-	--x-border-radius-button        : .3em;
+		--x-shadow-menu                   :  2px  2px  2px      #000000aa; /* sharper shadow */
+		--x-shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
+		--x-shadow-button                 :  0px  0px  8px  0px #00000011;
+		--x-shadow-tooltip                :  2px  2px  9px      #00000044;
+		--x-shadow-dialog                 :  2px  5px 10px      #00000088;
+		--x-shadow-toolbox                :  1px  1px  4px      #000000aa;
+		--x-shadow-slider-thumb           :  1px  1px  2px      #000000aa;
+		--x-shadow-button-pressed         : inset 0 0.15em 0.3em #1b1f2333;
 
-	--x-padding-x-button            : .7em;
-	--x-padding-y-button            : .4em;
-	--x-padding-x-button-icon       : .4em; /* for buttons with icon only */
-	--x-padding-y-input-top         : 22px; /* for inputs with label */
-	--x-padding-y-input-bottom      :  2px; /* for inputs with label */
-	--x-padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
-	--x-padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
-	--x-padding-y2-input-il-dropdown-button : .5em;
+		--x-margin                      : .25em;
+		--x-border-radius-input         : 0;
+		--x-border-radius-window        : .5em;
+		--x-border-radius-button        : .3em;
 
-	--x-min-height-input            : 3.6em;
-	--x-width-input                 : 12em;
+		--x-padding-x-button            : .7em;
+		--x-padding-y-button            : .4em;
+		--x-padding-x-button-icon       : .4em; /* for buttons with icon only */
+		--x-padding-y-input-top         : 22px; /* for inputs with label */
+		--x-padding-y-input-bottom      :  2px; /* for inputs with label */
+		--x-padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
+		--x-padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
+		--x-padding-y2-input-il-dropdown-button : .5em;
 
-	--x-font-size-input-label        : 90%;
-	--x-font-size-input-label-empty  : 90%; /* put 100% for animating floating label */
+		--x-min-height-input            : 3.6em;
+		--x-width-input                 : 12em;
 
-	--x-fg              : #000;  /* text on normal backgrounds */
-	--x-fg-p            : #444;  /* multiline text on normal backgrounds */
-	--x-fg-label        : #666;  /* text of input & chart labels */
-	--x-fg-inverted     : #fff;  /* text on inverted backgrounds */
-	--x-bg              : #fff;  /* bg for regions that need to be opaque */
-	--x-bg-alt          : #f3f3f3;  /* bg for regions that need to be opaque */
-	--x-bg-moving       : #eeeeeeaa;
-	--x-bg-popup        : #fff;  /* bg for popups and inline grid editors */
-	--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
-	--x-fg-disabled     : #00000066;  /* faded text on light bg */
-	--x-fg-disabled-inverted : #ffffff66;  /* faded text on dark colored bg with the same color as bg */
-	--x-smoke           : #00000022;  /* light overlays */
-	--x-faint           : #00000011;  /* faint overlays and faint borders */
-	--x-bg-new          : #eeeeff;
-	--x-bg-modified     : #ddffdd;
-	--x-bg-new-modified : #ccf0f0;
-	--x-fg-search       : #000;  /* fg for quicksearch text */
-	--x-bg-search       : #ff9;  /* bg for quicksearch text */
-	--x-bg-info         : #069;  /* bg & fg for info bubbles */
-	--x-fg-info         : var(--x-fg-inverted);
-	--x-bg-error        : #a33; /* bg & fg for invalid inputs and error bubbles */
-	--x-fg-error        : var(--x-fg-inverted);
-	--x-bg-warn         : #ffa500;
-	--x-fg-warn         : var(--x-fg);
-	--x-bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
-	--x-bg-today        : #f33;
-	--x-fg-today        : var(--x-fg-inverted);
-	--x-fg-clickable    : #207fdf; /* markbox icon, slider */
+		--x-font-size-input-label        : var(--font-size-small);
+		--x-font-size-input-label-empty  : var(--font-size-small); /* put 100% for animating floating label */
 
-	--x-bg-button                 : #eff3f6;
-	--x-bg-button-hover           : #dee6ed;
-	--x-bg-button-pressed         : #ced9e4;
-	--x-fg-button                 : var(--x-fg-inverted);
-	--x-bg-button-primary         : #28a745;
-	--x-fg-button-primary         : var(--x-fg-inverted);
-	--x-bg-button-primary-hover   : #199134;
-	--x-bg-button-primary-pressed : #147a2b;
-	--x-bg-button-danger          : var(--x-bg-button);
-	--x-bg-button-danger-hover    : var(--x-bg-button-hover);
-	--x-bg-button-danger-pressed  : var(--x-bg-button-pressed);
-	--x-fg-button-danger          : #a33;
+		--x-fg-inverted     : #fff;  /* text on inverted backgrounds */
+		--x-fg-label        : #666;  /* text of input & chart labels */
+		--x-bg-moving       : #eeeeeeaa;
+		--x-bg-popup        : #fff;  /* bg for popups and inline grid editors */
+		--x-bg-popup2       : #fff;  /* bg for popups sitting over popups */
+		--x-fg-disabled     : #00000066;  /* faded text on light bg */
+		--x-fg-disabled-inverted : #ffffff66;  /* faded text on dark colored bg with the same color as bg */
+		--x-smoke           : #00000022;  /* light overlays */
+		--x-bg-new          : #eeeeff;
+		--x-bg-modified     : #ddffdd;
+		--x-bg-new-modified : #ccf0f0;
+		--x-fg-search       : #000;  /* fg for quicksearch text */
+		--x-bg-search       : #ff9;  /* bg for quicksearch text */
+		--x-bg-info         : #069;  /* bg & fg for info bubbles */
+		--x-fg-info         : var(--x-fg-inverted);
+		--x-bg-error        : #a33; /* bg & fg for invalid inputs and error bubbles */
+		--x-fg-error        : var(--x-fg-inverted);
+		--x-bg-warn         : #ffa500;
+		--x-fg-warn         : var(--fg);
+		--x-bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
+		--x-bg-today        : #f33;
+		--x-fg-today        : var(--x-fg-inverted);
+		--x-fg-clickable    : #207fdf; /* markbox icon, slider */
 
-	--x-bg-select-button: var(--x-bg-button);
+		--x-bg-select-button: var(--bg-button);
 
-	--x-bg-toolbox-titlebar         : var(--x-faint);
-	--x-bg-toolbox-titlebar-focused : #00003333;
+		--x-bg-toolbox-titlebar         : var(--bg1);
+		--x-bg-toolbox-titlebar-focused : #00003333;
 
-	--x-stroke-dialog-xbutton       : #00000066;
+		--x-stroke-dialog-xbutton       : #00000066;
 
-	--x-bg-tabs-selection-bar: #66f;
+		--x-bg-tabs-selection-bar: #66f;
 
-	--x-selected-widget-outline-color         : #666;
-	--x-selected-widget-outline-color-focused : blue;
+		--x-selected-widget-outline-color         : #666;
+		--x-selected-widget-outline-color-focused : blue;
 
-	--x-outline-focused            : #000;
+		--x-outline-focused            : #000;
 
-	/* these need to be opaque! */
-	--x-bg-unfocused          : #999;
-	--x-bg-focused            : #ddd;
-	--x-bg-unfocused-selected : #333;
-	--x-fg-unfocused-selected : var(--x-fg-inverted);
-	--x-bg-focused-selected   : #258;
-	--x-bg-focused-invalid    : #f33;
-	--x-bg-unselected         : #888;
-	--x-bg-selected           : #69c;
-	--x-fg-selected           : var(--x-fg-inverted);
-	--x-fg-focused            : var(--x-fg-inverted);
-	--x-bg-row-focused        : #ddd;
+		/* these need to be opaque! */
+		--x-bg-unfocused          : #999;
+		--x-bg-focused            : #ddd;
+		--x-bg-unfocused-selected : #333;
+		--x-fg-unfocused-selected : var(--x-fg-inverted);
+		--x-bg-focused-selected   : #258;
+		--x-bg-focused-invalid    : #f33;
+		--x-bg-unselected         : #888;
+		--x-bg-selected           : #69c;
+		--x-fg-selected           : var(--x-fg-inverted);
+		--x-fg-focused            : var(--x-fg-inverted);
+		--x-bg-row-focused        : #ddd;
 
-	--x-bg-grid-editor        : var(--x-bg-popup);
-	--x-bg-grid-header        : var(--x-faint);
+		--x-bg-grid-editor        : var(--x-bg-popup);
+		--x-bg-grid-header        : var(--bg1);
 
-	--x-border-width-item          : 1px; /* PIXELS ONLY! grid cells and editboxes */
+		--x-border-width-item          : 1px; /* PIXELS ONLY! grid cells and editboxes */
+
+	}
+
 }
 
 /* info boxes ------------------------------------------------------------- */
 
-info {
-	display: flex;
-	font-size: 90%;
-	color: var(--x-fg-label);
-	margin: .5em 0;
-	padding-left  : var(--x-padding-x-input);
-	padding-right : var(--x-padding-x-input);
-	cursor: default;
+@layer base {
+
+	:where(info) {
+		display: flex;
+		font-size: 90%;
+		color: var(--x-fg-label);
+		margin: .5em 0;
+		padding-left  : var(--x-padding-x-input);
+		padding-right : var(--x-padding-x-input);
+		cursor: default;
+	}
+
 }
 
 /* widget defaults -------------------------------------------------------- */
 
-.x-widget {
-	display: flex; /* x-input-widget is inline-flex */
-	position: relative; /* make `position: absolute` of children context-free */
+@layer base {
+
+	:where(.x-widget) {
+		display: flex; /* x-input-widget is inline-flex */
+		position: relative; /* make `position: absolute` of children context-free */
+	}
+
+	:where(.x-container) { /* for inner divs that hold stretched widgets */
+		display: grid;  /* layout content: use grid because grid-in-flex is buggy */
+		min-width : 0;  /* container can't overflow its container */
+		min-height: 0;  /* container can't overflow its container */
+		overflow: hidden;
+		/* ^^ because of a Chrome layouting bug that makes the scrollbar show
+		sometimes for a split-second even when it shouldn't show at all. */
+	}
+
+	.x-if, .x-switcher, .x-ct { /* purely-logical containers */
+		display: contents; /* don't disturb the layouting */
+	}
+
 }
 
-.x-container { /* for inner divs that hold stretched widgets */
-	display: grid;  /* layout content: use grid because grid-in-flex is buggy */
-	min-width : 0;  /* container can't overflow its container */
-	min-height: 0;  /* container can't overflow its container */
-	overflow: hidden;
-	/* ^^ because of a Chrome layouting bug that makes the scrollbar show
-	sometimes for a split-second even when it shouldn't show at all. */
+
+/* widget editing & selecting --------------------------------------------- */
+
+@layer role {
+
+	:where(.x-widget.widget-editing) {
+		outline: 2px dotted red;
+		outline-offset: -2px;
+	}
+
+	:where(.x-widget [contenteditable]) {
+		outline: 0px solid transparent;
+	}
+
+	:where(.x-widget.widget-selected) {
+		pointer-events: none;
+	}
+
+	:where(.x-widget-selected-overlay) {
+		display: block;
+		position: absolute;
+		top: 0; left: 0; right: 0; bottom: 0;
+		background-color: var(--x-smoke);
+		outline: 2px dotted var(--x-selected-widget-outline-color);
+		outline-offset: -2px;
+		pointer-events: all;
+		z-index: 10; /* arbitrary */
+	}
+
 }
 
-.x-if, .x-switcher, .x-ct { /* purely-logical containers */
-	display: contents; /* don't disturb the layouting */
-}
+@layer role-state {
 
-/* widget editing --------------------------------------------------------- */
+	:where(.x-widget-selected-overlay:focus) {
+		outline-color: var(--x-selected-widget-outline-color-focused);
+	}
 
-.x-widget.widget-editing {
-	outline: 2px dotted red;
-	outline-offset: -2px;
-}
-
-.x-widget [contenteditable] {
-	outline: 0px solid transparent;
-}
-
-/* widget selecting ------------------------------------------------------- */
-
-.x-widget.widget-selected {
-	pointer-events: none;
-}
-
-.x-widget-selected-overlay {
-	display: block;
-	position: absolute;
-	top: 0; left: 0; right: 0; bottom: 0;
-	background-color: var(--x-smoke);
-	outline: 2px dotted var(--x-selected-widget-outline-color);
-	outline-offset: -2px;
-	pointer-events: all;
-	z-index: 10; /* arbitrary */
-}
-
-.x-widget-selected-overlay:focus {
-	outline-color: var(--x-selected-widget-outline-color-focused);
 }
 
 /* widgets with multiple focusable items inside --------------------------- */
 
-/*
-.x-focusable-items are widgets containing multiple focusable and selectable
-items, so they don't show a focus outline on the entire widget, but only show
-an inside .x-item element as being focused instead.
-NOTE: an .x-item cannot itself be an .x-focusable-items!
-*/
-.x-focusable-items:focus {
-	outline: none;
-}
+@layer state {
 
-.x-item.disabled  { color: var(--x-fg-disabled); }
-.x-item.null      { color: var(--x-fg-disabled); }
-.x-item.empty     { color: var(--x-fg-disabled); }
+	/*
+	.x-focusable-items are widgets containing multiple focusable and selectable
+	items, so they don't show a focus outline on the entire widget, but only show
+	an inside .x-item element as being focused instead.
+	NOTE: an .x-item cannot itself be an .x-focusable-items!
+	*/
+	:where(.x-focusable-items:focus) {
+		outline: none;
+	}
 
-.x-item.row-focused {
-	background-color: var(--x-bg-row-focused);
-}
+	:where(.x-item.disabled)  { color: var(--x-fg-disabled); }
+	:where(.x-item.null    )  { color: var(--x-fg-disabled); }
+	:where(.x-item.empty   )  { color: var(--x-fg-disabled); }
 
-.x-item.new {
-	background-color: var(--x-bg-new);
-}
+	:where(.x-item.row-focused ) { background-color: var(--x-bg-row-focused); }
+	:where(.x-item.new         ) { background-color: var(--x-bg-new); }
+	:where(.x-item.modified    ) { background-color: var(--x-bg-modified); }
+	:where(.x-item.new.modified) { background-color: var(--x-bg-new-modified); }
+	:where(.x-item.removed     ) { text-decoration: line-through; }
 
-.x-item.modified {
-	background-color: var(--x-bg-modified);
-}
+	:where(.x-item.selected) { background-color: var(--x-bg-unselected); }
+	:where(.x-item.focused ) { background-color: var(--x-bg-unfocused); }
 
-:where(.x-item).new.modified {
-	background-color: var(--x-bg-new-modified);
-}
+	:where(.x-focusable-items:focus-within .x-item.selected) {
+		background-color : var(--x-bg-selected);
+		color            : var(--x-fg-selected);
+	}
 
-.x-item.removed {
-	text-decoration: line-through;
-}
+	:where(.x-focusable-items:focus-within .x-item.focused) {
+		background-color : var(--x-bg-focused);
+		color            : var(--x-fg-focused);
+	}
 
-.x-item.selected {
-	background-color: var(--x-bg-unselected);
-}
+	:where(.x-focusable-items .x-item.focused.selected) {
+		background-color : var(--x-bg-unfocused-selected);
+		color            : var(--x-fg-unfocused-selected);
+	}
 
-.x-item.focused {
-	background-color: var(--x-bg-unfocused);
-}
+	:where(.x-focusable-items:focus-within .x-item.focused.selected) {
+		background-color: var(--x-bg-focused-selected);
+	}
 
-:where(.x-focusable-items:focus-within) .x-item.selected {
-	background-color : var(--x-bg-selected);
-	color            : var(--x-fg-selected);
-}
+	:where(.x-item.invalid) {
+		background-color: var(--x-bg-error);
+		color: var(--x-fg-error);
+	}
 
-:where(.x-focusable-items:focus-within) .x-item.focused {
-	background-color : var(--x-bg-focused);
-	color            : var(--x-fg-focused);
-}
+	:where(.x-focusable-items:focus-within .x-item.focused.invalid) {
+		background-color: var(--x-bg-focused-invalid);
+	}
 
-:where(.x-focusable-items .x-item).focused.selected {
-	background-color : var(--x-bg-unfocused-selected);
-	color            : var(--x-fg-unfocused-selected);
-}
-
-:where(.x-focusable-items:focus-within .x-item).focused.selected {
-	background-color: var(--x-bg-focused-selected);
-}
-
-.x-item.invalid {
-	background-color: var(--x-bg-error);
-	color: var(--x-fg-error);
-}
-
-:where(.x-focusable-items:focus-within .x-item).focused.invalid {
-	background-color: var(--x-bg-focused-invalid);
-}
-
-/* custom scrollbars ------------------------------------------------------ */
-
-/*
-NOTE: scrollbar width and/or height must be set in order to enable custom scrollbars.
-Only setting custom scrollbars for the dark theme as it's the only way to darken them.
-*/
-.x-widget::-webkit-scrollbar-track,
-.x-widget ::-webkit-scrollbar-track
-{
-	background-color: var(--x-faint);
-}
-
-.x-widget::-webkit-scrollbar-thumb,
-.x-widget ::-webkit-scrollbar-thumb
-{
-	background-color: var(--x-smoke);
-	border-color: var(--x-smoke);
 }
 
 /* border-based triangle shapes ------------------------------------------- */
 
-.x-arrow {
-	border-width: .5em;
-	border-style: solid;
-}
+@layer base {
 
-.x-arrow:where([side=top]) {
-	border-right-color : transparent;
-	border-left-color  : transparent;
-	border-bottom-color: transparent;
-	margin-left: -.5em;
-}
+	:where(.x-arrow) {
+		border-width: .5em;
+		border-style: solid;
+	}
 
-.x-arrow:where([side=bottom]) {
-	border-right-color : transparent;
-	border-left-color  : transparent;
-	border-top-color   : transparent;
-	margin-left: -.5em;
-}
+	:where(.x-arrow[side=top]) {
+		border-right-color : transparent;
+		border-left-color  : transparent;
+		border-bottom-color: transparent;
+		margin-left: -.5em;
+	}
 
-.x-arrow:where([side=left]) {
-	border-right-color : transparent;
-	border-top-color   : transparent;
-	border-bottom-color: transparent;
-	margin-top: -.5em;
-}
+	:where(.x-arrow[side=bottom]) {
+		border-right-color : transparent;
+		border-left-color  : transparent;
+		border-top-color   : transparent;
+		margin-left: -.5em;
+	}
 
-.x-arrow:where([side=right]) {
-	border-left-color  : transparent;
-	border-top-color   : transparent;
-	border-bottom-color: transparent;
-	margin-top: -.5em;
+	:where(.x-arrow[side=left]) {
+		border-right-color : transparent;
+		border-top-color   : transparent;
+		border-bottom-color: transparent;
+		margin-top: -.5em;
+	}
+
+	:where(.x-arrow[side=right]) {
+		border-left-color  : transparent;
+		border-top-color   : transparent;
+		border-bottom-color: transparent;
+		margin-top: -.5em;
+	}
+
 }
 
 /* button ----------------------------------------------------------------- */
 
-.x-button {
-	display: inline-flex;
-	flex-flow: column;
-	margin: .2em 0;
+@layer base {
+
+	:where(.x-button) {
+		display: inline-flex;
+		flex-flow: column;
+		margin: .2em 0;
+	}
+
+	:where(.x-button-focus-box) {
+
+		display: inline-flex;
+		align-items: baseline;     /* align icons to text */
+		justify-content: center;   /* center the content if the button is made wider */
+
+		padding-left   : var(--x-padding-x-button);
+		padding-right  : var(--x-padding-x-button);
+		padding-top    : var(--x-padding-y-button);
+		padding-bottom : var(--x-padding-y-button);
+
+		font-weight: bold;
+		line-height: 1;
+
+		user-select: none; /* make drag-select skip over button labels */
+		cursor: pointer;
+	}
+
+	:where(.x-button-focus-box.text-empty) { /* icon-only */
+		padding-left  : var(--x-padding-x-button-icon);
+		padding-right : var(--x-padding-x-button-icon);
+		align-items: center; /* no more baseline to align icon to */
+	}
+
+	:where(.x-button-icon) {
+		min-width: 1em; /* fixate icon container width to accomodate icon changes */
+		display: flex;
+		justify-content: center;
+	}
+
+	:where(.x-button-focus-box:not(.text-empty) .x-button-icon) {
+		margin-right: .5em;
+	}
+
+	:where(.x-button-focus-box) {
+		border-width: 1px;
+		border-style: solid;
+		border-color: var(--border);
+		background-color: var(--bg-button);
+		border-radius: var(--x-border-radius-button);
+		box-shadow: var(--x-shadow-button);
+	}
+
+	:where(.x-button[primary] .x-button-focus-box) {
+		background-color: var(--bg-button-primary);
+		border-color: var(--border-button-primary);
+		color: var(--fg-button-primary);
+	}
+
+	:where(.x-button[danger] .x-button-focus-box) {
+		background-color: var(--bg-button-danger);
+		color: var(--fg-button-danger);
+	}
+
 }
 
-.x-button-focus-box {
+@layer state {
 
-	display: inline-flex;
-	align-items: baseline;     /* align icons to text */
-	justify-content: center;   /* center the content if the button is made wider */
+	:where(.x-button:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover) {
+		background-color: var(--bg-button-hover);
+	}
 
-	padding-left   : var(--x-padding-x-button);
-	padding-right  : var(--x-padding-x-button);
-	padding-top    : var(--x-padding-y-button);
-	padding-bottom : var(--x-padding-y-button);
+	:where(.x-button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover) {
+		background-color: var(--bg-button-primary-hover);
+	}
 
-	font-weight: bold;
-	line-height: 1;
+	:where(.x-button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover) {
+		background-color: var(--bg-button-danger-hover);
+	}
 
-	user-select: none; /* make drag-select skip over button labels */
-	cursor: pointer;
-}
+	:where(.x-button .x-button-focus-box.active) {
+		background-color: var(--bg-button-pressed);
+		box-shadow: var(--x-shadow-button-pressed);
+	}
 
-:where(.x-button-focus-box).text-empty { /* icon-only */
-	padding-left  : var(--x-padding-x-button-icon);
-	padding-right : var(--x-padding-x-button-icon);
-	align-items: center; /* no more baseline to align icon to */
-}
+	:where(.x-button[primary] .x-button-focus-box.active) {
+		background-color: var(--bg-button-primary-pressed);
+	}
 
-.x-button-icon {
-	min-width: 1em; /* fixate icon container width to accomodate icon changes */
-	display: flex;
-	justify-content: center;
-}
+	:where(.x-button[danger] .x-button-focus-box.active) {
+		background-color: var(--bg-button-danger-pressed);
+	}
 
-:where(.x-button-focus-box:not(.text-empty)) .x-button-icon {
-	margin-right: .5em;
-}
-
-.x-button-focus-box {
-	border-width: 1px;
-	border-style: solid;
-	border-color: var(--x-faint);
-	background-color: var(--x-bg-button);
-	border-radius: var(--x-border-radius-button);
-	box-shadow: var(--x-shadow-button);
-}
-
-:where(.x-button[primary]) .x-button-focus-box {
-	background-color: var(--x-bg-button-primary);
-	color: var(--x-fg-button-primary);
-}
-
-:where(.x-button[danger]) .x-button-focus-box {
-	background-color: var(--x-bg-button-danger);
-	color: var(--x-fg-button-danger);
-}
-
-.x-button-focus-box:focus-visible {
-	border-color: var(--x-border-focused-button);
-	outline: 2px solid var(--x-outline-focused);
-	outline-offset: -2px;
-}
-
-:where(.x-button[primary]) .x-button-focus-box:focus-visible {
-	border-color: var(--x-border-focused-button-primary);
-}
-
-:where(.x-button:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
-	background-color: var(--x-bg-button-hover);
-}
-
-:where(.x-button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
-	background-color: var(--x-bg-button-primary-hover);
-}
-
-:where(.x-button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
-	background-color: var(--x-bg-button-danger-hover);
-}
-
-:where(.x-button) .x-button-focus-box.active {
-	background-color: var(--x-bg-button-pressed);
-	box-shadow: var(--x-shadow-button-pressed);
-}
-
-:where(.x-button[primary])) .x-button-focus-box.active {
-	background-color: var(--x-bg-button-primary-pressed);
-}
-
-:where(.x-button[danger])) .x-button-focus-box.active {
-	background-color: var(--x-bg-button-danger-pressed);
 }
 
 /* bare buttons (no borders) */
 
-:where(.x-button[bare]) .x-button-focus-box,
-:where(.x-button[bare]) .x-button-focus-box:is(:hover, .active) {
-	background: none;
-}
+@layer state {
 
-:where(.x-button[bare]) .x-button-focus-box:not(:focus-visible) {
-	border-color: transparent;
-	box-shadow: none;
-	border-radius: 0;
-}
-
-:where(.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected)) .x-button-focus-box:hover {
-	filter: contrast(.7);
-}
-
-:where(.x-button[bare]) .x-button-focus-box.active {
-	filter: contrast(.4);
-	box-shadow: none;
-}
-
-/* attention animation */
-
-@keyframes x-attention {
-	from {
-		transform: scale(1.2);
-		outline: 2px solid var(--x-fg);
-		outline-offset: 2px;
+	:where(.x-button[bare] .x-button-focus-box) {
+		background: none;
 	}
+
+	:where(.x-button[bare] .x-button-focus-box:not(:focus-visible)) {
+		border-color: transparent;
+		box-shadow: none;
+		border-radius: 0;
+	}
+
+	:where(.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover) {
+		filter: contrast(.7);
+	}
+
+	:where(.x-button[bare] .x-button-focus-box.active) {
+		filter: contrast(.4);
+		box-shadow: none;
+	}
+
+	/* attention animation */
+
+	@keyframes x-attention {
+		from {
+			transform: scale(1.2);
+			outline: 2px solid var(--fg);
+			outline-offset: 2px;
+		}
+	}
+
 }
 
-/* widget editing */
+@layer role {
 
-.x-button.widget-editing {
-	cursor: initial;
+	:where(.x-button.widget-editing) {
+		cursor: initial;
+	}
+
 }
 
 /* action band ------------------------------------------------------------ */
 
-.x-action-band {
-	justify-content: flex-end;
-	padding: var(--x-margin);
-}
+@layer base {
 
-:where(.x-action-band) .x-button {
-	margin: 0 var(--x-margin);
-}
+	:where(.x-action-band) {
+		justify-content: flex-end;
+		padding: var(--x-margin);
+	}
 
-:where(.x-action-band) .x-button-text {
-	white-space: nowrap !important;
-}
+	:where(.x-action-band .x-button) {
+		margin: 0 var(--x-margin);
+	}
 
-/* hide cancel button icon unless space is tight when text is hidden */
-:where(.x-action-band:not(.tight) .x-dialog-button-cancel) .x-button-icon {
-	display: none;
+	:where(.x-action-band .x-button-text) {
+		white-space: nowrap !important;
+	}
+
+	/* hide cancel button icon unless space is tight when text is hidden */
+	:where(.x-action-band:not(.tight) .x-dialog-button-cancel .x-button-icon) {
+		display: none;
+	}
+
 }
 
 /* tooltip ---------------------------------------------------------------- */
 
-.x-tooltip {
+@layer base {
 
-	/* positioning */
-	z-index: 2; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
+	:where(.x-tooltip) {
 
-	/* sizing */
-	max-width: 400px;  /* max. width of the message bubble before wrapping */
+		/* positioning */
+		z-index: 2; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
 
-	/* layout content */
-	align-items: flex-start;
-	justify-content: flex-start;
-	overflow: visible; /* for the tip */
+		/* sizing */
+		max-width: 400px;  /* max. width of the message bubble before wrapping */
 
-	/* animation */
-	opacity: 0;
-	pointer-events: none;
-	animation-duration: .2s;
-	animation-timing-function: ease-out;
-	animation-fill-mode: forwards;
+		/* layout content */
+		align-items: flex-start;
+		justify-content: flex-start;
+		overflow: visible; /* for the tip */
 
-	/* behavior */
-	user-select: none;
+		/* animation */
+		opacity: 0;
+		pointer-events: none;
+		animation-duration: .2s;
+		animation-timing-function: ease-out;
+		animation-fill-mode: forwards;
+
+		/* behavior */
+		user-select: none;
+	}
+
+	:where(.x-tooltip-body) {
+		display: flex;
+		padding: .5em 0;
+		align-items: baseline;
+
+		/* styling */
+		border-radius: var(--x-border-radius-window);
+		background-color: var(--x-bg-popup);
+		box-shadow: var(--x-shadow-tooltip);
+		line-height: 1.4;
+	}
+
+	/* visibility animation */
+
+	:where(.x-tooltip.visible) {
+		opacity: 1;
+		pointer-events: all;
+	}
+
+	@keyframes x-tooltip-left   { from { opacity: 0; transform: translate(-1em, 0); } }
+	@keyframes x-tooltip-right  { from { opacity: 0; transform: translate( 1em, 0); } }
+	@keyframes x-tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
+	@keyframes x-tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
+
+	:where(.x-tooltip.visible[side=left  ]) { animation-name: x-tooltip-left; }
+	:where(.x-tooltip.visible[side=right ]) { animation-name: x-tooltip-right; }
+	:where(.x-tooltip.visible[side=top   ]) { animation-name: x-tooltip-top; }
+	:where(.x-tooltip.visible[side=bottom]) { animation-name: x-tooltip-bottom; }
+
+	:where(.x-tooltip-content) {
+		/* layouting */
+		display: inline-block; /* shrink-wrap and also word-wrap when reaching container width */
+		padding: 0 1em;
+	}
+
+	:where(.x-tooltip-xbutton) {
+		vertical-align: top;
+		align-self: stretch;
+		font-size: 80%;
+		color: var(--x-fg-disabled);
+		padding: .25em 1em;
+		border: 0 solid transparent;
+		border-left-width: 1px;
+		border-color: var(--border);
+		pointer-events: all;
+		cursor: pointer;
+	}
+
+	:where(.x-tooltip-xbutton:not([disabled]):not(.active):hover) {
+		color: inherit;
+	}
+
+	:where(.x-tooltip-tip) {
+
+		/* border-based triangle shape */
+		display: block;
+		border: .5em solid transparent;
+		z-index: 1; /* draw over the parent's box shadow */
+
+		/* styling */
+		color: var(--x-bg-popup);
+	}
+
+	:where(.x-tooltip-icon) {
+		vertical-align: top;
+		margin: .2em 0 0 1em;
+		font-size: 1em;
+		line-height: inherit !important; /* override fontawesome's !important */
+	}
+
+	:where(.x-tooltip[side=left  ] > .x-tooltip-tip) { border-left-color   : inherit; }
+	:where(.x-tooltip[side=right ] > .x-tooltip-tip) { border-right-color  : inherit; }
+	:where(.x-tooltip[side=top   ] > .x-tooltip-tip) { border-top-color    : inherit; }
+	:where(.x-tooltip[side=bottom] > .x-tooltip-tip) { border-bottom-color : inherit; }
+
+	/* side & align combinations */
+
+	:where(.x-tooltip:is([side=top],[side=bottom])) { flex-flow: column; }
+
+	:where(.x-tooltip[side=left   ]) { justify-content: flex-end; }
+
+	:where(.x-tooltip[align=end   ]) { align-items: flex-end; }
+	:where(.x-tooltip[align=center]) { align-items: center; }
+
+	:where(.x-tooltip:is([side=right],[side=bottom]) > .x-tooltip-body) { order: 2; }
+
+	:where(.x-tooltip[align=center]:is([side=top],[side=bottom]) > .x-tooltip-body > .x-tooltip-content) { text-align: center; }
+	:where(.x-tooltip[align=end   ]:is([side=top],[side=bottom]) > .x-tooltip-body > .x-tooltip-content) { text-align: right; }
+
+	:where(.x-tooltip:is([side=top],[side=bottom]) > .x-tooltip-tip) { margin: 0 .5em; }
+	:where(.x-tooltip:is([side=left],[side=right]) > .x-tooltip-tip) { margin: .5em 0; }
+
+	:where(.x-tooltip[side=right ]) { margin-left   : -.25em; }
+	:where(.x-tooltip[side=left  ]) { margin-left   :  .25em; }
+	:where(.x-tooltip[side=top   ]) { margin-top    :  .25em; }
+	:where(.x-tooltip[side=bottom]) { margin-top    : -.25em; }
+
+	/* styling based on kind attr */
+
+	:where(.x-tooltip[kind=search] > .x-tooltip-body) { background-color: var(--x-bg-search); color: #000; }
+	:where(.x-tooltip[kind=search] > .x-tooltip-tip ) { color: var(--x-bg-search); }
+
+	:where(.x-tooltip[kind=info  ] > .x-tooltip-body) { background-color: var(--x-bg-info); color: var(--x-fg-info); }
+	:where(.x-tooltip[kind=info  ] > .x-tooltip-tip ) { color: var(--x-bg-info); }
+	:where(.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+
+	:where(.x-tooltip[kind=error ] > .x-tooltip-body) { background-color: var(--x-bg-error); color: var(--x-fg-error); }
+	:where(.x-tooltip[kind=error ] > .x-tooltip-tip ) { color: var(--x-bg-error); }
+	:where(.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+
+	:where(.x-tooltip[kind=warn  ] > .x-tooltip-body) { background-color: var(--x-bg-warn); color: var(--x-fg-warn); }
+	:where(.x-tooltip[kind=warn  ] > .x-tooltip-tip ) { color: var(--x-bg-warn); }
+	:where(.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton) { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
+
+	:where(.x-tooltip[kind=cursor]) {
+		margin-left: .75em;
+		margin-top : .75em;
+	}
+
+	:where(.x-tooltip[kind=cursor] > .x-tooltip-body) {
+		padding: .15em 0;
+		border: 1px solid #aaaa99;
+		color: #333;
+		background-color: var(--x-bg-tooltip);
+		font-family: sans-serif;
+		font-size: 12px;
+		border-radius: 0;
+	}
+
+	:where(.x-tooltip[kind=cursor] > .x-tooltip-body > .x-tooltip-content) {
+		padding: 0 .5em;
+		white-space: pre !important;
+	}
+
+	:where(.x-tooltip[kind=cursor] > .x-tooltip-tip) { display: none; }
+
+	:where(.x-error-list) {
+		margin: 0;
+		padding-inline-start: 1em;
+		text-align: start;
+	}
+
 }
 
-.x-tooltip-body {
-	display: flex;
-	padding: .5em 0;
-	align-items: baseline;
+@layer state {
 
-	/* styling */
-	border-radius: var(--x-border-radius-window);
-	background-color: var(--x-bg-popup);
-	box-shadow: var(--x-shadow-tooltip);
-	line-height: 1.4;
-}
+	:where(.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton:hover) { color: var(--x-fg-info); }
+	:where(.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton:hover) { color: var(--x-fg-error); }
+	:where(.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton:hover) { color: var(--x-fg-warn); }
 
-/* visibility animation */
-
-:where(.x-tooltip).visible {
-	opacity: 1;
-	pointer-events: all;
-}
-
-@keyframes x-tooltip-left   { from { opacity: 0; transform: translate(-1em, 0); } }
-@keyframes x-tooltip-right  { from { opacity: 0; transform: translate( 1em, 0); } }
-@keyframes x-tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
-@keyframes x-tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
-
-:where(.x-tooltip.visible)[side=left  ] { animation-name: x-tooltip-left; }
-:where(.x-tooltip.visible)[side=right ] { animation-name: x-tooltip-right; }
-:where(.x-tooltip.visible)[side=top   ] { animation-name: x-tooltip-top; }
-:where(.x-tooltip.visible)[side=bottom] { animation-name: x-tooltip-bottom; }
-
-.x-tooltip-content {
-	/* layouting */
-	display: inline-block; /* shrink-wrap and also word-wrap when reaching container width */
-	padding: 0 1em;
-}
-
-.x-tooltip-xbutton {
-	vertical-align: top;
-	align-self: stretch;
-	font-size: 80%;
-	color: var(--x-fg-disabled);
-	padding: .25em 1em;
-	border: 0 solid transparent;
-	border-left-width: 1px;
-	border-color: var(--x-faint);
-	pointer-events: all;
-	cursor: pointer;
-}
-
-:where(.x-tooltip-xbutton):not(.active):hover {
-	color: inherit;
-}
-
-.x-tooltip-tip {
-
-	/* border-based triangle shape */
-	display: block;
-	border: .5em solid transparent;
-	z-index: 1; /* draw over the parent's box shadow */
-
-	/* styling */
-	color: var(--x-bg-popup);
-}
-
-.x-tooltip-icon {
-	vertical-align: top;
-	margin: .2em 0 0 1em;
-	font-size: 1em;
-	line-height: inherit !important; /* override fontawesome's !important */
-}
-
-:where(.x-tooltip[side=left  ]) > .x-tooltip-tip { border-left-color   : inherit; }
-:where(.x-tooltip[side=right ]) > .x-tooltip-tip { border-right-color  : inherit; }
-:where(.x-tooltip[side=top   ]) > .x-tooltip-tip { border-top-color    : inherit; }
-:where(.x-tooltip[side=bottom]) > .x-tooltip-tip { border-bottom-color : inherit; }
-
-/* side & align combinations */
-
-:where(.x-tooltip):is([side=top],[side=bottom]) { flex-flow: column; }
-
-:where(.x-tooltip)[side=left   ] { justify-content: flex-end; }
-
-:where(.x-tooltip)[align=end   ] { align-items: flex-end; }
-:where(.x-tooltip)[align=center] { align-items: center; }
-
-:where(.x-tooltip:is([side=right],[side=bottom])) > .x-tooltip-body { order: 2; }
-
-:where(.x-tooltip[align=center]:is([side=top],[side=bottom]) > .x-tooltip-body) > .x-tooltip-content { text-align: center; }
-:where(.x-tooltip[align=end   ]:is([side=top],[side=bottom]) > .x-tooltip-body) > .x-tooltip-content { text-align: right; }
-
-:where(.x-tooltip:is([side=top],[side=bottom])) > .x-tooltip-tip { margin: 0 .5em; }
-:where(.x-tooltip:is([side=left],[side=right])) > .x-tooltip-tip { margin: .5em 0; }
-
-:where(.x-tooltip)[side=right ] { margin-left   : -.25em; }
-:where(.x-tooltip)[side=left  ] { margin-left   :  .25em; }
-:where(.x-tooltip)[side=top   ] { margin-top    :  .25em; }
-:where(.x-tooltip)[side=bottom] { margin-top    : -.25em; }
-
-/* styling based on kind attr */
-
-:where(.x-tooltip[kind=search]) > .x-tooltip-body { background-color: var(--x-bg-search); color: #000; }
-:where(.x-tooltip[kind=search]) > .x-tooltip-tip  { color: var(--x-bg-search); }
-
-:where(.x-tooltip[kind=info]) > .x-tooltip-body { background-color: var(--x-bg-info); color: var(--x-fg-info); }
-:where(.x-tooltip[kind=info]) > .x-tooltip-tip  { color: var(--x-bg-info); }
-:where(.x-tooltip[kind=info] > .x-tooltip-body) > .x-tooltip-xbutton       { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
-:where(.x-tooltip[kind=info] > .x-tooltip-body) > .x-tooltip-xbutton:hover { color: var(--x-fg-info); }
-
-:where(.x-tooltip[kind=error]) > .x-tooltip-body { background-color: var(--x-bg-error); color: var(--x-fg-error); }
-:where(.x-tooltip[kind=error]) > .x-tooltip-tip  { color: var(--x-bg-error); }
-:where(.x-tooltip[kind=error] > .x-tooltip-body) > .x-tooltip-xbutton       { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
-:where(.x-tooltip[kind=error] > .x-tooltip-body) > .x-tooltip-xbutton:hover { color: var(--x-fg-error); }
-
-:where(.x-tooltip[kind=warn]) > .x-tooltip-body { background-color: var(--x-bg-warn); color: var(--x-fg-warn); }
-:where(.x-tooltip[kind=warn]) > .x-tooltip-tip  { color: var(--x-bg-warn); }
-:where(.x-tooltip[kind=warn] > .x-tooltip-body) > .x-tooltip-xbutton       { color: var(--x-fg-disabled-inverted); border-color: var(--x-fg-disabled-inverted); }
-:where(.x-tooltip[kind=warn] > .x-tooltip-body) > .x-tooltip-xbutton:hover { color: var(--x-fg-warn); }
-
-:where(.x-tooltip)[kind=cursor] {
-	margin-left: .75em;
-	margin-top : .75em;
-}
-
-:where(.x-tooltip[kind=cursor]) > .x-tooltip-body {
-	padding: .15em 0;
-	border: 1px solid #aaaa99;
-	color: #333;
-	background-color: var(--x-bg-tooltip);
-	font-family: sans-serif;
-	font-size: 12px;
-	border-radius: 0;
-}
-
-:where(.x-tooltip[kind=cursor] > .x-tooltip-body) > .x-tooltip-content {
-	padding: 0 .5em;
-	white-space: pre !important;
-}
-
-:where(.x-tooltip[kind=cursor]) > .x-tooltip-tip { display: none; }
-
-.x-error-list {
-	margin: 0;
-	padding-inline-start: 1em;
-	text-align: start;
 }
 
 /* all inputs ------------------------------------------------------------- */
 
-.x-input-widget {
-	display: inline-flex; /* baseline-align in an inline context */
-	flex-flow: column; /* focus-box with info-box underneath */
+@layer base {
+
+	:where(.x-input-widget) {
+		display: inline-flex; /* baseline-align in an inline context */
+		flex-flow: column; /* focus-box with info-box underneath */
+	}
+
+	:where(.x-input-widget[readonly]) {
+		opacity: .8;
+	}
+
+	:where(.x-input-widget:not(.with-label) .x-input-label) {
+		display: none;
+	}
+
+	:where(.x-focus-box) {
+		flex: 1; /* stretch vertically */
+		position: relative; /* for abs. pos. animated labels */
+		border-width: 1px;
+		border-style: dotted;
+		border-color: transparent; /* only editboxes set this */
+		border-radius: var(--x-border-radius-input);
+		outline-offset: -2px;
+	}
+
+	:where(.x-input-widget.with-label .x-focus-box) {
+		min-height: var(--x-min-height-input);
+		--x-padding-y-button: 0; /* inline buttons should not affect box height */
+	}
+
+	/* input info button */
+
+	:where(.x-input-info-button) {
+		align-self: stretch; /* stretch vertically */
+		margin: 0;
+		/* make it seem integrated into the parent */
+		border-right-color  : rgb(0,0,0,0);
+		border-top-color    : rgb(0,0,0,0);
+		border-bottom-color : rgb(0,0,0,0);
+
+		/* icon style */
+		align-items: flex-end;
+		color: var(--x-bg-info);
+	}
+
+	:where(.x-input-info-button .x-button-icon) {
+		font-size: 110%;
+		opacity: .9;
+	}
+
+	/* input info under text */
+
+	:where(.x-input-info) {
+		font-size: 90%;
+		color: var(--x-fg-label);
+		margin: .5em 0;
+		padding-left  : var(--x-padding-x-input);
+		padding-right : var(--x-padding-x-input);
+		cursor: default;
+	}
+
+	:where(.x-input-info info) {
+		display: contents;
+		font-size: 100%;
+	}
+
 }
 
-.x-input-widget[readonly] {
-	opacity: .8;
-}
+@layer state {
 
-.x-input-widget:not(.with-label) .x-input-label {
-	display: none;
-}
+	:where(.x-focus-box :focus) {
+		outline: none;
+	}
 
-.x-focus-box {
-	flex: 1; /* stretch vertically */
-	position: relative; /* for abs. pos. animated labels */
-	border-width: 1px;
-	border-style: dotted;
-	border-color: transparent; /* only editboxes set this */
-	border-radius: var(--x-border-radius-input);
-	outline-offset: -2px;
-}
+	:where(.x-focus-box:has(:focus-visible)) {
+		border-color: transparent;
+		outline: 2px solid var(--x-outline-focused);
+	}
 
-.x-focus-box :focus {
-	outline: none;
-}
 
-.x-focus-box:has(:focus-visible) {
-	border-color: transparent;
-	outline: 2px solid var(--x-outline-focused);
-}
+	:where(.x-input-widget:focus-within .x-input-info) {
+		opacity: initial;
+	}
 
-:where(.x-input-widget.with-label) .x-focus-box {
-	min-height: var(--x-min-height-input);
-	--x-padding-y-button: 0; /* inline buttons should not affect box height */
-}
+	:where(.x-container > .x-input-widget .x-focus-box) {
+		border-width: 0;
+	}
 
-/* input info button */
+	:where(.x-input-widget:not(:focus-within) .x-error-tooltip) {
+		pointer-events: none;
+	}
 
-.x-input-info-button {
-	align-self: stretch; /* stretch vertically */
-	margin: 0;
-	/* make it seem integrated into the parent */
-	border-right-color  : rgb(0,0,0,0);
-	border-top-color    : rgb(0,0,0,0);
-	border-bottom-color : rgb(0,0,0,0);
-
-	/* icon style */
-	align-items: flex-end;
-	color: var(--x-bg-info);
-}
-
-:where(.x-input-info-button) .x-button-icon {
-	font-size: 110%;
-	opacity: .9;
-}
-
-/* input info under text */
-
-.x-input-info {
-	font-size: 90%;
-	color: var(--x-fg-label);
-	margin: .5em 0;
-	padding-left  : var(--x-padding-x-input);
-	padding-right : var(--x-padding-x-input);
-	cursor: default;
-}
-
-:where(.x-input-info) info {
-	display: contents;
-	font-size: 100%;
-}
-
-:where(.x-input-widget):focus-within .x-input-info {
-	opacity: initial;
-}
-
-:where(.x-container > .x-input-widget) .x-focus-box {
-	border-width: 0;
-}
-
-:where(.x-input-widget):not(:focus-within) .x-error-tooltip {
-	pointer-events: none;
 }
 
 /* input labels ----------------------------------------------------------- */
 
-.x-label {
-	margin-left : var(--x-padding-x-input);
-	margin-right: var(--x-padding-x-input);
-	color: var(--x-fg-label);
-}
+@layer base {
 
-:where(.x-form[grid])[baseline] {
-	align-items: baseline;
+	:where(.x-label) {
+		margin-left : var(--x-padding-x-input);
+		margin-right: var(--x-padding-x-input);
+		color: var(--x-fg-label);
+	}
+
+	:where(.x-form[grid][baseline]) {
+		align-items: baseline;
+	}
+
 }
 
 /* checkbox & radio item -------------------------------------------------- */
 
-.x-markbox {
-	width: auto; /* shrink-wrap */
-	min-width: 1em;
+@layer base {
+
+	:where(.x-markbox) {
+		width: auto; /* shrink-wrap */
+		min-width: 1em;
+	}
+
+	:where(.x-markbox .x-focus-box) {
+		display: inline-flex;
+		align-items: center;
+		flex-flow: row nowrap;
+		overflow: hidden;
+		padding-left   : var(--x-padding-x-input);
+		padding-right  : var(--x-padding-x-input);
+		padding-top    : var(--x-padding-y-input);
+		padding-bottom : var(--x-padding-y-input);
+	}
+
+	:where(.x-markbox.with-label .x-focus-box) {
+		line-height: initial;
+	}
+
+	:where(.x-markbox.with-label .x-markbox-label) {
+		display: block;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	:where(.x-markbox.no-field .x-markbox-label) {
+		flex: 1;
+	}
+
+	:where(.x-markbox-icon) {
+		color: var(--x-fg-clickable);
+		justify-self: center;
+	}
+
+	:where(.x-markbox-label),
+	:where(.x-markbox-label *),
+	:where(.x-markbox-icon)
+	{
+		cursor: pointer;
+	}
+
+	:where(.x-markbox[align=right] .x-focus-box    ) { justify-content: end; }
+	:where(.x-markbox[align=right] .x-markbox-icon ) { order: 2; }
+	:where(.x-markbox[align=right] .x-markbox-label) { text-align: right; }
+
+	:where(.x-markbox[align=left ] .x-markbox-label) { padding-left : .5em; }
+	:where(.x-markbox[align=right] .x-markbox-label) { padding-right: .5em; }
+
+	:where(.x-markbox[button_style=toggle]              .x-markbox-label) { flex: 1; }
+	:where(.x-markbox[button_style=toggle][align=right] .x-markbox-icon ) { order: 2; }
+	:where(.x-markbox[button_style=toggle][align=right] .x-markbox-label) { padding-left:    0; padding-right: .5em; }
+	:where(.x-markbox[button_style=toggle][align=left ] .x-markbox-label) { padding-left: .5em; padding-right:    0; }
+
+	:where(.x-markbox .x-input-info-button) {
+		margin-left: auto;
+		padding-right: 0;
+	}
+
 }
 
-:where(.x-markbox) .x-focus-box {
-	display: inline-flex;
-	align-items: center;
-	flex-flow: row nowrap;
-	overflow: hidden;
-	padding-left   : var(--x-padding-x-input);
-	padding-right  : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input);
-	padding-bottom : var(--x-padding-y-input);
+@layer state {
+
+	:where(.x-markbox:focus-within.invalid .x-focus-box) {
+		border-color: var(--x-fg-error);
+	}
+
+	:where(.x-input-widget:not([disabled]):not([readonly]) :is(.x-markbox-icon, .x-markbox-label):hover) {
+		filter: contrast(60%);
+	}
+
+	:where(.x-markbox).invalid :is(.x-markbox-label, .x-markbox-icon) {
+		color: var(--x-bg-error);
+	}
+
+	:where(.x-linear-form .x-markbox-label:focus-visible) {
+		outline: 2px solid var(--x-outline-focused);
+	}
+
 }
 
-:where(.x-markbox.with-label) .x-focus-box {
-	line-height: initial;
-}
+@layer role {
 
-:where(.x-markbox.with-label) .x-markbox-label {
-	display: block;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
+	:where(.x-markbox.grid-editor .x-focus-box) {
+		justify-content: center;
+	}
 
-:where(.x-markbox.no-field) .x-markbox-label {
-	flex: 1;
-}
-
-:where(.x-markbox:focus-within).invalid .x-focus-box {
-	border-color: var(--x-fg-error);
-}
-
-.x-markbox-icon {
-	color: var(--x-fg-clickable);
-	justify-self: center;
-}
-
-.x-markbox-label,
-.x-markbox-label *,
-.x-markbox-icon
-{
-	cursor: pointer;
-}
-
-:where(.x-input-widget:not([disabled]):not([readonly])) :is(.x-markbox-icon, .x-markbox-label):hover {
-	filter: contrast(60%);
-}
-
-:where(.x-markbox).invalid :is(.x-markbox-label, .x-markbox-icon) {
-	color: var(--x-bg-error);
-}
-
-:where(.x-markbox[align=right]) .x-focus-box     { justify-content: end; }
-:where(.x-markbox[align=right]) .x-markbox-icon  { order: 2; }
-:where(.x-markbox[align=right]) .x-markbox-label { text-align: right; }
-
-:where(.x-markbox[align=left ]) .x-markbox-label { padding-left : .5em; }
-:where(.x-markbox[align=right]) .x-markbox-label { padding-right: .5em; }
-
-:where(.x-markbox[button_style=toggle]             ) .x-markbox-label { flex: 1; }
-:where(.x-markbox[button_style=toggle][align=right]) .x-markbox-icon  { order: 2; }
-:where(.x-markbox[button_style=toggle][align=right]) .x-markbox-label { padding-left:    0; padding-right: .5em; }
-:where(.x-markbox[button_style=toggle][align=left ]) .x-markbox-label { padding-left: .5em; padding-right:    0; }
-
-:where(.x-markbox.grid-editor) .x-focus-box {
-	justify-content: center;
-}
-
-:where(.x-markbox) .x-input-info-button {
-	margin-left: auto;
-	padding-right: 0;
-}
-
-:where(.x-linear-form) .x-markbox-label:focus-visible {
-	outline: 2px solid var(--x-outline-focused);
 }
 
 /* checkbox --------------------------------------------------------------- */
 
-.x-checkbox-icon {
-	font-size: 120%;
+@layer base {
+
+	:where(.x-checkbox-icon) {
+		font-size: 120%;
+	}
+
 }
 
-:where(.x-checkbox-icon).toggle {
-	font-size: 200%;
+@layer state {
+
+	:where(.x-checkbox-icon.toggle) {
+		font-size: 200%;
+	}
+
 }
 
-:where(.x-linear-form) :is(.x-checkbox, .x-checkbox-focus-box) { display: contents; }
+@layer role {
+
+	:where(.x-linear-form :is(.x-checkbox, .x-checkbox-focus-box)) { display: contents; }
+
+}
 
 /* radiogroup ------------------------------------------------------------- */
 
-.x-radiogroup {
-	flex-flow: column;
+@layer base {
+
+	:where(.x-radiogroup) {
+		flex-flow: column;
+	}
+
+	:where(.x-radio-items) {
+		position: relative;
+		display: flex;
+		flex-flow: column;
+	}
+
+	:where(.x-radio-item) {
+		/* shrink-wrap sizing */
+		width: auto;
+		min-width: 1em;
+		align-items: baseline;
+		padding-left   : var(--x-padding-x-input);
+		padding-right  : var(--x-padding-x-input);
+		padding-top    : var(--x-padding-y-input);
+		padding-bottom : var(--x-padding-y-input);
+		outline-offset: -2px;
+	}
+
+	:where(.x-radio-label) {
+		user-select: none; /* make drag-select skip over button labels */
+	}
+
+	:where(.x-radiogroup[align=right] .x-radio-item   ) { justify-content: flex-end; }
+	:where(.x-radiogroup[align=right] .x-markbox-icon ) { order: 2; }
+	:where(.x-radiogroup[align=left ] .x-markbox-label) { padding-left : .5em; }
+	:where(.x-radiogroup[align=right] .x-markbox-label) { padding-right: .5em; }
+
 }
 
-.x-radio-items {
-	position: relative;
-	display: flex;
-	flex-flow: column;
+@layer state {
+
+	:where(.x-radio-item.invalid :is(.x-radio-label, .x-radio-icon)) {
+		color: var(--x-bg-error);
+	}
+
+	:where(.x-radio-label:focus) {
+		outline: none;
+	}
+
+	:where(.x-radiogroup:not([disabled]):not([readonly]) :is(.x-radio-label, .x-radio-icon):hover) {
+		filter: contrast(60%);
+	}
+
+	:where(.x-radio-item:has(:focus-visible)) {
+		outline: 2px solid var(--x-outline-focused);
+	}
+
 }
 
-.x-radio-item {
-	/* shrink-wrap sizing */
-	width: auto;
-	min-width: 1em;
-	align-items: baseline;
-	padding-left   : var(--x-padding-x-input);
-	padding-right  : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input);
-	padding-bottom : var(--x-padding-y-input);
-	outline-offset: -2px;
+@layer role {
+
+	:where(.x-linear-form :is(.x-radiogroup, .x-radio-items, .x-radio-item)) { display: contents; }
+
 }
-
-.x-radio-label {
-	user-select: none; /* make drag-select skip over button labels */
-}
-
-:where(.x-radio-item).invalid :is(.x-radio-label, .x-radio-icon) {
-	color: var(--x-bg-error);
-}
-
-.x-radio-label:focus {
-	outline: none;
-}
-
-:where(.x-radiogroup:not([disabled]):not([readonly])) :is(.x-radio-label, .x-radio-icon):hover {
-	filter: contrast(60%);
-}
-
-.x-radio-item:has(:focus-visible) {
-	outline: 2px solid var(--x-outline-focused);
-}
-
-:where(.x-radiogroup[align=right]) .x-radio-item    { justify-content: flex-end; }
-:where(.x-radiogroup[align=right]) .x-markbox-icon  { order: 2; }
-:where(.x-radiogroup[align=left ]) .x-markbox-label { padding-left : .5em; }
-:where(.x-radiogroup[align=right]) .x-markbox-label { padding-right: .5em; }
-
-:where(.x-linear-form) :is(.x-radiogroup, .x-radio-items, .x-radio-item) { display: contents; }
 
 /* editbox ---------------------------------------------------------------- */
 
-.x-editbox {
-	/* shrink-wrap sizing */
-	width: auto;
-	min-width: 1em;
-}
+@layer base {
 
-:where(.x-editbox) .x-focus-box {
-	/* layout content */
-	display: inline-flex;    /* the only way to get variable-width inputs */
-	align-items: baseline;   /* ...that are baseline-aligned */
-	padding-top     : var(--x-padding-y-input);
-	padding-bottom  : var(--x-padding-y-input);
-	padding-left    : calc(var(--x-padding-x-input) + var(--x-border-width-item));
-	padding-right   : calc(var(--x-padding-x-input) - var(--x-border-width-item));
-	overflow: hidden; /* label can overflow */
-	border-color: var(--x-border-light);
-	background-color: var(--x-bg-input);
-}
-
-:where(.x-editbox.with-label) .x-focus-box {
-	padding-top     : var(--x-padding-y-input-top);
-	padding-bottom  : var(--x-padding-y-input-bottom);
-	line-height: initial;  /* prevent inheriting it */
-}
-
-.x-input-placeholder {
-	width: 100%;
-	background-color: var(--x-smoke);
-}
-.x-input-placeholder::before {
-	content: '\200b'; /* zwsp */
-}
-
-.x-editbox-input { /* for editbox's input-box and value-box */
-	margin: 0;
-	border: 0;
-	padding: 0;
-	font-size: inherit;
-	font-family: inherit;
-	width: 100%;             /* stretch horizontally */
-	min-width: 0;            /* Firefox fix */
-	color: inherit;
-	background: none;
-	text-align: left;
-}
-
-:where(.x-editbox[align=right]) .x-editbox-input {
-	text-align: right;
-}
-
-:where(.x-editbox[mono]) .x-editbox-input {
-	font-family: monospace;
-}
-
-:where(.x-editbox.modified) .x-focus-box {
-	background-color: var(--x-bg-modified);
-}
-
-:where(.x-editbox.invalid) .x-focus-box {
-	background-color : var(--x-bg-error);
-	color            : var(--x-fg-error);
-}
-
-:where(.x-linear-form) > .x-editbox { display: contents; }
-
-/* editbox with animated inner label/placeholder -------------------------- */
-
-:where(.x-editbox.with-label[mode=inline]) .x-focus-box {
-	border-radius: 0;
-}
-
-.x-editbox-label {
-	vertical-align: top;
-	align-self: flex-start;
-	position: absolute;
-	top: 0; /* fixate to top so we only have to set the top padding */
-	font-size: var(--x-font-size-input-label-empty);
-	padding-top: var(--x-padding-y1-input-il-label-empty);
-	opacity: 1;
-	animation: x-editbox-label-unfocused .1s;
-	color: var(--x-fg-label);
-	white-space: nowrap;
-	cursor: default;
-}
-
-:where(.x-editbox.invalid) .x-editbox-label {
-	color: var(--x-fg-error);
-}
-
-:where(.x-editbox[mode=inline]) .x-focus-box {
-	border: 0;
-	border-radius: 0;
-}
-
-:where(.x-editbox[mode=inline]) .x-focus-box {
-	border-bottom-width: 1px;
-	border-bottom-style: dashed;
-	border-bottom-color: var(--x-fg);
-}
-
-:where(.x-editbox[mode=inline]) .x-editbox-input {
-	padding-bottom: .1em;
-}
-
-:where(.x-editbox[mode=inline]):focus-within .x-focus-box {
-	box-shadow: none;
-}
-
-.x-editbox[mode=inline].with-label > .x-focus-box > .x-editbox-input:not(.empty),
-.x-editbox[mode=inline].with-label:focus-within > .x-focus-box > .x-editbox-input
-{
-	padding-bottom: .1em;
-}
-
-.x-editbox.with-label > .x-focus-box > .x-editbox-label:not(.empty),
-.x-editbox.with-label:focus-within > .x-focus-box > .x-editbox-label,
-.x-editbox.with-label.open > .x-focus-box > .x-editbox-label
-{
-	user-select: none;
-	font-size: var(--x-font-size-input-label);
-	padding-top: var(--x-padding-y1-input-il-label);
-	animation: x-editbox-label-focused .1s;
-}
-
-.x-editbox[mode=inline].with-label > .x-focus-box > .x-editbox-label:not(.empty),
-.x-editbox[mode=inline].with-label:focus-within > .x-focus-box > .x-editbox-label
-{
-	font-weight: bold;
-	opacity: .5;
-}
-
-/* NOTE: remove the `disabled-` prefix to get animated inner labels */
-
-@keyframes disabled-x-editbox-label-unfocused {
-	from {
-		opacity: .5;
-		padding-top: calc(var(--x-padding-y1-input-il-label-empty) * .7);
+	:where(.x-editbox) {
+		/* shrink-wrap sizing */
+		width: auto;
+		min-width: 1em;
 	}
-}
 
-@keyframes disabled-x-editbox-label-focused {
-	from {
-		opacity: .5;
-		padding-top: calc(var(--x-padding-y1-input-il-label) * 2);
+	:where(.x-editbox .x-focus-box) {
+		/* layout content */
+		display: inline-flex;    /* the only way to get variable-width inputs */
+		align-items: baseline;   /* ...that are baseline-aligned */
+		padding-top     : var(--x-padding-y-input);
+		padding-bottom  : var(--x-padding-y-input);
+		padding-left    : calc(var(--x-padding-x-input) + var(--x-border-width-item));
+		padding-right   : calc(var(--x-padding-x-input) - var(--x-border-width-item));
+		overflow: hidden; /* label can overflow */
+		border-color: var(--border);
+		background-color: var(--x-bg-input);
 	}
+
+	:where(.x-editbox.with-label .x-focus-box) {
+		padding-top     : var(--x-padding-y-input-top);
+		padding-bottom  : var(--x-padding-y-input-bottom);
+		line-height: initial;  /* prevent inheriting it */
+	}
+
+	:where(.x-input-placeholder) {
+		width: 100%;
+		background-color: var(--x-smoke);
+	}
+	:where(.x-input-placeholder)::before {
+		content: '\200b'; /* zwsp */
+	}
+
+	:where(.x-editbox-input) { /* for editbox's input-box and value-box */
+		margin: 0;
+		border: 0;
+		padding: 0;
+		font-size: inherit;
+		font-family: inherit;
+		width: 100%;             /* stretch horizontally */
+		min-width: 0;            /* Firefox fix */
+		color: inherit;
+		background: none;
+		text-align: left;
+	}
+
+	:where(.x-editbox[align=right] .x-editbox-input) {
+		text-align: right;
+	}
+
+	:where(.x-editbox[mono] .x-editbox-input) {
+		font-family: monospace;
+	}
+
+	/* editbox with animated inner label/placeholder -------------------------- */
+
+	:where(.x-editbox.with-label[mode=inline] .x-focus-box) {
+		border-radius: 0;
+	}
+
+	:where(.x-editbox-label) {
+		vertical-align: top;
+		align-self: flex-start;
+		position: absolute;
+		top: 0; /* fixate to top so we only have to set the top padding */
+		font-size: var(--x-font-size-input-label-empty);
+		padding-top: var(--x-padding-y1-input-il-label-empty);
+		opacity: 1;
+		animation: x-editbox-label-unfocused .1s;
+		color: var(--x-fg-label);
+		white-space: nowrap;
+		cursor: default;
+	}
+
+	:where(.x-editbox[mode=inline] .x-focus-box) {
+		border: 0;
+		border-radius: 0;
+		border-bottom-width: 1px;
+		border-bottom-style: dashed;
+		border-bottom-color: var(--fg);
+	}
+
+	:where(.x-editbox[mode=inline] .x-editbox-input) {
+		padding-bottom: .1em;
+	}
+
+	/* NOTE: remove the `disabled-` prefix to get animated inner labels */
+
+	@keyframes disabled-x-editbox-label-unfocused {
+		from {
+			opacity: .5;
+			padding-top: calc(var(--x-padding-y1-input-il-label-empty) * .7);
+		}
+	}
+
+	@keyframes disabled-x-editbox-label-focused {
+		from {
+			opacity: .5;
+			padding-top: calc(var(--x-padding-y1-input-il-label) * 2);
+		}
+	}
+
+	/* editbox copy-to-clipboard button --------------------------------------- */
+
+	:where(.x-editbox-copy-to-clipboard-button) {
+		margin: 0;
+		margin-right: calc(0px - var(--x-padding-x-input));
+		border-left: 1px solid var(--x-smoke);
+		border-radius: 0;
+	}
+
+	:where(.x-editbox-copy-to-clipboard-button img) {
+		filter: contrast(.8);
+	}
+
 }
 
-/* editbox copy-to-clipboard button --------------------------------------- */
+@layer state {
 
-.x-button.x-editbox-copy-to-clipboard-button {
-	margin: 0;
-	margin-right: calc(0px - var(--x-padding-x-input));
-	border-left: 1px solid var(--x-smoke);
-	border-radius: 0;
+	:where(.x-editbox.modified .x-focus-box) {
+		background-color: var(--x-bg-modified);
+	}
+
+	:where(.x-editbox.invalid .x-focus-box) {
+		background-color : var(--x-bg-error);
+		color            : var(--x-fg-error);
+	}
+
+	:where(.x-editbox.invalid .x-editbox-label) {
+		color: var(--x-fg-error);
+	}
+
+	:where(.x-editbox[mode=inline]:focus-within .x-focus-box) {
+		box-shadow: none;
+	}
+
+	:where(.x-editbox[mode=inline].with-label:focus-within .x-editbox-input) {
+		padding-bottom: .1em;
+	}
+
+	:where(.x-editbox[mode=inline].with-label:not(.empty) .x-editbox-input) {
+		padding-bottom: .1em;
+	}
+
+	:where(.x-editbox.with-label:is(:focus-within, .open, :not(.empty)) .x-editbox-label) {
+		user-select: none;
+		font-size: var(--x-font-size-input-label);
+		padding-top: var(--x-padding-y1-input-il-label);
+		animation: x-editbox-label-focused .1s;
+	}
+
+	:where(.x-editbox[mode=inline].with-label):is(:focus-within, :not(.empty)) .x-editbox-label {
+		font-weight: bold;
+		opacity: .5;
+	}
+
 }
 
-.x-editbox-copy-to-clipboard-button > .x-button-icon > img {
-	filter: contrast(.8);
+@layer role {
+
+	:where(.x-linear-form > .x-editbox) { display: contents; }
+
 }
+
 
 /* textarea --------------------------------------------------------------- */
 
-.x-textarea {
-	flex: 1;
-}
+@layer base {
 
-.x-textarea > .x-focus-box {
-	padding-right: 0;
-	flex: 1;
-}
+	:where(.x-textarea) {
+		flex: 1;
+	}
 
-textarea.x-editbox-input {
-	resize: none;
-	padding-right: var(--x-padding-x-input);
-	overflow-y: overlay;
-	overflow-x: overlay;
-	cursor: auto;
-}
+	:where(.x-textarea .x-focus-box) {
+		padding-right: 0;
+		flex: 1;
+	}
 
-.x-textarea > .x-focus-box > .x-editbox-input {
-	align-self: stretch;
-}
+	:where(textarea.x-editbox-input) {
+		resize: none;
+		padding-right: var(--x-padding-x-input);
+		overflow-y: overlay;
+		overflow-x: overlay;
+		cursor: auto;
+	}
 
-.x-textarea[nowrap] {
-	white-space: pre;
-	overflow-wrap: normal;
+	:where(.x-textarea .x-editbox-input) {
+		align-self: stretch;
+	}
+
+	:where(.x-textarea[nowrap]) {
+		white-space: pre;
+		overflow-wrap: normal;
+	}
+
 }
 
 /* dropdown --------------------------------------------------------------- */
 
 /* NOTE: .x-dropdown is applied along with .x-editbox ! */
 
-.x-dropdown {
-	/* styling */
-	cursor: default;
+@layer base {
 
-	/* default mode: shrink-wrap, no-wrap */
-	width: auto;
-	min-width: 1em;
-	white-space: nowrap;
+	:where(.x-dropdown) {
+		/* styling */
+		cursor: default;
+
+		/* default mode: shrink-wrap, no-wrap */
+		width: auto;
+		min-width: 1em;
+		white-space: nowrap;
+	}
+
+	:where(.x-dropdown .x-focus-box) {
+		line-height: initial; /* prevent y-stretching to surrounding text's line height */
+	}
+
+	:where(.x-editbox-value) {
+
+		/* layout self */
+		flex: 1; /* stretch horizontally */
+		width: auto;
+		padding-right : .25em;
+
+		/* layout content */
+		display: flex;
+		align-items: center;
+		white-space: nowrap;
+		overflow: hidden;
+	}
+
+	:where(.x-editbox-value:empty)::before {
+		content: '\200b'; /* zwsp to force line height */
+	}
+
+	:where(.x-editbox-value.null) { color: var(--x-fg-disabled); }
+
+	:where(.x-dropdown-button) {
+		padding-left : .5em;
+
+		border-left-style: inherit;
+		border-left-color: inherit;
+		border-left-width: 1px;
+
+	}
+
+	:where(.x-dropdown-more-button) {
+		margin-left   : calc(0px - var(--x-padding-x-input));
+		padding-left  : var(--x-padding-x-input);
+		padding-right : var(--x-padding-x-input);
+		align-self: stretch;
+		display: flex;
+		align-items: center;
+		font-size: 90%;
+	}
+
+	:where(.x-dropdown[align=right] .x-editbox-value) {
+		order: 2;
+		padding-left  : .25em;
+		padding-right : var(--x-padding-x-input);
+	}
+
+	/* inline mode: variable-width, no-wrap with no min-width */
+	:where(.x-dropdown[mode=inline] .x-focus-box) {
+		min-width: 1em; /* reset from x-input's min-width */
+		align-items: baseline;
+	}
+
+	/* wrap mode: fixed-width, auto-wrap */
+	:where(.x-dropdown[mode=wrap]) {
+		width: 0; /* shrink-wrap; add min-width to make it look good */
+	}
+	:where(.x-dropdown[mode=wrap] .x-editbox-value) {
+		white-space: normal;
+	}
+
+	/* fixed mode: fixed-width, no-wrap, hide-overflow */
+	:where(.x-dropdown[mode=fixed]) {
+		width: 0; /* shrink-wrap; add min-width to make it look good */
+	}
+
+	:where(.x-widget.picker) {
+		background-color: var(--x-bg-popup);
+		z-index: 3; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
+
+		border-color: var(--x-border-focused);
+		box-shadow  : var(--x-shadow-popup-picker);
+	}
+
 }
 
-.x-dropdown > .x-focus-box {
-	line-height: initial; /* prevent y-stretching to surrounding text's line height */
-}
+@layer state {
 
-/* look focused even though it's the picker that's focused. */
-.x-dropdown.open > .x-focus-box {
-	border-color : var(--x-border-focused);
-}
+	/* look focused even though it's the picker that's focused. */
+	:where(.x-dropdown.open .x-focus-box) {
+		border-color : var(--x-border-focused);
+	}
 
-.x-editbox-value {
+	/* if you want that hipster animation, here it is...
+	:where(.x-dropdown-button.down) {
+		transition: transform .2s ease;
+	}
 
-	/* layout self */
-	flex: 1; /* stretch horizontally */
-	width: auto;
-	padding-right : .25em;
+	:where(.x-dropdown-button.up) {
+		transition: transform .2s ease;
+		transform: rotate(180deg);
+	}
+	*/
 
-	/* layout content */
-	display: flex;
-	align-items: center;
-	white-space: nowrap;
-	overflow: hidden;
-}
+	:where(.x-dropdown-more-button.active) {
+		color: var(--x-fg-disabled);
+	}
 
-.x-editbox-value:empty::before {
-	content: '\200b'; /* zwsp to force line height */
-}
+	:where(.x-dropdown[mode=inline]:is(:focus-within, .open) .x-focus-box) {
+		box-shadow: none;
+	}
 
-.x-editbox-value.null { color: var(--x-fg-disabled); }
-
-.x-dropdown-button {
-	padding-left : .5em;
-
-	border-left-style: inherit;
-	border-left-color: inherit;
-	border-left-width: 1px;
-
-}
-
-/* if you want that hipster animation, here it is...
-.x-dropdown-button.down {
-	transition: transform .2s ease;
-}
-
-.x-dropdown-button.up {
-	transition: transform .2s ease;
-	transform: rotate(180deg);
-}
-*/
-
-.x-dropdown-more-button {
-	margin-left   : calc(0px - var(--x-padding-x-input));
-	padding-left  : var(--x-padding-x-input);
-	padding-right : var(--x-padding-x-input);
-	align-self: stretch;
-	display: flex;
-	align-items: center;
-	font-size: 90%;
-}
-
-.x-dropdown-more-button.active {
-	color: var(--x-fg-disabled);
-}
-
-.x-dropdown[align=right] > .x-focus-box > .x-editbox-value {
-	order: 2;
-	padding-left  : .25em;
-	padding-right : var(--x-padding-x-input);
-}
-
-/* inline mode: variable-width, no-wrap with no min-width */
-.x-dropdown[mode=inline] > .x-focus-box {
-	min-width: 1em; /* reset from x-input's min-width */
-	align-items: baseline;
-}
-
-.x-dropdown[mode=inline]:focus-within > .x-focus-box,
-.x-dropdown[mode=inline].open > .x-focus-box {
-	box-shadow: none;
-}
-
-/* wrap mode: fixed-width, auto-wrap */
-.x-dropdown[mode=wrap] {
-	width: 0; /* shrink-wrap; add min-width to make it look good */
-}
-.x-dropdown[mode=wrap] > .x-focus-box > .x-editbox-value {
-	white-space: normal;
-}
-
-/* fixed mode: fixed-width, no-wrap, hide-overflow */
-.x-dropdown[mode=fixed] {
-	width: 0; /* shrink-wrap; add min-width to make it look good */
-}
-
-/* override with more specificity: .x-widget.x-<foo>.picker */
-.x-widget.picker {
-	background-color: var(--x-bg-popup);
-	z-index: 3; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
-
-	border-color: var(--x-border-focused);
-	box-shadow  : var(--x-shadow-popup-picker);
 }
 
 /* passedit --------------------------------------------------------------- */
 
-.x-button.x-passedit-eye-icon > .x-button-focus-box {
-	padding-right: 0;
-}
+@layer base {
 
-.x-passedit-eye-icon .x-button-icon {
-	min-width: 1.5em;
+	:where(.x-button.x-passedit-eye-icon .x-button-focus-box) {
+		padding-right: 0;
+	}
+
+	:where(.x-passedit-eye-icon .x-button-icon) {
+		min-width: 1.5em;
+	}
+
 }
 
 /* spinedit --------------------------------------------------------------- */
 
-.x-spinedit-button {
-	display: none;
-	border-style: solid;
-	border-color: var(--x-border-light);
-	border-width: 0;
-	padding-left : var(--x-padding-x-input);
-	padding-right: var(--x-padding-x-input);
-}
+@layer base {
 
-.x-spinedit-button.left  { display: initial; border-right-width: 1px; }
-.x-spinedit-button.right { display: initial; border-left-width : 1px; }
+	:where(.x-spinedit-button) {
+		display: none;
+		border-style: solid;
+		border-color: var(--border);
+		border-width: 0;
+		padding-left : var(--x-padding-x-input);
+		padding-right: var(--x-padding-x-input);
+	}
 
-.x-spinedit-button.fa-plus,
-.x-spinedit-button.fa-minus {
-	font-size: 70%;
-	align-self: center;
-}
-.x-spinedit-button.fa-minus.leftmost { padding-left  : calc(1.428 * var(--x-padding-x-input)); }
-.x-spinedit-button.fa-plus.rightmost { padding-right : calc(1.428 * var(--x-padding-x-input)); }
+	:where(.x-spinedit-button.left ) { display: initial; border-right-width: 1px; }
+	:where(.x-spinedit-button.right) { display: initial; border-left-width : 1px; }
 
-.x-spinedit-button.fa-caret-left  { padding-right : calc(.5 * var(--x-padding-x-input)); }
-.x-spinedit-button.fa-caret-right { padding-left  : calc(.5 * var(--x-padding-x-input)); }
+	:where(.x-spinedit-button.fa-plus ),
+	:where(.x-spinedit-button.fa-minus) {
+		font-size: 70%;
+		align-self: center;
+	}
+	:where(.x-spinedit-button.fa-minus.leftmost) { padding-left  : calc(1.428 * var(--x-padding-x-input)); }
+	:where(.x-spinedit-button.fa-plus.rightmost) { padding-right : calc(1.428 * var(--x-padding-x-input)); }
 
-/* inner label adjustments */
+	:where(.x-spinedit-button.fa-caret-left ) { padding-right : calc(.5 * var(--x-padding-x-input)); }
+	:where(.x-spinedit-button.fa-caret-right) { padding-left  : calc(.5 * var(--x-padding-x-input)); }
 
-.x-spinedit[button_placement=left]      > .x-editbox-label.empty,
-.x-spinedit[button_placement=each-side] > .x-editbox-label.empty {
-	padding-left: 2em;
-}
+	/* inner label adjustments */
 
-.x-spinedit[button_style=left-right][button_placement=left]      > .x-editbox-label.empty,
-.x-spinedit[button_style=left-right][button_placement=each-side] > .x-editbox-label.empty {
-	padding-left: 1.5em;
-}
+	:where(.x-spinedit:is([button_placement=left], [button_placement=each-side]) .x-editbox-label.empty) {
+		padding-left: 2em;
+	}
 
-.x-spinedit.with-label > .x-spinedit-button.fa-plus,
-.x-spinedit.with-label > .x-spinedit-button.fa-minus
-{
-	align-self: baseline;
+	:where(.x-spinedit[button_style=left-right]:is([button_placement=left], [button_placement=each-side]) .x-editbox-label.empty) {
+		padding-left: 1.5em;
+	}
+
+	:where(.x-spinedit.with-label .x-spinedit-button.fa-plus ),
+	:where(.x-spinedit.with-label .x-spinedit-button.fa-minus)
+	{
+		align-self: baseline;
+	}
+
 }
 
 /* dateedit --------------------------------------------------------------- */
 
-.x-dateedit-calendar-button {
-	margin-left: calc(0px - var(--x-padding-x-input));
+@layer base {
+
+	:where(.x-dateedit-calendar-button) {
+		margin-left: calc(0px - var(--x-padding-x-input));
+	}
+
 }
 
 /* slider ----------------------------------------------------------------- */
 
-/* reset x-editbox */
-.x-slider > .x-focus-box {
-	border-color: transparent;
-	background-color: transparent;
+@layer base {
+
+	/* reset x-editbox */
+	:where(.x-slider .x-focus-box) {
+		border-color: transparent;
+		background-color: transparent;
+	}
+
+	:where(.x-editbox.x-slider .x-focus-box) {
+		border-color: transparent;
+		background-color: transparent;
+	}
+
+	:where(.x-slider-box) {
+		flex: 1;
+		vertical-align: middle;
+		margin: .75em;
+		min-width: 8em;
+		height: 4px;
+		overflow: visible;
+		position: relative;
+	}
+
+	:where(.x-slider-fill) {
+		position: absolute;
+		height: 100%;
+		border-radius: 10em;
+	}
+
+	:where(.x-slider-range-fill) {
+		background-color: var(--bg1);
+		height: 3px;
+	}
+
+	:where(.x-slider-thumb) {
+
+		/* center vertically to track */
+		position: absolute;
+		margin-top : calc(-.6em + 2px);
+		margin-left: calc(-.6em);
+
+		/* sizing */
+		width: 1.2em;
+		height: 1.2em;
+
+		/* styling */
+		box-shadow: var(--x-shadow-slider-thumb);
+		border-radius: 50%;
+	}
+
+	:where(.x-slider-value-fill),
+	:where(.x-slider-thumb)
+	{
+		background-color: var(--x-fg-clickable);
+	}
+
 }
 
-.x-editbox.x-slider > .x-focus-box {
-	border-color: transparent;
-	background-color: transparent;
+@layer state {
+
+	:where(.x-editbox.x-slider.modified > .x-focus-box) {
+		background-color: transparent;
+	}
+
+	:where(.x-slider-input-thumb:focus-visible) {
+		box-shadow: none;
+		outline: 6px solid var(--x-outline-markbox-focused);
+	}
+
+	:where(.x-slider-focus-box:focus-within) {
+		outline-color: transparent;
+	}
+
+	:where(.x-slider-value-thumb.different) {
+		opacity: .5;
+	}
+
+	:where(.x-slider-focus-box:focus-within .x-slider-value-fill) {
+		background-color: var(--x-bg-focused-selected);
+	}
+
+	:where(.x-slider-focus-box:focus-within .x-slider-thumb) {
+		background-color: var(--x-bg-focused-selected);
+	}
+
+	:where(.x-slider.invalid .x-slider-input-thumb) {
+		border-color: var(--x-bg-error);
+		background-color: var(--x-bg-error);
+	}
+
+	:where(.x-slider.invalid .x-slider-focus-box:focus .x-slider-thumb) {
+		border-color: var(--x-disabled);
+	}
+
+	:where(.x-slider.animated .x-slider-thumb     ) { transition: left  .1s; }
+	:where(.x-slider.animated .x-slider-value-fill) { transition: width .1s; }
+
 }
-.x-editbox.x-slider.modified.modified > .x-focus-box {
-	background-color: transparent;
-}
-
-.x-slider-box {
-	flex: 1;
-	vertical-align: middle;
-	margin: .75em;
-	min-width: 8em;
-	height: 4px;
-	overflow: visible;
-	position: relative;
-}
-
-.x-slider-fill {
-	position: absolute;
-	height: 100%;
-	border-radius: 10em;
-}
-
-.x-slider-range-fill {
-	background-color: var(--x-faint);
-	height: 3px;
-}
-
-.x-slider-thumb {
-
-	/* center vertically to track */
-	position: absolute;
-	margin-top : calc(-.6em + 2px);
-	margin-left: calc(-.6em);
-
-	/* sizing */
-	width: 1.2em;
-	height: 1.2em;
-
-	/* styling */
-	box-shadow: var(--x-shadow-slider-thumb);
-	border-radius: 50%;
-}
-
-.x-slider-value-fill, .x-slider-thumb {
-	background-color: var(--x-fg-clickable);
-}
-
-.x-slider-input-thumb:focus-visible {
-	box-shadow: none;
-	outline: 6px solid var(--x-outline-markbox-focused);
-}
-
-.x-slider-focus-box:focus-within {
-	outline-color: transparent;
-}
-
-.x-slider-value-thumb.different {
-	opacity: .5;
-}
-
-.x-slider-focus-box:focus-within > .x-slider-box > .x-slider-value-fill {
-	background-color: var(--x-bg-focused-selected);
-}
-
-.x-slider-focus-box:focus-within > .x-slider-box > .x-slider-thumb {
-	background-color: var(--x-bg-focused-selected);
-}
-
-.x-slider.invalid > .x-slider-focus-box > .x-slider-box > .x-slider-input-thumb {
-	border-color: var(--x-bg-error);
-	background-color: var(--x-bg-error);
-}
-
-.x-slider.invalid > .x-slider-focus-box:focus > .x-slider-box > .x-slider-thumb {
-	border-color: var(--x-disabled);
-}
-
-.x-slider.animated > .x-slider-focus-box > .x-slider-box > .x-slider-thumb      { transition: left  .1s; }
-.x-slider.animated > .x-slider-focus-box > .x-slider-box > .x-slider-value-fill { transition: width .1s; }
 
 /* tagsedit --------------------------------------------------------------- */
 
-.x-tagsedit {
-	/* shrink-wrap sizing */
-	width: auto;
-	min-width: 1em;
+@layer base {
+
+	:where(.x-tagsedit) {
+		/* shrink-wrap sizing */
+		width: auto;
+		min-width: 1em;
+	}
+
+	:where(.x-tagsedit-tags-box) {
+		/* layout content */
+		display: flex;
+		flex-flow: wrap;
+		align-items: baseline;
+		align-content: flex-start;
+		overflow: hidden;
+
+		padding-left : .5em;
+		padding-right: .5em;
+	}
+
+	:where(.x-tagsedit-input) {
+		min-width: 0;
+		width: 3em;
+		padding: 2px 0; /* reset */
+		height: auto; /* reset */
+		flex: 1 1 auto;
+		line-height: 1;
+	}
+
+	:where(.x-tagsedit-button-expand) {
+		padding: 0 .5em 0 0;
+	}
+
+	:where(.x-tagsedit-bubble) {
+		pointer-events: all;
+	}
+
+	:where(.x-tagsedit-tag) {
+		display: inline;
+		border-width: 1px;
+		border-style: solid;
+		border-color: var(--border);
+		border-radius: .25em;
+		background-color: var(--bg1);
+		padding: 2px .25em;
+		padding-top: 3px;
+		margin: 1px .1em;
+		line-height: 1;
+		cursor: default;
+		overflow: hidden;
+	}
+
+	:where(.x-tagsedit-tag-xbutton) {
+		padding-left: .4em;
+		padding-right: .2em;
+		font-size: 70%;
+		align-self: center;
+		color: var(--x-fg-disabled);
+	}
+
+	/* fixed height mode */
+
+	:where(.x-tagsedit.with-label[mode=fixed]) {
+		min-height: var(--x-min-height-input);
+	}
+
+	:where(.x-tagsedit[mode=fixed] .x-tagsedit-tags-box) {
+		flex-flow: nowrap;
+	}
+
+	:where(.x-tagsedit[mode=fixed] .x-tagsedit-tag),
+	:where(.x-tagsedit-bubble .x-tagsedit-tag)
+	{
+		flex-flow: nowrap;
+		white-space: nowrap;
+	}
+
 }
 
-.x-tagsedit-tags-box {
-	/* layout content */
-	display: flex;
-	flex-flow: wrap;
-	align-items: baseline;
-	align-content: flex-start;
-	overflow: hidden;
+@layer state {
 
-	padding-left : .5em;
-	padding-right: .5em;
-}
+	:where(.x-tagsedit.invalid .x-tagsedit-tag) {
+		background-color: var(--x-bg-focused-invalid);
+	}
 
-/* avoiding !important because the web is a piece of shit. */
-.x-tagsedit-input.x-tagsedit-input.x-tagsedit-input.x-tagsedit-input {
-	min-width: 0;
-	width: 3em;
-	padding: 2px 0; /* reset */
-	height: auto; /* reset */
-	flex: 1 1 auto;
-	line-height: 1;
-}
+	:where(.x-tagsedit.invalid .x-tagsedit-tag-xbutton) {
+		color: var(--x-fg-disabled-inverted);
+	}
 
-.x-tagsedit-button-expand {
-	padding: 0 .5em 0 0;
-}
+	:where(.x-tagsedit:not([disabled]) .x-tagsedit-tag:hover) {
+		cursor: pointer;
+		background-color: var(--x-smoke);
+	}
 
-.x-tagsedit-bubble {
-	pointer-events: all;
-}
+	:where(.x-tagsedit:not([disabled]) .x-tagsedit-tag:hover .x-tagsedit-tag-xbutton) {
+		color: inherit;
+	}
 
-.x-tagsedit-tag {
-	display: inline;
-	border-width: 1px;
-	border-style: solid;
-	border-color: var(--x-border-light);
-	border-radius: .25em;
-	background-color: var(--x-faint);
-	padding: 2px .25em;
-	padding-top: 3px;
-	margin: 1px .1em;
-	line-height: 1;
-	cursor: default;
-	overflow: hidden;
-}
+	:where(.x-tagsedit:not([disabled]).invalid .x-tagsedit-tag:hover .x-tagsedit-tag-xbutton) {
+		color: var(--x-fg-error);
+	}
 
-.x-tagsedit-tag-xbutton {
-	padding-left: .4em;
-	padding-right: .2em;
-	font-size: 70%;
-	align-self: center;
-	color: var(--x-fg-disabled);
-}
-
-.x-tagsedit.invalid > .x-tagsedit-tag {
-	background-color: var(--x-bg-focused-invalid);
-}
-
-.x-tagsedit.invalid > .x-tagsedit-tag > .x-tagsedit-tag-xbutton {
-	color: var(--x-fg-disabled-inverted);
-}
-
-.x-tagsedit:not([disabled]) > .x-tagsedit-tag:hover {
-	cursor: pointer;
-	background-color: var(--x-smoke);
-}
-
-.x-tagsedit:not([disabled]) > .x-tagsedit-tag:hover > .x-tagsedit-tag-xbutton {
-	color: inherit;
-}
-
-.x-tagsedit:not([disabled]).invalid > .x-tagsedit-tag:hover > .x-tagsedit-tag-xbutton {
-	color: var(--x-fg-error);
-}
-
-/* fixed height mode */
-
-.x-tagsedit.with-label[mode=fixed] {
-	min-height: var(--x-min-height-input);
-}
-
-.x-tagsedit[mode=fixed] > .x-focus-box  > .x-tagsedit-tags-box {
-	flex-flow: nowrap;
-}
-
-.x-tagsedit[mode=fixed] > .x-focus-box > .x-tagsedit-tags-box > .x-tagsedit-tag,
-.x-tagsedit-bubble .x-tagsedit-tag
-{
-	flex-flow: nowrap;
-	white-space: nowrap;
 }
 
 /* `place` type formatting (also used in the address widget) -------------- */
 
-.x-place-pin {
-	margin-right: .5em;
-	cursor: pointer;
+@layer base {
+
+	:where(.x-place-pin) {
+		margin-right: .5em;
+		cursor: pointer;
+	}
+
 }
 
-.x-place-pin.disabled {
-	opacity: .3;
-	cursor: default;
+@layer state {
+
+	:where(.x-place-pin.disabled) {
+		opacity: .3;
+		cursor: default;
+	}
+
 }
 
 /* google maps ------------------------------------------------------------ */
 
-.x-googlemaps {
+@layer base {
 
-	/* layout self */
-	min-height: calc(var(--x-min-height-input) * 2 + var(--x-margin));
+	:where(.x-googlemaps) {
 
-	/* layout map icon */
-	display: flex !important; /* override fontawesome !important */
-	justify-content: center;
-	align-items: center;
-	color: var(--x-smoke);
+		/* layout self */
+		min-height: calc(var(--x-min-height-input) * 2 + var(--x-margin));
 
-	/* styling */
-	background-color: var(--x-faint);
-}
+		/* layout map icon */
+		display: flex !important; /* override fontawesome !important */
+		justify-content: center;
+		align-items: center;
+		color: var(--x-smoke);
 
-.x-googlemaps::before {
-	font-size: 2em !important; /* override fontawesome !important */
-}
+		/* styling */
+		background-color: var(--bg1);
+	}
 
-.x-googlemaps-iframe {
-	position: absolute;
-	min-width: 0;
-	min-height: 0;
-	width: 100%;
-	height: 100%;
+	:where(.x-googlemaps)::before {
+		font-size: 2em !important; /* override fontawesome !important */
+	}
+
+	:where(.x-googlemaps-iframe) {
+		position: absolute;
+		min-width: 0;
+		min-height: 0;
+		width: 100%;
+		height: 100%;
+	}
+
 }
 
 /* input ------------------------------------------------------------------ */
 
-.x-input {
-	display: flex;
-	flex-flow: column; /* so that contents can stretch horizontally */
-}
+@layer base {
 
-.x-input:not(:empty) {
-	margin: 0;
-	border: 0;
-	border-radius: 0;
+	:where(.x-input) {
+		display: flex;
+		flex-flow: column; /* so that contents can stretch horizontally */
+	}
+
+	:where(.x-input:not(:empty)) {
+		margin: 0;
+		border: 0;
+		border-radius: 0;
+	}
+
 }
 
 /* listbox ---------------------------------------------------------------- */
 
-.x-listbox {
-	/* layut self */
-	flex: 1; /* stretch-to-fill so we can focus it by clicking on its empty space */
-	/* layout content */
-	line-height: initial;  /* prevent inheriting it */
+@layer base {
+
+	:where(.x-listbox) {
+		/* layut self */
+		flex: 1; /* stretch-to-fill so we can focus it by clicking on its empty space */
+		/* layout content */
+		line-height: initial;  /* prevent inheriting it */
+	}
+
+	:where(.x-listbox[orientation=vertical  ]) { flex-direction: column; }
+	:where(.x-listbox[orientation=horizontal]) { flex-direction: row; }
+
+	:where(.x-listbox-item) {
+		/* layout */
+		display: block;
+		/* sizing */
+		padding-left   : var(--x-padding-x-input);
+		padding-right  : var(--x-padding-x-input);
+		padding-top    : var(--x-padding-y-input);
+		padding-bottom : var(--x-padding-y-input);
+		border: var(--x-border-width-item) solid transparent; /* to match grid row height */
+		/* behavior */
+		cursor: default;
+		position: relative; /* for item moving */
+	}
+
+	:where(.x-listbox-item) {
+		overflow: visible;
+	}
+
+	:where(.x-listbox.moving .x-listbox-item:not(.moving)) {
+		transition: top .1s, left .1s, right .1s;
+	}
+
+	:where(.x-listbox.picker) {
+		max-height: 300px;
+		overflow: auto;
+		resize: both;
+	}
+
 }
 
-.x-listbox[orientation=vertical]   { flex-direction: column; }
-.x-listbox[orientation=horizontal] { flex-direction: row; }
+@layer state {
 
-.x-listbox-item {
-	/* layout */
-	display: block;
-	/* sizing */
-	padding-left   : var(--x-padding-x-input);
-	padding-right  : var(--x-padding-x-input);
-	padding-top    : var(--x-padding-y-input);
-	padding-bottom : var(--x-padding-y-input);
-	border: var(--x-border-width-item) solid transparent; /* to match grid row height */
-	/* behavior */
-	cursor: default;
-	position: relative; /* for item moving */
-}
+	:where(.x-listbox:not([disabled]) .x-listbox-item:hover) {
+		background-color: var(--bg1);
+	}
 
-.x-listbox:not([disabled]) > .x-listbox-item:hover {
-	background-color: var(--x-faint);
-}
+	:where(.x-listbox-item.moving) {
+		z-index: 1;
+		opacity: .7;
+	}
 
-.x-item.x-listbox-item { /* specificity over ?? */
-	overflow: visible;
-}
-
-.x-listbox-item.moving {
-	z-index: 1;
-	opacity: .7;
-}
-
-.x-listbox.moving > .x-listbox-item:not(.moving) {
-	transition: top .1s, left .1s, right .1s;
-}
-
-.x-widget.x-listbox.picker {
-	max-height: 300px;
-	overflow: auto;
-	resize: both;
 }
 
 /* select-button ---------------------------------------------------------- */
 
-.x-select-button {
-	border: 0;
+@layer base {
+
+	:where(.x-select-button) {
+		border: 0;
+	}
+
+	:where(.x-select-button .x-item) {
+
+		/* styling */
+		background-color: var(--x-bg-select-button);
+		border-width: 1px;
+		border-style: solid;
+		border-color: var(--border);
+
+		/* behavior */
+		user-select: none;
+	}
+
+	:where(.x-select-button .x-item:first-child) {
+		border-top-left-radius    : var(--x-border-radius-button);
+		border-bottom-left-radius : var(--x-border-radius-button);
+	}
+
+	:where(.x-select-button .x-item:last-child) {
+		border-top-right-radius    : var(--x-border-radius-button);
+		border-bottom-right-radius : var(--x-border-radius-button);
+	}
+
+	:where(.x-select-button .x-item:not(:first-child)) {
+		border-left: 0;
+	}
+
 }
 
-.x-select-button > .x-item {
+@layer state {
 
-	/* styling */
-	background-color: var(--x-bg-select-button);
-	border-width: 1px;
-	border-style: solid;
-	border-color: var(--x-border-light);
+	:where(.x-select-button .x-item:hover) {
+		background-color: var(--x-smoke);
+	}
 
-	/* behavior */
-	user-select: none;
-}
+	:where(.x-select-button .x-item.focused.selected) {
+		box-shadow: var(--x-shadow-button-pressed);
+	}
 
-.x-select-button > .x-item:hover {
-	background-color: var(--x-smoke);
-}
-
-.x-select-button > .x-item.focused.selected {
-	box-shadow: var(--x-shadow-button-pressed);
-}
-
-.x-select-button > .x-item:first-child {
-	border-top-left-radius    : var(--x-border-radius-button);
-	border-bottom-left-radius : var(--x-border-radius-button);
-}
-
-.x-select-button > .x-item:last-child {
-	border-top-right-radius    : var(--x-border-radius-button);
-	border-bottom-right-radius : var(--x-border-radius-button);
-}
-
-.x-select-button > .x-item:not(:first-child) {
-	border-left: 0;
 }
 
 /* color item ------------------------------------------------------------- */
 
-.x-item-color {
-	width: 100%;
+@layer base {
+
+	:where(.x-item-color) {
+		width: 100%;
+	}
+
 }
 
 /* progress bar item ------------------------------------------------------ */
 
-.x-item-progress {
-	width: 100%;
-	height: 100%;
-	position: relative;
-}
+@layer base {
 
-.x-item-progress-bar {
-	position: absolute;
-	top: 0; left: 0; bottom: 0;
-	background-color: var(--x-bg-selected);
-}
+	:where(.x-item-progress) {
+		width: 100%;
+		height: 100%;
+		position: relative;
+	}
 
-.x-item-progress-text {
-	position: relative; /* so it stays on top of the absolute progress bar */
-	top: 0; left: 0; right: 0; bottom: 0;
-	text-align: center;
+	:where(.x-item-progress-bar) {
+		position: absolute;
+		top: 0; left: 0; bottom: 0;
+		background-color: var(--x-bg-selected);
+	}
+
+	:where(.x-item-progress-text) {
+		position: relative; /* so it stays on top of the absolute progress bar */
+		top: 0; left: 0; right: 0; bottom: 0;
+		text-align: center;
+	}
+
 }
 
 /* calendar --------------------------------------------------------------- */
 
-.x-calendar {
-	display: inline-flex;
-	padding: 1em;
-	user-select: none;
+@layer base {
+
+	:where(.x-calendar) {
+		display: inline-flex;
+		padding: 1em;
+		user-select: none;
+	}
+
+	:where(.x-calendar-header, .x-calendar-timeview) {
+		align-self: start;
+		display: flex;
+		min-height: 3.5em;
+		align-items: center;     /* vertical align */
+	}
+
+	:where(.x-calendar-header) {
+		justify-content: space-between;
+	}
+
+	:where(.x-calendar-timebox) {
+		margin-left: .5em;
+		padding-left: .5em;
+		border-left: 1px dotted var(--border);
+	}
+
+	:where(.x-calendar-weekview) {
+		width: 100%;
+		border-spacing: 0;
+	}
+
+	:where(.x-calendar-weekday) {
+		color: var(--x-fg-disabled);
+		font-weight: normal;
+	}
+
+	:where(
+		.x-calendar-day,
+		.x-calendar-weekday
+	) {
+		font-size: 90%;
+		text-align: center;
+		padding: .5em;
+	}
+
+	:where(.x-calendar-day)  { cursor: default; }
+
+	:where(.x-calendar-sel-day-box) {
+		min-width: 4.5em;
+		display: flex;
+	}
+
+	:where(.x-calendar-sel-day) {
+		font-size: 250%;
+	}
+
+	:where(.x-calendar-sel-day-suffix) {
+		flex: 1;                 /* stretch to fill width */
+		font-size: 150%;
+		padding-left: .1em;
+		padding-top: .25em;
+		align-self: flex-start;
+	}
+
+	:where(
+		.x-calendar-sel-month,
+		.x-calendar-sel-year
+	) {
+		border: 0;
+	}
+
+	:where(.x-calendar-sel-year) {
+		width: 8em;
+		margin-left: .5em;
+	}
+
+	:where(.x-calendar-sel-year .x-editbox-input) {
+		max-width: 2.5em;
+	}
+
+	:where(.x-calendar-sel-month-picker) {
+		background-color: var(--x-bg-popup2);
+	}
+
+	:where(.x-calendar-month-box) {
+		display: flex;
+	}
+
+	:where(.x-calendar-month-num) {
+		min-width: 1.25em;
+		text-align: right;
+		margin-right: .75em;
+	}
+
+	:where(.x-calendar-sel-year .x-focus-box) {
+		justify-content: space-between;
+	}
+
+	:where(.x-calendar-month-name) {
+		min-width: 2.5em;
+	}
+
+	:where(.x-calendar-sel-day:empty)::before,
+	:where(.x-calendar-sel-day-suffix:empty)::before,
+	:where(.x-calendar-day:empty)::before
+	{
+		content: '\200b'; /* zwsp to force line height */
+	}
+
+	:where(.x-calendar-sel-hms) {
+		min-width: 0;
+		width: 2.5em;
+	}
+
 }
 
-.x-calendar-header,
-.x-calendar-timeview
-{
-	align-self: start;
-	display: flex;
-	min-height: 3.5em;
-	align-items: center;     /* vertical align */
-}
+@layer state {
 
-.x-calendar-header {
-	justify-content: space-between;
-}
+	:where(.x-calendar-day:not(.current-month))         { color: var(--x-fg-disabled); }
+	:where(.x-calendar-day.today)                       { outline: 1px dashed var(--x-bg-today); }
+	:where(.x-calendar .x-calendar-day.today:hover)     { background-color: var(--x-bg-today); }
+	:where(.x-calendar.invalid .x-calendar-day.focused) { background-color: var(--x-bg-error); }
 
-.x-calendar-timebox {
-	margin-left: .5em;
-	padding-left: .5em;
-	border-left: 1px dotted var(--x-border-light);
-}
+	:where(.x-calendar-month-box:not(.focused) .x-calendar-month-num) {
+		color: var(--x-fg-disabled);
+	}
 
-.x-calendar-weekview {
-	width: 100%;
-	border-spacing: 0;
-}
-
-.x-calendar-weekday {
-	color: var(--x-fg-disabled);
-	font-weight: normal;
-}
-
-.x-calendar-day,
-.x-calendar-weekday
-{
-	font-size: 90%;
-	text-align: center;
-	padding: .5em;
-}
-
-.x-calendar-day                          { cursor: default; }
-.x-calendar-day:not(.current-month)      { color: var(--x-fg-disabled); }
-.x-calendar-day.today                    {
-	outline: 1px dashed var(--x-bg-today);
-}
-.x-calendar .x-calendar-day.today:hover  { background-color: var(--x-bg-today); }
-.x-calendar.invalid .x-calendar-day.focused {
-	background-color: var(--x-bg-error);
-}
-
-.x-calendar-sel-day-box {
-	min-width: 4.5em;
-	display: flex;
-}
-
-.x-calendar-sel-day {
-	font-size: 250%;
-}
-
-.x-calendar-sel-day-suffix {
-	flex: 1;                 /* stretch to fill width */
-	font-size: 150%;
-	padding-left: .1em;
-	padding-top: .25em;
-	align-self: flex-start;
-}
-
-.x-editbox.x-calendar-sel-month,
-.x-editbox.x-calendar-sel-year {
-	border: 0;
-}
-
-.x-editbox.x-calendar-sel-year {
-	width: 8em;
-	margin-left: .5em;
-}
-
-.x-calendar-sel-year > .x-focus-box {
-	justify-content: space-between;
-}
-
-.x-calendar-sel-year > .x-focus-box > .x-editbox-input {
-	max-width: 2.5em;
-}
-
-.x-widget.picker.x-calendar-sel-month-picker {
-	background-color: var(--x-bg-popup2);
-}
-
-.x-calendar-month-box {
-	display: flex;
-}
-
-.x-calendar-month-num {
-	min-width: 1.25em;
-	text-align: right;
-	margin-right: .75em;
-}
-
-.x-calendar-month-box:not(.focused) > .x-calendar-month-num {
-	color: var(--x-fg-disabled);
-}
-
-.x-calendar-month-name {
-	min-width: 2.5em;
-}
-
-.x-calendar-sel-day:empty::before,
-.x-calendar-sel-day-suffix:empty::before,
-.x-calendar-day:empty::before
-{
-	content: '\200b'; /* zwsp to force line height */
-}
-
-.x-calendar-sel-hms {
-	min-width: 0;
-	width: 2.5em;
 }
 
 /* calendar as picker ----------------------------------------------------- */
 
-.x-widget.x-calendar.picker {
-	padding: 1.5em;
-	min-width: auto !important; /* because it is set in code by the dropdown */
-}
-.x-widget.x-calendar.picker .x-calendar-sel-day {
-	font-size: 200%;
-}
-.x-widget.x-calendar.picker .x-calendar-sel-day-suffix {
-	padding-top: 0;
-}
-.x-widget.x-calendar.picker .x-calendar-day {
-	padding-top    : .25em;
-	padding-bottom : .25em;
+@layer role {
+
+	:where(.x-calendar.picker) {
+		padding: 1.5em;
+		min-width: auto !important; /* because it is set in code by the dropdown */
+	}
+
+	:where(.x-calendar.picker) .x-calendar-sel-day {
+		font-size: 200%;
+	}
+
+	:where(.x-calendar.picker) .x-calendar-sel-day-suffix {
+		padding-top: 0;
+	}
+
+	:where(.x-calendar.picker) .x-calendar-day {
+		padding-top    : .25em;
+		padding-bottom : .25em;
+	}
+
 }
 
 /* time picker ------------------------------------------------------------ */
 
-.x-timepicker {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-}
+@layer base {
 
-.x-timepicker:not([has_seconds]) > .x-timepicker-sel-s,
-.x-timepicker:not([has_seconds]) > .x-timepicker-heading-s
-{
-	display: none;
-}
+	:where(.x-timepicker) {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+	}
 
-.x-timepicker[has_seconds] {
-	grid-template-columns: 1fr 1fr 1fr;
-}
+	:where(.x-timepicker:not([has_seconds]) .x-timepicker-sel-s    ),
+	:where(.x-timepicker:not([has_seconds]) .x-timepicker-heading-s)
+	{
+		display: none;
+	}
 
-.x-timepicker > .x-button {
-	font-size: 90%;
-}
+	:where(.x-timepicker[has_seconds]) {
+		grid-template-columns: 1fr 1fr 1fr;
+	}
 
-.x-timepicker-button-cancel {
-	margin: .5em .25em .5em .5em;
-}
+	:where(.x-timepicker .x-button) {
+		font-size: 90%;
+	}
 
-.x-timepicker-button-set {
-	margin: .5em .5em .5em .25em;
-}
+	:where(.x-timepicker-button-cancel) {
+		margin: .5em .25em .5em .5em;
+	}
 
-.x-timepicker-sel {
-	overflow: auto;
-	border-top    : 1px dotted var(--x-border-light);
-	border-bottom : 1px dotted var(--x-border-light);
-}
+	:where(.x-timepicker-button-set) {
+		margin: .5em .5em .5em .25em;
+	}
 
-.x-widget.x-timepicker-sel::-webkit-scrollbar {
-	width : 12px;
-}
+	:where(.x-timepicker-sel) {
+		overflow: auto;
+		border-top    : 1px dotted var(--border);
+		border-bottom : 1px dotted var(--border);
+	}
 
-.x-timepicker-heading {
-	padding: .5em;
-	font-size: 90%;
-	color: var(--x-fg-disabled);
-}
+	:where(.x-timepicker-sel::-webkit-scrollbar) {
+		width : 12px;
+	}
 
-.x-timepicker-heading-m,
-.x-timepicker-heading-s,
-.x-timepicker-sel-m,
-.x-timepicker-sel-s
-{
-	border-left  : 1px dotted var(--x-border-light);
+	:where(.x-timepicker-heading) {
+		padding: .5em;
+		font-size: 90%;
+		color: var(--x-fg-disabled);
+	}
+
+	:where(.x-timepicker-heading-m),
+	:where(.x-timepicker-heading-s),
+	:where(.x-timepicker-sel-m    ),
+	:where(.x-timepicker-sel-s    )
+	{
+		border-left: 1px dotted var(--border);
+	}
+
 }
 
 /* timeofday edit --------------------------------------------------------- */
 
-.x-timeofdayedit .x-editbox-input {
-	text-align: center;
-}
+@layer base {
 
-.x-timeofdayedit .x-timeofdayedit-timepicker-button {
-	margin-left: -2em;
+	:where(.x-timeofdayedit .x-editbox-input) {
+		text-align: center;
+	}
+
+	:where(.x-timeofdayedit .x-timeofdayedit-timepicker-button) {
+		margin-left: -2em;
+	}
+
 }
 
 /* menu ------------------------------------------------------------------- */
 
-.x-menu {
+@layer base {
 
-	font-family : arial, sans-serif;
-	font-size   : 12px;
-	line-height : 1.5;
+	:where(.x-menu) {
 
-	/* layout self */
-	position: absolute; /* submenus are positioned in code */
-	top: 0;
-	left: 0;
-	margin: 0;
-	min-width: 200px;
-	width: min-content; /* why the fuck is `width: 0` not working here? */
-	z-index: 4; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
+		font-family : arial, sans-serif;
+		font-size   : 12px;
+		line-height : 1.5;
 
-	/* layout content */
-	display: table;
-	overflow: visible;  /* submenus are outside clipping area */
-	border-collapse: collapse; /* separators are done with borders */
-	background-color: var(--x-bg-popup);
+		/* layout self */
+		position: absolute; /* submenus are positioned in code */
+		top: 0;
+		left: 0;
+		margin: 0;
+		min-width: 200px;
+		width: min-content; /* why the fuck is `width: 0` not working here? */
+		z-index: 4; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
 
-	/* styling */
-	border: 0;
-	border-radius: 0;
-	color: inherit;
-	color: var(--x-fg); /* prevent inheritance by the .focused rule below */
+		/* layout content */
+		display: table;
+		overflow: visible;  /* submenus are outside clipping area */
+		border-collapse: collapse; /* separators are done with borders */
+		background-color: var(--x-bg-popup);
+
+		/* styling */
+		border: 0;
+		border-radius: 0;
+		color: inherit;
+		color: var(--fg); /* prevent inheritance by the .focused rule below */
+
+	}
+
+	:where(.x-menu-tr > .x-menu-sub-td) {
+		position: relative; /* submenus are anchored to this td */
+		padding-right: .8em;
+	}
+
+	:where(.x-menu-tr > td) {
+		padding: .4em;
+	}
+
+	:where(.x-menu-tr > td:first-child) {
+		padding-left: .9em;
+	}
+
+	:where(.x-menu-separator) {
+		height: 1em;
+	}
+
+	:where(.x-menu-heading) {
+		padding-left: 1em;
+		font-weight: bold;
+		color: var(--x-fg-disabled);
+		cursor: default;
+		padding-top   : .5em;
+		padding-bottom: .5em;
+	}
+
+	:where(.x-menu-separator > hr) {
+		border: 0;
+		border-top: 1px solid var(--border);
+		margin-top     : .5em;
+		margin-bottom  : .5em;
+	}
+
+	:where(.x-menu-title-td) {
+		padding: 0;
+		width: 100%;
+		padding-left: 0;
+		overflow: hidden;
+		white-space: nowrap;
+	}
 
 }
 
-.x-menu, .x-menu:focus-within {
-	outline: 1px solid var(--x-border-light);
-	outline-offset: -1px;
-	box-shadow: var(--x-shadow-menu);
-}
+@layer state {
 
-.x-menu-tr > .x-menu-sub-td {
-	position: relative; /* submenus are anchored to this td */
-	padding-right: .8em;
-}
+	:where(.x-menu, .x-menu:focus-within) {
+		outline: 1px solid var(--border);
+		outline-offset: -1px;
+		box-shadow: var(--x-shadow-menu);
+	}
 
-.x-menu-tr.focused > :not(.x-menu-table) {
-	background-color: var(--x-bg-unfocused-selected);
-	color: var(--x-fg-unfocused-selected);
-}
+	:where(.x-menu-tr.focused > :not(.x-menu-table)) {
+		background-color: var(--x-bg-unfocused-selected);
+		color: var(--x-fg-unfocused-selected);
+	}
 
-.x-menu:focus-within .x-menu-tr.focused > :not(.x-menu-table) {
-	background-color: var(--x-bg-focused-selected);
-}
+	:where(.x-menu:focus-within .x-menu-tr.focused > :not(.x-menu-table)) {
+		background-color: var(--x-bg-focused-selected);
+	}
 
-.x-menu-tr > td {
-	padding: .4em;
-}
+	:where(.x-menu-tr.focused > td) {
+		cursor: default;
+	}
 
-.x-menu-tr > td:first-child {
-	padding-left: .9em;
-}
-
-.x-menu-separator {
-	height: 1em;
-}
-
-.x-menu-heading {
-	padding-left: 1em;
-	font-weight: bold;
-	color: var(--x-fg-disabled);
-	cursor: default;
-	padding-top   : .5em;
-	padding-bottom: .5em;
-}
-
-.x-menu-separator > hr {
-	border: 0;
-	border-top: 1px solid var(--x-border-light);
-	margin-top     : .5em;
-	margin-bottom  : .5em;
-}
-
-.x-menu-title-td {
-	padding: 0;
-	width: 100%;
-	padding-left: 0;
-	overflow: hidden;
-	white-space: nowrap;
-}
-
-.x-menu-tr.focused > td {
-	cursor: default;
 }
 
 /* widget placeholder ----------------------------------------------------- */
 
-.x-widget-placeholder {
-	display: grid;
-	justify-content: safe center;
-	align-content: center;
-	outline: 1px dashed var(--x-smoke);
-	outline-offset: -1px;
-}
+@layer base {
 
-.x-widget-placeholder-button {
-	margin: 1px;
-	padding: .1em;
-	min-width: 2em;
-	font-size: 80%;
-	border-radius: 0;
+	:where(.x-widget-placeholder) {
+		display: grid;
+		justify-content: safe center;
+		align-content: center;
+		outline: 1px dashed var(--x-smoke);
+		outline-offset: -1px;
+	}
+
+	:where(.x-widget-placeholder-button) {
+		margin: 1px;
+		padding: .1em;
+		min-width: 2em;
+		font-size: 80%;
+		border-radius: 0;
+	}
+
 }
 
 /* tabs widget ------------------------------------------------------------ */
 
-.x-tabs {
-	/* layout self */
-	flex: 1;
+@layer base {
 
-	/* layout content */
-	flex-flow: column;
-	min-height: 0;  /* don't let the content make the x-tabs itself overflow */
+	:where(.x-tabs) {
+		/* layout self */
+		flex: 1;
+
+		/* layout content */
+		flex-flow: column;
+		min-height: 0;  /* don't let the content make the x-tabs itself overflow */
+	}
+
+	:where(.x-tabs-header) {
+
+		/* layouting */
+		display: flex;
+		position: relative;
+
+		/* styling */
+		border: 0px solid var(--border);
+		background-color: var(--bg1);
+
+	}
+
+	:where(.x-tabs-tabs) {
+		flex: 1;
+		display: flex;
+		position: relative;
+	}
+
+	:where(.x-tabs-fixed-header) {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+	}
+
+	:where(.x-tabs[tabs_side=left ]),
+	:where(.x-tabs[tabs_side=right]) { flex-flow: row; }
+
+	:where(.x-tabs[tabs_side=left ] > .x-tabs-header),
+	:where(.x-tabs[tabs_side=right] > .x-tabs-header),
+	:where(.x-tabs[tabs_side=left ] > .x-tabs-header > .x-tabs-tabs),
+	:where(.x-tabs[tabs_side=right] > .x-tabs-header > .x-tabs-tabs) { flex-flow: column; }
+
+	:where(.x-tabs[tabs_side=bottom] > .x-tabs-header),
+	:where(.x-tabs[tabs_side=right ] > .x-tabs-header) { order: 1; }
+
+	:where(.x-tabs[tabs_side=top   ] > .x-tabs-header) { border-bottom-width : 1px; }
+	:where(.x-tabs[tabs_side=bottom] > .x-tabs-header) { border-top-width    : 1px; }
+	:where(.x-tabs[tabs_side=left  ] > .x-tabs-header) { border-right-width  : 1px; }
+	:where(.x-tabs[tabs_side=right ] > .x-tabs-header) { border-left-width   : 1px; }
+
+	:where(.x-tabs-content) {
+		min-height: 0;  /* don't let the content make the x-tabs itself overflow */
+		overflow: auto;
+		flex: 1 0 0;    /* stretch to fill container but not more */
+	}
+
+	:where(.x-tabs-tab) {
+		position: relative;
+		line-height: 1.25;
+		color: var(--x-fg-label);
+		cursor: default;
+		display: flex;
+	}
+
+	:where(.x-tabs-title) {
+		padding: .5em .8em .3em .8em;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		max-width: 10em;
+		user-select: none;
+	}
+
+	:where(.x-tabs-add-button) {
+		padding: .25em 1em;
+		display: flex;
+		align-items: center;
+	}
+
+	:where(.x-tabs-add-button)::before {
+		font-size: 80%;
+	}
+
+	:where(.x-tabs-xbutton) {
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		font-size: 70%;
+		color: var(--x-fg-disabled);
+		cursor: default;
+	}
+
+	:where(.x-tabs-selection-bar) {
+		position: absolute;
+		background-color: var(--x-bg-tabs-selection-bar);
+		z-index: 2;  /* selection-bar = 2, moving-tab = 1 */
+		width: 2px;
+		height: 2px;
+	}
+
 }
 
-.x-tabs-header {
+@layer state {
 
-	/* layouting */
-	display: flex;
-	position: relative;
+	:where(.x-tabs-xbutton:hover) {
+		color: inherit;
+	}
 
-	/* styling */
-	border: 0px solid var(--x-border-light);
-	background-color: var(--x-faint);
+	:where(.x-tabs:not(.moving) > .x-tabs-header > .x-tabs-selection-bar) {
+		transition: width .15s, height .15s, left .15s, top .15s;
+	}
 
-}
+	:where(.x-tabs-tab.moving) {
+		z-index: 1;  /* selection-bar = 2, moving-tab = 1 */
+		opacity: .7;
+	}
 
-.x-tabs-tabs {
-	flex: 1;
-	display: flex;
-	position: relative;
-}
+	:where(.x-tabs.moving > .x-tabs-header > .x-tabs-tab:not(.moving)) {
+		transition: left .1s, top .1s;
+	}
 
-x-tabs-fixed-header {
-	flex: 1;
-	display: flex;
-	align-items: center;
-	justify-content: flex-end;
-}
+	:where(.x-tabs-tab.selected) {
+		color: inherit;
+	}
 
-.x-tabs[tabs_side=left ],
-.x-tabs[tabs_side=right] { flex-flow: row; }
+	:where(.x-tabs-tab:focus) {
+		outline: none;
+	}
 
-.x-tabs[tabs_side=left ] > .x-tabs-header,
-.x-tabs[tabs_side=right] > .x-tabs-header,
-.x-tabs[tabs_side=left ] > .x-tabs-header > .x-tabs-tabs,
-.x-tabs[tabs_side=right] > .x-tabs-header > .x-tabs-tabs { flex-flow: column; }
+	:where(.x-tabs-tab:is(:hover, :focus))	{
+		background-color: var(--bg1);
+	}
 
-.x-tabs[tabs_side=bottom] > .x-tabs-header,
-.x-tabs[tabs_side=right ] > .x-tabs-header { order: 1; }
-
-.x-tabs[tabs_side=top   ] > .x-tabs-header { border-bottom-width : 1px; }
-.x-tabs[tabs_side=bottom] > .x-tabs-header { border-top-width    : 1px; }
-.x-tabs[tabs_side=left  ] > .x-tabs-header { border-right-width  : 1px; }
-.x-tabs[tabs_side=right ] > .x-tabs-header { border-left-width   : 1px; }
-
-.x-tabs-content {
-	min-height: 0;  /* don't let the content make the x-tabs itself overflow */
-	overflow: auto;
-	flex: 1 0 0;    /* stretch to fill container but not more */
-}
-
-.x-tabs-tab {
-	position: relative;
-	line-height: 1.25;
-	color: var(--x-fg-label);
-	cursor: default;
-	display: flex;
-}
-
-.x-tabs-title {
-	padding: .5em .8em .3em .8em;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-	overflow: hidden;
-	max-width: 10em;
-	user-select: none;
-}
-
-.x-tabs-add-button {
-	padding: .25em 1em;
-	display: flex;
-	align-items: center;
-}
-
-.x-tabs-add-button::before {
-	font-size: 80%;
-}
-
-.x-tabs-xbutton {
-	position: absolute;
-	top: 2px;
-	right: 2px;
-	font-size: 70%;
-	color: var(--x-fg-disabled);
-	cursor: default;
-}
-
-.x-tabs-xbutton:hover {
-	color: inherit;
-}
-
-.x-tabs-selection-bar {
-	position: absolute;
-	background-color: var(--x-bg-tabs-selection-bar);
-	z-index: 2;  /* selection-bar = 2, moving-tab = 1 */
-	width: 2px;
-	height: 2px;
-}
-
-.x-tabs:not(.moving) > .x-tabs-header > .x-tabs-selection-bar {
-	transition: width .15s, height .15s, left .15s, top .15s;
-}
-
-.x-tabs-tab.moving {
-	z-index: 1;  /* selection-bar = 2, moving-tab = 1 */
-	opacity: .7;
-}
-
-.x-tabs.moving > .x-tabs-header > .x-tabs-tabs > .x-tabs-tab:not(.moving) {
-	transition: left .1s, top .1s;
-}
-
-.x-tabs-tab.selected {
-	color: inherit;
-}
-
-.x-tabs-tab:focus {
-	outline: none;
-}
-
-.x-tabs-tab:hover,
-.x-tabs-tab:focus {
-	background-color: var(--x-faint);
 }
 
 /* split ------------------------------------------------------------------ */
 
-.x-split {
-	/* layout self */
-	flex: 1;
-}
-.x-split[orientation=horizontal] { flex-direction: row; }
-.x-split[orientation=vertical] { flex-direction: column; }
+@layer base {
 
-.x-split[orientation=horizontal].resize { cursor: ew-resize; }
-.x-split[orientation=vertical].resize { cursor: ns-resize; }
+	:where(.x-split) {
+		flex: 1;
+	}
+	:where(.x-split[orientation=horizontal]) { flex-direction: row; }
+	:where(.x-split[orientation=vertical  ]) { flex-direction: column; }
 
-.x-split-pane {
-}
+	:where(.x-split-pane-auto) {
+		flex-grow: 1;  /* expand-to-fit container */
+		flex-basis: 0; /* completely obey fixed pane size */
+	}
 
-.x-split-pane-auto {
-	flex-grow: 1;  /* expand-to-fit container */
-	flex-basis: 0; /* completely obey fixed pane size */
-}
+	/* sizer */
 
-.x-split[orientation=horizontal] > .x-split-pane.collapsed {
-	min-width: 0 !important;
-	width: 0 !important;
-}
-.x-split[orientation=vertical] > .x-split-pane.collapsed {
-	min-height: 0 !important;
-	height: 0 !important;
-}
+	:where(.x-split-sizer) {
 
-/* sizer */
+		/* layouting */
+		display: flex;
+		align-items: center;
+		justify-content: center;
 
-.x-split-sizer {
+		/* styling */
+		background-color: var(--border);
 
-	/* layouting */
-	display: flex;
-	align-items: center;
-	justify-content: center;
-
-	/* styling */
-	background-color: var(--x-border-light);
+	}
+	:where(.x-split[orientation=vertical  ] > .x-split-sizer) { flex-direction: row; height: 1px; }
+	:where(.x-split[orientation=horizontal] > .x-split-sizer) { flex-direction: row; width : 1px; }
 
 }
-.x-split[orientation=vertical]   > .x-split-sizer { flex-direction: row; height: 1px; }
-.x-split[orientation=horizontal] > .x-split-sizer { flex-direction: row; width: 1px; }
 
-.x-split.resize > .x-split-sizer {
-	background-color: var(--x-border-light-hover);
-	transition: background-color .2s;
-}
+@layer state {
 
-/* grip */
+	:where(.x-split[orientation=horizontal].resize) { cursor: ew-resize; }
+	:where(.x-split[orientation=vertical  ].resize) { cursor: ns-resize; }
 
-.x-split.collapsed > .x-split-sizer::before {
-	content: '';
-	box-sizing: border-box;
-	border: 1px var(--x-fg-disabled);
-}
+	:where(.x-split[orientation=horizontal] > .x-split-pane.collapsed) {
+		min-width: 0 !important;
+		width: 0 !important;
+	}
+	:where(.x-split[orientation=vertical  ] > .x-split-pane.collapsed) {
+		min-height: 0 !important;
+		height: 0 !important;
+	}
 
-.x-split.collapsed > .x-split-sizer::before {
-	position: fixed; /* show over contents */
-}
-.x-split[orientation=horizontal].collapsed > .x-split-sizer::before {
-	min-width: 4px;
-	height: 24px;
-	border-style: none solid;
-}
-.x-split[orientation=vertical].collapsed > .x-split-sizer::before {
-	min-height: 4px;
-	width: 24px;
-	border-style: solid none;
-}
+	:where(.x-split.resize > .x-split-sizer) {
+		background-color: var(--border-hover);
+		transition: background-color .2s;
+	}
 
-/* cssgrid ---------------------------------------------------------------- */
+	/* grip */
 
-.x-cssgrid {
+	:where(.x-split.collapsed > .x-split-sizer)::before {
+		content: '';
+		box-sizing: border-box;
+		border: 1px var(--x-fg-disabled);
+	}
 
-	/* layout self */
-	margin: 0;
-	border: 0;
+	:where(.x-split.collapsed > .x-split-sizer)::before {
+		position: fixed; /* show over contents */
+	}
 
-	/* layout items */
-	display: grid;
-	align-content: start;
-	align-items: start;
-	overflow: hidden;
-}
+	:where(.x-split[orientation=horizontal].collapsed > .x-split-sizer)::before {
+		min-width: 4px;
+		height: 24px;
+		border-style: none solid;
+	}
+	:where(.x-split[orientation=vertical  ].collapsed > .x-split-sizer)::before {
+		min-height: 4px;
+		width: 24px;
+		border-style: solid none;
+	}
 
-/* guides */
-
-.x-cssgrid-guide {
-	position: absolute;
-	align-self: stretch;
-	justify-self: stretch;
-	display: grid;
-	overflow: visible;
-	z-index: 1; /* span = 3, overlay = 2, guide = 1 */
-}
-
-.x-cssgrid-guide[axis=x] { left: 0; width : 0; height: 100%; justify-self: end; border-right-width : 1px; }
-.x-cssgrid-guide[axis=y] { top : 0; height: 0; width : 100%; align-self  : end; border-bottom-width: 1px; }
-
-/* guide tips */
-
-.x-cssgrid-tip {
-	grid-area: 1 / 1;
-	width: 0;
-	border-color: #04a;
-}
-
-.x-cssgrid-tip:hover {
-	border-color: #28f;
-}
-
-.x-cssgrid-tip[axis=x] {
-	align-self: start;
-	cursor: ew-resize;
-	transform: scale(1, 2);
-}
-
-.x-cssgrid-tip[axis=y] {
-	cursor: ns-resize;
-	transform: scale(2, 1);
-}
-
-/* guide labels */
-
-.x-cssgrid-label {
-	grid-area: 1 / 1;
-	justify-self: start;
-	align-self: start;
-	font-size: 75%;
-	color: #333;
-	cursor: pointer;
-}
-
-.x-cssgrid-label[axis=x] { margin: 3px -6px; transform: translate(-100%, 0); }
-.x-cssgrid-label[axis=y] { margin: -3px 5px; transform: translate(0, -100%); }
-
-/* span outlines */
-
-.x-cssgrid-span {
-	justify-self: stretch;
-	align-self: stretch;
-	border: 1px dotted var(--x-fg-disabled);
-	pointer-events: none;
-	position: relative;
-	z-index: 3; /* span = 3, overlay = 2, guide = 1 */
-}
-
-.x-cssgrid-span-handle {
-	pointer-events: all;
-	position: absolute;
-	width : 14px;
-	height: 14px;
-	padding: 5px;
-	background-color: #888;
-	background-clip: content-box;
-}
-
-.x-cssgrid-span-handle[side=top   ] { cursor: ns-resize; margin-top   : -5px; margin-left  : -7px; left: 50%; }
-.x-cssgrid-span-handle[side=bottom] { cursor: ns-resize; margin-bottom: -7px; margin-left  : -7px; left: 50%; bottom: 0; }
-.x-cssgrid-span-handle[side=left  ] { cursor: ew-resize; margin-left  : -6px; margin-top   : -7px; top : 50%; }
-.x-cssgrid-span-handle[side=right ] { cursor: ew-resize; margin-right : -6px; margin-top   : -7px; top : 50%; right: 0; }
-
-/* item overlays */
-
-.x-cssgrid-item-overlay {
-	background-color: #00000011;
-	z-index: 2; /* span = 3, overlay = 2, guide = 1 */
-}
-
-.x-cssgrid-item-overlay.focused {
-	background-color: #0000ff11;
-}
-
-.x-cssgrid-item-ph {
-	/* enable this for debugging: */
-	border: 1px dashed #aaa;
-}
-
-.x-cssgrid-moving { cursor: move; }
-
-.x-cssgrid-span-move { border-color: #2a4; }
-.x-cssgrid-span-move > .x-cssgrid-span-handle { background-color: #2a4; }
-
-/* add button */
-
-.x-cssgrid-add-button {
-	position: absolute;
-	color: var(--x-fg-disabled);
 }
 
 /* form ------------------------------------------------------------------- */
 
-.x-form {
+@layer base {
 
-	/* layout items */
-	display: flex;
-	flex-flow: column;
-	align-content: start;
+	:where(.x-form) {
 
-	grid-gap: var(--x-border-width-item); /* works on both flex and grid */
-	/*
-	TODO: we'd like to use background as gap color (interstitial border).
-	background-color: var(--x-border-light);
-	*/
+		/* layout items */
+		display: flex;
+		flex-flow: column;
+		align-content: start;
 
-	/* this enables scrolling within children (it's like Harry Potter in here) */
-	overflow: auto;
-}
+		grid-gap: var(--x-border-width-item); /* works on both flex and grid */
+		/*
+		TODO: we'd like to use background as gap color (interstitial border).
+		background-color: var(--border);
+		*/
 
-.x-form[grid] {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-	align-items: start;
-}
+		/* this enables scrolling within children (it's like Harry Potter in here) */
+		overflow: auto;
+	}
 
-.x-form h1,
-.x-form h2,
-.x-form h3
-{
-	font-weight: normal;
-	margin-top: 1em;
-	margin-bottom: .2em;
-}
+	:where(.x-form[grid]) {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+		align-items: start;
+	}
 
-.x-form.compact {
-	grid-gap: 0;
-	font-size: 90%;
-}
+	:where(.x-form h1),
+	:where(.x-form h2),
+	:where(.x-form h3)
+	{
+		font-weight: normal;
+		margin-top: 1em;
+		margin-bottom: .2em;
+	}
 
-.x-form.compact > h1,
-.x-form.compact > h2,
-.x-form.compact > h3
-{
-	display: none;
-}
+	:where(.x-form.compact) {
+		grid-gap: 0;
+		font-size: 90%;
+	}
 
-.x-form.compact > .x-widget:not(.x-input),
-.x-form.compact > .x-input > .x-widget
-{
-	margin: 0;
-	border-radius: 0;
-	border-top-color  : rgb(0,0,0,0);
-	border-left-color : rgb(0,0,0,0);
-	border-right-color: rgb(0,0,0,0);
-}
+	:where(.x-form.compact > h1),
+	:where(.x-form.compact > h2),
+	:where(.x-form.compact > h3)
+	{
+		display: none;
+	}
 
-.x-form.compact > .x-widget:not(.x-input) > .x-focus-box,
-.x-form.compact > .x-input > .x-widget > .x-focus-box {
-	outline-offset: -2px;
+	:where(.x-form.compact > .x-widget:not(.x-input)),
+	:where(.x-form.compact > .x-input > .x-widget)
+	{
+		margin: 0;
+		border-radius: 0;
+		border-top-color  : rgb(0,0,0,0);
+		border-left-color : rgb(0,0,0,0);
+		border-right-color: rgb(0,0,0,0);
+	}
+
 }
 
 /* x-linear-form ----------------------------------------------------------
@@ -2351,1048 +2396,1123 @@ x-tabs-fixed-header {
 
 */
 
-.x-linear-form {
-	display: grid;
-	grid-template-columns: 2em 1fr;
-	align-items: first baseline;
-	grid-gap: .25em 0;
-}
+@layer base {
 
-.x-linear-form-filler {
-	/* hide filler or it screws baseline align of inputs with surrounding text */
-	display: none;
-}
+	:where(.x-linear-form) {
+		display: grid;
+		grid-template-columns: 2em 1fr;
+		align-items: first baseline;
+		grid-gap: .25em 0;
+	}
 
-.x-linear-form .x-linear-form-filler {
-	display: block;
+	:where(.x-linear-form-filler) {
+		/* hide filler or it screws baseline align of inputs with surrounding text */
+		display: none;
+	}
+
+	:where(.x-linear-form .x-linear-form-filler) {
+		display: block;
+	}
+
 }
 
 /* toaster ---------------------------------------------------------------- */
 
-.x-toaster {
-	display: none;  /* don't mess up the layout */
-}
+@layer base {
 
-.x-toaster-message {
-	opacity: 1;
-	transition: opacity .2s, top .2s;
+	:where(.x-toaster) {
+		display: none;  /* don't mess up the layout */
+	}
+
+	:where(.x-toaster-message) {
+		opacity: 1;
+		transition: opacity .2s, top .2s;
+	}
+
 }
 
 /* dialog ----------------------------------------------------------------- */
 
-.x-dialog {
-	display: flex;
-	flex-flow: column;
-	margin: 20px;
-	padding: 1em 1em;
-	color: var(--x-fg);
-	background-color: var(--x-bg-popup);
-	border: 0;
-	border-radius: var(--x-border-radius-window);
-	box-shadow: var(--x-shadow-dialog);
-}
+@layer base {
 
-.x-dialog-header,
-.x-dialog-footer,
-.x-dialog-content {
-	display: flex;
-	padding: 1em 0;
-}
+	:where(.x-dialog) {
+		display: flex;
+		flex-flow: column;
+		margin: 20px;
+		padding: 1em 1em;
+		color: var(--fg);
+		background-color: var(--x-bg-popup);
+		border: 0;
+		border-radius: var(--x-border-radius-window);
+		box-shadow: var(--x-shadow-dialog);
+	}
 
-.x-dialog-heading {
-	color: var(--x-fg-disabled);
-	font-size: 200%;
-	font-weight: bold;
-	margin: .25em 0;
-}
+	.x-dialog-header,
+	.x-dialog-footer,
+	.x-dialog-content
+	{
+		display: flex;
+		padding: 1em 0;
+	}
 
-.x-dialog-xbutton {
-	position: absolute;
-	right: 8px;
-	top: 0px;
-	border-bottom-right-radius: var(--x-border-radius-button);
-	border-bottom-left-radius : var(--x-border-radius-button);
-	border: 1px solid var(--x-border-light);
-	border-top: 0;
-	width: 52px;
-	height: 18px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	color: var(--x-fg-button);
-	-webkit-text-stroke: 1px var(--x-stroke-dialog-xbutton);
-	cursor: pointer;
-}
+	.x-dialog-heading {
+		color: var(--x-fg-disabled);
+		font-size: 200%;
+		font-weight: bold;
+		margin: .25em 0;
+	}
 
-.x-dialog-xbutton:hover {
-	background-color: var(--x-bg-button-hover);
-}
+	.x-dialog-xbutton {
+		position: absolute;
+		right: 8px;
+		top: 0px;
+		border-bottom-right-radius: var(--x-border-radius-button);
+		border-bottom-left-radius : var(--x-border-radius-button);
+		border: 1px solid var(--border);
+		border-top: 0;
+		width: 52px;
+		height: 18px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--fg-button);
+		-webkit-text-stroke: 1px var(--x-stroke-dialog-xbutton);
+		cursor: pointer;
+	}
 
-.x-dialog-xbutton.active {
-	background-color: var(--x-bg-button-pressed);
-}
+	.x-dialog-xbutton:hover {
+		background-color: var(--bg-button-hover);
+	}
 
-.x-dialog-content {
-	flex: auto;
-}
+	.x-dialog-xbutton.active {
+		background-color: var(--bg-button-pressed);
+	}
 
-.x-dialog-footer {
-	justify-content: flex-end;
+	.x-dialog-content {
+		flex: auto;
+	}
+
+	.x-dialog-footer {
+		justify-content: flex-end;
+	}
+
 }
 
 /* toolbox ---------------------------------------------------------------- */
 
-.x-toolbox {
+@layer base {
 
-	/* layout self */
-	z-index: 1; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
+	.x-toolbox {
 
-	/* layout content */
-	display: flex;
-	flex-flow: column;
-	overflow: auto;
+		/* layout self */
+		z-index: 1; /* menu = 4, picker = 3, tooltip = 2, toolbox = 1 */
 
-	/* styling */
-	background-color: var(--x-bg-popup);
+		/* layout content */
+		display: flex;
+		flex-flow: column;
+		overflow: auto;
 
-	/* pinning */
-	opacity: .2;
-	transition: opacity .5s;
+		/* styling */
+		background-color: var(--x-bg-popup);
 
-	border: 0;
-	border-radius: var(--x-border-radius-window);
-	box-shadow: var(--x-shadow-toolbox);
+		/* pinning */
+		opacity: .2;
+		transition: opacity .5s;
+
+		border: 0;
+		border-radius: var(--x-border-radius-window);
+		box-shadow: var(--x-shadow-toolbox);
+	}
+
+	.x-toolbox[pinned],
+	.x-toolbox:hover {
+		opacity: 1;
+		transition: opacity 0s;
+	}
+
+	.x-toolbox-titlebar {
+		display: flex;
+		align-items: baseline;
+		font-weight: bold;
+		font-size: 12px;
+		line-height: 2;
+		background-color: var(--x-bg-toolbox-titlebar);
+		cursor: move;
+		padding: 0 .5em;
+	}
+
+	:where(.x-toolbox):focus-within > .x-toolbox-titlebar {
+		background-color: var(--x-bg-toolbox-titlebar-focused);
+	}
+
+	.x-toolbox-title {
+		flex: auto;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		pointer-events: none;
+	}
+
+	.x-toolbox-button {
+		color: var(--x-fg-disabled);
+		flex: 0;
+		padding: .25em .5em;
+		cursor: default;
+	}
+
+	.x-toolbox-button-pin {
+		font-size: 85%;
+	}
+
+	.x-toolbox[pinned] > :where(.x-toolbox-titlebar > .x-toolbox-button-pin) {
+		color: var(--x-fg-label);
+	}
+
+	.x-toolbox-button-close:hover {
+		color: var(--fg);
+	}
+
+	.x-toolbox-content {
+		flex: 1;
+		min-width : 0;    /* content can't overflow the toolbox */
+		min-height: 0;    /* content can't overflow the toolbox */
+		overflow: auto;
+		display: grid;
+	}
+
+	/* toolbox resizing by dragging the margins */
+
+	.x-toolbox-resize-overlay {
+		position: absolute;
+		left: 0; top: 0; right: 0; bottom: 0;
+		clip-path: polygon(
+			0 0, 0 100%, 100% 100%, 100% 0, 0 0, /* outer rect, counter-clockwise */
+			5px 5px, calc(100% - 5px) 5px, calc(100% - 5px) calc(100% - 5px), 5px calc(100% - 5px), 5px 5px /* inner rect, clockwise */
+		);
+	}
+
+	.x-toolbox-resize-overlay[hit_side=top      ], .x-toolbox-resize-overlay[hit_side=bottom      ] { cursor: ns-resize  ; }
+	.x-toolbox-resize-overlay[hit_side=left     ], .x-toolbox-resize-overlay[hit_side=right       ] { cursor: ew-resize  ; }
+	.x-toolbox-resize-overlay[hit_side=top_left ], .x-toolbox-resize-overlay[hit_side=bottom_right] { cursor: nwse-resize; }
+	.x-toolbox-resize-overlay[hit_side=top_right], .x-toolbox-resize-overlay[hit_side=bottom_left ] { cursor: nesw-resize; }
+
 }
-
-.x-toolbox[pinned],
-.x-toolbox:hover {
-	opacity: 1;
-	transition: opacity 0s;
-}
-
-.x-toolbox-titlebar {
-	display: flex;
-	align-items: baseline;
-	font-weight: bold;
-	font-size: 12px;
-	line-height: 2;
-	background-color: var(--x-bg-toolbox-titlebar);
-	cursor: move;
-	padding: 0 .5em;
-}
-
-.x-toolbox:focus-within > .x-toolbox-titlebar {
-	background-color: var(--x-bg-toolbox-titlebar-focused);
-}
-
-.x-toolbox-title {
-	flex: auto;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	pointer-events: none;
-}
-
-.x-toolbox-button {
-	color: var(--x-fg-disabled);
-	flex: 0;
-	padding: .25em .5em;
-	cursor: default;
-}
-
-.x-toolbox-button-pin {
-	font-size: 85%;
-}
-
-.x-toolbox[pinned] > .x-toolbox-titlebar > .x-toolbox-button-pin {
-	color: var(--x-fg-label);
-}
-
-.x-toolbox-button-close:hover {
-	color: var(--x-fg);
-}
-
-.x-toolbox-content {
-	flex: 1;
-	min-width : 0;    /* content can't overflow the toolbox */
-	min-height: 0;    /* content can't overflow the toolbox */
-	overflow: auto;
-	display: grid;
-}
-
-/* toolbox resizing by dragging the margins */
-
-.x-toolbox-resize-overlay {
-	position: absolute;
-	left: 0; top: 0; right: 0; bottom: 0;
-	clip-path: polygon(
-		0 0, 0 100%, 100% 100%, 100% 0, 0 0, /* outer rect, counter-clockwise */
-		5px 5px, calc(100% - 5px) 5px, calc(100% - 5px) calc(100% - 5px), 5px calc(100% - 5px), 5px 5px /* inner rect, clockwise */
-	);
-}
-
-.x-toolbox-resize-overlay[hit_side=top      ], .x-toolbox-resize-overlay[hit_side=bottom      ] { cursor: ns-resize  ; }
-.x-toolbox-resize-overlay[hit_side=left     ], .x-toolbox-resize-overlay[hit_side=right       ] { cursor: ew-resize  ; }
-.x-toolbox-resize-overlay[hit_side=top_left ], .x-toolbox-resize-overlay[hit_side=bottom_right] { cursor: nwse-resize; }
-.x-toolbox-resize-overlay[hit_side=top_right], .x-toolbox-resize-overlay[hit_side=bottom_left ] { cursor: nesw-resize; }
 
 /* items switcher --------------------------------------------------------- */
 
-.x-widget-switcher {
-	display: grid;
+@layer base {
+
+	:where(.x-widget-switcher) {
+		display: grid;
+	}
+
 }
 
 /* slides ----------------------------------------------------------------- */
 
-.x-slides {
-	margin: 0;
-	border: 0;
-	display: grid;
-}
+@layer base {
 
-.x-slide {
-	grid-column-start: 1;
-	grid-row-start: 1;
+	:where(.x-slides) {
+		margin: 0;
+		border: 0;
+		display: grid;
+	}
 
-	opacity: 0;
-	transition: opacity .5s;
-	visibility: hidden;
-}
+	.x-slide {
+		grid-column-start: 1;
+		grid-row-start: 1;
 
-.x-slides > .x-ct > . {
-	grid-column-start: 1;
-	grid-row-start: 1;
-}
+		opacity: 0;
+		transition: opacity .5s;
+		visibility: hidden;
+	}
 
-.x-slide:not(.x-slide-selected),
-.x-slide:not(.x-slide-selected) *
-{
-	pointer-events: none !important;
-}
+	:where(.x-slides) > .x-ct > . {
+		grid-column-start: 1;
+		grid-row-start: 1;
+	}
 
-.x-slide-selected {
-	visibility: visible;
-	opacity: 1;
-	pointer-events: all;
-	transition: opacity .5s;
+	.x-slide:not(.x-slide-selected),
+	.x-slide:not(.x-slide-selected) *
+	{
+		pointer-events: none !important;
+	}
+
+	.x-slide-selected {
+		visibility: visible;
+		opacity: 1;
+		pointer-events: all;
+		transition: opacity .5s;
+	}
+
 }
 
 /* markdown --------------------------------------------------------------- */
 
-.x-md {
-	border: 0;
-	margin: 0;
-	flex-direction: column;
+@layer base {
+
+	:where(.x-md) {
+		border: 0;
+		margin: 0;
+		flex-direction: column;
+	}
+
 }
 
 /* x-nav ------------------------------------------------------------------ */
 
-.x-loading-overlay {
-	padding: .5em;
-}
+@layer base {
 
-.x-loading-overlay.error {
-	background-color: var(--x-smoke);
-}
+	:where(.x-loading-overlay) {
+		padding: .5em;
+	}
 
-.x-loading-overlay-message {
-	padding: 1em 1em;
-	background-color: var(--x-bg-popup);
-	box-shadow: var(--x-shadow-tooltip);
-}
+	:where(.x-loading-overlay.error) {
+		background-color: var(--x-smoke);
+	}
 
-.x-loading-overlay-message .x-button {
-	line-height: 1;
-}
+	:where(.x-loading-overlay-message) {
+		padding: 1em 1em;
+		background-color: var(--x-bg-popup);
+		box-shadow: var(--x-shadow-tooltip);
+	}
 
-.x-loading-overlay-detail {
-	font-family: monospace;
-	margin: 1em 0;
-}
+	:where(.x-loading-overlay-message .x-button) {
+		line-height: 1;
+	}
 
-.x-loading-error-icon {
-	margin: 0 .5em;
-	color: var(--x-fg-error);
+	:where(.x-loading-overlay-detail) {
+		font-family: monospace;
+		margin: 1em 0;
+	}
+
+	:where(.x-loading-error-icon) {
+		margin: 0 .5em;
+		color: var(--x-fg-error);
+	}
+
 }
 
 /* grid ------------------------------------------------------------------- */
 
-.x-grid {
-	/* layout self */
-	flex: 1;
-	/* layout content */
-	flex-flow: column;
-	overflow: hidden;          /* hide header overflow */
-	cursor: default;           /* don't show caret over text */
+@layer base {
+
+	:where(.x-grid) {
+		/* layout self */
+		flex: 1;
+		/* layout content */
+		flex-flow: column;
+		overflow: hidden;          /* hide header overflow */
+		cursor: default;           /* don't show caret over text */
+	}
+
+	:where(.x-vgrid) {
+		flex-flow: row;
+	}
+
+	:where(.x-vgrid .x-grid-action-band) {
+		flex-flow: column;
+	}
+
+	:where(.x-vgrid .x-grid-cells-view) {
+		width: 0; /* CSS people are hopeless */
+	}
+
+	/* grid header */
+
+	:where(.x-grid-header) {
+		position: relative;        /* make movable for scrolling horizontally */
+		border-width: 0;
+		border-color: var(--border);
+		border-style: solid;
+	}
+
+	:where(.x-grid:not(.x-vgrid) > .x-grid-header) {
+		border-bottom-width: 1px;
+	}
+
+	:where(.x-vgrid > .x-grid-header) {
+		border-right-width: 1px;
+	}
+
+	.x-grid-header-canvas {
+		position: absolute;
+	}
+
+	:where(.x-vgrid > .x-grid-header) {
+		border-bottom-width: 0;
+	}
+
+	/* grid cells: grid > view > ct > (cells, editor) > cell */
+
+	:where(.x-grid-cells-view) {
+		/* layout self */
+		flex: 1 0;                 /* stretch to fill container but not more */
+		min-height: 0;
+		/* layout content */
+		display: grid;
+		overflow-x: auto;
+		overflow-y: auto;
+		position: relative;        /* anchor rows div */
+	}
+
+	/*
+		Fix the damn Chrome bug with custom-drawn scrollbars !!
+		50px has the nice side effect of gradually hiding the header when the grid
+		height gets too small.
+	*/
+	:where(.x-grid-cells-view) {
+		flex-basis: 50px;
+	}
+
+	:where(.x-grid[auto_cols_w] > .x-grid-cells-view) {
+		overflow-y: scroll;      /* avoid col resizing based on row count */
+	}
+
+	:where(.x-grid[auto_h] > .x-grid-cells-view) {
+		overflow-y: hidden;      /* grid grows to fit contents, so no need for scrollbars */
+	}
+
+	:where(.x-grid-cells) {
+		grid-row-start: 1;
+		grid-column-start: 1;
+		overflow: hidden;          /* hide surplus bottom rows */
+		position: relative;        /* activates `overflow: hidden` on abs. pos. child */
+	}
+
+	:where(.x-grid-cells-canvas) {
+		position: absolute;        /* keep at y=0 while scrolling */
+	}
+
+	/* grid editing */
+
+	:where(.x-grid-error) {
+		position: absolute;
+	}
+
+	/* load/save progress bar */
+
+	:where(.x-grid-progress-bar) {
+		position: absolute;
+		top: -2px;
+		width: 0%;
+		height: 2px;
+		pointer-events: none;
+	}
+
+	:where(.x-grid.loading > .x-grid-progress-bar) {
+		background-color: green;
+	}
+
+	/* grid action band */
+
+	:where(.x-grid-action-band) {
+		border-top: 1px solid var(--border);
+		background-color: var(----bg);
+	}
+
+	:where(.x-grid-action-band-reload-button) {
+		font-size: 90%;
+		color: var(--x-fg-label);
+	}
+
+	:where(.x-grid-action-band-reload-button > .x-button-icon) {
+		padding-top: .2em;
+	}
+
+	:where(.x-grid-action-band-info) {
+		display: flex;
+		align-items: center;
+		font-size: 95%;
+		color: var(--x-fg-label);
+		margin-left: .5em;
+		white-space: pre;
+	}
+
 }
 
-.x-vgrid {
-	flex-flow: row;
+@layer state {
+
+	/* grid col moving */
+
+	:where(.x-grid.col-move) {
+		cursor: pointer;
+	}
+
+	:where(.x-grid.col-moving) {
+		cursor: grabbing;
+	}
+
+	/* grid col resizing */
+
+	/* NOTE: `col-resize` cursor is almost invisible on a light background on Windows 7 */
+	:where(.x-grid:is(.col-resize, .header-resize)) {
+		cursor: ew-resize;
+	}
+
+	:where(.x-grid-resize-guides) {
+		position: absolute;
+		top: 0;
+	}
+
 }
 
-.x-vgrid > .x-grid-action-band {
-	flex-flow: column;
-}
+@layer role {
 
-.x-vgrid > .x-grid-cells-view {
-	width: 0; /* CSS people are hopeless */
-}
+	/* grid editors */
 
-/* grid header */
+	:where(.x-widget.grid-editor) {
 
-.x-grid-header {
-	position: relative;        /* make movable for scrolling horizontally */
-	border-width: 0;
-	border-color: var(--x-border-light);
-	border-style: solid;
-}
+		/* layout self */
+		position: absolute;
+		width: min-content;
+		margin: 0;
 
-.x-grid:not(.x-vgrid) > .x-grid-header {
-	border-bottom-width: 1px;
-}
+		/* style self */
+		font-size: inherit;
+		font-family: inherit;
+	}
 
-.x-grid.x-vgrid > .x-grid-header {
-	border-right-width: 1px;
-}
+	:where(.grid-editor > .x-focus-box) {
+		border-radius: 0;
+		border: 0;
+		/* add border width, since we removed the border */
+		padding-top: calc(
+			var(--x-border-width-item) +
+			var(--x-padding-y-input)
+		);
+		background-color: var(--x-bg-grid-editor);
+	}
 
-.x-grid-header-canvas {
-	position: absolute;
-}
+	:where(.grid-editor > .x-focus-box > .x-editbox-input) {
+		line-height: var(--x-grid-cell-line-height);
+	}
 
-.x-vgrid > .x-grid-header {
-	border-bottom-width: 0;
-}
+	:where(.grid-editor > .x-focus-box),
+	:where(.grid-editor.open:not(.widget-selected) > .x-focus-box),
+	:where(.grid-editor:focus-within:not(.widget-selected) > .x-focus-box)
+	{
+		box-shadow: inset 2px 2px 6px -2px rgba(0,0,0,0.75);
+		outline: none;
+	}
 
-/* grid cells: grid > view > ct > (cells, editor) > cell */
+	/* grid as picker */
 
-.x-grid-cells-view {
-	/* layout self */
-	flex: 1 0;                 /* stretch to fill container but not more */
-	min-height: 0;
-	/* layout content */
-	display: grid;
-	overflow-x: auto;
-	overflow-y: auto;
-	position: relative;        /* anchor rows div */
-}
+	:where(.x-widget.x-grid.picker) {
+		min-height: 40px;
+		max-height: 300px;
+		max-width: 800px;
+		resize: both;
+	}
 
-/*
-	Fix the damn Chrome bug with custom-drawn scrollbars !!
-	50px has the nice side effect of gradually hiding the header when the grid
-	height gets too small.
-*/
-.x-grid-cells-view {
-	flex-basis: 50px;
-}
+	:where(.x-widget.x-grid.picker > .x-grid-cells-view) {
+		overflow-y: scroll; /* show vert-scrollbars always when a picker */
+	}
 
-.x-grid[auto_cols_w] > .x-grid-cells-view {
-	overflow-y: scroll;      /* avoid col resizing based on row count */
-}
+	/* TODO: grid filter dropdowns
 
-.x-grid[auto_h] > .x-grid-cells-view {
-	overflow-y: hidden;      /* grid grows to fit contents, so no need for scrollbars */
-}
+	.x-widget.x-grid-filter-dropdown {
+		font-size: 85%;
+		bottom: 0;
+		left: 0;
 
-.x-grid-cells {
-	grid-row-start: 1;
-	grid-column-start: 1;
-	overflow: hidden;          /* hide surplus bottom rows */
-	position: relative;        /* activates `overflow: hidden` on abs. pos. child */
-}
+		position: absolute;
+		min-width: 0;
+		border: 0;
+		margin: 0;
+		border-radius: 0;
 
-.x-grid-cells-canvas {
-	position: absolute;        /* keep at y=0 while scrolling */
-}
+		color: #36f;
+	}
 
-/* grid col moving */
+	.x-dropdown.x-grid-filter-dropdown.open {
+		box-shadow: none;
+	}
 
-.x-grid.col-move {
-	cursor: pointer;
-}
+	.x-grid-filter-dropdown-grid {
+		font-size: 90%;
+	}
 
-.x-grid.col-moving {
-	cursor: grabbing;
-}
+	*/
 
-/* grid col resizing */
+	/* grid widget editing */
 
-/* NOTE: `col-resize` cursor is almost invisible on a light background on Windows 7 */
-.x-grid.col-resize,
-.x-grid.header-resize
-{
-	cursor: ew-resize;
-}
+	:where(.x-grid.widget-editing) {
+		outline: none; /* many edit modes, each marked in its own ways */
+	}
 
-.x-grid-resize-guides {
-	position: absolute;
-	top: 0;
-}
+	:where(.x-grid-cells-view.editing > .x-grid-cells) {
+		display: none;
+	}
 
-/* grid editing */
-
-.x-grid-error {
-	position: absolute;
-}
-
-.x-widget.grid-editor {
-
-	/* layout self */
-	position: absolute;
-	width: min-content;
-	margin: 0;
-
-	/* style self */
-	font-size: inherit;
-	font-family: inherit;
-}
-
-.x-widget.grid-editor > .x-focus-box {
-	border-radius: 0;
-	border: 0;
-	/* add border width, since we removed the border */
-	padding-top: calc(
-		var(--x-border-width-item) +
-		var(--x-padding-y-input)
-	);
-	background-color: var(--x-bg-grid-editor);
-}
-
-.x-widget.grid-editor > .x-focus-box > .x-editbox-input {
-	line-height: var(--x-grid-cell-line-height);
-}
-
-.x-widget.grid-editor > .x-focus-box,
-.x-widget.grid-editor.open:not(.widget-selected) > .x-focus-box,           /* specificity over x-dropdown */
-.x-widget.grid-editor:focus-within:not(.widget-selected) > .x-focus-box    /* specificity over x-editbox */
-{
-	box-shadow: inset 2px 2px 6px -2px rgba(0,0,0,0.75);
-	outline: none;
-}
-
-/* load/save progress bar */
-
-.x-grid-progress-bar {
-	position: absolute;
-	top: -2px;
-	width: 0%;
-	height: 2px;
-	pointer-events: none;
-}
-
-.x-grid.loading > .x-grid-progress-bar {
-	background-color: green;
-}
-
-/* grid action band */
-
-.x-grid-action-band {
-	border-top: 1px solid var(--x-border-light);
-	background-color: var(--x-bg);
-}
-
-.x-grid-action-band-reload-button {
-	font-size: 90%;
-	color: var(--x-fg-label);
-}
-
-.x-grid-action-band-reload-button > .x-button-icon {
-	padding-top: .2em;
-}
-
-.x-grid-action-band-info {
-	display: flex;
-	align-items: center;
-	font-size: 95%;
-	color: var(--x-fg-label);
-	margin-left: .5em;
-	white-space: pre;
-}
-
-/* grid as picker */
-
-.x-widget.x-grid.picker {
-	min-height: 40px;
-	max-height: 300px;
-	max-width: 800px;
-	resize: both;
-}
-
-.x-widget.x-grid.picker > .x-grid-cells-view {
-	overflow-y: scroll;        /* show vert-scrollbars always when a picker */
-}
-
-/* TODO: grid filter dropdowns
-
-.x-widget.x-grid-filter-dropdown {
-	font-size: 85%;
-	bottom: 0;
-	left: 0;
-
-	position: absolute;
-	min-width: 0;
-	border: 0;
-	margin: 0;
-	border-radius: 0;
-
-	color: #36f;
-}
-
-.x-dropdown.x-grid-filter-dropdown.open {
-	box-shadow: none;
-}
-
-.x-grid-filter-dropdown-grid {
-	font-size: 90%;
-}
-
-*/
-
-/* grid widget editing */
-
-.x-widget.x-grid.widget-editing {
-	outline: none; /* many edit modes, each marked in its own ways */
-}
-
-.x-grid-cells-view.editing > .x-grid-cells {
-	display: none;
 }
 
 /* editable richtext ------------------------------------------------------ */
 
-.x-richtext {
-	overflow: auto;
+@layer base {
+
+	:where(.x-richtext) {
+		overflow: auto;
+	}
+
+	:where(.x-richtext:not(.x-richedit)) {
+		margin: 0;
+		display: block;
+	}
+	:where(.x-richtext:not(.x-richedit) > .x-focus-box) {
+		border: 0;
+	}
+
+	:where(.x-richtext-content) {
+		outline: none;
+		overflow-y: auto;
+		padding: 10px;
+	}
+
+	:where(.x-richtext-actionbar) {
+		position: absolute;
+		display: flex;
+
+		background-color: var(--x-bg-popup);
+	}
+
+	:where(.x-richtext-button) {
+		margin: 0;
+		height: 2em;
+		width: 2em;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+
+		background-color: var(--bg1);
+		border: 1px solid var(--border);
+	}
+
+	:where(.x-richtext-button:not(:first-child)) {
+		border-left-width: 0;
+	}
+
 }
 
-.x-richtext:not(.x-richedit) {
-	margin: 0;
-	display: block;
-}
-.x-richtext:not(.x-richedit) > .x-focus-box {
-	border: 0;
-}
+@layer state {
 
-.x-richtext-content {
-	outline: none;
-	overflow-y: auto;
-	padding: 10px;
-}
+	:where(.x-richtext-button:hover) {
+		background-color: var(--x-smoke);
+	}
 
-.x-richtext-actionbar {
-	position: absolute;
-	display: flex;
+	:where(.x-richtext-button:active) {
+		background-color: var(--x-fg-disabled);
+	}
 
-	background-color: var(--x-bg-popup);
-}
+	:where(.x-richtext-button.selected) {
+		box-shadow: var(--x-shadow-button-pressed);
+		background-color: var(--x-fg-disabled);
+		color: var(--x-fg-inverted);
+	}
 
-.x-richtext-button {
-	margin: 0;
-	height: 2em;
-	width: 2em;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-
-	background-color: var(--x-faint);
-	border: 1px solid var(--x-border-light);
-}
-
-.x-richtext-button:not(:first-child) {
-	border-left-width: 0;
-}
-
-.x-richtext-button:hover {
-	background-color: var(--x-smoke);
-}
-
-.x-richtext-button:active {
-	background-color: var(--x-fg-disabled);
-}
-
-.x-richtext-button.selected {
-	box-shadow: var(--x-shadow-button-pressed);
-	background-color: var(--x-fg-disabled);
-	color: var(--x-fg-inverted);
 }
 
 /* richedit widget -------------------------------------------------------- */
 
-.x-richedit {
-	display: inline-flex;
-	flex-flow: column;
-	min-height: 6em;
-}
+@layer base {
 
-.x-richtext-actionbar-embedded {
-	position: relative;
-	margin-top  : -1px;
-	margin-left : -1px;
-	background-color: var(--x-faint);
-	border-bottom: 1px solid var(--x-border-light);
-}
+	:where(.x-richedit) {
+		display: inline-flex;
+		flex-flow: column;
+		min-height: 6em;
+	}
 
-.x-richtext-actionbar-embedded > button {
-	border-bottom: 0;
-}
+	:where(.x-richtext-actionbar-embedded) {
+		position: relative;
+		margin-top  : -1px;
+		margin-left : -1px;
+		background-color: var(--bg1);
+		border-bottom: 1px solid var(--border);
+	}
 
-.x-richedit > .x-focus-box {
-	flex: 1;
-	overflow: auto; /* scroll instead of growing to overflow the css grid */
-	display: flex;
-	flex-flow: column;
-}
+	:where(.x-richtext-actionbar-embedded > button) {
+		border-bottom: 0;
+	}
 
-.x-richedit > .x-focus-box > .x-richtext-content {
-	flex: 1;
+	:where(.x-richedit > .x-focus-box) {
+		flex: 1;
+		overflow: auto; /* scroll instead of growing to overflow the css grid */
+		display: flex;
+		flex-flow: column;
+	}
+
+	:where(.x-richedit > .x-focus-box > .x-richtext-content) {
+		flex: 1;
+	}
+
 }
 
 /* image ------------------------------------------------------------------ */
 
-.x-image {
+@layer base {
 
-	/* layout self */
-	min-height: calc(var(--x-min-height-input) * 2 + var(--x-margin));
+	:where(.x-image) {
 
-	/* styling */
-	border-radius: var(--x-border-radius-input);
-	background-color: #000;
+		/* layout self */
+		min-height: calc(var(--x-min-height-input) * 2 + var(--x-margin));
 
-	/* layout missing icon */
-	display: flex !important; /* override fontawesome !important */
-	justify-content: center;
-	align-items: center;
-	color: #888;
+		/* styling */
+		border-radius: var(--x-border-radius-input);
+		background-color: #000;
+
+		/* layout missing icon */
+		display: flex !important; /* override fontawesome !important */
+		justify-content: center;
+		align-items: center;
+		color: #888;
+
+	}
+
+	:where(.x-image)::before {
+		font-size: 2em !important; /* override fontawesome !important */
+	}
+
+	:where(.x-image.empty) {
+		background-color: var(--bg1);
+		color: var(--x-smoke);
+	}
+
+	:where(.x-image-img) {
+		position: absolute;
+		min-width: 0;
+		min-height: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+	}
+
+	:where(.x-image-overlay) {
+		z-index: 2;
+		position: absolute;
+		left: 0; top: 0; right: 0; bottom: 0;
+		display: grid;
+		justify-items: end;
+		align-items: end;
+		opacity: .6;
+	}
+
+	:where(.x-image-button) {
+		margin: .5em .15em;
+		margin-top: 0;
+		font-size: 200%;
+		border-radius: 100%;
+		color: black;
+		background-color: white;
+		width: 1.5em;
+		height: 1.5em;
+		padding-top: .2em;
+		text-align: center;
+		box-shadow: 0px 0px 3px black;
+		cursor: pointer;
+		opacity: .7;
+	}
+
+	:where(.x-image-download-button) {
+		margin-right: .5em;
+	}
+
+	:where(.x-image-overlay > *) {
+		visibility: hidden;
+	}
 
 }
 
-.x-image::before {
-	font-size: 2em !important; /* override fontawesome !important */
-}
+@layer state {
 
-.x-image.empty {
-	background-color: var(--x-faint);
-	color: var(--x-smoke);
-}
+	:where(.x-image-img:not(.loaded)) {
+		opacity: 0;
+		transition: opacity .2s;
+	}
 
-.x-image-img {
-	position: absolute;
-	min-width: 0;
-	min-height: 0;
-	width: 100%;
-	height: 100%;
-	object-fit: contain;
-}
+	:where(.x-image-img.loaded) {
+		opacity: 1;
+		transition: opacity .1s;
+	}
 
-.x-image-img:not(.loaded) {
-	opacity: 0;
-	transition: opacity .2s;
-}
+	:where(.x-image-overlay:hover > *) {
+		visibility: visible;
+	}
 
-.x-image-img.loaded {
-	opacity: 1;
-	transition: opacity .1s;
-}
+	:where(.x-image-overlay:hover)::before {
+		visibility: hidden;
+	}
 
-.x-image-overlay {
-	z-index: 2;
-	position: absolute;
-	left: 0; top: 0; right: 0; bottom: 0;
-	display: grid;
-	justify-items: end;
-	align-items: end;
-	opacity: .6;
-}
+	:where(.x-image-button[disabled]) {
+		opacity: .4;
+	}
 
-.x-image-button {
-	margin: .5em .15em;
-	margin-top: 0;
-	font-size: 200%;
-	border-radius: 100%;
-	color: black;
-	background-color: white;
-	width: 1.5em;
-	height: 1.5em;
-	padding-top: .2em;
-	text-align: center;
-	box-shadow: 0px 0px 3px black;
-	cursor: pointer;
-	opacity: .7;
-}
+	:where(.x-image-button:not([disabled]):hover) {
+		opacity: .9;
+	}
 
-.x-image-download-button {
-	margin-right: .5em;
-}
+	:where(.x-image-button:not([disabled]):active) {
+		opacity: 1;
+	}
 
-.x-image-overlay > * {
-	visibility: hidden;
-}
-
-.x-image-overlay:hover > * {
-	visibility: visible;
-}
-
-.x-image-overlay:hover::before {
-	visibility: hidden;
-}
-
-.x-image-button[disabled] {
-	opacity: .4;
-}
-
-.x-image-button:not([disabled]):hover {
-	opacity: .9;
-}
-
-.x-image-button:not([disabled]):active {
-	opacity: 1;
 }
 
 /* charts ----------------------------------------------------------------- */
 
-.x-chart {
-	flex: 1 0 0;  /* stretch to fill container but not more */
-	padding: .5em;
-	overflow: hidden;
-	flex-flow: column;
-}
+@layer base {
 
-.x-chart-header {
-	padding-left: 40px;
-}
+	:where(.x-chart) {
+		flex: 1 0 0;  /* stretch to fill container but not more */
+		padding: .5em;
+		overflow: hidden;
+		flex-flow: column;
+	}
 
-.x-chart-split {
-	flex: 1;
-	display: flex;
-}
+	:where(.x-chart-header) {
+		padding-left: 40px;
+	}
 
-.x-chart-view {
-	flex: 1;
-	display: flex;
-	position: relative;
-}
+	:where(.x-chart-split) {
+		flex: 1;
+		display: flex;
+	}
 
-.x-chart-legend {
-	display: grid;
-	grid-template-columns: 1em 1fr;
-	grid-row-gap: .25em;
-	grid-column-gap:.5em;
-	align-content: end;
-	cursor: default;
-	margin-left: 2em;
-}
+	:where(.x-chart-view) {
+		flex: 1;
+		display: flex;
+		position: relative;
+	}
 
-.x-chart-legend-bullet {
-	width: .8em;
-	height: .8em;
-	border-radius: 50%;
-}
+	:where(.x-chart-legend) {
+		display: grid;
+		grid-template-columns: 1em 1fr;
+		grid-row-gap: .25em;
+		grid-column-gap:.5em;
+		align-content: end;
+		cursor: default;
+		margin-left: 2em;
+	}
 
-.x-chart-legend-label {}
+	:where(.x-chart-legend-bullet) {
+		width: .8em;
+		height: .8em;
+		border-radius: 50%;
+	}
 
-.x-chart-legend-percent {
-	font-weight: bold;
-	justify-self: end;
-}
+	:where(.x-chart-legend-label) {}
 
-.x-chart-canvas {
-	position: absolute;
-	left: 0;
-	top: 0;
-}
+	:where(.x-chart-legend-percent) {
+		font-weight: bold;
+		justify-self: end;
+	}
 
-.x-tooltip.x-chart-tooltip {
-	pointer-events: none; /* prevent hitting the tooltip itself */
-}
+	:where(.x-chart-canvas) {
+		position: absolute;
+		left: 0;
+		top: 0;
+	}
 
-.x-chart-tooltip > .x-tooltip-body {
-	line-height: 1.2;
-}
+	:where(.x-tooltip.x-chart-tooltip) {
+		pointer-events: none; /* prevent hitting the tooltip itself */
+	}
 
-.x-chart-tooltip-label {
-	display: grid;
-	grid-template-columns: repeat(2, auto);
-	column-gap: 1em;
-	justify-items: start;
-}
+	:where(.x-chart-tooltip > .x-tooltip-body) {
+		line-height: 1.2;
+	}
 
-.x-chart-stacks {
-	flex: 1;
-	display: flex;
-}
+	:where(.x-chart-tooltip-label) {
+		display: grid;
+		grid-template-columns: repeat(2, auto);
+		column-gap: 1em;
+		justify-items: start;
+	}
 
-.x-chart-stack {
-	display: flex;
-	flex-flow: column;
-}
+	:where(.x-chart-stacks) {
+		flex: 1;
+		display: flex;
+	}
 
-.x-chart-stack-slice-ct {
-	position: relative;
-	display: flex;
-}
+	:where(.x-chart-stack) {
+		display: flex;
+		flex-flow: column;
+	}
 
-.x-chart-stack-slice {
-	width: 50px;
-	margin-right: .5em;
-}
+	:where(.x-chart-stack-slice-ct) {
+		position: relative;
+		display: flex;
+	}
 
-.x-chart[shape=pie] .x-chart-split {
-	justify-content: center;
-}
+	:where(.x-chart-stack-slice) {
+		width: 50px;
+		margin-right: .5em;
+	}
 
-.x-chart[shape=pie] .x-chart-view {
-	max-width: 15em;
-	min-height: 15em;
-}
+	:where(.x-chart[shape=pie] .x-chart-split) {
+		justify-content: center;
+	}
 
-.x-chart[shape=pie] .x-chart-legend {
-	grid-template-columns: 1em 5fr 1fr;
-	align-content: center;
-}
+	:where(.x-chart[shape=pie] .x-chart-view) {
+		max-width: 15em;
+		min-height: 15em;
+	}
 
-.x-chart[shape=lines] .x-chart-view {
-	min-height: 10em;
-}
+	:where(.x-chart[shape=pie] .x-chart-legend) {
+		grid-template-columns: 1em 5fr 1fr;
+		align-content: center;
+	}
 
-.x-chart[shape=lines] .x-chart-legend {
-	margin-bottom: 2em;
-	margin-left: 1em;
-}
+	:where(.x-chart[shape=lines] .x-chart-view) {
+		min-height: 10em;
+	}
 
-.x-chart-pie {
-	position: absolute;
-}
+	:where(.x-chart[shape=lines] .x-chart-legend) {
+		margin-bottom: 2em;
+		margin-left: 1em;
+	}
 
-.x-chart-pie-selected {
-	position: absolute;
-	border-radius: 50%;
-}
+	:where(.x-chart-pie) {
+		position: absolute;
+	}
 
-.x-chart-pie-percents {
-	position: absolute;
-	top: 0;
-	left: 0;
-	pointer-events: none;
-}
+	:where(.x-chart-pie-selected) {
+		position: absolute;
+		border-radius: 50%;
+	}
 
-.x-chart-pie-label {
-	position: absolute;
-	color: white;
+	:where(.x-chart-pie-percents) {
+		position: absolute;
+		top: 0;
+		left: 0;
+		pointer-events: none;
+	}
+
+	:where(.x-chart-pie-label) {
+		position: absolute;
+		color: white;
+	}
+
 }
 
 /* countries listbox ------------------------------------------------------ */
 
-.x-countries-listbox-row {
-	display: flex;
-}
+@layer base {
 
-.x-countries-listbox-flag-cell {
-	min-height: 20px;
-	min-width : 22px;
-	display: flex;
-	align-items: center;
-	justify-content: start;
+	:where(.x-countries-listbox-row) {
+		display: flex;
+	}
+
+	:where(.x-countries-listbox-flag-cell) {
+		min-height: 20px;
+		min-width : 22px;
+		display: flex;
+		align-items: center;
+		justify-content: start;
+	}
+
 }
 
 /* icons listbox ---------------------------------------------------------- */
 
-.x-icons-listbox-item {
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
+@layer base {
 
-.x-icons-listbox-icon {
-	min-width : 20px;
+	:where(.x-icons-listbox-item) {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	:where(.x-icons-listbox-icon) {
+		min-width : 20px;
+	}
+
 }
 
 /* xmodule stuff ---------------------------------------------------------- */
 
-.x-dev-toolbox > .x-toolbox-titlebar,
-.x-dev-toolbox .x-widget
-{
-	font-family: arial, sans-serif;
-	font-size: 12px;
-}
+@layer base {
 
-.x-inspector .fa-eye, .x-inspector .fa-chevron, .x-inspector .fa-chevron-right {
-	font-size: 80%;
-}
+	:where(.x-dev-toolbox > .x-toolbox-titlebar),
+	:where(.x-dev-toolbox .x-widget)
+	{
+		font-family: arial, sans-serif;
+		font-size: 12px;
+	}
 
-x-prop-layers-inspector > .x-grid-header {
-	min-height: calc(2em + 1px);
+	:where(.x-inspector .fa-eye, .x-inspector .fa-chevron, .x-inspector .fa-chevron-right) {
+		font-size: 80%;
+	}
+
+	:where(x-prop-layers-inspector > .x-grid-header) {
+		min-height: calc(2em + 1px);
+	}
+
 }
 
 /* ------------------------------------------------------------------------ */
 /* dark theme                                                               */
 /* ------------------------------------------------------------------------ */
 
-[theme=dark] {
+@layer base {
 
-	--x-border-focused                :  #66a;
-	--x-border-focused-button         :  #999;
-	--x-border-focused-button-primary :  #5bde5b;
-	--x-outline-markbox-focused       :  #88888866;
+	:where(.theme-dark) {
 
-	--x-shadow-button-pressed         : inset 0 0.15em 0.5em #1b1f2377;
+		--x-border-focused                :  #66a;
+		--x-outline-markbox-focused       :  #88888866;
 
-	--x-fg                   : #fff;
-	--x-fg-inverted          : #fff;
-	--x-fg-p                 : #bbb;
-	--x-bg                   : #0d1117;
-	--x-bg-alt               : #090b0f;
-	--x-bg-moving            : #141a24aa;
-	--x-fg-info              : var(--x-fg-inverted);
-	--x-bg-popup             : #1d2532;
-	--x-bg-popup2            : #11161e;
-	--x-fg-disabled          : #ffffff66;
-	--x-fg-disabled-inverted : var(--x-fg-disabled);
-	--x-border-light         : #ffffff22;
-	--x-border-light-hover   : #ffffff44;
-	--x-smoke                : #ffffff22;
-	--x-faint                : #ffffff11;
-	--x-fg-label             : #aaa;
-	--x-bg-new               : #2c2c5c;
-	--x-bg-modified          : #196119;
-	--x-bg-new-modified      : #293b34;
-	--x-fg-clickable         : #75b7fa;
+		--x-shadow-button-pressed         : inset 0 0.15em 0.5em #1b1f2377;
 
-	--x-bg-button                 : #21262d;
-	--x-bg-button-hover           : #333c47;
-	--x-bg-button-pressed         : #404b59;
-	--x-bg-button-danger          : var(--x-bg-button);
-	--x-bg-button-danger-hover    : var(--x-bg-button-hover);
-	--x-bg-button-danger-pressed  : var(--x-bg-button-pressed);
-	--x-fg-button-danger          : #a33;
+		--x-fg-inverted          : #fff;
+		--x-bg-moving            : #141a24aa;
+		--x-fg-info              : var(--x-fg-inverted);
+		--x-bg-popup             : #1d2532;
+		--x-bg-popup2            : #11161e;
+		--x-fg-disabled          : #ffffff66;
+		--x-fg-disabled-inverted : var(--x-fg-disabled);
+		--x-smoke                : #ffffff22;
+		--x-fg-label             : #aaa;
+		--x-bg-new               : #2c2c5c;
+		--x-bg-modified          : #196119;
+		--x-bg-new-modified      : #293b34;
+		--x-fg-clickable         : #75b7fa;
 
-	--x-bg-select-button: var(--x-faint);
+		--x-bg-select-button: var(--bg1);
 
-	--x-bg-toolbox-titlebar         : #303030;
-	--x-bg-toolbox-titlebar-focused : #636363;
+		--x-bg-toolbox-titlebar         : #303030;
+		--x-bg-toolbox-titlebar-focused : #636363;
 
-	--x-stroke-dialog-xbutton       : #000000cc;
+		--x-stroke-dialog-xbutton       : #000000cc;
 
-	--x-bg-tabs-selection-bar: #ccc;
+		--x-bg-tabs-selection-bar: #ccc;
 
-	--x-selected-widget-outline-color         : #aaa;
-	--x-selected-widget-outline-color-focused : var(--x-fg-clickable);
+		--x-selected-widget-outline-color         : #aaa;
+		--x-selected-widget-outline-color-focused : var(--x-fg-clickable);
 
-	--x-outline-focused: #999;
+		--x-outline-focused: #999;
 
-	/* these need to be opaque! */
-	--x-bg-unfocused-selected : #4c545d;
-	--x-bg-unfocused          : #2e3033;
-	--x-bg-unselected         : #1d2021;
-	--x-bg-selected           : #122f4d;
-	--x-bg-row-focused        : #222326;
+		/* these need to be opaque! */
+		--x-bg-unfocused-selected : #4c545d;
+		--x-bg-unfocused          : #2e3033;
+		--x-bg-unselected         : #1d2021;
+		--x-bg-selected           : #122f4d;
+		--x-bg-row-focused        : #222326;
 
-	--x-bg-grid-editor        : #495560;
-	--x-bg-grid-header        : var(--x-faint);
+		--x-bg-grid-editor        : #495560;
+		--x-bg-grid-header        : var(--bg1);
 
-	color: var(--x-fg);
-}
+		color: var(--fg);
+		background-color: var(--bg);
+		color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
 
-[theme=dark] {
-	background-color: var(--x-bg);
-	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
-}
+	}
 
-/* dark widget on white body */
-body:not([theme=dark]) [theme=dark] {
-	--x-bg: var(--x-bg-popup);
-	background-color: var(--x-bg);
-}
+	/* dark widget on white body */
+	:where(body:not([theme=dark]) [theme=dark]) {
+		--x-bg: var(--x-bg-popup);
+		background-color: var(----bg);
+	}
 
-:where([theme=dark]) .x-focus-box {
-	background-color: #060606;
-	border-color: transparent;
-}
+	:where([theme=dark] .x-focus-box) {
+		background-color: #060606;
+		border-color: transparent;
+	}
 
-[theme=dark]::-webkit-resizer,
-[theme=dark] ::-webkit-resizer
-{
-	background-color: var(--x-smoke);
-}
+	:where([theme=dark]::-webkit-resizer),
+	:where([theme=dark] ::-webkit-resizer)
+	{
+		background-color: var(--x-smoke);
+	}
 
-[theme=dark]::selection,
-[theme=dark] ::selection
-{
-	color: #000;
-	background-color: #ff0;
-}
+	:where([theme=dark]::selection),
+	:where([theme=dark] ::selection)
+	{
+		color: #000;
+		background-color: #ff0;
+	}
 
-[theme=dark] img[invertable] {
-	filter: invert(1);
+	:where([theme=dark] img[invertable]) {
+		filter: invert(1);
+	}
+
 }
 
 /* thin scrollbars option ------------------------------------------------- */
 
-[thin-scrollbars]::-webkit-scrollbar,
-[thin-scrollbars] ::-webkit-scrollbar
-{
-	/* enable browsers' lazy-work of custom-drawn scrollbars */
-	width : 8px;
-	height: 8px;
+@layer base {
+
+	:where([thin-scrollbars]::-webkit-scrollbar),
+	:where([thin-scrollbars] ::-webkit-scrollbar)
+	{
+		/* enable browsers' lazy-work of custom-drawn scrollbars */
+		width : 8px;
+		height: 8px;
+	}
+
+	:where([thin-scrollbars]::-webkit-scrollbar-thumb),
+	:where([thin-scrollbars] ::-webkit-scrollbar-thumb)
+	{
+		border-radius: 50px;
+	}
+
 }
 
-[thin-scrollbars]::-webkit-scrollbar-thumb,
-[thin-scrollbars] ::-webkit-scrollbar-thumb
-{
-	border-radius: 50px;
+@layer state {
+
+	:where([thin-scrollbars]::-webkit-scrollbar-thumb:hover),
+	:where([thin-scrollbars] ::-webkit-scrollbar-thumb:hover)
+	{
+		background-color: var(--x-fg-disabled);
+	}
+
 }
 
-[thin-scrollbars]::-webkit-scrollbar-thumb:hover,
-[thin-scrollbars] ::-webkit-scrollbar-thumb:hover
-{
-	background-color: var(--x-fg-disabled);
+/* large & medium --------------------------------------------------------- */
+
+@layer base {
+
+	:where(.theme-large) {
+		--x-grid-cell-h            : 42px;
+		--x-grid-header-h          : 62px;
+		--x-grid-cell-baseline     : 17px; /* PIXELS ONLY! */
+		--x-grid-cell-line-height  : 24px; /* PIXELS ONLY! */
+		--x-padding-y-input        : 8px;
+		--x-padding-y-input-top    : 8px;
+		--x-padding-y-input-bottom : 0px;
+		--x-padding-x-input        : 10px;
+		--x-padding-y-button       : .7em;
+		--x-padding-x-button       : .7em;
+		--x-padding-x-button-icon  : .4em;
+		--x-border-radius-button   : 0;
+	}
+	:where(.theme-large .x-form) {
+		grid-gap: 6px;
+		margin:  10px;
+	}
+	:where(.theme-large .x-grid) {
+		margin: 10px;
+	}
+	:where(.theme-large .x-editbox.with-label > .x-focus-box) {
+		padding-top: 28px;
+	}
+	:where(.theme-large .x-tabs-title) {
+		padding: .9em .8em .7em .8em;
+	}
+
+	:where(.theme-medium) {
+		--x-grid-cell-h            : 38px;
+		--x-grid-header-h          : 58px;
+		--x-grid-cell-baseline     : 13px; /* PIXELS ONLY! */
+		--x-grid-cell-line-height  : 17px; /* PIXELS ONLY! */
+		--x-padding-x-input        : 6px;
+		--x-padding-y-input        : 10px;
+		--x-padding-y-input-top    : 25px;
+		--x-padding-y-input-bottom : 2px;
+		--x-padding-y-button       : .5em;
+		--x-padding-x-button       : .7em;
+		--x-padding-x-button-icon  : .4em;
+		--x-border-radius-button   : 0;
+	}
+	:where([medium]) .x-tabs-title {
+		padding: 1em .8em .8em .8em;
+	}
+
 }
 
-/* large ------------------------------------------------------------------ */
-
-[large] {
-	font-size                  : 15px;
-	--x-grid-cell-h            : 42px;
-	--x-grid-header-h          : 62px;
-	--x-grid-cell-baseline     : 17px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height  : 24px; /* PIXELS ONLY! */
-	--x-padding-y-input        : 8px;
-	--x-padding-y-input-top    : 8px;
-	--x-padding-y-input-bottom : 0px;
-	--x-padding-x-input        : 10px;
-	--x-padding-y-button       : .7em;
-	--x-padding-x-button       : .7em;
-	--x-padding-x-button-icon  : .4em;
-	--x-border-radius-button   : 0;
-}
-[large] .x-form {
-	grid-gap: 6px;
-	margin:  10px;
-}
-[large] .x-grid {
-	margin: 10px;
-}
-[large] .x-editbox.with-label > .x-focus-box {
-	padding-top: 28px;
-}
-[large] .x-tabs-title {
-	padding: .9em .8em .7em .8em;
-}
-
-/* medium ----------------------------------------------------------------- */
-
-[medium] {
-	font-size                  : 13px;
-	--x-grid-cell-h            : 38px;
-	--x-grid-header-h          : 58px;
-	--x-grid-cell-baseline     : 13px; /* PIXELS ONLY! */
-	--x-grid-cell-line-height  : 17px; /* PIXELS ONLY! */
-	--x-padding-x-input        : 6px;
-	--x-padding-y-input        : 10px;
-	--x-padding-y-input-top    : 25px;
-	--x-padding-y-input-bottom : 2px;
-	--x-padding-y-button       : .5em;
-	--x-padding-x-button       : .7em;
-	--x-padding-x-button-icon  : .4em;
-	--x-border-radius-button   : 0;
-}
-[medium] .x-tabs-title {
-	padding: 1em .8em .8em .8em;
-}

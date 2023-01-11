@@ -663,12 +663,10 @@ function nav_widget(e) {
 
 	e.ready = false
 
-	let init = e.init
-	e.init = function() {
-		init()
+	e.do_after('init', function() {
 		if (e.dropdown)
 			e.init_as_picker()
-	}
+	})
 
 	function init_all() {
 		e.changed_rows = null // set(row)
@@ -4954,7 +4952,7 @@ function nav_widget(e) {
 // view-less nav
 // ---------------------------------------------------------------------------
 
-component('x-nav', function(e) {
+widget('x-nav', function(e) {
 	nav_widget(e)
 	return {hidden: true}
 })

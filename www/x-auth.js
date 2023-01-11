@@ -146,7 +146,7 @@ function sign_out(opt) {
 	}, opt))
 }
 
-component('x-usr-button', function(e) {
+widget('x-usr-button', function(e) {
 
 	button.construct(e)
 
@@ -203,7 +203,7 @@ on('usr_usr_dropdown.init', function(e) {
 	})
 })
 
-component('x-usr-lang-dropdown', function(e) {
+widget('x-usr-lang-dropdown', function(e) {
 
 	lookup_dropdown.construct(e)
 
@@ -291,7 +291,7 @@ function sign_in() {
 	return d
 }
 
-component('x-sign-in-dialog', function(e) {
+widget('x-sign-in-dialog', function(e) {
 
 	e.style.display = 'contents'
 

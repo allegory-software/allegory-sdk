@@ -3,6 +3,13 @@
 	X-WIDGETS: Web Components in JavaScript.
 	Written by Cosmin Apreutesei. Public Domain.
 
+DEPENDS
+
+	divs.js
+	glue.js
+	utils.css
+	x-widgets.css
+
 WIDGETS
 
 	popup
@@ -24,180 +31,37 @@ WIDGETS
 
 GLOBALS
 
-	component(tag[, category], cons)
 	notify(text, ['search'|'info'|'error'], [timeout])
-	set_theme(theme|null)
 	setglobal(k, v)
 
 */
 
-function set_theme(theme) {
-	on_dom_load(function() {
-		theme = repl(theme, 'default', null)
-		document.body.attr('theme', theme)
-		document.fire('theme_changed', theme)
-	})
-}
-
-/* ---------------------------------------------------------------------------
-// creating & setting up web components
-// ---------------------------------------------------------------------------
-publishes:
-	e.iswidget: t
-	e.type
-	e.initialized: t|f
-	e.updating
-	e.update([opt])
-	e.position()
-calls:
-	e.init()
-fires:
-	^window['ID.init'](e)
---------------------------------------------------------------------------- */
-
-{
-
-// attr <-> prop conversions -------------------------------------------------
-
-let attr_val_opt = function(e) {
-	let opt = obj()
-	let pmap = e.attr_prop_map
-	for (let attr of e.attributes) {
-		let k = attr.name
-		// TODO: not cool that we must add all built-in attrs that we use for
-		// custom components here (so that they aren't set twice, and wrong too
-		// because text attr vals don't convert well to bool props, eg. `hidden`).
-		if (k != 'id' && k != 'class' && k != 'style' && k != 'hidden') {
-			k = pmap && pmap[k] || k
-			let v = attr.value
-			let popt = e.get_prop_attrs(k)
-			if (popt && popt.from_attr)
-				v = popt.from_attr(v)
-			if (!(k in opt))
-				opt[k] = v
-		}
-	}
-	return opt
-}
-
-// component(tag[, category], cons) -> create({option: value}) -> element.
-function component(tag, category, cons) {
-
-	if (!isstr(category)) { // called as component(tag, cons)
-		cons = category
-		category = 'Other'
+function widget(tag, category, init) {
+	if (!isstr(category)) { // shift arg
+		init = category
+		category = null
 	}
 
-	let type = tag.replace(/^x-/, '').replaceAll('-', '_')
-
-	// override cons() so that calling `parent_widget.construct()` always
-	// sets the css class for parent_widget.
-	function construct(e, ...args) {
+	let init0 = init
+	init = function(e) {
 		e.class(tag)
-		return cons(e, ...args)
+		return init0(e)
 	}
 
-	function initialize(e, ...args) {
-
-		e.debug_anon_name = function() { return this.type }
-
-		e.notify_id_changed()
-
-		e.initialized = null // for log_add_event().
-
-		// combine initial prop values from multiple sources, in overriding order:
-		// - html attributes.
-		// - constructor return value.
-		// - constructor args.
-		let opt = assign_opt(obj(), ...args)
-
-		e.props = opt.props || obj() // instance prop attrs to create props with.
+	let type
+	function comp_init(e) {
 		e.iswidget = true     // to diff from normal html elements.
 		e.type = type         // for serialization.
-		e.init = noop         // init point after all props are set.
 		e.class('x-widget')
-
-		disablable_widget(e)
-
-		e.debug_open_if(DEBUG_INIT, '^')
-
-		let cons_opt = construct(e)
-
-		opt = assign_opt(attr_val_opt(e), cons_opt, opt)
-
-		// use this barrier in prop setters to prevent trying to modify
-		// the component while it's not yet fully initialized.
-		e.initialized = false
-
-		// register events from the options directly.
-		if (opt.on) {
-			for (let k in opt.on)
-				e.on(k, opt.on[k])
-			delete opt.on
-		}
-
-		// set props to combined initial values.
-		if (window.xmodule) {
-			xmodule.init_instance(e, opt)
-		} else {
-			for (let k in opt)
-				e.set_prop(k, opt[k])
-		}
-
-		// call the after-properties-are-set init function.
-		e.initialized = true
-		e.init()
-
-		if (e.id)
-			window.fire(e.id+'.init', e)
-
-		e.debug_close_if(DEBUG_INIT)
+		e.make_disablable()
+		return init(e)
 	}
-
-	register_component(tag, initialize)
-
-	function create(...args) {
-		let e = document.createElement(tag)
-		initialize(e, ...args)
-		return e
-	}
-
-	create.type = type
-	create.construct = construct
-
-	attr(component.categories, category, array).push(create)
-	component.types[type] = create
+	let create = component(tag, comp_init, category)
+	create.construct = init
+	type = create.type
 	window[type] = create
 
 	return create
-}
-
-component.types = {} // {type -> create}
-component.categories = {} // {cat -> {craete1,...}}
-
-component.create = function(t, e0) {
-	if (isnode(t))
-		return t // nodes pass through.
-	let id = isstr(t) ? t : t.id
-	if (e0 && e0.id == id)
-		return e0  // already created (called from a prop's `convert()`).
-	if (isstr(t)) // t is an id
-		t = {id: t}
-	if (!t.type) {
-		t.type = xmodule.instance_type(id)
-		if (!t.type) {
-			warn('component id not found:', id)
-			return
-		}
-	}
-	let create = component.types[t.type]
-	if (!create) {
-		warn('component type not found', t.type, t.id)
-		return
-	}
-	return create(t)
-}
-
 }
 
 /* ---------------------------------------------------------------------------
@@ -561,130 +425,6 @@ function serializable_widget(e) {
 }
 
 /* ---------------------------------------------------------------------------
-// disablable widget mixin
-// ---------------------------------------------------------------------------
-publishes:
-	e.disabled
-	e.disable(reason, disabled)
-
-NOTE: The `disabled` state is a concerted effort located in multiple places:
-	- mouse events are blocked in divs.js.
-	- forcing the default cursor on the element and its children is done in css.
-	- showing the element grayed out with 50% transparency is done in css.
-	- keyboard focusing is disabled in focusable_widget().
-
-NOTE: `:hover` and `:active` still apply to a disabled widget so make sure
-to add `:not([disabled])` in css on those selectors.
-
-NOTE: for non-widgets setting the `disabled` attr is enough to disable them.
---------------------------------------------------------------------------- */
-
-function disablable_widget(e) {
-
-	e.on_bind(function(on) {
-		// each disabled ancestor is a reason for this widget to be disabled.
-		if (on) {
-			let p = this.parent
-			while (p) {
-				if (p.disabled)
-					this.disable(p, true)
-				p = p.parent
-			}
-		} else {
-			let p = this.parent
-			while (p) {
-				this.disable(p, false)
-				p = p.parent
-			}
-		}
-	})
-
-	e.set_disabled = function(disabled) {
-		// add/remove this widget as a reason for the child widget to be disabled.
-		for (let ce of this.$('.x-widget'))
-			if (ce.disable) // css classes are not to be trusted
-				ce.disable(this, disabled)
-	}
-
-	e.property('disabled',
-		function() {
-			return this.hasattr('disabled')
-		},
-		function(disabled) {
-			disabled = !!disabled
-			let disabled0 = this.hasattr('disabled')
-			if (disabled0 == disabled)
-				return
-			this.bool_attr('disabled', disabled || null)
-			e.set_disabled(disabled, disabled0)
-		})
-
-	let dr
-	e.disable = function(reason, disabled) {
-		if (disabled) {
-			dr = dr || set()
-			dr.add(reason)
-			e.disabled = true
-		} else if (dr) {
-			dr.delete(reason)
-			if (!dr.size) {
-				e.disabled = false
-			}
-		}
-		e.disabled_reasons = dr
-	}
-}
-
-/* ---------------------------------------------------------------------------
-// focusable widget mixin
-// ---------------------------------------------------------------------------
-publishes:
-	e.tabindex
-	e.focusable
---------------------------------------------------------------------------- */
-
-function focusable_widget(e, fe) {
-	fe = fe || e
-
-	let focusable = true
-
-	if (!fe.hasattr('tabindex'))
-		fe.attr('tabindex', 0)
-
-	function do_update() {
-		let can_be_focused = focusable && !e.disabled
-		fe.attr('tabindex', can_be_focused ? e.tabindex : (fe instanceof HTMLInputElement ? -1 : null))
-		if (!can_be_focused)
-			e.blur()
-	}
-
-	let set_disabled = e.set_disabled
-	e.set_disabled = function(disabled) {
-		set_disabled.call(this, disabled)
-		do_update()
-	}
-
-	e.set_tabindex = do_update
-	e.prop('tabindex', {type: 'number', default: 0})
-
-	e.property('focusable', () => focusable, function(v) {
-		v = !!v
-		if (v == focusable) return
-		focusable = v
-		do_update()
-	})
-
-	let inh_focus = e.focus
-	e.focus = function() {
-		if (fe == this || this.widget_selected)
-			inh_focus.call(this)
-		else
-			fe.focus()
-	}
-
-}
-
-/* ---------------------------------------------------------------------------
 // stylable widget mixin
 // ---------------------------------------------------------------------------
 publishes:
@@ -708,7 +448,7 @@ function stylable_widget(e) {
 // popup
 // ---------------------------------------------------------------------------
 
-component('x-popup', function(e) {
+widget('x-popup', function(e) {
 	e.classes = 'x-container'
 	e.init_child_components()
 	e.popup()
@@ -718,7 +458,7 @@ component('x-popup', function(e) {
 // tooltip
 // ---------------------------------------------------------------------------
 
-component('x-tooltip', function(e) {
+widget('x-tooltip', function(e) {
 
 	e.popup()
 
@@ -889,7 +629,7 @@ tooltip.icon_classes = {
 // toaster
 // ---------------------------------------------------------------------------
 
-component('x-toaster', function(e) {
+widget('x-toaster', function(e) {
 
 	e.tooltips = set()
 
@@ -968,9 +708,9 @@ ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 // menu
 // ---------------------------------------------------------------------------
 
-component('x-menu', function(e) {
+widget('x-menu', function(e) {
 
-	focusable_widget(e)
+	e.make_focusable()
 	e.class('x-focusable-items')
 	e.popup()
 
@@ -1384,7 +1124,7 @@ widget_items_widget = function(e) {
 // tabs
 // ---------------------------------------------------------------------------
 
-component('x-tabs', 'Containers', function(e) {
+widget('x-tabs', 'Containers', function(e) {
 
 	selectable_widget(e)
 	editable_widget(e)
@@ -1820,7 +1560,7 @@ component('x-tabs', 'Containers', function(e) {
 // split-view
 // ---------------------------------------------------------------------------
 
-component('x-split', 'Containers', function(e) {
+widget('x-split', 'Containers', function(e) {
 
 	serializable_widget(e)
 	selectable_widget(e)
@@ -1979,7 +1719,7 @@ component('x-split', 'Containers', function(e) {
 
 })
 
-component('x-vsplit', function(e) {
+widget('x-vsplit', function(e) {
 	let opt = split.construct(e)
 	opt.orientation = 'vertical'
 	return opt
@@ -1989,7 +1729,7 @@ component('x-vsplit', function(e) {
 // action band
 // ---------------------------------------------------------------------------
 
-component('x-action-band', 'Input', function(e) {
+widget('x-action-band', 'Input', function(e) {
 
 	e.layout = 'ok:ok cancel:cancel'
 
@@ -2061,7 +1801,7 @@ component('x-action-band', 'Input', function(e) {
 // modal dialog with action band footer
 // ---------------------------------------------------------------------------
 
-component('x-dialog', function(e) {
+widget('x-dialog', function(e) {
 
 	e.init_child_components()
 
@@ -2201,12 +1941,12 @@ component('x-dialog', function(e) {
 // floating toolbox
 // ---------------------------------------------------------------------------
 
-component('x-toolbox', function(e) {
+widget('x-toolbox', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
 
-	focusable_widget(e)
+	e.make_focusable()
 
 	e.props.popup_align = {default: 'top'}
 	e.props.popup_side  = {default: 'inner-top'}
@@ -2360,7 +2100,7 @@ component('x-toolbox', function(e) {
 // slides
 // ---------------------------------------------------------------------------
 
-component('x-slides', 'Containers', function(e) {
+widget('x-slides', 'Containers', function(e) {
 
 	serializable_widget(e)
 	selectable_widget(e)
@@ -2424,7 +2164,7 @@ component('x-slides', 'Containers', function(e) {
 
 {
 let md
-component('x-md', function(e) {
+widget('x-md', function(e) {
 
 	md = md || markdownit()
 		.use(MarkdownItIndentedTable)
@@ -2437,7 +2177,7 @@ component('x-md', function(e) {
 // page navigation widget
 // ---------------------------------------------------------------------------
 
-component('x-pagenav', function(e) {
+widget('x-pagenav', function(e) {
 
 	e.prop('page', {type: 'number', attr: true, default: 1})
 	e.prop('page_size', {type: 'number', attr: true, default: 100})
@@ -2499,7 +2239,7 @@ component('x-pagenav', function(e) {
 // richtext
 // ---------------------------------------------------------------------------
 
-component('x-richtext', function(e) {
+widget('x-richtext', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
@@ -2729,7 +2469,7 @@ function richtext_widget_editing(e) {
 // "if" widget for conditional binding of its child widget
 // ---------------------------------------------------------------------------
 
-component('x-if', 'Containers', function(e) {
+widget('x-if', 'Containers', function(e) {
 
 	let html_content = e.html
 	e.clear()
@@ -2792,7 +2532,7 @@ function setglobal(k, v, default_v) {
 // an invisible widget like an x-nav with a visible one to make a tab.
 // Don't try to group together visible elements with this! CSS will see
 // your <x-ct> tag in the middle, but the layout system won't!
-component('x-ct', 'Containers', function(e) {
+widget('x-ct', 'Containers', function(e) {
 	e.init_child_components()
 })
 
@@ -2803,7 +2543,7 @@ calls:
 	e.replace_child_widget()
 */
 
-component('x-widget-placeholder', function(e) {
+widget('x-widget-placeholder', function(e) {
 
 	serializable_widget(e)
 	selectable_widget(e)

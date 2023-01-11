@@ -441,7 +441,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 // button
 // ---------------------------------------------------------------------------
 
-component('x-button', 'Input', function(e) {
+widget('x-button', 'Input', function(e) {
 
 	row_widget(e, true)
 	editable_widget(e)
@@ -455,7 +455,7 @@ component('x-button', 'Input', function(e) {
 	e.icon_box.hidden = true
 	e.add(e.focus_box)
 
-	focusable_widget(e, e.focus_box)
+	e.make_focusable(e.focus_box)
 
 	e.prop('href', {store:'var', attr: true})
 	e.set_href = function(s) {
@@ -533,6 +533,7 @@ component('x-button', 'Input', function(e) {
 	function set_active(on, cancel) {
 		if (!on && cancel == null)
 			cancel = !e.hasclass('active')
+		e.class('active', on)
 		e.focus_box.class('active', on)
 		e.fire('active', on)
 		if (!on && !cancel)
@@ -808,7 +809,7 @@ function input_widget(e) {
 // checkbox
 // ---------------------------------------------------------------------------
 
-component('x-checkbox', 'Input', function(e) {
+widget('x-checkbox', 'Input', function(e) {
 
 	editable_widget(e)
 	val_widget(e)
@@ -825,7 +826,7 @@ component('x-checkbox', 'Input', function(e) {
 	e.focus_box = div({class: 'x-focus-box x-checkbox-focus-box'}, e.icon_box, e.label_box)
 	e.add(e.focus_box)
 
-	focusable_widget(e, e.label_box)
+	e.make_focusable(e.label_box)
 
 	e.add_info_button = function(btn) {
 		btn.attr('bare', true)
@@ -941,7 +942,7 @@ component('x-checkbox', 'Input', function(e) {
 
 })
 
-component('x-toggle', 'Input', function(e) {
+widget('x-toggle', 'Input', function(e) {
 	e.props.button_style = {default: 'toggle'}
 	e.props.align        = {default: 'right'}
 	return checkbox.construct(e)
@@ -951,7 +952,7 @@ component('x-toggle', 'Input', function(e) {
 // radiogroup
 // ---------------------------------------------------------------------------
 
-component('x-radiogroup', 'Input', function(e) {
+widget('x-radiogroup', 'Input', function(e) {
 
 	e.init_child_components()
 
@@ -1139,7 +1140,7 @@ function editbox_widget(e, opt) {
 		e.input_box = e.val_box
 	}
 
-	focusable_widget(e, e.input)
+	e.make_focusable(e.input)
 
 	e.label_box = div({class: 'x-input-label x-editbox-label'})
 	e.focus_box = div({class: 'x-focus-box'}, e.input_box, e.label_box)
@@ -1168,6 +1169,7 @@ function editbox_widget(e, opt) {
 			let s = e.display_val_for(v)
 			e.val_box.set(s)
 		}
+		e.class('empty', v == '')
 		e.input_box.class('empty', v == '')
 		e.label_box.class('empty', v == '')
 	}
@@ -1715,7 +1717,7 @@ function editbox_widget(e, opt) {
 // textedit
 // ---------------------------------------------------------------------------
 
-component('x-textedit', 'Input', function(e) {
+widget('x-textedit', 'Input', function(e) {
 	return editbox_widget(e)
 })
 
@@ -1723,7 +1725,7 @@ component('x-textedit', 'Input', function(e) {
 // textarea
 // ---------------------------------------------------------------------------
 
-component('x-textarea', 'Input', function(e) {
+widget('x-textarea', 'Input', function(e) {
 	let cons_opt = editbox_widget(e, {input_tag: 'textarea'})
 	e.do_after('init', function() {
 		e.input.rows = e.rows
@@ -1736,7 +1738,7 @@ component('x-textarea', 'Input', function(e) {
 // passedit
 // ---------------------------------------------------------------------------
 
-component('x-passedit', 'Input', function(e) {
+widget('x-passedit', 'Input', function(e) {
 
 	let cons_opt = editbox_widget(e)
 	e.input.attr('type', 'password')
@@ -1774,7 +1776,7 @@ component('x-passedit', 'Input', function(e) {
 // numedit
 // ---------------------------------------------------------------------------
 
-component('x-numedit', 'Input', function(e) {
+widget('x-numedit', 'Input', function(e) {
 
 	e.props.align = {default: 'right'}
 	e.field_attrs = {type: 'number'}
@@ -1806,7 +1808,7 @@ component('x-numedit', 'Input', function(e) {
 // spinedit
 // ---------------------------------------------------------------------------
 
-component('x-spinedit', 'Input', function(e) {
+widget('x-spinedit', 'Input', function(e) {
 
 	let cons_opt = numedit.construct(e)
 
@@ -1900,7 +1902,7 @@ component('x-spinedit', 'Input', function(e) {
 // tagsedit
 // ---------------------------------------------------------------------------
 
-component('x-tagsedit', 'Input', function(e) {
+widget('x-tagsedit', 'Input', function(e) {
 
 	e.class('x-editbox')
 
@@ -2024,7 +2026,7 @@ component('x-tagsedit', 'Input', function(e) {
 		return false
 	}
 
-	focusable_widget(e, e.input)
+	e.make_focusable(e.input)
 
 	e.input.on('blur', function() {
 		e.expanded = false
@@ -2174,7 +2176,7 @@ component('x-tagsedit', 'Input', function(e) {
 // placeedit widget with autocomplete via google places api
 // ---------------------------------------------------------------------------
 
-component('x-placeedit', 'Input', function(e) {
+widget('x-placeedit', 'Input', function(e) {
 
 	e.field_attrs = {type: 'place'}
 
@@ -2244,7 +2246,7 @@ component('x-placeedit', 'Input', function(e) {
 // google maps widget
 // ---------------------------------------------------------------------------
 
-component('x-googlemaps', 'Input', function(e) {
+widget('x-googlemaps', 'Input', function(e) {
 
 	e.field_attrs = {type: 'place'}
 
@@ -2269,7 +2271,7 @@ component('x-googlemaps', 'Input', function(e) {
 // slider
 // ---------------------------------------------------------------------------
 
-component('x-slider', 'Input', function(e) {
+widget('x-slider', 'Input', function(e) {
 
 	e.field_attrs = {type: 'number', decimals: 1}
 
@@ -2290,7 +2292,7 @@ component('x-slider', 'Input', function(e) {
 	e.focus_box   = div({class: 'x-focus-box'}, e.label_box, e.slider_box)
 	e.add(div({class: 'x-linear-form-filler'}), e.focus_box)
 
-	focusable_widget(e, e.input_thumb)
+	e.make_focusable(e.input_thumb)
 
 	// model
 
@@ -2401,10 +2403,10 @@ component('x-slider', 'Input', function(e) {
 // calendar widget
 // ---------------------------------------------------------------------------
 
-component('x-calendar', 'Input', function(e) {
+widget('x-calendar', 'Input', function(e) {
 
 	val_widget(e)
-	focusable_widget(e)
+	e.make_focusable()
 
 	function format_month(v) {
 		return div({class: 'x-calendar-month-box'},
@@ -2776,7 +2778,7 @@ component('x-calendar', 'Input', function(e) {
 // date edit
 // ---------------------------------------------------------------------------
 
-component('x-dateedit', 'Input', function(e) {
+widget('x-dateedit', 'Input', function(e) {
 
 	editbox_widget(e, {picker: true})
 
@@ -2803,10 +2805,10 @@ component('x-dateedit', 'Input', function(e) {
 
 })
 
-component('x-timepicker', 'Input', function(e) {
+widget('x-timepicker', 'Input', function(e) {
 
 	val_widget(e)
-	focusable_widget(e)
+	e.make_focusable()
 
 	let hh = t => t && t.slice(0, 2)
 	let mm = t => t && t.slice(3, 5)
@@ -2904,7 +2906,7 @@ component('x-timepicker', 'Input', function(e) {
 // time-of-day edit
 // ---------------------------------------------------------------------------
 
-component('x-timeofdayedit', 'Input', function(e) {
+widget('x-timeofdayedit', 'Input', function(e) {
 
 	editbox_widget(e, {picker: true})
 
@@ -2935,7 +2937,7 @@ component('x-timeofdayedit', 'Input', function(e) {
 // richedit
 // ---------------------------------------------------------------------------
 
-component('x-richedit', 'Input', function(e) {
+widget('x-richedit', 'Input', function(e) {
 
 	let html_val = [...e.nodes]
 	e.clear()
@@ -2974,7 +2976,7 @@ component('x-richedit', 'Input', function(e) {
 // richtext
 // ---------------------------------------------------------------------------
 
-component('x-richtext', function(e) {
+widget('x-richtext', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
@@ -3023,7 +3025,7 @@ component('x-richtext', function(e) {
 // lookup dropdown (for fields with `lookup_nav_id` or `lookup_rowset*`)
 // ---------------------------------------------------------------------------
 
-component('x-lookup-dropdown', function(e) {
+widget('x-lookup-dropdown', function(e) {
 
 	editbox_widget(e, {input: false, picker: true})
 
@@ -3083,7 +3085,7 @@ component('x-lookup-dropdown', function(e) {
 // image
 // ---------------------------------------------------------------------------
 
-component('x-image', 'Input', function(e) {
+widget('x-image', 'Input', function(e) {
 
 	e.title = ''
 	e.class('empty fa fa-camera')
@@ -3241,7 +3243,7 @@ component('x-image', 'Input', function(e) {
 // mustache row
 // ---------------------------------------------------------------------------
 
-component('x-mu-row', 'Input', function(e) {
+widget('x-mu-row', 'Input', function(e) {
 
 	e.template_string = e.at[0] && e.at[0].tag == 'script'
 		? e.at[0].html // text template as text inside <script> tag
@@ -3262,7 +3264,7 @@ component('x-mu-row', 'Input', function(e) {
 // sql editor
 // ---------------------------------------------------------------------------
 
-component('x-sql-editor', 'Input', function(e) {
+widget('x-sql-editor', 'Input', function(e) {
 
 	val_widget(e)
 
@@ -3303,7 +3305,7 @@ component('x-sql-editor', 'Input', function(e) {
 // mustache widget mixin
 // ---------------------------------------------------------------------------
 
-component('x-mu', function(e) {
+widget('x-mu', function(e) {
 
 	e.template_string = e.at[0] && e.at[0].tag == 'script'
 		? e.at[0].html // text template as text inside <script> tag
@@ -3423,7 +3425,7 @@ component('x-mu', function(e) {
 // widget switcher
 // ---------------------------------------------------------------------------
 
-component('x-switcher', 'Containers', function(e) {
+widget('x-switcher', 'Containers', function(e) {
 
 	row_widget(e)
 	let html_items = widget_items_widget(e)
@@ -3469,7 +3471,7 @@ component('x-switcher', 'Containers', function(e) {
 // x-label
 // ---------------------------------------------------------------------------
 
-component('x-label', function(e) {
+widget('x-label', function(e) {
 
 	editable_widget(e)
 	val_widget(e, false, false)
@@ -3492,7 +3494,7 @@ component('x-label', function(e) {
 // x-input
 // ---------------------------------------------------------------------------
 
-component('x-input', 'Input', function(e) {
+widget('x-input', 'Input', function(e) {
 
 	val_widget(e, true, false)
 
@@ -3569,7 +3571,7 @@ component('x-input', 'Input', function(e) {
 // form
 // ---------------------------------------------------------------------------
 
-component('x-form', 'Containers', function(e) {
+widget('x-form', 'Containers', function(e) {
 
 	serializable_widget(e)
 	selectable_widget(e)

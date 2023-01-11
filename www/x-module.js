@@ -107,7 +107,7 @@ function init_xmodule(opt) {
 		return pv
 	}
 
-	xm.instance_type = function(id) {
+	component.instance_type = function(id) {
 		for (let k in xm.active_layers) {
 			let props = xm.active_layers[k].props[id]
 			if (props && props.type)
@@ -115,7 +115,7 @@ function init_xmodule(opt) {
 		}
 	}
 
-	xm.init_instance = function(e, opt) {
+	component.init_instance = function(e, opt) {
 		let pv
 		opt.id = opt.id || e.id
 		if (!opt.id) {
@@ -134,12 +134,12 @@ function init_xmodule(opt) {
 			opt.module = opt.id.match(/^[^_\d]+/)[0]
 		}
 
-		// set init values as default values, which assumes that init values
+		// Set init values as default values, which assumes that init values
 		// i.e. html attrs as well as values passed to (or returned from) the
-		// constructor are static!
+		// component init function are static!
 		// If instead these values are dynamic for the same id, then they
-		// won't be saved right! To work around that, set nodefault="prop1 ..."
-		// for the props that you know not to have a static default value.
+		// won't be saved right! To fix that, set nodefault="prop1 ..."
+		// for the props that don't have a static default value.
 		e.xoff()
 		for (let k in opt)
 			e.set_prop(k, opt[k])
@@ -155,8 +155,6 @@ function init_xmodule(opt) {
 			for (let k in pv)
 				e.set_prop(k, pv[k])
 		}
-
-		e.xon()
 	}
 
 	function update_instance(e) {
@@ -266,7 +264,7 @@ function init_xmodule(opt) {
 		if (!e.id)
 			return
 		let pa = e.get_prop_attrs(k)
-		if (!pa)
+		if (!pa || pa.private)
 			return
 		xm.set_val(e, e.id, k, v, v0, pa.default, pa.slot, e.module, e.serialize_prop)
 	})
@@ -441,7 +439,7 @@ window.on('load', function() {
 // prop layers inspector
 // ---------------------------------------------------------------------------
 
-component('x-prop-layers-inspector', function(e) {
+widget('x-prop-layers-inspector', function(e) {
 
 	e.classes = 'x-inspector'
 
@@ -628,7 +626,7 @@ field_types.nav.editor = function(...args) {
 // property inspector
 // ---------------------------------------------------------------------------
 
-component('x-prop-inspector', function(e) {
+widget('x-prop-inspector', function(e) {
 
 	e.classes = 'x-inspector'
 
@@ -740,9 +738,9 @@ component('x-prop-inspector', function(e) {
 		for (let te of widgets)
 			for (let prop in te.get_props()) {
 				let pa = te.get_prop_attrs(prop)
-				if (widgets.size == 1 || !pa.unique) {
+				if (!pa.private && (widgets.size == 1 || !pa.unique)) {
 					prop_counts[prop] = (prop_counts[prop] || 0) + 1
-					defs[prop] = te.get_prop_attrs(prop)
+					defs[prop] = pa
 					let v1 = te.serialize_prop(prop, te.get_prop(prop))
 					let v0 = te.serialize_prop(prop, defs[prop].default)
 					pv0[prop] = prop in pv0 && pv0[prop] !== v0 ? undefined : v0
@@ -796,7 +794,7 @@ component('x-prop-inspector', function(e) {
 // widget tree
 // ---------------------------------------------------------------------------
 
-component('x-widget-tree', function(e) {
+widget('x-widget-tree', function(e) {
 
 	e.classes = 'x-inspector'
 
@@ -946,7 +944,7 @@ component('x-widget-tree', function(e) {
 // sql rowset editor
 // ---------------------------------------------------------------------------
 
-sql_rowset_editor = component('x-sql-rowset-editor', function(e) {
+sql_rowset_editor = widget('x-sql-rowset-editor', function(e) {
 
 
 

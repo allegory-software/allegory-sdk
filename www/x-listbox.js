@@ -24,7 +24,7 @@ function listbox_widget(e) {
 
 	val_widget(e, true)
 	nav_widget(e)
-	focusable_widget(e)
+	e.make_focusable()
 	e.class('x-focusable-items')
 	stylable_widget(e)
 
@@ -389,7 +389,7 @@ function listbox_widget(e) {
 	return {items: html_items, row_display_val_template: item_template}
 }
 
-component('x-listbox', 'Input', listbox_widget)
+widget('x-listbox', 'Input', listbox_widget)
 
 hlistbox = function(...options) {
 	return listbox({orientation: 'horizontal'}, ...options)
@@ -399,7 +399,7 @@ hlistbox = function(...options) {
 // list dropdown
 // ---------------------------------------------------------------------------
 
-component('x-list-dropdown', function(e) {
+widget('x-list-dropdown', function(e) {
 
 	nav_dropdown_widget(e)
 
@@ -443,7 +443,7 @@ component('x-list-dropdown', function(e) {
 // enum dropdown
 // ---------------------------------------------------------------------------
 
-component('x-enum-dropdown', function(e) {
+widget('x-enum-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 
@@ -460,7 +460,7 @@ component('x-enum-dropdown', function(e) {
 // select button
 // ---------------------------------------------------------------------------
 
-component('x-select-button', function(e) {
+widget('x-select-button', function(e) {
 
 	listbox.construct(e)
 
@@ -487,7 +487,7 @@ function colors_listbox(...opt) {
 	}, ...opt)
 }
 
-component('x-color-dropdown', function(e) {
+widget('x-color-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 
@@ -540,7 +540,7 @@ function icons_listbox(...opt) {
 	}, ...opt)
 }
 
-component('x-icon-dropdown', function(e) {
+widget('x-icon-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 
