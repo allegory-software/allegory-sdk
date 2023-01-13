@@ -4,6 +4,7 @@
 	Written by Cosmin Apreutesei. Public domain.
 
 TYPE CHECKING
+
 	isobject(e)
 	isarray(a)
 	isobj(t)
@@ -11,11 +12,15 @@ TYPE CHECKING
 	isnum(n)
 	isbool(b)
 	isfunc(f)
+
 LOGIC
+
 	or(x, z)
 	strict_or(x, z)
 	repl(x, v, z)
+
 MATH
+
 	inf
 	floor(x) ceil(x) round(x)
 	abs(x)
@@ -34,28 +39,37 @@ MATH
 	nextpow2(x)
 	x.dec([decimals])
 	x.base([base], [digits])
+
 CALLBACKS
+
 	noop
 	return_true
 	return_false
 	return_arg
 	assert_false
+
 ERRORS
+
 	pr[int](...)
 	warn(...)
+	warn_if(cond, ...)
 	debug(...)
 	trace(...)
 	debug_if(cond, ...)
 	trace_if(cond, ...)
 	assert(v, err, ...) -> v
 	stacktrace()
+
 EXTENDING BUILT-IN OBJECTS
+
 	property(class|instance, prop, descriptor | get,set)
 	method(class|instance, method, func)
 	override(class|instance, method, func)
 	alias(class|instance, new_name, old_name)
 	override_property_setter(class|instance, prop, set)
+
 STRINGS
+
 	s.subst('{0} {1}', a0, a1, ...)
 	s.starts(s)
 	s.ends(s)
@@ -69,14 +83,18 @@ STRINGS
 	catany(sep, ...); sep.catany(...)
 	catall(...)
 	s.captures(re) -> [capture1, ...]
+
 MULTI-LANGUAGE STUBS
+
 	S(id, default)                         get labeled string in current language
 	lang()                                 get current language
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
+
 ARRAYS
-	array(...) -> a
-	empty_array
+
+	array(...) -> a                        new Array(...)
+	empty_array -> []                      global empty array, read-only!
 	a.set(a1) -> s
 	a.extend(a1)
 	a.copy() -> a1
@@ -91,30 +109,36 @@ ARRAYS
 	a.tokeys([v]) -> t
 	a.uniq_sorted()
 	a.remove_duplicates()
+
 HASH MAPS
-	obj() -> o
-	set(iter) -> m
-	s.addset(s2) -> s
-	map(iter) -> m
+
+	obj() -> o                      create a native map, string keys only
+	set(iter) -> m                  create a set, holds all types
+	s.addset(s2) -> s               dump set into set
+	s.toarray() -> [v1,...]
+	map(iter) -> m                  create a map, keys and values can be of any type
 	m.first_key
-	m.toarray() -> a
-	empty -> {}
-	empty_obj -> obj()
-	empty_set -> set()
-	keys(t)
-	assign(dt, t1, ...)
-	assign_opt(dt, t1, ...)
-	attr(t, k[, cons])
+	empty -> {}                     global empty object, inherits Object
+	empty_obj -> obj()              global empty object, does not inherit Object
+	empty_set -> set()              global empty set, read-only!
+	keys(t) -> [k1, ...]
+	assign(dt, t1, ...)             dump t1, ... into dt
+	assign_opt(dt, t1, ...)         dump t1, ... into dt, skips undefined values
+	attr(t, k[, cons])              t[k] = t[k] || cons(); cons defaults to obj
 	memoize(f)
-	count_keys(t, [max_n]) -> n
+	count_keys(t, [max_n]) -> n     count keys in t up-to max_n
+
 TYPED ARRAYS
+
 	[dyn_][f32|i8|u8|i16|u16|i32|u32]arr(arr|[...]|capacity, [nc]) -> [dyn]arr
 		.set(in_arr, [offset=0], [len], [in_offset=0])
 		.invalidate([offset=0], [len])
 		.grow(cap, [preserve_contents=true], [pow2=true])
 		.grow_type(arr_type|max_index|[...]|arr, [preserve_contents=true])
 		.setlen(len)
+
 TIME & DATE
+
 	time() -> ts
 	time(y, m, d, H, M, s, ms) -> ts
 	time(date_str) -> ts
@@ -131,31 +155,49 @@ TIME & DATE
 	ts.timeago() -> s
 	ts.date([locale], [with_time], [with_seconds]) -> s
 	s.parse_date([locale]) -> ts
+
 FILE SIZE FORMATTING
+
 	x.kbytes(x, [dec], [mag], [mul = 1024]) -> s
+
 COLORS
+
 	hsl_to_rgb(h, s, L) -> '#rrggbb'
+
 GEOMETRY
+
 	point_around(cx, cy, r, angle) -> [x, y]
 	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) -> [x, y, w, h]
+
 TIMERS
+
 	runafter(t, f) -> tid
 	runevery(t, f) -> tid
 	runagainevery(t, f) -> tid
 	clock()
 	timer(f) -> tm; tm(t) to rearm; tm() to cancel.
+
 SERIALIZATION
+
 	json_arg(s) -> t
 	json(t) -> s
+
 CLIPBOARD
+
 	copy_to_clipboard(text, done_func)
+
 LOCAL STORAGE
+
 	save(key, [s])
 	load(key) -> s
+
 URL DECODING, ENCODING AND UPDATING
+
 	url_parse(s) -> t
 	url_format(t) -> s
+
 EVENTS
+
 	event(name|ev, [bubbles], ...args) -> ev
 	e.on   (name|ev, f, [enable], [capture])
 	e.off  (name|ev, f, [capture])
@@ -165,11 +207,15 @@ EVENTS
 	on.installers.EVENT = f() { ... }
 	on.callers.EVENT = f(ev, f) { return f.call(this, ...) }
 	DEBUG_EVENTS = false
+
 AJAX REQUESTS
+
 	ajax(opt) -> req
 	get(url, success, [error], [opt]) -> req
 	post(url, data, [success], [error], [opt]) -> req
+
 BROWSER DETECTION
+
 	Firefox
 
 */
@@ -276,6 +322,11 @@ pr    = console.log
 warn  = console.log
 debug = console.log
 trace = console.trace
+
+function warn_if(cond, ...args) {
+	if (!cond) return
+	warn(...args)
+}
 
 function trace_if(cond, ...args) {
 	if (!cond) return
