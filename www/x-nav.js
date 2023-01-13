@@ -450,6 +450,21 @@ server-side properties:
 
 {
 
+css('.x-loading-overlay', 'p')
+css('.x-loading-overlay.error', 'bg-smoke')
+
+css('.x-loading-overlay-message', 'p2 shadow-tooltip', `
+	background-color: var(--bg-popup);
+`)
+
+css('.x-loading-overlay-message .x-button', '', `
+	line-height: 1;
+`)
+
+css('.x-loading-overlay-detail', 'mono m-y')
+
+css('.x-loading-error-icon', 'm-x fg-error')
+
 field_types = obj() // {TYPE->{k:v}}
 rowset_col_attrs = obj() // {ROWSET.COL->{k:v}}
 
@@ -555,7 +570,7 @@ function shared_nav(id, opt) {
 	}
 	return ln
 }
-}
+} //shared nav scope
 
 let bool = v => repl(repl(v, '', true), 'false', false)
 
@@ -5571,6 +5586,10 @@ function nav_dropdown_widget(e) {
 	let color = obj()
 	field_types.color = color
 
+	css('.x-item-color', '', `
+		width: 100%;
+	`)
+
 	color.format = function(s) {
 		return div({class: 'x-item-color', style: 'background-color: '+s}, '\u00A0')
 	}
@@ -5591,6 +5610,21 @@ function nav_dropdown_widget(e) {
 	percent.to_text = function(p) {
 		return isnum(p) ? (p * 100).dec(this.decimals) + '%' : p
 	}
+
+	css('.x-item-progress', 'rel', `
+		width: 100%;
+		height: 100%;
+	`)
+
+	css('.x-item-progress-bar', 'abs', `
+		top: 0; left: 0; bottom: 0;
+		background-color: var(--bg-selected);
+	`)
+
+	// rel: so it stays on top of the absolute progress bar
+	css('.x-item-progress-text', 'rel t-c', `
+		top: 0; left: 0; right: 0; bottom: 0;
+	`)
 
 	percent.format = function(s) {
 		let bar = div({class: 'x-item-progress-bar'})
@@ -5793,4 +5827,4 @@ init_rowset_events = memoize(function() {
 	}
 })
 
-}
+} //module scope

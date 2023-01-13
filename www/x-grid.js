@@ -22,8 +22,8 @@ implements:
 
 // NOTE: in order to valign the text of the grid cell with its inline editor,
 // `grid-cell-baseline` must be set to match the baseline set implicitly by
-// `grid-cell-line-height`. Don't try to vcenter the text on the cell with these
-// two parameters, use `padding-y-input` for that.
+// `grid-cell-line-height`. Don't try to v-center the text on the cell with
+// these two parameters, use `padding-y-input` for that!
 // NOTE: Firefox won't set a line height lower than the font allows on <input>!
 css(':root', '', `
 	--grid-cell-h           : 24px; /* PIXELS ONLY! */
@@ -31,28 +31,38 @@ css(':root', '', `
 	--grid-cell-line-height : 16px; /* PIXELS ONLY! */
 `)
 
-css('.x-grid', 'v clip cursor-arrow')
+css('.theme-small', '', `
+	--grid-cell-h            : 20px; /* PIXELS ONLY! */
+	--grid-cell-baseline     : 11px; /* PIXELS ONLY! */
+	--grid-cell-line-height  : 12px; /* PIXELS ONLY! */
+`)
 
-css('.x-vgrid', 'h')
-css('.x-vgrid > .x-grid-header', 'br bb0')
-css('.x-vgrid .x-grid-action-band', 'v')
-css('.x-vgrid .x-grid-cells-view', '', 'width: 0;') /* CSS people are hopeless */
+css('.theme-large', '', `
+	--grid-cell-h            : 42px; /* PIXELS ONLY! */
+	--grid-header-h          : 62px; /* PIXELS ONLY! */
+	--grid-cell-baseline     : 17px; /* PIXELS ONLY! */
+	--grid-cell-line-height  : 24px; /* PIXELS ONLY! */
+`)
+
+css('.x-grid', 'S v-t-s clip arrow')
+
+css('.x-vgrid', 'h-l-s')
+css('.x-vgrid > .x-grid-header', 'b-r b-b-0')
+css('.x-vgrid .x-grid-action-band', 'v-t-s')
+css('.x-vgrid .x-grid-cells-view', '', 'width: 0;') // CSS people are hopeless
 
 // grid header
 
 // rel makes header cols movable for scrolling horizontally
 css('.x-grid-header', 'rel b b0')
 
-css('.x-grid:not(.x-vgrid) > .x-grid-header', 'bb')
+css('.x-grid:not(.x-vgrid) > .x-grid-header', 'b-b')
 
 css('.x-grid-header-canvas', 'abs')
 
 /* grid cells: grid > view > ct > (cells, editor) > cell */
 
-css('.x-grid-cells-view', 'rel grid scroll-auto', `
-	flex: 1 0;                 /* stretch to fill container but not more */
-	min-height: 0;
-`)
+css('.x-grid-cells-view', 'S shrinks rel grid scroll-auto')
 
 // Fix the damn Chrome bug with custom-drawn scrollbars !!
 // 50px has the nice side effect of gradually hiding the header when the grid
@@ -91,10 +101,109 @@ css('.x-grid.loading > .x-grid-progress-bar', '', 'background-color: green;')
 
 // grid action band
 
-css('.x-grid-action-band', 'bt bg')
+css('.x-grid-action-band', 'b-t bg')
 css('.x-grid-action-band-reload-button', 'small label')
-css('.x-grid-action-band-reload-button > .x-button-icon', 'pts')
-css('.x-grid-action-band-info', 'h-l-c ml small label pre')
+css('.x-grid-action-band-reload-button > .x-button-icon', 'p-t-05')
+css('.x-grid-action-band-info', 'h-l-c m-l small label pre')
+
+// grid col moving
+
+css_state('.x-grid.col-move'  , 'grab')
+css_state('.x-grid.col-moving', 'grabbing')
+
+// grid col resizing
+
+// NOTE: `col-resize` cursor is almost invisible on a light background on Windows.
+css_state('.x-grid:is(.col-resize, .header-resize)', '', 'cursor: ew-resize;')
+
+css_state('.x-grid-resize-guides', 'abs', 'top: 0;')
+
+// grid editor role
+
+css_role('.x-widget.grid-editor', '', `
+
+	/* layout self */
+	position: absolute;
+	width: min-content;
+	margin: 0;
+
+	/* style self */
+	font-size: inherit;
+	font-family: inherit;
+`)
+
+css_role('.grid-editor > .x-focus-box', '', `
+	border-radius: 0;
+	border: 0;
+	/* add border width, since we removed the border */
+	padding-top: calc(
+		var(--border-width-item) +
+		var(--padding-y-input)
+	);
+	background-color: var(--bg-grid-editor);
+`)
+
+css_role('.grid-editor > .x-focus-box > .x-editbox-input', '', `
+	line-height: var(--grid-cell-line-height);
+`)
+
+css_role(`
+	.grid-editor > .x-focus-box,
+	.grid-editor.open:not(.widget-selected) > .x-focus-box),
+	.grid-editor:focus-within:not(.widget-selected) > .x-focus-box
+`, '', `
+	box-shadow: inset 2px 2px 6px -2px rgba(0,0,0,0.75);
+	outline: none;
+`)
+
+/* grid as picker */
+
+css_role('.x-widget.x-grid.picker', '', `
+	min-height: 40px;
+	max-height: 300px;
+	max-width: 800px;
+	resize: both;
+`)
+
+css_role('.x-widget.x-grid.picker > .x-grid-cells-view', '', `
+	overflow-y: scroll; /* show vert-scrollbars always when a picker */
+`)
+
+/* TODO: grid filter dropdowns
+
+.x-widget.x-grid-filter-dropdown {
+	font-size: 85%;
+	bottom: 0;
+	left: 0;
+
+	position: absolute;
+	min-width: 0;
+	border: 0;
+	margin: 0;
+	border-radius: 0;
+
+	color: #36f;
+`)
+
+.x-dropdown.x-grid-filter-dropdown.open {
+	box-shadow: none;
+`)
+
+.x-grid-filter-dropdown-grid {
+	font-size: 90%;
+`)
+
+*/
+
+/* grid widget editing */
+
+css_role('.x-grid.widget-editing', '', `
+	outline: none; /* many edit modes, each marked in its own ways */
+`)
+
+css_role('.x-grid-cells-view.editing > .x-grid-cells', '', `
+	display: none;
+`)
 
 widget('x-grid', 'Input', function(e) {
 
@@ -114,18 +223,18 @@ widget('x-grid', 'Input', function(e) {
 		e.text_font_family = css['font-family']
 		e.icon_font_family = 'fontawesome'
 		e.font_size = num(css['font-size'])
-		e.padding_x = num(css.prop('--x-padding-x-input'))
-		e.padding_y = num(css.prop('--x-padding-y-input'))
+		e.padding_x = num(css.prop('--padding-x-input'))
+		e.padding_y = num(css.prop('--padding-y-input'))
 		e.cell_h    = num(css.prop('--grid-cell-h'))
 		e.header_h  = num(css.prop('--grid-header-h'))
 
 		// css colors
-		e.cell_border_width      = num(css.prop('--x-border-width-item'))
-		e.hcell_border_color     = css.prop('--bg2')
+		e.cell_border_width      = 1
+		e.hcell_border_color     = css.prop('--bg1')
 		e.cell_border_color      = css.prop('--bg1')
 		e.bg                     = css.prop('--bg')
 		e.bg_alt                 = css.prop('--bg-alt')
-		e.bg_header              = css.prop('--bg1')
+		e.bg_header              = css.prop('--bg-alt')
 		e.fg                     = css.prop('--fg')
 		e.fg_gray                = css.prop('--fg-gray')
 		e.fg_search              = css.prop('--fg-search')
@@ -1065,7 +1174,7 @@ widget('x-grid', 'Input', function(e) {
 		e.cells_canvas.x = scroll_x
 		e.cells_canvas.y = scroll_y
 
-		e.header.w = header_w
+		e.header.w = horiz ? null : header_w
 		e.header.h = header_h
 
 		e.cells_canvas.resize(cells_view_w, cells_view_h, 200, 200)

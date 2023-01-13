@@ -968,6 +968,22 @@ function globals_list() {
 // toolboxes
 // ---------------------------------------------------------------------------
 
+css(`
+	.x-dev-toolbox > .x-toolbox-titlebar,
+	.x-dev-toolbox .x-widget
+`, 'arial', `
+	font-family: arial, sans-serif;
+	font-size: 12px;
+`)
+
+css('.x-inspector .fa-eye, .x-inspector .fa-chevron, .x-inspector .fa-chevron-right', '', `
+	font-size: 80%;
+`)
+
+css('x-prop-layers-inspector > .x-grid-header', '', `
+	min-height: calc(2em + 1px);
+`)
+
 let dev_toolbox_props = {
 	text: {slot: 'none'},
 }

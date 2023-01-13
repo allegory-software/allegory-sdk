@@ -3,7 +3,7 @@
 	X-WIDGETS: Web Components in JavaScript.
 	Written by Cosmin Apreutesei. Public Domain.
 
-DEPENDS
+Depends on:
 
 	divs.js
 	glue.js
@@ -34,25 +34,156 @@ GLOBALS
 	notify(text, ['search'|'info'|'error'], [timeout])
 	setglobal(k, v)
 
-WRITING CSS
+WRITING CSS RULES
 
-	REUSE
+	CSS REUSE
+
 		Use var() for anything that is used in two places and is not a coincidence.
 		Use utils classes over specific styles when you can.
 
-	STATES
+	CSS STATES
+
 		State classes are set only on the outermost element of a widget except
 		`:focus-visible` which is set only to the innermost element (which has tabindex).
 		Use `.outer.state .inner` to style `.inner` on `.state`.
 		Use `.outer .inner:has(:focus-visible)` to style `.outer` on `:focus-visible`.
 
-	DESCENDANT COMBINATOR
+	CSS DESCENDANT COMBINATOR
+
 		For container widgets like tabs and split you have to use the ">" combinator
 		instead of " " at least until you reach a header or something, otherwise
 		you will accidentally select child widgets of the same type as the container.
 
+*/
+
+css(':root', '', `
+
+	--padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
+	--padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
+
+	--border-focused                : #99d; /* dropdown open */
+	--outline-markbox-focused       : #88888866;
+
+	--shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
+	--shadow-slider-thumb           :  1px  1px  2px      #000000aa;
+
+	--padding-y-input-top         : 22px; /* for inputs with label */
+	--padding-y-input-bottom      :  2px; /* for inputs with label */
+	--padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
+	--padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
+	--padding-y2-input-il-dropdown-button : .5em;
+
+	--min-height-input            : 3.6em;
+	--width-input                 : 12em;
+
+	--font-size-input-label        : var(--font-size-small);
+	--font-size-input-label-empty  : var(--font-size-small); /* put 100% for animating floating label */
+
+	--bg-moving       : #eeeeeeaa;
+	--bg-popup        : #fff;  /* bg for popups and inline grid editors */
+	--bg-popup2       : #fff;  /* bg for popups sitting over popups */
+	--bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
+	--bg-today        : #f33;
+	--fg-today        : var(--fg-inverted);
+	--fg-clickable    : #207fdf; /* markbox icon, slider */
+
+	--bg-select-button: var(--bg-button);
+
+	--bg-toolbox-titlebar         : var(--bg1);
+	--bg-toolbox-titlebar-focused : #00003333;
+
+	--stroke-dialog-xbutton       : #00000066;
+
+	--selected-widget-outline-color         : #666;
+	--selected-widget-outline-color-focused : blue;
+
+	--bg-grid-editor        : var(--bg-popup);
+`)
+
+css('.theme-dark', '', `
+
+	--border-focused                :  #66a;
+	--outline-markbox-focused       :  #88888866;
+
+	--bg-moving            : #141a24aa;
+	--bg-popup             : #1d2532;
+	--bg-popup2            : #11161e;
+	--fg-clickable         : #75b7fa;
+
+	--bg-select-button: var(--bg1);
+
+	--bg-toolbox-titlebar         : #303030;
+	--bg-toolbox-titlebar-focused : #636363;
+
+	--stroke-dialog-xbutton       : #000000cc;
+
+	--selected-widget-outline-color         : #aaa;
+	--selected-widget-outline-color-focused : var(--fg-clickable);
+
+	--bg-grid-editor        : #495560;
+
+	color: var(--fg);
+	background-color: var(--bg);
+	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
+
+`)
+
+css('info', 'h small label m-y p-x-input arrow')
+
+css('.x-widget', 'rel h')
+
+css('.x-container', 'grid shrinks clip') /* grid because grid-in-flex is buggy */
+
+css('.x-if .x-switcher, .x-ct', 'skip') /* purely-logical containers */
+
+/* focusable-items -----------------------------------------------------------
+
+	these are widgets containing multiple focusable and selectable items,
+	so they don't show a focus outline on the entire widget, but only show
+	an inside .x-item element as being focused instead.
+	NOTE: an .x-item cannot itself be .x-focusable-items!
 
 */
+
+css_state('.x-focusable-items:focus', '', 'outline: none;')
+
+css_state('.x-item.disabled', 'gray')
+css_state('.x-item.null'    , 'gray')
+css_state('.x-item.empty'   , 'gray')
+
+css_state('.x-item.row-focused' , '', ` background: var(--bg-row-focused);  `)
+css_state('.x-item.new'         , '', ` background: var(--bg-new);          `)
+css_state('.x-item.modified'    , '', ` background: var(--bg-modified);     `)
+css_state('.x-item.new.modified', '', ` background: var(--bg-new-modified); `)
+css_state('.x-item.removed'     , 'strike')
+
+css_state('.x-item.selected', '', ` background-color: var(--bg-unselected); `)
+css_state('.x-item.focused' , '', ` background-color: var(--bg-unfocused);  `)
+
+css_state('.x-focusable-items:focus-within .x-item.selected', '', `
+	background : var(--bg-selected);
+	color      : var(--fg-selected);
+`)
+
+css_state('.x-focusable-items:focus-within .x-item.focused', '', `
+	background : var(--bg-focused);
+	color      : var(--fg-focused);
+`)
+
+css_state('.x-focusable-items .x-item.focused.selected', '', `
+	background : var(--bg-unfocused-selected);
+	color      : var(--fg-unfocused-selected);
+`)
+
+css_state('.x-focusable-items:focus-within .x-item.focused.selected', '', `
+	background: var(--bg-focused-selected);
+`)
+
+css_state('.x-item.invalid', 'bg-error')
+
+css_state('.x-focusable-items:focus-within .x-item.focused.invalid', '', `
+	background : var(--bg-focused-error);
+`)
 
 function widget(tag, category, init) {
 	if (!isstr(category)) { // shift arg
@@ -81,6 +212,42 @@ function widget(tag, category, init) {
 
 	return create
 }
+
+/* widget editing & selecting --------------------------------------------- */
+
+css_role('.x-widget.widget-editing', '', `
+	outline: 2px dotted red;
+	outline-offset: -2px;
+`)
+
+css_role('.x-widget [contenteditable]', 'no-outline')
+
+css_role('.x-widget.widget-selected', 'click-through')
+
+css_role('.x-widget-selected-overlay', 'overlay click-through-off', `
+	display: block;
+	background-color: var(--bg-smoke);
+	outline: 2px dotted var(--selected-widget-outline-color);
+	outline-offset: -2px;
+	z-index: 10; /* arbitrary */
+`)
+
+css_role_state('.x-widget-selected-overlay:focus', '', `
+	outline-color: var(--selected-widget-outline-color-focused);
+`)
+
+css('.x-widget-placeholder', 'grid', `
+	justify-content: safe center;
+	align-content: center;
+	outline: 1px dashed var(--fg-gray);
+	outline-offset: -1px;
+`)
+
+css('.x-widget-placeholder-button', 'ro0 small', `
+	margin: 1px;
+	padding: .1em;
+	min-width: 2em;
+`)
 
 /* ---------------------------------------------------------------------------
 // undo stack, selected widgets, editing widget and clipboard.
@@ -476,6 +643,138 @@ widget('x-popup', function(e) {
 // tooltip
 // ---------------------------------------------------------------------------
 
+// z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
+css('.x-tooltip', 'z2 h-l-s noclip noselect', `
+	max-width: 400px;  /* max. width of the message bubble before wrapping */
+
+	/* animation */
+	opacity: 0;
+	pointer-events: none;
+	animation-duration: .2s;
+	animation-timing-function: ease-out;
+	animation-fill-mode: forwards;
+`)
+
+css('.x-tooltip-body', 'h-l-bl p-y tight', `
+	border-radius    : var(--border-radius-window);
+	background-color : var(--bg-popup);
+	box-shadow       : var(--shadow-tooltip);
+`)
+
+// visibility animation
+
+css('.x-tooltip.visible', 'op1 click-through-off')
+
+css('.x-tooltip.visible[side=left  ]', '', `animation-name: x-tooltip-left;   `)
+css('.x-tooltip.visible[side=right ]', '', `animation-name: x-tooltip-right;  `)
+css('.x-tooltip.visible[side=top   ]', '', `animation-name: x-tooltip-top;    `)
+css('.x-tooltip.visible[side=bottom]', '', `animation-name: x-tooltip-bottom; `)
+
+css(`
+	@keyframes x-tooltip-left   { from { opacity: 0; transform: translate(-1em, 0);  } }
+	@keyframes x-tooltip-right  { from { opacity: 0; transform: translate( 1em, 0);  } }
+	@keyframes x-tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
+	@keyframes x-tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
+`)
+
+css('.x-tooltip-content', 'p-x-2', `
+	display: inline-block; /* shrink-wrap and also word-wrap when reaching container width */
+`)
+
+css('.x-tooltip-xbutton', 't-t small gray p-y-05 p-x-2 b0 b-l hand', `
+	align-self: stretch;
+	pointer-events: all;
+`)
+
+css('.x-tooltip-xbutton:not([disabled]):not(.active):hover', '', `
+	color: inherit;
+`)
+
+css('.x-tooltip-tip', 'z1', `
+	display: block;
+	border: .5em solid transparent; /* border-based triangle shape */
+	color: var(--bg-popup);
+`)
+
+css('.x-tooltip-icon', 't-t m-t-05 m-l-2', `
+	font-size: 1em; /* TODO: why? */
+	line-height: inherit !important; /* override fontawesome's !important */
+`)
+
+css('.x-tooltip[side=left  ] > .x-tooltip-tip', '', ` border-left-color   : inherit; `)
+css('.x-tooltip[side=right ] > .x-tooltip-tip', '', ` border-right-color  : inherit; `)
+css('.x-tooltip[side=top   ] > .x-tooltip-tip', '', ` border-top-color    : inherit; `)
+css('.x-tooltip[side=bottom] > .x-tooltip-tip', '', ` border-bottom-color : inherit; `)
+
+// side & align combinations
+
+css('.x-tooltip:is([side=top],[side=bottom])', '', `flex-flow: column;`)
+css('.x-tooltip[side=left   ]', '', `justify-content: flex-end;`)
+css('.x-tooltip[align=end   ]', '', `align-items: flex-end; `)
+css('.x-tooltip[align=center]', '', `align-items: center; `)
+
+css('.x-tooltip:is([side=right],[side=bottom]) > .x-tooltip-body', '', `order: 2;`)
+
+css('.x-tooltip[align=center]:is([side=top],[side=bottom]) .x-tooltip-content', '', `text-align: center; `)
+css('.x-tooltip[align=end   ]:is([side=top],[side=bottom]) .x-tooltip-content', '', `text-align: right; `)
+
+css('.x-tooltip:is([side=top],[side=bottom]) > .x-tooltip-tip', '', ` margin: 0 .5em; `)
+css('.x-tooltip:is([side=left],[side=right]) > .x-tooltip-tip', '', ` margin: .5em 0; `)
+
+css('.x-tooltip[side=right ]', '', `margin-left   : -.25em; `)
+css('.x-tooltip[side=left  ]', '', `margin-left   :  .25em; `)
+css('.x-tooltip[side=top   ]', '', `margin-top    :  .25em; `)
+css('.x-tooltip[side=bottom]', '', `margin-top    : -.25em; `)
+
+// styling based on kind attr
+
+css('.x-tooltip[kind=search] > .x-tooltip-body', '', ` background-color: var(--bg-search); color: #000; `)
+css('.x-tooltip[kind=search] > .x-tooltip-tip ', '', ` color: var(--bg-search); `)
+
+css('.x-tooltip[kind=info  ] > .x-tooltip-body', '', ` background-color: var(--bg-info); color: var(--fg-info); `)
+css('.x-tooltip[kind=info  ] > .x-tooltip-tip ', '', ` color: var(--bg-info); `)
+css('.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+
+css('.x-tooltip[kind=error ] > .x-tooltip-body', '', ` background-color: var(--bg-error); color: var(--fg-error); `)
+css('.x-tooltip[kind=error ] > .x-tooltip-tip ', '', ` color: var(--bg-error); `)
+css('.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+
+css('.x-tooltip[kind=warn  ] > .x-tooltip-body', '', ` background-color: var(--bg-warn); color: var(--fg-warn); `)
+css('.x-tooltip[kind=warn  ] > .x-tooltip-tip ', '', ` color: var(--bg-warn); `)
+css('.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+
+css('.x-tooltip[kind=cursor]', '', `
+	margin-left: .75em;
+	margin-top : .75em;
+`)
+
+css('.x-tooltip[kind=cursor] > .x-tooltip-body', '', `
+	padding: .15em 0;
+	border: 1px solid #aaaa99;
+	color: #333;
+	background-color: var(--bg-tooltip);
+	font-family: sans-serif;
+	font-size: 12px;
+	border-radius: 0;
+`)
+
+css('.x-tooltip[kind=cursor] > .x-tooltip-body > .x-tooltip-content', '', `
+	padding: 0 .5em;
+	white-space: pre !important;
+`)
+
+css('.x-tooltip[kind=cursor] > .x-tooltip-tip', '', ` display: none; `)
+
+css('.x-error-list', '', `
+	margin: 0;
+	padding-inline-start: 1em;
+	text-align: start;
+`)
+
+css_state('.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton:hover', '', `color: var(--fg-info);  `)
+css_state('.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton:hover', '', `color: var(--fg-error); `)
+css_state('.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton:hover', '', `color: var(--fg-warn);  `)
+
 widget('x-tooltip', function(e) {
 
 	e.popup()
@@ -647,6 +946,12 @@ tooltip.icon_classes = {
 // toaster
 // ---------------------------------------------------------------------------
 
+css('.x-toaster', 'hidden') // don't mess up the layout
+
+css('.x-toaster-message', 'op1', `
+	transition: opacity .2s, top .2s;
+`)
+
 widget('x-toaster', function(e) {
 
 	e.tooltips = set()
@@ -725,6 +1030,69 @@ ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 // ---------------------------------------------------------------------------
 // menu
 // ---------------------------------------------------------------------------
+
+// z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
+// noclip: submenus are outside clipping area
+// fg: prevent inheritance by the .focused rule below.
+css('.x-menu', 'arial abs z4 noclip fg', `
+
+	font-size   : 12px;
+	line-height : 1.5;
+
+	/* layout self */
+	top: 0;
+	left: 0;
+	min-width: 200px;
+	width: min-content; /* why the fuck is width:0 not working here? */
+
+	display: table;
+	border-collapse: collapse; /* separators are done with borders */
+	background-color: var(--bg-popup);
+
+	color: inherit;
+`)
+
+// submenus are anchored to this td
+css('.x-menu-tr > .x-menu-sub-td', 'rel', `
+	padding-right: .8em;
+`)
+
+css('.x-menu-tr > td', '', `
+	padding: .4em;
+`)
+
+css('.x-menu-tr > td:first-child', '', `
+	padding-left: .9em;
+`)
+
+css('.x-menu-separator', '', `
+	height: 1em;
+`)
+
+css('.x-menu-heading', 'p-y p-l-2 bold gray arrow')
+
+css('.x-menu-separator > hr', 'b0 b-t m-y')
+
+css('.x-menu-title-td', 'p0 p-l-0 clip nowrap', `
+	width: 100%;
+`)
+
+css_state('.x-menu, .x-menu:focus-within', '', `
+	outline: 1px solid var(--border);
+	outline-offset: -1px;
+	box-shadow: var(--shadow-menu);
+`)
+
+css_state('.x-menu-tr.focused > :not(.x-menu-table)', '', `
+	background : var(--bg-unfocused-selected);
+	color      : var(--fg-unfocused-selected);
+`)
+
+css_state('.x-menu:focus-within .x-menu-tr.focused > :not(.x-menu-table)', '', `
+	background : var(--bg-focused-selected);
+`)
+
+css_state('.x-menu-tr.focused > td', 'arrow')
 
 widget('x-menu', function(e) {
 
@@ -1141,6 +1509,85 @@ widget_items_widget = function(e) {
 // ---------------------------------------------------------------------------
 // tabs
 // ---------------------------------------------------------------------------
+
+css('.x-tabs', 'S v shrinks')
+
+css('.x-tabs-header', 'h rel bg1')
+
+css('.x-tabs-tabs', 'S h rel')
+
+css('.x-tabs-fixed-header', 'S h-m')
+
+css('.x-tabs[tabs_side=left ]', 'h-l')
+css('.x-tabs[tabs_side=right]', 'h-r')
+
+css('.x-tabs[tabs_side=left ] > .x-tabs-header', 'v')
+css('.x-tabs[tabs_side=right] > .x-tabs-header', 'v')
+css('.x-tabs[tabs_side=left ] > .x-tabs-header > .x-tabs-tabs', 'v')
+css('.x-tabs[tabs_side=right] > .x-tabs-header > .x-tabs-tabs', 'v')
+
+css('.x-tabs[tabs_side=bottom] > .x-tabs-header', 'order-1')
+css('.x-tabs[tabs_side=right ] > .x-tabs-header', 'order-1')
+
+css('.x-tabs[tabs_side=top   ] > .x-tabs-header', 'b-b')
+css('.x-tabs[tabs_side=bottom] > .x-tabs-header', 'b-t')
+css('.x-tabs[tabs_side=left  ] > .x-tabs-header', 'b-r')
+css('.x-tabs[tabs_side=right ] > .x-tabs-header', 'b-l')
+
+css('.x-tabs-content', 'scroll-auto', `
+	min-height: 0;  /* don't let the content make the x-tabs itself overflow */
+	flex: 1 0 0;    /* stretch to fill container but not more */
+`)
+
+css('.x-tabs-tab', 'rel label arrow h', `
+	line-height: 1.25;
+`)
+
+css('.x-tabs-title', 'noselect nowrap', `
+	padding: .5em .8em .3em .8em;
+	max-width: 10em;
+`)
+
+css('.x-tabs-add-button', 'p-y-05 p-x-2 h-m')
+
+css('.x-tabs-add-button::before', 'small')
+
+css('.x-tabs-xbutton', 'abs gray arrow', `
+	top: 2px;
+	right: 2px;
+	font-size: 70%;
+`)
+
+// z2: selection-bar = 2, moving-tab = 1
+css('.x-tabs-selection-bar', 'abs bg-link z2', `
+	width: 2px;
+	height: 2px;
+`)
+
+css_state('.x-tabs-xbutton:hover', '', `
+	color: inherit;
+`)
+
+css_state('.x-tabs:not(.moving) > .x-tabs-header > .x-tabs-selection-bar', '', `
+	transition: width .15s, height .15s, left .15s, top .15s;
+`)
+
+// z1: selection-bar = 2, moving-tab = 1
+css_state('.x-tabs-tab.moving', 'z1', `
+	opacity: .7;
+`)
+
+css_state('.x-tabs.moving > .x-tabs-header > .x-tabs-tab:not(.moving)', '', `
+	transition: left .1s, top .1s;
+`)
+
+css_state('.x-tabs-tab.selected', '', `
+	color: inherit;
+`)
+
+css_state('.x-tabs-tab:focus', 'no-outline')
+
+css_state('.x-tabs-tab:is(:hover, :focus)', 'bg1')
 
 widget('x-tabs', 'Containers', function(e) {
 
@@ -1578,6 +2025,56 @@ widget('x-tabs', 'Containers', function(e) {
 // split-view
 // ---------------------------------------------------------------------------
 
+css('.x-split', 'S')
+css('.x-split[orientation=horizontal]', 'h')
+css('.x-split[orientation=vertical  ]', 'v')
+
+css('.x-split-pane-auto', 'S shrinks')
+
+css('.x-split-sizer', 'h-c-c', `
+	background-color: var(--border);
+`)
+css('.x-split[orientation=vertical  ] > .x-split-sizer', 'h', ` height: 1px; `)
+css('.x-split[orientation=horizontal] > .x-split-sizer', 'h', ` width : 1px; `)
+
+css_state('.x-split[orientation=horizontal].resize', '', ` cursor: ew-resize; `)
+css_state('.x-split[orientation=vertical  ].resize', '', ` cursor: ns-resize; `)
+
+css_state('.x-split[orientation=horizontal] > .x-split-pane.collapsed', '', `
+	min-width: 0 !important;
+	width: 0 !important;
+`)
+css_state('.x-split[orientation=vertical  ] > .x-split-pane.collapsed', '', `
+	min-height: 0 !important;
+	height: 0 !important;
+`)
+
+css_state('.x-split.resize > .x-split-sizer', '', `
+	background-color: var(--border-hover);
+	transition: background-color .2s;
+`)
+
+css('.x-split.collapsed > .x-split-sizer::before', '', `
+	content: '';
+	box-sizing: border-box;
+	border: 1px var(--fg-gray);
+`)
+
+css('.x-split.collapsed > .x-split-sizer::before', '', `
+	position: fixed; /* show over contents */
+`)
+
+css('.x-split[orientation=horizontal].collapsed > .x-split-sizer::before', '', `
+	min-width: 4px;
+	height: 24px;
+	border-style: none solid;
+`)
+css('.x-split[orientation=vertical  ].collapsed > .x-split-sizer::before', '', `
+	min-height: 4px;
+	width: 24px;
+	border-style: solid none;
+`)
+
 widget('x-split', 'Containers', function(e) {
 
 	serializable_widget(e)
@@ -1747,6 +2244,13 @@ widget('x-vsplit', function(e) {
 // action band
 // ---------------------------------------------------------------------------
 
+css('.x-action-band', 'h-r-c p05')
+css('.x-action-band .x-button', 'p-x-05')
+css('.x-action-band .x-button-text', 'nowrap')
+
+// hide cancel button icon unless space is tight when text is hidden
+css('.x-action-band:not(.tight) .x-dialog-button-cancel .x-button-icon', 'hidden')
+
 widget('x-action-band', 'Input', function(e) {
 
 	e.layout = 'ok:ok cancel:cancel'
@@ -1818,6 +2322,44 @@ widget('x-action-band', 'Input', function(e) {
 // ---------------------------------------------------------------------------
 // modal dialog with action band footer
 // ---------------------------------------------------------------------------
+
+css('.x-dialog', 'v p2 fg b0', `
+	margin: 20px;
+	background-color: var(--bg-popup);
+	border-radius: var(--border-radius-window);
+	box-shadow: var(--shadow-modal);
+`)
+
+css(`
+	.x-dialog-header,
+	.x-dialog-footer,
+	.x-dialog-content
+`, 'h p-y-2')
+
+css('.x-dialog-heading', 'gray xlarge bold m-y-05')
+
+css('.x-dialog-xbutton', 'abs b b-t-0 h-c-c hand', `
+	right: 8px;
+	top: 0px;
+	border-bottom-right-radius: var(--border-radius-button);
+	border-bottom-left-radius : var(--border-radius-button);
+	width: 52px;
+	height: 18px;
+	color: var(--fg-button);
+	-webkit-text-stroke: 1px var(--stroke-dialog-xbutton);
+`)
+
+css('.x-dialog-xbutton:hover', '', `
+	background-color: var(--bg-button-hover);
+`)
+
+css('.x-dialog-xbutton.active', '', `
+	background-color: var(--bg-button-pressed);
+`)
+
+css('.x-dialog-content', 'S shrinks')
+
+css('.x-dialog-footer', 'h-b')
 
 widget('x-dialog', function(e) {
 
@@ -1958,6 +2500,58 @@ widget('x-dialog', function(e) {
 // ---------------------------------------------------------------------------
 // floating toolbox
 // ---------------------------------------------------------------------------
+
+// z1: menu = 4, picker = 3, tooltip = 2, toolbox = 1
+css('.x-toolbox', 'z1 v scroll-auto b0', `
+	background-color: var(--bg-popup);
+
+	/* pinning */
+	opacity: .2;
+	transition: opacity .5s;
+
+	border-radius: var(--border-radius-window);
+	box-shadow: var(--shadow-toolbox);
+`)
+
+css_state('.x-toolbox[pinned], .x-toolbox:hover', 'op1 no-ease')
+
+css('.x-toolbox-titlebar', 'h-bl bold p-x', `
+	line-height: 2;
+	background-color: var(--bg-toolbox-titlebar);
+	cursor: move;
+`)
+
+css('.x-toolbox:focus-within > .x-toolbox-titlebar', '', `
+	background-color: var(--bg-toolbox-titlebar-focused);
+`)
+
+css('.x-toolbox-title', 'S shrinks nowrap click-through')
+
+css('.x-toolbox-button', 'gray p-y-05 p-x arrow gray', `
+	flex: 0;
+`)
+
+css('.x-toolbox-button-pin', 'small')
+
+css('.x-toolbox[pinned] > .x-toolbox-titlebar > .x-toolbox-button-pin', 'label')
+
+css_state('.x-toolbox-button-close:hover', 'fg')
+
+css('.x-toolbox-content', 'h shrinks scroll-auto grid')
+
+// toolbox resizing by dragging the margins
+
+css('.x-toolbox-resize-overlay', 'overlay', `
+	clip-path: polygon(
+		0 0, 0 100%, 100% 100%, 100% 0, 0 0, /* outer rect, counter-clockwise */
+		5px 5px, calc(100% - 5px) 5px, calc(100% - 5px) calc(100% - 5px), 5px calc(100% - 5px), 5px 5px /* inner rect, clockwise */
+	);
+`)
+
+css('.x-toolbox-resize-overlay[hit_side=top      ], .x-toolbox-resize-overlay[hit_side=bottom      ]', '', ` cursor: ns-resize  ; `)
+css('.x-toolbox-resize-overlay[hit_side=left     ], .x-toolbox-resize-overlay[hit_side=right       ]', '', ` cursor: ew-resize  ; `)
+css('.x-toolbox-resize-overlay[hit_side=top_left ], .x-toolbox-resize-overlay[hit_side=bottom_right]', '', ` cursor: nwse-resize; `)
+css('.x-toolbox-resize-overlay[hit_side=top_right], .x-toolbox-resize-overlay[hit_side=bottom_left ]', '', ` cursor: nesw-resize; `)
 
 widget('x-toolbox', function(e) {
 
@@ -2118,6 +2712,30 @@ widget('x-toolbox', function(e) {
 // slides
 // ---------------------------------------------------------------------------
 
+css('.x-slides', 'grid')
+
+css('.x-slide', 'invisible op0', `
+	grid-column-start: 1;
+	grid-row-start: 1;
+	transition: opacity .5s;
+`)
+
+css('.x-slides > .x-ct > .', '', `
+	grid-column-start: 1;
+	grid-row-start: 1;
+`)
+
+css(`
+	.x-slide:not(.x-slide-selected),
+	.x-slide:not(.x-slide-selected) *
+`, '', `
+	pointer-events: none !important;
+`)
+
+css('.x-slide-selected', 'visible op1 click-through-off', `
+	transition: opacity .5s;
+`)
+
 widget('x-slides', 'Containers', function(e) {
 
 	serializable_widget(e)
@@ -2179,6 +2797,8 @@ widget('x-slides', 'Containers', function(e) {
 // ---------------------------------------------------------------------------
 // markdown widget
 // ---------------------------------------------------------------------------
+
+css('.x-md', 'v')
 
 {
 let md
@@ -2256,6 +2876,40 @@ widget('x-pagenav', function(e) {
 // ---------------------------------------------------------------------------
 // richtext
 // ---------------------------------------------------------------------------
+
+css('.x-richtext', 'scroll-auto')
+
+css('.x-richtext:not(.x-richedit)', 'm0', 'display: block;')
+css('.x-richtext:not(.x-richedit) > .x-focus-box', 'b0')
+
+css('.x-richtext-content', 'vscroll-auto no-outline', `
+	padding: 10px;
+`)
+
+css('.x-richtext-actionbar', 'abs h', `
+	background-color: var(--bg-popup);
+`)
+
+css('.x-richtext-button', 'm0 b bg1 h-c-c', `
+	height: 2em;
+	width: 2em;
+`)
+
+css('.x-richtext-button:not(:first-child)', 'b-l-0')
+
+css_state('.x-richtext-button:hover', '', `
+	background-color: var(--bg-button-hover);
+`)
+
+css_state('.x-richtext-button:active', '', `
+	background-color: var(--fg-gray);
+`)
+
+css_state('.x-richtext-button.selected', '', `
+	box-shadow: var(--shadow-button-pressed);
+	background-color: var(--fg-gray);
+	color: var(--fg-inverted);
+`)
 
 widget('x-richtext', function(e) {
 
@@ -2546,7 +3200,7 @@ function setglobal(k, v, default_v) {
 	broadcast(k+'_changed', v, v0)
 }
 
-// container widget with `display: content`. useful to group together
+// container widget with `display: contents`. useful to group together
 // an invisible widget like an x-nav with a visible one to make a tab.
 // Don't try to group together visible elements with this! CSS will see
 // your <x-ct> tag in the middle, but the layout system won't!

@@ -18,6 +18,35 @@ WIDGETS
 // listbox widget
 // ---------------------------------------------------------------------------
 
+// S: stretch it so we can focus it by clicking on its empty space.
+css('.x-listbox', 'S', `
+	line-height: initial;  /* prevent inheriting it */
+`)
+
+css('.x-listbox[orientation=vertical  ]', '', ` flex-direction: column; `)
+css('.x-listbox[orientation=horizontal]', '', ` flex-direction: row; `)
+
+css('.x-listbox-item', 'p-x-input p-y-input b b-invisible arrow rel', `
+	display: block;
+`)
+
+css('.x-listbox-item', 'noclip')
+
+css('.x-listbox.moving .x-listbox-item:not(.moving)', '', `
+	transition: top .1s, left .1s, right .1s;
+`)
+
+css('.x-listbox.picker', 'scroll', `
+	max-height: 300px;
+	resize: both;
+`)
+
+css_state('.x-listbox:not([disabled]) .x-listbox-item:hover', 'bg1')
+
+css_state('.x-listbox-item.moving', 'z1', `
+	opacity: .7;
+`)
+
 function listbox_widget(e) {
 
 	e.class('x-listbox')
@@ -460,6 +489,24 @@ widget('x-enum-dropdown', function(e) {
 // select button
 // ---------------------------------------------------------------------------
 
+css('.x-select-button', 'b0')
+
+css('.x-select-button .x-item', 'b ro05 noselect', `
+	background-color: var(--bg-select-button);
+`)
+
+css('.x-select-button .x-item:first-child', 'ro-l-0')
+css('.x-select-button  .x-item:last-child', 'ro-r-0')
+css('.x-select-button .x-item:not(:first-child)', 'b-l-0')
+
+css_state('.x-select-button .x-item:hover', '', `
+	background-color: var(--bg-button-hover);
+`)
+
+css_state('.x-select-button .x-item.focused.selected', '', `
+	box-shadow: var(--shadow-button-pressed);
+`)
+
 widget('x-select-button', function(e) {
 
 	listbox.construct(e)
@@ -507,6 +554,12 @@ widget('x-color-dropdown', function(e) {
 // ---------------------------------------------------------------------------
 // icons listbox & dropdown
 // ---------------------------------------------------------------------------
+
+css('.x-icons-listbox-item', 'nowrap-dots')
+
+css('.x-icons-listbox-icon', '', `
+	min-width : 20px;
+`)
 
 default_icons = memoize(function() {
 	let t = []

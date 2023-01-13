@@ -12,6 +12,85 @@ SHAPES
 
 */
 
+css('.x-chart', 'S shrinks p clip v')
+
+css('.x-chart-header', '', `
+	padding-left: 40px;
+`)
+
+css('.x-chart-split', 'S h')
+
+css('.x-chart-view', 'S rel h')
+
+css('.x-chart-legend', 'grid arrow', `
+	grid-template-columns: 1em 1fr;
+	grid-row-gap: .25em;
+	grid-column-gap:.5em;
+	align-content: end;
+	margin-left: 2em;
+`)
+
+css('.x-chart-legend-bullet', 'round', `
+	width: .8em;
+	height: .8em;
+`)
+
+css('.x-chart-legend-percent', 'bold', `
+	justify-self: end;
+`)
+
+css('.x-chart-canvas', 'abs', `
+	left: 0;
+	top: 0;
+`)
+
+css('.x-tooltip.x-chart-tooltip', 'click-through')
+
+css('.x-chart-tooltip > .x-tooltip-body', 'tight')
+
+css('.x-chart-tooltip-label', 'grid', `
+	grid-template-columns: repeat(2, auto);
+	column-gap: 1em;
+	justify-items: start;
+`)
+
+css('.x-chart-stacks', 'S h')
+css('.x-chart-stack', 'v')
+css('.x-chart-stack-slice-ct', 'rel h')
+
+css('.x-chart-stack-slice', 'm-r', `
+	width: 50px;
+`)
+
+css('.x-chart[shape=pie] .x-chart-split', 'h-c')
+
+css('.x-chart[shape=pie] .x-chart-view', '', `
+	max-width: 15em;
+	min-height: 15em;
+`)
+
+css('.x-chart[shape=pie] .x-chart-legend', '', `
+	grid-template-columns: 1em 5fr 1fr;
+	align-content: center;
+`)
+
+css('.x-chart[shape=lines] .x-chart-view', '', `
+	min-height: 10em;
+`)
+
+css('.x-chart[shape=lines] .x-chart-legend', 'm-l-2 m-b-4')
+
+css('.x-chart-pie', 'abs')
+
+css('.x-chart-pie-selected', 'abs round')
+
+css('.x-chart-pie-percents', 'abs click-through', `
+	top: 0;
+	left: 0;
+`)
+
+css('.x-chart-pie-label', 'abs white')
+
 widget('x-chart', 'Input', function(e) {
 
 	contained_widget(e)

@@ -319,8 +319,8 @@ function return_arg(arg) { return arg; }
 
 print = null
 pr    = console.log
-warn  = console.log
-debug = console.log
+warn  = console.warn
+debug = console.log // console.debug makes everything blue wtf.
 trace = console.trace
 
 function warn_if(cond, ...args) {

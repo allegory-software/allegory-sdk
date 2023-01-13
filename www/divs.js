@@ -4,12 +4,15 @@
 	Written by Cosmin Apreutesei. Public domain.
 
 Depends on:
+
 	glue.js
 
 You must call on DOM load:
+
 	init_components()
 
 Defines CSS rules for:
+
 	[hidden]
 	[disabled]
 	.popup
@@ -17,16 +20,21 @@ Defines CSS rules for:
 	.modal-overlay
 
 Uses CSS classes on the <html> tag:
-	.theme-light .theme-dark .theme-small .theme-large
+
+	.theme-light .theme-dark
+	.theme-small .theme-large
 
 CSS-IN-JS
+
 	css_layer(name) -> layer; layer(selector, includes, rules)
 	css[_state|_role|_role_state|_generic_state](selector, includes, rules)
 
 DOM load event:
+
 	on_dom_load(f)
 
 DEBUGGING
+
 	e.debug(...)
 	e.debug_if(cond, ...)
 	e.debug_open_if(cond, ...)
@@ -37,6 +45,7 @@ DEBUGGING
 	e.debug_anon_name()
 
 ELEMENT ATTRS
+
 	e.hasattr(k)
 	e.attr(k[, v]) -> v
 	e.bool_attr(k[, v]) -> v
@@ -45,28 +54,34 @@ ELEMENT ATTRS
 	e.tag
 
 ELEMENT CSS CLASSES
+
 	e.hasclass(k)
 	e.class('k1 ...'[, enable])
 	e.switch_class(k1, k2, normal)
 	e.classess = 'k1 k2 ...'
 
 ELEMENT COMPUTED STYLES
+
 	e.css([k][, state])
 
 CSS QUERYING
+
 	css_class_prop(selector, style) -> v
 	fontawesome_char(name) -> s
 
 DOM NAVIGATION INCLUDING TEXT NODES
+
 	n.nodes -> nlist, n.nodes[i], n.nodes.len, n.parent
 	n.first_node, n.last_node, n.next_node, n.prev_node
 
 DOM NAVIGATION EXCLUDING TEXT NODES
+
 	e.at[i], e.len, e.at.length, e.parent
 	e.index
 	e.first, e.last, e.next, e.prev
 
 DOM QUERYING
+
 	iselem(v) -> t|f
 	isnode(v) -> t|f
 	e.$(sel) -> nlist
@@ -78,11 +93,13 @@ DOM QUERYING
 	root
 
 DOM <-> HTML
+
 	e.html -> s
 	[unsafe_]html(s) -> e
 	e.[unsafe_]html = s
 
 DOM MANIPULATION
+
 	T[C](te[,whitespace]) where `te` is f|e|text_str
 	e.clone()
 	e.set(te)
@@ -98,6 +115,7 @@ DOM MANIPULATION
 	[].join_nodes([separator])
 
 SVG ELEMENTS
+
 	svg_tag(tag, [attrs], e1,...)
 	svg([attrs], e1, ...) -> svg
 	svg_arc_path(x, y, r, a1, a2, ['M'|'L'])
@@ -105,11 +123,13 @@ SVG ELEMENTS
 	svg.text(attrs) -> svg_text
 
 ELEMENT METHOD OVERRIDING
+
 	e.override(method, f)
 	e.do_before(method, f)
 	e.do_after(method, f)
 
 ELEMENT PROPERTIES
+
 	e.property(name, [get],[set] | descriptor)
 	e.prop(name, attrs)
 	e.alias(new_name, existing_name)
@@ -121,11 +141,13 @@ ELEMENT PROPERTIES
 	e.element_links()
 
 PROPERTY PERSISTENCE
+
 	e.xoff()
 	e.xon()
 	e.xsave()
 
 DEFERRED DOM UPDATING
+
 	e.update([opt])
 	e.position()
 	e.on_update(f)
@@ -133,6 +155,7 @@ DEFERRED DOM UPDATING
 	e.on_position(f)
 
 COMPONENTS
+
 	component(tag, [selector], initializer, [category])
 	e.init_child_components()
 	e.initialized -> null|t|f
@@ -146,6 +169,7 @@ COMPONENTS
 	e.bound -> t|f
 
 INPUT EVENTS
+
 	^[right]click       (ev, nclicks, mx, my)
 	^[right]pointerdown (ev, mx, my)
 	^[right]pointerup   (ev, mx, my)
@@ -160,12 +184,15 @@ INPUT EVENTS
 	^document.stopped_event(stopped_ev, ev)
 
 LAYOUT CHANGE EVENT
+
 	^document.layout_changed()
 
 INTER-WINDOW COMMUNICATION
+
 	broadcast(name, ...args)
 
 ELEMENT GEOMETRY
+
 	px(x)
 	e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h, e.ox, e.oy
 	e.min_w, e.min_h, e.max_w, e.max_h
@@ -174,6 +201,7 @@ ELEMENT GEOMETRY
 	r.contains(x, y)
 
 ELEMENT STATE
+
 	e.hide([on])
 	e.show([on])
 	e.hovered
@@ -186,6 +214,7 @@ ELEMENT STATE
 	e.focus_first()
 
 ELEMENT STATE MIXINS
+
 	e.make_disablable()
 		e.disabled
 		e.disable(reason, disabled)
@@ -194,6 +223,7 @@ ELEMENT STATE MIXINS
 		e.focusable
 
 TEXT EDITING
+
 	input.select_range(i, j)
 	e.select(i, j)
 	e.contenteditable
@@ -202,6 +232,7 @@ TEXT EDITING
 	e.unselect()
 
 SCROLLING
+
 	scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
 	e.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
 	e.scroll_to_view_rect(sx0, sy0, x, y, w, h)
@@ -212,6 +243,7 @@ SCROLLING
 	scrollbox_client_dimensions(w, h, cw, ch, [overflow_x], [overflow_y], [cs_w], [hs_h])
 
 ANIMATION FRAMES
+
 	raf(f) -> raf_id
 	cancel_raf(raf_id)
 	in_raf -> t|f
@@ -220,32 +252,40 @@ ANIMATION FRAMES
 		wf.cancel()
 
 ANIMATION EASING
+
 	transition(f, [dt], [x0], [x1], [easing]) -> tr
 		tr.stop()
 		tr.finish = func
 
 HIT-TESTING
+
 	hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h)
 	e.hit_test_sides(mx, my, [d1], [d2])
 
 CANVAS
+
 	cx.clear()
 	e.resize(w, h, [pw], [ph])
 
 MODALS & OVERLAYS
+
 	e.modal([on])
 	overlay(attrs, content)
 
 IMAGE LAZY LOADING
+
 	<img data-src=""> images are loaded when they come into view.
 
 TIME-AGO AUTO-UPDATING
+
 	<... timeago time=""> auto-updates every minute.
 
 EXECUTABLE SCRIPTS
+
 	<script run></script> scripts declared in html are executable.
 
 POPUPS
+
 	e.popup([side], [align])      make element a popup.
 	e.popup_side                  '[inner-]{top bottom left right center}'
 	e.popup_align                 'center start end'
@@ -253,14 +293,20 @@ POPUPS
 	e.popup_fixed
 
 LIVE-MOVE LIST ELEMENTS
+
 	live_move_mixin(e)
 	e.make_children_movable()
 
 THEMING
+
 	is_theme_dark() -> t|f
 	set_theme_dark(dark)
 	get_theme_size() -> cur_size
 	set_theme_size(['large'|'small'|'normal'])
+
+CSS SPECIFICITY REPORTING
+
+	css_report_specificity(file, max_spec)
 
 */
 
@@ -338,12 +384,14 @@ function on_dom_load(fn) {
 // order in layers (what @layer and :where() would do in a CSS). Layers let
 // you restyle widgets without accidentally muting role/state-modifier styles.
 // Second, you get composable CSS without silly offline preprocessors.
-// Now you can style with utility classes inside arbitrary CSS selectors like
-// ones with :hover and :focus-visible. You can also use fontawesome icons
-// by name inside ::before rules. Third, because you get to put widget styles
-// near the widget code that they're coupled to. Fifth, because you get to
-// solve all these old problems with a page of JS. The cost is 1-3 frames
-// at startup for a site with some 3000 rules.
+// Now you can style with utility classes inside arbitrary CSS selectors
+// including those with :hover and :focus-visible. Now you can use fontawesome
+// icons by name inside ::before rules. Third, because you get to put widget
+// styles near the widget code that they're coupled to. Fourth, because now
+// you get warnings when mistyping utility class names, which also facilitates
+// refactoring the utility classes. Fifth, because you get to solve all these
+// old problems with a page of JS. The cost is 1-3 frames at startup for
+// a site with some 3000 rules (most of which come from fontawesome).
 
 class_rules = obj() // {class->rules} from all layers.
 
@@ -362,8 +410,9 @@ on_dom_load(function() {
 			return
 		let rules = rule.cssText.slice(selector.length + 3, -2)
 		if (class_rules[cls])
-			pr('CSS duplicate: ', cls, '\n\n', class_rules[cls], '\n\n', rules)
-		class_rules[cls] = rules
+			class_rules[cls] = class_rules[cls] + '\n' + rules
+		else
+			class_rules[cls] = rules
 		n++
 	}
 	function add_rules(rules) {
@@ -374,14 +423,12 @@ on_dom_load(function() {
 				add_rule(rule)
 		}
 	}
-	for (let ss of document.styleSheets)
-		if (!ss.ownerNode.css_in_js_layer)
-			add_rules(ss.cssRules)
-		else
-			pr(ss)
-
+	for (let ss of document.styleSheets) {
+		assert(!ss.ownerNode.css_in_js_layer)
+		add_rules(ss.cssRules)
+	}
 	let t1 = time()
-	debug('CSS ', n, 'rules,', floor((t1 - t0) * 1000), 'ms')
+	debug('CSS-in-JS mapped', n, 'rules in', floor((t1 - t0) * 1000), 'ms')
 })
 
 css_layer = memoize(function(layer) {
@@ -391,7 +438,7 @@ css_layer = memoize(function(layer) {
 	style.css_in_js_layer = true // we map classes ourselves.
 
 	on_dom_load(function() {
-		pieces.push('\n} // layer')
+		pieces.push('\n} /*layer*/')
 		let a = []
 		for (let p of pieces)
 			if (isfunc(p)) // expand includes
@@ -399,10 +446,14 @@ css_layer = memoize(function(layer) {
 			else
 				a.push(p)
 		style.textContent = a.join('')
-		document.head.append(style)
+		document.head.insert(0, style)
 	})
 
-	return function(selector, includes, rules) {
+	function css_layer(selector, includes, rules) {
+		if (includes == null && rules == null) { // verbatim CSS, eg. @keyframes
+			pieces.push(selector)
+			return
+		}
 		// ::before needs to be after :where(), so we must split the selector.
 		let [prefix, suffix] = selector.captures(/^(.+?)(::[^ >#:\.+~]+)$/)
 		if (!prefix) {
@@ -410,17 +461,30 @@ css_layer = memoize(function(layer) {
 			suffix = ''
 		}
 		pieces.push(':where(', prefix, ')', suffix, ' {\n')
-		if (includes)
+		if (includes) {
+			var e = new Error()
 			pieces.push(function(pieces) {
-				for (let cls of includes.words())
-					pieces.push('\t', class_rules[cls], '\n')
+				for (let cls of includes.words()) {
+					let rules = class_rules[cls]
+					if (!rules) {
+						warn('css unknown class', cls, 'at', e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+						continue
+					}
+					pieces.push('\t', rules, '\n')
+				}
 			})
+		}
 		pieces.push(rules)
 		pieces.push('}\n')
 		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // simple class
 		if (cls)
 			class_rules[cls] = rules
 	}
+
+	css_layer.layer_name = layer
+	css_layer.style_node = style
+
+	return css_layer
 
 })
 
@@ -2048,6 +2112,10 @@ callers.keydown = function(ev, f) {
 callers.keyup    = callers.keydown
 callers.keypress = callers.keydown
 
+alias(KeyboardEvent, 'shift', 'shiftKey')
+alias(KeyboardEvent, 'ctrl' , 'ctrlKey')
+alias(KeyboardEvent, 'alt'  , 'altKey')
+
 callers.wheel = function(ev, f) {
 	if (ev.target.effectively_disabled)
 		return
@@ -2570,16 +2638,13 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 
 // modals & overlays ---------------------------------------------------------
 
-css_role('.overlay', '', `
+// from utils.css but we don't depend on that.
+css('.overlay', '', `
 	position: absolute;
 	left: 0;
 	top: 0;
 	right: 0;
 	bottom: 0;
-	display: grid;
-	justify-content: center;
-	align-content: center;
-	z-index: 1;
 `)
 
 function overlay(attrs, content) {
@@ -3141,6 +3206,93 @@ function set_theme_size(size) {
 if (!is_theme_dark())
 	root.class('theme-light')
 
+// CSS specificity reporting -------------------------------------------------
+
+function css_selector_specificity(s0) {
+	let s = s0
+	let n = 0 // current specificity
+	let maxn = 0 // current max specificity
+	let cs = [0] // call stack: 1 for :is(), 0 for :not() and :where()
+	let ns = [] // specificity stack for :is()
+	let maxns = [] // max specificity stack for :is()
+	let z = 0 // call stack depth of first :where()
+	let sm // last matched string
+	function match(re) {
+		let m = s.match(re)
+		if (!m) return
+		sm = m[0]
+		assert(sm.len)
+		s = s.slice(sm.len)
+		return true
+	}
+	function next() {
+		if (!s.len) return max(maxn, n)
+		if (match(/^[ >+~*]+/ )) return next()
+		if (match(/^\)/      )) {
+			assert(cs.len > 1, 'unexpected )')
+			if (cs.pop()) { n = ns.pop() + max(maxn, n); maxn = maxns.pop() }
+			if (z == cs.len) z = 0; return next()
+		}
+		if (match(/^:is\(/   )) {
+			cs.push(1); ns.push(n); maxns.push(maxn); n = 0; maxn = 0
+			return next()
+		}
+		if (match(/^:not\(/  )) { cs.push(0); return next() }
+		if (match(/^:has\(/  )) { cs.push(0); return next() }
+		if (match(/^:where\(/)) { if (!z) z = cs.len; cs.push(0); return next() }
+		if (match(/^,/       )) { maxn = max(maxn, n); n = 0; return next() }
+		if (match(/^\[[^\]]*\]/) || match(/^[\.:#]?[:a-zA-Z\-_][a-zA-Z0-9\-_]*/)) {
+			if (!z)
+				n += (sm[0] == '#' && 10 || sm[0] == '.' && 1 || sm[0] == ':' && sm[1] != ':' && 1 || .1)
+			return next()
+		}
+		warn('invalid selector: '+s0, s)
+	}
+	return next()
+}
+
+function css_report_specificity(file, max_spec) {
+	let t0 = time()
+	let n = 0
+	function check_rule(rule, layer_name) {
+		let sel = rule.selectorText
+		if (!isstr(sel))
+			return
+		let spec = css_selector_specificity(sel)
+		if (spec > max_spec[layer_name || '_default'])
+			debug('CSS specificity', spec, sel)
+		n++
+	}
+	function check_rules(rules, layer_name) {
+		for (let rule of rules)
+			if (rule instanceof CSSLayerBlockRule) // @layer block
+				check_rules(rule.cssRules, rule.name)
+			else
+				check_rule(rule, layer_name)
+	}
+	for (let ss of document.styleSheets) {
+		if (file) // filtered
+			if (isfunc(file)) { // layer
+				if (ss.ownerNode != file.style_node)
+					continue
+			} else { // file name
+				if (!ss.href)
+					continue
+				if (!ss.href.ends(file))
+					continue
+			}
+		check_rules(ss.cssRules)
+	}
+	let file_name = isfunc(file) && '@'+file.layer_name || file
+	warn_if(!n, 'CSS file empty', file_name)
+	debug('CSS specificity checked for', file_name, n, 'rules in', floor((time() - t0) * 1000), 'ms')
+}
+
+on_dom_load(function() {
+	for (let layer of ['base', 'state', 'role', 'role-state', 'generic-state'])
+		css_report_specificity(css_layer(layer), {[layer] : 0.1})
+	css_report_specificity('utils.css', {base: 1.1, state: 2.1, _default: 1})
+})
 
 } // module scope
 
