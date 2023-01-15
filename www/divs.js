@@ -29,6 +29,18 @@ CSS-IN-JS
 	css_layer(name) -> layer; layer(selector, includes, rules)
 	css[_state|_role|_role_state|_generic_state](selector, includes, rules)
 
+CSS DEFAULT LAYERS
+
+	css()
+	css_theme()
+	css_state()
+	css_role()
+	css_role_state()
+	css_generic_state()
+	css_theme_light()
+	css_theme_dark()
+
+
 DOM load event:
 
 	on_dom_load(f)
@@ -46,7 +58,7 @@ DEBUGGING
 
 ELEMENT ATTRS
 
-	e.hasattr(k)
+	e.hasattr(k) -> t|f
 	e.attr(k[, v]) -> v
 	e.bool_attr(k[, v]) -> v
 	e.closest_attr(k) -> v
@@ -156,7 +168,7 @@ DEFERRED DOM UPDATING
 
 COMPONENTS
 
-	component(tag, [selector], initializer, [category])
+	component('TAG'|'TAG[ATTR]'[, category], initializer)
 	e.init_child_components()
 	e.initialized -> null|t|f
 	init_components()
@@ -320,6 +332,8 @@ DEBUG_ELEMENT_BIND = false
 PROFILE_BIND_TIME = true
 SLOW_BIND_TIME_MS = 10
 DEBUG_UPDATE = false
+DEBUG_CSS_USAGE = true
+DEBUG_CSS_SPECIFICITY = true
 
 let e = Element.prototype
 
@@ -393,7 +407,7 @@ function on_dom_load(fn) {
 // old problems with a page of JS. The cost is 1-3 frames at startup for
 // a site with some 3000 rules (most of which come from fontawesome).
 
-class_rules = obj() // {class->rules} from all layers.
+let class_rules = obj() // {class->rules} from all layers.
 
 on_dom_load(function() {
 	let t0 = time()
@@ -423,13 +437,15 @@ on_dom_load(function() {
 				add_rule(rule)
 		}
 	}
-	for (let ss of document.styleSheets) {
-		assert(!ss.ownerNode.css_in_js_layer)
-		add_rules(ss.cssRules)
+	for (let sheet of document.styleSheets) {
+		assert(!sheet.ownerNode.css_in_js_layer)
+		add_rules(sheet.cssRules)
 	}
 	let t1 = time()
 	debug('CSS-in-JS mapped', n, 'rules in', floor((t1 - t0) * 1000), 'ms')
 })
+
+let utils_usage = obj()
 
 css_layer = memoize(function(layer) {
 
@@ -446,7 +462,7 @@ css_layer = memoize(function(layer) {
 			else
 				a.push(p)
 		style.textContent = a.join('')
-		document.head.insert(0, style)
+		document.head.append(style)
 	})
 
 	function css_layer(selector, includes, rules) {
@@ -470,6 +486,7 @@ css_layer = memoize(function(layer) {
 						warn('css unknown class', cls, 'at', e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 						continue
 					}
+					utils_usage[cls] = (utils_usage[cls] || 0)+1
 					pieces.push('\t', rules, '\n')
 				}
 			})
@@ -489,10 +506,27 @@ css_layer = memoize(function(layer) {
 })
 
 css               = css_layer('base')
+css_theme         = css_layer('theme')
 css_state         = css_layer('state')
 css_role          = css_layer('role')
 css_role_state    = css_layer('role-state')
 css_generic_state = css_layer('generic-state')
+
+// utils.css usage ranking ---------------------------------------------------
+
+function css_rank_utils_usage() {
+	if (!DEBUG_CSS_USAGE)
+		return
+	let a = []
+	for (let k in utils_usage) {
+		let n = utils_usage[k]
+		a[n] = catany(' ', a[n], k)
+	}
+	for (let i = a.len; i > 0; i--)
+		if (a[i])
+			pr(i, a[i])
+}
+on_dom_load(css_rank_utils_usage)
 
 // element attribute manipulation --------------------------------------------
 
@@ -596,18 +630,38 @@ e.css = function(prop, state) {
 
 alias(CSSStyleDeclaration, 'prop', 'getPropertyValue')
 
-function css_class_prop(selector, style) {
-	let sheets = document.styleSheets
-	for (let i = 0, l = sheets.length; i < l; i++) {
-		let sheet = sheets[i]
-		if(!sheet.cssRules)
-			continue
-		for (let j = 0, k = sheet.cssRules.length; j < k; j++) {
-			let rule = sheet.cssRules[j]
-			if (rule.selectorText && rule.selectorText.split(',').indexOf(selector) !== -1)
-				return rule.style[style]
+{
+let each_css_rule = function(rules, f) {
+	for (let rule of rules) {
+		let ret
+		if (rule instanceof CSSLayerBlockRule) {
+			ret = each_css_rule(rule.cssRules, f)
+		} else {
+			ret = f(rule)
 		}
+		if (ret != null)
+			return ret
 	}
+}
+method(StyleSheet, 'each_rule', function(f) {
+	return each_css_rule(this.cssRules, f)
+})
+}
+
+function each_css_rule(f) {
+	for (let sheet of document.styleSheets)
+		if(sheet.cssRules) {
+			let ret = sheet.each_rule(f)
+			if (ret != null)
+				return ret
+		}
+}
+
+function css_class_prop(selector, style) {
+	return each_css_rule(function(rule) {
+		if (rule.selectorText && rule.selectorText.split(',').indexOf(selector) !== -1)
+			return rule.style[style]
+	})
 }
 
 // use this to to draw fontawesome icons on a canvas.
@@ -694,40 +748,42 @@ Moving elements around in the bound tree will *not* rebind them.
 
 let buitin_tags = 'a,abbr,address,area,article,aside,audio,b,base,bdi,bdo,blockquote,body,br,button,canvas,caption,cite,code,col,colgroup,data,datalist,dd,del,details,dfn,dialog,div,dl,dt,em,embed,fieldset,figcaption,figure,footer,form,h1,h2,h3,h4,h5,h6,head,header,hgroup,hr,html,i,iframe,img,input,ins,kbd,label,legend,li,link,main,map,mark,menu,meta,meter,nav,noscript,object,ol,optgroup,option,output,p,picture,pre,progress,q,rp,rt,ruby,s,samp,script,section,select,slot,small,source,span,strong,style,sub,summary,sup,table,tbody,td,template,textarea,tfoot,th,thead,time,title,tr,track,u,ul,var,video,wbr'.split(',').tokeys(1)
 
-let component_init = obj() // {tag->init}
-let component_selector = obj() // {tag->selector}
+let component_init = obj() // {tagName->init}
+let component_attr = obj() // {tagName->attr}
 
-function component(tag, selector, init, category) {
-	if (!isstr(selector)) { // shift arg
-		category = init
-		init = selector
-		selector = null
+function component(selector, category, init) {
+	if (isfunc(category)) { // shift arg
+		init = category
+		category = 'Other'
 	}
+	let [tag, tag_attr] = selector.captures(/^(.+?)\[(.+?)\]$/) // TAG[ATTR]
+	tag = tag || selector
+	assert(tag.match(/^[a-z]+[a-z\-]*$/), 'invalid component tag')
 	let tagName = tag.upper()
 	assert(!component_init[tagName], 'component already registered: {0}', tag)
 	component_init[tagName] = init
-	component_selector[tagName] = selector
-
+	if (tag_attr)
+		component_attr[tagName] = tag_attr
 	// TODO: remove this
 	let type = tag.replace(/^x-/, '').replaceAll('-', '_')
 	if (type != tag && !type in buitin_tags) {
 		let tagName = type.upper()
 		component_init[tagName] = init
-		component_selector[tagName] = selector
+		if (tag_attr)
+			component_attr[tagName] = tag_attr
 	}
-
 	function create(prop_vals) {
 		return element(tag, prop_vals)
 	}
 	create.type = type // for serialization
 	create.construct = init // use as mixin in other components
-	attr(component.categories, category || 'Other', array).push(create)
+	attr(component.categories, category, array).push(create)
 	component.types[type] = create
 	return create
 }
 
-component.types = {} // {type -> create}
-component.categories = {} // {cat -> {craete1,...}}
+component.types      = obj() // {type -> create}
+component.categories = obj() // {cat -> {craete1,...}}
 
 component.init_instance = function(e, prop_vals) { // stub, see xmodule.js.
 	e.xoff()
@@ -795,8 +851,8 @@ e.init_component = function(prop_vals) {
 	// For now, just don't use element() to create built-in tags, use tag() for that.
 	let tagName = e.tagName
 	let init = component_init[tagName]
-	let sel = init && component_selector[tagName]
-	if (!(init && (!sel || e.matches(sel)))) {
+	let tag_attr = init && component_attr[tagName]
+	if (!(init && (!tag_attr || e.hasattr(tag_attr)))) {
 		if (prop_vals)
 			assign_opt(e, prop_vals)
 		e.init_child_components()
@@ -2713,7 +2769,7 @@ on_dom_load(function() {
 	document.body.on('scroll', lazy_load_all)
 })
 
-component('img', '[data-src]', function(e) {
+component('img[data-src]', function(e) {
 	let is_in_viewport
 	let updated
 	e.on_measure(function() {
@@ -2754,7 +2810,7 @@ runevery(60, function() {
 
 // exec'ing js scripts inside html -------------------------------------------
 
-component('script', '[run]', function(e) {
+component('script[run]', function(e) {
 	if (e.type && e.type != 'javascript')
 		return
 	if (e.src)
@@ -3206,6 +3262,14 @@ function set_theme_size(size) {
 if (!is_theme_dark())
 	root.class('theme-light')
 
+function css_theme_light(selector, ...args) {
+	return css_theme(':is(:root, .theme-light, .theme-dark .theme-inverted)'+selector, ...args)
+}
+
+function css_theme_dark(selector, ...args) {
+	return css_theme(':is(.theme-dark, .theme-light .theme-inverted)'+selector, ...args)
+}
+
 // CSS specificity reporting -------------------------------------------------
 
 function css_selector_specificity(s0) {
@@ -3270,18 +3334,18 @@ function css_report_specificity(file, max_spec) {
 			else
 				check_rule(rule, layer_name)
 	}
-	for (let ss of document.styleSheets) {
+	for (let sheet of document.styleSheets) {
 		if (file) // filtered
 			if (isfunc(file)) { // layer
-				if (ss.ownerNode != file.style_node)
+				if (sheet.ownerNode != file.style_node)
 					continue
 			} else { // file name
-				if (!ss.href)
+				if (!sheet.href)
 					continue
-				if (!ss.href.ends(file))
+				if (!sheet.href.ends(file))
 					continue
 			}
-		check_rules(ss.cssRules)
+		check_rules(sheet.cssRules)
 	}
 	let file_name = isfunc(file) && '@'+file.layer_name || file
 	warn_if(!n, 'CSS file empty', file_name)
@@ -3289,10 +3353,11 @@ function css_report_specificity(file, max_spec) {
 }
 
 on_dom_load(function() {
+	if (!DEBUG_CSS_SPECIFICITY)
+		return
 	for (let layer of ['base', 'state', 'role', 'role-state', 'generic-state'])
 		css_report_specificity(css_layer(layer), {[layer] : 0.1})
 	css_report_specificity('utils.css', {base: 1.1, state: 2.1, _default: 1})
 })
 
 } // module scope
-

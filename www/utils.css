@@ -4,12 +4,10 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 CSS CLASSES:
-	TEXT          pre[-line] small [x]large h[1-3] tight bold italic underline strike allcaps noselect zwsp
+	TEXT          pre[-line] small [x]large tight bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   gray label link fg-inverted
 	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
-	ALIGN FLEX    h-{l r c sb}-{s c t b bl}  h-{l r c sb s t b m bl}
-	...           v-{t b c sb}-{s c l r}     v-{t b m sb s l r c}
-	...           S[1-5] flex-[no]wrap order-{1 2 last}
+	ALIGN FLEX    h-{l r c sb s t b m bl} v-{t b m sb s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
 	ALIGN GRID    grid
 	SIZING        nowrap shrinks
 	BORDERS       b[0 2 4] b-{l r t b}-{0 2 4} dotted dashed b-invisible b-fg ro[05 0 2 4] ro-{l r t b}-0 round
@@ -24,10 +22,10 @@ CSS CLASSES:
 	FILTERS       [in]visible [no-]dim op[0 1 01-09] darken lighten no-filter
 	SHADOWS       shadow-{tooltip thumb menu button pressed modal toolbox} no-shadow
 	TRANSFORMS    flip-{h v hv} rotate-{90 180 270}
-	TRANSITIONS   ease ease-01s ease-05s ease-1s no-ease
+	TRANSITIONS   ease ease-{01s 05s 1s} no-ease ease-out ease-fw
 	ANIMATIONS    beat bounce fade beat-fade flip shake spin spin-pulse forever once reverse
 	CURSORS       arrow hand grab grabbing
-	FONTS         mono arial opensans mi[-round -sharp]
+	FONTS         mono arial opensans[-condensed] inter mi[-round -sharp -outlined] fa[r] fa-*
 	INTERACTION   hover-{darken lighten b}
 
 HTML SELECTORS:
@@ -40,9 +38,9 @@ NOTES:
 
 */
 
-@layer base, role, state, role-state, generic-state; /* matching divs.js layers */
+@layer sub-base, base, theme, role, state, role-state, generic-state; /* matching divs.js layers */
 
-@layer base {
+@layer theme {
 
 :root, .theme-light, :where(.theme-dark) .theme-inverted {
 
@@ -51,7 +49,7 @@ NOTES:
 	--fg-p           : #444;  /* multiline text on normal backgrounds (just a tad less bright than labels) */
 	--fg-gray        : #999;  /* faded text but clearly legible (disabled, info boxes) */
 	--fg-gray-inverted : #ffffff66;  /* faded text on dark or colored bg */
-	--fg-link        : hsl(222 100% 33%); /* anything clickable inside text: links, bare buttons, checkboxes */
+	--fg-link        : hsl(222 100% 40%); /* anything clickable inside text: links, bare buttons, checkboxes */
 	--fg-link-hover  : hsl(222 100% 45%);
 	--fg-link-active : hsl(222 100% 55%);
 	--fg-label       : #666; /* between fg and gray (edit labels, chart labels) */
@@ -68,14 +66,13 @@ NOTES:
 	--border-hover   : hsl(0 0% 90%); /* sits on bg */
 
 	--border-radius-input       : 0;
-	--border-radius-window      : .5em; /* modals & toolboxes */
 
 	--outline-focused: hsl(0 %0 %0);
 
 	--shadow-tooltip :  2px  2px  9px      #00000044;
 	--shadow-toolbox :  1px  1px  4px      #000000aa;
 	--shadow-menu    :  2px  2px  2px      #000000aa;
-	--shadow-button  :  0px  0px  8px  0px #00000011;
+	--shadow-button  :  0px  0px  2px  0px #00000011;
 	--shadow-modal   :  2px  5px 10px      #00000088;
 	--shadow-pressed : inset 0 0.15em 0.3em hsl(210 13% 12% / 51);
 	--shadow-thumb   :  1px  1px  2px      #000000aa; /* slider thumb */
@@ -85,10 +82,6 @@ NOTES:
 	--bg-button-hover           : hsl(206 28% 90%);
 	--bg-button-pressed         : hsl(206 28% 85%);
 	--fg-button                 : var(--fg-inverted);
-	--bg-button-primary         : hsl(134 61% 41%); /* green bg */
-	--bg-button-primary-hover   : hsl(134 71% 33%);
-	--bg-button-primary-pressed : hsl(134 72% 28%);
-	--fg-button-primary         : var(--fg-inverted);
 	--border-button-primary     : hsl(134 61% 33%);
 	--bg-button-danger          : var(--bg-button);
 	--bg-button-danger-hover    : var(--bg-button-hover);
@@ -98,9 +91,9 @@ NOTES:
 	--fg-search       : var(--fg);  /* quicksearch text over quicksearch bg */
 	--bg-search       : #ff9;  /* quicksearch text bg */
 	--bg-info         : #069;  /* info bubbles */
-	--fg-info         : var(--x-fg-inverted);
+	--fg-info         : var(--fg-inverted);
 	--bg-error        : #a33; /* invalid inputs and error bubbles */
-	--fg-error        : var(--x-fg-inverted);
+	--fg-error        : var(--fg-inverted);
 	--bg-warn         : #ffa500; /* warning bubbles */
 	--fg-warn         : var(--fg);
 
@@ -122,8 +115,6 @@ NOTES:
 	--fg-focused            : var(--fg-inverted);
 	--bg-row-focused        : #ddd;
 
-	color            : var(--fg);
-	background-color : var(--bg);
 }
 
 .theme-dark, :where(.theme-light) .theme-inverted {
@@ -157,6 +148,7 @@ NOTES:
 	--bg-button-hover           : hsl(215 15% 24%);
 	--bg-button-pressed         : hsl(215 16% 30%);
 
+	--border-button-primary     : hsl(134 61% 43%);
 	--bg-button-danger          : var(--bg-button);
 	--bg-button-danger-hover    : var(--bg-button-hover);
 	--bg-button-danger-pressed  : var(--bg-button-pressed);
@@ -175,9 +167,6 @@ NOTES:
 	--bg-row-focused        : #222326;
 
 	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
-
-	color            : var(--fg);
-	background-color : var(--bg);
 
 }
 
@@ -198,8 +187,6 @@ NOTES:
 
 	--font-baseline-adjust-ff: 0; /* set this to 1 depending on font */
 
-	font-size: var(--font-size-normal);
-
 }
 
 .theme-small {
@@ -211,8 +198,6 @@ NOTES:
 	--font-size-h1     : 26px;
 	--font-size-h2     : 22px;
 	--font-size-h3     : 18px;
-
-	font-size: var(--font-size-normal);
 
 }
 
@@ -226,8 +211,16 @@ NOTES:
 	--font-size-h2     : 26px;
 	--font-size-h3     : 22px;
 
-	font-size: var(--font-size-normal);
+}
 
+} /*layer*/
+
+@layer base {
+
+:root {
+	font-size        : var(--font-size-normal);
+	color            : var(--fg);
+	background-color : var(--bg);
 }
 
 /* RESET ------------------------------------------------------------------ */
@@ -311,10 +304,7 @@ h3 { font-size: var(--font-size-h3); }
 .normal    { font-size: var(--font-size-normal); }
 .large     { font-size: var(--font-size-large); }
 .xlarge    { font-size: var(--font-size-xlarge); }
-.h1        { font-size: var(--font-size-h1); }
-.h2        { font-size: var(--font-size-h2); }
-.h3        { font-size: var(--font-size-h3); }
-.tight     { line-height: 1.3; }
+.tight     { line-height: 1.2; }
 .bold      { font-weight: bold; }
 .italic    { font-style: italic; }
 .underline { text-decoration: underline; }
@@ -355,54 +345,6 @@ h3 { font-size: var(--font-size-h3); }
 .float-r { float: right; }
 
 /* ALIGN: FLEXBOX --------------------------------------------------------- */
-
-/* full spec */
-
-.h-l-s   { display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; align-items: stretch   ; }
-.h-l-c   { display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; align-items: center    ; }
-.h-l-t   { display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; align-items: flex-start; }
-.h-l-b   { display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; align-items: flex-end  ; }
-.h-l-bl  { display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; align-items: baseline  ; }
-
-.h-r-s   { display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; align-items: stretch   ; }
-.h-r-c   { display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; align-items: center    ; }
-.h-r-t   { display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; align-items: flex-start; }
-.h-r-b   { display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; align-items: flex-end  ; }
-.h-r-bl  { display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; align-items: baseline  ; }
-
-.h-c-s   { display: inline-flex; flex-flow: row   ; justify-content: center       ; align-items: stretch   ; }
-.h-c-c   { display: inline-flex; flex-flow: row   ; justify-content: center       ; align-items: center    ; }
-.h-c-t   { display: inline-flex; flex-flow: row   ; justify-content: center       ; align-items: flex-start; }
-.h-c-b   { display: inline-flex; flex-flow: row   ; justify-content: center       ; align-items: flex-end  ; }
-.h-c-bl  { display: inline-flex; flex-flow: row   ; justify-content: center       ; align-items: baseline  ; }
-
-.h-sb-s  { display: inline-flex; flex-flow: row   ; justify-content: space-between; align-items: stretch   ; }
-.h-sb-c  { display: inline-flex; flex-flow: row   ; justify-content: space-between; align-items: center    ; }
-.h-sb-t  { display: inline-flex; flex-flow: row   ; justify-content: space-between; align-items: flex-start; }
-.h-sb-b  { display: inline-flex; flex-flow: row   ; justify-content: space-between; align-items: flex-end  ; }
-.h-sb-bl { display: inline-flex; flex-flow: row   ; justify-content: space-between; align-items: baseline  ; }
-
-.v-t-s   { display: inline-flex; flex-flow: column; justify-content: flex-start   ; align-items: stretch   ; }
-.v-b-s   { display: inline-flex; flex-flow: column; justify-content: flex-end     ; align-items: stretch   ; }
-.v-c-s   { display: inline-flex; flex-flow: column; justify-content: center       ; align-items: stretch   ; }
-.v-sb-s  { display: inline-flex; flex-flow: column; justify-content: space-between; align-items: stretch   ; }
-
-.v-t-c   { display: inline-flex; flex-flow: column; justify-content: flex-start   ; align-items: center    ; }
-.v-b-c   { display: inline-flex; flex-flow: column; justify-content: flex-end     ; align-items: center    ; }
-.v-c-c   { display: inline-flex; flex-flow: column; justify-content: center       ; align-items: center    ; }
-.v-sb-c  { display: inline-flex; flex-flow: column; justify-content: space-between; align-items: center    ; }
-
-.v-t-l   { display: inline-flex; flex-flow: column; justify-content: flex-start   ; align-items: flex-start; }
-.v-b-l   { display: inline-flex; flex-flow: column; justify-content: flex-end     ; align-items: flex-start; }
-.v-c-l   { display: inline-flex; flex-flow: column; justify-content: center       ; align-items: flex-start; }
-.v-sb-l  { display: inline-flex; flex-flow: column; justify-content: space-between; align-items: flex-start; }
-
-.v-t-r   { display: inline-flex; flex-flow: column; justify-content: flex-start   ; align-items: flex-end  ; }
-.v-b-r   { display: inline-flex; flex-flow: column; justify-content: flex-end     ; align-items: flex-end  ; }
-.v-c-r   { display: inline-flex; flex-flow: column; justify-content: center       ; align-items: flex-end  ; }
-.v-sb-r  { display: inline-flex; flex-flow: column; justify-content: space-between; align-items: flex-end  ; }
-
-/* combined spec */
 
 .h    { display: inline-flex; flex-flow: row   ; }
 .v    { display: inline-flex; flex-flow: column; }
@@ -632,6 +574,24 @@ h3 { font-size: var(--font-size-h3); }
 .noclip-x     { overflow-x: visible; }
 .noclip-y     { overflow-y: visible; }
 
+/* THIN SCROLLBARS -------------------------------------------------------- */
+
+/* must set w/h to enable custom-drawn scrollbars */
+.scroll-thin::-webkit-scrollbar {
+	width : 8px;
+	height: 8px;
+}
+
+.scroll-thin::-webkit-scrollbar-track {
+	background-color: var(--bg1);
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+	background    : var(--bg2);
+	border-color  : var(--bg2);
+	border-radius : 50px;
+}
+
 /* POSITIONING ------------------------------------------------------------ */
 
 .rel { position: relative; }
@@ -663,24 +623,6 @@ h3 { font-size: var(--font-size-h3); }
 
 .click-through     { pointer-events: none; }
 .click-through-off { pointer-events: all; }
-
-/* THIN SCROLLBARS -------------------------------------------------------- */
-
-/* must set w/h to enable custom-drawn scrollbars */
-.scroll-thin::-webkit-scrollbar {
-	width : 8px;
-	height: 8px;
-}
-
-.scroll-thin::-webkit-scrollbar-track {
-	background-color: var(--bg1);
-}
-
-.scroll-thin::-webkit-scrollbar-thumb {
-	background    : var(--bg2);
-	border-color  : var(--bg2);
-	border-radius : 50px;
-}
 
 /* FLAT BACKGROUNDS ------------------------------------------------------- */
 
@@ -721,8 +663,10 @@ h3 { font-size: var(--font-size-h3); }
 
 .dim    { opacity: .5; }
 .no-dim { opacity: .1; }
+
 .op0    { opacity:  0; }
 .op1    { opacity:  1; }
+
 .op01   { opacity: .1; }
 .op02   { opacity: .2; }
 .op03   { opacity: .3; }
@@ -759,15 +703,18 @@ h3 { font-size: var(--font-size-h3); }
 /* TRANSITIONS ------------------------------------------------------------ */
 
 .ease {
-	transition: top .2s ease;
 	transition-property:
 		top, left, right, bottom, transform,
-		filter, background-color, border-color;
+		opacity, filter, background-color, border-color;
+	transition-duration: .2s;
+	transition-timing-function: ease;
 }
+.ease-out { transition-timing-function: ease; }
 .ease-01s { transition-duration: .1s; }
 .ease-05s { transition-duration: .5s; }
 .ease-1s  { transition-duration:  1s; }
 .no-ease  { transition: all 0s; }
+.ease-fw  { animation-fill-mode: forwards; }
 
 /* ANIMATIONS ------------------------------------------------------------- */
 
@@ -839,29 +786,54 @@ h3 { font-size: var(--font-size-h3); }
 
 @font-face {
 	font-family: "opensans";
-	src: url("/opensans-regular.woff2");
+	src: url("opensans-regular.woff2");
 }
 
 @font-face {
 	font-family: "opensans";
 	font-weight: bold;
-	src: url("/opensans-600.woff2");
+	src: url("opensans-600.woff2");
 }
 
 @font-face {
-	font-family: "opensanscondensed";
-	src: url("/opensanscondensed-light.woff2");
+	font-family: "opensans-condensed";
+	src: url("opensanscondensed-light.woff2");
 }
 
 @font-face {
-	font-family: "opensanscondensed";
+	font-family: "opensans-condensed";
 	font-weight: bold;
-	src: url("/opensanscondensed-bold.woff2");
+	src: url("opensanscondensed-bold.woff2");
 }
 
 .opensans {
 	font-family: opensans, arial, sans-serif;
-	--x-grid-cell-baseline-adjust-ff: 0;
+}
+
+.opensans-condensed {
+	font-family: opensans-condensed, arial, sans-serif;
+}
+
+@font-face {
+  font-family: 'inter-var';
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
+  font-named-instance: 'Regular';
+  src: url("inter-roman.var.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: 'inter-var';
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: italic;
+  font-named-instance: 'Italic';
+  src: url("inter-italic.var.woff2") format("woff2");
+}
+
+.inter {
+	font-family: inter-var, sans-serif;
 }
 
 @font-face {
@@ -869,7 +841,7 @@ h3 { font-size: var(--font-size-h3); }
 	font-style: normal;
 	font-weight: 400;
 	font-display: block;
-	src: url("/material-icons-round.woff2");
+	src: url("material-icons-round.woff2");
 }
 
 @font-face {
@@ -877,10 +849,18 @@ h3 { font-size: var(--font-size-h3); }
 	font-style: normal;
 	font-weight: 400;
 	font-display: block;
-	src: url("/material-icons-sharp.woff2");
+	src: url("material-icons-sharp.woff2");
 }
 
-.mi, .mi-round, .mi-sharp {
+@font-face {
+	font-family: "mi-outlined";
+	font-style: normal;
+	font-weight: 400;
+	font-display: block;
+	src: url("material-icons-outlined.woff2");
+}
+
+.mi, .mi-round, .mi-sharp, .mi-outlined {
 	font-weight: normal;
 	font-style: normal;
 	font-size: 150%;
@@ -900,6 +880,7 @@ h3 { font-size: var(--font-size-h3); }
 
 .mi, .mi-round { font-family: "mi-round"; }
 .mi-sharp      { font-family: "mi-sharp"; }
+.mi-outlined   { font-family: "mi-outlined"; }
 
 } /*layer*/
 

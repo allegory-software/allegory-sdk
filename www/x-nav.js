@@ -453,9 +453,7 @@ server-side properties:
 css('.x-loading-overlay', 'p')
 css('.x-loading-overlay.error', 'bg-smoke')
 
-css('.x-loading-overlay-message', 'p2 shadow-tooltip', `
-	background-color: var(--bg-popup);
-`)
+css('.x-loading-overlay-message', 'p2 shadow-tooltip bg1')
 
 css('.x-loading-overlay-message .x-button', '', `
 	line-height: 1;

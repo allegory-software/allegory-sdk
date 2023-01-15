@@ -56,7 +56,7 @@ WRITING CSS RULES
 
 */
 
-css(':root', '', `
+css_theme_light('', '', `
 
 	--padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
 	--padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
@@ -80,8 +80,6 @@ css(':root', '', `
 	--font-size-input-label-empty  : var(--font-size-small); /* put 100% for animating floating label */
 
 	--bg-moving       : #eeeeeeaa;
-	--bg-popup        : #fff;  /* bg for popups and inline grid editors */
-	--bg-popup2       : #fff;  /* bg for popups sitting over popups */
 	--bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
 	--bg-today        : #f33;
 	--fg-today        : var(--fg-inverted);
@@ -97,17 +95,14 @@ css(':root', '', `
 	--selected-widget-outline-color         : #666;
 	--selected-widget-outline-color-focused : blue;
 
-	--bg-grid-editor        : var(--bg-popup);
 `)
 
-css('.theme-dark', '', `
+css_theme_dark('', '', `
 
 	--border-focused                :  #66a;
 	--outline-markbox-focused       :  #88888866;
 
 	--bg-moving            : #141a24aa;
-	--bg-popup             : #1d2532;
-	--bg-popup2            : #11161e;
 	--fg-clickable         : #75b7fa;
 
 	--bg-select-button: var(--bg1);
@@ -119,12 +114,6 @@ css('.theme-dark', '', `
 
 	--selected-widget-outline-color         : #aaa;
 	--selected-widget-outline-color-focused : var(--fg-clickable);
-
-	--bg-grid-editor        : #495560;
-
-	color: var(--fg);
-	background-color: var(--bg);
-	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
 
 `)
 
@@ -190,13 +179,11 @@ function widget(tag, category, init) {
 		init = category
 		category = null
 	}
-
 	let init0 = init
 	init = function(e) {
 		e.class(tag)
 		return init0(e)
 	}
-
 	let type
 	function comp_init(e) {
 		e.iswidget = true     // to diff from normal html elements.
@@ -205,7 +192,7 @@ function widget(tag, category, init) {
 		e.make_disablable()
 		return init(e)
 	}
-	let create = component(tag, comp_init, category)
+	let create = component(tag, category, comp_init)
 	create.construct = init
 	type = create.type
 	window[type] = create
@@ -644,20 +631,11 @@ widget('x-popup', function(e) {
 // ---------------------------------------------------------------------------
 
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.x-tooltip', 'z2 h-l-s noclip noselect', `
+css('.x-tooltip', 'z2 h noclip noselect op0 click-through ease ease-out ease-fw', `
 	max-width: 400px;  /* max. width of the message bubble before wrapping */
-
-	/* animation */
-	opacity: 0;
-	pointer-events: none;
-	animation-duration: .2s;
-	animation-timing-function: ease-out;
-	animation-fill-mode: forwards;
 `)
 
-css('.x-tooltip-body', 'h-l-bl p-y tight', `
-	border-radius    : var(--border-radius-window);
-	background-color : var(--bg-popup);
+css('.x-tooltip-body', 'h-bl p-y tight ro bg1', `
 	box-shadow       : var(--shadow-tooltip);
 `)
 
@@ -693,7 +671,7 @@ css('.x-tooltip-xbutton:not([disabled]):not(.active):hover', '', `
 css('.x-tooltip-tip', 'z1', `
 	display: block;
 	border: .5em solid transparent; /* border-based triangle shape */
-	color: var(--bg-popup);
+	color: var(--bg1);
 `)
 
 css('.x-tooltip-icon', 't-t m-t-05 m-l-2', `
@@ -946,13 +924,11 @@ tooltip.icon_classes = {
 // toaster
 // ---------------------------------------------------------------------------
 
-css('.x-toaster', 'hidden') // don't mess up the layout
+css('.toaster', 'hidden') // don't mess up the layout
 
-css('.x-toaster-message', 'op1', `
-	transition: opacity .2s, top .2s;
-`)
+css('.toaster-message', 'op1 ease ease-1s')
 
-widget('x-toaster', function(e) {
+widget('toaster', function(e) {
 
 	e.tooltips = set()
 
@@ -984,7 +960,7 @@ widget('x-toaster', function(e) {
 
 	e.post = function(text, kind, timeout) {
 		let t = tooltip({
-			classes: 'x-toaster-message',
+			classes: 'toaster-message',
 			kind: kind,
 			icon_visible: true,
 			text: text,
@@ -1034,7 +1010,7 @@ ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 // z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 // noclip: submenus are outside clipping area
 // fg: prevent inheritance by the .focused rule below.
-css('.x-menu', 'arial abs z4 noclip fg', `
+css('.x-menu', 'arial abs z4 noclip fg bg1', `
 
 	font-size   : 12px;
 	line-height : 1.5;
@@ -1047,7 +1023,6 @@ css('.x-menu', 'arial abs z4 noclip fg', `
 
 	display: table;
 	border-collapse: collapse; /* separators are done with borders */
-	background-color: var(--bg-popup);
 
 	color: inherit;
 `)
@@ -1510,86 +1485,86 @@ widget_items_widget = function(e) {
 // tabs
 // ---------------------------------------------------------------------------
 
-css('.x-tabs', 'S v shrinks')
+css('.tabs', 'S v shrinks')
 
-css('.x-tabs-header', 'h rel bg1')
+css('.tabs-header', 'h rel bg1')
 
-css('.x-tabs-tabs', 'S h rel')
+css('.tabs-tabs', 'S h rel')
 
-css('.x-tabs-fixed-header', 'S h-m')
+css('.tabs-fixed-header', 'S h-m')
 
-css('.x-tabs[tabs_side=left ]', 'h-l')
-css('.x-tabs[tabs_side=right]', 'h-r')
+css('.tabs[tabs_side=left ]', 'h-l')
+css('.tabs[tabs_side=right]', 'h-r')
 
-css('.x-tabs[tabs_side=left ] > .x-tabs-header', 'v')
-css('.x-tabs[tabs_side=right] > .x-tabs-header', 'v')
-css('.x-tabs[tabs_side=left ] > .x-tabs-header > .x-tabs-tabs', 'v')
-css('.x-tabs[tabs_side=right] > .x-tabs-header > .x-tabs-tabs', 'v')
+css('.tabs[tabs_side=left ] > .tabs-header', 'v')
+css('.tabs[tabs_side=right] > .tabs-header', 'v')
+css('.tabs[tabs_side=left ] > .tabs-header > .tabs-tabs', 'v')
+css('.tabs[tabs_side=right] > .tabs-header > .tabs-tabs', 'v')
 
-css('.x-tabs[tabs_side=bottom] > .x-tabs-header', 'order-1')
-css('.x-tabs[tabs_side=right ] > .x-tabs-header', 'order-1')
+css('.tabs[tabs_side=bottom] > .tabs-header', 'order-1')
+css('.tabs[tabs_side=right ] > .tabs-header', 'order-1')
 
-css('.x-tabs[tabs_side=top   ] > .x-tabs-header', 'b-b')
-css('.x-tabs[tabs_side=bottom] > .x-tabs-header', 'b-t')
-css('.x-tabs[tabs_side=left  ] > .x-tabs-header', 'b-r')
-css('.x-tabs[tabs_side=right ] > .x-tabs-header', 'b-l')
+css('.tabs[tabs_side=top   ] > .tabs-header', 'b-b')
+css('.tabs[tabs_side=bottom] > .tabs-header', 'b-t')
+css('.tabs[tabs_side=left  ] > .tabs-header', 'b-r')
+css('.tabs[tabs_side=right ] > .tabs-header', 'b-l')
 
-css('.x-tabs-content', 'scroll-auto', `
-	min-height: 0;  /* don't let the content make the x-tabs itself overflow */
+css('.tabs-content', 'scroll-auto', `
+	min-height: 0;  /* don't let the content make the tabs itself overflow */
 	flex: 1 0 0;    /* stretch to fill container but not more */
 `)
 
-css('.x-tabs-tab', 'rel label arrow h', `
+css('.tabs-tab', 'rel label arrow h', `
 	line-height: 1.25;
 `)
 
-css('.x-tabs-title', 'noselect nowrap', `
+css('.tabs-title', 'noselect nowrap', `
 	padding: .5em .8em .3em .8em;
 	max-width: 10em;
 `)
 
-css('.x-tabs-add-button', 'p-y-05 p-x-2 h-m')
+css('.tabs-add-button', 'p-y-05 p-x-2 h-m')
 
-css('.x-tabs-add-button::before', 'small')
+css('.tabs-add-button::before', 'small')
 
-css('.x-tabs-xbutton', 'abs gray arrow', `
+css('.tabs-xbutton', 'abs gray arrow', `
 	top: 2px;
 	right: 2px;
 	font-size: 70%;
 `)
 
 // z2: selection-bar = 2, moving-tab = 1
-css('.x-tabs-selection-bar', 'abs bg-link z2', `
+css('.tabs-selection-bar', 'abs bg-link z2', `
 	width: 2px;
 	height: 2px;
 `)
 
-css_state('.x-tabs-xbutton:hover', '', `
+css_state('.tabs-xbutton:hover', '', `
 	color: inherit;
 `)
 
-css_state('.x-tabs:not(.moving) > .x-tabs-header > .x-tabs-selection-bar', '', `
+css_state('.tabs:not(.moving) > .tabs-header > .tabs-selection-bar', '', `
 	transition: width .15s, height .15s, left .15s, top .15s;
 `)
 
 // z1: selection-bar = 2, moving-tab = 1
-css_state('.x-tabs-tab.moving', 'z1', `
+css_state('.tabs-tab.moving', 'z1', `
 	opacity: .7;
 `)
 
-css_state('.x-tabs.moving > .x-tabs-header > .x-tabs-tab:not(.moving)', '', `
+css_state('.tabs.moving > .tabs-header > .tabs-tab:not(.moving)', '', `
 	transition: left .1s, top .1s;
 `)
 
-css_state('.x-tabs-tab.selected', '', `
+css_state('.tabs-tab.selected', '', `
 	color: inherit;
 `)
 
-css_state('.x-tabs-tab:focus', 'no-outline')
+css_state('.tabs-tab:focus', 'no-outline')
 
-css_state('.x-tabs-tab:is(:hover, :focus)', 'bg1')
+css_state('.tabs-tab:is(:hover, :focus)', 'bg1')
 
-widget('x-tabs', 'Containers', function(e) {
+widget('tabs', 'Containers', function(e) {
 
 	selectable_widget(e)
 	editable_widget(e)
@@ -1598,7 +1573,7 @@ widget('x-tabs', 'Containers', function(e) {
 
 	let html_items = widget_items_widget(e)
 
-	e.fixed_header = html_items.find(e => e.tag == 'x-tabs-fixed-header')
+	e.fixed_header = html_items.find(e => e.tag == 'tabs-fixed-header')
 	if (e.fixed_header)
 		html_items.remove_value(e.fixed_header)
 
@@ -1637,12 +1612,12 @@ widget('x-tabs', 'Containers', function(e) {
 	e.do_update = function(opt) {
 
 		if (!e.selection_bar) {
-			e.selection_bar = div({class: 'x-tabs-selection-bar'})
-			e.add_button = div({class: 'x-tabs-add-button fa fa-plus', tabindex: 0})
-			e.tabs = div({class: 'x-tabs-tabs'})
-			e.header = div({class: 'x-tabs-header'},
+			e.selection_bar = div({class: 'tabs-selection-bar'})
+			e.add_button = div({class: 'tabs-add-button fa fa-plus', tabindex: 0})
+			e.tabs = div({class: 'tabs-tabs'})
+			e.header = div({class: 'tabs-header'},
 				e.selection_bar, e.tabs, e.fixed_header, e.add_button)
-			e.content = div({class: 'x-tabs-content x-container'})
+			e.content = div({class: 'tabs-content x-container'})
 			e.add(e.header, e.content)
 			e.add_button.on('click', add_button_click)
 		}
@@ -1657,10 +1632,10 @@ widget('x-tabs', 'Containers', function(e) {
 
 		if (opt.new_items) {
 			for (let item of opt.new_items) {
-				let xbutton = div({class: 'x-tabs-xbutton fa fa-times'})
+				let xbutton = div({class: 'tabs-xbutton fa fa-times'})
 				xbutton.hidden = true
-				let title_box = div({class: 'x-tabs-title'})
-				let tab = div({class: 'x-tabs-tab', tabindex: 0}, title_box, xbutton)
+				let title_box = div({class: 'tabs-title'})
+				let tab = div({class: 'tabs-tab', tabindex: 0}, title_box, xbutton)
 				tab.title_box = title_box
 				tab.xbutton = xbutton
 				tab.on('pointerdown' , tab_pointerdown)
@@ -1855,7 +1830,7 @@ widget('x-tabs', 'Containers', function(e) {
 		let parent = e.parent
 		let i = 0
 		while (parent && parent.iswidget) {
-			i += parent.hasclass('x-tabs')
+			i += parent.hasclass('tabs')
 			parent = parent.parent
 		}
 		return i
@@ -2025,57 +2000,57 @@ widget('x-tabs', 'Containers', function(e) {
 // split-view
 // ---------------------------------------------------------------------------
 
-css('.x-split', 'S')
-css('.x-split[orientation=horizontal]', 'h')
-css('.x-split[orientation=vertical  ]', 'v')
+css('.split', 'S')
+css('.split[orientation=horizontal]', 'h')
+css('.split[orientation=vertical  ]', 'v')
 
-css('.x-split-pane-auto', 'S shrinks')
+css('.split-pane-auto', 'S shrinks')
 
-css('.x-split-sizer', 'h-c-c', `
+css('.split-sizer', 'h-c h-m', `
 	background-color: var(--border);
 `)
-css('.x-split[orientation=vertical  ] > .x-split-sizer', 'h', ` height: 1px; `)
-css('.x-split[orientation=horizontal] > .x-split-sizer', 'h', ` width : 1px; `)
+css('.split[orientation=vertical  ] > .split-sizer', 'h', ` height: 1px; `)
+css('.split[orientation=horizontal] > .split-sizer', 'h', ` width : 1px; `)
 
-css_state('.x-split[orientation=horizontal].resize', '', ` cursor: ew-resize; `)
-css_state('.x-split[orientation=vertical  ].resize', '', ` cursor: ns-resize; `)
+css_state('.split[orientation=horizontal].resize', '', ` cursor: ew-resize; `)
+css_state('.split[orientation=vertical  ].resize', '', ` cursor: ns-resize; `)
 
-css_state('.x-split[orientation=horizontal] > .x-split-pane.collapsed', '', `
+css_state('.split[orientation=horizontal] > .split-pane.collapsed', '', `
 	min-width: 0 !important;
 	width: 0 !important;
 `)
-css_state('.x-split[orientation=vertical  ] > .x-split-pane.collapsed', '', `
+css_state('.split[orientation=vertical  ] > .split-pane.collapsed', '', `
 	min-height: 0 !important;
 	height: 0 !important;
 `)
 
-css_state('.x-split.resize > .x-split-sizer', '', `
+css_state('.split.resize > .split-sizer', '', `
 	background-color: var(--border-hover);
 	transition: background-color .2s;
 `)
 
-css('.x-split.collapsed > .x-split-sizer::before', '', `
+css('.split.collapsed > .split-sizer::before', '', `
 	content: '';
 	box-sizing: border-box;
 	border: 1px var(--fg-gray);
 `)
 
-css('.x-split.collapsed > .x-split-sizer::before', '', `
+css('.split.collapsed > .split-sizer::before', '', `
 	position: fixed; /* show over contents */
 `)
 
-css('.x-split[orientation=horizontal].collapsed > .x-split-sizer::before', '', `
+css('.split[orientation=horizontal].collapsed > .split-sizer::before', '', `
 	min-width: 4px;
 	height: 24px;
 	border-style: none solid;
 `)
-css('.x-split[orientation=vertical  ].collapsed > .x-split-sizer::before', '', `
+css('.split[orientation=vertical  ].collapsed > .split-sizer::before', '', `
 	min-height: 4px;
 	width: 24px;
 	border-style: solid none;
 `)
 
-widget('x-split', 'Containers', function(e) {
+widget('split', 'Containers', function(e) {
 
 	serializable_widget(e)
 	selectable_widget(e)
@@ -2086,9 +2061,9 @@ widget('x-split', 'Containers', function(e) {
 	let html_item2 = e.at[1]
 	e.clear()
 
-	e.pane1 = div({class: 'x-split-pane x-container'})
-	e.pane2 = div({class: 'x-split-pane x-container'})
-	e.sizer = div({class: 'x-split-sizer'})
+	e.pane1 = div({class: 'split-pane x-container'})
+	e.pane2 = div({class: 'split-pane x-container'})
+	e.sizer = div({class: 'split-sizer'})
 	e.add(e.pane1, e.sizer, e.pane2)
 
 	e.prop('item1', {type: 'widget', convert: component.create})
@@ -2110,10 +2085,10 @@ widget('x-split', 'Containers', function(e) {
 		left = e.fixed_side == 'first'
 		e.fixed_pane = left ? e.pane1 : e.pane2
 		e.auto_pane  = left ? e.pane2 : e.pane1
-		e.fixed_pane.class('x-split-pane-fixed')
-		e.fixed_pane.class('x-split-pane-auto', false)
-		e.auto_pane.class('x-split-pane-auto')
-		e.auto_pane.class('x-split-pane-fixed', false)
+		e.fixed_pane.class('split-pane-fixed')
+		e.fixed_pane.class('split-pane-auto', false)
+		e.auto_pane.class('split-pane-auto')
+		e.auto_pane.class('split-pane-fixed', false)
 		e.class('resizeable', e.resizeable)
 		e.sizer.hidden = !e.resizeable
 		e.fixed_pane[horiz ? 'h' : 'w'] = null
@@ -2234,7 +2209,7 @@ widget('x-split', 'Containers', function(e) {
 
 })
 
-widget('x-vsplit', function(e) {
+widget('vsplit', function(e) {
 	let opt = split.construct(e)
 	opt.orientation = 'vertical'
 	return opt
@@ -2244,7 +2219,7 @@ widget('x-vsplit', function(e) {
 // action band
 // ---------------------------------------------------------------------------
 
-css('.x-action-band', 'h-r-c p05')
+css('.x-action-band', 'h-r h-m p05')
 css('.x-action-band .x-button', 'p-x-05')
 css('.x-action-band .x-button-text', 'nowrap')
 
@@ -2323,10 +2298,8 @@ widget('x-action-band', 'Input', function(e) {
 // modal dialog with action band footer
 // ---------------------------------------------------------------------------
 
-css('.x-dialog', 'v p2 fg b0', `
+css('.x-dialog', 'v p2 fg b0 ro bg1', `
 	margin: 20px;
-	background-color: var(--bg-popup);
-	border-radius: var(--border-radius-window);
 	box-shadow: var(--shadow-modal);
 `)
 
@@ -2338,7 +2311,7 @@ css(`
 
 css('.x-dialog-heading', 'gray xlarge bold m-y-05')
 
-css('.x-dialog-xbutton', 'abs b b-t-0 h-c-c hand', `
+css('.x-dialog-xbutton', 'abs b b-t-0 h-c h-m hand', `
 	right: 8px;
 	top: 0px;
 	border-bottom-right-radius: var(--border-radius-button);
@@ -2502,8 +2475,7 @@ widget('x-dialog', function(e) {
 // ---------------------------------------------------------------------------
 
 // z1: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.x-toolbox', 'z1 v scroll-auto b0', `
-	background-color: var(--bg-popup);
+css('.x-toolbox', 'z1 v scroll-auto b0 bg1', `
 
 	/* pinning */
 	opacity: .2;
@@ -2886,11 +2858,9 @@ css('.x-richtext-content', 'vscroll-auto no-outline', `
 	padding: 10px;
 `)
 
-css('.x-richtext-actionbar', 'abs h', `
-	background-color: var(--bg-popup);
-`)
+css('.x-richtext-actionbar', 'abs h bg1')
 
-css('.x-richtext-button', 'm0 b bg1 h-c-c', `
+css('.x-richtext-button', 'm0 b bg1 h-c h-m', `
 	height: 2em;
 	width: 2em;
 `)

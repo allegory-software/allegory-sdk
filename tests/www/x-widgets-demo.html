@@ -3,7 +3,8 @@
 <head>
 <title>X-WIDGETS DEMO</title>
 <meta charset="utf-8">
-
+<link rel="stylesheet" type="text/css" href="../../www/utils.css">
+<link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
 <script src="../../www/glue.js"></script>
 <script src="../../www/divs.js"></script>
 <script src="../../www/purify.js"></script>
@@ -14,11 +15,8 @@
 <script src="../../www/x-grid.js"></script>
 <script src="../../www/x-chart.js"></script>
 <script src="../../www/x-module.js"></script>
+<script src="../../www/theme-default.js"></script>
 <script src="../../www/ace/ace.js"></script>
-
-<link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
-<link rel="stylesheet" type="text/css" href="../../www/utils.css">
-<link rel="stylesheet" type="text/css" href="../../www/x-widgets.css">
 
 <style>
 
@@ -74,52 +72,6 @@ button { border: 1px solid #555; }
 button[pressed] { background: #ddf; }
 .theme-dark button[pressed] { background: #336; }
 
-/*
-hack to get fontawesome fonts from a rel path so that we can serve this html
-file from any CDN like githack.com.
-*/
-@font-face {
-  font-family: 'Font Awesome 6 Free';
-  font-style: normal;
-  font-weight: 400;
-  font-display: block;
-  src: url("../../www/fa-regular-400.woff2") format("woff2"); }
-
-.far,
-.fa-regular {
-  font-family: 'Font Awesome 6 Free';
-  font-weight: 400; }
-:root, :host {
-  --fa-font-solid: normal 900 1em/1 "Font Awesome 6 Free"; }
-
-@font-face {
-  font-family: 'Font Awesome 6 Free';
-  font-style: normal;
-  font-weight: 900;
-  font-display: block;
-  src: url("../../www/fa-solid-900.woff2") format("woff2"); }
-
-.fas,
-.fa-solid {
-  font-family: 'Font Awesome 6 Free';
-  font-weight: 900; }
-
-@font-face {
-  font-family: "FontAwesome";
-  font-display: block;
-  src: url("../../www/fa-solid-900.woff2") format("woff2"); }
-
-@font-face {
-  font-family: "FontAwesome";
-  font-display: block;
-  src: url("../../www/fa-brands-400.woff2") format("woff2"); }
-
-@font-face {
-  font-family: "FontAwesome";
-  font-display: block;
-  src: url("../../www/fa-regular-400.woff2") format("woff2");
-  unicode-range: U+F003,U+F006,U+F014,U+F016-F017,U+F01A-F01B,U+F01D,U+F022,U+F03E,U+F044,U+F046,U+F05C-F05D,U+F06E,U+F070,U+F087-F088,U+F08A,U+F094,U+F096-F097,U+F09D,U+F0A0,U+F0A2,U+F0A4-F0A7,U+F0C5,U+F0C7,U+F0E5-F0E6,U+F0EB,U+F0F6-F0F8,U+F10C,U+F114-F115,U+F118-F11A,U+F11C-F11D,U+F133,U+F147,U+F14E,U+F150-F152,U+F185-F186,U+F18E,U+F190-F192,U+F196,U+F1C1-F1C9,U+F1D9,U+F1DB,U+F1E3,U+F1EA,U+F1F7,U+F1F9,U+F20A,U+F247-F248,U+F24A,U+F24D,U+F255-F25B,U+F25D,U+F271-F274,U+F278,U+F27B,U+F28C,U+F28E,U+F29C,U+F2B5,U+F2B7,U+F2BA,U+F2BC,U+F2BE,U+F2C0-F2C1,U+F2C3,U+F2D0,U+F2D2,U+F2D4,U+F2DC; }
-
 </style>
 
 </head>
@@ -161,7 +113,7 @@ on_dom_load(function() {
 <!--------------------------------------------------------------------------->
 
 <template id=tabs_demo>
-<x-tabs selected_tab=second_page tabs_side=top>
+<tabs selected_tab=second_page tabs_side=top>
 	<div label="First Page" id=first_page>
 		<h1>This is the first page</h1>
 		<p>You can put anything in here.</p>
@@ -170,22 +122,22 @@ on_dom_load(function() {
 		<h1>This is the second page.</h1>
 		<p>You can put anything in here too.</p>
 	</div>
-</x-tabs>
+</tabs>
 </template>
 
 <!--------------------------------------------------------------------------->
 
 <template id=split_demo>
-<x-split>
-	<x-vsplit id=my_split fixed_side=first min_size=100>
+<split>
+	<vsplit id=my_split fixed_side=first min_size=100>
 		<div style="background: gray">Stuff 1</div>
 		<div>Stuff 2</div>
-	</x-vsplit>
-	<x-vsplit fixed_side=second>
+	</vsplit>
+	<vsplit fixed_side=second>
 		<div>Stuff 3</div>
 		<div>Stuff 4</div>
-	</x-vsplit>
-</x-split>
+	</vsplit>
+</split>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -193,12 +145,12 @@ on_dom_load(function() {
 <template id=button_demo>
 <span>
 	<p>
-		<x-button id=wasup_button>Wasup?</x-button>, says the button.
+		<x-button id=wasup_button class=large>Cancel</x-button>, says the button.
 		<x-button danger>Don't do it Jonny!</x-button>, says another.
 		<x-button icon="fa fa-recycle" bare></x-button>
 	</p>
 	<p>
-		<x-button primary>Click me!</x-button>
+		<x-button primary>OK</x-button>
 		<x-button icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</x-button>
 		<x-button bare icon="fa fa-play">I'm also a button</x-button>
 		<script run>
@@ -1144,8 +1096,8 @@ main.add(grid({w: 200, h: 200, rowset: r}))
 <!--------------------------------------------------------------------------->
 
 <template id=charts_demo>
-<x-vsplit>
-	<x-tabs>
+<vsplit>
+	<tabs>
 		<script run label=Grid>
 			let g = grid({
 				id: 'g',
@@ -1181,9 +1133,9 @@ main.add(grid({w: 200, h: 200, rowset: r}))
 			})
 		</script>
 		<div label=Empty id=empty_div>This is empty to disconnect the grid.</div>
-	</x-tabs>
-	<x-split fixed_side=second>
-		<x-tabs tabs_side=left>
+	</tabs>
+	<split fixed_side=second>
+		<tabs tabs_side=left>
 			<x-chart label=Pie nav=g
 				sum_cols=output
 				group_cols="country sector"
@@ -1230,10 +1182,10 @@ main.add(grid({w: 200, h: 200, rowset: r}))
 				split_cols="country sector"
 				group_cols="date/0/month/1"
 			></x-chart>
-		</x-tabs>
+		</tabs>
 		<div></div>
-	</x-split>
-</x-vsplit>
+	</split>
+</vsplit>
 </template>
 
 <!--------------------------------------------------------------------------->

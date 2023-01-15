@@ -31,6 +31,14 @@ css(':root', '', `
 	--grid-cell-line-height : 16px; /* PIXELS ONLY! */
 `)
 
+css_theme_light('', '', `
+	--bg-grid-editor        : var(--bg1);
+`)
+
+css_theme_dark('', '', `
+	--bg-grid-editor        : #495560;
+`)
+
 css('.theme-small', '', `
 	--grid-cell-h            : 20px; /* PIXELS ONLY! */
 	--grid-cell-baseline     : 11px; /* PIXELS ONLY! */
@@ -44,11 +52,11 @@ css('.theme-large', '', `
 	--grid-cell-line-height  : 24px; /* PIXELS ONLY! */
 `)
 
-css('.x-grid', 'S v-t-s clip arrow')
+css('.x-grid', 'S v clip arrow')
 
-css('.x-vgrid', 'h-l-s')
+css('.x-vgrid', 'h')
 css('.x-vgrid > .x-grid-header', 'b-r b-b-0')
-css('.x-vgrid .x-grid-action-band', 'v-t-s')
+css('.x-vgrid .x-grid-action-band', 'v')
 css('.x-vgrid .x-grid-cells-view', '', 'width: 0;') // CSS people are hopeless
 
 // grid header
@@ -90,11 +98,10 @@ css('.x-grid-error', 'abs')
 
 // load/save progress bar
 
-css('.x-grid-progress-bar', 'abs', `
+css('.x-grid-progress-bar', 'abs click-through', `
 	top: -2px;
 	width: 0%;
 	height: 2px;
-	pointer-events: none;
 `)
 
 css('.x-grid.loading > .x-grid-progress-bar', '', 'background-color: green;')
@@ -104,7 +111,7 @@ css('.x-grid.loading > .x-grid-progress-bar', '', 'background-color: green;')
 css('.x-grid-action-band', 'b-t bg')
 css('.x-grid-action-band-reload-button', 'small label')
 css('.x-grid-action-band-reload-button > .x-button-icon', 'p-t-05')
-css('.x-grid-action-band-info', 'h-l-c m-l small label pre')
+css('.x-grid-action-band-info', 'h-m m-l small label pre')
 
 // grid col moving
 
@@ -120,21 +127,11 @@ css_state('.x-grid-resize-guides', 'abs', 'top: 0;')
 
 // grid editor role
 
-css_role('.x-widget.grid-editor', '', `
-
-	/* layout self */
-	position: absolute;
+css_role('.x-widget.grid-editor', 'abs', `
 	width: min-content;
-	margin: 0;
-
-	/* style self */
-	font-size: inherit;
-	font-family: inherit;
 `)
 
-css_role('.grid-editor > .x-focus-box', '', `
-	border-radius: 0;
-	border: 0;
+css_role('.grid-editor > .x-focus-box', 'b0 ro0', `
 	/* add border width, since we removed the border */
 	padding-top: calc(
 		var(--border-width-item) +
@@ -151,9 +148,8 @@ css_role(`
 	.grid-editor > .x-focus-box,
 	.grid-editor.open:not(.widget-selected) > .x-focus-box),
 	.grid-editor:focus-within:not(.widget-selected) > .x-focus-box
-`, '', `
+`, 'no-outline', `
 	box-shadow: inset 2px 2px 6px -2px rgba(0,0,0,0.75);
-	outline: none;
 `)
 
 /* grid as picker */
@@ -165,9 +161,8 @@ css_role('.x-widget.x-grid.picker', '', `
 	resize: both;
 `)
 
-css_role('.x-widget.x-grid.picker > .x-grid-cells-view', '', `
-	overflow-y: scroll; /* show vert-scrollbars always when a picker */
-`)
+/* show vert-scrollbars always when grid is a picker */
+css_role('.x-widget.x-grid.picker > .x-grid-cells-view', 'vscroll')
 
 /* TODO: grid filter dropdowns
 
@@ -197,13 +192,10 @@ css_role('.x-widget.x-grid.picker > .x-grid-cells-view', '', `
 
 /* grid widget editing */
 
-css_role('.x-grid.widget-editing', '', `
-	outline: none; /* many edit modes, each marked in its own ways */
-`)
+/* many edit modes, each marked in its own ways */
+css_role('.x-grid.widget-editing', 'no-outline')
 
-css_role('.x-grid-cells-view.editing > .x-grid-cells', '', `
-	display: none;
-`)
+css_role('.x-grid-cells-view.editing > .x-grid-cells', 'hidden')
 
 widget('x-grid', 'Input', function(e) {
 

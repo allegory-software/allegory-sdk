@@ -441,63 +441,47 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 // button
 // ---------------------------------------------------------------------------
 
-css('.x-button', 'v-t-s m-y-05')
+css('.x-button', 'v')
 
-css('.x-button-focus-box', 'h-c-bl bold noselect hand p-x-4 p-y-2', `
-	padding-left   : var(--padding-x-button);
-	padding-right  : var(--padding-x-button);
-	padding-top    : var(--padding-y-button);
-	padding-bottom : var(--padding-y-button);
-	line-height: 1;
-`)
-
-css('.x-button-focus-box.text-empty', 'p-x-2 h-c-c')
-css('.x-button-icon', 'w1 h-c-s')
-css('.x-button-focus-box:not(.text-empty) .x-button-icon', 'm-r')
-css('.x-button-focus-box', 'b ro05', `
-	background-color: var(--bg-button);
+css('.x-button-focus-box', 'h-c h-bl noselect hand', `
+	background: var(--bg-button);
 	box-shadow: var(--shadow-button);
 `)
 
-css('.x-button[primary] .x-button-focus-box', '', `
-	background   : var(--bg-button-primary);
-	border-color : var(--border-button-primary);
-	color        : var(--fg-button-primary);
+css('.x-button-focus-box.text-empty', 'h-c h-m')
+css('.x-button-icon', 'w1 h-c')
+css('.x-button-focus-box:not(.text-empty) .x-button-icon', 'm-r')
+
+css_state('.x-button:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover', '', `
+	background-color: var(--bg-button-hover);
+`)
+css_state('.x-button .x-button-focus-box.active', '', `
+	background-color: var(--bg-button-pressed);
+	box-shadow: var(--shadow-button-pressed);
+`)
+
+css('.x-button[primary] .x-button-focus-box', 'b-invisible bg-link fg-inverted')
+css_state('.x-button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover', '', `
+	background: var(--fg-link-hover);
+`)
+css_state('.x-button[primary] .x-button-focus-box.active', '', `
+	background: var(--fg-link-active);
 `)
 
 css('.x-button[danger] .x-button-focus-box', '', `
 	background : var(--bg-button-danger);
 	color      : var(--fg-button-danger);
 `)
-
-css_state('.x-button:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover', '', `
-	background-color: var(--bg-button-hover);
-`)
-
-css_state('.x-button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover', '', `
-	background-color: var(--bg-button-primary-hover);
-`)
-
 css_state('.x-button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover', '', `
 	background-color: var(--bg-button-danger-hover);
 `)
-
-css_state('.x-button .x-button-focus-box.active', '', `
-	background-color: var(--bg-button-pressed);
-	box-shadow: var(--shadow-button-pressed);
-`)
-
-css_state('.x-button[primary] .x-button-focus-box.active', '', `
-	background-color: var(--bg-button-primary-pressed);
-`)
-
 css_state('.x-button[danger] .x-button-focus-box.active', '', `
 	background-color: var(--bg-button-danger-pressed);
 `)
 
 // bare buttons (no borders)
 
-css_state('.x-button[bare] .x-button-focus-box', 'b-invisible ro0 no-bg no-shadow')
+css('.x-button[bare] .x-button-focus-box', 'b-invisible ro0 no-bg no-shadow link')
 
 css_state('.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover', '', `
 	color: var(--fg-link-hover);
@@ -765,7 +749,7 @@ css('.p-y-input', '', `
 	padding-bottom : var(--padding-y-input);
 `)
 
-css('.x-input-widget', 'v-t-s')
+css('.x-input-widget', 'v')
 css('.x-input-widget[readonly]', '', 'opacity: .8;')
 
 css('.x-input-widget:not(.with-label) .x-input-label', '', `
@@ -965,7 +949,7 @@ css('.x-markbox', 'w1', `
 	width: auto; /* shrink-wrap */
 `)
 
-css('.x-markbox .x-focus-box', 'h-l-c clip p-x-input p-y-input')
+css('.x-markbox .x-focus-box', 'h-m clip p-x-input p-y-input')
 
 css('.x-markbox.with-label .x-focus-box', '', `
 	line-height: initial;
@@ -1015,7 +999,7 @@ css_state('.x-markbox.invalid :is(.x-markbox-label, .x-markbox-icon', 'fg-error'
 
 css_state('.x-linear-form .x-markbox-label:focus-visible', 'outline-focus')
 
-css_role('.x-markbox.grid-editor .x-focus-box', 'h-c-c')
+css_role('.x-markbox.grid-editor .x-focus-box', 'h-c h-m')
 
 // ---------------------------------------------------------------------------
 // checkbox
@@ -1169,10 +1153,10 @@ widget('x-toggle', 'Input', function(e) {
 // radiogroup
 // ---------------------------------------------------------------------------
 
-css('.x-radiogroup', 'v-t-s')
-css('.x-radio-items', 'rel v-t-s')
+css('.x-radiogroup', 'v')
+css('.x-radio-items', 'rel v')
 
-css('.x-radio-item', 'h-l-bl p-x-input p-y-input', `
+css('.x-radio-item', 'h-bl p-x-input p-y-input', `
 	width: auto; /* shrink-wrap sizing */
 	min-width: 1em;
 `)
@@ -1364,8 +1348,8 @@ css('.x-editbox', '', `
 	min-width: 1em;
 `)
 
-// h-l-bl: the only way to get variable-width inputs that are baseline-aligned.
-css('.x-editbox .x-focus-box', 'h-l-bl p-y-input clip b', `
+// h-bl: the only way to get variable-width inputs that are baseline-aligned.
+css('.x-editbox .x-focus-box', 'h-bl p-y-input clip b', `
 	padding-left    : calc(var(--padding-x-input) + 1);
 	padding-right   : calc(var(--padding-x-input) - 1);
 	background      : var(--bg-input);
@@ -1479,7 +1463,7 @@ css('.x-dropdown .x-focus-box', '', `
 	line-height: initial; /* prevent y-stretching to surrounding text's line height */
 `)
 
-css('.x-editbox-value', 'S p-r-05 h-l-c nowrap', `
+css('.x-editbox-value', 'S p-r-05 h-m nowrap', `
 	width: auto;
 `)
 
@@ -1493,7 +1477,7 @@ css('.x-dropdown-button', 'p-l', `
 	border-left-width: 1px;
 `)
 
-css('.x-dropdown-more-button', 'p-x-input h-l-c small', `
+css('.x-dropdown-more-button', 'p-x-input h-m small', `
 	margin-left: calc(0px - var(--padding-x-input));
 	align-self: stretch;
 `)
@@ -1521,8 +1505,7 @@ css('.x-dropdown[mode=fixed]', '', `
 `)
 
 // z3: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.x-widget.picker', 'z3', `
-	background-color: var(--bg-popup);
+css('.x-widget.picker', 'z3 bg1', `
 	border-color: var(--border-focused);
 	box-shadow  : var(--shadow-popup-picker);
 `)
@@ -2398,7 +2381,7 @@ css('.x-tagsedit', '', `
 	min-width: 1em;
 `)
 
-css('.x-tagsedit-tags-box', 'h-l-bl flex-wrap clip p-x')
+css('.x-tagsedit-tags-box', 'h-bl flex-wrap clip p-x')
 
 css('.x-tagsedit-input', '', `
 	min-width: 0;
@@ -2805,7 +2788,7 @@ widget('x-placeedit', 'Input', function(e) {
 // google maps widget
 // ---------------------------------------------------------------------------
 
-css('.x-googlemaps', 'h-c-c gray bg1', `
+css('.x-googlemaps', 'h-c h-m gray bg1', `
 
 	/* layout self */
 	min-height: calc(var(--min-height-input) * 2 + var(--space-s));
@@ -3037,9 +3020,9 @@ widget('x-slider', 'Input', function(e) {
 // calendar widget
 // ---------------------------------------------------------------------------
 
-css('.x-calendar', 'h-l-s noselect p4')
+css('.x-calendar', 'h noselect p4')
 
-css('.x-calendar-header, .x-calendar-timeview', 'h-l-c', `
+css('.x-calendar-header, .x-calendar-timeview', 'h-m', `
 	align-self: start;
 	min-height: 3.5em;
 `)
@@ -3066,7 +3049,7 @@ css(`
 
 css('.x-calendar-day', 'arrow')
 
-css('.x-calendar-sel-day-box', 'h-l-s w4')
+css('.x-calendar-sel-day-box', 'h w4')
 
 css('.x-calendar-sel-day', '', `
 	font-size: 250%;
@@ -3091,11 +3074,9 @@ css('.x-calendar-sel-year .x-editbox-input', '', `
 	max-width: 2.5em;
 `)
 
-css('.x-calendar-sel-month-picker', '', `
-	background-color: var(--bg-popup2);
-`)
+css('.x-calendar-sel-month-picker', 'bg2')
 
-css('.x-calendar-month-box', 'h-l-s')
+css('.x-calendar-month-box', 'h')
 
 css('.x-calendar-month-num', 't-r', `
 	min-width: 1.25em;
@@ -3879,7 +3860,7 @@ widget('x-lookup-dropdown', function(e) {
 // image
 // ---------------------------------------------------------------------------
 
-css('.x-image', 'bg h-c-c', `
+css('.x-image', 'bg h-c h-m', `
 	/* layout self */
 	min-height: calc(var(--min-height-input) * 2 + var(--space-05));
 	/* styling */
@@ -4356,7 +4337,7 @@ widget('x-label', function(e) {
 // x-input
 // ---------------------------------------------------------------------------
 
-css('.x-input', 'v-t-s')
+css('.x-input', 'v')
 
 css('.x-input:not(:empty)', 'm0 b0 ro0')
 

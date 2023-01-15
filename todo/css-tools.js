@@ -8,67 +8,6 @@ COMPOSABLE CSS
 
 */
 
-// CSS specificity reporting -------------------------------------------------
-
-function css_selector_specificity(s0) {
-	let s = s0
-	let n = 0 // current specificity
-	let maxn = 0 // current max specificity
-	let cs = [0] // call stack: 1 for :is(), 0 for :not() and :where()
-	let ns = [] // specificity stack for :is()
-	let maxns = [] // max specificity stack for :is()
-	let z = 0 // call stack depth of first :where()
-	let sm // last matched string
-	function match(re) {
-		let m = s.match(re)
-		if (!m) return
-		sm = m[0]
-		assert(sm.len)
-		s = s.slice(sm.len)
-		return true
-	}
-	function next() {
-		if (!s.len) return max(maxn, n)
-		if (match(/^[ >+~*]+/ )) return next()
-		if (match(/^\)/      )) {
-			assert(cs.len > 1, 'unexpected )')
-			if (cs.pop()) { n = ns.pop() + max(maxn, n); maxn = maxns.pop() }
-			if (z == cs.len) z = 0; return next()
-		}
-		if (match(/^:is\(/   )) {
-			cs.push(1); ns.push(n); maxns.push(maxn); n = 0; maxn = 0
-			return next()
-		}
-		if (match(/^:not\(/  )) { cs.push(0); return next() }
-		if (match(/^:has\(/  )) { cs.push(0); return next() }
-		if (match(/^:where\(/)) { if (!z) z = cs.len; cs.push(0); return next() }
-		if (match(/^,/       )) { maxn = max(maxn, n); n = 0; return next() }
-		if (match(/^\[[^\]]*\]/) || match(/^[\.:#]?[:a-zA-Z\-_][a-zA-Z0-9\-_]*/)) {
-			if (!z)
-				n += (sm[0] == '#' && 10 || sm[0] == '.' && 1 || sm[0] == ':' && sm[1] != ':' && 1 || .1)
-			return next()
-		}
-		warn('invalid selector: '+s0, s)
-	}
-	return next()
-}
-
-function css_report_specificity(file, max_spec) {
-	for (let ss of document.styleSheets) {
-		if (!((ss.href || '').ends(file || '')))
-			continue
-		for (let r of ss.cssRules) {
-			let s = r.selectorText
-			if (!isstr(s))
-				continue
-			let spec = css_selector_specificity(s)
-			if (spec > max_spec)
-				debug('CSS spec', spec, s)
-		}
-	}
-}
-
-
 /* composable CSS ------------------------------------------------------------
 
 	example.css:
