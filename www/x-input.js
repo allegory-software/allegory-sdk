@@ -441,14 +441,14 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 // button
 // ---------------------------------------------------------------------------
 
-css('.x-button', 'v')
+css('.x-button', 'v m-y-05')
 
-css('.x-button-focus-box', 'h-c h-bl noselect hand', `
+css('.x-button-focus-box', 'h-c h-bl b ro075 bold noselect hand p-x-4 p-y', `
 	background: var(--bg-button);
 	box-shadow: var(--shadow-button);
 `)
 
-css('.x-button-focus-box.text-empty', 'h-c h-m')
+css('.x-button-focus-box.text-empty', 'p-x-2 h-c h-m')
 css('.x-button-icon', 'w1 h-c')
 css('.x-button-focus-box:not(.text-empty) .x-button-icon', 'm-r')
 
@@ -481,7 +481,7 @@ css_state('.x-button[danger] .x-button-focus-box.active', '', `
 
 // bare buttons (no borders)
 
-css('.x-button[bare] .x-button-focus-box', 'b-invisible ro0 no-bg no-shadow link')
+css_state('.x-button[bare] .x-button-focus-box', 'b-invisible ro0 no-bg no-shadow link')
 
 css_state('.x-button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) .x-button-focus-box:hover', '', `
 	color: var(--fg-link-hover);
@@ -1389,7 +1389,7 @@ css('.x-editbox-label', 'abs t-t op1 label nowrap arrow', `
 	animation: x-editbox-label-unfocused .1s;
 `)
 
-css('.x-editbox[mode=inline] .x-focus-box', 'b0 ro0 b-b b-fg dashed')
+css('.x-editbox[mode=inline] .x-focus-box', 'b0 ro0 b-b b-fg b-dashed')
 
 css('.x-editbox[mode=inline] .x-editbox-input', '', `
 	padding-bottom: .1em;
@@ -3031,7 +3031,7 @@ css('.x-calendar-header', '', `
 	justify-content: space-between;
 `)
 
-css('.x-calendar-timebox', 'm-l p-l b dotted')
+css('.x-calendar-timebox', 'm-l p-l b b-dotted')
 
 css('.x-calendar-weekview', '', `
 	width: 100%;
@@ -3546,7 +3546,7 @@ css('.x-timepicker .x-button', 'small')
 css('.x-timepicker-button-cancel', 'm m-r-05')
 css('.x-timepicker-button-set'   , 'm m-l-05')
 
-css('.x-timepicker-sel', 'scroll b-t b-b dotted')
+css('.x-timepicker-sel', 'scroll b-t b-b b-dotted')
 
 css('.x-timepicker-sel::-webkit-scrollbar', '', `
 	width : 12px;
@@ -3554,10 +3554,10 @@ css('.x-timepicker-sel::-webkit-scrollbar', '', `
 
 css('.x-timepicker-heading', 'p small gray')
 
-css('.x-timepicker-heading-m', 'b-l dotted')
-css('.x-timepicker-heading-s', 'b-l dotted')
-css('.x-timepicker-sel-m    ', 'b-l dotted')
-css('.x-timepicker-sel-s    ', 'b-l dotted')
+css('.x-timepicker-heading-m', 'b-l b-dotted')
+css('.x-timepicker-heading-s', 'b-l b-dotted')
+css('.x-timepicker-sel-m    ', 'b-l b-dotted')
+css('.x-timepicker-sel-s    ', 'b-l b-dotted')
 
 widget('x-timepicker', 'Input', function(e) {
 

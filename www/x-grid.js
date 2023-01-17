@@ -31,11 +31,11 @@ css(':root', '', `
 	--grid-cell-line-height : 16px; /* PIXELS ONLY! */
 `)
 
-css_theme_light('', '', `
+css_light('', '', `
 	--bg-grid-editor        : var(--bg1);
 `)
 
-css_theme_dark('', '', `
+css_dark('', '', `
 	--bg-grid-editor        : #495560;
 `)
 

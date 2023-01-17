@@ -4,13 +4,13 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 CSS CLASSES:
-	TEXT          pre[-line] small [x]large tight bold italic underline strike allcaps noselect zwsp
+	TEXT          pre[-line] small [x]large huge tight bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   gray label link fg-inverted
 	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb s t b m bl} v-{t b m sb s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
-	ALIGN GRID    grid
+	ALIGN GRID    grid {x y}{1-5} xx yy xxx yyy xxxx yyyy xxxxx yyyyy
 	SIZING        nowrap shrinks
-	BORDERS       b[0 2 4] b-{l r t b}-{0 2 4} dotted dashed b-invisible b-fg ro[05 0 2 4] ro-{l r t b}-0 round
+	BORDERS       b[0] b-{l r t b}[-0] b-{dotted dashed invisible fg} ro[05 075 0 2] ro-{l r t b}-0 round
 	PADDINGS      p[0 2 4] p-{l r t b x y}-{0 05 2 4}
 	MARGINS       m[0 2 4] m-{l r t b x y}-{0 05 2 4} {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
@@ -38,9 +38,9 @@ NOTES:
 
 */
 
-@layer sub-base, base, theme, role, state, role-state, generic-state; /* matching divs.js layers */
+@layer sub-base, base, role, state, role-state, generic-state; /* matching divs.js layers */
 
-@layer theme {
+@layer base {
 
 :root, .theme-light, :where(.theme-dark) .theme-inverted {
 
@@ -115,6 +115,9 @@ NOTES:
 	--fg-focused            : var(--fg-inverted);
 	--bg-row-focused        : #ddd;
 
+	font-size        : var(--font-size-normal);
+	color            : var(--fg);
+	background-color : var(--bg);
 }
 
 .theme-dark, :where(.theme-light) .theme-inverted {
@@ -124,9 +127,9 @@ NOTES:
 	--fg-p           : hsl(0 0% 90%);
 	--fg-gray        : #ffffff66;
 	--fg-gray-inverted : var(--fg-gray);
-	--fg-link        : hsl(240 100%  80%);
-	--fg-link-hover  : hsl(240 100%  90%);
-	--fg-link-active : hsl(240 100% 100%);
+	--fg-link        : hsl(140 100% 30%);
+	--fg-link-hover  : hsl(140 100% 35%);
+	--fg-link-active : hsl(140 100% 40%);
 	--fg-label       : #aaa;
 
 	--bg             : hsl(216 28% 7%);
@@ -168,54 +171,40 @@ NOTES:
 
 	color-scheme: dark; /* because Chrome's custom scrollbars look like crap */
 
+	font-size        : var(--font-size-normal);
+	color            : var(--fg);
+	background-color : var(--bg);
 }
 
 :root {
+	--space-025 : .125rem;
+	--space-05  :  .25rem;
+	--space-075 : .375rem;
+	--space-1   :   .5rem;
+	--space-2   :  .75rem;
+	--space-4   :    1rem;
 
-	--space-05 : .25rem;
-	--space-1  :  .5rem;
-	--space-2  : .75rem;
-	--space-4  :   1rem;
+	--font-size-normal : 14px;
 
-	--font-size-small  : 11px;
-	--font-size-normal : 13px;
-	--font-size-large  : 16px;
-	--font-size-xlarge : 22px;
-	--font-size-h1     : 32px;
-	--font-size-h2     : 26px;
-	--font-size-h3     : 22px;
+	--font-size-small  : .875rem;
+	--font-size-xsmall : .75rem;
+	--font-size-large  : 1.125rem;
+	--font-size-xlarge : 1.5rem;
+	--font-size-huge   : 4.5em;
+	--font-size-h1     : 2em;
+	--font-size-h2     : 1.5em;
+	--font-size-h3     : 1.3em;
 
 	--font-baseline-adjust-ff: 0; /* set this to 1 depending on font */
-
 }
 
 .theme-small {
-
-	--font-size-small  : 10px;
 	--font-size-normal : 12px;
-	--font-size-large  : 13px;
-	--font-size-xlarge : 18px;
-	--font-size-h1     : 26px;
-	--font-size-h2     : 22px;
-	--font-size-h3     : 18px;
-
 }
 
 .theme-large {
-
-	--font-size-small  : 13px;
-	--font-size-normal : 15px;
-	--font-size-large  : 18px;
-	--font-size-xlarge : 22px;
-	--font-size-h1     : 32px;
-	--font-size-h2     : 26px;
-	--font-size-h3     : 22px;
-
+	--font-size-normal : 16px;
 }
-
-} /*layer*/
-
-@layer base {
 
 :root {
 	font-size        : var(--font-size-normal);
@@ -300,12 +289,16 @@ h3 { font-size: var(--font-size-h3); }
 
 .pre       { white-space: pre; }
 .pre-line  { white-space: pre-line; }
+.xsmall    { font-size: var(--font-size-xsmall); }
 .small     { font-size: var(--font-size-small); }
 .normal    { font-size: var(--font-size-normal); }
 .large     { font-size: var(--font-size-large); }
 .xlarge    { font-size: var(--font-size-xlarge); }
+.huge      { font-size: var(--font-size-huge); }
 .tight     { line-height: 1.2; }
+.semibold  { font-weight: 600; }
 .bold      { font-weight: bold; }
+.extrabold { font-weight: 800; }
 .italic    { font-style: italic; }
 .underline { text-decoration: underline; }
 .strike    { text-decoration: line-through; }
@@ -387,9 +380,27 @@ h3 { font-size: var(--font-size-h3); }
 
 .grid { display: inline-grid; }
 
-.gc-l {}
-.gc-s {}
-.gc-sb {}
+.x1 { grid-column-start: 1; }
+.x2 { grid-column-start: 2; }
+.x3 { grid-column-start: 3; }
+.x4 { grid-column-start: 4; }
+.x5 { grid-column-start: 5; }
+
+.y1 { grid-row-start   : 1; }
+.y2 { grid-row-start   : 2; }
+.y3 { grid-row-start   : 3; }
+.y4 { grid-row-start   : 4; }
+.y5 { grid-row-start   : 5; }
+
+.xx    { grid-column-end  : span 2; }
+.xxx   { grid-column-end  : span 3; }
+.xxxx  { grid-column-end  : span 4; }
+.xxxxx { grid-column-end  : span 5; }
+
+.yy    { grid-row-end     : span 2; }
+.yyy   { grid-row-end     : span 3; }
+.yyyy  { grid-row-end     : span 4; }
+.yyyyy { grid-row-end     : span 5; }
 
 /* SIZING ----------------------------------------------------------------- */
 
@@ -429,7 +440,6 @@ h3 { font-size: var(--font-size-h3); }
 
 .b       { border        : 1px solid var(--border); }
 .b2      { border        : 2px solid var(--border); }
-.b4      { border        : 4px solid var(--border); }
 .b0      { border-width  : 0; }
 .b-l     { border-left   : 1px solid var(--border); }
 .b-r     { border-right  : 1px solid var(--border); }
@@ -442,9 +452,9 @@ h3 { font-size: var(--font-size-h3); }
 .b-b-0   { border-bottom-width : 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 
 .ro05    { border-radius: var(--space-05); }
+.ro075   { border-radius: var(--space-075); }
 .ro      { border-radius: var(--space-1); }
 .ro2     { border-radius: var(--space-2); }
-.ro4     { border-radius: var(--space-4); }
 .round   { border-radius: 9999px; }
 .ro0     { border-radius: 0; }
 
@@ -453,15 +463,17 @@ h3 { font-size: var(--font-size-h3); }
 .ro-t-0  { border-top-left-radius   : 0; border-top-right-radius   : 0; }
 .ro-b-0  { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 
-.dotted  { border-style: dotted; }
-.dashed  { border-style: dashed; }
+.b-solid     { border-style: solid; }
+.b-dotted    { border-style: dotted; }
+.b-dashed    { border-style: dashed; }
 .b-invisible { border-style: none; }
-.b-fg    { border-color: var(--fg); }
+.b-fg        { border-color: var(--fg); }
 
 /* PADDINGS --------------------------------------------------------------- */
 
-.p      { padding: var(--space-1); }
+.p025   { padding: var(--space-025); }
 .p05    { padding: var(--space-05); }
+.p      { padding: var(--space-1); }
 .p2     { padding: var(--space-2); }
 .p4     { padding: var(--space-4); }
 .p0     { padding: 0; }
@@ -471,16 +483,18 @@ h3 { font-size: var(--font-size-h3); }
 .p-b-05 { padding-bottom: var(--space-05); }
 .p-l-05 { padding-left:   var(--space-05); }
 
-.p-y-05 { padding-top:    var(--space-05); padding-bottom: var(--space-05); }
-.p-x-05 { padding-left:   var(--space-05); padding-right:  var(--space-05); }
-.p-x    { padding-left:   var(--space-1); padding-right:  var(--space-1); }
-.p-y    { padding-top:    var(--space-1); padding-bottom: var(--space-1); }
-.p-x-2  { padding-left:   var(--space-2); padding-right:  var(--space-2); }
-.p-y-2  { padding-top:    var(--space-2); padding-bottom: var(--space-2); }
-.p-x-4  { padding-left:   var(--space-4); padding-right:  var(--space-4); }
-.p-y-4  { padding-top:    var(--space-4); padding-bottom: var(--space-4); }
-.p-x-0  { padding-left   : 0; padding-right  : 0; }
-.p-y-0  { padding-top    : 0; padding-bottom : 0; }
+.p-x-025 { padding-left:   var(--space-025); padding-right:  var(--space-025); }
+.p-y-025 { padding-top:    var(--space-025); padding-bottom: var(--space-025); }
+.p-x-05  { padding-left:   var(--space-05); padding-right:  var(--space-05); }
+.p-y-05  { padding-top:    var(--space-05); padding-bottom: var(--space-05); }
+.p-x     { padding-left:   var(--space-1); padding-right:  var(--space-1); }
+.p-y     { padding-top:    var(--space-1); padding-bottom: var(--space-1); }
+.p-x-2   { padding-left:   var(--space-2); padding-right:  var(--space-2); }
+.p-y-2   { padding-top:    var(--space-2); padding-bottom: var(--space-2); }
+.p-x-4   { padding-left:   var(--space-4); padding-right:  var(--space-4); }
+.p-y-4   { padding-top:    var(--space-4); padding-bottom: var(--space-4); }
+.p-x-0   { padding-left   : 0; padding-right  : 0; }
+.p-y-0   { padding-top    : 0; padding-bottom : 0; }
 
 .p-t    { padding-top:    var(--space-1); }
 .p-r    { padding-right:  var(--space-1); }

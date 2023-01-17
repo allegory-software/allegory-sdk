@@ -56,7 +56,7 @@ WRITING CSS RULES
 
 */
 
-css_theme_light('', '', `
+css_light('', '', `
 
 	--padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
 	--padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
@@ -97,7 +97,7 @@ css_theme_light('', '', `
 
 `)
 
-css_theme_dark('', '', `
+css_dark('', '', `
 
 	--border-focused                :  #66a;
 	--outline-markbox-focused       :  #88888866;

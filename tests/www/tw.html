@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html class="inter theme-light" style="font-size: 16px">
+<head>
+<title>TW UI DEMO</title>
+<meta charset="utf-8">
+<link rel="stylesheet" type="text/css" href="../../www/utils.css">
+<link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
+<script src="../../www/glue.js"></script>
+<script src="../../www/divs.js"></script>
+<script src="../../www/purify.js"></script>
+<script src="../../www/x-widgets.js"></script>
+<script src="../../www/x-nav.js"></script>
+<script src="../../www/x-input.js"></script>
+<script src="../../www/x-listbox.js"></script>
+<script src="../../www/x-grid.js"></script>
+<script src="../../www/x-chart.js"></script>
+<script src="../../www/x-module.js"></script>
+<script src="../../www/theme-tw.js"></script>
+
+<style>
+:root {
+	--fg: rgb(15 23 42);
+}
+sp { display: inline; }
+.w-10 { width : 2.5rem; }
+.h-10 { height: 2.5rem; }
+.p-y-2rem { padding-top: 2rem; padding-bottom: 2rem; }
+.m-l-2rem { margin-left: 2rem; }
+.p-l-2rem { padding-left: 2rem; }
+.fg-sky { color      : rgb(14 165 233); }
+.bg-sky { background : rgb(14 165 233); }
+.p-y-1_25 { padding-top: .625rem; padding-bottom: .625rem; }
+.m-t-8rem { margin-top: 8rem; }
+</style>
+
+<script>
+
+on_dom_load(function() {
+	init_components()
+})
+
+css('.btn-pri', 'semibold b b-fg ro p-y-1_25 p-x-4 fg-inverted bg-fg')
+css('.btn'    , 'semibold b ro p-y-1_25 p-x-4')
+
+</script>
+</head>
+<body class="v-c rel bg-no-repeat" style="background-image: url(tw-bg.jpg); background-size: 150rem; background-position-x: -10rem">
+	<d class="v" style="width: 1296px">
+		<d class="h-m m-y-8 small p-y-2rem">
+			<d class="S large bold">allegory sdk<sp class="small b2 b-fg ro075 m05 p-x-025">UI</sp></d>
+			<d class="m-l-2rem semibold">Components</d>
+			<d class="m-l-2rem semibold">Templates <d class="m p-x p-y-025 round xsmall bg-sky fg-inverted">New</d></d>
+			<d class="m-l-2rem semibold">Documentation</d>
+			<d class="m-l-2rem mi xlarge">search</d>
+			<d class="m-l-2rem b-l p-l-2rem semibold">Sign in</d>
+			<d class="m-l-2rem btn-pri">Get all-access<i class="m-l t-m fa fa-arrow-right"></i></d>
+		</d>
+		<d class="grid m-t-8rem">
+			<d class="y1">
+				<d class="semibold fg-sky">By the makers of Allegory SDK</d>
+				<h1 class="m-t-4 extrabold huge" style="max-width: 45rem; line-height: 1">Build your next idea even faster.</h1>
+				<p class="large w32">
+				Beautifully designed, expertly crafted components and templates,
+				built by the makers of Tailwind CSS. The perfect starting point
+				for your next project.
+				</p>
+				<d class="h">
+					<d class="btn-pri">Browse components</d>
+					<d class="btn m-l-2">Explore templates</d>
+				</d>
+			</d>
+			<d class="y1 h-r">
+				<d class="v b ro clip bg" style="width: 24.5rem;">
+					<d class="h p4">
+						<img class="round w-10 h-10 " src="avatar-1.jpg"></img>
+						<d class="S v m-l-4">
+							<d>Leonard Krasner</d>
+							<d>@leonardkrasner</d>
+						</d>
+						<d class="b p ro">View</d>
+					</d>
+					<d class="h p4 b-t">
+						<img class="round w-10 h-10" src="avatar-2.jpg"></img>
+						<d class="S v m-l-4">
+							<d>Floyd Miles</d>
+							<d>@floydmiles</d>
+						</d>
+						<d class="b p ro">View</d>
+					</d>
+					<d class="h p4 b-t">
+						<img class="round w-10 h-10" src="avatar-3.jpg"></img>
+						<d class="S v m-l-4">
+							<d>Emily Selman</d>
+							<d>@emilyselman</d>
+						</d>
+						<d class="b p ro">View</d>
+					</d>
+					<d class="p4 b-t h">
+						<d class="b p ro S t-c">View all</d>
+					</d>
+				</d>
+			</d>
+		</d>
+	</d>
+</body>
+</html>

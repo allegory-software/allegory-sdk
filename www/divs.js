@@ -32,13 +32,12 @@ CSS-IN-JS
 CSS DEFAULT LAYERS
 
 	css()
-	css_theme()
 	css_state()
 	css_role()
 	css_role_state()
 	css_generic_state()
-	css_theme_light()
-	css_theme_dark()
+	css_light()
+	css_dark()
 
 
 DOM load event:
@@ -407,7 +406,7 @@ function on_dom_load(fn) {
 // old problems with a page of JS. The cost is 1-3 frames at startup for
 // a site with some 3000 rules (most of which come from fontawesome).
 
-let class_rules = obj() // {class->rules} from all layers.
+let class_props = obj() // {class->props} from all layers.
 
 on_dom_load(function() {
 	let t0 = time()
@@ -416,17 +415,18 @@ on_dom_load(function() {
 		let selector = rule.selectorText // this is slow on Chrome :(
 		if (!isstr(selector))
 			return
+		// TODO: support `foo-1.5` utility classes!
 		let [cls] = selector
 			.replace(/::before$/, '') // strip ::before (fontawesome)
 			.replace(/::after$/ , '') // strip ::after  (?)
 			.captures(/^\.([^ >#:\.+~]+)$/) // simple .class selector
 		if (!cls)
 			return
-		let rules = rule.cssText.slice(selector.length + 3, -2)
-		if (class_rules[cls])
-			class_rules[cls] = class_rules[cls] + '\n' + rules
+		let props = rule.cssText.slice(selector.length + 3, -2)
+		if (class_props[cls])
+			class_props[cls] = class_props[cls] + '\n' + props
 		else
-			class_rules[cls] = rules
+			class_props[cls] = props
 		n++
 	}
 	function add_rules(rules) {
@@ -447,10 +447,13 @@ on_dom_load(function() {
 
 let utils_usage = obj()
 
+css_layers = []
+
 css_layer = memoize(function(layer) {
 
 	let pieces = ['@layer '+layer+' {\n\n']
 	let style = document.createElement('style')
+	style.setAttribute('x-layer', layer) // for debugging.
 	style.css_in_js_layer = true // we map classes ourselves.
 
 	on_dom_load(function() {
@@ -463,10 +466,11 @@ css_layer = memoize(function(layer) {
 				a.push(p)
 		style.textContent = a.join('')
 		document.head.append(style)
+		css_layers.push(layer)
 	})
 
-	function css_layer(selector, includes, rules) {
-		if (includes == null && rules == null) { // verbatim CSS, eg. @keyframes
+	function add_rule(selector, includes, props) {
+		if (includes == null && props == null) { // verbatim CSS, eg. @keyframes
 			pieces.push(selector)
 			return
 		}
@@ -481,32 +485,31 @@ css_layer = memoize(function(layer) {
 			var e = new Error()
 			pieces.push(function(pieces) {
 				for (let cls of includes.words()) {
-					let rules = class_rules[cls]
-					if (!rules) {
+					let props = class_props[cls]
+					if (!props) {
 						warn('css unknown class', cls, 'at', e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 						continue
 					}
 					utils_usage[cls] = (utils_usage[cls] || 0)+1
-					pieces.push('\t', rules, '\n')
+					pieces.push('\t', props, '\n')
 				}
 			})
 		}
-		pieces.push(rules)
+		pieces.push(props)
 		pieces.push('}\n')
 		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // simple class
 		if (cls)
-			class_rules[cls] = rules
+			class_props[cls] = props
 	}
 
-	css_layer.layer_name = layer
-	css_layer.style_node = style
+	add_rule.layer_name = layer
+	add_rule.style_node = style
 
-	return css_layer
+	return add_rule
 
 })
 
 css               = css_layer('base')
-css_theme         = css_layer('theme')
 css_state         = css_layer('state')
 css_role          = css_layer('role')
 css_role_state    = css_layer('role-state')
@@ -3262,12 +3265,12 @@ function set_theme_size(size) {
 if (!is_theme_dark())
 	root.class('theme-light')
 
-function css_theme_light(selector, ...args) {
-	return css_theme(':is(:root, .theme-light, .theme-dark .theme-inverted)'+selector, ...args)
+function css_light(selector, ...args) {
+	return css(':is(:root, .theme-light, .theme-dark .theme-inverted)'+selector, ...args)
 }
 
-function css_theme_dark(selector, ...args) {
-	return css_theme(':is(.theme-dark, .theme-light .theme-inverted)'+selector, ...args)
+function css_dark(selector, ...args) {
+	return css(':is(.theme-dark, .theme-light .theme-inverted)'+selector, ...args)
 }
 
 // CSS specificity reporting -------------------------------------------------
@@ -3355,7 +3358,7 @@ function css_report_specificity(file, max_spec) {
 on_dom_load(function() {
 	if (!DEBUG_CSS_SPECIFICITY)
 		return
-	for (let layer of ['base', 'state', 'role', 'role-state', 'generic-state'])
+	for (let layer of css_layers)
 		css_report_specificity(css_layer(layer), {[layer] : 0.1})
 	css_report_specificity('utils.css', {base: 1.1, state: 2.1, _default: 1})
 })
