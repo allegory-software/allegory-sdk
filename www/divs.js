@@ -407,6 +407,7 @@ function on_dom_load(fn) {
 // a site with some 3000 rules (most of which come from fontawesome).
 
 let class_props = obj() // {class->props} from all layers.
+let class_includes = obj() // {class->includes}
 
 on_dom_load(function() {
 	let t0 = time()
@@ -416,17 +417,20 @@ on_dom_load(function() {
 		if (!isstr(selector))
 			return
 		// TODO: support `foo-1.5` utility classes!
-		let [cls] = selector
-			.replace(/::before$/, '') // strip ::before (fontawesome)
-			.replace(/::after$/ , '') // strip ::after  (?)
-			.captures(/^\.([^ >#:\.+~]+)$/) // simple .class selector
-		if (!cls)
-			return
 		let props = rule.cssText.slice(selector.length + 3, -2)
-		if (class_props[cls])
-			class_props[cls] = class_props[cls] + '\n' + props
-		else
-			class_props[cls] = props
+		let selectors = selector.includes(',') ? selector.split(/\s*,\s*/) : [selector]
+		for (let selector of selectors) {
+			let [cls] = selector
+				.replace(/::before$/, '') // strip ::before (fontawesome)
+				.replace(/::after$/ , '') // strip ::after  (?)
+				.captures(/^\.([^ >#:\.+~]+)$/) // simple .class selector
+			if (!cls)
+				return
+			if (class_props[cls])
+				class_props[cls] = class_props[cls] + '\n' + props
+			else
+				class_props[cls] = props
+		}
 		n++
 	}
 	function add_rules(rules) {
@@ -458,48 +462,61 @@ css_layer = memoize(function(layer) {
 
 	on_dom_load(function() {
 		pieces.push('\n} /*layer*/')
-		let a = []
-		for (let p of pieces)
-			if (isfunc(p)) // expand includes
-				p(a)
+		let final_pieces = []
+		for (let piece of pieces)
+			if (isfunc(piece)) // expand includes
+				piece(final_pieces)
 			else
-				a.push(p)
-		style.textContent = a.join('')
+				final_pieces.push(piece)
+		style.textContent = final_pieces.join('')
 		document.head.append(style)
 		css_layers.push(layer)
 	})
+
+	function add_includes(includes, pieces, e) {
+		for (let cls of includes.words()) {
+			let props = class_props[cls]
+			if (props == null) {
+				warn('css unknown class', cls, 'at',
+					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+				continue
+			}
+			pieces.push('\t', props, '\n')
+			let cls_includes = class_includes[cls]
+			if (cls_includes) {
+				add_includes(cls_includes, pieces, e)
+			}
+			utils_usage[cls] = (utils_usage[cls] || 0)+1
+		}
+	}
 
 	function add_rule(selector, includes, props) {
 		if (includes == null && props == null) { // verbatim CSS, eg. @keyframes
 			pieces.push(selector)
 			return
 		}
-		// ::before needs to be after :where(), so we must split the selector.
+		// ::before needs to be outside :where(), so we must split the selector.
 		let [prefix, suffix] = selector.captures(/^(.+?)(::[^ >#:\.+~]+)$/)
 		if (!prefix) {
 			prefix = selector
 			suffix = ''
 		}
-		pieces.push(':where(', prefix, ')', suffix, ' {\n')
+		pieces.push('\n:where(', prefix, ')', suffix, ' {\n')
 		if (includes) {
-			var e = new Error()
-			pieces.push(function(pieces) {
-				for (let cls of includes.words()) {
-					let props = class_props[cls]
-					if (!props) {
-						warn('css unknown class', cls, 'at', e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
-						continue
-					}
-					utils_usage[cls] = (utils_usage[cls] || 0)+1
-					pieces.push('\t', props, '\n')
-				}
+			let e = new Error()
+			pieces.push(function(dest_pieces) {
+				add_includes(includes, dest_pieces, e)
 			})
 		}
+		props = props || ''
 		pieces.push(props)
-		pieces.push('}\n')
-		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // simple class
-		if (cls)
-			class_props[cls] = props
+		pieces.push('\n}\n')
+
+		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // reusable class?
+		if (cls) {
+			class_props[cls] = props || ''
+			class_includes[cls] = includes
+		}
 	}
 
 	add_rule.layer_name = layer
