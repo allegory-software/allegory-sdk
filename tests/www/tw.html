@@ -1,10 +1,23 @@
+<!-- prevent quirks mode -->
 <!DOCTYPE html>
-<html class="inter theme-light" style="font-size: 16px">
+
+<!--
+	- `inter` sets Inter font
+	- `theme-light` enables theme-inverted class
+	- `hidden` so we prevent load-time jankiness: we show the page on window load.
+-->
+<html class="inter theme-light" hidden style="font-size: 16px">
 <head>
 <title>TW UI DEMO</title>
 <meta charset="utf-8">
+
+<!-- always preload your fonts to avoid extreme load-time jankiness -->
+<link rel="preload" as="font" href="../../www/inter-roman.var.woff2"     >
+<link rel="preload" as="font" href="../../www/material-icons-round.woff2">
+
 <link rel="stylesheet" type="text/css" href="../../www/utils.css">
 <link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
+
 <script src="../../www/glue.js"></script>
 <script src="../../www/divs.js"></script>
 <script src="../../www/purify.js"></script>
@@ -19,84 +32,157 @@
 
 <style>
 :root {
-	--fg: rgb(15 23 42);
+	--fg     : rgb(15 23 42);
+	--sky    : rgb(14 165 233);
+	--indigo : rgb(79 70 229);
 }
-sp { display: inline; }
-.w-10 { width : 2.5rem; }
-.h-10 { height: 2.5rem; }
-.p-y-2rem { padding-top: 2rem; padding-bottom: 2rem; }
-.m-l-2rem { margin-left: 2rem; }
-.p-l-2rem { padding-left: 2rem; }
-.fg-sky { color      : rgb(14 165 233); }
-.bg-sky { background : rgb(14 165 233); }
-.p-y-1_25 { padding-top: .625rem; padding-bottom: .625rem; }
-.m-t-8rem { margin-top: 8rem; }
+.huge      { font-size: 4.5rem; }
+.w-10      { width : 2.5rem; }
+.h-10      { height: 2.5rem; }
+.p-y-2rem  { padding-top: 2rem; padding-bottom: 2rem; }
+.m-l-2rem  { margin-left: 2rem; }
+.p-l-2rem  { padding-left: 2rem; }
+.fg-sky    { color: var(--sky); }
+.bg-sky    { background: var(--sky); }
+.bg-indigo { background-color: var(--indigo); }
+.p-y-1_25  { padding-top: .625rem; padding-bottom: .625rem; }
+.m-t-8rem  { margin-top: 8rem; }
 </style>
 
 <script>
+
+// button styling
+
+css('.btn'          , 'semibold nowrap noselect ro b b-darker p-y-1_25 p-x-4 h-c h-m hand')
+css('.btn-sm'       , 'littlebold ro075 b0 ring p p-x-2 bg')
+css('.btn-pri'      , 'btn b-fg fg-inverted bg-fg')
+css('.btn-indigo'   , 'btn-sm b-fg fg-inverted bg-indigo')
+css('.btn-sm:hover' , 'bg-hover')
+css('.arrow-right::after', 'mi m-l small', `content: 'arrow_forward';`)
+
+css('.btn-grp > .btn:not(:last-child)' , 'b-r-0')
+css('.btn-grp > .btn:not(:first-child)', 'b-l-0')
+css('.btn-grp:hover > .btn', 'bg-hover')
+
+// toggle component
+
+css('toggle', 't-m p05 round bg1 h-m ease ring', `
+	min-width  : 3em;
+	max-width  : 3em;
+	min-height : 1.75em;
+	max-height : 1.75em;
+`)
+css('.toggle-thumb', 'round bg ring ease', `
+	min-width  : 1.2em;
+	min-height : 1.2em;
+`)
+css('toggle.checked', 'bg-indigo')
+css('.toggle-thumb.checked', 'ease', `
+	transform: translateX(100%);
+`)
+
+component('toggle', function(e) {
+	e.thumb = tag('div', {class: 'toggle-thumb'})
+	e.set(e.thumb)
+	e.make_focusable()
+	e.prop('checked', {type: 'bool', attr: true})
+	e.set_checked = function(on) {
+		e.thumb.class('checked', on)
+		e.class('checked', on)
+	}
+	e.toggle = function() {
+		e.checked = !e.checked
+	}
+	e.on('keydown', function(key) {
+		if (key == ' ')
+			e.toggle()
+	})
+	e.on('click', function() {
+		e.toggle()
+	})
+})
+
+// init
 
 on_dom_load(function() {
 	init_components()
 })
 
-css('.btn-pri', 'semibold b b-fg ro p-y-1_25 p-x-4 fg-inverted bg-fg')
-css('.btn'    , 'semibold b ro p-y-1_25 p-x-4')
+// TODO: see if there's a way to get notified when all fonts are actually loaded.
+on('load', function() {
+	root.show()
+})
 
 </script>
+
 </head>
 <body class="v-c rel bg-no-repeat" style="background-image: url(tw-bg.jpg); background-size: 150rem; background-position-x: -10rem">
 	<d class="v" style="width: 1296px">
-		<d class="h-m m-y-8 small p-y-2rem">
-			<d class="S large bold">allegory sdk<sp class="small b2 b-fg ro075 m05 p-x-025">UI</sp></d>
+		<d class="h-m m-y-8 smaller p-y-2rem">
+			<d class="S large bold">allegory sdk<d class="b2 b-fg ro075 m05 p-x-025 small">UI</d></d>
 			<d class="m-l-2rem semibold">Components</d>
-			<d class="m-l-2rem semibold">Templates <d class="m p-x p-y-025 round xsmall bg-sky fg-inverted">New</d></d>
+			<d class="m-l-2rem semibold">Templates <d class="m p-x-05 p-y-025 round xsmall bg-sky fg-inverted">New</d></d>
 			<d class="m-l-2rem semibold">Documentation</d>
-			<d class="m-l-2rem mi xlarge">search</d>
+			<d class="m-l-2rem mi" style="font-size: 2rem">search</d>
 			<d class="m-l-2rem b-l p-l-2rem semibold">Sign in</d>
-			<d class="m-l-2rem btn-pri">Get all-access<i class="m-l t-m fa fa-arrow-right"></i></d>
+			<d class="m-l-2rem btn-pri arrow-right">Get all-access</d>
 		</d>
 		<d class="grid m-t-8rem">
 			<d class="y1">
 				<d class="semibold fg-sky">By the makers of Allegory SDK</d>
-				<h1 class="m-t-4 extrabold huge" style="max-width: 45rem; line-height: 1">Build your next idea even faster.</h1>
+				<h1 class="m-t-4 m-b-0 extrabold huge" style="max-width: 45rem; line-height: 1">Build your next idea even faster.</h1>
 				<p class="large w32">
 				Beautifully designed, expertly crafted components and templates,
 				built by the makers of Tailwind CSS. The perfect starting point
 				for your next project.
 				</p>
 				<d class="h">
-					<d class="btn-pri">Browse components</d>
-					<d class="btn m-l-2">Explore templates</d>
+					<d class="btn-pri arrow-right">Browse components</d>
+					<d class="btn m-l-2 arrow-right">Explore templates</d>
 				</d>
 			</d>
-			<d class="y1 h-r">
-				<d class="v b ro clip bg" style="width: 24.5rem;">
-					<d class="h p4">
-						<img class="round w-10 h-10 " src="avatar-1.jpg"></img>
-						<d class="S v m-l-4">
-							<d>Leonard Krasner</d>
-							<d>@leonardkrasner</d>
-						</d>
-						<d class="b p ro">View</d>
+			<d class="y1 h-r h-b">
+				<d class="p4 rel grid-r small gap4">
+					<toggle class="small m-b-4" checked></toggle>
+					<d>
+						<toggle></toggle>
+						<d class=btn-indigo>Button A</d>
 					</d>
-					<d class="h p4 b-t">
-						<img class="round w-10 h-10" src="avatar-2.jpg"></img>
-						<d class="S v m-l-4">
-							<d>Floyd Miles</d>
-							<d>@floydmiles</d>
-						</d>
-						<d class="b p ro">View</d>
+					<d class="h btn-grp">
+						<d class="btn btn-sm"><d class="mi m-r gray">bookmark</d>Bookmark</d>
+						<d class="btn btn-sm">12k</d>
 					</d>
-					<d class="h p4 b-t">
-						<img class="round w-10 h-10" src="avatar-3.jpg"></img>
-						<d class="S v m-l-4">
-							<d>Emily Selman</d>
-							<d>@emilyselman</d>
+				</d>
+				<d class="p4 rel">
+					<d class="abs bg1" style="width: 1px; bottom: -2rem; top: -2rem; right: 0;"></d>
+					<d class="v b ro clip bg small" style="width: 24.5rem">
+						<d class="h p4">
+							<img class="round w-10 h-10 " src="avatar-1.jpg"></img>
+							<d class="S v-sb m-l-4">
+								<d class=littlebold>Leonard Krasner</d>
+								<d>@leonardkrasner</d>
+							</d>
+							<d class="self-h-m btn btn-sm">View</d>
 						</d>
-						<d class="b p ro">View</d>
-					</d>
-					<d class="p4 b-t h">
-						<d class="b p ro S t-c">View all</d>
+						<d class="h p4 b-t">
+							<img class="round w-10 h-10" src="avatar-2.jpg"></img>
+							<d class="S v-sb m-l-4">
+								<d class=littlebold>Floyd Miles</d>
+								<d>@floydmiles</d>
+							</d>
+							<d class="self-h-m btn btn-sm">View</d>
+						</d>
+						<d class="h p4 b-t">
+							<img class="round w-10 h-10" src="avatar-3.jpg"></img>
+							<d class="S v-sb m-l-4">
+								<d class=littlebold>Emily Selman</d>
+								<d>@emilyselman</d>
+							</d>
+							<d class="self-h-m btn btn-sm">View</d>
+						</d>
+						<d class="p4 b-t h">
+							<d class="S btn btn-sm">View all</d>
+						</d>
 					</d>
 				</d>
 			</d>
