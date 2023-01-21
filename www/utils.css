@@ -291,6 +291,27 @@ h3 { font-size: var(--font-size-h3); }
 /* FONTS ------------------------------------------------------------------ */
 
 @font-face {
+  font-family: 'opensans';
+  font-weight: 100 900;
+  font-style: normal;
+  font-named-instance: 'Regular';
+  src: url("opensans.var.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: 'opensans';
+  font-weight: 100 900;
+  font-style: italic;
+  font-named-instance: 'Italic';
+  src: url("opensans-italic.var.woff2") format("woff2");
+}
+
+.opensans {
+	font-family: opensans, sans-serif;
+}
+
+/*
+@font-face {
 	font-family: "opensans";
 	src: url("opensans-regular.woff2");
 }
@@ -312,13 +333,10 @@ h3 { font-size: var(--font-size-h3); }
 	src: url("opensanscondensed-bold.woff2");
 }
 
-.opensans {
-	font-family: opensans, arial, sans-serif;
-}
-
 .opensans-condensed {
 	font-family: opensans-condensed, arial, sans-serif;
 }
+*/
 
 @font-face {
   font-family: 'inter-var';
@@ -404,6 +422,7 @@ h3 { font-size: var(--font-size-h3); }
 .bold      { font-weight: bold; }
 .extrabold { font-weight: 800; }
 .italic    { font-style: italic; }
+.condensed { font-stretch: 75%; } /* only with var fonts */
 .underline { text-decoration: underline; }
 .strike    { text-decoration: line-through; }
 .allcaps   { text-transform: uppercase; }

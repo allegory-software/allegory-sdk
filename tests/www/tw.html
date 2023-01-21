@@ -32,9 +32,10 @@
 
 <style>
 :root {
-	--fg     : rgb(15 23 42);
-	--sky    : rgb(14 165 233);
-	--indigo : rgb(79 70 229);
+	--fg           : rgb(15 23 42);
+	--sky          : rgb(14 165 233);
+	--indigo       : rgb(79 70 229);
+	--indigo-hover : rgb(79 70 229 / 80%);
 }
 .huge      { font-size: 4.5rem; }
 .w-10      { width : 2.5rem; }
@@ -45,6 +46,7 @@
 .fg-sky    { color: var(--sky); }
 .bg-sky    { background: var(--sky); }
 .bg-indigo { background-color: var(--indigo); }
+.bg-indigo-hover { background-color: var(--indigo-hover); }
 .p-y-1_25  { padding-top: .625rem; padding-bottom: .625rem; }
 .m-t-8rem  { margin-top: 8rem; }
 </style>
@@ -53,11 +55,12 @@
 
 // button styling
 
-css('.btn'          , 'semibold nowrap noselect ro b b-darker p-y-1_25 p-x-4 h-c h-m hand')
-css('.btn-sm'       , 'littlebold ro075 b0 ring p p-x-2 bg')
-css('.btn-pri'      , 'btn b-fg fg-inverted bg-fg')
-css('.btn-indigo'   , 'btn-sm b-fg fg-inverted bg-indigo')
-css('.btn-sm:hover' , 'bg-hover')
+css('.btn'                , 'semibold nowrap noselect ro b b-darker p-y-1_25 p-x-4 h-c h-m hand')
+css('.btn-sm'             , 'btn littlebold ro075 b0 ring p p-x-2 bg')
+css('.btn-pri'            , 'btn b-fg fg-inverted bg-fg')
+css('.btn-indigo'         , 'btn-sm b-fg fg-inverted bg-indigo')
+css('.btn-indigo:hover'   , 'bg-indigo-hover')
+css('.btn-sm:hover'       , 'bg-hover')
 css('.arrow-right::after', 'mi m-l small', `content: 'arrow_forward';`)
 
 css('.btn-grp > .btn:not(:last-child)' , 'b-r-0')
@@ -66,7 +69,7 @@ css('.btn-grp:hover > .btn', 'bg-hover')
 
 // toggle component
 
-css('toggle', 't-m p05 round bg1 h-m ease ring', `
+css('toggle', 't-m p05 round bg1 h-m ease ring hand', `
 	min-width  : 3em;
 	max-width  : 3em;
 	min-height : 1.75em;
@@ -76,8 +79,8 @@ css('.toggle-thumb', 'round bg ring ease', `
 	min-width  : 1.2em;
 	min-height : 1.2em;
 `)
-css('toggle.checked', 'bg-indigo')
-css('.toggle-thumb.checked', 'ease', `
+css('toggle[checked]', 'bg-indigo')
+css('toggle[checked] .toggle-thumb', 'ease', `
 	transform: translateX(100%);
 `)
 
@@ -86,10 +89,6 @@ component('toggle', function(e) {
 	e.set(e.thumb)
 	e.make_focusable()
 	e.prop('checked', {type: 'bool', attr: true})
-	e.set_checked = function(on) {
-		e.thumb.class('checked', on)
-		e.class('checked', on)
-	}
 	e.toggle = function() {
 		e.checked = !e.checked
 	}
