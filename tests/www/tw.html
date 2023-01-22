@@ -31,6 +31,7 @@
 <script src="../../www/theme-tw.js"></script>
 
 <style>
+@layer base {
 :root {
 	--fg           : rgb(15 23 42);
 	--sky          : rgb(14 165 233);
@@ -45,10 +46,13 @@
 .p-l-2rem  { padding-left: 2rem; }
 .fg-sky    { color: var(--sky); }
 .bg-sky    { background: var(--sky); }
-.bg-indigo { background-color: var(--indigo); }
-.bg-indigo-hover { background-color: var(--indigo-hover); }
+.bg-indigo { background: var(--indigo); }
+.fg-indigo { color: var(--indigo); }
+.bg-indigo-hover { background: var(--indigo-hover); }
+.b-indigo  { border-color: var(--indigo); }
 .p-y-1_25  { padding-top: .625rem; padding-bottom: .625rem; }
 .m-t-8rem  { margin-top: 8rem; }
+}
 </style>
 
 <script>
@@ -63,6 +67,7 @@ css('.btn-indigo:hover'   , 'bg-indigo-hover')
 css('.btn-sm:hover'       , 'bg-hover')
 css('.arrow-right::after', 'mi m-l small', `content: 'arrow_forward';`)
 
+css('.btn-grp', 'h')
 css('.btn-grp > .btn:not(:last-child)' , 'b-r-0')
 css('.btn-grp > .btn:not(:first-child)', 'b-l-0')
 css('.btn-grp:hover > .btn', 'bg-hover')
@@ -114,6 +119,17 @@ on('load', function() {
 
 </script>
 
+<svg hidden version="2.0">
+	<defs>
+		<symbol id="back-15s">
+			<path d="M6.22 11.03a.75.75 0 1 0 1.06-1.06l-1.06 1.06ZM3 6.75l-.53-.53a.75.75 0 0 0 0 1.06L3 6.75Zm4.28-3.22a.75.75 0 0 0-1.06-1.06l1.06 1.06ZM13.5 18a.75.75 0 0 0 0 1.5V18ZM7.28 9.97 3.53 6.22 2.47 7.28l3.75 3.75 1.06-1.06ZM3.53 7.28l3.75-3.75-1.06-1.06-3.75 3.75 1.06 1.06Zm16.72 5.47c0 2.9-2.35 5.25-5.25 5.25v1.5a6.75 6.75 0 0 0 6.75-6.75h-1.5ZM15 7.5c2.9 0 5.25 2.35 5.25 5.25h1.5A6.75 6.75 0 0 0 15 6v1.5ZM15 6H3v1.5h12V6Zm0 12h-1.5v1.5H15V18Z" fill="#64748B"></path><path d="M3 15.75h.75V21" stroke="#64748B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M9 16.5A.75.75 0 0 0 9 15v1.5Zm-2.25-.75V15a.75.75 0 0 0-.75.75h.75Zm0 2.25H6c0 .414.336.75.75.75V18Zm0 2.25a.75.75 0 0 0 0 1.5v-1.5ZM9 15H6.75v1.5H9V15Zm-3 .75V18h1.5v-2.25H6Zm.75 3h1.5v-1.5h-1.5v1.5Zm1.5 1.5h-1.5v1.5h1.5v-1.5ZM9 19.5a.75.75 0 0 1-.75.75v1.5a2.25 2.25 0 0 0 2.25-2.25H9Zm-.75-.75a.75.75 0 0 1 .75.75h1.5a2.25 2.25 0 0 0-2.25-2.25v1.5Z" fill="#64748B"></path>
+		</symbol>
+		<symbol id="fw-15s">
+			<path d="M16.72 9.97a.75.75 0 1 0 1.06 1.06l-1.06-1.06ZM21 6.75l.53.53a.75.75 0 0 0 0-1.06l-.53.53Zm-3.22-4.28a.75.75 0 1 0-1.06 1.06l1.06-1.06ZM10.5 19.5a.75.75 0 0 0 0-1.5v1.5Zm3.75-4.5a.75.75 0 0 0 0 1.5V15Zm.75.75h.75A.75.75 0 0 0 15 15v.75ZM14.25 21a.75.75 0 0 0 1.5 0h-1.5Zm6-4.5a.75.75 0 0 0 0-1.5v1.5ZM18 15.75V15a.75.75 0 0 0-.75.75H18ZM18 18h-.75c0 .414.336.75.75.75V18Zm0 2.25a.75.75 0 0 0 0 1.5v-1.5Zm-.22-9.22 3.75-3.75-1.06-1.06-3.75 3.75 1.06 1.06Zm3.75-4.81-3.75-3.75-1.06 1.06 3.75 3.75 1.06-1.06ZM2.25 12.75A6.75 6.75 0 0 0 9 19.5V18a5.25 5.25 0 0 1-5.25-5.25h-1.5ZM9 6a6.75 6.75 0 0 0-6.75 6.75h1.5C3.75 9.85 6.1 7.5 9 7.5V6Zm0 1.5h12V6H9v1.5Zm0 12h1.5V18H9v1.5Zm5.25-3H15V15h-.75v1.5Zm0-.75V21h1.5v-5.25h-1.5Zm6-.75H18v1.5h2.25V15Zm-3 .75V18h1.5v-2.25h-1.5Zm.75 3h1.5v-1.5H18v1.5Zm1.5 1.5H18v1.5h1.5v-1.5Zm.75-.75a.75.75 0 0 1-.75.75v1.5a2.25 2.25 0 0 0 2.25-2.25h-1.5Zm-.75-.75a.75.75 0 0 1 .75.75h1.5a2.25 2.25 0 0 0-2.25-2.25v1.5Z" fill="#64748B"></path>
+		</symbol>
+	</defs>
+</svg>
+
 </head>
 <body class="v-c rel bg-no-repeat" style="background-image: url(tw-bg.jpg); background-size: 150rem; background-position-x: -10rem">
 	<d class="v" style="width: 1296px">
@@ -140,21 +156,72 @@ on('load', function() {
 					<d class="btn m-l-2 arrow-right">Explore templates</d>
 				</d>
 			</d>
+			<d class="y2 xx m4 self-h-r btn-grp" style="width: 40em">
+				<d class="btn bg gap">
+					<svg style="width: 22px; height: 22px" version="2.0"><use href="#back-15s"></use></svg>
+					<d class="mi" style="font-size: 3.1em">play_circle</d>
+					<svg style="width: 22px; height: 22px" version="2.0"><use href="#fw-15s"></use></svg>
+				</d>
+				<!-- player bar -->
+				<d class="S smaller btn bg b-l no-bold gap4">
+					0:51
+					<d class="S h-m">
+						<d class="S bg-indigo round ro-r-0" style="height: 8px"></d>
+						<d class="bg-indigo round" style="margin-left: 2px; width: 4px; height: 20px"></d>
+						<d class="S2 bg1 round ro-l-0" style="height: 8px"></d>
+					</d>
+					55:43
+					<d class="mi label xlarge">volume_down</d>
+					<d class="mi label smaller">more_vert</d>
+				</d>
+			</d>
+			<!-- message boxes -->
+			<d class="v m4 gap4">
+				<d class="y3 ring ro b2 b-indigo p4 bg small v" style="width: 20rem; height: 8rem">
+					<d class="h">
+						<d class="S p-b littlebold">Newsletter</d>
+						<d class="mi mi-fill fg-indigo">check_circle</d>
+					</d>
+					<d>Last message sent an hour ago</d>
+					<d class="S h-b littlebold">621 users</d>
+				</d>
+				<d class="y3 ring ro b2 b-invisible p4 bg small v" style="width: 20rem; height: 8rem">
+					<d class="h">
+						<d class="S p-b littlebold">Existing customers</d>
+					</d>
+					<d>Last message sent an hour ago</d>
+					<d class="S h-b littlebold">1200 users</d>
+				</d>
+			</d>
+			<!-- search projects dropdown -->
+			<d class="m4 ro-group-v v-t small">
+				<d class="ro ring bg gray">
+					<d class="mi m-l xlarge">search</d>
+					<input class="m p05 b0 littlebold" style="font-family: inherit; font-size: inherit;" placeholder="Search projects..."></input>
+				</d>
+				<d class="bold gray xsmall p bg ring">Recent searches</d>
+				<d class="p-l-2 bg    "><d class="mi mi-no-fill p">folder</d>Allegory Labs / Website Redesign</d>
+				<d class="p-l-2 bg b-b"><d class="mi mi-no-fill p">folder</d>Larasmell LLC / Conference Branding</d>
+				<d class="p-l-2 bg b-b"><d class="mi mi-no-fill p">note_add</d>Add new file...</d>
+				<d class="p-l-2 bg b-b"><d class="mi mi-no-fill p">create_new_folder</d>Add new folder...</d>
+				<d class="p-l-2 bg b-b"><d class="p">#</d>Add hashtag...</d>
+			</d>
 			<d class="y1 h-r h-b">
-				<d class="p4 rel grid-r small gap4">
-					<toggle class="small m-b-4" checked></toggle>
+				<d class="p4 v-r small gap4">
+					<toggle class="m-b-4" checked></toggle>
 					<d>
 						<toggle></toggle>
-						<d class=btn-indigo>Button A</d>
+						<d class="m-l-4 btn-indigo">Button A</d>
 					</d>
-					<d class="h btn-grp">
+					<d class="btn-grp">
 						<d class="btn btn-sm"><d class="mi m-r gray">bookmark</d>Bookmark</d>
 						<d class="btn btn-sm">12k</d>
 					</d>
 				</d>
 				<d class="p4 rel">
 					<d class="abs bg1" style="width: 1px; bottom: -2rem; top: -2rem; right: 0;"></d>
-					<d class="v b ro clip bg small" style="width: 24.5rem">
+					<!-- person list -->
+					<d class="v ring ro clip bg small" style="width: 24.5rem">
 						<d class="h p4">
 							<img class="round w-10 h-10 " src="avatar-1.jpg"></img>
 							<d class="S v-sb m-l-4">
