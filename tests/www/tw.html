@@ -11,9 +11,10 @@
 <title>TW UI DEMO</title>
 <meta charset="utf-8">
 
-<!-- always preload your fonts to avoid extreme load-time jankiness -->
+<!-- always preload your fonts or face extreme load-time jankiness -->
 <link rel="preload" as="font" href="../../www/inter-roman.var.woff2"     >
 <link rel="preload" as="font" href="../../www/material-icons-round.woff2">
+<link rel="preload" as="font" href="../../www/material-icons-outlined.woff2">
 
 <link rel="stylesheet" type="text/css" href="../../www/utils.css">
 <link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
@@ -35,6 +36,7 @@
 :root {
 	--fg           : rgb(15 23 42);
 	--sky          : rgb(14 165 233);
+	--slate        : #94a3b8;
 	--indigo       : rgb(79 70 229);
 	--indigo-hover : rgb(79 70 229 / 80%);
 }
@@ -50,8 +52,11 @@
 .fg-indigo { color: var(--indigo); }
 .bg-indigo-hover { background: var(--indigo-hover); }
 .b-indigo  { border-color: var(--indigo); }
+.fg-slate  { color: var(--slate); }
 .p-y-1_25  { padding-top: .625rem; padding-bottom: .625rem; }
-.m-t-8rem  { margin-top: 8rem; }
+::placeholder { color: var(--fg); opacity: .3; font-weight: 600; }
+input       { font-family: inherit; font-size: inherit; }
+input:focus { outline: none; }
 }
 </style>
 
@@ -59,18 +64,27 @@
 
 // button styling
 
-css('.btn'                , 'semibold nowrap noselect ro b b-darker p-y-1_25 p-x-4 h-c h-m hand')
-css('.btn-sm'             , 'btn littlebold ro075 b0 ring p p-x-2 bg')
-css('.btn-pri'            , 'btn b-fg fg-inverted bg-fg')
-css('.btn-indigo'         , 'btn-sm b-fg fg-inverted bg-indigo')
+css('.btn'                , 'semibold nowrap noselect ro ring p-y-1_25 p-x-4 h-c h-m hand')
+css('.btn-sm'             , 'btn littlebold ro075 p p-x-2 bg')
+css('.btn-pri'            , 'btn fg-inverted bg-fg')
+css('.btn-indigo'         , 'btn-sm fg-inverted bg-indigo')
 css('.btn-indigo:hover'   , 'bg-indigo-hover')
 css('.btn-sm:hover'       , 'bg-hover')
 css('.arrow-right::after', 'mi m-l small', `content: 'arrow_forward';`)
 
-css('.btn-grp', 'h')
-css('.btn-grp > .btn:not(:last-child)' , 'b-r-0')
-css('.btn-grp > .btn:not(:first-child)', 'b-l-0')
-css('.btn-grp:hover > .btn', 'bg-hover')
+css('.ro-group-h:hover > .btn', 'bg-hover')
+
+// menu styling
+
+css('.menu-section', 'v p2 ro bg ring')
+css('.menu-section-label', 'p-y bold gray xsmall bg')
+css('.menu-item', 'ro075 p-y bg bg-hover-indigo')
+css('.menu-item:hover', '', `
+	background: var(--indigo);
+	color: var(--fg-inverted);
+`)
+css('.menu-item-icon', 'mi-outlined p-x fg-slate')
+css('.menu-item:hover .menu-item-icon', 'fg-inverted')
 
 // toggle component
 
@@ -142,86 +156,53 @@ on('load', function() {
 			<d class="m-l-2rem b-l p-l-2rem semibold">Sign in</d>
 			<d class="m-l-2rem btn-pri arrow-right">Get all-access</d>
 		</d>
-		<d class="grid m-t-8rem">
-			<d class="y1">
-				<d class="semibold fg-sky">By the makers of Allegory SDK</d>
-				<h1 class="m-t-4 m-b-0 extrabold huge" style="max-width: 45rem; line-height: 1">Build your next idea even faster.</h1>
-				<p class="large w32">
-				Beautifully designed, expertly crafted components and templates,
-				built by the makers of Tailwind CSS. The perfect starting point
-				for your next project.
-				</p>
-				<d class="h">
-					<d class="btn-pri arrow-right">Browse components</d>
-					<d class="btn m-l-2 arrow-right">Explore templates</d>
+		<d class="rel">
+
+			<!-- left side -->
+			<d class="overlay grid-t" style="margin-top: 5rem; grid-template-columns: 4fr 1fr 2fr 3fr">
+
+				<!-- headline -->
+				<d class="xx">
+					<d class="semibold fg-sky">By the makers of Allegory SDK</d>
+					<h1 class="m-t-4 m-b-0 extrabold huge lh1">Build your next idea even faster.</h1>
 				</d>
-			</d>
-			<d class="y2 xx m4 self-h-r btn-grp" style="width: 40em">
-				<d class="btn bg gap">
-					<svg style="width: 22px; height: 22px" version="2.0"><use href="#back-15s"></use></svg>
-					<d class="mi" style="font-size: 3.1em">play_circle</d>
-					<svg style="width: 22px; height: 22px" version="2.0"><use href="#fw-15s"></use></svg>
-				</d>
-				<!-- player bar -->
-				<d class="S smaller btn bg b-l no-bold gap4">
-					0:51
-					<d class="S h-m">
-						<d class="S bg-indigo round ro-r-0" style="height: 8px"></d>
-						<d class="bg-indigo round" style="margin-left: 2px; width: 4px; height: 20px"></d>
-						<d class="S2 bg1 round ro-l-0" style="height: 8px"></d>
-					</d>
-					55:43
-					<d class="mi label xlarge">volume_down</d>
-					<d class="mi label smaller">more_vert</d>
-				</d>
-			</d>
-			<!-- message boxes -->
-			<d class="v m4 gap4">
-				<d class="y3 ring ro b2 b-indigo p4 bg small v" style="width: 20rem; height: 8rem">
+
+				<!-- sub-headline -->
+				<d class="y2">
+					<p class="large">
+						Beautifully designed, expertly crafted components and templates,
+						built by the makers of Tailwind CSS. The perfect starting point
+						for your next project.
+					</p>
 					<d class="h">
-						<d class="S p-b littlebold">Newsletter</d>
-						<d class="mi mi-fill fg-indigo">check_circle</d>
+						<d class="btn-pri arrow-right">Browse components</d>
+						<d class="btn m-l-2 arrow-right">Explore templates</d>
 					</d>
-					<d>Last message sent an hour ago</d>
-					<d class="S h-b littlebold">621 users</d>
 				</d>
-				<d class="y3 ring ro b2 b-invisible p4 bg small v" style="width: 20rem; height: 8rem">
-					<d class="h">
-						<d class="S p-b littlebold">Existing customers</d>
-					</d>
-					<d>Last message sent an hour ago</d>
-					<d class="S h-b littlebold">1200 users</d>
-				</d>
+
 			</d>
-			<!-- search projects dropdown -->
-			<d class="m4 ro-group-v v-t small">
-				<d class="ro ring bg gray">
-					<d class="mi m-l xlarge">search</d>
-					<input class="m p05 b0 littlebold" style="font-family: inherit; font-size: inherit;" placeholder="Search projects..."></input>
-				</d>
-				<d class="bold gray xsmall p bg ring">Recent searches</d>
-				<d class="p-l-2 bg    "><d class="mi mi-no-fill p">folder</d>Allegory Labs / Website Redesign</d>
-				<d class="p-l-2 bg b-b"><d class="mi mi-no-fill p">folder</d>Larasmell LLC / Conference Branding</d>
-				<d class="p-l-2 bg b-b"><d class="mi mi-no-fill p">note_add</d>Add new file...</d>
-				<d class="p-l-2 bg b-b"><d class="mi mi-no-fill p">create_new_folder</d>Add new folder...</d>
-				<d class="p-l-2 bg b-b"><d class="p">#</d>Add hashtag...</d>
-			</d>
-			<d class="y1 h-r h-b">
-				<d class="p4 v-r small gap4">
-					<toggle class="m-b-4" checked></toggle>
-					<d>
-						<toggle></toggle>
-						<d class="m-l-4 btn-indigo">Button A</d>
-					</d>
-					<d class="btn-grp">
-						<d class="btn btn-sm"><d class="mi m-r gray">bookmark</d>Bookmark</d>
-						<d class="btn btn-sm">12k</d>
+
+			<!-- right side -->
+			<d class="overlay grid-t" style="margin-top: 5rem; grid-template-columns: 4fr 1fr 2fr 3fr">
+
+				<!-- buttons -->
+				<d class="x3 h-r h-b">
+					<d class="p4 v-r small gap4">
+						<toggle class="m-b-4" checked></toggle>
+						<d>
+							<toggle></toggle>
+							<d class="m-l-4 btn-indigo">Button A</d>
+						</d>
+						<d class="h ro-group-h">
+							<d class="btn btn-sm"><d class="mi m-r gray">bookmark</d>Bookmark</d>
+							<d class="btn btn-sm">12k</d>
+						</d>
 					</d>
 				</d>
-				<d class="p4 rel">
-					<d class="abs bg1" style="width: 1px; bottom: -2rem; top: -2rem; right: 0;"></d>
-					<!-- person list -->
-					<d class="v ring ro clip bg small" style="width: 24.5rem">
+
+				<!-- person list -->
+				<d class="x4 p4 v">
+					<d class="v ring ro clip bg small" style="">
 						<d class="h p4">
 							<img class="round w-10 h-10 " src="avatar-1.jpg"></img>
 							<d class="S v-sb m-l-4">
@@ -251,6 +232,67 @@ on('load', function() {
 						</d>
 					</d>
 				</d>
+
+				<!-- player bar -->
+				<d class="x3 xxx m4 h ro-group-h">
+					<d class="btn bg gap">
+						<svg style="width: 22px; height: 22px" version="2.0"><use href="#back-15s"></use></svg>
+						<d class="mi" style="font-size: 3.1em">play_circle</d>
+						<svg style="width: 22px; height: 22px" version="2.0"><use href="#fw-15s"></use></svg>
+					</d>
+					<d class="S smaller btn bg no-bold gap4">
+						0:51
+						<d class="S h-m">
+							<d class="S bg-indigo round ro-r-0" style="height: 8px"></d>
+							<d class="bg-indigo round" style="margin-left: 2px; width: 4px; height: 20px"></d>
+							<d class="S2 bg1 round ro-l-0" style="height: 8px"></d>
+						</d>
+						55:43
+						<d class="mi label xlarge">volume_down</d>
+						<d class="mi label smaller">more_vert</d>
+					</d>
+				</d>
+
+				<!-- message boxes -->
+				<d class="x2 xx v m4 gap4">
+					<d class="ring ro b2 b-indigo p4 bg small v" style="height: 8rem">
+						<d class="h">
+							<d class="S p-b littlebold">Newsletter</d>
+							<d class="mi fg-indigo">check_circle</d>
+						</d>
+						<d>Last message sent an hour ago</d>
+						<d class="S h-b littlebold">621 users</d>
+					</d>
+					<d class="ring ro b2 b-invisible p4 bg small v" style="height: 8rem">
+						<d class="h">
+							<d class="S p-b littlebold">Existing customers</d>
+						</d>
+						<d>Last message sent an hour ago</d>
+						<d class="S h-b littlebold">1200 users</d>
+					</d>
+				</d>
+
+				<!-- search projects dropdown -->
+				<d class="x4 m4 ro-group-v v-t small">
+					<d class="menu-section">
+						<d class="h">
+							<d class="menu-item-icon gray xlarge lh1">search</d>
+							<input class="S p05 b0 littlebold" placeholder="Search projects..."></input>
+						</d>
+					</d>
+					<d class="menu-section">
+						<d class="menu-section-label">Recent searches</d>
+						<d class="menu-item"><d class="menu-item-icon">folder</d>Allegory Labs / Website Redesign</d>
+						<d class="menu-item"><d class="menu-item-icon">folder</d>Larasmell LLC / Conference Branding</d>
+					</d>
+					<d class="menu-section">
+						<d class="menu-item"><d class="menu-item-icon">note_add</d>Add new file...</d>
+						<d class="menu-item"><d class="menu-item-icon">create_new_folder</d>Add new folder...</d>
+						<d class="menu-item"><d class="menu-item-icon">tag</d>Add hashtag...</d>
+						<d class="menu-item"><d class="menu-item-icon">label</d>Add label...</d>
+					</d>
+				</d>
+
 			</d>
 		</d>
 	</d>
