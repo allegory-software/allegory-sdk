@@ -412,8 +412,6 @@ h3 { font-size: var(--font-size-h3); }
 .mi, .mi-round { font-family: "mi-round"; }
 .mi-sharp      { font-family: "mi-sharp"; }
 .mi-outlined   { font-family: "mi-outlined"; }
-.mi-fill       { font-variation-settings: 'FILL' 1; }
-.mi-no-fill    { font-variation-settings: 'FILL' 0; }
 
 /* TEXT ------------------------------------------------------------------- */
 
@@ -426,6 +424,7 @@ h3 { font-size: var(--font-size-h3); }
 .large     { font-size: var(--font-size-large); line-height: 1.75; }
 .xlarge    { font-size: var(--font-size-xlarge); line-height: 2; }
 .tight     { line-height: 1.2; }
+.lh1       { line-height: 1; }
 .littlebold{ font-weight: 500; }
 .semibold  { font-weight: 600; }
 .bold      { font-weight: bold; }
@@ -530,8 +529,6 @@ h3 { font-size: var(--font-size-h3); }
 .gap0     { grid-gap: 0; }
 
 /* ALIGN: GRID ------------------------------------------------------------ */
-
-.grid { display: inline-grid; }
 
 .grid-1col { display: inline-grid; grid-template-columns: repeat(1, auto); }
 .grid-2col { display: inline-grid; grid-template-columns: repeat(2, auto); }
