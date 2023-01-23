@@ -436,8 +436,8 @@ widget('x-list-dropdown', function(e) {
 
 	e.create_picker = function(opt) {
 
-		let lb = component.create(assign_opt(opt, {
-			type: 'listbox',
+		let lb = element(assign_opt(opt, {
+			tag: 'listbox',
 			id: e.id && e.id + '.picker' || null,
 			classes: e.picker_classes,
 			val_col: e.val_col,

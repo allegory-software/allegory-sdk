@@ -547,7 +547,7 @@ function shared_nav(id, opt) {
 	let ln = shared_navs[name]
 	if (!ln) {
 		if (id) {
-			ln = component.create(id)
+			ln = element(id)
 			ln.id = null // not saving prop vals into the original.
 		} else {
 			ln = bare_nav(opt)
@@ -636,7 +636,7 @@ function nav_widget(e) {
 	e.prop('save_row_states'         , {type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
 	e.prop('action_band_visible'     , {type: 'enum', enum_values: 'auto always no', default: 'auto', attr: true, slot: 'user'})
 
-	e.debug_anon_name = () => catany('', e.type, catall(':', e.rowset_name))
+	e.debug_anon_name = () => catany('', e.tag, catall(':', e.rowset_name))
 
 	// init -------------------------------------------------------------------
 

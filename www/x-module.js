@@ -46,7 +46,7 @@ function init_xmodule(opt) {
 		let root_id = layer && layer.root_id
 		if (layer && !root_id)
 			warn('root_id not found in root module layer')
-		xm.set_root_widget(root_id && component.create(root_id), false)
+		xm.set_root_widget(root_id && element(root_id), false)
 	}
 
 	window.init_root_widget = init_root_widget
@@ -103,15 +103,15 @@ function init_xmodule(opt) {
 				layer0 = layer
 			}
 		}
-		delete pv.type
+		delete pv.tag
 		return pv
 	}
 
-	component.instance_type = function(id) {
+	component.instance_tag = function(id) {
 		for (let k in xm.active_layers) {
 			let props = xm.active_layers[k].props[id]
-			if (props && props.type)
-				return props.type
+			if (props && props.tag)
+				return props.tag
 		}
 	}
 
@@ -124,10 +124,10 @@ function init_xmodule(opt) {
 			// && because `e.id = null` sets the id to "null" so we can't win.
 		}
 		if (opt.id == '<new>') {
-			assert(e.type)
+			assert(e.tag)
 			assert(opt.module)
 			opt.id = xm.next_id(opt.module)
-			xm.set_val(null, opt.id, 'type', e.type, null, null, null, opt.module)
+			xm.set_val(null, opt.id, 'type', e.tag, null, null, null, opt.module)
 			pv = empty_obj
 		} else if (opt.id) {
 			pv = prop_vals(opt.id)
@@ -769,7 +769,7 @@ widget('x-prop-inspector', function(e) {
 				e.set_cell_val(row, field, pv1[field.name])
 		}
 
-		e.title_text = ([...widgets].map(e => e.type + (e.id ? ' ' + e.id : ''))).join(' ')
+		e.title_text = ([...widgets].map(e => e.tag + (e.id ? ' ' + e.id : ''))).join(' ')
 
 		e.fire('prop_inspector_changed')
 	}
@@ -805,7 +805,7 @@ widget('x-widget-tree', function(e) {
 		let rows = []
 		function add_widget(e, pe) {
 			if (!e) return
-			rows.push([e, pe, e.type, e.id])
+			rows.push([e, pe, e.tag, e.id])
 			if (e.child_widgets)
 				for (let ce of e.child_widgets())
 					add_widget(ce, e)

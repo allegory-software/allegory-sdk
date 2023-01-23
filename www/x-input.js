@@ -50,7 +50,6 @@ function row_widget(e, enabled_without_nav) {
 
 	selectable_widget(e)
 	contained_widget(e)
-	serializable_widget(e)
 
 	e.isinput = true // auto-focused when tabs items are changed.
 
@@ -148,7 +147,6 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 	selectable_widget(e)
 	contained_widget(e)
-	serializable_widget(e)
 
 	e.isinput = true // auto-focused when tabs items are changed.
 
@@ -739,16 +737,6 @@ calls:
 	create_label_placeholder()
 --------------------------------------------------------------------------- */
 
-css('.p-x-input', '', `
-	padding-left  : var(--padding-x-input);
-	padding-right : var(--padding-x-input);
-`)
-
-css('.p-y-input', '', `
-	padding-top    : var(--padding-y-input);
-	padding-bottom : var(--padding-y-input);
-`)
-
 css('.x-input-widget', 'v')
 css('.x-input-widget[readonly]', '', 'opacity: .8;')
 
@@ -840,7 +828,7 @@ function input_widget(e) {
 	}
 
 	e.debug_anon_name = function() {
-		return catany('', e.type, catall(':' + e.col))
+		return catany('', e.tag, catall(':' + e.col))
 	}
 
 	e.do_after('do_update_errors', function() {
@@ -3530,7 +3518,7 @@ widget('x-dateedit', 'Input', function(e) {
 // time picker
 // ---------------------------------------------------------------------------
 
-css('.x-timepicker', 'grid', `
+css('.x-timepicker', 'grid-h', `
 	grid-template-columns: 1fr 1fr;
 `)
 
@@ -3758,7 +3746,6 @@ widget('x-richtext', function(e) {
 
 	selectable_widget(e)
 	contained_widget(e)
-	serializable_widget(e)
 	editable_widget(e)
 
 	e.content_box = div({class: 'x-richtext-content'})
@@ -3810,7 +3797,7 @@ widget('x-lookup-dropdown', function(e) {
 		if (ln_id) {
 			opt.id = ln_id
 		} else {
-			opt.type = 'listbox'
+			opt.tag = 'listbox'
 			opt.rowset      = e._field.lookup_rowset
 			opt.rowset_name = e._field.lookup_rowset_name
 			opt.rowset_url  = e._field.lookup_rowset_url
@@ -3819,7 +3806,7 @@ widget('x-lookup-dropdown', function(e) {
 		opt.display_col = e._field.display_col
 		opt.theme       = e.theme
 
-		let picker = component.create(opt)
+		let picker = element(opt)
 		picker.id = null // not saving prop vals into the original.
 		return picker
 	}
@@ -4291,7 +4278,7 @@ widget('x-switcher', 'Containers', function(e) {
 
 	e.create_item = function(vals) {
 		let id = e.format_item_id(vals)
-		let item = id ? component.create(assign_opt({id: id}, e.item_create_options(vals))) : null
+		let item = id ? element(assign_opt({id: id}, e.item_create_options(vals))) : null
 	}
 
 	e.do_update_row = function(row) {
@@ -4428,7 +4415,7 @@ css('.x-form', 'v-l scroll', `
 	*/
 `)
 
-css('.x-form[grid]', 'grid', `
+css('.x-form[grid]', 'grid-h', `
 	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
 	align-items: start;
 `)
@@ -4460,7 +4447,7 @@ css('.x-form[grid][baseline]', '', `align-items: baseline;`)
 // responsible for changing their layouting with `display: contents`
 // until exactly two in-layout elements remain: an icon and a content.
 
-css('.x-linear-form', 'grid', `
+css('.x-linear-form', 'grid-h', `
 	grid-template-columns: 2em 1fr;
 	align-items: first baseline;
 	grid-gap: .25em 0;
@@ -4472,7 +4459,6 @@ css('.x-linear-form .x-linear-form-filler', 'show')
 
 widget('x-form', 'Containers', function(e) {
 
-	serializable_widget(e)
 	selectable_widget(e)
 	editable_widget(e)
 	contained_widget(e)

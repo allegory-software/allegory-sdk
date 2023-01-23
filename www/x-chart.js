@@ -22,35 +22,30 @@ css('.x-chart-split', 'S h')
 
 css('.x-chart-view', 'S rel h')
 
-css('.x-chart-legend', 'grid arrow', `
+css('.x-chart-legend', 'grid-h arrow gap-y-05 gap-x', `
 	grid-template-columns: 1em 1fr;
-	grid-row-gap: .25em;
-	grid-column-gap:.5em;
 	align-content: end;
 	margin-left: 2em;
 `)
 
 css('.x-chart-legend-bullet', 'round', `
-	width: .8em;
+	width : .8em;
 	height: .8em;
 `)
 
-css('.x-chart-legend-percent', 'bold', `
-	justify-self: end;
-`)
+css('.x-chart-legend-percent', 'bold self-h-r')
 
 css('.x-chart-canvas', 'abs', `
-	left: 0;
 	top: 0;
+	left: 0;
 `)
 
 css('.x-tooltip.x-chart-tooltip', 'click-through')
 
 css('.x-chart-tooltip > .x-tooltip-body', 'tight')
 
-css('.x-chart-tooltip-label', 'grid', `
+css('.x-chart-tooltip-label', 'grid-h gap-x-2', `
 	grid-template-columns: repeat(2, auto);
-	column-gap: 1em;
 	justify-items: start;
 `)
 
@@ -65,7 +60,7 @@ css('.x-chart-stack-slice', 'm-r', `
 css('.x-chart[shape=pie] .x-chart-split', 'h-c')
 
 css('.x-chart[shape=pie] .x-chart-view', '', `
-	max-width: 15em;
+	max-width : 15em;
 	min-height: 15em;
 `)
 
@@ -94,7 +89,6 @@ css('.x-chart-pie-label', 'abs white')
 widget('x-chart', 'Input', function(e) {
 
 	contained_widget(e)
-	serializable_widget(e)
 	selectable_widget(e)
 
 	// config -----------------------------------------------------------------

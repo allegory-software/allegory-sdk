@@ -67,8 +67,6 @@ css_light('', '', `
 	--shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 	--shadow-slider-thumb           :  1px  1px  2px      #000000aa;
 
-	--padding-y-input-top         : 22px; /* for inputs with label */
-	--padding-y-input-bottom      :  2px; /* for inputs with label */
 	--padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
 	--padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
 	--padding-y2-input-il-dropdown-button : .5em;
@@ -117,11 +115,21 @@ css_dark('', '', `
 
 `)
 
+css('.p-x-input', '', `
+	padding-left  : var(--padding-x-input);
+	padding-right : var(--padding-x-input);
+`)
+
+css('.p-y-input', '', `
+	padding-top    : var(--padding-y-input);
+	padding-bottom : var(--padding-y-input);
+`)
+
 css('info', 'h small label m-y p-x-input arrow')
 
 css('.x-widget', 'rel h')
 
-css('.x-container', 'grid shrinks clip') /* grid because grid-in-flex is buggy */
+css('.x-container', 'grid-h shrinks clip') /* grid because grid-in-flex is buggy */
 
 css('.x-if .x-switcher, .x-ct', 'skip') /* purely-logical containers */
 
@@ -184,19 +192,16 @@ function widget(tag, category, init) {
 		e.class(tag)
 		return init0(e)
 	}
-	let type
 	function comp_init(e) {
-		e.iswidget = true     // to diff from normal html elements.
-		e.type = type         // for serialization.
+		e.iswidget = true // to diff from normal html elements.
 		e.class('x-widget')
 		e.make_disablable()
 		return init(e)
 	}
 	let create = component(tag, category, comp_init)
 	create.construct = init
-	type = create.type
+	let type = tag.replace(/^x-/, '').replaceAll('-', '_') // TODO: remove this
 	window[type] = create
-
 	return create
 }
 
@@ -223,7 +228,7 @@ css_role_state('.x-widget-selected-overlay:focus', '', `
 	outline-color: var(--selected-widget-outline-color-focused);
 `)
 
-css('.x-widget-placeholder', 'grid', `
+css('.x-widget-placeholder', 'grid-h', `
 	justify-content: safe center;
 	align-content: center;
 	outline: 1px dashed var(--fg-gray);
@@ -570,30 +575,6 @@ function editable_widget(e) {
 
 function contained_widget(e) {
 	//
-}
-
-/* ---------------------------------------------------------------------------
-// serializable widget mixin
-// ---------------------------------------------------------------------------
-publishes:
-	e.serialize()
---------------------------------------------------------------------------- */
-
-function serializable_widget(e) {
-
-	e.serialize = function() {
-		if (e.id)
-			return e.id
-		let t = {type: e.type}
-		if (e.props)
-			for (let prop in e.get_props()) {
-				let v = e.serialize_prop(prop, e.get_prop(prop))
-				if (v !== undefined)
-					t[prop] = v
-			}
-		return t
-	}
-
 }
 
 /* ---------------------------------------------------------------------------
@@ -1395,9 +1376,7 @@ widget_items_widget = function(e) {
 		if (same_items(t, cur_items))
 			return cur_items
 
-		// diff between t and cur_items keyed on id or item identity.
-
-		let new_items, removed_items
+		// diff between t and cur_items keyed on item's object identity or its id.
 
 		// map current items by identity and by id.
 		let cur_set = set()
@@ -1411,30 +1390,13 @@ widget_items_widget = function(e) {
 		// create new items or reuse-by-id.
 		let items = set()
 		for (let v of t) {
-			// v is either an item from cur_items, an id, or the opts for a new item.
-			let cur_item = cur_set.has(v) ? v : cur_by_id.get(isobj(v) ? v.id : v)
-			let item = component.create(v, cur_item)
+			// v is either an item from cur_items or the prop_vals of a new item.
+			let cur_item = cur_set.has(v) ? v : cur_by_id.get(v.id)
+			let item = cur_item || element(v)
 			items.add(item)
-			if (!cur_item) {
-				if (!new_items)
-					new_items = []
-				new_items.push(item)
-			}
 		}
 
-		// remove items that are missing from the new set.
-		for (let item of cur_items)
-			if (!items.has(item)) {
-				if (!removed_items)
-					removed_items = []
-				removed_items.push(item)
-			}
-
-		e.update({
-			new_items     : new_items,
-			removed_items : removed_items,
-			items         : items,
-		})
+		e.update({items: items})
 
 		return items.toarray()
 	}
@@ -1569,7 +1531,6 @@ widget('tabs', 'Containers', function(e) {
 	selectable_widget(e)
 	editable_widget(e)
 	contained_widget(e)
-	serializable_widget(e)
 
 	let html_items = widget_items_widget(e)
 
@@ -1589,6 +1550,15 @@ widget('tabs', 'Containers', function(e) {
 	e.prop('auto_focus_first_item', {type: 'bool', default: true})
 
 	e.prop('header_width', {type: 'number'})
+
+	e.prop('tabs', {})
+
+	e.set_tabs = function(item_ids) {
+		//
+		for (let item_id of words(item_ids)) {
+
+		}
+	}
 
 	// view -------------------------------------------------------------------
 
@@ -1614,60 +1584,49 @@ widget('tabs', 'Containers', function(e) {
 		if (!e.selection_bar) {
 			e.selection_bar = div({class: 'tabs-selection-bar'})
 			e.add_button = div({class: 'tabs-add-button fa fa-plus', tabindex: 0})
-			e.tabs = div({class: 'tabs-tabs'})
+			e.tabs_div = div({class: 'tabs-tabs'})
 			e.header = div({class: 'tabs-header'},
-				e.selection_bar, e.tabs, e.fixed_header, e.add_button)
+				e.selection_bar, e.tabs_div, e.fixed_header, e.add_button)
 			e.content = div({class: 'tabs-content x-container'})
 			e.add(e.header, e.content)
 			e.add_button.on('click', add_button_click)
 		}
 
-		if (opt.items) {
-			for (let item of e.items) {
-				if (!item._tab) {
-
-				}
-			}
-		}
-
-		if (opt.new_items) {
-			for (let item of opt.new_items) {
-				let xbutton = div({class: 'tabs-xbutton fa fa-times'})
-				xbutton.hidden = true
-				let title_box = div({class: 'tabs-title'})
-				let tab = div({class: 'tabs-tab', tabindex: 0}, title_box, xbutton)
-				tab.title_box = title_box
-				tab.xbutton = xbutton
-				tab.on('pointerdown' , tab_pointerdown)
-				tab.on('dblclick'    , tab_dblclick)
-				tab.on('keydown'     , tab_keydown)
-				title_box.on('input' , update_title)
-				title_box.on('blur'  , title_blur)
-				xbutton.on('pointerdown', xbutton_pointerdown)
-				tab.item = item
-				item._tab = tab
-				item.on('label_changed', item_label_changed)
-				update_tab_title(tab)
-				item._tab.x = null
-				e.tabs.add(item._tab)
-			}
-		}
-
-		if (opt.removed_items) {
-			for (let item of opt.removed_items) {
-				item.remove()
-				item.on('label_changed', item_label_changed, false)
-				if (item._tab) {
-					item._tab.remove()
+		let items = opt.items
+		if (isarray(items))
+			items = set(items)
+		if (items) {
+			for (let tab of e.tabs_div.at) {
+				let item = tab._item
+				if (item && !items.has(item)) {
+					item.remove()
+					item.on('label_changed', item_label_changed, false)
 					item._tab = null
 				}
 			}
-		}
-
-		if (opt.items) {
-			e.tabs.innerHTML = null
-			for (let item of opt.items)
-				e.tabs.append(item._tab)
+			e.tabs_div.clear()
+			for (let item of items) {
+				if (!item._tab) {
+					let xbutton = div({class: 'tabs-xbutton fa fa-times'})
+					xbutton.hidden = true
+					let title_box = div({class: 'tabs-title'})
+					let tab = div({class: 'tabs-tab', tabindex: 0}, title_box, xbutton)
+					tab.title_box = title_box
+					tab.xbutton = xbutton
+					tab.on('pointerdown' , tab_pointerdown)
+					tab.on('dblclick'    , tab_dblclick)
+					tab.on('keydown'     , tab_keydown)
+					title_box.on('input' , update_title)
+					title_box.on('blur'  , title_blur)
+					xbutton.on('pointerdown', xbutton_pointerdown)
+					tab.item = item
+					item._tab = tab
+					item.on('label_changed', item_label_changed)
+					update_tab_title(tab)
+					item._tab.x = null
+				}
+				e.tabs_div.add(item._tab)
+			}
 		}
 
 		e.header.w = e.header_width
@@ -1712,7 +1671,7 @@ widget('tabs', 'Containers', function(e) {
 	let tr, cr
 
 	e.do_measure = function() {
-		tr = e.tabs.rect()
+		tr = e.tabs_div.rect()
 		cr = selected_tab && selected_tab.at[0].rect()
 	}
 
@@ -1949,7 +1908,7 @@ widget('tabs', 'Containers', function(e) {
 			}
 			if (key == 'ArrowRight' || key == 'ArrowLeft') {
 				let i = (selected_tab ? selected_tab.index : -1) + (key == 'ArrowRight' ? 1 : -1)
-				let tab = e.tabs.at[clamp(i, 0, e.len-1)]
+				let tab = e.tabs_div.at[clamp(i, 0, e.len-1)]
 				select_tab(tab, {focus_tab: true})
 				return false
 			}
@@ -2052,7 +2011,6 @@ css('.split[orientation=vertical  ].collapsed > .split-sizer::before', '', `
 
 widget('split', 'Containers', function(e) {
 
-	serializable_widget(e)
 	selectable_widget(e)
 	contained_widget(e)
 
@@ -2066,8 +2024,8 @@ widget('split', 'Containers', function(e) {
 	e.sizer = div({class: 'split-sizer'})
 	e.add(e.pane1, e.sizer, e.pane2)
 
-	e.prop('item1', {type: 'widget', convert: component.create})
-	e.prop('item2', {type: 'widget', convert: component.create})
+	e.prop('item1', {type: 'node', convert: element})
+	e.prop('item2', {type: 'node', convert: element})
 
 	let horiz, left
 
@@ -2509,7 +2467,7 @@ css('.x-toolbox[pinned] > .x-toolbox-titlebar > .x-toolbox-button-pin', 'label')
 
 css_state('.x-toolbox-button-close:hover', 'fg')
 
-css('.x-toolbox-content', 'h shrinks scroll-auto grid')
+css('.x-toolbox-content', 'h shrinks scroll-auto grid-h')
 
 // toolbox resizing by dragging the margins
 
@@ -2684,18 +2642,13 @@ widget('x-toolbox', function(e) {
 // slides
 // ---------------------------------------------------------------------------
 
-css('.x-slides', 'grid')
+css('.x-slides', 'grid-h')
 
-css('.x-slide', 'invisible op0', `
-	grid-column-start: 1;
-	grid-row-start: 1;
+css('.x-slide', 'invisible op0 x1 y1', `
 	transition: opacity .5s;
 `)
 
-css('.x-slides > .x-ct > .', '', `
-	grid-column-start: 1;
-	grid-row-start: 1;
-`)
+css('.x-slides > .x-ct > .', 'x1 y1')
 
 css(`
 	.x-slide:not(.x-slide-selected),
@@ -2710,7 +2663,6 @@ css('.x-slide-selected', 'visible op1 click-through-off', `
 
 widget('x-slides', 'Containers', function(e) {
 
-	serializable_widget(e)
 	selectable_widget(e)
 	contained_widget(e)
 	let html_items = widget_items_widget(e)
@@ -2888,7 +2840,6 @@ widget('x-richtext', function(e) {
 
 	selectable_widget(e)
 	contained_widget(e)
-	serializable_widget(e)
 	editable_widget(e)
 
 	e.content_box = div({class: 'x-richtext-content'})
@@ -2903,7 +2854,7 @@ widget('x-richtext', function(e) {
 	function serialize_content(s) {
 		return e.content_box.html
 	}
-	e.prop('content', {type: 'html', slot: 'lang', serialize: serialize_content})
+	e.prop('content', {type: 'nodes', slot: 'lang', serialize: serialize_content})
 
 	// widget editing ---------------------------------------------------------
 
@@ -3187,14 +3138,13 @@ calls:
 
 widget('x-widget-placeholder', function(e) {
 
-	serializable_widget(e)
 	selectable_widget(e)
 	contained_widget(e)
 
 	function replace_widget(item) {
 		let pe = e.parent_widget
-		let te = component.create({
-			type: item.create.type,
+		let te = element({
+			tag: item.tag,
 			id: '<new>', // pseudo-id to be replaced with an auto-generated id.
 			module: pe && pe.module || e.module,
 		})

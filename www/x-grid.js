@@ -70,7 +70,7 @@ css('.x-grid-header-canvas', 'abs')
 
 /* grid cells: grid > view > ct > (cells, editor) > cell */
 
-css('.x-grid-cells-view', 'S shrinks rel grid scroll-auto')
+css('.x-grid-cells-view', 'S shrinks rel grid-h scroll-auto')
 
 // Fix the damn Chrome bug with custom-drawn scrollbars !!
 // 50px has the nice side effect of gradually hiding the header when the grid
@@ -2835,8 +2835,8 @@ widget('x-grid-dropdown', function(e) {
 	nav_dropdown_widget(e)
 
 	e.create_picker = function(opt) {
-		return component.create(assign_opt(opt, {
-			type: 'grid',
+		return element(assign_opt(opt, {
+			tag: 'grid',
 			id: e.id && e.id + '.dropdown',
 			val_col: e.val_col,
 			display_col: e.display_col,
