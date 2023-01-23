@@ -113,12 +113,12 @@ on_dom_load(function() {
 <!--------------------------------------------------------------------------->
 
 <template id=tabs_demo>
-<tabs selected_tab=second_page tabs_side=top>
-	<div label="First Page" id=first_page>
+<tabs id=test_tabs selected_tab=second_page tabs_side=top style="min-height: 200px">
+	<div id=test_tabs_page_1 label="First Page" id=first_page>
 		<h1>This is the first page</h1>
 		<p>You can put anything in here.</p>
 	</div>
-	<div label="Second Page" id=second_page>
+	<div id=test_tabs_page_2 label="Second Page" id=second_page>
 		<h1>This is the second page.</h1>
 		<p>You can put anything in here too.</p>
 	</div>

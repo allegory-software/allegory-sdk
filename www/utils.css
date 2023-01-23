@@ -9,7 +9,7 @@ CSS CLASSES:
 	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb s t b m bl} v-{t b m sb s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
 	ALIGN GRID    grid-{l r c sb s t b m bl} {x y}{1-5} x..x y..y
-	GAPS F,G      gap[0 025 05 075 2 4 8]
+	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
 	SIZING        nowrap shrinks
@@ -32,7 +32,6 @@ CSS CLASSES:
 	FONTS         mono arial opensans[-condensed] inter
 	MAT ICONS     mi[-round -sharp -outlined -fill -no-fill]
 	FA ICONS      fa[r] fa-*
-	INTERACTION   hover-{darken lighten b}
 
 HTML SELECTORS:
 	*[gray] *[nowrap]
@@ -149,7 +148,7 @@ NOTES:
 	--bg-smoke       : #ffffff22;
 	--bg-input       : hsl(0 0% 0%);
 
-	--border         : hsl(0 0% 20%);
+	--border-light   : hsl(0 0% 20%);
 	--border-hover   : hsl(0 0% 50%);
 
 	--outline-focused: #999;
@@ -316,34 +315,6 @@ h3 { font-size: var(--font-size-h3); }
 .opensans {
 	font-family: opensans, sans-serif;
 }
-
-/*
-@font-face {
-	font-family: "opensans";
-	src: url("opensans-regular.woff2");
-}
-
-@font-face {
-	font-family: "opensans";
-	font-weight: bold;
-	src: url("opensans-600.woff2");
-}
-
-@font-face {
-	font-family: "opensans-condensed";
-	src: url("opensanscondensed-light.woff2");
-}
-
-@font-face {
-	font-family: "opensans-condensed";
-	font-weight: bold;
-	src: url("opensanscondensed-bold.woff2");
-}
-
-.opensans-condensed {
-	font-family: opensans-condensed, arial, sans-serif;
-}
-*/
 
 @font-face {
   font-family: 'inter-var';
@@ -519,16 +490,37 @@ h3 { font-size: var(--font-size-h3); }
 .order-last { order: 99999; }
 
 /* flex & grid */
-.gap025   { grid-gap: var(--space-025); }
-.gap05    { grid-gap: var(--space-05); }
-.gap075   { grid-gap: var(--space-075); }
-.gap      { grid-gap: var(--space-1); }
-.gap2     { grid-gap: var(--space-2); }
-.gap4     { grid-gap: var(--space-4); }
-.gap8     { grid-gap: var(--space-8); }
-.gap0     { grid-gap: 0; }
+.gap025   { gap: var(--space-025); }
+.gap05    { gap: var(--space-05); }
+.gap075   { gap: var(--space-075); }
+.gap      { gap: var(--space-1); }
+.gap2     { gap: var(--space-2); }
+.gap4     { gap: var(--space-4); }
+.gap8     { gap: var(--space-8); }
+.gap0     { gap: 0; }
+
+.gap-x-025   { column-gap: var(--space-025); }
+.gap-x-05    { column-gap: var(--space-05); }
+.gap-x-075   { column-gap: var(--space-075); }
+.gap-x       { column-gap: var(--space-1); }
+.gap-x-2     { column-gap: var(--space-2); }
+.gap-x-4     { column-gap: var(--space-4); }
+.gap-x-8     { column-gap: var(--space-8); }
+.gap-x-0     { column-gap: 0; }
+
+.gap-y-025   { row-gap: var(--space-025); }
+.gap-y-05    { row-gap: var(--space-05); }
+.gap-y-075   { row-gap: var(--space-075); }
+.gap-y       { row-gap: var(--space-1); }
+.gap-y-2     { row-gap: var(--space-2); }
+.gap-y-4     { row-gap: var(--space-4); }
+.gap-y-8     { row-gap: var(--space-8); }
+.gap-y-0     { row-gap: 0; }
 
 /* ALIGN: GRID ------------------------------------------------------------ */
+
+.grid-h { display: inline-grid; grid-auto-flow: row   ; }
+.grid-v { display: inline-grid; grid-auto-flow: column; }
 
 .grid-1col { display: inline-grid; grid-template-columns: repeat(1, auto); }
 .grid-2col { display: inline-grid; grid-template-columns: repeat(2, auto); }
@@ -1006,16 +998,7 @@ h3 { font-size: var(--font-size-h3); }
 
 @layer state {
 
-/* INTERACTION ------------------------------------------------------------ */
-
 a:visited { color: var(--fg-link); }
-
-/*
-.hover-dim:hover     { opacity: .5; }
-.hover-darken:hover  { filter: brightness(0.85); }
-.hover-lighten:hover { filter: brightness(1.15); }
-.hover-b:hover       { border-color: var(--border-hover); }
-*/
 
 .scroll-thin::-webkit-scrollbar-thumb:hover {
 	background: var(--bg2-hover);
