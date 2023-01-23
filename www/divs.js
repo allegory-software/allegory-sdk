@@ -122,7 +122,7 @@ DOM MANIPULATION
 	tag(tag, [attrs], e1,...)
 	div(...)
 	span(...)
-	element(tag, prop_vals, ...)
+	element(node | stringable | null | {id|tag:, PROP->VAL}) -> node | null
 	[].join_nodes([separator])
 
 SVG ELEMENTS
@@ -426,8 +426,9 @@ on_dom_load(function() {
 				.captures(/^\.([^ >#:\.+~]+)$/) // simple .class selector
 			if (!cls)
 				return
+			props = props.trim()
 			if (class_props[cls])
-				class_props[cls] = class_props[cls] + '\n' + props
+				class_props[cls] = class_props[cls] + '\n\t' + props
 			else
 				class_props[cls] = props
 		}
@@ -455,7 +456,7 @@ css_layers = []
 
 css_layer = memoize(function(layer) {
 
-	let pieces = ['@layer '+layer+' {\n\n']
+	let pieces = ['@layer '+layer+' {\n']
 	let style = document.createElement('style')
 	style.setAttribute('x-layer', layer) // for debugging.
 	style.css_in_js_layer = true // we map classes ourselves.
@@ -481,7 +482,7 @@ css_layer = memoize(function(layer) {
 					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 				continue
 			}
-			pieces.push('\t', props, '\n')
+			pieces.push('\n\t', props)
 			let cls_includes = class_includes[cls]
 			if (cls_includes) {
 				add_includes(cls_includes, pieces, e)
@@ -501,15 +502,15 @@ css_layer = memoize(function(layer) {
 			prefix = selector
 			suffix = ''
 		}
-		pieces.push('\n:where(', prefix, ')', suffix, ' {\n')
+		pieces.push('\n:where(', prefix, ')', suffix, ' {')
 		if (includes) {
 			let e = new Error()
 			pieces.push(function(dest_pieces) {
 				add_includes(includes, dest_pieces, e)
 			})
 		}
-		props = props || ''
-		pieces.push(props)
+		props = props ? props.trim() : ''
+		pieces.push('\n\t', props)
 		pieces.push('\n}\n')
 
 		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // reusable class?
@@ -598,7 +599,7 @@ e.closest_attr = function(attr) {
 	return e && e.attr(attr)
 }
 
-property(Element, 'tag', function() { return this.tagName.lower() })
+property(Element, 'tag', function() { return this.tagName.lower() }, noop)
 
 // element CSS class list manipulation ---------------------------------------
 
@@ -793,16 +794,15 @@ function component(selector, category, init) {
 			component_attr[tagName] = tag_attr
 	}
 	function create(prop_vals) {
-		return element(tag, prop_vals)
+		prop_vals = prop_vals || obj()
+		prop_vals.tag = tag
+		return element(prop_vals)
 	}
-	create.type = type // for serialization
 	create.construct = init // use as mixin in other components
 	attr(component.categories, category, array).push(create)
-	component.types[type] = create
 	return create
 }
 
-component.types      = obj() // {type -> create}
 component.categories = obj() // {cat -> {craete1,...}}
 
 component.init_instance = function(e, prop_vals) { // stub, see xmodule.js.
@@ -812,31 +812,7 @@ component.init_instance = function(e, prop_vals) { // stub, see xmodule.js.
 	e.xon()
 }
 
-component.instance_type = noop // stub, see xmodule.js.
-
-// component.create(id | {id:} | {type:} | e, [e0])
-component.create = function(t, e0) {
-	if (isnode(t))
-		return t // nodes pass through.
-	let id = isstr(t) ? t : t.id
-	if (e0 && e0.id == id)
-		return e0  // already created (called from a prop's `convert()`).
-	if (isstr(t)) // t is an id
-		t = {id: t}
-	if (!t.type) {
-		t.type = component.instance_type(id)
-		if (!t.type) {
-			warn('component id not found:', id)
-			return
-		}
-	}
-	let create = component.types[t.type]
-	if (!create) {
-		warn('invalid component type', t.type, 'for id', t.id)
-		return
-	}
-	return create(t)
-}
+component.instance_tag = noop // stub, see x-module.js.
 
 // TODO: this way, e.property() props can't be set from html. Convert them
 // to e.prop() if you want them to be settable from html attrs!
@@ -866,13 +842,12 @@ e.init_component = function(prop_vals) {
 	if (e.initialized)
 		return
 
-	// TODO: this way `element('img', {attrs: {'data-src': 'bla'}})`
-	// does not init the image but `tag('img', {'data-src': 'bla'})` does!
-	// For now, just don't use element() to create built-in tags, use tag() for that.
 	let tagName = e.tagName
 	let init = component_init[tagName]
 	let tag_attr = init && component_attr[tagName]
-	if (!(init && (!tag_attr || e.hasattr(tag_attr)))) {
+	if (!(init && (!tag_attr || e.hasattr(tag_attr)
+		|| (prop_vals && prop_vals.attrs && prop_vals.attrs[tag_attr] != null))
+	)) {
 		if (prop_vals)
 			assign_opt(e, prop_vals)
 		e.init_child_components()
@@ -881,7 +856,7 @@ e.init_component = function(prop_vals) {
 
 	e.debug_open_if(DEBUG_INIT, '^')
 
-	// prop attrs can be given as element({props: {prop: {k: v}}}).
+	// prop attrs can be given to element() as {props: {PROP->{K->V}}}.
 	// TODO: side effect of doing it this way is that now you need to use
 	// `attr(e.props, 'PROP').k = v` instead of `e.props.PROP = {...}` in init().
 	e.props = assign_opt(obj(), prop_vals && prop_vals.props)
@@ -1077,13 +1052,27 @@ function tag(tag, attrs, ...children) {
 div  = (...a) => tag('div' , ...a)
 span = (...a) => tag('span', ...a)
 
-// TODO: for now, don't use this to create built-in tags, use tag() for that!
-// See init_component() for where this limitation comes from.
-function element(tag, ...args) {
-	let e = document.createElement(tag)
-	let prop_vals = args.length > 1 ? assign_opt(obj(), ...args) : args[0]
-	e.init_component(prop_vals)
-	return e
+// element(node | stringable | null | {id|tag:, PROP->VAL}) -> node | null
+function element(t) {
+	if (isfunc(t)) // constructor
+		t = t()
+	if (t == null || isnode(t)) // node | null | undefined: pass through
+		return t
+	if (isobj(t)) { // {id|tag:, PROP->VAL}: create element
+		let id = t.id
+		let e0 = window[id]
+		if (e0)
+			return e0 // already created (called from a prop's `convert()`).
+		let tag = t.tag || component.instance_tag(id)
+		if (!tag) {
+			warn('component id not found:', id)
+			return
+		}
+		let e = document.createElement(tag)
+		e.init_component(t)
+		return e
+	}
+	return document.createTextNode(t) // stringable -> node
 }
 
 function svg_tag(tag, attrs, ...children) {
@@ -1581,6 +1570,24 @@ e.xsave = function() {
 	let xm = window.xmodule
 	if (xm)
 		xm.save()
+}
+
+e.serialize = function() {
+	let e = this
+	if (e.id)
+		return e.id
+	let t = {tag: e.tag}
+	if (e.props) {
+		for (let prop in e.get_props()) {
+			let v = e.serialize_prop(prop, e.get_prop(prop))
+			if (v !== undefined)
+				t[prop] = v
+		}
+	} else { // built-in
+		t.attrs = e.attrs
+		t.html = e.html
+	}
+	return t
 }
 
 /* ---------------------------------------------------------------------------
