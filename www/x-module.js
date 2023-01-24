@@ -260,7 +260,7 @@ function init_xmodule(opt) {
 
 	}
 
-	document.on('prop_changed', function(e, k, v, v0) {
+	window.on('prop_changed', function(e, k, v, v0) {
 		if (!e.id)
 			return
 		let pa = e.get_prop_attrs(k)
@@ -657,7 +657,7 @@ widget('x-prop-inspector', function(e) {
 
 	e.on('bind', function(on) {
 		document.on('selected_widgets_changed', selected_widgets_changed, on)
-		document.on('prop_changed', prop_changed, on)
+		window.on('prop_changed', prop_changed, on)
 		document.on('focusin', focus_changed, on)
 		if (on)
 			reset()

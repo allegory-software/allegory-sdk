@@ -2087,7 +2087,7 @@ widget('x-grid', 'Input', function(e) {
 			e.empty_rt.hidden = true
 			e.cells_view.add(e.empty_rt)
 
-			document.on('prop_changed', function(te, k, v) {
+			window.on('prop_changed', function(te, k, v) {
 				if (te == e.empty_rt && k == 'content') {
 					barrier = true
 					e.empty_text = v

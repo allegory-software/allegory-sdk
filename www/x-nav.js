@@ -1097,7 +1097,7 @@ function nav_widget(e) {
 		} else {
 			let slot = attrs && attrs.slot
 			let prop = 'col.' + col + '.' + k
-			document.fire('prop_changed', e, prop, v, v0, slot)
+			window.fire('prop_changed', e, prop, v, v0, slot)
 		}
 	}
 
