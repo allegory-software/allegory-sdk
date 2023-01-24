@@ -149,7 +149,12 @@ ELEMENT PROPERTIES
 	e.get_prop_attrs(k) -> {attr->val}
 	e.get_props() -> {k->attrs}
 	e.serialize_prop(k) -> s
-	e.element_links()
+
+LINKED ELEMENTS
+
+	e.set_linked_element(key, id)
+	e.on_linked_element_bind(f); f(key, element, on)
+	^e.linked_element_id_changed(key, id1, id0)
 
 PROPERTY PERSISTENCE
 
@@ -172,7 +177,7 @@ COMPONENTS
 	e.initialized -> null|t|f
 	init_components()
 	e.bind(t|f)
-	e.on_bind(f)
+	e.on_bind(f); f(on)
 	^e.bind(on)
 	^window.element_bind(e, on)
 	^window['ID.bind'](e, on)
@@ -1391,7 +1396,7 @@ calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
 fires:
-	^document.'prop_changed' (e, prop, v1, v0)
+	^window.'prop_changed' (e, prop, v1, v0)
 	^window.'element_id_changed' (e, id, id0)
 	^window.'ID0.id_changed' (e, id, id0)
 
@@ -1408,7 +1413,7 @@ let fire_prop_changed = function(e, prop, v1, v0) {
 	if (e._xoff) {
 		e.props[prop].default = v1
 	} else {
-		document.fire('prop_changed', e, prop, v1, v0)
+		window.fire('prop_changed', e, prop, v1, v0)
 	}
 }
 
@@ -1442,7 +1447,6 @@ e.prop = function(prop, opt) {
 	assign_opt(opt, e.props && e.props[prop])
 	let getter = 'get_'+prop
 	let setter = 'set_'+prop
-	let type = opt.type
 	opt.name = prop
 	let convert = opt.convert || return_arg
 	let priv = opt.private
@@ -1494,7 +1498,7 @@ e.prop = function(prop, opt) {
 		}
 	}
 
-	// id-based dynamic binding of external elements.
+	// id-based dynamic binding of external elements to a prop.
 	if (opt.bind_id) {
 		assert(!priv)
 		let ID = prop
@@ -1583,29 +1587,21 @@ e.serialize = function() {
 			if (v !== undefined)
 				t[prop] = v
 		}
-	} else { // built-in
+	} else { // built-in tag
 		t.attrs = e.attrs
 		t.html = e.html
 	}
 	return t
 }
 
-/* ---------------------------------------------------------------------------
-// dynamic element binding mixin
-// ---------------------------------------------------------------------------
-provides:
-	e.set_linked_element(key, id)
-calls:
-	e.bind_linked_element(key, te, on)
-	e.linked_element_id_changed(key, id1, id0)
---------------------------------------------------------------------------- */
-
-e.element_links = function() {
+// id-based dynamic binding of external elements.
+e.do_linked_element_bind = noop
+e.on_linked_element_bind = function(f) {
+	this.do_after('do_linked_element_bind', f)
+}
+e.set_linked_element = function(k, id1) {
 
 	let e = this
-
-	e.bind_linked_element = noop
-	e.linked_element_id_changed = noop
 
 	let links = map() // k->te
 	let all_keys = map() // id->set(K)
@@ -1622,7 +1618,7 @@ e.element_links = function() {
 			if (!keys.size)
 				all_keys.delete(id0)
 			if (te0.bound)
-				e.bind_linked_element(k, te0, false)
+				e.do_linked_element_bind(k, te0, false)
 		}
 		links.set(k, te1)
 		if (id1)
@@ -1646,7 +1642,7 @@ e.element_links = function() {
 		let keys = all_keys.get(id0)
 		if (keys)
 			for (let k of keys)
-				e.linked_element_id_changed(k, id1, id0)
+				e.fire('linked_element_id_changed', k, id1, id0)
 	}
 
 	e.on_bind(function(on) {
@@ -1671,6 +1667,7 @@ e.element_links = function() {
 		window.on('element_id_changed', element_id_changed, on)
 	})
 
+	e.set_linked_element(k, id1)
 }
 
 /* ---------------------------------------------------------------------------
