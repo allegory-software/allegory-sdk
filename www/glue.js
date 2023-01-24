@@ -207,6 +207,7 @@ EVENTS
 	on.installers.EVENT = f() { ... }
 	on.callers.EVENT = f(ev, f) { return f.call(this, ...) }
 	DEBUG_EVENTS = false
+	DEBUG_EVENTS_FIRE = false
 
 AJAX REQUESTS
 
@@ -220,6 +221,8 @@ BROWSER DETECTION
 
 */
 
+DEBUG_EVENTS = false
+DEBUG_EVENTS_FIRE = false
 DEBUG_AJAX = false
 
 // types ---------------------------------------------------------------------
@@ -1573,8 +1576,6 @@ function url_format(t) {
 let callers = obj()
 let installers = obj()
 
-DEBUG_EVENTS = false
-
 etrack = DEBUG_EVENTS && new Map()
 
 let log_add_event = function(target, name, f, capture) {
@@ -1629,8 +1630,8 @@ let on = function(name, f, enable, capture) {
 				if (caller)
 					ret = caller.call(this, ev, f)
 				else if (isobject(ev.detail) && ev.detail.args) {
-					//if (!(ev.type in hidden_events))
-						//debug(ev.type, ...ev.detail.args)
+					if (DEBUG_EVENTS_FIRE && !(ev.type in hidden_events))
+						debug(ev.type, ...ev.detail.args)
 					ret = f.call(this, ...ev.detail.args, ev)
 				} else
 					ret = f.call(this, ev)
