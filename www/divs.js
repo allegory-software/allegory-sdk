@@ -400,7 +400,7 @@ function on_dom_load(fn) {
 // Why this instead of pure CSS? First, all selectors get specificity 0 which
 // effectively disables this genius CSS feature so rules are applied in source
 // order in layers (what @layer and :where() would do in a CSS). Layers let
-// you restyle widgets without accidentally muting role/state-modifier styles.
+// you restyle elements without accidentally muting role/state-modifier styles.
 // Second, you get composable CSS without silly offline preprocessors.
 // Now you can style with utility classes inside arbitrary CSS selectors
 // including those with :hover and :focus-visible. Now you can use fontawesome
@@ -772,8 +772,6 @@ Moving elements around in the bound tree will *not* rebind them.
 
 */
 
-let buitin_tags = 'a,abbr,address,area,article,aside,audio,b,base,bdi,bdo,blockquote,body,br,button,canvas,caption,cite,code,col,colgroup,data,datalist,dd,del,details,dfn,dialog,div,dl,dt,em,embed,fieldset,figcaption,figure,footer,form,h1,h2,h3,h4,h5,h6,head,header,hgroup,hr,html,i,iframe,img,input,ins,kbd,label,legend,li,link,main,map,mark,menu,meta,meter,nav,noscript,object,ol,optgroup,option,output,p,picture,pre,progress,q,rp,rt,ruby,s,samp,script,section,select,slot,small,source,span,strong,style,sub,summary,sup,table,tbody,td,template,textarea,tfoot,th,thead,time,title,tr,track,u,ul,var,video,wbr'.split(',').tokeys(1)
-
 let component_init = obj() // {tagName->init}
 let component_attr = obj() // {tagName->attr}
 
@@ -790,14 +788,6 @@ function component(selector, category, init) {
 	component_init[tagName] = init
 	if (tag_attr)
 		component_attr[tagName] = tag_attr
-	// TODO: remove this
-	let type = tag.replace(/^x-/, '').replaceAll('-', '_')
-	if (type != tag && !type in buitin_tags) {
-		let tagName = type.upper()
-		component_init[tagName] = init
-		if (tag_attr)
-			component_attr[tagName] = tag_attr
-	}
 	function create(prop_vals) {
 		prop_vals = prop_vals || obj()
 		prop_vals.tag = tag
@@ -1382,15 +1372,13 @@ publishes:
 	e.props: {prop->prop_attrs}
 		store: false          value is read by calling `e.get_<prop>()`.
 		attr: true|NAME       value is *also* stored into a html attribute.
-		style                 prop represents a css style.
-		private               document is not notifed of prop value changes.
+		private               window is not notifed of prop value changes.
 		default               default value.
-		convert(v1, v0)       convert value when setting the property.
-		type                  type for object inspector.
-		style_format          format css style to set value.
-		style_parse           parse css style to get value.
-		from_attr             converter from html attr representation.
-		to_attr               converter to html attr representation.
+		convert(v, v0) -> v   convert value when setting the property.
+		type                  for html attr val conversion and for object inspector.
+		from_attr(s) -> v     convert from html attr text representation.
+		to_attr(v) -> s       convert to html attr text representation.
+		serialize()
 		bind_id               the prop represents an element id to dynamically link to.
 calls:
 	e.get_<prop>() -> v
@@ -1678,15 +1666,16 @@ publishes:
 	e.disable(reason, disabled)
 
 NOTE: The `disabled` state is a concerted effort located in multiple places:
-	- mouse events are blocked in divs.js.
-	- forcing the default cursor on the element and its children is done in css.
-	- showing the element grayed out with 50% transparency is done in css.
-	- keyboard focusing is disabled in make_focusable().
+- pointer events are blocked in their wrapper (raw events still work).
+- forcing the default cursor on the element and its children is done with css.
+- showing the element grayed out with 50% transparency is done with css.
+- keyboard focusing is disabled in make_focusable().
 
-NOTE: `:hover` and `:active` still apply to a disabled widget so make sure
-to add `:not([disabled])` in css on those selectors.
+NOTE: `:hover` and `:active` still apply to a disabled element, unless you
+also add `click-through` (but then scrolling won't work!) so make sure to
+add `:not([disabled])` in css on those selectors.
 
-NOTE: for non-widgets setting the `disabled` attr is enough to disable them.
+NOTE: for non-focusables setting the `disabled` attr is enough to disable them.
 --------------------------------------------------------------------------- */
 
 // NOTE: you still have to use `:not([disabled]):hover` to prevent :hover
@@ -1699,7 +1688,7 @@ css_generic_state('[disabled]', '', `
 // disabled child: reset opacity and filter.
 // TODO: it's wrong to do this for widgets that set these in their normal
 // state but selector `:not([disabled]) [disabled]` would be too slow.
-// Opacity is wrong anyway, find another filter that doesn't mix.
+// Opacity is wrong anyway, find another filter that doesn't mix with the background.
 css_generic_state('[disabled] [disabled]', '', `
 	opacity: unset;
 	filter: unset;
@@ -1717,7 +1706,7 @@ e.make_disablable = function() {
 		return
 
 	e.on_bind(function(on) {
-		// each disabled ancestor is a reason for this widget to be disabled.
+		// each disabled ancestor is a reason for this element to be disabled.
 		if (on) {
 			let p = this.parent
 			while (p) {
@@ -1734,11 +1723,17 @@ e.make_disablable = function() {
 		}
 	})
 
+	function disable_children(e, reason, disabled) {
+		for (let ce of e.children)
+			if (ce.disable)
+				ce.disable(reason, disabled)
+			else
+				disable_children(ce, reason, disabled)
+	}
+
 	e.set_disabled = function(disabled) {
-		// add/remove this widget as a reason for the child widget to be disabled.
-		for (let ce of this.$('.x-widget'))
-			if (ce.disable) // css classes are not to be trusted
-				ce.disable(this, disabled)
+		// add/remove this element as a reason for its children to be disabled.
+		disable_children(this, this, disabled)
 	}
 
 	e.property('disabled',
@@ -2014,7 +2009,9 @@ e.do_bind = function(on) {
 
 NOTE: these wrappers block mouse events on any target that has attr `disabled`
 or that has any ancestor with attr `disabled`. We're not using
-`pointer-events: none` because that makes disabled popups click-through.
+`pointer-events: none` because that makes disabled elements click-through
+(think clicking through disabled popups) and also disables scrolling, so you
+wouldn't see or select text from a disabled container with a scrollbar.
 
 NOTE: preventing focusing is a matter of not-setting/removing attr `tabindex`
 except for input elements that must have an explicit `tabindex=-1`.
