@@ -6,55 +6,55 @@
 WIDGETS
 
 	listbox
-	list_dropdown
-	enum_dropdown
-	select_button
-	color_dropdown
-	icon_dropdown
+	list-dropdown
+	enum-dropdown
+	select-button
+	color-dropdown
+	icon-dropdown
 
 */
 
 // ---------------------------------------------------------------------------
-// listbox widget
+// list widget
 // ---------------------------------------------------------------------------
 
 // S: stretch it so we can focus it by clicking on its empty space.
-css('.x-listbox', 'S', `
+css('.list', 'S', `
 	line-height: initial;  /* prevent inheriting it */
 `)
 
-css('.x-listbox[orientation=vertical  ]', '', ` flex-direction: column; `)
-css('.x-listbox[orientation=horizontal]', '', ` flex-direction: row; `)
+css('.list[orientation=vertical  ]', '', ` flex-direction: column; `)
+css('.list[orientation=horizontal]', '', ` flex-direction: row; `)
 
-css('.x-listbox-item', 'p-x-input p-y-input b b-invisible arrow rel', `
+css('.list-item', 'p-x-input p-y-input b b-invisible arrow rel', `
 	display: block;
 `)
 
-css('.x-listbox-item', 'noclip')
+css('.list-item', 'noclip')
 
-css('.x-listbox.moving .x-listbox-item:not(.moving)', '', `
+css('.list.moving .list-item:not(.moving)', '', `
 	transition: top .1s, left .1s, right .1s;
 `)
 
-css('.x-listbox.picker', 'scroll', `
+css('.list.picker', 'scroll', `
 	max-height: 300px;
 	resize: both;
 `)
 
-css_state('.x-listbox:not([disabled]) .x-listbox-item:hover', 'bg1')
+css_state('.list:not([disabled]) .list-item:hover', 'bg1')
 
-css_state('.x-listbox-item.moving', 'z1', `
+css_state('.list-item.moving', 'z1', `
 	opacity: .7;
 `)
 
 function listbox_widget(e) {
 
-	e.class('x-listbox')
+	e.class('list')
 
 	val_widget(e, true)
 	nav_widget(e)
 	e.make_focusable()
-	e.class('x-focusable-items')
+	e.class('focusable-items')
 	stylable_widget(e)
 
 	e.xoff()
@@ -87,7 +87,7 @@ function listbox_widget(e) {
 		let item = e.row_display_val(row)
 		if (!(iselem(item))) // plain string or text node, wrap it.
 			item = div(0, item)
-		item.classes = 'x-listbox-item x-item'
+		item.classes = 'list-item item'
 		item.on('pointerdown', item_pointerdown)
 		return item
 	}
@@ -418,7 +418,7 @@ function listbox_widget(e) {
 	return {items: html_items, row_display_val_template: item_template}
 }
 
-widget('x-listbox', 'Input', listbox_widget)
+widget('list', 'Input', listbox_widget)
 
 hlistbox = function(...options) {
 	return listbox({orientation: 'horizontal'}, ...options)
@@ -428,7 +428,7 @@ hlistbox = function(...options) {
 // list dropdown
 // ---------------------------------------------------------------------------
 
-widget('x-list-dropdown', function(e) {
+widget('list-dropdown', function(e) {
 
 	nav_dropdown_widget(e)
 
@@ -472,7 +472,7 @@ widget('x-list-dropdown', function(e) {
 // enum dropdown
 // ---------------------------------------------------------------------------
 
-widget('x-enum-dropdown', function(e) {
+widget('enum-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 
@@ -489,25 +489,25 @@ widget('x-enum-dropdown', function(e) {
 // select button
 // ---------------------------------------------------------------------------
 
-css('.x-select-button', 'b0')
+css('.select-btn', 'b0')
 
-css('.x-select-button .x-item', 'b ro05 noselect', `
+css('.select-btn .item', 'b ro05 noselect', `
 	background-color: var(--bg-select-button);
 `)
 
-css('.x-select-button .x-item:first-child', 'ro-l-0')
-css('.x-select-button  .x-item:last-child', 'ro-r-0')
-css('.x-select-button .x-item:not(:first-child)', 'b-l-0')
+css('.select-btn .item:first-child', 'ro-l-0')
+css('.select-btn  .item:last-child', 'ro-r-0')
+css('.select-btn .item:not(:first-child)', 'b-l-0')
 
-css_state('.x-select-button .x-item:hover', '', `
+css_state('.select-btn .item:hover', '', `
 	background-color: var(--bg-button-hover);
 `)
 
-css_state('.x-select-button .x-item.focused.selected', '', `
+css_state('.select-btn .item.focused.selected', '', `
 	box-shadow: var(--shadow-button-pressed);
 `)
 
-widget('x-select-button', function(e) {
+widget('select-btn', function(e) {
 
 	listbox.construct(e)
 
@@ -534,7 +534,7 @@ function colors_listbox(...opt) {
 	}, ...opt)
 }
 
-widget('x-color-dropdown', function(e) {
+widget('color-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 
@@ -555,9 +555,9 @@ widget('x-color-dropdown', function(e) {
 // icons listbox & dropdown
 // ---------------------------------------------------------------------------
 
-css('.x-icons-listbox-item', 'nowrap-dots')
+css('.icons-list-item', 'nowrap-dots')
 
-css('.x-icons-listbox-icon', '', `
+css('.icons-list-icon', '', `
 	min-width : 20px;
 `)
 
@@ -587,13 +587,13 @@ function icons_listbox(...opt) {
 		val_col: 'icon',
 		row_display_val: function(row) {
 			let s = row[0].replace(/^fa\-/, '')
-			return div({class: 'x-icons-listbox-item'},
-				div({class: 'x-icons-listbox-icon fa fa-'+s}), s)
+			return div({class: 'icons-list-item'},
+				div({class: 'icons-list-icon fa fa-'+s}), s)
 		}
 	}, ...opt)
 }
 
-widget('x-icon-dropdown', function(e) {
+widget('icon-dropdown', function(e) {
 
 	list_dropdown.construct(e)
 

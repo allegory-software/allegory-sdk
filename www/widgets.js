@@ -1,6 +1,6 @@
 /*
 
-	X-WIDGETS: Web Components in JavaScript.
+	widgets: Web Components in JavaScript.
 	Written by Cosmin Apreutesei. Public Domain.
 
 Depends on:
@@ -8,26 +8,22 @@ Depends on:
 	divs.js
 	glue.js
 	utils.css
-	x-widgets.css
 
 WIDGETS
 
-	popup
 	tooltip
 	toaster
-	button
 	menu
 	tabs
 	split vsplit
 	slides
-	action_band
-	dialog
+	action-band
+	dlg
 	toolbox
-	pagenav
+	pager
 	richtext
 	if
-	ct
-	widget_placeholder
+	widget-placeholder
 
 GLOBALS
 
@@ -127,58 +123,62 @@ css('.p-y-input', '', `
 
 css('info', 'h small label m-y p-x-input arrow')
 
-css('.x-widget', 'rel h')
+css('.widget', 'rel h')
 
 css('.x-container', 'grid-h shrinks clip') /* grid because grid-in-flex is buggy */
 
-css('.x-if .x-switcher, .x-ct', 'skip') /* purely-logical containers */
+// container with `display: contents`. useful to group together
+// an invisible widget like a nav with a visible one.
+// Don't try to group together visible elements with this! CSS will see
+// your <x-ct> tag in the middle, but the layout system won't!
+css('.x-ct', 'skip')
 
 /* focusable-items -----------------------------------------------------------
 
 	these are widgets containing multiple focusable and selectable items,
 	so they don't show a focus outline on the entire widget, but only show
-	an inside .x-item element as being focused instead.
-	NOTE: an .x-item cannot itself be .x-focusable-items!
+	an inside .item element as being focused instead.
+	NOTE: an .item cannot itself be or contain .focusable-items!
 
 */
 
-css_state('.x-focusable-items:focus', '', 'outline: none;')
+css_state('.item.disabled', 'gray')
+css_state('.item.null'    , 'gray')
+css_state('.item.empty'   , 'gray')
 
-css_state('.x-item.disabled', 'gray')
-css_state('.x-item.null'    , 'gray')
-css_state('.x-item.empty'   , 'gray')
+css_state('.item.row-focused' , '', ` background: var(--bg-row-focused);  `)
+css_state('.item.new'         , '', ` background: var(--bg-new);          `)
+css_state('.item.modified'    , '', ` background: var(--bg-modified);     `)
+css_state('.item.new.modified', '', ` background: var(--bg-new-modified); `)
+css_state('.item.removed'     , 'strike')
 
-css_state('.x-item.row-focused' , '', ` background: var(--bg-row-focused);  `)
-css_state('.x-item.new'         , '', ` background: var(--bg-new);          `)
-css_state('.x-item.modified'    , '', ` background: var(--bg-modified);     `)
-css_state('.x-item.new.modified', '', ` background: var(--bg-new-modified); `)
-css_state('.x-item.removed'     , 'strike')
+css_state('.item.selected', '', ` background-color: var(--bg-unselected); `)
+css_state('.item.focused' , '', ` background-color: var(--bg-unfocused);  `)
 
-css_state('.x-item.selected', '', ` background-color: var(--bg-unselected); `)
-css_state('.x-item.focused' , '', ` background-color: var(--bg-unfocused);  `)
+css_state('.focusable-items:focus', 'no-outline')
 
-css_state('.x-focusable-items:focus-within .x-item.selected', '', `
+css_state('.focusable-items:focus-within .item.selected', '', `
 	background : var(--bg-selected);
 	color      : var(--fg-selected);
 `)
 
-css_state('.x-focusable-items:focus-within .x-item.focused', '', `
+css_state('.focusable-items:focus-within .item.focused', '', `
 	background : var(--bg-focused);
 	color      : var(--fg-focused);
 `)
 
-css_state('.x-focusable-items .x-item.focused.selected', '', `
+css_state('.focusable-items .item.focused.selected', '', `
 	background : var(--bg-unfocused-selected);
 	color      : var(--fg-unfocused-selected);
 `)
 
-css_state('.x-focusable-items:focus-within .x-item.focused.selected', '', `
+css_state('.focusable-items:focus-within .item.focused.selected', '', `
 	background: var(--bg-focused-selected);
 `)
 
-css_state('.x-item.invalid', 'bg-error')
+css_state('.item.invalid', 'bg-error')
 
-css_state('.x-focusable-items:focus-within .x-item.focused.invalid', '', `
+css_state('.focusable-items:focus-within .item.focused.invalid', '', `
 	background : var(--bg-focused-error);
 `)
 
@@ -194,29 +194,29 @@ function widget(tag, category, init) {
 	}
 	function comp_init(e) {
 		e.iswidget = true // to diff from normal html elements.
-		e.class('x-widget')
+		e.class('widget')
 		e.make_disablable()
 		return init(e)
 	}
 	let create = component(tag, category, comp_init)
 	create.construct = init
-	let type = tag.replace(/^x-/, '').replaceAll('-', '_') // TODO: remove this
-	window[type] = create
+	let name = tag.replaceAll('-', '_')
+	window[name] = create
 	return create
 }
 
 /* widget editing & selecting --------------------------------------------- */
 
-css_role('.x-widget.widget-editing', '', `
+css_role('.widget.widget-editing', '', `
 	outline: 2px dotted red;
 	outline-offset: -2px;
 `)
 
-css_role('.x-widget [contenteditable]', 'no-outline')
+css_role('.widget [contenteditable]', 'no-outline')
 
-css_role('.x-widget.widget-selected', 'click-through')
+css_role('.widget.widget-selected', 'click-through')
 
-css_role('.x-widget-selected-overlay', 'overlay click-through-off', `
+css_role('.widget-selected-overlay', 'overlay click-through-off', `
 	display: block;
 	background-color: var(--bg-smoke);
 	outline: 2px dotted var(--selected-widget-outline-color);
@@ -224,18 +224,18 @@ css_role('.x-widget-selected-overlay', 'overlay click-through-off', `
 	z-index: 10; /* arbitrary */
 `)
 
-css_role_state('.x-widget-selected-overlay:focus', '', `
+css_role_state('.widget-selected-overlay:focus', '', `
 	outline-color: var(--selected-widget-outline-color-focused);
 `)
 
-css('.x-widget-placeholder', 'grid-h', `
+css('.widget-placeholder', 'grid-h', `
 	justify-content: safe center;
 	align-content: center;
 	outline: 1px dashed var(--fg-gray);
 	outline-offset: -1px;
 `)
 
-css('.x-widget-placeholder-button', 'ro0 small', `
+css('.widget-placeholder-button', 'ro0 small', `
 	margin: 1px;
 	padding: .1em;
 	min-width: 2em;
@@ -423,7 +423,7 @@ function selectable_widget(e) {
 		// make widget unfocusable: the overlay will be focusable instead.
 		e.focusable = false
 
-		let overlay = div({class: 'x-widget-selected-overlay', tabindex: 0})
+		let overlay = div({class: 'widget-selected-overlay', tabindex: 0})
 		e.widget_selected_overlay = overlay
 		e.add(overlay)
 
@@ -598,116 +598,107 @@ function stylable_widget(e) {
 }
 
 // ---------------------------------------------------------------------------
-// popup
-// ---------------------------------------------------------------------------
-
-widget('x-popup', function(e) {
-	e.classes = 'x-container'
-	e.init_child_components()
-	e.popup()
-})
-
-// ---------------------------------------------------------------------------
 // tooltip
 // ---------------------------------------------------------------------------
 
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.x-tooltip', 'z2 h noclip noselect op0 click-through ease ease-out ease-fw', `
+css('.tooltip', 'z2 h noclip noselect op0 click-through ease ease-out ease-fw', `
 	max-width: 400px;  /* max. width of the message bubble before wrapping */
 `)
 
-css('.x-tooltip-body', 'h-bl p-y tight ro bg1', `
+css('.tooltip-body', 'h-bl p-y tight ro bg1', `
 	box-shadow       : var(--shadow-tooltip);
 `)
 
 // visibility animation
 
-css('.x-tooltip.visible', 'op1 click-through-off')
+css('.tooltip.visible', 'op1 click-through-off')
 
-css('.x-tooltip.visible[side=left  ]', '', `animation-name: x-tooltip-left;   `)
-css('.x-tooltip.visible[side=right ]', '', `animation-name: x-tooltip-right;  `)
-css('.x-tooltip.visible[side=top   ]', '', `animation-name: x-tooltip-top;    `)
-css('.x-tooltip.visible[side=bottom]', '', `animation-name: x-tooltip-bottom; `)
+css('.tooltip.visible[side=left  ]', '', `animation-name: tooltip-left;   `)
+css('.tooltip.visible[side=right ]', '', `animation-name: tooltip-right;  `)
+css('.tooltip.visible[side=top   ]', '', `animation-name: tooltip-top;    `)
+css('.tooltip.visible[side=bottom]', '', `animation-name: tooltip-bottom; `)
 
 css(`
-	@keyframes x-tooltip-left   { from { opacity: 0; transform: translate(-1em, 0);  } }
-	@keyframes x-tooltip-right  { from { opacity: 0; transform: translate( 1em, 0);  } }
-	@keyframes x-tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
-	@keyframes x-tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
+	@keyframes tooltip-left   { from { opacity: 0; transform: translate(-1em, 0);  } }
+	@keyframes tooltip-right  { from { opacity: 0; transform: translate( 1em, 0);  } }
+	@keyframes tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
+	@keyframes tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
 `)
 
-css('.x-tooltip-content', 'p-x-2', `
+css('.tooltip-content', 'p-x-2', `
 	display: inline-block; /* shrink-wrap and also word-wrap when reaching container width */
 `)
 
-css('.x-tooltip-xbutton', 't-t small gray p-y-05 p-x-2 b0 b-l hand', `
+css('.tooltip-xbutton', 't-t small gray p-y-05 p-x-2 b0 b-l hand', `
 	align-self: stretch;
 	pointer-events: all;
 `)
 
-css('.x-tooltip-xbutton:not([disabled]):not(.active):hover', '', `
+css('.tooltip-xbutton:not([disabled]):not(.active):hover', '', `
 	color: inherit;
 `)
 
-css('.x-tooltip-tip', 'z1', `
+css('.tooltip-tip', 'z1', `
 	display: block;
 	border: .5em solid transparent; /* border-based triangle shape */
 	color: var(--bg1);
 `)
 
-css('.x-tooltip-icon', 't-t m-t-05 m-l-2', `
+css('.tooltip-icon', 't-t m-t-05 m-l-2', `
 	font-size: 1em; /* TODO: why? */
 	line-height: inherit !important; /* override fontawesome's !important */
 `)
 
-css('.x-tooltip[side=left  ] > .x-tooltip-tip', '', ` border-left-color   : inherit; `)
-css('.x-tooltip[side=right ] > .x-tooltip-tip', '', ` border-right-color  : inherit; `)
-css('.x-tooltip[side=top   ] > .x-tooltip-tip', '', ` border-top-color    : inherit; `)
-css('.x-tooltip[side=bottom] > .x-tooltip-tip', '', ` border-bottom-color : inherit; `)
+css('.tooltip[side=left  ] > .tooltip-tip', '', ` border-left-color   : inherit; `)
+css('.tooltip[side=right ] > .tooltip-tip', '', ` border-right-color  : inherit; `)
+css('.tooltip[side=top   ] > .tooltip-tip', '', ` border-top-color    : inherit; `)
+css('.tooltip[side=bottom] > .tooltip-tip', '', ` border-bottom-color : inherit; `)
 
 // side & align combinations
 
-css('.x-tooltip:is([side=top],[side=bottom])', '', `flex-flow: column;`)
-css('.x-tooltip[side=left   ]', '', `justify-content: flex-end;`)
-css('.x-tooltip[align=end   ]', '', `align-items: flex-end; `)
-css('.x-tooltip[align=center]', '', `align-items: center; `)
+css('.tooltip:is([side=top],[side=bottom])', '', `flex-flow: column;`)
+css('.tooltip[side=left   ]', '', `justify-content: flex-end;`)
+css('.tooltip[align=start ]', '', `align-items: flex-start; `)
+css('.tooltip[align=end   ]', '', `align-items: flex-end; `)
+css('.tooltip[align=center]', '', `align-items: center; `)
 
-css('.x-tooltip:is([side=right],[side=bottom]) > .x-tooltip-body', '', `order: 2;`)
+css('.tooltip:is([side=right],[side=bottom]) > .tooltip-body', '', `order: 2;`)
 
-css('.x-tooltip[align=center]:is([side=top],[side=bottom]) .x-tooltip-content', '', `text-align: center; `)
-css('.x-tooltip[align=end   ]:is([side=top],[side=bottom]) .x-tooltip-content', '', `text-align: right; `)
+css('.tooltip[align=center]:is([side=top],[side=bottom]) .tooltip-content', '', `text-align: center; `)
+css('.tooltip[align=end   ]:is([side=top],[side=bottom]) .tooltip-content', '', `text-align: right; `)
 
-css('.x-tooltip:is([side=top],[side=bottom]) > .x-tooltip-tip', '', ` margin: 0 .5em; `)
-css('.x-tooltip:is([side=left],[side=right]) > .x-tooltip-tip', '', ` margin: .5em 0; `)
+css('.tooltip:is([side=top],[side=bottom]) > .tooltip-tip', '', ` margin: 0 .5em; `)
+css('.tooltip:is([side=left],[side=right]) > .tooltip-tip', '', ` margin: .5em 0; `)
 
-css('.x-tooltip[side=right ]', '', `margin-left   : -.25em; `)
-css('.x-tooltip[side=left  ]', '', `margin-left   :  .25em; `)
-css('.x-tooltip[side=top   ]', '', `margin-top    :  .25em; `)
-css('.x-tooltip[side=bottom]', '', `margin-top    : -.25em; `)
+css('.tooltip[side=right ]', '', `margin-left   : -.25em; `)
+css('.tooltip[side=left  ]', '', `margin-left   :  .25em; `)
+css('.tooltip[side=top   ]', '', `margin-top    :  .25em; `)
+css('.tooltip[side=bottom]', '', `margin-top    : -.25em; `)
 
 // styling based on kind attr
 
-css('.x-tooltip[kind=search] > .x-tooltip-body', '', ` background-color: var(--bg-search); color: #000; `)
-css('.x-tooltip[kind=search] > .x-tooltip-tip ', '', ` color: var(--bg-search); `)
+css('.tooltip[kind=search] > .tooltip-body', '', ` background-color: var(--bg-search); color: #000; `)
+css('.tooltip[kind=search] > .tooltip-tip ', '', ` color: var(--bg-search); `)
 
-css('.x-tooltip[kind=info  ] > .x-tooltip-body', '', ` background-color: var(--bg-info); color: var(--fg-info); `)
-css('.x-tooltip[kind=info  ] > .x-tooltip-tip ', '', ` color: var(--bg-info); `)
-css('.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+css('.tooltip[kind=info  ] > .tooltip-body', '', ` background-color: var(--bg-info); color: var(--fg-info); `)
+css('.tooltip[kind=info  ] > .tooltip-tip ', '', ` color: var(--bg-info); `)
+css('.tooltip[kind=info  ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
 
-css('.x-tooltip[kind=error ] > .x-tooltip-body', '', ` background-color: var(--bg-error); color: var(--fg-error); `)
-css('.x-tooltip[kind=error ] > .x-tooltip-tip ', '', ` color: var(--bg-error); `)
-css('.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+css('.tooltip[kind=error ] > .tooltip-body', '', ` background-color: var(--bg-error); color: var(--fg-error); `)
+css('.tooltip[kind=error ] > .tooltip-tip ', '', ` color: var(--bg-error); `)
+css('.tooltip[kind=error ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
 
-css('.x-tooltip[kind=warn  ] > .x-tooltip-body', '', ` background-color: var(--bg-warn); color: var(--fg-warn); `)
-css('.x-tooltip[kind=warn  ] > .x-tooltip-tip ', '', ` color: var(--bg-warn); `)
-css('.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+css('.tooltip[kind=warn  ] > .tooltip-body', '', ` background-color: var(--bg-warn); color: var(--fg-warn); `)
+css('.tooltip[kind=warn  ] > .tooltip-tip ', '', ` color: var(--bg-warn); `)
+css('.tooltip[kind=warn  ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
 
-css('.x-tooltip[kind=cursor]', '', `
+css('.tooltip[kind=cursor]', '', `
 	margin-left: .75em;
 	margin-top : .75em;
 `)
 
-css('.x-tooltip[kind=cursor] > .x-tooltip-body', '', `
+css('.tooltip[kind=cursor] > .tooltip-body', '', `
 	padding: .15em 0;
 	border: 1px solid #aaaa99;
 	color: #333;
@@ -717,24 +708,24 @@ css('.x-tooltip[kind=cursor] > .x-tooltip-body', '', `
 	border-radius: 0;
 `)
 
-css('.x-tooltip[kind=cursor] > .x-tooltip-body > .x-tooltip-content', '', `
+css('.tooltip[kind=cursor] > .tooltip-body > .tooltip-content', '', `
 	padding: 0 .5em;
 	white-space: pre !important;
 `)
 
-css('.x-tooltip[kind=cursor] > .x-tooltip-tip', '', ` display: none; `)
+css('.tooltip[kind=cursor] > .tooltip-tip', '', ` display: none; `)
 
-css('.x-error-list', '', `
+css('.error-list', '', `
 	margin: 0;
 	padding-inline-start: 1em;
 	text-align: start;
 `)
 
-css_state('.x-tooltip[kind=info  ] > .x-tooltip-body > .x-tooltip-xbutton:hover', '', `color: var(--fg-info);  `)
-css_state('.x-tooltip[kind=error ] > .x-tooltip-body > .x-tooltip-xbutton:hover', '', `color: var(--fg-error); `)
-css_state('.x-tooltip[kind=warn  ] > .x-tooltip-body > .x-tooltip-xbutton:hover', '', `color: var(--fg-warn);  `)
+css_state('.tooltip[kind=info  ] > .tooltip-body > .tooltip-xbutton:hover', '', `color: var(--fg-info);  `)
+css_state('.tooltip[kind=error ] > .tooltip-body > .tooltip-xbutton:hover', '', `color: var(--fg-error); `)
+css_state('.tooltip[kind=warn  ] > .tooltip-body > .tooltip-xbutton:hover', '', `color: var(--fg-warn);  `)
 
-widget('x-tooltip', function(e) {
+widget('tooltip', function(e) {
 
 	e.popup()
 
@@ -771,15 +762,15 @@ widget('x-tooltip', function(e) {
 
 	e.on_update(function(opt) {
 		if (!e.content) {
-			e.content = div({class: 'x-tooltip-content'})
+			e.content = div({class: 'tooltip-content'})
 			e.icon_box = div()
-			e.body = div({class: 'x-tooltip-body'}, e.icon_box, e.content)
-			e.pin = div({class: 'x-tooltip-tip'})
+			e.body = div({class: 'tooltip-body'}, e.icon_box, e.content)
+			e.pin = div({class: 'tooltip-tip'})
 			e.add(e.body, e.pin)
 			e.content.on('pointerdown', content_pointerdown)
 		}
 		if (e.close_button && !e.xbutton) {
-			e.xbutton = div({class: 'x-tooltip-xbutton fa fa-times'})
+			e.xbutton = div({class: 'tooltip-xbutton fa fa-times'})
 			e.xbutton.on('pointerdown', return_false)
 			e.xbutton.on('pointerup', close)
 			e.body.add(e.xbutton)
@@ -787,7 +778,7 @@ widget('x-tooltip', function(e) {
 			e.xbutton.hidden = !e.close_button
 		}
 		let icon_classes = e.icon_visible && tooltip.icon_classes[e.kind]
-		e.icon_box.attr('class', icon_classes ? ('x-tooltip-icon ' + icon_classes) : null)
+		e.icon_box.attr('class', icon_classes ? ('tooltip-icon ' + icon_classes) : null)
 		if (opt.reset_timer)
 			reset_timeout_timer()
 		if (e.parent)
@@ -991,7 +982,7 @@ ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 // z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 // noclip: submenus are outside clipping area
 // fg: prevent inheritance by the .focused rule below.
-css('.x-menu', 'arial abs z4 noclip fg bg1', `
+css('.menu', 'arial abs z4 noclip fg bg1 m0', `
 
 	font-size   : 12px;
 	line-height : 1.5;
@@ -1009,51 +1000,47 @@ css('.x-menu', 'arial abs z4 noclip fg bg1', `
 `)
 
 // submenus are anchored to this td
-css('.x-menu-tr > .x-menu-sub-td', 'rel', `
+css('.menu-tr > .menu-sub-td', 'rel', `
 	padding-right: .8em;
 `)
 
-css('.x-menu-tr > td', '', `
+css('.menu-tr > td', '', `
 	padding: .4em;
 `)
 
-css('.x-menu-tr > td:first-child', '', `
+css('.menu-tr > td:first-child', '', `
 	padding-left: .9em;
 `)
 
-css('.x-menu-separator', '', `
+css('.menu-separator', '', `
 	height: 1em;
 `)
 
-css('.x-menu-heading', 'p-y p-l-2 bold gray arrow')
+css('.menu-heading', 'p-y p-l-2 bold gray arrow')
 
-css('.x-menu-separator > hr', 'b0 b-t m-y')
+css('.menu-separator > hr', 'b0 b-t m-y')
 
-css('.x-menu-title-td', 'p0 p-l-0 clip nowrap', `
+css('.menu-title-td', 'p0 p-l-0 clip nowrap', `
 	width: 100%;
 `)
 
-css_state('.x-menu, .x-menu:focus-within', '', `
-	outline: 1px solid var(--border);
-	outline-offset: -1px;
-	box-shadow: var(--shadow-menu);
-`)
+css_state('.menu', 'b no-outline shadow-menu')
 
-css_state('.x-menu-tr.focused > :not(.x-menu-table)', '', `
+css_state('.menu-tr.focused > :not(.menu-table)', '', `
 	background : var(--bg-unfocused-selected);
 	color      : var(--fg-unfocused-selected);
 `)
 
-css_state('.x-menu:focus-within .x-menu-tr.focused > :not(.x-menu-table)', '', `
+css_state('.menu:focus-within .menu-tr.focused > :not(.menu-table)', '', `
 	background : var(--bg-focused-selected);
 `)
 
-css_state('.x-menu-tr.focused > td', 'arrow')
+css_state('.menu-tr.focused > td', 'arrow')
 
-widget('x-menu', function(e) {
+widget('menu', function(e) {
 
 	e.make_focusable()
-	e.class('x-focusable-items')
+	e.class('focusable-items')
 	e.popup()
 
 	// view
@@ -1080,20 +1067,20 @@ widget('x-menu', function(e) {
 	}
 
 	function create_item(item, disabled) {
-		let check_box = div({class: 'x-menu-check-div fa fa-check'})
-		let icon_box  = div({class: 'x-menu-icon-div'})
+		let check_box = div({class: 'menu-check-div fa fa-check'})
+		let icon_box  = div({class: 'menu-icon-div'})
 		if (isstr(item.icon))
 			icon_box.classes = item.icon
 		else
 			icon_box.set(item.icon)
-		let check_td  = tag('td', {class: 'x-menu-check-td'}, check_box, icon_box)
-		let title_td  = tag('td', {class: 'x-menu-title-td'})
+		let check_td  = tag('td', {class: 'menu-check-td'}, check_box, icon_box)
+		let title_td  = tag('td', {class: 'menu-title-td'})
 		title_td.set(item.text)
-		let key_td    = tag('td', {class: 'x-menu-key-td'}, item.key)
-		let sub_box   = div({class: 'x-menu-sub-div fa fa-angle-right'})
-		let sub_td    = tag('td', {class: 'x-menu-sub-td'}, sub_box)
+		let key_td    = tag('td', {class: 'menu-key-td'}, item.key)
+		let sub_box   = div({class: 'menu-sub-div fa fa-angle-right'})
+		let sub_td    = tag('td', {class: 'menu-sub-td'}, sub_box)
 		sub_box.style.visibility = item.items ? null : 'hidden'
-		let tr = tag('tr', {class: 'x-item x-menu-tr'}, check_td, title_td, key_td, sub_td)
+		let tr = tag('tr', {class: 'item menu-tr'}, check_td, title_td, key_td, sub_td)
 		tr.icon_box = icon_box
 		tr.class('disabled', disabled || item.disabled)
 		tr.item = item
@@ -1106,7 +1093,7 @@ widget('x-menu', function(e) {
 	}
 
 	function create_heading(item) {
-		let td = tag('td', {class: 'x-menu-heading', colspan: 5})
+		let td = tag('td', {class: 'menu-heading', colspan: 5})
 		td.set(item.heading)
 		let tr = tag('tr', {}, td)
 		tr.focusable = false
@@ -1115,7 +1102,7 @@ widget('x-menu', function(e) {
 	}
 
 	function create_separator() {
-		let td = tag('td', {class: 'x-menu-separator', colspan: 5}, tag('hr'))
+		let td = tag('td', {class: 'menu-separator', colspan: 5}, tag('hr'))
 		let tr = tag('tr', {}, td)
 		tr.focusable = false
 		tr.on('pointerenter', separator_pointerenter)
@@ -1124,7 +1111,7 @@ widget('x-menu', function(e) {
 
 	function create_menu(table, items, is_submenu, disabled) {
 		table = table || tag('table')
-		table.classes = 'x-widget x-focusable x-menu'+(is_submenu ? ' x-menu-submenu' : '')
+		table.classes = 'widget menu'+(is_submenu ? ' menu-submenu' : '')
 		table.attr('tabindex', 0)
 		for (let i = 0; i < items.length; i++) {
 			let item = items[i]
@@ -1966,7 +1953,7 @@ css('.split[orientation=vertical  ]', 'v')
 css('.split-pane-auto', 'S shrinks')
 
 css('.split-sizer', 'h-c h-m', `
-	background-color: var(--border);
+	background-color: var(--border-light);
 `)
 css('.split[orientation=vertical  ] > .split-sizer', 'h', ` height: 1px; `)
 css('.split[orientation=horizontal] > .split-sizer', 'h', ` width : 1px; `)
@@ -2177,14 +2164,14 @@ widget('vsplit', function(e) {
 // action band
 // ---------------------------------------------------------------------------
 
-css('.x-action-band', 'h-r h-m p05')
-css('.x-action-band .x-button', 'p-x-05')
-css('.x-action-band .x-button-text', 'nowrap')
+css('.action-band', 'h-r h-m p05')
+css('.action-band .btn', 'p-x-05')
+css('.action-band .btn-text', 'nowrap')
 
 // hide cancel button icon unless space is tight when text is hidden
-css('.x-action-band:not(.tight) .x-dialog-button-cancel .x-button-icon', 'hidden')
+css('.action-band:not(.tight) .dlg-button-cancel .btn-icon', 'hidden')
 
-widget('x-action-band', 'Input', function(e) {
+widget('action-band', 'Input', function(e) {
 
 	e.layout = 'ok:ok cancel:cancel'
 
@@ -2222,7 +2209,7 @@ widget('x-action-band', 'Input', function(e) {
 				btn = button(btn)
 				e.buttons[bname] = btn
 			}
-			btn.class('x-dialog-button-'+name)
+			btn.class('dlg-button-'+name)
 			btn.dialog = e
 			if (!btn_sets_text) {
 				btn.text = S(bname, name.replace(/[_\-]/g, ' '))
@@ -2253,23 +2240,23 @@ widget('x-action-band', 'Input', function(e) {
 })
 
 // ---------------------------------------------------------------------------
-// modal dialog with action band footer
+// modal dialog box with heading, (x) button, and action band footer
 // ---------------------------------------------------------------------------
 
-css('.x-dialog', 'v p2 fg b0 ro bg1', `
+css('.dlg', 'v p2 fg b0 ro bg1', `
 	margin: 20px;
 	box-shadow: var(--shadow-modal);
 `)
 
 css(`
-	.x-dialog-header,
-	.x-dialog-footer,
-	.x-dialog-content
+	.dlg-header,
+	.dlg-footer,
+	.dlg-content
 `, 'h p-y-2')
 
-css('.x-dialog-heading', 'gray xlarge bold m-y-05')
+css('.dlg-heading', 'gray xlarge bold m-y-05')
 
-css('.x-dialog-xbutton', 'abs b b-t-0 h-c h-m hand', `
+css('.dlg-xbutton', 'abs b b-t-0 h-c h-m hand', `
 	right: 8px;
 	top: 0px;
 	border-bottom-right-radius: var(--border-radius-button);
@@ -2280,19 +2267,19 @@ css('.x-dialog-xbutton', 'abs b b-t-0 h-c h-m hand', `
 	-webkit-text-stroke: 1px var(--stroke-dialog-xbutton);
 `)
 
-css('.x-dialog-xbutton:hover', '', `
+css('.dlg-xbutton:hover', '', `
 	background-color: var(--bg-button-hover);
 `)
 
-css('.x-dialog-xbutton.active', '', `
+css('.dlg-xbutton.active', '', `
 	background-color: var(--bg-button-pressed);
 `)
 
-css('.x-dialog-content', 'S shrinks')
+css('.dlg-content', 'S shrinks')
 
-css('.x-dialog-footer', 'h-b')
+css('.dlg-footer', 'h-b')
 
-widget('x-dialog', function(e) {
+widget('dlg', function(e) {
 
 	e.init_child_components()
 
@@ -2336,13 +2323,13 @@ widget('x-dialog', function(e) {
 			} else if (e._footer)
 				e._footer.hide()
 
-		if (e._heading ) e._heading .class('x-dialog-heading')
-		if (e._header  ) e._header  .class('x-dialog-header')
-		if (e._content ) e._content .class('x-dialog-content')
-		if (e._footer  ) e._footer  .class('x-dialog-footer')
+		if (e._heading ) e._heading .class('dlg-heading')
+		if (e._header  ) e._header  .class('dlg-header')
+		if (e._content ) e._content .class('dlg-content')
+		if (e._footer  ) e._footer  .class('dlg-footer')
 
 		if (e.cancelable && !e.x_button) {
-			e.x_button = div({class: 'x-dialog-xbutton fa fa-times'})
+			e.x_button = div({class: 'dlg-xbutton fa fa-times'})
 			e.x_button.on('click', function() {
 				e.cancel()
 			})
@@ -2410,7 +2397,7 @@ widget('x-dialog', function(e) {
 	}
 
 	e.ok = function() {
-		for (let btn of e.$('x-button[primary]')) {
+		for (let btn of e.$('btn[primary]')) {
 			if (!(btn.effectively_hidden || btn.effectively_disabled)) {
 				btn.activate()
 				return true
@@ -2433,7 +2420,7 @@ widget('x-dialog', function(e) {
 // ---------------------------------------------------------------------------
 
 // z1: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.x-toolbox', 'z1 v scroll-auto b0 bg1', `
+css('.toolbox', 'z1 v scroll-auto b0 bg1', `
 
 	/* pinning */
 	opacity: .2;
@@ -2443,47 +2430,47 @@ css('.x-toolbox', 'z1 v scroll-auto b0 bg1', `
 	box-shadow: var(--shadow-toolbox);
 `)
 
-css_state('.x-toolbox[pinned], .x-toolbox:hover', 'op1 no-ease')
+css_state('.toolbox[pinned], .toolbox:hover', 'op1 no-ease')
 
-css('.x-toolbox-titlebar', 'h-bl bold p-x', `
+css('.toolbox-titlebar', 'h-bl bold p-x', `
 	line-height: 2;
 	background-color: var(--bg-toolbox-titlebar);
 	cursor: move;
 `)
 
-css('.x-toolbox:focus-within > .x-toolbox-titlebar', '', `
+css('.toolbox:focus-within > .toolbox-titlebar', '', `
 	background-color: var(--bg-toolbox-titlebar-focused);
 `)
 
-css('.x-toolbox-title', 'S shrinks nowrap click-through')
+css('.toolbox-title', 'S shrinks nowrap click-through')
 
-css('.x-toolbox-button', 'gray p-y-05 p-x arrow gray', `
+css('.toolbox-btn', 'gray p-y-05 p-x arrow gray', `
 	flex: 0;
 `)
 
-css('.x-toolbox-button-pin', 'small')
+css('.toolbox-btn-pin', 'small')
 
-css('.x-toolbox[pinned] > .x-toolbox-titlebar > .x-toolbox-button-pin', 'label')
+css('.toolbox[pinned] > .toolbox-titlebar > .toolbox-btn-pin', 'label')
 
-css_state('.x-toolbox-button-close:hover', 'fg')
+css_state('.toolbox-btn-close:hover', 'fg')
 
-css('.x-toolbox-content', 'h shrinks scroll-auto grid-h')
+css('.toolbox-content', 'h shrinks scroll-auto grid-h')
 
 // toolbox resizing by dragging the margins
 
-css('.x-toolbox-resize-overlay', 'overlay', `
+css('.toolbox-resize-overlay', 'overlay', `
 	clip-path: polygon(
 		0 0, 0 100%, 100% 100%, 100% 0, 0 0, /* outer rect, counter-clockwise */
 		5px 5px, calc(100% - 5px) 5px, calc(100% - 5px) calc(100% - 5px), 5px calc(100% - 5px), 5px 5px /* inner rect, clockwise */
 	);
 `)
 
-css('.x-toolbox-resize-overlay[hit_side=top      ], .x-toolbox-resize-overlay[hit_side=bottom      ]', '', ` cursor: ns-resize  ; `)
-css('.x-toolbox-resize-overlay[hit_side=left     ], .x-toolbox-resize-overlay[hit_side=right       ]', '', ` cursor: ew-resize  ; `)
-css('.x-toolbox-resize-overlay[hit_side=top_left ], .x-toolbox-resize-overlay[hit_side=bottom_right]', '', ` cursor: nwse-resize; `)
-css('.x-toolbox-resize-overlay[hit_side=top_right], .x-toolbox-resize-overlay[hit_side=bottom_left ]', '', ` cursor: nesw-resize; `)
+css('.toolbox-resize-overlay[hit_side=top      ], .toolbox-resize-overlay[hit_side=bottom      ]', '', ` cursor: ns-resize  ; `)
+css('.toolbox-resize-overlay[hit_side=left     ], .toolbox-resize-overlay[hit_side=right       ]', '', ` cursor: ew-resize  ; `)
+css('.toolbox-resize-overlay[hit_side=top_left ], .toolbox-resize-overlay[hit_side=bottom_right]', '', ` cursor: nwse-resize; `)
+css('.toolbox-resize-overlay[hit_side=top_right], .toolbox-resize-overlay[hit_side=bottom_left ]', '', ` cursor: nesw-resize; `)
 
-widget('x-toolbox', function(e) {
+widget('toolbox', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
@@ -2497,12 +2484,12 @@ widget('x-toolbox', function(e) {
 	e.istoolbox = true
 	e.class('pinned')
 
-	e.pin_button     = div({class: 'x-toolbox-button x-toolbox-button-pin fa fa-thumbtack'})
-	e.xbutton        = div({class: 'x-toolbox-button x-toolbox-button-close fa fa-times'})
-	e.title_box      = div({class: 'x-toolbox-title'})
-	e.titlebar       = div({class: 'x-toolbox-titlebar'}, e.title_box, e.pin_button, e.xbutton)
-	e.content_box    = div({class: 'x-toolbox-content x-container'})
-	e.resize_overlay = div({class: 'x-toolbox-resize-overlay'})
+	e.pin_button     = div({class: 'toolbox-btn toolbox-btn-pin fa fa-thumbtack'})
+	e.xbutton        = div({class: 'toolbox-btn toolbox-btn-close fa fa-times'})
+	e.title_box      = div({class: 'toolbox-title'})
+	e.titlebar       = div({class: 'toolbox-titlebar'}, e.title_box, e.pin_button, e.xbutton)
+	e.content_box    = div({class: 'toolbox-content x-container'})
+	e.resize_overlay = div({class: 'toolbox-resize-overlay'})
 	e.add(e.titlebar, e.content_box, e.resize_overlay)
 
 	e.alias('target', 'popup_target')
@@ -2642,26 +2629,26 @@ widget('x-toolbox', function(e) {
 // slides
 // ---------------------------------------------------------------------------
 
-css('.x-slides', 'grid-h')
+css('.slides', 'grid-h')
 
-css('.x-slide', 'invisible op0 x1 y1', `
+css('.slide', 'invisible op0 x1 y1', `
 	transition: opacity .5s;
 `)
 
-css('.x-slides > .x-ct > .', 'x1 y1')
+css('.slides > .x-ct > .', 'x1 y1')
 
 css(`
-	.x-slide:not(.x-slide-selected),
-	.x-slide:not(.x-slide-selected) *
+	.slide:not(.slide-selected),
+	.slide:not(.slide-selected) *
 `, '', `
 	pointer-events: none !important;
 `)
 
-css('.x-slide-selected', 'visible op1 click-through-off', `
+css('.slide-selected', 'visible op1 click-through-off', `
 	transition: opacity .5s;
 `)
 
-widget('x-slides', 'Containers', function(e) {
+widget('slides', 'Containers', function(e) {
 
 	selectable_widget(e)
 	contained_widget(e)
@@ -2672,7 +2659,7 @@ widget('x-slides', 'Containers', function(e) {
 
 		if (opt.new_items)
 			for (let item of opt.new_items) {
-				item.class('x-slide', true)
+				item.class('slide', true)
 				e.add(item)
 			}
 
@@ -2691,8 +2678,8 @@ widget('x-slides', 'Containers', function(e) {
 		if (i0 != i1) {
 			let e0 = e.items[i0]
 			let e1 = e.items[i1]
-			if (e0) e0.class('x-slide-selected', false)
-			if (e1) e1.class('x-slide-selected', true)
+			if (e0) e0.class('slide-selected', false)
+			if (e1) e1.class('slide-selected', true)
 			if (e1) e.fire('slide_changed', i1)
 			i0 = i1
 		}
@@ -2722,11 +2709,11 @@ widget('x-slides', 'Containers', function(e) {
 // markdown widget
 // ---------------------------------------------------------------------------
 
-css('.x-md', 'v')
+css('.md', 'v')
 
 {
 let md
-widget('x-md', function(e) {
+widget('md', function(e) {
 
 	md = md || markdownit()
 		.use(MarkdownItIndentedTable)
@@ -2736,10 +2723,10 @@ widget('x-md', function(e) {
 })}
 
 // ---------------------------------------------------------------------------
-// page navigation widget
+// page navigation
 // ---------------------------------------------------------------------------
 
-widget('x-pagenav', function(e) {
+widget('pager', function(e) {
 
 	e.prop('page', {type: 'number', attr: true, default: 1})
 	e.prop('page_size', {type: 'number', attr: true, default: 100})
@@ -2755,7 +2742,7 @@ widget('x-pagenav', function(e) {
 
 	e.page_button = function(page, text, title, href) {
 		let b = button()
-		b.class('x-pagenav-button')
+		b.class('pager-button')
 		b.class('selected', page == cur_page())
 		b.bool_attr('disabled', page >= 1 && page <= e.page_count && page != cur_page() || null)
 		b.title = or(title, or(text, S('page', 'Page {0}', page)))
@@ -2801,39 +2788,39 @@ widget('x-pagenav', function(e) {
 // richtext
 // ---------------------------------------------------------------------------
 
-css('.x-richtext', 'scroll-auto')
+css('.richtext', 'scroll-auto')
 
-css('.x-richtext:not(.x-richedit)', 'm0', 'display: block;')
-css('.x-richtext:not(.x-richedit) > .x-focus-box', 'b0')
+css('.richtext:not(.richedit)', 'm0', 'display: block;')
+css('.richtext:not(.richedit) > .focus-box', 'b0')
 
-css('.x-richtext-content', 'vscroll-auto no-outline', `
+css('.richtext-content', 'vscroll-auto no-outline', `
 	padding: 10px;
 `)
 
-css('.x-richtext-actionbar', 'abs h bg1')
+css('.richtext-actionbar', 'abs h bg1')
 
-css('.x-richtext-button', 'm0 b bg1 h-c h-m', `
+css('.richtext-button', 'm0 b bg1 h-c h-m', `
 	height: 2em;
 	width: 2em;
 `)
 
-css('.x-richtext-button:not(:first-child)', 'b-l-0')
+css('.richtext-button:not(:first-child)', 'b-l-0')
 
-css_state('.x-richtext-button:hover', '', `
+css_state('.richtext-button:hover', '', `
 	background-color: var(--bg-button-hover);
 `)
 
-css_state('.x-richtext-button:active', '', `
+css_state('.richtext-button:active', '', `
 	background-color: var(--fg-gray);
 `)
 
-css_state('.x-richtext-button.selected', '', `
+css_state('.richtext-button.selected', '', `
 	box-shadow: var(--shadow-button-pressed);
 	background-color: var(--fg-gray);
 	color: var(--fg-inverted);
 `)
 
-widget('x-richtext', function(e) {
+widget('richtext', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
@@ -2842,7 +2829,7 @@ widget('x-richtext', function(e) {
 	contained_widget(e)
 	editable_widget(e)
 
-	e.content_box = div({class: 'x-richtext-content'})
+	e.content_box = div({class: 'richtext-content'})
 	e.add(e.content_box)
 
 	// content property
@@ -2974,12 +2961,12 @@ function richtext_widget_editing(e) {
 	let button_pressed
 	function press_button() { button_pressed = true }
 
-	e.actionbar = div({class: 'x-richtext-actionbar'})
+	e.actionbar = div({class: 'richtext-actionbar'})
 	if (!e.focus_box)
 		e.actionbar.popup(e, 'top', 'left')
 	for (let k in actions) {
 		let action = actions[k]
-		let button = tag('button', {class: 'x-richtext-button', title: action.title})
+		let button = tag('button', {class: 'richtext-button', title: action.title})
 		button.attr('tabindex', '-1')
 		button.html = action.icon || ''
 		button.classes = action.icon_class
@@ -3004,7 +2991,7 @@ function richtext_widget_editing(e) {
 		e.actionbar.add(button)
 	}
 
-	e.actionbar.class('x-richtext-actionbar-embedded', !!e.focus_box)
+	e.actionbar.class('richtext-actionbar-embedded', !!e.focus_box)
 	if (e.focus_box) // is richedit
 		e.focus_box.insert(0, e.actionbar)
 	else
@@ -3059,10 +3046,12 @@ function richtext_widget_editing(e) {
 }
 
 // ---------------------------------------------------------------------------
-// "if" widget for conditional binding of its child widget
+// "if" widget for conditional binding of its content
 // ---------------------------------------------------------------------------
 
-widget('x-if', 'Containers', function(e) {
+css('.if', 'skip')
+
+widget('if', 'Containers', function(e) {
 
 	let html_content = e.html
 	e.clear()
@@ -3121,14 +3110,6 @@ function setglobal(k, v, default_v) {
 	broadcast(k+'_changed', v, v0)
 }
 
-// container widget with `display: contents`. useful to group together
-// an invisible widget like an x-nav with a visible one to make a tab.
-// Don't try to group together visible elements with this! CSS will see
-// your <x-ct> tag in the middle, but the layout system won't!
-widget('x-ct', 'Containers', function(e) {
-	e.init_child_components()
-})
-
 /* ---------------------------------------------------------------------------
 // widget placeholder
 // ---------------------------------------------------------------------------
@@ -3136,7 +3117,7 @@ calls:
 	e.replace_child_widget()
 */
 
-widget('x-widget-placeholder', function(e) {
+widget('widget-placeholder', function(e) {
 
 	selectable_widget(e)
 	contained_widget(e)

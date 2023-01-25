@@ -1,6 +1,6 @@
 /*
 
-	webb.js | single-page apps | client-side API
+	webb | single-page apps | client-side API
 	Written by Cosmin Apreutesei. Public Domain.
 
 

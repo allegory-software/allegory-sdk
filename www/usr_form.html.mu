@@ -1,47 +1,47 @@
 <style>
-.x-usr-tooltip .x-tooltip-content {
+.usr-tooltip .tooltip-content {
 	min-width: 300px;
 	margin-top: 1em;
 }
 </style>
-<x-if global=signed_in>
-	<x-form id=usr_form nav_id=usr_nav>
-		<x-input col=email ></x-input>
-		<x-input col=name  ></x-input>
+<if global=signed_in>
+	<frm id=usr_form nav_id=usr_nav>
+		<inp col=email ></inp>
+		<inp col=name  ></inp>
 		{{#multilang}}
-		<x-input col=lang     ></x-input>
-		<x-input col=country  ></x-input>
+		<inp col=lang     ></inp>
+		<inp col=country  ></inp>
 		{{/multilang}}
-		<x-input col=theme></x-input>
-		<x-if global=signed_in_dev>
-			<x-input col=tenant></x-input>
-		</x-if>
-		<x-if global=signed_in_realusr_dev>
-			<x-list-dropdown
+		<inp col=theme></inp>
+		<if global=signed_in_dev>
+			<inp col=tenant></inp>
+		</if>
+		<if global=signed_in_realusr_dev>
+			<list-dropdown
 				id=usr_usr_dropdown
 				label:s:field_label_impersonate_user="Impersonate User"
 				rowset_name=impersonate_users
 				val_col=usr
 				display_col=email
-			></x-list-dropdown>
-		</x-if>
-	</x-form>
-	<x-button id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
+			></list-dropdown>
+		</if>
+	</frm>
+	<btn id=auth_sign_out_button bare icon="fa fa-sign-out-alt">
 		<t s=log_out>Log out</t>
-	</x-button>
-</x-if>
-<x-if global=signed_in_anonymous>
-	<x-form id=usr_form nav_id=usr_nav>
+	</btn>
+</if>
+<if global=signed_in_anonymous>
+	<frm id=usr_form nav_id=usr_nav>
 		{{#multilang}}
-		<x-input col=lang     ></x-input>
-		<x-input col=country  ></x-input>
+		<inp col=lang     ></inp>
+		<inp col=country  ></inp>
 		{{/multilang}}
-		<x-input col=theme></x-input>
-	</x-form>
-	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
-</x-if>
-<x-if global=signed_out>
-	<x-form id=usr_form nav_id=usr_nav>
-	</x-form>
-	<x-button id=auth_sign_in_button><t s=sign_in>Sign-In</t></x-button>
-</x-if>
+		<inp col=theme></inp>
+	</frm>
+	<btn id=auth_sign_in_button><t s=sign_in>Sign-In</t></btn>
+</if>
+<if global=signed_out>
+	<frm id=usr_form nav_id=usr_nav>
+	</frm>
+	<btn id=auth_sign_in_button><t s=sign_in>Sign-In</t></btn>
+</if>

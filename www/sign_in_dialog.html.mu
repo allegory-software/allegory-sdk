@@ -1,4 +1,4 @@
-<x-dialog>
+<dlg>
 	<content>
 		<style>
 		.sign-in-logo {
@@ -11,7 +11,7 @@
 			padding: 1em 2em;
 		}
 
-		.sign-in-slides .x-button {
+		.sign-in-slides .btn {
 			//margin: .25em 0;
 		}
 
@@ -45,7 +45,7 @@
 			background-position: center;
 		}
 
-		.x-dialog-head-split {
+		.dlg-head-split {
 			display: flex;
 			justify-content: space-between;
 		}
@@ -73,21 +73,21 @@
 			}))
 		</script>
 		<img class=sign-in-logo src=/sign-in-logo.png onerror="this.style.display='none'">
-		<x-slides class=sign-in-slides>
-			<div class="x-form">
-				<div class=x-dialog-head-split>
-					<div class=x-dialog-heading>
+		<slides class=sign-in-slides>
+			<div class="frm">
+				<div class=dlg-head-split>
+					<div class=dlg-heading>
 						<t s=heading_sign_in>
 							Sign-in
 						</t>
 					</div>
 					{{#multilang}}
-					<x-lookup-dropdown class=sign-in-lang-dropdown
+					<lookup-dropdown class=sign-in-lang-dropdown
 						xnav=auth_pick_lang_nav
 						xcol=lang
 						rowset=pick_lang lookup_cols=lang display_col=name
 						.nolabel
-					></x-lookup-dropdown>
+					></lookup-dropdown>
 					{{/multilang}}
 				</div>
 				<p small><t s=sign_in_greet>
@@ -96,19 +96,19 @@
 					we will send you a one-time activation code every time
 					you need to sign in.
 				</t></p>
-				<x-textedit
+				<textedit
 					class=sign-in-email-edit
 					field_type=email
 					label:s:textedit_label_sign_in_email="E-mail address" focusfirst
-				></x-textedit>
-				<x-button primary
+				></textedit>
+				<btn primary
 					class=sign-in-email-button
 					text:s:button_text_sign_in_email="E-mail me a sign-in code"
-				></x-button>
+				></btn>
 			</div>
 
-			<div class="x-form">
-				<div class=x-dialog-heading><t s=heading_sign_in_enter_code>
+			<div class="frm">
+				<div class=dlg-heading><t s=heading_sign_in_enter_code>
 					Enter code
 				</t></div>
 				<p small><t s=sign_in_email_sent>
@@ -118,17 +118,17 @@
 					If you haven't received an email even after
 					a few minutes, please <a href="/sign-in">try again</a>.
 				</t></p>
-				<x-textedit
+				<textedit
 					class=sign-in-code-edit
 					field_type=sign_in_code
 					label:s:textedit_label_sign_in_code="6-digit sign-in code"
-					focusfirst></x-textedit>
-				<x-button primary
+					focusfirst></textedit>
+				<btn primary
 					class=sign-in-code-button
 					text:s:button_text_sign_in="Sign-in"
-				></x-button>
+				></btn>
 			</div>
 
-		</x-slides>
+		</slides>
 	</content>
-</x-dialog>
+</dlg>

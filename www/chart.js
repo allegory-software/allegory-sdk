@@ -12,81 +12,81 @@ SHAPES
 
 */
 
-css('.x-chart', 'S shrinks p clip v')
+css('.chart', 'S shrinks p clip v')
 
-css('.x-chart-header', '', `
+css('.chart-header', '', `
 	padding-left: 40px;
 `)
 
-css('.x-chart-split', 'S h')
+css('.chart-split', 'S h')
 
-css('.x-chart-view', 'S rel h')
+css('.chart-view', 'S rel h')
 
-css('.x-chart-legend', 'grid-h arrow gap-y-05 gap-x', `
+css('.chart-legend', 'grid-h arrow gap-y-05 gap-x', `
 	grid-template-columns: 1em 1fr;
 	align-content: end;
 	margin-left: 2em;
 `)
 
-css('.x-chart-legend-bullet', 'round', `
+css('.chart-legend-bullet', 'round', `
 	width : .8em;
 	height: .8em;
 `)
 
-css('.x-chart-legend-percent', 'bold self-h-r')
+css('.chart-legend-percent', 'bold self-h-r')
 
-css('.x-chart-canvas', 'abs', `
+css('.chart-canvas', 'abs', `
 	top: 0;
 	left: 0;
 `)
 
-css('.x-tooltip.x-chart-tooltip', 'click-through')
+css('.tooltip.chart-tooltip', 'click-through')
 
-css('.x-chart-tooltip > .x-tooltip-body', 'tight')
+css('.chart-tooltip > .tooltip-body', 'tight')
 
-css('.x-chart-tooltip-label', 'grid-h gap-x-2', `
+css('.chart-tooltip-label', 'grid-h gap-x-2', `
 	grid-template-columns: repeat(2, auto);
 	justify-items: start;
 `)
 
-css('.x-chart-stacks', 'S h')
-css('.x-chart-stack', 'v')
-css('.x-chart-stack-slice-ct', 'rel h')
+css('.chart-stacks', 'S h')
+css('.chart-stack', 'v')
+css('.chart-stack-slice-ct', 'rel h')
 
-css('.x-chart-stack-slice', 'm-r', `
+css('.chart-stack-slice', 'm-r', `
 	width: 50px;
 `)
 
-css('.x-chart[shape=pie] .x-chart-split', 'h-c')
+css('.chart[shape=pie] .chart-split', 'h-c')
 
-css('.x-chart[shape=pie] .x-chart-view', '', `
+css('.chart[shape=pie] .chart-view', '', `
 	max-width : 15em;
 	min-height: 15em;
 `)
 
-css('.x-chart[shape=pie] .x-chart-legend', '', `
+css('.chart[shape=pie] .chart-legend', '', `
 	grid-template-columns: 1em 5fr 1fr;
 	align-content: center;
 `)
 
-css('.x-chart[shape=lines] .x-chart-view', '', `
+css('.chart[shape=lines] .chart-view', '', `
 	min-height: 10em;
 `)
 
-css('.x-chart[shape=lines] .x-chart-legend', 'm-l-2 m-b-4')
+css('.chart[shape=lines] .chart-legend', 'm-l-2 m-b-4')
 
-css('.x-chart-pie', 'abs')
+css('.chart-pie', 'abs')
 
-css('.x-chart-pie-selected', 'abs round')
+css('.chart-pie-selected', 'abs round')
 
-css('.x-chart-pie-percents', 'abs click-through', `
+css('.chart-pie-percents', 'abs click-through', `
 	top: 0;
 	left: 0;
 `)
 
-css('.x-chart-pie-label', 'abs white')
+css('.chart-pie-label', 'abs white')
 
-widget('x-chart', 'Input', function(e) {
+widget('chart', 'Input', function(e) {
 
 	contained_widget(e)
 	selectable_widget(e)
@@ -324,10 +324,10 @@ widget('x-chart', 'Input', function(e) {
 
 	// view -------------------------------------------------------------------
 
-	e.header = div({class: 'x-chart-header'})
-	e.view   = div({class: 'x-chart-view'})
-	e.legend = div({class: 'x-chart-legend'})
-	e.add(e.header, div({class: 'x-chart-split'}, e.view, e.legend))
+	e.header = div({class: 'chart-header'})
+	e.view   = div({class: 'chart-view'})
+	e.legend = div({class: 'chart-legend'})
+	e.add(e.header, div({class: 'chart-split'}, e.view, e.legend))
 
 	e.set_nolegend = function(v) {
 		e.legend.hide(v)
@@ -338,7 +338,7 @@ widget('x-chart', 'Input', function(e) {
 		tt = tooltip(assign({
 			align   : 'center',
 			kind    : 'info',
-			classes : 'x-chart-tooltip',
+			classes : 'chart-tooltip',
 		}, opt))
 	}
 
@@ -403,11 +403,11 @@ widget('x-chart', 'Input', function(e) {
 		for (let slice of slices) {
 			let color = split_color(i, slices.length)
 			let bullet = div({
-					class: 'x-chart-legend-bullet',
+					class: 'chart-legend-bullet',
 					style: 'background-color: '+color,
 				})
-			let label   = div({class: 'x-chart-legend-label'}, slice.label)
-			let percent = div({class: 'x-chart-legend-percent'}, slice.percent)
+			let label   = div({class: 'chart-legend-label'}, slice.label)
+			let percent = div({class: 'chart-legend-percent'}, slice.percent)
 			e.legend.add(bullet, label, percent)
 			label.on('pointerenter', function() {
 				legend_hit_slice = slice
@@ -432,10 +432,10 @@ widget('x-chart', 'Input', function(e) {
 		for (let cg of groups) {
 			let color = split_color(cgi, groups.length)
 			let bullet = div({
-					class: 'x-chart-legend-bullet',
+					class: 'chart-legend-bullet',
 					style: 'background-color: '+color,
 				})
-			let label = div({class: 'x-chart-legend-label'}, TC(cg.label))
+			let label = div({class: 'chart-legend-label'}, TC(cg.label))
 			e.legend.add(bullet, label)
 			label.on('pointerenter', function() {
 				legend_hit_cg = cg
@@ -455,8 +455,8 @@ widget('x-chart', 'Input', function(e) {
 		if (!slices)
 			return
 
-		let stacks = div({class: 'x-chart-stacks'})
-		let labels = div({class: 'x-chart-stack-labels'})
+		let stacks = div({class: 'chart-stacks'})
+		let labels = div({class: 'chart-stack-labels'})
 		e.view.add(stacks)
 
 		do_update = function(opt) {
@@ -466,7 +466,7 @@ widget('x-chart', 'Input', function(e) {
 				if (!all_split_groups)
 					return
 				for (let cg of all_split_groups) {
-					let stack = div({class: 'x-chart-stack'})
+					let stack = div({class: 'chart-stack'})
 					stacks.add(stack)
 					let total = 0
 					for (let xg of cg)
@@ -474,8 +474,8 @@ widget('x-chart', 'Input', function(e) {
 					for (let xg of cg) {
 						let i = 0
 						for (let slice of slices) {
-							let cdiv = div({class: 'x-chart-stack-slice'})
-							let sdiv = div({class: 'x-chart-stack-slice-ct'}, cdiv, slice.label)
+							let cdiv = div({class: 'chart-stack-slice'})
+							let sdiv = div({class: 'chart-stack-slice-ct'}, cdiv, slice.label)
 							sdiv.style.flex = slice.size
 							cdiv.style['background-color'] = split_color(i, slices.length)
 							stack.add(sdiv)
@@ -494,8 +494,8 @@ widget('x-chart', 'Input', function(e) {
 		if (!slices)
 			return
 
-		let pie = svg({class: 'x-chart-pie', viewBox: '-1.1 -1.1 2.2 2.2'})
-		let percent_divs = div({class: 'x-chart-pie-percents'})
+		let pie = svg({class: 'chart-pie', viewBox: '-1.1 -1.1 2.2 2.2'})
+		let percent_divs = div({class: 'chart-pie-percents'})
 		e.attr('shape', 'pie')
 		e.view.add(pie, percent_divs)
 
@@ -558,7 +558,7 @@ widget('x-chart', 'Input', function(e) {
 				percent_divs.clear()
 				for (let slice of slices) {
 					if (slice.size > 0.05) {
-						slice.percent_div = div({class: 'x-chart-pie-label'}, slice.percent)
+						slice.percent_div = div({class: 'chart-pie-label'}, slice.percent)
 						percent_divs.add(slice.percent_div)
 					}
 				}
@@ -575,7 +575,7 @@ widget('x-chart', 'Input', function(e) {
 						tt.sum_cols_div = div()
 						tt.key_div = div({style: 'justify-self: end'})
 						tt.sum_div = div({style: 'justify-self: end'})
-						tt.text = div({class: 'x-chart-tooltip-label'},
+						tt.text = div({class: 'chart-tooltip-label'},
 							tt.key_cols_div, tt.key_div,
 							tt.sum_cols_div, tt.sum_div
 						)
@@ -645,7 +645,7 @@ widget('x-chart', 'Input', function(e) {
 	function renderer_line_or_columns(columns, rotate, dots, area, stacked) {
 
 		let canvas = tag('canvas', {
-			class : 'x-chart-canvas',
+			class : 'chart-canvas',
 			width : view_w,
 			height: view_h,
 		})
@@ -734,7 +734,7 @@ widget('x-chart', 'Input', function(e) {
 					tt = tooltip({
 						align   : 'center',
 						kind    : 'info',
-						classes : 'x-chart-tooltip',
+						classes : 'chart-tooltip',
 					})
 					e.add(tt)
 					tt.spl_cols_div = div()
@@ -743,7 +743,7 @@ widget('x-chart', 'Input', function(e) {
 					tt.spl_div = div({style: 'justify-self: end'})
 					tt.key_div = div({style: 'justify-self: end'})
 					tt.sum_div = div({style: 'justify-self: end'})
-					tt.text = div({class: 'x-chart-tooltip-label'},
+					tt.text = div({class: 'chart-tooltip-label'},
 						tt.spl_cols_div, tt.spl_div,
 						tt.key_cols_div, tt.key_div,
 						tt.sum_cols_div, tt.sum_div

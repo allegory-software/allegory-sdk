@@ -439,9 +439,9 @@ window.on('load', function() {
 // prop layers inspector
 // ---------------------------------------------------------------------------
 
-widget('x-prop-layers-inspector', function(e) {
+widget('prop-layers-inspector', function(e) {
 
-	e.classes = 'x-inspector'
+	e.classes = 'inspector'
 
 	grid.construct(e)
 	e.cell_h = 22
@@ -626,9 +626,9 @@ field_types.nav.editor = function(...args) {
 // property inspector
 // ---------------------------------------------------------------------------
 
-widget('x-prop-inspector', function(e) {
+widget('prop-inspector', function(e) {
 
-	e.classes = 'x-inspector'
+	e.classes = 'inspector'
 
 	grid.construct(e)
 	e.cell_h = 22
@@ -794,9 +794,9 @@ widget('x-prop-inspector', function(e) {
 // widget tree
 // ---------------------------------------------------------------------------
 
-widget('x-widget-tree', function(e) {
+widget('widget-tree', function(e) {
 
-	e.classes = 'x-inspector'
+	e.classes = 'inspector'
 
 	grid.construct(e)
 	e.cell_h = 22
@@ -944,7 +944,7 @@ widget('x-widget-tree', function(e) {
 // sql rowset editor
 // ---------------------------------------------------------------------------
 
-sql_rowset_editor = widget('x-sql-rowset-editor', function(e) {
+sql_rowset_editor = widget('sql-rowset-editor', function(e) {
 
 
 
@@ -969,18 +969,18 @@ function globals_list() {
 // ---------------------------------------------------------------------------
 
 css(`
-	.x-dev-toolbox > .x-toolbox-titlebar,
-	.x-dev-toolbox .x-widget
+	.dev-toolbox > .toolbox-titlebar,
+	.dev-toolbox .widget
 `, 'arial', `
 	font-family: arial, sans-serif;
 	font-size: 12px;
 `)
 
-css('.x-inspector .fa-eye, .x-inspector .fa-chevron, .x-inspector .fa-chevron-right', '', `
+css('.inspector .fa-eye, .inspector .fa-chevron, .inspector .fa-chevron-right', '', `
 	font-size: 80%;
 `)
 
-css('x-prop-layers-inspector > .x-grid-header', '', `
+css('prop-layers-inspector > .grid-header', '', `
 	min-height: calc(2em + 1px);
 `)
 
@@ -994,7 +994,7 @@ function prop_layers_toolbox(tb_opt, insp_opt) {
 		}, insp_opt))
 	let tb = toolbox(assign_opt({
 			id: 'dev_prop_layers_toolbox',
-			classes: 'x-dev-toolbox',
+			classes: 'dev-toolbox',
 			text: 'property layers',
 			props: dev_toolbox_props,
 			content: pg,
@@ -1010,7 +1010,7 @@ function props_toolbox(tb_opt, insp_opt) {
 		}, insp_opt))
 	let tb = toolbox(assign_opt({
 			id: 'dev_props_toolbox',
-			classes: 'x-dev-toolbox',
+			classes: 'dev-toolbox',
 			text: 'properties',
 			props: dev_toolbox_props,
 			content: pg,
@@ -1029,7 +1029,7 @@ function widget_tree_toolbox(tb_opt, wt_opt) {
 		}, wt_opt))
 	let tb = toolbox(assign_opt({
 			id: 'dev_widget_tree_toolbox',
-			classes: 'x-dev-toolbox',
+			classes: 'dev-toolbox',
 			text: 'widget tree',
 			props: dev_toolbox_props,
 			content: wt,

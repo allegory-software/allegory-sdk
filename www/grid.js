@@ -7,7 +7,7 @@ WIDGETS
 
 	grid
 	grid_dropdown
-	row_form
+	row-frm
 
 */
 
@@ -52,86 +52,88 @@ css('.theme-large', '', `
 	--grid-cell-line-height  : 24px; /* PIXELS ONLY! */
 `)
 
-css('.x-grid', 'S v clip arrow')
+css('.grid', 'S v clip arrow')
 
-css('.x-vgrid', 'h')
-css('.x-vgrid > .x-grid-header', 'b-r b-b-0')
-css('.x-vgrid .x-grid-action-band', 'v')
-css('.x-vgrid .x-grid-cells-view', '', 'width: 0;') // CSS people are hopeless
+css_state('.grid:focus', 'no-outline')
+
+css('.vgrid', 'h')
+css('.vgrid > .grid-header', 'b-r b-b-0')
+css('.vgrid .grid-action-band', 'v')
+css('.vgrid .grid-cells-view', '', 'width: 0;') // CSS people are hopeless
 
 // grid header
 
 // rel makes header cols movable for scrolling horizontally
-css('.x-grid-header', 'rel b b0')
+css('.grid-header', 'rel b b0')
 
-css('.x-grid:not(.x-vgrid) > .x-grid-header', 'b-b')
+css('.grid:not(.vgrid) > .grid-header', 'b-b')
 
-css('.x-grid-header-canvas', 'abs')
+css('.grid-header-canvas', 'abs')
 
 /* grid cells: grid > view > ct > (cells, editor) > cell */
 
-css('.x-grid-cells-view', 'S shrinks rel grid-h scroll-auto')
+css('.grid-cells-view', 'S shrinks rel grid-h scroll-auto')
 
 // Fix the damn Chrome bug with custom-drawn scrollbars !!
 // 50px has the nice side effect of gradually hiding the header when the grid
 // height gets too small.
-css('.x-grid-cells-view', '', 'flex-basis: 50px;')
+css('.grid-cells-view', '', 'flex-basis: 50px;')
 
 // avoid col resizing based on row count
-css('.x-grid[auto_cols_w] > .x-grid-cells-view', 'vscroll')
+css('.grid[auto_cols_w] > .grid-cells-view', 'vscroll')
 
 // grid grows to fit contents, so no need for scrollbars
-css('.x-grid[auto_h] > .x-grid-cells-view', 'clip-y')
+css('.grid[auto_h] > .grid-cells-view', 'clip-y')
 
 // clip: hide surplus bottom rows
 // rel: activates `overflow: hidden` on abs. pos. child.
-css('.x-grid-cells', 'rel clip', `
+css('.grid-cells', 'rel clip', `
 	grid-row-start: 1;
 	grid-column-start: 1;
 `)
 
-css('.x-grid-cells-canvas', 'abs') // keep at y=0 while scrolling
+css('.grid-cells-canvas', 'abs') // keep at y=0 while scrolling
 
 // grid editing
 
-css('.x-grid-error', 'abs')
+css('.grid-error', 'abs')
 
 // load/save progress bar
 
-css('.x-grid-progress-bar', 'abs click-through', `
+css('.grid-progress-bar', 'abs click-through', `
 	top: -2px;
 	width: 0%;
 	height: 2px;
 `)
 
-css('.x-grid.loading > .x-grid-progress-bar', '', 'background-color: green;')
+css('.grid.loading > .grid-progress-bar', '', 'background-color: green;')
 
 // grid action band
 
-css('.x-grid-action-band', 'b-t bg')
-css('.x-grid-action-band-reload-button', 'small label')
-css('.x-grid-action-band-reload-button > .x-button-icon', 'p-t-05')
-css('.x-grid-action-band-info', 'h-m m-l small label pre')
+css('.grid-action-band', 'b-t bg')
+css('.grid-action-band-reload-button', 'small label')
+css('.grid-action-band-reload-button > .btn-icon', 'p-t-05')
+css('.grid-action-band-info', 'h-m m-l small label pre')
 
 // grid col moving
 
-css_state('.x-grid.col-move'  , 'grab')
-css_state('.x-grid.col-moving', 'grabbing')
+css_state('.grid.col-move'  , 'grab')
+css_state('.grid.col-moving', 'grabbing')
 
 // grid col resizing
 
 // NOTE: `col-resize` cursor is almost invisible on a light background on Windows.
-css_state('.x-grid:is(.col-resize, .header-resize)', '', 'cursor: ew-resize;')
+css_state('.grid:is(.col-resize, .header-resize)', '', 'cursor: ew-resize;')
 
-css_state('.x-grid-resize-guides', 'abs', 'top: 0;')
+css_state('.grid-resize-guides', 'abs', 'top: 0;')
 
 // grid editor role
 
-css_role('.x-widget.grid-editor', 'abs', `
+css_role('.grid-editor', 'abs', `
 	width: min-content;
 `)
 
-css_role('.grid-editor > .x-focus-box', 'b0 ro0', `
+css_role('.grid-editor > .focus-box', 'b0 ro0', `
 	/* add border width, since we removed the border */
 	padding-top: calc(
 		var(--border-width-item) +
@@ -140,21 +142,21 @@ css_role('.grid-editor > .x-focus-box', 'b0 ro0', `
 	background-color: var(--bg-grid-editor);
 `)
 
-css_role('.grid-editor > .x-focus-box > .x-editbox-input', '', `
+css_role('.grid-editor > .focus-box > .editbox-input', '', `
 	line-height: var(--grid-cell-line-height);
 `)
 
 css_role(`
-	.grid-editor > .x-focus-box,
-	.grid-editor.open:not(.widget-selected) > .x-focus-box),
-	.grid-editor:focus-within:not(.widget-selected) > .x-focus-box
+	.grid-editor > .focus-box,
+	.grid-editor.open:not(.widget-selected) > .focus-box),
+	.grid-editor:focus-within:not(.widget-selected) > .focus-box
 `, 'no-outline', `
 	box-shadow: inset 2px 2px 6px -2px rgba(0,0,0,0.75);
 `)
 
 /* grid as picker */
 
-css_role('.x-widget.x-grid.picker', '', `
+css_role('.grid.picker', '', `
 	min-height: 40px;
 	max-height: 300px;
 	max-width: 800px;
@@ -162,11 +164,11 @@ css_role('.x-widget.x-grid.picker', '', `
 `)
 
 /* show vert-scrollbars always when grid is a picker */
-css_role('.x-widget.x-grid.picker > .x-grid-cells-view', 'vscroll')
+css_role('.grid.picker > .grid-cells-view', 'vscroll')
 
 /* TODO: grid filter dropdowns
 
-.x-widget.x-grid-filter-dropdown {
+.grid-filter-dropdown {
 	font-size: 85%;
 	bottom: 0;
 	left: 0;
@@ -180,11 +182,11 @@ css_role('.x-widget.x-grid.picker > .x-grid-cells-view', 'vscroll')
 	color: #36f;
 `)
 
-.x-dropdown.x-grid-filter-dropdown.open {
+.dropdown.grid-filter-dropdown.open {
 	box-shadow: none;
 `)
 
-.x-grid-filter-dropdown-grid {
+.grid-filter-dropdown-grid {
 	font-size: 90%;
 `)
 
@@ -193,17 +195,16 @@ css_role('.x-widget.x-grid.picker > .x-grid-cells-view', 'vscroll')
 /* grid widget editing */
 
 /* many edit modes, each marked in its own ways */
-css_role('.x-grid.widget-editing', 'no-outline')
+css_role('.grid.widget-editing', 'no-outline')
 
-css_role('.x-grid-cells-view.editing > .x-grid-cells', 'hidden')
+css_role('.grid-cells-view.editing > .grid-cells', 'hidden')
 
-widget('x-grid', 'Input', function(e) {
+widget('grid', 'Input', function(e) {
 
 	val_widget(e, true)
 	nav_widget(e)
 	editable_widget(e)
 	e.make_focusable()
-	e.class('x-focusable-items')
 	stylable_widget(e)
 	e.ctrl_key_taken = true
 
@@ -245,7 +246,7 @@ widget('x-grid', 'Input', function(e) {
 		e.bg_new                 = css.prop('--bg-new')
 		e.bg_modified            = css.prop('--bg-modified')
 		e.bg_new_modified        = css.prop('--bg-new-modified')
-		e.bg_moving              = css.prop('--x-bg-moving')
+		e.bg_moving              = css.prop('--bg-moving')
 		e.baseline               = num(css.prop('--grid-cell-baseline'))
 
 		// with Arial the baseline adjustment for Firefox is 1 but we're not
@@ -310,19 +311,19 @@ widget('x-grid', 'Input', function(e) {
 	var horiz = true
 	e.set_vertical = function(v) {
 		horiz = !v
-		e.class('x-hgrid',  horiz)
-		e.class('x-vgrid', !horiz)
+		e.class('hgrid',  horiz)
+		e.class('vgrid', !horiz)
 		e.must_be_flat = !horiz
 		theme_changed()
 	}
 	e.prop('vertical', {type: 'bool', attr: true, slot: 'user', default: false})
 
-	e.header_canvas = tag('canvas', {class : 'x-grid-header-canvas', width: 0, height: 0})
-	e.header        = div({class: 'x-grid-header'}, e.header_canvas)
-	e.cells_canvas  = tag('canvas', {class : 'x-grid-cells-canvas', width: 0, height: 0})
-	e.cells         = div({class: 'x-grid-cells'}, e.cells_canvas)
-	e.cells_view    = div({class: 'x-grid-cells-view'}, e.cells)
-	e.progress_bar  = div({class: 'x-grid-progress-bar'})
+	e.header_canvas = tag('canvas', {class : 'grid-header-canvas', width: 0, height: 0})
+	e.header        = div({class: 'grid-header'}, e.header_canvas)
+	e.cells_canvas  = tag('canvas', {class : 'grid-cells-canvas', width: 0, height: 0})
+	e.cells         = div({class: 'grid-cells'}, e.cells_canvas)
+	e.cells_view    = div({class: 'grid-cells-view'}, e.cells)
+	e.progress_bar  = div({class: 'grid-progress-bar'})
 	e.add(e.header, e.progress_bar, e.cells_view)
 
 	var cx  = e.cells_canvas.getContext('2d')
@@ -678,11 +679,11 @@ widget('x-grid', 'Input', function(e) {
 		let dd = grid_dropdown({
 			lookup_rowset : e.rowset,
 			lookup_cols   : 1,
-			classes       : 'x-grid-filter-dropdown',
+			classes       : 'grid-filter-dropdown',
 			mode          : 'fixed',
 			grid: {
 				cell_h: 22,
-				classes: 'x-grid-filter-dropdown-grid',
+				classes: 'grid-filter-dropdown-grid',
 			},
 		})
 
@@ -691,9 +692,9 @@ widget('x-grid', 'Input', function(e) {
 
 		dd.display_val = function() {
 			if (!rs.filtered_count)
-				return () => div({class: 'x-item disabled'}, S('all', 'all'))
+				return () => div({class: 'item disabled'}, S('all', 'all'))
 			else
-				return () => span({}, div({class: 'x-grid-filter fa fa-filter'}), rs.filtered_count+'')
+				return () => span({}, div({class: 'grid-filter fa fa-filter'}), rs.filtered_count+'')
 		}
 
 		dd.on('opened', function() {
@@ -1287,7 +1288,7 @@ widget('x-grid', 'Input', function(e) {
 				e.error_tooltip.text = errors
 					.filter(e => !e.passed)
 					.map(e => e.message)
-					.ul({class: 'x-error-list'}, true)
+					.ul({class: 'error-list'}, true)
 				update_error_tooltip_position()
 			} else {
 				e.error_tooltip.update()
@@ -2080,7 +2081,7 @@ widget('x-grid', 'Input', function(e) {
 
 		if (on && !e.empty_rt) {
 			e.empty_rt = richtext({
-				classes: 'x-grid-empty-rt',
+				classes: 'grid-empty-rt',
 				align_x: 'center',
 				align_y: 'center',
 			})
@@ -2205,7 +2206,7 @@ widget('x-grid', 'Input', function(e) {
 	function set_editing_sql(on) {
 		e.cells_view.class('editing', on)
 		if (on) {
-			sql_editor_ct = div({class: 'x-grid-sql-editor'})
+			sql_editor_ct = div({class: 'grid-sql-editor'})
 			sql_editor = ace.edit(sql_editor_ct, {
 				mode: 'ace/mode/mysql',
 				highlightActiveLine: false,
@@ -2830,7 +2831,7 @@ widget('x-grid', 'Input', function(e) {
 // grid dropdown
 // ---------------------------------------------------------------------------
 
-widget('x-grid-dropdown', function(e) {
+widget('grid-dropdown', function(e) {
 
 	nav_dropdown_widget(e)
 
@@ -2851,7 +2852,7 @@ widget('x-grid-dropdown', function(e) {
 // row form
 // ---------------------------------------------------------------------------
 
-widget('x-row-form', function(e) {
+widget('row-frm', function(e) {
 
 	grid.props.vertical = {default: true}
 
@@ -2932,7 +2933,7 @@ widget('x-row-form', function(e) {
 // grid profile
 // ---------------------------------------------------------------------------
 
-widget('x-grid-profile', function(e) {
+widget('grid-profile', function(e) {
 
 	tabs_item_widget(e)
 

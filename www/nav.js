@@ -12,11 +12,29 @@ implements:
 		the need to coordinate with the dropdown.
 
 field types (see "field type definitions" at the end):
-	password number filesize bool enum tags color percent icon
-	button place url phone email
-	date time timeofday timeofday_in_seconds duration
+	password
+	number
+	filesize
+	bool
+	enum
+	tags
+	color
+	percent
+	icon
+	button
+	place
+	url
+	phone
+	email
+	date
+	time
+	timeofday
+	timeofday_in_seconds
+	duration
 	col
-	secret_key public_key private_key
+	secret_key
+	public_key
+	private_key
 
 typing:
 	isnav: t
@@ -450,18 +468,18 @@ server-side properties:
 
 {
 
-css('.x-loading-overlay', 'p')
-css('.x-loading-overlay.error', 'bg-smoke')
+css('.nav-loading-overlay', 'p')
+css('.nav-loading-overlay.error', 'bg-smoke')
 
-css('.x-loading-overlay-message', 'p2 shadow-tooltip bg1')
+css('.nav-loading-overlay-message', 'p2 shadow-tooltip bg1')
 
-css('.x-loading-overlay-message .x-button', '', `
+css('.nav-loading-overlay-message .btn', '', `
 	line-height: 1;
 `)
 
-css('.x-loading-overlay-detail', 'mono m-y')
+css('.nav-loading-overlay-detail', 'mono m-y')
 
-css('.x-loading-error-icon', 'm-x fg-error')
+css('.loading-error-icon', 'm-x fg-error')
 
 field_types = obj() // {TYPE->{k:v}}
 rowset_col_attrs = obj() // {ROWSET.COL->{k:v}}
@@ -2901,7 +2919,7 @@ function nav_widget(e) {
 			e.row_errors(row, true, errs)
 		if (!errs.length)
 			return
-		e.notify('error', errs.ul({class: 'x-error-list'}, true))
+		e.notify('error', errs.ul({class: 'error-list'}, true))
 	}
 
 	e.validate_row = function(row) {
@@ -3132,7 +3150,7 @@ function nav_widget(e) {
 		if (e.hidden)
 			return // bare nav
 
-		let all_widgets = document.body.$('.x-widget')
+		let all_widgets = document.body.$('.widget')
 		let skip = set()
 		// skip self
 		skip.add(e)
@@ -3155,12 +3173,12 @@ function nav_widget(e) {
 		// skip children of skipped
 		let skip_all = set(skip)
 		for (let se of skip) {
-			for (let ce of se.$('.x-widget'))
+			for (let ce of se.$('.widget'))
 				skip_all.add(ce)
 		}
 		// skip popups of skipped and of their children
 		let skip_popups = set()
-		for (let ce of $('.x-widget.popup'))
+		for (let ce of $('.widget.popup'))
 			for (let se of skip_all)
 				if (se.contains(ce))
 					skip_popups.add(ce)
@@ -4587,13 +4605,13 @@ function nav_widget(e) {
 		e.disable('loading', on)
 		if (!on)
 			return
-		oe = overlay({class: 'x-loading-overlay'})
-		oe.content.class('x-loading-overlay-message')
+		oe = overlay({class: 'nav-loading-overlay'})
+		oe.content.class('nav-loading-overlay-message')
 		if (cls)
 			oe.class(cls)
 		let focus_e
 		if (cls == 'error') {
-			let more_div = div({class: 'x-loading-overlay-detail'})
+			let more_div = div({class: 'nav-loading-overlay-detail'})
 			let band = action_band({
 				layout: 'more... less... < > retry:ok forget-it:cancel',
 				buttons: {
@@ -4617,7 +4635,7 @@ function nav_widget(e) {
 				},
 			})
 			band.at[1].hide()
-			let error_icon = span({class: 'x-loading-error-icon fa fa-exclamation-circle'})
+			let error_icon = span({class: 'loading-error-icon fa fa-exclamation-circle'})
 			oe.content.add(div(0, error_icon, text, more_div, band))
 			focus_e = band.last.prev
 		} else if (cls == 'waiting') {
@@ -4670,11 +4688,11 @@ function nav_widget(e) {
 		if (!ab) {
 
 			ab = action_band({
-				classes: 'x-grid-action-band',
+				classes: 'grid-action-band',
 				layout: 'reload add delete move_up move_down info < > cancel:cancel save:ok',
 				buttons: {
 					'reload': button({
-						classes: 'x-grid-action-band-reload-button',
+						classes: 'grid-action-band-reload-button',
 						icon: 'fa fa-sync',
 						text: '',
 						title: S('reload', 'Reload all records'),
@@ -4725,7 +4743,7 @@ function nav_widget(e) {
 						},
 						tabindex: -1,
 					}),
-					'info': div({class: 'x-grid-action-band-info'}),
+					'info': div({class: 'grid-action-band-info'}),
 					'cancel': button({
 						bare: true,
 						icon: 'fa fa-rotate-left',
@@ -4965,12 +4983,16 @@ function nav_widget(e) {
 // view-less nav
 // ---------------------------------------------------------------------------
 
-widget('x-nav', function(e) {
+css('nav', 'hidden')
+
+widget('nav', function(e) {
 	nav_widget(e)
 	return {hidden: true}
 })
 
-bare_nav = nav // synonim, better use this in js code (but use x-nav in html).
+// use this synonim because stupid language designers don't understand
+// the utility of variable shadowing.
+bare_nav = nav
 
 // ---------------------------------------------------------------------------
 // global one-row nav for all standalone (i.e. not bound to a nav) widgets.
@@ -5240,7 +5262,7 @@ function nav_dropdown_widget(e) {
 	filesize.format = function(s) {
 		let small = this.is_small(s)
 		s = this.format_text(s)
-		return small ? span({class: 'x-dba-insignificant-size'}, s) : s
+		return small ? span({class: 'dba-insignificant-size'}, s) : s
 	}
 
 	filesize.draw = function(s, cx) {
@@ -5329,7 +5351,7 @@ function nav_dropdown_widget(e) {
 	let ts = {align: 'right'}
 	field_types.time = ts
 
-	ts.has_time = true // for x-calendar
+	ts.has_time = true // for calendar
 
 	ts.to_time   = return_arg
 	ts.from_time = return_arg
@@ -5584,12 +5606,12 @@ function nav_dropdown_widget(e) {
 	let color = obj()
 	field_types.color = color
 
-	css('.x-item-color', '', `
+	css('.item-color', '', `
 		width: 100%;
 	`)
 
 	color.format = function(s) {
-		return div({class: 'x-item-color', style: 'background-color: '+s}, '\u00A0')
+		return div({class: 'item-color', style: 'background-color: '+s}, '\u00A0')
 	}
 
 	// TODO: color.draw = function(s) {}
@@ -5609,26 +5631,26 @@ function nav_dropdown_widget(e) {
 		return isnum(p) ? (p * 100).dec(this.decimals) + '%' : p
 	}
 
-	css('.x-item-progress', 'rel', `
+	css('.item-progress', 'rel', `
 		width: 100%;
 		height: 100%;
 	`)
 
-	css('.x-item-progress-bar', 'abs', `
+	css('.item-progress-bar', 'abs', `
 		top: 0; left: 0; bottom: 0;
 		background-color: var(--bg-selected);
 	`)
 
 	// rel: so it stays on top of the absolute progress bar
-	css('.x-item-progress-text', 'rel t-c', `
+	css('.item-progress-text', 'rel t-c', `
 		top: 0; left: 0; right: 0; bottom: 0;
 	`)
 
 	percent.format = function(s) {
-		let bar = div({class: 'x-item-progress-bar'})
-		let txt = div({class: 'x-item-progress-text'}, this.to_text(s))
+		let bar = div({class: 'item-progress-bar'})
+		let txt = div({class: 'item-progress-text'}, this.to_text(s))
 		bar.style.right = (100 - (isnum(s) ? s * 100 : 0)) + '%'
-		return div({class: 'x-item-progress'}, bar, txt)
+		return div({class: 'item-progress'}, bar, txt)
 	}
 
 	// TODO: percent.draw = function(s) {}
@@ -5672,7 +5694,7 @@ function nav_dropdown_widget(e) {
 
 	place.format_pin = function() {
 		return span({
-			class: 'x-place-pin fa fa-map-marker-alt',
+			class: 'place-pin fa fa-map-marker-alt',
 			title: S('view_on_google_maps', 'View on Google Maps')
 		})
 	}

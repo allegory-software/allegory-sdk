@@ -225,7 +225,7 @@ NOTES:
 
 * { box-sizing: border-box; }
 
-:root, html, body, table, tr, td, img {
+:root, html, body, :where(table, tr, td, img) {
 	margin: 0;
 	padding: 0;
 	border: 0;
@@ -870,7 +870,7 @@ h3 { font-size: var(--font-size-h3); }
 .no-filter { filter: none; }
 
 .dim    { opacity: .5; }
-.no-dim { opacity: .1; }
+.no-dim { opacity:  1; }
 
 .op0    { opacity:  0; }
 .op1    { opacity:  1; }

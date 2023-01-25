@@ -107,7 +107,7 @@ let init_usr_nav = function() {
 		// other type of error: let the error be notified, don't take any action.
 		// if this happens on app load, you get a blank screen.
 
-		// TODO: x-if an oops page with a reload button.
+		// TODO: if an oops page with a reload button.
 
 	})
 
@@ -146,7 +146,7 @@ function sign_out(opt) {
 	}, opt))
 }
 
-widget('x-usr-button', function(e) {
+widget('usr-button', function(e) {
 
 	button.construct(e)
 
@@ -164,7 +164,7 @@ widget('x-usr-button', function(e) {
 				multilang: config('multilang', true),
 			}))
 			tt = tooltip({
-				classes: 'x-usr-tooltip',
+				classes: 'usr-tooltip',
 				target: e, side: 'bottom', align: 'start',
 				text: usr_form,
 				close_button: true,
@@ -203,7 +203,7 @@ on('usr_usr_dropdown.init', function(e) {
 	})
 })
 
-widget('x-usr-lang-dropdown', function(e) {
+widget('usr-lang-dropdown', function(e) {
 
 	lookup_dropdown.construct(e)
 
@@ -291,7 +291,7 @@ function sign_in() {
 	return d
 }
 
-widget('x-sign-in-dialog', function(e) {
+widget('sign-in-dialog', function(e) {
 
 	e.style.display = 'contents'
 
