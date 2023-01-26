@@ -336,8 +336,8 @@ DEBUG_ELEMENT_BIND = false
 PROFILE_BIND_TIME = true
 SLOW_BIND_TIME_MS = 10
 DEBUG_UPDATE = false
-DEBUG_CSS_USAGE = true
-DEBUG_CSS_SPECIFICITY = true
+DEBUG_CSS_USAGE = false
+DEBUG_CSS_SPECIFICITY = false
 
 let e = Element.prototype
 
@@ -447,10 +447,9 @@ on_dom_load(function() {
 				add_rule(rule)
 		}
 	}
-	for (let sheet of document.styleSheets) {
-		assert(!sheet.ownerNode.css_in_js_layer)
-		add_rules(sheet.cssRules)
-	}
+	for (let sheet of document.styleSheets)
+		if (!sheet.ownerNode.css_in_js_layer)
+			add_rules(sheet.cssRules)
 	let t1 = time()
 	debug('CSS-in-JS mapped', n, 'rules in', floor((t1 - t0) * 1000), 'ms')
 })
@@ -465,6 +464,8 @@ css_layer = memoize(function(layer) {
 	let style = document.createElement('style')
 	style.setAttribute('x-layer', layer) // for debugging.
 	style.css_in_js_layer = true // we map classes ourselves.
+		document.head.append(style)
+		css_layers.push(layer)
 
 	on_dom_load(function() {
 		pieces.push('\n} /*layer*/')
@@ -475,8 +476,6 @@ css_layer = memoize(function(layer) {
 			else
 				final_pieces.push(piece)
 		style.textContent = final_pieces.join('')
-		document.head.append(style)
-		css_layers.push(layer)
 	})
 
 	function add_includes(includes, pieces, e) {
@@ -487,22 +486,28 @@ css_layer = memoize(function(layer) {
 					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 				continue
 			}
-			pieces.push('\n\t', props)
 			let cls_includes = class_includes[cls]
 			if (cls_includes) {
 				add_includes(cls_includes, pieces, e)
 			}
+			pieces.push('\n\t', props)
 			utils_usage[cls] = (utils_usage[cls] || 0)+1
 		}
 	}
 
 	function add_rule(selector, includes, props) {
 		if (includes == null && props == null) { // verbatim CSS, eg. @keyframes
-			pieces.push(selector)
+			pieces.push(selector.trim())
+			return
+		}
+		if (isarray(selector)) {
+			for (let sel of selector)
+				add_rule(sel, includes, props)
 			return
 		}
 		// ::before needs to be outside :where(), so we must split the selector.
-		let [prefix, suffix] = selector.captures(/^(.+?)(::[^ >#:\.+~]+)$/)
+		selector = selector.trim()
+		let [prefix, suffix] = selector.captures(/^(.+?)(\s*::[^ >#:\.+~,]+)$/)
 		if (!prefix) {
 			prefix = selector
 			suffix = ''
@@ -537,8 +542,16 @@ css_state         = css_layer('state')
 css_role          = css_layer('role')
 css_role_state    = css_layer('role-state')
 css_generic_state = css_layer('generic-state')
+css_util          = css_layer('util')
 
-// utils.css usage ranking ---------------------------------------------------
+function css_and_children(parent_selector, child_selector) {
+	return [
+		parent_selector + child_selector,
+		parent_selector + ' ' + child_selector,
+	]
+}
+
+// css.js usage ranking ------------------------------------------------------
 
 function css_rank_utils_usage() {
 	if (!DEBUG_CSS_USAGE)
@@ -1668,7 +1681,7 @@ publishes:
 NOTE: The `disabled` state is a concerted effort located in multiple places:
 - pointer events are blocked in their wrapper (raw events still work).
 - forcing the default cursor on the element and its children is done with css.
-- showing the element grayed out with 50% transparency is done with css.
+- showing the element with .5 opacity is done with css.
 - keyboard focusing is disabled in make_focusable().
 
 NOTE: `:hover` and `:active` still apply to a disabled element, unless you
@@ -1771,24 +1784,25 @@ e.make_disablable = function() {
 publishes:
 	e.tabindex
 	e.focusable
+sets css classes:
+	focusable
 --------------------------------------------------------------------------- */
 
 e.make_focusable = function(fe) {
 
 	let e = this
 
-	if (e.props.tabindex)
+	if (e.props && e.props.tabindex)
 		return
 
 	fe = fe || e
-
-	let focusable = true
 
 	if (!fe.hasattr('tabindex'))
 		fe.attr('tabindex', 0)
 
 	function update() {
-		let can_be_focused = focusable && !e.disabled
+		let can_be_focused = e.focusable && !e.disabled
+		e.class('focusable', can_be_focused)
 		fe.attr('tabindex', can_be_focused ? e.tabindex : (fe instanceof HTMLInputElement ? -1 : null))
 		if (!can_be_focused)
 			e.blur()
@@ -1797,14 +1811,9 @@ e.make_focusable = function(fe) {
 	e.do_after('set_disabled', update)
 
 	e.set_tabindex = update
-	e.prop('tabindex', {type: 'number', default: 0})
-
-	e.property('focusable', () => focusable, function(v) {
-		v = !!v
-		if (v == focusable) return
-		focusable = v
-		update()
-	})
+	e.set_focusable = update
+	e.prop('tabindex' , {type: 'number', default: 0})
+	e.prop('focusable', {type: 'bool', private: true, default: true})
 
 	let inh_focus = e.focus
 	e.focus = function() {
@@ -1815,6 +1824,27 @@ e.make_focusable = function(fe) {
 	}
 
 }
+
+// tab cycling within the app, popups & modauls ------------------------------
+
+document.on('keydown', function(key, shift, ctrl, alt, ev) {
+	if (key == 'Tab') {
+		let popup = ev.target.closest('.popup, .modal')
+		popup = popup || document.body // TODO: make this configurable.
+		if (!popup)
+			return
+		let focusables = popup.focusables()
+		if (!focusables.length)
+			return
+		if (shift && ev.target == focusables[0]) {
+			focusables.last.focus()
+			return false
+		} else if (!shift && ev.target == focusables.last) {
+			focusables[0].focus()
+			return false
+		}
+	}
+})
 
 /* deferred DOM updating -----------------------------------------------------
 
@@ -2715,7 +2745,7 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 
 // modals & overlays ---------------------------------------------------------
 
-// from utils.css but we don't depend on that.
+// from css.js but we don't depend on that.
 css('.overlay', '', `
 	position: absolute;
 	left: 0;
@@ -2756,27 +2786,6 @@ e.modal = function(on) {
 	}
 	return e
 }
-
-// tab cycling within the app, popups & modauls ------------------------------
-
-document.on('keydown', function(key, shift, ctrl, alt, ev) {
-	if (key == 'Tab') {
-		let popup = ev.target.closest('.popup, .modal')
-		popup = popup || document.body // TODO: make this configurable.
-		if (!popup)
-			return
-		let focusables = popup.focusables()
-		if (!focusables.length)
-			return
-		if (shift && ev.target == focusables[0]) {
-			focusables.last.focus()
-			return false
-		} else if (!shift && ev.target == focusables.last) {
-			focusables[0].focus()
-			return false
-		}
-	}
-})
 
 // lazy image loading --------------------------------------------------------
 
@@ -3252,8 +3261,8 @@ function live_move_mixin(e) {
 
 // theming -------------------------------------------------------------------
 
-// NOTE: divs.js is independent of any css, including utils.css.
-// These class names are the only references to utils.css.
+// NOTE: divs.js is independent of any css, including css.js.
+// These class names are the only references to css.js.
 
 function is_theme_dark() {
 	return root.hasclass('theme-dark')
@@ -3337,6 +3346,7 @@ function css_selector_specificity(s0) {
 }
 
 function css_report_specificity(file, max_spec) {
+	max_spec = max_spec || {base: 1.1, state: 2.1, _default: 1}
 	let t0 = time()
 	let n = 0
 	function check_rule(rule, layer_name) {
@@ -3378,7 +3388,6 @@ on_dom_load(function() {
 		return
 	for (let layer of css_layers)
 		css_report_specificity(css_layer(layer), {[layer] : 0.1})
-	css_report_specificity('utils.css', {base: 1.1, state: 2.1, _default: 1})
 })
 
 } // module scope

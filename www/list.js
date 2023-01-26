@@ -32,11 +32,11 @@ css('.list-item', 'p-x-input p-y-input b b-invisible arrow rel', `
 
 css('.list-item', 'noclip')
 
-css('.list.moving .list-item:not(.moving)', '', `
+css_state('.list.moving .list-item:not(.moving)', '', `
 	transition: top .1s, left .1s, right .1s;
 `)
 
-css('.list.picker', 'scroll', `
+css_role('.list.picker', 'scroll', `
 	max-height: 300px;
 	resize: both;
 `)
@@ -495,8 +495,6 @@ css('.select-btn .item', 'b ro05 noselect', `
 	background-color: var(--bg-select-button);
 `)
 
-css('.select-btn .item:first-child', 'ro-l-0')
-css('.select-btn  .item:last-child', 'ro-r-0')
 css('.select-btn .item:not(:first-child)', 'b-l-0')
 
 css_state('.select-btn .item:hover', '', `
@@ -511,6 +509,7 @@ widget('select-btn', function(e) {
 
 	listbox.construct(e)
 
+	e.class('ro-group-h')
 	e.orientation = 'horizontal'
 	e.can_move_rows = false
 	e.auto_focus_first_cell = false

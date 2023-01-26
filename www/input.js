@@ -442,29 +442,33 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 
 css('.btn', 'v m-y-05')
 
-css('.btn-focus-box', 'h-c h-bl b ro075 bold noselect hand p-x-4 p-y', `
-	background: var(--bg-button);
-	box-shadow: var(--shadow-button);
+css('.btn-focus-box', 'h-c h-bl b ro075 bold noselect p-x-4 p-y', `
+	background : var(--bg-button);
+	color      : var(--fg-button);
+	box-shadow : var(--shadow-button);
 `)
 
 css('.btn-focus-box.text-empty', 'p-x-2 h-c h-m')
-css('.btn-icon', 'w1 h-c')
 css('.btn-focus-box:not(.text-empty) .btn-icon', 'm-r')
+css('.btn-icon', 'w1 h-c')
 
 css_state('.btn:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
 	background-color: var(--bg-button-hover);
 `)
 css_state('.btn .btn-focus-box.active', '', `
-	background-color: var(--bg-button-pressed);
-	box-shadow: var(--shadow-button-pressed);
+	background: var(--bg-button-active);
+	box-shadow: var(--shadow-button-active);
 `)
 
-css('.btn[primary] .btn-focus-box', 'b-invisible bg-link fg-inverted')
+css('.btn[primary] .btn-focus-box', 'b-invisible', `
+	background : var(--bg-button-primary);
+	color      : var(--fg-button-primary);
+`)
 css_state('.btn[primary]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
-	background: var(--fg-link-hover);
+	background : var(--bg-button-primary-hover);
 `)
 css_state('.btn[primary] .btn-focus-box.active', '', `
-	background: var(--fg-link-active);
+	background : var(--bg-button-primary-active);
 `)
 
 css('.btn[danger] .btn-focus-box', '', `
@@ -472,10 +476,10 @@ css('.btn[danger] .btn-focus-box', '', `
 	color      : var(--fg-button-danger);
 `)
 css_state('.btn[danger]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
-	background-color: var(--bg-button-danger-hover);
+	background : var(--bg-button-danger-hover);
 `)
 css_state('.btn[danger] .btn-focus-box.active', '', `
-	background-color: var(--bg-button-danger-pressed);
+	background : var(--bg-button-danger-active);
 `)
 
 // bare buttons (no borders)
@@ -501,8 +505,6 @@ css(`
 	}
 }
 `)
-
-css_role('.btn.widget-editing', 'hand')
 
 widget('btn', 'Input', function(e) {
 
@@ -616,7 +618,7 @@ widget('btn', 'Input', function(e) {
 			}
 			return
 		}
-		if (key == 'Escape') {
+		if (e.hasclass('active') && key == 'Escape') {
 			set_active(false, true)
 			return false
 		}
@@ -739,14 +741,11 @@ calls:
 --------------------------------------------------------------------------- */
 
 css('.input-widget', 'v')
-css('.input-widget[readonly]', '', 'opacity: .8;')
+css_state('.input-widget[readonly]', '', 'opacity: .8;')
 
-css('.input-widget:not(.with-label) .input-label', '', `
-	display: none;
-`)
+css('.input-widget:not(.with-label) .input-label', 'hidden')
 
-css('.focus-box', '', `
-	flex: 1; /* stretch vertically */
+css('.focus-box', 'S', `
 	position: relative; /* for abs. pos. animated labels */
 	border-width: 1px;
 	border-style: dotted;
@@ -938,7 +937,7 @@ css('.markbox', 'w1', `
 	width: auto; /* shrink-wrap */
 `)
 
-css('.markbox .focus-box', 'h-m clip p-x-input p-y-input')
+css('.markbox .focus-box', 'h-m clip p-x-input p-y-input arrow')
 
 css('.markbox.with-label .focus-box', '', `
 	line-height: initial;
@@ -954,23 +953,12 @@ css('.markbox-icon', 'link', `
 	justify-self: center;
 `)
 
-css(`
-	.markbox-label,
-	.markbox-label *,
-	.markbox-icon
-`, 'hand')
-
 css('.markbox[align=right] .focus-box    ', '', ` justify-content: end; `)
 css('.markbox[align=right] .markbox-icon ', 'order-2')
 css('.markbox[align=right] .markbox-label', 't-r')
 
 css('.markbox[align=left ] .markbox-label', 'p-l')
 css('.markbox[align=right] .markbox-label', 'p-r')
-
-css('.markbox[button_style=toggle]              .markbox-label', 'S')
-css('.markbox[button_style=toggle][align=right] .markbox-icon ', 'order-2')
-css('.markbox[button_style=toggle][align=right] .markbox-label', 'p-l-0 p-r')
-css('.markbox[button_style=toggle][align=left ] .markbox-label', 'p-l p-r-0')
 
 css('.markbox .input-info-button', 'p-r-0', `
 	margin-left: auto;
@@ -994,10 +982,15 @@ css_role('.markbox.grid-editor .focus-box', 'h-c h-m')
 // checkbox
 // ---------------------------------------------------------------------------
 
-css('.checkbox-icon', 'large')
-css('.checkbox-icon.toggle', 'xlarge')
-
 css_role('.linear-form :is(.checkbox, .checkbofocus-box)', 'skip')
+
+css('.checkbox-icon', 'large')
+css_state('.checkbox-icon::before', 'far fa-square')
+css_state('.checkbox-icon.checked::before', 'fa fa-check-square')
+
+css('.checkbox[button_style=toggle] > .focus-box > .checkbox-icon', 'xlarge')
+css_state('.checkbox[button_style=toggle] > .focus-box > .checkbox-icon::before', 'xlarge fa fa-toggle-off')
+css_state('.checkbox[button_style=toggle] > .focus-box > .checkbox-icon.checked::before', 'fa-toggle-on')
 
 widget('checkbox', 'Input', function(e) {
 
@@ -1011,7 +1004,7 @@ widget('checkbox', 'Input', function(e) {
 	e.unchecked_val = false
 
 	e.label_show_star = false
-	e.icon_box = span({class: 'markbox-icon checkbox-icon far fa-square'})
+	e.icon_box = span({class: 'markbox-icon checkbox-icon'})
 	e.label_box = span({class: 'input-label markbox-label checkbox-label'})
 	e.focus_box = div({class: 'focus-box checkbofocus-box'}, e.icon_box, e.label_box)
 	e.add(e.focus_box)
@@ -1023,17 +1016,8 @@ widget('checkbox', 'Input', function(e) {
 		e.add(btn)
 	}
 
-	function update_icon() {
-		let ie = e.icon_box
-		ie.class('toggle fa far fa-square fa-check-square fa-toggle-on fa-toggle-off', false)
-		if (e.button_style == 'toggle')
-			ie.classes = 'toggle fa fa-toggle-'+(e.checked ? 'on' : 'off')
-		else
-			ie.classes = e.checked ? 'fa fa-check-square' : 'far fa-square'
-	}
-
 	e.prop('button_style', {type: 'enum', enum_values: 'checkbox toggle',
-			default: 'checkbox', attr: true})
+		default: 'checkbox', attr: true})
 
 	// model
 
@@ -1050,7 +1034,7 @@ widget('checkbox', 'Input', function(e) {
 	e.do_update_val = function(v) {
 		let c = e.checked
 		e.class('checked', c)
-		update_icon()
+		e.icon_box.class('checked', c)
 		e.class('no-field', !e._field)
 	}
 
@@ -1133,8 +1117,8 @@ widget('checkbox', 'Input', function(e) {
 })
 
 widget('toggle', 'Input', function(e) {
-	e.props.button_style = {default: 'toggle'}
-	e.props.align        = {default: 'right'}
+	attr(e.props, 'button_style').default = 'toggle'
+	attr(e.props, 'align'       ).default = 'right'
 	return checkbox.construct(e)
 })
 
@@ -1189,36 +1173,40 @@ widget('radiogroup', 'Input', function(e) {
 	// do_update_val() must be called after the items are added!
 	e.do_before('do_update', function(opt) {
 
-		if (opt.new_items) {
-			for (let item of opt.new_items) {
-				let ri = div({class: 'radio-item'})
-				ri.icon_box = span({class: 'markbox-icon radio-icon far fa-circle'})
-				ri.label_box = item
-				ri.label_box.attr('tabindex', 0)
-				ri.label_box.class('input-label markbox-label radio-label')
-				item._radio_item = ri
-				ri.attr('align', e.align)
-				ri.item = item
-				ri.add(ri.icon_box, ri.label_box)
-				function pointerdown() {
-					select_radio_item(ri)
-					return false
+		let items = opt.items
+		if (isarray(items))
+			items = set(items)
+		if (items) {
+
+			for (let item of e.items_box.at)
+				if (!items.has(item)) {
+					item._radio_item.remove()
+					item._radio_item = null
 				}
-				ri.icon_box .on('pointerdown', pointerdown)
-				ri.label_box.on('pointerdown', pointerdown)
-				ri.on('keydown', radio_item_keydown)
-				e.items_box.add(ri)
-			}
-		}
 
-		if (opt.removed_items)
-			for (let item of opt.removed_items)
-				item._radio_item.remove()
-
-		if (opt.items) {
 			e.items_box.innerHTML = null
-			for (let item of opt.items) {
-				e.items_box.append(item._radio_item)
+			for (let item of items) {
+				if (!item._radio_item) {
+					let ri = div({class: 'radio-item'})
+					ri.icon_box = span({class: 'markbox-icon radio-icon far fa-circle'})
+					ri.label_box = item
+					ri.label_box.make_focusable()
+					ri.label_box.class('input-label markbox-label radio-label')
+					item._radio_item = ri
+					ri.attr('align', e.align)
+					ri.item = item
+					ri.add(ri.icon_box, ri.label_box)
+					function pointerdown() {
+						select_radio_item(ri)
+						return false
+					}
+					ri.icon_box .on('pointerdown', pointerdown)
+					ri.label_box.on('pointerdown', pointerdown)
+					ri.on('keydown', radio_item_keydown)
+					e.items_box.add(ri)
+				} else {
+					e.items_box.append(item._radio_item)
+				}
 			}
 		}
 
@@ -1227,6 +1215,7 @@ widget('radiogroup', 'Input', function(e) {
 			e.info_box = div({class: 'input-info'})
 			e.add(div({class: 'linear-form-filler'}), e.info_box)
 		}
+
 		if (e.info_box) {
 			e.info_box.set(info)
 			e.info_box.hide(!info)
@@ -1339,8 +1328,8 @@ css('.editbox', '', `
 
 // h-bl: the only way to get variable-width inputs that are baseline-aligned.
 css('.editbox .focus-box', 'h-bl p-y-input clip b', `
-	padding-left    : calc(var(--padding-inp) + 1);
-	padding-right   : calc(var(--padding-inp) - 1);
+	padding-left    : calc(var(--padding-x-input) + 1);
+	padding-right   : calc(var(--padding-x-input) - 1);
 	background      : var(--bg-input);
 `)
 
@@ -1354,7 +1343,7 @@ css('.input-placeholder', 'bg-smoke', `
 
 css('.input-placeholder::before', 'zwsp')
 
-css('.editboinp', 'm0 b0 p0 no-bg t-l', ` /* for editbox's input-box and value-box */
+css('.editbox-input', 'm0 b0 p0 no-bg t-l', ` /* for editbox's input-box and value-box */
 	font-size: inherit;
 	font-family: inherit;
 	width: 100%;             /* stretch horizontally */
@@ -1362,9 +1351,9 @@ css('.editboinp', 'm0 b0 p0 no-bg t-l', ` /* for editbox's input-box and value-b
 	color: inherit;
 `)
 
-css('.editbox[align=right] .editboinp', 't-r')
+css('.editbox[align=right] .editbox-input', 't-r')
 
-css('.editbox[mono] .editboinp', 'mono')
+css('.editbox[mono] .editbox-input', 'mono')
 
 // editbox with animated inner label/placeholder -----------------------------
 
@@ -1380,7 +1369,7 @@ css('.editbox-label', 'abs t-t op1 label nowrap arrow', `
 
 css('.editbox[mode=inline] .focus-box', 'b0 ro0 b-b b-fg b-dashed')
 
-css('.editbox[mode=inline] .editboinp', '', `
+css('.editbox[mode=inline] .editbox-input', '', `
 	padding-bottom: .1em;
 `)
 
@@ -1404,7 +1393,7 @@ css(`
 // editbox copy-to-clipboard button ------------------------------------------
 
 css('.editbox-copy-to-clipboard-button', 'm0 b-l ro0', `
-	margin-right: calc(0px - var(--padding-inp));
+	margin-right: calc(0px - var(--padding-x-input));
 `)
 
 css('.editbox-copy-to-clipboard-button img', '', `
@@ -1421,11 +1410,11 @@ css_state('.editbox.invalid .editbox-label', 'fg-error')
 
 css_state('.editbox[mode=inline]:focus-within .focus-box', 'no-shadow')
 
-css_state('.editbox[mode=inline].with-label:focus-within .editboinp', '', `
+css_state('.editbox[mode=inline].with-label:focus-within .editbox-input', '', `
 	padding-bottom: .1em;
 `)
 
-css_state('.editbox[mode=inline].with-label:not(.empty) .editboinp', '', `
+css_state('.editbox[mode=inline].with-label:not(.empty) .editbox-input', '', `
 	padding-bottom: .1em;
 `)
 
@@ -1443,7 +1432,7 @@ css_role('.linear-form > .editbox', 'skip')
 /* NOTE: .dropdown is applied along with .editbox ! */
 
 // default mode: shrink-wrap, no-wrap
-css('.dropdown', 'hand nowrap', `
+css('.dropdown', 'nowrap', `
 	width: auto;
 	min-width: 1em;
 `)
@@ -1456,9 +1445,8 @@ css('.editbox-value', 'S p-r-05 h-m nowrap', `
 	width: auto;
 `)
 
-css('.editbox-value:empty::before', 'zwsp')
-
-css('.editbox-value.null', 'gray')
+css_state('.editbox-value:empty::before', 'zwsp')
+css_state('.editbox-value.null', 'dim')
 
 css('.dropdown-button', 'p-l', `
 	border-left-style: inherit;
@@ -1467,12 +1455,12 @@ css('.dropdown-button', 'p-l', `
 `)
 
 css('.dropdown-more-button', 'p-x-input h-m small', `
-	margin-left: calc(0px - var(--padding-inp));
+	margin-left: calc(0px - var(--padding-x-input));
 	align-self: stretch;
 `)
 
 css('.dropdown[align=right] .editbox-value', 'order-2 p-l-05', `
-	padding-right: var(--padding-inp);
+	padding-right: var(--padding-x-input);
 `)
 
 // inline mode: variable-width, no-wrap with no min-width.
@@ -1515,7 +1503,7 @@ css_state('.dropdown-button.up', '', `
 `)
 */
 
-css_state('.dropdown-more-button.active', 'gray')
+css_state('.dropdown-more-button.active', 'dim')
 
 css_state('.dropdown[mode=inline]:is(:focus-within, .open) .focus-box', 'no-shadow')
 
@@ -1536,11 +1524,11 @@ function editbox_widget(e, opt) {
 	if (has_input) {
 		e.input = tag(opt && opt.input_tag || 'input', {
 			autocomplete: 'off',
-			class: 'editboinp',
+			class: 'editbox-input',
 		})
 		e.input_box = e.input
 	} else {
-		e.val_box = e.val_box || div({class: 'editboinp editbox-value'})
+		e.val_box = e.val_box || div({class: 'editbox-input editbox-value'})
 		e.input_box = e.val_box
 	}
 
@@ -2133,15 +2121,15 @@ css('.lineedit', 'S')
 
 css('.lineedit .focus-box', 'S p-r-0')
 
-css('textarea.editboinp', '', `
+css('textarea.editbox-input', '', `
 	resize: none;
-	padding-right: var(--padding-inp);
+	padding-right: var(--padding-x-input);
 	overflow-y: overlay; /* Chrome only */
 	overflow-x: overlay; /* Chrome only */
 	cursor: auto;
 `)
 
-css('.lineedit .editboinp', '', `
+css('.lineedit .editbox-input', '', `
 	align-self: stretch;
 `)
 
@@ -2242,32 +2230,32 @@ css('.spinedit-btn', 'hidden p-x-input')
 css('.spinedit-btn.left ', 'show b-r')
 css('.spinedit-btn.right', 'show b-l')
 
-css(`
-	.spinedit-btn.fa-plus,
-	.spinedit-btn.fa-minus
-`, 'small', `
+css([
+	'.spinedit-btn.fa-plus',
+	'.spinedit-btn.fa-minus',
+], 'small', `
 	align-self: center;
 `)
-css('.spinedit-btn.fa-minus.leftmost', '', `padding-left  : calc(1.428 * var(--padding-inp)); `)
-css('.spinedit-btn.fa-plus.rightmost', '', `padding-right : calc(1.428 * var(--padding-inp)); `)
+css('.spinedit-btn.fa-minus.leftmost', '', `padding-left  : calc(1.428 * var(--padding-x-input)); `)
+css('.spinedit-btn.fa-plus.rightmost', '', `padding-right : calc(1.428 * var(--padding-x-input)); `)
 
-css('.spinedit-btn.fa-caret-left ', '', ` padding-right : calc(.5 * var(--padding-inp)); `)
-css('.spinedit-btn.fa-caret-right', '', ` padding-left  : calc(.5 * var(--padding-inp)); `)
+css('.spinedit-btn.fa-caret-left ', '', ` padding-right : calc(.5 * var(--padding-x-input)); `)
+css('.spinedit-btn.fa-caret-right', '', ` padding-left  : calc(.5 * var(--padding-x-input)); `)
 
 // inner label adjustments
 
-css('.spinedit:is([button_placement=left], [button_placement=each-side]) .editbox-label.empty', '', `
+css_state('.spinedit:is([button_placement=left], [button_placement=each-side]) .editbox-label.empty', '', `
 	padding-left: 2em;
 `)
 
-css('.spinedit[button_style=left-right]:is([button_placement=left], [button_placement=each-side]) .editbox-label.empty', '', `
+css_state('.spinedit[button_style=left-right]:is([button_placement=left], [button_placement=each-side]) .editbox-label.empty', '', `
 	padding-left: 1.5em;
 `)
 
-css(`
-	.spinedit.with-label .spinedit-btn.fa-plus,
-	.spinedit.with-label .spinedit-btn.fa-minus
-`, '', `
+css([
+	'.spinedit.with-label .spinedit-btn.fa-plus',
+	'.spinedit.with-label .spinedit-btn.fa-minus',
+], '', `
 	align-self: baseline;
 `)
 
@@ -2385,7 +2373,7 @@ css('.tagsedit-button-expand', 'p-r')
 
 css('.tagsedit-bubble', 'click-through-off')
 
-css('.tagsedit-tag', 'b ro05 bg1 p-x-05 hand clip', `
+css('.tagsedit-tag', 'b ro05 bg1 p-x-05 clip', `
 	display: inline;
 	padding-top    : 3px;
 	padding-bottom : 2px;
@@ -2393,7 +2381,7 @@ css('.tagsedit-tag', 'b ro05 bg1 p-x-05 hand clip', `
 	line-height: 1;
 `)
 
-css('.tagsedit-tag-xbutton', 'gray', `
+css('.tagsedit-tag-xbutton', 'dim', `
 	padding-left : .4em;
 	padding-right: .2em;
 	font-size: 70%;
@@ -2408,18 +2396,18 @@ css('.tagsedit.with-label[mode=fixed]', '', `
 
 css('.tagsedit[mode=fixed] .tagsedit-tags-box', 'flex-nowrap')
 
-css(`
-	.tagsedit[mode=fixed] .tagsedit-tag,
-	.tagsedit-bubble .tagsedit-tag
-`, 'flex-nowrap nowrap')
+css([
+	'.tagsedit[mode=fixed] .tagsedit-tag',
+	'.tagsedit-bubble .tagsedit-tag',
+], 'flex-nowrap nowrap')
 
 css_state('.tagsedit.invalid .tagsedit-tag', '', `
 	background-color: var(--bg-focused-error);
 `)
 
-css_state('.tagsedit.invalid .tagsedit-tag-xbutton', 'gray-inverted')
+css_state('.tagsedit.invalid .tagsedit-tag-xbutton', 'dim-on-dark')
 
-css_state('.tagsedit:not([disabled]) .tagsedit-tag:hover', 'hand bg2')
+css_state('.tagsedit:not([disabled]) .tagsedit-tag:hover', 'bg2')
 
 css_state('.tagsedit:not([disabled]) .tagsedit-tag:hover .tagsedit-tag-xbutton', '', `
 	color: inherit;
@@ -2439,7 +2427,7 @@ widget('tagsedit', 'Input', function(e) {
 	let S_expand = S('expand', 'expand') + ' (Enter)'
 	let S_condense = S('condense', 'condense') + ' (Enter)'
 
-	e.input = tag('input', {class: 'editboinp tagsedit-input'})
+	e.input = tag('input', {class: 'editbox-input tagsedit-input'})
 	e.label_box = div({class: 'editbox-label tagsedit-label'})
 	e.expand_button = div({class: 'tagsedit-button-expand fa fa-caret-down',
 		title: S_expand,
@@ -2701,7 +2689,7 @@ widget('tagsedit', 'Input', function(e) {
 // placeedit widget with autocomplete via google places api
 // ---------------------------------------------------------------------------
 
-css('.placepin', 'm-r hand')
+css('.placepin', 'm-r')
 
 css_state('.placepin.disabled', 'arrow', `
 	opacity: .3;
@@ -2777,7 +2765,7 @@ widget('placeedit', 'Input', function(e) {
 // google maps widget
 // ---------------------------------------------------------------------------
 
-css('.googlemaps', 'h-c h-m gray bg1', `
+css('.googlemaps', 'h-c h-m dim bg1', `
 
 	/* layout self */
 	min-height: calc(var(--min-height-input) * 2 + var(--space-s));
@@ -2786,7 +2774,7 @@ css('.googlemaps', 'h-c h-m gray bg1', `
 	display: flex !important; /* override fontawesome !important */
 `)
 
-css('.googlemaps)::before', '', `
+css('.googlemaps::before', '', `
 	font-size: 2em !important; /* override fontawesome !important */
 `)
 
@@ -3027,14 +3015,14 @@ css('.calendar-weekview', '', `
 	border-spacing: 0;
 `)
 
-css('.calendar-weekday', 'gray', `
+css('.calendar-weekday', 'dim', `
 	font-weight: normal;
 `)
 
-css(`
-	.calendar-day,
-	.calendar-weekday
-`, 'small t-c p')
+css([
+	'.calendar-day',
+	'.calendar-weekday',
+], 'small t-c p')
 
 css('.calendar-day', 'arrow')
 
@@ -3050,16 +3038,16 @@ css('.calendar-sel-day-suffix', 'S p-t-05', `
 	align-self: flex-start;
 `)
 
-css(`
-	.calendar-sel-month,
-	.calendar-sel-year
-`, 'b0')
+css([
+	'.calendar-sel-month',
+	'.calendar-sel-year',
+], 'b0')
 
 css('.calendar-sel-year', 'm-l', `
 	width: 8em;
 `)
 
-css('.calendar-sel-year .editboinp', '', `
+css('.calendar-sel-year .editbox-input', '', `
 	max-width: 2.5em;
 `)
 
@@ -3080,21 +3068,21 @@ css('.calendar-month-name', '', `
 	min-width: 2.5em;
 `)
 
-css('.calendar-sel-day:empty::before', 'zwsp')
-css('.calendar-sel-day-suffix:empty::before', 'zwsp')
-css('.calendar-day:empty::before', 'zwsp')
+css_state('.calendar-sel-day:empty::before', 'zwsp')
+css_state('.calendar-sel-day-suffix:empty::before', 'zwsp')
+css_state('.calendar-day:empty::before', 'zwsp')
 
 css('.calendar-sel-hms', '', `
 	min-width: 0;
 	width: 2.5em;
 `)
 
-css_state('.calendar-day:not(.current-month)'        , 'gray')
+css_state('.calendar-day:not(.current-month)'        , 'dim')
 css_state('.calendar-day.today'                      , '', ` outline: 1px dashed var(--bg-today); `)
 css_state('.calendar .calendar-day.today:hover'    , '', ` background-color: var(--bg-today); `)
 css_state('.calendar.invalid .calendar-day.focused', '', ` background-color: var(--bg-error); `)
 
-css_state('.calendar-month-box:not(.focused) .calendar-month-num', 'gray')
+css_state('.calendar-month-box:not(.focused) .calendar-month-num', 'dim')
 
 // calendar as picker --------------------------------------------------------
 
@@ -3485,7 +3473,7 @@ widget('calendar', 'Input', function(e) {
 // ---------------------------------------------------------------------------
 
 css('.dateedit-calendar-button', '', `
-	margin-left: calc(0px - var(--padding-inp));
+	margin-left: calc(0px - var(--padding-x-input));
 `)
 
 widget('dateedit', 'Input', function(e) {
@@ -3541,7 +3529,7 @@ css('.timepicker-sel::-webkit-scrollbar', '', `
 	width : 12px;
 `)
 
-css('.timepicker-heading', 'p small gray')
+css('.timepicker-heading', 'p small dim')
 
 css('.timepicker-heading-m', 'b-l b-dotted')
 css('.timepicker-heading-s', 'b-l b-dotted')
@@ -3649,7 +3637,7 @@ widget('timepicker', 'Input', function(e) {
 // time-of-day edit
 // ---------------------------------------------------------------------------
 
-css('.timeofdayedit .editboinp', 't-c')
+css('.timeofdayedit .editbox-input', 't-c')
 
 css('.timeofdayedit .timeofdayedit-timepicker-button', '', `
 	margin-left: -2em;
@@ -4248,8 +4236,8 @@ widget('switcher', 'Containers', function(e) {
 // ---------------------------------------------------------------------------
 
 css('.x-label', '', `
-	margin-left : var(--padding-inp);
-	margin-right: var(--padding-inp);
+	margin-left : var(--padding-x-input);
+	margin-right: var(--padding-x-input);
 	color: var(--fg-label);
 `)
 
@@ -4384,10 +4372,10 @@ css('.frm.compact', 'small', `
 
 css('.frm.compact > :is(h1, h2, h3)', 'hidden')
 
-css(`
-	.frm.compact > .widget:not(.inp),
-	.frm.compact > .inp > .widget)
-`, 'm0 ro0', `
+css([
+	'.frm.compact > .widget:not(.inp)',
+	'.frm.compact > .inp > .widget',
+], 'm0 ro0', `
 	border-top-color  : rgb(0,0,0,0);
 	border-left-color : rgb(0,0,0,0);
 	border-right-color: rgb(0,0,0,0);

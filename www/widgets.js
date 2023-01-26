@@ -57,6 +57,8 @@ css_light('', '', `
 	--padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
 	--padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
 
+	--border-radius-input : 0;
+
 	--border-focused                : #99d; /* dropdown open */
 	--outline-markbox-focused       : #88888866;
 
@@ -71,12 +73,12 @@ css_light('', '', `
 	--width-input                 : 12em;
 
 	--font-size-input-label        : var(--font-size-small);
-	--font-size-input-label-empty  : var(--font-size-small); /* put 100% for animating floating label */
+	--font-size-input-label-empty  : var(--font-size-normal); /* put 100% for animating floating label */
 
 	--bg-moving       : #eeeeeeaa;
 	--bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
 	--bg-today        : #f33;
-	--fg-today        : var(--fg-inverted);
+	--fg-today        : white;
 	--fg-clickable    : #207fdf; /* markbox icon, slider */
 
 	--bg-select-button: var(--bg-button);
@@ -142,9 +144,9 @@ css('.x-ct', 'skip')
 
 */
 
-css_state('.item.disabled', 'gray')
-css_state('.item.null'    , 'gray')
-css_state('.item.empty'   , 'gray')
+css_state('.item.disabled', 'dim')
+css_state('.item.null'    , 'dim')
+css_state('.item.empty'   , 'dim')
 
 css_state('.item.row-focused' , '', ` background: var(--bg-row-focused);  `)
 css_state('.item.new'         , '', ` background: var(--bg-new);          `)
@@ -231,7 +233,7 @@ css_role_state('.widget-selected-overlay:focus', '', `
 css('.widget-placeholder', 'grid-h', `
 	justify-content: safe center;
 	align-content: center;
-	outline: 1px dashed var(--fg-gray);
+	outline: 1px dashed var(--fg-dim);
 	outline-offset: -1px;
 `)
 
@@ -630,12 +632,12 @@ css('.tooltip-content', 'p-x-2', `
 	display: inline-block; /* shrink-wrap and also word-wrap when reaching container width */
 `)
 
-css('.tooltip-xbutton', 't-t small gray p-y-05 p-x-2 b0 b-l hand', `
+css('.tooltip-xbutton', 't-t small dim p-y-05 p-x-2 b0 b-l', `
 	align-self: stretch;
 	pointer-events: all;
 `)
 
-css('.tooltip-xbutton:not([disabled]):not(.active):hover', '', `
+css_state('.tooltip-xbutton:not([disabled]):not(.active):hover', '', `
 	color: inherit;
 `)
 
@@ -683,15 +685,15 @@ css('.tooltip[kind=search] > .tooltip-tip ', '', ` color: var(--bg-search); `)
 
 css('.tooltip[kind=info  ] > .tooltip-body', '', ` background-color: var(--bg-info); color: var(--fg-info); `)
 css('.tooltip[kind=info  ] > .tooltip-tip ', '', ` color: var(--bg-info); `)
-css('.tooltip[kind=info  ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+css('.tooltip[kind=info  ] > .tooltip-body > .tooltip-xbutton', '', `color: var(--fg-dim-on-dark); border-color: var(--border-light-on-dark); `)
 
 css('.tooltip[kind=error ] > .tooltip-body', '', ` background-color: var(--bg-error); color: var(--fg-error); `)
 css('.tooltip[kind=error ] > .tooltip-tip ', '', ` color: var(--bg-error); `)
-css('.tooltip[kind=error ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+css('.tooltip[kind=error ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-dim-on-dark); border-color: var(--border-light-on-dark); `)
 
 css('.tooltip[kind=warn  ] > .tooltip-body', '', ` background-color: var(--bg-warn); color: var(--fg-warn); `)
 css('.tooltip[kind=warn  ] > .tooltip-tip ', '', ` color: var(--bg-warn); `)
-css('.tooltip[kind=warn  ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-gray-inverted); border-color: var(--fg-gray-inverted); `)
+css('.tooltip[kind=warn  ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-dim-on-dark); border-color: var(--border-light-on-dark); `)
 
 css('.tooltip[kind=cursor]', '', `
 	margin-left: .75em;
@@ -898,7 +900,7 @@ tooltip.icon_classes = {
 
 css('.toaster', 'hidden') // don't mess up the layout
 
-css('.toaster-message', 'op1 ease ease-1s')
+css('.toaster-message', 'op1 ease')
 
 widget('toaster', function(e) {
 
@@ -982,49 +984,26 @@ ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 // z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 // noclip: submenus are outside clipping area
 // fg: prevent inheritance by the .focused rule below.
-css('.menu', 'arial abs z4 noclip fg bg1 m0', `
-
-	font-size   : 12px;
-	line-height : 1.5;
-
-	/* layout self */
-	top: 0;
-	left: 0;
+css('.menu', 'm0 p0 b arial smaller abs z4 noclip bg1 shadow-menu noselect', `
 	min-width: 200px;
 	width: min-content; /* why the fuck is width:0 not working here? */
-
 	display: table;
-	border-collapse: collapse; /* separators are done with borders */
-
-	color: inherit;
 `)
 
 // submenus are anchored to this td
-css('.menu-tr > .menu-sub-td', 'rel', `
-	padding-right: .8em;
-`)
+css('.menu-tr > .menu-sub-td', 'rel')
 
-css('.menu-tr > td', '', `
-	padding: .4em;
-`)
+css('.menu-tr > td', 'p')
 
-css('.menu-tr > td:first-child', '', `
-	padding-left: .9em;
-`)
+css('.menu-tr > td:first-child', 'p-l-2')
 
-css('.menu-separator', '', `
-	height: 1em;
-`)
+css('.menu-separator', '', `height: 1em;`)
 
-css('.menu-heading', 'p-y p-l-2 bold gray arrow')
+css('.menu-heading', 'p-y p-l-2 bold dim')
 
 css('.menu-separator > hr', 'b0 b-t m-y')
 
-css('.menu-title-td', 'p0 p-l-0 clip nowrap', `
-	width: 100%;
-`)
-
-css_state('.menu', 'b no-outline shadow-menu')
+css('.menu-title-td', 'p0 p-y p-l-0 clip nowrap', `width: 100%;`)
 
 css_state('.menu-tr.focused > :not(.menu-table)', '', `
 	background : var(--bg-unfocused-selected);
@@ -1035,7 +1014,11 @@ css_state('.menu:focus-within .menu-tr.focused > :not(.menu-table)', '', `
 	background : var(--bg-focused-selected);
 `)
 
-css_state('.menu-tr.focused > td', 'arrow')
+css('.menu-check-div', 'p-x')
+css('.menu-check-div::before', 'icon-check') // fa fa-check
+
+css('.menu-sub-div', 'p-x')
+css('.menu-sub-div::before', 'icon-chevron-right') // fa fa-angle-right
 
 widget('menu', function(e) {
 
@@ -1067,7 +1050,7 @@ widget('menu', function(e) {
 	}
 
 	function create_item(item, disabled) {
-		let check_box = div({class: 'menu-check-div fa fa-check'})
+		let check_box = div({class: 'menu-check-div'})
 		let icon_box  = div({class: 'menu-icon-div'})
 		if (isstr(item.icon))
 			icon_box.classes = item.icon
@@ -1077,7 +1060,7 @@ widget('menu', function(e) {
 		let title_td  = tag('td', {class: 'menu-title-td'})
 		title_td.set(item.text)
 		let key_td    = tag('td', {class: 'menu-key-td'}, item.key)
-		let sub_box   = div({class: 'menu-sub-div fa fa-angle-right'})
+		let sub_box   = div({class: 'menu-sub-div'})
 		let sub_td    = tag('td', {class: 'menu-sub-td'}, sub_box)
 		sub_box.style.visibility = item.items ? null : 'hidden'
 		let tr = tag('tr', {class: 'item menu-tr'}, check_td, title_td, key_td, sub_td)
@@ -1093,7 +1076,7 @@ widget('menu', function(e) {
 	}
 
 	function create_heading(item) {
-		let td = tag('td', {class: 'menu-heading', colspan: 5})
+		let td = tag('td', {class: 'menu-heading', colspan: 4})
 		td.set(item.heading)
 		let tr = tag('tr', {}, td)
 		tr.focusable = false
@@ -1102,7 +1085,7 @@ widget('menu', function(e) {
 	}
 
 	function create_separator() {
-		let td = tag('td', {class: 'menu-separator', colspan: 5}, tag('hr'))
+		let td = tag('td', {class: 'menu-separator', colspan: 4}, tag('hr'))
 		let tr = tag('tr', {}, td)
 		tr.focusable = false
 		tr.on('pointerenter', separator_pointerenter)
@@ -1110,7 +1093,7 @@ widget('menu', function(e) {
 	}
 
 	function create_menu(table, items, is_submenu, disabled) {
-		table = table || tag('table')
+		table = table || tag('table', {cellspacing: 0, cellpadding: 0})
 		table.classes = 'widget menu'+(is_submenu ? ' menu-submenu' : '')
 		table.attr('tabindex', 0)
 		for (let i = 0; i < items.length; i++) {
@@ -1476,7 +1459,7 @@ css('.tabs-add-button', 'p-y-05 p-x-2 h-m')
 
 css('.tabs-add-button::before', 'small')
 
-css('.tabs-xbutton', 'abs gray arrow', `
+css('.tabs-xbutton', 'abs dim arrow', `
 	top: 2px;
 	right: 2px;
 	font-size: 70%;
@@ -1591,7 +1574,7 @@ widget('tabs', 'Containers', function(e) {
 					item._tab = null
 				}
 			}
-			e.tabs_div.clear()
+			e.tabs_div.innerHTML = null
 			for (let item of items) {
 				if (!item._tab) {
 					let xbutton = div({class: 'tabs-xbutton fa fa-times'})
@@ -1611,8 +1594,10 @@ widget('tabs', 'Containers', function(e) {
 					item.on('label_changed', item_label_changed)
 					update_tab_title(tab)
 					item._tab.x = null
+					e.tabs_div.add(tab)
+				} else {
+					e.tabs_div.append(item._tab)
 				}
-				e.tabs_div.add(item._tab)
 			}
 		}
 
@@ -1971,26 +1956,26 @@ css_state('.split[orientation=vertical  ] > .split-pane.collapsed', '', `
 `)
 
 css_state('.split.resize > .split-sizer', '', `
-	background-color: var(--border-hover);
+	background-color: var(--border-light-hover);
 	transition: background-color .2s;
 `)
 
 css('.split.collapsed > .split-sizer::before', '', `
 	content: '';
 	box-sizing: border-box;
-	border: 1px var(--fg-gray);
+	border: 1px var(--fg-dim);
 `)
 
 css('.split.collapsed > .split-sizer::before', '', `
 	position: fixed; /* show over contents */
 `)
 
-css('.split[orientation=horizontal].collapsed > .split-sizer::before', '', `
+css_state('.split[orientation=horizontal].collapsed > .split-sizer::before', '', `
 	min-width: 4px;
 	height: 24px;
 	border-style: none solid;
 `)
-css('.split[orientation=vertical  ].collapsed > .split-sizer::before', '', `
+css_state('.split[orientation=vertical  ].collapsed > .split-sizer::before', '', `
 	min-height: 4px;
 	width: 24px;
 	border-style: solid none;
@@ -2196,36 +2181,36 @@ widget('action-band', 'Input', function(e) {
 			let name = s.shift()
 			let spec = new Set(s)
 			let bname = name.replaceAll('-', '_').replace(/[^\w]/g, '')
-			let btn = e.buttons && e.buttons[bname]
-			let btn_sets_text = true
-			if (!(isnode(btn))) {
-				if (typeof btn == 'function')
-					btn = {action: btn}
+			let b = e.buttons && e.buttons[bname]
+			let b_sets_text = true
+			if (!(isnode(b))) {
+				if (typeof b == 'function')
+					b = {action: b}
 				else
-					btn = assign_opt({}, btn)
+					b = assign_opt({}, b)
 				if (spec.has('primary') || spec.has('ok'))
-					btn.primary = true
-				btn_sets_text = btn.text != null
-				btn = button(btn)
-				e.buttons[bname] = btn
+					b.primary = true
+				b_sets_text = b.text != null
+				b = btn(b)
+				e.buttons[bname] = b
 			}
-			btn.class('dlg-button-'+name)
-			btn.dialog = e
-			if (!btn_sets_text) {
-				btn.text = S(bname, name.replace(/[_\-]/g, ' '))
-				btn.style['text-transform'] = 'capitalize'
+			b.class('dlg-button-'+name)
+			b.dialog = e
+			if (!b_sets_text) {
+				b.text = S(bname, name.replace(/[_\-]/g, ' '))
+				b.style['text-transform'] = 'capitalize'
 			}
 			if (name == 'ok' || spec.has('ok')) {
-				btn.on('activate', function() {
+				b.on('activate', function() {
 					e.ok()
 				})
 			}
 			if (name == 'cancel' || spec.has('cancel')) {
-				btn.on('activate', function() {
+				b.on('activate', function() {
 					e.cancel()
 				})
 			}
-			ct.add(btn)
+			ct.add(b)
 		}
 	}
 
@@ -2248,15 +2233,15 @@ css('.dlg', 'v p2 fg b0 ro bg1', `
 	box-shadow: var(--shadow-modal);
 `)
 
-css(`
-	.dlg-header,
-	.dlg-footer,
-	.dlg-content
-`, 'h p-y-2')
+css([
+	'.dlg-header',
+	'.dlg-footer',
+	'.dlg-content',
+], 'h p-y-2')
 
-css('.dlg-heading', 'gray xlarge bold m-y-05')
+css('.dlg-heading', 'dim xlarge bold m-y-05')
 
-css('.dlg-xbutton', 'abs b b-t-0 h-c h-m hand', `
+css('.dlg-xbutton', 'abs b b-t-0 h-c h-m', `
 	right: 8px;
 	top: 0px;
 	border-bottom-right-radius: var(--border-radius-button);
@@ -2267,11 +2252,11 @@ css('.dlg-xbutton', 'abs b b-t-0 h-c h-m hand', `
 	-webkit-text-stroke: 1px var(--stroke-dialog-xbutton);
 `)
 
-css('.dlg-xbutton:hover', '', `
+css_state('.dlg-xbutton:hover', '', `
 	background-color: var(--bg-button-hover);
 `)
 
-css('.dlg-xbutton.active', '', `
+css_state('.dlg-xbutton.active', '', `
 	background-color: var(--bg-button-pressed);
 `)
 
@@ -2420,39 +2405,31 @@ widget('dlg', function(e) {
 // ---------------------------------------------------------------------------
 
 // z1: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.toolbox', 'z1 v scroll-auto b0 bg1', `
-
-	/* pinning */
-	opacity: .2;
-	transition: opacity .5s;
-
-	border-radius: var(--border-radius-window);
-	box-shadow: var(--shadow-toolbox);
-`)
+css('.toolbox', 'z1 v scroll-auto b0 bg1 ro shadow-toolbox op02 ease ease-05s')
 
 css_state('.toolbox[pinned], .toolbox:hover', 'op1 no-ease')
 
-css('.toolbox-titlebar', 'h-bl bold p-x', `
-	line-height: 2;
-	background-color: var(--bg-toolbox-titlebar);
+css('.toolbox-titlebar', 'h-m bold p-x-2 p-y-05 gap2 noselect', `
+	background : var(--bg-unfocused-selected);
+	color      : var(--fg-unfocused-selected);
 	cursor: move;
 `)
 
-css('.toolbox:focus-within > .toolbox-titlebar', '', `
-	background-color: var(--bg-toolbox-titlebar-focused);
+css('.toolbox-title', 'nowrap-dots')
+
+css_state('.toolbox:focus-within > .toolbox-titlebar', '', `
+	background : var(--bg-focused-selected);
+	color      : var(--fg-focused-selected);
 `)
 
 css('.toolbox-title', 'S shrinks nowrap click-through')
 
-css('.toolbox-btn', 'gray p-y-05 p-x arrow gray', `
-	flex: 0;
-`)
-
-css('.toolbox-btn-pin', 'small')
-
-css('.toolbox[pinned] > .toolbox-titlebar > .toolbox-btn-pin', 'label')
-
-css_state('.toolbox-btn-close:hover', 'fg')
+css('.toolbox-btn', 'dim-on-dark arrow')
+css('.toolbox-btn-pin', 'small rotate-45')
+css('.toolbox-btn-pin::before', 'fa fa-thumbtack')
+css('.toolbox-btn-close::before', 'fa fa-times')
+css_state('.toolbox[pinned] > .toolbox-titlebar > .toolbox-btn-pin', 'label-on-dark rotate-0')
+css_state('.toolbox-btn:hover', 'white')
 
 css('.toolbox-content', 'h shrinks scroll-auto grid-h')
 
@@ -2484,8 +2461,8 @@ widget('toolbox', function(e) {
 	e.istoolbox = true
 	e.class('pinned')
 
-	e.pin_button     = div({class: 'toolbox-btn toolbox-btn-pin fa fa-thumbtack'})
-	e.xbutton        = div({class: 'toolbox-btn toolbox-btn-close fa fa-times'})
+	e.pin_button     = div({class: 'toolbox-btn toolbox-btn-pin'})
+	e.xbutton        = div({class: 'toolbox-btn toolbox-btn-close'})
 	e.title_box      = div({class: 'toolbox-title'})
 	e.titlebar       = div({class: 'toolbox-titlebar'}, e.title_box, e.pin_button, e.xbutton)
 	e.content_box    = div({class: 'toolbox-content x-container'})
@@ -2637,10 +2614,10 @@ css('.slide', 'invisible op0 x1 y1', `
 
 css('.slides > .x-ct > .', 'x1 y1')
 
-css(`
-	.slide:not(.slide-selected),
-	.slide:not(.slide-selected) *
-`, '', `
+css([
+	'.slide:not(.slide-selected)',
+	'.slide:not(.slide-selected) *',
+], '', `
 	pointer-events: none !important;
 `)
 
@@ -2811,13 +2788,13 @@ css_state('.richtext-button:hover', '', `
 `)
 
 css_state('.richtext-button:active', '', `
-	background-color: var(--fg-gray);
+	background-color: var(--fg-dim);
 `)
 
 css_state('.richtext-button.selected', '', `
 	box-shadow: var(--shadow-button-pressed);
-	background-color: var(--fg-gray);
-	color: var(--fg-inverted);
+	background-color: var(--fg-dim);
+	color: white;
 `)
 
 widget('richtext', function(e) {

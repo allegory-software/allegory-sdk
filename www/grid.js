@@ -106,7 +106,7 @@ css('.grid-progress-bar', 'abs click-through', `
 	height: 2px;
 `)
 
-css('.grid.loading > .grid-progress-bar', '', 'background-color: green;')
+css_state('.grid.loading > .grid-progress-bar', '', 'background-color: green;')
 
 // grid action band
 
@@ -229,7 +229,7 @@ widget('grid', 'Input', function(e) {
 		e.bg_alt                 = css.prop('--bg-alt')
 		e.bg_header              = css.prop('--bg-alt')
 		e.fg                     = css.prop('--fg')
-		e.fg_gray                = css.prop('--fg-gray')
+		e.fg_dim                 = css.prop('--fg-dim')
 		e.fg_search              = css.prop('--fg-search')
 		e.bg_search              = css.prop('--bg-search')
 		e.bg_error               = css.prop('--bg-error')
@@ -723,7 +723,7 @@ widget('grid', 'Input', function(e) {
 		cx.icon_font = e.icon_font
 		cx.bg_search = e.bg_search
 		cx.fg_search = e.fg_search
-		cx.fg_gray   = e.fg_gray
+		cx.fg_dim    = e.fg_dim
 		cx.baseline  = e.baseline
 	}
 
@@ -950,7 +950,7 @@ widget('grid', 'Input', function(e) {
 				bg = e.bg
 
 		if (is_null || is_empty || disabled)
-			fg = e.fg_gray
+			fg = e.fg_dim
 
 		// drawing
 
