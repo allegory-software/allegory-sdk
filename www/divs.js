@@ -203,10 +203,6 @@ LAYOUT CHANGE EVENT
 
 	^document.layout_changed()
 
-INTER-WINDOW COMMUNICATION
-
-	broadcast(name, ...args)
-
 ELEMENT GEOMETRY
 
 	px(x)
@@ -1462,7 +1458,7 @@ e.prop = function(prop, opt) {
 	if (prop_attr != prop)
 		attr(e, 'attr_prop_map')[prop_attr] = prop
 
-	if (!(opt.store == false) && !opt.style) { // stored prop
+	if (opt.store != false) { // stored prop
 		let v = dv
 		function get() {
 			return v
@@ -2244,30 +2240,6 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 	if (this.type == 'pointerdown')
 		document.fire('stopped_event', this)
 })
-
-// inter-window event broadcasting -------------------------------------------
-
-window.addEventListener('storage', function(e) {
-	// decode the message.
-	if (e.key != '__broadcast')
-		return
-	let v = e.newValue
-	if (!v)
-		return
-	v = json_arg(v)
-	fire(v.topic, ...v.args)
-})
-
-// broadcast a message to other windows.
-function broadcast(topic, ...args) {
-	fire(topic, ...args)
-	save('__broadcast', '')
-	save('__broadcast', json({
-		topic: topic,
-		args: args,
-	}))
-	save('__broadcast', '')
-}
 
 // geometry wrappers ---------------------------------------------------------
 

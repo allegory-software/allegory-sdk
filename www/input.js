@@ -982,15 +982,13 @@ css_role('.markbox.grid-editor .focus-box', 'h-c h-m')
 // checkbox
 // ---------------------------------------------------------------------------
 
-css_role('.linear-form :is(.checkbox, .checkbofocus-box)', 'skip')
+css_role('.linear-form :is(.checkbox, .checkbox-focus-box)', 'skip')
 
-css('.checkbox-icon', 'large')
-css_state('.checkbox-icon::before', 'far fa-square')
-css_state('.checkbox-icon.checked::before', 'fa fa-check-square')
+css('.checkbox[button_style=checkbox] > .focus-box > .markbox-baseline-box > .checkbox-icon', 'large')
+css('.checkbox[button_style=checkbox] > .focus-box > .markbox-baseline-box > .checkbox-icon::before', 'far fa-square')
+css_state('.checkbox[button_style=checkbox] > .focus-box > .markbox-baseline-box > .checkbox-icon.checked::before', 'fa fa-check-square')
 
-css('.checkbox[button_style=toggle] > .focus-box > .checkbox-icon', 'xlarge')
-css_state('.checkbox[button_style=toggle] > .focus-box > .checkbox-icon::before', 'xlarge fa fa-toggle-off')
-css_state('.checkbox[button_style=toggle] > .focus-box > .checkbox-icon.checked::before', 'fa-toggle-on')
+css('.markbox-baseline-box', 'h-bl')
 
 widget('checkbox', 'Input', function(e) {
 
@@ -1006,7 +1004,8 @@ widget('checkbox', 'Input', function(e) {
 	e.label_show_star = false
 	e.icon_box = span({class: 'markbox-icon checkbox-icon'})
 	e.label_box = span({class: 'input-label markbox-label checkbox-label'})
-	e.focus_box = div({class: 'focus-box checkbofocus-box'}, e.icon_box, e.label_box)
+	e.baseline_box = span({class: 'markbox-baseline-box'}, e.icon_box, e.label_box)
+	e.focus_box = div({class: 'focus-box checkbox-focus-box'}, e.baseline_box)
 	e.add(e.focus_box)
 
 	e.make_focusable(e.label_box)
@@ -1016,8 +1015,21 @@ widget('checkbox', 'Input', function(e) {
 		e.add(btn)
 	}
 
+	e.set_button_style = function(v) {
+		if (v == 'toggle') {
+			e.icon_box.set(tag('toggle'))
+			e.icon_box.user_set_checked = function(v) {
+				e.set_checked(v, {input: e})
+			}
+		} else {
+			e.icon_box.clear()
+		}
+	}
+
 	e.prop('button_style', {type: 'enum', enum_values: 'checkbox toggle',
 		default: 'checkbox', attr: true})
+
+	e.set_button_style(e.button_style)
 
 	// model
 
@@ -1034,7 +1046,10 @@ widget('checkbox', 'Input', function(e) {
 	e.do_update_val = function(v) {
 		let c = e.checked
 		e.class('checked', c)
-		e.icon_box.class('checked', c)
+		if (e.button_style == 'toggle')
+			e.icon_box.at[0].checked = c
+		else
+			e.icon_box.class('checked', c)
 		e.class('no-field', !e._field)
 	}
 
@@ -1116,7 +1131,7 @@ widget('checkbox', 'Input', function(e) {
 
 })
 
-widget('toggle', 'Input', function(e) {
+widget('toggleedit', 'Input', function(e) {
 	attr(e.props, 'button_style').default = 'toggle'
 	attr(e.props, 'align'       ).default = 'right'
 	return checkbox.construct(e)

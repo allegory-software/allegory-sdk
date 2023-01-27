@@ -215,6 +215,13 @@ AJAX REQUESTS
 	get(url, success, [error], [opt]) -> req
 	post(url, data, [success], [error], [opt]) -> req
 
+INTER-WINDOW COMMUNICATION
+
+	broadcast(name, ...args)
+	setglobal(name, val)
+	^window.global_changed(name, v, v0)
+	^window.NAME_changed(v, v0)
+
 BROWSER DETECTION
 
 	Firefox
@@ -1929,4 +1936,40 @@ function post(url, upload, success, fail, opt) {
 	}, opt))
 }
 
+// inter-window event broadcasting -------------------------------------------
+
+window.addEventListener('storage', function(e) {
+	// decode the message.
+	if (e.key != '__broadcast')
+		return
+	let v = e.newValue
+	if (!v)
+		return
+	v = json_arg(v)
+	fire(v.topic, ...v.args)
+})
+
+// broadcast a message to other windows.
+function broadcast(topic, ...args) {
+	fire(topic, ...args)
+	save('__broadcast', '')
+	save('__broadcast', json({
+		topic: topic,
+		args: args,
+	}))
+	save('__broadcast', '')
+}
+
+function setglobal(k, v, default_v) {
+	let v0 = strict_or(window[k], default_v)
+	if (v === v0)
+		return
+	window[k] = v
+	broadcast('global_changed', k, v, v0)
+	broadcast(k+'_changed', v, v0)
+}
+
+// browser detection ---------------------------------------------------------
+
 Firefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
+

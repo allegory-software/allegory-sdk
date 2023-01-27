@@ -3078,14 +3078,47 @@ widget('if', 'Containers', function(e) {
 
 })
 
-function setglobal(k, v, default_v) {
-	let v0 = strict_or(window[k], default_v)
-	if (v === v0)
-		return
-	window[k] = v
-	broadcast('global_changed', k, v, v0)
-	broadcast(k+'_changed', v, v0)
-}
+/* ---------------------------------------------------------------------------
+// toggle
+// ---------------------------------------------------------------------------
+*/
+
+css('toggle', 't-m p05 round bg1 h-m ease ring hand', `
+	min-width  : 3em;
+	max-width  : 3em;
+	min-height : 1.75em;
+	max-height : 1.75em;
+`)
+css('.toggle-thumb', 'round bg-white ring ease', `
+	min-width  : 1.2em;
+	min-height : 1.2em;
+`)
+css_state('toggle[checked]', '', `
+	background: var(--bg-button-primary);
+`)
+css_state('toggle[checked] .toggle-thumb', 'ease', `
+	transform: translateX(100%);
+`)
+
+widget('toggle', function(e) {
+	e.thumb = tag('div', {class: 'toggle-thumb'})
+	e.set(e.thumb)
+	e.make_focusable()
+	e.prop('checked', {type: 'bool', attr: true})
+	e.user_set_checked = function(v) { // stub
+		e.checked = v
+	}
+	e.toggle = function() {
+		e.user_set_checked(!e.checked)
+	}
+	e.on('keydown', function(key) {
+		if (key == ' ')
+			e.toggle()
+	})
+	e.on('click', function() {
+		e.toggle()
+	})
+})
 
 /* ---------------------------------------------------------------------------
 // widget placeholder

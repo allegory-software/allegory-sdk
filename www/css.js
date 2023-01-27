@@ -860,6 +860,7 @@ css('.bg2     ', '', ` background: var(--bg2); `)
 css('.bg-alt  ', '', ` background: var(--bg-alt); `)
 css('.bg-smoke', '', ` background: var(--bg-smoke); `)
 css('.bg-fg   ', '', ` background: var(--fg); `) /* slider thumb, etc. */
+css('.bg-white', '', ` background: var(--fg-white); `)
 css('.bg-link ', '', ` background: var(--fg-link); `) /* slider track */
 css('.no-bg   ', '', ` background: none; `)
 
