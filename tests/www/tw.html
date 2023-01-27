@@ -7,32 +7,32 @@
 	- `hidden` so we prevent load-time jankiness: we show the page on window load.
 -->
 <html class="inter theme-light" hidden style="font-size: 16px">
+<base href="../../www/">
 <head>
 <title>TW UI DEMO</title>
 <meta charset="utf-8">
 
 <!-- always preload your fonts or face extreme load-time jankiness -->
-<link rel="preload" as="font" href="../../www/inter-roman.var.woff2"     >
-<link rel="preload" as="font" href="../../www/material-icons-round.woff2">
-<link rel="preload" as="font" href="../../www/material-icons-outlined.woff2">
+<link rel="preload" as="font" href="inter-roman.var.woff2"     >
+<link rel="preload" as="font" href="material-icons-round.woff2">
+<link rel="preload" as="font" href="material-icons-outlined.woff2">
 
-<link rel="stylesheet" type="text/css" href="../../www/utils.css">
-<link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
+<link rel="stylesheet" type="text/css" href="fontawesome.css">
 
-<script src="../../www/glue.js"></script>
-<script src="../../www/divs.js"></script>
-<script src="../../www/purify.js"></script>
-<script src="../../www/x-widgets.js"></script>
-<script src="../../www/x-nav.js"></script>
-<script src="../../www/x-input.js"></script>
-<script src="../../www/x-listbox.js"></script>
-<script src="../../www/x-grid.js"></script>
-<script src="../../www/x-chart.js"></script>
-<script src="../../www/x-module.js"></script>
-<script src="../../www/theme-tw.js"></script>
+<script src="glue.js"></script>
+<script src="divs.js"></script>
+<script src="css.js"></script>
+<script src="purify.js"></script>
+<script src="widgets.js"></script>
+<script src="nav.js"></script>
+<script src="input.js"></script>
+<script src="list.js"></script>
+<script src="grid.js"></script>
+<script src="chart.js"></script>
+<script src="module.js"></script>
+<script src="theme-tw.js"></script>
 
 <style>
-@layer base {
 :root {
 	--fg           : rgb(15 23 42);
 	--sky          : rgb(14 165 233);
@@ -57,7 +57,6 @@
 ::placeholder { color: var(--fg); opacity: .3; font-weight: 600; }
 input       { font-family: inherit; font-size: inherit; }
 input:focus { outline: none; }
-}
 </style>
 
 <script>
@@ -66,45 +65,45 @@ input:focus { outline: none; }
 
 css('.btn'                , 'semibold nowrap noselect ro ring p-y-1_25 p-x-4 h-c h-m hand')
 css('.btn-sm'             , 'btn littlebold ro075 p p-x-2 bg')
-css('.btn-pri'            , 'btn fg-inverted bg-fg')
-css('.btn-indigo'         , 'btn-sm fg-inverted bg-indigo')
-css('.btn-indigo:hover'   , 'bg-indigo-hover')
-css('.btn-sm:hover'       , 'bg-hover')
+css('.btn-pri'            , 'btn white bg-fg')
+css('.btn-indigo'         , 'btn-sm white bg-indigo')
+css_state('.btn-indigo:hover'   , 'bg-indigo-hover')
+css_state('.btn-sm:hover'       , 'bg-hover')
 css('.arrow-right::after', 'mi m-l small', `content: 'arrow_forward';`)
 
-css('.ro-group-h:hover > .btn', 'bg-hover')
+css_state('.ro-group-h:hover > .btn', 'bg-hover')
 
 // menu styling
 
 css('.menu-section', 'v p2 ro bg ring')
-css('.menu-section-label', 'p-y bold gray xsmall bg')
-css('.menu-item', 'ro075 p-y bg bg-hover-indigo')
-css('.menu-item:hover', '', `
+css('.menu-section-label', 'p-y bold dim xsmall bg')
+css('.menu-item', 'ro075 p-y bg')
+css_state('.menu-item:hover', '', `
 	background: var(--indigo);
-	color: var(--fg-inverted);
+	color: var(--fg-white);
 `)
 css('.menu-item-icon', 'mi-outlined p-x fg-slate')
-css('.menu-item:hover .menu-item-icon', 'fg-inverted')
+css_state('.menu-item:hover .menu-item-icon', 'white')
 
 // toggle component
 
-css('toggle', 't-m p05 round bg1 h-m ease ring hand', `
+css('my-toggle', 't-m p05 round bg1 h-m ease ring hand', `
 	min-width  : 3em;
 	max-width  : 3em;
 	min-height : 1.75em;
 	max-height : 1.75em;
 `)
-css('.toggle-thumb', 'round bg ring ease', `
+css('.my-toggle-thumb', 'round bg ring ease', `
 	min-width  : 1.2em;
 	min-height : 1.2em;
 `)
-css('toggle[checked]', 'bg-indigo')
-css('toggle[checked] .toggle-thumb', 'ease', `
+css_state('my-toggle[checked]', 'bg-indigo')
+css_state('my-toggle[checked] .my-toggle-thumb', 'ease', `
 	transform: translateX(100%);
 `)
 
-component('toggle', function(e) {
-	e.thumb = tag('div', {class: 'toggle-thumb'})
+component('my-toggle', function(e) {
+	e.thumb = tag('div', {class: 'my-toggle-thumb'})
 	e.set(e.thumb)
 	e.make_focusable()
 	e.prop('checked', {type: 'bool', attr: true})
@@ -144,12 +143,12 @@ on('load', function() {
 </svg>
 
 </head>
-<body class="v-c rel bg-no-repeat" style="background-image: url(tw-bg.jpg); background-size: 150rem; background-position-x: -10rem">
+<body class="v-c rel bg-no-repeat" style="background-image: url(../tests/www/tw-bg.jpg); background-size: 150rem; background-position-x: -10rem">
 	<d class="v" style="width: 1296px">
 		<d class="h-m smaller p-y-2rem">
 			<d class="S large bold">allegory sdk<d class="b2 b-fg ro075 m05 p-x-025 small">UI</d></d>
 			<d class="m-l-2rem semibold">Components</d>
-			<d class="m-l-2rem semibold">Templates <d class="m p-x-05 p-y-025 round xsmall bg-sky fg-inverted">New</d></d>
+			<d class="m-l-2rem semibold">Templates <d class="m p-x-05 p-y-025 round xsmall bg-sky white">New</d></d>
 			<d class="m-l-2rem semibold">Documentation</d>
 			<d class="m-l-2rem mi" style="font-size: 2rem">search</d>
 			<d class="m-l-2rem b-l p-l-2rem semibold">Sign in</d>
@@ -187,13 +186,13 @@ on('load', function() {
 				<!-- buttons -->
 				<d class="x3 h-r h-b">
 					<d class="p4 v-r small gap4">
-						<toggle class="m-b-4" checked></toggle>
+						<my-toggle class="m-b-4" checked></my-toggle>
 						<d>
-							<toggle></toggle>
+							<my-toggle></my-toggle>
 							<d class="m-l-4 btn-indigo">Button A</d>
 						</d>
 						<d class="h ro-group-h">
-							<d class="btn btn-sm"><d class="mi m-r gray">bookmark</d>Bookmark</d>
+							<d class="btn btn-sm"><d class="mi m-r dim">bookmark</d>Bookmark</d>
 							<d class="btn btn-sm">12k</d>
 						</d>
 					</d>
@@ -203,7 +202,7 @@ on('load', function() {
 				<d class="x4 p4 v">
 					<d class="v ring ro clip bg small" style="">
 						<d class="h p4">
-							<img class="round w-10 h-10 " src="avatar-1.jpg"></img>
+							<img class="round w-10 h-10 " src="../tests/www/avatar-1.jpg"></img>
 							<d class="S v-sb m-l-4">
 								<d class=littlebold>Leonard Krasner</d>
 								<d>@leonardkrasner</d>
@@ -211,7 +210,7 @@ on('load', function() {
 							<d class="self-h-m btn btn-sm">View</d>
 						</d>
 						<d class="h p4 b-t">
-							<img class="round w-10 h-10" src="avatar-2.jpg"></img>
+							<img class="round w-10 h-10" src="../tests/www/avatar-2.jpg"></img>
 							<d class="S v-sb m-l-4">
 								<d class=littlebold>Floyd Miles</d>
 								<d>@floydmiles</d>
@@ -219,7 +218,7 @@ on('load', function() {
 							<d class="self-h-m btn btn-sm">View</d>
 						</d>
 						<d class="h p4 b-t">
-							<img class="round w-10 h-10" src="avatar-3.jpg"></img>
+							<img class="round w-10 h-10" src="../tests/www/avatar-3.jpg"></img>
 							<d class="S v-sb m-l-4">
 								<d class=littlebold>Emily Selman</d>
 								<d>@emilyselman</d>
@@ -275,7 +274,7 @@ on('load', function() {
 				<d class="x4 m4 ro-group-v v-t small">
 					<d class="menu-section">
 						<d class="h">
-							<d class="menu-item-icon gray xlarge lh1">search</d>
+							<d class="menu-item-icon dim xlarge lh1">search</d>
 							<input class="S p05 b0 littlebold" placeholder="Search projects..."></input>
 						</d>
 					</d>

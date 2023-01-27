@@ -3,20 +3,21 @@
 <head>
 <title>X-WIDGETS DEMO</title>
 <meta charset="utf-8">
-<link rel="stylesheet" type="text/css" href="../../www/utils.css">
-<link rel="stylesheet" type="text/css" href="../../www/fontawesome.css">
-<script src="../../www/glue.js"></script>
-<script src="../../www/divs.js"></script>
-<script src="../../www/purify.js"></script>
-<script src="../../www/x-widgets.js"></script>
-<script src="../../www/x-nav.js"></script>
-<script src="../../www/x-input.js"></script>
-<script src="../../www/x-listbox.js"></script>
-<script src="../../www/x-grid.js"></script>
-<script src="../../www/x-chart.js"></script>
-<script src="../../www/x-module.js"></script>
-<script src="../../www/theme-tw.js"></script>
-<script src="../../www/ace/ace.js"></script>
+<base href="../../www/">
+<link rel="stylesheet" type="text/css" href="fontawesome.css">
+<script src="glue.js"></script>
+<script src="divs.js"></script>
+<script src="css.js"></script>
+<script src="purify.js"></script>
+<script src="widgets.js"></script>
+<script src="nav.js"></script>
+<script src="input.js"></script>
+<script src="list.js"></script>
+<script src="grid.js"></script>
+<script src="chart.js"></script>
+<script src="module.js"></script>
+<script src="theme-tw.js"></script>
+<script src="ace/ace.js"></script>
 
 <style>
 
@@ -59,7 +60,6 @@ button {
 
 .demo-list-item {
 	padding: 0.2em .5em;
-	cursor: pointer;
 }
 
 .demo-list-item:hover { background: #ddd; }
@@ -145,16 +145,16 @@ on_dom_load(function() {
 <template id=button_demo>
 <span>
 	<p>
-		<x-button id=wasup_button class=large>Cancel</x-button>, says the button.
-		<x-button danger>Don't do it Jonny!</x-button>, says another.
-		<x-button icon="fa fa-recycle" bare></x-button>
+		<btn id=wasup_button class=large>Cancel</btn>, says the button.
+		<btn danger>Don't do it Jonny!</btn>, says another.
+		<btn icon="fa fa-recycle" bare></btn>
 	</p>
 	<p>
-		<x-button primary>OK</x-button>
-		<x-button icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</x-button>
-		<x-button bare icon="fa fa-play">I'm also a button</x-button>
+		<btn primary>OK</btn>
+		<btn icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</btn>
+		<btn bare icon="fa fa-play">I'm also a button</btn>
 		<script run>
-			this.parent.add(button({
+			this.parent.add(btn({
 				text: html('Multiline text<br>works too!'),
 				icon: 'fa fa-folder-open',
 				action: function() { this.debug('clicked') },
@@ -173,9 +173,9 @@ on_dom_load(function() {
 <template id=tooltip_demo>
 <script run>
 
-b1 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
-b2 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
-b3 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
+b1 = btn({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
+b2 = btn({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
+b3 = btn({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
 result.add(div({style: 'text-align: center'}, div({}, b1), div({}, b2), div({}, b3)))
 
 b1.style['margin'] = '5em'
@@ -236,17 +236,18 @@ notify('There!', 'error', 2)
 <div id=main></div>
 <script run>
 
-win = dialog({
+win = dlg({
 	heading: 'I\'m playing the title',
 	content: div({}, 'I\'m just here for the demo.', tag('br'), 'What do you think?'),
 	buttons_layout: 'some-button < yes no > apply:ok cancel',
 	buttons: {
 		yes: { icon: 'fa fa-thumbs-up' },
 		no: { icon: 'fa fa-thumbs-down' },
+		apply: { action: function() { win.close(); }, },
 	},
 })
 
-main.add(button({
+main.add(btn({
 	text: 'Click for modal',
 	action: function() {
 		win.cancelable = true
@@ -254,7 +255,7 @@ main.add(button({
 	}
 }))
 
-main.add(button({
+main.add(btn({
 	text: 'Modal that you can\'t close',
 	action: function() {
 		win.cancelable = false
@@ -283,14 +284,14 @@ tb = toolbox({
 
 main.add(tb)
 
-main.add(button({
+main.add(btn({
 	text: 'Click to show toolbox',
 	action: function() {
 		tb.show().focus()
 	}
 }))
 
-main.add(button({
+main.add(btn({
 	text: 'Click to show another toolbox',
 	action: function() {
 		main.add(toolbox({
@@ -336,7 +337,7 @@ m = menu({
 	],
 })
 
-b = button({
+b = btn({
 	text: 'Click for menu',
 	primary: true,
 	action: function() {
@@ -353,11 +354,11 @@ main.add(b)
 <!--------------------------------------------------------------------------->
 
 <template id=checkbox_demo>
-<x-checkbox>
+<checkbox>
 	Do it!
 	<info>This checkbox does something</info>
-</x-checkbox>
-<x-toggle>This is the same</x-toggle>
+</checkbox>
+<toggleedit>This is the same</toggleedit>
 <script run>
 
 result.add(checkbox({
@@ -389,11 +390,11 @@ result.add(c2)
 <!--------------------------------------------------------------------------->
 
 <template id=radiogroup_demo>
-<x-radiogroup id=r1 val=1>
+<radiogroup id=r1 val=1>
 	<info>Info box, can put any HTML in here.<br>But it will be gray and small.</info>
 	<div val=1>Choose <i>me!</i></div>
 	<div val=2>Me, me<br>me, me, <b>me</b>!</div>
-</x-radiogroup>
+</radiogroup>
 <div id=main></div>
 <script run>
 
@@ -449,9 +450,9 @@ main.add(radiogroup({
 <!--------------------------------------------------------------------------->
 
 <template id=richtext_demo>
-<x-richtext id=my_r>
+<richtext id=my_r>
 	<b>Wasup</b> <i>homies</i> ?
-</x-richtext>
+</richtext>
 <script run>
 my_r.widget_editing = true
 </script>
@@ -460,9 +461,9 @@ my_r.widget_editing = true
 <!--------------------------------------------------------------------------->
 
 <template id=richedit_demo>
-<x-richedit id=my_r>
+<richedit id=my_r>
 	<b>Wasup</b> <i>homies</i> ?
-</x-richedit>
+</richedit>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -532,7 +533,7 @@ result.add(passedit({
 <!--------------------------------------------------------------------------->
 
 <template id=spinedit_demo>
-<x-spinedit val=42></x-spinedit>
+<spinedit val=42></spinedit>
 <script run>
 
 result.add(div({},
@@ -556,7 +557,7 @@ result.add(div({},
 <!--------------------------------------------------------------------------->
 
 <template id=tagsedit_demo>
-<x-tagsedit id=t val="apples bananas mangos"></x-tagsedit>
+<tagsedit id=t val="apples bananas mangos"></tagsedit>
 <script run>
 t.add_validator('bananas', function(field) {
 	return {
@@ -572,12 +573,12 @@ t.add_validator('bananas', function(field) {
 <!--------------------------------------------------------------------------->
 
 <template id=slider_demo>
-<x-slider val=0.7 label="Slider with a very very long label" info="This is a slider"></x-slider>
-<x-slider id=s1 val=0.5 label="Slider 1" info="This is another slider"></x-slider>
-<x-slider id=s2 val=1500 from=1000 to=2000
+<slider val=0.7 label="Slider with a very very long label" info="This is a slider"></slider>
+<slider id=s1 val=0.5 label="Slider 1" info="This is another slider"></slider>
+<slider id=s2 val=1500 from=1000 to=2000
 	label="Slider 2" info="This is yet another slider">
 	<field min=1300 max=1700 decimals=2></field>
-</x-slider>
+</slider>
 <script run>
 s1.add_validator('custom', field => ({
 		validate: v => isnum(v) && v >= .2 && v <= .8,
@@ -644,7 +645,7 @@ hlb = hlistbox({
 	],
 })
 
-sb = select_button({
+sb = select_btn({
 	items: [
 		'Choose',
 		'One',
@@ -663,22 +664,22 @@ result.add(lb, hlb, div({}, html('<h3>select_button</h3>'), sb))
 <!--------------------------------------------------------------------------->
 
 <template id=linear_form_demo>
-<div class="x-linear-form">
-	<x-checkbox id=c1 val=1>
+<div class="linear-form">
+	<checkbox id=c1 val=1>
 		Check me baby
 		<info>
 			...because if you won't<br>
 			somebody else will
 		</info>
-	</x-checkbox>
-	<x-radiogroup id=r1 val=1>
+	</checkbox>
+	<radiogroup id=r1 val=1>
 		<info>Info box, can put any HTML in here.<br>But it will be gray and small.</info>
 		<div val=1>Choose me!</div>
 		<div val=2>Me, me<br>me, me, me!</div>
-	</x-radiogroup>
-	<x-textedit label=Wasup>
+	</radiogroup>
+	<textedit label=Wasup>
 		<info>Wasa bii</info>
-	</x-textedit>
+	</textedit>
 </div>
 </template>
 
@@ -773,7 +774,7 @@ main.add(g)
 <!--------------------------------------------------------------------------->
 
 <template id=html_grid_demo>
-<x-grid>
+<grid>
 	<col-attrs for=id type=number></col-attrs>
 	<rowset pk=id can_change_rows=false>
 		<field name=id   ></field>
@@ -783,7 +784,7 @@ main.add(g)
 		<row id=2 name=Bar desc="Le Bar"></row>
 		<row id=3 name=Baz desc="Le Baz"></row>
 	</rowset>
-</x-grid>
+</grid>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -1011,7 +1012,7 @@ main.add(div({style: 'line-height: 3'},
 	,
 	*/
 	', which can be made to wrap-to-fit or grow-to-fit, and even',
-	button({
+	btn({
 		text: 'buttons.',
 		primary: true,
 		action: function() { pr('clicked') },
@@ -1045,7 +1046,7 @@ i1 = input({nav: g, col: 'name'})
 
 main.add(div({}, g), i1)
 
-main.add(button({
+main.add(btn({
 	text: 'unfocus row',
 	action: function() { g.focus_cell(false) },
 }))
@@ -1136,52 +1137,52 @@ main.add(grid({w: 200, h: 200, rowset: r}))
 	</tabs>
 	<split fixed_side=second>
 		<tabs tabs_side=left>
-			<x-chart label=Pie nav=g
+			<chart label=Pie nav=g
 				sum_cols=output
 				group_cols="country sector"
-			></x-chart>
-			<x-chart label="Areas" nav=g
+			></chart>
+			<chart label="Areas" nav=g
 				shape=areas
 				sum_cols=output
 				split_cols=country
 				group_cols="date/0/month/1"
-			></x-chart>
-			<x-chart label="Areas+Dots" nav=g
+			></chart>
+			<chart label="Areas+Dots" nav=g
 				shape=areas_dots
 				sum_cols=output
 				split_cols=country
 				group_cols="date/0/month/1"
-			></x-chart>
-			<x-chart label="Lines" nav=g
+			></chart>
+			<chart label="Lines" nav=g
 				shape=lines
 				sum_cols=output
 				split_cols=country
 				group_cols="date/0/month/1"
-			></x-chart>
-			<x-chart label="Lines+Dots" nav=g
+			></chart>
+			<chart label="Lines+Dots" nav=g
 				shape=lines_dots
 				sum_cols=output
 				split_cols=country
 				group_cols="date/0/month/1"
-			></x-chart>
-			<x-chart label=Columns nav=g
+			></chart>
+			<chart label=Columns nav=g
 				shape=columns
 				sum_cols=output
 				split_cols="country sector"
 				group_cols="date/0/month/1"
-			></x-chart>
-			<x-chart label=Bars nav=g
+			></chart>
+			<chart label=Bars nav=g
 				shape=bars
 				sum_cols=output
 				split_cols="country sector"
 				group_cols="date/0/month/1"
-			></x-chart>
-			<x-chart label=Stacks nav=g
+			></chart>
+			<chart label=Stacks nav=g
 				shape=stacks
 				sum_cols=output
 				split_cols="country sector"
 				group_cols="date/0/month/1"
-			></x-chart>
+			></chart>
 		</tabs>
 		<div></div>
 	</split>
