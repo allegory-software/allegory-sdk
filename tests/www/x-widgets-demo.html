@@ -142,6 +142,76 @@ on_dom_load(function() {
 
 <!--------------------------------------------------------------------------->
 
+<template id=check_demo>
+<d class="h-m m b ro p gap-x">
+	<check id=my_check checked></check><label for=my_check>Wasup</label>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=toggle_demo>
+<d class="h-m m b ro p gap-x-2">
+	<label for=my_toggle class="S">Wasup</label><toggle id=my_toggle checked></toggle>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=radio_demo>
+<d class="v-m m b ro p gap-y-2">
+	<d class="h-m gap-x-2"><radio id=my_radio1 group=g1 checked></radio><label for=my_radio1>Option 1</label></d>
+	<d class="h-m gap-x-2"><radio id=my_radio2 group=g1></radio><label for=my_radio2>Option 2</label></d>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=info_demo>
+<info id=my_info>
+	<h3>It never entered my mind, but</h3>
+	<p>Here we are</p>
+</info>
+<button onclick="toggle_collapsed()">Toggle Collapsed</button>
+<script run>
+toggle_collapsed = function() {
+	my_info.collapsed = !my_info.collapsed
+}
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=nodes_demo>
+<d id=my></d>
+<script run>
+	my.on('nodes_changed', function() {
+		pr('NODES CHANGED')
+	})
+	my.add(div())
+	my.add(div())
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=if_demo>
+<if global=foo>
+	foo was set!
+</if>
+<script run>
+	let timer_id = runagainevery(.5, function() {
+		setglobal('foo', !(window.foo))
+	})
+	this.on('bind', function(on) {
+		if (!on)
+			clearInterval(timer_id)
+	})
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
 <template id=button_demo>
 <span>
 	<p>

@@ -44,28 +44,31 @@ NOTES:
 
 {
 
-let css = css_util
+let css = css_base
 
 /* COLORS ----------------------------------------------------------------- */
 
 css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 
 	--fg                    : hsl(  0   0%   0% / 1.0);
+	--fg-hover              : hsl(  0   0%   0% / 0.8);
 	--fg-p                  : hsl(  0   0%   0% / 0.9); /* multiline text on normal backgrounds (just a tad dimmer than fg) */
 	--fg-white              : hsl(  0   0% 100% / 1.0);
 	--fg-black              : hsl(  0   0%   0% / 1.0);
 	--fg-dim                : hsl(  0   0%   0% / 0.5); /* faded (not gray!) text but clearly legible (disabled, info boxes) */
 	--fg-dim-on-dark        : hsl(  0   0% 100% / 0.5); /* same but on dark or colored bg */
-	--fg-label              : hsl(  0   0%   0% / 0.8); /* between fg and dim (edit labels, chart labels) */
+	--fg-label              : hsl(  0   0%  40% / 1.0); /* between fg and dim (edit labels, chart labels) */
+	--fg-label-hover        : hsl(  0   0%  50% / 1.0); /* between fg and dim (edit labels, chart labels) */
 	--fg-label-on-dark      : hsl(  0   0% 100% / 0.8); /* same but on dark or colored bg */
 	--fg-link               : hsl(222 100%  40% / 1.0); /* anything clickable inside text: links, bare buttons, checkboxes */
-	--fg-link-hover         : hsl(222 100%  45% / 1.0);
-	--fg-link-active        : hsl(222 100%  55% / 1.0);
+	--fg-link-hover         : hsl(222 100%  50% / 1.0);
+	--fg-link-active        : hsl(222 100%  60% / 1.0);
 
 	--bg                    : hsl(  0   0% 100% / 1.0); /* opaque */
 	--bg-hover              : hsl(  0   0%  99% / 1.0); /* opaque */
 	--bg-active             : hsl(  0   0%  98% / 1.0); /* opaque */
-	--bg1                   : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
+	--bg1                   : hsl(  0   0%  90% / 1.0); /* sits on bg; opaque */
+	--bg1-hover             : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
 	--bg2                   : hsl(  0   0%  85% / 1.0); /* sits on bg1; opaque */
 	--bg2-hover             : hsl(  0   0%  90% / 1.0);
 	--bg-alt                : hsl(  0   0%  97% / 1.0); /* alternating bg for grid rows; lighter than bg1 */
@@ -145,9 +148,11 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 css('.theme-dark, .theme-light .theme-inverted', '', `
 
 	--fg                    : hsl(  0   0% 100% / 1.0);
+	--fg-hover              : hsl(  0   0%  95% / 1.0);
 	--fg-p                  : hsl(  0   0% 100% / 0.9);
 	--fg-dim                : var(--fg-dim-on-dark);
-	--fg-label              : hsl(  0 100% 100% / 0.8);
+	--fg-label              : hsl(  0   0%  80% / 1.0);
+	--fg-label-hover        : hsl(  0   0%  90% / 1.0);
 	--fg-link               : hsl(140 100%  30% / 1.0);
 	--fg-link-hover         : hsl(140 100%  35% / 1.0);
 	--fg-link-active        : hsl(140 100%  40% / 1.0);
@@ -155,6 +160,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg                    : hsl(216  28%   7% / 1.0);
 	--bg-hover              : hsl(216  28%   8% / 1.0);
 	--bg1                   : hsl(216  28%  15% / 1.0);
+	--bg1-hover             : hsl(216  28%  20% / 1.0);
 	--bg2                   : hsl(216  28%  19% / 1.0);
 	--bg2-hover             : hsl(216  28%  22% / 1.0);
 	--bg-alt                : hsl(216  28%  10% / 1.0);
@@ -373,10 +379,7 @@ css(`
 }
 `)
 
-css('.opensans', '', ` font-family: opensans, sans-serif; `)
-css('.inter   ', '', ` font-family: inter, sans-serif; `)
-
-css('.mi, .mi-round, .mi-sharp, .mi-outlined', '', `
+css('.mi-common', '', `
 	font-weight: normal;
 	font-style: normal;
 	font-size: 1.5em;
@@ -394,13 +397,19 @@ css('.mi, .mi-round, .mi-sharp, .mi-outlined', '', `
 	font-feature-settings: "liga";
 `)
 
-css('.mi-round'    , '', ` font-family: "mi-round"; `)
-css('.mi-sharp'    , '', ` font-family: "mi-sharp"; `)
-css('.mi-outlined' , '', ` font-family: "mi-outlined"; `)
+/* TEXT ------------------------------------------------------------------- */
+
+css = css_util
+
+css('.opensans', '', ` font-family: opensans, sans-serif; `)
+css('.inter   ', '', ` font-family: inter, sans-serif; `)
+
+css('.mi'          , 'mi-common', ` font-family: mi-round; `)
+css('.mi-round'    , 'mi-common', ` font-family: mi-round; `)
+css('.mi-sharp'    , 'mi-common', ` font-family: mi-sharp; `)
+css('.mi-outlined' , 'mi-common', ` font-family: mi-outlined; `)
 
 css('.mi', 'mi-round')
-
-/* TEXT ------------------------------------------------------------------- */
 
 css('.pre      ', '', ` white-space: pre; `)
 css('.pre-line ', '', ` white-space: pre-line; `)
@@ -435,9 +444,12 @@ css('.dim           ', '', ` color: var(--fg-dim); `)
 css('.dim-on-dark   ', '', ` color: var(--fg-dim-on-dark); `)
 css('.white         ', '', ` color: var(--fg-white); `)
 css('.label         ', '', ` color: var(--fg-label); `)
+css('.label-hover   ', '', ` color: var(--fg-label-hover); `)
 css('.label-on-dark ', '', ` color: var(--fg-label-on-dark); `)
 css('.link          ', '', ` color: var(--fg-link); `)
+css('.link-hover    ', '', ` color: var(--fg-link-hover); `)
 css('.fg            ', '', ` color: var(--fg); `)
+css('.fg-hover      ', '', ` color: var(--fg-hover); `)
 css('.fg-error      ', '', ` color: var(--bg-error); `)
 
 /* ALIGN: INLINE ---------------------------------------------------------- */
@@ -914,10 +926,19 @@ css('.no-shadow     ', '', ` box-shadow: none; `)
 /* TRANSFORMS ------------------------------------------------------------- */
 
 css('.transform', '', `
+	--translate-x : 0;
+	--translate-y : 0;
+	--scale-x : 1;
+	--scale-y : 1;
+	--scale   : 1;
+	--rotate  : 0deg;
+	--rotate2 : 0deg;
 	transform:
-		translate(var(--translate-x, 0), var(--translate-y, 0))
-		scale(var(--scale-x, var(--scale, 1)), var(--scale-y, var(--scale, 1)))
-		rotate(calc(var(--rotate, 0deg) + var(--rotate2, 0deg)))
+		translate(var(--translate-x), var(--translate-y))
+		scale(
+			calc(var(--scale-x) * var(--scale)),
+			calc(var(--scale-y) * var(--scale)))
+		rotate(calc(var(--rotate) + var(--rotate2)))
 	;
 `)
 
@@ -939,16 +960,17 @@ css('.ease', '', `
 	transition-property:
 		top, left, right, bottom, transform,
 		opacity, filter, background-color, border-color;
-	transition-duration: .2s;
+	transition-duration: .1s;
 	transition-timing-function: ease;
 `)
-css('.ease-out   ', '', ` transition-timing-function: ease-out; `)
-css('.ease-linear', '', ` transition-timing-function: linear; `)
-css('.ease-01s   ', '', ` transition-duration: .1s; `)
-css('.ease-05s   ', '', ` transition-duration: .5s; `)
-css('.ease-1s    ', '', ` transition-duration:  1s; `)
+css('.ease-out   ', 'ease', ` transition-timing-function: ease-out; `)
+css('.ease-linear', 'ease', ` transition-timing-function: linear; `)
+css('.ease-01s   ', 'ease', ` transition-duration: .1s; `)
+css('.ease-02s   ', 'ease', ` transition-duration: .2s; `)
+css('.ease-05s   ', 'ease', ` transition-duration: .5s; `)
+css('.ease-1s    ', 'ease', ` transition-duration:  1s; `)
+css('.ease-fw    ', 'ease', ` animation-fill-mode: forwards; `)
 css('.no-ease    ', '', ` transition: all 0s; `)
-css('.ease-fw    ', '', ` animation-fill-mode: forwards; `)
 
 /* ANIMATIONS ------------------------------------------------------------- */
 
@@ -1022,25 +1044,30 @@ css('.grabbing', '', ` cursor: grabbing; `)
 
 /* SHAPES ----------------------------------------------------------------- */
 
-css('.icon-check::before', 'rotate-45', `
-  content: "";
-  display: block;
-  border-color: var(--fg);
-  border-style: solid;
-  border-width: 0 0.2em 0.2em 0;
-  width  : 0.5em;
-  height : 1em;
+/* not great because lack of hinting. use an icon font if you need this small. */
+css('.icon-check::before', '', `
+	content: "";
+	display: block;
+	border-color: var(--fg);
+	border-style: solid;
+	border-width: 0 .2em .2em 0;
+	width : .4em;
+	height: .8em;
+	transform:
+		translate(0, -0.1em)
+		rotate(45deg)
+	;
 `)
 
 css('.icon-chevron-right::before', 'rotate--45', `
-  content: "";
-  display: block;
-  border-color: var(--fg);
-  border-style: solid;
-  border-width: 0 .2em .2em 0;
-  width : .6em;
-  height: .6em;
-  --translate-x: -0.125em;
+	content: "";
+	display: block;
+	border-color: var(--fg);
+	border-style: solid;
+	border-width: 0 .2em .2em 0;
+	width : .6em;
+	height: .6em;
+	--translate-x: -0.125em;
 `)
 
 css('.icon-chevron-left::before', 'icon-chevron-right flip-h' , `--translate-x: .25em;`)

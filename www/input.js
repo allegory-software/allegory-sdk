@@ -28,10 +28,107 @@ WIDGETS
 	sqledit
 	mu
 	switcher
-	x-label
+	lbl
 	inp
 	frm
 
+*/
+
+css('.error-list', '', `
+	margin: 0;
+	padding-inline-start: 1em;
+	text-align: start;
+`)
+
+// ---------------------------------------------------------------------------
+// widget with a nav prop
+// ---------------------------------------------------------------------------
+
+/*
+function nav_link_widget(e) {
+
+	function bind_ext_nav(on) {
+		let nav = e._nav
+		let col = e._col
+		nav.on('focused_row_changed', update, on)
+		nav.on('focused_row_cell_state_changed_for_'+col, cell_state_changed, on)
+		nav.on('display_vals_changed_for_'+col, update, on)
+		nav.on('reset', reset, on)
+		nav.on('col_label_changed_for_'+col, update, on)
+		nav.on('col_info_changed_for_'+col, update, on)
+	}
+
+	function bind_global_nav(on) {
+		// e.debug('BGN', e.col)
+		let nav = e._nav
+		let col = e._col
+		nav.on('focused_row_cell_state_changed_for_'+col, cell_state_changed, on)
+		nav.on('display_vals_changed_for_'+col, update, on)
+	}
+
+	function bind_ext_field(on) {
+		if (on) {
+			e._field = e._nav && e._nav.optfld(e.col) || null
+			if (!e._field)
+				return
+			e._col = e._field.name
+			e.fire('bind_field', true)
+		} else {
+			e._field = null
+			e._col = null
+			e.fire('bind_field', false)
+		}
+	}
+
+	function bind_nav(on) {
+		if (on) {
+			if (!e._nav) {
+				let nav = e.nav || e._nav_id_nav || null
+				if (e.col != null) { // nav-bound
+					if (nav) {
+						e._nav = nav
+						e._col = e.col
+						bind_ext_nav(true)
+						bind_ext_field(true)
+					}
+				} else { // standalone
+					e.bind_int_nav(true)
+				}
+			}
+		} else {
+			if (e._nav) {
+				if (e._nav != global_val_nav()) { // nav-bound
+					e.bind_ext_nav(false)
+					e.bind_ext_field(false)
+					e._nav = null
+					e._col = null
+				} else { // standalone
+					e.bind_int_nav(false)
+				}
+			}
+		}
+	}
+
+	e.on_bind(bind_nav)
+
+	function nav_changed() {
+		if (!e.bound)
+			return
+		bind_nav(false)
+		bind_nav(true)
+	}
+
+	e.set_col = nav_changed
+	e.prop('col', {type: 'col', col_nav: () => e._nav})
+
+	e.set_nav = nav_changed
+	e.prop('nav', {private: true})
+
+	e.set__nav_id_nav = nav_changed
+	e.prop('_nav_id_nav', {private: true})
+	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
+
+})
 */
 
 /* ---------------------------------------------------------------------------
@@ -42,9 +139,9 @@ publishes:
 	e.nav_id
 	e.row
 implements:
-	do_update
+	e.do_update()
 calls:
-	do_update_row([row])
+	e.do_update_row([row])
 --------------------------------------------------------------------------- */
 
 function row_widget(e, enabled_without_nav) {
@@ -75,7 +172,7 @@ function row_widget(e, enabled_without_nav) {
 		nav.on('focused_row_cell_state_changed', row_changed, on)
 		nav.on('display_vals_changed', row_changed, on)
 		nav.on('reset', row_changed, on)
-		nav.on('col_text_changed', row_changed, on)
+		nav.on('col_label_changed', row_changed, on)
 		nav.on('col_info_changed', row_changed, on)
 		e.fire('bind_nav', on)
 	}
@@ -270,7 +367,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 	}
 
 	e.set_col = nav_changed
-	e.prop('col', {type: 'col', col_nav: () => e.nav})
+	e.prop('col', {type: 'col', col_nav: () => e._nav})
 
 	e.set_nav = nav_changed
 	e.prop('nav', {private: true})
@@ -968,10 +1065,6 @@ css_state('.markbox:focus-within.invalid .focus-box', '', `
 	border-color: var(--fg-error);
 `)
 
-css_state('.input-widget:not([disabled]):not([readonly]) :is(.markbox-icon, .markbox-label):hover', '', `
-	filter: contrast(60%);
-`)
-
 css_state('.markbox.invalid :is(.markbox-label, .markbox-icon)', 'fg-error')
 
 css_state('.linear-form .markbox-label:focus-visible', 'outline-focus')
@@ -982,7 +1075,7 @@ css_role('.markbox.grid-editor .focus-box', 'h-c h-m')
 // checkbox
 // ---------------------------------------------------------------------------
 
-css_role('.linear-form :is(.checkbox, .checkbox-focus-box)', 'skip')
+css_role('.linear-form :is(.checkbox, .checkbox-focus-box, .markbox-baseline-box)', 'skip')
 
 css('.checkbox[button_style=checkbox] > .focus-box > .markbox-baseline-box > .checkbox-icon', 'large')
 css('.checkbox[button_style=checkbox] > .focus-box > .markbox-baseline-box > .checkbox-icon::before', 'far fa-square')
@@ -4247,16 +4340,16 @@ widget('switcher', 'Containers', function(e) {
 })
 
 // ---------------------------------------------------------------------------
-// x-label
+// lbl
 // ---------------------------------------------------------------------------
 
-css('.x-label', '', `
+css('.lbl', '', `
 	margin-left : var(--padding-x-input);
 	margin-right: var(--padding-x-input);
 	color: var(--fg-label);
 `)
 
-widget('x-label', function(e) {
+widget('lbl', function(e) {
 
 	editable_widget(e)
 	val_widget(e, false, false)
@@ -4427,7 +4520,7 @@ widget('frm', 'Containers', function(e) {
 			return s
 		// make-up a name based on col names.
 		s = item.col || item.attr('col')
-		if (item.tag == 'x-label')
+		if (item.tag == 'lbl')
 			s = s + '_label'
 		if (!s)
 			s = item.id
@@ -4446,7 +4539,7 @@ widget('frm', 'Containers', function(e) {
 	e.do_update = function(opt) {
 		if (opt.nav) {
 			names = obj()
-			for (let ce of e.$('.inp-widget, .inp, .x-label, .chart')) {
+			for (let ce of e.$('.inp-widget, .inp, .lbl, .chart')) {
 				if (ce.closest('frm') == e) {
 					ce.nav = e._nav
 					ce.style['grid-area'] = area_name(ce)

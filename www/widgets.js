@@ -23,6 +23,8 @@ WIDGETS
 	pager
 	richtext
 	if
+	toggle
+	label
 	widget-placeholder
 
 GLOBALS
@@ -122,8 +124,6 @@ css('.p-y-input', '', `
 	padding-top    : var(--padding-y-input);
 	padding-bottom : var(--padding-y-input);
 `)
-
-css('info', 'h small label m-y p-x-input arrow')
 
 css('.widget', 'rel h')
 
@@ -604,28 +604,30 @@ function stylable_widget(e) {
 // ---------------------------------------------------------------------------
 
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.tooltip', 'z2 h noclip noselect op0 click-through ease ease-out ease-fw', `
+css('.tooltip', 'z2 h-l h-t noclip noselect op0 click-through ease-out ease-fw ease-02s', `
+	transition-property: opacity, transform;
 	max-width: 400px;  /* max. width of the message bubble before wrapping */
 `)
 
 css('.tooltip-body', 'h-bl p-y tight ro bg1', `
-	box-shadow       : var(--shadow-tooltip);
+	box-shadow: var(--shadow-tooltip);
 `)
 
 // visibility animation
 
 css('.tooltip.visible', 'op1 click-through-off')
 
-css('.tooltip.visible[side=left  ]', '', `animation-name: tooltip-left;   `)
-css('.tooltip.visible[side=right ]', '', `animation-name: tooltip-right;  `)
-css('.tooltip.visible[side=top   ]', '', `animation-name: tooltip-top;    `)
-css('.tooltip.visible[side=bottom]', '', `animation-name: tooltip-bottom; `)
+// TODO: these don't work, figure out why!
+css('.tooltip.visible[side=left  ]', '', ` animation-name: tooltip-left;   `)
+css('.tooltip.visible[side=right ]', '', ` animation-name: tooltip-right;  `)
+css('.tooltip.visible[side=top   ]', '', ` animation-name: tooltip-top;    `)
+css('.tooltip.visible[side=bottom]', '', ` animation-name: tooltip-bottom; `)
 
 css(`
-	@keyframes tooltip-left   { from { opacity: 0; transform: translate(-1em, 0);  } }
-	@keyframes tooltip-right  { from { opacity: 0; transform: translate( 1em, 0);  } }
-	@keyframes tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
-	@keyframes tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
+@keyframes tooltip-left   { from { opacity: 0; transform: translate(-1em, 0);  } }
+@keyframes tooltip-right  { from { opacity: 0; transform: translate( 1em, 0);  } }
+@keyframes tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
+@keyframes tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
 `)
 
 css('.tooltip-content', 'p-x-2', `
@@ -657,7 +659,14 @@ css('.tooltip[side=right ] > .tooltip-tip', '', ` border-right-color  : inherit;
 css('.tooltip[side=top   ] > .tooltip-tip', '', ` border-top-color    : inherit; `)
 css('.tooltip[side=bottom] > .tooltip-tip', '', ` border-bottom-color : inherit; `)
 
-// side & align combinations
+// side & align combinations.
+
+// NOTE: tooltip must have the exact same total width and height for each
+// side and align combinations because side and/or align attrs can change
+// _after_ the popup is being positioned when it's too late to re-measure it!
+// This is why we put these paddings.
+css('.tooltip:is([side=top],[side=bottom])', '', `padding-left: .5em; padding-right : .5em; margin-left: -.5em; margin-right : -.5em;`)
+css('.tooltip:is([side=left],[side=right])', '', `padding-top : .5em; padding-bottom: .5em; margin-top : -.5em; margin-bottom: -.5em;`)
 
 css('.tooltip:is([side=top],[side=bottom])', '', `flex-flow: column;`)
 css('.tooltip[side=left   ]', '', `justify-content: flex-end;`)
@@ -678,7 +687,7 @@ css('.tooltip[side=left  ]', '', `margin-left   :  .25em; `)
 css('.tooltip[side=top   ]', '', `margin-top    :  .25em; `)
 css('.tooltip[side=bottom]', '', `margin-top    : -.25em; `)
 
-// styling based on kind attr
+// coloring based on kind attr.
 
 css('.tooltip[kind=search] > .tooltip-body', '', ` background-color: var(--bg-search); color: #000; `)
 css('.tooltip[kind=search] > .tooltip-tip ', '', ` color: var(--bg-search); `)
@@ -715,17 +724,7 @@ css('.tooltip[kind=cursor] > .tooltip-body > .tooltip-content', '', `
 	white-space: pre !important;
 `)
 
-css('.tooltip[kind=cursor] > .tooltip-tip', '', ` display: none; `)
-
-css('.error-list', '', `
-	margin: 0;
-	padding-inline-start: 1em;
-	text-align: start;
-`)
-
-css_state('.tooltip[kind=info  ] > .tooltip-body > .tooltip-xbutton:hover', '', `color: var(--fg-info);  `)
-css_state('.tooltip[kind=error ] > .tooltip-body > .tooltip-xbutton:hover', '', `color: var(--fg-error); `)
-css_state('.tooltip[kind=warn  ] > .tooltip-body > .tooltip-xbutton:hover', '', `color: var(--fg-warn);  `)
+css('.tooltip[kind=cursor] > .tooltip-tip', 'hidden')
 
 widget('tooltip', function(e) {
 
@@ -743,10 +742,15 @@ widget('tooltip', function(e) {
 	e.alias('side'   , 'popup_side')
 	e.alias('align'  , 'popup_align')
 
+	// SUBTLE: fixate side so that the tooltip has the exact same dimensions
+	// when measured for the first time as when measured afterwards
+	// after the side changes due to popup relayouting.
+	e.attr('side', e.side)
+
 	e.do_position_popup = function(side, align) {
 		// slide-in + fade-in with css.
 		e.class('visible', !e.hidden)
-		e.attr('side', side)
+		e.attr('side' , side)
 		e.attr('align', align)
 	}
 
@@ -3045,6 +3049,7 @@ widget('if', 'Containers', function(e) {
 			e.unsafe_html = html_content
 			document.fire('layout_changed')
 		}
+		e.show(!!opt.show)
 	}
 
 	function global_changed() {
@@ -3078,12 +3083,340 @@ widget('if', 'Containers', function(e) {
 
 })
 
-/* ---------------------------------------------------------------------------
-// toggle
+/*
 // ---------------------------------------------------------------------------
+// button
+// ---------------------------------------------------------------------------
+
+css('.btn', 'v m-y-05')
+
+css('.btn-focus-box', 'h-c h-bl b ro075 bold noselect p-x-4 p-y', `
+	background : var(--bg-button);
+	color      : var(--fg-button);
+	box-shadow : var(--shadow-button);
+`)
+
+css('.btn-focus-box.text-empty', 'p-x-2 h-c h-m')
+css('.btn-focus-box:not(.text-empty) .btn-icon', 'm-r')
+css('.btn-icon', 'w1 h-c')
+
+css_state('.btn:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
+	background-color: var(--bg-button-hover);
+`)
+css_state('.btn .btn-focus-box.active', '', `
+	background: var(--bg-button-active);
+	box-shadow: var(--shadow-button-active);
+`)
+
+css('.btn[primary] .btn-focus-box', 'b-invisible', `
+	background : var(--bg-button-primary);
+	color      : var(--fg-button-primary);
+`)
+css_state('.btn[primary]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
+	background : var(--bg-button-primary-hover);
+`)
+css_state('.btn[primary] .btn-focus-box.active', '', `
+	background : var(--bg-button-primary-active);
+`)
+
+css('.btn[danger] .btn-focus-box', '', `
+	background : var(--bg-button-danger);
+	color      : var(--fg-button-danger);
+`)
+css_state('.btn[danger]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
+	background : var(--bg-button-danger-hover);
+`)
+css_state('.btn[danger] .btn-focus-box.active', '', `
+	background : var(--bg-button-danger-active);
+`)
+
+// bare buttons (no borders)
+
+css_state('.btn[bare] .btn-focus-box', 'b-invisible ro0 no-bg no-shadow link')
+
+css_state('.btn[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
+	color: var(--fg-link-hover);
+`)
+
+css_state('.btn[bare] .btn-focus-box.active', '', `
+	color: var(--fg-link-active);
+`)
+
+// attention animation
+
+css(`
+@keyframes x-attention {
+	from {
+		transform: scale(1.2);
+		outline: 2px solid var(--fg);
+		outline-offset: 2px;
+	}
+}
+`)
+
+widget('btn', 'Input', function(e) {
+
+	row_widget(e, true)
+	editable_widget(e)
+
+	let html_text = unsafe_html(e.html)
+	e.clear()
+
+	e.icon_box = span({class: 'btn-icon'})
+	e.text_box = span({class: 'btn-text'})
+	e.focus_box = div({class: 'btn-focus-box'}, e.icon_box, e.text_box)
+	e.icon_box.hidden = true
+	e.add(e.focus_box)
+
+	e.make_focusable(e.focus_box)
+
+	e.prop('href', {store:'var', attr: true})
+	e.set_href = function(s) {
+		if (s) {
+			if (!e.link) { // make a link for google bot to follow.
+				let noscript = tag('noscript')
+				e.add(noscript)
+				e.link = tag('a')
+				e.link.set(TC(e.text))
+				e.link.title = e.title
+				noscript.set(e.link)
+			}
+			e.link.href = s
+		} else if (e.link) {
+			e.link.href = null
+		}
+	}
+
+	e.format_text = function(s) {
+		let row = e.row
+		if (!row) return s
+		return render_string(s, e._nav.serialize_row_vals(row))
+	}
+
+	function update_text() {
+		let s = e.format_text(e.text)
+		e.text_box.set(s, 'pre-line')
+		e.focus_box.class('text-empty', !s)
+		if (e.link)
+			e.link.set(TC(s))
+	}
+
+	e.set_text = function(s) {
+		update_text()
+	}
+
+	e.prop('text', {type: 'html', default: '', slot: 'lang'})
+
+	e.set_icon = function(v) {
+		if (isstr(v))
+			e.icon_box.attr('class', 'btn-icon '+v)
+		else
+			e.icon_box.set(v)
+		e.icon_box.hidden = !v
+	}
+	e.prop('icon', {type: 'icon'})
+	e.prop('load_spin', {attr: true})
+
+	e.prop('primary', {type: 'bool', attr: true})
+	e.prop('bare'   , {type: 'bool', attr: true})
+	e.prop('danger' , {type: 'bool', attr: true})
+	e.prop('confirm', {attr: true})
+	e.prop('action_name', {attr: 'action'})
+
+	e.activate = function() {
+		if (e.effectively_hidden || e.effectively_disabled)
+			return
+		if (e.confirm)
+			if (!confirm(e.confirm))
+				return
+		if (e.href) {
+			exec(e.href)
+			return
+		}
+		// action can be set directly and/or can be a global with a matching name.
+		if (e.action)
+			e.action()
+		let action_name = e.action_name || (e.id && e.id+'_action')
+		let action = window[action_name]
+		if (action)
+			action.call(e)
+		e.fire('activate')
+	}
+
+	function set_active(on, cancel) {
+		if (!on && cancel == null)
+			cancel = !e.hasclass('active')
+		e.class('active', on)
+		e.focus_box.class('active', on)
+		e.fire('active', on)
+		if (!on && !cancel)
+			e.activate()
+	}
+
+	e.on('keydown', function keydown(key, shift, ctrl) {
+		if (e.widget_editing) {
+			if (key == 'Enter') {
+				if (ctrl) {
+					e.text_box.insert_at_caret('<br>')
+					return
+				} else {
+					e.widget_editing = false
+					return false
+				}
+			}
+			return
+		}
+		if (e.hasclass('active') && key == 'Escape') {
+			set_active(false, true)
+			return false
+		}
+		if (key == ' ' || key == 'Enter') {
+			set_active(true)
+			return false
+		}
+	})
+
+	e.on('keyup', function keyup(key) {
+		if (e.hasclass('active')) {
+			// ^^ always match keyups with keydowns otherwise we might catch
+			// a keyup from someone else's keydown, eg. a dropdown menu item
+			// could've been selected by pressing Enter which closed the menu
+			// and focused this button back and that Enter's keyup got here.
+			if (key == ' ' || key == 'Enter') {
+				set_active(false)
+			}
+			return false
+		}
+	})
+
+	e.focus_box.on('pointerdown', function(ev) {
+		if (e.widget_editing)
+			return
+		e.focus()
+		set_active(true)
+		return this.capture_pointer(ev, null, function() {
+			set_active(false)
+		})
+	})
+
+	// widget editing ---------------------------------------------------------
+
+	e.set_widget_editing = function(v) {
+		e.text_box.contenteditable = v
+		if (!v)
+			e.text = e.text_box.innerText
+	}
+
+	e.on('pointerdown', function(ev) {
+		if (e.widget_editing && ev.target != e.text_box) {
+			e.text_box.focus()
+			e.text_box.select_all()
+			return this.capture_pointer(ev)
+		}
+	})
+
+	function prevent_bubbling(ev) {
+		if (e.widget_editing)
+			ev.stopPropagation()
+	}
+	e.text_box.on('pointerdown', prevent_bubbling)
+	e.text_box.on('click', prevent_bubbling)
+
+	e.text_box.on('blur', function() {
+		e.widget_editing = false
+	})
+
+	// ajax notifications -----------------------------------------------------
+
+	e.on('load', function(ev, ...args) {
+		e.disable('loading', ev != 'done')
+		let s = e.load_spin
+		if (s) {
+			s = repl(s, '', true) // html attr
+			s = repl(s, true, 'fa-spin')
+			s = repl(s, 'reverse', 'fa-spin fa-spin-reverse')
+			e.icon_box.class(s, ev == 'start')
+		}
+	})
+
+	e.load = function(url, success, fail, opt) {
+		return get(url, success, fail, assign({notify: e}, opt))
+	}
+
+	e.post = function(url, upload, success, fail, opt) {
+		return post(url, upload, success, fail, assign({notify: e}, opt))
+	}
+
+	// "drawing attention" animation ------------------------------------------
+
+	e.draw_attention = function() {
+		if (e.disabled)
+			return
+		e.style.animation = 'none'
+		raf(function() { e.style.animation = 'x-attention .5s' })
+	}
+
+	// row changing -----------------------------------------------------------
+
+	e.do_update_row = function(row) {
+		update_text()
+	}
+
+	return {text: or(html_text)}
+
+})
 */
 
-css('toggle', 't-m p05 round bg1 h-m ease ring hand', `
+/* ---------------------------------------------------------------------------
+// check, toggle, radio buttons
+// ---------------------------------------------------------------------------
+sets attrs:
+	checked
+sets classes:
+	.hover
+publishes:
+	e.checked <-> t|f
+	e.user_toggle()
+	e.user_set_checked(checked)
+*/
+
+// check button --------------------------------------------------------------
+
+function check_widget(e) {
+	e.clear()
+	e.make_focusable()
+	e.prop('checked', {type: 'bool', attr: true})
+	e.user_set_checked = function(v) { // stub
+		e.checked = v
+	}
+	e.user_toggle = function() {
+		e.user_set_checked(!e.checked)
+	}
+	e.on('keydown', function(key) {
+		if (key == ' ')
+			e.user_toggle()
+	})
+	e.on('click', function() {
+		e.user_toggle()
+	})
+	e.on('label_hover', function(on) {
+		e.class('hover', on)
+	})
+	e.on('label_click', function() {
+		e.user_toggle()
+	})
+}
+
+css('.check', 'large link')
+css_state('.check:is(:hover,.hover)', 'link-hover')
+css_state('.check[checked]:is(:hover,.hover)', 'link-hover')
+css_state('.check::before', 'far fa-square')
+css_state('.check[checked]::before', 'fa fa-check-square')
+widget('check', check_widget)
+
+// toggle button -------------------------------------------------------------
+
+css('.toggle', 't-m p05 round bg1 h-m ease ring', `
 	min-width  : 3em;
 	max-width  : 3em;
 	min-height : 1.75em;
@@ -3093,31 +3426,159 @@ css('.toggle-thumb', 'round bg-white ring ease', `
 	min-width  : 1.2em;
 	min-height : 1.2em;
 `)
-css_state('toggle[checked]', '', `
+css_state('.toggle[checked]', '', `
 	background: var(--bg-button-primary);
 `)
-css_state('toggle[checked] .toggle-thumb', 'ease', `
+css_state('.toggle[checked] .toggle-thumb', 'ease', `
 	transform: translateX(100%);
 `)
-
+css_state('.toggle:is(:hover,.hover)', '', `
+	background: var(--bg1-hover);
+`)
+css_state('.toggle[checked]:is(:hover,.hover)', '', `
+	background: var(--bg-button-primary-hover);
+`)
 widget('toggle', function(e) {
-	e.thumb = tag('div', {class: 'toggle-thumb'})
+	check_widget(e)
+	e.thumb = div({class: 'toggle-thumb'})
 	e.set(e.thumb)
-	e.make_focusable()
-	e.prop('checked', {type: 'bool', attr: true})
-	e.user_set_checked = function(v) { // stub
-		e.checked = v
+})
+
+// radio button --------------------------------------------------------------
+
+css('.radio', 't-m b2 round h-c h-m ease ring', `
+	min-width  : 1.2em;
+	max-width  : 1.2em;
+	min-height : 1.2em;
+	max-height : 1.2em;
+	border-color: var(--bg-button-primary);
+`)
+css('.radio-thumb', 'abs round ring ease', `
+	left  : 50%;
+	top   : 50%;
+	right : 50%;
+	bottom: 50%;
+	background: var(--bg-button-primary);
+`)
+css_state('.radio[checked] .radio-thumb', 'ease', `
+	left  : .2em;
+	top   : .2em;
+	right : .2em;
+	bottom: .2em;
+`)
+
+css_state('.radio:is(:hover,.hover)', '', `
+	background: var(--bg1-hover);
+`)
+css_state('.radio[checked]:is(:hover,.hover)', '', `
+	border-color: var(--bg-button-primary-hover);
+`)
+css_state('.radio[checked]:is(:hover,.hover) > .radio-thumb', '', `
+	background: var(--bg-button-primary-hover);
+`)
+widget('radio', function(e) {
+	check_widget(e)
+	e.thumb = div({class: 'radio-thumb'})
+	e.set(e.thumb)
+	e.prop('group', {attr: true})
+	e.user_set_checked = function(v) {
+		if (!v)
+			return
+		if (!e.group)
+			return
+		let frm = e.closest('frm')
+		if (!frm)
+			frm = document.body
+		for (let re of frm.$('radio[group='+e.group+']'))
+			if (re != e)
+				re.checked = false
+		e.checked = true
 	}
-	e.toggle = function() {
-		e.user_set_checked(!e.checked)
+})
+
+/* ---------------------------------------------------------------------------
+// activation label
+// ---------------------------------------------------------------------------
+fires:
+	^for.label_hover(on)
+	^for.label_pointer{down|up}(ev)
+	^for.label_click(ev)
+*/
+
+css('.label-widget', 'label noselect')
+css_state('.label-widget:hover', 'label-hover')
+widget('label', function(e) {
+	e.class('label-widget')
+	e.class('label', false)
+	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.on('pointerenter', function() {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_hover', true)
+	})
+	e.on('pointerleave', function() {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_hover', false)
+	})
+	e.on('pointerdown', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_pointerdown', ev)
+	})
+	e.on('pointerup', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_pointerup', ev)
+	})
+	e.on('click', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_click', ev)
+	})
+})
+
+/* ---------------------------------------------------------------------------
+// info text / button
+// ---------------------------------------------------------------------------
+*/
+
+css('.info', '', `display: inline-block`)
+
+css('.info[collapsed]', 'h-t', `color: var(--bg-info);`)
+css('.info:not([collapsed])', 'small label')
+css('.info[collapsed] > .info-btn::before', 'xlarge fa fa-info-circle')
+css('.info-btn-small::before', 'm-r fa fa-info-circle', `color: var(--bg-info);`)
+
+widget('info', function(e) {
+	let html_content = [...e.nodes]
+	e.prop('collapsed', {type: 'bool', attr: true})
+	e.prop('content'  , {type: 'nodes'})
+	e.set_collapsed = function(v) {
+		e.clear()
+		if (v) {
+			e.btn = e.btn || div({class: 'info-btn'})
+			if (!e.tooltip) {
+				e.tooltip = tooltip({kind: 'info', align: 'left', popup_ox: -4})
+				e.btn.set(e.tooltip)
+				e.tooltip.update({show: false})
+				e.btn.on('hover', function(ev, on) {
+					e.tooltip.update({show: on})
+				})
+			}
+			e.tooltip.text = [...e.content]
+			e.set(e.btn)
+		} else {
+			if (e.tooltip)
+				e.tooltip.update({show: false})
+			e.clear()
+			e.add(span({class: 'info-btn-small'}), e.content)
+		}
 	}
-	e.on('keydown', function(key) {
-		if (key == ' ')
-			e.toggle()
-	})
-	e.on('click', function() {
-		e.toggle()
-	})
+	return {
+		content   : html_content,
+		collapsed : or(e.collapsed, true),
+	}
 })
 
 /* ---------------------------------------------------------------------------

@@ -533,19 +533,14 @@ css_layer = memoize(function(layer) {
 
 })
 
-css               = css_layer('base')
+css_base          = css_layer('base')
 css_state         = css_layer('state')
 css_role          = css_layer('role')
 css_role_state    = css_layer('role-state')
 css_generic_state = css_layer('generic-state')
 css_util          = css_layer('util')
 
-function css_and_children(parent_selector, child_selector) {
-	return [
-		parent_selector + child_selector,
-		parent_selector + ' ' + child_selector,
-	]
-}
+css = css_base
 
 // css.js usage ranking ------------------------------------------------------
 
@@ -1944,8 +1939,6 @@ e.update = function(opt) {
 	}
 	if (!this.bound)
 		return
-	if (update_opt.show != null)
-		this.show(update_opt.show)
 	if (update_set.has(this)) // update() inside do_update(), eg. a prop was set.
 		return
 	update_set.add(this)
@@ -1970,10 +1963,10 @@ e._do_update = function() {
 	let opt = this._update_opt
 	this._update_opt = null
 	this.debug_open_if(DEBUG_UPDATE, 'U', Object.keys(opt).join(','))
+	if (opt.show != null)
+		this.show(opt.show)
 	if (this.do_update)
 		this.do_update(opt)
-	if (opt.show)
-		this.show()
 	this.position()
 	this.debug_close_if(DEBUG_UPDATE)
 }
@@ -2114,6 +2107,38 @@ installers.attr_changed = function() {
 		bind.call(this, true)
 }
 
+let nodes_change_observer = new MutationObserver(function(mutations) {
+	for (let mut of mutations)
+		mut.target.fire('nodes_changed', mut)
+})
+installers.nodes_changed = function() {
+	if (this.__detecting_node_changes)
+		return
+	this.__detecting_node_changes = true
+	let observing
+	function bind(on) {
+		if (on) {
+			if (!observing) {
+				nodes_change_observer.observe(this, {
+					childList: true,
+					subtree: true,
+					characterData: true,
+					characterDataOldValue: true,
+				})
+				observing = true
+			}
+		} else {
+			if (observing) {
+				nodes_change_observer.disconnect(this)
+				observing = false
+			}
+		}
+	}
+	this.on_bind(bind)
+	if (this.bound)
+		bind.call(this, true)
+}
+
 installers.hover = function() {
 	if (this.__hover_installed)
 		return
@@ -2121,7 +2146,7 @@ installers.hover = function() {
 	this.on('pointerover', function(ev, mx, my) {
 		if (this.pointer_captured)
 			return
-		if (this.ev.buttons)
+		if (ev.buttons)
 			return
 		if (this.hasattr('disabled'))
 			return
