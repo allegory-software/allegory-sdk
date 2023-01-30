@@ -150,12 +150,6 @@ ELEMENT PROPERTIES
 	e.get_props() -> {k->attrs}
 	e.serialize_prop(k) -> s
 
-LINKED ELEMENTS
-
-	e.set_linked_element(key, id)
-	e.on_linked_element_bind(f); f(key, element, on)
-	^e.linked_element_id_changed(key, id1, id0)
-
 PROPERTY PERSISTENCE
 
 	e.xoff()
@@ -170,19 +164,27 @@ DEFERRED DOM UPDATING
 	e.on_measure(f)
 	e.on_position(f)
 
-COMPONENTS
+ELEMENT INIT
 
 	component('TAG'|'TAG[ATTR]'[, category], initializer)
 	e.init_child_components()
 	e.initialized -> null|t|f
+	e.on_init(f); f()
+	^^init(e)
+	^^ID.init(e)
 	init_components()
-	e.bind(t|f)
+
+ELEMENT BIND
+
 	e.on_bind(f); f(on)
-	^e.bind(on)
-	^window.element_bind(e, on)
-	^window['ID.bind'](e, on)
-	^window['ID.init'](e)
+	^^bind(e, on)
+	^^ID.bind(e, on)
 	e.bound -> t|f
+
+GLOBAL EVENTS
+
+	e.listen(event, f)
+	e.announce(event, ...args)
 
 INPUT EVENTS
 
@@ -752,17 +754,27 @@ property(NodeList, 'last' , function() { return this[this.length-1] })
 
 /* DOM manipulation with lifecycle management --------------------------------
 
-The DOM API works with strings, nodes, arrays of nodes and also functions
-that will be called to return those objects (we call those constructors).
+The DOM manipulation API works with strings, nodes, arrays of nodes and also
+functions (aka constructors) that are called to return those objects.
 
-The "lifecycle management" part of this is basically poor man's web components.
-The reason we're reinventing web components is because the actual web components
-API built into the browser is unusable. Needless to say, all DOM manipulation
-needs to be done through this API exclusively for components to work.
+The "lifecycle management" part of this is an implementation of web components.
+The reason we're reinventing web components is because the web components API
+built into the browser is unusable. Needless to say, all DOM manipulation
+needs to be done through this API exclusively for any of this to work, so use
+e.add() instead of e.append(), etc. everywhere!
+
+Lifecycle management means you can add an init function on a tag to be called
+every time an element of that tag is created via this DOM API. This can be
+a custom tag or a built-in tag, and you can also specify a html attribute
+as a condition for initialization (see uses of component() in this file).
+
+To init components declared in html you need to call init_components() when
+the DOM is loaded! This is not called automatically so you can have a central
+place in which you init things in the right order.
 
 Components can be either attached to the DOM (bound) or not. When bound they
 become alive, when unbound they die and must remove all event handlers that
-they registered in document, window or other external components.
+they registered in document, window or other external objects, or they leak!
 
 When a component is initialized, its parents are only partially initialized
 so take that into account if you mess with them at that stage.
@@ -774,7 +786,27 @@ Moving bound elements to an unbound tree will unbind them.
 Adding unbound elements to the bound tree will bind them.
 Moving elements around in the bound tree will *not* rebind them.
 
+Getting back to the init function, inside it you can:
+
+1. Replace the element's inner html with whatever the component is be made of.
+For more complex components, the inner html can be used to configure the
+component. For container-type components, call e.init_child_components()
+so that inner components can be initialized before use.
+
+2. Declare properties with e.prop(). Properties are initialized using values
+gathered from the element() call or from html attributes if coming from html.
+The init function can also return a map of default initial prop vals.
+
+While props are initialized, e.initialized is false, ^^prop_changed event is
+not fired, and prop's default is set to the initial value.
+
+3. Register event handlers, with the caveat that handlers into window, document
+or external components need to be set inside a bind handler, passing along the
+`on` arg, so that they get unset when the component is unbound.
+
 */
+
+// element init --------------------------------------------------------------
 
 let component_init = obj() // {tagName->init}
 let component_attr = obj() // {tagName->attr}
@@ -802,18 +834,18 @@ function component(selector, category, init) {
 	return create
 }
 
-component.categories = obj() // {cat -> {craete1,...}}
+component.categories = obj() // {cat->{create1,...}}
 
-component.init_instance = function(e, prop_vals) { // stub, see xmodule.js.
+component.init_instance = function(e, prop_vals) { // stub, see module.js.
 	e.xoff()
 	for (let k in prop_vals)
 		e.set_prop(k, prop_vals[k])
 	e.xon()
 }
 
-component.instance_tag = noop // stub, see x-module.js.
+component.instance_tag = noop // stub, see module.js.
 
-// TODO: this way, e.property() props can't be set from html. Convert them
+// TODO: e.property() props can't be set from html. Convert them
 // to e.prop() if you want them to be settable from html attrs!
 let attr_prop_vals = function(e) {
 	let prop_vals = obj()
@@ -833,8 +865,7 @@ let attr_prop_vals = function(e) {
 	return prop_vals
 }
 
-// NOT for users to call!
-e.init_component = function(prop_vals) {
+e._init_component = function(prop_vals) {
 
 	let e = this
 
@@ -865,7 +896,7 @@ e.init_component = function(prop_vals) {
 	let cons_prop_vals = init(e)
 
 	// initial prop values come from multiple sources, in priority order:
-	// - element() args.
+	// - element() arg keys.
 	// - constructor return value.
 	// - html attributes.
 	prop_vals = assign_opt(attr_prop_vals(e), cons_prop_vals, prop_vals)
@@ -893,19 +924,18 @@ e.init_component = function(prop_vals) {
 	component.init_instance(e, prop_vals)
 	e.initialized = true
 
-	// call the after-properties-are-set init function.
-	if (e.init)
-		e.init()
+	// call the after-all-properties-are-set init function.
+	if (e._user_init)
+		e._user_init()
 
 	// NOTE: id must be given when the component is created, not set later!
 	if (e.id) {
 		e.on('attr_changed', function(k, v, v0) {
-			if (k == 'id') {
-				window.fire('element_id_changed', e, v, v0)
-				window.fire(v0+'.id_changed', e, v, v0)
-			}
+			if (k == 'id')
+				e.announce('id_changed', v, v0)
 		})
-		window.fire(e.id+'.init', e)
+		e.announce('init')
+		e.announce(e.id+'.init')
 	}
 
 	e.debug_close_if(DEBUG_INIT)
@@ -916,10 +946,15 @@ e.init_component = function(prop_vals) {
 e.init_child_components = function() {
 	if (this.len)
 		for (let ce of this.children)
-			ce.init_component()
+			ce._init_component()
 }
 
-// NOT for users to call!
+e.on_init = function(f) {
+	this.do_after('_user_init', f)
+}
+
+// element bind --------------------------------------------------------------
+
 property(Element, 'bound', {
 	get: function() {
 		if (this._bound != null)
@@ -931,39 +966,64 @@ property(Element, 'bound', {
 			return true
 		return p.bound
 	},
-	set: function(bound) {
-		this._bound = bound
-	}
 })
 
-// NOT for users to call!
-e.bind_children = function bind_children(on) {
+e._bind_children = function bind_children(on) {
 	if (!this.len)
 		return
 	assert(isbool(on))
 	for (let ce of this.children)
-		ce.bind(on)
+		ce._bind(on)
 }
 
-// NOT for users to call!
-e.bind = function bind(on) {
+e._bind = function bind(on) {
 	assert(isbool(on))
-	if (this._bound != null) { // any tag that called on('bind') or on_bind()
-		if (this._bound == on)
+	let e = this
+	// only tags that called on_bind() or have an id get this event.
+	if (e._bound != null || e.id) {
+		if (e._bound == on)
 			return
-		this._bound = on
-		this.do_bind(on)
+		e._bound = on
+		assert(e.bound != null)
+		if (on) {
+			e.debug_open_if(DEBUG_BIND, '+')
+			let t0 = PROFILE_BIND_TIME && time()
+			if (e._user_bind)
+				e._user_bind(true)
+			if (e.id) {
+				e.announce('bind', true)
+				e.announce(e.id+'.bind', true)
+			}
+			if (PROFILE_BIND_TIME) {
+				let t1 = time()
+				let dt = (t1 - t0) * 1000
+				if (dt >= SLOW_BIND_TIME_MS)
+					debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name)
+			}
+			e.update()
+			e.debug_close_if(DEBUG_BIND)
+		} else {
+			e.debug_open_if(DEBUG_BIND, '-')
+			e.cancel_update()
+			if (e._user_bind)
+				e._user_bind(false)
+			if (e.id) {
+				e.announce('bind', false)
+				e.announce(e.id+'.bind', true)
+			}
+			e.debug_close_if(DEBUG_BIND)
+		}
 	}
 	// bind children after their parent is bound to allow components to remove
 	// their children inside the bind event handler before them getting bound,
 	// and also so that children see a bound parent when they are getting bound.
-	this.bind_children(on)
+	e._bind_children(on)
 }
 
 e.on_bind = function(f) {
 	if (this._bound == null)
 		this._bound = this.bound
-	this.do_after('do_bind', f)
+	this.do_after('_user_bind', f)
 }
 
 root = document.documentElement
@@ -973,13 +1033,34 @@ function init_components() {
 	head = document.head // for debugging, don't use in code.
 	if (DEBUG_INIT)
 		debug('ROOT INIT ---------------------------------')
-	root.init_component()
+	root._init_component()
 	if (DEBUG_BIND)
 		debug('ROOT BIND ---------------------------------')
-	root.bind(true)
+	root._bind(true)
 	if (DEBUG_BIND)
 		debug('ROOT BIND DONE ----------------------------')
 }
+
+// element global events -----------------------------------------------------
+
+// listen to a global event *while the element is bound*.
+e.listen = function(event, f) {
+	let handlers = obj() // event->f
+	e.on_bind(function(on) {
+		for (let event in handlers)
+			listen(event, handlers[event], f, on)
+	})
+	e.listen = function(event, f) {
+		handlers[event] = f
+	}
+}
+
+e.announce = function(event, ...args) {
+	if (!this.bound) return
+	announce(this, this.id, event, ...args)
+}
+
+// DOM manipulation API ------------------------------------------------------
 
 // create a text node from a stringable. calls a constructor first.
 // wraps the node in a span if wrapping control is specified.
@@ -1044,7 +1125,7 @@ function tag(tag, attrs, ...children) {
 		else
 			e.append(s)
 	}
-	e.init_component()
+	e._init_component()
 	return e
 }
 
@@ -1068,7 +1149,7 @@ function element(t) {
 			return
 		}
 		let e = document.createElement(tag)
-		e.init_component(t)
+		e._init_component(t)
 		return e
 	}
 	return document.createTextNode(t) // stringable -> node
@@ -1137,7 +1218,7 @@ Array.prototype.join_nodes = function(sep, parent_node) {
 // NOTE: you can end up with duplicate ids after this!
 method(Node, 'clone', function() {
 	let cloned = this.cloneNode(true)
-	cloned.init_component()
+	cloned._init_component()
 	return cloned
 })
 
@@ -1148,13 +1229,13 @@ property(Element, 'unsafe_html', {
 		let _bound = this._bound
 		let bound = this.bound
 		if (bound)
-			this.bind_children(false)
+			this._bind_children(false)
 		this.innerHTML = s
 		this._bound = false // prevent bind in init for children.
 		this.init_child_components()
 		this._bound = _bound
 		if (bound)
-			this.bind_children(true)
+			this._bind_children(true)
 	},
 })
 
@@ -1194,7 +1275,7 @@ e.set = function E_set(s) {
 		if (!this.bound) {
 			for (let s1 of s)
 				if (iselem(s1))
-					s1.bind(false)
+					s1._bind(false)
 			this.innerHTML = null
 			for (let s1 of s)
 				if (s1 != null)
@@ -1203,13 +1284,13 @@ e.set = function E_set(s) {
 			// unbind nodes that are not in the new list.
 			for (let node of this.nodes)
 				if (iselem(node) && s.indexOf(node) == -1) // TODO: O(n^2) !
-					node.bind(false)
+					node._bind(false)
 			this.innerHTML = null
 			for (let s1 of s)
 				if (s1 != null)
 					this.append(s1)
 			// bind any unbound new elements.
-			this.bind_children(true)
+			this._bind_children(true)
 		}
 	} else { // string or stringable: set as text.
 		this.clear() // unbind children
@@ -1232,10 +1313,10 @@ e.add = function E_add(...args) {
 		}
 		let bind = iselem(s) ? this.bound : null
 		if (bind == false)
-			s.bind(false)
+			s._bind(false)
 		this.append(s)
 		if (bind == true)
-			s.bind(true)
+			s._bind(true)
 	}
 	return this
 }
@@ -1256,16 +1337,16 @@ e.insert = function E_insert(i0, ...args) {
 		}
 		let bind = iselem(s) ? this.bound : null
 		if (bind == false)
-			s.bind(false)
+			s._bind(false)
 		this.insertBefore(s, this.at[i0])
 		if (bind == true)
-			s.bind(true)
+			s._bind(true)
 	}
 	return this
 }
 
 override(Element, 'remove', function E_remove(inherited) {
-	this.bind(false)
+	this._bind(false)
 	inherited.call(this)
 	return this
 })
@@ -1286,20 +1367,20 @@ e.replace = function E_replace(e0, s) {
 			return this
 		}
 		if (iselem(e0))
-			e0.bind(false)
+			e0._bind(false)
 		let bind = iselem(s) ? this.bound : null
 		if (bind == false)
-			s.bind(false)
+			s._bind(false)
 		this.replaceChild(s, e0)
 		if (bind == true)
-			s.bind(true)
+			s._bind(true)
 	} else if (s != null) {
 		let bind = iselem(s) ? this.bound : null
 		if (bind == false)
-			s.bind(false)
+			s._bind(false)
 		this.appendChild(s)
 		if (bind == true)
-			s.bind(true)
+			s._bind(true)
 	}
 	return this
 }
@@ -1323,7 +1404,8 @@ property(Element, 'index', {
 	}
 })
 
-// util to convert an array to a html bullet list.
+// util to convert an array to a html bullet list ----------------------------
+
 {
 let ul = function(a, ul_tag, ul_attrs, only_if_many) {
 	if (only_if_many && a.length < 2)
@@ -1334,7 +1416,7 @@ Array.prototype.ul = function(attrs, only_if_many) { return ul(this, 'ul', attrs
 Array.prototype.ol = function(attrs, only_if_many) { return ul(this, 'ol', attrs, only_if_many) }
 }
 
-/* element method overriding -------------------------------------------------
+/* component method overriding -----------------------------------------------
 
 NOTE: unlike global override(), e.override() cannot override built-in methods.
 You can still use the global override() to override built-in methods in an
@@ -1367,7 +1449,7 @@ e.do_after = function(method, func) {
 	} || func
 }
 
-/* element virtual properties ------------------------------------------------
+/* component virtual properties ----------------------------------------------
 
 publishes:
 	e.property(name, get, [set])
@@ -1388,9 +1470,8 @@ calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
 fires:
-	^window.'prop_changed' (e, prop, v1, v0)
-	^window.'element_id_changed' (e, id, id0)
-	^window.'ID0.id_changed' (e, id, id0)
+	^^prop_changed(e, prop, v1, v0)
+	^^id_changed(e, id, id0)
 
 */
 
@@ -1405,7 +1486,7 @@ let fire_prop_changed = function(e, prop, v1, v0) {
 	if (e._xoff) {
 		e.props[prop].default = v1
 	} else {
-		window.fire('prop_changed', e, prop, v1, v0)
+		e.announce('prop_changed', prop, v1, v0)
 	}
 }
 
@@ -1497,38 +1578,31 @@ e.prop = function(prop, opt) {
 		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
 		let REF = opt.bind_id
 		function element_bind(te, on) {
-			if (e[ID] == te.id) {
-				e[REF] = on ? te : null
-				e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
-			}
+			if (e[ID] != te.id) return
+			e[REF] = on ? te : null
+			e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
+		}
+		function id_bind(id, on) {
+			if (!id) return
+			let te = resolve_linked_element(id)
+			e[REF] = te
+			e.debug_if(DEBUG_ELEMENT_BIND, te ? '==' : '=/=', DEBUG_ID, id)
 		}
 		function element_id_changed(te, id1, id0) {
+			if (e[ID] != id0) return
 			e[ID] = id1
 		}
-		let bind_element
-		function id_prop_changed(id1, id0) {
-			if (id0 != null) {
-				bind_element(false)
-				e.on('bind', bind_element, false)
-				bind_element = null
-			}
-			if (id1 != null) {
-				bind_element = function(on) {
-					e[REF] = on ? resolve_linked_element(e[ID]) : null
-					e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, e[ID])
-					window.on(id1+'.bind', element_bind, on)
-					window.on(id1+'.id_changed', element_id_changed, true)
-				}
-				e.on('bind', bind_element, true)
-				if (e.bound)
-					bind_element(true)
-			}
-		}
+		e.on_bind(function(on) {
+			listen('bind', element_bind, on)
+			listen('id_changed', element_id_changed, true)
+		})
 		prop_changed = function(e, k, v1, v0) {
 			fire_prop_changed(e, k, v1, v0)
-			id_prop_changed(v1, v0)
+			id_bind(v0, false)
+			id_bind(v1, true)
 		}
-		id_prop_changed(e[ID])
+		if (e.bound)
+			id_bind(e[ID], true)
 	}
 
 	e.property(prop, get, set)
@@ -1586,85 +1660,8 @@ e.serialize = function() {
 	return t
 }
 
-// id-based dynamic binding of external elements.
-e.do_linked_element_bind = noop
-e.on_linked_element_bind = function(f) {
-	this.do_after('do_linked_element_bind', f)
-}
-e.set_linked_element = function(k, id1) {
+/* element disablable mixin --------------------------------------------------
 
-	let e = this
-
-	let links = map() // k->te
-	let all_keys = map() // id->set(K)
-
-	e.set_linked_element = function(k, id1) {
-		let te1 = id1 != null && resolve_linked_element(id1)
-		let te0 = links.get(k)
-		if (te0) {
-			let id0 = te0.id
-			if (te1 == te0)
-				return
-			let keys = all_keys.get(id0)
-			keys.delete(k)
-			if (!keys.size)
-				all_keys.delete(id0)
-			if (te0.bound)
-				e.do_linked_element_bind(k, te0, false)
-		}
-		links.set(k, te1)
-		if (id1)
-			attr(all_keys, id1, set).add(k)
-		if (te1)
-			e.bind_linked_element(k, te1, true)
-	}
-
-	function element_bind(te, on) { // ^window.element_bind
-		let keys = all_keys.get(te.id)
-		if (!keys) return
-		te = resolve_linked_element(te.id)
-		if (!te) return
-		for (let k of keys) {
-			links.set(k, on ? te : null)
-			e.bind_linked_element(k, te, on)
-		}
-	}
-
-	function element_id_changed(te, id1, id0) { // ^window.element_id_changed
-		let keys = all_keys.get(id0)
-		if (keys)
-			for (let k of keys)
-				e.fire('linked_element_id_changed', k, id1, id0)
-	}
-
-	e.on_bind(function(on) {
-		for (let [id, keys] of all_keys) {
-			for (let k of keys) {
-				if (on) {
-					let te = resolve_linked_element(id)
-					if (te) {
-						links.set(k, te)
-						e.bind_linked_element(k, te, true)
-					}
-				} else {
-					let te = links.get(k)
-					if (te) {
-						links.set(k, null)
-						e.bind_linked_element(k, te, false)
-					}
-				}
-			}
-		}
-		window.on('element_bind', element_bind, on)
-		window.on('element_id_changed', element_id_changed, on)
-	})
-
-	e.set_linked_element(k, id1)
-}
-
-/* ---------------------------------------------------------------------------
-// element disablable mixin
-// ---------------------------------------------------------------------------
 publishes:
 	e.disabled
 	e.disable(reason, disabled)
@@ -1680,7 +1677,8 @@ also add `click-through` (but then scrolling won't work!) so make sure to
 add `:not([disabled])` in css on those selectors.
 
 NOTE: for non-focusables setting the `disabled` attr is enough to disable them.
---------------------------------------------------------------------------- */
+
+*/
 
 // NOTE: you still have to use `:not([disabled]):hover` to prevent :hover
 // on disabled widgets because we're not using `pointer-events: none`.
@@ -1769,15 +1767,15 @@ e.make_disablable = function() {
 	}
 }
 
-/* ---------------------------------------------------------------------------
-// element focusable mixin
-// ---------------------------------------------------------------------------
+/* element focusable mixin ---------------------------------------------------
+
 publishes:
 	e.tabindex
 	e.focusable
 sets css classes:
 	focusable
---------------------------------------------------------------------------- */
+
+*/
 
 e.make_focusable = function(fe) {
 
@@ -1955,7 +1953,7 @@ e.cancel_update = function() {
 }
 
 e.on_update = function(f) {
-	this.bound = this.bound || false
+	this._bound = this.bound || false
 	this.do_after('do_update', f)
 }
 
@@ -1984,44 +1982,13 @@ e.position = function() {
 }
 
 e.on_measure = function(f) {
-	this.bound = this.bound || false
+	this._bound = this.bound || false
 	this.do_after('do_measure', f)
 }
 
 e.on_position = function(f) {
-	this.bound = this.bound || false
+	this._bound = this.bound || false
 	this.do_after('do_position', f)
-}
-
-e.do_bind = function(on) {
-	let e = this
-	assert(e.bound != null)
-	if (on) {
-		e.debug_open_if(DEBUG_BIND, '+')
-		let t0 = PROFILE_BIND_TIME && time()
-		e.fire('bind', true)
-		if (e.id) {
-			window.fire('element_bind', e, true)
-			window.fire(e.id+'.bind', e, true)
-		}
-		if (PROFILE_BIND_TIME) {
-			let t1 = time()
-			let dt = (t1 - t0) * 1000
-			if (dt >= SLOW_BIND_TIME_MS)
-				debug((dt).dec().padStart(3, ' ')+'ms', e.debug_name)
-		}
-		e.update()
-		e.debug_close_if(DEBUG_BIND)
-	} else {
-		e.debug_open_if(DEBUG_BIND, '-')
-		e.cancel_update()
-		e.fire('bind', false)
-		if (e.id) {
-			window.fire('element_bind', e, false)
-			window.fire(e.id+'.bind', e, false)
-		}
-		e.debug_close_if(DEBUG_BIND)
-	}
 }
 
 /* events & event wrappers ---------------------------------------------------
@@ -2040,11 +2007,6 @@ This is not done here, see e.make_disablable() and e.make_focusable().
 
 let installers = on.installers
 let callers = on.callers
-
-installers.bind = function() {
-	if (this._bound == null)
-		this._bound = this.bound
-}
 
 let resize_observer = new ResizeObserver(function(entries) {
 	for (let entry of entries)
@@ -2842,7 +2804,7 @@ component('script[run]', function(e) {
 		return
 	if (e.src)
 		return
-	// calling with `e` as `this` allows `this.on('bind',...)` inside the script
+	// calling with `e` as `this` allows `this.on_bind(...)` inside the script
 	// and also attaching other elements to the script for lifetime control!
 	(new Function('', e.text)).call(e)
 })
