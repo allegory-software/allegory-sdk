@@ -1827,7 +1827,7 @@ function editbox_widget(e, opt) {
 		}
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		if (on)
 			update_copy_button()
 	})
@@ -2268,7 +2268,7 @@ widget('passedit', 'Input', function(e) {
 	let cons_opt = editbox_widget(e)
 	e.input.attr('type', 'password')
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		if (on && !e.view_password_button) {
 			e.view_password_button = button({
 				classes: 'passedit-eye-icon',
@@ -3822,7 +3822,7 @@ widget('richedit', 'Input', function(e) {
 		e.set_val(v ? v : null, {input: e})
 	})
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		if (on)
 			e.editing = true
 	})
@@ -4148,7 +4148,7 @@ widget('sqledit', 'Input', function(e) {
 		// TODO
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		if (on) {
 			e.editor = ace.edit(e, {
 					mode: 'ace/mode/mysql',
@@ -4185,7 +4185,7 @@ widget('mu', function(e) {
 
 	e.clear()
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		if (on)
 			e.reload()
 	})
@@ -4251,7 +4251,7 @@ widget('mu', function(e) {
 		e.reload()
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		bind_nav(e.param_nav, e.data_url, on)
 		if (on && !placeholder_set) {
 			e.render({loading: true})

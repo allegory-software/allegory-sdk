@@ -706,7 +706,7 @@ function nav_widget(e) {
 		init_row_validators()
 	}
 
-	e.on('bind', function nav_bind(on) {
+	e.on_bind(function nav_bind(on) {
 		bind_param_nav(on)
 		bind_rowset_name(e.rowset_name, on)
 		if (on) {

@@ -336,7 +336,7 @@ widget('grid', 'Input', function(e) {
 		e.update()
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		document.on('layout_changed', layout_changed, on)
 		document.on('theme_changed', theme_changed, on)
 		document.fonts.on('loadingdone', fonts_loaded, on)
@@ -2077,7 +2077,7 @@ widget('grid', 'Input', function(e) {
 		e.empty_rt.content = s
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 
 		if (on && !e.empty_rt) {
 			e.empty_rt = richtext({
@@ -2870,7 +2870,7 @@ widget('row-frm', function(e) {
 		nav.on('col_attr_changed'               , col_attr_changed, on)
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		bind_nav(e._nav, on)
 		document.on('layout_changed', redraw, on)
 	})

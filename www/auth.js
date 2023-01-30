@@ -178,7 +178,7 @@ widget('usr-button', function(e) {
 		// e.text = signed_in ? S('account', 'Account') : S('sign_in', 'Sign in')
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		window.on('signed_in_changed', signed_in_changed, on)
 	})
 
@@ -295,7 +295,7 @@ widget('sign-in-dialog', function(e) {
 
 	e.style.display = 'contents'
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		if (on)
 			sign_in()
 		else

@@ -193,7 +193,7 @@ function init_xmodule(opt) {
 		}
 	}
 
-	window.on('widget_bind', function(e, on) {
+	listen('bind', function(e, on) {
 		xm.bind_instance(e, on)
 		document.fire('widget_tree_changed')
 	})
@@ -260,7 +260,7 @@ function init_xmodule(opt) {
 
 	}
 
-	window.on('prop_changed', function(e, k, v, v0) {
+	listen('prop_changed', function(e, k, v, v0) {
 		if (!e.id)
 			return
 		let pa = e.get_prop_attrs(k)
@@ -503,7 +503,7 @@ widget('prop-layers-inspector', function(e) {
 			//		|| field.name == 'selected' || field.name == 'active')
 	}
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		document.on('prop_layer_slots_changed', reset, on)
 		reset()
 	})
@@ -610,7 +610,7 @@ function widget_select_editor(widgets_id_map, filter, ...options) {
 		dd.picker.rowset.rows = rows
 		dd.picker.reset()
 	}
-	dd.on('bind', function(on) {
+	dd.on_bind(function(on) {
 		document.on('widget_tree_changed', reset_nav, on)
 	})
 	reset_nav()
@@ -655,9 +655,9 @@ widget('prop-inspector', function(e) {
 
 	e.empty_text = 'No widgets selected or focused'
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		document.on('selected_widgets_changed', selected_widgets_changed, on)
-		window.on('prop_changed', prop_changed, on)
+		listen('prop_changed', prop_changed, on)
 		document.on('focusin', focus_changed, on)
 		if (on)
 			reset()
@@ -932,7 +932,7 @@ widget('widget-tree', function(e) {
 	}
 	*/
 
-	e.on('bind', function(on) {
+	e.on_bind(function(on) {
 		document.on('widget_tree_changed', widget_tree_changed, on)
 		document.on('selected_widgets_changed', selected_widgets_changed, on)
 		//document.on('focusin', focus_changed, on)

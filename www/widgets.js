@@ -3026,9 +3026,14 @@ function richtext_widget_editing(e) {
 
 }
 
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
 // "if" widget for conditional binding of its content
 // ---------------------------------------------------------------------------
+attrs:
+	global
+props:
+	e.global
+*/
 
 css('.if', 'skip')
 
@@ -3083,64 +3088,284 @@ widget('if', 'Containers', function(e) {
 
 })
 
-/*
+/* ---------------------------------------------------------------------------
+// check, toggle, radio buttons
 // ---------------------------------------------------------------------------
+classes:
+	.hover
+props:
+	e.checked <-> t|f
+attrs:
+	checked
+methods:
+	e.user_toggle()
+	e.user_set_checked(checked)
+*/
+
+// check button --------------------------------------------------------------
+
+function check_widget(e) {
+	e.clear()
+	e.make_focusable()
+	e.prop('checked', {type: 'bool', attr: true})
+	e.user_set_checked = function(v) { // stub
+		e.checked = v
+	}
+	e.user_toggle = function() {
+		e.user_set_checked(!e.checked)
+	}
+	e.on('keydown', function(key) {
+		if (key == ' ')
+			e.user_toggle()
+	})
+	e.on('click', function() {
+		e.user_toggle()
+	})
+	e.on('label_hover', function(on) {
+		e.class('hover', on)
+	})
+	e.on('label_click', function() {
+		e.user_toggle()
+	})
+}
+
+css('.check', 'large link')
+css_state('.check:is(:hover,.hover)', 'link-hover')
+css_state('.check[checked]:is(:hover,.hover)', 'link-hover')
+css_state('.check::before', 'far fa-square')
+css_state('.check[checked]::before', 'fa fa-check-square')
+widget('check', check_widget)
+
+// toggle button -------------------------------------------------------------
+
+css('.toggle', 't-m p05 round bg1 h-m ease ring', `
+	min-width  : 3em;
+	max-width  : 3em;
+	min-height : 1.75em;
+	max-height : 1.75em;
+`)
+css('.toggle-thumb', 'round bg-white ring ease', `
+	min-width  : 1.2em;
+	min-height : 1.2em;
+`)
+css_state('.toggle[checked]', '', `
+	background: var(--bg-button-primary);
+`)
+css_state('.toggle[checked] .toggle-thumb', 'ease', `
+	transform: translateX(100%);
+`)
+css_state('.toggle:is(:hover,.hover)', '', `
+	background: var(--bg1-hover);
+`)
+css_state('.toggle[checked]:is(:hover,.hover)', '', `
+	background: var(--bg-button-primary-hover);
+`)
+widget('toggle', function(e) {
+	check_widget(e)
+	e.thumb = div({class: 'toggle-thumb'})
+	e.set(e.thumb)
+})
+
+// radio button --------------------------------------------------------------
+
+css('.radio', 't-m b2 round h-c h-m ease ring', `
+	min-width  : 1.2em;
+	max-width  : 1.2em;
+	min-height : 1.2em;
+	max-height : 1.2em;
+	border-color: var(--bg-button-primary);
+`)
+css('.radio-thumb', 'abs round ring ease', `
+	left  : 50%;
+	top   : 50%;
+	right : 50%;
+	bottom: 50%;
+	background: var(--bg-button-primary);
+`)
+css_state('.radio[checked] .radio-thumb', 'ease', `
+	left  : .2em;
+	top   : .2em;
+	right : .2em;
+	bottom: .2em;
+`)
+
+css_state('.radio:is(:hover,.hover)', '', `
+	background: var(--bg1-hover);
+`)
+css_state('.radio[checked]:is(:hover,.hover)', '', `
+	border-color: var(--bg-button-primary-hover);
+`)
+css_state('.radio[checked]:is(:hover,.hover) > .radio-thumb', '', `
+	background: var(--bg-button-primary-hover);
+`)
+widget('radio', function(e) {
+	check_widget(e)
+	e.thumb = div({class: 'radio-thumb'})
+	e.set(e.thumb)
+	e.prop('group', {attr: true})
+	e.user_set_checked = function(v) {
+		if (!v)
+			return
+		if (!e.group)
+			return
+		let frm = e.closest('frm')
+		if (!frm)
+			frm = document.body
+		for (let re of frm.$('radio[group='+e.group+']'))
+			if (re != e)
+				re.checked = false
+		e.checked = true
+	}
+})
+
+/* ---------------------------------------------------------------------------
+// activation label
+// ---------------------------------------------------------------------------
+props:
+	for_id
+attrs:
+	for
+fires:
+	^for.label_hover(on)
+	^for.label_pointer{down|up}(ev)
+	^for.label_click(ev)
+*/
+
+css('.label-widget', 'label noselect')
+css_state('.label-widget:hover', 'label-hover')
+widget('label', function(e) {
+	e.class('label-widget')
+	e.class('label', false)
+	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.on('pointerenter', function() {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_hover', true)
+	})
+	e.on('pointerleave', function() {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_hover', false)
+	})
+	e.on('pointerdown', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_pointerdown', ev)
+	})
+	e.on('pointerup', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_pointerup', ev)
+	})
+	e.on('click', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_click', ev)
+	})
+})
+
+/* ---------------------------------------------------------------------------
+// info text / button
+// ---------------------------------------------------------------------------
+*/
+
+css('.info', '', `display: inline-block`)
+
+css('.info[collapsed]', 'h-t', `color: var(--bg-info);`)
+css('.info:not([collapsed])', 'small label')
+css('.info[collapsed] > .info-btn::before', 'xlarge fa fa-info-circle')
+css('.info-btn-small::before', 'm-r fa fa-info-circle', `color: var(--bg-info);`)
+
+widget('info', function(e) {
+	let html_content = [...e.nodes]
+	e.prop('collapsed', {type: 'bool', attr: true})
+	e.prop('content'  , {type: 'nodes'})
+	e.set_collapsed = function(v) {
+		e.clear()
+		if (v) {
+			e.btn = e.btn || div({class: 'info-btn'})
+			if (!e.tooltip) {
+				e.tooltip = tooltip({kind: 'info', align: 'left', popup_ox: -4})
+				e.btn.set(e.tooltip)
+				e.tooltip.update({show: false})
+				e.btn.on('hover', function(ev, on) {
+					e.tooltip.update({show: on})
+				})
+			}
+			e.tooltip.text = [...e.content]
+			e.set(e.btn)
+		} else {
+			if (e.tooltip)
+				e.tooltip.update({show: false})
+			e.clear()
+			e.add(span({class: 'info-btn-small'}), e.content)
+		}
+	}
+	return {
+		content   : html_content,
+		collapsed : or(e.collapsed, true),
+	}
+})
+
+/* ---------------------------------------------------------------------------
 // button
 // ---------------------------------------------------------------------------
 
-css('.btn', 'v m-y-05')
+*/
 
-css('.btn-focus-box', 'h-c h-bl b ro075 bold noselect p-x-4 p-y', `
+/*
+css('.btn', 'm-y-05 h-c h-bl b ro075 bold noselect p-x-4 p-y gap-x-2', `
 	background : var(--bg-button);
 	color      : var(--fg-button);
 	box-shadow : var(--shadow-button);
 `)
 
-css('.btn-focus-box.text-empty', 'p-x-2 h-c h-m')
-css('.btn-focus-box:not(.text-empty) .btn-icon', 'm-r')
 css('.btn-icon', 'w1 h-c')
 
-css_state('.btn:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
-	background-color: var(--bg-button-hover);
+css_state('.btn:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+	background: var(--bg-button-hover);
 `)
-css_state('.btn .btn-focus-box.active', '', `
+css_state('.btn.active', '', `
 	background: var(--bg-button-active);
 	box-shadow: var(--shadow-button-active);
 `)
 
-css('.btn[primary] .btn-focus-box', 'b-invisible', `
+css('.btn[primary]', 'b-invisible', `
 	background : var(--bg-button-primary);
 	color      : var(--fg-button-primary);
 `)
-css_state('.btn[primary]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
+css_state('.btn[primary]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-primary-hover);
 `)
-css_state('.btn[primary] .btn-focus-box.active', '', `
+css_state('.btn[primary].active', '', `
 	background : var(--bg-button-primary-active);
 `)
 
-css('.btn[danger] .btn-focus-box', '', `
+css('.btn[danger]', '', `
 	background : var(--bg-button-danger);
 	color      : var(--fg-button-danger);
 `)
-css_state('.btn[danger]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
+css_state('.btn[danger]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-danger-hover);
 `)
-css_state('.btn[danger] .btn-focus-box.active', '', `
+css_state('.btn[danger].active', '', `
 	background : var(--bg-button-danger-active);
 `)
 
 // bare buttons (no borders)
 
-css_state('.btn[bare] .btn-focus-box', 'b-invisible ro0 no-bg no-shadow link')
+css_state('.btn[bare]', 'b-invisible ro0 no-bg no-shadow link')
 
-css_state('.btn[bare]:not([disabled]):not(.widget-editing):not(.widget-selected) .btn-focus-box:hover', '', `
+css_state('.btn[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	color: var(--fg-link-hover);
 `)
 
-css_state('.btn[bare] .btn-focus-box.active', '', `
+css_state('.btn[bare].active', '', `
 	color: var(--fg-link-active);
 `)
+
+*/
+css('button', 'btn')
 
 // attention animation
 
@@ -3154,7 +3379,7 @@ css(`
 }
 `)
 
-widget('btn', 'Input', function(e) {
+widget('xbutton', 'Input', function(e) {
 
 	row_widget(e, true)
 	editable_widget(e)
@@ -3364,221 +3589,6 @@ widget('btn', 'Input', function(e) {
 
 	return {text: or(html_text)}
 
-})
-*/
-
-/* ---------------------------------------------------------------------------
-// check, toggle, radio buttons
-// ---------------------------------------------------------------------------
-sets attrs:
-	checked
-sets classes:
-	.hover
-publishes:
-	e.checked <-> t|f
-	e.user_toggle()
-	e.user_set_checked(checked)
-*/
-
-// check button --------------------------------------------------------------
-
-function check_widget(e) {
-	e.clear()
-	e.make_focusable()
-	e.prop('checked', {type: 'bool', attr: true})
-	e.user_set_checked = function(v) { // stub
-		e.checked = v
-	}
-	e.user_toggle = function() {
-		e.user_set_checked(!e.checked)
-	}
-	e.on('keydown', function(key) {
-		if (key == ' ')
-			e.user_toggle()
-	})
-	e.on('click', function() {
-		e.user_toggle()
-	})
-	e.on('label_hover', function(on) {
-		e.class('hover', on)
-	})
-	e.on('label_click', function() {
-		e.user_toggle()
-	})
-}
-
-css('.check', 'large link')
-css_state('.check:is(:hover,.hover)', 'link-hover')
-css_state('.check[checked]:is(:hover,.hover)', 'link-hover')
-css_state('.check::before', 'far fa-square')
-css_state('.check[checked]::before', 'fa fa-check-square')
-widget('check', check_widget)
-
-// toggle button -------------------------------------------------------------
-
-css('.toggle', 't-m p05 round bg1 h-m ease ring', `
-	min-width  : 3em;
-	max-width  : 3em;
-	min-height : 1.75em;
-	max-height : 1.75em;
-`)
-css('.toggle-thumb', 'round bg-white ring ease', `
-	min-width  : 1.2em;
-	min-height : 1.2em;
-`)
-css_state('.toggle[checked]', '', `
-	background: var(--bg-button-primary);
-`)
-css_state('.toggle[checked] .toggle-thumb', 'ease', `
-	transform: translateX(100%);
-`)
-css_state('.toggle:is(:hover,.hover)', '', `
-	background: var(--bg1-hover);
-`)
-css_state('.toggle[checked]:is(:hover,.hover)', '', `
-	background: var(--bg-button-primary-hover);
-`)
-widget('toggle', function(e) {
-	check_widget(e)
-	e.thumb = div({class: 'toggle-thumb'})
-	e.set(e.thumb)
-})
-
-// radio button --------------------------------------------------------------
-
-css('.radio', 't-m b2 round h-c h-m ease ring', `
-	min-width  : 1.2em;
-	max-width  : 1.2em;
-	min-height : 1.2em;
-	max-height : 1.2em;
-	border-color: var(--bg-button-primary);
-`)
-css('.radio-thumb', 'abs round ring ease', `
-	left  : 50%;
-	top   : 50%;
-	right : 50%;
-	bottom: 50%;
-	background: var(--bg-button-primary);
-`)
-css_state('.radio[checked] .radio-thumb', 'ease', `
-	left  : .2em;
-	top   : .2em;
-	right : .2em;
-	bottom: .2em;
-`)
-
-css_state('.radio:is(:hover,.hover)', '', `
-	background: var(--bg1-hover);
-`)
-css_state('.radio[checked]:is(:hover,.hover)', '', `
-	border-color: var(--bg-button-primary-hover);
-`)
-css_state('.radio[checked]:is(:hover,.hover) > .radio-thumb', '', `
-	background: var(--bg-button-primary-hover);
-`)
-widget('radio', function(e) {
-	check_widget(e)
-	e.thumb = div({class: 'radio-thumb'})
-	e.set(e.thumb)
-	e.prop('group', {attr: true})
-	e.user_set_checked = function(v) {
-		if (!v)
-			return
-		if (!e.group)
-			return
-		let frm = e.closest('frm')
-		if (!frm)
-			frm = document.body
-		for (let re of frm.$('radio[group='+e.group+']'))
-			if (re != e)
-				re.checked = false
-		e.checked = true
-	}
-})
-
-/* ---------------------------------------------------------------------------
-// activation label
-// ---------------------------------------------------------------------------
-fires:
-	^for.label_hover(on)
-	^for.label_pointer{down|up}(ev)
-	^for.label_click(ev)
-*/
-
-css('.label-widget', 'label noselect')
-css_state('.label-widget:hover', 'label-hover')
-widget('label', function(e) {
-	e.class('label-widget')
-	e.class('label', false)
-	e.prop('for_id', {type: 'id', attr: 'for'})
-	e.on('pointerenter', function() {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_hover', true)
-	})
-	e.on('pointerleave', function() {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_hover', false)
-	})
-	e.on('pointerdown', function(ev) {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_pointerdown', ev)
-	})
-	e.on('pointerup', function(ev) {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_pointerup', ev)
-	})
-	e.on('click', function(ev) {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_click', ev)
-	})
-})
-
-/* ---------------------------------------------------------------------------
-// info text / button
-// ---------------------------------------------------------------------------
-*/
-
-css('.info', '', `display: inline-block`)
-
-css('.info[collapsed]', 'h-t', `color: var(--bg-info);`)
-css('.info:not([collapsed])', 'small label')
-css('.info[collapsed] > .info-btn::before', 'xlarge fa fa-info-circle')
-css('.info-btn-small::before', 'm-r fa fa-info-circle', `color: var(--bg-info);`)
-
-widget('info', function(e) {
-	let html_content = [...e.nodes]
-	e.prop('collapsed', {type: 'bool', attr: true})
-	e.prop('content'  , {type: 'nodes'})
-	e.set_collapsed = function(v) {
-		e.clear()
-		if (v) {
-			e.btn = e.btn || div({class: 'info-btn'})
-			if (!e.tooltip) {
-				e.tooltip = tooltip({kind: 'info', align: 'left', popup_ox: -4})
-				e.btn.set(e.tooltip)
-				e.tooltip.update({show: false})
-				e.btn.on('hover', function(ev, on) {
-					e.tooltip.update({show: on})
-				})
-			}
-			e.tooltip.text = [...e.content]
-			e.set(e.btn)
-		} else {
-			if (e.tooltip)
-				e.tooltip.update({show: false})
-			e.clear()
-			e.add(span({class: 'info-btn-small'}), e.content)
-		}
-	}
-	return {
-		content   : html_content,
-		collapsed : or(e.collapsed, true),
-	}
 })
 
 /* ---------------------------------------------------------------------------

@@ -182,19 +182,6 @@ toggle_collapsed = function() {
 
 <!--------------------------------------------------------------------------->
 
-<template id=nodes_demo>
-<d id=my></d>
-<script run>
-	my.on('nodes_changed', function() {
-		pr('NODES CHANGED')
-	})
-	my.add(div())
-	my.add(div())
-</script>
-</template>
-
-<!--------------------------------------------------------------------------->
-
 <template id=if_demo>
 <if global=foo>
 	foo was set!
@@ -1365,6 +1352,21 @@ main.add(g)
 
 d.load()
 
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=nodes_changed_demo>
+<d id=my></d>
+<script run>
+	my.on('nodes_changed', function() {
+		pr('NODES CHANGED')
+	})
+	runafter(0, function() {
+		my.add(div())
+		my.add(div())
+	})
 </script>
 </template>
 
