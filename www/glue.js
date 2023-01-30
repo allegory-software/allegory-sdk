@@ -209,6 +209,10 @@ EVENTS
 	DEBUG_EVENTS = false
 	DEBUG_EVENTS_FIRE = false
 
+FAST GLOBAL EVENTS
+	listen(event, f, [on])
+	announce(event, ...args)
+
 AJAX REQUESTS
 
 	ajax(opt) -> req
@@ -1577,7 +1581,7 @@ function url_format(t) {
 	return path + (args ? '?' + args : '') + (fragment ? '#' + fragment : '')
 }
 
-/* events ----------------------------------------------------------------- */
+// DOM events ----------------------------------------------------------------
 
 {
 let callers = obj()
@@ -1712,6 +1716,27 @@ method(EventTarget, 'fireup' , fireup)
 
 on.installers = installers
 on.callers = callers
+}
+
+// fast global events --------------------------------------------------------
+
+let all_handlers = obj() // {event_name->set(f)}
+
+function listen(event, f, on) {
+	if (on != false) {
+		let handlers = attr(all_handlers, event, set)
+		assert(!handlers.has(f))
+		handlers.add(f)
+	} else {
+		let handlers = assert(all_handlers[event])
+		handlers.delete(f)
+	}
+}
+
+function announce(event, ...args) {
+	let handlers = all_handlers[event]; if (!handlers) return
+	for (let handler of handlers)
+		handler(...args)
 }
 
 /* AJAX requests -------------------------------------------------------------
