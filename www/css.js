@@ -6,27 +6,27 @@
 CSS CLASSES:
 	TEXT          pre[-line] [x]small[er] [x]large tight lh1 [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
-	ALIGN INLINE  t-{l r c j m t b bas sub sup`) float-{l r`)
-	ALIGN FLEX    h-{l r c sb s t b m bl`) v-{t b m sb s l r c`) S[1-5] flex-[no]wrap order-{1 2 last`)
-	ALIGN GRID    grid-{l r c sb s t b m bl`)', '', `x y`){1-5`) x..x y..y
+	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
+	ALIGN FLEX    h-{l r c sb s t b m bl} v-{t b m sb s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
+	ALIGN GRID    grid-{l r c sb s t b m bl}', '', {x y}{1-5} x..x y..y
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
-	ALIGN F,G     self-h-{t m b s`) self-v-{l c r s`)
-	ALIGN F,G,B,A self-h-{l r c`) self-v-{t b m`)
+	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
+	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
 	SIZING        nowrap shrinks
-	BORDERS       b[0] b-{l r t b`)[-0] b-{dotted dashed invisible fg`)
-	CORNERS       ro[05 075 0 2] ro-{l r t b`)-0 round ro-group-{h v`)
-	PADDINGS      p[0 05 2 4 8] p-{l r t b x y`)-{0 05 2 4 8`)
-	MARGINS       m[0 05 2 4 8] m-{l r t b x y`)-{0 05 2 4 8`)', '', `ml mr mx`)-auto
+	BORDERS       b[0] b-{l r t b}[-0] b-{dotted dashed invisible fg}
+	CORNERS       ro ro0 ro-{05 075 0 2 var} ro-{l r t b}-0 round ro-group-{h v}
+	PADDINGS      p p0 p-{025 05 075 2 4 8} p-{l r t b x y}-{0 05 2 4 8}
+	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
 	OVERFLOW      [v h]scroll[-auto] [no]clip[-x -y] scroll-thin
-	POSITIONING   rel abs z{1 2 3 4 5`) overlay
+	POSITIONING   rel abs z{1 2 3 4 5} overlay
 	VISIBILITY    hidden skip click-through[-off]
 	FLAT BGs      bg[1 2 -alt -smoke -fg] no-bg
-	IMAGE BGs     bg-{cover contain center t r b l no-repeat repeat-{x y`)`)
+	IMAGE BGs     bg-{cover contain center t r b l no-repeat repeat-{x y}}
 	FILTERS       [in]visible op[0 1 01-09] darken lighten no-filter
-	SHADOWS       ring shadow-{tooltip thumb menu button pressed modal toolbox`) no-shadow
-	TRANSFORMS    flip-{h v`) rotate-{90 180 270`)
-	TRANSITIONS   ease ease-{01s 05s 1s`) no-ease ease-out ease-fw
+	SHADOWS       ring shadow-{tooltip thumb menu button pressed modal toolbox} no-shadow
+	TRANSFORMS    flip-{h v} rotate-{90 180 270}
+	TRANSITIONS   ease ease-{01s 05s 1s} no-ease ease-out ease-fw
 	ANIMATIONS    beat bounce fade beat-fade flip shake spin spin-pulse forever once reverse
 	CURSORS       arrow hand grab grabbing
 	FONTS         mono arial opensans[-condensed] inter
@@ -34,7 +34,7 @@ CSS CLASSES:
 	FA ICONS      fa[r] fa-*
 
 HTML SELECTORS:
-	*[dim] *[nowrap]
+	*[dim] *[nowrap] *[nowrap-dots]
 	img[invertable]
 
 NOTES:
@@ -165,7 +165,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg2-hover             : hsl(216  28%  22% / 1.0);
 	--bg-alt                : hsl(216  28%  10% / 1.0);
 	--bg-smoke              : hsk(  0   0% 100% / 0.2);
-	--bg-input              : hsl(  0   0%   0% / 1.0);
+	--bg-input              : hsl(216  28%  17% / 1.0);
 
 	--border-light          : var(--border-light-on-dark);
 	--border-light-hover    : var(--border-light-on-dark-hover);
@@ -197,7 +197,6 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 
 	color-scheme: dark; /* make default scrollbars dark */
 
-	font-size        : var(--font-size-normal);
 	color            : var(--fg);
 	background-color : var(--bg);
 
@@ -205,7 +204,8 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 
 /* SPACINGS --------------------------------------------------------------- */
 
-css(':root', '', `
+css(':root', 'arial', `
+
 	--space-025 : .125rem;
 	--space-05  :  .25rem;
 	--space-075 : .375rem;
@@ -214,18 +214,24 @@ css(':root', '', `
 	--space-4   :    1rem;
 	--space-8   :    2rem;
 
-	--font-size-normal : 14px;
+	--font-size-normal  : 14px;
+	--lh-input          : 1.25; /* minimum that the <input> tag supports */
 
 	--font-size-xsmall  : .72rem;    /* 10/14 */
 	--font-size-small   : .8125rem;  /* 12/14 */
 	--font-size-smaller : .875rem;   /* 13/14 */
 	--font-size-large   : 1.125rem;  /* 16/14 */
 	--font-size-xlarge  : 1.5rem;
+
 	--font-size-h1      : 2em;
 	--font-size-h2      : 1.5em;
 	--font-size-h3      : 1.3em;
 
-	--font-baseline-adjust-ff: 0; /* set this to 1 depending on font */
+	/* TODO: remove this */
+	--font-baseline-adjust-ff: 0;
+
+	font-size : var(--font-size-normal);
+
 `)
 
 css('.theme-small', '', `
@@ -234,12 +240,6 @@ css('.theme-small', '', `
 
 css('.theme-large', '', `
 	--font-size-normal : 16px;
-`)
-
-css(':root', '', `
-	font-size        : var(--font-size-normal);
-	color            : var(--fg);
-	background-color : var(--bg);
 `)
 
 /* RESET ------------------------------------------------------------------ */
@@ -259,7 +259,6 @@ css(':root', '', `
 	width: 100%;
 	height: 100%;
 	overflow: hidden;
-	font-family: arial, sans-serif;
 `)
 
 // For document-style UIs use `overflow-y: scroll` to avoid the annoying
@@ -310,10 +309,10 @@ css(':is(.theme-dark, .theme-light .theme-inverted) img[invertable]', '', `
 `)
 
 /* make `resize: both` resizer dark */
-css([
-	'.theme-dark::-webkit-resizer',
-	'.theme-dark ::-webkit-resizer',
-], '', `
+css(`
+	.theme-dark::-webkit-resizer,
+	.theme-dark ::-webkit-resizer
+`, '', `
 	background: var(--bg-smoke);
 `)
 
@@ -402,7 +401,7 @@ css('.mi-common', '', `
 css = css_util
 
 css('.opensans', '', ` font-family: opensans, sans-serif; `)
-css('.inter   ', '', ` font-family: inter, sans-serif; `)
+css('.inter'   , '', ` font-family: inter, sans-serif; `)
 
 css('.mi'          , 'mi-common', ` font-family: mi-round; `)
 css('.mi-round'    , 'mi-common', ` font-family: mi-round; `)
@@ -411,59 +410,66 @@ css('.mi-outlined' , 'mi-common', ` font-family: mi-outlined; `)
 
 css('.mi', 'mi-round')
 
-css('.pre      ', '', ` white-space: pre; `)
-css('.pre-line ', '', ` white-space: pre-line; `)
-css('.xsmall   ', '', ` font-size: var(--font-size-xsmall); `)
-css('.small    ', '', ` font-size: var(--font-size-small); `)
-css('.smaller  ', '', ` font-size: var(--font-size-smaller); `)
-css('.normal   ', '', ` font-size: var(--font-size-normal); `)
-css('.large    ', '', ` font-size: var(--font-size-large); line-height: 1.75; `)
-css('.xlarge   ', '', ` font-size: var(--font-size-xlarge); line-height: 2; `)
-css('.tight    ', '', ` line-height: 1.2; `)
-css('.lh1      ', '', ` line-height: 1; `)
-css('.littlebold','', ` font-weight: 500; `)
-css('.semibold ', '', ` font-weight: 600; `)
-css('.bold     ', '', ` font-weight: bold; `)
-css('.extrabold', '', ` font-weight: 800; `)
-css('.italic   ', '', ` font-style: italic; `)
-css('.no-bold  ', '', ` font-weight: normal; `)
-css('.condensed', '', ` font-stretch: 75%; `) /* only with var fonts */
-css('.underline', '', ` text-decoration: underline; `)
-css('.strike   ', '', ` text-decoration: line-through; `)
-css('.allcaps  ', '', ` text-transform: uppercase; `)
-css('.noselect ', '', ` user-select: none; `)
+css('.pre'       , '', ` white-space: pre; `)
+css('.pre-line'  , '', ` white-space: pre-line; `)
+css('.xsmall'    , '', ` font-size: var(--font-size-xsmall ); `)
+css('.small'     , '', ` font-size: var(--font-size-small  ); `)
+css('.smaller'   , '', ` font-size: var(--font-size-smaller); `)
+css('.normal'    , '', ` font-size: var(--font-size-normal ); `)
+css('.large'     , '', ` font-size: var(--font-size-large  ); line-height: 1.75; `)
+css('.xlarge'    , '', ` font-size: var(--font-size-xlarge ); line-height:    2; `)
+css('.tight'     , '', ` line-height: 1.2; `)
+css('.lh1'       , '', ` line-height: 1; `)
+css('.littlebold', '', ` font-weight: 500; `)
+css('.semibold'  , '', ` font-weight: 600; `)
+css('.bold'      , '', ` font-weight: bold; `)
+css('.extrabold' , '', ` font-weight: 800; `)
+css('.italic'    , '', ` font-style: italic; `)
+css('.no-bold'   , '', ` font-weight: normal; `)
+css('.condensed' , '', ` font-stretch: 75%; `) /* only with var fonts */
+css('.underline' , '', ` text-decoration: underline; `)
+css('.strike'    , '', ` text-decoration: line-through; `)
+css('.allcaps'   , '', ` text-transform: uppercase; `)
+css('.noselect'  , '', ` user-select: none; `)
 
-css('.mono     ', '', ` font-family: monospace; `)
-css('.arial    ', '', ` font-family: arial, sans-serif; `)
+css('.mono'      , '', `font-family: monospace;`)
+css('.arial'     , '', `font-family: arial, sans-serif;`)
+
+css_chrome('.arial', '', `
+	--p-y-input-adjust-xsmall  : 1px;
+	--p-y-input-adjust-smaller : 1px;
+	--p-y-input-adjust-normal  : 1px;
+	--p-y-input-adjust-large   : 1px;
+`)
 
 /* use with ::before; inserts ZWSP to force line height on empty text */
 css('.zwsp     ', '', " content: '\200b'; ")
 
-css('[dim]          ', '', ` color: var(--fg-dim); `)
-css('.dim           ', '', ` color: var(--fg-dim); `)
-css('.dim-on-dark   ', '', ` color: var(--fg-dim-on-dark); `)
-css('.white         ', '', ` color: var(--fg-white); `)
-css('.label         ', '', ` color: var(--fg-label); `)
-css('.label-hover   ', '', ` color: var(--fg-label-hover); `)
-css('.label-on-dark ', '', ` color: var(--fg-label-on-dark); `)
-css('.link          ', '', ` color: var(--fg-link); `)
-css('.link-hover    ', '', ` color: var(--fg-link-hover); `)
-css('.fg            ', '', ` color: var(--fg); `)
-css('.fg-hover      ', '', ` color: var(--fg-hover); `)
-css('.fg-error      ', '', ` color: var(--bg-error); `)
+css('[dim]'          , '', ` color: var(--fg-dim); `)
+css('.dim'           , '', ` color: var(--fg-dim); `)
+css('.dim-on-dark'   , '', ` color: var(--fg-dim-on-dark); `)
+css('.white'         , '', ` color: var(--fg-white); `)
+css('.label'         , '', ` color: var(--fg-label); `)
+css('.label-hover'   , '', ` color: var(--fg-label-hover); `)
+css('.label-on-dark' , '', ` color: var(--fg-label-on-dark); `)
+css('.link'          , '', ` color: var(--fg-link); `)
+css('.link-hover'    , '', ` color: var(--fg-link-hover); `)
+css('.fg'            , '', ` color: var(--fg); `)
+css('.fg-hover'      , '', ` color: var(--fg-hover); `)
+css('.fg-error'      , '', ` color: var(--bg-error); `)
 
 /* ALIGN: INLINE ---------------------------------------------------------- */
 
-css('.t-l       ', '', ` text-align: start  ; `)
-css('.t-c       ', '', ` text-align: center ; `)
-css('.t-r       ', '', ` text-align: end    ; `)
-css('.t-j       ', '', ` text-align: justify; `)
-css('.t-t       ', '', ` vertical-align: top     ; `)
-css('.t-m       ', '', ` vertical-align: middle  ; `)
-css('.t-b       ', '', ` vertical-align: bottom  ; `)
-css('.t-baseline', '', ` vertical-align: baseline; `)
-css('.t-sup     ', '', ` vertical-align: super   ; `)
-css('.t-sub     ', '', ` vertical-align: sub     ; `)
+css('.t-l'  , '', ` text-align: start  ; `)
+css('.t-c'  , '', ` text-align: center ; `)
+css('.t-r'  , '', ` text-align: end    ; `)
+css('.t-j'  , '', ` text-align: justify; `)
+css('.t-t'  , '', ` vertical-align: top     ; `)
+css('.t-m'  , '', ` vertical-align: middle  ; `)
+css('.t-b'  , '', ` vertical-align: bottom  ; `)
+css('.t-bl' , '', ` vertical-align: baseline; `)
+css('.t-sup', '', ` vertical-align: super   ; `)
+css('.t-sub', '', ` vertical-align: sub     ; `)
 
 css('.float-l', '', ` float: left; `)
 css('.float-r', '', ` float: right; `)
@@ -473,24 +479,24 @@ css('.float-r', '', ` float: right; `)
 css('.h', '', ` display: inline-flex; flex-flow: row   ; `)
 css('.v', '', ` display: inline-flex; flex-flow: column; `)
 
-css('.h-l ', '', ` display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; `)
-css('.h-r ', '', ` display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; `)
-css('.h-c ', '', ` display: inline-flex; flex-flow: row   ; justify-content: center       ; `)
+css('.h-l' , '', ` display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; `)
+css('.h-r' , '', ` display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; `)
+css('.h-c' , '', ` display: inline-flex; flex-flow: row   ; justify-content: center       ; `)
 css('.h-sb', '', ` display: inline-flex; flex-flow: row   ; justify-content: space-between; `)
-css('.h-s ', '', ` display: inline-flex; flex-flow: row   ; align-items: stretch          ; `)
-css('.h-t ', '', ` display: inline-flex; flex-flow: row   ; align-items: flex-start       ; `)
-css('.h-b ', '', ` display: inline-flex; flex-flow: row   ; align-items: flex-end         ; `)
-css('.h-m ', '', ` display: inline-flex; flex-flow: row   ; align-items: center           ; `)
+css('.h-s' , '', ` display: inline-flex; flex-flow: row   ; align-items: stretch          ; `)
+css('.h-t' , '', ` display: inline-flex; flex-flow: row   ; align-items: flex-start       ; `)
+css('.h-b' , '', ` display: inline-flex; flex-flow: row   ; align-items: flex-end         ; `)
+css('.h-m' , '', ` display: inline-flex; flex-flow: row   ; align-items: center           ; `)
 css('.h-bl', '', ` display: inline-flex; flex-flow: row   ; align-items: baseline         ; `)
 
-css('.v-t ', '', ` display: inline-flex; flex-flow: column; justify-content: flex-start   ; `)
-css('.v-b ', '', ` display: inline-flex; flex-flow: column; justify-content: flex-end     ; `)
-css('.v-m ', '', ` display: inline-flex; flex-flow: column; justify-content: center       ; `)
+css('.v-t' , '', ` display: inline-flex; flex-flow: column; justify-content: flex-start   ; `)
+css('.v-b' , '', ` display: inline-flex; flex-flow: column; justify-content: flex-end     ; `)
+css('.v-m' , '', ` display: inline-flex; flex-flow: column; justify-content: center       ; `)
 css('.v-sb', '', ` display: inline-flex; flex-flow: column; justify-content: space-between; `)
-css('.v-s ', '', ` display: inline-flex; flex-flow: column; align-items: stretch          ; `)
-css('.v-l ', '', ` display: inline-flex; flex-flow: column; align-items: flex-start       ; `)
-css('.v-r ', '', ` display: inline-flex; flex-flow: column; align-items: flex-end         ; `)
-css('.v-c ', '', ` display: inline-flex; flex-flow: column; align-items: center           ; `)
+css('.v-s' , '', ` display: inline-flex; flex-flow: column; align-items: stretch          ; `)
+css('.v-l' , '', ` display: inline-flex; flex-flow: column; align-items: flex-start       ; `)
+css('.v-r' , '', ` display: inline-flex; flex-flow: column; align-items: flex-end         ; `)
+css('.v-c' , '', ` display: inline-flex; flex-flow: column; align-items: center           ; `)
 
 css('.S ', '', ` flex: 1; `)
 css('.S1', '', ` flex: 1; `)
@@ -513,37 +519,37 @@ css('.self-v-s', '', ` align-self: stretch; `)
 css('.flex-wrap  ', '', ` flex-wrap: wrap; `)
 css('.flex-nowrap', '', ` flex-flow: nowrap; `)
 
-css('.order-1   ', '', ` order: 1; `)
-css('.order-2   ', '', ` order: 1; `)
+css('.order-1'  , '', ` order: 1; `)
+css('.order-2'  , '', ` order: 1; `)
 css('.order-last', '', ` order: 99999; `)
 
 /* flex & grid */
-css('.gap025  ', '', ` gap: var(--space-025); `)
-css('.gap05   ', '', ` gap: var(--space-05); `)
-css('.gap075  ', '', ` gap: var(--space-075); `)
-css('.gap     ', '', ` gap: var(--space-1); `)
-css('.gap2    ', '', ` gap: var(--space-2); `)
-css('.gap4    ', '', ` gap: var(--space-4); `)
-css('.gap8    ', '', ` gap: var(--space-8); `)
-css('.gap0    ', '', ` gap: 0; `)
+css('.gap-025'  , '', ` gap: var(--space-025); `)
+css('.gap-05'   , '', ` gap: var(--space-05); `)
+css('.gap-075'  , '', ` gap: var(--space-075); `)
+css('.gap'      , '', ` gap: var(--space-1); `)
+css('.gap-2'    , '', ` gap: var(--space-2); `)
+css('.gap-4'    , '', ` gap: var(--space-4); `)
+css('.gap-8'    , '', ` gap: var(--space-8); `)
+css('.gap-0'    , '', ` gap: 0; `)
 
-css('.gap-x-025  ', '', ` column-gap: var(--space-025); `)
-css('.gap-x-05   ', '', ` column-gap: var(--space-05); `)
-css('.gap-x-075  ', '', ` column-gap: var(--space-075); `)
-css('.gap-x      ', '', ` column-gap: var(--space-1); `)
-css('.gap-x-2    ', '', ` column-gap: var(--space-2); `)
-css('.gap-x-4    ', '', ` column-gap: var(--space-4); `)
-css('.gap-x-8    ', '', ` column-gap: var(--space-8); `)
-css('.gap-x-0    ', '', ` column-gap: 0; `)
+css('.gap-x-025', '', ` column-gap: var(--space-025); `)
+css('.gap-x-05' , '', ` column-gap: var(--space-05); `)
+css('.gap-x-075', '', ` column-gap: var(--space-075); `)
+css('.gap-x'    , '', ` column-gap: var(--space-1); `)
+css('.gap-x-2'  , '', ` column-gap: var(--space-2); `)
+css('.gap-x-4'  , '', ` column-gap: var(--space-4); `)
+css('.gap-x-8'  , '', ` column-gap: var(--space-8); `)
+css('.gap-x-0'  , '', ` column-gap: 0; `)
 
-css('.gap-y-025  ', '', ` row-gap: var(--space-025); `)
-css('.gap-y-05   ', '', ` row-gap: var(--space-05); `)
-css('.gap-y-075  ', '', ` row-gap: var(--space-075); `)
-css('.gap-y      ', '', ` row-gap: var(--space-1); `)
-css('.gap-y-2    ', '', ` row-gap: var(--space-2); `)
-css('.gap-y-4    ', '', ` row-gap: var(--space-4); `)
-css('.gap-y-8    ', '', ` row-gap: var(--space-8); `)
-css('.gap-y-0    ', '', ` row-gap: 0; `)
+css('.gap-y-025', '', ` row-gap: var(--space-025); `)
+css('.gap-y-05' , '', ` row-gap: var(--space-05); `)
+css('.gap-y-075', '', ` row-gap: var(--space-075); `)
+css('.gap-y'    , '', ` row-gap: var(--space-1); `)
+css('.gap-y-2'  , '', ` row-gap: var(--space-2); `)
+css('.gap-y-4'  , '', ` row-gap: var(--space-4); `)
+css('.gap-y-8'  , '', ` row-gap: var(--space-8); `)
+css('.gap-y-0'  , '', ` row-gap: 0; `)
 
 /* ALIGN: GRID ------------------------------------------------------------ */
 
@@ -557,14 +563,14 @@ css('.grid-4col', '', ` display: inline-grid; grid-template-columns: repeat(4, a
 css('.grid-5col', '', ` display: inline-grid; grid-template-columns: repeat(5, auto); `)
 css('.grid-6col', '', ` display: inline-grid; grid-template-columns: repeat(6, auto); `)
 
-css('.grid-l ', '', ` display: inline-grid; justify-content: start   ; `)
-css('.grid-r ', '', ` display: inline-grid; justify-content: end     ; `)
-css('.grid-c ', '', ` display: inline-grid; justify-content: center  ; `)
+css('.grid-l' , '', ` display: inline-grid; justify-content: start   ; `)
+css('.grid-r' , '', ` display: inline-grid; justify-content: end     ; `)
+css('.grid-c' , '', ` display: inline-grid; justify-content: center  ; `)
 css('.grid-sb', '', ` display: inline-grid; justify-content: space-between; `)
-css('.grid-s ', '', ` display: inline-grid; align-items: stretch     ; `)
-css('.grid-t ', '', ` display: inline-grid; align-items: start       ; `)
-css('.grid-b ', '', ` display: inline-grid; align-items: end         ; `)
-css('.grid-m ', '', ` display: inline-grid; align-items: center      ; `)
+css('.grid-s' , '', ` display: inline-grid; align-items: stretch     ; `)
+css('.grid-t' , '', ` display: inline-grid; align-items: start       ; `)
+css('.grid-b' , '', ` display: inline-grid; align-items: end         ; `)
+css('.grid-m' , '', ` display: inline-grid; align-items: center      ; `)
 css('.grid-bl', '', ` display: inline-grid; align-items: baseline    ; `)
 
 css('.x1', '', ` grid-column-start: 1; `)
@@ -579,14 +585,14 @@ css('.y3', '', ` grid-row-start   : 3; `)
 css('.y4', '', ` grid-row-start   : 4; `)
 css('.y5', '', ` grid-row-start   : 5; `)
 
-css('.xx   ', '', ` grid-column-end  : span 2; `)
-css('.xxx  ', '', ` grid-column-end  : span 3; `)
-css('.xxxx ', '', ` grid-column-end  : span 4; `)
+css('.xx'   , '', ` grid-column-end  : span 2; `)
+css('.xxx'  , '', ` grid-column-end  : span 3; `)
+css('.xxxx' , '', ` grid-column-end  : span 4; `)
 css('.xxxxx', '', ` grid-column-end  : span 5; `)
 
-css('.yy   ', '', ` grid-row-end     : span 2; `)
-css('.yyy  ', '', ` grid-row-end     : span 3; `)
-css('.yyyy ', '', ` grid-row-end     : span 4; `)
+css('.yy'   , '', ` grid-row-end     : span 2; `)
+css('.yyy'  , '', ` grid-row-end     : span 3; `)
+css('.yyyy' , '', ` grid-row-end     : span 4; `)
 css('.yyyyy', '', ` grid-row-end     : span 5; `)
 
 /* inline-axis align: grid, block, absolute positioning. */
@@ -646,12 +652,34 @@ css('.b-r-0  ', '', ` border-right-width  : 0; border-top-right-radius  : 0; bor
 css('.b-t-0  ', '', ` border-top-width    : 0; border-top-left-radius   : 0; border-top-right-radius   : 0; `)
 css('.b-b-0  ', '', ` border-bottom-width : 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; `)
 
-css('.ro05   ', '', ` border-radius: var(--space-05); `)
-css('.ro075  ', '', ` border-radius: var(--space-075); `)
-css('.ro     ', '', ` border-radius: var(--space-1); `)
-css('.ro2    ', '', ` border-radius: var(--space-2); `)
-css('.round  ', '', ` border-radius: 9999px; `)
-css('.ro0    ', '', ` border-radius: 0; `)
+css('.b-solid    ', '', ` border-style: solid; `)
+css('.b-dotted   ', '', ` border-style: dotted; `)
+css('.b-dashed   ', '', ` border-style: dashed; `)
+css('.b-invisible', '', ` border-color: #00000000; `)
+
+css('.b-fg       ', '', ` border-color: var(--fg); `)
+css('.b-hover    ', '', ` border-color: var(--border-light-hover); `)
+
+css('.b-collapse-h > :not(:last-child)' , '', ` border-right-color : #00000000; `)
+css('.b-collapse-v > :not(:last-child)' , '', ` border-bottom-color: #00000000; `)
+
+/* BORDER RADIUS ---------------------------------------------------------- */
+
+// variable rounded corners
+css('.ro-var', '', `border-radius: var(--border-radius, var(--space-075));`)
+css('.xsmall' , '', `--border-radius: var(--space-025);`)
+css('.small'  , '', `--border-radius: var(--space-05 );`)
+css('.smaller', '', `--border-radius: var(--space-05 );`)
+css('.normal' , '', `--border-radius: var(--space-075);`)
+css('.large'  , '', `--border-radius: var(--space-1  );`)
+css('.xlarge' , '', `--border-radius: var(--space-1  );`)
+
+css('.ro-05'  , '', ` border-radius: var(--space-05); `)
+css('.ro-075' , '', ` border-radius: var(--space-075); `)
+css('.ro'     , '', ` border-radius: var(--space-1); `)
+css('.ro-2'   , '', ` border-radius: var(--space-2); `)
+css('.round'  , '', ` border-radius: 9999px; `)
+css('.ro0'    , '', ` border-radius: 0; `)
 
 css('.ro-l-0 ', '', ` border-top-left-radius   : 0; border-bottom-left-radius : 0; `)
 css('.ro-r-0 ', '', ` border-top-right-radius  : 0; border-bottom-right-radius: 0; `)
@@ -663,23 +691,16 @@ css('.ro-group-h > :not(:first-child)', '', ` border-top-left-radius   : 0; bord
 css('.ro-group-v > :not(:last-child)' , '', ` border-bottom-left-radius: 0; border-bottom-right-radius: 0; `)
 css('.ro-group-v > :not(:first-child)', '', ` border-top-left-radius   : 0; border-top-right-radius   : 0; `)
 
-css('.b-solid    ', '', ` border-style: solid; `)
-css('.b-dotted   ', '', ` border-style: dotted; `)
-css('.b-dashed   ', '', ` border-style: dashed; `)
-css('.b-invisible', '', ` border-color: #00000000; `)
-
-css('.b-fg       ', '', ` border-color: var(--fg); `)
-css('.b-hover    ', '', ` border-color: var(--border-light-hover); `)
-
 /* PADDINGS --------------------------------------------------------------- */
 
-css('.p025  ', '', ` padding: var(--space-025); `)
-css('.p05   ', '', ` padding: var(--space-05); `)
-css('.p     ', '', ` padding: var(--space-1); `)
-css('.p2    ', '', ` padding: var(--space-2); `)
-css('.p4    ', '', ` padding: var(--space-4); `)
-css('.p8    ', '', ` padding: var(--space-8); `)
-css('.p0    ', '', ` padding: 0; `)
+css('.p-025' , '', ` padding: var(--space-025); `)
+css('.p-05'  , '', ` padding: var(--space-05); `)
+css('.p-075' , '', ` padding: var(--space-075); `)
+css('.p'     , '', ` padding: var(--space-1); `)
+css('.p-2'   , '', ` padding: var(--space-2); `)
+css('.p-4'   , '', ` padding: var(--space-4); `)
+css('.p-8'   , '', ` padding: var(--space-8); `)
+css('.p0'    , '', ` padding: 0; `)
 
 css('.p-t-05', '', ` padding-top:    var(--space-05); `)
 css('.p-r-05', '', ` padding-right:  var(--space-05); `)
@@ -690,6 +711,8 @@ css('.p-x-025', '', ` padding-left:   var(--space-025); padding-right:  var(--sp
 css('.p-y-025', '', ` padding-top:    var(--space-025); padding-bottom: var(--space-025); `)
 css('.p-x-05 ', '', ` padding-left:   var(--space-05 ); padding-right:  var(--space-05 ); `)
 css('.p-y-05 ', '', ` padding-top:    var(--space-05 ); padding-bottom: var(--space-05 ); `)
+css('.p-x-075', '', ` padding-left:   var(--space-075); padding-right:  var(--space-075); `)
+css('.p-y-075', '', ` padding-top:    var(--space-075); padding-bottom: var(--space-075); `)
 css('.p-x    ', '', ` padding-left:   var(--space-1  ); padding-right:  var(--space-1  ); `)
 css('.p-y    ', '', ` padding-top:    var(--space-1  ); padding-bottom: var(--space-1  ); `)
 css('.p-x-2  ', '', ` padding-left:   var(--space-2  ); padding-right:  var(--space-2  ); `)
@@ -699,53 +722,53 @@ css('.p-y-4  ', '', ` padding-top:    var(--space-4  ); padding-bottom: var(--sp
 css('.p-x-8  ', '', ` padding-left:   var(--space-8  ); padding-right:  var(--space-8  ); `)
 css('.p-y-8  ', '', ` padding-top:    var(--space-8  ); padding-bottom: var(--space-8  ); `)
 
-css('.p-x-0  ', '', ` padding-left   : 0; padding-right  : 0; `)
-css('.p-y-0  ', '', ` padding-top    : 0; padding-bottom : 0; `)
+css('.p-x-0'  , '', ` padding-left   : 0; padding-right  : 0; `)
+css('.p-y-0'  , '', ` padding-top    : 0; padding-bottom : 0; `)
 
-css('.p-t   ', '', ` padding-top:    var(--space-1); `)
-css('.p-r   ', '', ` padding-right:  var(--space-1); `)
-css('.p-b   ', '', ` padding-bottom: var(--space-1); `)
-css('.p-l   ', '', ` padding-left:   var(--space-1); `)
+css('.p-t'    , '', ` padding-top:    var(--space-1); `)
+css('.p-r'    , '', ` padding-right:  var(--space-1); `)
+css('.p-b'    , '', ` padding-bottom: var(--space-1); `)
+css('.p-l'    , '', ` padding-left:   var(--space-1); `)
 
-css('.p-t-2 ', '', ` padding-top:    var(--space-2); `)
-css('.p-r-2 ', '', ` padding-right:  var(--space-2); `)
-css('.p-b-2 ', '', ` padding-bottom: var(--space-2); `)
-css('.p-l-2 ', '', ` padding-left:   var(--space-2); `)
+css('.p-t-2'  , '', ` padding-top:    var(--space-2); `)
+css('.p-r-2'  , '', ` padding-right:  var(--space-2); `)
+css('.p-b-2'  , '', ` padding-bottom: var(--space-2); `)
+css('.p-l-2'  , '', ` padding-left:   var(--space-2); `)
 
-css('.p-t-4 ', '', ` padding-top:    var(--space-4); `)
-css('.p-r-4 ', '', ` padding-right:  var(--space-4); `)
-css('.p-b-4 ', '', ` padding-bottom: var(--space-4); `)
-css('.p-l-4 ', '', ` padding-left:   var(--space-4); `)
+css('.p-t-4'  , '', ` padding-top:    var(--space-4); `)
+css('.p-r-4'  , '', ` padding-right:  var(--space-4); `)
+css('.p-b-4'  , '', ` padding-bottom: var(--space-4); `)
+css('.p-l-4'  , '', ` padding-left:   var(--space-4); `)
 
-css('.p-t-8 ', '', ` padding-top:    var(--space-8); `)
-css('.p-r-8 ', '', ` padding-right:  var(--space-8); `)
-css('.p-b-8 ', '', ` padding-bottom: var(--space-8); `)
-css('.p-l-8 ', '', ` padding-left:   var(--space-8); `)
+css('.p-t-8'  , '', ` padding-top:    var(--space-8); `)
+css('.p-r-8'  , '', ` padding-right:  var(--space-8); `)
+css('.p-b-8'  , '', ` padding-bottom: var(--space-8); `)
+css('.p-l-8'  , '', ` padding-left:   var(--space-8); `)
 
-css('.p-t-0 ', '', ` padding-top    : 0; `)
-css('.p-r-0 ', '', ` padding-right  : 0; `)
-css('.p-b-0 ', '', ` padding-bottom : 0; `)
-css('.p-l-0 ', '', ` padding-left   : 0; `)
+css('.p-t-0'  , '', ` padding-top    : 0; `)
+css('.p-r-0'  , '', ` padding-right  : 0; `)
+css('.p-b-0'  , '', ` padding-bottom : 0; `)
+css('.p-l-0'  , '', ` padding-left   : 0; `)
 
 /* MARGINS ---------------------------------------------------------------- */
 
-css('.m     ', '', ` margin: var(--space-1); `)
-css('.m05   ', '', ` margin: var(--space-05); `)
-css('.m2    ', '', ` margin: var(--space-2); `)
-css('.m4    ', '', ` margin: var(--space-4); `)
-css('.m8    ', '', ` margin: var(--space-8); `)
-css('.m0    ', '', ` margin: 0; `)
+css('.m'     , '', ` margin: var(--space-1); `)
+css('.m-05'  , '', ` margin: var(--space-05); `)
+css('.m-2'   , '', ` margin: var(--space-2); `)
+css('.m-4'   , '', ` margin: var(--space-4); `)
+css('.m-8'   , '', ` margin: var(--space-8); `)
+css('.m0'    , '', ` margin: 0; `)
 
 css('.m-x-05', '', ` margin-left:   var(--space-05); margin-right:  var(--space-05); `)
 css('.m-y-05', '', ` margin-top:    var(--space-05); margin-bottom: var(--space-05); `)
-css('.m-x   ', '', ` margin-left:   var(--space-1); margin-right:  var(--space-1); `)
-css('.m-y   ', '', ` margin-top:    var(--space-1); margin-bottom: var(--space-1); `)
-css('.m-x-2 ', '', ` margin-left:   var(--space-2); margin-right:  var(--space-2); `)
-css('.m-y-2 ', '', ` margin-top:    var(--space-2); margin-bottom: var(--space-2); `)
-css('.m-x-4 ', '', ` margin-left:   var(--space-4); margin-right:  var(--space-4); `)
-css('.m-y-4 ', '', ` margin-top:    var(--space-4); margin-bottom: var(--space-4); `)
-css('.m-x-8 ', '', ` margin-left:   var(--space-8); margin-right:  var(--space-8); `)
-css('.m-y-8 ', '', ` margin-top:    var(--space-8); margin-bottom: var(--space-8); `)
+css('.m-x'   , '', ` margin-left:   var(--space-1); margin-right:  var(--space-1); `)
+css('.m-y'   , '', ` margin-top:    var(--space-1); margin-bottom: var(--space-1); `)
+css('.m-x-2' , '', ` margin-left:   var(--space-2); margin-right:  var(--space-2); `)
+css('.m-y-2' , '', ` margin-top:    var(--space-2); margin-bottom: var(--space-2); `)
+css('.m-x-4' , '', ` margin-left:   var(--space-4); margin-right:  var(--space-4); `)
+css('.m-y-4' , '', ` margin-top:    var(--space-4); margin-bottom: var(--space-4); `)
+css('.m-x-8' , '', ` margin-left:   var(--space-8); margin-right:  var(--space-8); `)
+css('.m-y-8' , '', ` margin-top:    var(--space-8); margin-bottom: var(--space-8); `)
 
 css('.m-x-0 ', '', ` margin-left:   0; margin-right:  0; `)
 css('.m-y-0 ', '', ` margin-top:    0; margin-bottom: 0; `)
@@ -755,34 +778,34 @@ css('.m-r-05', '', ` margin-right:  var(--space-05); `)
 css('.m-b-05', '', ` margin-bottom: var(--space-05); `)
 css('.m-l-05', '', ` margin-left:   var(--space-05); `)
 
-css('.m-t   ', '', ` margin-top:    var(--space-1); `)
-css('.m-r   ', '', ` margin-right:  var(--space-1); `)
-css('.m-b   ', '', ` margin-bottom: var(--space-1); `)
-css('.m-l   ', '', ` margin-left:   var(--space-1); `)
+css('.m-t'   , '', ` margin-top:    var(--space-1); `)
+css('.m-r'   , '', ` margin-right:  var(--space-1); `)
+css('.m-b'   , '', ` margin-bottom: var(--space-1); `)
+css('.m-l'   , '', ` margin-left:   var(--space-1); `)
 
-css('.m-t-2 ', '', ` margin-top:    var(--space-2); `)
-css('.m-r-2 ', '', ` margin-right:  var(--space-2); `)
-css('.m-b-2 ', '', ` margin-bottom: var(--space-2); `)
-css('.m-l-2 ', '', ` margin-left:   var(--space-2); `)
+css('.m-t-2' , '', ` margin-top:    var(--space-2); `)
+css('.m-r-2' , '', ` margin-right:  var(--space-2); `)
+css('.m-b-2' , '', ` margin-bottom: var(--space-2); `)
+css('.m-l-2' , '', ` margin-left:   var(--space-2); `)
 
-css('.m-t-4 ', '', ` margin-top:    var(--space-4); `)
-css('.m-r-4 ', '', ` margin-right:  var(--space-4); `)
-css('.m-b-4 ', '', ` margin-bottom: var(--space-4); `)
-css('.m-l-4 ', '', ` margin-left:   var(--space-4); `)
+css('.m-t-4' , '', ` margin-top:    var(--space-4); `)
+css('.m-r-4' , '', ` margin-right:  var(--space-4); `)
+css('.m-b-4' , '', ` margin-bottom: var(--space-4); `)
+css('.m-l-4' , '', ` margin-left:   var(--space-4); `)
 
-css('.m-t-8 ', '', ` margin-top:    var(--space-8); `)
-css('.m-r-8 ', '', ` margin-right:  var(--space-8); `)
-css('.m-b-8 ', '', ` margin-bottom: var(--space-8); `)
-css('.m-l-8 ', '', ` margin-left:   var(--space-8); `)
+css('.m-t-8' , '', ` margin-top:    var(--space-8); `)
+css('.m-r-8' , '', ` margin-right:  var(--space-8); `)
+css('.m-b-8' , '', ` margin-bottom: var(--space-8); `)
+css('.m-l-8' , '', ` margin-left:   var(--space-8); `)
 
 css('.m-x-auto', '', ` margin-left: auto; margin-right: auto; `)
 css('.m-l-auto', '', ` margin-left: auto `)
 css('.m-r-auto', '', ` margin-right: auto `)
 
-css('.m-t-0 ', '', ` margin-top:    0; `)
-css('.m-r-0 ', '', ` margin-right:  0; `)
-css('.m-b-0 ', '', ` margin-bottom: 0; `)
-css('.m-l-0 ', '', ` margin-left:   0; `)
+css('.m-t-0' , '', ` margin-top:    0; `)
+css('.m-r-0' , '', ` margin-right:  0; `)
+css('.m-b-0' , '', ` margin-bottom: 0; `)
+css('.m-l-0' , '', ` margin-left:   0; `)
 
 /* OUTLINE ---------------------------------------------------------------- */
 
@@ -796,18 +819,18 @@ css_state(':focus-visible', 'outline-focus')
 
 /* OVERFLOW --------------------------------------------------------------- */
 
-css('.scroll      ', '', ` overflow  : scroll; `)
-css('.hscroll     ', '', ` overflow-x: scroll; `)
-css('.vscroll     ', '', ` overflow-y: scroll; `)
-css('.scroll-auto ', '', ` overflow  : auto; `)
+css('.scroll'      , '', ` overflow  : scroll; `)
+css('.hscroll'     , '', ` overflow-x: scroll; `)
+css('.vscroll'     , '', ` overflow-y: scroll; `)
+css('.scroll-auto' , '', ` overflow  : auto; `)
 css('.hscroll-auto', '', ` overflow-x: auto; `)
 css('.vscroll-auto', '', ` overflow-y: auto; `)
-css('.clip        ', '', ` overflow  : hidden; `)
-css('.clip-x      ', '', ` overflow-x: hidden; `)
-css('.clip-y      ', '', ` overflow-y: hidden; `)
-css('.noclip      ', '', ` overflow  : visible; `)
-css('.noclip-x    ', '', ` overflow-x: visible; `)
-css('.noclip-y    ', '', ` overflow-y: visible; `)
+css('.clip'        , '', ` overflow  : hidden; `)
+css('.clip-x'      , '', ` overflow-x: hidden; `)
+css('.clip-y'      , '', ` overflow-y: hidden; `)
+css('.noclip'      , '', ` overflow  : visible; `)
+css('.noclip-x'    , '', ` overflow-x: visible; `)
+css('.noclip-y'    , '', ` overflow-y: visible; `)
 
 /* THIN SCROLLBARS -------------------------------------------------------- */
 
@@ -837,11 +860,11 @@ css('.rel', '', ` position: relative; `)
 css('.abs', '', ` position: absolute; `)
 
 /* example: menu = z4, picker = z3, tooltip = z2, toolbox = z1 */
-css('.z1 ', '', ` z-index: 1; `)
-css('.z2 ', '', ` z-index: 2; `)
-css('.z3 ', '', ` z-index: 3; `)
-css('.z4 ', '', ` z-index: 4; `)
-css('.z5 ', '', ` z-index: 5; `)
+css('.z1', '', ` z-index: 1; `)
+css('.z2', '', ` z-index: 2; `)
+css('.z3', '', ` z-index: 3; `)
+css('.z4', '', ` z-index: 4; `)
+css('.z5', '', ` z-index: 5; `)
 
 css('.overlay', '', `
 	position: absolute;

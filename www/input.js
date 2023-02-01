@@ -537,9 +537,10 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 // button
 // ---------------------------------------------------------------------------
 
-css('.btn', 'v m-y-05')
+css('.btn', 'v')
+css('p .btn', 'm-05')
 
-css('.btn-focus-box', 'h-c h-bl b ro075 bold noselect p-x-4 p-y', `
+css('.btn-focus-box', 'h-c h-bl b ro-075 bold noselect p-x-4 p-y', `
 	background : var(--bg-button);
 	color      : var(--fg-button);
 	box-shadow : var(--shadow-button);
@@ -2338,10 +2339,10 @@ css('.spinedit-btn', 'hidden p-x-input')
 css('.spinedit-btn.left ', 'show b-r')
 css('.spinedit-btn.right', 'show b-l')
 
-css([
-	'.spinedit-btn.fa-plus',
-	'.spinedit-btn.fa-minus',
-], 'small', `
+css(`
+	.spinedit-btn.fa-plus,
+	.spinedit-btn.fa-minus
+`, 'small', `
 	align-self: center;
 `)
 css('.spinedit-btn.fa-minus.leftmost', '', `padding-left  : calc(1.428 * var(--padding-x-input)); `)
@@ -2360,10 +2361,10 @@ css_state('.spinedit[button_style=left-right]:is([button_placement=left], [butto
 	padding-left: 1.5em;
 `)
 
-css([
-	'.spinedit.with-label .spinedit-btn.fa-plus',
-	'.spinedit.with-label .spinedit-btn.fa-minus',
-], '', `
+css(`
+	.spinedit.with-label .spinedit-btn.fa-plus,
+	.spinedit.with-label .spinedit-btn.fa-minus
+`, '', `
 	align-self: baseline;
 `)
 
@@ -2481,7 +2482,7 @@ css('.tagsedit-button-expand', 'p-r')
 
 css('.tagsedit-bubble', 'click-through-off')
 
-css('.tagsedit-tag', 'b ro05 bg1 p-x-05 clip', `
+css('.tagsedit-tag', 'b ro-05 bg1 p-x-05 clip', `
 	display: inline;
 	padding-top    : 3px;
 	padding-bottom : 2px;
@@ -2504,10 +2505,10 @@ css('.tagsedit.with-label[mode=fixed]', '', `
 
 css('.tagsedit[mode=fixed] .tagsedit-tags-box', 'flex-nowrap')
 
-css([
-	'.tagsedit[mode=fixed] .tagsedit-tag',
-	'.tagsedit-bubble .tagsedit-tag',
-], 'flex-nowrap nowrap')
+css(`
+	.tagsedit[mode=fixed] .tagsedit-tag,
+	.tagsedit-bubble .tagsedit-tag
+`, 'flex-nowrap nowrap')
 
 css_state('.tagsedit.invalid .tagsedit-tag', '', `
 	background-color: var(--bg-focused-error);
@@ -3105,7 +3106,7 @@ widget('slider', 'Input', function(e) {
 // calendar widget
 // ---------------------------------------------------------------------------
 
-css('.calendar', 'h noselect p4')
+css('.calendar', 'h noselect p-4')
 
 css('.calendar-header, .calendar-timeview', 'h-m', `
 	align-self: start;
@@ -3599,7 +3600,7 @@ widget('dateedit', 'Input', function(e) {
 		title: S('button_pick_from_calendar', 'Pick from calendar'),
 	})
 
-	e.calendar_button.on('activate', function() {
+	e.calendar_button.on('click', function() {
 		e.toggle(true)
 	})
 
@@ -3766,7 +3767,7 @@ widget('timeofdayedit', 'Input', function(e) {
 		title: S('button_pick_from_time_picker', 'Pick from time picker'),
 	})
 
-	e.timepicker_button.on('activate', function() {
+	e.timepicker_button.on('click', function() {
 		e.toggle(true)
 	})
 
@@ -4480,10 +4481,10 @@ css('.frm.compact', 'small', `
 
 css('.frm.compact > :is(h1, h2, h3)', 'hidden')
 
-css([
-	'.frm.compact > .widget:not(.inp)',
-	'.frm.compact > .inp > .widget',
-], 'm0 ro0', `
+css(`
+	.frm.compact > .widget:not(.inp),
+	.frm.compact > .inp > .widget
+`, 'm0 ro0', `
 	border-top-color  : rgb(0,0,0,0);
 	border-left-color : rgb(0,0,0,0);
 	border-right-color: rgb(0,0,0,0);

@@ -119,10 +119,10 @@ DOM MANIPULATION
 	e.replace([e0], te)
 	e.move([pe], [i0])
 	e.clear()
-	tag(tag, [attrs], e1,...)
+	tag(tag, [attrs], [e1,...])
 	div(...)
 	span(...)
-	element(node | stringable | null | {id|tag:, PROP->VAL}) -> node | null
+	element(node | stringable | null | {id|tag:, PROP->VAL}, [attrs], [e1,...]) -> node | null
 	[].join_nodes([separator])
 
 SVG ELEMENTS
@@ -226,15 +226,13 @@ ELEMENT STATE
 	e.effectively_disabled
 	e.effectively_hidden
 	e.focus_first()
-
-ELEMENT STATE MIXINS
-
 	e.make_disablable()
 		e.disabled
 		e.disable(reason, disabled)
 	e.make_focusable([focusable_element])
 		e.tabindex
 		e.focusable
+	focused_focusable([e]) -> e
 
 TEXT EDITING
 
@@ -517,14 +515,15 @@ css_layer = memoize(function(layer) {
 				add_includes(includes, dest_pieces, e)
 			})
 		}
-		props = props ? props.trim() : ''
-		pieces.push('\n\t', props)
+		props = props && props.trim()
+		if (props)
+			pieces.push('\n\t', props)
 		pieces.push('\n}\n')
 
 		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // reusable class?
 		if (cls) {
-			class_props[cls] = props || ''
-			class_includes[cls] = includes
+			class_props[cls] = catany('\n\t', class_props[cls], props) || ''
+			class_includes[cls] = catany(' ', class_includes[cls], includes)
 		}
 	}
 
@@ -541,6 +540,8 @@ css_role          = css_layer('role')
 css_role_state    = css_layer('role-state')
 css_generic_state = css_layer('generic-state')
 css_util          = css_layer('util')
+css_chrome        = Chrome  ? css_util : noop
+css_firefox       = Firefox ? css_util : noop
 
 css = css_base
 
@@ -820,10 +821,14 @@ function component(selector, category, init) {
 	tag = tag || selector
 	assert(tag.match(/^[a-z]+[a-z\-]*$/), 'invalid component tag')
 	let tagName = tag.upper()
-	assert(!component_init[tagName], 'component already registered: {0}', tag)
+	assert(!(init && component_init[tagName]), 'component already registered: {0}', tag)
 	component_init[tagName] = init
 	if (tag_attr)
 		component_attr[tagName] = tag_attr
+	if (!init) { // unregister
+		attr(component.categories, category, array).remove_value(create)
+		return
+	}
 	function create(prop_vals) {
 		prop_vals = prop_vals || obj()
 		prop_vals.tag = tag
@@ -1046,11 +1051,11 @@ function init_components() {
 // listen to a global event *while the element is bound*.
 e.listen = function(event, f) {
 	let handlers = obj() // event->f
-	e.on_bind(function(on) {
+	this.on_bind(function(on) {
 		for (let event in handlers)
-			listen(event, handlers[event], f, on)
+			listen(event, handlers[event], on)
 	})
-	e.listen = function(event, f) {
+	this.listen = function(event, f) {
 		handlers[event] = f
 	}
 }
@@ -1109,31 +1114,26 @@ function html(s) {
 	return unsafe_html(sanitize_html(s))
 }
 
-// create a HTML element from an attribute map and a list of child nodes.
-// skips nulls, calls constructors, expands arrays.
-function tag(tag, attrs, ...children) {
+let create_element = function(tag, prop_vals, attrs, ...children) {
 	let e = document.createElement(tag)
 	e.attrs = attrs
 	for (let s of children) {
-		if (isfunc(s))
+		if (isfunc(s)) // constructor
 			s = s()
-		if (s == null)
+		if (s == null) // skip nulls
 			continue
-		if (isarray(s))
+		if (isarray(s)) // expand array
 			for (let cs of s)
 				e.append(cs)
 		else
 			e.append(s)
 	}
-	e._init_component()
+	e._init_component(prop_vals)
 	return e
 }
 
-div  = (...a) => tag('div' , ...a)
-span = (...a) => tag('span', ...a)
-
-// element(node | stringable | null | {id|tag:, PROP->VAL}) -> node | null
-function element(t) {
+// element(node | stringable | null | {id|tag:, PROP->VAL}, [attrs], [e1,...]) -> node | null
+function element(t, attrs, ...children) {
 	if (isfunc(t)) // constructor
 		t = t()
 	if (t == null || isnode(t)) // node | null | undefined: pass through
@@ -1148,12 +1148,19 @@ function element(t) {
 			warn('component id not found:', id)
 			return
 		}
-		let e = document.createElement(tag)
-		e._init_component(t)
-		return e
+		return create_element(tag, t, attrs, ...children)
 	}
 	return document.createTextNode(t) // stringable -> node
 }
+
+// create a HTML element from an attribute map and a list of child nodes.
+// skips nulls, calls constructors, expands arrays.
+function tag(tag, attrs, ...children) {
+	return create_element(tag, null, attrs, ...children)
+}
+
+div  = (...a) => tag('div' , ...a)
+span = (...a) => tag('span', ...a)
 
 function svg_tag(tag, attrs, ...children) {
 	let e = document.createElementNS('http://www.w3.org/2000/svg', tag)
@@ -1577,24 +1584,20 @@ e.prop = function(prop, opt) {
 		let ID = prop
 		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
 		let REF = opt.bind_id
-		function element_bind(te, on) {
-			if (e[ID] != te.id) return
-			e[REF] = on ? te : null
-			e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
-		}
 		function id_bind(id, on) {
 			if (!id) return
 			let te = resolve_linked_element(id)
 			e[REF] = te
 			e.debug_if(DEBUG_ELEMENT_BIND, te ? '==' : '=/=', DEBUG_ID, id)
 		}
-		function element_id_changed(te, id1, id0) {
+		e.listen('bind', function(te, on) {
+			if (e[ID] != te.id) return
+			e[REF] = on ? te : null
+			e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
+		})
+		e.listen('id_changed', function(te, id1, id0) {
 			if (e[ID] != id0) return
 			e[ID] = id1
-		}
-		e.on_bind(function(on) {
-			listen('bind', element_bind, on)
-			listen('id_changed', element_id_changed, true)
 		})
 		prop_changed = function(e, k, v1, v0) {
 			fire_prop_changed(e, k, v1, v0)
@@ -1674,26 +1677,15 @@ NOTE: The `disabled` state is a concerted effort located in multiple places:
 
 NOTE: `:hover` and `:active` still apply to a disabled element, unless you
 also add `click-through` (but then scrolling won't work!) so make sure to
-add `:not([disabled])` in css on those selectors.
+add `:not([disabled])` on mouse state selectors.
 
 NOTE: for non-focusables setting the `disabled` attr is enough to disable them.
 
 */
 
-// NOTE: you still have to use `:not([disabled]):hover` to prevent :hover
-// on disabled widgets because we're not using `pointer-events: none`.
-css_generic_state('[disabled]', '', `
+css_generic_state(':not([disabled]) [disabled]', '', `
 	opacity: .5;
 	filter: grayscale();
-`)
-
-// disabled child: reset opacity and filter.
-// TODO: it's wrong to do this for widgets that set these in their normal
-// state but selector `:not([disabled]) [disabled]` would be too slow.
-// Opacity is wrong anyway, find another filter that doesn't mix with the background.
-css_generic_state('[disabled] [disabled]', '', `
-	opacity: unset;
-	filter: unset;
 `)
 
 css_generic_state('[disabled], [disabled] *', '', `
@@ -1738,18 +1730,22 @@ e.make_disablable = function() {
 		disable_children(this, this, disabled)
 	}
 
-	e.property('disabled',
-		function() {
-			return this.hasattr('disabled')
-		},
-		function(disabled) {
-			disabled = !!disabled
-			let disabled0 = this.hasattr('disabled')
-			if (disabled0 == disabled)
-				return
-			this.bool_attr('disabled', disabled || null)
-			e.set_disabled(disabled, disabled0)
-		})
+	function get_disabled() {
+		return this.hasattr('disabled')
+	}
+	function set_disabled(disabled) {
+		disabled = !!disabled
+		let disabled0 = this.hasattr('disabled')
+		if (disabled0 == disabled)
+			return
+		this.bool_attr('disabled', disabled || null)
+		this.set_disabled(disabled, disabled0)
+	}
+	if (e.disabled == null) {
+		e.property('disabled', get_disabled, set_disabled)
+	} else {
+		override_property_setter(e, 'disabled', set_disabled)
+	}
 
 	let dr
 	e.disable = function(reason, disabled) {
@@ -1812,6 +1808,11 @@ e.make_focusable = function(fe) {
 			fe.focus()
 	}
 
+}
+
+function focused_focusable(e) {
+	e = e || document.activeElement
+	return e && e.focusable && e || (e.parent && e.parent != e && focused_focusable(e.parent))
 }
 
 // tab cycling within the app, popups & modauls ------------------------------
@@ -2806,7 +2807,33 @@ component('script[run]', function(e) {
 		return
 	// calling with `e` as `this` allows `this.on_bind(...)` inside the script
 	// and also attaching other elements to the script for lifetime control!
+	// NOTE: `function foo() {}` declarations are local. Use `foo = function() {}`
+	// to declare global functions.
 	(new Function('', e.text)).call(e)
+})
+
+// html-declared components --------------------------------------------------
+
+css('component', 'skip')
+
+component('component', function(e) {
+
+	let tag = e.attr('tag')
+	let script = e.$1('script')
+
+	if (warn_if(!tag, '<component> tag attr missing')) return
+	if (warn_if(!script, '<component> <script> tag missing')) return
+
+	script.remove()
+	let cons = new Function('e', script.text)
+
+	component(tag, cons)
+
+	e.on_bind(function(on) {
+		if (!on)
+			component(tag, false)
+	})
+
 })
 
 // not initializing components inside the template tag -----------------------
@@ -3220,7 +3247,7 @@ function live_move_mixin(e) {
 
 // theming -------------------------------------------------------------------
 
-// NOTE: divs.js is independent of any css, including css.js.
+// NOTE: dom.js is independent of any css, including css.js.
 // These class names are the only references to css.js.
 
 function is_theme_dark() {

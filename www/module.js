@@ -679,7 +679,7 @@ widget('prop-inspector', function(e) {
 		if (barrier) return
 		if (selected_widgets.size)
 			return
-		let fe = focused_widget()
+		let fe = focused_focusable()
 		if (!fe || !fe.can_select_widget)
 			return
 		barrier = true
@@ -717,8 +717,8 @@ widget('prop-inspector', function(e) {
 	function reset() {
 
 		widgets = selected_widgets
-		if (!selected_widgets.size && focused_widget() && !up_widget_which(focused_widget(), e => !e.can_select_widget))
-			widgets = new Set([focused_widget()])
+		if (!selected_widgets.size && focused_focusable() && !up_widget_which(focused_focusable(), e => !e.can_select_widget))
+			widgets = new Set([focused_focusable()])
 
 		let i = 0
 		for (let te of widgets) // for debugging...
@@ -880,8 +880,8 @@ widget('widget-tree', function(e) {
 			let row = e.lookup(0, [ce])[0]
 			rows.set(row, true)
 		}
-		let focused_widget = [...widgets].pop()
-		let row = e.lookup(0, [focused_widget])[0]
+		let focused_focusable = [...widgets].pop()
+		let row = e.lookup(0, [focused_focusable])[0]
 		let ri = e.row_index(row)
 		e.focus_cell(ri, null, 0, 0, {
 			selected_rows: rows,
@@ -925,7 +925,7 @@ widget('widget-tree', function(e) {
 	function focus_changed() {
 		if (selected_widgets.size)
 			return
-		let fe = focused_widget()
+		let fe = focused_focusable()
 		if (!fe || !fe.can_select_widget)
 			return
 		//select_widgets(new Set([fe]))

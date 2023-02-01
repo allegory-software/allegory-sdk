@@ -6,7 +6,7 @@
 <base href="../../www/">
 <link rel="stylesheet" type="text/css" href="fontawesome.css">
 <script src="glue.js"></script>
-<script src="divs.js"></script>
+<script src="dom.js"></script>
 <script src="css.js"></script>
 <script src="purify.js"></script>
 <script src="widgets.js"></script>
@@ -24,10 +24,6 @@
 #layout {
 	height: 100%;
 	display: flex;
-}
-
-button {
-	margin: 4px 0;
 }
 
 #code_split {
@@ -51,7 +47,7 @@ button {
 
 #demo_list { overflow: hidden auto; padding-top: .5em; user-select: none; }
 #code      { flex: 1; }
-#result    { flex: 1; padding: 1em; }
+#result    { flex: 1; padding: 1em; align-content: start; }
 #inspect   { flex: 1; border-top: 1px solid #333; }
 
 #code:focus {
@@ -66,11 +62,6 @@ button {
 .theme-dark .demo-list-item:hover { background: #333; }
 .demo-list-item.selected { background: #ddf; }
 .theme-dark .demo-list-item.selected { background: #336; }
-button { border: 1px solid #555; }
-.theme-dark button { background: #333; color: white; border-color: #555; }
-
-button[pressed] { background: #ddf; }
-.theme-dark button[pressed] { background: #336; }
 
 </style>
 
@@ -90,10 +81,10 @@ on_dom_load(function() {
 <div id=layout>
 	<div id=demo_list></div>
 	<div id=code_split>
-		<div id=buttons>
+		<div id=buttons class="smaller gap-x-05 p-x-05">
 			<button id=run_button>Run</button>
 			<button id=reload_button>Reload</button>
-			<div style="flex: 1; text-align: right;">
+			<div class="S h-r gap-x-05">
 				<button id=small_button>Small</button>
 				<button id=large_button>Large</button>
 				<button id=lights_button>Lights</button>
@@ -102,7 +93,7 @@ on_dom_load(function() {
 		<aceeditor id=code></aceeditor>
 	</div>
 	<div id=result_split>
-		<div id=result_buttons>
+		<div id=result_buttons class="smaller p-x-05">
 			<button id=inline_button>Inline</button>
 		</div>
 		<div id=result class=x-container></div>
@@ -172,7 +163,7 @@ on_dom_load(function() {
 	<h3>It never entered my mind, but</h3>
 	<p>Here we are</p>
 </info>
-<button onclick="toggle_collapsed()">Toggle Collapsed</button>
+<button action=toggle_collapsed>Toggle Collapsed</button>
 <script run>
 toggle_collapsed = function() {
 	my_info.collapsed = !my_info.collapsed
@@ -200,29 +191,73 @@ toggle_collapsed = function() {
 <!--------------------------------------------------------------------------->
 
 <template id=button_demo>
-<span>
-	<p>
-		<btn id=wasup_button class=large>Cancel</btn>, says the button.
-		<btn danger>Don't do it Jonny!</btn>, says another.
-		<btn icon="fa fa-recycle" bare></btn>
-	</p>
-	<p>
-		<btn primary>OK</btn>
-		<btn icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</btn>
-		<btn bare icon="fa fa-play">I'm also a button</btn>
-		<script run>
-			this.parent.add(btn({
-				text: html('Multiline text<br>works too!'),
-				icon: 'fa fa-folder-open',
-				action: function() { this.debug('clicked') },
-			}))
+<p>
+	<button id=cancel_button confirm="U sure?" class=large>Cancel</button>, says the button.
+	<button id=danger_button danger>Don't do it Jonny!</button>, says another.
+	<button icon="fa fa-recycle" bare></button>
+</p>
+<p>
+	<button primary>OK</button>
+	<button icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</button>
+	<button bare icon="fa fa-play">I'm also a button</button>
+	<script run>
+		this.parent.add(button({
+			text: html('Multiline text<br>works too!'),
+			icon: 'fa fa-folder-open',
+			action: function() { this.debug('clicked') },
+		}))
 
-			wasup_button.action = function() {
-				this.debug('clicked')
-			}
-		</script>
-	</p>
-</span>
+		danger_button.action = function() {
+			cancel_button.click()
+		}
+		cancel_button_action = function() {
+			this.debug('clicked')
+		}
+	</script>
+</p>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=component_demo>
+<component tag=foo>
+	<script>
+		let content = [...e.nodes]
+		let wrapper = div({class: 'm b p h-c'}, content)
+		e.set(wrapper)
+	</script>
+</component>
+
+<foo>Hello!</foo>
+
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=input_demo>
+<d class="grid-h grid-2col grid-m" style="grid-template-columns: 1fr 6fr">
+xsmall  <span class="ro-group-h b-collapse-h xsmall  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+small   <span class="ro-group-h b-collapse-h small   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+smaller <span class="ro-group-h b-collapse-h smaller "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+normal  <span class="ro-group-h b-collapse-h normal  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+large   <span class="ro-group-h b-collapse-h large   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=inputbox_demo>
+
+<d class="xro-group-h xb-collapse-h">
+	<inputbox>
+		<d class="b ro-var fa fa-car"> </d>
+		<input value="Oh My!">
+		<d class="b ro-var fa fa-truck"> </d>
+		<button>...</button>
+	</inputbox> <button>OK</button>
+</d>
+
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -230,9 +265,9 @@ toggle_collapsed = function() {
 <template id=tooltip_demo>
 <script run>
 
-b1 = btn({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
-b2 = btn({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
-b3 = btn({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
+b1 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
+b2 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
+b3 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
 result.add(div({style: 'text-align: center'}, div({}, b1), div({}, b2), div({}, b3)))
 
 b1.style['margin'] = '5em'
@@ -294,6 +329,7 @@ notify('There!', 'error', 2)
 <script run>
 
 win = dlg({
+	w: 600,
 	heading: 'I\'m playing the title',
 	content: div({}, 'I\'m just here for the demo.', tag('br'), 'What do you think?'),
 	buttons_layout: 'some-button < yes no > apply:ok cancel',
@@ -304,7 +340,7 @@ win = dlg({
 	},
 })
 
-main.add(btn({
+main.add(button({
 	text: 'Click for modal',
 	action: function() {
 		win.cancelable = true

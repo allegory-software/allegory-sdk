@@ -491,7 +491,7 @@ widget('enum-dropdown', function(e) {
 
 css('.select-btn', 'b0')
 
-css('.select-btn .item', 'b ro05 noselect', `
+css('.select-btn .item', 'b ro-05 noselect', `
 	background-color: var(--bg-select-button);
 `)
 

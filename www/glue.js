@@ -52,7 +52,7 @@ ERRORS
 
 	pr[int](...)
 	warn(...)
-	warn_if(cond, ...)
+	warn_if(cond, ...) -> cond
 	debug(...)
 	trace(...)
 	debug_if(cond, ...)
@@ -340,6 +340,7 @@ trace = console.trace
 function warn_if(cond, ...args) {
 	if (!cond) return
 	warn(...args)
+	return cond
 }
 
 function trace_if(cond, ...args) {
@@ -509,7 +510,9 @@ method(String, 'esc', function() {
 })
 
 method(String, 'words', function() {
-	return this.trim().split(/\s+/)
+	let s = this.trim()
+	if (!s) return []
+	return s.split(/\s+/)
 })
 
 function words(s) {
@@ -1997,4 +2000,4 @@ function setglobal(k, v, default_v) {
 // browser detection ---------------------------------------------------------
 
 Firefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
-
+Chrome  = navigator.userAgent.toLowerCase().indexOf('chrome') > -1

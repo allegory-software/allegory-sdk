@@ -15,12 +15,12 @@ a keyboard and a mouse ("keyboard & mouse"-first apps).
 
 ## Components
 
-The highlight of the library is a **virtual grid widget** which can load,
+The highlight of the library is a **canvas-drawn grid widget** which can load,
 scroll, sort and filter 100K items instantly on any modern computer or phone,
 can act as a tree-grid or as a vertical grid, has inline editing, drag & drop
 moving of columns and rows and many other features.
 
-Accompanying that there's a **listbox widget** which is not virtual (so it
+Accompanying that there's a **listbox widget** which is not canvas-drawn (so it
 can't hold as many items as the grid efficiently), not out-of-the-box editable,
 but the items can be custom-rendered to variable widths and heights and can
 still have drag & drop moving, multiple selection, sorting, etc.
@@ -50,17 +50,15 @@ Like usual, docs are in the code but this time there's also a [demo (master)]
 ## Installation
 
 There is no installation step and no offline preprocessing or packing tools
-are used or necessary. Just make sure you load both the js and css files
-in order like [x-widgets-demo.html] does.
+are used or necessary. Just make sure you load all the js and css files in
+order like [x-widgets-demo.html] does.
 
 [x-widgets-demo.html]: https://github.com/allegory-software/allegory-sdk/tree/dev/www/x-widgets-demo.html
 
 ## Styling
 
 Even though they're web components, the widgets don't use shadow DOMs so
-both their sub-elements and their styling are overridable. All widgets
-get the `.x-widget` class that can be used to set global styling for all
-the widgets without disturbing the styles of non x-widget components.
+both their sub-elements and their styling are overridable.
 
 ## Security
 
@@ -72,7 +70,6 @@ option for this and it also has a server-side implementation.
 
 * `glue.js` is intended to be used as a standard library and as such it
 publishes everything directly as globals.
-* `divs.js` is intended to be used as the primary/only DOM manipulation API
+* `dom.js` is intended to be used as the primary/only DOM manipulation API
 and as such it extends built-in classes directly with new methods and
 properties, instead of wrapping them.
-

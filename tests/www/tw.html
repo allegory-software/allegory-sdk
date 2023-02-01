@@ -20,7 +20,7 @@
 <link rel="stylesheet" type="text/css" href="fontawesome.css">
 
 <script src="glue.js"></script>
-<script src="divs.js"></script>
+<script src="dom.js"></script>
 <script src="css.js"></script>
 <script src="purify.js"></script>
 <script src="widgets.js"></script>
@@ -63,8 +63,8 @@ input:focus { outline: none; }
 
 // button styling
 
-css('.btn'                , 'semibold nowrap noselect ro ring p-y-1_25 p-x-4 h-c h-m hand')
-css('.btn-sm'             , 'btn littlebold ro075 p p-x-2 bg')
+css('.btn'                , 'semibold nowrap noselect ro ring p-x-4 p-y-1_25 h-c h-m hand')
+css('.btn-sm'             , 'btn littlebold ro-075 p-x-2 p-y bg')
 css('.btn-pri'            , 'btn white bg-fg')
 css('.btn-indigo'         , 'btn-sm white bg-indigo')
 css_state('.btn-indigo:hover'   , 'bg-indigo-hover')
@@ -75,9 +75,9 @@ css_state('.ro-group-h:hover > .btn', 'bg-hover')
 
 // menu styling
 
-css('.menu-section', 'v p2 ro bg ring')
+css('.menu-section', 'v p-2 ro bg ring')
 css('.menu-section-label', 'p-y bold dim xsmall bg')
-css('.menu-item', 'ro075 p-y bg')
+css('.menu-item', 'ro-075 p-y bg')
 css_state('.menu-item:hover', '', `
 	background: var(--indigo);
 	color: var(--fg-white);
@@ -87,7 +87,7 @@ css_state('.menu-item:hover .menu-item-icon', 'white')
 
 // toggle component
 
-css('my-toggle', 't-m p05 round bg1 h-m ease ring hand', `
+css('my-toggle', 't-m p-05 round bg1 h-m ease ring hand', `
 	min-width  : 3em;
 	max-width  : 3em;
 	min-height : 1.75em;
@@ -103,7 +103,7 @@ css_state('my-toggle[checked] .my-toggle-thumb', 'ease', `
 `)
 
 component('my-toggle', function(e) {
-	e.thumb = tag('div', {class: 'my-toggle-thumb'})
+	e.thumb = div({class: 'my-toggle-thumb'})
 	e.set(e.thumb)
 	e.make_focusable()
 	e.prop('checked', {type: 'bool', attr: true})
@@ -146,7 +146,7 @@ on('load', function() {
 <body class="v-c rel bg-no-repeat" style="background-image: url(../tests/www/tw-bg.jpg); background-size: 150rem; background-position-x: -10rem">
 	<d class="v" style="width: 1296px">
 		<d class="h-m smaller p-y-2rem">
-			<d class="S large bold">allegory sdk<d class="b2 b-fg ro075 m05 p-x-025 small">UI</d></d>
+			<d class="S large bold">allegory sdk<d class="b2 b-fg ro-075 m-05 p-x-025 small">UI</d></d>
 			<d class="m-l-2rem semibold">Components</d>
 			<d class="m-l-2rem semibold">Templates <d class="m p-x-05 p-y-025 round xsmall bg-sky white">New</d></d>
 			<d class="m-l-2rem semibold">Documentation</d>
@@ -185,7 +185,7 @@ on('load', function() {
 
 				<!-- buttons -->
 				<d class="x3 h-r h-b">
-					<d class="p4 v-r small gap4">
+					<d class="p-4 v-r small gap-4">
 						<my-toggle class="m-b-4" checked></my-toggle>
 						<d>
 							<my-toggle></my-toggle>
@@ -199,9 +199,9 @@ on('load', function() {
 				</d>
 
 				<!-- person list -->
-				<d class="x4 p4 v">
+				<d class="x4 p-4 v">
 					<d class="v ring ro clip bg small" style="">
-						<d class="h p4">
+						<d class="h p-4">
 							<img class="round w-10 h-10 " src="../tests/www/avatar-1.jpg"></img>
 							<d class="S v-sb m-l-4">
 								<d class=littlebold>Leonard Krasner</d>
@@ -209,7 +209,7 @@ on('load', function() {
 							</d>
 							<d class="self-h-m btn btn-sm">View</d>
 						</d>
-						<d class="h p4 b-t">
+						<d class="h p-4 b-t">
 							<img class="round w-10 h-10" src="../tests/www/avatar-2.jpg"></img>
 							<d class="S v-sb m-l-4">
 								<d class=littlebold>Floyd Miles</d>
@@ -217,7 +217,7 @@ on('load', function() {
 							</d>
 							<d class="self-h-m btn btn-sm">View</d>
 						</d>
-						<d class="h p4 b-t">
+						<d class="h p-4 b-t">
 							<img class="round w-10 h-10" src="../tests/www/avatar-3.jpg"></img>
 							<d class="S v-sb m-l-4">
 								<d class=littlebold>Emily Selman</d>
@@ -225,20 +225,20 @@ on('load', function() {
 							</d>
 							<d class="self-h-m btn btn-sm">View</d>
 						</d>
-						<d class="p4 b-t h">
+						<d class="p-4 b-t h">
 							<d class="S btn btn-sm">View all</d>
 						</d>
 					</d>
 				</d>
 
 				<!-- player bar -->
-				<d class="x3 xxx m4 h ro-group-h">
+				<d class="x3 xxx m-4 h ro-group-h">
 					<d class="btn bg gap">
 						<svg style="width: 22px; height: 22px" version="2.0"><use href="#back-15s"></use></svg>
 						<d class="mi" style="font-size: 3.1em">play_circle</d>
 						<svg style="width: 22px; height: 22px" version="2.0"><use href="#fw-15s"></use></svg>
 					</d>
-					<d class="S smaller btn bg no-bold gap4">
+					<d class="S smaller btn bg no-bold gap-4">
 						0:51
 						<d class="S h-m">
 							<d class="S bg-indigo round ro-r-0" style="height: 8px"></d>
@@ -252,8 +252,8 @@ on('load', function() {
 				</d>
 
 				<!-- message boxes -->
-				<d class="x2 xx v m4 gap4">
-					<d class="ring ro b2 b-indigo p4 bg small v" style="height: 8rem">
+				<d class="x2 xx v m-4 gap-4">
+					<d class="ring ro b2 b-indigo p-4 bg small v" style="height: 8rem">
 						<d class="h">
 							<d class="S p-b littlebold">Newsletter</d>
 							<d class="mi fg-indigo">check_circle</d>
@@ -261,7 +261,7 @@ on('load', function() {
 						<d>Last message sent an hour ago</d>
 						<d class="S h-b littlebold">621 users</d>
 					</d>
-					<d class="ring ro b2 b-invisible p4 bg small v" style="height: 8rem">
+					<d class="ring ro b2 b-invisible p-4 bg small v" style="height: 8rem">
 						<d class="h">
 							<d class="S p-b littlebold">Existing customers</d>
 						</d>
@@ -271,11 +271,11 @@ on('load', function() {
 				</d>
 
 				<!-- search projects dropdown -->
-				<d class="x4 m4 ro-group-v v-t small">
+				<d class="x4 m-4 ro-group-v v-t small">
 					<d class="menu-section">
 						<d class="h">
 							<d class="menu-item-icon dim xlarge lh1">search</d>
-							<input class="S p05 b0 littlebold" placeholder="Search projects..."></input>
+							<input class="S p-05 b0 littlebold" placeholder="Search projects..."></input>
 						</d>
 					</d>
 					<d class="menu-section">

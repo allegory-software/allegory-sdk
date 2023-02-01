@@ -471,7 +471,7 @@ server-side properties:
 css('.nav-loading-overlay', 'p')
 css('.nav-loading-overlay.error', 'bg-smoke')
 
-css('.nav-loading-overlay-message', 'p2 shadow-tooltip bg1')
+css('.nav-loading-overlay-message', 'p-2 shadow-tooltip bg1')
 
 css('.nav-loading-overlay-message .btn', '', `
 	line-height: 1;

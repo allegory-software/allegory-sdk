@@ -165,13 +165,10 @@ wwwfile['_inline.html'] = function()
 	return html()
 end
 
-cssfile[[
-utils.css
-]]
-
 jsfile[[
 glue.js
-divs.js
+dom.js
+css.js
 webb_spa.js
 config.js   // dynamic config
 strings.js  // strings in current language

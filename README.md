@@ -166,7 +166,7 @@ scripts for new libraries.
   * [X-Widgets](X-WIDGETS.md)          - Overview of the web components suite
   * [X-Widgets Demo][x-widgets-demo]   - X-Widgets Demo (dev branch; http server not required to run it!)
   * [glue.js](www/glue.js)             - JS "assorted lenghs of wire" library
-  * [divs.js](www/divs.js)             - DOM API and mechanism for web components
+  * [dom.js](www/dom.js)               - DOM API and web components
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
   * [x-widgets.js](www/x-widgets.js)   - Web components & layouting widgets
   * [x-nav.js](www/x-nav.js)           - Model mixin for data-driven widgets

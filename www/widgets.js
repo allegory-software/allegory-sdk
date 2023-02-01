@@ -5,9 +5,9 @@
 
 Depends on:
 
-	divs.js
 	glue.js
-	utils.css
+	dom.js
+	css.js
 
 WIDGETS
 
@@ -251,7 +251,6 @@ publishes:
 	editing_widget
 	selected_widgets
 	copied_widgets
-	focused_widget(e)
 	unselect_all_widgets()
 	copy_selected_widgets()
 	cut_selected_widgets()
@@ -283,11 +282,6 @@ function redo() {
 	;[undo_stack, redo_stack] = [redo_stack, undo_stack]
 	undo()
 	;[undo_stack, redo_stack] = [redo_stack, undo_stack]
-}
-
-function focused_widget(e) {
-	e = e || document.activeElement
-	return e && e.iswidget && e || (e.parent && e.parent != e && focused_widget(e.parent))
 }
 
 editing_widget = null
@@ -353,9 +347,8 @@ document.on('pointerdown', function() {
 	unselect_all_widgets()
 })
 
-/* ---------------------------------------------------------------------------
-// selectable widget mixin
-// ---------------------------------------------------------------------------
+/* selectable widget mixin ---------------------------------------------------
+
 uses:
 	e.can_select_widget
 publishes:
@@ -372,7 +365,8 @@ calls from the first parent which has e.child_widgets:
 	p.remove_child_widget()
 behavior:
 	enters widget editing mode and/or selects widget with ctrl(+shift)+click.
---------------------------------------------------------------------------- */
+
+*/
 
 function parent_widget_which(e, which) {
 	assert(e != window)
@@ -530,16 +524,16 @@ function selectable_widget(e) {
 
 }
 
-/* ---------------------------------------------------------------------------
-// editable widget mixin
-// ---------------------------------------------------------------------------
+/* editable widget mixin -----------------------------------------------------
+
 uses:
 	e.can_edit_widget
 publishes:
 	e.widget_editing
 calls:
 	e.set_widget_editing()
---------------------------------------------------------------------------- */
+
+*/
 
 function editable_widget(e) {
 
@@ -579,12 +573,12 @@ function contained_widget(e) {
 	//
 }
 
-/* ---------------------------------------------------------------------------
-// stylable widget mixin
-// ---------------------------------------------------------------------------
+/* stylable widget -----------------------------------------------------------
+
 publishes:
 	e.css_classes
---------------------------------------------------------------------------- */
+
+*/
 
 function stylable_widget(e) {
 
@@ -599,9 +593,11 @@ function stylable_widget(e) {
 	e.prop('theme', {attr: true})
 }
 
-// ---------------------------------------------------------------------------
-// tooltip
-// ---------------------------------------------------------------------------
+/* tooltip -------------------------------------------------------------------
+
+
+
+*/
 
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 css('.tooltip', 'z2 h-l h-t noclip noselect op0 click-through ease-out ease-fw ease-02s', `
@@ -898,9 +894,13 @@ tooltip.icon_classes = {
 	warn   : 'fa fa-exclamation-triangle',
 }
 
-// ---------------------------------------------------------------------------
-// toaster
-// ---------------------------------------------------------------------------
+/* toaster -------------------------------------------------------------------
+
+methods:
+	post(text, [kind], [timeout])
+	close_all()
+
+*/
 
 css('.toaster', 'hidden') // don't mess up the layout
 
@@ -967,7 +967,8 @@ widget('toaster', function(e) {
 
 })
 
-// global notify function.
+// global notify function ----------------------------------------------------
+
 let notify_toaster
 function notify(...args) {
 	if (!notify_toaster) {
@@ -981,9 +982,11 @@ function notify(...args) {
 ajax.notify_error  = (err) => notify(err, 'error')
 ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
-// ---------------------------------------------------------------------------
-// menu
-// ---------------------------------------------------------------------------
+/* menu ----------------------------------------------------------------------
+
+
+
+*/
 
 // z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 // noclip: submenus are outside clipping area
@@ -1112,9 +1115,9 @@ widget('menu', function(e) {
 		return table
 	}
 
-	e.init = function() {
+	e.on_init(function() {
 		e.table = create_menu(e, e.items, false, e.disabled)
-	}
+	})
 
 	function show_submenu(tr) {
 		let table = tr.submenu_table
@@ -1316,18 +1319,18 @@ widget('menu', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
-// "widget containing a list of items that are widgets" mixin
-// ---------------------------------------------------------------------------
-// publishes:
-//   e.items
-// implements:
-//   e.child_widgets()
-//   e.replace_child_widget()
-//   e.remove_child_widget()
-// calls:
-//   e.update({new_items:, removed_items:, items:})
-// ---------------------------------------------------------------------------
+/* "widget containing a list of items that are widgets" mixin ----------------
+
+publishes:
+  e.items
+implements:
+  e.child_widgets()
+  e.replace_child_widget()
+  e.remove_child_widget()
+calls:
+  e.update({new_items:, removed_items:, items:})
+
+*/
 
 widget_items_widget = function(e) {
 
@@ -1417,88 +1420,89 @@ widget_items_widget = function(e) {
 
 }
 
-// ---------------------------------------------------------------------------
-// tabs
-// ---------------------------------------------------------------------------
+/* tabs widget ---------------------------------------------------------------
+
+
+*/
 
 css('.tabs', 'S v shrinks')
 
-css('.tabs-header', 'h rel bg1')
+css('tabs-header', 'h rel bg1')
 
-css('.tabs-tabs', 'S h rel')
+css('tabs-box', 'S h rel')
 
-css('.tabs-fixed-header', 'S h-m')
+css('tabs-fixed-header', 'S h-m')
 
 css('.tabs[tabs_side=left ]', 'h-l')
 css('.tabs[tabs_side=right]', 'h-r')
 
-css('.tabs[tabs_side=left ] > .tabs-header', 'v')
-css('.tabs[tabs_side=right] > .tabs-header', 'v')
-css('.tabs[tabs_side=left ] > .tabs-header > .tabs-tabs', 'v')
-css('.tabs[tabs_side=right] > .tabs-header > .tabs-tabs', 'v')
+css('.tabs[tabs_side=left ] > tabs-header', 'v')
+css('.tabs[tabs_side=right] > tabs-header', 'v')
+css('.tabs[tabs_side=left ] > tabs-header > tabs-box', 'v')
+css('.tabs[tabs_side=right] > tabs-header > tabs-box', 'v')
 
-css('.tabs[tabs_side=bottom] > .tabs-header', 'order-1')
-css('.tabs[tabs_side=right ] > .tabs-header', 'order-1')
+css('.tabs[tabs_side=bottom] > tabs-header', 'order-1')
+css('.tabs[tabs_side=right ] > tabs-header', 'order-1')
 
-css('.tabs[tabs_side=top   ] > .tabs-header', 'b-b')
-css('.tabs[tabs_side=bottom] > .tabs-header', 'b-t')
-css('.tabs[tabs_side=left  ] > .tabs-header', 'b-r')
-css('.tabs[tabs_side=right ] > .tabs-header', 'b-l')
+css('.tabs[tabs_side=top   ] > tabs-header', 'b-b')
+css('.tabs[tabs_side=bottom] > tabs-header', 'b-t')
+css('.tabs[tabs_side=left  ] > tabs-header', 'b-r')
+css('.tabs[tabs_side=right ] > tabs-header', 'b-l')
 
-css('.tabs-content', 'scroll-auto', `
+css('tabs-content', 'scroll-auto', `
 	min-height: 0;  /* don't let the content make the tabs itself overflow */
 	flex: 1 0 0;    /* stretch to fill container but not more */
 `)
 
-css('.tabs-tab', 'rel label arrow h', `
+css('tabs-tab', 'rel label arrow h', `
 	line-height: 1.25;
 `)
 
-css('.tabs-title', 'noselect nowrap', `
+css('tabs-title', 'noselect nowrap', `
 	padding: .5em .8em .3em .8em;
 	max-width: 10em;
 `)
 
-css('.tabs-add-button', 'p-y-05 p-x-2 h-m')
+css('tabs-add-button', 'p-y-05 p-x-2 h-m')
+css('tabs-add-button::before', 'small fa fa-plus')
 
-css('.tabs-add-button::before', 'small')
-
-css('.tabs-xbutton', 'abs dim arrow', `
+css('tabs-xbutton', 'abs dim arrow', `
 	top: 2px;
 	right: 2px;
 	font-size: 70%;
 `)
+css('tabs-xbutton::before', 'fa fa-times')
 
 // z2: selection-bar = 2, moving-tab = 1
-css('.tabs-selection-bar', 'abs bg-link z2', `
+css('tabs-selection-bar', 'abs bg-link z2', `
 	width: 2px;
 	height: 2px;
 `)
 
-css_state('.tabs-xbutton:hover', '', `
+css_state('tabs-xbutton:hover', '', `
 	color: inherit;
 `)
 
-css_state('.tabs:not(.moving) > .tabs-header > .tabs-selection-bar', '', `
+css_state('.tabs:not(.moving) > tabs-header tabs-selection-bar', '', `
 	transition: width .15s, height .15s, left .15s, top .15s;
 `)
 
 // z1: selection-bar = 2, moving-tab = 1
-css_state('.tabs-tab.moving', 'z1', `
+css_state('tabs-tab.moving', 'z1', `
 	opacity: .7;
 `)
 
-css_state('.tabs.moving > .tabs-header > .tabs-tab:not(.moving)', '', `
+css_state('.tabs.moving > tabs-header tabs-tab:not(.moving)', '', `
 	transition: left .1s, top .1s;
 `)
 
-css_state('.tabs-tab.selected', '', `
+css_state('tabs-tab.selected', '', `
 	color: inherit;
 `)
 
-css_state('.tabs-tab:focus', 'no-outline')
+css_state('tabs-tab:focus', 'no-outline')
 
-css_state('.tabs-tab:is(:hover, :focus)', 'bg1')
+css_state('tabs-tab:is(:hover, :focus)', 'bg1')
 
 widget('tabs', 'Containers', function(e) {
 
@@ -1556,12 +1560,12 @@ widget('tabs', 'Containers', function(e) {
 	e.do_update = function(opt) {
 
 		if (!e.selection_bar) {
-			e.selection_bar = div({class: 'tabs-selection-bar'})
-			e.add_button = div({class: 'tabs-add-button fa fa-plus', tabindex: 0})
-			e.tabs_div = div({class: 'tabs-tabs'})
-			e.header = div({class: 'tabs-header'},
-				e.selection_bar, e.tabs_div, e.fixed_header, e.add_button)
-			e.content = div({class: 'tabs-content x-container'})
+			e.selection_bar = tag('tabs-selection-bar')
+			e.add_button = tag('tabs-add-button', {tabindex: 0})
+			e.tabs_box = tag('tabs-box')
+			e.header = tag('tabs-header', 0,
+				e.tabs_box, e.selection_bar, e.fixed_header, e.add_button)
+			e.content = tag('tabs-content', {class: 'x-container'})
 			e.add(e.header, e.content)
 			e.add_button.on('click', add_button_click)
 		}
@@ -1570,7 +1574,7 @@ widget('tabs', 'Containers', function(e) {
 		if (isarray(items))
 			items = set(items)
 		if (items) {
-			for (let tab of e.tabs_div.at) {
+			for (let tab of e.tabs_box.at) {
 				let item = tab._item
 				if (item && !items.has(item)) {
 					item.remove()
@@ -1578,13 +1582,13 @@ widget('tabs', 'Containers', function(e) {
 					item._tab = null
 				}
 			}
-			e.tabs_div.innerHTML = null
+			e.tabs_box.innerHTML = null
 			for (let item of items) {
 				if (!item._tab) {
-					let xbutton = div({class: 'tabs-xbutton fa fa-times'})
+					let xbutton = tag('tabs-xbutton')
 					xbutton.hidden = true
-					let title_box = div({class: 'tabs-title'})
-					let tab = div({class: 'tabs-tab', tabindex: 0}, title_box, xbutton)
+					let title_box = tag('tabs-title')
+					let tab = tag('tabs-tab', 0, title_box, xbutton)
 					tab.title_box = title_box
 					tab.xbutton = xbutton
 					tab.on('pointerdown' , tab_pointerdown)
@@ -1598,9 +1602,9 @@ widget('tabs', 'Containers', function(e) {
 					item.on('label_changed', item_label_changed)
 					update_tab_title(tab)
 					item._tab.x = null
-					e.tabs_div.add(tab)
+					e.tabs_box.add(tab)
 				} else {
-					e.tabs_div.append(item._tab)
+					e.tabs_box.append(item._tab)
 				}
 			}
 		}
@@ -1647,7 +1651,7 @@ widget('tabs', 'Containers', function(e) {
 	let tr, cr
 
 	e.do_measure = function() {
-		tr = e.tabs_div.rect()
+		tr = e.tabs_box.rect()
 		cr = selected_tab && selected_tab.at[0].rect()
 	}
 
@@ -1884,7 +1888,7 @@ widget('tabs', 'Containers', function(e) {
 			}
 			if (key == 'ArrowRight' || key == 'ArrowLeft') {
 				let i = (selected_tab ? selected_tab.index : -1) + (key == 'ArrowRight' ? 1 : -1)
-				let tab = e.tabs_div.at[clamp(i, 0, e.len-1)]
+				let tab = e.tabs_box.at[clamp(i, 0, e.len-1)]
 				select_tab(tab, {focus_tab: true})
 				return false
 			}
@@ -1931,9 +1935,11 @@ widget('tabs', 'Containers', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
-// split-view
-// ---------------------------------------------------------------------------
+/* split-view ----------------------------------------------------------------
+
+
+
+*/
 
 css('.split', 'S')
 css('.split[orientation=horizontal]', 'h')
@@ -1941,45 +1947,45 @@ css('.split[orientation=vertical  ]', 'v')
 
 css('.split-pane-auto', 'S shrinks')
 
-css('.split-sizer', 'h-c h-m', `
+css('split-sizer', 'h-c h-m', `
 	background-color: var(--border-light);
 `)
-css('.split[orientation=vertical  ] > .split-sizer', 'h', ` height: 1px; `)
-css('.split[orientation=horizontal] > .split-sizer', 'h', ` width : 1px; `)
+css('.split[orientation=vertical  ] > split-sizer', 'h', ` height: 1px; `)
+css('.split[orientation=horizontal] > split-sizer', 'h', ` width : 1px; `)
 
 css_state('.split[orientation=horizontal].resize', '', ` cursor: ew-resize; `)
 css_state('.split[orientation=vertical  ].resize', '', ` cursor: ns-resize; `)
 
-css_state('.split[orientation=horizontal] > .split-pane.collapsed', '', `
+css_state('.split[orientation=horizontal] > split-pane.collapsed', '', `
 	min-width: 0 !important;
 	width: 0 !important;
 `)
-css_state('.split[orientation=vertical  ] > .split-pane.collapsed', '', `
+css_state('.split[orientation=vertical  ] > split-pane.collapsed', '', `
 	min-height: 0 !important;
 	height: 0 !important;
 `)
 
-css_state('.split.resize > .split-sizer', '', `
+css_state('.split.resize > split-sizer', '', `
 	background-color: var(--border-light-hover);
 	transition: background-color .2s;
 `)
 
-css('.split.collapsed > .split-sizer::before', '', `
+css('.split.collapsed > split-sizer::before', '', `
 	content: '';
 	box-sizing: border-box;
 	border: 1px var(--fg-dim);
 `)
 
-css('.split.collapsed > .split-sizer::before', '', `
+css('.split.collapsed > split-sizer::before', '', `
 	position: fixed; /* show over contents */
 `)
 
-css_state('.split[orientation=horizontal].collapsed > .split-sizer::before', '', `
+css_state('.split[orientation=horizontal].collapsed > split-sizer::before', '', `
 	min-width: 4px;
 	height: 24px;
 	border-style: none solid;
 `)
-css_state('.split[orientation=vertical  ].collapsed > .split-sizer::before', '', `
+css_state('.split[orientation=vertical  ].collapsed > split-sizer::before', '', `
 	min-height: 4px;
 	width: 24px;
 	border-style: solid none;
@@ -1995,9 +2001,9 @@ widget('split', 'Containers', function(e) {
 	let html_item2 = e.at[1]
 	e.clear()
 
-	e.pane1 = div({class: 'split-pane x-container'})
-	e.pane2 = div({class: 'split-pane x-container'})
-	e.sizer = div({class: 'split-sizer'})
+	e.pane1 = tag('split-pane', {class: 'x-container'})
+	e.pane2 = tag('split-pane', {class: 'x-container'})
+	e.sizer = tag('split-sizer')
 	e.add(e.pane1, e.sizer, e.pane2)
 
 	e.prop('item1', {type: 'node', convert: element})
@@ -2149,31 +2155,29 @@ widget('vsplit', function(e) {
 	return opt
 })
 
-// ---------------------------------------------------------------------------
-// action band
-// ---------------------------------------------------------------------------
+/* action band ---------------------------------------------------------------
 
-css('.action-band', 'h-r h-m p05')
-css('.action-band .btn', 'p-x-05')
+
+
+*/
+
+css('.action-band', 'S h-r h-m gap-x')
 css('.action-band .btn-text', 'nowrap')
 
 // hide cancel button icon unless space is tight when text is hidden
 css('.action-band:not(.tight) .dlg-button-cancel .btn-icon', 'hidden')
 
+css('.action-band-center', 'S h-c gap-x')
+
 widget('action-band', 'Input', function(e) {
 
 	e.layout = 'ok:ok cancel:cancel'
 
-	e.init = function() {
+	e.on_init(function() {
 		let ct = e
 		for (let s of e.layout.words()) {
 			if (s == '<') {
-				ct = div({style: `
-						flex: auto;
-						display: flex;
-						flex-flow: row wrap;
-						justify-content: center;
-					`})
+				ct = div({class: 'action-band-center'})
 				e.add(ct)
 				continue
 			} else if (s == '>') {
@@ -2205,18 +2209,18 @@ widget('action-band', 'Input', function(e) {
 				b.style['text-transform'] = 'capitalize'
 			}
 			if (name == 'ok' || spec.has('ok')) {
-				b.on('activate', function() {
+				b.on('click', function() {
 					e.ok()
 				})
 			}
 			if (name == 'cancel' || spec.has('cancel')) {
-				b.on('activate', function() {
+				b.on('click', function() {
 					e.cancel()
 				})
 			}
 			ct.add(b)
 		}
-	}
+	})
 
 	e.ok = function() {
 		e.fire('ok')
@@ -2228,22 +2232,22 @@ widget('action-band', 'Input', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
-// modal dialog box with heading, (x) button, and action band footer
-// ---------------------------------------------------------------------------
+/* modal dialog box ----------------------------------------------------------
 
-css('.dlg', 'v p2 fg b0 ro bg1', `
+
+
+*/
+
+css('.dlg', 'v p-4 fg b0 ro bg1', `
 	margin: 20px;
 	box-shadow: var(--shadow-modal);
 `)
 
-css([
-	'.dlg-header',
-	'.dlg-footer',
-	'.dlg-content',
-], 'h p-y-2')
+css('.dlg-header', 'm-b-2')
+css('.dlg-footer', 'm-t-2')
+css('.dlg-content', 'm-y-2')
 
-css('.dlg-heading', 'dim xlarge bold m-y-05')
+css('.dlg-heading', 'dim xlarge bold')
 
 css('.dlg-xbutton', 'abs b b-t-0 h-c h-m', `
 	right: 8px;
@@ -2255,13 +2259,14 @@ css('.dlg-xbutton', 'abs b b-t-0 h-c h-m', `
 	color: var(--fg-button);
 	-webkit-text-stroke: 1px var(--stroke-dialog-xbutton);
 `)
+css('.dlg-xbutton::before', 'fa fa-times')
 
 css_state('.dlg-xbutton:hover', '', `
 	background-color: var(--bg-button-hover);
 `)
 
 css_state('.dlg-xbutton.active', '', `
-	background-color: var(--bg-button-pressed);
+	background-color: var(--bg-button-active);
 `)
 
 css('.dlg-content', 'S shrinks')
@@ -2282,9 +2287,9 @@ widget('dlg', function(e) {
 	e.prop('buttons'        , {})
 	e.prop('buttons_layout' , {})
 
-	e.prop('header' , {type: 'html'})
-	e.prop('content', {type: 'html'})
-	e.prop('footer' , {type: 'html'})
+	e.prop('header' , {type: 'nodes'})
+	e.prop('content', {type: 'nodes'})
+	e.prop('footer' , {type: 'nodes'})
 
 	e.on_update(function() {
 
@@ -2307,7 +2312,8 @@ widget('dlg', function(e) {
 			if (e.buttons || e.buttons_layout) {
 				e._footer = e._footer || div()
 				e._footer.set(action_band({
-					layout: e.buttons_layout, buttons: e.buttons
+					layout: e.buttons_layout,
+					buttons: e.buttons,
 				}))
 			} else if (e._footer)
 				e._footer.hide()
@@ -2318,7 +2324,7 @@ widget('dlg', function(e) {
 		if (e._footer  ) e._footer  .class('dlg-footer')
 
 		if (e.cancelable && !e.x_button) {
-			e.x_button = div({class: 'dlg-xbutton fa fa-times'})
+			e.x_button = div({class: 'dlg-xbutton'})
 			e.x_button.on('click', function() {
 				e.cancel()
 			})
@@ -2338,28 +2344,30 @@ widget('dlg', function(e) {
 	})
 
 	function doc_keydown(key) {
-		if (key == 'Escape' && e.x_button) {
-			e.x_button.class('active', true)
+		if (key == 'Escape') {
+			if (e.cancelable && e.x_button) {
+				e.x_button.class('active', true)
+				return false
+			} else {
+				if (e.cancel())
+					return false
+			}
 		}
 	}
 
 	function doc_keyup(key) {
-		if (key == 'Escape' && e.x_button && e.x_button.hasclass('active')) {
-			e.x_button.class('active', false)
-			e.cancel()
+		if (key == 'Escape') {
+			if (e.cancelable && e.x_button && e.x_button.hasclass('active')) {
+				e.x_button.class('active', false)
+				if (e.cancel())
+					return false
+			}
 		}
 	}
 
 	function doc_pointerdown(ev) {
 		if (e.contains(ev.target)) // clicked inside the dialog
 			return
-		if (!e.cancelable)
-			e.animate([
-					{transform: 'scale(1.05)'},
-				], {
-					// easing: '',
-					duration: 100,
-				})
 		e.cancel()
 		return false
 	}
@@ -2379,8 +2387,10 @@ widget('dlg', function(e) {
 	}
 
 	e.cancel = function() {
-		if (!e.cancelable)
+		if (!e.cancelable) {
+			e.animate([{transform: 'scale(1.05)'}], {duration: 100})
 			return false
+		}
 		e.close(false)
 		return true
 	}
@@ -2388,7 +2398,7 @@ widget('dlg', function(e) {
 	e.ok = function() {
 		for (let btn of e.$('btn[primary]')) {
 			if (!(btn.effectively_hidden || btn.effectively_disabled)) {
-				btn.activate()
+				btn.click()
 				return true
 			}
 		}
@@ -2404,16 +2414,18 @@ widget('dlg', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
-// floating toolbox
-// ---------------------------------------------------------------------------
+/* floating toolbox ----------------------------------------------------------
+
+
+
+*/
 
 // z1: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 css('.toolbox', 'z1 v scroll-auto b0 bg1 ro shadow-toolbox op02 ease ease-05s')
 
 css_state('.toolbox[pinned], .toolbox:hover', 'op1 no-ease')
 
-css('.toolbox-titlebar', 'h-m bold p-x-2 p-y-05 gap2 noselect', `
+css('.toolbox-titlebar', 'h-m bold p-x-2 p-y-05 gap-2 noselect', `
 	background : var(--bg-unfocused-selected);
 	color      : var(--fg-unfocused-selected);
 	cursor: move;
@@ -2606,9 +2618,11 @@ widget('toolbox', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
-// slides
-// ---------------------------------------------------------------------------
+/* slides --------------------------------------------------------------------
+
+
+
+*/
 
 css('.slides', 'grid-h')
 
@@ -2618,10 +2632,10 @@ css('.slide', 'invisible op0 x1 y1', `
 
 css('.slides > .x-ct > .', 'x1 y1')
 
-css([
-	'.slide:not(.slide-selected)',
-	'.slide:not(.slide-selected) *',
-], '', `
+css(`
+	.slide:not(.slide-selected),
+	.slide:not(.slide-selected) *
+`, '', `
 	pointer-events: none !important;
 `)
 
@@ -2686,9 +2700,11 @@ widget('slides', 'Containers', function(e) {
 })
 
 
-// ---------------------------------------------------------------------------
-// markdown widget
-// ---------------------------------------------------------------------------
+/* markdown widget -----------------------------------------------------------
+
+
+
+*/
 
 css('.md', 'v')
 
@@ -2765,9 +2781,11 @@ widget('pager', function(e) {
 })
 
 
-// ---------------------------------------------------------------------------
-// richtext
-// ---------------------------------------------------------------------------
+/* richtext ------------------------------------------------------------------
+
+
+
+*/
 
 css('.richtext', 'scroll-auto')
 
@@ -2843,9 +2861,11 @@ widget('richtext', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
-// richtext widget editing mixin
-// ---------------------------------------------------------------------------
+/* richtext / editing mixin --------------------------------------------------
+
+
+
+*/
 
 {
 
@@ -3026,13 +3046,13 @@ function richtext_widget_editing(e) {
 
 }
 
-/* ---------------------------------------------------------------------------
-// "if" widget for conditional binding of its content
-// ---------------------------------------------------------------------------
+/* "if" container for conditional element binding ----------------------------
+
 attrs:
 	global
 props:
 	e.global
+
 */
 
 css('.if', 'skip')
@@ -3088,9 +3108,8 @@ widget('if', 'Containers', function(e) {
 
 })
 
-/* ---------------------------------------------------------------------------
-// check, toggle, radio buttons
-// ---------------------------------------------------------------------------
+/* check, toggle, radio buttons ----------------------------------------------
+
 classes:
 	.hover
 props:
@@ -3100,6 +3119,7 @@ attrs:
 methods:
 	e.user_toggle()
 	e.user_set_checked(checked)
+
 */
 
 // check button --------------------------------------------------------------
@@ -3138,7 +3158,7 @@ widget('check', check_widget)
 
 // toggle button -------------------------------------------------------------
 
-css('.toggle', 't-m p05 round bg1 h-m ease ring', `
+css('.toggle', 't-m p-05 round bg1 h-m ease ring', `
 	min-width  : 3em;
 	max-width  : 3em;
 	min-height : 1.75em;
@@ -3218,9 +3238,8 @@ widget('radio', function(e) {
 	}
 })
 
-/* ---------------------------------------------------------------------------
-// activation label
-// ---------------------------------------------------------------------------
+/* activation label ----------------------------------------------------------
+
 props:
 	for_id
 attrs:
@@ -3229,6 +3248,7 @@ fires:
 	^for.label_hover(on)
 	^for.label_pointer{down|up}(ev)
 	^for.label_click(ev)
+
 */
 
 css('.label-widget', 'label noselect')
@@ -3264,26 +3284,33 @@ widget('label', function(e) {
 	})
 })
 
-/* ---------------------------------------------------------------------------
-// info text / button
-// ---------------------------------------------------------------------------
+/* info text / button --------------------------------------------------------
+
+props:
+	collapsed
+	text
+styling:
+	.info [collapsed]
+inner html
+	-> text
+
 */
 
 css('.info', '', `display: inline-block`)
 
 css('.info[collapsed]', 'h-t', `color: var(--bg-info);`)
 css('.info:not([collapsed])', 'small label')
-css('.info[collapsed] > .info-btn::before', 'xlarge fa fa-info-circle')
-css('.info-btn-small::before', 'm-r fa fa-info-circle', `color: var(--bg-info);`)
+css('.info[collapsed] > .info-button::before', 'xlarge fa fa-info-circle')
+css('.info-button-small::before', 'm-r fa fa-info-circle', `color: var(--bg-info);`)
 
 widget('info', function(e) {
-	let html_content = [...e.nodes]
+	let html_text = [...e.nodes]
 	e.prop('collapsed', {type: 'bool', attr: true})
-	e.prop('content'  , {type: 'nodes'})
+	e.prop('text', {type: 'nodes', slot: 'lang'})
 	e.set_collapsed = function(v) {
 		e.clear()
 		if (v) {
-			e.btn = e.btn || div({class: 'info-btn'})
+			e.btn = e.btn || div({class: 'info-button'})
 			if (!e.tooltip) {
 				e.tooltip = tooltip({kind: 'info', align: 'left', popup_ox: -4})
 				e.btn.set(e.tooltip)
@@ -3292,85 +3319,167 @@ widget('info', function(e) {
 					e.tooltip.update({show: on})
 				})
 			}
-			e.tooltip.text = [...e.content]
+			e.tooltip.text = [...e.text]
 			e.set(e.btn)
 		} else {
 			if (e.tooltip)
 				e.tooltip.update({show: false})
 			e.clear()
-			e.add(span({class: 'info-btn-small'}), e.content)
+			e.add(span({class: 'info-button-small'}), e.text)
 		}
 	}
 	return {
-		content   : html_content,
+		text      : html_text,
 		collapsed : or(e.collapsed, true),
 	}
 })
 
-/* ---------------------------------------------------------------------------
-// button
-// ---------------------------------------------------------------------------
+
+/* inputbox ------------------------------------------------------------------
+
+.inputbox class:
+	- applied to both <input> and <button> so that they valign.
+	- applied to <inputbox> which can contain <input>, <button>, icons, text,
+	etc. inside and also valigns with external input boxes of any kind.
 
 */
 
-/*
-css('.btn', 'm-y-05 h-c h-bl b ro075 bold noselect p-x-4 p-y gap-x-2', `
-	background : var(--bg-button);
-	color      : var(--fg-button);
-	box-shadow : var(--shadow-button);
+// NOTE: `--p-y-adjust` is set to 1px for certain fonts at certain sizes.
+// NOTE: `--lh-input` is 1.25 because <input> can't set it lower.
+
+// NOTE: Do not try to baseline-align elements that have borders or background,
+// they will never align perfectly if you have text in multiple fonts inside
+// (which you do when you use icon fonts). Even when `line-height` is exactly
+// the same everywhere the elements will still misalign at certain zoom levels.
+// That's why we use `t-m` instead of `t-bl` on all bordered widgets.
+
+css_util('.lh-input', '', `line-height: var(--lh-input);`)
+
+css('.inputbox', 't-m m-y-05 b p-x-2 gap-x-2 p-y-input lh-input ro-var', `
+	padding-top    : calc(var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)));
+	padding-bottom : calc(var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)));
+	/* outline-offset : -2px; */
 `)
 
-css('.btn-icon', 'w1 h-c')
+css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
+css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
+css_util('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller);`)
+css_util('.normal' , '', `--p-y-input-adjust: var(--p-y-input-adjust-normal );`)
+css_util('.large'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-large  );`)
+css_util('.xlarge' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xlarge );`)
 
-css_state('.btn:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+css_util('.xsmall' , '', `--p-y-input: var(--space-025);`)
+css_util('.small'  , '', `--p-y-input: var(--space-025);`)
+css_util('.smaller', '', `--p-y-input: var(--space-05 );`)
+
+css(`
+	.xlarge.inputbox,
+	.xlarge .inputbox
+`, 'p-x-4 gap-x-4')
+
+css('inputbox', 'h-s p0 b0', `background: var(--bg-input);`)
+css('inputbox > *', 'm0 no-bg')
+css('inputbox .input', 'S')
+
+css_state('inputbox:has(.input:focus-visible), input:focus-visible', 'outline-focus rel z1')
+css_state('inputbox .input:focus-visible', 'no-outline')
+
+widget('inputbox', function(e) {
+
+	e.class('b-collapse-h ro-group-h')
+	e.init_child_components()
+	e.input = $1('input')
+	e.make_focusable(e.input)
+
+})
+
+/* button --------------------------------------------------------------------
+
+props:
+	primary danger bare   style flags
+	icon                  css classes for the icon
+	text
+	href                  link for googlebot to follow
+	confirm               message
+	action                function
+	action_name           name of global function to call on click
+methods:
+	draw_attention()      animate
+stubs:
+	format_text(s)
+styling:
+	.button [primary] [danger] [bare] :hover :active
+events:
+	^click()
+globals:
+	ID_action()           global function called on click
+inner html:
+	-> text
+
+*/
+
+css('.button', 'h-c h-m semibold nowrap noselect', `
+	background  : var(--bg-button);
+	color       : var(--fg-button);
+	box-shadow  : var(--shadow-button);
+	font-family : inherit;
+	font-size   : inherit;
+	padding-left  : var(--p-x-button, var(--space-2));
+	padding-right : var(--p-x-button, var(--space-2));
+	row-gap     : var(--row-gap, var(--space-2));
+`)
+
+css('.large ', '', `--p-x-button: var(--space-4); --row-gap: var(--space-4); `)
+css('.xlarge', '', `--p-x-button: var(--space-4); --row-gap: var(--space-4); `)
+
+css('.button.text-empty > .button-text', 'hidden')
+
+css('.button-icon', 'w1 h-c')
+
+css_state('.button:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background: var(--bg-button-hover);
 `)
-css_state('.btn.active', '', `
+css_state('.button:active', '', `
 	background: var(--bg-button-active);
 	box-shadow: var(--shadow-button-active);
 `)
 
-css('.btn[primary]', 'b-invisible', `
+css('.button[primary]', 'b-invisible', `
 	background : var(--bg-button-primary);
 	color      : var(--fg-button-primary);
 `)
-css_state('.btn[primary]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-primary-hover);
 `)
-css_state('.btn[primary].active', '', `
+css_state('.button[primary]:active', '', `
 	background : var(--bg-button-primary-active);
 `)
 
-css('.btn[danger]', '', `
+css('.button[danger]', '', `
 	background : var(--bg-button-danger);
 	color      : var(--fg-button-danger);
 `)
-css_state('.btn[danger]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-danger-hover);
 `)
-css_state('.btn[danger].active', '', `
+css_state('.button[danger]:active', '', `
 	background : var(--bg-button-danger-active);
 `)
 
-// bare buttons (no borders)
+css('.button[bare]', 'b-invisible ro0 no-bg no-shadow link')
 
-css_state('.btn[bare]', 'b-invisible ro0 no-bg no-shadow link')
-
-css_state('.btn[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', 'no-bg', `
 	color: var(--fg-link-hover);
 `)
 
-css_state('.btn[bare].active', '', `
+css_state('.button[bare]:active', 'no-bg', `
 	color: var(--fg-link-active);
 `)
-
-*/
-css('button', 'btn')
 
 // attention animation
 
 css(`
-@keyframes x-attention {
+@keyframes button-attention {
 	from {
 		transform: scale(1.2);
 		outline: 2px solid var(--fg);
@@ -3379,32 +3488,30 @@ css(`
 }
 `)
 
-widget('xbutton', 'Input', function(e) {
+widget('button', 'Input', function(e) {
 
-	row_widget(e, true)
 	editable_widget(e)
+	e.class('inputbox')
 
-	let html_text = unsafe_html(e.html)
+	let html_text = [...e.nodes]
 	e.clear()
 
-	e.icon_box = span({class: 'btn-icon'})
-	e.text_box = span({class: 'btn-text'})
-	e.focus_box = div({class: 'btn-focus-box'}, e.icon_box, e.text_box)
+	e.icon_box = span({class: 'button-icon'})
+	e.text_box = span({class: 'button-text'})
 	e.icon_box.hidden = true
-	e.add(e.focus_box)
+	e.add(e.icon_box, e.text_box)
 
-	e.make_focusable(e.focus_box)
+	e.make_focusable()
 
-	e.prop('href', {store:'var', attr: true})
+	e.prop('href')
 	e.set_href = function(s) {
 		if (s) {
 			if (!e.link) { // make a link for google bot to follow.
-				let noscript = tag('noscript')
-				e.add(noscript)
 				e.link = tag('a')
-				e.link.set(TC(e.text))
+				let s = e.format_text(e.text)
+				e.link.set(TC(s))
 				e.link.title = e.title
-				noscript.set(e.link)
+				e.add(tag('noscript', 0, e.link))
 			}
 			e.link.href = s
 		} else if (e.link) {
@@ -3412,16 +3519,14 @@ widget('xbutton', 'Input', function(e) {
 		}
 	}
 
-	e.format_text = function(s) {
-		let row = e.row
-		if (!row) return s
-		return render_string(s, e._nav.serialize_row_vals(row))
+	e.format_text = function(s) { // stub
+		return s
 	}
 
 	function update_text() {
 		let s = e.format_text(e.text)
 		e.text_box.set(s, 'pre-line')
-		e.focus_box.class('text-empty', !s)
+		e.class('text-empty', !s || isarray(s) && !s.length)
 		if (e.link)
 			e.link.set(TC(s))
 	}
@@ -3429,12 +3534,11 @@ widget('xbutton', 'Input', function(e) {
 	e.set_text = function(s) {
 		update_text()
 	}
-
-	e.prop('text', {type: 'html', default: '', slot: 'lang'})
+	e.prop('text', {type: 'nodes', default: '', slot: 'lang'})
 
 	e.set_icon = function(v) {
 		if (isstr(v))
-			e.icon_box.attr('class', 'btn-icon '+v)
+			e.icon_box.attr('class', 'button-icon '+v)
 		else
 			e.icon_box.set(v)
 		e.icon_box.hidden = !v
@@ -3445,37 +3549,42 @@ widget('xbutton', 'Input', function(e) {
 	e.prop('primary', {type: 'bool', attr: true})
 	e.prop('bare'   , {type: 'bool', attr: true})
 	e.prop('danger' , {type: 'bool', attr: true})
-	e.prop('confirm', {attr: true})
+	e.prop('confirm')
 	e.prop('action_name', {attr: 'action'})
 
-	e.activate = function() {
+	function activate() {
 		if (e.effectively_hidden || e.effectively_disabled)
-			return
+			return false
 		if (e.confirm)
 			if (!confirm(e.confirm))
-				return
+				return false
 		if (e.href) {
 			exec(e.href)
-			return
+			return true
 		}
 		// action can be set directly and/or can be a global with a matching name.
 		if (e.action)
-			e.action()
+			if (e.action() == false)
+				return false
 		let action_name = e.action_name || (e.id && e.id+'_action')
 		let action = window[action_name]
 		if (action)
-			action.call(e)
-		e.fire('activate')
+			if (action.call(e) == false)
+				return false
+		return true
 	}
 
-	function set_active(on, cancel) {
-		if (!on && cancel == null)
-			cancel = !e.hasclass('active')
-		e.class('active', on)
-		e.focus_box.class('active', on)
-		e.fire('active', on)
-		if (!on && !cancel)
-			e.activate()
+	e.on('click', function() {
+		if (!activate())
+			return false
+	})
+
+	// widget editing ---------------------------------------------------------
+
+	e.set_widget_editing = function(v) {
+		e.text_box.contenteditable = v
+		if (!v)
+			e.text = e.text_box.innerText
 	}
 
 	e.on('keydown', function keydown(key, shift, ctrl) {
@@ -3489,48 +3598,8 @@ widget('xbutton', 'Input', function(e) {
 					return false
 				}
 			}
-			return
-		}
-		if (e.hasclass('active') && key == 'Escape') {
-			set_active(false, true)
-			return false
-		}
-		if (key == ' ' || key == 'Enter') {
-			set_active(true)
-			return false
 		}
 	})
-
-	e.on('keyup', function keyup(key) {
-		if (e.hasclass('active')) {
-			// ^^ always match keyups with keydowns otherwise we might catch
-			// a keyup from someone else's keydown, eg. a dropdown menu item
-			// could've been selected by pressing Enter which closed the menu
-			// and focused this button back and that Enter's keyup got here.
-			if (key == ' ' || key == 'Enter') {
-				set_active(false)
-			}
-			return false
-		}
-	})
-
-	e.focus_box.on('pointerdown', function(ev) {
-		if (e.widget_editing)
-			return
-		e.focus()
-		set_active(true)
-		return this.capture_pointer(ev, null, function() {
-			set_active(false)
-		})
-	})
-
-	// widget editing ---------------------------------------------------------
-
-	e.set_widget_editing = function(v) {
-		e.text_box.contenteditable = v
-		if (!v)
-			e.text = e.text_box.innerText
-	}
 
 	e.on('pointerdown', function(ev) {
 		if (e.widget_editing && ev.target != e.text_box) {
@@ -3578,16 +3647,30 @@ widget('xbutton', 'Input', function(e) {
 		if (e.disabled)
 			return
 		e.style.animation = 'none'
-		raf(function() { e.style.animation = 'x-attention .5s' })
+		raf(function() { e.style.animation = 'button-attention .5s' })
 	}
 
-	// row changing -----------------------------------------------------------
+	return {text: html_text}
 
-	e.do_update_row = function(row) {
-		update_text()
-	}
+})
 
-	return {text: or(html_text)}
+/* input ---------------------------------------------------------------------
+
+--
+
+*/
+
+css('.input', '', `
+	font-family   : inherit;
+	font-size     : inherit;
+	background    : var(--bg-input);
+	border-radius : 0;
+`)
+
+widget('input', 'Input', function(e) {
+
+	e.make_focusable()
+	e.class('inputbox')
 
 })
 

@@ -156,7 +156,7 @@ widget('usr-button', function(e) {
 	e.focusable = false
 
 	let tt
-	e.on('activate', function() {
+	e.on('click', function() {
 		if (tt && tt.target) {
 			tt.close()
 		} else {
@@ -185,11 +185,11 @@ widget('usr-button', function(e) {
 })
 
 on('auth_sign_in_button.init', function(e) {
-	e.on('activate', function() { sign_in() })
+	e.on('click', function() { sign_in() })
 })
 
 on('auth_sign_out_button.init', function(e) {
-	e.on('activate', function() { sign_out({notify: e}) })
+	e.on('click', function() { sign_out({notify: e}) })
 })
 
 on('usr_usr_dropdown.init', function(e) {
