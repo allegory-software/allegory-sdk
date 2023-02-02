@@ -3,7 +3,7 @@
 	widgets: Web Components in JavaScript.
 	Written by Cosmin Apreutesei. Public Domain.
 
-Depends on:
+Must load before, in order:
 
 	glue.js
 	dom.js
@@ -3358,7 +3358,6 @@ css_util('.lh-input', '', `line-height: var(--lh-input);`)
 css('.inputbox', 't-m m-y-05 b p-x-2 gap-x-2 p-y-input lh-input ro-var', `
 	padding-top    : calc(var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)));
 	padding-bottom : calc(var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)));
-	/* outline-offset : -2px; */
 `)
 
 css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
@@ -3377,15 +3376,24 @@ css(`
 	.xlarge .inputbox
 `, 'p-x-4 gap-x-4')
 
-css('inputbox', 'h-s p0 b0', `background: var(--bg-input);`)
-css('inputbox > *', 'm0 no-bg')
-css('inputbox .input', 'S')
+css('inputbox', 't-m m-y-05 lh-input h-s')
 
-css_state('inputbox:has(.input:focus-visible), input:focus-visible', 'outline-focus rel z1')
-css_state('inputbox .input:focus-visible', 'no-outline')
+// `position: static` fixes the bug (in both Chrome & FF) where the outline
+// is obscured by the children if 1) they have a background and 2) they create
+// a stacking context.
+css_role('inputbox > *', 'm0 no-z', `position: static;`)
+
+css('inputbox > *', 'bg-input')
+
+css_role('inputbox .input', 'S')
+
+css_state_firefox('inputbox:focus-within', 'outline-focus') // no :has() yet.
+css_state_chrome('inputbox:has(.input:focus-visible)', 'outline-focus')
+css_role_state('inputbox .input:focus-visible', 'no-outline')
 
 widget('inputbox', function(e) {
 
+	e.class('inputbox', false)
 	e.class('b-collapse-h ro-group-h')
 	e.init_child_components()
 	e.input = $1('input')
@@ -3660,10 +3668,9 @@ widget('button', 'Input', function(e) {
 
 */
 
-css('.input', '', `
+css('.input', 'bg-input', `
 	font-family   : inherit;
 	font-size     : inherit;
-	background    : var(--bg-input);
 	border-radius : 0;
 `)
 

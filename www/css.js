@@ -19,7 +19,7 @@ CSS CLASSES:
 	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
 	OVERFLOW      [v h]scroll[-auto] [no]clip[-x -y] scroll-thin
-	POSITIONING   rel abs z{1 2 3 4 5} overlay
+	POSITIONING   rel abs z{1 2 3 4 5} no-z overlay
 	VISIBILITY    hidden skip click-through[-off]
 	FLAT BGs      bg[1 2 -alt -smoke -fg] no-bg
 	IMAGE BGs     bg-{cover contain center t r b l no-repeat repeat-{x y}}
@@ -32,6 +32,7 @@ CSS CLASSES:
 	FONTS         mono arial opensans[-condensed] inter
 	MAT ICONS     mi[-round -sharp -outlined -fill -no-fill]
 	FA ICONS      fa[r] fa-*
+	UNICODE ICONS icon-menu-{3-dots-{v h} 3-lines-h}
 
 HTML SELECTORS:
 	*[dim] *[nowrap] *[nowrap-dots]
@@ -44,7 +45,8 @@ NOTES:
 
 {
 
-let css = css_base
+let css        = css_base
+let css_chrome = css_base_chrome
 
 /* COLORS ----------------------------------------------------------------- */
 
@@ -318,6 +320,8 @@ css(`
 
 /* FONTS ------------------------------------------------------------------ */
 
+/* opensans variable font */
+
 css(`
 @font-face {
   font-family: 'opensans';
@@ -334,6 +338,8 @@ css(`
   font-named-instance: 'Italic';
   src: url("opensans-italic.var.woff2") format("woff2");
 }
+
+/* inter variable font */
 
 @font-face {
   font-family: 'inter';
@@ -352,6 +358,8 @@ css(`
   font-named-instance: 'Italic';
   src: url("inter-italic.var.woff2") format("woff2");
 }
+
+/* material icons fixed font (the variable one is 2MB+) */
 
 @font-face {
 	font-family: "mi-round";
@@ -378,7 +386,7 @@ css(`
 }
 `)
 
-css('.mi-common', '', `
+css('.mi-font', '', `
 	font-weight: normal;
 	font-style: normal;
 	font-size: 1.5em;
@@ -398,15 +406,15 @@ css('.mi-common', '', `
 
 /* TEXT ------------------------------------------------------------------- */
 
-css = css_util
+css        = css_util
+css_chrome = css_util_chrome
 
 css('.opensans', '', ` font-family: opensans, sans-serif; `)
 css('.inter'   , '', ` font-family: inter, sans-serif; `)
 
-css('.mi'          , 'mi-common', ` font-family: mi-round; `)
-css('.mi-round'    , 'mi-common', ` font-family: mi-round; `)
-css('.mi-sharp'    , 'mi-common', ` font-family: mi-sharp; `)
-css('.mi-outlined' , 'mi-common', ` font-family: mi-outlined; `)
+css('.mi-round'    , 'mi-font', ` font-family: mi-round; `)
+css('.mi-sharp'    , 'mi-font', ` font-family: mi-sharp; `)
+css('.mi-outlined' , 'mi-font', ` font-family: mi-outlined; `)
 
 css('.mi', 'mi-round')
 
@@ -691,6 +699,11 @@ css('.ro-group-h > :not(:first-child)', '', ` border-top-left-radius   : 0; bord
 css('.ro-group-v > :not(:last-child)' , '', ` border-bottom-left-radius: 0; border-bottom-right-radius: 0; `)
 css('.ro-group-v > :not(:first-child)', '', ` border-top-left-radius   : 0; border-top-right-radius   : 0; `)
 
+css('.ro-group-h > .ro-group-h:not(:last-child)  > *', '', ` border-top-right-radius  : 0; border-bottom-right-radius: 0; `)
+css('.ro-group-h > .ro-group-h:not(:first-child) > *', '', ` border-top-left-radius   : 0; border-bottom-left-radius : 0; `)
+css('.ro-group-v > .ro-group-v:not(:last-child)  > *', '', ` border-bottom-left-radius: 0; border-bottom-right-radius: 0; `)
+css('.ro-group-v > .ro-group-v:not(:first-child) > *', '', ` border-top-left-radius   : 0; border-top-right-radius   : 0; `)
+
 /* PADDINGS --------------------------------------------------------------- */
 
 css('.p-025' , '', ` padding: var(--space-025); `)
@@ -811,6 +824,7 @@ css('.m-l-0' , '', ` margin-left:   0; `)
 
 css('.outline-focus', '', `
 	outline: 2px solid var(--outline-focus);
+	outline-offset: -2px;
 `)
 
 css('.no-outline', '', ` outline: none; `)
@@ -860,11 +874,12 @@ css('.rel', '', ` position: relative; `)
 css('.abs', '', ` position: absolute; `)
 
 /* example: menu = z4, picker = z3, tooltip = z2, toolbox = z1 */
-css('.z1', '', ` z-index: 1; `)
-css('.z2', '', ` z-index: 2; `)
-css('.z3', '', ` z-index: 3; `)
-css('.z4', '', ` z-index: 4; `)
-css('.z5', '', ` z-index: 5; `)
+css('.z1'  , '', ` z-index: 1; `)
+css('.z2'  , '', ` z-index: 2; `)
+css('.z3'  , '', ` z-index: 3; `)
+css('.z4'  , '', ` z-index: 4; `)
+css('.z5'  , '', ` z-index: 5; `)
+css('.no-z', '', ` z-index: auto; `)
 
 css('.overlay', '', `
 	position: absolute;
@@ -898,6 +913,7 @@ css('.bg-fg   ', '', ` background: var(--fg); `) /* slider thumb, etc. */
 css('.bg-white', '', ` background: var(--fg-white); `)
 css('.bg-link ', '', ` background: var(--fg-link); `) /* slider track */
 css('.no-bg   ', '', ` background: none; `)
+css('.bg-input', '', ` background: var(--bg-input); `)
 
 css('.bg-error', '', `
 	background : var(--bg-error);
@@ -1096,5 +1112,12 @@ css('.icon-chevron-right::before', 'rotate--45', `
 css('.icon-chevron-left::before', 'icon-chevron-right flip-h' , `--translate-x: .25em;`)
 css('.icon-chevron-down::before', 'icon-chevron-right rotate-45')
 css('.icon-chevron-up::before'  , 'icon-chevron-down  flip-v', `--translate-y: 0.25em;`)
+
+/* UNICODE ICONS ---------------------------------------------------------- */
+
+css('.icon-3-dots-v::before'  , '', `content: "\\22ee";`) // kebab
+css('.icon-3-dots-h::before'  , '', `content: "\\22ef";`) // meatballs
+css('.icon-9-dots::before'    , '', `content: "\\1392\\1392\\1392";`) // chocolate
+css('.icon-3-lines-h::before' , '', `content: "\\2261";`) // burger (also \2630)
 
 } /* module */

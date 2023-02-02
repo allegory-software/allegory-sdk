@@ -3,7 +3,7 @@
 	DOM API & web components.
 	Written by Cosmin Apreutesei. Public domain.
 
-Depends on:
+Must load before:
 
 	glue.js
 
@@ -31,14 +31,7 @@ CSS-IN-JS
 
 CSS DEFAULT LAYERS
 
-	css()
-	css_state()
-	css_role()
-	css_role_state()
-	css_generic_state()
-	css_light()
-	css_dark()
-
+	css[_base _state _role _role_state _generic_state _light _dark][_chrome _firefox]()
 
 DOM load event:
 
@@ -534,16 +527,14 @@ css_layer = memoize(function(layer) {
 
 })
 
-css_base          = css_layer('base')
-css_state         = css_layer('state')
-css_role          = css_layer('role')
-css_role_state    = css_layer('role-state')
-css_generic_state = css_layer('generic-state')
-css_util          = css_layer('util')
-css_chrome        = Chrome  ? css_util : noop
-css_firefox       = Firefox ? css_util : noop
-
-css = css_base
+for (layer of 'base state role role_state generic_state util'.words()) {
+	window['css_'+layer] = css_layer(layer.replace('_', '-'))
+	window['css_'+layer+'_chrome' ] = Chrome  ? window['css_'+layer] : noop
+	window['css_'+layer+'_firefox'] = Firefox ? window['css_'+layer] : noop
+}
+css         = css_base
+css_chrome  = css_base_chrome
+css_firefox = css_base_firefox
 
 // css.js usage ranking ------------------------------------------------------
 
