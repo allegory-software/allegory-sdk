@@ -289,6 +289,18 @@ EXECUTABLE SCRIPTS
 
 	<script run></script> scripts declared in html are executable.
 
+HTML COMPONENTS
+
+	<component tag=foo>
+		<script>
+			...
+		</script>
+	</component>
+
+CONDITIONAL ELEMENT BINDING
+
+	<if global=> ... </if>
+
 POPUPS
 
 	e.popup([side], [align])      make element a popup.
@@ -1674,9 +1686,14 @@ NOTE: for non-focusables setting the `disabled` attr is enough to disable them.
 
 */
 
-css_generic_state(':not([disabled]) [disabled]', '', `
+css_generic_state('[disabled]', '', `
 	opacity: .5;
 	filter: grayscale();
+`)
+
+css_generic_state('[disabled] [disabled]', '', `
+	opacity: unset;
+	filter: unset;
 `)
 
 css_generic_state('[disabled], [disabled] *', '', `
@@ -2830,6 +2847,68 @@ component('component', function(e) {
 // not initializing components inside the template tag -----------------------
 
 component('template', noop) // do not init child components.
+
+/* "if" container for conditional element binding ----------------------------
+
+attrs:
+	global
+props:
+	e.global
+
+*/
+
+css('.if', 'skip')
+
+component('if', 'Containers', function(e) {
+
+	let html_content = e.html
+	e.clear()
+	e.hide()
+
+	e.prop('global', {attr: true})
+
+	e.cond = function(v) {
+		return !!v
+	}
+
+	e.do_update = function(opt) {
+		if (opt.show) {
+			e.unsafe_html = html_content
+			document.fire('layout_changed')
+		}
+		e.show(!!opt.show)
+	}
+
+	function global_changed() {
+		let k = e.global
+		if (!k) return
+		let on = e.cond(window[k])
+		e.update({show: on})
+	}
+
+	function bind_global(k, on) {
+		if (!k) return
+		window.on(k+'_changed', global_changed, on)
+	}
+
+	e.set_global = function(k1, k0) {
+		if (!e.bound) return
+		bind_global(k0, false)
+		bind_global(k1, true)
+		global_changed()
+	}
+
+	e.on_bind(function(on) {
+		bind_global(e.global, on)
+		if (on) {
+			global_changed()
+		} else {
+			e.hide()
+			e.clear()
+		}
+	})
+
+})
 
 /* popups --------------------------------------------------------------------
 
