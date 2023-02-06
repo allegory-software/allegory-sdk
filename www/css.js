@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 CSS CLASSES:
-	TEXT          pre[-line] [x]small[er] [x]large tight lh1 [no-]bold italic underline strike allcaps noselect zwsp
+	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
 	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb s t b m bl} v-{t b m sb s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
@@ -84,6 +84,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	                        : hsl(  0 100% 100% / 0.3);
 
 	--outline-focus         : hsl(  0 100%   0% / 1.0);
+	--outline-focus-offset  : -2px;
 
 	--fg-button                 : var(--fg);
 	--bg-button                 : var(--bg);
@@ -428,6 +429,7 @@ css('.large'     , '', ` font-size: var(--font-size-large  ); line-height: 1.75;
 css('.xlarge'    , '', ` font-size: var(--font-size-xlarge ); line-height:    2; `)
 css('.tight'     , '', ` line-height: 1.2; `)
 css('.lh1'       , '', ` line-height: 1; `)
+css('.lh0'       , '', ` line-height: 0; `)
 css('.littlebold', '', ` font-weight: 500; `)
 css('.semibold'  , '', ` font-weight: 600; `)
 css('.bold'      , '', ` font-weight: bold; `)
@@ -484,8 +486,8 @@ css('.float-r', '', ` float: right; `)
 
 /* ALIGN: FLEXBOX --------------------------------------------------------- */
 
-css('.h', '', ` display: inline-flex; flex-flow: row   ; `)
-css('.v', '', ` display: inline-flex; flex-flow: column; `)
+css('.h', '', ` display: inline-flex; flex-flow: row   ; `) // same as h-s
+css('.v', '', ` display: inline-flex; flex-flow: column; `) // same as v-s
 
 css('.h-l' , '', ` display: inline-flex; flex-flow: row   ; justify-content: flex-start   ; `)
 css('.h-r' , '', ` display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; `)
@@ -638,12 +640,14 @@ css('.shrinks', '', `
 	min-height : 0;
 `)
 
-css('.w1 ', '', ` width: 1.25em; `) /* mainly to keep changing icons fixated and aligned */
-css('.w2 ', '', ` width:  2.5em; `)
-css('.w4 ', '', ` width:    5em; `)
-css('.w8 ', '', ` width:   10em; `)
-css('.w16', '', ` width:   20em; `)
-css('.w32', '', ` width:   40em; `)
+css('.w1 ', '', ` width : 1.25em; min-width : 1.25em; max-width : 1.25em; `) /* mainly to keep changing icons fixated and aligned */
+css('.h1 ', '', ` height: 1.25em; min-height: 1.25em; max-height: 1.25em; `) /* to make icons square with w1 h1 */
+
+css('.w2 ', '', ` width:  2.5em; min-width:  2.5em; max-width:  2.5em; `)
+css('.w4 ', '', ` width:    5em; min-width:    5em; max-width:    5em; `)
+css('.w8 ', '', ` width:   10em; min-width:   10em; max-width:   10em; `)
+css('.w16', '', ` width:   20em; min-width:   20em; max-width:   20em; `)
+css('.w32', '', ` width:   40em; min-width:   40em; max-width:   40em; `)
 
 /* BORDERS ---------------------------------------------------------------- */
 
@@ -824,7 +828,12 @@ css('.m-l-0' , '', ` margin-left:   0; `)
 
 css('.outline-focus', '', `
 	outline: 2px solid var(--outline-focus);
-	outline-offset: -2px;
+	/*
+	bring outline inside element's box, otherwise it gets obscured by the next
+	sibling if there's no gap between them (the alternative would be to bring
+	the element to the front while focused but that's too invasive).
+	*/
+	outline-offset: var(--outline-focus-offset);
 `)
 
 css('.no-outline', '', ` outline: none; `)
@@ -1117,7 +1126,10 @@ css('.icon-chevron-up::before'  , 'icon-chevron-down  flip-v', `--translate-y: 0
 
 css('.icon-3-dots-v::before'  , '', `content: "\\22ee";`) // kebab
 css('.icon-3-dots-h::before'  , '', `content: "\\22ef";`) // meatballs
-css('.icon-9-dots::before'    , '', `content: "\\1392\\1392\\1392";`) // chocolate
 css('.icon-3-lines-h::before' , '', `content: "\\2261";`) // burger (also \2630)
+css('.icon-9-dots::before'    , '', `
+	content: "\\1392\\1392\\1392";
+	display: block; transform: scale(.8, 1);
+`) // chocolate
 
 } /* module */
