@@ -103,72 +103,17 @@ on_dom_load(function() {
 
 <!--------------------------------------------------------------------------->
 
-<template id=tabs_demo>
-<tabs id=test_tabs selected_tab=second_page tabs_side=top style="min-height: 200px">
-	<div id=test_tabs_page_1 label="First Page" id=first_page>
-		<h1>This is the first page</h1>
-		<p>You can put anything in here.</p>
-	</div>
-	<div id=test_tabs_page_2 label="Second Page" id=second_page>
-		<h1>This is the second page.</h1>
-		<p>You can put anything in here too.</p>
-	</div>
-</tabs>
-</template>
+<template id=component_demo>
+<component tag=foo>
+	<script>
+		let content = [...e.nodes]
+		let wrapper = div({class: 'm b p h-c'}, content)
+		e.set(wrapper)
+	</script>
+</component>
 
-<!--------------------------------------------------------------------------->
+<foo>Hello!</foo>
 
-<template id=split_demo>
-<split>
-	<vsplit id=my_split fixed_side=first min_size=100>
-		<div style="background: gray">Stuff 1</div>
-		<div>Stuff 2</div>
-	</vsplit>
-	<vsplit fixed_side=second>
-		<div>Stuff 3</div>
-		<div>Stuff 4</div>
-	</vsplit>
-</split>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=check_demo>
-<d class="h-m m b ro p gap-x">
-	<check id=my_check checked></check><label for=my_check>Wasup</label>
-</d>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=toggle_demo>
-<d class="h-m m b ro p gap-x-2">
-	<label for=my_toggle class="S">Wasup</label><toggle id=my_toggle checked></toggle>
-</d>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=radio_demo>
-<d class="v-m m b ro p gap-y-2">
-	<d class="h-m gap-x-2"><radio id=my_radio1 group=g1 checked></radio><label for=my_radio1>Option 1</label></d>
-	<d class="h-m gap-x-2"><radio id=my_radio2 group=g1></radio><label for=my_radio2>Option 2</label></d>
-</d>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=info_demo>
-<info id=my_info>
-	<h3>It never entered my mind, but</h3>
-	<p>Here we are</p>
-</info>
-<button action=toggle_collapsed>Toggle Collapsed</button>
-<script run>
-toggle_collapsed = function() {
-	my_info.collapsed = !my_info.collapsed
-}
-</script>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -186,79 +131,6 @@ toggle_collapsed = function() {
 			clearInterval(timer_id)
 	})
 </script>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=button_demo>
-<p>
-	<button id=cancel_button confirm="U sure?" class=large>Cancel</button>, says the button.
-	<button id=danger_button danger>Don't do it Jonny!</button>, says another.
-	<button icon="fa fa-recycle" bare></button>
-</p>
-<p>
-	<button primary>OK</button>
-	<button icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</button>
-	<button bare icon="fa fa-play">I'm also a button</button>
-	<script run>
-		this.parent.add(button({
-			text: html('Multiline text<br>works too!'),
-			icon: 'fa fa-folder-open',
-			action: function() { this.debug('clicked') },
-		}))
-
-		danger_button.action = function() {
-			cancel_button.click()
-		}
-		cancel_button_action = function() {
-			this.debug('clicked')
-		}
-	</script>
-</p>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=component_demo>
-<component tag=foo>
-	<script>
-		let content = [...e.nodes]
-		let wrapper = div({class: 'm b p h-c'}, content)
-		e.set(wrapper)
-	</script>
-</component>
-
-<foo>Hello!</foo>
-
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=input_demo>
-<d class="grid-h grid-2col grid-m" style="grid-template-columns: 1fr 6fr">
-xsmall  <span class="ro-group-h b-collapse-h xsmall  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-small   <span class="ro-group-h b-collapse-h small   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-smaller <span class="ro-group-h b-collapse-h smaller "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-normal  <span class="ro-group-h b-collapse-h normal  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-large   <span class="ro-group-h b-collapse-h large   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-</d>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=inputbox_demo>
-
-<d class="ro-group-h b-collapse-h">
-	<inputbox>
-		<d class="b h-m p-x ro-var fa fa-car"> </d>
-		<input value="Oh My!">
-		<button>...</button>
-		<d class="b h-m p-x ro-var fa fa-truck"> </d>
-		<button><d class="icon-9-dots"></d></button>
-	</inputbox><button>OK</button>
-</d>
-
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -310,7 +182,6 @@ t.post('Pay attention!', 'error', 3)
 </script>
 </template>
 
-
 <!--------------------------------------------------------------------------->
 
 <template id=notify_demo>
@@ -321,6 +192,80 @@ notify('Where?')
 notify('There!', 'error', 2)
 
 </script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=menu_demo>
+<div id=main></div>
+<script run>
+
+function action(item) { pr(item.text) }
+
+m = menu({
+	popup_side: 'bottom',
+	popup_align: 'left',
+	popup_y1: 2,
+	items: [
+		{text: 'Open', action: action, key: 'Ctrl+B', icon: 'fa fa-folder-open'},
+		{text: 'Close', disabled: true, icon: 'fa fa-window-close', action: action, separator: true},
+		{text: 'More', items: [
+			{text: 'Check', checked: true},
+			{text: 'Check No Close', checked: true,
+				action: function(a) { pr(a.checked); return false } },
+			{text: 'More Stuff', items: [
+				{text: 'More Stuff 1 this is a very long item text'},
+				{text: 'More Stuff 2', action: action},
+			]},
+		]},
+		{text: 'Even More', items: [
+			{text: 'Even More Stuff 1'},
+			{text: 'Even More Stuff 2'},
+		]},
+	],
+})
+
+b = btn({
+	text: 'Click for menu',
+	primary: true,
+	action: function() {
+		b.add(m)
+	},
+})
+
+main.add(b)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=tabs_demo>
+<tabs id=test_tabs selected_tab=second_page tabs_side=top style="min-height: 200px">
+	<div id=test_tabs_page_1 label="First Page" id=first_page>
+		<h1>This is the first page</h1>
+		<p>You can put anything in here.</p>
+	</div>
+	<div id=test_tabs_page_2 label="Second Page" id=second_page>
+		<h1>This is the second page.</h1>
+		<p>You can put anything in here too.</p>
+	</div>
+</tabs>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=split_demo>
+<split>
+	<vsplit id=my_split fixed_side=first min_size=100>
+		<div style="background: gray">Stuff 1</div>
+		<div>Stuff 2</div>
+	</vsplit>
+	<vsplit fixed_side=second>
+		<div>Stuff 3</div>
+		<div>Stuff 4</div>
+	</vsplit>
+</split>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -402,48 +347,158 @@ main.add(btn({
 
 <!--------------------------------------------------------------------------->
 
-<template id=menu_demo>
-<div id=main></div>
+<template id=slides_demo>
+<slides>
+
+</slides>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=md_demo>
+<md>
+# Sup fellow kids?
+
+So this is a paragraph.
+
+And this is [another](exmaple.com) one.
+</md>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=pagenav_demo>
+<pagenav></pagenav>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=richtext_demo>
+<richtext id=my_r>
+	<b>Wasup</b> <i>homies</i> ?
+</richtext>
 <script run>
-
-function action(item) { pr(item.text) }
-
-m = menu({
-	popup_side: 'bottom',
-	popup_align: 'left',
-	popup_y1: 2,
-	items: [
-		{text: 'Open', action: action, key: 'Ctrl+B', icon: 'fa fa-folder-open'},
-		{text: 'Close', disabled: true, icon: 'fa fa-window-close', action: action, separator: true},
-		{text: 'More', items: [
-			{text: 'Check', checked: true},
-			{text: 'Check No Close', checked: true,
-				action: function(a) { pr(a.checked); return false } },
-			{text: 'More Stuff', items: [
-				{text: 'More Stuff 1 this is a very long item text'},
-				{text: 'More Stuff 2', action: action},
-			]},
-		]},
-		{text: 'Even More', items: [
-			{text: 'Even More Stuff 1'},
-			{text: 'Even More Stuff 2'},
-		]},
-	],
-})
-
-b = btn({
-	text: 'Click for menu',
-	primary: true,
-	action: function() {
-		b.add(m)
-	},
-})
-
-main.add(b)
-
+my_r.widget_editing = true
 </script>
 </template>
 
+<!--------------------------------------------------------------------------->
+
+<template id=check_demo>
+<d class="h-m m b ro p">
+	<check id=my_check checked></check><label for=my_check>Wasup</label>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=toggle_demo>
+<d class="h-m m b ro p-x-2">
+	<label for=my_toggle class="S">Wasup</label><toggle id=my_toggle checked></toggle>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=radio_demo>
+<d class="v-m m b p ro">
+	<d class="h-m"><radio id=my_radio1 group=g1 checked></radio><label for=my_radio1>Option 1</label></d>
+	<d class="h-m"><radio id=my_radio2 group=g1></radio><label for=my_radio2>Option 2</label></d>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=input_demo>
+<d class="grid-h grid-2col grid-m" style="grid-template-columns: 1fr 6fr">
+xsmall  <span class="ro-group-h b-collapse-h xsmall  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+small   <span class="ro-group-h b-collapse-h small   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+smaller <span class="ro-group-h b-collapse-h smaller "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+normal  <span class="ro-group-h b-collapse-h normal  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+large   <span class="ro-group-h b-collapse-h large   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+</d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=inputbox_demo>
+
+<d class="S h ro-group-h b-collapse-h">
+	<inputbox class="ro-var">
+		<d class="ro-var h-m p-x fa fa-car"></d>
+		<labelbox class="ro-var">
+			<label for=oh_my>On my label</label>
+			<inputbox>
+				<button bare icon="fa fa-bicycle"></button>
+				<input id=oh_my value="Oh My!">
+				<d class="ro-var h-m p-x fa fa-bicycle"></d>
+			</inputbox>
+		</labelbox>
+		<button>...</button>
+		<d class="ro-var h-m p-x fa fa-truck"></d>
+		<button><d class="icon-9-dots"></d></button>
+	</inputbox><button>OK</button>
+</d>
+
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=button_demo>
+<p>
+	<button id=cancel_button confirm="U sure?" class=large>Cancel</button>, says the button.
+	<button id=danger_button danger>Don't do it Jonny!</button>, says another.
+	<button icon="fa fa-recycle" bare></button>
+</p>
+<p>
+	<button primary>OK</button>
+	<button icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</button>
+	<button bare icon="fa fa-play">I'm also a button</button>
+	<script run>
+		this.parent.add(button({
+			text: html('Multiline text<br>works too!'),
+			icon: 'fa fa-folder-open',
+			action: function() { this.debug('clicked') },
+		}))
+
+		danger_button.action = function() {
+			cancel_button.click()
+		}
+		cancel_button_action = function() {
+			this.debug('clicked')
+		}
+	</script>
+</p>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=info_demo>
+<info id=my_info>
+	<h3>It never entered my mind, but</h3>
+	<p>Here we are</p>
+</info>
+<button action=toggle_collapsed>Toggle Collapsed</button>
+<script run>
+toggle_collapsed = function() {
+	my_info.collapsed = !my_info.collapsed
+}
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=input_align_demo>
+<d class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
+	<check  class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
+	<radio  class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
+	<radio  class="self-h-c" id=radio2 group=g1></radio><label for=radio2>No, pick me!</label>
+	<toggle class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
+	<d></d><label for=input1>Some input</label>
+	<d></d><input id=input1></input>
+</d>
+</template>
 
 <!--------------------------------------------------------------------------->
 
@@ -538,17 +593,6 @@ main.add(radiogroup({
 	},
 }))
 
-</script>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=richtext_demo>
-<richtext id=my_r>
-	<b>Wasup</b> <i>homies</i> ?
-</richtext>
-<script run>
-my_r.widget_editing = true
 </script>
 </template>
 

@@ -16,21 +16,20 @@ WIDGETS
 	menu
 	tabs
 	split vsplit
-	slides
 	action-band
 	dlg
 	toolbox
-	pager
+	slides
+	md
+	pagenav
 	richtext
-	if
 	toggle
 	label
 	widget-placeholder
 
-GLOBALS
+FUNCTIONS
 
 	notify(text, ['search'|'info'|'error'], [timeout])
-	setglobal(k, v)
 
 WRITING CSS RULES
 
@@ -54,28 +53,29 @@ WRITING CSS RULES
 
 */
 
-css_light('', '', `
-
-	--padding-x-input       :  5px; /* for inputs and grid cells; PIXELS ONLY! */
-	--padding-y-input       :  3px; /* for inputs and grid cells; PIXELS ONLY! */
+css(':root', '', `
 
 	--border-radius-input : 0;
-
-	--border-focused                : #99d; /* dropdown open */
-	--outline-markbox-focused       : #88888866;
-
-	--shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
-	--shadow-slider-thumb           :  1px  1px  2px      #000000aa;
-
-	--padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
-	--padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
-	--padding-y2-input-il-dropdown-button : .5em;
 
 	--min-height-input            : 3.6em;
 	--width-input                 : 12em;
 
 	--font-size-input-label        : var(--font-size-small);
 	--font-size-input-label-empty  : var(--font-size-normal); /* put 100% for animating floating label */
+
+	--padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
+	--padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
+	--padding-y2-input-il-dropdown-button : .5em;
+
+`)
+
+css_light('', '', `
+
+	--border-focused                : #99d; /* dropdown open */
+	--outline-markbox-focused       : #88888866;
+
+	--shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
+	--shadow-slider-thumb           :  1px  1px  2px      #000000aa;
 
 	--bg-moving       : #eeeeeeaa;
 	--bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
@@ -113,16 +113,6 @@ css_dark('', '', `
 	--selected-widget-outline-color         : #aaa;
 	--selected-widget-outline-color-focused : var(--fg-clickable);
 
-`)
-
-css('.p-x-input', '', `
-	padding-left  : var(--padding-x-input);
-	padding-right : var(--padding-x-input);
-`)
-
-css('.p-y-input', '', `
-	padding-top    : var(--padding-y-input);
-	padding-bottom : var(--padding-y-input);
 `)
 
 css('.widget', 'rel h')
@@ -2719,11 +2709,11 @@ widget('md', function(e) {
 
 })}
 
-// ---------------------------------------------------------------------------
-// page navigation
-// ---------------------------------------------------------------------------
+/* page navigation -----------------------------------------------------------
 
-widget('pager', function(e) {
+*/
+
+widget('pagenav', function(e) {
 
 	e.prop('page', {type: 'number', attr: true, default: 1})
 	e.prop('page_size', {type: 'number', attr: true, default: 100})
@@ -3046,68 +3036,6 @@ function richtext_widget_editing(e) {
 
 }
 
-/* "if" container for conditional element binding ----------------------------
-
-attrs:
-	global
-props:
-	e.global
-
-*/
-
-css('.if', 'skip')
-
-widget('if', 'Containers', function(e) {
-
-	let html_content = e.html
-	e.clear()
-	e.hide()
-
-	e.prop('global', {attr: true})
-
-	e.cond = function(v) {
-		return !!v
-	}
-
-	e.do_update = function(opt) {
-		if (opt.show) {
-			e.unsafe_html = html_content
-			document.fire('layout_changed')
-		}
-		e.show(!!opt.show)
-	}
-
-	function global_changed() {
-		let k = e.global
-		if (!k) return
-		let on = e.cond(window[k])
-		e.update({show: on})
-	}
-
-	function bind_global(k, on) {
-		if (!k) return
-		window.on(k+'_changed', global_changed, on)
-	}
-
-	e.set_global = function(k1, k0) {
-		if (!e.bound) return
-		bind_global(k0, false)
-		bind_global(k1, true)
-		global_changed()
-	}
-
-	e.on_bind(function(on) {
-		bind_global(e.global, on)
-		if (on) {
-			global_changed()
-		} else {
-			e.hide()
-			e.clear()
-		}
-	})
-
-})
-
 /* check, toggle, radio buttons ----------------------------------------------
 
 classes:
@@ -3122,12 +3050,42 @@ methods:
 
 */
 
-// check button --------------------------------------------------------------
+// check, toggle, radio ------------------------------------------------------
 
-function check_widget(e) {
+css('.checkbox', 'large t-m link h-c h-m round', `
+	min-width  : 2em;
+	min-height : 2em;
+	max-width  : 2em;
+	max-height : 2em;
+	--fg-check: var(--fg-link);
+`)
+
+css_state('.checkbox:is(:hover,.hover)', '', `
+	--fg-check: var(--fg-link-hover);
+`)
+
+css_state('.checkbox:focus-visible', '', `
+	--fg-check: var(--fg-white);
+`)
+
+css('.checkbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
+css_state('.checkbox:focus-visible .checkbox-focus-circle', '', ` r: 50%; `)
+
+function check_widget(e, input_type) {
 	e.clear()
+	e.class('checkbox')
+	e.input = tag('input', {hidden: '', type: input_type || 'checkbox'})
+	e.add(e.input)
 	e.make_focusable()
 	e.prop('checked', {type: 'bool', attr: true})
+	e.property('label', function() {
+		if (!e.bound) return
+		if (!e.id) return
+		return $1('label[for='+e.id+']')
+	})
+	e.set_checked = function(v) {
+		e.input.checked = v
+	}
 	e.user_set_checked = function(v) { // stub
 		e.checked = v
 	}
@@ -3135,7 +3093,7 @@ function check_widget(e) {
 		e.user_set_checked(!e.checked)
 	}
 	e.on('keydown', function(key) {
-		if (key == ' ')
+		if (key == ' ') // same as for <button>
 			e.user_toggle()
 	})
 	e.on('click', function() {
@@ -3147,26 +3105,76 @@ function check_widget(e) {
 	e.on('label_click', function() {
 		e.user_toggle()
 	})
+	e.on('hover', function(ev, on) {
+		let label = e.label
+		if (!label) return
+		label.fire('target_hover', on)
+	})
 }
 
-css('.check', 'large link')
-css_state('.check:is(:hover,.hover)', 'link-hover')
-css_state('.check[checked]:is(:hover,.hover)', 'link-hover')
-css_state('.check::before', 'far fa-square')
-css_state('.check[checked]::before', 'fa fa-check-square')
-widget('check', check_widget)
+// check ---------------------------------------------------------------------
 
-// toggle button -------------------------------------------------------------
-
-css('.toggle', 't-m p-05 round bg1 h-m ease ring', `
-	min-width  : 3em;
-	max-width  : 3em;
-	min-height : 1.75em;
-	max-height : 1.75em;
+css('.check-line', '', `
+	fill: none;
+	stroke: var(--fg-check);
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 5%;
 `)
-css('.toggle-thumb', 'round bg-white ring ease', `
-	min-width  : 1.2em;
-	min-height : 1.2em;
+css('.check-frame', 'check-line', `
+	rx    : 1px;
+	ry    : 1px;
+	x     : -25%;
+	y 		: -25%;
+	width :  50%;
+	height:  50%;
+`)
+css('.check-mark', 'check-line ease', `
+	transform: translate(-25%, -25%) scale(.5);
+	stroke-width: 15%;
+	stroke-dasharray : 20;
+	stroke-dashoffset: 20;
+	transition-property: transform, stroke-dashoffset;
+`)
+
+css_state('.check[checked] .check-mark', 'ease', `
+	stroke: var(--bg);
+	stroke-dashoffset: 0;
+	transition-property: transform, stroke-dashoffset;
+`)
+
+css_state('.check:focus-visible', 'no-outline')
+
+css_state('.check:focus-visible .check-mark', 'ease', `
+	stroke: var(--bg-focused-selected);
+	transition-property: transform, stroke-dashoffset;
+`)
+
+css_state('.check[checked] .check-frame', '', `
+	fill: var(--fg-check);
+`)
+
+widget('check', function(e) {
+	check_widget(e)
+	e.add(svg({viewBox: '-10 -10 20 20'},
+		svg_tag('circle'  , {class: 'checkbox-focus-circle'}),
+		svg_tag('rect'    , {class: 'check-frame'}),
+		svg_tag('polyline', {class: 'check-mark', points: '4 11 8 15 16 6'}),
+	))
+})
+
+// toggle --------------------------------------------------------------------
+
+css('.toggle', 'm t-m p-05 round bg1 h-m ease ring rel', `
+	min-width  : 2.4em;
+	max-width  : 2.4em;
+	min-height : 1.4em;
+	max-height : 1.4em;
+`)
+css('.toggle-thumb', 'round bg-white ring ease abs', `
+	min-width  : 1em;
+	min-height : 1em;
+	left: .2em;
 `)
 css_state('.toggle[checked]', '', `
 	background: var(--bg-button-primary);
@@ -3180,48 +3188,31 @@ css_state('.toggle:is(:hover,.hover)', '', `
 css_state('.toggle[checked]:is(:hover,.hover)', '', `
 	background: var(--bg-button-primary-hover);
 `)
+
 widget('toggle', function(e) {
 	check_widget(e)
 	e.thumb = div({class: 'toggle-thumb'})
 	e.set(e.thumb)
 })
 
-// radio button --------------------------------------------------------------
+// radio ---------------------------------------------------------------------
 
-css('.radio', 't-m b2 round h-c h-m ease ring', `
-	min-width  : 1.2em;
-	max-width  : 1.2em;
-	min-height : 1.2em;
-	max-height : 1.2em;
-	border-color: var(--bg-button-primary);
-`)
-css('.radio-thumb', 'abs round ring ease', `
-	left  : 50%;
-	top   : 50%;
-	right : 50%;
-	bottom: 50%;
-	background: var(--bg-button-primary);
-`)
-css_state('.radio[checked] .radio-thumb', 'ease', `
-	left  : .2em;
-	top   : .2em;
-	right : .2em;
-	bottom: .2em;
-`)
+css('.radio', 'checkbox')
 
-css_state('.radio:is(:hover,.hover)', '', `
-	background: var(--bg1-hover);
-`)
-css_state('.radio[checked]:is(:hover,.hover)', '', `
-	border-color: var(--bg-button-primary-hover);
-`)
-css_state('.radio[checked]:is(:hover,.hover) > .radio-thumb', '', `
-	background: var(--bg-button-primary-hover);
-`)
+css('.radio-circle', 'check-line', ` r: .5; `)
+css('.radio-thumb' , 'ease'      , ` r:  0; fill: var(--fg-check); `)
+
+css_state('.radio[checked] .radio-thumb', 'ease', ` r: .3px; transition-property: r; `)
+
+css_state('.radio:focus-visible', 'no-outline')
+
 widget('radio', function(e) {
-	check_widget(e)
-	e.thumb = div({class: 'radio-thumb'})
-	e.set(e.thumb)
+	check_widget(e, 'radio')
+	e.add(svg({viewBox: '-1 -1 2 2'},
+		svg_tag('circle', {class: 'checkbox-focus-circle'}),
+		svg_tag('circle', {class: 'radio-circle'}),
+		svg_tag('circle', {class: 'radio-thumb'}),
+	))
 	e.prop('group', {attr: true})
 	e.user_set_checked = function(v) {
 		if (!v)
@@ -3251,8 +3242,10 @@ fires:
 
 */
 
+// using `label-widget` because `label` is a utility class...
 css('.label-widget', 'label noselect')
-css_state('.label-widget:hover', 'label-hover')
+css_state('.label-widget:is(:hover,.hover)', 'label-hover')
+
 widget('label', function(e) {
 	e.class('label-widget')
 	e.class('label', false)
@@ -3266,6 +3259,9 @@ widget('label', function(e) {
 		let te = window[e.for_id]
 		if (!te) return
 		te.fire('label_hover', false)
+	})
+	e.on('target_hover', function(on) {
+		e.class('hover', on)
 	})
 	e.on('pointerdown', function(ev) {
 		let te = window[e.for_id]
@@ -3335,30 +3331,36 @@ widget('info', function(e) {
 })
 
 
-/* inputbox ------------------------------------------------------------------
+/* .inputbox class -----------------------------------------------------------
 
-.inputbox class:
-	- applied to both <input> and <button> so that they valign.
-	- applied to <inputbox> which can contain <input>, <button>, icons, text,
-	etc. inside and also valigns with external input boxes of any kind.
+Applies to <input> and <button> so that they dovetail perfectly in an inline
+context (they valign and have the same border, height, margin and padding).
+
+NOTE: `--p-y-input-adjust` is set to 1px for certain fonts at certain sizes.
+NOTE: `--lh-input` is 1.25 because <input> can't set it lower.
+
+NOTE: Do not try to baseline-align elements that have borders or background,
+they will never align perfectly if you have text in multiple fonts inside
+(which you do when you use icon fonts). Even when `line-height` is exactly
+the same everywhere the elements will still misalign at certain zoom levels.
+That's why we use `t-m` instead of `t-bl` on all bordered widgets.
 
 */
 
-// NOTE: `--p-y-adjust` is set to 1px for certain fonts at certain sizes.
-// NOTE: `--lh-input` is 1.25 because <input> can't set it lower.
-
-// NOTE: Do not try to baseline-align elements that have borders or background,
-// they will never align perfectly if you have text in multiple fonts inside
-// (which you do when you use icon fonts). Even when `line-height` is exactly
-// the same everywhere the elements will still misalign at certain zoom levels.
-// That's why we use `t-m` instead of `t-bl` on all bordered widgets.
-
 css_util('.lh-input', '', `line-height: var(--lh-input);`)
 
-css('.inputbox', 't-m m-y-05 b p-x-2 gap-x-2 p-y-input lh-input ro-var', `
-	padding-top    : calc(var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)));
-	padding-bottom : calc(var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)));
-`)
+css_util('.p-t-input', '', ` padding-top    : calc(var(--p-y-input-scale, 1) * (var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)))); `)
+css_util('.p-b-input', '', ` padding-bottom : calc(var(--p-y-input-scale, 1) * (var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)))); `)
+css_util('.p-y-input', 'p-t-input p-b-input')
+
+css_util('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-2)); `)
+css_util('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-2)); `)
+css_util('.p-x-input', 'p-l-input p-r-input')
+
+css_util('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-2)); `)
+css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
+
+css('.inputbox', 't-m m-y-05 b p-x-input gap-x-input p-y-input lh-input')
 
 css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
 css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
@@ -3371,24 +3373,31 @@ css_util('.xsmall' , '', `--p-y-input: var(--space-025);`)
 css_util('.small'  , '', `--p-y-input: var(--space-025);`)
 css_util('.smaller', '', `--p-y-input: var(--space-05 );`)
 
-css(`
-	.xlarge.inputbox,
-	.xlarge .inputbox
-`, 'p-x-4 gap-x-4')
+css_util('.xlarge' , '', `--p-x-input: var(--space-4);`)
 
-css('inputbox', 't-m m-y-05 lh-input h-s')
+/* <inputbox> ----------------------------------------------------------------
+
+Stacks elements horizontally and styles them to create an input box.
+<inputbox> doesn't itself have the .inputbox class but instead styles itself
+and its children so that the end result looks and behaves like an input box.
+This allows different backgrounds in the child elements and also making
+seprators out of their left/right borders.
+
+*/
+
+css('inputbox', 'S t-m m-y-05 lh-input h-s')
 
 // `position: static` fixes the bug (in both Chrome & FF) where the outline
 // is obscured by the children if 1) they have a background and 2) they create
 // a stacking context.
-css_role('inputbox > *', 'm0 no-z', `position: static;`)
+css_role('inputbox > *', 'm0 b no-z', `position: static;`)
 
+// things that <inputbox> doesn't insist upon its children having.
 css('inputbox > *', 'bg-input')
 
-css_role('inputbox .input', 'S')
-
+// move the focus ring from the inner <input> (if any) to the <inputbox>.
 css_state_firefox('inputbox:focus-within', 'outline-focus') // no :has() yet.
-css_state_chrome('inputbox:has(.input:focus-visible)', 'outline-focus')
+css_state_chrome('inputbox:has(:not(inputbox) .input:focus-visible)', 'outline-focus')
 css_role_state('inputbox .input:focus-visible', 'no-outline')
 
 widget('inputbox', function(e) {
@@ -3400,6 +3409,25 @@ widget('inputbox', function(e) {
 	e.make_focusable(e.input)
 
 })
+
+/* <labelbox> ----------------------------------------------------------------
+
+Stack elements vertically inside an <inputbox>, also stripping them of margin,
+border and padding, making them float beside each other. Putting an <inputbox>
+inside a <labelbox> also strips the elements inside the <inputbox>. So a
+<labelbox> can be used for two things: 1) putting a <label> above an <input>,
+and 2) putting stripped elements inside an <inputbox>, even when you don't
+want a label.
+
+*/
+
+css('labelbox', 'S v p-x-input p-y-input gap-x-input gap-y-input')
+
+css_role('labelbox > *, labelbox > inputbox > *', 'b0 m0 p0')
+css_role('labelbox > inputbox', 'gap-x-input gap-y-input')
+
+// no-bg prevents outline clipping, also bg doesn't make sense since labelbox has padding.
+css_role('labelbox *', 'no-bg')
 
 /* button --------------------------------------------------------------------
 
@@ -3426,7 +3454,7 @@ inner html:
 
 */
 
-css('.button', 'h-c h-m semibold nowrap noselect', `
+css('.button', 'h-c h-m semibold nowrap noselect ro-var', `
 	background  : var(--bg-button);
 	color       : var(--fg-button);
 	box-shadow  : var(--shadow-button);
@@ -3668,7 +3696,7 @@ widget('button', 'Input', function(e) {
 
 */
 
-css('.input', 'bg-input', `
+css('.input', 'S bg-input', `
 	font-family   : inherit;
 	font-size     : inherit;
 	border-radius : 0;
