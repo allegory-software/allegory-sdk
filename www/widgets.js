@@ -23,8 +23,14 @@ WIDGETS
 	md
 	pagenav
 	richtext
-	toggle
 	label
+	info
+	check
+	toggle
+	radio
+	slider
+	inputbox labelbox input textarea
+	button
 	widget-placeholder
 
 FUNCTIONS
@@ -56,16 +62,7 @@ WRITING CSS RULES
 css(':root', '', `
 
 	--border-radius-input : 0;
-
-	--min-height-input            : 3.6em;
 	--width-input                 : 12em;
-
-	--font-size-input-label        : var(--font-size-small);
-	--font-size-input-label-empty  : var(--font-size-normal); /* put 100% for animating floating label */
-
-	--padding-y1-input-il-label-empty : .35em;  /* put 1.5em to shift label to focus-box middle */
-	--padding-y1-input-il-label       : .35em;  /* shift label up away from the input */
-	--padding-y2-input-il-dropdown-button : .5em;
 
 `)
 
@@ -75,15 +72,12 @@ css_light('', '', `
 	--outline-markbox-focused       : #88888866;
 
 	--shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
-	--shadow-slider-thumb           :  1px  1px  2px      #000000aa;
 
 	--bg-moving       : #eeeeeeaa;
 	--bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
 	--bg-today        : #f33;
 	--fg-today        : white;
 	--fg-clickable    : #207fdf; /* markbox icon, slider */
-
-	--bg-select-button: var(--bg-button);
 
 	--bg-toolbox-titlebar         : var(--bg1);
 	--bg-toolbox-titlebar-focused : #00003333;
@@ -102,8 +96,6 @@ css_dark('', '', `
 
 	--bg-moving            : #141a24aa;
 	--fg-clickable         : #75b7fa;
-
-	--bg-select-button: var(--bg1);
 
 	--bg-toolbox-titlebar         : #303030;
 	--bg-toolbox-titlebar-focused : #636363;
@@ -125,7 +117,7 @@ css('.x-container', 'grid-h shrinks clip') /* grid because grid-in-flex is buggy
 // your <x-ct> tag in the middle, but the layout system won't!
 css('.x-ct', 'skip')
 
-/* focusable-items -----------------------------------------------------------
+/* .focusable-items ----------------------------------------------------------
 
 	these are widgets containing multiple focusable and selectable items,
 	so they don't show a focus outline on the entire widget, but only show
@@ -583,7 +575,7 @@ function stylable_widget(e) {
 	e.prop('theme', {attr: true})
 }
 
-/* tooltip -------------------------------------------------------------------
+/* <tooltip> -----------------------------------------------------------------
 
 
 
@@ -884,7 +876,7 @@ tooltip.icon_classes = {
 	warn   : 'fa fa-exclamation-triangle',
 }
 
-/* toaster -------------------------------------------------------------------
+/* <toaster> -----------------------------------------------------------------
 
 methods:
 	post(text, [kind], [timeout])
@@ -972,7 +964,7 @@ function notify(...args) {
 ajax.notify_error  = (err) => notify(err, 'error')
 ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
-/* menu ----------------------------------------------------------------------
+/* <menu> --------------------------------------------------------------------
 
 
 
@@ -1410,7 +1402,7 @@ widget_items_widget = function(e) {
 
 }
 
-/* tabs widget ---------------------------------------------------------------
+/* <tabs> --------------------------------------------------------------------
 
 
 */
@@ -1456,10 +1448,9 @@ css('tabs-title', 'noselect nowrap', `
 css('tabs-add-button', 'p-y-05 p-x-2 h-m')
 css('tabs-add-button::before', 'small fa fa-plus')
 
-css('tabs-xbutton', 'abs dim arrow', `
+css('tabs-xbutton', 'abs dim arrow small', `
 	top: 2px;
 	right: 2px;
-	font-size: 70%;
 `)
 css('tabs-xbutton::before', 'fa fa-times')
 
@@ -1640,12 +1631,12 @@ widget('tabs', 'Containers', function(e) {
 
 	let tr, cr
 
-	e.do_measure = function() {
+	e.on_measure(function() {
 		tr = e.tabs_box.rect()
 		cr = selected_tab && selected_tab.at[0].rect()
-	}
+	})
 
-	e.do_position = function() {
+	e.on_position(function() {
 		let b = e.selection_bar
 		if (e.tabs_side == 'left') {
 			b.x1 = null
@@ -1677,19 +1668,15 @@ widget('tabs', 'Containers', function(e) {
 			b.h  = null
 		}
 		b.hidden = !selected_tab
-	}
+	})
 
 	// controller -------------------------------------------------------------
 
-	function resized() {
+	e.on('resize', function() {
 		e.position()
-	}
+	})
 
 	var selected_item = null
-
-	e.on_bind(function(on) {
-		e.on('resize', resized, on)
-	})
 
 	function select_tab(tab, opt) {
 		selected_item = tab ? tab.item : null
@@ -1925,7 +1912,7 @@ widget('tabs', 'Containers', function(e) {
 
 })
 
-/* split-view ----------------------------------------------------------------
+/* <split> & <vsplit> --------------------------------------------------------
 
 
 
@@ -2145,7 +2132,7 @@ widget('vsplit', function(e) {
 	return opt
 })
 
-/* action band ---------------------------------------------------------------
+/* <action-band> -------------------------------------------------------------
 
 
 
@@ -2222,7 +2209,7 @@ widget('action-band', 'Input', function(e) {
 
 })
 
-/* modal dialog box ----------------------------------------------------------
+/* <dlg> aka modal dialog box ------------------------------------------------
 
 
 
@@ -2404,7 +2391,7 @@ widget('dlg', function(e) {
 
 })
 
-/* floating toolbox ----------------------------------------------------------
+/* <toolbox> -----------------------------------------------------------------
 
 
 
@@ -2608,7 +2595,7 @@ widget('toolbox', function(e) {
 
 })
 
-/* slides --------------------------------------------------------------------
+/* <slides> ------------------------------------------------------------------
 
 
 
@@ -2690,7 +2677,7 @@ widget('slides', 'Containers', function(e) {
 })
 
 
-/* markdown widget -----------------------------------------------------------
+/* <md> for markdown ---------------------------------------------------------
 
 
 
@@ -2709,7 +2696,7 @@ widget('md', function(e) {
 
 })}
 
-/* page navigation -----------------------------------------------------------
+/* <pagenav> aka page navigation ---------------------------------------------
 
 */
 
@@ -2771,7 +2758,7 @@ widget('pagenav', function(e) {
 })
 
 
-/* richtext ------------------------------------------------------------------
+/* <richtext> ----------------------------------------------------------------
 
 
 
@@ -2804,7 +2791,7 @@ css_state('.richtext-button:active', '', `
 `)
 
 css_state('.richtext-button.selected', '', `
-	box-shadow: var(--shadow-button-pressed);
+	box-shadow: var(--shadow-pressed);
 	background-color: var(--fg-dim);
 	color: white;
 `)
@@ -2851,7 +2838,7 @@ widget('richtext', function(e) {
 
 })
 
-/* richtext / editing mixin --------------------------------------------------
+/* <richtext> editing mixin --------------------------------------------------
 
 
 
@@ -3036,7 +3023,116 @@ function richtext_widget_editing(e) {
 
 }
 
-/* check, toggle, radio buttons ----------------------------------------------
+/* <label> -------------------------------------------------------------------
+
+props:
+	for_id
+attrs:
+	for
+fires:
+	^for.label_hover(on)
+	^for.label_pointer{down|up}(ev)
+	^for.label_click(ev)
+
+*/
+
+// using `label-widget` because `label` is a utility class...
+css('.label-widget', 'label noselect')
+css_state('.label-widget:is(:hover,.hover)', 'label-hover')
+
+widget('label', function(e) {
+	e.class('label-widget')
+	e.class('label', false)
+	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.on('pointerenter', function() {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_hover', true)
+	})
+	e.on('pointerleave', function() {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_hover', false)
+	})
+	e.on('target_hover', function(on) {
+		e.class('hover', on)
+	})
+	e.on('pointerdown', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_pointerdown', ev)
+	})
+	e.on('pointerup', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_pointerup', ev)
+	})
+	e.on('click', function(ev) {
+		let te = window[e.for_id]
+		if (!te) return
+		te.fire('label_click', ev)
+	})
+})
+
+/* <info> text / button ------------------------------------------------------
+
+classes:
+	.info-button
+props:
+	collapsed
+	text
+styling:
+	.info [collapsed]
+inner html
+	-> text
+
+*/
+
+css('.info-button', 'h-c h-m b round mono extrabold dim w1 h1 m', `
+	border-width: .12em;
+	border-color: var(--fg-dim);
+`)
+css('.info-button::before', '', ` content: 'i'; `)
+
+css('.info', '', ` display: inline-block; `)
+
+css('.info:not([collapsed])', 'smaller label h-bl gap-x')
+
+// toggling visibility on hover requires click-through for stable hovering!
+css('.info .tooltip.visible', 'click-through')
+
+widget('info', function(e) {
+	let html_text = [...e.nodes]
+	e.prop('collapsed', {type: 'bool', attr: true})
+	e.prop('text', {type: 'nodes', slot: 'lang'})
+	e.set_collapsed = function(v) {
+		if (v) {
+			e.btn = e.btn || div({class: 'info-button'})
+			if (!e.tooltip) {
+				e.tooltip = tooltip({kind: 'info', align: 'left', popup_ox: -4, target: e.btn})
+				e.add(e.tooltip)
+				e.tooltip.update({show: false})
+				e.btn.on('hover', function(ev, on) {
+					e.tooltip.update({show: on})
+				})
+			}
+			e.tooltip.text = [...e.text]
+			e.clear()
+			e.add(e.btn, e.tooltip)
+		} else {
+			if (e.tooltip)
+				e.tooltip.update({show: false})
+			e.clear()
+			e.add(div({class: 'info-button'}), div(0, e.text))
+		}
+	}
+	return {
+		text      : html_text,
+		collapsed : or(e.collapsed, true),
+	}
+})
+
+/* <check>, <toggle>, <radio> buttons ----------------------------------------
 
 classes:
 	.hover
@@ -3195,14 +3291,14 @@ widget('toggle', function(e) {
 	e.set(e.thumb)
 })
 
-// radio ---------------------------------------------------------------------
+// <radio> -------------------------------------------------------------------
 
 css('.radio', 'checkbox')
 
 css('.radio-circle', 'check-line', ` r: .5; `)
 css('.radio-thumb' , 'ease'      , ` r:  0; fill: var(--fg-check); `)
 
-css_state('.radio[checked] .radio-thumb', 'ease', ` r: .3px; transition-property: r; `)
+css_state('.radio[checked] .radio-thumb', 'ease', ` r: .2px; transition-property: r; `)
 
 css_state('.radio:focus-visible', 'no-outline')
 
@@ -3217,119 +3313,365 @@ widget('radio', function(e) {
 	e.user_set_checked = function(v) {
 		if (!v)
 			return
-		if (!e.group)
-			return
-		let frm = e.closest('frm')
-		if (!frm)
-			frm = document.body
-		for (let re of frm.$('radio[group='+e.group+']'))
+		let others
+		if (e.group) {
+			let form = e.closest('.form') || document.body
+			others = form.$('.radio[group='+e.group+']')
+		} else {
+			let form = e.closest('.form') || e.closest('.radio-group')
+			others = form && form.$('.radio') || empty_array
+		}
+		for (let re of others)
 			if (re != e)
 				re.checked = false
 		e.checked = true
 	}
 })
 
-/* activation label ----------------------------------------------------------
+// <radio-group> & .radio-group ----------------------------------------------
 
-props:
-	for_id
-attrs:
-	for
-fires:
-	^for.label_hover(on)
-	^for.label_pointer{down|up}(ev)
-	^for.label_click(ev)
+css('radio-group', 'skip')
 
-*/
+/* <slider> & <range-slider> -------------------------------------------------
 
-// using `label-widget` because `label` is a utility class...
-css('.label-widget', 'label noselect')
-css_state('.label-widget:is(:hover,.hover)', 'label-hover')
-
-widget('label', function(e) {
-	e.class('label-widget')
-	e.class('label', false)
-	e.prop('for_id', {type: 'id', attr: 'for'})
-	e.on('pointerenter', function() {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_hover', true)
-	})
-	e.on('pointerleave', function() {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_hover', false)
-	})
-	e.on('target_hover', function(on) {
-		e.class('hover', on)
-	})
-	e.on('pointerdown', function(ev) {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_pointerdown', ev)
-	})
-	e.on('pointerup', function(ev) {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_pointerup', ev)
-	})
-	e.on('click', function(ev) {
-		let te = window[e.for_id]
-		if (!te) return
-		te.fire('label_click', ev)
-	})
-})
-
-/* info text / button --------------------------------------------------------
-
-props:
-	collapsed
-	text
-styling:
-	.info [collapsed]
-inner html
-	-> text
+config:
+	from to
+	min max
+	decimals
+state:
+	val | min_val max_val
+	progress | min_progress max_progress
+methods:
 
 */
 
-css('.info', '', `display: inline-block`)
+// reset editbox
+css('.slider', 'S t-m noclip rel', `
+	--slider-marked: 1;
+	--slider-mark-w: 40px; /* pixels only! */
+	min-width: 8em;
+	margin-left   : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-1));
+	margin-right  : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-1));
+	margin-top    : calc(var(--space-1) + 1em);
+	margin-bottom : calc(var(--space-1) + 1em + var(--slider-marked) * 1em);
+`)
+css('.slider-fill', 'abs round', ` height: 3px; `)
+css('.slider-bg-fill'   , 'bg1')
+css('.slider-valid-fill', 'bg3')
+css('.slider-val-fill'  , 'bg-link')
+css('.slider-thumb', 'bg-link')
+css('.slider-thumb', 'abs round', `
+	/* center vertically relative to the fill */
+	margin-top : calc(-.6em + 1px);
+	margin-left: calc(-.6em);
+	width : 1.2em;
+	height: 1.2em;
+	box-shadow: var(--shadow-thumb);
+`)
 
-css('.info[collapsed]', 'h-t', `color: var(--bg-info);`)
-css('.info:not([collapsed])', 'small label')
-css('.info[collapsed] > .info-button::before', 'xlarge fa fa-info-circle')
-css('.info-button-small::before', 'm-r fa fa-info-circle', `color: var(--bg-info);`)
+// toggling visibility on hover requires click-through for stable hovering!
+css('.slider-thumb .tooltip.visible', 'click-through')
 
-widget('info', function(e) {
-	let html_text = [...e.nodes]
-	e.prop('collapsed', {type: 'bool', attr: true})
-	e.prop('text', {type: 'nodes', slot: 'lang'})
-	e.set_collapsed = function(v) {
-		e.clear()
-		if (v) {
-			e.btn = e.btn || div({class: 'info-button'})
-			if (!e.tooltip) {
-				e.tooltip = tooltip({kind: 'info', align: 'left', popup_ox: -4})
-				e.btn.set(e.tooltip)
-				e.tooltip.update({show: false})
-				e.btn.on('hover', function(ev, on) {
-					e.tooltip.update({show: on})
-				})
+css('.slider-mark', 'abs b-l t-c noselect', `
+	margin-left: -1px;
+	top: 3px;
+	height: 10px;
+	border-color: var(--bg2);
+`)
+css('.slider-mark-label', 'rel label nowrap-dots', `
+	left: -50%;
+	top : .7em;
+`)
+
+css_state('.slider.modified', 'no-bg')
+
+css_state('.slider-thumb:focus-visible', 'no-shadow', `
+	outline: 6px solid var(--outline-markbox-focused);
+`)
+css_state('.slider:focus-within', 'no-outline')
+css_state('.slider:focus-within .slider-val-fill', '', `
+	background-color: var(--bg-focused-selected);
+`)
+css_state('.slider:focus-within .slider-thumb', '', `
+	background-color: var(--bg-focused-selected);
+`)
+
+// css_state('.slider.invalid .slider-thumb', '', `
+// 	border-color: var(--bg-error);
+// 	background: var(--bg-error);
+// `)
+
+css_state('.slider.animate .slider-thumb     ', 'ease')
+css_state('.slider.animate .slider-val-fill'  , 'ease')
+
+let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, decimals) {
+	scale_base = scale_base || 10
+	scales = scales || [1, 2, 2.5, 5]
+	let d = max - min
+	let min_scale_exp = floor((d ? logbase(d, scale_base) : 0) - 2)
+	let max_scale_exp = floor((d ? logbase(d, scale_base) : 0) + 2)
+	let n0, step
+	let step_multiple = decimals != null ? 10**(-decimals) : null
+	for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
+		for (let scale of scales) {
+			let step1 = scale_base ** scale_exp * scale
+			let n = d / step1
+			if (n0 == null || abs(n - wanted_n) < n0) {
+				if (step_multiple == null || floor(step1 / step_multiple) == step1 / step_multiple) {
+					n0 = n
+					step = step1
+				}
 			}
-			e.tooltip.text = [...e.text]
-			e.set(e.btn)
-		} else {
-			if (e.tooltip)
-				e.tooltip.update({show: false})
-			e.clear()
-			e.add(span({class: 'info-button-small'}), e.text)
 		}
 	}
-	return {
-		text      : html_text,
-		collapsed : or(e.collapsed, true),
-	}
-})
+	min = ceil  (min / step) * step
+	max = floor (max / step) * step
+	return [step, min, max]
+}
 
+let slider_widget = function(e, range) {
+
+	e.class('slider')
+
+	e.prop('from'       , {type: 'number', default: 0})
+	e.prop('to'         , {type: 'number', default: 1})
+
+	e.prop('min'        , {type: 'number'})
+	e.prop('max'        , {type: 'number'})
+	e.prop('decimals'   , {type: 'number', default: 2})
+
+	e.prop('marked'     , {type: 'bool'  , default: true})
+
+	if (range) {
+		e.prop('min_val' , {type: 'number'})
+		e.prop('max_val' , {type: 'number'})
+	} else {
+		e.prop('val'     , {type: 'number'})
+	}
+
+	e.mark_w = e.css().prop('--slider-mark-w').num()
+
+	e.set_marked = function(v) {
+		e.style.prop('--slider-marked', v ? 1 : 0)
+	}
+
+	e.bg_fill    = div({class: 'slider-fill slider-bg-fill'})
+	e.valid_fill = div({class: 'slider-fill slider-valid-fill'})
+	e.val_fill   = div({class: 'slider-fill slider-val-fill'})
+
+	e.marks = div({class: 'slider-marks'})
+
+	if (range) {
+		e.min_val_thumb = div({class: 'slider-thumb'})
+		e.max_val_thumb = div({class: 'slider-thumb'})
+		e.min_val_thumb.val_prop = 'min_val'
+		e.max_val_thumb.val_prop = 'max_val'
+		e.thumbs    = [e.min_val_thumb, e.max_val_thumb]
+	} else {
+		e.val_thumb = div({class: 'slider-thumb'})
+		e.val_thumb.val_prop = 'val'
+		e.thumbs    = [e.val_thumb]
+	}
+
+	e.add(e.bg_fill, e.valid_fill, e.val_fill, e.marks,
+		e.min_val_thumb, e.max_val_thumb, e.val_thumb)
+
+	for (let thumb of e.thumbs)
+		thumb.make_focusable()
+
+	// model
+
+	function cmin() { return max(or(e.min, -1/0), e.from) }
+	function cmax() { return min(or(e.max,  1/0), e.to  ) }
+
+	function multiple() { return or(1 / 10 ** e.decimals, 1) }
+
+	function progress_for(v) {
+		return clamp(lerp(v, e.from, e.to, 0, 1), 0, 1)
+	}
+
+	function val_prop(val_i) {
+		return e.thumbs[val_i || 0].val_prop
+	}
+
+	e.set_progress = function(p, val_prop) {
+
+		let v = lerp(p, 0, 1, e.from, e.to)
+
+		if (e.decimals != null)
+			v = floor(v / multiple() + .5) * multiple()
+
+		if (range)
+			if (val_prop == 'min_val')
+				v = min(v, e.max_val)
+			else
+				v = max(v, e.min_val)
+
+		e[val_prop] = clamp(v, cmin(), cmax())
+
+		e.update()
+	}
+
+	e.get_progress = function(val_prop) {
+		return progress_for(e[val_prop])
+	}
+
+	if (!range) {
+		e.prop('progress', {private: true, store: false})
+	} else {
+		for (let thumb of e.thumbs) {
+			let vk = thumb.val_prop
+			let k = vk.replace('_val', '')
+			e.prop(k+'_progress', {private: true, store: false})
+			e['get_'+k] = function( ) { e.get_progress(vk) }
+			e['set_'+k] = function(p) { e.set_progress(p, vk) }
+		}
+	}
+
+	// view
+
+	e.tooltip_target = e.val_thumb || e
+	e.tooltip_align = 'center'
+
+	e.user_set_progress = function(p, val_prop) {
+		e.set_progress(p, val_prop)
+	}
+
+	e.display_val_for = function(v) {
+		return (v && e.decimals != null) ? v.dec(e.decimals) : v
+	}
+
+	function update_thumb(thumb, p) {
+		thumb.style.left = (p * 100)+'%'
+		if (thumb.tooltip) {
+			thumb.tooltip.text = e.display_val_for(e[thumb.val_prop])
+			thumb.tooltip.position()
+		}
+	}
+
+	function update_fill(fill, p1, p2) {
+		fill.style.left  = (p1 * 100)+'%'
+		fill.style.width = ((p2 - p1) * 100)+'%'
+	}
+
+	e.on_update(function() {
+
+		let p1, p2
+
+		p1 = progress_for(e.from)
+		p2 = progress_for(e.to)
+		update_fill(e.bg_fill, p1, p2)
+
+		p1 = progress_for(cmin())
+		p2 = progress_for(cmax())
+		update_fill(e.valid_fill, p1, p2)
+
+		p1 = progress_for(range ? e.min_val : cmin())
+		p2 = progress_for(range ? e.max_val : e.val)
+		update_fill(e.val_fill, p1, p2)
+
+		for (let thumb of e.thumbs) {
+			let p = e.get_progress(thumb.val_prop)
+			update_thumb(thumb, p)
+		}
+
+		if (!e.marks.len)
+			e.position()
+
+	})
+
+	let w
+	e.on_measure(function() {
+		w = e.rect().w
+	})
+
+	function add_mark(v) {
+		let l = div({class: 'slider-mark-label', style: 'max-width:'+e.mark_w+'px'})
+		let m = div({class: 'slider-mark'}, l)
+		e.marks.add(m)
+		m.x = lerp(v, e.from, e.to, 0, w)
+		l.set(e.display_val_for(v))
+	}
+	function update_marks() {
+		e.marks.clear()
+		if (!e.marked)
+			return
+
+		let max_n = floor(w / e.mark_w)
+		let [step, min, max] = compute_step_and_range(
+			max_n, e.from, e.to, e.scale_base, e.scales, e.decimals)
+
+		add_mark(e.from)
+		for (let v = min; v <= max; v += step)
+			add_mark(v)
+		add_mark(e.to)
+	}
+
+	e.on_position(function() {
+		update_marks()
+	})
+
+	// controller
+
+	e.class('animate')
+
+	for (let thumb of e.thumbs) {
+
+		thumb.on('hover', function(ev, on) {
+			if (!thumb.tooltip) {
+				thumb.tooltip = tooltip({align: 'center'})
+				thumb.add(thumb.tooltip)
+			}
+			thumb.tooltip.show(on)
+			e.update()
+		})
+
+		thumb.on('pointerdown', function(ev, mx) {
+			thumb.focus()
+			let r = e.rect()
+			function pointermove(ev, mx) {
+				e.user_set_progress((mx - r.x) / r.w, thumb.val_prop)
+			}
+			pointermove(ev, mx)
+			function pointerup(ev) {
+				e.class('animate')
+			}
+			e.class('animate', e.decimals != null
+				&& lerp(e.from + multiple(), e.from, e.to, 0, r.w) >= 20)
+			return this.capture_pointer(ev, pointermove, pointerup)
+		})
+
+		thumb.on('keydown', function(key, shift) {
+			let d
+			switch (key) {
+				case 'ArrowLeft'  : d =  -.1; break
+				case 'ArrowRight' : d =   .1; break
+				case 'ArrowUp'    : d =  -.1; break
+				case 'ArrowDown'  : d =   .1; break
+				case 'PageUp'     : d =  -.5; break
+				case 'PageDown'   : d =   .5; break
+				case 'Home'       : d = -1/0; break
+				case 'End'        : d =  1/0; break
+			}
+			if (d) {
+				let p = e.get_progress(this.val_prop) + d * (shift ? .1 : 1)
+				e.user_set_progress(p, this.val_prop)
+				return false
+			}
+		})
+
+	}
+
+	e.on('resize', function() {
+		e.position()
+	})
+
+}
+
+widget('slider'      , 'Input', slider_widget)
+widget('range-slider', 'Input', function(e) {
+	slider_widget(e, true)
+})
 
 /* .inputbox class -----------------------------------------------------------
 
@@ -3347,20 +3689,23 @@ That's why we use `t-m` instead of `t-bl` on all bordered widgets.
 
 */
 
-css_util('.lh-input', '', `line-height: var(--lh-input);`)
+css_util('.lh-input', '', `
+	--lh: var(--lh-input);
+	line-height: calc(var(--fs) * var(--lh)); /* in pixels so it's the same on icon fonts */
+`)
 
-css_util('.p-t-input', '', ` padding-top    : calc(var(--p-y-input-scale, 1) * (var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)))); `)
-css_util('.p-b-input', '', ` padding-bottom : calc(var(--p-y-input-scale, 1) * (var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, var(--p-y-input-adjust-normal, 0px)))); `)
+css_util('.p-t-input', '', ` padding-top    : calc((var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
+css_util('.p-b-input', '', ` padding-bottom : calc((var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
 css_util('.p-y-input', 'p-t-input p-b-input')
 
-css_util('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-2)); `)
-css_util('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-2)); `)
+css_util('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-1)); `)
+css_util('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-1)); `)
 css_util('.p-x-input', 'p-l-input p-r-input')
 
-css_util('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-2)); `)
+css_util('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-1)); `)
 css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
 
-css('.inputbox', 't-m m-y-05 b p-x-input gap-x-input p-y-input lh-input')
+css('.inputbox', 'm-y-05 b p-x-input p-y-input t-m h-m gap-x-input lh-input')
 
 css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
 css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
@@ -3373,7 +3718,8 @@ css_util('.xsmall' , '', `--p-y-input: var(--space-025);`)
 css_util('.small'  , '', `--p-y-input: var(--space-025);`)
 css_util('.smaller', '', `--p-y-input: var(--space-05 );`)
 
-css_util('.xlarge' , '', `--p-x-input: var(--space-4);`)
+css_util('.large'  , '', `--p-x-input: var(--space-2);`)
+css_util('.xlarge' , '', `--p-x-input: var(--space-2);`)
 
 /* <inputbox> ----------------------------------------------------------------
 
@@ -3429,7 +3775,44 @@ css_role('labelbox > inputbox', 'gap-x-input gap-y-input')
 // no-bg prevents outline clipping, also bg doesn't make sense since labelbox has padding.
 css_role('labelbox *', 'no-bg')
 
-/* button --------------------------------------------------------------------
+/* <input> -------------------------------------------------------------------
+
+--
+
+*/
+
+css('.input', 'S bg-input', `
+	font-family   : inherit;
+	font-size     : inherit;
+	border-radius : 0;
+`)
+
+widget('input', 'Input', function(e) {
+
+	e.make_focusable()
+	e.class('inputbox')
+
+})
+
+/* <textarea> ----------------------------------------------------------------
+
+--
+
+*/
+
+css('.textarea', 'S h m0 b p bg-input', `
+	resize: none;
+	overflow-y: overlay; /* Chrome only */
+	overflow-x: overlay; /* Chrome only */
+`)
+
+widget('textarea', 'Input', function(e) {
+
+	e.make_focusable()
+
+})
+
+/* <button> ------------------------------------------------------------------
 
 props:
 	primary danger bare   style flags
@@ -3439,6 +3822,8 @@ props:
 	confirm               message
 	action                function
 	action_name           name of global function to call on click
+state:
+	selected
 methods:
 	draw_attention()      animate
 stubs:
@@ -3454,19 +3839,21 @@ inner html:
 
 */
 
-css('.button', 'h-c h-m semibold nowrap noselect ro-var', `
+css_util('.p-x-button', '', `
+	padding-left  : var(--p-x-button, var(--space-2));
+	padding-right : var(--p-x-button, var(--space-2));
+`)
+
+css('.button', 'h-c h-m p-x-button semibold nowrap noselect ro-var', `
 	background  : var(--bg-button);
 	color       : var(--fg-button);
 	box-shadow  : var(--shadow-button);
 	font-family : inherit;
-	font-size   : inherit;
-	padding-left  : var(--p-x-button, var(--space-2));
-	padding-right : var(--p-x-button, var(--space-2));
-	row-gap     : var(--row-gap, var(--space-2));
+	font-size   : var(--fs);
 `)
 
-css('.large ', '', `--p-x-button: var(--space-4); --row-gap: var(--space-4); `)
-css('.xlarge', '', `--p-x-button: var(--space-4); --row-gap: var(--space-4); `)
+css('.large ', '', `--p-x-button: var(--space-4); `)
+css('.xlarge', '', `--p-x-button: var(--space-4); `)
 
 css('.button.text-empty > .button-text', 'hidden')
 
@@ -3510,6 +3897,10 @@ css_state('.button[bare]:not([disabled]):not(.widget-editing):not(.widget-select
 
 css_state('.button[bare]:active', 'no-bg', `
 	color: var(--fg-link-active);
+`)
+
+css_state('.button[selected]', '', `
+	box-shadow: var(--shadow-pressed);
 `)
 
 // attention animation
@@ -3573,10 +3964,17 @@ widget('button', 'Input', function(e) {
 	e.prop('text', {type: 'nodes', default: '', slot: 'lang'})
 
 	e.set_icon = function(v) {
-		if (isstr(v))
-			e.icon_box.attr('class', 'button-icon '+v)
-		else
+		if (isstr(v)) {
+			if (v.starts('mi mi-')) {
+				e.icon_box.attr('class', 'button-icon mi')
+				e.icon_box.set(v.replace('mi mi-', ''))
+			} else {
+				e.icon_box.attr('class', 'button-icon '+v)
+				e.icon_box.clear()
+			}
+		} else {
 			e.icon_box.set(v)
+		}
 		e.icon_box.hidden = !v
 	}
 	e.prop('icon', {type: 'icon'})
@@ -3690,30 +4088,147 @@ widget('button', 'Input', function(e) {
 
 })
 
-/* input ---------------------------------------------------------------------
+/* <select-button> && <vselect-button> ---------------------------------------
 
 --
 
 */
 
-css('.input', 'S bg-input', `
-	font-family   : inherit;
-	font-size     : inherit;
-	border-radius : 0;
+css('.select-button', 'rel ro-var h-s gap-x-0 shadow-button', `
+	padding: 3px;
+	--p-y-input-offset: -3px;
 `)
 
-widget('input', 'Input', function(e) {
+css('.select-button > :not(.select-button-plate)', 'S h-m t-c p-y-input p-x-button gap-x nowrap-dots noselect dim z1', `
+	flex-basis: fit-content;
+`)
+css('.select-button > :not(.select-button-plate):not(.selected):hover', 'fg')
+css('.select-button > :not(.select-button-plate).selected', '', `
+	color: var(--fg-select-button-plate);
+`)
 
-	e.make_focusable()
+css('.select-button-plate', 'abs ease shadow-button', `
+	transition-property: left, width;
+	border-radius: calc(var(--border-radius, var(--space-075)) * 0.7);
+	background: var(--bg-select-button-plate);
+`)
+
+css_state('.select-button-plate:hover', '', `
+	background: var(--bg-select-button-plate-hover);
+`)
+
+css_light('', '', `
+	--bg-select-button-plate: var(--bg-button-primary);
+	--fg-select-button-plate: var(--fg-button-primary);
+`)
+
+css_dark('', '', `
+	--bg-select-button-plate: var(--bg2);
+	--fg-select-button-plate: var(--fg-white);
+`)
+
+widget('select-button', function(e) {
+
 	e.class('inputbox')
+	e.init_child_components()
+	e.plate = div({class: 'select-button-plate'})
+	e.add(e.plate)
+
+	e.make_focusable(e.plate)
+
+	// model
+
+	e.prop('selected_index', {type: 'number'})
+
+	e.property('selected_val', function() {
+		return e.selected_button ? e.selected_button.val : null
+	})
+
+	e.set_selected_index = function(i) {
+		let b = i != null && e.len > 1 && e.at[clamp(i, 0, e.len-2)] || null
+		e.selected_button = b
+		e.update()
+	}
+
+	// view
+
+	let sbor
+	let mx = 0
+	let my = 0
+
+	e.on_measure(function() {
+		sbor = e.selected_button && e.selected_button.orect()
+	})
+
+	e.on_update(function() {
+		for (let b of e.at)
+			b.class('selected', false)
+		if (e.selected_button)
+			e.selected_button.class('selected', true)
+	})
+
+	e.on_position(function() {
+		if (!e.selected_button) {
+			e.plate.hide()
+			return
+		}
+		e.plate.x = sbor.x + mx
+		e.plate.y = sbor.y + my
+		e.plate.w = sbor.w - 2*mx
+		e.plate.h = sbor.h - 2*my
+		e.plate.show()
+	})
+
+	// controller
+
+	// e.on('pointerdown', function() {
+	// })
+
+	e.on('click', function(ev) {
+		let b = ev.target
+		while (b && b.parent != e) b = b.parent
+		if (!b || b.parent != e || b == e.plate) return
+		e.selected_index = b.index
+		e.focus()
+	})
+
+	e.on('keydown', function(key) {
+		let n = (key == 'ArrowRight' ? 1 : key == 'ArrowLeft' ? -1 : 0)
+		if (!n) return
+		e.selected_index = (e.selected_button ? e.selected_button.index : 0) + n
+	})
+
+	e.on('resize', function() {
+		e.position()
+	})
+
+	return {selected_index: 0}
+})
+
+widget('vselect-button', function(e) {
+
+	e.class('ro-group-v b-collapse-v')
+	e.init_child_components()
 
 })
 
-/* ---------------------------------------------------------------------------
-// widget placeholder
-// ---------------------------------------------------------------------------
+/* <tags> --------------------------------------------------------------------
+
+
+
+*/
+
+widget('tags', function(e) {
+
+	//
+
+})
+
+/* <widget-placeholder> ------------------------------------------------------
+
 calls:
 	e.replace_child_widget()
+
 */
 
 widget('widget-placeholder', function(e) {

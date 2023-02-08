@@ -137,7 +137,7 @@ widget('chart', 'Input', function(e) {
 				let step1 = scale_base ** scale_exp * scale
 				let n = d / step1
 				if (n0 == null || abs(n - wanted_n) < n0) {
-					if (step_multiple == null || floor(step1 / step_multiple) == step1) {
+					if (step_multiple == null || floor(step1 / step_multiple) == step1 / step_multiple) {
 						n0 = n
 						step = step1
 					}

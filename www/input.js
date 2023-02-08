@@ -17,7 +17,7 @@ WIDGETS
 	tagsedit
 	placeedit
 	googlemaps
-	slider
+	slideedit
 	calendar
 	dateedit
 	timepicker
@@ -2914,67 +2914,67 @@ widget('googlemaps', 'Input', function(e) {
 })
 
 // ---------------------------------------------------------------------------
-// slider
+// slideedit
 // ---------------------------------------------------------------------------
 
 // reset editbox
-css('.slider .focus-box', 'b-invisible no-bg')
+css('.slideedit .focus-box', 'b-invisible no-bg')
 
-css('.editbox.slider .focus-box', 'b-invisible no-bg')
+css('.editbox.slideedit .focus-box', 'b-invisible no-bg')
 
-css('.slider-box', 'S t-m noclip rel', `
+css('.slideedit-box', 'S t-m noclip rel', `
 	margin: .75em;
 	min-width: 8em;
 	height: 4px;
 `)
 
-css('.slider-fill', 'abs round', `
+css('.slideedit-fill', 'abs round', `
 	height: 100%;
 `)
 
-css('.slider-range-fill', 'bg1', `
+css('.slideedit-range-fill', 'bg1', `
 	height: 3px;
 `)
 
-css('.slider-thumb', 'abs round', `
+css('.slideedit-thumb', 'abs round', `
 	/* center vertically relative to the fill */
 	position: absolute;
 	margin-top : calc(-.6em + 2px);
 	margin-left: calc(-.6em);
 	width: 1.2em;
 	height: 1.2em;
-	box-shadow: var(--shadow-slider-thumb);
+	box-shadow: var(--shadow-slideedit-thumb);
 `)
 
-css('.slider-value-fill, .slider-thumb', 'bg-link')
+css('.slideedit-value-fill, .slideedit-thumb', 'bg-link')
 
-css_state('.editbox.slider.modified > .focus-box', 'no-bg')
+css_state('.editbox.slideedit.modified > .focus-box', 'no-bg')
 
-css_state('.slider-input-thumb:focus-visible', 'no-shadow', `
+css_state('.slideedit-input-thumb:focus-visible', 'no-shadow', `
 	outline: 6px solid var(--outline-markbox-focused);
 `)
 
-css_state('.slider-focus-box:focus-within', 'no-outline')
+css_state('.slideedit-focus-box:focus-within', 'no-outline')
 
-css_state('.slider-value-thumb.different', 'dim')
+css_state('.slideedit-value-thumb.different', 'dim')
 
-css_state('.slider-focus-box:focus-within .slider-value-fill', '', `
+css_state('.slideedit-focus-box:focus-within .slideedit-value-fill', '', `
 	background-color: var(--bg-focused-selected);
 `)
 
-css_state('.slider-focus-box:focus-within .slider-thumb', '', `
+css_state('.slideedit-focus-box:focus-within .slideedit-thumb', '', `
 	background-color: var(--bg-focused-selected);
 `)
 
-css_state('.slider.invalid .slider-input-thumb', '', `
+css_state('.slideedit.invalid .slideedit-input-thumb', '', `
 	border-color: var(--bg-error);
 	background: var(--bg-error);
 `)
 
-css_state('.slider.animated .slider-thumb     ', '', `transition: left  .1s;`)
-css_state('.slider.animated .slider-value-fill', '', `transition: width .1s;`)
+css_state('.slideedit.animated .slideedit-thumb     ', '', `transition: left  .1s;`)
+css_state('.slideedit.animated .slideedit-value-fill', '', `transition: width .1s;`)
 
-widget('slider', 'Input', function(e) {
+widget('slideedit', 'Input', function(e) {
 
 	e.field_attrs = {type: 'number', decimals: 1}
 
@@ -2986,13 +2986,13 @@ widget('slider', 'Input', function(e) {
 	e.prop('to'  , {type: 'number', default: 1})
 
 	e.label_box   = div({class: 'editbox-label'})
-	e.val_fill    = div({class: 'slider-fill slider-value-fill'})
-	e.range_fill  = div({class: 'slider-fill slider-range-fill'})
-	e.input_thumb = div({class: 'slider-thumb slider-input-thumb'})
-	e.val_thumb   = div({class: 'slider-thumb slider-value-thumb'})
-	e.slider_box  = div({class: 'slider-box'},
+	e.val_fill    = div({class: 'slideedit-fill slideedit-value-fill'})
+	e.range_fill  = div({class: 'slideedit-fill slideedit-range-fill'})
+	e.input_thumb = div({class: 'slideedit-thumb slideedit-input-thumb'})
+	e.val_thumb   = div({class: 'slideedit-thumb slideedit-value-thumb'})
+	e.slideedit_box  = div({class: 'slideedit-box'},
 			e.range_fill, e.val_fill, e.val_thumb, e.input_thumb)
-	e.focus_box   = div({class: 'focus-box'}, e.label_box, e.slider_box)
+	e.focus_box   = div({class: 'focus-box'}, e.label_box, e.slideedit_box)
 	e.add(div({class: 'linear-form-filler'}), e.focus_box)
 
 	e.make_focusable(e.input_thumb)
@@ -3062,7 +3062,7 @@ widget('slider', 'Input', function(e) {
 
 	// controller
 
-	e.slider_box.on('pointerdown', function(ev, mx) {
+	e.slideedit_box.on('pointerdown', function(ev, mx) {
 		e.focus()
 		let r = this.rect()
 		if (!e.tooltip) {
