@@ -66,7 +66,9 @@ ELEMENT CSS CLASSES
 
 ELEMENT COMPUTED STYLES
 
-	e.css([k][, state])
+	e.css(k[, state])
+	e.css() -> css
+	css.prop(k[, v])
 
 CSS QUERYING
 
@@ -204,6 +206,7 @@ ELEMENT GEOMETRY
 	e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h, e.ox, e.oy
 	e.min_w, e.min_h, e.max_w, e.max_h
 	e.rect() -> r
+	e.orect() -> r
 	r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
 	r.contains(x, y)
 
@@ -664,7 +667,12 @@ e.css = function(prop, state) {
 	return prop ? css[prop] : css
 }
 
-alias(CSSStyleDeclaration, 'prop', 'getPropertyValue')
+method(CSSStyleDeclaration, 'prop', function(k, v) {
+	if (arguments.length < 2)
+		return this.getPropertyValue(k)
+	else
+		this.setProperty(k, v)
+})
 
 {
 let each_css_rule = function(rules, f) {
@@ -2262,6 +2270,10 @@ alias(Element, 'x', 'x1')
 alias(Element, 'y', 'y1')
 e.rect = function() {
 	return this.getBoundingClientRect()
+}
+
+e.orect = function() {
+	return new DOMRect(this.offsetLeft, this.offsetTop, this.offsetWidth, this.offsetHeight)
 }
 
 alias(Element, 'cx', 'clientLeft')
