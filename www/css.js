@@ -54,7 +54,6 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 
 	--fg                    : hsl(  0   0%   0% / 1.0);
 	--fg-hover              : hsl(  0   0%   0% / 0.8);
-	--fg-p                  : hsl(  0   0%   0% / 0.9); /* multiline text on normal backgrounds (just a tad dimmer than fg) */
 	--fg-white              : hsl(  0   0% 100% / 1.0);
 	--fg-black              : hsl(  0   0%   0% / 1.0);
 	--fg-dim                : hsl(  0   0%   0% / 0.5); /* faded (not gray!) text but clearly legible (disabled, info boxes) */
@@ -66,20 +65,23 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--fg-link-hover         : hsl(222 100%  50% / 1.0);
 	--fg-link-active        : hsl(222 100%  60% / 1.0);
 
-	--bg                    : hsl(  0   0% 100% / 1.0); /* opaque */
-	--bg-hover              : hsl(  0   0%  99% / 1.0); /* opaque */
-	--bg-active             : hsl(  0   0%  98% / 1.0); /* opaque */
+	--bg0                   : hsl(  0   0% 100% / 1.0); /* opaque */
+	--bg                    : hsl(  0   0%  99% / 1.0); /* opaque */
+	--bg-hover              : hsl(  0   0%  98% / 1.0); /* opaque */
+	--bg-active             : hsl(  0   0%  96% / 1.0); /* opaque */
 	--bg1                   : hsl(  0   0%  90% / 1.0); /* sits on bg; opaque */
 	--bg1-hover             : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
-	--bg2                   : hsl(  0   0%  85% / 1.0); /* sits on bg1; opaque */
-	--bg2-hover             : hsl(  0   0%  90% / 1.0);
+	--bg2                   : hsl(  0   0%  80% / 1.0); /* sits on bg1; opaque */
+	--bg2-hover             : hsl(  0   0%  85% / 1.0);
+	--bg3                   : hsl(  0   0%  70% / 1.0); /* sits on bg1; opaque */
+	--bg3-hover             : hsl(  0   0%  75% / 1.0);
 	--bg-alt                : hsl(  0   0%  97% / 1.0); /* alternating bg for grid rows; lighter than bg1 */
 	--bg-smoke              : hsl(  0   0%   0% / 0.2); /* overlays bg */
 	--bg-input              : var(--bg);
 
 	--border-light          : hsl(  0   0%   0% / 0.1); /* sits on bg */
 	--border-light-hover    : hsl(  0   0%   0% / 0.3);
-	--border-light-on-dark  : hsl(  0   0% 100% / 0.1); /* sits on bg */
+	--border-light-on-dark  : hsl(  0   0% 100% / 0.09); /* sits on bg */
 	--border-light-on-dark-hover
 	                        : hsl(  0 100% 100% / 0.3);
 
@@ -129,12 +131,13 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--fg-focused            : var(--fg-white);
 	--bg-row-focused        : #ddd;
 
-	--ring                  : hsl(  0 100%   0% / .25);
+	--ring                  : hsl(  0 100%   0% / .3);
 
 	--shadow-tooltip        :  2px  2px  9px      #00000044;
 	--shadow-toolbox        :  1px  1px  4px      #000000aa;
 	--shadow-menu           :  2px  2px  2px      #000000aa;
 	--shadow-button         :  0px  0px  2px  0px #00000011;
+	--shadow-thumb          :  0px  0px  2px  0px #000000bb;
 	--shadow-modal          :  2px  5px 10px      #00000088;
 	--shadow-pressed        : inset 0 0.15em 0.3em hsl(210 13% 12% / .5);
 	--shadow-picker         :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
@@ -142,7 +145,6 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--fg-text-selection     : var(--bg-focused-selected);
 	--bg-text-selection     : var(--fg-focused-selected);
 
-	font-size               : var(--font-size-normal);
 	color                   : var(--fg);
 	background-color        : var(--bg);
 
@@ -150,22 +152,24 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 
 css('.theme-dark, .theme-light .theme-inverted', '', `
 
-	--fg                    : hsl(  0   0% 100% / 1.0);
-	--fg-hover              : hsl(  0   0%  95% / 1.0);
-	--fg-p                  : hsl(  0   0% 100% / 0.9);
+	--fg                    : hsl(  0   0%  95% / 1.0);
+	--fg-hover              : hsl(  0   0% 100% / 1.0);
 	--fg-dim                : var(--fg-dim-on-dark);
-	--fg-label              : hsl(  0   0%  80% / 1.0);
-	--fg-label-hover        : hsl(  0   0%  90% / 1.0);
-	--fg-link               : hsl(140 100%  30% / 1.0);
-	--fg-link-hover         : hsl(140 100%  35% / 1.0);
-	--fg-link-active        : hsl(140 100%  40% / 1.0);
+	--fg-label              : hsl(  0   0%  70% / 1.0);
+	--fg-label-hover        : hsl(  0   0%  80% / 1.0);
+	--fg-link               : hsl( 26  78%  51% / 1.0);
+	--fg-link-hover         : hsl( 26  78%  56% / 1.0);
+	--fg-link-active        : hsl( 26  78%  61% / 1.0);
 
-	--bg                    : hsl(216  28%   7% / 1.0);
-	--bg-hover              : hsl(216  28%   8% / 1.0);
+	--bg0                   : hsl(216  28%   8% / 1.0);
+	--bg                    : hsl(216  28%  10% / 1.0);
+	--bg-hover              : hsl(216  28%  12% / 1.0);
 	--bg1                   : hsl(216  28%  15% / 1.0);
-	--bg1-hover             : hsl(216  28%  20% / 1.0);
-	--bg2                   : hsl(216  28%  19% / 1.0);
+	--bg1-hover             : hsl(216  28%  17% / 1.0);
+	--bg2                   : hsl(216  28%  20% / 1.0);
 	--bg2-hover             : hsl(216  28%  22% / 1.0);
+	--bg3                   : hsl(216  28%  25% / 1.0);
+	--bg3-hover             : hsl(216  28%  27% / 1.0);
 	--bg-alt                : hsl(216  28%  10% / 1.0);
 	--bg-smoke              : hsk(  0   0% 100% / 0.2);
 	--bg-input              : hsl(216  28%  17% / 1.0);
@@ -185,9 +189,9 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--fg-button-danger          : hsl(0 54% 43%);
 
 	/* grid cell data states */
-	--bg-new               : #2c2c5c;
-	--bg-modified          : #196119;
-	--bg-new-modified      : #293b34;
+	--bg-new                : #2c2c5c;
+	--bg-modified           : #196119;
+	--bg-new-modified       : #293b34;
 
 	/* grid cell interaction states. these need to be opaque! */
 	--bg-unfocused-selected : #4c545d;
@@ -196,16 +200,37 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg-selected           : #122f4d;
 	--bg-row-focused        : #222326;
 
-	--shadow-pressed : inset 0 .15em .5em hsl(228 32% 15% / 46%);
+	--ring                  : hsl(  0 100%   0% / .3);
+
+	--shadow-tooltip        :  2px  2px  9px      #00000044; /* todo */
+	--shadow-toolbox        :  1px  1px  4px      #000000aa; /* todo */
+	--shadow-menu           :  2px  2px  2px      #000000aa; /* todo */
+	--shadow-button         :  0px  0px  2px  0px #000000ff;
+	--shadow-thumb          :  1px  1px  2px      #000000aa;
+	--shadow-modal          :  2px  5px 10px      #00000088; /* todo */
+	--shadow-pressed        : inset 0 0.15em 0.5em hsl(228 32% 0%);
+	--shadow-picker         :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 
 	color-scheme: dark; /* make default scrollbars dark */
 
-	color            : var(--fg);
-	background-color : var(--bg);
+	color                   : var(--fg);
+	background-color        : var(--bg);
 
 `)
 
 /* SPACINGS --------------------------------------------------------------- */
+
+css(':root', '', `
+
+	--fs-normal : 14px;
+	--lh        : 1.5; /* only unitless allowed! */
+	--lh-input  : 1.25; /* 1.25 is the minimum that <input> supports! */
+	--fs        : var(--fs-normal);
+
+	font-size   : var(--fs);
+	line-height : var(--lh);
+
+`)
 
 css(':root', 'arial', `
 
@@ -217,32 +242,30 @@ css(':root', 'arial', `
 	--space-4   :    1rem;
 	--space-8   :    2rem;
 
-	--font-size-normal  : 14px;
-	--lh-input          : 1.25; /* minimum that the <input> tag supports */
+	--fs-xsmall : calc(var(--fs-normal) * .72);    /* 10/14 */
+	--fs-small  : calc(var(--fs-normal) * .8125);  /* 12/14 */
+	--fs-smaller: calc(var(--fs-normal) * .875);   /* 13/14 */
+	--fs-large  : calc(var(--fs-normal) * 1.125);  /* 16/14 */
+	--fs-xlarge : calc(var(--fs-normal) * 1.5);
 
-	--font-size-xsmall  : .72rem;    /* 10/14 */
-	--font-size-small   : .8125rem;  /* 12/14 */
-	--font-size-smaller : .875rem;   /* 13/14 */
-	--font-size-large   : 1.125rem;  /* 16/14 */
-	--font-size-xlarge  : 1.5rem;
-
-	--font-size-h1      : 2em;
-	--font-size-h2      : 1.5em;
-	--font-size-h3      : 1.3em;
+	--fs-h1     : 2em;
+	--fs-h2     : 1.5em;
+	--fs-h3     : 1.3em;
 
 	/* TODO: remove this */
 	--font-baseline-adjust-ff: 0;
 
-	font-size : var(--font-size-normal);
+	font-size   : var(--fs);
+	line-height : var(--lh);
 
 `)
 
 css('.theme-small', '', `
-	--font-size-normal : 12px;
+	--fs-normal : 12px;
 `)
 
 css('.theme-large', '', `
-	--font-size-normal : 16px;
+	--fs-normal : 16px;
 `)
 
 /* RESET ------------------------------------------------------------------ */
@@ -294,11 +317,11 @@ css('a', '', ` color: var(--fg-link); `)
 
 css_state('a:visited', '', ` color: var(--fg-link); `)
 
-css('p', '', ` color: var(--fg-p); `)
+css('p', '', ` opacity: .9; `)
 
-css('h1', '', ` font-size: var(--font-size-h1); `)
-css('h2', '', ` font-size: var(--font-size-h2); `)
-css('h3', '', ` font-size: var(--font-size-h3); `)
+css('h1', '', ` --fs: var(--fs-h1); font-size: var(--fs); `)
+css('h2', '', ` --fs: var(--fs-h2); font-size: var(--fs); `)
+css('h3', '', ` --fs: var(--fs-h3); font-size: var(--fs); `)
 
 /* text selection */
 css('::selection', '', `
@@ -390,9 +413,8 @@ css(`
 css('.mi-font', '', `
 	font-weight: normal;
 	font-style: normal;
-	font-size: 1.5em;
-	vertical-align: -.25em;
-	line-height: 1;
+	font-size   : calc(var(--fs) * 1.3); /* trying to match fontawsome in *apparent* size */
+	line-height : calc(var(--fs) * var(--lh)); /* in pixels so that it matches the main font line height */
 	letter-spacing: normal;
 	text-transform: none;
 	display: inline-block;
@@ -421,15 +443,15 @@ css('.mi', 'mi-round')
 
 css('.pre'       , '', ` white-space: pre; `)
 css('.pre-line'  , '', ` white-space: pre-line; `)
-css('.xsmall'    , '', ` font-size: var(--font-size-xsmall ); `)
-css('.small'     , '', ` font-size: var(--font-size-small  ); `)
-css('.smaller'   , '', ` font-size: var(--font-size-smaller); `)
-css('.normal'    , '', ` font-size: var(--font-size-normal ); `)
-css('.large'     , '', ` font-size: var(--font-size-large  ); line-height: 1.75; `)
-css('.xlarge'    , '', ` font-size: var(--font-size-xlarge ); line-height:    2; `)
-css('.tight'     , '', ` line-height: 1.2; `)
-css('.lh1'       , '', ` line-height: 1; `)
-css('.lh0'       , '', ` line-height: 0; `)
+css('.xsmall'    , '', ` --fs: var(--fs-xsmall ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
+css('.small'     , '', ` --fs: var(--fs-small  ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
+css('.smaller'   , '', ` --fs: var(--fs-smaller); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
+css('.normal'    , '', ` --fs: var(--fs-normal ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
+css('.large'     , '', ` --fs: var(--fs-large  ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
+css('.xlarge'    , '', ` --fs: var(--fs-xlarge ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
+css('.tight'     , '', ` --lh: 1.2; line-height: var(--lh); `)
+css('.lh1'       , '', ` --lh:   1; line-height: var(--lh); `)
+css('.lh0'       , '', ` --lh:   0; line-height: var(--lh); `)
 css('.littlebold', '', ` font-weight: 500; `)
 css('.semibold'  , '', ` font-weight: 600; `)
 css('.bold'      , '', ` font-weight: bold; `)
@@ -447,7 +469,7 @@ css('.arial'     , '', `font-family: arial, sans-serif;`)
 
 css_chrome('.arial', '', `
 	--p-y-input-adjust-xsmall  : 1px;
-	--p-y-input-adjust-smaller : 1px;
+	--p-y-input-adjust-smaller : 2px;
 	--p-y-input-adjust-normal  : 1px;
 	--p-y-input-adjust-large   : 1px;
 `)
@@ -493,6 +515,8 @@ css('.h-l' , '', ` display: inline-flex; flex-flow: row   ; justify-content: fle
 css('.h-r' , '', ` display: inline-flex; flex-flow: row   ; justify-content: flex-end     ; `)
 css('.h-c' , '', ` display: inline-flex; flex-flow: row   ; justify-content: center       ; `)
 css('.h-sb', '', ` display: inline-flex; flex-flow: row   ; justify-content: space-between; `)
+css('.h-sa', '', ` display: inline-flex; flex-flow: row   ; justify-content: space-around ; `)
+css('.h-se', '', ` display: inline-flex; flex-flow: row   ; justify-content: space-evenly ; `)
 css('.h-s' , '', ` display: inline-flex; flex-flow: row   ; align-items: stretch          ; `)
 css('.h-t' , '', ` display: inline-flex; flex-flow: row   ; align-items: flex-start       ; `)
 css('.h-b' , '', ` display: inline-flex; flex-flow: row   ; align-items: flex-end         ; `)
@@ -900,28 +924,30 @@ css('.overlay', '', `
 
 /* VISIBILITY ------------------------------------------------------------- */
 
-css('.show  ', '', ` display: initial; `) /* TODO: this is flaky! */
+css('.show'  , '', ` display: initial; `) /* TODO: this is flaky! */
 css('.hidden', '', ` display: none; `)
-css('.skip  ', '', ` display: contents; `)
+css('.skip'  , '', ` display: contents; `)
 
 css('.invisible', '', ` visibility: hidden; `)
-css('.visible  ', '', ` visibility: visible; `)
+css('.visible'  , '', ` visibility: visible; `)
 
-css('.click-through    ', '', ` pointer-events: none; `)
+css('.click-through'    , '', ` pointer-events: none; `)
 css('.click-through-off', '', ` pointer-events: all; `)
 
 /* FLAT BACKGROUNDS ------------------------------------------------------- */
 
-css('.bg      ', '', ` background: var(--bg); `)
+css('.bg'      , '', ` background: var(--bg); `)
 css('.bg-hover', '', ` background: var(--bg-hover); `)
-css('.bg1     ', '', ` background: var(--bg1); `)
-css('.bg2     ', '', ` background: var(--bg2); `)
-css('.bg-alt  ', '', ` background: var(--bg-alt); `)
+css('.bg0'     , '', ` background: var(--bg0); `)
+css('.bg1'     , '', ` background: var(--bg1); `)
+css('.bg2'     , '', ` background: var(--bg2); `)
+css('.bg3'     , '', ` background: var(--bg3); `)
+css('.bg-alt'  , '', ` background: var(--bg-alt); `)
 css('.bg-smoke', '', ` background: var(--bg-smoke); `)
-css('.bg-fg   ', '', ` background: var(--fg); `) /* slider thumb, etc. */
+css('.bg-fg'   , '', ` background: var(--fg); `) /* slider thumb, etc. */
 css('.bg-white', '', ` background: var(--fg-white); `)
-css('.bg-link ', '', ` background: var(--fg-link); `) /* slider track */
-css('.no-bg   ', '', ` background: none; `)
+css('.bg-link' , '', ` background: var(--fg-link); `) /* slider track */
+css('.no-bg'   , '', ` background: none; `)
 css('.bg-input', '', ` background: var(--bg-input); `)
 
 css('.bg-error', '', `
@@ -931,7 +957,7 @@ css('.bg-error', '', `
 
 /* IMAGE BACKGROUNDS ------------------------------------------------------ */
 
-css('.bg-cover  ', '', ` background-size: cover; `)
+css('.bg-cover'  , '', ` background-size: cover; `)
 css('.bg-contain', '', ` background-size: contain; `)
 
 css('.bg-c', '', ` background-position: center; `)
@@ -941,24 +967,24 @@ css('.bg-b', '', ` background-position: bottom; `)
 css('.bg-l', '', ` background-position: left; `)
 
 css('.bg-no-repeat', '', ` background-repeat: no-repeat; `)
-css('.bg-repeat-x ', '', ` background-repeat: repeat-x; `)
-css('.bg-repeat-y ', '', ` background-repeat: repeat-y; `)
+css('.bg-repeat-x' , '', ` background-repeat: repeat-x; `)
+css('.bg-repeat-y' , '', ` background-repeat: repeat-y; `)
 
 /* FILTERS ---------------------------------------------------------------- */
 
-css('.darken   ', '', ` filter: brightness(0.85); `)
-css('.lighten  ', '', ` filter: brightness(1.15); `)
+css('.darken'   , '', ` filter: brightness(0.85); `)
+css('.lighten'  , '', ` filter: brightness(1.15); `)
 css('.no-filter', '', ` filter: none; `)
 
-css('.op0   ', '', ` opacity:  0; `)
-css('.op1   ', '', ` opacity:  1; `)
+css('.op0', '', ` opacity:  0; `)
+css('.op1', '', ` opacity:  1; `)
 
 for (let i = 1; i <= 9; i++)
 	css('.op0'+i, '', ` opacity: .${i}; `)
 
 /* SHADOWS ---------------------------------------------------------------- */
 
-css('.ring          ', '', ` box-shadow:  0px  0px  2px var(--ring); `)
+css('.ring          ', '', ` box-shadow:  0px  0px  2px 0px var(--ring); `)
 
 css('.shadow        ', '', ` box-shadow: var(--shadow-tooltip); `)
 css('.shadow-tooltip', '', ` box-shadow: var(--shadow-tooltip); `)
