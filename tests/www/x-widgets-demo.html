@@ -16,10 +16,21 @@
 <script src="grid.js"></script>
 <script src="chart.js"></script>
 <script src="module.js"></script>
+<script src="markdown-it.js"></script>
 <script src="theme-tw.js"></script>
 <script src="ace/ace.js"></script>
 
 <style>
+
+/*
+.theme-light {
+	--bg: hsl(220deg, 43%, 97%);
+	--bg-input: white;
+	--bg-button: white;
+	--bg-select-button: white;
+	background: var(--bg);
+}
+*/
 
 #layout {
 	height: 100%;
@@ -63,6 +74,12 @@
 .demo-list-item.selected { background: #ddf; }
 .theme-dark .demo-list-item.selected { background: #336; }
 
+button[pressed] { background: var(--bg-button-active); }
+
+.flex-h-container { display: flex; flex-direction: row; }
+.flex-v-container { display: flex; flex-direction: column; }
+.inline-container { display: inline; }
+
 </style>
 
 </head>
@@ -85,18 +102,23 @@ on_dom_load(function() {
 			<button id=run_button>Run</button>
 			<button id=reload_button>Reload</button>
 			<div class="S h-r gap-x-05">
-				<button id=small_button>Small</button>
-				<button id=large_button>Large</button>
 				<button id=lights_button>Lights</button>
+				<d class="m b-l"></d>
+				<button id=small_button>Small</button>
+				<button id=normal_button>Normal</button>
+				<button id=large_button>Large</button>
 			</div>
 		</div>
 		<aceeditor id=code></aceeditor>
 	</div>
 	<div id=result_split>
-		<div id=result_buttons class="smaller p-x-05">
+		<div id=result_buttons class="smaller p-x-05 gap-x-05">
 			<button id=inline_button>Inline</button>
+			<button id=flex_h_button>Flex H</button>
+			<button id=flex_v_button>Flex V</button>
+			<button id=grid_button>Grid</button>
 		</div>
-		<div id=result class=x-container></div>
+		<div id=result></div>
 		<div id=inspect></div>
 	</div>
 </div>
@@ -348,9 +370,21 @@ main.add(btn({
 <!--------------------------------------------------------------------------->
 
 <template id=slides_demo>
-<slides>
-
+<slides id=my_slides selected=slide2>
+	<div id=slide1>
+		<h1>Slide 1</h1>
+		<p>Lorem ipsum</p>
+	</div>
+	<div id=slide2>
+		<h1>Slide 2</h1>
+		<p>Lorem ipsum</p>
+		<p>Lorem ipsum</p>
+	</div>
 </slides>
+<div>
+	<button onclick="my_slides.prev_slide()">prev slide</button>
+	<button onclick="my_slides.next_slide()">next slide</button>
+</div>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -359,9 +393,9 @@ main.add(btn({
 <md>
 # Sup fellow kids?
 
-So this is a paragraph.
+This is a paragraph.
 
-And this is [another](exmaple.com) one.
+And this is a [link](exmaple.com).
 </md>
 </template>
 
@@ -369,6 +403,7 @@ And this is [another](exmaple.com) one.
 
 <template id=pagenav_demo>
 <pagenav></pagenav>
+<pagenav item_count=123456 page=1234></pagenav>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -384,6 +419,21 @@ my_r.widget_editing = true
 
 <!--------------------------------------------------------------------------->
 
+<template id=info_demo>
+<info id=my_info>
+	<h3>It never entered my mind, but</h3>
+	<p>Here we are</p>
+</info>
+<button action=toggle_collapsed>Toggle Collapsed</button>
+<script run>
+toggle_collapsed = function() {
+	my_info.collapsed = !my_info.collapsed
+}
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
 <template id=check_demo>
 <d class="h-m m b ro p">
 	<check id=my_check checked></check><label for=my_check>Wasup</label>
@@ -393,18 +443,33 @@ my_r.widget_editing = true
 <!--------------------------------------------------------------------------->
 
 <template id=toggle_demo>
-<d class="h-m m b ro p-x-2">
-	<label for=my_toggle class="S">Wasup</label><toggle id=my_toggle checked></toggle>
+<d class="h-m m b p ro">
+	<label for=my_toggle class="S p-x">Wasup</label><toggle id=my_toggle checked></toggle>
 </d>
 </template>
 
 <!--------------------------------------------------------------------------->
 
 <template id=radio_demo>
-<d class="v-m m b p ro">
-	<d class="h-m"><radio id=my_radio1 group=g1 checked></radio><label for=my_radio1>Option 1</label></d>
-	<d class="h-m"><radio id=my_radio2 group=g1></radio><label for=my_radio2>Option 2</label></d>
+<d class="v-m m b p ro radio-group">
+	<d class="h-m"><radio id=my_radio1 checked></radio><label for=my_radio1>Option 1</label></d>
+	<d class="h-m"><radio id=my_radio2></radio><label for=my_radio2>Option 2</label></d>
 </d>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=slider_demo>
+<slider val=0.7 marked=false></slider>
+<slider val=5 from=1 to=9 min=3 max=7 decimals=0></slider>
+<range-slider min_val=1200 max_val=1800 from=1000 to=2000 decimals=0></range-slider>
+<script run>
+//s1.add_validator('custom', field => ({
+//		validate: v => isnum(v) && v >= .2 && v <= .8,
+//		message: 'Value not between .2 and .8',
+//	})
+//)
+</script>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -445,6 +510,12 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 
 <!--------------------------------------------------------------------------->
 
+<template id=teaxtarea_demo>
+<textarea></textarea>
+</template>
+
+<!--------------------------------------------------------------------------->
+
 <template id=button_demo>
 <p>
 	<button id=cancel_button confirm="U sure?" class=large>Cancel</button>, says the button.
@@ -453,7 +524,8 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 </p>
 <p>
 	<button primary>OK</button>
-	<button icon="fa fa-biohazard">Click&nbsp;<i>me</i>&nbsp;too!</button>
+	<button icon="fa fa-folder">Click&nbsp;<i>me</i>&nbsp;too!</button>
+	<button icon="mi mi-folder">Using mi icons</button>
 	<button bare icon="fa fa-play">I'm also a button</button>
 	<script run>
 		this.parent.add(button({
@@ -474,17 +546,56 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 
 <!--------------------------------------------------------------------------->
 
-<template id=info_demo>
-<info id=my_info>
-	<h3>It never entered my mind, but</h3>
-	<p>Here we are</p>
-</info>
-<button action=toggle_collapsed>Toggle Collapsed</button>
-<script run>
-toggle_collapsed = function() {
-	my_info.collapsed = !my_info.collapsed
-}
-</script>
+<template id=select_button_demo>
+<d class="small">
+	<select-button>
+		<d><span class="mi">rocket</span>Rockets</d>
+		<d><span class="mi">radar</span>Radar</d>
+		<d><span class="mi">military_tech</span>Stars</d>
+	</select-button>
+	<button>OK</button>
+	<input class="w4 ro-var">
+	<select-button>
+		<d class="mi">dark_mode</d>
+		<d class="mi">light_mode</d>
+	</select-button>
+	<select-button>
+		<d style="font-size: .75em">A</d>
+		<d style="">A</d>
+		<d style="font-size: 1.25em">A</d>
+	</select-button>
+</d>
+<d class=large>
+	<select-button>
+		<d><span class="mi">rocket</span> Rockets</d>
+		<d><span class="mi">radar</span> Radar</d>
+		<d><span class="mi">military_tech</span> Stars</d>
+	</select-button>
+	<button>OK</button>
+	<input class="w4 ro-var">
+	<select-button>
+		<d class="mi">dark_mode</d>
+		<d class="mi">light_mode</d>
+	</select-button>
+	<select-button>
+		<d style="font-size: .75em">A</d>
+		<d style="">A</d>
+		<d style="font-size: 1.25em">A</d>
+	</select-button>
+</d>
+<select-button>
+	<d>Label</d>
+	<d>Label</d>
+	<d>Label</d>
+</select-button>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=tags_demo>
+<tags class="small"  tags="apples bananas mangos"></tags><button>OK</button>
+<tags class="normal" tags="Apples Bananas Mangos"></tags><button>OK</button>
+<tags class="large"  tags="apples bananas mangos"></tags><button>OK</button>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -705,24 +816,6 @@ t.add_validator('bananas', function(field) {
 		message: 'Can\'t renounce bananas',
 	}
 })
-</script>
-</template>
-
-<!--------------------------------------------------------------------------->
-
-<template id=slider_demo>
-<slider val=0.7 label="Slider with a very very long label" info="This is a slider"></slider>
-<slider id=s1 val=0.5 label="Slider 1" info="This is another slider"></slider>
-<slider id=s2 val=1500 from=1000 to=2000
-	label="Slider 2" info="This is yet another slider">
-	<field min=1300 max=1700 decimals=2></field>
-</slider>
-<script run>
-s1.add_validator('custom', field => ({
-		validate: v => isnum(v) && v >= .2 && v <= .8,
-		message: 'Value not between .2 and .8',
-	})
-)
 </script>
 </template>
 
@@ -1541,16 +1634,49 @@ lights_button.on('click', function() {
 	ace_editor.setTheme(dark ? 'ace/theme/tomorrow_night' : null)
 	save('dark_mode', dark)
 	set_theme_dark(dark)
+	this.attr('pressed', !dark)
 })
 
+function reset_container_buttons() {
+	inline_button.attr('pressed', false)
+	flex_h_button.attr('pressed', false)
+	flex_v_button.attr('pressed', false)
+	grid_button.attr('pressed', false)
+	result.class('inline-container flex-h-container flex-v-container x-container', false)
+}
+
 inline_button.on('click', function() {
-	result.switch_class('inline', 'x-container', result.hasclass('inline'))
-	inline_button.bool_attr('pressed', result.hasclass('inline') || null)
+	reset_container_buttons()
+	result.class('inline-container')
+	save('container', 'inline')
+	inline_button.bool_attr('pressed', true)
+})
+
+flex_h_button.on('click', function() {
+	reset_container_buttons()
+	result.class('flex-h-container')
+	save('container', 'flex-h')
+	flex_h_button.bool_attr('pressed', true)
+})
+
+flex_v_button.on('click', function() {
+	reset_container_buttons()
+	result.class('flex-v-container')
+	save('container', 'flex-v')
+	flex_v_button.bool_attr('pressed', true)
+})
+
+grid_button.on('click', function() {
+	reset_container_buttons()
+	result.class('x-container')
+	save('container')
+	grid_button.bool_attr('pressed', true)
 })
 
 function reset_size_buttons() {
 	small_button.attr('pressed', false)
 	large_button.attr('pressed', false)
+	normal_button.attr('pressed', false)
 }
 
 small_button.on('click', function() {
@@ -1569,6 +1695,13 @@ large_button.on('click', function() {
 	set_theme_size(v && 'large')
 })
 
+normal_button.on('click', function() {
+	reset_size_buttons()
+	this.attr('pressed', true)
+	save('size', null)
+	set_theme_size()
+})
+
 on_dom_load(function() {
 	if (load('dark_mode') == 'true')
 		lights_button.click()
@@ -1576,6 +1709,16 @@ on_dom_load(function() {
 		small_button.click()
 	else if (load('size') == 'large')
 		large_button.click()
+	else
+		normal_button.click()
+	if (load('container') == 'inline')
+		inline_button.click()
+	else if (load('container') == 'flex-h')
+		flex_h_button.click()
+	else if (load('container') == 'flex-v')
+		flex_v_button.click()
+	else
+		grid_button.click()
 })
 
 </script>

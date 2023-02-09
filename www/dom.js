@@ -1789,6 +1789,12 @@ sets css classes:
 
 */
 
+// move the focus ring from the inner focused element to the outermost focusable.
+css_state_firefox('.focus-within:focus-within', 'outline-focus') // no :has() yet.
+css_state_chrome('.focus-within:has(:focus-visible)', 'outline-focus')
+css_role_state('.focus-within :focus-visible', 'no-outline')
+css_role_state('.focus-within .focus-within:focus-within', 'no-outline')
+
 e.make_focusable = function(fe) {
 
 	let e = this
@@ -1800,6 +1806,9 @@ e.make_focusable = function(fe) {
 
 	if (!fe.hasattr('tabindex'))
 		fe.attr('tabindex', 0)
+
+	if (fe != e)
+		e.class('focus-within')
 
 	function update() {
 		let can_be_focused = e.focusable && !e.disabled

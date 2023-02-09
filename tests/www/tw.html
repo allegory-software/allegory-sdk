@@ -6,7 +6,7 @@
 	- `theme-light` enables theme-inverted class
 	- `hidden` so we prevent load-time jankiness: we show the page on window load.
 -->
-<html class="inter theme-light" hidden style="font-size: 16px">
+<html class="inter theme-light" hidden style="--fs-normal: 16px">
 <base href="../../www/">
 <head>
 <title>TW UI DEMO</title>
@@ -87,13 +87,13 @@ css_state('.menu-item:hover .menu-item-icon', 'white')
 
 // toggle component
 
-css('my-toggle', 't-m p-05 round bg1 h-m ease ring hand', `
+css('my-toggle', 't-m p-05 round b bg1 h-m ease hand', `
 	min-width  : 3em;
 	max-width  : 3em;
 	min-height : 1.75em;
 	max-height : 1.75em;
 `)
-css('.my-toggle-thumb', 'round bg ring ease', `
+css('.my-toggle-thumb', 'round bg ease shadow-thumb', `
 	min-width  : 1.2em;
 	min-height : 1.2em;
 `)
@@ -146,7 +146,7 @@ on('load', function() {
 <body class="v-c rel bg-no-repeat" style="background-image: url(../tests/www/tw-bg.jpg); background-size: 150rem; background-position-x: -10rem">
 	<d class="v" style="width: 1296px">
 		<d class="h-m smaller p-y-2rem">
-			<d class="S large bold">allegory sdk<d class="b2 b-fg ro-075 m-05 p-x-025 small">UI</d></d>
+			<d class="S xlarge bold h-m">allegory sdk<d class="b2 m-05 m-x b-fg ro-075 p-x-025 small tight">UI</d></d>
 			<d class="m-l-2rem semibold">Components</d>
 			<d class="m-l-2rem semibold">Templates <d class="m p-x-05 p-y-025 round xsmall bg-sky white">New</d></d>
 			<d class="m-l-2rem semibold">Documentation</d>
@@ -169,7 +169,7 @@ on('load', function() {
 				<d class="y2">
 					<p class="large">
 						Beautifully designed, expertly crafted components and templates,
-						built by the makers of Tailwind CSS. The perfect starting point
+						built by the makers of Allegory SDK. The perfect starting point
 						for your next project.
 					</p>
 					<d class="h">

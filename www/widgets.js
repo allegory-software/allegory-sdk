@@ -1316,13 +1316,15 @@ calls:
 
 widget_items_widget = function(e) {
 
-	function same_items(t, items) {
-		if (t.length != items.length)
+	function same_set(s1, s2) {
+		if (s1.size != s2.size)
 			return false
-		for (let i = 0; i < t.length; i++) {
-			let id0 = items[i].id
-			let id1 = isstr(t[i]) ? t[i] : t[i].id
-			if (!id1 || !id0 || id1 != id0)
+		let it1 = s1.values()
+		let it2 = s2.values()
+		for(let i = 0, n = s1.size; i < n; i++) {
+			let v1 = it1.next().value
+			let v2 = it2.next().value
+			if (v1 != v2)
 				return false
 		}
 		return true
@@ -1332,7 +1334,10 @@ widget_items_widget = function(e) {
 
 		t = isstr(t) ? t.words() : t
 
-		if (same_items(t, cur_items))
+		if (isarray(t))
+			t = set(t)
+
+		if (same_set(t, cur_items))
 			return cur_items
 
 		// diff between t and cur_items keyed on item's object identity or its id.
@@ -1357,7 +1362,7 @@ widget_items_widget = function(e) {
 
 		e.update({items: items})
 
-		return items.toarray()
+		return items
 	}
 
 	e.serialize_items = function(items) {
@@ -1367,11 +1372,7 @@ widget_items_widget = function(e) {
 		return t
 	}
 
-	// e.prop('_items', {private: true, convert: diff_items, default: []})
-	// e.set_items = function(items) {
-	// 	e._items = items
-	// }
-	e.prop('items', {type: 'nodes', serialize: e.serialize_items, convert: diff_items, default: []})
+	e.prop('items', {type: 'nodes', serialize: e.serialize_items, convert: diff_items, default: empty_set})
 
 	// parent-of selectable widget protocol.
 	e.child_widgets = function() {
@@ -1538,7 +1539,7 @@ widget('tabs', 'Containers', function(e) {
 
 	let selected_tab = null
 
-	e.do_update = function(opt) {
+	e.on_update(function(opt) {
 
 		if (!e.selection_bar) {
 			e.selection_bar = tag('tabs-selection-bar')
@@ -1561,11 +1562,12 @@ widget('tabs', 'Containers', function(e) {
 					item.remove()
 					item.on('label_changed', item_label_changed, false)
 					item._tab = null
+					item._tabs = null
 				}
 			}
-			e.tabs_box.innerHTML = null
+			e.tabs_box.innerHTML = null // reappend items without rebinding them.
 			for (let item of items) {
-				if (!item._tab) {
+				if (item._tabs != e) {
 					let xbutton = tag('tabs-xbutton')
 					xbutton.hidden = true
 					let title_box = tag('tabs-title')
@@ -1580,6 +1582,7 @@ widget('tabs', 'Containers', function(e) {
 					xbutton.on('pointerdown', xbutton_pointerdown)
 					tab.item = item
 					item._tab = tab
+					item._tabs = e
 					item.on('label_changed', item_label_changed)
 					update_tab_title(tab)
 					item._tab.x = null
@@ -1627,7 +1630,7 @@ widget('tabs', 'Containers', function(e) {
 
 		e.add_button.hidden = !(e.can_add_items || e.widget_editing)
 
-	}
+	})
 
 	let tr, cr
 
@@ -1988,7 +1991,7 @@ widget('split', 'Containers', function(e) {
 
 	let horiz, left
 
-	e.do_update = function() {
+	e.on_update(function() {
 
 		e.xoff()
 		if (!e.item1) e.item1 = widget_placeholder({module: e.module})
@@ -2018,7 +2021,7 @@ widget('split', 'Containers', function(e) {
 		e.auto_pane.min_h = null
 
 		document.fire('layout_changed')
-	}
+	})
 
 	e.prop('orientation', {type: 'enum', enum_values: 'horizontal vertical', default: 'horizontal', attr: true})
 	e.prop('fixed_side' , {type: 'enum', enum_values: 'first second', default: 'first', attr: true})
@@ -2597,7 +2600,12 @@ widget('toolbox', function(e) {
 
 /* <slides> ------------------------------------------------------------------
 
-
+in attrs:
+	selected selected_index
+in props:
+	selected_id selected_index
+out props:
+	selected_item
 
 */
 
@@ -2626,85 +2634,140 @@ widget('slides', 'Containers', function(e) {
 	contained_widget(e)
 	let html_items = widget_items_widget(e)
 
-	let i0
-	e.do_update = function(opt) {
-
-		if (opt.new_items)
-			for (let item of opt.new_items) {
-				item.class('slide', true)
-				e.add(item)
-			}
-
-		if (opt.removed_items)
-			for (let item of opt.removed_items)
-				item.remove()
-
-		if (opt.items) {
-			e.innerHTML = null
-			for (let item of opt.items)
-				e.append(item)
-			i0 = null
-		}
-
-		let i1 = e.selected_index
-		if (i0 != i1) {
-			let e0 = e.items[i0]
-			let e1 = e.items[i1]
-			if (e0) e0.class('slide-selected', false)
-			if (e1) e1.class('slide-selected', true)
-			if (e1) e.fire('slide_changed', i1)
-			i0 = i1
-		}
-	}
+	// model
 
 	e.prop('selected_index', {type: 'number', default: 0})
+	e.prop('selected_id'   , {type: 'id', attr: 'selected'})
 
-	e.property('selected_item', () => e.items[e.selected_index])
+	e.property('selected_item',
+		function() {
+			let item
+			if (e.selected_id) {
+				item = window[e.selected_id]
+				item = item && item.parent == e && item
+			}
+			return item || e.at[e.selected_index] || e.at[0] || null
+		}, function(item) {
+			if (warn_if(item && item.parent != e, 'slide: invalid item'))
+				return
+			if (e.selected_id) {
+				if (warn_if(item && !item.id, 'slide: item has no id'))
+					return
+				e.selected_id = item && item.id || null
+			} else {
+				e.selected_index = item ? item.index : null
+			}
+		})
 
-	e.slide = function(i, onfinish) {
-		e.selected_index = i
-		if (e.selected_item) {
-			e.selected_item.focus_first()
-			if (onfinish)
-				e.selected_item.once('transitionend', function() {
-					onfinish(e, this)
-				})
-		}
+	function clamp_item(i, rollover) {
+		if (e.len < 2) return 0
+		if (rollover) return i % e.len
+		return clamp(i, 0, e.len-1)
 	}
+
+	e.next_slide = function(rollover) {
+		let e0 = e.selected_item
+		let i1 = clamp_item(or(e0 && e0.index, -1) + 1, rollover)
+		e.selected_item = e.at[i1]
+	}
+
+	e.prev_slide = function(rollover) {
+		let e0 = e.selected_item
+		let i1 = clamp_item(or(e0 && e0.index, -1) - 1, rollover)
+		e.selected_item = e.at[i1]
+	}
+
+	// view
+
+	let selected_item
+	e.on_update(function(opt) {
+
+		let items = opt.items
+		if (items) {
+			for (let item of e.at) {
+				if (item && !items.has(item)) {
+					item.remove()
+					item.class('slide', false)
+					item.class('slide-selected', false)
+					item._slides = null
+				}
+			}
+			e.innerHTML = null // reappend items without rebinding them.
+			for (let item of items) {
+				if (item._slides != e) { // new item
+					item._slides = e
+					item.class('slide', true)
+					e.add(item)
+				} else { // existing item
+					e.append(item)
+				}
+			}
+		}
+
+		let e0 = selected_item
+		let e1 = e.selected_item
+		if (e0 != e1) {
+			if (e0)
+				e0.class('slide-selected', false)
+			if (e1) {
+				selected_item = e1
+				e.fire('slide_start', e1)
+				e1.class('slide-selected', true)
+				e1.focus_first()
+				e1.once('transitionend', function() {
+					e.fire('slide_end', e1)
+				})
+			}
+		}
+
+	})
 
 	return {items: html_items}
 
 })
 
 
-/* <md> for markdown ---------------------------------------------------------
+/* <md> markdown tag ---------------------------------------------------------
 
-
+inner html:
+	markdown -> html
 
 */
 
-css('.md', 'v')
+css('md', 'skip')
 
 {
 let md
-widget('md', function(e) {
+component('md', function(e) {
 
 	md = md || markdownit()
-		.use(MarkdownItIndentedTable)
+	if (window.MarkdownItIndentedTable)
+		md.use(MarkdownItIndentedTable)
 
 	e.unsafe_html = md.render(e.html)
+	e.init_child_components()
 
-})}
+})
+}
 
 /* <pagenav> aka page navigation ---------------------------------------------
+
+in props:
+	page_size
+state:
+	page
+out props:
+	item_count
+stubs:
+	page_url(page) -> url
 
 */
 
 widget('pagenav', function(e) {
 
-	e.prop('page', {type: 'number', attr: true, default: 1})
-	e.prop('page_size', {type: 'number', attr: true, default: 100})
-	e.prop('item_count', {type: 'number', attr: true})
+	e.prop('page'      , {type: 'number', default: 1})
+	e.prop('page_size' , {type: 'number', default: 100})
+	e.prop('item_count', {type: 'number', })
 
 	property(e, 'page_count', () => ceil(e.item_count / e.page_size))
 
@@ -2718,7 +2781,7 @@ widget('pagenav', function(e) {
 		let b = button()
 		b.class('pager-button')
 		b.class('selected', page == cur_page())
-		b.bool_attr('disabled', page >= 1 && page <= e.page_count && page != cur_page() || null)
+		b.disable('pagenav', !(page >= 1 && page <= e.page_count && page != cur_page()))
 		b.title = or(title, or(text, S('page', 'Page {0}', page)))
 		b.href = href !== false ? e.page_url(page) : null
 		b.set(or(text, page))
@@ -2737,7 +2800,7 @@ widget('pagenav', function(e) {
 		)
 	}
 
-	e.do_update = function() {
+	e.on_update(function() {
 		e.clear()
 		e.add(e.nav_button(-1))
 		let n = e.page_count
@@ -2753,7 +2816,7 @@ widget('pagenav', function(e) {
 			}
 		}
 		e.add(e.nav_button(1))
-	}
+	})
 
 })
 
@@ -3267,6 +3330,8 @@ css('.toggle', 'm t-m p-05 round bg1 h-m ease ring rel', `
 	min-height : 1.4em;
 	max-height : 1.4em;
 `)
+
+/* TODO: pixel snapping makes this look wrong sometimes, redo it with svg. */
 css('.toggle-thumb', 'round bg-white ring ease abs', `
 	min-width  : 1em;
 	min-height : 1em;
@@ -3626,13 +3691,15 @@ let slider_widget = function(e, range) {
 			e.update()
 		})
 
-		thumb.on('pointerdown', function(ev, mx) {
+		thumb.on('pointerdown', function(ev, mx0) {
 			thumb.focus()
 			let r = e.rect()
+			let tr = thumb.rect()
+			let dx = mx0 - (tr.x + tr.w / 2)
 			function pointermove(ev, mx) {
-				e.user_set_progress((mx - r.x) / r.w, thumb.val_prop)
+				e.user_set_progress((mx - dx - r.x) / r.w, thumb.val_prop)
 			}
-			pointermove(ev, mx)
+			pointermove(ev, mx0)
 			function pointerup(ev) {
 				e.class('animate')
 			}
@@ -3740,11 +3807,6 @@ css_role('inputbox > *', 'm0 b no-z', `position: static;`)
 
 // things that <inputbox> doesn't insist upon its children having.
 css('inputbox > *', 'bg-input')
-
-// move the focus ring from the inner <input> (if any) to the <inputbox>.
-css_state_firefox('inputbox:focus-within', 'outline-focus') // no :has() yet.
-css_state_chrome('inputbox:has(:not(inputbox) .input:focus-visible)', 'outline-focus')
-css_role_state('inputbox .input:focus-visible', 'no-outline')
 
 widget('inputbox', function(e) {
 
@@ -3862,7 +3924,7 @@ css('.button-icon', 'w1 h-c')
 css_state('.button:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background: var(--bg-button-hover);
 `)
-css_state('.button:active', '', `
+css_state('.button:not([disabled]):not(.widget-editing):not(.widget-selected):active', '', `
 	background: var(--bg-button-active);
 	box-shadow: var(--shadow-button-active);
 `)
@@ -3874,7 +3936,7 @@ css('.button[primary]', 'b-invisible', `
 css_state('.button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-primary-hover);
 `)
-css_state('.button[primary]:active', '', `
+css_state('.button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected):active', '', `
 	background : var(--bg-button-primary-active);
 `)
 
@@ -3885,7 +3947,7 @@ css('.button[danger]', '', `
 css_state('.button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-danger-hover);
 `)
-css_state('.button[danger]:active', '', `
+css_state('.button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected):active', '', `
 	background : var(--bg-button-danger-active);
 `)
 
@@ -4094,10 +4156,14 @@ widget('button', 'Input', function(e) {
 
 */
 
-css('.select-button', 'rel ro-var h-s gap-x-0 shadow-button', `
-	padding: 3px;
-	--p-y-input-offset: -3px;
+css('.select-button', 'rel ro-var h-s gap-x-0 bg0 shadow-button', `
+	padding: var(--p-select-button, 3px);
+	--p-y-input-offset: calc(1px - var(--p-select-button, 3px));
 `)
+
+css('.smaller', '', ` --p-select-button: 2px; `)
+css('.xsmall' , '', ` --p-select-button: 1px; `)
+css('.small'  , '', ` --p-select-button: 1px; `)
 
 css('.select-button > :not(.select-button-plate)', 'S h-m t-c p-y-input p-x-button gap-x nowrap-dots noselect dim z1', `
 	flex-basis: fit-content;
@@ -4181,9 +4247,6 @@ widget('select-button', function(e) {
 
 	// controller
 
-	// e.on('pointerdown', function() {
-	// })
-
 	e.on('click', function(ev) {
 		let b = ev.target
 		while (b && b.parent != e) b = b.parent
@@ -4218,9 +4281,71 @@ widget('vselect-button', function(e) {
 
 */
 
+css('.tags', 'h p-05', `
+	background: var(--bg-input);
+	--tag-hue: 154;
+`)
+
+css('.tags-box', 'h-m p-05')
+css('.tags-box::before', 'zwsp tags-tag p-x-0 m-x-0 b-invisible')
+
+css('.tags-tag', 'm-x-05 p-x-2 gap-x ro h-m', `
+	background : hsl(var(--tag-hue), 32%, 28%);
+	color      : hsl(var(--tag-hue), 87%, 61%);
+`)
+
+css('.tags-x', 'round fg h-m h-c small bold', `
+	width : 1.1em;
+	height: 1.1em;
+	background : hsl(var(--tag-hue), 63%, 43%);
+	color      : hsl(var(--tag-hue), 48%, 29%);
+`)
+css('.tags-x::before', 'icon-crossmark')
+
+css('.tags-input', 'S m0 b0 p0')
+
 widget('tags', function(e) {
 
-	//
+	e.class('inputbox')
+
+	e.prop('tags', {convert: words})
+
+	e.clear()
+	e.tags_box = div({class: 'tags-box'})
+	e.input = tag('input', {class: 'tags-input'})
+	e.add(e.tags_box, e.input)
+
+	e.make_focusable(e.input)
+
+	e.set_tags = function(tags) {
+		e.tags_box.clear()
+		for (let tag of tags) {
+			e.tags_box.add(div({class: 'tags-tag'}, tag, div({class: 'tags-x'})))
+		}
+	}
+
+	// controller
+
+	e.on('keydown', function(key) {
+		if (key == 'Backspace') {
+			let s = e.input.value
+			if (s) {
+				let s1 = e.input.selectionStart
+				let s2 = e.input.selectionEnd
+				if (s1 != s2) return
+				if (s1 != 0) return
+			}
+			e.tags = e.tags.slice(0, -1)
+			return false
+		}
+		if (key == 'Enter') {
+			let s = e.input.value
+			if (!s) return
+			let t1 = e.tags.slice(); t1.push(s); e.tags = t1
+			e.input.value = ''
+			return false
+		}
+	})
 
 })
 

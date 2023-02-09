@@ -66,10 +66,10 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--fg-link-active        : hsl(222 100%  60% / 1.0);
 
 	--bg0                   : hsl(  0   0% 100% / 1.0); /* opaque */
-	--bg                    : hsl(  0   0%  99% / 1.0); /* opaque */
-	--bg-hover              : hsl(  0   0%  98% / 1.0); /* opaque */
+	--bg                    : hsl(  0   0%  98% / 1.0); /* opaque */
+	--bg-hover              : hsl(  0   0%  97% / 1.0); /* opaque */
 	--bg-active             : hsl(  0   0%  96% / 1.0); /* opaque */
-	--bg1                   : hsl(  0   0%  90% / 1.0); /* sits on bg; opaque */
+	--bg1                   : hsl(  0   0%  91% / 1.0); /* sits on bg; opaque */
 	--bg1-hover             : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
 	--bg2                   : hsl(  0   0%  80% / 1.0); /* sits on bg1; opaque */
 	--bg2-hover             : hsl(  0   0%  85% / 1.0);
@@ -223,7 +223,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 css(':root', '', `
 
 	--fs-normal : 14px;
-	--lh        : 1.5; /* only unitless allowed! */
+	--lh        : 1.25; /* only unitless allowed! */
 	--lh-input  : 1.25; /* 1.25 is the minimum that <input> supports! */
 	--fs        : var(--fs-normal);
 
@@ -475,12 +475,13 @@ css_chrome('.arial', '', `
 `)
 
 /* use with ::before; inserts ZWSP to force line height on empty text */
-css('.zwsp     ', '', " content: '\200b'; ")
+css('.zwsp     ', '', ` content: "\\200b"; `)
 
 css('[dim]'          , '', ` color: var(--fg-dim); `)
 css('.dim'           , '', ` color: var(--fg-dim); `)
 css('.dim-on-dark'   , '', ` color: var(--fg-dim-on-dark); `)
 css('.white'         , '', ` color: var(--fg-white); `)
+css('.black'         , '', ` color: var(--fg-black); `)
 css('.label'         , '', ` color: var(--fg-label); `)
 css('.label-hover'   , '', ` color: var(--fg-label-hover); `)
 css('.label-on-dark' , '', ` color: var(--fg-label-on-dark); `)
@@ -705,8 +706,8 @@ css('.b-collapse-v > :not(:last-child)' , '', ` border-bottom-color: #00000000; 
 css('.ro-var', '', `border-radius: var(--border-radius, var(--space-075));`)
 css('.xsmall' , '', `--border-radius: var(--space-025);`)
 css('.small'  , '', `--border-radius: var(--space-05 );`)
-css('.smaller', '', `--border-radius: var(--space-05 );`)
-css('.normal' , '', `--border-radius: var(--space-075);`)
+css('.smaller', '', `--border-radius: var(--space-075);`)
+css('.normal' , '', `--border-radius: var(--space-1  );`)
 css('.large'  , '', `--border-radius: var(--space-1  );`)
 css('.xlarge' , '', `--border-radius: var(--space-1  );`)
 
@@ -1150,6 +1151,7 @@ css('.icon-chevron-up::before'  , 'icon-chevron-down  flip-v', `--translate-y: 0
 
 /* UNICODE ICONS ---------------------------------------------------------- */
 
+css('.icon-crossmark'         , '', `content: "×";`) // &times;
 css('.icon-3-dots-v::before'  , '', `content: "\\22ee";`) // kebab
 css('.icon-3-dots-h::before'  , '', `content: "\\22ef";`) // meatballs
 css('.icon-3-lines-h::before' , '', `content: "\\2261";`) // burger (also \2630)
