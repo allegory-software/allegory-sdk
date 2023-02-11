@@ -1591,25 +1591,37 @@ e.prop = function(prop, opt) {
 	}
 
 	// id-based dynamic binding of external elements to a prop.
-	if (opt.bind_id) {
+	if (opt.bind_id || opt.on_bind) {
 		assert(!priv)
 		let ID = prop
 		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
-		let REF = opt.bind_id
+		let REF = opt.bind_id || ID+'_ref'
+		let on_bind = opt.on_bind
 		function id_bind(id, on) {
 			if (!id) return
-			let te = resolve_linked_element(id)
+			let te = on ? resolve_linked_element(id) : null
+			if (on_bind && e[REF])
+				on_bind.call(e, e[REF], false)
 			e[REF] = te
+			if (on_bind && te)
+				on_bind.call(e, te, true)
 			e.debug_if(DEBUG_ELEMENT_BIND, te ? '==' : '=/=', DEBUG_ID, id)
 		}
 		e.listen('bind', function(te, on) {
-			if (e[ID] != te.id) return
+			if (!e[ID] || e[ID] != te.id) return
+			if (on_bind && e[REF])
+				on_bind.call(e, e[REF], false)
 			e[REF] = on ? te : null
+			if (on_bind && on)
+				on_bind.call(e, te, true)
 			e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
 		})
 		e.listen('id_changed', function(te, id1, id0) {
 			if (e[ID] != id0) return
 			e[ID] = id1
+		})
+		e.on_bind(function(on) {
+			id_bind(e[ID], on)
 		})
 		prop_changed = function(e, k, v1, v0) {
 			fire_prop_changed(e, k, v1, v0)
@@ -2849,7 +2861,7 @@ css('component', 'skip')
 component('component', function(e) {
 
 	let tag = e.attr('tag')
-	let script = e.$1('script')
+	let script = e.$1(':scope>script')
 
 	if (warn_if(!tag, '<component> tag attr missing')) return
 	if (warn_if(!script, '<component> <script> tag missing')) return

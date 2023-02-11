@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html class="m0 p0 abs overlay inter">
+<head>
+<style>
+@font-face {
+  font-family: 'inter';
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
+  font-named-instance: 'Regular';
+  src: url("inter-roman.var.woff2") format("woff2");
+}
+* { box-sizing: border-box; }
+
+.ibox { height: 44px; width: 240px; border-radius: 11px; color: white; padding: 12px;
+	background: #323741;
+	box-shadow: 1px 1px 2px 0px #00000044;
+}
+.o-focus { outline: 3px solid #1f3569; background: #2a2f3b; }
+.label { color: #666; margin-bottom: 10px; }
+.lbl { flex: 1; text-align: center; padding: 12px; color: #666; }
+.lbl-bg { background: #323741; border-radius: 8px; padding: 9px; margin: 3px; color: white; }
+
+.inter { font-family: inter, sans-serif; font-size: 16px; }
+.bg1 { background: #23242a; }
+.bg0 { background: #1c1d21; }
+.m0 { margin: 0; }
+.p0 { padding: 0; }
+.abs { position: absolute; }
+.rel { position: relative; }
+.overlay { top: 0; left: 0; right: 0; bottom: 0; }
+.box { width: 10px; height: 10px; background: red; }
+.b { border: 1px solid #494d59; }
+.b-focus { border-color: #2a5edf; }
+.h { display: flex; flex-direction: row; }
+.v { display: flex; flex-direction: column; }
+.m-b-lg { margin-top: 0px; margin-bottom: 30px; }
+.tag { align-items: center; padding: 6px; padding-top: 0; padding-bottom: 0; display: flex; flex-flow: row;
+	border-radius: 8px;
+	--tag-hue: 154;
+	background : hsl(var(--tag-hue), 32%, 28%);
+	color      : hsl(var(--tag-hue), 87%, 61%);
+}
+.tag::after { content: "×"; align-items: center; margin: 6px; display: flex; width: 10px; height: 10px; border-radius: 50%;
+	--tag-hue: 154;
+	background : hsl(var(--tag-hue), 63%, 43%);
+	color      : hsl(var(--tag-hue), 48%, 29%);
+}
+</style>
+</head>
+<body class="m0 p0 abs overlay bg1">
+<img class="abs overlay" src="ui-dark-sm.png">
+<d class="abs overlay v bg1" style="left: 54px; top: 70px; opacity: 1;">
+	<d class="label">Label</d>
+	<d class="m-b-lg ibox b b-focus o-focus" style="">Christian Bal</d>
+	<d class="label">Tags</d>
+	<d class="m-b-lg ibox b h" style="padding: 9px; gap: 10px;">
+		<d class="tag">Keyword</d>
+		<d class="tag">Keyword</d>
+	</d>
+	<d class="label">Website</d>
+	<d class="m-b-lg ibox b" style=""></d>
+	<d class="label" style="margin-top: 3px;">Stepper</d>
+	<d class="h" style="gap: 17px;">
+		<d class="m-b-lg ibox b" style="width: 112px"></d>
+		<d class="m-b-lg ibox b" style="width: 112px"></d>
+	</d>
+	<d class="m-b-lg ibox b bg0 h" style="margin-top: 2px; padding: 0; gap: 2px;">
+		<d class="lbl lbl-bg">Label</d>
+		<d class="lbl">Label</d>
+		<d class="lbl">Label</d>
+	</d>
+</d>
+</body>
+</html>

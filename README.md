@@ -163,27 +163,27 @@ scripts for new libraries.
   * [webb_spa](lua/webb_spa.lua)       - Single-page app support
   * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
 * __Web / Client side__
-  * [X-Widgets](X-WIDGETS.md)          - Overview of the web components suite
-  * [X-Widgets Demo][x-widgets-demo]   - X-Widgets Demo (dev branch; http server not required to run it!)
+  * [Widgets](WIDGETS.md)              - Overview of the web components suite
+  * [Widgets Demo][widgets-demo]       - Widgets Demo (dev branch; http server not required to run it!)
   * [glue.js](www/glue.js)             - JS "assorted lenghs of wire" library
   * [dom.js](www/dom.js)               - DOM API and web components
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
-  * [x-widgets.js](www/x-widgets.js)   - Web components & layouting widgets
-  * [x-nav.js](www/x-nav.js)           - Model mixin for data-driven widgets
-  * [x-grid.js](www/x-grid.js)         - Nav-based virtual tree-grid widget
-  * [x-listbox.js](www/x-listbox.js)   - Nav-based listbox widget
-  * [x-input.js](www/x-input.js)       - Nav-based single-value (scalar) widgets
-  * [x-chart.js](www/x-chart.js)       - Nav-based graphs & charts
-  * [x-module.js](www/x-module.js)     - Persistence layer for widget-based self-editing UIs
-* __Web / Client side / Third-party libs__
+  * [widgets.js](www/widgets.js)       - Web components & layouting widgets
+  * [nav.js](www/nav.js)               - Model mixin for data-driven widgets
+  * [grid.js](www/grid.js)             - Nav-based virtual tree-grid widget
+  * [listbox.js](www/listbox.js)       - Nav-based listbox widget
+  * [input.js](www/input.js)           - Nav-based single-value (scalar) widgets
+  * [charts.js](www/charts.js)         - Nav-based graphs & charts
+  * [module.js](www/module.js)         - Persistence layer for widget-based self-editing UIs
+* __Web / Client side / Third-party libs & resources__
   * [mustache.js](www/mustache.js)         - Logic-less templates ([Mustache](https://mustache.github.io/))
   * [purify.js](www/purify.js)             - HTML sanitizer       ([DOMPurify](https://github.com/cure53/DOMPurify))
   * [markdown-it.js](www/markdown-it.js)   - Markdown parser      ([Markdown-it](https://github.com/markdown-it/markdown-it); 6 KLOC but extensible and does tables)
   * [ace/ace.js](www/ace/ace.js)           - Code editor          ([ACE](https://ace.c9.io/); huge, only load when needed)
-  * [fontawesome.css](www/fontawesome.css) - Icons                ([Font Awesome](https://fontawesome.com/icons?m=free))
-  * [opensans](www/divs.css)               - OpenSans fonts
+  * icon fonts: fontawesome, material icons
+  * sans serif fonts: inter, opensans
 
-[x-widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/x-widgets-demo.html
+[widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
 
 # Contributing
 

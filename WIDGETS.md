@@ -1,5 +1,5 @@
 
-# X-Widgets
+# Allegory SDK Widgets
 
 Model-driven web components in pure JavaScript.
 
@@ -20,7 +20,7 @@ scroll, sort and filter 100K items instantly on any modern computer or phone,
 can act as a tree-grid or as a vertical grid, has inline editing, drag & drop
 moving of columns and rows and many other features.
 
-Accompanying that there's a **listbox widget** which is not canvas-drawn (so it
+Accompanying that there's a **list widget** which is not canvas-drawn (so it
 can't hold as many items as the grid efficiently), not out-of-the-box editable,
 but the items can be custom-rendered to variable widths and heights and can
 still have drag & drop moving, multiple selection, sorting, etc.
@@ -33,27 +33,25 @@ Next there's an assortment of **layouting widgets** geared towards
 split-screen-style layouts.
 
 All navigation widgets as well as the single-value widgets are model-driven
-The **navigation widget** (be it a grid, a listbox or a headless nav) holds
+The **navigation widget** (be it a grid, a list or a headless nav) holds
 the data, and one or more value widgets are then bound to the nav widget so
-changes made on a cell by one widget are reflected instantly in other widgets
-(aka 2-way binding). The nav widget then gathers the changes made to one
-or more rows/cells and can push them to a server (aka 3-way binding).
+changes made on a cell by one widget are reflected instantly in other widgets.
+The nav widget then gathers the changes made to one or more rows/cells and
+can push them to a server.
 
 ## Docs / Demo
 
 Like usual, docs are in the code but this time there's also a [demo (master)]
 (and [demo (dev)]).
 
-[demo (master)]: https://raw.githack.com/allegory-software/allegory-sdk/master/tests/www/x-widgets-demo.html
-[demo (dev)]:    https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/x-widgets-demo.html
+[demo (master)]: https://raw.githack.com/allegory-software/allegory-sdk/master/tests/www/widgets-demo.html
+[demo (dev)]:    https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
 
 ## Installation
 
 There is no installation step and no offline preprocessing or packing tools
 are used or necessary. Just make sure you load all the js and css files in
-order like [x-widgets-demo.html] does.
-
-[x-widgets-demo.html]: https://github.com/allegory-software/allegory-sdk/tree/dev/www/x-widgets-demo.html
+order like the demo does.
 
 ## Styling
 
@@ -68,8 +66,12 @@ option for this and it also has a server-side implementation.
 
 ## Coding style
 
-* `glue.js` is intended to be used as a standard library and as such it
-publishes everything directly as globals.
-* `dom.js` is intended to be used as the primary/only DOM manipulation API
-and as such it extends built-in classes directly with new methods and
-properties, instead of wrapping them.
+* `glue.js` is an extension of the JS standard library and as such it publishes
+everything directly as globals or extends built-in prototypes for convenience.
+
+* `dom.js` provides the DOM manipulation API used by all widgets and as such
+it extends the built-in DOM prototypes with new properties and methods.
+
+* `css.js` is a small functional CSS library that widgets are styled with.
+It has a dark mode (and can invert the mode locally), and it has tuned
+small and large modes.

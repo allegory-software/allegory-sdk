@@ -3,6 +3,8 @@
 	webb | single-page apps | client-side API
 	Written by Cosmin Apreutesei. Public Domain.
 
+You must load first:
+	glue.js
 
 You must call on DOM load:
 	init_action()
@@ -382,6 +384,38 @@ e.render = function(data, ev) {
 		|| template(this.template || this.attr('template') || this.id || this.tag)
 	return this.render_string(s, data, ev)
 }
+
+/* <render> ------------------------------------------------------------------
+
+attrs:
+	template
+inner html:
+	<template>
+	<script>
+
+*/
+
+component('render', function(e) {
+
+	let t = e.$1(':scope>template')
+	let ts = t && t.html
+	let tn = e.attr('template')
+
+	let get_data
+	let script = e.$1(':scope>script')
+	get_data = script && new Function('', script.text)
+
+	e.clear()
+
+	e.on_update(function() {
+		let data = get_data.call(e)
+		if (ts)
+			e.render_string(ts, data)
+		else if (tn)
+			e.render(tn, data)
+	})
+
+})
 
 // init ----------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 /*
 
-	Chart widget.
+	Chart widgets.
 	Written by Cosmin Apreutesei. Public Domain.
 
 SHAPES

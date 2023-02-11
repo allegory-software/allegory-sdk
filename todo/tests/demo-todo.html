@@ -1,0 +1,744 @@
+<!--------------------------------------------------------------------------->
+
+<template id=checkbox_demo>
+<checkbox>
+	Do it!
+	<info>This checkbox does something</info>
+</checkbox>
+<toggleedit>This is the same</toggleedit>
+<script run>
+
+result.add(checkbox({
+	val: 'wrong',
+	field: {
+		label: 'Wassup homie',
+		validator_bool: field => ({
+			message: 'Value must be a boolean',
+			validate: isbool,
+		}),
+	},
+}))
+
+c2 = checkbox({
+	align: 'right',
+	field: {
+		label: html('Yo wasup<br>I am multiline and right-aligned.'),
+	},
+	val: true,
+})
+
+c2.on('value_changed', function(v) { pr(v, this.checked) })
+
+result.add(c2)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=radiogroup_demo>
+<radiogroup id=r1 val=1>
+	<info>Info box, can put any HTML in here.<br>But it will be gray and small.</info>
+	<div val=1>Choose <i>me!</i></div>
+	<div val=2>Me, me<br>me, me, <b>me</b>!</div>
+</radiogroup>
+<div id=main></div>
+<script run>
+
+main.add(radiogroup({
+	val: 'b',
+	field: {
+		type: 'enum',
+		enum_values: 'a b c',
+		enum_texts: {
+			a: 'Option a',
+			b: 'Option b',
+			c: 'Option c',
+		},
+	}
+}))
+
+main.add(radiogroup({
+	items: [
+		unsafe_html('<div val=option_1>Option 1</div>'),
+		div({val: 'option_2'}, 'Option 2'),
+		div({val: 'option_3'}, T('Option 3\nMultiple lines', 'pre-line')),
+	],
+	val: 'wrong_option',
+	field: {type: 'enum', enum_values: 'option_1 option_2 option_3'},
+}))
+
+main.add(radiogroup({
+	align: 'right',
+	items: [
+		unsafe_html(`
+			<div val=1>
+				Option 1
+				<info>So this is the first option and it ain\'t good</info>
+			</div>
+		`),
+		unsafe_html('<div val=2>Option 2<info>This one is better</info></div>'),
+		unsafe_html('<div val=3>Option 3<br>Multiple lines long text</div>'),
+	],
+	val: 3,
+	field: {
+		type: 'number',
+		info: T('There you go, some info on the whole thing.\nDon\'t lose it!', 'pre-line'),
+		validator_good: field => ({
+			validate: v => v != 1,
+			message: 'Told you it wasn\'t good',
+		}),
+	},
+}))
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=richedit_demo>
+<richedit id=my_r>
+	<b>Wasup</b> <i>homies</i> ?
+</richedit>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=textedit_demo>
+<script run>
+
+function say_my_name(field) {
+	return {
+		message: 'Type in "Klaus" or leave empty.',
+		validate: v => v == null || v == 'Klaus',
+	}
+}
+
+function say_my_name_long(field) {
+	return {
+		validate: v => v == null || v == 'Klaus',
+		message:
+			'Type in "Klaus" or leave empty.\n' +
+			'This error message is purposefully long to show that the default error box ' +
+			'wraps decently.'
+	}
+}
+
+result.add(div({}, 'type in "Klaus" to validate'), textedit({
+	field: {
+		validator_name: say_my_name,
+	},
+	val: 'wrong',
+	info: 'Santa wants this field',
+}))
+
+result.add(div(0, 'type in "Klaus" to validate'), textedit({
+	field: {
+		validator_name: say_my_name_long,
+	},
+	copy_to_clipboard_button: true,
+}))
+
+result.add(
+	div({style: 'padding-top: 2em'},
+		'Check out these inner labels:',
+		div({},
+			textedit({
+				field: {name: "santa's_name", validator_name: say_my_name},
+			}),
+			textedit({
+				field: {label: "devil's name"},
+				val: 'Anything goes',
+			})
+		)
+	)
+)
+
+result.add(passedit({
+	field: {
+		validator_name: say_my_name,
+		label: 'Password',
+	},
+	val: 'Klaus',
+	info: 'Don\'t tell anyone',
+}))
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=spinedit_demo>
+<spinedit val=42></spinedit>
+<script run>
+
+result.add(div({},
+	spinedit({button_style: 'up-down', val: 42}),
+	spinedit({button_style: 'up-down', field: {label: 'Hey hey'}})
+))
+
+result.add(div({},
+	spinedit({button_style: 'left-right', val: 42}),
+	spinedit({button_style: 'left-right', field: {label: 'Dis look good?'}})
+))
+
+result.add(div({},
+	spinedit({val: 1, field: {min: -2, max: 5, multiple_of: 1.5}, button_placement: 'right'}),
+	spinedit({field: {min: -2, max: 5, multiple_of: 1.5, label: 'How bout dis?'}, button_placement: 'right'}),
+))
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=tagsedit_demo>
+<tagsedit id=t val="apples bananas mangos"></tagsedit>
+<script run>
+t.add_validator('bananas', function(field) {
+	return {
+		validate: function(v) {
+			return v.includes('bananas')
+		},
+		message: 'Can\'t renounce bananas',
+	}
+})
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=image_demo>
+<div id=main></div>
+<script run>
+
+main.add(
+	image({nav: global_val_nav(), url_template: '/media/gif/porsche.gif', w: 300, h: 200})
+)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=placeedit_demo>
+<div id=main></div>
+<script run>
+
+let api = editbox({val: 'AIzaSyAuM6W_Hh2IagBOi4zR6owafO5yNyJLGiM'})
+api.on('val_changed', function(v) {
+	if (v) init_google_places_api(v)
+})
+main.add(api)
+
+let addr = placeedit({val: 'Somewhere'})
+main.add(addr)
+
+let gmap = googlemaps({nav: addr.nav, col: addr.col})
+main.add(gmap)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=listbox_demo>
+<script run>
+
+lb = listbox({
+	items: [
+		'Apples',
+		'Bananas',
+		'Something Else Entirely',
+	],
+	val_col: 0,
+	val: 'Bananas',
+})
+
+hlb = hlistbox({
+	items: [
+		'Works',
+		'Horizontally',
+		'Too',
+	],
+})
+
+sb = select_btn({
+	items: [
+		'Choose',
+		'One',
+		'Of',
+		'Us',
+	],
+	val_col: 0,
+	val: 'One',
+})
+
+result.add(lb, hlb, div({}, html('<h3>select_button</h3>'), sb))
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=linear_form_demo>
+<div class="linear-form">
+	<checkbox id=c1 val=1>
+		Check me baby
+		<info>
+			...because if you won't<br>
+			somebody else will
+		</info>
+	</checkbox>
+	<radiogroup id=r1 val=1>
+		<info>Info box, can put any HTML in here.<br>But it will be gray and small.</info>
+		<div val=1>Choose me!</div>
+		<div val=2>Me, me<br>me, me, me!</div>
+	</radiogroup>
+	<textedit label=Wasup>
+		<info>Wasa bii</info>
+	</textedit>
+</div>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=calendar_demo>
+<div id=main></div>
+<script run>
+
+main.add(calendar())
+
+/*
+main.add(calendar({
+	val: day(time(), 1),
+	field: {
+		validate: function(v) {
+			if (day(v) == day(time()))
+				return 'Can\'t have today.'
+			if (day(v) == day(time(), 1))
+				return 'Can\'t have tomorrow.'
+		},
+	},
+}))
+*/
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=date_dropdown_demo>
+<div id=main></div>
+<script run>
+
+d = date_dropdown({
+	val: time(),
+	field: {
+		type: 'date',
+		validate: function(v) {
+			if (day(v) == day(time()))
+				return 'Can\'t have today.'
+			if (day(v) == day(time(), 1))
+				return 'Can\'t have tomorrow.'
+		},
+	},
+})
+
+main.add(d)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=list_dropdown_demo>
+<div id=main></div>
+<script run>
+
+function thousand_items() {
+	let a = []
+	for (let i = 1; i <= 1000; i++)
+		a.push('Record '+i)
+	return a
+}
+
+main.add(
+	list_dropdown({
+		id: 'dd1',
+		rowset: {
+			fields: [
+				{name: 'name'},
+				{name: 'code'},
+			],
+			rows: [
+				['Apples', 'a'],
+				['Mananas', 'm'],
+				['Bangos', 'b'],
+				['Something Else Entirely', 's'],
+			],
+		},
+		val_col: 'code',
+		display_col: 'name',
+		field: {
+			name: 'Here we are',
+			validate: function(v) {
+				return v != 'm' || 'Can\'t have mananas.'
+			},
+		},
+		val: 'm',
+	}),
+
+	list_dropdown({
+		id: 'dd2',
+		field: {name: 'Here we are again'},
+		items: thousand_items(),
+		val_col: 0,
+		val: 'not-in-list',
+	}),
+
+)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=grid_dropdown_demo>
+<div id=main></div>
+<script run>
+
+main.add(
+	grid_dropdown({
+		rowset: {
+			fields: [
+				{w:  50, name: 'id', type: 'number', visible: false},
+				{w: 150, name: 'name'},
+				{w: 150, name: 'date', type: 'date'},
+			],
+			rows: [
+				[1, 'Hey Dude', day(time())],
+				[2, 'Wasup'   , month(time())],
+				[3, 'Nuthin'  , year(time())],
+			],
+		},
+		val_col: 'id',
+		display_col: 'name',
+		val: 4,
+	})
+)
+
+rows2 = []
+for (let i = 1; i <= 1e5; i++)
+	rows2.push([i, 'Hey Dude #'+i])
+
+main.add(
+	grid_dropdown({
+		rowset: {
+			fields: [
+				{w:  50, name: 'id', type: 'number', visible: false},
+				{w: 200, name: 'name'},
+			],
+			rows: rows2,
+		},
+		val_col: 'id',
+		display_col: 'name',
+		val: 42,
+	})
+)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=countries_listbox_demo>
+<div id=main></div>
+<script run>
+
+clb = countries_listbox({
+	val: 'RO',
+})
+main.add(clb)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=country_dropdown_demo>
+<div id=main></div>
+<script run>
+
+cd = country_dropdown({
+	val: 'RO',
+})
+main.add(cd)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=dropdown_modes_demo>
+<div id=main></div>
+<script run>
+
+function items() {
+	return [
+		'Apples',
+		'Bananas',
+		'Something Else Entirely',
+	]
+}
+
+function p(mode, ...args) {
+	return div({style: 'margin-top: 1em'}, html('<b>'+mode+'</b> mode:<br>'), ...args)
+}
+
+main.add(
+	p('default', 'variable-width, no-wrap with min-width aligned with other inputs'),
+	date_dropdown({field: {type: 'date'}, val: time()}),
+	div(),
+	list_dropdown({items: items()}),
+
+	p('inline', 'variable-width, no-wrap, with no min-width (shrink-wrapped), baseline-aligned'),
+	date_dropdown({field: {type: 'date'}, mode: 'inline', val: time()}),
+	div(),
+	list_dropdown({mode: 'inline', items: items()}),
+
+	p('wrap', 'fixed-width, auto-wrap'),
+	date_dropdown({field: {type: 'date'}, mode: 'wrap', val: time()}),
+	div(),
+	list_dropdown({mode: 'wrap', items: items(), val: 'Something Else Entirely'}),
+
+	p('fixed', 'fixed-width, no-wrap, overflow hidden'),
+	date_dropdown({field: {type: 'date'}, mode: 'fixed', val: time()}),
+	div(),
+	list_dropdown({id: 'xx', mode: 'fixed', items: items(), val: 'Something Else Entirely'})
+)
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=inline_inputs_demo>
+<div id=main></div>
+<script run>
+
+main.add(div({style: 'line-height: 3'},
+	'All ',
+	textedit({
+		style: 'min-width: 4em',
+		label: 'imma input',
+		mode: 'inline',
+		val: 'inputs',
+	}),
+	'are baseline-aligned',
+	spinedit({
+		label: 'imma spinner',
+		style: 'min-width: 6em',
+		mode: 'inline',
+		val: 42,
+	}),
+	', including dropdowns ',
+	/*
+	date_dropdown({
+		label: 'imma date',
+		mode: 'inline',
+	})
+	,
+	*/
+	', which can be made to wrap-to-fit or grow-to-fit, and even',
+	btn({
+		text: 'buttons.',
+		primary: true,
+		action: function() { pr('clicked') },
+	}),
+	'This stays true under different fonts, font sizes and line heights.'
+))
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=rowset_form_demo>
+<div id=main></div>
+<script run>
+
+r = rowset({
+	fields: [
+		{w: 100, name: 'id', type: 'number'},
+		{w: 100, name: 'name'},
+	],
+	rows: [
+		[1, 'apples'],
+		[2, 'bananas'],
+	],
+})
+
+g = grid({w: 200, h: 200, rowset: r})
+
+i1 = input({nav: g, col: 'name'})
+
+main.add(div({}, g), i1)
+
+main.add(btn({
+	text: 'unfocus row',
+	action: function() { g.focus_cell(false) },
+}))
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=lookup_col_demo>
+<div id=main></div>
+<script run>
+
+fruits = rowset({
+	fields: [
+		{w:  50, name: 'id', type: 'number'},
+		{w: 150, name: 'name'},
+	],
+	rows: [
+		[1, 'apples'],
+		[2, 'bananas'],
+	],
+	can_change_rows: true,
+})
+
+main.add(grid({w: 200, h: 200, rowset: fruits}))
+
+r = rowset({
+	fields: [
+		{w: 100, name: 'fruit_id', type: 'number', align: 'left', label: 'fruit',
+			lookup_rowset: fruits,
+			lookup_col: 'id',
+			display_col: 'name',
+		},
+	],
+	rows: [
+		[1],
+		[2],
+		[1],
+	],
+})
+
+main.add(grid({w: 200, h: 200, rowset: r}))
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=ajax_demo>
+<div id=main></div>
+<script run>
+
+pre = tag('pre')
+main.add(pre)
+function log(...args) { pre.add(args.join(' '), '\n') }
+
+let req = ajax({
+	url: '/ajax-test.txt',
+	// timeout: 2,
+	slow_timeout: .5,
+	slow     : function(...args) { log('slow'       , ...args) },
+	progress : function(...args) { log('progress'   , ...args) },
+	done     : function(...args) { log('done'       , ...args) },
+}).send()
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=ajax_json_demo>
+<div id=main></div>
+<script run>
+
+pre = tag('pre')
+main.add(pre)
+function log(...args) { pre.add(args.join(' '), '\n') }
+
+let req = ajax({
+	url: '/ajax-test.json',
+	upload: {a: 5, b: 7},
+	slow     : function(...args) { log('slow'       , ...args) },
+	progress : function(...args) { log('progress'   , ...args) },
+	fail     : function(...args) { log('fail'       , ...args) },
+	success  : function(j)       { log('success'    , json(j)) },
+}).send()
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=data_grid_demo>
+<div id=main></div>
+<script run>
+
+function starts_with_a(s) {
+	return s.lower().starts('a') || 'Name must start with "A"'
+}
+
+var data = {
+	fields: [
+		{name: 'id'   , w:  60, min_w:  30, type: 'number', editable: false},
+		{name: 'name' , w:  70, min_w:  50, max_w: 200, validate: starts_with_a},
+		{name: 'date' , w: 140, allow_null: true, type: 'date'},
+	],
+	pk: 'id',
+	url: 'rowset.json/test_static',
+	slow_timeout: 1,
+}
+
+d = rowset(data)
+
+g = grid({
+	rowset: d,
+	w: 500,
+	h: 200,
+})
+
+main.add(g)
+
+log = tag('pre')
+main.add(log)
+
+d.on('row_changed', function() {
+	log.html = json(d.pack_changes(), null, 3)
+})
+
+d.load()
+
+</script>
+</template>
+
+<!--------------------------------------------------------------------------->
+
+<template id=query_demo>
+<div id=main></div>
+<script run>
+
+d = global_rowset('test_query')
+
+g = grid({
+	rowset: d,
+	w: 500,
+	h: 200,
+	//remove_row_on: 'exit_row',
+})
+
+main.add(g)
+
+d.load()
+
+</script>
+</template>
+

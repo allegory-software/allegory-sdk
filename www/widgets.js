@@ -580,7 +580,13 @@ function stylable_widget(e) {
 
 /* <tooltip> -----------------------------------------------------------------
 
-
+in props:
+	text
+	icon_visible
+	kind              default search info error warn cursor
+	target -> popup_target
+	align  -> popup_align
+	side   -> popup_side
 
 */
 
@@ -2140,7 +2146,13 @@ widget('vsplit', function(e) {
 
 /* <action-band> -------------------------------------------------------------
 
-
+in props:
+	layout      'NAME[:ok|primary|cancel] ... < ... > ...'
+out props:
+	buttons.NAME -> b
+methods:
+	ok()
+	cancel()
 
 */
 
@@ -2217,7 +2229,20 @@ widget('action-band', 'Input', function(e) {
 
 /* <dlg> aka modal dialog box ------------------------------------------------
 
-
+in props:
+	cancelable
+	buttons
+	buttons_layout
+	heading header content footer
+inner html:
+	<heading> -> heading
+	<header>  -> header
+	<content> -> content
+	<footer>  -> footer
+methods:
+	close([ok])
+	cancel()
+	ok()
 
 */
 
@@ -2399,7 +2424,12 @@ widget('dlg', function(e) {
 
 /* <toolbox> -----------------------------------------------------------------
 
-
+in props:
+	px py pw ph pinned
+	content
+	text
+inner htnl:
+	-> content
 
 */
 
@@ -2481,7 +2511,7 @@ widget('toolbox', function(e) {
 	e.set_pw = (w) => e.w = w
 	e.set_ph = (h) => e.h = h
 
-	e.prop('content', {type: 'html'})
+	e.prop('content', {type: 'nodes'})
 
 	e.prop('text', {slot: 'lang'})
 
@@ -2824,7 +2854,10 @@ widget('pagenav', function(e) {
 
 /* <richtext> ----------------------------------------------------------------
 
-
+in props:
+	content
+inner html:
+	-> content
 
 */
 
@@ -3397,6 +3430,10 @@ widget('radio', function(e) {
 // <radio-group> & .radio-group ----------------------------------------------
 
 css('radio-group', 'skip')
+
+widget('radio-group', 'Input', function(e) {
+	e.init_child_components()
+})
 
 /* <slider> & <range-slider> -------------------------------------------------
 
@@ -4469,6 +4506,34 @@ widget('tags', function(e) {
 		})
 
 	})
+
+})
+
+/* <autocomplete> ------------------------------------------------------------
+
+*/
+
+css('.autocomplete', 'b p-x-input p-y-input bg-input')
+
+widget('autocomplete', 'Input', function(e) {
+
+	function input_input(ev) {
+		e.set(this.value)
+		e.show(!!this.value)
+	}
+
+	e.bind_input = function(te, on) {
+		if (warn_if(te.tag != 'input', 'autocomplete: not an input tag: {0}', e.input_id))
+			return
+		te.on('input', input_input, on)
+		e.popup_target = on ? te : null
+		e.show(!!te.value)
+	}
+
+	e.prop('input_id', {type: 'id', attr: 'for', on_bind: e.bind_input})
+
+	e.popup(null, 'bottom', 'left')
+	e.hide()
 
 })
 
