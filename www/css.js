@@ -3,6 +3,9 @@
 	Functional CSS library & reset.
 	Written by Cosmin Apreutesei. Public Domain.
 
+You must load first:
+	dom.js
+
 CSS CLASSES:
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
@@ -12,7 +15,7 @@ CSS CLASSES:
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
-	SIZING        nowrap shrinks
+	SIZING        nowrap shrinks expands
 	BORDERS       b[0] b-{l r t b}[-0] b-{dotted dashed invisible fg}
 	CORNERS       ro ro0 ro-{05 075 0 2 var} ro-{l r t b}-0 round ro-group-{h v}
 	PADDINGS      p p0 p-{025 05 075 2 4 8} p-{l r t b x y}-{0 05 2 4 8}
@@ -33,6 +36,7 @@ CSS CLASSES:
 	MAT ICONS     mi[-round -sharp -outlined -fill -no-fill]
 	FA ICONS      fa[r] fa-*
 	UNICODE ICONS icon-menu-{3-dots-{v h} 3-lines-h}
+	SVG_ICONS     svg_circle_x()
 
 HTML SELECTORS:
 	*[dim] *[nowrap] *[nowrap-dots]
@@ -469,7 +473,7 @@ css('.arial'     , '', `font-family: arial, sans-serif;`)
 
 css_chrome('.arial', '', `
 	--p-y-input-adjust-xsmall  : 1px;
-	--p-y-input-adjust-smaller : 2px;
+	--p-y-input-adjust-smaller : 1px;
 	--p-y-input-adjust-normal  : 1px;
 	--p-y-input-adjust-large   : 1px;
 `)
@@ -649,6 +653,7 @@ css('.nowrap', '', `
 	overflow: hidden;
 `)
 
+// NOTE: you need to apply `.shrinks` for this to work.
 css('[nowrap-dots]', '', `
 	white-space: nowrap;
 	overflow: hidden;
@@ -660,9 +665,20 @@ css('.nowrap-dots', '', `
 	text-overflow: ellipsis;
 `)
 
+css('.expands', '', `
+	min-width  : auto;
+	min-height : auto;
+`)
+
+// prevents overflow in inline & block containers.
+css_util('shrinks-inline', '', ``)
+
 css('.shrinks', '', `
+	/* prevents overflow in flexbox and css-grid containers. */
 	min-width  : 0;
 	min-height : 0;
+	/* prevens overflow in inline and block containers */
+	max-width: 100%;
 `)
 
 css('.w1 ', '', ` width : 1.25em; min-width : 1.25em; max-width : 1.25em; `) /* mainly to keep changing icons fixated and aligned */
@@ -703,7 +719,8 @@ css('.b-collapse-v > :not(:last-child)' , '', ` border-bottom-color: #00000000; 
 /* BORDER RADIUS ---------------------------------------------------------- */
 
 // variable rounded corners
-css('.ro-var', '', `border-radius: var(--border-radius, var(--space-075));`)
+css('.ro-var'    , '', `border-radius: var(--border-radius, var(--space-075));`)
+css('.ro-var-075', '', `border-radius: calc(var(--border-radius, var(--space-075)) * .75);`)
 css('.xsmall' , '', `--border-radius: var(--space-025);`)
 css('.small'  , '', `--border-radius: var(--space-05 );`)
 css('.smaller', '', `--border-radius: var(--space-075);`)
@@ -1159,5 +1176,16 @@ css('.icon-9-dots::before'    , '', `
 	content: "\\1392\\1392\\1392";
 	display: block; transform: scale(.8, 1);
 `) // chocolate
+
+/* SVG icons -------------------------------------------------------------- */
+
+function svg_circle_x(attrs) {
+	return svg(assign_opt({fill: 'currentColor', viewBox: '0 0 16 16', preserveAspectRatio: 'xMidYMid meet'}, attrs),
+		svg_tag('path', {d: `
+			M 8 16 C 14.158 16 18.007 9.333 14.928 4 C 13.499 1.525 10.858 0 8 0 C 1.842 0 -2.007 6.667 1.072 12 C 2.501 14.475 5.142 16 8 16 Z
+			M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z
+		`}),
+	)
+}
 
 } /* module */
