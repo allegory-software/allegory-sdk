@@ -3,7 +3,7 @@
 	DOM API & web components.
 	Written by Cosmin Apreutesei. Public domain.
 
-Must load before:
+You must load first:
 
 	glue.js
 
@@ -27,11 +27,7 @@ Uses CSS classes on the <html> tag:
 CSS-IN-JS
 
 	css_layer(name) -> layer; layer(selector, includes, rules)
-	css[_state|_role|_role_state|_generic_state](selector, includes, rules)
-
-CSS DEFAULT LAYERS
-
-	css[_base _state _role _role_state _generic_state _light _dark][_chrome _firefox]()
+	css[_base _state _role _role_state _generic_state _light _dark][_chrome _firefox](selector, includes, rules)
 
 DOM load event:
 
@@ -203,7 +199,9 @@ LAYOUT CHANGE EVENT
 ELEMENT GEOMETRY
 
 	px(x)
-	e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h, e.ox, e.oy
+	e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h
+	e.ox, e.oy, e.ow, e.oh
+	e.cx, e.cy, e.cw, e.ch
 	e.min_w, e.min_h, e.max_w, e.max_h
 	e.rect() -> r
 	e.orect() -> r
@@ -871,11 +869,13 @@ let attr_prop_vals = function(e) {
 		k = pmap && pmap[k] || k
 		let v = attr.value
 		let pa = e.get_prop_attrs(k)
-		if (!(pa && pa.from_attr))
-			continue
-		v = pa.from_attr(v)
-		if (k in prop_vals)
-			continue
+		if (!k.starts('on_')) {
+			if (!(pa && pa.from_attr))
+				continue
+			v = pa.from_attr(v)
+			if (k in prop_vals)
+				continue
+		}
 		prop_vals[k] = v
 	}
 	return prop_vals
@@ -1111,6 +1111,7 @@ function unsafe_html(s) {
 		return s
 	let span = document.createElement('span')
 	span.unsafe_html = s.trim()
+	span._init_component()
 	return span.childNodes.length > 1 ? [...span.nodes] : span.firstChild
 }
 
@@ -2264,16 +2265,16 @@ function px(v) {
 	return typeof v == 'number' ? v+'px' : v
 }
 
-property(Element, 'x1'   , { set: function(v) { if (v !== this.__x1) { this.__x1 = v; this.style.left          = px(v) } } })
-property(Element, 'y1'   , { set: function(v) { if (v !== this.__y1) { this.__y1 = v; this.style.top           = px(v) } } })
-property(Element, 'x2'   , { set: function(v) { if (v !== this.__x2) { this.__x2 = v; this.style.right         = px(v) } } })
-property(Element, 'y2'   , { set: function(v) { if (v !== this.__y2) { this.__y2 = v; this.style.bottom        = px(v) } } })
-property(Element, 'w'    , { set: function(v) { if (v !== this.__w ) { this.__w  = v; this.style.width         = px(v) } } })
-property(Element, 'h'    , { set: function(v) { if (v !== this.__h ) { this.__h  = v; this.style.height        = px(v) } } })
-property(Element, 'min_w', { set: function(v) { if (v !== this.__mw) { this.__mw = v; this.style['min-width' ] = px(v) } } })
-property(Element, 'min_h', { set: function(v) { if (v !== this.__mh) { this.__mh = v; this.style['min-height'] = px(v) } } })
-property(Element, 'max_w', { set: function(v) { if (v !== this.__Mw) { this.__Mw = v; this.style['max-width' ] = px(v) } } })
-property(Element, 'max_h', { set: function(v) { if (v !== this.__Mh) { this.__Mh = v; this.style['max-height'] = px(v) } } })
+property(Element, 'x1'   , function() { return this.__x1 }, function(v) { if (v !== this.__x1) { this.__x1 = v; this.style.left          = px(v) } })
+property(Element, 'y1'   , function() { return this.__y1 }, function(v) { if (v !== this.__y1) { this.__y1 = v; this.style.top           = px(v) } })
+property(Element, 'x2'   , function() { return this.__x2 }, function(v) { if (v !== this.__x2) { this.__x2 = v; this.style.right         = px(v) } })
+property(Element, 'y2'   , function() { return this.__y2 }, function(v) { if (v !== this.__y2) { this.__y2 = v; this.style.bottom        = px(v) } })
+property(Element, 'w'    , function() { return this.__w  }, function(v) { if (v !== this.__w ) { this.__w  = v; this.style.width         = px(v) } })
+property(Element, 'h'    , function() { return this.__h  }, function(v) { if (v !== this.__h ) { this.__h  = v; this.style.height        = px(v) } })
+property(Element, 'min_w', function() { return this.__mw }, function(v) { if (v !== this.__mw) { this.__mw = v; this.style['min-width' ] = px(v) } })
+property(Element, 'min_h', function() { return this.__mh }, function(v) { if (v !== this.__mh) { this.__mh = v; this.style['min-height'] = px(v) } })
+property(Element, 'max_w', function() { return this.__Mw }, function(v) { if (v !== this.__Mw) { this.__Mw = v; this.style['max-width' ] = px(v) } })
+property(Element, 'max_h', function() { return this.__Mh }, function(v) { if (v !== this.__Mh) { this.__Mh = v; this.style['max-height'] = px(v) } })
 
 alias(Element, 'x', 'x1')
 alias(Element, 'y', 'y1')

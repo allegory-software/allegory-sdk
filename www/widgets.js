@@ -3,7 +3,7 @@
 	widgets: Web Components in JavaScript.
 	Written by Cosmin Apreutesei. Public Domain.
 
-Must load before, in order:
+You must load first, in order:
 
 	glue.js
 	dom.js
@@ -29,7 +29,10 @@ WIDGETS
 	toggle
 	radio
 	slider
-	inputbox labelbox input textarea
+	input-group
+	labelbox
+	input
+	textarea
 	button
 	widget-placeholder
 
@@ -2223,8 +2226,8 @@ css('.dlg', 'v p-4 fg b0 ro bg1', `
 	box-shadow: var(--shadow-modal);
 `)
 
-css('.dlg-header', 'm-b-2')
-css('.dlg-footer', 'm-t-2')
+css('.dlg-header' , 'm-b-2')
+css('.dlg-footer' , 'm-t-2')
 css('.dlg-content', 'm-y-2')
 
 css('.dlg-heading', 'dim xlarge bold')
@@ -2411,14 +2414,12 @@ css('.toolbox-titlebar', 'h-m bold p-x-2 p-y-05 gap-2 noselect', `
 	cursor: move;
 `)
 
-css('.toolbox-title', 'nowrap-dots')
-
 css_state('.toolbox:focus-within > .toolbox-titlebar', '', `
 	background : var(--bg-focused-selected);
 	color      : var(--fg-focused-selected);
 `)
 
-css('.toolbox-title', 'S shrinks nowrap click-through')
+css('.toolbox-title', 'S shrinks nowrap-dots click-through')
 
 css('.toolbox-btn', 'dim-on-dark arrow')
 css('.toolbox-btn-pin', 'small rotate-45')
@@ -2601,32 +2602,20 @@ widget('toolbox', function(e) {
 /* <slides> ------------------------------------------------------------------
 
 in attrs:
-	selected selected_index
+	current current_index
 in props:
-	selected_id selected_index
+	current_id current_index
 out props:
-	selected_item
+	current_slide
 
 */
 
 css('.slides', 'grid-h')
-
-css('.slide', 'invisible op0 x1 y1', `
-	transition: opacity .5s;
-`)
-
+css('.slide', 'x1 y1')
 css('.slides > .x-ct > .', 'x1 y1')
 
-css(`
-	.slide:not(.slide-selected),
-	.slide:not(.slide-selected) *
-`, '', `
-	pointer-events: none !important;
-`)
-
-css('.slide-selected', 'visible op1 click-through-off', `
-	transition: opacity .5s;
-`)
+css_state('.slide'        , 'invisible op0 click-through     ease-05s')
+css_state('.slide-current', 'visible   op1 click-through-off ease-05s')
 
 widget('slides', 'Containers', function(e) {
 
@@ -2636,26 +2625,26 @@ widget('slides', 'Containers', function(e) {
 
 	// model
 
-	e.prop('selected_index', {type: 'number', default: 0})
-	e.prop('selected_id'   , {type: 'id', attr: 'selected'})
+	e.prop('current_index', {type: 'number', default: 0})
+	e.prop('current_id'   , {type: 'id', attr: 'current'})
 
-	e.property('selected_item',
+	e.property('current_slide',
 		function() {
 			let item
-			if (e.selected_id) {
-				item = window[e.selected_id]
+			if (e.current_id) {
+				item = window[e.current_id]
 				item = item && item.parent == e && item
 			}
-			return item || e.at[e.selected_index] || e.at[0] || null
+			return item || e.at[e.current_index] || e.at[0] || null
 		}, function(item) {
 			if (warn_if(item && item.parent != e, 'slide: invalid item'))
 				return
-			if (e.selected_id) {
+			if (e.current_id) {
 				if (warn_if(item && !item.id, 'slide: item has no id'))
 					return
-				e.selected_id = item && item.id || null
+				e.current_id = item && item.id || null
 			} else {
-				e.selected_index = item ? item.index : null
+				e.current_index = item ? item.index : null
 			}
 		})
 
@@ -2666,20 +2655,20 @@ widget('slides', 'Containers', function(e) {
 	}
 
 	e.next_slide = function(rollover) {
-		let e0 = e.selected_item
+		let e0 = e.current_slide
 		let i1 = clamp_item(or(e0 && e0.index, -1) + 1, rollover)
-		e.selected_item = e.at[i1]
+		e.current_slide = e.at[i1]
 	}
 
 	e.prev_slide = function(rollover) {
-		let e0 = e.selected_item
+		let e0 = e.current_slide
 		let i1 = clamp_item(or(e0 && e0.index, -1) - 1, rollover)
-		e.selected_item = e.at[i1]
+		e.current_slide = e.at[i1]
 	}
 
 	// view
 
-	let selected_item
+	let current_slide
 	e.on_update(function(opt) {
 
 		let items = opt.items
@@ -2688,7 +2677,7 @@ widget('slides', 'Containers', function(e) {
 				if (item && !items.has(item)) {
 					item.remove()
 					item.class('slide', false)
-					item.class('slide-selected', false)
+					item.class('slide-current', false)
 					item._slides = null
 				}
 			}
@@ -2704,15 +2693,15 @@ widget('slides', 'Containers', function(e) {
 			}
 		}
 
-		let e0 = selected_item
-		let e1 = e.selected_item
+		let e0 = current_slide
+		let e1 = e.current_slide
 		if (e0 != e1) {
 			if (e0)
-				e0.class('slide-selected', false)
+				e0.class('slide-current', false)
 			if (e1) {
-				selected_item = e1
+				current_slide = e1
 				e.fire('slide_start', e1)
-				e1.class('slide-selected', true)
+				e1.class('slide-current', true)
 				e1.focus_first()
 				e1.once('transitionend', function() {
 					e.fire('slide_end', e1)
@@ -2750,46 +2739,58 @@ component('md', function(e) {
 })
 }
 
-/* <pagenav> aka page navigation ---------------------------------------------
+/* <pagenav> page navigation -------------------------------------------------
 
 in props:
 	page_size
+	item_count
 state:
 	page
 out props:
-	item_count
+	cur_page
+	page_count
+	first_item
 stubs:
 	page_url(page) -> url
+events:
+	^page_changed(page)
 
 */
+
+css('.pagenav', 'h-bl')
+css('.pagenav-button', '')
+css('.pagenav-current', '')
+css('.pagenav-dots', '')
 
 widget('pagenav', function(e) {
 
 	e.prop('page'      , {type: 'number', default: 1})
 	e.prop('page_size' , {type: 'number', default: 100})
-	e.prop('item_count', {type: 'number', })
+	e.prop('item_count', {type: 'number'})
+	e.prop('bare'      , {type: 'bool', attr: true})
 
-	property(e, 'page_count', () => ceil(e.item_count / e.page_size))
+	e.property('cur_page'   , () => clamp(e.page || 1, 1, e.page_count))
+	e.property('page_count' , () => ceil(e.item_count / e.page_size))
+	e.property('first_item' , () => e.page * e.item_count)
 
 	e.page_url = noop
 
-	function cur_page() {
-		return clamp(e.page || 1, 1, e.page_count)
-	}
-
 	e.page_button = function(page, text, title, href) {
-		let b = button()
-		b.class('pager-button')
-		b.class('selected', page == cur_page())
-		b.disable('pagenav', !(page >= 1 && page <= e.page_count && page != cur_page()))
+		let b = button({bare: e.bare})
+		b.class('pagenav-button')
+		b.class('pagenav-current', page == e.cur_page)
+		b.disable('pagenav', !(page >= 1 && page <= e.page_count && page != e.cur_page))
 		b.title = or(title, or(text, S('page', 'Page {0}', page)))
 		b.href = href !== false ? e.page_url(page) : null
 		b.set(or(text, page))
+		b.action = function() {
+			e.fire('page_changed', page)
+		}
 		return b
 	}
 
 	e.nav_button = function(offset) {
-		return e.page_button(cur_page() + offset,
+		return e.page_button(e.cur_page + offset,
 			offset > 0 ?
 				S('next_page_button_text', 'Next →') :
 				S('previous_page_button_text', '← Previous'),
@@ -2804,14 +2805,14 @@ widget('pagenav', function(e) {
 		e.clear()
 		e.add(e.nav_button(-1))
 		let n = e.page_count
-		let p = cur_page()
+		let p = e.cur_page
 		let dotted
 		for (let i = 1; i <= n; i++) {
 			if (i == 1 || i == n || (i >= p-1 && i <= p+1)) {
 				e.add(e.page_button(i))
 				dotted = false
 			} else if (!dotted) {
-				e.add(' ... ')
+				e.add(div({class: 'pagenav-dots'}, unsafe_html('&mldr;')))
 				dotted = true
 			}
 		}
@@ -3788,29 +3789,28 @@ css_util('.smaller', '', `--p-y-input: var(--space-05 );`)
 css_util('.large'  , '', `--p-x-input: var(--space-2);`)
 css_util('.xlarge' , '', `--p-x-input: var(--space-2);`)
 
-/* <inputbox> ----------------------------------------------------------------
+/* <input-group> -------------------------------------------------------------
 
-Stacks elements horizontally and styles them to create an input box.
-<inputbox> doesn't itself have the .inputbox class but instead styles itself
+Stacks elements horizontally and styles them to create a composed input box.
+<input-group> doesn't itself have the .inputbox class but instead styles itself
 and its children so that the end result looks and behaves like an input box.
 This allows different backgrounds in the child elements and also making
 seprators out of their left/right borders.
 
 */
 
-css('inputbox', 'S t-m m-y-05 lh-input h-s')
+css('.input-group', 'shrinks t-m m-y-05 lh-input h-s')
 
 // `position: static` fixes the bug (in both Chrome & FF) where the outline
 // is obscured by the children if 1) they have a background and 2) they create
 // a stacking context.
-css_role('inputbox > *', 'm0 b no-z', `position: static;`)
+css_role('.input-group > *', 'm0 b no-z', `position: static;`)
 
-// things that <inputbox> doesn't insist upon its children having.
-css('inputbox > *', 'bg-input')
+// things that <input-group> doesn't insist upon its children having.
+css('.input-group > *', 'bg-input')
 
-widget('inputbox', function(e) {
+widget('input-group', function(e) {
 
-	e.class('inputbox', false)
 	e.class('b-collapse-h ro-group-h')
 	e.init_child_components()
 	e.input = $1('input')
@@ -3820,22 +3820,26 @@ widget('inputbox', function(e) {
 
 /* <labelbox> ----------------------------------------------------------------
 
-Stack elements vertically inside an <inputbox>, also stripping them of margin,
-border and padding, making them float beside each other. Putting an <inputbox>
-inside a <labelbox> also strips the elements inside the <inputbox>. So a
+Stack elements vertically inside an .inputbox, also stripping them of margin,
+border and padding, making them float beside each other. Putting an <input-group>
+inside a <labelbox> also strips the elements inside the <input-group>. So a
 <labelbox> can be used for two things: 1) putting a <label> above an <input>,
-and 2) putting stripped elements inside an <inputbox>, even when you don't
+and 2) putting stripped elements inside an <input-group>, even when you don't
 want a label.
 
 */
 
-css('labelbox', 'S v p-x-input p-y-input gap-x-input gap-y-input')
+css('.labelbox', 'S v p-x-input p-y-input gap-x-input gap-y-input')
 
-css_role('labelbox > *, labelbox > inputbox > *', 'b0 m0 p0')
-css_role('labelbox > inputbox', 'gap-x-input gap-y-input')
+css_role('.labelbox > *, labelbox > .input-group > *', 'b0 m0 p0')
+css_role('.labelbox > .input-group', 'gap-x-input gap-y-input')
 
 // no-bg prevents outline clipping, also bg doesn't make sense since labelbox has padding.
-css_role('labelbox *', 'no-bg')
+css_role('.labelbox *', 'no-bg')
+
+widget('labelbox', function(e) {
+	e.init_child_components()
+})
 
 /* <input> -------------------------------------------------------------------
 
@@ -4152,7 +4156,9 @@ widget('button', 'Input', function(e) {
 
 /* <select-button> && <vselect-button> ---------------------------------------
 
---
+state:
+	selected_val
+	selected_index
 
 */
 
@@ -4275,63 +4281,155 @@ widget('vselect-button', function(e) {
 
 })
 
-/* <tags> --------------------------------------------------------------------
+/* <tags-box> ----------------------------------------------------------------
 
-
+state:
+	tags: 'tag1 ...' || ['tag1', ...]
 
 */
 
-css('.tags', 'h p-05', `
-	background: var(--bg-input);
+css('.tags-box', 'm-y p-y-05 h-m flex-wrap gap', `
 	--tag-hue: 154;
 `)
 
-css('.tags-box', 'h-m p-05')
-css('.tags-box::before', 'zwsp tags-tag p-x-0 m-x-0 b-invisible')
-
-css('.tags-tag', 'm-x-05 p-x-2 gap-x ro h-m', `
-	background : hsl(var(--tag-hue), 32%, 28%);
-	color      : hsl(var(--tag-hue), 87%, 61%);
+css('.tags-tag', 'p-y-025 p-x-input gap-x ro-var-075 h-m noselect', `
+	background  : hsl(var(--tag-hue), 32%, 28%);
+	color       : hsl(var(--tag-hue), 87%, 61%);
+`)
+css_role(':is(.xsmall, .small, .smaller).tags-box, :is(.xsmall, .small, .smaller) :is(.tags-box, .tags-tag)', 'p-y-0')
+css_role_state('.tags-tag:focus-visible', '', `
+	background  : hsl(var(--tag-hue), 32%, 38%);
 `)
 
 css('.tags-x', 'round fg h-m h-c small bold', `
 	width : 1.1em;
 	height: 1.1em;
-	background : hsl(var(--tag-hue), 63%, 43%);
-	color      : hsl(var(--tag-hue), 48%, 29%);
+	color : hsl(var(--tag-hue), 63%, 43%);
 `)
-css('.tags-x::before', 'icon-crossmark')
+css_state('.tags-x:hover', '', `
+	color : hsl(var(--tag-hue), 63%, 53%);
+`)
+css_state('.tags-x:active', '', `
+	color : hsl(var(--tag-hue), 63%, 63%);
+`)
 
-css('.tags-input', 'S m0 b0 p0')
+widget('tags-box', function(e) {
 
-widget('tags', function(e) {
+	// model
 
-	e.class('inputbox')
+	e.prop('tags', {type: 'set', element_type: 'string', convert: convert_tags })
 
-	e.prop('tags', {convert: words})
+	function convert_tags(tags) {
+		return words(tags).remove_duplicates()
+	}
+
+	e.remove_tag = function(tag) {
+		let t1 = e.tags.slice()
+		let i = t1.remove_value(tag)
+		e.tags = t1
+		return i
+	}
+
+	// view
 
 	e.clear()
-	e.tags_box = div({class: 'tags-box'})
-	e.input = tag('input', {class: 'tags-input'})
-	e.add(e.tags_box, e.input)
 
-	e.make_focusable(e.input)
+	e.make_tag = function(tag) {
+		let x = svg_circle_x({class: 'tags-x'})
+		let t = div({class: 'tags-tag'}, tag, x)
+		t.make_focusable()
+		t.on('keydown', tag_keydown)
+		t.on('pointerdown', tag_pointerdown)
+		x.on('pointerdown', return_false) // prevent bubbling
+		x.on('click', tag_x_click)
+		return t
+	}
 
 	e.set_tags = function(tags) {
-		e.tags_box.clear()
-		for (let tag of tags) {
-			e.tags_box.add(div({class: 'tags-tag'}, tag, div({class: 'tags-x'})))
-		}
+		e.clear()
+		for (let tag of tags)
+			e.add(e.make_tag(tag))
+	}
+
+	e.tag_box = function(tag) {
+		let i = e.tags.indexOf(tag)
+		return i != -1 ? e.at[i] : null
+	}
+
+	e.focus_tag = function(tag) {
+		let t = e.tag_box(tag)
+		if (t) t.focus()
 	}
 
 	// controller
 
-	e.on('keydown', function(key) {
+	function tag_pointerdown() {
+		this.focus()
+	}
+
+	function tag_x_click() {
+		e.remove_tag(this.parent.textContent)
+	}
+
+	function tag_keydown(key) {
+		if (key == 'Delete') {
+			let i = e.remove_tag(this.textContent)
+			let next_tag = e.at[i] || e.last
+			if (next_tag) {
+				next_tag.focus()
+				return false
+			}
+		}
+		if (key == 'ArrowLeft' || key == 'ArrowRight') {
+			let is_next = key == 'ArrowRight'
+			let next_tag = is_next ? this.next : this.prev
+			if (next_tag) {
+				next_tag.focus()
+				return false
+			}
+		}
+	}
+
+})
+
+/* <tags> --------------------------------------------------------------------
+
+config:
+	nowrap
+state:
+	tags: 'tag1 ...' || ['tag1', ...]
+
+*/
+
+css('.tags', 'shrinks')
+css('.tags-input', 'S b0')
+css_role('.tags-scrollbox', 'shrinks h-m b-r-0 p-x clip')
+css_role('.tags .tags-box'  , 'shrinks m0')
+css_role('.tags .tags-input', 'b-l-0', `min-width: 5em;`)
+css('.tags-box-nowrap', 'flex-nowrap')
+
+widget('tags', function(e) {
+
+	e.class('input-group')
+
+	e.tags_box = tags_box()
+	e.input = tag('input', {class: 'tags-input', placeholder: 'Tag'})
+	e.add(div({class: 'tags-scrollbox'}, e.tags_box), e.input)
+	e.make_focusable(e.input)
+
+	e.prop('tags', {store: false})
+	e.get_tags = () => e.tags_box.tags
+	e.set_tags = (v) => e.tags_box.tags = v
+
+	e.prop('nowrap', {type: 'bool'})
+	e.set_nowrap = (v) => e.tags_box.class('tags-box-nowrap', !!v)
+
+	e.input.on('keydown', function(key) {
 		if (key == 'Backspace') {
-			let s = e.input.value
+			let s = this.value
 			if (s) {
-				let s1 = e.input.selectionStart
-				let s2 = e.input.selectionEnd
+				let s1 = this.selectionStart
+				let s2 = this.selectionEnd
 				if (s1 != s2) return
 				if (s1 != 0) return
 			}
@@ -4339,15 +4437,41 @@ widget('tags', function(e) {
 			return false
 		}
 		if (key == 'Enter') {
-			let s = e.input.value
+			let s = this.value
 			if (!s) return
-			let t1 = e.tags.slice(); t1.push(s); e.tags = t1
-			e.input.value = ''
+			let t1 = e.tags.slice()
+			t1.remove_value(s)
+			t1.push(s)
+			e.tags = t1
+			this.value = ''
+			e.tags_box.focus_tag(s) // scroll tag into view
+			e.input.focus()
 			return false
 		}
 	})
 
+	e.tags_box.on('hover', function(ev, on) {
+		this.class('grab', on && !ev.target.closest('.tags-x') && this.scrollWidth > this.cw)
+	})
+
+	e.tags_box.on('pointerdown', function(ev, mx0) {
+		mx0 -= this.x || 0
+		let w = this.scrollWidth - this.cw
+		if (w == 0) {
+			this.x = null
+			return
+		}
+		return this.capture_pointer(ev, function(ev, mx) {
+			this.x = clamp(mx - mx0, -w, 0)
+			this.class('grabbing')
+		}, function() {
+			this.class('grabbing', false)
+		})
+
+	})
+
 })
+
 
 /* <widget-placeholder> ------------------------------------------------------
 

@@ -97,7 +97,6 @@ ARRAYS
 	empty_array -> []                      global empty array, read-only!
 	a.set(a1) -> s
 	a.extend(a1)
-	a.copy() -> a1
 	a.insert(i, v)
 	a.remove(i) -> v
 	a.remove_value(v) -> i
@@ -108,14 +107,14 @@ ARRAYS
 	a.each(f)
 	a.tokeys([v]) -> t
 	a.uniq_sorted()
-	a.remove_duplicates()
+	a.remove_duplicates() -> a
 
 HASH MAPS
 
 	obj() -> o                      create a native map, string keys only
 	set(iter) -> m                  create a set, holds all types
 	s.addset(s2) -> s               dump set into set
-	s.toarray() -> [v1,...]
+	s.toarray() -> [v1,...]         array of elements in insert order
 	map(iter) -> m                  create a map, keys and values can be of any type
 	m.first_key
 	empty -> {}                     global empty object, inherits Object
@@ -580,10 +579,6 @@ method(Array, 'set', function(a) {
 	return this
 })
 
-method(Array, 'copy', function() {
-	return [].extend(this)
-})
-
 method(Array, 'insert', function(i, v) {
 	if (i == null)
 		this.push(v)
@@ -684,8 +679,14 @@ method(Array, 'uniq_sorted', function() {
 	})
 })
 
-// NOTE: O(n^3)
 method(Array, 'remove_duplicates', function() {
+	if (this.len > 40) { // go heavy after 64k iterations.. too soon?
+		let s = set(this)
+		this.length = 0
+		for (let v of s)
+			this.push(v)
+		return this
+	}
 	return this.remove_values(function(v, i, a) {
 		return a.indexOf(v) != i
 	})

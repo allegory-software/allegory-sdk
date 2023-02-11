@@ -17,7 +17,7 @@ CSS CLASSES:
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
 	SIZING        nowrap shrinks expands
 	BORDERS       b[0] b-{l r t b}[-0] b-{dotted dashed invisible fg}
-	CORNERS       ro ro0 ro-{05 075 0 2 var} ro-{l r t b}-0 round ro-group-{h v}
+	CORNERS       ro ro0 ro-{05 075 0 2 var var-075} ro-{l r t b}-0 round ro-group-{h v}
 	PADDINGS      p p0 p-{025 05 075 2 4 8} p-{l r t b x y}-{0 05 2 4 8}
 	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
