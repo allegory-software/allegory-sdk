@@ -13,6 +13,7 @@ WIDGETS
 
 	tooltip
 	toaster
+	list
 	menu
 	tabs
 	split vsplit
@@ -34,6 +35,10 @@ WIDGETS
 	input
 	textarea
 	button
+	select-button
+	tags-box tags
+	autocomplete
+	TODO: dropdown
 	widget-placeholder
 
 FUNCTIONS
@@ -972,6 +977,161 @@ function notify(...args) {
 }
 ajax.notify_error  = (err) => notify(err, 'error')
 ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
+
+/* <list> --------------------------------------------------------------------
+
+--
+
+*/
+
+let e = Element.prototype
+
+function closest_child(ce, e) {
+	while (ce.parent && ce.parent != e) ce = ce.parent
+	return ce
+}
+
+e.make_list = function() {
+
+	let e = this
+
+	// drag & drop elements: acting as a drag source --------------------------
+
+	let item_e_x0, item_e_y0, item_e_w0, item_e_h0 // item dimensions before fixating.
+
+	e.on('start_drag', function(ev, start, mx, my, down_ev, mx0, my0) {
+
+		if ((my - my0)**2 + (mx - mx0)**2 < 5**2)
+			return
+
+		let item_e = closest_child(down_ev.target, e)
+		if (!item_e) return
+
+		let item_r = item_e.rect()
+
+		// fixate item dimensions and move it to root so it doesn't get clipped.
+		item_e.class('list-item-moving')
+		item_e_x0 = item_e.style.left
+		item_e_y0 = item_e.style.top
+		item_e_w0 = item_e.style.width
+		item_e_h0 = item_e.style.height
+		item_e.w = item_r.w
+		item_e.h = item_r.h
+		root.add(item_e)
+
+		start(item_e, item_r)
+
+	})
+
+	e.on('dragging', function(ev, item_e, item_r) {
+		item_e.x = item_r.x
+		item_e.y = item_r.y
+	})
+
+	e.on('stop_drag', function(ev, dest_elem, item_e) {
+		item_e.class('list-item-moving', false)
+		item_e.x = item_e_x0
+		item_e.y = item_e_y0
+		item_e.w = item_e_w0
+		item_e.h = item_e_h0
+	})
+
+	// drag & drop elements: acting as a drop destination ---------------------
+
+	let mys // mid-points in host elements.
+	let e_w0, e_h0 // list dimensions before fixating.
+
+	function hit_test(elem_y) {
+		for (let i = 0, n = e.len; i < n; i++) {
+			if (elem_y < mys[i])
+				return i
+		}
+		return e.len
+	}
+
+	e.listen('drag_started', function(item_e, add_drop_area) {
+
+		let e_r = e.rect()
+
+		// fixate list dimensions so that it doesn't fluctuate while dragging
+		// elements in and out of it.
+		e.class('list-dragging')
+		let e_w0 = e.style.width
+		let e_h0 = e.style.height
+		e.w = e_r.w
+		e.h = e_r.h
+
+		// remember the mid-points of elements for hit-testing.
+		mys = []
+		for (let item_e of e.at) {
+			let r = item_e.rect()
+			mys.push(r.y + r.h / 2)
+		}
+
+		add_drop_area(e, e.rect())
+	})
+
+	e.listen('drag_stopped', function(item_e) {
+
+		// restore list dimensions.
+		e.class('list-dragging', false)
+		e.w = e_w0
+		e.h = e_h0
+
+		for (let ce of e.at)
+			ce.y = null
+
+	})
+
+	let before_i
+	e.on('dropping', function(ev, accepted, item_e, item_r) {
+		before_i = accepted ? hit_test(item_r.y) : null
+		for (let i = 0, n = e.len; i < n; i++)
+			e.at[i].y = accepted ? (i < before_i ? 0 : item_e.h) : null
+	})
+
+	e.on('drop', function(ev, item_e, source_e) {
+		if (before_i != null)
+			e.insert(before_i, item_e)
+	})
+
+}
+
+css('.list', 'v clip arrow')
+css_state('.list-dragging > *', 'rel ease')
+css_state('.list-item-moving', 'abs m0')
+
+widget('list', function(e) {
+
+	e.init_child_components()
+
+	let t = e.$1(':scope>template')
+	let html_template = t && t.html
+
+	let s = e.$1(':scope>script')
+	let html_items = s && s.run(e)
+
+	e.clear()
+
+	e.prop('template_name', {type: 'template_name', attr: 'template'})
+	e.prop('template'     , {type: 'template'})
+	e.prop('items'        , {type: 'array'})
+
+	e.on_update(function(opt) {
+		let ts = template(e.template_name) || e.template
+		if (!ts) return
+		e.clear()
+		for (let item of e.items) {
+			let ce = unsafe_html(render_string(ts, item))
+			e.add(ce)
+		}
+	})
+
+	e.make_list()
+
+	return {template: html_template, items: html_items}
+
+})
 
 /* <menu> --------------------------------------------------------------------
 
@@ -3233,10 +3393,10 @@ widget('info', function(e) {
 
 classes:
 	.hover
-props:
-	e.checked <-> t|f
 attrs:
-	checked
+	name value checked
+state:
+	checked <-> t|f
 methods:
 	e.user_toggle()
 	e.user_set_checked(checked)
@@ -3271,6 +3431,8 @@ function check_widget(e, input_type) {
 	e.add(e.input)
 	e.make_focusable()
 	e.prop('checked', {type: 'bool', attr: true})
+	e.prop('name')
+	e.prop('value')
 	e.property('label', function() {
 		if (!e.bound) return
 		if (!e.id) return
@@ -3390,7 +3552,14 @@ widget('toggle', function(e) {
 	e.set(e.thumb)
 })
 
-// <radio> -------------------------------------------------------------------
+/* <radio> -------------------------------------------------------------------
+
+additional attrs:
+	group
+additional props:
+	group
+
+*/
 
 css('.radio', 'checkbox')
 
@@ -3402,13 +3571,21 @@ css_state('.radio[checked] .radio-thumb', 'ease', ` r: .2px; transition-property
 css_state('.radio:focus-visible', 'no-outline')
 
 widget('radio', function(e) {
+
 	check_widget(e, 'radio')
+
+	e.prop('group', {attr: true})
+
 	e.add(svg({viewBox: '-1 -1 2 2'},
 		svg_tag('circle', {class: 'checkbox-focus-circle'}),
 		svg_tag('circle', {class: 'radio-circle'}),
 		svg_tag('circle', {class: 'radio-thumb'}),
 	))
-	e.prop('group', {attr: true})
+
+	e.set_value = function(v) {
+		e.input.value = v
+	}
+
 	e.user_set_checked = function(v) {
 		if (!v)
 			return
@@ -3425,6 +3602,7 @@ widget('radio', function(e) {
 				re.checked = false
 		e.checked = true
 	}
+
 })
 
 // <radio-group> & .radio-group ----------------------------------------------
@@ -3432,7 +3610,15 @@ widget('radio', function(e) {
 css('radio-group', 'skip')
 
 widget('radio-group', 'Input', function(e) {
+
 	e.init_child_components()
+
+	e.property('value', function() {
+		for (let r of e.each('.radio'))
+			if (r.checked)
+				return r.value
+	})
+
 })
 
 /* <slider> & <range-slider> -------------------------------------------------
@@ -3794,37 +3980,37 @@ That's why we use `t-m` instead of `t-bl` on all bordered widgets.
 
 */
 
-css_util('.lh-input', '', `
+css('.lh-input', '', `
 	--lh: var(--lh-input);
 	line-height: calc(var(--fs) * var(--lh)); /* in pixels so it's the same on icon fonts */
 `)
 
-css_util('.p-t-input', '', ` padding-top    : calc((var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
-css_util('.p-b-input', '', ` padding-bottom : calc((var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
-css_util('.p-y-input', 'p-t-input p-b-input')
+css('.p-t-input', '', ` padding-top    : calc((var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
+css('.p-b-input', '', ` padding-bottom : calc((var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
+css('.p-y-input', 'p-t-input p-b-input')
 
-css_util('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-1)); `)
-css_util('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-1)); `)
-css_util('.p-x-input', 'p-l-input p-r-input')
+css('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-1)); `)
+css('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-1)); `)
+css('.p-x-input', 'p-l-input p-r-input')
 
-css_util('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-1)); `)
-css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
+css('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-1)); `)
+css('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
 
 css('.inputbox', 'm-y-05 b p-x-input p-y-input t-m h-m gap-x-input lh-input')
 
-css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
-css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
-css_util('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller);`)
-css_util('.normal' , '', `--p-y-input-adjust: var(--p-y-input-adjust-normal );`)
-css_util('.large'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-large  );`)
-css_util('.xlarge' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xlarge );`)
+css('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
+css('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
+css('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller);`)
+css('.normal' , '', `--p-y-input-adjust: var(--p-y-input-adjust-normal );`)
+css('.large'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-large  );`)
+css('.xlarge' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xlarge );`)
 
-css_util('.xsmall' , '', `--p-y-input: var(--space-025);`)
-css_util('.small'  , '', `--p-y-input: var(--space-025);`)
-css_util('.smaller', '', `--p-y-input: var(--space-05 );`)
+css('.xsmall' , '', `--p-y-input: var(--space-025);`)
+css('.small'  , '', `--p-y-input: var(--space-025);`)
+css('.smaller', '', `--p-y-input: var(--space-05 );`)
 
-css_util('.large'  , '', `--p-x-input: var(--space-2);`)
-css_util('.xlarge' , '', `--p-x-input: var(--space-2);`)
+css('.large'  , '', `--p-x-input: var(--space-2);`)
+css('.xlarge' , '', `--p-x-input: var(--space-2);`)
 
 /* <input-group> -------------------------------------------------------------
 
@@ -3942,7 +4128,7 @@ inner html:
 
 */
 
-css_util('.p-x-button', '', `
+css('.p-x-button', '', `
 	padding-left  : var(--p-x-button, var(--space-2));
 	padding-right : var(--p-x-button, var(--space-2));
 `)
@@ -4511,6 +4697,11 @@ widget('tags', function(e) {
 
 /* <autocomplete> ------------------------------------------------------------
 
+in props:
+
+update opt:
+	input
+
 */
 
 css('.autocomplete', 'b p-x-input p-y-input bg-input')
@@ -4518,8 +4709,7 @@ css('.autocomplete', 'b p-x-input p-y-input bg-input')
 widget('autocomplete', 'Input', function(e) {
 
 	function input_input(ev) {
-		e.set(this.value)
-		e.show(!!this.value)
+		e.update({input: this.value, show: !!this.value})
 	}
 
 	e.bind_input = function(te, on) {
@@ -4537,6 +4727,20 @@ widget('autocomplete', 'Input', function(e) {
 
 })
 
+/* <dropdown> ----------------------------------------------------------------
+
+
+*/
+
+widget('dropdown', 'Input', function(e) {
+
+	e.class('inputbox')
+
+	e.value_box = div({class: 'dropdown-value'})
+	e.chevron = div({class: 'dropdown-chevron'})
+	e.add(e.value_box, e.chevron)
+
+})
 
 /* <widget-placeholder> ------------------------------------------------------
 

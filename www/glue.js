@@ -166,7 +166,9 @@ COLORS
 GEOMETRY
 
 	point_around(cx, cy, r, angle) -> [x, y]
-	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) -> [x, y, w, h]
+	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, [out]) -> [x, y, w, h]
+	rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) -> t|f
+
 
 TIMERS
 
@@ -1428,8 +1430,8 @@ function point_around(cx, cy, r, angle) {
 	]
 }
 
-function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) {
-	// intersect on each dimension
+function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, out) {
+	// intersect on one dimension
 	// intersect_segs(ax1, ax2, bx1, bx2) => [max(ax1, bx1), min(ax2, bx2)]
 	// intersect_segs(x1, x1+w1, x2, x2+w2)
 	// intersect_segs(y1, y1+h1, y2, y2+h2)
@@ -1440,7 +1442,26 @@ function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) {
 	// clamp size
 	let _w = max(_x2-_x1, 0)
 	let _h = max(_y2-_y1, 0)
-	return [_x1, _y1, _w, _h]
+	if (out) {
+		out[0] = _x1
+		out[1] = _y1
+		out[2] = _w
+		out[3] = _h
+		return out
+	} else {
+		return [_x1, _y1, _w, _h]
+	}
+}
+
+{
+let segs_overlap = function(ax1, ax2, bx1, bx2) { // check if two 1D segments overlap
+	return !(ax2 < bx1 || bx2 < ax1)
+}
+function rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) {
+	return
+		segs_overlap(x1, x1+w1, x2, x2+w2) &&
+		segs_overlap(y1, y1+h1, y2, y2+h2)
+}
 }
 
 // timers --------------------------------------------------------------------

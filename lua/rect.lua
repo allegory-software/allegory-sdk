@@ -136,6 +136,10 @@ end
 
 --box overlapping test
 
+local function overlap_seg(ax1, ax2, bx1, bx2) --two 1D segments overlap
+	return not (ax2 < bx1 or bx2 < ax1)
+end
+
 function rect_overlapping(x1, y1, w1, h1, x2, y2, w2, h2)
 	return
 		overlap_seg(x1, x1+w1, x2, x2+w2) and

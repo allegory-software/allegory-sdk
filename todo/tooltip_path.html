@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html class="theme-dark" hidden>
+<head>
+<script src="glue.js"></script>
+<script src="divs.js"></script>
+<script src="purify.js"></script>
+<link rel="stylesheet" type="text/css" href="utils.css">
+<style>
+toggle.on {
+	background-color: blue;
+}
+.toggle-thumb.on {
+	transform: translateX(calc(100% - 1px));
+}
+</style>
+<script>
+component('toggle', function(e) {
+	e.classes = 't-m m-x b hover-b p05 round bg1 h-m ease'
+	e.min_w = '3em'
+	e.max_w = '3em'
+	e.min_h = '1.75em'
+	e.max_h = '1.75em'
+	e.thumb = element('div', {
+		classes: 'toggle-thumb b round bg-fg shadow-thumb ease',
+		min_w: '1.25em', min_h: '1.25em',
+	})
+	e.set(e.thumb)
+	e.on('click', function() {
+		let on = !e.hasclass('on')
+		e.at[0].class('on', on)
+		e.class('on', on)
+	})
+})
+on_dom_load(function() {
+	init_components()
+	root.show()
+})
+
+component('xtooltip', function(e) {
+	let shape = svg({width: '100%', height: '100%', viewBox: '0 0 1 1', fill: 'white', stroke: 'blue'})
+	let side
+	let align
+	let r = .05
+	let x = 1 - 2*r
+	let p = shape.path({
+		'vector-effect': 'non-scaling-stroke',
+		d: `
+			m0,${r}
+			v${x}
+			a${r},${r} 0 00 ${r},${r}
+			h${x} a${r},${r} 0 00 ${r},-${r}
+			v-${x} a${r},${r} 0 00 -${r},-${r}
+			h-${x} a${r},${r} 0 00 -${r},${r} z
+		`
+	})
+	e.add(shape)
+})
+
+</script>
+</head>
+<body class="h-c theme-large">
+	<div class="S b p h-sb" style="height: 500px">
+		<xtooltip class="m b" style="width: 200px; height: 200px;"></xtooltip>
+		<div class="h-c h-m m b p hover-b xlarge nowrap">
+			<div class="nowrap">Toggle me </div><toggle></toggle>
+		</div>
+		<div class="S3 m b p ro ro-r-0 m-r-05">Wasup</div>
+		<div class="S2 b m p h-c h-m ro ro-l-0 m-l-05">Wasup <br>Dude</div>
+		<div class="S b p m v-sb w8">
+			<div class="b p m b2 dashed theme-inverted large">
+				<div>
+					<span class="mi beat once">home</span>
+					Suup1
+				</div>
+				<div>
+					<span class="fa bounce forever reverse">&#xf015</span>
+					Suup1
+				</div>
+				<p nowrap-dots class="shrinks">Suup1 Suup1 Suup1 Suup1 Suup1 Suup1 Suup1 Suup1</p>
+				<p nowrap class="shrinks">Suup1 Suup1 Suup1 Suup1</p>
+			</div>
+			<div class="b px4 py2 m">
+				Suup2
+			</div>
+		</div>
+	</div>
+</body>
+</html>

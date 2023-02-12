@@ -167,6 +167,7 @@ scripts for new libraries.
   * [Widgets Demo][widgets-demo]       - Widgets Demo (dev branch; http server not required to run it!)
   * [glue.js](www/glue.js)             - JS "assorted lenghs of wire" library
   * [dom.js](www/dom.js)               - DOM API and web components
+  * [css.js](www/css.js)               - Functional CSS library & reset
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
   * [widgets.js](www/widgets.js)       - Web components & layouting widgets
   * [nav.js](www/nav.js)               - Model mixin for data-driven widgets

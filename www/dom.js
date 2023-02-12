@@ -177,7 +177,7 @@ GLOBAL EVENTS
 	e.listen(event, f)
 	e.announce(event, ...args)
 
-INPUT EVENTS
+POINTER EVENTS
 
 	^[right]click       (ev, nclicks, mx, my)
 	^[right]pointerdown (ev, mx, my)
@@ -187,6 +187,9 @@ INPUT EVENTS
 	this.capture_pointer(ev, [on_pointermove], [on_pointerup])
 		^on_pointermove (ev, mx, my, mx0, my0)
 		^on_pointerup   (ev, mx, my, mx0, my0)
+
+KEYBOARD EVENTS
+
 	^keydown            (key, shift, ctrl, alt, ev)
 	^keyup              (key, shift, ctrl, alt, ev)
 	^keypress           (key, shift, ctrl, alt, ev)
@@ -198,6 +201,13 @@ LAYOUT CHANGE EVENT
 
 ELEMENT GEOMETRY
 
+	domrect([x, y, w, h]) -> r
+	r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
+	r.set(r | x,y,w,h)
+	r.clip(r, [out_r]) -> out_r
+	r.contains(x, y) -> t|f
+	r.intersects(r) -> t|f
+
 	px(x)
 	e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h
 	e.ox, e.oy, e.ow, e.oh
@@ -205,8 +215,6 @@ ELEMENT GEOMETRY
 	e.min_w, e.min_h, e.max_w, e.max_h
 	e.rect() -> r
 	e.orect() -> r
-	r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
-	r.contains(x, y)
 
 ELEMENT STATE
 
@@ -289,6 +297,7 @@ TIME-AGO AUTO-UPDATING
 EXECUTABLE SCRIPTS
 
 	<script run></script> scripts declared in html are executable.
+	script_e.run([this_arg])
 
 HTML COMPONENTS
 
@@ -313,7 +322,6 @@ POPUPS
 LIVE-MOVE LIST ELEMENTS
 
 	live_move_mixin(e)
-	e.make_children_movable()
 
 THEMING
 
@@ -540,7 +548,7 @@ css_layer = memoize(function(layer) {
 
 })
 
-for (layer of 'base state role role_state generic_state util'.words()) {
+for (layer of 'base state role role_state generic_state'.words()) {
 	window['css_'+layer] = css_layer(layer.replace('_', '-'))
 	window['css_'+layer+'_chrome' ] = Chrome  ? window['css_'+layer] : noop
 	window['css_'+layer+'_firefox'] = Firefox ? window['css_'+layer] : noop
@@ -1007,8 +1015,8 @@ e._bind = function bind(on) {
 			if (e._user_bind)
 				e._user_bind(true)
 			if (e.id) {
-				e.announce('bind', true)
-				e.announce(e.id+'.bind', true)
+				announce(e, 'bind', true)
+				announce(e, e.id+'.bind', true)
 			}
 			if (PROFILE_BIND_TIME) {
 				let t1 = time()
@@ -1024,8 +1032,8 @@ e._bind = function bind(on) {
 			if (e._user_bind)
 				e._user_bind(false)
 			if (e.id) {
-				e.announce('bind', false)
-				e.announce(e.id+'.bind', true)
+				announce(e, 'bind', false)
+				announce(e, e.id+'.bind', false)
 			}
 			e.debug_close_if(DEBUG_BIND)
 		}
@@ -1062,18 +1070,22 @@ function init_components() {
 // listen to a global event *while the element is bound*.
 e.listen = function(event, f) {
 	let handlers = obj() // event->f
-	this.on_bind(function(on) {
-		for (let event in handlers)
-			listen(event, handlers[event], on)
-	})
 	this.listen = function(event, f) {
 		handlers[event] = f
 	}
+	this.listen(event, f)
+	function bind(on) {
+		for (let event in handlers)
+			listen(event, handlers[event], on)
+	}
+	this.on_bind(bind)
+	if (this.bound)
+		bind(true)
 }
 
 e.announce = function(event, ...args) {
 	if (!this.bound) return
-	announce(this, this.id, event, ...args)
+	announce(event, this, ...args)
 }
 
 // DOM manipulation API ------------------------------------------------------
@@ -2030,22 +2042,12 @@ e.on_position = function(f) {
 	this.do_after('do_position', f)
 }
 
-/* events & event wrappers ---------------------------------------------------
-
-NOTE: these wrappers block mouse events on any target that has attr `disabled`
-or that has any ancestor with attr `disabled`. We're not using
-`pointer-events: none` because that makes disabled elements click-through
-(think clicking through disabled popups) and also disables scrolling, so you
-wouldn't see or select text from a disabled container with a scrollbar.
-
-NOTE: preventing focusing is a matter of not-setting/removing attr `tabindex`
-except for input elements that must have an explicit `tabindex=-1`.
-This is not done here, see e.make_disablable() and e.make_focusable().
-
-*/
+// events & event wrappers ---------------------------------------------------
 
 let installers = on.installers
 let callers = on.callers
+
+// resize event --------------------------------------------------------------
 
 let resize_observer = new ResizeObserver(function(entries) {
 	for (let entry of entries)
@@ -2075,6 +2077,8 @@ installers.resize = function() {
 	if (this.bound)
 		bind.call(this, true)
 }
+
+// DOM change events ---------------------------------------------------------
 
 let attr_change_observer = new MutationObserver(function(mutations) {
 	for (let mut of mutations)
@@ -2139,6 +2143,16 @@ installers.nodes_changed = function() {
 	if (this.bound)
 		bind.call(this, true)
 }
+
+/* mouse events --------------------------------------------------------------
+
+NOTE: these wrappers block mouse events on any target that has attr `disabled`
+or that has any ancestor with attr `disabled`. We're not using
+`pointer-events: none` because that makes disabled elements click-through
+(think clicking through disabled popups) and also disables scrolling, so you
+wouldn't see or select text from a disabled container with a scrollbar.
+
+*/
 
 installers.hover = function() {
 	if (this.__hover_installed)
@@ -2235,6 +2249,128 @@ callers.pointermove = function(ev, f) {
 	return f.call(this, ev, ev.clientX, ev.clientY)
 }
 
+/* drag & drop protocol ------------------------------------------------------
+
+TL;DR:
+- as a source, listen on start_drag(), dragging(), stop_drag().
+  call start(payload, payload_rect) inside start_drag() to start the drag.
+- as a dest, listen on drag_started(), drag_stopped(), dropping(), drop(),
+  and possibly accept_drop(). call add_drop_area(elem, drop_area_rect)
+  inside drag_started() to register drop areas.
+
+LONG(ER) VERSION:
+- listen on ^start_drag(pointermove_ev, start, mx, my, pointerdown_ev, mx0, my0)
+  which is called on ^pointerdown and on ^pointermove.
+- inside ^start_drag, call start([payload[, payload_rect]]) to start dragging
+  a payload (defaults to this). the payload can have a rect in abs. coords
+  (defaults to a zero-sized rect at cursor position).
+- ^^drag_started(payload, add_drop_area, source_elem) is then announced so that potential
+  acceptors can announce their drop area rect(s) by calling add_drop_area(elem, drop_area_rect).
+- while the mouse moves, hit elements get ^accept_drop(pointermove_ev, payload, payload_rect)
+  which they can cancel, signaling refusal to accept the drop.
+- if multiple elements accept the drop at the same time, the one with the largest
+  intersected area wins, and gets ^dropping(pointermove_ev, true, payload, payload_rect),
+  and the element that won last time gets ^dropping(pointermove_ev, false, payload, payload_rect).
+- on ^pointerup, the source elem gets ^stop_drag(pointermove_ev, [dest_elem], payload, payload_rect),
+  and canceling it means refusal to drop to dest_elem.
+- the destination elem gets ^drop(pointerup_ev, payload, payload_rect) if the drop wasn't
+  canceled or ^dropping(pointerup_ev, false, payload, payload_rect) if it was.
+- source elem also gets ^dragging(ev, payload, payload_rect, [dest_elem]) while the mouse moves,
+  and canceling it means refusal to accept dest_elem as a drop target.
+- ^^drag_stopped(payload, payload_rect) is always announced when the drag stopped.
+
+*/
+installers.start_drag = function() {
+	this.on('pointerdown', function(ev, mx0, my0) {
+
+		let source_elem = this
+		let down_ev = ev
+		let mx, my
+		let dragging, payload
+		let px, py, pw, ph // payload rect in relative-to-cursor coords.
+		let drop_areas = [] // [r1, ...]
+		let drop_elems = [] // [e1, ...]
+
+		function add_drop_area(e, r) {
+			drop_areas.push(assert(r))
+			drop_elems.push(assert(e))
+		}
+
+		function start(payload_arg, payload_r) {
+			dragging = true
+			payload = payload_arg || source_elem
+			px = payload_r && payload_r.x - mx0 || 0
+			py = payload_r && payload_r.y - my0 || 0
+			pw = payload_r && payload_r.w || 0
+			ph = payload_r && payload_r.h || 0
+			announce('drag_started', payload, add_drop_area, source_elem)
+		}
+
+		let dest_elem
+
+		let payload_r = domrect()
+		let temp_r = domrect()
+		function source_elem_move(ev, mx1, my1) {
+			mx = mx1
+			my = my1
+			if (!dragging)
+				source_elem.fireup('start_drag', ev, start, mx, my, down_ev, mx0, my0)
+			if (dragging) {
+				payload_r.x = mx + px
+				payload_r.y = my + py
+				payload_r.w = pw
+				payload_r.h = ph
+				let max_area = 0
+				let last_dest_elem = dest_elem
+				dest_elem = null
+				for (let i = 0, n = drop_areas.length; i < n; i++) {
+					let drop_area_r = drop_areas[i]
+					let cr = payload_r.clip(drop_area_r, temp_r)
+					let area = cr.w * cr.h
+					if (pw == 0 || ph == 0 || area > 0) {
+						let e = drop_elems[i]
+						if (e.fire('accept_drop', ev, payload, payload_r)) {
+							if (area > max_area) {
+								max_area = area
+								dest_elem = e
+							}
+						}
+					}
+				}
+				if (!source_elem.fire('dragging', ev, payload, payload_r, dest_elem))
+					dest_elem = null
+				if (last_dest_elem && last_dest_elem != dest_elem)
+					last_dest_elem.fire('dropping', ev, false, payload, payload_r)
+				if (dest_elem)
+					dest_elem.fire('dropping', ev, true, payload, payload_r)
+			}
+		}
+
+		function source_elem_up(ev, mx, my) {
+			if (!dragging)
+				return
+			if (!source_elem.fireup('stop_drag', ev, dest_elem, payload, payload_r)) {
+				if (dest_elem)
+					dest_elem.fireup('dropping', ev, false, payload, payload_r)
+			} else if (dest_elem)
+				dest_elem.fireup('drop', ev, payload, pr)
+			announce('drag_stopped', payload, source_elem)
+		}
+
+		source_elem_move(ev, mx0, my0)
+
+		return this.capture_pointer(ev, source_elem_move, source_elem_up)
+	})
+}
+
+/* keyboard events -----------------------------------------------------------
+
+NOTE: preventing focusing is a matter of not-setting/removing attr `tabindex`
+except for input elements that must have an explicit `tabindex=-1`.
+This is not done here, see e.make_disablable() and e.make_focusable().
+
+*/
+
 callers.keydown = function(ev, f) {
 	return f.call(this, ev.key, ev.shiftKey, ev.ctrlKey, ev.altKey, ev)
 }
@@ -2267,14 +2403,74 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 		document.fire('stopped_event', this)
 })
 
-// geometry wrappers ---------------------------------------------------------
+// DOMRect extensions --------------------------------------------------------
 
 function domrect(...args) {
 	return new DOMRect(...args)
 }
 
+alias(DOMRectReadOnly, 'x1', 'left')
+alias(DOMRectReadOnly, 'y1', 'top')
+alias(DOMRectReadOnly, 'w' , 'width')
+alias(DOMRectReadOnly, 'h' , 'height')
+alias(DOMRectReadOnly, 'x2', 'right')
+alias(DOMRectReadOnly, 'y2', 'bottom')
+
+alias(DOMRect, 'x1', 'left')
+alias(DOMRect, 'y1', 'top')
+alias(DOMRect, 'w' , 'width')
+alias(DOMRect, 'h' , 'height')
+alias(DOMRect, 'x2', 'right')
+alias(DOMRect, 'y2', 'bottom')
+
+method(DOMRectReadOnly, 'contains', function(x, y) {
+	return (
+		(x >= this.left && x <= this.right) &&
+		(y >= this.top  && y <= this.bottom))
+})
+
+method(DOMRect, 'set', function(x, y, w, h) {
+	if (x instanceof DOMRectReadOnly) {
+		this.x = x.x
+		this.y = x.y
+		this.w = x.w
+		this.h = x.h
+	} else {
+		this.x = x
+		this.y = y
+		this.w = w
+		this.h = h
+	}
+})
+
+{
+let out = []
+method(DOMRectReadOnly, 'clip', function(r, out_r) {
+	out = clip_rect(this.x, this.y, this.w, this.h, r.x, r.y, r.w, r.h, out)
+	if (out_r) {
+		out_r.set(...out)
+		return out_r
+	} else {
+		return domrect(...out)
+	}
+})
+}
+
+method(DOMRectReadOnly, 'intersects', function(r) {
+	return rect_intersects(this.x, this.y, this.w, this.h, r.x, r.y, r.w, r.h)
+})
+
+/* element geometry ----------------------------------------------------------
+
+NOTE: x, y, w, h, x1, x2, y1, y2 set offsets from offsetParent to the element's
+box *including its margins*, so what you want to measure those against are
+ox, oy, ow, oh, but note that those are rounded!
+
+*/
+
+// NOTE: setting style.* to undefined is ignored so we change it to null!
 function px(v) {
-	return typeof v == 'number' ? v+'px' : v
+	return isnum(v) ? v+'px' : or(v, null)
 }
 
 property(Element, 'x1'   , function() { return this.__x1 }, function(v) { if (v !== this.__x1) { this.__x1 = v; this.style.left          = px(v) } })
@@ -2290,48 +2486,32 @@ property(Element, 'max_h', function() { return this.__Mh }, function(v) { if (v 
 
 alias(Element, 'x', 'x1')
 alias(Element, 'y', 'y1')
-e.rect = function() {
-	return this.getBoundingClientRect()
+
+// NOTE: these are rounded, integer values!
+alias(HTMLElement, 'ox', 'offsetLeft')
+alias(HTMLElement, 'oy', 'offsetTop')
+alias(HTMLElement, 'ow', 'offsetWidth')
+alias(HTMLElement, 'oh', 'offsetHeight')
+e.orect = function() {
+	return domrect(this.ox, this.oy, this.ow, this.oh)
 }
 
-e.orect = function() {
-	return new DOMRect(this.offsetLeft, this.offsetTop, this.offsetWidth, this.offsetHeight)
+// viewport-relative position; includes padding and border, but not margins.
+e.rect = function() {
+	return this.getBoundingClientRect()
 }
 
 alias(Element, 'cx', 'clientLeft')
 alias(Element, 'cy', 'clientTop')
 alias(Element, 'cw', 'clientWidth')
 alias(Element, 'ch', 'clientHeight')
-alias(HTMLElement, 'ox', 'offsetLeft')
-alias(HTMLElement, 'oy', 'offsetTop')
-alias(HTMLElement, 'ow', 'offsetWidth')
-alias(HTMLElement, 'oh', 'offsetHeight')
 
-alias(DOMRectReadOnly, 'x' , 'left')
-alias(DOMRectReadOnly, 'y' , 'top')
-alias(DOMRectReadOnly, 'x1', 'left')
-alias(DOMRectReadOnly, 'y1', 'top')
-alias(DOMRectReadOnly, 'w' , 'width')
-alias(DOMRectReadOnly, 'h' , 'height')
-alias(DOMRectReadOnly, 'x2', 'right')
-alias(DOMRectReadOnly, 'y2', 'bottom')
-
-method(DOMRectReadOnly, 'contains', function(x, y) {
-	return (
-		(x >= this.left && x <= this.right) &&
-		(y >= this.top  && y <= this.bottom))
-})
-
-method(DOMRectReadOnly, 'clip', function(r) {
-	return domrect(...clip_rect(this.x, this.y, this.w, this.h, r.x, r.y, r.w, r.h))
+method(Window, 'rect', function() {
+	return domrect(0, 0, this.innerWidth, this.innerHeight)
 })
 
 window.on('resize', function window_resize() {
 	document.fire('layout_changed')
-})
-
-method(Window, 'rect', function() {
-	return new DOMRect(0, 0, this.innerWidth, this.innerHeight)
 })
 
 // common state wrappers -----------------------------------------------------
@@ -2842,6 +3022,11 @@ runevery(60, function() {
 
 // exec'ing js scripts inside html -------------------------------------------
 
+let script = HTMLScriptElement.prototype
+script.run = function(this_arg) {
+	return (new Function('', this.text)).call(this_arg || this)
+}
+
 component('script[run]', function(e) {
 	if (e.type && e.type != 'javascript')
 		return
@@ -2851,7 +3036,7 @@ component('script[run]', function(e) {
 	// and also attaching other elements to the script for lifetime control!
 	// NOTE: `function foo() {}` declarations are local. Use `foo = function() {}`
 	// to declare global functions.
-	(new Function('', e.text)).call(e)
+	e.run()
 })
 
 // html-declared components --------------------------------------------------
@@ -3216,7 +3401,7 @@ e.popup = function(target, side, align) {
 
 // implements:
 //   e.move_element_start(move_i, move_n, i1, i2[, x1, x2, xoffset])
-//   e.move_element_update(elem_x, [i1, i2, x1, x2])
+//   e.move_element_update(elem_x)
 //   e.move_element_stop() -> over_id
 // uses:
 //   e.movable_element_size(elem_i) -> w
@@ -3230,6 +3415,7 @@ function live_move_mixin(e) {
 	let move_x, over_i, over_p, over_x
 	let sizes = []
 	let positions = []
+	let initial_positions = []
 
 	e.move_element_start = function(move_i, move_n, _i1, _i2, _i1x, _i2x, _offsetx) {
 		move_n = or(move_n, 1)
@@ -3245,8 +3431,14 @@ function live_move_mixin(e) {
 		offsetx = _offsetx || 0
 		sizes    .length = i2 - i1
 		positions.length = i2 - i1
-		for (let i = i1; i < i2; i++)
-			sizes[i] = e.movable_element_size(i)
+		initial_positions.length = sizes.length
+		let x = 0
+		for (let i = i1; i < i2; i++) {
+			let w = e.movable_element_size(i)
+			sizes[i] = w
+			initial_positions[i] = x
+			x += w
+		}
 		if (i1x == null) {
 			assert(i1 == 0)
 			i1x = 0
@@ -3312,7 +3504,7 @@ function live_move_mixin(e) {
 		if (move_ri1 != null)
 			for (let i = move_ri1; i < move_ri2; i++) {
 				positions[i] = offsetx + x
-				e.set_movable_element_pos(i, offsetx + x, moving)
+				e.set_movable_element_pos(i, offsetx + x, moving, initial_positions[i])
 				x += sizes[i]
 			}
 	}
@@ -3336,7 +3528,7 @@ function live_move_mixin(e) {
 						move_ri2 = i+1
 					} else {
 						positions[i] = offsetx + x
-						e.set_movable_element_pos(i, offsetx + x)
+						e.set_movable_element_pos(i, offsetx + x, false, initial_positions[i])
 					}
 					x += sizes[i]
 				})

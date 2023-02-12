@@ -278,14 +278,15 @@ css('*', '', `
 	box-sizing: border-box;
 `)
 
-css(':root, html, body, table, tr, td, img', '', `
+css(':root, body, table, tr, td, img', '', `
 	margin: 0;
 	padding: 0;
 	border: 0;
 `)
 
-/* let `body` do the scrolling instead of `html` so that modals can cover the scrollbars */
+/* let `body` do the scrolling instead of `html` so that modals can cover the scrollbars. */
 css(':root', '', `
+	position: relative; /* because we add popups to it. */
 	width: 100%;
 	height: 100%;
 	overflow: hidden;
@@ -432,9 +433,6 @@ css('.mi-font', '', `
 `)
 
 /* TEXT ------------------------------------------------------------------- */
-
-css        = css_util
-css_chrome = css_util_chrome
 
 css('.opensans', '', ` font-family: opensans, sans-serif; `)
 css('.inter'   , '', ` font-family: inter, sans-serif; `)
@@ -671,7 +669,7 @@ css('.expands', '', `
 `)
 
 // prevents overflow in inline & block containers.
-css_util('shrinks-inline', '', ``)
+css('shrinks-inline', '', ``)
 
 css('.shrinks', '', `
 	/* prevents overflow in flexbox and css-grid containers. */
