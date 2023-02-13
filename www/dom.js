@@ -27,7 +27,7 @@ Uses CSS classes on the <html> tag:
 CSS-IN-JS
 
 	css_layer(name) -> layer; layer(selector, includes, rules)
-	css[_base _state _role _role_state _generic_state _light _dark][_chrome _firefox](selector, includes, rules)
+	css[_base _util _state _role _role_state _generic_state _light _dark][_chrome _firefox](selector, includes, rules)
 
 DOM load event:
 
@@ -90,7 +90,9 @@ DOM QUERYING
 	e.$1(sel|e) -> e
 	$(sel) -> nlist
 	$1(sel|e) -> e
+	e.closest_child(ancestor_e) -> ce
 	nlist.each(f)
+	nlist.first nlist.last
 	nlist.trim() -> [n1,...]|null
 	root
 
@@ -177,8 +179,9 @@ GLOBAL EVENTS
 	e.listen(event, f)
 	e.announce(event, ...args)
 
-POINTER EVENTS
+MOUSE EVENTS
 
+	^hover              (ev, on, mx, my)
 	^[right]click       (ev, nclicks, mx, my)
 	^[right]pointerdown (ev, mx, my)
 	^[right]pointerup   (ev, mx, my)
@@ -187,6 +190,7 @@ POINTER EVENTS
 	this.capture_pointer(ev, [on_pointermove], [on_pointerup])
 		^on_pointermove (ev, mx, my, mx0, my0)
 		^on_pointerup   (ev, mx, my, mx0, my0)
+	force_cursor(cursor|false)
 
 KEYBOARD EVENTS
 
@@ -548,7 +552,7 @@ css_layer = memoize(function(layer) {
 
 })
 
-for (layer of 'base state role role_state generic_state'.words()) {
+for (layer of 'base util state role role_state generic_state'.words()) {
 	window['css_'+layer] = css_layer(layer.replace('_', '-'))
 	window['css_'+layer+'_chrome' ] = Chrome  ? window['css_'+layer] : noop
 	window['css_'+layer+'_firefox'] = Firefox ? window['css_'+layer] : noop
@@ -769,6 +773,13 @@ method(NodeList, 'each', Array.prototype.forEach)
 
 property(NodeList, 'first', function() { return this[0] })
 property(NodeList, 'last' , function() { return this[this.length-1] })
+
+// return closest element whose parent is e.
+e.closest_child = function(e) {
+	let ce = this
+	while (ce.parent && ce.parent != e) ce = ce.parent
+	return ce.parent == e && ce || null
+}
 
 /* DOM manipulation with lifecycle management --------------------------------
 
@@ -2215,6 +2226,7 @@ method(EventTarget, 'capture_pointer', function(ev, move, up) {
 	up   = or(up  , return_false)
 	let mx0 = ev.clientX
 	let my0 = ev.clientY
+	let cursor_style
 	function wrap_move(ev, mx, my) {
 		return move.call(this, ev, mx, my, mx0, my0)
 	}
@@ -2247,6 +2259,26 @@ callers.pointerup = function(ev, f) {
 
 callers.pointermove = function(ev, f) {
 	return f.call(this, ev, ev.clientX, ev.clientY)
+}
+
+// when using capture_pointer(), setting the cursor for the element that
+// is hovered doesn't work anymore, so use this hack instead.
+{
+let cursor_style
+function force_cursor(cursor) {
+	if (cursor) {
+		if (!cursor_style) {
+			cursor_style = tag('style')
+			cursor_style.unsafe_html = '* {cursor: '+cursor+' !important; }'
+			root.add(cursor_style)
+		} else {
+			cursor_style.unsafe_html = '* {cursor: '+cursor+' !important; }'
+		}
+	} else if (cursor_style) {
+		cursor_style.remove()
+		cursor_style = null
+	}
+}
 }
 
 /* drag & drop protocol ------------------------------------------------------

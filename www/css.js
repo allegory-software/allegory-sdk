@@ -434,6 +434,8 @@ css('.mi-font', '', `
 
 /* TEXT ------------------------------------------------------------------- */
 
+css = css_util
+
 css('.opensans', '', ` font-family: opensans, sans-serif; `)
 css('.inter'   , '', ` font-family: inter, sans-serif; `)
 
@@ -668,15 +670,14 @@ css('.expands', '', `
 	min-height : auto;
 `)
 
-// prevents overflow in inline & block containers.
-css('shrinks-inline', '', ``)
-
 css('.shrinks', '', `
 	/* prevents overflow in flexbox and css-grid containers. */
 	min-width  : 0;
 	min-height : 0;
 	/* prevens overflow in inline and block containers */
 	max-width: 100%;
+	/* prevens overflow in horizontal flex containers */
+	max-height: 100%;
 `)
 
 css('.w1 ', '', ` width : 1.25em; min-width : 1.25em; max-width : 1.25em; `) /* mainly to keep changing icons fixated and aligned */
