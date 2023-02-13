@@ -986,41 +986,76 @@ ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
 let e = Element.prototype
 
-function closest_child(ce, e) {
-	while (ce.parent && ce.parent != e) ce = ce.parent
-	return ce
-}
-
 e.make_list = function() {
 
 	let e = this
 
+	// set-up list so that elements can be made movable.
+
+	function setup_list() {
+		e.class('list-moving-items')
+	}
+
+	function restore_list() {
+		e.class('list-moving-items', false)
+	}
+
+	// fixate element dimensions so that it can be taken outside its layout.
+
+	function setup_item(item_e, item_r) {
+		item_e.class('list-item-dragging')
+		item_e._x0 = item_e.style.left
+		item_e._y0 = item_e.style.top
+		item_e._w0 = item_e.style.width
+		item_e._h0 = item_e.style.height
+		item_e.w = item_r.w
+		item_e.h = item_r.h
+	}
+
+	function restore_item(item_e) {
+		item_e.class('list-item-dragging', false)
+		item_e.x = item_e._x0
+		item_e.y = item_e._y0
+		item_e.w = item_e._w0
+		item_e.h = item_e._h0
+	}
+
 	// drag & drop elements: acting as a drag source --------------------------
 
-	let item_e_x0, item_e_y0, item_e_w0, item_e_h0 // item dimensions before fixating.
+	let item_e, item_i
 
 	e.on('start_drag', function(ev, start, mx, my, down_ev, mx0, my0) {
 
 		if ((my - my0)**2 + (mx - mx0)**2 < 5**2)
 			return
 
-		let item_e = closest_child(down_ev.target, e)
+		item_e = down_ev.target.closest_child(e)
 		if (!item_e) return
 
+		// DOM measuring
+		item_i = item_e.index
+		let e_r = e.rect()
 		let item_r = item_e.rect()
+		let css = item_e.css()
+		let ml = num(css.marginLeft)
+		let mr = num(css.marginRight)
+		let mt = num(css.marginTop)
+		let mb = num(css.marginBottom)
+
+		setup_list()
 
 		// fixate item dimensions and move it to root so it doesn't get clipped.
-		item_e.class('list-item-moving')
-		item_e_x0 = item_e.style.left
-		item_e_y0 = item_e.style.top
-		item_e_w0 = item_e.style.width
-		item_e_h0 = item_e.style.height
-		item_e.w = item_r.w
-		item_e.h = item_r.h
+		setup_item(item_e, item_r)
 		root.add(item_e)
+
+		item_r.x -= ml
+		item_r.y -= mt
+		item_r.w += ml + mr
+		item_r.h += mt + mb
 
 		start(item_e, item_r)
 
+		force_cursor('grabbing')
 	})
 
 	e.on('dragging', function(ev, item_e, item_r) {
@@ -1029,17 +1064,16 @@ e.make_list = function() {
 	})
 
 	e.on('stop_drag', function(ev, dest_elem, item_e) {
-		item_e.class('list-item-moving', false)
-		item_e.x = item_e_x0
-		item_e.y = item_e_y0
-		item_e.w = item_e_w0
-		item_e.h = item_e_h0
+		force_cursor(false)
+		restore_list()
+		restore_item(item_e)
+		if (!dest_elem)
+			e.insert(item_i, item_e)
 	})
 
 	// drag & drop elements: acting as a drop destination ---------------------
 
 	let mys // mid-points in host elements.
-	let e_w0, e_h0 // list dimensions before fixating.
 
 	function hit_test(elem_y) {
 		for (let i = 0, n = e.len; i < n; i++) {
@@ -1049,17 +1083,10 @@ e.make_list = function() {
 		return e.len
 	}
 
-	e.listen('drag_started', function(item_e, add_drop_area) {
+	e.listen('drag_started', function(item_e, add_drop_area, source_e) {
 
-		let e_r = e.rect()
-
-		// fixate list dimensions so that it doesn't fluctuate while dragging
-		// elements in and out of it.
-		e.class('list-dragging')
-		let e_w0 = e.style.width
-		let e_h0 = e.style.height
-		e.w = e_r.w
-		e.h = e_r.h
+		if (e != source_e)
+			setup_list()
 
 		// remember the mid-points of elements for hit-testing.
 		mys = []
@@ -1071,15 +1098,15 @@ e.make_list = function() {
 		add_drop_area(e, e.rect())
 	})
 
-	e.listen('drag_stopped', function(item_e) {
+	e.listen('drag_stopped', function(item_e, source_e) {
 
-		// restore list dimensions.
-		e.class('list-dragging', false)
-		e.w = e_w0
-		e.h = e_h0
+		if (e != source_e)
+			restore_list()
 
 		for (let ce of e.at)
 			ce.y = null
+
+		mys = null
 
 	})
 
@@ -1087,7 +1114,7 @@ e.make_list = function() {
 	e.on('dropping', function(ev, accepted, item_e, item_r) {
 		before_i = accepted ? hit_test(item_r.y) : null
 		for (let i = 0, n = e.len; i < n; i++)
-			e.at[i].y = accepted ? (i < before_i ? 0 : item_e.h) : null
+			e.at[i].y = accepted ? (i < before_i ? 0 : item_r.h) : 0
 	})
 
 	e.on('drop', function(ev, item_e, source_e) {
@@ -1097,9 +1124,9 @@ e.make_list = function() {
 
 }
 
-css('.list', 'v clip arrow')
-css_state('.list-dragging > *', 'rel ease')
-css_state('.list-item-moving', 'abs m0')
+css('.list', 'v-t scroll-auto')
+css_state('.list-moving-items > *', 'rel ease')
+css_state('.list-item-dragging', 'abs')
 
 widget('list', function(e) {
 
@@ -1113,12 +1140,12 @@ widget('list', function(e) {
 
 	e.clear()
 
-	e.prop('template_name', {type: 'template_name', attr: 'template'})
-	e.prop('template'     , {type: 'template'})
-	e.prop('items'        , {type: 'array'})
+	e.prop('item_template_name', {type: 'template_name', attr: 'item_template'})
+	e.prop('item_template'     , {type: 'template'})
+	e.prop('items'             , {type: 'array'})
 
 	e.on_update(function(opt) {
-		let ts = template(e.template_name) || e.template
+		let ts = template(e.item_template_name) || e.item_template
 		if (!ts) return
 		e.clear()
 		for (let item of e.items) {
@@ -1129,7 +1156,7 @@ widget('list', function(e) {
 
 	e.make_list()
 
-	return {template: html_template, items: html_items}
+	return {item_template: html_template, items: html_items}
 
 })
 
@@ -3980,37 +4007,37 @@ That's why we use `t-m` instead of `t-bl` on all bordered widgets.
 
 */
 
-css('.lh-input', '', `
+css_util('.lh-input', '', `
 	--lh: var(--lh-input);
 	line-height: calc(var(--fs) * var(--lh)); /* in pixels so it's the same on icon fonts */
 `)
 
-css('.p-t-input', '', ` padding-top    : calc((var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
-css('.p-b-input', '', ` padding-bottom : calc((var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
-css('.p-y-input', 'p-t-input p-b-input')
+css_util('.p-t-input', '', ` padding-top    : calc((var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
+css_util('.p-b-input', '', ` padding-bottom : calc((var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
+css_util('.p-y-input', 'p-t-input p-b-input')
 
-css('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-1)); `)
-css('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-1)); `)
-css('.p-x-input', 'p-l-input p-r-input')
+css_util('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-1)); `)
+css_util('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-1)); `)
+css_util('.p-x-input', 'p-l-input p-r-input')
 
-css('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-1)); `)
-css('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
+css_util('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-1)); `)
+css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
 
 css('.inputbox', 'm-y-05 b p-x-input p-y-input t-m h-m gap-x-input lh-input')
 
-css('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
-css('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
-css('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller);`)
-css('.normal' , '', `--p-y-input-adjust: var(--p-y-input-adjust-normal );`)
-css('.large'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-large  );`)
-css('.xlarge' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xlarge );`)
+css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
+css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
+css_util('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller);`)
+css_util('.normal' , '', `--p-y-input-adjust: var(--p-y-input-adjust-normal );`)
+css_util('.large'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-large  );`)
+css_util('.xlarge' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xlarge );`)
 
-css('.xsmall' , '', `--p-y-input: var(--space-025);`)
-css('.small'  , '', `--p-y-input: var(--space-025);`)
-css('.smaller', '', `--p-y-input: var(--space-05 );`)
+css_util('.xsmall' , '', `--p-y-input: var(--space-025);`)
+css_util('.small'  , '', `--p-y-input: var(--space-025);`)
+css_util('.smaller', '', `--p-y-input: var(--space-05 );`)
 
-css('.large'  , '', `--p-x-input: var(--space-2);`)
-css('.xlarge' , '', `--p-x-input: var(--space-2);`)
+css_util('.large'  , '', `--p-x-input: var(--space-2);`)
+css_util('.xlarge' , '', `--p-x-input: var(--space-2);`)
 
 /* <input-group> -------------------------------------------------------------
 
@@ -4128,7 +4155,7 @@ inner html:
 
 */
 
-css('.p-x-button', '', `
+css_util('.p-x-button', '', `
 	padding-left  : var(--p-x-button, var(--space-2));
 	padding-right : var(--p-x-button, var(--space-2));
 `)
@@ -4141,8 +4168,8 @@ css('.button', 'h-c h-m p-x-button semibold nowrap noselect ro-var', `
 	font-size   : var(--fs);
 `)
 
-css('.large ', '', `--p-x-button: var(--space-4); `)
-css('.xlarge', '', `--p-x-button: var(--space-4); `)
+css_util('.large ', '', `--p-x-button: var(--space-4); `)
+css_util('.xlarge', '', `--p-x-button: var(--space-4); `)
 
 css('.button.text-empty > .button-text', 'hidden')
 
@@ -4390,9 +4417,9 @@ css('.select-button', 'rel ro-var h-s gap-x-0 bg0 shadow-button', `
 	--p-y-input-offset: calc(1px - var(--p-select-button, 3px));
 `)
 
-css('.smaller', '', ` --p-select-button: 2px; `)
-css('.xsmall' , '', ` --p-select-button: 1px; `)
-css('.small'  , '', ` --p-select-button: 1px; `)
+css_util('.smaller', '', ` --p-select-button: 2px; `)
+css_util('.xsmall' , '', ` --p-select-button: 1px; `)
+css_util('.small'  , '', ` --p-select-button: 1px; `)
 
 css('.select-button > :not(.select-button-plate)', 'S h-m t-c p-y-input p-x-button gap-x nowrap-dots noselect dim z1', `
 	flex-basis: fit-content;
