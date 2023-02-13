@@ -74,11 +74,6 @@ css('.grid-header-canvas', 'abs')
 
 css('.grid-cells-view', 'S shrinks rel grid-h scroll-auto')
 
-// Fix the damn Chrome bug with custom-drawn scrollbars !!
-// 50px has the nice side effect of gradually hiding the header when the grid
-// height gets too small.
-css('.grid-cells-view', '', 'flex-basis: 50px;')
-
 // avoid col resizing based on row count
 css('.grid[auto_cols_w] > .grid-cells-view', 'vscroll')
 
