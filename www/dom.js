@@ -203,7 +203,7 @@ LAYOUT CHANGE EVENT
 
 	^document.layout_changed()
 
-ELEMENT GEOMETRY
+DOM RECTANGLES
 
 	domrect([x, y, w, h]) -> r
 	r.x, r.y, r.x1, r.y1, r.x2, r.y2, r.w, r.h
@@ -212,11 +212,17 @@ ELEMENT GEOMETRY
 	r.contains(x, y) -> t|f
 	r.intersects(r) -> t|f
 
+ELEMENT GEOMETRY / SIZING
+
 	px(x)
 	e.x, e.y, e.x1, e.y1, e.x2, e.y2, e.w, e.h
+	e.min_w, e.min_h, e.max_w, e.max_h
+
+ELEMENT GEOMETRY / MEASURING
+
 	e.ox, e.oy, e.ow, e.oh
 	e.cx, e.cy, e.cw, e.ch
-	e.min_w, e.min_h, e.max_w, e.max_h
+	e.sx, e.sy, e.sw, e.sh
 	e.rect() -> r
 	e.orect() -> r
 
@@ -2528,7 +2534,7 @@ e.orect = function() {
 	return domrect(this.ox, this.oy, this.ow, this.oh)
 }
 
-// viewport-relative position; includes padding and border, but not margins.
+// position in viewport space; includes padding and border, but not margins.
 e.rect = function() {
 	return this.getBoundingClientRect()
 }
@@ -2537,6 +2543,11 @@ alias(Element, 'cx', 'clientLeft')
 alias(Element, 'cy', 'clientTop')
 alias(Element, 'cw', 'clientWidth')
 alias(Element, 'ch', 'clientHeight')
+
+alias(HTMLElement, 'sx', 'scrollLeft')
+alias(HTMLElement, 'sy', 'scrollTop')
+alias(HTMLElement, 'sw', 'scrollWidth')
+alias(HTMLElement, 'sh', 'scrollHeight')
 
 method(Window, 'rect', function() {
 	return domrect(0, 0, this.innerWidth, this.innerHeight)
