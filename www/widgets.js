@@ -980,7 +980,18 @@ ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
 /* <list> --------------------------------------------------------------------
 
---
+inner html:
+	<template>          inline template
+	<script>            inline script to compute and return the items array
+html attrs:
+	item_template       template name for formatting an item
+config props:
+	item_template       template text for formatting an item
+	item_template_name  template name for formatting an item
+data props:
+	items               array of items
+
+NOTE: does not support element margins!
 
 */
 
@@ -990,26 +1001,13 @@ e.make_list = function() {
 
 	let e = this
 
-	// set-up list so that elements can be made movable.
+	// drag & drop elements: acting as a drag source --------------------------
 
-	function setup_list() {
-		e.class('list-moving-items')
-	}
-
-	function restore_list() {
-		e.class('list-moving-items', false)
-	}
-
-	// fixate element dimensions so that it can be taken outside its layout.
-
-	function setup_item(item_e, item_r) {
-		item_e.class('list-item-dragging')
+	function save_item(item_e) {
 		item_e._x0 = item_e.style.left
 		item_e._y0 = item_e.style.top
 		item_e._w0 = item_e.style.width
 		item_e._h0 = item_e.style.height
-		item_e.w = item_r.w
-		item_e.h = item_r.h
 	}
 
 	function restore_item(item_e) {
@@ -1019,8 +1017,6 @@ e.make_list = function() {
 		item_e.w = item_e._w0
 		item_e.h = item_e._h0
 	}
-
-	// drag & drop elements: acting as a drag source --------------------------
 
 	let item_e, item_i
 
@@ -1034,24 +1030,18 @@ e.make_list = function() {
 
 		// DOM measuring
 		item_i = item_e.index
-		let e_r = e.rect()
 		let item_r = item_e.rect()
 		let css = item_e.css()
-		let ml = num(css.marginLeft)
-		let mr = num(css.marginRight)
-		let mt = num(css.marginTop)
-		let mb = num(css.marginBottom)
+		save_item(item_e)
 
-		setup_list()
+		e.class('list-items-moving')
+		item_e.class('list-item-dragging')
 
-		// fixate item dimensions and move it to root so it doesn't get clipped.
-		setup_item(item_e, item_r)
-		root.add(item_e)
+		// fixate size so we can move it out of layout.
+		item_e.w = item_r.w
+		item_e.h = item_r.h
 
-		item_r.x -= ml
-		item_r.y -= mt
-		item_r.w += ml + mr
-		item_r.h += mt + mb
+		root.add(item_e) // ...so it doesn't get clipped.
 
 		start(item_e, item_r)
 
@@ -1065,7 +1055,7 @@ e.make_list = function() {
 
 	e.on('stop_drag', function(ev, dest_elem, item_e) {
 		force_cursor(false)
-		restore_list()
+		e.class('list-items-moving', false)
 		restore_item(item_e)
 		if (!dest_elem)
 			e.insert(item_i, item_e)
@@ -1073,27 +1063,45 @@ e.make_list = function() {
 
 	// drag & drop elements: acting as a drop destination ---------------------
 
-	let mys // mid-points in host elements.
+	let gap_y, placeholder_w
+	let ys // y's of host elements in offset space.
+	let mys // mid-points in host elements in viewport space.
+	let placeholder
+	let hit_i, hit_y
 
 	function hit_test(elem_y) {
-		for (let i = 0, n = e.len; i < n; i++) {
-			if (elem_y < mys[i])
-				return i
+		let n = e.len - (placeholder ? 1 : 0)
+		for (let i = 0; i < n; i++) {
+			if (elem_y < mys[i]) {
+				hit_i = i
+				hit_y = ys[i]
+				return
+			}
 		}
-		return e.len
+		hit_i = n
 	}
 
-	e.listen('drag_started', function(item_e, add_drop_area, source_e) {
+	e.listen('drag_started', function(drop_item_e, add_drop_area, source_e) {
 
 		if (e != source_e)
-			setup_list()
+			e.class('list-items-moving')
 
-		// remember the mid-points of elements for hit-testing.
+		// measure elements for hit-testing.
+		let e_css = e.css()
+		gap_y = num(e_css.rowGap) || 0
+		placeholder_w = e.cw - (num(e_css.paddingLeft) || 0) - (num(e_css.paddingRight) || 0)
+		ys = []
 		mys = []
-		for (let item_e of e.at) {
-			let r = item_e.rect()
-			mys.push(r.y + r.h / 2)
+		let item_e, item_r
+		for (item_e of e.at) {
+			item_r = item_e.rect()
+			ys.push(item_e.oy)
+			mys.push(item_e.oy + item_e.oh / 2)
 		}
+		if (item_e)
+			ys.push(item_e.oy + item_e.oh + gap_y)
+		else
+			ys.push(0)
 
 		add_drop_area(e, e.rect())
 	})
@@ -1101,32 +1109,60 @@ e.make_list = function() {
 	e.listen('drag_stopped', function(item_e, source_e) {
 
 		if (e != source_e)
-			restore_list()
+			e.class('list-items-moving', false)
 
 		for (let ce of e.at)
 			ce.y = null
 
+		ys = null
 		mys = null
+
+		if (placeholder) {
+			placeholder.remove()
+			placeholder = null
+		}
 
 	})
 
-	let before_i
 	e.on('dropping', function(ev, accepted, item_e, item_r) {
-		before_i = accepted ? hit_test(item_r.y) : null
-		for (let i = 0, n = e.len; i < n; i++)
-			e.at[i].y = accepted ? (i < before_i ? 0 : item_r.h) : 0
+		if (accepted) {
+			hit_test(item_r.y - e.rect().y - e.cy + e.sy)
+		}
+		if (accepted) {
+			if (!placeholder) {
+				placeholder = div({class: 'list-drop-placeholder'})
+				e.add(placeholder)
+			}
+			placeholder.y = ys[hit_i]
+			placeholder.min_w = placeholder_w
+			placeholder.min_h = item_r.h
+			placeholder.show()
+			placeholder.make_visible()
+		} else if (placeholder) {
+			placeholder.hide()
+		}
+		let n = e.len - (placeholder ? 1 : 0)
+		for (let i = 0; i < n; i++) {
+			let item_e = e.at[i]
+			item_e.y = accepted ? (i < hit_i ? 0 : gap_y + item_r.h) : 0
+		}
 	})
 
 	e.on('drop', function(ev, item_e, source_e) {
-		if (before_i != null)
-			e.insert(before_i, item_e)
+		e.insert(hit_i, item_e)
 	})
 
 }
 
-css('.list', 'v-t scroll-auto')
-css_state('.list-moving-items > *', 'rel ease')
-css_state('.list-item-dragging', 'abs')
+css('.list', 'v-t scroll-auto rel')
+
+css_state('.list-items-moving > *', 'rel ease z2')
+css_state('.list-item-dragging', 'abs m0 z3')
+css_state('.list-drop-placeholder', 'abs b2 b-dashed no-ease z1', ` border-color: green; `)
+
+// NOTE: margins on list elements are not supported because of drag & drop!
+// Use padding and gap on the list instead, that works.
+css_role('.list > *', 'm0')
 
 widget('list', function(e) {
 
@@ -4701,12 +4737,12 @@ widget('tags', function(e) {
 	})
 
 	e.tags_box.on('hover', function(ev, on) {
-		this.class('grab', on && !ev.target.closest('.tags-x') && this.scrollWidth > this.cw)
+		this.class('grab', on && !ev.target.closest('.tags-x') && this.sw > this.cw)
 	})
 
 	e.tags_box.on('pointerdown', function(ev, mx0) {
 		mx0 -= this.x || 0
-		let w = this.scrollWidth - this.cw
+		let w = this.sw - this.cw
 		if (w == 0) {
 			this.x = null
 			return

@@ -660,26 +660,27 @@ my_auto.on_update(function(opt) {
 
 <template id="list-drag_demo">
 <script type="text/x-mustache" id=list_drag_demo_template>
-	<div class="m b p bg1 noselect">
+	<div class="b0 p bg1 noselect" style="{{#height}}height: {{height}}{{/height}}">
 		<div class="bold">{{name}}</div>
-		<div class="smaller">{{phone}}</div>
+		{{#phone}}<div class="smaller">{{phone}}</div>{{/phone}}
+		{{#email}}<div class="smaller">{{email}}</div>{{/email}}
 	</div>
 </script>
 <div class="S h-l shrinks">
-	<list class="m b2" style="border-width: 10px" item_template=list_drag_demo>
+	<list class="m b p gap" style="border-width: 10px" item_template=list_drag_demo>
 		<script>
 			let i = 0, a = []
-			while (++i <= 20)
+			while (++i <= 200)
 				a.push({name: 'John Doe 1.'+i, phone: '+123 456 '+i})
 			return a
 		</script>
 	</list>
-	<list class="m b2" item_template=list_drag_demo>
+	<list class="m b p-4 gap-4" style="border-width: 10px;" item_template=list_drag_demo>
 		<script>
 			return [
-				{name: 'John Doe 2.1', phone: '+123 456 789'},
-				{name: 'John Doe 2.2', phone: '+321 456 789'},
-				{name: 'John Doe 2.3', phone: '+213 456 789'},
+				{name: 'John Doe 2.1', phone: '+123 456 789', },
+				{name: 'John Doe 2.2', phone: '+321 456 789', email: 'bla@bla.com'},
+				{name: 'John Doe 2.3', phone: '+213 456 789', email: 'bla@bla.com'},
 			]
 		</script>
 	</list>
