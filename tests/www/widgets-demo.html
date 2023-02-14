@@ -758,9 +758,9 @@ my_auto.on_update(function(opt) {
 <template id="list-drag_demo">
 <script type="text/x-mustache" id=list_drag_demo_template>
 	<div class="b2 p bg1 noselect" style="{{#height}}height: {{height}}{{/height}}">
-		<div class="bold">{{name}}</div>
-		{{#phone}}<div class="smaller">{{phone}}</div>{{/phone}}
-		{{#email}}<div class="smaller">{{email}}</div>{{/email}}
+		<div class="bold nowrap">{{name}}</div>
+		{{#phone}}<div class="smaller nowrap">{{phone}}</div>{{/phone}}
+		{{#email}}<div class="smaller nowrap">{{email}}</div>{{/email}}
 	</div>
 </script>
 <list class="m b p gap" style="border-width: 10px" item_template=list_drag_demo>
@@ -780,7 +780,7 @@ my_auto.on_update(function(opt) {
 		]
 	</script>
 </list>
-<list class="S self-h-t m b gap h-l self-h-l" item_template=list_drag_demo>
+<list class="S self-h-t m b gap h-l" item_template=list_drag_demo>
 	<script>
 		return [
 			{name: 'John Doe 3.1', phone: '+123 456 789', },
