@@ -22,7 +22,7 @@ CSS CLASSES:
 	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
 	OVERFLOW      [v h]scroll[-auto] [no]clip[-x -y] scroll-thin
-	POSITIONING   rel abs z{1 2 3 4 5} no-z overlay
+	POSITIONING   rel abs z{1-9} no-z overlay
 	VISIBILITY    hidden skip click-through[-off]
 	FLAT BGs      bg[1 2 -alt -smoke -fg] no-bg
 	IMAGE BGs     bg-{cover contain center t r b l no-repeat repeat-{x y}}
@@ -924,11 +924,8 @@ css('.rel', '', ` position: relative; `)
 css('.abs', '', ` position: absolute; `)
 
 /* example: menu = z4, picker = z3, tooltip = z2, toolbox = z1 */
-css('.z1'  , '', ` z-index: 1; `)
-css('.z2'  , '', ` z-index: 2; `)
-css('.z3'  , '', ` z-index: 3; `)
-css('.z4'  , '', ` z-index: 4; `)
-css('.z5'  , '', ` z-index: 5; `)
+for (let i = 1; i < 9; i++)
+	css('.z'+i, '', `z-index: ${i};`)
 css('.no-z', '', ` z-index: auto; `)
 
 css('.overlay', '', `
@@ -997,7 +994,7 @@ css('.op0', '', ` opacity:  0; `)
 css('.op1', '', ` opacity:  1; `)
 
 for (let i = 1; i <= 9; i++)
-	css('.op0'+i, '', ` opacity: .${i}; `)
+	css('.op0'+i, '', `opacity: .${i};`)
 
 /* SHADOWS ---------------------------------------------------------------- */
 

@@ -23,16 +23,6 @@
 
 <style>
 
-/*
-.theme-light {
-	--bg: hsl(220deg, 43%, 97%);
-	--bg-input: white;
-	--bg-button: white;
-	--bg-select-button: white;
-	background: var(--bg);
-}
-*/
-
 #layout {
 	height: 100%;
 	display: flex;
@@ -62,7 +52,7 @@
 
 #demo_list { overflow: hidden auto; padding-top: .5em; user-select: none; }
 #code      { flex: 1; }
-#result    { flex: 1; padding: 1em; align-content: start; min-width: 0; min-height: 0; overflow: auto; }
+#result    { padding: 1em; overflow: auto; }
 #inspect   { flex: 1; border-top: 1px solid #333; }
 
 #code:focus {
@@ -80,24 +70,11 @@
 
 button[pressed] { background: var(--bg-button-active); }
 
-.flex-h-container { display: flex; flex-direction: row; align-items: start; }
-.flex-v-container { display: flex; flex-direction: column; align-items: start; }
-.inline-container { display: inline; }
-
 </style>
 
 </head>
 
 <body>
-
-<script>
-
-on_dom_load(function() {
-	init_xmodule()
-	init_components()
-})
-
-</script>
 
 <div id=layout>
 	<div id=demo_list></div>
@@ -106,26 +83,146 @@ on_dom_load(function() {
 			<button id=run_button>Run</button>
 			<button id=reload_button>Reload</button>
 			<div class="S h-r gap-x-05">
-				<button id=lights_button>Lights</button>
+				<button class="theme-btn" key=light >Light</button>
+				<button class="theme-btn" key=dark  >Dark</button>
 				<d class="m b-l"></d>
-				<button id=small_button>Small</button>
-				<button id=normal_button>Normal</button>
-				<button id=large_button>Large</button>
+				<button class="size-btn" key=small  >Small</button>
+				<button class="size-btn" key=normal >Normal</button>
+				<button class="size-btn" key=large  >Large</button>
 			</div>
 		</div>
 		<aceeditor id=code></aceeditor>
 	</div>
 	<div id=result_split>
 		<div id=result_buttons class="smaller p-x-05 gap-x-05 h-r">
-			<button id=inline_button>Inline</button>
-			<button id=flex_h_button>Flex H-T</button>
-			<button id=flex_v_button>Flex V-L</button>
-			<button id=grid_button>Grid</button>
+			<button class="layout-btn" key=inline   layout-classes="display-inline ">Inline</button>
+			<button class="layout-btn" key=flex-h-t layout-classes="h-t S shrinks  ">Flex H-T</button>
+			<button class="layout-btn" key=flex-h-s layout-classes="h-s S shrinks  ">Flex H-S</button>
+			<button class="layout-btn" key=flex-v-l layout-classes="v-l S shrinks  ">Flex V-L</button>
+			<button class="layout-btn" key=grid     layout-classes="grid shrinks   ">Grid</button>
 		</div>
 		<div id=result></div>
 		<div id=inspect></div>
 	</div>
 </div>
+<script>
+
+css('.display-inline', '', ` display: inline; `)
+
+on_dom_load(function() {
+
+	init_xmodule()
+	init_components()
+
+	// ace.config.set('basePath', '/ace')
+
+	let ace_editor = ace.edit(code, {
+		mode: 'ace/mode/javascript',
+		highlightActiveLine: false,
+		showGutter: false,
+		printMargin: false,
+		displayIndentGuides: false,
+		tabSize: 3,
+	})
+
+	// disable Tab in the editor since we need to demo tab navigation.
+	ace_editor.commands.removeCommand(ace_editor.commands.byName.indent)
+	ace_editor.commands.removeCommand(ace_editor.commands.byName.outdent)
+
+	function get_script() {
+		return ace_editor.getSession().getValue()
+	}
+
+	function set_script(s) {
+		ace_editor.getSession().setValue(s)
+	}
+
+	function run_script() {
+		result.unsafe_html = get_script()
+		inspect.clear()
+		// inspect.
+	}
+
+	run_button.on('click', function() {
+		run_script()
+	})
+
+	reload_button.on('click', function() {
+		save('script', get_script())
+		window.location = window.location
+	})
+
+	{
+	let i = 0
+	$('template').each(function(e) {
+		if (!e.id.ends('_demo'))
+			return
+		let name = e.id.replace('_demo', '')
+		let s = window[name+'_demo'].html.trim()
+		let item = div({class: 'demo-list-item'}, name)
+		demo_list.add(item)
+		let i1 = i
+		item.on('click', function() {
+
+			ace_editor.getSession().setValue(s)
+			ace_editor.initial_script = s
+			run_script()
+
+			let i0 = load('selected_demo_index')
+			let item0 = i0 != null && demo_list.at[i0]
+			if (item0)
+				item0.class('selected', false)
+			item.class('selected', true)
+			save('selected_demo_index', i1)
+
+		})
+		i++
+	})
+	}
+
+	function init_select_buttons(btn_class, default_key, action) {
+		for (let btn of $(btn_class)) {
+			btn.on('click', function() {
+				for (let btn of $(btn_class))
+					btn.bool_attr('pressed', null)
+				btn.bool_attr('pressed', true)
+				let key = btn.attr('key')
+				action(btn, key)
+				save(btn_class, key)
+			})
+		}
+		let btn = $1(btn_class+'[key='+(load(btn_class) || default_key)+']')
+		if (btn)
+			btn.click()
+	}
+	init_select_buttons('.layout-btn', 'inline', function(btn) {
+		result.attr('class', btn.attr('layout-classes'))
+	})
+	init_select_buttons('.size-btn', 'normal', function(btn, key) {
+		set_theme_size(key)
+	})
+	init_select_buttons('.theme-btn', 'light', function(btn, key) {
+		let dark = key == 'dark'
+		set_theme_dark(dark)
+		ace_editor.setTheme(dark ? 'ace/theme/tomorrow_night' : null)
+	})
+
+	{
+	let i = load('selected_demo_index')
+	let item = i != null && demo_list.at[i]
+	if (item)
+		item.click()
+	let s = load('script')
+	if (s) {
+		set_script(s)
+		run_script()
+		save('script')
+	}
+	}
+
+})
+
+</script>
 
 <!--------------------------------------------------------------------------->
 
@@ -666,34 +763,32 @@ my_auto.on_update(function(opt) {
 		{{#email}}<div class="smaller">{{email}}</div>{{/email}}
 	</div>
 </script>
-<div class="S h-l shrinks">
-	<list class="m b p gap" style="border-width: 10px" item_template=list_drag_demo>
-		<script>
-			let i = 0, a = []
-			while (++i <= 200)
-				a.push({name: 'John Doe 1.'+i, phone: '+123 456 '+i})
-			return a
-		</script>
-	</list>
-	<list class="m b p-4 gap-4" style="border-width: 10px;" item_template=list_drag_demo>
-		<script>
-			return [
-				{name: 'John Doe 2.1', phone: '+123 456 789', },
-				{name: 'John Doe 2.2', phone: '+321 456 789', email: 'bla@bla.com'},
-				{name: 'John Doe 2.3', phone: '+213 456 789', email: 'bla@bla.com'},
-			]
-		</script>
-	</list>
-	<list class="m b gap" item_template=list_drag_demo>
-		<script>
-			return [
-				{name: 'John Doe 3.1', phone: '+123 456 789', },
-				{name: 'John Doe 3.2', phone: '+321 456 789', email: 'bla@bla.com'},
-				{name: 'John Doe 3.3', phone: '+213 456 789', email: 'bla@bla.com'},
-			]
-		</script>
-	</list>
-</div>
+<list class="m b p gap" style="border-width: 10px" item_template=list_drag_demo>
+	<script>
+		let i = 0, a = []
+		while (++i <= 200)
+			a.push({name: 'John Doe 1.'+i, phone: '+123 456 '+i})
+		return a
+	</script>
+</list>
+<list class="m b p-4 gap-4" style="border-width: 10px;" item_template=list_drag_demo>
+	<script>
+		return [
+			{name: 'John Doe 2.1', phone: '+123 456 789', },
+			{name: 'John Doe 2.2', phone: '+321 456 789', email: 'bla@bla.com'},
+			{name: 'John Doe 2.3', phone: '+213 456 789', email: 'bla@bla.com'},
+		]
+	</script>
+</list>
+<list class="S self-h-t m b gap h-l self-h-l" item_template=list_drag_demo>
+	<script>
+		return [
+			{name: 'John Doe 3.1', phone: '+123 456 789', },
+			{name: 'John Doe 3.2', phone: '+321 456 789', email: 'bla@bla.com'},
+			{name: 'John Doe 3.3', phone: '+213 456 789', email: 'bla@bla.com'},
+		]
+	</script>
+</list>
 </template>
 
 <!--------------------------------------------------------------------------->
@@ -909,181 +1004,5 @@ main.add(g)
 
 <!--------------------------------------------------------------------------->
 
-<script>
-
-on_dom_load(function() {
-	init_components()
-})
-
-// ace.config.set('basePath', '/ace')
-
-ace_editor = ace.edit(code, {
-	mode: 'ace/mode/javascript',
-	highlightActiveLine: false,
-	showGutter: false,
-	printMargin: false,
-	displayIndentGuides: false,
-	tabSize: 3,
-})
-
-// disable Tab in the editor since we need to demo tab navigation.
-ace_editor.commands.removeCommand(ace_editor.commands.byName.indent)
-ace_editor.commands.removeCommand(ace_editor.commands.byName.outdent)
-
-function get_script() {
-	return ace_editor.getSession().getValue()
-}
-
-function set_script(s) {
-	ace_editor.getSession().setValue(s)
-}
-
-function run_script() {
-	result.unsafe_html = get_script()
-	inspect.clear()
-	// inspect.
-}
-
-let i = 0
-$('template').each(function(e) {
-	if (!e.id.ends('_demo'))
-		return
-	let name = e.id.replace('_demo', '')
-	let s = window[name+'_demo'].html.trim()
-	let item = div({class: 'demo-list-item'}, name)
-	demo_list.add(item)
-	let i1 = i
-	item.on('click', function() {
-
-		ace_editor.getSession().setValue(s)
-		ace_editor.initial_script = s
-		run_script()
-
-		let i0 = load('selected_demo_index')
-		let item0 = i0 != null && demo_list.at[i0]
-		if (item0)
-			item0.class('selected', false)
-		item.class('selected', true)
-		save('selected_demo_index', i1)
-
-	})
-	i++
-})
-
-on_dom_load(function() {
-	let i = load('selected_demo_index')
-	let item = i != null && demo_list.at[i]
-	if (item)
-		item.click()
-	let s = load('script')
-	if (s) {
-		set_script(s)
-		run_script()
-		save('script')
-	}
-})
-
-run_button.on('click', function() {
-	run_script()
-})
-
-reload_button.on('click', function() {
-	save('script', get_script())
-	window.location = window.location
-})
-
-lights_button.on('click', function() {
-	let dark = !is_theme_dark()
-	ace_editor.setTheme(dark ? 'ace/theme/tomorrow_night' : null)
-	save('dark_mode', dark)
-	set_theme_dark(dark)
-	this.attr('pressed', !dark)
-})
-
-function reset_container_buttons() {
-	inline_button.attr('pressed', false)
-	flex_h_button.attr('pressed', false)
-	flex_v_button.attr('pressed', false)
-	grid_button.attr('pressed', false)
-	result.class('inline-container flex-h-container flex-v-container x-container', false)
-}
-
-inline_button.on('click', function() {
-	reset_container_buttons()
-	result.class('inline-container')
-	save('container', 'inline')
-	inline_button.bool_attr('pressed', true)
-})
-
-flex_h_button.on('click', function() {
-	reset_container_buttons()
-	result.class('flex-h-container')
-	save('container', 'flex-h')
-	flex_h_button.bool_attr('pressed', true)
-})
-
-flex_v_button.on('click', function() {
-	reset_container_buttons()
-	result.class('flex-v-container')
-	save('container', 'flex-v')
-	flex_v_button.bool_attr('pressed', true)
-})
-
-grid_button.on('click', function() {
-	reset_container_buttons()
-	result.class('x-container')
-	save('container')
-	grid_button.bool_attr('pressed', true)
-})
-
-function reset_size_buttons() {
-	small_button.attr('pressed', false)
-	large_button.attr('pressed', false)
-	normal_button.attr('pressed', false)
-}
-
-small_button.on('click', function() {
-	let v = get_theme_size() != 'small'
-	reset_size_buttons()
-	this.attr('pressed', v)
-	save('size', v && 'medium' || null)
-	set_theme_size(v && 'small')
-})
-
-large_button.on('click', function() {
-	let v = get_theme_size() != 'large'
-	reset_size_buttons()
-	this.attr('pressed', v)
-	save('size', v && 'large' || null)
-	set_theme_size(v && 'large')
-})
-
-normal_button.on('click', function() {
-	reset_size_buttons()
-	this.attr('pressed', true)
-	save('size', null)
-	set_theme_size()
-})
-
-on_dom_load(function() {
-	if (load('dark_mode') == 'true')
-		lights_button.click()
-	if (load('size') == 'medium')
-		small_button.click()
-	else if (load('size') == 'large')
-		large_button.click()
-	else
-		normal_button.click()
-	if (load('container') == 'inline')
-		inline_button.click()
-	else if (load('container') == 'flex-h')
-		flex_h_button.click()
-	else if (load('container') == 'flex-v')
-		flex_v_button.click()
-	else
-		grid_button.click()
-})
-
-</script>
 </body>
 </html>

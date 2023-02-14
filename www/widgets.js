@@ -67,6 +67,8 @@ WRITING CSS RULES
 
 */
 
+let e = Element.prototype
+
 css(':root', '', `
 
 	--border-radius-input : 0;
@@ -978,91 +980,113 @@ function notify(...args) {
 ajax.notify_error  = (err) => notify(err, 'error')
 ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
-/* <list> --------------------------------------------------------------------
+// drag & drop list elements: acting as a drag source ------------------------
 
-inner html:
-	<template>          inline template
-	<script>            inline script to compute and return the items array
-html attrs:
-	item_template       template name for formatting an item
-config props:
-	item_template       template text for formatting an item
-	item_template_name  template name for formatting an item
-data props:
-	items               array of items
+css_state('.list-item-dragging', 'abs m0 z5')
+css_state('.list-item-grabbed', 'z6')
 
-NOTE: does not support element margins!
-
-*/
-
-let e = Element.prototype
-
-e.make_list = function() {
+e.make_list_drag_elements = function() {
 
 	let e = this
 
-	// drag & drop elements: acting as a drag source --------------------------
+	// offsets when stacking multiple elements for dragging.
+	let ox = 5
+	let oy = 5
 
-	function save_item(item_e) {
-		item_e._x0 = item_e.style.left
-		item_e._y0 = item_e.style.top
-		item_e._w0 = item_e.style.width
-		item_e._h0 = item_e.style.height
-	}
-
-	function restore_item(item_e) {
-		item_e.class('list-item-dragging', false)
-		item_e.x = item_e._x0
-		item_e.y = item_e._y0
-		item_e.w = item_e._w0
-		item_e.h = item_e._h0
-	}
-
-	let item_e, item_i
+	let grabbed_item
 
 	e.on('start_drag', function(ev, start, mx, my, down_ev, mx0, my0) {
 
 		if ((my - my0)**2 + (mx - mx0)**2 < 5**2)
 			return
 
-		item_e = down_ev.target.closest_child(e)
-		if (!item_e) return
+		grabbed_item = down_ev.target.closest_child(e)
+		if (!grabbed_item) return
 
-		// DOM measuring
-		item_i = item_e.index
-		let item_r = item_e.rect()
-		let css = item_e.css()
-		save_item(item_e)
+		// e.selected_items = grabbed_item.prev ? [grabbed_item.prev] : [grabbed_item.next]
 
+		let items = e.selected_items || [grabbed_item]
+
+		if (items.indexOf(grabbed_item) == -1)
+			items.push(grabbed_item)
+
+		// pray that e.index is not O(n)...
+		items.sort((e1, e2) => e1.index < e2.index ? -1 : 1)
+
+		let items_r = grabbed_item.rect()
+
+		// save item props that we must change while dragging, to be restored on drop.
+		for (let item of items) {
+			item._index0 = item.index
+			item._x0 = item.style.left
+			item._y0 = item.style.top
+			item._w0 = item.style.width
+			item._h0 = item.style.height
+			item._r0 = item.rect()
+		}
+
+		// --measuring stops here--
+
+		for (let item of items) {
+			item.class('list-item-dragging')
+			let r = floor(random() * 15) - 5
+			item.style.transform = `rotate(${r}deg)`
+			// fixate size so we can move it out of layout.
+			item.w = item._r0.w
+			item.h = item._r0.h
+			items_r.h += oy
+		}
+		// move the items out of layout so they don't get clipped.
+		for (let i = items.length-1; i >= 0; i--)
+			root.add(items[i])
 		e.class('list-items-moving')
-		item_e.class('list-item-dragging')
-
-		// fixate size so we can move it out of layout.
-		item_e.w = item_r.w
-		item_e.h = item_r.h
-
-		root.add(item_e) // ...so it doesn't get clipped.
-
-		start(item_e, item_r)
-
+		grabbed_item.class('list-item-grabbed')
 		force_cursor('grabbing')
+
+		start(items, items_r)
 	})
 
-	e.on('dragging', function(ev, item_e, item_r) {
-		item_e.x = item_r.x
-		item_e.y = item_r.y
+	e.on('dragging', function(ev, items, items_r) {
+		let x = 0
+		let y = 0
+		for (let item of items) {
+			item.x = items_r.x + x
+			item.y = items_r.y + y
+			x += ox
+			y += oy
+		}
 	})
 
-	e.on('stop_drag', function(ev, dest_elem, item_e) {
-		force_cursor(false)
+	e.on('stop_drag', function(ev, dest_elem, items) {
 		e.class('list-items-moving', false)
-		restore_item(item_e)
-		if (!dest_elem)
-			e.insert(item_i, item_e)
+		grabbed_item.class('list-item-grabbed', false)
+		force_cursor(false)
+		for (let item of items) {
+			item.class('list-item-dragging', false)
+			item.style.transform = null
+			item.x = item._x0
+			item.y = item._y0
+			item.w = item._w0
+			item.h = item._h0
+			if (!dest_elem) // put element back.
+				e.insert(item._index0, item)
+		}
 	})
 
-	// drag & drop elements: acting as a drop destination ---------------------
+}
 
+// drag & drop list elements: acting as a drop destination -------------------
+
+css_state('.list-accepts-items > *', 'rel ease z1')
+css_state('.list-drop-placeholder', 'abs b2 b-dashed no-ease', `
+	border-color: var(--fg-link);
+`)
+
+e.make_list_drop_elements = function() {
+
+	let e = this
+
+	let horiz
 	let gap_y, placeholder_w
 	let ys // y's of host elements in offset space.
 	let mys // mid-points in host elements in viewport space.
@@ -1081,38 +1105,52 @@ e.make_list = function() {
 		hit_i = n
 	}
 
-	e.listen('drag_started', function(drop_item_e, add_drop_area, source_e) {
+	e.listen('drag_started', function(drop_items, add_drop_area, source_e) {
 
-		if (e != source_e)
-			e.class('list-items-moving')
+		// --measuring starts here--
 
-		// measure elements for hit-testing.
 		let e_css = e.css()
-		gap_y = num(e_css.rowGap) || 0
-		placeholder_w = e.cw - (num(e_css.paddingLeft) || 0) - (num(e_css.paddingRight) || 0)
+		horiz = e_css.flexDirection == 'row'
+		gap_y = num(horiz ? e_css.columnGap : e_css.rowGap) || 0
+		placeholder_w = horiz
+			? e.ch - (num(e_css.paddingTop ) || 0) - (num(e_css.paddingBottom) || 0)
+			: e.cw - (num(e_css.paddingLeft) || 0) - (num(e_css.paddingRight ) || 0)
 		ys = []
 		mys = []
-		let item_e, item_r
-		for (item_e of e.at) {
-			item_r = item_e.rect()
-			ys.push(item_e.oy)
-			mys.push(item_e.oy + item_e.oh / 2)
+		let item, item_r
+		for (item of e.at) {
+			item_r = item.rect()
+			ys.push(horiz ? item.ox : item.oy)
+			mys.push(horiz
+				? item.ox + item.ow / 2
+				: item.oy + item.oh / 2
+			)
 		}
-		if (item_e)
-			ys.push(item_e.oy + item_e.oh + gap_y)
+		if (item)
+			ys.push(horiz
+				? item.ox + item.ow + gap_y
+				: item.oy + item.oh + gap_y
+			)
 		else
 			ys.push(0)
 
 		add_drop_area(e, e.rect())
+
+		// --measuring stops here--
+
+		e.class('list-accepts-items')
+
 	})
 
-	e.listen('drag_stopped', function(item_e, source_e) {
+	e.listen('drag_stopped', function(drop_items, source_e) {
 
-		if (e != source_e)
-			e.class('list-items-moving', false)
+		e.class('list-accepts-items', false)
 
-		for (let ce of e.at)
+		// TODO: save and restore these.
+		for (let ce of e.at) {
+			ce.x = null
 			ce.y = null
+		}
 
 		ys = null
 		mys = null
@@ -1124,18 +1162,27 @@ e.make_list = function() {
 
 	})
 
-	e.on('dropping', function(ev, accepted, item_e, item_r) {
+	e.on('dropping', function(ev, accepted, drop_items, items_r) {
 		if (accepted) {
-			hit_test(item_r.y - e.rect().y - e.cy + e.sy)
+			hit_test(horiz
+				? items_r.x - e.rect().x - e.cx + e.sx
+				: items_r.y - e.rect().y - e.cy + e.sy
+			)
 		}
 		if (accepted) {
 			if (!placeholder) {
 				placeholder = div({class: 'list-drop-placeholder'})
 				e.add(placeholder)
 			}
-			placeholder.y = ys[hit_i]
-			placeholder.min_w = placeholder_w
-			placeholder.min_h = item_r.h
+			if (horiz) {
+				placeholder.x = ys[hit_i]
+				placeholder.min_h = placeholder_w
+				placeholder.min_w = items_r.w
+			} else {
+				placeholder.y = ys[hit_i]
+				placeholder.min_w = placeholder_w
+				placeholder.min_h = items_r.h
+			}
 			placeholder.show()
 			placeholder.make_visible()
 		} else if (placeholder) {
@@ -1143,22 +1190,38 @@ e.make_list = function() {
 		}
 		let n = e.len - (placeholder ? 1 : 0)
 		for (let i = 0; i < n; i++) {
-			let item_e = e.at[i]
-			item_e.y = accepted ? (i < hit_i ? 0 : gap_y + item_r.h) : 0
+			let item = e.at[i]
+			item[horiz ? 'x' : 'y'] =
+				accepted ? (i < hit_i ? 0 : gap_y + (horiz ? items_r.w : items_r.h)) : 0
 		}
 	})
 
-	e.on('drop', function(ev, item_e, source_e) {
-		e.insert(hit_i, item_e)
+	e.on('drop', function(ev, drop_items, source_e) {
+		for (let i = drop_items.len-1; i >= 0; i--)
+			e.insert(hit_i, drop_items[i])
 	})
 
 }
 
-css('.list', 'v-t scroll-auto rel')
+/* <list> --------------------------------------------------------------------
 
-css_state('.list-items-moving > *', 'rel ease z2')
-css_state('.list-item-dragging', 'abs m0 z3')
-css_state('.list-drop-placeholder', 'abs b2 b-dashed no-ease z1', ` border-color: green; `)
+inner html:
+	<template>          inline template
+	<script>            inline script to compute and return the items array
+html attrs:
+	item_template       template name for formatting an item
+config props:
+	item_template       template text for formatting an item
+	item_template_name  template name for formatting an item
+	selected_items
+data props:
+	items               array of items
+
+NOTE: does not support element margins!
+
+*/
+
+css('.list', 'v-t scroll-auto rel')
 
 // NOTE: margins on list elements are not supported because of drag & drop!
 // Use padding and gap on the list instead, that works.
@@ -1190,7 +1253,8 @@ widget('list', function(e) {
 		}
 	})
 
-	e.make_list()
+	e.make_list_drag_elements()
+	e.make_list_drop_elements()
 
 	return {item_template: html_template, items: html_items}
 
@@ -1198,7 +1262,7 @@ widget('list', function(e) {
 
 /* <menu> --------------------------------------------------------------------
 
-
+-- TODO
 
 */
 
