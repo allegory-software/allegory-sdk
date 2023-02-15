@@ -103,6 +103,7 @@ ARRAYS
 	a.remove_values(cond)
 	a.last
 	a.len
+	a.equals(b, [i1], [i2]) -> t|f
 	a.binsearch(v, cmp, i1, i2)
 	a.each(f)
 	a.tokeys([v]) -> t
@@ -114,7 +115,9 @@ HASH MAPS
 	obj() -> o                      create a native map, string keys only
 	set(iter) -> m                  create a set, holds all types
 	s.addset(s2) -> s               dump set into set
+	s.set(s2) -> s                  set elements to s'
 	s.toarray() -> [v1,...]         array of elements in insert order
+	s.equals(s2[, same_order]) -> t|f    compare sets
 	map(iter) -> m                  create a map, keys and values can be of any type
 	m.first_key
 	empty -> {}                     global empty object, inherits Object
@@ -631,16 +634,18 @@ property(Array, 'last', {
 	set: function(v) { this[this.length-1] = v }
 })
 
+property(Array, 'len', function() { return this.length })
+
 method(Array, 'equals', function(a, i0, i1) {
 	i0 = i0 || 0
 	i1 = i1 || max(this.length, a.length)
+	if (i1 > min(this.length, a.length))
+		return false
 	for (let i = i0; i < i1; i++)
 		if (this[i] !== a[i])
 			return false
 	return true
 })
-
-property(Array, 'len', function() { return this.length })
 
 // binary search for an insert position that keeps the array sorted.
 // using '<' gives the first insert position, while '<=' gives the last.
@@ -712,8 +717,35 @@ method(Set, 'addset', function(s) {
 	return this
 })
 
+method(Set, 'set', function(s) {
+	this.clear()
+	this.addset(s)
+	return this
+})
+
 method(Set, 'toarray', function() {
 	return Array.from(this)
+})
+
+method(Set, 'equals', function(s2, same_order) {
+	let s1 = this
+	if (s1.size != s2.size)
+		return false
+	if (same_order) {
+		let it1 = s1.values()
+		let it2 = s2.values()
+		for(let i = 0, n = s1.size; i < n; i++) {
+			let v1 = it1.next().value
+			let v2 = it2.next().value
+			if (v1 != v2)
+				return false
+		}
+	} else {
+		for (let k1 of s1)
+			if (!s2.has(k1))
+				return false
+	}
+	return true
 })
 
 empty = {}
