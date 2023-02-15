@@ -112,6 +112,7 @@ DOM MANIPULATION
 	e.replace([e0], te)
 	e.move([pe], [i0])
 	e.clear()
+	update_element_list([id|{id:,...}|e, ...], [e1, ...]) -> [e1, ...]
 	tag(tag, [attrs], [e1,...])
 	div(...)
 	span(...)
@@ -1452,6 +1453,40 @@ property(Element, 'index', {
 	}
 })
 
+// diff an element array against a new words/array of elements/element-ids/element-prop-vals.
+// elements not in the old array are created, elements present in the old array
+// or having the same id are retained, elements not in the new array are marked
+// for removal by setting the `_remove` flag. if t and cur_elems have the same
+// contents, cur_elems is returned.
+{
+let cur_set = set()
+let cur_by_id = map()
+function update_element_list(t, cur_elems) {
+	t = isstr(t) ? t.words() : t
+	if (t.equals(cur_elems))
+		return cur_elems
+	// map current items by identity and by id.
+	cur_set.clear()
+	cur_by_id.clear()
+	for (let item of cur_elems) {
+		cur_set.add(item)
+		if (item.id)
+			cur_by_id.set(item.id, item)
+		item._remove = true
+	}
+	// create new items or reuse existing ones as needed.
+	let items = []
+	for (let v of t) {
+		// v is either an item from cur_elems, an id, or the prop_vals of a new item.
+		let cur_item = cur_set.has(v) ? v : cur_by_id.get(isstr(v) ? v : v.id)
+		let item = cur_item || element(isstr(v) ? {id: v} : v)
+		items.push(item)
+		item._remove = false
+	}
+	return items
+}
+}
+
 // util to convert an array to a html bullet list ----------------------------
 
 {
@@ -1753,9 +1788,7 @@ css_generic_state('[disabled], [disabled] *', '', `
 e.make_disablable = function() {
 
 	let e = this
-
-	if (e.disable)
-		return
+	e.make_disablable = noop
 
 	e.on_bind(function(on) {
 		// each disabled ancestor is a reason for this element to be disabled.
@@ -1840,9 +1873,7 @@ css_role_state('.focus-within .focus-within:focus-within', 'no-outline')
 e.make_focusable = function(fe) {
 
 	let e = this
-
-	if (e.props && e.props.tabindex)
-		return
+	e.make_focusable = noop
 
 	fe = fe || e
 
