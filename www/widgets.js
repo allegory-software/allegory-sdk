@@ -277,7 +277,7 @@ function redo() {
 }
 
 editing_widget = null
-selected_widgets = new Set()
+selected_widgets = set()
 
 function unselect_all_widgets() {
 	if (editing_widget)
@@ -286,10 +286,10 @@ function unselect_all_widgets() {
 		e.widget_selected = false
 }
 
-copied_widgets = new Set()
+copied_widgets = set()
 
 function copy_selected_widgets() {
-	copied_widgets = new Set(selected_widgets)
+	copied_widgets = set(selected_widgets)
 }
 
 function cut_selected_widgets() {
@@ -299,8 +299,6 @@ function cut_selected_widgets() {
 }
 
 function paste_copied_widgets() {
-	if (!copied_widgets.size)
-		return
 	if (editing_widget) {
 		editing_widget.add_widgets(copied_widgets)
 		copied_widgets.clear()
@@ -317,16 +315,25 @@ function paste_copied_widgets() {
 	}
 }
 
-document.on('keydown', function(key, shift, ctrl) {
+document.on('keydown', function(key, shift, ctrl, alt, ev) {
 	if (key == 'Escape')
 		unselect_all_widgets()
 	else if (ctrl && key == 'c')
-		copy_selected_widgets()
+		if (selected_widgets.size)
+			copy_selected_widgets()
+		else
+			ev.target.fireup('copy', ev)
 	else if (ctrl && key == 'x')
-		cut_selected_widgets()
-	else if (ctrl && key == 'v')
-		paste_copied_widgets()
-	else if (ctrl && key == 'z')
+		if (selected_widgets.size)
+			cut_selected_widgets()
+		else
+			ev.target.fireup('cut', ev)
+	else if (ctrl && key == 'v') {
+		if (copied_widgets.size)
+			paste_copied_widgets()
+		if (copied_widgets.size)
+			ev.target.fireup('paste', ev)
+	} else if (ctrl && key == 'z')
 		if (shift)
 			redo()
 		else
@@ -980,7 +987,19 @@ function notify(...args) {
 ajax.notify_error  = (err) => notify(err, 'error')
 ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
-// drag & drop list elements: acting as a drag source ------------------------
+/* drag & drop list elements: acting as a drag source ------------------------
+
+uses state:
+	selected_items
+list css classes:
+	list-items-moving
+item css classes:
+	list-item-dragging
+	list-item-grabbed
+fires:
+	^items_changed()
+
+*/
 
 css_state('.list-item-dragging', 'abs m0 z5')
 css_state('.list-item-grabbed', 'z6')
@@ -988,6 +1007,7 @@ css_state('.list-item-grabbed', 'z6')
 e.make_list_drag_elements = function() {
 
 	let e = this
+	e.make_list_drag_elements = noop
 
 	// offsets when stacking multiple elements for dragging.
 	let ox = 5
@@ -1003,27 +1023,24 @@ e.make_list_drag_elements = function() {
 		grabbed_item = down_ev.target.closest_child(e)
 		if (!grabbed_item) return
 
-		// e.selected_items = grabbed_item.prev ? [grabbed_item.prev] : [grabbed_item.next]
-
-		let items = e.selected_items || [grabbed_item]
+		let items = e.selected_items && e.selected_items.toarray() || [grabbed_item]
 
 		if (items.indexOf(grabbed_item) == -1)
 			items.push(grabbed_item)
-
-		// pray that e.index is not O(n)...
-		items.sort((e1, e2) => e1.index < e2.index ? -1 : 1)
 
 		let items_r = grabbed_item.rect()
 
 		// save item props that we must change while dragging, to be restored on drop.
 		for (let item of items) {
-			item._index0 = item.index
 			item._x0 = item.style.left
 			item._y0 = item.style.top
 			item._w0 = item.style.width
 			item._h0 = item.style.height
 			item._r0 = item.rect()
+			item._index0 = item.index // NOTE: O(n)
 		}
+
+		items.sort((e1, e2) => e1._index0 < e2._index0 ? -1 : 1)
 
 		// --measuring stops here--
 
@@ -1037,11 +1054,15 @@ e.make_list_drag_elements = function() {
 			items_r.h += oy
 		}
 		// move the items out of layout so they don't get clipped.
-		for (let i = items.length-1; i >= 0; i--)
+		for (let i = items.length-1; i >= 0; i--) {
 			root.add(items[i])
+			items[i]._remove = true
+		}
 		e.class('list-items-moving')
 		grabbed_item.class('list-item-grabbed')
 		force_cursor('grabbing')
+
+		e.fire('items_changed')
 
 		start(items, items_r)
 	})
@@ -1068,14 +1089,40 @@ e.make_list_drag_elements = function() {
 			item.y = item._y0
 			item.w = item._w0
 			item.h = item._h0
-			if (!dest_elem) // put element back.
+			if (!dest_elem) { // put element back in its initial position.
 				e.insert(item._index0, item)
+				item._remove = null
+			}
 		}
+		if (!dest_elem)
+			e.fire('items_changed')
 	})
 
 }
 
-// drag & drop list elements: acting as a drop destination -------------------
+/* lists of elements with one or more static items at the end ----------------
+
+in state:
+	list_static_lien
+out state:
+	list_len
+
+*/
+
+property(e, 'list_len', function() {
+	return this.len - (this.list_static_len || 0)
+})
+
+/* drag & drop list elements: acting as a drop destination -------------------
+
+list css classes:
+	list-accepts-items
+list placeholder css classes:
+	list-drop-placeholder
+fires:
+	^items_changed()
+
+*/
 
 css_state('.list-accepts-items > *', 'rel ease z1')
 css_state('.list-drop-placeholder', 'abs b2 b-dashed no-ease', `
@@ -1085,6 +1132,7 @@ css_state('.list-drop-placeholder', 'abs b2 b-dashed no-ease', `
 e.make_list_drop_elements = function() {
 
 	let e = this
+	e.make_list_drop_elements = noop
 
 	let horiz
 	let gap_y, placeholder_w
@@ -1094,7 +1142,7 @@ e.make_list_drop_elements = function() {
 	let hit_i, hit_y
 
 	function hit_test(elem_y) {
-		let n = e.len - (placeholder ? 1 : 0)
+		let n = e.list_len
 		for (let i = 0; i < n; i++) {
 			if (elem_y < mys[i]) {
 				hit_i = i
@@ -1118,7 +1166,8 @@ e.make_list_drop_elements = function() {
 		ys = []
 		mys = []
 		let item, item_r
-		for (item of e.at) {
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			item = e.at[i]
 			item_r = item.rect()
 			ys.push(horiz ? item.ox : item.oy)
 			mys.push(horiz
@@ -1147,7 +1196,8 @@ e.make_list_drop_elements = function() {
 		e.class('list-accepts-items', false)
 
 		// TODO: save and restore these.
-		for (let ce of e.at) {
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			let ce = e.at[i]
 			ce.x = null
 			ce.y = null
 		}
@@ -1158,6 +1208,7 @@ e.make_list_drop_elements = function() {
 		if (placeholder) {
 			placeholder.remove()
 			placeholder = null
+			e.list_static_len--
 		}
 
 	})
@@ -1173,6 +1224,7 @@ e.make_list_drop_elements = function() {
 			if (!placeholder) {
 				placeholder = div({class: 'list-drop-placeholder'})
 				e.add(placeholder)
+				e.list_static_len = (e.list_static_len || 0) + 1
 			}
 			if (horiz) {
 				placeholder.x = ys[hit_i]
@@ -1188,8 +1240,7 @@ e.make_list_drop_elements = function() {
 		} else if (placeholder) {
 			placeholder.hide()
 		}
-		let n = e.len - (placeholder ? 1 : 0)
-		for (let i = 0; i < n; i++) {
+		for (let i = 0, n = e.list_len; i < n; i++) {
 			let item = e.at[i]
 			item[horiz ? 'x' : 'y'] =
 				accepted ? (i < hit_i ? 0 : gap_y + (horiz ? items_r.w : items_r.h)) : 0
@@ -1197,8 +1248,397 @@ e.make_list_drop_elements = function() {
 	})
 
 	e.on('drop', function(ev, drop_items, source_e) {
-		for (let i = drop_items.len-1; i >= 0; i--)
-			e.insert(hit_i, drop_items[i])
+		for (let i = drop_items.len-1; i >= 0; i--) {
+			let item = drop_items[i]
+			e.insert(hit_i, item)
+			item._remove = null
+		}
+		e.fire('items_changed')
+	})
+
+}
+
+/*
+
+config props:
+	multiselect
+out props:
+	selected_items: set(item)
+	focused_item
+	focused_item_index
+uses item state:
+	item.focusable
+update options:
+	opt.state
+	opt.scroll_to_focused_item
+	opt.enter_edit
+fires:
+	^selected_items_changed()
+
+*/
+
+css_state('.list-item-selected', '', `background: var(--bg-selected);`)
+
+e.make_list_items_focusable = function() {
+
+	let e = this
+	e.make_list_items_focusable = noop
+
+	e.make_focusable()
+
+	e.can_edit_item = return_false
+	e.can_focus_item = function(item, for_editing) {
+		return (!item || item.focusable != false)
+			&& (!for_editing || e.can_edit_item(item))
+	}
+	e.can_select_item = e.can_focus_item
+	e.multiselect = true
+	e.stay_in_edit_mode = true
+
+	e.focused_item_index = null
+	e.selected_items = set()
+	e.selected_item_index = null
+
+	e.property('focused_item', function() {
+		return e.focused_item_index != null && e.at[e.focused_item_index] || null
+	})
+
+	e.property('selected_item', function() {
+		return e.selected_item_index != null && e.at[e.selected_item_index] || null
+	})
+
+	/*
+		i: true             start from focused item
+		i: i                start from index i
+		i: null             start from nowhere
+		n: n                move n positions (positive or negative)
+		n: null             move 0 positions
+		opt.must_move       return only if moved
+		opt.must_not_move   return only if not moved
+		opt.editable        skip non-editable items
+	*/
+	e.first_focusable_item_index = function(i, n, opt) {
+
+		if (i === true)
+			i = e.focused_item_index
+
+		n = or(n, 0) // by default find the first focusable item.
+		let inc = strict_sign(n)
+		n = abs(n)
+
+		opt = opt || empty
+
+		// if starting from nowhere, include the first/last item into the count.
+		if (i == null && n)
+			n--
+
+		let move = n >= 1
+		let start_i = i
+
+		// the default item is the first or the last depending on direction.
+		i = or(i, inc * -1/0)
+
+		// clamp out-of-bound indices.
+		i = clamp(i, 0, e.list_len-1)
+
+		let last_valid_i = null
+
+		// find the last valid item, stopping after the specified row count.
+		if (e.can_focus_item(null, opt.editable)) {
+			let len = e.list_len
+			while (i >= 0 && i < len) {
+				let item = e.at[i]
+				if (e.can_focus_item(item, opt.editable)) {
+					last_valid_i = i
+					if (n <= 0)
+						break
+				}
+				n--
+				i += inc
+			}
+		}
+
+		if (last_valid_i == null)
+			return null
+
+		let moved = last_valid_i != start_i
+
+		if (opt.must_move && !moved)
+			return null
+
+		if (opt.must_not_move && moved)
+			return null
+
+		return last_valid_i
+	}
+
+	e.do_focus_item = function(item, item0) {
+
+	}
+
+	/*
+		i: false                     unfocus
+		opt.unfocus_if_not_found
+		opt.expand_selection
+		opt.invert_selection
+		opt.preserve_selection
+		opt.make_visible
+		opt.focus_editor
+		opt.editable
+		opt.enter_editing
+		opt.focus_non_editable_if_not_found
+	*/
+	e.focus_item = function(i, n, opt) {
+
+		if (!e.list_len)
+			return false
+
+		if (i === false) { // false means unfocus.
+			return e.focus_item(i === false ? null : i, 0, assign({
+				must_not_move: i === false,
+				unfocus_if_not_found: true,
+			}, opt))
+		}
+
+		opt = opt || empty_obj
+		let was_editing = !!e.editor
+		let focus_editor = opt.focus_editor || (e.editor && e.editor.hasfocus)
+		let enter_edit = opt.enter_edit || (was_editing && e.stay_in_edit_mode)
+		let editable = (opt.editable || enter_edit) && !opt.focus_non_editable_if_not_found
+		let expand_selection = opt.expand_selection && e.multiselect
+		let invert_selection = opt.invert_selection && e.multiselect
+		opt = assign({editable: editable}, opt)
+
+		i = e.first_focusable_item_index(i, n, opt)
+
+		// failure to find cell means cancel.
+		if (i == null && !opt.unfocus_if_not_found)
+			return false
+
+		let moved = e.focused_item != e.at[i]
+
+		let last_i = e.focused_item_index
+		let i0 = or(e.selected_item_index, last_i)
+		let item0 = e.focused_item
+		let item = e.at[i]
+
+		e.focused_item_index = i
+
+		let old_selected_items = set(e.selected_items)
+		if (opt.preserve_selection) {
+			// leave it
+		} else if (opt.selected_items) {
+			e.selected_items = set(opt.selected_items)
+		} else {
+			if (expand_selection) {
+				e.selected_items.clear()
+				let i1 = min(i0, i)
+				let i2 = max(i0, i)
+				for (let i = i1; i <= i2; i++) {
+					let item = e.at[i]
+					if (!e.selected_items.has(item)) {
+						if (e.can_select_item(item)) {
+							e.selected_items.add(item)
+						}
+					}
+				}
+			} else {
+				if (!invert_selection)
+					e.selected_items.clear()
+				if (item)
+					if (e.selected_items.has(item))
+						e.selected_items.delete(item)
+					else
+						e.selected_items.add(item)
+			}
+		}
+
+		e.selected_item_index = expand_selection ? i0 : null
+
+		if (moved) {
+			e.do_focus_item(item, item0)
+			e.fire('focused_item_changed', item, item0)
+		}
+
+		let sel_items_changed = !old_selected_items.equals(e.selected_items)
+		if (sel_items_changed)
+			e.fire('selected_items_changed')
+
+		if (moved || sel_items_changed)
+			e.update({state: true})
+
+		if (enter_edit && i != null)
+			e.update({enter_edit: [ev.editor_state, focus_editor || false]})
+
+		if (opt.make_visible != false)
+			if (e.focused_item)
+				e.update({scroll_to_focused_item: true})
+
+		return true
+	}
+
+	e.select_all_items = function() {
+		let sel_size_before = e.selected_items.size
+		e.selected_items.clear()
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			let item = e.at[i]
+			if (e.can_select_item(item))
+				e.selected_items.add(item)
+		}
+		e.update({state: true})
+		if (sel_size_before != e.selected_items.size)
+			e.fire('selected_items_changed')
+	}
+
+	e.on('items_changed', function() {
+		if (e.focused_item)
+			if (e.focused_item._remove) {
+				e.focused_item_index = null
+				e.update({state: true})
+			}
+		if (e.selected_item)
+			if (e.selected_item._remove) {
+				e.selected_item_index = null
+				e.update({state: true})
+			}
+		let sel_changed
+		for (let item of e.selected_items)
+			if (item._remove) {
+				e.selected_items.delete(item)
+				sel_changed = true
+			}
+		if (sel_changed) {
+			e.fire('selected_items_changed')
+			e.update({state: true})
+		}
+	})
+
+	e.on_update(function(opt) {
+
+		if (opt.state) {
+			for (let i = 0, n = e.list_len; i < n; i++) {
+				let item = e.at[i]
+				item.class('list-item-selected', e.selected_items.has(item))
+			}
+		}
+
+		if (opt.scroll_to_focused_item)
+			if (e.focused_item)
+				e.focused_item.make_visible()
+
+	})
+
+	e.on('pointerdown', function(ev) {
+
+		//
+
+	})
+
+	// find the next item before/after the selected item that would need
+	// scrolling, if the selected item would be on top/bottom of the viewport.
+	function page_item(forward) {
+		if (!e.focused_item)
+			return forward ? e.first : e.at[e.list_len-1]
+		let item = e.focused_item
+		let sy0 = item.oy + (forward ? 0 : item.oh - e.ch)
+		item = forward ? item.next : item.prev
+		while(item) {
+			let [sx, sy] = item.make_visible_scroll_offset(0, sy0)
+			if (sy != sy0)
+				return item
+			item = forward ? item.next : item.prev
+		}
+		return forward ? e.at[e.list_len-1] : e.first
+	}
+
+	e.on('keydown', function(key, shift, ctrl, alt) {
+
+		let n
+		switch (key) {
+			case 'ArrowUp'   : n = -1; break
+			case 'ArrowDown' : n =  1; break
+			case 'ArrowLeft' : n = -1; break
+			case 'ArrowRight': n =  1; break
+			case 'Home'      : n = -1/0; break
+			case 'End'       : n =  1/0; break
+		}
+		if (n) {
+			if (!shift) {
+				let i = e.first_focusable_item_index(true, n)
+				let item = e.at[i]
+				if (item && item.attr('href')) {
+					item.click()
+					return false
+				}
+			}
+			e.focus_item(true, n, {
+				expand_selection: shift,
+				make_visible: true,
+			})
+			return false
+		}
+
+		if (key == 'PageUp' || key == 'PageDown') {
+			let item = page_item(key == 'PageDown')
+			if (item) {
+				if (!shift && item.attr('href')) {
+					item.click()
+					return false
+				}
+				e.focus_item(item.index, null, 0, 0, {
+					expand_selection: shift,
+					make_visible: true,
+				})
+				return false
+			}
+		}
+
+		if (key == 'Enter') {
+			e.fire('val_picked') // picker protocol
+			return false
+		}
+
+		if (key == 'a' && ctrl) {
+			e.select_all_items()
+			return false
+		}
+
+	})
+
+	e.on('cut', function(ev) {
+		if (ev.target != e) return
+		if (!e.selected_items.size) return
+		copied_widgets.set(e.selected_items)
+		for (let item of e.selected_items) {
+			item.remove()
+			item._remove = true
+		}
+		e.fire('items_changed')
+		return false
+	})
+
+	e.on('copy', function(ev) {
+		if (ev.target != e) return
+		if (!e.selected_items.size) return
+		copied_widgets.set(e.selected_items)
+		return false
+	})
+
+	e.on('paste', function(ev) {
+		if (ev.target != e) return
+		if (!copied_widgets.size) return
+		e.selected_item_index = null
+		e.selected_items.clear()
+		let i = e.focused_item_index || e.list_len
+		for (let item of copied_widgets) {
+			e.insert(i, item)
+			e.selected_items.add(item)
+			item._remove = null
+			i++
+		}
+		copied_widgets.clear()
+		e.update({state: true})
+		e.fire('items_changed')
 	})
 
 }
@@ -1215,7 +1655,7 @@ config props:
 	item_template_name  template name for formatting an item
 	selected_items
 data props:
-	items               array of items
+	items               set of items
 
 NOTE: does not support element margins!
 
@@ -1239,22 +1679,46 @@ widget('list', function(e) {
 
 	e.clear()
 
+	function update_items() {
+		e.update({items: true})
+	}
+
+	let items
+	e.get_items = () => items
+	e.set_items = function(items1) {
+		items = items1
+		update_items()
+	}
+	e.prop('items', {store: false, type: 'array'})
+
 	e.prop('item_template_name', {type: 'template_name', attr: 'item_template'})
 	e.prop('item_template'     , {type: 'template'})
-	e.prop('items'             , {type: 'array'})
+
+	e.set_item_template_name = update_items
+	e.set_item_template      = update_items
 
 	e.on_update(function(opt) {
-		let ts = template(e.item_template_name) || e.item_template
-		if (!ts) return
-		e.clear()
-		for (let item of e.items) {
-			let ce = unsafe_html(render_string(ts, item))
-			e.add(ce)
+		if (opt.items) {
+			let ts = template(e.item_template_name) || e.item_template
+			if (!ts) return
+			e.clear()
+			for (let item of e.items) {
+				let item_e = unsafe_html(render_string(ts, item))
+				item_e.data = item
+				e.add(item_e)
+			}
 		}
 	})
 
 	e.make_list_drag_elements()
 	e.make_list_drop_elements()
+	e.make_list_items_focusable()
+
+	e.on('items_changed', function() {
+		items.clear()
+		for (let i = 0, n = e.list_len; i < n; i++)
+			items.push(e.at[i].data)
+	})
 
 	return {item_template: html_template, items: html_items}
 
@@ -1612,52 +2076,9 @@ calls:
 
 widget_items_widget = function(e) {
 
-	function same_set(s1, s2) {
-		if (s1.size != s2.size)
-			return false
-		let it1 = s1.values()
-		let it2 = s2.values()
-		for(let i = 0, n = s1.size; i < n; i++) {
-			let v1 = it1.next().value
-			let v2 = it2.next().value
-			if (v1 != v2)
-				return false
-		}
-		return true
-	}
-
 	function diff_items(t, cur_items) {
-
-		t = isstr(t) ? t.words() : t
-
-		if (isarray(t))
-			t = set(t)
-
-		if (same_set(t, cur_items))
-			return cur_items
-
-		// diff between t and cur_items keyed on item's object identity or its id.
-
-		// map current items by identity and by id.
-		let cur_set = set()
-		let cur_by_id = map()
-		for (let item of cur_items) {
-			cur_set.add(item)
-			if (item.id)
-				cur_by_id.set(item.id, item)
-		}
-
-		// create new items or reuse-by-id.
-		let items = set()
-		for (let v of t) {
-			// v is either an item from cur_items or the prop_vals of a new item.
-			let cur_item = cur_set.has(v) ? v : cur_by_id.get(v.id)
-			let item = cur_item || element(v)
-			items.add(item)
-		}
-
+		let items = update_element_list(t, cur_items)
 		e.update({items: items})
-
 		return items
 	}
 
@@ -1668,7 +2089,7 @@ widget_items_widget = function(e) {
 		return t
 	}
 
-	e.prop('items', {type: 'nodes', serialize: e.serialize_items, convert: diff_items, default: empty_set})
+	e.prop('items', {type: 'nodes', serialize: e.serialize_items, convert: diff_items, default: empty_array})
 
 	// parent-of selectable widget protocol.
 	e.child_widgets = function() {
@@ -1848,21 +2269,19 @@ widget('tabs', 'Containers', function(e) {
 			e.add_button.on('click', add_button_click)
 		}
 
-		let items = opt.items
-		if (isarray(items))
-			items = set(items)
-		if (items) {
+		if (opt.items) {
 			for (let tab of e.tabs_box.at) {
-				let item = tab._item
-				if (item && !items.has(item)) {
+				let item = tab.item
+				if (item._remove) {
 					item.remove()
 					item.on('label_changed', item_label_changed, false)
 					item._tab = null
 					item._tabs = null
+					item._remove = null
 				}
 			}
 			e.tabs_box.innerHTML = null // reappend items without rebinding them.
-			for (let item of items) {
+			for (let item of opt.items) {
 				if (item._tabs != e) {
 					let xbutton = tag('tabs-xbutton')
 					xbutton.hidden = true
@@ -2988,10 +3407,9 @@ widget('slides', 'Containers', function(e) {
 	let current_slide
 	e.on_update(function(opt) {
 
-		let items = opt.items
-		if (items) {
+		if (opt.items) {
 			for (let item of e.at) {
-				if (item && !items.has(item)) {
+				if (item._remove) {
 					item.remove()
 					item.class('slide', false)
 					item.class('slide-current', false)
@@ -2999,7 +3417,7 @@ widget('slides', 'Containers', function(e) {
 				}
 			}
 			e.innerHTML = null // reappend items without rebinding them.
-			for (let item of items) {
+			for (let item of opt.items) {
 				if (item._slides != e) { // new item
 					item._slides = e
 					item.class('slide', true)
