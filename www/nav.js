@@ -490,9 +490,6 @@ function map_keys_different(m1, m2) {
 	for (let k1 of m1.keys())
 		if (!m2.has(k1))
 			return true
-	for (let k2 of m2.keys())
-		if (!m1.has(k2))
-			return true
 	return false
 }
 
