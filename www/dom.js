@@ -2202,6 +2202,10 @@ wouldn't see or select text from a disabled container with a scrollbar.
 
 */
 
+alias(PointerEvent, 'shift', 'shiftKey')
+alias(PointerEvent, 'ctrl' , 'ctrlKey')
+alias(PointerEvent, 'alt'  , 'altKey')
+
 installers.hover = function() {
 	if (this.__hover_installed)
 		return

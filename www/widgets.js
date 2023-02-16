@@ -987,6 +987,19 @@ function notify(...args) {
 ajax.notify_error  = (err) => notify(err, 'error')
 ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
 
+/* lists of elements with one or more static items at the end ----------------
+
+in state:
+	list_static_lien
+out state:
+	list_len
+
+*/
+
+property(e, 'list_len', function() {
+	return this.len - (this.list_static_len || 0)
+})
+
 /* drag & drop list elements: acting as a drag source ------------------------
 
 uses state:
@@ -1025,9 +1038,7 @@ e.make_list_drag_elements = function() {
 
 		let items = e.selected_items && e.selected_items.toarray() || [grabbed_item]
 
-		if (items.indexOf(grabbed_item) == -1)
-			items.push(grabbed_item)
-
+		let horiz = e.css('flexDirection') == 'row'
 		let items_r = grabbed_item.rect()
 
 		// save item props that we must change while dragging, to be restored on drop.
@@ -1051,18 +1062,23 @@ e.make_list_drag_elements = function() {
 			// fixate size so we can move it out of layout.
 			item.w = item._r0.w
 			item.h = item._r0.h
-			items_r.h += oy
+			// note: this enlarge-on-cross-axis-only thing ony makes sense when
+			// moving elements between lists with same horiz.
+			if (horiz)
+				items_r.w += ox
+			else
+				items_r.h += oy
 		}
 		// move the items out of layout so they don't get clipped.
 		for (let i = items.length-1; i >= 0; i--) {
 			root.add(items[i])
 			items[i]._remove = true
 		}
+		e.fire('items_changed')
+
 		e.class('list-items-moving')
 		grabbed_item.class('list-item-grabbed')
 		force_cursor('grabbing')
-
-		e.fire('items_changed')
 
 		start(items, items_r)
 	})
@@ -1099,19 +1115,6 @@ e.make_list_drag_elements = function() {
 	})
 
 }
-
-/* lists of elements with one or more static items at the end ----------------
-
-in state:
-	list_static_lien
-out state:
-	list_len
-
-*/
-
-property(e, 'list_len', function() {
-	return this.len - (this.list_static_len || 0)
-})
 
 /* drag & drop list elements: acting as a drop destination -------------------
 
@@ -1254,6 +1257,10 @@ e.make_list_drop_elements = function() {
 			item._remove = null
 		}
 		e.fire('items_changed')
+		if (e.focus_item)
+			e.focus_item(hit_i, 0, {
+				selected_items: drop_items,
+			})
 	})
 
 }
@@ -1382,6 +1389,7 @@ e.make_list_items_focusable = function() {
 		opt.expand_selection
 		opt.invert_selection
 		opt.preserve_selection
+		opt.selected_items
 		opt.make_visible
 		opt.focus_editor
 		opt.editable
@@ -1424,11 +1432,12 @@ e.make_list_items_focusable = function() {
 
 		e.focused_item_index = i
 
-		let old_selected_items = set(e.selected_items)
+		let sel_items_changed
 		if (opt.preserve_selection) {
 			// leave it
 		} else if (opt.selected_items) {
 			e.selected_items = set(opt.selected_items)
+			sel_items_changed = true
 		} else {
 			if (expand_selection) {
 				e.selected_items.clear()
@@ -1442,6 +1451,7 @@ e.make_list_items_focusable = function() {
 						}
 					}
 				}
+				sel_items_changed = true
 			} else {
 				if (!invert_selection)
 					e.selected_items.clear()
@@ -1450,6 +1460,7 @@ e.make_list_items_focusable = function() {
 						e.selected_items.delete(item)
 					else
 						e.selected_items.add(item)
+				sel_items_changed = true
 			}
 		}
 
@@ -1460,7 +1471,6 @@ e.make_list_items_focusable = function() {
 			e.fire('focused_item_changed', item, item0)
 		}
 
-		let sel_items_changed = !old_selected_items.equals(e.selected_items)
 		if (sel_items_changed)
 			e.fire('selected_items_changed')
 
@@ -1530,7 +1540,22 @@ e.make_list_items_focusable = function() {
 
 	e.on('pointerdown', function(ev) {
 
-		//
+		let item = ev.target.closest_child(e)
+		if (!item) return
+
+		if (ev.ctrl && ev.shift) {
+			e.focus_item(false)
+			return // enter editing / select widget
+		}
+
+		e.focus()
+
+		if (!e.focus_item(item.index, 0, {
+			must_not_move: true,
+			expand_selection: ev.shift,
+			invert_selection: ev.ctrl,
+		}))
+			return false
 
 	})
 
@@ -1710,9 +1735,9 @@ widget('list', function(e) {
 		}
 	})
 
+	e.make_list_items_focusable()
 	e.make_list_drag_elements()
 	e.make_list_drop_elements()
-	e.make_list_items_focusable()
 
 	e.on('items_changed', function() {
 		items.clear()
