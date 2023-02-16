@@ -278,6 +278,8 @@ css('*', '', `
 	box-sizing: border-box;
 `)
 
+css('xmp', 'hidden')
+
 css(':root, body, table, tr, td, img', '', `
 	margin: 0;
 	padding: 0;

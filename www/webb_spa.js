@@ -357,7 +357,7 @@ function template(name) {
 	if (!name) return null
 	let e = window[name+'_template']
 	warn_if(!e, 'unknown template', name)
-	return e && e.tag == 'script' ? e.html : null
+	return e && (e.tag == 'script' || e.tag == 'xmp') ? e.html : null
 }
 
 function static_template(name) {

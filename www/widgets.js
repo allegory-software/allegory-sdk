@@ -1675,6 +1675,7 @@ inner html:
 	<script>            inline script to compute and return the items array
 html attrs:
 	item_template       template name for formatting an item
+	items               items json array
 config props:
 	item_template       template text for formatting an item
 	item_template_name  template name for formatting an item
@@ -1696,11 +1697,12 @@ widget('list', function(e) {
 
 	e.init_child_components()
 
-	let t = e.$1(':scope>template')
-	let html_template = t && t.html
+	let ht = e.$1(':scope>template, :scope>script[type="text/x-mustache"], :scope>xmp')
+	let html_template = ht && ht.html
+	if (ht) ht.remove()
 
 	let s = e.$1(':scope>script')
-	let html_items = s && s.run(e)
+	let html_items = s && s.run(e) || json_arg(e.attr('items'))
 
 	e.clear()
 
@@ -5299,12 +5301,18 @@ widget('autocomplete', 'Input', function(e) {
 
 /* <dropdown> ----------------------------------------------------------------
 
+--
 
 */
 
 widget('dropdown', 'Input', function(e) {
 
 	e.class('inputbox')
+
+	let picker = e.$1('picker')
+	picker = picker && picker.at[0]
+
+	e.clear()
 
 	e.value_box = div({class: 'dropdown-value'})
 	e.chevron = div({class: 'dropdown-chevron'})
