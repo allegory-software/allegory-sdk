@@ -1541,7 +1541,7 @@ css_role('.linear-form > .editbox', 'skip')
 /* NOTE: .dropdown is applied along with .editbox ! */
 
 // default mode: shrink-wrap, no-wrap
-css('.dropdown', 'nowrap', `
+css('.xdropdown', 'nowrap', `
 	width: auto;
 	min-width: 1em;
 `)

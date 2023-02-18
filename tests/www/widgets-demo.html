@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html hidden>
 <head>
 <title>X-WIDGETS DEMO</title>
 <meta charset="utf-8">
@@ -154,7 +154,7 @@ on_dom_load(function() {
 
 	{
 	let i = 0
-	$('template').each(function(e) {
+	$('xmp,script[type="text/x-mustache"]').each(function(e) {
 		if (!e.id.ends('_demo'))
 			return
 		let name = e.id.replace('_demo', '')
@@ -182,18 +182,18 @@ on_dom_load(function() {
 
 	function init_select_buttons(btn_class, default_key, action) {
 		for (let btn of $(btn_class)) {
-			btn.on('click', function() {
+			btn.action = function() {
 				for (let btn of $(btn_class))
 					btn.bool_attr('pressed', null)
 				btn.bool_attr('pressed', true)
 				let key = btn.attr('key')
 				action(btn, key)
 				save(btn_class, key)
-			})
+			}
 		}
 		let btn = $1(btn_class+'[key='+(load(btn_class) || default_key)+']')
 		if (btn)
-			btn.click()
+			btn.action() // btn.click() doesn't work on hidden buttons. smaart.
 	}
 	init_select_buttons('.layout-btn', 'inline', function(btn) {
 		result.attr('class', btn.attr('layout-classes'))
@@ -220,13 +220,15 @@ on_dom_load(function() {
 	}
 	}
 
+	root.show()
+
 })
 
 </script>
 
 <!--------------------------------------------------------------------------->
 
-<template id=component_demo>
+<xmp id=component_demo>
 <component tag=foo>
 	<script>
 		let content = [...e.nodes]
@@ -237,11 +239,11 @@ on_dom_load(function() {
 
 <foo>Hello!</foo>
 
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=render_demo>
+<xmp id=render_demo>
 <render>
 	<template>
 		<div class="v">
@@ -263,11 +265,11 @@ on_dom_load(function() {
 	</script>
 </render>
 
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=if_demo>
+<xmp id=if_demo>
 <if global=foo>
 	foo was set!
 </if>
@@ -280,11 +282,11 @@ on_dom_load(function() {
 			clearInterval(timer_id)
 	})
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=tooltip_demo>
+<xmp id=tooltip_demo>
 <script run>
 
 b1 = button({text: html('aaa ^ aaa<br>aaa aaa aaa v aaa aaa aaa')})
@@ -314,11 +316,11 @@ b3.add(tooltip({text: html(s2), side: 'bottom', align: 'end', kind: 'error', clo
 b3.add(tooltip({text: html(s3), side: 'bottom', align: 'end', kind: 'error', close_button: true , icon_visible: true, target: b3.focus_box}))
 b3.add(tooltip({text: html(s3), side: 'left'  , align: 'end', kind: 'error', close_button: false, icon_visible: true, target: b3.focus_box}))
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=toaster_demo>
+<xmp id=toaster_demo>
 <script run>
 
 t = toaster()
@@ -329,11 +331,11 @@ t.post('I\'ve got something to tell you...', 'info', 2)
 t.post('Pay attention!', 'error', 3)
 
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=notify_demo>
+<xmp id=notify_demo>
 <script run>
 
 notify('Did you see that?', 'info')
@@ -341,11 +343,11 @@ notify('Where?')
 notify('There!', 'error', 2)
 
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=menu_demo>
+<xmp id=menu_demo>
 <div id=main></div>
 <script run>
 
@@ -385,11 +387,11 @@ b = btn({
 main.add(b)
 
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=tabs_demo>
+<xmp id=tabs_demo>
 <tabs id=test_tabs selected_tab=second_page tabs_side=top style="min-height: 200px">
 	<div id=test_tabs_page_1 label="First Page" id=first_page>
 		<h1>This is the first page</h1>
@@ -400,11 +402,11 @@ main.add(b)
 		<p>You can put anything in here too.</p>
 	</div>
 </tabs>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=split_demo>
+<xmp id=split_demo>
 <split>
 	<vsplit id=my_split fixed_side=first min_size=100>
 		<div style="background: gray">Stuff 1</div>
@@ -415,11 +417,11 @@ main.add(b)
 		<div>Stuff 4</div>
 	</vsplit>
 </split>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=dialog_demo>
+<xmp id=dialog_demo>
 <div id=main></div>
 <script run>
 
@@ -452,11 +454,11 @@ main.add(btn({
 }))
 
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=toolbox_demo>
+<xmp id=toolbox_demo>
 <div id=main></div>
 <script run>
 
@@ -492,11 +494,11 @@ main.add(btn({
 }))
 
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=slides_demo>
+<xmp id=slides_demo>
 <slides id=my_slides current=slide2>
 	<div id=slide1>
 		<h1>Slide 1</h1>
@@ -512,11 +514,11 @@ main.add(btn({
 	<button onclick="my_slides.prev_slide()">prev slide</button>
 	<button onclick="my_slides.next_slide()">next slide</button>
 </div>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=md_demo>
+<xmp id=md_demo>
 <md>
 # Sup fellow kids?
 
@@ -524,11 +526,11 @@ This is a paragraph.
 
 And this is a [link](exmaple.com).
 </md>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=pagenav_demo>
+<xmp id=pagenav_demo>
 <pagenav on_page_changed=page_changed></pagenav>
 <pagenav item_count=5 page_size=1 bare on_page_changed=page_changed></pagenav>
 <pagenav item_count=10000 page=50 on_page_changed=page_changed></pagenav>
@@ -537,22 +539,22 @@ page_changed = function(page) {
 	this.page = page
 }
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=richtext_demo>
+<xmp id=richtext_demo>
 <richtext id=my_r>
 	<b>Wasup</b> <i>homies</i> ?
 </richtext>
 <script run>
 my_r.widget_editing = true
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=info_demo>
+<xmp id=info_demo>
 <info id=my_info>
 	<h3>It never entered my mind, but</h3>
 	<p>Here we are</p>
@@ -563,36 +565,36 @@ toggle_collapsed = function() {
 	my_info.collapsed = !my_info.collapsed
 }
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=check_demo>
+<xmp id=check_demo>
 <d class="h-m m b ro p">
 	<check id=my_check checked></check><label for=my_check>Wasup</label>
 </d>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=toggle_demo>
+<xmp id=toggle_demo>
 <d class="h-m m b p ro">
 	<label for=my_toggle class="S p-x">Wasup</label><toggle id=my_toggle checked></toggle>
 </d>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=radio_demo>
+<xmp id=radio_demo>
 <radio-group class="v-m m b p ro">
 	<d class="h-m"><radio id=my_radio1 checked></radio><label for=my_radio1>Option 1</label></d>
 	<d class="h-m"><radio id=my_radio2></radio><label for=my_radio2>Option 2</label></d>
 </radio-group>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=slider_demo>
+<xmp id=slider_demo>
 <slider val=0.7 marked=false></slider>
 <slider val=5 from=1 to=9 min=3 max=7 decimals=0></slider>
 <range-slider min_val=1200 max_val=1800 from=1000 to=2000 decimals=0></range-slider>
@@ -603,11 +605,11 @@ toggle_collapsed = function() {
 //	})
 //)
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=input_demo>
+<xmp id=input_demo>
 <d class="grid-h grid-2col grid-m" style="grid-template-columns: 1fr 6fr">
 xsmall  <span class="ro-group-h b-collapse-h xsmall  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
 small   <span class="ro-group-h b-collapse-h small   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
@@ -616,11 +618,11 @@ normal  <span class="ro-group-h b-collapse-h normal  "><input class="ro-var" val
 large   <span class="ro-group-h b-collapse-h large   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
 xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
 </d>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=input-group_demo>
+<xmp id=input-group_demo>
 
 <d class="S h ro-group-h b-collapse-h">
 	<input-group class="ro-var">
@@ -639,17 +641,17 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 	</input-group><button>OK</button>
 </d>
 
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=teaxtarea_demo>
+<xmp id=teaxtarea_demo>
 <textarea></textarea>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=button_demo>
+<xmp id=button_demo>
 <p>
 	<button id=cancel_button confirm="U sure?" class=large>Cancel</button>, says the button.
 	<button id=danger_button danger>Don't do it Jonny!</button>, says another.
@@ -675,11 +677,11 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 		}
 	</script>
 </p>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=select-button_demo>
+<xmp id=select-button_demo>
 <d class="small">
 	<select-button>
 		<d><span class="mi">rocket</span>Rockets</d>
@@ -721,11 +723,11 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 	<d>Label</d>
 	<d>Label</d>
 </select-button>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=tags_demo>
+<xmp id=tags_demo>
 <tags-box tags="Apples Bananas Mangos what do you do when there are too many tags"></tags-box>
 
 <tags nowrap tags="Apples Bananas Mangos"></tags>
@@ -738,11 +740,11 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 <d class="ro-group-h h-m flex-nowrap shrinks normal "><tags class="S" tags="Apples Bananas Mangos what do you do when there are too many tags"></tags><button>OK</button></d>
 <d class="ro-group-h h-m flex-nowrap shrinks normal "><tags class="S" nowrap tags="what do you do when there are too many tags"></tags><button>OK</button></d>
 <d class="ro-group-h h-m flex-nowrap shrinks large  "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=autocomplete_demo>
+<xmp id=autocomplete_demo>
 <input id=my_input>
 <autocomplete id=my_auto for=my_input>
 </autocomplete>
@@ -751,11 +753,11 @@ my_auto.on_update(function(opt) {
 	this.set(opt.input)
 })
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id="list-drag_demo">
+<xmp id="list-drag_demo">
 <script type="text/x-mustache" id=list_drag_demo_template>
 	<div class="b2 p bg1 noselect" style="{{#height}}height: {{height}}{{/height}}">
 		<div class="bold nowrap">{{name}}</div>
@@ -780,30 +782,40 @@ my_auto.on_update(function(opt) {
 		]
 	</script>
 </list>
-<list class="S self-h-t m b gap h-l" item_template=list_drag_demo>
-	<script>
-		return [
-			{name: 'John Doe 3.1', phone: '+123 456 789', },
-			{name: 'John Doe 3.2', phone: '+321 456 789', email: 'bla@bla.com'},
-			{name: 'John Doe 3.3', phone: '+213 456 789', email: 'bla@bla.com'},
-		]
-	</script>
-</list>
-</template>
+<list class="S self-h-t m b gap h-l" item_template=list_drag_demo items='[
+	{"name": "John Doe 3.1", "phone": "+123 456 789"},
+	{"name": "John Doe 3.2", "phone": "+321 456 789", "email": "bla@bla.com"},
+	{"name": "John Doe 3.3", "phone": "+213 456 789", "email": "bla@bla.com"}
+]'></list>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=dropdown_demo>
-<dropdown>
-	<list></list>
+<xmp id=dropdown_demo>
+<dropdown value="55" align=right>
+	<list>
+		<script type="text/x-mustache">{{name}}</script>
+		<script>
+			let a = []
+			for (let i = 1; i <= 100; i++)
+				a.push({value: i+'', name: 'Option '+i})
+			return a
+		</script>
+	</list>
+</dropdown>
+<input><button>OK</button>
+<dropdown value=grass>
+	<div value=chickens ><b>Chickens </b></div>
+	<div value=cows     ><b>Cows     </b></div>
+	<div value=grass    ><i>Grass    </i></div>
 </dropdown>
 <script run>
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id="input align_demo">
+<xmp id="input align_demo">
 <d class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
 	<check  class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
 	<radio  class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
@@ -812,11 +824,11 @@ my_auto.on_update(function(opt) {
 	<d></d><label for=input1>Some input</label>
 	<d></d><input id=input1></input>
 </d>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=grid_demo>
+<xmp id=grid_demo>
 <div id=main style="height: 100%; display: flex;"></div>
 <script run>
 
@@ -875,11 +887,11 @@ g = grid({
 main.add(g)
 
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id="html grid_demo">
+<xmp id="html grid_demo">
 <grid>
 	<col-attrs for=id type=number></col-attrs>
 	<rowset pk=id can_change_rows=false>
@@ -891,11 +903,11 @@ main.add(g)
 		<row id=3 name=Baz desc="Le Baz"></row>
 	</rowset>
 </grid>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=charts_demo>
+<xmp id=charts_demo>
 <vsplit>
 	<tabs>
 		<script run label=Grid>
@@ -986,11 +998,11 @@ main.add(g)
 		<div></div>
 	</split>
 </vsplit>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
-<template id=nodes_changed_demo>
+<xmp id=nodes_changed_demo>
 <d id=my></d>
 <script run>
 	my.on('nodes_changed', function() {
@@ -1001,7 +1013,7 @@ main.add(g)
 		my.add(div())
 	})
 </script>
-</template>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 

@@ -99,7 +99,7 @@ DOM QUERYING
 DOM <-> HTML
 
 	e.html -> s
-	[unsafe_]html(s) -> e
+	[unsafe_]html(s, [unwrap]) -> e
 	e.[unsafe_]html = s
 
 DOM MANIPULATION
@@ -1136,12 +1136,14 @@ function TC(s, whitespace) {
 
 // create a html element or text node from a html string.
 // if the string contains more than one node, return an array of nodes.
-function unsafe_html(s) {
+function unsafe_html(s, unwrap) {
 	if (typeof s != 'string') // pass-through: nulls, elements, etc.
 		return s
 	let span = document.createElement('span')
 	span.unsafe_html = s.trim()
 	span._init_component()
+	if (unwrap == false)
+		return span
 	return span.childNodes.length > 1 ? [...span.nodes] : span.firstChild
 }
 

@@ -1775,6 +1775,11 @@ on.installers = installers
 on.callers = callers
 }
 
+Event.prototype.forward = function(e) {
+	let ev = new this.constructor(this.type, this)
+	return e.fire(ev)
+}
+
 // fast global events --------------------------------------------------------
 
 let all_handlers = obj() // {event_name->set(f)}

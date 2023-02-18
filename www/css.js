@@ -229,6 +229,7 @@ css(':root', '', `
 	--fs-normal : 14px;
 	--lh        : 1.25; /* only unitless allowed! */
 	--lh-input  : 1.25; /* 1.25 is the minimum that <input> supports! */
+	--w-input   : 12em; /* to sync <input> with <dropdown> */
 	--fs        : var(--fs-normal);
 
 	font-size   : var(--fs);
@@ -1016,19 +1017,12 @@ css('.no-shadow     ', '', ` box-shadow: none; `)
 /* TRANSFORMS ------------------------------------------------------------- */
 
 css('.transform', '', `
-	--translate-x : 0;
-	--translate-y : 0;
-	--scale-x : 1;
-	--scale-y : 1;
-	--scale   : 1;
-	--rotate  : 0deg;
-	--rotate2 : 0deg;
 	transform:
-		translate(var(--translate-x), var(--translate-y))
+		translate(var(--translate-x, 0), var(--translate-y, 0))
 		scale(
-			calc(var(--scale-x) * var(--scale)),
-			calc(var(--scale-y) * var(--scale)))
-		rotate(calc(var(--rotate) + var(--rotate2)))
+			calc(var(--scale-x, 1) * var(--scale, 1)),
+			calc(var(--scale-y, 1) * var(--scale, 1)))
+		rotate(calc(var(--rotate, 0deg) + var(--rotate2, 0deg)))
 	;
 `)
 
@@ -1042,7 +1036,7 @@ css('.rotate--2q', 'transform',  `--rotate: -180deg;`)
 css('.rotate--3q', 'transform',  `--rotate: -270deg;`)
 css('.rotate-45 ', 'transform',  `--rotate2:   45deg;`)
 css('.rotate--45', 'transform',  `--rotate2:  -45deg;`)
-css('.rotate-0  ', 'transform',  `--rotate1: 0deg; --rotate2: 0deg;`)
+css('.rotate-0  ', 'transform',  `--rotate: 0deg; --rotate2: 0deg;`)
 
 /* TRANSITIONS ------------------------------------------------------------ */
 
@@ -1160,9 +1154,9 @@ css('.icon-chevron-right::before', 'rotate--45', `
 	--translate-x: -0.125em;
 `)
 
-css('.icon-chevron-left::before', 'icon-chevron-right flip-h' , `--translate-x: .25em;`)
-css('.icon-chevron-down::before', 'icon-chevron-right rotate-45')
-css('.icon-chevron-up::before'  , 'icon-chevron-down  flip-v', `--translate-y: 0.25em;`)
+css('.icon-chevron-left::before', 'icon-chevron-right flip-h'     , `--translate-x: .25em;`)
+css('.icon-chevron-down::before', 'icon-chevron-right rotate-45'  , `--translate-y: -.2em;`)
+css('.icon-chevron-up::before'  , 'icon-chevron-right rotate-3q'  , `--translate-y:  .1em;`)
 
 /* UNICODE ICONS ---------------------------------------------------------- */
 

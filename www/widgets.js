@@ -1010,7 +1010,7 @@ item css classes:
 	list-item-dragging
 	list-item-grabbed
 fires:
-	^items_changed()
+	items_changed()
 
 */
 
@@ -1123,7 +1123,7 @@ list css classes:
 list placeholder css classes:
 	list-drop-placeholder
 fires:
-	^items_changed()
+	items_changed()
 
 */
 
@@ -1279,19 +1279,21 @@ update options:
 	opt.state
 	opt.scroll_to_focused_item
 	opt.enter_edit
-fires:
-	^selected_items_changed()
+announces:
+	selected_items_changed()
+	focused_item_changed()
 
 */
 
 css_state('.list-item-selected', '', `background: var(--bg-selected);`)
 
+css('.list-items-focusable', 'arrow')
+
 e.make_list_items_focusable = function() {
 
 	let e = this
 	e.make_list_items_focusable = noop
-
-	e.make_focusable()
+	e.class('list-items-focusable')
 
 	e.can_edit_item = return_false
 	e.can_focus_item = function(item, for_editing) {
@@ -1302,9 +1304,14 @@ e.make_list_items_focusable = function() {
 	e.multiselect = true
 	e.stay_in_edit_mode = true
 
-	e.focused_item_index = null
 	e.selected_items = set()
 	e.selected_item_index = null
+
+	e.prop('focused_item_index', {default: null})
+
+	e.set_focused_item_index = function(i) {
+		e.announce('focused_item_changed')
+	}
 
 	e.property('focused_item', function() {
 		return e.focused_item_index != null && e.at[e.focused_item_index] || null
@@ -1379,10 +1386,6 @@ e.make_list_items_focusable = function() {
 		return last_valid_i
 	}
 
-	e.do_focus_item = function(item, item0) {
-
-	}
-
 	/*
 		i: false                     unfocus
 		opt.unfocus_if_not_found
@@ -1390,6 +1393,8 @@ e.make_list_items_focusable = function() {
 		opt.invert_selection
 		opt.preserve_selection
 		opt.selected_items
+		opt.must_move                focus it only if moved
+		opt.must_not_move            focus it only if not moved
 		opt.make_visible
 		opt.focus_editor
 		opt.editable
@@ -1427,7 +1432,6 @@ e.make_list_items_focusable = function() {
 
 		let last_i = e.focused_item_index
 		let i0 = or(e.selected_item_index, last_i)
-		let item0 = e.focused_item
 		let item = e.at[i]
 
 		e.focused_item_index = i
@@ -1466,13 +1470,8 @@ e.make_list_items_focusable = function() {
 
 		e.selected_item_index = expand_selection ? i0 : null
 
-		if (moved) {
-			e.do_focus_item(item, item0)
-			e.fire('focused_item_changed', item, item0)
-		}
-
 		if (sel_items_changed)
-			e.fire('selected_items_changed')
+			e.announce('selected_items_changed')
 
 		if (moved || sel_items_changed)
 			e.update({state: true})
@@ -1497,10 +1496,10 @@ e.make_list_items_focusable = function() {
 		}
 		e.update({state: true})
 		if (sel_size_before != e.selected_items.size)
-			e.fire('selected_items_changed')
+			e.announce('selected_items_changed')
 	}
 
-	e.on('items_changed', function() {
+	e.do_after('items_changed', function() {
 		if (e.focused_item)
 			if (e.focused_item._remove) {
 				e.focused_item_index = null
@@ -1518,7 +1517,7 @@ e.make_list_items_focusable = function() {
 				sel_changed = true
 			}
 		if (sel_changed) {
-			e.fire('selected_items_changed')
+			e.announce('selected_items_changed')
 			e.update({state: true})
 		}
 	})
@@ -1610,17 +1609,12 @@ e.make_list_items_focusable = function() {
 					item.click()
 					return false
 				}
-				e.focus_item(item.index, null, 0, 0, {
+				e.focus_item(item.index, 0, {
 					expand_selection: shift,
 					make_visible: true,
 				})
 				return false
 			}
-		}
-
-		if (key == 'Enter') {
-			e.fire('val_picked') // picker protocol
-			return false
 		}
 
 		if (key == 'a' && ctrl) {
@@ -1695,8 +1689,6 @@ css_role('.list > *', 'm0')
 
 widget('list', function(e) {
 
-	e.init_child_components()
-
 	let ht = e.$1(':scope>template, :scope>script[type="text/x-mustache"], :scope>xmp')
 	let html_template = ht && ht.html
 	if (ht) ht.remove()
@@ -1710,11 +1702,16 @@ widget('list', function(e) {
 		e.update({items: true})
 	}
 
-	let items
+	let items = empty_array
 	e.get_items = () => items
 	e.set_items = function(items1) {
 		items = items1
-		update_items()
+		let ts = template(e.item_template_name) || e.item_template
+		if (!ts) return
+		e.clear()
+		for (let item of items)
+			e.add(e.format_item(item, ts))
+		e.fire('items_changed', 'set_items')
 	}
 	e.prop('items', {store: false, type: 'array'})
 
@@ -1724,24 +1721,25 @@ widget('list', function(e) {
 	e.set_item_template_name = update_items
 	e.set_item_template      = update_items
 
-	e.on_update(function(opt) {
-		if (opt.items) {
-			let ts = template(e.item_template_name) || e.item_template
-			if (!ts) return
-			e.clear()
-			for (let item of e.items) {
-				let item_e = unsafe_html(render_string(ts, item))
-				item_e.data = item
-				e.add(item_e)
-			}
-		}
-	})
+	e.format_item = function(item, ts) {
+		ts = ts || template(e.item_template_name) || e.item_template
+		if (!ts) return
+		let item_e = unsafe_html(render_string(ts, item || empty_obj), false)
+		item_e.data = item
+		return item_e
+	}
 
+	/*
+	// TODO: enable/disable these under flags.
+	e.make_focusable()
 	e.make_list_items_focusable()
 	e.make_list_drag_elements()
 	e.make_list_drop_elements()
+	*/
 
-	e.on('items_changed', function() {
+	e.on('items_changed', function(from) {
+		if (from == 'set_items')
+			return
 		items.clear()
 		for (let i = 0, n = e.list_len; i < n; i++)
 			items.push(e.at[i].data)
@@ -2266,6 +2264,10 @@ widget('tabs', 'Containers', function(e) {
 
 	// view -------------------------------------------------------------------
 
+	function item_label(item) {
+		return item._label || item.attr('label')
+	}
+
 	function item_label_changed() {
 		e.update({title_of: this})
 	}
@@ -2428,24 +2430,6 @@ widget('tabs', 'Containers', function(e) {
 		e.update(opt)
 	}
 
-	e.set_items = function() {
-		let i = find_item_index(e.selected_item_id)
-		if (i == null)
-			selected_item = url_path_item()
-		if (!selected_item)
-			selected_item = e.items[i || 0]
-	}
-
-	// selected_item_id persistent property -----------------------------------
-
-	function item_label(item) {
-		return item._label || item.attr('label')
-	}
-
-	function format_item(item) {
-		return item_label(item) || item.id
-	}
-
 	function find_item_index(id) {
 		if (!id)
 			return
@@ -2456,34 +2440,15 @@ widget('tabs', 'Containers', function(e) {
 		}
 	}
 
-	function format_id(id) {
-		let i = find_item_index(id)
-		let item = i != null ? e.items[i] : null
-		return item && item_label(item) || id
+	e.set_items = function() {
+		let i = find_item_index(e.selected_item_id)
+		if (i == null)
+			selected_item = url_path_item()
+		if (!selected_item)
+			selected_item = e.items[i || 0]
 	}
 
-	function item_select_editor(...opt) {
-
-		let rows = []
-		for (let item of e.items)
-			if (item.id)
-				rows.push([item.id, item])
-
-		return list_dropdown({
-			rowset: {
-				fields: [{name: 'id'}, {name: 'item', format: format_item}],
-				rows: rows,
-			},
-			nolabel: true,
-			val_col: 'id',
-			display_col: 'item',
-			mode: 'fixed',
-		}, ...opt)
-
-	}
-
-	e.prop('selected_item_id', {text: 'Selected Item',
-		editor: item_select_editor, format: format_id})
+	e.prop('selected_item_id', {type: 'id'})
 
 	// url --------------------------------------------------------------------
 
@@ -4646,6 +4611,7 @@ css('.input', 'S bg-input', `
 	font-family   : inherit;
 	font-size     : inherit;
 	border-radius : 0;
+	width         : var(--w-input);
 `)
 
 widget('input', 'Input', function(e) {
@@ -5304,19 +5270,208 @@ widget('autocomplete', 'Input', function(e) {
 --
 
 */
+css('.dropdown', 'gap-x arrow h-sb', `width: var(--w-input);`)
+css('.dropdown.empty::before', 'zwsp') // .empty condition because we use gap-x.
+css('.dropdown-chevron', 'p-x-05 smaller ease')
+css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
+css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
+
+css('.dropdown-picker', 'v-s bg1 p-y-input', `
+	resize: both;
+	height: 10em;
+`)
+css('.dropdown-picker > *', 'p-x-input p-y-input')
+css('.dropdown.open', '')
+css('.dropdown.open, .dropdown-picker', 'outline-focus')
+css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
 
 widget('dropdown', 'Input', function(e) {
 
 	e.class('inputbox')
 
-	let picker = e.$1('picker')
-	picker = picker && picker.at[0]
+	e.init_child_components()
 
-	e.clear()
+	let html_list = e.$1('list')
+
+	if (!html_list) { // static list
+		html_list = div()
+		for (let ce of [...e.at])
+			html_list.add(ce)
+		html_list.make_list_items_focusable()
+		e.clear()
+	}
+
+	e.make_focusable()
+
+	function item_value(item_e) {
+		if (item_e.data != null) { // dynamic list with a data model
+			return item_e.data.value
+		} else { // static list, value kept in a prop or attr.
+			return or(item_e.value, item_e.attr('value'))
+		}
+	}
+
+	let lookup = map() // {value->list_index}
+	function list_items_changed() {
+		lookup.clear()
+		let list = this
+		for (let i = 0, n = list.list_len; i < n; i++) {
+			let value = item_value(list.at[i])
+			if (value != null)
+				lookup.set(value, i)
+		}
+	}
+
+	function bind_list(list, on) {
+		if (!list) return
+		list.on('items_changed', list_items_changed, on)
+		if (on) {
+			list.make_list_items_focusable()
+			list.multiselect = false
+			list_items_changed.call(list)
+			list.class('dropdown-picker')
+			list.popup(null, 'bottom', 'left')
+			list.hide()
+			e.add(list)
+		} else {
+			list.remove()
+		}
+		e.update({value: true})
+	}
+
+	e.set_list = function(list1, list0) {
+		bind_list(list0, false)
+		bind_list(list1, true)
+	}
+
+	e.prop('list', {private: true})
+
+	e.prop('value')
 
 	e.value_box = div({class: 'dropdown-value'})
-	e.chevron = div({class: 'dropdown-chevron'})
+	e.chevron   = div({class: 'dropdown-chevron'})
 	e.add(e.value_box, e.chevron)
+
+	e.find_list_item_index = function(value) {
+		return lookup.get(value)
+	}
+
+	e.set_value = function() {
+		e.update({value: true})
+	}
+
+	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
+
+	e.on_update(function(opt) {
+		if (opt.value) {
+			let i = e.find_list_item_index(e.value)
+			if (i != null) {
+				let item_e = e.list.at[i].clone()
+				item_e.id = null // id would be duplicated.
+				e.value_box.set(item_e)
+			} else {
+				e.value_box.clear()
+			}
+			e.class('empty', i == null)
+		}
+	})
+
+	let w
+	e.on_measure(function() {
+		w = e.rect().w
+	})
+	e.on_position(function() {
+		if (!e.list) return
+		e.list.w = w
+	})
+
+	e.property('isopen',
+		function() {
+			return e.hasclass('open')
+		},
+		function(open) {
+			e.set_open(open, true)
+		}
+	)
+
+	e.open   = function(focus) { e.set_open(true, focus) }
+	e.close  = function(focus) { e.set_open(false, focus) }
+	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
+	e.cancel = function() {
+		if (e.isopen)
+			e.value = e.cancel_value
+		e.close(true)
+	}
+
+	e.set_open = function(open, focus) {
+		if (e.isopen != open) {
+			let w = e.rect().w
+			e.class('open', open)
+			if (open) {
+				e.cancel_value = e.value
+				e.list.popup('bottom', 'left')
+				e.list.show()
+				e.list.focus_item(true, 0, {
+					// must_not_move: true,
+					make_visible: true,
+				})
+			} else {
+				e.cancel_value = null
+				e.list.hide()
+			}
+		}
+		if (focus)
+			e.focus()
+	}
+
+	// controller
+
+	e.on('pointerdown', function(ev) {
+		if (ev.target.closest_child(e) == e.list)
+			return // don't return false so that resizer works.
+		e.toggle()
+	})
+
+	e.on('click', function(ev) {
+		if (ev.target.closest_child(e.list))
+			e.close()
+	})
+
+	e.on('blur', function(ev) {
+		e.close()
+	})
+
+	e.listen('focused_item_changed', function(list) {
+		if (list != e.list) return
+		e.value = list.focused_item ? item_value(list.focused_item) : null
+	})
+
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+		if (key == 'Enter' || key == ' ') {
+			e.toggle(true)
+			return false
+		}
+		if (key == 'Escape') {
+			e.cancel()
+			return false
+		}
+		if (key == 'Delete') {
+			e.value = null
+			return false
+		}
+		if (ev.target.closest_child(e) == e.list) // event bubbled back from the picker.
+			return
+		// forward all other keyboard events to the picker like it was focused.
+		return ev.forward(e.list)
+	})
+
+	e.on('wheel', function(ev, dy) {
+		if (ev.target.closest_child(e) != e.list) // event wasn't bubbled from the picker.
+			if (e.list)
+				e.list.focus_item(true, round(dy))
+	})
+
+	return {list: html_list}
 
 })
 
