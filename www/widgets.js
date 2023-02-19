@@ -1285,7 +1285,10 @@ announces:
 
 */
 
-css_state('.list-item-selected', '', `background: var(--bg-selected);`)
+css_state('.list-item-selected', '', `
+	color      : var(--fg-selected);
+	background : var(--bg-selected);
+`)
 
 css('.list-items-focusable', 'arrow')
 
@@ -5276,7 +5279,7 @@ css('.dropdown-chevron', 'p-x-05 smaller ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
 
-css('.dropdown-picker', 'v-s bg1 p-y-input', `
+css('.dropdown-picker', 'v-s bg-input p-y-input', `
 	resize: both;
 	height: 10em;
 `)
@@ -5382,7 +5385,7 @@ widget('dropdown', 'Input', function(e) {
 	})
 	e.on_position(function() {
 		if (!e.list) return
-		e.list.w = w
+		e.list.min_w = w
 	})
 
 	e.property('isopen',
