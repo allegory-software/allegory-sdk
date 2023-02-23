@@ -4,9 +4,11 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 You must load first:
-	dom.js
 
-CSS CLASSES:
+	glue.js  dom.js
+
+CSS CLASSES
+
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
 	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
@@ -38,11 +40,13 @@ CSS CLASSES:
 	UNICODE ICONS icon-menu-{3-dots-{v h} 3-lines-h}
 	SVG_ICONS     svg_circle_x()
 
-HTML SELECTORS:
+HTML SELECTORS
+
 	*[dim] *[nowrap] *[nowrap-dots]
 	img[invertable]
 
-NOTES:
+NOTES
+
 	You must add the theme-light class to <html> for theme-inverted class to work!
 
 */
@@ -107,7 +111,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg-button-danger-hover    : var(--bg-button-hover);
 	--bg-button-danger-active   : var(--bg-button-active);
 
-	--fg-search             : var(--fg); /* quicksearch text over quicksearch bg */
+	--fg-search             : var(--fg-black); /* quicksearch text over quicksearch bg */
 	--bg-search             : #ff9;  /* quicksearch text bg */
 	--bg-info               : #069;  /* info bubbles */
 	--fg-info               : var(--fg-white);
@@ -497,6 +501,7 @@ css('.link-hover'    , '', ` color: var(--fg-link-hover); `)
 css('.fg'            , '', ` color: var(--fg); `)
 css('.fg-hover'      , '', ` color: var(--fg-hover); `)
 css('.fg-error'      , '', ` color: var(--bg-error); `)
+css('.fg-search'     , '', ` color: var(--fg-search); `)
 
 /* ALIGN: INLINE ---------------------------------------------------------- */
 
@@ -953,19 +958,20 @@ css('.click-through-off', '', ` pointer-events: all; `)
 
 /* FLAT BACKGROUNDS ------------------------------------------------------- */
 
-css('.bg'      , '', ` background: var(--bg); `)
-css('.bg-hover', '', ` background: var(--bg-hover); `)
-css('.bg0'     , '', ` background: var(--bg0); `)
-css('.bg1'     , '', ` background: var(--bg1); `)
-css('.bg2'     , '', ` background: var(--bg2); `)
-css('.bg3'     , '', ` background: var(--bg3); `)
-css('.bg-alt'  , '', ` background: var(--bg-alt); `)
-css('.bg-smoke', '', ` background: var(--bg-smoke); `)
-css('.bg-fg'   , '', ` background: var(--fg); `) /* slider thumb, etc. */
-css('.bg-white', '', ` background: var(--fg-white); `)
-css('.bg-link' , '', ` background: var(--fg-link); `) /* slider track */
-css('.no-bg'   , '', ` background: none; `)
-css('.bg-input', '', ` background: var(--bg-input); `)
+css('.bg'        , '', ` background: var(--bg); `)
+css('.bg-hover'  , '', ` background: var(--bg-hover); `)
+css('.bg0'       , '', ` background: var(--bg0); `)
+css('.bg1'       , '', ` background: var(--bg1); `)
+css('.bg2'       , '', ` background: var(--bg2); `)
+css('.bg3'       , '', ` background: var(--bg3); `)
+css('.bg-alt'    , '', ` background: var(--bg-alt); `)
+css('.bg-smoke'  , '', ` background: var(--bg-smoke); `)
+css('.bg-fg'     , '', ` background: var(--fg); `) /* slider thumb, etc. */
+css('.bg-white'  , '', ` background: var(--fg-white); `)
+css('.bg-link'   , '', ` background: var(--fg-link); `) /* slider track */
+css('.no-bg'     , '', ` background: none; `)
+css('.bg-input'  , '', ` background: var(--bg-input); `)
+css('.bg-search' , '', ` background: var(--bg-search); `)
 
 css('.bg-error', '', `
 	background : var(--bg-error);

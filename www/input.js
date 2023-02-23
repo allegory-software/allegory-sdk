@@ -3206,7 +3206,7 @@ css_role('.calendar.picker .calendar-sel-day-suffix', 'p-t-0')
 
 css_role('.calendar.picker .calendar-day', 'p-y-05')
 
-widget('calendar', 'Input', function(e) {
+widget('xcalendar', 'Input', function(e) {
 
 	val_widget(e)
 	e.make_focusable()

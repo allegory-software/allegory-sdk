@@ -1,13 +1,11 @@
 /*
 
-	widgets: Web Components in JavaScript.
+	Web Components in JavaScript.
 	Written by Cosmin Apreutesei. Public Domain.
 
 You must load first, in order:
 
-	glue.js
-	dom.js
-	css.js
+	glue.js  dom.js  css.js
 
 WIDGETS
 
@@ -38,7 +36,7 @@ WIDGETS
 	select-button
 	tags-box tags
 	autocomplete
-	TODO: dropdown
+	dropdown
 	widget-placeholder
 
 FUNCTIONS
@@ -1686,7 +1684,7 @@ NOTE: does not support element margins!
 
 css('.list', 'v-t scroll-auto rel')
 
-// NOTE: margins on list elements are not supported because of drag & drop!
+// NOTE: margins on list elements are not supported with drag & drop!
 // Use padding and gap on the list instead, that works.
 css_role('.list > *', 'm0')
 
@@ -1705,15 +1703,22 @@ widget('list', function(e) {
 		e.update({items: true})
 	}
 
+	e.property('item_template_string', function() {
+		return template(e.item_template_name) || e.item_template
+	})
+
 	let items = empty_array
 	e.get_items = () => items
 	e.set_items = function(items1) {
 		items = items1
-		let ts = template(e.item_template_name) || e.item_template
+		let ts = e.item_template_string
 		if (!ts) return
 		e.clear()
-		for (let item of items)
-			e.add(e.format_item(item, ts))
+		for (let item of items) {
+			let item_e = e.format_item(item, ts)
+			item_e.data = item
+			e.add(item_e)
+		}
 		e.fire('items_changed', 'set_items')
 	}
 	e.prop('items', {store: false, type: 'array'})
@@ -1725,20 +1730,8 @@ widget('list', function(e) {
 	e.set_item_template      = update_items
 
 	e.format_item = function(item, ts) {
-		ts = ts || template(e.item_template_name) || e.item_template
-		if (!ts) return
-		let item_e = unsafe_html(render_string(ts, item || empty_obj), false)
-		item_e.data = item
-		return item_e
+		return unsafe_html(render_string(ts, item || empty_obj), false)
 	}
-
-	/*
-	// TODO: enable/disable these under flags.
-	e.make_focusable()
-	e.make_list_items_focusable()
-	e.make_list_drag_elements()
-	e.make_list_drop_elements()
-	*/
 
 	e.on('items_changed', function(from) {
 		if (from == 'set_items')
@@ -3841,13 +3834,18 @@ widget('label', function(e) {
 	e.class('label-widget')
 	e.class('label', false)
 	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.property('target', function() {
+		if (e.for_id) return window[e.for_id]
+		let g = e.closest('.input-group')
+		return g && g.$1('.input')
+	})
 	e.on('pointerenter', function() {
-		let te = window[e.for_id]
+		let te = e.target
 		if (!te) return
 		te.fire('label_hover', true)
 	})
 	e.on('pointerleave', function() {
-		let te = window[e.for_id]
+		let te = e.target
 		if (!te) return
 		te.fire('label_hover', false)
 	})
@@ -3855,17 +3853,17 @@ widget('label', function(e) {
 		e.class('hover', on)
 	})
 	e.on('pointerdown', function(ev) {
-		let te = window[e.for_id]
+		let te = e.target
 		if (!te) return
 		te.fire('label_pointerdown', ev)
 	})
 	e.on('pointerup', function(ev) {
-		let te = window[e.for_id]
+		let te = e.target
 		if (!te) return
 		te.fire('label_pointerup', ev)
 	})
 	e.on('click', function(ev) {
-		let te = window[e.for_id]
+		let te = e.target
 		if (!te) return
 		te.fire('label_click', ev)
 	})
@@ -4622,6 +4620,10 @@ widget('input', 'Input', function(e) {
 	e.make_focusable()
 	e.class('inputbox')
 
+	e.on('label_click', function() {
+		e.focus()
+	})
+
 })
 
 /* <textarea> ----------------------------------------------------------------
@@ -5236,38 +5238,6 @@ widget('tags', function(e) {
 
 })
 
-/* <autocomplete> ------------------------------------------------------------
-
-in props:
-
-update opt:
-	input
-
-*/
-
-css('.autocomplete', 'b p-x-input p-y-input bg-input')
-
-widget('autocomplete', 'Input', function(e) {
-
-	function input_input(ev) {
-		e.update({input: this.value, show: !!this.value})
-	}
-
-	e.bind_input = function(te, on) {
-		if (warn_if(te.tag != 'input', 'autocomplete: not an input tag: {0}', e.input_id))
-			return
-		te.on('input', input_input, on)
-		e.popup_target = on ? te : null
-		e.show(!!te.value)
-	}
-
-	e.prop('input_id', {type: 'id', attr: 'for', on_bind: e.bind_input})
-
-	e.popup(null, 'bottom', 'left')
-	e.hide()
-
-})
-
 /* <dropdown> ----------------------------------------------------------------
 
 --
@@ -5279,9 +5249,9 @@ css('.dropdown-chevron', 'p-x-05 smaller ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
 
-css('.dropdown-picker', 'v-s bg-input p-y-input', `
+css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
 	resize: both;
-	height: 10em;
+	height: 12em;
 `)
 css('.dropdown-picker > *', 'p-x-input p-y-input')
 css('.dropdown.open', '')
@@ -5306,6 +5276,10 @@ widget('dropdown', 'Input', function(e) {
 
 	e.make_focusable()
 
+	// model: value lookup
+
+	e.prop('value')
+
 	function item_value(item_e) {
 		if (item_e.data != null) { // dynamic list with a data model
 			return item_e.data.value
@@ -5325,6 +5299,74 @@ widget('dropdown', 'Input', function(e) {
 		}
 	}
 
+	e.lookup = function(value) {
+		return lookup.get(value)
+	}
+
+	// model/view: text search in multiple searchable fields
+
+	e.search_into = function(s, in_s) {
+		let i = in_s.indexOf(s)
+		if (i < 0) return empty_array
+		return [i, s.len]
+	}
+
+	e.prop('search')
+	e.prop('searchable_fields')
+
+	e.set_search            = update_search
+	e.set_searchable_fields = update_search
+
+	let search_out = obj()
+	function update_search() {
+		if (!e.list) return
+		let s = e.search
+		let ts = e.list.item_template_string
+		for (let i = 0, n = e.list.list_len; i < n; i++) {
+			let item_e = e.list.at[i]
+			let item = item_e.data
+			if (item) { // dynamic list with a data model to search into
+				if (e.searchable_fields) {
+					item_e.hide()
+					for (let k of words(e.searchable_fields)) {
+						let v = item[k]
+						if (v != null) {
+							let [i, n] = e.search_into(s, v)
+							if (i != null) {
+								if (ts) {
+									search_out.prefix = v.slice(0, i)
+									search_out.search = v.slice(i, i+n)
+									search_out.suffix = v.slice(i+n)
+									item[k+'_search'] = search_out
+									let new_item_e = e.list.format_item(item, ts)
+									item[k+'_search'] = null
+									e.list.replace(item_e, new_item_e)
+									pr(new_item_e)
+									item_e = new_item_e
+									item_e.highlighted = true
+								}
+								item_e.show()
+								break
+							}
+						}
+					}
+				} else {
+					if (item_e.highlighted) {
+						let new_item_e = e.list.format_item(item, ts)
+						e.list.replace(item_e, new_item_e)
+						item_e = new_item_e
+						item_e.highlighted = false
+					}
+					item_e.show()
+				}
+			} else { // static list, search into text contents
+				//
+			}
+		}
+	}
+
+	// model/view: list prop: set it up
+
 	function bind_list(list, on) {
 		if (!list) return
 		list.on('items_changed', list_items_changed, on)
@@ -5332,6 +5374,8 @@ widget('dropdown', 'Input', function(e) {
 			list.make_list_items_focusable()
 			list.multiselect = false
 			list_items_changed.call(list)
+			let item_i = e.lookup(e.value)
+			list.focus_item(or(item_i, false), 0)
 			list.class('dropdown-picker')
 			list.popup(null, 'bottom', 'left')
 			list.hide()
@@ -5349,15 +5393,11 @@ widget('dropdown', 'Input', function(e) {
 
 	e.prop('list', {private: true})
 
-	e.prop('value')
+	// view
 
 	e.value_box = div({class: 'dropdown-value'})
 	e.chevron   = div({class: 'dropdown-chevron'})
 	e.add(e.value_box, e.chevron)
-
-	e.find_list_item_index = function(value) {
-		return lookup.get(value)
-	}
 
 	e.set_value = function() {
 		e.update({value: true})
@@ -5367,7 +5407,7 @@ widget('dropdown', 'Input', function(e) {
 
 	e.on_update(function(opt) {
 		if (opt.value) {
-			let i = e.find_list_item_index(e.value)
+			let i = e.lookup(e.value)
 			if (i != null) {
 				let item_e = e.list.at[i].clone()
 				item_e.id = null // id would be duplicated.
@@ -5415,7 +5455,6 @@ widget('dropdown', 'Input', function(e) {
 				e.list.popup('bottom', 'left')
 				e.list.show()
 				e.list.focus_item(true, 0, {
-					// must_not_move: true,
 					make_visible: true,
 				})
 			} else {
@@ -5475,6 +5514,109 @@ widget('dropdown', 'Input', function(e) {
 	})
 
 	return {list: html_list}
+
+})
+
+/* <autocomplete> ------------------------------------------------------------
+
+in props:
+
+update opt:
+	input
+
+*/
+
+css('.autocomplete', 'b v-s p-x-input p-y-input bg-input z3', `
+	resize: both;
+`)
+
+widget('autocomplete', 'Input', function(e) {
+
+	e.init_child_components()
+
+	let html_list = e.$1('list')
+
+	if (!html_list) { // static list
+		html_list = div()
+		for (let ce of [...e.at])
+			html_list.add(ce)
+		html_list.make_list_items_focusable()
+		e.clear()
+	}
+
+	function bind_list(list, on) {
+		if (!list) return
+		if (on) {
+			list.make_list_items_focusable()
+			list.multiselect = false
+			list_items_changed.call(list)
+			list.class('dropdown-picker')
+			list.popup(null, 'bottom', 'left')
+			list.hide()
+			e.add(list)
+		} else {
+			list.remove()
+		}
+		e.update({value: true})
+	}
+
+	e.set_list = function(list1, list0) {
+		bind_list(list0, false)
+		bind_list(list1, true)
+	}
+
+	e.prop('list', {private: true})
+
+	function item_value(item_e, k) {
+		if (item_e.data != null) { // dynamic list with a data model
+			return item_e.data[k]
+		} else { // static list, value kept in a prop or attr.
+			return or(item_e[k], item_e.attr(k))
+		}
+	}
+
+	function input_input(ev) {
+		e.update({input: this.value, show: !!this.value})
+	}
+
+	e.on_update(function(opt) {
+		if (opt.input) {
+			let list = this
+			for (let i = 0, n = list.list_len; i < n; i++) {
+				let item_e = list.at[i]
+				let text = item_value(item_e, 'text')
+				let matches = text != null && text.starts(prefix)
+				// if (matches)
+
+				item_e.show(matches)
+			}
+		}
+	})
+
+	e.bind_input = function(input, on) {
+		if (warn_if(input.tag != 'input', 'autocomplete: not an input tag: {0}', e.input_id))
+			return
+		input.on('input', input_input, on)
+		e.popup_target = on ? input : null
+		e.show(!!input.value)
+	}
+
+	e.prop('input_id', {type: 'id', attr: 'for', on_bind: e.bind_input})
+
+	e.popup(null, 'bottom', 'left')
+	e.hide()
+
+	return {list: html_list}
+
+})
+
+/* <calendar> ----------------------------------------------------------------
+
+*/
+
+widget('calendar', 'Input', function(e) {
+
+	//
 
 })
 

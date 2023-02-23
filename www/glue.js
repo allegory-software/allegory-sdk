@@ -1490,9 +1490,10 @@ let segs_overlap = function(ax1, ax2, bx1, bx2) { // check if two 1D segments ov
 	return !(ax2 < bx1 || bx2 < ax1)
 }
 function rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) {
-	return
+	return (
 		segs_overlap(x1, x1+w1, x2, x2+w2) &&
 		segs_overlap(y1, y1+h1, y2, y2+h2)
+	)
 }
 }
 
