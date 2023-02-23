@@ -99,7 +99,7 @@ DOM QUERYING
 DOM <-> HTML
 
 	e.html -> s
-	[unsafe_]html(s, [unwrap]) -> e
+	[unsafe_]html(s, [unwrap: false]) -> e
 	e.[unsafe_]html = s
 
 DOM MANIPULATION
@@ -1142,9 +1142,10 @@ function unsafe_html(s, unwrap) {
 	let span = document.createElement('span')
 	span.unsafe_html = s.trim()
 	span._init_component()
-	if (unwrap == false)
+	let n = span.childNodes.length
+	if (unwrap == false && (n > 1 || !span.len)) // not a single element
 		return span
-	return span.childNodes.length > 1 ? [...span.nodes] : span.firstChild
+	return n > 1 ? [...span.nodes] : span.firstChild
 }
 
 function sanitize_html(s) {
@@ -1154,8 +1155,8 @@ function sanitize_html(s) {
 	return DOMPurify.sanitize(s)
 }
 
-function html(s) {
-	return unsafe_html(sanitize_html(s))
+function html(s, unwrap) {
+	return unsafe_html(sanitize_html(s), unwrap)
 }
 
 let create_element = function(tag, prop_vals, attrs, ...children) {
