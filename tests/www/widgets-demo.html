@@ -4,7 +4,7 @@
 <title>X-WIDGETS DEMO</title>
 <meta charset="utf-8">
 <base href="../../www/">
-<link rel="stylesheet" type="text/css" href="fontawesome.css">
+<link rel="stylesheet" type="text/css" href="fontawesome.css" crossorigin>
 <script src="glue.js"></script>
 <script src="dom.js"></script>
 <script src="css.js"></script>
@@ -225,6 +225,16 @@ on_dom_load(function() {
 })
 
 </script>
+
+<xmp id=intro_demo>
+To run this demo without a web server, you need allow JavaScript to see files
+loaded with <code>file:///</code> urls:
+
+<ul>
+<li><b>Chrome:</b> start it with command-line option <code>--allow-file-access-from-files</code>.</li>
+<li><b>Firefox:</b> in <code>about:config</code>, type <code>security.fileuri.strict_origin_policy</code> and set it to false.</li>
+</ul>
+</xmp>
 
 <!--------------------------------------------------------------------------->
 
@@ -628,10 +638,10 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 	<input-group class="ro-var">
 		<d class="ro-var h-m p-x fa fa-car"></d>
 		<labelbox class="ro-var">
-			<label for=oh_my>On my label</label>
+			<label>On my label</label>
 			<input-group>
 				<button bare icon="fa fa-bicycle"></button>
-				<input id=oh_my value="Oh My!">
+				<input value="Oh My!">
 				<d class="ro-var h-m p-x fa fa-bicycle"></d>
 			</input-group>
 		</labelbox>
@@ -747,12 +757,8 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 <xmp id=autocomplete_demo>
 <input id=my_input>
 <autocomplete id=my_auto for=my_input>
+	<div text="">Option 1</div>
 </autocomplete>
-<script run>
-my_auto.on_update(function(opt) {
-	this.set(opt.input)
-})
-</script>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -787,28 +793,73 @@ my_auto.on_update(function(opt) {
 	{"name": "John Doe 3.2", "phone": "+321 456 789", "email": "bla@bla.com"},
 	{"name": "John Doe 3.3", "phone": "+213 456 789", "email": "bla@bla.com"}
 ]'></list>
+<script run>
+for (let e of $('list')) {
+	e.make_focusable()
+	e.make_list_items_focusable()
+	e.make_list_drag_elements()
+	e.make_list_drop_elements()
+}
+</script>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
 <xmp id=dropdown_demo>
-<dropdown value="55" align=right>
-	<list>
-		<script type="text/x-mustache">{{name}}</script>
-		<script>
-			let a = []
-			for (let i = 1; i <= 100; i++)
-				a.push({value: i+'', name: 'Option '+i})
-			return a
-		</script>
-	</list>
-</dropdown>
+<input-group>
+	<dropdown value="55" align=right>
+		<list>
+			<script type="text/x-mustache">{{name}}</script>
+			<script>
+				let a = []
+				for (let i = 1; i <= 100; i++)
+					a.push({value: i+'', name: 'Option '+i})
+				return a
+			</script>
+		</list>
+	</dropdown>
+	<button>OK</button>
+</input-group>
 <input><button>OK</button>
+
 <dropdown value=grass>
 	<div value=chickens ><b>Chickens </b></div>
 	<div value=cows     ><b>Cows     </b></div>
 	<div value=grass    ><i>Grass    </i></div>
 </dropdown>
+
+<dropdown value=abel searchable_fields="name phone email">
+	<list>
+		<script type="text/x-mustache">
+			<div class="p noselect" style="{{#height}}height: {{height}}{{/height}}">
+				<div class="bold nowrap">
+					{{#name_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/name_search}}
+					{{^name_search}} {{name}} {{/name_search}}
+				</div>
+				{{#phone}}
+				<div class="smaller nowrap">
+					{{#phone_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/phone_search}}
+					{{^phone_search}} {{phone}} {{/phone_search}}
+				</div>
+				{{/phone}}
+				{{#email}}
+				<div class="smaller nowrap">
+					{{#email_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/email_search}}
+					{{^email_search}} {{email}} {{/email_search}}
+				</div>
+				{{/email}}
+			</div>
+		</script>
+		<script>
+			return [
+				{value: 'cain', name: 'Cain', phone: '+38 321 654', email: 'cain@hell.edu'},
+				{value: 'abel', name: 'Abel', phone: '+40 123 456', email: 'abel@heaven.com'},
+				{value: 'god' , name: 'God' , phone: '+36 456 123', email: 'god@heaven.com'},
+			]
+		</script>
+	</list>
+</dropdown>
+
 <script run>
 </script>
 </xmp>
