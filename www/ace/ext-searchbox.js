@@ -335,3 +335,4 @@ exports.Search = function (editor, isReplace) {
                         }
                     });
                 })();
+            
