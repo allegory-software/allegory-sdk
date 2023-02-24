@@ -806,20 +806,18 @@ for (let e of $('list')) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=dropdown_demo>
-<input-group>
-	<dropdown value="55" align=right>
-		<list>
-			<script type="text/x-mustache">{{name}}</script>
-			<script>
-				let a = []
-				for (let i = 1; i <= 100; i++)
-					a.push({value: i+'', name: 'Option '+i})
-				return a
-			</script>
-		</list>
-	</dropdown>
-	<button>OK</button>
-</input-group>
+<dropdown value="55" align=right>
+	<list>
+		<script type="text/x-mustache">{{name}}</script>
+		<script>
+			let a = []
+			for (let i = 1; i <= 100; i++)
+				a.push({value: i+'', name: 'Option '+i})
+			return a
+		</script>
+	</list>
+</dropdown>
+<button>OK</button>
 <input><button>OK</button>
 
 <dropdown value=grass>
@@ -828,7 +826,7 @@ for (let e of $('list')) {
 	<div value=grass    ><i>Grass    </i></div>
 </dropdown>
 
-<dropdown value=abel searchable_fields="name phone email">
+<dropdown value=y searchable_fields="name phone email">
 	<list>
 		<script type="text/x-mustache">
 			<div class="p noselect" style="{{#height}}height: {{height}}{{/height}}">
@@ -852,9 +850,9 @@ for (let e of $('list')) {
 		</script>
 		<script>
 			return [
-				{value: 'cain', name: 'Cain', phone: '+38 321 654', email: 'cain@hell.edu'},
-				{value: 'abel', name: 'Abel', phone: '+40 123 456', email: 'abel@heaven.com'},
-				{value: 'god' , name: 'God' , phone: '+36 456 123', email: 'god@heaven.com'},
+				{value: 'x', name: 'X Foo', phone: '+38 321 654', email: 'x.foo@example.com'},
+				{value: 'y', name: 'Y Bar', phone: '+40 123 456', email: 'y.bar@example.com'},
+				{value: 'z', name: 'Z Baz', phone: '+36 456 123', email: 'z.baz@example.com'},
 			]
 		</script>
 	</list>
