@@ -1702,8 +1702,6 @@ css_role('.list > *', 'm0')
 
 widget('list', function(e) {
 
-	e.islist = true // quick check for a dynamic list
-
 	let ht = e.$1(':scope>template, :scope>script[type="text/x-mustache"], :scope>xmp')
 	let html_template = ht && ht.html
 	if (ht) ht.remove()
@@ -5270,10 +5268,11 @@ widget('tags', function(e) {
 
 config props:
 	align: left | right
-	searchable_fields: 'k1 ...'
 	list:
 html attrs:
 	align: left | right
+list item inner element attrs:
+	searchable
 inner html:
 	<list>
 state in props:
@@ -5303,6 +5302,8 @@ css('.dropdown-picker > *', 'p-x-input p-y-input')
 css('.dropdown.open', '')
 css('.dropdown.open, .dropdown-picker', 'outline-focus')
 css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
+
+css('.dropdown-search', 'fg-search bg-search')
 
 widget('dropdown', 'Input', function(e) {
 
@@ -5358,114 +5359,77 @@ widget('dropdown', 'Input', function(e) {
 		return i != null ? [i, s.len] : empty_array
 	}
 
-	let search_string = null
+	let search_string = ''
 
 	e.prop('searchable_fields')
 	e.set_searchable_fields = function() {
-		search_string = null
-		update_search()
+		e.search('')
 	}
-
-	function rerender_item(item_e0, ts, highlighted) {
-		let item_e1 = e.list.rerender_item(item_e0, ts)
-		item_e1.highlighted = highlighted
-		return item_e1
-	}
-
-	// The search behavior is different whether we're using a dynamic list
-	// or a static list as a picker. A dynamic list allows for searching
-	// into different fields of each item, and allows re-rendering items with
-	// highlighting of the searching text, so filtering out non-matching items
-	// also makes sense. With a static list we search in the textContent and
-	// we can't highlight the searching text, so filtering out non-matching
-	// items is not ok since there's no visual feedback that we're searching.
 
 	function update_search() {
 		if (!e.list) return
-		let dynamic = e.list.islist
-		let searching = !!(search_string && (!dynamic || e.searchable_fields))
-		let ts = e.list.item_template_string
+		let searching = !!search_string
 
-		// step 1: search and set up found items for rendering.
-		let searchable_fields = words(e.searchable_fields)
+		// step 1: search and record required changes.
 		let first_item_i
-		for (let i = 0, n = e.list.list_len; i < n; i++) {
-			let item_e = e.list.at[i]
+		let tape = []
+		for (let item_i = 0, item_n = e.list.list_len; item_i < item_n; item_i++) {
+			let item_e = e.list.at[item_i]
 
 			// skip non-focusables
 			if (!e.list.can_focus_item(item_e, null, true))
 				continue
 
-			if (searching) {
-				let found
-				if (dynamic) {
-					let item = item_e.data
-					item.search_state = null
-					for (let k of searchable_fields) {
-						let v = item[k]
-						if (v) {
-							let [i, n] = e.search_into(search_string, v)
-							if (i != null) {
-								let prefix = v.slice(0, i)
-								let search = v.slice(i, i+n)
-								let suffix = v.slice(i+n)
-								item.search_state = item.search_state || obj()
-								item.search_state[k] = {
-									prefix: prefix,
-									search: search,
-									suffix: suffix,
-								}
-								found = true
-							}
-						}
-					}
-				} else {
-					let v = item_e.textContent
-					if (v) {
-						let [i, n] = e.search_into(search_string, v)
-						if (i != null)
-							found = true
-					}
+			let show = !searching
+			let searchables = item_e.hasattr('searchable') ? [item_e] : item_e.$('[searchable]')
+			for (let val_e of searchables) {
+				let v = val_e.textContent
+				if (!v)
+					continue
+				if (!searching) {
+					tape.push('reset', item_e, val_e, v)
+					continue
 				}
-				if (found && first_item_i == null)
-					first_item_i = i
+				let [i, n] = e.search_into(search_string, v)
+				if (i != null) {
+					let prefix = v.slice(0, i)
+					let search = v.slice(i, i+n)
+					let suffix = v.slice(i+n)
+					tape.push('search', item_e, val_e, prefix, search, suffix)
+					show = true
+					if (first_item_i == null)
+						first_item_i = item_i
+				}
 			}
+			tape.push('show', item_e, show || !searchables.length)
 		}
 
 		if (searching && first_item_i == null)
 			return
 
-		function clear_item_search_state(item) {
-			for (k of searchable_fields)
-				item[k+'_search'] = null
-		}
-
-		// step 2: re-render items with highlighting or not, visible or not.
-		for (let i = 0, n = e.list.list_len; i < n; i++) {
-			let item_e = e.list.at[i]
-
-			// skip non-focusables
-			if (!e.list.can_focus_item(item_e, null, true))
-				continue
-
-			if (dynamic && searching) {
-				let item = item_e.data
-				if (item.search_state) {
-					clear_item_search_state(item)
-					for (let k in item.search_state)
-						item[k+'_search'] = item.search_state[k]
-					item.search_state = null
-					item_e = rerender_item(item_e, ts, true)
-					item_e.show()
-				} else {
-					item_e.hide()
-				}
-			} else {
-				if (item_e.highlighted) {
-					clear_item_search_state(item_e.data)
-					item_e = rerender_item(item_e, ts, false)
-				}
+		for (let i = 0, n = tape.len; i < n; ) {
+			let cmd  = tape[i++]
+			if (cmd == 'reset') {
+				let item_e = tape[i++]
+				let val_e  = tape[i++]
+				let v      = tape[i++]
+				val_e.set(v)
 				item_e.show()
+			} else if (cmd == 'search') {
+				let item_e = tape[i++]
+				let val_e  = tape[i++]
+				let prefix = tape[i++]
+				let search = tape[i++]
+				let suffix = tape[i++]
+				val_e.clear()
+				val_e.add(prefix)
+				val_e.add(span({class: 'dropdown-search'}, search))
+				val_e.add(suffix)
+				item_e.show()
+			} else if (cmd == 'show') {
+				let item_e = tape[i++]
+				let show   = tape[i++]
+				item_e.show(show)
 			}
 		}
 
@@ -5486,6 +5450,7 @@ widget('dropdown', 'Input', function(e) {
 	}
 
 	e.search = function(s) {
+		if (!s) s = ''
 		if (search_string == s)
 			return
 		let s0 = search_string
@@ -5493,13 +5458,6 @@ widget('dropdown', 'Input', function(e) {
 		let found = update_search()
 		if (!found)
 			search_string = s0
-
-		// on non-dynamic lists we don't have visual feedback of the search state
-		// so we reset the search state after a second like Windows does.
-		if (e.list && !e.list.islist)
-			runafter(1, function() {
-				e.search(null)
-			})
 
 		return found
 	}
@@ -5722,7 +5680,7 @@ widget('autocomplete', 'Input', function(e) {
 		if (item_e.data != null) { // dynamic list with a data model
 			return item_e.data[k]
 		} else { // static list, value kept in a prop or attr.
-			return or(item_e[k], item_e.attr(k))
+			return strict_or(item_e[k], item_e.attr(k))
 		}
 	}
 

@@ -808,7 +808,7 @@ for (let e of $('list')) {
 <xmp id=dropdown_demo>
 <dropdown value="55" align=right>
 	<list>
-		<script type="text/x-mustache">{{name}}</script>
+		<script type="text/x-mustache"><div searchable>{{name}}</div></script>
 		<script>
 			let a = []
 			for (let i = 1; i <= 100; i++)
@@ -826,7 +826,7 @@ for (let e of $('list')) {
 	<div value=grass    ><i>Grass    </i></div>
 </dropdown>
 
-<dropdown searchable_fields="name phone email">
+<dropdown>
 	<list>
 		<script type="text/x-mustache">
 			{{#cat}}
@@ -837,22 +837,9 @@ for (let e of $('list')) {
 			{{/choose}}
 			{{^cat}}{{^choose}}
 				<div class="noselect v-m" style="min-height: 5em">
-					<div class="bold nowrap">
-						{{#name_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/name_search}}
-						{{^name_search}} {{name}} {{/name_search}}
-					</div>
-					{{#phone}}
-					<div class="smaller nowrap">
-						{{#phone_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/phone_search}}
-						{{^phone_search}} {{phone}} {{/phone_search}}
-					</div>
-					{{/phone}}
-					{{#email}}
-					<div class="smaller nowrap">
-						{{#email_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/email_search}}
-						{{^email_search}} {{email}} {{/email_search}}
-					</div>
-					{{/email}}
+					<div class="bold nowrap" searchable>{{name}}</div>
+					{{#phone}}<div class="smaller nowrap" searchable>{{phone}}</div>{{/phone}}
+					{{#email}}<div class="smaller nowrap" searchable>{{email}}</div>{{/email}}
 				</div>
 			{{/choose}}{{/cat}}
 		</script>
