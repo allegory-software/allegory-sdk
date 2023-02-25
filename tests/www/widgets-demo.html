@@ -826,32 +826,43 @@ for (let e of $('list')) {
 	<div value=grass    ><i>Grass    </i></div>
 </dropdown>
 
-<dropdown value=y searchable_fields="name phone email">
+<dropdown searchable_fields="name phone email">
 	<list>
 		<script type="text/x-mustache">
-			<div class="p noselect" style="{{#height}}height: {{height}}{{/height}}">
-				<div class="bold nowrap">
-					{{#name_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/name_search}}
-					{{^name_search}} {{name}} {{/name_search}}
+			{{#cat}}
+				<div class="noselect v-m bold large label">{{cat}}</div>
+			{{/cat}}
+			{{#choose}}
+				<div class="noselect v-m bold" style="min-height: 5em">Choose...</div>
+			{{/choose}}
+			{{^cat}}{{^choose}}
+				<div class="noselect v-m" style="min-height: 5em">
+					<div class="bold nowrap">
+						{{#name_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/name_search}}
+						{{^name_search}} {{name}} {{/name_search}}
+					</div>
+					{{#phone}}
+					<div class="smaller nowrap">
+						{{#phone_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/phone_search}}
+						{{^phone_search}} {{phone}} {{/phone_search}}
+					</div>
+					{{/phone}}
+					{{#email}}
+					<div class="smaller nowrap">
+						{{#email_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/email_search}}
+						{{^email_search}} {{email}} {{/email_search}}
+					</div>
+					{{/email}}
 				</div>
-				{{#phone}}
-				<div class="smaller nowrap">
-					{{#phone_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/phone_search}}
-					{{^phone_search}} {{phone}} {{/phone_search}}
-				</div>
-				{{/phone}}
-				{{#email}}
-				<div class="smaller nowrap">
-					{{#email_search}} {{prefix}}<span class="fg-search bg-search">{{search}}</span>{{suffix}} {{/email_search}}
-					{{^email_search}} {{email}} {{/email_search}}
-				</div>
-				{{/email}}
-			</div>
+			{{/choose}}{{/cat}}
 		</script>
 		<script>
 			return [
+				{value: null, choose: 'Choose'},
+				{cat: "Foos'n'Bars", focusable: false},
 				{value: 'x', name: 'X Foo', phone: '+38 321 654', email: 'x.foo@example.com'},
 				{value: 'y', name: 'Y Bar', phone: '+40 123 456', email: 'y.bar@example.com'},
+				{cat: "Baz's", focusable: false},
 				{value: 'z', name: 'Z Baz', phone: '+36 456 123', email: 'z.baz@example.com'},
 			]
 		</script>

@@ -1003,17 +1003,17 @@ property(e, 'list_len', function() {
 item state:
 	selected
 list css classes:
-	list-items-moving
+	moving
 item css classes:
-	list-item-dragging
-	list-item-grabbed
+	dragging
+	grabbed
 fires:
 	items_changed()
 
 */
 
-css_state('.list-item-dragging', 'abs m0 z5')
-css_state('.list-item-grabbed', 'z6')
+css_state('.dragging', 'abs m0 z5')
+css_state('.grabbed', 'z6')
 
 e.make_list_drag_elements = function() {
 
@@ -1034,7 +1034,8 @@ e.make_list_drag_elements = function() {
 		grabbed_item = down_ev.target.closest_child(e)
 		if (!grabbed_item) return
 
-		let items = e.selected_items || [grabbed_item]
+		let items = e.selected_items
+		items = items && items.copy() || [grabbed_item]
 
 		let horiz = e.css('flexDirection') == 'row'
 		let items_r = grabbed_item.rect()
@@ -1054,7 +1055,7 @@ e.make_list_drag_elements = function() {
 		// --measuring stops here--
 
 		for (let item of items) {
-			item.class('list-item-dragging')
+			item.class('dragging')
 			let r = floor(random() * 15) - 5
 			item.style.transform = `rotate(${r}deg)`
 			// fixate size so we can move it out of layout.
@@ -1074,8 +1075,8 @@ e.make_list_drag_elements = function() {
 		}
 		e.fire('items_changed')
 
-		e.class('list-items-moving')
-		grabbed_item.class('list-item-grabbed')
+		e.class('moving')
+		grabbed_item.class('grabbed')
 		force_cursor('grabbing')
 
 		start(items, items_r)
@@ -1093,11 +1094,11 @@ e.make_list_drag_elements = function() {
 	})
 
 	e.on('stop_drag', function(ev, dest_elem, items) {
-		e.class('list-items-moving', false)
-		grabbed_item.class('list-item-grabbed', false)
+		e.class('moving', false)
+		grabbed_item.class('grabbed', false)
 		force_cursor(false)
 		for (let item of items) {
-			item.class('list-item-dragging', false)
+			item.class('dragging', false)
 			item.style.transform = null
 			item.x = item._x0
 			item.y = item._y0
@@ -1286,7 +1287,7 @@ stubs:
 
 */
 
-css_state('.list-item-selected', '', `
+css_state('.selected', '', `
 	color      : var(--fg-selected);
 	background : var(--bg-selected);
 `)
@@ -1532,7 +1533,7 @@ e.make_list_items_focusable = function() {
 		if (opt.state) {
 			for (let i = 0, n = e.list_len; i < n; i++) {
 				let item = e.at[i]
-				item.class('list-item-selected', !!item.selected)
+				e.update_item_state(item)
 			}
 		}
 
@@ -1541,6 +1542,11 @@ e.make_list_items_focusable = function() {
 				e.focused_item.make_visible()
 
 	})
+
+	e.update_item_state = function(item) {
+		item.class('selected', !!item.selected)
+		item.class('focused', e.focused_item == item)
+	}
 
 	e.on('pointerdown', function(ev) {
 
@@ -1681,8 +1687,10 @@ config props:
 	selected_items
 data props:
 	items               set of items
+stubs:
+	format_item(item, ts)
 
-NOTE: does not support element margins!
+NOTE: removes element margins!
 
 */
 
@@ -1693,6 +1701,8 @@ css('.list', 'v-t scroll-auto rel')
 css_role('.list > *', 'm0')
 
 widget('list', function(e) {
+
+	e.islist = true // quick check for a dynamic list
 
 	let ht = e.$1(':scope>template, :scope>script[type="text/x-mustache"], :scope>xmp')
 	let html_template = ht && ht.html
@@ -1721,6 +1731,9 @@ widget('list', function(e) {
 		for (let item of items) {
 			let item_e = e.format_item(item, ts)
 			item_e.data = item
+			item_e.focusable = item.focusable
+			if (e.update_item_state)
+				e.update_item_state(item_e)
 			e.add(item_e)
 		}
 		e.fire('items_changed', 'set_items')
@@ -1735,6 +1748,17 @@ widget('list', function(e) {
 
 	e.format_item = function(item, ts) {
 		return unsafe_html(render_string(ts, item || empty_obj), false)
+	}
+
+	e.rerender_item = function(e0, ts) {
+		let item = e0.data
+		let e1 = e.format_item(item, ts)
+		e1.data = item
+		e1.selected = e0.selected
+		e.replace(e0, e1)
+		if (e.update_item_state)
+			e.update_item_state(e1)
+		return e1
 	}
 
 	e.on('items_changed', function(from) {
@@ -5261,7 +5285,6 @@ methods:
 	lookup(value) -> i
 	set_open(on, [focus])
 	open([focus])  close([focus])  toggle([focus])
-	cancel()
 update opts:
 	value
 
@@ -5293,7 +5316,6 @@ widget('dropdown', 'Input', function(e) {
 		html_list = div()
 		for (let ce of [...e.at])
 			html_list.add(ce)
-		html_list.make_list_items_focusable()
 		e.clear()
 	}
 
@@ -5301,13 +5323,14 @@ widget('dropdown', 'Input', function(e) {
 
 	// model: value lookup
 
-	e.prop('value')
+	e.prop('value', {default: null})
+	e.update({value: true})
 
 	function item_value(item_e) {
 		if (item_e.data != null) { // dynamic list with a data model
 			return item_e.data.value
 		} else { // static list, value kept in a prop or attr.
-			return or(item_e.value, item_e.attr('value'))
+			return strict_or(item_e.value, item_e.attr('value'))
 		}
 	}
 
@@ -5317,9 +5340,11 @@ widget('dropdown', 'Input', function(e) {
 		let list = this
 		for (let i = 0, n = list.list_len; i < n; i++) {
 			let value = item_value(list.at[i])
-			if (value != null)
+			if (value !== undefined)
 				lookup.set(value, i)
 		}
+		if (search_string)
+			update_search()
 	}
 
 	e.lookup = function(value) {
@@ -5328,28 +5353,24 @@ widget('dropdown', 'Input', function(e) {
 
 	// model/view: text search in multiple searchable fields
 
-	let lower = s => s.normalize('NFKD').replace(/\p{Diacritic}/gu, '').lower()
-
-	e.search_into = function(s, in_s) {
-		let i = lower(in_s).indexOf(lower(s))
-		if (i < 0) return empty_array
-		return [i, s.len]
-	}
-
-	e.prop('searchable_fields')
-	e.set_searchable_fields = update_search
-
-	function reformat_item(item_e, ts, highlighted) {
-		let item = item_e.data
-		let new_item_e = e.list.format_item(item, ts)
-		new_item_e.data = item
-		new_item_e.selected = item_e.selected
-		e.list.replace(item_e, new_item_e)
-		new_item_e.highlighted = highlighted
-		return new_item_e
+	e.search_into = function(s, in_s) { // stub
+		let i = in_s.find_ai_ci(s)
+		return i != null ? [i, s.len] : empty_array
 	}
 
 	let search_string = null
+
+	e.prop('searchable_fields')
+	e.set_searchable_fields = function() {
+		search_string = null
+		update_search()
+	}
+
+	function rerender_item(item_e0, ts, highlighted) {
+		let item_e1 = e.list.rerender_item(item_e0, ts)
+		item_e1.highlighted = highlighted
+		return item_e1
+	}
 
 	// The search behavior is different whether we're using a dynamic list
 	// or a static list as a picker. A dynamic list allows for searching
@@ -5361,22 +5382,26 @@ widget('dropdown', 'Input', function(e) {
 
 	function update_search() {
 		if (!e.list) return
-		let ts = e.list.item_template_string
-		let dynamic = !!ts
+		let dynamic = e.list.islist
 		let searching = !!(search_string && (!dynamic || e.searchable_fields))
+		let ts = e.list.item_template_string
 
 		// step 1: search and set up found items for rendering.
+		let searchable_fields = words(e.searchable_fields)
 		let first_item_i
-		if (searching) {
-			for (let i = 0, n = e.list.list_len; i < n; i++) {
-				let item_e = e.list.at[i]
-				if (!e.list.can_focus_item(item_e, null, true))
-					continue
-				item_e.search_found = false
+		for (let i = 0, n = e.list.list_len; i < n; i++) {
+			let item_e = e.list.at[i]
+
+			// skip non-focusables
+			if (!e.list.can_focus_item(item_e, null, true))
+				continue
+
+			if (searching) {
 				let found
 				if (dynamic) {
 					let item = item_e.data
-					for (let k of words(e.searchable_fields)) {
+					item.search_state = null
+					for (let k of searchable_fields) {
 						let v = item[k]
 						if (v) {
 							let [i, n] = e.search_into(search_string, v)
@@ -5384,12 +5409,12 @@ widget('dropdown', 'Input', function(e) {
 								let prefix = v.slice(0, i)
 								let search = v.slice(i, i+n)
 								let suffix = v.slice(i+n)
-								item[k+'_search'] = {
+								item.search_state = item.search_state || obj()
+								item.search_state[k] = {
 									prefix: prefix,
 									search: search,
 									suffix: suffix,
 								}
-								item_e.search_found = true
 								found = true
 							}
 						}
@@ -5398,9 +5423,8 @@ widget('dropdown', 'Input', function(e) {
 					let v = item_e.textContent
 					if (v) {
 						let [i, n] = e.search_into(search_string, v)
-						if (i != null) {
+						if (i != null)
 							found = true
-						}
 					}
 				}
 				if (found && first_item_i == null)
@@ -5411,24 +5435,36 @@ widget('dropdown', 'Input', function(e) {
 		if (searching && first_item_i == null)
 			return
 
+		function clear_item_search_state(item) {
+			for (k of searchable_fields)
+				item[k+'_search'] = null
+		}
+
 		// step 2: re-render items with highlighting or not, visible or not.
 		for (let i = 0, n = e.list.list_len; i < n; i++) {
 			let item_e = e.list.at[i]
+
+			// skip non-focusables
 			if (!e.list.can_focus_item(item_e, null, true))
 				continue
+
 			if (dynamic && searching) {
-				if (item_e.search_found) {
-					item_e = reformat_item(item_e, ts, true)
-					let item = item_e.data
-					for (let k of words(e.searchable_fields))
-						item[k+'_search'] = null
+				let item = item_e.data
+				if (item.search_state) {
+					clear_item_search_state(item)
+					for (let k in item.search_state)
+						item[k+'_search'] = item.search_state[k]
+					item.search_state = null
+					item_e = rerender_item(item_e, ts, true)
 					item_e.show()
 				} else {
 					item_e.hide()
 				}
 			} else {
-				if (item_e.highlighted)
-					item_e = reformat_item(item_e, ts, false)
+				if (item_e.highlighted) {
+					clear_item_search_state(item_e.data)
+					item_e = rerender_item(item_e, ts, false)
+				}
 				item_e.show()
 			}
 		}
@@ -5439,22 +5475,32 @@ widget('dropdown', 'Input', function(e) {
 				make_visible: true,
 			})
 		} else {
-			e.update({value: true})
-			e.list.update({state: true})
 			let item_e = e.list.focused_item
 			if (item_e)
 				item_e.make_visible()
 		}
 
+		e.update({value: true})
+
 		return true
 	}
 
 	e.search = function(s) {
+		if (search_string == s)
+			return
 		let s0 = search_string
 		search_string = s
 		let found = update_search()
 		if (!found)
 			search_string = s0
+
+		// on non-dynamic lists we don't have visual feedback of the search state
+		// so we reset the search state after a second like Windows does.
+		if (e.list && !e.list.islist)
+			runafter(1, function() {
+				e.search(null)
+			})
+
 		return found
 	}
 
@@ -5504,6 +5550,8 @@ widget('dropdown', 'Input', function(e) {
 			if (i != null) {
 				let item_e = e.list.at[i].clone()
 				item_e.id = null // id would be duplicated.
+				item_e.selected = null
+				e.list.update_item_state(item_e)
 				e.value_box.set(item_e)
 			} else {
 				e.value_box.clear()
@@ -5535,25 +5583,18 @@ widget('dropdown', 'Input', function(e) {
 	e.open   = function(focus) { e.set_open(true, focus) }
 	e.close  = function(focus) { e.set_open(false, focus) }
 	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
-	e.cancel = function() {
-		if (e.isopen)
-			e.value = e.cancel_value
-		e.close(true)
-	}
 
 	e.set_open = function(open, focus) {
 		if (e.isopen != open) {
 			let w = e.rect().w
 			e.class('open', open)
 			if (open) {
-				e.cancel_value = e.value
 				e.list.popup('bottom', 'left')
 				e.list.show()
 				e.list.focus_item(true, 0, {
 					make_visible: true,
 				})
 			} else {
-				e.cancel_value = null
 				e.list.hide()
 				if (search_string)
 					e.search('')
@@ -5591,7 +5632,7 @@ widget('dropdown', 'Input', function(e) {
 			return false
 		}
 		if (key == 'Escape') {
-			e.cancel()
+			e.close()
 			return false
 		}
 		if (key == 'Delete') {

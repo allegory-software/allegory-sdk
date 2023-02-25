@@ -78,6 +78,8 @@ STRINGS
 	s.len
 	s.num([z])
 	s.display_name()
+	s.lower_ai_ci()
+	s.find_ai_ci(s)
 	s.words() -> a
 	words(s) -> a
 	catany(sep, ...); sep.catany(...)
@@ -479,6 +481,14 @@ method(String, 'display_name', function() {
 	return this.replace(/[\w]/, upper).replace(/(_[\w])/g, upper2)
 })
 }
+
+method(String, 'lower_ai_ci', function() {
+	return this.normalize('NFKD').replace(/\p{Diacritic}/gu, '').lower()
+})
+
+method(String, 'find_ai_ci', function(s) {
+	return repl(this.lower_ai_ci().indexOf(s.lower_ai_ci()), -1, null)
+})
 
 {
 // concat args, skipping null ones. returns null if all args are null.
