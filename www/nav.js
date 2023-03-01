@@ -626,6 +626,7 @@ let parse_rowset_tag = function(rowset_tag) {
 function nav_widget(e) {
 
 	e.isnav = true
+	e.make_disablable()
 
 	e.prop('can_add_rows'            , {type: 'bool', default: true})
 	e.prop('can_remove_rows'         , {type: 'bool', default: true})
@@ -3162,7 +3163,7 @@ function nav_widget(e) {
 		let skip_parents = set()
 		for (let pe of skip) {
 			while (pe) {
-				if (pe.iswidget)
+				if (pe.initialized)
 					skip_parents.add(pe)
 				pe = pe.parent
 			}
@@ -4980,16 +4981,13 @@ function nav_widget(e) {
 // view-less nav
 // ---------------------------------------------------------------------------
 
-css('nav', 'hidden')
+css('bare-nav', 'hidden')
 
-widget('nav', function(e) {
+bare_nav = component('nav', function(e) {
+	e.class('bare-nav')
 	nav_widget(e)
 	return {hidden: true}
 })
-
-// use this synonim because stupid language designers don't understand
-// the utility of variable shadowing.
-bare_nav = nav
 
 // ---------------------------------------------------------------------------
 // global one-row nav for all standalone (i.e. not bound to a nav) widgets.

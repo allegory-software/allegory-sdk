@@ -115,8 +115,6 @@ css_dark('', '', `
 
 `)
 
-css('.widget', 'rel h')
-
 css('.x-container', 'grid-h shrinks clip') /* grid because grid-in-flex is buggy */
 
 // container with `display: contents`. useful to group together
@@ -174,39 +172,16 @@ css_state('.focusable-items:focus-within .item.focused.invalid', '', `
 	background : var(--bg-focused-error);
 `)
 
-function widget(tag, category, init) {
-	if (!isstr(category)) { // shift arg
-		init = category
-		category = null
-	}
-	let init0 = init
-	init = function(e) {
-		e.class(tag)
-		return init0(e)
-	}
-	function comp_init(e) {
-		e.iswidget = true // to diff from normal html elements.
-		e.class('widget')
-		e.make_disablable()
-		return init(e)
-	}
-	let create = component(tag, category, comp_init)
-	create.construct = init
-	let name = tag.replaceAll('-', '_')
-	window[name] = create
-	return create
-}
-
 /* widget editing & selecting --------------------------------------------- */
 
-css_role('.widget.widget-editing', '', `
+css_role('.widget-editing', '', `
 	outline: 2px dotted red;
 	outline-offset: -2px;
 `)
 
-css_role('.widget [contenteditable]', 'no-outline')
+css_role('[contenteditable]', 'no-outline')
 
-css_role('.widget.widget-selected', 'click-through')
+css_role('.widget-selected', 'click-through')
 
 css_role('.widget-selected-overlay', 'overlay click-through-off', `
 	display: block;
@@ -369,7 +344,7 @@ function parent_widget_which(e, which) {
 	assert(e != window)
 	e = e.parent
 	while (e) {
-		if (e.iswidget && which(e))
+		if (e.initialized && which(e))
 			return e
 		e = e.parent
 	}
@@ -725,8 +700,9 @@ css('.tooltip[kind=cursor] > .tooltip-body > .tooltip-content', '', `
 
 css('.tooltip[kind=cursor] > .tooltip-tip', 'hidden')
 
-widget('tooltip', function(e) {
+tooltip = component('tooltip', function(e) {
 
+	e.class('tooltip')
 	e.popup()
 
 	e.prop('text'        , {slot: 'lang'})
@@ -909,8 +885,9 @@ css('.toaster', 'hidden') // don't mess up the layout
 
 css('.toaster-message', 'op1 ease')
 
-widget('toaster', function(e) {
+toaster = component('toaster', function(e) {
 
+	e.class('toaster')
 	e.tooltips = set()
 
 	e.side = 'inner-top'
@@ -1700,7 +1677,10 @@ css('.list', 'v-t scroll-auto rel')
 // Use padding and gap on the list instead, that works.
 css_role('.list > *', 'm0')
 
-widget('list', function(e) {
+list = component('list', function(e) {
+
+	e.class('list')
+	e.make_disablable()
 
 	let ht = e.$1(':scope>template, :scope>script[type="text/x-mustache"], :scope>xmp')
 	let html_template = ht && ht.html
@@ -1736,7 +1716,7 @@ widget('list', function(e) {
 		}
 		e.fire('items_changed', 'set_items')
 	}
-	e.prop('items', {store: false, type: 'array'})
+	e.prop('items', {store: false, type: 'array', element_type: 'node'})
 
 	e.prop('item_template_name', {type: 'template_name', attr: 'item_template'})
 	e.prop('item_template'     , {type: 'template'})
@@ -1816,10 +1796,11 @@ css('.menu-check-div::before', 'icon-check') // fa fa-check
 css('.menu-sub-div', 'p-x')
 css('.menu-sub-div::before', 'icon-chevron-right') // fa fa-angle-right
 
-widget('menu', function(e) {
+menu = component('menu', function(e) {
 
+	e.make_disablable()
 	e.make_focusable()
-	e.class('focusable-items')
+	e.class('menu focusable-items')
 	e.popup()
 
 	// view
@@ -2250,8 +2231,10 @@ css_state('tabs-tab:focus', 'no-outline')
 
 css_state('tabs-tab:is(:hover, :focus)', 'bg1')
 
-widget('tabs', 'Containers', function(e) {
+tabs = component('tabs', 'Containers', function(e) {
 
+	e.class('tabs')
+	e.make_disablable()
 	selectable_widget(e)
 	editable_widget(e)
 	contained_widget(e)
@@ -2477,7 +2460,7 @@ widget('tabs', 'Containers', function(e) {
 	function url_path_level() {
 		let parent = e.parent
 		let i = 0
-		while (parent && parent.iswidget) {
+		while (parent && parent.initialized) {
 			i += parent.hasclass('tabs')
 			parent = parent.parent
 		}
@@ -2700,8 +2683,10 @@ css_state('.split[orientation=vertical  ].collapsed > split-sizer::before', '', 
 	border-style: solid none;
 `)
 
-widget('split', 'Containers', function(e) {
+split = component('split', 'Containers', function(e) {
 
+	e.class('split')
+	e.make_disablable()
 	selectable_widget(e)
 	contained_widget(e)
 
@@ -2858,7 +2843,8 @@ widget('split', 'Containers', function(e) {
 
 })
 
-widget('vsplit', function(e) {
+vsplit = component('vsplit', function(e) {
+	e.class('vsplit')
 	let opt = split.construct(e)
 	opt.orientation = 'vertical'
 	return opt
@@ -2884,8 +2870,10 @@ css('.action-band:not(.tight) .dlg-button-cancel .btn-icon', 'hidden')
 
 css('.action-band-center', 'S h-c gap-x')
 
-widget('action-band', 'Input', function(e) {
+action_band = component('action-band', 'Input', function(e) {
 
+	e.make_disablable()
+	e.class('action-band')
 	e.layout = 'ok:ok cancel:cancel'
 
 	e.on_init(function() {
@@ -3001,8 +2989,9 @@ css('.dlg-content', 'S shrinks')
 
 css('.dlg-footer', 'h-b')
 
-widget('dlg', function(e) {
+dlg = component('dlg', function(e) {
 
+	e.class('dlg')
 	e.init_child_components()
 
 	let html_heading = e.$1('heading')
@@ -3194,11 +3183,12 @@ css('.toolbox-resize-overlay[hit_side=left     ], .toolbox-resize-overlay[hit_si
 css('.toolbox-resize-overlay[hit_side=top_left ], .toolbox-resize-overlay[hit_side=bottom_right]', '', ` cursor: nwse-resize; `)
 css('.toolbox-resize-overlay[hit_side=top_right], .toolbox-resize-overlay[hit_side=bottom_left ]', '', ` cursor: nesw-resize; `)
 
-widget('toolbox', function(e) {
+toolbox = component('toolbox', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
 
+	e.class('toolbox')
 	e.make_focusable()
 
 	e.props.popup_align = {default: 'top'}
@@ -3367,8 +3357,10 @@ css('.slides > .x-ct > .', 'x1 y1')
 css_state('.slide'        , 'invisible op0 click-through     ease-05s')
 css_state('.slide-current', 'visible   op1 click-through-off ease-05s')
 
-widget('slides', 'Containers', function(e) {
+slides = component('slides', 'Containers', function(e) {
 
+	e.class('slides')
+	e.make_disablable()
 	selectable_widget(e)
 	contained_widget(e)
 	let html_items = widget_items_widget(e)
@@ -3511,7 +3503,10 @@ css('.pagenav-button', '')
 css('.pagenav-current', '')
 css('.pagenav-dots', '')
 
-widget('pagenav', function(e) {
+pagenav = component('pagenav', function(e) {
+
+	e.class('pagenav')
+	e.make_disablable()
 
 	e.prop('page'      , {type: 'number', default: 1})
 	e.prop('page_size' , {type: 'number', default: 100})
@@ -3612,7 +3607,10 @@ css_state('.richtext-button.selected', '', `
 	color: white;
 `)
 
-widget('richtext', function(e) {
+richtext = component('richtext', function(e) {
+
+	e.class('richtext')
+	e.make_disablable()
 
 	let html_content = [...e.nodes]
 	e.clear()
@@ -3856,9 +3854,11 @@ fires:
 css('.label-widget', 'label noselect')
 css_state('.label-widget:is(:hover,.hover)', 'label-hover')
 
-widget('label', function(e) {
+label = component('label', function(e) {
+
 	e.class('label-widget')
-	e.class('label', false)
+	e.make_disablable()
+
 	e.prop('for_id', {type: 'id', attr: 'for'})
 	e.property('target', function() {
 		if (e.for_id) return window[e.for_id]
@@ -3922,10 +3922,16 @@ css('.info:not([collapsed])', 'smaller label h-bl gap-x')
 // toggling visibility on hover requires click-through for stable hovering!
 css('.info .tooltip.visible', 'click-through')
 
-widget('info', function(e) {
+info = component('info', function(e) {
+
+	e.class('info')
+	e.make_disablable()
+
 	let html_text = [...e.nodes]
+
 	e.prop('collapsed', {type: 'bool', attr: true})
 	e.prop('text', {type: 'nodes', slot: 'lang'})
+
 	e.set_collapsed = function(v) {
 		if (v) {
 			e.btn = e.btn || div({class: 'info-button'})
@@ -3947,6 +3953,7 @@ widget('info', function(e) {
 			e.add(div({class: 'info-button'}), div(0, e.text))
 		}
 	}
+
 	return {
 		text      : html_text,
 		collapsed : or(e.collapsed, true),
@@ -3989,6 +3996,7 @@ css('.checkbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
 css_state('.checkbox:focus-visible .checkbox-focus-circle', '', ` r: 50%; `)
 
 function check_widget(e, input_type) {
+	e.make_disablable()
 	e.clear()
 	e.class('checkbox')
 	e.input = tag('input', {hidden: '', type: input_type || 'checkbox'})
@@ -4073,8 +4081,11 @@ css_state('.check[checked] .check-frame', '', `
 	fill: var(--fg-check);
 `)
 
-widget('check', function(e) {
+check = component('check', function(e) {
+
+	e.class('check')
 	check_widget(e)
+
 	e.add(svg({viewBox: '-10 -10 20 20'},
 		svg_tag('circle'  , {class: 'checkbox-focus-circle'}),
 		svg_tag('rect'    , {class: 'check-frame'}),
@@ -4110,7 +4121,8 @@ css_state('.toggle[checked]:is(:hover,.hover)', '', `
 	background: var(--bg-button-primary-hover);
 `)
 
-widget('toggle', function(e) {
+toggle = component('toggle', function(e) {
+	e.class('toggle')
 	check_widget(e)
 	e.thumb = div({class: 'toggle-thumb'})
 	e.set(e.thumb)
@@ -4134,8 +4146,9 @@ css_state('.radio[checked] .radio-thumb', 'ease', ` r: .2px; transition-property
 
 css_state('.radio:focus-visible', 'no-outline')
 
-widget('radio', function(e) {
+radio = component('radio', function(e) {
 
+	e.class('radio')
 	check_widget(e, 'radio')
 
 	e.prop('group', {attr: true})
@@ -4173,8 +4186,10 @@ widget('radio', function(e) {
 
 css('radio-group', 'skip')
 
-widget('radio-group', 'Input', function(e) {
+radio_group = component('radio-group', 'Input', function(e) {
 
+	e.class('radio-group')
+	e.make_disablable()
 	e.init_child_components()
 
 	e.property('value', function() {
@@ -4285,6 +4300,7 @@ let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, de
 let slider_widget = function(e, range) {
 
 	e.class('slider')
+	e.make_disablable()
 
 	e.prop('from'       , {type: 'number', default: 0})
 	e.prop('to'         , {type: 'number', default: 1})
@@ -4523,9 +4539,10 @@ let slider_widget = function(e, range) {
 
 }
 
-widget('slider'      , 'Input', slider_widget)
-widget('range-slider', 'Input', function(e) {
-	slider_widget(e, true)
+slider = component('slider', 'Input', slider_widget)
+
+range_slider = component('range-slider', 'Input', function(e) {
+	return slider_widget(e, true)
 })
 
 /* .inputbox class -----------------------------------------------------------
@@ -4596,13 +4613,12 @@ css_role('.input-group > *', 'm0 b no-z', `position: static;`)
 // things that <input-group> doesn't insist upon its children having.
 css('.input-group > *', 'bg-input')
 
-widget('input-group', function(e) {
-
-	e.class('b-collapse-h ro-group-h')
+input_group = component('input-group', function(e) {
+	e.class('input-group b-collapse-h ro-group-h')
+	e.make_disablable()
 	e.init_child_components()
 	e.input = $1('input')
 	e.make_focusable(e.input)
-
 })
 
 /* <labelbox> ----------------------------------------------------------------
@@ -4624,7 +4640,8 @@ css_role('.labelbox > .input-group', 'gap-x-input gap-y-input')
 // no-bg prevents outline clipping, also bg doesn't make sense since labelbox has padding.
 css_role('.labelbox *', 'no-bg')
 
-widget('labelbox', function(e) {
+labelbox = component('labelbox', function(e) {
+	e.class('labelbox')
 	e.init_child_components()
 })
 
@@ -4641,10 +4658,11 @@ css('.input', 'S bg-input', `
 	width         : var(--w-input);
 `)
 
-widget('input', 'Input', function(e) {
+input = component('input', 'Input', function(e) {
 
+	e.class('input inputbox')
+	e.make_disablable()
 	e.make_focusable()
-	e.class('inputbox')
 
 	e.on('label_click', function() {
 		e.focus()
@@ -4664,8 +4682,10 @@ css('.textarea', 'S h m0 b p bg-input', `
 	overflow-x: overlay; /* Chrome only */
 `)
 
-widget('textarea', 'Input', function(e) {
+textarea = component('textarea', 'Input', function(e) {
 
+	e.class('textarea')
+	e.make_disablable()
 	e.make_focusable()
 
 })
@@ -4773,10 +4793,11 @@ css(`
 }
 `)
 
-widget('button', 'Input', function(e) {
+button = component('button', 'Input', function(e) {
 
+	e.class('button inputbox')
+	e.make_disablable()
 	editable_widget(e)
-	e.class('inputbox')
 
 	let html_text = [...e.nodes]
 	e.clear()
@@ -4991,9 +5012,10 @@ css_dark('', '', `
 	--fg-select-button-plate: var(--fg-white);
 `)
 
-widget('select-button', function(e) {
+select_button = component('select-button', function(e) {
 
-	e.class('inputbox')
+	e.class('select-button inputbox')
+	e.make_disablable()
 	e.init_child_components()
 	e.plate = div({class: 'select-button-plate'})
 	e.add(e.plate)
@@ -5066,10 +5088,10 @@ widget('select-button', function(e) {
 	return {selected_index: 0}
 })
 
-widget('vselect-button', function(e) {
+vselect_button = component('vselect-button', function(e) {
 
-	e.class('ro-group-v b-collapse-v')
-	e.init_child_components()
+	e.class('vselect-button ro-group-v b-collapse-v')
+	return select_button.construct(e)
 
 })
 
@@ -5105,15 +5127,18 @@ css_state('.tags-x:active', '', `
 	color : hsl(var(--tag-hue), 63%, 63%);
 `)
 
-widget('tags-box', function(e) {
+tags_box = component('tags-box', function(e) {
+
+	e.class('tags-box')
+	e.make_disablable()
 
 	// model
-
-	e.prop('tags', {type: 'set', element_type: 'string', convert: convert_tags })
 
 	function convert_tags(tags) {
 		return words(tags).remove_duplicates()
 	}
+
+	e.prop('tags', {type: 'array', element_type: 'string', convert: convert_tags})
 
 	e.remove_tag = function(tag) {
 		let t1 = e.tags.slice()
@@ -5200,9 +5225,10 @@ css_role('.tags .tags-box'  , 'shrinks m0')
 css_role('.tags .tags-input', 'b-l-0', `min-width: 5em;`)
 css('.tags-box-nowrap', 'flex-nowrap')
 
-widget('tags', function(e) {
+tags = component('tags', function(e) {
 
-	e.class('input-group')
+	e.class('tags input-group')
+	e.make_disablable()
 
 	e.tags_box = tags_box()
 	e.input = tag('input', {class: 'tags-input', placeholder: 'Tag'})
@@ -5305,9 +5331,10 @@ css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
 
 css('.dropdown-search', 'fg-search bg-search')
 
-widget('dropdown', 'Input', function(e) {
+dropdown = component('dropdown', 'Input', function(e) {
 
-	e.class('inputbox')
+	e.class('dropdown inputbox')
+	e.make_disablable()
 
 	e.init_child_components()
 
@@ -5639,8 +5666,10 @@ css('.autocomplete', 'b v-s p-x-input p-y-input bg-input z3', `
 	resize: both;
 `)
 
-widget('autocomplete', 'Input', function(e) {
+autocomplete = component('autocomplete', 'Input', function(e) {
 
+	e.class('autocomplete')
+	e.make_disablable()
 	e.init_child_components()
 
 	let html_list = e.$1('list')
@@ -5723,9 +5752,588 @@ widget('autocomplete', 'Input', function(e) {
 
 */
 
-widget('calendar', 'Input', function(e) {
+css('.calendar', 'v-s', `
+	padding: 2px; /* make focus ring visible */
+	min-width: 16.5em;
+	--fs-calendar-months   : 1.25;
+	--fs-calendar-weekdays : 0.75;
+	--fs-calendar-month    : 0.65;
+	--p-y-calendar-days-em: .4;
+	--fg-calendar-month: red;
+`)
 
-	//
+css('.calendar-canvas-ct', 'S rel')
+css('.calendar-canvas', 'abs')
+
+calendar = component('calendar', 'Input', function(e) {
+
+	e.class('calendar')
+	e.make_disablable()
+	e.make_focusable()
+
+	e.prop('mode', {type: 'enum', enum_values: 'day range ranges', default: 'day'})
+
+	function convert_date(s) {
+		return isstr(s) ? s.parse_date(null, true) : s
+	}
+	function convert_range(s) {
+		return (isstr(s) ? s.split(/\.\./) : s).map(convert_date)
+	}
+	function convert_ranges(s) {
+		return words(s).map(convert_range)
+	}
+
+	// mode: day
+	e.prop('day'   , {type: 'date', convert: convert_date})
+
+	// mode: range
+	e.prop('day1'  , {type: 'date', convert: convert_date})
+	e.prop('day2'  , {type: 'date', convert: convert_date})
+
+	// mode: ranges
+	e.prop('ranges', {type: 'array', element_type: 'date_range', convert: convert_ranges, default: empty_array})
+
+	let ranges
+	function update_ranges() {
+		ranges =
+			e.mode == 'ranges' ? e.ranges :
+			e.mode == 'range'  ? [[e.day1, e.day2]] :
+			e.mode == 'day'    ? [[e.day, e.day]] : []
+		if (e.mode == 'range')
+			e.focus_range(ranges[0])
+	}
+	e.set_day    = update_ranges
+	e.set_day1   = update_ranges
+	e.set_day2   = update_ranges
+	e.set_ranges = update_ranges
+
+	let ct = resizeable_canvas()
+	e.add(ct)
+
+	// view config, computed styles and measurements
+
+	let view_x, view_y, view_w, view_h
+	let cell_w, cell_h, cell_py
+	let font_weekdays, font_weekdays_ascent
+	let font_days, font_days_ascent
+	let font_months, font_months_ascent, font_months_h
+	let font_month
+	let fg, fg_label, bg_alt, bg_smoke, fg_month
+	let fg_focused_selected, fg_unfocused_selected
+	let bg_focused_selected, bg_unfocused_selected
+
+	let sy_week1, sy_week2
+
+	e.on_update(function() {
+		ct.update()
+	})
+
+	ct.on_measure(function() {
+
+		let cr = ct.rect()
+		let css = e.css()
+
+		font_weekdays = num(css.fontSize) * num(css.prop('--fs-calendar-weekdays')) + 'px ' + css.fontFamily
+		font_days     = css.font
+		font_months   = 'bold ' + num(css.fontSize) * num(css.prop('--fs-calendar-months')) + 'px ' + css.fontFamily
+		font_month    = num(css.fontSize) * num(css.prop('--fs-calendar-month')) + 'px ' + css.fontFamily
+
+		let cx = ct.ctx
+		let m
+		cx.font = font_weekdays
+		m = cx.measureText('My')
+		font_weekdays_ascent = round(m.actualBoundingBoxAscent)
+
+		cx.font = font_days
+		m = cx.measureText('My')
+		font_days_ascent = round(m.actualBoundingBoxAscent)
+
+		cx.font = font_months
+		m = cx.measureText('My')
+		font_months_ascent = round(m.actualBoundingBoxAscent)
+		font_months_h = round(m.actualBoundingBoxAscent + m.actualBoundingBoxDescent)
+
+		let em   = num(css.fontSize)
+		cell_lh  = num(css.lineHeight)
+		cell_py  = round(num(css.prop('--p-y-calendar-days-em')) * em)
+		cell_w   = snap(cell_lh + 2 * cell_py, 2)
+		cell_h   = snap(cell_lh + 2 * cell_py, 2)
+		fg       = css.prop('--fg')
+		fg_label = css.prop('--fg-label')
+		bg_alt   = css.prop('--bg-alt')
+		bg_smoke = css.prop('--bg-smoke')
+		fg_month = css.prop('--fg-calendar-month')
+		fg_focused_selected   = css.prop('--fg-focused-selected')
+		bg_focused_selected   = css.prop('--bg-focused-selected')
+		fg_unfocused_selected = css.prop('--fg-unfocused-selected')
+		bg_unfocused_selected = css.prop('--bg-unfocused-selected')
+
+		view_x = cr.x
+		view_y = cr.y
+		view_w = cr.w
+		view_h = cr.h - cell_h
+
+		if (sy_week1 != null) {
+			e.scroll_to_view_range(sy_week1, sy_week2, 0)
+			sy_week1 = null
+			sy_week2 = null
+		}
+
+	})
+
+	// scroll state
+
+	let start_week = week(time(2020))
+	let sy_weeks_now   = 0 // in weeks, while animating.
+	let sy_weeks_final = 0 // in weeks, final.
+	let sy_pixels      = 0 // from drag-scrolling, not animated.
+	let scrolling
+	let scroll_transition_progress
+
+	let scroll_transition = transition(function(sy_weeks, progress) {
+		sy_weeks_now = sy_weeks
+		scroll_transition_progress = progress
+		ct.force_redraw() // we're already in an animation frame.
+	})
+
+	e.scroll_pixels = function(sy) {
+		sy_pixels = sy
+		e.update()
+	}
+
+	e.scroll_weeks = function(dy_weeks, duration) {
+		sy_weeks_final += dy_weeks
+		if (duration == null)
+			duration = clamp(abs(dy_weeks * .5), .1, .4)
+		if (duration > 0)
+			scroll_transition.restart(duration, sy_weeks_now, sy_weeks_final)
+		else {
+			sy_weeks_now = sy_weeks_final
+			e.update()
+		}
+	}
+
+	e.scroll_to_view_range = function(d0, d1, duration) {
+		let week1 = week(d0)
+		let week2 = week(d1)
+		if (view_h == null) { // defer to after measuring
+			sy_week1 = week1
+			sy_week2 = week2
+			e.update()
+		} else {
+			let weeks1 = days(week1 - start_week) / 7
+			let weeks2 = days(week2 - start_week) / 7
+			let sy_weeks = -scroll_to_view_dim(-weeks1, weeks2 - weeks1, view_h / cell_h, -sy_weeks_now, 'center') + 1
+			e.scroll_weeks(sy_weeks - sy_weeks_final, duration)
+		}
+	}
+
+	e.scroll_to_view_all_ranges = function(duration) {
+		if (e.mode == 'ranges') {
+			let d1, d2
+			for (let r of e.ranges) {
+				d1 = min(or(d1,  1/0), r[0])
+				d2 = max(or(d2, -1/0), r[1])
+			}
+			if (d1 != null && d2 != null)
+				e.scroll_to_view_range(d1, d2, 0)
+		} else if (e.mode == 'range') {
+			if (e.day1 != null && e.day2 != null)
+				e.scroll_to_view_range(e.day1, e.day2)
+		} else {
+			if (e.day != null)
+				e.scroll_to_view_range(day(e.day, -140), day(e.day, 140))
+		}
+	}
+	e.on_bind(function(on) {
+		if (on)
+			e.scroll_to_view_all_ranges()
+	})
+
+	// focus state
+
+	let focused_range
+
+	e.focus_range = function(range) {
+		focused_range = range
+		e.update()
+	}
+
+	// hit state
+
+	let hit_mx, hit_my
+	let hit_day
+	let hit_range
+	let hit_range_end
+	let drag_range
+	let drag_range_end
+	let down
+	let invalid
+
+	// drawing & hit testing
+
+	function hit_test_rect(mx, my, x1, y1, x2, y2) {
+		return (
+			mx >= x1 && mx <= x2 &&
+			my >= y1 && my <= y2
+		)
+	}
+	function hit_test_circle(mx, my, cx, cy, r) {
+		return hit_test_rect(mx, my, cx - r, cy - r, cx + r, cy + r)
+	}
+
+	ct.on_redraw(function(cx) {
+
+		// update scroll state.
+		let sy_weeks_f = sy_weeks_now + sy_pixels / cell_h
+		let sy_weeks = trunc(sy_weeks_f)
+		let sy = (sy_weeks_f - sy_weeks) * cell_h
+		let d0 = week(start_week, -sy_weeks)
+
+		// update hit state.
+		let mx = hit_mx - view_x
+		let my = hit_my - view_y
+
+		cx.textAlign = 'center'
+
+		// draw week day names header
+		cx.font = font_weekdays
+		for (let weekday = 0; weekday < 7; weekday++) {
+			let s = weekday_name(day(d0, weekday), 'short', lang()).slice(0, 1).upper()
+			let x = weekday * cell_w
+			cx.fillStyle = fg_label
+			cx.fillText(s, x + cell_w / 2, cell_h / 2 + font_weekdays_ascent / 2)
+		}
+		cx.beginPath()
+
+		let y = floor(cell_h * 1) - .5
+		cx.moveTo(0, y)
+		cx.lineTo(view_w, y)
+		cx.strokeStyle = fg_label
+		cx.stroke()
+
+		// go under the header
+		cx.translate(0, cell_h)
+
+		cx.beginPath()
+		cx.rect(0, 0, view_w, view_h)
+		cx.clip()
+
+		let visible_weeks = floor(view_h / cell_h) + 2
+
+		// draw & hit-test calendar
+		hit_day = null
+		hit_range = null
+		hit_range_end = null
+		let d_days = 0
+		let today = day(time())
+		let out_p = []
+		for (let week = 0; week <= visible_weeks; week++) {
+			for (let weekday = 0; weekday < 7; weekday++) {
+				let d = day(d0, d_days)
+				let m = month(d)
+				let n = floor(1 + days(d - m))
+
+				let x = weekday * cell_w
+				let y = sy + week * cell_h - cell_h
+
+				cx.translate(x, y)
+
+				// hit-test calendar day cell
+				let [u_mx, u_my] = cx.device_to_user(mx, my, out_p)
+				let cell_hit_x = weekday == 0 ? -1/0 : 0
+				let cell_hit_w = weekday == 6 ?  1/0 : cell_w
+				if (drag_range) {
+					let offset = cell_w / 2 * (drag_range_end ? 1 : -1)
+					cell_hit_x += offset
+					cell_hit_w += offset
+				}
+				if (hit_day == null && hit_test_rect(u_mx, u_my, cell_hit_x, 0, cell_hit_w, cell_h))
+					hit_day = d
+
+				// draw month alt. background
+				let alt_month = month_of(d) % 2 == 0
+				if (alt_month) {
+					cx.fillStyle = bg_alt
+					cx.fillRect(0, 0, cell_w, cell_h)
+				}
+
+				// draw & hit-test ranges
+				let in_range
+				cx.fillStyle   = bg_unfocused_selected
+				cx.strokeStyle = bg_focused_selected
+				cx.lineWidth = 2
+				let p = 3 // padding so that stacked ranges don't touch
+				let w = cell_w / 2 // width of half a cell, as we draw in halves.
+				let h = round(cell_h - 2 * p)
+				for (let range of ranges) {
+					if (d >= range[0] && d <= range[1]) {
+						in_range = true
+
+						// hit-test range
+						if (e.mode != 'day' && !hit_range && hit_test_rect(u_mx, u_my, 0, 0, cell_w, cell_h))
+							hit_range = range
+
+						// draw the day box in halves, each half being either
+						// a range-end grabbing handle or a continuous fill.
+						for (let ri = 0; ri < 2; ri++) {
+							let rd = range[ri]
+
+							cx.save()
+							cx.translate(ri * w, p)
+
+							if (d == rd) { // this half is a range end
+
+								if (ri == 1) { // right side: flip it
+									cx.translate(w, 0)
+									cx.scale(-1, 1)
+								}
+
+								cx.beginPath()
+								cx.arc(
+									w,
+									h / 2,
+									h / 2,
+									PI / 2,
+									3 * PI / 2
+								)
+								cx.fill()
+								if (range == focused_range)
+									cx.stroke()
+
+								// draw & hit-test range-end grab handle
+								if (range == focused_range) {
+
+									// hit-test range-end grab handle
+									if (e.mode != 'day' && hit_range_end == null) {
+										let [u_mx, u_my] = cx.device_to_user(mx, my, out_p)
+										if (hit_test_circle(u_mx, u_my, p, h / 2, w / 3)) {
+											hit_range = range
+											hit_range_end = ri
+										}
+									}
+
+									let r = w / (!down && hit_range == range && hit_range_end == ri ? 2 : 3)
+									cx.beginPath()
+									cx.arc(p, h / 2, r, 0, 2 * PI)
+									cx.fillStyle = bg_alt
+									cx.fill()
+									cx.stroke()
+								}
+
+							} else { // this half is a continuous fill
+
+								cx.beginPath()
+								cx.rect(0, 0, w, h)
+								cx.fill()
+								if (range == focused_range) {
+									cx.beginPath()
+									cx.moveTo(0, 0)
+									cx.lineTo(w, 0)
+									cx.moveTo(0, h)
+									cx.lineTo(w, h)
+									cx.stroke()
+								}
+
+							}
+
+							cx.restore()
+						}
+					}
+				}
+
+				// draw calendar day cell
+				cx.font = font_days
+				cx.fillStyle = in_range ? fg_unfocused_selected : fg
+				cx.fillText(n, cell_w / 2, cell_h / 2 + font_days_ascent / 2)
+
+				// draw month name of day-1 cell
+				if (n == 1 || d == today) {
+					cx.font = font_month
+					cx.fillStyle = fg_month
+					let s = d == today ? S('today', 'Today').upper() : month_name(m, 'short').upper()
+					cx.fillText(s,
+						cell_w / 2,
+						cell_h / 2 - font_days_ascent / 2 - 2
+					)
+				}
+
+				cx.translate(-x, -y)
+				d_days++
+			}
+
+		}
+
+		// move range end
+		if (drag_range_end != null && hit_day != null) {
+			drag_range[drag_range_end] = hit_day
+			let [d0, d1] = drag_range
+			if (d0 > d1) {
+				drag_range[0] = d1
+				drag_range[1] = d0
+				drag_range_end = 1 - drag_range_end
+			}
+			if (e.mode == 'range') {
+				e.day1 = drag_range[0]
+				e.day2 = drag_range[1]
+			}
+		}
+
+		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize' : null
+
+		// draw month name overlays while scrolling
+		if (scrolling || scroll_transition.started) {
+			cx.font = font_months
+			if (0) {
+				cx.fillStyle = bg_smoke
+				cx.fillRect(0, 0, view_w, view_h)
+			}
+			let d_days = -(7 * 6)
+			let m0, y0
+			for (let week = -(1 + 6); week <= visible_weeks + 6; week++) {
+				let m_d0 = month(day(d0, d_days))
+				let m_d6 = month(day(d0, d_days + 6))
+				let y = sy + week * cell_h
+				if (m0 == null) {
+					m0 = m_d6
+					y0 = y
+				} else if (m_d6 != m0) {
+
+					let h = y - y0 + (m_d0 != m_d6 ? cell_h : 0)
+					let year_s  = year_of(m0) + ''
+					let month_s = month_name(m0, 'long')
+
+					cx.globalAlpha = scrolling ? 1 : 1 - easing.cubic(scroll_transition_progress)
+
+					let px = 20
+					let py = 10
+					let m1 = cx.measureText(year_s)
+					let m2 = cx.measureText(month_s)
+					let text_w = max(m1.width, m2.width)
+					let text_h = font_months_h * 2 + py
+					cx.beginPath()
+					cx.rect(
+						view_w / 2 - text_w / 2 - px,
+						y0 + h / 2 - text_h / 2 - py,
+						text_w + 2 * px,
+						text_h + 2 * py,
+					)
+					cx.fillStyle = bg_smoke
+					cx.fill()
+
+					cx.fillStyle = fg
+					cx.fillText(year_s,
+						view_w / 2,
+						y0 + (h + font_months_ascent - font_months_h - py) / 2
+					)
+					cx.fillText(month_s,
+						view_w / 2,
+						y0 + (h + font_months_ascent + font_months_h + py) / 2
+					)
+
+					cx.globalAlpha = 1
+
+					m0 = m_d6
+					y0 = y
+				}
+				d_days += 7
+			}
+		}
+
+		invalid = false
+
+	})
+
+	e.on('blur' , function() { e.update() })
+	e.on('focus', function() { e.update() })
+
+	ct.on('wheel', function(dx, dy) {
+		e.scroll_weeks(-dy * 3)
+	})
+
+	ct.on('pointermove', function(ev, mx, my) {
+		if (down)
+			return
+		hit_mx = mx
+		hit_my = my
+		invalid = true
+		e.update()
+	})
+
+	ct.on('pointerdown', function(ev, down_mx, down_my) {
+
+		scroll_transition.stop()
+
+		// this shouldn't normally happen, but just in case it does,
+		// we need to update the hit state to reflect current mouse position.
+		if (invalid || hit_mx != down_mx || hit_my != down_my) {
+			hit_mx = down_mx
+			hit_my = down_my
+			invalid = true
+			ct.force_redraw()
+		}
+		assert(!invalid)
+
+		down = true
+		let t0 = ev.timeStamp
+		let sy_pixels0 = sy_pixels
+		e.focus()
+		if (e.mode == 'day') {
+			if (hit_day) {
+				e.day = hit_day
+				return false
+			}
+		}
+		if (hit_range_end != null) {
+			drag_range     = hit_range
+			drag_range_end = hit_range_end
+			e.update()
+		} else if (e.mode == 'ranges') {
+			e.focus_range(hit_range)
+		}
+
+		return this.capture_pointer(ev,
+			function captured_move(ev, mx, my) {
+				if (drag_range) {
+					hit_mx = mx
+					hit_my = my
+					e.update()
+					return
+				}
+				let dy = my - down_my
+				if (!scrolling)
+					if (abs(dy) < 7) // prevent accidental dragging
+						return
+				scrolling = true
+				e.scroll_pixels(sy_pixels0 + dy)
+			},
+			function captured_up(ev, mx, my) {
+				down = false
+				drag_range     = null
+				drag_range_end = null
+				if (!scrolling)
+					return
+				scrolling = false
+				let t1 = ev.timeStamp
+				let dt = (t1 - t0)
+				let dy = my - down_my
+				let velocity = dy / dt
+				e.scroll_weeks(velocity)
+			}
+		)
+	})
+
+	e.on('keydown', function(key) {
+		if (e.mode == 'ranges' && key == 'Delete') {
+			if (focused_range) {
+				ranges = e.ranges.slice()
+				ranges.remove_value(focused_range)
+				focused_range = null
+				e.ranges = ranges
+				return false
+			}
+		}
+	})
 
 })
 
@@ -5736,7 +6344,9 @@ calls:
 
 */
 
-widget('widget-placeholder', function(e) {
+widget_placeholder = component('widget-placeholder', function(e) {
+
+	e.class('widget-placeholder')
 
 	selectable_widget(e)
 	contained_widget(e)

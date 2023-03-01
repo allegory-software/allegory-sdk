@@ -194,8 +194,9 @@ css_role('.grid.widget-editing', 'no-outline')
 
 css_role('.grid-cells-view.editing > .grid-cells', 'hidden')
 
-widget('grid', 'Input', function(e) {
+grid = component('grid', 'Input', function(e) {
 
+	e.class('grid')
 	val_widget(e, true)
 	nav_widget(e)
 	editable_widget(e)
@@ -331,9 +332,10 @@ widget('grid', 'Input', function(e) {
 		e.update()
 	}
 
+	e.listen('theme_changed', theme_changed)
+
 	e.on_bind(function(on) {
 		document.on('layout_changed', layout_changed, on)
-		document.on('theme_changed', theme_changed, on)
 		document.fonts.on('loadingdone', fonts_loaded, on)
 		if (on)
 			theme_changed()
@@ -2826,8 +2828,9 @@ widget('grid', 'Input', function(e) {
 // grid dropdown
 // ---------------------------------------------------------------------------
 
-widget('grid-dropdown', function(e) {
+grid_dropdown = component('grid-dropdown', function(e) {
 
+	e.class('grid-dropdown')
 	nav_dropdown_widget(e)
 
 	e.create_picker = function(opt) {
@@ -2847,8 +2850,9 @@ widget('grid-dropdown', function(e) {
 // row form
 // ---------------------------------------------------------------------------
 
-widget('row-frm', function(e) {
+row_form = component('row-frm', function(e) {
 
+	e.class('row-form')
 	grid.props.vertical = {default: true}
 
 	grid.construct(e, false)
@@ -2928,7 +2932,7 @@ widget('row-frm', function(e) {
 // grid profile
 // ---------------------------------------------------------------------------
 
-widget('grid-profile', function(e) {
+grid_profile = component('grid-profile', function(e) {
 
 	tabs_item_widget(e)
 

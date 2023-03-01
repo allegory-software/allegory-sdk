@@ -86,8 +86,10 @@ css('.chart-pie-percents', 'abs click-through', `
 
 css('.chart-pie-label', 'abs white')
 
-widget('chart', 'Input', function(e) {
+chart = component('chart', 'Input', function(e) {
 
+	e.class('chart')
+	e.make_disablable()
 	contained_widget(e)
 	selectable_widget(e)
 

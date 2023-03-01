@@ -439,7 +439,7 @@ window.on('load', function() {
 // prop layers inspector
 // ---------------------------------------------------------------------------
 
-widget('prop-layers-inspector', function(e) {
+prop_layers_inspector = component('prop-layers-inspector', function(e) {
 
 	e.classes = 'inspector'
 
@@ -626,9 +626,9 @@ field_types.nav.editor = function(...args) {
 // property inspector
 // ---------------------------------------------------------------------------
 
-widget('prop-inspector', function(e) {
+prop_inspector = component('prop-inspector', function(e) {
 
-	e.classes = 'inspector'
+	e.class('inspector')
 
 	grid.construct(e)
 	e.cell_h = 22
@@ -794,9 +794,9 @@ widget('prop-inspector', function(e) {
 // widget tree
 // ---------------------------------------------------------------------------
 
-widget('widget-tree', function(e) {
+widget_tree = component('widget-tree', function(e) {
 
-	e.classes = 'inspector'
+	e.class('widget-tree inspector')
 
 	grid.construct(e)
 	e.cell_h = 22
@@ -944,10 +944,8 @@ widget('widget-tree', function(e) {
 // sql rowset editor
 // ---------------------------------------------------------------------------
 
-sql_rowset_editor = widget('sql-rowset-editor', function(e) {
-
-
-
+sql_rowset_editor = component('sql-rowset-editor', function(e) {
+	e.class('sql-rowset-editor')
 })
 
 // ---------------------------------------------------------------------------
