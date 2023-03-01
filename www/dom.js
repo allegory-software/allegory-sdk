@@ -258,12 +258,12 @@ TEXT EDITING
 
 SCROLLING
 
-	scroll_to_view_dim(x, w, pw, sx)
-	scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
-	e.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
-	e.scroll_to_view_rect(sx0, sy0, x, y, w, h)
-	e.make_visible_scroll_offset(sx0, sy0[, parent])
-	e.make_visible()
+	scroll_to_view_dim(x, w, pw, sx, [align])
+	scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy, [halign[, valign]])
+	e.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h, [halign, valign]])
+	e.scroll_to_view_rect(sx0, sy0, x, y, w, h, halign, valign)
+	e.make_visible_scroll_offset(sx0, sy0, [parent], [halign[, valign]])
+	e.make_visible([halign[, valign]])
 	e.is_in_viewport()
 	scrollbar_widths() -> [vs_w, hs_h]
 	scrollbox_client_dimensions(w, h, cw, ch, [overflow_x], [overflow_y], [cs_w], [hs_h])
@@ -2743,24 +2743,24 @@ function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy, halign, valign) {
 	return [sx, sy]
 }
 
-e.scroll_to_view_rect_offset = function(sx0, sy0, x, y, w, h) {
+e.scroll_to_view_rect_offset = function(sx0, sy0, x, y, w, h, halign, valign) {
 	let pw  = this.cw
 	let ph  = this.ch
 	if (sx0 == null) { sx0 = this.scrollLeft; }
 	if (sy0 == null) { sy0 = this.scrollTop ; }
 	let e = this
-	let [sx, sy] = scroll_to_view_rect(x, y, w, h, pw, ph, -sx0, -sy0)
+	let [sx, sy] = scroll_to_view_rect(x, y, w, h, pw, ph, -sx0, -sy0, halign, valign)
 	return [-sx, -sy]
 }
 
 // scroll to make inside rectangle invisible.
-e.scroll_to_view_rect = function(sx0, sy0, x, y, w, h) {
-	let [sx, sy] = this.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
+e.scroll_to_view_rect = function(sx0, sy0, x, y, w, h, halign, valign) {
+	let [sx, sy] = this.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h, halign, valign)
 	this.scroll(sx, sy)
 	return [sx, sy]
 }
 
-e.make_visible_scroll_offset = function(sx0, sy0, parent) {
+e.make_visible_scroll_offset = function(sx0, sy0, parent, halign, valign) {
 	parent = this.parent
 	// TODO:
 	//parent = parent || this.parent
@@ -2772,14 +2772,14 @@ e.make_visible_scroll_offset = function(sx0, sy0, parent) {
 	let y = this.oy
 	let w = this.ow
 	let h = this.oh
-	return parent.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
+	return parent.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h, halign, valign)
 }
 
 // scroll parent to make self visible.
-e.make_visible = function() {
+e.make_visible = function(halign, valign) {
 	let parent = this.parent
 	while (parent && parent != document) {
-		parent.scroll(...this.make_visible_scroll_offset(null, null, parent))
+		parent.scroll(...this.make_visible_scroll_offset(null, null, parent, halign, valign))
 		parent = parent.parent
 		break
 	}

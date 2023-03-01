@@ -720,8 +720,10 @@ css('.b-invisible', '', ` border-color: #00000000; `)
 css('.b-fg       ', '', ` border-color: var(--fg); `)
 css('.b-hover    ', '', ` border-color: var(--border-light-hover); `)
 
-css('.b-collapse-h > :not(:last-child)' , '', ` border-right-color : #00000000; `)
-css('.b-collapse-v > :not(:last-child)' , '', ` border-bottom-color: #00000000; `)
+css('.b-collapse-h > :not(:last-child)'  , '', ` border-right-color : #00000000; `)
+css('.b-collapse-h > :not(:first-child)' , '', ` border-left-color  : #00000000; `)
+css('.b-collapse-v > :not(:last-child)'  , '', ` border-bottom-color: #00000000; `)
+css('.b-collapse-v > :not(:first-child)' , '', ` border-top-color   : #00000000; `)
 
 /* BORDER RADIUS ---------------------------------------------------------- */
 

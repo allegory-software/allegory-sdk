@@ -4608,10 +4608,12 @@ css('.input-group', 'shrinks t-m m-y-05 lh-input h-s')
 // `position: static` fixes the bug (in both Chrome & FF) where the outline
 // is obscured by the children if 1) they have a background and 2) they create
 // a stacking context.
-css_role('.input-group > *', 'm0 b no-z', `position: static;`)
+css_role('.input-group > *', 'm0 no-z', `position: static;`)
 
 // things that <input-group> doesn't insist upon its children having.
-css('.input-group > *', 'bg-input')
+css('.input-group > *', 'b-t b-b bg-input')
+css('.input-group > *:first-child', 'b-l')
+css('.input-group > *:last-child' , 'b-r')
 
 input_group = component('input-group', function(e) {
 	e.class('input-group b-collapse-h ro-group-h')
@@ -6346,6 +6348,64 @@ calendar = component('calendar', 'Input', function(e) {
 			}
 		}
 	})
+
+})
+
+/* <date-range> ------------------------------------------------------
+
+*/
+
+css('.date-range')
+
+css('.date-range-separator', 'p-x h-m')
+css('.date-range-calendar-button', 'b fg bg-input')
+css_role('.date-range-calendar-button', 'b-l')
+css('.date-range-input', '', ` width: 6em; `)
+
+// css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
+// 	resize: both;
+// 	height: 12em;
+// `)
+// css('.dropdown-picker > *', 'p-x-input p-y-input')
+// css('.dropdown.open', '')
+// css('.dropdown.open, .dropdown-picker', 'outline-focus')
+// css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
+//
+// css('.dropdown-search', 'fg-search bg-search')
+//
+
+date_range = component('date-range', function(e) {
+
+	e.class('date-range input-group b-collapse-h')
+	e.make_disablable()
+
+	e.day1_input = input({classes: 'date-range-input'})
+	e.day2_input = input({classes: 'date-range-input'})
+	e.calendar = calendar()
+
+	function convert_date(s) {
+		return isstr(s) ? s.parse_date(null, true) : s
+	}
+	e.prop('day1', {private: true, type: 'date', convert: convert_date})
+	e.prop('day2', {private: true, type: 'date', convert: convert_date})
+
+	e.day1_input.on('input', function(ev) {
+		e.day1 = this.value
+		e.update()
+	})
+
+	e.day2_input.on('input', function(ev) {
+		e.day2 = this.value
+		e.update()
+	})
+
+	// TODO: make_focusable with multiple inputs
+	e.make_focusable(e.day1_input)
+
+	e.calendar_button = button({bare: true, icon: 'fa fa-calendar',
+		classes: 'date-range-calendar-button'})
+
+	e.add(e.day1_input, div({class: 'date-range-separator'},'-'), e.day2_input, e.calendar_button)
 
 })
 
