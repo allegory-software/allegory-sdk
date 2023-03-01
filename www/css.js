@@ -66,7 +66,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--fg-black              : hsl(  0   0%   0% / 1.0);
 	--fg-dim                : hsl(  0   0%   0% / 0.5); /* faded (not gray!) text but clearly legible (disabled, info boxes) */
 	--fg-dim-on-dark        : hsl(  0   0% 100% / 0.5); /* same but on dark or colored bg */
-	--fg-label              : hsl(  0   0%  40% / 1.0); /* between fg and dim (edit labels, chart labels) */
+	--fg-label              : hsl(  0   0%  60% / 1.0); /* between fg and dim (edit labels, chart labels) */
 	--fg-label-hover        : hsl(  0   0%  50% / 1.0); /* between fg and dim (edit labels, chart labels) */
 	--fg-label-on-dark      : hsl(  0   0% 100% / 0.8); /* same but on dark or colored bg */
 	--fg-link               : hsl(222 100%  40% / 1.0); /* anything clickable inside text: links, bare buttons, checkboxes */
@@ -83,8 +83,8 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg2-hover             : hsl(  0   0%  85% / 1.0);
 	--bg3                   : hsl(  0   0%  70% / 1.0); /* sits on bg1; opaque */
 	--bg3-hover             : hsl(  0   0%  75% / 1.0);
-	--bg-alt                : hsl(  0   0%  97% / 1.0); /* alternating bg for grid rows; lighter than bg1 */
-	--bg-smoke              : hsl(  0   0%   0% / 0.2); /* overlays bg */
+	--bg-alt                : hsl(  0   0%  95% / 1.0); /* alternating bg for grid rows; lighter than bg1 */
+	--bg-smoke              : hsl(  0   0% 100% / 0.8); /* overlays bg */
 	--bg-input              : var(--bg);
 
 	--border-light          : hsl(  0   0%   0% / 0.1); /* sits on bg */
@@ -163,7 +163,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--fg                    : hsl(  0   0%  95% / 1.0);
 	--fg-hover              : hsl(  0   0% 100% / 1.0);
 	--fg-dim                : var(--fg-dim-on-dark);
-	--fg-label              : hsl(  0   0%  70% / 1.0);
+	--fg-label              : hsl(  0   0%  50% / 1.0);
 	--fg-label-hover        : hsl(  0   0%  80% / 1.0);
 	--fg-link               : hsl( 26  78%  51% / 1.0);
 	--fg-link-hover         : hsl( 26  78%  56% / 1.0);
@@ -178,8 +178,8 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg2-hover             : hsl(216  28%  22% / 1.0);
 	--bg3                   : hsl(216  28%  25% / 1.0);
 	--bg3-hover             : hsl(216  28%  27% / 1.0);
-	--bg-alt                : hsl(216  28%  10% / 1.0);
-	--bg-smoke              : hsk(  0   0% 100% / 0.2);
+	--bg-alt                : hsl(260  28%  14% / 1.0);
+	--bg-smoke              : hsl(  0   0%   0% / 0.7);
 	--bg-input              : hsl(216  28%  17% / 1.0);
 
 	--border-light          : var(--border-light-on-dark);
