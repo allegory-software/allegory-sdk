@@ -6284,12 +6284,6 @@ calendar = component('calendar', 'Input', function(e) {
 		let t0 = ev.timeStamp
 		let sy_pixels0 = sy_pixels
 		e.focus()
-		if (e.mode == 'day') {
-			if (hit_day) {
-				e.day = hit_day
-				return false
-			}
-		}
 		if (hit_range_end != null) {
 			drag_range     = hit_range
 			drag_range_end = hit_range_end
@@ -6317,8 +6311,15 @@ calendar = component('calendar', 'Input', function(e) {
 				down = false
 				drag_range     = null
 				drag_range_end = null
-				if (!scrolling)
+				if (!scrolling) {
+					if (e.mode == 'day') {
+						if (hit_day) {
+							e.day = hit_day
+							return false
+						}
+					}
 					return
+				}
 				scrolling = false
 				let t1 = ev.timeStamp
 				let dt = (t1 - t0)
