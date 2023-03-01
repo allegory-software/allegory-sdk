@@ -258,6 +258,7 @@ TEXT EDITING
 
 SCROLLING
 
+	scroll_to_view_dim(x, w, pw, sx)
 	scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
 	e.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h)
 	e.scroll_to_view_rect(sx0, sy0, x, y, w, h)
@@ -340,6 +341,7 @@ THEMING
 	set_theme_dark(dark)
 	get_theme_size() -> cur_size
 	set_theme_size(['large'|'small'|'normal'])
+	^^theme_changed()
 
 CSS SPECIFICITY REPORTING
 
@@ -2726,13 +2728,18 @@ method(HTMLElement, 'unselect', function() {
 
 // scrolling -----------------------------------------------------------------
 
-function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
+function scroll_to_view_dim(x, w, pw, sx, align) {
+	if (w > pw) // content larger than viewport.
+		if (align == 'center')
+			return -x + (w - pw) / 2
 	let min_sx = -x
-	let min_sy = -y
 	let max_sx = -(x + w - pw)
-	let max_sy = -(y + h - ph)
-	sx = clamp(sx, min_sx, max_sx)
-	sy = clamp(sy, min_sy, max_sy)
+	return clamp(sx, min_sx, max_sx)
+}
+
+function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy, halign, valign) {
+	sx = scroll_to_view_dim(x, w, pw, sx, halign)
+	sy = scroll_to_view_dim(y, h, ph, sy, or(valign, halign))
 	return [sx, sy]
 }
 
@@ -2877,8 +2884,6 @@ function raf_wrap(f) {
 
 // animation easing ----------------------------------------------------------
 
-// TODO: reimplement this over the Web Animation API, but keep this API.
-
 easing = obj() // from easing.lua
 
 easing.reverse = (f, t, ...args) => 1 - f(1 - t, ...args)
@@ -2888,14 +2893,16 @@ easing.outin   = (f, t, ...args) => t < .5 ? .5 * (1 - f(1 - t * 2, ...args)) : 
 // ease any interpolation function.
 easing.ease = function(f, way, t, ...args) {
 	f = or(easing[f], f)
-	if (way == 'out')
-		return easing.reverse(f, t, ...args)
+	if (way == 'in')
+		return f(t, ...args)
 	else if (way == 'inout')
 		return easing.inout(f, t, ...args)
 	else if (way == 'outin')
 		return easing.outin(f, t, ...args)
+	else if (way == 'out')
+		return easing.reverse(f, t, ...args)
 	else
-		return f(t, ...args)
+		assert(false)
 }
 
 // actual easing functions.
@@ -2924,34 +2931,63 @@ easing.bounce = function(t) {
 	}
 }
 
-function transition(f, dt, y0, y1, ease_f, ease_way, ...ease_args) {
-	dt = or(dt, 1)
-	y0 = or(y0, 0)
-	y1 = or(y1, 1)
-	ease_f = or(ease_f, 'cubic')
-	let raf_id, t0, finished
-	let e = {}
+function transition(f) {
+	let raf_id, t0
+	let dt, y0, y1, ease_f, ease_way, ease_args
+	let e = {started: false}
+	let start = noop
+	let finish = noop
+	e.on_start = function(f) {
+		let f0 = start
+		start = function() { f0(); f() }
+	}
+	e.on_finish = function(f) {
+		let f0 = finish
+		finish = function() { f0(); f() }
+	}
 	e.stop = function() {
-		if (raf_id)
-			cancel_raf(raf_id)
-		finished = true
+		if (raf_id == null) return
+		cancel_raf(raf_id)
+		raf_id = null
+		let t = performance.now()
+		let lin_x = lerp(t, t0, t0 + dt * 1000, 0, 1)
+		t0 = null
+		e.started = false
+		f(y1, lin_x, true)
+		finish()
+	}
+	e.restart = function(dt_, y0_, y1_, ease_f_, ease_way_, ...ease_args_) {
+		dt = dt_
+		y0 = y0_
+		y1 = y1_
+		ease_f = ease_f_
+		ease_way = or(ease_way_, 'out')
+		ease_args = ease_args_
+		dt = or(dt, 1)
+		y0 = or(y0, 0)
+		y1 = or(y1, 1)
+		ease_f = or(ease_f, 'cubic')
+		e.stop()
+		raf_id = raf(wrapper)
+		e.started = true
+		start()
 	}
 	let wrapper = function(t) {
 		t0 = or(t0, t)
 		let lin_x = lerp(t, t0, t0 + dt * 1000, 0, 1)
-		if (lin_x < 1 && !finished) {
+		if (lin_x < 1) {
 			let eas_x = easing.ease(ease_f, ease_way, lin_x, ...ease_args)
 			let y = lerp(eas_x, 0, 1, y0, y1)
 			if (f(y, lin_x) !== false)
 				raf_id = raf(wrapper)
 		} else {
+			raf_id = null
+			t0 = null
+			e.started = false
 			f(y1, lin_x, true)
-			if (e.finish)
-				e.finish()
-			finished = true
+			finish()
 		}
 	}
-	raf_id = raf(wrapper)
 	return e
 }
 
@@ -2997,14 +3033,79 @@ method(CanvasRenderingContext2D, 'clear', function() {
 	this.clearRect(0, 0, this.canvas.width, this.canvas.height)
 })
 
+method(CanvasRenderingContext2D, 'user_to_device', function(x, y, out) {
+	let m = this.getTransform()
+	out = out || []
+	out[0] = m.a * x + m.c * y + m.e
+	out[1] = m.b * x + m.d * y + m.f
+	return out
+})
+
+method(CanvasRenderingContext2D, 'device_to_user', function(x, y, out) {
+	let m = this.getTransform().inverse()
+	out = out || []
+	out[0] = m.a * x + m.c * y + m.e
+	out[1] = m.b * x + m.d * y + m.f
+	return out
+})
+
 // pw & ph are size multiples for lowering the number of resizes.
 method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
+	pw = pw || 100
+	ph = ph || 100
 	let r = devicePixelRatio
 	w = ceil(w / pw) * pw
 	h = ceil(h / ph) * ph
 	if (this.width  != w) { this.width  = w * r; this.w = w; }
 	if (this.height != h) { this.height = h * r; this.h = h; }
 })
+
+// Create a div with a canvas inside. The canvas is resized automatically
+// to fill the div when the div size changes. The div's redraw(cx, w, h)
+// method is called on div's update and when the canvas is resized.
+// Before each redraw call the canvas is cleared and the context is reset.
+function resizeable_canvas(pw, ph) {
+	let canvas = tag('canvas', {class: 'abs', width: 0, height: 0})
+	let ct = div({class: 'S rel clip'}, canvas)
+	ct.redraw = noop
+	let cx = canvas.getContext('2d')
+	let w0, h0
+	let w, h
+	ct.on_measure(function() {
+		w0 = w || 0
+		h0 = h || 0
+		w = ct.cw
+		h = ct.ch
+	})
+	function redraw() {
+		canvas.resize(w, h, pw, ph)
+		cx.save()
+		cx.clear()
+		cx.scale(devicePixelRatio, devicePixelRatio)
+		ct.redraw(cx, w, h)
+		cx.restore()
+	}
+	ct.on_position(redraw)
+	function update() {
+		ct.update()
+	}
+	ct.on('resize', update)
+	ct.listen('theme_changed', update)
+	ct.on_redraw = function(f) {
+		ct.do_after('redraw', f)
+	}
+	// Firefox loads fonts into canvas asynchronously, even though said fonts
+	// are already loaded and were preloaded using <link preload>.
+	// NOTE: this delay is only visible with the debugger on.
+	ct.on_bind(function(on) {
+		document.on('layout_changed', update, on)
+		document.fonts.on('loadingdone', update, on)
+	})
+	ct.force_redraw = redraw
+	ct.canvas = canvas
+	ct.ctx = cx
+	return ct
+}
 
 // modals & overlays ---------------------------------------------------------
 
@@ -3634,7 +3735,7 @@ function is_theme_dark() {
 function set_theme_dark(dark) {
 	root.class('theme-dark' , !!dark)
 	root.class('theme-light', !dark)
-	document.fire('theme_changed')
+	announce('theme_changed')
 }
 
 function get_theme_size() {
@@ -3648,7 +3749,7 @@ function set_theme_size(size) {
 	root.class('theme-large theme-small', false)
 	if (size)
 		root.class('theme-'+size)
-	document.fire('theme_changed')
+	announce('theme_changed')
 }
 
 // make `.theme-inverted` work.
