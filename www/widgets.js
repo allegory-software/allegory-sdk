@@ -6119,7 +6119,10 @@ calendar = component('calendar', 'Input', function(e) {
 										}
 									}
 
-									let r = w / (!down && hit_range == range && hit_range_end == ri ? 2 : 3)
+									let on_range_end =
+										(!down && hit_range == range && hit_range_end == ri)
+										|| (drag_range == range && drag_range_end == ri)
+									let r = w / (on_range_end ? 2 : 3)
 									cx.beginPath()
 									cx.arc(p, h / 2, r, 0, 2 * PI)
 									cx.fillStyle = bg_alt
@@ -6182,6 +6185,7 @@ calendar = component('calendar', 'Input', function(e) {
 			if (e.mode == 'range') {
 				e.day1 = drag_range[0]
 				e.day2 = drag_range[1]
+				drag_range = ranges[0]
 			}
 		}
 
