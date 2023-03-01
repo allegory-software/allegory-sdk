@@ -5750,6 +5750,12 @@ autocomplete = component('autocomplete', 'Input', function(e) {
 
 /* <calendar> ----------------------------------------------------------------
 
+state props:
+	mode           'day|range|ranges'
+	day            day mode    : string date or timestamp
+	day1 day2      range mode  : start & end dates or timestamps
+	ranges         ranges mode : 'd1..d2 ...' or [[d1,d2],...]
+
 */
 
 css('.calendar', 'v-s', `
