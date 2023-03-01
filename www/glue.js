@@ -22,7 +22,7 @@ LOGIC
 MATH
 
 	inf
-	floor(x) ceil(x) round(x)
+	floor(x) ceil(x) round(x) snap(x, p)
 	abs(x)
 	min(x, y) max(x, y)
 	sqrt(x)
@@ -266,9 +266,11 @@ function repl(x, v, z) { return x === v ? z : x }
 // math ----------------------------------------------------------------------
 
 inf = Infinity
-floor = Math.floor
+floor = Math.floor // rounds towards -1/0
 ceil = Math.ceil
 round = Math.round
+snap = (x, p) => round(x / p) * p
+trunc = Math.trunc // rounds towards 0
 abs = Math.abs
 min = Math.min
 max = Math.max
