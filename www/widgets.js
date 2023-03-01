@@ -6185,7 +6185,8 @@ calendar = component('calendar', 'Input', function(e) {
 			if (e.mode == 'range') {
 				e.day1 = drag_range[0]
 				e.day2 = drag_range[1]
-				drag_range = ranges[0]
+				drag_range    = ranges[0]
+				focused_range = ranges[0]
 			}
 		}
 
