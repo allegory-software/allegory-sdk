@@ -1570,7 +1570,7 @@ e.property = function(name, get, set) {
 e.xoff = function() { this._xoff = true  }
 e.xon  = function() { this._xoff = false }
 
-let fire_prop_changed = function(e, prop, v1, v0) {
+function announce_prop_changed(e, prop, v1, v0) {
 	if (e._xoff) {
 		e.props[prop].default = v1
 	} else {
@@ -1613,7 +1613,7 @@ e.prop = function(prop, opt) {
 	let priv = opt.private
 	if (!e[setter])
 		e[setter] = noop
-	let prop_changed = fire_prop_changed
+	let prop_changed = announce_prop_changed
 	let dv = opt.default
 
 	opt.from_attr = from_attr_func(opt)
@@ -1627,17 +1627,17 @@ e.prop = function(prop, opt) {
 		function get() {
 			return v
 		}
-		function set(v1) {
+		function set(v1, ev) {
 			let v0 = v
 			v1 = convert(v1, v0)
 			if (v1 === v0)
 				return
 			v = v1
-			e[setter](v1, v0)
+			e[setter](v1, v0, ev)
 			if (set_attr)
 				set_attr(v1)
 			if (!priv)
-				prop_changed(e, prop, v1, v0)
+				prop_changed(e, prop, v1, v0, ev)
 			e.update()
 		}
 		if (dv != null && set_attr && !e.hasattr(prop_attr))
@@ -1647,14 +1647,14 @@ e.prop = function(prop, opt) {
 		function get() {
 			return e[getter]()
 		}
-		function set(v) {
+		function set(v, ev) {
 			let v0 = e[getter]()
 			v = convert(v, v0)
 			if (v === v0)
 				return
-			e[setter](v, v0)
+			e[setter](v, v0, ev)
 			if (!priv)
-				prop_changed(e, prop, v, v0)
+				prop_changed(e, prop, v, v0, ev)
 			e.update()
 		}
 	}
@@ -1693,7 +1693,7 @@ e.prop = function(prop, opt) {
 			id_bind(e[ID], on)
 		})
 		prop_changed = function(e, k, v1, v0) {
-			fire_prop_changed(e, k, v1, v0)
+			announce_prop_changed(e, k, v1, v0)
 			id_bind(v0, false)
 			id_bind(v1, true)
 		}
@@ -1702,6 +1702,8 @@ e.prop = function(prop, opt) {
 	}
 
 	e.property(prop, get, set)
+	opt.get = get
+	opt.set = set
 
 	attr(e, 'props')[prop] = opt
 
@@ -1717,7 +1719,13 @@ e.alias = function(new_name, old_name) {
 }
 
 // dynamic properties.
-e.set_prop = function(k, v) { this[k] = v } // stub
+e.set_prop = function(k, v, ev) {
+	let pa = this.get_prop_attrs(k)
+	if (pa)
+		pa.set.call(this, v, ev)
+	else
+		this[k] = v
+} // stub
 e.get_prop = function(k) { return this[k] } // stub
 e.get_prop_attrs = function(k) { return this.props[k] } // stub
 e.get_props = function() { return this.props }
@@ -1875,23 +1883,26 @@ css_state_chrome('.focus-within:has(:focus-visible)', 'outline-focus')
 css_role_state('.focus-within :focus-visible', 'no-outline')
 css_role_state('.focus-within .focus-within:focus-within', 'no-outline')
 
-e.make_focusable = function(fe) {
+e.make_focusable = function(...fes) {
 
 	let e = this
 	e.make_focusable = noop
 
-	fe = fe || e
+	if (!fes.length)
+		fes.push(e)
 
-	if (!fe.hasattr('tabindex'))
-		fe.attr('tabindex', 0)
+	for (fe of fes)
+		if (!fe.hasattr('tabindex'))
+			fe.attr('tabindex', 0)
 
-	if (fe != e)
+	if (fes[0] != e)
 		e.class('focus-within')
 
 	function update() {
 		let can_be_focused = e.focusable && !e.disabled
 		e.class('focusable', can_be_focused)
-		fe.attr('tabindex', can_be_focused ? e.tabindex : (fe instanceof HTMLInputElement ? -1 : null))
+		for (let fe of fes)
+			fe.attr('tabindex', can_be_focused ? e.tabindex : (fe instanceof HTMLInputElement ? -1 : null))
 		if (!can_be_focused)
 			e.blur()
 	}
@@ -1905,10 +1916,10 @@ e.make_focusable = function(fe) {
 
 	let inh_focus = e.focus
 	e.focus = function() {
-		if (fe == this || this.widget_selected)
+		if (fes[0] == this || this.widget_selected)
 			inh_focus.call(this)
 		else
-			fe.focus()
+			fes[0].focus()
 	}
 
 }
@@ -2731,7 +2742,7 @@ method(HTMLElement, 'unselect', function() {
 function scroll_to_view_dim(x, w, pw, sx, align) {
 	if (w > pw) // content larger than viewport.
 		if (align == 'center')
-			return -x + (w - pw) / 2
+			return -(x + (w - pw) / 2)
 	let min_sx = -x
 	let max_sx = -(x + w - pw)
 	return clamp(sx, min_sx, max_sx)
@@ -2762,12 +2773,6 @@ e.scroll_to_view_rect = function(sx0, sy0, x, y, w, h, halign, valign) {
 
 e.make_visible_scroll_offset = function(sx0, sy0, parent, halign, valign) {
 	parent = this.parent
-	// TODO:
-	//parent = parent || this.parent
-	//let cr = this.rect()
-	//let pr = parent.rect()
-	//let x = cr.x - pr.x
-	//let y = cr.y - pr.y
 	let x = this.ox
 	let y = this.oy
 	let w = this.ow
