@@ -37,6 +37,8 @@ WIDGETS
 	tags-box tags
 	autocomplete
 	dropdown
+	date-input
+	date-range-input
 	widget-placeholder
 
 FUNCTIONS
@@ -5503,7 +5505,7 @@ dropdown = component('dropdown', 'Input', function(e) {
 			let item_i = e.lookup(e.value)
 			list.focus_item(or(item_i, false))
 			list.class('dropdown-picker')
-			list.popup(null, 'bottom', 'left')
+			list.popup(null, 'bottom', 'start')
 			list.hide()
 			e.add(list)
 		} else {
@@ -5576,7 +5578,6 @@ dropdown = component('dropdown', 'Input', function(e) {
 			let w = e.rect().w
 			e.class('open', open)
 			if (open) {
-				e.list.popup('bottom', 'left')
 				e.list.show()
 				e.list.focus_item(true, 0, {
 					make_visible: true,
@@ -5691,7 +5692,7 @@ autocomplete = component('autocomplete', 'Input', function(e) {
 			list.multiselect = false
 			list_items_changed.call(list)
 			list.class('dropdown-picker')
-			list.popup(null, 'bottom', 'left')
+			list.popup(null, 'bottom', 'start')
 			list.hide()
 			e.add(list)
 		} else {
@@ -5743,7 +5744,7 @@ autocomplete = component('autocomplete', 'Input', function(e) {
 
 	e.prop('input_id', {type: 'id', attr: 'for', on_bind: e.bind_input})
 
-	e.popup(null, 'bottom', 'left')
+	e.popup(null, 'bottom', 'start')
 	e.hide()
 
 	return {list: html_list}
@@ -5762,7 +5763,8 @@ state props:
 
 css('.calendar', 'v-s', `
 	padding: 2px; /* make focus ring visible */
-	min-width: 16.5em;
+	--min-w-calendar: 16.5em;
+	min-width: var(--min-w-calendar);
 	--fs-calendar-months   : 1.25;
 	--fs-calendar-weekdays : 0.75;
 	--fs-calendar-month    : 0.65;
@@ -5773,13 +5775,13 @@ css('.calendar', 'v-s', `
 css('.calendar-canvas-ct', 'S rel')
 css('.calendar-canvas', 'abs')
 
-calendar = component('calendar', 'Input', function(e) {
+function calendar_widget(e, mode, focusable) {
 
 	e.class('calendar')
 	e.make_disablable()
 	e.make_focusable()
 
-	e.prop('mode', {type: 'enum', enum_values: 'day range ranges', default: 'day'})
+	// model: ranges
 
 	function convert_date(s) {
 		return isstr(s) ? s.parse_date(null, true) : s
@@ -5791,29 +5793,38 @@ calendar = component('calendar', 'Input', function(e) {
 		return words(s).map(convert_range)
 	}
 
-	// mode: day
-	e.prop('day'   , {type: 'date', convert: convert_date})
-
-	// mode: range
-	e.prop('day1'  , {type: 'date', convert: convert_date})
-	e.prop('day2'  , {type: 'date', convert: convert_date})
-
-	// mode: ranges
-	e.prop('ranges', {type: 'array', element_type: 'date_range', convert: convert_ranges, default: empty_array})
-
-	let ranges
-	function update_ranges() {
-		ranges =
-			e.mode == 'ranges' ? e.ranges :
-			e.mode == 'range'  ? [[e.day1, e.day2]] :
-			e.mode == 'day'    ? [[e.day, e.day]] : []
-		if (e.mode == 'range')
+	let ranges = []
+	let day1, day2
+	if (mode == 'day') {
+		e.prop('day', {type: 'date', convert: convert_date})
+		e.set_day = function(d) {
+			ranges = [[d, d]]
+		}
+	} else if (mode == 'range') {
+		e.prop('day1', {store: false, type: 'date', convert: convert_date})
+		e.prop('day2', {store: false, type: 'date', convert: convert_date})
+		e.get_day1 = () => day1
+		e.get_day2 = () => day2
+		e.set_day1 = function(d) {
+			day1 = d
+			ranges = [[d, e.day2]]
 			e.focus_range(ranges[0])
+		}
+		e.set_day2 = function(d) {
+			day2 = d
+			ranges = [[e.day1, d]]
+			e.focus_range(ranges[0])
+		}
+	} else if (mode == 'ranges') {
+		e.prop('ranges', {type: 'array', element_type: 'date_range', convert: convert_ranges, default: empty_array})
+		e.set_ranges = function(r) {
+			ranges = r
+		}
+	} else {
+		assert(false)
 	}
-	e.set_day    = update_ranges
-	e.set_day1   = update_ranges
-	e.set_day2   = update_ranges
-	e.set_ranges = update_ranges
+
+	// view
 
 	let ct = resizeable_canvas()
 	e.add(ct)
@@ -5830,10 +5841,15 @@ calendar = component('calendar', 'Input', function(e) {
 	let fg_focused_selected, fg_unfocused_selected
 	let bg_focused_selected, bg_unfocused_selected
 
+	// deferred scroll state
 	let sy_week1, sy_week2
+	let sy_weeks = 0
+	let sy_pages = 0
 
-	e.on_update(function() {
+	e.on_update(function(opt) {
 		ct.update()
+		if (opt.focus)
+			e.focus()
 	})
 
 	ct.on_measure(function() {
@@ -5881,47 +5897,67 @@ calendar = component('calendar', 'Input', function(e) {
 		view_w = cr.w
 		view_h = cr.h - cell_h
 
-		if (sy_week1 != null) {
-			e.scroll_to_view_range(sy_week1, sy_week2, 0)
-			sy_week1 = null
-			sy_week2 = null
-		}
+		// apply scrolling offsets that were deferred.
+		e.scroll_by_weeks(sy_weeks, 0)
+		e.scroll_by_pages(sy_pages, 0)
+		e.scroll_to_view_range(sy_week1, sy_week2, 0, 'center')
 
 	})
 
 	// scroll state
 
 	let start_week = week(time(2020))
-	let sy_weeks_now   = 0 // in weeks, while animating.
-	let sy_weeks_final = 0 // in weeks, final.
-	let sy_pixels      = 0 // from drag-scrolling, not animated.
+	let sy_now   = 0 // in pixels, while animating.
+	let sy_final = 0 // in pixels, final.
 	let scrolling
 	let scroll_transition_progress
 
-	let scroll_transition = transition(function(sy_weeks, progress) {
-		sy_weeks_now = sy_weeks
+	let scroll_transition = transition(function(sy, progress) {
+		sy_now = sy
 		scroll_transition_progress = progress
 		ct.force_redraw() // we're already in an animation frame.
 	})
 
-	e.scroll_pixels = function(sy) {
-		sy_pixels = sy
+	e.scroll_to = function(sy, duration) {
+		sy_final = sy
+		if (duration == null)
+			duration = clamp(abs(sy_final - sy_now) * 0.01, .1, .4)
+		if (duration > 0)
+			scroll_transition.restart(duration, sy_now, sy_final)
+		else {
+			sy_now = sy_final
+			e.update()
+		}
 		e.update()
 	}
 
-	e.scroll_weeks = function(dy_weeks, duration) {
-		sy_weeks_final += dy_weeks
-		if (duration == null)
-			duration = clamp(abs(dy_weeks * .5), .1, .4)
-		if (duration > 0)
-			scroll_transition.restart(duration, sy_weeks_now, sy_weeks_final)
-		else {
-			sy_weeks_now = sy_weeks_final
+	e.scroll_by = function(dy, duration) {
+		e.scroll_to(sy_final + dy, duration)
+	}
+
+	e.scroll_by_weeks = function(dy_weeks, duration) {
+		sy_weeks += dy_weeks
+		if (cell_h == null) { // defer to after measuring
 			e.update()
+		} else {
+			e.scroll_by(sy_weeks * cell_h, duration)
+			sy_weeks = 0
 		}
 	}
 
-	e.scroll_to_view_range = function(d0, d1, duration) {
+	e.scroll_by_pages = function(dy_pages, duration) {
+		sy_pages += dy_pages
+		if (view_h == null) { // defer to after measuring
+			e.update()
+		} else {
+			e.scroll_by(sy_pages * view_h, duration)
+			sy_pages = 0
+		}
+	}
+
+	e.scroll_to_view_range = function(d0, d1, duration, center) {
+		if (d0 == null || d1 == null)
+			return
 		let week1 = week(d0)
 		let week2 = week(d1)
 		if (view_h == null) { // defer to after measuring
@@ -5929,28 +5965,32 @@ calendar = component('calendar', 'Input', function(e) {
 			sy_week2 = week2
 			e.update()
 		} else {
-			let weeks1 = days(week1 - start_week) / 7
-			let weeks2 = days(week2 - start_week) / 7
-			let sy_weeks = -scroll_to_view_dim(-weeks1, weeks2 - weeks1, view_h / cell_h, -sy_weeks_now, 'center') + 1
-			e.scroll_weeks(sy_weeks - sy_weeks_final, duration)
+			e.scroll_by_weeks(sy_weeks, 0)
+			e.scroll_by_pages(sy_pages, 0)
+			let y1 = (days(week1 - start_week) / 7 - (center ? 1000 : 0)) * cell_h
+			let y2 = (days(week2 - start_week) / 7 + (center ? 1000 : 0)) * cell_h
+			let sy = scroll_to_view_dim(y1, y2 - y1 + cell_h, view_h, sy_now, 'center')
+			e.scroll_to(sy, duration)
+			sy_week1 = null
+			sy_week2 = null
 		}
 	}
 
-	e.scroll_to_view_all_ranges = function(duration) {
-		if (e.mode == 'ranges') {
+	e.scroll_to_view_all_ranges = function(duration, center) {
+		if (mode == 'ranges') {
 			let d1, d2
 			for (let r of e.ranges) {
 				d1 = min(or(d1,  1/0), r[0])
 				d2 = max(or(d2, -1/0), r[1])
 			}
 			if (d1 != null && d2 != null)
-				e.scroll_to_view_range(d1, d2, 0)
-		} else if (e.mode == 'range') {
+				e.scroll_to_view_range(d1, d2, duration, center)
+		} else if (mode == 'range') {
 			if (e.day1 != null && e.day2 != null)
-				e.scroll_to_view_range(e.day1, e.day2)
+				e.scroll_to_view_range(e.day1, e.day2, duration, center)
 		} else {
 			if (e.day != null)
-				e.scroll_to_view_range(day(e.day, -140), day(e.day, 140))
+				e.scroll_to_view_range(e.day, e.day, duration, center)
 		}
 	}
 	e.on_bind(function(on) {
@@ -5992,8 +6032,8 @@ calendar = component('calendar', 'Input', function(e) {
 
 	ct.on_redraw(function(cx) {
 
-		// update scroll state.
-		let sy_weeks_f = sy_weeks_now + sy_pixels / cell_h
+		// break down scroll offset into start week and relative scroll offset.
+		let sy_weeks_f = sy_now / cell_h
 		let sy_weeks = trunc(sy_weeks_f)
 		let sy = (sy_weeks_f - sy_weeks) * cell_h
 		let d0 = week(start_week, -sy_weeks)
@@ -6001,6 +6041,9 @@ calendar = component('calendar', 'Input', function(e) {
 		// update hit state.
 		let mx = hit_mx - view_x
 		let my = hit_my - view_y
+
+		// center the view horizontally on the container
+		cx.translate(round((view_w - cell_w * 7) / 2), 0)
 
 		cx.textAlign = 'center'
 
@@ -6014,7 +6057,7 @@ calendar = component('calendar', 'Input', function(e) {
 		}
 		cx.beginPath()
 
-		let y = floor(cell_h * 1) - .5
+		let y = floor(cell_h * 1.0) - .5
 		cx.moveTo(0, y)
 		cx.lineTo(view_w, y)
 		cx.strokeStyle = fg_label
@@ -6033,17 +6076,17 @@ calendar = component('calendar', 'Input', function(e) {
 		hit_day = null
 		hit_range = null
 		hit_range_end = null
-		let d_days = 0
+		let d_days = -7
 		let today = day(time())
 		let out_p = []
-		for (let week = 0; week <= visible_weeks; week++) {
+		for (let week = -1; week <= visible_weeks; week++) {
 			for (let weekday = 0; weekday < 7; weekday++) {
 				let d = day(d0, d_days)
 				let m = month(d)
 				let n = floor(1 + days(d - m))
 
 				let x = weekday * cell_w
-				let y = sy + week * cell_h - cell_h
+				let y = sy + week * cell_h
 
 				cx.translate(x, y)
 
@@ -6079,7 +6122,7 @@ calendar = component('calendar', 'Input', function(e) {
 						in_range = true
 
 						// hit-test range
-						if (e.mode != 'day' && !hit_range && hit_test_rect(u_mx, u_my, 0, 0, cell_w, cell_h))
+						if (mode != 'day' && !hit_range && hit_test_rect(u_mx, u_my, 0, 0, cell_w, cell_h))
 							hit_range = range
 
 						// draw the day box in halves, each half being either
@@ -6113,7 +6156,7 @@ calendar = component('calendar', 'Input', function(e) {
 								if (range == focused_range) {
 
 									// hit-test range-end grab handle
-									if (e.mode != 'day' && hit_range_end == null) {
+									if (mode != 'day' && hit_range_end == null) {
 										let [u_mx, u_my] = cx.device_to_user(mx, my, out_p)
 										if (hit_test_circle(u_mx, u_my, p, h / 2, w / 3)) {
 											hit_range = range
@@ -6175,27 +6218,27 @@ calendar = component('calendar', 'Input', function(e) {
 
 		}
 
-		// move range end
+		// update range end
 		if (drag_range_end != null && hit_day != null) {
 			drag_range[drag_range_end] = hit_day
-			let [d0, d1] = drag_range
-			if (d0 > d1) {
-				drag_range[0] = d1
-				drag_range[1] = d0
-				drag_range_end = 1 - drag_range_end
-			}
-			if (e.mode == 'range') {
-				e.day1 = drag_range[0]
-				e.day2 = drag_range[1]
-				drag_range    = ranges[0]
-				focused_range = ranges[0]
+			if (drag_range[0] > drag_range[1])
+				drag_range[drag_range_end] = drag_range[1-drag_range_end]
+			if (mode == 'range') {
+				let day1_0 = day1
+				let day2_0 = day2
+				day1 = drag_range[0]
+				day2 = drag_range[1]
+				if (day1 != day1_0) announce_prop_changed(e, 'day1', day1, day1_0)
+				if (day2 != day2_0) announce_prop_changed(e, 'day2', day2, day2_0)
+			} else if (mode == 'ranges') {
+				announce_prop_changed(e, 'ranges', e.ranges, e.ranges)
 			}
 		}
 
 		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize' : null
 
 		// draw month name overlays while scrolling
-		if (scrolling || scroll_transition.started) {
+		if (scrolling) {
 			cx.font = font_months
 			if (0) {
 				cx.fillStyle = bg_smoke
@@ -6261,7 +6304,7 @@ calendar = component('calendar', 'Input', function(e) {
 	e.on('focus', function() { e.update() })
 
 	ct.on('wheel', function(dx, dy) {
-		e.scroll_weeks(-dy * 3)
+		e.scroll_by_weeks(-dy * 3)
 	})
 
 	ct.on('pointermove', function(ev, mx, my) {
@@ -6289,13 +6332,13 @@ calendar = component('calendar', 'Input', function(e) {
 
 		down = true
 		let t0 = ev.timeStamp
-		let sy_pixels0 = sy_pixels
+		let sy0 = sy_now
 		e.focus()
 		if (hit_range_end != null) {
 			drag_range     = hit_range
 			drag_range_end = hit_range_end
 			e.update()
-		} else if (e.mode == 'ranges') {
+		} else if (mode == 'ranges') {
 			e.focus_range(hit_range)
 		}
 
@@ -6312,16 +6355,17 @@ calendar = component('calendar', 'Input', function(e) {
 					if (abs(dy) < 7) // prevent accidental dragging
 						return
 				scrolling = true
-				e.scroll_pixels(sy_pixels0 + dy)
+				e.scroll_to(sy0 + dy)
 			},
 			function captured_up(ev, mx, my) {
 				down = false
 				drag_range     = null
 				drag_range_end = null
 				if (!scrolling) {
-					if (e.mode == 'day') {
+					if (mode == 'day') {
 						if (hit_day) {
 							e.day = hit_day
+							e.fire('pick', e.day)
 							return false
 						}
 					}
@@ -6332,13 +6376,14 @@ calendar = component('calendar', 'Input', function(e) {
 				let dt = (t1 - t0)
 				let dy = my - down_my
 				let velocity = dy / dt
-				e.scroll_weeks(velocity)
+				e.scroll_by_weeks(velocity)
 			}
 		)
 	})
 
-	e.on('keydown', function(key) {
-		if (e.mode == 'ranges' && key == 'Delete') {
+	e.on('keydown', function(key, shift, ctrl) {
+
+		if (mode == 'ranges' && key == 'Delete') {
 			if (focused_range) {
 				ranges = e.ranges.slice()
 				ranges.remove_value(focused_range)
@@ -6347,20 +6392,69 @@ calendar = component('calendar', 'Input', function(e) {
 				return false
 			}
 		}
+
+		if (ctrl) {
+
+			if (key == 'ArrowUp' || key == 'ArrowDown') {
+				e.scroll_by_pages((key == 'ArrowUp' ? 1 : -1) * .5)
+				return false
+			}
+
+		} else {
+
+			if (mode == 'day' && key == 'PageUp' || key == 'PageDown') {
+				e.day = month(e.day, key == 'PageDown' ? 1 : -1)
+				e.scroll_to_view_range(e.day, e.day)
+				return false
+			}
+
+			if (key == 'ArrowDown' || key == 'ArrowUp' ||
+				 key == 'ArrowLeft' || key == 'ArrowRight'
+			) {
+				let ddays = (key == 'ArrowUp' || key == 'ArrowDown' ? 7 : 1)
+					* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
+				if (mode == 'day') {
+					e.day = day(e.day, ddays)
+					e.scroll_to_view_range(e.day, e.day)
+					return false
+				} else if (mode == 'range') {
+					e.day1 = day(e.day1, ddays)
+					e.day2 = day(e.day2, ddays)
+					e.scroll_to_view_range(e.day1, e.day2)
+					return false
+				}
+			}
+
+		}
+
 	})
 
+}
+
+calendar = component('calendar', 'Input', function(e) {
+	return calendar_widget(e, 'day')
 })
 
-/* <date-range> ------------------------------------------------------
+range_calendar = component('range-calendar', 'Input', function(e) {
+	return calendar_widget(e, 'range')
+})
+
+ranges_calendar = component('ranges-calendar', 'Input', function(e) {
+	return calendar_widget(e, 'ranges')
+})
+
+/* <date-input> & <date-range-input> -----------------------------------------
 
 */
 
-css('.date-range')
+css('.date-input', '')
 
-css('.date-range-separator', 'p-x h-m')
-css('.date-range-calendar-button', 'b fg bg-input')
-css_role('.date-range-calendar-button', 'b-l')
-css('.date-range-input', '', ` width: 6em; `)
+css('.date-input-calendar-button', 'b fg bg-input h-m p-x-input p-y-input noselect')
+css_role('.date-input-calendar-button', 'b-l')
+css('.date-input-calendar-button::before', 'fa fa-calendar')
+css('.date-input-input', 't-r', ` width: 7em; `)
+css('.date-range-input-separator', 'p-x h-m')
+css('.date-input-calendar', '', ` resize: both; `)
 
 // css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
 // 	resize: both;
@@ -6374,39 +6468,154 @@ css('.date-range-input', '', ` width: 6em; `)
 // css('.dropdown-search', 'fg-search bg-search')
 //
 
-date_range = component('date-range', function(e) {
+css_state('.date-input:has(.calendar:focus-visible)', 'no-outline')
+css_role_state('.date-input .calendar:focus-visible', 'outline-focus')
 
-	e.class('date-range input-group b-collapse-h')
+function date_input_widget(e, range) {
+
+	e.class('input-group b-collapse-h')
 	e.make_disablable()
 
-	e.day1_input = input({classes: 'date-range-input'})
-	e.day2_input = input({classes: 'date-range-input'})
-	e.calendar = calendar()
+	if (range) {
+		e.day1_input = input({classes: 'date-input-input', })
+		e.day2_input = input({classes: 'date-input-input', })
+		e.calendar = range_calendar({classes: 'date-input-calendar'})
+	} else {
+		e.day_input = input({classes: 'date-input-input', })
+		e.calendar = calendar({classes: 'date-input-calendar'})
+	}
+
+	e.calendar.h = 300
+
+	let w
+	e.on_measure(function() {
+		w = e.rect().w
+	})
+	e.on_position(function() {
+		e.calendar.min_w = `calc(max(var(--min-w-calendar), ${w}px))`
+	})
+
+	e.to_text = function(t) {
+		return t.date()
+	}
+
+	e.from_text = function(s) {
+		return s.parse_date(null, true)
+	}
 
 	function convert_date(s) {
-		return isstr(s) ? s.parse_date(null, true) : s
+		return isstr(s) && e.from_text(s) || s
 	}
-	e.prop('day1', {private: true, type: 'date', convert: convert_date})
-	e.prop('day2', {private: true, type: 'date', convert: convert_date})
 
-	e.day1_input.on('input', function(ev) {
-		e.day1 = this.value
-		e.update()
+	for (let DAY of (range ? ['day1', 'day2'] : ['day'])) {
+		e.prop(DAY, {type: 'date', convert: convert_date})
+		e['set_'+DAY] = function(v, v0, ev) {
+			if (!(ev && ev.target == e[DAY+'_input']))
+				e[DAY+'_input'].value = isnum(v) ? e.to_text(v) : v
+			if (!(ev && ev.target == e.calendar))
+				e.calendar.set_prop(DAY, isnum(v) ? v : null, ev)
+		}
+		e[DAY+'_input'].on('input', function(ev) {
+			e.set_prop(DAY, this.value, ev)
+		})
+		e[DAY+'_input'].on('wheel', function(ev, dy) {
+			let d = day(e[DAY], round(dy))
+			if (range)
+				if (DAY == 'day1' && d > e.day2)
+					d = e.day2
+				else if (DAY == 'day2' && d < e.day1)
+					d = e.day1
+			e.set_prop(DAY, d, {target: e})
+		})
+	}
+
+	e.listen('prop_changed', function(ce, k, v, v0, ev) {
+		if (ce != e.calendar) return
+		if (range) {
+			if (!(k == 'day1' || k == 'day2'))
+				return
+			if (ev && (ev.target == e.day1_input || ev.target == e.day2_input))
+				return
+		} else {
+			if (k != 'day')
+				return
+			if (ev && ev.target == e.day_input)
+				return
+		}
+		e.set_prop(k, v, {target: ce})
 	})
 
-	e.day2_input.on('input', function(ev) {
-		e.day2 = this.value
-		e.update()
+	if (range)
+		e.make_focusable(e.day1_input, e.day2_input)
+	else
+		e.make_focusable(e.day_input)
+
+	e.calendar_button = div({class: 'date-input-calendar-button'})
+
+	if (range)
+		e.add(e.day1_input, div({class: 'date-range-input-separator'},'-'), e.day2_input, e.calendar_button)
+	else
+		e.add(e.day_input, e.calendar_button)
+
+	// controller -------------------------------------------------------------
+
+	e.prop('isopen', {private: true, default: false})
+	e.set_isopen = function(open, open0, focus) {
+		if (open) {
+			e.calendar.popup(null, 'bottom', 'end')
+			e.calendar.update({show: true, focus: focus !== false})
+			e.add(e.calendar)
+		} else {
+			e.calendar.hide()
+			if (focus !== false)
+				e.focus()
+		}
+	}
+
+	e.calendar.on('blur', function(ev) {
+		e.set_prop('isopen', false, false)
 	})
 
-	// TODO: make_focusable with multiple inputs
-	e.make_focusable(e.day1_input)
+	e.calendar_button.on('pointerdown', function(ev) {
+		e.isopen = !e.isopen
+		return false
+	})
 
-	e.calendar_button = button({bare: true, icon: 'fa fa-calendar',
-		classes: 'date-range-calendar-button'})
+	e.calendar_button.on('click', function(ev) {
+		// if (e.isopen)
+		// 	e.calendar.focus()
+	})
 
-	e.add(e.day1_input, div({class: 'date-range-separator'},'-'), e.day2_input, e.calendar_button)
+	e.calendar.on('pick', function() {
+		runafter(.1, function() {
+			e.isopen = false
+		})
+	})
 
+	if (range) {
+		// e.day1_input.on('blur', function(ev) { e.isopen = false })
+		// e.day2_input.on('blur', function(ev) { e.isopen = false })
+	} else {
+		// e.day_input.on('blur', function(ev) { e.isopen = false })
+	}
+
+	e.on('keydown', function(key) {
+		if (key == 'Enter') {
+			e.isopen = !e.isopen
+			return false
+		}
+	})
+
+}
+
+date_input = component('date-input', 'Input', function(e) {
+	e.class('date-input')
+	return date_input_widget(e)
+})
+
+date_range_input = component('date-range-input', 'Input', function(e) {
+	e.class('date-range-input')
+	return date_input_widget(e, true)
 })
 
 /* <widget-placeholder> ------------------------------------------------------

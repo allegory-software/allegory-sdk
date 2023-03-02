@@ -875,15 +875,16 @@ for (let e of $('list')) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=calendar_demo>
-<calendar class="large" mode=ranges ranges="1/1/2022..1/5/2022 1/13/2022..1/15/2022"></calendar>
-<calendar class="large" mode=range day1="1/1/2022" day2="1/5/2022"></calendar>
-<calendar class="large" mode=day day="1/1/2022"></calendar>
+<ranges-calendar class="large" ranges="1/1/2022..1/5/2022 1/13/2022..1/15/2022"></ranges-calendar>
+<range-calendar day1="1/1/2022" day2="1/5/2022"></range-calendar>
+<calendar class="smaller" day="1/1/2022"></calendar>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=date_range_demo>
-<date-range day1="1/1/2022" day2="1/5/2022"></date-range>
+<xmp id=date_input_demo>
+<date-input day="1/18/2022"></date-input>
+<date-range-input day1="1/18/2022" day2="2/3/2022"></date-range-input>
 </xmp>
 
 <!--------------------------------------------------------------------------->
