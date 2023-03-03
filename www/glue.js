@@ -181,7 +181,7 @@ TIMERS
 	runevery(t, f) -> tid
 	runagainevery(t, f) -> tid
 	clock()
-	timer(f) -> tm; tm(t) to rearm; tm() to cancel.
+	timer(f) -> tm; tm(t) to rearm; tm() to cancel; tm(true) to rearm to last duration.
 
 SERIALIZATION
 
@@ -1517,7 +1517,7 @@ function runagainevery(t, f) { f(); return runevery(t, f) }
 function clock() { return performance.now() / 1000 }
 
 function timer(f) {
-	let timer_id
+	let timer_id, t0
 	function wrapper() {
 		timer_id = null
 		f()
@@ -1527,8 +1527,10 @@ function timer(f) {
 			clearTimeout(timer_id)
 			timer_id = null
 		}
-		if (t != null && t !== false)
+		if (t != null && t !== false) {
+			t = repl(t, true, t0); t0 = t
 			timer_id = runafter(t, wrapper)
+		}
 	}
 }
 
