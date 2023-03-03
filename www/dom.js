@@ -158,6 +158,10 @@ DEFERRED DOM UPDATING
 	e.on_measure(f)
 	e.on_position(f)
 
+TIMERS
+
+	e.timer(f) -> tm
+
 ELEMENT INIT
 
 	component('TAG'|'TAG[ATTR]'[, category], initializer)
@@ -2104,6 +2108,16 @@ e.on_measure = function(f) {
 e.on_position = function(f) {
 	this._bound = this.bound || false
 	this.do_after('do_position', f)
+}
+
+// timer that is paused on unbind --------------------------------------------
+
+e.timer = function(f) {
+	let tm = timer(f)
+	this.on_bind(function(on) {
+		if (!on) tm()
+	})
+	return tm
 }
 
 // events & event wrappers ---------------------------------------------------
