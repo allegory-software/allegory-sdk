@@ -4576,10 +4576,14 @@ css_util('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-1)); 
 css_util('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-1)); `)
 css_util('.p-x-input', 'p-l-input p-r-input')
 
+css_util('.p-input', 'p-x-input p-y-input')
+
 css_util('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-1)); `)
 css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
 
-css('.inputbox', 'm-y-05 b p-x-input p-y-input t-m h-m gap-x-input lh-input')
+css_util('.gap-input', 'gap-x-input gap-y-input')
+
+css('.inputbox', 'm-y-05 b p-input t-m h-m gap-x-input lh-input')
 
 css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
 css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
@@ -4636,10 +4640,10 @@ want a label.
 
 */
 
-css('.labelbox', 'S v p-x-input p-y-input gap-x-input gap-y-input')
+css('.labelbox', 'S v p-input gap-input')
 
 css_role('.labelbox > *, labelbox > .input-group > *', 'b0 m0 p0')
-css_role('.labelbox > .input-group', 'gap-x-input gap-y-input')
+css_role('.labelbox > .input-group', 'gap-input')
 
 // no-bg prevents outline clipping, also bg doesn't make sense since labelbox has padding.
 css_role('.labelbox *', 'no-bg')
@@ -5328,7 +5332,7 @@ css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
 	resize: both;
 	height: 12em;
 `)
-css('.dropdown-picker > *', 'p-x-input p-y-input')
+css('.dropdown-picker > *', 'p-input')
 css('.dropdown.open', '')
 css('.dropdown.open, .dropdown-picker', 'outline-focus')
 css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
@@ -5665,7 +5669,7 @@ update opt:
 
 */
 
-css('.autocomplete', 'b v-s p-x-input p-y-input bg-input z3', `
+css('.autocomplete', 'b v-s p-input bg-input z3', `
 	resize: both;
 `)
 
@@ -5816,7 +5820,8 @@ function calendar_widget(e, mode, focusable) {
 			e.focus_range(ranges[0])
 		}
 	} else if (mode == 'ranges') {
-		e.prop('ranges', {type: 'array', element_type: 'date_range', convert: convert_ranges, default: empty_array})
+		e.prop('ranges', {type: 'array', element_type: 'date_range',
+				convert: convert_ranges, default: empty_array})
 		e.set_ranges = function(r) {
 			ranges = r
 		}
@@ -5842,9 +5847,10 @@ function calendar_widget(e, mode, focusable) {
 	let bg_focused_selected, bg_unfocused_selected
 
 	// deferred scroll state
-	let sy_week1, sy_week2
+	let sy_week1, sy_week2, sy_center
 	let sy_weeks = 0
 	let sy_pages = 0
+	let sy_duration = 'none'
 
 	e.on_update(function(opt) {
 		ct.update()
@@ -5859,7 +5865,7 @@ function calendar_widget(e, mode, focusable) {
 
 		font_weekdays = num(css.fontSize) * num(css.prop('--fs-calendar-weekdays')) + 'px ' + css.fontFamily
 		font_days     = css.font
-		font_months   = 'bold ' + num(css.fontSize) * num(css.prop('--fs-calendar-months')) + 'px ' + css.fontFamily
+		font_months   = num(css.fontSize) * num(css.prop('--fs-calendar-months')) + 'px ' + css.fontFamily
 		font_month    = num(css.fontSize) * num(css.prop('--fs-calendar-month')) + 'px ' + css.fontFamily
 
 		let cx = ct.ctx
@@ -5897,11 +5903,32 @@ function calendar_widget(e, mode, focusable) {
 		view_w = cr.w
 		view_h = cr.h - cell_h
 
-		// apply scrolling offsets that were deferred.
-		e.scroll_by_weeks(sy_weeks, 0)
-		e.scroll_by_pages(sy_pages, 0)
-		e.scroll_to_view_range(sy_week1, sy_week2, 0, 'center')
+		// apply scrolling that was deferred to measuring.
+		if (sy_duration != 'none') {
 
+			if (sy_week1 != null) {
+				let y1 = (days(sy_week1 - start_week) / 7 - (sy_center ? 10000 : 0)) * cell_h
+				let y2 = (days(sy_week2 - start_week) / 7 + (sy_center ? 10000 : 0)) * cell_h
+				sy_final = scroll_to_view_dim(y1, y2 - y1 + cell_h, view_h, sy_now, 'center')
+			} else {
+				sy_final += sy_weeks * cell_h + sy_pages * view_h
+			}
+
+			if (sy_duration == null) {
+				sy_duration = clamp(abs(sy_final - sy_now) * .002, .1, .4)
+			}
+			if (sy_duration > 0)
+				scroll_transition.restart(sy_duration, sy_now, sy_final)
+			else
+				sy_now = sy_final
+
+			sy_week1 = null
+			sy_week2 = null
+			sy_center = null
+			sy_weeks = 0
+			sy_pages = 0
+			sy_duration = 'none'
+		}
 	})
 
 	// scroll state
@@ -5909,25 +5936,16 @@ function calendar_widget(e, mode, focusable) {
 	let start_week = week(time(2020))
 	let sy_now   = 0 // in pixels, while animating.
 	let sy_final = 0 // in pixels, final.
-	let scrolling
-	let scroll_transition_progress
+	let dragging
 
-	let scroll_transition = transition(function(sy, progress) {
+	let scroll_transition = transition(function(sy) {
 		sy_now = sy
-		scroll_transition_progress = progress
 		ct.force_redraw() // we're already in an animation frame.
 	})
 
 	e.scroll_to = function(sy, duration) {
 		sy_final = sy
-		if (duration == null)
-			duration = clamp(abs(sy_final - sy_now) * 0.01, .1, .4)
-		if (duration > 0)
-			scroll_transition.restart(duration, sy_now, sy_final)
-		else {
-			sy_now = sy_final
-			e.update()
-		}
+		sy_duration = duration
 		e.update()
 	}
 
@@ -5937,43 +5955,22 @@ function calendar_widget(e, mode, focusable) {
 
 	e.scroll_by_weeks = function(dy_weeks, duration) {
 		sy_weeks += dy_weeks
-		if (cell_h == null) { // defer to after measuring
-			e.update()
-		} else {
-			e.scroll_by(sy_weeks * cell_h, duration)
-			sy_weeks = 0
-		}
+		sy_duration = duration
+		e.update()
 	}
 
 	e.scroll_by_pages = function(dy_pages, duration) {
 		sy_pages += dy_pages
-		if (view_h == null) { // defer to after measuring
-			e.update()
-		} else {
-			e.scroll_by(sy_pages * view_h, duration)
-			sy_pages = 0
-		}
+		sy_duration = duration
+		e.update()
 	}
 
 	e.scroll_to_view_range = function(d0, d1, duration, center) {
-		if (d0 == null || d1 == null)
-			return
-		let week1 = week(d0)
-		let week2 = week(d1)
-		if (view_h == null) { // defer to after measuring
-			sy_week1 = week1
-			sy_week2 = week2
-			e.update()
-		} else {
-			e.scroll_by_weeks(sy_weeks, 0)
-			e.scroll_by_pages(sy_pages, 0)
-			let y1 = (days(week1 - start_week) / 7 - (center ? 1000 : 0)) * cell_h
-			let y2 = (days(week2 - start_week) / 7 + (center ? 1000 : 0)) * cell_h
-			let sy = scroll_to_view_dim(y1, y2 - y1 + cell_h, view_h, sy_now, 'center')
-			e.scroll_to(sy, duration)
-			sy_week1 = null
-			sy_week2 = null
-		}
+		sy_week1 = week(d0)
+		sy_week2 = week(d1)
+		sy_duration = duration
+		sy_center = center
+		e.update()
 	}
 
 	e.scroll_to_view_all_ranges = function(duration, center) {
@@ -5995,7 +5992,7 @@ function calendar_widget(e, mode, focusable) {
 	}
 	e.on_bind(function(on) {
 		if (on)
-			e.scroll_to_view_all_ranges()
+			e.scroll_to_view_all_ranges(0, 'center')
 	})
 
 	// focus state
@@ -6030,13 +6027,55 @@ function calendar_widget(e, mode, focusable) {
 		return hit_test_rect(mx, my, cx - r, cy - r, cx + r, cy + r)
 	}
 
+	function draw_month_overlay(cx, week0, d) {
+
+		let week1 = week(month(d)) // first day of first week of the month of d
+		let week2 = week(day(month(d, 1), -1)) // first day of last week of the month of d
+		let y  = (days(week1 - week0) / 7) * cell_h
+		let y2 = (days(week2 - week0) / 7) * cell_h
+		let h = y2 - y + cell_h
+
+		let year_s  = year_of(d) + ''
+		let month_s = month_name(d, 'long')
+
+		cx.font = font_months
+
+		let px = 20
+		let py = 10
+		let m1 = cx.measureText(year_s)
+		let m2 = cx.measureText(month_s)
+		let text_w = max(m1.width, m2.width)
+		let text_h = font_months_h * 2 + py
+
+		cx.beginPath()
+		cx.rect(
+			view_w / 2 - text_w / 2 - px,
+			y + h / 2 - text_h / 2 - py,
+			text_w + 2 * px,
+			text_h + 2 * py,
+		)
+		cx.fillStyle = bg_smoke
+		cx.fill()
+
+		cx.fillStyle = fg
+		cx.fillText(year_s,
+			view_w / 2,
+			y + (h + font_months_ascent - font_months_h - py) / 2
+		)
+		cx.fillText(month_s,
+			view_w / 2,
+			y + (h + font_months_ascent + font_months_h + py) / 2
+		)
+
+	}
+
 	ct.on_redraw(function(cx) {
 
 		// break down scroll offset into start week and relative scroll offset.
 		let sy_weeks_f = sy_now / cell_h
 		let sy_weeks = trunc(sy_weeks_f)
-		let sy = (sy_weeks_f - sy_weeks) * cell_h
-		let d0 = week(start_week, -sy_weeks)
+		let sy = round((sy_weeks_f - sy_weeks) * cell_h)
+		let week0 = week(start_week, -sy_weeks)
 
 		// update hit state.
 		let mx = hit_mx - view_x
@@ -6050,7 +6089,7 @@ function calendar_widget(e, mode, focusable) {
 		// draw week day names header
 		cx.font = font_weekdays
 		for (let weekday = 0; weekday < 7; weekday++) {
-			let s = weekday_name(day(d0, weekday), 'short', lang()).slice(0, 1).upper()
+			let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).upper()
 			let x = weekday * cell_w
 			cx.fillStyle = fg_label
 			cx.fillText(s, x + cell_w / 2, cell_h / 2 + font_weekdays_ascent / 2)
@@ -6070,6 +6109,9 @@ function calendar_widget(e, mode, focusable) {
 		cx.rect(0, 0, view_w, view_h)
 		cx.clip()
 
+		// go at scroll position.
+		cx.translate(0, sy)
+
 		let visible_weeks = floor(view_h / cell_h) + 2
 
 		// draw & hit-test calendar
@@ -6081,12 +6123,12 @@ function calendar_widget(e, mode, focusable) {
 		let out_p = []
 		for (let week = -1; week <= visible_weeks; week++) {
 			for (let weekday = 0; weekday < 7; weekday++) {
-				let d = day(d0, d_days)
+				let d = day(week0, d_days)
 				let m = month(d)
 				let n = floor(1 + days(d - m))
 
 				let x = weekday * cell_w
-				let y = sy + week * cell_h
+				let y = week * cell_h
 
 				cx.translate(x, y)
 
@@ -6237,61 +6279,20 @@ function calendar_widget(e, mode, focusable) {
 
 		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize' : null
 
-		// draw month name overlays while scrolling
-		if (scrolling) {
-			cx.font = font_months
+		// draw month name overlays while drag-scrolling
+		if (dragging) {
 			if (0) {
 				cx.fillStyle = bg_smoke
 				cx.fillRect(0, 0, view_w, view_h)
 			}
 			let d_days = -(7 * 6)
-			let m0, y0
+			let m0
 			for (let week = -(1 + 6); week <= visible_weeks + 6; week++) {
-				let m_d0 = month(day(d0, d_days))
-				let m_d6 = month(day(d0, d_days + 6))
-				let y = sy + week * cell_h
-				if (m0 == null) {
-					m0 = m_d6
-					y0 = y
-				} else if (m_d6 != m0) {
-
-					let h = y - y0 + (m_d0 != m_d6 ? cell_h : 0)
-					let year_s  = year_of(m0) + ''
-					let month_s = month_name(m0, 'long')
-
-					cx.globalAlpha = scrolling ? 1 : 1 - easing.cubic(scroll_transition_progress)
-
-					let px = 20
-					let py = 10
-					let m1 = cx.measureText(year_s)
-					let m2 = cx.measureText(month_s)
-					let text_w = max(m1.width, m2.width)
-					let text_h = font_months_h * 2 + py
-					cx.beginPath()
-					cx.rect(
-						view_w / 2 - text_w / 2 - px,
-						y0 + h / 2 - text_h / 2 - py,
-						text_w + 2 * px,
-						text_h + 2 * py,
-					)
-					cx.fillStyle = bg_smoke
-					cx.fill()
-
-					cx.fillStyle = fg
-					cx.fillText(year_s,
-						view_w / 2,
-						y0 + (h + font_months_ascent - font_months_h - py) / 2
-					)
-					cx.fillText(month_s,
-						view_w / 2,
-						y0 + (h + font_months_ascent + font_months_h + py) / 2
-					)
-
-					cx.globalAlpha = 1
-
-					m0 = m_d6
-					y0 = y
-				}
+				let d = day(week0, d_days)
+				let m = month(d)
+				if (m != m0)
+					draw_month_overlay(cx, week0, d)
+				m0 = m
 				d_days += 7
 			}
 		}
@@ -6351,17 +6352,17 @@ function calendar_widget(e, mode, focusable) {
 					return
 				}
 				let dy = my - down_my
-				if (!scrolling)
+				if (!dragging)
 					if (abs(dy) < 7) // prevent accidental dragging
 						return
-				scrolling = true
-				e.scroll_to(sy0 + dy)
+				dragging = true
+				e.scroll_to(sy0 + dy, 0)
 			},
 			function captured_up(ev, mx, my) {
 				down = false
 				drag_range     = null
 				drag_range_end = null
-				if (!scrolling) {
+				if (!dragging) {
 					if (mode == 'day') {
 						if (hit_day) {
 							e.day = hit_day
@@ -6371,12 +6372,12 @@ function calendar_widget(e, mode, focusable) {
 					}
 					return
 				}
-				scrolling = false
+				dragging = false
 				let t1 = ev.timeStamp
 				let dt = (t1 - t0)
 				let dy = my - down_my
 				let velocity = dy / dt
-				e.scroll_by_weeks(velocity)
+				e.scroll_by(velocity * 50)
 			}
 		)
 	})
@@ -6449,24 +6450,12 @@ ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 
 css('.date-input', '')
 
-css('.date-input-calendar-button', 'b fg bg-input h-m p-x-input p-y-input noselect')
+css('.date-input-calendar-button', 'b fg bg-input h-m p-input noselect')
 css_role('.date-input-calendar-button', 'b-l')
 css('.date-input-calendar-button::before', 'fa fa-calendar')
 css('.date-input-input', 't-r', ` width: 7em; `)
 css('.date-range-input-separator', 'p-x h-m')
 css('.date-input-calendar', '', ` resize: both; `)
-
-// css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
-// 	resize: both;
-// 	height: 12em;
-// `)
-// css('.dropdown-picker > *', 'p-x-input p-y-input')
-// css('.dropdown.open', '')
-// css('.dropdown.open, .dropdown-picker', 'outline-focus')
-// css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
-//
-// css('.dropdown-search', 'fg-search bg-search')
-//
 
 css_state('.date-input:has(.calendar:focus-visible)', 'no-outline')
 css_role_state('.date-input .calendar:focus-visible', 'outline-focus')
@@ -6563,6 +6552,7 @@ function date_input_widget(e, range) {
 	e.set_isopen = function(open, open0, focus) {
 		if (open) {
 			e.calendar.popup(null, 'bottom', 'end')
+			e.calendar.scroll_to_view_all_ranges(0)
 			e.calendar.update({show: true, focus: focus !== false})
 			e.add(e.calendar)
 		} else {
