@@ -31,8 +31,9 @@ CSS CLASSES
 	FILTERS       [in]visible op[0 1 01-09] darken lighten no-filter
 	SHADOWS       ring shadow-{tooltip thumb menu button pressed modal toolbox} no-shadow
 	TRANSFORMS    flip-{h v} rotate-{90 180 270}
-	TRANSITIONS   ease ease-{01s 05s 1s} no-ease ease-out ease-fw
-	ANIMATIONS    beat bounce fade beat-fade flip shake spin spin-pulse forever once reverse
+	TRANSITIONS   ease ease-{in out linear} ease-{01s 02s 05s 1s} no-ease
+	ANIMATIONS    beat bounce fade beat-fade flip shake spin spin-pulse
+	ANIMATION CTL anim anim-{in out linear} anim-{01s 02s 05s 1s} no-anim forwards backwards reverse forever once
 	CURSORS       arrow hand grab grabbing
 	FONTS         mono arial opensans[-condensed] inter
 	MAT ICONS     mi[-round -sharp -outlined -fill -no-fill]
@@ -930,8 +931,9 @@ css_state('.scroll-thin::-webkit-scrollbar-thumb:hover', '', `
 
 /* POSITIONING ------------------------------------------------------------ */
 
-css('.rel', '', ` position: relative; `)
-css('.abs', '', ` position: absolute; `)
+css('.rel'  , '', ` position: relative; `)
+css('.abs'  , '', ` position: absolute; `)
+css('.fixed', '', ` position: fixed; `)
 
 /* example: menu = z4, picker = z3, tooltip = z2, toolbox = z1 */
 for (let i = 1; i < 9; i++)
@@ -1053,18 +1055,37 @@ css('.ease', '', `
 		top, left, right, bottom, transform,
 		opacity, filter, background-color, border-color;
 	transition-duration: .1s;
-	transition-timing-function: ease;
+	transition-timing-function: ease-out;
 `)
-css('.ease-out   ', 'ease', ` transition-timing-function: ease-out; `)
+css('.ease-in'    , 'ease', ` transition-timing-function: ease-in; `)
+css('.ease-out'   , 'ease', ` transition-timing-function: ease-out; `)
 css('.ease-linear', 'ease', ` transition-timing-function: linear; `)
-css('.ease-01s   ', 'ease', ` transition-duration: .1s; `)
-css('.ease-02s   ', 'ease', ` transition-duration: .2s; `)
-css('.ease-05s   ', 'ease', ` transition-duration: .5s; `)
-css('.ease-1s    ', 'ease', ` transition-duration:  1s; `)
-css('.ease-fw    ', 'ease', ` animation-fill-mode: forwards; `)
-css('.no-ease    ', '', ` transition: all 0s; `)
+css('.ease-01s'   , 'ease', ` transition-duration: .1s; `)
+css('.ease-02s'   , 'ease', ` transition-duration: .2s; `)
+css('.ease-05s'   , 'ease', ` transition-duration: .5s; `)
+css('.ease-1s'    , 'ease', ` transition-duration:  1s; `)
+css('.no-ease'    , ''    , ` transition: all 0s; `)
 
 /* ANIMATIONS ------------------------------------------------------------- */
+
+css('.anim', '', `
+	animation-duration: .1s;
+	animation-timing-function: ease;
+`)
+css('.anim-in'    , 'anim', ` animation-timing-function: ease-in; `)
+css('.anim-out'   , 'anim', ` animation-timing-function: ease-out; `)
+css('.anim-linear', 'anim', ` animation-timing-function: linear; `)
+css('.anim-01s'   , 'anim', ` animation-duration: .1s; `)
+css('.anim-02s'   , 'anim', ` animation-duration: .2s; `)
+css('.anim-05s'   , 'anim', ` animation-duration: .5s; `)
+css('.anim-1s'    , 'anim', ` animation-duration:  1s; `)
+css('.no-anim'    , ''    , ` animation: none; `)
+
+css('.forwards'   , 'anim', ` animation-fill-mode: forwards; `)
+css('.backwards'  , 'anim', ` animation-fill-mode: backwards; `)
+css('.reverse'    , ''    , ` animation-direction: reverse; `)
+css('.forever'    , ''    , ` animation-iteration-count: infinite; `)
+css('.once'       , ''    , ` animation-iteration-count: 1; `)
 
 css('.beat      ', '', ` animation: 1s 1 ease-in-out beat; `)
 css('.bounce    ', '', ` animation: 1s 1 cubic-bezier(0.28, 0.84, 0.42, 1) bounce; `)
@@ -1073,9 +1094,6 @@ css('.beat-fade ', '', ` animation: 1s 1 cubic-bezier(0.4, 0, 0.6, 1) beat-fade;
 css('.flip      ', '', ` animation: 1s 1 ease-in-out flip; `)
 css('.shake     ', '', ` animation: 1s 1 linear shake; `)
 css('.spin      ', '', ` animation: 1s 1 linear spin; `)
-css('.reverse   ', '', ` animation-direction: reverse; `)
-css('.forever   ', '', ` animation-iteration-count: infinite; `)
-css('.once      ', '', ` animation-iteration-count: 1; `)
 css('.spin-pulse', '', ` animation: 1s infinite steps(8) spin; `)
 
 css(`
