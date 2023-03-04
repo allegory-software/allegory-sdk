@@ -2630,6 +2630,12 @@ window.on('resize', function window_resize() {
 	document.fire('layout_changed')
 })
 
+// this is only needed on Firefox with the debugger open,
+// and if you don't preload fonts (which you should).
+document.fonts.on('loadingdone', function() {
+	document.fire('layout_changed')
+})
+
 // common state wrappers -----------------------------------------------------
 
 css_generic_state('[hidden]', '', `
@@ -3418,6 +3424,8 @@ e.popup = function(target, side, align) {
 	let er, tr, br, fixed, sx, sy, spx, spy
 
 	e.on_measure(function() {
+		if (e.hidden)
+			return
 		er = e.rect()
 		tr = (e.popup_target || e.parent).rect()
 		br = window.rect()
@@ -3484,6 +3492,8 @@ e.popup = function(target, side, align) {
 	e.do_position_popup = noop
 
 	e.on_position(function() {
+		if (e.hidden)
+			return
 
 		let w = er.w
 		let h = er.h
