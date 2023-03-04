@@ -246,7 +246,7 @@ ELEMENT STATE
 	e.make_disablable()
 		e.disabled
 		e.disable(reason, disabled)
-	e.make_focusable([focusable_element])
+	e.make_focusable([focusable_element1, ...])
 		e.tabindex
 		e.focusable
 	focused_focusable([e]) -> e
@@ -1918,12 +1918,20 @@ e.make_focusable = function(...fes) {
 	e.prop('tabindex' , {type: 'number', default: 0})
 	e.prop('focusable', {type: 'bool', private: true, default: true})
 
+	let last_focused
+	function set_last_focused() {
+		last_focused = this
+	}
+	if (fes.length > 1)
+		for (let fe of fes)
+			fe.on('focusout', set_last_focused)
+
 	let inh_focus = e.focus
 	e.focus = function() {
 		if (fes[0] == this || this.widget_selected)
 			inh_focus.call(this)
 		else
-			fes[0].focus()
+			(last_focused || fes[0]).focus()
 	}
 
 }
@@ -3086,7 +3094,7 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 function resizeable_canvas(pw, ph) {
 	let canvas = tag('canvas', {class: 'abs', width: 0, height: 0})
 	let ct = div({class: 'S rel clip'}, canvas)
-	ct.redraw = noop
+	ct.do_redraw = noop
 	let cx = canvas.getContext('2d')
 	let w0, h0
 	let w, h
@@ -3096,13 +3104,21 @@ function resizeable_canvas(pw, ph) {
 		w = ct.cw
 		h = ct.ch
 	})
+	let redraw_pass = null
 	function redraw() {
-		canvas.resize(w, h, pw, ph)
-		cx.save()
-		cx.clear()
-		cx.scale(devicePixelRatio, devicePixelRatio)
-		ct.redraw(cx, w, h)
-		cx.restore()
+		do {
+			let pass = redraw_pass
+			redraw_pass = null
+			canvas.resize(w, h, pw, ph)
+			cx.save()
+			cx.clear()
+			cx.scale(devicePixelRatio, devicePixelRatio)
+			ct.do_redraw(cx, w, h, pass)
+			cx.restore()
+		} while (redraw_pass)
+	}
+	ct.redraw_again = function(pass) {
+		redraw_pass = pass || true
 	}
 	ct.on_position(redraw)
 	function update() {
@@ -3111,7 +3127,7 @@ function resizeable_canvas(pw, ph) {
 	ct.on('resize', update)
 	ct.listen('theme_changed', update)
 	ct.on_redraw = function(f) {
-		ct.do_after('redraw', f)
+		ct.do_after('do_redraw', f)
 	}
 	// Firefox loads fonts into canvas asynchronously, even though said fonts
 	// are already loaded and were preloaded using <link preload>.
@@ -3120,7 +3136,7 @@ function resizeable_canvas(pw, ph) {
 		document.on('layout_changed', update, on)
 		document.fonts.on('loadingdone', update, on)
 	})
-	ct.force_redraw = redraw
+	ct.redraw_now = redraw
 	ct.canvas = canvas
 	ct.ctx = cx
 	return ct

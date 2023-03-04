@@ -97,6 +97,7 @@ button[pressed] { background: var(--bg-button-active); }
 			<button class="layout-btn" key=inline   layout-classes="display-inline ">Inline</button>
 			<button class="layout-btn" key=flex-h-t layout-classes="h-t S shrinks  ">Flex H-T</button>
 			<button class="layout-btn" key=flex-h-s layout-classes="h-s S shrinks  ">Flex H-S</button>
+			<button class="layout-btn" key=flex-v-s layout-classes="v-s S shrinks  ">Flex V-S</button>
 			<button class="layout-btn" key=flex-v-l layout-classes="v-l S shrinks  ">Flex V-L</button>
 			<button class="layout-btn" key=grid     layout-classes="grid shrinks   ">Grid</button>
 		</div>
@@ -385,11 +386,11 @@ m = menu({
 	],
 })
 
-b = btn({
+b = button({
 	text: 'Click for menu',
 	primary: true,
 	action: function() {
-		b.add(m)
+		main.add(m)
 	},
 })
 
@@ -454,7 +455,7 @@ main.add(button({
 	}
 }))
 
-main.add(btn({
+main.add(button({
 	text: 'Modal that you can\'t close',
 	action: function() {
 		win.cancelable = false
@@ -483,14 +484,14 @@ tb = toolbox({
 
 main.add(tb)
 
-main.add(btn({
+main.add(button({
 	text: 'Click to show toolbox',
 	action: function() {
 		tb.show().focus()
 	}
 }))
 
-main.add(btn({
+main.add(button({
 	text: 'Click to show another toolbox',
 	action: function() {
 		main.add(toolbox({
@@ -820,9 +821,9 @@ for (let e of $('list')) {
 <input><button>OK</button>
 
 <dropdown value=grass>
-	<div value=chickens ><b>Chickens </b></div>
-	<div value=cows     ><b>Cows     </b></div>
-	<div value=grass    ><i>Grass    </i></div>
+	<b value=chickens ><span class="fas fa-drumstick-bite"></span> <span searchable>Chickens </span></b>
+	<u value=cows style="--fa-display: inline"><span class="fas fa-hat-cowboy"></span> <span searchable>Cows</span></u>
+	<i value=grass><i><span searchable>Grass</span></i>
 </dropdown>
 
 <dropdown>

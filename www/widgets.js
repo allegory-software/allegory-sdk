@@ -21,7 +21,6 @@ WIDGETS
 	slides
 	md
 	pagenav
-	richtext
 	label
 	info
 	check
@@ -39,6 +38,7 @@ WIDGETS
 	dropdown
 	date-input
 	date-range-input
+	richtext
 	widget-placeholder
 
 FUNCTIONS
@@ -795,6 +795,7 @@ tooltip = component('tooltip', function(e) {
 	})
 
 	function content_pointerdown(ev) {
+
 		if (ev.target != this)
 			return // clicked inside the tooltip.
 
@@ -1013,8 +1014,12 @@ e.make_list_drag_elements = function() {
 		grabbed_item = down_ev.target.closest_child(e)
 		if (!grabbed_item) return
 
-		let items = e.selected_items
-		items = items && items.copy() || [grabbed_item]
+		let items = []
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			let item = e.at[i]
+			if (item.selected || item == grabbed_item)
+				items.push(item)
+		}
 
 		let horiz = e.css('flexDirection') == 'row'
 		let items_r = grabbed_item.rect()
@@ -1248,7 +1253,7 @@ e.make_list_drop_elements = function() {
 config props:
 	multiselect
 out props:
-	selected_items: set(item)
+	selected_items: [item1,...]
 	focused_item
 	focused_item_index
 uses from item:
@@ -1266,7 +1271,7 @@ stubs:
 
 */
 
-css_state('.selected', '', `
+css_state('.list-item-selected', '', `
 	color      : var(--fg-selected);
 	background : var(--bg-selected);
 `)
@@ -1523,8 +1528,8 @@ e.make_list_items_focusable = function() {
 	})
 
 	e.update_item_state = function(item) {
-		item.class('selected', !!item.selected)
-		item.class('focused', e.focused_item == item)
+		item.class('list-item-selected', !!item.selected)
+		item.class('list-item-focused', e.focused_item == item)
 	}
 
 	e.on('pointerdown', function(ev) {
@@ -1762,7 +1767,7 @@ list = component('list', function(e) {
 // z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 // noclip: submenus are outside clipping area
 // fg: prevent inheritance by the .focused rule below.
-css('.menu', 'm0 p0 b arial smaller abs z4 noclip bg1 shadow-menu noselect', `
+css('.menu', 'm0 p0 b arial smaller t-l abs z4 noclip bg1 shadow-menu noselect', `
 	min-width: 200px;
 	width: min-content; /* why the fuck is width:0 not working here? */
 	display: table;
@@ -2865,10 +2870,10 @@ methods:
 */
 
 css('.action-band', 'S h-r h-m gap-x')
-css('.action-band .btn-text', 'nowrap')
+css('.action-band .button-text', 'nowrap')
 
 // hide cancel button icon unless space is tight when text is hidden
-css('.action-band:not(.tight) .dlg-button-cancel .btn-icon', 'hidden')
+css('.action-band:not(.tight) .dlg-button-cancel .button-icon', 'hidden')
 
 css('.action-band-center', 'S h-c gap-x')
 
@@ -2904,7 +2909,7 @@ action_band = component('action-band', 'Input', function(e) {
 				if (spec.has('primary') || spec.has('ok'))
 					b.primary = true
 				b_sets_text = b.text != null
-				b = btn(b)
+				b = button(b)
 				e.buttons[bname] = b
 			}
 			b.class('dlg-button-'+name)
@@ -2956,7 +2961,7 @@ methods:
 
 */
 
-css('.dlg', 'v p-4 fg b0 ro bg1', `
+css('.dlg', 'rel v p-4 fg b0 ro bg1', `
 	margin: 20px;
 	box-shadow: var(--shadow-modal);
 `)
@@ -2967,11 +2972,9 @@ css('.dlg-content', 'm-y-2')
 
 css('.dlg-heading', 'dim xlarge bold')
 
-css('.dlg-xbutton', 'abs b b-t-0 h-c h-m', `
+css('.dlg-xbutton', 'abs ro-var b b-t-0 h-c h-m', `
 	right: 8px;
 	top: 0px;
-	border-bottom-right-radius: var(--border-radius-button);
-	border-bottom-left-radius : var(--border-radius-button);
 	width: 52px;
 	height: 18px;
 	color: var(--fg-button);
@@ -3115,7 +3118,7 @@ dlg = component('dlg', function(e) {
 	}
 
 	e.ok = function() {
-		for (let btn of e.$('btn[primary]')) {
+		for (let btn of e.$('.button[primary]')) {
 			if (!(btn.effectively_hidden || btn.effectively_disabled)) {
 				btn.click()
 				return true
@@ -3500,10 +3503,11 @@ events:
 
 */
 
-css('.pagenav', 'h-bl')
-css('.pagenav-button', '')
+css('.pagenav', 'h-bl h-sb')
+css('.pagenav-pages-box', 'h-bl')
+css('.pagenav-button', 'm-x-05')
 css('.pagenav-current', '')
-css('.pagenav-dots', '')
+css('.pagenav-dots', 'p-x noselect')
 
 pagenav = component('pagenav', function(e) {
 
@@ -3550,294 +3554,24 @@ pagenav = component('pagenav', function(e) {
 	e.on_update(function() {
 		e.clear()
 		e.add(e.nav_button(-1))
+		let pages_box = div({class: 'pagenav-pages-box'})
 		let n = e.page_count
 		let p = e.cur_page
 		let dotted
 		for (let i = 1; i <= n; i++) {
 			if (i == 1 || i == n || (i >= p-1 && i <= p+1)) {
-				e.add(e.page_button(i))
+				pages_box.add(e.page_button(i))
 				dotted = false
 			} else if (!dotted) {
-				e.add(div({class: 'pagenav-dots'}, unsafe_html('&mldr;')))
+				pages_box.add(div({class: 'pagenav-dots'}, unsafe_html('&mldr;')))
 				dotted = true
 			}
 		}
+		e.add(pages_box)
 		e.add(e.nav_button(1))
 	})
 
 })
-
-
-/* <richtext> ----------------------------------------------------------------
-
-in props:
-	content
-inner html:
-	-> content
-
-*/
-
-css('.richtext', 'scroll-auto')
-
-css('.richtext:not(.richedit)', 'm0', 'display: block;')
-css('.richtext:not(.richedit) > .focus-box', 'b0')
-
-css('.richtext-content', 'vscroll-auto no-outline', `
-	padding: 10px;
-`)
-
-css('.richtext-actionbar', 'abs h bg1')
-
-css('.richtext-button', 'm0 b bg1 h-c h-m', `
-	height: 2em;
-	width: 2em;
-`)
-
-css('.richtext-button:not(:first-child)', 'b-l-0')
-
-css_state('.richtext-button:hover', '', `
-	background-color: var(--bg-button-hover);
-`)
-
-css_state('.richtext-button:active', '', `
-	background-color: var(--fg-dim);
-`)
-
-css_state('.richtext-button.selected', '', `
-	box-shadow: var(--shadow-pressed);
-	background-color: var(--fg-dim);
-	color: white;
-`)
-
-richtext = component('richtext', function(e) {
-
-	e.class('richtext')
-	e.make_disablable()
-
-	let html_content = [...e.nodes]
-	e.clear()
-
-	selectable_widget(e)
-	contained_widget(e)
-	editable_widget(e)
-
-	e.content_box = div({class: 'richtext-content'})
-	e.add(e.content_box)
-
-	// content property
-
-	e.set_content = function(s) {
-		e.content_box.set(s)
-		e.fire('content_changed')
-	}
-	function serialize_content(s) {
-		return e.content_box.html
-	}
-	e.prop('content', {type: 'nodes', slot: 'lang', serialize: serialize_content})
-
-	// widget editing ---------------------------------------------------------
-
-	e.set_widget_editing = function(v) {
-		if (!v) return
-		richtext_widget_editing(e)
-		e.set_widget_editing = function(v) {
-			e.editing = v
-			if (!v) {
-				e.content = [...e.content_box.nodes]
-				e.xsave()
-			}
-		}
-		e.editing = true
-	}
-
-	return {content: html_content}
-
-})
-
-/* <richtext> editing mixin --------------------------------------------------
-
-
-
-*/
-
-{
-
-let exec = (command, value = null) => document.execCommand(command, false, value)
-let cstate = (command) => document.queryCommandState(command)
-
-let actions = {
-	bold: {
-		//icon: '<b>B</b>',
-		icon_class: 'fa fa-bold',
-		result: () => exec('bold'),
-		state: () => cstate('bold'),
-		title: 'Bold (Ctrl+B)',
-	},
-	italic: {
-		//icon: '<i>I</i>',
-		icon_class: 'fa fa-italic',
-		result: () => exec('italic'),
-		state: () => cstate('italic'),
-		title: 'Italic (Ctrl+I)',
-	},
-	underline: {
-		//icon: '<u>U</u>',
-		icon_class: 'fa fa-underline',
-		result: () => exec('underline'),
-		state: () => cstate('underline'),
-		title: 'Underline (Ctrl+U)',
-	},
-	code: {
-		//icon: '&lt/&gt',
-		icon_class: 'fa fa-code',
-		result: () => exec('formatBlock', '<pre>'),
-		title: 'Code',
-	},
-	heading1: {
-		icon: '<b>H<sub>1</sub></b>',
-		result: () => exec('formatBlock', '<h1>'),
-		title: 'Heading 1',
-	},
-	heading2: {
-		icon: '<b>H<sub>2</sub></b>',
-		result: () => exec('formatBlock', '<h2>'),
-		title: 'Heading 2',
-	},
-	line: {
-		icon: '&#8213',
-		result: () => exec('insertHorizontalRule'),
-		title: 'Horizontal Line',
-	},
-	link: {
-		//icon: '&#128279',
-		icon_class: 'fa fa-link',
-		result: function() {
-			let url = window.prompt('Enter the link URL')
-			if (url) exec('createLink', url)
-		},
-		title: 'Link',
-	},
-	olist: {
-		//icon: '&#35',
-		icon_class: 'fa fa-list-ol',
-		result: () => exec('insertOrderedList'),
-		title: 'Ordered List',
-	},
-	ulist: {
-		//icon: '&#8226',
-		icon_class: 'fa fa-list-ul',
-		result: () => exec('insertUnorderedList'),
-		title: 'Unordered List',
-	},
-	paragraph: {
-		//icon: '&#182',
-		icon_class: 'fa fa-paragraph',
-		result: () => exec('formatBlock', '<p>'),
-		title: 'Paragraph',
-	},
-	quote: {
-		//icon: '&#8220 &#8221',
-		icon_class: 'fa fa-quote-left',
-		result: () => exec('formatBlock', '<blockquote>'),
-		title: 'Quote',
-	},
-	strikethrough: {
-		//icon: '<strike>S</strike>',
-		icon_class: 'fa fa-strikethrough',
-		result: () => exec('strikeThrough'),
-		state: () => cstate('strikeThrough'),
-		title: 'Strike-through',
-	},
-}
-
-function richtext_widget_editing(e) {
-
-	let button_pressed
-	function press_button() { button_pressed = true }
-
-	e.actionbar = div({class: 'richtext-actionbar'})
-	if (!e.focus_box)
-		e.actionbar.popup(e, 'top', 'left')
-	for (let k in actions) {
-		let action = actions[k]
-		let button = tag('button', {class: 'richtext-button', title: action.title})
-		button.attr('tabindex', '-1')
-		button.html = action.icon || ''
-		button.classes = action.icon_class
-		button.on('pointerdown', press_button)
-		let update_button
-		if (action.state) {
-			update_button = function() {
-				button.class('selected', action.state())
-			}
-			e.content_box.on('keyup', update_button)
-			e.content_box.on('pointerup', update_button)
-		}
-		button.on('click', function() {
-			button_pressed = false
-			if (action.result()) {
-				e.content_box.focus()
-			}
-			if (update_button)
-				update_button()
-			return false
-		})
-		e.actionbar.add(button)
-	}
-
-	e.actionbar.class('richtext-actionbar-embedded', !!e.focus_box)
-	if (e.focus_box) // is richedit
-		e.focus_box.insert(0, e.actionbar)
-	else
-		e.add(e.actionbar)
-
-	e.content_box.on('input', function(ev) {
-		let e1 = ev.target.first
-		if (e1 && e1.nodeType == 3)
-			exec('formatBlock', '<p>')
-		else if (e.content_box.html == '<br>')
-			e.content_box.clear()
-		e.fire('content_changed')
-	})
-
-	e.content_box.on('keydown', function(key, shift, ctrl, alt, ev) {
-		if (key === 'Enter')
-			if (document.queryCommandValue('formatBlock') == 'blockquote')
-				runafter(0, function() { exec('formatBlock', '<p>') })
-			else if (document.queryCommandValue('formatBlock') == 'pre')
-				runafter(0, function() { exec('formatBlock', '<br>') })
-		ev.stopPropagation()
-	})
-
-	e.content_box.on('keypress', function(key, shift, ctr, alt, ev) {
-		ev.stopPropagation()
-	})
-
-	e.content_box.on('pointerdown', function(ev) {
-		if (!e.widget_editing)
-			return
-		if (!ev.ctrlKey)
-			ev.stopPropagation() // prevent exit editing.
-	})
-
-	e.actionbar.on('pointerdown', function(ev) {
-		ev.stopPropagation() // prevent exit editing.
-	})
-
-	e.set_editing = function(v) {
-		e.content_box.contentEditable = v
-		e.actionbar.hidden = !v
-	}
-	e.prop('editing', {private: true})
-
-	e.content_box.on('blur', function() {
-		if (!button_pressed)
-			e.widget_editing = false
-	})
-
-}
-
-}
 
 /* <label> -------------------------------------------------------------------
 
@@ -5110,11 +4844,11 @@ state:
 
 */
 
-css('.tags-box', 'm-y p-y-05 h-m flex-wrap gap', `
+css('.tags-box', 'm-y p-y-05 h-m flex-wrap gap-y', `
 	--tag-hue: 154;
 `)
 
-css('.tags-tag', 'p-y-025 p-x-input gap-x ro-var-075 h-m noselect', `
+css('.tags-tag', 'm-x-05 p-y-025 p-x-input gap-x ro-var-075 h-m noselect', `
 	background  : hsl(var(--tag-hue), 32%, 28%);
 	color       : hsl(var(--tag-hue), 87%, 61%);
 `)
@@ -5227,10 +4961,10 @@ state:
 */
 
 css('.tags', 'shrinks')
-css('.tags-input', 'S b0')
-css_role('.tags-scrollbox', 'shrinks h-m b-r-0 p-x clip')
-css_role('.tags .tags-box'  , 'shrinks m0')
-css_role('.tags .tags-input', 'b-l-0', `min-width: 5em;`)
+css('.tags-input', 'S')
+css_role('.tags-scrollbox', 'shrinks h-m b-r-0 clip')
+css_role('.tags .tags-box'  , 'rel shrinks m0')
+css_role('.tags .tags-input', 'p-x-input b-l-0', `min-width: 5em;`)
 css('.tags-box-nowrap', 'flex-nowrap')
 
 tags = component('tags', function(e) {
@@ -5936,11 +5670,11 @@ function calendar_widget(e, mode, focusable) {
 	let start_week = week(time(2020))
 	let sy_now   = 0 // in pixels, while animating.
 	let sy_final = 0 // in pixels, final.
-	let dragging
+	let drag_scroll
 
 	let scroll_transition = transition(function(sy) {
 		sy_now = sy
-		ct.force_redraw() // we're already in an animation frame.
+		ct.redraw_now() // we're already in an animation frame.
 	})
 
 	e.scroll_to = function(sy, duration) {
@@ -6069,7 +5803,7 @@ function calendar_widget(e, mode, focusable) {
 
 	}
 
-	ct.on_redraw(function(cx) {
+	ct.on_redraw(function(cx, _, _, pass) {
 
 		// break down scroll offset into start week and relative scroll offset.
 		let sy_weeks_f = sy_now / cell_h
@@ -6262,25 +5996,31 @@ function calendar_widget(e, mode, focusable) {
 
 		// update range end
 		if (drag_range_end != null && hit_day != null) {
+			let d0_0 = drag_range[0]
+			let d1_0 = drag_range[1]
 			drag_range[drag_range_end] = hit_day
-			if (drag_range[0] > drag_range[1])
+			if (drag_range[0] > drag_range[1]) // adjust a negative range.
 				drag_range[drag_range_end] = drag_range[1-drag_range_end]
-			if (mode == 'range') {
-				let day1_0 = day1
-				let day2_0 = day2
-				day1 = drag_range[0]
-				day2 = drag_range[1]
-				if (day1 != day1_0) announce_prop_changed(e, 'day1', day1, day1_0)
-				if (day2 != day2_0) announce_prop_changed(e, 'day2', day2, day2_0)
-			} else if (mode == 'ranges') {
-				announce_prop_changed(e, 'ranges', e.ranges, e.ranges)
+			let d0 = drag_range[0]
+			let d1 = drag_range[1]
+			if (d0 != d0_0 || d1 != d1_0) {
+				assert(pass != 'update_range_end') // blow up fuse
+				if (mode == 'range') {
+					if (d0 != d0_0) announce_prop_changed(e, 'day1', d0, d0_0)
+					if (d1 != d1_0) announce_prop_changed(e, 'day2', d1, d1_0)
+				} else if (mode == 'ranges') {
+					announce_prop_changed(e, 'ranges', e.ranges, e.ranges)
+				} else if (mode == 'range') {
+					announce_prop_changed(e, 'range', e.range, e.range)
+				}
+				ct.redraw_again('update_range_end')
 			}
 		}
 
 		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize' : null
 
 		// draw month name overlays while drag-scrolling
-		if (dragging) {
+		if (drag_scroll) {
 			if (0) {
 				cx.fillStyle = bg_smoke
 				cx.fillRect(0, 0, view_w, view_h)
@@ -6317,6 +6057,8 @@ function calendar_widget(e, mode, focusable) {
 		e.update()
 	})
 
+	let anchor_day
+
 	ct.on('pointerdown', function(ev, down_mx, down_my) {
 
 		scroll_transition.stop()
@@ -6327,7 +6069,7 @@ function calendar_widget(e, mode, focusable) {
 			hit_mx = down_mx
 			hit_my = down_my
 			invalid = true
-			ct.force_redraw()
+			ct.redraw_now()
 		}
 		assert(!invalid)
 
@@ -6352,32 +6094,56 @@ function calendar_widget(e, mode, focusable) {
 					return
 				}
 				let dy = my - down_my
-				if (!dragging)
+				if (!drag_scroll)
 					if (abs(dy) < 7) // prevent accidental dragging
 						return
-				dragging = true
+				drag_scroll = true
 				e.scroll_to(sy0 + dy, 0)
 			},
 			function captured_up(ev, mx, my) {
+				let was_drag_range = !!drag_range
+
 				down = false
-				drag_range     = null
+				drag_range = null
 				drag_range_end = null
-				if (!dragging) {
-					if (mode == 'day') {
-						if (hit_day) {
-							e.day = hit_day
-							e.fire('pick', e.day)
-							return false
-						}
-					}
-					return
+
+				if (drag_scroll) {
+					drag_scroll = false
+					let t1 = ev.timeStamp
+					let dt = (t1 - t0)
+					let dy = my - down_my
+					let velocity = dy / dt
+					e.scroll_by(velocity * 50)
+					return false
 				}
-				dragging = false
-				let t1 = ev.timeStamp
-				let dt = (t1 - t0)
-				let dy = my - down_my
-				let velocity = dy / dt
-				e.scroll_by(velocity * 50)
+
+				if (mode == 'day' && hit_day != null) {
+					e.day = hit_day
+					e.fire('pick', e.day)
+					return false
+				}
+
+				if (mode == 'range' && !was_drag_range && hit_day != null) {
+					if (ev.shift || ev.ctrl) {
+						if (anchor_day == null)
+							anchor_day = min(e.day1, e.day2)
+						let d1 = anchor_day
+						let d2 = hit_day
+						if (d1 > d2) {
+							let t = d1
+							d1 = d2
+							d2 = t
+						}
+						e.day1 = d1
+						e.day2 = d2
+					} else {
+						anchor_day = hit_day
+						e.day1 = hit_day
+						e.day2 = hit_day
+					}
+					return false
+				}
+
 			}
 		)
 	})
@@ -6419,8 +6185,9 @@ function calendar_widget(e, mode, focusable) {
 					e.scroll_to_view_range(e.day, e.day)
 					return false
 				} else if (mode == 'range') {
-					e.day1 = day(e.day1, ddays)
-					e.day2 = day(e.day2, ddays)
+					if (!shift)
+						e.day1 = day(e.day1, ddays)
+					e.day2 = max(day(e.day2, ddays), e.day1)
 					e.scroll_to_view_range(e.day1, e.day2)
 					return false
 				}
@@ -6462,7 +6229,7 @@ css_role_state('.date-input .calendar:focus-visible', 'outline-focus')
 
 function date_input_widget(e, range) {
 
-	e.class('input-group b-collapse-h')
+	e.class('date-input input-group b-collapse-h')
 	e.make_disablable()
 
 	if (range) {
@@ -6599,7 +6366,6 @@ function date_input_widget(e, range) {
 }
 
 date_input = component('date-input', 'Input', function(e) {
-	e.class('date-input')
 	return date_input_widget(e)
 })
 
@@ -6607,6 +6373,266 @@ date_range_input = component('date-range-input', 'Input', function(e) {
 	e.class('date-range-input')
 	return date_input_widget(e, true)
 })
+
+/* <richtext> ----------------------------------------------------------------
+
+in props:
+	content
+inner html:
+	-> content
+
+*/
+
+css('.richtext', 'scroll-auto')
+
+css('.richtext:not(.richedit)', 'm0', 'display: block;')
+css('.richtext:not(.richedit) > .focus-box', 'b0')
+
+css('.richtext-content', 'vscroll-auto no-outline', `
+	padding: 10px;
+`)
+
+richtext = component('richtext', function(e) {
+
+	e.class('richtext')
+	e.make_disablable()
+
+	let html_content = [...e.nodes]
+	e.clear()
+
+	selectable_widget(e)
+	contained_widget(e)
+	editable_widget(e)
+
+	e.content_box = div({class: 'richtext-content'})
+	e.add(e.content_box)
+
+	// content property
+
+	e.set_content = function(s) {
+		e.content_box.set(s)
+		e.fire('content_changed')
+	}
+	function serialize_content(s) {
+		return e.content_box.html
+	}
+	e.prop('content', {type: 'nodes', slot: 'lang', serialize: serialize_content})
+
+	// widget editing ---------------------------------------------------------
+
+	e.set_widget_editing = function(v) {
+		if (!v) return
+		richtext_widget_editing(e)
+		e.set_widget_editing = function(v) {
+			e.editing = v
+			if (!v) {
+				e.content = [...e.content_box.nodes]
+				e.xsave()
+			}
+		}
+		e.editing = true
+	}
+
+	return {content: html_content}
+
+})
+
+/* <richtext> editing mixin --------------------------------------------------
+
+
+
+*/
+
+{
+
+css('.richtext-actionbar', 'abs h bg1')
+
+css('.richtext-button', 'm0 b ro0 bg1 h-c h-m arrow', `
+	height: 2em;
+	width: 2em;
+`)
+
+// TODO: why does fontawsome take priority over css styles?
+css_role('.richtext-button', 'h')
+
+let exec = (command, value = null) => document.execCommand(command, false, value)
+let cstate = (command) => document.queryCommandState(command)
+
+let actions = {
+	bold: {
+		//icon: '<b>B</b>',
+		icon_class: 'fa fa-bold',
+		result: () => exec('bold'),
+		state: () => cstate('bold'),
+		title: 'Bold (Ctrl+B)',
+	},
+	italic: {
+		//icon: '<i>I</i>',
+		icon_class: 'fa fa-italic',
+		result: () => exec('italic'),
+		state: () => cstate('italic'),
+		title: 'Italic (Ctrl+I)',
+	},
+	underline: {
+		//icon: '<u>U</u>',
+		icon_class: 'fa fa-underline',
+		result: () => exec('underline'),
+		state: () => cstate('underline'),
+		title: 'Underline (Ctrl+U)',
+	},
+	code: {
+		//icon: '&lt/&gt',
+		icon_class: 'fa fa-code',
+		result: () => exec('formatBlock', '<pre>'),
+		title: 'Code',
+	},
+	heading1: {
+		icon: '<b>H<sub>1</sub></b>',
+		result: () => exec('formatBlock', '<h1>'),
+		title: 'Heading 1',
+	},
+	heading2: {
+		icon: '<b>H<sub>2</sub></b>',
+		result: () => exec('formatBlock', '<h2>'),
+		title: 'Heading 2',
+	},
+	line: {
+		icon: '&#8213',
+		result: () => exec('insertHorizontalRule'),
+		title: 'Horizontal Line',
+	},
+	link: {
+		//icon: '&#128279',
+		icon_class: 'fa fa-link',
+		result: function() {
+			let url = window.prompt('Enter the link URL')
+			if (url) exec('createLink', url)
+		},
+		title: 'Link',
+	},
+	olist: {
+		//icon: '&#35',
+		icon_class: 'fa fa-list-ol',
+		result: () => exec('insertOrderedList'),
+		title: 'Ordered List',
+	},
+	ulist: {
+		//icon: '&#8226',
+		icon_class: 'fa fa-list-ul',
+		result: () => exec('insertUnorderedList'),
+		title: 'Unordered List',
+	},
+	paragraph: {
+		//icon: '&#182',
+		icon_class: 'fa fa-paragraph',
+		result: () => exec('formatBlock', '<p>'),
+		title: 'Paragraph',
+	},
+	quote: {
+		//icon: '&#8220 &#8221',
+		icon_class: 'fa fa-quote-left',
+		result: () => exec('formatBlock', '<blockquote>'),
+		title: 'Quote',
+	},
+	strikethrough: {
+		//icon: '<strike>S</strike>',
+		icon_class: 'fa fa-strikethrough',
+		result: () => exec('strikeThrough'),
+		state: () => cstate('strikeThrough'),
+		title: 'Strike-through',
+	},
+}
+
+function richtext_widget_editing(e) {
+
+	let button_pressed
+	function press_button() { button_pressed = true }
+
+	e.actionbar = div({class: 'richtext-actionbar'})
+	if (!e.focus_box)
+		e.actionbar.popup(e, 'top', 'left')
+	for (let k in actions) {
+		let action = actions[k]
+		// Guess what: this must be a <button>, if it's a <div>, clicking on it
+		// makes you lose the selection on the contenteditable!!! WTF?
+		let button = tag('button', {class: 'richtext-button b-collapse-h', title: action.title})
+		button.attr('tabindex', '-1')
+		button.html = action.icon || ''
+		button.classes = action.icon_class
+		button.on('pointerdown', press_button)
+		let update_button
+		if (action.state) {
+			update_button = function() {
+				button.class('selected', action.state())
+			}
+			e.content_box.on('keyup', update_button)
+			e.content_box.on('pointerup', update_button)
+		}
+		button.on('click', function() {
+			button_pressed = false
+			if (action.result()) {
+				e.content_box.focus()
+			}
+			if (update_button)
+				update_button()
+			return false
+		})
+		e.actionbar.add(button)
+	}
+
+	e.actionbar.class('richtext-actionbar-embedded', !!e.focus_box)
+	if (e.focus_box) // is richedit
+		e.focus_box.insert(0, e.actionbar)
+	else
+		e.add(e.actionbar)
+
+	e.content_box.on('input', function(ev) {
+		let e1 = ev.target.first
+		if (e1 && e1.nodeType == 3)
+			exec('formatBlock', '<p>')
+		else if (e.content_box.html == '<br>')
+			e.content_box.clear()
+		e.fire('content_changed')
+	})
+
+	e.content_box.on('keydown', function(key, shift, ctrl, alt, ev) {
+		if (key === 'Enter')
+			if (document.queryCommandValue('formatBlock') == 'blockquote')
+				runafter(0, function() { exec('formatBlock', '<p>') })
+			else if (document.queryCommandValue('formatBlock') == 'pre')
+				runafter(0, function() { exec('formatBlock', '<br>') })
+		ev.stopPropagation()
+	})
+
+	e.content_box.on('keypress', function(key, shift, ctr, alt, ev) {
+		ev.stopPropagation()
+	})
+
+	e.content_box.on('pointerdown', function(ev) {
+		if (!e.widget_editing)
+			return
+		if (!ev.ctrl)
+			ev.stopPropagation() // prevent exit editing.
+	})
+
+	e.actionbar.on('pointerdown', function(ev) {
+		ev.stopPropagation() // prevent exit editing.
+	})
+
+	e.set_editing = function(v) {
+		e.content_box.contentEditable = v
+		e.actionbar.hidden = !v
+	}
+	e.prop('editing', {private: true})
+
+	e.content_box.on('blur', function() {
+		if (!button_pressed)
+			e.widget_editing = false
+	})
+
+}
+
+}
 
 /* <widget-placeholder> ------------------------------------------------------
 
