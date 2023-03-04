@@ -580,8 +580,7 @@ in props:
 */
 
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.tooltip', 'z2 h-l h-t noclip noselect op0 click-through ease-out ease-fw ease-02s', `
-	transition-property: opacity, transform;
+css('.tooltip', 'z2 h-l h-t noclip noselect', `
 	max-width: 400px;  /* max. width of the message bubble before wrapping */
 `)
 
@@ -591,19 +590,22 @@ css('.tooltip-body', 'h-bl p-y tight ro bg1', `
 
 // visibility animation
 
-css('.tooltip.visible', 'op1 click-through-off')
+// hiding with `op0 click-through` instead of `display: none` enables animated show/hide.
+css_generic_state('.tooltip[hidden]', '', `display: inline-flex !important;`)
 
-// TODO: these don't work, figure out why!
-css('.tooltip.visible[side=left  ]', '', ` animation-name: tooltip-left;   `)
-css('.tooltip.visible[side=right ]', '', ` animation-name: tooltip-right;  `)
-css('.tooltip.visible[side=top   ]', '', ` animation-name: tooltip-top;    `)
-css('.tooltip.visible[side=bottom]', '', ` animation-name: tooltip-bottom; `)
+css('.tooltip[hidden]'      , 'op0 click-through     ease-out ease-02s')
+css('.tooltip:not([hidden])', 'op1 click-through-off anim-out anim-02s')
+
+css('.tooltip:not([hidden])[side=left  ]', '', ` animation-name: tooltip-in-left;   `)
+css('.tooltip:not([hidden])[side=right ]', '', ` animation-name: tooltip-in-right;  `)
+css('.tooltip:not([hidden])[side=top   ]', '', ` animation-name: tooltip-in-top;    `)
+css('.tooltip:not([hidden])[side=bottom]', '', ` animation-name: tooltip-in-bottom; `)
 
 css(`
-@keyframes tooltip-left   { from { opacity: 0; transform: translate(-1em, 0);  } }
-@keyframes tooltip-right  { from { opacity: 0; transform: translate( 1em, 0);  } }
-@keyframes tooltip-top    { from { opacity: 0; transform: translate(0, -.5em); } }
-@keyframes tooltip-bottom { from { opacity: 0; transform: translate(0,  .5em); } }
+@keyframes tooltip-in-left   { 0% { opacity: 0; transform: translate(-1em, 0);  } 100% { opacity: 1; } }
+@keyframes tooltip-in-right  { 0% { opacity: 0; transform: translate( 1em, 0);  } 100% { opacity: 1; } }
+@keyframes tooltip-in-top    { 0% { opacity: 0; transform: translate(0, -.5em); } 100% { opacity: 1; } }
+@keyframes tooltip-in-bottom { 0% { opacity: 0; transform: translate(0,  .5em); } 100% { opacity: 1; } }
 `)
 
 css('.tooltip-content', 'p-x-2', `
@@ -726,7 +728,6 @@ tooltip = component('tooltip', function(e) {
 
 	e.do_position_popup = function(side, align) {
 		// slide-in + fade-in with css.
-		e.class('visible', !e.hidden)
 		e.attr('side' , side)
 		e.attr('align', align)
 	}
@@ -1294,12 +1295,14 @@ e.make_list_items_focusable = function() {
 	e.stay_in_edit_mode = true
 
 	e.selected_item_index = null
-	let out_a = []
 	e.property('selected_items', function() {
-		out_a.clear()
-		for (let i = 0, n = e.list_len; i < n; i++)
-			if (e.at[i].selected)
-				out_a.push(e.at[i])
+		let sel_items = []
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			let item = e.at[i]
+			if (item.selected)
+				sel_items.push(item)
+		}
+		return sel_items
 	}, function(items) {
 		for (let i = 0, n = e.list_len; i < n; i++)
 			e.at[i].selected = false
@@ -1492,20 +1495,21 @@ e.make_list_items_focusable = function() {
 	e.do_after('items_changed', function() {
 		if (e.focused_item)
 			if (e.focused_item._remove) {
+				e.selected_item._remove = null
 				e.focused_item_index = null
 				e.update({state: true})
 			}
 		if (e.selected_item)
-			if (e.selected_item._remove) {
+			if (e.selected_item._remove)
 				e.selected_item_index = null
-				e.update({state: true})
-			}
 		let sel_changed
-		for (let item of e.selected_items)
-			if (item._remove) {
-				e.selected_items.delete(item)
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			let item = e.at[i]
+			if (item.selected) {
+				item.selected = null
 				sel_changed = true
 			}
+		}
 		if (sel_changed) {
 			e.announce('selected_items_changed')
 			e.update({state: true})
@@ -1621,9 +1625,10 @@ e.make_list_items_focusable = function() {
 
 	e.on('cut', function(ev) {
 		if (ev.target != e) return
-		if (!e.selected_items.size) return
-		copied_widgets.set(e.selected_items)
-		for (let item of e.selected_items) {
+		let sel_items = e.selected_items
+		if (!sel_items.length) return
+		copied_widgets.set(sel_items)
+		for (let item of sel_items) {
 			item.remove()
 			item._remove = true
 		}
@@ -1633,8 +1638,9 @@ e.make_list_items_focusable = function() {
 
 	e.on('copy', function(ev) {
 		if (ev.target != e) return
-		if (!e.selected_items.size) return
-		copied_widgets.set(e.selected_items)
+		let sel_items = e.selected_items
+		if (!sel_items.length) return
+		copied_widgets.set(sel_items)
 		return false
 	})
 
@@ -1642,15 +1648,16 @@ e.make_list_items_focusable = function() {
 		if (ev.target != e) return
 		if (!copied_widgets.size) return
 		e.selected_item_index = null
-		e.selected_items.clear()
+		let sel_items = []
 		let i = e.focused_item_index || e.list_len
 		for (let item of copied_widgets) {
 			e.insert(i, item)
-			e.selected_items.add(item)
+			sel_items.push(item)
 			item._remove = null
 			i++
 		}
 		copied_widgets.clear()
+		e.selected_items = sel_items
 		e.update({state: true})
 		e.fire('items_changed')
 	})
@@ -3656,7 +3663,7 @@ css('.info', '', ` display: inline-block; `)
 css('.info:not([collapsed])', 'smaller label h-bl gap-x')
 
 // toggling visibility on hover requires click-through for stable hovering!
-css('.info .tooltip.visible', 'click-through')
+css('.info .tooltip:not([hidden])', 'click-through')
 
 info = component('info', function(e) {
 
@@ -3974,7 +3981,7 @@ css('.slider-thumb', 'abs round', `
 `)
 
 // toggling visibility on hover requires click-through for stable hovering!
-css('.slider-thumb .tooltip.visible', 'click-through')
+css('.slider-thumb .tooltip:not([hidden])', 'click-through')
 
 css('.slider-mark', 'abs b-l t-c noselect', `
 	margin-left: -1px;
