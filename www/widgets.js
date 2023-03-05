@@ -3882,8 +3882,8 @@ additional props:
 
 css('.radio', 'checkbox')
 
-css('.radio-circle', 'check-line', ` r: .5; `)
-css('.radio-thumb' , 'ease'      , ` r:  0; fill: var(--fg-check); `)
+css('.radio-circle', 'check-line', ` r: .5px; `)
+css('.radio-thumb' , 'ease'      , ` r:    0; fill: var(--fg-check); `)
 
 css_state('.radio[checked] .radio-thumb', 'ease', ` r: .2px; transition-property: r; `)
 
@@ -4841,6 +4841,44 @@ vselect_button = component('vselect-button', function(e) {
 
 	e.class('vselect-button ro-group-v b-collapse-v')
 	return select_button.construct(e)
+
+})
+
+/* <num-input> ---------------------------------------------------------------
+
+
+
+*/
+
+css('.num-input', '')
+
+css('.num-input-input', 't-r')
+css('.num-input-updown-box' , 'h', `padding: 1px;`)
+css('.num-input-updown' , 'v-s b')
+css('.num-input-button' , 'S p-x-075 h-m')
+css('.num-input:not([disabled]) .num-input-button:hover', 'bg-input-hover')
+css('.num-input:not([disabled]) .num-input-button:active', 'bg-input-active')
+css('.num-input-button-down' , 'b-t')
+css('.num-input-arrow', '', `
+	--num-input-arrow-size: .25em;
+	border: var(--num-input-arrow-size) solid transparent; /* border-based triangle shape */
+`)
+css('.num-input-arrow-up'  , '', `border-bottom-color : var(--fg); margin-top   : calc(0px - var(--num-input-arrow-size)); `)
+css('.num-input-arrow-down', '', `border-top-color    : var(--fg); margin-bottom: calc(0px - var(--num-input-arrow-size)); `)
+
+css('.xsmall .num-input-updown, .xsmall.num-input-updown', 'hidden')
+
+num_input = component('num-input', 'Input', function(e) {
+
+	e.class('num-input input-group focus-within b-collapse-h ro-group-h')
+	e.input = input({classes: 'num-input-input'})
+	e.up_button   = div({class: 'num-input-button num-input-button-up'  },
+		div({class: 'num-input-arrow num-input-arrow-up'}))
+	e.down_button = div({class: 'num-input-button num-input-button-down'},
+		div({class: 'num-input-arrow num-input-arrow-down'}))
+	e.updown_box  = div({class: 'num-input-updown-box'},
+		div({class: 'num-input-updown'}, e.up_button, e.down_button))
+	e.add(e.input, e.updown_box)
 
 })
 
@@ -6239,14 +6277,7 @@ function date_input_widget(e, range) {
 	e.class('date-input input-group b-collapse-h')
 	e.make_disablable()
 
-	if (range) {
-		e.day1_input = input({classes: 'date-input-input', })
-		e.day2_input = input({classes: 'date-input-input', })
-		e.calendar = range_calendar({classes: 'date-input-calendar'})
-	} else {
-		e.day_input = input({classes: 'date-input-input', })
-		e.calendar = calendar({classes: 'date-input-calendar'})
-	}
+	e.calendar = (range ? range_calendar : calendar)({classes: 'date-input-calendar'})
 
 	e.calendar.h = 300
 
@@ -6278,6 +6309,10 @@ function date_input_widget(e, range) {
 			if (!(ev && ev.target == e.calendar))
 				e.calendar.set_prop(DAY, isnum(v) ? v : null, ev)
 		}
+		e[DAY+'_input'] = input({
+			classes: 'date-input-input',
+			placeholder: date_placeholder_text(),
+		})
 		e[DAY+'_input'].on('input', function(ev) {
 			e.set_prop(DAY, this.value, ev)
 		})
@@ -6290,6 +6325,11 @@ function date_input_widget(e, range) {
 					d = e.day1
 			e.set_prop(DAY, d, {target: e})
 		})
+		e.prop(range ? DAY+'_placeholder' : 'placeholder')
+		e[range ? 'set_'+DAY+'_placeholder' : 'set_placeholder'] = function(s) {
+			pr(DAY, s)
+			e[DAY+'_input'].placeholder = s
+		}
 	}
 
 	e.listen('prop_changed', function(ce, k, v, v0, ev) {
@@ -6326,7 +6366,7 @@ function date_input_widget(e, range) {
 	e.set_isopen = function(open, open0, focus) {
 		if (open) {
 			e.calendar.popup(null, 'bottom', 'end')
-			e.calendar.scroll_to_view_all_ranges(0)
+			e.calendar.scroll_to_view_all_ranges(0, 'center')
 			e.calendar.update({show: true, focus: focus !== false})
 			e.add(e.calendar)
 		} else {
@@ -6345,23 +6385,11 @@ function date_input_widget(e, range) {
 		return false
 	})
 
-	e.calendar_button.on('click', function(ev) {
-		// if (e.isopen)
-		// 	e.calendar.focus()
-	})
-
 	e.calendar.on('pick', function() {
 		runafter(.1, function() {
 			e.isopen = false
 		})
 	})
-
-	if (range) {
-		// e.day1_input.on('blur', function(ev) { e.isopen = false })
-		// e.day2_input.on('blur', function(ev) { e.isopen = false })
-	} else {
-		// e.day_input.on('blur', function(ev) { e.isopen = false })
-	}
 
 	e.on('keydown', function(key) {
 		if (key == 'Enter') {
