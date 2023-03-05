@@ -1350,6 +1350,20 @@ method(Number, 'date', function(locale1, with_time, with_seconds) {
 	return date_formatter(locale1 || locale())(this, with_time, with_seconds)
 })
 
+let _date_placeholder_text = memoize(function(locale) {
+	let a = []
+	for (p of date_parts(locale)) {
+		if (p.type == 'day'  ) a.push('d')
+		if (p.type == 'month') a.push('m')
+		if (p.type == 'year' ) a.push('yyyy')
+		if (p.type == 'literal') a.push(p.value)
+	}
+	return a.join('')
+})
+function date_placeholder_text(locale1) {
+	return _date_placeholder_text(locale1 || locale())
+}
+
 }
 
 // time formatting -----------------------------------------------------------
