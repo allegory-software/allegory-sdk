@@ -12,7 +12,7 @@ CSS CLASSES
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
 	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
-	ALIGN FLEX    h-{l r c sb s t b m bl} v-{t b m sb s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
+	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
 	ALIGN GRID    grid-{l r c sb s t b m bl}', '', {x y}{1-5} x..x y..y
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
@@ -86,7 +86,9 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg3-hover             : hsl(  0   0%  75% / 1.0);
 	--bg-alt                : hsl(  0   0%  95% / 1.0); /* alternating bg for grid rows; lighter than bg1 */
 	--bg-smoke              : hsl(  0   0% 100% / 0.8); /* overlays bg */
-	--bg-input              : var(--bg);
+	--bg-input              : hsl(  0   0%  98% / 1.0);
+	--bg-input-hover        : hsl(  0   0%  94% / 1.0);
+	--bg-input-active       : hsl(  0   0%  90% / 1.0);
 
 	--border-light          : hsl(  0   0%   0% / 0.1); /* sits on bg */
 	--border-light-hover    : hsl(  0   0%   0% / 0.3);
@@ -162,7 +164,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 css('.theme-dark, .theme-light .theme-inverted', '', `
 
 	--fg                    : hsl(  0   0%  95% / 1.0);
-	--fg-hover              : hsl(  0   0% 100% / 1.0);
+	--fg-hover              : hsl(  0   0%  98% / 1.0);
 	--fg-dim                : var(--fg-dim-on-dark);
 	--fg-label              : hsl(  0   0%  50% / 1.0);
 	--fg-label-hover        : hsl(  0   0%  80% / 1.0);
@@ -173,6 +175,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg0                   : hsl(216  28%   8% / 1.0);
 	--bg                    : hsl(216  28%  10% / 1.0);
 	--bg-hover              : hsl(216  28%  12% / 1.0);
+	--bg-active             : hsl(216  28%  14% / 1.0);
 	--bg1                   : hsl(216  28%  15% / 1.0);
 	--bg1-hover             : hsl(216  28%  17% / 1.0);
 	--bg2                   : hsl(216  28%  20% / 1.0);
@@ -182,6 +185,8 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg-alt                : hsl(260  28%  14% / 1.0);
 	--bg-smoke              : hsl(  0   0%   0% / 0.7);
 	--bg-input              : hsl(216  28%  17% / 1.0);
+	--bg-input-hover        : hsl(216  28%  21% / 1.0);
+	--bg-input-active       : hsl(216  28%  25% / 1.0);
 
 	--border-light          : var(--border-light-on-dark);
 	--border-light-hover    : var(--border-light-on-dark-hover);
@@ -541,6 +546,8 @@ css('.v-t' , '', ` display: inline-flex; flex-flow: column; justify-content: fle
 css('.v-b' , '', ` display: inline-flex; flex-flow: column; justify-content: flex-end     ; `)
 css('.v-m' , '', ` display: inline-flex; flex-flow: column; justify-content: center       ; `)
 css('.v-sb', '', ` display: inline-flex; flex-flow: column; justify-content: space-between; `)
+css('.v-sa', '', ` display: inline-flex; flex-flow: column; justify-content: space-around ; `)
+css('.v-se', '', ` display: inline-flex; flex-flow: column; justify-content: space-evenly ; `)
 css('.v-s' , '', ` display: inline-flex; flex-flow: column; align-items: stretch          ; `)
 css('.v-l' , '', ` display: inline-flex; flex-flow: column; align-items: flex-start       ; `)
 css('.v-r' , '', ` display: inline-flex; flex-flow: column; align-items: flex-end         ; `)
@@ -964,6 +971,7 @@ css('.click-through-off', '', ` pointer-events: all; `)
 
 css('.bg'        , '', ` background: var(--bg); `)
 css('.bg-hover'  , '', ` background: var(--bg-hover); `)
+css('.bg-active' , '', ` background: var(--bg-active); `)
 css('.bg0'       , '', ` background: var(--bg0); `)
 css('.bg1'       , '', ` background: var(--bg1); `)
 css('.bg2'       , '', ` background: var(--bg2); `)
@@ -975,6 +983,8 @@ css('.bg-white'  , '', ` background: var(--fg-white); `)
 css('.bg-link'   , '', ` background: var(--fg-link); `) /* slider track */
 css('.no-bg'     , '', ` background: none; `)
 css('.bg-input'  , '', ` background: var(--bg-input); `)
+css('.bg-input-hover'  , '', ` background: var(--bg-input-hover); `)
+css('.bg-input-active' , '', ` background: var(--bg-input-active); `)
 css('.bg-search' , '', ` background: var(--bg-search); `)
 
 css('.bg-error', '', `
@@ -1175,11 +1185,13 @@ css('.icon-chevron-right::before', 'rotate--45', `
 	border-color: var(--fg);
 	border-style: solid;
 	border-width: 0 .2em .2em 0;
-	width : .6em;
-	height: .6em;
 	--translate-x: -0.125em;
 `)
 
+css('.icon-chevron-right', '', `width: .6em; height: .6em; `)
+css('.icon-chevron-left' , '', `width: .6em; height: .6em; `)
+css('.icon-chevron-down' , '', `width: .6em; height: .6em; margin-left: .5em; margin-right: .3em; `)
+css('.icon-chevron-up'   , '', `width: .6em; height: .6em; margin-left: .5em; margin-right: .3em; `)
 css('.icon-chevron-left::before', 'icon-chevron-right flip-h'     , `--translate-x: .25em;`)
 css('.icon-chevron-down::before', 'icon-chevron-right rotate-45'  , `--translate-y: -.2em;`)
 css('.icon-chevron-up::before'  , 'icon-chevron-right rotate-3q'  , `--translate-y:  .1em;`)
