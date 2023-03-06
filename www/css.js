@@ -38,8 +38,9 @@ CSS CLASSES
 	FONTS         mono arial opensans[-condensed] inter
 	MAT ICONS     mi[-round -sharp -outlined -fill -no-fill]
 	FA ICONS      fa[r] fa-*
-	UNICODE ICONS icon-menu-{3-dots-{v h} 3-lines-h}
-	SVG_ICONS     svg_circle_x()
+	BORDER ICONS  icon-chevron-{right left down up}
+	UNICODE ICONS icon-crossmark icon-{3-dots-{v h} 3-lines-h 9-dots}
+	SVG ICONS     svg_circle_x() svg_plus_sign()
 
 HTML SELECTORS
 
@@ -63,12 +64,14 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 
 	--fg                    : hsl(  0   0%   0% / 1.0);
 	--fg-hover              : hsl(  0   0%   0% / 0.8);
+	--fg-active             : hsl(  0   0%   0% / 0.6);
 	--fg-white              : hsl(  0   0% 100% / 1.0);
 	--fg-black              : hsl(  0   0%   0% / 1.0);
 	--fg-dim                : hsl(  0   0%   0% / 0.5); /* faded (not gray!) text but clearly legible (disabled, info boxes) */
 	--fg-dim-on-dark        : hsl(  0   0% 100% / 0.5); /* same but on dark or colored bg */
 	--fg-label              : hsl(  0   0%  60% / 1.0); /* between fg and dim (edit labels, chart labels) */
 	--fg-label-hover        : hsl(  0   0%  50% / 1.0); /* between fg and dim (edit labels, chart labels) */
+	--fg-label-active       : hsl(  0   0%  40% / 1.0); /* between fg and dim (edit labels, chart labels) */
 	--fg-label-on-dark      : hsl(  0   0% 100% / 0.8); /* same but on dark or colored bg */
 	--fg-link               : hsl(222 100%  40% / 1.0); /* anything clickable inside text: links, bare buttons, checkboxes */
 	--fg-link-hover         : hsl(222 100%  50% / 1.0);
@@ -164,13 +167,15 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 css('.theme-dark, .theme-light .theme-inverted', '', `
 
 	--fg                    : hsl(  0   0%  95% / 1.0);
-	--fg-hover              : hsl(  0   0%  98% / 1.0);
+	--fg-hover              : hsl(  0   0%  90% / 1.0);
+	--fg-active             : hsl(  0   0% 100% / 1.0);
 	--fg-dim                : var(--fg-dim-on-dark);
 	--fg-label              : hsl(  0   0%  50% / 1.0);
 	--fg-label-hover        : hsl(  0   0%  80% / 1.0);
-	--fg-link               : hsl( 26  78%  51% / 1.0);
-	--fg-link-hover         : hsl( 26  78%  56% / 1.0);
-	--fg-link-active        : hsl( 26  78%  61% / 1.0);
+	--fg-label-active       : hsl(  0   0% 100% / 1.0);
+	--fg-link               : hsl( 26  88%  51% / 1.0);
+	--fg-link-hover         : hsl( 26  99%  56% / 1.0);
+	--fg-link-active        : hsl( 26  99%  65% / 1.0);
 
 	--bg0                   : hsl(216  28%   8% / 1.0);
 	--bg                    : hsl(216  28%  10% / 1.0);
@@ -501,11 +506,14 @@ css('.white'         , '', ` color: var(--fg-white); `)
 css('.black'         , '', ` color: var(--fg-black); `)
 css('.label'         , '', ` color: var(--fg-label); `)
 css('.label-hover'   , '', ` color: var(--fg-label-hover); `)
+css('.label-active'  , '', ` color: var(--fg-label-active); `)
 css('.label-on-dark' , '', ` color: var(--fg-label-on-dark); `)
 css('.link'          , '', ` color: var(--fg-link); `)
 css('.link-hover'    , '', ` color: var(--fg-link-hover); `)
+css('.link-active'   , '', ` color: var(--fg-link-active); `)
 css('.fg'            , '', ` color: var(--fg); `)
 css('.fg-hover'      , '', ` color: var(--fg-hover); `)
+css('.fg-active'     , '', ` color: var(--fg-active); `)
 css('.fg-error'      , '', ` color: var(--bg-error); `)
 css('.fg-search'     , '', ` color: var(--fg-search); `)
 
@@ -728,10 +736,10 @@ css('.b-invisible', '', ` border-color: #00000000; `)
 css('.b-fg       ', '', ` border-color: var(--fg); `)
 css('.b-hover    ', '', ` border-color: var(--border-light-hover); `)
 
-css('.b-collapse-h > :not(:last-child)'  , '', ` border-right-color : #00000000; `)
-css('.b-collapse-h > :not(:first-child)' , '', ` border-left-color  : #00000000; `)
-css('.b-collapse-v > :not(:last-child)'  , '', ` border-bottom-color: #00000000; `)
-css('.b-collapse-v > :not(:first-child)' , '', ` border-top-color   : #00000000; `)
+css('.b-collapse-h > :not(:last-child):not(:has(+.popup))'  , '', ` border-right-color : #00000000; `)
+css('.b-collapse-h > :not(:first-child)'                    , '', ` border-left-color  : #00000000; `)
+css('.b-collapse-v > :not(:last-child):not(:has(+.popup))'  , '', ` border-bottom-color: #00000000; `)
+css('.b-collapse-v > :not(:first-child)'                    , '', ` border-top-color   : #00000000; `)
 
 /* BORDER RADIUS ---------------------------------------------------------- */
 
@@ -1162,22 +1170,7 @@ css('.hand    ', '', ` cursor: pointer; `) /* only for links */
 css('.grab    ', '', ` cursor: grab; `)
 css('.grabbing', '', ` cursor: grabbing; `)
 
-/* SHAPES ----------------------------------------------------------------- */
-
-/* not great because lack of hinting. use an icon font if you need this small. */
-css('.icon-check::before', '', `
-	content: "";
-	display: block;
-	border-color: var(--fg);
-	border-style: solid;
-	border-width: 0 .2em .2em 0;
-	width : .4em;
-	height: .8em;
-	transform:
-		translate(0, -0.1em)
-		rotate(45deg)
-	;
-`)
+/* ICONS: BORDER-BASED ---------------------------------------------------- */
 
 css('.icon-chevron-right::before', 'rotate--45', `
 	content: "";
@@ -1196,7 +1189,10 @@ css('.icon-chevron-left::before', 'icon-chevron-right flip-h'     , `--translate
 css('.icon-chevron-down::before', 'icon-chevron-right rotate-45'  , `--translate-y: -.2em;`)
 css('.icon-chevron-up::before'  , 'icon-chevron-right rotate-3q'  , `--translate-y:  .1em;`)
 
-/* UNICODE ICONS ---------------------------------------------------------- */
+/* ICONS: FONT-BASED ------------------------------------------------------ */
+
+// NOTE: font-based icons are currently the best because they are actually hinted
+// not just pixel-snapped like the box model or svg's `crispedges` lazy-work.
 
 css('.icon-crossmark'         , '', `content: "×";`) // &times;
 css('.icon-3-dots-v::before'  , '', `content: "\\22ee";`) // kebab
@@ -1207,7 +1203,7 @@ css('.icon-9-dots::before'    , '', `
 	display: block; transform: scale(.8, 1);
 `) // chocolate
 
-/* SVG icons -------------------------------------------------------------- */
+/* ICONS: SVG-BASED ------------------------------------------------------- */
 
 function svg_circle_x(attrs) {
 	return svg(assign_opt({fill: 'currentColor', viewBox: '0 0 16 16', preserveAspectRatio: 'xMidYMid meet'}, attrs),
@@ -1215,6 +1211,28 @@ function svg_circle_x(attrs) {
 			M 8 16 C 14.158 16 18.007 9.333 14.928 4 C 13.499 1.525 10.858 0 8 0 C 1.842 0 -2.007 6.667 1.072 12 C 2.501 14.475 5.142 16 8 16 Z
 			M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z
 		`}),
+	)
+}
+
+function svg_plus_sign(attrs) {
+	return svg(assign_opt({stroke: 'currentColor', viewBox: '-1 -1 2 2',
+		preserveAspectRatio: 'xMidYMid meet'}, attrs),
+		svg_tag('path', {
+			d: 'M 0 0 H 1 M 0 0 H -1 M 0 0 V 1 M 0 0 V -1',
+			'vector-effect': 'non-scaling-stroke',
+			'shape-rendering': 'crispedges',
+		}),
+	)
+}
+
+function svg_minus_sign(attrs) {
+	return svg(assign_opt({stroke: 'currentColor', viewBox: '-1 -1 2 2',
+		preserveAspectRatio: 'xMidYMid meet'}, attrs),
+		svg_tag('path', {
+			d: 'M 0 0 H .9 M 0 0 H -.9',
+			'vector-effect': 'non-scaling-stroke',
+			'shape-rendering': 'crispEdges',
+		}),
 	)
 }
 

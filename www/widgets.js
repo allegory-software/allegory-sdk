@@ -1805,6 +1805,22 @@ css_state('.menu:focus-within .menu-tr.focused > :not(.menu-table)', '', `
 `)
 
 css('.menu-check-div', 'p-x')
+
+// TODO: change this to: svg({viewbox: '-10 -10 20 20'}, svg_tag('polyline', {class: 'check-mark', points: '4 11 8 15 16 6'}))
+// which looks better because it's not pixel-snapped.
+css('.icon-check::before', '', `
+	content: "";
+	display: block;
+	border-color: var(--fg);
+	border-style: solid;
+	border-width: 0 .2em .2em 0;
+	width : .4em;
+	height: .8em;
+	transform:
+		translate(0, -0.1em)
+		rotate(45deg)
+	;
+`)
 css('.menu-check-div::before', 'icon-check') // fa fa-check
 
 css('.menu-sub-div', 'p-x')
@@ -4516,15 +4532,13 @@ css_state('.button[danger]:not([disabled]):not(.widget-editing):not(.widget-sele
 	background : var(--bg-button-danger-active);
 `)
 
-css('.button[bare]', 'b-invisible ro0 no-bg no-shadow link')
+css      ('.button[bare][primary]', 'b-invisible ro0 no-bg no-shadow link')
+css_state('.button[bare][primary]:not([disabled]):not(.widget-editing):not(.widget-selected):hover' , 'no-bg link-hover')
+css_state('.button[bare][primary]:not([disabled]):not(.widget-editing):not(.widget-selected):active', 'no-bg link-active')
 
-css_state('.button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', 'no-bg', `
-	color: var(--fg-link-hover);
-`)
-
-css_state('.button[bare]:active', 'no-bg', `
-	color: var(--fg-link-active);
-`)
+css      ('.button[bare]', 'b-invisible ro0 no-bg no-shadow fg')
+css_state('.button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):hover' , 'no-bg fg-hover')
+css_state('.button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):active', 'no-bg fg-active')
 
 css_state('.button[selected]', '', `
 	box-shadow: var(--shadow-pressed);
@@ -4608,9 +4622,9 @@ button = component('button', 'Input', function(e) {
 	e.prop('icon', {type: 'icon'})
 	e.prop('load_spin', {attr: true})
 
-	e.prop('primary', {type: 'bool', attr: true})
-	e.prop('bare'   , {type: 'bool', attr: true})
-	e.prop('danger' , {type: 'bool', attr: true})
+	e.prop('primary'    , {type: 'bool', attr: true})
+	e.prop('bare'       , {type: 'bool', attr: true})
+	e.prop('danger'     , {type: 'bool', attr: true})
 	e.prop('confirm')
 	e.prop('action_name', {attr: 'action'})
 
@@ -4846,39 +4860,225 @@ vselect_button = component('vselect-button', function(e) {
 
 /* <num-input> ---------------------------------------------------------------
 
-
+props:
+	value
+	decimals
+	buttons
 
 */
 
 css('.num-input', '')
 
-css('.num-input-input', 't-r')
-css('.num-input-updown-box' , 'h', `padding: 1px;`)
-css('.num-input-updown' , 'v-s b')
+css('.num-input-input', 't-r', `--w-input: 6em;`)
+
 css('.num-input-button' , 'S p-x-075 h-m')
-css('.num-input:not([disabled]) .num-input-button:hover', 'bg-input-hover')
+css('.num-input:not([disabled]) .num-input-button:hover' , 'bg-input-hover')
 css('.num-input:not([disabled]) .num-input-button:active', 'bg-input-active')
+
+// up-down arrow buttons
+css('.num-input-updown-box' , 'h', `padding: 1px;`)
+css('.num-input[buttons=up-down] .num-input-input', 'p-r-05')
+css('.num-input-updown', 'v-s')
 css('.num-input-button-down' , 'b-t')
 css('.num-input-arrow', '', `
-	--num-input-arrow-size: .25em;
+	--num-input-arrow-size: .3em;
 	border: var(--num-input-arrow-size) solid transparent; /* border-based triangle shape */
 `)
-css('.num-input-arrow-up'  , '', `border-bottom-color : var(--fg); margin-top   : calc(0px - var(--num-input-arrow-size)); `)
-css('.num-input-arrow-down', '', `border-top-color    : var(--fg); margin-bottom: calc(0px - var(--num-input-arrow-size)); `)
+css('.num-input-arrow-up'  , '', `border-bottom-color : var(--fg); margin-top   : calc(0px - var(--num-input-arrow-size));`)
+css('.num-input-arrow-down', '', `border-top-color    : var(--fg); margin-bottom: calc(0px - var(--num-input-arrow-size));`)
+css(':is(.xsmall, .small) .num-input-button-down' , 'b-t-0')
 
-css('.xsmall .num-input-updown, .xsmall.num-input-updown', 'hidden')
+// plus-minus buttons
+css('.num-input-button-plusminus', '', `width: 2em;`)
+
+// alternative diamond-style for up & down buttons
+if (1) {
+	css('.num-input[buttons=up-down] .num-input-input', 'b-r-0')
+	css('.num-input-arrow', '', `transform: scaleY(1.5);`)
+	css('.num-input-button-down' , 'b-t-0')
+	css('.num-input-button-up'   , 'h-b', `padding-bottom: .25em;`)
+	css('.num-input-button-down' , 'h-t', `padding-top   : .25em;`)
+}
+
+// enable for less clutter
+if (0) {
+	css('.num-input-input', 'p-r-0')
+	css('.num-input              .num-input-updown' , 'invisible')
+	css('.num-input:focus-within .num-input-updown' , 'visible')
+}
 
 num_input = component('num-input', 'Input', function(e) {
 
-	e.class('num-input input-group focus-within b-collapse-h ro-group-h')
+	e.prop('input_value', {attr: 'value' , default: null})
+	e.prop('value'      , {type: 'number', default: null})
+	e.prop('decimals'   , {type: 'number', default: 0})
+	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus', default: 'none', attr: true})
+
+	e.class('num-input input-group ro-group-h')
 	e.input = input({classes: 'num-input-input'})
-	e.up_button   = div({class: 'num-input-button num-input-button-up'  },
-		div({class: 'num-input-arrow num-input-arrow-up'}))
-	e.down_button = div({class: 'num-input-button num-input-button-down'},
-		div({class: 'num-input-arrow num-input-arrow-down'}))
-	e.updown_box  = div({class: 'num-input-updown-box'},
-		div({class: 'num-input-updown'}, e.up_button, e.down_button))
-	e.add(e.input, e.updown_box)
+
+	e.make_focusable(e.input)
+
+	e.set_buttons = function(v) {
+		if (v == 'up-down') {
+			e.up_button   = div({class: 'num-input-button num-input-button-updown num-input-button-up'},
+				div({class: 'num-input-arrow num-input-arrow-up'}))
+			e.down_button = div({class: 'num-input-button num-input-button-updown num-input-button-down'},
+				div({class: 'num-input-arrow num-input-arrow-down'}))
+			e.updown_box  = div({class: 'num-input-updown-box'},
+				div({class: 'num-input-updown'}, e.up_button, e.down_button))
+			e.set([e.input, e.updown_box])
+		} else if (v == 'plus-minus') {
+			e.up_button   = div({class: 'num-input-button num-input-button-plusminus num-input-button-plus' }, svg_plus_sign())
+			e.down_button = div({class: 'num-input-button num-input-button-plusminus num-input-button-minus'}, svg_minus_sign())
+			e.set([e.down_button, e.input, e.up_button])
+		}
+		if (e.up_button) {
+			e.up_button  .on('pointerdown',   up_button_pointerdown)
+			e.down_button.on('pointerdown', down_button_pointerdown)
+		}
+	}
+
+	e.from_text = num
+
+	e.to_text = function(v) {
+		return v != null ? v.dec(this.decimals) : v
+	}
+
+	e.set_value = function(v, v0, ev) {
+		if (!(ev && (ev.target == e.input || ev.target == e))) {
+			e.input.value = e.to_text(v)
+			e.set_prop('input_value', null, ev || {target: e})
+		}
+	}
+
+	e.set_input_value = function(v, v0, ev) {
+		if (!(ev && (ev.target == e.input || ev.target == e)))
+			e.input.value = v
+		if (!(ev && ev.target == e))
+			e.set_prop('value', e.from_text(v), ev || {target: e})
+	}
+
+	e.set_decimals = function() {
+		if (e.input_value == null)
+			e.input.value = e.to_text(e.value)
+	}
+
+	e.input.on('input', function(ev) {
+		e.set_prop('input_value', this.value, ev)
+	})
+
+	e.on_init(function() {
+		e.set_buttons(e.buttons)
+	})
+
+	e.on_update(function(opt) {
+		if (opt.select_all)
+			e.input.select_range(0, -1)
+	})
+
+	e.increment_value = function(increment, ctrl) {
+		if (e.value == null) return
+		let m = or(1 / 10 ** (e.decimals || 0), 1)
+		let v = e.value + m * increment * (ctrl ? 10 : 1)
+		e.value = snap(v, m)
+		e.update({select_all: true})
+	}
+
+	// controller
+
+	e.input.on('wheel', function(ev, dy) {
+		e.increment_value(dy)
+		return false
+	})
+
+	e.on('keydown', function(key, shift, ctrl) {
+		if (key == 'ArrowDown' || key == 'ArrowUp') {
+			e.increment_value(key == 'ArrowDown' ? 1 : -1, shift || ctrl)
+			return false
+		}
+	})
+
+	function button_pointerdown(ev, increment) {
+		let ctrl = ev.shift || ev.ctrl
+		let increment_timer = timer(function() {
+			e.increment_value(increment, ctrl)
+			increment_timer(.1)
+		})
+		e.increment_value(increment, ctrl)
+		increment_timer(.5)
+		return this.capture_pointer(ev, null, function() {
+			increment_timer()
+		})
+	}
+
+	function up_button_pointerdown(ev) {
+		return button_pointerdown.call(this, ev, 1)
+	}
+
+	function down_button_pointerdown(ev) {
+		return button_pointerdown.call(this, ev, -1)
+	}
+
+})
+
+/* <pass-input> --------------------------------------------------------------
+
+props:
+
+*/
+
+css('.pass-input', '')
+
+css('.pass-input-input', '')
+
+css('.pass-input-button' , 'S h-m h-c b bg-input', `width: 2.5em;`)
+css('.pass-input-button::before', 'far fa-eye-slash')
+css_state('.pass-input:not([disabled]) .pass-input-button:is(:hover,:active)' , 'bg-input')
+css_state('.pass-input:not([disabled]) .pass-input-button:active::before', 'far fa-eye')
+
+pass_input = component('pass-input', 'Input', function(e) {
+
+	e.prop('value', {default: null})
+
+	e.class('pass-input input-group b-collapse-h ro-group-h')
+	e.input = input({classes: 'pass-input-input', type: 'password'})
+	e.eye_button = button({
+		classes: 'pass-input-button',
+		bare: true,
+		title: S('view_password', 'View password'),
+	})
+	e.add(e.input, e.eye_button)
+
+	e.prop('placeholder', {store: false})
+	e.get_placeholder = () => e.input.placeholder
+	e.set_placeholder = function(s) { e.input.placeholder = s }
+
+	e.make_focusable(e.input)
+
+	e.set_value = function(v, v0, ev) {
+		if (!(ev && (ev.target == e.input || ev.target == e)))
+			e.input.value = v
+		e.eye_button.disable('empty', !v)
+	}
+
+	e.input.on('input', function(ev) {
+		e.set_prop('value', this.value, ev)
+	})
+
+	e.on_update(function(opt) {
+		if (opt.select_all)
+			e.input.select_range(0, -1)
+	})
+
+	// controller
+
+	e.eye_button.on('pointerdown', function(ev) {
+		e.input.type = 'text'
+		this.capture_pointer(ev, null, function() {
+			e.input.type = 'password'
+		})
+	})
 
 })
 
@@ -6262,9 +6462,9 @@ ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 
 css('.date-input', '')
 
-css('.date-input-calendar-button', 'b fg bg-input h-m p-input noselect')
-css_role('.date-input-calendar-button', 'b-l')
-css('.date-input-calendar-button::before', 'fa fa-calendar')
+css('.date-input-calendar-button', 'b bg-input h-m p-input noselect')
+css_state('.date-input-calendar-button:not([disabled]):is(:active,:hover)', 'bg-input')
+css('.date-input-calendar-button::before', 'far fa-calendar')
 css('.date-input-input', 't-r', ` width: 7em; `)
 css('.date-range-input-separator', 'p-x h-m')
 css('.date-input-calendar', '', ` resize: both; `)
@@ -6325,7 +6525,8 @@ function date_input_widget(e, range) {
 					d = e.day1
 			e.set_prop(DAY, d, {target: e})
 		})
-		e.prop(range ? DAY+'_placeholder' : 'placeholder')
+		e.prop(range ? DAY+'_placeholder' : 'placeholder', {store: false})
+		e[range ? 'get_'+DAY+'_placeholder' : 'get_placeholder'] = () => e[DAY+'_input'].placeholder
 		e[range ? 'set_'+DAY+'_placeholder' : 'set_placeholder'] = function(s) {
 			pr(DAY, s)
 			e[DAY+'_input'].placeholder = s
@@ -6353,7 +6554,10 @@ function date_input_widget(e, range) {
 	else
 		e.make_focusable(e.day_input)
 
-	e.calendar_button = div({class: 'date-input-calendar-button'})
+	e.calendar_button = button({
+		classes: 'date-input-calendar-button',
+		bare: true,
+	})
 
 	if (range)
 		e.add(e.day1_input, div({class: 'date-range-input-separator'},'-'), e.day2_input, e.calendar_button)

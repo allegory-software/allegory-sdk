@@ -737,6 +737,31 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 
 <!--------------------------------------------------------------------------->
 
+<xmp id=num-input_demo>
+<div class="xsmall  "><num-input value=-1.51     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="small   "><num-input value=-1.52     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="smaller "><num-input value=-1.53     decimals=1 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="normal  "><num-input value=-1.54     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="large   "><num-input value=-1.55     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="xsmall  "><num-input value=-1.51     decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="small   "><num-input value=-1.52     decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="smaller "><num-input value=123456    decimals=1 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="normal  "><num-input value= 1.54     decimals=0 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="large   "><num-input value=abc       decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id=pass-input_demo>
+<div class="xsmall  "><pass-input value="abc"></pass-input><button>OK</button></div>
+<div class="small   "><pass-input value="abc"></pass-input><button>OK</button></div>
+<div class="smaller "><pass-input value="abc"></pass-input><button>OK</button></div>
+<div class="normal  "><pass-input value="" placeholder="Password"></pass-input><button>OK</button></div>
+<div class="large   "><pass-input value="abc"></pass-input><button>OK</button></div>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
 <xmp id=tags_demo>
 <tags-box tags="Apples Bananas Mangos what do you do when there are too many tags"></tags-box>
 
@@ -883,8 +908,8 @@ for (let e of $('list')) {
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=date_input_demo>
-<date-input day="1/18/2022"></date-input>
+<xmp id=date-input_demo>
+<date-input day="1/18/2022" placeholder="Birth date"></date-input>
 <date-range-input day1="1/18/2022" day2="2/3/2022"></date-range-input>
 </xmp>
 
