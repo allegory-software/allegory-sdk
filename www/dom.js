@@ -164,7 +164,7 @@ TIMERS
 
 ELEMENT INIT
 
-	component('TAG'|'TAG[ATTR]'[, category], initializer)
+	component('TAG'|'TAG[ATTR]'[, category], initializer) -> create([props], ...children)
 	e.init_child_components()
 	e.initialized -> null|t|f
 	e.on_init(f); f()
@@ -870,10 +870,10 @@ function component(selector, category, init) {
 		attr(component.categories, category, array).remove_value(create)
 		return
 	}
-	function create(prop_vals) {
+	function create(prop_vals, ...children) {
 		prop_vals = prop_vals || obj()
 		prop_vals.tag = tag
-		return element(prop_vals)
+		return element(prop_vals, null, ...children)
 	}
 	create.construct = init // use as mixin in other components
 	attr(component.categories, category, array).push(create)
@@ -1775,22 +1775,29 @@ publishes:
 	e.disable(reason, disabled)
 
 NOTE: The `disabled` state is a concerted effort located in multiple places:
-- pointer events are blocked in their wrapper (raw events still work).
+- pointer events are blocked by `pointer-events: none`, and they're also
+- blocked in the pointer event wrappers in case `pointer-events: none` doesn't
+- cut it (raw events still work in that case).
 - forcing the default cursor on the element and its children is done with css.
 - showing the element with .5 opacity is done with css.
 - keyboard focusing is disabled in make_focusable().
 
-NOTE: `:hover` and `:active` still apply to a disabled element, unless you
-also add `click-through` (but then scrolling won't work!) so make sure to
-add `:not([disabled])` on mouse state selectors.
+NOTE: Don't put disablables on top of other elements (eg. popups can't be
+disablable), because they are click-through. If you set .click-through-off
+on a disablable, pointer events will still get blocked, but `:hover` and
+`:active` will start working again, so you'll need to add `:not([disabled])`
+on your state styles. You can't win on the web.
 
-NOTE: for non-focusables setting the `disabled` attr is enough to disable them.
+NOTE: Scrolling doesn't work with click-through elements, which can be an issue.
+
+NOTE: For non-focusables setting the `disabled` attr is enough to disable them.
 
 */
 
 css_generic_state('[disabled]', '', `
 	opacity: .5;
 	filter: grayscale();
+	pointer-events: none;
 `)
 
 css_generic_state('[disabled] [disabled]', '', `
@@ -1806,6 +1813,7 @@ e.make_disablable = function() {
 
 	let e = this
 	e.make_disablable = noop
+	e.disablable = true
 
 	e.on_bind(function(on) {
 		// each disabled ancestor is a reason for this element to be disabled.
@@ -1827,16 +1835,16 @@ e.make_disablable = function() {
 
 	function disable_children(e, reason, disabled) {
 		for (let ce of e.children)
-			if (ce.disable)
+			if (ce.disablable)
 				ce.disable(reason, disabled)
 			else
 				disable_children(ce, reason, disabled)
 	}
 
-	e.set_disabled = function(disabled) {
+	e.do_after('set_disabled', function(disabled) {
 		// add/remove this element as a reason for its children to be disabled.
 		disable_children(this, this, disabled)
-	}
+	})
 
 	function get_disabled() {
 		return this.hasattr('disabled')
@@ -1852,12 +1860,15 @@ e.make_disablable = function() {
 	if (e.disabled == null) {
 		e.property('disabled', get_disabled, set_disabled)
 	} else {
-		override_property_setter(e, 'disabled', set_disabled)
+		override_property_setter(e, 'disabled', function(inherited, disabled) {
+			set_disabled.call(this, disabled)
+			return inherited.call(this, disabled)
+		})
 	}
 
 	let dr
 	e.disable = function(reason, disabled) {
-		if (disabled) {
+		if (disabled != false) {
 			dr = dr || set()
 			dr.add(reason)
 			e.disabled = true
@@ -1871,6 +1882,11 @@ e.make_disablable = function() {
 	}
 }
 
+e.disable = function(...args) {
+	this.make_disablable()
+	return this.disable(...args)
+}
+
 /* element focusable mixin ---------------------------------------------------
 
 publishes:
@@ -1881,11 +1897,22 @@ sets css classes:
 
 */
 
-// move the focus ring from the inner focused element to the outermost focusable.
-css_state_firefox('.focus-within:focus-within', 'outline-focus') // no :has() yet.
-css_state_chrome('.focus-within:has(:focus-visible)', 'outline-focus')
-css_role_state('.focus-within :focus-visible', 'no-outline')
-css_role_state('.focus-within .focus-within:focus-within', 'no-outline')
+// move the focus ring from focused element to the outermost element with `.focus-within`.
+css_role_state('.focus-within:has(.focus-outside:focus-visible)', 'outline-focus') // outermost
+css_role_state('.focus-within .focus-within:has(.focus-outside:focus-visible)', 'no-outline') // not outermost
+css_role_state_firefox('.focus-within:focus-within', 'outline-focus') // no :has() yet on FF.
+css_role_state('.focus-outside:focus-visible', 'no-outline')
+
+// Popup focusables attached to a focusable are DOM-wise within the focusable,
+// but visually they're near it. Mark them as such with the .non-within class
+// so that they get a focus outline instead of their outermost focusable ancestor getting it.
+css_role_state('.non-within:has(.focus-outside:focus-visible)', 'outline-focus')
+css_role_state('.focus-within:has(.non-within .focus-outside:focus-visible)', 'no-outline')
+
+let builtin_focusables = {button:1, input:1, select:1, textarea:1, a:1, area:1}
+function is_builtin_focusable(e) {
+	return builtin_focusables[e.tag]
+}
 
 e.make_focusable = function(...fes) {
 
@@ -1899,14 +1926,17 @@ e.make_focusable = function(...fes) {
 		if (!fe.hasattr('tabindex'))
 			fe.attr('tabindex', 0)
 
-	if (fes[0] != e)
+	if (fes[0] != e) {
 		e.class('focus-within')
+		for (let fe of fes)
+			fe.class('focus-outside')
+	}
 
 	function update() {
 		let can_be_focused = e.focusable && !e.disabled
 		e.class('focusable', can_be_focused)
 		for (let fe of fes)
-			fe.attr('tabindex', can_be_focused ? e.tabindex : (fe instanceof HTMLInputElement ? -1 : null))
+			fe.attr('tabindex', can_be_focused ? e.tabindex : (is_builtin_focusable(fe) ? -1 : null))
 		if (!can_be_focused)
 			e.blur()
 	}
@@ -1940,27 +1970,6 @@ function focused_focusable(e) {
 	e = e || document.activeElement
 	return e && e.focusable && e || (e.parent && e.parent != e && focused_focusable(e.parent))
 }
-
-// tab cycling within the app, popups & modauls ------------------------------
-
-document.on('keydown', function(key, shift, ctrl, alt, ev) {
-	if (key == 'Tab') {
-		let popup = ev.target.closest('.popup, .modal')
-		popup = popup || document.body // TODO: make this configurable.
-		if (!popup)
-			return
-		let focusables = popup.focusables()
-		if (!focusables.length)
-			return
-		if (shift && ev.target == focusables[0]) {
-			focusables.last.focus()
-			return false
-		} else if (!shift && ev.target == focusables.last) {
-			focusables[0].focus()
-			return false
-		}
-	}
-})
 
 /* deferred DOM updating -----------------------------------------------------
 
@@ -2687,14 +2696,13 @@ property(Element, 'effectively_focusable', function() {
 })
 
 e.focusables = function() {
-	let t = []
-	let sel = 'button, a[href] area[href], input, select, textarea, '
-		+ '[tabindex]:not([tabindex="-1"])'
+	let a = []
+	let sel = ':is(button,a[href],area[href],input,select,textarea,[tabindex]):not([tabindex="-1"])'
 	for (let e of this.$(sel)) {
 		if (!e.effectively_hidden && !e.effectively_disabled)
-			t.push(e)
+			a.push(e)
 	}
-	return t
+	return a
 }
 
 e.focus_first = function() {
@@ -3168,7 +3176,7 @@ function overlay(attrs, content) {
 
 css_role('.modal-overlay', '', `
 	position: fixed;
-	background-color: rgba(0,0,0,0.6);
+	background-color: rgba(0,0,0,0.2);
 	display: grid;
 	justify-content: center;
 	align-content: center;
@@ -3177,20 +3185,41 @@ css_role('.modal-overlay', '', `
 
 e.modal = function(on) {
 	let e = this
-	if (on == false) {
-		if (e.modal_overlay) {
-			e.class('modal', false)
-			e.modal_overlay.remove()
-			e.modal_overlay = null
-		}
-	} else if (!e.overlay) {
+	on = on != false
+	if (!on && e.modal_overlay) {
+		e.class('modal', false)
+		e.modal_overlay.remove()
+		e.modal_overlay = null
+		document.body.disable(e, false)
+	} else if (on && !e.overlay) {
 		e.modal_overlay = overlay({class: 'modal-overlay'}, e)
 		e.class('modal')
-		document.body.add(e.modal_overlay)
+		document.body.disable(e, true)
+		root.add(e.modal_overlay)
 		e.modal_overlay.focus_first()
 	}
 	return e
 }
+
+// keep Tab navigation inside the app, modals & popups -----------------------
+
+root.on('keydown', function(key, shift, ctrl, alt, ev) {
+	if (key == 'Tab') {
+		let modal = ev.target.closest('.modal') || this
+		if (!modal)
+			return
+		let focusables = modal.focusables()
+		if (!focusables.length)
+			return
+		if (shift && ev.target == focusables[0]) {
+			focusables.last.focus()
+			return false
+		} else if (!shift && ev.target == focusables.last) {
+			focusables[0].focus()
+			return false
+		}
+	}
+})
 
 // lazy image loading --------------------------------------------------------
 

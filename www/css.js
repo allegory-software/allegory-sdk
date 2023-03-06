@@ -81,7 +81,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg                    : hsl(  0   0%  98% / 1.0); /* opaque */
 	--bg-hover              : hsl(  0   0%  97% / 1.0); /* opaque */
 	--bg-active             : hsl(  0   0%  96% / 1.0); /* opaque */
-	--bg1                   : hsl(  0   0%  91% / 1.0); /* sits on bg; opaque */
+	--bg1                   : hsl(  0   0%  98% / 1.0); /* sits on bg; opaque */
 	--bg1-hover             : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
 	--bg2                   : hsl(  0   0%  80% / 1.0); /* sits on bg1; opaque */
 	--bg2-hover             : hsl(  0   0%  85% / 1.0);
@@ -736,10 +736,10 @@ css('.b-invisible', '', ` border-color: #00000000; `)
 css('.b-fg       ', '', ` border-color: var(--fg); `)
 css('.b-hover    ', '', ` border-color: var(--border-light-hover); `)
 
-css('.b-collapse-h > :not(:last-child):not(:has(+.popup))'  , '', ` border-right-color : #00000000; `)
-css('.b-collapse-h > :not(:first-child)'                    , '', ` border-left-color  : #00000000; `)
-css('.b-collapse-v > :not(:last-child):not(:has(+.popup))'  , '', ` border-bottom-color: #00000000; `)
-css('.b-collapse-v > :not(:first-child)'                    , '', ` border-top-color   : #00000000; `)
+css('.b-collapse-h > :not(:last-child)' , '', ` border-right-color : #00000000; `)
+css('.b-collapse-h > :not(:first-child)', '', ` border-left-color  : #00000000; `)
+css('.b-collapse-v > :not(:last-child)' , '', ` border-bottom-color: #00000000; `)
+css('.b-collapse-v > :not(:first-child)', '', ` border-top-color   : #00000000; `)
 
 /* BORDER RADIUS ---------------------------------------------------------- */
 
