@@ -617,7 +617,7 @@ css('.tooltip-xbutton', 't-t small dim p-y-05 p-x-2 b0 b-l', `
 	pointer-events: all;
 `)
 
-css_state('.tooltip-xbutton:not([disabled]):not(.active):hover', '', `
+css_state('.tooltip-xbutton:not(.active):hover', '', `
 	color: inherit;
 `)
 
@@ -4502,10 +4502,10 @@ css('.button.text-empty > .button-text', 'hidden')
 
 css('.button-icon', 'w1 h-c')
 
-css_state('.button:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button:not(.widget-editing):not(.widget-selected):hover', '', `
 	background: var(--bg-button-hover);
 `)
-css_state('.button:not([disabled]):not(.widget-editing):not(.widget-selected):active', '', `
+css_state('.button:not(.widget-editing):not(.widget-selected):active', '', `
 	background: var(--bg-button-active);
 	box-shadow: var(--shadow-button-active);
 `)
@@ -4514,10 +4514,10 @@ css('.button[primary]', 'b-invisible', `
 	background : var(--bg-button-primary);
 	color      : var(--fg-button-primary);
 `)
-css_state('.button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button[primary]:not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-primary-hover);
 `)
-css_state('.button[primary]:not([disabled]):not(.widget-editing):not(.widget-selected):active', '', `
+css_state('.button[primary]:not(.widget-editing):not(.widget-selected):active', '', `
 	background : var(--bg-button-primary-active);
 `)
 
@@ -4525,20 +4525,20 @@ css('.button[danger]', '', `
 	background : var(--bg-button-danger);
 	color      : var(--fg-button-danger);
 `)
-css_state('.button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button[danger]:not(.widget-editing):not(.widget-selected):hover', '', `
 	background : var(--bg-button-danger-hover);
 `)
-css_state('.button[danger]:not([disabled]):not(.widget-editing):not(.widget-selected):active', '', `
+css_state('.button[danger]:not(.widget-editing):not(.widget-selected):active', '', `
 	background : var(--bg-button-danger-active);
 `)
 
 css      ('.button[bare][primary]', 'b-invisible ro0 no-bg no-shadow link')
-css_state('.button[bare][primary]:not([disabled]):not(.widget-editing):not(.widget-selected):hover' , 'no-bg link-hover')
-css_state('.button[bare][primary]:not([disabled]):not(.widget-editing):not(.widget-selected):active', 'no-bg link-active')
+css_state('.button[bare][primary]:not(.widget-editing):not(.widget-selected):hover' , 'no-bg link-hover')
+css_state('.button[bare][primary]:not(.widget-editing):not(.widget-selected):active', 'no-bg link-active')
 
 css      ('.button[bare]', 'b-invisible ro0 no-bg no-shadow fg')
-css_state('.button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):hover' , 'no-bg fg-hover')
-css_state('.button[bare]:not([disabled]):not(.widget-editing):not(.widget-selected):active', 'no-bg fg-active')
+css_state('.button[bare]:not(.widget-editing):not(.widget-selected):hover' , 'no-bg fg-hover')
+css_state('.button[bare]:not(.widget-editing):not(.widget-selected):active', 'no-bg fg-active')
 
 css_state('.button[selected]', '', `
 	box-shadow: var(--shadow-pressed);
@@ -4872,8 +4872,8 @@ css('.num-input', '')
 css('.num-input-input', 't-r', `--w-input: 6em;`)
 
 css('.num-input-button' , 'S p-x-075 h-m')
-css('.num-input:not([disabled]) .num-input-button:hover' , 'bg-input-hover')
-css('.num-input:not([disabled]) .num-input-button:active', 'bg-input-active')
+css_state('.num-input .num-input-button:hover' , 'bg-input-hover')
+css_state('.num-input .num-input-button:active', 'bg-input-active')
 
 // up-down arrow buttons
 css('.num-input-updown-box' , 'h', `padding: 1px;`)
@@ -5034,8 +5034,8 @@ css('.pass-input-input', '')
 
 css('.pass-input-button' , 'S h-m h-c b bg-input', `width: 2.5em;`)
 css('.pass-input-button::before', 'far fa-eye-slash')
-css_state('.pass-input:not([disabled]) .pass-input-button:is(:hover,:active)' , 'bg-input')
-css_state('.pass-input:not([disabled]) .pass-input-button:active::before', 'far fa-eye')
+css_state('.pass-input .pass-input-button:is(:hover,:active)' , 'bg-input')
+css_state('.pass-input .pass-input-button:active::before', 'far fa-eye')
 
 pass_input = component('pass-input', 'Input', function(e) {
 
@@ -6463,14 +6463,12 @@ ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 css('.date-input', '')
 
 css('.date-input-calendar-button', 'b bg-input h-m p-input noselect')
-css_state('.date-input-calendar-button:not([disabled]):is(:active,:hover)', 'bg-input')
+css_state('.date-input-calendar-button:is(:active,:hover)', 'bg-input')
 css('.date-input-calendar-button::before', 'far fa-calendar')
 css('.date-input-input', 't-r', ` width: 7em; `)
 css('.date-range-input-separator', 'p-x h-m')
-css('.date-input-calendar', '', ` resize: both; `)
-
-css_state('.date-input:has(.calendar:focus-visible)', 'no-outline')
-css_role_state('.date-input .calendar:focus-visible', 'outline-focus')
+css('.date-input-calendar-box', 'b bg-input v', ` resize: both; `)
+css('.date-input-calendar', 'S')
 
 function date_input_widget(e, range) {
 
@@ -6478,15 +6476,30 @@ function date_input_widget(e, range) {
 	e.make_disablable()
 
 	e.calendar = (range ? range_calendar : calendar)({classes: 'date-input-calendar'})
+	if (range) {
+		e.close_button = button({
+			classes: 'date-input-close-button',
+			focusable: false,
+			bare: true,
+		}, S('close', 'Close'))
+		e.close_button.action = function() {
+			e.isopen = false
+		}
+		e.calendar_box = div({class: 'date-input-calendar-box non-within'}, e.calendar, e.close_button)
+		e.calendar_box.make_focusable(e.calendar)
+	} else {
+		e.calendar_box = e.calendar
+	}
+	e.calendar_box.popup(e, 'bottom', 'end')
 
-	e.calendar.h = 300
+	e.calendar_box.h = 300
 
 	let w
 	e.on_measure(function() {
 		w = e.rect().w
 	})
 	e.on_position(function() {
-		e.calendar.min_w = `calc(max(var(--min-w-calendar), ${w}px))`
+		e.calendar_box.min_w = `calc(max(var(--min-w-calendar), ${w}px))`
 	})
 
 	e.to_text = function(t) {
@@ -6557,6 +6570,7 @@ function date_input_widget(e, range) {
 	e.calendar_button = button({
 		classes: 'date-input-calendar-button',
 		bare: true,
+		focusable: false,
 	})
 
 	if (range)
@@ -6568,19 +6582,27 @@ function date_input_widget(e, range) {
 
 	e.prop('isopen', {private: true, default: false})
 	e.set_isopen = function(open, open0, focus) {
+		e.class('open', open)
 		if (open) {
-			e.calendar.popup(null, 'bottom', 'end')
+			e.calendar_box.popup(null, 'bottom', 'end')
 			e.calendar.scroll_to_view_all_ranges(0, 'center')
-			e.calendar.update({show: true, focus: focus !== false})
-			e.add(e.calendar)
+			e.calendar.update() // {focus: focus !== false})
+			e.calendar_box.show()
+			e.add(e.calendar_box)
+			if (focus !== false)
+				e.calendar_box.focus()
 		} else {
-			e.calendar.hide()
+			e.calendar_box.hide()
 			if (focus !== false)
 				e.focus()
 		}
 	}
 
-	e.calendar.on('blur', function(ev) {
+	e.calendar_box.on('focusout', function(ev) {
+		if (e.close_button && ev.relatedTarget == e.close_button)
+			return
+		if (ev.relatedTarget == e.calendar)
+			return
 		e.set_prop('isopen', false, false)
 	})
 
@@ -6593,6 +6615,13 @@ function date_input_widget(e, range) {
 		runafter(.1, function() {
 			e.isopen = false
 		})
+	})
+
+	e.calendar_box.on('keydown', function(key) {
+		if (key == 'Escape') {
+			e.isopen = false
+			return false
+		}
 	})
 
 	e.on('keydown', function(key) {
