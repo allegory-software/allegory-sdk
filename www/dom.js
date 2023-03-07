@@ -647,7 +647,7 @@ property(Element, 'tag', function() { return this.tagName.lower() }, noop)
 e.class = function(names, enable) {
 	if (arguments.length < 2)
 		enable = true
-	if (names.indexOf(' ') != -1) {
+	if (names.includes(' ')) {
 		for (let name of names.words())
 			if (enable)
 				this.classList.add(name)
@@ -726,7 +726,7 @@ function each_css_rule(f) {
 
 function css_class_prop(selector, style) {
 	return each_css_rule(function(rule) {
-		if (rule.selectorText && rule.selectorText.split(',').indexOf(selector) !== -1)
+		if (rule.selectorText && rule.selectorText.split(',').includes(selector))
 			return rule.style[style]
 	})
 }
@@ -1341,7 +1341,7 @@ e.set = function E_set(s) {
 		} else {
 			// unbind nodes that are not in the new list.
 			for (let node of this.nodes)
-				if (iselem(node) && s.indexOf(node) == -1) // TODO: O(n^2) !
+				if (iselem(node) && !s.includes(node)) // TODO: O(n^2) !
 					node._bind(false)
 			this.innerHTML = null
 			for (let s1 of s)
@@ -1817,6 +1817,7 @@ e.make_disablable = function() {
 
 	e.on_bind(function(on) {
 		// each disabled ancestor is a reason for this element to be disabled.
+		// NOTE: this makes disabled sub-trees non-movable in the DOM.
 		if (on) {
 			let p = this.parent
 			while (p) {
@@ -1904,10 +1905,10 @@ css_role_state_firefox('.focus-within:focus-within', 'outline-focus') // no :has
 css_role_state('.focus-outside:focus-visible', 'no-outline')
 
 // Popup focusables attached to a focusable are DOM-wise within the focusable,
-// but visually they're near it. Mark them as such with the .non-within class
+// but visually they're near it. Mark them as such with the .not-within class
 // so that they get a focus outline instead of their outermost focusable ancestor getting it.
-css_role_state('.non-within:has(.focus-outside:focus-visible)', 'outline-focus')
-css_role_state('.focus-within:has(.non-within .focus-outside:focus-visible)', 'no-outline')
+css_role_state('.not-within:has(.focus-outside:focus-visible)', 'outline-focus')
+css_role_state('.focus-within:has(.not-within .focus-outside:focus-visible)', 'no-outline')
 
 let builtin_focusables = {button:1, input:1, select:1, textarea:1, a:1, area:1}
 function is_builtin_focusable(e) {
@@ -3810,6 +3811,7 @@ function set_theme_dark(dark) {
 	root.class('theme-dark' , !!dark)
 	root.class('theme-light', !dark)
 	announce('theme_changed')
+	document.fire('layout_changed')
 }
 
 function get_theme_size() {
@@ -3824,6 +3826,7 @@ function set_theme_size(size) {
 	if (size)
 		root.class('theme-'+size)
 	announce('theme_changed')
+	document.fire('layout_changed')
 }
 
 // make `.theme-inverted` work.

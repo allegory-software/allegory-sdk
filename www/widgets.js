@@ -3961,12 +3961,12 @@ radio_group = component('radio-group', 'Input', function(e) {
 
 /* <slider> & <range-slider> -------------------------------------------------
 
-config:
+model options:
 	from to
 	min max
 	decimals
 state:
-	val | min_val max_val
+	value | value1 value2
 	progress | min_progress max_progress
 methods:
 
@@ -3983,9 +3983,9 @@ css('.slider', 'S t-m noclip rel', `
 	margin-bottom : calc(var(--space-1) + 1em + var(--slider-marked) * 1em);
 `)
 css('.slider-fill', 'abs round', ` height: 3px; `)
-css('.slider-bg-fill'   , 'bg1')
+css('.slider-bg-fill', 'bg1')
 css('.slider-valid-fill', 'bg3')
-css('.slider-val-fill'  , 'bg-link')
+css('.slider-value-fill', 'bg-link')
 css('.slider-thumb', 'bg-link')
 css('.slider-thumb', 'abs round', `
 	/* center vertically relative to the fill */
@@ -4016,7 +4016,7 @@ css_state('.slider-thumb:focus-visible', 'no-shadow', `
 	outline: 6px solid var(--outline-markbox-focused);
 `)
 css_state('.slider:focus-within', 'no-outline')
-css_state('.slider:focus-within .slider-val-fill', '', `
+css_state('.slider:focus-within .slider-value-fill', '', `
 	background-color: var(--bg-focused-selected);
 `)
 css_state('.slider:focus-within .slider-thumb', '', `
@@ -4028,8 +4028,8 @@ css_state('.slider:focus-within .slider-thumb', '', `
 // 	background: var(--bg-error);
 // `)
 
-css_state('.slider.animate .slider-thumb     ', 'ease')
-css_state('.slider.animate .slider-val-fill'  , 'ease')
+css_state('.slider.animate .slider-thumb       ', 'ease')
+css_state('.slider.animate .slider-value-fill'  , 'ease')
 
 let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, decimals) {
 	scale_base = scale_base || 10
@@ -4071,10 +4071,10 @@ let slider_widget = function(e, range) {
 	e.prop('marked'     , {type: 'bool'  , default: true})
 
 	if (range) {
-		e.prop('min_val' , {type: 'number'})
-		e.prop('max_val' , {type: 'number'})
+		e.prop('value1' , {type: 'number'})
+		e.prop('value2' , {type: 'number'})
 	} else {
-		e.prop('val'     , {type: 'number'})
+		e.prop('value'  , {type: 'number'})
 	}
 
 	e.mark_w = e.css().prop('--slider-mark-w').num()
@@ -4085,24 +4085,24 @@ let slider_widget = function(e, range) {
 
 	e.bg_fill    = div({class: 'slider-fill slider-bg-fill'})
 	e.valid_fill = div({class: 'slider-fill slider-valid-fill'})
-	e.val_fill   = div({class: 'slider-fill slider-val-fill'})
+	e.value_fill = div({class: 'slider-fill slider-value-fill'})
 
 	e.marks = div({class: 'slider-marks'})
 
 	if (range) {
-		e.min_val_thumb = div({class: 'slider-thumb'})
-		e.max_val_thumb = div({class: 'slider-thumb'})
-		e.min_val_thumb.val_prop = 'min_val'
-		e.max_val_thumb.val_prop = 'max_val'
-		e.thumbs    = [e.min_val_thumb, e.max_val_thumb]
+		e.min_value_thumb = div({class: 'slider-thumb'})
+		e.max_value_thumb = div({class: 'slider-thumb'})
+		e.min_value_thumb.VAL = 'value1'
+		e.max_value_thumb.VAL = 'value2'
+		e.thumbs    = [e.min_value_thumb, e.max_value_thumb]
 	} else {
-		e.val_thumb = div({class: 'slider-thumb'})
-		e.val_thumb.val_prop = 'val'
-		e.thumbs    = [e.val_thumb]
+		e.value_thumb = div({class: 'slider-thumb'})
+		e.value_thumb.VAL = 'value'
+		e.thumbs    = [e.value_thumb]
 	}
 
-	e.add(e.bg_fill, e.valid_fill, e.val_fill, e.marks,
-		e.min_val_thumb, e.max_val_thumb, e.val_thumb)
+	e.add(e.bg_fill, e.valid_fill, e.value_fill, e.marks,
+		e.min_value_thumb, e.max_value_thumb, e.value_thumb)
 
 	for (let thumb of e.thumbs)
 		thumb.make_focusable()
@@ -4118,11 +4118,11 @@ let slider_widget = function(e, range) {
 		return clamp(lerp(v, e.from, e.to, 0, 1), 0, 1)
 	}
 
-	function val_prop(val_i) {
-		return e.thumbs[val_i || 0].val_prop
+	function VAL(val_i) {
+		return e.thumbs[val_i || 0].VAL
 	}
 
-	e.set_progress = function(p, val_prop) {
+	e.set_progress = function(p, VAL) {
 
 		let v = lerp(p, 0, 1, e.from, e.to)
 
@@ -4130,49 +4130,48 @@ let slider_widget = function(e, range) {
 			v = floor(v / multiple() + .5) * multiple()
 
 		if (range)
-			if (val_prop == 'min_val')
-				v = min(v, e.max_val)
+			if (VAL == 'value1')
+				v = min(v, e.value2)
 			else
-				v = max(v, e.min_val)
+				v = max(v, e.value1)
 
-		e[val_prop] = clamp(v, cmin(), cmax())
+		e[VAL] = clamp(v, cmin(), cmax())
 
 		e.update()
 	}
 
-	e.get_progress = function(val_prop) {
-		return progress_for(e[val_prop])
+	e.get_progress = function(VAL) {
+		return progress_for(e[VAL])
 	}
 
 	if (!range) {
 		e.prop('progress', {private: true, store: false})
 	} else {
 		for (let thumb of e.thumbs) {
-			let vk = thumb.val_prop
-			let k = vk.replace('_val', '')
-			e.prop(k+'_progress', {private: true, store: false})
-			e['get_'+k] = function( ) { e.get_progress(vk) }
-			e['set_'+k] = function(p) { e.set_progress(p, vk) }
+			let VAL = thumb.VAL
+			e.prop(VAL+'_progress', {private: true, store: false})
+			e['get_'+VAL+'_progress'] = function( ) { e.get_progress(VAL) }
+			e['set_'+VAL+'_progress'] = function(p) { e.set_progress(p, VAL) }
 		}
 	}
 
 	// view
 
-	e.tooltip_target = e.val_thumb || e
+	e.tooltip_target = e.value_thumb || e
 	e.tooltip_align = 'center'
 
-	e.user_set_progress = function(p, val_prop) {
-		e.set_progress(p, val_prop)
+	e.user_set_progress = function(p, VAL) {
+		e.set_progress(p, VAL)
 	}
 
-	e.display_val_for = function(v) {
+	e.display_value_for = function(v) {
 		return (v && e.decimals != null) ? v.dec(e.decimals) : v
 	}
 
 	function update_thumb(thumb, p) {
 		thumb.style.left = (p * 100)+'%'
 		if (thumb.tooltip) {
-			thumb.tooltip.text = e.display_val_for(e[thumb.val_prop])
+			thumb.tooltip.text = e.display_value_for(e[thumb.VAL])
 			thumb.tooltip.position()
 		}
 	}
@@ -4194,12 +4193,12 @@ let slider_widget = function(e, range) {
 		p2 = progress_for(cmax())
 		update_fill(e.valid_fill, p1, p2)
 
-		p1 = progress_for(range ? e.min_val : cmin())
-		p2 = progress_for(range ? e.max_val : e.val)
-		update_fill(e.val_fill, p1, p2)
+		p1 = progress_for(range ? e.value1 : cmin())
+		p2 = progress_for(range ? e.value2 : e.value)
+		update_fill(e.value_fill, p1, p2)
 
 		for (let thumb of e.thumbs) {
-			let p = e.get_progress(thumb.val_prop)
+			let p = e.get_progress(thumb.VAL)
 			update_thumb(thumb, p)
 		}
 
@@ -4218,7 +4217,7 @@ let slider_widget = function(e, range) {
 		let m = div({class: 'slider-mark'}, l)
 		e.marks.add(m)
 		m.x = lerp(v, e.from, e.to, 0, w)
-		l.set(e.display_val_for(v))
+		l.set(e.display_value_for(v))
 	}
 	function update_marks() {
 		e.marks.clear()
@@ -4260,7 +4259,7 @@ let slider_widget = function(e, range) {
 			let tr = thumb.rect()
 			let dx = mx0 - (tr.x + tr.w / 2)
 			function pointermove(ev, mx) {
-				e.user_set_progress((mx - dx - r.x) / r.w, thumb.val_prop)
+				e.user_set_progress((mx - dx - r.x) / r.w, thumb.VAL)
 			}
 			pointermove(ev, mx0)
 			function pointerup(ev) {
@@ -4284,8 +4283,8 @@ let slider_widget = function(e, range) {
 				case 'End'        : d =  1/0; break
 			}
 			if (d) {
-				let p = e.get_progress(this.val_prop) + d * (shift ? .1 : 1)
-				e.user_set_progress(p, this.val_prop)
+				let p = e.get_progress(this.VAL) + d * (shift ? .1 : 1)
+				e.user_set_progress(p, this.VAL)
 				return false
 			}
 		})
@@ -4416,11 +4415,12 @@ labelbox = component('labelbox', function(e) {
 
 */
 
-css('.input', 'S bg-input', `
+css('.w-input', '', `width: var(--w-input);`)
+
+css('.input', 'S bg-input w-input', `
 	font-family   : inherit;
 	font-size     : inherit;
 	border-radius : 0;
-	width         : var(--w-input);
 `)
 
 input = component('input', 'Input', function(e) {
@@ -4860,18 +4860,20 @@ vselect_button = component('vselect-button', function(e) {
 
 /* <num-input> ---------------------------------------------------------------
 
-props:
-	value
-	decimals
+state:
+	value input_value
+model options:
+	min max decimals
+view options:
 	buttons
 
 */
 
-css('.num-input', '')
+css('.num-input', 'w-input')
 
-css('.num-input-input', 't-r', `--w-input: 6em;`)
+css('.num-input-input', 'S shrinks t-r')
 
-css('.num-input-button' , 'S p-x-075 h-m')
+css('.num-input-button' , 'p-x-075 h-m')
 css_state('.num-input .num-input-button:hover' , 'bg-input-hover')
 css_state('.num-input .num-input-button:active', 'bg-input-active')
 
@@ -4879,6 +4881,7 @@ css_state('.num-input .num-input-button:active', 'bg-input-active')
 css('.num-input-updown-box' , 'h', `padding: 1px;`)
 css('.num-input[buttons=up-down] .num-input-input', 'p-r-05')
 css('.num-input-updown', 'v-s')
+css('.num-input-button-updown' , 'S')
 css('.num-input-button-down' , 'b-t')
 css('.num-input-arrow', '', `
 	--num-input-arrow-size: .3em;
@@ -5024,18 +5027,15 @@ num_input = component('num-input', 'Input', function(e) {
 
 /* <pass-input> --------------------------------------------------------------
 
-props:
+state props:
+	value
 
 */
 
-css('.pass-input', '')
-
-css('.pass-input-input', '')
-
-css('.pass-input-button' , 'S h-m h-c b bg-input', `width: 2.5em;`)
-css('.pass-input-button::before', 'far fa-eye-slash')
-css_state('.pass-input .pass-input-button:is(:hover,:active)' , 'bg-input')
-css_state('.pass-input .pass-input-button:active::before', 'far fa-eye')
+css('.pass-input', 'w-input bg-input')
+css('.pass-input-input', 'S shrinks p-r-0')
+css('.pass-input-button', 'h-m h-c b p0', `width: 2.75em;`)
+css_generic_state('.pass-input-button[disabled]', 'op1 dim')
 
 pass_input = component('pass-input', 'Input', function(e) {
 
@@ -5045,6 +5045,7 @@ pass_input = component('pass-input', 'Input', function(e) {
 	e.input = input({classes: 'pass-input-input', type: 'password'})
 	e.eye_button = button({
 		classes: 'pass-input-button',
+		icon: 'far fa-eye',
 		bare: true,
 		title: S('view_password', 'View password'),
 	})
@@ -5074,7 +5075,7 @@ pass_input = component('pass-input', 'Input', function(e) {
 	// controller
 
 	e.eye_button.on('pointerdown', function(ev) {
-		e.input.type = 'text'
+		e.input.type = null
 		this.capture_pointer(ev, null, function() {
 			e.input.type = 'password'
 		})
@@ -5738,8 +5739,8 @@ autocomplete = component('autocomplete', 'Input', function(e) {
 
 state props:
 	mode           'day|range|ranges'
-	day            day mode    : string date or timestamp
-	day1 day2      range mode  : start & end dates or timestamps
+	value          day mode    : string date or timestamp
+	value1 value2  range mode  : start & end dates or timestamps
 	ranges         ranges mode : 'd1..d2 ...' or [[d1,d2],...]
 
 */
@@ -5758,16 +5759,20 @@ css('.calendar', 'v-s', `
 css('.calendar-canvas-ct', 'S rel')
 css('.calendar-canvas', 'abs')
 
-function calendar_widget(e, mode, focusable) {
+function calendar_widget(e, mode, has_time) {
 
 	e.class('calendar')
 	e.make_disablable()
 	e.make_focusable()
 
-	// model: ranges
+	// model: ranges & focused range
+
+	function convert_time(t) {
+		return day(t)
+	}
 
 	function convert_date(s) {
-		return isstr(s) ? s.parse_date(null, true) : s
+		return isstr(s) ? s.parse_date(null, true) : convert_time(s)
 	}
 	function convert_range(s) {
 		return (isstr(s) ? s.split(/\.\./) : s).map(convert_date)
@@ -5777,35 +5782,47 @@ function calendar_widget(e, mode, focusable) {
 	}
 
 	let ranges = []
-	let day1, day2
+	let focused_range = null
+
 	if (mode == 'day') {
-		e.prop('day', {type: 'date', convert: convert_date})
-		e.set_day = function(d) {
-			ranges = [[d, d]]
+		ranges.push([])
+		focused_range = ranges[0]
+		e.prop('value', {store: false, type: 'date', convert: convert_date})
+		e.get_value = () => ranges[0][0]
+		e.set_value = function(d) {
+			ranges[0][0] = convert_time(d)
+			ranges[0][1] = convert_time(d)
 		}
 	} else if (mode == 'range') {
-		e.prop('day1', {store: false, type: 'date', convert: convert_date})
-		e.prop('day2', {store: false, type: 'date', convert: convert_date})
-		e.get_day1 = () => day1
-		e.get_day2 = () => day2
-		e.set_day1 = function(d) {
-			day1 = d
-			ranges = [[d, e.day2]]
-			e.focus_range(ranges[0])
+		ranges.push([])
+		focused_range = ranges[0]
+		e.prop('value1', {store: false, type: 'date', convert: convert_date})
+		e.prop('value2', {store: false, type: 'date', convert: convert_date})
+		e.get_value1 = () => ranges[0][0]
+		e.get_value2 = () => ranges[0][1]
+		e.set_value1 = function(d) {
+			ranges[0][0] = convert_time(d)
 		}
-		e.set_day2 = function(d) {
-			day2 = d
-			ranges = [[e.day1, d]]
-			e.focus_range(ranges[0])
+		e.set_value2 = function(d) {
+			ranges[0][1] = convert_time(d)
 		}
 	} else if (mode == 'ranges') {
-		e.prop('ranges', {type: 'array', element_type: 'date_range',
-				convert: convert_ranges, default: empty_array})
-		e.set_ranges = function(r) {
-			ranges = r
+		e.prop('value', {store: false, type: 'array', element_type: 'date_range',
+				convert: convert_ranges})
+		e.get_value = () => ranges
+		e.set_value = function(ranges1) {
+			ranges = ranges1
+			if (!ranges.includes(focused_range))
+				focused_range = null
 		}
 	} else {
 		assert(false)
+	}
+
+	e.focus_range = function(range) {
+		assert(!range || ranges.includes(range))
+		focused_range = range
+		e.update()
 	}
 
 	// view
@@ -5953,35 +5970,24 @@ function calendar_widget(e, mode, focusable) {
 	}
 
 	e.scroll_to_view_all_ranges = function(duration, center) {
-		if (mode == 'ranges') {
-			let d1, d2
-			for (let r of e.ranges) {
-				d1 = min(or(d1,  1/0), r[0])
-				d2 = max(or(d2, -1/0), r[1])
-			}
-			if (d1 != null && d2 != null)
-				e.scroll_to_view_range(d1, d2, duration, center)
-		} else if (mode == 'range') {
-			if (e.day1 != null && e.day2 != null)
-				e.scroll_to_view_range(e.day1, e.day2, duration, center)
-		} else {
-			if (e.day != null)
-				e.scroll_to_view_range(e.day, e.day, duration, center)
+		let d1, d2
+		for (let r of ranges) {
+			d1 = min(or(d1,  1/0), r[0])
+			d2 = max(or(d2, -1/0), r[1])
 		}
+		if (d1 != null && d2 != null)
+			e.scroll_to_view_range(d1, d2, duration, center)
 	}
+
+	function update_scroll() {
+		e.scroll_to_view_all_ranges(0, 'center')
+	}
+
 	e.on_bind(function(on) {
+		document.on('layout_changed', update_scroll)
 		if (on)
-			e.scroll_to_view_all_ranges(0, 'center')
+			update_scroll()
 	})
-
-	// focus state
-
-	let focused_range
-
-	e.focus_range = function(range) {
-		focused_range = range
-		e.update()
-	}
 
 	// hit state
 
@@ -6241,23 +6247,24 @@ function calendar_widget(e, mode, focusable) {
 
 		// update range end
 		if (drag_range_end != null && hit_day != null) {
-			let d0_0 = drag_range[0]
-			let d1_0 = drag_range[1]
-			drag_range[drag_range_end] = hit_day
-			if (drag_range[0] > drag_range[1]) // adjust a negative range.
-				drag_range[drag_range_end] = drag_range[1-drag_range_end]
-			let d0 = drag_range[0]
-			let d1 = drag_range[1]
+			let ranges0 = mode == 'ranges' && ranges.map(r => r.slice())
+			let r = drag_range
+			let d0_0 = r[0]
+			let d1_0 = r[1]
+			r[drag_range_end] = hit_day
+			if (r[0] > r[1]) // adjust a negative range.
+				r[drag_range_end] = r[1-drag_range_end]
+			let d0 = r[0]
+			let d1 = r[1]
 			if (d0 != d0_0 || d1 != d1_0) {
 				assert(pass != 'update_range_end') // blow up fuse
 				if (mode == 'range') {
-					if (d0 != d0_0) announce_prop_changed(e, 'day1', d0, d0_0)
-					if (d1 != d1_0) announce_prop_changed(e, 'day2', d1, d1_0)
+					e.value1 = d0
+					e.value2 = d1
 				} else if (mode == 'ranges') {
-					announce_prop_changed(e, 'ranges', e.ranges, e.ranges)
-				} else if (mode == 'range') {
-					announce_prop_changed(e, 'range', e.range, e.range)
-				}
+					announce_prop_changed(e, 'value', ranges, ranges0)
+				} else
+					assert(false)
 				ct.redraw_again('update_range_end')
 			}
 		}
@@ -6363,15 +6370,15 @@ function calendar_widget(e, mode, focusable) {
 				}
 
 				if (mode == 'day' && hit_day != null) {
-					e.day = hit_day
-					e.fire('pick', e.day)
+					e.value = hit_day
+					e.fire('pick', e.value)
 					return false
 				}
 
 				if (mode == 'range' && !was_drag_range && hit_day != null) {
 					if (ev.shift || ev.ctrl) {
 						if (anchor_day == null)
-							anchor_day = min(e.day1, e.day2)
+							anchor_day = min(e.value1, e.value2)
 						let d1 = anchor_day
 						let d2 = hit_day
 						if (d1 > d2) {
@@ -6379,12 +6386,12 @@ function calendar_widget(e, mode, focusable) {
 							d1 = d2
 							d2 = t
 						}
-						e.day1 = d1
-						e.day2 = d2
+						e.value1 = d1
+						e.value2 = d2
 					} else {
 						anchor_day = hit_day
-						e.day1 = hit_day
-						e.day2 = hit_day
+						e.value1 = hit_day
+						e.value2 = hit_day
 					}
 					return false
 				}
@@ -6397,10 +6404,9 @@ function calendar_widget(e, mode, focusable) {
 
 		if (mode == 'ranges' && key == 'Delete') {
 			if (focused_range) {
-				ranges = e.ranges.slice()
 				ranges.remove_value(focused_range)
 				focused_range = null
-				e.ranges = ranges
+				e.value = ranges.slice()
 				return false
 			}
 		}
@@ -6415,29 +6421,46 @@ function calendar_widget(e, mode, focusable) {
 		} else {
 
 			if (mode == 'day' && key == 'PageUp' || key == 'PageDown') {
-				e.day = month(e.day, key == 'PageDown' ? 1 : -1)
-				e.scroll_to_view_range(e.day, e.day)
+				e.value = month(e.value, key == 'PageDown' ? 1 : -1)
+				e.scroll_to_view_range(e.value, e.value)
 				return false
 			}
 
 			if (key == 'ArrowDown' || key == 'ArrowUp' ||
 				 key == 'ArrowLeft' || key == 'ArrowRight'
 			) {
+
+				let r = focused_range
 				let ddays = (key == 'ArrowUp' || key == 'ArrowDown' ? 7 : 1)
 					* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
+
 				if (mode == 'day') {
-					e.day = day(e.day, ddays)
-					e.scroll_to_view_range(e.day, e.day)
-					return false
-				} else if (mode == 'range') {
+					e.value = day(e.value, ddays)
+				} else {
+					let d1 = day(r[1], ddays)
 					if (!shift)
-						e.day1 = day(e.day1, ddays)
-					e.day2 = max(day(e.day2, ddays), e.day1)
-					e.scroll_to_view_range(e.day1, e.day2)
-					return false
+						r[0] = d1
+					r[1] = max(d1, r[0])
+					if (mode == 'range') {
+						e.value1 = r[0]
+						e.value2 = r[1]
+					} else {
+						e.value = ranges.slice()
+					}
 				}
+				e.scroll_to_view_range(focused_range[0], focused_range[1])
+				return false
 			}
 
+		}
+
+		if (key == 'Tab') {
+			let ri = (focused_range ? ranges.indexOf(focused_range) : -1) + (shift ? -1 : 1)
+			let range = ranges[ri]
+			if (range) {
+				e.focus_range(range)
+				return false
+			}
 		}
 
 	})
@@ -6460,19 +6483,20 @@ ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 
 */
 
-css('.date-input', '')
+css('.date-input', 'w-input bg-input')
 
-css('.date-input-calendar-button', 'b bg-input h-m p-input noselect')
-css_state('.date-input-calendar-button:is(:active,:hover)', 'bg-input')
+css('.date-input-calendar-button', 'b h-m p-input')
 css('.date-input-calendar-button::before', 'far fa-calendar')
-css('.date-input-input', 't-r', ` width: 7em; `)
+css('.date-input-input', 'S shrinks t-c')
+css('.date-input:not(.date-input-with-time) .date-input-input', '')
 css('.date-range-input-separator', 'p-x h-m')
 css('.date-input-calendar-box', 'b bg-input v', ` resize: both; `)
 css('.date-input-calendar', 'S')
 
-function date_input_widget(e, range) {
+function date_input_widget(e, range, has_time) {
 
 	e.class('date-input input-group b-collapse-h')
+	e.class('date-input-with-time', has_time)
 	e.make_disablable()
 
 	e.calendar = (range ? range_calendar : calendar)({classes: 'date-input-calendar'})
@@ -6485,7 +6509,7 @@ function date_input_widget(e, range) {
 		e.close_button.action = function() {
 			e.isopen = false
 		}
-		e.calendar_box = div({class: 'date-input-calendar-box non-within'}, e.calendar, e.close_button)
+		e.calendar_box = div({class: 'date-input-calendar-box not-within'}, e.calendar, e.close_button)
 		e.calendar_box.make_focusable(e.calendar)
 	} else {
 		e.calendar_box = e.calendar
@@ -6511,61 +6535,69 @@ function date_input_widget(e, range) {
 	}
 
 	function convert_date(s) {
-		return isstr(s) && e.from_text(s) || s
+		return isstr(s) ? e.from_text(s) : s
 	}
 
-	for (let DAY of (range ? ['day1', 'day2'] : ['day'])) {
-		e.prop(DAY, {type: 'date', convert: convert_date})
-		e['set_'+DAY] = function(v, v0, ev) {
-			if (!(ev && ev.target == e[DAY+'_input']))
-				e[DAY+'_input'].value = isnum(v) ? e.to_text(v) : v
+	for (let VAL of (range ? ['value1', 'value2'] : ['value'])) {
+		e.prop(VAL, {type: 'date', convert: convert_date})
+		e['set_'+VAL] = function(v, v0, ev) {
+			if (!(ev && ev.target == e[VAL+'_input'] || ev.target == e))
+				e[VAL+'_input'].value = isnum(v) ? e.to_text(v) : v
 			if (!(ev && ev.target == e.calendar))
-				e.calendar.set_prop(DAY, isnum(v) ? v : null, ev)
+				e.calendar.set_prop(VAL, v, ev)
+			e.set_prop('input_'+VAL, null, ev || {target: e})
 		}
-		e[DAY+'_input'] = input({
+		e.prop('input_'+VAL, {attr: VAL, default: null})
+		e['set_input_'+VAL] = function(v, v0, ev) {
+			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
+				e[VAL+'_input'].value = v
+			if (!(ev && ev.target == e))
+				e.set_prop(VAL, e.from_text(v), ev || {target: e})
+		}
+		let inp = input({
 			classes: 'date-input-input',
 			placeholder: date_placeholder_text(),
 		})
-		e[DAY+'_input'].on('input', function(ev) {
-			e.set_prop(DAY, this.value, ev)
+		inp.on('input', function(ev) {
+			e.set_prop(VAL, this.value, ev)
 		})
-		e[DAY+'_input'].on('wheel', function(ev, dy) {
-			let d = day(e[DAY], round(dy))
+		inp.on('wheel', function(ev, dy) {
+			let d = day(e[VAL], round(dy))
 			if (range)
-				if (DAY == 'day1' && d > e.day2)
-					d = e.day2
-				else if (DAY == 'day2' && d < e.day1)
-					d = e.day1
-			e.set_prop(DAY, d, {target: e})
+				if (VAL == 'value1' && d > e.value2)
+					d = e.value2
+				else if (VAL == 'value2' && d < e.value1)
+					d = e.value1
+			e.set_prop(VAL, d, {target: e})
 		})
-		e.prop(range ? DAY+'_placeholder' : 'placeholder', {store: false})
-		e[range ? 'get_'+DAY+'_placeholder' : 'get_placeholder'] = () => e[DAY+'_input'].placeholder
-		e[range ? 'set_'+DAY+'_placeholder' : 'set_placeholder'] = function(s) {
-			pr(DAY, s)
-			e[DAY+'_input'].placeholder = s
+		e[VAL+'_input'] = inp
+		e.prop(range ? VAL+'_placeholder' : 'placeholder', {store: false})
+		e[range ? 'get_'+VAL+'_placeholder' : 'get_placeholder'] = () => e[VAL+'_input'].placeholder
+		e[range ? 'set_'+VAL+'_placeholder' : 'set_placeholder'] = function(s) {
+			e[VAL+'_input'].placeholder = s
 		}
 	}
 
 	e.listen('prop_changed', function(ce, k, v, v0, ev) {
 		if (ce != e.calendar) return
 		if (range) {
-			if (!(k == 'day1' || k == 'day2'))
+			if (!(k == 'value1' || k == 'value2'))
 				return
-			if (ev && (ev.target == e.day1_input || ev.target == e.day2_input))
+			if (ev && (ev.target == e.value1_input || ev.target == e.value2_input))
 				return
 		} else {
-			if (k != 'day')
+			if (k != 'value')
 				return
-			if (ev && ev.target == e.day_input)
+			if (ev && ev.target == e.value_input)
 				return
 		}
 		e.set_prop(k, v, {target: ce})
 	})
 
 	if (range)
-		e.make_focusable(e.day1_input, e.day2_input)
+		e.make_focusable(e.value1_input, e.value2_input)
 	else
-		e.make_focusable(e.day_input)
+		e.make_focusable(e.value_input)
 
 	e.calendar_button = button({
 		classes: 'date-input-calendar-button',
@@ -6574,9 +6606,10 @@ function date_input_widget(e, range) {
 	})
 
 	if (range)
-		e.add(e.day1_input, div({class: 'date-range-input-separator'},'-'), e.day2_input, e.calendar_button)
+		e.add(e.value1_input, div({class: 'date-range-input-separator'},'-'),
+			e.value2_input, e.calendar_button)
 	else
-		e.add(e.day_input, e.calendar_button)
+		e.add(e.value_input, e.calendar_button)
 
 	// controller -------------------------------------------------------------
 
@@ -6612,6 +6645,7 @@ function date_input_widget(e, range) {
 	})
 
 	e.calendar.on('pick', function() {
+		// delay it so the user can glance the choice.
 		runafter(.1, function() {
 			e.isopen = false
 		})
@@ -6636,6 +6670,12 @@ function date_input_widget(e, range) {
 date_input = component('date-input', 'Input', function(e) {
 	return date_input_widget(e)
 })
+
+datetime_input = component('datetime-input', 'Input', function(e) {
+	return date_input_widget(e, false, true)
+})
+
+css('.date-range-input', '', `width: calc(var(--w-input) * 2);`)
 
 date_range_input = component('date-range-input', 'Input', function(e) {
 	e.class('date-range-input')

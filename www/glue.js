@@ -612,9 +612,8 @@ method(Array, 'remove', function(i) {
 
 method(Array, 'remove_value', function(v) {
 	let i = this.indexOf(v)
-	if (i == -1)
-		return null
-	this.splice(i, 1)
+	if (i != -1)
+		this.splice(i, 1)
 	return i
 })
 
@@ -1268,7 +1267,7 @@ let date_parser = memoize(function(locale) {
 		if (tm) {
 			let H = num(tm[2])
 			let M = num(tm[3])
-			let S = num(tm[4])
+			let S = num(tm[4], 0)
 			let t = time(y, m, d, H, M, S)
 			if (validate)
 				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
@@ -2087,5 +2086,5 @@ function setglobal(k, v, default_v) {
 
 // browser detection ---------------------------------------------------------
 
-Firefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
-Chrome  = navigator.userAgent.toLowerCase().indexOf('chrome') > -1
+Firefox = navigator.userAgent.toLowerCase().includes('firefox')
+Chrome  = navigator.userAgent.toLowerCase().includes('chrome')
