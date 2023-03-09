@@ -267,7 +267,7 @@ SCROLLING
 	e.scroll_to_view_rect_offset(sx0, sy0, x, y, w, h, [halign, valign]])
 	e.scroll_to_view_rect(sx0, sy0, x, y, w, h, halign, valign)
 	e.make_visible_scroll_offset(sx0, sy0, [parent], [halign[, valign]])
-	e.make_visible([halign[, valign]])
+	e.make_visible([halign[, valign]], [smooth])
 	e.is_in_viewport()
 	scrollbar_widths() -> [vs_w, hs_h]
 	scrollbox_client_dimensions(w, h, cw, ch, [overflow_x], [overflow_y], [cs_w], [hs_h])
@@ -2777,8 +2777,12 @@ method(HTMLElement, 'unselect', function() {
 // scrolling -----------------------------------------------------------------
 
 function scroll_to_view_dim(x, w, pw, sx, align) {
+	if (align == 'center') { // enlarge content around its center to center it
+		x -= (10**6 - w) / 2
+		w = 10**6
+	}
 	if (w > pw) // content larger than viewport.
-		if (align == 'center')
+		if (align == 'center' || align == 'center-auto')
 			return -(x + (w - pw) / 2)
 	let min_sx = -x
 	let max_sx = -(x + w - pw)
@@ -2818,10 +2822,11 @@ e.make_visible_scroll_offset = function(sx0, sy0, parent, halign, valign) {
 }
 
 // scroll parent to make self visible.
-e.make_visible = function(halign, valign) {
+e.make_visible = function(halign, valign, smooth) {
 	let parent = this.parent
 	while (parent && parent != document) {
-		parent.scroll(...this.make_visible_scroll_offset(null, null, parent, halign, valign))
+		let [sx, sy] = this.make_visible_scroll_offset(null, null, parent, halign, valign)
+		parent.scroll({left: sx, top: sy, behavior: (smooth ? 'smooth' : 'auto')})
 		parent = parent.parent
 		break
 	}
