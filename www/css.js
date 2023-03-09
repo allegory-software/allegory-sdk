@@ -23,7 +23,7 @@ CSS CLASSES
 	PADDINGS      p p0 p-{025 05 075 2 4 8} p-{l r t b x y}-{0 05 2 4 8}
 	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
-	OVERFLOW      [v h]scroll[-auto] [no]clip[-x -y] scroll-thin
+	OVERFLOW      [v h]scroll[-auto] [no]clip[-x -y] scroll-thin scroll-smooth
 	POSITIONING   rel abs z{1-9} no-z overlay
 	VISIBILITY    hidden skip click-through[-off]
 	FLAT BGs      bg[1 2 -alt -smoke -fg] no-bg
@@ -922,12 +922,20 @@ css('.noclip'      , '', ` overflow  : visible; `)
 css('.noclip-x'    , '', ` overflow-x: visible; `)
 css('.noclip-y'    , '', ` overflow-y: visible; `)
 
+css('.scroll-smooth', '', ` scroll-behavior: smooth; `)
+
 /* THIN SCROLLBARS -------------------------------------------------------- */
 
-/* must set w/h to enable custom-drawn scrollbars */
+/* Firefox */
+css('.scroll-thin', '', `
+	scrollbar-width  : thin; /* 10px on FF */
+	scrollbar-color  : var(--bg2) var(--bg1);
+`)
+
+/* Chrome: must set w/h to enable custom-drawn scrollbars */
 css('.scroll-thin::-webkit-scrollbar', '', `
-	width : 8px;
-	height: 8px;
+	width : 10px; /* match FF */
+	height: 10px; /* match FF */
 `)
 
 css('.scroll-thin::-webkit-scrollbar-track', '', `
