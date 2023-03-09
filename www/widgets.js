@@ -127,7 +127,7 @@ css('.x-ct', 'skip')
 
 /* .focusable-items ----------------------------------------------------------
 
-	these are widgets containing multiple focusable and selectable items,
+	These are widgets containing multiple focusable and selectable items,
 	so they don't show a focus outline on the entire widget, but only show
 	an inside .item element as being focused instead.
 	NOTE: an .item cannot itself be or contain .focusable-items!
@@ -996,10 +996,16 @@ fires:
 css_state('.dragging', 'abs m0 z5')
 css_state('.grabbed', 'z6')
 
+// NOTE: margins on list elements are not supported with drag & drop!
+// Use padding and gap on the list instead, that works.
+css_role('.list-drag-elements > *', 'm0')
+
 e.make_list_drag_elements = function() {
 
 	let e = this
 	e.make_list_drag_elements = noop
+
+	e.class('list-drag-elements')
 
 	// offsets when stacking multiple elements for dragging.
 	let ox = 5
@@ -1120,6 +1126,8 @@ e.make_list_drop_elements = function() {
 
 	let e = this
 	e.make_list_drop_elements = noop
+
+	e.class('list-drag-elements')
 
 	let horiz
 	let gap_y, placeholder_w
@@ -1257,37 +1265,34 @@ out props:
 	selected_items: [item1,...]
 	focused_item
 	focused_item_index
-uses from item:
+uses props from item:
 	item.focusable
+uses attrs from item:
+	nofocus
 update options:
 	opt.state
-	opt.scroll_to_focused_item
+	opt.scroll_to_focused_item opt.scroll_align opt.scroll_smooth
 	opt.enter_edit
 announces:
-	selected_items_changed()
-	focused_item_changed()
+	^^selected_items_changed()
+	^^focused_item_changed()
 stubs:
 	can_edit_item([item])
 	can_focus_item([item], [for_editing], [assume_visible])
 
 */
 
-css_state('.list-item-selected', '', `
-	color      : var(--fg-selected);
-	background : var(--bg-selected);
-`)
-
-css('.list-items-focusable', 'arrow')
+css('.focusable-list', 'arrow')
 
 e.make_list_items_focusable = function() {
 
 	let e = this
 	e.make_list_items_focusable = noop
-	e.class('list-items-focusable')
+	e.class('focusable-list focusable-items')
 
 	e.can_edit_item = return_false
 	e.can_focus_item = function(item, for_editing, assume_visible) {
-		return (!item || (item.focusable != false && (assume_visible || !item.hidden)))
+		return (!item || (item.focusable != false && !item.hasattr('nofocus') && (assume_visible || !item.hidden)))
 			&& (!for_editing || e.can_edit_item(item))
 	}
 	e.can_select_item = e.can_focus_item
@@ -1312,8 +1317,8 @@ e.make_list_items_focusable = function() {
 
 	e.prop('focused_item_index', {default: null})
 
-	e.set_focused_item_index = function(i) {
-		e.announce('focused_item_changed')
+	e.set_focused_item_index = function(i, i0, ev) {
+		e.announce('focused_item_changed', ev)
 	}
 
 	e.property('focused_item', function() {
@@ -1390,6 +1395,7 @@ e.make_list_items_focusable = function() {
 	}
 
 	/*
+		i, n:                        see first_focusable_item_index() above
 		i: false                     unfocus
 		opt.unfocus_if_not_found
 		opt.expand_selection
@@ -1437,7 +1443,7 @@ e.make_list_items_focusable = function() {
 		let i0 = or(e.selected_item_index, last_i)
 		let item = e.at[i]
 
-		e.focused_item_index = i
+		e.set_prop('focused_item_index', i, opt)
 
 		let sel_items_changed
 		if (opt.preserve_selection) {
@@ -1467,7 +1473,7 @@ e.make_list_items_focusable = function() {
 		e.selected_item_index = expand_selection ? i0 : null
 
 		if (sel_items_changed)
-			e.announce('selected_items_changed')
+			e.announce('selected_items_changed', opt)
 
 		if (moved || sel_items_changed)
 			e.update({state: true})
@@ -1477,19 +1483,19 @@ e.make_list_items_focusable = function() {
 
 		if (opt.make_visible != false)
 			if (e.focused_item)
-				e.update({scroll_to_focused_item: true})
+				e.update({scroll_to_focused_item: true, scroll_align: opt.scroll_align, smooth: opt.scroll_smooth})
 
 		return true
 	}
 
-	e.select_all_items = function() {
+	e.select_all_items = function(ev) {
 		for (let i = 0, n = e.list_len; i < n; i++) {
 			let item = e.at[i]
 			if (e.can_select_item(item))
 				item.selected = true
 		}
 		e.update({state: true})
-		e.announce('selected_items_changed')
+		e.announce('selected_items_changed', ev)
 	}
 
 	e.do_after('items_changed', function() {
@@ -1527,13 +1533,13 @@ e.make_list_items_focusable = function() {
 
 		if (opt.scroll_to_focused_item)
 			if (e.focused_item)
-				e.focused_item.make_visible()
+				e.focused_item.make_visible(opt.scoll_align, opt.scroll_align, opt.scroll_smooth)
 
 	})
 
 	e.update_item_state = function(item) {
-		item.class('list-item-selected', !!item.selected)
-		item.class('list-item-focused', e.focused_item == item)
+		item.class('selected', !!item.selected)
+		item.class('focused', e.focused_item == item)
 	}
 
 	e.on('pointerdown', function(ev) {
@@ -1597,6 +1603,7 @@ e.make_list_items_focusable = function() {
 			e.focus_item(true, n, {
 				expand_selection: shift,
 				make_visible: true,
+				keyboard: true,
 			})
 			return false
 		}
@@ -1611,13 +1618,14 @@ e.make_list_items_focusable = function() {
 				e.focus_item(item.index, 0, {
 					expand_selection: shift,
 					make_visible: true,
+					keyboard: true,
 				})
 				return false
 			}
 		}
 
 		if (key == 'a' && ctrl) {
-			e.select_all_items()
+			e.select_all_items({keyboard: true})
 			return false
 		}
 
@@ -1664,6 +1672,148 @@ e.make_list_items_focusable = function() {
 
 }
 
+/* list text search in searchable content ------------------------------------
+
+list item inner element attrs:
+	searchable
+state props:
+	search_string
+state methods:
+	search(s)
+stubs:
+	search_into(s, in_s) -> [i, len] | empty_array
+
+NOTE: Makes list items be focusable if not already.
+
+*/
+
+e.make_list_items_searchable = function() {
+
+	let e = this
+	e.make_list_items_searchable = noop
+
+	e.make_list_items_focusable()
+
+	e.search_into = function(s, in_s) { // stub
+		let i = in_s.find_ai_ci(s)
+		return i != null ? [i, s.len] : empty_array
+	}
+
+	let search_string = ''
+	e.property('search_string', () => search_string)
+
+	function update_search() {
+		let searching = !!search_string
+
+		// step 1: search and record required changes.
+		let first_item_i
+		let tape = []
+		for (let item_i = 0, item_n = e.list_len; item_i < item_n; item_i++) {
+			let item_e = e.at[item_i]
+
+			// skip non-focusables
+			if (!e.can_focus_item(item_e, null, true))
+				continue
+
+			let show = !searching
+			let searchables = item_e.hasattr('searchable') ? [item_e] : item_e.$('[searchable]')
+			for (let val_e of searchables) {
+				let v = val_e.textContent
+				if (!v)
+					continue
+				if (!searching) {
+					tape.push('reset', item_e, val_e, v)
+					continue
+				}
+				let [i, n] = e.search_into(search_string, v)
+				if (i != null) {
+					let prefix = v.slice(0, i)
+					let search = v.slice(i, i+n)
+					let suffix = v.slice(i+n)
+					tape.push('search', item_e, val_e, prefix, search, suffix)
+					show = true
+					if (first_item_i == null)
+						first_item_i = item_i
+				}
+			}
+			tape.push('show', item_e, show || !searchables.length)
+		}
+
+		if (searching && first_item_i == null)
+			return
+
+		for (let i = 0, n = tape.len; i < n; ) {
+			let cmd  = tape[i++]
+			if (cmd == 'reset') {
+				let item_e = tape[i++]
+				let val_e  = tape[i++]
+				let v      = tape[i++]
+				val_e.set(v)
+				item_e.show()
+			} else if (cmd == 'search') {
+				let item_e = tape[i++]
+				let val_e  = tape[i++]
+				let prefix = tape[i++]
+				let search = tape[i++]
+				let suffix = tape[i++]
+				val_e.clear()
+				val_e.add(prefix)
+				val_e.add(span({class: 'dropdown-search'}, search))
+				val_e.add(suffix)
+				item_e.show()
+			} else if (cmd == 'show') {
+				let item_e = tape[i++]
+				let show   = tape[i++]
+				item_e.show(show)
+			}
+		}
+
+		// step 3: focus first found item.
+		if (first_item_i != null) {
+			e.focus_item(first_item_i, 0, {
+				make_visible: true,
+				keyboard: true,
+			})
+		} else {
+			let item_e = e.focused_item
+			if (item_e)
+				item_e.make_visible()
+		}
+
+		e.update({value: true})
+
+		return true
+	}
+
+	e.search = function(s) {
+		if (!s) s = ''
+		if (search_string == s)
+			return
+		let s0 = search_string
+		search_string = s
+		let found = update_search()
+		if (!found)
+			search_string = s0
+		e.fire('search', found)
+
+		return found
+	}
+
+	e.on('items_changed', update_search)
+
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+		if (key == 'Backspace' && search_string) {
+			e.search(search_string.slice(0, -1))
+			return false
+		}
+		if (!ctrl && !alt && (key.length == 1 || /[^a-zA-Z0-9]/.test(key))) {
+			e.search((search_string || '') + key)
+			return false
+		}
+	})
+
+}
+
 /* <list> --------------------------------------------------------------------
 
 inner html:
@@ -1686,10 +1836,6 @@ NOTE: removes element margins!
 */
 
 css('.list', 'v-t scroll-auto rel')
-
-// NOTE: margins on list elements are not supported with drag & drop!
-// Use padding and gap on the list instead, that works.
-css_role('.list > *', 'm0')
 
 list = component('list', function(e) {
 
@@ -5285,8 +5431,6 @@ config props:
 	list:
 html attrs:
 	align: left | right
-list item inner element attrs:
-	searchable
 inner html:
 	<list>
 state in props:
@@ -5359,122 +5503,10 @@ dropdown = component('dropdown', 'Input', function(e) {
 			if (value !== undefined)
 				lookup.set(value, i)
 		}
-		if (search_string)
-			update_search()
 	}
 
 	e.lookup = function(value) {
 		return lookup.get(value)
-	}
-
-	// model/view: text search in multiple searchable fields
-
-	e.search_into = function(s, in_s) { // stub
-		let i = in_s.find_ai_ci(s)
-		return i != null ? [i, s.len] : empty_array
-	}
-
-	let search_string = ''
-
-	e.prop('searchable_fields')
-	e.set_searchable_fields = function() {
-		e.search('')
-	}
-
-	function update_search() {
-		if (!e.list) return
-		let searching = !!search_string
-
-		// step 1: search and record required changes.
-		let first_item_i
-		let tape = []
-		for (let item_i = 0, item_n = e.list.list_len; item_i < item_n; item_i++) {
-			let item_e = e.list.at[item_i]
-
-			// skip non-focusables
-			if (!e.list.can_focus_item(item_e, null, true))
-				continue
-
-			let show = !searching
-			let searchables = item_e.hasattr('searchable') ? [item_e] : item_e.$('[searchable]')
-			for (let val_e of searchables) {
-				let v = val_e.textContent
-				if (!v)
-					continue
-				if (!searching) {
-					tape.push('reset', item_e, val_e, v)
-					continue
-				}
-				let [i, n] = e.search_into(search_string, v)
-				if (i != null) {
-					let prefix = v.slice(0, i)
-					let search = v.slice(i, i+n)
-					let suffix = v.slice(i+n)
-					tape.push('search', item_e, val_e, prefix, search, suffix)
-					show = true
-					if (first_item_i == null)
-						first_item_i = item_i
-				}
-			}
-			tape.push('show', item_e, show || !searchables.length)
-		}
-
-		if (searching && first_item_i == null)
-			return
-
-		for (let i = 0, n = tape.len; i < n; ) {
-			let cmd  = tape[i++]
-			if (cmd == 'reset') {
-				let item_e = tape[i++]
-				let val_e  = tape[i++]
-				let v      = tape[i++]
-				val_e.set(v)
-				item_e.show()
-			} else if (cmd == 'search') {
-				let item_e = tape[i++]
-				let val_e  = tape[i++]
-				let prefix = tape[i++]
-				let search = tape[i++]
-				let suffix = tape[i++]
-				val_e.clear()
-				val_e.add(prefix)
-				val_e.add(span({class: 'dropdown-search'}, search))
-				val_e.add(suffix)
-				item_e.show()
-			} else if (cmd == 'show') {
-				let item_e = tape[i++]
-				let show   = tape[i++]
-				item_e.show(show)
-			}
-		}
-
-		// step 3: focus first found item.
-		if (first_item_i != null) {
-			e.list.focus_item(first_item_i, 0, {
-				make_visible: true,
-			})
-		} else {
-			let item_e = e.list.focused_item
-			if (item_e)
-				item_e.make_visible()
-		}
-
-		e.update({value: true})
-
-		return true
-	}
-
-	e.search = function(s) {
-		if (!s) s = ''
-		if (search_string == s)
-			return
-		let s0 = search_string
-		search_string = s
-		let found = update_search()
-		if (!found)
-			search_string = s0
-
-		return found
 	}
 
 	// model/view: list prop: set it up as picker.
@@ -5484,7 +5516,12 @@ dropdown = component('dropdown', 'Input', function(e) {
 		list.on('items_changed', list_items_changed, on)
 		if (on) {
 			list.make_list_items_focusable()
+			list.make_list_items_searchable()
 			list.multiselect = false
+			list.on('search', function() {
+				e.open()
+				e.update({value: true})
+			})
 			list_items_changed.call(list)
 			let item_i = e.lookup(e.value)
 			list.focus_item(or(item_i, false))
@@ -5568,8 +5605,7 @@ dropdown = component('dropdown', 'Input', function(e) {
 				})
 			} else {
 				e.list.hide()
-				if (search_string)
-					e.search('')
+				e.list.search('')
 			}
 		}
 		if (focus)
@@ -5593,13 +5629,13 @@ dropdown = component('dropdown', 'Input', function(e) {
 		e.close()
 	})
 
-	e.listen('focused_item_changed', function(list) {
+	e.listen('focused_item_changed', function(list, ev) {
 		if (list != e.list) return
 		e.value = list.focused_item ? item_value(list.focused_item) : null
 	})
 
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
-		if (key == 'Enter' || (key == ' ' && !search_string)) {
+		if (key == 'Enter' || (key == ' ' && !e.list.search_string)) {
 			e.toggle(true)
 			return false
 		}
@@ -5609,17 +5645,6 @@ dropdown = component('dropdown', 'Input', function(e) {
 		}
 		if (key == 'Delete') {
 			e.value = null
-			return false
-		}
-
-		if (key == 'Backspace' && search_string) {
-			e.open()
-			e.search(search_string.slice(0, -1))
-			return false
-		}
-		if (!ctrl && !alt && (key.length == 1 || /[^a-zA-Z0-9]/.test(key))) {
-			if (e.search((search_string || '') + key))
-				e.open()
 			return false
 		}
 
@@ -5678,6 +5703,9 @@ autocomplete = component('autocomplete', 'Input', function(e) {
 			list.class('dropdown-picker')
 			list.popup(null, 'bottom', 'start')
 			list.hide()
+			list.on('search', function() {
+				e.open()
+			})
 			e.add(list)
 		} else {
 			list.remove()
@@ -5759,7 +5787,7 @@ css('.calendar', 'v-s', `
 css('.calendar-canvas-ct', 'S rel')
 css('.calendar-canvas', 'abs')
 
-function calendar_widget(e, mode, has_time) {
+function calendar_widget(e, mode) {
 
 	e.class('calendar')
 	e.make_disablable()
@@ -5767,12 +5795,8 @@ function calendar_widget(e, mode, has_time) {
 
 	// model: ranges & focused range
 
-	function convert_time(t) {
-		return day(t)
-	}
-
 	function convert_date(s) {
-		return isstr(s) ? s.parse_date(null, true) : convert_time(s)
+		return isstr(s) ? s.parse_date(null, true) : day(s)
 	}
 	function convert_range(s) {
 		return (isstr(s) ? s.split(/\.\./) : s).map(convert_date)
@@ -5790,8 +5814,8 @@ function calendar_widget(e, mode, has_time) {
 		e.prop('value', {store: false, type: 'date', convert: convert_date})
 		e.get_value = () => ranges[0][0]
 		e.set_value = function(d) {
-			ranges[0][0] = convert_time(d)
-			ranges[0][1] = convert_time(d)
+			ranges[0][0] = day(d)
+			ranges[0][1] = day(d)
 		}
 	} else if (mode == 'range') {
 		ranges.push([])
@@ -5801,10 +5825,10 @@ function calendar_widget(e, mode, has_time) {
 		e.get_value1 = () => ranges[0][0]
 		e.get_value2 = () => ranges[0][1]
 		e.set_value1 = function(d) {
-			ranges[0][0] = convert_time(d)
+			ranges[0][0] = day(d)
 		}
 		e.set_value2 = function(d) {
-			ranges[0][1] = convert_time(d)
+			ranges[0][1] = day(d)
 		}
 	} else if (mode == 'ranges') {
 		e.prop('value', {store: false, type: 'array', element_type: 'date_range',
@@ -6147,6 +6171,7 @@ function calendar_widget(e, mode, has_time) {
 				for (let range of ranges) {
 					if (d >= range[0] && d <= range[1]) {
 						in_range = true
+						let is_focused = mode != 'day' && range == focused_range
 
 						// hit-test range
 						if (mode != 'day' && !hit_range && hit_test_rect(u_mx, u_my, 0, 0, cell_w, cell_h))
@@ -6176,11 +6201,11 @@ function calendar_widget(e, mode, has_time) {
 									3 * PI / 2
 								)
 								cx.fill()
-								if (range == focused_range)
+								if (is_focused)
 									cx.stroke()
 
 								// draw & hit-test range-end grab handle
-								if (range == focused_range) {
+								if (is_focused) {
 
 									// hit-test range-end grab handle
 									if (mode != 'day' && hit_range_end == null) {
@@ -6207,7 +6232,7 @@ function calendar_widget(e, mode, has_time) {
 								cx.beginPath()
 								cx.rect(0, 0, w, h)
 								cx.fill()
-								if (range == focused_range) {
+								if (is_focused) {
 									cx.beginPath()
 									cx.moveTo(0, 0)
 									cx.lineTo(w, 0)
@@ -6245,28 +6270,9 @@ function calendar_widget(e, mode, has_time) {
 
 		}
 
-		// update range end
-		if (drag_range_end != null && hit_day != null) {
-			let ranges0 = mode == 'ranges' && ranges.map(r => r.slice())
-			let r = drag_range
-			let d0_0 = r[0]
-			let d1_0 = r[1]
-			r[drag_range_end] = hit_day
-			if (r[0] > r[1]) // adjust a negative range.
-				r[drag_range_end] = r[1-drag_range_end]
-			let d0 = r[0]
-			let d1 = r[1]
-			if (d0 != d0_0 || d1 != d1_0) {
-				assert(pass != 'update_range_end') // blow up fuse
-				if (mode == 'range') {
-					e.value1 = d0
-					e.value2 = d1
-				} else if (mode == 'ranges') {
-					announce_prop_changed(e, 'value', ranges, ranges0)
-				} else
-					assert(false)
-				ct.redraw_again('update_range_end')
-			}
+		if (update_drag_range_end()) {
+			assert(pass != 'update_range_end') // blow up fuse
+			ct.redraw_again('update_range_end')
 		}
 
 		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize' : null
@@ -6310,6 +6316,32 @@ function calendar_widget(e, mode, has_time) {
 	})
 
 	let anchor_day
+
+	function update_drag_range_end() {
+		if (drag_range_end == null)
+			return
+		if (hit_day == null)
+			return
+		let ranges0 = mode == 'ranges' && ranges.map(r => r.slice())
+		let r = drag_range
+		let d0_0 = r[0]
+		let d1_0 = r[1]
+		r[drag_range_end] = hit_day
+		if (r[0] > r[1]) // adjust a negative range.
+			r[drag_range_end] = r[1-drag_range_end]
+		let d0 = r[0]
+		let d1 = r[1]
+		if (d0 != d0_0 || d1 != d1_0) {
+			if (mode == 'range') {
+				e.value1 = d0
+				e.value2 = d1
+			} else if (mode == 'ranges') {
+				announce_prop_changed(e, 'value', ranges, ranges0)
+			} else
+				assert(false)
+			return true
+		}
+	}
 
 	ct.on('pointerdown', function(ev, down_mx, down_my) {
 
@@ -6393,6 +6425,7 @@ function calendar_widget(e, mode, has_time) {
 						e.value1 = hit_day
 						e.value2 = hit_day
 					}
+					e.scroll_to_view_range(hit_day, hit_day)
 					return false
 				}
 
@@ -6401,6 +6434,9 @@ function calendar_widget(e, mode, has_time) {
 	})
 
 	e.on('keydown', function(key, shift, ctrl) {
+
+		if (down)
+			return
 
 		if (mode == 'ranges' && key == 'Delete') {
 			if (focused_range) {
@@ -6429,33 +6465,45 @@ function calendar_widget(e, mode, has_time) {
 			if (key == 'ArrowDown' || key == 'ArrowUp' ||
 				 key == 'ArrowLeft' || key == 'ArrowRight'
 			) {
+				if (focused_range) {
 
-				let r = focused_range
-				let ddays = (key == 'ArrowUp' || key == 'ArrowDown' ? 7 : 1)
-					* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
+					let r = focused_range
+					let ddays = (key == 'ArrowUp' || key == 'ArrowDown' ? 7 : 1)
+						* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
 
-				if (mode == 'day') {
-					e.value = day(e.value, ddays)
-				} else {
-					let d1 = day(r[1], ddays)
-					if (!shift)
-						r[0] = d1
-					r[1] = max(d1, r[0])
-					if (mode == 'range') {
-						e.value1 = r[0]
-						e.value2 = r[1]
+					if (mode == 'day') {
+						e.value = day(e.value, ddays)
+						e.scroll_to_view_range(e.value, e.value)
 					} else {
-						e.value = ranges.slice()
+						let ranges0 = ranges.map(r => r.slice())
+						let d = day(r[1], ddays)
+						if (!shift) {
+							r[0] = d
+							r[1] = d
+						} else {
+							d = max(d, r[0])
+							r[1] = d
+						}
+						e.scroll_to_view_range(d, d)
+						if (mode == 'range') {
+							announce_prop_changed(e, 'value1', r[0], ranges0[0])
+							announce_prop_changed(e, 'value2', r[1], ranges0[1])
+						} else {
+							announce_prop_changed(e, 'value', ranges, ranges0)
+						}
 					}
+					return false
 				}
-				e.scroll_to_view_range(focused_range[0], focused_range[1])
-				return false
 			}
 
 		}
 
 		if (key == 'Tab') {
-			let ri = (focused_range ? ranges.indexOf(focused_range) : -1) + (shift ? -1 : 1)
+			let ri = (
+				focused_range
+					? ranges.indexOf(focused_range)
+					: shift ? ranges.length : -1
+				) + (shift ? -1 : 1)
 			let range = ranges[ri]
 			if (range) {
 				e.focus_range(range)
@@ -6479,6 +6527,107 @@ ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 	return calendar_widget(e, 'ranges')
 })
 
+/* <time-picker> -------------------------------------------------------------
+
+
+*/
+
+css('.time-picker', 'h shrinks', `height: 16em;`)
+css('.time-picker-list-box', 'v m-x', `padding: 2px;`)
+css('.time-picker-list-header', 'label t-c t-m vscroll', `
+	font-size: calc(0.75 * var(--fs));
+	height: calc(var(--lh) * var(--fs) + 2px);
+`)
+css('.time-picker-list', 'S shrinks', `
+	padding-top   : 60%;
+	padding-bottom: 60%;
+`)
+css('.time-picker-item', 't-r p-x-2 p-y-025 noselect')
+css_state('.time-picker-item.selected', 'bold')
+
+time_picker = component('time-picker', 'Input', function(e) {
+
+	e.class('time-picker')
+	e.clear()
+
+	let add_time_list = function(n, s) {
+		let li = list({
+			classes: 'time-picker-list scroll-thin',
+			items: range(0, n, 1, i => ({value: i, name: i.base(10, 2)})),
+			item_template: '<div class="item time-picker-item" searchable>{{{name}}}</div>',
+		})
+		li.make_focusable()
+		li.make_list_items_focusable()
+		li.make_list_items_searchable()
+		li.multiselect = false
+		e.add(div({class: 'time-picker-list-box'}, div({class: 'time-picker-list-header scroll-thin'}, s), li))
+		return li
+	}
+	e.hours_list   = add_time_list(24, 'HH')
+	e.minutes_list = add_time_list(60, 'mm')
+	e.seconds_list = add_time_list(60, 'ss')
+
+	e.listen('focused_item_changed', function(list, ev) {
+		if (list.parent != e)
+			return
+		if (list.focused_item)
+			list.update({scroll_to_focused_item: true, scroll_align: 'center', scroll_smooth: !(ev && ev.keyboard)})
+		if (list == e.hours_list)
+			e.set_prop('value',   set_hours(e.value, list.focused_item.data.value), {target: list})
+		else if (list == e.minutes_list)
+			e.set_prop('value', set_minutes(e.value, list.focused_item.data.value), {target: list})
+		else if (list == e.seconds_list)
+			e.set_prop('value', set_seconds(e.value, list.focused_item.data.value), {target: list})
+	})
+
+	e.prop('value', {type: 'timeofday', convert: s => parse_time(s) % (24 * 3600) })
+
+	e.set_value = function(v, v0, ev) {
+		if (!(ev && ev.target && (ev.target == e || ev.target.parent == e))) {
+			let opt = {ev: ev || {target: e}, scroll_to_focused_item: true, scroll_align: 'center'}
+			e.  hours_list.focus_item(v ? floor((v / 3600) % 24) : false, null, opt)
+			e.minutes_list.focus_item(v ? floor((v / 60) % 60) : false, null, opt)
+			e.seconds_list.focus_item(v ? floor(v % 60) : false, null, opt)
+		}
+	}
+
+})
+
+/* <datetime-picker> ---------------------------------------------------------
+
+*/
+
+css('.datetime-picker', 'h', `height: 16em;`)
+
+datetime_picker = component('datetime-picker', 'Input', function(e) {
+
+	e.class('datetime-picker')
+	e.clear()
+
+	e.calendar = calendar()
+	e.time_picker = time_picker()
+	e.add(e.calendar, e.time_picker)
+
+	function convert_time(s) {
+		return isstr(s) ? s.parse_date(null, true) : s
+	}
+	e.prop('value', {type: 'time', convert: convert_time})
+
+	e.set_value = function(v, v1, ev) {
+		e.calendar   .set_prop('value', v, ev)
+		e.time_picker.set_prop('value', v, ev)
+	}
+
+	e.listen('prop_changed', function(ce, k, v, v0, ev) {
+		if (ce == e.calendar) {
+			e.set_prop('value', v + e.time_picker.value, ev)
+		} else if (ce == e.time_picker) {
+			e.set_prop('value', e.calendar.value + v, ev)
+		}
+	})
+
+})
+
 /* <date-input> & <date-range-input> -----------------------------------------
 
 */
@@ -6492,6 +6641,7 @@ css('.date-input:not(.date-input-with-time) .date-input-input', '')
 css('.date-range-input-separator', 'p-x h-m')
 css('.date-input-calendar-box', 'b bg-input v', ` resize: both; `)
 css('.date-input-calendar', 'S')
+css('.date-input-close-button', 'allcaps')
 
 function date_input_widget(e, range, has_time) {
 
