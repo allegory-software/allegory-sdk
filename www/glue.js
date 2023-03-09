@@ -97,6 +97,7 @@ ARRAYS
 
 	array(...) -> a                        new Array(...)
 	empty_array -> []                      global empty array, read-only!
+	range(i, j, step, f) -> a
 	a.set(a1) -> s
 	a.extend(a1)
 	a.insert(i, v)
@@ -158,7 +159,8 @@ TIME & DATE
 	ds.duration(['approx[+s]'|'long']) -> s
 	ts.timeago() -> s
 	ts.date([locale], [with_time], [with_seconds]) -> s
-	s.parse_date([locale]) -> ts
+	s.parse_date([locale], [validate]) -> ts
+	s.parse_time([validate]) -> s
 
 FILE SIZE FORMATTING
 
@@ -322,10 +324,10 @@ acos  = Math.acos
 atan  = Math.atan
 atan2 = Math.atan2
 
-Number.prototype.base = function(base, decimals) {
+Number.prototype.base = function(base, digits) {
 	let s = this.toString(base)
-	if (decimals != null)
-		s = s.padStart(decimals, '0')
+	if (digits != null)
+		s = s.padStart(digits, '0')
 	return s
 }
 Number.prototype.dec = Number.prototype.toFixed
@@ -578,6 +580,15 @@ if (!window.href)
 // arrays --------------------------------------------------------------------
 
 empty_array = []
+
+function range(i1, j, step, f) {
+	step = or(step, 1)
+	f = f || return_arg
+	let a = []
+	for (let i = i1; i < j; i += step)
+		a.push(f(i))
+	return a
+}
 
 method(Array, 'extend', function(a) {
 	let i0 = this.length
@@ -1235,6 +1246,30 @@ function week_start_offset(country1) {
 }
 
 {
+function parse_time(s, validate) {
+	let t = s
+	if (isstr(s)) {
+		s = s.trim()
+		let t1_re = /^(\d+)\s*:\s*(\d+)\s*:\s*([\.\d]+)$/;
+		let t2_re = /^(\d+)\s*:\s*(\d+)$/;
+		let tm = t1_re.exec(s) || t2_re.exec(s)
+		if (!tm)
+			return null
+		let H = num(tm[1])
+		let M = num(tm[2])
+		let S = num(tm[3], 0)
+		t = H * 3600 + M * 60 + S
+	}
+	if (validate)
+		if (t >= 24 * 3600)
+			return null
+	return t
+}
+
+method(String, 'parse_time', function(validate) {
+	return parse_time(this, validate)
+})
+
 let date_parts = memoize(function(locale) {
 	if (locale == 'SQL') { // yyyy-mm-dd
 		let m = {type: 'literal', value: '-'}
