@@ -21,7 +21,7 @@ The **server-side stack** is written entirely in Lua and contains:
 
 The **client-side stack** is written from scratch in JavaScript and contains:
 
-* a virtual editable tree-grid widget that can handle 100,000 records at 60fps.
+* a virtual editable tree-grid widget that can handle 100,000 records at 60 fps.
 * a collection of data-bound widgets for data entry, navigation and reporting.
 * layouting widgets for split-pane layouts common in data-dense business applications.
 * a mechanism for web components better than the native one.
@@ -34,9 +34,17 @@ depending on experience. You will have to read the code while you're using it
 and gradually start to _own it_ so that in time you gain the ability and the
 freedom to work on it like you wrote it yourself. This is a mechanics' car
 not a Toyota with a 10 year warranty that you never have to open the hood on.
+
 So even though this is more-less a web-framework-with-a-server type of deal,
 if you think you're too far away from making your own full stack from scratch,
 server and all, this is probably not for you.
+
+If, on the other hand, you're one of the increasingly rare types who
+thinks that procedural > functional > OOP, library > framework, SQL > ORM,
+JavaScript > React, dynamic > static, relational > nosql, less LOC > more LOC,
+and you get a rash whenever you hear the words "build system", "package manager",
+"folder structure", "container" or "dependency injection", then you might
+actually like this, who knows.
 
 # Status
 

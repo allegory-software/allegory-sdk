@@ -37,13 +37,9 @@ Generally just use `\n`.
 
 Don't use `module()`, it's not necessary. Just make things global, that's ok,
 it forces you find good names and it makes user code easier to read because
-there's no renaming involved.
+there's no renaming involved, everybody knows one thing.
 
 ## Submodules
-
-Split optional functionality into submodules. Submodules can either have
-their own namespace or can extend the main module's namespace, or can just
-add globals.
 
 Name submodules of `foo` `foo_bar.lua` instead of `foo/bar.lua`. In general,
 *don't make directories* unless you really really have to.
