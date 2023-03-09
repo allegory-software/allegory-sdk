@@ -1,23 +1,70 @@
+FEATURES
+------------------------------------------------------------------------------
+
+- validators and error box with non-data-driven input widgets
+
+- new, modified, deleted state with non-data-driven input widgets
+
+- input-align demo: add all input widgets + info etc. (make a complete form)
+
+
 BUGS
 ------------------------------------------------------------------------------
-* LIST demo
-* PLACEEDIT demo
-* IMAGE upload & download demo
-* CALENDAR demo
-* DATE_DROPDOWN demo
-* LIST_DROPDOWN demo
-* GRID_DROPDOWN demo
-- WIDGET_ITEMS_WIDGET set_items() update
-- WIDGET_ITEMS_WIDGET _items
-	- RADIOGROUP set _items from enum spec
-	- LIST set _items from rowset
+
+* DATE/TIME DROPDOWNS
+	- arrow-up/down to increment the current item be it y/m/d/h/m/s
+
+
+* CALENDAR
+	- scroll glitch
+	- anchor_direction missing (shift+arrows, dragging)
+
+* SELECT-BUTTON
+	- focus-visible not working on FF
+
+* INPUT-GROUP FOCUS ??
+
+* SLIDER
+	- fill animation glitch
+	- tooltip offset wrong
+	- add w-input so looks good in inline container
+
+* TOASTER
+	- weird spacing between messages when starting
+
+* PLACEEDIT
+
+* IMAGE
+	- upload
+	- download
+
+* GRID_DROPDOWN
+
+
 - NAV revert bug (esp. tree)
 - NAV which widgets to disable when nav has unsaved changes ?
+
+DATA-DRIVEN single-value input widget:
+
+	* col
+		* bool: checkbox / radio buttons
+		* text: input / tags-input / textarea / password
+		* number: num-input / slider
+		* date: date-input
+		* datetime: date-time-input
+		* time: time-input
+		* image: image-input
+		* enum: dropdown / select-button
+		* lookup: dropdown / grid / list
+	* col1 col2
+		* date range
+		* date-time range
+		* time range
+		* num: range-slider
 
 
 FEATURES
 ------------------------------------------------------------------------------
-- INPUT widgets add validators on html elements
 - ALL auto-urls
 - ALL inherited props
 	* prop attr: inherits_from: <prop_name>
@@ -25,7 +72,6 @@ FEATURES
 	* in a prop_change hook check parent and sync the prop with that of the parent
 		add/remove the event hook when the prop is set/cleared
 * NAV data_nav: have a nav feed another with data so that we can have lookup dropdowns
-* LOOKUP dropdown
 - NAV group-by aggregates
 - NAV group-by "others" group
 - NAV group-by % column
@@ -38,9 +84,6 @@ FEATURES
 - BUTTON with menu or list dropdown
 * DROPDOWN [x] button to set null
 * DROPDOWN search
-- DROPDOWN quicksearch when picker is closed
-- CALENDAR select range
-- SLIDER select range
 * INPUT save on typing with delay: field attr "save_on_input" true or false
 - TABS auto-menu with items that don't fit the bar
 - TABS pop-out button
