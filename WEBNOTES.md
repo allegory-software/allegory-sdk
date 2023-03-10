@@ -7,21 +7,21 @@ of writing web components from scratch in JavaScript.
 
 Here's why:
 
-	* You can't create child elements in the constructor while the DOM is loading,
-	so good luck initializing components declared in HTML. You're going to have
-	to query the document for components and initialize them on DOMContentLoaded.
+* You can't create child elements in the constructor while the DOM is loading,
+so good luck initializing components declared in HTML. You're going to have
+to query the document for components and initialize them on DOMContentLoaded.
 
-	* disconnectedCallback() is called asynchronously (probably on GC) so you
-	can end up with two component instances with the same id at the same time.
-	Good luck implementing something that binds a component to another automatically
-	by id whenever the target component is attached to the DOM.
+* disconnectedCallback() is called asynchronously (probably on GC) so you
+can end up with two component instances with the same id at the same time.
+Good luck implementing something that binds a component to another automatically
+by id whenever the target component is attached to the DOM.
 
-	* connectedCallback() is called before children are created (and even before
-	they are parsed), instead of going depth-first after they are created.
-	Good luck trying to set up the children automatically when the component is attached.
+* connectedCallback() is called before children are created (and even before
+they are parsed), instead of going depth-first after they are created.
+Good luck trying to set up the children automatically when the component is attached.
 
-	* shadow DOM/CSS makes components unstylable by library users but at least
-	you're not forced to use it.
+* shadow DOM/CSS makes components unstylable by library users but at least
+you're not forced to use it.
 
 Luckily we can create our own components API, with blackjack and hookers,
 and none of the above problems, so as long as you're not using third-party
@@ -61,39 +61,39 @@ attempt to apply logic and common sense to make simple things with this lemon.
 ## Popups
 
 Popups are impossible to implement cleanly on this platform.
-There are basically two ways to implement popups in this model:
+There are basically two ways to implement popups:
 
 Method 1: Add the popup to the root. Problems with that:
 
-	* removing the target from the DOM doesn't remove the popup, must fix in JS.
-	* hiding the target doesn't hide the popup, must fix in JS.
-	* disabling the target doesn't disable the popup, must fix in JS.
-	* wrong Tab focusing order, must fix in JS.
+* removing the target from the DOM doesn't remove the popup, must fix in JS.
+* hiding the target doesn't hide the popup, must fix in JS.
+* disabling the target doesn't disable the popup, must fix in JS.
+* wrong Tab focusing order, must fix in JS.
 
 Method 2: Add the popup to its target. Problems with that:
 
-	* any CSS rule that works on the assumption that the DOM tree represents
-	visually nested lists of boxes, will break:
+* any CSS rule that works on the assumption that the DOM tree represents
+visually nested lists of boxes, will break:
 
-		* :hover rules on the container are triggered when hovering the popup.
-		:hover bubbles up because it assumes that child elements are visually
-		inside their parents, but in this case the popup is not
-		(visually it's a sibling of its parent).
+	* :hover rules on the container are triggered when hovering the popup.
+	:hover bubbles up because it assumes that child elements are visually
+	inside their parents, but in this case the popup is not
+	(visually it's a sibling of its parent).
 
-		* .b-collapse-h: a css class which collapses borders in a list.
-		This assumes that DOM siblings are visual siblings. A popup added
-		to a list is a sibling DOM-wise but not visually.
+	* .b-collapse-h: a css class which collapses borders in a list.
+	This assumes that DOM siblings are visual siblings. A popup added
+	to a list is a sibling DOM-wise but not visually.
 
-		* .focus-within: a css class which puts a focus ring on a container
-		when an inner input element is focused. A popup containing an input
-		element, when attached to such container, will put the focus ring
-		on the container, but visually the input is not inside the container.
+	* .focus-within: a css class which puts a focus ring on a container
+	when an inner input element is focused. A popup containing an input
+	element, when attached to such container, will put the focus ring
+	on the container, but visually the input is not inside the container.
 
-	* lack of a global z-index: partially fixed with `display: fixed` hack
-	but any parent creating an implicit stacking context breaks the hack,
-	and it's very easy to create implicit stacking contexts by mistake.
-	Basically forever live in fear of bug reports with popups that are
-	partially obscured.
+* lack of a global z-index: partially fixed with `display: fixed` hack
+but any parent creating an implicit stacking context breaks the hack,
+and it's very easy to create implicit stacking contexts by mistake.
+Basically forever live in fear of bug reports with popups that are
+partially obscured.
 
 
 ## Pixel snapping
@@ -117,16 +117,18 @@ fonts are still the best option because they have true hinting (which simple
 pixel snapping is not).
 
 The only other way to draw a scalable plus sign that looks good is with canvas.
-The canvas API is great because well, it's an API, and an API are always better
-than declarative abstractions (contrary to current wisdom) simply because they
-are a strict superset of capabilities.
+The canvas API is great because well, it's an API, and APIs are always better
+than declarative abstractions (contrary to current wisdom) simply because
+nothing beats the level of composability and automation of a programming language.
 
-Drawing an entire widget procedurally on a canvas is great for making a grid
-widget that scrolls a million records at 60 fps, and we've done that.
+Canvas is not all good though. Drawing an entire widget procedurally on a canvas
+is great if you need to make a grid widget that scrolls a million records
+at 60 fps, in fact it's the only way to do it, and we've done that.
 But using it for simple things is overkill: it's not automatically integrated
 with the layout system and CSS, so you need to code for resizing, styling,
 hi-dpi, scrolling, animation, etc. (which you might actually enjoy more
 than putting divs together but it's also more work).
+
 
 ## Browser bugs
 
