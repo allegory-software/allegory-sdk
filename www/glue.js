@@ -452,7 +452,7 @@ function override_property_setter(cls, prop, set) {
 
 method(String, 'subst', function(...args) {
 	if (!args.length)
-		return this
+		return this.valueOf()
 	if (isarray(args[0]))
 		args = args[0]
 	if (isobject(args[0]))
@@ -1246,7 +1246,7 @@ function week_start_offset(country1) {
 }
 
 {
-function parse_time(s, validate) {
+function parse_timeofday(s, validate) {
 	let t = s
 	if (isstr(s)) {
 		s = s.trim()
@@ -1265,9 +1265,8 @@ function parse_time(s, validate) {
 			return null
 	return t
 }
-
-method(String, 'parse_time', function(validate) {
-	return parse_time(this, validate)
+method(String, 'parse_timeofday', function(validate) {
+	return parse_timeofday(this.valueOf(), validate)
 })
 
 let date_parts = memoize(function(locale) {
@@ -1318,6 +1317,36 @@ let date_parser = memoize(function(locale) {
 		}
 	}
 })
+method(String, 'parse_date', function(locale1, validate) {
+	return date_parser(locale1 || locale())(this.valueOf(), validate)
+})
+
+let a1 = [0, ':', 0, ':', 0]
+let a2 = [0, ':', 0]
+function format_timeofday(t, with_seconds) {
+	let H = floor(t / 3600)
+	let M = floor(t / 60) % 60
+	let S = t % 60
+	if (with_seconds) {
+		if (H < 10) H = '0'+H
+		if (M < 10) M = '0'+M
+		if (S < 10) S = '0'+S
+		a1[0] = H
+		a1[2] = M
+		a1[4] = S
+		return a1.join('')
+	} else {
+		if (H < 10) H = '0'+H
+		if (M < 10) M = '0'+M
+		a2[0] = H
+		a2[2] = M
+		return a2.join('')
+	}
+}
+method(Number, 'timeofday', function(with_seconds) {
+	return format_timeofday(this.valueOf(), with_seconds)
+})
+
 let date_formatter = memoize(function(locale) {
 	let a = []
 	let yi, mi, di, Hi, Mi, Si
@@ -1375,13 +1404,8 @@ let date_formatter = memoize(function(locale) {
 		}
 	}
 })
-
-method(String, 'parse_date', function(locale1, validate) {
-	return date_parser(locale1 || locale())(this, validate)
-})
-
 method(Number, 'date', function(locale1, with_time, with_seconds) {
-	return date_formatter(locale1 || locale())(this, with_time, with_seconds)
+	return date_formatter(locale1 || locale())(this.valueOf(), with_time, with_seconds)
 })
 
 let _date_placeholder_text = memoize(function(locale) {
@@ -1405,7 +1429,7 @@ function date_placeholder_text(locale1) {
 {
 let a = []
 method(Number, 'duration', function(format) {  // approx[+s] | long | null
-	let ss = this
+	let ss = this.valueOf()
 	let s = abs(this)
 	if (format == 'approx') {
 		if (s > 2 * 365 * 24 * 3600)

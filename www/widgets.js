@@ -1288,7 +1288,7 @@ e.make_list_items_focusable = function() {
 
 	let e = this
 	e.make_list_items_focusable = noop
-	e.class('focusable-list focusable-items')
+	e.class('focusable-list')
 
 	e.can_edit_item = return_false
 	e.can_focus_item = function(item, for_editing, assume_visible) {
@@ -5773,10 +5773,14 @@ state props:
 
 */
 
-css('.calendar', 'v-s', `
-	padding: 2px; /* make focus ring visible */
+css(':root', '', `
 	--min-w-calendar: 16.5em;
-	min-width: var(--min-w-calendar);
+	--min-h-calendar: 16.5em;
+`)
+
+css('.calendar', 'v-s', `
+	min-width : var(--min-w-calendar);
+	min-height: var(--min-h-calendar);
 	--fs-calendar-months   : 1.25;
 	--fs-calendar-weekdays : 0.75;
 	--fs-calendar-month    : 0.65;
@@ -5789,7 +5793,7 @@ css('.calendar-canvas', 'abs')
 
 function calendar_widget(e, mode) {
 
-	e.class('calendar')
+	e.class('calendar focusable-items')
 	e.make_disablable()
 	e.make_focusable()
 
@@ -5862,9 +5866,10 @@ function calendar_widget(e, mode) {
 	let font_days, font_days_ascent
 	let font_months, font_months_ascent, font_months_h
 	let font_month
-	let fg, fg_label, bg_alt, bg_smoke, fg_month
+	let fg, fg_label, bg_alt, bg_smoke, fg_month, border_light
 	let fg_focused_selected, fg_unfocused_selected
 	let bg_focused_selected, bg_unfocused_selected
+	let outline_focus
 
 	// deferred scroll state
 	let sy_week1, sy_week2, sy_center
@@ -5913,10 +5918,12 @@ function calendar_widget(e, mode) {
 		bg_alt   = css.prop('--bg-alt')
 		bg_smoke = css.prop('--bg-smoke')
 		fg_month = css.prop('--fg-calendar-month')
+		border_light = css.prop('--border-light')
 		fg_focused_selected   = css.prop('--fg-focused-selected')
 		bg_focused_selected   = css.prop('--bg-focused-selected')
 		fg_unfocused_selected = css.prop('--fg-unfocused-selected')
 		bg_unfocused_selected = css.prop('--bg-unfocused-selected')
+		outline_focus         = css.prop('--outline-focus')
 
 		view_x = cr.x
 		view_y = cr.y
@@ -6001,6 +6008,10 @@ function calendar_widget(e, mode) {
 		}
 		if (d1 != null && d2 != null)
 			e.scroll_to_view_range(d1, d2, duration, center)
+	}
+
+	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
+		e.scroll_to_view_all_ranges(scroll_smooth ? 1/0 : 0, scroll_align == 'center')
 	}
 
 	function update_scroll() {
@@ -6108,7 +6119,7 @@ function calendar_widget(e, mode) {
 		let y = floor(cell_h * 1.0) - .5
 		cx.moveTo(0, y)
 		cx.lineTo(view_w, y)
-		cx.strokeStyle = fg_label
+		cx.strokeStyle = border_light
 		cx.stroke()
 
 		// go under the header
@@ -6162,8 +6173,8 @@ function calendar_widget(e, mode) {
 
 				// draw & hit-test ranges
 				let in_range
-				cx.fillStyle   = bg_unfocused_selected
-				cx.strokeStyle = bg_focused_selected
+				cx.fillStyle   = e.focused ? bg_focused_selected : bg_unfocused_selected
+				cx.strokeStyle = e.focused ? outline_focus : null
 				cx.lineWidth = 2
 				let p = 3 // padding so that stacked ranges don't touch
 				let w = cell_w / 2 // width of half a cell, as we draw in halves.
@@ -6201,7 +6212,7 @@ function calendar_widget(e, mode) {
 									3 * PI / 2
 								)
 								cx.fill()
-								if (is_focused)
+								if (is_focused || (mode == 'day' && e.focus))
 									cx.stroke()
 
 								// draw & hit-test range-end grab handle
@@ -6250,7 +6261,7 @@ function calendar_widget(e, mode) {
 
 				// draw calendar day cell
 				cx.font = font_days
-				cx.fillStyle = in_range ? fg_unfocused_selected : fg
+				cx.fillStyle = in_range ? (e.focused ? fg_focused_selected : fg_unfocused_selected) : fg
 				cx.fillText(n, cell_w / 2, cell_h / 2 + font_days_ascent / 2)
 
 				// draw month name of day-1 cell
@@ -6532,18 +6543,20 @@ ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 
 */
 
-css('.time-picker', 'h shrinks', `height: 16em;`)
-css('.time-picker-list-box', 'v m-x', `padding: 2px;`)
-css('.time-picker-list-header', 'label t-c t-m vscroll', `
+css('.time-picker', 'h-c', `
+	--h-time-picker: 12em;
+	height: var(--h-time-picker);
+`)
+css('.time-picker-list-box', 'v')
+css('.time-picker-list-header', 'label h-c h-m b-b vscroll', `
 	font-size: calc(0.75 * var(--fs));
-	height: calc(var(--lh) * var(--fs) + 2px);
+	min-height: calc(var(--fs) * var(--lh) * 1.67);
 `)
-css('.time-picker-list', 'S shrinks', `
-	padding-top   : 60%;
-	padding-bottom: 60%;
-`)
-css('.time-picker-item', 't-r p-x-2 p-y-025 noselect')
+css('.time-picker-item:first-child', '', `margin-top   : calc(var(--h-time-picker) * .5);`)
+css('.time-picker-item:last-child' , '', `margin-bottom: calc(var(--h-time-picker) * .5);`)
+css('.time-picker-item', 't-r p-x-4 p-y-025 noselect')
 css_state('.time-picker-item.selected', 'bold')
+css_state('.time-picker-list:focus-visible .time-picker-item.focused', 'outline-focus')
 
 time_picker = component('time-picker', 'Input', function(e) {
 
@@ -6552,7 +6565,7 @@ time_picker = component('time-picker', 'Input', function(e) {
 
 	let add_time_list = function(n, s) {
 		let li = list({
-			classes: 'time-picker-list scroll-thin',
+			classes: 'time-picker-list focusable-items scroll-thin',
 			items: range(0, n, 1, i => ({value: i, name: i.base(10, 2)})),
 			item_template: '<div class="item time-picker-item" searchable>{{{name}}}</div>',
 		})
@@ -6567,8 +6580,30 @@ time_picker = component('time-picker', 'Input', function(e) {
 	e.minutes_list = add_time_list(60, 'mm')
 	e.seconds_list = add_time_list(60, 'ss')
 
+	e.make_disablable()
+	e.make_focusable(e.hours_list, e.minutes_list, e.seconds_list)
+
+	e.prop('with_seconds', {type: 'bool', default: false})
+
+	e.seconds_list.parent.hide()
+
+	e.set_with_seconds = function(v) {
+		e.seconds_list.parent.show(!!v)
+	}
+
+	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
+		let opt = {
+			scroll_to_focused_item: true,
+			scroll_align: scroll_align,
+			scroll_smooth: scroll_smooth,
+		}
+		e.  hours_list.update(opt)
+		e.minutes_list.update(opt)
+		e.seconds_list.update(opt)
+	}
+
 	e.listen('focused_item_changed', function(list, ev) {
-		if (list.parent != e)
+		if (!list.parent || list.parent.parent != e)
 			return
 		if (list.focused_item)
 			list.update({scroll_to_focused_item: true, scroll_align: 'center', scroll_smooth: !(ev && ev.keyboard)})
@@ -6580,7 +6615,7 @@ time_picker = component('time-picker', 'Input', function(e) {
 			e.set_prop('value', set_seconds(e.value, list.focused_item.data.value), {target: list})
 	})
 
-	e.prop('value', {type: 'timeofday', convert: s => parse_time(s) % (24 * 3600) })
+	e.prop('value', {type: 'timeofday', convert: s => parse_timeofday(s) % (24 * 3600) })
 
 	e.set_value = function(v, v0, ev) {
 		if (!(ev && ev.target && (ev.target == e || ev.target.parent == e))) {
@@ -6597,7 +6632,8 @@ time_picker = component('time-picker', 'Input', function(e) {
 
 */
 
-css('.datetime-picker', 'h', `height: 16em;`)
+css('.datetime-picker', 'h shrinks', `height: var(--min-h-calendar);`)
+css('.datetime-picker .time-picker', 'shrinks', `height: auto;`)
 
 datetime_picker = component('datetime-picker', 'Input', function(e) {
 
@@ -6607,6 +6643,9 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 	e.calendar = calendar()
 	e.time_picker = time_picker()
 	e.add(e.calendar, e.time_picker)
+
+	e.make_disablable()
+	e.make_focusable(e.calendar, e.time_picker)
 
 	function convert_time(s) {
 		return isstr(s) ? s.parse_date(null, true) : s
@@ -6626,31 +6665,64 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 		}
 	})
 
+	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
+		e.calendar.scroll_to_view_all_ranges(0, scroll_align)
+		e.time_picker.scroll_to_view_value(scroll_align, scroll_smooth)
+	}
+
 })
 
 /* <date-input> & <date-range-input> -----------------------------------------
 
 */
 
-css('.date-input', 'w-input bg-input')
+function svg_calendar_clock(attrs) {
+	return svg(assign_opt({
+		stroke: 'currentColor',
+		fill: 'currentColor',
+		viewBox: '-60 -20 616 592',
+		preserveAspectRatio: 'xMidYMid meet',
+	}, attrs),
+		svg_tag('path', {d: 'M 400.59 224 C 320.99 224 256.59 288.4 256.59 368 C 256.59 447.6 320.97 512 400.59 512 C 480.21 512 544.59 447.6 544.59 368 C 544.59 288.4 480.19 224 400.59 224 Z M 448.59 384 L 394.34 384 C 388.99 384 384.59 379.6 384.59 374.3 L 384.59 304 C 384.59 295.2 391.79 288 400.59 288 C 409.39 288 416.59 295.2 416.59 304 L 416.59 352 L 448.59 352 C 457.428 352 464.59 359.164 464.59 368 C 464.59 376.836 457.39 384 448.59 384 Z M 245.19 437.171 L 64 437.171 C 55.178 437.171 48 429.995 48 421.171 L 48 192 L 416.59 192 L 416.59 128 C 416.59 92.65 387.94 64 352.59 64 L 312.59 64 L 312.59 24 C 312.59 10.75 301.84 0 289.49 0 C 277.14 0 264.59 10.75 264.59 24 L 264.59 64 L 152 64 L 152 24 C 152 10.75 141.3 0 128 0 C 114.7 0 104 10.75 104 24 L 104 64 L 64 64 C 28.65 64 0 92.65 0 128 L 0 421.171 C 0 456.521 28.65 485.171 64 485.171 L 283.738 485.171 C 265.338 472.271 257.49 455.971 245.19 437.171 Z'})
+	)
+}
 
-css('.date-input-calendar-button', 'b h-m p-input')
-css('.date-input-calendar-button::before', 'far fa-calendar')
+css('.date-input', 'w-input bg-input', `
+	--min-w-date-input: var(--min-w-calendar);
+`)
 css('.date-input-input', 'S shrinks t-c')
-css('.date-input:not(.date-input-with-time) .date-input-input', '')
+css('.date-input-picker-button', 'b p-x-input')
+css_role('.date-input-picker-button', 'b-r') // override b-collapse-h with picker
 css('.date-range-input-separator', 'p-x h-m')
-css('.date-input-calendar-box', 'b bg-input v', ` resize: both; `)
-css('.date-input-calendar', 'S')
+css('.timeonly-input', '', `
+	--min-w-calendar: 0px; /* calendar is too wide */
+`)
+
+css('.date-input-picker-box', 'b bg-input v', ` resize: both; `)
+//css('.date-input .calendar', 'S', `resize: both;`)
 css('.date-input-close-button', 'allcaps')
 
-function date_input_widget(e, range, has_time) {
+function date_input_widget(e, has_date, has_time, range) {
 
 	e.class('date-input input-group b-collapse-h')
-	e.class('date-input-with-time', has_time)
+	e.class('dateonly-input', !has_time)
+	e.class('timeonly-input', !has_date)
+	e.class('datetime-input', has_date && has_time)
 	e.make_disablable()
 
-	e.calendar = (range ? range_calendar : calendar)({classes: 'date-input-calendar'})
 	if (range) {
+		e.picker = range_calendar()
+		e.calendar = e.picker
+	} else if (has_date && has_time) {
+		e.picker = datetime_picker()
+		e.calendar = e.picker.calendar
+	} else if (has_date) {
+		e.picker = calendar()
+		e.calendar = e.picker
+	} else {
+		e.picker = time_picker()
+	}
+	if (e.picker != e.calendar) {
 		e.close_button = button({
 			classes: 'date-input-close-button',
 			focusable: false,
@@ -6659,42 +6731,56 @@ function date_input_widget(e, range, has_time) {
 		e.close_button.action = function() {
 			e.isopen = false
 		}
-		e.calendar_box = div({class: 'date-input-calendar-box not-within'}, e.calendar, e.close_button)
-		e.calendar_box.make_focusable(e.calendar)
+		e.picker_box = div({class: 'date-input-picker-box'}, e.picker, e.close_button)
 	} else {
-		e.calendar_box = e.calendar
+		e.picker_box = e.picker
 	}
-	e.calendar_box.popup(e, 'bottom', 'end')
-
-	e.calendar_box.h = 300
+	e.picker_box.class('not-within')
+	e.picker_box.popup(e, 'bottom', 'center')
 
 	let w
 	e.on_measure(function() {
 		w = e.rect().w
 	})
 	e.on_position(function() {
-		e.calendar_box.min_w = `calc(max(var(--min-w-calendar), ${w}px))`
+		e.picker_box.min_w = `calc(max(var(--min-w-date-input), ${w}px))`
 	})
 
-	e.to_text = function(t) {
-		return t.date()
+	if (has_date) {
+		e.to_text = function(t) {
+			return t.date(null, has_time, e.with_seconds)
+		}
+		e.from_text = function(s) {
+			return s.parse_date(null, true)
+		}
+	} else {
+		e.to_text = function(t) {
+			return t.timeofday(e.with_seconds)
+		}
+		e.from_text = function(s) {
+			return s.parse_timeofday(true)
+		}
 	}
 
-	e.from_text = function(s) {
-		return s.parse_date(null, true)
+	if (has_time) {
+		e.prop('with_seconds', {type: 'bool', default: false})
+
+		e.set_with_seconds = function(v) {
+			e.picker.with_seconds = v
+		}
 	}
 
-	function convert_date(s) {
+	function convert_value(s) {
 		return isstr(s) ? e.from_text(s) : s
 	}
 
 	for (let VAL of (range ? ['value1', 'value2'] : ['value'])) {
-		e.prop(VAL, {type: 'date', convert: convert_date})
+		e.prop(VAL, {type: 'date', convert: convert_value})
 		e['set_'+VAL] = function(v, v0, ev) {
 			if (!(ev && ev.target == e[VAL+'_input'] || ev.target == e))
 				e[VAL+'_input'].value = isnum(v) ? e.to_text(v) : v
-			if (!(ev && ev.target == e.calendar))
-				e.calendar.set_prop(VAL, v, ev)
+			if (!(ev && ev.target == e.picker))
+				e.picker.set_prop(VAL, v, ev)
 			e.set_prop('input_'+VAL, null, ev || {target: e})
 		}
 		e.prop('input_'+VAL, {attr: VAL, default: null})
@@ -6729,7 +6815,7 @@ function date_input_widget(e, range, has_time) {
 	}
 
 	e.listen('prop_changed', function(ce, k, v, v0, ev) {
-		if (ce != e.calendar) return
+		if (ce != e.picker) return
 		if (range) {
 			if (!(k == 'value1' || k == 'value2'))
 				return
@@ -6749,17 +6835,21 @@ function date_input_widget(e, range, has_time) {
 	else
 		e.make_focusable(e.value_input)
 
-	e.calendar_button = button({
-		classes: 'date-input-calendar-button',
+	e.picker_button = button({
+		classes: 'date-input-picker-button',
 		bare: true,
 		focusable: false,
+		icon:
+			has_date && has_time && svg_calendar_clock()
+			|| !has_time && 'far fa-calendar'
+			|| !has_date && 'far fa-clock',
 	})
 
 	if (range)
 		e.add(e.value1_input, div({class: 'date-range-input-separator'},'-'),
-			e.value2_input, e.calendar_button)
+			e.value2_input, e.picker_button)
 	else
-		e.add(e.value_input, e.calendar_button)
+		e.add(e.value_input, e.picker_button)
 
 	// controller -------------------------------------------------------------
 
@@ -6767,41 +6857,39 @@ function date_input_widget(e, range, has_time) {
 	e.set_isopen = function(open, open0, focus) {
 		e.class('open', open)
 		if (open) {
-			e.calendar_box.popup(null, 'bottom', 'end')
-			e.calendar.scroll_to_view_all_ranges(0, 'center')
-			e.calendar.update() // {focus: focus !== false})
-			e.calendar_box.show()
-			e.add(e.calendar_box)
+			e.picker_box.popup(null, 'bottom', 'end')
+			e.picker.scroll_to_view_value('center')
+			e.picker_box.show()
+			e.add(e.picker_box)
 			if (focus !== false)
-				e.calendar_box.focus()
+				e.picker_box.focus()
 		} else {
-			e.calendar_box.hide()
+			//e.picker_box.hide()
 			if (focus !== false)
 				e.focus()
 		}
 	}
 
-	e.calendar_box.on('focusout', function(ev) {
-		if (e.close_button && ev.relatedTarget == e.close_button)
-			return
-		if (ev.relatedTarget == e.calendar)
+	e.picker_box.on('focusout', function(ev) {
+		if (ev.relatedTarget && e.picker_box.contains(ev.relatedTarget))
 			return
 		e.set_prop('isopen', false, false)
 	})
 
-	e.calendar_button.on('pointerdown', function(ev) {
+	e.picker_button.on('pointerdown', function(ev) {
 		e.isopen = !e.isopen
 		return false
 	})
 
-	e.calendar.on('pick', function() {
-		// delay it so the user can glance the choice.
-		runafter(.1, function() {
-			e.isopen = false
+	if (!e.close_button && e.calendar) // auto-close on pick with delay
+		e.calendar.on('pick', function() {
+			// delay it so the user can glance the choice.
+			runafter(.1, function() {
+				e.isopen = false
+			})
 		})
-	})
 
-	e.calendar_box.on('keydown', function(key) {
+	e.picker_box.on('keydown', function(key) {
 		if (key == 'Escape') {
 			e.isopen = false
 			return false
@@ -6818,18 +6906,22 @@ function date_input_widget(e, range, has_time) {
 }
 
 date_input = component('date-input', 'Input', function(e) {
-	return date_input_widget(e)
+	return date_input_widget(e, true)
+})
+
+time_input = component('time-input', 'Input', function(e) {
+	return date_input_widget(e, false, true)
 })
 
 datetime_input = component('datetime-input', 'Input', function(e) {
-	return date_input_widget(e, false, true)
+	return date_input_widget(e, true, true)
 })
 
 css('.date-range-input', '', `width: calc(var(--w-input) * 2);`)
 
 date_range_input = component('date-range-input', 'Input', function(e) {
 	e.class('date-range-input')
-	return date_input_widget(e, true)
+	return date_input_widget(e, true, false, true)
 })
 
 /* <richtext> ----------------------------------------------------------------

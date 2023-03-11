@@ -11,7 +11,7 @@ CSS CLASSES
 
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
-	ALIGN INLINE  t-{l r c j m t b bas sub sup} float-{l r}
+	ALIGN INLINE  inline block t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
 	ALIGN GRID    grid-{l r c sb s t b m bl}', '', {x y}{1-5} x..x y..y
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
@@ -81,8 +81,8 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg                    : hsl(  0   0%  98% / 1.0); /* opaque */
 	--bg-hover              : hsl(  0   0%  97% / 1.0); /* opaque */
 	--bg-active             : hsl(  0   0%  96% / 1.0); /* opaque */
-	--bg1                   : hsl(  0   0%  98% / 1.0); /* sits on bg; opaque */
-	--bg1-hover             : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
+	--bg1                   : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
+	--bg1-hover             : hsl(  0   0%  93% / 1.0); /* sits on bg; opaque */
 	--bg2                   : hsl(  0   0%  80% / 1.0); /* sits on bg1; opaque */
 	--bg2-hover             : hsl(  0   0%  85% / 1.0);
 	--bg3                   : hsl(  0   0%  70% / 1.0); /* sits on bg1; opaque */
@@ -519,6 +519,9 @@ css('.fg-search'     , '', ` color: var(--fg-search); `)
 
 /* ALIGN: INLINE ---------------------------------------------------------- */
 
+css('.inline', '', ` display: inline; `)
+css('.block' , '', ` display: block ; `)
+
 css('.t-l'  , '', ` text-align: start  ; `)
 css('.t-c'  , '', ` text-align: center ; `)
 css('.t-r'  , '', ` text-align: end    ; `)
@@ -909,12 +912,14 @@ css_state(':focus-visible', 'outline-focus')
 
 /* OVERFLOW --------------------------------------------------------------- */
 
-css('.scroll'      , '', ` overflow  : scroll; `)
-css('.hscroll'     , '', ` overflow-x: scroll; `)
-css('.vscroll'     , '', ` overflow-y: scroll; `)
-css('.scroll-auto' , '', ` overflow  : auto; `)
-css('.hscroll-auto', '', ` overflow-x: auto; `)
-css('.vscroll-auto', '', ` overflow-y: auto; `)
+/* NOTE: padding doesn't go well with scrolling so we're removing it to avoid bugs. */
+
+css('.scroll'      , 'p0'   , ` overflow  : scroll; `)
+css('.hscroll'     , 'p-x-0', ` overflow-x: scroll; `)
+css('.vscroll'     , 'p-y-0', ` overflow-y: scroll; `)
+css('.scroll-auto' , 'p0'   , ` overflow  : auto; `)
+css('.hscroll-auto', 'p-x-0', ` overflow-x: auto; `)
+css('.vscroll-auto', 'p-y-0', ` overflow-y: auto; `)
 css('.clip'        , '', ` overflow  : hidden; `)
 css('.clip-x'      , '', ` overflow-x: hidden; `)
 css('.clip-y'      , '', ` overflow-y: hidden; `)
@@ -1214,7 +1219,7 @@ css('.icon-9-dots::before'    , '', `
 /* ICONS: SVG-BASED ------------------------------------------------------- */
 
 function svg_circle_x(attrs) {
-	return svg(assign_opt({fill: 'currentColor', viewBox: '0 0 16 16', preserveAspectRatio: 'xMidYMid meet'}, attrs),
+	return svg(assign_opt({viewBox: '0 0 16 16'}, attrs),
 		svg_tag('path', {d: `
 			M 8 16 C 14.158 16 18.007 9.333 14.928 4 C 13.499 1.525 10.858 0 8 0 C 1.842 0 -2.007 6.667 1.072 12 C 2.501 14.475 5.142 16 8 16 Z
 			M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z
@@ -1223,8 +1228,7 @@ function svg_circle_x(attrs) {
 }
 
 function svg_plus_sign(attrs) {
-	return svg(assign_opt({stroke: 'currentColor', viewBox: '-1 -1 2 2',
-		preserveAspectRatio: 'xMidYMid meet'}, attrs),
+	return svg(assign_opt({viewBox: '-1 -1 2 2'}, attrs),
 		svg_tag('path', {
 			d: 'M 0 0 H 1 M 0 0 H -1 M 0 0 V 1 M 0 0 V -1',
 			'vector-effect': 'non-scaling-stroke',
@@ -1234,8 +1238,7 @@ function svg_plus_sign(attrs) {
 }
 
 function svg_minus_sign(attrs) {
-	return svg(assign_opt({stroke: 'currentColor', viewBox: '-1 -1 2 2',
-		preserveAspectRatio: 'xMidYMid meet'}, attrs),
+	return svg(assign_opt({viewBox: '-1 -1 2 2'}, attrs),
 		svg_tag('path', {
 			d: 'M 0 0 H .9 M 0 0 H -.9',
 			'vector-effect': 'non-scaling-stroke',

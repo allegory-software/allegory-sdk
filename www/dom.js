@@ -19,6 +19,11 @@ Defines CSS rules for:
 	.modal
 	.modal-overlay
 
+Uses CSS classes:
+
+	.outline-focus
+	.no-outline
+
 Uses CSS classes on the <html> tag:
 
 	.theme-light .theme-dark
@@ -1215,7 +1220,11 @@ span = (...a) => tag('span', ...a)
 
 function svg_tag(tag, attrs, ...children) {
 	let e = document.createElementNS('http://www.w3.org/2000/svg', tag)
-	e.attrs = attrs
+	e.attrs = tag == 'svg' ? assign_opt({
+		stroke : 'currentColor',
+		fill   : 'currentColor',
+		preserveAspectRatio: 'xMidYMid meet',
+	}, attrs) : attrs
 	for (let s of children) {
 		if (isfunc(s))
 			s = s()
@@ -1897,6 +1906,9 @@ sets css classes:
 	focusable
 
 */
+
+// NOTE: uses CSS classes `.outline-focus` and `.no-outline` that are
+// not defined here, define them yourself or load css.js which has them.
 
 // move the focus ring from focused element to the outermost element with `.focus-within`.
 css_role_state('.focus-within:has(.focus-outside:focus-visible)', 'outline-focus') // outermost
@@ -3299,7 +3311,7 @@ component('script[run]', function(e) {
 
 // html-declared components --------------------------------------------------
 
-css('component', 'skip')
+css('component', '', `display: contents;`)
 
 component('component', function(e) {
 
@@ -3334,7 +3346,7 @@ props:
 
 */
 
-css('.if', 'skip')
+css('.if', '', `display: contents;`)
 
 component('if', 'Containers', function(e) {
 

@@ -1,11 +1,13 @@
-# Programming notes for the web platform
+# Programming for browsers in 2022
 
-Following is a condensed summary of the issues I've encountered in two years
-of writing web components from scratch in JavaScript.
+Following is a condensed summary of the issues and gotchas that I've
+encountered in two years of writing web components from scratch
+in JavaScript in the year of our DOM 2020 through 2022.
+
 
 ## The web components API is unusable
 
-Here's why:
+Here's what's wrong with it:
 
 * You can't create child elements in the constructor while the DOM is loading,
 so good luck initializing components declared in HTML. You're going to have
@@ -27,8 +29,6 @@ Luckily we can create our own components API, with blackjack and hookers,
 and none of the above problems, so as long as you're not using third-party
 libraries (luckily we're not), you can consider this solved.
 
-This is our first clean victory in fighting this platform.
-
 
 ## CSS is not composable
 
@@ -42,17 +42,16 @@ Generating CSS also gives us the opportunity to disable the genius CSS feature
 of specificity by wrapping all the rules in `:where()` thus leaving source
 order and CSS layers as the way to specify rule order.
 
-This is our second clean victory in fighting this platform.
-Programmable interfaces are the great escape hatch from the short-sightedness
-of platform designers. But it ends here.
+Programmable interfaces are a great escape hatch from the idiocy of silly
+platform designers.
 
 
 ## No global z-index
 
 Popups, i.e. things that should pe painted above everything else but should
 otherwise be anchored to a specific part of the layout, are impossible
-in this model. Combine that with the "implicit stacking context" genius idea
-(which is actually an abstraction leak of the underlying graphics implementation,
+on this platform. Combine that with the "implicit stacking context" genius idea
+(which is probably an abstraction leak of the underlying graphics implementation,
 cowardly disguised as a feature), and it's no wonder that `z-index: 99999`
 is basically a meme at this point, endlessly frustrating beginners in their
 attempt to apply logic and common sense to make simple things with this lemon.
@@ -100,7 +99,7 @@ partially obscured.
 
 Draw a "+" sign that looks sharp at any zoom level on this platform, I dare you.
 
-There's multiple ways to do graphics on the web: styled divs, svg, canvas,
+There's many ways to do graphics on the web: styled divs, svg, canvas,
 fonts, raster images.
 
 For small-size graphics that prioritize legibility like icons, raster images are out.
@@ -124,10 +123,18 @@ nothing beats the level of composability and automation of a programming languag
 Canvas is not all good though. Drawing an entire widget procedurally on a canvas
 is great if you need to make a grid widget that scrolls a million records
 at 60 fps, in fact it's the only way to do it, and we've done that.
-But using it for simple things is overkill: it's not automatically integrated
-with the layout system and CSS, so you need to code for resizing, styling,
-hi-dpi, scrolling, animation, etc. (which you might actually enjoy more
+But using it for simple things is overkill: it's not integrated with the
+layout system and CSS, so you need to code for resizing, styling, scrolling,
+animation, hit-testing, hi-dpi, etc. (which you might actually enjoy more
 than putting divs together but it's also more work).
+
+
+## Padding is not accounted for on overflow
+
+Never put padding on a container that can overflow by scrolling because the
+scrollbar doesn't accunt for the container's padding, it's only scrolling
+the content inside the padding, even though the scrollbar itself is drawn
+in the space that includes the padding, which is very misleading visually.
 
 
 ## Browser bugs

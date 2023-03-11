@@ -94,7 +94,8 @@ button[pressed] { background: var(--bg-button-active); }
 	</div>
 	<div id=result_split>
 		<div id=result_buttons class="smaller p-x-05 gap-x-05 h-r">
-			<button class="layout-btn" key=inline   layout-classes="display-inline ">Inline</button>
+			<button class="layout-btn" key=inline   layout-classes="inline">Inline</button>
+			<button class="layout-btn" key=block    layout-classes="block ">Block</button>
 			<button class="layout-btn" key=flex-h-t layout-classes="h-t S shrinks  ">Flex H-T</button>
 			<button class="layout-btn" key=flex-h-s layout-classes="h-s S shrinks  ">Flex H-S</button>
 			<button class="layout-btn" key=flex-v-s layout-classes="v-s S shrinks  ">Flex V-S</button>
@@ -106,8 +107,6 @@ button[pressed] { background: var(--bg-button-active); }
 	</div>
 </div>
 <script>
-
-css('.display-inline', '', ` display: inline; `)
 
 on_dom_load(function() {
 
@@ -197,6 +196,7 @@ on_dom_load(function() {
 	}
 	init_select_buttons('.layout-btn', 'inline', function(btn) {
 		result.attr('class', btn.attr('layout-classes'))
+		document.fire('layout_changed')
 	})
 	init_select_buttons('.size-btn', 'normal', function(btn, key) {
 		set_theme_size(key)
@@ -605,9 +605,9 @@ toggle_collapsed = function() {
 <!--------------------------------------------------------------------------->
 
 <xmp id=slider_demo>
-<slider val=0.7 marked=false></slider>
-<slider val=5 from=1 to=9 min=3 max=7 decimals=0></slider>
-<range-slider min_val=1200 max_val=1800 from=1000 to=2000 decimals=0></range-slider>
+<slider value=0.7 marked=false></slider>
+<slider value=5 from=1 to=9 min=3 max=7 decimals=0></slider>
+<range-slider value1=1200 value2=1800 from=1000 to=2000 decimals=0></range-slider>
 <script run>
 //s1.add_validator('custom', field => ({
 //		validate: v => isnum(v) && v >= .2 && v <= .8,
@@ -901,16 +901,30 @@ for (let e of $('list')) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=calendar_demo>
-<ranges-calendar class="large" ranges="1/1/2022..1/5/2022 1/13/2022..1/15/2022"></ranges-calendar>
-<range-calendar day1="1/1/2022" day2="1/5/2022"></range-calendar>
-<calendar class="smaller" day="1/1/2022"></calendar>
+<ranges-calendar class="large" value="1/1/2022..1/5/2022 1/13/2022..1/15/2022"></ranges-calendar>
+<range-calendar value1="1/1/2022" value2="1/5/2022"></range-calendar>
+<calendar class="smaller" value="1/1/2022"></calendar>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id=time-picker_demo>
+<time-picker value="1:57:12"></time-picker>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id=datetime-picker_demo>
+<datetime-picker value="3/4/2345 3:42:12"></datetime-picker>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
 <xmp id=date-input_demo>
-<date-input day="1/18/2022" placeholder="Birth date"></date-input>
-<date-range-input day1="1/18/2022" day2="2/3/2022"></date-range-input>
+<div><date-input       value="1/18/2022" placeholder="Birth date"></date-input></div>
+<div><time-input       input_value="13:42:12" placeholder="Meet at"></tine-input></div>
+<div><datetime-input   input_value="1/18/2022 13:42" placeholder="Meet at"></datetime-input></div>
+<div><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input></div>
 </xmp>
 
 <!--------------------------------------------------------------------------->
