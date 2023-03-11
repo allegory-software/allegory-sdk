@@ -39,18 +39,24 @@ update() is always called when a property changes). Deferring is more work
 but supports multiple property changes before updating happens once on the
 next frame.
 
+* if the widget is canvas drawn, best to use resizeable_canvas() because:
+  * the canvas needs to be resized and repainted when the widget is resized.
+	 * resize in multiples of 100-200px or it'll be too slow when dragging a split-view.
+  * the context needs to be scaled before drawing on hi-dpi screens.
+  * buffer needs clearing and the context needs to be reset on each repaint.
+
 # What `dom.js` can do for you
 
 About that rope...
 
-* prop('foo', opt)          - declare a property
+* e.prop('foo', opt)          - declare a property
 * e.set_foo = f(v, v0, ev)  - implement property's setter
-* on_init(f)                - run f after all properties are set
-* on_bind(f)                - run f when attached and detached from DOM
-* on_update(f)              - run f on the next update - update the DOM here
-* on_measure(f)             - run f after all updates are done - measure the DOM here
-* on_position(f)            - run f after all measurements are done - update the DOM that needs measurements
-* make_disablable()         - add disabled property and disable()
-* make_focusable()          - add focusable and tabindex property
-* popup()                   - turn into a popup
-
+* e.on_init(f)                - run f after all properties are set
+* e.on_bind(f)                - run f when attached and detached from DOM
+* e.on_update(f)              - run f on the next update - update the DOM here
+* e.on_measure(f)             - run f after all updates are done - measure the DOM here
+* e.on_position(f)            - run f after all measurements are done - update the DOM that needs measurements
+* e.make_disablable()         - add disabled property and disable()
+* e.make_focusable()          - add focusable and tabindex property
+* e.popup()                   - turn into a popup
+* resizeable_canvas(f)        - creates a canvas that resizes itself automatically
