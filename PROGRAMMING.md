@@ -1,5 +1,5 @@
 
-# Lua coding style guide
+# Lua coding style
 
 __NOTE__: This guide assumes familiarity with the
 [LuaStyleGuide](http://lua-users.org/wiki/LuaStyleGuide) from the Lua wiki.
@@ -299,7 +299,7 @@ Switching endianness of a 64bit integer (to use in conjunction with
 
 ------------------------------------------------------------------------------
 
-# Notes on Lua API design
+# Making Lua APIs
 
 ## The golden rule
 
@@ -403,7 +403,7 @@ OO languages like Eiffel. In these languages you have enough hooks to achieve
 semantic equivalence of the native types and it's not easy to subvert the
 virtualization, making libraries mostly work automatically with the new types.
 This model is incompatible with Lua for practical reasons. The high
-performance standard Lua has set to follow is enough of a show-stopper:
+performance standard that Lua has set to follow is enough of a show-stopper:
 hooks are expensive to check and many standard utilities exploit implementation
 details for performance. It is also a broken model philosophically because
 abstractions leak, like how `1/0` breaks when LUA_NUMBER is int,
@@ -416,14 +416,13 @@ not convinced, search the Lua mailing list for "`__next`". I don't know why
 they even bothered with `__pairs` and `__ipairs`. This clearly isn't going
 anywhere.
 
-That being said, there _are_ patterns of virtualization that you should
-care for. In particular, callable tables and userdata are common enough
-that typechecking for functions should be made with `callable(f)`
-(a function which I just made up which checks for `__call`) instead of
-`type(f)=='function'`. Virtualized functions work because the API of
-a function (i.e. what you can do with it) is almost leak-free: except for
-dumping and loading, all you can do with a function is call it and
-pass it around.
+That being said, there may be patterns of virtualization that you might want
+to care for. In particular, callable tables and userdata are common enough
+that typechecking for functions could be made with a function which also
+checks for `__call` besides `type(f)=='function'`. Virtualized functions work
+because the API of a function (i.e. what you can do with it) is almost
+leak-free: except for dumping and loading, all you can do with a function
+is call it and pass it around.
 
 ## Mutating arguments
 
