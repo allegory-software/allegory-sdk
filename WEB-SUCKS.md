@@ -129,12 +129,22 @@ animation, hit-testing, hi-dpi, etc. (which you might actually enjoy more
 than putting divs together but it's also more work).
 
 
-## Padding is not accounted for on overflow
+## Padding and overflow
 
 Never put padding on a container that can overflow by scrolling because the
 scrollbar doesn't accunt for the container's padding, it's only scrolling
 the content inside the padding, even though the scrollbar itself is drawn
 in the space that includes the padding, which is very misleading visually.
+
+
+## CSS Transitions
+
+Transitions is just lerp'ing css properties, so if you want to fade-in/out
+an element into/out-of existence use opacity because non-numeric properties
+like visibility or display are not lerp'able.
+
+Computed properties like element's size and position are not transitionable.
+To animate those use the FLIP technique.
 
 
 ## Browser bugs
