@@ -147,6 +147,26 @@ Computed properties like element's size and position are not transitionable.
 To animate those use the FLIP technique.
 
 
+## Focus state
+
+Use `:focus-visibile` instead of `:focus` so that a focus ring only appears
+on keyboard navigation but not on mouse navigation which would be distracting
+and ugly. The problem is that Firefox doesn't support `:has(:focus-visible)`
+(because it doesn't support `:has()`) yet, and there's no `:focus-visibile-within`
+equivalent to `:focus-within`. Also the `focusVisible` option to `focus()`
+only works in Firefox and there's no way to query the `:focus-visible` state
+at all from JavaScript which is needed for canvas-drawn widgets.
+I guess we'll just have to wait on that one, unless you want to reimplement
+the whole focusing logic in JavaScript (doable but a bit overkill).
+
+
+## Mouse wheel deltas
+
+They're totally different on a touchpad than on a mouse wheel, defferent
+between browsers, different on a Mac, so good luck detecting which is which
+and correct for it.
+
+
 ## Browser bugs
 
 Check out this still-open FF bug from 11 years ago:

@@ -6315,7 +6315,7 @@ function calendar_widget(e, mode) {
 	e.on('blur' , function() { e.update() })
 	e.on('focus', function() { e.update() })
 
-	ct.on('wheel', function(dx, dy) {
+	ct.on('wheel', function(ev, dy) {
 		e.scroll_by_weeks(-dy * 3)
 	})
 

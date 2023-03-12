@@ -2517,11 +2517,13 @@ callers.wheel = function(ev, f) {
 		return
 	if (ev.deltaY) {
 		let dy = ev.deltaY
-		// 90% of Mozilla is funded by Google but they still hate each other...
-		if (abs(dy) >= 100) // Chrome
-			dy /= 100
-		else
-			dy /= 3 // Firefox
+		if (ev.deltaMode === 1) // dy is in "lines"
+			dy *= 40
+		else if (ev.deltaMode == 2) // dy is in "pages"
+			dy *= 800
+		if (Firefox) // firefox does some crap...
+			dy /= (102 / 120)
+		dy /= 120
 		return f.call(this, ev, dy, ev.clientX, ev.clientY)
 	}
 }
