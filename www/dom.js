@@ -1221,8 +1221,6 @@ span = (...a) => tag('span', ...a)
 function svg_tag(tag, attrs, ...children) {
 	let e = document.createElementNS('http://www.w3.org/2000/svg', tag)
 	e.attrs = tag == 'svg' ? assign_opt({
-		stroke : 'currentColor',
-		fill   : 'currentColor',
 		preserveAspectRatio: 'xMidYMid meet',
 	}, attrs) : attrs
 	for (let s of children) {

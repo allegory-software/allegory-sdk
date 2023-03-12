@@ -1288,7 +1288,7 @@ e.make_list_items_focusable = function() {
 
 	let e = this
 	e.make_list_items_focusable = noop
-	e.class('focusable-list')
+	e.class('focusable-list focusable-items')
 
 	e.can_edit_item = return_false
 	e.can_focus_item = function(item, for_editing, assume_visible) {
@@ -1511,6 +1511,7 @@ e.make_list_items_focusable = function() {
 		let sel_changed
 		for (let i = 0, n = e.list_len; i < n; i++) {
 			let item = e.at[i]
+			item.class('item')
 			if (item.selected) {
 				item.selected = null
 				sel_changed = true
@@ -1538,6 +1539,7 @@ e.make_list_items_focusable = function() {
 	})
 
 	e.update_item_state = function(item) {
+		item.class('item')
 		item.class('selected', !!item.selected)
 		item.class('focused', e.focused_item == item)
 	}
@@ -6678,7 +6680,6 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 function svg_calendar_clock(attrs) {
 	return svg(assign_opt({
-		stroke: 'currentColor',
 		fill: 'currentColor',
 		viewBox: '-60 -20 616 592',
 		preserveAspectRatio: 'xMidYMid meet',

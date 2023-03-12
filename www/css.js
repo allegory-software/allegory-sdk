@@ -1219,7 +1219,10 @@ css('.icon-9-dots::before'    , '', `
 /* ICONS: SVG-BASED ------------------------------------------------------- */
 
 function svg_circle_x(attrs) {
-	return svg(assign_opt({viewBox: '0 0 16 16'}, attrs),
+	return svg(assign_opt({
+			viewBox: '0 0 16 16',
+			fill   : 'currentColor',
+		}, attrs),
 		svg_tag('path', {d: `
 			M 8 16 C 14.158 16 18.007 9.333 14.928 4 C 13.499 1.525 10.858 0 8 0 C 1.842 0 -2.007 6.667 1.072 12 C 2.501 14.475 5.142 16 8 16 Z
 			M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z
@@ -1228,7 +1231,10 @@ function svg_circle_x(attrs) {
 }
 
 function svg_plus_sign(attrs) {
-	return svg(assign_opt({viewBox: '-1 -1 2 2'}, attrs),
+	return svg(assign_opt({
+			viewBox: '-1 -1 2 2',
+			stroke : 'currentColor',
+		}, attrs),
 		svg_tag('path', {
 			d: 'M 0 0 H 1 M 0 0 H -1 M 0 0 V 1 M 0 0 V -1',
 			'vector-effect': 'non-scaling-stroke',
@@ -1238,7 +1244,10 @@ function svg_plus_sign(attrs) {
 }
 
 function svg_minus_sign(attrs) {
-	return svg(assign_opt({viewBox: '-1 -1 2 2'}, attrs),
+	return svg(assign_opt({
+			viewBox: '-1 -1 2 2',
+			stroke : 'currentColor',
+		}, attrs),
 		svg_tag('path', {
 			d: 'M 0 0 H .9 M 0 0 H -.9',
 			'vector-effect': 'non-scaling-stroke',
