@@ -5139,7 +5139,7 @@ num_input = component('num-input', 'Input', function(e) {
 	// controller
 
 	e.input.on('wheel', function(ev, dy) {
-		e.increment_value(dy)
+		e.increment_value(round(-dy / 120))
 		return false
 	})
 
@@ -5660,7 +5660,7 @@ dropdown = component('dropdown', 'Input', function(e) {
 	e.on('wheel', function(ev, dy) {
 		if (ev.target.closest_child(e) != e.list) // event wasn't bubbled from the picker.
 			if (e.list)
-				e.list.focus_item(true, round(dy))
+				e.list.focus_item(true, round(-dy / 120))
 	})
 
 	return {list: html_list}
@@ -6316,7 +6316,7 @@ function calendar_widget(e, mode) {
 	e.on('focus', function() { e.update() })
 
 	ct.on('wheel', function(ev, dy) {
-		e.scroll_by_weeks(-dy * 3)
+		e.scroll_by(dy)
 	})
 
 	ct.on('pointermove', function(ev, mx, my) {
@@ -6799,7 +6799,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			e.set_prop(VAL, this.value, ev)
 		})
 		inp.on('wheel', function(ev, dy) {
-			let d = day(e[VAL], round(dy))
+			let d = day(e[VAL], round(-dy / 120))
 			if (range)
 				if (VAL == 'value1' && d > e.value2)
 					d = e.value2

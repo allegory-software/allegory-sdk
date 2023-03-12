@@ -2515,17 +2515,9 @@ alias(KeyboardEvent, 'alt'  , 'altKey')
 callers.wheel = function(ev, f) {
 	if (ev.target.effectively_disabled)
 		return
-	if (ev.deltaY) {
-		let dy = ev.deltaY
-		if (ev.deltaMode === 1) // dy is in "lines"
-			dy *= 40
-		else if (ev.deltaMode == 2) // dy is in "pages"
-			dy *= 800
-		if (Firefox) // firefox does some crap...
-			dy /= (102 / 120)
-		dy /= 120
+	let dy = ev.wheelDeltaY
+	if (dy)
 		return f.call(this, ev, dy, ev.clientX, ev.clientY)
-	}
 }
 
 override(Event, 'stopPropagation', function(inherited, ...args) {
