@@ -2985,7 +2985,6 @@ easing.expo   = t => 2**(10 * (t - 1))
 easing.sine   = t => -cos(t * (PI * .5)) + 1
 easing.circ   = t => -(sqrt(1 - t**2) - 1)
 easing.back   = t => t**2 * (2.7 * t - 1.7)
-
 easing.bounce = function(t) {
 	if (t < 1 / 2.75) {
 		return 7.5625 * t**2
@@ -3001,6 +3000,7 @@ easing.bounce = function(t) {
 	}
 }
 
+// restartable, abortable, callback-based transitions.
 function transition(f) {
 	let raf_id, t0
 	let dt, y0, y1, ease_f, ease_way, ease_args
@@ -3015,36 +3015,35 @@ function transition(f) {
 		let f0 = finish
 		finish = function() { f0(); f() }
 	}
-	e.stop = function() {
+	e.abort = function() {
 		if (raf_id == null) return
 		cancel_raf(raf_id)
 		raf_id = null
-		let t = performance.now()
-		let lin_x = lerp(t, t0, t0 + dt * 1000, 0, 1)
 		t0 = null
 		e.started = false
-		f(y1, lin_x, true)
-		finish()
 	}
-	e.restart = function(dt_, y0_, y1_, ease_f_, ease_way_, ...ease_args_) {
-		dt = dt_
-		y0 = y0_
-		y1 = y1_
-		ease_f = ease_f_
-		ease_way = or(ease_way_, 'out')
-		ease_args = ease_args_
-		dt = or(dt, 1)
+	e.stop = function() {
+		if (raf_id == null) return
+		e.started = false // stop on next frame
+	}
+	e.restart = function(_dt, _y0, _y1, _ease_f, _ease_way, ..._ease_args) {
+		t0 = null
+		dt = max(0, _dt)
+		y0 = _y0
+		y1 = _y1
+		ease_f = _ease_f
+		ease_way = or(_ease_way, 'out')
+		ease_args = _ease_args
 		y0 = or(y0, 0)
 		y1 = or(y1, 1)
 		ease_f = or(ease_f, 'cubic')
-		e.stop()
 		raf_id = raf(wrapper)
 		e.started = true
 		start()
 	}
 	let wrapper = function(t) {
 		t0 = or(t0, t)
-		let lin_x = lerp(t, t0, t0 + dt * 1000, 0, 1)
+		let lin_x = e.started ? lerp(t, t0, t0 + dt * 1000, 0, 1) : 1
 		if (lin_x < 1) {
 			let eas_x = easing.ease(ease_f, ease_way, lin_x, ...ease_args)
 			let y = lerp(eas_x, 0, 1, y0, y1)
@@ -3054,7 +3053,7 @@ function transition(f) {
 			raf_id = null
 			t0 = null
 			e.started = false
-			f(y1, lin_x, true)
+			f(y1, 1, true)
 			finish()
 		}
 	}
