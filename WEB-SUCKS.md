@@ -118,15 +118,15 @@ pixel snapping is not).
 The only other way to draw a scalable plus sign that looks good is with canvas.
 The canvas API is great because well, it's an API, and APIs are always better
 than declarative abstractions (contrary to current wisdom) simply because
-nothing beats the level of composability and automation of a programming language.
+nothing beats the level of control and composability of a programming language.
 
 Canvas is not all good though. Drawing an entire widget procedurally on a canvas
 is great if you need to make a grid widget that scrolls a million records
-at 60 fps, in fact it's the only way to do it, and we've done that.
-But using it for simple things is overkill: it's not integrated with the
-layout system and CSS, so you need to code for resizing, styling, scrolling,
-animation, hit-testing, hi-dpi, etc. (which you might actually enjoy more
-than putting divs together but it's also more work).
+at 60 fps, in fact it's the only way to do it. But using it for simple things
+is overkill: it's not integrated with the layout system or CSS, so you need
+to code for resizing, styling, scrolling, animation, hit-testing, pixel snapping,
+hi-dpi, etc. (which you might actually enjoy more than putting divs together
+and you have the ultimate control over every pixel but it's also more work).
 
 
 ## Padding and overflow
@@ -139,11 +139,11 @@ in the space that includes the padding, which is very misleading visually.
 
 ## CSS Transitions
 
-Transitions is just lerp'ing css properties, so if you want to fade-in/out
-an element into/out-of existence use opacity because non-numeric properties
-like visibility or display are not lerp'able.
-
-Computed properties like element's size and position are not transitionable.
+Transitions is just lerp'ing css properties, which are only a proxy for the
+things that you might actually want to animate. So if you want to fade-in/out
+an element into/out-of existence for example you have to use opacity because
+non-numeric properties like visibility or display are not lerp'able. Computed
+properties like element's size and position are not transitionable at all.
 To animate those use the FLIP technique.
 
 
@@ -156,15 +156,33 @@ and ugly. The problem is that Firefox doesn't support `:has(:focus-visible)`
 equivalent to `:focus-within`. Also the `focusVisible` option to `focus()`
 only works in Firefox and there's no way to query the `:focus-visible` state
 at all from JavaScript which is needed for canvas-drawn widgets.
-I guess we'll just have to wait on that one, unless you want to reimplement
-the whole focusing logic in JavaScript (doable but a bit overkill).
+
+I guess we'll just have to wait on these because the alternative is tu
+reimplement the whole focusing logic in JavaScript (doable but more work
+than waiting).
+
+Another minor issue is that there's no way to tell if focusing was the result
+of Tab navigation or by calling focus(), which is important because when you
+focus a dropdown picker you don't want to smooth-scroll to move the selected
+element into view, but when you Tab-navigate you do. Luckily we can override
+focus() and track that when we need this distinction, so consider this solved.
+
+Related, there's no way to tell if focusing was the result of Tab or shift+Tab
+which you need to know if your widget contains multiple focusable elements
+but your widget is canvas-drawn so those are not DOM elements (you could
+create hidden elements with tabindex for this use case but it's easier to
+just keep focus state internally and just use that when drawing). This is
+solved by tracking shift pressed state globally (getting key state is another
+missing API).
 
 
 ## Mouse wheel deltas
 
-They're totally different on a touchpad than on a mouse wheel, defferent
+They're totally different on a touchpad than on a mouse wheel, different
 between browsers, different on a Mac, so good luck detecting which is which
-and correct for it.
+and correct for it. Lately though, `wheelDeltaY` at least seems to give
+something in "pixels" that you can use for scrolling. Tested on Chrome & FF
+with a mouse with scroll wheel on Windows and with a touchpad on a Mac.
 
 
 ## Browser bugs

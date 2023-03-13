@@ -6525,6 +6525,16 @@ function calendar_widget(e, mode) {
 		)
 	})
 
+	ct.on('dblclick', function(ev) {
+		if (mode == 'ranges' && hit_day) {
+			let ranges1 = ranges.map(r => r.slice())
+			ranges1.push([hit_day, hit_day])
+			e.value = ranges1
+			e.focus_range(ranges.last)
+			return false
+		}
+	})
+
 	e.on('keydown', function(key, shift, ctrl) {
 
 		if (down)
