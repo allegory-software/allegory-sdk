@@ -6387,8 +6387,8 @@ function calendar_widget(e, mode) {
 		e.update()
 	})
 
-	ct.on('wheel', function(ev, dy) {
-		e.scroll_by(dy)
+	ct.on('wheel', function(ev, dy, is_trackpad) {
+		e.scroll_by(dy, is_trackpad ? 0 : null)
 	})
 
 	ct.on('pointermove', function(ev, mx, my) {
@@ -6878,7 +6878,7 @@ function date_input_widget(e, has_date, has_time, range) {
 		inp.on('input', function(ev) {
 			e.set_prop(VAL, this.value, ev)
 		})
-		inp.on('wheel', function(ev, dy) {
+		inp.on('wheel', function(ev, dy, is_trackpad) {
 			let d = day(e[VAL], round(-dy / 120))
 			if (range)
 				if (VAL == 'value1' && d > e.value2)

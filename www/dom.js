@@ -196,7 +196,7 @@ MOUSE EVENTS
 	^[right]pointerdown (ev, mx, my)
 	^[right]pointerup   (ev, mx, my)
 	^pointermove        (ev, mx, my)
-	^wheel              (ev, dy, mx, my)
+	^wheel              (ev, dy, is_trackpad, mx, my)
 	this.capture_pointer(ev, [on_pointermove], [on_pointerup])
 		^on_pointermove (ev, mx, my, mx0, my0)
 		^on_pointerup   (ev, mx, my, mx0, my0)
@@ -2534,8 +2534,9 @@ callers.wheel = function(ev, f) {
 	if (ev.target.effectively_disabled)
 		return
 	let dy = ev.wheelDeltaY
-	if (dy)
-		return f.call(this, ev, dy, ev.clientX, ev.clientY)
+	if (!dy) return
+	let is_trackpad = (e.wheelDeltaY === (e.deltaY * -3))
+	return f.call(this, ev, dy, is_trackpad, ev.clientX, ev.clientY)
 }
 
 stopped_event_types = {pointerdown:1, keydown:1, keyup: 1}
