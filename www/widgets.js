@@ -6193,6 +6193,8 @@ function calendar_widget(e, mode) {
 	function rw(w) { return round(w * dpr) }
 	function rh(h) { return round(h * dpr) }
 
+	let gh = [obj(), obj()] // see below...
+
 	ct.on_redraw(function(cx, _, _, pass) {
 
 		x0 = 0
@@ -6277,6 +6279,10 @@ function calendar_widget(e, mode) {
 			}
 		}
 
+		cx.strokeStyle = outline_focus
+		cx.lineWidth = rh(2)
+
+		let gh_set = false
 		d_days = -7
 		for (let week_i = -1; week_i <= visible_weeks; week_i++) {
 			for (let weekday = 0; weekday < 7; weekday++) {
@@ -6306,14 +6312,12 @@ function calendar_widget(e, mode) {
 
 				// draw & hit-test ranges
 				let in_range
-				cx.strokeStyle = outline_focus
-				cx.lineWidth = rh(2)
 				let p = 3 // padding so that stacked ranges don't touch
 				let w = cell_w / 2 // width of half a cell, as we draw in halves.
 				let h = cell_h - 2 * p
 				for (let range of draw_ranges) {
 					if (d >= range[0] && d <= range[1]) { // filter fast since it's O(n^2)
-						in_range = range
+						in_range = true
 						let is_focused = e.focused && range == focused_range
 
 						cx.fillStyle = is_focused ? bg_focused_selected : or(range.color, bg_unfocused_selected)
@@ -6358,16 +6362,16 @@ function calendar_widget(e, mode) {
 										}
 									}
 
-									// draw range-end grab handle
+									// draw range-end grab handle, but not now, later.
 									let on_range_end =
 										(!down && hit_range == range && hit_range_end == ri)
 										|| (drag_range == range && drag_range_end == ri)
 
 									let r = w / (on_range_end ? 2.5 : 3)
-									cx.beginPath()
-									cx.arc(rx(gcx), ry(gcy), r, 0, 2 * PI)
-									cx.fill()
-									cx.stroke()
+									gh_set = true
+									gh[ri].cx = rx(gcx)
+									gh[ri].cy = ry(gcy)
+									gh[ri].r  = r
 								}
 
 							} else { // this half is a continuous fill
@@ -6412,6 +6416,17 @@ function calendar_widget(e, mode) {
 				d_days++
 			}
 
+		}
+
+		// draw range-end grab handles on top of cells because they're in-between cells.
+		if (gh_set) {
+			cx.fillStyle = cx.strokeStyle
+			for (let ri = 0; ri <= 1; ri++) {
+				let g = gh[ri]
+				cx.beginPath()
+				cx.arc(g.cx, g.cy, g.r, 0, 2 * PI)
+				cx.fill()
+			}
 		}
 
 		if (update_drag_range_end()) {
@@ -6596,7 +6611,7 @@ function calendar_widget(e, mode) {
 				return false
 			}
 
-			if (mode == 'day' && hit_day != null) {
+			if (mode == 'day' && hit_day != null && had_focus) {
 				e.value = hit_day
 				e.fire('pick', e.value)
 				return false
