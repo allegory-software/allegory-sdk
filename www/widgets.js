@@ -14,7 +14,7 @@ WIDGETS
 	list
 	menu
 	tabs
-	split vsplit
+	split, vsplit
 	action-band
 	dlg
 	toolbox
@@ -33,10 +33,15 @@ WIDGETS
 	textarea
 	button
 	select-button
-	tags-box tags
-	autocomplete
+	tags-box, tags
 	dropdown
+	autocomplete
+	calendar
+	range-calendar
+	ranges-calendar
 	date-input
+	time-input
+	datetime-input
 	date-range-input
 	richtext
 	widget-placeholder
@@ -5799,7 +5804,7 @@ function calendar_widget(e, mode) {
 	e.make_disablable()
 	e.make_focusable()
 
-	// model: ranges & focused range
+	// model & state ----------------------------------------------------------
 
 	function convert_date(s) {
 		return isstr(s) ? s.parse_date(null, true) : day(s)
@@ -5811,12 +5816,18 @@ function calendar_widget(e, mode) {
 		return words(s).map(convert_range)
 	}
 
-	let ranges = []
+	let ranges = [] // ranges in initial order.
+	let focus_ranges = [] // same but in paint order.
+	let draw_ranges  = [] // same but in paint order with focused range on top.
 	let focused_range = null
 
+	if (mode == 'day' || mode == 'range') { // single static range, always focused.
+		focused_range = []
+		ranges.push(focused_range)
+		focus_ranges[0] = focused_range
+		draw_ranges [0] = focused_range
+	}
 	if (mode == 'day') {
-		ranges.push([])
-		focused_range = ranges[0]
 		e.prop('value', {store: false, type: 'date', convert: convert_date})
 		e.get_value = () => ranges[0][0]
 		e.set_value = function(d) {
@@ -5824,8 +5835,6 @@ function calendar_widget(e, mode) {
 			ranges[0][1] = day(d)
 		}
 	} else if (mode == 'range') {
-		ranges.push([])
-		focused_range = ranges[0]
 		e.prop('value1', {store: false, type: 'date', convert: convert_date})
 		e.prop('value2', {store: false, type: 'date', convert: convert_date})
 		e.get_value1 = () => ranges[0][0]
@@ -5844,22 +5853,102 @@ function calendar_widget(e, mode) {
 			ranges = ranges1
 			if (!ranges.includes(focused_range))
 				focused_range = null
+			sort_ranges()
 		}
 	} else {
 		assert(false)
 	}
 
-	e.focus_range = function(range, scroll_duration, scroll_center) {
-		if (mode != 'ranges')
-			return
-		assert(!range || ranges.includes(range))
-		focused_range = range
-		if (range && scroll_duration !== false)
-			e.scroll_to_view_range(range[0], range[1], scroll_duration, scroll_center)
+	// sometimes we mutate ranges so we have to announce value prop changes manually.
+	function ranges_changed() {
+		ranges0 = ranges // TODO: save ranges before modifying so we get correct old value?
+		if (mode == 'day') {
+			announce_prop_changed(e, 'value', ranges[0][0], ranges0[0][0])
+		} else if (mode == 'range') {
+			announce_prop_changed(e, 'value1', ranges[0], ranges0[0])
+			announce_prop_changed(e, 'value2', ranges[1], ranges0[1])
+		} else if (mode == 'ranges') {
+			announce_prop_changed(e, 'value', ranges, ranges0)
+		}
+	}
+
+	function sort_ranges() {
+		if (mode == 'ranges') {
+			focus_ranges.set(ranges)
+			focus_ranges.sort(function(r1, r2) {
+				if ((r1.index || 0) < (r2.index || 0)) return -1
+				if (r1[0] < r2[0]) return -1
+				if (r1[0] > r2[0]) return  1
+				if (r1[1] > r2[1]) return -1
+				if (r1[1] < r2[1]) return  1
+				return 0
+			})
+			draw_ranges.set(ranges)
+			if (focused_range && focused_range != draw_ranges.last) {
+				draw_ranges.remove_value(focused_range)
+				draw_ranges.push(focused_range)
+			}
+		}
 		e.update()
 	}
 
-	// view
+	e.can_focus_range = function(range) { // stub
+		return range.focusable != false && range.disabled != false
+	}
+
+	e.focus_range = function(range, scroll_duration, scroll_center) {
+		if (focused_range == range)
+			return false
+		assert(!range || ranges.includes(range))
+		if (range && !e.can_focus_range(range))
+			return false
+		if (mode == 'ranges') {
+			focused_range = range
+			sort_ranges()
+		}
+		if (range && scroll_duration !== false)
+			e.scroll_to_view_range(range[0], range[1], scroll_duration, scroll_center)
+		return true
+	}
+
+	e.focus_next_range = function(backwards) {
+		if (!focus_ranges.length)
+			return false
+		let step = backwards ? -1 : 1
+		let max_i = focus_ranges.length - 1
+		let i = focused_range ? focus_ranges.indexOf(focused_range) + step : backwards ? max_i : 0
+		while (backwards ? i >= 0 : i <= max_i) {
+			let r = focus_ranges[i]
+			if (e.can_focus_range(r)) {
+				e.focus_range(r)
+				return true
+			}
+			i += step
+		}
+		return false
+	}
+
+	e.property('focused_range', () => focused_range)
+
+	e.can_change_range = function(range) { // stub
+		if (!e.can_focus_range(range))
+			return false
+		return e.readonly != false
+	}
+
+	e.can_remove_range = function(range) { // stub
+		return e.can_change_range(range)
+	}
+
+	e.can_add_range = function(d1, d2) { // stub
+		return true
+	}
+
+	e.create_range = function(d1, d2) { // stub
+		return [d1, d2]
+	}
+
+	// view -------------------------------------------------------------------
 
 	let ct = resizeable_canvas()
 	e.add(ct)
@@ -6042,7 +6131,7 @@ function calendar_widget(e, mode) {
 			update_scroll()
 	})
 
-	// hit state
+	// hit state & drag state
 
 	let hit_mx, hit_my
 	let hit_day
@@ -6198,7 +6287,7 @@ function calendar_widget(e, mode) {
 				let p = 3 // padding so that stacked ranges don't touch
 				let w = cell_w / 2 // width of half a cell, as we draw in halves.
 				let h = cell_h - 2 * p
-				for (let range of ranges) {
+				for (let range of draw_ranges) {
 					if (d >= range[0] && d <= range[1]) { // filter fast since it's O(n^2)
 						in_range = true
 						let is_focused = e.focused && range == focused_range
@@ -6369,6 +6458,8 @@ function calendar_widget(e, mode) {
 
 	})
 
+	// controller -------------------------------------------------------------
+
 	let focus_called
 	let inh_focus = e.focus
 	e.focus = function() {
@@ -6381,9 +6472,10 @@ function calendar_widget(e, mode) {
 		e.focus_range(null)
 		e.update()
 	})
+
 	e.on('focus', function(ev) {
 		if (!focus_called) // event triggeded by Tab navigation
-			e.focus_range(ranges.at(shift_pressed ? -1 : 0))
+			e.focus_range(focus_ranges.at(shift_pressed ? -1 : 0))
 		e.update()
 	})
 
@@ -6400,10 +6492,6 @@ function calendar_widget(e, mode) {
 		e.update()
 	})
 
-	function sort_ranges() {
-		ranges.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0)
-	}
-
 	let anchor_day
 
 	function update_drag_range_end() {
@@ -6411,7 +6499,6 @@ function calendar_widget(e, mode) {
 			return
 		if (hit_day == null)
 			return
-		let ranges0 = mode == 'ranges' && ranges.map(r => r.slice())
 		let r = drag_range
 		let d0_0 = r[0]
 		let d1_0 = r[1]
@@ -6420,17 +6507,10 @@ function calendar_widget(e, mode) {
 			r[drag_range_end] = r[1-drag_range_end]
 		let d0 = r[0]
 		let d1 = r[1]
-		if (d0 != d0_0 || d1 != d1_0) {
-			if (mode == 'range') {
-				e.value1 = d0
-				e.value2 = d1
-			} else if (mode == 'ranges') {
-				sort_ranges()
-				announce_prop_changed(e, 'value', ranges, ranges0)
-			} else
-				assert(false)
-			return true
-		}
+		if (d0 == d0_0 && d1 == d1_0)
+			return
+		ranges_changed()
+		return true
 	}
 
 	ct.on('pointerdown', function(ev, down_mx, down_my) {
@@ -6450,86 +6530,91 @@ function calendar_widget(e, mode) {
 		down = true
 		let t0 = ev.timeStamp
 		let sy0 = sy_now
+
+		let had_focus = e.hasfocus
 		e.focus()
-		if (hit_range_end != null) {
+
+		if (hit_range_end != null && e.can_change_range(hit_range)) {
 			drag_range     = hit_range
 			drag_range_end = hit_range_end
 			e.update()
 		}
 
-		return this.capture_pointer(ev,
-			function captured_move(ev, mx, my) {
-				if (drag_range) {
-					hit_mx = mx
-					hit_my = my
-					e.update()
-					return
-				}
-				let dy = my - down_my
-				if (!drag_scroll)
-					if (abs(dy) < 7) // prevent accidental dragging
-						return
-				drag_scroll = true
-				e.scroll_to(sy0 + dy, 0)
-			},
-			function captured_up(ev, mx, my) {
-				let was_drag_range = !!drag_range
+		function captured_move(ev, mx, my) {
 
-				down = false
-				drag_range = null
-				drag_range_end = null
-
-				if (drag_scroll) {
-					drag_scroll = false
-					let t1 = ev.timeStamp
-					let dt = (t1 - t0)
-					let dy = my - down_my
-					let velocity = dy / dt
-					e.scroll_by(velocity ** 3, 'inertial')
-					return false
-				}
-
-				if (mode == 'day' && hit_day != null) {
-					e.value = hit_day
-					e.fire('pick', e.value)
-					return false
-				}
-
-				if (mode == 'ranges' && !was_drag_range) {
-					e.focus_range(hit_range)
-					return false
-				}
-
-				if (mode == 'range' && !was_drag_range && hit_day != null) {
-					if (ev.shift || ev.ctrl) {
-						if (anchor_day == null)
-							anchor_day = min(e.value1, e.value2)
-						let d1 = anchor_day
-						let d2 = hit_day
-						if (d1 > d2) {
-							let t = d1
-							d1 = d2
-							d2 = t
-						}
-						e.value1 = d1
-						e.value2 = d2
-					} else {
-						anchor_day = hit_day
-						e.value1 = hit_day
-						e.value2 = hit_day
-					}
-					return false
-				}
-
+			if (drag_range) {
+				hit_mx = mx
+				hit_my = my
+				e.update()
+				return
 			}
-		)
+
+			let dy = my - down_my
+			if (!drag_scroll)
+				if (abs(dy) < 7) // prevent accidental dragging
+					return
+
+			drag_scroll = true
+			e.scroll_to(sy0 + dy, 0)
+		}
+
+		function captured_up(ev, mx, my) {
+			let was_drag_range = !!drag_range
+
+			down = false
+			drag_range = null
+			drag_range_end = null
+
+			if (drag_scroll) {
+				drag_scroll = false
+				let t1 = ev.timeStamp
+				let dt = (t1 - t0)
+				let dy = my - down_my
+				let velocity = dy / dt
+				e.scroll_by(velocity ** 3, 'inertial')
+				return false
+			}
+
+			if (mode == 'day' && hit_day != null) {
+				e.value = hit_day
+				e.fire('pick', e.value)
+				return false
+			}
+
+			if (mode == 'ranges' && !was_drag_range) {
+				e.focus_range(hit_range)
+				return false
+			}
+
+			if (mode == 'range' && !was_drag_range && hit_day != null) {
+				if (ev.shift || ev.ctrl) {
+					if (anchor_day == null)
+						anchor_day = min(e.value1, e.value2)
+					let d1 = anchor_day
+					let d2 = hit_day
+					if (d1 > d2) {
+						let t = d1
+						d1 = d2
+						d2 = t
+					}
+					e.value1 = d1
+					e.value2 = d2
+				} else if (had_focus) {
+					anchor_day = hit_day
+					e.value1 = hit_day
+					e.value2 = hit_day
+				}
+				return false
+			}
+		}
+
+		return this.capture_pointer(ev, captured_move, captured_up)
 	})
 
 	ct.on('dblclick', function(ev) {
-		if (mode == 'ranges' && hit_day) {
-			let ranges1 = ranges.map(r => r.slice())
-			ranges1.push([hit_day, hit_day])
-			e.value = ranges1
+		if (mode == 'ranges' && hit_day && e.can_add_range(hit_day, hit_day)) {
+			ranges.push(e.create_range(hit_day, hit_day))
+			ranges_changed()
 			e.focus_range(ranges.last)
 			return false
 		}
@@ -6542,9 +6627,12 @@ function calendar_widget(e, mode) {
 
 		if (mode == 'ranges' && key == 'Delete') {
 			if (focused_range) {
+				if (!e.can_remove_range(focused_range))
+					return
 				ranges.remove_value(focused_range)
 				focused_range = null
-				e.value = ranges.slice()
+				ranges_changed()
+				sort_ranges()
 				return false
 			}
 		}
@@ -6560,9 +6648,10 @@ function calendar_widget(e, mode) {
 		}
 
 		if (!ctrl && focused_range && (
-			key == 'ArrowDown' || key == 'ArrowUp' ||
-			key == 'ArrowLeft' || key == 'ArrowRight'
-		)) {
+				key == 'ArrowDown' || key == 'ArrowUp' ||
+				key == 'ArrowLeft' || key == 'ArrowRight'
+			) && e.can_change_range(focused_range)
+		) {
 			let r = focused_range
 			let ddays = (key == 'ArrowUp' || key == 'ArrowDown' ? 7 : 1)
 				* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
@@ -6571,7 +6660,6 @@ function calendar_widget(e, mode) {
 				e.value = day(e.value, ddays)
 				e.scroll_to_view_range(e.value, e.value, 0)
 			} else {
-				let ranges0 = ranges.map(r => r.slice())
 				let d = day(r[1], ddays)
 				if (!shift) {
 					r[0] = d
@@ -6580,28 +6668,17 @@ function calendar_widget(e, mode) {
 					d = max(d, r[0])
 					r[1] = d
 				}
+				ranges_changed()
+				sort_ranges()
 				e.scroll_to_view_range(d, d, 0)
-				if (mode == 'range') {
-					announce_prop_changed(e, 'value1', r[0], ranges0[0])
-					announce_prop_changed(e, 'value2', r[1], ranges0[1])
-				} else {
-					sort_ranges()
-					announce_prop_changed(e, 'value', ranges, ranges0)
-				}
 			}
 			return false
 		}
 
 		if (key == 'Tab') {
-			let ri = (
-				focused_range
-					? ranges.indexOf(focused_range)
-					: shift ? ranges.length : -1
-				) + (shift ? -1 : 1)
-			let range = ranges[ri]
-			e.focus_range(range)
-			if (range) // prevent tabbing out on internal focusing.
-				return false
+			if (e.focus_next_range(shift))
+				return false // prevent tabbing out on internal focusing
+			e.focus_range(null)
 		}
 
 	})
