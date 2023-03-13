@@ -2535,7 +2535,7 @@ callers.wheel = function(ev, f) {
 		return
 	let dy = ev.wheelDeltaY
 	if (!dy) return
-	let is_trackpad = (e.wheelDeltaY === (e.deltaY * -3))
+	let is_trackpad = ev.wheelDeltaY === -ev.deltaY * 3
 	return f.call(this, ev, dy, is_trackpad, ev.clientX, ev.clientY)
 }
 
