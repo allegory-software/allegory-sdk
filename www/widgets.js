@@ -5778,6 +5778,17 @@ state props:
 	value1 value2  range mode  : start & end dates or timestamps
 	ranges         ranges mode : 'd1..d2 ...' or [[d1,d2],...]
 
+range state:
+	readonly             range is read-only
+	disabled             range is disabled
+	focusable: false     range is non-focusable
+	color                range background color
+	z-index              range z-index
+
+TODO:
+	* disabled range coloring
+	* anchor_direction missing (shift+arrows, dragging)
+
 */
 
 css(':root', '', `
@@ -5800,6 +5811,23 @@ css('.calendar-canvas', 'abs')
 
 function calendar_widget(e, mode) {
 
+	let html_value
+	if (mode == 'ranges') {
+		html_value = []
+		for (let range of e.$('range')) {
+			let r = convert_range(range.textContent)
+			if (r.length == 2) {
+				r.color       = range.attr('color')
+				r.focusable   = range.bool_attr('focusable')
+				r.readonly    = range.bool_attr('readonly')
+				r.disalbed    = range.bool_attr('disabled')
+				r.z_index     = range.bool_attr('z-index')
+				html_value.push(r)
+			}
+		}
+	}
+	e.clear()
+
 	e.class('calendar focusable-items')
 	e.make_disablable()
 	e.make_focusable()
@@ -5810,7 +5838,7 @@ function calendar_widget(e, mode) {
 		return isstr(s) ? s.parse_date(null, true) : day(s)
 	}
 	function convert_range(s) {
-		return (isstr(s) ? s.split(/\.\./) : s).map(convert_date)
+		return assign((isstr(s) ? s.split(/\.\./) : s).map(convert_date), isstr(s) ? null : s)
 	}
 	function convert_ranges(s) {
 		return words(s).map(convert_range)
@@ -5876,7 +5904,7 @@ function calendar_widget(e, mode) {
 		if (mode == 'ranges') {
 			focus_ranges.set(ranges)
 			focus_ranges.sort(function(r1, r2) {
-				if ((r1.index || 0) < (r2.index || 0)) return -1
+				if ((r1.z_index || 0) < (r2.z_index || 0)) return -1
 				if (r1[0] < r2[0]) return -1
 				if (r1[0] > r2[0]) return  1
 				if (r1[1] > r2[1]) return -1
@@ -5890,10 +5918,6 @@ function calendar_widget(e, mode) {
 			}
 		}
 		e.update()
-	}
-
-	e.can_focus_range = function(range) { // stub
-		return range.focusable != false && range.disabled != false
 	}
 
 	e.focus_range = function(range, scroll_duration, scroll_center) {
@@ -5919,10 +5943,8 @@ function calendar_widget(e, mode) {
 		let i = focused_range ? focus_ranges.indexOf(focused_range) + step : backwards ? max_i : 0
 		while (backwards ? i >= 0 : i <= max_i) {
 			let r = focus_ranges[i]
-			if (e.can_focus_range(r)) {
-				e.focus_range(r)
+			if (e.focus_range(r))
 				return true
-			}
 			i += step
 		}
 		return false
@@ -5930,10 +5952,14 @@ function calendar_widget(e, mode) {
 
 	e.property('focused_range', () => focused_range)
 
+	e.can_focus_range = function(range) { // stub
+		if (range.disabled) return false
+		if (range.focusable != null) return range.focusable
+		return !range.readonly
+	}
+
 	e.can_change_range = function(range) { // stub
-		if (!e.can_focus_range(range))
-			return false
-		return e.readonly != false
+		return !e.readonly && !range.disabled
 	}
 
 	e.can_remove_range = function(range) { // stub
@@ -6289,10 +6315,10 @@ function calendar_widget(e, mode) {
 				let h = cell_h - 2 * p
 				for (let range of draw_ranges) {
 					if (d >= range[0] && d <= range[1]) { // filter fast since it's O(n^2)
-						in_range = true
+						in_range = range
 						let is_focused = e.focused && range == focused_range
 
-						cx.fillStyle = is_focused ? bg_focused_selected : bg_unfocused_selected
+						cx.fillStyle = is_focused ? bg_focused_selected : or(range.color, bg_unfocused_selected)
 
 						// hit-test range
 						if (mode != 'day' && !hit_range && hit_test_rect(mx-x0, my-y0, 0, 0, cell_w, cell_h))
@@ -6682,6 +6708,8 @@ function calendar_widget(e, mode) {
 		}
 
 	})
+
+	return {value: html_value}
 
 }
 

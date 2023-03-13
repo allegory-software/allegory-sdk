@@ -14,10 +14,6 @@ BUGS
 * DATE/TIME DROPDOWNS
 	- arrow-up/down to increment the current item be it y/m/d/h/m/s
 
-
-* CALENDAR
-	- anchor_direction missing (shift+arrows, dragging)
-
 * SELECT-BUTTON
 	- focus-visible not working on FF
 

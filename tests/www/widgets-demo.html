@@ -901,13 +901,13 @@ for (let e of $('list')) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=calendar_demo>
-<ranges-calendar class="large" value="
-	1/1/2022..1/5/2022
-	1/4/2022..1/15/2022
-	2/13/2022..2/15/2022
-	3/13/2022..4/4/2022
-	4/13/2022..4/25/2022
-"></ranges-calendar>
+<ranges-calendar class="large">
+	<range>1/1/2022..1/5/2022</range>
+	<range color="hsl(120 50% 50%)">1/4/2022..1/15/2022</range>
+	<range focusable=false>2/13/2022..2/15/2022</range>
+	<range>3/13/2022..4/4/2022</range>
+	<range>4/13/2022..4/25/2022</range>
+</ranges-calendar>
 <range-calendar value1="1/1/2022" value2="1/5/2022"></range-calendar>
 <calendar class="smaller" value="1/1/2022"></calendar>
 </xmp>
