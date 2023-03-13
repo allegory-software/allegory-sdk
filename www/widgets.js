@@ -6495,7 +6495,7 @@ function calendar_widget(e, mode) {
 					return false
 				}
 
-				if (mode == 'ranges' && !was_drag_range && hit_range) {
+				if (mode == 'ranges' && !was_drag_range) {
 					e.focus_range(hit_range)
 					return false
 				}
