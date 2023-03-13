@@ -2502,11 +2502,29 @@ This is not done here, see e.make_disablable() and e.make_focusable().
 
 */
 
+shift_pressed = null
+ctrl_pressed  = null
+alt_pressed   = null
+
 callers.keydown = function(ev, f) {
+	shift_pressed = ev.shiftKey
+	ctrl_pressed  = ev.ctrlKey
+	alt_pressed   = ev.altKey
 	return f.call(this, ev.key, ev.shiftKey, ev.ctrlKey, ev.altKey, ev)
 }
 callers.keyup    = callers.keydown
 callers.keypress = callers.keydown
+
+// making sure that *_pressed globals are set.
+document.on('keydown', noop)
+document.on('keyup', noop)
+document.on('stopped_event', function(ev) {
+	if (ev.type == 'keydown' || ev.type == 'keyup') {
+		shift_pressed = ev.shiftKey
+		ctrl_pressed  = ev.ctrlKey
+		alt_pressed   = ev.altKey
+	}
+})
 
 alias(KeyboardEvent, 'shift', 'shiftKey')
 alias(KeyboardEvent, 'ctrl' , 'ctrlKey')
@@ -2520,11 +2538,12 @@ callers.wheel = function(ev, f) {
 		return f.call(this, ev, dy, ev.clientX, ev.clientY)
 }
 
+stopped_event_types = {pointerdown:1, keydown:1, keyup: 1}
+
 override(Event, 'stopPropagation', function(inherited, ...args) {
 	inherited.call(this, ...args)
-	this.propagation_stoppped = true
 	// notify document of stopped events.
-	if (this.type == 'pointerdown')
+	if (this.type in stopped_event_types)
 		document.fire('stopped_event', this)
 })
 
@@ -3084,16 +3103,24 @@ method(CanvasRenderingContext2D, 'clear', function() {
 	this.clearRect(0, 0, this.canvas.width, this.canvas.height)
 })
 
-method(CanvasRenderingContext2D, 'user_to_device', function(x, y, out) {
+method(CanvasRenderingContext2D, 'user_to_device', function(x, y, out, scaled) {
 	let m = this.getTransform()
+	// ^^ we're trying not to litter with `out` but the browser litters anyway
+	// by allocating a matrix on each getMatrix() call. great job...
 	out = out || []
 	out[0] = m.a * x + m.c * y + m.e
 	out[1] = m.b * x + m.d * y + m.f
+	if (scaled) {
+		out[0] /= devicePixelRatio
+		out[1] /= devicePixelRatio
+	}
 	return out
 })
 
-method(CanvasRenderingContext2D, 'device_to_user', function(x, y, out) {
-	let m = this.getTransform().inverse()
+method(CanvasRenderingContext2D, 'device_to_user', function(x, y, out, scaled) {
+	let m = this.getTransform().invertSelf()
+	if (scaled)
+		m.scaleSelf(devicePixelRatio, devicePixelRatio)
 	out = out || []
 	out[0] = m.a * x + m.c * y + m.e
 	out[1] = m.b * x + m.d * y + m.f
@@ -3155,7 +3182,7 @@ function resizeable_canvas(pw, ph) {
 	}
 	// Firefox loads fonts into canvas asynchronously, even though said fonts
 	// are already loaded and were preloaded using <link preload>.
-	// NOTE: this delay is only visible with the debugger on.
+	// NOTE: this is only visible with the debugger on.
 	ct.on_bind(function(on) {
 		document.on('layout_changed', update, on)
 		document.fonts.on('loadingdone', update, on)
