@@ -16,9 +16,9 @@ BUGS
 
 
 * CALENDAR
-	- anchor_direction missing (shift+arrows, dragging)
 	- dblclick to create range in multi-range mode
 	- click-inside-range should do nothing in single-range mode
+	- anchor_direction missing (shift+arrows, dragging)
 
 * SELECT-BUTTON
 	- focus-visible not working on FF

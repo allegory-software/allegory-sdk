@@ -5850,6 +5850,8 @@ function calendar_widget(e, mode) {
 	}
 
 	e.focus_range = function(range, scroll_duration, scroll_center) {
+		if (mode != 'ranges')
+			return
 		assert(!range || ranges.includes(range))
 		focused_range = range
 		if (range && scroll_duration !== false)
@@ -6120,7 +6122,7 @@ function calendar_widget(e, mode) {
 		// go under the header
 		move(0, cell_h)
 
-		let hit_days = mx-x0 >= 0 && my-y0 >= 0 && mx-x0 <= cell_w * 7
+		let hit_days = !!drag_range || (mx-x0 >= 0 && my-y0 >= 0 && mx-x0 <= cell_w * 7)
 
 		cx.beginPath()
 		cx.rect(rx(-10000), ry(0), rw(20000), rh(20000))
@@ -6184,8 +6186,10 @@ function calendar_widget(e, mode) {
 					cell_hit_x += offset
 					cell_hit_w += offset
 				}
-				if (hit_day == null && hit_days && hit_test_rect(mx-x0, my-y0, cell_hit_x, 0, cell_hit_w, cell_h))
-					hit_day = d
+				if (hit_day == null)
+					if (hit_days)
+						if (hit_test_rect(mx-x0, my-y0, cell_hit_x, 0, cell_hit_w, cell_h))
+							hit_day = d
 
 				// draw & hit-test ranges
 				let in_range
