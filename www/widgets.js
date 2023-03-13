@@ -6207,8 +6207,6 @@ function calendar_widget(e, mode) {
 		let sy = (sy_weeks_f - sy_weeks) * cell_h
 		let week0 = week(start_week, -sy_weeks)
 
-		//pr(sy_now, sy_weeks, sy)
-
 		// update hit state.
 		let mx = hit_mx - view_x
 		let my = hit_my - view_y
@@ -6425,10 +6423,7 @@ function calendar_widget(e, mode) {
 
 		// draw month name overlays while drag-scrolling
 		if (drag_scroll) {
-			if (0) {
-				cx.fillStyle = bg_smoke
-				cx.fillRect(0, 0, view_w, view_h)
-			}
+			move(cell_w * 7 / 2, 0) // move space to center
 			let d_days = -(7 * 6)
 			let m0
 			for (let week_i = -(1 + 6); week_i <= visible_weeks + 6; week_i++) {
@@ -6456,7 +6451,7 @@ function calendar_widget(e, mode) {
 
 					cx.beginPath()
 					cx.rect(
-						rx(view_w / 2 - text_w / 2 - px),
+						rx(-text_w / 2 - px),
 						ry(y + h / 2 - text_h / 2 - py),
 						rw(text_w + 2 * px),
 						rh(text_h + 2 * py),
@@ -6466,11 +6461,11 @@ function calendar_widget(e, mode) {
 
 					cx.fillStyle = fg
 					cx.fillText(year_s,
-						rx(view_w / 2),
+						rx(0),
 						ry(y + (h + font_months_ascent - font_months_h - py) / 2)
 					)
 					cx.fillText(month_s,
-						rx(view_w / 2),
+						rx(0),
 						ry(y + (h + font_months_ascent + font_months_h + py) / 2)
 					)
 
