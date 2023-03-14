@@ -3131,11 +3131,15 @@ method(CanvasRenderingContext2D, 'device_to_user', function(x, y, out, scaled) {
 method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 	pw = pw || 100
 	ph = ph || 100
-	let r = devicePixelRatio
 	w = ceil(w / pw) * pw
 	h = ceil(h / ph) * ph
-	if (this.width  != w) { this.width  = w * r; this.w = w; }
-	if (this.height != h) { this.height = h * r; this.h = h; }
+	let r = devicePixelRatio
+	let rw = ceil(w * r)
+	let rh = ceil(h * r)
+	if (this.width  != rw) this.width  = rw
+	if (this.height != rh) this.height = rh
+	this.w = w
+	this.h = h
 })
 
 // Create a div with a canvas inside. The canvas is resized automatically
