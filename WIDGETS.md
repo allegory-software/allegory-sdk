@@ -41,11 +41,9 @@ can push them to a server.
 
 ## Docs / Demo
 
-Like usual, docs are in the code but there's also a [demo (master branch)]
-(and [demo (dev branch)]).
+Like usual, docs are in the code but there's also a [demo (dev branch)].
 
-[demo (master branch)]: https://raw.githack.com/allegory-software/allegory-sdk/master/tests/www/widgets-demo.html
-[demo (dev branch)]:    https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
+[demo (dev branch)]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
 
 ## Installation
 
