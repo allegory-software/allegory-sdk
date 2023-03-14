@@ -5460,6 +5460,7 @@ css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
 
 css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
+	margin-top: -2px; /* merge dropdown and picker outlines */
 	resize: both;
 	height: 12em;
 `)
@@ -5792,18 +5793,18 @@ TODO:
 */
 
 css(':root', '', `
-	--min-w-calendar: 16.5em;
-	--min-h-calendar: 16.5em;
-`)
-
-css('.calendar', 'v-s', `
-	min-width : var(--min-w-calendar);
-	min-height: var(--min-h-calendar);
+	--min-w-calendar: 14.5em;
+	--min-h-calendar: 20em;
 	--fs-calendar-months   : 1.25;
 	--fs-calendar-weekdays : 0.75;
 	--fs-calendar-month    : 0.65;
 	--p-y-calendar-days-em: .4;
 	--fg-calendar-month: red;
+`)
+
+css('.calendar', 'v-s', `
+	min-width : var(--min-w-calendar);
+	min-height: var(--min-h-calendar);
 `)
 
 css('.calendar-canvas-ct', 'S rel')
@@ -5893,8 +5894,8 @@ function calendar_widget(e, mode) {
 		if (mode == 'day') {
 			announce_prop_changed(e, 'value', ranges[0][0], ranges0[0][0])
 		} else if (mode == 'range') {
-			announce_prop_changed(e, 'value1', ranges[0], ranges0[0])
-			announce_prop_changed(e, 'value2', ranges[1], ranges0[1])
+			announce_prop_changed(e, 'value1', ranges[0][0], ranges0[0][0])
+			announce_prop_changed(e, 'value2', ranges[0][1], ranges0[0][1])
 		} else if (mode == 'ranges') {
 			announce_prop_changed(e, 'value', ranges, ranges0)
 		}
@@ -6229,7 +6230,7 @@ function calendar_widget(e, mode) {
 		cx.beginPath()
 
 		let y = ry(cell_h * 1.0) - .5
-		cx.moveTo(rx(0), y)
+		cx.moveTo(0, y)
 		cx.lineTo(rx(view_w), y)
 		cx.strokeStyle = border_light
 		cx.stroke()
@@ -6434,7 +6435,8 @@ function calendar_widget(e, mode) {
 			ct.redraw_again('update_range_end')
 		}
 
-		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize' : null
+		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize'
+			: mode == 'range' && drag_scroll ? 'grabbing' : null
 
 		// draw month name overlays while drag-scrolling
 		if (drag_scroll) {
@@ -6728,6 +6730,7 @@ calendar = component('calendar', 'Input', function(e) {
 })
 
 range_calendar = component('range-calendar', 'Input', function(e) {
+	e.class('range-calendar')
 	return calendar_widget(e, 'range')
 })
 
@@ -6737,17 +6740,26 @@ ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 
 /* <time-picker> -------------------------------------------------------------
 
+state props:
+	value            timestamp from 1/1/1970 or 'HH:mm:ss.ms'
+html attrs:
+	value            'HH:mm:ss.ms'
+	with-seconds     show seconds list
+config props:
+	with_seconds     true: show seconds list
 
 */
 
-css('.time-picker', 'h-c', `
+css(':root', '', `
 	--h-time-picker: 12em;
+`)
+css('.time-picker', 'h-c', `
 	height: var(--h-time-picker);
 `)
 css('.time-picker-list-box', 'v')
 css('.time-picker-list-header', 'label h-c h-m b-b vscroll', `
 	font-size: calc(0.75 * var(--fs));
-	min-height: calc(var(--fs) * var(--lh) * 1.67);
+	min-height: calc(var(--fs) * var(--lh) + 2 * var(--fs) * var(--p-y-calendar-days-em) - 1px);
 `)
 css('.time-picker-item:first-child', '', `margin-top   : calc(var(--h-time-picker) * .5);`)
 css('.time-picker-item:last-child' , '', `margin-bottom: calc(var(--h-time-picker) * .5);`)
@@ -6827,10 +6839,23 @@ time_picker = component('time-picker', 'Input', function(e) {
 
 /* <datetime-picker> ---------------------------------------------------------
 
+state props:
+	value          timestamp or date+time string
+html attrs:
+	value:         date+time string
+	with-seconds:  show seconds list
+config props:
+	with_seconds:  true: show seconds list
+
 */
 
-css('.datetime-picker', 'h shrinks', `height: var(--min-h-calendar);`)
-css('.datetime-picker .time-picker', 'shrinks', `height: auto;`)
+css(':root', '', `
+	--h-datetime-picker: 16em;
+`)
+css('.datetime-picker', 'h shrinks', `
+	--h-time-picker  : var(--h-datetime-picker);
+	--min-h-calendar : var(--h-datetime-picker);
+`)
 
 datetime_picker = component('datetime-picker', 'Input', function(e) {
 
@@ -6887,28 +6912,37 @@ function svg_calendar_clock(attrs) {
 	)
 }
 
-css('.date-input', 'w-input bg-input', `
+css('.date-input', 'skip', `
 	--min-w-date-input: var(--min-w-calendar);
 `)
-css('.date-input-input', 'S shrinks t-c')
+css('.date-input-group', 'w-input bg-input')
+css('.date-input-input', 'S shrinks t-c p-r-0')
+css('.date-input-input-value2', 'p-l-0')
 css('.date-input-picker-button', 'b p-x-input')
-css_role('.date-input-picker-button', 'b-r') // override b-collapse-h with picker
 css('.date-range-input-separator', 'p-x h-m')
-css('.timeonly-input', '', `
-	--min-w-calendar: 0px; /* calendar is too wide */
+css('.time-only-input', '', `
+	--min-w-calendar: 0px; /* has natural min-w; calendar's can be too wide */
 `)
-
-css('.date-input-picker-box', 'b bg-input v', ` resize: both; `)
-//css('.date-input .calendar', 'S', `resize: both;`)
+css('.date-input-picker-box', 'b bg-input v')
+css('.date-only-input .calendar', 'S b bg-input clip', `resize: vertical;`) // NOTE: resize needs clip!
+css('.date-range-input .date-input-picker-box', 'clip', `resize: vertical;`) // NOTE: resize needs clip!
+css('.date-range-input .calendar', 'S')
 css('.date-input-close-button', 'allcaps')
 
 function date_input_widget(e, has_date, has_time, range) {
 
-	e.class('date-input input-group b-collapse-h')
-	e.class('dateonly-input', !has_time)
-	e.class('timeonly-input', !has_date)
-	e.class('datetime-input', has_date && has_time)
+	e.clear()
+
+	e.class('date-input')
+	if (!range) {
+		e.class('date-only-input', !has_time)
+		e.class('time-only-input', !has_date)
+		e.class('datetime-input', has_date && has_time)
+	}
 	e.make_disablable()
+
+	e.input_group = div({class: 'date-input-group input-group b-collapse-h'})
+	e.add(e.input_group)
 
 	if (range) {
 		e.picker = range_calendar()
@@ -6922,7 +6956,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	} else {
 		e.picker = time_picker()
 	}
-	if (e.picker != e.calendar) {
+	if (range || e.picker != e.calendar) {
 		e.close_button = button({
 			classes: 'date-input-close-button',
 			focusable: false,
@@ -6936,11 +6970,10 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.picker_box = e.picker
 	}
 	e.picker_box.class('not-within')
-	e.picker_box.popup(e, 'bottom', 'center')
 
 	let w
 	e.on_measure(function() {
-		w = e.rect().w
+		w = e.input_group.rect().w
 	})
 	e.on_position(function() {
 		e.picker_box.min_w = `calc(max(var(--min-w-date-input), ${w}px))`
@@ -6991,7 +7024,7 @@ function date_input_widget(e, has_date, has_time, range) {
 				e.set_prop(VAL, e.from_text(v), ev || {target: e})
 		}
 		let inp = input({
-			classes: 'date-input-input',
+			classes: 'date-input-input date-input-input-'+VAL,
 			placeholder: date_placeholder_text(),
 		})
 		inp.on('input', function(ev) {
@@ -7046,10 +7079,10 @@ function date_input_widget(e, has_date, has_time, range) {
 	})
 
 	if (range)
-		e.add(e.value1_input, div({class: 'date-range-input-separator'},'-'),
+		e.input_group.add(e.value1_input, div({class: 'date-range-input-separator'},'-'),
 			e.value2_input, e.picker_button)
 	else
-		e.add(e.value_input, e.picker_button)
+		e.input_group.add(e.value_input, e.picker_button)
 
 	// controller -------------------------------------------------------------
 
@@ -7057,9 +7090,10 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.set_isopen = function(open, open0, focus) {
 		e.class('open', open)
 		if (open) {
-			e.picker_box.popup(null, 'bottom', 'end')
+			e.picker_box.popup(e.input_group, 'bottom', 'start')
+			e.picker_box.popup_oy = -1 // make top border overlap with editbox
 			e.picker.scroll_to_view_value('center')
-			e.picker_box.show()
+			e.picker_box.update({show: true})
 			e.add(e.picker_box)
 			if (focus !== false)
 				e.picker_box.focus_first()
@@ -7117,10 +7151,7 @@ datetime_input = component('datetime-input', 'Input', function(e) {
 	return date_input_widget(e, true, true)
 })
 
-css('.date-range-input', '', `width: calc(var(--w-input) * 2);`)
-
 date_range_input = component('date-range-input', 'Input', function(e) {
-	e.class('date-range-input')
 	return date_input_widget(e, true, false, true)
 })
 

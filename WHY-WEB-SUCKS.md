@@ -218,7 +218,8 @@ Check out this still-open FF bug from 11 years ago:
 
 	https://bugzilla.mozilla.org/show_bug.cgi?id=1335265
 
-This is not some obscure situation that you never run into, this is core
-flexbox functionality. Stuff like this wastes hours of valuable programmer
-time, bewilders and frustrates the programmer making them less productive, etc.
+This is not some obscure case that you never run into, this is core flexbox
+functionality. And you can't fix this with JavaScript, unless you draw your
+entire web app on a giant canvas and do your own layouting and styling from
+scratch in JS (some people had done just that and they're probably happy).
 

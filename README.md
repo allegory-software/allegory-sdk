@@ -44,7 +44,7 @@ thinks that procedural > functional > OOP, library > framework, SQL > ORM,
 JavaScript > React, dynamic > static, relational > nosql, less LOC > more LOC,
 and you get a rash whenever you hear the words "build system", "package manager",
 "folder structure", "container" or "dependency injection", then you might
-actually like this, who knows.
+actually like this.
 
 # Status
 

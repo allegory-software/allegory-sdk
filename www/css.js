@@ -244,7 +244,7 @@ css(':root', '', `
 	--fs-normal : 14px;
 	--lh        : 1.25; /* only unitless allowed! */
 	--lh-input  : 1.25; /* 1.25 is the minimum that <input> supports! */
-	--w-input   : 12em; /* to sync <input> with <dropdown> */
+	--w-input   : 16em; /* to sync <input> with <dropdown> */
 	--fs        : var(--fs-normal);
 
 	font-size   : var(--fs);

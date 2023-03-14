@@ -51,7 +51,7 @@
 
 #demo_list { overflow: hidden auto; padding-top: .5em; user-select: none; }
 #code      { flex: 1; }
-#result    { padding: 1em; overflow: auto; }
+#result    { padding: 1em; overflow: auto; resize: horizontal; }
 #inspect   { flex: 1; border-top: 1px solid #333; }
 
 #code:focus {
@@ -915,21 +915,21 @@ for (let e of $('list')) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=time-picker_demo>
-<time-picker value="1:57:12"></time-picker>
+<time-picker value="0:59:12" with-seconds></time-picker>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
 <xmp id=datetime-picker_demo>
-<datetime-picker value="6/7/2345 12:34:56" with-seconds></datetime-picker>
+<datetime-picker value="6/7/2345 00:34:59" with-seconds></datetime-picker>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
 <xmp id=date-input_demo>
 <div><date-input       value="1/18/2022" placeholder="Birth date"></date-input></div>
-<div><time-input       input_value="13:42:12" placeholder="Meet at"></tine-input></div>
-<div><datetime-input   input_value="1/18/2022 13:42" placeholder="Meet at"></datetime-input></div>
+<div><time-input       input_value="12:34:56" with-seconds placeholder="Meet at"></tine-input></div>
+<div><datetime-input   input_value="1/18/2022 12:34:56" with-seconds placeholder="Meet at"></datetime-input></div>
 <div><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input></div>
 </xmp>
 
