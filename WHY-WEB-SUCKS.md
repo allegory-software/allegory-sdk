@@ -46,7 +46,7 @@ layers as the way to specify rule order.
 
 ## No global z-index
 
-Popups, i.e. things that should pe painted above everything else but should
+Popups, i.e. things that should be painted above everything else but should
 otherwise be anchored to a specific part of the layout, are impossible
 on this platform. Combine that with the "implicit stacking context" genius idea
 (which is probably an abstraction leak of the underlying graphics implementation,
@@ -60,32 +60,36 @@ attempt to apply logic and common sense to make simple things with this lemon.
 Even if you do them in JavaScript, popups are impossible to implement cleanly
 on this platform without the abstraction leaking all over the place. Let's see:
 
-Method 1: Add the popup to the root. Problems with that:
+### Method 1: Add the popup to the root. Problems with that:
 
 * removing the target from the DOM doesn't remove the popup, must fix in JS.
 * hiding the target doesn't hide the popup, must fix in JS.
-* disabling the target doesn't disable the popup, must fix in JS.
-* wrong Tab focusing order, must fix in JS.
+* disabling the target doesn't disable (or hide) the popup, must fix in JS.
+* wrong Tab focusing order if the popup contains focusable elements, must fix in JS.
 
-Method 2: Add the popup to its target. Problems with that:
+### Method 2: Add the popup to its target. Problems with that:
 
 * any CSS rule that works on the assumption that the DOM tree represents
 visually nested lists of boxes, will break:
 
-	* :hover rules on the container are triggered when hovering the popup.
+	* `:hover` rules on the container are triggered when hovering the popup.
 	:hover bubbles up because it assumes that child elements are visually
 	inside their parents, but in this case the popup is not
 	(visually it's a sibling of its parent).
 
-	* .b-collapse-h: a css class which collapses borders in a list.
+	* `.b-collapse-h`: a css class that collapses borders in a list.
 	This assumes that DOM siblings are visual siblings. A popup added
 	to a list is a sibling DOM-wise but visually it is not.
 
-	* .focus-within: a css class which puts a focus ring on a container
+	* `.focus-ring`: a css class that puts a focus ring on a container
 	when an inner input element is focused. A popup containing an input
-	element, when attached to such container, will put the focus ring
+	element, when attached to such a container, will put the focus ring
 	on the container, but visually the input is not inside the container,
 	so that rule doesn't make sense when popups are involved.
+
+To avoid these issues, wrap the popup's target in a container and add the
+popup to the container instead. Note that you can't add popups to elements
+like `<input>` and such anyway, so you have to wrap.
 
 * lack of a global z-index: partially fixed with the `display: fixed` hack
 but any parent creating an implicit stacking context breaks the hack,
@@ -93,8 +97,7 @@ and it's very easy to create implicit stacking contexts by mistake.
 
 This is why depending on the method chosen, you'll often see bugs on websites
 where the popup is either partially obscured (when method 2 was chosen),
-or left behind after its target is gone (when method 1 was chosen; this is
-a common bug also in the desktop world).
+or left behind after its target is gone.
 
 
 ## Event listeners are not weak refs
@@ -106,12 +109,12 @@ will leak because the external object holds a reference to the listener.
 Suddenly you're no longer in a garbage-collected language, now you're in a
 language with manual memory management, in which you have to call a free
 function to free your component. Either that, or invent a policy that does
-that automatically, like for instnace when the component is detached from
-the DOM, which is what every web components framework does. In fact this is
+that automatically, like for instance when the component is detached from
+the DOM, which is what every web components framework does. In fact, this is
 the only reason for the need to have attach/detach hooks at all in a framework.
 
 Needless to say, this could've been solved simply and elegantly if JavaScript
-had proper iterable weak tables (like Lua has since 2006) so we culd implement
+had proper iterable weak tables (like Lua has since 2006) so we could implement
 weak event listener entries. Most probably they'll figure out a way to do this
 securely in the future. In the meantime, just make sure that you add/remove
 your external event listeners in the `bind` callback. That's why in our
@@ -123,7 +126,7 @@ for attach/detach which you can pass directly to `on()` to add/remove a listener
 
 Draw a "+" sign that looks sharp at any zoom level on this platform, I dare you.
 
-There's many ways to do graphics on the web: styled divs, svg, canvas,
+There are many ways to do graphics on the web: styled divs, svg, canvas,
 fonts, raster images.
 
 For small-size graphics that prioritize legibility like icons, raster images are out.
@@ -156,7 +159,7 @@ and you have the ultimate control over every pixel but it's also more work).
 ## Padding and overflow
 
 Never put padding on a container that can overflow by scrolling because the
-scrollbar doesn't accunt for the container's padding, it's only scrolling
+scrollbar doesn't account for the container's padding, it's only scrolling
 the content inside the padding, even though the scrollbar itself is drawn
 in the space that includes the padding, which is very misleading visually.
 

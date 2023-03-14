@@ -7,7 +7,7 @@ Read that first if you're new to Lua.
 
 ## General
 
-Start each module with small comment specifying what the module does,
+Start each module with a small comment specifying what the module does,
 who's the author and what the license is:
 
 ```lua
@@ -36,7 +36,7 @@ Generally just use `\n`.
 ## Modules
 
 Don't use `module()`, it's not necessary. Just make things global, that's ok,
-it forces you find good names and it makes user code easier to read because
+it forces you to find good names and it makes user code easier to read because
 there's no renaming involved, everybody knows one thing.
 
 ## Submodules
@@ -198,7 +198,7 @@ different types can't ever be equal, so a cdata cannot be equal to nil.
 This has two implications:
 
 1. Lua-ffi cannot implement this for Lua 5.1, so compatibility with Lua
-cannot be acheived if this idiom is used.
+cannot be achieved if this idiom is used.
 2. The `if ptr then` idiom doesn't work, although you'd expect that anything
 that `== nil` to pass the `if` test too.
 
@@ -393,8 +393,8 @@ generate ascii identifier keys.
 
 Don't make it configurable if there's a clear best choice between alternatives,
 even if that would upset some users. Avoid compulsive customization.
-Best to add in customization options after presented with use cases from users,
-and use them to justify and document each option.
+Best to add in customization options after being presented with use cases
+from users, and use them to justify and document each option.
 
 ## Virtualization is overrated
 
@@ -418,7 +418,7 @@ anywhere.
 
 That being said, there may be patterns of virtualization that you might want
 to care for. In particular, callable tables and userdata are common enough
-that typechecking for functions could be made with a function which also
+that typechecking for functions could be made with a function that also
 checks for `__call` besides `type(f)=='function'`. Virtualized functions work
 because the API of a function (i.e. what you can do with it) is almost
 leak-free: except for dumping and loading, all you can do with a function

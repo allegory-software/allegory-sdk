@@ -107,7 +107,7 @@ input widgets, aux widgets like tooltips and notifications and everything
 in between. Uses `mustache.js` for html templating (optional).
 The `md` component uses `markdown-it.js` for parsing Markdown (optional).
 
-### Layer 5: Data-drivn widgets
+### Layer 5: Data-driven widgets
 
 `nav.js`, `grid.js`, `charts.js` comprise the "other half" of the library,
 containing a data-driven grid, charts and input widgets.
