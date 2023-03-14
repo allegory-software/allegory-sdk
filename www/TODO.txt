@@ -12,6 +12,8 @@ BUGS
 ------------------------------------------------------------------------------
 
 * DATE/TIME DROPDOWNS
+	- re-focus bug
+	- time set 00:00:00 bug
 	- arrow-up/down to increment the current item be it y/m/d/h/m/s
 
 * SELECT-BUTTON

@@ -7008,6 +7008,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	}
 
 	for (let VAL of (range ? ['value1', 'value2'] : ['value'])) {
+
 		e.prop(VAL, {type: 'date', convert: convert_value})
 		e['set_'+VAL] = function(v, v0, ev) {
 			if (!(ev && ev.target == e[VAL+'_input'] || ev.target == e))
@@ -7016,6 +7017,7 @@ function date_input_widget(e, has_date, has_time, range) {
 				e.picker.set_prop(VAL, v, ev)
 			e.set_prop('input_'+VAL, null, ev || {target: e})
 		}
+
 		e.prop('input_'+VAL, {attr: VAL, default: null})
 		e['set_input_'+VAL] = function(v, v0, ev) {
 			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
@@ -7023,13 +7025,16 @@ function date_input_widget(e, has_date, has_time, range) {
 			if (!(ev && ev.target == e))
 				e.set_prop(VAL, e.from_text(v), ev || {target: e})
 		}
+
 		let inp = input({
 			classes: 'date-input-input date-input-input-'+VAL,
 			placeholder: date_placeholder_text(),
 		})
+
 		inp.on('input', function(ev) {
 			e.set_prop(VAL, this.value, ev)
 		})
+
 		inp.on('wheel', function(ev, dy, is_trackpad) {
 			let d = day(e[VAL], round(-dy / 120))
 			if (range)
@@ -7039,12 +7044,58 @@ function date_input_widget(e, has_date, has_time, range) {
 					d = e.value1
 			e.set_prop(VAL, d, {target: e})
 		})
+
+		inp.on('keydown', function(key, shift) {
+
+			// tabbing between digit groups
+			if (key == 'Tab') {
+				let i = this.selectionStart
+				let j = this.selectionEnd
+				if (i == 0 && j == this.value.len) {
+					i = shift ? this.value.len : 0
+					j = i
+				}
+				let ms = []
+				this.value.replace(/\d+/g, (s, i) => ms.push({i: i, j: i + s.len}))
+				if (!shift) { // select next number
+					for (let m of ms)
+						if (m.i >= j) {
+							this.setSelectionRange(m.i, m.j)
+							return false
+						}
+				} else {
+					for (let m of ms.reverse())
+						if (m.j <= i) {
+							this.setSelectionRange(m.i, m.j)
+							return false
+						}
+				}
+			}
+
+			// inc/dec current digit group with arrow keys
+			if (key == 'ArrowUp' || key == 'ArrowDown') {
+				let i = this.selectionStart
+				let j = this.selectionEnd
+				let s = this.value
+				let sel = s.slice(i, j)
+				if (sel.match(/^\d+$/)) {
+					let ns = sel.num() + (key == 'ArrowUp' ? -1 : 1) + ''
+					this.value = s.slice(0, i) + ns + s.slice(j)
+					this.setSelectionRange(i, i + ns.len)
+					return false
+				}
+			}
+
+		})
+
 		e[VAL+'_input'] = inp
+
 		e.prop(range ? VAL+'_placeholder' : 'placeholder', {store: false})
 		e[range ? 'get_'+VAL+'_placeholder' : 'get_placeholder'] = () => e[VAL+'_input'].placeholder
 		e[range ? 'set_'+VAL+'_placeholder' : 'set_placeholder'] = function(s) {
 			e[VAL+'_input'].placeholder = s
 		}
+
 	}
 
 	e.listen('prop_changed', function(ce, k, v, v0, ev) {
