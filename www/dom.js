@@ -1900,6 +1900,7 @@ e.disable = function(...args) {
 publishes:
 	e.tabindex
 	e.focusable
+	e.remember_last_focused
 sets css classes:
 	focusable
 
@@ -1908,22 +1909,17 @@ sets css classes:
 // NOTE: uses CSS classes `.outline-focus` and `.no-outline` that are
 // not defined here, define them yourself or load css.js which has them.
 
-// move the focus ring from focused element to the outermost element with `.focus-within`.
-css_role_state('.focus-within:has(.focus-outside:focus-visible)', 'outline-focus') // outermost
-css_role_state('.focus-within .focus-within:has(.focus-outside:focus-visible)', 'no-outline') // not outermost
-css_role_state_firefox('.focus-within:focus-within', 'outline-focus') // no :has() yet on FF.
+// move the focus ring from focused element to the outermost element with `.focus-ring`.
+css_role_state('.focus-ring:has(.focus-outside:focus-visible)', 'outline-focus') // outermost
+css_role_state('.focus-ring .focus-ring:has(.focus-outside:focus-visible)', 'no-outline') // not outermost
+css_role_state_firefox('.focus-ring:focus-ring', 'outline-focus') // no :has() yet on FF.
 css_role_state('.focus-outside:focus-visible', 'no-outline')
 
 // Popup focusables attached to a focusable are DOM-wise within the focusable,
 // but visually they're near it. Mark them as such with the .not-within class
 // so that they get a focus outline instead of their outermost focusable ancestor getting it.
 css_role_state('.not-within:has(.focus-outside:focus-visible)', 'outline-focus')
-css_role_state('.focus-within:has(.not-within .focus-outside:focus-visible)', 'no-outline')
-
-let builtin_focusables = {button:1, input:1, select:1, textarea:1, a:1, area:1}
-function is_builtin_focusable(e) {
-	return builtin_focusables[e.tag]
-}
+css_role_state('.focus-ring:has(.not-within .focus-outside:focus-visible)', 'no-outline')
 
 e.make_focusable = function(...fes) {
 
@@ -1938,7 +1934,7 @@ e.make_focusable = function(...fes) {
 			fe.attr('tabindex', 0)
 
 	if (fes[0] != e) {
-		e.class('focus-within')
+		e.class('focus-ring')
 		for (let fe of fes)
 			fe.class('focus-outside')
 	}
@@ -1947,7 +1943,7 @@ e.make_focusable = function(...fes) {
 		let can_be_focused = e.focusable && !e.disabled
 		e.class('focusable', can_be_focused)
 		for (let fe of fes)
-			fe.attr('tabindex', can_be_focused ? e.tabindex : (is_builtin_focusable(fe) ? -1 : null))
+			fe.attr('tabindex', can_be_focused ? e.tabindex : -1)
 		if (!can_be_focused)
 			e.blur()
 	}
@@ -1970,9 +1966,9 @@ e.make_focusable = function(...fes) {
 	let inh_focus = e.focus
 	e.focus = function() {
 		if (fes[0] == this || this.widget_selected)
-			inh_focus.call(this)
-		else
-			(last_focused || fes[0]).focus()
+			return inh_focus.call(this)
+		let fe = e.remember_last_focused && last_focused || fes[0]
+		fe.focus()
 	}
 
 }
@@ -2717,12 +2713,13 @@ property(Element, 'effectively_focusable', function() {
 			t == 'button' || t == 'input' || t == 'select' || t == 'textarea'
 			|| ((t == 'a' || t == 'area') && this.hasattr('href'))
 			|| (e.hasattr('tabindex') && e.attr('tabindex') != '-1')
+			|| e.hasclass('focusable')
 		) && !e.effectively_hidden && !e.effectively_disabled
 })
 
 e.focusables = function() {
 	let a = []
-	let sel = ':is(button,a[href],area[href],input,select,textarea,[tabindex]):not([tabindex="-1"])'
+	let sel = ':is(button,a[href],area[href],input,select,textarea,[tabindex],.focusable):not([tabindex="-1"])'
 	for (let e of this.$(sel)) {
 		if (!e.effectively_hidden && !e.effectively_disabled)
 			a.push(e)
