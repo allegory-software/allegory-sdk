@@ -32,18 +32,16 @@ libraries (luckily we're not), you can consider this solved.
 
 ## CSS is not composable
 
-CSS is many dumb things, but lack of composability is the worst.
+This means that CSS rules are not reusable. Luckily we can create styles
+programmatically so we can have composable CSS in JavaScript with very little
+runtime overhead, and not having to resort to silly offline preprocessors.
 
-Luckily we can create styles programmatically so we can make composable CSS
-with a few lines of JS and very little runtime overhead, and not having
-to resort to silly offline preprocessors.
+## CSS specificity
 
-Generating CSS also gives us the opportunity to disable the genius CSS feature
-of specificity by wrapping all the rules in `:where()` thus leaving source
-order and CSS layers as the way to specify rule order.
-
-Programmable interfaces are a great escape hatch from the idiocy of silly
-platform designers.
+CSS is many dumb things, but specificity takes the cake. Luckily, generating
+CSS also gives us the opportunity to completely disable this genius CSS feature
+(by wrapping all the rules in `:where()`) thus leaving source order and CSS
+layers as the way to specify rule order.
 
 
 ## No global z-index
@@ -59,8 +57,8 @@ attempt to apply logic and common sense to make simple things with this lemon.
 
 ## Popups
 
-Popups are impossible to implement cleanly on this platform.
-There are basically two ways to implement popups:
+Even if you do them in JavaScript, popups are impossible to implement cleanly
+on this platform without the abstraction leaking all over the place. Let's see:
 
 Method 1: Add the popup to the root. Problems with that:
 
@@ -81,18 +79,44 @@ visually nested lists of boxes, will break:
 
 	* .b-collapse-h: a css class which collapses borders in a list.
 	This assumes that DOM siblings are visual siblings. A popup added
-	to a list is a sibling DOM-wise but not visually.
+	to a list is a sibling DOM-wise but visually it is not.
 
 	* .focus-within: a css class which puts a focus ring on a container
 	when an inner input element is focused. A popup containing an input
 	element, when attached to such container, will put the focus ring
-	on the container, but visually the input is not inside the container.
+	on the container, but visually the input is not inside the container,
+	so that rule doesn't make sense when popups are involved.
 
-* lack of a global z-index: partially fixed with `display: fixed` hack
+* lack of a global z-index: partially fixed with the `display: fixed` hack
 but any parent creating an implicit stacking context breaks the hack,
 and it's very easy to create implicit stacking contexts by mistake.
-Basically forever live in fear of bug reports with popups that are
-partially obscured.
+
+This is why depending on the method chosen, you'll often see bugs on websites
+where the popup is either partially obscured (when method 2 was chosen),
+or left behind after its target is gone (when method 1 was chosen; this is
+a common bug also in the desktop world).
+
+
+## Event listeners are not weak refs
+
+If your web component needs to register an event listener on another component,
+or on a global object like document or window in order to function, then it
+also needs to remove that listener before it is freed, otherwise the component
+will leak because the external object holds a reference to the listener.
+Suddenly you're no longer in a garbage-collected language, now you're in a
+language with manual memory management, in which you have to call a free
+function to free your component. Either that, or invent a policy that does
+that automatically, like for instnace when the component is detached from
+the DOM, which is what every web components framework does. In fact this is
+the only reason for the need to have attach/detach hooks at all in a framework.
+
+Needless to say, this could've been solved simply and elegantly if JavaScript
+had proper iterable weak tables (like Lua has since 2006) so we culd implement
+weak event listener entries. Most probably they'll figure out a way to do this
+securely in the future. In the meantime, just make sure that you add/remove
+your external event listeners in the `bind` callback. That's why in our
+framework there's a single `bind` callback that gets called with an `on` flag
+for attach/detach which you can pass directly to `on()` to add/remove a listener.
 
 
 ## Pixel snapping
