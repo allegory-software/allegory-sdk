@@ -152,7 +152,7 @@ css_state('.item.removed'     , 'strike')
 css_state('.item.selected', '', ` background-color: var(--bg-unselected); `)
 css_state('.item.focused' , '', ` background-color: var(--bg-unfocused);  `)
 
-css_state('.focusable-items:focus', 'no-outline')
+css_state('.focusable-items:focus-visible', 'no-outline')
 
 css_state('.focusable-items:focus-within .item.selected', '', `
 	background : var(--bg-selected);
@@ -1287,13 +1287,13 @@ stubs:
 
 */
 
-css('.focusable-list', 'arrow')
+css('.clickable-list', 'arrow')
 
 e.make_list_items_focusable = function() {
 
 	let e = this
 	e.make_list_items_focusable = noop
-	e.class('focusable-list focusable-items')
+	e.class('clickable-list focusable-items')
 
 	e.can_edit_item = return_false
 	e.can_focus_item = function(item, for_editing, assume_visible) {
@@ -6611,7 +6611,7 @@ function calendar_widget(e, mode) {
 				return false
 			}
 
-			if (mode == 'day' && hit_day != null && had_focus) {
+			if (mode == 'day' && hit_day != null) {
 				e.value = hit_day
 				e.fire('pick', e.value)
 				return false
@@ -6770,7 +6770,8 @@ time_picker = component('time-picker', 'Input', function(e) {
 		li.make_list_items_focusable()
 		li.make_list_items_searchable()
 		li.multiselect = false
-		e.add(div({class: 'time-picker-list-box'}, div({class: 'time-picker-list-header scroll-thin'}, s), li))
+		e.add(div({class: 'time-picker-list-box'},
+			div({class: 'time-picker-list-header scroll-thin'}, s), li))
 		return li
 	}
 	e.hours_list   = add_time_list(24, 'HH')
@@ -6778,9 +6779,8 @@ time_picker = component('time-picker', 'Input', function(e) {
 	e.seconds_list = add_time_list(60, 'ss')
 
 	e.make_disablable()
-	e.make_focusable(e.hours_list, e.minutes_list, e.seconds_list)
 
-	e.prop('with_seconds', {type: 'bool', default: false})
+	e.prop('with_seconds', {type: 'bool', attr: 'with-seconds', default: false})
 
 	e.seconds_list.parent.hide()
 
@@ -6842,7 +6842,11 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 	e.add(e.calendar, e.time_picker)
 
 	e.make_disablable()
-	e.make_focusable(e.calendar, e.time_picker)
+
+	e.prop('with_seconds', {type: 'bool', attr: 'with-seconds', default: false})
+	e.set_with_seconds = function(v) {
+		e.time_picker.with_seconds = v
+	}
 
 	function convert_time(s) {
 		return isstr(s) ? s.parse_date(null, true) : s
@@ -6855,9 +6859,9 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 	}
 
 	e.listen('prop_changed', function(ce, k, v, v0, ev) {
-		if (ce == e.calendar) {
+		if (v == 'value' && ce == e.calendar) {
 			e.set_prop('value', v + e.time_picker.value, ev)
-		} else if (ce == e.time_picker) {
+		} else if (v == 'value' && ce == e.time_picker) {
 			e.set_prop('value', e.calendar.value + v, ev)
 		}
 	})
@@ -6959,7 +6963,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	}
 
 	if (has_time) {
-		e.prop('with_seconds', {type: 'bool', default: false})
+		e.prop('with_seconds', {type: 'bool', attr: 'with-seconds', default: false})
 
 		e.set_with_seconds = function(v) {
 			e.picker.with_seconds = v
@@ -7058,9 +7062,9 @@ function date_input_widget(e, has_date, has_time, range) {
 			e.picker_box.show()
 			e.add(e.picker_box)
 			if (focus !== false)
-				e.picker_box.focus()
+				e.picker_box.focus_first()
 		} else {
-			//e.picker_box.hide()
+			e.picker_box.hide()
 			if (focus !== false)
 				e.focus()
 		}
