@@ -914,9 +914,12 @@ for (let e of $('list')) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=date-input_demo>
-<div><date-input       value="1/18/2022" placeholder="Birth date"></date-input></div>
-<div><time-input       input_value="12:34:56" with-seconds placeholder="Meet at"></time-input></div>
-<div><datetime-input   input_value="1/18/2022 12:34:56" with-seconds placeholder="Meet at"></datetime-input></div>
+<div><date-input       placeholder="Birth date"></date-input></div>
+<div><date-input       value="1/1/1900" placeholder="Birth date"></date-input></div>
+<div><time-input                                   input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
+<div><time-input       with-seconds                input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
+<div><time-input       with-seconds with-fractions input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
+<div><datetime-input   with-seconds with-fractions input_value="1/1/1900 0:0:0.1" placeholder="Meet at"></datetime-input></div>
 <div><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input></div>
 </xmp>
 
@@ -1121,7 +1124,7 @@ main.add(g)
 		<d value=app>Shiny Apples</d>
 	</select-button>
 	<d></d><date-input       value="1/18/2022" placeholder="Birth date"></date-input>
-	<d></d><time-input       input_value="12:34:56" with-seconds placeholder="Meet at"></time-input>
+	<d></d><time-input       input_value="00:00:00.2" with-seconds placeholder="Meet at"></time-input>
 	<d></d><datetime-input   input_value="1/18/2022 12:34:56" with-seconds placeholder="Meet at"></datetime-input>
 	<d></d><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input>
 </d>

@@ -1271,8 +1271,8 @@ function parse_timeofday(s, validate, with_seconds, with_fractions) {
 			return null
 	return t
 }
-method(String, 'parse_timeofday', function(validate) {
-	return parse_timeofday(this.valueOf(), validate)
+method(String, 'parse_timeofday', function(validate, with_seconds, with_fractions) {
+	return parse_timeofday(this.valueOf(), validate, with_seconds, with_fractions)
 })
 
 let date_parts = memoize(function(locale) {

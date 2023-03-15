@@ -7169,8 +7169,8 @@ function date_input_widget(e, has_date, has_time, range) {
 					// from `-` used as date separator!
 					let s1 = s.slice(0, g.i) + ns + s.slice(g.j)
 					let t = e.from_text(s1, false)
-					if (e.valid_value(t) != null) {
-						e.set_prop(VAL, t)
+					if (t != null) {
+						e[VAL] = t
 						g = digit_groups()[g.index] // re-locate digit group
 						if (g)
 							inp.setSelectionRange(g.i, g.j)
