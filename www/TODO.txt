@@ -1,6 +1,9 @@
 FEATURES
 ------------------------------------------------------------------------------
 
+- <list-search> component
+- <dropdown> with list-search
+
 - validators and error box with non-data-driven input widgets
 
 - new, modified, deleted state with non-data-driven input widgets
@@ -13,13 +16,8 @@ BUGS
 
 * DATE/TIME DROPDOWNS
 	- re-focus bug
-	- time set 00:00:00 bug
-	- arrow-up/down to increment the current item be it y/m/d/h/m/s
-
-* SELECT-BUTTON
-	- focus-visible not working on FF
-
-* INPUT-GROUP FOCUS ??
+	- time set to 00:00:00 bug
+	- arrow-up/down increment out-of-range
 
 * SLIDER
 	- fill animation glitch
@@ -37,6 +35,9 @@ BUGS
 
 * GRID_DROPDOWN
 
+
+* BUTTON
+	- bring back the ^active event (can we force :active so we don't have to set .active?)
 
 - NAV revert bug (esp. tree)
 - NAV which widgets to disable when nav has unsaved changes ?

@@ -54,7 +54,38 @@ Updating the widget when a property changes can be done immediately (in the
 property's setter) or can be deferred to the next animation frame (in fact
 update() is always called when a property changes). Deferring is more work
 but allows for multiple property changes before updating happens once in the
-next frame.
+next frame, so you have the opportunity to update the widget in a single
+possibly more efficient transformation even when that comprises multiple
+property changes.
+
+
+## The necessity to keep properties orthogonal
+
+When defining a property, you can give a convert function in which the
+property value can be parsed, clamped or changed in any way before being set.
+This comes with a big caveat which is easy to forget: the convert function
+*must not depend on the value of any other property* to do its job because
+the order in which properties are set when the component is initialized is
+undefined. IOW, it is necessary to keep properties orthogonal at all times.
+This means *needing to accept invalid values* sometimes.
+
+For example, let's say a widget defines a "list of items" property and also
+a "selected item index" property. Notice how you can't clamp the index in its
+convert function based on the current list of items, because it might just
+happen that the items were not yet set, and if you do that you lose the index.
+
+This can be counter-intuitive because it is very tempting to use the convert
+function as a sort of "firewall" that transforms or rejects invalid values
+in order to avoid putting the widget in an invalid state, and sometimes
+that's not possible.
+
+So orthogonal properties are a bit more work, but the advantage is a widget
+in which changing multiple properties in any order will get the same result.
+
+> An alternative to having orthogonal properties with possibly invalid values
+would be a way to have batch updates (seting multiple properties at once)
+in order to get the widget between valid states, but the API for that is more
+complicated, it would be harder to make an object inspector that way, etc.
 
 
 ## Canvas-drawn widgets

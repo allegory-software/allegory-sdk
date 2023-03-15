@@ -192,7 +192,8 @@ Another minor issue is that there's no way to tell if focusing was the result
 of Tab navigation or by calling focus(), which is important because when you
 focus a dropdown picker you don't want to smooth-scroll to move the selected
 element into view, but when you Tab-navigate you do. Luckily we can override
-focus() and track that when we need this distinction, so consider this solved.
+focus() and track that when we need this distinction, so consider this solved
+(for non-built-in focusables at least, for inputs it's a different story).
 
 Related, there's no way to tell if focusing was the result of Tab or shift+Tab
 which you need to know if your widget contains multiple focusable elements
@@ -201,6 +202,19 @@ create hidden elements with tabindex for this use case but it's easier to
 just keep focus state internally and just use that when drawing). This is
 solved by tracking shift pressed state globally (getting key state is another
 missing API).
+
+
+## Making an element disabled
+
+There's no built-in way to disable any element and it's not easy to do it yourself.
+
+* `pointer-events: none` disables mouse events but has the nasty side effect
+of making your otherwise visibile elements click-through (so never use this
+on overlapping elements). You do need it to block `:hover` rules though
+(that is if you don't want to litter your CSS with `:not([disabled])`).
+Oh, but then scrolling doesn't work. You just can't win on the web.
+
+* there's no way to disable tab focusing with CSS.
 
 
 ## Mouse wheel deltas

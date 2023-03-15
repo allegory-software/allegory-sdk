@@ -1632,6 +1632,8 @@ e.prop = function(prop, opt) {
 	let set_attr = opt.attr && set_attr_func(e, prop_attr, opt)
 	if (prop_attr != prop)
 		attr(e, 'attr_prop_map')[prop_attr] = prop
+	if (prop_attr.includes('_')) // allow foo-bar in addition to foo_bar
+		attr(e, 'attr_prop_map')[prop_attr.replace('_', '-')] = prop
 
 	if (opt.store != false) { // stored prop
 		let v = dv
@@ -1775,25 +1777,30 @@ e.serialize = function() {
 	return t
 }
 
-/* element disablable mixin --------------------------------------------------
+/* mixing for adding disabled state to any element ---------------------------
 
 publishes:
 	e.disabled
 	e.disable(reason, disabled)
 
+disable(reason) allows multiple independent external actors to disable an element
+each for its own reason and the element will stay disabled as long as there's
+at least one reason for it to be disabled.
+
 NOTE: The `disabled` state is a concerted effort located in multiple places:
-- pointer events are blocked by `pointer-events: none`, and they're also
-- blocked in the pointer event wrappers in case `pointer-events: none` doesn't
-- cut it (raw events still work in that case).
+- pointer events are blocked by `pointer-events: none`, but they're also
+  blocked in the pointer event wrappers in case you need `pointer-events: all`
+  on a disabled element (raw events still work in that case).
 - forcing the default cursor on the element and its children is done with css.
-- showing the element with .5 opacity is done with css.
+- showing the element with reduced opacity is done with css.
 - keyboard focusing is disabled in make_focusable().
 
 NOTE: Don't put disablables on top of other elements (eg. popups can't be
-disablable), because they are click-through. If you set .click-through-off
-on a disablable, pointer events will still get blocked, but `:hover` and
-`:active` will start working again, so you'll need to add `:not([disabled])`
-on your state styles. You can't win on the web.
+disablable), because you will be clicking *through* them (by virtue of
+`pointer-events: none`). If you set .click-through-off on a disablable,
+pointer events will still get blocked, but `:hover` and `:active` will start
+working again, so you'll need to add `:not([disabled])` on your state styles.
+You can't win on the web.
 
 NOTE: Scrolling doesn't work with click-through elements, which can be an issue.
 
@@ -1896,6 +1903,9 @@ e.disable = function(...args) {
 }
 
 /* element focusable mixin ---------------------------------------------------
+
+A focusable is an element with a tabindex that disables focusing when the
+element disabled
 
 publishes:
 	e.tabindex

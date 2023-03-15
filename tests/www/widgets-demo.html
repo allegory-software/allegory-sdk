@@ -621,12 +621,12 @@ toggle_collapsed = function() {
 
 <xmp id=input_demo>
 <d class="grid-h grid-2col grid-m" style="grid-template-columns: 1fr 6fr">
-xsmall  <span class="ro-group-h b-collapse-h xsmall  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-small   <span class="ro-group-h b-collapse-h small   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-smaller <span class="ro-group-h b-collapse-h smaller "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-normal  <span class="ro-group-h b-collapse-h normal  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-large   <span class="ro-group-h b-collapse-h large   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
-xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+xsmall  <span class="ro-collapse-h b-collapse-h xsmall  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+small   <span class="ro-collapse-h b-collapse-h small   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+smaller <span class="ro-collapse-h b-collapse-h smaller "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+normal  <span class="ro-collapse-h b-collapse-h normal  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+large   <span class="ro-collapse-h b-collapse-h large   "><input class="ro-var" value="Oh My!"><button>OK</button></span>
+xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" value="Oh My!"><button>OK</button></span>
 </d>
 </xmp>
 
@@ -634,7 +634,7 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 
 <xmp id=input-group_demo>
 
-<d class="S h ro-group-h b-collapse-h">
+<d class="S h ro-collapse-h b-collapse-h">
 	<input-group class="ro-var">
 		<d class="ro-var h-m p-x fa fa-car"></d>
 		<labelbox class="ro-var">
@@ -693,45 +693,45 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 
 <xmp id=select-button_demo>
 <d class="small">
-	<select-button>
-		<d><span class="mi">rocket</span>Rockets</d>
-		<d><span class="mi">radar</span>Radar</d>
-		<d><span class="mi">military_tech</span>Stars</d>
+	<select-button value=v2>
+		<d value=v1><span class="mi">rocket</span>Big Rockets</d>
+		<d value=v2><span class="mi">radar</span>Radar</d>
+		<d value=v3><span class="mi">military_tech</span>Stars</d>
 	</select-button>
 	<button>OK</button>
 	<input class="w4 ro-var">
-	<select-button>
-		<d class="mi">dark_mode</d>
-		<d class="mi">light_mode</d>
+	<select-button value=light>
+		<d value=dark  class="mi">dark_mode</d>
+		<d value=light class="mi">light_mode</d>
 	</select-button>
 	<select-button>
-		<d style="font-size: .75em">A</d>
-		<d style="">A</d>
-		<d style="font-size: 1.25em">A</d>
+		<d value=1 style="font-size: .75em">A</d>
+		<d value=2 style="">A</d>
+		<d value=3 style="font-size: 1.25em">A</d>
 	</select-button>
 </d>
 <d class=large>
-	<select-button>
-		<d><span class="mi">rocket</span> Rockets</d>
-		<d><span class="mi">radar</span> Radar</d>
-		<d><span class="mi">military_tech</span> Stars</d>
+	<select-button value=v5>
+		<d value=v1><span class="mi">rocket</span> Big Rockets</d>
+		<d value=v2><span class="mi">radar</span> Radar</d>
+		<d value=v3><span class="mi">military_tech</span> Stars</d>
 	</select-button>
 	<button>OK</button>
 	<input class="w4 ro-var">
-	<select-button>
-		<d class="mi">dark_mode</d>
-		<d class="mi">light_mode</d>
+	<select-button value=dark>
+		<d value=dark  class="mi">dark_mode</d>
+		<d value=light class="mi">light_mode</d>
 	</select-button>
-	<select-button>
-		<d style="font-size: .75em">A</d>
-		<d style="">A</d>
-		<d style="font-size: 1.25em">A</d>
+	<select-button value=2>
+		<d value=1 style="font-size: .75em">A</d>
+		<d value=2 style="">A</d>
+		<d value=3 style="font-size: 1.25em">A</d>
 	</select-button>
 </d>
 <select-button>
-	<d>Label</d>
-	<d>Label</d>
-	<d>Label</d>
+	<d value=1>Label</d>
+	<d value=1>Label</d>
+	<d value=1>Label</d>
 </select-button>
 </xmp>
 
@@ -769,12 +769,12 @@ xlarge  <span class="ro-group-h b-collapse-h xlarge  "><input class="ro-var" val
 
 <tags nowrap tags="Apples Bananas Mangos what do you do when there are too many tags"></tags>
 
-<d class="ro-group-h h-m flex-nowrap shrinks xsmall "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
-<d class="ro-group-h h-m flex-nowrap shrinks small  "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
-<d class="ro-group-h h-m flex-nowrap shrinks smaller"><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
-<d class="ro-group-h h-m flex-nowrap shrinks normal "><tags class="S" tags="Apples Bananas Mangos what do you do when there are too many tags"></tags><button>OK</button></d>
-<d class="ro-group-h h-m flex-nowrap shrinks normal "><tags class="S" nowrap tags="what do you do when there are too many tags"></tags><button>OK</button></d>
-<d class="ro-group-h h-m flex-nowrap shrinks large  "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks xsmall "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks small  "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks smaller"><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags class="S" tags="Apples Bananas Mangos what do you do when there are too many tags"></tags><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags class="S" nowrap tags="what do you do when there are too many tags"></tags><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks large  "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -887,19 +887,6 @@ for (let e of $('list')) {
 
 <!--------------------------------------------------------------------------->
 
-<xmp id="input align_demo">
-<d class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
-	<check  class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
-	<radio  class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
-	<radio  class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
-	<toggle class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
-	<d></d><label for=input1>Some input</label>
-	<d></d><input id=input1></input>
-</d>
-</xmp>
-
-<!--------------------------------------------------------------------------->
-
 <xmp id=calendar_demo>
 <ranges-calendar class="large">
 	<range>1/1/2022..1/5/2022</range>
@@ -928,7 +915,7 @@ for (let e of $('list')) {
 
 <xmp id=date-input_demo>
 <div><date-input       value="1/18/2022" placeholder="Birth date"></date-input></div>
-<div><time-input       input_value="12:34:56" with-seconds placeholder="Meet at"></tine-input></div>
+<div><time-input       input_value="12:34:56" with-seconds placeholder="Meet at"></time-input></div>
 <div><datetime-input   input_value="1/18/2022 12:34:56" with-seconds placeholder="Meet at"></datetime-input></div>
 <div><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input></div>
 </xmp>
@@ -1105,6 +1092,39 @@ main.add(g)
 		<div></div>
 	</split>
 </vsplit>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id="input align_demo">
+<d class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
+	<check  class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
+	<radio  class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
+	<radio  class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
+	<toggle class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
+	<d></d><label for=input1>Some input</label>
+	<d></d><input id=input1></input>
+	<d></d><d class="b-collapse-h ro-collapse-h">
+			<pass-input value="" placeholder="Password"></pass-input><button>OK</button></div>
+		</d>
+	<d></d><num-input value=-1.54 decimals=2 buttons=up-down></num-input>
+	<d></d><num-input value=-5 buttons=plus-minus></num-input>
+	<d></d><tags nowrap tags="Apples Bananas Mangos" style="width: var(--w-input);"></tags>
+	<d></d><dropdown value=ban>
+		<d value=app searchable>Apples</d>
+		<d value=ban searchable>Bananas</d>
+		<d value=man searchable>Mangos</d>
+	</dropdown>
+	<d></d><select-button value=ban>
+		<d value=man>Mangos</d>
+		<d value=ban>Bananas</d>
+		<d value=app>Shiny Apples</d>
+	</select-button>
+	<d></d><date-input       value="1/18/2022" placeholder="Birth date"></date-input>
+	<d></d><time-input       input_value="12:34:56" with-seconds placeholder="Meet at"></time-input>
+	<d></d><datetime-input   input_value="1/18/2022 12:34:56" with-seconds placeholder="Meet at"></datetime-input>
+	<d></d><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input>
+</d>
 </xmp>
 
 <!--------------------------------------------------------------------------->

@@ -509,7 +509,7 @@ widget('select-btn', function(e) {
 
 	listbox.construct(e)
 
-	e.class('ro-group-h')
+	e.class('ro-collapse-h')
 	e.orientation = 'horizontal'
 	e.can_move_rows = false
 	e.auto_focus_first_cell = false

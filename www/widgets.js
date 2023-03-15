@@ -2285,7 +2285,7 @@ calls:
 
 */
 
-widget_items_widget = function(e) {
+widget_with_widget_items = function(e) {
 
 	function diff_items(t, cur_items) {
 		let items = update_element_list(t, cur_items)
@@ -2300,7 +2300,8 @@ widget_items_widget = function(e) {
 		return t
 	}
 
-	e.prop('items', {type: 'nodes', serialize: e.serialize_items, convert: diff_items, default: empty_array})
+	e.prop('items', {type: 'array', element_type: 'node',
+			serialize: e.serialize_items, convert: diff_items, default: empty_array})
 
 	// parent-of selectable widget protocol.
 	e.child_widgets = function() {
@@ -2422,7 +2423,7 @@ tabs = component('tabs', 'Containers', function(e) {
 	editable_widget(e)
 	contained_widget(e)
 
-	let html_items = widget_items_widget(e)
+	let html_items = widget_with_widget_items(e)
 
 	e.fixed_header = html_items.find(e => e.tag == 'tabs-fixed-header')
 	if (e.fixed_header)
@@ -3544,7 +3545,7 @@ slides = component('slides', 'Containers', function(e) {
 	e.make_disablable()
 	selectable_widget(e)
 	contained_widget(e)
-	let html_items = widget_items_widget(e)
+	let html_items = widget_with_widget_items(e)
 
 	// model
 
@@ -4516,6 +4517,8 @@ and its children so that the end result looks and behaves like an input box.
 This allows different backgrounds in the child elements and also making
 seprators out of their left/right borders.
 
+An <input-group> can contain multiple <input> elements.
+
 */
 
 css('.input-group', 'shrinks t-m m-y-05 lh-input h-s')
@@ -4530,12 +4533,15 @@ css('.input-group > *', 'b-t b-b bg-input')
 css('.input-group > *:first-child', 'b-l')
 css('.input-group > *:last-child' , 'b-r')
 
+// nested input-groups should not have borders.
+css('.input-group', 'b0')
+
 input_group = component('input-group', function(e) {
-	e.class('input-group b-collapse-h ro-group-h')
+	e.class('input-group b-collapse-h ro-collapse-h')
 	e.make_disablable()
 	e.init_child_components()
-	e.input = $1('input')
-	e.make_focusable(e.input)
+	e.inputs = e.$('input')
+	e.make_focusable(...e.inputs)
 })
 
 /* <labelbox> ----------------------------------------------------------------
@@ -4711,19 +4717,18 @@ css(`
 
 button = component('button', 'Input', function(e) {
 
-	e.class('button inputbox')
-	e.make_disablable()
-	editable_widget(e)
-
 	let html_text = [...e.nodes]
 	e.clear()
+
+	e.class('button inputbox')
+	e.make_disablable()
+	e.make_focusable()
+	editable_widget(e)
 
 	e.icon_box = span({class: 'button-icon'})
 	e.text_box = span({class: 'button-text'})
 	e.icon_box.hidden = true
 	e.add(e.icon_box, e.text_box)
-
-	e.make_focusable()
 
 	e.prop('href')
 	e.set_href = function(s) {
@@ -4885,8 +4890,8 @@ button = component('button', 'Input', function(e) {
 
 /* <select-button> && <vselect-button> ---------------------------------------
 
-state:
-	selected_val
+state props/attrs:
+	value
 	selected_index
 
 */
@@ -4900,7 +4905,8 @@ css_util('.smaller', '', ` --p-select-button: 2px; `)
 css_util('.xsmall' , '', ` --p-select-button: 1px; `)
 css_util('.small'  , '', ` --p-select-button: 1px; `)
 
-css('.select-button > :not(.select-button-plate)', 'S h-m t-c p-y-input p-x-button gap-x nowrap-dots noselect dim z1', `
+css('.select-button > :not(.select-button-plate)',
+	'S h-m h-c p-y-input p-x-button gap-x nowrap-dots noselect dim z1', `
 	flex-basis: fit-content;
 `)
 css('.select-button > :not(.select-button-plate):not(.selected):hover', 'fg')
@@ -4932,24 +4938,36 @@ select_button = component('select-button', function(e) {
 
 	e.class('select-button inputbox')
 	e.make_disablable()
-	e.init_child_components()
-	e.plate = div({class: 'select-button-plate'})
-	e.add(e.plate)
 
-	e.make_focusable(e.plate)
+	let html_items = widget_with_widget_items(e)
+
+	e.plate = div({class: 'select-button-plate'})
+
+	e.make_focusable()
 
 	// model
 
 	e.prop('selected_index', {type: 'number'})
+	e.prop('value')
 
-	e.property('selected_val', function() {
-		return e.selected_button ? e.selected_button.val : null
-	})
+	e.set_items = function(items1) {
+		e.update({items: true})
+	}
+
+	e.set_value = function(v) {
+		e.update({value: true})
+	}
 
 	e.set_selected_index = function(i) {
-		let b = i != null && e.len > 1 && e.at[clamp(i, 0, e.len-2)] || null
-		e.selected_button = b
-		e.update()
+		e.update({selected_index: true})
+	}
+
+	e.item_value = function(ce) { // stub to pluck value from items
+		return strict_or(ce.value, ce.attr('value'))
+	}
+
+	function clamp_item_index(i) {
+		return i != null && e.len > 1 && e.at[clamp(i, 0, e.len-2)] || null
 	}
 
 	// view
@@ -4959,18 +4977,34 @@ select_button = component('select-button', function(e) {
 	let my = 0
 
 	e.on_measure(function() {
-		sbor = e.selected_button && e.selected_button.orect()
+		sbor = e.selected_item && e.selected_item.orect()
 	})
 
-	e.on_update(function() {
+	e.on_update(function(opt) {
+		if (opt.items) {
+			e.clear()
+			e.set([...e.items, e.plate])
+			opt.value = true
+		}
+		if (opt.value) {
+			for (let b of e.at) {
+				if (b != e.plate && e.item_value(b) === e.value) {
+					e.selected_item = b
+					break
+				}
+			}
+		} else if (opt.selected_index) {
+			let i = e.selected_index
+			e.selected_item = clamp_item_index(i)
+		}
 		for (let b of e.at)
 			b.class('selected', false)
-		if (e.selected_button)
-			e.selected_button.class('selected', true)
+		if (e.selected_item)
+			e.selected_item.class('selected', true)
 	})
 
 	e.on_position(function() {
-		if (!e.selected_button) {
+		if (!e.selected_item) {
 			e.plate.hide()
 			return
 		}
@@ -4983,30 +5017,42 @@ select_button = component('select-button', function(e) {
 
 	// controller
 
+	function select_item(b) {
+		let v = b ? e.item_value(b) : null
+		if (v != null)
+			e.value = v
+		else
+			e.selected_index = b.index
+	}
+
 	e.on('click', function(ev) {
 		let b = ev.target
 		while (b && b.parent != e) b = b.parent
 		if (!b || b.parent != e || b == e.plate) return
-		e.selected_index = b.index
+		select_item(b)
 		e.focus()
 	})
 
 	e.on('keydown', function(key) {
-		let n = (key == 'ArrowRight' ? 1 : key == 'ArrowLeft' ? -1 : 0)
-		if (!n) return
-		e.selected_index = (e.selected_button ? e.selected_button.index : 0) + n
+		if (key == 'ArrowRight' || key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowDown') {
+			let fw = key == 'ArrowRight' || key == 'ArrowDown'
+			let b = e.selected_item
+			b = fw ? b.next || e.last.prev : b.prev || e.first
+			select_item(b)
+			return false
+		}
 	})
 
 	e.on('resize', function() {
 		e.position()
 	})
 
-	return {selected_index: 0}
+	return {items: html_items}
 })
 
 vselect_button = component('vselect-button', function(e) {
 
-	e.class('vselect-button ro-group-v b-collapse-v')
+	e.class('vselect-button ro-collapse-v b-collapse-v')
 	return select_button.construct(e)
 
 })
@@ -5070,7 +5116,7 @@ num_input = component('num-input', 'Input', function(e) {
 	e.prop('decimals'   , {type: 'number', default: 0})
 	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus', default: 'none', attr: true})
 
-	e.class('num-input input-group ro-group-h')
+	e.class('num-input input-group ro-collapse-h')
 	e.input = input({classes: 'num-input-input'})
 
 	e.make_focusable(e.input)
@@ -5194,12 +5240,13 @@ pass_input = component('pass-input', 'Input', function(e) {
 
 	e.prop('value', {default: null})
 
-	e.class('pass-input input-group b-collapse-h ro-group-h')
+	e.class('pass-input input-group b-collapse-h ro-collapse-h')
 	e.input = input({classes: 'pass-input-input', type: 'password'})
 	e.eye_button = button({
 		classes: 'pass-input-button',
 		icon: 'far fa-eye',
 		bare: true,
+		focusable: false,
 		title: S('view_password', 'View password'),
 	})
 	e.add(e.input, e.eye_button)
@@ -5229,8 +5276,12 @@ pass_input = component('pass-input', 'Input', function(e) {
 
 	e.eye_button.on('pointerdown', function(ev) {
 		e.input.type = null
-		this.capture_pointer(ev, null, function() {
+		let i = e.input.selectionStart
+		let j = e.input.selectionEnd
+		return this.capture_pointer(ev, null, function() {
 			e.input.type = 'password'
+			e.input.setSelectionRange(i, j)
+			return false
 		})
 	})
 
@@ -5453,7 +5504,7 @@ update opts:
 	value
 
 */
-css('.dropdown', 'gap-x arrow h-sb', `width: var(--w-input);`)
+css('.dropdown', 'gap-x arrow h-sb bg-input', `width: var(--w-input);`)
 css('.dropdown.empty::before', 'zwsp') // .empty condition because we use gap-x.
 css('.dropdown-chevron', 'p-x-05 smaller ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
@@ -5548,7 +5599,7 @@ dropdown = component('dropdown', 'Input', function(e) {
 		bind_list(list1, true)
 	}
 
-	e.prop('list', {private: true})
+	e.prop('list', {type: 'list'})
 
 	// view -------------------------------------------------------------------
 
@@ -6792,7 +6843,7 @@ time_picker = component('time-picker', 'Input', function(e) {
 
 	e.make_disablable()
 
-	e.prop('with_seconds', {type: 'bool', attr: 'with-seconds', default: false})
+	e.prop('with_seconds', {type: 'bool', attr: 'with_seconds', default: false})
 
 	e.seconds_list.parent.hide()
 
@@ -6868,7 +6919,7 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 	e.make_disablable()
 
-	e.prop('with_seconds', {type: 'bool', attr: 'with-seconds', default: false})
+	e.prop('with_seconds', {type: 'bool', attr: 'with_seconds', default: false})
 	e.set_with_seconds = function(v) {
 		e.time_picker.with_seconds = v
 	}
@@ -6996,7 +7047,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	}
 
 	if (has_time) {
-		e.prop('with_seconds', {type: 'bool', attr: 'with-seconds', default: false})
+		e.prop('with_seconds', {type: 'bool', attr: 'with_seconds', default: false})
 
 		e.set_with_seconds = function(v) {
 			e.picker.with_seconds = v
@@ -7032,7 +7083,7 @@ function date_input_widget(e, has_date, has_time, range) {
 		})
 
 		inp.on('input', function(ev) {
-			e.set_prop(VAL, this.value, ev)
+			e.set_prop(VAL, inp.value, ev)
 		})
 
 		inp.on('wheel', function(ev, dy, is_trackpad) {
@@ -7045,47 +7096,60 @@ function date_input_widget(e, has_date, has_time, range) {
 			e.set_prop(VAL, d, {target: e})
 		})
 
+		function focus_next_digit_group(shift) {
+			let i = inp.selectionStart
+			let j = inp.selectionEnd
+			if (i == 0 && j == inp.value.len) {
+				i = shift ? inp.value.len : 0
+				j = i
+			}
+			let ms = []
+			inp.value.replace(/\d+/g, (s, i) => ms.push({i: i, j: i + s.len}))
+			if (!shift) { // select next number
+				for (let m of ms)
+					if (m.i >= j) {
+						inp.setSelectionRange(m.i, m.j)
+						return true
+					}
+			} else {
+				for (let m of ms.reverse())
+					if (m.j <= i) {
+						inp.setSelectionRange(m.i, m.j)
+						return true
+					}
+			}
+		}
+
 		inp.on('keydown', function(key, shift) {
 
 			// tabbing between digit groups
-			if (key == 'Tab') {
-				let i = this.selectionStart
-				let j = this.selectionEnd
-				if (i == 0 && j == this.value.len) {
-					i = shift ? this.value.len : 0
-					j = i
-				}
-				let ms = []
-				this.value.replace(/\d+/g, (s, i) => ms.push({i: i, j: i + s.len}))
-				if (!shift) { // select next number
-					for (let m of ms)
-						if (m.i >= j) {
-							this.setSelectionRange(m.i, m.j)
-							return false
-						}
-				} else {
-					for (let m of ms.reverse())
-						if (m.j <= i) {
-							this.setSelectionRange(m.i, m.j)
-							return false
-						}
-				}
-			}
+			if (key == 'Tab')
+				if (focus_next_digit_group(shift))
+					return false
 
 			// inc/dec current digit group with arrow keys
 			if (key == 'ArrowUp' || key == 'ArrowDown') {
-				let i = this.selectionStart
-				let j = this.selectionEnd
-				let s = this.value
+				let i = inp.selectionStart
+				let j = inp.selectionEnd
+				let s = inp.value
 				let sel = s.slice(i, j)
 				if (sel.match(/^\d+$/)) {
-					let ns = sel.num() + (key == 'ArrowUp' ? -1 : 1) + ''
-					this.value = s.slice(0, i) + ns + s.slice(j)
-					this.setSelectionRange(i, i + ns.len)
+					let n = sel.num() + (key == 'ArrowUp' ? -1 : 1)
+					let ns = n + ''
+					inp.value = s.slice(0, i) + ns + s.slice(j)
+					inp.setSelectionRange(i, i + ns.len)
+					e.set_prop(VAL, inp.value, {target: inp})
 					return false
 				}
 			}
 
+		})
+
+		inp.on('focus', function() {
+			let i = inp.selectionStart
+			let j = inp.selectionEnd
+			if (i ==0 && j > 0 && j == inp.value.len) // all text is selected
+				focus_next_digit_group(shift_pressed)
 		})
 
 		e[VAL+'_input'] = inp
