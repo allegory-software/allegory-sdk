@@ -158,9 +158,9 @@ TIME & DATE
 	week_start_offset([country])
 	ds.duration(['approx[+s]'|'long']) -> s
 	ts.timeago() -> s
-	ts.date([locale], [with_time], [with_seconds]) -> s
-	s.parse_date([locale], [validate]) -> ts
-	s.parse_time([validate]) -> s
+	ts.date([locale], [with_time], [with_seconds], [with_fractions]) -> s
+	parse_date(s, [locale], [validate], [with_seconds], [with_fractions]) -> ts
+	parse_timeofday(s, [validate], [with_seconds], [with_fractions]) -> ts
 
 FILE SIZE FORMATTING
 
@@ -1246,22 +1246,28 @@ function week_start_offset(country1) {
 }
 
 {
-function parse_timeofday(s, validate) {
-	let t = s
-	if (isstr(s)) {
-		s = s.trim()
-		let t1_re = /^(\d+)\s*:\s*(\d+)\s*:\s*([\.\d]+)$/;
-		let t2_re = /^(\d+)\s*:\s*(\d+)$/;
-		let tm = t1_re.exec(s) || t2_re.exec(s)
-		if (!tm)
-			return null
-		let H = num(tm[1])
-		let M = num(tm[2])
-		let S = num(tm[3], 0)
-		t = H * 3600 + M * 60 + S
-	}
+
+// NOTE: the parsers accept negative numbers in time positions but not in dates.
+
+let time_re = /(\-?\d+)\s*:\s*(\-?\d+)\s*(?::\s*(\-?\d+))?\s*(?:[\:\.]\s*(\-?)(\d+))?/;
+let date_re = /(\d+)\s*[\-\/\.,\s]\s*(\d+)\s*[\-\/\.,\s]\s*(\d+)/;
+let timeonly_re = new RegExp('^\\s*' + time_re.source + '\\s*$')
+let datetime_re = new RegExp('^\\s*' + date_re.source + '(?:\\s+' + time_re.source + '\\s*)?$')
+
+function parse_timeofday(s, validate, with_seconds, with_fractions) {
+	if (!isstr(s))
+		return s
+	let tm = timeonly_re.exec(s)
+	if (!tm)
+		return null
+	let H = num(tm[1])
+	let M = num(tm[2])
+	let S = with_seconds && num(tm[3]) || 0
+	let fs = tm[5] || ''
+	let f = with_fractions && (tm[4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
+	let t = H * 3600 + M * 60 + S + f
 	if (validate)
-		if (t >= 24 * 3600)
+		if (hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
 			return null
 	return t
 }
@@ -1277,6 +1283,7 @@ let date_parts = memoize(function(locale) {
 	let dtf = new Intl.DateTimeFormat(locale)
 	return dtf.formatToParts(0)
 })
+
 let date_parser = memoize(function(locale) {
 	let yi, mi, di
 	let i = 1
@@ -1285,55 +1292,55 @@ let date_parser = memoize(function(locale) {
 		if (p.type == 'month') mi = i++
 		if (p.type == 'year' ) yi = i++
 	}
-	let t1_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)\s*:\s*([\.\d]+)$/;
-	let t2_re = /^(.*?)\s*(\d+)\s*:\s*(\d+)$/;
-	let d_re  = /^(\d+)[^\d]+(\d+)[^\d]+(\d+)$/;
-	return function(s, validate) {
-		s = s.trim()
-		let tm = t1_re.exec(s) || t2_re.exec(s)
-		s = tm ? tm[1] : s
-		let dm = d_re.exec(s)
+	if (i != 4) { // failed? default to `m d y`
+		mi = 1; di = 2; yi = 3
+	}
+	return function(s, validate, fractional) {
+		let dm = datetime_re.exec(s)
 		if (!dm)
 			return null
 		let y = num(dm[yi])
 		let m = num(dm[mi])
 		let d = num(dm[di])
-		if (tm) {
-			let H = num(tm[2])
-			let M = num(tm[3])
-			let S = num(tm[4], 0)
-			let t = time(y, m, d, H, M, S)
-			if (validate)
-				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
-						|| hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
-					return null
-			return t
-		} else {
-			let t = time(y, m, d)
-			if (validate)
-				if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d)
-					return null
-			return t
-		}
+		let H = num(dm[3+1]) || 0
+		let M = num(dm[3+2]) || 0
+		let S = num(dm[3+3]) || 0
+		let fs = dm[3+5] || ''
+		let f = fractional ? (dm[3+4] ? -1 : 1) * num(fs, 0) / 10**fs.len : 0
+		let t = time(y, m, d, H, M, S) + f
+		if (validate)
+			if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
+					|| hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
+				return null
+		return t
 	}
 })
-method(String, 'parse_date', function(locale1, validate) {
-	return date_parser(locale1 || locale())(this.valueOf(), validate)
+
+function parse_date(s, locale1, validate, with_seconds, with_fractions) {
+	return isstr(s) ? date_parser(locale1 || locale())(s, validate, with_seconds, with_fractions) : s
+}
+method(String, 'parse_date', function(locale1, validate, with_seconds, with_fractions) {
+	return date_parser(locale1 || locale())(this.valueOf(), validate, with_seconds, with_fractions)
 })
 
 let a1 = [0, ':', 0, ':', 0]
 let a2 = [0, ':', 0]
-function format_timeofday(t, with_seconds) {
+let seconds_format = new Intl.NumberFormat('nu', {
+	minimumIntegerDigits: 2,
+	maximumFractionDigits: 6, // mySQL-compatible
+})
+function format_timeofday(t, with_seconds, with_fractions) {
 	let H = floor(t / 3600)
 	let M = floor(t / 60) % 60
-	let S = t % 60
+	let Sf = t % 60
+	let S = floor(Sf)
 	if (with_seconds) {
 		if (H < 10) H = '0'+H
 		if (M < 10) M = '0'+M
 		if (S < 10) S = '0'+S
 		a1[0] = H
 		a1[2] = M
-		a1[4] = S
+		a1[4] = (with_fractions && Sf != S) ? seconds_format.format(Sf) : S
 		return a1.join('')
 	} else {
 		if (H < 10) H = '0'+H
@@ -1343,8 +1350,8 @@ function format_timeofday(t, with_seconds) {
 		return a2.join('')
 	}
 }
-method(Number, 'timeofday', function(with_seconds) {
-	return format_timeofday(this.valueOf(), with_seconds)
+method(Number, 'timeofday', function(with_seconds, with_fractions) {
+	return format_timeofday(this.valueOf(), with_seconds, with_fractions)
 })
 
 let date_formatter = memoize(function(locale) {
@@ -1364,7 +1371,7 @@ let date_formatter = memoize(function(locale) {
 	Mi = i++; a1[i++] = ':'
 	Si = i++;
 	let a2 = a1.slice(0, -2) // without seconds
-	return function(t, with_time, with_seconds) {
+	return function(t, with_time, with_seconds, with_fractions) {
 		// if this is slow, see
 		//   http://git.musl-libc.org/cgit/musl/tree/src/time/__secs_to_tm.c?h=v0.9.15
 		_d.setTime(t * 1000)
@@ -1374,6 +1381,7 @@ let date_formatter = memoize(function(locale) {
 		let H = _d.getUTCHours()
 		let M = _d.getUTCMinutes()
 		let S = _d.getUTCSeconds()
+		let Sf = S + t - floor(t)
 		if (m < 10 && md > 1) m = '0'+m
 		if (d < 10 && dd > 1) d = '0'+d
 		if (with_seconds) {
@@ -1385,7 +1393,7 @@ let date_formatter = memoize(function(locale) {
 			a1[di] = d
 			a1[Hi] = H
 			a1[Mi] = M
-			a1[Si] = S
+			a1[Si] = (with_fractions && Sf != S) ? seconds_format.format(Sf) : S
 			return a1.join('')
 		} else if (with_time) {
 			if (H < 10) H = '0'+H
@@ -1404,8 +1412,8 @@ let date_formatter = memoize(function(locale) {
 		}
 	}
 })
-method(Number, 'date', function(locale1, with_time, with_seconds) {
-	return date_formatter(locale1 || locale())(this.valueOf(), with_time, with_seconds)
+method(Number, 'date', function(locale1, with_time, with_seconds, with_fractions) {
+	return date_formatter(locale1 || locale())(this.valueOf(), with_time, with_seconds, with_fractions)
 })
 
 let _date_placeholder_text = memoize(function(locale) {
