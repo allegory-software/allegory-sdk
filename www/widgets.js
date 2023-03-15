@@ -6843,7 +6843,8 @@ time_picker = component('time-picker', 'Input', function(e) {
 
 	e.make_disablable()
 
-	e.prop('with_seconds', {type: 'bool', attr: 'with_seconds', default: false})
+	e.prop('with_seconds'  , {type: 'bool', default: false})
+	e.prop('with_fractions', {type: 'bool', default: false})
 
 	e.seconds_list.parent.hide()
 
@@ -6875,7 +6876,7 @@ time_picker = component('time-picker', 'Input', function(e) {
 			e.set_prop('value', set_seconds(e.value, list.focused_item.data.value), {target: list})
 	})
 
-	e.prop('value', {type: 'timeofday', convert: s => parse_timeofday(s) % (24 * 3600) })
+	e.prop('value', {type: 'timeofday', convert: s => parse_timeofday(s, true, e.with_seconds, e.with_fractions) })
 
 	e.set_value = function(v, v0, ev) {
 		if (!(ev && ev.target && (ev.target == e || ev.target.parent == e))) {
@@ -6919,15 +6920,19 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 	e.make_disablable()
 
-	e.prop('with_seconds', {type: 'bool', attr: 'with_seconds', default: false})
+	e.prop('with_seconds'  , {type: 'bool', default: false})
+	e.prop('with_fractions', {type: 'bool', default: false})
 	e.set_with_seconds = function(v) {
 		e.time_picker.with_seconds = v
 	}
-
-	function convert_time(s) {
-		return isstr(s) ? s.parse_date(null, true) : s
+	e.set_with_fractions = function(v) {
+		e.time_picker.with_fractions = v
 	}
-	e.prop('value', {type: 'time', convert: convert_time})
+
+	function convert_value(s) {
+		return isstr(s) ? s.parse_date(null, true, e.with_seconds, e.with_fractions) : s
+	}
+	e.prop('value', {type: 'time', convert: convert_value})
 
 	e.set_value = function(v, v1, ev) {
 		e.calendar   .set_prop('value', v, ev)
@@ -7032,37 +7037,49 @@ function date_input_widget(e, has_date, has_time, range) {
 
 	if (has_date) {
 		e.to_text = function(t) {
-			return t.date(null, has_time, e.with_seconds)
+			return t.date(null, has_time, e.with_seconds, e.with_fractions)
 		}
-		e.from_text = function(s) {
-			return s.parse_date(null, true)
+		e.valid_value = function(t) {
+			// NOTE: trying to be compliant with mySQL TIMESTAMP range.
+			// NOTE: 6-digit of fractional precision are only kept for years >= 1900
+			// when making computations with timestamps, so we're not really fully mySQL compliant.
+			return t != null && t >= time(1000, 1, 1, 0, 0, 0) && t <= time(10000)-1 ? t : null
+		}
+		e.from_text = function(s, validate) {
+			return e.valid_value(s.parse_date(null, validate, e.with_seconds, e.with_fractions))
 		}
 	} else {
 		e.to_text = function(t) {
-			return t.timeofday(e.with_seconds)
+			return t.timeofday(e.with_seconds, e.with_fractions)
 		}
-		e.from_text = function(s) {
-			return s.parse_timeofday(true)
+		e.valid_value = function(t) {
+			return t != null && t >= 0 && t < 24 * 3600 ? t : null
+		}
+		e.from_text = function(s, validate) {
+			return e.valid_value(s.parse_timeofday(validate, e.with_seconds, e.with_fractions))
 		}
 	}
 
 	if (has_time) {
-		e.prop('with_seconds', {type: 'bool', attr: 'with_seconds', default: false})
-
+		e.prop('with_seconds'  , {type: 'bool', default: false})
+		e.prop('with_fractions', {type: 'bool', default: false})
 		e.set_with_seconds = function(v) {
 			e.picker.with_seconds = v
+		}
+		e.set_with_seconds = function(v) {
+			e.picker.with_fractions = v
 		}
 	}
 
 	function convert_value(s) {
-		return isstr(s) ? e.from_text(s) : s
+		return isstr(s) ? e.from_text(s, true) : s
 	}
 
 	for (let VAL of (range ? ['value1', 'value2'] : ['value'])) {
 
 		e.prop(VAL, {type: 'date', convert: convert_value})
 		e['set_'+VAL] = function(v, v0, ev) {
-			if (!(ev && ev.target == e[VAL+'_input'] || ev.target == e))
+			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
 				e[VAL+'_input'].value = isnum(v) ? e.to_text(v) : v
 			if (!(ev && ev.target == e.picker))
 				e.picker.set_prop(VAL, v, ev)
@@ -7074,7 +7091,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
 				e[VAL+'_input'].value = v
 			if (!(ev && ev.target == e))
-				e.set_prop(VAL, e.from_text(v), ev || {target: e})
+				e.set_prop(VAL, e.from_text(v, true), ev || {target: e})
 		}
 
 		let inp = input({
@@ -7096,6 +7113,21 @@ function date_input_widget(e, has_date, has_time, range) {
 			e.set_prop(VAL, d, {target: e})
 		})
 
+		function digit_groups() {
+			let gs = []
+			let index = 0
+			inp.value.replace(/(\s\-)?\d+/g, (s, _, i) => gs.push({i: i, j: i + s.len, index: index++}))
+			return gs
+		}
+
+		function current_digit_group() {
+			let i = inp.selectionStart
+			let j = inp.selectionEnd
+			for (let g of digit_groups())
+				if (g.i <= i && g.j >= j)
+					return g
+		}
+
 		function focus_next_digit_group(shift) {
 			let i = inp.selectionStart
 			let j = inp.selectionEnd
@@ -7103,18 +7135,17 @@ function date_input_widget(e, has_date, has_time, range) {
 				i = shift ? inp.value.len : 0
 				j = i
 			}
-			let ms = []
-			inp.value.replace(/\d+/g, (s, i) => ms.push({i: i, j: i + s.len}))
+			let gs = digit_groups()
 			if (!shift) { // select next number
-				for (let m of ms)
-					if (m.i >= j) {
-						inp.setSelectionRange(m.i, m.j)
+				for (let g of gs)
+					if (g.i >= j) {
+						inp.setSelectionRange(g.i, g.j)
 						return true
 					}
 			} else {
-				for (let m of ms.reverse())
-					if (m.j <= i) {
-						inp.setSelectionRange(m.i, m.j)
+				for (let g of gs.reverse())
+					if (g.j <= i) {
+						inp.setSelectionRange(g.i, g.j)
 						return true
 					}
 			}
@@ -7129,16 +7160,21 @@ function date_input_widget(e, has_date, has_time, range) {
 
 			// inc/dec current digit group with arrow keys
 			if (key == 'ArrowUp' || key == 'ArrowDown') {
-				let i = inp.selectionStart
-				let j = inp.selectionEnd
-				let s = inp.value
-				let sel = s.slice(i, j)
-				if (sel.match(/^\d+$/)) {
-					let n = sel.num() + (key == 'ArrowUp' ? -1 : 1)
-					let ns = n + ''
-					inp.value = s.slice(0, i) + ns + s.slice(j)
-					inp.setSelectionRange(i, i + ns.len)
-					e.set_prop(VAL, inp.value, {target: inp})
+				let g = current_digit_group()
+				if (g) {
+					let s = inp.value
+					let n = s.slice(g.i, g.j).num() + (key == 'ArrowUp' ? -1 : 1)
+					let ns = ' '+n
+					// ^^ the space is prepended in case n is negative, to diff.
+					// from `-` used as date separator!
+					let s1 = s.slice(0, g.i) + ns + s.slice(g.j)
+					let t = e.from_text(s1, false)
+					if (e.valid_value(t) != null) {
+						e.set_prop(VAL, t)
+						g = digit_groups()[g.index] // re-locate digit group
+						if (g)
+							inp.setSelectionRange(g.i, g.j)
+					}
 					return false
 				}
 			}
