@@ -4127,7 +4127,7 @@ methods:
 */
 
 // reset editbox
-css('.slider', 'S t-m noclip rel', `
+css('.slider', 'S h t-m noclip rel', `
 	--slider-marked: 1;
 	--slider-mark-w: 40px; /* pixels only! */
 	min-width: 8em;
@@ -4135,6 +4135,7 @@ css('.slider', 'S t-m noclip rel', `
 	margin-right  : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-1));
 	margin-top    : calc(var(--space-1) + 1em);
 	margin-bottom : calc(var(--space-1) + 1em + var(--slider-marked) * 1em);
+	width: calc(var(--w-input) - margin-left - margin-right);
 `)
 css('.slider-fill', 'abs round', ` height: 3px; `)
 css('.slider-bg-fill', 'bg1')
@@ -5504,7 +5505,7 @@ update opts:
 	value
 
 */
-css('.dropdown', 'gap-x arrow h-sb bg-input', `width: var(--w-input);`)
+css('.dropdown', 'gap-x arrow h-sb bg-input w-input')
 css('.dropdown.empty::before', 'zwsp') // .empty condition because we use gap-x.
 css('.dropdown-chevron', 'p-x-05 smaller ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
@@ -6979,7 +6980,7 @@ css('.date-range-input-separator', 'p-x h-m')
 css('.time-only-input', '', `
 	--min-w-calendar: 0px; /* has natural min-w; calendar's can be too wide */
 `)
-css('.date-input-picker-box', 'b bg-input v')
+css('.date-input-picker-box', 'b bg-input v z3')
 css('.date-only-input .calendar', 'S b bg-input clip', `resize: vertical;`) // NOTE: resize needs clip!
 css('.date-range-input .date-input-picker-box', 'clip', `resize: vertical;`) // NOTE: resize needs clip!
 css('.date-range-input .calendar', 'S')

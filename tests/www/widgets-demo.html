@@ -1105,9 +1105,12 @@ main.add(g)
 	<radio  class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
 	<radio  class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
 	<toggle class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
-	<d></d><label for=input1>Some input</label>
-	<d></d><input id=input1></input>
-	<d></d><d class="b-collapse-h ro-collapse-h">
+	<d></d><label for=input1>Label of next input</label>
+	<info class="self-h-c">
+		This here is just a simple input.<br>
+		Click on the label to focus it.
+	</info><input id=input1></input>
+	<d></d><d class="h b-collapse-h ro-collapse-h w-input">
 			<pass-input value="" placeholder="Password"></pass-input><button>OK</button></div>
 		</d>
 	<d></d><num-input value=-1.54 decimals=2 buttons=up-down></num-input>
@@ -1121,12 +1124,19 @@ main.add(g)
 	<d></d><select-button value=ban>
 		<d value=man>Mangos</d>
 		<d value=ban>Bananas</d>
-		<d value=app>Shiny Apples</d>
+		<d value=app>Apples</d>
 	</select-button>
 	<d></d><date-input       value="1/18/2022" placeholder="Birth date"></date-input>
 	<d></d><time-input       input_value="00:00:00.2" with-seconds placeholder="Meet at"></time-input>
 	<d></d><datetime-input   input_value="1/18/2022 12:34:56" with-seconds placeholder="Meet at"></datetime-input>
 	<d></d><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input>
+	<d></d><slider min=0.1 max=0.9 value=0.75></slider>
+	<d></d><range-slider min=10 max=90 from=0 to=100 value1=20 value2=80 decimals=0></range-slider>
+	<d></d><button bare>CANCEL</button>
+	<d></d><d class="h gap-x S">
+		<button class="S" primary icon="fa fa-save">Save</button>
+		<button class="S" danger icon="fa fa-trash">Delete</button>
+	</d>
 </d>
 </xmp>
 
