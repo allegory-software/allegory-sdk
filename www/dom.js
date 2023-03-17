@@ -1560,6 +1560,7 @@ publishes:
 		private               window is not notifed of prop value changes.
 		default               default value.
 		convert(v, v0) -> v   convert value when setting the property.
+		updates: 'opt1 ...'   options to pass to update() when the prop value changes
 		type                  for html attr val conversion and for object inspector.
 		from_attr(s) -> v     convert from html attr text representation.
 		to_attr(v) -> s       convert to html attr text representation.
@@ -1617,15 +1618,16 @@ e.prop = function(prop, opt) {
 	let e = this
 	opt = opt || obj()
 	assign_opt(opt, e.props && e.props[prop])
-	let getter = 'get_'+prop
-	let setter = 'set_'+prop
+	let GET = 'get_'+prop
+	let SET = 'set_'+prop
 	opt.name = prop
 	let convert = opt.convert || return_arg
 	let priv = opt.private
-	if (!e[setter])
-		e[setter] = noop
+	if (!e[SET])
+		e[SET] = noop
 	let prop_changed = announce_prop_changed
-	let dv = opt.default
+	let dv = or(opt.default, null)
+	let update_opt = opt.updates && words(opt.updates).tokeys() || null
 
 	opt.from_attr = from_attr_func(opt)
 	let prop_attr = isstr(opt.attr) ? opt.attr : prop
@@ -1646,29 +1648,29 @@ e.prop = function(prop, opt) {
 			if (v1 === v0)
 				return
 			v = v1
-			e[setter](v1, v0, ev)
+			e[SET](v1, v0, ev)
 			if (set_attr)
 				set_attr(v1)
 			if (!priv)
 				prop_changed(e, prop, v1, v0, ev)
-			e.update()
+			e.update(update_opt)
 		}
 		if (dv != null && set_attr && !e.hasattr(prop_attr))
 			set_attr(dv)
 	} else { // virtual prop with getter
 		assert(!('default' in opt))
 		function get() {
-			return e[getter]()
+			return e[GET]()
 		}
 		function set(v, ev) {
-			let v0 = e[getter]()
+			let v0 = e[GET]()
 			v = convert(v, v0)
 			if (v === v0)
 				return
-			e[setter](v, v0, ev)
+			e[SET](v, v0, ev)
 			if (!priv)
 				prop_changed(e, prop, v, v0, ev)
-			e.update()
+			e.update(update_opt)
 		}
 	}
 
@@ -3390,13 +3392,12 @@ component('if', 'Containers', function(e) {
 		return !!v
 	}
 
-	e.do_update = function(opt) {
+	e.on_update(function(opt) {
 		if (opt.show) {
 			e.unsafe_html = html_content
 			document.fire('layout_changed')
 		}
-		e.show(!!opt.show)
-	}
+	})
 
 	function global_changed() {
 		let k = e.global
