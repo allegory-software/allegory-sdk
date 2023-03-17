@@ -109,7 +109,7 @@ ARRAYS
 	a.equals(b, [i1], [i2]) -> t|f
 	a.binsearch(v, cmp, i1, i2)
 	a.each(f)
-	a.tokeys([v]) -> t
+	a.tokeys([v], [cons]) -> t
 	a.uniq_sorted()
 	a.remove_duplicates() -> a
 
