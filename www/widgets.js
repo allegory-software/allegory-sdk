@@ -60,9 +60,10 @@ WRITING CSS RULES
 	CSS STATES
 
 		State classes are set only on the outermost element of a widget except
-		`:focus-visible` which is set only to the innermost element (which has tabindex).
+		`:focus-visible` which is set to the innermost element (which has tabindex).
 		Use `.outer.state .inner` to style `.inner` on `.state`.
-		Use `.outer .inner:has(:focus-visible)` to style `.outer` on `:focus-visible`.
+		Use `.outer:has(.inner:focus-visible)` to style `.outer` on `:focus-visible`
+		but note that this doesn't work in Firefox in 2022 (but will work in 2023).
 
 	CSS DESCENDANT COMBINATOR
 
@@ -1320,7 +1321,7 @@ e.make_list_items_focusable = function() {
 			item.selected = true
 	})
 
-	e.prop('focused_item_index', {default: null})
+	e.prop('focused_item_index')
 
 	e.set_focused_item_index = function(i, i0, ev) {
 		e.announce('focused_item_changed', ev)
@@ -1589,12 +1590,16 @@ e.make_list_items_focusable = function() {
 
 	e.on('keydown', function(key, shift, ctrl, alt) {
 
+		if (alt)
+			return
+
+		let horiz = e.css('flexDirection') == 'row'
 		let n
 		switch (key) {
-			case 'ArrowUp'   : n = -1; break
-			case 'ArrowDown' : n =  1; break
-			case 'ArrowLeft' : n = -1; break
-			case 'ArrowRight': n =  1; break
+			case 'ArrowUp'   : if (!horiz) n = -1; break
+			case 'ArrowDown' : if (!horiz) n =  1; break
+			case 'ArrowLeft' : if ( horiz) n = -1; break
+			case 'ArrowRight': if ( horiz) n =  1; break
 			case 'Home'      : n = -1/0; break
 			case 'End'       : n =  1/0; break
 		}
@@ -1858,10 +1863,6 @@ list = component('list', function(e) {
 
 	e.clear()
 
-	function update_items() {
-		e.update({items: true})
-	}
-
 	e.property('item_template_string', function() {
 		return template(e.item_template_name) || e.item_template
 	})
@@ -1885,11 +1886,8 @@ list = component('list', function(e) {
 	}
 	e.prop('items', {store: false, type: 'array', element_type: 'node'})
 
-	e.prop('item_template_name', {type: 'template_name', attr: 'item_template'})
-	e.prop('item_template'     , {type: 'template'})
-
-	e.set_item_template_name = update_items
-	e.set_item_template      = update_items
+	e.prop('item_template_name', {type: 'template_name', attr: 'item_template', updates: 'items'})
+	e.prop('item_template'     , {type: 'template', updates: 'items'})
 
 	e.format_item = function(item, ts) {
 		return unsafe_html(render_string(ts, item || empty_obj), false)
@@ -2301,7 +2299,8 @@ widget_with_widget_items = function(e) {
 	}
 
 	e.prop('items', {type: 'array', element_type: 'node',
-			serialize: e.serialize_items, convert: diff_items, default: empty_array})
+			serialize: e.serialize_items, convert: diff_items, default: empty_array,
+			updates: 'items'})
 
 	// parent-of selectable widget protocol.
 	e.child_widgets = function() {
@@ -4291,8 +4290,6 @@ let slider_widget = function(e, range) {
 				v = max(v, e.value1)
 
 		e[VAL] = clamp(v, cmin(), cmax())
-
-		e.update()
 	}
 
 	e.get_progress = function(VAL) {
@@ -4425,7 +4422,9 @@ let slider_widget = function(e, range) {
 			return this.capture_pointer(ev, pointermove, pointerup)
 		})
 
-		thumb.on('keydown', function(key, shift) {
+		thumb.on('keydown', function(key, shift, ctrl, alt) {
+			if (alt)
+				return
 			let d
 			switch (key) {
 				case 'ArrowLeft'  : d =  -.1; break
@@ -4496,6 +4495,10 @@ css_util('.gap-input', 'gap-x-input gap-y-input')
 
 css('.inputbox', 'm-y-05 b p-input t-m h-m gap-x-input lh-input')
 
+css_state('.inputbox.invalid', '', `
+	border-color: var(bg-invalid);
+`)
+
 css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
 css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
 css_util('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller);`)
@@ -4536,6 +4539,10 @@ css('.input-group > *:last-child' , 'b-r')
 
 // nested input-groups should not have borders.
 css('.input-group', 'b0')
+
+css_state('.input-group.invalid > *', '', `
+	background-color : var(--bg-error);
+`)
 
 input_group = component('input-group', function(e) {
 	e.class('input-group b-collapse-h ro-collapse-h')
@@ -4747,20 +4754,14 @@ button = component('button', 'Input', function(e) {
 		}
 	}
 
-	e.format_text = function(s) { // stub
-		return s
-	}
+	e.format_text = return_arg // stub
 
-	function update_text() {
-		let s = e.format_text(e.text)
+	e.set_text = function(s) {
+		s = e.format_text(s)
 		e.text_box.set(s, 'pre-line')
 		e.class('text-empty', !s || isarray(s) && !s.length)
 		if (e.link)
 			e.link.set(TC(s))
-	}
-
-	e.set_text = function(s) {
-		update_text()
 	}
 	e.prop('text', {type: 'nodes', default: '', slot: 'lang'})
 
@@ -4921,6 +4922,10 @@ css('.select-button-plate', 'abs ease shadow-button', `
 	background: var(--bg-select-button-plate);
 `)
 
+// not sure about this one...
+css_state('.select-button:focus-visible', 'no-outline')
+css_state('.select-button:focus-visible .select-button-plate', 'outline-focus')
+
 css_state('.select-button-plate:hover', '', `
 	background: var(--bg-select-button-plate-hover);
 `)
@@ -4948,20 +4953,8 @@ select_button = component('select-button', function(e) {
 
 	// model
 
-	e.prop('selected_index', {type: 'number'})
-	e.prop('value')
-
-	e.set_items = function(items1) {
-		e.update({items: true})
-	}
-
-	e.set_value = function(v) {
-		e.update({value: true})
-	}
-
-	e.set_selected_index = function(i) {
-		e.update({selected_index: true})
-	}
+	e.prop('selected_index', {type: 'number', updates: 'selected_index'})
+	e.prop('value', {updates: 'value'})
 
 	e.item_value = function(ce) { // stub to pluck value from items
 		return strict_or(ce.value, ce.attr('value'))
@@ -5034,7 +5027,9 @@ select_button = component('select-button', function(e) {
 		e.focus()
 	})
 
-	e.on('keydown', function(key) {
+	e.on('keydown', function(key, shift, ctrl, alt) {
+		if (alt || shift || ctrl)
+			return
 		if (key == 'ArrowRight' || key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowDown') {
 			let fw = key == 'ArrowRight' || key == 'ArrowDown'
 			let b = e.selected_item
@@ -5060,12 +5055,10 @@ vselect_button = component('vselect-button', function(e) {
 
 /* <num-input> ---------------------------------------------------------------
 
-state:
-	value input_value
-model options:
-	min max decimals
-view options:
-	buttons
+state:            value input_value
+model options:    min max decimals
+view options:     buttons
+update options:   value select_all
 
 */
 
@@ -5073,12 +5066,12 @@ css('.num-input', 'w-input')
 
 css('.num-input-input', 'S shrinks t-r')
 
-css('.num-input-button' , 'p-x-075 h-m')
+css('.num-input-button' , 'm0 p-y-0 p-x-075 h-m bg-input no-shadow')
 css_state('.num-input .num-input-button:hover' , 'bg-input-hover')
 css_state('.num-input .num-input-button:active', 'bg-input-active')
 
 // up-down arrow buttons
-css('.num-input-updown-box' , 'h', `padding: 1px;`)
+css('.num-input-updown-box', 'h', `padding: 1px;`)
 css('.num-input[buttons=up-down] .num-input-input', 'p-r-05')
 css('.num-input-updown', 'v-s')
 css('.num-input-button-updown' , 'S')
@@ -5092,7 +5085,8 @@ css('.num-input-arrow-down', '', `border-top-color    : var(--fg); margin-bottom
 css(':is(.xsmall, .small) .num-input-button-down' , 'b-t-0')
 
 // plus-minus buttons
-css('.num-input-button-plusminus', '', `width: 2em;`)
+css('.num-input-button-plusminus', 'ro0 m0 p0', `width: 2.25em;`)
+css('.num-input[buttons=plus-minus] .input', 't-c b-l-0 b-r-0')
 
 // alternative diamond-style for up & down buttons
 if (1) {
@@ -5112,9 +5106,14 @@ if (0) {
 
 num_input = component('num-input', 'Input', function(e) {
 
-	e.prop('input_value', {attr: 'value' , default: null})
-	e.prop('value'      , {type: 'number', default: null})
+	e.prop('input_value', {attr: 'value'}) // initial value and text value from user input
+	e.prop('value'      , {type: 'number'}) // typed valid value, not user-changeable
+	e.prop('invalid'    , {type: 'bool', default: false})
+	e.prop('required'   , {type: 'bool', default: false})
+	e.prop('readonly'   , {type: 'bool', default: false})
 	e.prop('decimals'   , {type: 'number', default: 0})
+	e.prop('min'        , {type: 'number'})
+	e.prop('max'        , {type: 'number'})
 	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus', default: 'none', attr: true})
 
 	e.class('num-input input-group ro-collapse-h')
@@ -5122,25 +5121,57 @@ num_input = component('num-input', 'Input', function(e) {
 
 	e.make_focusable(e.input)
 
+	function update_buttons() {
+		for (b of e.$('button'))
+			b.disable('readonly', e.readonly)
+	}
+
 	e.set_buttons = function(v) {
 		if (v == 'up-down') {
-			e.up_button   = div({class: 'num-input-button num-input-button-updown num-input-button-up'},
-				div({class: 'num-input-arrow num-input-arrow-up'}))
-			e.down_button = div({class: 'num-input-button num-input-button-updown num-input-button-down'},
-				div({class: 'num-input-arrow num-input-arrow-down'}))
-			e.updown_box  = div({class: 'num-input-updown-box'},
+			e.up_button = button({
+				classes: 'num-input-button num-input-button-updown num-input-button-up',
+				bare: true,
+				focusable: false,
+				type: 'button',
+			}, div({class: 'num-input-arrow num-input-arrow-up'}))
+			e.down_button = button({
+				classes: 'num-input-button num-input-button-updown num-input-button-down',
+				bare: true,
+				focusable: false,
+				type: 'button',
+			}, div({class: 'num-input-arrow num-input-arrow-down'}))
+			e.updown_box = div({class: 'num-input-updown-box'},
 				div({class: 'num-input-updown'}, e.up_button, e.down_button))
 			e.set([e.input, e.updown_box])
 		} else if (v == 'plus-minus') {
-			e.up_button   = div({class: 'num-input-button num-input-button-plusminus num-input-button-plus' }, svg_plus_sign())
-			e.down_button = div({class: 'num-input-button num-input-button-plusminus num-input-button-minus'}, svg_minus_sign())
+			e.up_button   = button({
+				classes: 'num-input-button num-input-button-plusminus num-input-button-plus',
+				focusable: false,
+				type: 'button',
+				icon: svg_plus_sign(),
+			})
+			e.down_button = button({
+				classes: 'num-input-button num-input-button-plusminus num-input-button-minus',
+				focusable: false,
+				type: 'button',
+				icon: svg_minus_sign(),
+			})
 			e.set([e.down_button, e.input, e.up_button])
 		}
 		if (e.up_button) {
 			e.up_button  .on('pointerdown',   up_button_pointerdown)
 			e.down_button.on('pointerdown', down_button_pointerdown)
 		}
+		update_buttons()
 	}
+
+	e.set_value = function(v, v0, ev) {
+		assert(ev && (ev.target == e || ev.target == e.input)) // not user-writable
+	}
+
+	e.valid_value = return_arg // stub
+
+	e.update({value: true})
 
 	e.from_text = num
 
@@ -5148,23 +5179,43 @@ num_input = component('num-input', 'Input', function(e) {
 		return v != null ? v.dec(this.decimals) : v
 	}
 
-	e.set_value = function(v, v0, ev) {
-		if (!(ev && (ev.target == e.input || ev.target == e))) {
-			e.input.value = e.to_text(v)
-			e.set_prop('input_value', null, ev || {target: e})
-		}
+	e.set_invalid = function(v) {
+		v = !!v
+		e.class('invalid', v)
 	}
 
-	e.set_input_value = function(v, v0, ev) {
-		if (!(ev && (ev.target == e.input || ev.target == e)))
-			e.input.value = v
-		if (!(ev && ev.target == e))
-			e.set_prop('value', e.from_text(v), ev || {target: e})
+	e.set_readonly = function(v) {
+		v = !!v
+		e.class('readonly', v)
+		e.input.bool_attr('readonly', v)
+		update_buttons()
+	}
+
+	e.set_input_value = function(iv, iv0, ev) {
+
+		let input = ev && ev.target == e.input
+
+		if (!input)
+			e.invalid = false
+
+		iv = repl(iv, '', null)
+
+		let v = iv
+		v = isstr(v) ? e.from_text(v) : v
+		v = v != null && v >= or(e.min, -1/0) && v <= or(e.max, 1/0) ? v : null
+		v = v != null ? e.valid_value(v) : null
+		e.set_prop('value', v, ev || {target: e})
+
+		if (input)
+			e.invalid = (iv == null && e.required)
+				|| (v == null && (iv != null && iv != '-' && iv != '.'))
+
+		if (!input)
+			e.update({value: true})
 	}
 
 	e.set_decimals = function() {
-		if (e.input_value == null)
-			e.input.value = e.to_text(e.value)
+		e.update({value: true})
 	}
 
 	e.input.on('input', function(ev) {
@@ -5176,15 +5227,19 @@ num_input = component('num-input', 'Input', function(e) {
 	})
 
 	e.on_update(function(opt) {
+		if (opt.value)
+			e.input.value = e.input_value
 		if (opt.select_all)
 			e.input.select_range(0, -1)
 	})
 
 	e.increment_value = function(increment, ctrl) {
-		if (e.value == null) return
+		let v = e.value
+		if (v == null) v = increment > 0 ? e.min : e.max
+		if (v == null) return
 		let m = or(1 / 10 ** (e.decimals || 0), 1)
-		let v = e.value + m * increment * (ctrl ? 10 : 1)
-		e.value = snap(v, m)
+		v += m * increment * (ctrl ? 10 : 1)
+		e.input_value = snap(v, m)
 		e.update({select_all: true})
 	}
 
@@ -5195,7 +5250,9 @@ num_input = component('num-input', 'Input', function(e) {
 		return false
 	})
 
-	e.on('keydown', function(key, shift, ctrl) {
+	e.on('keydown', function(key, shift, ctrl, alt) {
+		if (alt)
+			return
 		if (key == 'ArrowDown' || key == 'ArrowUp') {
 			e.increment_value(key == 'ArrowDown' ? 1 : -1, shift || ctrl)
 			return false
@@ -5239,11 +5296,12 @@ css_generic_state('.pass-input-button[disabled]', 'op1 dim')
 
 pass_input = component('pass-input', 'Input', function(e) {
 
-	e.prop('value', {default: null})
+	e.prop('value')
 
 	e.class('pass-input input-group b-collapse-h ro-collapse-h')
 	e.input = input({classes: 'pass-input-input', type: 'password'})
 	e.eye_button = button({
+		type: 'button',
 		classes: 'pass-input-button',
 		icon: 'far fa-eye',
 		bare: true,
@@ -5517,8 +5575,8 @@ css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
 	height: 12em;
 `)
 css('.dropdown-picker > *', 'p-input')
-css('.dropdown.open', '')
-css('.dropdown.open, .dropdown-picker', 'outline-focus')
+css('.dropdown-picker', 'outline-focus')
+css('.dropdown.open', 'outline-focus')
 css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
 
 css('.dropdown-search', 'fg-search bg-search')
@@ -5543,7 +5601,7 @@ dropdown = component('dropdown', 'Input', function(e) {
 
 	// model: value lookup
 
-	e.prop('value', {default: null})
+	e.prop('value')
 	e.update({value: true})
 
 	function item_value(item_e) {
@@ -5695,7 +5753,12 @@ dropdown = component('dropdown', 'Input', function(e) {
 	})
 
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
-		if (key == 'Enter' || (key == ' ' && !e.list.search_string)) {
+		let free_key = !(alt || shift || ctrl)
+		if (
+			(free_key && key == ' ' && !e.list.search_string)
+			|| (alt && (key == 'ArrowDown' || key == 'ArrowUp'))
+			|| (free_key && key == 'Enter')
+		) {
 			e.toggle(true)
 			return false
 		}
@@ -5909,15 +5972,15 @@ function calendar_widget(e, mode) {
 		draw_ranges [0] = focused_range
 	}
 	if (mode == 'day') {
-		e.prop('value', {store: false, type: 'date', convert: convert_date})
+		e.prop('value', {store: false, type: 'time', convert: convert_date})
 		e.get_value = () => ranges[0][0]
 		e.set_value = function(d) {
 			ranges[0][0] = day(d)
 			ranges[0][1] = day(d)
 		}
 	} else if (mode == 'range') {
-		e.prop('value1', {store: false, type: 'date', convert: convert_date})
-		e.prop('value2', {store: false, type: 'date', convert: convert_date})
+		e.prop('value1', {store: false, type: 'time', convert: convert_date})
+		e.prop('value2', {store: false, type: 'time', convert: convert_date})
 		e.get_value1 = () => ranges[0][0]
 		e.get_value2 = () => ranges[0][1]
 		e.set_value1 = function(d) {
@@ -6710,7 +6773,10 @@ function calendar_widget(e, mode) {
 		}
 	})
 
-	e.on('keydown', function(key, shift, ctrl) {
+	e.on('keydown', function(key, shift, ctrl, alt) {
+
+		if (alt)
+			return
 
 		if (down)
 			return
@@ -6824,6 +6890,7 @@ time_picker = component('time-picker', 'Input', function(e) {
 	e.class('time-picker')
 	e.clear()
 
+	let lists = []
 	let add_time_list = function(n, s) {
 		let li = list({
 			classes: 'time-picker-list focusable-items scroll-thin',
@@ -6836,6 +6903,7 @@ time_picker = component('time-picker', 'Input', function(e) {
 		li.multiselect = false
 		e.add(div({class: 'time-picker-list-box'},
 			div({class: 'time-picker-list-header scroll-thin'}, s), li))
+		lists.push(li)
 		return li
 	}
 	e.hours_list   = add_time_list(24, 'HH')
@@ -6859,9 +6927,8 @@ time_picker = component('time-picker', 'Input', function(e) {
 			scroll_align: scroll_align,
 			scroll_smooth: scroll_smooth,
 		}
-		e.  hours_list.update(opt)
-		e.minutes_list.update(opt)
-		e.seconds_list.update(opt)
+		for (let li of lists)
+			li.update(opt)
 	}
 
 	e.listen('focused_item_changed', function(list, ev) {
@@ -6882,11 +6949,31 @@ time_picker = component('time-picker', 'Input', function(e) {
 	e.set_value = function(v, v0, ev) {
 		if (!(ev && ev.target && (ev.target == e || ev.target.parent == e))) {
 			let opt = {ev: ev || {target: e}, scroll_to_focused_item: true, scroll_align: 'center'}
-			e.  hours_list.focus_item(v ? floor((v / 3600) % 24) : false, null, opt)
-			e.minutes_list.focus_item(v ? floor((v / 60) % 60) : false, null, opt)
-			e.seconds_list.focus_item(v ? floor(v % 60) : false, null, opt)
+			e.  hours_list.focus_item(v != null ? floor((v / 3600) % 24) : false, null, opt)
+			e.minutes_list.focus_item(v != null ? floor((v / 60) % 60)   : false, null, opt)
+			e.seconds_list.focus_item(v != null ? floor(v % 60)          : false, null, opt)
 		}
 	}
+
+	e.on_update(function(opt) {
+		if (opt.focus)
+			e.focus_first()
+	})
+
+	e.on('keydown', function(key, shift, ctrl, alt) {
+		let free_key = !(alt || ctrl || shift)
+		if (free_key && (key == 'ArrowLeft' || key == 'ArrowRight')) {
+			for (i = 0, n = e.with_seconds ? 3 : 2; i < n; i++) {
+				if (lists[i].hasfocus) {
+					let next_li = lists[i + (key == 'ArrowLeft' ? -1 : 1)]
+					if (next_li) {
+						next_li.focus()
+						return false
+					}
+				}
+			}
+		}
+	})
 
 })
 
@@ -6953,9 +7040,19 @@ datetime_picker = component('datetime-picker', 'Input', function(e) {
 		e.time_picker.scroll_to_view_value(scroll_align, scroll_smooth)
 	}
 
+	e.on_update(function(opt) {
+		if (opt.focus)
+			e.focus_first()
+	})
+
 })
 
 /* <date-input> & <date-range-input> -----------------------------------------
+
+date-input, time-input, datetime-input state:
+	value input_value
+date-range-input state:
+	value1 value2 input_value1 input_value2
 
 */
 
@@ -6969,6 +7066,8 @@ function svg_calendar_clock(attrs) {
 	)
 }
 
+// NOTE: we use 'skip' on the root element and create an <input-group> inside
+// so that we can add popups to the widget without messing up the CSS.
 css('.date-input', 'skip', `
 	--min-w-date-input: var(--min-w-calendar);
 `)
@@ -6980,7 +7079,8 @@ css('.date-range-input-separator', 'p-x h-m')
 css('.time-only-input', '', `
 	--min-w-calendar: 0px; /* has natural min-w; calendar's can be too wide */
 `)
-css('.date-input-picker-box', 'b bg-input v z3')
+css('.date-input-picker', 'bg-input z3')
+css('.date-input-picker-box', 'b v')
 css('.date-only-input .calendar', 'S b bg-input clip', `resize: vertical;`) // NOTE: resize needs clip!
 css('.date-range-input .date-input-picker-box', 'clip', `resize: vertical;`) // NOTE: resize needs clip!
 css('.date-range-input .calendar', 'S')
@@ -7015,6 +7115,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	}
 	if (range || e.picker != e.calendar) {
 		e.close_button = button({
+			type: 'button',
 			classes: 'date-input-close-button',
 			focusable: false,
 			bare: true,
@@ -7026,7 +7127,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	} else {
 		e.picker_box = e.picker
 	}
-	e.picker_box.class('not-within')
+	e.picker_box.class('date-input-picker not-within')
 
 	let w
 	e.on_measure(function() {
@@ -7036,13 +7137,18 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.picker_box.min_w = `calc(max(var(--min-w-date-input), ${w}px))`
 	})
 
+	e.prop('min', {type: 'time'})
+	e.prop('max', {type: 'time'})
+
+	// e.valid_value = function()
+
 	if (has_date) {
 		e.to_text = function(t) {
 			return t.date(null, has_time, e.with_seconds, e.with_fractions)
 		}
 		e.valid_value = function(t) {
 			// NOTE: trying to be compliant with mySQL TIMESTAMP range.
-			// NOTE: 6-digit of fractional precision are only kept for years >= 1900
+			// NOTE: you only get 6-digit of fractional precision for years >= 1900
 			// when making computations with timestamps, so we're not really fully mySQL compliant.
 			return t != null && t >= time(1000, 1, 1, 0, 0, 0) && t <= time(10000)-1 ? t : null
 		}
@@ -7078,7 +7184,7 @@ function date_input_widget(e, has_date, has_time, range) {
 
 	for (let VAL of (range ? ['value1', 'value2'] : ['value'])) {
 
-		e.prop(VAL, {type: 'date', convert: convert_value})
+		e.prop(VAL, {type: 'time', convert: convert_value})
 		e['set_'+VAL] = function(v, v0, ev) {
 			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
 				e[VAL+'_input'].value = isnum(v) ? e.to_text(v) : v
@@ -7087,7 +7193,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			e.set_prop('input_'+VAL, null, ev || {target: e})
 		}
 
-		e.prop('input_'+VAL, {attr: VAL, default: null})
+		e.prop('input_'+VAL, {attr: VAL})
 		e['set_input_'+VAL] = function(v, v0, ev) {
 			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
 				e[VAL+'_input'].value = v
@@ -7152,7 +7258,10 @@ function date_input_widget(e, has_date, has_time, range) {
 			}
 		}
 
-		inp.on('keydown', function(key, shift) {
+		inp.on('keydown', function(key, shift, ctrl, alt) {
+
+			if (alt)
+				return
 
 			// tabbing between digit groups
 			if (key == 'Tab')
@@ -7182,10 +7291,11 @@ function date_input_widget(e, has_date, has_time, range) {
 
 		})
 
-		inp.on('focus', function() {
+		// NOTE: ^focusin because ^focus resets the selection on Firefox!
+		inp.on('focusin', function() {
 			let i = inp.selectionStart
 			let j = inp.selectionEnd
-			if (i ==0 && j > 0 && j == inp.value.len) // all text is selected
+			if (i == 0 && j > 0 && j == inp.value.len) // all text is selected
 				focus_next_digit_group(shift_pressed)
 		})
 
@@ -7220,7 +7330,12 @@ function date_input_widget(e, has_date, has_time, range) {
 	else
 		e.make_focusable(e.value_input)
 
+	// move .focus-ring to the input-group, since we have .skip.
+	e.class('focus-ring', false)
+	e.input_group.class('focus-ring')
+
 	e.picker_button = button({
+		type: 'button',
 		classes: 'date-input-picker-button',
 		bare: true,
 		focusable: false,
@@ -7244,15 +7359,14 @@ function date_input_widget(e, has_date, has_time, range) {
 		if (open) {
 			e.picker_box.popup(e.input_group, 'bottom', 'start')
 			e.picker_box.popup_oy = -1 // make top border overlap with editbox
-			e.picker.scroll_to_view_value('center')
-			e.picker_box.update({show: true})
 			e.add(e.picker_box)
-			if (focus !== false)
-				e.picker_box.focus_first()
+			e.picker_box.update({show: true})
+			e.picker.scroll_to_view_value('center')
+			e.picker.update({focus: true})
 		} else {
 			e.picker_box.hide()
 			if (focus !== false)
-				e.focus()
+				e.focus_first()
 		}
 	}
 
@@ -7275,15 +7389,20 @@ function date_input_widget(e, has_date, has_time, range) {
 			})
 		})
 
-	e.picker_box.on('keydown', function(key) {
-		if (key == 'Escape') {
+	e.picker_box.on('keydown', function(key, shift, ctrl, alt) {
+		let free_key = !(alt || shift || ctrl)
+		if (free_key && key == 'Escape') {
 			e.isopen = false
 			return false
 		}
 	})
 
-	e.on('keydown', function(key) {
-		if (key == 'Enter') {
+	e.on('keydown', function(key, shift, ctrl, alt) {
+		let free_key = !(alt || shift || ctrl)
+		if (
+			(alt && (key == 'ArrowDown' || key == 'ArrowUp'))
+			|| (free_key && key == 'Enter')
+		) {
 			e.isopen = !e.isopen
 			return false
 		}

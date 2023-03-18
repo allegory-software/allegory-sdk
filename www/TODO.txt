@@ -1,49 +1,54 @@
-FEATURES
+THINK
 ------------------------------------------------------------------------------
 
-- <list-search> component
-- <dropdown> with list-search
+* VALIDATORS and error box with non-data-driven input widgets
+	- textarea max-len validator to show "X chars remaining" on a textarea.
 
-- validators and error box with non-data-driven input widgets
+* AUTOCOMPLETE: use <datalist> and list attr and show a list picker with "Other..." button
+	- use <datalist> and list attr and show a list picker with "Other..." button:
+		- date/time dropdowns
+		- num-input
+		- input
 
-- new, modified, deleted state with non-data-driven input widgets
 
-- input-align demo: add all input widgets + info etc. (make a complete form)
+* NAV EXLCLUSIVE EDIT MODE:
+	- which widgets to disable when nav has unsaved changes ?
 
 
 BUGS
 ------------------------------------------------------------------------------
 
-* DATE/TIME DROPDOWNS
-	- re-focus bug
-	- time set to 00:00:00 bug
-	- arrow-up/down increment out-of-range
+* FF BUGS
+	- focus outline not showing on some input widgets
 
 * SLIDER
 	- fill animation glitch
 	- tooltip offset wrong
-	- add w-input so looks good in inline container
 
 * TOASTER
 	- weird spacing between messages when starting
 
-* PLACEEDIT
-
-* IMAGE
-	- upload
-	- download
-
-* GRID_DROPDOWN
+* NAV revert bug (esp. tree)
 
 
-* BUTTON
-	- bring back the ^active event (can we force :active so we don't have to set .active?)
+NEW WIDGETS
+------------------------------------------------------------------------------
 
-- NAV revert bug (esp. tree)
-- NAV which widgets to disable when nav has unsaved changes ?
+* FIELDSET & LEGEND - style them
 
-DATA-DRIVEN single-value input widget:
+* SELECT-RADIO
 
+* CHECKLIST
+
+* GRID-DROPDOWN
+
+* PLACE-INPUT
+
+* MONTH CALENDAR variation
+
+* MONTH-INPUT
+
+* DATA-DRIVEN single-value input widget:
 	* col
 		* bool: checkbox / radio buttons
 		* text: input / tags-input / textarea / password
@@ -63,29 +68,104 @@ DATA-DRIVEN single-value input widget:
 
 FEATURES
 ------------------------------------------------------------------------------
+
+* DATE/TIME PICKERS & INPUTS:
+	- `format` prop: 'timestamp' or 'sql'
+		- or better yet, parse both, and have value_timestamp and value_sql props
+
+* ALL INPUTS
+	- borderless auto-growing mode.
+	- undo/redo
+		TODO: all date/time inputs
+		TODO: dropdown
+		TODO: tags
+		TODO: select-button?
+		TODO: slider
+	- input_value vs r/o value && valid_value().
+		DONE: num-input
+	- invalid state:
+		DONE: num-input
+	- readonly state
+		DONE: num-input
+	- represent null value
+	- set null value
+	- new, modified, deleted state
+
+* NUM-INPUT
+	- up/down from invalid value goes to max/min value
+
+* LIST-SEARCH component working on near list.
+
+* INPUT-XBUTTON
+	- put near an <input> (inside an <input-group> usually) to clear the value.
+
+* DROPDOWN
+	- list-search
+	- [x] button to set value to null
+		- use placeholder attr for null value.
+		- set height to any one of the values in the list.
+
+* SLIDER
+	- list of marker values with labels (<datalist> ?)
+
+* IMAGE
+	- upload
+	- download
+
+* UPLOAD area/button with progress
+
+* BUTTON
+	- bring back the ^active event
+		- can we force :active so we don't have to set .active?
+
+* SPLIT % panes
+
+* GRID
+	- quick filters
+	- checklist filters
+
+* GRID inline editing of entire row (see chrome network throttling grid)
+
+* NAV multi-nav params
+	- params syntax: [nav_id.]field to map params from multiple navs
+	- param_nav_id becomes optional then.
+	- find a way to bind freestanding widgets too, based on id
+		??? map a widget to a param name, which assigns global nav and that widget's
+		field in the global nav; unmap when the field is removed from the nav.
+
+
+
+* NAV data_nav: have a nav feed another with data so that we can have lookup dropdowns
+
+* NAV copy selection to clipboard as csv (test paste in Excel)
+
+* NAV paste csv at focused cell
+
+* AUTH POPUP
+	- (normal | large | xlarge) chooser
+	- theme dropdown -> (light | dark)
+
+
+
+LATERZ
+------------------------------------------------------------------------------
 - ALL auto-urls
 - ALL inherited props
 	* prop attr: inherits_from: <prop_name>
 	* needed for: nav, sql_db, ...
 	* in a prop_change hook check parent and sync the prop with that of the parent
 		add/remove the event hook when the prop is set/cleared
-* NAV data_nav: have a nav feed another with data so that we can have lookup dropdowns
 - NAV group-by aggregates
 - NAV group-by "others" group
 - NAV group-by % column
 - VAL_WIDGET html field opt
-* NAV copy selection to clipboard as csv (test paste in Excel)
-* NAV paste csv at focused cell
 - NAV send a "rowset closed" request to server when a grid is unbound
 - NAV rowset.server_order_by (shown in grid header grayed)
 - NAV multi-col luookup (i.e. val_col -> val_cols)
 - BUTTON with menu or list dropdown
-* DROPDOWN [x] button to set null
-* DROPDOWN search
 * INPUT save on typing with delay: field attr "save_on_input" true or false
 - TABS auto-menu with items that don't fit the bar
 - TABS pop-out button
-* SPLIT % panes
 - SPLIT context menu: vertical/horizontal, %/fixed
 - CHART pie use % column and "others" group from nav
 - CHART bars, columns
@@ -97,44 +177,33 @@ FEATURES
 	the selected slice in the first pie (rotate the first pie so that
 	the selected slice points to the detail slice).
 - CHART sub-unit log-1024-based steps
-* GRID quick filters
-* GRID checklist filters
 - GRID drag-move row to other grid
-- GRID inline editing of entire row (see chrome network throttling grid)
 - GRID put action bar on top, use bare buttons without labels (see jetbrain settings)
 - GRID move impossibility
-	* error notification: can’t move row becuz…
+	* error notification: can’t move row becuz
 	* invalid icon over bad targets
 - GRID give subtle visual feedback when refusing to enter edit mode because
 	the cell is read-only
 - GRID allow_exit_row: disable all other rows while editing
 - GRID allow_exit_edit: disable all other cells while editing
-* NAV multi-nav params
-	* params syntax: [nav_id.]field to map params from multiple navs
-		* param_nav_id becomes optional then.
-	* find a way to bind freestanding widgets too, based on id
 - NAV entity names
 	* what about translation? shouldn't this better be directly translatable?
 	* change "record" to entity name in button labels, messages, etc.
 	* add entity name to rowset too (infer plural)
 	* add entity name to tables too (infer singular)
 	* set 'label' prop
-- CHECKLIST
-* UPLOAD area/button with progress
-- new widget: contenteditable-based auto-growing inline input box
 - LIST editing:
 	* move hit area + grab hand
 	* 3-dots icon for move area (left or right)
 	* X button for removing item (left or right)
 	* edit button for toggle enter/exit edit
 	* button for add item
-* LIST quick filters
-- LIST multi-letter quicksearch like grid
-- LIST select range
-- LIST drag-move row to other list
+- TIMEZONE-PICKER widget: list of "TZN +/-NN Country".
+- TIME-PICKER, TIME-INPUT, DATE-TIME-PICKER, DATE-TIME-INPUT: `with-timezone` attr.
+	- `timezone` prop (value is a tz name).
+	- value_timestamp changes depending on tz.
+	- show local time somewhere too.
 
-??? map a widget to a param name, which assigns global nav and that widget's field
-in the global nav; unmap when the field is removed from the nav.
 
 
 SECURITY
@@ -143,9 +212,4 @@ CSRF:
 - no need for CRSF tokens, just send normal session cookie with `Secure; SameSite=Lax`.
 - on the server just check that the `Origin` header matches a static string on POST.
 
-
-AUTH
-------------------------------------------------------------------------------
-- (normal | large | xlarge) chooser
-- theme dropdown -> (light | dark)
 
