@@ -7,8 +7,8 @@ a decent job. Let's see what that means first.
 A good widget needs to satisfy many things:
 
 * work in different types of containers: inline, block, flex, grid.
-* be instantiable from both html and from JavaScript (more on that later).
-* allow any property change while live.
+* be instantiable from both html and from JavaScript.
+* allow any property changes while the widget is live.
 * not leak event listeners when detached from DOM.
 * work at any parent font size.
 * use only theme colors.
@@ -21,13 +21,20 @@ A good widget needs to satisfy many things:
 * allow it to be disabled (means no focus, no hover, faded-looking, etc.).
 * if it has text input, never "correct" what the user is typing in or pasting!
   * IOW, validation should only warn, not slap the hand, that's bad experience.
-  * this means having value and input_value as two separate things.
-* if it has an inner `<input>`, show the focus ring on the outer container when focusing the input.
-* if it's a dropdown, allow keyboard navigation on the picker.
+  * this means having input value and output value as two separate things.
+* if it has an inner `<input>`, show the focus ring on the outer container when
+focusing the input.
+* if it's a dropdown, allow keyboard navigation on the picker while it's open.
 * if dragging is involved, start dragging after a threshold distance (5-10px).
+* show validation errors as a popup or have a separate linked widget for that.
 
+> Some resources on that as a warm-up:
+>
+> [How to build custom form controls (article on MDN)](https://developer.mozilla.org/en-US/docs/Learn/Forms/How_to_build_custom_form_controls)
+> [How to Report Errors in Forms (article on NN/g)](https://www.nngroup.com/articles/errors-forms-design-guidelines/)
+> [Jakob Nielsen - Top 10 Web-design Mistakes (YouTube presentation)](https://www.youtube.com/watch?v=VGxze7xMYJs)
 
-# Just some random tips (for now)
+# Some random tips (for now)
 
 
 ## Widget configuration
@@ -52,22 +59,24 @@ parsing it. Also, when setting it from JS the `range` property should accept
 
 Updating the widget when a property changes can be done immediately (in the
 property's setter) or can be deferred to the next animation frame (in fact
-update() is always called when a property changes). Deferring is more work
-but allows for multiple property changes before updating happens once in the
-next frame, so you have the opportunity to update the widget in a single
-possibly more efficient transformation even when that comprises multiple
-property changes.
+the widget's update() method is always called when a property changes).
+Deferring is more work but allows for multiple property changes before updating
+happens once in the next frame, so you have the opportunity to update the
+widget in a single possibly more efficient transformation. It also solves
+an entire class of bugs caused by hidden dependencies between properties,
+which I'll discuss next.
 
 
 ## The necessity to keep properties orthogonal
 
 When defining a property, you can give a convert function in which the
 property value can be parsed, clamped or changed in any way before being set.
-This comes with a big caveat which is easy to forget: the convert function
+This comes with a big caveat that is easy to forget: the convert function
 *must not depend on the value of any other property* to do its job because
 the order in which properties are set when the component is initialized is
 undefined. IOW, it is necessary to keep properties orthogonal at all times.
-This means *needing to accept invalid values* sometimes.
+This means *needing to accept invalid values* sometimes and keep the valid
+state separately, either internally or exposed as read-only properties.
 
 For example, let's say a widget defines a "list of items" property and also
 a "selected item index" property. Notice how you can't clamp the index in its
@@ -76,16 +85,38 @@ happen that the items were not yet set, and if you do that you lose the index.
 
 This can be counter-intuitive because it is very tempting to use the convert
 function as a sort of "firewall" that transforms or rejects invalid values
-in order to avoid putting the widget in an invalid state, and sometimes
-that's not possible.
+in order to avoid putting the widget in an invalid state.
 
-So orthogonal properties are a bit more work, but the advantage is a widget
-in which changing multiple properties in any order will get the same result.
+Hidden dependencies between properties can happen in other ways too. One
+common case is when two properties change the same thing in a widget,
+so the property that is set last wins.
 
-> An alternative to having orthogonal properties with possibly invalid values
-would be a way to have batch updates (seting multiple properties at once)
-in order to get the widget between valid states, but the API for that is more
-complicated, it would be harder to make an object inspector that way, etc.
+Another case is when setting a property results in changing another property.
+Properties should really only be changed by the widget as the result of user
+interaction.
+
+An easy way to avoid falling into all of those traps is doing all the updating
+of the widget in one place, namely in an update callback. The downside to that
+is that the callback is asynchronous (it's called on the next frame), so you
+don't have immediate access to the updated DOM of the widget after you change
+a property. This forces a conceptual separation between what's considered the
+"model" of the widget (which should be updated immediately) and what's
+considered the "view" (which is updated in the next frame). Of course you
+can always just make your own update function that you call directly inside
+property setters to avoid the async issue and still solve the property
+dependency issue.
+
+Another problem with updating everything in one place is that now you have to
+figure out how to do the minimum amount of changes in the DOM given the new
+model. This is basically why DOM diff'ing was invented, as a general solution.
+My take on it is that it's not necessary in most situations. Our element
+`set()` method already does a limited form of diff'ing, and even that is
+rarely used. Our most complex widgets like the grid or the infinite calendar
+are canvas-drawn so there's no DOM to diff there to begin with. In all other
+cases, using update flags to signal partial updates should be enough.
+
+So orthogonal properties are a bit more work, but the result is a widget
+in which changing properties in any order will get to the same result.
 
 
 ## Canvas-drawn widgets
@@ -104,17 +135,16 @@ handler that was passed to `resizeable_canvas()`.
 
 # What `dom.js` can do for you
 
-* `e.prop('foo')`                - declare a property
-* `e.set_foo = f(v, v0, ev)`     - implement property's setter
-* `e.on_init(f)`                 - call `f()` after all properties are set
-* `e.on_bind(bind_f)`            - call `bind_f(on)` when attached and detached from DOM
+* `e.prop('foo')`                - declare properties
+* `e.set_foo = f(v, v0, ev)`     - implement property setters
+* `e.on_init(f)`                 - call a function after all properties are set
+* `e.on_bind(f)`                 - call a function when the element is attached and detached from DOM
 * `e.on_update(f)`               - call `f(opt)` on the next update - update the DOM here
 * `e.on_measure(f)`              - call `f()` after all updates are done - measure the DOM here
 * `e.on_position(f)`             - call `f()` after all measurements are done - update the DOM that uses measurements here
-* `e.make_disablable()`          - add disabled property
+* `e.make_disablable()`          - add disabled property and disable() method
 * `e.make_focusable()`           - add focusable and tabindex property
 * `e.popup()`                    - turn into a popup
-* `resizeable_canvas(redraw)`    - creates a canvas that resizes itself automatically
+* `resizeable_canvas(redraw)`    - create a canvas that resizes itself automatically
   * `redraw(cx, w, h, pass)`     - called when properties change, widget is resized, etc.
-
 

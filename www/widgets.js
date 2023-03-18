@@ -3928,6 +3928,9 @@ function check_widget(e, input_type) {
 	e.user_set_checked = function(v) { // stub
 		e.checked = v
 	}
+	e.set_value = function(v) {
+		e.input.value = v
+	}
 	e.user_toggle = function() {
 		e.user_set_checked(!e.checked)
 	}
@@ -4071,10 +4074,6 @@ radio = component('radio', function(e) {
 		svg_tag('circle', {class: 'radio-thumb'}),
 	))
 
-	e.set_value = function(v) {
-		e.input.value = v
-	}
-
 	e.user_set_checked = function(v) {
 		if (!v)
 			return
@@ -4177,6 +4176,7 @@ css_state('.slider:focus-within .slider-thumb', '', `
 	background-color: var(--bg-focused-selected);
 `)
 
+// TODO: invalid state
 // css_state('.slider.invalid .slider-thumb', '', `
 // 	border-color: var(--bg-error);
 // 	background: var(--bg-error);
@@ -4212,6 +4212,8 @@ let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, de
 
 let slider_widget = function(e, range) {
 
+	e.clear()
+
 	e.class('slider')
 	e.make_disablable()
 
@@ -4225,10 +4227,21 @@ let slider_widget = function(e, range) {
 	e.prop('marked'     , {type: 'bool'  , default: true})
 
 	if (range) {
+
 		e.prop('value1' , {type: 'number'})
 		e.prop('value2' , {type: 'number'})
+
+		e.input1 = tag('input', {hidden: ''})
+		e.input2 = tag('input', {hidden: ''})
+		e.add(e.input1, e.input2)
+
 	} else {
+
 		e.prop('value'  , {type: 'number'})
+
+		e.input = tag('input', {hidden: ''})
+		e.add(e.input)
+
 	}
 
 	e.mark_w = e.css().prop('--slider-mark-w').num()
@@ -4930,14 +4943,14 @@ css_state('.select-button-plate:hover', '', `
 	background: var(--bg-select-button-plate-hover);
 `)
 
-css_light('', '', `
+css(':root', '', `
 	--bg-select-button-plate: var(--bg-button-primary);
 	--fg-select-button-plate: var(--fg-button-primary);
 `)
 
-css_dark('', '', `
-	--bg-select-button-plate: var(--bg2);
-	--fg-select-button-plate: var(--fg-white);
+css('.select-button[secondary]', '', `
+	--bg-select-button-plate: var(--bg-unfocused-selected);
+	--fg-select-button-plate: var(--fg-unfocused-selected);
 `)
 
 select_button = component('select-button', function(e) {
@@ -5033,7 +5046,7 @@ select_button = component('select-button', function(e) {
 		if (key == 'ArrowRight' || key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowDown') {
 			let fw = key == 'ArrowRight' || key == 'ArrowDown'
 			let b = e.selected_item
-			b = fw ? b.next || e.last.prev : b.prev || e.first
+			b = fw ? b && b.next || e.last.prev : b && b.prev || e.first
 			select_item(b)
 			return false
 		}
@@ -5106,11 +5119,12 @@ if (0) {
 
 num_input = component('num-input', 'Input', function(e) {
 
-	e.prop('input_value', {attr: 'value'}) // initial value and text value from user input
-	e.prop('value'      , {type: 'number'}) // typed valid value, not user-changeable
-	e.prop('invalid'    , {type: 'bool', default: false})
-	e.prop('required'   , {type: 'bool', default: false})
-	e.prop('readonly'   , {type: 'bool', default: false})
+	e.prop('input_value', {attr: 'value' , slot: 'state'}) // initial value and text value from user input
+	e.prop('value'      , {type: 'number', slot: 'state'}) // typed valid value, not user-changeable
+	e.prop('invalid'    , {type: 'bool'  , slot: 'state', default: false})
+	e.prop('error'      , {type: 'bool'  , slot: 'state', default: false})
+	e.prop('required'   , {type: 'bool'  , default: false})
+	e.prop('readonly'   , {type: 'bool'  , default: false})
 	e.prop('decimals'   , {type: 'number', default: 0})
 	e.prop('min'        , {type: 'number'})
 	e.prop('max'        , {type: 'number'})
@@ -5191,6 +5205,14 @@ num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
+	function validate(v, err) {
+		if (v == null) {
+			e.invalid = true
+			e.error = err
+		}
+		return v
+	}
+
 	e.set_input_value = function(iv, iv0, ev) {
 
 		let input = ev && ev.target == e.input
@@ -5201,8 +5223,9 @@ num_input = component('num-input', 'Input', function(e) {
 		iv = repl(iv, '', null)
 
 		let v = iv
-		v = isstr(v) ? e.from_text(v) : v
-		v = v != null && v >= or(e.min, -1/0) && v <= or(e.max, 1/0) ? v : null
+		v = isstr(v) ? validate(e.from_text(v), S('not_a_number_error', 'Not a number')) : v
+		v = v != null ? validate(v >= or(e.min, -1/0), S()) : null
+		&& v <= or(e.max, 1/0) ? v : null
 		v = v != null ? e.valid_value(v) : null
 		e.set_prop('value', v, ev || {target: e})
 

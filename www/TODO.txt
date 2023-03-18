@@ -18,9 +18,6 @@ THINK
 BUGS
 ------------------------------------------------------------------------------
 
-* FF BUGS
-	- focus outline not showing on some input widgets
-
 * SLIDER
 	- fill animation glitch
 	- tooltip offset wrong
@@ -74,8 +71,13 @@ FEATURES
 		- or better yet, parse both, and have value_timestamp and value_sql props
 
 * ALL INPUTS
+	- make them compatible with forms:
+		- add 'name' property to all
+		- add 'form' property to all
+		- add hidden <input> to:
+			-
 	- borderless auto-growing mode.
-	- undo/redo
+	- undo/redo:
 		TODO: all date/time inputs
 		TODO: dropdown
 		TODO: tags

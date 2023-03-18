@@ -738,16 +738,16 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 <!--------------------------------------------------------------------------->
 
 <xmp id=num-input_demo>
-<div class="xsmall  "><num-input value=-1.51     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="small   "><num-input value=-1.52     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="smaller "><num-input value=-1.53     decimals=1 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="normal  "><num-input value=-1.54     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="large   "><num-input value=-1.55     decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="xsmall  "><num-input value=-1.51     decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="small   "><num-input value=-1.52     decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="smaller "><num-input value=123456    decimals=1 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="normal  "><num-input value= 1.54     decimals=0 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="large   "><num-input value=abc       decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="xsmall  "><num-input value=-1.51   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="small   "><num-input value=-1.52   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="smaller "><num-input value=-1.53   decimals=1 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="normal  "><num-input value=-1.54   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="large   "><num-input value=-1.55   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
+<div class="xsmall  "><num-input value=-1.51   decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="small   "><num-input value=-1.52   decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="smaller "><num-input value=123456  decimals=1 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="normal  "><num-input value= 1.54   decimals=0 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="large   "><num-input value=abc     decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1099,8 +1099,8 @@ main.add(g)
 
 <!--------------------------------------------------------------------------->
 
-<xmp id="input align_demo">
-<d class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
+<xmp id="form_demo">
+<form class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
 	<check  class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
 	<radio  class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
 	<radio  class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
@@ -1114,7 +1114,7 @@ main.add(g)
 			<pass-input value="" placeholder="Password"></pass-input><button>OK</button></div>
 		</d>
 	<d></d><num-input value=-1.54 decimals=2 buttons=up-down></num-input>
-	<d></d><num-input value=-5 buttons=plus-minus></num-input>
+	<d></d><num-input value=-5 min=1 max=10 buttons=plus-minus></num-input>
 	<d></d><tags nowrap tags="Apples Bananas Mangos" style="width: var(--w-input);"></tags>
 	<d></d><dropdown value=ban>
 		<d value=app searchable>Apples</d>
@@ -1132,12 +1132,12 @@ main.add(g)
 	<d></d><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input>
 	<d></d><slider min=0.1 max=0.9 value=0.75></slider>
 	<d></d><range-slider min=10 max=90 from=0 to=100 value1=20 value2=80 decimals=0></range-slider>
-	<d></d><button bare>CANCEL</button>
+	<d></d><button bare type="button">CANCEL</button>
 	<d></d><d class="h gap-x S">
 		<button class="S" primary icon="fa fa-save">Save</button>
-		<button class="S" danger icon="fa fa-trash">Delete</button>
+		<button class="S" danger icon="fa fa-trash" type="button">Delete</button>
 	</d>
-</d>
+</form>
 </xmp>
 
 <!--------------------------------------------------------------------------->
