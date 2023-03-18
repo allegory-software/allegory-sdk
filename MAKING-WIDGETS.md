@@ -10,6 +10,7 @@ A good widget needs to satisfy many things:
 * be instantiable from both html and from JavaScript.
 * allow any property changes while the widget is live.
 * not leak event listeners when detached from DOM.
+* maintain hidden input elements to work in forms.
 * work at any parent font size.
 * use only theme colors.
 * update itself when resized.
@@ -26,6 +27,7 @@ A good widget needs to satisfy many things:
 focusing the input.
 * if it's a dropdown, allow keyboard navigation on the picker while it's open.
 * if dragging is involved, start dragging after a threshold distance (5-10px).
+  * you also need an event-based protocol for drag & drop between widgets.
 * show validation errors as a popup or have a separate linked widget for that.
 
 > Some resources on that as a warm-up:

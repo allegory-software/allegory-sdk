@@ -43,8 +43,7 @@ WIDGETS
 	time-input
 	datetime-input
 	date-range-input
-	richtext
-	widget-placeholder
+	html-input
 
 FUNCTIONS
 
@@ -133,10 +132,10 @@ css('.x-ct', 'skip')
 
 /* .focusable-items ----------------------------------------------------------
 
-	These are widgets containing multiple focusable and selectable items,
-	so they don't show a focus outline on the entire widget, but only show
-	an inside .item element as being focused instead.
-	NOTE: an .item cannot itself be or contain .focusable-items!
+These are widgets containing multiple focusable and selectable items,
+so they don't show a focus outline on the entire widget, but only show
+an inside .item element as being focused instead.
+NOTE: an .item cannot itself be or contain .focusable-items!
 
 */
 
@@ -179,399 +178,6 @@ css_state('.item.invalid', 'bg-error')
 css_state('.focusable-items:focus-within .item.focused.invalid', '', `
 	background : var(--bg-focused-error);
 `)
-
-/* widget editing & selecting --------------------------------------------- */
-
-css_role('.widget-editing', '', `
-	outline: 2px dotted red;
-	outline-offset: -2px;
-`)
-
-css_role('[contenteditable]', 'no-outline')
-
-css_role('.widget-selected', 'click-through')
-
-css_role('.widget-selected-overlay', 'overlay click-through-off', `
-	display: block;
-	background-color: var(--bg-smoke);
-	outline: 2px dotted var(--selected-widget-outline-color);
-	outline-offset: -2px;
-	z-index: 10; /* arbitrary */
-`)
-
-css_role_state('.widget-selected-overlay:focus', '', `
-	outline-color: var(--selected-widget-outline-color-focused);
-`)
-
-css('.widget-placeholder', 'grid-h', `
-	justify-content: safe center;
-	align-content: center;
-	outline: 1px dashed var(--fg-dim);
-	outline-offset: -1px;
-`)
-
-css('.widget-placeholder-button', 'ro0 small', `
-	margin: 1px;
-	padding: .1em;
-	min-width: 2em;
-`)
-
-/* ---------------------------------------------------------------------------
-// undo stack, selected widgets, editing widget and clipboard.
-// ---------------------------------------------------------------------------
-publishes:
-	undo_stack, redo_stack
-	editing_widget
-	selected_widgets
-	copied_widgets
-	unselect_all_widgets()
-	copy_selected_widgets()
-	cut_selected_widgets()
-	paste_copied_widgets()
-	undo()
-	redo()
-	push_undo(f)
-behavior:
-	uncaptured clicks and escape unselect all widgets.
-	ctrl+x/+c/+v/(+shift)+z/+y do the usual thing with selected widgets.
---------------------------------------------------------------------------- */
-
-undo_stack = []
-redo_stack = []
-
-function push_undo(f) {
-	undo_stack.push(f)
-}
-
-function undo() {
-	let f = undo_stack.pop()
-	if (!f)
-		return
-	redo_stack.push(f)
-	f()
-}
-
-function redo() {
-	;[undo_stack, redo_stack] = [redo_stack, undo_stack]
-	undo()
-	;[undo_stack, redo_stack] = [redo_stack, undo_stack]
-}
-
-editing_widget = null
-selected_widgets = set()
-
-function unselect_all_widgets() {
-	if (editing_widget)
-		editing_widget.widget_editing = false
-	for (let e of selected_widgets)
-		e.widget_selected = false
-}
-
-copied_widgets = set()
-
-function copy_selected_widgets() {
-	copied_widgets = set(selected_widgets)
-}
-
-function cut_selected_widgets() {
-	copy_selected_widgets()
-	for (let e of selected_widgets)
-		e.remove_widget()
-}
-
-function paste_copied_widgets() {
-	if (editing_widget) {
-		editing_widget.add_widgets(copied_widgets)
-		copied_widgets.clear()
-	} else {
-		for (let e of selected_widgets) {
-			let ce = copied_widgets.values().next().value
-			if (!ce)
-				break
-			let pe = e.parent_widget
-			if (pe)
-				pe.replace_child_widget(e, ce)
-			copied_widgets.delete(ce)
-		}
-	}
-}
-
-document.on('keydown', function(key, shift, ctrl, alt, ev) {
-	if (key == 'Escape')
-		unselect_all_widgets()
-	else if (ctrl && key == 'c')
-		if (selected_widgets.size)
-			copy_selected_widgets()
-		else
-			ev.target.fireup('copy', ev)
-	else if (ctrl && key == 'x')
-		if (selected_widgets.size)
-			cut_selected_widgets()
-		else
-			ev.target.fireup('cut', ev)
-	else if (ctrl && key == 'v') {
-		if (copied_widgets.size)
-			paste_copied_widgets()
-		if (copied_widgets.size)
-			ev.target.fireup('paste', ev)
-	} else if (ctrl && key == 'z')
-		if (shift)
-			redo()
-		else
-			undo()
-	else if (ctrl && key == 'y')
-		redo()
-})
-
-document.on('pointerdown', function() {
-	unselect_all_widgets()
-})
-
-/* selectable widget mixin ---------------------------------------------------
-
-uses:
-	e.can_select_widget
-publishes:
-	e.parent_widget
-	e.selectable_parent_widget
-	e.widget_selected
-	e.set_widget_selected()
-	e.remove_widget()
-calls:
-	e.do_select_widget()
-	e.do_unselect_widget()
-calls from the first parent which has e.child_widgets:
-	p.can_select_widget
-	p.remove_child_widget()
-behavior:
-	enters widget editing mode and/or selects widget with ctrl(+shift)+click.
-
-*/
-
-function parent_widget_which(e, which) {
-	assert(e != window)
-	e = e.parent
-	while (e) {
-		if (e.initialized && which(e))
-			return e
-		e = e.parent
-	}
-}
-
-function up_widget_which(e, which) {
-	return which(e) ? e : parent_widget_which(e, which)
-}
-
-function selectable_widget(e) {
-
-	e.property('parent_widget', function() {
-		return parent_widget_which(this, p => p.child_widgets)
-	})
-
-	e.property('selectable_parent_widget', function() {
-		return parent_widget_which(e, p => p.child_widgets && p.can_select_widget)
-	})
-
-	e.can_select_widget = true
-
-	e.set_widget_selected = function(select, focus, fire_changed_event) {
-		select = select !== false
-		if (e.widget_selected == select)
-			return
-		if (select) {
-			selected_widgets.add(e)
-			e.do_select_widget(focus)
-		} else {
-			selected_widgets.delete(e)
-			e.do_unselect_widget(focus)
-		}
-		e.class('widget-selected', select)
-		if (fire_changed_event !== false)
-			document.fire('selected_widgets_changed')
-	}
-
-	e.property('widget_selected',
-		() => selected_widgets.has(e),
-		function(v, ...args) { e.set_widget_selected(v, ...args) })
-
-	e.do_select_widget = function(focus) {
-
-		// make widget unfocusable: the overlay will be focusable instead.
-		e.focusable = false
-
-		let overlay = div({class: 'widget-selected-overlay', tabindex: 0})
-		e.widget_selected_overlay = overlay
-		e.add(overlay)
-
-		overlay.on('keydown', function(key) {
-			if (key == 'Delete') {
-				e.remove_widget()
-				return false
-			}
-		})
-
-		overlay.on('pointerdown', function(ev) {
-			if (ev.ctrlKey && ev.shiftKey) {
-				if (!overlay.focused)
-					overlay.focus()
-				if (selected_widgets.size == 1) {
-					unselect_all_widgets()
-					let p = e.selectable_parent_widget
-					if (p)
-						p.widget_selected = true
-				} else
-					e.widget_selected = !e.widget_selected
-				return false
-			} else
-				unselect_all_widgets()
-		})
-
-		if (focus !== false)
-			overlay.focus()
-	}
-
-	e.do_unselect_widget = function(focus_prev) {
-
-		e.focusable = true
-
-		e.widget_selected_overlay.remove()
-		e.widget_selected_overlay = null
-
-		if (focus_prev !== false && selected_widgets.size)
-			[...selected_widgets].last.widget_selected_overlay.focus()
-	}
-
-	e.remove_widget = function() {
-		let p = e.parent_widget
-		if (!p) return
-		e.widget_selected = false
-		p.remove_child_widget(e)
-	}
-
-	e.hit_test_widget_editing = return_true
-
-	e.on('pointerdown', function(ev, mx, my) {
-
-		if (!e.can_select_widget)
-			return
-
-		if (e.widget_selected)
-			return false // prevent dropdown from opening.
-
-		if (!ev.ctrlKey)
-			return
-
-		if (e.ctrl_key_taken)
-			return
-
-		if (ev.shiftKey) {
-
-			// prevent accidentally clicking on the parent of any of the selected widgets.
-			for (let e1 of selected_widgets) {
-				let p = e1.selectable_parent_widget
-				while (p) {
-					if (p == e)
-						return false
-					p = p.selectable_parent_widget
-				}
-			}
-
-			e.widget_editing = false
-			e.widget_selected = true
-
-		} else {
-
-			unselect_all_widgets()
-
-			if (e.can_edit_widget && !selected_widgets.size)
-				if (e.hit_test_widget_editing(ev, mx, my)) {
-					e.widget_editing = true
-					// don't prevent default to let the caret land under the mouse.
-					ev.stopPropagation()
-					return
-				}
-
-		}
-
-		return false
-
-	})
-
-	e.on_bind(function(on) {
-		if (!on)
-			e.widget_selected = false
-	})
-
-}
-
-/* editable widget mixin -----------------------------------------------------
-
-uses:
-	e.can_edit_widget
-publishes:
-	e.widget_editing
-calls:
-	e.set_widget_editing()
-
-*/
-
-function editable_widget(e) {
-
-	e.can_edit_widget = true
-	e.set_widget_editing = noop
-
-	e.property('widget_editing',
-		() => editing_widget == e,
-		function(v) {
-			v = !!v
-			if (e.widget_editing == v)
-				return
-			e.class('widget-editing', v)
-			if (v) {
-				assert(editing_widget != e)
-				if (editing_widget)
-					editing_widget.widget_editing = false
-				assert(editing_widget == null)
-				e.focusable = false
-				editing_widget = e
-			} else {
-				e.focusable = true
-				editing_widget = null
-			}
-			getSelection().removeAllRanges()
-			e.set_widget_editing(v)
-		})
-
-	e.on_bind(function(on) {
-		if (!on)
-			e.widget_editing = false
-	})
-
-}
-
-function contained_widget(e) {
-	//
-}
-
-/* stylable widget -----------------------------------------------------------
-
-publishes:
-	e.css_classes
-
-*/
-
-function stylable_widget(e) {
-
-	e.set_css_classes = function(c1, c0) {
-		if (c0)
-			e.class(c0, false)
-		if (c1)
-			e.class(c1, true)
-	}
-	e.prop('css_classes', {})
-
-	e.prop('theme', {attr: true})
-}
 
 /* <tooltip> -----------------------------------------------------------------
 
@@ -996,6 +602,7 @@ item css classes:
 	grabbed
 fires:
 	items_changed()
+	list_move_items()
 
 */
 
@@ -1071,10 +678,13 @@ e.make_list_drag_elements = function() {
 			items[i]._remove = true
 		}
 		e.fire('items_changed')
+		e.update({items: true})
 
 		e.class('moving')
 		grabbed_item.class('grabbed')
 		force_cursor('grabbing')
+
+		e.fire('list_move_items', true, items)
 
 		start(items, items_r)
 	})
@@ -1091,6 +701,7 @@ e.make_list_drag_elements = function() {
 	})
 
 	e.on('stop_drag', function(ev, dest_elem, items) {
+		e.fire('list_move_items', false, items, dest_elem)
 		e.class('moving', false)
 		grabbed_item.class('grabbed', false)
 		force_cursor(false)
@@ -1106,8 +717,10 @@ e.make_list_drag_elements = function() {
 				item._remove = null
 			}
 		}
-		if (!dest_elem)
+		if (!dest_elem) {
 			e.fire('items_changed')
+			e.update({items: true})
+		}
 	})
 
 }
@@ -1255,6 +868,7 @@ e.make_list_drop_elements = function() {
 			item._remove = null
 		}
 		e.fire('items_changed')
+		e.update({items: true})
 		if (e.focus_item)
 			e.focus_item(hit_i, 0, {
 				selected_items: drop_items,
@@ -1263,7 +877,40 @@ e.make_list_drop_elements = function() {
 
 }
 
-/*
+// make list elements movable within the same list only ----------------------
+
+e.make_list_items_movable = function() {
+
+	let e = this
+
+	e.make_list_drag_elements()
+	e.make_list_drop_elements()
+
+	let r, horiz
+	e.listen('drag_started', function(payload, add_drop_area, source_elem) {
+		if (source_elem != e)
+			return
+		add_drop_area(e, rect(-1/0, -1/0, 1/0, 1/0))
+		horiz = e.css('flexDirection') == 'row'
+		r = e.rect()
+	})
+
+	e.on('accept_drop', function(ev, payload, payload_rect, source_elem) {
+		return source_elem == e
+	})
+
+	e.on('dragging', function(ev, items, items_r) {
+		for (let item of items) {
+			if (horiz)
+				item.y = r.y
+			else
+				item.x = r.x
+		}
+	})
+
+}
+
+/* focusable & selectable list elements --------------------------------------
 
 config props:
 	multiselect
@@ -1290,7 +937,7 @@ stubs:
 
 css('.clickable-list', 'arrow')
 
-e.make_list_items_focusable = function() {
+e.make_list_items_focusable = function(opt) {
 
 	let e = this
 	e.make_list_items_focusable = noop
@@ -1302,7 +949,7 @@ e.make_list_items_focusable = function() {
 			&& (!for_editing || e.can_edit_item(item))
 	}
 	e.can_select_item = e.can_focus_item
-	e.multiselect = true
+	e.multiselect = strict_or(opt && opt.multiselect, true)
 	e.stay_in_edit_mode = true
 
 	e.selected_item_index = null
@@ -1413,7 +1060,6 @@ e.make_list_items_focusable = function() {
 		opt.make_visible
 		opt.focus_editor
 		opt.editable
-		opt.enter_editing
 		opt.focus_non_editable_if_not_found
 	*/
 	e.focus_item = function(i, n, opt) {
@@ -1647,7 +1293,7 @@ e.make_list_items_focusable = function() {
 		if (ev.target != e) return
 		let sel_items = e.selected_items
 		if (!sel_items.length) return
-		copied_widgets.set(sel_items)
+		copied_elements.set(sel_items)
 		for (let item of sel_items) {
 			item.remove()
 			item._remove = true
@@ -1660,23 +1306,23 @@ e.make_list_items_focusable = function() {
 		if (ev.target != e) return
 		let sel_items = e.selected_items
 		if (!sel_items.length) return
-		copied_widgets.set(sel_items)
+		copied_elements.set(sel_items)
 		return false
 	})
 
 	e.on('paste', function(ev) {
 		if (ev.target != e) return
-		if (!copied_widgets.size) return
+		if (!copied_elements.size) return
 		e.selected_item_index = null
 		let sel_items = []
 		let i = e.focused_item_index || e.list_len
-		for (let item of copied_widgets) {
+		for (let item of copied_elements) {
 			e.insert(i, item)
 			sel_items.push(item)
 			item._remove = null
 			i++
 		}
-		copied_widgets.clear()
+		copied_elements.clear()
 		e.selected_items = sel_items
 		e.update({state: true})
 		e.fire('items_changed')
@@ -2274,22 +1920,12 @@ menu = component('menu', function(e) {
 
 publishes:
   e.items
-implements:
-  e.child_widgets()
-  e.replace_child_widget()
-  e.remove_child_widget()
 calls:
   e.update({new_items:, removed_items:, items:})
 
 */
 
 widget_with_widget_items = function(e) {
-
-	function diff_items(t, cur_items) {
-		let items = update_element_list(t, cur_items)
-		e.update({items: items})
-		return items
-	}
 
 	e.serialize_items = function(items) {
 		let t = []
@@ -2299,28 +1935,8 @@ widget_with_widget_items = function(e) {
 	}
 
 	e.prop('items', {type: 'array', element_type: 'node',
-			serialize: e.serialize_items, convert: diff_items, default: empty_array,
-			updates: 'items'})
-
-	// parent-of selectable widget protocol.
-	e.child_widgets = function() {
-		return e.items.slice()
-	}
-
-	// parent-of selectable widget protocol.
-	e.replace_child_widget = function(old_item, new_item) {
-		let i = e.items.indexOf(old_item)
-		let items = e.items.copy()
-		items[i] = new_item
-		e.items = items
-	}
-
-	// parent-of selectable widget protocol.
-	e.remove_child_widget = function(item) {
-		let items = e.items.copy()
-		items.remove_value(item)
-		e.items = items
-	}
+			serialize: e.serialize_items, convert: update_element_list,
+			default: empty_array, updates: 'items'})
 
 	if (e.len) {
 		e.init_child_components()
@@ -2389,6 +2005,8 @@ css('tabs-selection-bar', 'abs bg-link z2', `
 	height: 2px;
 `)
 
+css_state('.tabs.tab-moving tabs-selection-bar', 'invisible')
+
 css_state('tabs-xbutton:hover', '', `
 	color: inherit;
 `)
@@ -2418,9 +2036,6 @@ tabs = component('tabs', 'Containers', function(e) {
 
 	e.class('tabs')
 	e.make_disablable()
-	selectable_widget(e)
-	editable_widget(e)
-	contained_widget(e)
 
 	let html_items = widget_with_widget_items(e)
 
@@ -2467,8 +2082,8 @@ tabs = component('tabs', 'Containers', function(e) {
 	}
 
 	function update_tab_state(tab, select) {
-		tab.xbutton.hidden = !(select && (e.can_remove_items || e.widget_editing))
-		tab.title_box.contenteditable = select && (e.widget_editing || e.renaming)
+		tab.xbutton.hidden = !(select && e.can_remove_items)
+		tab.title_box.contenteditable = select && e.renaming
 	}
 
 	let selected_tab = null
@@ -2479,6 +2094,9 @@ tabs = component('tabs', 'Containers', function(e) {
 			e.selection_bar = tag('tabs-selection-bar')
 			e.add_button = tag('tabs-add-button', {tabindex: 0})
 			e.tabs_box = tag('tabs-box')
+			e.tabs_box.make_list_items_movable()
+			e.tabs_box.on('items_changed', tabs_box_items_changed)
+			e.tabs_box.on('list_move_items', tabs_box_list_move_items)
 			e.header = tag('tabs-header', 0,
 				e.tabs_box, e.selection_bar, e.fixed_header, e.add_button)
 			e.content = tag('tabs-content', {class: 'x-container'})
@@ -2498,19 +2116,19 @@ tabs = component('tabs', 'Containers', function(e) {
 				}
 			}
 			e.tabs_box.innerHTML = null // reappend items without rebinding them.
-			for (let item of opt.items) {
+			for (let item of e.items) {
 				if (item._tabs != e) {
 					let xbutton = tag('tabs-xbutton')
 					xbutton.hidden = true
 					let title_box = tag('tabs-title')
 					let tab = tag('tabs-tab', 0, title_box, xbutton)
+					tab.tabs = e
 					tab.title_box = title_box
 					tab.xbutton = xbutton
 					tab.on('pointerdown' , tab_pointerdown)
 					tab.on('dblclick'    , tab_dblclick)
 					tab.on('keydown'     , tab_keydown)
 					title_box.on('input' , update_title)
-					title_box.on('blur'  , title_blur)
 					xbutton.on('pointerdown', xbutton_pointerdown)
 					tab.item = item
 					item._tab = tab
@@ -2523,6 +2141,14 @@ tabs = component('tabs', 'Containers', function(e) {
 					e.tabs_box.append(item._tab)
 				}
 			}
+		}
+
+		function tabs_box_list_move_items(on) {
+			e.class('tab-moving', on)
+		}
+
+		function tabs_box_items_changed() {
+			e.update()
 		}
 
 		e.header.w = e.header_width
@@ -2546,12 +2172,7 @@ tabs = component('tabs', 'Containers', function(e) {
 			}
 		}
 
-		if (opt.enter_editing) {
-			e.widget_editing = true
-			return
-		}
-
-		if (tab && !e.widget_editing)
+		if (tab)
 			if (opt.focus_tab)
 				tab.focus()
 			else if (opt.focus_tab_content != false && e.auto_focus_first_item)
@@ -2560,7 +2181,7 @@ tabs = component('tabs', 'Containers', function(e) {
 		if (tab)
 			update_tab_state(tab, true)
 
-		e.add_button.hidden = !(e.can_add_items || e.widget_editing)
+		e.add_button.hidden = !e.can_add_items
 
 	})
 
@@ -2663,70 +2284,17 @@ tabs = component('tabs', 'Containers', function(e) {
 				return item
 	}
 
-	// drag-move tabs ---------------------------------------------------------
-
-	live_move_mixin(e)
-
-	e.set_movable_element_pos = function(i, x) {
-		let tab = e.items[i]._tab
-		tab.x = x - tab._offset_x
-	}
-
-	e.movable_element_size = function(i) {
-		return e.items[i]._tab.rect().w
-	}
-
-	let dragging, drag_mx
+	// select & drag-move tabs ------------------------------------------------
 
 	function tab_pointerdown(ev, mx, my) {
-		if (this.title_box.contenteditable && !ev.ctrlKey) {
+		if (this.title_box.contenteditable && !ev.ctrl) {
 			ev.stopPropagation()
 			return
 		}
 		select_tab(this)
-		if (ev.ctrlKey)
+		if (ev.ctrl)
 			return // bubble-up to enter editing mode.
 		this.focus()
-		return this.capture_pointer(ev, tab_pointermove, tab_pointerup)
-	}
-
-	function tab_pointermove(ev, mx, my, down_mx, down_my) {
-		if (!dragging) {
-			dragging = e.can_move_items && (abs(down_mx - mx) > 4 || abs(down_my - my) > 4)
-			if (dragging) {
-				for (let item of e.items)
-					item._tab._offset_x = item._tab.ox
-				e.move_element_start(this.index, 1, 0, e.items.length)
-				drag_mx = down_mx - this.ox
-				e.class('moving', true)
-				this.class('moving', true)
-				e.position()
-			}
-		} else {
-			e.move_element_update(mx - drag_mx)
-			e.position()
-		}
-	}
-
-	function tab_pointerup() {
-		if (dragging) {
-
-			let over_i = e.move_element_stop()
-			let insert_i = over_i - (over_i > this.index ? 1 : 0)
-			let items = [...e.items]
-			let rem_item = items.remove(this.index)
-			items.insert(insert_i, rem_item)
-			e.items = items
-
-			e.class('moving', false)
-			this.class('moving', false)
-
-			for (let item of e.items)
-				item._tab.x = null
-
-			dragging = false
-		}
-		select_tab(this)
 	}
 
 	// key bindings -----------------------------------------------------------
@@ -2741,12 +2309,9 @@ tabs = component('tabs', 'Containers', function(e) {
 			set_renaming(!e.renaming)
 			return false
 		}
-		if (e.widget_editing || e.renaming) {
-			if (key == 'Enter') {
-				if (ctrl)
-					this.title_box.insert_at_caret('<br>')
-				else
-					e.widget_editing = false
+		if (e.renaming) {
+			if (ctrl && key == 'Enter') {
+				this.title_box.insert_at_caret('<br>')
 				return false
 			}
 		}
@@ -2756,7 +2321,7 @@ tabs = component('tabs', 'Containers', function(e) {
 				return false
 			}
 		}
-		if (!e.widget_editing && !e.renaming) {
+		if (!e.renaming) {
 			if (key == ' ' || key == 'Enter') {
 				select_tab(this)
 				return false
@@ -2770,15 +2335,16 @@ tabs = component('tabs', 'Containers', function(e) {
 		}
 	}
 
-	e.set_widget_editing = function(v) {
-		if (!v)
-			update_title()
-	}
+	e.create_item = noop // stub
+	e.remove_item = noop // stub
 
 	function add_button_click() {
 		if (selected_tab == this)
 			return
-		e.items = [...e.items, widget_placeholder({title: 'New', module: e.module})]
+		let item = create_item()
+		if (!item)
+			return
+		e.items = [...e.items, item]
 		return false
 	}
 
@@ -2796,14 +2362,10 @@ tabs = component('tabs', 'Containers', function(e) {
 		e.update()
 	}
 
-	function title_blur() {
-		e.widget_editing = false
-	}
-
 	function xbutton_pointerdown() {
 		select_tab(null)
-		e.remove_child_widget(this.parent.item)
-		return false
+		if (e.remove_item(this.parent.item))
+			return false
 	}
 
 	return {items: html_items}
@@ -2870,8 +2432,6 @@ split = component('split', 'Containers', function(e) {
 
 	e.class('split')
 	e.make_disablable()
-	selectable_widget(e)
-	contained_widget(e)
 
 	e.init_child_components()
 	let html_item1 = e.at[0]
@@ -2888,11 +2448,13 @@ split = component('split', 'Containers', function(e) {
 
 	let horiz, left
 
+	e.widget_placeholder = () => div() // stub
+
 	e.on_update(function() {
 
 		e.xoff()
-		if (!e.item1) e.item1 = widget_placeholder({module: e.module})
-		if (!e.item2) e.item2 = widget_placeholder({module: e.module})
+		if (!e.item1) e.item1 = e.widget_placeholder()
+		if (!e.item2) e.item2 = e.widget_placeholder()
 		e.xon()
 
 		e.pane1.set(e.item1)
@@ -3001,23 +2563,6 @@ split = component('split', 'Containers', function(e) {
 		e.class('resizing')
 		return this.capture_pointer(ev, mm_resize, mu_resize)
 	})
-
-	// parent-of selectable widget protocol.
-	e.child_widgets = function() {
-		return [e.item1, e.item2]
-	}
-
-	// parent-of selectable widget protocol.
-	e.remove_child_widget = function(item) {
-		e.replace_child_widget(item, widget_placeholder({module: e.module}))
-	}
-
-	// widget placeholder protocol.
-	e.replace_child_widget = function(old_item, new_item) {
-		let ITEM = e.item1 == old_item && 'item1' || e.item2 == old_item && 'item2' || null
-		e[ITEM] = new_item
-		e.update()
-	}
 
 	return {
 		item1: html_item1,
@@ -3542,8 +3087,6 @@ slides = component('slides', 'Containers', function(e) {
 
 	e.class('slides')
 	e.make_disablable()
-	selectable_widget(e)
-	contained_widget(e)
 	let html_items = widget_with_widget_items(e)
 
 	// model
@@ -3604,7 +3147,7 @@ slides = component('slides', 'Containers', function(e) {
 				}
 			}
 			e.innerHTML = null // reappend items without rebinding them.
-			for (let item of opt.items) {
+			for (let item of e.items) {
 				if (item._slides != e) { // new item
 					item._slides = e
 					item.class('slide', true)
@@ -3916,6 +3459,7 @@ function check_widget(e, input_type) {
 	e.make_focusable()
 	e.prop('checked', {type: 'bool', attr: true})
 	e.prop('name')
+	e.prop('form')
 	e.prop('value')
 	e.property('label', function() {
 		if (!e.bound) return
@@ -3928,9 +3472,9 @@ function check_widget(e, input_type) {
 	e.user_set_checked = function(v) { // stub
 		e.checked = v
 	}
-	e.set_value = function(v) {
-		e.input.value = v
-	}
+	e.set_name = function(s) { e.input.name = s }
+	e.set_form = function(s) { e.input.form = s }
+	e.set_value = function(v) { e.input.value = v }
 	e.user_toggle = function() {
 		e.user_set_checked(!e.checked)
 	}
@@ -4040,7 +3584,7 @@ toggle = component('toggle', function(e) {
 	e.class('toggle')
 	check_widget(e)
 	e.thumb = div({class: 'toggle-thumb'})
-	e.set(e.thumb)
+	e.add(e.thumb)
 })
 
 /* <radio> -------------------------------------------------------------------
@@ -4226,23 +3770,30 @@ let slider_widget = function(e, range) {
 
 	e.prop('marked'     , {type: 'bool'  , default: true})
 
-	if (range) {
+	for (let I of range ? ['1', '2'] : ['']) {
 
-		e.prop('value1' , {type: 'number'})
-		e.prop('value2' , {type: 'number'})
+		e.prop('name'+I)
+		e.prop('value'+I, {type: 'number'})
 
-		e.input1 = tag('input', {hidden: ''})
-		e.input2 = tag('input', {hidden: ''})
-		e.add(e.input1, e.input2)
+		let inp = tag('input', {type: 'hidden', hidden: ''})
+		e['input'+I] = inp
+		e.add(inp)
 
-	} else {
-
-		e.prop('value'  , {type: 'number'})
-
-		e.input = tag('input', {hidden: ''})
-		e.add(e.input)
+		e['set_name' +I] = function(s) { inp.name = s }
+		e['set_value'+I] = function(v) { inp.value = v }
 
 	}
+
+	e.prop('form')
+	if (range)
+		e.set_form = function(s) {
+			e.input1.form = s
+			e.input2.form = s
+		}
+	else
+		e.set_form = function(s) {
+			e.input.form = s
+		}
 
 	e.mark_w = e.css().prop('--slider-mark-w').num()
 
@@ -4261,11 +3812,11 @@ let slider_widget = function(e, range) {
 		e.max_value_thumb = div({class: 'slider-thumb'})
 		e.min_value_thumb.VAL = 'value1'
 		e.max_value_thumb.VAL = 'value2'
-		e.thumbs    = [e.min_value_thumb, e.max_value_thumb]
+		e.thumbs = [e.min_value_thumb, e.max_value_thumb]
 	} else {
 		e.value_thumb = div({class: 'slider-thumb'})
 		e.value_thumb.VAL = 'value'
-		e.thumbs    = [e.value_thumb]
+		e.thumbs = [e.value_thumb]
 	}
 
 	e.add(e.bg_fill, e.valid_fill, e.value_fill, e.marks,
@@ -4682,10 +4233,10 @@ css('.button.text-empty > .button-text', 'hidden')
 
 css('.button-icon', 'w1 h-c')
 
-css_state('.button:not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button:hover', '', `
 	background: var(--bg-button-hover);
 `)
-css_state('.button:not(.widget-editing):not(.widget-selected):active', '', `
+css_state('.button:active', '', `
 	background: var(--bg-button-active);
 	box-shadow: var(--shadow-button-active);
 `)
@@ -4694,10 +4245,10 @@ css('.button[primary]', 'b-invisible', `
 	background : var(--bg-button-primary);
 	color      : var(--fg-button-primary);
 `)
-css_state('.button[primary]:not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button[primary]:hover', '', `
 	background : var(--bg-button-primary-hover);
 `)
-css_state('.button[primary]:not(.widget-editing):not(.widget-selected):active', '', `
+css_state('.button[primary]:active', '', `
 	background : var(--bg-button-primary-active);
 `)
 
@@ -4705,20 +4256,20 @@ css('.button[danger]', '', `
 	background : var(--bg-button-danger);
 	color      : var(--fg-button-danger);
 `)
-css_state('.button[danger]:not(.widget-editing):not(.widget-selected):hover', '', `
+css_state('.button[danger]:hover', '', `
 	background : var(--bg-button-danger-hover);
 `)
-css_state('.button[danger]:not(.widget-editing):not(.widget-selected):active', '', `
+css_state('.button[danger]:active', '', `
 	background : var(--bg-button-danger-active);
 `)
 
 css      ('.button[bare][primary]', 'b-invisible ro0 no-bg no-shadow link')
-css_state('.button[bare][primary]:not(.widget-editing):not(.widget-selected):hover' , 'no-bg link-hover')
-css_state('.button[bare][primary]:not(.widget-editing):not(.widget-selected):active', 'no-bg link-active')
+css_state('.button[bare][primary]:hover' , 'no-bg link-hover')
+css_state('.button[bare][primary]:active', 'no-bg link-active')
 
 css      ('.button[bare]', 'b-invisible ro0 no-bg no-shadow fg')
-css_state('.button[bare]:not(.widget-editing):not(.widget-selected):hover' , 'no-bg fg-hover')
-css_state('.button[bare]:not(.widget-editing):not(.widget-selected):active', 'no-bg fg-active')
+css_state('.button[bare]:hover' , 'no-bg fg-hover')
+css_state('.button[bare]:active', 'no-bg fg-active')
 
 css_state('.button[selected]', '', `
 	box-shadow: var(--shadow-pressed);
@@ -4744,7 +4295,6 @@ button = component('button', 'Input', function(e) {
 	e.class('button inputbox')
 	e.make_disablable()
 	e.make_focusable()
-	editable_widget(e)
 
 	e.icon_box = span({class: 'button-icon'})
 	e.text_box = span({class: 'button-text'})
@@ -4826,47 +4376,6 @@ button = component('button', 'Input', function(e) {
 	e.on('click', function() {
 		if (!activate())
 			return false
-	})
-
-	// widget editing ---------------------------------------------------------
-
-	e.set_widget_editing = function(v) {
-		e.text_box.contenteditable = v
-		if (!v)
-			e.text = e.text_box.innerText
-	}
-
-	e.on('keydown', function keydown(key, shift, ctrl) {
-		if (e.widget_editing) {
-			if (key == 'Enter') {
-				if (ctrl) {
-					e.text_box.insert_at_caret('<br>')
-					return
-				} else {
-					e.widget_editing = false
-					return false
-				}
-			}
-		}
-	})
-
-	e.on('pointerdown', function(ev) {
-		if (e.widget_editing && ev.target != e.text_box) {
-			e.text_box.focus()
-			e.text_box.select_all()
-			return this.capture_pointer(ev)
-		}
-	})
-
-	function prevent_bubbling(ev) {
-		if (e.widget_editing)
-			ev.stopPropagation()
-	}
-	e.text_box.on('pointerdown', prevent_bubbling)
-	e.text_box.on('click', prevent_bubbling)
-
-	e.text_box.on('blur', function() {
-		e.widget_editing = false
 	})
 
 	// ajax notifications -----------------------------------------------------
@@ -4961,12 +4470,15 @@ select_button = component('select-button', function(e) {
 	let html_items = widget_with_widget_items(e)
 
 	e.plate = div({class: 'select-button-plate'})
+	e.input = tag('input', {type: 'hidden', hidden: ''})
 
 	e.make_focusable()
 
 	// model
 
 	e.prop('selected_index', {type: 'number', updates: 'selected_index'})
+	e.prop('name')
+	e.prop('form')
 	e.prop('value', {updates: 'value'})
 
 	e.item_value = function(ce) { // stub to pluck value from items
@@ -4974,8 +4486,12 @@ select_button = component('select-button', function(e) {
 	}
 
 	function clamp_item_index(i) {
-		return i != null && e.len > 1 && e.at[clamp(i, 0, e.len-2)] || null
+		return i != null && e.len > 1 && e.at[clamp(i, 0, e.len-3)] || null
 	}
+
+	e.set_name = function(s) { e.input.name = s }
+	e.set_form = function(s) { e.input.form = s }
+	e.set_value = function(v) { e.input.value = v }
 
 	// view
 
@@ -4990,12 +4506,12 @@ select_button = component('select-button', function(e) {
 	e.on_update(function(opt) {
 		if (opt.items) {
 			e.clear()
-			e.set([...e.items, e.plate])
+			e.set([...e.items, e.plate, e.input])
 			opt.value = true
 		}
 		if (opt.value) {
 			for (let b of e.at) {
-				if (b != e.plate && e.item_value(b) === e.value) {
+				if (b != e.plate && b != e.input && e.item_value(b) === e.value) {
 					e.selected_item = b
 					break
 				}
@@ -5319,6 +4835,8 @@ css_generic_state('.pass-input-button[disabled]', 'op1 dim')
 
 pass_input = component('pass-input', 'Input', function(e) {
 
+	e.prop('name')
+	e.prop('form')
 	e.prop('value')
 
 	e.class('pass-input input-group b-collapse-h ro-collapse-h')
@@ -5345,9 +4863,8 @@ pass_input = component('pass-input', 'Input', function(e) {
 		e.eye_button.disable('empty', !v)
 	}
 
-	e.input.on('input', function(ev) {
-		e.set_prop('value', this.value, ev)
-	})
+	e.set_name = function(s) { e.input.name = s }
+	e.set_form = function(s) { e.input.form = s }
 
 	e.on_update(function(opt) {
 		if (opt.select_all)
@@ -5355,6 +4872,10 @@ pass_input = component('pass-input', 'Input', function(e) {
 	})
 
 	// controller
+
+	e.input.on('input', function(ev) {
+		e.set_prop('value', this.value, ev)
+	})
 
 	e.eye_button.on('pointerdown', function(ev) {
 		e.input.type = null
@@ -5483,7 +5004,7 @@ tags_box = component('tags-box', function(e) {
 
 })
 
-/* <tags> --------------------------------------------------------------------
+/* <tags-input> --------------------------------------------------------------
 
 config:
 	nowrap
@@ -5492,26 +5013,37 @@ state:
 
 */
 
-css('.tags', 'shrinks')
-css('.tags-input', 'S')
+css('.tags-input', 'shrinks')
+css('.tags-input-inpu', 'S')
 css_role('.tags-scrollbox', 'shrinks h-m b-r-0 clip')
-css_role('.tags .tags-box'  , 'rel shrinks m0')
-css_role('.tags .tags-input', 'p-x-input b-l-0', `min-width: 5em;`)
+css_role('.tags-input .tags-box'  , 'rel shrinks m0')
+css_role('.tags-input .tags-input-input', 'p-x-input b-l-0', `min-width: 5em;`)
 css('.tags-box-nowrap', 'flex-nowrap')
 
-tags = component('tags', function(e) {
+tags_input = component('tags-input', function(e) {
 
-	e.class('tags input-group')
+	e.clear()
+
+	e.class('tags-input input-group')
 	e.make_disablable()
 
+	e.prop('name')
+	e.prop('form')
+	e.set_name = function(s) { e.value_input.name = s }
+	e.set_form = function(s) { e.value_input.form = s }
+
 	e.tags_box = tags_box()
-	e.input = tag('input', {class: 'tags-input', placeholder: 'Tag'})
-	e.add(div({class: 'tags-scrollbox'}, e.tags_box), e.input)
+	e.input = tag('input', {class: 'tags-input-input', placeholder: 'Tag'})
+	e.value_input = tag('input', {type: 'hidden', hidden: ''})
+	e.add(div({class: 'tags-scrollbox'}, e.tags_box), e.input, e.value_input)
 	e.make_focusable(e.input)
 
 	e.prop('tags', {store: false})
 	e.get_tags = () => e.tags_box.tags
-	e.set_tags = (v) => e.tags_box.tags = v
+	e.set_tags = function(v) {
+		e.tags_box.tags = v
+		e.value_input.value = json(e.tags_box.tags)
+	}
 
 	e.prop('nowrap', {type: 'bool'})
 	e.set_nowrap = (v) => e.tags_box.class('tags-box-nowrap', !!v)
@@ -5656,9 +5188,7 @@ dropdown = component('dropdown', 'Input', function(e) {
 		if (!list) return
 		list.on('items_changed', list_items_changed, on)
 		if (on) {
-			list.make_list_items_focusable()
-			list.make_list_items_searchable()
-			list.multiselect = false
+			list.make_list_items_focusable({multiselect: false})
 			list.on('search', function() {
 				e.open()
 				e.update({value: true})
@@ -5683,13 +5213,24 @@ dropdown = component('dropdown', 'Input', function(e) {
 
 	e.prop('list', {type: 'list'})
 
+	// model/form
+
+	e.prop('name')
+	e.prop('form')
+	e.input = tag('input', {type: 'hidden', hidden: ''})
+	e.add(e.input)
+
+	e.set_name = function(s) { e.input.name = s }
+	e.set_form = function(s) { e.input.form = s }
+
 	// view -------------------------------------------------------------------
 
 	e.value_box = div({class: 'dropdown-value'})
 	e.chevron   = div({class: 'dropdown-chevron'})
 	e.add(e.value_box, e.chevron)
 
-	e.set_value = function() {
+	e.set_value = function(v) {
+		e.input.value = v
 		e.update({value: true})
 	}
 
@@ -5843,8 +5384,7 @@ autocomplete = component('autocomplete', 'Input', function(e) {
 	function bind_list(list, on) {
 		if (!list) return
 		if (on) {
-			list.make_list_items_focusable()
-			list.multiselect = false
+			list.make_list_items_focusable({multiselect: false})
 			list_items_changed.call(list)
 			list.class('dropdown-picker')
 			list.popup(null, 'bottom', 'start')
@@ -6921,9 +6461,7 @@ time_picker = component('time-picker', 'Input', function(e) {
 			item_template: '<div class="item time-picker-item" searchable>{{{name}}}</div>',
 		})
 		li.make_focusable()
-		li.make_list_items_focusable()
-		li.make_list_items_searchable()
-		li.multiselect = false
+		li.make_list_items_focusable({multiselect: false})
 		e.add(div({class: 'time-picker-list-box'},
 			div({class: 'time-picker-list-header scroll-thin'}, s), li))
 		lists.push(li)
@@ -7205,24 +6743,9 @@ function date_input_widget(e, has_date, has_time, range) {
 		return isstr(s) ? e.from_text(s, true) : s
 	}
 
-	for (let VAL of (range ? ['value1', 'value2'] : ['value'])) {
+	for (let I of (range ? ['1', '2'] : [''])) {
 
-		e.prop(VAL, {type: 'time', convert: convert_value})
-		e['set_'+VAL] = function(v, v0, ev) {
-			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
-				e[VAL+'_input'].value = isnum(v) ? e.to_text(v) : v
-			if (!(ev && ev.target == e.picker))
-				e.picker.set_prop(VAL, v, ev)
-			e.set_prop('input_'+VAL, null, ev || {target: e})
-		}
-
-		e.prop('input_'+VAL, {attr: VAL})
-		e['set_input_'+VAL] = function(v, v0, ev) {
-			if (!(ev && (ev.target == e[VAL+'_input'] || ev.target == e)))
-				e[VAL+'_input'].value = v
-			if (!(ev && ev.target == e))
-				e.set_prop(VAL, e.from_text(v, true), ev || {target: e})
-		}
+		let VAL = 'value'+I
 
 		let inp = input({
 			classes: 'date-input-input date-input-input-'+VAL,
@@ -7322,36 +6845,65 @@ function date_input_widget(e, has_date, has_time, range) {
 				focus_next_digit_group(shift_pressed)
 		})
 
-		e[VAL+'_input'] = inp
+		e['input'+I] = inp
+		e.add(inp)
 
-		e.prop(range ? VAL+'_placeholder' : 'placeholder', {store: false})
-		e[range ? 'get_'+VAL+'_placeholder' : 'get_placeholder'] = () => e[VAL+'_input'].placeholder
-		e[range ? 'set_'+VAL+'_placeholder' : 'set_placeholder'] = function(s) {
-			e[VAL+'_input'].placeholder = s
+		e.prop('name'+I)
+		e.prop('placeholder'+I)
+
+		e['set_name'+I]        = function(s) { inp.name = s }
+		e['set_placeholder'+I] = function(s) { inp.placeholder = s }
+
+		e.prop(VAL, {type: 'time', convert: convert_value})
+		e['set_'+VAL] = function(v, v0, ev) {
+			if (!(ev && (ev.target == inp || ev.target == e)))
+				inp.value = isnum(v) ? e.to_text(v) : v
+			if (!(ev && ev.target == e.picker))
+				e.picker.set_prop(VAL, v, ev)
+			e.set_prop('input_'+VAL, null, ev || {target: e})
+		}
+
+		e.prop('input_'+VAL, {attr: VAL})
+		e['set_input_'+VAL] = function(v, v0, ev) {
+			if (!(ev && (ev.target == inp || ev.target == e)))
+				inp.value = v
+			if (!(ev && ev.target == e))
+				e.set_prop(VAL, e.from_text(v, true), ev || {target: e})
 		}
 
 	}
+
+	e.prop('form')
+	if (range)
+		e.set_form = function(s) {
+			e.input1.form = s
+			e.input2.form = s
+		}
+	else
+		e.set_form = function(s) {
+			e.input.form = s
+		}
 
 	e.listen('prop_changed', function(ce, k, v, v0, ev) {
 		if (ce != e.picker) return
 		if (range) {
 			if (!(k == 'value1' || k == 'value2'))
 				return
-			if (ev && (ev.target == e.value1_input || ev.target == e.value2_input))
+			if (ev && (ev.target == e.input1 || ev.target == e.input2))
 				return
 		} else {
 			if (k != 'value')
 				return
-			if (ev && ev.target == e.value_input)
+			if (ev && ev.target == e.input)
 				return
 		}
 		e.set_prop(k, v, {target: ce})
 	})
 
 	if (range)
-		e.make_focusable(e.value1_input, e.value2_input)
+		e.make_focusable(e.input1, e.input2)
 	else
-		e.make_focusable(e.value_input)
+		e.make_focusable(e.input)
 
 	// move .focus-ring to the input-group, since we have .skip.
 	e.class('focus-ring', false)
@@ -7369,10 +6921,10 @@ function date_input_widget(e, has_date, has_time, range) {
 	})
 
 	if (range)
-		e.input_group.add(e.value1_input, div({class: 'date-range-input-separator'},'-'),
-			e.value2_input, e.picker_button)
+		e.input_group.add(e.input1, div({class: 'date-range-input-separator'},'-'),
+			e.input2, e.picker_button)
 	else
-		e.input_group.add(e.value_input, e.picker_button)
+		e.input_group.add(e.input, e.picker_button)
 
 	// controller -------------------------------------------------------------
 
@@ -7460,12 +7012,10 @@ inner html:
 
 css('.richtext', 'scroll-auto')
 
-css('.richtext:not(.richedit)', 'm0', 'display: block;')
+css('.richtext:not(.richedit)', 'm0 block')
 css('.richtext:not(.richedit) > .focus-box', 'b0')
 
-css('.richtext-content', 'vscroll-auto no-outline', `
-	padding: 10px;
-`)
+css('.richtext-content', 'vscroll-auto no-outline p')
 
 richtext = component('richtext', function(e) {
 
@@ -7474,10 +7024,6 @@ richtext = component('richtext', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
-
-	selectable_widget(e)
-	contained_widget(e)
-	editable_widget(e)
 
 	e.content_box = div({class: 'richtext-content'})
 	e.add(e.content_box)
@@ -7492,21 +7038,6 @@ richtext = component('richtext', function(e) {
 		return e.content_box.html
 	}
 	e.prop('content', {type: 'nodes', slot: 'lang', serialize: serialize_content})
-
-	// widget editing ---------------------------------------------------------
-
-	e.set_widget_editing = function(v) {
-		if (!v) return
-		richtext_widget_editing(e)
-		e.set_widget_editing = function(v) {
-			e.editing = v
-			if (!v) {
-				e.content = [...e.content_box.nodes]
-				e.xsave()
-			}
-		}
-		e.editing = true
-	}
 
 	return {content: html_content}
 
@@ -7683,13 +7214,6 @@ function richtext_widget_editing(e) {
 		ev.stopPropagation()
 	})
 
-	e.content_box.on('pointerdown', function(ev) {
-		if (!e.widget_editing)
-			return
-		if (!ev.ctrl)
-			ev.stopPropagation() // prevent exit editing.
-	})
-
 	e.actionbar.on('pointerdown', function(ev) {
 		ev.stopPropagation() // prevent exit editing.
 	})
@@ -7700,74 +7224,59 @@ function richtext_widget_editing(e) {
 	}
 	e.prop('editing', {private: true})
 
-	e.content_box.on('blur', function() {
-		if (!button_pressed)
-			e.widget_editing = false
-	})
-
 }
 
 }
 
-/* <widget-placeholder> ------------------------------------------------------
-
-calls:
-	e.replace_child_widget()
+/* html-input ----------------------------------------------------------------
 
 */
 
-widget_placeholder = component('widget-placeholder', function(e) {
+css('.html-input', 'v', `
+	min-height: 6em;
+`)
 
-	e.class('widget-placeholder')
+css('.richtext-actionbar-embedded', 'rel bg1 b-b', `
+	margin-top  : -1px;
+	margin-left : -1px;
+`)
 
-	selectable_widget(e)
-	contained_widget(e)
+css('.richtext-actionbar-embedded > button', 'b-b-0')
 
-	function replace_widget(item) {
-		let pe = e.parent_widget
-		let te = element({
-			tag: item.tag,
-			id: '<new>', // pseudo-id to be replaced with an auto-generated id.
-			module: pe && pe.module || e.module,
-		})
-		if (pe) {
-			pe.replace_child_widget(e, te)
-		} else {
-			xmodule.set_root_widget(te)
-		}
-		te.focus()
+/* scroll instead of growing to overflow the css grid */
+css('.html-input > .focus-box', 'S scroll-auto v')
+css('.html-input > .focus-box > .richtext-content', 'S')
+
+html_input = component('html-input', 'Input', function(e) {
+
+	let html_val = [...e.nodes]
+	e.clear()
+
+	e.make_disablable()
+
+	e.content_box = div({class: 'richtext-content'})
+	e.focus_box = div({class: 'focus-box'}, e.content_box)
+	e.add(e.focus_box)
+
+	richtext_widget_editing(e)
+
+	e.do_update_val = function(v, ev) {
+		if (ev && ev.input == e)
+			return
+		e.content_box.set(v)
 	}
 
-	let cmenu
-
-	function create_context_menu() {
-		let items = []
-		for (let cat in component.categories) {
-			let comp_items = []
-			let cat_item = {text: cat, items: comp_items}
-			items.push(cat_item)
-			for (let create of component.categories[cat])
-				comp_items.push({
-					text: create.type.display_name(),
-					create: create,
-					action: replace_widget,
-				})
-		}
-		if (cmenu)
-			cmenu.close()
-		cmenu = menu({
-			items: items,
-		})
-	}
+	e.on('content_changed', function() {
+		let v = e.content_box.html
+		e.set_val(v ? v : null, {input: e})
+	})
 
 	e.on_bind(function(on) {
 		if (on)
-			create_context_menu()
+			e.editing = true
 	})
 
-	e.on('contextmenu', function(ev, mx, my) {
-		cmenu.popup(e, 'inner-top', null, null, null, null, null, ev.clientX, ev.clientY)
-		return false
-	})
+	return html_val.length ? {val: html_val} : null
 
 })
+

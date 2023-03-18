@@ -147,13 +147,14 @@ ELEMENT PROPERTIES
 	e.get_prop(k) -> v
 	e.get_prop_attrs(k) -> {attr->val}
 	e.get_props() -> {k->attrs}
-	e.serialize_prop(k) -> s
 
 PROPERTY PERSISTENCE
 
 	e.xoff()
 	e.xon()
 	e.xsave()
+	e.serialize_prop(k) -> s
+	e.serialize() -> s
 
 DEFERRED DOM UPDATING
 
@@ -208,6 +209,14 @@ KEYBOARD EVENTS
 	^keyup              (key, shift, ctrl, alt, ev)
 	^keypress           (key, shift, ctrl, alt, ev)
 	^document.stopped_event(stopped_ev, ev)
+
+ELEMENT CLIPBOARD & CLIPBOARD EVENTS
+
+	copied_elements: set(element)
+
+	^cut   (ev)
+	^copy  (ev)
+	^paste (ev)
 
 LAYOUT CHANGE EVENT
 
@@ -1134,7 +1143,14 @@ function init_components() {
 e.listen = function(event, f) {
 	let handlers = obj() // event->f
 	this.listen = function(event, f) {
-		handlers[event] = f
+		let f0 = handlers[event]
+		if (f0)
+			handlers[event] = function(...args) {
+				f0(...args)
+				f(...args)
+			}
+		else
+			handlers[event] = f
 	}
 	this.listen(event, f)
 	function bind(on) {
@@ -1613,9 +1629,6 @@ e.property = function(name, get, set) {
 	return property(this, name, get, set)
 }
 
-e.xoff = function() { this._xoff = true  }
-e.xon  = function() { this._xoff = false }
-
 function announce_prop_changed(e, prop, v1, v0) {
 	if (e._xoff) {
 		e.props[prop].default = v1
@@ -1779,7 +1792,8 @@ e.get_prop = function(k) { return this[k] } // stub
 e.get_prop_attrs = function(k) { return this.props[k] } // stub
 e.get_props = function() { return this.props }
 
-// prop serialization.
+// prop & element serialization & saving -------------------------------------
+
 e.serialize_prop = function(k, v) {
 	let pa = this.get_prop_attrs(k)
 	if (pa && pa.serialize)
@@ -1787,12 +1801,6 @@ e.serialize_prop = function(k, v) {
 	else if (isobject(v) && v.serialize)
 		v = v.serialize()
 	return v
-}
-
-e.xsave = function() {
-	let xm = window.xmodule
-	if (xm)
-		xm.save()
 }
 
 e.serialize = function() {
@@ -1811,6 +1819,15 @@ e.serialize = function() {
 		t.html = e.html
 	}
 	return t
+}
+
+e.xoff = function() { this._xoff = true  }
+e.xon  = function() { this._xoff = false }
+
+e.xsave = function() {
+	let xm = window.xmodule
+	if (xm)
+		xm.save()
 }
 
 /* mixing for adding disabled state to any element ---------------------------
@@ -2425,7 +2442,7 @@ function force_cursor(cursor) {
 /* drag & drop protocol ------------------------------------------------------
 
 TL;DR:
-- as a source, listen on start_drag(), dragging(), stop_drag().
+- as a source, listen on start_drag(), stared_drag(), dragging(), stop_drag().
   call start(payload, payload_rect) inside start_drag() to start the drag.
 - as a dest, listen on drag_started(), drag_stopped(), dropping(), drop(),
   and possibly accept_drop(). call add_drop_area(elem, drop_area_rect)
@@ -2439,7 +2456,7 @@ LONG(ER) VERSION:
   (defaults to a zero-sized rect at cursor position).
 - ^^drag_started(payload, add_drop_area, source_elem) is then announced so that potential
   acceptors can announce their drop area rect(s) by calling add_drop_area(elem, drop_area_rect).
-- while the mouse moves, hit elements get ^accept_drop(pointermove_ev, payload, payload_rect)
+- while the mouse moves, hit elements get ^accept_drop(pointermove_ev, payload, payload_rect, source_elem)
   which they can cancel, signaling refusal to accept the drop.
 - if multiple elements accept the drop at the same time, the one with the largest
   intersected area wins, and gets ^dropping(pointermove_ev, true, payload, payload_rect),
@@ -2476,6 +2493,7 @@ installers.start_drag = function() {
 			py = payload_r && payload_r.y - my0 || 0
 			pw = payload_r && payload_r.w || 0
 			ph = payload_r && payload_r.h || 0
+			source_elem.fireup('started_drag', payload)
 			announce('drag_started', payload, add_drop_area, source_elem)
 		}
 
@@ -2502,7 +2520,7 @@ installers.start_drag = function() {
 					let area = cr.w * cr.h
 					if (pw == 0 || ph == 0 || area > 0) {
 						let e = drop_elems[i]
-						if (e.fire('accept_drop', ev, payload, payload_r)) {
+						if (e.fire('accept_drop', ev, payload, payload_r, source_elem)) {
 							if (area > max_area) {
 								max_area = area
 								dest_elem = e
@@ -2588,6 +2606,23 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 	// notify document of stopped events.
 	if (this.type in stopped_event_types)
 		document.fire('stopped_event', this)
+})
+
+// clipboard of elements & copy/paste events ---------------------------------
+
+copied_elements = set() // {element}
+
+document.on('keydown', function(key, shift, ctrl, alt, ev) {
+	if (alt || shift)
+		return
+	if (ctrl && key == 'c') {
+		ev.target.fireup('copy', ev)
+	} else if (ctrl && key == 'x') {
+		ev.target.fireup('cut', ev)
+	} else if (ctrl && key == 'v') {
+		if (copied_elements.size)
+			ev.target.fireup('paste', ev)
+	}
 })
 
 // DOMRect extensions --------------------------------------------------------

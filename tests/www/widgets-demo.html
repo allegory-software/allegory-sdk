@@ -762,19 +762,19 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=tags_demo>
+<xmp id=tags-input_demo>
 <tags-box tags="Apples Bananas Mangos what do you do when there are too many tags"></tags-box>
 
-<tags nowrap tags="Apples Bananas Mangos"></tags>
+<tags-input nowrap tags="Apples Bananas Mangos"></tags-input>
 
-<tags nowrap tags="Apples Bananas Mangos what do you do when there are too many tags"></tags>
+<tags-input nowrap tags="Apples Bananas Mangos what do you do when there are too many tags"></tags-input>
 
-<d class="ro-collapse-h h-m flex-nowrap shrinks xsmall "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
-<d class="ro-collapse-h h-m flex-nowrap shrinks small  "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
-<d class="ro-collapse-h h-m flex-nowrap shrinks smaller"><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
-<d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags class="S" tags="Apples Bananas Mangos what do you do when there are too many tags"></tags><button>OK</button></d>
-<d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags class="S" nowrap tags="what do you do when there are too many tags"></tags><button>OK</button></d>
-<d class="ro-collapse-h h-m flex-nowrap shrinks large  "><tags class="S" tags="apples bananas mangos"></tags><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks xsmall "><tags-input class="S" tags="apples bananas mangos"></tags-input><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks small  "><tags-input class="S" tags="apples bananas mangos"></tags-input><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks smaller"><tags-input class="S" tags="apples bananas mangos"></tags-input><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags-input class="S" tags="Apples Bananas Mangos what do you do when there are too many tags"></tags-input><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags-input class="S" nowrap tags="what do you do when there are too many tags"></tags-input><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks large  "><tags-input class="S" tags="apples bananas mangos"></tags-input><button>OK</button></d>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1100,44 +1100,69 @@ main.add(g)
 <!--------------------------------------------------------------------------->
 
 <xmp id="form_demo">
-<form class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
-	<check  class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
-	<radio  class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
-	<radio  class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
-	<toggle class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
+<form id=myform class="grid-h grid-m grid-2col gap-x" style="grid-template-columns: 5em auto">
+	<check  name=check1 value=c1 class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
+	<radio  name=radio1 value=r1 class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
+	<radio  name=radio1 value=r2 class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
+	<toggle name=toggle1 class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
 	<d></d><label for=input1>Label of next input</label>
 	<info class="self-h-c">
 		This here is just a simple input.<br>
 		Click on the label to focus it.
-	</info><input id=input1></input>
+	</info><input name=input1 id=input1></input>
 	<d></d><d class="h b-collapse-h ro-collapse-h w-input">
-			<pass-input value="" placeholder="Password"></pass-input><button>OK</button></div>
+			<pass-input name=pass1 value="" placeholder="Password"></pass-input><button>OK</button></div>
 		</d>
-	<d></d><num-input value=-1.54 decimals=2 buttons=up-down></num-input>
-	<d></d><num-input value=-5 min=1 max=10 buttons=plus-minus></num-input>
-	<d></d><tags nowrap tags="Apples Bananas Mangos" style="width: var(--w-input);"></tags>
-	<d></d><dropdown value=ban>
+	<d></d><num-input name=n1 value=-1.54 decimals=2 buttons=up-down></num-input>
+	<d></d><num-input name=n2 value=-5 min=1 max=10 buttons=plus-minus></num-input>
+	<d></d><tags-input name=tags1 nowrap tags="Apples Bananas Mangos" style="width: var(--w-input);"></tags-input>
+	<d></d><dropdown name=dd1 value=ban>
 		<d value=app searchable>Apples</d>
 		<d value=ban searchable>Bananas</d>
 		<d value=man searchable>Mangos</d>
 	</dropdown>
-	<d></d><select-button value=ban>
+	<d></d><select-button name=sel1 value=ban>
 		<d value=man>Mangos</d>
 		<d value=ban>Bananas</d>
 		<d value=app>Apples</d>
 	</select-button>
-	<d></d><date-input       value="1/18/2022" placeholder="Birth date"></date-input>
-	<d></d><time-input       input_value="00:00:00.2" with-seconds placeholder="Meet at"></time-input>
-	<d></d><datetime-input   input_value="1/18/2022 12:34:56" with-seconds placeholder="Meet at"></datetime-input>
-	<d></d><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input>
-	<d></d><slider min=0.1 max=0.9 value=0.75></slider>
-	<d></d><range-slider min=10 max=90 from=0 to=100 value1=20 value2=80 decimals=0></range-slider>
+	<d></d><date-input
+		name=date1
+		value="1/18/2022"
+		placeholder="Birth date"
+	></date-input>
+	<d></d><time-input
+		name=time1
+		input_value="00:00:00.2"
+		with-seconds placeholder="Meet at"
+	></time-input>
+	<d></d><datetime-input
+		name=datetime1
+		input_value="1/18/2022 12:34:56"
+		with-seconds
+		placeholder="Meet at"
+	></datetime-input>
+	<d></d><date-range-input
+		name1=daterange1_from name2=daterange1_to
+		value1="1/18/2022" value2="2/3/2022"
+	></date-range-input>
+	<d></d><slider name=slider1 min=0.1 max=0.9 value=0.75></slider>
+	<d></d><range-slider name1=slider2_from name2=slider2_to
+		min=10 max=90 from=0 to=100 value1=20 value2=80 decimals=0></range-slider>
 	<d></d><button bare type="button">CANCEL</button>
 	<d></d><d class="h gap-x S">
-		<button class="S" primary icon="fa fa-save">Save</button>
-		<button class="S" danger icon="fa fa-trash" type="button">Delete</button>
+		<button class="S" primary icon="fa fa-save" name=action value=save>Save</button>
+		<button class="S" danger icon="fa fa-trash" name=action value=delete>Delete</button>
 	</d>
 </form>
+<script run>
+myform.on('submit', function(ev) {
+	pr('Submit:', ev.submitter && ev.submitter.value)
+	for (const [name,value] of new FormData(this))
+		pr('', name, ':', value)
+	return false
+})
+</script>
 </xmp>
 
 <!--------------------------------------------------------------------------->

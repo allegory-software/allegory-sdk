@@ -1,6 +1,13 @@
 THINK
 ------------------------------------------------------------------------------
 
+* DATE/TIME PICKERS & INPUTS:
+	- server value in UTC but input_value in current locale?
+		- input_value in UTC when it's a timestamp
+		- what about when it's an SQL value ???
+	- `format` prop: 'timestamp' or 'sql'
+		- or better yet, parse both, and have value_timestamp and value_sql props
+
 * VALIDATORS and error box with non-data-driven input widgets
 	- textarea max-len validator to show "X chars remaining" on a textarea.
 
@@ -18,6 +25,9 @@ THINK
 BUGS
 ------------------------------------------------------------------------------
 
+* NUM-INPUT
+	- validation on increment (and validation in general)
+
 * SLIDER
 	- fill animation glitch
 	- tooltip offset wrong
@@ -30,6 +40,8 @@ BUGS
 
 NEW WIDGETS
 ------------------------------------------------------------------------------
+
+* HTML-INPUT
 
 * FIELDSET & LEGEND - style them
 
@@ -66,16 +78,11 @@ NEW WIDGETS
 FEATURES
 ------------------------------------------------------------------------------
 
-* DATE/TIME PICKERS & INPUTS:
-	- `format` prop: 'timestamp' or 'sql'
-		- or better yet, parse both, and have value_timestamp and value_sql props
-
 * ALL INPUTS
 	- make them compatible with forms:
-		- add 'name' property to all
-		- add 'form' property to all
-		- add hidden <input> to:
-			-
+		- DONE: add 'name' property to all
+		- DONE: add 'form' property to all
+		- DONE: add hidden <input> to all
 	- borderless auto-growing mode.
 	- undo/redo:
 		TODO: all date/time inputs
