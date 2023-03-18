@@ -899,9 +899,12 @@ css('.m-l-0' , '', ` margin-left:   0; `)
 css('.outline-focus', '', `
 	outline: 2px solid var(--outline-focus);
 	/*
-	bring outline inside element's box, otherwise it gets obscured by the next
+	Bring outline inside element's box, otherwise it gets obscured by the next
 	sibling if there's no gap between them (the alternative would be to bring
 	the element to the front while focused but that's too invasive).
+	There's still problems even with this, as setting opacity or filter on
+	the child partially obscures the outline of the parent.
+	Test case: readonly num-input with plus-minus buttons.
 	*/
 	outline-offset: var(--outline-focus-offset);
 `)
@@ -909,6 +912,15 @@ css('.outline-focus', '', `
 css('.no-outline', '', ` outline: none; `)
 
 css_state(':focus-visible', 'outline-focus')
+
+/*
+// TODO: replace focus outlines with this after implementing reusable CSS pseudos.
+css('.focus-ring', 'rel')
+css_state('.focus-ring:has(:focus-visible)::after', 'overlay', `
+	content: '';
+	border: 2px dotted var(--outline-focus);
+`)
+*/
 
 /* OVERFLOW --------------------------------------------------------------- */
 

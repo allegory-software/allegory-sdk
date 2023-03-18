@@ -443,8 +443,9 @@ function on_dom_load(fn) {
 // old problems with a page of JS. The cost is 1-3 frames at startup for
 // a site with some 3000 rules (most of which come from fontawesome).
 
-let class_props = obj() // {class->props} from all layers.
-let class_includes = obj() // {class->includes}
+let include_props = obj() // {include->props} from all layers.
+let include_includes = obj() // {include->[include1,...]}
+let include_pseudos = obj() // {include->
 
 on_dom_load(function() {
 	let t0 = time()
@@ -457,17 +458,17 @@ on_dom_load(function() {
 		let props = rule.cssText.slice(selector.length + 3, -2)
 		let selectors = selector.includes(',') ? selector.split(/\s*,\s*/) : [selector]
 		for (let selector of selectors) {
-			let [cls] = selector
+			let inc = selector
 				.replace(/::before$/, '') // strip ::before (fontawesome)
 				.replace(/::after$/ , '') // strip ::after  (?)
-				.captures(/^\.([^ >#:\.+~]+)$/) // simple .class selector
-			if (!cls)
+				.captures(/^\.([^ >#:\.+~]+)$/)[0] // simple .class selector
+			if (!inc)
 				return
 			props = props.trim()
-			if (class_props[cls])
-				class_props[cls] = class_props[cls] + '\n\t' + props
+			if (include_props[inc])
+				include_props[inc] = include_props[inc] + '\n\t' + props
 			else
-				class_props[cls] = props
+				include_props[inc] = props
 		}
 		n++
 	}
@@ -511,24 +512,53 @@ css_layer = memoize(function(layer) {
 	})
 
 	function add_includes(includes, pieces, e) {
-		for (let cls of includes.words()) {
-			let props = class_props[cls]
+		for (let inc of includes) {
+			let props = include_props[inc]
 			if (props == null) {
-				warn('css unknown class', cls, 'at',
+				warn('css unknown include', inc, 'at',
 					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 				continue
 			}
-			let cls_includes = class_includes[cls]
-			if (cls_includes) {
-				add_includes(cls_includes, pieces, e)
+			let inc_includes = include_includes[inc]
+			if (inc_includes) {
+				add_includes(inc_includes, pieces, e)
 			}
 			pieces.push('\n\t', props)
-			utils_usage[cls] = (utils_usage[cls] || 0)+1
+			utils_usage[inc] = (utils_usage[inc] || 0)+1
 		}
 	}
 
-	function add_rule(selector, includes, props) {
-		if (includes == null && props == null) { // verbatim CSS, eg. @keyframes
+	function add_include_pseudos(prefix, suffix, includes, pieces, e) {
+		/*
+		// TODO: finish this
+		for (let inc of includes) {
+			let props = include_props[inc]
+			if (props == null) {
+				warn('css unknown class', inc, 'at',
+					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+				continue
+			}
+			let inc_includes = include_includes[inc]
+			if (inc_includes) {
+				add_includes(inc_includes, pieces, e)
+			}
+			if (suffix) {
+				warn('css pseudo include on pseudo rule', inc, 'at',
+					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+				continue
+			}
+			pieces.push('\n:where(', prefix, ')', pseudo, ' {')
+			pieces.push('\n\t', props)
+			utils_usage[inc] = (utils_usage[inc] || 0)+1
+		}
+		*/
+	}
+
+	function add_rule(selector, includes_arg, props) {
+		let includes = words(repl(includes_arg, '', null))
+		if (includes && !includes.length)
+			includes = null
+		if (!includes && props == null) { // verbatim CSS, eg. @keyframes
 			pieces.push(selector.trim())
 			return
 		}
@@ -545,21 +575,25 @@ css_layer = memoize(function(layer) {
 			suffix = ''
 		}
 		pieces.push('\n:where(', prefix, ')', suffix, ' {')
-		if (includes) {
-			let e = new Error()
+		let e = includes && new Error() // for stack trace
+		if (includes)
 			pieces.push(function(dest_pieces) {
 				add_includes(includes, dest_pieces, e)
 			})
-		}
 		props = props && props.trim()
 		if (props)
 			pieces.push('\n\t', props)
 		pieces.push('\n}\n')
-
-		let [cls] = prefix.captures(/^\.([^ >#:\.+~]+)$/) // reusable class?
-		if (cls) {
-			class_props[cls] = catany('\n\t', class_props[cls], props) || ''
-			class_includes[cls] = catany(' ', class_includes[cls], includes)
+		// some includes can be rules with :: which we must add as separate rules.
+		if (includes)
+			pieces.push(function(dest_pieces) {
+				add_include_pseudos(prefix, suffix, includes, dest_pieces, e)
+			})
+		let inc = prefix.captures(/^\.([^ >#:\.+~]+)$/)[0] // reusable class?
+		if (inc) {
+			include_props[inc] = catany('\n\t', include_props[inc], props) || ''
+			if (includes)
+				attr(include_includes, inc, array).extend(includes)
 		}
 	}
 
@@ -1924,7 +1958,7 @@ sets css classes:
 // move the focus ring from focused element to the outermost element with `.focus-ring`.
 css_role_state('.focus-ring:has(.focus-outside:focus-visible)', 'outline-focus') // outermost
 css_role_state('.focus-ring .focus-ring:has(.focus-outside:focus-visible)', 'no-outline') // not outermost
-css_role_state_firefox('.focus-ring:focus-ring', 'outline-focus') // no :has() yet on FF.
+css_role_state_firefox('.focus-ring:focus-within', 'outline-focus') // no :has() yet on FF.
 css_role_state('.focus-outside:focus-visible', 'no-outline')
 
 // Popup focusables attached to a focusable are DOM-wise within the focusable,
@@ -2000,7 +2034,7 @@ DOM, they call their update() method which adds them to a global update set.
 On the next animation frame, their do_update() method is called in which they
 update their DOM, or at least the part of their DOM that they can update
 without measuring the DOM in any way and without accessing the DOM of other
-widgets in any way. In do_update() widgets can call position() which asks to
+widgets in any way. do_update() also calls position(), which asks to
 be allowed to measure the DOM later. In stage 2, for the widgets that called
 position(), their do_measure() is called in which they can call rect() but
 only on themselves and their parents. Stage 3, their do_position() method is
@@ -3255,7 +3289,7 @@ e.modal = function(on) {
 
 root.on('keydown', function(key, shift, ctrl, alt, ev) {
 	if (key == 'Tab') {
-		let modal = ev.target.closest('.modal') || this
+		let modal = ev.target.closest('.modal, .popup') || this
 		if (!modal)
 			return
 		let focusables = modal.focusables()
