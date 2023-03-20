@@ -83,7 +83,7 @@ DOM NAVIGATION INCLUDING TEXT NODES
 
 DOM NAVIGATION EXCLUDING TEXT NODES
 
-	e.at[i], e.len, e.at.length, e.parent
+	e.at[i], e.len, e.at.len, e.parent
 	e.index
 	e.first, e.last, e.next, e.prev
 
@@ -117,7 +117,8 @@ DOM MANIPULATION
 	e.replace([e0], te)
 	e.move([pe], [i0])
 	e.clear()
-	update_element_list([id|{id:,...}|e, ...], [e1, ...]) -> [e1, ...]
+	diff_element_list([id|{id:,...}|e, ...], [e1, ...]) -> [e1, ...]
+	e.make_items_prop([prop_name], [html_items]) -> html_items
 	tag(tag, [attrs], [e1,...])
 	div(...)
 	span(...)
@@ -260,7 +261,7 @@ ELEMENT STATE
 	e.make_disablable()
 		e.disabled
 		e.disable(reason, disabled)
-	e.make_focusable([focusable_element1, ...])
+	e.make_focusable(['focus-ring'], [focusable_element1, ...])
 		e.tabindex
 		e.focusable
 	focused_focusable([e]) -> e
@@ -444,13 +445,21 @@ function on_dom_load(fn) {
 // you restyle elements without accidentally muting role/state-modifier styles.
 // Second, you get composable CSS without silly offline preprocessors.
 // Now you can style with utility classes inside arbitrary CSS selectors
-// including those with :hover and :focus-visible. Now you can use fontawesome
+// including those with :hover and :focus-visible, and you can use fontawesome
 // icons by name inside ::before rules. Third, because you get to put widget
 // styles near the widget code that they're coupled to. Fourth, because now
 // you get warnings when mistyping utility class names, which also facilitates
 // refactoring the utility classes. Fifth, because you get to solve all these
-// old problems with a page of JS. The cost is 1-3 frames at startup for
+// old problems with two pages of JS. The cost is 1-3 frames at startup for
 // a site with some 3000 rules (most of which come from fontawesome).
+
+// NOTE: Only rules of form `.class` and `.class::pseudo` are reusable.
+// Rules of form `.class::pseudo` must be used as if they were `.class`!
+
+// NOTE: Conflicting classes behave differently when used as includes in
+// css() declarations and when used directly in the class attr of an element.
+// When used as includes, include order applies. When used in the class attr,
+// source order applies.
 
 let include_props = obj() // {include->props} from all layers.
 let include_includes = obj() // {include->[include1,...]}
@@ -1522,12 +1531,12 @@ property(Element, 'index', {
 // diff an element array against a new words/array of elements/element-ids/element-prop-vals.
 // elements not in the old array are created, elements present in the old array
 // or having the same id are retained, elements not in the new array are marked
-// for removal by setting the `_remove` flag. if t and cur_elems have the same
+// for removal by setting the `_removed` flag. if t and cur_elems have the same
 // contents, cur_elems is returned.
 {
 let cur_set = set()
 let cur_by_id = map()
-function update_element_list(t, cur_elems) {
+function diff_element_list(t, cur_elems) {
 	t = isstr(t) ? t.words() : t
 	if (t.equals(cur_elems))
 		return cur_elems
@@ -1538,7 +1547,7 @@ function update_element_list(t, cur_elems) {
 		cur_set.add(item)
 		if (item.id)
 			cur_by_id.set(item.id, item)
-		item._remove = true
+		item._removed = true
 	}
 	// create new items or reuse existing ones as needed.
 	let items = []
@@ -1547,10 +1556,48 @@ function update_element_list(t, cur_elems) {
 		let cur_item = cur_set.has(v) ? v : cur_by_id.get(isstr(v) ? v : v.id)
 		let item = cur_item || element(isstr(v) ? {id: v} : v)
 		items.push(item)
-		item._remove = false
+		item._removed = false
 	}
 	return items
 }
+}
+
+/* items property that is a list of elements mixin ---------------------------
+
+publishes:
+  e.items
+when items are set, it sets:
+	item._removed
+calls:
+  e.update({items: trues})
+
+*/
+
+e.make_items_prop = function(ITEMS, html_items) {
+
+	let e = this
+	ITEMS = ITEMS || 'items'
+
+	function serialize(items) {
+		let t = []
+		for (let item of items)
+			t.push(item.serialize())
+		return t
+	}
+
+	e.prop(ITEMS, {type: 'array', element_type: 'node',
+			serialize: serialize, convert: diff_element_list,
+			default: empty_array, updates: ITEMS})
+
+	if (e.len) {
+		e.init_child_components()
+		if (!html_items) {
+			html_items = [...e.children]
+			e.clear()
+		}
+		return html_items
+	}
+
 }
 
 // util to convert an array to a html bullet list ----------------------------
@@ -1957,8 +2004,9 @@ e.disable = function(...args) {
 
 /* element focusable mixin ---------------------------------------------------
 
-A focusable is an element with a tabindex that disables focusing when the
-element disabled
+A focusable is an element with a tabindex (or with a child or more with a tabindex)
+that has changeable focusable state and becomes unfocusable when it's disabled.
+It can also be made to show a focus ring on behalf of its inside focusables.
 
 publishes:
 	e.tabindex
@@ -1975,12 +2023,15 @@ sets css classes:
 // move the focus ring from focused element to the outermost element with `.focus-ring`.
 css_role_state('.focus-ring:has(.focus-outside:focus-visible)', 'outline-focus') // outermost
 css_role_state('.focus-ring .focus-ring:has(.focus-outside:focus-visible)', 'no-outline') // not outermost
-css_role_state_firefox('.focus-ring:focus-within', 'outline-focus') // no :has() yet on FF.
 css_role_state('.focus-outside:focus-visible', 'no-outline')
 
-// Popup focusables attached to a focusable are DOM-wise within the focusable,
-// but visually they're near it. Mark them as such with the .not-within class
-// so that they get a focus outline instead of their outermost focusable ancestor getting it.
+// Firefox doesn't have :has() yet. Luckily for us, most of our widgets that
+// use .focus-ring have input elements with .focus-outside, and for input elements
+// :focus-within is the same as :has(:focus-visible).
+css_role_state_firefox('.focus-ring:focus-within', 'outline-focus')
+
+// Popups are DOM-wise "inside" their parent, but visually they're near it,
+// so the whole outer focus ring thing doesn't apply across popup boundaries.
 css_role_state('.not-within:has(.focus-outside:focus-visible)', 'outline-focus')
 css_role_state('.focus-ring:has(.not-within .focus-outside:focus-visible)', 'no-outline')
 
@@ -1989,18 +2040,20 @@ e.make_focusable = function(...fes) {
 	let e = this
 	e.make_focusable = noop
 
-	if (!fes.length)
+	if (fes[0] == 'focus-ring') {
+		fes.shift()
+		assert(fes.len)
+		e.class('focus-ring')
+		for (let fe of fes)
+			fe.class('focus-outside')
+	}
+
+	if (!fes.len)
 		fes.push(e)
 
 	for (fe of fes)
 		if (!fe.hasattr('tabindex'))
 			fe.attr('tabindex', 0)
-
-	if (fes[0] != e) {
-		e.class('focus-ring')
-		for (let fe of fes)
-			fe.class('focus-outside')
-	}
 
 	function update() {
 		let can_be_focused = e.focusable && !e.disabled
@@ -2221,9 +2274,6 @@ let resize_observer = new ResizeObserver(function(entries) {
 installers.resize = function() {
 	if (this == window)
 		return // built-in.
-	if (this.__detecting_resize)
-		return
-	this.__detecting_resize = true
 	let observing
 	function bind(on) {
 		if (on) {
@@ -2252,9 +2302,6 @@ let attr_change_observer = new MutationObserver(function(mutations) {
 				mut.target.attr(mut.attributeName), mut.oldValue)
 })
 installers.attr_changed = function() {
-	if (this.__detecting_attr_changes)
-		return
-	this.__detecting_attr_changes = true
 	let observing
 	function bind(on) {
 		if (on) {
@@ -2282,9 +2329,6 @@ let nodes_change_observer = new MutationObserver(function(mutations) {
 		mut.target.fire('nodes_changed', mut)
 })
 installers.nodes_changed = function() {
-	if (this.__detecting_node_changes)
-		return
-	this.__detecting_node_changes = true
 	let observing
 	function bind(on) {
 		if (on) {
@@ -2324,9 +2368,6 @@ alias(PointerEvent, 'ctrl' , 'ctrlKey')
 alias(PointerEvent, 'alt'  , 'altKey')
 
 installers.hover = function() {
-	if (this.__hover_installed)
-		return
-	this.__hover_installed = true
 	this.on('pointerover', function(ev, mx, my) {
 		if (this.pointer_captured)
 			return
@@ -2371,15 +2412,19 @@ callers.pointerdown = function(ev, f) {
 		ret = f.call(this, ev, ev.clientX, ev.clientY)
 	else if (ev.which == 3)
 		ret = this.fireup('rightpointerdown', ev, ev.clientX, ev.clientY)
-	if (ret == 'capture') {
-		this.setPointerCapture(ev.pointerId)
-		this.pointer_captured = true
-		ret = false
-	}
 	return ret
 }
 
+// NOTE: capturing the mouse on ^pointerdown inhibits ^click and ^dblclick on the children.
+// To fix, listen for ^click / ^dblclick on the parent and use document.elementFromPoint()
+// to identify the target child that was actually clicked.
 method(EventTarget, 'capture_pointer', function(ev, move, up) {
+
+	this.setPointerCapture(ev.pointerId)
+	if (warn_if(!this.hasPointerCapture(ev.pointerId), 'setPointerCapture failed'))
+		return
+	this.pointer_captured = true
+
 	move = or(move, return_false)
 	up   = or(up  , return_false)
 	let mx0 = ev.clientX
@@ -2395,7 +2440,10 @@ method(EventTarget, 'capture_pointer', function(ev, move, up) {
 	}
 	this.on('pointermove', wrap_move)
 	this.on('pointerup'  , wrap_up)
-	return 'capture'
+
+	// return false so you can call `return this.pointer_capture(ev, ...)`
+	// inside a ^pointerdown handler.
+	return false
 })
 
 callers.pointerup = function(ev, f) {
@@ -2442,12 +2490,12 @@ function force_cursor(cursor) {
 /* drag & drop protocol ------------------------------------------------------
 
 TL;DR:
-- as a source, listen on start_drag(), stared_drag(), dragging(), stop_drag().
-  call start(payload, payload_rect) inside start_drag() to start the drag.
-- as a dest, listen on drag_started(), drag_stopped(), dropping(), drop(),
-  and possibly accept_drop(). call add_drop_area(elem, drop_area_rect)
-  inside drag_started() to register drop areas.
-
+- as a source, listen on ^start_drag, ^dragging, ^stop_drag.
+  call start(payload, payload_rect) inside ^start_drag to start the drag.
+- as a dest, listen on ^^drag_started, ^^drag_stopped, ^dropping, ^drop,
+  and possibly ^accept_drop. call add_drop_area(elem, drop_area_rect)
+  inside ^^drag_started to register drop areas.
+- return false from ^allow_drag until ready to drag to prevent premature pointer capturing.
 LONG(ER) VERSION:
 - listen on ^start_drag(pointermove_ev, start, mx, my, pointerdown_ev, mx0, my0)
   which is called on ^pointerdown and on ^pointermove.
@@ -2468,14 +2516,23 @@ LONG(ER) VERSION:
 - source elem also gets ^dragging(ev, payload, payload_rect, [dest_elem]) while the mouse moves,
   and canceling it means refusal to accept dest_elem as a drop target.
 - ^^drag_stopped(payload, payload_rect) is always announced when the drag stopped.
+- ^allow_drag(ev, mx, my, down_mx, down_my) is called before pointer is captured
+  in order to allow default behavior that would otherwise be inhibited by pointer
+  capturing (eg. clicking on a child).
+
+NOTE: this implementation is more complicated and less correct than it could be
+bacause we don't want to start capturing the mouse on ^pointerdown because that
+inhibits ^click and ^dblclick on the children.
 
 */
 installers.start_drag = function() {
-	this.on('pointerdown', function(ev, mx0, my0) {
 
-		let source_elem = this
-		let down_ev = ev
-		let mx, my
+	let e = this
+	let down_ev, mx0, my0
+
+	function start_drag(ev, mx, my) {
+
+		let source_elem = e
 		let dragging, payload
 		let px, py, pw, ph // payload rect in relative-to-cursor coords.
 		let drop_areas = [] // [r1, ...]
@@ -2488,12 +2545,11 @@ installers.start_drag = function() {
 
 		function start(payload_arg, payload_r) {
 			dragging = true
-			payload = payload_arg || source_elem
+			payload = payload_arg || e
 			px = payload_r && payload_r.x - mx0 || 0
 			py = payload_r && payload_r.y - my0 || 0
 			pw = payload_r && payload_r.w || 0
 			ph = payload_r && payload_r.h || 0
-			source_elem.fireup('started_drag', payload)
 			announce('drag_started', payload, add_drop_area, source_elem)
 		}
 
@@ -2506,35 +2562,34 @@ installers.start_drag = function() {
 			my = my1
 			if (!dragging)
 				source_elem.fireup('start_drag', ev, start, mx, my, down_ev, mx0, my0)
-			if (dragging) {
-				payload_r.x = mx + px
-				payload_r.y = my + py
-				payload_r.w = pw
-				payload_r.h = ph
-				let max_area = 0
-				let last_dest_elem = dest_elem
-				dest_elem = null
-				for (let i = 0, n = drop_areas.length; i < n; i++) {
-					let drop_area_r = drop_areas[i]
-					let cr = payload_r.clip(drop_area_r, temp_r)
-					let area = cr.w * cr.h
-					if (pw == 0 || ph == 0 || area > 0) {
-						let e = drop_elems[i]
-						if (e.fire('accept_drop', ev, payload, payload_r, source_elem)) {
-							if (area > max_area) {
-								max_area = area
-								dest_elem = e
-							}
+			assert(dragging)
+			payload_r.x = mx + px
+			payload_r.y = my + py
+			payload_r.w = pw
+			payload_r.h = ph
+			let max_area = 0
+			let last_dest_elem = dest_elem
+			dest_elem = null
+			for (let i = 0, n = drop_areas.length; i < n; i++) {
+				let drop_area_r = drop_areas[i]
+				let cr = payload_r.clip(drop_area_r, temp_r)
+				let area = cr.w * cr.h
+				if (pw == 0 || ph == 0 || area > 0) {
+					let e = drop_elems[i]
+					if (e.fire('accept_drop', ev, payload, payload_r, source_elem)) {
+						if (area > max_area) {
+							max_area = area
+							dest_elem = e
 						}
 					}
 				}
-				if (!source_elem.fire('dragging', ev, payload, payload_r, dest_elem))
-					dest_elem = null
-				if (last_dest_elem && last_dest_elem != dest_elem)
-					last_dest_elem.fire('dropping', ev, false, payload, payload_r)
-				if (dest_elem)
-					dest_elem.fire('dropping', ev, true, payload, payload_r)
 			}
+			if (!source_elem.fire('dragging', ev, payload, payload_r, dest_elem))
+				dest_elem = null
+			if (last_dest_elem && last_dest_elem != dest_elem)
+				last_dest_elem.fire('dropping', ev, false, payload, payload_r)
+			if (dest_elem)
+				dest_elem.fire('dropping', ev, true, payload, payload_r)
 		}
 
 		function source_elem_up(ev, mx, my) {
@@ -2550,8 +2605,48 @@ installers.start_drag = function() {
 
 		source_elem_move(ev, mx0, my0)
 
-		return this.capture_pointer(ev, source_elem_move, source_elem_up)
+		return e.capture_pointer(ev, source_elem_move, source_elem_up)
+	}
+
+	function check_drag(ev, mx, my) {
+		if (!e.fireup('allow_drag', ev, mx, my, down_ev, mx0, my0))
+			return
+		return start_drag(ev, mx, my)
+	}
+
+	e.on('pointermove', function(ev, mx, my) {
+		if (e.pointer_captured)
+			return
+		if (!down_ev)
+			return
+		if (!ev.buttons)
+			return
+		return check_drag(ev, mx, my)
 	})
+
+	e.on('pointerleave', function(ev) {
+		if (e.pointer_captured)
+			return
+		down_ev = false
+	})
+
+	e.on('pointerup', function(ev) {
+		if (e.pointer_captured)
+			return
+		if (ev.buttons) // pressed both buttons?
+			return
+		down_ev = false
+	})
+
+	e.on('pointerdown', function(ev, mx, my) {
+		if (e.pointer_captured)
+			return
+		down_ev = ev
+		mx0 = mx
+		my0 = my
+		return check_drag(ev, mx, my)
+	})
+
 }
 
 /* keyboard events -----------------------------------------------------------
@@ -3262,12 +3357,8 @@ function resizeable_canvas(pw, ph) {
 	ct.on_redraw = function(f) {
 		ct.do_after('do_redraw', f)
 	}
-	// Firefox loads fonts into canvas asynchronously, even though said fonts
-	// are already loaded and were preloaded using <link preload>.
-	// NOTE: this is only visible with the debugger on.
 	ct.on_bind(function(on) {
 		document.on('layout_changed', update, on)
-		document.fonts.on('loadingdone', update, on)
 	})
 	ct.redraw_now = redraw
 	ct.canvas = canvas

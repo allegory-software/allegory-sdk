@@ -218,6 +218,7 @@ EVENTS
 	DEBUG_EVENTS_FIRE = false
 
 FAST GLOBAL EVENTS
+
 	listen(event, f, [on])
 	announce(event, ...args)
 
@@ -1778,8 +1779,10 @@ let on = function(name, f, enable, capture) {
 		return
 	}
 	let install = installers[name]
-	if (install)
+	if (install && !(this.__installed && this.__installed[name])) {
 		install.call(this)
+		attr(this, '__installed')[name] = true
+	}
 	let listener
 	if (name.starts('raw:')) { // raw handler
 		name = name.slice(4)
@@ -1875,7 +1878,22 @@ Event.prototype.forward = function(e) {
 	return e.fire(ev)
 }
 
-// fast global events --------------------------------------------------------
+/* fast global events --------------------------------------------------------
+
+There are 4 types of events in here:
+
+TYPE           FIRE                  LISTEN
+------------------------------------------------------------------------------
+element        e.fire(k, ...)        e.on(k, f, [on])
+window         fire(k, ...)          on(k, f, [on])
+announce       announce(k, ...)      listen(k, f, [on])
+broadcast      broadcast(k, ...)     on(k, f, [on])
+
+There's no difference between window and announce events except these
+are simpler and faster. TBH I just created them as a knee-jerk reaction
+to how much garbage a simple event can produce.
+
+*/
 
 let all_handlers = obj() // {event_name->set(f)}
 
@@ -2119,6 +2137,8 @@ function post(url, upload, success, fail, opt) {
 }
 
 // inter-window event broadcasting -------------------------------------------
+
+// TODO: use announce() instead.
 
 window.addEventListener('storage', function(e) {
 	// decode the message.
