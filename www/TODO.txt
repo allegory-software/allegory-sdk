@@ -1,6 +1,8 @@
 THINK
 ------------------------------------------------------------------------------
 
+* TABS auto-menu with items that don't fit the bar
+
 * DATE/TIME PICKERS & INPUTS:
 	- server value in UTC but input_value in current locale?
 		- input_value in UTC when it's a timestamp
@@ -173,7 +175,6 @@ LATERZ
 - NAV multi-col luookup (i.e. val_col -> val_cols)
 - BUTTON with menu or list dropdown
 * INPUT save on typing with delay: field attr "save_on_input" true or false
-- TABS auto-menu with items that don't fit the bar
 - TABS pop-out button
 - SPLIT context menu: vertical/horizontal, %/fixed
 - CHART pie use % column and "others" group from nav

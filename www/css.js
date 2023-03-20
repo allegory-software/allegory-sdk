@@ -12,8 +12,8 @@ CSS CLASSES
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
 	ALIGN INLINE  inline block t-{l r c j m t b bas sub sup} float-{l r}
-	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex-[no]wrap order-{1 2 last}
-	ALIGN GRID    grid-{l r c sb s t b m bl}', '', {x y}{1-5} x..x y..y
+	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex[-no][-wrap] order-{1 2 last}
+	ALIGN GRID    grid-{l r c sb s t b m bl} grid-{x y}{1-5} x..x y..y grid
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
@@ -182,7 +182,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg-hover              : hsl(216  28%  12% / 1.0);
 	--bg-active             : hsl(216  28%  14% / 1.0);
 	--bg1                   : hsl(216  28%  15% / 1.0);
-	--bg1-hover             : hsl(216  28%  17% / 1.0);
+	--bg1-hover             : hsl(216  28%  19% / 1.0);
 	--bg2                   : hsl(216  28%  20% / 1.0);
 	--bg2-hover             : hsl(216  28%  22% / 1.0);
 	--bg3                   : hsl(216  28%  25% / 1.0);
@@ -584,9 +584,10 @@ css('.self-v-s', '', ` align-self: stretch; `)
 
 css('.flex-wrap  ', '', ` flex-wrap: wrap; `)
 css('.flex-nowrap', '', ` flex-flow: nowrap; `)
+css('.flex'       , '', ` display: flex; `) /* opposed to the default inline-flex */
 
-css('.order-1'  , '', ` order: 1; `)
-css('.order-2'  , '', ` order: 1; `)
+css('.order-1'   , '', ` order: 1; `)
+css('.order-2'   , '', ` order: 1; `)
 css('.order-last', '', ` order: 99999; `)
 
 /* flex & grid */
@@ -638,6 +639,8 @@ css('.grid-t' , '', ` display: inline-grid; align-items: start       ; `)
 css('.grid-b' , '', ` display: inline-grid; align-items: end         ; `)
 css('.grid-m' , '', ` display: inline-grid; align-items: center      ; `)
 css('.grid-bl', '', ` display: inline-grid; align-items: baseline    ; `)
+
+css('.grid', '', ` display: grid; `) /* opposed to the default inline-grid */
 
 css('.x1', '', ` grid-column-start: 1; `)
 css('.x2', '', ` grid-column-start: 2; `)
@@ -1007,6 +1010,7 @@ css('.bg-hover'  , '', ` background: var(--bg-hover); `)
 css('.bg-active' , '', ` background: var(--bg-active); `)
 css('.bg0'       , '', ` background: var(--bg0); `)
 css('.bg1'       , '', ` background: var(--bg1); `)
+css('.bg1-hover' , '', ` background: var(--bg1-hover); `)
 css('.bg2'       , '', ` background: var(--bg2); `)
 css('.bg3'       , '', ` background: var(--bg3); `)
 css('.bg-alt'    , '', ` background: var(--bg-alt); `)
