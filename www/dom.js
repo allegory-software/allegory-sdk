@@ -162,12 +162,9 @@ DEFERRED DOM UPDATING
 	e.update([opt])
 	e.position()
 	e.on_update(f)
+	e.on_first_update(f)
 	e.on_measure(f)
 	e.on_position(f)
-
-TIMERS
-
-	e.timer(f) -> tm
 
 ELEMENT INIT
 
@@ -257,7 +254,7 @@ ELEMENT STATE
 	e.focusables()
 	e.effectively_disabled
 	e.effectively_hidden
-	e.focus_first()
+	e.focus_first() -> found
 	e.make_disablable()
 		e.disabled
 		e.disable(reason, disabled)
@@ -2216,6 +2213,14 @@ e.on_update = function(f) {
 	this.do_after('do_update', f)
 }
 
+e.on_first_update = function(f) {
+	this.on_update(function(opt) {
+		if (this._updated_once) return
+		this._updated_once = true
+		f(opt)
+	})
+}
+
 e._do_update = function() {
 	let opt = this._update_opt
 	this._update_opt = null
@@ -2248,16 +2253,6 @@ e.on_measure = function(f) {
 e.on_position = function(f) {
 	this._bound = this.bound || false
 	this.do_after('do_position', f)
-}
-
-// timer that is paused on unbind --------------------------------------------
-
-e.timer = function(f) {
-	let tm = timer(f)
-	this.on_bind(function(on) {
-		if (!on) tm()
-	})
-	return tm
 }
 
 // events & event wrappers ---------------------------------------------------
@@ -2946,7 +2941,7 @@ property(Element, 'contenteditable', {
 
 // for contenteditables.
 method(HTMLElement, 'insert_at_caret', function(s) {
-	let node = H(s)
+	let node = html(s)
 	let sel = getSelection()
 	let range = sel.getRangeAt(0)
 	range.insertNode(node)
@@ -3175,6 +3170,7 @@ easing.bounce = function(t) {
 }
 
 // restartable, abortable, callback-based transitions.
+// like the animation API but simpler.
 function transition(f) {
 	let raf_id, t0
 	let dt, y0, y1, ease_f, ease_way, ease_args
