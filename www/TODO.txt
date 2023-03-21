@@ -27,6 +27,11 @@ THINK
 BUGS
 ------------------------------------------------------------------------------
 
+* TABS
+	- drag the other after drag bug
+	- sel bar animated while typing
+	- ctrl+enter insert_at_caret bug
+
 * NUM-INPUT
 	- validation on increment (and validation in general)
 

@@ -157,7 +157,6 @@ css_state('.focusable-items:focus-within .item.focused', '', `
 	color      : var(--fg-focused);
 `)
 
-
 css_state('.focusable-items .item.focused.selected', '', `
 	background : var(--bg-unfocused-selected);
 	color      : var(--fg-unfocused-selected);
@@ -391,6 +390,9 @@ tooltip = component('tooltip', function(e) {
 			t = num(t)
 		close_timer(t)
 	}
+	e.on_bind(function(on) {
+		if (!on) close_timer()
+	})
 
 	// keyboard, mouse & focusing behavior ------------------------------------
 
@@ -595,7 +597,7 @@ item css classes:
 	dragging
 	grabbed
 uses:
-	list_can_drag_elements (defaults to false!)
+	list_can_drag_elements (defaults to true)
 fires:
 	items_changed()
 
@@ -608,12 +610,14 @@ css_state('.grabbed', 'z6')
 // Use padding and gap on the list instead, that works.
 css_role('.list-drag-elements > *', 'm0')
 
-e.make_list_drag_elements = function() {
+e.make_list_drag_elements = function(can_drag_elements) {
 
 	let e = this
 	e.make_list_drag_elements = noop
 
 	e.class('list-drag-elements')
+
+	e.list_can_drag_elements = can_drag_elements != false
 
 	// offsets when stacking multiple elements for dragging.
 	let ox = 5
@@ -872,18 +876,20 @@ e.make_list_drop_elements = function() {
 /* make list elements movable within the same list only ----------------------
 
 uses:
-	list_can_move_elements (defaults to false!)
-requires:
-	list_can_drag_elements (defaults to false!)
+	list_can_move_elements (defaults to true)
+	list_can_drag_elements (defaults to true)
 
 */
 
-e.make_list_items_movable = function() {
+e.make_list_items_movable = function(can_move) {
 
 	let e = this
 
 	e.make_list_drag_elements()
 	e.make_list_drop_elements()
+
+	e.list_can_drag_elements = can_move != false
+	e.list_can_move_elements = can_move != false
 
 	let r, horiz
 
@@ -1949,14 +1955,14 @@ css_state('tabs-tab.selected', 'fg')
 css_state('tabs-tab.tab-selected', 'fg')
 css_state('tabs-tab:is(:hover)', 'label-hover')
 
-css('tabs-title', 'noselect nowrap p-x-4', `
+css('tabs-title', 'noselect nowrap-dots p-x-4', `
 	padding-top    : .6em;
 	padding-bottom : .4em;
 	max-width: 10em;
 `)
 
 // make height stable when there are no tabs.
-css('tabs-box::before', 'zwsp', `
+css('.tabs:is([tabs_side=top],[tabs_side=bottom]) > tabs-header tabs-box::before', 'zwsp', `
 	padding-top    : .6em;
 	padding-bottom : .4em;
 `)
@@ -1986,7 +1992,7 @@ css_state('.tabs:not(.moving) > tabs-header tabs-selection-bar', '', `
 
 // tab renaming
 css_state('tabs-tab.renaming', 'bg0 fg')
-css_state('tabs-tab.renaming tabs-title', 'no-outline')
+css_state('tabs-tab.renaming tabs-title', 'no-outline nowrap')
 css_state('tabs-tab.renaming::before', 'overlay click-through', `
 	content: '';
 	border: 2px dashed var(--fg-link);
@@ -2006,7 +2012,7 @@ tabs = component('tabs', 'Containers', function(e) {
 	e.prop('tabs_side', {type: 'enum',
 			enum_values: 'top bottom left right', default: 'top', attr: true})
 
-	e.prop('auto_focus_first_item', {type: 'bool', default: true})
+	e.prop('auto_focus', {type: 'bool', default: true})
 
 	e.prop('header_width', {type: 'number'})
 
@@ -2024,15 +2030,10 @@ tabs = component('tabs', 'Containers', function(e) {
 		classes: 'tabs-add-button',
 		icon: 'fa fa-plus',
 		bare: true,
-	})
+	}).hide()
 	e.tabs_box = tag('tabs-box')
 	e.tabs_box.make_list_items_focusable()
-	e.tabs_box.make_list_items_movable()
-	e.tabs_box.on('allow_drag', () => !e.renaming)
-	e.tabs_box.on('start_drag', tabs_box_start_drag)
-	e.tabs_box.on('stop_drag', tabs_box_stop_drag)
-	e.tabs_box.on('drop', tabs_box_drop)
-	e.tabs_box.on('keydown', tabs_box_keydown)
+	e.tabs_box.make_list_items_movable(false)
 	e.header = tag('tabs-header', 0,
 		e.tabs_box, e.selection_bar, e.fixed_header, e.add_button)
 	e.content = tag('tabs-content', {class: 'x-container'})
@@ -2047,7 +2048,7 @@ tabs = component('tabs', 'Containers', function(e) {
 
 	function item_label_changed() {
 		if (!this._tab) return
-		update_tab_title(this._tab)
+		update_tab_title(this._tab) // TODO: defer this
 	}
 
 	function update_tab_title(tab) {
@@ -2056,18 +2057,22 @@ tabs = component('tabs', 'Containers', function(e) {
 		tab.title_box.title = tab.title_box.textContent
 	}
 
-	function update_tab_state(tab, select) {
+	let selected_tab, renaming_tab
+
+	function update_selected_tab_state(selected) {
+		tab = selected_tab
 		if (!tab) return
-		tab.xbutton.hidden = !(select && e.can_remove_items)
-		tab.title_box.contenteditable = !!(select && renaming_tab)
-		tab.class('tab-selected', !!select)
+		tab.xbutton.hidden = !(selected && e.can_remove_items)
+		tab.class('tab-selected', !!selected)
 	}
 
-	let selected_tab = null
-
-	e.set_can_move_items = function(v) {
-		e.tabs_box.list_can_drag_elements = v
-		e.tabs_box.list_can_move_elements = v
+	function update_renaming_tab_state(on) {
+		tab = renaming_tab
+		if (!tab) return
+		e.class('renaming', on)
+		tab.class('renaming', on)
+		tab.title_box.contenteditable = on
+		tab.title_box.sx = 0
 	}
 
 	e.on_update(function(opt) {
@@ -2091,10 +2096,12 @@ tabs = component('tabs', 'Containers', function(e) {
 					tab.tabs = e
 					tab.title_box = title_box
 					tab.xbutton = xbutton
-					tab.on('pointerdown' , tab_pointerdown)
-					tab.on('dblclick'    , tab_dblclick)
-					title_box.on('input' , tab_title_input)
-					title_box.on('blur'  , title_box_blur)
+					tab.on('pointerdown'      , tab_pointerdown)
+					tab.on('dblclick'         , tab_dblclick)
+					title_box.on('input'      , tab_title_box_input)
+					title_box.on('blur'       , tab_title_box_blur)
+					title_box.on('keydown'    , tab_title_box_keydown)
+					title_box.on('pointerdown', tab_title_box_pointerdown)
 					xbutton.on('pointerdown', xbutton_pointerdown)
 					tab.item = item
 					item._tab = tab
@@ -2111,26 +2118,35 @@ tabs = component('tabs', 'Containers', function(e) {
 
 		e.header.w = e.header_width
 
-		let tab = selected_item && selected_item._tab
-
-		if (selected_tab != tab) {
-			update_tab_state(selected_tab)
-			selected_tab = tab
-			update_tab_state(tab, true)
-		}
-
 		e.content.set(selected_item)
 
-		if (tab)
-			if (opt.focus_tab)
-				tab.focus()
-			else if (opt.focus_tab_content != false && e.auto_focus_first_item)
-				tab.item.focus_first()
+		let new_selected_tab = selected_item && selected_item._tab
+		let selected_tab_changed = selected_tab != new_selected_tab
+		if (selected_tab_changed) {
+			update_selected_tab_state(false)
+			selected_tab = new_selected_tab
+		}
+		update_selected_tab_state(true)
 
-		if (tab)
-			update_tab_state(tab, true)
+		if (selected_tab_changed)
+			e.tabs_box.focus_item(selected_tab ? selected_tab.index : false)
 
-		e.add_button.hidden = !e.can_add_items
+		let new_renaming_tab = renaming_item && renaming_item._tab
+		let renaming_tab_changed = renaming_tab != new_renaming_tab
+		if (renaming_tab_changed) {
+			update_renaming_tab_state(false)
+			renaming_tab = new_renaming_tab
+		}
+		update_renaming_tab_state(true)
+
+		if (renaming_tab_changed && renaming_tab) {
+			renaming_tab.title_box.focus()
+			renaming_tab.title_box.select_all()
+		} else if (opt.focus_content) {
+			e.content.focus_first()
+		} else if (opt.focus_tabs) {
+			e.tabs_box.focus()
+		}
 
 	})
 
@@ -2206,155 +2222,121 @@ tabs = component('tabs', 'Containers', function(e) {
 				return item
 	}
 
+	// config -----------------------------------------------------------------
+
+	e.set_can_rename_items = function(v) {
+		if (!v) {
+			set_renaming(false)
+			renaming_tab = null
+		}
+	}
+
+	e.set_can_add_items = function(v) {
+		e.add_button.hidden = !v
+	}
+
+	e.set_can_move_items = function(v) {
+		e.tabs_box.list_can_drag_elements = v
+		e.tabs_box.list_can_move_elements = v
+	}
+
 	// selected item ----------------------------------------------------------
 
 	let selected_item = null
 
-	function select_item(item, opt) {
+	function select_item(item, focus_content) {
 		if (selected_item == item)
 			return
-		selected_item = item
 		set_renaming(false)
-		e.update(opt)
+		selected_item = item
+		e.update()
+		focus_content = item && focus_content != false && e.auto_focus || false
+		e.update({focus_content: focus_content})
+		if (focus_content)
+			return true
 	}
 
-	function select_tab(tab, opt) {
-		select_item(tab && tab.item, opt)
-	}
-
-	function find_item(id) {
-		if (id)
-			for (let item of e.items)
-				if (item.id == id)
-					return item
+	function find_selected_item() {
+		return selected_item && e.items.find(item => item == selected_item)
+			|| e.selected_item_id && e.items.find(item => item.id == e.selected_item_id)
 	}
 
 	e.set_items = function() {
-		select_item(find_item(e.selected_item_id) || url_path_item() || e.items[0])
+		select_item(find_selected_item() || url_path_item() || e.items[0] || null)
 	}
 
 	// tab moving -------------------------------------------------------------
 
-	function tabs_box_start_drag() {
-		e.class('moving', true)
-	}
-	function tabs_box_stop_drag() {
-		e.class('moving', false)
-	}
+	e.tabs_box.on('allow_drag', function() {
+		return !renaming_item
+	})
 
-	function tabs_box_drop() {
+	e.tabs_box.on('start_drag', function() {
+		e.class('moving', true)
+	})
+
+	e.tabs_box.on('stop_drag', function() {
+		e.class('moving', false)
+	})
+
+	e.tabs_box.on('drop', function() {
 		let items = []
 		for (let tab of e.tabs_box.at)
 			if (tab.item)
 				items.push(tab.item)
-		let sel_item = selected_item
 		e.items = items
-		selected_item = sel_item
-	}
+	})
 
 	// tab renaming -----------------------------------------------------------
 
-	let renaming_tab, renaming_by_key
+	let renaming_item
 
-	function tab_title_input() {
-		if (selected_tab)
-			selected_tab.item.label = selected_tab.title_box.innerText
+	function set_renaming(item) {
+		renaming_item = item || null
 		e.update()
 	}
 
-	function set_renaming(on, tab, by_key) {
-		on = !!on
-		assert(!!tab == on)
-		if (on) {
-			if (renaming_tab && tab != renaming_tab)
-				set_renaming(false)
-			if (tab == renaming_tab)
-				return
-			if (!e.can_rename_items)
-				return
-			renaming_tab    = tab
-			renaming_by_key = by_key
-		} else {
-			if (!renaming_tab)
-				return
-		}
-		e.class('renaming', on)
-		renaming_tab.class('renaming', on)
-		renaming_tab.title_box.contenteditable = on
-		if (on) {
-			tab.title_box.focus()
-			tab.title_box.select_all()
-		} else {
-			if (renaming_by_key) {
-				e.tabs_box.focus()
-			} else {
-				runafter(0, function() {
-					e.tabs_box.focus()
-				})
-			}
-			renaming_tab   = null
-			renaming_by_key = null
-		}
-	}
-
-	e.on_bind(function(on) {
-		if (!on)
-			set_renaming(false)
-	})
-
 	function tab_pointerdown(ev, mx, my) {
-		let tab = this
-		if (tab.title_box.contenteditable) {
-			ev.stopPropagation()
-			return
-		}
-		select_tab(tab)
-		// focusing on ^pointerdown screws up :focus-visible heuristic, but
-		// apparently if we do it on the next frame it doesn't.
-		// TODO: use `focusVisible` option instead when it will be supported.
-		runafter(0, function() {
-			tab.focus()
-		})
+		if (select_item(this.item))
+			return false // prevent list focusing if content was focused.
 	}
 
 	function tab_dblclick(ev, mx, my) {
-		set_renaming(this, true)
-	}
-
-	function tabs_box_keydown(key, shift, ctrl) {
-		let tab = this.focused_item
-		if (!tab)
-			return
-
-		// tab selecting
-		if (!renaming_tab && key == ' ' || key == 'Enter') {
-			select_tab(tab, true)
+		if (e.can_rename_items) {
+			set_renaming(this.item)
 			return false
 		}
-
-		// tab renaming
-		if (!renaming_tab && e.can_rename_items) {
-			if (key == ' ' || key == 'Enter' || key == 'F2') {
-				select_tab(tab, true)
-				return false
-			}
-		}
-		if (renaming_tab) {
-			if (ctrl && key == 'Enter') {
-				tab.title_box.insert_at_caret('<br>')
-				return false
-			}
-			if (key == 'Enter' || key == 'Escape' || key == 'F2') {
-				set_renaming(tab, false, true)
-				return false
-			}
-		}
 	}
 
-	function title_box_blur(ev) {
-		if (ev.relatedTarget && this.parent.contains(ev.relatedTarget))
+	function tab_title_box_input() {
+		renaming_tab.item.label = renaming_tab.title_box.innerText
+		e.position()
+	}
+
+	function tab_title_box_blur(ev) {
+		if (ev.relatedTarget && this.contains(ev.relatedTarget))
 			return
-		set_renaming(this.parent, false)
+		set_renaming(false)
+	}
+
+	function tab_title_box_pointerdown(ev) {
+		if (renaming_item == this.parent.item)
+			ev.stopPropagation() // prevent list focusing while editing
+	}
+
+	function tab_title_box_keydown(key, shift, ctrl, alt, ev) {
+		if (!renaming_item)
+			return
+		if ((ctrl || shift) && key == 'Enter') {
+			tab.title_box.insert_at_caret('<br>')
+			return false
+		}
+		if (key == 'Enter' || key == 'Escape' || key == 'F2') {
+			set_renaming(false)
+			e.update({focus_tabs: true})
+			return false
+		}
+		ev.stopPropagation() // prevent list navigation while editing
 	}
 
 	// tab adding -------------------------------------------------------------
@@ -2362,34 +2344,96 @@ tabs = component('tabs', 'Containers', function(e) {
 	e.create_item = noop // stub
 
 	function add_button_click() {
-		if (selected_tab == this)
-			return
 		let item = e.create_item()
 		if (!item)
 			return
 		e.items = [...e.items, item]
-		selected_item = item
-		e.update({focus_tab: true})
+		select_item(item)
 		return false
 	}
 
 	// tab removing -----------------------------------------------------------
 
-	e.remove_item = noop // stub
+	e.can_remove_item = return_true // stub
+	e.free_item = noop // stub
+
+	e.remove_item = function(item, animated, focus_content) {
+		if (animated) {
+			let tab = item._tab
+			if (tab) {
+				let pr = tab.rect()
+				let horiz = e.tabs_box.css('flexDirection') == 'row'
+				tab.w = pr.w
+				tab.h = pr.h
+				tab.animate(
+					[horiz ? {'width': '0px'} : {'height': '0px'}],
+					{duration: 100, easing: 'ease-out'}
+				).onfinish = function() {
+					e.remove_item(item, null, focus_content)
+					tab.w = null
+					tab.h = null
+				}
+				return
+			}
+		}
+		e.free_item(item)
+		let new_items = e.items.slice()
+		let item_index = new_items.remove_value(item)
+		let next_item = e.items[item_index+1] || e.items[item_index-1]
+		let next_selected_item = selected_item == item ? next_item : selected_item
+		e.items = new_items
+		select_item(next_selected_item, focus_content)
+		e.tabs_box.focus_item(next_item ? e.items.indexOf(next_item) : false)
+	}
 
 	function xbutton_pointerdown() {
-		let item = this.parent.item
-		let next_tab = this.parent.next || this.parent.prev
-		let next_item = selected_item == item && next_tab ? next_tab.item : null
-		if (e.remove_item(this.parent.item)) {
-			let items1 = e.items.slice()
-			assert(items1.remove_value(this.parent.item) != null)
-			e.items = items1
-			selected_item = next_item
-			e.update({focus_tab: true})
+		let tab = this.parent
+		let item = tab.item
+		if (e.can_remove_item(item)) {
+			this.hide()
+			e.remove_item(item, true)
 			return false
 		}
 	}
+
+	// key bindings -----------------------------------------------------------
+
+	e.tabs_box.on('keydown', function(key, shift, ctrl) {
+		let tab = this.focused_item
+		if (!tab)
+			return
+
+		// select tab
+		if (key == ' ' || key == 'Enter') {
+			select_item(tab.item, false)
+			return false
+		}
+
+		// enter tab renaming
+		if (e.can_rename_items && key == 'F2') {
+			set_renaming(tab.item)
+			return false
+		}
+
+		// add tab
+		if (key == 'Insert') {
+			let item = e.create_item()
+			if (!item)
+				return
+			let i = this.focused_item_index
+			e.items = e.items.slice().insert(i, item)
+			select_item(item, false)
+		}
+
+		// remove tab
+		if (key == 'Delete') {
+			if (e.can_remove_item(tab.item)) {
+				e.remove_item(tab.item, true, false)
+				return false
+			}
+		}
+
+	})
 
 	return {items: html_items}
 

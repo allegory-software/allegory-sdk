@@ -402,13 +402,20 @@ main.add(b)
 <!--------------------------------------------------------------------------->
 
 <xmp id=tabs_demo>
-<tabs>
-	<div label="First Tab">
+<d class="h self-h-t">
+	<button onclick="mytabs.tabs_side='top';"    >tabs_side=top   </button>
+	<button onclick="mytabs.tabs_side='bottom';" >tabs_side=bottom</button>
+	<button onclick="mytabs.tabs_side='left';"   >tabs_side=left  </button>
+	<button onclick="mytabs.tabs_side='right';"  >tabs_side=right </button>
+</d>
+<tabs id=mytabs>
+	<div label="First Tab" class="p-4">
 		<h1>This is the first tab</h1>
 		<p>You can put anything in here.</p>
+		<p>Content is focused on click subject to auto_focus option. <input></input></p>
 	</div>
 	<div label="Second Tab">
-		<h1>This is the second tab.</h1>
+		<h1>This is the second tab (no padding).</h1>
 		<p>You can put anything in here too.</p>
 	</div>
 </tabs>
@@ -429,6 +436,7 @@ main.add(b)
 	<div id=test_tabs_t1 label="First Tab" id=first_tab>
 		<h1>This is the first tab</h1>
 		<p>You can put anything in here.</p>
+		<p>Content is focused on click subject to auto_focus option. <input></input></p>
 	</div>
 	<div id=test_tabs_t2 label="Second Tab" id=second_tab>
 		<h1>This is the second tab.</h1>
@@ -436,11 +444,9 @@ main.add(b)
 	</div>
 </tabs>
 <script run>
+let n = 1
 test_tabs.create_item = function() {
-	return div({label: 'Wasup', class: 'p'}, 'Hello mate!')
-}
-test_tabs.remove_item = function() {
-	return true
+	return div({label: 'New Tab '+n++, class: 'p'}, 'Hello mate! ', input())
 }
 </script>
 </xmp>
