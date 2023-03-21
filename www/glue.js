@@ -99,11 +99,11 @@ ARRAYS
 	empty_array -> []                      global empty array, read-only!
 	range(i, j, step, f) -> a
 	a.set(a1) -> s
-	a.extend(a1)
-	a.insert(i, v)
+	a.extend(a1) -> a
+	a.insert(i, v) -> a
 	a.remove(i) -> v
 	a.remove_value(v) -> i
-	a.remove_values(cond)
+	a.remove_values(cond) -> a
 	a.last
 	a.len
 	a.equals(b, [i1], [i2]) -> t|f
@@ -1734,6 +1734,27 @@ function url_format(t) {
 	return path + (args ? '?' + args : '') + (fragment ? '#' + fragment : '')
 }
 
+/* events --------------------------------------------------------------------
+
+There are 5 types of events in this joint:
+
+TYPE           FIRE                  LISTEN
+------------------------------------------------------------------------------
+pseudo         e.do_foo()            e.do_{after|before}('do_foo', f)
+element        e.fire[up](k, ...)    e.on(k, f, [on])
+window         fire(k, ...)          on(k, f, [on])
+announce       announce(k, ...)      listen(k, f, [on])
+broadcast      broadcast(k, ...)     on(k, f, [on])
+
+Pseudo-events are just function composition. They are the fastest but can't
+be unhooked. Use them when extending widgets. Element events are what we get
+from the browser. Since most of them bubble you can use them on parents too.
+Events that are usually interesting to the outside world should be fired with
+announce() (preferred over firing native events on window/document). Broadcast
+should only be used when you need to sync all browser tabs of the same app.
+
+*/
+
 // DOM events ----------------------------------------------------------------
 
 {
@@ -1880,18 +1901,8 @@ Event.prototype.forward = function(e) {
 
 /* fast global events --------------------------------------------------------
 
-There are 4 types of events in here:
-
-TYPE           FIRE                  LISTEN
-------------------------------------------------------------------------------
-element        e.fire(k, ...)        e.on(k, f, [on])
-window         fire(k, ...)          on(k, f, [on])
-announce       announce(k, ...)      listen(k, f, [on])
-broadcast      broadcast(k, ...)     on(k, f, [on])
-
-There's no difference between window and announce events except these
-are simpler and faster. TBH I just created them as a knee-jerk reaction
-to how much garbage a simple event can produce.
+These do the same job as window.on(event, f) / window.fire(event, ...)
+except they are faster because they make no garbage.
 
 */
 
@@ -1912,6 +1923,41 @@ function announce(event, ...args) {
 	let handlers = all_handlers[event]; if (!handlers) return
 	for (let handler of handlers)
 		handler(...args)
+}
+
+// inter-window events -------------------------------------------------------
+
+// TODO: use announce() instead.
+
+window.addEventListener('storage', function(e) {
+	// decode the message.
+	if (e.key != '__broadcast')
+		return
+	let v = e.newValue
+	if (!v)
+		return
+	v = json_arg(v)
+	fire(v.topic, ...v.args)
+})
+
+// broadcast a message to other windows.
+function broadcast(topic, ...args) {
+	fire(topic, ...args)
+	save('__broadcast', '')
+	save('__broadcast', json({
+		topic: topic,
+		args: args,
+	}))
+	save('__broadcast', '')
+}
+
+function setglobal(k, v, default_v) {
+	let v0 = strict_or(window[k], default_v)
+	if (v === v0)
+		return
+	window[k] = v
+	broadcast('global_changed', k, v, v0)
+	broadcast(k+'_changed', v, v0)
 }
 
 /* AJAX requests -------------------------------------------------------------
@@ -2134,41 +2180,6 @@ function post(url, upload, success, fail, opt) {
 		success: success,
 		fail: fail,
 	}, opt))
-}
-
-// inter-window event broadcasting -------------------------------------------
-
-// TODO: use announce() instead.
-
-window.addEventListener('storage', function(e) {
-	// decode the message.
-	if (e.key != '__broadcast')
-		return
-	let v = e.newValue
-	if (!v)
-		return
-	v = json_arg(v)
-	fire(v.topic, ...v.args)
-})
-
-// broadcast a message to other windows.
-function broadcast(topic, ...args) {
-	fire(topic, ...args)
-	save('__broadcast', '')
-	save('__broadcast', json({
-		topic: topic,
-		args: args,
-	}))
-	save('__broadcast', '')
-}
-
-function setglobal(k, v, default_v) {
-	let v0 = strict_or(window[k], default_v)
-	if (v === v0)
-		return
-	window[k] = v
-	broadcast('global_changed', k, v, v0)
-	broadcast(k+'_changed', v, v0)
 }
 
 // browser detection ---------------------------------------------------------
