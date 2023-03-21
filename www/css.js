@@ -681,6 +681,7 @@ css('[nowrap]', '', `
 css('.nowrap', '', `
 	white-space: nowrap;
 	overflow: hidden;
+	text-overflow: clip;
 `)
 
 // NOTE: you need to apply `.shrinks` for this to work.
@@ -1271,5 +1272,10 @@ function svg_minus_sign(attrs) {
 		}),
 	)
 }
+
+/* universal layouting element "d" */
+
+css('d[h]', 'h')
+css('d[v]', 'v')
 
 } /* module */
