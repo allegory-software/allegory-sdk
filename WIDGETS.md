@@ -88,15 +88,15 @@ in the SDK.
 
 ### Layer 2: DOM API & web components
 
-`dom.js` provides a DOM manipulation API and a mechanism for making web
-components. Extends the built-in DOM prototypes with new properties and methods.
+`dom.js` provides a DOM manipulation API and a mechanism for web components.
+Extends the built-in DOM prototypes with new properties and methods.
 Uses `purify.js` for HTML sanitizing.
 
 This layer provides everything needed to manipulate the DOM as well as to make
 custom components with lifetime management, properties, deferred updating,
-events, etc. It also contains the composable CSS API (but no actual styles)
+events, etc. It also contains an API for composable CSS (but no actual styles)
 and provides utilities for making popups, modals, disabled elements,
-focusable elements, resizeable canvases, easing animation, etc.
+focusable elements, resizeable canvases, easing animation, drag & drop, etc.
 
 This layer doesn't implement any actual widgets except a few very basic ones
 like `<if>`.
