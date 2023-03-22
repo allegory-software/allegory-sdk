@@ -1,7 +1,10 @@
 THINK
 ------------------------------------------------------------------------------
 
-* TABS auto-menu with items that don't fit the bar
+* INLINE-EDITABLE MODE FOR PRESENTATION-ONLY WIDGETS
+	* HTML => HTML-INPUT
+	* IMG => IMAGE
+	* TEXT => EDITABLE TEXT
 
 * DATE/TIME PICKERS & INPUTS:
 	- server value in UTC but input_value in current locale?
@@ -29,8 +32,8 @@ BUGS
 
 * TABS
 	- drag the other after drag bug
-	- sel bar animated while typing
 	- ctrl+enter insert_at_caret bug
+	- selection_bar shouldn't be animated while typing
 
 * NUM-INPUT
 	- validation on increment (and validation in general)
@@ -85,6 +88,13 @@ NEW WIDGETS
 FEATURES
 ------------------------------------------------------------------------------
 
+* TABS
+	- auto-shrink tabs to fit tabs_box
+		- but enlarge-to-min-width when renaming
+		- alternative: auto-menu with items that don't fit the bar
+
+* SPLIT % panes
+
 * ALL INPUTS
 	- make them compatible with forms:
 		- DONE: add 'name' property to all
@@ -133,8 +143,6 @@ FEATURES
 * BUTTON
 	- bring back the ^active event
 		- can we force :active so we don't have to set .active?
-
-* SPLIT % panes
 
 * GRID
 	- quick filters

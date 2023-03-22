@@ -7,8 +7,9 @@ a decent job. Let's see what that means first.
 A good widget needs to satisfy many things:
 
 * work in different types of containers: inline, block, flex, grid.
-* be instantiable from both html and from JavaScript.
+* be instantiable from both html and JavaScript with all the features.
 * allow any property changes while the widget is live.
+  * this alone increases complexity substantially at least for DOM-based widgets.
 * not leak event listeners when detached from DOM.
 * maintain hidden input elements to work in forms.
 * work at any parent font size.
@@ -36,13 +37,13 @@ focusing the input.
 > [How to Report Errors in Forms (article on NN/g)](https://www.nngroup.com/articles/errors-forms-design-guidelines/)
 > [Jakob Nielsen - Top 10 Web-design Mistakes (YouTube presentation)](https://www.youtube.com/watch?v=VGxze7xMYJs)
 
-# Some random tips (for now)
+# Architecture notes
 
 
 ## Widget configuration
 
 When creating a widget from html, both html attributes and the widget's
-inner html can used to configure the widget. Good naming, good defaults
+inner html can be used to configure the widget. Good naming, good defaults
 and terse syntax are key here.
 
 Html attribute values are text, they need to be parsed/converted when
@@ -72,7 +73,7 @@ which I'll discuss next.
 ## The necessity to keep properties orthogonal
 
 When defining a property, you can give a convert function in which the
-property value can be parsed, clamped or changed in any way before being set.
+property value can be parsed, clamped, or changed in any way before being set.
 This comes with a big caveat that is easy to forget: the convert function
 *must not depend on the value of any other property* to do its job because
 the order in which properties are set when the component is initialized is
@@ -97,7 +98,7 @@ Another case is when setting a property results in changing another property.
 Properties should really only be changed by the widget as the result of user
 interaction.
 
-An easy way to avoid falling into all of those traps is doing all the updating
+An easy way to avoid falling into all of those traps is to do all the updating
 of the widget in one place, namely in an update callback. The downside to that
 is that the callback is asynchronous (it's called on the next frame), so you
 don't have immediate access to the updated DOM of the widget after you change
@@ -123,7 +124,22 @@ in which changing properties in any order will get to the same result.
 
 ## Canvas-drawn widgets
 
-If the widget is canvas drawn, it's best to use `resizeable_canvas()` because:
+The canvas API is great because well, it's an API, and APIs are always better
+than declarative abstractions (contrary to current wisdom) simply because
+nothing beats the level of control and composability of a programming language.
+And you don't have to update the DOM so updating the view becomes simpler
+and more robust.
+
+Canvas is not all good though. Drawing an entire widget procedurally on a canvas
+is great if you need to make a grid widget that scrolls a million records
+at 60 fps, in fact it's the only way to do it. But using it for simple things
+is overkill: it's not integrated with the layout system or CSS, so you need
+to code for resizing, styling, scrolling, animation, hit-testing, pixel snapping,
+hi-dpi, etc. (which you might actually enjoy more than putting divs together
+and you have the ultimate control over every pixel but it's also more work).
+
+In any case, if you do decide on a canvas-drawn widget, it's best to use
+`resizeable_canvas()` because:
 
 * the canvas needs to be resized and repainted when the widget is resized.
   * resize in multiples of 100-200px or it'll be too slow when dragging a split-view.
@@ -134,8 +150,14 @@ For styling use css vars. Query the computed css with `e.css()` inside an
 `on_measure()` handler, remember the values and then use them in the redraw
 handler that was passed to `resizeable_canvas()`.
 
+Check out the calendar widget to get a feel on how canvas-based differs from
+DOM-based, there's a lot more to it than what's been talked about here.
 
-# What `dom.js` can do for you
+
+# Programming notes
+
+
+## What `dom.js` can do for you
 
 * `e.prop('foo')`                - declare properties
 * `e.set_foo = f(v, v0, ev)`     - implement property setters
@@ -146,7 +168,25 @@ handler that was passed to `resizeable_canvas()`.
 * `e.on_position(f)`             - call `f()` after all measurements are done - update the DOM that uses measurements here
 * `e.make_disablable()`          - add disabled property and disable() method
 * `e.make_focusable()`           - add focusable and tabindex property
-* `e.popup()`                    - turn into a popup
+* `e.popup()`                    - turn element into a popup
 * `resizeable_canvas(redraw)`    - create a canvas that resizes itself automatically
   * `redraw(cx, w, h, pass)`     - called when properties change, widget is resized, etc.
+
+
+## Similar APIs
+
+Ideally, there should be only one way of doing something in an API.
+When there are two ways, it can cause confusion about which method to use.
+Here's some explanations:
+
+* `method(class, name, f)` vs `class.prototype.name = f`. The latter is
+preferred, but `method()` makes the method name non-enumerable which is
+sometimes preferred. Also, `method()` shadows both instance and prototype
+methods which can be desired or not depending on the situation.
+
+* `property(e, k, ...)` vs `e.property(k, ...)` vs `e.prop(k)`. The first
+variant works for any object, the second is just sugar of the first for
+elements but the third is usually what you want for elements as it packs
+in many features overridable getters and setters, storing the value internally
+and creating a getter for you, setting a mirror attribute for styling, etc.
 

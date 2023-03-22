@@ -32,18 +32,24 @@ and they show and edit the data at whatever the focused row is on that component
 Lastly there's a bunch of **layouting widgets** geared towards split-screen-style
 layouts, like tabs and split-views.
 
-All navigation widgets as well as the single-value widgets are model-driven
+All navigation widgets, as well as the single-value widgets are model-driven
 The **navigation widget** (be it a grid, a list or a headless nav) holds
 the data, and one or more value widgets are then bound to the nav widget so
 changes made on a cell by one widget are reflected instantly in other widgets.
 The nav widget then gathers the changes made to one or more rows/cells and
 can push them to a server.
 
-## Docs / Demo
+## Docs & Demo
 
-Like usual, docs are in the code but there's also a [demo (dev branch)].
+As usual, docs are in the code but there's also a [demo (dev branch)] which
+serves as a showcase of all the available widgets and their features, a quick
+reference on how to instantiate the widgets and what the options are, and as
+a testbed for development and finding bugs.
+
+I've also started working on a guide on [how to make widgets][making-widgets].
 
 [demo (dev branch)]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
+[making-widgets]: MAKING-WIDGETS.md
 
 ## Installation
 
@@ -75,7 +81,10 @@ and you can stop whenever you want.
 directly as globals and extends the prototypes of built-in types.
 
 This layer doesn't provide anything UI-related, it just beefs-up and sugar-coats
-the standard library, excluding anything DOM-related.
+the standard library, excluding anything DOM-related. You can use it in your
+own code or you can ignore it, but the widget code is heavily based on it so
+you need to get familiar with it if you want to work on any of the widgets
+in the SDK.
 
 ### Layer 2: DOM API & web components
 
@@ -91,6 +100,14 @@ focusable elements, resizeable canvases, easing animation, etc.
 
 This layer doesn't implement any actual widgets except a few very basic ones
 like `<if>`.
+
+Unlike `glue.js` you can't ignore this API if you want to manipulate any DOM
+in your application that contains widgets from this SDK. That is because all
+DOM manipulation must be done using this API, as standard DOM methods like
+`e.append()` do not call our lifecycle methods (except `e.remove()` which does).
+We might override all built-in DOM APIs in the future for a more seamless
+experience but since we don't use them (our API is better) the need hasn't
+come yet.
 
 ### Layer 3: Functional CSS library
 
@@ -123,7 +140,7 @@ json files, but you can also have layers stored on the client.
 
 Persistence only works on components with an id, since it's all id-based.
 
-## The dev-run cycle
+## Making widgets: the dev-run cycle
 
 Working on widgets is easier with a framework that doesn't have a build
 step and you don't even need a web server to run it. All you need is a code
@@ -135,5 +152,5 @@ To make a new widget, add a new js file for your widget code, and a new demo
 section in the demos file for showcasing your widget. Your demo will appear
 in the nav bar automatically and refreshing the browser will keep context.
 
-So much for the dev-run cycle. Now you just need to know how to write
-a good quality web component. To be continued...
+So much for the dev-run cycle. Now you just need to know [how to write
+a good quality web component][making-widgets].

@@ -142,19 +142,8 @@ by default, but you can't make a "+" sign that will look good. For that,
 fonts are still the best option because they have true hinting (which simple
 pixel snapping is not).
 
-The only other way to draw a scalable plus sign that looks good is with canvas.
-The canvas API is great because well, it's an API, and APIs are always better
-than declarative abstractions (contrary to current wisdom) simply because
-nothing beats the level of control and composability of a programming language.
-
-Canvas is not all good though. Drawing an entire widget procedurally on a canvas
-is great if you need to make a grid widget that scrolls a million records
-at 60 fps, in fact it's the only way to do it. But using it for simple things
-is overkill: it's not integrated with the layout system or CSS, so you need
-to code for resizing, styling, scrolling, animation, hit-testing, pixel snapping,
-hi-dpi, etc. (which you might actually enjoy more than putting divs together
-and you have the ultimate control over every pixel but it's also more work).
-
+The only other way to draw a scalable plus sign that looks good is with canvas,
+but that's way overkill for a simple icon.
 
 ## Padding and overflow
 
