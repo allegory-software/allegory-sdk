@@ -271,6 +271,7 @@ TEXT EDITING
 	e.insert_at_caret(s)
 	e.select_all()
 	e.unselect()
+	e.trim_inner_html()
 
 SCROLLING
 
@@ -2626,11 +2627,11 @@ installers.start_drag = function() {
 	})
 
 	e.on('pointerup', function(ev) {
-		if (e.pointer_captured)
-			return
 		if (ev.buttons) // pressed both buttons?
 			return
 		down_ev = false
+		mx0 = null
+		my0 = null
 	})
 
 	e.on('pointerdown', function(ev, mx, my) {
@@ -2951,6 +2952,18 @@ method(HTMLElement, 'insert_at_caret', function(s) {
 	sel.addRange(range)
 })
 
+method(HTMLElement, 'is_caret_at_text_end', function() {
+	let sel = getSelection()
+	let offset = sel.focusOffset
+	sel.modify('move', 'forward', 'character')
+	if (offset == sel.focusOffset) {
+		return true
+	} else {
+		sel.modify ('move', 'backward', 'character')
+		return false
+	}
+})
+
 method(HTMLElement, 'select_all', function() {
 	let range = document.createRange()
 	range.selectNodeContents(this)
@@ -2964,6 +2977,26 @@ method(HTMLElement, 'unselect', function() {
 	range.selectNodeContents(this)
 	let sel = getSelection()
 	sel.removeAllRanges()
+})
+
+is_node_trimmable = node => (node && (
+	(node.nodeType == Node.ELEMENT_NODE && node.tagName == 'BR') ||
+	(node.nodeType == Node.TEXT_NODE    && node.textContent.trim() == '')
+))
+
+method(HTMLElement, 'trim_inner_html', function() {
+	let node = this.last_node
+	while (is_node_trimmable(node)) {
+		let node_to_remove = node
+		node = node.prev_node
+		node_to_remove.remove()
+	}
+	node = this.first_node
+	while (is_node_trimmable(node)) {
+		let node_to_remove = node
+		node = node.next_node
+		node_to_remove.remove()
+	}
 })
 
 // scrolling -----------------------------------------------------------------

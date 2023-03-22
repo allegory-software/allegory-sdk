@@ -667,8 +667,10 @@ e.make_list_drag_elements = function(can_drag_elements) {
 
 		for (let item of items) {
 			item.class('dragging')
-			let r = floor(random() * 15) - 5
-			item.style.transform = `rotate(${r}deg)`
+			if (items.len > 1) {
+				let r = floor(random() * 15) - 5
+				item.style.transform = `rotate(${r}deg)`
+			}
 			// fixate size so we can move it out of layout.
 			item.w = item._r0.w
 			item.h = item._r0.h
@@ -1925,7 +1927,7 @@ css('.tabs', 'S v flex')
 
 css('tabs-header', 'h rel bg1')
 
-css('tabs-box', 'S h rel')
+css('tabs-box', 'S h rel shrinks clip')
 
 css('tabs-fixed-header', 'S h-m')
 
@@ -1947,7 +1949,7 @@ css('.tabs[tabs_side=right ] > tabs-header', 'b-l')
 
 css('tabs-content', 'scroll-auto shrinks')
 
-css('tabs-tab', 'rel label arrow h')
+css('tabs-tab', 'rel label arrow h shrinks')
 
 // reset focusable-items states.
 css_state('tabs-tab', 'no-bg')
@@ -1955,7 +1957,7 @@ css_state('tabs-tab.selected', 'fg')
 css_state('tabs-tab.tab-selected', 'fg')
 css_state('tabs-tab:is(:hover)', 'label-hover')
 
-css('tabs-title', 'noselect nowrap-dots p-x-4', `
+css('tabs-title', 'noselect nowrap p-x-4', `
 	padding-top    : .6em;
 	padding-bottom : .4em;
 	max-width: 10em;
@@ -1968,14 +1970,15 @@ css('.tabs:is([tabs_side=top],[tabs_side=bottom]) > tabs-header tabs-box::before
 `)
 
 // header "+" button
-css_role('.tabs-add-button', 'm0 p-y-0')
+css_role('.tabs-add-button', 'm0')
 
 // tab "x" button
-css('tabs-xbutton', 'abs dim arrow small', `
+css('tabs-xbutton', 'abs dim arrow small w1 invisible', `
 	top: 2px;
-	right: 2px;
+	right: calc(4px - var(--space-1));
 `)
 css('tabs-xbutton::before', 'fa fa-times')
+css_state('tabs-tab:hover tabs-xbutton', 'visible')
 css_state('tabs-xbutton:hover', 'fg')
 
 // selection bar
@@ -1991,7 +1994,7 @@ css_state('.tabs:not(.moving) > tabs-header tabs-selection-bar', '', `
 `)
 
 // tab renaming
-css_state('tabs-tab.renaming', 'bg0 fg')
+css_state('tabs-tab.renaming', 'bg0 fg', `min-width: 6em;`)
 css_state('tabs-tab.renaming tabs-title', 'no-outline nowrap')
 css_state('tabs-tab.renaming::before', 'overlay click-through', `
 	content: '';
@@ -2060,14 +2063,14 @@ tabs = component('tabs', 'Containers', function(e) {
 	let selected_tab, renaming_tab
 
 	function update_selected_tab_state(selected) {
-		tab = selected_tab
+		let tab = selected_tab
 		if (!tab) return
-		tab.xbutton.hidden = !(selected && e.can_remove_items)
+		tab.xbutton.hidden = !e.can_remove_items
 		tab.class('tab-selected', !!selected)
 	}
 
 	function update_renaming_tab_state(on) {
-		tab = renaming_tab
+		let tab = renaming_tab
 		if (!tab) return
 		e.class('renaming', on)
 		tab.class('renaming', on)
@@ -2097,6 +2100,7 @@ tabs = component('tabs', 'Containers', function(e) {
 					tab.title_box = title_box
 					tab.xbutton = xbutton
 					tab.on('pointerdown'      , tab_pointerdown)
+					tab.on('click'            , tab_click)
 					tab.on('dblclick'         , tab_dblclick)
 					title_box.on('input'      , tab_title_box_input)
 					title_box.on('blur'       , tab_title_box_blur)
@@ -2123,7 +2127,8 @@ tabs = component('tabs', 'Containers', function(e) {
 		let new_selected_tab = selected_item && selected_item._tab
 		let selected_tab_changed = selected_tab != new_selected_tab
 		if (selected_tab_changed) {
-			update_selected_tab_state(false)
+			if (selected_tab)
+				update_selected_tab_state(false)
 			selected_tab = new_selected_tab
 		}
 		update_selected_tab_state(true)
@@ -2134,7 +2139,10 @@ tabs = component('tabs', 'Containers', function(e) {
 		let new_renaming_tab = renaming_item && renaming_item._tab
 		let renaming_tab_changed = renaming_tab != new_renaming_tab
 		if (renaming_tab_changed) {
-			update_renaming_tab_state(false)
+			if (renaming_tab) {
+				renaming_tab.title_box.trim_inner_html()
+				update_renaming_tab_state(false)
+			}
 			renaming_tab = new_renaming_tab
 		}
 		update_renaming_tab_state(true)
@@ -2252,8 +2260,6 @@ tabs = component('tabs', 'Containers', function(e) {
 		e.update()
 		focus_content = item && focus_content != false && e.auto_focus || false
 		e.update({focus_content: focus_content})
-		if (focus_content)
-			return true
 	}
 
 	function find_selected_item() {
@@ -2263,6 +2269,10 @@ tabs = component('tabs', 'Containers', function(e) {
 
 	e.set_items = function() {
 		select_item(find_selected_item() || url_path_item() || e.items[0] || null)
+	}
+
+	e.select_item = function(...args) {
+		select_item(...args)
 	}
 
 	// tab moving -------------------------------------------------------------
@@ -2297,8 +2307,12 @@ tabs = component('tabs', 'Containers', function(e) {
 	}
 
 	function tab_pointerdown(ev, mx, my) {
-		if (select_item(this.item))
-			return false // prevent list focusing if content was focused.
+		select_item(this.item, false)
+	}
+
+	function tab_click(ev, mx, my) {
+		if (e.auto_focus)
+			e.update({focus_content: true})
 	}
 
 	function tab_dblclick(ev, mx, my) {
@@ -2328,7 +2342,10 @@ tabs = component('tabs', 'Containers', function(e) {
 		if (!renaming_item)
 			return
 		if ((ctrl || shift) && key == 'Enter') {
-			tab.title_box.insert_at_caret('<br>')
+			// NOTE: browsers don't put the caret after an ending <br> so we must hack!
+			if (!(this.last_node && this.last_node.tag == 'br') && this.is_caret_at_text_end())
+				this.insert_at_caret('<br>')
+			this.insert_at_caret('<br>')
 			return false
 		}
 		if (key == 'Enter' || key == 'Escape' || key == 'F2') {
@@ -2343,13 +2360,18 @@ tabs = component('tabs', 'Containers', function(e) {
 
 	e.create_item = noop // stub
 
-	function add_button_click() {
-		let item = e.create_item()
+	e.add_item = function(item, i, focus_content) {
+		item = item || e.create_item()
 		if (!item)
 			return
-		e.items = [...e.items, item]
-		select_item(item)
-		return false
+		e.items = e.items.slice().insert(i, item)
+		select_item(item, focus_content)
+		return item
+	}
+
+	function add_button_click() {
+		if (e.add_item())
+			return false
 	}
 
 	// tab removing -----------------------------------------------------------
@@ -2416,23 +2438,35 @@ tabs = component('tabs', 'Containers', function(e) {
 		}
 
 		// add tab
-		if (key == 'Insert') {
-			let item = e.create_item()
-			if (!item)
-				return
+		if (key == 'Insert' && e.can_add_items) {
 			let i = this.focused_item_index
-			e.items = e.items.slice().insert(i, item)
-			select_item(item, false)
+			if (e.add_item(null, i, false))
+				return false
 		}
 
 		// remove tab
-		if (key == 'Delete') {
+		if (key == 'Delete' && e.can_remove_items) {
 			if (e.can_remove_item(tab.item)) {
 				e.remove_item(tab.item, true, false)
 				return false
 			}
 		}
 
+	})
+
+	e.on('keydown', function(key, shift, ctrl) {
+		if (ctrl && key == 'T' && e.can_add_items) {
+			let i = e.tabs_box.focused_item_index
+			if (e.add_item(null, i, false))
+				return false
+		}
+		if (ctrl && key == 'W' && e.can_remove_items) {
+			let item = e.tabs_box.focused_item
+			if (item && e.can_remove_item(item)) {
+				e.remove_item(item, true, false)
+				return false
+			}
+		}
 	})
 
 	return {items: html_items}
