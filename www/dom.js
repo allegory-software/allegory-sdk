@@ -2829,13 +2829,13 @@ method(Window, 'rect', function() {
 })
 
 window.on('resize', function window_resize() {
-	document.fire('layout_changed')
+	announce('layout_changed')
 })
 
 // this is only needed on Firefox with the debugger open,
 // and if you don't preload fonts (which you should).
 document.fonts.on('loadingdone', function() {
-	document.fire('layout_changed')
+	announce('layout_changed')
 })
 
 // common state wrappers -----------------------------------------------------
@@ -3382,13 +3382,10 @@ function resizeable_canvas(pw, ph) {
 		ct.update()
 	}
 	ct.on('resize', update)
-	ct.listen('theme_changed', update)
+	ct.listen('layout_changed', update)
 	ct.on_redraw = function(f) {
 		ct.do_after('do_redraw', f)
 	}
-	ct.on_bind(function(on) {
-		document.on('layout_changed', update, on)
-	})
 	ct.redraw_now = redraw
 	ct.canvas = canvas
 	ct.ctx = cx
@@ -3584,7 +3581,7 @@ component('if', 'Containers', function(e) {
 	e.on_update(function(opt) {
 		if (opt.show) {
 			e.unsafe_html = html_content
-			document.fire('layout_changed')
+			announce('layout_changed')
 		}
 	})
 
@@ -3597,7 +3594,7 @@ component('if', 'Containers', function(e) {
 
 	function bind_global(k, on) {
 		if (!k) return
-		window.on(k+'_changed', global_changed, on)
+		listen(k+'_changed', global_changed, on)
 	}
 
 	e.set_global = function(k1, k0) {
@@ -3879,7 +3876,7 @@ e.popup = function(target, side, align) {
 		window.on('scroll', window_scroll, on, true)
 
 		// layout changes update the popup position.
-		document.on('layout_changed', update, on)
+		listen('layout_changed', update, on)
 
 		// hovering on target can make it a stacking context
 		// (eg. target sets opacity) which needs a popup update.
@@ -4048,7 +4045,7 @@ function set_theme_dark(dark) {
 	root.class('theme-dark' , !!dark)
 	root.class('theme-light', !dark)
 	announce('theme_changed')
-	document.fire('layout_changed')
+	announce('layout_changed')
 }
 
 function get_theme_size() {
@@ -4063,7 +4060,7 @@ function set_theme_size(size) {
 	if (size)
 		root.class('theme-'+size)
 	announce('theme_changed')
-	document.fire('layout_changed')
+	announce('layout_changed')
 }
 
 // make `.theme-inverted` work.

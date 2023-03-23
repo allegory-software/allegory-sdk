@@ -325,18 +325,10 @@ grid = component('grid', 'Input', function(e) {
 	var cx  = e.cells_canvas.getContext('2d')
 	var hcx = e.header_canvas.getContext('2d')
 
-	// Firefox loads fonts into canvas asynchronously, even though said fonts
-	// are already loaded and were preloaded using <link preload>.
-	// NOTE: this delay is only visible with the debugger on.
-	function fonts_loaded() {
-		e.update()
-	}
-
 	e.listen('theme_changed', theme_changed)
+	e.listen('layout_changed', layout_changed)
 
 	e.on_bind(function(on) {
-		document.on('layout_changed', layout_changed, on)
-		document.fonts.on('loadingdone', fonts_loaded, on)
 		if (on)
 			theme_changed()
 	})
@@ -2075,7 +2067,6 @@ grid = component('grid', 'Input', function(e) {
 	}
 
 	e.on_bind(function(on) {
-
 		if (on && !e.empty_rt) {
 			e.empty_rt = richtext({
 				classes: 'grid-empty-rt',
@@ -2084,19 +2075,18 @@ grid = component('grid', 'Input', function(e) {
 			})
 			e.empty_rt.hidden = true
 			e.cells_view.add(e.empty_rt)
-
-			window.on('prop_changed', function(te, k, v) {
-				if (te == e.empty_rt && k == 'content') {
-					barrier = true
-					e.empty_text = v
-					barrier = false
-				}
-			})
 		}
-
 	})
 
 	e.prop('empty_text', {slot: 'lang'})
+
+	e.listen('prop_changed', function(te, k, v) {
+		if (te == e.empty_rt && k == 'content') {
+			barrier = true
+			e.empty_text = v
+			barrier = false
+		}
+	})
 
 	// widget editing protocol ------------------------------------------------
 
@@ -2869,9 +2859,10 @@ row_form = component('row-frm', function(e) {
 		nav.on('col_attr_changed'               , col_attr_changed, on)
 	}
 
+	e.listen('layout_changed', redraw)
+
 	e.on_bind(function(on) {
 		bind_nav(e._nav, on)
-		document.on('layout_changed', redraw, on)
 	})
 
 	e.set_nav = function(nav1, nav0) {

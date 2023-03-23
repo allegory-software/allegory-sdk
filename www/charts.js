@@ -1144,16 +1144,16 @@ chart = component('chart', 'Input', function(e) {
 		e.update()
 	}
 
+	e.listen('layout_changed', update_view)
+	e.on('resize', update_view)
+
 	e.on_bind(function(on) {
 		bind_nav(e._nav, on)
-		document.on('layout_changed', update_view, on)
 		if (!on && tt) {
 			tt.close()
 			tt = null
 		}
 	})
-
-	e.on('resize', update_view)
 
 	function nav_changed() {
 		bind_nav(e._nav, false)

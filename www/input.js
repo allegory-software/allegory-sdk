@@ -4439,7 +4439,7 @@ widget('inp', 'Input', function(e) {
 		if (v !== v0 && e.widget && k.starts('.')) {
 			k = k.replace(/^\./, '')
 			e.widget[k] = v
-			window.fire('prop_changed', e, k, v, v0, null)
+			e.announce('prop_changed', k, v, v0, null)
 		}
 	}
 

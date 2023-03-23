@@ -212,6 +212,7 @@ EVENTS
 	e.once (name|ev, f, [enable], [capture])
 	e.fire    (name, ...args)
 	e.fireup  (name, ...args)
+	ev.forward(e)
 	on.installers.EVENT = f() { ... }
 	on.callers.EVENT = f(ev, f) { return f.call(this, ...) }
 	DEBUG_EVENTS = false
@@ -1927,9 +1928,7 @@ function announce(event, ...args) {
 
 // inter-window events -------------------------------------------------------
 
-// TODO: use announce() instead.
-
-window.addEventListener('storage', function(e) {
+addEventListener('storage', function(e) {
 	// decode the message.
 	if (e.key != '__broadcast')
 		return
@@ -1937,12 +1936,12 @@ window.addEventListener('storage', function(e) {
 	if (!v)
 		return
 	v = json_arg(v)
-	fire(v.topic, ...v.args)
+	announce(v.topic, ...v.args)
 })
 
 // broadcast a message to other windows.
 function broadcast(topic, ...args) {
-	fire(topic, ...args)
+	announce(topic, ...args)
 	save('__broadcast', '')
 	save('__broadcast', json({
 		topic: topic,
@@ -1975,6 +1974,7 @@ function setglobal(k, v, default_v) {
 		opt.dont_send (false)
 		opt.notify: widget to send 'load' events to.
 		opt.notify_error: error notify function: f(message, 'error').
+		opt.notify_notify: json `notify` notify function.
 		opt.onchunk: f(s, finished) [-> false]
 
 	req.send()
@@ -1988,9 +1988,8 @@ function setglobal(k, v, default_v) {
 	^fail(error, 'http', status, message, content)
 	^done('success' | 'fail', ...)
 
-	ajax.notify_error: default error notify function (to be set by user).
-	ajax.notify_notify: default notify function for json results containing
-	  a field called `notify` (to be set by user).
+	^^ajax_error  : error notification.
+	^^ajax_notify : notification for json results containing a field called `notify`.
 
 */
 
@@ -2118,6 +2117,9 @@ function ajax(req) {
 		return req
 	}
 
+	let notify_error  = req.notify_error  || function(...args) { announce('ajax_error' , ...args) }
+	let notify_notify = req.notify_notify || function(...args) { announce('ajax_notify', ...args) }
+
 	function fire(name, arg1, ...rest) {
 
 		if (name == 'done')
@@ -2125,9 +2127,9 @@ function ajax(req) {
 
 		if (req.fire(name, arg1, ...rest)) {
 			if (name == 'fail' && arg1)
-				(req.notify_error || ajax.notify_error || noop)(arg1, ...rest)
+				notify_error(arg1, ...rest)
 			if (name == 'success' && isobject(arg1) && isstr(arg1.notify))
-				(req.notify_notify || ajax.notify_notify || noop)(arg1.notify, arg1.notify_kind)
+				notify_notify(arg1.notify, arg1.notify_kind)
 		}
 
 		if (req[name])
@@ -2135,9 +2137,8 @@ function ajax(req) {
 
 		let notify = req.notify instanceof EventTarget ? [req.notify] : req.notify
 		if (isarray(notify))
-			for (target of notify) {
+			for (target of notify)
 				target.fire('load', name, arg1, ...rest)
-			}
 
 	}
 

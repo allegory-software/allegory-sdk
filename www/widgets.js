@@ -571,8 +571,8 @@ function notify(...args) {
 	console.log('NOTIFY', iselem(args[0]) ? args[0].textContent : args[0])
 	return tt
 }
-ajax.notify_error  = (err) => notify(err, 'error')
-ajax.notify_notify = (msg, kind) => notify(msg, kind || 'info')
+listen('ajax_error' , function(err) { notify(err, 'error') })
+listen('ajax_notify', function(msg, kind) { notify(msg, kind || 'info') })
 
 /* lists of elements with one or more static items at the end ----------------
 
@@ -2580,7 +2580,7 @@ split = component('split', 'Containers', function(e) {
 		e.auto_pane.min_w = null
 		e.auto_pane.min_h = null
 
-		document.fire('layout_changed')
+		announce('layout_changed')
 	})
 
 	e.prop('orientation', {type: 'enum', enum_values: 'horizontal vertical', default: 'horizontal', attr: true})
@@ -3158,7 +3158,7 @@ toolbox = component('toolbox', function(e) {
 	})
 
 	e.on('resize', function() {
-		document.fire('layout_changed', e)
+		announce('layout_changed', e)
 	})
 
 	return {content: html_content}
@@ -3408,7 +3408,7 @@ fires:
 css('.label-widget', 'label noselect')
 css_state('.label-widget:is(:hover,.hover)', 'label-hover')
 
-label = component('label', function(e) {
+label = component('label', 'Input', function(e) {
 
 	e.class('label-widget')
 	e.make_disablable()
@@ -3512,6 +3512,154 @@ info = component('info', function(e) {
 		text      : html_text,
 		collapsed : or(e.collapsed, true),
 	}
+})
+
+/* validators ----------------------------------------------------------------
+
+We don't like abstractions around here but this one buys us many things:
+  - completely separating validation logic from input elements, to the point
+    of not even having to tell which validators you want. Instead, validators
+    check for themselves if they are relevant to the input or not.
+  - dependencies, i.e. requiring other validations to pass first.
+  - not having to deal with null values after the "required" validator.
+  - not having to deal with parsing string values after the convert validator.
+  - result containing all messages with `failed` and `checked` status on each.
+*/
+
+validators = obj()
+INVALID = obj() // convert functions return this to distinguish from null.
+
+function validator(e, ...args) {
+
+	let relevant_validators = []
+	let results = []
+	let checked = obj()
+	function applies(name) {
+		assert(checked[name] !== false, 'validator require cycle')
+		if (checked[name])
+			return true
+		checked[name] = false // means checking...
+		let validator = validators[name]
+		if (warn_if(!validator, 'unknown validator "{0}"', name))
+			return
+		if (!validator.applies(e, ...args))
+			return
+		validator.name = name
+		validator.requires = words(validator.requires) || empty_array
+		for (req of validator.requires)
+			if (warn_if(!applies(req),
+					'validator "{0}" required by validator "{1}" does not apply', req, name))
+				return
+		relevant_validators.push(validator)
+		results.push(obj())
+		validator.index = results.len-1
+		checked[name] = true
+		return true
+	}
+	for (name in validators)
+		applies(name)
+
+	let v, convert_failed
+	function validate(validator) {
+		if (convert_failed)
+			return false // if convert failed, subsequent validators cannot run!
+		if (validator.failed)
+			return false
+		if (validator.checked)
+			return true
+		if (v == null && !validator.check_null)
+			return true
+		for (req of validator.requires)
+			if (validators[req].failed) {
+				validator.failed = true
+				return false
+			}
+		let convert = validator.convert
+		if (convert) {
+			let s = v
+			v = convert(e, v, ...args)
+			if (v === INVALID) {
+				convert_failed = true
+				v = s
+			}
+		}
+		let failed = convert_failed || !validator.validate(e, v, ...args)
+		validator.s = validator.message(e, v, ...args)
+		validator.checked = true
+		validator.failed = failed
+		return !failed
+	}
+
+	let out = {results: results}
+	return function(v1, ann) {
+		v = repl(v1, '', null)
+		for (let validator of relevant_validators)
+			validate(validator)
+		for (let validator of relevant_validators) {
+			let result = results[validator.index]
+			result.checked = validator.checked || false
+			result.failed  = validator.failed || false
+			result.message = validator.s
+			if (validator.failed)
+				results.failed = true
+			validator.index   = null
+			validator.checked = null
+			validator.failed  = null
+			validator.s       = null
+		}
+		out.value = repl(v, undefined, null)
+		if (ann != false)
+			announce('validate', e, out, ...args)
+		pr(out)
+		return out
+	}
+}
+
+validators.required = {
+	check_null: true,
+	applies  : (e,    field) => field.not_null || field.required,
+	validate : (e, v, field) => v != null || field.default != null,
+	message  : (e, v, field) => S('validation_empty', 'Value cannot be empty'),
+}
+
+validators.min = {
+	requires : 'num',
+	applies  : (e,    field) => field.min != null,
+	validate : (e, v, field) => v >= field.min,
+	message  : (e, v, field) => S('validation_min_value',
+		'Value must be larger than (or equal to) {0}',
+			(field.from_num || return_arg)(field.min)),
+}
+
+validators.max = {
+	requires : 'num',
+	applies  : (e,    field) => field.max != null,
+	validate : (e, v, field) => v >= field.max,
+	message  : (e, v, field) => S('validation_max_value',
+		'Value must be smaller than (or equal to) {0}',
+			(field.from_num || return_arg)(field.max)),
+}
+
+validators.num = {
+	applies  : (e,    field) => field.to_num,
+	convert  : (e, v, field) => {
+		v = repl(repl(v, '-'), '.') // just started typing? allow.
+		return isstr(v) ? or(field.to_num(v), INVALID) : v
+	},
+	validate : (e, v, field) => isnum(v),
+	message  : () => S('not_a_number_error', 'Not a number'),
+}
+
+validators.lookup = {
+	applies  : (e,    field) => field.lookup_nav,
+	validate : (e, v, field) => field.lookup_nav.ready
+			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
+	message  : (e, v, field) => S('validation_lookup',
+		'Value not in the list of allowed values.'),
+}
+
+errors = component('errors', 'Input', function(e) {
+
 })
 
 /* <check>, <toggle>, <radio> buttons ----------------------------------------
@@ -4233,6 +4381,23 @@ css_role('.labelbox > .input-group', 'gap-input')
 // no-bg prevents outline clipping, also bg doesn't make sense since labelbox has padding.
 css_role('.labelbox *', 'no-bg')
 
+// overlaid labels: old is new again...
+// TOOD: finish this: `rel` obscures the focus outline of the parent!
+css_role('.labelbox[overlaid]', 'rel ro-var', `
+	--p-y-input-adjust: .1em;
+`)
+// TODO: finish this: `abs` ::before cannot be painted before text content!
+css_role('.labelbox[overlaid] > .label-widget::before', 'overlay m-l bg-input', `
+	top: -1px;
+	left: -.25em;
+	content: '';
+	height: 1px;
+`)
+css_role('.labelbox[overlaid] > .label-widget', 'abs p-x smaller bold lh0', `
+	left: 0;
+	top: 0;
+`)
+
 labelbox = component('labelbox', function(e) {
 	e.class('labelbox')
 	e.init_child_components()
@@ -4731,9 +4896,11 @@ if (0) {
 num_input = component('num-input', 'Input', function(e) {
 
 	e.prop('input_value', {attr: 'value' , slot: 'state'}) // initial value and text value from user input
+	e.prop('name')
+	e.prop('form')
 	e.prop('value'      , {type: 'number', slot: 'state'}) // typed valid value, not user-changeable
 	e.prop('invalid'    , {type: 'bool'  , slot: 'state', default: false})
-	e.prop('error'      , {type: 'bool'  , slot: 'state', default: false})
+	e.prop('errors'     , {type: 'array' , slot: 'state', default: false})
 	e.prop('required'   , {type: 'bool'  , default: false})
 	e.prop('readonly'   , {type: 'bool'  , default: false})
 	e.prop('decimals'   , {type: 'number', default: 0})
@@ -4790,6 +4957,9 @@ num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
+	e.set_name = function(s) { e.input.name = s }
+	e.set_form = function(s) { e.input.form = s }
+
 	e.set_value = function(v, v0, ev) {
 		assert(ev && (ev.target == e || ev.target == e.input)) // not user-writable
 	}
@@ -4799,6 +4969,9 @@ num_input = component('num-input', 'Input', function(e) {
 	e.update({value: true})
 
 	e.from_text = num
+
+	e.to_num = num
+	e.from_num = return_arg
 
 	e.to_text = function(v) {
 		return v != null ? v.dec(this.decimals) : v
@@ -4816,12 +4989,9 @@ num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	function validate(v, err) {
-		if (v == null) {
-			e.invalid = true
-			e.error = err
-		}
-		return v
+	e.validate = function(v) {
+		let validate = validator(e, e)
+		return validate(v)
 	}
 
 	e.set_input_value = function(iv, iv0, ev) {
@@ -4831,18 +5001,11 @@ num_input = component('num-input', 'Input', function(e) {
 		if (!input)
 			e.invalid = false
 
-		iv = repl(iv, '', null)
-
-		let v = iv
-		v = isstr(v) ? validate(e.from_text(v), S('not_a_number_error', 'Not a number')) : v
-		v = v != null ? validate(v >= or(e.min, -1/0), S()) : null
-		&& v <= or(e.max, 1/0) ? v : null
-		v = v != null ? e.valid_value(v) : null
+		let out = e.validate(iv)
+		let v = out.value
 		e.set_prop('value', v, ev || {target: e})
-
 		if (input)
-			e.invalid = (iv == null && e.required)
-				|| (v == null && (iv != null && iv != '-' && iv != '.'))
+			e.invalid = out.failed
 
 		if (!input)
 			e.update({value: true})
@@ -5927,7 +6090,7 @@ function calendar_widget(e, mode) {
 	}
 
 	e.on_bind(function(on) {
-		document.on('layout_changed', update_scroll)
+		listen('layout_changed', update_scroll, on)
 		if (on)
 			update_scroll()
 	})

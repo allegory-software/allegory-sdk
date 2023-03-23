@@ -196,7 +196,7 @@ on_dom_load(function() {
 	}
 	init_select_buttons('.layout-btn', 'inline', function(btn) {
 		result.attr('class', btn.attr('layout-classes'))
-		document.fire('layout_changed')
+		announce('layout_changed')
 	})
 	init_select_buttons('.size-btn', 'normal', function(btn, key) {
 		set_theme_size(key)
@@ -681,23 +681,28 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 
 <xmp id=input-group_demo>
 
-<d class="S h ro-collapse-h b-collapse-h">
-	<input-group class="ro-var">
-		<d class="ro-var h-m p-x fa fa-car"></d>
-		<labelbox class="ro-var">
-			<label>On my label</label>
-			<input-group>
-				<button bare icon="fa fa-bicycle"></button>
-				<input value="Oh My!">
-				<d class="ro-var h-m p-x fa fa-bicycle"></d>
-			</input-group>
-		</labelbox>
-		<button>...</button>
-		<d class="ro-var h-m p-x fa fa-truck"></d>
-		<button><d class="icon-9-dots"></d></button>
-	</input-group><button>OK</button>
-</d>
-
+<input-group class="ro-var">
+	<d class="ro-var h-m p-x fa fa-car"></d>
+	<labelbox class="ro-var">
+		<label>Oh, my label</label>
+		<input-group>
+			<button bare icon="fa fa-bicycle"></button>
+			<input value="Oh My!">
+			<d class="ro-var h-m p-x fa fa-bicycle"></d>
+		</input-group>
+	</labelbox>
+	<button>...</button>
+	<d class="ro-var h-m p-x fa fa-truck"></d>
+	<button><d class="icon-9-dots"></d></button>
+</input-group>
+<br>
+<br>
+<input-group>
+	<labelbox overlaid>
+		<label>Oh, my label</label>
+		<input value="Oh My!">
+	</labelbox>
+</input-group><button>OK</button>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1209,6 +1214,11 @@ myform.on('submit', function(ev) {
 		pr('', name, ':', value)
 	return false
 })
+
+listen('validate', function(e) {
+
+})
+
 </script>
 </xmp>
 

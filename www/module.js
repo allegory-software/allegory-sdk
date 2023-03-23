@@ -84,7 +84,7 @@ function init_xmodule(opt) {
 	function init_prop_layers() {
 		for (let t of opt.layers)
 			set_active_layer(t.module, t.slot, t.layer)
-		document.fire('prop_layer_slots_changed')
+		announce('prop_layer_slots_changed')
 	}
 
 	// loading layer prop vals into instances ---------------------------------
@@ -191,7 +191,6 @@ function init_xmodule(opt) {
 
 	listen('bind', function(e, on) {
 		xm.bind_instance(e, on)
-		document.fire('widget_tree_changed')
 	})
 
 	// saving prop vals into prop layers --------------------------------------
@@ -279,7 +278,7 @@ function init_xmodule(opt) {
 					for (let e of xm.instances[id])
 						update_instance(e)
 			if (module && slot)
-				document.fire('prop_layer_slots_changed')
+				announce('prop_layer_slots_changed')
 		}
 	}
 
