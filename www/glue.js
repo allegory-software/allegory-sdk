@@ -658,7 +658,7 @@ property(Array, 'last', {
 	set: function(v) { this[this.length-1] = v }
 })
 
-property(Array, 'len', function() { return this.length })
+property(Array, 'len', function() { return this.length }, function(n) { this.length = n })
 
 method(Array, 'equals', function(a, i0, i1) {
 	i0 = i0 || 0
@@ -858,7 +858,7 @@ function index_arr_type(arg) {
 	if (isarray(arg)) // [...]
 		return arr_type_from_max_index(max_index_from_array(arg))
 	if (arg.BYTES_PER_ELEMENT) // arr | arr_type
-		return arg.constructor.prototype == arg.__proto__ ? arg.constructor : arg
+		return arg.constructor.prototype == Object.getPrototypeOf(arg) ? arg.constructor : arg
 	return assert(arg, 'arr_type required')
 }
 
@@ -1420,7 +1420,7 @@ method(Number, 'date', function(locale1, with_time, with_seconds, with_fractions
 
 let _date_placeholder_text = memoize(function(locale) {
 	let a = []
-	for (p of date_parts(locale)) {
+	for (let p of date_parts(locale)) {
 		if (p.type == 'day'  ) a.push('d')
 		if (p.type == 'month') a.push('m')
 		if (p.type == 'year' ) a.push('yyyy')
@@ -2137,7 +2137,7 @@ function ajax(req) {
 
 		let notify = req.notify instanceof EventTarget ? [req.notify] : req.notify
 		if (isarray(notify))
-			for (target of notify)
+			for (let target of notify)
 				target.fire('load', name, arg1, ...rest)
 
 	}
@@ -2187,3 +2187,41 @@ function post(url, upload, success, fail, opt) {
 
 Firefox = navigator.userAgent.toLowerCase().includes('firefox')
 Chrome  = navigator.userAgent.toLowerCase().includes('chrome')
+
+// JSHint linter -------------------------------------------------------------
+
+// lint any loaded js file from the browser directly, no server needed!
+// we use this mostly to catch `for (v ...` which should be `for(let v ...`.
+function lint(file) {
+	if (!window.JSHINT) {
+		let script = document.createElement('script')
+		script.onload = function() {
+			assert(window.JSHINT, 'jshint.js not loaded')
+			lint(file)
+		}
+		script.src = 'jshint.js'
+		document.documentElement.append(script)
+		return
+	}
+	$('script').each(function(sc) {
+		if (!sc.src || !sc.src.ends(file))
+			return
+		get(sc.src, function(s) {
+			pr(sc.src, s.len)
+			pr('------------------------------------------------------')
+			JSHINT(s, {
+				asi: true,
+				esversion: 6,
+				'-W014': true, // starting a line with `?`
+				'-W119': true, // `a**b` is es7
+				'-W082': true, // func decl in block
+				'-W008': true, // says `.5` is confusing :facepalm:
+				'-W054': true, // says we shouldn't use `new Function()`
+				'-W069': true, // says `foo['bar']` should be `foo.bar`
+				'-W083': true, // says we shouldn't make closures in loops, wtf.
+			})
+			pr(JSHINT.errors.map(e => sc.src+':'+e.line + ':' + e.character + ': '
+				+ e.code + ' ' + e.raw.subst(e)).join('\n'))
+		})
+	})
+}

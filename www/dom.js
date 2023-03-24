@@ -620,7 +620,7 @@ css_layer = memoize(function(layer) {
 
 })
 
-for (layer of 'base util state role role_state generic_state'.words()) {
+for (let layer of 'base util state role role_state generic_state'.words()) {
 	window['css_'+layer] = css_layer(layer.replace('_', '-'))
 	window['css_'+layer+'_chrome' ] = Chrome  ? window['css_'+layer] : noop
 	window['css_'+layer+'_firefox'] = Firefox ? window['css_'+layer] : noop
@@ -968,6 +968,14 @@ let attr_prop_vals = function(e) {
 	return prop_vals
 }
 
+let global_caller = function(fname) {
+	return function(...args) {
+		let f = window[fname]
+		if (!f) return
+		f.call(this, ...args)
+	}
+}
+
 e._init_component = function(prop_vals) {
 
 	let e = this
@@ -1010,14 +1018,8 @@ e._init_component = function(prop_vals) {
 			let f = prop_vals[k]
 			delete prop_vals[k]
 			k = k.slice(3)
-			if (isstr(f)) { // set from html: name of global function.
-				let fname = f
-				f = function(...args) {
-					let f = window[fname]
-					if (!f) return
-					f.call(this, ...args)
-				}
-			}
+			if (isstr(f)) // set from html: name of global function.
+				f = global_caller(f)
 			e.on(k, f)
 		}
 	}
@@ -1729,12 +1731,13 @@ e.prop = function(prop, opt) {
 	if (prop_attr.includes('_')) // allow foo-bar in addition to foo_bar
 		attr(e, 'attr_prop_map')[prop_attr.replace('_', '-')] = prop
 
+	let get, set
 	if (opt.store != false) { // stored prop
 		let v = dv
-		function get() {
+		get = function() {
 			return v
 		}
-		function set(v1, ev) {
+		set = function(v1, ev) {
 			let v0 = v
 			v1 = convert(v1, v0)
 			if (v1 === v0)
@@ -1751,10 +1754,10 @@ e.prop = function(prop, opt) {
 			set_attr(dv)
 	} else { // virtual prop with getter
 		assert(!('default' in opt))
-		function get() {
+		get = function() {
 			return e[GET]()
 		}
-		function set(v, ev) {
+		set = function(v, ev) {
 			let v0 = e[GET]()
 			v = convert(v, v0)
 			if (v === v0)
@@ -1773,7 +1776,7 @@ e.prop = function(prop, opt) {
 		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
 		let REF = opt.bind_id || ID+'_ref'
 		let on_bind = opt.on_bind
-		function id_bind(id, on) {
+		let id_bind = function(id, on) {
 			if (!id) return
 			let te = on ? resolve_linked_element(id) : null
 			if (on_bind && e[REF])
@@ -2049,7 +2052,7 @@ e.make_focusable = function(...fes) {
 	if (!fes.len)
 		fes.push(e)
 
-	for (fe of fes)
+	for (let fe of fes)
 		if (!fe.hasattr('tabindex'))
 			fe.attr('tabindex', 0)
 

@@ -3517,24 +3517,45 @@ info = component('info', function(e) {
 /* validators ----------------------------------------------------------------
 
 We don't like abstractions around here but this one buys us many things:
-  - completely separating validation logic from input elements, to the point
-    of not even having to tell which validators you want. Instead, validators
-    check for themselves if they are relevant to the input or not.
-  - dependencies, i.e. requiring other validations to pass first.
-  - not having to deal with null values after the "required" validator.
-  - not having to deal with parsing string values after the convert validator.
+
+  - validators are: reusable, composable, and easy to write logic for.
+  - validators apply automatically, no need to specify which to apply where.
+  - a validator can depend on, i.e. require that other validators pass first.
+  - a validator can convert the input value so that subsequent validators
+    operate on the converted value, thus only having to parse the value once.
+  - null values are filtered automatically.
   - result containing all messages with `failed` and `checked` status on each.
+  - It's not that much code, and it makes no garbage on re-validation.
+
 */
 
 validators = obj()
+validator_props = obj()
 INVALID = obj() // convert functions return this to distinguish from null.
+
+function update_validators() {
+	for (let name in validators) {
+		let validator = validators[name]
+		if (validator.updated)
+			continue
+		validator.name = name
+		validator.props = isstr(validator.props) && validator.props.words().tokeys() || null
+		validator.requires = words(validator.requires) || empty_array
+		assign(validator_props, validator.props)
+		validator.updated = true
+	}
+}
 
 function validator(e, ...args) {
 
-	let relevant_validators = []
+	update_validators()
+
+	let my_validators_invalid = true
+	let my_validators = []
 	let results = []
 	let checked = obj()
-	function applies(name) {
+
+	function add_validator(name) {
 		assert(checked[name] !== false, 'validator require cycle')
 		if (checked[name])
 			return true
@@ -3544,99 +3565,129 @@ function validator(e, ...args) {
 			return
 		if (!validator.applies(e, ...args))
 			return
-		validator.name = name
-		validator.requires = words(validator.requires) || empty_array
-		for (req of validator.requires)
-			if (warn_if(!applies(req),
-					'validator "{0}" required by validator "{1}" does not apply', req, name))
+		for (let req of validator.requires)
+			if (warn_if(!add_validator(req),
+					'validator "{0}" required by "{1}" does not apply', req, name))
 				return
-		relevant_validators.push(validator)
-		results.push(obj())
-		validator.index = results.len-1
+		my_validators.push(validator)
 		checked[name] = true
 		return true
 	}
-	for (name in validators)
-		applies(name)
 
-	let v, convert_failed
-	function validate(validator) {
-		if (convert_failed)
-			return false // if convert failed, subsequent validators cannot run!
-		if (validator.failed)
-			return false
-		if (validator.checked)
-			return true
-		if (v == null && !validator.check_null)
-			return true
-		for (req of validator.requires)
-			if (validators[req].failed) {
-				validator.failed = true
-				return false
-			}
-		let convert = validator.convert
-		if (convert) {
-			let s = v
-			v = convert(e, v, ...args)
-			if (v === INVALID) {
-				convert_failed = true
-				v = s
-			}
-		}
-		let failed = convert_failed || !validator.validate(e, v, ...args)
-		validator.s = validator.message(e, v, ...args)
-		validator.checked = true
-		validator.failed = failed
-		return !failed
+	function prop_changed(prop) {
+		if (prop && !validator_props[prop])
+			return
+		my_validators.clear()
+		for (let k in checked)
+			checked[k] = null
+		my_validators_invalid = true
+	}
+
+	function update_my_validators() {
+		for (let name in validators)
+			add_validator(name)
+		my_validators_invalid = false
 	}
 
 	let out = {results: results}
-	return function(v1, ann) {
-		v = repl(v1, '', null)
-		for (let validator of relevant_validators)
-			validate(validator)
-		for (let validator of relevant_validators) {
-			let result = results[validator.index]
-			result.checked = validator.checked || false
-			result.failed  = validator.failed || false
-			result.message = validator.s
-			if (validator.failed)
-				results.failed = true
-			validator.index   = null
-			validator.checked = null
-			validator.failed  = null
-			validator.s       = null
+	function validate(v, ann) {
+		if (my_validators_invalid)
+			update_my_validators()
+		v = repl(v, '', null)
+		let convert_failed
+		for (let validator of my_validators) {
+			if (convert_failed)
+				continue // if convert failed, subsequent validators cannot run!
+			if (validator._failed)
+				continue
+			if (validator._checked)
+				continue
+			if (v == null && !validator.check_null)
+				continue
+			for (let req of validator.requires)
+				if (validators[req].failed) {
+					validator._failed = true
+					continue
+				}
+			let convert = validator.convert
+			if (convert) {
+				v = convert(e, v, ...args)
+				convert_failed = v === INVALID
+				v = repl(v, INVALID, null)
+			}
+			let failed = convert_failed || !validator.validate(e, v, ...args)
+			validator._error = validator.error(e, v, ...args)
+			validator._rule  = validator.rule (e, v, ...args)
+			validator._checked = true
+			validator._failed = failed
+		}
+		results.len = my_validators.len
+		out.failed = false
+		out.first_failed_result = null
+		for (let i = 0, n = my_validators.len; i < n; i++) {
+			let validator = my_validators[i]
+			let result = attr(results, i)
+			result.checked = validator._checked || false
+			result.failed  = validator._failed || false
+			result.error   = validator._error
+			result.rule    = validator._rule
+			if (validator._failed) {
+				out.failed = true
+				out.first_failed_result = result
+			}
+			validator._checked = null
+			validator._failed  = null
+			validator._error  = null
+			validator._rule   = null
 		}
 		out.value = repl(v, undefined, null)
 		if (ann != false)
 			announce('validate', e, out, ...args)
-		pr(out)
 		return out
 	}
+
+	return {
+		prop_changed: prop_changed,
+		validate: validate,
+	}
+}
+
+let field_name = function(field) {
+	return field.text || field.name || S('value', 'Value')
 }
 
 validators.required = {
 	check_null: true,
+	props    : 'not_null required',
 	applies  : (e,    field) => field.not_null || field.required,
 	validate : (e, v, field) => v != null || field.default != null,
-	message  : (e, v, field) => S('validation_empty', 'Value cannot be empty'),
+	error    : (e, v, field) => S('validation_empty_error', '{0} is required', field_name(field)),
+	rule     : (e, v, field) => S('validation_empty_rule', '{0} is not empty', field_name(field)),
 }
 
 validators.min = {
 	requires : 'num',
+	props    : 'min',
 	applies  : (e,    field) => field.min != null,
 	validate : (e, v, field) => v >= field.min,
-	message  : (e, v, field) => S('validation_min_value',
-		'Value must be larger than (or equal to) {0}',
+	error    : (e, v, field) => S('validation_min_error',
+		'{0} is lower than {1}', field_name(field),
+			(field.from_num || return_arg)(field.min)),
+	rule     : (e, v, field) => S('validation_min_rule',
+		'{0} must be larger than or equal to {1}', field_name(field),
 			(field.from_num || return_arg)(field.min)),
 }
 
 validators.max = {
 	requires : 'num',
+	props    : 'max',
 	applies  : (e,    field) => field.max != null,
-	validate : (e, v, field) => v >= field.max,
-	message  : (e, v, field) => S('validation_max_value',
-		'Value must be smaller than (or equal to) {0}',
+	validate : (e, v, field) => v <= field.max,
+	error    : (e, v, field) => S('validation_max_error',
+		'{0} is larger than {1}', field_name(field),
+			(field.from_num || return_arg)(field.max)),
+	rule     : (e, v, field) => S('validation_max_rule',
+		'{0} must be smaller than (or equal to) {1}', field_name(field),
 			(field.from_num || return_arg)(field.max)),
 }
 
@@ -3647,18 +3698,76 @@ validators.num = {
 		return isstr(v) ? or(field.to_num(v), INVALID) : v
 	},
 	validate : (e, v, field) => isnum(v),
-	message  : () => S('not_a_number_error', 'Not a number'),
+	error    : (e, v, field) => S('validation_num_error', '{0} is not a number' , field_name(field)),
+	rule     : (e, v, field) => S('validation_num_rule' , '{0} must be a number', field_name(field)),
 }
 
 validators.lookup = {
+	props    : 'lookup_nav',
 	applies  : (e,    field) => field.lookup_nav,
 	validate : (e, v, field) => field.lookup_nav.ready
 			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
-	message  : (e, v, field) => S('validation_lookup',
-		'Value not in the list of allowed values.'),
+	error    : (e, v, field) => S('validation_lookup_error',
+		'{0} not in the list of allowed values.', field_name(field)),
+	rule     : (e, v, field) => S('validation_lookup_rule',
+		'{0} must be in the list of allowed values.', field_name(field)),
 }
 
 errors = component('errors', 'Input', function(e) {
+
+	e.prop('for_id'  , {type: 'id', attr: 'for'})
+	e.prop('for_name', {type: 'name', attr: 'name'})
+	e.prop('form'    , {type: 'id'})
+	e.prop('show_all', {type: 'bool', attr: 'show-all'})
+
+	function update(out) {
+		if (show_all) {
+			for (let result of out.results) {
+				//
+			}
+		} else {
+			if (out.first_failed_result)
+				e.set(out.first_failed_result.error)
+			else
+				e.clear()
+		}
+	}
+
+	function find_target_element() {
+		if (e.for_id)
+			return window[e.for_id]
+		if (!e.for_name)
+			return
+		let form = e.form || e.closest('form')
+		if (!form)
+			return
+		for (let te of form.elements)
+			if (te.name == e.for_name)
+				return te
+	}
+
+	function check_target_element(te) {
+		if (e.for_id)
+			return te.id == e.for_id
+		if (e.for_name) {
+			let form = e.form || e.closest('form')
+			return form && te.form == form
+		}
+	}
+
+	e.on_bind(function(on) {
+		if (on) {
+			let te = find_target_element()
+			if (te && te.validation_result)
+				update(te.validation_result)
+		}
+	})
+
+	e.listen('validate', function(te, out) {
+		if (!check_target_element(te))
+			return
+		update(out)
+	})
 
 })
 
@@ -3706,7 +3815,7 @@ function check_widget(e, input_type) {
 	e.make_focusable()
 	e.prop('checked', {type: 'bool', attr: true})
 	e.prop('name')
-	e.prop('form')
+	e.prop('form', {type: 'id', store: false})
 	e.prop('value')
 	e.property('label', function() {
 		if (!e.bound) return
@@ -3720,6 +3829,7 @@ function check_widget(e, input_type) {
 		e.checked = v
 	}
 	e.set_name = function(s) { e.input.name = s }
+	e.get_form = function() { return e.input.form }
 	e.set_form = function(s) { e.input.form = s }
 	e.set_value = function(v) { e.input.value = v }
 	e.user_toggle = function() {
@@ -3870,10 +3980,10 @@ radio = component('radio', function(e) {
 			return
 		let others
 		if (e.group) {
-			let form = e.closest('.form') || document.body
+			let form = e.form || document.body
 			others = form.$('.radio[group='+e.group+']')
 		} else {
-			let form = e.closest('.form') || e.closest('.radio-group')
+			let form = e.form || e.closest('.radio-group')
 			others = form && form.$('.radio') || empty_array
 		}
 		for (let re of others)
@@ -4029,16 +4139,17 @@ let slider_widget = function(e, range) {
 
 	}
 
-	e.prop('form')
-	if (range)
+	e.prop('form', {type: 'id', store: false})
+	if (range) {
+		e.get_form = function() { return e.input1.form }
 		e.set_form = function(s) {
 			e.input1.form = s
 			e.input2.form = s
 		}
-	else
-		e.set_form = function(s) {
-			e.input.form = s
-		}
+	} else {
+		e.get_form = function() { return e.input.form }
+		e.set_form = function(s) { e.input.form = s }
+	}
 
 	e.mark_w = e.css().prop('--slider-mark-w').num()
 
@@ -4741,7 +4852,7 @@ select_button = component('select-button', function(e) {
 
 	e.prop('selected_index', {type: 'number', updates: 'selected_index'})
 	e.prop('name')
-	e.prop('form')
+	e.prop('form', {type: 'id', store: false})
 	e.prop('value', {updates: 'value'})
 
 	e.item_value = function(ce) { // stub to pluck value from items
@@ -4753,6 +4864,7 @@ select_button = component('select-button', function(e) {
 	}
 
 	e.set_name = function(s) { e.input.name = s }
+	e.get_form = function() { return e.input.form }
 	e.set_form = function(s) { e.input.form = s }
 	e.set_value = function(v) { e.input.value = v }
 
@@ -4897,7 +5009,7 @@ num_input = component('num-input', 'Input', function(e) {
 
 	e.prop('input_value', {attr: 'value' , slot: 'state'}) // initial value and text value from user input
 	e.prop('name')
-	e.prop('form')
+	e.prop('form'       , {type: 'id', store: false})
 	e.prop('value'      , {type: 'number', slot: 'state'}) // typed valid value, not user-changeable
 	e.prop('invalid'    , {type: 'bool'  , slot: 'state', default: false})
 	e.prop('errors'     , {type: 'array' , slot: 'state', default: false})
@@ -4914,7 +5026,7 @@ num_input = component('num-input', 'Input', function(e) {
 	e.make_focusable('focus-ring', e.input)
 
 	function update_buttons() {
-		for (b of e.$('button'))
+		for (let b of e.$('button'))
 			b.disable('readonly', e.readonly)
 	}
 
@@ -4958,6 +5070,7 @@ num_input = component('num-input', 'Input', function(e) {
 	}
 
 	e.set_name = function(s) { e.input.name = s }
+	e.get_form = function() { return e.input.form }
 	e.set_form = function(s) { e.input.form = s }
 
 	e.set_value = function(v, v0, ev) {
@@ -4989,23 +5102,24 @@ num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	e.validate = function(v) {
-		let validate = validator(e, e)
-		return validate(v)
+	let my_validator
+	function validate(v) {
+		my_validator = my_validator || validator(e, e)
+		let out = my_validator.validate(v)
+		// TODO: if this gets too slow, do this only when props actually change.
+		my_validator.prop_changed()
+		e.validation_result = out
+		return out
 	}
 
 	e.set_input_value = function(iv, iv0, ev) {
 
 		let input = ev && ev.target == e.input
 
-		if (!input)
-			e.invalid = false
-
-		let out = e.validate(iv)
+		let out = validate(iv)
 		let v = out.value
 		e.set_prop('value', v, ev || {target: e})
-		if (input)
-			e.invalid = out.failed
+		e.invalid = out.failed
 
 		if (!input)
 			e.update({value: true})
@@ -5094,7 +5208,7 @@ css_generic_state('.pass-input-button[disabled]', 'op1 dim')
 pass_input = component('pass-input', 'Input', function(e) {
 
 	e.prop('name')
-	e.prop('form')
+	e.prop('form', {type: 'id', store: false})
 	e.prop('value')
 
 	e.class('pass-input input-group b-collapse-h ro-collapse-h')
@@ -5122,6 +5236,7 @@ pass_input = component('pass-input', 'Input', function(e) {
 	}
 
 	e.set_name = function(s) { e.input.name = s }
+	e.get_form = function() { return e.input.form }
 	e.set_form = function(s) { e.input.form = s }
 
 	e.on_update(function(opt) {
@@ -5286,8 +5401,9 @@ tags_input = component('tags-input', function(e) {
 	e.make_disablable()
 
 	e.prop('name')
-	e.prop('form')
+	e.prop('form', {type: 'id', store: false})
 	e.set_name = function(s) { e.value_input.name = s }
+	e.get_form = function() { return e.value_input.form }
 	e.set_form = function(s) { e.value_input.form = s }
 
 	e.tags_box = tags_box()
@@ -5475,11 +5591,12 @@ dropdown = component('dropdown', 'Input', function(e) {
 	// model/form
 
 	e.prop('name')
-	e.prop('form')
+	e.prop('form', {type: 'id', store: false})
 	e.input = tag('input', {type: 'hidden', hidden: ''})
 	e.add(e.input)
 
 	e.set_name = function(s) { e.input.name = s }
+	e.get_form = function() { return e.input.form }
 	e.set_form = function(s) { e.input.form = s }
 
 	// view -------------------------------------------------------------------
@@ -6133,7 +6250,7 @@ function calendar_widget(e, mode) {
 
 	let gh = [obj(), obj()] // see below...
 
-	ct.on_redraw(function(cx, _, _, pass) {
+	ct.on_redraw(function(cx, _, __, pass) {
 
 		x0 = 0
 		y0 = 0
@@ -7124,16 +7241,17 @@ function date_input_widget(e, has_date, has_time, range) {
 
 	}
 
-	e.prop('form')
-	if (range)
+	e.prop('form', {type: 'id', store: false})
+	if (range) {
+		e.get_form = function() { return e.input1.form }
 		e.set_form = function(s) {
 			e.input1.form = s
 			e.input2.form = s
 		}
-	else
-		e.set_form = function(s) {
-			e.input.form = s
-		}
+	} else {
+		e.get_form = function() { return e.input.form }
+		e.set_form = function(s) { e.input.form = s }
+	}
 
 	e.listen('prop_changed', function(ce, k, v, v0, ev) {
 		if (ce != e.picker) return
