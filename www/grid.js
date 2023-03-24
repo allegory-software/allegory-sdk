@@ -335,15 +335,14 @@ grid = component('grid', 'Input', function(e) {
 
 	// view-size-derived state ------------------------------------------------
 
-	var cells_w, cells_h // cell grid dimensions.
-	var grid_w, grid_h // grid dimensions.
-	var cells_view_w, cells_view_h // cell viewport dimensions inside scrollbars.
-	var cells_view_overflow_x, cells_view_overflow_y // cells viewport overflow setting.
-	var header_w, header_h // header viewport dimensions.
-	var grid_w // grid width, for vgrid header resizing
-	var hcell_h // header cell height.
-	var vrn // how many rows are fully or partially in the viewport.
-	var page_row_count // how many rows in a page for pgup/pgdown navigation.
+	let cells_w, cells_h // cell grid dimensions.
+	let grid_w, grid_h // grid dimensions.
+	let cells_view_w, cells_view_h // cell viewport dimensions inside scrollbars.
+	let cells_view_overflow_x, cells_view_overflow_y // cells viewport overflow setting.
+	let header_w, header_h // header viewport dimensions.
+	let hcell_h // header cell height.
+	let vrn // how many rows are fully or partially in the viewport.
+	let page_row_count // how many rows in a page for pgup/pgdown navigation.
 
 	// NOTE: keep this raf-friendly, i.e. don't measure the DOM in here!
 	function update_internal_sizes() {
@@ -1385,21 +1384,19 @@ grid = component('grid', 'Input', function(e) {
 
 	// responding to layout changes -------------------------------------------
 
-	{
-		let w0, h0
-		function layout_changed() {
-			let r = e.rect()
-			let w1 = r.w
-			let h1 = r.h
-			if (w1 == 0 && h1 == 0)
-				return // hidden
-			if (h1 !== h0 || w1 !== w0)
-				update_sizes()
-			w0 = w1
-			h0 = h1
-		}
-		e.on('resize', layout_changed)
+	let w0, h0
+	function layout_changed() {
+		let r = e.rect()
+		let w1 = r.w
+		let h1 = r.h
+		if (w1 == 0 && h1 == 0)
+			return // hidden
+		if (h1 !== h0 || w1 !== w0)
+			update_sizes()
+		w0 = w1
+		h0 = h1
 	}
+	e.on('resize', layout_changed)
 
 	// responding to rowset changes -------------------------------------------
 
@@ -1529,9 +1526,11 @@ grid = component('grid', 'Input', function(e) {
 		hit_state = 'col_resizing'
 		e.class('col-resizing')
 
+		let mm_col_resize
+
 		if (horiz) {
 
-			function mm_col_resize(ev, mx, my) {
+			mm_col_resize = function(ev, mx, my) {
 				;[mx, my] = cells_point(mx, my)
 				let w = mx - e.fields[hit_fi]._x - hit_dx
 				let field = e.fields[hit_fi]
@@ -1542,7 +1541,7 @@ grid = component('grid', 'Input', function(e) {
 
 		} else {
 
-			function mm_col_resize(ev, mx, my) {
+			mm_col_resize = function(ev, mx, my) {
 				e.cell_w = max(20, mx - hit_dx)
 			}
 

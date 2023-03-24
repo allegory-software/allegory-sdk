@@ -1621,7 +1621,7 @@ function nav_widget(e) {
 
 		while (fi >= 0 && fi < e.fields.length) {
 			let field = e.fields[fi]
-			if (e.can_focus_cell(last_valid_row, field, editable)) {4
+			if (e.can_focus_cell(last_valid_row, field, editable)) {
 				last_valid_fi = fi
 				if (cols <= 0)
 					break
@@ -1935,6 +1935,8 @@ function nav_widget(e) {
 		let cols_arr = colsarr(cols) // [col1,...]
 		let fis // [val_index1, ...]
 
+		let range_val, range_label
+
 		if (range_defs) {
 
 			let range_val_funcs = obj() // {col->f}
@@ -1977,7 +1979,7 @@ function nav_widget(e) {
 				range_label_funcs[col] = range_label
 			}
 
-			function range_val(v, i) {
+			range_val = function(v, i) {
 				if (v != null) {
 					let f = range_val_funcs[cols_arr[i]]
 					v = f ? f(v) : v
@@ -1985,16 +1987,16 @@ function nav_widget(e) {
 				return v
 			}
 
-			function range_label(v, i, row) {
+			range_label = function(v, i, row) {
 				let f = range_label_funcs[cols_arr[i]]
 				return f ? f(v) : e.cell_display_val(row, fld(cols_arr[i]))
 			}
 
 		} else {
 
-			var range_val = return_arg
+			range_val = return_arg
 
-			function range_label(v, i, row) {
+			range_label = function(v, i, row) {
 				return e.cell_display_val(row, fld(cols_arr[i]))
 			}
 
@@ -3139,7 +3141,7 @@ function nav_widget(e) {
 			return
 
 		if (!disabled) {
-			for (ce of disabled_widgets)
+			for (let ce of disabled_widgets)
 				ce.disable(e, disabled)
 			disabled_widgets = null
 			return

@@ -2212,13 +2212,15 @@ function lint(file) {
 			JSHINT(s, {
 				asi: true,
 				esversion: 6,
-				'-W014': true, // starting a line with `?`
+				'-W014': true, // says starting a line with `?` is "confusing".
 				'-W119': true, // `a**b` is es7
-				'-W082': true, // func decl in block
+				'-W082': true, // func decl in block: we do this all the time.
 				'-W008': true, // says `.5` is confusing :facepalm:
 				'-W054': true, // says we shouldn't use `new Function()`
 				'-W069': true, // says `foo['bar']` should be `foo.bar`
 				'-W083': true, // says we shouldn't make closures in loops, wtf.
+				'-W061': true, // says eval() is "harmful"... only in the wrong hands :)
+				'-W018': true, // says "confusing use of !" in charts.js dunno why.
 			})
 			pr(JSHINT.errors.map(e => sc.src+':'+e.line + ':' + e.character + ': '
 				+ e.code + ' ' + e.raw.subst(e)).join('\n'))
