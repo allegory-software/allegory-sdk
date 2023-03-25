@@ -3596,6 +3596,8 @@ function validator(e, ...args) {
 		v = repl(v, '', null)
 		let convert_failed
 		for (let validator of my_validators) {
+			validator._error = validator.error(e, v, ...args)
+			validator._rule  = validator.rule (e, v, ...args)
 			if (convert_failed)
 				continue // if convert failed, subsequent validators cannot run!
 			if (validator._failed)
@@ -3616,8 +3618,6 @@ function validator(e, ...args) {
 				v = repl(v, INVALID, null)
 			}
 			let failed = convert_failed || !validator.validate(e, v, ...args)
-			validator._error = validator.error(e, v, ...args)
-			validator._rule  = validator.rule (e, v, ...args)
 			validator._checked = true
 			validator._failed = failed
 		}
@@ -3713,7 +3713,17 @@ validators.lookup = {
 		'{0} must be in the list of allowed values.', field_name(field)),
 }
 
+css('.errors', 'v p')
+css('.errors-line', 'h p-05 gap-x')
+css('.errors-failed', 'fg-error bg-error')
+css('.errors-icon', 'w1 t-c')
+css('.errors-failed .errors-icon::before', 'fa fa-times')
+css('.errors-passed .errors-icon::before', 'fa fa-check')
+css('.errors-message', '')
+
 errors = component('errors', 'Input', function(e) {
+
+	e.class('errors')
 
 	e.prop('for_id'  , {type: 'id', attr: 'for'})
 	e.prop('for_name', {type: 'name', attr: 'name'})
@@ -3721,9 +3731,13 @@ errors = component('errors', 'Input', function(e) {
 	e.prop('show_all', {type: 'bool', attr: 'show-all'})
 
 	function update(out) {
-		if (show_all) {
+		if (e.show_all) {
+			e.clear()
 			for (let result of out.results) {
-				//
+				e.add(div({class: 'errors-line ' + (result.failed ? 'errors-failed' : 'errors-passed')},
+						div({class: 'errors-icon'}),
+						div({class: 'errors-message'}, result.rule)
+					))
 			}
 		} else {
 			if (out.first_failed_result)
