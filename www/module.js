@@ -5,12 +5,16 @@
 
 */
 
-function init_xmodule(opt) {
+(function () {
+"use strict"
+let G = window
+
+G.init_xmodule = function(opt) {
 
 	opt = opt || {layers: []}
 
 	let xm = {}
-	xmodule = xm // singleton.
+	G.xmodule = xm // singleton.
 
 	let generation = 1
 
@@ -355,3 +359,4 @@ function init_xmodule(opt) {
 
 }
 
+}()) // module function

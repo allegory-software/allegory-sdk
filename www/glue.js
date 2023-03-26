@@ -2219,8 +2219,8 @@ G.lint = function(file) {
 		document.documentElement.append(script)
 		return
 	}
-	$('script').each(function(sc) {
-		if (!sc.src || !sc.src.ends(file))
+	$('script[src]').each(function(sc) {
+		if (file && !sc.src.ends(file))
 			return
 		get(sc.src, function(s) {
 			pr(sc.src, s.len)

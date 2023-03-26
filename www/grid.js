@@ -11,6 +11,10 @@ WIDGETS
 
 */
 
+(function () {
+"use strict"
+let G = window
+
 /* ---------------------------------------------------------------------------
 // grid widget
 // ---------------------------------------------------------------------------
@@ -194,14 +198,12 @@ css_role('.grid.widget-editing', 'no-outline')
 
 css_role('.grid-cells-view.editing > .grid-cells', 'hidden')
 
-grid = component('grid', 'Input', function(e) {
+G.grid = component('grid', 'Input', function(e) {
 
 	e.class('grid')
-	val_widget(e, true)
+	// val_widget(e, true)
 	nav_widget(e)
-	editable_widget(e)
 	e.make_focusable()
-	stylable_widget(e)
 	e.ctrl_key_taken = true
 
 	function theme_changed() {
@@ -548,9 +550,10 @@ grid = component('grid', 'Input', function(e) {
 	var hit_ri, hit_fi, hit_indent // the hit cell and whether the cell indent was hit.
 	var row_move_state // additional state when row moving
 
+	let row_rect
 	{
 	let r = [0, 0, 0, 0] // x, y, w, h
-	function row_rect(ri, draw_stage) {
+	row_rect = function(ri, draw_stage) {
 		let s = row_move_state
 		if (horiz) {
 			r[0] = 0
@@ -583,9 +586,10 @@ grid = component('grid', 'Input', function(e) {
 	}
 	}
 
+	let cell_rel_rect
 	{
 	let r = [0, 0, 0, 0]  // x, y, w, h
-	function cell_rel_rect(fi) {
+	cell_rel_rect = function(fi) {
 		let s = row_move_state
 		if (horiz) {
 			r[0] = e.fields[fi]._x
@@ -1216,6 +1220,8 @@ grid = component('grid', 'Input', function(e) {
 
 	// error tooltip ----------------------------------------------------------
 
+	let update_error_tooltip
+	let update_error_tooltip_position
 	{
 		let row, field
 
@@ -1226,7 +1232,7 @@ grid = component('grid', 'Input', function(e) {
 			return false
 		}
 
-		function update_error_tooltip_position() {
+		update_error_tooltip_position = function() {
 			if (!e.error_tooltip) return
 			if (!row) return
 			let r = field
@@ -1236,7 +1242,7 @@ grid = component('grid', 'Input', function(e) {
 			e.error_tooltip.side = horiz ? 'top' : 'right'
 		}
 
-		function update_error_tooltip() {
+		update_error_tooltip = function() {
 			row = null
 			field = null
 			if (hit_state == 'cell') {
@@ -1475,9 +1481,10 @@ grid = component('grid', 'Input', function(e) {
 
 	// col resizing -----------------------------------------------------------
 
+	let cells_point
 	{
 	let p = [0, 0]
-	function cells_point(mx, my) {
+	cells_point = function(mx, my) {
 		let r = e.cells.rect()
 		let b = e.cell_border_width
 		mx -= r.x + b
@@ -2817,7 +2824,7 @@ grid = component('grid', 'Input', function(e) {
 // grid dropdown
 // ---------------------------------------------------------------------------
 
-grid_dropdown = component('grid-dropdown', function(e) {
+G.grid_dropdown = component('grid-dropdown', function(e) {
 
 	e.class('grid-dropdown')
 	nav_dropdown_widget(e)
@@ -2839,7 +2846,7 @@ grid_dropdown = component('grid-dropdown', function(e) {
 // row form
 // ---------------------------------------------------------------------------
 
-row_form = component('row-frm', function(e) {
+G.row_form = component('row-frm', function(e) {
 
 	e.class('row-form')
 	grid.props.vertical = {default: true}
@@ -2917,13 +2924,14 @@ row_form = component('row-frm', function(e) {
 
 })
 
-
 // ---------------------------------------------------------------------------
 // grid profile
 // ---------------------------------------------------------------------------
 
-grid_profile = component('grid-profile', function(e) {
+G.grid_profile = component('grid-profile', function(e) {
 
 	tabs_item_widget(e)
 
 })
+
+}()) // module function

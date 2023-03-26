@@ -2097,7 +2097,7 @@ G.tabs = component('tabs', 'Containers', function(e) {
 			for (let item of e.items) {
 				if (item._tabs != e) {
 					let xbutton = tag('tabs-xbutton')
-					xbutton.hidden = true
+					xbutton.hidden =  !e.can_remove_items
 					let title_box = tag('tabs-title')
 					let tab = tag('tabs-tab', 0, title_box, xbutton)
 					tab.tabs = e

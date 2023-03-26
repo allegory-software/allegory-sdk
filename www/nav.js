@@ -466,7 +466,9 @@ server-side properties:
 
 --------------------------------------------------------------------------- */
 
-{
+(function () {
+"use strict"
+let G = window
 
 css('.nav-loading-overlay', 'p')
 css('.nav-loading-overlay.error', 'bg-smoke')
@@ -481,8 +483,8 @@ css('.nav-loading-overlay-detail', 'mono m-y')
 
 css('.loading-error-icon', 'm-x fg-error')
 
-field_types = obj() // {TYPE->{k:v}}
-rowset_col_attrs = obj() // {ROWSET.COL->{k:v}}
+G.field_types = obj() // {TYPE->{k:v}}
+G.rowset_col_attrs = obj() // {ROWSET.COL->{k:v}}
 
 function map_keys_different(m1, m2) {
 	if (m1.size != m2.size)
@@ -546,7 +548,7 @@ let gc = function() {
 
 let prefix = (p, s) => s ? p + ':' + s : null
 
-function shared_nav(id, opt) {
+G.shared_nav = function(id, opt) {
 
 	let name = prefix('id', id)
 		|| prefix('rowset_name', opt.rowset_name)
@@ -623,7 +625,7 @@ let parse_rowset_tag = function(rowset_tag) {
 	return convert_text_attrs(rowset_tag.attrs, rowset_attr_convert)
 }
 
-function nav_widget(e) {
+G.nav_widget = function(e) {
 
 	e.isnav = true
 	e.make_disablable()
@@ -4985,7 +4987,7 @@ function nav_widget(e) {
 
 css('bare-nav', 'hidden')
 
-bare_nav = component('nav', function(e) {
+G.bare_nav = component('nav', function(e) {
 	e.class('bare-nav')
 	nav_widget(e)
 	return {hidden: true}
@@ -4995,7 +4997,7 @@ bare_nav = component('nav', function(e) {
 // global one-row nav for all standalone (i.e. not bound to a nav) widgets.
 // ---------------------------------------------------------------------------
 
-global_val_nav = function() {
+G.global_val_nav = function() {
 	global_val_nav = () => nav // memoize.
 	let nav = bare_nav({
 		rowset: {
@@ -5014,7 +5016,7 @@ external, internal, or missing (in which case the widget is disabled).
 
 // ------------------------------------------------------------------------ */
 
-function data_nav_widget(e) {
+G.data_nav_widget = function(e) {
 
 	function update_data_nav() {
 
@@ -5056,7 +5058,7 @@ function data_nav_widget(e) {
 // nav dropdown mixin
 // ---------------------------------------------------------------------------
 
-function nav_dropdown_widget(e) {
+G.nav_dropdown_widget = function(e) {
 
 	editbox_widget(e, {input: false, picker: true})
 
@@ -5090,749 +5092,750 @@ function nav_dropdown_widget(e) {
 // ------------------------------------------------------------------------ */
 
 {
-	field_prop_attrs = {
-		label : {slot: 'lang'},
-		w     : {slot: 'user'},
+
+G.field_prop_attrs = {
+	label : {slot: 'lang'},
+	w     : {slot: 'user'},
+}
+
+G.all_field_types = {
+	default: null,
+	w: 100,
+	min_w: 22,
+	max_w: 2000,
+	align: 'left',
+	not_null: false,
+	sortable: true,
+	maxlen: 256,
+	null_text: S('null_text', ''),
+	empty_text: S('empty_text', 'empty text'),
+	to_num: v => num(v, null),
+	from_num: return_arg,
+}
+
+all_field_types.validator_not_null = field => (field.not_null && {
+	validate : v => v != null || field.default != null,
+	message  : S('validation_empty', 'Value cannot be empty'),
+})
+
+all_field_types.validator_min = field => (field.min != null && {
+	validate : v => v == null || field.to_num(v) >= field.min,
+	message  : S('validation_min_value', 'Value must be at least {0}',
+		field.from_num(field.min)),
+})
+
+all_field_types.validator_max = field => (field.max != null && {
+	validate : v => v == null || field.to_num(v) <= field.max,
+	message  : S('validation_max_value', 'Value must be at most {0}',
+		field.from_num(field.max)),
+})
+
+all_field_types.validator_lookup = field => (field.lookup_nav && {
+	validate : v => v == null
+		|| (field.lookup_nav.ready
+			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0),
+	message  : S('validation_lookup',
+		'Value must be in the list of allowed values.'),
+})
+
+all_field_types.to_text = function(v) {
+	return String(v)
+}
+
+all_field_types.from_text = function(s) {
+	s = s.trim()
+	return s !== '' ? s : null
+}
+
+all_field_types.format = function(s) {
+	return this.to_text(s)
+}
+
+all_field_types.format_text = function(s) {
+	return this.to_text(s)
+}
+
+all_field_types.fixed_width = 0
+
+all_field_types.draw = function(v, cx) {
+	let s = this.format_text(v)
+	cx.font = cx.text_font
+	if (cx.measure) {
+		cx.measured_width = cx.measureText(s).width + this.fixed_width
+		return
 	}
-
-	all_field_types = {
-		default: null,
-		w: 100,
-		min_w: 22,
-		max_w: 2000,
-		align: 'left',
-		not_null: false,
-		sortable: true,
-		maxlen: 256,
-		null_text: S('null_text', ''),
-		empty_text: S('empty_text', 'empty text'),
-		to_num: v => num(v, null),
-		from_num: return_arg,
+	let x
+	if (this.align == 'right')
+		x = cx.cw
+	else if (this.align == 'center')
+		x = cx.cw / 2
+	else
+		x = 0
+	cx.textAlign = this.align
+	cx.fillStyle = cx.fg_text
+	cx.fillText(s, x, cx.baseline)
+	if (cx.quicksearch_len) {
+		let s1 = s.slice(0, cx.quicksearch_len)
+		let m = cx.measureText(s)
+		let ascent  = m.actualBoundingBoxAscent
+		let descent = m.actualBoundingBoxDescent
+		let w = cx.measureText(s1).width
+		cx.fillStyle = cx.bg_search
+		cx.beginPath()
+		cx.rect(0, cx.baseline - ascent, w, ascent + descent)
+		cx.fill()
+		cx.fillStyle = cx.fg_search
+		cx.fillText(s1, x, cx.baseline)
 	}
+}
 
-	all_field_types.validator_not_null = field => (field.not_null && {
-		validate : v => v != null || field.default != null,
-		message  : S('validation_empty', 'Value cannot be empty'),
-	})
+all_field_types.editor = function(opt) {
+	return textedit(opt)
+}
 
-	all_field_types.validator_min = field => (field.min != null && {
-		validate : v => v == null || field.to_num(v) >= field.min,
-		message  : S('validation_min_value', 'Value must be at least {0}',
-			field.from_num(field.min)),
-	})
+// passwords
 
-	all_field_types.validator_max = field => (field.max != null && {
-		validate : v => v == null || field.to_num(v) <= field.max,
-		message  : S('validation_max_value', 'Value must be at most {0}',
-			field.from_num(field.max)),
-	})
+let pwd = obj()
+field_types.password = pwd
 
-	all_field_types.validator_lookup = field => (field.lookup_nav && {
-		validate : v => v == null
-			|| (field.lookup_nav.ready
-				&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0),
-		message  : S('validation_lookup',
-			'Value must be in the list of allowed values.'),
-	})
+pwd.editor = function(opt) {
+	return passedit(opt)
+}
 
-	all_field_types.to_text = function(v) {
-		return String(v)
-	}
+// numbers
 
-	all_field_types.from_text = function(s) {
-		s = s.trim()
-		return s !== '' ? s : null
-	}
+let number = {align: 'right', min: 0, max: 1/0, decimals: 0}
+field_types.number = number
 
-	all_field_types.format = function(s) {
-		return this.to_text(s)
-	}
+number.validator_number = field => ({
+	validate : v => v == null || (isnum(v) && v === v),
+	message  : S('validation_number', 'Value must be a number'),
+})
 
-	all_field_types.format_text = function(s) {
-		return this.to_text(s)
-	}
+number.validator_integer = field => (field.decimals == 0 && {
+	validate : v => v == null || (v % 1 == 0),
+	message  : S('validation_integer', 'Value must be an integer'),
+})
 
-	all_field_types.fixed_width = 0
+number.editor = function(opt) {
+	return numedit(opt)
+}
 
-	all_field_types.draw = function(v, cx) {
-		let s = this.format_text(v)
-		cx.font = cx.text_font
-		if (cx.measure) {
-			cx.measured_width = cx.measureText(s).width + this.fixed_width
+number.from_text = function(s) {
+	s = s.trim()
+	s = s !== '' ? s : null
+	let x = num(s)
+	return x != null ? x : s
+}
+
+number.to_text = function(s) {
+	let x = num(s)
+	return x != null ? x.dec(this.decimals) : s
+}
+
+// file sizes
+
+let filesize = assign(obj(), number)
+field_types.filesize = filesize
+
+// TODO: filesize.from_text!
+
+filesize.is_small = function(s) {
+	let x = num(s)
+	if (x == null)
+		return true
+	let min = this.filesize_min
+	if (min == null)
+		min = 1/10**(this.filesize_decimals || 0)
+	return x < min
+}
+
+filesize.to_text = function(s) {
+	let x = num(s)
+	if (x == null)
+		return s
+	let mag = this.filesize_magnitude
+	let dec = this.filesize_decimals || 0
+	return x.kbytes(dec, mag)
+}
+
+filesize.format = function(s) {
+	let small = this.is_small(s)
+	s = this.format_text(s)
+	return small ? span({class: 'dba-insignificant-size'}, s) : s
+}
+
+filesize.draw = function(s, cx) {
+	if (this.is_small(s))
+		cx.fg_text = cx.fg_disabled
+	all_field_types.draw.call(this, s, cx)
+}
+
+filesize.scale_base = 1024
+filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
+
+// counts
+
+let count = assign(obj(), number)
+field_types.count = count
+
+count.to_text = function(s) {
+	let x = num(s)
+	if (x == null)
+		return s
+	let mag = this.magnitude
+	let dec = this.decimals || 0
+	return x.kcount(dec, mag)
+}
+
+// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
+
+let date = {align: 'right'}
+field_types.date = date
+
+date.to_time = function(s, validate) {
+	if (s == null || s == '')
+		return null
+	return s.trim().parse_date('SQL', validate)
+}
+
+let a = []
+date.from_time = function(t) {
+	if (t == null)
+		return null
+	return t.date('SQL', this.has_time, this.has_seconds)
+}
+
+date.to_num   = date.to_time
+date.from_num = date.from_time
+
+date.to_text = function(s) {
+	let t = this.to_time(s, true)
+	if (t == null) return s // invalid
+	return t.date(null, this.has_time, this.has_seconds)
+}
+
+date.from_text = function(s) {
+	if (s == '') return null
+	let t = s.parse_date(null, true)
+	if (t == null) return s
+	return this.from_time(t)
+}
+
+date.format_text = function(s) {
+	let t = this.to_time(s, true)
+	if (t == null) return s // invalid
+	if (this.timeago)
+		return t.timeago()
+	return t.date(null, this.has_time, this.has_seconds)
+}
+
+// range of MySQL DATETIME type
+date.min = date.to_time('1000-01-01 00:00:00')
+date.max = date.to_time('9999-12-31 23:59:59')
+
+date.editor = function(opt) {
+	return dateedit(assign_opt({
+		align: 'right',
+		mode: opt.embedded ? 'fixed' : null,
+	}, opt))
+}
+
+date.validator_date = field => ({
+	validate : (v, row, field) => v == null || field.to_time(v, true) != null,
+	message  : S('validation_date', 'Date must be valid'),
+})
+
+// timestamps
+
+let ts = {align: 'right'}
+field_types.time = ts
+
+ts.has_time = true // for calendar
+
+ts.to_time   = return_arg
+ts.from_time = return_arg
+
+ts.to_num   = return_arg
+ts.from_num = return_arg
+
+ts.to_text = function(v) {
+	if (isstr(v)) return v // invalid
+	return v.date('SQL', this.has_time, this.has_seconds)
+}
+
+ts.from_text = function(s) {
+	return s.trim().parse_date('SQL')
+}
+
+ts.min = 0
+ts.max = 2**32-1 // range of MySQL TIMESTAMP type
+
+ts.format = function(t) {
+	if (isstr(t)) return t // invalid
+	if (this.timeago)
+		return span({timeago: '', time: t}, t.timeago())
+	return t.date(null, this.has_time, this.has_seconds)
+}
+
+ts.format_text = function(t) {
+	if (isstr(t)) return t // invalid
+	if (this.timeago)
+		return t.timeago()
+	return t.date(null, this.has_time, this.has_seconds)
+}
+
+ts.validator_date = field => ({
+	validate : v => v == null || (isnum(v) && v === v),
+	message  : S('validation_date', 'Date must be valid'),
+})
+
+// parsing of: h m | h m s | hhmm | hhmmss
+// TODO: move this to glue.js date_parser() and use that.
+let _tt_out = [0, 0, 0]
+let parse_hms = function(s, has_seconds) {
+	let m = s.match(/\d+/g)
+	if (!m)
+		return
+	let H, M, S
+	if (m.length == 1) { // hhmm | hhmmss
+		if (m[0].length != 6 && m[0].length != 4)
 			return
-		}
-		let x
-		if (this.align == 'right')
-			x = cx.cw
-		else if (this.align == 'center')
-			x = cx.cw / 2
+		H = num(m[0].slice(0, 2))
+		M = num(m[0].slice(2, 4))
+		S = num(m[0].slice(4, 6), 0)
+	} else { // h m | h m s
+		if (m.length != 3 && m.length != 2)
+			return
+		H = num(m[0])
+		M = num(m[1])
+		S = num(m[2], 0)
+	}
+	if (H > 23) return
+	if (M > 59) return
+	if (S > 59) return
+	if (!has_seconds && S)
+		return
+	_tt_out[0] = H
+	_tt_out[1] = M
+	_tt_out[2] = S
+	return _tt_out
+}
+
+// MySQL time
+
+let td = {align: 'center'}
+field_types.timeofday = td
+
+td.to_text = function(v) {
+	let t = parse_hms(v, this.has_seconds)
+	if (t == null) return v // invalid
+	let s = t[0].base(10, 2) + ':' + t[1].base(10, 2)
+	if (this.has_seconds)
+		s += ':' + t[2].base(10, 2)
+	return s
+}
+
+td.from_text = function(s, has_seconds) {
+	let t = parse_hms(s, this.has_seconds)
+	if (t == null) return // invalid
+	return t[0].base(10, 2) + ':' + t[1].base(10, 2)
+		+ ':' + (this.has_seconds ? t[2].base(10, 2) : '00')
+}
+
+td.validator_time = field => ({
+	validate : v => v == null || parse_hms(v, field.has_seconds) != null,
+	message  : field.has_seconds
+		? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
+		: S('validate_time', 'Time must look like H:M or HHMM')
+})
+
+td.editor = function(opt) {
+	return timeofdayedit(opt)
+}
+
+// timeofday in seconds
+
+let tds = {align: 'center'}
+field_types.timeofday_in_seconds = tds
+
+tds.to_text = function(v) {
+	if (isstr(v)) return v // invalid
+	let H = floor(v / 3600)
+	let M = floor(v / 60) % 60
+	let S = floor(v) % 60
+	let s = H.base(10, 2) + ':' + M.base(10, 2)
+	if (this.has_seconds)
+		s += ':' + S.base(10, 2)
+	return s
+}
+
+tds.from_text = function(s) {
+	let t = parse_hms(s, this.has_seconds)
+	if (t == null) return s // invalid
+	return t[0] * 3600 + t[1] * 60 + t[2]
+}
+
+tds.validator_timeofday_in_seconds = field => ({
+	validate : v => v == null || tds_from_text(v, field.has_seconds),
+	message  : field.has_seconds
+		? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
+		: S('validate_time', 'Time must look like H:M or HHMM')
+})
+
+tds.editor = function(opt) {
+	return timeofdayedit(opt)
+}
+
+// duration
+
+let d = {align: 'right'}
+field_types.duration = d
+
+d.to_text = function(v) {
+	if (!isnum(v)) return v // invalid
+	return v.duration(this.duration_format)
+}
+
+// parse `N d[ays] N h[ours] N m[in] N s[ec]` in any order, spaces optional.
+let d_re = /(\d+)\s*([^\d\s])[^\d\s]*/g
+d.from_text = function(s) {
+	s = s.trim()
+	let m
+	let d = 0
+	d_re.lastIndex = 0 // reset regex state.
+	while ((m = d_re.exec(s)) != null) {
+		let x = num(m[1])
+		let t = m[2].lower()
+		if (t == 'd')
+			d += x * 3600 * 24
+		else if (t == 'h')
+			d += x * 3600
+		else if (t == 'm')
+			d += x * 60
+		else if (t == 's')
+			d += x
 		else
-			x = 0
-		cx.textAlign = this.align
-		cx.fillStyle = cx.fg_text
-		cx.fillText(s, x, cx.baseline)
-		if (cx.quicksearch_len) {
-			let s1 = s.slice(0, cx.quicksearch_len)
-			let m = cx.measureText(s)
-			let ascent  = m.actualBoundingBoxAscent
-			let descent = m.actualBoundingBoxDescent
-			let w = cx.measureText(s1).width
-			cx.fillStyle = cx.bg_search
-			cx.beginPath()
-			cx.rect(0, cx.baseline - ascent, w, ascent + descent)
-			cx.fill()
-			cx.fillStyle = cx.fg_search
-			cx.fillText(s1, x, cx.baseline)
-		}
-	}
-
-	all_field_types.editor = function(opt) {
-		return textedit(opt)
-	}
-
-	// passwords
-
-	let pwd = obj()
-	field_types.password = pwd
-
-	pwd.editor = function(opt) {
-		return passedit(opt)
-	}
-
-	// numbers
-
-	let number = {align: 'right', min: 0, max: 1/0, decimals: 0}
-	field_types.number = number
-
-	number.validator_number = field => ({
-		validate : v => v == null || (isnum(v) && v === v),
-		message  : S('validation_number', 'Value must be a number'),
-	})
-
-	number.validator_integer = field => (field.decimals == 0 && {
-		validate : v => v == null || (v % 1 == 0),
-		message  : S('validation_integer', 'Value must be an integer'),
-	})
-
-	number.editor = function(opt) {
-		return numedit(opt)
-	}
-
-	number.from_text = function(s) {
-		s = s.trim()
-		s = s !== '' ? s : null
-		let x = num(s)
-		return x != null ? x : s
-	}
-
-	number.to_text = function(s) {
-		let x = num(s)
-		return x != null ? x.dec(this.decimals) : s
-	}
-
-	// file sizes
-
-	let filesize = assign(obj(), number)
-	field_types.filesize = filesize
-
-	// TODO: filesize.from_text!
-
-	filesize.is_small = function(s) {
-		let x = num(s)
-		if (x == null)
-			return true
-		let min = this.filesize_min
-		if (min == null)
-			min = 1/10**(this.filesize_decimals || 0)
-		return x < min
-	}
-
-	filesize.to_text = function(s) {
-		let x = num(s)
-		if (x == null)
 			return s
-		let mag = this.filesize_magnitude
-		let dec = this.filesize_decimals || 0
-		return x.kbytes(dec, mag)
 	}
+	return d
+}
 
-	filesize.format = function(s) {
-		let small = this.is_small(s)
-		s = this.format_text(s)
-		return small ? span({class: 'dba-insignificant-size'}, s) : s
-	}
+// booleans
 
-	filesize.draw = function(s, cx) {
-		if (this.is_small(s))
-			cx.fg_text = cx.fg_disabled
-		all_field_types.draw.call(this, s, cx)
-	}
+let bool = {align: 'center', min_w: 28}
+field_types.bool = bool
 
-	filesize.scale_base = 1024
-	filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
+bool.true_text = () => div({class: 'fa fa-check'})
+bool.false_text = ''
 
-	// counts
+bool.null_text = () => div({class: 'fa fa-square'})
 
-	let count = assign(obj(), number)
-	field_types.count = count
+bool.validator_bool = field => ({
+	validate : v => v == null || isbool(v),
+	message  : S('validation_boolean', 'Value must be true or false'),
+})
 
-	count.to_text = function(s) {
-		let x = num(s)
-		if (x == null)
-			return s
-		let mag = this.magnitude
-		let dec = this.decimals || 0
-		return x.kcount(dec, mag)
-	}
+bool.format = function(v) {
+	return v ? this.true_text : this.false_text
+}
 
-	// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
+bool.format_text = function(v) {
+	return v ? '\uf00c' : ''
+}
 
-	let date = {align: 'right'}
-	field_types.date = date
+bool.draw = function(v, cx) {
+	let text_font = cx.text_font
+	cx.text_font = cx.icon_font
+	all_field_types.draw.call(this, v, cx)
+	cx.text_font = text_font
+}
 
-	date.to_time = function(s, validate) {
-		if (s == null || s == '')
-			return null
-		return s.trim().parse_date('SQL', validate)
-	}
+bool.editor = function(opt) {
+	return checkbox(assign_opt({
+		center: opt.embedded,
+	}, opt))
+}
 
-	let a = []
-	date.from_time = function(t) {
-		if (t == null)
-			return null
-		return t.date('SQL', this.has_time, this.has_seconds)
-	}
+// enums
 
-	date.to_num   = date.to_time
-	date.from_num = date.from_time
+let enm = obj()
+field_types.enum = enm
 
-	date.to_text = function(s) {
-		let t = this.to_time(s, true)
-		if (t == null) return s // invalid
-		return t.date(null, this.has_time, this.has_seconds)
-	}
+enm.editor = function(opt) {
+	return list_dropdown(assign_opt({
+		items: words(this.enum_values),
+		format: enm.format,
+		mode: opt.embedded ? 'fixed' : null,
+		val_col: 0,
+	}, opt))
+}
 
-	date.from_text = function(s) {
-		if (s == '') return null
-		let t = s.parse_date(null, true)
-		if (t == null) return s
-		return this.from_time(t)
-	}
+enm.to_text = function(v) {
+	let s = this.enum_texts ? this.enum_texts[v] : undefined
+	return s !== undefined ? s : v
+}
 
-	date.format_text = function(s) {
-		let t = this.to_time(s, true)
-		if (t == null) return s // invalid
-		if (this.timeago)
-			return t.timeago()
-		return t.date(null, this.has_time, this.has_seconds)
-	}
+enm.validator_enum = field => ({
+	validate : v => v == null
+		|| !field.enum_values
+		|| !!words(field.enum_values).tokeys()[v],
+	message  : S('validation_enum',
+		'Value must be in the list of allowed values.'),
+})
 
-	// range of MySQL DATETIME type
-	date.min = date.to_time('1000-01-01 00:00:00')
-	date.max = date.to_time('9999-12-31 23:59:59')
+// tag lists
 
-	date.editor = function(opt) {
-		return dateedit(assign_opt({
-			align: 'right',
-			mode: opt.embedded ? 'fixed' : null,
-		}, opt))
-	}
+let tags = obj()
+field_types.tags = tags
 
-	date.validator_date = field => ({
-		validate : (v, row, field) => v == null || field.to_time(v, true) != null,
-		message  : S('validation_date', 'Date must be valid'),
+tags.tags_format = 'words' // words | array
+
+tags.editor = function(opt) {
+	return tagsedit(assign_opt({
+		mode: opt.embedded ? 'fixed' : null,
+	}, opt))
+}
+
+tags.to_text = function(v) {
+	return isarray(v) ? v.join(' ') : v
+}
+
+// colors
+
+let color = obj()
+field_types.color = color
+
+css('.item-color', '', `
+	width: 100%;
+`)
+
+color.format = function(s) {
+	return div({class: 'item-color', style: 'background-color: '+s}, '\u00A0')
+}
+
+// TODO: color.draw = function(s) {}
+
+color.editor = function(opt) {
+	return color_dropdown(assign_opt({
+		mode: opt.embedded ? 'fixed' : null,
+	}, opt))
+}
+
+// percent
+
+let percent = obj()
+field_types.percent = percent
+
+percent.to_text = function(p) {
+	return isnum(p) ? (p * 100).dec(this.decimals) + '%' : p
+}
+
+css('.item-progress', 'rel', `
+	width: 100%;
+	height: 100%;
+`)
+
+css('.item-progress-bar', 'abs', `
+	top: 0; left: 0; bottom: 0;
+	background-color: var(--bg-selected);
+`)
+
+// rel: so it stays on top of the absolute progress bar
+css('.item-progress-text', 'rel t-c', `
+	top: 0; left: 0; right: 0; bottom: 0;
+`)
+
+percent.format = function(s) {
+	let bar = div({class: 'item-progress-bar'})
+	let txt = div({class: 'item-progress-text'}, this.to_text(s))
+	bar.style.right = (100 - (isnum(s) ? s * 100 : 0)) + '%'
+	return div({class: 'item-progress'}, bar, txt)
+}
+
+// TODO: percent.draw = function(s) {}
+
+// icons
+
+let icon = obj()
+field_types.icon = icon
+
+icon.format = function(icon) {
+	return div({class: 'fa '+icon})
+}
+
+icon.draw = function(s, cx) {
+	s = fontawesome_char(s)
+	if (!s)
+		return
+	let text_font = cx.text_font
+	cx.text_font = cx.icon_font
+	all_field_types.draw.call(this, s, cx)
+	cx.text_font = text_font
+}
+
+icon.editor = function(opt) {
+	return icon_dropdown(assign_opt({
+		mode: opt.embedded ? 'fixed' : null,
+	}, opt))
+}
+
+// columns
+
+let col = obj()
+field_types.col = col
+
+col.convert = v => or(num(v), v)
+
+// google maps places
+
+let place = obj()
+field_types.place = place
+
+place.format_pin = function() {
+	return span({
+		class: 'place-pin fa fa-map-marker-alt',
+		title: S('view_on_google_maps', 'View on Google Maps')
 	})
-
-	// timestamps
-
-	let ts = {align: 'right'}
-	field_types.time = ts
-
-	ts.has_time = true // for calendar
-
-	ts.to_time   = return_arg
-	ts.from_time = return_arg
-
-	ts.to_num   = return_arg
-	ts.from_num = return_arg
-
-	ts.to_text = function(v) {
-		if (isstr(v)) return v // invalid
-		return v.date('SQL', this.has_time, this.has_seconds)
-	}
-
-	ts.from_text = function(s) {
-		return s.trim().parse_date('SQL')
-	}
-
-	ts.min = 0
-	ts.max = 2**32-1 // range of MySQL TIMESTAMP type
-
-	ts.format = function(t) {
-		if (isstr(t)) return t // invalid
-		if (this.timeago)
-			return span({timeago: '', time: t}, t.timeago())
-		return t.date(null, this.has_time, this.has_seconds)
-	}
-
-	ts.format_text = function(t) {
-		if (isstr(t)) return t // invalid
-		if (this.timeago)
-			return t.timeago()
-		return t.date(null, this.has_time, this.has_seconds)
-	}
-
-	ts.validator_date = field => ({
-		validate : v => v == null || (isnum(v) && v === v),
-		message  : S('validation_date', 'Date must be valid'),
-	})
-
-	// parsing of: h m | h m s | hhmm | hhmmss
-	// TODO: move this to glue.js date_parser() and use that.
-	let _tt_out = [0, 0, 0]
-	let parse_hms = function(s, has_seconds) {
-		let m = s.match(/\d+/g)
-		if (!m)
-			return
-		let H, M, S
-		if (m.length == 1) { // hhmm | hhmmss
-			if (m[0].length != 6 && m[0].length != 4)
-				return
-			H = num(m[0].slice(0, 2))
-			M = num(m[0].slice(2, 4))
-			S = num(m[0].slice(4, 6), 0)
-		} else { // h m | h m s
-			if (m.length != 3 && m.length != 2)
-				return
-			H = num(m[0])
-			M = num(m[1])
-			S = num(m[2], 0)
-		}
-		if (H > 23) return
-		if (M > 59) return
-		if (S > 59) return
-		if (!has_seconds && S)
-			return
-		_tt_out[0] = H
-		_tt_out[1] = M
-		_tt_out[2] = S
-		return _tt_out
-	}
-
-	// MySQL time
-
-	let td = {align: 'center'}
-	field_types.timeofday = td
-
-	td.to_text = function(v) {
-		let t = parse_hms(v, this.has_seconds)
-		if (t == null) return v // invalid
-		let s = t[0].base(10, 2) + ':' + t[1].base(10, 2)
-		if (this.has_seconds)
-			s += ':' + t[2].base(10, 2)
-		return s
-	}
-
-	td.from_text = function(s, has_seconds) {
-		let t = parse_hms(s, this.has_seconds)
-		if (t == null) return // invalid
-		return t[0].base(10, 2) + ':' + t[1].base(10, 2)
-			+ ':' + (this.has_seconds ? t[2].base(10, 2) : '00')
-	}
-
-	td.validator_time = field => ({
-		validate : v => v == null || parse_hms(v, field.has_seconds) != null,
-		message  : field.has_seconds
-			? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
-			: S('validate_time', 'Time must look like H:M or HHMM')
-	})
-
-	td.editor = function(opt) {
-		return timeofdayedit(opt)
-	}
-
-	// timeofday in seconds
-
-	let tds = {align: 'center'}
-	field_types.timeofday_in_seconds = tds
-
-	tds.to_text = function(v) {
-		if (isstr(v)) return v // invalid
-		let H = floor(v / 3600)
-		let M = floor(v / 60) % 60
-		let S = floor(v) % 60
-		let s = H.base(10, 2) + ':' + M.base(10, 2)
-		if (this.has_seconds)
-			s += ':' + S.base(10, 2)
-		return s
-	}
-
-	tds.from_text = function(s) {
-		let t = parse_hms(s, this.has_seconds)
-		if (t == null) return s // invalid
-		return t[0] * 3600 + t[1] * 60 + t[2]
-	}
-
-	tds.validator_timeofday_in_seconds = field => ({
-		validate : v => v == null || tds_from_text(v, field.has_seconds),
-		message  : field.has_seconds
-			? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
-			: S('validate_time', 'Time must look like H:M or HHMM')
-	})
-
-	tds.editor = function(opt) {
-		return timeofdayedit(opt)
-	}
-
-	// duration
-
-	let d = {align: 'right'}
-	field_types.duration = d
-
-	d.to_text = function(v) {
-		if (!isnum(v)) return v // invalid
-		return v.duration(this.duration_format)
-	}
-
-	// parse `N d[ays] N h[ours] N m[in] N s[ec]` in any order, spaces optional.
-	let d_re = /(\d+)\s*([^\d\s])[^\d\s]*/g
-	d.from_text = function(s) {
-		s = s.trim()
-		let m
-		let d = 0
-		d_re.lastIndex = 0 // reset regex state.
-		while ((m = d_re.exec(s)) != null) {
-			let x = num(m[1])
-			let t = m[2].lower()
-			if (t == 'd')
-				d += x * 3600 * 24
-			else if (t == 'h')
-				d += x * 3600
-			else if (t == 'm')
-				d += x * 60
-			else if (t == 's')
-				d += x
-			else
-				return s
-		}
-		return d
-	}
-
-	// booleans
-
-	let bool = {align: 'center', min_w: 28}
-	field_types.bool = bool
-
-	bool.true_text = () => div({class: 'fa fa-check'})
-	bool.false_text = ''
-
-	bool.null_text = () => div({class: 'fa fa-square'})
-
-	bool.validator_bool = field => ({
-		validate : v => v == null || isbool(v),
-		message  : S('validation_boolean', 'Value must be true or false'),
-	})
-
-	bool.format = function(v) {
-		return v ? this.true_text : this.false_text
-	}
-
-	bool.format_text = function(v) {
-		return v ? '\uf00c' : ''
-	}
-
-	bool.draw = function(v, cx) {
-		let text_font = cx.text_font
-		cx.text_font = cx.icon_font
-		all_field_types.draw.call(this, v, cx)
-		cx.text_font = text_font
-	}
-
-	bool.editor = function(opt) {
-		return checkbox(assign_opt({
-			center: opt.embedded,
-		}, opt))
-	}
-
-	// enums
-
-	let enm = obj()
-	field_types.enum = enm
-
-	enm.editor = function(opt) {
-		return list_dropdown(assign_opt({
-			items: words(this.enum_values),
-			format: enm.format,
-			mode: opt.embedded ? 'fixed' : null,
-			val_col: 0,
-		}, opt))
-	}
-
-	enm.to_text = function(v) {
-		let s = this.enum_texts ? this.enum_texts[v] : undefined
-		return s !== undefined ? s : v
-	}
-
-	enm.validator_enum = field => ({
-		validate : v => v == null
-			|| !field.enum_values
-			|| !!words(field.enum_values).tokeys()[v],
-		message  : S('validation_enum',
-			'Value must be in the list of allowed values.'),
-	})
-
-	// tag lists
-
-	let tags = obj()
-	field_types.tags = tags
-
-	tags.tags_format = 'words' // words | array
-
-	tags.editor = function(opt) {
-		return tagsedit(assign_opt({
-			mode: opt.embedded ? 'fixed' : null,
-		}, opt))
-	}
-
-	tags.to_text = function(v) {
-		return isarray(v) ? v.join(' ') : v
-	}
-
-	// colors
-
-	let color = obj()
-	field_types.color = color
-
-	css('.item-color', '', `
-		width: 100%;
-	`)
-
-	color.format = function(s) {
-		return div({class: 'item-color', style: 'background-color: '+s}, '\u00A0')
-	}
-
-	// TODO: color.draw = function(s) {}
-
-	color.editor = function(opt) {
-		return color_dropdown(assign_opt({
-			mode: opt.embedded ? 'fixed' : null,
-		}, opt))
-	}
-
-	// percent
-
-	let percent = obj()
-	field_types.percent = percent
-
-	percent.to_text = function(p) {
-		return isnum(p) ? (p * 100).dec(this.decimals) + '%' : p
-	}
-
-	css('.item-progress', 'rel', `
-		width: 100%;
-		height: 100%;
-	`)
-
-	css('.item-progress-bar', 'abs', `
-		top: 0; left: 0; bottom: 0;
-		background-color: var(--bg-selected);
-	`)
-
-	// rel: so it stays on top of the absolute progress bar
-	css('.item-progress-text', 'rel t-c', `
-		top: 0; left: 0; right: 0; bottom: 0;
-	`)
-
-	percent.format = function(s) {
-		let bar = div({class: 'item-progress-bar'})
-		let txt = div({class: 'item-progress-text'}, this.to_text(s))
-		bar.style.right = (100 - (isnum(s) ? s * 100 : 0)) + '%'
-		return div({class: 'item-progress'}, bar, txt)
-	}
-
-	// TODO: percent.draw = function(s) {}
-
-	// icons
-
-	let icon = obj()
-	field_types.icon = icon
-
-	icon.format = function(icon) {
-		return div({class: 'fa '+icon})
-	}
-
-	icon.draw = function(s, cx) {
-		s = fontawesome_char(s)
-		if (!s)
-			return
-		let text_font = cx.text_font
-		cx.text_font = cx.icon_font
-		all_field_types.draw.call(this, s, cx)
-		cx.text_font = text_font
-	}
-
-	icon.editor = function(opt) {
-		return icon_dropdown(assign_opt({
-			mode: opt.embedded ? 'fixed' : null,
-		}, opt))
-	}
-
-	// columns
-
-	let col = obj()
-	field_types.col = col
-
-	col.convert = v => or(num(v), v)
-
-	// google maps places
-
-	let place = obj()
-	field_types.place = place
-
-	place.format_pin = function() {
-		return span({
-			class: 'place-pin fa fa-map-marker-alt',
-			title: S('view_on_google_maps', 'View on Google Maps')
-		})
-	}
-
-	place.format = function(v, row, place) {
-		if (!place) {
-			let pin = this.format_pin()
-			pin.onpointerdown = function(ev) {
-				if (this.place_id) {
-					window.open('https://www.google.com/maps/place/?q=place_id:'+this.place_id, '_blank')
-					return false
-				}
+}
+
+place.format = function(v, row, place) {
+	if (!place) {
+		let pin = this.format_pin()
+		pin.onpointerdown = function(ev) {
+			if (this.place_id) {
+				window.open('https://www.google.com/maps/place/?q=place_id:'+this.place_id, '_blank')
+				return false
 			}
-			let descr = span()
-			place = span(0, pin, descr)
-			place.pin = pin
-			place.descr = descr
 		}
-		place.pin.place_id = isobject(v) && v.place_id
-		place.pin.class('disabled', !place.pin.place_id)
-		place.descr.textContent = isobject(v) ? v.description : v || ''
-		return place
+		let descr = span()
+		place = span(0, pin, descr)
+		place.pin = pin
+		place.descr = descr
 	}
+	place.pin.place_id = isobject(v) && v.place_id
+	place.pin.class('disabled', !place.pin.place_id)
+	place.descr.textContent = isobject(v) ? v.description : v || ''
+	return place
+}
 
-	place.draw = function(v, cx) {
-		let place_id = isobject(v) && v.place_id
-		let descr = isobject(v) ? v.description : v || ''
-		let icon_char = fontawesome_char('fa-map-marker-alt')
-		let indent_x = cx.font_size * 1.25
-		if (cx.measure) {
-			all_field_types.draw.call(this, descr, cx)
-			cx.measured_width += indent_x
-			return
-		}
-		cx.font = cx.icon_font
-		cx.fillStyle = place_id ? cx.fg_text : cx.fg_disabled
-		cx.fillText(icon_char, 0, cx.baseline)
-		cx.save()
-		cx.translate(indent_x, 0)
+place.draw = function(v, cx) {
+	let place_id = isobject(v) && v.place_id
+	let descr = isobject(v) ? v.description : v || ''
+	let icon_char = fontawesome_char('fa-map-marker-alt')
+	let indent_x = cx.font_size * 1.25
+	if (cx.measure) {
 		all_field_types.draw.call(this, descr, cx)
-		cx.restore()
+		cx.measured_width += indent_x
+		return
 	}
+	cx.font = cx.icon_font
+	cx.fillStyle = place_id ? cx.fg_text : cx.fg_disabled
+	cx.fillText(icon_char, 0, cx.baseline)
+	cx.save()
+	cx.translate(indent_x, 0)
+	all_field_types.draw.call(this, descr, cx)
+	cx.restore()
+}
 
-	place.editor = function(opt) {
-		return placeedit(opt)
+place.editor = function(opt) {
+	return placeedit(opt)
+}
+
+// url
+
+let url = obj()
+field_types.url = url
+
+url.format = function(v) {
+	let href = v.match('://') ? v : 'http://' + v
+	let a = tag('a', {href: href, target: '_blank'}, v)
+	return a
+}
+
+url.cell_dblclick = function(cell) {
+	window.open(cell.href, '_blank')
+	return false // prevent enter edit
+}
+
+// phone
+
+let phone = obj()
+field_types.phone = phone
+
+phone.validator_phone = function() {
+	// TODO
+}
+
+// email
+
+let email = obj()
+field_types.email = email
+
+email.validator_email = function(field) {
+	return {
+		validate: function(val) { return val == null || val.includes('@') },
+		message: S('validation_email', 'This does not appear to be a valid email.'),
 	}
+}
 
-	// url
+// button
 
-	let url = obj()
-	field_types.url = url
+let btn = {align: 'center', readonly: true}
+field_types.button = btn
 
-	url.format = function(v) {
-		let href = v.match('://') ? v : 'http://' + v
-		let a = tag('a', {href: href, target: '_blank'}, v)
-		return a
-	}
-
-	url.cell_dblclick = function(cell) {
-		window.open(cell.href, '_blank')
-		return false // prevent enter edit
-	}
-
-	// phone
-
-	let phone = obj()
-	field_types.phone = phone
-
-	phone.validator_phone = function() {
-		// TODO
-	}
-
-	// email
-
-	let email = obj()
-	field_types.email = email
-
-	email.validator_email = function(field) {
-		return {
-			validate: function(val) { return val == null || val.includes('@') },
-			message: S('validation_email', 'This does not appear to be a valid email.'),
-		}
-	}
-
-	// button
-
-	let btn = {align: 'center', readonly: true}
-	field_types.button = btn
-
-	btn.format = function(val, row) {
-		let field = this
-		return button(assign_opt({
-			tabindex: null, // don't steal focus from the grid when clicking.
-			style: 'flex: 1',
-			action: function() {
-				field.action.call(this, val, row, field)
-			},
-		}, this.button_options))
-	}
-
-	btn.draw = function(v, cx) {
-		// TODO
-	}
-
-	btn.click = function() {
-		// TODO
-	}
-
-	// public_key, secret_key, private_key
-
-	field_types.secret_key = {
-		editor: function(opt) {
-			return textedit(assign_opt({
-				attrs: {mono: true},
-			}, opt))
+btn.format = function(val, row) {
+	let field = this
+	return button(assign_opt({
+		tabindex: null, // don't steal focus from the grid when clicking.
+		style: 'flex: 1',
+		action: function() {
+			field.action.call(this, val, row, field)
 		},
-	}
+	}, this.button_options))
+}
 
-	field_types.public_key = {
-		editor: function(opt) {
-			return textarea(assign_opt({
-				attrs: {mono: true},
-			}, opt))
-		},
-	}
+btn.draw = function(v, cx) {
+	// TODO
+}
 
-	field_types.private_key = {
-		editor: function(opt) {
-			return textarea(assign_opt({
-				attrs: {mono: true},
-			}, opt))
-		},
-	}
+btn.click = function() {
+	// TODO
+}
+
+// public_key, secret_key, private_key
+
+field_types.secret_key = {
+	editor: function(opt) {
+		return textedit(assign_opt({
+			attrs: {mono: true},
+		}, opt))
+	},
+}
+
+field_types.public_key = {
+	editor: function(opt) {
+		return textarea(assign_opt({
+			attrs: {mono: true},
+		}, opt))
+	},
+}
+
+field_types.private_key = {
+	editor: function(opt) {
+		return textarea(assign_opt({
+			attrs: {mono: true},
+		}, opt))
+	},
+}
 
 }
 
 // reload push-notifications -------------------------------------------------
 
-rowset_navs = obj() // {rowset_name -> set(nav)}
+G.rowset_navs = obj() // {rowset_name -> set(nav)}
 
-init_rowset_events = memoize(function() {
+let init_rowset_events = memoize(function() {
 	let es = new EventSource('/xrowset.events')
 	es.onmessage = function(ev) {
 		let a = ev.data.words()
@@ -5844,4 +5847,4 @@ init_rowset_events = memoize(function() {
 	}
 })
 
-} //module scope
+}()) // module function

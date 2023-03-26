@@ -74,7 +74,6 @@ ELEMENT COMPUTED STYLES
 
 CSS QUERYING
 
-	css_class_prop(selector, style) -> v
 	fontawesome_char(name) -> s
 
 DOM NAVIGATION INCLUDING TEXT NODES
@@ -546,7 +545,7 @@ G.css_layer = memoize(function(layer) {
 
 	// NOTE: this is a dumb parser: start all your CSS rules on a newline!
 
-	let css_re = /\n([#:\.a-zA-Z][\s\S#:\.a-zA-Z>+~\-]*?){(.+?)}/gs
+	let css_re = /\n([#:\.a-zA-Z][\s\S#:\.a-zA-Z>+~\-]*?){([^}]+?)}/g
 
 	function add_rules(err, css) {
 		css = css.replaceAll(/\/\*.*?\*\//gs, '')
@@ -627,7 +626,7 @@ G.css_firefox = css_base_firefox
 
 G.load_css = function(url, layer) {
 	get(url, function(s) {
-		;css_layer(layer || 'base')(s)
+		css_layer(layer || 'base')(s)
 	}, null, {async: false})
 }
 
@@ -765,43 +764,9 @@ method(CSSStyleDeclaration, 'prop', function(k, v) {
 		this.setProperty(k, v)
 })
 
-{
-let each_css_rule = function(rules, f) {
-	for (let rule of rules) {
-		let ret
-		if (is_css_layer(rule)) {
-			ret = each_css_rule(rule.cssRules, f)
-		} else {
-			ret = f(rule)
-		}
-		if (ret != null)
-			return ret
-	}
-}
-method(StyleSheet, 'each_rule', function(f) {
-	return each_css_rule(this.cssRules, f)
-})
-}
-
-G.each_css_rule = function(f) {
-	for (let sheet of document.styleSheets)
-		if(sheet.cssRules) {
-			let ret = sheet.each_rule(f)
-			if (ret != null)
-				return ret
-		}
-}
-
-G.css_class_prop = function(selector, style) {
-	return each_css_rule(function(rule) {
-		if (rule.selectorText && rule.selectorText.split(',').includes(selector))
-			return rule.style[style]
-	})
-}
-
 // use this to to draw fontawesome icons on a canvas.
 G.fontawesome_char = memoize(function(icon) {
-	return css_class_prop('.'+icon+'::before', 'content').slice(1, -1)
+	return include_props[icon].captures(/content\s*:\s*"([^"]+)";/)[0]
 })
 
 // DOM navigation for elements, skipping over text nodes ---------------------

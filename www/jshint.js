@@ -21039,7 +21039,7 @@ var errors = {
   // Regular expressions
   E014: "A regular expression literal can be confused with '/='.",
   E015: "Unclosed regular expression.",
-  E016: "Invalid regular expression.",
+  E016: "Invalid regular expression. {a}",
 
   // Tokens
   E017: "Unclosed comment.",
