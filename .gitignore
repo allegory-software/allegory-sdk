@@ -3,3 +3,4 @@
 /tests/*.log
 test.*
 /www/test.*
+.DS_Store

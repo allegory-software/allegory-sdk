@@ -242,19 +242,21 @@ BROWSER DETECTION
 
 */
 
-DEBUG_EVENTS = false
-DEBUG_EVENTS_FIRE = false
-DEBUG_AJAX = false
+'use strict';
+
+var DEBUG_EVENTS = false
+var DEBUG_EVENTS_FIRE = false
+var DEBUG_AJAX = false
 
 // types ---------------------------------------------------------------------
 
-isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
-isarray = Array.isArray
-isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
-isstr = s => typeof s == 'string'
-isnum = n => typeof n == 'number'
-isbool = b => typeof b == 'boolean'
-isfunc = f => typeof f == 'function'
+var isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
+var isarray = Array.isArray
+var isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
+var isstr = s => typeof s == 'string'
+var isnum = n => typeof n == 'number'
+var isbool = b => typeof b == 'boolean'
+var isfunc = f => typeof f == 'function'
 
 // logic ---------------------------------------------------------------------
 
@@ -269,21 +271,21 @@ function repl(x, v, z) { return x === v ? z : x }
 
 // math ----------------------------------------------------------------------
 
-inf = Infinity
-floor = Math.floor // rounds towards -1/0
-ceil = Math.ceil
-round = Math.round
-snap = (x, p) => round(x / p) * p
-trunc = Math.trunc // rounds towards 0
-abs = Math.abs
-min = Math.min
-max = Math.max
-sqrt = Math.sqrt
-ln = Math.log
-log10 = Math.log10
-logbase = (x, base) => ln(x) / ln(base)
-random = Math.random
-sign = Math.sign
+var inf = Infinity
+var floor = Math.floor // rounds towards -1/0
+var ceil = Math.ceil
+var round = Math.round
+var snap = (x, p) => round(x / p) * p
+var trunc = Math.trunc // rounds towards 0
+var abs = Math.abs
+var min = Math.min
+var max = Math.max
+var sqrt = Math.sqrt
+var ln = Math.log
+var log10 = Math.log10
+var logbase = (x, base) => ln(x) / ln(base)
+var random = Math.random
+var sign = Math.sign
 
 // NOTE: returns x1 if x1 < x0, which enables the idiom
 // `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
@@ -314,17 +316,17 @@ function nextpow2(x) {
 	return max(0, 2**(ceil(ln(x) / ln(2))))
 }
 
-PI  = Math.PI
-sin = Math.sin
-cos = Math.cos
-tan = Math.tan
-rad = PI / 180
-deg = 180 / PI
+var PI  = Math.PI
+var sin = Math.sin
+var cos = Math.cos
+var tan = Math.tan
+var rad = PI / 180
+var deg = 180 / PI
 
-asin  = Math.asin
-acos  = Math.acos
-atan  = Math.atan
-atan2 = Math.atan2
+var asin  = Math.asin
+var acos  = Math.acos
+var atan  = Math.atan
+var atan2 = Math.atan2
 
 Number.prototype.base = function(base, digits) {
 	let s = this.toString(base)
@@ -343,11 +345,11 @@ function return_arg(arg) { return arg; }
 
 // error handling ------------------------------------------------------------
 
-print = null
-pr    = console.log
-warn  = console.warn
-debug = console.log // console.debug makes everything blue wtf.
-trace = console.trace
+var print = null
+var pr    = console.log
+var warn  = console.warn
+var debug = console.log // console.debug makes everything blue wtf.
+var trace = console.trace
 
 function warn_if(cond, ...args) {
 	if (!cond) return
@@ -499,7 +501,7 @@ method(String, 'find_ai_ci', function(s) {
 {
 // concat args, skipping null ones. returns null if all args are null.
 let non_null = (s) => s != null
-function catany(sep, ...args) {
+var catany = function(sep, ...args) {
 	if (args.length == 0)
 		return null
 	if (args.length == 1)
@@ -514,8 +516,8 @@ function catany(sep, ...args) {
 	let a = args.filter(non_null)
 	return a.length ? a.join(sep) : null
 }
-method(String, 'catany', function(...args) { return catany(this, ...args) })
 }
+method(String, 'catany', function(...args) { return catany(this, ...args) })
 
 // concat args. if any arg is null return nothing.
 function catall(...args) {
@@ -548,10 +550,11 @@ method(String, 'captures', function(re) {
 // multi-language stubs replaced in webb_spa.js ------------------------------
 
 // stub for getting message strings that can be translated multiple languages.
-if (!window.S)
-	function S(name, en_s, ...args) {
+if (!window.S) {
+	var S = function(name, en_s, ...args) {
 		return en_s.subst(...args)
 	}
+}
 
 function Sf(...args) {
 	return () => S(...args)
@@ -560,7 +563,7 @@ function Sf(...args) {
 // stub for getting current language.
 if (!window.lang) {
 	let nav_lang = navigator.language.substring(0, 2)
-	function lang() {
+	var lang = function() {
 		return document.documentElement.lang || nav_lang
 	}
 }
@@ -568,20 +571,21 @@ if (!window.lang) {
 // stub for getting current country.
 if (!window.country) {
 	let nav_country = navigator.language.substring(3, 5)
-	function country() {
+	var country = function() {
 		return document.documentElement.attr('country') || nav_country
 	}
 }
 
-locale = memoize(function() { return lang() + '-' + country() })
+let locale = memoize(function() { return lang() + '-' + country() })
 
 // stub for rewriting links to current language.
-if (!window.href)
-	href = return_arg
+if (!window.href) {
+	var href = return_arg
+}
 
 // arrays --------------------------------------------------------------------
 
-empty_array = []
+var empty_array = []
 
 function range(i1, j, step, f) {
 	step = or(step, 1)
@@ -725,10 +729,10 @@ method(Array, 'remove_duplicates', function() {
 
 // hash maps -----------------------------------------------------------------
 
-obj = () => Object.create(null)
-set = (iter) => new Set(iter)
-map = (iter) => new Map(iter)
-array = (...args) => new Array(...args)
+var obj = () => Object.create(null)
+var set = (iter) => new Set(iter)
+var map = (iter) => new Map(iter)
+var array = (...args) => new Array(...args)
 
 property(Map, 'first_key', function() {
 	for (let [k] of this)
@@ -772,13 +776,13 @@ method(Set, 'equals', function(s2, same_order) {
 	return true
 })
 
-empty = {}
-empty_obj = obj()
-empty_set = set()
+var empty = {}
+var empty_obj = obj()
+var empty_set = set()
 
-keys = Object.keys
+var keys = Object.keys
 
-assign = Object.assign
+var assign = Object.assign
 
 // like Object.assign() but skips assigning `undefined` values.
 function assign_opt(dt, ...ts) {
@@ -830,13 +834,13 @@ function count_keys(t, max_n) {
 
 // typed arrays --------------------------------------------------------------
 
-f32arr = Float32Array
-i8arr  = Int8Array
-u8arr  = Uint8Array
-i16arr = Int16Array
-u16arr = Uint16Array
-i32arr = Int32Array
-u32arr = Uint32Array
+var f32arr = Float32Array
+var i8arr  = Int8Array
+var u8arr  = Uint8Array
+var i16arr = Int16Array
+var u16arr = Uint16Array
+var i32arr = Int32Array
+var u32arr = Uint32Array
 
 function max_index_from_array(a) {
 	if (a.max_index != null) // hint
@@ -1011,18 +1015,18 @@ function dyn_arr(arr_type, data_or_cap, nc) {
 dyn_arr.index_arr_type = index_arr_type
 
 {
-	let dyn_arr_func = function(arr_type) {
-		return function(data_or_cap, nc) {
-			return new dyn_arr_class(arr_type, data_or_cap, nc)
-		}
+let dyn_arr_func = function(arr_type) {
+	return function(data_or_cap, nc) {
+		return new dyn_arr_class(arr_type, data_or_cap, nc)
 	}
-	dyn_f32arr = dyn_arr_func(f32arr)
-	dyn_i8arr  = dyn_arr_func(i8arr)
-	dyn_u8arr  = dyn_arr_func(u8arr)
-	dyn_i16arr = dyn_arr_func(i16arr)
-	dyn_u16arr = dyn_arr_func(u16arr)
-	dyn_i32arr = dyn_arr_func(i32arr)
-	dyn_u32arr = dyn_arr_func(u32arr)
+}
+var dyn_f32arr = dyn_arr_func(f32arr)
+var dyn_i8arr  = dyn_arr_func(i8arr)
+var dyn_u8arr  = dyn_arr_func(u8arr)
+var dyn_i16arr = dyn_arr_func(i16arr)
+var dyn_u16arr = dyn_arr_func(u16arr)
+var dyn_i32arr = dyn_arr_func(i32arr)
+var dyn_u32arr = dyn_arr_func(u32arr)
 }
 
 // data structures -----------------------------------------------------------
@@ -1068,7 +1072,7 @@ function freelist_stack(create, init, destroy) {
 
 // timestamps ----------------------------------------------------------------
 
-_d = new Date() // public temporary date object.
+var _d = new Date() // public temporary date object.
 
 // NOTE: months start at 1, and seconds can be fractionary.
 function time(y, m, d, H, M, s) {
@@ -1200,8 +1204,6 @@ function set_seconds(t, x) {
 	return _d.valueOf() / 1000
 }
 
-{
-
 let weekday_names = memoize(function(locale1) {
 	let wd = {short: obj(), long: obj()}
 	for (let i = 0; i < 7; i++) {
@@ -1211,7 +1213,6 @@ let weekday_names = memoize(function(locale1) {
 	}
 	return wd
 })
-
 function weekday_name(t, how, locale1) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
@@ -1231,8 +1232,6 @@ function month_year(t, how, locale1) {
 	return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short', year: 'numeric'})
 }
 
-}
-
 {
 let wso = { // fri:1, sat:2, sun:3
 	MV:1,
@@ -1242,7 +1241,7 @@ let wso = { // fri:1, sat:2, sun:3
 	MO:3,MT:3,MX:3,MZ:3,NI:3,NP:3,PA:3,PE:3,PH:3,PK:3,PR:3,PT:3,PY:3,SA:3,SG:3,
 	SV:3,TH:3,TT:3,TW:3,UM:3,US:3,VE:3,VI:3,WS:3,YE:3,ZA:3,ZW:3,
 }
-function week_start_offset(country1) {
+var week_start_offset = function(country1) {
 	return (wso[country1 || country()] || 4) - 3
 }
 }
@@ -1256,7 +1255,7 @@ let date_re = /(\d+)\s*[\-\/\.,\s]\s*(\d+)\s*[\-\/\.,\s]\s*(\d+)/;
 let timeonly_re = new RegExp('^\\s*' + time_re.source + '\\s*$')
 let datetime_re = new RegExp('^\\s*' + date_re.source + '(?:\\s+' + time_re.source + '\\s*)?$')
 
-function parse_timeofday(s, validate, with_seconds, with_fractions) {
+var parse_timeofday = function(s, validate, with_seconds, with_fractions) {
 	if (!isstr(s))
 		return s
 	let tm = timeonly_re.exec(s)
@@ -1318,7 +1317,7 @@ let date_parser = memoize(function(locale) {
 	}
 })
 
-function parse_date(s, locale1, validate, with_seconds, with_fractions) {
+var parse_date = function(s, locale1, validate, with_seconds, with_fractions) {
 	return isstr(s) ? date_parser(locale1 || locale())(s, validate, with_seconds, with_fractions) : s
 }
 method(String, 'parse_date', function(locale1, validate, with_seconds, with_fractions) {
@@ -1428,7 +1427,7 @@ let _date_placeholder_text = memoize(function(locale) {
 	}
 	return a.join('')
 })
-function date_placeholder_text(locale1) {
+var date_placeholder_text = function(locale1) {
 	return _date_placeholder_text(locale1 || locale())
 }
 
@@ -1534,7 +1533,7 @@ let h2rgb = function(m1, m2, h) {
 let hex = x => round(255 * x).base(16, 2)
 
 // hsla is in (0..360, 0..1, 0..1, 0..1); rgb is #rrggbb
-function hsl_to_rgb(h, s, L, a) {
+var hsl_to_rgb = function(h, s, L, a) {
 	h = h / 360
 	let m2 = L <= .5 ? L*(s+1) : L+s-L*s
 	let m1 = L*2-m2
@@ -1583,7 +1582,7 @@ function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, out) {
 let segs_overlap = function(ax1, ax2, bx1, bx2) { // check if two 1D segments overlap
 	return !(ax2 < bx1 || bx2 < ax1)
 }
-function rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) {
+var rect_intersects = function(x1, y1, w1, h1, x2, y2, w2, h2) {
 	return (
 		segs_overlap(x1, x1+w1, x2, x2+w2) &&
 		segs_overlap(y1, y1+h1, y2, y2+h2)
@@ -1618,8 +1617,8 @@ function timer(f) {
 
 // serialization -------------------------------------------------------------
 
-json_arg = (s) => isstr(s) ? JSON.parse(s) : s
-json = JSON.stringify
+var json_arg = (s) => isstr(s) ? JSON.parse(s) : s
+var json = JSON.stringify
 
 // clipboard -----------------------------------------------------------------
 
@@ -1762,7 +1761,7 @@ should only be used when you need to sync all browser tabs of the same app.
 let callers = obj()
 let installers = obj()
 
-etrack = DEBUG_EVENTS && new Map()
+let etrack = DEBUG_EVENTS && new Map()
 
 let log_add_event = function(target, name, f, capture) {
 	if (target.initialized === null) // skip handlers added in the constructor.
@@ -1907,9 +1906,10 @@ except they are faster because they make no garbage.
 
 */
 
+{
 let all_handlers = obj() // {event_name->set(f)}
 
-function listen(event, f, on) {
+var listen = function(event, f, on) {
 	if (on != false) {
 		let handlers = attr(all_handlers, event, set)
 		assert(!handlers.has(f))
@@ -1920,10 +1920,12 @@ function listen(event, f, on) {
 	}
 }
 
-function announce(event, ...args) {
+var announce = function(event, ...args) {
 	let handlers = all_handlers[event]; if (!handlers) return
 	for (let handler of handlers)
 		handler(...args)
+}
+
 }
 
 // inter-window events -------------------------------------------------------
@@ -2185,8 +2187,8 @@ function post(url, upload, success, fail, opt) {
 
 // browser detection ---------------------------------------------------------
 
-Firefox = navigator.userAgent.toLowerCase().includes('firefox')
-Chrome  = navigator.userAgent.toLowerCase().includes('chrome')
+var Firefox = navigator.userAgent.toLowerCase().includes('firefox')
+var Chrome  = navigator.userAgent.toLowerCase().includes('chrome')
 
 // JSHint linter -------------------------------------------------------------
 

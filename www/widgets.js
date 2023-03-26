@@ -72,6 +72,9 @@ WRITING CSS RULES
 
 */
 
+'use strict';
+{
+
 let e = Element.prototype
 
 css_light('', '', `
@@ -309,7 +312,7 @@ css('.tooltip[kind=cursor] > .tooltip-body > .tooltip-content', '', `
 
 css('.tooltip[kind=cursor] > .tooltip-tip', 'hidden')
 
-tooltip = component('tooltip', function(e) {
+var tooltip = component('tooltip', function(e) {
 
 	e.class('tooltip')
 	e.popup()
@@ -497,7 +500,7 @@ css('.toaster', 'hidden') // don't mess up the layout
 
 css('.toaster-message', 'op1 ease')
 
-toaster = component('toaster', function(e) {
+var toaster = component('toaster', function(e) {
 
 	e.class('toaster')
 	e.tooltips = set()
@@ -562,7 +565,7 @@ toaster = component('toaster', function(e) {
 // global notify function ----------------------------------------------------
 
 let notify_toaster
-function notify(...args) {
+var notify = function(...args) {
 	if (!notify_toaster) {
 		notify_toaster = toaster()
 		document.body.add(notify_toaster)
@@ -1497,7 +1500,7 @@ NOTE: removes element margins!
 
 css('.list', 'v-t scroll-auto rel')
 
-list = component('list', function(e) {
+var list = component('list', function(e) {
 
 	e.class('list')
 	e.make_disablable()
@@ -1625,7 +1628,7 @@ css('.menu-check-div::before', 'icon-check') // fa fa-check
 css('.menu-sub-div', 'p-x')
 css('.menu-sub-div::before', 'icon-chevron-right') // fa fa-angle-right
 
-menu = component('menu', function(e) {
+var menu = component('menu', function(e) {
 
 	e.make_disablable()
 	e.make_focusable()
@@ -2001,7 +2004,7 @@ css_state('tabs-tab.renaming::before', 'overlay click-through', `
 	border: 2px dashed var(--fg-link);
 `)
 
-tabs = component('tabs', 'Containers', function(e) {
+var tabs = component('tabs', 'Containers', function(e) {
 
 	e.class('tabs')
 	e.make_disablable()
@@ -2529,7 +2532,7 @@ css_state('.split[orientation=vertical  ].collapsed > split-sizer::before', '', 
 	border-style: solid none;
 `)
 
-split = component('split', 'Containers', function(e) {
+var split = component('split', 'Containers', function(e) {
 
 	e.class('split')
 	e.make_disablable()
@@ -2672,7 +2675,7 @@ split = component('split', 'Containers', function(e) {
 
 })
 
-vsplit = component('vsplit', function(e) {
+var vsplit = component('vsplit', function(e) {
 	e.class('vsplit')
 	let opt = split.construct(e)
 	opt.orientation = 'vertical'
@@ -2699,7 +2702,7 @@ css('.action-band:not(.tight) .dlg-button-cancel .button-icon', 'hidden')
 
 css('.action-band-center', 'S h-c gap-x')
 
-action_band = component('action-band', 'Input', function(e) {
+var action_band = component('action-band', 'Input', function(e) {
 
 	e.make_disablable()
 	e.class('action-band')
@@ -2816,7 +2819,7 @@ css('.dlg-content', 'S shrinks')
 
 css('.dlg-footer', 'h-b')
 
-dlg = component('dlg', function(e) {
+var dlg = component('dlg', function(e) {
 
 	e.class('dlg')
 	e.init_child_components()
@@ -3010,7 +3013,7 @@ css('.toolbox-resize-overlay[hit_side=left     ], .toolbox-resize-overlay[hit_si
 css('.toolbox-resize-overlay[hit_side=top_left ], .toolbox-resize-overlay[hit_side=bottom_right]', '', ` cursor: nwse-resize; `)
 css('.toolbox-resize-overlay[hit_side=top_right], .toolbox-resize-overlay[hit_side=bottom_left ]', '', ` cursor: nesw-resize; `)
 
-toolbox = component('toolbox', function(e) {
+var toolbox = component('toolbox', function(e) {
 
 	let html_content = [...e.nodes]
 	e.clear()
@@ -3183,7 +3186,7 @@ css('.slides > .x-ct > .', 'x1 y1')
 css_state('.slide'        , 'invisible op0 click-through     ease-05s')
 css_state('.slide-current', 'visible   op1 click-through-off ease-05s')
 
-slides = component('slides', 'Containers', function(e) {
+var slides = component('slides', 'Containers', function(e) {
 
 	e.class('slides')
 	e.make_disablable()
@@ -3327,7 +3330,7 @@ css('.pagenav-button', 'm-x-05')
 css('.pagenav-current', '')
 css('.pagenav-dots', 'p-x noselect')
 
-pagenav = component('pagenav', function(e) {
+var pagenav = component('pagenav', function(e) {
 
 	e.class('pagenav')
 	e.make_disablable()
@@ -3408,7 +3411,7 @@ fires:
 css('.label-widget', 'label noselect')
 css_state('.label-widget:is(:hover,.hover)', 'label-hover')
 
-label = component('label', 'Input', function(e) {
+var label = component('label', 'Input', function(e) {
 
 	e.class('label-widget')
 	e.make_disablable()
@@ -3476,7 +3479,7 @@ css('.info:not([collapsed])', 'smaller label h-bl gap-x')
 // toggling visibility on hover requires click-through for stable hovering!
 css('.info .tooltip:not([hidden])', 'click-through')
 
-info = component('info', function(e) {
+var info = component('info', function(e) {
 
 	e.class('info')
 	e.make_disablable()
@@ -3529,9 +3532,10 @@ We don't like abstractions around here but this one buys us many things:
 
 */
 
-validators = obj()
-validator_props = obj()
-INVALID = obj() // convert functions return this to distinguish from null.
+var validators = obj()
+var INVALID = obj() // convert functions return this to distinguish from null.
+
+let validator_props = obj()
 
 function update_validators() {
 	for (let name in validators) {
@@ -3546,7 +3550,7 @@ function update_validators() {
 	}
 }
 
-function validator(e, ...args) {
+var validator = function(e, ...args) {
 
 	update_validators()
 
@@ -3581,6 +3585,7 @@ function validator(e, ...args) {
 		for (let k in checked)
 			checked[k] = null
 		my_validators_invalid = true
+		return true
 	}
 
 	function update_my_validators() {
@@ -3598,8 +3603,10 @@ function validator(e, ...args) {
 		for (let validator of my_validators) {
 			validator._error = validator.error(e, v, ...args)
 			validator._rule  = validator.rule (e, v, ...args)
-			if (convert_failed)
+			if (convert_failed) {
+				validator._failed = true
 				continue // if convert failed, subsequent validators cannot run!
+			}
 			if (validator._failed)
 				continue
 			if (validator._checked)
@@ -3715,13 +3722,14 @@ validators.lookup = {
 
 css('.errors', 'v p')
 css('.errors-line', 'h p-05 gap-x')
-css('.errors-failed', 'fg-error bg-error')
 css('.errors-icon', 'w1 t-c')
-css('.errors-failed .errors-icon::before', 'fa fa-times')
-css('.errors-passed .errors-icon::before', 'fa fa-check')
 css('.errors-message', '')
+css('.errors-checked.errors-failed', 'fg-error bg-error')
+css('.errors-not-checked', 'dim')
+css('.errors-failed .errors-icon::before', 'fa fa-times')
+css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
 
-errors = component('errors', 'Input', function(e) {
+var errors = component('errors', 'Input', function(e) {
 
 	e.class('errors')
 
@@ -3734,7 +3742,11 @@ errors = component('errors', 'Input', function(e) {
 		if (e.show_all) {
 			e.clear()
 			for (let result of out.results) {
-				e.add(div({class: 'errors-line ' + (result.failed ? 'errors-failed' : 'errors-passed')},
+				e.add(div({class: catany(' ',
+							'errors-line',
+							(result.checked ? 'errors-checked' : 'errors-not-checked'),
+							(result.failed ? 'errors-failed' : 'errors-passed')
+						)},
 						div({class: 'errors-icon'}),
 						div({class: 'errors-message'}, result.rule)
 					))
@@ -3755,7 +3767,7 @@ errors = component('errors', 'Input', function(e) {
 		let form = e.form || e.closest('form')
 		if (!form)
 			return
-		for (let te of form.elements)
+		for (let te of form.all)
 			if (te.name == e.for_name)
 				return te
 	}
@@ -3911,7 +3923,7 @@ css_state('.check[checked] .check-frame', '', `
 	fill: var(--fg-check);
 `)
 
-check = component('check', function(e) {
+var check = component('check', function(e) {
 
 	e.class('check')
 	check_widget(e)
@@ -3951,7 +3963,7 @@ css_state('.toggle[checked]:is(:hover,.hover)', '', `
 	background: var(--bg-button-primary-hover);
 `)
 
-toggle = component('toggle', function(e) {
+var toggle = component('toggle', function(e) {
 	e.class('toggle')
 	check_widget(e)
 	e.thumb = div({class: 'toggle-thumb'})
@@ -3976,7 +3988,7 @@ css_state('.radio[checked] .radio-thumb', 'ease', ` r: .2px; transition-property
 
 css_state('.radio:focus-visible', 'no-outline')
 
-radio = component('radio', function(e) {
+var radio = component('radio', function(e) {
 
 	e.class('radio')
 	check_widget(e, 'radio')
@@ -4012,7 +4024,7 @@ radio = component('radio', function(e) {
 
 css('radio-group', 'skip')
 
-radio_group = component('radio-group', 'Input', function(e) {
+var radio_group = component('radio-group', 'Input', function(e) {
 
 	e.class('radio-group')
 	e.make_disablable()
@@ -4386,9 +4398,9 @@ let slider_widget = function(e, range) {
 
 }
 
-slider = component('slider', 'Input', slider_widget)
+var slider = component('slider', 'Input', slider_widget)
 
-range_slider = component('range-slider', 'Input', function(e) {
+var range_slider = component('range-slider', 'Input', function(e) {
 	return slider_widget(e, true)
 })
 
@@ -4479,7 +4491,7 @@ css_state('.input-group.invalid > *', '', `
 	background-color : var(--bg-error);
 `)
 
-input_group = component('input-group', function(e) {
+var input_group = component('input-group', function(e) {
 	e.class('input-group b-collapse-h ro-collapse-h')
 	e.make_disablable()
 	e.init_child_components()
@@ -4523,7 +4535,7 @@ css_role('.labelbox[overlaid] > .label-widget', 'abs p-x smaller bold lh0', `
 	top: 0;
 `)
 
-labelbox = component('labelbox', function(e) {
+var labelbox = component('labelbox', function(e) {
 	e.class('labelbox')
 	e.init_child_components()
 })
@@ -4542,7 +4554,7 @@ css('.input', 'S bg-input w-input', `
 	border-radius : 0;
 `)
 
-input = component('input', 'Input', function(e) {
+var input = component('input', 'Input', function(e) {
 
 	e.class('input inputbox')
 	e.make_disablable()
@@ -4566,7 +4578,7 @@ css('.textarea', 'S h m0 b p bg-input', `
 	overflow-x: overlay; /* Chrome only */
 `)
 
-textarea = component('textarea', 'Input', function(e) {
+var textarea = component('textarea', 'Input', function(e) {
 
 	e.class('textarea')
 	e.make_disablable()
@@ -4675,7 +4687,7 @@ css(`
 }
 `)
 
-button = component('button', 'Input', function(e) {
+var button = component('button', 'Input', function(e) {
 
 	let html_text = [...e.nodes]
 	e.clear()
@@ -4850,7 +4862,7 @@ css('.select-button[secondary]', '', `
 	--fg-select-button-plate: var(--fg-unfocused-selected);
 `)
 
-select_button = component('select-button', function(e) {
+var select_button = component('select-button', function(e) {
 
 	e.class('select-button inputbox')
 	e.make_disablable()
@@ -4961,7 +4973,7 @@ select_button = component('select-button', function(e) {
 	return {items: html_items}
 })
 
-vselect_button = component('vselect-button', function(e) {
+var vselect_button = component('vselect-button', function(e) {
 
 	e.class('vselect-button ro-collapse-v b-collapse-v')
 	return select_button.construct(e)
@@ -5019,7 +5031,7 @@ if (0) {
 	css('.num-input:focus-within .num-input-updown' , 'visible')
 }
 
-num_input = component('num-input', 'Input', function(e) {
+var num_input = component('num-input', 'Input', function(e) {
 
 	e.prop('input_value', {attr: 'value' , slot: 'state'}) // initial value and text value from user input
 	e.prop('name')
@@ -5116,28 +5128,22 @@ num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	let my_validator
-	function validate(v) {
-		my_validator = my_validator || validator(e, e)
-		let out = my_validator.validate(v)
-		// TODO: if this gets too slow, do this only when props actually change.
-		my_validator.prop_changed()
+	let my_validator = validator(e, e)
+	function update_value(changed_prop, ev) {
+		let out = my_validator.validate(e.input_value)
 		e.validation_result = out
-		return out
-	}
-
-	e.set_input_value = function(iv, iv0, ev) {
-
-		let input = ev && ev.target == e.input
-
-		let out = validate(iv)
-		let v = out.value
-		e.set_prop('value', v, ev || {target: e})
+		e.set_prop('value', out.value, ev || {target: e})
 		e.invalid = out.failed
-
-		if (!input)
+		if (!(ev && ev.target == e.input))
 			e.update({value: true})
 	}
+	e.set_input_value = function(v, v0, ev) {
+		update_value('input_value', ev)
+	}
+	e.on_prop_changed(function(k, v, v0, ev) {
+		if (my_validator.prop_changed(k))
+			update_value(k, ev)
+	})
 
 	e.set_decimals = function() {
 		e.update({value: true})
@@ -5219,7 +5225,7 @@ css('.pass-input-input', 'S shrinks p-r-0')
 css('.pass-input-button', 'h-m h-c b p0', `width: 2.75em;`)
 css_generic_state('.pass-input-button[disabled]', 'op1 dim')
 
-pass_input = component('pass-input', 'Input', function(e) {
+var pass_input = component('pass-input', 'Input', function(e) {
 
 	e.prop('name')
 	e.prop('form', {type: 'id', store: false})
@@ -5309,7 +5315,7 @@ css_state('.tags-x:active', '', `
 	color : hsl(var(--tag-hue), 63%, 63%);
 `)
 
-tags_box = component('tags-box', function(e) {
+var tags_box = component('tags-box', function(e) {
 
 	e.class('tags-box')
 	e.make_disablable()
@@ -5407,7 +5413,7 @@ css('.tags-input .tags-box', 'rel shrinks m0')
 css('.tags-input .tags-input-input', 'p-x-input b-l-0', `min-width: 5em;`)
 css('.tags-box-nowrap', 'flex-nowrap')
 
-tags_input = component('tags-input', function(e) {
+var tags_input = component('tags-input', function(e) {
 
 	e.clear()
 
@@ -5524,7 +5530,7 @@ css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
 
 css('.dropdown-search', 'fg-search bg-search')
 
-dropdown = component('dropdown', 'Input', function(e) {
+var dropdown = component('dropdown', 'Input', function(e) {
 
 	e.class('dropdown inputbox')
 	e.make_disablable()
@@ -5755,7 +5761,7 @@ css('.autocomplete', 'b v-s p-input bg-input z3', `
 	resize: both;
 `)
 
-autocomplete = component('autocomplete', 'Input', function(e) {
+var autocomplete = component('autocomplete', 'Input', function(e) {
 
 	e.class('autocomplete')
 	e.make_disablable()
@@ -6796,16 +6802,16 @@ function calendar_widget(e, mode) {
 
 }
 
-calendar = component('calendar', 'Input', function(e) {
+var calendar = component('calendar', 'Input', function(e) {
 	return calendar_widget(e, 'day')
 })
 
-range_calendar = component('range-calendar', 'Input', function(e) {
+var range_calendar = component('range-calendar', 'Input', function(e) {
 	e.class('range-calendar')
 	return calendar_widget(e, 'range')
 })
 
-ranges_calendar = component('ranges-calendar', 'Input', function(e) {
+var ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 	return calendar_widget(e, 'ranges')
 })
 
@@ -6838,7 +6844,7 @@ css('.time-picker-item', 't-r p-x-4 p-y-025 noselect')
 css_state('.time-picker-item.selected', 'bold')
 css_state('.time-picker-list:focus-visible .time-picker-item.focused', 'outline-focus')
 
-time_picker = component('time-picker', 'Input', function(e) {
+var time_picker = component('time-picker', 'Input', function(e) {
 
 	e.class('time-picker')
 	e.clear()
@@ -6948,7 +6954,7 @@ css('.datetime-picker', 'h shrinks', `
 	--min-h-calendar : var(--h-datetime-picker);
 `)
 
-datetime_picker = component('datetime-picker', 'Input', function(e) {
+var datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 	e.class('datetime-picker')
 	e.clear()
@@ -7368,19 +7374,19 @@ function date_input_widget(e, has_date, has_time, range) {
 
 }
 
-date_input = component('date-input', 'Input', function(e) {
+var date_input = component('date-input', 'Input', function(e) {
 	return date_input_widget(e, true)
 })
 
-time_input = component('time-input', 'Input', function(e) {
+var time_input = component('time-input', 'Input', function(e) {
 	return date_input_widget(e, false, true)
 })
 
-datetime_input = component('datetime-input', 'Input', function(e) {
+var datetime_input = component('datetime-input', 'Input', function(e) {
 	return date_input_widget(e, true, true)
 })
 
-date_range_input = component('date-range-input', 'Input', function(e) {
+var date_range_input = component('date-range-input', 'Input', function(e) {
 	return date_input_widget(e, true, false, true)
 })
 
@@ -7400,7 +7406,7 @@ css('.richtext:not(.richedit) > .focus-box', 'b0')
 
 css('.richtext-content', 'vscroll-auto no-outline p')
 
-richtext = component('richtext', function(e) {
+var richtext = component('richtext', function(e) {
 
 	e.class('richtext')
 	e.make_disablable()
@@ -7630,7 +7636,7 @@ css('.richtext-actionbar-embedded > button', 'b-b-0')
 css('.html-input > .focus-box', 'S scroll-auto v')
 css('.html-input > .focus-box > .richtext-content', 'S')
 
-html_input = component('html-input', 'Input', function(e) {
+var html_input = component('html-input', 'Input', function(e) {
 
 	let html_val = [...e.nodes]
 	e.clear()
@@ -7663,3 +7669,4 @@ html_input = component('html-input', 'Input', function(e) {
 
 })
 
+} // module scope

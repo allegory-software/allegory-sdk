@@ -86,6 +86,7 @@ DOM NAVIGATION EXCLUDING TEXT NODES
 	e.at[i], e.len, e.at.len, e.parent
 	e.index
 	e.first, e.last, e.next, e.prev
+	e.all
 
 DOM QUERYING
 
@@ -366,18 +367,20 @@ CSS SPECIFICITY REPORTING
 
 */
 
+'use strict';
+
 { // module scope
 
 // debugging -----------------------------------------------------------------
 
-DEBUG_INIT = false
-DEBUG_BIND = false
-DEBUG_ELEMENT_BIND = false
-PROFILE_BIND_TIME = true
-SLOW_BIND_TIME_MS = 10
-DEBUG_UPDATE = false
-DEBUG_CSS_USAGE = false
-DEBUG_CSS_SPECIFICITY = false
+var DEBUG_INIT = false
+var DEBUG_BIND = false
+var DEBUG_ELEMENT_BIND = false
+var PROFILE_BIND_TIME = true
+var SLOW_BIND_TIME_MS = 10
+var DEBUG_UPDATE = false
+var DEBUG_CSS_USAGE = false
+var DEBUG_CSS_SPECIFICITY = false
 
 let e = Element.prototype
 
@@ -428,7 +431,7 @@ e.trace_if = function(cond, ...args) {
 
 // DOM load event ------------------------------------------------------------
 
-function on_dom_load(fn) {
+var on_dom_load = function(fn) {
 	if (document.readyState === 'loading')
 		document.on('DOMContentLoaded', fn)
 	else // `DOMContentLoaded` already fired
@@ -505,9 +508,9 @@ on_dom_load(function() {
 
 let utils_usage = obj()
 
-css_layers = []
+var css_layers = []
 
-css_layer = memoize(function(layer) {
+var css_layer = memoize(function(layer) {
 
 	let pieces = ['@layer '+layer+' {\n']
 	let style = document.createElement('style')
@@ -574,7 +577,12 @@ css_layer = memoize(function(layer) {
 		let includes = words(repl(includes_arg, '', null))
 		if (includes && !includes.length)
 			includes = null
-		if (!includes && props == null) { // verbatim CSS, eg. @keyframes
+		if (includes_arg == null && props == null) { // verbatim CSS, eg. @keyframes
+			if (!selector.includes('{')) {
+				warn('css invalid verbatim rule', selector, 'at',
+					(new Error()).stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+				return
+			}
 			pieces.push(selector.trim())
 			return
 		}
@@ -625,13 +633,13 @@ for (let layer of 'base util state role role_state generic_state'.words()) {
 	window['css_'+layer+'_chrome' ] = Chrome  ? window['css_'+layer] : noop
 	window['css_'+layer+'_firefox'] = Firefox ? window['css_'+layer] : noop
 }
-css         = css_base
-css_chrome  = css_base_chrome
-css_firefox = css_base_firefox
+var css         = css_base
+var css_chrome  = css_base_chrome
+var css_firefox = css_base_firefox
 
 // css.js usage ranking ------------------------------------------------------
 
-function css_rank_utils_usage() {
+var css_rank_utils_usage = function() {
 	if (!DEBUG_CSS_USAGE)
 		return
 	let a = []
@@ -770,7 +778,7 @@ method(StyleSheet, 'each_rule', function(f) {
 })
 }
 
-function each_css_rule(f) {
+var each_css_rule = function(f) {
 	for (let sheet of document.styleSheets)
 		if(sheet.cssRules) {
 			let ret = sheet.each_rule(f)
@@ -779,7 +787,7 @@ function each_css_rule(f) {
 		}
 }
 
-function css_class_prop(selector, style) {
+var css_class_prop = function(selector, style) {
 	return each_css_rule(function(rule) {
 		if (rule.selectorText && rule.selectorText.split(',').includes(selector))
 			return rule.style[style]
@@ -787,7 +795,7 @@ function css_class_prop(selector, style) {
 }
 
 // use this to to draw fontawesome icons on a canvas.
-fontawesome_char = memoize(function(icon) {
+var fontawesome_char = memoize(function(icon) {
 	return css_class_prop('.'+icon+'::before', 'content').slice(1, -1)
 })
 
@@ -799,6 +807,13 @@ alias(Element, 'first'  , 'firstElementChild')
 alias(Element, 'last'   , 'lastElementChild')
 alias(Element, 'next'   , 'nextElementSibling')
 alias(Element, 'prev'   , 'previousElementSibling')
+
+property(e, 'all', function*() {
+	for (let ce of this.at) {
+		yield ce
+		yield* ce.all
+	}
+})
 
 // DOM navigation for nodes --------------------------------------------------
 // also faster for elements when you know that you don't have text nodes.
@@ -825,17 +840,17 @@ method(NodeList, 'trim', function() {
 
 // DOM querying --------------------------------------------------------------
 
-function iselem(e) { return e instanceof Element }
-function isnode(e) { return e instanceof Node }
+var iselem = function(e) { return e instanceof Element }
+var isnode = function(e) { return e instanceof Node }
 
 // NOTE: spec says the search is depth-first and we use that.
 alias(Element         , '$', 'querySelectorAll')
 alias(DocumentFragment, '$', 'querySelectorAll')
-function $(s) { return document.querySelectorAll(s) }
+var $ = function(s) { return document.querySelectorAll(s) }
 
 alias(Element         , '$1', 'querySelector')
 alias(DocumentFragment, '$1', 'querySelector')
-function $1(s) { return typeof s == 'string' ? document.querySelector(s) : s }
+var $1 = function(s) { return typeof s == 'string' ? document.querySelector(s) : s }
 
 method(NodeList, 'each', Array.prototype.forEach)
 
@@ -908,7 +923,7 @@ or external components need to be set inside a bind handler, passing along the
 let component_init = obj() // {tagName->init}
 let component_attr = obj() // {tagName->attr}
 
-function component(selector, category, init) {
+var component = function(selector, category, init) {
 	if (isfunc(category)) { // shift arg
 		init = category
 		category = 'Other'
@@ -1131,11 +1146,11 @@ e.on_bind = function(f) {
 	this.do_after('_user_bind', f)
 }
 
-root = document.documentElement
+var root = document.documentElement
 
-function init_components() {
-	body = document.body // for debugging, don't use in code.
-	head = document.head // for debugging, don't use in code.
+var init_components = function() {
+	var body = document.body // for debugging, don't use in code.
+	var head = document.head // for debugging, don't use in code.
 	if (DEBUG_INIT)
 		debug('ROOT INIT ---------------------------------')
 	root._init_component()
@@ -1182,7 +1197,7 @@ e.announce = function(event, ...args) {
 // wraps the node in a span if wrapping control is specified.
 // elements, nulls and arrays pass-through regardless of wrapping control.
 // TODO: remove this!
-function T(s, whitespace) {
+var T = function(s, whitespace) {
 	if (isfunc(s)) // constructor
 		s = s()
 	if (s == null || iselem(s) || isarray(s)) // pass-through
@@ -1196,7 +1211,7 @@ function T(s, whitespace) {
 
 // like T() but clones nodes instead of passing them through.
 // TODO: remove this!
-function TC(s, whitespace) {
+var TC = function(s, whitespace) {
 	if (typeof s == 'function')
 		s = s()
 	if (isnode(s))
@@ -1206,7 +1221,7 @@ function TC(s, whitespace) {
 
 // create a html element or text node from a html string.
 // if the string contains more than one node, return an array of nodes.
-function unsafe_html(s, unwrap) {
+var unsafe_html = function(s, unwrap) {
 	if (typeof s != 'string') // pass-through: nulls, elements, etc.
 		return s
 	let span = document.createElement('span')
@@ -1218,14 +1233,14 @@ function unsafe_html(s, unwrap) {
 	return n > 1 ? [...span.nodes] : span.firstChild
 }
 
-function sanitize_html(s) {
+let sanitize_html = function(s) {
 	if (typeof s != 'string') // pass-through: nulls, elements, etc.
 		return s
 	assert(DOMPurify.isSupported)
 	return DOMPurify.sanitize(s)
 }
 
-function html(s, unwrap) {
+var html = function(s, unwrap) {
 	return unsafe_html(sanitize_html(s), unwrap)
 }
 
@@ -1248,7 +1263,7 @@ let create_element = function(tag, prop_vals, attrs, ...children) {
 }
 
 // element(node | stringable | null | {id|tag:, PROP->VAL}, [attrs], [e1,...]) -> node | null
-function element(t, attrs, ...children) {
+var element = function(t, attrs, ...children) {
 	if (isfunc(t)) // constructor
 		t = t()
 	if (t == null || isnode(t)) // node | null | undefined: pass through
@@ -1270,14 +1285,14 @@ function element(t, attrs, ...children) {
 
 // create a HTML element from an attribute map and a list of child nodes.
 // skips nulls, calls constructors, expands arrays.
-function tag(tag, attrs, ...children) {
+var tag = function(tag, attrs, ...children) {
 	return create_element(tag, null, attrs, ...children)
 }
 
-div  = (...a) => tag('div' , ...a)
-span = (...a) => tag('span', ...a)
+var div  = (...a) => tag('div' , ...a)
+var span = (...a) => tag('span', ...a)
 
-function svg_tag(tag, attrs, ...children) {
+var svg_tag = function(tag, attrs, ...children) {
 	let e = document.createElementNS('http://www.w3.org/2000/svg', tag)
 	e.attrs = tag == 'svg' ? assign_opt({
 		preserveAspectRatio: 'xMidYMid meet',
@@ -1296,9 +1311,9 @@ function svg_tag(tag, attrs, ...children) {
 	return e
 }
 
-function svg(...args) { return svg_tag('svg', ...args) }
+var svg = function(...args) { return svg_tag('svg', ...args) }
 
-function svg_arc_path(x, y, r, a1, a2, start_cmd) {
+var svg_arc_path = function(x, y, r, a1, a2, start_cmd) {
 	let [x1, y1] = point_around(x, y, r, a1)
 	let [x2, y2] = point_around(x, y, r, a2)
 	let large_arc_flag = a2 - a1 <= 180 ? '0' : '1'
@@ -1536,7 +1551,7 @@ property(Element, 'index', {
 {
 let cur_set = set()
 let cur_by_id = map()
-function diff_element_list(t, cur_elems) {
+var diff_element_list = function(t, cur_elems) {
 	t = isstr(t) ? t.words() : t
 	if (t.equals(cur_elems))
 		return cur_elems
@@ -1667,7 +1682,7 @@ calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
 fires:
-	^^prop_changed(e, prop, v1, v0)
+	^^prop_changed(e, prop, v1, v0, ev)
 	^^id_changed(e, id, id0)
 
 */
@@ -1676,11 +1691,16 @@ e.property = function(name, get, set) {
 	return property(this, name, get, set)
 }
 
-function announce_prop_changed(e, prop, v1, v0) {
+e.on_prop_changed = function(f) {
+	this.do_after('prop_changed',f)
+}
+
+let announce_prop_changed = function(e, prop, v1, v0, ev) {
+	e.prop_changed?.(prop, v1, v0, ev)
 	if (e._xoff) {
 		e.props[prop].default = v1
 	} else {
-		e.announce('prop_changed', prop, v1, v0)
+		e.announce('prop_changed', prop, v1, v0, ev)
 	}
 }
 
@@ -1802,8 +1822,8 @@ e.prop = function(prop, opt) {
 		e.on_bind(function(on) {
 			id_bind(e[ID], on)
 		})
-		prop_changed = function(e, k, v1, v0) {
-			announce_prop_changed(e, k, v1, v0)
+		prop_changed = function(e, k, v1, v0, ev) {
+			announce_prop_changed(e, k, v1, v0, ev)
 			id_bind(v0, false)
 			id_bind(v1, true)
 		}
@@ -2090,7 +2110,7 @@ e.make_focusable = function(...fes) {
 
 }
 
-function focused_focusable(e) {
+var focused_focusable = function(e) {
 	e = e || document.activeElement
 	return e && e.focusable && e || (e.parent && e.parent != e && focused_focusable(e.parent))
 }
@@ -2147,7 +2167,7 @@ let position_with_parents = function(e) {
 	}
 }
 
-let update_all = raf_wrap(function update_all() {
+let update_all = function() {
 
 	updating = true
 
@@ -2179,7 +2199,7 @@ let update_all = raf_wrap(function update_all() {
 	position_set.clear()
 
 	updating = false
-})
+}
 
 e.update = function(opt) {
 	let update_opt = this._update_opt
@@ -2470,7 +2490,7 @@ callers.pointermove = function(ev, f) {
 // is hovered doesn't work anymore, so use this hack instead.
 {
 let cursor_style
-function force_cursor(cursor) {
+var force_cursor = function(cursor) {
 	if (cursor) {
 		if (!cursor_style) {
 			cursor_style = tag('style')
@@ -2656,9 +2676,9 @@ This is not done here, see e.make_disablable() and e.make_focusable().
 
 */
 
-shift_pressed = null
-ctrl_pressed  = null
-alt_pressed   = null
+var shift_pressed = null
+var ctrl_pressed  = null
+var alt_pressed   = null
 
 callers.keydown = function(ev, f) {
 	shift_pressed = ev.shiftKey
@@ -2693,7 +2713,7 @@ callers.wheel = function(ev, f) {
 	return f.call(this, ev, dy, is_trackpad, ev.clientX, ev.clientY)
 }
 
-stopped_event_types = {pointerdown:1, keydown:1, keyup: 1}
+var stopped_event_types = {pointerdown:1, keydown:1, keyup: 1}
 
 override(Event, 'stopPropagation', function(inherited, ...args) {
 	inherited.call(this, ...args)
@@ -2704,7 +2724,7 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 
 // clipboard of elements & copy/paste events ---------------------------------
 
-copied_elements = set() // {element}
+var copied_elements = set() // {element}
 
 document.on('keydown', function(key, shift, ctrl, alt, ev) {
 	if (alt || shift)
@@ -2721,7 +2741,7 @@ document.on('keydown', function(key, shift, ctrl, alt, ev) {
 
 // DOMRect extensions --------------------------------------------------------
 
-function domrect(...args) {
+var domrect = function(...args) {
 	return new DOMRect(...args)
 }
 
@@ -2785,7 +2805,7 @@ ox, oy, ow, oh, but note that those are rounded!
 */
 
 // NOTE: setting style.* to undefined is ignored so we change it to null!
-function px(v) {
+var px = function(v) {
 	return isnum(v) ? v+'px' : or(v, null)
 }
 
@@ -2982,7 +3002,7 @@ method(HTMLElement, 'unselect', function() {
 	sel.removeAllRanges()
 })
 
-is_node_trimmable = node => (node && (
+var is_node_trimmable = node => (node && (
 	(node.nodeType == Node.ELEMENT_NODE && node.tagName == 'BR') ||
 	(node.nodeType == Node.TEXT_NODE    && node.textContent.trim() == '')
 ))
@@ -3004,7 +3024,7 @@ method(HTMLElement, 'trim_inner_html', function() {
 
 // scrolling -----------------------------------------------------------------
 
-function scroll_to_view_dim(x, w, pw, sx, align) {
+var scroll_to_view_dim = function(x, w, pw, sx, align) {
 	if (align == 'center') { // enlarge content around its center to center it
 		x -= (10**6 - w) / 2
 		w = 10**6
@@ -3017,7 +3037,7 @@ function scroll_to_view_dim(x, w, pw, sx, align) {
 	return clamp(sx, min_sx, max_sx)
 }
 
-function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy, halign, valign) {
+var scroll_to_view_rect = function(x, y, w, h, pw, ph, sx, sy, halign, valign) {
 	sx = scroll_to_view_dim(x, w, pw, sx, halign)
 	sy = scroll_to_view_dim(y, h, ph, sy, or(valign, halign))
 	return [sx, sy]
@@ -3072,7 +3092,7 @@ e.is_in_viewport = function(m) {
 	)
 }
 
-scrollbar_widths = memoize(function() {
+var scrollbar_widths = memoize(function() {
 	let d = div({style: `
 		position: absolute;
 		visibility: hidden;
@@ -3089,7 +3109,7 @@ scrollbar_widths = memoize(function() {
 	return [w, h]
 })
 
-function scrollbox_client_dimensions(w, h, cw, ch, overflow_x, overflow_y, vscrollbar_w, hscrollbar_h) {
+var scrollbox_client_dimensions = function(w, h, cw, ch, overflow_x, overflow_y, vscrollbar_w, hscrollbar_h) {
 
 	overflow_x = overflow_x || 'auto'
 	overflow_y = overflow_y || 'auto'
@@ -3130,14 +3150,14 @@ function scrollbox_client_dimensions(w, h, cw, ch, overflow_x, overflow_y, vscro
 // animation frames ----------------------------------------------------------
 
 // TODO: remove these, use raf_wrap() only!
-function raf(f, last_id) {
+var raf = function(f, last_id) {
 	return last_id == null ? requestAnimationFrame(f) : last_id
 }
-cancel_raf = cancelAnimationFrame
+var cancel_raf = cancelAnimationFrame
 
-in_raf = false // public
+var in_raf = false // public
 
-function raf_wrap(f) {
+var raf_wrap = function(f) {
 	let id
 	function raf_f() {
 		id = null
@@ -3157,9 +3177,11 @@ function raf_wrap(f) {
 	return wrapper
 }
 
+update_all = raf_wrap(update_all)
+
 // animation easing ----------------------------------------------------------
 
-easing = obj() // from easing.lua
+var easing = obj() // from easing.lua
 
 easing.reverse = (f, t, ...args) => 1 - f(1 - t, ...args)
 easing.inout   = (f, t, ...args) => t < .5 ? .5 * f(t * 2, ...args) : .5 * (1 - f((1 - t) * 2, ...args)) + .5
@@ -3207,7 +3229,7 @@ easing.bounce = function(t) {
 
 // restartable, abortable, callback-based transitions.
 // like the animation API but simpler.
-function transition(f) {
+var transition = function(f) {
 	let raf_id, t0
 	let dt, y0, y1, ease_f, ease_way, ease_args
 	let e = {started: false}
@@ -3278,7 +3300,7 @@ let hit = function(x0, y0, d1, d2, x, y, w, h) {
 	return x0 >= x && x0 <= x + w && y0 >= y && y0 <= y + h
 }
 
-function hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h) {
+var hit_test_rect_sides = function(x0, y0, d1, d2, x, y, w, h) {
 	if (hit(x0, y0, d1, d2, x, y, 0, 0))
 		return 'top_left'
 	else if (hit(x0, y0, d1, d2, x + w, y, 0, 0))
@@ -3351,7 +3373,7 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 // to fill the div when the div size changes. The div's redraw(cx, w, h)
 // method is called on div's update and when the canvas is resized.
 // Before each redraw call the canvas is cleared and the context is reset.
-function resizeable_canvas(pw, ph) {
+var resizeable_canvas = function(pw, ph) {
 	let canvas = tag('canvas', {class: 'abs', width: 0, height: 0})
 	let ct = div({class: 'S rel clip'}, canvas)
 	ct.do_redraw = noop
@@ -3406,7 +3428,7 @@ css('.overlay', '', `
 	bottom: 0;
 `)
 
-function overlay(attrs, content) {
+var overlay = function(attrs, content) {
 	let e = div(attrs)
 	e.class('overlay')
 	e.set(content || div())
@@ -3901,7 +3923,7 @@ e.popup = function(target, side, align) {
 //   e.movable_element_size(elem_i) -> w
 //   e.set_movable_element_pos(i, x, moving)
 //
-function live_move_mixin(e) {
+var live_move_mixin = function(e) {
 
 	e = e || {}
 
@@ -4040,24 +4062,24 @@ function live_move_mixin(e) {
 // NOTE: dom.js is independent of any css, including css.js.
 // These class names are the only references to css.js.
 
-function is_theme_dark() {
+var is_theme_dark = function() {
 	return root.hasclass('theme-dark')
 }
 
-function set_theme_dark(dark) {
+var set_theme_dark = function(dark) {
 	root.class('theme-dark' , !!dark)
 	root.class('theme-light', !dark)
 	announce('theme_changed')
 	announce('layout_changed')
 }
 
-function get_theme_size() {
+var get_theme_size = function() {
 	return root.hasclass('theme-large') && 'large'
 		|| root.hasclass('theme-small') && 'small'
 		|| 'normal'
 }
 
-function set_theme_size(size) {
+var set_theme_size = function(size) {
 	size = repl(size, 'normal')
 	root.class('theme-large theme-small', false)
 	if (size)
@@ -4070,17 +4092,17 @@ function set_theme_size(size) {
 if (!is_theme_dark())
 	root.class('theme-light')
 
-function css_light(selector, ...args) {
+var css_light = function(selector, ...args) {
 	return css(':is(:root, .theme-light, .theme-dark .theme-inverted)'+selector, ...args)
 }
 
-function css_dark(selector, ...args) {
+var css_dark = function(selector, ...args) {
 	return css(':is(.theme-dark, .theme-light .theme-inverted)'+selector, ...args)
 }
 
 // CSS specificity reporting -------------------------------------------------
 
-function css_selector_specificity(s0) {
+var css_selector_specificity = function(s0) {
 	let s = s0
 	let n = 0 // current specificity
 	let maxn = 0 // current max specificity
@@ -4123,7 +4145,7 @@ function css_selector_specificity(s0) {
 	return next()
 }
 
-function css_report_specificity(file, max_spec) {
+var css_report_specificity = function(file, max_spec) {
 	max_spec = max_spec || {base: 1.1, state: 2.1, _default: 1}
 	let t0 = time()
 	let n = 0

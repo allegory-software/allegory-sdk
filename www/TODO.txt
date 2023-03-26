@@ -30,9 +30,6 @@ THINK
 BUGS
 ------------------------------------------------------------------------------
 
-* NUM-INPUT
-	- validation on increment (and validation in general)
-
 * SLIDER
 	- fill animation glitch
 	- tooltip offset wrong

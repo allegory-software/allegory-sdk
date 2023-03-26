@@ -51,7 +51,8 @@ TEMPLATES
 
 */
 
-{ // module scope.
+'use strict';
+{
 
 let e = Element.prototype
 
@@ -60,7 +61,7 @@ let e = Element.prototype
 // some of the values come from the server (see config.js action).
 {
 let t = obj()
-function config(name, val) {
+var config = function(name, val) {
 	if (val !== undefined && t[name] === undefined)
 		t[name] = val
 	if (t[name] === undefined)
@@ -70,9 +71,9 @@ function config(name, val) {
 
 // global S() for internationalizing strings.
 
-S_texts = obj()
+var S_texts = obj()
 
-function S(name, en_s, ...args) {
+var S = function(name, en_s, ...args) {
 	let s = or(S_texts[name], en_s) || ''
 	if (args.length)
 		return s.subst(...args)
@@ -96,7 +97,7 @@ let url_action = function(t) {
 // replace its action name with a language-specific alias for a given
 // (or current) language if any, or add ?lang= if the given language
 // is not the default language.
-function href(url_s, target_lang) {
+var href = function(url_s, target_lang) {
 	let t = url_parse(url_s)
 
 	// add impersonated user if any
@@ -126,7 +127,7 @@ function href(url_s, target_lang) {
 	return url_format(t)
 }
 
-action = obj() // {name->handler}
+var action = obj() // {name->handler}
 
 // given a url (in encoded form), find its action and return the handler.
 let action_handler = function(url) {
@@ -170,13 +171,13 @@ let action_handler = function(url) {
 let loading = true
 
 // check if the action was triggered by a page load or by exec()
-function page_loading() {
+var page_loading = function() {
 	return loading
 }
 
 let ignore_url_changed
 
-current_url = url_parse(location.pathname + location.search) // this is global
+var current_url = url_parse(location.pathname + location.search) // this is global
 
 let url_changed = function(ev) {
 	if (ignore_url_changed)
@@ -191,7 +192,7 @@ let url_changed = function(ev) {
 		fire('action_not_found', opt)
 }
 
-on('action_not_found', function(opt) {
+window.on('action_not_found', function(opt) {
 	if (location.pathname == '/') {
 		setflaps('action_not_found')
 		return // no home action
@@ -220,7 +221,7 @@ let check_exec = function() {
 	return !exec_aborted
 }
 
-function exec(url, opt) {
+var exec = function(url, opt) {
 	opt = opt || {}
 	if (opt.refresh) {
 		window.location = href(url, opt.lang)
@@ -242,14 +243,14 @@ function exec(url, opt) {
 	window.fire(ev)
 }
 
-function back() {
+var back = function() {
 	if (!check_exec())
 		return
 	history.back()
 }
 
 // set scroll back to where it was or reset it
-function setscroll(top) {
+var setscroll = function(top) {
 	if (top !== undefined) {
 		_save_scroll_state(top)
 	} else {
@@ -302,7 +303,7 @@ component('a', '[href]', function(e) {
 	e.sethref()
 })
 
-function settitle(title) {
+var settitle = function(title) {
 	title = title
 		|| $('h1').html()
 		|| url_parse(location.pathname).segments[1].replace(/[-_]/g, ' ')
@@ -310,19 +311,19 @@ function settitle(title) {
 		document.title = title + config('page_title_suffix')
 }
 
-function slug(id, s) {
+var slug = function(id, s) {
 	return (s.upper()
 		.replace(/ /g,'-')
 		.replace(/[^\w-]+/g,'')
 	) + '-' + id
 }
 
-function id_arg(s) {
+var id_arg = function(s) {
 	s = s && s.match(/\d+$/)
 	return s && num(s) || null
 }
 
-function opt_arg(s) {
+var opt_arg = function(s) {
 	return s && ('/' + s) || null
 }
 
@@ -330,8 +331,8 @@ function opt_arg(s) {
 
 {
 let cur_cx
-flap = obj()
-function setflaps(new_cx) {
+var flap = obj()
+var setflaps = function(new_cx) {
 	if (cur_cx == new_cx)
 		return
 	let cx0 = cur_cx && cur_cx.words().tokeys() || empty
@@ -353,23 +354,23 @@ function setflaps(new_cx) {
 
 // templates -----------------------------------------------------------------
 
-function template(name) {
+var template = function(name) {
 	if (!name) return null
 	let e = window[name+'_template']
 	warn_if(!e, 'unknown template', name)
 	return e && (e.tag == 'script' || e.tag == 'xmp') ? e.html : null
 }
 
-function static_template(name) {
+var static_template = function(name) {
 	let e = window[name+'_template']
 	return e && e.tag == 'template' ? e.html : null
 }
 
-function render_string(s, data) {
+var render_string = function(s, data) {
 	return Mustache.render(s, data || obj(), template)
 }
 
-function render(template_name, data) {
+var render = function(template_name, data) {
 	let s = template(template_name)
 	assert(s != null, 'template not found: {0}', template_name)
 	return render_string(s, data)
@@ -421,7 +422,7 @@ component('render', function(e) {
 
 // init ----------------------------------------------------------------------
 
-function init_action() {
+var init_action = function() {
 	window.on('popstate', function(ev) {
 		loading = false
 		url_changed(ev)

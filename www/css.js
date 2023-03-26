@@ -53,6 +53,7 @@ NOTES
 
 */
 
+'use strict';
 {
 
 let css        = css_base
@@ -1235,7 +1236,7 @@ css('.icon-9-dots::before'    , '', `
 
 /* ICONS: SVG-BASED ------------------------------------------------------- */
 
-function svg_circle_x(attrs) {
+var svg_circle_x = function(attrs) {
 	return svg(assign_opt({
 			viewBox: '0 0 16 16',
 			fill   : 'currentColor',
@@ -1247,7 +1248,7 @@ function svg_circle_x(attrs) {
 	)
 }
 
-function svg_plus_sign(attrs) {
+var svg_plus_sign = function(attrs) {
 	return svg(assign_opt({
 			viewBox: '-1 -1 2 2',
 			stroke : 'currentColor',
@@ -1260,7 +1261,7 @@ function svg_plus_sign(attrs) {
 	)
 }
 
-function svg_minus_sign(attrs) {
+var svg_minus_sign = function(attrs) {
 	return svg(assign_opt({
 			viewBox: '-1 -1 2 2',
 			stroke : 'currentColor',
