@@ -78,45 +78,6 @@ let G = window
 
 let e = Element.prototype
 
-css_light('', '', `
-
-	--outline-markbox-focused       : #88888866;
-
-	--shadow-popup-picker           :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
-
-	--bg-moving       : #eeeeeeaa;
-	--bg-tooltip      : #ffffcc; /* bg for cursor-kind tooltips */
-	--bg-today        : #f33;
-	--fg-today        : white;
-	--fg-clickable    : #207fdf; /* markbox icon, slider */
-
-	--bg-toolbox-titlebar         : var(--bg1);
-	--bg-toolbox-titlebar-focused : #00003333;
-
-	--stroke-dialog-xbutton       : #00000066;
-
-	--selected-widget-outline-color         : #666;
-	--selected-widget-outline-color-focused : blue;
-
-`)
-
-css_dark('', '', `
-
-	--outline-markbox-focused       :  #88888866;
-
-	--bg-moving            : #141a24aa;
-	--fg-clickable         : #75b7fa;
-
-	--bg-toolbox-titlebar         : #303030;
-	--bg-toolbox-titlebar-focused : #636363;
-
-	--stroke-dialog-xbutton       : #000000cc;
-
-	--selected-widget-outline-color         : #aaa;
-	--selected-widget-outline-color-focused : var(--fg-clickable);
-
-`)
-
 css('.x-container', 'grid-h shrinks clip') /* grid because grid-in-flex is buggy */
 
 // container with `display: contents`. useful to group together
@@ -294,6 +255,10 @@ css('.tooltip[kind=warn  ] > .tooltip-body > .tooltip-xbutton', '', ` color: var
 css('.tooltip[kind=cursor]', '', `
 	margin-left: .75em;
 	margin-top : .75em;
+`)
+
+css_light('', '', `
+	--bg-tooltip : #ffffcc; /* bg for at-cursor tooltips */
 `)
 
 css('.tooltip[kind=cursor] > .tooltip-body', '', `
@@ -2797,6 +2762,9 @@ css('.dlg-footer' , 'm-t-2')
 css('.dlg-content', 'm-y-2')
 
 css('.dlg-heading', 'dim xlarge bold')
+
+css_light('', '', `--stroke-dialog-xbutton : #00000066;`)
+css_dark ('', '', `--stroke-dialog-xbutton : #000000cc;`)
 
 css('.dlg-xbutton', 'abs ro-var b b-t-0 h-c h-m', `
 	right: 8px;
