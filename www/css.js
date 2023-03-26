@@ -53,8 +53,9 @@ NOTES
 
 */
 
-'use strict';
-{
+(function () {
+"use strict"
+let G = window
 
 let css        = css_base
 let css_chrome = css_base_chrome
@@ -1236,7 +1237,7 @@ css('.icon-9-dots::before'    , '', `
 
 /* ICONS: SVG-BASED ------------------------------------------------------- */
 
-var svg_circle_x = function(attrs) {
+G.svg_circle_x = function(attrs) {
 	return svg(assign_opt({
 			viewBox: '0 0 16 16',
 			fill   : 'currentColor',
@@ -1248,7 +1249,7 @@ var svg_circle_x = function(attrs) {
 	)
 }
 
-var svg_plus_sign = function(attrs) {
+G.svg_plus_sign = function(attrs) {
 	return svg(assign_opt({
 			viewBox: '-1 -1 2 2',
 			stroke : 'currentColor',
@@ -1261,7 +1262,7 @@ var svg_plus_sign = function(attrs) {
 	)
 }
 
-var svg_minus_sign = function(attrs) {
+G.svg_minus_sign = function(attrs) {
 	return svg(assign_opt({
 			viewBox: '-1 -1 2 2',
 			stroke : 'currentColor',
@@ -1279,4 +1280,4 @@ var svg_minus_sign = function(attrs) {
 css('d[h]', 'h')
 css('d[v]', 'v')
 
-} /* module */
+}()) // module function

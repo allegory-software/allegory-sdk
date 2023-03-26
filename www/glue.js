@@ -86,13 +86,6 @@ STRINGS
 	catall(...)
 	s.captures(re) -> [capture1, ...]
 
-MULTI-LANGUAGE STUBS
-
-	S(id, default)                         get labeled string in current language
-	lang()                                 get current language
-	country()                              get current country
-	href(url, [lang])                      rewrite URL for (current) language
-
 ARRAYS
 
 	array(...) -> a                        new Array(...)
@@ -223,12 +216,6 @@ FAST GLOBAL EVENTS
 	listen(event, f, [on])
 	announce(event, ...args)
 
-AJAX REQUESTS
-
-	ajax(opt) -> req
-	get(url, success, [error], [opt]) -> req
-	post(url, data, [success], [error], [opt]) -> req
-
 INTER-WINDOW COMMUNICATION
 
 	broadcast(name, ...args)
@@ -236,97 +223,129 @@ INTER-WINDOW COMMUNICATION
 	^window.global_changed(name, v, v0)
 	^window.NAME_changed(v, v0)
 
+MULTI-LANGUAGE STUBS
+
+	S(id, default)                         get labeled string in current language
+	lang()                                 get current language
+	country()                              get current country
+	href(url, [lang])                      rewrite URL for (current) language
+
+AJAX REQUESTS
+
+	ajax(opt) -> req
+	get(url, success, [error], [opt]) -> req
+	post(url, data, [success], [error], [opt]) -> req
+
 BROWSER DETECTION
 
-	Firefox
+	Firefox Chrome Safari Safari_min Safari_maj
 
 */
 
-'use strict';
+(function () {
+"use strict"
+let G = window
 
-var DEBUG_EVENTS = false
-var DEBUG_EVENTS_FIRE = false
-var DEBUG_AJAX = false
+G.DEBUG_EVENTS = false
+G.DEBUG_EVENTS_FIRE = false
+G.DEBUG_AJAX = false
+
+// browser detection ---------------------------------------------------------
+
+{
+let ua = navigator.userAgent.toLowerCase()
+G.Firefox = ua.includes('firefox')
+G.Chrome  = ua.includes('chrome')
+G.Safari  = ua.includes('safari') && !Chrome
+if (Safari) {
+	// Safari is by far the shittiest browser that doesn't even have auto-update
+	// so we need to give the finger to those poor bastards who haven't sold their
+	// kidneys on the Apple store yet to get an upgrade on their browser.
+	let m = ua.match(/version\/(\d+)\.(\d+)/)
+	G.Safari_maj = m && parseFloat(m[1])
+	G.Safari_min = m && parseFloat(m[2])
+}
+}
 
 // types ---------------------------------------------------------------------
 
-var isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
-var isarray = Array.isArray
-var isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
-var isstr = s => typeof s == 'string'
-var isnum = n => typeof n == 'number'
-var isbool = b => typeof b == 'boolean'
-var isfunc = f => typeof f == 'function'
+G.isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
+G.isarray = Array.isArray
+G.isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
+G.isstr = s => typeof s == 'string'
+G.isnum = n => typeof n == 'number'
+G.isbool = b => typeof b == 'boolean'
+G.isfunc = f => typeof f == 'function'
 
 // logic ---------------------------------------------------------------------
 
 // non-shortcircuiting `||` operator for which only `undefined` and `null` are falsey.
-function or(x, z) { return x != null ? x : z }
+G.or = function(x, z) { return x != null ? x : z }
 
 // non-shortcircuiting `||` operator for which only `undefined` is falsey.
-function strict_or(x, z) { return x !== undefined ? x : z }
+G.strict_or = function(x, z) { return x !== undefined ? x : z }
 
 // single-value filter.
-function repl(x, v, z) { return x === v ? z : x }
+G.repl = function(x, v, z) { return x === v ? z : x }
 
 // math ----------------------------------------------------------------------
 
-var inf = Infinity
-var floor = Math.floor // rounds towards -1/0
-var ceil = Math.ceil
-var round = Math.round
-var snap = (x, p) => round(x / p) * p
-var trunc = Math.trunc // rounds towards 0
-var abs = Math.abs
-var min = Math.min
-var max = Math.max
-var sqrt = Math.sqrt
-var ln = Math.log
-var log10 = Math.log10
-var logbase = (x, base) => ln(x) / ln(base)
-var random = Math.random
-var sign = Math.sign
+G.inf = Infinity
+G.floor = Math.floor // rounds towards -1/0
+G.ceil = Math.ceil
+G.round = Math.round
+G.snap = (x, p) => round(x / p) * p
+G.trunc = Math.trunc // rounds towards 0
+G.abs = Math.abs
+G.min = Math.min
+G.max = Math.max
+G.sqrt = Math.sqrt
+G.ln = Math.log
+G.log10 = Math.log10
+G.logbase = (x, base) => ln(x) / ln(base)
+G.random = Math.random
+G.sign = Math.sign
 
 // NOTE: returns x1 if x1 < x0, which enables the idiom
 // `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
-function clamp(x, x0, x1) {
+G.clamp = function(x, x0, x1) {
 	return min(max(x, or(x0, -1/0)), or(x1, 1/0))
 }
 
 // sign() that only returns -1 or 1, never 0, and returns -1 for -0.
-function strict_sign(x) {
+G.strict_sign = function(x) {
 	return 1/x == 1/-0 ? -1 : (x >= 0 ? 1 : -1)
 }
 
-function lerp(x, x0, x1, y0, y1) {
+G.lerp = function(x, x0, x1, y0, y1) {
 	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
 }
 
-function num(s, z) {
+G.num = function(s, z) {
 	let x = parseFloat(s)
 	return x != x ? z : x
 }
 
 // % that works with negative numbers.
-function mod(a, b) {
+G.mod = function(a, b) {
 	return (a % b + b) % b
 }
 
-function nextpow2(x) {
+G.nextpow2 = function(x) {
 	return max(0, 2**(ceil(ln(x) / ln(2))))
 }
 
-var PI  = Math.PI
-var sin = Math.sin
-var cos = Math.cos
-var tan = Math.tan
-var rad = PI / 180
-var deg = 180 / PI
+G.PI  = Math.PI
+G.sin = Math.sin
+G.cos = Math.cos
+G.tan = Math.tan
+G.rad = PI / 180
+G.deg = 180 / PI
 
-var asin  = Math.asin
-var acos  = Math.acos
-var atan  = Math.atan
-var atan2 = Math.atan2
+G.asin  = Math.asin
+G.acos  = Math.acos
+G.atan  = Math.atan
+G.atan2 = Math.atan2
 
 Number.prototype.base = function(base, digits) {
 	let s = this.toString(base)
@@ -338,36 +357,36 @@ Number.prototype.dec = Number.prototype.toFixed
 
 // callback stubs ------------------------------------------------------------
 
-function noop() {}
-function return_true() { return true; }
-function return_false() { return false; }
-function return_arg(arg) { return arg; }
+G.noop = function() {}
+G.return_true = function() { return true; }
+G.return_false = function() { return false; }
+G.return_arg = function(arg) { return arg; }
 
 // error handling ------------------------------------------------------------
 
-var print = null
-var pr    = console.log
-var warn  = console.warn
-var debug = console.log // console.debug makes everything blue wtf.
-var trace = console.trace
+G.print = null
+G.pr    = console.log
+G.warn  = console.warn
+G.debug = console.log // console.debug makes everything blue wtf.
+G.trace = console.trace
 
-function warn_if(cond, ...args) {
+G.warn_if = function(cond, ...args) {
 	if (!cond) return
 	warn(...args)
 	return cond
 }
 
-function trace_if(cond, ...args) {
+G.trace_if = function(cond, ...args) {
 	if (!cond) return
 	console.trace(...args)
 }
 
-function debug_if(cond, ...args) {
+G.debug_if = function(cond, ...args) {
 	if (!cond) return
 	debug(...args)
 }
 
-function assert(ret, err, ...args) {
+G.assert = function(ret, err, ...args) {
 	if (ret == null || ret === false) {
 		throw ((err && err.subst(...args) || 'assertion failed'))
 	}
@@ -386,7 +405,7 @@ enumerables into it.
 
 // extend an object with a property, checking for upstream name clashes.
 // NOTE: shadows both instance and prototype fields.
-function property(cls, prop, get, set) {
+G.property = function(cls, prop, get, set) {
 	let proto = cls.prototype || cls
 	assert(!(prop in proto), '{0}.{1} already exists and it\'s set to: {2}',
 		cls.type || cls.name, prop, proto[prop])
@@ -396,7 +415,7 @@ function property(cls, prop, get, set) {
 
 // extend an object with a method, checking for upstream name clashes.
 // NOTE: shadows both instance and prototype methods!
-function method(cls, meth, func) {
+G.method = function(cls, meth, func) {
 	property(cls, meth, {
 		value: func,
 		enumerable: false,
@@ -404,7 +423,7 @@ function method(cls, meth, func) {
 }
 
 // override a method, with the ability to override a built-in method.
-function override(cls, meth, func) {
+G.override = function(cls, meth, func) {
 	let proto = cls.prototype || cls
 	let inherited = proto[meth]
 	assert(inherited, '{0}.{1} does not exist', cls.type || cls.name, meth)
@@ -417,7 +436,7 @@ function override(cls, meth, func) {
 	})
 }
 
-function getRecursivePropertyDescriptor(obj, key) {
+G.getRecursivePropertyDescriptor = function(obj, key) {
 	return Object.prototype.hasOwnProperty.call(obj, key)
 		? Object.getOwnPropertyDescriptor(obj, key)
 		: getRecursivePropertyDescriptor(Object.getPrototypeOf(obj), key)
@@ -426,7 +445,7 @@ method(Object, 'getPropertyDescriptor', function(key) {
 	return key in this && getRecursivePropertyDescriptor(this, key)
 })
 
-function alias(cls, new_name, old_name) {
+G.alias = function(cls, new_name, old_name) {
 	let proto = cls.prototype || cls
 	let d = proto.getPropertyDescriptor(old_name)
 	assert(d, '{0}.{1} does not exist', cls.type || cls.name, old_name)
@@ -434,7 +453,7 @@ function alias(cls, new_name, old_name) {
 }
 
 // override a property setter in a prototype *or instance*.
-function override_property_setter(cls, prop, set) {
+G.override_property_setter = function(cls, prop, set) {
 	let proto = cls.prototype || cls
 	let d0 = proto.getPropertyDescriptor(prop)
 	assert(d0, '{0}.{1} does not exist', cls.type || cls.name, prop)
@@ -501,7 +520,7 @@ method(String, 'find_ai_ci', function(s) {
 {
 // concat args, skipping null ones. returns null if all args are null.
 let non_null = (s) => s != null
-var catany = function(sep, ...args) {
+G.catany = function(sep, ...args) {
 	if (args.length == 0)
 		return null
 	if (args.length == 1)
@@ -520,7 +539,7 @@ var catany = function(sep, ...args) {
 method(String, 'catany', function(...args) { return catany(this, ...args) })
 
 // concat args. if any arg is null return nothing.
-function catall(...args) {
+G.catall = function(...args) {
 	for (let i = 0, n = args.length; i < n; i++)
 		if (args[i] == null)
 			return
@@ -537,7 +556,7 @@ method(String, 'words', function() {
 	return s.split(/\s+/)
 })
 
-function words(s) {
+G.words = function(s) {
 	return isstr(s) ? s.words() : s
 }
 
@@ -547,47 +566,11 @@ method(String, 'captures', function(re) {
 	return m || empty_array
 })
 
-// multi-language stubs replaced in webb_spa.js ------------------------------
-
-// stub for getting message strings that can be translated multiple languages.
-if (!window.S) {
-	var S = function(name, en_s, ...args) {
-		return en_s.subst(...args)
-	}
-}
-
-function Sf(...args) {
-	return () => S(...args)
-}
-
-// stub for getting current language.
-if (!window.lang) {
-	let nav_lang = navigator.language.substring(0, 2)
-	var lang = function() {
-		return document.documentElement.lang || nav_lang
-	}
-}
-
-// stub for getting current country.
-if (!window.country) {
-	let nav_country = navigator.language.substring(3, 5)
-	var country = function() {
-		return document.documentElement.attr('country') || nav_country
-	}
-}
-
-let locale = memoize(function() { return lang() + '-' + country() })
-
-// stub for rewriting links to current language.
-if (!window.href) {
-	var href = return_arg
-}
-
 // arrays --------------------------------------------------------------------
 
-var empty_array = []
+G.empty_array = []
 
-function range(i1, j, step, f) {
+G.range = function(i1, j, step, f) {
 	step = or(step, 1)
 	f = f || return_arg
 	let a = []
@@ -729,10 +712,10 @@ method(Array, 'remove_duplicates', function() {
 
 // hash maps -----------------------------------------------------------------
 
-var obj = () => Object.create(null)
-var set = (iter) => new Set(iter)
-var map = (iter) => new Map(iter)
-var array = (...args) => new Array(...args)
+G.obj = () => Object.create(null)
+G.set = (iter) => new Set(iter)
+G.map = (iter) => new Map(iter)
+G.array = (...args) => new Array(...args)
 
 property(Map, 'first_key', function() {
 	for (let [k] of this)
@@ -776,16 +759,16 @@ method(Set, 'equals', function(s2, same_order) {
 	return true
 })
 
-var empty = {}
-var empty_obj = obj()
-var empty_set = set()
+G.empty = {}
+G.empty_obj = obj()
+G.empty_set = set()
 
-var keys = Object.keys
+G.keys = Object.keys
 
-var assign = Object.assign
+G.assign = Object.assign
 
 // like Object.assign() but skips assigning `undefined` values.
-function assign_opt(dt, ...ts) {
+G.assign_opt = function(dt, ...ts) {
 	for (let t of ts)
 		if (t != null)
 			for (let k in t)
@@ -795,7 +778,7 @@ function assign_opt(dt, ...ts) {
 	return dt
 }
 
-function attr(t, k, cons) {
+G.attr = function(t, k, cons) {
 	cons = cons || obj
 	let v = (t instanceof Map) ? t.get(k) : t[k]
 	if (v === undefined) {
@@ -809,7 +792,7 @@ function attr(t, k, cons) {
 }
 
 // TOOD: multi-arg memoize.
-function memoize(f) {
+G.memoize = function(f) {
 	let t = new Map()
 	return function(x) {
 		if (t.has(x))
@@ -822,7 +805,7 @@ function memoize(f) {
 	}
 }
 
-function count_keys(t, max_n) {
+G.count_keys = function(t, max_n) {
 	let n = 0
 	for(let i in t) {
 		if (n === max_n)
@@ -834,15 +817,15 @@ function count_keys(t, max_n) {
 
 // typed arrays --------------------------------------------------------------
 
-var f32arr = Float32Array
-var i8arr  = Int8Array
-var u8arr  = Uint8Array
-var i16arr = Int16Array
-var u16arr = Uint16Array
-var i32arr = Int32Array
-var u32arr = Uint32Array
+G.f32arr = Float32Array
+G.i8arr  = Int8Array
+G.u8arr  = Uint8Array
+G.i16arr = Int16Array
+G.u16arr = Uint16Array
+G.i32arr = Int32Array
+G.u32arr = Uint32Array
 
-function max_index_from_array(a) {
+G.max_index_from_array = function(a) {
 	if (a.max_index != null) // hint
 		return a.max_index
 	let max_idx = 0
@@ -851,12 +834,12 @@ function max_index_from_array(a) {
 	return max_idx
 }
 
-function arr_type_from_max_index(max_idx) {
+G.arr_type_from_max_index = function(max_idx) {
 	return max_idx > 65535 && u32arr || max_idx > 255 && u16arr || u8arr
 }
 
 // for inferring the data type of gl.ELEMENT_ARRAY_BUFFER VBOs.
-function index_arr_type(arg) {
+G.index_arr_type = function(arg) {
 	if (isnum(arg)) // max_idx
 		return arr_type_from_max_index(arg)
 	if (isarray(arg)) // [...]
@@ -1008,7 +991,7 @@ property(dyn_arr_class, 'len',
 	function(len) { this.setlen(len) }
 )
 
-function dyn_arr(arr_type, data_or_cap, nc) {
+G.dyn_arr = function(arr_type, data_or_cap, nc) {
 	return new dyn_arr_class(arr_type, data_or_cap, nc)
 }
 
@@ -1020,18 +1003,18 @@ let dyn_arr_func = function(arr_type) {
 		return new dyn_arr_class(arr_type, data_or_cap, nc)
 	}
 }
-var dyn_f32arr = dyn_arr_func(f32arr)
-var dyn_i8arr  = dyn_arr_func(i8arr)
-var dyn_u8arr  = dyn_arr_func(u8arr)
-var dyn_i16arr = dyn_arr_func(i16arr)
-var dyn_u16arr = dyn_arr_func(u16arr)
-var dyn_i32arr = dyn_arr_func(i32arr)
-var dyn_u32arr = dyn_arr_func(u32arr)
+G.dyn_f32arr = dyn_arr_func(f32arr)
+G.dyn_i8arr  = dyn_arr_func(i8arr)
+G.dyn_u8arr  = dyn_arr_func(u8arr)
+G.dyn_i16arr = dyn_arr_func(i16arr)
+G.dyn_u16arr = dyn_arr_func(u16arr)
+G.dyn_i32arr = dyn_arr_func(i32arr)
+G.dyn_u32arr = dyn_arr_func(u32arr)
 }
 
 // data structures -----------------------------------------------------------
 
-function freelist(create, init, destroy) {
+G.freelist = function(create, init, destroy) {
 	let e = []
 	e.alloc = function() {
 		let e = this.pop()
@@ -1049,7 +1032,7 @@ function freelist(create, init, destroy) {
 }
 
 // stack with freelist.
-function freelist_stack(create, init, destroy) {
+G.freelist_stack = function(create, init, destroy) {
 	let e = {}
 	let stack = []
 	let fl = freelist(create, init, destroy)
@@ -1072,10 +1055,10 @@ function freelist_stack(create, init, destroy) {
 
 // timestamps ----------------------------------------------------------------
 
-var _d = new Date() // public temporary date object.
+G._d = new Date() // public temporary date object.
 
 // NOTE: months start at 1, and seconds can be fractionary.
-function time(y, m, d, H, M, s) {
+G.time = function(y, m, d, H, M, s) {
 	if (isnum(y)) {
 		_d.setTime(0) // necessary to reset the time first!
 		_d.setUTCFullYear(y)
@@ -1097,7 +1080,7 @@ function time(y, m, d, H, M, s) {
 }
 
 // get the time at the start of the day of a given time, plus/minus a number of days.
-function day(t, offset) {
+G.day = function(t, offset) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
@@ -1109,7 +1092,7 @@ function day(t, offset) {
 }
 
 // get the time at the start of the month of a given time, plus/minus a number of months.
-function month(t, offset) {
+G.month = function(t, offset) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
@@ -1122,7 +1105,7 @@ function month(t, offset) {
 }
 
 // get the time at the start of the year of a given time, plus/minus a number of years.
-function year(t, offset) {
+G.year = function(t, offset) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
@@ -1136,7 +1119,7 @@ function year(t, offset) {
 }
 
 // get the time at the start of the week of a given time, plus/minus a number of weeks.
-function week(t, offset, country) {
+G.week = function(t, offset, country) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
@@ -1149,55 +1132,55 @@ function week(t, offset, country) {
 	return _d.valueOf() / 1000
 }
 
-function days(dt) {
+G.days = function(dt) {
 	if (dt == null) return null
 	return dt / (3600 * 24)
 }
 
-function year_of      (t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCFullYear() }
-function month_of     (t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCMonth() + 1 }
-function week_day_of  (t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCDay() }
-function month_day_of (t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCDate() }
-function hours_of     (t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCHours() }
-function minutes_of   (t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCMinutes() }
-function seconds_of   (t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCSeconds() }
+G.year_of       = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCFullYear() }
+G.month_of      = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCMonth() + 1 }
+G.week_day_of   = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCDay() }
+G.month_day_of  = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCDate() }
+G.hours_of      = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCHours() }
+G.minutes_of    = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCMinutes() }
+G.seconds_of    = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCSeconds() }
 
-function set_year(t, x) {
+G.set_year = function(t, x) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCFullYear(x)
 	return _d.valueOf() / 1000
 }
 
-function set_month(t, x) {
+G.set_month = function(t, x) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMonth(x - 1)
 	return _d.valueOf() / 1000
 }
 
-function set_month_day(t, x) {
+G.set_month_day = function(t, x) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCDate(x)
 	return _d.valueOf() / 1000
 }
 
-function set_hours(t, x) {
+G.set_hours = function(t, x) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCHours(x)
 	return _d.valueOf() / 1000
 }
 
-function set_minutes(t, x) {
+G.set_minutes = function(t, x) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMinutes(x)
 	return _d.valueOf() / 1000
 }
 
-function set_seconds(t, x) {
+G.set_seconds = function(t, x) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCSeconds(x)
@@ -1213,20 +1196,20 @@ let weekday_names = memoize(function(locale1) {
 	}
 	return wd
 })
-function weekday_name(t, how, locale1) {
+G.weekday_name = function(t, how, locale1) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	let wd = _d.getDay()
 	return weekday_names(locale1 || locale())[how || 'short'][wd]
 }
 
-function month_name(t, how, locale1) {
+G.month_name = function(t, how, locale1) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short'})
 }
 
-function month_year(t, how, locale1) {
+G.month_year = function(t, how, locale1) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	return _d.toLocaleDateString(locale1 || locale(), {month: how || 'short', year: 'numeric'})
@@ -1241,7 +1224,7 @@ let wso = { // fri:1, sat:2, sun:3
 	MO:3,MT:3,MX:3,MZ:3,NI:3,NP:3,PA:3,PE:3,PH:3,PK:3,PR:3,PT:3,PY:3,SA:3,SG:3,
 	SV:3,TH:3,TT:3,TW:3,UM:3,US:3,VE:3,VI:3,WS:3,YE:3,ZA:3,ZW:3,
 }
-var week_start_offset = function(country1) {
+G.week_start_offset = function(country1) {
 	return (wso[country1 || country()] || 4) - 3
 }
 }
@@ -1255,7 +1238,7 @@ let date_re = /(\d+)\s*[\-\/\.,\s]\s*(\d+)\s*[\-\/\.,\s]\s*(\d+)/;
 let timeonly_re = new RegExp('^\\s*' + time_re.source + '\\s*$')
 let datetime_re = new RegExp('^\\s*' + date_re.source + '(?:\\s+' + time_re.source + '\\s*)?$')
 
-var parse_timeofday = function(s, validate, with_seconds, with_fractions) {
+G.parse_timeofday = function(s, validate, with_seconds, with_fractions) {
 	if (!isstr(s))
 		return s
 	let tm = timeonly_re.exec(s)
@@ -1317,7 +1300,7 @@ let date_parser = memoize(function(locale) {
 	}
 })
 
-var parse_date = function(s, locale1, validate, with_seconds, with_fractions) {
+G.parse_date = function(s, locale1, validate, with_seconds, with_fractions) {
 	return isstr(s) ? date_parser(locale1 || locale())(s, validate, with_seconds, with_fractions) : s
 }
 method(String, 'parse_date', function(locale1, validate, with_seconds, with_fractions) {
@@ -1330,7 +1313,7 @@ let seconds_format = new Intl.NumberFormat('nu', {
 	minimumIntegerDigits: 2,
 	maximumFractionDigits: 6, // mySQL-compatible
 })
-function format_timeofday(t, with_seconds, with_fractions) {
+G.format_timeofday = function(t, with_seconds, with_fractions) {
 	let H = floor(t / 3600)
 	let M = floor(t / 60) % 60
 	let Sf = t % 60
@@ -1427,7 +1410,7 @@ let _date_placeholder_text = memoize(function(locale) {
 	}
 	return a.join('')
 })
-var date_placeholder_text = function(locale1) {
+G.date_placeholder_text = function(locale1) {
 	return _date_placeholder_text(locale1 || locale())
 }
 
@@ -1533,7 +1516,7 @@ let h2rgb = function(m1, m2, h) {
 let hex = x => round(255 * x).base(16, 2)
 
 // hsla is in (0..360, 0..1, 0..1, 0..1); rgb is #rrggbb
-var hsl_to_rgb = function(h, s, L, a) {
+G.hsl_to_rgb = function(h, s, L, a) {
 	h = h / 360
 	let m2 = L <= .5 ? L*(s+1) : L+s-L*s
 	let m1 = L*2-m2
@@ -1548,14 +1531,14 @@ var hsl_to_rgb = function(h, s, L, a) {
 // geometry ------------------------------------------------------------------
 
 // point at a specified angle on a circle.
-function point_around(cx, cy, r, angle) {
+G.point_around = function(cx, cy, r, angle) {
 	return [
 		cx + cos(rad * angle) * r,
 		cy + sin(rad * angle) * r
 	]
 }
 
-function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, out) {
+G.clip_rect = function(x1, y1, w1, h1, x2, y2, w2, h2, out) {
 	// intersect on one dimension
 	// intersect_segs(ax1, ax2, bx1, bx2) => [max(ax1, bx1), min(ax2, bx2)]
 	// intersect_segs(x1, x1+w1, x2, x2+w2)
@@ -1582,7 +1565,7 @@ function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, out) {
 let segs_overlap = function(ax1, ax2, bx1, bx2) { // check if two 1D segments overlap
 	return !(ax2 < bx1 || bx2 < ax1)
 }
-var rect_intersects = function(x1, y1, w1, h1, x2, y2, w2, h2) {
+G.rect_intersects = function(x1, y1, w1, h1, x2, y2, w2, h2) {
 	return (
 		segs_overlap(x1, x1+w1, x2, x2+w2) &&
 		segs_overlap(y1, y1+h1, y2, y2+h2)
@@ -1592,12 +1575,12 @@ var rect_intersects = function(x1, y1, w1, h1, x2, y2, w2, h2) {
 
 // timers --------------------------------------------------------------------
 
-function runafter(t, f) { return setTimeout(f, t * 1000) }
-function runevery(t, f) { return setInterval(f, t * 1000) }
-function runagainevery(t, f) { f(); return runevery(t, f) }
-function clock() { return performance.now() / 1000 }
+G.runafter = function(t, f) { return setTimeout(f, t * 1000) }
+G.runevery = function(t, f) { return setInterval(f, t * 1000) }
+G.runagainevery = function(t, f) { f(); return runevery(t, f) }
+G.clock = function() { return performance.now() / 1000 }
 
-function timer(f) {
+G.timer = function(f) {
 	let timer_id, t0
 	function wrapper() {
 		timer_id = null
@@ -1617,18 +1600,18 @@ function timer(f) {
 
 // serialization -------------------------------------------------------------
 
-var json_arg = (s) => isstr(s) ? JSON.parse(s) : s
-var json = JSON.stringify
+G.json_arg = (s) => isstr(s) ? JSON.parse(s) : s
+G.json = JSON.stringify
 
 // clipboard -----------------------------------------------------------------
 
-function copy_to_clipboard(text, done) {
+G.copy_to_clipboard = function(text, done) {
 	return navigator.clipboard.writeText(text).then(done)
 }
 
 // local storage -------------------------------------------------------------
 
-function save(key, s) {
+G.save = function(key, s) {
 	if (s == null) {
 		debug('REMOVE', key)
 		localStorage.removeItem(key)
@@ -1638,13 +1621,13 @@ function save(key, s) {
 	}
 }
 
-function load(key) {
+G.load = function(key) {
 	return localStorage.getItem(key)
 }
 
 // URL parsing & formatting --------------------------------------------------
 
-function url_parse(s) {
+G.url_parse = function(s) {
 
 	if (!isstr(s))
 		return s
@@ -1693,7 +1676,7 @@ function url_parse(s) {
 }
 
 // TODO: this only works on urls without scheme and host !
-function url_format(t) {
+G.url_format = function(t) {
 
 	if (!isobject(t))
 		return t
@@ -1868,7 +1851,7 @@ let log_fire = DEBUG_EVENTS && function(e) {
 	return e
 } || return_arg
 
-function event(name, bubbles, ...args) {
+G.event = function(name, bubbles, ...args) {
 	return typeof name == 'string'
 		? new CustomEvent(name, {detail: {args}, cancelable: true, bubbles: bubbles})
 		: name
@@ -1909,7 +1892,7 @@ except they are faster because they make no garbage.
 {
 let all_handlers = obj() // {event_name->set(f)}
 
-var listen = function(event, f, on) {
+G.listen = function(event, f, on) {
 	if (on != false) {
 		let handlers = attr(all_handlers, event, set)
 		assert(!handlers.has(f))
@@ -1920,7 +1903,7 @@ var listen = function(event, f, on) {
 	}
 }
 
-var announce = function(event, ...args) {
+G.announce = function(event, ...args) {
 	let handlers = all_handlers[event]; if (!handlers) return
 	for (let handler of handlers)
 		handler(...args)
@@ -1942,7 +1925,7 @@ addEventListener('storage', function(e) {
 })
 
 // broadcast a message to other windows.
-function broadcast(topic, ...args) {
+G.broadcast = function(topic, ...args) {
 	announce(topic, ...args)
 	save('__broadcast', '')
 	save('__broadcast', json({
@@ -1952,13 +1935,49 @@ function broadcast(topic, ...args) {
 	save('__broadcast', '')
 }
 
-function setglobal(k, v, default_v) {
+G.setglobal = function(k, v, default_v) {
 	let v0 = strict_or(window[k], default_v)
 	if (v === v0)
 		return
 	window[k] = v
 	broadcast('global_changed', k, v, v0)
 	broadcast(k+'_changed', v, v0)
+}
+
+// multi-language stubs replaced in webb_spa.js ------------------------------
+
+// stub for getting message strings that can be translated multiple languages.
+if (!window.S) {
+	G.S = function(name, en_s, ...args) {
+		return en_s.subst(...args)
+	}
+}
+
+G.Sf = function(...args) {
+	return () => S(...args)
+}
+
+// stub for getting current language.
+if (!window.lang) {
+	let nav_lang = navigator.language.substring(0, 2)
+	G.lang = function() {
+		return document.documentElement.lang || nav_lang
+	}
+}
+
+// stub for getting current country.
+if (!window.country) {
+	let nav_country = navigator.language.substring(3, 5)
+	G.country = function() {
+		return document.documentElement.attr('country') || nav_country
+	}
+}
+
+let locale = memoize(function() { return lang() + '-' + country() })
+
+// stub for rewriting links to current language.
+if (!window.href) {
+	G.href = return_arg
 }
 
 /* AJAX requests -------------------------------------------------------------
@@ -1995,7 +2014,7 @@ function setglobal(k, v, default_v) {
 
 */
 
-function ajax(req) {
+G.ajax = function(req) {
 
 	req = assign_opt(new EventTarget(), {slow_timeout: 4}, req)
 
@@ -2166,7 +2185,7 @@ function ajax(req) {
 	return req
 }
 
-function get(url, success, fail, opt) {
+G.get = function(url, success, fail, opt) {
 	return ajax(assign({
 		url: url,
 		method: 'GET',
@@ -2175,7 +2194,7 @@ function get(url, success, fail, opt) {
 	}, opt))
 }
 
-function post(url, upload, success, fail, opt) {
+G.post = function(url, upload, success, fail, opt) {
 	return ajax(assign({
 		url: url,
 		method: 'POST',
@@ -2185,16 +2204,11 @@ function post(url, upload, success, fail, opt) {
 	}, opt))
 }
 
-// browser detection ---------------------------------------------------------
-
-var Firefox = navigator.userAgent.toLowerCase().includes('firefox')
-var Chrome  = navigator.userAgent.toLowerCase().includes('chrome')
-
 // JSHint linter -------------------------------------------------------------
 
 // lint any loaded js file from the browser directly, no server needed!
 // we use this mostly to catch `for (v ...` which should be `for(let v ...`.
-function lint(file) {
+G.lint = function(file) {
 	if (!window.JSHINT) {
 		let script = document.createElement('script')
 		script.onload = function() {
@@ -2216,16 +2230,19 @@ function lint(file) {
 				esversion: 6,
 				'-W014': true, // says starting a line with `?` is "confusing".
 				'-W119': true, // `a**b` is es7
-				'-W082': true, // func decl in block: we do this all the time.
+				'-W082': true, // func decl in block: in strict mode it's no problem.
 				'-W008': true, // says `.5` is confusing :facepalm:
-				'-W054': true, // says we shouldn't use `new Function()`
-				'-W069': true, // says `foo['bar']` should be `foo.bar`
-				'-W083': true, // says we shouldn't make closures in loops, wtf.
+				'-W054': true, // says we shouldn't use `new Function()` sheesh.
+				'-W069': true, // says `foo['bar']` should be `foo.bar`, whatever.
+				'-W083': true, // says we shouldn't make closures in loops, what a joykill.
 				'-W061': true, // says eval() is "harmful"... only in the wrong hands :)
-				'-W018': true, // says "confusing use of !" in charts.js dunno why.
+				'-W018': true, // says "confusing use of !" in charts.js, dunno why.
+				'-W040': true, // says we shouldn't make standalone functions with `this` inside.
 			})
 			pr(JSHINT.errors.map(e => sc.src+':'+e.line + ':' + e.character + ': '
 				+ e.code + ' ' + e.raw.subst(e)).join('\n'))
 		})
 	})
 }
+
+}()) // module function

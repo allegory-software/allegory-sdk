@@ -33,6 +33,7 @@ CSS-IN-JS
 
 	css_layer(name) -> layer; layer(selector, includes, rules)
 	css[_base _util _state _role _role_state _generic_state _light _dark][_chrome _firefox](selector, includes, rules)
+	load_css(file, [layer])
 
 DOM load event:
 
@@ -367,20 +368,20 @@ CSS SPECIFICITY REPORTING
 
 */
 
-'use strict';
-
-{ // module scope
+(function () {
+"use strict"
+let G = window
 
 // debugging -----------------------------------------------------------------
 
-var DEBUG_INIT = false
-var DEBUG_BIND = false
-var DEBUG_ELEMENT_BIND = false
-var PROFILE_BIND_TIME = true
-var SLOW_BIND_TIME_MS = 10
-var DEBUG_UPDATE = false
-var DEBUG_CSS_USAGE = false
-var DEBUG_CSS_SPECIFICITY = false
+G.DEBUG_INIT = false
+G.DEBUG_BIND = false
+G.DEBUG_ELEMENT_BIND = false
+G.PROFILE_BIND_TIME = true
+G.SLOW_BIND_TIME_MS = 10
+G.DEBUG_UPDATE = false
+G.DEBUG_CSS_USAGE = false
+G.DEBUG_CSS_SPECIFICITY = false
 
 let e = Element.prototype
 
@@ -431,7 +432,7 @@ e.trace_if = function(cond, ...args) {
 
 // DOM load event ------------------------------------------------------------
 
-var on_dom_load = function(fn) {
+G.on_dom_load = function(fn) {
 	if (document.readyState === 'loading')
 		document.on('DOMContentLoaded', fn)
 	else // `DOMContentLoaded` already fired
@@ -466,53 +467,21 @@ let include_props = obj() // {include->props} from all layers.
 let include_includes = obj() // {include->[include1,...]}
 let include_pseudos = obj() // {include->
 
-on_dom_load(function() {
-	let t0 = time()
-	let n = 0
-	function add_rule(rule) {
-		let selector = rule.selectorText // this is slow on Chrome :(
-		if (!isstr(selector))
-			return
-		// TODO: support `foo-1.5` utility classes!
-		let props = rule.cssText.slice(selector.length + 3, -2)
-		let selectors = selector.includes(',') ? selector.split(/\s*,\s*/) : [selector]
-		for (let selector of selectors) {
-			let inc = selector
-				.replace(/::before$/, '') // strip ::before (fontawesome)
-				.replace(/::after$/ , '') // strip ::after  (?)
-				.captures(/^\.([^ >#:\.+~]+)$/)[0] // simple .class selector
-			if (!inc)
-				return
-			props = props.trim()
-			if (include_props[inc])
-				include_props[inc] = include_props[inc] + '\n\t' + props
-			else
-				include_props[inc] = props
-		}
-		n++
-	}
-	function add_rules(rules) {
-		for (let rule of rules) {
-			if (rule instanceof CSSLayerBlockRule) // @layer block
-				add_rules(rule.cssRules)
-			else
-				add_rule(rule)
-		}
-	}
-	for (let sheet of document.styleSheets)
-		if (!sheet.ownerNode.css_in_js_layer)
-			add_rules(sheet.cssRules)
-	let t1 = time()
-	debug('CSS-in-JS mapped', n, 'rules in', floor((t1 - t0) * 1000), 'ms')
-})
+// Safari only added CSS layers in 15.4.
+// Our layers already work without `@layer` blocks but we generate them
+// anyway if supported to make it easier to integrate with external CSS.
+let supports_css_layers = window.CSSLayerBlockRule
+function is_css_layer(rule) {
+	return supports_css_layers && rule instanceof CSSLayerBlockRule
+}
 
 let utils_usage = obj()
 
-var css_layers = []
+G.css_layers = []
 
-var css_layer = memoize(function(layer) {
+G.css_layer = memoize(function(layer) {
 
-	let pieces = ['@layer '+layer+' {\n']
+	let pieces = supports_css_layers ? ['@layer '+layer+' {\n'] : []
 	let style = document.createElement('style')
 	style.setAttribute('x-layer', layer) // for debugging.
 	style.css_in_js_layer = true // we map classes ourselves.
@@ -520,7 +489,9 @@ var css_layer = memoize(function(layer) {
 		css_layers.push(layer)
 
 	on_dom_load(function() {
-		pieces.push('\n} /*layer*/')
+		load_css_files()
+		if (supports_css_layers)
+			pieces.push('\n} /*layer*/')
 		let final_pieces = []
 		for (let piece of pieces)
 			if (isfunc(piece)) // expand includes
@@ -530,40 +501,40 @@ var css_layer = memoize(function(layer) {
 		style.textContent = final_pieces.join('')
 	})
 
-	function add_includes(includes, pieces, e) {
+	function add_includes(err, includes, pieces) {
 		for (let inc of includes) {
 			let props = include_props[inc]
 			if (props == null) {
 				warn('css unknown include', inc, 'at',
-					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+					err.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 				continue
 			}
 			let inc_includes = include_includes[inc]
 			if (inc_includes) {
-				add_includes(inc_includes, pieces, e)
+				add_includes(err, inc_includes, pieces)
 			}
 			pieces.push('\n\t', props)
 			utils_usage[inc] = (utils_usage[inc] || 0)+1
 		}
 	}
 
-	function add_include_pseudos(prefix, suffix, includes, pieces, e) {
+	function add_include_pseudos(err, prefix, suffix, includes, pieces) {
 		/*
 		// TODO: finish this
 		for (let inc of includes) {
 			let props = include_props[inc]
 			if (props == null) {
 				warn('css unknown class', inc, 'at',
-					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+					err.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 				continue
 			}
 			let inc_includes = include_includes[inc]
 			if (inc_includes) {
-				add_includes(inc_includes, pieces, e)
+				add_includes(err, inc_includes, pieces)
 			}
 			if (suffix) {
 				warn('css pseudo include on pseudo rule', inc, 'at',
-					e.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+					err.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
 				continue
 			}
 			pieces.push('\n:where(', prefix, ')', pseudo, ' {')
@@ -573,36 +544,46 @@ var css_layer = memoize(function(layer) {
 		*/
 	}
 
-	function add_rule(selector, includes_arg, props) {
+	// NOTE: this is a dumb parser: start all your CSS rules on a newline!
+
+	let css_re = /\n([#:\.a-zA-Z][\s\S#:\.a-zA-Z>+~\-]*?){(.+?)}/gs
+
+	function add_rules(err, css) {
+		css = css.replaceAll(/\/\*.*?\*\//gs, '')
+		if (!css.includes('{')) {
+			warn('css invalid verbatim rule', selector, 'at',
+				err.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+			return
+		}
+		function fix_rule(s, sel, props) {
+			add_rule(err, sel, '', props)
+			return ''
+		}
+		css = css.replaceAll(css_re, fix_rule)
+		pieces.push(css)
+	}
+
+	function add_rule(err, selector, includes_arg, props) {
 		let includes = words(repl(includes_arg, '', null))
 		if (includes && !includes.length)
 			includes = null
-		if (includes_arg == null && props == null) { // verbatim CSS, eg. @keyframes
-			if (!selector.includes('{')) {
-				warn('css invalid verbatim rule', selector, 'at',
-					(new Error()).stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
-				return
-			}
-			pieces.push(selector.trim())
-			return
-		}
 		if (isarray(selector)) {
 			for (let sel of selector)
-				add_rule(sel, includes, props)
+				add_rule(err, sel, includes, props)
 			return
 		}
 		// ::before needs to be outside :where(), so we must split the selector.
 		selector = selector.trim()
-		let [prefix, suffix] = selector.captures(/^(.+?)(\s*::[^ >#:\.+~,]+)$/)
+		let [prefix, suffix] = selector.captures(/^(.+?)(::?(?:before|after))$/)
 		if (!prefix) {
 			prefix = selector
 			suffix = ''
 		}
+		trace_if(prefix == 'fa-times')
 		pieces.push('\n:where(', prefix, ')', suffix, ' {')
-		let e = includes && new Error() // for stack trace
 		if (includes)
 			pieces.push(function(dest_pieces) {
-				add_includes(includes, dest_pieces, e)
+				add_includes(err, includes, dest_pieces)
 			})
 		props = props && props.trim()
 		if (props)
@@ -611,7 +592,7 @@ var css_layer = memoize(function(layer) {
 		// some includes can be rules with :: which we must add as separate rules.
 		if (includes)
 			pieces.push(function(dest_pieces) {
-				add_include_pseudos(prefix, suffix, includes, dest_pieces, e)
+				add_include_pseudos(err, prefix, suffix, includes, dest_pieces, e)
 			})
 		let inc = prefix.captures(/^\.([^ >#:\.+~]+)$/)[0] // reusable class?
 		if (inc) {
@@ -621,11 +602,18 @@ var css_layer = memoize(function(layer) {
 		}
 	}
 
-	add_rule.layer_name = layer
-	add_rule.style_node = style
+	function add(selector, includes, props) {
+		let err = new Error() // for stack trace
+		if (includes == null && props == null)
+			add_rules(err, selector) // verbatim CSS, needs parsed.
+		else
+			add_rule(err, selector, includes, props)
+	}
 
-	return add_rule
+	add.layer_name = layer
+	add.style_node = style
 
+	return add
 })
 
 for (let layer of 'base util state role role_state generic_state'.words()) {
@@ -633,13 +621,30 @@ for (let layer of 'base util state role role_state generic_state'.words()) {
 	window['css_'+layer+'_chrome' ] = Chrome  ? window['css_'+layer] : noop
 	window['css_'+layer+'_firefox'] = Firefox ? window['css_'+layer] : noop
 }
-var css         = css_base
-var css_chrome  = css_base_chrome
-var css_firefox = css_base_firefox
+G.css         = css_base
+G.css_chrome  = css_base_chrome
+G.css_firefox = css_base_firefox
+
+G.load_css = function(url, layer) {
+	get(url, function(s) {
+		;css_layer(layer || 'base')(s)
+	}, null, {async: false})
+}
+
+let load_css_files = memoize(function() {
+	for (let e of $('style[src]')) {
+		let t0 = time()
+		let src = e.attr('src')
+		let layer = e.attr('layer')
+		load_css(src, layer)
+		let t1 = time()
+		debug(src, 'loaded in', floor((t1 - t0) * 1000), 'ms')
+	}
+})
 
 // css.js usage ranking ------------------------------------------------------
 
-var css_rank_utils_usage = function() {
+G.css_rank_utils_usage = function() {
 	if (!DEBUG_CSS_USAGE)
 		return
 	let a = []
@@ -764,7 +769,7 @@ method(CSSStyleDeclaration, 'prop', function(k, v) {
 let each_css_rule = function(rules, f) {
 	for (let rule of rules) {
 		let ret
-		if (rule instanceof CSSLayerBlockRule) {
+		if (is_css_layer(rule)) {
 			ret = each_css_rule(rule.cssRules, f)
 		} else {
 			ret = f(rule)
@@ -778,7 +783,7 @@ method(StyleSheet, 'each_rule', function(f) {
 })
 }
 
-var each_css_rule = function(f) {
+G.each_css_rule = function(f) {
 	for (let sheet of document.styleSheets)
 		if(sheet.cssRules) {
 			let ret = sheet.each_rule(f)
@@ -787,7 +792,7 @@ var each_css_rule = function(f) {
 		}
 }
 
-var css_class_prop = function(selector, style) {
+G.css_class_prop = function(selector, style) {
 	return each_css_rule(function(rule) {
 		if (rule.selectorText && rule.selectorText.split(',').includes(selector))
 			return rule.style[style]
@@ -795,7 +800,7 @@ var css_class_prop = function(selector, style) {
 }
 
 // use this to to draw fontawesome icons on a canvas.
-var fontawesome_char = memoize(function(icon) {
+G.fontawesome_char = memoize(function(icon) {
 	return css_class_prop('.'+icon+'::before', 'content').slice(1, -1)
 })
 
@@ -840,17 +845,17 @@ method(NodeList, 'trim', function() {
 
 // DOM querying --------------------------------------------------------------
 
-var iselem = function(e) { return e instanceof Element }
-var isnode = function(e) { return e instanceof Node }
+G.iselem = function(e) { return e instanceof Element }
+G.isnode = function(e) { return e instanceof Node }
 
 // NOTE: spec says the search is depth-first and we use that.
 alias(Element         , '$', 'querySelectorAll')
 alias(DocumentFragment, '$', 'querySelectorAll')
-var $ = function(s) { return document.querySelectorAll(s) }
+G.$ = function(s) { return document.querySelectorAll(s) }
 
 alias(Element         , '$1', 'querySelector')
 alias(DocumentFragment, '$1', 'querySelector')
-var $1 = function(s) { return typeof s == 'string' ? document.querySelector(s) : s }
+G.$1 = function(s) { return typeof s == 'string' ? document.querySelector(s) : s }
 
 method(NodeList, 'each', Array.prototype.forEach)
 
@@ -923,7 +928,7 @@ or external components need to be set inside a bind handler, passing along the
 let component_init = obj() // {tagName->init}
 let component_attr = obj() // {tagName->attr}
 
-var component = function(selector, category, init) {
+G.component = function(selector, category, init) {
 	if (isfunc(category)) { // shift arg
 		init = category
 		category = 'Other'
@@ -1146,11 +1151,11 @@ e.on_bind = function(f) {
 	this.do_after('_user_bind', f)
 }
 
-var root = document.documentElement
+G.root = document.documentElement
 
-var init_components = function() {
-	var body = document.body // for debugging, don't use in code.
-	var head = document.head // for debugging, don't use in code.
+G.init_components = function() {
+	G.body = document.body // for debugging, don't use in code.
+	G.head = document.head // for debugging, don't use in code.
 	if (DEBUG_INIT)
 		debug('ROOT INIT ---------------------------------')
 	root._init_component()
@@ -1197,7 +1202,7 @@ e.announce = function(event, ...args) {
 // wraps the node in a span if wrapping control is specified.
 // elements, nulls and arrays pass-through regardless of wrapping control.
 // TODO: remove this!
-var T = function(s, whitespace) {
+G.T = function(s, whitespace) {
 	if (isfunc(s)) // constructor
 		s = s()
 	if (s == null || iselem(s) || isarray(s)) // pass-through
@@ -1211,7 +1216,7 @@ var T = function(s, whitespace) {
 
 // like T() but clones nodes instead of passing them through.
 // TODO: remove this!
-var TC = function(s, whitespace) {
+G.TC = function(s, whitespace) {
 	if (typeof s == 'function')
 		s = s()
 	if (isnode(s))
@@ -1221,7 +1226,7 @@ var TC = function(s, whitespace) {
 
 // create a html element or text node from a html string.
 // if the string contains more than one node, return an array of nodes.
-var unsafe_html = function(s, unwrap) {
+G.unsafe_html = function(s, unwrap) {
 	if (typeof s != 'string') // pass-through: nulls, elements, etc.
 		return s
 	let span = document.createElement('span')
@@ -1240,7 +1245,7 @@ let sanitize_html = function(s) {
 	return DOMPurify.sanitize(s)
 }
 
-var html = function(s, unwrap) {
+G.html = function(s, unwrap) {
 	return unsafe_html(sanitize_html(s), unwrap)
 }
 
@@ -1263,7 +1268,7 @@ let create_element = function(tag, prop_vals, attrs, ...children) {
 }
 
 // element(node | stringable | null | {id|tag:, PROP->VAL}, [attrs], [e1,...]) -> node | null
-var element = function(t, attrs, ...children) {
+G.element = function(t, attrs, ...children) {
 	if (isfunc(t)) // constructor
 		t = t()
 	if (t == null || isnode(t)) // node | null | undefined: pass through
@@ -1285,14 +1290,14 @@ var element = function(t, attrs, ...children) {
 
 // create a HTML element from an attribute map and a list of child nodes.
 // skips nulls, calls constructors, expands arrays.
-var tag = function(tag, attrs, ...children) {
+G.tag = function(tag, attrs, ...children) {
 	return create_element(tag, null, attrs, ...children)
 }
 
-var div  = (...a) => tag('div' , ...a)
-var span = (...a) => tag('span', ...a)
+G.div  = (...a) => tag('div' , ...a)
+G.span = (...a) => tag('span', ...a)
 
-var svg_tag = function(tag, attrs, ...children) {
+G.svg_tag = function(tag, attrs, ...children) {
 	let e = document.createElementNS('http://www.w3.org/2000/svg', tag)
 	e.attrs = tag == 'svg' ? assign_opt({
 		preserveAspectRatio: 'xMidYMid meet',
@@ -1311,9 +1316,9 @@ var svg_tag = function(tag, attrs, ...children) {
 	return e
 }
 
-var svg = function(...args) { return svg_tag('svg', ...args) }
+G.svg = function(...args) { return svg_tag('svg', ...args) }
 
-var svg_arc_path = function(x, y, r, a1, a2, start_cmd) {
+G.svg_arc_path = function(x, y, r, a1, a2, start_cmd) {
 	let [x1, y1] = point_around(x, y, r, a1)
 	let [x2, y2] = point_around(x, y, r, a2)
 	let large_arc_flag = a2 - a1 <= 180 ? '0' : '1'
@@ -1551,7 +1556,7 @@ property(Element, 'index', {
 {
 let cur_set = set()
 let cur_by_id = map()
-var diff_element_list = function(t, cur_elems) {
+G.diff_element_list = function(t, cur_elems) {
 	t = isstr(t) ? t.words() : t
 	if (t.equals(cur_elems))
 		return cur_elems
@@ -2110,7 +2115,7 @@ e.make_focusable = function(...fes) {
 
 }
 
-var focused_focusable = function(e) {
+G.focused_focusable = function(e) {
 	e = e || document.activeElement
 	return e && e.focusable && e || (e.parent && e.parent != e && focused_focusable(e.parent))
 }
@@ -2490,7 +2495,7 @@ callers.pointermove = function(ev, f) {
 // is hovered doesn't work anymore, so use this hack instead.
 {
 let cursor_style
-var force_cursor = function(cursor) {
+G.force_cursor = function(cursor) {
 	if (cursor) {
 		if (!cursor_style) {
 			cursor_style = tag('style')
@@ -2676,9 +2681,9 @@ This is not done here, see e.make_disablable() and e.make_focusable().
 
 */
 
-var shift_pressed = null
-var ctrl_pressed  = null
-var alt_pressed   = null
+G.shift_pressed = null
+G.ctrl_pressed  = null
+G.alt_pressed   = null
 
 callers.keydown = function(ev, f) {
 	shift_pressed = ev.shiftKey
@@ -2713,7 +2718,7 @@ callers.wheel = function(ev, f) {
 	return f.call(this, ev, dy, is_trackpad, ev.clientX, ev.clientY)
 }
 
-var stopped_event_types = {pointerdown:1, keydown:1, keyup: 1}
+G.stopped_event_types = {pointerdown:1, keydown:1, keyup: 1}
 
 override(Event, 'stopPropagation', function(inherited, ...args) {
 	inherited.call(this, ...args)
@@ -2724,7 +2729,7 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 
 // clipboard of elements & copy/paste events ---------------------------------
 
-var copied_elements = set() // {element}
+G.copied_elements = set() // {element}
 
 document.on('keydown', function(key, shift, ctrl, alt, ev) {
 	if (alt || shift)
@@ -2741,7 +2746,7 @@ document.on('keydown', function(key, shift, ctrl, alt, ev) {
 
 // DOMRect extensions --------------------------------------------------------
 
-var domrect = function(...args) {
+G.domrect = function(...args) {
 	return new DOMRect(...args)
 }
 
@@ -2805,7 +2810,7 @@ ox, oy, ow, oh, but note that those are rounded!
 */
 
 // NOTE: setting style.* to undefined is ignored so we change it to null!
-var px = function(v) {
+G.px = function(v) {
 	return isnum(v) ? v+'px' : or(v, null)
 }
 
@@ -3002,7 +3007,7 @@ method(HTMLElement, 'unselect', function() {
 	sel.removeAllRanges()
 })
 
-var is_node_trimmable = node => (node && (
+G.is_node_trimmable = node => (node && (
 	(node.nodeType == Node.ELEMENT_NODE && node.tagName == 'BR') ||
 	(node.nodeType == Node.TEXT_NODE    && node.textContent.trim() == '')
 ))
@@ -3024,7 +3029,7 @@ method(HTMLElement, 'trim_inner_html', function() {
 
 // scrolling -----------------------------------------------------------------
 
-var scroll_to_view_dim = function(x, w, pw, sx, align) {
+G.scroll_to_view_dim = function(x, w, pw, sx, align) {
 	if (align == 'center') { // enlarge content around its center to center it
 		x -= (10**6 - w) / 2
 		w = 10**6
@@ -3037,7 +3042,7 @@ var scroll_to_view_dim = function(x, w, pw, sx, align) {
 	return clamp(sx, min_sx, max_sx)
 }
 
-var scroll_to_view_rect = function(x, y, w, h, pw, ph, sx, sy, halign, valign) {
+G.scroll_to_view_rect = function(x, y, w, h, pw, ph, sx, sy, halign, valign) {
 	sx = scroll_to_view_dim(x, w, pw, sx, halign)
 	sy = scroll_to_view_dim(y, h, ph, sy, or(valign, halign))
 	return [sx, sy]
@@ -3092,7 +3097,7 @@ e.is_in_viewport = function(m) {
 	)
 }
 
-var scrollbar_widths = memoize(function() {
+G.scrollbar_widths = memoize(function() {
 	let d = div({style: `
 		position: absolute;
 		visibility: hidden;
@@ -3109,7 +3114,7 @@ var scrollbar_widths = memoize(function() {
 	return [w, h]
 })
 
-var scrollbox_client_dimensions = function(w, h, cw, ch, overflow_x, overflow_y, vscrollbar_w, hscrollbar_h) {
+G.scrollbox_client_dimensions = function(w, h, cw, ch, overflow_x, overflow_y, vscrollbar_w, hscrollbar_h) {
 
 	overflow_x = overflow_x || 'auto'
 	overflow_y = overflow_y || 'auto'
@@ -3150,14 +3155,14 @@ var scrollbox_client_dimensions = function(w, h, cw, ch, overflow_x, overflow_y,
 // animation frames ----------------------------------------------------------
 
 // TODO: remove these, use raf_wrap() only!
-var raf = function(f, last_id) {
+G.raf = function(f, last_id) {
 	return last_id == null ? requestAnimationFrame(f) : last_id
 }
-var cancel_raf = cancelAnimationFrame
+G.cancel_raf = cancelAnimationFrame
 
-var in_raf = false // public
+G.in_raf = false // public
 
-var raf_wrap = function(f) {
+G.raf_wrap = function(f) {
 	let id
 	function raf_f() {
 		id = null
@@ -3181,7 +3186,7 @@ update_all = raf_wrap(update_all)
 
 // animation easing ----------------------------------------------------------
 
-var easing = obj() // from easing.lua
+G.easing = obj() // from easing.lua
 
 easing.reverse = (f, t, ...args) => 1 - f(1 - t, ...args)
 easing.inout   = (f, t, ...args) => t < .5 ? .5 * f(t * 2, ...args) : .5 * (1 - f((1 - t) * 2, ...args)) + .5
@@ -3229,7 +3234,7 @@ easing.bounce = function(t) {
 
 // restartable, abortable, callback-based transitions.
 // like the animation API but simpler.
-var transition = function(f) {
+G.transition = function(f) {
 	let raf_id, t0
 	let dt, y0, y1, ease_f, ease_way, ease_args
 	let e = {started: false}
@@ -3300,7 +3305,7 @@ let hit = function(x0, y0, d1, d2, x, y, w, h) {
 	return x0 >= x && x0 <= x + w && y0 >= y && y0 <= y + h
 }
 
-var hit_test_rect_sides = function(x0, y0, d1, d2, x, y, w, h) {
+G.hit_test_rect_sides = function(x0, y0, d1, d2, x, y, w, h) {
 	if (hit(x0, y0, d1, d2, x, y, 0, 0))
 		return 'top_left'
 	else if (hit(x0, y0, d1, d2, x + w, y, 0, 0))
@@ -3373,7 +3378,7 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 // to fill the div when the div size changes. The div's redraw(cx, w, h)
 // method is called on div's update and when the canvas is resized.
 // Before each redraw call the canvas is cleared and the context is reset.
-var resizeable_canvas = function(pw, ph) {
+G.resizeable_canvas = function(pw, ph) {
 	let canvas = tag('canvas', {class: 'abs', width: 0, height: 0})
 	let ct = div({class: 'S rel clip'}, canvas)
 	ct.do_redraw = noop
@@ -3428,7 +3433,7 @@ css('.overlay', '', `
 	bottom: 0;
 `)
 
-var overlay = function(attrs, content) {
+G.overlay = function(attrs, content) {
 	let e = div(attrs)
 	e.class('overlay')
 	e.set(content || div())
@@ -3722,7 +3727,7 @@ e.popup = function(target, side, align) {
 		sy = window.scrollY
 		let sp = e.stacking_parent
 		trace_if(!sp, e.isConnected, e.bound, e.parent)
-		sr = sp.rect()
+		let sr = sp.rect()
 		spx = sr.x + sp.cx
 		spy = sr.y + sp.cy
 	})
@@ -3923,7 +3928,7 @@ e.popup = function(target, side, align) {
 //   e.movable_element_size(elem_i) -> w
 //   e.set_movable_element_pos(i, x, moving)
 //
-var live_move_mixin = function(e) {
+G.live_move_mixin = function(e) {
 
 	e = e || {}
 
@@ -4062,24 +4067,24 @@ var live_move_mixin = function(e) {
 // NOTE: dom.js is independent of any css, including css.js.
 // These class names are the only references to css.js.
 
-var is_theme_dark = function() {
+G.is_theme_dark = function() {
 	return root.hasclass('theme-dark')
 }
 
-var set_theme_dark = function(dark) {
+G.set_theme_dark = function(dark) {
 	root.class('theme-dark' , !!dark)
 	root.class('theme-light', !dark)
 	announce('theme_changed')
 	announce('layout_changed')
 }
 
-var get_theme_size = function() {
+G.get_theme_size = function() {
 	return root.hasclass('theme-large') && 'large'
 		|| root.hasclass('theme-small') && 'small'
 		|| 'normal'
 }
 
-var set_theme_size = function(size) {
+G.set_theme_size = function(size) {
 	size = repl(size, 'normal')
 	root.class('theme-large theme-small', false)
 	if (size)
@@ -4092,17 +4097,17 @@ var set_theme_size = function(size) {
 if (!is_theme_dark())
 	root.class('theme-light')
 
-var css_light = function(selector, ...args) {
+G.css_light = function(selector, ...args) {
 	return css(':is(:root, .theme-light, .theme-dark .theme-inverted)'+selector, ...args)
 }
 
-var css_dark = function(selector, ...args) {
+G.css_dark = function(selector, ...args) {
 	return css(':is(.theme-dark, .theme-light .theme-inverted)'+selector, ...args)
 }
 
 // CSS specificity reporting -------------------------------------------------
 
-var css_selector_specificity = function(s0) {
+G.css_selector_specificity = function(s0) {
 	let s = s0
 	let n = 0 // current specificity
 	let maxn = 0 // current max specificity
@@ -4145,7 +4150,7 @@ var css_selector_specificity = function(s0) {
 	return next()
 }
 
-var css_report_specificity = function(file, max_spec) {
+G.css_report_specificity = function(file, max_spec) {
 	max_spec = max_spec || {base: 1.1, state: 2.1, _default: 1}
 	let t0 = time()
 	let n = 0
@@ -4160,7 +4165,7 @@ var css_report_specificity = function(file, max_spec) {
 	}
 	function check_rules(rules, layer_name) {
 		for (let rule of rules)
-			if (rule instanceof CSSLayerBlockRule) // @layer block
+			if (is_css_layer(rule)) // @layer block
 				check_rules(rule.cssRules, rule.name)
 			else
 				check_rule(rule, layer_name)
@@ -4190,4 +4195,4 @@ on_dom_load(function() {
 		css_report_specificity(css_layer(layer), {[layer] : 0.1})
 })
 
-} // module scope
+}()) // module function
