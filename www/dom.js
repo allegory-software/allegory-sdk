@@ -3710,7 +3710,9 @@ e.popup = function(target, side, align) {
 		sx = window.scrollX
 		sy = window.scrollY
 		let sp = e.stacking_parent
-		trace_if(!sp, e.isConnected, e.bound, e.parent)
+		if (!(sp == root || sp.hasclass('popup') || sp.hasclass('modal-overlay')))
+			warn('invalid stacking parent detected:', sp.debug_name,
+				'popup could be partially obscured.')
 		let sr = sp.rect()
 		spx = sr.x + sp.cx
 		spy = sr.y + sp.cy
