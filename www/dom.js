@@ -3649,15 +3649,15 @@ property(Element, 'creates_stacking_context', function() {
 	let css = this.css()
 	// TODO: `will-change` check is incomplete.
 	return (false
-		|| css['z-index'        ] != 'auto'
-		|| css['opacity'        ] != '1'
-		|| css['mix-blend-mode' ] != 'normal'
-		|| css['transform'      ] != 'none'
-		|| css['filter'         ] != 'none'
-		|| css['backdrop-filter'] != 'none'
-		|| css['perspective'    ] != 'none'
-		|| css['clip-path'      ] != 'none'
-		|| css['mask'           ] != 'none'
+		|| repl(css['z-index'        ], 'auto')
+		|| repl(css['opacity'        ], '1')
+		|| repl(css['mix-blend-mode' ], 'normal')
+		|| repl(css['transform'      ], 'none')
+		|| repl(css['filter'         ], 'none')
+		|| repl(css['backdrop-filter'], 'none') // not in Safari 16
+		|| repl(css['perspective'    ], 'none')
+		|| repl(css['clip-path'      ], 'none')
+		|| repl(css['mask'           ], 'none')
 		|| css['isolation'      ] == 'isolate'
 		|| css['contain'        ] == 'layout'
 		|| css['contain'        ] == 'paint'
