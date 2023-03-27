@@ -1542,9 +1542,9 @@ G.list = component('list', function(e) {
 */
 
 // z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-// noclip: submenus are outside clipping area
+// noclip: submenus are outside clipping area.
 // fg: prevent inheritance by the .focused rule below.
-css('.menu', 'm0 p0 b arial smaller t-l abs z4 noclip bg1 shadow-menu noselect', `
+css('.menu', 'm0 p0 b arial t-l abs z4 noclip bg1 fg shadow-menu noselect', `
 	min-width: 200px;
 	width: min-content; /* why the fuck is width:0 not working here? */
 	display: table;
@@ -1565,23 +1565,23 @@ css('.menu-separator > hr', 'b0 b-t m-y')
 
 css('.menu-title-td', 'p0 p-y p-l-0 clip nowrap', `width: 100%;`)
 
-css_state('.menu-tr.focused > :not(.menu-table)', '', `
+css_state('.menu:focus-visible', 'no-outline')
+
+css_state('.menu-tr.focused > :not(.menu)', '', `
 	background : var(--bg-unfocused-selected);
 	color      : var(--fg-unfocused-selected);
 `)
 
-css_state('.menu:focus-within .menu-tr.focused > :not(.menu-table)', '', `
+css_state('.menu:focus-within .menu-tr.focused > :not(.menu)', '', `
 	background : var(--bg-focused-selected);
 `)
 
 css('.menu-check-div', 'p-x')
 
-// TODO: change this to: svg({viewbox: '-10 -10 20 20'}, svg_tag('polyline', {class: 'check-mark', points: '4 11 8 15 16 6'}))
-// which looks better because it's not pixel-snapped.
 css('.icon-check::before', '', `
 	content: "";
 	display: block;
-	border-color: var(--fg);
+	border-color: inherit;
 	border-style: solid;
 	border-width: 0 .2em .2em 0;
 	width : .4em;
@@ -1594,13 +1594,15 @@ css('.icon-check::before', '', `
 css('.menu-check-div::before', 'icon-check') // fa fa-check
 
 css('.menu-sub-div', 'p-x')
-css('.menu-sub-div::before', 'icon-chevron-right') // fa fa-angle-right
+css('.menu-sub-div::before', 'icon-chevron-right', `
+	border-color: inherit;
+`) // fa fa-angle-right
 
 G.menu = component('menu', function(e) {
 
 	e.make_disablable()
 	e.make_focusable()
-	e.class('menu focusable-items')
+	e.class('menu')
 	e.popup()
 
 	// view
@@ -1671,7 +1673,7 @@ G.menu = component('menu', function(e) {
 
 	function create_menu(table, items, is_submenu, disabled) {
 		table = table || tag('table', {cellspacing: 0, cellpadding: 0})
-		table.classes = 'widget menu'+(is_submenu ? ' menu-submenu' : '')
+		table.classes = 'widget menu'
 		table.attr('tabindex', 0)
 		for (let i = 0; i < items.length; i++) {
 			let item = items[i]
