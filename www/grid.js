@@ -2329,10 +2329,9 @@ G.grid = component('grid', 'Input', function(e) {
 	})
 
 	e.on('contextmenu', function(ev) {
-		if (!hit_state || hit_state == 'cell' || hit_state == 'col') {
-			context_menu_popup(hit_fi, ev.clientX, ev.clientY)
-			return false
-		}
+		let fi = (hit_state == 'cell' || hit_state == 'col') ? hit_fi : null
+		context_menu_popup(fi, ev.clientX, ev.clientY)
+		return false
 	})
 
 	e.on('click', function(ev, mx, my) {

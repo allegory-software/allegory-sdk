@@ -1578,25 +1578,10 @@ css_state('.menu:focus-within .menu-tr.focused > :not(.menu)', '', `
 
 css('.menu-check-div', 'p-x')
 
-css('.icon-check::before', '', `
-	content: "";
-	display: block;
-	border-color: inherit;
-	border-style: solid;
-	border-width: 0 .2em .2em 0;
-	width : .4em;
-	height: .8em;
-	transform:
-		translate(0, -0.1em)
-		rotate(45deg)
-	;
-`)
-css('.menu-check-div::before', 'icon-check') // fa fa-check
+css('.menu-check-div::before', 'fa fa-check')
 
 css('.menu-sub-div', 'p-x')
-css('.menu-sub-div::before', 'icon-chevron-right', `
-	border-color: inherit;
-`) // fa fa-angle-right
+css('.menu-sub-div::before', 'fa fa-angle-right')
 
 G.menu = component('menu', function(e) {
 
