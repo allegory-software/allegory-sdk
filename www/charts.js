@@ -22,7 +22,7 @@ css('.chart-split', 'S h')
 
 css('.chart-view', 'S rel h')
 
-css('.chart-legend', 'grid-h arrow gap-y-05 gap-x', `
+css('.chart-legend', 'g-h arrow gap-y-05 gap-x', `
 	grid-template-columns: 1em 1fr;
 	align-content: end;
 	margin-left: 2em;
@@ -44,7 +44,7 @@ css('.tooltip.chart-tooltip', 'click-through')
 
 css('.chart-tooltip > .tooltip-body', 'tight')
 
-css('.chart-tooltip-label', 'grid-h gap-x-2', `
+css('.chart-tooltip-label', 'g-h gap-x-2', `
 	grid-template-columns: repeat(2, auto);
 	justify-items: start;
 `)

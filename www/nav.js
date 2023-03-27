@@ -5168,24 +5168,27 @@ all_field_types.draw = function(v, cx) {
 	if (this.align == 'right')
 		x = cx.cw
 	else if (this.align == 'center')
-		x = cx.cw / 2
+		x = round(cx.cw / 2)
 	else
 		x = 0
+	let y = round(cx.ch / 2)
 	cx.textAlign = this.align
+	cx.textBaseline = 'middle'
 	cx.fillStyle = cx.fg_text
-	cx.fillText(s, x, cx.baseline)
+	cx.fillText(s, x, y)
 	if (cx.quicksearch_len) {
 		let s1 = s.slice(0, cx.quicksearch_len)
 		let m = cx.measureText(s)
 		let ascent  = m.actualBoundingBoxAscent
 		let descent = m.actualBoundingBoxDescent
-		let w = cx.measureText(s1).width
+		let w = ceil(cx.measureText(s1).width)
+		let h = cx.line_height
 		cx.fillStyle = cx.bg_search
 		cx.beginPath()
-		cx.rect(0, cx.baseline - ascent, w, ascent + descent)
+		cx.rect(0, round(y - h / 2), w, h)
 		cx.fill()
 		cx.fillStyle = cx.fg_search
-		cx.fillText(s1, x, cx.baseline)
+		cx.fillText(s1, x, y)
 	}
 }
 

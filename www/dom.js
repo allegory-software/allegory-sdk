@@ -359,7 +359,7 @@ THEMING
 	set_theme_dark(dark)
 	get_theme_size() -> cur_size
 	set_theme_size(['large'|'small'|'normal'])
-	^^theme_changed()
+	^^layout_changed([what])
 
 CSS SPECIFICITY REPORTING
 
@@ -571,9 +571,9 @@ G.css_layer = memoize(function(layer) {
 				add_rule(err, sel, includes, props)
 			return
 		}
-		// ::before needs to be outside :where(), so we must split the selector.
+		// ::pseudos need to be outside :where(), so we must split the selector.
 		selector = selector.trim()
-		let [prefix, suffix] = selector.captures(/^(.+?)(::?(?:before|after))$/)
+		let [prefix, suffix] = selector.captures(/^(.+?)(::?(?:before|after|-[a-zA-Z\-]+))$/)
 		if (!prefix) {
 			prefix = selector
 			suffix = ''
@@ -627,7 +627,11 @@ G.css_firefox = css_base_firefox
 G.load_css = function(url, layer) {
 	get(url, function(s) {
 		css_layer(layer || 'base')(s)
-	}, null, {async: false})
+	}, null, {
+		async: false,
+		response_mime_type: 'text/plain; charset=x-user-defined',
+		// ^^ hack for Firefox otherwise it loads it as XML and gives a parse error.
+	})
 }
 
 let load_css_files = memoize(function() {
@@ -758,15 +762,20 @@ e.css = function(prop, state) {
 }
 
 method(CSSStyleDeclaration, 'prop', function(k, v) {
-	if (arguments.length < 2)
-		return this.getPropertyValue(k)
-	else
+	if (arguments.length < 2) {
+		let v = repl(this.getPropertyValue(k), '', null)
+		warn_if(v == null, 'css property not set', k)
+		return v
+	} else {
 		this.setProperty(k, v)
+	}
 })
 
 // use this to to draw fontawesome icons on a canvas.
 G.fontawesome_char = memoize(function(icon) {
-	return include_props[icon].captures(/content\s*:\s*"([^"]+)";/)[0]
+	let s = include_props[icon].captures(/content\s*:\s*"\\([^"]+)";/)[0]
+	let cp = parseInt(s, 16)
+	return String.fromCodePoint(cp)
 })
 
 // DOM navigation for elements, skipping over text nodes ---------------------
@@ -2828,7 +2837,7 @@ window.on('resize', function window_resize() {
 // this is only needed on Firefox with the debugger open,
 // and if you don't preload fonts (which you should).
 document.fonts.on('loadingdone', function() {
-	announce('layout_changed')
+	announce('layout_changed', 'fonts')
 })
 
 // common state wrappers -----------------------------------------------------
@@ -3962,7 +3971,7 @@ G.live_move_mixin = function(e) {
 			}
 		}
 		new_over_i = i2
-		x1 = i2x
+		let x1 = i2x
 		new_over_p = lerp(elem_x, x0, x1, 0, 1)
 		over_i = new_over_i
 		over_p = new_over_p
@@ -4039,8 +4048,7 @@ G.is_theme_dark = function() {
 G.set_theme_dark = function(dark) {
 	root.class('theme-dark' , !!dark)
 	root.class('theme-light', !dark)
-	announce('theme_changed')
-	announce('layout_changed')
+	announce('layout_changed', 'theme')
 }
 
 G.get_theme_size = function() {
@@ -4054,8 +4062,7 @@ G.set_theme_size = function(size) {
 	root.class('theme-large theme-small', false)
 	if (size)
 		root.class('theme-'+size)
-	announce('theme_changed')
-	announce('layout_changed')
+	announce('layout_changed', 'theme')
 }
 
 // make `.theme-inverted` work.

@@ -78,7 +78,7 @@ let G = window
 
 let e = Element.prototype
 
-css('.x-container', 'grid-h shrinks clip') /* grid because grid-in-flex is buggy */
+css('.x-container', 'g-h shrinks clip') /* grid because grid-in-flex is buggy */
 
 // container with `display: contents`. useful to group together
 // an invisible widget like a nav with a visible one.
@@ -2966,7 +2966,7 @@ css('.toolbox-btn-close::before', 'fa fa-times')
 css_state('.toolbox[pinned] > .toolbox-titlebar > .toolbox-btn-pin', 'label-on-dark rotate-0')
 css_state('.toolbox-btn:hover', 'white')
 
-css('.toolbox-content', 'h shrinks scroll-auto grid-h')
+css('.toolbox-content', 'h shrinks scroll-auto')
 
 // toolbox resizing by dragging the margins
 
@@ -3130,7 +3130,7 @@ G.toolbox = component('toolbox', function(e) {
 	})
 
 	e.on('resize', function() {
-		announce('layout_changed', e)
+		announce('layout_changed')
 	})
 
 	return {content: html_content}
@@ -3148,7 +3148,7 @@ out props:
 
 */
 
-css('.slides', 'grid-h')
+css('.slides', 'g-h')
 css('.slide', 'x1 y1')
 css('.slides > .x-ct > .', 'x1 y1')
 
@@ -4389,23 +4389,30 @@ That's why we use `t-m` instead of `t-bl` on all bordered widgets.
 
 */
 
+css(':root', '', `
+	--p-x-input: var(--space-1);
+	--p-y-input: var(--space-1);
+	--p-y-input-adjust: 0px;
+	--p-y-input-offset: 0px;
+`)
+
 css_util('.lh-input', '', `
 	--lh: var(--lh-input);
 	line-height: calc(var(--fs) * var(--lh)); /* in pixels so it's the same on icon fonts */
 `)
 
-css_util('.p-t-input', '', ` padding-top    : calc((var(--p-y-input, var(--space-1)) + var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
-css_util('.p-b-input', '', ` padding-bottom : calc((var(--p-y-input, var(--space-1)) - var(--p-y-input-adjust, 0px) + var(--p-y-input-offset, 0px))); `)
+css_util('.p-t-input', '', ` padding-top    : calc((var(--p-y-input) + var(--p-y-input-adjust) + var(--p-y-input-offset))); `)
+css_util('.p-b-input', '', ` padding-bottom : calc((var(--p-y-input) - var(--p-y-input-adjust) + var(--p-y-input-offset))); `)
 css_util('.p-y-input', 'p-t-input p-b-input')
 
-css_util('.p-l-input', '', ` padding-left   : var(--p-x-input, var(--space-1)); `)
-css_util('.p-r-input', '', ` padding-right  : var(--p-x-input, var(--space-1)); `)
+css_util('.p-l-input', '', ` padding-left   : var(--p-x-input); `)
+css_util('.p-r-input', '', ` padding-right  : var(--p-x-input); `)
 css_util('.p-x-input', 'p-l-input p-r-input')
 
 css_util('.p-input', 'p-x-input p-y-input')
 
-css_util('.gap-x-input', '', ` column-gap: var(--p-x-input, var(--space-1)); `)
-css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input, var(--space-1)); `)
+css_util('.gap-x-input', '', ` column-gap: var(--p-x-input); `)
+css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input); `)
 
 css_util('.gap-input', 'gap-x-input gap-y-input')
 
@@ -6076,7 +6083,7 @@ function calendar_widget(e, mode) {
 		font_months_h = (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) / dpr
 
 		let em   = num(css.fontSize)
-		cell_lh  = num(css.lineHeight)
+		let cell_lh = num(css.lineHeight)
 		cell_py  = num(css.prop('--p-y-calendar-days-em')) * em
 		cell_w   = snap(cell_lh + 2 * cell_py, 2)
 		cell_h   = snap(cell_lh + 2 * cell_py, 2)

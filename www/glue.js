@@ -1989,6 +1989,7 @@ if (!window.href) {
 		opt.method ('POST' or 'GET' based on req.upload)
 		opt.slow_timeout (4)
 		opt.headers: {h->v}
+		opt.response_mime_type // needed for loading CSS files non-async in Firefox
 		opt.user
 		opt.pass
 		opt.async (true)
@@ -2038,6 +2039,9 @@ G.ajax = function(req) {
 	if (req.headers)
 		for (let h in req.headers)
 			xhr.setRequestHeader(h, req.headers[h])
+
+	if (req.response_mime_type)
+		xhr.overrideMimeType(req.response_mime_type)
 
 	let slow_watch
 

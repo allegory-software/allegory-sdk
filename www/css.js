@@ -13,7 +13,7 @@ CSS CLASSES
 	TEXT COLORS   dim[-on-dark] white label link
 	ALIGN INLINE  inline block t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex[-no][-wrap] order-{1 2 last}
-	ALIGN GRID    grid-{l r c sb s t b m bl} grid-{x y}{1-5} x..x y..y grid
+	ALIGN GRID    g-{l r c sb s t b m bl} g-{x y}{1-5} x..x y..y g
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
@@ -124,6 +124,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg-info               : #069;  /* info bubbles */
 	--fg-info               : var(--fg-white);
 	--bg-error              : #a33; /* invalid inputs and error bubbles */
+	--bg-focused-invalid    : #f33;
 	--fg-error              : var(--fg-white);
 	--bg-warn               : #ffa500; /* warning bubbles */
 	--fg-warn               : var(--fg);
@@ -622,27 +623,27 @@ css('.gap-y-0'  , '', ` row-gap: 0; `)
 
 /* ALIGN: GRID ------------------------------------------------------------ */
 
-css('.grid-h', '', ` display: inline-grid; grid-auto-flow: row   ; `)
-css('.grid-v', '', ` display: inline-grid; grid-auto-flow: column; `)
+css('.g-h', '', ` display: inline-grid; grid-auto-flow: row   ; `)
+css('.g-v', '', ` display: inline-grid; grid-auto-flow: column; `)
 
-css('.grid-1col', '', ` display: inline-grid; grid-template-columns: repeat(1, auto); `)
-css('.grid-2col', '', ` display: inline-grid; grid-template-columns: repeat(2, auto); `)
-css('.grid-3col', '', ` display: inline-grid; grid-template-columns: repeat(3, auto); `)
-css('.grid-4col', '', ` display: inline-grid; grid-template-columns: repeat(4, auto); `)
-css('.grid-5col', '', ` display: inline-grid; grid-template-columns: repeat(5, auto); `)
-css('.grid-6col', '', ` display: inline-grid; grid-template-columns: repeat(6, auto); `)
+css('.g-1col', '', ` display: inline-grid; grid-template-columns: repeat(1, auto); `)
+css('.g-2col', '', ` display: inline-grid; grid-template-columns: repeat(2, auto); `)
+css('.g-3col', '', ` display: inline-grid; grid-template-columns: repeat(3, auto); `)
+css('.g-4col', '', ` display: inline-grid; grid-template-columns: repeat(4, auto); `)
+css('.g-5col', '', ` display: inline-grid; grid-template-columns: repeat(5, auto); `)
+css('.g-6col', '', ` display: inline-grid; grid-template-columns: repeat(6, auto); `)
 
-css('.grid-l' , '', ` display: inline-grid; justify-content: start   ; `)
-css('.grid-r' , '', ` display: inline-grid; justify-content: end     ; `)
-css('.grid-c' , '', ` display: inline-grid; justify-content: center  ; `)
-css('.grid-sb', '', ` display: inline-grid; justify-content: space-between; `)
-css('.grid-s' , '', ` display: inline-grid; align-items: stretch     ; `)
-css('.grid-t' , '', ` display: inline-grid; align-items: start       ; `)
-css('.grid-b' , '', ` display: inline-grid; align-items: end         ; `)
-css('.grid-m' , '', ` display: inline-grid; align-items: center      ; `)
-css('.grid-bl', '', ` display: inline-grid; align-items: baseline    ; `)
+css('.g-l' , '', ` display: inline-grid; justify-content: start   ; `)
+css('.g-r' , '', ` display: inline-grid; justify-content: end     ; `)
+css('.g-c' , '', ` display: inline-grid; justify-content: center  ; `)
+css('.g-sb', '', ` display: inline-grid; justify-content: space-between; `)
+css('.g-s' , '', ` display: inline-grid; align-items: stretch     ; `)
+css('.g-t' , '', ` display: inline-grid; align-items: start       ; `)
+css('.g-b' , '', ` display: inline-grid; align-items: end         ; `)
+css('.g-m' , '', ` display: inline-grid; align-items: center      ; `)
+css('.g-bl', '', ` display: inline-grid; align-items: baseline    ; `)
 
-css('.grid', '', ` display: grid; `) /* opposed to the default inline-grid */
+css('.g', '', ` display: grid; `) /* opposed to the default inline-grid */
 
 css('.x1', '', ` grid-column-start: 1; `)
 css('.x2', '', ` grid-column-start: 2; `)

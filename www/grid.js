@@ -27,12 +27,14 @@ implements:
 // NOTE: in order to valign the text of the grid cell with its inline editor,
 // `grid-cell-baseline` must be set to match the baseline set implicitly by
 // `grid-cell-line-height`. Don't try to v-center the text on the cell with
-// these two parameters, use `padding-y-input` for that!
+// these two parameters, use `p-y-input` for that!
 // NOTE: Firefox won't set a line height lower than the font allows on <input>!
 css(':root', '', `
-	--grid-cell-h           : 24px; /* PIXELS ONLY! */
-	--grid-cell-baseline    : 12px; /* PIXELS ONLY! */
+	--grid-cell-h           : '';
+	--grid-header-h         : calc(2 * var(--lh) + 2 * (var(--p-y-input) + 1px)); /* PIXELS ONLY! */
+	--grid-cell-baseline    : 10px; /* PIXELS ONLY! */
 	--grid-cell-line-height : 16px; /* PIXELS ONLY! */
+	--bg-grid-moving        : var(--bg-smoke);
 `)
 
 css_light('', '', `
@@ -44,26 +46,22 @@ css_dark('', '', `
 `)
 
 css('.theme-small', '', `
-	--grid-cell-h            : 20px; /* PIXELS ONLY! */
 	--grid-cell-baseline     : 11px; /* PIXELS ONLY! */
-	--grid-cell-line-height  : 12px; /* PIXELS ONLY! */
 `)
 
 css('.theme-large', '', `
-	--grid-cell-h            : 42px; /* PIXELS ONLY! */
 	--grid-header-h          : 62px; /* PIXELS ONLY! */
 	--grid-cell-baseline     : 17px; /* PIXELS ONLY! */
-	--grid-cell-line-height  : 24px; /* PIXELS ONLY! */
 `)
 
-css('.grid', 'S v clip arrow')
+css('.grid', 'S v clip arrow lh-input')
 
 css_state('.grid:focus', 'no-outline')
 
 css('.vgrid', 'h')
 css('.vgrid > .grid-header', 'b-r b-b-0')
 css('.vgrid .grid-action-band', 'v')
-css('.vgrid .grid-cells-view', '', 'width: 0;') // CSS people are hopeless
+css('.vgrid .grid-cells-view', 'S', 'width: 0;') // CSS people are hopeless
 
 // grid header
 
@@ -76,7 +74,7 @@ css('.grid-header-canvas', 'abs')
 
 /* grid cells: grid > view > ct > (cells, editor) > cell */
 
-css('.grid-cells-view', 'S shrinks rel grid-h scroll-auto')
+css('.grid-cells-view', 'S shrinks rel g-h scroll-auto')
 
 // avoid col resizing based on row count
 css('.grid[auto_cols_w] > .grid-cells-view', 'vscroll')
@@ -134,10 +132,7 @@ css_role('.grid-editor', 'abs', `
 
 css_role('.grid-editor > .focus-box', 'b0 ro0', `
 	/* add border width, since we removed the border */
-	padding-top: calc(
-		var(--border-width-item) +
-		var(--padding-y-input)
-	);
+	padding-top: calc(var(--p-y-input) + 1px);
 	background-color: var(--bg-grid-editor);
 `)
 
@@ -213,9 +208,10 @@ G.grid = component('grid', 'Input', function(e) {
 		// css geometry
 		e.text_font_family = css['font-family']
 		e.icon_font_family = 'fontawesome'
-		e.font_size = num(css['font-size'])
-		e.padding_x = num(css.prop('--padding-x-input'))
-		e.padding_y = num(css.prop('--padding-y-input'))
+		e.font_size   = num(css['font-size'])
+		e.line_height = round(num(css['line-height']))
+		e.padding_x = round(num(css.prop('--p-x-input')) * e.font_size)
+		e.padding_y = round(num(css.prop('--p-y-input')) * e.font_size)
 		e.cell_h    = num(css.prop('--grid-cell-h'))
 		e.header_h  = num(css.prop('--grid-header-h'))
 
@@ -244,7 +240,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.bg_new                 = css.prop('--bg-new')
 		e.bg_modified            = css.prop('--bg-modified')
 		e.bg_new_modified        = css.prop('--bg-new-modified')
-		e.bg_moving              = css.prop('--bg-moving')
+		e.bg_moving              = css.prop('--bg-grid-moving')
 		e.baseline               = num(css.prop('--grid-cell-baseline'))
 
 		// with Arial the baseline adjustment for Firefox is 1 but we're not
@@ -254,7 +250,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 		e.text_font = e.font_size + 'px ' + e.text_font_family
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
-		e.cell_h   = or(e.cell_h  , round(e.font_size * 2))
+		e.cell_h   = or(e.cell_h, round(e.line_height + 2 * (e.padding_y + 1)))
 		e.header_h = or(e.header_h, e.cell_h * 2)
 
 		update_cx(cx)
@@ -327,7 +323,6 @@ G.grid = component('grid', 'Input', function(e) {
 	var cx  = e.cells_canvas.getContext('2d')
 	var hcx = e.header_canvas.getContext('2d')
 
-	e.listen('theme_changed', theme_changed)
 	e.listen('layout_changed', layout_changed)
 
 	e.on_bind(function(on) {
@@ -710,13 +705,14 @@ G.grid = component('grid', 'Input', function(e) {
 	}
 
 	function update_cx(cx) {
-		cx.font_size = e.font_size
-		cx.text_font = e.text_font
-		cx.icon_font = e.icon_font
-		cx.bg_search = e.bg_search
-		cx.fg_search = e.fg_search
-		cx.fg_dim    = e.fg_dim
-		cx.baseline  = e.baseline
+		cx.font_size   = e.font_size
+		cx.line_height = e.line_height
+		cx.text_font   = e.text_font
+		cx.icon_font   = e.icon_font
+		cx.bg_search   = e.bg_search
+		cx.fg_search   = e.fg_search
+		cx.fg_dim      = e.fg_dim
+		cx.baseline    = e.baseline
 	}
 
 	function draw_cell_border_path(cx, first_field, w, h) {
@@ -1391,7 +1387,11 @@ G.grid = component('grid', 'Input', function(e) {
 	// responding to layout changes -------------------------------------------
 
 	let w0, h0
-	function layout_changed() {
+	function layout_changed(what) {
+		if (what) {
+			theme_changed()
+			return
+		}
 		let r = e.rect()
 		let w1 = r.w
 		let h1 = r.h
@@ -2864,8 +2864,6 @@ G.row_form = component('row-frm', function(e) {
 		nav.on('focused_row_cell_state_changed' , focused_row_cell_state_changed, on)
 		nav.on('col_attr_changed'               , col_attr_changed, on)
 	}
-
-	e.listen('layout_changed', redraw)
 
 	e.on_bind(function(on) {
 		bind_nav(e._nav, on)
