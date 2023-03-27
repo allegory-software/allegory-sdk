@@ -148,7 +148,7 @@ In any case, if you do decide on a canvas-drawn widget, it's best to use
 
 For styling use css vars. Query the computed css with `e.css()` inside an
 `on_measure()` handler, remember the values and then use them in the redraw
-handler that was passed to `resizeable_canvas()`.
+handler that was passed to `resizeable_canvas_container()`.
 
 Check out the calendar widget to get a feel on how canvas-based differs from
 DOM-based, there's a lot more to it than what's been talked about here.
@@ -169,7 +169,7 @@ DOM-based, there's a lot more to it than what's been talked about here.
 * `e.make_disablable()`          - add disabled property and disable() method
 * `e.make_focusable()`           - add focusable and tabindex property
 * `e.popup()`                    - turn element into a popup
-* `resizeable_canvas(redraw)`    - create a canvas that resizes itself automatically
+* `resizeable_canvas_container(redraw)`  - create a canvas that resizes itself automatically
   * `redraw(cx, w, h, pass)`     - called when properties change, widget is resized, etc.
 
 

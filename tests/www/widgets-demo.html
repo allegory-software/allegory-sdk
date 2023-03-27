@@ -233,10 +233,14 @@ To run this demo without a web server, you need allow JavaScript to see files
 loaded with <code>file:///</code> urls:
 
 <ul>
-<li><b>Chrome:</b> start it with command-line option <code>--allow-file-access-from-files</code>.</li>
+<li><b>Chrome & Edge:</b> start it with command-line option <code>--allow-file-access-from-files</code>.</li>
 <li><b>Firefox:</b> in <code>about:config</code>, type <code>security.fileuri.strict_origin_policy</code> and set it to false.</li>
 <li><b>Safari:</b> Preferences > Advanced > "Show Develop menu in menu bar", then Develop > Disable Cross-Origin Restrictions.</li>
 </ul>
+
+This has security implications, do it at your own risk! Or use a server.
+Or a second browser that you don't use on the Internet.
+
 </xmp>
 
 <!--------------------------------------------------------------------------->

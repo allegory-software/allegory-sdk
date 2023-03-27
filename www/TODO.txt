@@ -39,6 +39,14 @@ BUGS
 
 * NAV revert bug (esp. tree)
 
+* Safari 16.3 dumbass browser
+	- popups
+	- menu
+	- tabs moving
+		- selects all text on start drag
+	- grid hit testing
+	- grid scrolling
+
 
 NEW WIDGETS
 ------------------------------------------------------------------------------
@@ -160,6 +168,20 @@ FEATURES
 	- (normal | large | xlarge) chooser
 	- theme dropdown -> (light | dark)
 
+
+MOBILE
+------------------------------------------------------------------------------
+
+* DEMO: make or adapt for mobile
+
+
+* LIST
+	- drag & drop
+		- test tabs too
+
+* SLIDES
+	- swipe vert/horiz
+	- slide effects
 
 
 LATERZ

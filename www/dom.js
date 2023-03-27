@@ -38,6 +38,7 @@ CSS-IN-JS
 DOM load event:
 
 	on_dom_load(f)
+	dom_loaded -> t|f
 
 DEBUGGING
 
@@ -310,6 +311,7 @@ CANVAS
 
 	cx.clear()
 	e.resize(w, h, [pw], [ph])
+	resizeable_canvas_container() -> ct; ct.ctx, ct.canvas, ct.on_redraw(f)
 
 MODALS & OVERLAYS
 
@@ -431,11 +433,17 @@ e.trace_if = function(cond, ...args) {
 
 // DOM load event ------------------------------------------------------------
 
+function update_dom_loaded() {
+	G.dom_loaded = document.readyState === 'complete'
+}
+update_dom_loaded()
+document.on('DOMContentLoaded', update_dom_loaded)
+
 G.on_dom_load = function(fn) {
-	if (document.readyState === 'loading')
-		document.on('DOMContentLoaded', fn)
-	else // `DOMContentLoaded` already fired
+	if (dom_loaded)
 		fn()
+	else
+		document.on('DOMContentLoaded', fn)
 }
 
 // CSS-in-JS -----------------------------------------------------------------
@@ -545,13 +553,13 @@ G.css_layer = memoize(function(layer) {
 
 	// NOTE: this is a dumb parser: start all your CSS rules on a newline!
 
-	let css_re = /\n([#:\.a-zA-Z][\s\S#:\.a-zA-Z>+~\-]*?){([^}]+?)}/g
+	let css_re = /[\r\n]([#:\.a-zA-Z][\s\S#:\.a-zA-Z>+~\-]*?){([^}]+?)}/g
 
 	function add_rules(err, css) {
 		css = css.replaceAll(/\/\*.*?\*\//gs, '')
 		if (!css.includes('{')) {
 			warn('css invalid verbatim rule', selector, 'at',
-				err.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\n]+)/)[0])
+				err.stack.captures(/\s+at\s+[^\r\n]+\r?\n+\s+at ([^\r\n]+)/)[0])
 			return
 		}
 		function fix_rule(s, sel, props) {
@@ -629,8 +637,9 @@ G.load_css = function(url, layer) {
 		css_layer(layer || 'base')(s)
 	}, null, {
 		async: false,
-		response_mime_type: 'text/plain; charset=x-user-defined',
-		// ^^ hack for Firefox otherwise it loads it as XML and gives a parse error.
+		silent: true,
+		// hack for Firefox otherwise it loads it as XML and gives a parse error.
+		response_mime_type: 'application/octet-stream',
 	})
 }
 
@@ -639,9 +648,10 @@ let load_css_files = memoize(function() {
 		let t0 = time()
 		let src = e.attr('src')
 		let layer = e.attr('layer')
-		load_css(src, layer)
-		let t1 = time()
-		debug(src, 'loaded in', floor((t1 - t0) * 1000), 'ms')
+		if (load_css(src, layer)) {
+			let t1 = time()
+			debug(src, 'loaded in', floor((t1 - t0) * 1000), 'ms')
+		}
 	}
 })
 
@@ -3352,7 +3362,7 @@ method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
 // to fill the div when the div size changes. The div's redraw(cx, w, h)
 // method is called on div's update and when the canvas is resized.
 // Before each redraw call the canvas is cleared and the context is reset.
-G.resizeable_canvas = function(pw, ph) {
+G.resizeable_canvas_container = function() {
 	let canvas = tag('canvas', {class: 'abs', width: 0, height: 0})
 	let ct = div({class: 'S rel clip'}, canvas)
 	ct.do_redraw = noop
@@ -3370,7 +3380,7 @@ G.resizeable_canvas = function(pw, ph) {
 		do {
 			let pass = redraw_pass
 			redraw_pass = null
-			canvas.resize(w, h, pw, ph)
+			canvas.resize(w, h)
 			cx.save()
 			cx.clear()
 			cx.scale(devicePixelRatio, devicePixelRatio)
@@ -3392,7 +3402,7 @@ G.resizeable_canvas = function(pw, ph) {
 	}
 	ct.redraw_now = redraw
 	ct.canvas = canvas
-	ct.ctx = cx
+	ct.context = cx
 	return ct
 }
 

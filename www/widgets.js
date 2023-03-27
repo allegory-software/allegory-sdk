@@ -532,6 +532,8 @@ G.toaster = component('toaster', function(e) {
 
 let notify_toaster
 G.notify = function(...args) {
+	if (!dom_loaded)
+		return
 	if (!notify_toaster) {
 		notify_toaster = toaster()
 		document.body.add(notify_toaster)
@@ -871,7 +873,7 @@ e.make_list_items_movable = function(can_move) {
 	e.listen('drag_started', function(payload, add_drop_area, source_elem) {
 		if (source_elem != e)
 			return
-		add_drop_area(e, rect(-1/0, -1/0, 1/0, 1/0))
+		add_drop_area(e, domrect(-1/0, -1/0, 1/0, 1/0))
 		horiz = e.css('flexDirection') == 'row'
 		r = e.rect()
 	})
@@ -4422,12 +4424,12 @@ css_state('.inputbox.invalid', '', `
 	border-color: var(bg-invalid);
 `)
 
-css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall );`)
-css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  );`)
-css_util('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller);`)
-css_util('.normal' , '', `--p-y-input-adjust: var(--p-y-input-adjust-normal );`)
-css_util('.large'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-large  );`)
-css_util('.xlarge' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xlarge );`)
+css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall , 0px);`)
+css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  , 0px);`)
+css_util('.smaller', '', `--p-y-input-adjust: var(--p-y-input-adjust-smaller, 0px);`)
+css_util('.normal' , '', `--p-y-input-adjust: var(--p-y-input-adjust-normal , 0px);`)
+css_util('.large'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-large  , 0px);`)
+css_util('.xlarge' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xlarge , 0px);`)
 
 css_util('.xsmall' , '', `--p-y-input: var(--space-025);`)
 css_util('.small'  , '', `--p-y-input: var(--space-025);`)
@@ -6027,7 +6029,7 @@ function calendar_widget(e, mode) {
 
 	// view -------------------------------------------------------------------
 
-	let ct = resizeable_canvas()
+	let ct = resizeable_canvas_container()
 	e.add(ct)
 
 	// view config, computed styles and measurements
@@ -6067,7 +6069,7 @@ function calendar_widget(e, mode) {
 		font_months   = num(css.fontSize) * dpr * num(css.prop('--fs-calendar-months')) + 'px ' + css.fontFamily
 		font_month    = num(css.fontSize) * dpr * num(css.prop('--fs-calendar-month')) + 'px ' + css.fontFamily
 
-		let cx = ct.ctx
+		let cx = ct.context
 		let m
 		cx.font = font_weekdays
 		m = cx.measureText('My')

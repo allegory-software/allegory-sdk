@@ -24,16 +24,10 @@ implements:
 	nav widget protocol.
 --------------------------------------------------------------------------- */
 
-// NOTE: in order to valign the text of the grid cell with its inline editor,
-// `grid-cell-baseline` must be set to match the baseline set implicitly by
-// `grid-cell-line-height`. Don't try to v-center the text on the cell with
-// these two parameters, use `p-y-input` for that!
 // NOTE: Firefox won't set a line height lower than the font allows on <input>!
 css(':root', '', `
 	--grid-cell-h           : '';
-	--grid-header-h         : calc(2 * var(--lh) + 2 * (var(--p-y-input) + 1px)); /* PIXELS ONLY! */
-	--grid-cell-baseline    : 10px; /* PIXELS ONLY! */
-	--grid-cell-line-height : 16px; /* PIXELS ONLY! */
+	--grid-header-h         : '';
 	--bg-grid-moving        : var(--bg-smoke);
 `)
 
@@ -43,15 +37,6 @@ css_light('', '', `
 
 css_dark('', '', `
 	--bg-grid-editor        : #495560;
-`)
-
-css('.theme-small', '', `
-	--grid-cell-baseline     : 11px; /* PIXELS ONLY! */
-`)
-
-css('.theme-large', '', `
-	--grid-header-h          : 62px; /* PIXELS ONLY! */
-	--grid-cell-baseline     : 17px; /* PIXELS ONLY! */
 `)
 
 css('.grid', 'S v clip arrow lh-input')
@@ -216,13 +201,17 @@ G.grid = component('grid', 'Input', function(e) {
 		e.header_h  = num(css.prop('--grid-header-h'))
 
 		// css colors
-		e.cell_border_width      = 1
-		e.hcell_border_color     = css.prop('--bg1')
-		e.cell_border_color      = css.prop('--bg1')
+		e.cell_border_x_width    = 1
+		e.cell_border_y_width    = 1
+		e.hcell_border_x_color   = css.prop('--border-dark')
+		e.hcell_border_y_color   = css.prop('--border-light')
+		e.cell_border_x_color    = css.prop('--border-light')
+		e.cell_border_y_color    = null
 		e.bg                     = css.prop('--bg')
 		e.bg_alt                 = css.prop('--bg-alt')
-		e.bg_header              = css.prop('--bg-alt')
 		e.fg                     = css.prop('--fg')
+		e.fg_header              = css.prop('--fg-label')
+		e.bg_header              = e.bg
 		e.fg_dim                 = css.prop('--fg-dim')
 		e.fg_search              = css.prop('--fg-search')
 		e.bg_search              = css.prop('--bg-search')
@@ -241,17 +230,13 @@ G.grid = component('grid', 'Input', function(e) {
 		e.bg_modified            = css.prop('--bg-modified')
 		e.bg_new_modified        = css.prop('--bg-new-modified')
 		e.bg_moving              = css.prop('--bg-grid-moving')
-		e.baseline               = num(css.prop('--grid-cell-baseline'))
-
-		// with Arial the baseline adjustment for Firefox is 1 but we're not
-		// using Arial because it renders poorly on canvas on Firefox Windows.
-		let baseline_adjust = num(css.prop('--font-baseline-adjust-ff'))
-		e.baseline += Firefox ? baseline_adjust : 0
 
 		e.text_font = e.font_size + 'px ' + e.text_font_family
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
-		e.cell_h   = or(e.cell_h, round(e.line_height + 2 * (e.padding_y + 1)))
-		e.header_h = or(e.header_h, e.cell_h * 2)
+		e.header_icon_font = (e.font_size * 0.875) + 'px ' + e.icon_font_family
+		e.header_text_font = (e.font_size * 0.875) + 'px ' + e.text_font_family
+		e.cell_h   = or(e.cell_h  , round(e.line_height + 2 * e.padding_y + e.cell_border_y_width))
+		e.header_h = or(e.header_h, round(e.line_height + 2 * e.padding_y + e.cell_border_y_width))
 
 		update_cx(cx)
 		update_cx(hcx)
@@ -348,7 +333,8 @@ G.grid = component('grid', 'Input', function(e) {
 			return
 
 		let col_resizing = hit_state == 'col_resizing'
-		let b = e.cell_border_width
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
 
 		let auto_cols_w =
 			horiz
@@ -371,9 +357,9 @@ G.grid = component('grid', 'Input', function(e) {
 			for (let field of e.fields)
 				min_cols_w += col_resizing ? field._w : min(max(field.w, field.min_w), field.max_w)
 
-			cells_h = b + e.cell_h * e.rows.length
+			cells_h = by + e.cell_h * e.rows.length
 
-			let min_cells_w = b + min_cols_w
+			let min_cells_w = bx + min_cols_w
 
 			// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
 			if (col_resizing && !e.auto_expand)
@@ -402,7 +388,7 @@ G.grid = component('grid', 'Input', function(e) {
 			let total_free_w = 0
 			let cw = min_cols_w
 			if (auto_cols_w) {
-				cw = cells_view_w - b
+				cw = cells_view_w - bx
 				total_free_w = max(0, cw - min_cols_w)
 			}
 
@@ -430,7 +416,7 @@ G.grid = component('grid', 'Input', function(e) {
 				col_x += col_w
 			}
 
-			cells_w = b + col_x
+			cells_w = bx + col_x
 
 			// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
 			if (col_resizing && !e.auto_expand)
@@ -453,8 +439,8 @@ G.grid = component('grid', 'Input', function(e) {
 				field._w = w
 			}
 
-			cells_w = b + e.cell_w * e.rows.length
-			cells_h = b + e.cell_h * e.fields.length
+			cells_w = bx + e.cell_w * e.rows.length
+			cells_h = by + e.cell_h * e.fields.length
 
 			if (e.auto_expand) {
 				cells_view_w = cells_w
@@ -643,18 +629,20 @@ G.grid = component('grid', 'Input', function(e) {
 	}
 
 	function row_visible_rect(row) { // relative to cells
-		let b = e.cell_border_width
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
 		let ri = e.row_index(row)
 		let [x, y, w, h] = row_rect(ri)
-		return clip_rect(x+b, y+b, scroll_x, scroll_y, cells_view_w, cells_view_h)
+		return clip_rect(x+bx, y+by, scroll_x, scroll_y, cells_view_w, cells_view_h)
 	}
 
 	function cell_visible_rect(row, field) { // relative to cells
-		let b = e.cell_border_width
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
 		let ri = e.row_index(row)
 		let fi = e.field_index(field)
 		let [x, y, w, h] = cell_rect(ri, fi)
-		return clip_rect(x+b, y+b, w, h, scroll_x, scroll_y, cells_view_w, cells_view_h)
+		return clip_rect(x+bx, y+by, w, h, scroll_x, scroll_y, cells_view_w, cells_view_h)
 	}
 
 	// rendering --------------------------------------------------------------
@@ -712,23 +700,44 @@ G.grid = component('grid', 'Input', function(e) {
 		cx.bg_search   = e.bg_search
 		cx.fg_search   = e.fg_search
 		cx.fg_dim      = e.fg_dim
-		cx.baseline    = e.baseline
 	}
 
-	function draw_cell_border_path(cx, first_field, w, h) {
+	function draw_cell_border(cx, first_field, w, h, bx, by, color_x, color_y) {
 		let bw = w - .5
 		let bh = h - .5
 		let zz = -.5
-		cx.beginPath()
-		if (!horiz && first_field) { // top line
-			cx.moveTo(zz, zz)
-			cx.lineTo(bw, zz)
-		} else
+		if (bx && color_x != null) {
+			cx.beginPath()
+			cx.lineWidth = bx
+			cx.strokeStyle = color_x
+
+			// top line
+			if (!horiz && first_field) {
+				cx.moveTo(zz, zz)
+				cx.lineTo(bw, zz)
+			}
+			// bottom line
+			cx.moveTo(zz, bh)
+			cx.lineTo(bw, bh)
+
+			cx.stroke()
+		}
+		if (by && color_y != null) {
+			cx.beginPath()
+			cx.lineWidth = by
+			cx.strokeStyle = color_y
+
+			// left line
+			if (horiz && first_field) {
+				cx.moveTo(zz, zz)
+				cx.lineTo(zz, bh)
+			}
+			// right line
 			cx.moveTo(bw, zz)
-		cx.lineTo(bw, bh)
-		cx.lineTo(zz, bh)
-		if (horiz && first_field) // left line
-			cx.lineTo(zz, zz)
+			cx.lineTo(bw, bh)
+
+			cx.stroke()
+		}
 	}
 
 	function draw_hcell_at(field, fi, x0, y0, w, h, draw_stage) {
@@ -738,7 +747,8 @@ G.grid = component('grid', 'Input', function(e) {
 		// static geometry
 		let px = e.padding_x
 		let py = e.padding_y
-		let b = e.cell_border_width
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
 
 		cx.save()
 
@@ -746,17 +756,16 @@ G.grid = component('grid', 'Input', function(e) {
 
 		// border
 		let first_field = !fi || draw_stage == 'moving_cols'
-		cx.lineWidth = b
-		cx.strokeStyle = e.hcell_border_color
-		draw_cell_border_path(cx, first_field, w, h)
-		cx.stroke()
+		draw_cell_border(cx, first_field, w, h, bx, by,
+			e.hcell_border_x_color,
+			e.hcell_border_y_color)
 
 		// background
 		let bg = draw_stage == 'moving_cols' ? e.bg_moving : e.bg_header
 		if (bg) {
 			cx.beginPath()
 			cx.fillStyle = bg
-			cx.rect(0, 0, w-b, h-b)
+			cx.rect(0, 0, w-bx, h-by)
 			cx.fill()
 		}
 
@@ -768,12 +777,14 @@ G.grid = component('grid', 'Input', function(e) {
 			let desc = horiz ? 'down' : 'right'
 			let right = horiz && field.align == 'right'
 			let icon_char = fontawesome_char('fa-angle'+(pri?'-double':'')+'-'+(dir== 'asc'?asc:desc))
-			cx.font = e.icon_font
+			cx.font = e.header_icon_font
 			let x = right ? 2*px : w - 2*px
+			let y = round(h / 2)
 			let iw = e.font_size * 1.5
 			cx.textAlign = right ? 'left' : 'right'
-			cx.fillStyle = e.fg
-			cx.fillText(icon_char, x, cx.baseline + py)
+			cx.textBaseline = 'middle'
+			cx.fillStyle = e.fg_header
+			cx.fillText(icon_char, x, y)
 			w -= iw
 			if (right)
 				cx.translate(iw, 0)
@@ -782,23 +793,25 @@ G.grid = component('grid', 'Input', function(e) {
 		// clip
 		cx.beginPath()
 		cx.translate(px, py)
-		let cw = w - px - px
-		let ch = h - py - py
+		let cw = w - 2*px
+		let ch = h - 2*py
 		cx.rect(0, 0, cw, ch)
 		cx.clip()
 
 		// text
 		let x = 0
+		let y = round(ch / 2)
 		if (horiz)
 			if (field.align == 'right')
 				x = cw
 			else if (field.align == 'center')
 				x = cw / 2
 
-		cx.font = 'bold ' + e.text_font
+		cx.font = e.header_text_font
 		cx.textAlign = horiz ? field.align : 'left'
-		cx.fillStyle = e.fg
-		cx.fillText(field.label, x, cx.baseline)
+		cx.textBaseline = 'middle'
+		cx.fillStyle = e.fg_header
+		cx.fillText(field.label, x, y)
 
 		cx.restore()
 
@@ -806,8 +819,9 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function draw_hcells_range(fi1, fi2, draw_stage) {
 		hcx.save()
-		let b = e.cell_border_width
-		hcx.translate(horiz ? -scroll_x + b : 0, horiz ? 0 : -scroll_y + b)
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
+		hcx.translate(horiz ? -scroll_x + bx : 0, horiz ? 0 : -scroll_y + by)
 		let skip_moving_col = hit_state == 'col_moving' && draw_stage == 'non_moving_cols'
 		for (let fi = fi1; fi < fi2; fi++) {
 			if (skip_moving_col && hit_fi == fi)
@@ -839,9 +853,10 @@ G.grid = component('grid', 'Input', function(e) {
 		let input_val = e.cell_input_val(row, field)
 
 		// static geometry
-		let b  = e.cell_border_width
-		let px = e.padding_x + b
-		let py = e.padding_y + b
+		let bx  = e.cell_border_x_width
+		let by  = e.cell_border_y_width
+		let px = e.padding_x + bx
+		let py = e.padding_y + by
 
 		// state
 		let grid_focused = e.focused
@@ -955,10 +970,11 @@ G.grid = component('grid', 'Input', function(e) {
 
 		// border
 		let first_field = !fi || draw_stage == 'moving_cols'
-		cx.lineWidth = b
+		cx.lineWidth = bx || by
 		cx.strokeStyle = e.cell_border_color
-		draw_cell_border_path(cx, first_field, w, h)
-		cx.stroke()
+		draw_cell_border(cx, first_field, w, h, bx, by,
+			e.cell_border_x_color,
+			e.cell_border_y_color)
 
 		if (!editing) {
 
@@ -974,12 +990,15 @@ G.grid = component('grid', 'Input', function(e) {
 			cx.rect(0, 0, cw, ch)
 			cx.clip()
 
+			let y = round(ch / 2)
+
 			// tree node sign
 			if (collapsed != null) {
 				cx.fillStyle = selected ? fg : e.bg_focused_selected
 				cx.font = cx.icon_font
 				let x = indent_x - e.font_size - 4
-				cx.fillText(collapsed ? '\uf0fe' : '\uf146', x, cx.baseline)
+				cx.textBaseline = 'middle'
+				cx.fillText(collapsed ? '\uf0fe' : '\uf146', x, y)
 			}
 
 			// text
@@ -1005,14 +1024,15 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function draw_hover_outline(x, y, w, h) {
 
-		let b = e.cell_border_width
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
 		let bw = w - .5
 		let bh = h - .5
 
 		cx.save()
 		cx.translate(x, y)
 
-		cx.lineWidth = b
+		cx.lineWidth = bx || by
 
 		// add a background to override the borders.
 		cx.strokeStyle = e.bg
@@ -1064,8 +1084,9 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function draw_cells_range(rows, ri1, ri2, fi1, fi2, draw_stage) {
 		cx.save()
-		let b = e.cell_border_width
-		cx.translate(-scroll_x + b, -scroll_y + b)
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
+		cx.translate(-scroll_x + bx, -scroll_y + by)
 
 		let hit_cell, foc_cell, foc_ri, foc_fi
 		if (!draw_stage) {
@@ -1320,7 +1341,8 @@ G.grid = component('grid', 'Input', function(e) {
 		let hcell = e.header.at[fi]
 		let iw = field_has_indent(field)
 			? indent_offset(or(indent, row_indent(row))) : 0
-		let b = e.cell_border_width
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
 
 		let [x, y, w, h] = cell_rect(ri, fi)
 		w -= iw
@@ -1329,16 +1351,16 @@ G.grid = component('grid', 'Input', function(e) {
 
 		if (field.align == 'right') {
 			e.editor.x1 = null
-			e.editor.x2 = cells_w - (x + w) + b
+			e.editor.x2 = cells_w - (x + w) + bx
 		} else {
-			e.editor.x1 = x + b
+			e.editor.x1 = x + bx
 			e.editor.x2 = null
 		}
 
 		// set min outer width to col width.
 		// width is set in css to 'min-content' to shrink to min inner width.
 		e.editor.min_w = w
-		e.editor.y = y + b
+		e.editor.y = y + by
 		e.editor.h = h
 
 		// set min inner width to cell's unclipped text width.
@@ -1486,9 +1508,10 @@ G.grid = component('grid', 'Input', function(e) {
 	let p = [0, 0]
 	cells_point = function(mx, my) {
 		let r = e.cells.rect()
-		let b = e.cell_border_width
-		mx -= r.x + b
-		my -= r.y + b
+		let bx = e.cell_border_x_width
+		let by = e.cell_border_y_width
+		mx -= r.x + bx
+		my -= r.y + by
 		p[0] = mx
 		p[1] = my
 		return p

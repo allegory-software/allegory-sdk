@@ -259,8 +259,9 @@ G.Chrome  = ua.includes('chrome')
 G.Safari  = ua.includes('safari') && !Chrome
 if (Safari) {
 	// Safari is by far the shittiest browser that doesn't even have auto-update
-	// so we need to give the finger to those poor bastards who haven't sold their
-	// kidneys on the Apple store yet to get an upgrade on their browser.
+	// so you might need this so you can give the finger to those poor bastards
+	// who haven't yet bought this years's hardware so they can have this year's
+	// OS which ships with this year's Safari.
 	let m = ua.match(/version\/(\d+)\.(\d+)/)
 	G.Safari_maj = m && parseFloat(m[1])
 	G.Safari_min = m && parseFloat(m[2])
@@ -1997,6 +1998,7 @@ if (!window.href) {
 		opt.notify: widget to send 'load' events to.
 		opt.notify_error: error notify function: f(message, 'error').
 		opt.notify_notify: json `notify` notify function.
+		opt.silent: don't notify
 		opt.onchunk: f(s, finished) [-> false]
 
 	req.send()
@@ -2040,9 +2042,6 @@ G.ajax = function(req) {
 		for (let h in req.headers)
 			xhr.setRequestHeader(h, req.headers[h])
 
-	if (req.response_mime_type)
-		xhr.overrideMimeType(req.response_mime_type)
-
 	let slow_watch
 
 	function stop_slow_watch() {
@@ -2064,7 +2063,15 @@ G.ajax = function(req) {
 	req.send = function() {
 		fire('start')
 		slow_watch = runafter(req.slow_timeout, slow_expired)
-		xhr.send(upload)
+		try { // non-async requests raise errors, catch and call our callbacks.
+			xhr.send(upload)
+			if (!async)
+				done(200)
+		} catch (err) {
+			// NOTE: xhr.status is always 0 on non-async requests so there's no way
+			// to know the failure mode. We classify them all as 'network' errors.
+			xhr.onerror()
+		}
 		return req
 	}
 
@@ -2097,7 +2104,7 @@ G.ajax = function(req) {
 		fire('done', 'fail', req.error_message('timeout'), 'timeout')
 	}
 
-	// NOTE: only fired on network errors like connection refused!
+	// NOTE: only fired on network errors like "connection refused" and on CORS errors!
 	xhr.onerror = function() {
 		req.failtype = 'network'
 		fire('done', 'fail', req.error_message('network'), 'network')
@@ -2108,33 +2115,36 @@ G.ajax = function(req) {
 		fire('done', 'fail', null, 'abort')
 	}
 
+	function done(status) {
+		let res = xhr.response
+		if (!xhr.responseType || xhr.responseType == 'text')
+			if (xhr.getResponseHeader('content-type') == 'application/json' && res)
+				res = json_arg(res)
+		req.response = res
+		if (status == 200) {
+			debug_if(DEBUG_AJAX, '$', method, url)
+			fire('done', 'success', res)
+		} else {
+			req.failtype = 'http'
+			let status_message = xhr.statusText
+			debug_if(DEBUG_AJAX, '!', method, url)
+			fire('done', 'fail',
+				req.error_message('http', status, status_message, res),
+				'http', status, status_message, res)
+		}
+	}
+
 	xhr.onreadystatechange = function(ev) {
+		if (!async)
+			return
 		if (xhr.readyState > 1)
 			stop_slow_watch()
 		if (xhr.readyState > 2 && req.onchunk)
 			if (req.onchunk(xhr.response, xhr.readyState == 4) === false)
 				req.abort()
-		if (xhr.readyState == 4) {
-			let status = xhr.status
-			if (status) { // status is 0 for network errors, incl. timeout.
-				let res = xhr.response
-				if (!xhr.responseType || xhr.responseType == 'text')
-					if (xhr.getResponseHeader('content-type') == 'application/json' && res)
-						res = json_arg(res)
-				req.response = res
-				if (status == 200) {
-					debug_if(DEBUG_AJAX, '$', method, url)
-					fire('done', 'success', res)
-				} else {
-					req.failtype = 'http'
-					let status_message = xhr.statusText
-					debug_if(DEBUG_AJAX, '!', method, url)
-					fire('done', 'fail',
-						req.error_message('http', status, status_message, res),
-						'http', status, status_message, res)
-				}
-			}
-		}
+		if (xhr.readyState == 4)
+			if (xhr.status)
+				done(xhr.status)
 	}
 
 	req.abort = function() {
@@ -2142,8 +2152,8 @@ G.ajax = function(req) {
 		return req
 	}
 
-	let notify_error  = req.notify_error  || function(...args) { announce('ajax_error' , ...args) }
-	let notify_notify = req.notify_notify || function(...args) { announce('ajax_notify', ...args) }
+	let notify_error  = req.notify_error  || req.silent && noop || function(...args) { announce('ajax_error' , ...args) }
+	let notify_notify = req.notify_notify || req.silent && noop || function(...args) { announce('ajax_notify', ...args) }
 
 	function fire(name, arg1, ...rest) {
 

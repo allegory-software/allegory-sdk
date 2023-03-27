@@ -97,9 +97,11 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 
 	--border-light          : hsl(  0   0%   0% / 0.1); /* sits on bg */
 	--border-light-hover    : hsl(  0   0%   0% / 0.3);
-	--border-light-on-dark  : hsl(  0   0% 100% / 0.09); /* sits on bg */
+	--border-light-on-dark  : hsl(  0   0% 100% / 0.09);
 	--border-light-on-dark-hover
 	                        : hsl(  0 100% 100% / 0.3);
+	--border-dark           : hsl(  0   0%   0% / 0.3);
+	--border-dark-on-dark   : hsl(  0   0% 100% / 0.2);
 
 	--outline-focus         : hsl(  0 100%   0% / 1.0);
 	--outline-focus-offset  : -2px;
@@ -198,6 +200,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 
 	--border-light          : var(--border-light-on-dark);
 	--border-light-hover    : var(--border-light-on-dark-hover);
+	--border-dark           : var(--border-dark-on-dark);
 
 	--outline-focus         : hsl(  0   0% 100% / 1.0);
 
@@ -366,6 +369,14 @@ css(`
 	.theme-dark ::-webkit-resizer
 `, '', `
 	background: var(--bg-smoke);
+`)
+
+/* hide the very helpful "contacts" icon that Safari adds on some inputs */
+css(`
+input::-webkit-contacts-auto-fill-button {
+	visibility: hidden;
+	position: absolute;
+}
 `)
 
 /* FONTS ------------------------------------------------------------------ */

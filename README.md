@@ -61,7 +61,7 @@ to see what's missing, broken or wanted.
 # Compatibility
 
  * Operating Systems: **Debian 10+**, **Windows 10**
- * Browsers: Desktop **Chrome**, **Firefox**, **Edge** (Safari planned)
+ * Browsers: Desktop **Chrome**, **Firefox**, **Edge**, **Safari 16.3+**
  * CPUs: x86-64 with SSE 4.2 (AVX2 used if found).
 
 # Binaries

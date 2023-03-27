@@ -5734,7 +5734,8 @@ place.draw = function(v, cx) {
 	}
 	cx.font = cx.icon_font
 	cx.fillStyle = place_id ? cx.fg_text : cx.fg_disabled
-	cx.fillText(icon_char, 0, cx.baseline)
+	cx.textBaseline = 'middle'
+	cx.fillText(icon_char, 0, round(cx.ch / 2))
 	cx.save()
 	cx.translate(indent_x, 0)
 	all_field_types.draw.call(this, descr, cx)
