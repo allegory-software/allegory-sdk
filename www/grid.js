@@ -201,12 +201,12 @@ G.grid = component('grid', 'Input', function(e) {
 		e.header_h  = num(css.prop('--grid-header-h'))
 
 		// css colors
-		e.cell_border_x_width    = 1
-		e.cell_border_y_width    = 1
-		e.hcell_border_x_color   = css.prop('--border-dark')
-		e.hcell_border_y_color   = css.prop('--border-light')
-		e.cell_border_x_color    = css.prop('--border-light')
-		e.cell_border_y_color    = null
+		e.cell_border_v_width    = 1
+		e.cell_border_h_width    = 1
+		e.hcell_border_v_color   = css.prop('--border-dark')
+		e.hcell_border_h_color   = css.prop('--border-light')
+		e.cell_border_v_color    = css.prop('--border-light')
+		e.cell_border_h_color    = css.prop('--border-light')
 		e.bg                     = css.prop('--bg')
 		e.bg_alt                 = css.prop('--bg-alt')
 		e.fg                     = css.prop('--fg')
@@ -235,8 +235,8 @@ G.grid = component('grid', 'Input', function(e) {
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
 		e.header_icon_font = (e.font_size * 0.875) + 'px ' + e.icon_font_family
 		e.header_text_font = (e.font_size * 0.875) + 'px ' + e.text_font_family
-		e.cell_h   = or(e.cell_h  , round(e.line_height + 2 * e.padding_y + e.cell_border_y_width))
-		e.header_h = or(e.header_h, round(e.line_height + 2 * e.padding_y + e.cell_border_y_width))
+		e.cell_h   = or(e.cell_h  , round(e.line_height + 2 * e.padding_y + e.cell_border_h_width))
+		e.header_h = or(e.header_h, round(e.line_height + 2 * e.padding_y + e.cell_border_h_width))
 
 		update_cx(cx)
 		update_cx(hcx)
@@ -287,7 +287,7 @@ G.grid = component('grid', 'Input', function(e) {
 	e.prop('can_change_filters_visibility' , {type: 'bool', default: true})
 	e.prop('can_change_fields_visibility'  , {type: 'bool', default: true})
 
-	var horiz = true
+	let horiz = true
 	e.set_vertical = function(v) {
 		horiz = !v
 		e.class('hgrid',  horiz)
@@ -305,8 +305,8 @@ G.grid = component('grid', 'Input', function(e) {
 	e.progress_bar  = div({class: 'grid-progress-bar'})
 	e.add(e.header, e.progress_bar, e.cells_view)
 
-	var cx  = e.cells_canvas.getContext('2d')
-	var hcx = e.header_canvas.getContext('2d')
+	let cx  = e.cells_canvas.getContext('2d')
+	let hcx = e.header_canvas.getContext('2d')
 
 	e.listen('layout_changed', layout_changed)
 
@@ -333,8 +333,8 @@ G.grid = component('grid', 'Input', function(e) {
 			return
 
 		let col_resizing = hit_state == 'col_resizing'
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 
 		let auto_cols_w =
 			horiz
@@ -496,8 +496,8 @@ G.grid = component('grid', 'Input', function(e) {
 
 	// view-scroll-derived state ----------------------------------------------
 
-	var scroll_x, scroll_y // current scroll offsets.
-	var vri1, vri2 // visible row range.
+	let scroll_x, scroll_y // current scroll offsets.
+	let vri1, vri2 // visible row range.
 
 	// NOTE: keep this raf-friendly, i.e. don't measure the DOM in here!
 	function update_scroll(sx, sy) {
@@ -524,12 +524,12 @@ G.grid = component('grid', 'Input', function(e) {
 
 	// mouse-derived state ----------------------------------------------------
 
-	var hit_state // this affects both rendering and behavior in many ways.
-	var hit_mx, hit_my // last mouse coords, needed on scroll event.
-	var hit_target // last mouse target, needed on click events.
-	var hit_dx, hit_dy // mouse coords relative to the dragged object.
-	var hit_ri, hit_fi, hit_indent // the hit cell and whether the cell indent was hit.
-	var row_move_state // additional state when row moving
+	let hit_state // this affects both rendering and behavior in many ways.
+	let hit_mx, hit_my // last mouse coords, needed on scroll event.
+	let hit_target // last mouse target, needed on click events.
+	let hit_dx, hit_dy // mouse coords relative to the dragged object.
+	let hit_ri, hit_fi, hit_indent // the hit cell and whether the cell indent was hit.
+	let row_move_state // additional state when row moving
 
 	let row_rect
 	{
@@ -629,16 +629,16 @@ G.grid = component('grid', 'Input', function(e) {
 	}
 
 	function row_visible_rect(row) { // relative to cells
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 		let ri = e.row_index(row)
 		let [x, y, w, h] = row_rect(ri)
 		return clip_rect(x+bx, y+by, scroll_x, scroll_y, cells_view_w, cells_view_h)
 	}
 
 	function cell_visible_rect(row, field) { // relative to cells
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 		let ri = e.row_index(row)
 		let fi = e.field_index(field)
 		let [x, y, w, h] = cell_rect(ri, fi)
@@ -702,17 +702,17 @@ G.grid = component('grid', 'Input', function(e) {
 		cx.fg_dim      = e.fg_dim
 	}
 
-	function draw_cell_border(cx, first_field, w, h, bx, by, color_x, color_y) {
+	function draw_cell_border(cx, w, h, bx, by, color_x, color_y, draw_stage) {
 		let bw = w - .5
 		let bh = h - .5
 		let zz = -.5
-		if (bx && color_x != null) {
+		if (by && color_y != null) { // horizontals
 			cx.beginPath()
-			cx.lineWidth = bx
-			cx.strokeStyle = color_x
+			cx.lineWidth = by
+			cx.strokeStyle = color_y
 
 			// top line
-			if (!horiz && first_field) {
+			if (!horiz && draw_stage == 'moving_cols') {
 				cx.moveTo(zz, zz)
 				cx.lineTo(bw, zz)
 			}
@@ -722,13 +722,13 @@ G.grid = component('grid', 'Input', function(e) {
 
 			cx.stroke()
 		}
-		if (by && color_y != null) {
+		if (bx && color_x != null) { // verticals
 			cx.beginPath()
-			cx.lineWidth = by
-			cx.strokeStyle = color_y
+			cx.lineWidth = bx
+			cx.strokeStyle = color_x
 
 			// left line
-			if (horiz && first_field) {
+			if (horiz && draw_stage == 'moving_cols') {
 				cx.moveTo(zz, zz)
 				cx.lineTo(zz, bh)
 			}
@@ -747,18 +747,18 @@ G.grid = component('grid', 'Input', function(e) {
 		// static geometry
 		let px = e.padding_x
 		let py = e.padding_y
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 
 		cx.save()
 
 		cx.translate(x0, y0)
 
 		// border
-		let first_field = !fi || draw_stage == 'moving_cols'
-		draw_cell_border(cx, first_field, w, h, bx, by,
-			e.hcell_border_x_color,
-			e.hcell_border_y_color)
+		draw_cell_border(cx, w, h, bx, by,
+			e.hcell_border_v_color,
+			e.hcell_border_h_color,
+			draw_stage)
 
 		// background
 		let bg = draw_stage == 'moving_cols' ? e.bg_moving : e.bg_header
@@ -819,8 +819,8 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function draw_hcells_range(fi1, fi2, draw_stage) {
 		hcx.save()
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 		hcx.translate(horiz ? -scroll_x + bx : 0, horiz ? 0 : -scroll_y + by)
 		let skip_moving_col = hit_state == 'col_moving' && draw_stage == 'non_moving_cols'
 		for (let fi = fi1; fi < fi2; fi++) {
@@ -853,8 +853,8 @@ G.grid = component('grid', 'Input', function(e) {
 		let input_val = e.cell_input_val(row, field)
 
 		// static geometry
-		let bx  = e.cell_border_x_width
-		let by  = e.cell_border_y_width
+		let bx  = e.cell_border_v_width
+		let by  = e.cell_border_h_width
 		let px = e.padding_x + bx
 		let py = e.padding_y + by
 
@@ -969,12 +969,12 @@ G.grid = component('grid', 'Input', function(e) {
 		}
 
 		// border
-		let first_field = !fi || draw_stage == 'moving_cols'
 		cx.lineWidth = bx || by
 		cx.strokeStyle = e.cell_border_color
-		draw_cell_border(cx, first_field, w, h, bx, by,
-			e.cell_border_x_color,
-			e.cell_border_y_color)
+		draw_cell_border(cx, w, h, bx, by,
+			e.cell_border_v_color,
+			e.cell_border_h_color,
+			draw_stage)
 
 		if (!editing) {
 
@@ -1024,8 +1024,8 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function draw_hover_outline(x, y, w, h) {
 
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 		let bw = w - .5
 		let bh = h - .5
 
@@ -1084,8 +1084,8 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function draw_cells_range(rows, ri1, ri2, fi1, fi2, draw_stage) {
 		cx.save()
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 		cx.translate(-scroll_x + bx, -scroll_y + by)
 
 		let hit_cell, foc_cell, foc_ri, foc_fi
@@ -1341,8 +1341,8 @@ G.grid = component('grid', 'Input', function(e) {
 		let hcell = e.header.at[fi]
 		let iw = field_has_indent(field)
 			? indent_offset(or(indent, row_indent(row))) : 0
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 
 		let [x, y, w, h] = cell_rect(ri, fi)
 		w -= iw
@@ -1471,6 +1471,8 @@ G.grid = component('grid', 'Input', function(e) {
 
 	// vgrid header resizing --------------------------------------------------
 
+	let hit_x
+
 	function ht_header_resize(ev, mx, my) {
 		if (!hit_state && !horiz) {
 			let r = e.header.rect()
@@ -1508,8 +1510,8 @@ G.grid = component('grid', 'Input', function(e) {
 	let p = [0, 0]
 	cells_point = function(mx, my) {
 		let r = e.cells.rect()
-		let bx = e.cell_border_x_width
-		let by = e.cell_border_y_width
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
 		mx -= r.x + bx
 		my -= r.y + by
 		p[0] = mx
@@ -1807,7 +1809,7 @@ G.grid = component('grid', 'Input', function(e) {
 		return true
 	}
 
-	var mm_row_move, mu_row_move
+	let mm_row_move, mu_row_move
 
 	function md_row_move(mx, my) {
 

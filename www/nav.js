@@ -3849,7 +3849,7 @@ G.nav_widget = function(e) {
 	}
 
 	e.rows_moved = noop // stub
-	var rows_moved // flag in case there's no pos col and thus no e.changed_rows.
+	let rows_moved // flag in case there's no pos col and thus no e.changed_rows.
 
 	function move_rows_state(focused_ri, selected_ri, ev) {
 
