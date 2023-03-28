@@ -2091,7 +2091,7 @@ e.make_focusable = function(...fes) {
 
 	let inh_focus = e.focus
 	e.focus = function() {
-		if (fes[0] == this || this.widget_selected)
+		if (fes[0] == this)
 			return inh_focus.call(this)
 		let fe = e.remember_last_focused && last_focused || fes[0]
 		fe.focus()
@@ -2629,6 +2629,7 @@ installers.start_drag = function() {
 			return
 		if (!ev.buttons)
 			return
+		ev.preventDefault() // Safari: prevent selecting all text on the page.
 		return check_drag(ev, mx, my)
 	})
 

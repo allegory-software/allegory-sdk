@@ -3196,7 +3196,6 @@ G.nav_widget = function(e) {
 		}
 
 		document.on('stopped_event', clicked_on_disabled, disabled)
-		all_disabled = disabled
 	}
 
 	e.enter_edit = function(editor_state, focus) {

@@ -379,6 +379,12 @@ input::-webkit-contacts-auto-fill-button {
 }
 `)
 
+/* fix Safari bug */
+css('svg', '', `
+	width: 100%;
+	height: 100%;
+`)
+
 /* FONTS ------------------------------------------------------------------ */
 
 /* opensans variable font */
@@ -498,7 +504,10 @@ css('.condensed' , '', ` font-stretch: 75%; `) /* only with var fonts */
 css('.underline' , '', ` text-decoration: underline; `)
 css('.strike'    , '', ` text-decoration: line-through; `)
 css('.allcaps'   , '', ` text-transform: uppercase; `)
-css('.noselect'  , '', ` user-select: none; `)
+css('.noselect'  , '', `
+	user-select: none;
+	-webkit-user-select: none; /* Safari */
+`)
 
 css('.mono'      , '', `font-family: monospace;`)
 css('.arial'     , '', `font-family: arial, sans-serif;`)

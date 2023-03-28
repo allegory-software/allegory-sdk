@@ -2222,12 +2222,12 @@ G.post = function(url, upload, success, fail, opt) {
 
 // lint any loaded js file from the browser directly, no server needed!
 // we use this mostly to catch `for (v ...` which should be `for(let v ...`.
-G.lint = function(file) {
+G.lint = function(file, opt) {
 	if (!window.JSHINT) {
 		let script = document.createElement('script')
 		script.onload = function() {
 			assert(window.JSHINT, 'jshint.js not loaded')
-			lint(file)
+			lint(file, opt)
 		}
 		script.src = 'jshint.js'
 		document.documentElement.append(script)
@@ -2239,9 +2239,11 @@ G.lint = function(file) {
 		get(sc.src, function(s) {
 			pr(sc.src, s.len)
 			pr('------------------------------------------------------')
-			JSHINT(s, {
+			JSHINT(s, assign({
 				asi: true,
 				esversion: 6,
+				strict: true,
+				browser: true,
 				'-W014': true, // says starting a line with `?` is "confusing".
 				'-W119': true, // `a**b` is es7
 				'-W082': true, // func decl in block: in strict mode it's no problem.
@@ -2252,7 +2254,7 @@ G.lint = function(file) {
 				'-W061': true, // says eval() is "harmful"... only in the wrong hands :)
 				'-W018': true, // says "confusing use of !" in charts.js, dunno why.
 				'-W040': true, // says we shouldn't make standalone functions with `this` inside.
-			})
+			}, opt))
 			pr(JSHINT.errors.map(e => sc.src+':'+e.line + ':' + e.character + ': '
 				+ e.code + ' ' + e.raw.subst(e)).join('\n'))
 		})

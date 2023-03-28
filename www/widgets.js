@@ -373,16 +373,10 @@ G.tooltip = component('tooltip', function(e) {
 	})
 
 	function content_pointerdown(ev) {
-
 		if (ev.target != this)
 			return // clicked inside the tooltip.
-
 		// TODO: generalize this behavior of focusing an element by clicking on empty space.
-		let first_focusable = this.focusables()[0]
-		if (!first_focusable)
-			return
-		first_focusable.focus()
-
+		this.focus_first()
 		return false
 	}
 
@@ -2671,7 +2665,7 @@ G.action_band = component('action-band', 'Input', function(e) {
 				e.add(ct)
 				continue
 			} else if (s == '>') {
-				align = 'right'
+				// TODO: align right
 				ct = e
 				continue
 			}
@@ -5929,7 +5923,7 @@ function calendar_widget(e, mode) {
 
 	// sometimes we mutate ranges so we have to announce value prop changes manually.
 	function ranges_changed() {
-		ranges0 = ranges // TODO: save ranges before modifying so we get correct old value?
+		let ranges0 = ranges // TODO: save ranges before modifying so we get correct old value?
 		if (mode == 'day') {
 			announce_prop_changed(e, 'value', ranges[0][0], ranges0[0][0])
 		} else if (mode == 'range') {

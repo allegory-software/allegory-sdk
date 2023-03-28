@@ -40,10 +40,6 @@ BUGS
 * NAV revert bug (esp. tree)
 
 * Safari 16.3 dumbass browser
-	- popups
-	- menu
-	- tabs moving
-		- selects all text on start drag
 	- grid hit testing
 	- grid scrolling
 
