@@ -3378,6 +3378,11 @@ G.resizeable_canvas_container = function() {
 	})
 	let redraw_pass = null
 	function redraw() {
+		// WTF is going on with Safari??
+		if (Safari) {
+			canvas.height = 0
+			canvas.height = h
+		}
 		do {
 			let pass = redraw_pass
 			redraw_pass = null

@@ -205,7 +205,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.cell_border_h_width    = 1
 		e.hcell_border_v_color   = css.prop('--border-dark')
 		e.hcell_border_h_color   = css.prop('--border-light')
-		e.cell_border_v_color    = css.prop('--border-light')
+		e.cell_border_v_color    = null // css.prop('--border-light')
 		e.cell_border_h_color    = css.prop('--border-light')
 		e.bg                     = css.prop('--bg')
 		e.bg_alt                 = css.prop('--bg-alt')
@@ -1179,7 +1179,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.header.w = horiz ? null : header_w
 		e.header.h = header_h
 
-		e.cells_canvas.resize(cells_view_w, cells_view_h, 200, 200)
+		e.cells_canvas .resize(cells_view_w, cells_view_h, 200, 200)
 		e.header_canvas.resize(header_w, header_h, 200, horiz ? 1 : 200)
 
 		for (let field of e.fields)
@@ -1188,11 +1188,23 @@ G.grid = component('grid', 'Input', function(e) {
 
 		// canvas drawing
 
-		cx .clear()
-		hcx.clear()
+		e.ctx = cx
+
+		// WTF is going on with Safari??
+		if (Safari) {
+			let ch = e.cells_canvas.height
+			e.cells_canvas.height = 0
+			e.cells_canvas.height = ch
+			let hh = e.header_canvas.height
+			e.header_canvas.height = 0
+			e.header_canvas.height = hh
+		}
 
 		cx .resetTransform()
 		hcx.resetTransform()
+
+		cx .clear()
+		hcx.clear()
 
 		cx .scale(devicePixelRatio, devicePixelRatio)
 		hcx.scale(devicePixelRatio, devicePixelRatio)
