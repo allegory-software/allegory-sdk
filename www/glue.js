@@ -408,8 +408,8 @@ enumerables into it.
 // NOTE: shadows both instance and prototype fields.
 G.property = function(cls, prop, get, set) {
 	let proto = cls.prototype || cls
-	assert(!(prop in proto), '{0}.{1} already exists and it\'s set to: {2}',
-		cls.type || cls.name, prop, proto[prop])
+	if (prop in proto)
+		assert(false, '{0} already exists and it\'s set to: {1}', prop, proto[prop])
 	let descriptor = isobject(get) ? get : {get: get, set: set}
 	Object.defineProperty(proto, prop, descriptor)
 }

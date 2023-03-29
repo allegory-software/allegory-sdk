@@ -637,9 +637,20 @@ toggle_collapsed = function() {
 <!--------------------------------------------------------------------------->
 
 <xmp id=check_demo>
-<d class="h-m m b ro p">
-	<check id=my_check checked></check><label for=my_check>Wasup</label>
-</d>
+<form id=myform class="g-m g-2col gap-x">
+	<check name=check1 checked-value=yes checked></check><label name=check1>Check me baby</label>
+	<check name=check2 checked-value=yes value=wrong required></check><label name=check2>Check me baby</label>
+	<d></d><errors name=check2 show-all></errors>
+	<check name=check3 checked-value=yes unchecked-value=no></check><label name=check3>Check me baby</label>
+	<d></d><button>Submit</button>
+</form>
+<script run>
+myform.on('submit', function(ev) {
+	for (const [name,value] of new FormData(this))
+		pr('', name, ':', value)
+	return false
+})
+</script>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1163,7 +1174,9 @@ main.add(g)
 
 <xmp id="form_demo">
 <form id=myform class="g-h g-m g-2col gap-x" style="grid-template-columns: 5em auto">
-	<check  name=check1 value=c1 class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
+	<check  name=check1 checked-value=c1 value=c1 class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
+	<check  name=check2 checked-value=c2 value=false class="self-h-c" id=check1></check><label for=check2>Check me baby</label>
+	<check  name=check3 checked-value=c3 class="self-h-c" id=check1></check><label for=check3>Check me baby</label>
 	<radio  name=radio1 value=r1 class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
 	<radio  name=radio1 value=r2 class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
 	<toggle name=toggle1 class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>

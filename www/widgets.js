@@ -3348,10 +3348,9 @@ G.pagenav = component('pagenav', function(e) {
 
 /* <label> -------------------------------------------------------------------
 
-props:
-	for_id
-attrs:
-	for
+attrs/props:
+	for/for_id
+	name/for_name
 fires:
 	^for.label_hover(on)
 	^for.label_pointer{down|up}(ev)
@@ -3368,12 +3367,27 @@ G.label = component('label', 'Input', function(e) {
 	e.class('label-widget')
 	e.make_disablable()
 
-	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.prop('for_id'  , {type: 'id', attr: 'for'})
+	e.prop('for_name', {type: 'input_name', attr: 'name'})
+	e.props.form = {type: 'id'} // form property already exists for labels
+
 	e.property('target', function() {
-		if (e.for_id) return window[e.for_id]
+		if (e.for_id) {
+			let te = window[e.for_id]
+			if (te)
+				return te
+		}
+		if (e.for_name) {
+			let form = e.form || e.closest('form')
+			if (form)
+				for (let te of form.all)
+					if (te.name == e.for_name)
+						return te
+		}
 		let g = e.closest('.input-group')
 		return g && g.$1('.input')
 	})
+
 	e.on('pointerenter', function() {
 		let te = e.target
 		if (!te) return
@@ -3621,7 +3635,7 @@ validators.required = {
 	applies  : (e,    field) => field.not_null || field.required,
 	validate : (e, v, field) => v != null || field.default != null,
 	error    : (e, v, field) => S('validation_empty_error', '{0} is required', field_name(field)),
-	rule     : (e, v, field) => S('validation_empty_rule', '{0} is not empty', field_name(field)),
+	rule     : (e, v, field) => S('validation_empty_rule', '{0} is filled', field_name(field)),
 }
 
 validators.min = {
@@ -3659,6 +3673,14 @@ validators.num = {
 	validate : (e, v, field) => isnum(v),
 	error    : (e, v, field) => S('validation_num_error', '{0} is not a number' , field_name(field)),
 	rule     : (e, v, field) => S('validation_num_rule' , '{0} must be a number', field_name(field)),
+}
+
+validators.checked_value = {
+	props    : 'checked_value unchecked_value',
+	applies  : (e,    field) => field.checked_value !== undefined || field.unchecked_value !== undefined,
+	validate : (e, v, field) => v == field.checked_value || v == field.unchecked_value,
+	error    : (e, v, field) => S('validation_checked_value_error', '{0} is not {1} or {2}' , field_name(field), e.checked_value, e.unchecked_value),
+	rule     : (e, v, field) => S('validation_checked_value_rule' , '{0} must be {1} or {2}', field_name(field), e.checked_value, e.unchecked_value),
 }
 
 validators.lookup = {
@@ -3739,7 +3761,7 @@ G.errors = component('errors', 'Input', function(e) {
 			return te.id == e.for_id
 		if (e.for_name) {
 			let form = e.form || e.closest('form')
-			return form && te.form == form
+			return form && te.form == form && te.name == e.for_name
 		}
 	}
 
@@ -3759,6 +3781,82 @@ G.errors = component('errors', 'Input', function(e) {
 
 })
 
+/* input_widget --------------------------------------------------------------
+
+config:
+	name
+	form
+	required
+	readonly
+state:
+	input_value (attr: value)
+	value
+	invalid
+hooks:
+	on_update_value(f); f(ev)
+
+*/
+
+e.make_input_widget = function(opt) {
+
+	let e = this
+
+	e.prop('name', {store: false})
+	e.prop('form', {type: 'id', store: false})
+
+	e.prop('input_value', {type: opt.input_value_type, attr: 'value', slot: 'state'}) // initial value and text value from user input
+	e.prop('value'      , {type: opt.value_type, slot: 'state'}) // typed valid value, not user-changeable
+
+	e.prop('invalid'    , {type: 'bool'  , slot: 'state', attr: true, default: false})
+
+	e.prop('required'   , {type: 'bool'  , attr: true, default: false})
+	e.prop('readonly'   , {type: 'bool'  , attr: true, default: false})
+
+	e.input = tag('input', {
+		hidden : opt.input_hidden ? '' : null,
+		type   : opt.input_type || 'hidden',
+	})
+	e.add(e.input)
+
+	e.get_name = function(s) { return e.input.name }
+	e.set_name = function(s) { e.input.name = s }
+	e.get_form = function() { return e.input.form }
+	e.set_form = function(s) { e.input.form = s }
+
+	e.update_input = function() {
+		e.input.value = e.value
+	}
+	e.on_update(function(opt) {
+		if (opt.value)
+			e.update_input()
+	})
+	e.update({value: true})
+
+	e.input.on('input', function() {
+		e.set_prop('input_value', this.value, ev)
+	})
+
+	e.set_value = function(v, v0, ev) {
+		assert(ev && (ev.target == e || ev.target == e.input)) // not user-writable
+	}
+
+	let validator = create_validator(e, e)
+	e.update_value = function(ev) {
+		e.validation_result = validator.validate(e.input_value)
+		e.set_prop('value', e.validation_result.value, ev || {target: e})
+		e.invalid = e.validation_result.failed
+		if (!(ev && ev.target == e.input))
+			e.update({value: true})
+	}
+	e.on_update_value = function(f) {
+		e.do_after('update_value', f)
+	}
+	e.on_prop_changed(function(k, v, v0, ev) {
+		if (k == 'input_value' || validator.prop_changed(k))
+			e.update_value(ev)
+	})
+}
+
 /* <check>, <toggle>, <radio> buttons ----------------------------------------
 
 classes:
@@ -3769,9 +3867,8 @@ attrs:
 	checked
 state:
 	checked <-> t|f
-methods:
-	e.user_toggle()
-	e.user_set_checked(checked)
+events:
+	^input
 
 */
 
@@ -3785,6 +3882,9 @@ css('.checkbox', 'large t-m link h-c h-m round', `
 	--fg-check: var(--fg-link);
 `)
 
+css('.checkbox.null', 'op06')
+css('.checkbox[invalid]', 'fg-error bg-error')
+
 css_state('.checkbox:is(:hover,.hover)', '', `
 	--fg-check: var(--fg-link-hover);
 `)
@@ -3797,46 +3897,68 @@ css('.checkbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
 css_state('.checkbox:focus-visible .checkbox-focus-circle', '', ` r: 50%; `)
 
 function check_widget(e, input_type) {
-	e.make_disablable()
 	e.clear()
 	e.class('checkbox')
-	e.input = tag('input', {hidden: '', type: input_type || 'checkbox'})
-	e.add(e.input)
+	e.make_disablable()
+	e.make_input_widget({
+		value_type: 'bool',
+		input_value_type: 'bool',
+		input_type: 'checkbox',
+		input_hidden: true,
+	})
 	e.make_focusable()
-	e.prop('checked', {type: 'bool', attr: true})
-	e.prop('name')
-	e.prop('form', {type: 'id', store: false})
-	e.prop('value', {type: 'bool'})
 	e.property('label', function() {
 		if (!e.bound) return
 		if (!e.id) return
 		return $1('label[for='+e.id+']')
 	})
-	e.set_checked = function(v) {
-		e.input.checked = v
+
+	e.prop('checked_value'  , {default: true })
+	e.prop('unchecked_value', {default: false})
+	e.prop('checked', {type: 'bool', store: false})
+	e.get_checked = function() {
+		if (e.value === e.checked_value) return true
+		if (e.value === e.unchecked_value) return false
+		return null
 	}
-	e.user_set_checked = function(v) { // stub
-		e.checked = v
+	e.set_checked = function(v, v0, ev) {
+		if (v) v = e.checked_value
+		else if (v != null) v = e.unchecked_value
+		else v = null
+		e.set_prop('input_value', v, ev)
 	}
-	e.set_name = function(s) { e.input.name = s }
-	e.get_form = function() { return e.input.form }
-	e.set_form = function(s) { e.input.form = s }
-	e.set_value = function(v) { e.input.value = v }
-	e.user_toggle = function() {
-		e.user_set_checked(!e.checked)
+
+	e.on_update(function(opt) {
+		if (opt.value) {
+			e.bool_attr('checked', e.checked || null)
+			e.class('null', e.value == null)
+			e.input.checked = e.checked
+		}
+	})
+
+	function user_set(v) {
+		e.set_prop('checked', v, {target: e})
+		e.fireup('input')
 	}
+	function user_toggle() { user_set(!e.checked) }
 	e.on('keydown', function(key) {
-		if (key == ' ') // same as for <button>
-			e.user_toggle()
+		if (key == ' ') { // same as for <button>
+			user_toggle()
+			return false
+		}
+		if (key == 'Delete') {
+			e.checked = null
+			return false
+		}
 	})
 	e.on('click', function() {
-		e.user_toggle()
+		user_toggle()
 	})
 	e.on('label_hover', function(on) {
 		e.class('hover', on)
 	})
 	e.on('label_click', function() {
-		e.user_toggle()
+		user_toggle()
 	})
 	e.on('hover', function(ev, on) {
 		let label = e.label
@@ -3895,7 +4017,7 @@ G.check = component('check', function(e) {
 	e.add(svg({viewBox: '-10 -10 20 20'},
 		svg_tag('circle'  , {class: 'checkbox-focus-circle'}),
 		svg_tag('rect'    , {class: 'check-frame'}),
-		svg_tag('polyline', {class: 'check-mark', points: '4 11 8 15 16 6'}),
+		svg_tag('polyline', {class: 'check-mark' , points: '4 11 8 15 16 6'})
 	))
 })
 
@@ -3965,7 +4087,8 @@ G.radio = component('radio', function(e) {
 		svg_tag('circle', {class: 'radio-thumb'}),
 	))
 
-	e.user_set_checked = function(v) {
+	e.on('input', function() {
+		let v = e.checked
 		if (!v)
 			return
 		let others
@@ -3980,7 +4103,7 @@ G.radio = component('radio', function(e) {
 			if (re != e)
 				re.checked = false
 		e.checked = true
-	}
+	})
 
 })
 
