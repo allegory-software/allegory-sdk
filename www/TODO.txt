@@ -40,8 +40,7 @@ BUGS
 * NAV revert bug (esp. tree)
 
 * Safari 16.3 dumbass browser
-	- grid hit testing
-	- grid scrolling
+	- will do more testing before release...
 
 
 NEW WIDGETS

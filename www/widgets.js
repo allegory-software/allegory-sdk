@@ -3502,7 +3502,7 @@ function update_validators() {
 	}
 }
 
-G.validator = function(e, ...args) {
+G.create_validator = function(e, ...args) {
 
 	update_validators()
 
@@ -3681,6 +3681,16 @@ css('.errors-not-checked', 'dim')
 css('.errors-failed .errors-icon::before', 'fa fa-times')
 css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
 
+/* <errors> ------------------------------------------------------------------
+
+attr:      prop:
+	for        for_id        id   of input that fires ^^validate
+	name       for_name      name of input that fires ^^validate
+	form                     form id
+	show_all                 shwo all rules with pass/fail mark or just the first error
+
+*/
+
 G.errors = component('errors', 'Input', function(e) {
 
 	e.class('errors')
@@ -3754,7 +3764,9 @@ G.errors = component('errors', 'Input', function(e) {
 classes:
 	.hover
 attrs:
-	name value checked
+	name
+	value
+	checked
 state:
 	checked <-> t|f
 methods:
@@ -3794,7 +3806,7 @@ function check_widget(e, input_type) {
 	e.prop('checked', {type: 'bool', attr: true})
 	e.prop('name')
 	e.prop('form', {type: 'id', store: false})
-	e.prop('value')
+	e.prop('value', {type: 'bool'})
 	e.property('label', function() {
 		if (!e.bound) return
 		if (!e.id) return
@@ -4358,8 +4370,9 @@ G.range_slider = component('range-slider', 'Input', function(e) {
 
 /* .inputbox class -----------------------------------------------------------
 
-Applies to <input> and <button> so that they dovetail perfectly in an inline
-context (they valign and have the same border, height, margin and padding).
+Applies to <input>, <button>, <select-button> and <dropdown> so that they
+dovetail perfectly in an inline context (they valign and have the same border,
+height, font, line height, margin and padding).
 
 NOTE: `--p-y-input-adjust` is set to 1px for certain fonts at certain sizes.
 NOTE: `--lh-input` is 1.25 because <input> can't set it lower.
@@ -5087,9 +5100,9 @@ G.num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	let my_validator = validator(e, e)
-	function update_value(changed_prop, ev) {
-		let out = my_validator.validate(e.input_value)
+	let validator = create_validator(e, e)
+	function update_value(ev) {
+		let out = validator.validate(e.input_value)
 		e.validation_result = out
 		e.set_prop('value', out.value, ev || {target: e})
 		e.invalid = out.failed
@@ -5097,11 +5110,11 @@ G.num_input = component('num-input', 'Input', function(e) {
 			e.update({value: true})
 	}
 	e.set_input_value = function(v, v0, ev) {
-		update_value('input_value', ev)
+		update_value(ev)
 	}
 	e.on_prop_changed(function(k, v, v0, ev) {
-		if (my_validator.prop_changed(k))
-			update_value(k, ev)
+		if (validator.prop_changed(k))
+			update_value(ev)
 	})
 
 	e.set_decimals = function() {
@@ -5381,27 +5394,27 @@ G.tags_input = component('tags-input', function(e) {
 
 	e.prop('name')
 	e.prop('form', {type: 'id', store: false})
-	e.set_name = function(s) { e.value_input.name = s }
-	e.get_form = function() { return e.value_input.form }
+	e.set_name = function(s) { e.input.name = s }
+	e.get_form = function() { return e.input.form }
 	e.set_form = function(s) { e.value_input.form = s }
 
 	e.tags_box = tags_box()
-	e.input = tag('input', {class: 'tags-input-input', placeholder: 'Tag'})
-	e.value_input = tag('input', {type: 'hidden', hidden: ''})
-	e.add(div({class: 'tags-scrollbox'}, e.tags_box), e.input, e.value_input)
-	e.make_focusable('focus-ring', e.input)
+	e.tag_input = tag('input', {class: 'tags-input-input', placeholder: 'Tag'})
+	e.input = tag('input', {type: 'hidden', hidden: ''})
+	e.add(div({class: 'tags-scrollbox'}, e.tags_box), e.tag_input, e.input)
+	e.make_focusable('focus-ring', e.tag_input)
 
 	e.prop('tags', {store: false})
 	e.get_tags = () => e.tags_box.tags
 	e.set_tags = function(v) {
 		e.tags_box.tags = v
-		e.value_input.value = json(e.tags_box.tags)
+		e.input.value = json(e.tags_box.tags)
 	}
 
 	e.prop('nowrap', {type: 'bool'})
 	e.set_nowrap = (v) => e.tags_box.class('tags-box-nowrap', !!v)
 
-	e.input.on('keydown', function(key) {
+	e.tag_input.on('keydown', function(key) {
 		if (key == 'Backspace') {
 			let s = this.value
 			if (s) {
@@ -5422,7 +5435,7 @@ G.tags_input = component('tags-input', function(e) {
 			e.tags = t1
 			this.value = ''
 			e.tags_box.focus_tag(s) // scroll tag into view
-			e.input.focus()
+			e.tag_input.focus()
 			return false
 		}
 	})
