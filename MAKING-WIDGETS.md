@@ -190,3 +190,6 @@ elements but the third is usually what you want for elements as it packs
 in many features overridable getters and setters, storing the value internally
 and creating a getter for you, setting a mirror attribute for styling, etc.
 
+* `override(class, method, f)` vs `e.override(method, f)`. The first variant
+overrides built-in methods and works on any class. The element variant can't
+override built-in methods.

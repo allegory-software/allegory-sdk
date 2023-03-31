@@ -151,6 +151,8 @@ ELEMENT PROPERTIES
 	e.get_prop_attrs(k) -> {attr->val}
 	e.get_props() -> {k->attrs}
 
+	e.forward_prop(name, forward_element, [attr], 'forward|backward')
+
 PROPERTY PERSISTENCE
 
 	e.xoff()
@@ -1008,7 +1010,7 @@ e._init_component = function(prop_vals) {
 
 	e.initialized = null // for log_add_event(), see glue.js.
 
-	let cons_prop_vals = init(e)
+	let cons_prop_vals = init(e, prop_vals)
 
 	// initial prop values come from multiple sources, in priority order:
 	// - element() arg keys.
@@ -1627,26 +1629,15 @@ affecting the prototype.
 */
 
 e.override = function(method, func) {
-	let inherited = this[method] || noop
-	this[method] = function(...args) {
-		return func.call(this, inherited, ...args)
-	}
+	this[method] = wrap(this[method], func)
 }
 
 e.do_before = function(method, func) {
-	let inherited = repl(this[method], noop)
-	this[method] = inherited && function(...args) {
-		func.call(this, ...args)
-		inherited.call(this, ...args)
-	} || func
+	this[method] = do_before(this[method], func)
 }
 
 e.do_after = function(method, func) {
-	let inherited = repl(this[method], noop)
-	this[method] = inherited && function(...args) {
-		inherited.call(this, ...args)
-		func.call(this, ...args)
-	} || func
+	this[method] = do_after(this[method], func)
 }
 
 /* component virtual properties ----------------------------------------------
@@ -1681,7 +1672,7 @@ e.property = function(name, get, set) {
 }
 
 e.on_prop_changed = function(f) {
-	this.do_after('prop_changed',f)
+	this.do_after('prop_changed', f)
 }
 
 let announce_prop_changed = function(e, prop, v1, v0, ev) {
@@ -1729,7 +1720,7 @@ e.prop = function(prop, opt) {
 	if (!e[SET])
 		e[SET] = noop
 	let prop_changed = announce_prop_changed
-	let dv = or(opt.default, null)
+	let dv = 'default' in opt ? opt.default : null
 	let update_opt = opt.updates && words(opt.updates).tokeys() || null
 
 	opt.from_attr = from_attr_func(opt)
@@ -1848,6 +1839,42 @@ e.set_prop = function(k, v, ev) {
 e.get_prop = function(k) { return this[k] } // stub
 e.get_prop_attrs = function(k) { return this.props[k] } // stub
 e.get_props = function() { return this.props }
+
+e.forward_prop = function(k, fe, fk, attr, dir) {
+	let e = this
+	if (!e.props[k]) {
+		let attrs = assign(obj(), fe.get_prop_attrs(fk))
+		attrs.store = true
+		attrs.attr = attr
+		e.prop(k, attrs)
+	}
+	if (!dir || dir == 'bidi') { // bidirectional
+		e.do_after('set_'+k, function(v, v0, ev) {
+			if (ev && ev.forwarded_from == fe)
+				return
+			fe.set_prop(fk, v, ev)
+		})
+		fe.on_prop_changed(function(k1, v, v0, ev) {
+			if (k1 != fk)
+				return
+			ev = ev || obj()
+			ev.forwarded_from = fe
+			e.set_prop(k, v, ev)
+		})
+	} else if (dir == 'forward') {
+		e.do_after('set_'+k, function(v, v0, ev) {
+			fe.set_prop(fk, v, ev)
+		})
+	} else if (dir == 'backward') {
+		fe.on_prop_changed(function(k1, v, v0, ev) {
+			if (k1 != fk)
+				return
+			e.set_prop(k, v, ev)
+		})
+	} else {
+		assert(false)
+	}
+}
 
 // prop & element serialization & saving -------------------------------------
 

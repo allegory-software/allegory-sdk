@@ -152,9 +152,15 @@ in props:
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 css('.tooltip', 'z2 h-l h-t noclip noselect', `
 	max-width: 400px;  /* max. width of the message bubble before wrapping */
+	--bg-tooltip: var(--bg1);
+	--fg-tooltip: var(--fg);
+	--fg-tooltip-xbutton: var(--fg-dim);
+	--border-tooltip-xbutton: var(--border-light);
 `)
 
-css('.tooltip-body', 'h-bl p-y tight ro bg1', `
+css('.tooltip-body', 'h-bl p-y tight ro', `
+	background: var(--bg-tooltip);
+	color: var(--fg-tooltip);
 	box-shadow: var(--shadow-tooltip);
 `)
 
@@ -182,9 +188,11 @@ css('.tooltip-content', 'p-x-2', `
 	display: inline-block; /* shrink-wrap and also word-wrap when reaching container width */
 `)
 
-css('.tooltip-xbutton', 't-t small dim p-y-05 p-x-2 b0 b-l', `
+css('.tooltip-xbutton', 't-t small p-y-05 p-x-2 b0 b-l', `
 	align-self: stretch;
 	pointer-events: all;
+	color       : var(--fg-tooltip-xbutton);
+	border-color: var(--border-tooltip-xbutton);
 `)
 
 css_state('.tooltip-xbutton:not(.active):hover', '', `
@@ -194,7 +202,7 @@ css_state('.tooltip-xbutton:not(.active):hover', '', `
 css('.tooltip-tip', 'z1', `
 	display: block;
 	border: .5em solid transparent; /* border-based triangle shape */
-	color: var(--bg1);
+	color: var(--bg-tooltip);
 `)
 
 css('.tooltip-icon', 't-t m-t-05 m-l-2', `
@@ -237,30 +245,39 @@ css('.tooltip[side=bottom]', '', `margin-top    : -.25em; `)
 
 // coloring based on kind attr.
 
-css('.tooltip[kind=search] > .tooltip-body', '', ` background-color: var(--bg-search); color: #000; `)
-css('.tooltip[kind=search] > .tooltip-tip ', '', ` color: var(--bg-search); `)
+css('.tooltip[kind=search]', '', `
+	--bg-tooltip: var(--bg-search);
+	--fg-tooltip: #000;
+`)
 
-css('.tooltip[kind=info  ] > .tooltip-body', '', ` background-color: var(--bg-info); color: var(--fg-info); `)
-css('.tooltip[kind=info  ] > .tooltip-tip ', '', ` color: var(--bg-info); `)
-css('.tooltip[kind=info  ] > .tooltip-body > .tooltip-xbutton', '', `color: var(--fg-dim-on-dark); border-color: var(--border-light-on-dark); `)
+css('.tooltip[kind=info]', '', `
+	--bg-tooltip: var(--bg-info);
+	--fg-tooltip: var(--fg-info);
+	--fg-tooltip-xbutton    : var(--fg-dim-on-dark);
+	--border-tooltip-xbutton: var(--border-light-on-dark);
+`)
 
-css('.tooltip[kind=error ] > .tooltip-body', '', ` background-color: var(--bg-error); color: var(--fg-error); `)
-css('.tooltip[kind=error ] > .tooltip-tip ', '', ` color: var(--bg-error); `)
-css('.tooltip[kind=error ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-dim-on-dark); border-color: var(--border-light-on-dark); `)
+css('.tooltip[kind=error]', '', `
+	--bg-tooltip: var(--bg-error);
+	--fg-tooltip: var(--fg-error);
+	--fg-tooltip-xbutton    : var(--fg-dim-on-dark);
+	--border-tooltip-xbutton: var(--border-light-on-dark);
+`)
 
-css('.tooltip[kind=warn  ] > .tooltip-body', '', ` background-color: var(--bg-warn); color: var(--fg-warn); `)
-css('.tooltip[kind=warn  ] > .tooltip-tip ', '', ` color: var(--bg-warn); `)
-css('.tooltip[kind=warn  ] > .tooltip-body > .tooltip-xbutton', '', ` color: var(--fg-dim-on-dark); border-color: var(--border-light-on-dark); `)
+css('.tooltip[kind=warn]', '', `
+	--bg-tooltip: var(--bg-warn);
+	--fg-tooltip: var(--fg-warn);
+	--fg-tooltip-xbutton    : var(--fg-dim-on-dark);
+	--border-tooltip-xbutton: var(--border-light-on-dark);
+`)
 
+css_light('.tooltip[kind=cursor]', '', `
+	--bg-tooltip : #ffffcc; /* bg for at-cursor tooltips */
+`)
 css('.tooltip[kind=cursor]', '', `
 	margin-left: .75em;
 	margin-top : .75em;
 `)
-
-css_light('', '', `
-	--bg-tooltip : #ffffcc; /* bg for at-cursor tooltips */
-`)
-
 css('.tooltip[kind=cursor] > .tooltip-body', '', `
 	padding: .15em 0;
 	border: 1px solid #aaaa99;
@@ -270,12 +287,10 @@ css('.tooltip[kind=cursor] > .tooltip-body', '', `
 	font-size: 12px;
 	border-radius: 0;
 `)
-
 css('.tooltip[kind=cursor] > .tooltip-body > .tooltip-content', '', `
 	padding: 0 .5em;
 	white-space: pre !important;
 `)
-
 css('.tooltip[kind=cursor] > .tooltip-tip', 'hidden')
 
 G.tooltip = component('tooltip', function(e) {
@@ -3350,7 +3365,6 @@ G.pagenav = component('pagenav', function(e) {
 
 attrs/props:
 	for/for_id
-	name/for_name
 fires:
 	^for.label_hover(on)
 	^for.label_pointer{down|up}(ev)
@@ -3358,6 +3372,7 @@ fires:
 
 */
 
+// NOTE: doesn't work as implicit label with an <input> inside because of `noselect`.
 // using `label-widget` because `label` is a utility class...
 css('.label-widget', 'label noselect')
 css_state('.label-widget:is(:hover,.hover)', 'label-hover')
@@ -3367,23 +3382,12 @@ G.label = component('label', 'Input', function(e) {
 	e.class('label-widget')
 	e.make_disablable()
 
-	e.prop('for_id'  , {type: 'id', attr: 'for'})
-	e.prop('for_name', {type: 'input_name', attr: 'name'})
-	e.props.form = {type: 'id'} // form property already exists for labels
+	e.alias('for_id', 'htmlFor')
+	e.props.for_id = {type: 'id', attr: 'for'}
 
 	e.property('target', function() {
-		if (e.for_id) {
-			let te = window[e.for_id]
-			if (te)
-				return te
-		}
-		if (e.for_name) {
-			let form = e.form || e.closest('form')
-			if (form)
-				for (let te of form.all)
-					if (te.name == e.for_name)
-						return te
-		}
+		if (e.for_id)
+			return window[e.for_id]
 		let g = e.closest('.input-group')
 		return g && g.$1('.input')
 	})
@@ -3494,34 +3498,31 @@ We don't like abstractions around here but this one buys us many things:
     operate on the converted value, thus only having to parse the value once.
   - null values are filtered automatically.
   - result containing all messages with `failed` and `checked` status on each.
-  - It's not that much code, and it makes no garbage on re-validation.
+  - it makes no garbage on re-validation so you can validate huge lists fast.
+  - entire objects can be validated the same way simple values are, so it also
+    works for validating db records, applying inter-widget constraints, etc.
+  - it's not that much code for all of that.
 
 */
 
-G.validators = obj()
+let validators = obj()
 G.INVALID = obj() // convert functions return this to distinguish from null.
 
 let validator_props = obj()
 
-function update_validators() {
-	for (let name in validators) {
-		let validator = validators[name]
-		if (validator.updated)
-			continue
-		validator.name = name
-		validator.props = isstr(validator.props) && validator.props.words().tokeys() || null
-		validator.requires = words(validator.requires) || empty_array
-		assign(validator_props, validator.props)
-		validator.updated = true
-	}
+G.add_validator = function(validator) {
+	validators[validator.name] = validator
+	validator. props = isstr(validator. props) && validator. props.words().tokeys() || null
+	validator.vprops = isstr(validator.vprops) && validator.vprops.words().tokeys() || null
+	validator.requires = words(validator.requires) || empty_array
+	assign(validator_props, validator.props)
 }
 
-G.create_validator = function(e, ...args) {
-
-	update_validators()
+G.create_validator = function(e, field) {
 
 	let my_validators_invalid = true
 	let my_validators = []
+	let my_vprops = obj()
 	let results = []
 	let checked = obj()
 
@@ -3531,27 +3532,30 @@ G.create_validator = function(e, ...args) {
 			return true
 		checked[name] = false // means checking...
 		let validator = validators[name]
-		if (warn_if(!validator, 'unknown validator "{0}"', name))
+		if (warn_if(!validator, 'unknown validator', name))
 			return
-		if (!validator.applies(e, ...args))
+		if (!validator.applies(e, field))
 			return
 		for (let req of validator.requires)
-			if (warn_if(!add_validator(req),
-					'validator "{0}" required by "{1}" does not apply', req, name))
+			if (warn_if(!add_validator(req), 'validator', req, 'required by', name, 'does not apply'))
 				return
 		my_validators.push(validator)
+		assign(my_vprops, validator.vprops)
 		checked[name] = true
 		return true
 	}
 
 	function prop_changed(prop) {
-		if (prop && !validator_props[prop])
-			return
-		my_validators.clear()
-		for (let k in checked)
-			checked[k] = null
-		my_validators_invalid = true
-		return true
+		if (!prop || validator_props[prop]) {
+			my_validators.clear()
+			for (let k in my_vprops)
+				my_vprops[k] = null
+			for (let k in checked)
+				checked[k] = null
+			my_validators_invalid = true
+			return true
+		}
+		return my_validators_invalid || my_vprops[prop] || false
 	}
 
 	function update_my_validators() {
@@ -3560,15 +3564,15 @@ G.create_validator = function(e, ...args) {
 		my_validators_invalid = false
 	}
 
-	let out = {results: results}
+	let out = {results: results, validators: my_validators}
 	function validate(v, ann) {
 		if (my_validators_invalid)
 			update_my_validators()
 		v = repl(v, '', null)
 		let convert_failed
 		for (let validator of my_validators) {
-			validator._error = validator.error(e, v, ...args)
-			validator._rule  = validator.rule (e, v, ...args)
+			validator._error = validator.error(e, v, field)
+			validator._rule  = validator.rule (e, v, field)
 			if (convert_failed) {
 				validator._failed = true
 				continue // if convert failed, subsequent validators cannot run!
@@ -3586,11 +3590,11 @@ G.create_validator = function(e, ...args) {
 				}
 			let convert = validator.convert
 			if (convert) {
-				v = convert(e, v, ...args)
+				v = convert(e, v, field)
 				convert_failed = v === INVALID
 				v = repl(v, INVALID, null)
 			}
-			let failed = convert_failed || !validator.validate(e, v, ...args)
+			let failed = convert_failed || !validator.validate(e, v, field)
 			validator._checked = true
 			validator._failed = failed
 		}
@@ -3615,13 +3619,14 @@ G.create_validator = function(e, ...args) {
 		}
 		out.value = repl(v, undefined, null)
 		if (ann != false)
-			announce('validate', e, out, ...args)
+			announce('validate', e, out, field)
 		return out
 	}
 
 	return {
 		prop_changed: prop_changed,
 		validate: validate,
+		validators: my_validators,
 	}
 }
 
@@ -3629,42 +3634,20 @@ let field_name = function(field) {
 	return field.text || field.name || S('value', 'Value')
 }
 
-validators.required = {
+add_validator({
+	name     : 'required',
 	check_null: true,
 	props    : 'not_null required',
+	vprops   : 'input_value',
 	applies  : (e,    field) => field.not_null || field.required,
 	validate : (e, v, field) => v != null || field.default != null,
 	error    : (e, v, field) => S('validation_empty_error', '{0} is required', field_name(field)),
 	rule     : (e, v, field) => S('validation_empty_rule', '{0} is filled', field_name(field)),
-}
+})
 
-validators.min = {
-	requires : 'num',
-	props    : 'min',
-	applies  : (e,    field) => field.min != null,
-	validate : (e, v, field) => v >= field.min,
-	error    : (e, v, field) => S('validation_min_error',
-		'{0} is lower than {1}', field_name(field),
-			(field.from_num || return_arg)(field.min)),
-	rule     : (e, v, field) => S('validation_min_rule',
-		'{0} must be larger than or equal to {1}', field_name(field),
-			(field.from_num || return_arg)(field.min)),
-}
-
-validators.max = {
-	requires : 'num',
-	props    : 'max',
-	applies  : (e,    field) => field.max != null,
-	validate : (e, v, field) => v <= field.max,
-	error    : (e, v, field) => S('validation_max_error',
-		'{0} is larger than {1}', field_name(field),
-			(field.from_num || return_arg)(field.max)),
-	rule     : (e, v, field) => S('validation_max_rule',
-		'{0} must be smaller than (or equal to) {1}', field_name(field),
-			(field.from_num || return_arg)(field.max)),
-}
-
-validators.num = {
+add_validator({
+	name     : 'num',
+	vprops   : 'input_value',
 	applies  : (e,    field) => field.to_num,
 	convert  : (e, v, field) => {
 		v = repl(repl(v, '-'), '.') // just started typing? allow.
@@ -3673,18 +3656,70 @@ validators.num = {
 	validate : (e, v, field) => isnum(v),
 	error    : (e, v, field) => S('validation_num_error', '{0} is not a number' , field_name(field)),
 	rule     : (e, v, field) => S('validation_num_rule' , '{0} must be a number', field_name(field)),
-}
+})
 
-validators.checked_value = {
+add_validator({
+	name     : 'min',
+	requires : 'num',
+	props    : 'min',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.min != null,
+	validate : (e, v, field) => v >= field.min,
+	error    : (e, v, field) => S('validation_min_error',
+		'{0} is lower than {1}', field_name(field),
+			(field.from_num || return_arg)(field.min)),
+	rule     : (e, v, field) => S('validation_min_rule',
+		'{0} must be larger than or equal to {1}', field_name(field),
+			(field.from_num || return_arg)(field.min)),
+})
+
+add_validator({
+	name     : 'max',
+	requires : 'num',
+	props    : 'max',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.max != null,
+	validate : (e, v, field) => v <= field.max,
+	error    : (e, v, field) => S('validation_max_error',
+		'{0} is larger than {1}', field_name(field),
+			(field.from_num || return_arg)(field.max)),
+	rule     : (e, v, field) => S('validation_max_rule',
+		'{0} must be smaller than (or equal to) {1}', field_name(field),
+			(field.from_num || return_arg)(field.max)),
+})
+
+add_validator({
+	name     : 'checked_value',
 	props    : 'checked_value unchecked_value',
+	vprops   : 'input_value',
 	applies  : (e,    field) => field.checked_value !== undefined || field.unchecked_value !== undefined,
 	validate : (e, v, field) => v == field.checked_value || v == field.unchecked_value,
 	error    : (e, v, field) => S('validation_checked_value_error', '{0} is not {1} or {2}' , field_name(field), e.checked_value, e.unchecked_value),
 	rule     : (e, v, field) => S('validation_checked_value_rule' , '{0} must be {1} or {2}', field_name(field), e.checked_value, e.unchecked_value),
-}
+})
 
-validators.lookup = {
-	props    : 'lookup_nav',
+add_validator({
+	name     : 'range_values_valid',
+	vprops   : 'invalid1 invalid2',
+	applies  : (e   ) => e.is_range,
+	validate : (e, v) => !e.invalid1 && !e.invalid2,
+	error    : (e, v) => S('validation_range_values_valid_error', 'Range values are invalid'),
+	rule     : (e, v) => S('validation_range_values_valid_rule' , 'Range values must be valid'),
+})
+
+add_validator({
+	name     : 'positive_range',
+	vprops   : 'value1 value2',
+	applies  : (e   ) => e.is_range,
+	validate : (e, v) => e.value1 == null || e.value2 == null || e.value1 <= e.value2,
+	error    : (e, v) => S('validation_positive_range_error', 'range is negative'),
+	rule     : (e, v) => S('validation_positive_range_rule' , 'range must be positive'),
+})
+
+add_validator({
+	name     : 'lookup',
+	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
+	vprops   : 'input_value',
 	applies  : (e,    field) => field.lookup_nav,
 	validate : (e, v, field) => field.lookup_nav.ready
 			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
@@ -3692,16 +3727,7 @@ validators.lookup = {
 		'{0} not in the list of allowed values.', field_name(field)),
 	rule     : (e, v, field) => S('validation_lookup_rule',
 		'{0} must be in the list of allowed values.', field_name(field)),
-}
-
-css('.errors', 'v p')
-css('.errors-line', 'h p-05 gap-x')
-css('.errors-icon', 'w1 t-c')
-css('.errors-message', '')
-css('.errors-checked.errors-failed', 'fg-error bg-error')
-css('.errors-not-checked', 'dim')
-css('.errors-failed .errors-icon::before', 'fa fa-times')
-css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
+})
 
 /* <errors> ------------------------------------------------------------------
 
@@ -3713,13 +3739,20 @@ attr:      prop:
 
 */
 
+css('.errors', 'v p')
+css('.errors-line', 'h p-05 gap-x')
+css('.errors-icon', 'w1 t-c')
+css('.errors-message', '')
+css('.errors-checked.errors-failed', 'fg-error bg-error')
+css('.errors-not-checked', 'dim')
+css('.errors-failed .errors-icon::before', 'fa fa-times')
+css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
+
 G.errors = component('errors', 'Input', function(e) {
 
 	e.class('errors')
 
 	e.prop('for_id'  , {type: 'id', attr: 'for'})
-	e.prop('for_name', {type: 'name', attr: 'name'})
-	e.prop('form'    , {type: 'id'})
 	e.prop('show_all', {type: 'bool', attr: 'show-all'})
 
 	function update(out) {
@@ -3743,38 +3776,16 @@ G.errors = component('errors', 'Input', function(e) {
 		}
 	}
 
-	function find_target_element() {
-		if (e.for_id)
-			return window[e.for_id]
-		if (!e.for_name)
-			return
-		let form = e.form || e.closest('form')
-		if (!form)
-			return
-		for (let te of form.all)
-			if (te.name == e.for_name)
-				return te
-	}
-
-	function check_target_element(te) {
-		if (e.for_id)
-			return te.id == e.for_id
-		if (e.for_name) {
-			let form = e.form || e.closest('form')
-			return form && te.form == form && te.name == e.for_name
-		}
-	}
-
 	e.on_bind(function(on) {
 		if (on) {
-			let te = find_target_element()
+			let te = window[e.for_id]
 			if (te && te.validation_result)
 				update(te.validation_result)
 		}
 	})
 
 	e.listen('validate', function(te, out) {
-		if (!check_target_element(te))
+		if (!(e.for_id && te.id == e.for_id))
 			return
 		update(out)
 	})
@@ -3782,6 +3793,10 @@ G.errors = component('errors', 'Input', function(e) {
 })
 
 /* input_widget --------------------------------------------------------------
+
+An input widget has an `input_value` prop which when set, is validated and
+results in setting `value`, `invalid` and `validation_result`. It also has
+a hidden <input> element set to `value` so it works in a form.
 
 config:
 	name
@@ -3792,10 +3807,44 @@ state:
 	input_value (attr: value)
 	value
 	invalid
+methods:
+	validate()
 hooks:
-	on_update_value(f); f(ev)
+	on_validate(f); f(ev)
+stubs:
+	update_value_input(ev)
 
 */
+
+e.make_validator = function(validate_on_init) {
+
+	let e = this
+
+	e.prop('invalid', {type: 'bool', attr: true, default: false, slot: 'state'})
+
+	e.validator = create_validator(e, e)
+
+	e.validate = function(ev) {
+		e.validation_result = e.validator.validate(e.input_value)
+		e.invalid = e.validation_result.failed
+	}
+	e.on_validate = function(f) {
+		e.do_after('validate', f)
+	}
+
+	e.on_prop_changed(function(k, v, v0, ev) {
+		if (e.initialized == false)
+			return
+		if (e.validator.prop_changed(k))
+			e.validate(ev)
+	})
+
+	if (validate_on_init != false)
+		e.on_init(function() {
+			e.validate()
+		})
+
+}
 
 e.make_input_widget = function(opt) {
 
@@ -3804,57 +3853,48 @@ e.make_input_widget = function(opt) {
 	e.prop('name', {store: false})
 	e.prop('form', {type: 'id', store: false})
 
-	e.prop('input_value', {type: opt.input_value_type, attr: 'value', slot: 'state'}) // initial value and text value from user input
-	e.prop('value'      , {type: opt.value_type, slot: 'state'}) // typed valid value, not user-changeable
+	// initial value and also the value from user input, valid or not, typed or text.
+	e.prop('input_value', {type: opt.value_type, attr: 'value', slot: 'state',
+		default: undefined})
 
-	e.prop('invalid'    , {type: 'bool'  , slot: 'state', attr: true, default: false})
+	// typed, validated value, not user-changeable.
+	e.prop('value', {type: opt.value_type, slot: 'state'})
 
-	e.prop('required'   , {type: 'bool'  , attr: true, default: false})
-	e.prop('readonly'   , {type: 'bool'  , attr: true, default: false})
+	e.prop('required', {type: 'bool', attr: true, default: false})
+	e.prop('readonly', {type: 'bool', attr: true, default: false})
 
-	e.input = tag('input', {
-		hidden : opt.input_hidden ? '' : null,
-		type   : opt.input_type || 'hidden',
-	})
-	e.add(e.input)
+	e.value_input = tag('input', {hidden : '', type: 'hidden'})
+	e.add(e.value_input)
 
-	e.get_name = function(s) { return e.input.name }
-	e.set_name = function(s) { e.input.name = s }
-	e.get_form = function() { return e.input.form }
-	e.set_form = function(s) { e.input.form = s }
-
-	e.update_input = function() {
-		e.input.value = e.value
-	}
-	e.on_update(function(opt) {
-		if (opt.value)
-			e.update_input()
-	})
-	e.update({value: true})
-
-	e.input.on('input', function() {
-		e.set_prop('input_value', this.value, ev)
-	})
+	e.get_name = function(s) { return e.value_input.name }
+	e.set_name = function(s) { e.value_input.name = s }
+	e.get_form = function() { return e.value_input.form }
+	e.set_form = function(s) { e.value_input.form = s }
 
 	e.set_value = function(v, v0, ev) {
-		assert(ev && (ev.target == e || ev.target == e.input)) // not user-writable
+		assert(ev) // not user-writable
 	}
 
-	let validator = create_validator(e, e)
-	e.update_value = function(ev) {
-		e.validation_result = validator.validate(e.input_value)
+	e.make_validator(false)
+
+	e.update_value_input = function(ev) {
+		e.value_input.value = or(e.value, '')
+		e.value_input.disabled = e.value == null
+	}
+	e.on_validate(function(ev) {
 		e.set_prop('value', e.validation_result.value, ev || {target: e})
-		e.invalid = e.validation_result.failed
-		if (!(ev && ev.target == e.input))
-			e.update({value: true})
-	}
-	e.on_update_value = function(f) {
-		e.do_after('update_value', f)
-	}
-	e.on_prop_changed(function(k, v, v0, ev) {
-		if (k == 'input_value' || validator.prop_changed(k))
-			e.update_value(ev)
+		e.update_value_input(ev)
 	})
+
+	e.input_value_default = () => null // stub
+
+	e.on_init(function() {
+		if (e.input_value === undefined)
+			e.input_value = e.input_value_default()
+		else
+			e.validate()
+	})
+
 }
 
 /* <check>, <toggle>, <radio> buttons ----------------------------------------
@@ -3900,12 +3940,8 @@ function check_widget(e, input_type) {
 	e.clear()
 	e.class('checkbox')
 	e.make_disablable()
-	e.make_input_widget({
-		value_type: 'bool',
-		input_value_type: 'bool',
-		input_type: 'checkbox',
-		input_hidden: true,
-	})
+	e.make_input_widget({value_type: 'bool'})
+	e.input_value_default = () => e.unchecked_value
 	e.make_focusable()
 	e.property('label', function() {
 		if (!e.bound) return
@@ -3932,39 +3968,53 @@ function check_widget(e, input_type) {
 		if (opt.value) {
 			e.bool_attr('checked', e.checked || null)
 			e.class('null', e.value == null)
-			e.input.checked = e.checked
 		}
 	})
 
-	function user_set(v) {
-		e.set_prop('checked', v, {target: e})
-		e.fireup('input')
+	e.update_value_input = function(ev) {
+		// don't send any value when unchecked, just like native input does.
+		e.value_input.value = e.checked_value
+		e.value_input.disabled = !e.checked
 	}
-	function user_toggle() { user_set(!e.checked) }
-	e.on('keydown', function(key) {
+
+	e.on_validate(function(ev) {
+		e.update({value: true})
+	})
+
+	e.user_set = function(v, ev) {
+		e.set_checked(v, e.checked, ev || {target: e})
+		e.fireup('input', ev)
+	}
+	function user_toggle(ev) { e.user_set(!e.checked, ev) }
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 		if (key == ' ') { // same as for <button>
-			user_toggle()
+			user_toggle(ev)
+			return false
+		}
+		if (key == 'Enter' && e.form) { // same as <input type=checkbox|radio>
+			e.form.fire('submit')
 			return false
 		}
 		if (key == 'Delete') {
-			e.checked = null
+			e.user_set(null, ev)
 			return false
 		}
 	})
-	e.on('click', function() {
-		user_toggle()
+	e.on('click', function(ev) {
+		user_toggle(ev)
 	})
 	e.on('label_hover', function(on) {
 		e.class('hover', on)
 	})
-	e.on('label_click', function() {
-		user_toggle()
+	e.on('label_click', function(ev) {
+		user_toggle(ev)
 	})
 	e.on('hover', function(ev, on) {
 		let label = e.label
 		if (!label) return
 		label.fire('target_hover', on)
 	})
+
 }
 
 // check ---------------------------------------------------------------------
@@ -4010,10 +4060,8 @@ css_state('.check[checked] .check-frame', '', `
 `)
 
 G.check = component('check', function(e) {
-
 	e.class('check')
 	check_widget(e)
-
 	e.add(svg({viewBox: '-10 -10 20 20'},
 		svg_tag('circle'  , {class: 'checkbox-focus-circle'}),
 		svg_tag('rect'    , {class: 'check-frame'}),
@@ -4052,16 +4100,10 @@ css_state('.toggle[checked]:is(:hover,.hover)', '', `
 G.toggle = component('toggle', function(e) {
 	e.class('toggle')
 	check_widget(e)
-	e.thumb = div({class: 'toggle-thumb'})
-	e.add(e.thumb)
+	e.add(div({class: 'toggle-thumb'}))
 })
 
 /* <radio> -------------------------------------------------------------------
-
-additional attrs:
-	group
-additional props:
-	group
 
 */
 
@@ -4079,48 +4121,46 @@ G.radio = component('radio', function(e) {
 	e.class('radio')
 	check_widget(e, 'radio')
 
-	e.prop('group', {attr: true})
-
 	e.add(svg({viewBox: '-1 -1 2 2'},
 		svg_tag('circle', {class: 'checkbox-focus-circle'}),
 		svg_tag('circle', {class: 'radio-circle'}),
 		svg_tag('circle', {class: 'radio-thumb'}),
 	))
 
-	e.on('input', function() {
-		let v = e.checked
-		if (!v)
-			return
-		let others
-		if (e.group) {
-			let form = e.form || document.body
-			others = form.$('.radio[group='+e.group+']')
-		} else {
-			let form = e.form || e.closest('.radio-group')
-			others = form && form.$('.radio') || empty_array
+	e.group_elements = function() {
+		let form = e.form || document.body
+		return e.name ? [...form.$('.radio[name='+e.name+']')] : [e]
+	}
+
+	e.user_set = function(v, ev) {
+		if (v == false)
+			return // toggling doesn't make sense on a radio.
+		if (v == null) {
+			// setting `checked` to null doesn't make sense on a radio,
+			// but removing the checked state does.
+			v = false
 		}
-		for (let re of others)
+		for (let re of e.group_elements())
 			if (re != e)
 				re.checked = false
-		e.checked = true
-	})
+		e.set_prop('checked', v, ev || {target: e})
+		e.fireup('input')
+	}
 
-})
+	e.next_radio = function(inc) {
+		let res = e.group_elements()
+		return res[(res.indexOf(e)+inc) % res.len]
+	}
 
-// <radio-group> & .radio-group ----------------------------------------------
-
-css('radio-group', 'skip')
-
-G.radio_group = component('radio-group', 'Input', function(e) {
-
-	e.class('radio-group')
-	e.make_disablable()
-	e.init_child_components()
-
-	e.property('value', function() {
-		for (let r of e.each('.radio'))
-			if (r.checked)
-				return r.value
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+		if (key == 'ArrowDown' || key == 'ArrowUp' || key == 'ArrowLeft' || key == 'ArrowRight') {
+			e.next_radio((key == 'ArrowUp' || key == 'ArrowLeft') ? -1 : 1).focus()
+			return false
+		}
+		if (key == 'Tab') {
+			// TODO: exit radio group on Tab like native input does?
+			// Not sure about this, it's so confusing, but maybe people expect it?
+		}
 	})
 
 })
@@ -4133,7 +4173,7 @@ model options:
 	decimals
 state:
 	value | value1 value2
-	progress | min_progress max_progress
+	progress | progress1 progress2
 methods:
 
 */
@@ -4163,7 +4203,7 @@ css('.slider-thumb', 'abs round', `
 `)
 
 // toggling visibility on hover requires click-through for stable hovering!
-css('.slider-thumb .tooltip', 'click-through')
+css('.slider-thumb .tooltip', 'click-through m-l-0')
 
 css('.slider-mark', 'abs b-l t-c noselect', `
 	margin-left: -1px;
@@ -4176,23 +4216,8 @@ css('.slider-mark-label', 'rel label nowrap-dots', `
 	top : .7em;
 `)
 
-css_state('.slider.modified', 'no-bg')
-
-css_state('.slider-thumb:focus-visible', 'no-shadow', `
-	// outline: 6px solid var(--outline-slider-thumb-focused);
-`)
-css_state('.slider:focus-within .slider-value-fill', '', `
-	background-color: var(--bg-focused-selected);
-`)
-css_state('.slider:focus-within .slider-thumb', '', `
-	background-color: var(--bg-focused-selected);
-`)
-
-// TODO: invalid state
-// css_state('.slider.invalid .slider-thumb', '', `
-// 	border-color: var(--bg-error);
-// 	background: var(--bg-error);
-// `)
+css_state('.slider-thumb[invalid]', 'bg-error')
+css_state('.slider[invalid] .slider-value-fill', 'bg-error')
 
 css_state('.slider.animate .slider-thumb       ', 'ease')
 css_state('.slider.animate .slider-value-fill'  , 'ease')
@@ -4222,47 +4247,32 @@ let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, de
 	return [step, min, max]
 }
 
+component('slider-thumb', function(e) {
+	e.class('slider-thumb')
+	e.to_num = num
+	e.from_num = return_arg
+	e.make_input_widget({value_type: 'number'})
+	e.prop('min', {type: 'number'})
+	e.prop('max', {type: 'number'})
+})
+
 let slider_widget = function(e, range) {
 
 	e.clear()
-
 	e.class('slider')
 	e.make_disablable()
+	e.is_range = range // for range validator
 
-	e.prop('from'       , {type: 'number', default: 0})
-	e.prop('to'         , {type: 'number', default: 1})
+	e.prop('form'    , {type: 'id', store: false})
 
-	e.prop('min'        , {type: 'number'})
-	e.prop('max'        , {type: 'number'})
-	e.prop('decimals'   , {type: 'number', default: 2})
+	e.prop('from'    , {type: 'number', default: 0})
+	e.prop('to'      , {type: 'number', default: 1})
 
-	e.prop('marked'     , {type: 'bool'  , default: true})
+	e.prop('min'     , {type: 'number'})
+	e.prop('max'     , {type: 'number'})
+	e.prop('decimals', {type: 'number', default: 2})
 
-	for (let I of range ? ['1', '2'] : ['']) {
-
-		e.prop('name'+I)
-		e.prop('value'+I, {type: 'number'})
-
-		let inp = tag('input', {type: 'hidden', hidden: ''})
-		e['input'+I] = inp
-		e.add(inp)
-
-		e['set_name' +I] = function(s) { inp.name = s }
-		e['set_value'+I] = function(v) { inp.value = v }
-
-	}
-
-	e.prop('form', {type: 'id', store: false})
-	if (range) {
-		e.get_form = function() { return e.input1.form }
-		e.set_form = function(s) {
-			e.input1.form = s
-			e.input2.form = s
-		}
-	} else {
-		e.get_form = function() { return e.input.form }
-		e.set_form = function(s) { e.input.form = s }
-	}
+	e.prop('marked'  , {type: 'bool'  , default: true})
 
 	e.mark_w = e.css().prop('--slider-mark-w').num()
 
@@ -4276,24 +4286,42 @@ let slider_widget = function(e, range) {
 
 	e.marks = div({class: 'slider-marks'})
 
-	if (range) {
-		e.min_value_thumb = div({class: 'slider-thumb'})
-		e.max_value_thumb = div({class: 'slider-thumb'})
-		e.min_value_thumb.VAL = 'value1'
-		e.max_value_thumb.VAL = 'value2'
-		e.thumbs = [e.min_value_thumb, e.max_value_thumb]
-	} else {
-		e.value_thumb = div({class: 'slider-thumb'})
-		e.value_thumb.VAL = 'value'
-		e.thumbs = [e.value_thumb]
+	let validator = create_validator(e, e)
+
+	e.thumbs = []
+	for (let i = 1; i <= (range ? 2 : 1); i++) {
+		let K = range ? i : ''
+		let thumb = element({tag: 'slider-thumb', K: K})
+		e.forward_prop('min', thumb, 'min', null, 'forward')
+		e.forward_prop('max', thumb, 'max', null, 'forward')
+		e.forward_prop('name'+K, thumb, 'name', null, 'forward')
+		e.forward_prop('required'+K, thumb, 'required', null, 'forward')
+		e.forward_prop('readonly'+K, thumb, 'readonly', null, 'forward')
+		e.forward_prop('input_value'+K, thumb, 'input_value', 'value'+K, 'forward')
+		e.forward_prop('value'+K, thumb, 'value', null, 'bidi')
+		e.forward_prop('invalid'+K, thumb, 'invalid', null, 'backward')
+		e.thumbs.push(thumb)
 	}
 
-	e.add(e.bg_fill, e.valid_fill, e.value_fill, e.marks,
-		e.min_value_thumb, e.max_value_thumb, e.value_thumb)
+	e.add(e.bg_fill, e.valid_fill, e.value_fill, e.marks, ...e.thumbs)
 
 	e.make_focusable(...e.thumbs)
 
-	// model
+	e.get_form = function() { return e.thumbs[0].form }
+	e.set_form = function(s) {
+		for (let thumb of e.thumbs)
+			thumb.form = s
+	}
+
+	if (range) {
+		e.make_validator()
+		e.property('input_value', () => e)
+		e.on_validate(function(e) {
+			//
+		})
+	}
+
+	// model: progress
 
 	function cmin() { return max(or(e.min, -1/0), e.from) }
 	function cmax() { return min(or(e.max,  1/0), e.to  ) }
@@ -4304,11 +4332,7 @@ let slider_widget = function(e, range) {
 		return clamp(lerp(v, e.from, e.to, 0, 1), 0, 1)
 	}
 
-	function VAL(val_i) {
-		return e.thumbs[val_i || 0].VAL
-	}
-
-	e.set_progress = function(p, VAL) {
+	e.set_progress_for = function(K, p, ev) {
 
 		let v = lerp(p, 0, 1, e.from, e.to)
 
@@ -4316,53 +4340,69 @@ let slider_widget = function(e, range) {
 			v = floor(v / multiple() + .5) * multiple()
 
 		if (range)
-			if (VAL == 'value1')
-				v = min(v, e.value2)
+			if (K == 1)
+				v = e.value2 != null ? min(v, e.value2) : null
 			else
-				v = max(v, e.value1)
+				v = e.value1 != null ? max(v, e.value1) : null
 
-		e[VAL] = clamp(v, cmin(), cmax())
+		e.set_prop('input_value'+K, clamp(v, cmin(), cmax()), ev)
 	}
 
-	e.get_progress = function(VAL) {
-		return progress_for(e[VAL])
+	e.get_progress_for = function(K) {
+		return progress_for(e['value'+K])
 	}
 
-	if (!range) {
-		e.prop('progress', {private: true, store: false})
-	} else {
-		for (let thumb of e.thumbs) {
-			let VAL = thumb.VAL
-			e.prop(VAL+'_progress', {private: true, store: false})
-			e['get_'+VAL+'_progress'] = function( ) { e.get_progress(VAL) }
-			e['set_'+VAL+'_progress'] = function(p) { e.set_progress(p, VAL) }
-		}
+	for (let thumb of e.thumbs) {
+		let K = thumb.K
+		e.prop('progress'+K, {private: true, store: false})
+		e['get_progress'+K] = function() { e.get_progress_for(K) }
+		e['set_progress'+K] = function(p, ev) { e.set_progress_for(K, p, ev) }
 	}
 
 	// view
 
-	e.tooltip_target = e.value_thumb || e
-	e.tooltip_align = 'center'
-
-	e.user_set_progress = function(p, VAL) {
-		e.set_progress(p, VAL)
+	e.user_set_progress_for = function(K, p, ev) {
+		e.set_progress_for(K, p, ev)
 	}
 
 	e.display_value_for = function(v) {
-		return (v && e.decimals != null) ? v.dec(e.decimals) : v
+		return (v != null && e.decimals != null) ? v.dec(e.decimals) : v
 	}
 
 	function update_thumb(thumb, p) {
-		thumb.style.left = (p * 100)+'%'
-		if (thumb.tooltip) {
-			thumb.tooltip.text = e.display_value_for(e[thumb.VAL])
-			thumb.tooltip.position()
-		}
+		thumb.x1 = (p * 100)+'%'
+		update_tooltip(thumb, true)
 	}
 
 	function update_fill(fill, p1, p2) {
-		fill.style.left  = (p1 * 100)+'%'
-		fill.style.width = ((p2 - p1) * 100)+'%'
+		fill.x1 = (p1 * 100)+'%'
+		fill.x2 = ((1-p2) * 100)+'%'
+	}
+
+	function update_tooltip(thumb, update_text) {
+		let show = thumb.matches(':is(:hover,:focus-visible)')
+			&& !thumb.getAnimations().length
+		if (!show && !thumb.tooltip) return
+		if (!thumb.tooltip) {
+			thumb.tooltip = tooltip({align: 'center'})
+			thumb.add(thumb.tooltip)
+			update_text = true
+		}
+		if (update_text) {
+			thumb.tooltip.kind = e.invalid ? 'error' : null
+			let vr1 = e.thumbs[0].validation_result
+			let vr2 = e.thumbs[1] && e.thumbs[1].validation_result
+			let vrr = e.validation_result
+			let fr1 = vr1 && vr1.first_failed_result
+			let fr2 = vr2 && vr2.first_failed_result
+			let frr = vrr && vrr.first_failed_result
+			let a = [e.display_value_for(e['value'+thumb.K])]
+			if (fr1 && fr1.error) a.push(fr1.error)
+			if (fr2 && fr2.error) a.push(fr2.error)
+			if (frr && frr.error) a.push(frr.error)
+			thumb.tooltip.text = a.join_nodes(tag('br'))
+		}
+		thumb.tooltip.update({show: show})
 	}
 
 	e.on_update(function() {
@@ -4379,10 +4419,10 @@ let slider_widget = function(e, range) {
 
 		p1 = progress_for(range ? e.value1 : cmin())
 		p2 = progress_for(range ? e.value2 : e.value)
-		update_fill(e.value_fill, p1, p2)
+		update_fill(e.value_fill, min(p1, p2), max(p1, p2))
 
 		for (let thumb of e.thumbs) {
-			let p = e.get_progress(thumb.VAL)
+			let p = e.get_progress_for(thumb.K)
 			update_thumb(thumb, p)
 		}
 
@@ -4428,24 +4468,26 @@ let slider_widget = function(e, range) {
 
 	for (let thumb of e.thumbs) {
 
-		thumb.on('hover', function(ev, on) {
-			if (!thumb.tooltip) {
-				thumb.tooltip = tooltip({align: 'center'})
-				thumb.add(thumb.tooltip)
-			}
-			thumb.tooltip.show(on)
-			e.update()
-		})
+		function update_tt() { update_tooltip(thumb) }
+		thumb.on('hover', update_tt)
+		thumb.on('focus', update_tt)
+		thumb.on('blur' , update_tt)
+		thumb.on('transitionstart', update_tt)
+		thumb.on('transitionend'  , update_tt)
 
 		thumb.on('pointerdown', function(ev, mx0) {
-			// TODO: this is screwing up the :focus-visible heuristic,
-			// and runafter(0) hack doesn't help here, dunno why.
-			thumb.focus()
+
+			// delayed focus to avoid screwing up the :focus-visible heuristic!
+			runafter(0, function() {
+				thumb.focus()
+			})
+
 			let r = e.rect()
 			let tr = thumb.rect()
 			let dx = mx0 - (tr.x + tr.w / 2)
 			function pointermove(ev, mx) {
-				e.user_set_progress((mx - dx - r.x) / r.w, thumb.VAL)
+				e.user_set_progress_for(thumb.K, (mx - dx - r.x) / r.w, ev)
+				return false
 			}
 			pointermove(ev, mx0)
 			function pointerup(ev) {
@@ -4453,10 +4495,12 @@ let slider_widget = function(e, range) {
 			}
 			e.class('animate', e.decimals != null
 				&& lerp(e.from + multiple(), e.from, e.to, 0, r.w) >= 20)
-			return this.capture_pointer(ev, pointermove, pointerup)
+
+			// NOTE: not returning false here because it screws :focus-visible.
+			this.capture_pointer(ev, pointermove, pointerup)
 		})
 
-		thumb.on('keydown', function(key, shift, ctrl, alt) {
+		thumb.on('keydown', function(key, shift, ctrl, alt, ev) {
 			if (alt)
 				return
 			let d
@@ -4471,13 +4515,23 @@ let slider_widget = function(e, range) {
 				case 'End'        : d =  1/0; break
 			}
 			if (d) {
-				let p = e.get_progress(this.VAL) + d * (shift ? .1 : 1)
-				e.user_set_progress(p, this.VAL)
+				let p = e.get_progress_for(this.K) + d * (shift ? .1 : 1)
+				e.user_set_progress_for(this.K, p, ev)
 				return false
 			}
 		})
 
 	}
+
+	if (!range)
+		e.on('pointerdown', function(ev, mx) {
+			for (let thumb of e.thumbs)
+				if (thumb.contains(ev.target))
+					return
+			let r = e.bg_fill.rect()
+			let p = (mx - r.x) / r.w
+			e.user_set_progress_for('', p, ev)
+		})
 
 	e.on('resize', function() {
 		e.position()
@@ -4537,7 +4591,7 @@ css_util('.gap-input', 'gap-x-input gap-y-input')
 
 css('.inputbox', 'm-y-05 b p-input t-m h-m gap-x-input lh-input')
 
-css_state('.inputbox.invalid', '', `
+css_state('.inputbox[invalid]', '', `
 	border-color: var(bg-invalid);
 `)
 
@@ -4582,7 +4636,7 @@ css('.input-group > *:last-child' , 'b-r')
 // nested input-groups should not have borders.
 css('.input-group', 'b0')
 
-css_state('.input-group.invalid > *', '', `
+css_state('.input-group[invalid] > *', '', `
 	background-color : var(--bg-error);
 `)
 
@@ -5128,21 +5182,19 @@ if (0) {
 
 G.num_input = component('num-input', 'Input', function(e) {
 
-	e.prop('input_value', {attr: 'value' , slot: 'state'}) // initial value and text value from user input
-	e.prop('name')
-	e.prop('form'       , {type: 'id', store: false})
-	e.prop('value'      , {type: 'number', slot: 'state'}) // typed valid value, not user-changeable
-	e.prop('invalid'    , {type: 'bool'  , slot: 'state', default: false})
-	e.prop('errors'     , {type: 'array' , slot: 'state', default: false})
-	e.prop('required'   , {type: 'bool'  , default: false})
-	e.prop('readonly'   , {type: 'bool'  , default: false})
+	e.clear()
+	e.class('num-input input-group ro-collapse-h')
+
+	e.make_input_widget({
+		value_type: 'number',
+		input_classes: 'num-input-input',
+	})
+
 	e.prop('decimals'   , {type: 'number', default: 0})
 	e.prop('min'        , {type: 'number'})
 	e.prop('max'        , {type: 'number'})
-	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus', default: 'none', attr: true})
-
-	e.class('num-input input-group ro-collapse-h')
-	e.input = input({classes: 'num-input-input'})
+	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus',
+		default: 'none', attr: true})
 
 	e.make_focusable('focus-ring', e.input)
 
@@ -5190,18 +5242,6 @@ G.num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	e.set_name = function(s) { e.input.name = s }
-	e.get_form = function() { return e.input.form }
-	e.set_form = function(s) { e.input.form = s }
-
-	e.set_value = function(v, v0, ev) {
-		assert(ev && (ev.target == e || ev.target == e.input)) // not user-writable
-	}
-
-	e.valid_value = return_arg // stub
-
-	e.update({value: true})
-
 	e.from_text = num
 
 	e.to_num = num
@@ -5211,11 +5251,6 @@ G.num_input = component('num-input', 'Input', function(e) {
 		return v != null ? v.dec(this.decimals) : v
 	}
 
-	e.set_invalid = function(v) {
-		v = !!v
-		e.class('invalid', v)
-	}
-
 	e.set_readonly = function(v) {
 		v = !!v
 		e.class('readonly', v)
@@ -5223,38 +5258,19 @@ G.num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	let validator = create_validator(e, e)
-	function update_value(ev) {
-		let out = validator.validate(e.input_value)
-		e.validation_result = out
-		e.set_prop('value', out.value, ev || {target: e})
-		e.invalid = out.failed
-		if (!(ev && ev.target == e.input))
-			e.update({value: true})
+	e.update_input = function() {
+		e.input.value = e.value != null ? e.to_text(e.value) : e.input_value
 	}
-	e.set_input_value = function(v, v0, ev) {
-		update_value(ev)
-	}
-	e.on_prop_changed(function(k, v, v0, ev) {
-		if (validator.prop_changed(k))
-			update_value(ev)
-	})
 
 	e.set_decimals = function() {
 		e.update({value: true})
 	}
-
-	e.input.on('input', function(ev) {
-		e.set_prop('input_value', this.value, ev)
-	})
 
 	e.on_init(function() {
 		e.set_buttons(e.buttons)
 	})
 
 	e.on_update(function(opt) {
-		if (opt.value)
-			e.input.value = e.input_value
 		if (opt.select_all)
 			e.input.select_range(0, -1)
 	})
@@ -7187,8 +7203,6 @@ function date_input_widget(e, has_date, has_time, range) {
 
 	e.prop('min', {type: 'time'})
 	e.prop('max', {type: 'time'})
-
-	// e.valid_value = function()
 
 	if (has_date) {
 		e.to_text = function(t) {

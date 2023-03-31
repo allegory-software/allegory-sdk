@@ -46,7 +46,9 @@ CALLBACKS
 	return_true
 	return_false
 	return_arg
-	assert_false
+	wrap(inherited, f) -> f'
+	do_before(inherited, f) -> f'
+	do_after(inherited, f) -> f'
 
 ERRORS
 
@@ -356,12 +358,33 @@ Number.prototype.base = function(base, digits) {
 }
 Number.prototype.dec = Number.prototype.toFixed
 
-// callback stubs ------------------------------------------------------------
+// callbacks -----------------------------------------------------------------
 
 G.noop = function() {}
 G.return_true = function() { return true; }
 G.return_false = function() { return false; }
 G.return_arg = function(arg) { return arg; }
+
+G.wrap = function(inherited, func) {
+	inherited = inherited || noop
+	return function(...args) {
+		return func.call(this, inherited, ...args)
+	}
+}
+
+G.do_before = function(inherited, func) {
+	return repl(inherited, noop) && function(...args) {
+		func.call(this, ...args)
+		inherited.call(this, ...args)
+	} || func
+}
+
+G.do_after = function(inherited, func) {
+	return repl(inherited, noop) && function(...args) {
+		inherited.call(this, ...args)
+		func.call(this, ...args)
+	} || func
+}
 
 // error handling ------------------------------------------------------------
 

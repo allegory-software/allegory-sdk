@@ -637,15 +637,15 @@ toggle_collapsed = function() {
 <!--------------------------------------------------------------------------->
 
 <xmp id=check_demo>
-<form id=myform class="g-m g-2col gap-x">
-	<check name=check1 checked-value=yes checked></check><label name=check1>Check me baby</label>
-	<check name=check2 checked-value=yes value=wrong required></check><label name=check2>Check me baby</label>
-	<d></d><errors name=check2 show-all></errors>
-	<check name=check3 checked-value=yes unchecked-value=no></check><label name=check3>Check me baby</label>
+<form id=my_form class="g-m g-2col gap-x">
+	<check id=my_check1 name=check1 checked-value=yes checked></check><label for=my_check1>Check me baby</label>
+	<check id=my_check2 name=check2 checked-value=yes value=wrong required></check><label for=my_check2>Check me baby</label>
+	<d></d><errors for=my_check2 show-all></errors>
+	<check id=my_check3 name=check3 checked-value=yes unchecked-value=no></check><label for=my_check3>Check me baby</label>
 	<d></d><button>Submit</button>
 </form>
 <script run>
-myform.on('submit', function(ev) {
+my_form.on('submit', function(ev) {
 	for (const [name,value] of new FormData(this))
 		pr('', name, ':', value)
 	return false
@@ -664,24 +664,51 @@ myform.on('submit', function(ev) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=radio_demo>
-<radio-group class="v-m m b p ro">
-	<d class="h-m"><radio id=my_radio1 checked></radio><label for=my_radio1>Option 1</label></d>
-	<d class="h-m"><radio id=my_radio2></radio><label for=my_radio2>Option 2</label></d>
-</radio-group>
+<form id=my_form class=skip>
+	Group 1:
+	<d class="t-m"><radio name=r1 checked-value=v1 id=my_radio1 checked></radio><label for=my_radio1>Option 1</label></d>
+	<d class="t-m"><radio name=r1 checked-value=v2 id=my_radio2></radio><label for=my_radio2>Option 2</label></d>
+	Group 2:
+	<d class="t-m"><radio name=r2 checked-value=v1 id=my_radio3></radio><label for=my_radio3>Option 1</label></d>
+	<d class="t-m"><radio name=r2 checked-value=v2 id=my_radio4></radio><label for=my_radio4>Option 2</label></d>
+	<button>Submit</button>
+</form>
+<script run>
+my_form.on('submit', function(ev) {
+	for (const [name,value] of new FormData(this))
+		pr('', name, ':', value)
+	return false
+})
+</script>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
 <xmp id=slider_demo>
-<slider value=0.7 marked=false></slider>
-<slider value=5 from=1 to=9 min=3 max=7 decimals=0></slider>
-<range-slider value1=1200 value2=1800 from=1000 to=2000 decimals=0></range-slider>
 <script run>
-//s1.add_validator('custom', field => ({
-//		validate: v => isnum(v) && v >= .2 && v <= .8,
-//		message: 'Value not between .2 and .8',
-//	})
-//)
+add_validator({
+	name     : 's1_slider',
+	props    : 'name',
+	vprops   : 'input_value',
+	requires : 'num',
+	applies  : (e) => e.name == 's1' && (pr(e.tag) || true),
+	validate : (e, v) => v >= .2 && v <= .8,
+	error    : () => 'Value not between .2 and .8',
+	rule     : () => 'Value must be between .2 and .8',
+})
+</script>
+<form id=my_form class=skip>
+	<slider name=s1 value=0.7 marked=false></slider>
+	<slider name=s2 value=5 from=1 to=9 min=3 max=7 decimals=0></slider>
+	<range-slider name1=s31 name2=s32 value1=1800 value2=1200 from=1000 to=2000 decimals=0></range-slider>
+	<button>Submit</button>
+</form>
+<script run>
+my_form.on('submit', function(ev) {
+	for (const [name,value] of new FormData(this))
+		pr('', name, ':', value)
+	return false
+})
 </script>
 </xmp>
 
@@ -1174,11 +1201,9 @@ main.add(g)
 
 <xmp id="form_demo">
 <form id=myform class="g-h g-m g-2col gap-x" style="grid-template-columns: 5em auto">
-	<check  name=check1 checked-value=c1 value=c1 class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
-	<check  name=check2 checked-value=c2 value=false class="self-h-c" id=check1></check><label for=check2>Check me baby</label>
-	<check  name=check3 checked-value=c3 class="self-h-c" id=check1></check><label for=check3>Check me baby</label>
-	<radio  name=radio1 value=r1 class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
-	<radio  name=radio1 value=r2 class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
+	<check  name=check1 checked-value=c1 class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
+	<radio  name=radio1 checked-value=r1 class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
+	<radio  name=radio1 checked-value=r2 class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
 	<toggle name=toggle1 class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
 	<d></d><label for=input1>Label of next input</label>
 	<info class="self-h-c">

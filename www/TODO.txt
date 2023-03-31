@@ -30,10 +30,6 @@ THINK
 BUGS
 ------------------------------------------------------------------------------
 
-* SLIDER
-	- fill animation glitch
-	- tooltip offset wrong
-
 * TOASTER
 	- weird spacing between messages when starting
 
