@@ -14,17 +14,22 @@ The **server-side stack** is written entirely in Lua and contains:
  * async process execution with pipes and shared memory.
  * the fastest libraries for hashing, encryption, compression, image codecs,
    image resizing, JSON and XML codecs, CSV parsing and XLS generation.
- * async connectors for MySQL and Tarantool.
- * a powerful SQL preprocessor with conditionals and macros.
+ * async clients for MySQL and Tarantool.
+ * a powerful SQL preprocessor with macros and conditionals.
  * a database schema DSL with automatic schema synchronization.
  * ...and more, see full list of modules below.
 
 The **client-side stack** is written from scratch in JavaScript and contains:
 
-* a virtual editable tree-grid widget that can handle 100,000 records at 60 fps.
+* a virtual editable tree-grid widget that can handle 100K records at 60 fps.
 * a collection of data-bound widgets for data entry, navigation and reporting.
 * layouting widgets for split-pane layouts common in data-dense business applications.
 * a mechanism for web components better than the native one.
+
+> If you're only interested in some good quality web components but don't care
+at all for the server-side stack then good news, you can use the widgets library
+with any server technology you like (in fact our widgets demo doesn't even
+require a web server to run at all so no real coupling there).
 
 # Who is this for?
 
@@ -32,17 +37,24 @@ This is for people who could write the whole thing themselves if they wanted
 to but just don't have the time and could use a head start of about 2-5 years
 depending on experience. You will have to read the code while you're using it
 and gradually start to _own it_ so that in time you gain the ability and the
-freedom to work on it like you wrote it yourself. This is a mechanics' car
-not a Toyota with a 10 year warranty that you never have to open the hood on.
+freedom to work on it like you wrote it yourself.
+
+This is a very different proposition than the black-box approach of most
+frameworks that don't encourage looking under the hood. Our approach comes
+from the observation that in order to keep things simple, you have to solve
+your problems at the right level of abstraction, and you can only do that
+if you own the entire stack. We'd own the OS if we could, we'd definitely own
+the browser, it's only a matter of scope and user expectations that we don't.
 
 So even though this is more-less a web-framework-with-a-server type of deal,
 if you think you're too far away from making your own full stack from scratch,
-server and all, this is probably not for you.
+server and all, or you prefer the black-box approach, then this is probably
+not for you.
 
 If, on the other hand, you're one of the increasingly rare types who
 thinks that procedural > functional > OOP, library > framework, SQL > ORM,
-JavaScript > React, dynamic > static, relational > nosql, less LOC > more LOC,
-and you get a rash whenever you hear the words "build system", "package manager",
+JavaScript > TyoeScript, relational > nosql, less LOC > more LOC, and you get
+a rash whenever you hear the words "build system", "package manager",
 "folder structure", "container" or "dependency injection", then you might
 actually like this.
 
@@ -74,14 +86,14 @@ versioned to follow the main repo.
 
 # Building
 
-See our [Building Guide](c/README.md) which also teaches how create build
-scripts for new libraries.
+See our [Building Guide](c/README.md) which also teaches how to create build
+scripts for new libraries without using a build system.
 
-# Runtime
+# Server Runtime
 
   * [LuaJIT](RUNTIME.md)               - Custom build of LuaJIT
 
-# Modules
+# Server Modules
 
 * __Standard Library__
   * [glue](lua/glue.lua)               - "Assorted lengths of wire" library
@@ -164,33 +176,48 @@ scripts for new libraries.
   * [cpu_supports](lua/cpu_supports.lua) - check CPU SIMD sets at runtime
 * __Dev Tools__
   * [debugger](lua/debugger.lua)       - Lua command-line debugger
-* __Web / Server side__
+
+> The runtime and the modules up to here can be used as a base to build any kind
+of app including desktop apps (just add your favorite UI toolkit). You can also
+use it as a base for your own web framework, since this part is mostly mechanical
+and non-opinionated. The opinionated part comes next.
+
+## Web Framework
+
+* __Webb Web Framework__
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
   * [webb_spa](lua/webb_spa.lua)       - Single-page app support
-  * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
-* __Web / Client side__
-  * [Widgets](WIDGETS.md)              - Overview of the web components suite
-  * [Widgets Demo][widgets-demo]       - Widgets Demo (dev branch; http server not required to run it!)
-  * [glue.js](www/glue.js)             - JS "assorted lenghs of wire" library
-  * [dom.js](www/dom.js)               - DOM API and web components
-  * [css.js](www/css.js)               - Functional CSS library & reset
+* __Webb Web Framework / Client-side__
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
-  * [widgets.js](www/widgets.js)       - Web components & layouting widgets
+* __Support Libs__
+  * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
+
+## Client Modules
+
+* __Widgets Docs & Demo__
+  * [Widgets Docs](WIDGETS.md)         - Overview of the web components suite
+  * [Widgets Demo][widgets-demo]       - Widgets Demo (dev branch; http server not required to run it!)
+* __JavaScript Standard Library__
+  * [glue.js](www/glue.js)             - JavaScript "assorted lenghs of wire" library
+  * [dom.js](www/dom.js)               - DOM API and web components mechanism
+  * [css.js](www/css.js)               - Functional CSS library & reset
+* __Widgets Library__
+  * [widgets.js](www/widgets.js)       - Web components
+  * [module.js](www/module.js)         - Layered persistence for UI components
+* __Data-Driven Widgets__
   * [nav.js](www/nav.js)               - Model mixin for data-driven widgets
   * [grid.js](www/grid.js)             - Nav-based virtual tree-grid widget
-  * [listbox.js](www/listbox.js)       - Nav-based listbox widget
-  * [input.js](www/input.js)           - Nav-based single-value (scalar) widgets
   * [charts.js](www/charts.js)         - Nav-based graphs & charts
-  * [module.js](www/module.js)         - Persistence layer for widget-based self-editing UIs
-* __Web / Client side / Third-party libs & resources__
+* __Support libs & resources__
   * [mustache.js](www/mustache.js)         - Logic-less templates ([Mustache](https://mustache.github.io/))
   * [purify.js](www/purify.js)             - HTML sanitizer       ([DOMPurify](https://github.com/cure53/DOMPurify))
   * [markdown-it.js](www/markdown-it.js)   - Markdown parser      ([Markdown-it](https://github.com/markdown-it/markdown-it); 6 KLOC but extensible and does tables)
   * [ace/ace.js](www/ace/ace.js)           - Code editor          ([ACE](https://ace.c9.io/); huge, only load when needed)
-  * icon fonts: fontawesome, material icons
-  * sans serif fonts: inter, opensans
+  * [jshint.js](www/jshint.js)             - JavaScript Linter    ([JSHint](https://jshint.com/); huge, loaded on-demand)
+  * icon fonts: fontawesome, material icons (woff2, fixed-width)
+  * sans serif fonts: inter, opensans (woff2, variable-width)
 
 [widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
 
@@ -198,7 +225,9 @@ scripts for new libraries.
 
 The SDK is open to contributions for fixing bugs and improving the existing
 modules. We also accept new modules but we take the liberty to choose what to
-include if we are to take responsibility for maintaining them.
+include if we are to take responsibility for maintaining them. Most likely
+though, you will do your own thing and we'll copy from each other as long as
+the software remains free.
 
 Before issuing a pull request, it might be helpful to read our
 [Programming Guide](PROGRAMMING.md) which contains:
@@ -218,7 +247,7 @@ The Allegory SDK is MIT Licensed.
 
 Because Lua is like modern JavaScript, except
 [it got there 10 years earlier](https://stackoverflow.com/questions/1022560#1022683)
-and it didn't keep the baggage while doing so. That being said, we're all
+and it didn't keep the baggage while doing so. That said, we're all
 engineers here, we don't have language affectations. We're just happy to use
 a language with stackful coroutines, real closures with full lexical scoping,
 hash maps, a garbage collector, a better ffi than we could ever ask for,
@@ -232,7 +261,7 @@ probably even faster. It definitely has more features. Nginx is however quite
 large, not nearly as hackable as our pure-Lua server, it wants to control
 the main loop and manage threads all by itself, and its configuration
 directives are inescapably byzantine and undebuggable by trying to do
-declaratively what is sometimes better done procedurally.
+declaratively what is sometimes better done procedurally in a web server.
 
 ------------------------------------------------------------------------------
 <sup>Allegory SDK (c) 2020 Allegory Software SRL</sup>

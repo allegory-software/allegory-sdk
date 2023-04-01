@@ -87,17 +87,20 @@ visually nested lists of boxes, will break:
 	on the container, but visually the input is not inside the container,
 	so that rule doesn't make sense when popups are involved.
 
+	* the popup width contributes to the parent's width.
+
 To avoid these issues, wrap the popup's target in a container and add the
 popup to the container instead. Note that you can't add popups to elements
 like `<input>` and such anyway, so you have to wrap.
 
 * lack of a global z-index: partially fixed with the `display: fixed` hack
 but any parent creating an implicit stacking context breaks the hack,
-and it's very easy to create implicit stacking contexts by mistake.
+and it's very easy to create implicit stacking contexts by mistake (we made
+it so you get a warning when that happense though).
 
 This is why depending on the method chosen, you'll often see bugs on websites
-where the popup is either partially obscured (when method 2 was chosen),
-or left behind after its target is gone.
+where the popup is either partially obscured (when method 2 is used),
+or left behind after its target is gone (when method 1 is used).
 
 
 ## Event listeners are not weak refs
@@ -170,8 +173,7 @@ on keyboard navigation but not on mouse navigation which would be distracting
 and ugly. The problem is that Firefox doesn't support `:has(:focus-visible)`
 (because it doesn't support `:has()`) yet, and there's no `:focus-visibile-within`
 equivalent to `:focus-within`. Also the `focusVisible` option to `focus()`
-only works in Firefox and there's no way to query the `:focus-visible` state
-at all from JavaScript which is needed for canvas-drawn widgets.
+only works in Firefox (but we can hack our way around that).
 
 I guess we'll just have to wait on these because the alternative is tu
 reimplement the whole focusing logic in JavaScript (doable but more work

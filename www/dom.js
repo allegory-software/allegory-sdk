@@ -255,6 +255,7 @@ ELEMENT STATE
 	e.focused_element
 	e.focused
 	e.hasfocus
+	e.focus_visible
 	e.focusables()
 	e.effectively_disabled
 	e.effectively_hidden
@@ -1683,6 +1684,7 @@ let announce_prop_changed = function(e, prop, v1, v0, ev) {
 		e.announce('prop_changed', prop, v1, v0, ev)
 	}
 }
+G.announce_prop_changed = announce_prop_changed
 
 let resolve_linked_element = function(id) { // stub
 	let e = window[id]
@@ -2919,6 +2921,10 @@ property(Element, 'hasfocus', function() {
 	return this.contains(document.activeElement)
 })
 
+property(Element, 'focus_visible', function() {
+	return this.matches(':focus-visible')
+})
+
 property(Element, 'effectively_focusable', function() {
 	let t = this.tag, e = this
 	return (
@@ -3933,6 +3939,15 @@ e.popup = function(target, side, align) {
 		e.parent.on('pointerleave', update, on)
 
 	})
+
+	function no_bubble(ev) { ev.stopPropagation() }
+	e.on('raw:pointerdown' , no_bubble)
+	e.on('raw:pointerup'   , no_bubble)
+	e.on('raw:pointermove' , no_bubble)
+	e.on('raw:pointerover' , no_bubble)
+	e.on('raw:pointerleave', no_bubble)
+	e.on('raw:click'       , no_bubble)
+	e.on('raw:dblclick'    , no_bubble)
 
 	return e
 }

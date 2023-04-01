@@ -3527,18 +3527,22 @@ G.create_validator = function(e, field) {
 	let checked = obj()
 
 	function add_validator(name) {
-		assert(checked[name] !== false, 'validator require cycle')
+		assert(checked[name] !== false, 'validator require cycle: {0}', name)
 		if (checked[name])
 			return true
-		checked[name] = false // means checking...
 		let validator = validators[name]
 		if (warn_if(!validator, 'unknown validator', name))
 			return
 		if (!validator.applies(e, field))
 			return
-		for (let req of validator.requires)
-			if (warn_if(!add_validator(req), 'validator', req, 'required by', name, 'does not apply'))
-				return
+		checked[name] = false // means checking...
+		if (!(e.id || e.name))
+		for (let req of validator.requires) {
+			if (!add_validator(req)) {
+				checked[name] = true
+				return true
+			}
+		}
 		my_validators.push(validator)
 		assign(my_vprops, validator.vprops)
 		checked[name] = true
@@ -3713,7 +3717,7 @@ add_validator({
 	applies  : (e   ) => e.is_range,
 	validate : (e, v) => e.value1 == null || e.value2 == null || e.value1 <= e.value2,
 	error    : (e, v) => S('validation_positive_range_error', 'range is negative'),
-	rule     : (e, v) => S('validation_positive_range_rule' , 'range must be positive'),
+	rule     : (e, v) => S('validation_positive_range_rule' , 'Range must be positive'),
 })
 
 add_validator({
@@ -3732,14 +3736,13 @@ add_validator({
 /* <errors> ------------------------------------------------------------------
 
 attr:      prop:
-	for        for_id        id   of input that fires ^^validate
-	name       for_name      name of input that fires ^^validate
-	form                     form id
-	show_all                 shwo all rules with pass/fail mark or just the first error
+	for        target_id     id of input that fires ^^validate()
+	           target        input that fires ^^validate()
+   show_all                 shwo all rules with pass/fail mark or just the first error
 
 */
 
-css('.errors', 'v p')
+css('.errors', 'v p label')
 css('.errors-line', 'h p-05 gap-x')
 css('.errors-icon', 'w1 t-c')
 css('.errors-message', '')
@@ -3752,8 +3755,9 @@ G.errors = component('errors', 'Input', function(e) {
 
 	e.class('errors')
 
-	e.prop('for_id'  , {type: 'id', attr: 'for'})
-	e.prop('show_all', {type: 'bool', attr: 'show-all'})
+	e.prop('target'    , {type: 'element'})
+	e.prop('target_id' , {type: 'id', attr: 'for'})
+	e.prop('show_all'  , {type: 'bool', attr: 'show-all'})
 
 	function update(out) {
 		if (e.show_all) {
@@ -3778,25 +3782,109 @@ G.errors = component('errors', 'Input', function(e) {
 
 	e.on_bind(function(on) {
 		if (on) {
-			let te = window[e.for_id]
+			let te = e.target || window[e.target_id]
 			if (te && te.validation_result)
 				update(te.validation_result)
 		}
 	})
 
 	e.listen('validate', function(te, out) {
-		if (!(e.for_id && te.id == e.for_id))
+		if (!(te == e.target || (e.target_id && te.id == e.target_id)))
 			return
 		update(out)
 	})
 
 })
 
+/* element validator ---------------------------------------------------------
+
+An element with a validator gets re-validated automatically whenever any props
+that are involved in validation change. Validation state and result is kept
+in the element as well as a tooltip that shows up when the element has focus
+or is hovered.
+
+state:
+	validator
+	validation_result
+	invalid
+	errors
+	errors_tooltip
+methods:
+	validate([ev])
+hooks:
+	on_validate(f); f([ev])
+update options:
+	validation_result
+
+*/
+
+// css_state(':not(:focus-within) .errors-tooltip', 'click-through')
+css('.errors-tooltip .errors', 'bg-error')
+
+e.make_validator = function(validate_on_init, errors_tooltip_target) {
+
+	let e = this
+
+	e.prop('invalid', {type: 'bool', attr: true, default: false, slot: 'state'})
+
+	e.validator = create_validator(e, e)
+
+	e.validate = function(ev) {
+		e.validation_result = e.validator.validate(e.input_value)
+		e.invalid = e.validation_result.failed
+		e.update({validation_result: true})
+	}
+	e.on_validate = function(f) {
+		e.do_after('validate', f)
+	}
+
+	e.on_prop_changed(function(k, v, v0, ev) {
+		if (e.initialized == false)
+			return
+		if (e.validator.prop_changed(k))
+			e.validate(ev)
+	})
+
+	if (validate_on_init != false)
+		e.on_init(function() {
+			e.validate()
+		})
+
+	errors_tooltip_target = errors_tooltip_target || e
+
+	e.on_update(function(opt) {
+		let update_tooltip = opt.validation_result
+		let show_tooltip = (opt.errors_tooltip || update_tooltip)
+			&& (e.invalid && (e.hasfocus || e.hovered))
+		let et = e.errors_tooltip
+		if (show_tooltip && !et) {
+			e.errors = tag('errors', {show_all: false})
+			e.errors.target = e
+			et = tooltip({kind: 'error', side: 'top', align: 'center',
+				text: e.errors, target: errors_tooltip_target})
+			et.class('errors-tooltip')
+			e.errors_tooltip = et
+			e.add(et)
+			update_tooltip = true
+		}
+		if (update_tooltip && e.errors_tooltip)
+		e.errors_tooltip?.show(show_tooltip)
+	})
+
+	function update() {
+		e.update({errors_tooltip: true})
+	}
+	e.on('focusin'      , update)
+	e.on('focusout'     , update)
+	e.on('pointerenter' , update)
+	e.on('pointerleave' , update)
+
+}
+
 /* input_widget --------------------------------------------------------------
 
-An input widget has an `input_value` prop which when set, is validated and
-results in setting `value`, `invalid` and `validation_result`. It also has
-a hidden <input> element set to `value` so it works in a form.
+An input widget is a validated widget with an `input_value` prop and a `value`
+prop. It also has a hidden <input> element set to `value` so it works in a form.
 
 config:
 	name
@@ -3815,36 +3903,6 @@ stubs:
 	update_value_input(ev)
 
 */
-
-e.make_validator = function(validate_on_init) {
-
-	let e = this
-
-	e.prop('invalid', {type: 'bool', attr: true, default: false, slot: 'state'})
-
-	e.validator = create_validator(e, e)
-
-	e.validate = function(ev) {
-		e.validation_result = e.validator.validate(e.input_value)
-		e.invalid = e.validation_result.failed
-	}
-	e.on_validate = function(f) {
-		e.do_after('validate', f)
-	}
-
-	e.on_prop_changed(function(k, v, v0, ev) {
-		if (e.initialized == false)
-			return
-		if (e.validator.prop_changed(k))
-			e.validate(ev)
-	})
-
-	if (validate_on_init != false)
-		e.on_init(function() {
-			e.validate()
-		})
-
-}
 
 e.make_input_widget = function(opt) {
 
@@ -3875,7 +3933,7 @@ e.make_input_widget = function(opt) {
 		assert(ev) // not user-writable
 	}
 
-	e.make_validator(false)
+	e.make_validator(false, opt.errors_tooltip_target)
 
 	e.update_value_input = function(ev) {
 		e.value_input.value = or(e.value, '')
@@ -3971,15 +4029,15 @@ function check_widget(e, input_type) {
 		}
 	})
 
+	e.on_validate(function(ev) {
+		e.update({value: true})
+	})
+
 	e.update_value_input = function(ev) {
 		// don't send any value when unchecked, just like native input does.
 		e.value_input.value = e.checked_value
 		e.value_input.disabled = !e.checked
 	}
-
-	e.on_validate(function(ev) {
-		e.update({value: true})
-	})
 
 	e.user_set = function(v, ev) {
 		e.set_checked(v, e.checked, ev || {target: e})
@@ -4636,9 +4694,7 @@ css('.input-group > *:last-child' , 'b-r')
 // nested input-groups should not have borders.
 css('.input-group', 'b0')
 
-css_state('.input-group[invalid] > *', '', `
-	background-color : var(--bg-error);
-`)
+css_state('.input-group[invalid] > *', 'bg-error')
 
 G.input_group = component('input-group', function(e) {
 	e.class('input-group b-collapse-h ro-collapse-h')
@@ -4697,7 +4753,7 @@ G.labelbox = component('labelbox', function(e) {
 
 css('.w-input', '', `width: var(--w-input);`)
 
-css('.input', 'S bg-input w-input', `
+css('.input', 'S bg-input w-input shrinks', `
 	font-family   : inherit;
 	font-size     : inherit;
 	border-radius : 0;
@@ -5138,7 +5194,8 @@ update options:   value select_all
 
 */
 
-css('.num-input', 'w-input')
+css('.num-input', 'skip')
+css('.num-input-box', 'w-input')
 
 css('.num-input-input', 'S shrinks t-r')
 
@@ -5183,11 +5240,18 @@ if (0) {
 G.num_input = component('num-input', 'Input', function(e) {
 
 	e.clear()
-	e.class('num-input input-group ro-collapse-h')
+	e.class('num-input')
+	e.input_box = div({class: 'num-input-box input-group ro-collapse-h'})
+	e.add(e.input_box)
 
 	e.make_input_widget({
 		value_type: 'number',
 		input_classes: 'num-input-input',
+		errors_tooltip_target: e.input_box,
+	})
+
+	e.do_after('set_invalid', function(v) {
+		e.input_box.attr('invalid', v)
 	})
 
 	e.prop('decimals'   , {type: 'number', default: 0})
@@ -5196,6 +5260,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus',
 		default: 'none', attr: true})
 
+	e.input = tag('input')
 	e.make_focusable('focus-ring', e.input)
 
 	function update_buttons() {
@@ -5219,7 +5284,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 			}, div({class: 'num-input-arrow num-input-arrow-down'}))
 			e.updown_box = div({class: 'num-input-updown-box'},
 				div({class: 'num-input-updown'}, e.up_button, e.down_button))
-			e.set([e.input, e.updown_box])
+			e.input_box.set([e.input, e.updown_box])
 		} else if (v == 'plus-minus') {
 			e.up_button   = button({
 				classes: 'num-input-button num-input-button-plusminus num-input-button-plus',
@@ -5233,7 +5298,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 				type: 'button',
 				icon: svg_minus_sign(),
 			})
-			e.set([e.down_button, e.input, e.up_button])
+			e.input_box.set([e.down_button, e.input, e.up_button])
 		}
 		if (e.up_button) {
 			e.up_button  .on('pointerdown',   up_button_pointerdown)
@@ -5258,8 +5323,9 @@ G.num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	e.update_input = function() {
-		e.input.value = e.value != null ? e.to_text(e.value) : e.input_value
+	e.update_value_input = function() {
+		e.value_input.value = e.value != null ? e.to_text(e.value) : null
+		e.value_input.disabled = e.value == null
 	}
 
 	e.set_decimals = function() {
@@ -5271,6 +5337,8 @@ G.num_input = component('num-input', 'Input', function(e) {
 	})
 
 	e.on_update(function(opt) {
+		if (opt.value)
+			e.input.value = e.value != null ? e.to_text(e.value) : ''
 		if (opt.select_all)
 			e.input.select_range(0, -1)
 	})
@@ -5286,6 +5354,15 @@ G.num_input = component('num-input', 'Input', function(e) {
 	}
 
 	// controller
+
+	e.on_validate(function(ev) {
+		if (!(ev && ev.target == e.input))
+			e.update({value: true})
+	})
+
+	e.input.on('input', function(ev) {
+		e.set_prop('input_value', this.value, ev)
+	})
 
 	e.input.on('wheel', function(ev, dy) {
 		e.increment_value(round(-dy / 120))
@@ -6468,6 +6545,8 @@ function calendar_widget(e, mode) {
 		cx.strokeStyle = outline_focus
 		cx.lineWidth = rh(2)
 
+		let is_focused = mode == 'day' ? e.focus_visible : e.focused
+
 		let gh_set = false
 		d_days = -7
 		for (let week_i = -1; week_i <= visible_weeks; week_i++) {
@@ -6504,9 +6583,9 @@ function calendar_widget(e, mode) {
 				for (let range of draw_ranges) {
 					if (d >= range[0] && d <= range[1]) { // filter fast since it's O(n^2)
 						in_range = true
-						let is_focused = e.focused && range == focused_range
+						let range_focused = is_focused && range == focused_range
 
-						cx.fillStyle = is_focused ? bg_focused_selected : or(range.color, bg_unfocused_selected)
+						cx.fillStyle = range_focused ? bg_focused_selected : or(range.color, bg_unfocused_selected)
 
 						// hit-test range
 						if (mode != 'day' && !hit_range && hit_test_rect(mx-x0, my-y0, 0, 0, cell_w, cell_h))
@@ -6531,11 +6610,11 @@ function calendar_widget(e, mode) {
 								else // right side
 									cx.arc(rx(0), cy, cr, -PI / 2, PI / 2)
 								cx.fill()
-								if (is_focused)
+								if (range_focused)
 									cx.stroke()
 
 								// draw & hit-test range-end grab handle
-								if (is_focused && mode != 'day') {
+								if (range_focused && mode != 'day') {
 
 									let gcx = ri ? w-p : p
 									let gcy = h / 2
@@ -6564,7 +6643,7 @@ function calendar_widget(e, mode) {
 
 								cx.fillRect(rx(0), cy-cr, rw(w + 1), cr * 2)
 
-								if (is_focused) {
+								if (range_focused) {
 									cx.beginPath()
 									cx.moveTo(rx(0), cy-cr)
 									cx.lineTo(rx(w), cy-cr)

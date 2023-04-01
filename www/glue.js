@@ -3,6 +3,10 @@
 	JavaScript "assorted lengths of wire" library.
 	Written by Cosmin Apreutesei. Public domain.
 
+BROWSER DETECTION
+
+	Firefox Chrome Safari Safari_min Safari_maj
+
 TYPE CHECKING
 
 	isobject(e)
@@ -238,9 +242,9 @@ AJAX REQUESTS
 	get(url, success, [error], [opt]) -> req
 	post(url, data, [success], [error], [opt]) -> req
 
-BROWSER DETECTION
+JS LINTING
 
-	Firefox Chrome Safari Safari_min Safari_maj
+	lint([js_file], [lint_options])
 
 */
 
@@ -1747,18 +1751,18 @@ There are 5 types of events in this joint:
 
 TYPE           FIRE                  LISTEN
 ------------------------------------------------------------------------------
-pseudo         e.do_foo()            e.do_{after|before}('do_foo', f)
+hook           e.do_foo()            e.do_{after|before}('do_foo', f)
 element        e.fire[up](k, ...)    e.on(k, f, [on])
 window         fire(k, ...)          on(k, f, [on])
 announce       announce(k, ...)      listen(k, f, [on])
 broadcast      broadcast(k, ...)     on(k, f, [on])
 
-Pseudo-events are just function composition. They are the fastest but can't
-be unhooked. Use them when extending widgets. Element events are what we get
-from the browser. Since most of them bubble you can use them on parents too.
-Events that are usually interesting to the outside world should be fired with
-announce() (preferred over firing native events on window/document). Broadcast
-should only be used when you need to sync all browser tabs of the same app.
+Hooks are just function composition. They are the fastest but can't be unhooked.
+Use them when extending widgets. Element events are what we get from the browser.
+Most of them bubble so you get them on parents too. Events that are usually
+interesting to the outside world should be fired with announce() (preferred
+over firing native events on window/document). Broadcast should only be used
+when you need to sync all browser tabs of the same app.
 
 */
 
