@@ -260,6 +260,7 @@ ELEMENT STATE
 	e.effectively_disabled
 	e.effectively_hidden
 	e.focus_first() -> found
+	e.focus_async()
 	e.make_disablable()
 		e.disabled
 		e.disable(reason, disabled)
@@ -2958,6 +2959,17 @@ e.focus_first = function() {
 		return true
 	}
 	return false
+}
+
+// HACK: call focus_async() on ^pointerdown() instead of focus() to avoid
+// getting `:focus-visibile` on your face.
+// For this to work you must not call preventDefault() on the pointerdown event
+// i.e. avoid `return false` or `return capture_pointer()` from the event.
+e.focus_async = function() {
+	let e = this
+	runafter(0, function() {
+		e.focus()
+	})
 }
 
 property(Element, 'effectively_disabled', {get: function() {

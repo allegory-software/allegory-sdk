@@ -1196,10 +1196,7 @@ e.make_list_items_focusable = function(opt) {
 		}))
 			return false
 
-		// delayed focus to avoid screwing up the :focus-visible heuristic!
-		runafter(0, function() {
-			e.focus()
-		})
+		e.focus_async() // async avoids :focus-visible!
 
 	})
 
@@ -4538,10 +4535,7 @@ let slider_widget = function(e, range) {
 
 		thumb.on('pointerdown', function(ev, mx0) {
 
-			// delayed focus to avoid screwing up the :focus-visible heuristic!
-			runafter(0, function() {
-				thumb.focus()
-			})
+			thumb.focus_async() // async avoids :focus-visible!
 
 			let r = e.rect()
 			let tr = thumb.rect()
@@ -5198,6 +5192,8 @@ update options:   value select_all
 
 */
 
+// NOTE: we use 'skip' on the root element and create an <input-group> inside
+// so that we can add popups to the widget without messing up the CSS.
 css('.num-input', 'skip')
 css('.num-input-group', 'w-input bg-input')
 
@@ -6551,7 +6547,8 @@ function calendar_widget(e, mode) {
 		cx.strokeStyle = outline_focus
 		cx.lineWidth = rh(2)
 
-		let is_focused = mode == 'day' ? e.focus_visible : e.focused
+		let focused = e.focused
+		let focus_visible = mode == 'day' ? e.focus_visible : focused
 
 		let gh_set = false
 		d_days = -7
@@ -6589,7 +6586,8 @@ function calendar_widget(e, mode) {
 				for (let range of draw_ranges) {
 					if (d >= range[0] && d <= range[1]) { // filter fast since it's O(n^2)
 						in_range = true
-						let range_focused = is_focused && range == focused_range
+						let range_focused = focused && range == focused_range
+						let range_focus_visible = focus_visible && range_focused
 
 						cx.fillStyle = range_focused ? bg_focused_selected : or(range.color, bg_unfocused_selected)
 
@@ -6616,7 +6614,7 @@ function calendar_widget(e, mode) {
 								else // right side
 									cx.arc(rx(0), cy, cr, -PI / 2, PI / 2)
 								cx.fill()
-								if (range_focused)
+								if (range_focus_visible)
 									cx.stroke()
 
 								// draw & hit-test range-end grab handle
@@ -6649,7 +6647,7 @@ function calendar_widget(e, mode) {
 
 								cx.fillRect(rx(0), cy-cr, rw(w + 1), cr * 2)
 
-								if (range_focused) {
+								if (range_focus_visible) {
 									cx.beginPath()
 									cx.moveTo(rx(0), cy-cr)
 									cx.lineTo(rx(w), cy-cr)
@@ -6840,7 +6838,8 @@ function calendar_widget(e, mode) {
 		let sy0 = sy_now
 
 		let had_focus = e.hasfocus
-		e.focus()
+
+		e.focus_async() // async avoids :focus-visible!
 
 		if (hit_range_end != null && e.can_change_range(hit_range)) {
 			drag_range     = hit_range
@@ -6916,7 +6915,7 @@ function calendar_widget(e, mode) {
 			}
 		}
 
-		return this.capture_pointer(ev, captured_move, captured_up)
+		this.capture_pointer(ev, captured_move, captured_up)
 	})
 
 	ct.on('dblclick', function(ev) {
