@@ -3820,7 +3820,6 @@ update options:
 
 */
 
-// css_state(':not(:focus-within) .errors-tooltip', 'click-through')
 css('.errors-tooltip .errors', 'bg-error')
 
 e.make_validator = function(validate_on_init, errors_tooltip_target) {
@@ -3869,7 +3868,10 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 			e.add(et)
 			update_tooltip = true
 		}
-		e.errors_tooltip?.show(show_tooltip)
+		if (et) {
+			et.show(show_tooltip)
+			et.class('click-through', !e.hasfocus)
+		}
 	})
 
 	function update() {
