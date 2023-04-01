@@ -71,9 +71,9 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--fg-black              : hsl(  0   0%   0% / 1.0);
 	--fg-dim                : hsl(  0   0%   0% / 0.5); /* faded (not gray!) text but clearly legible (disabled, info boxes) */
 	--fg-dim-on-dark        : hsl(  0   0% 100% / 0.5); /* same but on dark or colored bg */
-	--fg-label              : hsl(  0   0%  60% / 1.0); /* between fg and dim (edit labels, chart labels) */
-	--fg-label-hover        : hsl(  0   0%  50% / 1.0); /* between fg and dim (edit labels, chart labels) */
-	--fg-label-active       : hsl(  0   0%  40% / 1.0); /* between fg and dim (edit labels, chart labels) */
+	--fg-label              : hsl(  0   0%   0% / 0.6); /* between fg and dim (edit labels, chart labels) */
+	--fg-label-hover        : hsl(  0   0%   0% / 0.5); /* between fg and dim (edit labels, chart labels) */
+	--fg-label-active       : hsl(  0   0%   0% / 0.4); /* between fg and dim (edit labels, chart labels) */
 	--fg-label-on-dark      : hsl(  0   0% 100% / 0.8); /* same but on dark or colored bg */
 	--fg-link               : hsl(222 100%  40% / 1.0); /* anything clickable inside text: links, bare buttons, checkboxes */
 	--fg-link-hover         : hsl(222 100%  50% / 1.0);
@@ -175,8 +175,8 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--fg-hover              : hsl(  0   0%  90% / 1.0);
 	--fg-active             : hsl(  0   0% 100% / 1.0);
 	--fg-dim                : var(--fg-dim-on-dark);
-	--fg-label              : hsl(  0   0%  50% / 1.0);
-	--fg-label-hover        : hsl(  0   0%  80% / 1.0);
+	--fg-label              : hsl(  0   0% 100% / 0.6);
+	--fg-label-hover        : hsl(  0   0% 100% / 0.8);
 	--fg-label-active       : hsl(  0   0% 100% / 1.0);
 	--fg-link               : hsl( 26  88%  51% / 1.0);
 	--fg-link-hover         : hsl( 26  99%  56% / 1.0);

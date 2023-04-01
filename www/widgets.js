@@ -3612,7 +3612,7 @@ G.create_validator = function(e, field) {
 			result.failed  = validator._failed || false
 			result.error   = validator._error
 			result.rule    = validator._rule
-			if (validator._failed) {
+			if (validator._failed && !out.failed) {
 				out.failed = true
 				out.first_failed_result = result
 			}
@@ -3773,10 +3773,12 @@ G.errors = component('errors', 'Input', function(e) {
 					))
 			}
 		} else {
-			if (out.first_failed_result)
-				e.set(out.first_failed_result.error)
-			else
-				e.clear()
+			let ffr = out.first_failed_result
+			if (ffr)
+				e.set(ffr.error)
+			// don't clear the error, just hide it so that box w and h stay stable.
+			e.class('visible'  , !!ffr)
+			e.class('invisible', !ffr)
 		}
 	}
 
@@ -3867,7 +3869,6 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 			e.add(et)
 			update_tooltip = true
 		}
-		if (update_tooltip && e.errors_tooltip)
 		e.errors_tooltip?.show(show_tooltip)
 	})
 
