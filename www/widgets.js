@@ -4702,7 +4702,8 @@ G.input_group = component('input-group', function(e) {
 	e.make_disablable()
 	e.init_child_components()
 	e.inputs = e.$('input')
-	e.make_focusable('focus-ring', ...e.inputs)
+	e.make_focusable(...e.inputs)
+	e.make_focus_ring(...e.inputs)
 })
 
 /* <labelbox> ----------------------------------------------------------------
@@ -5196,7 +5197,7 @@ update options:   value select_all
 */
 
 css('.num-input', 'skip')
-css('.num-input-box', 'w-input')
+css('.num-input-group', 'w-input bg-input')
 
 css('.num-input-input', 'S shrinks t-r')
 
@@ -5220,7 +5221,7 @@ css(':is(.xsmall, .small) .num-input-button-down' , 'b-t-0')
 
 // plus-minus buttons
 css('.num-input-button-plusminus', 'ro0 m0 p0', `width: 2.25em;`)
-css('.num-input[buttons=plus-minus] .input', 't-c b-l-0 b-r-0')
+css('.num-input[buttons=plus-minus] .num-input-input', 't-c b-l-0 b-r-0')
 
 // alternative diamond-style for up & down buttons
 if (1) {
@@ -5242,17 +5243,16 @@ G.num_input = component('num-input', 'Input', function(e) {
 
 	e.clear()
 	e.class('num-input')
-	e.input_box = div({class: 'num-input-box input-group ro-collapse-h'})
-	e.add(e.input_box)
+	e.input_group = div({class: 'num-input-group input-group b-collapse-h ro-collapse-h'})
+	e.add(e.input_group)
 
 	e.make_input_widget({
 		value_type: 'number',
-		input_classes: 'num-input-input',
-		errors_tooltip_target: e.input_box,
+		errors_tooltip_target: e.input_group,
 	})
 
 	e.do_after('set_invalid', function(v) {
-		e.input_box.attr('invalid', v)
+		e.input_group.attr('invalid', v)
 	})
 
 	e.prop('decimals'   , {type: 'number', default: 0})
@@ -5261,8 +5261,9 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus',
 		default: 'none', attr: true})
 
-	e.input = tag('input')
-	e.make_focusable('focus-ring', e.input)
+	e.input = tag('input', {class: 'num-input-input'})
+	e.make_focusable(e.input)
+	e.input_group.make_focus_ring(e.input)
 
 	function update_buttons() {
 		for (let b of e.$('button'))
@@ -5285,7 +5286,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 			}, div({class: 'num-input-arrow num-input-arrow-down'}))
 			e.updown_box = div({class: 'num-input-updown-box'},
 				div({class: 'num-input-updown'}, e.up_button, e.down_button))
-			e.input_box.set([e.input, e.updown_box])
+			e.input_group.set([e.input, e.updown_box])
 		} else if (v == 'plus-minus') {
 			e.up_button   = button({
 				classes: 'num-input-button num-input-button-plusminus num-input-button-plus',
@@ -5299,7 +5300,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 				type: 'button',
 				icon: svg_minus_sign(),
 			})
-			e.input_box.set([e.down_button, e.input, e.up_button])
+			e.input_group.set([e.down_button, e.input, e.up_button])
 		}
 		if (e.up_button) {
 			e.up_button  .on('pointerdown',   up_button_pointerdown)
@@ -5436,7 +5437,8 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 	e.get_placeholder = () => e.input.placeholder
 	e.set_placeholder = function(s) { e.input.placeholder = s }
 
-	e.make_focusable('focus-ring', e.input)
+	e.make_focusable(e.input)
+	e.make_focus_ring(e.input)
 
 	e.set_value = function(v, v0, ev) {
 		if (!(ev && (ev.target == e.input || ev.target == e)))
@@ -5619,7 +5621,8 @@ G.tags_input = component('tags-input', function(e) {
 	e.tag_input = tag('input', {class: 'tags-input-input', placeholder: 'Tag'})
 	e.input = tag('input', {type: 'hidden', hidden: ''})
 	e.add(div({class: 'tags-scrollbox'}, e.tags_box), e.tag_input, e.input)
-	e.make_focusable('focus-ring', e.tag_input)
+	e.make_focusable(e.tag_input)
+	e.make_focus_ring(e.tag_input)
 
 	e.prop('tags', {store: false})
 	e.get_tags = () => e.tags_box.tags
@@ -7242,7 +7245,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	}
 	e.make_disablable()
 
-	e.input_group = div({class: 'date-input-group input-group b-collapse-h'})
+	e.input_group = div({class: 'date-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
 
 	if (range) {
@@ -7319,6 +7322,8 @@ function date_input_widget(e, has_date, has_time, range) {
 	function convert_value(s) {
 		return isstr(s) ? e.from_text(s, true) : s
 	}
+
+	e.inputs = []
 
 	for (let I of (range ? ['1', '2'] : [''])) {
 
@@ -7423,6 +7428,7 @@ function date_input_widget(e, has_date, has_time, range) {
 		})
 
 		e['input'+I] = inp
+		e.inputs.push(inp)
 		e.add(inp)
 
 		e.prop('name'+I)
@@ -7478,14 +7484,8 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.set_prop(k, v, {target: ce})
 	})
 
-	if (range)
-		e.make_focusable('focus-ring', e.input1, e.input2)
-	else
-		e.make_focusable('focus-ring', e.input)
-
-	// move .focus-ring to the input-group, since we have .skip.
-	e.class('focus-ring', false)
-	e.input_group.class('focus-ring')
+	e.make_focusable(...e.inputs)
+	e.input_group.make_focus_ring(...e.inputs)
 
 	e.picker_button = button({
 		type: 'button',

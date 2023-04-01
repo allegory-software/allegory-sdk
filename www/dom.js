@@ -263,7 +263,8 @@ ELEMENT STATE
 	e.make_disablable()
 		e.disabled
 		e.disable(reason, disabled)
-	e.make_focusable(['focus-ring'], [focusable_element1, ...])
+	e.make_focus_ring([focusable_element1, ...])
+	e.make_focusable([focusable_element1, ...])
 		e.tabindex
 		e.focusable
 	focused_focusable([e]) -> e
@@ -2074,18 +2075,16 @@ css_role_state_firefox('.focus-ring:focus-within', 'outline-focus')
 css_role_state('.not-within:has(.focus-outside:focus-visible)', 'outline-focus')
 css_role_state('.focus-ring:has(.not-within .focus-outside:focus-visible)', 'no-outline')
 
+e.make_focus_ring = function(...fes) {
+	this.class('focus-ring')
+	for (let fe of fes)
+		fe.class('focus-outside')
+}
+
 e.make_focusable = function(...fes) {
 
 	let e = this
 	e.make_focusable = noop
-
-	if (fes[0] == 'focus-ring') {
-		fes.shift()
-		assert(fes.len)
-		e.class('focus-ring')
-		for (let fe of fes)
-			fe.class('focus-outside')
-	}
 
 	if (!fes.len)
 		fes.push(e)
