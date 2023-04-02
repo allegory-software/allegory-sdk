@@ -13,9 +13,6 @@ THINK
 	- `format` prop: 'timestamp' or 'sql'
 		- or better yet, parse both, and have value_timestamp and value_sql props
 
-* VALIDATORS and error box with non-data-driven input widgets
-	- textarea max-len validator to show "X chars remaining" on a textarea.
-
 * AUTOCOMPLETE: use <datalist> and list attr and show a list picker with "Other..." button
 	- use <datalist> and list attr and show a list picker with "Other..." button:
 		- date/time dropdowns
@@ -79,6 +76,12 @@ NEW WIDGETS
 FEATURES
 ------------------------------------------------------------------------------
 
+* DROPDOWN
+	- placeholder
+
+* TEXTAREA
+	- max-len validator to show "X chars remaining" on a textarea.
+
 * TABS
 	- DONE: auto-shrink tabs to fit tabs_box
 		- TODO: but enlarge-to-min-width when renaming
@@ -86,10 +89,6 @@ FEATURES
 * SPLIT % panes
 
 * ALL INPUTS
-	- make them compatible with forms:
-		- DONE: add 'name' property to all
-		- DONE: add 'form' property to all
-		- DONE: add hidden <input> to all
 	- borderless auto-growing mode.
 	- undo/redo:
 		TODO: all date/time inputs
@@ -97,10 +96,6 @@ FEATURES
 		TODO: tags
 		TODO: select-button?
 		TODO: slider
-	- input_value vs r/o value && valid_value().
-		DONE: num-input
-	- invalid state:
-		DONE: num-input
 	- readonly state
 		DONE: num-input
 	- represent null value

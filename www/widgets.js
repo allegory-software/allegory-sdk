@@ -3723,7 +3723,7 @@ add_validator({
 	vprops   : 'value1 value2',
 	applies  : (e   ) => e.is_range,
 	validate : (e, v) => e.value1 == null || e.value2 == null || e.value1 <= e.value2,
-	error    : (e, v) => S('validation_positive_range_error', 'range is negative'),
+	error    : (e, v) => S('validation_positive_range_error', 'Range is negative'),
 	rule     : (e, v) => S('validation_positive_range_rule' , 'Range must be positive'),
 })
 
@@ -3737,6 +3737,66 @@ add_validator({
 		'{0} not in the list of allowed values.', field_name(field)),
 	rule     : (e, v, field) => S('validation_lookup_rule',
 		'{0} must be in the list of allowed values.', field_name(field)),
+})
+
+add_validator({
+	name     : 'minlen',
+	props    : 'minlen',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.minlen,
+	validate : (e, v, field) => v.len >= field.minlen,
+	error    : (e, v, field) => S('validation_minlen_error',
+		'{0} too short', field_name(field)),
+	rule     : (e, v, field) => S('validation_minlen_rule' ,
+		'{0} must be at least {1} characters', field_name(field), field.minlen),
+})
+
+add_validator({
+	name     : 'lower',
+	props    : 'conditions',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.conditions.includes('lower'),
+	validate : (e, v, field) => /[a-z]/.test(v),
+	error    : (e, v, field) => S('validation_lower_error',
+		'{0} does not contain a lowercase letter', field_name(field)),
+	rule     : (e, v, field) => S('validation_lower_rule' ,
+		'{0} must contain at least one lowercase letter', field_name(field)),
+})
+
+add_validator({
+	name     : 'upper',
+	props    : 'conditions',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.conditions.includes('upper'),
+	validate : (e, v, field) => /[A-Z]/.test(v),
+	error    : (e, v, field) => S('validation_upper_error',
+		'{0} does not contain a uppercase letter', field_name(field)),
+	rule     : (e, v, field) => S('validation_upper_rule' ,
+		'{0} must contain at least one uppercase letter', field_name(field)),
+})
+
+add_validator({
+	name     : 'digit',
+	props    : 'conditions',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.conditions.includes('digit'),
+	validate : (e, v, field) => /[0-9]/.test(v),
+	error    : (e, v, field) => S('validation_digit_error',
+		'{0} does not contain a digit', field_name(field)),
+	rule     : (e, v, field) => S('validation_digit_rule' ,
+		'{0} must contain at least one digit', field_name(field)),
+})
+
+add_validator({
+	name     : 'symbol',
+	props    : 'conditions',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.conditions.includes('symbol'),
+	validate : (e, v, field) => /[~!@#$%^&*()_+\-=`\[\]{}|\\;:'",.<>?\/]/.test(v),
+	error    : (e, v, field) => S('validation_symbol_error',
+		'{0} does not contain a symbol', field_name(field)),
+	rule     : (e, v, field) => S('validation_symbol_rule' ,
+		'{0} must contain at least one symbol', field_name(field)),
 })
 
 add_validator({
@@ -3979,13 +4039,13 @@ e.make_input_widget = function(opt) {
 
 /* <check>, <toggle>, <radio> buttons ----------------------------------------
 
-classes:
+inherits:
+	input_widget
+css classes:
 	.hover
-attrs:
-	name
-	value
+state attrs:
 	checked
-state:
+state props:
 	checked <-> t|f
 events:
 	^input
@@ -4149,7 +4209,12 @@ G.check = component('check', function(e) {
 	))
 })
 
-// toggle --------------------------------------------------------------------
+/* toggle --------------------------------------------------------------------
+
+inherits:
+	check_widget
+
+*/
 
 css('.toggle', 'm t-m p-05 round bg1 h-m ease ring rel', `
 	min-width  : 2.4em;
@@ -4184,6 +4249,9 @@ G.toggle = component('toggle', function(e) {
 })
 
 /* <radio> -------------------------------------------------------------------
+
+inherits:
+	check_widget
 
 */
 
@@ -4247,6 +4315,8 @@ G.radio = component('radio', function(e) {
 
 /* <slider> & <range-slider> -------------------------------------------------
 
+inherits:
+	input_widget
 model options:
 	from to
 	min max
@@ -5039,8 +5109,11 @@ G.button = component('button', 'Input', function(e) {
 
 /* <select-button> && <vselect-button> ---------------------------------------
 
-state props/attrs:
-	value
+inherits:
+	input_widget
+state attrs:
+	selected_index
+state props:
 	selected_index
 
 */
@@ -5207,10 +5280,17 @@ G.vselect_button = component('vselect-button', function(e) {
 
 /* <num-input> ---------------------------------------------------------------
 
-state:            value input_value
-model options:    min max decimals
-view options:     buttons
-update options:   value select_all
+inherits:
+	input_widget
+model options:
+	min
+	max
+	decimals
+view options:
+	buttons
+update options:
+	value
+	select_all
 
 */
 
@@ -5425,23 +5505,45 @@ G.num_input = component('num-input', 'Input', function(e) {
 
 /* <pass-input> --------------------------------------------------------------
 
-state props:
-	value
+inherits:
+	input_widget
+config:
+	minlen
+	conditions
+update options:
+	select_all
 
 */
 
-css('.pass-input', 'w-input bg-input')
+// NOTE: we use 'skip' on the root element and create an <input-group> inside
+// so that we can add popups to the widget without messing up the CSS.
+css('.pass-input', 'skip')
+css('.pass-input-group', 'w-input bg-input')
 css('.pass-input-input', 'S shrinks p-r-0')
-css('.pass-input-button', 'h-m h-c b p0', `width: 2.75em;`)
-css_generic_state('.pass-input-button[disabled]', 'op1 dim')
+css('.pass-input-button', 'h-m h-c b p0 label', `width: 2.75em;`)
+css_state('.pass-input-button', 'bg-input')
+css_state('.pass-input[invalid] .pass-input-button', 'bg-error')
+css_generic_state('.pass-input-button[disabled]', 'op1 no-filter dim')
 
 G.pass_input = component('pass-input', 'Input', function(e) {
 
-	e.prop('name')
-	e.prop('form', {type: 'id', store: false})
-	e.prop('value')
+	e.clear()
+	e.class('pass-input')
+	e.input_group = div({class: 'input-group b-collapse-h ro-collapse-h'})
+	e.add(e.input_group)
 
-	e.class('pass-input input-group b-collapse-h ro-collapse-h')
+	e.make_input_widget({
+		errors_tooltip_target: e.input_group,
+	})
+
+	e.do_after('set_invalid', function(v) {
+		e.input_group.attr('invalid', v)
+	})
+
+	e.prop('minlen', {type: 'number'})
+	e.prop('conditions', {type: 'words', convert: words,
+		default: 'lower upper digit symbol'})
+
 	e.input = input({classes: 'pass-input-input', type: 'password'})
 	e.eye_button = button({
 		type: 'button',
@@ -5451,7 +5553,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 		focusable: false,
 		title: S('view_password', 'View password'),
 	})
-	e.add(e.input, e.eye_button)
+	e.input_group.add(e.input, e.eye_button)
 
 	e.prop('placeholder', {store: false})
 	e.get_placeholder = () => e.input.placeholder
@@ -5460,16 +5562,6 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 	e.make_focusable(e.input)
 	e.make_focus_ring(e.input)
 
-	e.set_value = function(v, v0, ev) {
-		if (!(ev && (ev.target == e.input || ev.target == e)))
-			e.input.value = v
-		e.eye_button.disable('empty', !v)
-	}
-
-	e.set_name = function(s) { e.input.name = s }
-	e.get_form = function() { return e.input.form }
-	e.set_form = function(s) { e.input.form = s }
-
 	e.on_update(function(opt) {
 		if (opt.select_all)
 			e.input.select_range(0, -1)
@@ -5477,8 +5569,14 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 
 	// controller
 
+	e.do_after('set_input_value', function(v, v0, ev) {
+		if (!(ev && ev.target == e.input))
+			e.input.value = v
+		e.eye_button.disable('empty', !v)
+	})
+
 	e.input.on('input', function(ev) {
-		e.set_prop('value', this.value, ev)
+		e.set_prop('input_value', this.value, ev)
 	})
 
 	e.eye_button.on('pointerdown', function(ev) {
