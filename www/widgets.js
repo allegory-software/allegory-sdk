@@ -5797,6 +5797,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 			if (value !== undefined)
 				lookup.set(value, i)
 		}
+		e.validate()
 	}
 
 	e.lookup = function(value) {
@@ -5821,7 +5822,6 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 			list.popup(e.inputbox, 'bottom', 'start')
 			list.hide()
 			e.add(list)
-			e.validate()
 		} else {
 			list.remove()
 		}
@@ -5924,6 +5924,11 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 	})
 
 	e.on_validate(function(ev) {
+		if (e.list && e.list.ispopup && !(ev && ev.target == e.list)) {
+			e.list.focus_item(or(e.lookup(e.value), false), 0, {
+				must_not_move: true,
+			})
+		}
 		e.update({value: true})
 	})
 
