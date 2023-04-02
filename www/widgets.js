@@ -5729,22 +5729,28 @@ update opts:
 // so that we can add popups to the widget without messing up the CSS.
 css('.dropdown', 'skip')
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
+css('.dropdown-value', 'S')
 css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition because we use gap-x.
 css('.dropdown-chevron', 'smaller ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
+css('.dropdown-xbutton', 'm0 p0 label smaller')
+css('.dropdown-xbutton::before', 'fa fa-times lh1')
 
-css('.dropdown-picker', 'v-s p-y-input bg-input z3 arrow', `
+css('.dropdown-picker', 'b v-s p-y-input bg-input z3 arrow', `
 	margin-top: -2px; /* merge dropdown and picker outlines */
 	resize: both;
 	height: 12em; /* TODO: what we want is max-height but then resizer doesn't work! */
 `)
 css('.dropdown-picker > *', 'p-input')
-css('.dropdown-picker', 'outline-focus')
-css('.dropdown.open .dropdown-inputbox', 'outline-focus')
-css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
+css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
+css('.dropdown[align=right] .dropdown-value'  , '', `order: 3;`)
 
 css('.dropdown-search', 'fg-search bg-search')
+
+// TODO: fix this on Firefox but note that :focus-within is buggy on FF,
+// it gets stuck even when focus is on anoher widget, so it's not an easy fix.
+css_state('.dropdown:has(:focus-visible) .dropdown-picker', 'outline-focus')
 
 css_state('.dropdown[invalid] .dropdown-inputbox', 'bg-error')
 
@@ -5811,7 +5817,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 			list_items_changed.call(list)
 			let item_i = e.lookup(e.value)
 			list.focus_item(or(item_i, false))
-			list.class('dropdown-picker')
+			list.class('dropdown-picker scroll-thin')
 			list.popup(e.inputbox, 'bottom', 'start')
 			list.hide()
 			e.add(list)
@@ -5838,9 +5844,14 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	e.value_box = div({class: 'dropdown-value'})
 	e.chevron   = div({class: 'dropdown-chevron'})
-	e.inputbox.add(e.value_box, e.chevron)
+	e.xbutton   = button({bare: true, classes: 'dropdown-xbutton'})
+	e.inputbox.add(e.value_box, e.xbutton, e.chevron)
 
 	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
+
+	e.set_required = function() {
+		e.update({value: true})
+	}
 
 	e.on_update(function(opt) {
 		if (opt.value) {
@@ -5855,6 +5866,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 				e.value_box.clear()
 			}
 			e.class('empty', i == null)
+			e.xbutton.show(e.value != null && !e.required)
 		}
 	})
 
@@ -5940,7 +5952,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		e.close()
 	}
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.inputbox.on('keydown', function(key, shift, ctrl, alt, ev) {
 		let free_key = !(alt || shift || ctrl)
 		if (
 			(free_key && key == ' ' && !e.list.search_string)
@@ -5966,10 +5978,15 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		return ev.forward(e.list)
 	})
 
-	e.on('wheel', function(ev, dy) {
+	e.inputbox.on('wheel', function(ev, dy) {
 		if (ev.target.closest_child(e) != e.list) // event wasn't bubbled from the picker.
 			if (e.list)
 				e.list.focus_item(true, round(-dy / 120))
+	})
+
+	e.xbutton.on('pointerdown', function(ev) {
+		e.set_prop('input_value', null, ev)
+		return false
 	})
 
 	return {list: html_list}

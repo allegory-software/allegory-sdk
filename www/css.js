@@ -996,6 +996,11 @@ css_state('.scroll-thin::-webkit-scrollbar-thumb:hover', '', `
 	background: var(--bg2-hover);
 `)
 
+/* fixing resizer color for Chrome with thin scrollbars */
+css_state('.scroll-thin::-webkit-resizer', '', `
+	background: var(--bg1);
+`)
+
 /* POSITIONING ------------------------------------------------------------ */
 
 css('.rel'  , '', ` position: relative; `)
@@ -1228,7 +1233,6 @@ css('.grabbing', '', ` cursor: grabbing; `)
 css('.icon-chevron-right::before', 'rotate--45', `
 	content: "";
 	display: block;
-	border-color: var(--fg);
 	border-style: solid;
 	border-width: 0 .2em .2em 0;
 	--translate-x: -0.125em;
