@@ -6239,7 +6239,7 @@ TODO:
 */
 
 css(':root', '', `
-	--min-w-calendar: 14.5em;
+	--min-w-calendar: 16.5em;
 	--min-h-calendar: 20em;
 	--fs-calendar-months   : 1.25;
 	--fs-calendar-weekdays : 0.75;
