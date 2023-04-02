@@ -3635,6 +3635,10 @@ let field_name = function(field) {
 	return field.text || field.name || S('value', 'Value')
 }
 
+let field_value = function(field, v) {
+	return field.to_text ? field.to_text(v) : v
+}
+
 // validator just so that input_value gets converted to value.
 add_validator({
 	name     : 'null',
@@ -3728,18 +3732,6 @@ add_validator({
 })
 
 add_validator({
-	name     : 'dropdown',
-	props    : 'list',
-	vprops   : 'input_value',
-	applies  : (e,    field) => field.lookup,
-	validate : (e, v, field) => field.lookup(v) != null,
-	error    : (e, v, field) => S('validation_lookup_error',
-		'{0} not in the list of allowed values.', field_name(field)),
-	rule     : (e, v, field) => S('validation_lookup_rule',
-		'{0} must be in the list of allowed values.', field_name(field)),
-})
-
-add_validator({
 	name     : 'minlen',
 	props    : 'minlen',
 	vprops   : 'input_value',
@@ -3800,6 +3792,17 @@ add_validator({
 })
 
 add_validator({
+	name     : 'enum',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.value_known,
+	validate : (e, v, field) => field.value_known(v) != null,
+	error    : (e, v, field) => S('validation_known_error',
+		'{0} unknown value {1}', field_name(field), field_value(field, v)),
+	rule     : (e, v, field) => S('validation_known_rule',
+		'{0} must be a known value', field_name(field)),
+})
+
+add_validator({
 	name     : 'lookup',
 	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
 	vprops   : 'input_value',
@@ -3807,9 +3810,9 @@ add_validator({
 	validate : (e, v, field) => field.lookup_nav.ready
 			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
 	error    : (e, v, field) => S('validation_lookup_error',
-		'{0} not in the list of allowed values.', field_name(field)),
+		'{0} unknown value {1}', field_name(field), field_value(field, v)),
 	rule     : (e, v, field) => S('validation_lookup_rule',
-		'{0} must be in the list of allowed values.', field_name(field)),
+		'{0} value unknown', field_name(field)),
 })
 
 /* <errors> ------------------------------------------------------------------
@@ -5118,7 +5121,10 @@ state props:
 
 */
 
-css('.select-button', 'rel ro-var h-s gap-x-0 bg0 shadow-button', `
+// NOTE: we use 'skip' on the root element and create an <input-group> inside
+// so that we can add popups to the widget without messing up the CSS.
+css('.select-button', 'skip')
+css('.select-button-box', 'rel ro-var h-s gap-x-0 bg0 shadow-button', `
 	padding: var(--p-select-button, 3px);
 	--p-y-input-offset: calc(1px - var(--p-select-button, 3px));
 `)
@@ -5127,12 +5133,12 @@ css_util('.smaller', '', ` --p-select-button: 2px; `)
 css_util('.xsmall' , '', ` --p-select-button: 1px; `)
 css_util('.small'  , '', ` --p-select-button: 1px; `)
 
-css('.select-button > :not(.select-button-plate)',
+css('.select-button-box > :not(.select-button-plate)',
 	'S h-m h-c p-y-input p-x-button gap-x nowrap-dots noselect dim z1', `
 	flex-basis: fit-content;
 `)
-css('.select-button > :not(.select-button-plate):not(.selected):hover', 'fg')
-css('.select-button > :not(.select-button-plate).selected', '', `
+css('.select-button-box > :not(.select-button-plate):not(.selected):hover', 'fg')
+css('.select-button-box > :not(.select-button-plate).selected', '', `
 	color: var(--fg-select-button-plate);
 `)
 
@@ -5143,8 +5149,8 @@ css('.select-button-plate', 'abs ease shadow-button', `
 `)
 
 // not sure about this one...
-css_state('.select-button:focus-visible', 'no-outline')
-css_state('.select-button:focus-visible .select-button-plate', 'outline-focus')
+css_state('.select-button-box:focus-visible', 'no-outline')
+css_state('.select-button-box:focus-visible .select-button-plate', 'outline-focus')
 
 css_state('.select-button-plate:hover', '', `
 	background: var(--bg-select-button-plate-hover);
@@ -5162,47 +5168,57 @@ css('.select-button[secondary]', '', `
 
 G.select_button = component('select-button', function(e) {
 
+	let html_items = e.make_items_prop()
+
 	e.class('select-button inputbox')
 	e.make_disablable()
 
-	let html_items = e.make_items_prop()
+	e.inputbox = div({class: 'select-button-box inputbox'})
+	e.add(e.inputbox)
+
+	e.make_focusable(e.inputbox)
+
+	e.make_input_widget({
+		errors_tooltip_target: e.inputbox,
+	})
 
 	e.plate = div({class: 'select-button-plate'})
-	e.input = tag('input', {type: 'hidden', hidden: ''})
-
-	e.make_focusable()
 
 	// model
 
 	e.prop('selected_index', {type: 'number', updates: 'selected_index'})
-	e.prop('name')
-	e.prop('form', {type: 'id', store: false})
-	e.prop('value', {updates: 'value'})
 
 	e.item_value = function(ce) { // stub to pluck value from items
 		return strict_or(ce.value, ce.attr('value'))
 	}
 
 	function clamp_item_index(i) {
-		return i != null && e.len > 1 && e.at[clamp(i, 0, e.len-3)] || null
+		return i != null && e.len > 1 && e.inputbox.at[clamp(i, 0, e.len-3)] || null
 	}
 
-	e.set_name = function(s) { e.input.name = s }
-	e.get_form = function() { return e.input.form }
-	e.set_form = function(s) { e.input.form = s }
-	e.set_value = function(v) { e.input.value = v }
+	// validation
+
+	e.value_known = function(v) {
+		for (let item of e.items)
+			if (v === e.item_value(item))
+				return true
+	}
+
+	e.do_after('set_items', function(items) {
+		e.validate()
+	})
 
 	// view
 
 	e.on_update(function(opt) {
 		if (opt.items) {
-			e.clear()
-			e.set([...e.items, e.plate, e.input])
+			e.inputbox.clear()
+			e.inputbox.set([...e.items, e.plate])
 			opt.value = true
 		}
 		if (opt.value) {
-			for (let b of e.at) {
-				if (b != e.plate && b != e.input && e.item_value(b) === e.value) {
+			for (let b of e.inputbox.at) {
+				if (b != e.plate && e.item_value(b) === e.value) {
 					e.selected_item = b
 					break
 				}
@@ -5211,7 +5227,7 @@ G.select_button = component('select-button', function(e) {
 			let i = e.selected_index
 			e.selected_item = clamp_item_index(i)
 		}
-		for (let b of e.at)
+		for (let b of e.inputbox.at)
 			b.class('selected', false)
 		if (e.selected_item)
 			e.selected_item.class('selected', true)
@@ -5236,30 +5252,34 @@ G.select_button = component('select-button', function(e) {
 
 	// controller
 
-	function select_item(b) {
+	e.on_validate(function(ev) {
+		e.update({value: true})
+	})
+
+	function select_item(b, ev) {
 		let v = b ? e.item_value(b) : null
 		if (v != null)
-			e.value = v
+			e.set_prop('input_value', v, ev)
 		else
 			e.selected_index = b.index
 	}
 
-	e.on('click', function(ev) {
+	e.inputbox.on('click', function(ev) {
 		let b = ev.target
-		while (b && b.parent != e) b = b.parent
-		if (!b || b.parent != e || b == e.plate) return
-		select_item(b)
+		while (b && b.parent != e.inputbox) b = b.parent
+		if (!b || b.parent != e.inputbox || b == e.plate) return
+		select_item(b, ev)
 		e.focus()
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt) {
+	e.inputbox.on('keydown', function(key, shift, ctrl, alt) {
 		if (alt || shift || ctrl)
 			return
 		if (key == 'ArrowRight' || key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowDown') {
 			let fw = key == 'ArrowRight' || key == 'ArrowDown'
 			let b = e.selected_item
 			b = fw ? b && b.next || e.last.prev : b && b.prev || e.first
-			select_item(b)
+			select_item(b, ev)
 			return false
 		}
 	})
@@ -5901,6 +5921,10 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 	e.lookup = function(value) {
 		return lookup.get(value)
 	}
+
+	// validation
+
+	e.value_known = e.lookup
 
 	// model/view: list prop: set it up as picker.
 
