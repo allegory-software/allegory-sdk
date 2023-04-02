@@ -1070,7 +1070,7 @@ e.make_list_items_focusable = function(opt) {
 		let editable = (opt.editable || enter_edit) && !opt.focus_non_editable_if_not_found
 		let expand_selection = opt.expand_selection && e.multiselect
 		let invert_selection = opt.invert_selection && e.multiselect
-		opt = assign({editable: editable}, opt)
+		opt = assign({editable: editable, target: e}, opt)
 
 		i = e.first_focusable_item_index(i, n, opt)
 
@@ -3503,6 +3503,7 @@ We don't like abstractions around here but this one buys us many things:
 */
 
 let validators = obj()
+G.validators = validators
 G.INVALID = obj() // convert functions return this to distinguish from null.
 
 let validator_props = obj()
@@ -3635,6 +3636,16 @@ let field_name = function(field) {
 	return field.text || field.name || S('value', 'Value')
 }
 
+// validator just so that input_value gets converted to value.
+add_validator({
+	name     : 'null',
+	vprops   : 'input_value',
+	applies  : return_true,
+	validate : return_true,
+	error    : noop,
+	rule     : noop,
+})
+
 add_validator({
 	name     : 'required',
 	check_null: true,
@@ -3718,6 +3729,18 @@ add_validator({
 })
 
 add_validator({
+	name     : 'dropdown',
+	props    : 'list',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.lookup,
+	validate : (e, v, field) => field.lookup(v) != null,
+	error    : (e, v, field) => S('validation_lookup_error',
+		'{0} not in the list of allowed values.', field_name(field)),
+	rule     : (e, v, field) => S('validation_lookup_rule',
+		'{0} must be in the list of allowed values.', field_name(field)),
+})
+
+add_validator({
 	name     : 'lookup',
 	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
 	vprops   : 'input_value',
@@ -3759,16 +3782,16 @@ G.errors = component('errors', 'Input', function(e) {
 	function update(out) {
 		if (e.show_all) {
 			e.clear()
-			for (let result of out.results) {
-				e.add(div({class: catany(' ',
-							'errors-line',
-							(result.checked ? 'errors-checked' : 'errors-not-checked'),
-							(result.failed ? 'errors-failed' : 'errors-passed')
-						)},
-						div({class: 'errors-icon'}),
-						div({class: 'errors-message'}, result.rule)
-					))
-			}
+			for (let result of out.results)
+				if (result.rule)
+					e.add(div({class: catany(' ',
+								'errors-line',
+								(result.checked ? 'errors-checked' : 'errors-not-checked'),
+								(result.failed ? 'errors-failed' : 'errors-passed')
+							)},
+							div({class: 'errors-icon'}),
+							div({class: 'errors-message'}, result.rule)
+						))
 		} else {
 			let ffr = out.first_failed_result
 			if (ffr)
@@ -5343,13 +5366,13 @@ G.num_input = component('num-input', 'Input', function(e) {
 			e.input.select_range(0, -1)
 	})
 
-	e.increment_value = function(increment, ctrl) {
+	e.increment_value = function(increment, ctrl, ev) {
 		let v = e.value
 		if (v == null) v = increment > 0 ? e.min : e.max
 		if (v == null) return
 		let m = or(1 / 10 ** (e.decimals || 0), 1)
 		v += m * increment * (ctrl ? 10 : 1)
-		e.input_value = snap(v, m)
+		e.set_prop('input_value', snap(v, m), ev)
 		e.update({select_all: true})
 	}
 
@@ -5369,11 +5392,11 @@ G.num_input = component('num-input', 'Input', function(e) {
 		return false
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt) {
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 		if (alt)
 			return
 		if (key == 'ArrowDown' || key == 'ArrowUp') {
-			e.increment_value(key == 'ArrowDown' ? 1 : -1, shift || ctrl)
+			e.increment_value(key == 'ArrowDown' ? 1 : -1, shift || ctrl, ev)
 			return false
 		}
 	})
@@ -5381,10 +5404,10 @@ G.num_input = component('num-input', 'Input', function(e) {
 	function button_pointerdown(ev, increment) {
 		let ctrl = ev.shift || ev.ctrl
 		let increment_timer = timer(function() {
-			e.increment_value(increment, ctrl)
+			e.increment_value(increment, ctrl, ev)
 			increment_timer(.1)
 		})
-		e.increment_value(increment, ctrl)
+		e.increment_value(increment, ctrl, ev)
 		increment_timer(.5)
 		return this.capture_pointer(ev, null, function() {
 			increment_timer()
@@ -5702,29 +5725,34 @@ update opts:
 	value
 
 */
-css('.dropdown', 'gap-x arrow h-sb bg-input w-input')
-css('.dropdown.empty::before', 'zwsp') // .empty condition because we use gap-x.
-css('.dropdown-chevron', 'p-x-05 smaller ease')
+
+// NOTE: we use 'skip' on the root element and create an <inputbox> inside
+// so that we can add popups to the widget without messing up the CSS.
+css('.dropdown', 'skip')
+css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
+css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition because we use gap-x.
+css('.dropdown-chevron', 'smaller ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
 
-css('.dropdown-picker', 'v-s p-y-input bg-input z3', `
+css('.dropdown-picker', 'v-s p-y-input bg-input z3 arrow', `
 	margin-top: -2px; /* merge dropdown and picker outlines */
 	resize: both;
-	height: 12em;
+	height: 12em; /* TODO: what we want is max-height but then resizer doesn't work! */
 `)
 css('.dropdown-picker > *', 'p-input')
 css('.dropdown-picker', 'outline-focus')
-css('.dropdown.open', 'outline-focus')
+css('.dropdown.open .dropdown-inputbox', 'outline-focus')
 css('.dropdown[align=right] .dropdown-value', '', `order: 2;`)
 
 css('.dropdown-search', 'fg-search bg-search')
 
+css_state('.dropdown[invalid] .dropdown-inputbox', 'bg-error')
+
 G.dropdown = component('dropdown', 'Input', function(e) {
 
-	e.class('dropdown inputbox')
+	e.class('dropdown')
 	e.make_disablable()
-
 	e.init_child_components()
 
 	let html_list = e.$1('list')
@@ -5736,12 +5764,16 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		e.clear()
 	}
 
-	e.make_focusable()
+	e.inputbox = div({class: 'inputbox dropdown-inputbox'})
+	e.add(e.inputbox)
+
+	e.make_focusable(e.inputbox)
+
+	e.make_input_widget({
+		errors_tooltip_target: e.inputbox,
+	})
 
 	// model: value lookup
-
-	e.prop('value')
-	e.update({value: true})
 
 	function item_value(item_e) {
 		if (item_e.data != null) { // dynamic list with a data model
@@ -5771,20 +5803,20 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 	function bind_list(list, on) {
 		if (!list) return
 		list.on('items_changed', list_items_changed, on)
+		list.on('search', list_search, on)
+		list.on('pointerdown', list_pointerdown, on)
+		list.on('click', list_click, on)
 		if (on) {
 			list.make_list_items_focusable({multiselect: false})
 			list.make_list_items_searchable()
-			list.on('search', function() {
-				e.open()
-				e.update({value: true})
-			})
 			list_items_changed.call(list)
 			let item_i = e.lookup(e.value)
 			list.focus_item(or(item_i, false))
 			list.class('dropdown-picker')
-			list.popup(null, 'bottom', 'start')
+			list.popup(e.inputbox, 'bottom', 'start')
 			list.hide()
 			e.add(list)
+			e.validate()
 		} else {
 			list.remove()
 		}
@@ -5792,33 +5824,22 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 	}
 
 	e.set_list = function(list1, list0) {
+		if (!e.initialized) return
 		bind_list(list0, false)
 		bind_list(list1, true)
 	}
 
+	e.on_init(function() {
+		bind_list(e.list, true)
+	})
+
 	e.prop('list', {type: 'list'})
-
-	// model/form
-
-	e.prop('name')
-	e.prop('form', {type: 'id', store: false})
-	e.input = tag('input', {type: 'hidden', hidden: ''})
-	e.add(e.input)
-
-	e.set_name = function(s) { e.input.name = s }
-	e.get_form = function() { return e.input.form }
-	e.set_form = function(s) { e.input.form = s }
 
 	// view -------------------------------------------------------------------
 
 	e.value_box = div({class: 'dropdown-value'})
 	e.chevron   = div({class: 'dropdown-chevron'})
-	e.add(e.value_box, e.chevron)
-
-	e.set_value = function(v) {
-		e.input.value = v
-		e.update({value: true})
-	}
+	e.inputbox.add(e.value_box, e.chevron)
 
 	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
 
@@ -5840,7 +5861,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	let w
 	e.on_measure(function() {
-		w = e.rect().w
+		w = e.inputbox.rect().w
 	})
 	e.on_position(function() {
 		if (!e.list) return
@@ -5882,25 +5903,41 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	// controller -------------------------------------------------------------
 
-	e.on('pointerdown', function(ev) {
-		if (ev.target.closest_child(e) == e.list)
-			return // don't return false so that resizer works.
+	e.inputbox.on('pointerdown', function(ev) {
 		e.toggle()
 	})
 
-	e.on('click', function(ev) {
-		if (ev.target.closest_child(e.list))
-			e.close()
+	e.inputbox.on('blur', function(ev) {
+		e.close()
 	})
 
-	e.on('blur', function(ev) {
-		e.close()
+	e.on_validate(function(ev) {
+		e.update({value: true})
 	})
 
 	e.listen('focused_item_changed', function(list, ev) {
 		if (list != e.list) return
-		e.value = list.focused_item ? item_value(list.focused_item) : null
+		let v = list.focused_item ? item_value(list.focused_item) : null
+		e.set_prop('input_value', v, ev)
 	})
+
+	function list_search() {
+		e.open()
+		e.update({value: true})
+	}
+
+	function list_pointerdown(ev) {
+		if (ev.target == this)
+			return // let resizer work
+		// prevent ^blur event in inputbox that would close the dropdown.
+		ev.preventDefault()
+	}
+
+	function list_click(ev) {
+		if (ev.target == this)
+			return // let resizer work
+		e.close()
+	}
 
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 		let free_key = !(alt || shift || ctrl)
@@ -5917,7 +5954,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 			return false
 		}
 		if (key == 'Delete') {
-			e.value = null
+			e.set_prop('input_value', null, ev)
 			return false
 		}
 
