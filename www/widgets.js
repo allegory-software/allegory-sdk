@@ -5844,7 +5844,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	e.value_box = div({class: 'dropdown-value'})
 	e.chevron   = div({class: 'dropdown-chevron'})
-	e.xbutton   = button({bare: true, classes: 'dropdown-xbutton'})
+	e.xbutton   = button({bare: true, focusable: false, classes: 'dropdown-xbutton'})
 	e.inputbox.add(e.value_box, e.xbutton, e.chevron)
 
 	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
