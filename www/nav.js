@@ -1666,7 +1666,7 @@ G.nav_widget = function(e) {
 		}
 
 		let was_editing = ev.was_editing || !!e.editor
-		let focus_editor = ev.focus_editor || (e.editor && e.editor.hasfocus)
+		let focus_editor = ev.focus_editor || (e.editor && e.editor.has_focus)
 		let enter_edit = ev.enter_edit || (was_editing && e.stay_in_edit_mode)
 		let editable = (ev.editable || enter_edit) && !ev.focus_non_editable_if_not_found
 		let expand_selection = ev.expand_selection && e.can_select_multiple
@@ -1881,9 +1881,9 @@ G.nav_widget = function(e) {
 	e.refocus_state = function(how) {
 		let fs = {how: how}
 		fs.was_editing = !!e.editor
-		fs.focus_editor = e.editor && e.editor.hasfocus
+		fs.focus_editor = e.editor && e.editor.has_focus
 		fs.col = e.focused_field && e.focused_field.name
-		fs.focused = e.hasfocus
+		fs.focused = e.has_focus
 		if (how == 'pk' || how == 'val') {
 			if (e.pk_fields)
 				fs.pk_vals = e.focused_row ? e.cell_vals(e.focused_row, e.pk_fields) : null
@@ -3262,7 +3262,7 @@ G.nav_widget = function(e) {
 		if (cancel)
 			e.revert_cell(row, field)
 
-		let had_focus = e.hasfocus
+		let had_focus = e.has_focus
 
 		e.editor.off('lost_focus', editor_lost_focus)
 
@@ -3486,7 +3486,7 @@ G.nav_widget = function(e) {
 		if (ev.focus_it) {
 			ev.was_editing  = !!e.editor
 			ev.editor_state = ev.editor_state || e.editor && e.editor.state && e.editor.editor_state()
-			ev.focus_editor = e.editor && e.editor.hasfocus
+			ev.focus_editor = e.editor && e.editor.has_focus
 			if (!e.focus_cell(false, false))
 				return 0
 		}
@@ -4652,7 +4652,7 @@ G.nav_widget = function(e) {
 		} else
 			oe.content.remove()
 		e.add(oe)
-		if(focus_e && e.hasfocus)
+		if(focus_e && e.has_focus)
 			focus_e.focus()
 	}
 	}

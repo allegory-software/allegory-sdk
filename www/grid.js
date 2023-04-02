@@ -1257,7 +1257,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.do_error_tooltip_check = function() {
 			if (!row) return false
 			if (e.editor && e.editor.do_error_tooltip_check()) return false
-			if (e.hasfocus) return true
+			if (e.has_focus) return true
 			return false
 		}
 
@@ -1698,7 +1698,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function md_row_drag(ev, mx, my, shift, ctrl) {
 
-		if (!e.hasfocus)
+		if (!e.has_focus)
 			e.focus()
 
 		let row = e.rows[hit_ri]

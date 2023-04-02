@@ -1065,7 +1065,7 @@ e.make_list_items_focusable = function(opt) {
 
 		opt = opt || empty_obj
 		let was_editing = !!e.editor
-		let focus_editor = opt.focus_editor || (e.editor && e.editor.hasfocus)
+		let focus_editor = opt.focus_editor || (e.editor && e.editor.has_focus)
 		let enter_edit = opt.enter_edit || (was_editing && e.stay_in_edit_mode)
 		let editable = (opt.editable || enter_edit) && !opt.focus_non_editable_if_not_found
 		let expand_selection = opt.expand_selection && e.multiselect
@@ -1432,7 +1432,6 @@ e.make_list_items_searchable = function() {
 		if (!found)
 			search_string = s0
 		e.fire('search', found)
-
 		return found
 	}
 
@@ -3876,7 +3875,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 	e.on_update(function(opt) {
 		let update_tooltip = opt.validation_result
 		let show_tooltip = (opt.errors_tooltip || update_tooltip)
-			&& (e.invalid && (e.hasfocus || e.hovered))
+			&& (e.invalid && (e.has_focus_visible || e.hovered))
 		let et = e.errors_tooltip
 		if (show_tooltip && !et) {
 			e.errors = tag('errors', {show_all: false})
@@ -3890,7 +3889,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 		}
 		if (et) {
 			et.show(show_tooltip)
-			et.class('click-through', !e.hasfocus)
+			et.class('click-through', !e.has_focus)
 		}
 	})
 
@@ -5888,9 +5887,10 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 			let w = e.rect().w
 			e.class('open', open)
 			if (open) {
-				e.list.show()
+				e.list.update({show: true})
 				e.list.focus_item(true, 0, {
 					make_visible: true,
+					must_not_move: true,
 				})
 			} else {
 				e.list.hide()
@@ -5922,7 +5922,8 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 	})
 
 	function list_search() {
-		e.open()
+		if (this.search_string)
+			e.open()
 		e.update({value: true})
 	}
 
@@ -6874,7 +6875,7 @@ function calendar_widget(e, mode) {
 		let t0 = ev.timeStamp
 		let sy0 = sy_now
 
-		let had_focus = e.hasfocus
+		let had_focus = e.has_focus
 
 		e.focus_async() // async avoids :focus-visible!
 
@@ -7153,7 +7154,7 @@ G.time_picker = component('time-picker', 'Input', function(e) {
 		let free_key = !(alt || ctrl || shift)
 		if (free_key && (key == 'ArrowLeft' || key == 'ArrowRight')) {
 			for (i = 0, n = e.with_seconds ? 3 : 2; i < n; i++) {
-				if (lists[i].hasfocus) {
+				if (lists[i].has_focus) {
 					let next_li = lists[i + (key == 'ArrowLeft' ? -1 : 1)]
 					if (next_li) {
 						next_li.focus()

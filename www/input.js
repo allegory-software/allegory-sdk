@@ -511,7 +511,7 @@ function val_widget(e, enabled_without_nav, show_error_tooltip) {
 		function update() {
 			let show =
 				e.invalid && !e.hasclass('picker')
-				&& (e.hasfocus || e.hovered)
+				&& (e.has_focus || e.hovered)
 			e.error_tooltip.update({show: show})
 		}
 		if (!e.error_tooltip) {
@@ -4592,7 +4592,7 @@ widget('frm', 'Containers', function(e) {
 	e.on('pointerdown', function(ev) {
 		if (ev.target != e)
 			return
-		if (!e.hasfocus)
+		if (!e.has_focus)
 			if (last_focused_input)
 				last_focused_input.focus()
 			else

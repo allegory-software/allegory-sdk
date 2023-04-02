@@ -254,8 +254,9 @@ ELEMENT STATE
 	e.hovered
 	e.focused_element
 	e.focused
-	e.hasfocus
+	e.has_focus
 	e.focus_visible
+	e.has_focus_visible
 	e.focusables()
 	e.effectively_disabled
 	e.effectively_hidden
@@ -2917,12 +2918,16 @@ property(Element, 'focused', function() {
 	return document.activeElement == this
 })
 
-property(Element, 'hasfocus', function() {
+property(Element, 'has_focus', function() {
 	return this.contains(document.activeElement)
 })
 
-property(Element, 'focus_visible', function() {
-	return this.matches(':focus-visible')
+property(Element, 'has_focus_visible', function() {
+	if (Firefox) {
+		return !!this.$1(':focus-visible')
+	} else {
+		return this.matches(':has(:focus-visible)')
+	}
 })
 
 property(Element, 'effectively_focusable', function() {
