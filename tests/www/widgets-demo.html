@@ -858,7 +858,8 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 <div class="smaller "><pass-input required></pass-input><button>OK</button></div>
 <div class="normal  "><pass-input minlen=5 placeholder="Password" id=my_pass></pass-input><button>OK</button></div>
 <errors for=my_pass show-all></errors>
-<div class="large   "><pass-input value="abc"></pass-input><button>OK</button></div>
+<div class="large   "><pass-input value="abc" minlen=5 conditions="lower" id=my_pass2></pass-input><button>OK</button></div>
+<errors for=my_pass2 show-all></errors>
 </xmp>
 
 <!--------------------------------------------------------------------------->
