@@ -3792,7 +3792,7 @@ add_validator({
 	props    : 'conditions',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.conditions && field.conditions.includes('symbol'),
-	validate : (e, v, field) => /[~!@#$%^&*()_+\-=`\[\]{}|\\;:'",.<>?\/]/.test(v),
+	validate : (e, v, field) => /[^A-Za-z0-9]/.test(v),
 	error    : (e, v, field) => S('validation_symbol_error',
 		'{0} does not contain a symbol', field_name(field)),
 	rule     : (e, v, field) => S('validation_symbol_rule' ,
