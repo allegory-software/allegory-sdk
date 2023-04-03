@@ -1120,7 +1120,7 @@ e.make_list_items_focusable = function(opt) {
 			e.update({state: true})
 
 		if (enter_edit && i != null)
-			e.update({enter_edit: [ev.editor_state, focus_editor || false]})
+			e.update({enter_edit: [opt.editor_state, focus_editor || false]})
 
 		if (opt.make_visible != false)
 			if (e.focused_item)
@@ -1195,8 +1195,6 @@ e.make_list_items_focusable = function(opt) {
 			invert_selection: ev.ctrl,
 		}))
 			return false
-
-		e.focus_async() // async avoids :focus-visible!
 
 	})
 
@@ -3887,7 +3885,9 @@ that are involved in validation change. Validation state and result is kept
 in the element as well as a tooltip that shows up when the element has focus
 or is hovered.
 
-state:
+uses props:
+	input_value
+state props:
 	validator
 	validation_result
 	invalid
@@ -3933,57 +3933,69 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 			e.validate()
 		})
 
-	errors_tooltip_target = errors_tooltip_target || e
+	let ett = or(errors_tooltip_target, e)
 
-	e.on_update(function(opt) {
-		let update_tooltip = opt.validation_result
-		let show_tooltip = (opt.errors_tooltip || update_tooltip)
-			&& (e.invalid && (e.has_focus_visible || e.hovered))
-		let et = e.errors_tooltip
-		if (show_tooltip && !et) {
-			e.errors = tag('errors', {show_all: false})
-			e.errors.target = e
-			et = tooltip({kind: 'error', side: 'top', align: 'center',
-				text: e.errors, target: errors_tooltip_target})
-			et.class('errors-tooltip')
-			e.errors_tooltip = et
-			e.add(et)
-			update_tooltip = true
-		}
-		if (et) {
-			et.show(show_tooltip)
-			et.class('click-through', !e.has_focus)
-		}
-	})
+	if (ett != false) {
 
-	function update() {
-		e.update({errors_tooltip: true})
+		e.do_after('set_invalid', function(v) {
+			ett.attr('invalid', v)
+		})
+
+		e.on_update(function(opt) {
+
+			let show_tooltip = (opt.errors_tooltip || opt.validation_result)
+				&& (e.invalid && (e.has_focus_visible || e.hovered))
+				&& !e.getAnimations().length
+
+			let et = e.errors_tooltip
+			if (show_tooltip && !et) {
+				e.errors = tag('errors', {show_all: false})
+				e.errors.target = e
+				et = tooltip({kind: 'error', align: 'center',
+					text: e.errors, target: ett})
+				et.class('errors-tooltip')
+				e.errors_tooltip = et
+				e.add(et)
+			}
+			if (et) {
+				et.show(show_tooltip)
+				et.class('click-through', !e.has_focus)
+			}
+		})
+
+		function update_et() {
+			e.update({errors_tooltip: true})
+		}
+		ett.on('focus', update_et)
+		ett.on('blur' , update_et)
+		ett.on('hover', update_et)
+
+		// hide the tooltip while the target animates (slider thumb does that).
+		ett.on('transitionstart', update_et)
+		ett.on('transitionend'  , update_et)
+
 	}
-	e.on('focusin'      , update)
-	e.on('focusout'     , update)
-	e.on('pointerenter' , update)
-	e.on('pointerleave' , update)
 
 }
 
 /* input_widget --------------------------------------------------------------
 
-An input widget is a validated widget with an `input_value` prop and a `value`
-prop. It also has a hidden <input> element set to `value` so it works in a form.
+An input widget is a widget with a validator with an `input_value` prop that
+gets validated and a `value` prop that is set as the result. It also has a
+hidden <input> element set to `value` so that it works in a form.
 
+inherits:
+	validator
 config:
 	name
 	form
 	required
 	readonly
+	min max     (for `number` and `time` value types)
 state:
 	input_value (attr: value)
 	value
 	invalid
-methods:
-	validate()
-hooks:
-	on_validate(f); f(ev)
 stubs:
 	update_value_input(ev)
 
@@ -4005,6 +4017,12 @@ e.make_input_widget = function(opt) {
 
 	e.prop('required', {type: 'bool', attr: true, default: false})
 	e.prop('readonly', {type: 'bool', attr: true, default: false})
+
+	let vt = opt.value_type
+	if (vt == 'number' || vt == 'time') {
+		e.prop('min', {type: 'number'})
+		e.prop('max', {type: 'number'})
+	}
 
 	e.value_input = tag('input', {hidden : '', type: 'hidden'})
 	e.add(e.value_input)
@@ -4037,6 +4055,79 @@ e.make_input_widget = function(opt) {
 		else
 			e.validate()
 	})
+
+}
+
+/* range_input_widget --------------------------------------------------------
+
+A range input widget is a widget that contains two validated input widgets
+that define a range, and it also has a validator that validates the range.
+
+inherits:
+	validator
+config:
+	form
+	name1 name2
+	required1 required2
+	readonly1 readonly2
+	min1 min2 max1 max2     (for `number` and `time` value types)
+state:
+	input_value1 (attr: value1)
+	input_value2 (attr: value2)
+	value1 value2
+	invalid1 invalid2
+
+*/
+
+e.make_range_input_widget = function(opt) {
+
+	let e = this
+
+	let n = opt.value_input_widgets.length
+	assert(n == 1 || n == 2)
+	let range = n == 2
+
+	e.make_validator(true, opt.errors_tooltip_target)
+
+	e.prop('form', {type: 'id', store: false})
+
+	for (let ve of opt.value_input_widgets) {
+
+		let i = ve.K || ''
+
+		e.forward_prop('name'+i       , ve, 'name'       , null, 'forward')
+		e.forward_prop('required'+i   , ve, 'required'   , null, 'forward')
+		e.forward_prop('readonly'+i   , ve, 'readonly'   , null, 'forward')
+		e.forward_prop('input_value'+i, ve, 'input_value', 'value'+i, 'forward')
+		e.forward_prop('value'+i      , ve, 'value'      , null, 'bidi')
+		e.forward_prop('invalid'+i    , ve, 'invalid'    , null, 'backward')
+
+		let vt = ve.props.value.type
+		if (vt == 'number' || vt == 'time') {
+			e.forward_prop('min', ve, 'min', null, 'forward')
+			e.forward_prop('max', ve, 'max', null, 'forward')
+		}
+
+		e.do_after('set_form', function(s) {
+			ve.form = s
+		})
+
+	}
+
+	e.get_form = function() {
+		return opt.value_input_widgets[0].form
+	}
+
+	if (range) {
+		e.property('input_value', () => e)
+		e.on_validate(function(e) {
+			//
+		})
+	}
+
+	// e.on_init(function() {
+	// 	e.validate()
+	// })
 
 }
 
@@ -4400,29 +4491,17 @@ let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, de
 	return [step, min, max]
 }
 
-component('slider-thumb', function(e) {
-	e.class('slider-thumb')
-	e.to_num = num
-	e.from_num = return_arg
-	e.make_input_widget({value_type: 'number'})
-	e.prop('min', {type: 'number'})
-	e.prop('max', {type: 'number'})
-})
-
 let slider_widget = function(e, range) {
 
 	e.clear()
 	e.class('slider')
+	e.class('range', !!range)
 	e.make_disablable()
 	e.is_range = range // for range validator
-
-	e.prop('form'    , {type: 'id', store: false})
 
 	e.prop('from'    , {type: 'number', default: 0})
 	e.prop('to'      , {type: 'number', default: 1})
 
-	e.prop('min'     , {type: 'number'})
-	e.prop('max'     , {type: 'number'})
 	e.prop('decimals', {type: 'number', default: 2})
 
 	e.prop('marked'  , {type: 'bool'  , default: true})
@@ -4439,40 +4518,38 @@ let slider_widget = function(e, range) {
 
 	e.marks = div({class: 'slider-marks'})
 
-	let validator = create_validator(e, e)
-
 	e.thumbs = []
-	for (let i = 1; i <= (range ? 2 : 1); i++) {
-		let K = range ? i : ''
-		let thumb = element({tag: 'slider-thumb', K: K})
-		e.forward_prop('min', thumb, 'min', null, 'forward')
-		e.forward_prop('max', thumb, 'max', null, 'forward')
-		e.forward_prop('name'+K, thumb, 'name', null, 'forward')
-		e.forward_prop('required'+K, thumb, 'required', null, 'forward')
-		e.forward_prop('readonly'+K, thumb, 'readonly', null, 'forward')
-		e.forward_prop('input_value'+K, thumb, 'input_value', 'value'+K, 'forward')
-		e.forward_prop('value'+K, thumb, 'value', null, 'bidi')
-		e.forward_prop('invalid'+K, thumb, 'invalid', null, 'backward')
+	for (let K of range ? ['1', '2'] : ['']) {
+		let thumb = tag('slider-thumb')
 		e.thumbs.push(thumb)
+		thumb.class('slider-thumb')
+		thumb.K = K
+		thumb.to_num = num
+		thumb.from_num = return_arg
+		if (range)
+			thumb.make_input_widget({
+				value_type: 'number',
+				errors_tooltip_target: false,
+			})
+		e.do_after('set_invalid', function(v) {
+			thumb.attr('invalid', v)
+		})
+	}
+	if (range) {
+		e.make_range_input_widget({
+			value_input_widgets: e.thumbs,
+			errors_tooltip_target: false,
+		})
+	} else {
+		e.make_input_widget({
+			value_type: 'number',
+			errors_tooltip_target: false,
+		})
 	}
 
 	e.add(e.bg_fill, e.valid_fill, e.value_fill, e.marks, ...e.thumbs)
 
 	e.make_focusable(...e.thumbs)
-
-	e.get_form = function() { return e.thumbs[0].form }
-	e.set_form = function(s) {
-		for (let thumb of e.thumbs)
-			thumb.form = s
-	}
-
-	if (range) {
-		e.make_validator()
-		e.property('input_value', () => e)
-		e.on_validate(function(e) {
-			//
-		})
-	}
 
 	// model: progress
 
@@ -4493,7 +4570,7 @@ let slider_widget = function(e, range) {
 			v = floor(v / multiple() + .5) * multiple()
 
 		if (range)
-			if (K == 1)
+			if (K == '1')
 				v = e.value2 != null ? min(v, e.value2) : null
 			else
 				v = e.value1 != null ? max(v, e.value1) : null
@@ -4543,16 +4620,13 @@ let slider_widget = function(e, range) {
 		}
 		if (update_text) {
 			thumb.tooltip.kind = e.invalid ? 'error' : null
-			let vr1 = e.thumbs[0].validation_result
-			let vr2 = e.thumbs[1] && e.thumbs[1].validation_result
-			let vrr = e.validation_result
-			let fr1 = vr1 && vr1.first_failed_result
-			let fr2 = vr2 && vr2.first_failed_result
-			let frr = vrr && vrr.first_failed_result
+			let tvr = thumb.validation_result
+			let evr = e.validation_result
+			let tfr = tvr && tvr.first_failed_result
+			let efr = evr && evr.first_failed_result
 			let a = [e.display_value_for(e['value'+thumb.K])]
-			if (fr1 && fr1.error) a.push(fr1.error)
-			if (fr2 && fr2.error) a.push(fr2.error)
-			if (frr && frr.error) a.push(frr.error)
+			if (tfr && tfr.error) a.push(tfr.error)
+			if (efr && efr.error) a.push(efr.error)
 			thumb.tooltip.text = a.join_nodes(tag('br'))
 		}
 		thumb.tooltip.update({show: show})
@@ -4629,8 +4703,6 @@ let slider_widget = function(e, range) {
 		thumb.on('transitionend'  , update_tt)
 
 		thumb.on('pointerdown', function(ev, mx0) {
-
-			thumb.focus_async() // async avoids :focus-visible!
 
 			let r = e.rect()
 			let tr = thumb.rect()
@@ -5269,10 +5341,9 @@ G.select_button = component('select-button', function(e) {
 		while (b && b.parent != e.inputbox) b = b.parent
 		if (!b || b.parent != e.inputbox || b == e.plate) return
 		select_item(b, ev)
-		e.focus()
 	})
 
-	e.inputbox.on('keydown', function(key, shift, ctrl, alt) {
+	e.inputbox.on('keydown', function(key, shift, ctrl, alt, ev) {
 		if (alt || shift || ctrl)
 			return
 		if (key == 'ArrowRight' || key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowDown') {
@@ -5371,13 +5442,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 		errors_tooltip_target: e.input_group,
 	})
 
-	e.do_after('set_invalid', function(v) {
-		e.input_group.attr('invalid', v)
-	})
-
 	e.prop('decimals'   , {type: 'number', default: 0})
-	e.prop('min'        , {type: 'number'})
-	e.prop('max'        , {type: 'number'})
 	e.prop('buttons'    , {type: 'enum', enum_values: 'none up-down plus-minus',
 		default: 'none', attr: true})
 
@@ -5556,10 +5621,6 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 		errors_tooltip_target: e.input_group,
 	})
 
-	e.do_after('set_invalid', function(v) {
-		e.input_group.attr('invalid', v)
-	})
-
 	e.prop('minlen', {type: 'number'})
 	e.prop('conditions', {type: 'words', convert: words,
 		default: 'lower upper digit symbol'})
@@ -5673,7 +5734,6 @@ G.tags_box = component('tags-box', function(e) {
 		let t = div({class: 'tags-tag'}, tag, x)
 		t.make_focusable()
 		t.on('keydown', tag_keydown)
-		t.on('pointerdown', tag_pointerdown)
 		x.on('pointerdown', return_false) // prevent bubbling
 		x.on('click', tag_x_click)
 		return t
@@ -5696,10 +5756,6 @@ G.tags_box = component('tags-box', function(e) {
 	}
 
 	// controller
-
-	function tag_pointerdown() {
-		this.focus()
-	}
 
 	function tag_x_click() {
 		e.remove_tag(this.parent.textContent)
@@ -6012,10 +6068,6 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		}
 	)
 
-	e.open   = function(focus) { e.set_open(true, focus) }
-	e.close  = function(focus) { e.set_open(false, focus) }
-	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
-
 	e.set_open = function(open, focus) {
 		if (e.isopen != open) {
 			let w = e.rect().w
@@ -6034,6 +6086,10 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		if (focus)
 			e.focus()
 	}
+
+	e.open   = function(focus) { e.set_open(true, focus) }
+	e.close  = function(focus) { e.set_open(false, focus) }
+	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
 
 	// controller -------------------------------------------------------------
 
@@ -6239,7 +6295,7 @@ TODO:
 */
 
 css(':root', '', `
-	--min-w-calendar: 16.5em;
+	--min-w-calendar: 16em; /* more than 16em is too wide as a picker */
 	--min-h-calendar: 20em;
 	--fs-calendar-months   : 1.25;
 	--fs-calendar-weekdays : 0.75;
@@ -6368,8 +6424,6 @@ function calendar_widget(e, mode) {
 	}
 
 	e.focus_range = function(range, scroll_duration, scroll_center) {
-		if (focused_range == range)
-			return false
 		assert(!range || ranges.includes(range))
 		if (range && !e.can_focus_range(range))
 			return false
@@ -6595,7 +6649,7 @@ function calendar_widget(e, mode) {
 	}
 
 	function update_scroll() {
-		e.scroll_to_view_all_ranges(0, 'center')
+		e.scroll_to_view_all_ranges(0, true)
 	}
 
 	e.on_bind(function(on) {
@@ -6948,22 +7002,23 @@ function calendar_widget(e, mode) {
 
 	// controller -------------------------------------------------------------
 
-	let focus_called
-	let inh_focus = e.focus
-	e.focus = function() {
-		focus_called = true
-		inh_focus.call(this)
-		focus_called = false
-	}
-
 	e.on('blur' , function() {
 		e.focus_range(null)
 		e.update()
 	})
 
+	let pointerdown_ts
+
+	let inh_focus = e.focus
+	e.focus = function() {
+		pointerdown_ts = clock() * 1000 // simulate click (i.e. no scroll)
+		inh_focus.call(this)
+	}
+
 	e.on('focus', function(ev) {
-		if (!focus_called) // event triggeded by Tab navigation
-			e.focus_range(focus_ranges.at(shift_pressed ? -1 : 0))
+		if (ev.timeStamp - pointerdown_ts < 100) // clicked
+			return
+		e.focus_range(focus_ranges.at(shift_pressed ? -1 : 0))
 		e.update()
 	})
 
@@ -7003,6 +7058,7 @@ function calendar_widget(e, mode) {
 
 	ct.on('pointerdown', function(ev, down_mx, down_my) {
 
+		pointerdown_ts = ev.timeStamp
 		scroll_transition.stop()
 
 		// this shouldn't normally happen, but just in case it does,
@@ -7020,8 +7076,6 @@ function calendar_widget(e, mode) {
 		let sy0 = sy_now
 
 		let had_focus = e.has_focus
-
-		e.focus_async() // async avoids :focus-visible!
 
 		if (hit_range_end != null && e.can_change_range(hit_range)) {
 			drag_range     = hit_range
@@ -7268,24 +7322,36 @@ G.time_picker = component('time-picker', 'Input', function(e) {
 	e.listen('focused_item_changed', function(list, ev) {
 		if (!list.parent || list.parent.parent != e)
 			return
-		if (list.focused_item)
-			list.update({scroll_to_focused_item: true, scroll_align: 'center', scroll_smooth: !(ev && ev.keyboard)})
+		if (!list.focused_item)
+			return
+		list.update({
+			scroll_to_focused_item: true,
+			scroll_align: 'center',
+			scroll_smooth: !(ev && ev.keyboard),
+		})
+		let v = list.focused_item.data.value
 		if (list == e.hours_list)
-			e.set_prop('value',   set_hours(e.value, list.focused_item.data.value), {target: list})
+			e.set_prop('value',   set_hours(e.value, v), {target: list})
 		else if (list == e.minutes_list)
-			e.set_prop('value', set_minutes(e.value, list.focused_item.data.value), {target: list})
+			e.set_prop('value', set_minutes(e.value, v), {target: list})
 		else if (list == e.seconds_list)
-			e.set_prop('value', set_seconds(e.value, list.focused_item.data.value), {target: list})
+			e.set_prop('value', set_seconds(e.value, v), {target: list})
 	})
 
-	e.prop('value', {type: 'timeofday', convert: s => parse_timeofday(s, true, e.with_seconds, e.with_fractions) })
+	e.prop('value', {type: 'timeofday',
+		convert: s => parse_timeofday(s, false, e.with_seconds, e.with_fractions),
+	})
 
 	e.set_value = function(v, v0, ev) {
 		if (!(ev && ev.target && (ev.target == e || ev.target.parent == e))) {
-			let opt = {ev: ev || {target: e}, scroll_to_focused_item: true, scroll_align: 'center'}
-			e.  hours_list.focus_item(v != null ? floor((v / 3600) % 24) : false, null, opt)
-			e.minutes_list.focus_item(v != null ? floor((v / 60) % 60)   : false, null, opt)
-			e.seconds_list.focus_item(v != null ? floor(v % 60)          : false, null, opt)
+			let opt = assign_opt({
+				target: e,
+				scroll_to_focused_item: true,
+				scroll_align: 'center',
+			}, ev)
+			e.  hours_list.focus_item(v != null ? floor(v / 3600 % 24) : false, null, opt)
+			e.minutes_list.focus_item(v != null ? floor(v / 60 % 60)   : false, null, opt)
+			e.seconds_list.focus_item(v != null ? floor(v % 60)        : false, null, opt)
 		}
 	}
 
@@ -7352,21 +7418,26 @@ G.datetime_picker = component('datetime-picker', 'Input', function(e) {
 	}
 	e.prop('value', {type: 'time', convert: convert_value})
 
-	e.set_value = function(v, v1, ev) {
+	e.set_value = function(v) {
+		let ev = {target: this}
 		e.calendar   .set_prop('value', v, ev)
 		e.time_picker.set_prop('value', v, ev)
 	}
 
-	e.listen('prop_changed', function(ce, k, v, v0, ev) {
-		if (v == 'value' && ce == e.calendar) {
-			e.set_prop('value', v + e.time_picker.value, ev)
-		} else if (v == 'value' && ce == e.time_picker) {
-			e.set_prop('value', e.calendar.value + v, ev)
-		}
+	e.calendar.on_prop_changed(function(k, v, v0, ev) {
+		if (k != 'value') return
+		if (ev && ev.target == e) return
+		e.set_prop('value', v + e.time_picker.value, ev)
+	})
+
+	e.time_picker.on_prop_changed(function(k, v, v0, ev) {
+		if (k != 'value') return
+		if (ev && ev.target == e) return
+		e.set_prop('value', e.calendar.value + v, ev)
 	})
 
 	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
-		e.calendar.scroll_to_view_all_ranges(scroll_smooth, scroll_align)
+		e.calendar.scroll_to_view_all_ranges(scroll_smooth ? 1/0 : 0, scroll_align == 'center')
 		e.time_picker.scroll_to_view_value(scroll_align, scroll_smooth)
 	}
 
@@ -7451,7 +7522,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			bare: true,
 		}, S('close', 'Close'))
 		e.close_button.action = function() {
-			e.isopen = false
+			e.set_open(false)
 		}
 		e.picker_box = div({class: 'date-input-picker-box'}, e.picker, e.close_button)
 	} else {
@@ -7510,6 +7581,7 @@ function date_input_widget(e, has_date, has_time, range) {
 
 	for (let I of (range ? ['1', '2'] : [''])) {
 
+		let INPUT_VAL = 'input_value'+I
 		let VAL = 'value'+I
 
 		let inp = input({
@@ -7517,8 +7589,10 @@ function date_input_widget(e, has_date, has_time, range) {
 			placeholder: date_placeholder_text(),
 		})
 
+		//
+
 		inp.on('input', function(ev) {
-			e.set_prop(VAL, inp.value, ev)
+			e.set_prop(INPUT_VAL, inp.value, ev)
 		})
 
 		inp.on('wheel', function(ev, dy, is_trackpad) {
@@ -7689,15 +7763,22 @@ function date_input_widget(e, has_date, has_time, range) {
 
 	// controller -------------------------------------------------------------
 
-	e.prop('isopen', {private: true, default: false})
-	e.set_isopen = function(open, open0, focus) {
+	e.property('isopen',
+		function() {
+			return e.hasclass('open')
+		},
+		function(open) {
+			e.set_open(open, true)
+		}
+	)
+	e.set_open = function(open, focus) {
 		e.class('open', open)
 		if (open) {
 			e.picker_box.popup(e.input_group, 'bottom', 'start')
 			e.picker_box.popup_oy = -1 // make top border overlap with editbox
 			e.add(e.picker_box)
 			e.picker_box.update({show: true})
-			e.picker.scroll_to_view_value('center')
+			e.picker.scroll_to_view_value('center', false)
 			e.picker.update({focus: true})
 		} else {
 			e.picker_box.hide()
@@ -7706,14 +7787,18 @@ function date_input_widget(e, has_date, has_time, range) {
 		}
 	}
 
+	e.open   = function(focus) { e.set_open(true, focus) }
+	e.close  = function(focus) { e.set_open(false, focus) }
+	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
+
 	e.picker_box.on('focusout', function(ev) {
 		if (ev.relatedTarget && e.picker_box.contains(ev.relatedTarget))
 			return
-		e.set_prop('isopen', false, false)
+		e.close(false)
 	})
 
 	e.picker_button.on('pointerdown', function(ev) {
-		e.isopen = !e.isopen
+		e.toggle()
 		return false
 	})
 
@@ -7721,14 +7806,14 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.calendar.on('pick', function() {
 			// delay it so the user can glance the choice.
 			runafter(.1, function() {
-				e.isopen = false
+				e.close()
 			})
 		})
 
 	e.picker_box.on('keydown', function(key, shift, ctrl, alt) {
 		let free_key = !(alt || shift || ctrl)
 		if (free_key && key == 'Escape') {
-			e.isopen = false
+			e.close()
 			return false
 		}
 	})
@@ -7739,7 +7824,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			(alt && (key == 'ArrowDown' || key == 'ArrowUp'))
 			|| (free_key && key == 'Enter')
 		) {
-			e.isopen = !e.isopen
+			e.toggle()
 			return false
 		}
 	})

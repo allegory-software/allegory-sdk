@@ -1267,20 +1267,26 @@ let timeonly_re = new RegExp('^\\s*' + time_re.source + '\\s*$')
 let datetime_re = new RegExp('^\\s*' + date_re.source + '(?:\\s+' + time_re.source + '\\s*)?$')
 
 G.parse_timeofday = function(s, validate, with_seconds, with_fractions) {
-	if (!isstr(s))
-		return s
-	let tm = timeonly_re.exec(s)
-	if (!tm)
-		return null
-	let H = num(tm[1])
-	let M = num(tm[2])
-	let S = with_seconds && num(tm[3]) || 0
-	let fs = tm[5] || ''
-	let f = with_fractions && (tm[4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
-	let t = H * 3600 + M * 60 + S + f
-	if (validate)
-		if (hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
+	let t = s
+	if (isstr(s)) {
+		let tm = timeonly_re.exec(s)
+		if (!tm)
 			return null
+		let H = num(tm[1])
+		let M = num(tm[2])
+		let S = with_seconds && num(tm[3]) || 0
+		let fs = tm[5] || ''
+		let f = with_fractions && (tm[4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
+		t = H * 3600 + M * 60 + S + f
+		if (validate)
+			if (hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
+				return null
+	}
+	if (validate)
+		if (t < 0 || t >= 3600 * 24)
+			return null
+	t = t % (3600 * 24)
+	if (t < 0) t += 3600 * 24
 	return t
 }
 method(String, 'parse_timeofday', function(validate, with_seconds, with_fractions) {
