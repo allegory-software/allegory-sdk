@@ -7545,7 +7545,7 @@ G.datetime_picker = component('datetime-picker', 'Input', function(e) {
 	})
 
 	e.time_picker.on('input', function(ev) {
-		e.set_prop('value', e.calendar.value + this.value, ev)
+		e.set_prop('value', (e.calendar.value ?? time()) + this.value, ev)
 		e.fire('input', ev)
 	})
 
