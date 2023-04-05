@@ -830,8 +830,8 @@ chart = component('chart', 'Input', function(e) {
 				max_val = -1/0
 				min_sum =  1/0
 				max_sum = -1/0
-				let user_min_val = or(e.min_val, -1/0)
-				let user_max_val = or(e.max_val,  1/0)
+				let user_min_val = e.min_val ?? -1/0
+				let user_max_val = e.max_val ??  1/0
 				let val0
 				for (let cg of all_split_groups) {
 					for (let xg of cg) {
@@ -850,10 +850,10 @@ chart = component('chart', 'Input', function(e) {
 			}
 
 			// clip/stretch ranges to given fixed values.
-			min_val = or(e.min_val, min_val)
-			max_val = or(e.max_val, max_val)
-			min_sum = or(e.min_sum, min_sum)
-			max_sum = or(e.max_sum, max_sum)
+			min_val = e.min_val ?? min_val
+			max_val = e.max_val ?? max_val
+			min_sum = e.min_sum ?? min_sum
+			max_sum = e.max_sum ?? max_sum
 
 			if (columns && all_split_groups) {
 				let val_unit = (max_val - min_val) / xgs.size

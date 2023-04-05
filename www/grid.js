@@ -235,8 +235,8 @@ G.grid = component('grid', 'Input', function(e) {
 		e.icon_font = e.font_size + 'px ' + e.icon_font_family
 		e.header_icon_font = (e.font_size * 0.875) + 'px ' + e.icon_font_family
 		e.header_text_font = (e.font_size * 0.875) + 'px ' + e.text_font_family
-		e.cell_h   = or(e.cell_h  , round(e.line_height + 2 * e.padding_y + e.cell_border_h_width))
-		e.header_h = or(e.header_h, round(e.line_height + 2 * e.padding_y + e.cell_border_h_width))
+		e.cell_h   = e.cell_h   ?? round(e.line_height + 2 * e.padding_y + e.cell_border_h_width)
+		e.header_h = e.header_h ?? round(e.line_height + 2 * e.padding_y + e.cell_border_h_width)
 
 		update_cx(cx)
 		update_cx(hcx)
@@ -1351,15 +1351,14 @@ G.grid = component('grid', 'Input', function(e) {
 		let field = e.fields[fi]
 		let row = e.rows[ri]
 		let hcell = e.header.at[fi]
-		let iw = field_has_indent(field)
-			? indent_offset(or(indent, row_indent(row))) : 0
+		let iw = field_has_indent(field) ? indent_offset(indent ?? row_indent(row)) : 0
 		let bx = e.cell_border_v_width
 		let by = e.cell_border_h_width
 
 		let [x, y, w, h] = cell_rect(ri, fi)
 		w -= iw
-		x = or(ex, x + iw)
-		y = or(ey, y)
+		x = ex ?? (x + iw)
+		y = ey ?? y
 
 		if (field.align == 'right') {
 			e.editor.x1 = null
@@ -1917,9 +1916,9 @@ G.grid = component('grid', 'Input', function(e) {
 			function hit_test() {
 				let ci = xs.binsearch(hit_x)
 				let last_hit_over_ri = hit_over_ri
-				hit_over_ri = or(is[ci], ri2)
-				let x1 = or(xs[ci  ], xof(ri2))
-				let x0 = or(xs[ci-1], xof(ri1))
+				hit_over_ri = is[ci] ?? ri2
+				let x1 = xs[ci  ] ?? xof(ri2)
+				let x0 = xs[ci-1] ?? xof(ri1)
 				let hit_p = lerp(hit_x, x0, x1, 0, 1)
 				update_hit_parent_row(hit_p)
 				return hit_over_ri != last_hit_over_ri
@@ -1984,14 +1983,14 @@ G.grid = component('grid', 'Input', function(e) {
 						let ev = 1 - (1 - v)**3
 						xs[ri] = lerp(ev, 0, 1, x0, x1)
 
-						aari1 = or(aari1, ri)
+						aari1 = aari1 ?? ri
 						aari2 = ri + 1
 					}
 				}
 
 				// shrink the animation range to the active range.
-				ari1 = max(ari1, or(aari1, ari1))
-				ari2 = min(ari2, or(aari2, ari1))
+				ari1 = max(ari1, aari1 ?? ari1)
+				ari2 = min(ari2, aari2 ?? ari1)
 
 				let view_x = horiz ? scroll_y : scroll_x
 				let view_w = horiz ? cells_view_h : cells_view_w
@@ -2050,8 +2049,8 @@ G.grid = component('grid', 'Input', function(e) {
 		{
 		let mx0, my0
 		mm_row_move = function(ev, mx, my) {
-			mx = or(mx, mx0)
-			my = or(my, my0)
+			mx = mx ?? mx0
+			my = my ?? my0
 			mx0 = mx
 			my0 = my
 			let r = e.cells_view.rect()

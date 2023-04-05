@@ -74,7 +74,7 @@ var config = function(name, val) {
 var S_texts = obj()
 
 var S = function(name, en_s, ...args) {
-	let s = or(S_texts[name], en_s) || ''
+	let s = (S_texts[name] ?? en_s) || ''
 	if (args.length)
 		return s.subst(...args)
 	else

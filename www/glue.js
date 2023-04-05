@@ -19,7 +19,6 @@ TYPE CHECKING
 
 LOGIC
 
-	or(x, z)
 	strict_or(x, z)
 	repl(x, v, z)
 
@@ -146,9 +145,9 @@ TIME & DATE
 	time() -> ts
 	time(y, m, d, H, M, s, ms) -> ts
 	time(date_str) -> ts
-	[day|month|year|week](ts[, offset]) -> ts
+	[day|month|year|week](ts[, offset], [local]) -> ts
 	days(delta_ts) -> ds
-	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts)
+	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts, [local])
 	set_[year|month|month_day|hours|minutes|seconds](ts)
 	locale()
 	weekday_name (ts, ['long'], [locale])
@@ -286,9 +285,6 @@ G.isfunc = f => typeof f == 'function'
 
 // logic ---------------------------------------------------------------------
 
-// non-shortcircuiting `||` operator for which only `undefined` and `null` are falsey.
-G.or = function(x, z) { return x != null ? x : z }
-
 // non-shortcircuiting `||` operator for which only `undefined` is falsey.
 G.strict_or = function(x, z) { return x !== undefined ? x : z }
 
@@ -316,7 +312,7 @@ G.sign = Math.sign
 // NOTE: returns x1 if x1 < x0, which enables the idiom
 // `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
 G.clamp = function(x, x0, x1) {
-	return min(max(x, or(x0, -1/0)), or(x1, 1/0))
+	return min(max(x, x0 ?? -1/0), x1 ?? 1/0)
 }
 
 // sign() that only returns -1 or 1, never 0, and returns -1 for -0.
@@ -600,7 +596,7 @@ method(String, 'captures', function(re) {
 G.empty_array = []
 
 G.range = function(i1, j, step, f) {
-	step = or(step, 1)
+	step = step ?? 1
 	f = f || return_arg
 	let a = []
 	for (let i = i1; i < j; i += step)
@@ -696,8 +692,8 @@ cmps['>' ] = ((a, b) => a >  b)
 cmps['<='] = ((a, b) => a <= b)
 cmps['>='] = ((a, b) => a >= b)
 method(Array, 'binsearch', function(v, cmp, i1, i2) {
-	let lo = or(i1, 0) - 1
-	let hi = or(i2, this.length)
+	let lo = (i1 ?? 0) - 1
+	let hi = (i2 ?? this.length)
 	cmp = cmps[cmp || '<'] || cmp
 	while (lo + 1 < hi) {
 		let mid = (lo + hi) >> 1
@@ -713,7 +709,7 @@ method(Array, 'binsearch', function(v, cmp, i1, i2) {
 alias(Array, 'each', 'forEach')
 
 method(Array, 'tokeys', function(v, cons) {
-	v = or(v, true)
+	v = v ?? true
 	let t = cons || obj()
 	for (let k of this)
 		t[k] = v
@@ -774,7 +770,7 @@ method(Set, 'equals', function(s2, same_order) {
 	if (same_order) {
 		let it1 = s1.values()
 		let it2 = s2.values()
-		for(let i = 0, n = s1.size; i < n; i++) {
+		for (let i = 0, n = s1.size; i < n; i++) {
 			let v1 = it1.next().value
 			let v2 = it2.next().value
 			if (v1 != v2)
@@ -836,7 +832,7 @@ G.memoize = function(f) {
 
 G.count_keys = function(t, max_n) {
 	let n = 0
-	for(let i in t) {
+	for (let i in t) {
 		if (n === max_n)
 			break
 		n++
@@ -948,13 +944,13 @@ class dyn_arr_class {
 		let data_len
 		if (data.nc != null) {
 			assert(data.nc == this.nc, 'source array nc is {0}, expected {1}', data.nc, this.nc)
-			data_len = or(data.len, data.length)
+			data_len = data.len ?? data.length
 		} else {
 			data_len = data.length * this.inv_nc
 			assert(data_len == floor(data_len), 'source array length not multiple of {0}', this.nc)
 		}
 		assert(data_offset >= 0 && data_offset <= data_len, 'source offset out of range')
-		len = clamp(or(len, 1/0), 0, data_len - data_offset)
+		len = clamp(len ?? 1/0, 0, data_len - data_offset)
 		if (data_offset != 0 || len != data_len) // gotta make garbage here...
 			data = data.subarray(data_offset * this.nc, (data_offset + len) * this.nc)
 
@@ -969,7 +965,7 @@ class dyn_arr_class {
 
 	remove(offset, len) {
 		assert(offset >= 0, 'offset out of range')
-		len = max(0, min(or(len, 1), this.len - offset))
+		len = max(0, min(len ?? 1, this.len - offset))
 		if (len == 0)
 			return
 		for (let a = this.array, o1 = offset, o2 = offset + len, i = 0; i < len; i++)
@@ -993,10 +989,10 @@ class dyn_arr_class {
 
 	invalidate(offset, len) {
 		let o1 = max(0, offset || 0)
-		len = max(0, or(len, 1/0))
+		len = max(0, len ?? 1/0)
 		let o2 = min(o1 + len, this.len)
-		o1 = min(or(this.invalid_offset1,  1/0), o1)
-		o2 = max(or(this.invalid_offset2, -1/0), o2)
+		o1 = min(this.invalid_offset1 ??  1/0, o1)
+		o2 = max(this.invalid_offset2 ?? -1/0, o2)
 		this.invalid = true
 		this.invalid_offset1 = o1
 		this.invalid_offset2 = o2
@@ -1087,14 +1083,15 @@ G.freelist_stack = function(create, init, destroy) {
 G._d = new Date() // public temporary date object.
 
 // NOTE: months start at 1, and seconds can be fractionary.
-G.time = function(y, m, d, H, M, s) {
+G.time = function(y, m, d, H, M, s, local) {
+	assert(!local, 'NYI')
 	if (isnum(y)) {
 		_d.setTime(0) // necessary to reset the time first!
 		_d.setUTCFullYear(y)
-		_d.setUTCMonth(or(m, 1) - 1)
-		_d.setUTCDate(or(d, 1))
-		_d.setUTCHours(H || 0)
-		_d.setUTCMinutes(M || 0)
+		_d.setUTCMonth((m ?? 1) - 1)
+		_d.setUTCDate(d ?? 1)
+		_d.setUTCHours(H ?? 0)
+		_d.setUTCMinutes(M ?? 0)
 		s = s || 0
 		_d.setUTCSeconds(s)
 		_d.setUTCMilliseconds((s - floor(s)) * 1000)
@@ -1109,19 +1106,28 @@ G.time = function(y, m, d, H, M, s) {
 }
 
 // get the time at the start of the day of a given time, plus/minus a number of days.
-G.day = function(t, offset) {
+G.day = function(t, offset, local) {
 	if (t == null) return null
 	_d.setTime(t * 1000)
-	_d.setUTCMilliseconds(0)
-	_d.setUTCSeconds(0)
-	_d.setUTCMinutes(0)
-	_d.setUTCHours(0)
-	_d.setUTCDate(_d.getUTCDate() + (offset || 0))
+	if (local) {
+		_d.setMilliseconds(0)
+		_d.setSeconds(0)
+		_d.setMinutes(0)
+		_d.setHours(0)
+		_d.setDate(_d.getDate() + (offset || 0))
+	} else {
+		_d.setUTCMilliseconds(0)
+		_d.setUTCSeconds(0)
+		_d.setUTCMinutes(0)
+		_d.setUTCHours(0)
+		_d.setUTCDate(_d.getUTCDate() + (offset || 0))
+	}
 	return _d.valueOf() / 1000
 }
 
 // get the time at the start of the month of a given time, plus/minus a number of months.
-G.month = function(t, offset) {
+G.month = function(t, offset, local) {
+	assert(!local, 'NYI')
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
@@ -1134,7 +1140,8 @@ G.month = function(t, offset) {
 }
 
 // get the time at the start of the year of a given time, plus/minus a number of years.
-G.year = function(t, offset) {
+G.year = function(t, offset, local) {
+	assert(!local, 'NYI')
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
@@ -1148,7 +1155,8 @@ G.year = function(t, offset) {
 }
 
 // get the time at the start of the week of a given time, plus/minus a number of weeks.
-G.week = function(t, offset, country) {
+G.week = function(t, offset, country, local) {
+	assert(!local, 'NYI')
 	if (t == null) return null
 	_d.setTime(t * 1000)
 	_d.setUTCMilliseconds(0)
@@ -1166,13 +1174,13 @@ G.days = function(dt) {
 	return dt / (3600 * 24)
 }
 
-G.year_of       = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCFullYear() }
-G.month_of      = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCMonth() + 1 }
-G.week_day_of   = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCDay() }
-G.month_day_of  = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCDate() }
-G.hours_of      = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCHours() }
-G.minutes_of    = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCMinutes() }
-G.seconds_of    = function(t) { if (t == null) return null; _d.setTime(t * 1000); return _d.getUTCSeconds() }
+G.year_of       = function(t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getFullYear() : _d.getUTCFullYear() }
+G.month_of      = function(t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getMonth()+1  : _d.getUTCMonth()+1  }
+G.week_day_of   = function(t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getDay     () : _d.getUTCDay     () }
+G.month_day_of  = function(t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getDate    () : _d.getUTCDate    () }
+G.hours_of      = function(t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getHours   () : _d.getUTCHours   () }
+G.minutes_of    = function(t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getMinutes () : _d.getUTCMinutes () }
+G.seconds_of    = function(t, local) { if (t == null) return null; _d.setTime(t * 1000); return local ? _d.getSeconds () : _d.getUTCSeconds () }
 
 G.set_year = function(t, x) {
 	if (t == null) return null
@@ -1993,7 +2001,7 @@ G.setglobal = function(k, v, default_v) {
 // multi-language stubs replaced in webb_spa.js ------------------------------
 
 // stub for getting message strings that can be translated multiple languages.
-if (!window.S) {
+if (!G.S) {
 	G.S = function(name, en_s, ...args) {
 		return en_s.subst(...args)
 	}
@@ -2004,7 +2012,7 @@ G.Sf = function(...args) {
 }
 
 // stub for getting current language.
-if (!window.lang) {
+if (!G.lang) {
 	let nav_lang = navigator.language.substring(0, 2)
 	G.lang = function() {
 		return document.documentElement.lang || nav_lang
@@ -2012,7 +2020,7 @@ if (!window.lang) {
 }
 
 // stub for getting current country.
-if (!window.country) {
+if (!G.country) {
 	let nav_country = navigator.language.substring(3, 5)
 	G.country = function() {
 		return document.documentElement.attr('country') || nav_country
@@ -2022,7 +2030,7 @@ if (!window.country) {
 let locale = memoize(function() { return lang() + '-' + country() })
 
 // stub for rewriting links to current language.
-if (!window.href) {
+if (!G.href) {
 	G.href = return_arg
 }
 
@@ -2268,10 +2276,10 @@ G.post = function(url, upload, success, fail, opt) {
 // lint any loaded js file from the browser directly, no server needed!
 // we use this mostly to catch `for (v ...` which should be `for(let v ...`.
 G.lint = function(file, opt) {
-	if (!window.JSHINT) {
+	if (!G.JSHINT) {
 		let script = document.createElement('script')
 		script.onload = function() {
-			assert(window.JSHINT, 'jshint.js not loaded')
+			assert(G.JSHINT, 'jshint.js not loaded')
 			lint(file, opt)
 		}
 		script.src = 'jshint.js'

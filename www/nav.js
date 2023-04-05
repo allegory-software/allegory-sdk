@@ -994,7 +994,7 @@ G.nav_widget = function(e) {
 		init_find_row()
 		e.val_field = check_field('val_col', e.val_col)
 		e.pos_field = check_field('pos_col', rs.pos_col)
-		e.name_field = check_field('name_col', or(e.name_col, rs.name_col))
+		e.name_field = check_field('name_col', e.name_col ?? rs.name_col)
 		if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
 			e.name_field = e.pk_fields[0]
 		e.display_field = check_field('display_col', e.display_col) || e.name_field
@@ -1021,7 +1021,7 @@ G.nav_widget = function(e) {
 		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
 			e.id_field = e.pk_fields[0]
 		e.parent_field = check_field('parent_col', rs.parent_col)
-		e.tree_field = check_field('tree_col', or(e.tree_col, rs.tree_col)) || e.name_field
+		e.tree_field = check_field('tree_col', e.tree_col ?? rs.tree_col) || e.name_field
 		if (!e.id_field || !e.parent_field || !e.tree_field || e.tree_field.hidden)
 			reset_tree_fields()
 	}
@@ -1565,8 +1565,8 @@ G.nav_widget = function(e) {
 		let must_not_move_row = opt.must_not_move_row // return only if row not moved.
 		let must_not_move_col = opt.must_not_move_col // return only if col not moved.
 
-		rows = or(rows, 0) // by default find the first focusable row.
-		cols = or(cols, 0) // by default find the first focusable col.
+		rows = rows ?? 0 // by default find the first focusable row.
+		cols = cols ?? 0 // by default find the first focusable col.
 		let ri_inc = strict_sign(rows)
 		let fi_inc = strict_sign(cols)
 		rows = abs(rows)
@@ -1588,8 +1588,8 @@ G.nav_widget = function(e) {
 		let start_fi = fi
 
 		// the default cell is the first or the last depending on direction.
-		ri = or(ri, ri_inc * -1/0)
-		fi = or(fi, fi_inc * -1/0)
+		ri ??= ri_inc * -1/0
+		fi ??= fi_inc * -1/0
 
 		// clamp out-of-bound row/col indices.
 		ri = clamp(ri, 0, e.rows.length-1)
@@ -1690,8 +1690,8 @@ G.nav_widget = function(e) {
 
 		let last_ri = e.focused_row_index
 		let last_fi = e.focused_field_index
-		let ri0 = or(e.selected_row_index  , last_ri)
-		let fi0 = or(e.selected_field_index, last_fi)
+		let ri0 = e.selected_row_index   ?? last_ri
+		let fi0 = e.selected_field_index ?? last_fi
 		let row0 = e.focused_row
 		let row = e.rows[ri]
 
@@ -2172,7 +2172,7 @@ G.nav_widget = function(e) {
 	//   rows            : [row1,...]
 	//   group_label_sep : separator for multi-col group labels
 	e.row_groups = function(opt) {
-		let group_label_sep = or(opt.group_label_sep, ' / ')
+		let group_label_sep = opt.group_label_sep ?? ' / '
 		let col_groups = opt.col_groups.split(/\s*>\s*/)
 		if (false && col_groups.length == 1) // TODO: enable this optimization again?
 			return row_groups_one_level(opt.col_groups, opt.range_defs, opt.rows)
@@ -2877,7 +2877,7 @@ G.nav_widget = function(e) {
 		if (!error.passed) {
 			errors.passed = false
 			errors.must_allow_exit_edit =
-				or(errors.must_allow_exit_edit, validator.must_allow_exit_edit)
+				errors.must_allow_exit_edit ?? validator.must_allow_exit_edit
 		}
 	}
 
@@ -3385,7 +3385,7 @@ G.nav_widget = function(e) {
 		let ln = lf.lookup_nav                            ; if (!ln) return s
 		let nfv = e.cell_val(row, lf)
 		let ln_row = ln.lookup(lf.lookup_cols, [nfv])[0]  ; if (!ln_row) return s
-		let dcol = or(field.null_display_col, field.name)
+		let dcol = field.null_display_col ?? field.name
 		let df = ln.all_fields_map[dcol]                  ; if (!df) return s
 		if (cx) {
 			let v = ln.cell_input_val(ln_row, df)
@@ -3984,7 +3984,7 @@ G.nav_widget = function(e) {
 
 	e.start_move_selected_rows = function(ev) {
 		let focused_ri  = e.focused_row_index
-		let selected_ri = or(e.selected_row_index, focused_ri)
+		let selected_ri = e.selected_row_index ?? focused_ri
 		return move_rows_state(focused_ri, selected_ri, ev)
 	}
 
@@ -4861,7 +4861,7 @@ G.nav_widget = function(e) {
 
 	function* qs_reach_row(start_row, ri_offset) {
 		let n = e.rows.length
-		let ri1 = or(e.row_index(start_row), 0) + (ri_offset || 0)
+		let ri1 = (e.row_index(start_row) ?? 0) + (ri_offset || 0)
 		if (ri_offset >= 0) {
 			for (let ri = ri1; ri < n; ri++)
 				yield ri
@@ -5687,7 +5687,7 @@ icon.editor = function(opt) {
 let col = obj()
 field_types.col = col
 
-col.convert = v => or(num(v), v)
+col.convert = v => num(v) ?? v
 
 // google maps places
 

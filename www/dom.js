@@ -1457,7 +1457,7 @@ e.add = function E_add(...args) {
 // insert nodes into an element at a position.
 // skips nulls, calls constructors, expands arrays.
 e.insert = function E_insert(i0, ...args) {
-	i0 = max(0, min(or(i0, 1/0), this.nodes.length))
+	i0 = max(0, min(i0 ?? 1/0, this.nodes.length))
 	for (let i = args.length-1; i >= 0; i--) {
 		let s = args[i]
 		if (isfunc(s))
@@ -2468,8 +2468,8 @@ method(EventTarget, 'capture_pointer', function(ev, move, up) {
 		return
 	this.pointer_captured = true
 
-	move = or(move, return_false)
-	up   = or(up  , return_false)
+	move = move ?? return_false
+	up   = up   ?? return_false
 	let mx0 = ev.clientX
 	let my0 = ev.clientY
 	let cursor_style
@@ -2831,7 +2831,7 @@ ox, oy, ow, oh, but note that those are rounded!
 
 // NOTE: setting style.* to undefined is ignored so we change it to null!
 G.px = function(v) {
-	return isnum(v) ? v+'px' : or(v, null)
+	return isnum(v) ? v+'px' : v ?? null
 }
 
 property(Element, 'x1'   , function() { return this.__x1 }, function(v) { if (v !== this.__x1) { this.__x1 = v; this.style.left          = px(v) } })
@@ -3076,7 +3076,7 @@ G.scroll_to_view_dim = function(x, w, pw, sx, align) {
 
 G.scroll_to_view_rect = function(x, y, w, h, pw, ph, sx, sy, halign, valign) {
 	sx = scroll_to_view_dim(x, w, pw, sx, halign)
-	sy = scroll_to_view_dim(y, h, ph, sy, or(valign, halign))
+	sy = scroll_to_view_dim(y, h, ph, sy, valign ?? halign)
 	return [sx, sy]
 }
 
@@ -3150,8 +3150,8 @@ G.scrollbox_client_dimensions = function(w, h, cw, ch, overflow_x, overflow_y, v
 
 	overflow_x = overflow_x || 'auto'
 	overflow_y = overflow_y || 'auto'
-	vscrollbar_w = or(vscrollbar_w, scrollbar_widths()[0])
-	hscrollbar_h = or(hscrollbar_h, scrollbar_widths()[1])
+	vscrollbar_w = vscrollbar_w ?? scrollbar_widths()[0]
+	hscrollbar_h = hscrollbar_h ?? scrollbar_widths()[1]
 
 	let hs
 	if (overflow_x == 'scroll')
@@ -3226,7 +3226,7 @@ easing.outin   = (f, t, ...args) => t < .5 ? .5 * (1 - f(1 - t * 2, ...args)) : 
 
 // ease any interpolation function.
 easing.ease = function(f, way, t, ...args) {
-	f = or(easing[f], f)
+	f = easing[f] ?? f
 	if (way == 'in')
 		return f(t, ...args)
 	else if (way == 'inout')
@@ -3297,17 +3297,17 @@ G.transition = function(f) {
 		y0 = _y0
 		y1 = _y1
 		ease_f = _ease_f
-		ease_way = or(_ease_way, 'out')
+		ease_way = _ease_way ?? 'out'
 		ease_args = _ease_args
-		y0 = or(y0, 0)
-		y1 = or(y1, 1)
-		ease_f = or(ease_f, 'cubic')
+		y0 = y0 ?? 0
+		y1 = y1 ?? 1
+		ease_f = ease_f ?? 'cubic'
 		raf_id = raf(wrapper)
 		e.started = true
 		start()
 	}
 	let wrapper = function(t) {
-		t0 = or(t0, t)
+		t0 = t0 ?? t
 		let lin_x = e.started ? lerp(t, t0, t0 + dt * 1000, 0, 1) : 1
 		if (lin_x < 1) {
 			let eas_x = easing.ease(ease_f, ease_way, lin_x, ...ease_args)
@@ -3358,7 +3358,7 @@ G.hit_test_rect_sides = function(x0, y0, d1, d2, x, y, w, h) {
 
 e.hit_test_sides = function(mx, my, d1, d2) {
 	let r = this.rect()
-	return hit_test_rect_sides(mx, my, or(d1, 5), or(d2, 5), r.x, r.y, r.w, r.h)
+	return hit_test_rect_sides(mx, my, d1 ?? 5, d2 ?? 5, r.x, r.y, r.w, r.h)
 }
 
 // canvas --------------------------------------------------------------------
@@ -3773,10 +3773,10 @@ e.popup = function(target, side, align) {
 
 	function layout(w, h, side, align) {
 
-		let tx1 = tr.x + or(e.popup_x1, 0)
-		let ty1 = tr.y + or(e.popup_y1, 0)
-		let tx2 = tr.x + or(e.popup_x2, tr.w)
-		let ty2 = tr.y + or(e.popup_y2, tr.h)
+		let tx1 = tr.x + (e.popup_x1 ?? 0)
+		let ty1 = tr.y + (e.popup_y1 ?? 0)
+		let tx2 = tr.x + (e.popup_x2 ?? tr.w)
+		let ty2 = tr.y + (e.popup_y2 ?? tr.h)
 		let tw = tx2 - tx1
 		let th = ty2 - ty1
 
@@ -3987,7 +3987,7 @@ G.live_move_mixin = function(e) {
 	let initial_positions = []
 
 	e.move_element_start = function(move_i, move_n, _i1, _i2, _i1x, _i2x, _offsetx) {
-		move_n = or(move_n, 1)
+		move_n = move_n ?? 1
 		move_i1 = move_i
 		move_i2 = move_i + move_n
 		move_x = null
@@ -4092,8 +4092,8 @@ G.live_move_mixin = function(e) {
 				over_x = null
 				each_index(function(i, moving) {
 					if (moving) {
-						over_x = or(over_x, x)
-						move_ri1 = or(move_ri1, i)
+						over_x = over_x ?? x
+						move_ri1 = move_ri1 ?? i
 						move_ri2 = i+1
 					} else {
 						positions[i] = offsetx + x

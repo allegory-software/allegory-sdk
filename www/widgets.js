@@ -989,7 +989,7 @@ e.make_list_items_focusable = function(opt) {
 		if (i === true)
 			i = e.focused_item_index
 
-		n = or(n, 0) // by default find the first focusable item.
+		n = n ?? 0 // by default find the first focusable item.
 		let inc = strict_sign(n)
 		n = abs(n)
 
@@ -1003,7 +1003,7 @@ e.make_list_items_focusable = function(opt) {
 		let start_i = i
 
 		// the default item is the first or the last depending on direction.
-		i = or(i, inc * -1/0)
+		i ??= inc * -1/0
 
 		// clamp out-of-bound indices.
 		i = clamp(i, 0, e.list_len-1)
@@ -1085,7 +1085,7 @@ e.make_list_items_focusable = function(opt) {
 		let moved = e.focused_item != e.at[i]
 
 		let last_i = e.focused_item_index
-		let i0 = or(e.selected_item_index, last_i)
+		let i0 = e.selected_item_index ?? last_i
 		let item = e.at[i]
 
 		e.set_prop('focused_item_index', i, opt.event)
@@ -3191,13 +3191,13 @@ G.slides = component('slides', 'Containers', function(e) {
 
 	e.next_slide = function(rollover) {
 		let e0 = e.current_slide
-		let i1 = clamp_item(or(e0 && e0.index, -1) + 1, rollover)
+		let i1 = clamp_item(((e0 && e0.index) ?? -1) + 1, rollover)
 		e.current_slide = e.at[i1]
 	}
 
 	e.prev_slide = function(rollover) {
 		let e0 = e.current_slide
-		let i1 = clamp_item(or(e0 && e0.index, -1) - 1, rollover)
+		let i1 = clamp_item(((e0 && e0.index) ?? -1) - 1, rollover)
 		e.current_slide = e.at[i1]
 	}
 
@@ -3317,9 +3317,9 @@ G.pagenav = component('pagenav', function(e) {
 		b.class('pagenav-button')
 		b.class('pagenav-current', page == e.cur_page)
 		b.disable('pagenav', !(page >= 1 && page <= e.page_count && page != e.cur_page))
-		b.title = or(title, or(text, S('page', 'Page {0}', page)))
+		b.title = title ?? text ?? S('page', 'Page {0}', page)
 		b.href = href !== false ? e.page_url(page) : null
-		b.set(or(text, page))
+		b.set(text ?? page)
 		b.action = function() {
 			e.fire('page_changed', page)
 		}
@@ -3482,7 +3482,7 @@ G.info = component('info', function(e) {
 
 	return {
 		text      : html_text,
-		collapsed : or(e.collapsed, true),
+		collapsed : e.collapsed ?? true,
 	}
 })
 
@@ -3666,7 +3666,7 @@ add_validator({
 	name     : 'number',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.is_number,
-	convert  : (e, v, field) => isstr(v) ? or(field.to_num(v), INVALID) : v,
+	convert  : (e, v, field) => isstr(v) ? field.to_num(v) ?? INVALID : v,
 	validate : (e, v, field) => isnum(v),
 	error    : (e, v, field) => S('validation_num_error',
 		'{0} is not a number' , field_name(field)),
@@ -3826,8 +3826,8 @@ add_validator({
 	name     : 'time',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.is_time,
-	convert  : (e, v, field) => or(parse_date(v, 'SQL', true,
-			e.with_time, e.with_seconds, e.with_fractions), INVALID),
+	convert  : (e, v, field) => parse_date(v, 'SQL', true,
+			e.with_time, e.with_seconds, e.with_fractions) ?? INVALID,
 	validate : (e, v, field) => v >= min_time && v <= max_time,
 	error    : (e, v, field) => S('validation_time_error',
 		'{0} is an invalid date', field_name(field)),
@@ -3839,8 +3839,8 @@ add_validator({
 	name     : 'timeofday',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.is_timeofday,
-	convert  : (e, v, field) => or(parse_timeofday(v, true,
-		e.with_seconds, e.with_fractions), INVALID),
+	convert  : (e, v, field) => parse_timeofday(v, true,
+		e.with_seconds, e.with_fractions) ?? INVALID,
 	validate : return_true,
 	error    : (e, v, field) => S('validation_timeofday_error',
 		'{0} is an invalid time of day', field_name(field)),
@@ -3974,7 +3974,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 			e.validate()
 		})
 
-	let ett = or(errors_tooltip_target, e)
+	let ett = errors_tooltip_target ?? e
 
 	if (ett != false) {
 
@@ -4111,7 +4111,7 @@ e.make_input_widget = function(opt) {
 	e.to_form = e.to_form || return_arg // stub
 
 	e.update_value_input = function(ev) {
-		e.value_input.value = or(e.to_form(e.value), '')
+		e.value_input.value = e.to_form(e.value) ?? ''
 		e.value_input.disabled = e.value == null
 	}
 	e.on_validate(function(ev) {
@@ -4628,10 +4628,10 @@ let slider_widget = function(e, range) {
 
 	// model: progress
 
-	function cmin() { return max(or(e.min, -1/0), e.from) }
-	function cmax() { return min(or(e.max,  1/0), e.to  ) }
+	function cmin() { return max(e.min ?? -1/0, e.from) }
+	function cmax() { return min(e.max ??  1/0, e.to  ) }
 
-	function multiple() { return or(1 / 10 ** e.decimals, 1) }
+	function multiple() { return e.decimals ? 1 / 10 ** e.decimals : 1 }
 
 	function progress_for(v) {
 		return clamp(lerp(v, e.from, e.to, 0, 1), 0, 1)
@@ -5603,7 +5603,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 		let v = e.value
 		if (v == null) v = increment > 0 ? e.min : e.max
 		if (v == null) return
-		let m = or(1 / 10 ** (e.decimals || 0), 1)
+		let m = e.decimals ? 1 / 10 ** e.decimals : 1
 		v += m * increment * (ctrl ? 10 : 1)
 		v = snap(v, m)
 		if (e.try_validate(v))
@@ -6069,7 +6069,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 			list.make_list_items_searchable()
 			list_items_changed.call(list)
 			let item_i = e.lookup(e.value)
-			list.focus_item(or(item_i, false))
+			list.focus_item(item_i ?? false)
 			list.class('dropdown-picker scroll-thin')
 			list.popup(e.inputbox, 'bottom', 'start')
 			list.hide()
@@ -6177,7 +6177,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	e.on_validate(function(ev) {
 		if (e.list && e.list.ispopup && !(ev && ev.target == e.list)) {
-			e.list.focus_item(or(e.lookup(e.value), false), 0, {
+			e.list.focus_item(e.lookup(e.value) ?? false, 0, {
 				must_not_move: true,
 				event: ev,
 			})
@@ -6634,6 +6634,8 @@ function calendar_widget(e, mode) {
 		if (sy_duration != '_none') {
 
 			if (sy_week1 != null) {
+				if (start_week == null)
+					start_week = week(time())
 				let y1 = (days(sy_week1 - start_week) / 7) * cell_h
 				let y2 = (days(sy_week2 - start_week) / 7) * cell_h
 				sy_final = scroll_to_view_dim(y1, y2 - y1 + cell_h, view_h, sy_now, sy_center ? 'center' : null)
@@ -6644,7 +6646,7 @@ function calendar_widget(e, mode) {
 			if (sy_duration == 'inertial') // drag'n'drop-triggered
 				sy_dt = clamp(abs(sy_final - sy_now) * .002, .1, .6)
 			else // keyboard triggered
-				sy_dt = clamp(or(sy_duration, 1/0), 0, .4)
+				sy_dt = clamp(sy_duration ?? 1/0, 0, .4)
 
 			if (sy_dt == 0)
 				sy_now = sy_final
@@ -6669,7 +6671,7 @@ function calendar_widget(e, mode) {
 
 	// scroll state
 
-	let start_week = week(time(2020))
+	let start_week
 	let sy_now   = 0 // in pixels, while animating.
 	let sy_final = 0 // in pixels, final.
 	let drag_scroll
@@ -6701,9 +6703,18 @@ function calendar_widget(e, mode) {
 		e.update()
 	}
 
-	e.scroll_to_view_range = function(d0, d1, duration, center) {
-		sy_week1 = week(d0)
-		sy_week2 = week(d1)
+	e.scroll_to_view_range = function(d1, d2, duration, center) {
+		if (d1 == null && d2 == null) {
+			let now = time()
+			d1 = now
+			d2 = now
+		} else if (d1 == null) {
+			d1 = d2
+		} else if (d2 == null) {
+			d2 = d1
+		}
+		sy_week1 = week(d1)
+		sy_week2 = week(d2)
 		sy_duration = duration
 		sy_center = center
 		e.update()
@@ -6712,11 +6723,10 @@ function calendar_widget(e, mode) {
 	e.scroll_to_view_all_ranges = function(duration, center) {
 		let d1, d2
 		for (let r of ranges) {
-			d1 = min(or(d1,  1/0), r[0])
-			d2 = max(or(d2, -1/0), r[1])
+			if (r[0] != null) d1 = min(d1 ??  1/0, r[0])
+			if (r[1] != null) d2 = max(d2 ?? -1/0, r[1])
 		}
-		if (d1 != null && d2 != null)
-			e.scroll_to_view_range(d1, d2, duration, center)
+		e.scroll_to_view_range(d1, d2, duration, center)
 	}
 
 	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
@@ -6777,6 +6787,9 @@ function calendar_widget(e, mode) {
 		y0 = 0
 		dpr = devicePixelRatio
 
+		if (start_week == null)
+			start_week = week(time())
+
 		cx.resetTransform() // we do our own hi-dpi scaling.
 
 		// break down scroll offset into start week and relative scroll offset.
@@ -6828,7 +6841,14 @@ function calendar_widget(e, mode) {
 		hit_day = null
 		hit_range = null
 		hit_range_end = null
-		let today = day(time())
+
+		let now = time()
+		let today = day(now)
+
+		// align UTC-today to local-today.
+		let today_local = day(now, 0, true)
+		if (month_day_of(today_local, true) != month_day_of(today))
+			today = day(today, today_local < today ? -1 : 1)
 
 		// draw month alt. background
 		let d_days = -7
@@ -6895,12 +6915,15 @@ function calendar_widget(e, mode) {
 				let w = cell_w / 2 // width of half a cell, as we draw in halves.
 				let h = cell_h - 2 * p
 				for (let range of draw_ranges) {
-					if (d >= range[0] && d <= range[1]) { // filter fast since it's O(n^2)
+					let r0 = range[0] ?? range[1] ??  1/0
+					let r1 = range[1] ?? range[0] ?? -1/0
+					if (d >= r0 && d <= r1) { // filter fast since it's O(n^2)
 						in_range = true
 						let range_focused = focused && range == focused_range
 						let range_focus_visible = focus_visible && range_focused
 
-						cx.fillStyle = range_focused ? bg_focused_selected : or(range.color, bg_unfocused_selected)
+						cx.fillStyle = range_focused ? bg_focused_selected
+							: (range.color ?? bg_unfocused_selected)
 
 						// hit-test range
 						if (mode != 'day' && !hit_range && hit_test_rect(mx-x0, my-y0, 0, 0, cell_w, cell_h))
@@ -6908,8 +6931,9 @@ function calendar_widget(e, mode) {
 
 						// draw the day box in halves, each half being either
 						// a range-end grabbing handle or a continuous fill.
-						for (let ri = 0; ri < 2; ri++) {
-							let rd = range[ri]
+						for (let ri = 0; ri <= 1; ri++) {
+							let rd  = range[ri] // actual, can be null
+							let vrd = rd ?? range[1-ri] ?? (2*ri-1) * 1/0 // virtual
 
 							let _x0 = x0
 							let _y0 = y0
@@ -6918,15 +6942,18 @@ function calendar_widget(e, mode) {
 							let cy = ry(h / 2)
 							let cr = rh(h / 2)
 
-							if (d == rd) { // this half is a range end
-								cx.beginPath()
-								if (!ri) // left side
-									cx.arc(rx(w), cy, cr, PI / 2, 3 * PI / 2)
-								else // right side
-									cx.arc(rx(0), cy, cr, -PI / 2, PI / 2)
-								cx.fill()
-								if (range_focus_visible)
-									cx.stroke()
+							if (d == vrd) { // this half is a range end
+
+								if(rd != null) {
+									cx.beginPath()
+									if (!ri) // left side
+										cx.arc(rx(w), cy, cr, PI / 2, 3 * PI / 2)
+									else // right side
+										cx.arc(rx(0), cy, cr, -PI / 2, PI / 2)
+									cx.fill()
+									if (range_focus_visible)
+										cx.stroke()
+								}
 
 								// draw & hit-test range-end grab handle
 								if (range_focused && mode != 'day') {
@@ -6980,7 +7007,7 @@ function calendar_widget(e, mode) {
 				cx.fillStyle = in_range ? (e.focused ? fg_focused_selected : fg_unfocused_selected) : fg
 				cx.fillText(n, rx(cell_w / 2), ry(cell_h / 2 + font_days_ascent / 2))
 
-				// draw month name of day-1 cell
+				// draw month name of day-1 cell and of today
 				if (n == 1 || d == today) {
 					cx.font = font_month
 					cx.fillStyle = fg_month
@@ -7121,7 +7148,7 @@ function calendar_widget(e, mode) {
 		let d0_0 = r[0]
 		let d1_0 = r[1]
 		r[drag_range_end] = hit_day
-		if (r[0] > r[1]) // adjust a negative range.
+		if ((r[0] ?? -1/0) > (r[1] ?? 1/0)) // adjust a negative range.
 			r[drag_range_end] = r[1-drag_range_end]
 		let d0 = r[0]
 		let d1 = r[1]
@@ -7725,7 +7752,7 @@ function date_input_widget(e, has_date, has_time, range) {
 
 		input.on('input', function(ev) {
 			let v = from_input(input.value)
-			e.set_prop('input_value'+K, or(v, input.value), ev)
+			e.set_prop('input_value'+K, v ?? input.value, ev)
 		})
 
 		input.on('wheel', function(ev, dy, is_trackpad) {

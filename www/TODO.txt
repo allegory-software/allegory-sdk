@@ -6,19 +6,11 @@ THINK
 	* IMG => IMAGE
 	* TEXT => EDITABLE TEXT
 
-* DATE/TIME PICKERS & INPUTS:
-	- server value in UTC but input_value in current locale?
-		- input_value in UTC when it's a timestamp
-		- what about when it's an SQL value ???
-	- `format` prop: 'timestamp' or 'sql'
-		- or better yet, parse both, and have value_timestamp and value_sql props
-
 * AUTOCOMPLETE: use <datalist> and list attr and show a list picker with "Other..." button
 	- use <datalist> and list attr and show a list picker with "Other..." button:
 		- date/time dropdowns
 		- num-input
 		- input
-
 
 * NAV EXLCLUSIVE EDIT MODE:
 	- which widgets to disable when nav has unsaved changes ?
@@ -26,6 +18,9 @@ THINK
 
 BUGS
 ------------------------------------------------------------------------------
+
+* RANGE-DATE
+	- merge errors from inputs
 
 * TOASTER
 	- weird spacing between messages when starting
@@ -82,10 +77,6 @@ FEATURES
 * TEXTAREA
 	- max-len validator to show "X chars remaining" on a textarea.
 
-* TABS
-	- DONE: auto-shrink tabs to fit tabs_box
-		- TODO: but enlarge-to-min-width when renaming
-
 * SPLIT % panes
 
 * ALL INPUTS
@@ -111,10 +102,8 @@ FEATURES
 	- put near an <input> (inside an <input-group> usually) to clear the value.
 
 * DROPDOWN
-	- list-search
-	- [x] button to set value to null
-		- use placeholder attr for null value.
-		- set height to any one of the values in the list.
+	- use placeholder attr for null value.
+	- set height to any one of the values in the list.
 
 * SLIDER
 	- list of marker values with labels (<datalist> ?)
