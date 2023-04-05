@@ -6465,7 +6465,7 @@ function calendar_widget(e, mode) {
 	}
 
 	// sometimes we mutate ranges so we have to announce value prop changes manually.
-	function ranges_changed() {
+	function ranges_changed(ev) {
 		let ranges0 = ranges // TODO: save ranges before modifying so we get correct old value?
 		if (mode == 'day') {
 			announce_prop_changed(e, 'value', ranges[0][0], ranges0[0][0])
@@ -6475,7 +6475,7 @@ function calendar_widget(e, mode) {
 		} else if (mode == 'ranges') {
 			announce_prop_changed(e, 'value', ranges, ranges0)
 		}
-		e.fire('input', {target: e})
+		e.fire('input', ev || {target: e})
 	}
 
 	function sort_ranges() {
@@ -6940,7 +6940,7 @@ function calendar_widget(e, mode) {
 							move(ri * w, p)
 
 							let cy = ry(h / 2)
-							let cr = rh(h / 2)
+							let cr = rh(h / 2 + 1)
 
 							if (d == vrd) { // this half is a range end
 
@@ -7222,7 +7222,8 @@ function calendar_widget(e, mode) {
 
 			if (mode == 'day' && hit_day != null) {
 				e.value = hit_day
-				e.fire('input', {target: e})
+				ev.picked = true
+				e.fire('input', ev)
 				return false
 			}
 
@@ -7244,12 +7245,12 @@ function calendar_widget(e, mode) {
 					}
 					e.value1 = d1
 					e.value2 = d2
-					e.fire('input', {target: e})
+					e.fire('input', ev)
 				} else if (had_focus) {
 					anchor_day = hit_day
 					e.value1 = hit_day
 					e.value2 = hit_day
-					e.fire('input', {target: e})
+					e.fire('input', ev)
 				}
 				return false
 			}
@@ -7261,13 +7262,13 @@ function calendar_widget(e, mode) {
 	ct.on('dblclick', function(ev) {
 		if (mode == 'ranges' && hit_day && e.can_add_range(hit_day, hit_day)) {
 			ranges.push(e.create_range(hit_day, hit_day))
-			ranges_changed()
+			ranges_changed(ev)
 			e.focus_range(ranges.last)
 			return false
 		}
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt) {
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 
 		if (alt)
 			return
@@ -7281,7 +7282,7 @@ function calendar_widget(e, mode) {
 					return
 				ranges.remove_value(focused_range)
 				focused_range = null
-				ranges_changed()
+				ranges_changed(ev)
 				sort_ranges()
 				return false
 			}
@@ -7307,7 +7308,8 @@ function calendar_widget(e, mode) {
 				* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
 
 			if (mode == 'day') {
-				e.user_set(day(e.value, ddays))
+				e.value = day(e.value, ddays)
+				e.fire('input', ev)
 				e.scroll_to_view_range(e.value, e.value, 0)
 			} else {
 				let d = day(r[1], ddays)
@@ -7318,7 +7320,7 @@ function calendar_widget(e, mode) {
 					d = max(d, r[0])
 					r[1] = d
 				}
-				ranges_changed()
+				ranges_changed(ev)
 				sort_ranges()
 				e.scroll_to_view_range(d, d, 0)
 			}
@@ -7943,7 +7945,9 @@ function date_input_widget(e, has_date, has_time, range) {
 	})
 
 	if (!e.close_button && e.calendar) // auto-close on pick with delay
-		e.calendar.on('input', function() {
+		e.calendar.on('input', function(ev) {
+			if (!ev.picked)
+				return
 			// delay it so the user can glance the choice.
 			runafter(.1, function() {
 				e.close()
