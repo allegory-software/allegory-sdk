@@ -996,14 +996,14 @@ for (let e of $('list')) {
 
 <xmp id=calendar_demo>
 <ranges-calendar class="large">
-	<range>1/1/2022..1/5/2022</range>
-	<range color="hsl(120 50% 50%)">1/4/2022..1/15/2022</range>
-	<range focusable=false>2/13/2022..2/15/2022</range>
-	<range>3/13/2022..4/4/2022</range>
-	<range>4/13/2022..4/25/2022</range>
+	<range>2022-1-1..2022-5-1</range>
+	<range color="hsl(120 50% 50%)">2022-1-5..2022-1-15</range>
+	<range focusable=false>2022-2-13..2022-2-15</range>
+	<range>2022-3-13..2022-4-4</range>
+	<range>2022-4-13..2022-4-25</range>
 </ranges-calendar>
-<range-calendar value1="1/1/2022" value2="1/5/2022"></range-calendar>
-<calendar class="smaller" value="1/1/2022"></calendar>
+<range-calendar value1="2022-1-1" value2="2022-1-5"></range-calendar>
+<calendar class="smaller" value="2022-1-1"></calendar>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1021,14 +1021,17 @@ for (let e of $('list')) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=date-input_demo>
+<form>
 <div><date-input       placeholder="Birth date"></date-input></div>
-<div><date-input       value="1/1/1900" placeholder="Birth date"></date-input></div>
+<div><date-input       value="1900-1-1" placeholder="Birth date"></date-input></div>
 <div><time-input                                   input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
 <div><time-input       with-seconds                input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
 <div><time-input       with-seconds with-fractions input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
-<div><datetime-input   with-seconds with-fractions input_value="1/1/1900 0:0:0.1" placeholder="Meet at"></datetime-input></div>
-<div><datetime-input   with-seconds with-fractions input_value="1/1/2000 0:0:0.1" placeholder="Meet at"></datetime-input></div>
-<div><date-range-input value1="1/18/2022" value2="2/3/2022"></date-range-input></div>
+<div><datetime-input   with-seconds with-fractions input_value="1900-1-1 0:0:0.1" placeholder="Meet at"></datetime-input></div>
+<div><datetime-input   with-seconds with-fractions input_value="2000-1-1 0:0:0.1" placeholder="Meet at"></datetime-input></div>
+<div><date-range-input value1="2022-1-18" value2="2022-2-3"></date-range-input></div>
+<button>Submit</button>
+</form>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1239,7 +1242,7 @@ main.add(g)
 	</select-button>
 	<d></d><date-input
 		name=date1
-		value="1/18/2022"
+		value="2022-1-18"
 		placeholder="Birth date"
 	></date-input>
 	<d></d><time-input
@@ -1249,13 +1252,13 @@ main.add(g)
 	></time-input>
 	<d></d><datetime-input
 		name=datetime1
-		input_value="1/18/2022 12:34:56"
+		input_value="2022-1-18 12:34:56"
 		with-seconds
 		placeholder="Meet at"
 	></datetime-input>
 	<d></d><date-range-input
 		name1=daterange1_from name2=daterange1_to
-		value1="1/18/2022" value2="2/3/2022"
+		value1="2022-1-18" value2="2022-2-3"
 	></date-range-input>
 	<d></d><slider name=slider1 min=0.1 max=0.9 value=0.75></slider>
 	<d></d><range-slider name1=slider2_from name2=slider2_to

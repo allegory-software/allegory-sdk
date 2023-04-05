@@ -151,7 +151,7 @@ ELEMENT PROPERTIES
 	e.get_prop_attrs(k) -> {attr->val}
 	e.get_props() -> {k->attrs}
 
-	e.forward_prop(name, forward_element, [attr], 'forward|backward')
+	e.forward_prop(name, forward_element, [attr], ['forward|backward|bidi'='forward'])
 
 PROPERTY PERSISTENCE
 
@@ -1846,13 +1846,19 @@ e.get_props = function() { return this.props }
 
 e.forward_prop = function(k, fe, fk, attr, dir) {
 	let e = this
+	dir = dir || 'forward'
+	fk = fk || k
 	if (!e.props[k]) {
-		let attrs = assign(obj(), fe.get_prop_attrs(fk))
-		attrs.store = true
-		attrs.attr = attr
-		e.prop(k, attrs)
+		let pa_fw = fe.get_prop_attrs(fk)
+		if (!pa_fw)
+			assert(false, 'forward_prop: property {0} not found in {1}', fk, fe.debug_name)
+		let pa = assign(obj(), pa_fw)
+		pa.store = true
+		if (attr != null)
+			pa.attr = attr
+		e.prop(k, pa)
 	}
-	if (!dir || dir == 'bidi') { // bidirectional
+	if (dir == 'bidi') { // bidirectional
 		e.do_after('set_'+k, function(v, v0, ev) {
 			if (ev && ev.forwarded_from == fe)
 				return

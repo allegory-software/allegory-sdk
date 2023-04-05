@@ -158,7 +158,7 @@ TIME & DATE
 	ds.duration(['approx[+s]'|'long']) -> s
 	ts.timeago() -> s
 	ts.date([locale], [with_time], [with_seconds], [with_fractions]) -> s
-	parse_date(s, [locale], [validate], [with_seconds], [with_fractions]) -> ts
+	parse_date(s, [locale], [validate], [with_time], [with_seconds], [with_fractions]) -> ts
 	parse_timeofday(s, [validate], [with_seconds], [with_fractions]) -> ts
 
 FILE SIZE FORMATTING
@@ -436,7 +436,8 @@ enumerables into it.
 G.property = function(cls, prop, get, set) {
 	let proto = cls.prototype || cls
 	if (prop in proto)
-		assert(false, '{0} already exists and it\'s set to: {1}', prop, proto[prop])
+		assert(false, '{0}.{1} already exists and it\'s set to: {2}',
+			cls.debug_name || cls.constructor.name, prop, proto[prop])
 	let descriptor = isobject(get) ? get : {get: get, set: set}
 	Object.defineProperty(proto, prop, descriptor)
 }
@@ -1260,12 +1261,16 @@ G.week_start_offset = function(country1) {
 {
 
 // NOTE: the parsers accept negative numbers in time positions but not in dates.
+// The reason is to allow decrementing past zero, eg. `01:-1` => `00:59`.
 
 let time_re = /(\-?\d+)\s*:\s*(\-?\d+)\s*(?::\s*(\-?\d+))?\s*(?:[\:\.]\s*(\-?)(\d+))?/;
 let date_re = /(\d+)\s*[\-\/\.,\s]\s*(\d+)\s*[\-\/\.,\s]\s*(\d+)/;
 let timeonly_re = new RegExp('^\\s*' + time_re.source + '\\s*$')
 let datetime_re = new RegExp('^\\s*' + date_re.source + '(?:\\s+' + time_re.source + '\\s*)?$')
 
+// NOTE: validate=false accepts any timestamp including negative values but still clamps
+// the input to a [0..24h) interval.
+// NOTE: with_seconds=false ignores seconds, doesn't validate them, same with fractions.
 G.parse_timeofday = function(s, validate, with_seconds, with_fractions) {
 	let t = s
 	if (isstr(s)) {
@@ -1275,18 +1280,20 @@ G.parse_timeofday = function(s, validate, with_seconds, with_fractions) {
 		let H = num(tm[1])
 		let M = num(tm[2])
 		let S = with_seconds && num(tm[3]) || 0
-		let fs = tm[5] || ''
+		let fs = with_fractions && tm[5] || ''
 		let f = with_fractions && (tm[4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
 		t = H * 3600 + M * 60 + S + f
 		if (validate)
-			if (hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
+			if (hours_of(t) != H || minutes_of(t) != M || (with_seconds && seconds_of(t) != S))
 				return null
 	}
-	if (validate)
+	if (validate) {
 		if (t < 0 || t >= 3600 * 24)
 			return null
-	t = t % (3600 * 24)
-	if (t < 0) t += 3600 * 24
+	} else {
+		t = t % (3600 * 24)
+		if (t < 0) t += 3600 * 24
+	}
 	return t
 }
 method(String, 'parse_timeofday', function(validate, with_seconds, with_fractions) {
@@ -1313,32 +1320,37 @@ let date_parser = memoize(function(locale) {
 	if (i != 4) { // failed? default to `m d y`
 		mi = 1; di = 2; yi = 3
 	}
-	return function(s, validate, fractional) {
+	return function(s, validate, with_time, with_seconds, with_fractions) {
 		let dm = datetime_re.exec(s)
 		if (!dm)
 			return null
 		let y = num(dm[yi])
 		let m = num(dm[mi])
 		let d = num(dm[di])
-		let H = num(dm[3+1]) || 0
-		let M = num(dm[3+2]) || 0
-		let S = num(dm[3+3]) || 0
-		let fs = dm[3+5] || ''
-		let f = fractional ? (dm[3+4] ? -1 : 1) * num(fs, 0) / 10**fs.len : 0
+		let H = with_time && num(dm[3+1]) || 0
+		let M = with_time && num(dm[3+2]) || 0
+		let S = with_seconds && num(dm[3+3]) || 0
+		let fs = with_fractions && dm[3+5] || ''
+		let f = with_fractions && (dm[3+4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
 		let t = time(y, m, d, H, M, S) + f
 		if (validate)
-			if (year_of(t) != y || month_of(t) != m || month_day_of(t) != d
-					|| hours_of(t) != H || minutes_of(t) != M || seconds_of(t) != S)
-				return null
+			if (
+				year_of(t) != y
+				|| month_of(t) != m
+				|| month_day_of(t) != d
+				|| (with_time && hours_of(t) != H)
+				|| (with_time && minutes_of(t) != M)
+				|| (with_seconds && seconds_of(t) != S)
+			) return null
 		return t
 	}
 })
 
-G.parse_date = function(s, locale1, validate, with_seconds, with_fractions) {
-	return isstr(s) ? date_parser(locale1 || locale())(s, validate, with_seconds, with_fractions) : s
+G.parse_date = function(s, locale1, validate, with_time, with_seconds, with_fractions) {
+	return isstr(s) ? date_parser(locale1 || locale())(s, validate, with_time, with_seconds, with_fractions) : s
 }
-method(String, 'parse_date', function(locale1, validate, with_seconds, with_fractions) {
-	return date_parser(locale1 || locale())(this.valueOf(), validate, with_seconds, with_fractions)
+method(String, 'parse_date', function(locale1, validate, with_time, with_seconds, with_fractions) {
+	return date_parser(locale1 || locale())(this.valueOf(), validate, with_time, with_seconds, with_fractions)
 })
 
 let a1 = [0, ':', 0, ':', 0]

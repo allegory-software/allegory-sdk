@@ -850,6 +850,7 @@ e.make_list_drop_elements = function() {
 		if (e.focus_item)
 			e.focus_item(hit_i, 0, {
 				selected_items: drop_items,
+				event: ev,
 			})
 	})
 
@@ -961,6 +962,8 @@ e.make_list_items_focusable = function(opt) {
 
 	e.set_focused_item_index = function(i, i0, ev) {
 		e.announce('focused_item_changed', ev)
+		if (ev && ev instanceof UIEvent)
+			e.fire('input', ev)
 	}
 
 	e.property('focused_item', function() {
@@ -1039,6 +1042,7 @@ e.make_list_items_focusable = function(opt) {
 	/*
 		i, n:                        see first_focusable_item_index() above
 		i: false                     unfocus
+		opt.event                    event that triggered the focus (if any)
 		opt.unfocus_if_not_found
 		opt.expand_selection
 		opt.invert_selection
@@ -1070,7 +1074,7 @@ e.make_list_items_focusable = function(opt) {
 		let editable = (opt.editable || enter_edit) && !opt.focus_non_editable_if_not_found
 		let expand_selection = opt.expand_selection && e.multiselect
 		let invert_selection = opt.invert_selection && e.multiselect
-		opt = assign({editable: editable, target: e}, opt)
+		opt = assign({editable: editable}, opt)
 
 		i = e.first_focusable_item_index(i, n, opt)
 
@@ -1084,7 +1088,7 @@ e.make_list_items_focusable = function(opt) {
 		let i0 = or(e.selected_item_index, last_i)
 		let item = e.at[i]
 
-		e.set_prop('focused_item_index', i, opt)
+		e.set_prop('focused_item_index', i, opt.event)
 
 		let sel_items_changed
 		if (opt.preserve_selection) {
@@ -1185,7 +1189,7 @@ e.make_list_items_focusable = function(opt) {
 		if (!item) return
 
 		if (ev.ctrl && ev.shift) {
-			e.focus_item(false)
+			e.focus_item(false, 0, {event: ev})
 			return // enter editing / select widget
 		}
 
@@ -1193,6 +1197,7 @@ e.make_list_items_focusable = function(opt) {
 			must_not_move: true,
 			expand_selection: ev.shift,
 			invert_selection: ev.ctrl,
+			event: ev,
 		}))
 			return false
 
@@ -1215,7 +1220,7 @@ e.make_list_items_focusable = function(opt) {
 		return forward ? e.at[e.list_len-1] : e.first
 	}
 
-	e.on('keydown', function(key, shift, ctrl, alt) {
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 
 		if (alt)
 			return
@@ -1242,7 +1247,7 @@ e.make_list_items_focusable = function(opt) {
 			e.focus_item(true, n, {
 				expand_selection: shift,
 				make_visible: true,
-				keyboard: true,
+				event: ev,
 			})
 			return false
 		}
@@ -1257,14 +1262,14 @@ e.make_list_items_focusable = function(opt) {
 				e.focus_item(item.index, 0, {
 					expand_selection: shift,
 					make_visible: true,
-					keyboard: true,
+					event: ev,
 				})
 				return false
 			}
 		}
 
 		if (key == 'a' && ctrl) {
-			e.select_all_items({keyboard: true})
+			e.select_all_items()
 			return false
 		}
 
@@ -1337,7 +1342,7 @@ e.make_list_items_searchable = function() {
 	let search_string = ''
 	e.property('search_string', () => search_string)
 
-	function update_search() {
+	function update_search(ev) {
 		let searching = !!search_string
 
 		// step 1: search and record required changes.
@@ -1407,7 +1412,7 @@ e.make_list_items_searchable = function() {
 		if (first_item_i != null) {
 			e.focus_item(first_item_i, 0, {
 				make_visible: true,
-				keyboard: true,
+				event: ev,
 			})
 		} else {
 			let item_e = e.focused_item
@@ -1420,13 +1425,13 @@ e.make_list_items_searchable = function() {
 		return true
 	}
 
-	e.search = function(s) {
+	e.search = function(s, ev) {
 		if (!s) s = ''
 		if (search_string == s)
 			return
 		let s0 = search_string
 		search_string = s
-		let found = update_search()
+		let found = update_search(ev)
 		if (!found)
 			search_string = s0
 		e.fire('search', found)
@@ -1437,11 +1442,11 @@ e.make_list_items_searchable = function() {
 
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 		if (key == 'Backspace' && search_string) {
-			e.search(search_string.slice(0, -1))
+			e.search(search_string.slice(0, -1), ev)
 			return false
 		}
 		if (!ctrl && !alt && (key.length == 1 || /[^a-zA-Z0-9]/.test(key))) {
-			e.search((search_string || '') + key)
+			e.search((search_string || '') + key, ev)
 			return false
 		}
 	})
@@ -3497,6 +3502,17 @@ We don't like abstractions around here but this one buys us many things:
     works for validating db records, applying inter-widget constraints, etc.
   - it's not that much code for all of that.
 
+props:
+	validators
+	triggered
+	results
+	value
+	failed
+	first_failed_result
+methods:
+	prop_changed(prop) -> needs_revalidation?
+	validate([ev]) -> valid?
+
 */
 
 let validators = obj()
@@ -3544,7 +3560,9 @@ G.create_validator = function(e, field) {
 		return true
 	}
 
-	function prop_changed(prop) {
+	let validator = {results: results, validators: my_validators, triggered: false}
+
+	validator.prop_changed = function(prop) {
 		if (!prop || validator_props[prop]) {
 			my_validators.clear()
 			for (let k in my_vprops)
@@ -3563,15 +3581,14 @@ G.create_validator = function(e, field) {
 		my_validators_invalid = false
 	}
 
-	let out = {results: results, validators: my_validators}
-	function validate(v, ann) {
+	validator.validate = function(v, ann) {
 		if (my_validators_invalid)
 			update_my_validators()
 		v = repl(v, '', null)
 		let convert_failed
 		for (let validator of my_validators) {
 			validator._error = validator.error(e, v, field)
-			validator._rule  = validator.rule (e, v, field)
+			validator._rule  = validator.rule (e, field)
 			if (convert_failed) {
 				validator._failed = true
 				continue // if convert failed, subsequent validators cannot run!
@@ -3598,8 +3615,8 @@ G.create_validator = function(e, field) {
 			validator._failed = failed
 		}
 		results.len = my_validators.len
-		out.failed = false
-		out.first_failed_result = null
+		this.failed = false
+		this.first_failed_result = null
 		for (let i = 0, n = my_validators.len; i < n; i++) {
 			let validator = my_validators[i]
 			let result = attr(results, i)
@@ -3607,26 +3624,23 @@ G.create_validator = function(e, field) {
 			result.failed  = validator._failed || false
 			result.error   = validator._error
 			result.rule    = validator._rule
-			if (validator._failed && !out.failed) {
-				out.failed = true
-				out.first_failed_result = result
+			if (validator._failed && !this.failed) {
+				this.failed = true
+				this.first_failed_result = result
 			}
 			validator._checked = null
 			validator._failed  = null
 			validator._error  = null
 			validator._rule   = null
 		}
-		out.value = repl(v, undefined, null)
+		this.value = this.failed ? null : repl(v, undefined, null)
 		if (ann != false)
-			announce('validate', e, out, field)
-		return out
+			announce('validate', e, this, field)
+		this.triggered = true
+		return !this.failed
 	}
 
-	return {
-		prop_changed: prop_changed,
-		validate: validate,
-		validators: my_validators,
-	}
+	return validator
 }
 
 let field_name = function(field) {
@@ -3637,16 +3651,6 @@ let field_value = function(field, v) {
 	return field.to_text ? field.to_text(v) : v
 }
 
-// validator just so that input_value gets converted to value.
-add_validator({
-	name     : 'null',
-	vprops   : 'input_value',
-	applies  : return_true,
-	validate : return_true,
-	error    : noop,
-	rule     : noop,
-})
-
 add_validator({
 	name     : 'required',
 	check_null: true,
@@ -3655,50 +3659,47 @@ add_validator({
 	applies  : (e,    field) => field.not_null || field.required,
 	validate : (e, v, field) => v != null || field.default != null,
 	error    : (e, v, field) => S('validation_empty_error', '{0} is required', field_name(field)),
-	rule     : (e, v, field) => S('validation_empty_rule', '{0} is filled', field_name(field)),
+	rule     : (e,    field) => S('validation_empty_rule', '{0} is filled', field_name(field)),
 })
 
 add_validator({
-	name     : 'num',
+	name     : 'number',
 	vprops   : 'input_value',
-	applies  : (e,    field) => field.to_num,
-	convert  : (e, v, field) => {
-		v = repl(repl(v, '-'), '.') // just started typing? allow.
-		return isstr(v) ? or(field.to_num(v), INVALID) : v
-	},
+	applies  : (e,    field) => field.is_number,
+	convert  : (e, v, field) => isstr(v) ? or(field.to_num(v), INVALID) : v,
 	validate : (e, v, field) => isnum(v),
-	error    : (e, v, field) => S('validation_num_error', '{0} is not a number' , field_name(field)),
-	rule     : (e, v, field) => S('validation_num_rule' , '{0} must be a number', field_name(field)),
+	error    : (e, v, field) => S('validation_num_error',
+		'{0} is not a number' , field_name(field)),
+	rule     : (e,    field) => S('validation_num_rule' ,
+		'{0} must be a number', field_name(field)),
 })
 
 add_validator({
 	name     : 'min',
-	requires : 'num',
+	requires : 'number',
 	props    : 'min',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.min != null,
 	validate : (e, v, field) => v >= field.min,
 	error    : (e, v, field) => S('validation_min_error',
-		'{0} is lower than {1}', field_name(field),
-			(field.from_num || return_arg)(field.min)),
-	rule     : (e, v, field) => S('validation_min_rule',
+		'{0} is lower than {1}', field_name(field), field_value(field, field.min)),
+	rule     : (e,    field) => S('validation_min_rule',
 		'{0} must be larger than or equal to {1}', field_name(field),
-			(field.from_num || return_arg)(field.min)),
+			field_value(field, field.min)),
 })
 
 add_validator({
 	name     : 'max',
-	requires : 'num',
+	requires : 'number',
 	props    : 'max',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.max != null,
 	validate : (e, v, field) => v <= field.max,
 	error    : (e, v, field) => S('validation_max_error',
-		'{0} is larger than {1}', field_name(field),
-			(field.from_num || return_arg)(field.max)),
-	rule     : (e, v, field) => S('validation_max_rule',
+		'{0} is larger than {1}', field_name(field), field_value(field, field.max)),
+	rule     : (e,    field) => S('validation_max_rule',
 		'{0} must be smaller than (or equal to) {1}', field_name(field),
-			(field.from_num || return_arg)(field.max)),
+			field_value(field, field.max)),
 })
 
 add_validator({
@@ -3707,8 +3708,10 @@ add_validator({
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.checked_value !== undefined || field.unchecked_value !== undefined,
 	validate : (e, v, field) => v == field.checked_value || v == field.unchecked_value,
-	error    : (e, v, field) => S('validation_checked_value_error', '{0} is not {1} or {2}' , field_name(field), e.checked_value, e.unchecked_value),
-	rule     : (e, v, field) => S('validation_checked_value_rule' , '{0} must be {1} or {2}', field_name(field), e.checked_value, e.unchecked_value),
+	error    : (e, v, field) => S('validation_checked_value_error',
+		'{0} is not {1} or {2}' , field_name(field), e.checked_value, e.unchecked_value),
+	rule     : (e,    field) => S('validation_checked_value_rule' ,
+		'{0} must be {1} or {2}', field_name(field), e.checked_value, e.unchecked_value),
 })
 
 add_validator({
@@ -3737,7 +3740,7 @@ add_validator({
 	validate : (e, v, field) => v.len >= field.minlen,
 	error    : (e, v, field) => S('validation_minlen_error',
 		'{0} too short', field_name(field)),
-	rule     : (e, v, field) => S('validation_minlen_rule' ,
+	rule     : (e,    field) => S('validation_minlen_rule' ,
 		'{0} must be at least {1} characters', field_name(field), field.minlen),
 })
 
@@ -3749,7 +3752,7 @@ add_validator({
 	validate : (e, v, field) => /[a-z]/.test(v),
 	error    : (e, v, field) => S('validation_lower_error',
 		'{0} does not contain a lowercase letter', field_name(field)),
-	rule     : (e, v, field) => S('validation_lower_rule' ,
+	rule     : (e,    field) => S('validation_lower_rule' ,
 		'{0} must contain at least one lowercase letter', field_name(field)),
 })
 
@@ -3761,7 +3764,7 @@ add_validator({
 	validate : (e, v, field) => /[A-Z]/.test(v),
 	error    : (e, v, field) => S('validation_upper_error',
 		'{0} does not contain a uppercase letter', field_name(field)),
-	rule     : (e, v, field) => S('validation_upper_rule' ,
+	rule     : (e,    field) => S('validation_upper_rule' ,
 		'{0} must contain at least one uppercase letter', field_name(field)),
 })
 
@@ -3773,7 +3776,7 @@ add_validator({
 	validate : (e, v, field) => /[0-9]/.test(v),
 	error    : (e, v, field) => S('validation_digit_error',
 		'{0} does not contain a digit', field_name(field)),
-	rule     : (e, v, field) => S('validation_digit_rule' ,
+	rule     : (e,    field) => S('validation_digit_rule' ,
 		'{0} must contain at least one digit', field_name(field)),
 })
 
@@ -3785,7 +3788,7 @@ add_validator({
 	validate : (e, v, field) => /[^A-Za-z0-9]/.test(v),
 	error    : (e, v, field) => S('validation_symbol_error',
 		'{0} does not contain a symbol', field_name(field)),
-	rule     : (e, v, field) => S('validation_symbol_rule' ,
+	rule     : (e,    field) => S('validation_symbol_rule' ,
 		'{0} must contain at least one symbol', field_name(field)),
 })
 
@@ -3796,7 +3799,7 @@ add_validator({
 	validate : (e, v, field) => field.value_known(v) != null,
 	error    : (e, v, field) => S('validation_known_error',
 		'{0} unknown value {1}', field_name(field), field_value(field, v)),
-	rule     : (e, v, field) => S('validation_known_rule',
+	rule     : (e,    field) => S('validation_known_rule',
 		'{0} must be a known value', field_name(field)),
 })
 
@@ -3809,8 +3812,40 @@ add_validator({
 			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
 	error    : (e, v, field) => S('validation_lookup_error',
 		'{0} unknown value {1}', field_name(field), field_value(field, v)),
-	rule     : (e, v, field) => S('validation_lookup_rule',
+	rule     : (e,    field) => S('validation_lookup_rule',
 		'{0} value unknown', field_name(field)),
+})
+
+// NOTE: trying to be compliant with mySQL TIMESTAMP range.
+// NOTE: you only get 6-digit of fractional precision for years >= 1900
+// when making computations with timestamps, so we're not really fully
+// mySQL compliant.
+let min_time = time(1000, 1, 1, 0, 0, 0)
+let max_time = time(10000) - 1
+add_validator({
+	name     : 'time',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.is_time,
+	convert  : (e, v, field) => or(parse_date(v, 'SQL', true,
+			e.with_time, e.with_seconds, e.with_fractions), INVALID),
+	validate : (e, v, field) => v >= min_time && v <= max_time,
+	error    : (e, v, field) => S('validation_time_error',
+		'{0} is an invalid date', field_name(field)),
+	rule     : (e,    field) => S('validation_time_rule',
+		'{0} must be a valid date'),
+})
+
+add_validator({
+	name     : 'timeofday',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.is_timeofday,
+	convert  : (e, v, field) => or(parse_timeofday(v, true,
+		e.with_seconds, e.with_fractions), INVALID),
+	validate : return_true,
+	error    : (e, v, field) => S('validation_timeofday_error',
+		'{0} is an invalid time of day', field_name(field)),
+	rule     : (e,    field) => S('validation_timeofday_rule',
+		'{0} must be a valid time of day'),
 })
 
 /* <errors> ------------------------------------------------------------------
@@ -3839,10 +3874,10 @@ G.errors = component('errors', 'Input', function(e) {
 	e.prop('target_id' , {type: 'id', attr: 'for'})
 	e.prop('show_all'  , {type: 'bool', attr: 'show-all'})
 
-	function update(out) {
+	function update(validator) {
 		if (e.show_all) {
 			e.clear()
-			for (let result of out.results)
+			for (let result of validator.results)
 				if (result.rule)
 					e.add(div({class: catany(' ',
 								'errors-line',
@@ -3853,7 +3888,7 @@ G.errors = component('errors', 'Input', function(e) {
 							div({class: 'errors-message'}, result.rule)
 						))
 		} else {
-			let ffr = out.first_failed_result
+			let ffr = validator.first_failed_result
 			if (ffr)
 				e.set(ffr.error)
 			// don't clear the error, just hide it so that box w and h stay stable.
@@ -3865,8 +3900,8 @@ G.errors = component('errors', 'Input', function(e) {
 	e.on_bind(function(on) {
 		if (on) {
 			let te = e.target || window[e.target_id]
-			if (te && te.validation_result)
-				update(te.validation_result)
+			if (te && te.validator)
+				update(te.validator)
 		}
 	})
 
@@ -3884,21 +3919,22 @@ An element with a validator gets re-validated automatically whenever any props
 that are involved in validation change. Validation state and result is kept
 in the element as well as a tooltip that shows up when the element has focus
 or is hovered.
+NOTE: This is excess-DRY but copy-paste is even worse.
 
 uses props:
 	input_value
 state props:
 	validator
-	validation_result
 	invalid
 	errors
 	errors_tooltip
 methods:
-	validate([ev])
+	validate([ev]) -> valid?
+	try_validate(v) -> valid?
 hooks:
 	on_validate(f); f([ev])
 update options:
-	validation_result
+	validation
 
 */
 
@@ -3912,13 +3948,18 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 
 	e.validator = create_validator(e, e)
 
-	e.validate = function(ev) {
-		e.validation_result = e.validator.validate(e.input_value)
-		e.invalid = e.validation_result.failed
-		e.update({validation_result: true})
+	e.validate = function() {
+		e.invalid = !e.validator.validate(e.input_value)
+		e.update({validation: true})
 	}
 	e.on_validate = function(f) {
 		e.do_after('validate', f)
+	}
+
+	e.try_validate = function(v) {
+		let ok = e.validator.validate(v, false)
+		e.validator.validate(e.input_value, false)
+		return ok
 	}
 
 	e.on_prop_changed(function(k, v, v0, ev) {
@@ -3943,7 +3984,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 
 		e.on_update(function(opt) {
 
-			let show_tooltip = (opt.errors_tooltip || opt.validation_result)
+			let show_tooltip = (opt.errors_tooltip || opt.validation)
 				&& (e.invalid && (e.has_focus_visible || e.hovered))
 				&& !e.getAnimations().length
 
@@ -3961,6 +4002,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 				et.show(show_tooltip)
 				et.class('click-through', !e.has_focus)
 			}
+
 		})
 
 		function update_et() {
@@ -3978,11 +4020,38 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 
 }
 
+/* form ----------------------------------------------------------------------
+
+Just wrapping the form so that it triggers validation on first submit,
+and aborts the submit if validation fails.
+
+*/
+
+component('form', function(e) {
+
+	e.init_child_components()
+
+	e.on('submit', function(ev) {
+		for (let input of e.elements) {
+			if (input.widget && input.widget.validator) {
+				if (!input.widget.validator.triggered)
+					input.widget.validate(ev)
+				if (input.widget.validator.failed) {
+					ev.preventDefault()
+					break
+				}
+			}
+		}
+	})
+
+})
+
 /* input_widget --------------------------------------------------------------
 
 An input widget is a widget with a validator with an `input_value` prop that
 gets validated and a `value` prop that is set as the result. It also has a
 hidden <input> element set to `value` so that it works in a form.
+NOTE: This is excess-DRY but copy-paste is even worse.
 
 inherits:
 	validator
@@ -3998,33 +4067,34 @@ state:
 	invalid
 stubs:
 	update_value_input(ev)
+	to_form
 
 */
 
 e.make_input_widget = function(opt) {
 
 	let e = this
+	let vt = opt.value_type
 
 	e.prop('name', {store: false})
 	e.prop('form', {type: 'id', store: false})
 
 	// initial value and also the value from user input, valid or not, typed or text.
-	e.prop('input_value', {type: opt.value_type, attr: 'value', slot: 'state',
-		default: undefined})
+	e.prop('input_value', {type: vt, attr: 'value', slot: 'state', default: undefined})
 
 	// typed, validated value, not user-changeable.
-	e.prop('value', {type: opt.value_type, slot: 'state'})
+	e.prop('value', {type: vt, slot: 'state'})
 
 	e.prop('required', {type: 'bool', attr: true, default: false})
 	e.prop('readonly', {type: 'bool', attr: true, default: false})
 
-	let vt = opt.value_type
 	if (vt == 'number' || vt == 'time') {
-		e.prop('min', {type: 'number'})
-		e.prop('max', {type: 'number'})
+		e.prop('min', {type: vt})
+		e.prop('max', {type: vt})
 	}
 
 	e.value_input = tag('input', {hidden : '', type: 'hidden'})
+	e.value_input.widget = e
 	e.add(e.value_input)
 
 	e.get_name = function(s) { return e.value_input.name }
@@ -4038,12 +4108,14 @@ e.make_input_widget = function(opt) {
 
 	e.make_validator(false, opt.errors_tooltip_target)
 
+	e.to_form = e.to_form || return_arg // stub
+
 	e.update_value_input = function(ev) {
-		e.value_input.value = or(e.value, '')
+		e.value_input.value = or(e.to_form(e.value), '')
 		e.value_input.disabled = e.value == null
 	}
 	e.on_validate(function(ev) {
-		e.set_prop('value', e.validation_result.value, ev || {target: e})
+		e.set_prop('value', e.validator.value, ev || {target: e})
 		e.update_value_input(ev)
 	})
 
@@ -4051,7 +4123,7 @@ e.make_input_widget = function(opt) {
 
 	e.on_init(function() {
 		if (e.input_value === undefined)
-			e.input_value = e.input_value_default()
+			e.input_value = e.input_value_default() // triggers validation
 		else
 			e.validate()
 	})
@@ -4062,6 +4134,7 @@ e.make_input_widget = function(opt) {
 
 A range input widget is a widget that contains two validated input widgets
 that define a range, and it also has a validator that validates the range.
+NOTE: This is DRY at its worst but copy-paste is even worse.
 
 inherits:
 	validator
@@ -4082,10 +4155,7 @@ state:
 e.make_range_input_widget = function(opt) {
 
 	let e = this
-
-	let n = opt.value_input_widgets.length
-	assert(n == 1 || n == 2)
-	let range = n == 2
+	assert(opt.value_input_widgets.len == 2)
 
 	e.make_validator(true, opt.errors_tooltip_target)
 
@@ -4093,24 +4163,26 @@ e.make_range_input_widget = function(opt) {
 
 	for (let ve of opt.value_input_widgets) {
 
-		let i = ve.K || ''
+		let i = assert(ve.K)
 
-		e.forward_prop('name'+i       , ve, 'name'       , null, 'forward')
-		e.forward_prop('required'+i   , ve, 'required'   , null, 'forward')
-		e.forward_prop('readonly'+i   , ve, 'readonly'   , null, 'forward')
-		e.forward_prop('input_value'+i, ve, 'input_value', 'value'+i, 'forward')
+		e.forward_prop('name'+i       , ve, 'name')
+		e.forward_prop('required'+i   , ve, 'required')
+		e.forward_prop('readonly'+i   , ve, 'readonly')
+		e.forward_prop('input_value'+i, ve, 'input_value', 'value'+i)
 		e.forward_prop('value'+i      , ve, 'value'      , null, 'bidi')
 		e.forward_prop('invalid'+i    , ve, 'invalid'    , null, 'backward')
 
 		let vt = ve.props.value.type
 		if (vt == 'number' || vt == 'time') {
-			e.forward_prop('min', ve, 'min', null, 'forward')
-			e.forward_prop('max', ve, 'max', null, 'forward')
+			e.forward_prop('min', ve, 'min')
+			e.forward_prop('max', ve, 'max')
 		}
 
 		e.do_after('set_form', function(s) {
 			ve.form = s
 		})
+
+		ve.value_input.widget = e
 
 	}
 
@@ -4118,12 +4190,10 @@ e.make_range_input_widget = function(opt) {
 		return opt.value_input_widgets[0].form
 	}
 
-	if (range) {
-		e.property('input_value', () => e)
-		e.on_validate(function(e) {
-			//
-		})
-	}
+	e.property('input_value', () => e)
+	e.on_validate(function(ev) {
+		//
+	})
 
 	// e.on_init(function() {
 	// 	e.validate()
@@ -4518,6 +4588,11 @@ let slider_widget = function(e, range) {
 
 	e.marks = div({class: 'slider-marks'})
 
+	function to_text(v) {
+		if (v == null) return null
+		return e.decimals != null ? v.dec(e.decimals) : v+''
+	}
+
 	e.thumbs = []
 	for (let K of range ? ['1', '2'] : ['']) {
 		let thumb = tag('slider-thumb')
@@ -4525,7 +4600,7 @@ let slider_widget = function(e, range) {
 		thumb.class('slider-thumb')
 		thumb.K = K
 		thumb.to_num = num
-		thumb.from_num = return_arg
+		thumb.to_text = v => to_text
 		if (range)
 			thumb.make_input_widget({
 				value_type: 'number',
@@ -4569,11 +4644,10 @@ let slider_widget = function(e, range) {
 		if (e.decimals != null)
 			v = floor(v / multiple() + .5) * multiple()
 
-		if (range)
-			if (K == '1')
-				v = e.value2 != null ? min(v, e.value2) : null
-			else
-				v = e.value1 != null ? max(v, e.value1) : null
+		if (K == '1')
+			v = e.value2 != null ? min(v, e.value2) : null
+		else if (K == '2')
+			v = e.value1 != null ? max(v, e.value1) : null
 
 		e.set_prop('input_value'+K, clamp(v, cmin(), cmax()), ev)
 	}
@@ -4620,10 +4694,8 @@ let slider_widget = function(e, range) {
 		}
 		if (update_text) {
 			thumb.tooltip.kind = e.invalid ? 'error' : null
-			let tvr = thumb.validation_result
-			let evr = e.validation_result
-			let tfr = tvr && tvr.first_failed_result
-			let efr = evr && evr.first_failed_result
+			let tfr = thumb.validator && thumb.validator.first_failed_result
+			let efr = e.validator && e.validator.first_failed_result
 			let a = [e.display_value_for(e['value'+thumb.K])]
 			if (tfr && tfr.error) a.push(tfr.error)
 			if (efr && efr.error) a.push(efr.error)
@@ -5437,6 +5509,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.input_group = div({class: 'num-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
 
+	e.is_number = true
 	e.make_input_widget({
 		value_type: 'number',
 		errors_tooltip_target: e.input_group,
@@ -5494,25 +5567,20 @@ G.num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	e.from_text = num
-
 	e.to_num = num
-	e.from_num = return_arg
 
 	e.to_text = function(v) {
-		return v != null ? v.dec(this.decimals) : v
+		if (v == null) return null
+		return e.decimals != null ? v.dec(e.decimals) : v+''
 	}
+	e.to_form = e.to_text
+	let to_input = e.to_text
 
 	e.set_readonly = function(v) {
 		v = !!v
 		e.class('readonly', v)
 		e.input.bool_attr('readonly', v)
 		update_buttons()
-	}
-
-	e.update_value_input = function() {
-		e.value_input.value = e.value != null ? e.to_text(e.value) : null
-		e.value_input.disabled = e.value == null
 	}
 
 	e.set_decimals = function() {
@@ -5525,7 +5593,8 @@ G.num_input = component('num-input', 'Input', function(e) {
 
 	e.on_update(function(opt) {
 		if (opt.value)
-			e.input.value = e.value != null ? e.to_text(e.value) : ''
+			e.input.value = e.value != null ? to_input(e.value)
+				: isnum(e.input_value) ? to_input(e.input_value) : e.input_value
 		if (opt.select_all)
 			e.input.select_range(0, -1)
 	})
@@ -5536,7 +5605,9 @@ G.num_input = component('num-input', 'Input', function(e) {
 		if (v == null) return
 		let m = or(1 / 10 ** (e.decimals || 0), 1)
 		v += m * increment * (ctrl ? 10 : 1)
-		e.set_prop('input_value', snap(v, m), ev)
+		v = snap(v, m)
+		if (e.try_validate(v))
+			e.set_prop('input_value', v, ev)
 		e.update({select_all: true})
 	}
 
@@ -5548,6 +5619,8 @@ G.num_input = component('num-input', 'Input', function(e) {
 	})
 
 	e.input.on('input', function(ev) {
+		if (repl(repl(this.value, '-'), '.') == null)
+			return // just started typing, don't buzz.
 		e.set_prop('input_value', this.value, ev)
 	})
 
@@ -5986,6 +6059,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	function bind_list(list, on) {
 		if (!list) return
+		list.on('input', list_input, on)
 		list.on('items_changed', list_items_changed, on)
 		list.on('search', list_search, on)
 		list.on('pointerdown', list_pointerdown, on)
@@ -6105,16 +6179,16 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		if (e.list && e.list.ispopup && !(ev && ev.target == e.list)) {
 			e.list.focus_item(or(e.lookup(e.value), false), 0, {
 				must_not_move: true,
+				event: ev,
 			})
 		}
 		e.update({value: true})
 	})
 
-	e.listen('focused_item_changed', function(list, ev) {
-		if (list != e.list) return
-		let v = list.focused_item ? item_value(list.focused_item) : null
+	function list_input(ev) {
+		let v = this.focused_item ? item_value(this.focused_item) : null
 		e.set_prop('input_value', v, ev)
-	})
+	}
 
 	function list_search() {
 		if (this.search_string)
@@ -6338,7 +6412,7 @@ function calendar_widget(e, mode) {
 	// model & state ----------------------------------------------------------
 
 	function convert_date(s) {
-		return isstr(s) ? s.parse_date(null, true) : day(s)
+		return day(parse_date(s, 'SQL'))
 	}
 	function convert_range(s) {
 		return assign((isstr(s) ? s.split(/\.\./) : s).map(convert_date), isstr(s) ? null : s)
@@ -6401,6 +6475,7 @@ function calendar_widget(e, mode) {
 		} else if (mode == 'ranges') {
 			announce_prop_changed(e, 'value', ranges, ranges0)
 		}
+		e.fire('input', {target: e})
 	}
 
 	function sort_ranges() {
@@ -7120,7 +7195,7 @@ function calendar_widget(e, mode) {
 
 			if (mode == 'day' && hit_day != null) {
 				e.value = hit_day
-				e.fire('pick', e.value)
+				e.fire('input', {target: e})
 				return false
 			}
 
@@ -7142,10 +7217,12 @@ function calendar_widget(e, mode) {
 					}
 					e.value1 = d1
 					e.value2 = d2
+					e.fire('input', {target: e})
 				} else if (had_focus) {
 					anchor_day = hit_day
 					e.value1 = hit_day
 					e.value2 = hit_day
+					e.fire('input', {target: e})
 				}
 				return false
 			}
@@ -7203,7 +7280,7 @@ function calendar_widget(e, mode) {
 				* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
 
 			if (mode == 'day') {
-				e.value = day(e.value, ddays)
+				e.user_set(day(e.value, ddays))
 				e.scroll_to_view_range(e.value, e.value, 0)
 			} else {
 				let d = day(r[1], ddays)
@@ -7319,40 +7396,52 @@ G.time_picker = component('time-picker', 'Input', function(e) {
 			li.update(opt)
 	}
 
-	e.listen('focused_item_changed', function(list, ev) {
-		if (!list.parent || list.parent.parent != e)
-			return
+	function list_input_value(list, ev) {
 		if (!list.focused_item)
 			return
 		list.update({
 			scroll_to_focused_item: true,
 			scroll_align: 'center',
-			scroll_smooth: !(ev && ev.keyboard),
+			scroll_smooth: !(ev && ev instanceof KeyboardEvent),
 		})
-		let v = list.focused_item.data.value
-		if (list == e.hours_list)
-			e.set_prop('value',   set_hours(e.value, v), {target: list})
-		else if (list == e.minutes_list)
-			e.set_prop('value', set_minutes(e.value, v), {target: list})
-		else if (list == e.seconds_list)
-			e.set_prop('value', set_seconds(e.value, v), {target: list})
+		return list.focused_item.data.value
+	}
+
+	e.hours_list.on('input', function(ev) {
+		let v = list_input_value(this, ev)
+		if (v == null) return
+		e.set_prop('value', set_hours(e.value, v), ev)
+	})
+
+	e.minutes_list.on('input', function(ev) {
+		let v = list_input_value(this, ev)
+		if (v == null) return
+		e.set_prop('value', set_minutes(e.value, v), ev)
+	})
+
+	e.seconds_list.on('input', function(ev) {
+		let v = list_input_value(this, ev)
+		if (v == null) return
+		e.set_prop('value', set_seconds(e.value, v), ev)
 	})
 
 	e.prop('value', {type: 'timeofday',
-		convert: s => parse_timeofday(s, false, e.with_seconds, e.with_fractions),
+		convert: s => parse_timeofday(s, false, true, true),
 	})
 
 	e.set_value = function(v, v0, ev) {
-		if (!(ev && ev.target && (ev.target == e || ev.target.parent == e))) {
-			let opt = assign_opt({
-				target: e,
-				scroll_to_focused_item: true,
-				scroll_align: 'center',
-			}, ev)
-			e.  hours_list.focus_item(v != null ? floor(v / 3600 % 24) : false, null, opt)
-			e.minutes_list.focus_item(v != null ? floor(v / 60 % 60)   : false, null, opt)
-			e.seconds_list.focus_item(v != null ? floor(v % 60)        : false, null, opt)
+		if (ev && e.contains(ev.target)) { // from input
+			this.fire('input', ev)
+			return
 		}
+		let opt = assign_opt({
+			target: ev && ev.target,
+			scroll_to_focused_item: true,
+			scroll_align: 'center',
+		}, ev)
+		e.  hours_list.focus_item(v != null ? floor(v / 3600 % 24) : false, null, opt)
+		e.minutes_list.focus_item(v != null ? floor(v / 60 % 60)   : false, null, opt)
+		e.seconds_list.focus_item(v != null ? floor(v % 60)        : false, null, opt)
 	}
 
 	e.on_update(function(opt) {
@@ -7408,32 +7497,27 @@ G.datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 	e.make_disablable()
 
-	e.prop('with_seconds'  , {type: 'bool', default: false})
-	e.prop('with_fractions', {type: 'bool', default: false})
-	e.set_with_seconds   = function(v) { e.time_picker.with_seconds   = v }
-	e.set_with_fractions = function(v) { e.time_picker.with_fractions = v }
+	e.forward_prop('with_seconds'  , e.time_picker)
+	e.forward_prop('with_fractions', e.time_picker)
 
 	function convert_value(s) {
-		return isstr(s) ? s.parse_date(null, true, e.with_seconds, e.with_fractions) : s
+		return parse_date(s, 'SQL', true, true, true, true)
 	}
 	e.prop('value', {type: 'time', convert: convert_value})
 
-	e.set_value = function(v) {
-		let ev = {target: this}
+	e.set_value = function(v, v0, ev) {
 		e.calendar   .set_prop('value', v, ev)
 		e.time_picker.set_prop('value', v, ev)
 	}
 
-	e.calendar.on_prop_changed(function(k, v, v0, ev) {
-		if (k != 'value') return
-		if (ev && ev.target == e) return
-		e.set_prop('value', v + e.time_picker.value, ev)
+	e.calendar.on('input', function(ev) {
+		e.set_prop('value', this.value + e.time_picker.value, ev)
+		e.fire('input', ev)
 	})
 
-	e.time_picker.on_prop_changed(function(k, v, v0, ev) {
-		if (k != 'value') return
-		if (ev && ev.target == e) return
-		e.set_prop('value', e.calendar.value + v, ev)
+	e.time_picker.on('input', function(ev) {
+		e.set_prop('value', e.calendar.value + this.value, ev)
+		e.fire('input', ev)
 	})
 
 	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
@@ -7448,8 +7532,16 @@ G.datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 })
 
-/* <date-input> & <date-range-input> -----------------------------------------
+/* <date-input>, <time-input>, <datetime-input> & <date-range-input> ---------
 
+This is 4 widgets crammed into one, that's why this code is full of ifs.
+The range widget is the most different with its 2-level validation. Still,
+there's enough common functionality in all variants that it makes more sense
+to have one constructor instead of four. It's also simpler than extracting
+the common bits into a mixin (less wiring, less naming, less code-chasing).
+
+config:
+	as_text                format form data as SQL text instead of timestamp
 date-input, time-input, datetime-input state:
 	value input_value
 date-range-input state:
@@ -7502,18 +7594,42 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.input_group = div({class: 'date-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
 
+	let to_text, to_form
+
 	if (range) {
+		assert(!has_time, 'NYI')
+		e.is_range = true
 		e.picker = range_calendar()
 		e.calendar = e.picker
-	} else if (has_date && has_time) {
-		e.picker = datetime_picker()
-		e.calendar = e.picker.calendar
-	} else if (has_date) {
-		e.picker = calendar()
-		e.calendar = e.picker
 	} else {
-		e.picker = time_picker()
+		if (has_date) {
+			if (has_time) {
+				e.picker = datetime_picker()
+				e.calendar = e.picker.calendar
+				to_text = t => t.date()
+				to_form = t => e.as_text ? t.date('SQL') : t
+			} else {
+				e.picker = calendar()
+				e.calendar = e.picker
+				to_text = t => t.date(null, true, e.with_seconds, e.with_fractions)
+				to_form = t => e.as_text
+					? t.date('SQL', true, e.with_seconds, e.with_fractions)
+					: t
+				e.with_time = true
+			}
+			e.is_time = true
+		} else {
+			e.picker = time_picker()
+			e.is_timeofday = true
+			to_text = t => t.timeofday(e.with_seconds, e.with_fractions)
+			to_form = t => e.as_text
+				? t.timeofday(e.with_seconds, e.with_fractions)
+				: t
+		}
+		e.to_text = to_text
+		e.to_form = to_form
 	}
+
 	if (range || e.picker != e.calendar) {
 		e.close_button = button({
 			type: 'button',
@@ -7522,7 +7638,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			bare: true,
 		}, S('close', 'Close'))
 		e.close_button.action = function() {
-			e.set_open(false)
+			e.close(false)
 		}
 		e.picker_box = div({class: 'date-input-picker-box'}, e.picker, e.close_button)
 	} else {
@@ -7538,112 +7654,133 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.picker_box.min_w = `calc(max(var(--min-w-date-input), ${w}px))`
 	})
 
-	e.prop('min', {type: 'time'})
-	e.prop('max', {type: 'time'})
-
-	if (has_date) {
-		e.to_text = function(t) {
-			return t.date(null, has_time, e.with_seconds, e.with_fractions)
-		}
-		e.valid_value = function(t) {
-			// NOTE: trying to be compliant with mySQL TIMESTAMP range.
-			// NOTE: you only get 6-digit of fractional precision for years >= 1900
-			// when making computations with timestamps, so we're not really fully mySQL compliant.
-			return t != null && t >= time(1000, 1, 1, 0, 0, 0) && t <= time(10000)-1 ? t : null
-		}
-		e.from_text = function(s, validate) {
-			return e.valid_value(s.parse_date(null, validate, e.with_seconds, e.with_fractions))
-		}
-	} else {
-		e.to_text = function(t) {
-			return t.timeofday(e.with_seconds, e.with_fractions)
-		}
-		e.valid_value = function(t) {
-			return t != null && t >= 0 && t < 24 * 3600 ? t : null
-		}
-		e.from_text = function(s, validate) {
-			return e.valid_value(s.parse_timeofday(validate, e.with_seconds, e.with_fractions))
-		}
-	}
-
 	if (has_time) {
-		e.prop('with_seconds'  , {type: 'bool', default: false})
-		e.prop('with_fractions', {type: 'bool', default: false})
-		e.set_with_seconds   = function(v) { e.picker.with_seconds  = v }
-		e.set_with_fractions = function(v) { e.picker.with_fractions = v }
+		e.forward_prop('with_seconds'  , e.picker)
+		e.forward_prop('with_fractions', e.picker)
 	}
 
-	function convert_value(s) {
-		return isstr(s) ? e.from_text(s, true) : s
+	let to_input, from_input
+	if (has_date) {
+		to_input = t => t.date(null, has_time, e.with_seconds, e.with_fractions)
+		from_input = s => parse_date(s, null, false, has_time, e.with_seconds, e.with_fractions)
+	} else {
+		to_input = t => t.timeofday(e.with_seconds, e.with_fractions)
+		from_input = s => parse_timeofday(s, false, e.with_seconds, e.with_fractions)
 	}
 
 	e.inputs = []
+	e.input_widgets = []
 
-	for (let I of (range ? ['1', '2'] : [''])) {
+	if (!range)
+		e.make_input_widget({
+			value_type: has_date ? 'time' : 'timeofday',
+			errors_tooltip_target: e.input_group,
+		})
 
-		let INPUT_VAL = 'input_value'+I
-		let VAL = 'value'+I
+	for (let K of range ? ['1', '2'] : ['']) {
 
-		let inp = input({
-			classes: 'date-input-input date-input-input-'+VAL,
+		let input = tag('input', {
+			class: 'date-input-input date-input-input-value'+K,
 			placeholder: date_placeholder_text(),
 		})
 
-		//
+		let input_widget
 
-		inp.on('input', function(ev) {
-			e.set_prop(INPUT_VAL, inp.value, ev)
+		if (range) {
+
+			// NOTE: only making these "input widgets" for validation purposes,
+			// no need to add them to the DOM. They have to be elements though.
+			input_widget = div()
+			input_widget.K = K
+			e.input_widgets.push(input_widget)
+
+			input_widget.is_time = true
+			input_widget.to_text = to_text
+			input_widget.to_form = to_form
+
+			input_widget.make_input_widget({
+				value_type: 'time',
+				errors_tooltip_target: false,
+			})
+
+		} else {
+
+			input_widget = e
+
+		}
+
+		input_widget.on_validate(function(ev) {
+
+			if (!(ev && ev.target == e.picker)) {
+				e.picker.set_prop('value'+K, e['value'+K], ev)
+			}
+
+			if (!(ev && ev.target == input && ev instanceof InputEvent)) {
+				let v = e['value'+K]
+				let iv = e['input_value'+K]
+				input.value = v != null ? to_input(v) : isnum(iv) ? to_input(iv) : iv
+			}
+
 		})
 
-		inp.on('wheel', function(ev, dy, is_trackpad) {
-			let d = day(e[VAL], round(-dy / 120))
+		input.on('input', function(ev) {
+			let v = from_input(input.value)
+			e.set_prop('input_value'+K, or(v, input.value), ev)
+		})
+
+		input.on('wheel', function(ev, dy, is_trackpad) {
+			let v = e['value'+K]
+			if (v == null)
+				return
+			let d = day(v, round(-dy / 120))
 			if (range)
-				if (VAL == 'value1' && d > e.value2)
+				if (K == '1' && d > e.value2)
 					d = e.value2
-				else if (VAL == 'value2' && d < e.value1)
+				else if (K == '2' && d < e.value1)
 					d = e.value1
-			e.set_prop(VAL, d, {target: e})
+			e.set_prop('input_value'+K, d, {target: e})
 		})
 
 		function digit_groups() {
 			let gs = []
 			let index = 0
-			inp.value.replace(/(\s\-)?\d+/g, (s, _, i) => gs.push({i: i, j: i + s.len, index: index++}))
+			input.value.replace(/(\s\-)?\d+/g,
+				(s, _, i) => gs.push({i: i, j: i + s.len, index: index++}))
 			return gs
 		}
 
 		function current_digit_group() {
-			let i = inp.selectionStart
-			let j = inp.selectionEnd
+			let i = input.selectionStart
+			let j = input.selectionEnd
 			for (let g of digit_groups())
 				if (g.i <= i && g.j >= j)
 					return g
 		}
 
 		function focus_next_digit_group(shift) {
-			let i = inp.selectionStart
-			let j = inp.selectionEnd
-			if (i == 0 && j == inp.value.len) {
-				i = shift ? inp.value.len : 0
+			let i = input.selectionStart
+			let j = input.selectionEnd
+			if (i == 0 && j == input.value.len) {
+				i = shift ? input.value.len : 0
 				j = i
 			}
 			let gs = digit_groups()
 			if (!shift) { // select next number
 				for (let g of gs)
 					if (g.i >= j) {
-						inp.setSelectionRange(g.i, g.j)
+						input.setSelectionRange(g.i, g.j)
 						return true
 					}
 			} else {
 				for (let g of gs.reverse())
 					if (g.j <= i) {
-						inp.setSelectionRange(g.i, g.j)
+						input.setSelectionRange(g.i, g.j)
 						return true
 					}
 			}
 		}
 
-		inp.on('keydown', function(key, shift, ctrl, alt) {
+		input.on('keydown', function(key, shift, ctrl, alt, ev) {
 
 			if (alt)
 				return
@@ -7657,18 +7794,20 @@ function date_input_widget(e, has_date, has_time, range) {
 			if (key == 'ArrowUp' || key == 'ArrowDown') {
 				let g = current_digit_group()
 				if (g) {
-					let s = inp.value
+					let s = input.value
 					let n = s.slice(g.i, g.j).num() + (key == 'ArrowUp' ? -1 : 1)
 					let ns = ' '+n
 					// ^^ the space is prepended in case n is negative, to diff.
 					// from `-` used as date separator!
 					let s1 = s.slice(0, g.i) + ns + s.slice(g.j)
-					let t = e.from_text(s1, false)
+					let t = from_input(s1)
 					if (t != null) {
-						e[VAL] = t
-						g = digit_groups()[g.index] // re-locate digit group
-						if (g)
-							inp.setSelectionRange(g.i, g.j)
+						if (e.try_validate(t)) {
+							e.set_prop('input_value'+K, t, ev)
+							g = digit_groups()[g.index] // re-locate digit group
+							if (g)
+								input.setSelectionRange(g.i, g.j)
+						}
 					}
 					return false
 				}
@@ -7677,68 +7816,39 @@ function date_input_widget(e, has_date, has_time, range) {
 		})
 
 		// NOTE: using ^focusin because ^focus resets the selection on Firefox!
-		inp.on('focusin', function() {
-			let i = inp.selectionStart
-			let j = inp.selectionEnd
-			if (i == 0 && j > 0 && j == inp.value.len) // all text is selected
+		input.on('focusin', function() {
+			let i = input.selectionStart
+			let j = input.selectionEnd
+			if (i == 0 && j > 0 && j == input.value.len) // all text is selected
 				focus_next_digit_group(shift_pressed)
 		})
 
-		e['input'+I] = inp
-		e.inputs.push(inp)
-		e.add(inp)
+		e['input'+K] = input
+		e.inputs.push(input)
+		e.input_group.add(input)
 
-		e.prop('name'+I)
-		e.prop('placeholder'+I)
-
-		e['set_name'+I]        = function(s) { inp.name = s }
-		e['set_placeholder'+I] = function(s) { inp.placeholder = s }
-
-		e.prop(VAL, {type: 'time', convert: convert_value})
-		e['set_'+VAL] = function(v, v0, ev) {
-			if (!(ev && (ev.target == inp || ev.target == e)))
-				inp.value = isnum(v) ? e.to_text(v) : v
-			if (!(ev && ev.target == e.picker))
-				e.picker.set_prop(VAL, v, ev)
-			e.set_prop('input_'+VAL, null, ev || {target: e})
-		}
-
-		e.prop('input_'+VAL, {attr: VAL})
-		e['set_input_'+VAL] = function(v, v0, ev) {
-			if (!(ev && (ev.target == inp || ev.target == e)))
-				inp.value = v
-			if (!(ev && ev.target == e))
-				e.set_prop(VAL, e.from_text(v, true), ev || {target: e})
-		}
+		e.prop('placeholder'+K, {store: false})
+		e['get_placeholder'+K] = () => input.placeholder
+		e['set_placeholder'+K] = function(s) { input.placeholder = s }
 
 	}
 
-	e.prop('form', {type: 'id', store: false})
 	if (range) {
-		e.get_form = function() { return e.input1.form }
-		e.set_form = function(s) {
-			e.input1.form = s
-			e.input2.form = s
-		}
-	} else {
-		e.get_form = function() { return e.input.form }
-		e.set_form = function(s) { e.input.form = s }
+
+		e.make_range_input_widget({
+			value_input_widgets: e.input_widgets,
+			errors_tooltip_target: e.input_group,
+		})
+
 	}
 
-	e.listen('prop_changed', function(ce, k, v, v0, ev) {
-		if (ce != e.picker) return
+	e.picker.on('input', function(ev) {
 		if (range) {
-			if (!(k == 'value1' || k == 'value2'))
-				return
-			if (ev && (ev.target == e.input1 || ev.target == e.input2))
-				return
+			e.set_prop('input_value1', this.value1, ev)
+			e.set_prop('input_value2', this.value2, ev)
 		} else {
-			if (k != 'value')
-				return
-			if (ev && ev.target == e.input)
-				return
+			e.set_prop('input_value', this.value, ev)
 		}
-		e.set_prop(k, v, {target: ce})
 	})
 
 	e.make_focusable(...e.inputs)
@@ -7756,8 +7866,11 @@ function date_input_widget(e, has_date, has_time, range) {
 	})
 
 	if (range)
-		e.input_group.add(e.input1, div({class: 'date-range-input-separator'},'-'),
-			e.input2, e.picker_button)
+		e.input_group.add(
+			e.input1,
+			div({class: 'date-range-input-separator'}, '-'),
+			e.input2,
+			e.picker_button)
 	else
 		e.input_group.add(e.input, e.picker_button)
 
@@ -7803,7 +7916,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	})
 
 	if (!e.close_button && e.calendar) // auto-close on pick with delay
-		e.calendar.on('pick', function() {
+		e.calendar.on('input', function() {
 			// delay it so the user can glance the choice.
 			runafter(.1, function() {
 				e.close()
