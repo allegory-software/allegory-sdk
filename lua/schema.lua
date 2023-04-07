@@ -24,7 +24,7 @@ to make sure that the database was migrated properly.
 to create and maintain schema versions and migration scripts.
 * you don't want to care about declaration order for foreign key constraints.
 * you want to annotate table fields with extra information for use in
-data-bound widget toolkits like [x-widgets](x-widgets.md), and you don't want
+data-bound widget toolkits like [widgets](WIDGETS.md), and you don't want
 to do that off-band in a separate file.
 * your app has modules or extensions and you want each module to define its
 own part of the app schema, including adding columns to common tables
@@ -177,7 +177,7 @@ end
 local function resolve_fk(fk, tbl, ref_tbl)
 	assertf(ref_tbl.pk, 'ref table `%s` has no PK', ref_tbl.name)
 	fk.ref_cols = extend({}, ref_tbl.pk)
-	--add convenience ref fields for automatic lookup in x-widgets.
+	--add convenience ref fields for automatic lookup in widgets.
 	if #fk.cols == 1 then
 		local fld = tbl.fields[fk.cols[1]]
 		fld.ref_table = ref_tbl.name

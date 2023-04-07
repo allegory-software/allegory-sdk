@@ -1,11 +1,11 @@
 --[==[
 
-	X-Widgets Application Server
+	Widgets-based Application Server
 	Written by Cosmin Apreutesei. Public Domain.
 
 LOADS
 
-	x-widgets, fontawesome, markdown-it, xauth
+	widgets, fontawesome, markdown-it, xauth
 
 USAGE
 
@@ -48,19 +48,16 @@ on_dom_load(function init_all() {
 
 cssfile[[
 fontawesome.css
-x-widgets.css
 ]]
 
 jsfile[[
 markdown-it.js
 markdown-it-easy-tables.js
-x-widgets.js
-x-nav.js
-x-input.js
-x-listbox.js
-x-grid.js
-x-chart.js
-x-module.js
+widgets.js
+nav.js
+grid.js
+charts.js
+xmodule.js
 ]]
 
 fontfile('fa-solid-900.woff2')

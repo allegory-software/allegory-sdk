@@ -586,13 +586,16 @@ G.css_layer = memoize(function(layer) {
 		}
 		// ::pseudos need to be outside :where(), so we must split the selector.
 		selector = selector.trim()
-		let [prefix, suffix] = selector.captures(/^(.+?)(::?(?:before|after|-[a-zA-Z\-]+))$/)
-		if (!prefix) {
+		let [prefix, suffix] = selector.captures(/^(.*?)(::[a-zA-Z\-]+)$/)
+		if (prefix == null) {
 			prefix = selector
 			suffix = ''
+		} else {
+			warn_if(prefix.includes('::'), 'bad selector', selector)
 		}
-		trace_if(prefix == 'fa-times')
-		pieces.push('\n:where(', prefix, ')', suffix, ' {')
+		if (prefix) pieces.push('\n:where(', prefix, ')')
+		if (suffix) pieces.push(suffix)
+		pieces.push(' {')
 		if (includes)
 			pieces.push(function(dest_pieces) {
 				add_includes(err, includes, dest_pieces)
@@ -946,14 +949,14 @@ G.component = function(selector, category, init) {
 
 component.categories = obj() // {cat->{create1,...}}
 
-component.init_instance = function(e, prop_vals) { // stub, see module.js.
+component.init_instance = function(e, prop_vals) { // stub, see xmodule.js.
 	e.xoff()
 	for (let k in prop_vals)
 		e.set_prop(k, prop_vals[k])
 	e.xon()
 }
 
-component.instance_tag = noop // stub, see module.js.
+component.instance_tag = noop // stub, see xmodule.js.
 
 // TODO: e.property() props can't be set from html. Convert them
 // to e.prop() if you want them to be settable from html attrs!
@@ -1105,8 +1108,8 @@ e._bind = function bind(on) {
 			if (e._user_bind)
 				e._user_bind(true)
 			if (e.id) {
-				announce(e, 'bind', true)
-				announce(e, e.id+'.bind', true)
+				e.announce('bind', true)
+				e.announce(e.id+'.bind', true)
 			}
 			if (PROFILE_BIND_TIME) {
 				let t1 = time()
@@ -1122,8 +1125,8 @@ e._bind = function bind(on) {
 			if (e._user_bind)
 				e._user_bind(false)
 			if (e.id) {
-				announce(e, 'bind', false)
-				announce(e, e.id+'.bind', false)
+				e.announce('bind', false)
+				e.announce(e.id+'.bind', false)
 			}
 			e.debug_close_if(DEBUG_BIND)
 		}
@@ -2468,8 +2471,8 @@ method(EventTarget, 'capture_pointer', function(ev, move, up) {
 		return
 	this.pointer_captured = true
 
-	move = move ?? return_false
-	up   = up   ?? return_false
+	move = move ?? noop
+	up   = up   ?? noop
 	let mx0 = ev.clientX
 	let my0 = ev.clientY
 	let cursor_style
@@ -2485,7 +2488,7 @@ method(EventTarget, 'capture_pointer', function(ev, move, up) {
 	this.on('pointerup'  , wrap_up)
 
 	// return false so you can call `return this.pointer_capture(ev, ...)`
-	// inside a ^pointerdown handler.
+	// inside a ^pointerdown handler if you want to inhibit further action.
 	return false
 })
 
@@ -3938,8 +3941,14 @@ e.popup = function(target, side, align) {
 
 	e.on_bind(function(on) {
 
+		// changes in content size updates the popup position.
+		e.on('resize', update, on)
+
 		// changes in parent size updates the popup position.
 		e.parent.on('resize', update, on)
+
+		// changes in content size updates the popup position.
+		e.on('content_resize', update, on)
 
 		// scrolling on any of the parents updates the popup position.
 		window.on('scroll', window_scroll, on, true)

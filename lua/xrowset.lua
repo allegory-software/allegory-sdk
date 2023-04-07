@@ -1,6 +1,6 @@
 --[[
 
-	Server-side rowsets for nav-based x-widgets.
+	Server-side rowsets for nav-based widgets.
 	Written by Cosmin Apreutesei. Public Domain.
 
 	Properties to set:

@@ -3486,14 +3486,14 @@ G.info = component('info', function(e) {
 	}
 })
 
-/* validators ----------------------------------------------------------------
+/* validators & validation rules ---------------------------------------------
 
 We don't like abstractions around here but this one buys us many things:
 
-  - validators are: reusable, composable, and easy to write logic for.
-  - validators apply automatically, no need to specify which to apply where.
-  - a validator can depend on, i.e. require that other validators pass first.
-  - a validator can convert the input value so that subsequent validators
+  - validation rules are: reusable, composable, and easy to write logic for.
+  - rules apply automatically, no need to specify which to apply where.
+  - a validator can depend on, i.e. require that other rules pass first.
+  - a validator can convert the input value so that subsequent rules
     operate on the converted value, thus only having to parse the value once.
   - null values are filtered automatically.
   - result containing all messages with `failed` and `checked` status on each.
@@ -3503,7 +3503,7 @@ We don't like abstractions around here but this one buys us many things:
   - it's not that much code for all of that.
 
 props:
-	validators
+	rules
 	triggered
 	results
 	value
@@ -3515,123 +3515,147 @@ methods:
 
 */
 
-let validators = obj()
-G.validators = validators
+let global_rules = obj()
+G.validation_rules = global_rules
 G.INVALID = obj() // convert functions return this to distinguish from null.
 
-let validator_props = obj()
+let global_rule_props = obj()
 
-G.add_validator = function(validator) {
-	validators[validator.name] = validator
-	validator. props = isstr(validator. props) && validator. props.words().tokeys() || null
-	validator.vprops = isstr(validator.vprops) && validator.vprops.words().tokeys() || null
-	validator.requires = words(validator.requires) || empty_array
-	assign(validator_props, validator.props)
+function fix_rule(rule) {
+	rule.applies = rule.applies || return_true
+	rule. props = isstr(rule. props) && rule. props.words().tokeys() || null
+	rule.vprops = isstr(rule.vprops) && rule.vprops.words().tokeys() || null
+	rule.requires = words(rule.requires) || empty_array
+}
+
+G.add_validation_rule = function(rule) {
+	fix_rule(rule)
+	global_rules[rule.name] = rule
+	assign(global_rule_props, rule.props)
+	announce('validation_rules_changed')
 }
 
 G.create_validator = function(e, field) {
 
-	let my_validators_invalid = true
-	let my_validators = []
-	let my_vprops = obj()
+	let rules_invalid = true
+	let rules = []
+	let own_rules = []
+	let own_rule_props = obj()
+	let rule_vprops = obj()
 	let results = []
-	let checked = obj()
+	let checked = map()
 
-	function add_validator(name) {
-		assert(checked[name] !== false, 'validator require cycle: {0}', name)
-		if (checked[name])
+	function add_rule(rule) {
+		assert(checked.get(rule) !== false, 'validation rule require cycle: {0}', rule.name)
+		if (checked.get(rule))
 			return true
-		let validator = validators[name]
-		if (warn_if(!validator, 'unknown validator', name))
+		if (!rule.applies(e, field))
 			return
-		if (!validator.applies(e, field))
-			return
-		checked[name] = false // means checking...
-		if (!(e.id || e.name))
-		for (let req of validator.requires) {
-			if (!add_validator(req)) {
-				checked[name] = true
+		checked.set(rule, false) // means checking...
+		for (let req_rule_name of rule.requires) {
+			if (!add_global_rule(req_rule_name)) {
+				checked.set(rule, true)
 				return true
 			}
 		}
-		my_validators.push(validator)
-		assign(my_vprops, validator.vprops)
-		checked[name] = true
+		rules.push(rule)
+		assign(rule_vprops, rule.vprops)
+		checked.set(rule, true)
 		return true
 	}
 
-	let validator = {results: results, validators: my_validators, triggered: false}
-
-	validator.prop_changed = function(prop) {
-		if (!prop || validator_props[prop]) {
-			my_validators.clear()
-			for (let k in my_vprops)
-				my_vprops[k] = null
-			for (let k in checked)
-				checked[k] = null
-			my_validators_invalid = true
-			return true
-		}
-		return my_validators_invalid || my_vprops[prop] || false
+	function add_global_rule(rule_name) {
+		let rule = global_rules[rule_name]
+		if (warn_if(!rule, 'unknown validation rule', rule_name))
+			return
+		return add_rule(rule)
 	}
 
-	function update_my_validators() {
-		for (let name in validators)
-			add_validator(name)
-		my_validators_invalid = false
+	let validator = {results: results, rules: rules, triggered: false}
+
+	validator.invalidate = function() {
+		rules_invalid = true
+	}
+
+	validator.add_rule = function(rule) {
+		fix_rule(rule)
+		own_rules.push(rule)
+		assign(own_rule_props, rule.props)
+		rules_invalid = true
+	}
+
+	validator.prop_changed = function(prop) {
+		if (!prop || global_rule_props[prop] || own_rule_props[prop]) {
+			rules.clear()
+			for (let k in rule_vprops)
+				rule_vprops[k] = null
+			checked.clear()
+			rules_invalid = true
+			return true
+		}
+		return rules_invalid || rule_vprops[prop] || false
+	}
+
+	function update_rules() {
+		for (let rule_name in global_rules)
+			add_global_rule(rule_name)
+		for (let rule of own_rules)
+			add_rule(rule)
+		rules_invalid = false
 	}
 
 	validator.validate = function(v, ann) {
-		if (my_validators_invalid)
-			update_my_validators()
+		if (rules_invalid)
+			update_rules()
 		v = repl(v, '', null)
 		let convert_failed
-		for (let validator of my_validators) {
-			validator._error = validator.error(e, v, field)
-			validator._rule  = validator.rule (e, field)
+		for (let rule of rules) {
+			rule._error = rule.error(e, v, field)
+			rule._rule  = rule.rule (e, field)
 			if (convert_failed) {
-				validator._failed = true
-				continue // if convert failed, subsequent validators cannot run!
+				rule._failed = true
+				continue // if convert failed, subsequent rules cannot run!
 			}
-			if (validator._failed)
+			if (rule._failed)
 				continue
-			if (validator._checked)
+			if (rule._checked)
 				continue
-			if (v == null && !validator.check_null)
+			if (v == null && !rule.check_null)
 				continue
-			for (let req of validator.requires)
-				if (validators[req].failed) {
-					validator._failed = true
+			for (let req of rule.requires)
+				if (rules[req]._failed) {
+					rule._failed = true
 					continue
 				}
-			let convert = validator.convert
+			let convert = rule.convert
 			if (convert) {
 				v = convert(e, v, field)
 				convert_failed = v === INVALID
 				v = repl(v, INVALID, null)
 			}
-			let failed = convert_failed || !validator.validate(e, v, field)
-			validator._checked = true
-			validator._failed = failed
+			let failed = convert_failed || !rule.validate(e, v, field)
+			rule._checked = true
+			rule._failed = failed
 		}
-		results.len = my_validators.len
+		results.len = rules.len
 		this.failed = false
 		this.first_failed_result = null
-		for (let i = 0, n = my_validators.len; i < n; i++) {
-			let validator = my_validators[i]
+		for (let i = 0, n = rules.len; i < n; i++) {
+			let rule = rules[i]
 			let result = attr(results, i)
-			result.checked = validator._checked || false
-			result.failed  = validator._failed || false
-			result.error   = validator._error
-			result.rule    = validator._rule
-			if (validator._failed && !this.failed) {
+			result.checked = rule._checked || false
+			result.failed  = rule._failed || false
+			result.error   = rule._error
+			result.rule    = rule._rule
+			if (rule._failed && !this.failed) {
 				this.failed = true
 				this.first_failed_result = result
 			}
-			validator._checked = null
-			validator._failed  = null
-			validator._error  = null
-			validator._rule   = null
+			// clean up scratch pad.
+			rule._checked = null
+			rule._failed  = null
+			rule._error   = null
+			rule._rule    = null
 		}
 		this.value = this.failed ? null : repl(v, undefined, null)
 		if (ann != false)
@@ -3647,11 +3671,16 @@ let field_name = function(field) {
 	return field.text || field.name || S('value', 'Value')
 }
 
+// NOTE: this must work with values that are unconverted and invalid!
 let field_value = function(field, v) {
-	return field.to_text ? field.to_text(v) : v
+	if (v == null) return 'null'
+	if (isstr(v)) return v
+	if (field.to_text)
+		v = field.to_text(v)
+	return v+''
 }
 
-add_validator({
+add_validation_rule({
 	name     : 'required',
 	check_null: true,
 	props    : 'not_null required',
@@ -3662,7 +3691,7 @@ add_validator({
 	rule     : (e,    field) => S('validation_empty_rule', '{0} is filled', field_name(field)),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'number',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.is_number,
@@ -3674,7 +3703,7 @@ add_validator({
 		'{0} must be a number', field_name(field)),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'min',
 	requires : 'number',
 	props    : 'min',
@@ -3688,7 +3717,7 @@ add_validator({
 			field_value(field, field.min)),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'max',
 	requires : 'number',
 	props    : 'max',
@@ -3702,7 +3731,7 @@ add_validator({
 			field_value(field, field.max)),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'checked_value',
 	props    : 'checked_value unchecked_value',
 	vprops   : 'input_value',
@@ -3714,7 +3743,7 @@ add_validator({
 		'{0} must be {1} or {2}', field_name(field), e.checked_value, e.unchecked_value),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'range_values_valid',
 	vprops   : 'invalid1 invalid2',
 	applies  : (e   ) => e.is_range,
@@ -3723,7 +3752,7 @@ add_validator({
 	rule     : (e, v) => S('validation_range_values_valid_rule' , 'Range values must be valid'),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'positive_range',
 	vprops   : 'value1 value2',
 	applies  : (e   ) => e.is_range,
@@ -3732,19 +3761,19 @@ add_validator({
 	rule     : (e, v) => S('validation_positive_range_rule' , 'Range must be positive'),
 })
 
-add_validator({
-	name     : 'minlen',
-	props    : 'minlen',
+add_validation_rule({
+	name     : 'min_length',
+	props    : 'min_length',
 	vprops   : 'input_value',
-	applies  : (e,    field) => field.minlen,
-	validate : (e, v, field) => v.len >= field.minlen,
-	error    : (e, v, field) => S('validation_minlen_error',
+	applies  : (e,    field) => field.min_length,
+	validate : (e, v, field) => v.len >= field.min_length,
+	error    : (e, v, field) => S('validation_min_length_error',
 		'{0} too short', field_name(field)),
-	rule     : (e,    field) => S('validation_minlen_rule' ,
-		'{0} must be at least {1} characters', field_name(field), field.minlen),
+	rule     : (e,    field) => S('validation_min_length_rule' ,
+		'{0} must be at least {1} characters', field_name(field), field.min_length),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'lower',
 	props    : 'conditions',
 	vprops   : 'input_value',
@@ -3756,7 +3785,7 @@ add_validator({
 		'{0} must contain at least one lowercase letter', field_name(field)),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'upper',
 	props    : 'conditions',
 	vprops   : 'input_value',
@@ -3768,7 +3797,7 @@ add_validator({
 		'{0} must contain at least one uppercase letter', field_name(field)),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'digit',
 	props    : 'conditions',
 	vprops   : 'input_value',
@@ -3780,7 +3809,7 @@ add_validator({
 		'{0} must contain at least one digit', field_name(field)),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'symbol',
 	props    : 'conditions',
 	vprops   : 'input_value',
@@ -3792,18 +3821,29 @@ add_validator({
 		'{0} must contain at least one symbol', field_name(field)),
 })
 
-add_validator({
-	name     : 'enum',
+let scores = [
+	S('password_score_0', 'extremely weak'),
+	S('password_score_1', 'very weak'),
+	S('password_score_2', 'medium-strong'),
+	S('password_score_3', 'strong'),
+	S('password_score_4', 'very strong'),
+]
+add_validation_rule({
+	name: 'min_score',
+	props    : 'conditions min_score',
 	vprops   : 'input_value',
-	applies  : (e,    field) => field.value_known,
-	validate : (e, v, field) => field.value_known(v) != null,
-	error    : (e, v, field) => S('validation_known_error',
-		'{0} unknown value {1}', field_name(field), field_value(field, v)),
-	rule     : (e,    field) => S('validation_known_rule',
-		'{0} must be a known value', field_name(field)),
+	applies  : (e,    field) => e.min_score != null
+		&& field.conditions && field.conditions.includes('min-score'),
+	validate : (e, v, field) => (field.score ?? 0) >= field.min_score,
+	error    : (e, v, field) => S('validation_min_score_error',
+		'{0} is {1}', field_name(field),
+			field.score != null && scores[field.score]
+			|| S('password_score_unknwon', 'probably weak')),
+	rule     : (e,    field) => S('validation_min_score_rule' ,
+		'{0} must be {1}', field_name(field), scores[e.min_score]),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'lookup',
 	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
 	vprops   : 'input_value',
@@ -3822,7 +3862,7 @@ add_validator({
 // mySQL compliant.
 let min_time = time(1000, 1, 1, 0, 0, 0)
 let max_time = time(10000) - 1
-add_validator({
+add_validation_rule({
 	name     : 'time',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.is_time,
@@ -3830,12 +3870,12 @@ add_validator({
 			e.with_time, e.with_seconds, e.with_fractions) ?? INVALID,
 	validate : (e, v, field) => v >= min_time && v <= max_time,
 	error    : (e, v, field) => S('validation_time_error',
-		'{0} is an invalid date', field_name(field)),
+		'{0}: invalid date', field_name(field)),
 	rule     : (e,    field) => S('validation_time_rule',
 		'{0} must be a valid date'),
 })
 
-add_validator({
+add_validation_rule({
 	name     : 'timeofday',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.is_timeofday,
@@ -3843,9 +3883,45 @@ add_validator({
 		e.with_seconds, e.with_fractions) ?? INVALID,
 	validate : return_true,
 	error    : (e, v, field) => S('validation_timeofday_error',
-		'{0} is an invalid time of day', field_name(field)),
+		'{0}: invalid time of day', field_name(field)),
 	rule     : (e,    field) => S('validation_timeofday_rule',
 		'{0} must be a valid time of day'),
+})
+
+add_validation_rule({
+	name     : 'value_known',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.value_known,
+	validate : (e, v, field) => field.value_known(v) != null,
+	error    : (e, v, field) => S('validation_known_error',
+		'{0}: unknown value {1}', field_name(field), field_value(field, v)),
+	rule     : (e,    field) => S('validation_known_rule',
+		'{0} must be a known value', field_name(field)),
+})
+add_validation_rule({
+	name     : 'tags',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.is_tags,
+	convert  : (e, v, field) => (isstr(v) ?
+		(v.trim().starts('[') ? json_arg(v) : v.words()) : v) ?? INVALID,
+	validate : return_true,
+	error    : (e, v, field) => S('validation_tags_error',
+		'{0}: invalid tags list', field_name(field)),
+	rule     : (e,    field) => S('validation_tags_rule',
+		'{0} must be a valid tags list', field_name(field)),
+})
+
+add_validation_rule({
+	name     : 'tags_valid',
+	props    : 'valid_tags',
+	vprops   : 'input_value',
+	requires : 'tags',
+	applies  : (e,    field) => field.valid_tags && count_keys(field.valid_tags, 1),
+	validate : (e, v, field) => !field.invalid_tags(v).len,
+	error    : (e, v, field) => S('validation_known_error',
+		'{0}: unknown tags: {1}', field_name(field), field.invalid_tags(v).join(', ')),
+	rule     : (e,    field) => S('validation_known_rule',
+		'{0} must contain only known tags', field_name(field)),
 })
 
 /* <errors> ------------------------------------------------------------------
@@ -3874,10 +3950,12 @@ G.errors = component('errors', 'Input', function(e) {
 	e.prop('target_id' , {type: 'id', attr: 'for'})
 	e.prop('show_all'  , {type: 'bool', attr: 'show-all'})
 
-	function update(validator) {
+	e.on_update(function(opt) {
+		if (!opt.validator)
+			return
 		if (e.show_all) {
 			e.clear()
-			for (let result of validator.results)
+			for (let result of opt.validator.results)
 				if (result.rule)
 					e.add(div({class: catany(' ',
 								'errors-line',
@@ -3888,27 +3966,32 @@ G.errors = component('errors', 'Input', function(e) {
 							div({class: 'errors-message'}, result.rule)
 						))
 		} else {
-			let ffr = validator.first_failed_result
+			let ffr = opt.validator.first_failed_result
 			if (ffr)
 				e.set(ffr.error)
 			// don't clear the error, just hide it so that box w and h stay stable.
 			e.class('visible'  , !!ffr)
 			e.class('invisible', !ffr)
 		}
-	}
+	})
 
 	e.on_bind(function(on) {
 		if (on) {
 			let te = e.target || window[e.target_id]
-			if (te && te.validator)
-				update(te.validator)
+			if (te && te.validator) {
+				e.update({validator: te.validator})
+				// because the resize observer event on the errors popup comes in too slow.
+				e.fireup('content_resize')
+			}
 		}
 	})
 
-	e.listen('validate', function(te, out) {
+	e.listen('validate', function(te, validator) {
 		if (!(te == e.target || (e.target_id && te.id == e.target_id)))
 			return
-		update(out)
+		e.update({validator: validator})
+		// because the resize observer event on the errors popup comes in too slow.
+		e.fireup('content_resize')
 	})
 
 })
@@ -4031,6 +4114,14 @@ component('form', function(e) {
 
 	e.init_child_components()
 
+	e.json = function() {
+		let t = obj()
+		for (let input of e.elements)
+			if (input.widget)
+				input.widget.to_json(t)
+		return t
+	}
+
 	e.on('submit', function(ev) {
 		for (let input of e.elements) {
 			if (input.widget && input.widget.validator) {
@@ -4067,7 +4158,8 @@ state:
 	invalid
 stubs:
 	update_value_input(ev)
-	to_form
+	to_form()
+	to_json(t)
 
 */
 
@@ -4080,10 +4172,11 @@ e.make_input_widget = function(opt) {
 	e.prop('form', {type: 'id', store: false})
 
 	// initial value and also the value from user input, valid or not, typed or text.
-	e.prop('input_value', {type: vt, attr: 'value', slot: 'state', default: undefined})
+	e.prop('input_value', assign({type: vt, attr: 'value', slot: 'state',
+		default: undefined}, opt.input_value_attrs))
 
 	// typed, validated value, not user-changeable.
-	e.prop('value', {type: vt, slot: 'state'})
+	e.prop('value', assign({type: vt, slot: 'state'}, opt.value_attrs))
 
 	e.prop('required', {type: 'bool', attr: true, default: false})
 	e.prop('readonly', {type: 'bool', attr: true, default: false})
@@ -4109,9 +4202,10 @@ e.make_input_widget = function(opt) {
 	e.make_validator(false, opt.errors_tooltip_target)
 
 	e.to_form = e.to_form || return_arg // stub
+	e.to_json = e.to_json || function(t) { if (e.name) t[e.name] = e.value }
 
 	e.update_value_input = function(ev) {
-		e.value_input.value = e.to_form(e.value) ?? ''
+		e.value_input.value = (e.value != null ? e.to_form(e.value) : null) ?? ''
 		e.value_input.disabled = e.value == null
 	}
 	e.on_validate(function(ev) {
@@ -4190,14 +4284,12 @@ e.make_range_input_widget = function(opt) {
 		return opt.value_input_widgets[0].form
 	}
 
-	e.property('input_value', () => e)
-	e.on_validate(function(ev) {
-		//
-	})
+	e.to_json = function(t) {
+		for (let ve of opt.value_input_widgets)
+			ve.to_json(t)
+	}
 
-	// e.on_init(function() {
-	// 	e.validate()
-	// })
+	e.property('input_value', () => e)
 
 }
 
@@ -4589,8 +4681,8 @@ let slider_widget = function(e, range) {
 	e.marks = div({class: 'slider-marks'})
 
 	function to_text(v) {
-		if (v == null) return null
-		return e.decimals != null ? v.dec(e.decimals) : v+''
+		if (!isnum(v)) return v
+		return e.decimals != null ? v.dec(e.decimals) : v
 	}
 
 	e.thumbs = []
@@ -4600,7 +4692,7 @@ let slider_widget = function(e, range) {
 		thumb.class('slider-thumb')
 		thumb.K = K
 		thumb.to_num = num
-		thumb.to_text = v => to_text
+		thumb.to_text = to_text
 		if (range)
 			thumb.make_input_widget({
 				value_type: 'number',
@@ -5441,6 +5533,177 @@ G.vselect_button = component('vselect-button', function(e) {
 
 })
 
+/* <text-input> --------------------------------------------------------------
+
+inherits:
+	input_widget
+update options:
+	select_all
+
+*/
+
+// NOTE: we use 'skip' on the root element and create an <input-group> inside
+// so that we can add popups to the widget without messing up the CSS.
+css('.text-input', 'skip')
+css('.text-input-group', 'w-input bg-input')
+css('.text-input-input', 'S shrinks p-r-0')
+
+G.text_input = component('text-input', 'Input', function(e) {
+
+	e.clear()
+	e.class('text-input')
+	e.input_group = div({class: 'text-input-group input-group b-collapse-h ro-collapse-h'})
+	e.add(e.input_group)
+
+	e.make_input_widget({
+		errors_tooltip_target: e.input_group,
+	})
+
+	e.input = input({classes: 'text-input-input'})
+	e.input_group.add(e.input)
+
+	e.prop('placeholder', {store: false})
+	e.get_placeholder = () => e.input.placeholder
+	e.set_placeholder = function(s) { e.input.placeholder = s }
+
+	e.make_focusable(e.input)
+	e.input_group.make_focus_ring(e.input)
+
+	e.on_update(function(opt) {
+		if (opt.select_all)
+			e.input.select_range(0, -1)
+	})
+
+	// controller
+
+	e.do_after('set_input_value', function(v, v0, ev) {
+		if (!(ev && ev.target == e.input))
+			e.input.value = v
+	})
+
+	e.input.on('input', function(ev) {
+		e.set_prop('input_value', this.value, ev)
+	})
+
+})
+
+/* <pass-input> --------------------------------------------------------------
+
+inherits:
+	input_widget
+config:
+	conditions
+	min_length
+	min_score
+update options:
+	select_all
+
+*/
+
+// NOTE: we use 'skip' on the root element and create an <input-group> inside
+// so that we can add popups to the widget without messing up the CSS.
+css('.pass-input', 'skip')
+css('.pass-input-group', 'w-input bg-input')
+css('.pass-input-input', 'S shrinks p-r-0')
+
+css('.pass-input-button', 'h-m h-c b p0 label', `width: 2.75em;`)
+css_state('.pass-input-button', 'bg-input')
+css_state('.pass-input[invalid] .pass-input-button', 'bg-error')
+css_generic_state('.pass-input-button[disabled]', 'op1 no-filter dim')
+
+let load_zxcvbn = memoize(function() {
+	let script = tag('script')
+	script.onload = function() {
+		announce('validation_rules_changed')
+	}
+	script.src = 'zxcvbn.js'
+	root.add(script)
+})
+
+G.pass_input = component('pass-input', 'Input', function(e) {
+
+	e.clear()
+	e.class('pass-input')
+	e.input_group = div({class: 'pass-input-group input-group b-collapse-h ro-collapse-h'})
+	e.add(e.input_group)
+
+	e.make_input_widget({
+		errors_tooltip_target: e.input_group,
+	})
+
+	e.prop('min_length', {type: 'number', default: 6})
+	e.prop('min_score', {type: 'number', default: 3}) // 0..4, 3+ is safe.
+	e.prop('conditions', {type: 'words', convert: words,
+		// NOTE: remove `min-score` if you don't want to load the gigantic library,
+		// and replace with 'lower upper digit symbol', which is reasonable.
+		default: 'min-score',
+	})
+
+	function update_score() {
+		e.score = G.zxcvbn ? zxcvbn(e.input_value).score : null
+	}
+
+	let zxcvbn_loaded
+	e.set_conditions = function(cond) {
+		if (cond.includes('min-score') && !zxcvbn_loaded) {
+			zxcvbn_loaded = true
+			e.listen('validation_rules_changed', function() {
+				update_score()
+				e.validate()
+			})
+			load_zxcvbn()
+		}
+	}
+
+	e.input = input({classes: 'pass-input-input', type: 'password'})
+	e.eye_button = button({
+		type: 'button',
+		classes: 'pass-input-button',
+		icon: 'far fa-eye',
+		bare: true,
+		focusable: false,
+		title: S('view_password', 'View password'),
+	})
+	e.input_group.add(e.input, e.eye_button)
+
+	e.prop('placeholder', {store: false})
+	e.get_placeholder = () => e.input.placeholder
+	e.set_placeholder = function(s) { e.input.placeholder = s }
+
+	e.make_focusable(e.input)
+	e.input_group.make_focus_ring(e.input)
+
+	e.on_update(function(opt) {
+		if (opt.select_all)
+			e.input.select_range(0, -1)
+	})
+
+	// controller
+
+	e.do_after('set_input_value', function(v, v0, ev) {
+		update_score()
+		if (!(ev && ev.target == e.input))
+			e.input.value = v
+		e.eye_button.disable('empty', !v)
+	})
+
+	e.input.on('input', function(ev) {
+		e.set_prop('input_value', this.value, ev)
+	})
+
+	e.eye_button.on('pointerdown', function(ev) {
+		e.input.type = null
+		let i = e.input.selectionStart
+		let j = e.input.selectionEnd
+		return this.capture_pointer(ev, null, function() {
+			e.input.type = 'password'
+			e.input.setSelectionRange(i, j)
+			return false
+		})
+	})
+
+})
+
 /* <num-input> ---------------------------------------------------------------
 
 inherits:
@@ -5570,8 +5833,8 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.to_num = num
 
 	e.to_text = function(v) {
-		if (v == null) return null
-		return e.decimals != null ? v.dec(e.decimals) : v+''
+		if (!isnum(v)) return v
+		return e.decimals != null ? v.dec(e.decimals) : v
 	}
 	e.to_form = e.to_text
 	let to_input = e.to_text
@@ -5661,91 +5924,6 @@ G.num_input = component('num-input', 'Input', function(e) {
 
 })
 
-/* <pass-input> --------------------------------------------------------------
-
-inherits:
-	input_widget
-config:
-	minlen
-	conditions
-update options:
-	select_all
-
-*/
-
-// NOTE: we use 'skip' on the root element and create an <input-group> inside
-// so that we can add popups to the widget without messing up the CSS.
-css('.pass-input', 'skip')
-css('.pass-input-group', 'w-input bg-input')
-css('.pass-input-input', 'S shrinks p-r-0')
-css('.pass-input-button', 'h-m h-c b p0 label', `width: 2.75em;`)
-css_state('.pass-input-button', 'bg-input')
-css_state('.pass-input[invalid] .pass-input-button', 'bg-error')
-css_generic_state('.pass-input-button[disabled]', 'op1 no-filter dim')
-
-G.pass_input = component('pass-input', 'Input', function(e) {
-
-	e.clear()
-	e.class('pass-input')
-	e.input_group = div({class: 'input-group b-collapse-h ro-collapse-h'})
-	e.add(e.input_group)
-
-	e.make_input_widget({
-		errors_tooltip_target: e.input_group,
-	})
-
-	e.prop('minlen', {type: 'number'})
-	e.prop('conditions', {type: 'words', convert: words,
-		default: 'lower upper digit symbol'})
-
-	e.input = input({classes: 'pass-input-input', type: 'password'})
-	e.eye_button = button({
-		type: 'button',
-		classes: 'pass-input-button',
-		icon: 'far fa-eye',
-		bare: true,
-		focusable: false,
-		title: S('view_password', 'View password'),
-	})
-	e.input_group.add(e.input, e.eye_button)
-
-	e.prop('placeholder', {store: false})
-	e.get_placeholder = () => e.input.placeholder
-	e.set_placeholder = function(s) { e.input.placeholder = s }
-
-	e.make_focusable(e.input)
-	e.make_focus_ring(e.input)
-
-	e.on_update(function(opt) {
-		if (opt.select_all)
-			e.input.select_range(0, -1)
-	})
-
-	// controller
-
-	e.do_after('set_input_value', function(v, v0, ev) {
-		if (!(ev && ev.target == e.input))
-			e.input.value = v
-		e.eye_button.disable('empty', !v)
-	})
-
-	e.input.on('input', function(ev) {
-		e.set_prop('input_value', this.value, ev)
-	})
-
-	e.eye_button.on('pointerdown', function(ev) {
-		e.input.type = null
-		let i = e.input.selectionStart
-		let j = e.input.selectionEnd
-		return this.capture_pointer(ev, null, function() {
-			e.input.type = 'password'
-			e.input.setSelectionRange(i, j)
-			return false
-		})
-	})
-
-})
-
 /* <tags-box> ----------------------------------------------------------------
 
 state:
@@ -5755,28 +5933,40 @@ state:
 
 css('.tags-box', 'm-y p-y-05 h-m flex-wrap gap-y', `
 	--tag-hue: 154;
+	--tag-lum: 1;
 `)
 
 css('.tags-tag', 'm-x-05 p-y-025 p-x-input gap-x ro-var-075 h-m noselect', `
-	background  : hsl(var(--tag-hue), 32%, 28%);
-	color       : hsl(var(--tag-hue), 87%, 61%);
+	background  : hsl(var(--tag-hue), 32%, calc(28% * var(--tag-lum)));
+	color       : hsl(var(--tag-hue), 87%, calc(61% * var(--tag-lum)));
+`)
+css_state('.tags-tag.invalid', '', `
+	--tag-hue: 0;
+	--tag-lum: 2;
 `)
 css_role(':is(.xsmall, .small, .smaller).tags-box, :is(.xsmall, .small, .smaller) :is(.tags-box, .tags-tag)', 'p-y-0')
 css_role_state('.tags-tag:focus-visible', '', `
-	background  : hsl(var(--tag-hue), 32%, 38%);
+	background  : hsl(var(--tag-hue), 32%, calc(38% * var(--tag-lum)));
 `)
 
 css('.tags-x', 'round fg h-m h-c small bold', `
 	width : 1.1em;
 	height: 1.1em;
-	color : hsl(var(--tag-hue), 63%, 43%);
+	color : hsl(var(--tag-hue), 63%, calc(43% * var(--tag-lum)));
 `)
 css_state('.tags-x:hover', '', `
-	color : hsl(var(--tag-hue), 63%, 53%);
+	color : hsl(var(--tag-hue), 63%, calc(53% * var(--tag-lum)));
 `)
 css_state('.tags-x:active', '', `
-	color : hsl(var(--tag-hue), 63%, 63%);
+	color : hsl(var(--tag-hue), 63%, calc(63% * var(--tag-lum)));
 `)
+
+function convert_tags(tags) {
+	tags = isstr(tags) ? (tags.trim().starts('[') ? json_arg(tags) : tags.words()) : tags
+	if (isarray(tags))
+		tags.remove_duplicates()
+	return tags
+}
 
 G.tags_box = component('tags-box', function(e) {
 
@@ -5785,16 +5975,12 @@ G.tags_box = component('tags-box', function(e) {
 
 	// model
 
-	function convert_tags(tags) {
-		return words(tags).remove_duplicates()
-	}
-
 	e.prop('tags', {type: 'array', element_type: 'string', convert: convert_tags})
 
-	e.remove_tag = function(tag) {
+	e.remove_tag = function(tag, ev) {
 		let t1 = e.tags.slice()
 		let i = t1.remove_value(tag)
-		e.tags = t1
+		e.set_prop('tags', t1, ev)
 		return i
 	}
 
@@ -5802,10 +5988,16 @@ G.tags_box = component('tags-box', function(e) {
 
 	e.clear()
 
-	e.make_tag = function(tag) {
+	e.make_tag = function(s) {
+		let [tag, tag_attrs] = s.split('###')
 		let x = svg_circle_x({class: 'tags-x'})
 		let t = div({class: 'tags-tag'}, tag, x)
+		if (tag_attrs) // TODO: this is not used
+			for (let attr of tag_attrs.split(','))
+				t.bool_attr(attr.trim(), true)
+		t.value = tag
 		t.make_focusable()
+		t.on('dblclick', tag_dblclick)
 		t.on('keydown', tag_keydown)
 		x.on('pointerdown', return_false) // prevent bubbling
 		x.on('click', tag_x_click)
@@ -5814,8 +6006,9 @@ G.tags_box = component('tags-box', function(e) {
 
 	e.set_tags = function(tags) {
 		e.clear()
-		for (let tag of tags)
-			e.add(e.make_tag(tag))
+		if (tags)
+			for (let tag of tags)
+				e.add(e.make_tag(tag))
 	}
 
 	e.tag_box = function(tag) {
@@ -5830,13 +6023,20 @@ G.tags_box = component('tags-box', function(e) {
 
 	// controller
 
-	function tag_x_click() {
-		e.remove_tag(this.parent.textContent)
+	function tag_dblclick(ev) {
+		e.remove_tag(this.value, ev)
+		e.fire('input', ev)
 	}
 
-	function tag_keydown(key) {
+	function tag_x_click(ev) {
+		e.remove_tag(this.parent.value, ev)
+		e.fire('input', ev)
+	}
+
+	function tag_keydown(key, shift, ctrl, alt, ev) {
 		if (key == 'Delete') {
-			let i = e.remove_tag(this.textContent)
+			let i = e.remove_tag(this.value, ev)
+			e.fire('input', ev)
 			let next_tag = e.at[i] || e.last
 			if (next_tag) {
 				next_tag.focus()
@@ -5864,8 +6064,11 @@ state:
 
 */
 
-css('.tags-input', 'shrinks')
-css('.tags-input-inpu', 'S')
+// NOTE: we use 'skip' on the root element and create an <input-group> inside
+// so that we can add popups to the widget without messing up the CSS.
+css('.tags-input', 'skip')
+css('.tags-input-group', 'shrinks')
+css('.tags-input-input', 'S')
 css('.tags-scrollbox', 'shrinks h-m b-r-0 clip')
 css('.tags-input .tags-box', 'rel shrinks m0')
 css('.tags-input .tags-input-input', 'p-x-input b-l-0', `min-width: 5em;`)
@@ -5875,53 +6078,96 @@ G.tags_input = component('tags-input', function(e) {
 
 	e.clear()
 
-	e.class('tags-input input-group')
+	e.class('tags-input')
+	e.input_group = div({class: 'tags-input-group input-group'})
+	e.add(e.input_group)
 	e.make_disablable()
-
-	e.prop('name')
-	e.prop('form', {type: 'id', store: false})
-	e.set_name = function(s) { e.input.name = s }
-	e.get_form = function() { return e.input.form }
-	e.set_form = function(s) { e.value_input.form = s }
 
 	e.tags_box = tags_box()
 	e.tag_input = tag('input', {class: 'tags-input-input', placeholder: 'Tag'})
-	e.input = tag('input', {type: 'hidden', hidden: ''})
-	e.add(div({class: 'tags-scrollbox'}, e.tags_box), e.tag_input, e.input)
+	e.tags_scrollbox = div({class: 'tags-scrollbox'}, e.tags_box)
+	e.input_group.add(e.tags_scrollbox, e.tag_input)
 	e.make_focusable(e.tag_input)
-	e.make_focus_ring(e.tag_input)
+	e.input_group.make_focus_ring(e.tag_input)
 
-	e.prop('tags', {store: false})
-	e.get_tags = () => e.tags_box.tags
-	e.set_tags = function(v) {
-		e.tags_box.tags = v
-		e.input.value = json(e.tags_box.tags)
+	e.prop('as_words', {type: 'bool'})
+
+	e.to_text = tags => tags.join(', ')
+	e.to_form = tags => e.as_words ? tags.join(' ') : json(tags)
+
+	e.is_tags = true
+	e.make_input_widget({
+		input_value_attrs : {type: 'array', element_type: 'string'},
+		value_attrs       : {type: 'array', element_type: 'string'},
+		errors_tooltip_target: e.input_group,
+	})
+
+	let valid_tags
+	e.prop('valid_tags', {type: 'array', element_type: 'string', convert: convert_tags})
+	e.set_valid_tags = function(tags) {
+		valid_tags = tags.tokeys()
+	}
+
+	let invalid_tags = []
+	e.invalid_tags = function(tags) {
+		invalid_tags.clear()
+		if (valid_tags)
+			for (let tag of tags)
+				if (!valid_tags[tag])
+					invalid_tags.push(tag)
+		return invalid_tags
 	}
 
 	e.prop('nowrap', {type: 'bool'})
 	e.set_nowrap = (v) => e.tags_box.class('tags-box-nowrap', !!v)
 
-	e.tag_input.on('keydown', function(key) {
+	e.user_set_tags = function(tags, ev) {
+		e.tags_box.x = null
+		e.set_prop('input_value', tags, ev)
+		e.fire('input', ev)
+	}
+
+	e.tags_box.on('input', function(ev) {
+		e.user_set_tags(this.tags, ev)
+	})
+
+	e.on_validate(function(ev) {
+		e.tags_box.tags = e.input_value
+		e.update({state: true})
+	})
+
+	e.on_update(function(opt) {
+		if (opt.state) {
+			let invalid_tags = e.invalid_tags(e.tags_box.tags).tokeys()
+			for (let tag_div of e.tags_box.at)
+				tag_div.class('invalid', !!invalid_tags[tag_div.value])
+		}
+	})
+
+	e.tag_input.on('keydown', function(key, shift, ctrl, alt, ev) {
 		if (key == 'Backspace') {
 			let s = this.value
 			if (s) {
 				let s1 = this.selectionStart
 				let s2 = this.selectionEnd
 				if (s1 != s2) return
-				if (s1 != 0) return
+				if (s1 != 0 ) return
 			}
-			e.tags = e.tags.slice(0, -1)
+			e.user_set_tags(e.tags_box.tags.slice(0, -1), ev)
 			return false
 		}
 		if (key == 'Enter') {
 			let s = this.value
-			if (!s) return
-			let t1 = e.tags.slice()
-			t1.remove_value(s)
-			t1.push(s)
-			e.tags = t1
+			if (!s)
+				return false
 			this.value = ''
-			e.tags_box.focus_tag(s) // scroll tag into view
+			let t1 = e.tags_box.tags.slice()
+			for (let tag of e.as_words ? s.words() : [s]) {
+				t1.push(tag)
+				e.tags_box.focus_tag(tag) // scroll tag into view
+			}
+			t1.remove_duplicates()
+			e.user_set_tags(t1, ev)
 			e.tag_input.focus()
 			return false
 		}
@@ -5931,6 +6177,7 @@ G.tags_input = component('tags-input', function(e) {
 		this.class('grab', on && !ev.target.closest('.tags-x') && this.sw > this.cw)
 	})
 
+	// TODO: this inhibits tab dblclick event, find out why.
 	e.tags_box.on('pointerdown', function(ev, mx0) {
 		mx0 -= this.x || 0
 		let w = this.sw - this.cw
@@ -5938,7 +6185,7 @@ G.tags_input = component('tags-input', function(e) {
 			this.x = null
 			return
 		}
-		return this.capture_pointer(ev, function(ev, mx) {
+		this.capture_pointer(ev, function(ev, mx) {
 			this.x = clamp(mx - mx0, -w, 0)
 			this.class('grabbing')
 		}, function() {
@@ -7623,6 +7870,8 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.input_group = div({class: 'date-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
 
+	e.prop('as_text', {type: 'bool', attr: 'as-text'})
+
 	let to_text, to_form
 
 	if (range) {
@@ -7635,15 +7884,14 @@ function date_input_widget(e, has_date, has_time, range) {
 			if (has_time) {
 				e.picker = datetime_picker()
 				e.calendar = e.picker.calendar
-				to_text = t => t.date()
-				to_form = t => e.as_text ? t.date('SQL') : t
+				to_text = t => t.date(null, true, e.with_seconds, e.with_fractions)
+				to_form = t => e.as_text ?
+					t.date('SQL', true, e.with_seconds, e.with_fractions) : t
 			} else {
 				e.picker = calendar()
 				e.calendar = e.picker
-				to_text = t => t.date(null, true, e.with_seconds, e.with_fractions)
-				to_form = t => e.as_text
-					? t.date('SQL', true, e.with_seconds, e.with_fractions)
-					: t
+				to_text = t => t.date()
+				to_form = t => e.as_text ? t.date('SQL') : t
 				e.with_time = true
 			}
 			e.is_time = true
@@ -7657,6 +7905,11 @@ function date_input_widget(e, has_date, has_time, range) {
 		}
 		e.to_text = to_text
 		e.to_form = to_form
+	}
+
+	function to_json(t) {
+		if (this.name)
+			t[this.name] = this.to_form(this.value)
 	}
 
 	if (range || e.picker != e.calendar) {
@@ -7700,11 +7953,13 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.inputs = []
 	e.input_widgets = []
 
-	if (!range)
+	if (!range) {
 		e.make_input_widget({
 			value_type: has_date ? 'time' : 'timeofday',
 			errors_tooltip_target: e.input_group,
 		})
+		e.to_json = to_json
+	}
 
 	for (let K of range ? ['1', '2'] : ['']) {
 
@@ -7726,6 +7981,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			input_widget.is_time = true
 			input_widget.to_text = to_text
 			input_widget.to_form = to_form
+			input_widget.to_json = to_json
 
 			input_widget.make_input_widget({
 				value_type: 'time',

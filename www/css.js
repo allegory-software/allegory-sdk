@@ -125,7 +125,8 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg-search             : #ff9;  /* quicksearch text bg */
 	--bg-info               : #069;  /* info bubbles */
 	--fg-info               : var(--fg-white);
-	--bg-error              : #a33; /* invalid inputs and error bubbles */
+	--bg-error              : hsl(  0   54%  43% / 1.0); /* invalid inputs and error bubbles */
+	--bg-error2             : hsl(  0   54%  38% / 1.0); /* error on error bg (tags-input) */
 	--bg-focused-invalid    : #f33;
 	--fg-error              : var(--fg-white);
 	--bg-warn               : #ffa500; /* warning bubbles */
@@ -351,6 +352,9 @@ css('p', '', ` opacity: .9; `)
 css('h1', '', ` --fs: var(--fs-h1); font-size: var(--fs); `)
 css('h2', '', ` --fs: var(--fs-h2); font-size: var(--fs); `)
 css('h3', '', ` --fs: var(--fs-h3); font-size: var(--fs); `)
+
+/* input placeholders */
+css(['::placeholder','::-ms-input-placeholder'], 'label op1')
 
 /* text selection */
 css('::selection', '', `

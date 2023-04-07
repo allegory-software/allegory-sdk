@@ -90,8 +90,6 @@ chart = component('chart', 'Input', function(e) {
 
 	e.class('chart')
 	e.make_disablable()
-	contained_widget(e)
-	selectable_widget(e)
 
 	// config -----------------------------------------------------------------
 
