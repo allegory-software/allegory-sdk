@@ -2117,18 +2117,16 @@ G.grid = component('grid', 'Input', function(e) {
 			})
 			e.empty_rt.hidden = true
 			e.cells_view.add(e.empty_rt)
+			e.empty_rt.on_prop_changed(function(k, v) {
+				if (k != 'content') return
+				barrier = true
+				e.empty_text = v
+				barrier = false
+			})
 		}
 	})
 
 	e.prop('empty_text', {slot: 'lang'})
-
-	e.listen('prop_changed', function(te, k, v) {
-		if (te == e.empty_rt && k == 'content') {
-			barrier = true
-			e.empty_text = v
-			barrier = false
-		}
-	})
 
 	// widget editing protocol ------------------------------------------------
 

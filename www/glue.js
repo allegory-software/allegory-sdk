@@ -96,6 +96,7 @@ ARRAYS
 	array(...) -> a                        new Array(...)
 	empty_array -> []                      global empty array, read-only!
 	range(i, j, step, f) -> a
+	a.slice()                              overall fastest way to copy on FF & Chrome
 	a.set(a1) -> s
 	a.extend(a1) -> a
 	a.insert(i, v) -> a
@@ -743,7 +744,9 @@ G.map = (iter) => new Map(iter)
 G.array = (...args) => new Array(...args)
 
 property(Map, 'first_key', function() {
-	for (let [k] of this)
+	// let's hope the compiler sees this pattern and doesn't actually allocate
+	// an iterator object for this.
+	for (let k of this.keys())
 		return k
 })
 
@@ -1777,11 +1780,11 @@ There are 5 types of events in this joint:
 
 TYPE           FIRE                  LISTEN
 ------------------------------------------------------------------------------
-hook           e.do_foo()            e.do_{after|before}('do_foo', f)
-element        e.fire[up](k, ...)    e.on(k, f, [on])
-window         fire(k, ...)          on(k, f, [on])
-announce       announce(k, ...)      listen(k, f, [on])
-broadcast      broadcast(k, ...)     on(k, f, [on])
+hook           e.foo()               e.do_{after|before}('foo', f); e.on_foo(f)
+^element       e.fire[up](k, ...)    e.on(k, f, [on])
+^window        fire(k, ...)          on(k, f, [on])
+^^announce     announce(k, ...)      listen(k, f, [on])
+^^^broadcast   broadcast(k, ...)     on(k, f, [on])
 
 Hooks are just function composition. They are the fastest but can't be unhooked.
 Use them when extending widgets. Element events are what we get from the browser.

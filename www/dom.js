@@ -146,10 +146,15 @@ ELEMENT PROPERTIES
 	e.property(name, [get],[set] | descriptor)
 	e.prop(name, attrs)
 	e.alias(new_name, existing_name)
+
+DYNAMIC PROPERTIES
+
 	e.set_prop(k, v)
 	e.get_prop(k) -> v
 	e.get_prop_attrs(k) -> {attr->val}
 	e.get_props() -> {k->attrs}
+
+FORWARD PROPERTIES
 
 	e.forward_prop(name, forward_element, [attr], ['forward|backward|bidi'='forward'])
 
@@ -586,12 +591,15 @@ G.css_layer = memoize(function(layer) {
 		}
 		// ::pseudos need to be outside :where(), so we must split the selector.
 		selector = selector.trim()
-		let [prefix, suffix] = selector.captures(/^(.*?)(::[a-zA-Z\-]+)$/)
-		if (prefix == null) {
+		let m = selector.match(/^(.*?)(::[a-zA-Z\-]+)$/)
+		let prefix, suffix
+		if (m) {
+			prefix = m[1]
+			suffix = m[2]
+			warn_if(prefix.includes('::'), 'bad selector', selector)
+		} else {
 			prefix = selector
 			suffix = ''
-		} else {
-			warn_if(prefix.includes('::'), 'bad selector', selector)
 		}
 		if (prefix) pieces.push('\n:where(', prefix, ')')
 		if (suffix) pieces.push(suffix)
@@ -925,8 +933,9 @@ G.component = function(selector, category, init) {
 		init = category
 		category = 'Other'
 	}
-	let [tag, tag_attr] = selector.captures(/^(.+?)\[(.+?)\]$/) // TAG[ATTR]
-	tag = tag || selector
+	let m = selector.match(/^(.+?)\[(.+?)\]$/) // TAG[ATTR]
+	let tag = m && m[1] || selector
+	let tag_attr = m && m[2]
 	assert(tag.match(/^[a-z]+[a-z\-]*$/), 'invalid component tag')
 	let tagName = tag.upper()
 	assert(!(init && component_init[tagName]), 'component already registered: {0}', tag)
@@ -1667,9 +1676,14 @@ publishes:
 calls:
 	e.get_<prop>() -> v
 	e.set_<prop>(v1, v0)
+hooks:
+	e.on_prop_changed(f); f(prop, v, v0, ev)
 fires:
 	^^prop_changed(e, prop, v1, v0, ev)
 	^^id_changed(e, id, id0)
+
+NOTE: With `store: false` you're responsible for calling e.prop_changed()
+when the value changes by other means than by assigning to the property!
 
 */
 
@@ -1677,19 +1691,16 @@ e.property = function(name, get, set) {
 	return property(this, name, get, set)
 }
 
+e.prop_changed = function(prop, v1, v0, ev) {
+	if (this._xoff) {
+		this.props[prop].default = v1
+	} else {
+		this.announce('prop_changed', prop, v1, v0, ev)
+	}
+}
 e.on_prop_changed = function(f) {
 	this.do_after('prop_changed', f)
 }
-
-let announce_prop_changed = function(e, prop, v1, v0, ev) {
-	e.prop_changed?.(prop, v1, v0, ev)
-	if (e._xoff) {
-		e.props[prop].default = v1
-	} else {
-		e.announce('prop_changed', prop, v1, v0, ev)
-	}
-}
-G.announce_prop_changed = announce_prop_changed
 
 let resolve_linked_element = function(id) { // stub
 	let e = window[id]
@@ -1726,7 +1737,6 @@ e.prop = function(prop, opt) {
 	let priv = opt.private
 	if (!e[SET])
 		e[SET] = noop
-	let prop_changed = announce_prop_changed
 	let dv = 'default' in opt ? opt.default : null
 	let update_opt = opt.updates && words(opt.updates).tokeys() || null
 
@@ -1754,7 +1764,7 @@ e.prop = function(prop, opt) {
 			if (set_attr)
 				set_attr(v1)
 			if (!priv)
-				prop_changed(e, prop, v1, v0, ev)
+				e.prop_changed(prop, v1, v0, ev)
 			e.update(update_opt)
 		}
 		if (dv != null && set_attr && !e.hasattr(prop_attr))
@@ -1771,7 +1781,7 @@ e.prop = function(prop, opt) {
 				return
 			e[SET](v, v0, ev)
 			if (!priv)
-				prop_changed(e, prop, v, v0, ev)
+				e.prop_changed(prop, v, v0, ev)
 			e.update(update_opt)
 		}
 	}
@@ -1809,11 +1819,10 @@ e.prop = function(prop, opt) {
 		e.on_bind(function(on) {
 			id_bind(e[ID], on)
 		})
-		prop_changed = function(e, k, v1, v0, ev) {
-			announce_prop_changed(e, k, v1, v0, ev)
+		e.on_prop_changed(function(k, v1, v0, ev) {
 			id_bind(v0, false)
 			id_bind(v1, true)
-		}
+		})
 		if (e.bound)
 			id_bind(e[ID], true)
 	}
@@ -1835,7 +1844,15 @@ e.alias = function(new_name, old_name) {
 	alias(this, new_name, old_name)
 }
 
-// dynamic properties.
+/* dynamic properties --------------------------------------------------------
+
+Rationale: object properties in JS cannot be dynamic unless you use a proxy.
+But we need dynamic props to store props of grid column (which are dynamic)
+in xmodule. So use e.get_prop(k) instead of e[k] every time when dealing with
+an unknwon k that might be a dynamic prop.
+
+*/
+
 e.set_prop = function(k, v, ev) {
 	let pa = this.get_prop_attrs(k)
 	if (pa)
@@ -1847,14 +1864,19 @@ e.get_prop = function(k) { return this[k] } // stub
 e.get_prop_attrs = function(k) { return this.props[k] } // stub
 e.get_props = function() { return this.props }
 
+// forward properties --------------------------------------------------------
+
 e.forward_prop = function(k, fe, fk, attr, dir) {
 	let e = this
 	dir = dir || 'forward'
 	fk = fk || k
 	if (!e.props[k]) {
 		let pa_fw = fe.get_prop_attrs(fk)
-		if (!pa_fw)
-			assert(false, 'forward_prop: property {0} not found in {1}', fk, fe.debug_name)
+		if (!pa_fw) {
+			let pd = fe.getPropertyDescriptor(fk)
+			if (!pd)
+				assert(false, 'forward_prop: property {0} not found in {1}', fk, fe.debug_name)
+		}
 		let pa = assign(obj(), pa_fw)
 		pa.store = true
 		if (attr != null)

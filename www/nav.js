@@ -1115,7 +1115,7 @@ G.nav_widget = function(e) {
 		} else {
 			let slot = attrs && attrs.slot
 			let prop = 'col.' + col + '.' + k
-			e.announce('prop_changed', prop, v, v0, slot)
+			e.prop_changed(prop, v, v0, slot)
 		}
 	}
 

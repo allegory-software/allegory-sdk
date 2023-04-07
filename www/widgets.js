@@ -9,12 +9,12 @@ You must load first, in order:
 
 WIDGETS
 
-	tooltip
-	toaster
+	tooltip          text target align side kind icon_visible
+	toaster          post(text, [kind], [timeout]) close_all()
 	list
 	menu
-	tabs
-	split, vsplit
+	tabs             tabs_side auto_focus selected_item_id
+	split, vsplit    fixed_side fixed_size resizeable min_size
 	action-band
 	dlg
 	toolbox
@@ -33,7 +33,12 @@ WIDGETS
 	textarea
 	button
 	select-button
-	tags-box, tags
+	textarea-input
+	text-input
+	pass-input
+	num-input
+	tags-box
+	tags-input
 	dropdown
 	autocomplete
 	calendar
@@ -47,7 +52,7 @@ WIDGETS
 
 FUNCTIONS
 
-	notify(text, ['search'|'info'|'error'], [timeout])
+	notify(text, ['search info error'], [timeout])
 
 WRITING CSS RULES
 
@@ -141,8 +146,8 @@ css_state('.focusable-items:focus-within .item.focused.invalid', '', `
 
 in props:
 	text
-	icon_visible
-	kind              default search info error warn cursor
+	icon_visible      false
+	kind              default; default search info error warn cursor
 	target -> popup_target
 	align  -> popup_align
 	side   -> popup_side
@@ -299,7 +304,7 @@ G.tooltip = component('tooltip', function(e) {
 	e.popup()
 
 	e.prop('text'        , {slot: 'lang'})
-	e.prop('icon_visible', {type: 'bool'})
+	e.prop('icon_visible', {type: 'bool', default: false})
 	e.prop('kind'        , {type: 'enum',
 			enum_values: 'default search info warn error cursor',
 			default: 'default', attr: true})
@@ -369,7 +374,7 @@ G.tooltip = component('tooltip', function(e) {
 	function reset_timeout_timer() {
 		let t = e.timeout
 		if (t == 'auto')
-			t = clamp((e.content.textContent).length / (tooltip.reading_speed / 60), 1, 10)
+			t = clamp(e.content.textContent.len / (tooltip.reading_speed / 60), 1, 10)
 		else
 			t = num(t)
 		close_timer(t)
@@ -662,7 +667,7 @@ e.make_list_drag_elements = function(can_drag_elements) {
 				items_r.h += oy
 		}
 		// move the items out of layout so they don't get clipped.
-		for (let i = items.length-1; i >= 0; i--)
+		for (let i = items.len-1; i >= 0; i--)
 			root.add(items[i])
 		e.fire('items_changed')
 
@@ -1278,7 +1283,7 @@ e.make_list_items_focusable = function(opt) {
 	e.on('cut', function(ev) {
 		if (ev.target != e) return
 		let sel_items = e.selected_items
-		if (!sel_items.length) return
+		if (!sel_items.len) return
 		copied_elements.set(sel_items)
 		for (let item of sel_items)
 			item.remove()
@@ -1289,7 +1294,7 @@ e.make_list_items_focusable = function(opt) {
 	e.on('copy', function(ev) {
 		if (ev.target != e) return
 		let sel_items = e.selected_items
-		if (!sel_items.length) return
+		if (!sel_items.len) return
 		copied_elements.set(sel_items)
 		return false
 	})
@@ -1376,7 +1381,7 @@ e.make_list_items_searchable = function() {
 						first_item_i = item_i
 				}
 			}
-			tape.push('show', item_e, show || !searchables.length)
+			tape.push('show', item_e, show || !searchables.len)
 		}
 
 		if (searching && first_item_i == null)
@@ -1445,7 +1450,7 @@ e.make_list_items_searchable = function() {
 			e.search(search_string.slice(0, -1), ev)
 			return false
 		}
-		if (!ctrl && !alt && (key.length == 1 || /[^a-zA-Z0-9]/.test(key))) {
+		if (!ctrl && !alt && (key.len == 1 || /[^a-zA-Z0-9]/.test(key))) {
 			e.search((search_string || '') + key, ev)
 			return false
 		}
@@ -1668,7 +1673,7 @@ G.menu = component('menu', function(e) {
 		table = table || tag('table', {cellspacing: 0, cellpadding: 0})
 		table.classes = 'widget menu'
 		table.attr('tabindex', 0)
-		for (let i = 0; i < items.length; i++) {
+		for (let i = 0; i < items.len; i++) {
 			let item = items[i]
 			item.menu = e
 			let tr = item.heading ? create_heading(item) : create_item(item, disabled)
@@ -1779,7 +1784,7 @@ G.menu = component('menu', function(e) {
 	// navigation
 
 	function next_valid_item(menu, down, tr) {
-		let i = menu.children.length
+		let i = menu.children.len
 		while (i--) {
 			tr = tr && (down != false ? tr.next : tr.prev)
 			tr = tr || (down != false ? menu.first : menu.last)
@@ -1886,6 +1891,22 @@ G.menu = component('menu', function(e) {
 
 /* <tabs> --------------------------------------------------------------------
 
+inner html:
+	* -> items
+content:
+	items              [e1, ...]
+state:
+	selected_item_id
+appearance:
+	tabs_side          top bottom left right
+	header_width
+behavior:
+	auto_focus         true
+dynamic tabs:
+	can_rename_items   false
+	can_add_items      false
+	can_remove_items   false
+	can_move_items     false
 
 */
 
@@ -2441,7 +2462,20 @@ G.tabs = component('tabs', 'Containers', function(e) {
 
 /* <split> & <vsplit> --------------------------------------------------------
 
-
+html elements:
+	* -> item1, item2
+content:
+	item1 item2    : e
+state:
+	fixed_size     : 200
+appearance:
+	orientation    : horizontal vertical
+behavior:
+	fixed_side     : first second
+	resizeable     : true
+	min_size       : 0
+html attrs:
+	resizeable fixed_size
 
 */
 
@@ -2929,12 +2963,16 @@ G.dlg = component('dlg', function(e) {
 
 /* <toolbox> -----------------------------------------------------------------
 
-in props:
-	px py pw ph pinned
-	content
-	text
 inner htnl:
-	-> content
+	* -> content
+content:
+	content
+	text                 title
+state:
+	px py pw ph          position and size
+	pinned               true
+html attrs:
+	pinned
 
 */
 
@@ -3252,7 +3290,7 @@ G.slides = component('slides', 'Containers', function(e) {
 /* <md> markdown tag ---------------------------------------------------------
 
 inner html:
-	markdown -> html
+	* -> html
 
 */
 
@@ -3321,7 +3359,7 @@ G.pagenav = component('pagenav', function(e) {
 		b.href = href !== false ? e.page_url(page) : null
 		b.set(text ?? page)
 		b.action = function() {
-			e.fire('page_changed', page)
+			e.fireup('page_changed', page)
 		}
 		return b
 	}
@@ -3622,11 +3660,12 @@ G.create_validator = function(e, field) {
 				continue
 			if (v == null && !rule.check_null)
 				continue
-			for (let req of rule.requires)
-				if (rules[req]._failed) {
+			for (let req_rule_name of rule.requires) {
+				if (global_rules[req_rule_name]._failed) {
 					rule._failed = true
 					continue
 				}
+			}
 			let convert = rule.convert
 			if (convert) {
 				v = convert(e, v, field)
@@ -3762,15 +3801,27 @@ add_validation_rule({
 })
 
 add_validation_rule({
-	name     : 'min_length',
-	props    : 'min_length',
+	name     : 'min_len',
+	props    : 'min_len',
 	vprops   : 'input_value',
-	applies  : (e,    field) => field.min_length,
-	validate : (e, v, field) => v.len >= field.min_length,
-	error    : (e, v, field) => S('validation_min_length_error',
+	applies  : (e,    field) => field.min_len,
+	validate : (e, v, field) => v.len >= field.min_len,
+	error    : (e, v, field) => S('validation_min_len_error',
 		'{0} too short', field_name(field)),
-	rule     : (e,    field) => S('validation_min_length_rule' ,
-		'{0} must be at least {1} characters', field_name(field), field.min_length),
+	rule     : (e,    field) => S('validation_min_len_rule' ,
+		'{0} must be at least {1} characters', field_name(field), field.min_len),
+})
+
+add_validation_rule({
+	name     : 'max_len',
+	props    : 'max_len',
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.max_len != null,
+	validate : (e, v, field) => v.len >= field.max_len,
+	error    : (e, v, field) => S('validation_max_len_error',
+		'{0} too long', field_name(field)),
+	rule     : (e,    field) => S('validation_min_len_rule' ,
+		'{0} must be at most {1} characters', field_name(field), field.max_len),
 })
 
 add_validation_rule({
@@ -3849,7 +3900,7 @@ add_validation_rule({
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.lookup_nav,
 	validate : (e, v, field) => field.lookup_nav.ready
-			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0,
+			&& field.lookup_nav.lookup(field.lookup_cols, [v]).len > 0,
 	error    : (e, v, field) => S('validation_lookup_error',
 		'{0} unknown value {1}', field_name(field), field_value(field, v)),
 	rule     : (e,    field) => S('validation_lookup_rule',
@@ -3933,7 +3984,7 @@ attr:      prop:
 
 */
 
-css('.errors', 'v p label')
+css('.errors', 'v flex p label')
 css('.errors-line', 'h p-05 gap-x')
 css('.errors-icon', 'w1 t-c')
 css('.errors-message', '')
@@ -3941,7 +3992,7 @@ css('.errors-checked.errors-failed', 'fg-error bg-error')
 css('.errors-not-checked', 'dim')
 css('.errors-failed .errors-icon::before', 'fa fa-times')
 css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
-css('.errors-single', 'h-m fg-error')
+css('.errors-single', 'h-m flex fg-error')
 css('.errors-single::before', 'p-r-2 fa fa-triangle-exclamation')
 
 G.errors = component('errors', 'Input', function(e) {
@@ -4094,9 +4145,9 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 		function update_et() {
 			e.update({errors_tooltip: true})
 		}
-		ett.on('focus', update_et)
-		ett.on('blur' , update_et)
-		ett.on('hover', update_et)
+		ett.on('focusin' , update_et)
+		ett.on('focusout', update_et)
+		ett.on('hover'   , update_et)
 
 		// hide the tooltip while the target animates (slider thumb does that).
 		ett.on('transitionstart', update_et)
@@ -4168,6 +4219,7 @@ stubs:
 
 e.make_input_widget = function(opt) {
 
+	opt = opt || empty_obj
 	let e = this
 	let vt = opt.value_type
 
@@ -5109,7 +5161,7 @@ G.input = component('input', 'Input', function(e) {
 
 */
 
-css('.textarea', 'S h m0 b p bg-input', `
+css('.textarea', 'S shrinks h flex m0 b p bg-input', `
 	resize: none;
 	overflow-y: overlay; /* Chrome only */
 	overflow-x: overlay; /* Chrome only */
@@ -5259,7 +5311,7 @@ G.button = component('button', 'Input', function(e) {
 	e.set_text = function(s) {
 		s = e.format_text(s)
 		e.text_box.set(s, 'pre-line')
-		e.class('text-empty', !s || isarray(s) && !s.length)
+		e.class('text-empty', !s || isarray(s) && !s.len)
 		if (e.link)
 			e.link.set(TC(s))
 	}
@@ -5536,6 +5588,55 @@ G.vselect_button = component('vselect-button', function(e) {
 
 })
 
+/* <textarea-input> ----------------------------------------------------------
+
+This is a validated textarea. We wrap a <textarea> in an element because we
+can't add elements to <textarea> directly and we need to add the errors popup.
+We do the same with <text-input> and all other inputs below.
+
+inherits:
+	input_widget
+update options:
+	select_all
+
+*/
+
+css('.textarea-input', '')
+css('.textarea-input-textarea', '')
+
+G.textarea_input = component('textarea-input', 'Input', function(e) {
+
+	e.clear()
+	e.class('textarea-input')
+	e.textarea = textarea({classes: 'textarea-input-textarea'})
+	e.add(e.textarea)
+
+	e.forward_prop('placeholder', e.textarea)
+
+	e.make_input_widget({
+		errors_tooltip_target: e.textarea,
+	})
+
+	e.make_focusable(e.textarea)
+
+	e.on_update(function(opt) {
+		if (opt.select_all)
+			e.input.select_range(0, -1)
+	})
+
+	// controller
+
+	e.do_after('set_input_value', function(v, v0, ev) {
+		if (!(ev && ev.target == e.input))
+			e.textarea.value = v
+	})
+
+	e.textarea.on('input', function(ev) {
+		e.set_prop('input_value', this.value, ev)
+	})
+
+})
+
 /* <text-input> --------------------------------------------------------------
 
 inherits:
@@ -5565,9 +5666,7 @@ G.text_input = component('text-input', 'Input', function(e) {
 	e.input = input({classes: 'text-input-input'})
 	e.input_group.add(e.input)
 
-	e.prop('placeholder', {store: false})
-	e.get_placeholder = () => e.input.placeholder
-	e.set_placeholder = function(s) { e.input.placeholder = s }
+	e.forward_prop('placeholder', e.input)
 
 	e.make_focusable(e.input)
 	e.input_group.make_focus_ring(e.input)
@@ -5596,7 +5695,7 @@ inherits:
 	input_widget
 config:
 	conditions
-	min_length
+	min_len
 	min_score
 update options:
 	select_all
@@ -5634,7 +5733,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 		errors_tooltip_target: e.input_group,
 	})
 
-	e.prop('min_length', {type: 'number', default: 6})
+	e.prop('min_len', {type: 'number', default: 6})
 	e.prop('min_score', {type: 'number', default: 3}) // 0..4, 3+ is safe.
 	e.prop('conditions', {type: 'words', convert: words,
 		// NOTE: remove `min-score` if you don't want to load the gigantic library,
@@ -5669,9 +5768,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 	})
 	e.input_group.add(e.input, e.eye_button)
 
-	e.prop('placeholder', {store: false})
-	e.get_placeholder = () => e.input.placeholder
-	e.set_placeholder = function(s) { e.input.placeholder = s }
+	e.forward_prop('placeholder', e.input)
 
 	e.make_focusable(e.input)
 	e.input_group.make_focus_ring(e.input)
@@ -6643,7 +6740,7 @@ function calendar_widget(e, mode) {
 		html_value = []
 		for (let range of e.$('range')) {
 			let r = convert_range(range.textContent)
-			if (r.length == 2) {
+			if (r.len == 2) {
 				r.color       = range.attr('color')
 				r.focusable   = range.bool_attr('focusable')
 				r.readonly    = range.bool_attr('readonly')
@@ -6718,12 +6815,12 @@ function calendar_widget(e, mode) {
 	function ranges_changed(ev) {
 		let ranges0 = ranges // TODO: save ranges before modifying so we get correct old value?
 		if (mode == 'day') {
-			announce_prop_changed(e, 'value', ranges[0][0], ranges0[0][0])
+			e.prop_changed('value', ranges[0][0], ranges0[0][0])
 		} else if (mode == 'range') {
-			announce_prop_changed(e, 'value1', ranges[0][0], ranges0[0][0])
-			announce_prop_changed(e, 'value2', ranges[0][1], ranges0[0][1])
+			e.prop_changed('value1', ranges[0][0], ranges0[0][0])
+			e.prop_changed('value2', ranges[0][1], ranges0[0][1])
 		} else if (mode == 'ranges') {
-			announce_prop_changed(e, 'value', ranges, ranges0)
+			e.prop_changed('value', ranges, ranges0)
 		}
 		e.fire('input', ev || {target: e})
 	}
@@ -6762,10 +6859,10 @@ function calendar_widget(e, mode) {
 	}
 
 	e.focus_next_range = function(backwards) {
-		if (!focus_ranges.length)
+		if (!focus_ranges.len)
 			return false
 		let step = backwards ? -1 : 1
-		let max_i = focus_ranges.length - 1
+		let max_i = focus_ranges.len - 1
 		let i = focused_range ? focus_ranges.indexOf(focused_range) + step : backwards ? max_i : 0
 		while (backwards ? i >= 0 : i <= max_i) {
 			let r = focus_ranges[i]
@@ -8115,9 +8212,7 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.inputs.push(input)
 		e.input_group.add(input)
 
-		e.prop('placeholder'+K, {store: false})
-		e['get_placeholder'+K] = () => input.placeholder
-		e['set_placeholder'+K] = function(s) { input.placeholder = s }
+		e.forward_prop('placeholder'+K, input, 'placeholder')
 
 	}
 
@@ -8525,7 +8620,7 @@ G.html_input = component('html-input', 'Input', function(e) {
 			e.editing = true
 	})
 
-	return html_val.length ? {val: html_val} : null
+	return html_val.len ? {val: html_val} : null
 
 })
 

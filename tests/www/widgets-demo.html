@@ -836,6 +836,22 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 
 <!--------------------------------------------------------------------------->
 
+<xmp id=textarea-input_demo>
+<form>
+<div class="small">
+	<textarea-input value="abc"></textarea-input>
+	<button>OK</button>
+</div>
+<div>
+	<textarea-input required placeholder="Put stuff here" id=my_input></textarea-input>
+	<errors for=my_input></errors>
+	<button>Submit</button>
+</div>
+</form>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
 <xmp id=text-input_demo>
 <div class="xsmall  "><text-input value="abc"></text-input><button>OK</button></div>
 <div class="small   "><text-input value="abc"></text-input><button>OK</button></div>
@@ -860,9 +876,9 @@ my_input2.validator.add_rule({
 <div class="xsmall  "><pass-input value="abc"></pass-input><button>OK</button></div>
 <div class="small   "><pass-input value="abc"></pass-input><button>OK</button></div>
 <div class="smaller "><pass-input required></pass-input><button>OK</button></div>
-<div class="normal  "><pass-input min-length=5 placeholder="Password" id=my_pass></pass-input><button>OK</button></div>
+<div class="normal  "><pass-input min-lenh=5 placeholder="Password" id=my_pass></pass-input><button>OK</button></div>
 <errors for=my_pass show-all></errors>
-<div class="large   "><pass-input name=password value="abc" min-length=5 required conditions="min-score" id=my_pass2></pass-input><button>OK</button></div>
+<div class="large   "><pass-input name=password value="abc" min-len=5 required conditions="min-score" id=my_pass2></pass-input><button>OK</button></div>
 <errors for=my_pass2></errors>
 <p>Rules:
 <errors for=my_pass2 show-all></errors>
