@@ -3941,6 +3941,8 @@ css('.errors-checked.errors-failed', 'fg-error bg-error')
 css('.errors-not-checked', 'dim')
 css('.errors-failed .errors-icon::before', 'fa fa-times')
 css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
+css('.errors-single', 'h-m fg-error')
+css('.errors-single::before', 'p fa fa-triangle-exclamation')
 
 G.errors = component('errors', 'Input', function(e) {
 
@@ -3972,6 +3974,7 @@ G.errors = component('errors', 'Input', function(e) {
 			// don't clear the error, just hide it so that box w and h stay stable.
 			e.class('visible'  , !!ffr)
 			e.class('invisible', !ffr)
+			e.class('errors-single')
 		}
 	})
 
