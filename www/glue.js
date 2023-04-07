@@ -86,7 +86,9 @@ STRINGS
 	s.lower_ai_ci()
 	s.find_ai_ci(s)
 	s.words() -> a
-	words(s) -> a
+	words(s) -> a|null
+	e.wordset() -> {word1: true, ...}
+	wordset(s) -> {word1: true, ...}|null
 	catany(sep, ...); sep.catany(...)
 	catall(...)
 	s.captures(re) -> [capture1, ...]
@@ -109,6 +111,7 @@ ARRAYS
 	a.binsearch(v, cmp, i1, i2)
 	a.each(f)
 	a.tokeys([v], [cons]) -> t
+	tokeys(a, [v], [cons]) -> t|null
 	a.uniq_sorted()
 	a.remove_duplicates() -> a
 
@@ -581,10 +584,12 @@ method(String, 'words', function() {
 	if (!s) return []
 	return s.split(/\s+/)
 })
+G.words = s => isstr(s) ? s.words() : s
 
-G.words = function(s) {
-	return isstr(s) ? s.words() : s
-}
+method(String, 'wordset', function() {
+	return this.words().tokeys()
+})
+G.wordset = s => isstr(s) ? s.wordset() : s
 
 method(String, 'captures', function(re) {
 	let m = this.match(re)
@@ -716,6 +721,7 @@ method(Array, 'tokeys', function(v, cons) {
 		t[k] = v
 	return t
 })
+G.tokeys = (a, v, cons) => isarray(a) ? a.tokeys(v, cons) : a
 
 method(Array, 'uniq_sorted', function() {
 	return this.remove_values(function(v, i, a) {

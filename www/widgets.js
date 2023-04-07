@@ -83,13 +83,11 @@ let G = window
 
 let e = Element.prototype
 
-css('.x-container', 'g-h shrinks clip') /* grid because grid-in-flex is buggy */
-
 // container with `display: contents`. useful to group together
 // an invisible widget like a nav with a visible one.
 // Don't try to group together visible elements with this! CSS will see
-// your <x-ct> tag in the middle, but the layout system won't!
-css('.x-ct', 'skip')
+// your <skip> tag in the middle, but the layout system won't!
+css('skip', 'skip')
 
 /* .focusable-items ----------------------------------------------------------
 
@@ -2026,7 +2024,7 @@ G.tabs = component('tabs', 'Containers', function(e) {
 	e.tabs_box.make_list_items_movable(false)
 	e.header = tag('tabs-header', 0,
 		e.tabs_box, e.selection_bar, e.fixed_header, e.add_button)
-	e.content = tag('tabs-content', {class: 'x-container'})
+	e.content = tag('tabs-content', {class: 'frame'})
 	e.add(e.header, e.content)
 	e.add_button.on('click', add_button_click)
 
@@ -2539,8 +2537,8 @@ G.split = component('split', 'Containers', function(e) {
 	let html_item2 = e.at[1]
 	e.clear()
 
-	e.pane1 = tag('split-pane', {class: 'x-container'})
-	e.pane2 = tag('split-pane', {class: 'x-container'})
+	e.pane1 = tag('split-pane', {class: 'frame'})
+	e.pane2 = tag('split-pane', {class: 'frame'})
 	e.sizer = tag('split-sizer')
 	e.add(e.pane1, e.sizer, e.pane2)
 
@@ -3035,7 +3033,7 @@ G.toolbox = component('toolbox', function(e) {
 	e.xbutton        = div({class: 'toolbox-btn toolbox-btn-close'})
 	e.title_box      = div({class: 'toolbox-title'})
 	e.titlebar       = div({class: 'toolbox-titlebar'}, e.title_box, e.pin_button, e.xbutton)
-	e.content_box    = div({class: 'toolbox-content x-container'})
+	e.content_box    = div({class: 'toolbox-content frame'})
 	e.resize_overlay = div({class: 'toolbox-resize-overlay'})
 	e.add(e.titlebar, e.content_box, e.resize_overlay)
 
@@ -3185,7 +3183,7 @@ out props:
 
 css('.slides', 'g-h')
 css('.slide', 'x1 y1')
-css('.slides > .x-ct > .', 'x1 y1')
+css('.slides > .skip > .', 'x1 y1')
 
 css_state('.slide'        , 'invisible op0 click-through     ease-05s')
 css_state('.slide-current', 'visible   op1 click-through-off ease-05s')
@@ -3561,8 +3559,8 @@ let global_rule_props = obj()
 
 function fix_rule(rule) {
 	rule.applies = rule.applies || return_true
-	rule. props = isstr(rule. props) && rule. props.words().tokeys() || null
-	rule.vprops = isstr(rule.vprops) && rule.vprops.words().tokeys() || null
+	rule. props = wordset(rule. props)
+	rule.vprops = wordset(rule.vprops)
 	rule.requires = words(rule.requires) || empty_array
 }
 
@@ -3642,14 +3640,13 @@ G.create_validator = function(e, field) {
 		rules_invalid = false
 	}
 
-	validator.validate = function(v, ann) {
+	validator.validate = function(v, announce_results) {
+		announce_results = announce_results != false
 		if (rules_invalid)
 			update_rules()
 		v = repl(v, '', null)
 		let convert_failed
 		for (let rule of rules) {
-			rule._error = rule.error(e, v, field)
-			rule._rule  = rule.rule (e, field)
 			if (convert_failed) {
 				rule._failed = true
 				continue // if convert failed, subsequent rules cannot run!
@@ -3684,8 +3681,11 @@ G.create_validator = function(e, field) {
 			let result = attr(results, i)
 			result.checked = rule._checked || false
 			result.failed  = rule._failed || false
-			result.error   = rule._error
-			result.rule    = rule._rule
+			result.rule    = rule
+			if (announce_results) {
+				result.error     = rule.error(e, v, field)
+				result.rule_text = rule.rule (e, field)
+			}
 			if (rule._failed && !this.failed) {
 				this.failed = true
 				this.first_failed_result = result
@@ -3693,11 +3693,9 @@ G.create_validator = function(e, field) {
 			// clean up scratch pad.
 			rule._checked = null
 			rule._failed  = null
-			rule._error   = null
-			rule._rule    = null
 		}
 		this.value = this.failed ? null : repl(v, undefined, null)
-		if (ann != false)
+		if (announce_results)
 			announce('validate', e, this, field)
 		this.triggered = true
 		return !this.failed
@@ -3707,7 +3705,7 @@ G.create_validator = function(e, field) {
 }
 
 let field_name = function(field) {
-	return field.text || field.name || S('value', 'Value')
+	return (field.text || field.name || S('value', 'value')).display_name()
 }
 
 // NOTE: this must work with values that are unconverted and invalid!
@@ -3872,15 +3870,21 @@ add_validation_rule({
 		'{0} must contain at least one symbol', field_name(field)),
 })
 
-let scores = [
-	S('password_score_0', 'extremely weak'),
-	S('password_score_1', 'very weak'),
-	S('password_score_2', 'medium-strong'),
-	S('password_score_3', 'strong'),
-	S('password_score_4', 'very strong'),
+let pass_score_errors = [
+	S('password_score_error_0', 'extremely easy to guess'),
+	S('password_score_error_1', 'very easy to guess'),
+	S('password_score_error_2', 'easy to guess'),
+	S('password_score_error_3', 'not hard enough to guess'),
+]
+let pass_score_rules = [
+	S('password_score_rule_0', 'extremely easy to guess'),
+	S('password_score_rule_1', 'very easy to guess'),
+	S('password_score_rule_2', 'easy to guess'),
+	S('password_score_rule_3', 'hard to guess'),
+	S('password_score_rule_4', 'impossible to guess'),
 ]
 add_validation_rule({
-	name: 'min_score',
+	name     : 'min_score',
 	props    : 'conditions min_score',
 	vprops   : 'input_value',
 	applies  : (e,    field) => e.min_score != null
@@ -3888,10 +3892,9 @@ add_validation_rule({
 	validate : (e, v, field) => (field.score ?? 0) >= field.min_score,
 	error    : (e, v, field) => S('validation_min_score_error',
 		'{0} is {1}', field_name(field),
-			field.score != null && scores[field.score]
-			|| S('password_score_unknwon', 'probably weak')),
+			pass_score_errors[field.score] || S('password_score_unknwon', '... wait...')),
 	rule     : (e,    field) => S('validation_min_score_rule' ,
-		'{0} must be {1}', field_name(field), scores[e.min_score]),
+		'{0} must be {1}', field_name(field), pass_score_rules[e.min_score]),
 })
 
 add_validation_rule({
@@ -3990,8 +3993,9 @@ css('.errors-icon', 'w1 t-c')
 css('.errors-message', '')
 css('.errors-checked.errors-failed', 'fg-error bg-error')
 css('.errors-not-checked', 'dim')
-css('.errors-failed .errors-icon::before', 'fa fa-times')
-css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
+css('.errors-icon', 'fa')
+css('.errors-failed .errors-icon::before', 'fa-times')
+css('.errors-checked.errors-passed .errors-icon::before', 'fa-check')
 css('.errors-single', 'h-m flex fg-error')
 css('.errors-single::before', 'p-r-2 fa fa-triangle-exclamation')
 
@@ -4001,51 +4005,53 @@ G.errors = component('errors', 'Input', function(e) {
 
 	e.prop('target'    , {type: 'element'})
 	e.prop('target_id' , {type: 'id', attr: 'for'})
-	e.prop('show_all'  , {type: 'bool', attr: 'show-all'})
+	e.prop('type')
 
 	e.on_update(function(opt) {
 		if (!opt.validator)
 			return
-		if (e.show_all) {
+		if (e.type == 'rules') {
 			e.clear()
 			for (let result of opt.validator.results)
-				if (result.rule)
-					e.add(div({class: catany(' ',
-								'errors-line',
-								(result.checked ? 'errors-checked' : 'errors-not-checked'),
-								(result.failed ? 'errors-failed' : 'errors-passed')
-							)},
-							div({class: 'errors-icon'}),
-							div({class: 'errors-message'}, result.rule)
-						))
+				e.add(div({class: catany(' ',
+							'errors-line',
+							(result.checked ? 'errors-checked' : 'errors-not-checked'),
+							(result.failed ? 'errors-failed' : 'errors-passed')
+						)},
+						div({class: 'errors-icon'}),
+						div({class: 'errors-message'}, result.rule_text)
+					))
 		} else {
-			let ffr = opt.validator.first_failed_result
-			if (ffr)
-				e.set(ffr.error)
-			// don't clear the error, just hide it so that box w and h stay stable.
-			e.class('visible'  , !!ffr)
-			e.class('invisible', !ffr)
+			let res = opt.validator.first_failed_result
+			if (res)
+				e.set(res.error)
+			// don't clear the error, just hide it so that tooltip's dimensions
+			// remain stable while it fades out.
+			e.class('visible'  , !!res)
+			e.class('invisible', !res)
 			e.class('errors-single')
 		}
 	})
 
-	e.on_bind(function(on) {
-		if (on) {
-			let te = e.target || window[e.target_id]
-			if (te && te.validator) {
-				e.update({validator: te.validator})
-				// because the resize observer event on the errors popup comes in too slow.
-				e.fireup('content_resize')
-			}
-		}
-	})
-
-	e.listen('validate', function(te, validator) {
-		if (!(te == e.target || (e.target_id && te.id == e.target_id)))
-			return
-		e.update({validator: validator})
+	function target_changed() {
+		let te = e.target || window[e.target_id]
+		te = te && te.validator && te
+		if (!te) return
+		te.has_errors_widget = !e.target
+		e.update({validator: te.validator})
 		// because the resize observer event on the errors popup comes in too slow.
 		e.fireup('content_resize')
+	}
+	e.set_target    = target_changed
+	e.set_target_id = target_changed
+	e.on_bind(function(on) {
+		if (on) target_changed()
+	})
+
+	e.listen('validate', function(te1, validator) {
+		let te = e.target || window[e.target_id]
+		if (te == te1)
+			target_changed()
 	})
 
 })
@@ -4122,7 +4128,8 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 		e.on_update(function(opt) {
 
 			let show_tooltip = (opt.errors_tooltip || opt.validation)
-				&& (e.invalid && (e.has_focus_visible || e.hovered))
+				&& e.invalid && !e.has_errors_widget
+				&& (e.has_focus_visible || e.hovered)
 				&& !e.getAnimations().length
 
 			let et = e.errors_tooltip
@@ -5161,7 +5168,8 @@ G.input = component('input', 'Input', function(e) {
 
 */
 
-css('.textarea', 'S shrinks h flex m0 b p bg-input', `
+css('.textarea', 'S shrinks h flex m0 b p bg-input w-input', `
+	font: inherit;
 	resize: none;
 	overflow-y: overlay; /* Chrome only */
 	overflow-x: overlay; /* Chrome only */
@@ -5169,7 +5177,7 @@ css('.textarea', 'S shrinks h flex m0 b p bg-input', `
 
 G.textarea = component('textarea', 'Input', function(e) {
 
-	e.class('textarea')
+	e.class('textarea unframe')
 	e.make_disablable()
 	e.make_focusable()
 
@@ -5601,7 +5609,9 @@ update options:
 
 */
 
-css('.textarea-input', '')
+// NOTE: we use 'skip' on the root element so that it doesn't have a box
+// that errors popup would get hover event over.
+css('.textarea-input', 'skip')
 css('.textarea-input-textarea', '')
 
 G.textarea_input = component('textarea-input', 'Input', function(e) {
@@ -5735,14 +5745,16 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 
 	e.prop('min_len', {type: 'number', default: 6})
 	e.prop('min_score', {type: 'number', default: 3}) // 0..4, 3+ is safe.
-	e.prop('conditions', {type: 'words', convert: words,
+	e.prop('conditions', {type: 'array', element_type: 'string', convert: words,
 		// NOTE: remove `min-score` if you don't want to load the gigantic library,
 		// and replace with 'lower upper digit symbol', which is reasonable.
 		default: 'min-score',
 	})
 
 	function update_score() {
-		e.score = G.zxcvbn ? zxcvbn(e.input_value).score : null
+		e.score = (G.zxcvbn && e.input_value != null) ?
+			zxcvbn(e.input_value).score : null
+		e.announce('pass_score_changed', e.score)
 	}
 
 	let zxcvbn_loaded
@@ -5756,6 +5768,9 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 			load_zxcvbn()
 		}
 	}
+	e.on_init(function() {
+		e.set_conditions(e.conditions)
+	})
 
 	e.input = input({classes: 'pass-input-input', type: 'password'})
 	e.eye_button = button({
@@ -5788,7 +5803,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 	})
 
 	e.input.on('input', function(ev) {
-		e.set_prop('input_value', this.value, ev)
+		e.set_prop('input_value', repl(this.value, '', null), ev)
 	})
 
 	e.eye_button.on('pointerdown', function(ev) {
@@ -5800,6 +5815,38 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 			e.input.setSelectionRange(i, j)
 			return false
 		})
+	})
+
+})
+
+css('.pass-score', 'v w-input')
+css('.pass-score-bar', 'm-y-05 ro', `
+	height: 4px;
+	background: var(--color);
+`)
+css('.pass-score[score="0"]', '', `--color: var(--bg-error);`)
+css('.pass-score[score="1"]', '', `--color: var(--bg-error);`)
+css('.pass-score[score="2"]', '', `--color: var(--bg-warn);`)
+css('.pass-score[score="3"]', '', `--color: green;`)
+css('.pass-score[score="4"]', '', `--color: green;`)
+css('.pass-score-label', 'self-v-r smaller', `color: var(--color);`)
+css('.pass-score-label::before', 'zwsp')
+
+G.pass_score = component('pass-score', function(e) {
+
+	e.class('pass-score')
+	e.clear()
+	e.bar   = div({class: 'pass-score-bar'})
+	e.label = div({class: 'pass-score-label'})
+	e.add(e.bar, e.label)
+
+	e.prop('for_id', {type: 'id', attr: 'for'})
+
+	e.listen('pass_score_changed', function(pass_input, score) {
+		if (pass_input.id != e.for_id) return
+		e.attr('score', score)
+		e.bar.w = score != null ? (((1 + score) / 5) * 100) + '%' : 0
+		e.label.set(score != null ? pass_score_rules[score] : '')
 	})
 
 })
@@ -6190,10 +6237,10 @@ G.tags_input = component('tags-input', function(e) {
 	e.make_focusable(e.tag_input)
 	e.input_group.make_focus_ring(e.tag_input)
 
-	e.prop('as_words', {type: 'bool'})
+	e.prop('format', {type: 'enum', enum_values: 'array words', default: 'array'})
 
 	e.to_text = tags => tags.join(', ')
-	e.to_form = tags => e.as_words ? tags.join(' ') : json(tags)
+	e.to_form = tags => e.format == 'words' ? tags.join(' ') : json(tags)
 
 	e.is_tags = true
 	e.make_input_widget({
@@ -6262,7 +6309,7 @@ G.tags_input = component('tags-input', function(e) {
 				return false
 			this.value = ''
 			let t1 = e.tags_box.tags.slice()
-			for (let tag of e.as_words ? s.words() : [s]) {
+			for (let tag of e.format == 'words' ? s.words() : [s]) {
 				t1.push(tag)
 				e.tags_box.focus_tag(tag) // scroll tag into view
 			}
@@ -7917,7 +7964,7 @@ to have one constructor instead of four. It's also simpler than extracting
 the common bits into a mixin (less wiring, less naming, less code-chasing).
 
 config:
-	as_text                format form data as SQL text instead of timestamp
+	format=sql               format form data as SQL text instead of timestamp
 date-input, time-input, datetime-input state:
 	value input_value
 date-range-input state:
@@ -7970,7 +8017,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.input_group = div({class: 'date-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
 
-	e.prop('as_text', {type: 'bool', attr: 'as-text'})
+	e.prop('format', {type: 'enum', enum_values: 'sql time', default: 'time'})
 
 	let to_text, to_form
 
@@ -7985,13 +8032,13 @@ function date_input_widget(e, has_date, has_time, range) {
 				e.picker = datetime_picker()
 				e.calendar = e.picker.calendar
 				to_text = t => t.date(null, true, e.with_seconds, e.with_fractions)
-				to_form = t => e.as_text ?
+				to_form = t => e.format == 'sql' ?
 					t.date('SQL', true, e.with_seconds, e.with_fractions) : t
 			} else {
 				e.picker = calendar()
 				e.calendar = e.picker
 				to_text = t => t.date()
-				to_form = t => e.as_text ? t.date('SQL') : t
+				to_form = t => e.format == 'sql' ? t.date('SQL') : t
 				e.with_time = true
 			}
 			e.is_time = true
@@ -7999,7 +8046,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			e.picker = time_picker()
 			e.is_timeofday = true
 			to_text = t => t.timeofday(e.with_seconds, e.with_fractions)
-			to_form = t => e.as_text
+			to_form = t => e.format == 'sql'
 				? t.timeofday(e.with_seconds, e.with_fractions)
 				: t
 		}

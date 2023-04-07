@@ -9,14 +9,15 @@ A good widget needs to satisfy many things:
 * work in different types of containers: inline, block, flex, grid.
 * be instantiable from both html and JavaScript with all the features.
 * allow any property changes while the widget is live.
-  * this alone increases complexity substantially at least for DOM-based widgets.
+  * this alone increases complexity substantially, at least for DOM-based
+    widgets, less so for canvas-drawn widgets.
 * not leak event listeners when detached from DOM.
 * maintain hidden input elements to work in forms.
-* work at any parent font size.
+* work at any inherited font size.
 * use only theme colors.
 * update itself when resized.
 * fire events on state changes.
-* be stylable by having semantic css classes on its inner parts.
+* be stylable with css classes describing its inner parts.
 * have stylable state by setting html attributes and/or css classes for state.
 * have reasonable min and max dimensions even if its a stretchable widget.
 * be focusable (if interactive), and have good keyboard interaction.
@@ -95,19 +96,20 @@ common case is when two properties change the same thing in a widget,
 so the property that is set last wins.
 
 Another case is when setting a property results in changing another property.
-Properties should really only be changed by the widget as the result of user
-interaction.
+A widget should only change its own properties as the result of user interaction.
 
 An easy way to avoid falling into all of those traps is to do all the updating
 of the widget in one place, namely in an update callback. The downside to that
-is that the callback is asynchronous (it's called on the next frame), so you
+is that the callback is asynchronous (it's called in the next frame), so you
 don't have immediate access to the updated DOM of the widget after you change
 a property. This forces a conceptual separation between what's considered the
 "model" of the widget (which should be updated immediately) and what's
 considered the "view" (which is updated in the next frame). Of course you
 can always just make your own update function that you call directly inside
 property setters to avoid the async issue and still solve the property
-dependency issue.
+dependency issue. This is how we do validation in our input widgets: the
+validated value is recalculated immediately every time any of the props
+involved in the validation change, not in the next frame.
 
 Another problem with updating everything in one place is that now you have to
 figure out how to do the minimum amount of changes in the DOM given the new
@@ -127,8 +129,8 @@ in which changing properties in any order will get to the same result.
 The canvas API is great because well, it's an API, and APIs are always better
 than declarative abstractions (contrary to current wisdom) simply because
 nothing beats the level of control and composability of a programming language.
-And you don't have to update the DOM so updating the view becomes simpler
-and more robust.
+And there's no DOM to update so updating the view becomes simpler and more
+robust. Basically immediate-mode-style GUI at the widget level.
 
 Canvas is not all good though. Drawing an entire widget procedurally on a canvas
 is great if you need to make a grid widget that scrolls a million records
@@ -136,10 +138,10 @@ at 60 fps, in fact it's the only way to do it. But using it for simple things
 is overkill: it's not integrated with the layout system or CSS, so you need
 to code for resizing, styling, scrolling, animation, hit-testing, pixel snapping,
 hi-dpi, etc. (which you might actually enjoy more than putting divs together
-and you have the ultimate control over every pixel but it's also more work).
+and you have the ultimate control over every pixel but it's work you have to do).
 
 In any case, if you do decide on a canvas-drawn widget, it's best to use
-`resizeable_canvas()` because:
+`resizeable_canvas_container()` because:
 
 * the canvas needs to be resized and repainted when the widget is resized.
   * resize in multiples of 100-200px or it'll be too slow when dragging a split-view.

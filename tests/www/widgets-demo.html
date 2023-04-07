@@ -639,7 +639,7 @@ toggle_collapsed = function() {
 <form id=my_form class="g-m g-2col gap-x">
 	<check id=my_check1 name=check1 checked-value=yes checked></check><label for=my_check1>Check me baby</label>
 	<check id=my_check2 name=check2 checked-value=yes value=wrong required></check><label for=my_check2>Check me baby</label>
-	<d></d><errors for=my_check2 show-all></errors>
+	<d></d><errors for=my_check2 type=rules></errors>
 	<check id=my_check3 name=check3 checked-value=yes unchecked-value=no></check><label for=my_check3>Check me baby</label>
 	<d></d><button>Submit</button>
 </form>
@@ -837,11 +837,7 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 <!--------------------------------------------------------------------------->
 
 <xmp id=textarea-input_demo>
-<form>
-<div class="small">
-	<textarea-input value="abc"></textarea-input>
-	<button>OK</button>
-</div>
+<textarea-input class=small value="abc"></textarea-input>
 <div>
 	<textarea-input required placeholder="Put stuff here" id=my_input></textarea-input>
 	<errors for=my_input></errors>
@@ -859,7 +855,7 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 <div class="normal  "><text-input required placeholder="Put stuff here" id=my_input></text-input><button>OK</button></div>
 <errors for=my_input></errors>
 <div class="large   "><text-input value="abc" required id=my_input2></text-input><button>OK</button></div>
-<errors for=my_input2 show-all></errors>
+<errors for=my_input2 type=rules></errors>
 <script run>
 my_input2.validator.add_rule({
 	vprops   : 'input_value',
@@ -876,12 +872,24 @@ my_input2.validator.add_rule({
 <div class="xsmall  "><pass-input value="abc"></pass-input><button>OK</button></div>
 <div class="small   "><pass-input value="abc"></pass-input><button>OK</button></div>
 <div class="smaller "><pass-input required></pass-input><button>OK</button></div>
-<div class="normal  "><pass-input min-lenh=5 placeholder="Password" id=my_pass></pass-input><button>OK</button></div>
-<errors for=my_pass show-all></errors>
-<div class="large   "><pass-input name=password value="abc" min-len=5 required conditions="min-score" id=my_pass2></pass-input><button>OK</button></div>
+<div class="normal  "><pass-input
+		min-len=2 min-score=4 placeholder="Password" id=my_pass
+	></pass-input><button>OK</button></div>
+<errors for=my_pass type=rules></errors>
+<div class="large v">
+	<pass-input
+		name=password
+		value="abc!125"
+		min-len=0
+		required
+		conditions="min-score"
+		id=my_pass2
+	></pass-input>
+	<pass-score for=my_pass2></pass-score>
+</div>
 <errors for=my_pass2></errors>
 <p>Rules:
-<errors for=my_pass2 show-all></errors>
+<errors for=my_pass2 type=rules></errors>
 </p>
 </xmp>
 
@@ -912,7 +920,7 @@ my_input2.validator.add_rule({
 <d class="ro-collapse-h h-m flex-nowrap shrinks smaller"><tags-input class="S" value="apples bananas mangos"></tags-input><button>OK</button></d>
 <d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags-input class="S" value="Apples Bananas Mangos what do you do when there are too many tags"></tags-input><button>OK</button></d>
 <d class="ro-collapse-h h-m flex-nowrap shrinks normal "><tags-input class="S" nowrap value="what do you do when there are too many tags"></tags-input><button>OK</button></d>
-<d class="ro-collapse-h h-m flex-nowrap shrinks large  "><tags-input class="S" value="apples bananas mangos" valid-tags="apples bananas mangos" name=t1 as-words fruits-only></tags-input><button>OK</button></d>
+<d class="ro-collapse-h h-m flex-nowrap shrinks large  "><tags-input class="S" value="apples bananas mangos" valid-tags="apples bananas mangos" name=t1 format=words fruits-only></tags-input><button>OK</button></d>
 <p><button>Submit</button></p>
 </form>
 <script run>
@@ -1074,7 +1082,7 @@ for (let e of $('list')) {
 <div><time-input       name=d4 with-seconds                input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
 <div><time-input       name=d5 with-seconds with-fractions input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
 <div><datetime-input   name=d6 with-seconds with-fractions input_value="1900-1-1 0:0:0.1" placeholder="Meet at"></datetime-input></div>
-<div><datetime-input   name=d7 with-seconds with-fractions input_value="2000-1-1 0:0:0.1" placeholder="Meet at" as-text></datetime-input></div>
+<div><datetime-input   name=d7 with-seconds with-fractions input_value="2000-1-1 0:0:0.1" placeholder="Meet at" format=sql></datetime-input></div>
 <div><date-range-input name1=d8_1 name2=d8_2 value1="2022-1-18" value2="2022-2-3"></date-range-input></div>
 <button>Submit</button>
 </form>
@@ -1273,13 +1281,15 @@ main.add(g)
 		This here is just a simple input.<br>
 		Click on the label to focus it.
 	</info><input name=input1 id=input1></input>
+	<d></d><text-input required placeholder="Just text"></text-input>
+	<d></d><textarea-input required placeholder="Put here&#10;some text"></textarea-input>
 	<d></d><d class="h b-collapse-h ro-collapse-h w-input">
 			<pass-input name=pass1 value="" placeholder="Password"></pass-input><button>OK</button></div>
 		</d>
 	<d></d><num-input name=n1 value=-1.54 decimals=2 buttons=up-down></num-input>
 	<d></d><d class=v>
 		<num-input id=num1 name=n2 value=-5 min=1 max=10 buttons=plus-minus></num-input>
-		<errors for=num1 show-all></errors>
+		<errors for=num1 type=rules></errors>
 	</d>
 	<d></d>
 	<style>

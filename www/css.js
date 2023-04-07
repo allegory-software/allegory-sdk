@@ -770,10 +770,15 @@ css('.b-invisible', '', ` border-color: #00000000; `)
 css('.b-fg       ', '', ` border-color: var(--fg); `)
 css('.b-hover    ', '', ` border-color: var(--border-light-hover); `)
 
-css('.b-collapse-h > :not(:last-child)' , '', ` border-right-color : #00000000; `)
-css('.b-collapse-h > :not(:first-child)', '', ` border-left-color  : #00000000; `)
-css('.b-collapse-v > :not(:last-child)' , '', ` border-bottom-color: #00000000; `)
-css('.b-collapse-v > :not(:first-child)', '', ` border-top-color   : #00000000; `)
+css('.b-collapse-h > :not(:last-child)' , '', ` border-right-width : 0; `)
+css('.b-collapse-h > :not(:first-child)', '', ` border-left-width  : 0; `)
+css('.b-collapse-v > :not(:last-child)' , '', ` border-bottom-width: 0; `)
+css('.b-collapse-v > :not(:first-child)', '', ` border-top-width   : 0; `)
+
+// put .frame on containers with a border and .unframe on widgets that would
+// get stripped of their margin and border if put inside a .frame container.
+css('.frame', 'g-h shrinks clip') // using grid because grid-in-flex is buggy.
+css('.frame > .unframe, .frame > .skip > .unframe', 'b0 m0')
 
 /* BORDER RADIUS ---------------------------------------------------------- */
 
@@ -1060,6 +1065,11 @@ css('.bg-search' , '', ` background: var(--bg-search); `)
 css('.bg-error', '', `
 	background : var(--bg-error);
 	color      : var(--fg-error);
+`)
+
+css('.bg-warn', '', `
+	background : var(--bg-warn);
+	color      : var(--fg-warn);
 `)
 
 /* IMAGE BACKGROUNDS ------------------------------------------------------ */

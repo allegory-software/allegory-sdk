@@ -127,7 +127,7 @@ G.init_xmodule = function(opt) {
 			assert(e.tag)
 			assert(opt.module)
 			opt.id = xm.next_id(opt.module)
-			xm.set_val(null, opt.id, 'type', e.tag, null, null, null, opt.module)
+			xm.set_val(null, opt.id, 'tag', e.tag, null, null, null, opt.module)
 			pv = empty_obj
 		} else if (opt.id) {
 			pv = prop_vals(opt.id)
