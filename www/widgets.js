@@ -3764,7 +3764,7 @@ add_validation_rule({
 	error    : (e, v, field) => S('validation_max_error',
 		'{0} is larger than {1}', field_name(field), field_value(field, field.max)),
 	rule     : (e,    field) => S('validation_max_rule',
-		'{0} must be smaller than (or equal to) {1}', field_name(field),
+		'{0} must be smaller than or equal to {1}', field_name(field),
 			field_value(field, field.max)),
 })
 
@@ -5168,7 +5168,7 @@ G.input = component('input', 'Input', function(e) {
 
 */
 
-css('.textarea', 'S shrinks h flex m0 b p bg-input w-input', `
+css('.textarea', 'm-y-05 S shrinks p-input h flex b p bg-input w-input', `
 	font: inherit;
 	resize: none;
 	overflow-y: overlay; /* Chrome only */
@@ -5613,6 +5613,7 @@ update options:
 // that errors popup would get hover event over.
 css('.textarea-input', 'skip')
 css('.textarea-input-textarea', '')
+css('.textarea-input[invalid] .textarea-input-textarea', 'bg-error')
 
 G.textarea_input = component('textarea-input', 'Input', function(e) {
 
