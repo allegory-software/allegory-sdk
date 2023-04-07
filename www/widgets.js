@@ -3688,7 +3688,7 @@ add_validation_rule({
 	applies  : (e,    field) => field.not_null || field.required,
 	validate : (e, v, field) => v != null || field.default != null,
 	error    : (e, v, field) => S('validation_empty_error', '{0} is required', field_name(field)),
-	rule     : (e,    field) => S('validation_empty_rule', '{0} is filled', field_name(field)),
+	rule     : (e,    field) => S('validation_empty_rule', '{0} is required', field_name(field)),
 })
 
 add_validation_rule({
@@ -3942,7 +3942,7 @@ css('.errors-not-checked', 'dim')
 css('.errors-failed .errors-icon::before', 'fa fa-times')
 css('.errors-checked.errors-passed .errors-icon::before', 'fa fa-check')
 css('.errors-single', 'h-m fg-error')
-css('.errors-single::before', 'p fa fa-triangle-exclamation')
+css('.errors-single::before', 'p-r-2 fa fa-triangle-exclamation')
 
 G.errors = component('errors', 'Input', function(e) {
 
