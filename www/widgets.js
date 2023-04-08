@@ -4122,7 +4122,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 	if (ett != false) {
 
 		e.do_after('set_invalid', function(v) {
-			ett.attr('invalid', v)
+			ett.bool_attr('invalid', v || null)
 		})
 
 		e.on_update(function(opt) {
@@ -4763,14 +4763,16 @@ let slider_widget = function(e, range) {
 		e.thumb_circles.push(circle)
 		thumb.class('slider-thumb')
 		thumb.K = K
-		thumb.to_num = num
-		thumb.to_text = to_text
-		thumb.is_number = true
-		if (range)
+		if (range) {
+			thumb.is_number = true
+			thumb.to_num = num
+			thumb.to_text = to_text
+			thumb.to_form = to_text
 			thumb.make_input_widget({
 				value_type: 'number',
 				errors_tooltip_target: false,
 			})
+		}
 	}
 	if (range) {
 		e.make_range_input_widget({
@@ -4779,6 +4781,9 @@ let slider_widget = function(e, range) {
 		})
 	} else {
 		e.is_number = true
+		e.to_num = num
+		e.to_text = to_text
+		e.to_form = to_text
 		e.make_input_widget({
 			value_type: 'number',
 			errors_tooltip_target: false,
@@ -4812,7 +4817,7 @@ let slider_widget = function(e, range) {
 
 		v = clamp(v, cmin(), cmax())
 
-		e.set_prop('input_value'+K, v, ev)
+			e.set_prop('input_value'+K, v, ev)
 	}
 
 	e.get_progress_for = function(K) {
@@ -4838,13 +4843,9 @@ let slider_widget = function(e, range) {
 		e.set_progress_for(K, p, ev)
 	}
 
-	e.display_value_for = function(v) {
-		return (v != null && e.decimals != null) ? v.dec(e.decimals) : v+''
-	}
-
 	function update_thumb(thumb, p) {
-		thumb.attr('invalid', thumb.invalid)
-		thumb.attr('null', e['input_value'+thumb.K] == null)
+		thumb.bool_attr('invalid', (range ? thumb.invalid : e.invalid) || null)
+		thumb.bool_attr('null', e['input_value'+thumb.K] == null || null)
 		thumb.x1 = (p * 100)+'%'
 		update_tooltip(thumb, true)
 	}
@@ -4868,7 +4869,7 @@ let slider_widget = function(e, range) {
 			let tfr = thumb.validator && thumb.validator.first_failed_result
 			let efr = e.validator && e.validator.first_failed_result
 			let v = e['input_value'+thumb.K]
-			let a = [e.display_value_for(v)]
+			let a = [to_text(v)+'']
 			if (tfr && tfr.error) a.push(tfr.error)
 			if (efr && efr.error) a.push(efr.error)
 			thumb.tooltip.text = a.join_nodes(tag('br'))
@@ -4902,9 +4903,9 @@ let slider_widget = function(e, range) {
 			update_thumb(thumb, p)
 		}
 
-		e.attr('null', range
+		e.bool_attr('null', (range
 			? e.input_value1 == null && e.input_value2 == null
-			: e.input_value == null)
+			: e.input_value == null) || null)
 
 		if (!e.marks.len)
 			e.position()
@@ -4921,7 +4922,7 @@ let slider_widget = function(e, range) {
 		let m = div({class: 'slider-mark'}, l)
 		e.marks.add(m)
 		m.x = lerp(v, e.from, e.to, 0, w)
-		l.set(e.display_value_for(v))
+		l.set(to_text(v))
 	}
 	function update_marks() {
 		e.marks.clear()
