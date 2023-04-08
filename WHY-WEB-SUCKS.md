@@ -221,7 +221,7 @@ with a mouse with scroll wheel on Windows and with a touchpad on a Mac.
 
 Check out this still-open FF bug from 11 years ago:
 
-	https://bugzilla.mozilla.org/show_bug.cgi?id=1335265
+	https://bugzilla.mozilla.org/show_bug.cgi?id=764076
 
 This is not some obscure case that you never run into, this is core flexbox
 functionality. And you can't fix this with JavaScript, unless you draw your

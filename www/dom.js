@@ -2917,7 +2917,12 @@ css_generic_state('[hidden]', '', `
 	display: none !important;
 `)
 
-e.hide = function(on) {
+function call_user_show(e, ev) {
+	e._user_show?.(!on, ev)
+	for (let ce of e.at)
+		call_user_show(ce, ev)
+}
+e.hide = function(on, ev) {
 	if (!arguments.length)
 		on = true
 	else
@@ -2925,15 +2930,17 @@ e.hide = function(on) {
 	if (this.hidden == on)
 		return
 	this.hidden = on
-	this.fire('show', !on)
+	call_user_show(this, {target: this})
 	return this
 }
-
-e.show = function(on) {
+e.show = function(on, ev) {
 	if (!arguments.length)
 		on = true
-	this.hide(!on)
+	this.hide(!on, ev)
 	return this
+}
+e.on_show = function(f) {
+	e.do_after('_user_show', f)
 }
 
 property(Element, 'hovered', function() {
@@ -3995,6 +4002,30 @@ e.popup = function(target, side, align) {
 	e.on('raw:dblclick'    , no_bubble)
 
 	return e
+}
+
+// NOTE: not used yet. Righ tnow we add popups directly to their owner element
+// but that's a pain because we can't add the popup directly to its target
+// element so we have to wrap the target to avoid messing up its box dimensions
+// and the CSS of its direct children (eg. border-collapse), and then there's
+// the stacking context problem (eg. we can't make the owner transparent).
+// This solution seems better but we need to try it and see what breaks.
+e.add_popup = function(pe) {
+	function bind(on) {
+		if (on) {
+			pe.hide()
+			body.add(pe)
+			pe.update({show: !e.effectively_hidden})
+		} else {
+			pe.remove()
+		}
+	}
+	e.on_bind(bind)
+	e.on_show(function(on) {
+		pe.update({show: on})
+	})
+	if (e.bound)
+		bind(true)
 }
 
 // live-move list elements ---------------------------------------------------

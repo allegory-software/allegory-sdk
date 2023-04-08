@@ -1308,8 +1308,7 @@ G.parse_timeofday = function(s, validate, with_seconds, with_fractions) {
 		if (t < 0 || t >= 3600 * 24)
 			return null
 	} else {
-		t = t % (3600 * 24)
-		if (t < 0) t += 3600 * 24
+		t = mod(t, 3600 * 24)
 	}
 	return t
 }

@@ -4152,6 +4152,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 		function update_et() {
 			e.update({errors_tooltip: true})
 		}
+		assert(ett.tag != 'svg') // hooking focusin on svg makes it focusable!
 		ett.on('focusin' , update_et)
 		ett.on('focusout', update_et)
 		ett.on('hover'   , update_et)
@@ -4380,8 +4381,12 @@ css('.checkbox', 'large t-m link h-c h-m round', `
 	--fg-check: var(--fg-link);
 `)
 
-css('.checkbox.null', 'op06')
-css('.checkbox[invalid]', 'fg-error bg-error')
+css_state('.checkbox[invalid]', 'fg-error bg-error')
+
+// making the inner markbox transparent instead of the checkbox because we
+// can't make the checkbox transparent because that creates a stacking context
+// and we can't attach popups to that. that's web dev for ya, like it?
+css_state('.checkbox[null] .markbox', 'op06')
 
 css_state('.checkbox:is(:hover,.hover)', '', `
 	--fg-check: var(--fg-link-hover);
@@ -4394,11 +4399,15 @@ css_state('.checkbox:focus-visible', '', `
 css('.checkbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
 css_state('.checkbox:focus-visible .checkbox-focus-circle', '', ` r: 50%; `)
 
-function check_widget(e, input_type) {
-	e.clear()
+function check_widget(e, markbox, input_type) {
 	e.class('checkbox')
+	e.clear()
+	markbox.class('markbox')
+	e.add(markbox)
 	e.make_disablable()
-	e.make_input_widget({value_type: 'bool'})
+	e.make_input_widget({
+		value_type: 'bool',
+	})
 	e.input_value_default = () => e.unchecked_value
 	e.make_focusable()
 	e.property('label', function() {
@@ -4425,7 +4434,7 @@ function check_widget(e, input_type) {
 	e.on_update(function(opt) {
 		if (opt.value) {
 			e.bool_attr('checked', e.checked || null)
-			e.class('null', e.value == null)
+			e.bool_attr('null', e.value == null || null)
 		}
 	})
 
@@ -4519,12 +4528,12 @@ css_state('.check[checked] .check-frame', '', `
 
 G.check = component('check', function(e) {
 	e.class('check')
-	check_widget(e)
-	e.add(svg({viewBox: '-10 -10 20 20'},
+	e.markbox = svg({viewBox: '-10 -10 20 20'},
 		svg_tag('circle'  , {class: 'checkbox-focus-circle'}),
 		svg_tag('rect'    , {class: 'check-frame'}),
 		svg_tag('polyline', {class: 'check-mark' , points: '4 11 8 15 16 6'})
-	))
+	)
+	check_widget(e, e.markbox)
 })
 
 /* toggle --------------------------------------------------------------------
@@ -4559,11 +4568,18 @@ css_state('.toggle:is(:hover,.hover)', '', `
 css_state('.toggle[checked]:is(:hover,.hover)', '', `
 	background: var(--bg-button-primary-hover);
 `)
+css_state('.toggle-thumb:focus-visible', 'outline-focus')
 
 G.toggle = component('toggle', function(e) {
 	e.class('toggle')
-	check_widget(e)
-	e.add(div({class: 'toggle-thumb'}))
+	e.markbox = div({class: 'toggle-thumb'})
+	check_widget(e, e.markbox)
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+		if (key == 'ArrowLeft' || key == 'ArrowRight') {
+			e.user_set(key == 'ArrowRight', ev)
+			return false
+		}
+	})
 })
 
 /* <radio> -------------------------------------------------------------------
@@ -4585,13 +4601,12 @@ css_state('.radio:focus-visible', 'no-outline')
 G.radio = component('radio', function(e) {
 
 	e.class('radio')
-	check_widget(e, 'radio')
-
-	e.add(svg({viewBox: '-1 -1 2 2'},
+	e.markbox = svg({viewBox: '-1 -1 2 2'},
 		svg_tag('circle', {class: 'checkbox-focus-circle'}),
 		svg_tag('circle', {class: 'radio-circle'}),
 		svg_tag('circle', {class: 'radio-thumb'}),
-	))
+	)
+	check_widget(e, e.markbox, 'radio')
 
 	e.group_elements = function() {
 		let form = e.form || document.body
@@ -4615,7 +4630,7 @@ G.radio = component('radio', function(e) {
 
 	e.next_radio = function(inc) {
 		let res = e.group_elements()
-		return res[(res.indexOf(e)+inc) % res.len]
+		return res[mod(res.indexOf(e)+inc, res.len)]
 	}
 
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
@@ -5644,7 +5659,7 @@ update options:
 // that errors popup would get hover event over.
 css('.textarea-input', 'skip')
 css('.textarea-input-textarea', '')
-css('.textarea-input[invalid] .textarea-input-textarea', 'bg-error')
+css_state('.textarea-input[invalid] .textarea-input-textarea', 'bg-error')
 
 G.textarea_input = component('textarea-input', 'Input', function(e) {
 
