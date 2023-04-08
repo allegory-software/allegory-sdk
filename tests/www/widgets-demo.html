@@ -685,11 +685,11 @@ my_form.on('submit', function(ev) {
 
 <xmp id=slider_demo>
 <script run>
-add_validator({
+add_validation_rule({
 	name     : 's1_slider',
 	props    : 'name',
 	vprops   : 'input_value',
-	requires : 'num',
+	requires : 'number',
 	applies  : (e) => e.name == 's1',
 	validate : (e, v) => v >= .2 && v <= .8,
 	error    : () => 'Value not between .2 and .8',
@@ -697,7 +697,7 @@ add_validator({
 })
 </script>
 <form id=my_form class=skip>
-	<slider name=s1 value=0.7 marked=false></slider>
+	<slider name=s1 value=0.7 marked=false required></slider>
 	<slider name=s2 value=5 from=1 to=9 min=3 max=7 decimals=0></slider>
 	<range-slider name1=s31 name2=s32 value1=1800 value2=1200 from=1000 to=2000 decimals=0></range-slider>
 	<button>Submit</button>

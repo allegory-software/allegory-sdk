@@ -3987,7 +3987,7 @@ attr:      prop:
 
 */
 
-css('.errors', 'v flex p label')
+css('.errors', 'v flex p label arrow')
 css('.errors-line', 'h p-05 gap-x')
 css('.errors-icon', 'w1 t-c')
 css('.errors-message', '')
@@ -4755,6 +4755,7 @@ let slider_widget = function(e, range) {
 		thumb.K = K
 		thumb.to_num = num
 		thumb.to_text = to_text
+		thumb.is_number = true
 		if (range)
 			thumb.make_input_widget({
 				value_type: 'number',
@@ -4770,6 +4771,7 @@ let slider_widget = function(e, range) {
 			errors_tooltip_target: false,
 		})
 	} else {
+		e.is_number = true
 		e.make_input_widget({
 			value_type: 'number',
 			errors_tooltip_target: false,
@@ -4807,7 +4809,7 @@ let slider_widget = function(e, range) {
 	}
 
 	e.get_progress_for = function(K) {
-		return progress_for(e['value'+K])
+		return progress_for(num(e['input_value'+K]))
 	}
 
 	for (let thumb of e.thumbs) {
@@ -4850,7 +4852,9 @@ let slider_widget = function(e, range) {
 			thumb.tooltip.kind = e.invalid ? 'error' : null
 			let tfr = thumb.validator && thumb.validator.first_failed_result
 			let efr = e.validator && e.validator.first_failed_result
-			let a = [e.display_value_for(e['value'+thumb.K])]
+			let v = e['value'+thumb.K]
+			let a = []
+			if (v != null) a.push(e.display_value_for(v))
 			if (tfr && tfr.error) a.push(tfr.error)
 			if (efr && efr.error) a.push(efr.error)
 			thumb.tooltip.text = a.join_nodes(tag('br'))
@@ -4870,8 +4874,8 @@ let slider_widget = function(e, range) {
 		p2 = progress_for(cmax())
 		update_fill(e.valid_fill, p1, p2)
 
-		p1 = progress_for(range ? e.value1 : cmin())
-		p2 = progress_for(range ? e.value2 : e.value)
+		p1 = progress_for(range ? num(e.input_value1) : cmin())
+		p2 = progress_for(range ? num(e.input_value2) : num(e.input_value))
 		update_fill(e.value_fill, min(p1, p2), max(p1, p2))
 
 		for (let thumb of e.thumbs) {
@@ -4966,6 +4970,9 @@ let slider_widget = function(e, range) {
 				let p = e.get_progress_for(this.K) + d * (shift ? .1 : 1)
 				e.user_set_progress_for(this.K, p, ev)
 				return false
+			}
+			if (key == 'Delete') {
+				e.set_prop('input_value'+this.K, null, ev)
 			}
 		})
 
