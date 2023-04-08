@@ -4660,13 +4660,18 @@ css('.slider-fill', 'abs round', ` height: 3px; `)
 css('.slider-bg-fill', 'bg1')
 css('.slider-valid-fill', 'bg3')
 css('.slider-value-fill', 'bg-link')
-css('.slider-thumb', 'bg-link')
-css('.slider-thumb', 'abs round', `
+
+// wrapping the thumb circle because we can't attach a popup to a transparent
+// object because it creates a stacking context.
+css('.slider-thumb', 'abs h', `
 	/* center vertically relative to the fill */
 	margin-top : calc(-.6em + 1px);
 	margin-left: calc(-.6em);
 	width : 1.2em;
 	height: 1.2em;
+`)
+css('.slider-thumb-circle', 'S bg-link')
+css('.slider-thumb-circle', 'round', `
 	box-shadow: var(--shadow-thumb);
 `)
 
@@ -4684,8 +4689,10 @@ css('.slider-mark-label', 'rel label nowrap-dots', `
 	top : .7em;
 `)
 
-css_state('.slider-thumb[invalid]', 'bg-error')
+css_state('.slider-thumb[invalid] .slider-thumb-circle', 'bg-error')
+css_state('.slider-thumb[null]    .slider-thumb-circle', 'op05')
 css_state('.slider[invalid] .slider-value-fill', 'bg-error')
+css_state('.slider[null]    .slider-value-fill', 'op05')
 
 css_state('.slider.animate .slider-thumb       ', 'ease')
 css_state('.slider.animate .slider-value-fill'  , 'ease')
@@ -4748,9 +4755,12 @@ let slider_widget = function(e, range) {
 	}
 
 	e.thumbs = []
+	e.thumb_circles = []
 	for (let K of range ? ['1', '2'] : ['']) {
-		let thumb = tag('slider-thumb')
+		let circle = div({class: 'slider-thumb-circle'})
+		let thumb = tag('slider-thumb', {class: 'slider-thumb'}, circle)
 		e.thumbs.push(thumb)
+		e.thumb_circles.push(circle)
 		thumb.class('slider-thumb')
 		thumb.K = K
 		thumb.to_num = num
@@ -4761,9 +4771,6 @@ let slider_widget = function(e, range) {
 				value_type: 'number',
 				errors_tooltip_target: false,
 			})
-		e.do_after('set_invalid', function(v) {
-			thumb.attr('invalid', v)
-		})
 	}
 	if (range) {
 		e.make_range_input_widget({
@@ -4780,9 +4787,9 @@ let slider_widget = function(e, range) {
 
 	e.add(e.bg_fill, e.valid_fill, e.value_fill, e.marks, ...e.thumbs)
 
-	e.make_focusable(...e.thumbs)
+	e.make_focusable(...e.thumb_circles)
 
-	// model: progress
+	// model: progress (visual, not validated)
 
 	function cmin() { return max(e.min ?? -1/0, e.from) }
 	function cmax() { return min(e.max ??  1/0, e.to  ) }
@@ -4800,16 +4807,22 @@ let slider_widget = function(e, range) {
 		if (e.decimals != null)
 			v = floor(v / multiple() + .5) * multiple()
 
-		if (K == '1')
-			v = e.value2 != null ? min(v, e.value2) : null
-		else if (K == '2')
-			v = e.value1 != null ? max(v, e.value1) : null
+		if (K == '1' && e.value2 != null) v = min(v, e.value2)
+		if (K == '2' && e.value1 != null) v = max(v, e.value1)
 
-		e.set_prop('input_value'+K, clamp(v, cmin(), cmax()), ev)
+		v = clamp(v, cmin(), cmax())
+
+		e.set_prop('input_value'+K, v, ev)
 	}
 
 	e.get_progress_for = function(K) {
-		return progress_for(num(e['input_value'+K]))
+		let v = num(e['input_value'+K])
+		if (v == null) {
+			if (K == '1') v = cmin()
+			if (K == '2') v = cmax()
+			if (K == '' ) v = (cmax() + cmin()) / 2
+		}
+		return progress_for(v)
 	}
 
 	for (let thumb of e.thumbs) {
@@ -4826,10 +4839,12 @@ let slider_widget = function(e, range) {
 	}
 
 	e.display_value_for = function(v) {
-		return (v != null && e.decimals != null) ? v.dec(e.decimals) : v
+		return (v != null && e.decimals != null) ? v.dec(e.decimals) : v+''
 	}
 
 	function update_thumb(thumb, p) {
+		thumb.attr('invalid', thumb.invalid)
+		thumb.attr('null', e['input_value'+thumb.K] == null)
 		thumb.x1 = (p * 100)+'%'
 		update_tooltip(thumb, true)
 	}
@@ -4852,9 +4867,8 @@ let slider_widget = function(e, range) {
 			thumb.tooltip.kind = e.invalid ? 'error' : null
 			let tfr = thumb.validator && thumb.validator.first_failed_result
 			let efr = e.validator && e.validator.first_failed_result
-			let v = e['value'+thumb.K]
-			let a = []
-			if (v != null) a.push(e.display_value_for(v))
+			let v = e['input_value'+thumb.K]
+			let a = [e.display_value_for(v)]
 			if (tfr && tfr.error) a.push(tfr.error)
 			if (efr && efr.error) a.push(efr.error)
 			thumb.tooltip.text = a.join_nodes(tag('br'))
@@ -4874,14 +4888,23 @@ let slider_widget = function(e, range) {
 		p2 = progress_for(cmax())
 		update_fill(e.valid_fill, p1, p2)
 
-		p1 = progress_for(range ? num(e.input_value1) : cmin())
-		p2 = progress_for(range ? num(e.input_value2) : num(e.input_value))
+		if (range) {
+			p1 = e.get_progress_for('1')
+			p2 = e.get_progress_for('2')
+		} else {
+			p1 = progress_for(cmin())
+			p2 = e.get_progress_for('')
+		}
 		update_fill(e.value_fill, min(p1, p2), max(p1, p2))
 
 		for (let thumb of e.thumbs) {
 			let p = e.get_progress_for(thumb.K)
 			update_thumb(thumb, p)
 		}
+
+		e.attr('null', range
+			? e.input_value1 == null && e.input_value2 == null
+			: e.input_value == null)
 
 		if (!e.marks.len)
 			e.position()
