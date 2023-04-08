@@ -7304,7 +7304,7 @@ function calendar_widget(e, mode) {
 		cx.lineWidth = rh(2)
 
 		let focused = e.focused
-		let focus_visible = mode == 'day' ? e.focus_visible : focused
+		let focus_visible = e.focus_visible
 
 		let gh_set = false
 		d_days = -7
