@@ -23,6 +23,17 @@
 
 <style>
 
+/*
+On Chrome on a Windows with 125% scaling, 80% zoom gets us 1:1 real zoom
+so can test in ideal conditions. With a 1440p screen there's even room for
+the browser's inspector/debugger.
+*/
+@media (resolution: 120dpi) {
+	:root {
+		zoom: 80%;
+	}
+}
+
 #layout {
 	height: 100%;
 	display: flex;
@@ -109,6 +120,26 @@ button[pressed] { background: var(--bg-button-active); }
 </div>
 <script>
 
+let hash = obj()
+function order_keys(t) {
+	return keys(t).sort().reduce((t1, k) => { t1[k] = t[k]; return t1}, obj())
+}
+for (let kv of window.location.hash.split(',')) {
+	if (!kv) continue
+	let [k, v] = kv.split('=')
+	hash[k] = v
+}
+hash = order_keys(hash)
+function hash_save(k, v) {
+	if (!v) delete hash[k]; else hash[k] = v
+	hash = order_keys(hash)
+	let a = []; for (let k in hash) a.push(k+'='+hash[k])
+	window.location.hash = a.join(',')
+}
+function hash_load(k) {
+	return hash[k]
+}
+
 on_dom_load(function() {
 
 	init_xmodule()
@@ -148,7 +179,7 @@ on_dom_load(function() {
 	})
 
 	reload_button.on('click', function() {
-		save('script', get_script())
+		hash_save('script', get_script())
 		window.location = window.location
 	})
 
@@ -168,12 +199,12 @@ on_dom_load(function() {
 			ace_editor.initial_script = s
 			run_script()
 
-			let i0 = load('selected_demo_index')
+			let i0 = hash_load('selected_demo_index')
 			let item0 = i0 != null && demo_list.at[i0]
 			if (item0)
 				item0.class('selected', false)
 			item.class('selected', true)
-			save('selected_demo_index', i1)
+			hash_save('selected_demo_index', i1)
 
 		})
 		i++
@@ -188,10 +219,10 @@ on_dom_load(function() {
 				btn.bool_attr('pressed', true)
 				let key = btn.attr('key')
 				action(btn, key)
-				save(btn_class, key)
+				hash_save(btn_class, key)
 			}
 		}
-		let btn = $1(btn_class+'[key='+(load(btn_class) || default_key)+']')
+		let btn = $1(btn_class+'[key='+(hash_load(btn_class) || default_key)+']')
 		if (btn)
 			btn.action() // btn.click() doesn't work on hidden buttons. smaart.
 	}
@@ -209,15 +240,15 @@ on_dom_load(function() {
 	})
 
 	{
-	let i = load('selected_demo_index')
+	let i = hash_load('selected_demo_index')
 	let item = i != null && demo_list.at[i]
 	if (item)
 		item.click()
-	let s = load('script')
+	let s = hash_load('script')
 	if (s) {
 		set_script(s)
 		run_script()
-		save('script')
+		hash_save('script')
 	}
 	}
 
