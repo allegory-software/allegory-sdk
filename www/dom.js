@@ -254,8 +254,9 @@ ELEMENT GEOMETRY / MEASURING
 
 ELEMENT STATE
 
-	e.hide([on])
-	e.show([on])
+	e.hide([on], [ev])
+	e.show([on], [ev])
+	e.on_show(f); f(on, ev)
 	e.hovered
 	e.focused_element
 	e.focused
@@ -4010,19 +4011,20 @@ e.popup = function(target, side, align) {
 // and the CSS of its direct children (eg. border-collapse), and then there's
 // the stacking context problem (eg. we can't make the owner transparent).
 // This solution seems better but we need to try it and see what breaks.
+// TODO: finish this and use it!
 e.add_popup = function(pe) {
 	function bind(on) {
 		if (on) {
 			pe.hide()
 			body.add(pe)
-			pe.update({show: !e.effectively_hidden})
+			pe.update({show: !e.parent.effectively_hidden})
 		} else {
 			pe.remove()
 		}
 	}
 	e.on_bind(bind)
 	e.on_show(function(on) {
-		pe.update({show: on})
+		pe.update({show: on && !e.parent.effectively_hidden})
 	})
 	if (e.bound)
 		bind(true)

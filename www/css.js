@@ -354,7 +354,7 @@ css('h2', '', ` --fs: var(--fs-h2); font-size: var(--fs); `)
 css('h3', '', ` --fs: var(--fs-h3); font-size: var(--fs); `)
 
 /* input placeholders */
-css(['::placeholder','::-ms-input-placeholder'], 'label op1')
+css(['::placeholder', '::-ms-input-placeholder'], 'label op1')
 
 /* text selection */
 css('::selection', '', `
@@ -524,7 +524,7 @@ css_chrome('.arial', '', `
 `)
 
 /* use with ::before; inserts ZWSP to force line height on empty text */
-css('.zwsp     ', '', ` content: "\\200b"; `)
+css('.zwsp', '', ` content: "\\200b"; `)
 
 css('[dim]'          , '', ` color: var(--fg-dim); `)
 css('.dim'           , '', ` color: var(--fg-dim); `)
@@ -1006,7 +1006,7 @@ css_state('.scroll-thin::-webkit-scrollbar-thumb:hover', '', `
 `)
 
 /* fixing resizer color for Chrome with thin scrollbars */
-css_state('.scroll-thin::-webkit-resizer', '', `
+css('.scroll-thin::-webkit-resizer', '', `
 	background: var(--bg1);
 `)
 

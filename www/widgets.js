@@ -23,7 +23,7 @@ WIDGETS
 	pagenav
 	label
 	info
-	check
+	checkbox
 	toggle
 	radio
 	slider
@@ -324,15 +324,15 @@ G.tooltip = component('tooltip', function(e) {
 		e.attr('align', align)
 	}
 
-	e.close = function() {
-		if (e.fire('close')) {
+	e.close = function(ev) {
+		if (e.fire('close', ev)) {
 			e.remove()
 			return true
 		}
 		return false
 	}
 
-	function close() { e.close() }
+	function close(ev) { e.close(ev) }
 
 	let last_popup_time
 
@@ -383,9 +383,9 @@ G.tooltip = component('tooltip', function(e) {
 
 	// keyboard, mouse & focusing behavior ------------------------------------
 
-	e.on('keydown', function(key) {
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 		if (key == 'Escape') {
-			e.close()
+			e.close(ev)
 			return false
 		}
 	})
@@ -428,7 +428,7 @@ G.tooltip = component('tooltip', function(e) {
 			return
 		if (too_soon())
 			return
-		e.close()
+		e.close(ev)
 	}
 
 	// clicking outside the tooltip closes the tooltip, even if the click did something.
@@ -453,7 +453,7 @@ G.tooltip = component('tooltip', function(e) {
 			return
 		if (e.contains(ev.target))
 			return
-		e.close()
+		e.close(ev)
 	}
 
 })
@@ -1477,7 +1477,7 @@ NOTE: removes element margins!
 
 */
 
-css('.list', 'v-t scroll-auto rel')
+css('.list', 'v-t flex scroll-auto rel')
 
 G.list = component('list', function(e) {
 
@@ -1506,6 +1506,7 @@ G.list = component('list', function(e) {
 		e.clear()
 		for (let item of items) {
 			let item_e = e.format_item(item, ts)
+			item_e.list = e
 			item_e.data = item
 			item_e.focusable = item.focusable
 			if (e.update_item_state)
@@ -1523,15 +1524,16 @@ G.list = component('list', function(e) {
 		return unsafe_html(render_string(ts, item || empty_obj), false)
 	}
 
-	e.rerender_item = function(e0, ts) {
+	e.rerender_item = function(item_e0, ts) {
 		let item = e0.data
-		let e1 = e.format_item(item, ts)
-		e1.data = item
-		e1.selected = e0.selected
-		e.replace(e0, e1)
+		let item_e1 = e.format_item(item, ts)
+		item_e1.list = e
+		item_e1.data = item
+		item_e1.selected = item_e0.selected
+		e.replace(item_e0, item_e1)
 		if (e.update_item_state)
-			e.update_item_state(e1)
-		return e1
+			e.update_item_state(item_e1)
+		return item_e1
 	}
 
 	e.on('items_changed', function(from) {
@@ -1543,6 +1545,66 @@ G.list = component('list', function(e) {
 	})
 
 	return {item_template: html_template, items: html_items}
+
+})
+
+/* <checklist> ---------------------------------------------------------------
+
+in item template:
+	<checklist-checkbox>
+methods:
+	get_checked(item) -> t|f|null
+	set_checked(item, checked, [ev])
+events:
+	^item_checked(item, checked, ev)
+
+*/
+
+component('checklist-checkbox', function(e) {
+	e.clear()
+	e.make_checkbox(false)
+	e.class('checklist-checkbox')
+	function check_click(ev) {
+		let checked = !this.checked_state
+		this.checked_state = checked
+		this.item.list.fire('item_checked', this.item, checked, ev)
+	}
+	e.on('click', check_click)
+	e.on_bind(function(on) {
+		if (on) {
+			let item_e = e.parent
+			while (!item_e.list)
+				item_e = item_e.parent
+			e.item = item_e
+			item_e.checkbox = e
+		} else {
+			e.item.checkbox = null
+			e.item = null
+		}
+	})
+})
+
+G.checklist = component('checklist', function(e) {
+
+	e.class('checklist')
+	let html_props = list.construct(e)
+
+	e.get_checked = function(item) {
+		return item.checkbox.checked_state
+	}
+	e.set_checked = function(item, checked, ev) {
+		item.checkbox.checked_state = checked
+	}
+
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+		let item = e.focused_item
+		if (key == ' ' && item) {
+			item.checkbox.click()
+			return false
+		}
+	})
+
+	return html_props
 
 })
 
@@ -3585,7 +3647,7 @@ G.create_validator = function(e, field) {
 		assert(checked.get(rule) !== false, 'validation rule require cycle: {0}', rule.name)
 		if (checked.get(rule))
 			return true
-		if (!rule.applies(e, field))
+		if (e.name, !rule.applies(e, field))
 			return
 		checked.set(rule, false) // means checking...
 		for (let req_rule_name of rule.requires) {
@@ -3629,7 +3691,7 @@ G.create_validator = function(e, field) {
 			rules_invalid = true
 			return true
 		}
-		return rules_invalid || rule_vprops[prop] || false
+		return rules_invalid || rule_vprops[prop] || !rules.len
 	}
 
 	function update_rules() {
@@ -3897,19 +3959,6 @@ add_validation_rule({
 		'{0} must be {1}', field_name(field), pass_score_rules[e.min_score]),
 })
 
-add_validation_rule({
-	name     : 'lookup',
-	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
-	vprops   : 'input_value',
-	applies  : (e,    field) => field.lookup_nav,
-	validate : (e, v, field) => field.lookup_nav.ready
-			&& field.lookup_nav.lookup(field.lookup_cols, [v]).len > 0,
-	error    : (e, v, field) => S('validation_lookup_error',
-		'{0} unknown value {1}', field_name(field), field_value(field, v)),
-	rule     : (e,    field) => S('validation_lookup_rule',
-		'{0} value unknown', field_name(field)),
-})
-
 // NOTE: trying to be compliant with mySQL TIMESTAMP range.
 // NOTE: you only get 6-digit of fractional precision for years >= 1900
 // when making computations with timestamps, so we're not really fully
@@ -3944,38 +3993,70 @@ add_validation_rule({
 
 add_validation_rule({
 	name     : 'value_known',
+	props    : 'known_values',
 	vprops   : 'input_value',
-	applies  : (e,    field) => field.value_known,
-	validate : (e, v, field) => field.value_known(v) != null,
-	error    : (e, v, field) => S('validation_known_error',
+	applies  : (e,    field) => !e.is_values && field.known_values,
+	validate : (e, v, field) => field.known_values.has(v),
+	error    : (e, v, field) => S('validation_value_known_error',
 		'{0}: unknown value {1}', field_name(field), field_value(field, v)),
-	rule     : (e,    field) => S('validation_known_rule',
+	rule     : (e,    field) => S('validation_value_known_rule',
 		'{0} must be a known value', field_name(field)),
-})
-add_validation_rule({
-	name     : 'tags',
-	vprops   : 'input_value',
-	applies  : (e,    field) => field.is_tags,
-	convert  : (e, v, field) => (isstr(v) ?
-		(v.trim().starts('[') ? json_arg(v) : v.words()) : v) ?? INVALID,
-	validate : return_true,
-	error    : (e, v, field) => S('validation_tags_error',
-		'{0}: invalid tags list', field_name(field)),
-	rule     : (e,    field) => S('validation_tags_rule',
-		'{0} must be a valid tags list', field_name(field)),
 })
 
 add_validation_rule({
-	name     : 'tags_valid',
-	props    : 'valid_tags',
+	name     : 'values',
 	vprops   : 'input_value',
-	requires : 'tags',
-	applies  : (e,    field) => field.valid_tags && count_keys(field.valid_tags, 1),
-	validate : (e, v, field) => !field.invalid_tags(v).len,
-	error    : (e, v, field) => S('validation_known_error',
-		'{0}: unknown tags: {1}', field_name(field), field.invalid_tags(v).join(', ')),
-	rule     : (e,    field) => S('validation_known_rule',
-		'{0} must contain only known tags', field_name(field)),
+	applies  : (e,    field) => field.is_values,
+	convert  : (e, v, field) => {
+		v = isstr(v) ? (v.trim().starts('[') ? json_arg(v) : v.words()) : v
+		v.remove_duplicates()
+		return v
+	},
+	validate : return_true,
+	error    : (e, v, field) => S('validation_values_error',
+		'{0}: invalid values list', field_name(field)),
+	rule     : (e,    field) => S('validation_values_rule',
+		'{0} must be a valid values list', field_name(field)),
+})
+
+function invalid_values(field, v) {
+	if (v == null)
+		return 'null'
+	let a = []
+	for (let s of v)
+		if (!field.known_values.has(s))
+			a.push(s)
+	return a.join(', ')
+}
+add_validation_rule({
+	name     : 'values_known',
+	props    : 'known_values',
+	vprops   : 'input_value',
+	requires : 'values',
+	applies  : (e,    field) => field.known_values,
+	validate : (e, v, field) => {
+		for (let s of v)
+			if (!field.known_values.has(s))
+				return false
+		return true
+	},
+	error    : (e, v, field) => S('validation_values_known_error',
+		'{0}: unknown values: {1}', field_name(field), invalid_values(field, v)),
+	rule     : (e,    field) => S('validation_values_known_rule',
+		'{0} must contain only known values', field_name(field)),
+})
+
+add_validation_rule({
+	name     : 'lookup',
+	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
+	vprops   : 'input_value',
+	applies  : (e,    field) => field.lookup_nav,
+	validate : (e, v, field) => field.lookup_nav.ready
+			&& field.lookup_nav.lookup(field.lookup_cols, [v]).len > 0,
+	error    : (e, v, field) => S('validation_lookup_error',
+		'{0} unknown value {1}', field_name(field), field_value(field, v)),
+	rule     : (e,    field) => S('validation_lookup_rule',
+		'{0} value unknown', field_name(field)),
 })
 
 /* <errors> ------------------------------------------------------------------
@@ -4005,7 +4086,7 @@ G.errors = component('errors', 'Input', function(e) {
 
 	e.prop('target'    , {type: 'element'})
 	e.prop('target_id' , {type: 'id', attr: 'for'})
-	e.prop('type')
+	e.prop('type'      , {type: 'enum', enum_values: 'rules'})
 
 	e.on_update(function(opt) {
 		if (!opt.validator)
@@ -4356,7 +4437,7 @@ e.make_range_input_widget = function(opt) {
 
 }
 
-/* <check>, <toggle>, <radio> buttons ----------------------------------------
+/* <checkbox>, <toggle>, <radio> ---------------------------------------------
 
 inherits:
 	input_widget
@@ -4371,37 +4452,39 @@ events:
 
 */
 
-// check, toggle, radio ------------------------------------------------------
+// checkbox, toggle, radio ---------------------------------------------------
 
-css('.checkbox', 'large t-m link h-c h-m round', `
-	min-width  : 2em;
-	min-height : 2em;
-	max-width  : 2em;
-	max-height : 2em;
-	--fg-check: var(--fg-link);
+// crbox is the fixed-size outer box of checkbox, toggle and radio.
+css('.crbox', 'large t-m link h-c h-m round', `
+	--w-crbox: 1em;
+	min-width  : var(--w-crbox);
+	min-height : var(--w-crbox);
+	max-width  : var(--w-crbox);
+	max-height : var(--w-crbox);
+	--fg-check : var(--fg-link);
 `)
+css('.crbox.focusable', '', `--w-crbox: 2em;`)
 
-css_state('.checkbox[invalid]', 'fg-error bg-error')
+css_state('.crbox[invalid]', 'fg-error bg-error')
 
-// making the inner markbox transparent instead of the checkbox because we
-// can't make the checkbox transparent because that creates a stacking context
+// making the inner markbox transparent instead of the crbox because we
+// can't make the crbox transparent because that creates a stacking context
 // and we can't attach popups to that. that's web dev for ya, like it?
-css_state('.checkbox[null] .markbox', 'op06')
+css_state('.crbox[null] .markbox', 'op06')
 
-css_state('.checkbox:is(:hover,.hover)', '', `
+css_state('.crbox:is(:hover,.hover)', '', `
 	--fg-check: var(--fg-link-hover);
 `)
 
-css_state('.checkbox:focus-visible', '', `
+css_state('.crbox:focus-visible', '', `
 	--fg-check: var(--fg-white);
 `)
 
-css('.checkbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
-css_state('.checkbox:focus-visible .checkbox-focus-circle', '', ` r: 50%; `)
+css('.crbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
+css_state('.crbox:focus-visible .crbox-focus-circle', '', ` r: 10px; `)
 
-function check_widget(e, markbox, input_type) {
-	e.class('checkbox')
-	e.clear()
+function checkbox_widget(e, markbox, input_type) {
+	e.class('crbox focusable')
 	markbox.class('markbox')
 	e.add(markbox)
 	e.make_disablable()
@@ -4432,10 +4515,8 @@ function check_widget(e, markbox, input_type) {
 	}
 
 	e.on_update(function(opt) {
-		if (opt.value) {
-			e.bool_attr('checked', e.checked || null)
-			e.bool_attr('null', e.value == null || null)
-		}
+		if (opt.value)
+			e.checked_state = e.checked
 	})
 
 	e.on_validate(function(ev) {
@@ -4484,62 +4565,77 @@ function check_widget(e, markbox, input_type) {
 
 }
 
-// check ---------------------------------------------------------------------
+// checkbox ------------------------------------------------------------------
 
 css('.check-line', '', `
 	fill: none;
 	stroke: var(--fg-check);
 	stroke-linecap: round;
 	stroke-linejoin: round;
-	stroke-width: 5%;
+	stroke-width: 1px;
 `)
 css('.check-frame', 'check-line', `
 	rx    : 1px;
 	ry    : 1px;
-	x     : -25%;
-	y 		: -25%;
-	width :  50%;
-	height:  50%;
+	x     : -4.6px;
+	y 		: -4.6px;
+	width :  9.2px;
+	height:  9.2px;
 `)
 css('.check-mark', 'check-line ease', `
-	transform: translate(-25%, -25%) scale(.5);
-	stroke-width: 15%;
+	transform: translate(-5px, -5px) scale(.5);
+	stroke-width: 2px;
 	stroke-dasharray : 20;
 	stroke-dashoffset: 20;
 	transition-property: transform, stroke-dashoffset;
 `)
 
-css_state('.check[checked] .check-mark', 'ease', `
+css_state('.checkbox[checked] .check-mark', 'ease', `
 	stroke: var(--bg);
 	stroke-dashoffset: 0;
 	transition-property: transform, stroke-dashoffset;
 `)
 
-css_state('.check:focus-visible', 'no-outline')
+css_state('.checkbox:focus-visible', 'no-outline')
 
-css_state('.check:focus-visible .check-mark', 'ease', `
+css_state('.checkbox:focus-visible .check-mark', 'ease', `
 	stroke: var(--bg-focused-selected);
 	transition-property: transform, stroke-dashoffset;
 `)
 
-css_state('.check[checked] .check-frame', '', `
+css_state('.checkbox[checked] .check-frame', '', `
 	fill: var(--fg-check);
 `)
 
-G.check = component('check', function(e) {
-	e.class('check')
-	e.markbox = svg({viewBox: '-10 -10 20 20'},
-		svg_tag('circle'  , {class: 'checkbox-focus-circle'}),
-		svg_tag('rect'    , {class: 'check-frame'}),
-		svg_tag('polyline', {class: 'check-mark' , points: '4 11 8 15 16 6'})
-	)
-	check_widget(e, e.markbox)
+e.make_checkbox = function(focusable) {
+	let e = this
+	e.clear()
+	e.class('crbox checkbox')
+	e.class('focusable', !!focusable)
+	e.markbox = svg({viewBox: focusable ? '-10 -10 20 20' : '-5 -5 10 10', class: 'markbox'})
+	if (focusable)
+		e.markbox.append(svg_tag('circle', {class: 'crbox-focus-circle'}))
+	e.markbox.append(svg_tag('rect', {class: 'check-frame'}))
+	e.markbox.append(svg_tag('polyline', {class: 'check-mark' , points: '4 11 8 15 16 6'}))
+	e.add(e.markbox)
+	e.property('checked_state', function() {
+		if (this.bool_attr('null')) return null
+		return this.bool_attr('checked') || false
+	}, function(v) {
+	 	this.bool_attr('checked', v || null)
+		this.bool_attr('null', v == null || null)
+	})
+}
+
+G.checkbox = component('checkbox', function(e) {
+	e.make_checkbox(true)
+	checkbox_widget(e, e.markbox)
 })
 
 /* toggle --------------------------------------------------------------------
 
 inherits:
-	check_widget
+	checkbox_widget
 
 */
 
@@ -4571,9 +4667,10 @@ css_state('.toggle[checked]:is(:hover,.hover)', '', `
 css_state('.toggle-thumb:focus-visible', 'outline-focus')
 
 G.toggle = component('toggle', function(e) {
+	e.clear()
 	e.class('toggle')
 	e.markbox = div({class: 'toggle-thumb'})
-	check_widget(e, e.markbox)
+	checkbox_widget(e, e.markbox)
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 		if (key == 'ArrowLeft' || key == 'ArrowRight') {
 			e.user_set(key == 'ArrowRight', ev)
@@ -4585,28 +4682,39 @@ G.toggle = component('toggle', function(e) {
 /* <radio> -------------------------------------------------------------------
 
 inherits:
-	check_widget
+	checkbox_widget
 
 */
 
-css('.radio', 'checkbox')
+css('.radio-circle', '', `
+	r: 5px;
+	fill: none;
+	stroke: var(--fg-check);
+	stroke-width: 1px;
+`)
 
-css('.radio-circle', 'check-line', ` r: .5px; `)
-css('.radio-thumb' , 'ease'      , ` r:    0; fill: var(--fg-check); `)
+css('.radio-thumb' , 'ease', ` r: 0; fill: var(--fg-check); `)
 
-css_state('.radio[checked] .radio-thumb', 'ease', ` r: .2px; transition-property: r; `)
+css_state('.radio[checked] .radio-thumb', 'ease', ` r: 2px; transition-property: r; `)
 
 css_state('.radio:focus-visible', 'no-outline')
 
+e.make_radio = function(focusable) {
+	let e = this
+	e.clear()
+	e.class('crbox radio')
+	e.markbox = svg({viewBox: focusable ? '-10 -10 20 20' : '-5 -5 10 10', class: 'markbox'})
+	if (focusable)
+		e.markbox.append(svg_tag('circle', {class: 'crbox-focus-circle'}))
+	e.markbox.append(svg_tag('circle', {class: 'radio-circle'}))
+	e.markbox.append(svg_tag('circle', {class: 'radio-thumb'}))
+	e.add(e.markbox)
+}
+
 G.radio = component('radio', function(e) {
 
-	e.class('radio')
-	e.markbox = svg({viewBox: '-1 -1 2 2'},
-		svg_tag('circle', {class: 'checkbox-focus-circle'}),
-		svg_tag('circle', {class: 'radio-circle'}),
-		svg_tag('circle', {class: 'radio-thumb'}),
-	)
-	check_widget(e, e.markbox, 'radio')
+	e.make_radio(true)
+	checkbox_widget(e, e.markbox, 'radio')
 
 	e.group_elements = function() {
 		let form = e.form || document.body
@@ -5543,14 +5651,13 @@ G.select_button = component('select-button', function(e) {
 
 	// validation
 
-	e.value_known = function(v) {
-		for (let item of e.items)
-			if (v === e.item_value(item))
-				return true
-	}
+	e.prop('known_values', {slot: 'state'})
 
 	e.do_after('set_items', function(items) {
-		e.validate()
+		let kv = map()
+		for (let item of items)
+			kv.set(e.item_value(item), true)
+		e.known_values = kv
 	})
 
 	// view
@@ -5821,7 +5928,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 
 	e.input = input({classes: 'pass-input-input', type: 'password'})
 	e.eye_button = button({
-		type: 'button',
+		type: 'button', // no submit
 		classes: 'pass-input-button',
 		icon: 'far fa-eye',
 		bare: true,
@@ -5988,31 +6095,31 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.set_buttons = function(v) {
 		if (v == 'up-down') {
 			e.up_button = button({
+				type: 'button', // no submit
 				classes: 'num-input-button num-input-button-updown num-input-button-up',
 				bare: true,
 				focusable: false,
-				type: 'button',
 			}, div({class: 'num-input-arrow num-input-arrow-up'}))
 			e.down_button = button({
+				type: 'button', // no submit
 				classes: 'num-input-button num-input-button-updown num-input-button-down',
 				bare: true,
 				focusable: false,
-				type: 'button',
 			}, div({class: 'num-input-arrow num-input-arrow-down'}))
 			e.updown_box = div({class: 'num-input-updown-box'},
 				div({class: 'num-input-updown'}, e.up_button, e.down_button))
 			e.input_group.set([e.input, e.updown_box])
 		} else if (v == 'plus-minus') {
 			e.up_button   = button({
+				type: 'button', // no submit
 				classes: 'num-input-button num-input-button-plusminus num-input-button-plus',
 				focusable: false,
-				type: 'button',
 				icon: svg_plus_sign(),
 			})
 			e.down_button = button({
+				type: 'button', // no submit
 				classes: 'num-input-button num-input-button-plusminus num-input-button-minus',
 				focusable: false,
-				type: 'button',
 				icon: svg_minus_sign(),
 			})
 			e.input_group.set([e.down_button, e.input, e.up_button])
@@ -6289,27 +6396,21 @@ G.tags_input = component('tags-input', function(e) {
 	e.to_text = tags => tags.join(', ')
 	e.to_form = tags => e.format == 'words' ? tags.join(' ') : json(tags)
 
-	e.is_tags = true
+	e.is_values = true
 	e.make_input_widget({
 		input_value_attrs : {type: 'array', element_type: 'string'},
 		value_attrs       : {type: 'array', element_type: 'string'},
 		errors_tooltip_target: e.input_group,
 	})
 
-	let valid_tags
 	e.prop('valid_tags', {type: 'array', element_type: 'string', convert: convert_tags})
-	e.set_valid_tags = function(tags) {
-		valid_tags = tags.tokeys()
-	}
 
-	let invalid_tags = []
-	e.invalid_tags = function(tags) {
-		invalid_tags.clear()
-		if (valid_tags)
-			for (let tag of tags)
-				if (!valid_tags[tag])
-					invalid_tags.push(tag)
-		return invalid_tags
+	e.prop('known_values', {slot: 'state'})
+	e.set_valid_tags = function(tags) {
+		let kv = map()
+		for (let tag of tags)
+			kv.set(tag, true)
+		e.known_values = kv
 	}
 
 	e.prop('nowrap', {type: 'bool'})
@@ -6327,15 +6428,13 @@ G.tags_input = component('tags-input', function(e) {
 
 	e.on_validate(function(ev) {
 		e.tags_box.tags = e.input_value
-		e.update({state: true})
+		e.update({value: true})
 	})
 
 	e.on_update(function(opt) {
-		if (opt.state) {
-			let invalid_tags = e.invalid_tags(e.tags_box.tags).tokeys()
+		if (opt.value)
 			for (let tag_div of e.tags_box.at)
-				tag_div.class('invalid', !!invalid_tags[tag_div.value])
-		}
+				tag_div.class('invalid', !e.known_values.has(tag_div.value))
 	})
 
 	e.tag_input.on('keydown', function(key, shift, ctrl, alt, ev) {
@@ -6407,7 +6506,9 @@ state out props:
 methods:
 	lookup(value) -> i
 	set_open(on, [focus])
-	open([focus])  close([focus])  toggle([focus])
+	open  ([focus], [ev])
+	close ([focus], [ev])
+	toggle([focus], [ev])
 update opts:
 	value
 
@@ -6417,7 +6518,7 @@ update opts:
 // so that we can add popups to the widget without messing up the CSS.
 css('.dropdown', 'skip')
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
-css('.dropdown-value', 'S')
+css('.dropdown-value', 'S shrinks h-m nowrap')
 css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition because we use gap-x.
 css('.dropdown-chevron', 'smaller ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
@@ -6425,12 +6526,16 @@ css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
 css('.dropdown-xbutton', 'm0 p0 label smaller')
 css('.dropdown-xbutton::before', 'fa fa-times lh1')
 
-css('.dropdown-picker', 'b v-s p-y-input bg-input z3 arrow', `
+css('.dropdown-picker', 'clip b v p-y-input bg-input z3 arrow', `
 	margin-top: -2px; /* merge dropdown and picker outlines */
 	resize: both;
 	height: 12em; /* TODO: what we want is max-height but then resizer doesn't work! */
 `)
-css('.dropdown-picker > *', 'p-input')
+css('.dropdown-picker::-webkit-resizer', 'invisible')
+css('.dropdown-picker-close-button', 'm0 allcaps')
+css('.dropdown-list', 'S')
+
+css('.dropdown .dropdown-list > *', 'p-input')
 css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
 css('.dropdown[align=right] .dropdown-value'  , '', `order: 3;`)
 
@@ -6442,13 +6547,15 @@ css_state('.dropdown:has(:focus-visible) .dropdown-picker', 'outline-focus')
 
 css_state('.dropdown[invalid] .dropdown-inputbox', 'bg-error')
 
-G.dropdown = component('dropdown', 'Input', function(e) {
+css('.check-dropdown .dropdown-picker', 'p-x')
+
+function dropdown_widget(e, is_checklist) {
 
 	e.class('dropdown')
 	e.make_disablable()
 	e.init_child_components()
 
-	let html_list = e.$1('list')
+	let html_list = e.$1('.list')
 
 	if (!html_list) { // static list
 		html_list = div()
@@ -6466,9 +6573,11 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		errors_tooltip_target: e.inputbox,
 	})
 
+	e.to_form = v => e.format == 'words' ? v.join(' ') : json(v)
+
 	// model: value lookup
 
-	function item_value(item_e) {
+	e.item_value = function(item_e) {
 		if (item_e.data != null) { // dynamic list with a data model
 			return item_e.data.value
 		} else { // static list, value kept in a prop or attr.
@@ -6476,48 +6585,64 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		}
 	}
 
-	let lookup = map() // {value->list_index}
-	function list_items_changed() {
-		lookup.clear()
+	e.prop('known_values', {slot: 'state'}) // {value->list_index}
+
+	function list_items_changed(ev) {
+		let kv = map()
 		let list = this
 		for (let i = 0, n = list.list_len; i < n; i++) {
-			let value = item_value(list.at[i])
+			let value = e.item_value(list.at[i])
 			if (value !== undefined)
-				lookup.set(value, i)
+				kv.set(value, i)
 		}
-		e.validate()
+		e.known_values = kv
 	}
 
-	e.lookup = function(value) {
-		return lookup.get(value)
+	e.lookup = function(v) {
+		return e.known_values.get(v)
 	}
-
-	// validation
-
-	e.value_known = e.lookup
 
 	// model/view: list prop: set it up as picker.
 
 	function bind_list(list, on) {
 		if (!list) return
-		list.on('input', list_input, on)
-		list.on('items_changed', list_items_changed, on)
-		list.on('search', list_search, on)
-		list.on('pointerdown', list_pointerdown, on)
-		list.on('click', list_click, on)
 		if (on) {
 			list.make_list_items_focusable({multiselect: false})
 			list.make_list_items_searchable()
+			list.class('dropdown-list')
 			list_items_changed.call(list)
-			let item_i = e.lookup(e.value)
-			list.focus_item(item_i ?? false)
-			list.class('dropdown-picker scroll-thin')
-			list.popup(e.inputbox, 'bottom', 'start')
-			list.hide()
-			e.add(list)
+			if (is_checklist) {
+				assert(list.hasclass('checklist'))
+				e.close_button = button({
+					type: 'button', // no submit
+					classes: 'dropdown-picker-close-button',
+					text: S('close', 'Close'),
+					bare: true,
+					focusable: false,
+				})
+				e.picker = div({class: 'dropdown-picker scroll-thin'}, list, e.close_button)
+				e.picker.popup(e.inputbox, 'bottom', 'start')
+				e.picker.hide()
+				e.add(e.picker)
+			} else {
+				let item_i = e.lookup(e.value)
+				list.focus_item(item_i ?? false)
+				list.class('dropdown-picker scroll-thin')
+				list.popup(e.inputbox, 'bottom', 'start')
+				list.hide()
+				e.picker = list
+				e.add(list)
+			}
 		} else {
 			list.remove()
+			e.known_values = null
 		}
+		list.on('input'        , list_input, on)
+		list.on('items_changed', list_items_changed, on)
+		list.on('search'       , list_search, on)
+		list.on('pointerdown'  , list_pointerdown, on)
+		list.on('click'        , list_click, on)
+		list.on('item_checked' , list_item_checked, on)
 		e.update({value: true})
 	}
 
@@ -6537,28 +6662,71 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	e.value_box = div({class: 'dropdown-value'})
 	e.chevron   = div({class: 'dropdown-chevron'})
-	e.xbutton   = button({bare: true, focusable: false, classes: 'dropdown-xbutton'})
+	e.xbutton   = button({
+		type: 'button', // no submit
+		classes: 'dropdown-xbutton',
+		bare: true,
+		focusable: false,
+	})
 	e.inputbox.add(e.value_box, e.xbutton, e.chevron)
 
 	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
 
-	e.set_required = function() {
-		e.update({value: true})
+	e.format_item = function(i) {
+		let item_e = e.list.at[i].clone()
+		item_e.class('check-dropdown-item')
+		if (is_checklist)
+			item_e.$1('checklist-checkbox').remove()
+		return item_e
 	}
 
 	e.on_update(function(opt) {
 		if (opt.value) {
-			let i = e.lookup(e.value)
-			if (i != null) {
-				let item_e = e.list.at[i].clone()
-				item_e.id = null // id would be duplicated.
-				item_e.selected = null
-				e.list.update_item_state(item_e)
-				e.value_box.set(item_e)
+
+			if (is_checklist) {
+
+				for (let item of e.list.at)
+					item.checkbox.checked_state = false
+				if (e.value) {
+					for (let v of e.value) {
+						let i = e.lookup(v)
+						e.list.at[i].checkbox.checked_state = true
+					}
+				}
+
+				let items = []
+				if (e.value) {
+					for (let v of e.value) {
+						let i = e.lookup(v)
+						e.list.at[i].checkbox.checked_state = true
+
+						let item_e = e.format_item(i)
+						item_e.id = null // id would be duplicated.
+						item_e.selected = null
+						e.list.update_item_state(item_e)
+						items.push(item_e)
+					}
+					e.value_box.set(items)
+				} else {
+					e.value_box.clear()
+				}
+
 			} else {
-				e.value_box.clear()
+
+				let i = e.lookup(e.value)
+				if (i != null) {
+					let item_e = e.format_item(i)
+					item_e.id = null // id would be duplicated.
+					item_e.selected = null
+					e.list.update_item_state(item_e)
+					e.value_box.set(item_e)
+				} else {
+					e.value_box.clear()
+				}
+
 			}
-			e.class('empty', i == null)
+
+			e.class('empty', e.value == null)
 			e.xbutton.show(e.value != null && !e.required)
 		}
 	})
@@ -6569,7 +6737,7 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 	})
 	e.on_position(function() {
 		if (!e.list) return
-		e.list.min_w = w
+		e.picker.min_w = w
 	})
 
 	// open state -------------------------------------------------------------
@@ -6583,18 +6751,19 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 		}
 	)
 
-	e.set_open = function(open, focus) {
+	e.set_open = function(open, focus, ev) {
 		if (e.isopen != open) {
 			let w = e.rect().w
 			e.class('open', open)
 			if (open) {
-				e.list.update({show: true})
+				e.picker.update({show: true})
 				e.list.focus_item(true, 0, {
 					make_visible: true,
 					must_not_move: true,
+					event: ev,
 				})
 			} else {
-				e.list.hide()
+				e.picker.hide(true, ev)
 				e.list.search('')
 			}
 		}
@@ -6602,39 +6771,55 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 			e.focus()
 	}
 
-	e.open   = function(focus) { e.set_open(true, focus) }
-	e.close  = function(focus) { e.set_open(false, focus) }
-	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
+	e.open   = function(focus, ev) { e.set_open(true     , focus, ev) }
+	e.close  = function(focus, ev) { e.set_open(false    , focus, ev) }
+	e.toggle = function(focus, ev) { e.set_open(!e.isopen, focus, ev) }
 
 	// controller -------------------------------------------------------------
 
 	e.inputbox.on('pointerdown', function(ev) {
-		e.toggle()
+		e.toggle(false, ev)
 	})
 
 	e.inputbox.on('blur', function(ev) {
-		e.close()
+		e.close(false, ev)
 	})
 
 	e.on_validate(function(ev) {
-		if (e.list && e.list.ispopup && !(ev && ev.target == e.list)) {
-			e.list.focus_item(e.lookup(e.value) ?? false, 0, {
-				must_not_move: true,
-				event: ev,
-			})
+		if (!is_checklist) {
+			if (e.list && e.list.ispopup && !(ev && ev.target == e.list)) {
+				e.list.focus_item(e.lookup(e.value) ?? false, 0, {
+					must_not_move: true,
+					event: ev,
+				})
+			}
 		}
 		e.update({value: true})
 	})
 
-	function list_input(ev) {
-		let v = this.focused_item ? item_value(this.focused_item) : null
+	function list_item_checked(item, checked, ev) {
+		let v = e.value ? e.value.slice() : []
+		let s = e.item_value(item)
+		if (checked)
+			v.push(s)
+		else
+			v.remove_value(s)
+		if (!v.len) v = null
 		e.set_prop('input_value', v, ev)
+	}
+
+	function list_input(ev) {
+		if (!is_checklist) {
+			let v = this.focused_item ? e.item_value(this.focused_item) : null
+			e.set_prop('input_value', v, ev)
+		}
 	}
 
 	function list_search() {
 		if (this.search_string)
 			e.open()
-		e.update({value: true})
+		if (!is_checklist)
+			e.update({value: true})
 	}
 
 	function list_pointerdown(ev) {
@@ -6647,21 +6832,22 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 	function list_click(ev) {
 		if (ev.target == this)
 			return // let resizer work
-		e.close()
+		if (!is_checklist)
+			e.close(false, ev)
 	}
 
 	e.inputbox.on('keydown', function(key, shift, ctrl, alt, ev) {
 		let free_key = !(alt || shift || ctrl)
 		if (
-			(free_key && key == ' ' && !e.list.search_string)
+			(free_key && !is_checklist && key == ' ' && !e.list.search_string)
 			|| (alt && (key == 'ArrowDown' || key == 'ArrowUp'))
 			|| (free_key && key == 'Enter')
 		) {
-			e.toggle(true)
+			e.toggle(true, ev)
 			return false
 		}
 		if (key == 'Escape') {
-			e.close()
+			e.close(false, ev)
 			return false
 		}
 		if (key == 'Delete') {
@@ -6689,6 +6875,22 @@ G.dropdown = component('dropdown', 'Input', function(e) {
 
 	return {list: html_list}
 
+}
+
+G.dropdown = component('dropdown', 'Input', function(e) {
+	return dropdown_widget(e)
+})
+
+G.check_dropdown = component('check-dropdown', 'Input', function(e) {
+
+	e.class('check-dropdown')
+	let props = dropdown_widget(e, true)
+
+	e.prop('format', {type: 'enum', enum_values: 'array words', default: 'array'})
+
+	e.is_values = true // enable values validators
+
+	return props
 })
 
 /* <autocomplete> ------------------------------------------------------------
@@ -7550,7 +7752,7 @@ function calendar_widget(e, mode) {
 		e.update()
 	})
 
-	let pointerdown_ts
+	let pointerdown_ts = 0
 
 	let inh_focus = e.focus
 	e.focus = function() {
@@ -8108,13 +8310,13 @@ function date_input_widget(e, has_date, has_time, range) {
 
 	if (range || e.picker != e.calendar) {
 		e.close_button = button({
-			type: 'button',
+			type: 'button', // no submit
 			classes: 'date-input-close-button',
 			focusable: false,
 			bare: true,
 		}, S('close', 'Close'))
-		e.close_button.action = function() {
-			e.close(false)
+		e.close_button.action = function(ev) {
+			e.close(false, ev)
 		}
 		e.picker_box = div({class: 'date-input-picker-box'}, e.picker, e.close_button)
 	} else {
@@ -8332,7 +8534,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.input_group.make_focus_ring(...e.inputs)
 
 	e.picker_button = button({
-		type: 'button',
+		type: 'button', // no submit
 		classes: 'date-input-picker-button',
 		bare: true,
 		focusable: false,
@@ -8361,7 +8563,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			e.set_open(open, true)
 		}
 	)
-	e.set_open = function(open, focus) {
+	e.set_open = function(open, focus, ev) {
 		e.class('open', open)
 		if (open) {
 			e.picker_box.popup(e.input_group, 'bottom', 'start')
@@ -8377,18 +8579,18 @@ function date_input_widget(e, has_date, has_time, range) {
 		}
 	}
 
-	e.open   = function(focus) { e.set_open(true, focus) }
-	e.close  = function(focus) { e.set_open(false, focus) }
-	e.toggle = function(focus) { e.set_open(!e.isopen, focus) }
+	e.open   = function(focus, ev) { e.set_open(true     , focus, ev) }
+	e.close  = function(focus, ev) { e.set_open(false    , focus, ev) }
+	e.toggle = function(focus, ev) { e.set_open(!e.isopen, focus, ev) }
 
 	e.picker_box.on('focusout', function(ev) {
 		if (ev.relatedTarget && e.picker_box.contains(ev.relatedTarget))
 			return
-		e.close(false)
+		e.close(false, ev)
 	})
 
 	e.picker_button.on('pointerdown', function(ev) {
-		e.toggle()
+		e.toggle(false, ev)
 		return false
 	})
 
@@ -8398,25 +8600,25 @@ function date_input_widget(e, has_date, has_time, range) {
 				return
 			// delay it so the user can glance the choice.
 			runafter(.1, function() {
-				e.close()
+				e.close(false, ev)
 			})
 		})
 
-	e.picker_box.on('keydown', function(key, shift, ctrl, alt) {
+	e.picker_box.on('keydown', function(key, shift, ctrl, alt, ev) {
 		let free_key = !(alt || shift || ctrl)
 		if (free_key && key == 'Escape') {
-			e.close()
+			e.close(false, ev)
 			return false
 		}
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt) {
+	e.on('keydown', function(key, shift, ctrl, alt, ev) {
 		let free_key = !(alt || shift || ctrl)
 		if (
 			(alt && (key == 'ArrowDown' || key == 'ArrowUp'))
 			|| (free_key && key == 'Enter')
 		) {
-			e.toggle()
+			e.toggle(false, ev)
 			return false
 		}
 	})

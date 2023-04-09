@@ -159,7 +159,7 @@ on_dom_load(function() {
 			return
 		let name = e.id.replace('_demo', '')
 		let s = window[name+'_demo'].html.trim()
-		let item = div({class: 'demo-list-item'}, name)
+		let item = div({class: 'demo-list-item'}, name.replace('_', '-'))
 		demo_list.add(item)
 		let i1 = i
 		item.on('click', function() {
@@ -432,7 +432,7 @@ main.add(b)
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=tabs-editable_demo>
+<xmp id=tabs_editable_demo>
 <d class="h self-h-t">
 	<button onclick="mytabs.tabs_side='top';"    >tabs_side=top   </button>
 	<button onclick="mytabs.tabs_side='bottom';" >tabs_side=bottom</button>
@@ -635,12 +635,12 @@ toggle_collapsed = function() {
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=check_demo>
+<xmp id=checkbox_demo>
 <form id=my_form class="g-m g-2col gap-x">
-	<check id=my_check1 name=check1 checked-value=yes checked required></check><label for=my_check1>Check me baby</label>
-	<check id=my_check2 name=check2 checked-value=yes value=wrong required></check><label for=my_check2>Check me baby</label>
+	<checkbox id=my_check1 name=check1 checked-value=yes checked required></checkbox><label for=my_check1>Check me baby</label>
+	<checkbox id=my_check2 name=check2 checked-value=yes value=wrong required></checkbox><label for=my_check2>Check me baby</label>
 	<d></d><errors for=my_check2 type=rules></errors>
-	<check id=my_check3 name=check3 checked-value=yes unchecked-value=no></check><label for=my_check3>Check me baby</label>
+	<checkbox id=my_check3 name=check3 checked-value=yes unchecked-value=no></checkbox><label for=my_check3>Check me baby</label>
 	<d></d><button>Submit</button>
 </form>
 <script run>
@@ -726,7 +726,7 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=input-group_demo>
+<xmp id=input_group_demo>
 
 <input-group class="ro-var">
 	<d class="ro-var h-m p-x fa fa-car"></d>
@@ -790,7 +790,7 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=select-button_demo>
+<xmp id=select_button_demo>
 <d class="small">
 	<select-button value=v2>
 		<d value=v1><span class="mi">rocket</span>Big Rockets</d>
@@ -836,7 +836,7 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=textarea-input_demo>
+<xmp id=textarea_input_demo>
 <textarea-input class=small value="abc"></textarea-input>
 <div>
 	<textarea-input required placeholder="Put stuff here" id=my_input></textarea-input>
@@ -848,7 +848,7 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=text-input_demo>
+<xmp id=text_input_demo>
 <div class="xsmall  "><text-input value="abc"></text-input><button>OK</button></div>
 <div class="small   "><text-input value="abc"></text-input><button>OK</button></div>
 <div class="smaller "><text-input></text-input><button>OK</button></div>
@@ -868,7 +868,7 @@ my_input2.validator.add_rule({
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=pass-input_demo>
+<xmp id=pass_input_demo>
 <div class="xsmall  "><pass-input value="abc"></pass-input><button>OK</button></div>
 <div class="small   "><pass-input value="abc"></pass-input><button>OK</button></div>
 <div class="smaller "><pass-input required></pass-input><button>OK</button></div>
@@ -895,7 +895,7 @@ my_input2.validator.add_rule({
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=num-input_demo>
+<xmp id=num_input_demo>
 <div class="xsmall  "><num-input value=-1.51   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
 <div class="small   "><num-input value=-1.52   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
 <div class="smaller "><num-input value=-1.53   decimals=1 buttons=up-down   ></num-input><button>OK</button></div>
@@ -910,7 +910,7 @@ my_input2.validator.add_rule({
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=tags-input_demo>
+<xmp id=tags_input_demo>
 <form id=my_form>
 <tags-box tags="Apples Bananas Mangos what do you do when there are too many tags"></tags-box>
 <tags-input nowrap value="Apples Bananas Mangos"></tags-input>
@@ -944,7 +944,27 @@ my_form.on('submit', function() {
 
 <!--------------------------------------------------------------------------->
 
-<xmp id="list-drag_demo">
+<xmp id=checklist_demo>
+<checklist>
+	<template>
+		<div class="h-m gap p">
+			<checklist-checkbox></checklist-checkbox>
+			<div>{{name}}</div>
+		</div>
+	</template>
+	<script>
+		return [
+			{name: 'Apples'},
+			{name: 'Bananas'},
+			{name: 'Mangos'},
+		]
+	</script>
+</checklist>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id=list_drag_demo>
 <script type="text/x-mustache" id=list_drag_demo_template>
 	<div class="b2 p bg1 noselect" style="{{#height}}height: {{height}}{{/height}}">
 		<div class="bold nowrap">{{name}}</div>
@@ -1048,6 +1068,39 @@ for (let e of $('list')) {
 
 <!--------------------------------------------------------------------------->
 
+<xmp id=check_dropdown_demo>
+<form id=my_form>
+<check-dropdown name=cd1 value='["Mangos"]' required>
+	<checklist>
+		<template>
+			<d class="h-m">
+				<checklist-checkbox class="m-r"></checklist-checkbox>
+				<d>{{value}}</d>
+			</d>
+		</template>
+		<script>
+			return [
+				{value: 'Bananas'},
+				{value: 'Apples'},
+				{value: 'Mangos'},
+			]
+		</script>
+	</checklist>
+</check-dropdown>
+<button>Submit</button>
+</form>
+<script run>
+my_form.on('submit', function() {
+	pr(this.json())
+	for (const [name,value] of new FormData(this))
+		pr('', name, ':', value)
+	return false
+})
+</script>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
 <xmp id=calendar_demo>
 <ranges-calendar class="large">
 	<range>2022-1-1..2022-1-5</range>
@@ -1062,19 +1115,19 @@ for (let e of $('list')) {
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=time-picker_demo>
+<xmp id=time_picker_demo>
 <time-picker value="0:59:12" with-seconds></time-picker>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=datetime-picker_demo>
+<xmp id=datetime_picker_demo>
 <datetime-picker value="2345-7-6 00:34:59" with-seconds></datetime-picker>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=date-input_demo>
+<xmp id=date_input_demo>
 <form id=my_form>
 <div><date-input       name=d1 placeholder="Birth date"></date-input></div>
 <div><date-input       name=d2 value="1900-1-1" placeholder="Birth date"></date-input></div>
@@ -1159,7 +1212,7 @@ main.add(g)
 
 <!--------------------------------------------------------------------------->
 
-<xmp id="html grid_demo">
+<xmp id=html_grid_demo>
 <grid>
 	<col-attrs for=id type=number></col-attrs>
 	<rowset pk=id can_change_rows=false>
@@ -1270,9 +1323,9 @@ main.add(g)
 
 <!--------------------------------------------------------------------------->
 
-<xmp id="form_demo">
+<xmp id=form_demo>
 <form id=my_form class="g-h g-m g-2col gap-x" style="grid-template-columns: 5em auto">
-	<check  name=check1 checked-value=c1 class="self-h-c" id=check1></check><label for=check1>Check me baby</label>
+	<checkbox name=check1 checked-value=c1 class="self-h-c" id=check1></checkbox><label for=check1>Check me baby</label>
 	<radio  name=radio1 checked-value=r1 class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
 	<radio  name=radio1 checked-value=r2 class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
 	<toggle name=toggle1 class="self-h-c" id=toggle1></toggle><label for=toggle1>Toggle me</label>
