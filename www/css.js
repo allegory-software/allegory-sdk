@@ -12,7 +12,7 @@ CSS CLASSES
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
 	TEXT COLORS   dim[-on-dark] white label link
 	ALIGN INLINE  inline block t-{l r c j m t b bas sub sup} float-{l r}
-	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex[-no][-wrap] order-{1 2 last}
+	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex[-no][-wrap] order-{1 2 last} no-shrink
 	ALIGN GRID    g-{l r c sb s t b m bl} g-{x y}{1-5} x..x y..y g
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
@@ -644,6 +644,8 @@ css('.gap-y-2'  , '', ` row-gap: var(--space-2); `)
 css('.gap-y-4'  , '', ` row-gap: var(--space-4); `)
 css('.gap-y-8'  , '', ` row-gap: var(--space-8); `)
 css('.gap-y-0'  , '', ` row-gap: 0; `)
+
+css('.no-shrink', '', ` flex-shrink: 0; `)
 
 /* ALIGN: GRID ------------------------------------------------------------ */
 

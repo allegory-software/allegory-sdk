@@ -6627,7 +6627,7 @@ css('.dropdown-picker', 'scroll-auto b v p-y-input bg-input z3 arrow', `
 	max-height: 16em;
 `)
 css('.dropdown-picker-box', 'gap-y')
-css('.dropdown-picker-close-button', 'm0 allcaps')
+css('.dropdown-picker-close-button', 'm0 allcaps no-shrink')
 css('.dropdown-list', 'S')
 css('.dropdown-list::-webkit-resizer', 'invisible')
 css('.dropdown .dropdown-list > *', 'p-input')
