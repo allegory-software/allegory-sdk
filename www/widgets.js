@@ -6700,7 +6700,7 @@ function dropdown_widget(e, is_checklist) {
 				list.make_checklist()
 			list.make_list_items_focusable({multiselect: false})
 			list.make_list_items_searchable()
-			list.class('dropdown-list')
+			list.class('dropdown-list scroll-thin')
 			list_items_changed.call(list)
 			if (is_checklist) {
 				e.close_button = button({
@@ -6710,14 +6710,14 @@ function dropdown_widget(e, is_checklist) {
 					bare: true,
 					focusable: false,
 				})
-				e.picker = div({class: 'dropdown-picker scroll-thin'}, list, e.close_button)
+				e.picker = div({class: 'dropdown-picker'}, list, e.close_button)
 				e.picker.popup(e.inputbox, 'bottom', 'start')
 				e.picker.hide()
 				e.add(e.picker)
 			} else {
 				let item_i = e.lookup(e.value)
 				list.focus_item(item_i ?? false)
-				list.class('dropdown-picker scroll-thin')
+				list.class('dropdown-picker')
 				list.popup(e.inputbox, 'bottom', 'start')
 				list.hide()
 				e.picker = list
