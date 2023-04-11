@@ -6626,8 +6626,10 @@ css('.dropdown-picker', 'scroll-auto b v p-y-input bg-input z3 arrow', `
 	resize: both;
 	max-height: 16em;
 `)
-css('.dropdown-picker-close-button', 'm0 allcaps')
+css('.dropdown-picker-box', 'gap-y')
+css('.dropdown-picker-close-button', 'm0 allcaps p-y-2')
 css('.dropdown-list', 'S')
+css('.dropdown-list::-webkit-resizer', 'invisible')
 css('.dropdown .dropdown-list > *', 'p-input')
 
 // TODO: fix this on Firefox but note that :focus-within is buggy on FF,
@@ -6640,6 +6642,8 @@ css('.check-dropdown .dropdown-picker', 'p-x')
 css('.check-dropdown .dropdown-value', 'gap-x')
 css('.check-dropdown-item', 'shrinks clip nowrap')
 css('.check-dropdown-item[invalid]', 'bg-error2')
+
+css_state('.check-dropdown .checklist-item.focused', 'bg1 fg')
 
 function dropdown_widget(e, is_checklist) {
 
@@ -6710,7 +6714,7 @@ function dropdown_widget(e, is_checklist) {
 					bare: true,
 					focusable: false,
 				})
-				e.picker = div({class: 'dropdown-picker'}, list, e.close_button)
+				e.picker = div({class: 'dropdown-picker-box dropdown-picker'}, list, e.close_button)
 				e.picker.popup(e.inputbox, 'bottom', 'start')
 				e.picker.hide()
 				e.add(e.picker)
