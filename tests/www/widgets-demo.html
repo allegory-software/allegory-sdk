@@ -975,26 +975,6 @@ my_form.on('submit', function() {
 
 <!--------------------------------------------------------------------------->
 
-<xmp id=checklist_demo>
-<checklist>
-	<template>
-		<div class="h-m gap p">
-			<checklist-checkbox></checklist-checkbox>
-			<div>{{name}}</div>
-		</div>
-	</template>
-	<script>
-		return [
-			{name: 'Apples'},
-			{name: 'Bananas'},
-			{name: 'Mangos'},
-		]
-	</script>
-</checklist>
-</xmp>
-
-<!--------------------------------------------------------------------------->
-
 <xmp id=list_drag_demo>
 <script type="text/x-mustache" id=list_drag_demo_template>
 	<div class="b2 p bg1 noselect" style="{{#height}}height: {{height}}{{/height}}">
@@ -1031,6 +1011,39 @@ for (let e of $('list')) {
 	e.make_list_items_focusable()
 	e.make_list_drag_elements()
 	e.make_list_drop_elements()
+}
+</script>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id=checklist_demo>
+<p>Static checklist</p>
+<checklist>
+	<d value=a checked>Apples</d>
+	<d value=b>Bananas</d>
+	<d value=m checked>Mangos</d>
+</checklist>
+
+<p>Templated checklist</p>
+<checklist>
+	<script type="text/x-mustache">
+		<d value="{{value}}">{{name}}</d>
+	</script>
+	<script>
+		return [
+			{value: 'a', name: 'Apples', checked: true},
+			{value: 'b', name: 'Bananas'},
+			{value: 'm', name: 'Mangos', checked: true},
+		]
+	</script>
+</checklist>
+
+<script run>
+for (let cl of this.parent.$('checklist')) {
+	cl.make_list_items_focusable()
+	cl.make_focusable()
+	cl.on('item_checked', (item, checked) => pr(item.attr('value'), checked))
 }
 </script>
 </xmp>
@@ -1101,25 +1114,30 @@ for (let e of $('list')) {
 
 <xmp id=check_dropdown_demo>
 <form id=my_form>
-<check-dropdown name=cd1 value='["Mangos"]' required>
-	<checklist>
-		<template>
-			<d class="h-m">
-				<checklist-checkbox class="m-r"></checklist-checkbox>
-				<d>{{value}}</d>
-			</d>
-		</template>
-		<script>
-			return [
-				{value: 'Bananas'},
-				{value: 'Apples'},
-				{value: 'Mangos'},
-			]
-		</script>
-	</checklist>
+
+<p>Basic checklist with default formatting</p>
+<check-dropdown name=cd1 value='["3","1"]' required>
+	<d value=1>Bananas</d>
+	<d value=2>Apples</d>
+	<d value=3>Mangos</d>
+</check-dropdown>
+
+<p>Templated checklist</p>
+<check-dropdown name=cd2 value='["Mangos","Bananas","Tamarind"]' required>
+	<template>
+		<d>{{value}}</d>
+	</template>
+	<script>
+		return [
+			{value: 'Bananas'},
+			{value: 'Apples'},
+			{value: 'Mangos'},
+		]
+	</script>
 </check-dropdown>
 <button>Submit</button>
 </form>
+
 <script run>
 my_form.on('submit', function() {
 	pr(this.json())

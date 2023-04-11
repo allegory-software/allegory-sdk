@@ -1067,6 +1067,11 @@ css('.bg-error', '', `
 	color      : var(--fg-error);
 `)
 
+css('.bg-error2', '', `
+	background : var(--bg-error2);
+	color      : var(--fg-error);
+`)
+
 css('.bg-warn', '', `
 	background : var(--bg-warn);
 	color      : var(--fg-warn);

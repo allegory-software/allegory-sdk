@@ -104,12 +104,16 @@ is that the callback is asynchronous (it's called in the next frame), so you
 don't have immediate access to the updated DOM of the widget after you change
 a property. This forces a conceptual separation between what's considered the
 "model" of the widget (which should be updated immediately) and what's
-considered the "view" (which is updated in the next frame). Of course you
-can always just make your own update function that you call directly inside
-property setters to avoid the async issue and still solve the property
-dependency issue. This is how we do validation in our input widgets: the
-validated value is recalculated immediately every time any of the props
-involved in the validation change, not in the next frame.
+considered the "view" (which is updated in the next frame). This separation
+is necessary to avoid TOCTOU bugs because, since DOM updates are done later,
+you cannot mix model updates with DOM querying and traversals anymore.
+In fact the DOM becomes write-only.
+
+Of course you can always just make your own update function that you call
+directly inside property setters to avoid the async issue and still solve
+the property dependency issue. This is how we do validation in our input
+widgets: the validated value is recalculated immediately every time any of
+the props involved in the validation change, not in the next frame.
 
 Another problem with updating everything in one place is that now you have to
 figure out how to do the minimum amount of changes in the DOM given the new

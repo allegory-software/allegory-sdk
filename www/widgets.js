@@ -12,6 +12,7 @@ WIDGETS
 	tooltip          text target align side kind icon_visible
 	toaster          post(text, [kind], [timeout]) close_all()
 	list
+	checklist
 	menu
 	tabs             tabs_side auto_focus selected_item_id
 	split, vsplit    fixed_side fixed_size resizeable min_size
@@ -40,6 +41,7 @@ WIDGETS
 	tags-box
 	tags-input
 	dropdown
+	check-dropdown
 	autocomplete
 	calendar
 	range-calendar
@@ -1146,7 +1148,7 @@ e.make_list_items_focusable = function(opt) {
 		e.announce('selected_items_changed', ev)
 	}
 
-	e.do_after('items_changed', function() {
+	e.on('items_changed', function() {
 		if (e.focused_item)
 			if (e.focused_item.parent != e) { // removed
 				e.focused_item_index = null
@@ -1330,6 +1332,8 @@ NOTE: Makes list items be focusable if not already.
 
 */
 
+css('.dropdown-search', 'fg-search bg-search')
+
 e.make_list_items_searchable = function() {
 
 	let e = this
@@ -1449,8 +1453,8 @@ e.make_list_items_searchable = function() {
 			return false
 		}
 		if (!ctrl && !alt && (key.len == 1 || /[^a-zA-Z0-9]/.test(key))) {
-			e.search((search_string || '') + key, ev)
-			return false
+			if (e.search((search_string || '') + key, ev))
+				return false
 		}
 	})
 
@@ -1473,7 +1477,7 @@ data props:
 stubs:
 	format_item(item, ts)
 
-NOTE: removes element margins!
+NOTE: removes element margins (needed for drag & drop to work) !
 
 */
 
@@ -1484,64 +1488,76 @@ G.list = component('list', function(e) {
 	e.class('list')
 	e.make_disablable()
 
+	// html
+
 	let ht = e.$1(':scope>template, :scope>script[type="text/x-mustache"], :scope>xmp')
 	let html_template = ht && ht.html
 	if (ht) ht.remove()
 
-	let s = e.$1(':scope>script')
-	let html_items = s && s.run(e) || json_arg(e.attr('items'))
+	let sc = e.$1(':scope>script')
+	let html_items = sc && sc.run(e) || json_arg(e.attr('items'))
+	if (sc) sc.remove()
+
+	if (e.len && !html_template && !html_items) // static items
+		html_items = [...e.at]
 
 	e.clear()
+
+	// model
+
+	e.prop('items', {type: 'array', element_type: 'object', default: empty_array})
+	e.prop('item_template_name', {type: 'template_name', attr: 'item_template'})
+	e.prop('item_template', {type: 'template'})
+
+	e.set_items = function(v, v0, ev) {
+		if (ev && ev.from_items_changed)
+			return
+		update_items()
+	}
+	e.set_item_template_name = update_items
+	e.set_item_template = update_items
+
+	// view
 
 	e.property('item_template_string', function() {
 		return template(e.item_template_name) || e.item_template
 	})
 
-	let items = empty_array
-	e.get_items = () => items
-	e.set_items = function(items1) {
-		items = items1
-		let ts = e.item_template_string
-		if (!ts) return
-		e.clear()
-		for (let item of items) {
-			let item_e = e.format_item(item, ts)
-			item_e.list = e
-			item_e.data = item
-			item_e.focusable = item.focusable
-			if (e.update_item_state)
-				e.update_item_state(item_e)
-			e.add(item_e)
-		}
-		e.fire('items_changed', 'set_items')
-	}
-	e.prop('items', {store: false, type: 'array', element_type: 'node'})
-
-	e.prop('item_template_name', {type: 'template_name', attr: 'item_template', updates: 'items'})
-	e.prop('item_template'     , {type: 'template', updates: 'items'})
-
 	e.format_item = function(item, ts) {
 		return unsafe_html(render_string(ts, item || empty_obj), false)
 	}
 
-	e.rerender_item = function(item_e0, ts) {
-		let item = e0.data
-		let item_e1 = e.format_item(item, ts)
-		item_e1.list = e
-		item_e1.data = item
-		item_e1.selected = item_e0.selected
-		e.replace(item_e0, item_e1)
-		if (e.update_item_state)
-			e.update_item_state(item_e1)
-		return item_e1
+	function update_items() {
+		let ts = e.item_template_string
+		if (ts) { // to-render items
+			e.clear()
+			for (let item of e.items) {
+				let item_e = e.format_item(item, ts)
+				item_e.data = item
+				item_e.focusable = item.focusable
+				if (e.update_item_state)
+					e.update_item_state(item_e)
+				e.add(item_e)
+			}
+		} else { // static items
+			for (let item_e of e.items) {
+				if (e.update_item_state)
+					e.update_item_state(item_e)
+			}
+			e.set(e.items)
+		}
+		e.fire('items_changed', {from_update: true})
 	}
 
-	e.on('items_changed', function(from) {
-		if (from == 'set_items')
+	e.on('items_changed', function(ev) {
+		if (ev && ev.from_update)
 			return
-		items.clear()
-		for (let i = 0, n = e.list_len; i < n; i++)
-			items.push(e.at[i].data)
+		let items = []
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			let item_e = e.at[i]
+			items.push(item_e.data)
+		}
+		e.set_prop('items', items, {from_items_changed: true})
 	})
 
 	return {item_template: html_template, items: html_items}
@@ -1552,13 +1568,12 @@ G.list = component('list', function(e) {
 
 in item template:
 	<checklist-checkbox>
-methods:
-	get_checked(item) -> t|f|null
-	set_checked(item, checked, [ev])
 events:
 	^item_checked(item, checked, ev)
 
 */
+
+css('checklist-checkbox', 'm-r')
 
 component('checklist-checkbox', function(e) {
 	e.clear()
@@ -1567,45 +1582,61 @@ component('checklist-checkbox', function(e) {
 	function check_click(ev) {
 		let checked = !this.checked_state
 		this.checked_state = checked
-		this.item.list.fire('item_checked', this.item, checked, ev)
+		this.list.fire('item_checked', this.item, checked, ev)
 	}
 	e.on('click', check_click)
-	e.on_bind(function(on) {
-		if (on) {
-			let item_e = e.parent
-			while (!item_e.list)
-				item_e = item_e.parent
-			e.item = item_e
-			item_e.checkbox = e
-		} else {
-			e.item.checkbox = null
-			e.item = null
-		}
-	})
 })
 
-G.checklist = component('checklist', function(e) {
+css('.checklist-item', 'h-m')
 
+// works with any element, doesn't have to be a <list>.
+e.make_checklist = function() {
+
+	let e = this
 	e.class('checklist')
-	let html_props = list.construct(e)
 
-	e.get_checked = function(item) {
-		return item.checkbox.checked_state
+	e.item_checked_state = function(i) {
+		let item = e.at[i].item
+		return item.data ? item.data.checked : item.bool_attr('checked')
 	}
-	e.set_checked = function(item, checked, ev) {
-		item.checkbox.checked_state = checked
+
+	function update_items() {
+		for (let i = 0, n = e.list_len; i < n; i++) {
+			let item_ct = e.at[i]
+			let item = item_ct.item
+			if (!item) {
+				item = item_ct
+				// wrap item and add a checkbox
+				let cb = tag('checklist-checkbox')
+				item_ct = div({class: 'checklist-item'}, cb)
+				e.replace(item, item_ct)
+				item_ct.add(item)
+				item_ct.item = item
+				cb.item = item
+				cb.list = e
+				item.checkbox = cb
+				cb.checked_state = e.item_checked_state(i)
+			}
+		}
 	}
+
+	e.on('items_changed', update_items)
 
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
-		let item = e.focused_item
-		if (key == ' ' && item) {
-			item.checkbox.click()
+		let item_ct = e.focused_item
+		if (key == ' ' && item_ct) {
+			item_ct.item.checkbox.click()
 			return false
 		}
 	})
 
-	return html_props
+	update_items()
+}
 
+G.checklist = component('checklist', function(e) {
+	let html_props = list.construct(e)
+	e.make_checklist()
+	return html_props
 })
 
 /* <menu> --------------------------------------------------------------------
@@ -6525,6 +6556,8 @@ css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
 css('.dropdown-xbutton', 'm0 p0 label smaller')
 css('.dropdown-xbutton::before', 'fa fa-times lh1')
+css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
+css('.dropdown[align=right] .dropdown-value'  , '', `order: 3;`)
 
 css('.dropdown-picker', 'clip b v p-y-input bg-input z3 arrow', `
 	margin-top: -2px; /* merge dropdown and picker outlines */
@@ -6534,12 +6567,7 @@ css('.dropdown-picker', 'clip b v p-y-input bg-input z3 arrow', `
 css('.dropdown-picker::-webkit-resizer', 'invisible')
 css('.dropdown-picker-close-button', 'm0 allcaps')
 css('.dropdown-list', 'S')
-
 css('.dropdown .dropdown-list > *', 'p-input')
-css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
-css('.dropdown[align=right] .dropdown-value'  , '', `order: 3;`)
-
-css('.dropdown-search', 'fg-search bg-search')
 
 // TODO: fix this on Firefox but note that :focus-within is buggy on FF,
 // it gets stuck even when focus is on anoher widget, so it's not an easy fix.
@@ -6548,6 +6576,8 @@ css_state('.dropdown:has(:focus-visible) .dropdown-picker', 'outline-focus')
 css_state('.dropdown[invalid] .dropdown-inputbox', 'bg-error')
 
 css('.check-dropdown .dropdown-picker', 'p-x')
+css('.check-dropdown .dropdown-value', 'gap-x')
+css('.check-dropdown-item[invalid]', 'bg-error2')
 
 function dropdown_widget(e, is_checklist) {
 
@@ -6555,14 +6585,9 @@ function dropdown_widget(e, is_checklist) {
 	e.make_disablable()
 	e.init_child_components()
 
-	let html_list = e.$1('.list')
-
-	if (!html_list) { // static list
-		html_list = div()
-		for (let ce of [...e.at])
-			html_list.add(ce)
-		e.clear()
-	}
+	let html_list = is_checklist
+		? e.$1('.checklist') || tag('checklist', 0, ...e.at)
+		: e.$1('.list'     ) || tag('list'     , 0, ...e.at)
 
 	e.inputbox = div({class: 'inputbox dropdown-inputbox'})
 	e.add(e.inputbox)
@@ -6591,7 +6616,9 @@ function dropdown_widget(e, is_checklist) {
 		let kv = map()
 		let list = this
 		for (let i = 0, n = list.list_len; i < n; i++) {
-			let value = e.item_value(list.at[i])
+			let item_e = list.at[i]
+			item_e = is_checklist ? item_e.item : item_e
+			let value = e.item_value(item_e)
 			if (value !== undefined)
 				kv.set(value, i)
 		}
@@ -6607,12 +6634,13 @@ function dropdown_widget(e, is_checklist) {
 	function bind_list(list, on) {
 		if (!list) return
 		if (on) {
+			if (is_checklist && !list.hasclass('checklist')) // plain list, make it a checklist.
+				list.make_checklist()
 			list.make_list_items_focusable({multiselect: false})
 			list.make_list_items_searchable()
 			list.class('dropdown-list')
 			list_items_changed.call(list)
 			if (is_checklist) {
-				assert(list.hasclass('checklist'))
 				e.close_button = button({
 					type: 'button', // no submit
 					classes: 'dropdown-picker-close-button',
@@ -6673,11 +6701,28 @@ function dropdown_widget(e, is_checklist) {
 	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
 
 	e.format_item = function(i) {
-		let item_e = e.list.at[i].clone()
-		item_e.class('check-dropdown-item')
+		let item_e = e.list.at[i]
+		item_e = is_checklist ? item_e.item : item_e
+		item_e = item_e.clone()
+		item_e.id = null // id would be duplicated.
+		item_e.selected = null
+		e.list.update_item_state(item_e)
 		if (is_checklist)
-			item_e.$1('checklist-checkbox').remove()
+			item_e.class('check-dropdown-item')
 		return item_e
+	}
+
+	function partially_valid_input_value(remove_invalid) {
+		let v = e.input_value
+		v = isstr(v) ? (v.trim().starts('[') ? json_arg(v) : v.words()) : isarray(v) ? v.slice() : v
+		if (v) {
+			v.remove_duplicates()
+			if (remove_invalid)
+				for (let i = v.len; i >= 0; i--)
+					if (!e.known_values.has(v[i]))
+						v.remove(i)
+		}
+		return v
 	}
 
 	e.on_update(function(opt) {
@@ -6685,31 +6730,26 @@ function dropdown_widget(e, is_checklist) {
 
 			if (is_checklist) {
 
-				for (let item of e.list.at)
-					item.checkbox.checked_state = false
-				if (e.value) {
-					for (let v of e.value) {
-						let i = e.lookup(v)
-						e.list.at[i].checkbox.checked_state = true
-					}
+				for (let i = 0, n = list.list_len; i < n; i++) {
+					let item_ct = list.at[i]
+					item_ct.item.checkbox.checked_state = false
 				}
-
 				let items = []
-				if (e.value) {
-					for (let v of e.value) {
-						let i = e.lookup(v)
-						e.list.at[i].checkbox.checked_state = true
 
-						let item_e = e.format_item(i)
-						item_e.id = null // id would be duplicated.
-						item_e.selected = null
-						e.list.update_item_state(item_e)
-						items.push(item_e)
+				let v = partially_valid_input_value()
+				if (v) {
+					for (let s of v) {
+						let i = e.lookup(s)
+						if (i != null) {
+							e.list.at[i].item.checkbox.checked_state = true
+							let item_e = e.format_item(i)
+							items.push(item_e)
+						} else {
+							items.push(div({class: 'check-dropdown-item', invalid: ''}, s))
+						}
 					}
-					e.value_box.set(items)
-				} else {
-					e.value_box.clear()
 				}
+				e.value_box.set(items)
 
 			} else {
 
@@ -6798,7 +6838,7 @@ function dropdown_widget(e, is_checklist) {
 	})
 
 	function list_item_checked(item, checked, ev) {
-		let v = e.value ? e.value.slice() : []
+		let v = partially_valid_input_value(true) || []
 		let s = e.item_value(item)
 		if (checked)
 			v.push(s)
@@ -6854,6 +6894,9 @@ function dropdown_widget(e, is_checklist) {
 			e.set_prop('input_value', null, ev)
 			return false
 		}
+
+		if (key == 'Alt') // pressing Alt removes focus on Windows.
+			ev.preventDefault()
 
 		if (ev.target.closest_child(e) == e.list) // event bubbled back from the picker.
 			return
