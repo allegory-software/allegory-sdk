@@ -1339,8 +1339,6 @@ e.make_list_items_searchable = function() {
 	let e = this
 	e.make_list_items_searchable = noop
 
-	e.make_list_items_focusable()
-
 	e.search_into = function(s, in_s) { // stub
 		let i = in_s.find_ai_ci(s)
 		return i != null ? [i, s.len] : empty_array
@@ -1359,8 +1357,9 @@ e.make_list_items_searchable = function() {
 			let item_e = e.at[item_i]
 
 			// skip non-focusables
-			if (!e.can_focus_item(item_e, null, true))
-				continue
+			if (e.can_focus_item)
+				if (!e.can_focus_item(item_e, null, true))
+					continue
 
 			let show = !searching
 			let searchables = item_e.hasattr('searchable') ? [item_e] : item_e.$('[searchable]')
@@ -1416,15 +1415,20 @@ e.make_list_items_searchable = function() {
 		}
 
 		// step 3: focus first found item.
-		if (first_item_i != null) {
-			e.focus_item(first_item_i, 0, {
-				make_visible: true,
-				event: ev,
-			})
+		if (e.focus_item) {
+			if (first_item_i != null) {
+					e.focus_item(first_item_i, 0, {
+						make_visible: true,
+						event: ev,
+					})
+			} else {
+				let item_e = e.focused_item
+				if (item_e)
+					item_e.make_visible()
+			}
 		} else {
-			let item_e = e.focused_item
-			if (item_e)
-				item_e.make_visible()
+			if (first_item_i != null)
+				e.at[first_item_i].make_visible()
 		}
 
 		e.update({value: true})
@@ -1459,6 +1463,62 @@ e.make_list_items_searchable = function() {
 	})
 
 }
+
+/* <list-search-input> -------------------------------------------------------
+
+props:
+	for_id     for    list element to search into
+	value             current search value
+
+*/
+
+e.list_search_input = component('list-search-input', 'Input', function(e) {
+
+	e.class('list-search-input')
+	e.clear()
+	e.input = tag('input', {class: 'list-search-input-input'})
+	e.add(e.input)
+
+	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.prop('value', {})
+
+	e.set_for_id = update_target
+	e.set_value = update_target
+
+	function update_target() {
+		if (!e.bound)
+			return
+		let target = e.for_id && window[e.for_id]
+		if (!target)
+			return
+		target.make_list_items_searchable()
+		target.search(e.value)
+	}
+
+	e.set_value = function(v, v0, ev) {
+		if (ev && ev instanceof InputEvent)
+			return
+		e.input.value = v
+		update_target()
+	}
+
+	e.on_bind(function(on) {
+		if (on)
+			update_target()
+	})
+
+	e.input.on('input', function(ev) {
+		e.set_prop('value', e.input.value, ev)
+		update_target()
+		return ev.forward(e)
+	})
+
+	e.listen('bind', function(e, on) {
+		if (e.id == e.for_id && on)
+			update_target()
+	})
+
+})
 
 /* <list> --------------------------------------------------------------------
 
@@ -1498,7 +1558,7 @@ G.list = component('list', function(e) {
 	let html_items = sc && sc.run(e) || json_arg(e.attr('items'))
 	if (sc) sc.remove()
 
-	if (e.len && !html_template && !html_items) // static items
+	if (!html_template && !html_items) // static items
 		html_items = [...e.at]
 
 	e.clear()
@@ -4640,6 +4700,7 @@ css_state('.checkbox[checked] .check-frame', '', `
 
 e.make_checkbox = function(focusable) {
 	let e = this
+	e.make_checkbox = noop
 	e.clear()
 	e.class('crbox checkbox')
 	e.class('focusable', !!focusable)
@@ -5880,6 +5941,7 @@ G.text_input = component('text-input', 'Input', function(e) {
 
 	e.input.on('input', function(ev) {
 		e.set_prop('input_value', this.value, ev)
+		ev.forward(e)
 	})
 
 })

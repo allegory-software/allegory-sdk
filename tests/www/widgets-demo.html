@@ -190,7 +190,7 @@ on_dom_load(function() {
 			return
 		let name = e.id.replace('_demo', '')
 		let s = window[name+'_demo'].html.trim()
-		let item = div({class: 'demo-list-item'}, name.replace('_', '-'))
+		let item = div({class: 'demo-list-item'}, name.replaceAll('_', '-'))
 		demo_list.add(item)
 		let i1 = i
 		item.on('click', function() {
@@ -1013,6 +1013,17 @@ for (let e of $('list')) {
 	e.make_list_drop_elements()
 }
 </script>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id=list_search_input_demo>
+<list-search-input for=my_list value="an"></list-search-input>
+<list id=my_list>
+	<d searchable>Apples</d>
+	<d searchable>Bananas</d>
+	<d searchable>Mangos</d>
+</list>
 </xmp>
 
 <!--------------------------------------------------------------------------->
