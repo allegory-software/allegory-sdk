@@ -6609,9 +6609,7 @@ update opts:
 
 // NOTE: we use 'skip' on the root element and create an <inputbox> inside
 // so that we can add popups to the widget without messing up the CSS.
-css('.dropdown', 'skip', `
-	--h-dropdown-picker: 16em;
-`)
+css('.dropdown', 'skip')
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
 css('.dropdown-value', 'S shrinks h-m nowrap')
 css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition because we use gap-x.
@@ -6623,9 +6621,10 @@ css('.dropdown-xbutton::before', 'fa fa-times lh1')
 css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
 css('.dropdown[align=right] .dropdown-value'  , '', `order: 3;`)
 
-css('.dropdown-picker', 'clip b v p-y-input bg-input z3 arrow', `
+css('.dropdown-picker', 'scroll-auto b v p-y-input bg-input z3 arrow', `
 	margin-top: -1px; /* merge dropdown and picker outlines */
 	resize: both;
+	max-height: 16em;
 `)
 css('.dropdown-picker::-webkit-resizer', 'invisible')
 css('.dropdown-picker-close-button', 'm0 allcaps')
@@ -6735,6 +6734,7 @@ function dropdown_widget(e, is_checklist) {
 		list.on('pointerdown'  , list_pointerdown, on)
 		list.on('click'        , list_click, on)
 		list.on('item_checked' , list_item_checked, on)
+		list.on('resize'       , list_resize)
 		e.update({value: true})
 	}
 
@@ -6838,19 +6838,20 @@ function dropdown_widget(e, is_checklist) {
 	})
 
 	let w
-	let picker_h
-	e.on_update(function() {
-		e.picker.h = null
-	})
 	e.on_measure(function() {
 		w = e.inputbox.rect().w
-		picker_h = e.picker.oh
 	})
 	e.on_position(function() {
-		if (!e.list) return
+		if (!e.picker)
+			return
 		e.picker.min_w = w
-		e.picker.h = `calc(min(var(--h-dropdown-picker), ${picker_h}px))`
 	})
+
+	function list_resize() {
+		// hack to make resizer work, sorta...
+		if (e.picker.style.height)
+			e.picker.style['max-height'] = 'none'
+	}
 
 	// open state -------------------------------------------------------------
 
