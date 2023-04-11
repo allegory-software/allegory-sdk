@@ -190,7 +190,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg1                   : hsl(216  28%  15% / 1.0);
 	--bg1-hover             : hsl(216  28%  19% / 1.0);
 	--bg2                   : hsl(216  28%  20% / 1.0);
-	--bg2-hover             : hsl(216  28%  22% / 1.0);
+	--bg2-hover             : hsl(216  28%  23% / 1.0);
 	--bg3                   : hsl(216  28%  25% / 1.0);
 	--bg3-hover             : hsl(216  28%  27% / 1.0);
 	--bg-alt                : hsl(260  28%  14% / 1.0);
@@ -991,19 +991,14 @@ css('.scroll-thin::-webkit-scrollbar', '', `
 	height: 10px; /* match FF */
 `)
 
-css('.scroll-thin::-webkit-scrollbar-track', '', `
-	background-color: var(--bg1);
-`)
+css('.scroll-thin::-webkit-scrollbar-track', 'bg1')
 
-css('.scroll-thin::-webkit-scrollbar-thumb', '', `
-	background    : var(--bg2);
+css('.scroll-thin::-webkit-scrollbar-thumb', 'bg2', `
 	border-color  : var(--bg2);
 	border-radius : 50px;
 `)
 
-css_state('.scroll-thin::-webkit-scrollbar-thumb:hover', '', `
-	background: var(--bg2-hover);
-`)
+css('.scroll-thin::-webkit-scrollbar-corner', 'bg1')
 
 /* fixing resizer color for Chrome with thin scrollbars */
 css('.scroll-thin::-webkit-resizer', '', `
