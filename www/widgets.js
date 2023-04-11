@@ -6527,7 +6527,7 @@ G.tags_input = component('tags-input', function(e) {
 	e.on_update(function(opt) {
 		if (opt.value)
 			for (let tag_div of e.tags_box.at)
-				tag_div.class('invalid', !e.known_values.has(tag_div.value))
+				tag_div.class('invalid', e.known_values && !e.known_values.has(tag_div.value))
 	})
 
 	e.tag_input.on('keydown', function(key, shift, ctrl, alt, ev) {
@@ -6609,7 +6609,9 @@ update opts:
 
 // NOTE: we use 'skip' on the root element and create an <inputbox> inside
 // so that we can add popups to the widget without messing up the CSS.
-css('.dropdown', 'skip')
+css('.dropdown', 'skip', `
+	--h-dropdown-picker: 16em;
+`)
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
 css('.dropdown-value', 'S shrinks h-m nowrap')
 css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition because we use gap-x.
@@ -6622,9 +6624,8 @@ css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
 css('.dropdown[align=right] .dropdown-value'  , '', `order: 3;`)
 
 css('.dropdown-picker', 'clip b v p-y-input bg-input z3 arrow', `
-	margin-top: -2px; /* merge dropdown and picker outlines */
+	margin-top: -1px; /* merge dropdown and picker outlines */
 	resize: both;
-	height: 12em; /* TODO: what we want is max-height but then resizer doesn't work! */
 `)
 css('.dropdown-picker::-webkit-resizer', 'invisible')
 css('.dropdown-picker-close-button', 'm0 allcaps')
@@ -6639,6 +6640,7 @@ css_state('.dropdown[invalid] .dropdown-inputbox', 'bg-error')
 
 css('.check-dropdown .dropdown-picker', 'p-x')
 css('.check-dropdown .dropdown-value', 'gap-x')
+css('.check-dropdown-item', 'shrinks clip nowrap')
 css('.check-dropdown-item[invalid]', 'bg-error2')
 
 function dropdown_widget(e, is_checklist) {
@@ -6768,6 +6770,7 @@ function dropdown_widget(e, is_checklist) {
 		item_e = item_e.clone()
 		item_e.id = null // id would be duplicated.
 		item_e.selected = null
+		item_e.title = item_e.textContent
 		e.list.update_item_state(item_e)
 		if (is_checklist)
 			item_e.class('check-dropdown-item')
@@ -6788,6 +6791,7 @@ function dropdown_widget(e, is_checklist) {
 	}
 
 	e.on_update(function(opt) {
+
 		if (opt.value) {
 
 			if (is_checklist) {
@@ -6834,12 +6838,18 @@ function dropdown_widget(e, is_checklist) {
 	})
 
 	let w
+	let picker_h
+	e.on_update(function() {
+		e.picker.h = null
+	})
 	e.on_measure(function() {
 		w = e.inputbox.rect().w
+		picker_h = e.picker.oh
 	})
 	e.on_position(function() {
 		if (!e.list) return
 		e.picker.min_w = w
+		e.picker.h = `calc(min(var(--h-dropdown-picker), ${picker_h}px))`
 	})
 
 	// open state -------------------------------------------------------------
