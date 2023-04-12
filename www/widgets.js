@@ -47,7 +47,7 @@ WIDGETS
 	range-calendar
 	ranges-calendar
 	date-input
-	time-input
+	timeofday-input
 	datetime-input
 	date-range-input
 	html-input
@@ -301,7 +301,7 @@ css('.tooltip[kind=cursor] > .tooltip-tip', 'hidden')
 G.tooltip = component('tooltip', function(e) {
 
 	e.class('tooltip')
-	e.popup()
+	e.make_popup()
 
 	e.prop('text'        , {slot: 'lang'})
 	e.prop('icon_visible', {type: 'bool', default: false})
@@ -1548,18 +1548,16 @@ G.list = component('list', function(e) {
 	e.class('list')
 	e.make_disablable()
 
-	// html
-
 	let ht = e.$1(':scope>template, :scope>script[type="text/x-mustache"], :scope>xmp')
-	let html_template = ht && ht.html
+	e.prop_vals.item_template = ht && ht.html
 	if (ht) ht.remove()
 
 	let sc = e.$1(':scope>script')
-	let html_items = sc && sc.run(e) || json_arg(e.attr('items'))
+	e.prop_vals.items = sc && sc.run(e) || json_arg(e.attr('items'))
 	if (sc) sc.remove()
 
-	if (!html_template && !html_items) // static items
-		html_items = [...e.at]
+	if (!e.prop_vals.item_template && !e.prop_vals.items) // static items
+		e.prop_vals.items = [...e.at]
 
 	e.clear()
 
@@ -1619,8 +1617,6 @@ G.list = component('list', function(e) {
 		}
 		e.set_prop('items', items, {from_items_changed: true})
 	})
-
-	return {item_template: html_template, items: html_items}
 
 })
 
@@ -1694,9 +1690,8 @@ e.make_checklist = function() {
 }
 
 G.checklist = component('checklist', function(e) {
-	let html_props = list.construct(e)
+	e.construct('list')
 	e.make_checklist()
-	return html_props
 })
 
 /* <menu> --------------------------------------------------------------------
@@ -1752,7 +1747,7 @@ G.menu = component('menu', function(e) {
 	e.make_disablable()
 	e.make_focusable()
 	e.class('menu')
-	e.popup()
+	e.make_popup()
 
 	// view
 
@@ -2144,11 +2139,13 @@ G.tabs = component('tabs', 'Containers', function(e) {
 	e.class('tabs')
 	e.make_disablable()
 
-	let html_items = e.make_items_prop()
+	e.init_child_components()
 
-	e.fixed_header = html_items.find(e => e.tag == 'tabs-fixed-header')
+	e.fixed_header = e.$1('tabs-fixed-header')
 	if (e.fixed_header)
-		html_items.remove_value(e.fixed_header)
+		e.fixed_header.remove()
+
+	e.make_items_prop()
 
 	e.prop('tabs_side', {type: 'enum',
 			enum_values: 'top bottom left right', default: 'top', attr: true})
@@ -2607,8 +2604,6 @@ G.tabs = component('tabs', 'Containers', function(e) {
 		}
 	})
 
-	return {items: html_items}
-
 })
 
 /* <split> & <vsplit> --------------------------------------------------------
@@ -2686,8 +2681,8 @@ G.split = component('split', 'Containers', function(e) {
 	e.make_disablable()
 
 	e.init_child_components()
-	let html_item1 = e.at[0]
-	let html_item2 = e.at[1]
+	e.prop_vals.item1 = e.at[0]
+	e.prop_vals.item2 = e.at[1]
 	e.clear()
 
 	e.pane1 = tag('split-pane', {class: 'frame'})
@@ -2816,16 +2811,11 @@ G.split = component('split', 'Containers', function(e) {
 		return this.capture_pointer(ev, mm_resize, mu_resize)
 	})
 
-	return {
-		item1: html_item1,
-		item2: html_item2,
-	}
-
 })
 
 G.vsplit = component('vsplit', function(e) {
 	e.class('vsplit')
-	let opt = split.construct(e)
+	let opt = e.construct('split')
 	opt.orientation = 'vertical'
 	return opt
 })
@@ -2975,10 +2965,10 @@ G.dlg = component('dlg', function(e) {
 	e.class('dlg')
 	e.init_child_components()
 
-	let html_heading = e.$1('heading')
-	let html_header  = e.$1('header' )
-	let html_content = e.$1('content')
-	let html_footer  = e.$1('footer' )
+	e.prop_vals.heading = e.$1('heading')
+	e.prop_vals.header  = e.$1('header' )
+	e.prop_vals.content = e.$1('content')
+	e.prop_vals.footer  = e.$1('footer' )
 
 	e.prop('heading'        , {attr: true}) // because title is taken
 	e.prop('cancelable'     , {type: 'bool', attr: true, default: true})
@@ -3103,13 +3093,6 @@ G.dlg = component('dlg', function(e) {
 		return false
 	}
 
-	return {
-		heading : html_heading,
-		header  : html_header,
-		content : html_content,
-		footer  : html_footer,
-	}
-
 })
 
 /* <toolbox> -----------------------------------------------------------------
@@ -3170,14 +3153,14 @@ css('.toolbox-resize-overlay[hit_side=top_right], .toolbox-resize-overlay[hit_si
 
 G.toolbox = component('toolbox', function(e) {
 
-	let html_content = [...e.nodes]
+	e.prop_vals.content = [...e.nodes]
 	e.clear()
 
 	e.class('toolbox')
 
 	e.props.popup_align = {default: 'top'}
 	e.props.popup_side  = {default: 'inner-top'}
-	e.popup()
+	e.make_popup()
 
 	e.istoolbox = true
 	e.class('pinned')
@@ -3319,8 +3302,6 @@ G.toolbox = component('toolbox', function(e) {
 		announce('layout_changed')
 	})
 
-	return {content: html_content}
-
 })
 
 /* <slides> ------------------------------------------------------------------
@@ -3345,7 +3326,7 @@ G.slides = component('slides', 'Containers', function(e) {
 
 	e.class('slides')
 	e.make_disablable()
-	let html_items = e.make_items_prop()
+	e.make_items_prop()
 
 	// model
 
@@ -3432,8 +3413,6 @@ G.slides = component('slides', 'Containers', function(e) {
 		}
 
 	})
-
-	return {items: html_items}
 
 })
 
@@ -3642,7 +3621,7 @@ G.info = component('info', function(e) {
 	e.class('info')
 	e.make_disablable()
 
-	let html_text = [...e.nodes]
+	e.prop_vals.text = [...e.nodes]
 
 	e.prop('collapsed', {type: 'bool', attr: true})
 	e.prop('text', {type: 'nodes', slot: 'lang'})
@@ -3669,10 +3648,8 @@ G.info = component('info', function(e) {
 		}
 	}
 
-	return {
-		text      : html_text,
-		collapsed : e.collapsed ?? true,
-	}
+	e.prop_vals.collapsed = e.collapsed ?? true
+
 })
 
 /* validators & validation rules ---------------------------------------------
@@ -4284,6 +4261,12 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 			e.validate(ev)
 	})
 
+	e.listen('validation_rules_changed', function() {
+		if (e.initialized == false)
+			return
+		e.validate()
+	})
+
 	if (validate_on_init != false)
 		e.on_init(function() {
 			e.validate()
@@ -4622,7 +4605,7 @@ function checkbox_widget(e, markbox, input_type) {
 
 	e.user_set = function(v, ev) {
 		e.set_checked(v, e.checked, ev || {target: e})
-		e.fireup('input', ev)
+		e.fire('input', ev)
 	}
 	function user_toggle(ev) { e.user_set(!e.checked, ev) }
 	e.on('keydown', function(key, shift, ctrl, alt, ev) {
@@ -4825,7 +4808,7 @@ G.radio = component('radio', function(e) {
 			if (re != e)
 				re.checked = false
 		e.set_prop('checked', v, ev || {target: e})
-		e.fireup('input')
+		e.fire('input')
 	}
 
 	e.next_radio = function(inc) {
@@ -5532,7 +5515,7 @@ css(`
 
 G.button = component('button', 'Input', function(e) {
 
-	let html_text = [...e.nodes]
+	e.prop_vals.text = [...e.nodes]
 	e.clear()
 
 	e.class('button inputbox')
@@ -5651,8 +5634,6 @@ G.button = component('button', 'Input', function(e) {
 		raf(function() { e.style.animation = 'button-attention .5s' })
 	}
 
-	return {text: html_text}
-
 })
 
 /* <select-button> && <vselect-button> ---------------------------------------
@@ -5713,7 +5694,7 @@ css('.select-button[secondary]', '', `
 
 G.select_button = component('select-button', function(e) {
 
-	let html_items = e.make_items_prop()
+	e.make_items_prop()
 
 	e.class('select-button inputbox')
 	e.make_disablable()
@@ -5831,13 +5812,12 @@ G.select_button = component('select-button', function(e) {
 		e.position()
 	})
 
-	return {items: html_items}
 })
 
 G.vselect_button = component('vselect-button', function(e) {
 
 	e.class('vselect-button ro-collapse-v b-collapse-v')
-	return select_button.construct(e)
+	return e.construct('select-button')
 
 })
 
@@ -5973,7 +5953,7 @@ css_generic_state('.pass-input-button[disabled]', 'op1 no-filter dim')
 let load_zxcvbn = memoize(function() {
 	let script = tag('script')
 	script.onload = function() {
-		announce('validation_rules_changed')
+		announce('validation_rules_changed', 'zxcvbn')
 	}
 	script.src = 'zxcvbn.js'
 	root.add(script)
@@ -6008,9 +5988,11 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 	e.set_conditions = function(cond) {
 		if (cond.includes('min-score') && !zxcvbn_loaded) {
 			zxcvbn_loaded = true
-			e.listen('validation_rules_changed', function() {
-				update_score()
-				e.validate()
+			e.listen('validation_rules_changed', function(which) {
+				if (which == 'zxcvbn') {
+					update_score()
+					e.validate()
+				}
 			})
 			load_zxcvbn()
 		}
@@ -6651,7 +6633,7 @@ function dropdown_widget(e, is_checklist) {
 	e.make_disablable()
 	e.init_child_components()
 
-	let html_list = is_checklist
+	e.prop_vals.list = is_checklist
 		? e.$1('.checklist') || tag('checklist', 0, ...e.at)
 		: e.$1('.list'     ) || tag('list'     , 0, ...e.at)
 
@@ -6715,14 +6697,14 @@ function dropdown_widget(e, is_checklist) {
 					focusable: false,
 				})
 				e.picker = div({class: 'dropdown-picker-box dropdown-picker'}, list, e.close_button)
-				e.picker.popup(e.inputbox, 'bottom', 'start')
+				e.picker.make_popup(e.inputbox, 'bottom', 'start')
 				e.picker.hide()
 				e.add(e.picker)
 			} else {
 				let item_i = e.lookup(e.value)
 				list.focus_item(item_i ?? false)
 				list.class('dropdown-picker')
-				list.popup(e.inputbox, 'bottom', 'start')
+				list.make_popup(e.inputbox, 'bottom', 'start')
 				list.hide()
 				e.picker = list
 				e.add(list)
@@ -6992,8 +6974,6 @@ function dropdown_widget(e, is_checklist) {
 		return false
 	})
 
-	return {list: html_list}
-
 }
 
 G.dropdown = component('dropdown', 'Input', function(e) {
@@ -7031,13 +7011,13 @@ G.autocomplete = component('autocomplete', 'Input', function(e) {
 	e.make_disablable()
 	e.init_child_components()
 
-	let html_list = e.$1('list')
+	e.prop_vals.list = e.$1('list')
 
-	if (!html_list) { // static list
-		html_list = div()
+	if (!e.prop_vals.list) { // static list
+		e.prop_vals.list = div()
 		for (let ce of [...e.at])
-			html_list.add(ce)
-		html_list.make_list_items_focusable()
+			e.prop_vals.list.add(ce)
+		e.prop_vals.list.make_list_items_focusable()
 		e.clear()
 	}
 
@@ -7047,7 +7027,7 @@ G.autocomplete = component('autocomplete', 'Input', function(e) {
 			list.make_list_items_focusable({multiselect: false})
 			list_items_changed.call(list)
 			list.class('dropdown-picker')
-			list.popup(null, 'bottom', 'start')
+			list.make_popup(null, 'bottom', 'start')
 			list.hide()
 			list.on('search', function() {
 				e.open()
@@ -7102,10 +7082,8 @@ G.autocomplete = component('autocomplete', 'Input', function(e) {
 
 	e.prop('input_id', {type: 'id', attr: 'for', on_bind: e.bind_input})
 
-	e.popup(null, 'bottom', 'start')
+	e.make_popup(null, 'bottom', 'start')
 	e.hide()
-
-	return {list: html_list}
 
 })
 
@@ -7150,9 +7128,8 @@ css('.calendar-canvas', 'abs')
 
 function calendar_widget(e, mode) {
 
-	let html_value
 	if (mode == 'ranges') {
-		html_value = []
+		e.prop_vals.value = []
 		for (let range of e.$('range')) {
 			let r = convert_range(range.textContent)
 			if (r.len == 2) {
@@ -7161,7 +7138,7 @@ function calendar_widget(e, mode) {
 				r.readonly    = range.bool_attr('readonly')
 				r.disalbed    = range.bool_attr('disabled')
 				r.z_index     = range.bool_attr('z-index')
-				html_value.push(r)
+				e.prop_vals.value.push(r)
 			}
 		}
 	}
@@ -8097,8 +8074,6 @@ function calendar_widget(e, mode) {
 
 	})
 
-	return {value: html_value}
-
 }
 
 G.calendar = component('calendar', 'Input', function(e) {
@@ -8323,7 +8298,7 @@ G.datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 })
 
-/* <date-input>, <time-input>, <datetime-input> & <date-range-input> ---------
+/* <date-input>, <timeofday-input>, <datetime-input> & <date-range-input> ----
 
 This is 4 widgets crammed into one, that's why this code is full of ifs.
 The range widget is the most different with its 2-level validation. Still,
@@ -8333,7 +8308,7 @@ the common bits into a mixin (less wiring, less naming, less code-chasing).
 
 config:
 	format=sql               format form data as SQL text instead of timestamp
-date-input, time-input, datetime-input state:
+date-input, timeofday-input, datetime-input state:
 	value input_value
 date-range-input state:
 	value1 value2 input_value1 input_value2
@@ -8685,7 +8660,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.set_open = function(open, focus, ev) {
 		e.class('open', open)
 		if (open) {
-			e.picker_box.popup(e.input_group, 'bottom', 'start')
+			e.picker_box.make_popup(e.input_group, 'bottom', 'start')
 			e.picker_box.popup_oy = -1 // make top border overlap with editbox
 			e.add(e.picker_box)
 			e.picker_box.update({show: true})
@@ -8748,7 +8723,7 @@ G.date_input = component('date-input', 'Input', function(e) {
 	return date_input_widget(e, true)
 })
 
-G.time_input = component('time-input', 'Input', function(e) {
+G.timeofday_input = component('timeofday-input', 'Input', function(e) {
 	return date_input_widget(e, false, true)
 })
 
@@ -8781,7 +8756,7 @@ G.richtext = component('richtext', function(e) {
 	e.class('richtext')
 	e.make_disablable()
 
-	let html_content = [...e.nodes]
+	e.prop_vals.content = [...e.nodes]
 	e.clear()
 
 	e.content_box = div({class: 'richtext-content'})
@@ -8797,8 +8772,6 @@ G.richtext = component('richtext', function(e) {
 		return e.content_box.html
 	}
 	e.prop('content', {type: 'nodes', slot: 'lang', serialize: serialize_content})
-
-	return {content: html_content}
 
 })
 
@@ -8915,7 +8888,7 @@ function richtext_widget_editing(e) {
 
 	e.actionbar = div({class: 'richtext-actionbar'})
 	if (!e.focus_box)
-		e.actionbar.popup(e, 'top', 'left')
+		e.actionbar.make_popup(e, 'top', 'left')
 	for (let k in actions) {
 		let action = actions[k]
 		// Guess what: this must be a <button>, if it's a <div>, clicking on it
@@ -9008,7 +8981,7 @@ css('.html-input > .focus-box > .richtext-content', 'S')
 
 G.html_input = component('html-input', 'Input', function(e) {
 
-	let html_val = [...e.nodes]
+	e.prop_vals.val = e.nodes.len ? [...e.nodes] : null
 	e.clear()
 
 	e.make_disablable()
@@ -9034,8 +9007,6 @@ G.html_input = component('html-input', 'Input', function(e) {
 		if (on)
 			e.editing = true
 	})
-
-	return html_val.len ? {val: html_val} : null
 
 })
 

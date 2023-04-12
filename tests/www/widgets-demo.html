@@ -1202,9 +1202,9 @@ my_form.on('submit', function() {
 <form id=my_form>
 <div><date-input       name=d1 placeholder="Birth date"></date-input></div>
 <div><date-input       name=d2 value="1900-1-1" placeholder="Birth date"></date-input></div>
-<div><time-input       name=d3                             input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
-<div><time-input       name=d4 with-seconds                input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
-<div><time-input       name=d5 with-seconds with-fractions input_value="0:0:0.1" placeholder="Meet at"></time-input></div>
+<div><timeofday-input  name=d3                             input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
+<div><timeofday-input  name=d4 with-seconds                input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
+<div><timeofday-input  name=d5 with-seconds with-fractions input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
 <div><datetime-input   name=d6 with-seconds with-fractions input_value="1900-1-1 0:0:0.1" placeholder="Meet at"></datetime-input></div>
 <div><datetime-input   name=d7 with-seconds with-fractions input_value="2000-1-1 0:0:0.1" placeholder="Meet at" format=sql></datetime-input></div>
 <div><date-range-input name1=d8_1 name2=d8_2 value1="2022-1-18" value2="2022-2-3"></date-range-input></div>
@@ -1437,11 +1437,11 @@ main.add(g)
 		value="2022-1-18"
 		placeholder="Birth date"
 	></date-input>
-	<d></d><time-input
+	<d></d><timeofday-input
 		name=time1
 		input_value="00:00:00.2"
 		with-seconds placeholder="Meet at"
-	></time-input>
+	></timeofday-input>
 	<d></d><datetime-input
 		name=datetime1
 		input_value="2022-1-18 12:34:56"
@@ -1475,6 +1475,27 @@ listen('validate', function(e) {
 })
 
 </script>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
+<xmp id=grid_inputs_demo>
+<split>
+	<grid id=my_grid>
+		<rowset pk=id>
+			<field name=id   ></field>
+			<field name=name ></field>
+			<field name=desc ></field>
+			<row id=1 name=Foo desc="Le Foo"></row>
+			<row id=2 name=Bar desc="Le Bar"></row>
+			<row id=3 name=Baz desc="Le Baz"></row>
+		</rowset>
+	</grid>
+	<div>
+		<nav-input nav=my_grid col=id></nav-input>
+		<nav-input nav=my_grid col=name></nav-input>
+	</div>
+</split>
 </xmp>
 
 <!--------------------------------------------------------------------------->
