@@ -120,7 +120,7 @@ DOM MANIPULATION
 	e.move([pe], [i0])
 	e.clear()
 	diff_element_list([id|{id:,...}|e, ...], [e1, ...]) -> [e1, ...]
-	e.make_items_prop([prop_name], [html_items]) -> html_items
+	e.make_items_prop([prop_name], [html_items])
 	tag(tag, [attrs], [e1,...])
 	div(...)
 	span(...)
@@ -178,6 +178,10 @@ DEFERRED DOM UPDATING
 ELEMENT INIT
 
 	component('TAG'|'TAG[ATTR]'[, category], initializer) -> create([props], ...children)
+	component.extend(tag[, 'before|after'], initializer)
+	e.prop_vals <- {prop->html_value}
+	e.construct(tag, ...)
+	e.init_component()
 	e.init_child_components()
 	e.initialized -> null|t|f
 	e.on_init(f); f()
@@ -356,7 +360,7 @@ CONDITIONAL ELEMENT BINDING
 
 POPUPS
 
-	e.popup([side], [align])      make element a popup.
+	e.make_popup([side], [align]) make element a popup.
 	e.popup_side                  '[inner-]{top bottom left right center}'
 	e.popup_align                 'center start end'
 	e.popup_{x1,y1,x2,y2}
@@ -952,9 +956,20 @@ G.component = function(selector, category, init) {
 		prop_vals.tag = tag
 		return element(prop_vals, null, ...children)
 	}
-	create.construct = init // use as mixin in other components
 	attr(component.categories, category, array).push(create)
 	return create
+}
+
+e.construct = function(tag, ...args) {
+	component_init[tag.upper()](this, ...args)
+}
+
+component.extend = function(tag, where, init) {
+	if (!init) { init = where; where = 'after'; }
+	let tagName = tag.upper()
+	let init0 = assert(component_init[tagName], 'component not registered: {0}', tag)
+	init = (where == 'before' ? do_before : do_after)(init0, init);
+	component_init[tagName] = init
 }
 
 component.categories = obj() // {cat->{create1,...}}
@@ -998,7 +1013,7 @@ let global_caller = function(fname) {
 	}
 }
 
-e._init_component = function(prop_vals) {
+e.init_component = function(prop_vals) {
 
 	let e = this
 
@@ -1026,19 +1041,19 @@ e._init_component = function(prop_vals) {
 
 	e.initialized = null // for log_add_event(), see glue.js.
 
-	let cons_prop_vals = init(e, prop_vals)
-
 	// initial prop values come from multiple sources, in priority order:
-	// - element() arg keys.
-	// - constructor return value.
-	// - html attributes.
-	prop_vals = assign_opt(attr_prop_vals(e), cons_prop_vals, prop_vals)
+	// 1. prop values passed to element().
+	// 2. init values set by the constructor from interpreting the inner html.
+	// 3. html attributes that match prop names.
+	e.prop_vals = obj()
+	init(e)
+	e.prop_vals = assign_opt(attr_prop_vals(e), e.prop_vals, prop_vals)
 
 	// register events from `on_EVENT` props.
-	for (let k in prop_vals) {
+	for (let k in e.prop_vals) {
 		if (k.starts('on_')) {
-			let f = prop_vals[k]
-			delete prop_vals[k]
+			let f = e.prop_vals[k]
+			delete e.prop_vals[k]
 			k = k.slice(3)
 			if (isstr(f)) // set from html: name of global function.
 				f = global_caller(f)
@@ -1048,7 +1063,7 @@ e._init_component = function(prop_vals) {
 
 	// set props to their initial values.
 	e.initialized = false // let prop setters know that we're not fully initialized.
-	component.init_instance(e, prop_vals)
+	component.init_instance(e, e.prop_vals)
 	e.initialized = true
 
 	// call the after-all-properties-are-set init function.
@@ -1073,7 +1088,7 @@ e._init_component = function(prop_vals) {
 e.init_child_components = function() {
 	if (this.len)
 		for (let ce of this.children)
-			ce._init_component()
+			ce.init_component()
 }
 
 e.on_init = function(f) {
@@ -1160,7 +1175,7 @@ G.init_components = function() {
 	G.head = document.head // for debugging, don't use in code.
 	if (DEBUG_INIT)
 		debug('ROOT INIT ---------------------------------')
-	root._init_component()
+	root.init_component()
 	if (DEBUG_BIND)
 		debug('ROOT BIND ---------------------------------')
 	root._bind(true)
@@ -1233,7 +1248,7 @@ G.unsafe_html = function(s, unwrap) {
 		return s
 	let span = document.createElement('span')
 	span.unsafe_html = s.trim()
-	span._init_component()
+	span.init_component()
 	let n = span.childNodes.length
 	if (unwrap == false && (n > 1 || !span.len)) // not a single element
 		return span
@@ -1265,7 +1280,7 @@ let create_element = function(tag, prop_vals, attrs, ...children) {
 		else
 			e.append(s)
 	}
-	e._init_component(prop_vals)
+	e.init_component(prop_vals)
 	return e
 }
 
@@ -1364,7 +1379,7 @@ Array.prototype.join_nodes = function(sep, parent_node) {
 // NOTE: you can end up with duplicate ids after this!
 method(Node, 'clone', function() {
 	let cloned = this.cloneNode(true)
-	cloned._init_component()
+	cloned.init_component()
 	return cloned
 })
 
@@ -1617,7 +1632,7 @@ e.make_items_prop = function(ITEMS, html_items) {
 			html_items = [...e.children]
 			e.clear()
 		}
-		return html_items
+		e.prop_vals.items = html_items
 	}
 
 }
@@ -3774,11 +3789,10 @@ css_role('.popup', '', `
 	position: fixed !important;
 `)
 
-e.popup = function(target, side, align) {
+e.make_popup = function(target, side, align) {
 
 	let e = this
-	if (e.hasclass('popup'))
-		return
+	e.make_popup = noop
 
 	e.ispopup = true
 	e.class('popup')
