@@ -6737,7 +6737,7 @@ function dropdown_widget(e, is_checklist) {
 		list.on('pointerdown'  , list_pointerdown, on)
 		list.on('click'        , list_click, on)
 		list.on('item_checked' , list_item_checked, on)
-		list.on('resize'       , list_resize)
+		e.picker.on('attr_changed', picker_attr_changed, on)
 		e.update({value: true})
 	}
 
@@ -6850,9 +6850,9 @@ function dropdown_widget(e, is_checklist) {
 		e.picker.min_w = w
 	})
 
-	function list_resize() {
-		// hack to make resizer work, sorta...
-		if (e.picker.style.height)
+	// hack to make resizer work...
+	function picker_attr_changed(k, v) {
+		if (k == 'style' && this.style.height)
 			e.picker.style['max-height'] = 'none'
 	}
 
