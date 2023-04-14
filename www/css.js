@@ -17,7 +17,7 @@ CSS CLASSES
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
-	SIZING        nowrap shrinks expands
+	SIZING        nowrap shrinks[-h -v] expands
 	BORDERS       b[0] b-{l r t b}[-0] b-{dotted dashed invisible fg}
 	CORNERS       ro ro0 ro-{05 075 0 2 var var-075} ro-{l r t b}-0 round ro-collapse-{h v}
 	PADDINGS      p p0 p-{025 05 075 2 4 8} p-{l r t b x y}-{0 05 2 4 8}
@@ -730,15 +730,21 @@ css('.expands', '', `
 	min-height : auto;
 `)
 
-css('.shrinks', '', `
+css('.shrinks-h', '', `
 	/* prevents overflow in flexbox and css-grid containers. */
 	min-width  : 0;
-	min-height : 0;
 	/* prevens overflow in inline and block containers */
 	max-width: 100%;
+`)
+
+css('.shrinks-v', '', `
+	/* prevents overflow in flexbox and css-grid containers. */
+	min-height : 0;
 	/* prevens overflow in horizontal flex containers */
 	max-height: 100%;
 `)
+
+css('.shrinks', 'shrinks-v shrinks-h')
 
 css('.w1 ', '', ` width : 1.25em; min-width : 1.25em; max-width : 1.25em; `) /* mainly to keep changing icons fixated and aligned */
 css('.h1 ', '', ` height: 1.25em; min-height: 1.25em; max-height: 1.25em; `) /* to make icons square with w1 h1 */

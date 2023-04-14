@@ -112,7 +112,7 @@ ARRAYS
 	a.each(f)
 	a.tokeys([v], [cons]) -> t
 	tokeys(a, [v], [cons]) -> t|null
-	a.uniq_sorted()
+	a.uniq_sorted() -> a
 	a.remove_duplicates() -> a
 
 HASH MAPS
@@ -1861,10 +1861,10 @@ let on = function(name, f, enable, capture) {
 				let ret
 				if (caller)
 					ret = caller.call(this, ev, f)
-				else if (isobject(ev.detail) && ev.detail.args) {
+				else if (ev.args) {
 					if (DEBUG_EVENTS_FIRE && !(ev.type in hidden_events))
-						debug(ev.type, ...ev.detail.args)
-					ret = f.call(this, ...ev.detail.args, ev)
+						debug(ev.type, ...ev.args)
+					ret = f.call(this, ...ev.args, ev)
 				} else
 					ret = f.call(this, ev)
 				if (ret === false) { // like jquery
@@ -1907,16 +1907,17 @@ let ep = obj()
 let log_fire = DEBUG_EVENTS && function(e) {
 	ev[e.type] = (ev[e.type] || 0) + 1
 	if (e.type == 'prop_changed') {
-		let k = e.detail.args[1]
+		let k = e.args[1]
 		ep[k] = (ep[k] || 0) + 1
 	}
 	return e
 } || return_arg
 
 G.event = function(name, bubbles, ...args) {
-	return typeof name == 'string'
-		? new CustomEvent(name, {detail: {args}, cancelable: true, bubbles: bubbles})
-		: name
+	if (!isstr(name)) return name
+	let ev = new CustomEvent(name, {cancelable: true, bubbles: bubbles})
+	ev.args = args
+	return ev
 }
 
 let fire = function(name, ...args) {
@@ -1944,10 +1945,58 @@ Event.prototype.forward = function(e) {
 	return e.fire(ev)
 }
 
+/* DOM events into dynamic targets -------------------------------------------
+
+A listener is a pseudo-event-target that can be used with `e.on(listener, ...)`
+and will register events on the listener's target. The nice thing about it is
+that you can change the target anytime and the event handlers will be removed
+from the old target and added back to the new target (also implies the ability
+to set the target after the events handlers are associated).
+
+*/
+
+G.listener = function() {
+	let e = this
+	let ls = {}
+	let target
+	let handlers = obj() // {event->[f1,...]}
+	let user_bind = noop
+	function bind(on) {
+		if (!target)
+			return
+		for (let event in handlers)
+			for (let handler of handlers[event])
+				target.on(event, handler, on)
+		user_bind(on)
+	}
+	property(ls, 'target', () => target, function(te) {
+		bind(false)
+		target = te
+		bind(true)
+	})
+	ls.on_bind = function(f) {
+		user_bind = do_after(user_bind, f)
+	}
+	ls.on = function(event, f, on) {
+		if (on) {
+			attr(handlers, event, array).push(f)
+			if (target)
+				target.on(event, f)
+		} else {
+			if (target)
+				target.off(event, f)
+			handlers[event] = null
+		}
+		return ls
+	}
+	return ls
+}
+
 /* fast global events --------------------------------------------------------
 
 These do the same job as window.on(event, f) / window.fire(event, ...)
-except they are faster because they make no garbage.
+except they are faster because they make less garbage (or none if JS is
+smart enough to keep the varargs on the stack or sink them).
 
 */
 
@@ -1966,7 +2015,8 @@ G.listen = function(event, f, on) {
 }
 
 G.announce = function(event, ...args) {
-	let handlers = all_handlers[event]; if (!handlers) return
+	let handlers = all_handlers[event]
+	if (!handlers) return
 	for (let handler of handlers)
 		handler(...args)
 }

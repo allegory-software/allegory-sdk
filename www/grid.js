@@ -1421,6 +1421,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 	let w0, h0
 	function layout_changed(what) {
+		assert(e.bound)
 		if (what) {
 			theme_changed()
 			return
@@ -1440,6 +1441,7 @@ G.grid = component('grid', 'Input', function(e) {
 	// responding to rowset changes -------------------------------------------
 
 	e.on_update(function(opt) {
+		trace_if(!e.bound, e.debug_name)
 		if (opt.fields || opt.rows) {
 			update_internal_sizes()
 			update_error_tooltip_position()
@@ -2195,7 +2197,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.widget_editing = false
 	}
 
-	function editing_field_keydown(key, shift, ctrl, alt, ev) {
+	function editing_field_keydown(ev, key, shift, ctrl) {
 		if (key == 'Enter') {
 			if (ctrl) {
 				let hcell = e.header.at[editing_field.index]
@@ -2253,7 +2255,7 @@ G.grid = component('grid', 'Input', function(e) {
 			e.sql_select = repl(sql_editor.getSession().getValue(), '', undefined)
 			sql_editor.destroy()
 			sql_editor = null
-			sql_editor_ct.remove()
+			sql_editor_ct.del()
 			sql_editor_ct = null
 			editing_sql = null
 		}
@@ -2375,7 +2377,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 	// keyboard bindings ------------------------------------------------------
 
-	e.on('keydown', function(key, shift, ctrl) {
+	e.on('keydown', function(ev, key, shift, ctrl) {
 
 		if (e.widget_editing)
 			return
@@ -2884,7 +2886,7 @@ G.row_form = component('row-frm', function(e) {
 	e.class('row-form')
 	grid.props.vertical = {default: true}
 
-	grid.construct(e, false)
+	e.construct('grid', null, false)
 
 	function bind_nav(nav, on) {
 		if (!e.bound)

@@ -12,6 +12,11 @@ SHAPES
 
 */
 
+(function () {
+"use strict"
+let G = window
+
+
 css('.chart', 'S shrinks p clip v')
 
 css('.chart-header', '', `
@@ -86,7 +91,7 @@ css('.chart-pie-percents', 'abs click-through', `
 
 css('.chart-pie-label', 'abs white')
 
-chart = component('chart', 'Input', function(e) {
+G.chart = component('chart', 'Input', function(e) {
 
 	e.class('chart')
 	e.make_disablable()
@@ -1167,3 +1172,5 @@ chart = component('chart', 'Input', function(e) {
 
 })
 
+
+}()) // module function

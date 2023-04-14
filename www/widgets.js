@@ -42,7 +42,6 @@ WIDGETS
 	tags-input
 	dropdown
 	check-dropdown
-	autocomplete
 	calendar
 	range-calendar
 	ranges-calendar
@@ -82,7 +81,6 @@ WRITING CSS RULES
 (function () {
 "use strict"
 let G = window
-
 let e = Element.prototype
 
 // container with `display: contents`. useful to group together
@@ -328,7 +326,7 @@ G.tooltip = component('tooltip', function(e) {
 
 	e.close = function(ev) {
 		if (e.fire('close', ev)) {
-			e.remove()
+			e.del()
 			return true
 		}
 		return false
@@ -380,12 +378,13 @@ G.tooltip = component('tooltip', function(e) {
 		close_timer(t)
 	}
 	e.on_bind(function(on) {
-		if (!on) close_timer()
+		if (!on)
+			close_timer()
 	})
 
 	// keyboard, mouse & focusing behavior ------------------------------------
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key) {
 		if (key == 'Escape') {
 			e.close(ev)
 			return false
@@ -405,10 +404,6 @@ G.tooltip = component('tooltip', function(e) {
 	e.prop('autoclose', {type: 'bool', default: false})
 
 	e.on_bind(function(on) {
-		document.on('pointerdown', document_pointerdown, on)
-		document.on('stopped_event', document_stopped_event, on)
-		document.on('focusin', document_focusin, on)
-		document.on('focusout', document_focusout, on)
 		if (on)
 			e.update({reset_timer: true})
 	})
@@ -421,7 +416,7 @@ G.tooltip = component('tooltip', function(e) {
 	}
 
 	// clicking outside the tooltip or its anchor closes the tooltip.
-	function document_pointerdown(ev) {
+	e.on(document, 'pointerdown', function(ev) {
 		if (!e.autoclose)
 			return
 		if (e.parent && e.parent.contains(ev.target)) // clicked inside the anchor.
@@ -431,22 +426,22 @@ G.tooltip = component('tooltip', function(e) {
 		if (too_soon())
 			return
 		e.close(ev)
-	}
+	})
 
 	// clicking outside the tooltip closes the tooltip, even if the click did something.
-	function document_stopped_event(ev) {
+	e.on(document, 'stopped_event', function(ev) {
 		if (!ev.type.ends('pointerdown'))
 			return
 		document_pointerdown(ev)
-	}
+	})
 
 	// focusing an element outside the tooltip or its anchor closes the tooltip.
-	function document_focusin(ev) {
+	e.on(document, 'focusin', function(ev) {
 		document_pointerdown(ev)
-	}
+	})
 
 	// focusing out of the document (to the titlebar etc.) closes the tooltip.
-	function document_focusout(ev) {
+	e.on(document, 'focusout', function(ev) {
 		if (!e.autoclose)
 			return
 		if (ev.relatedTarget)
@@ -456,7 +451,7 @@ G.tooltip = component('tooltip', function(e) {
 		if (e.contains(ev.target))
 			return
 		e.close(ev)
-	}
+	})
 
 })
 
@@ -804,7 +799,7 @@ e.make_list_drop_elements = function() {
 		mys = null
 
 		if (placeholder) {
-			placeholder.remove()
+			placeholder.del()
 			placeholder = null
 			e.list_static_len--
 		}
@@ -908,6 +903,7 @@ e.make_list_items_movable = function(can_move) {
 
 config props:
 	multiselect
+	list_items_horizontal
 out props:
 	selected_items: [item1,...]
 	focused_item
@@ -966,6 +962,7 @@ e.make_list_items_focusable = function(opt) {
 	e.prop('focused_item_index')
 
 	e.set_focused_item_index = function(i, i0, ev) {
+		e.fire('focused_item_changed', ev)
 		e.announce('focused_item_changed', ev)
 		if (ev && ev instanceof UIEvent)
 			e.fire('input', ev)
@@ -1008,7 +1005,7 @@ e.make_list_items_focusable = function(opt) {
 		let start_i = i
 
 		// the default item is the first or the last depending on direction.
-		i ??= inc * -1/0
+		i ??= inc * -1/0 // jshint ignore:line
 
 		// clamp out-of-bound indices.
 		i = clamp(i, 0, e.list_len-1)
@@ -1225,12 +1222,14 @@ e.make_list_items_focusable = function(opt) {
 		return forward ? e.at[e.list_len-1] : e.first
 	}
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key, shift, ctrl, alt) {
 
 		if (alt)
 			return
 
-		let horiz = e.css('flexDirection') == 'row'
+		let horiz = e.list_items_horizontal ??
+			(e.css('display').includes('flex') && e.css('flexDirection') == 'row')
+
 		let n
 		switch (key) {
 			case 'ArrowUp'   : if (!horiz) n = -1; break
@@ -1286,7 +1285,7 @@ e.make_list_items_focusable = function(opt) {
 		if (!sel_items.len) return
 		copied_elements.set(sel_items)
 		for (let item of sel_items)
-			item.remove()
+			item.del()
 		e.fire('items_changed')
 		return false
 	})
@@ -1385,7 +1384,7 @@ e.make_list_items_searchable = function() {
 			tape.push('show', item_e, show || !searchables.len)
 		}
 
-		if (searching && first_item_i == null)
+		if (searching && first_item_i == null && !(ev && ev.allow_zero_results))
 			return
 
 		for (let i = 0, n = tape.len; i < n; ) {
@@ -1451,7 +1450,7 @@ e.make_list_items_searchable = function() {
 
 	e.on('items_changed', update_search)
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key, shift, ctrl, alt) {
 		if (key == 'Backspace' && search_string) {
 			e.search(search_string.slice(0, -1), ev)
 			return false
@@ -1479,20 +1478,20 @@ e.list_search_input = component('list-search-input', 'Input', function(e) {
 	e.input = tag('input', {class: 'list-search-input-input'})
 	e.add(e.input)
 
-	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.prop('for', {private: true})
+	e.prop('for_id', {type: 'id', attr: 'for', bind_id: 'for'})
 	e.prop('value', {})
 
-	e.set_for_id = update_target
-	e.set_value = update_target
-
 	function update_target() {
-		if (!e.bound)
-			return
-		let target = e.for_id && window[e.for_id]
-		if (!target)
-			return
-		target.make_list_items_searchable()
-		target.search(e.value)
+		if (!e.for) return
+		e.for.make_list_items_searchable()
+		e.for.search(e.value, {allow_zero_results: true})
+	}
+
+	e.set_for = function(te1, te0) {
+		if (te0)
+			te0.search('')
+		update_target()
 	}
 
 	e.set_value = function(v, v0, ev) {
@@ -1502,20 +1501,10 @@ e.list_search_input = component('list-search-input', 'Input', function(e) {
 		update_target()
 	}
 
-	e.on_bind(function(on) {
-		if (on)
-			update_target()
-	})
-
 	e.input.on('input', function(ev) {
 		e.set_prop('value', e.input.value, ev)
 		update_target()
 		return ev.forward(e)
-	})
-
-	e.listen('bind', function(e, on) {
-		if (e.id == e.for_id && on)
-			update_target()
 	})
 
 })
@@ -1553,11 +1542,13 @@ G.list = component('list', function(e) {
 	if (ht) ht.remove()
 
 	let sc = e.$1(':scope>script')
-	e.prop_vals.items = sc && sc.run(e) || json_arg(e.attr('items'))
+	e.prop_vals.items = sc && sc.run(e) || json_arg(e.attr('items')) || undefined
 	if (sc) sc.remove()
 
-	if (!e.prop_vals.item_template && !e.prop_vals.items) // static items
+	if (!e.prop_vals.item_template && !e.prop_vals.items) { // static items
+		e.init_child_components()
 		e.prop_vals.items = [...e.at]
+	}
 
 	e.clear()
 
@@ -1566,14 +1557,6 @@ G.list = component('list', function(e) {
 	e.prop('items', {type: 'array', element_type: 'object', default: empty_array})
 	e.prop('item_template_name', {type: 'template_name', attr: 'item_template'})
 	e.prop('item_template', {type: 'template'})
-
-	e.set_items = function(v, v0, ev) {
-		if (ev && ev.from_items_changed)
-			return
-		update_items()
-	}
-	e.set_item_template_name = update_items
-	e.set_item_template = update_items
 
 	// view
 
@@ -1585,7 +1568,7 @@ G.list = component('list', function(e) {
 		return unsafe_html(render_string(ts, item || empty_obj), false)
 	}
 
-	function update_items() {
+	e.update_items = function() {
 		let ts = e.item_template_string
 		if (ts) { // to-render items
 			e.clear()
@@ -1606,6 +1589,15 @@ G.list = component('list', function(e) {
 		}
 		e.fire('items_changed', {from_update: true})
 	}
+
+	e.set_items = function(v, v0, ev) {
+		if (ev && ev.from_items_changed)
+			return
+		e.update_items()
+	}
+
+	e.set_item_template_name = e.update_items
+	e.set_item_template = e.update_items
 
 	e.on('items_changed', function(ev) {
 		if (ev && ev.from_update)
@@ -1678,7 +1670,7 @@ e.make_checklist = function() {
 
 	e.on('items_changed', update_items)
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key) {
 		let item_ct = e.focused_item
 		if (key == ' ' && item_ct) {
 			item_ct.item.checkbox.click()
@@ -1871,7 +1863,7 @@ G.menu = component('menu', function(e) {
 	function hide_submenu(tr) {
 		if (!tr.submenu_table)
 			return
-		tr.submenu_table.remove()
+		tr.submenu_table.del()
 		tr.submenu_table = null
 	}
 
@@ -1899,9 +1891,6 @@ G.menu = component('menu', function(e) {
 	// popup protocol
 
 	e.on_bind(function(on) {
-		document.on('pointerdown', document_pointerdown, on)
-		document.on('rightpointerdown', document_pointerdown, on)
-		document.on('stopped_event', document_stopped_event, on)
 		if (on && e.select_first_item)
 			select_next_item(e.table)
 	})
@@ -1911,17 +1900,19 @@ G.menu = component('menu', function(e) {
 			return
 		e.close()
 	}
+	e.on(document, 'pointerdown', document_pointerdown)
+	e.on(document, 'rightpointerdown', document_pointerdown)
 
 	// clicking outside the menu closes the menu, even if the click did something.
-	function document_stopped_event(ev) {
+	e.on(document, 'stopped_event', function(ev) {
 		if (e.contains(ev.target)) // clicked inside the menu.
 			return
 		if (ev.type.ends('pointerdown'))
 			e.close()
-	}
+	})
 
 	e.close = function(focus_target) {
-		e.remove()
+		e.del()
 		select_item(e.table, null)
 		if (e.parent && focus_target)
 			e.parent.focus()
@@ -1930,7 +1921,7 @@ G.menu = component('menu', function(e) {
 	// navigation
 
 	function next_valid_item(menu, down, tr) {
-		let i = menu.children.len
+		let i = menu.len
 		while (i--) {
 			tr = tr && (down != false ? tr.next : tr.prev)
 			tr = tr || (down != false ? menu.first : menu.last)
@@ -1989,7 +1980,7 @@ G.menu = component('menu', function(e) {
 
 	// keyboard binding
 
-	function menu_keydown(key) {
+	function menu_keydown(ev, key) {
 		if (key == 'ArrowUp' || key == 'ArrowDown') {
 			select_next_item(this, key == 'ArrowDown', this.selected_item_tr)
 			return false
@@ -2080,7 +2071,7 @@ css('.tabs[tabs_side=bottom] > tabs-header', 'b-t')
 css('.tabs[tabs_side=left  ] > tabs-header', 'b-r')
 css('.tabs[tabs_side=right ] > tabs-header', 'b-l')
 
-css('tabs-content', 'scroll-auto shrinks')
+css('tabs-content', 'S shrinks scroll-auto')
 
 css('tabs-tab', 'rel label arrow h shrinks')
 
@@ -2143,7 +2134,7 @@ G.tabs = component('tabs', 'Containers', function(e) {
 
 	e.fixed_header = e.$1('tabs-fixed-header')
 	if (e.fixed_header)
-		e.fixed_header.remove()
+		e.fixed_header.del()
 
 	e.make_items_prop()
 
@@ -2473,7 +2464,7 @@ G.tabs = component('tabs', 'Containers', function(e) {
 			ev.stopPropagation() // prevent list focusing while editing
 	}
 
-	function tab_title_box_keydown(key, shift, ctrl, alt, ev) {
+	function tab_title_box_keydown(ev, key, shift, ctrl) {
 		if (!renaming_item)
 			return
 		if ((ctrl || shift) && key == 'Enter') {
@@ -2555,7 +2546,7 @@ G.tabs = component('tabs', 'Containers', function(e) {
 
 	// key bindings -----------------------------------------------------------
 
-	e.tabs_box.on('keydown', function(key, shift, ctrl) {
+	e.tabs_box.on('keydown', function(ev, key, shift, ctrl) {
 		let tab = this.focused_item
 		if (!tab)
 			return
@@ -2589,7 +2580,7 @@ G.tabs = component('tabs', 'Containers', function(e) {
 
 	})
 
-	e.on('keydown', function(key, shift, ctrl) {
+	e.on('keydown', function(ev, key, shift, ctrl) {
 		if (ctrl && key == 'T' && e.can_add_items) {
 			let i = e.tabs_box.focused_item_index
 			if (e.add_item(null, i, false))
@@ -2815,9 +2806,8 @@ G.split = component('split', 'Containers', function(e) {
 
 G.vsplit = component('vsplit', function(e) {
 	e.class('vsplit')
-	let opt = e.construct('split')
-	opt.orientation = 'vertical'
-	return opt
+	e.construct('split')
+	e.prop_vals.orientation = 'vertical'
 })
 
 /* <action-band> -------------------------------------------------------------
@@ -2952,7 +2942,7 @@ css_state('.dlg-xbutton:hover', '', `
 	background-color: var(--bg-button-hover);
 `)
 
-css_state('.dlg-xbutton.active', '', `
+css_state('.dlg-xbutton:is(.active,:active)', '', `
 	background-color: var(--bg-button-active);
 `)
 
@@ -3025,13 +3015,7 @@ G.dlg = component('dlg', function(e) {
 
 	})
 
-	e.on_bind(function(on) {
-		document.on('keydown', doc_keydown, on)
-		document.on('keyup', doc_keyup, on)
-		document.on('pointerdown', doc_pointerdown, on)
-	})
-
-	function doc_keydown(key) {
+	e.on(document, 'keydown', function(ev, key) {
 		if (key == 'Escape') {
 			if (e.cancelable && e.x_button) {
 				e.x_button.class('active', true)
@@ -3041,9 +3025,9 @@ G.dlg = component('dlg', function(e) {
 					return false
 			}
 		}
-	}
+	})
 
-	function doc_keyup(key) {
+	e.on(document, 'keyup', function(ev, key) {
 		if (key == 'Escape') {
 			if (e.cancelable && e.x_button && e.x_button.hasclass('active')) {
 				e.x_button.class('active', false)
@@ -3051,16 +3035,16 @@ G.dlg = component('dlg', function(e) {
 					return false
 			}
 		}
-	}
+	})
 
-	function doc_pointerdown(ev) {
+	e.on(document, 'pointerdown', function(ev) {
 		if (e.contains(ev.target)) // clicked inside the dialog
 			return
 		e.cancel()
 		return false
-	}
+	})
 
-	e.on('keydown', function(key) {
+	e.on('keydown', function(ev, key) {
 		if (key == 'Enter') {
 			e.ok()
 			return false
@@ -3077,6 +3061,11 @@ G.dlg = component('dlg', function(e) {
 	e.cancel = function() {
 		if (!e.cancelable) {
 			e.animate([{transform: 'scale(1.05)'}], {duration: 100})
+			for (let k in e.buttons) {
+				let b = e.buttons[k]
+				if (b.closes)
+					b.draw_attention()
+			}
 			return false
 		}
 		e.close(false)
@@ -3553,8 +3542,8 @@ G.label = component('label', 'Input', function(e) {
 	e.props.for_id = {type: 'id', attr: 'for'}
 
 	e.property('target', function() {
-		if (e.for_id)
-			return window[e.for_id]
+		if (e.for) return e.for
+		if (e.for_id) return window[e.for_id]
 		let g = e.closest('.input-group')
 		return g && g.$1('.input')
 	})
@@ -3826,7 +3815,7 @@ G.create_validator = function(e, field) {
 		}
 		this.value = this.failed ? null : repl(v, undefined, null)
 		if (announce_results)
-			announce('validate', e, this, field)
+			e.announce('validate', this, field)
 		this.triggered = true
 		return !this.failed
 	}
@@ -3945,7 +3934,7 @@ add_validation_rule({
 	props    : 'max_len',
 	vprops   : 'input_value',
 	applies  : (e,    field) => field.max_len != null,
-	validate : (e, v, field) => v.len >= field.max_len,
+	validate : (e, v, field) => v.len <= field.max_len,
 	error    : (e, v, field) => S('validation_max_len_error',
 		'{0} too long', field_name(field)),
 	rule     : (e,    field) => S('validation_min_len_rule' ,
@@ -4077,8 +4066,7 @@ add_validation_rule({
 	applies  : (e,    field) => field.is_values,
 	convert  : (e, v, field) => {
 		v = isstr(v) ? (v.trim().starts('[') ? json_arg(v) : v.words()) : v
-		v.remove_duplicates()
-		return v
+		return v.sort().uniq_sorted()
 	},
 	validate : return_true,
 	error    : (e, v, field) => S('validation_values_error',
@@ -4152,16 +4140,18 @@ G.errors = component('errors', 'Input', function(e) {
 
 	e.class('errors')
 
-	e.prop('target'    , {type: 'element'})
-	e.prop('target_id' , {type: 'id', attr: 'for'})
+	e.prop('target'    , {private: true})
+	e.prop('target_id' , {type: 'id', attr: 'for', bind_id: 'target'})
 	e.prop('type'      , {type: 'enum', enum_values: 'rules'})
 
 	e.on_update(function(opt) {
 		if (!opt.validator)
 			return
+		let te = e.target
+		if (!te) return
 		if (e.type == 'rules') {
 			e.clear()
-			for (let result of opt.validator.results)
+			for (let result of te.validator.results)
 				e.add(div({class: catany(' ',
 							'errors-line',
 							(result.checked ? 'errors-checked' : 'errors-not-checked'),
@@ -4171,7 +4161,7 @@ G.errors = component('errors', 'Input', function(e) {
 						div({class: 'errors-message'}, result.rule_text)
 					))
 		} else {
-			let res = opt.validator.first_failed_result
+			let res = te.validator.first_failed_result
 			if (res)
 				e.set(res.error)
 			// don't clear the error, just hide it so that tooltip's dimensions
@@ -4182,25 +4172,21 @@ G.errors = component('errors', 'Input', function(e) {
 		}
 	})
 
-	function target_changed() {
-		let te = e.target || window[e.target_id]
-		te = te && te.validator && te
-		if (!te) return
-		te.has_errors_widget = !e.target
-		e.update({validator: te.validator})
+	function update_errors() {
+		e.update({validator: true})
 		// because the resize observer event on the errors popup comes in too slow.
 		e.fireup('content_resize')
 	}
-	e.set_target    = target_changed
-	e.set_target_id = target_changed
-	e.on_bind(function(on) {
-		if (on) target_changed()
-	})
 
-	e.listen('validate', function(te1, validator) {
-		let te = e.target || window[e.target_id]
-		if (te == te1)
-			target_changed()
+	e.set_target = function(te1, te0) {
+		if (te0) te0.has_errors_widget = false
+		if (te1) te1.has_errors_widget = !!e.target_id
+		update_errors()
+	}
+
+	e.listen('validate', function(te, validator) {
+		if (te != e.target) return
+		update_errors()
 	})
 
 })
@@ -4557,6 +4543,16 @@ css_state('.crbox:focus-visible', '', `
 css('.crbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
 css_state('.crbox:focus-visible .crbox-focus-circle', '', ` r: 10px; `)
 
+function checked_state_prop(e) {
+	e.property('checked_state', function() {
+		if (this.bool_attr('null')) return null
+		return this.bool_attr('checked') || false
+	}, function(v) {
+		this.bool_attr('checked', v || null)
+		this.bool_attr('null', v == null || null)
+	})
+}
+
 function checkbox_widget(e, markbox, input_type) {
 	e.class('crbox focusable')
 	markbox.class('markbox')
@@ -4608,7 +4604,7 @@ function checkbox_widget(e, markbox, input_type) {
 		e.fire('input', ev)
 	}
 	function user_toggle(ev) { e.user_set(!e.checked, ev) }
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key) {
 		if (key == ' ') { // same as for <button>
 			user_toggle(ev)
 			return false
@@ -4693,13 +4689,7 @@ e.make_checkbox = function(focusable) {
 	e.markbox.append(svg_tag('rect', {class: 'check-frame'}))
 	e.markbox.append(svg_tag('polyline', {class: 'check-mark' , points: '4 11 8 15 16 6'}))
 	e.add(e.markbox)
-	e.property('checked_state', function() {
-		if (this.bool_attr('null')) return null
-		return this.bool_attr('checked') || false
-	}, function(v) {
-	 	this.bool_attr('checked', v || null)
-		this.bool_attr('null', v == null || null)
-	})
+	checked_state_prop(e)
 }
 
 G.checkbox = component('checkbox', function(e) {
@@ -4746,7 +4736,8 @@ G.toggle = component('toggle', function(e) {
 	e.class('toggle')
 	e.markbox = div({class: 'toggle-thumb'})
 	checkbox_widget(e, e.markbox)
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	checked_state_prop(e)
+	e.on('keydown', function(ev, key) {
 		if (key == 'ArrowLeft' || key == 'ArrowRight') {
 			e.user_set(key == 'ArrowRight', ev)
 			return false
@@ -4790,6 +4781,7 @@ G.radio = component('radio', function(e) {
 
 	e.make_radio(true)
 	checkbox_widget(e, e.markbox, 'radio')
+	checked_state_prop(e)
 
 	e.group_elements = function() {
 		let form = e.form || document.body
@@ -4816,7 +4808,7 @@ G.radio = component('radio', function(e) {
 		return res[mod(res.indexOf(e)+inc, res.len)]
 	}
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key) {
 		if (key == 'ArrowDown' || key == 'ArrowUp' || key == 'ArrowLeft' || key == 'ArrowRight') {
 			e.next_radio((key == 'ArrowUp' || key == 'ArrowLeft') ? -1 : 1).focus()
 			return false
@@ -5054,7 +5046,7 @@ let slider_widget = function(e, range) {
 	}
 
 	function update_tooltip(thumb, update_text) {
-		let show = thumb.matches(':is(:hover,:focus-visible)')
+		let show = thumb.matches(':is(:hover,:focus-within)')
 			&& !thumb.getAnimations().length
 		if (!show && !thumb.tooltip) return
 		if (!thumb.tooltip) {
@@ -5148,9 +5140,9 @@ let slider_widget = function(e, range) {
 	for (let thumb of e.thumbs) {
 
 		function update_tt() { update_tooltip(thumb) }
-		thumb.on('hover', update_tt)
-		thumb.on('focus', update_tt)
-		thumb.on('blur' , update_tt)
+		thumb.on('hover'   , update_tt)
+		thumb.on('focusin' , update_tt)
+		thumb.on('focusout', update_tt)
 		thumb.on('transitionstart', update_tt)
 		thumb.on('transitionend'  , update_tt)
 
@@ -5174,7 +5166,7 @@ let slider_widget = function(e, range) {
 			this.capture_pointer(ev, pointermove, pointerup)
 		})
 
-		thumb.on('keydown', function(key, shift, ctrl, alt, ev) {
+		thumb.on('keydown', function(ev, key, shift, ctrl, alt) {
 			if (alt)
 				return
 			let d
@@ -5298,7 +5290,7 @@ An <input-group> can contain multiple <input> elements.
 
 */
 
-css('.input-group', 'shrinks t-m m-y-05 lh-input h-s')
+css('.input-group', 'shrinks-h t-m m-y-05 lh-input h-s')
 
 // `position: static` fixes the bug (in both Chrome & FF) where the outline
 // is obscured by the children if 1) they have a background and 2) they create
@@ -5503,16 +5495,6 @@ css_state('.button[selected]', '', `
 
 // attention animation
 
-css(`
-@keyframes button-attention {
-	from {
-		transform: scale(1.2);
-		outline: 2px solid var(--fg);
-		outline-offset: 2px;
-	}
-}
-`)
-
 G.button = component('button', 'Input', function(e) {
 
 	e.prop_vals.text = [...e.nodes]
@@ -5630,8 +5612,11 @@ G.button = component('button', 'Input', function(e) {
 	e.draw_attention = function() {
 		if (e.disabled)
 			return
-		e.style.animation = 'none'
-		raf(function() { e.style.animation = 'button-attention .5s' })
+		e.animate([{
+			'transform'      : 'scale(1.2)',
+			'outline'        : '2px solid var(--fg)',
+			'outline-offset' : '2px',
+		}], {duration: 200})
 	}
 
 })
@@ -5775,6 +5760,10 @@ G.select_button = component('select-button', function(e) {
 		e.plate.show()
 	})
 
+	e.listen('layout_changed', function() {
+		e.position()
+	})
+
 	// controller
 
 	e.on_validate(function(ev) {
@@ -5796,14 +5785,14 @@ G.select_button = component('select-button', function(e) {
 		select_item(b, ev)
 	})
 
-	e.inputbox.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.inputbox.on('keydown', function(ev, key, shift, ctrl, alt) {
 		if (alt || shift || ctrl)
 			return
 		if (key == 'ArrowRight' || key == 'ArrowLeft' || key == 'ArrowUp' || key == 'ArrowDown') {
 			let fw = key == 'ArrowRight' || key == 'ArrowDown'
 			let b = e.selected_item
-			b = fw ? b && b.next || e.last.prev : b && b.prev || e.first
-			select_item(b, ev)
+			let i = clamp(b.index + (fw ? 1 : -1), 0, e.inputbox.len-2)
+			select_item(e.inputbox.at[i], ev)
 			return false
 		}
 	})
@@ -5829,6 +5818,8 @@ We do the same with <text-input> and all other inputs below.
 
 inherits:
 	input_widget
+props:
+	max_len
 update options:
 	select_all
 
@@ -5846,6 +5837,8 @@ G.textarea_input = component('textarea-input', 'Input', function(e) {
 	e.class('textarea-input')
 	e.textarea = textarea({classes: 'textarea-input-textarea'})
 	e.add(e.textarea)
+
+	e.prop('max_len', {type: 'number'})
 
 	e.forward_prop('placeholder', e.textarea)
 
@@ -5877,6 +5870,8 @@ G.textarea_input = component('textarea-input', 'Input', function(e) {
 
 inherits:
 	input_widget
+props:
+	max_len
 update options:
 	select_all
 
@@ -5894,6 +5889,8 @@ G.text_input = component('text-input', 'Input', function(e) {
 	e.class('text-input')
 	e.input_group = div({class: 'text-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
+
+	e.prop('max_len', {type: 'number'})
 
 	e.make_input_widget({
 		errors_tooltip_target: e.input_group,
@@ -6268,7 +6265,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 		return false
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key, shift, ctrl, alt) {
 		if (alt)
 			return
 		if (key == 'ArrowDown' || key == 'ArrowUp') {
@@ -6340,7 +6337,7 @@ css_state('.tags-x:active', '', `
 function convert_tags(tags) {
 	tags = isstr(tags) ? (tags.trim().starts('[') ? json_arg(tags) : tags.words()) : tags
 	if (isarray(tags))
-		tags.remove_duplicates()
+		tags.sort().uniq_sorted()
 	return tags
 }
 
@@ -6409,7 +6406,7 @@ G.tags_box = component('tags-box', function(e) {
 		e.fire('input', ev)
 	}
 
-	function tag_keydown(key, shift, ctrl, alt, ev) {
+	function tag_keydown(ev, key) {
 		if (key == 'Delete') {
 			let i = e.remove_tag(this.value, ev)
 			e.fire('input', ev)
@@ -6443,7 +6440,7 @@ state:
 // NOTE: we use 'skip' on the root element and create an <input-group> inside
 // so that we can add popups to the widget without messing up the CSS.
 css('.tags-input', 'skip')
-css('.tags-input-group', 'shrinks')
+css('.tags-input-group', 'shrinks-h')
 css('.tags-input-input', 'S')
 css('.tags-scrollbox', 'shrinks h-m b-r-0 clip')
 css('.tags-input .tags-box', 'rel shrinks m0')
@@ -6512,7 +6509,7 @@ G.tags_input = component('tags-input', function(e) {
 				tag_div.class('invalid', e.known_values && !e.known_values.has(tag_div.value))
 	})
 
-	e.tag_input.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.tag_input.on('keydown', function(ev, key) {
 		if (key == 'Backspace') {
 			let s = this.value
 			if (s) {
@@ -6710,7 +6707,7 @@ function dropdown_widget(e, is_checklist) {
 				e.add(list)
 			}
 		} else {
-			list.remove()
+			list.del()
 			e.known_values = null
 		}
 		list.on('input'        , list_input, on)
@@ -6766,7 +6763,7 @@ function dropdown_widget(e, is_checklist) {
 		let v = e.input_value
 		v = isstr(v) ? (v.trim().starts('[') ? json_arg(v) : v.words()) : isarray(v) ? v.slice() : v
 		if (v) {
-			v.remove_duplicates()
+			v.sort().uniq_sorted()
 			if (remove_invalid)
 				for (let i = v.len; i >= 0; i--)
 					if (!e.known_values.has(v[i]))
@@ -6934,7 +6931,7 @@ function dropdown_widget(e, is_checklist) {
 			e.close(false, ev)
 	}
 
-	e.inputbox.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.inputbox.on('keydown', function(ev, key, shift, ctrl, alt) {
 		let free_key = !(alt || shift || ctrl)
 		if (
 			(free_key && !is_checklist && key == ' ' && !e.list.search_string)
@@ -6990,101 +6987,6 @@ G.check_dropdown = component('check-dropdown', 'Input', function(e) {
 	e.is_values = true // enable values validators
 
 	return props
-})
-
-/* <autocomplete> ------------------------------------------------------------
-
-in props:
-
-update opt:
-	input
-
-*/
-
-css('.autocomplete', 'b v-s p-input bg-input z3', `
-	resize: both;
-`)
-
-G.autocomplete = component('autocomplete', 'Input', function(e) {
-
-	e.class('autocomplete')
-	e.make_disablable()
-	e.init_child_components()
-
-	e.prop_vals.list = e.$1('list')
-
-	if (!e.prop_vals.list) { // static list
-		e.prop_vals.list = div()
-		for (let ce of [...e.at])
-			e.prop_vals.list.add(ce)
-		e.prop_vals.list.make_list_items_focusable()
-		e.clear()
-	}
-
-	function bind_list(list, on) {
-		if (!list) return
-		if (on) {
-			list.make_list_items_focusable({multiselect: false})
-			list_items_changed.call(list)
-			list.class('dropdown-picker')
-			list.make_popup(null, 'bottom', 'start')
-			list.hide()
-			list.on('search', function() {
-				e.open()
-			})
-			e.add(list)
-		} else {
-			list.remove()
-		}
-		e.update({value: true})
-	}
-
-	e.set_list = function(list1, list0) {
-		bind_list(list0, false)
-		bind_list(list1, true)
-	}
-
-	e.prop('list', {private: true})
-
-	function item_value(item_e, k) {
-		if (item_e.data != null) { // dynamic list with a data model
-			return item_e.data[k]
-		} else { // static list, value kept in a prop or attr.
-			return strict_or(item_e[k], item_e.attr(k))
-		}
-	}
-
-	function input_input(ev) {
-		e.update({input: this.value, show: !!this.value})
-	}
-
-	e.on_update(function(opt) {
-		if (opt.input) {
-			let list = this
-			for (let i = 0, n = list.list_len; i < n; i++) {
-				let item_e = list.at[i]
-				let text = item_value(item_e, 'text')
-				let matches = text != null && text.starts(prefix)
-				// if (matches)
-
-				item_e.show(matches)
-			}
-		}
-	})
-
-	e.bind_input = function(input, on) {
-		if (warn_if(input.tag != 'input', 'autocomplete: not an input tag: {0}', e.input_id))
-			return
-		input.on('input', input_input, on)
-		e.popup_target = on ? input : null
-		e.show(!!input.value)
-	}
-
-	e.prop('input_id', {type: 'id', attr: 'for', on_bind: e.bind_input})
-
-	e.make_popup(null, 'bottom', 'start')
-	e.hide()
-
 })
 
 /* <calendar> ----------------------------------------------------------------
@@ -7477,10 +7379,11 @@ function calendar_widget(e, mode) {
 	}
 
 	e.on_bind(function(on) {
-		listen('layout_changed', update_scroll, on)
 		if (on)
 			update_scroll()
 	})
+
+	e.listen('layout_changed', update_scroll)
 
 	// hit state & drag state
 
@@ -8007,7 +7910,7 @@ function calendar_widget(e, mode) {
 		}
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key, shift, ctrl, alt) {
 
 		if (alt)
 			return
@@ -8047,7 +7950,7 @@ function calendar_widget(e, mode) {
 				* ((key == 'ArrowDown' || key == 'ArrowRight') ? 1 : -1)
 
 			if (mode == 'day') {
-				e.value = day(e.value, ddays)
+				e.value = day(e.value ?? time(), ddays)
 				e.fire('input', ev)
 				e.scroll_to_view_range(e.value, e.value, 0)
 			} else {
@@ -8215,10 +8118,10 @@ G.time_picker = component('time-picker', 'Input', function(e) {
 			e.focus_first()
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt) {
+	e.on('keydown', function(ev, key, shift, ctrl, alt) {
 		let free_key = !(alt || ctrl || shift)
 		if (free_key && (key == 'ArrowLeft' || key == 'ArrowRight')) {
-			for (i = 0, n = e.with_seconds ? 3 : 2; i < n; i++) {
+			for (let i = 0, n = e.with_seconds ? 3 : 2; i < n; i++) {
 				if (lists[i].has_focus) {
 					let next_li = lists[i + (key == 'ArrowLeft' ? -1 : 1)]
 					if (next_li) {
@@ -8555,7 +8458,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			}
 		}
 
-		input.on('keydown', function(key, shift, ctrl, alt, ev) {
+		input.on('keydown', function(ev, key, shift, ctrl, alt) {
 
 			if (alt)
 				return
@@ -8698,21 +8601,21 @@ function date_input_widget(e, has_date, has_time, range) {
 			})
 		})
 
-	e.picker_box.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.picker_box.on('keydown', function(ev, key, shift, ctrl, alt) {
 		let free_key = !(alt || shift || ctrl)
 		if (free_key && key == 'Escape') {
-			e.close(false, ev)
+			e.close(true, ev)
 			return false
 		}
 	})
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.on('keydown', function(ev, key, shift, ctrl, alt) {
 		let free_key = !(alt || shift || ctrl)
 		if (
 			(alt && (key == 'ArrowDown' || key == 'ArrowUp'))
 			|| (free_key && key == 'Enter')
 		) {
-			e.toggle(false, ev)
+			e.toggle(true, ev)
 			return false
 		}
 	})
@@ -8933,7 +8836,7 @@ function richtext_widget_editing(e) {
 		e.fire('content_changed')
 	})
 
-	e.content_box.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.content_box.on('keydown', function(ev, key) {
 		if (key === 'Enter')
 			if (document.queryCommandValue('formatBlock') == 'blockquote')
 				runafter(0, function() { exec('formatBlock', '<p>') })
@@ -8942,7 +8845,7 @@ function richtext_widget_editing(e) {
 		ev.stopPropagation()
 	})
 
-	e.content_box.on('keypress', function(key, shift, ctr, alt, ev) {
+	e.content_box.on('keypress', function(ev) {
 		ev.stopPropagation()
 	})
 

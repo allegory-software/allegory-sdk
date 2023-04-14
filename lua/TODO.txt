@@ -22,6 +22,14 @@ FEATURES
 	- https://github.com/bungle/lua-resty-libxl
 
 
+TASKS (THINK)
+------------------------------------------------------------------------------
+- wait for all to finish
+- kill -> kill all
+- terminals bubble up
+- attach task to termination of a group of tasks
+
+
 MULTILANGUAGE
 ------------------------------------------------------------------------------
 TOPICS

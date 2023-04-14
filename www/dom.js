@@ -116,6 +116,7 @@ DOM MANIPULATION
 	e.set(te)
 	e.add(te1,...)
 	e.insert(i, te1,...)
+	e.del() -> e
 	e.replace([e0], te)
 	e.move([pe], [i0])
 	e.clear()
@@ -387,6 +388,7 @@ CSS SPECIFICITY REPORTING
 (function () {
 "use strict"
 let G = window
+let e = Element.prototype
 
 // debugging -----------------------------------------------------------------
 
@@ -398,8 +400,6 @@ G.SLOW_BIND_TIME_MS = 10
 G.DEBUG_UPDATE = false
 G.DEBUG_CSS_USAGE = false
 G.DEBUG_CSS_SPECIFICITY = false
-
-let e = Element.prototype
 
 let debug_indent = ''
 
@@ -449,7 +449,7 @@ e.trace_if = function(cond, ...args) {
 // DOM load event ------------------------------------------------------------
 
 function update_dom_loaded() {
-	G.dom_loaded = document.readyState === 'complete'
+	G.dom_loaded = document.readyState === 'interactive'
 }
 update_dom_loaded()
 document.on('DOMContentLoaded', update_dom_loaded)
@@ -836,6 +836,7 @@ alias(Node, 'next_node'  , 'nextSibling')
 alias(Node, 'prev_node'  , 'previousSibling')
 
 alias(NodeList, 'len', 'length')
+alias(HTMLCollection, 'len', 'length')
 
 method(NodeList, 'trim', function() {
 	let a = []
@@ -968,8 +969,8 @@ component.extend = function(tag, where, init) {
 	if (!init) { init = where; where = 'after'; }
 	let tagName = tag.upper()
 	let init0 = assert(component_init[tagName], 'component not registered: {0}', tag)
-	init = (where == 'before' ? do_before : do_after)(init0, init);
-	component_init[tagName] = init
+	let combine = where == 'before' && do_before || where == 'after' && do_after
+	component_init[tagName] = combine(init0, init)
 }
 
 component.categories = obj() // {cat->{create1,...}}
@@ -1074,10 +1075,10 @@ e.init_component = function(prop_vals) {
 	if (e.id) {
 		e.on('attr_changed', function(k, v, v0) {
 			if (k == 'id')
-				e.announce('id_changed', v, v0)
+				announce('id_changed', e, v, v0)
 		})
-		e.announce('init')
-		e.announce(e.id+'.init')
+		announce('init', e)
+		announce(e.id+'.init', e)
 	}
 
 	e.debug_close_if(DEBUG_INIT)
@@ -1126,15 +1127,14 @@ e._bind = function bind(on) {
 		if (e._bound == on)
 			return
 		e._bound = on
-		assert(e.bound != null)
 		if (on) {
 			e.debug_open_if(DEBUG_BIND, '+')
 			let t0 = PROFILE_BIND_TIME && time()
 			if (e._user_bind)
 				e._user_bind(true)
 			if (e.id) {
-				e.announce('bind', true)
-				e.announce(e.id+'.bind', true)
+				announce('bind', e, true)
+				announce(e.id+'.bind', e, true)
 			}
 			if (PROFILE_BIND_TIME) {
 				let t1 = time()
@@ -1150,8 +1150,8 @@ e._bind = function bind(on) {
 			if (e._user_bind)
 				e._user_bind(false)
 			if (e.id) {
-				e.announce('bind', false)
-				e.announce(e.id+'.bind', false)
+				announce('bind', e, false)
+				announce(e.id+'.bind', e, false)
 			}
 			e.debug_close_if(DEBUG_BIND)
 		}
@@ -1183,20 +1183,33 @@ G.init_components = function() {
 		debug('ROOT BIND DONE ----------------------------')
 }
 
+// element events into external objects --------------------------------------
+
+override(Element, 'on', function(inherited, target, event, f, enable, capture) {
+	if (isstr(target)) {
+		return inherited.call(this, target, event, f, enable)
+	} else {
+		this.on_bind(function(on) {
+			target.on(event, f, enable, capture)
+		})
+		if (enable != false && this.bound)
+			target.on(event, f, enable, capture)
+	}
+})
+
+e.listener = function() {
+	let ls = listener()
+	//
+	return ls
+}
+
 // element global events -----------------------------------------------------
 
 // listen to a global event *while the element is bound*.
 e.listen = function(event, f) {
 	let handlers = obj() // event->f
 	this.listen = function(event, f) {
-		let f0 = handlers[event]
-		if (f0)
-			handlers[event] = function(...args) {
-				f0(...args)
-				f(...args)
-			}
-		else
-			handlers[event] = f
+		handlers[event] = do_after(handlers[event], f)
 	}
 	this.listen(event, f)
 	function bind(on) {
@@ -1427,7 +1440,7 @@ e.set = function E_set(s) {
 				return this
 			for (let node of this.nodes) // s->[..s..]
 				if (node != s)
-					node.remove()
+					node.del()
 		} else { // s->[...]
 			this.clear()
 			this.add(s)
@@ -1506,11 +1519,11 @@ e.insert = function E_insert(i0, ...args) {
 	return this
 }
 
-override(Element, 'remove', function E_remove(inherited) {
+e.del = function E_del() {
 	this._bind(false)
-	inherited.call(this)
+	this.remove()
 	return this
-})
+}
 
 // replace child node with: text, node, null (or a constructor returning those).
 // if the node to be replaced is null, the new node is appended instead.
@@ -1524,7 +1537,7 @@ e.replace = function E_replace(e0, s) {
 		if (s === e0)
 			return this
 		if (s == null) {
-			e0.remove()
+			e0.del()
 			return this
 		}
 		if (iselem(e0))
@@ -1632,8 +1645,9 @@ e.make_items_prop = function(ITEMS, html_items) {
 			html_items = [...e.children]
 			e.clear()
 		}
-		e.prop_vals.items = html_items
 	}
+
+	e.prop_vals.items = html_items
 
 }
 
@@ -1716,11 +1730,6 @@ e.prop_changed = function(prop, v1, v0, ev) {
 }
 e.on_prop_changed = function(f) {
 	this.do_after('prop_changed', f)
-}
-
-let resolve_linked_element = function(id) { // stub
-	let e = window[id]
-	return iselem(e) && e.bound ? e : null
 }
 
 let from_bool_attr = v => repl(repl(v, '', true), 'false', false)
@@ -1809,9 +1818,10 @@ e.prop = function(prop, opt) {
 		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
 		let REF = opt.bind_id || ID+'_ref'
 		let on_bind = opt.on_bind
-		let id_bind = function(id, on) {
+		let bind_id = function(id, on) {
 			if (!id) return
-			let te = on ? resolve_linked_element(id) : null
+			let te = on && window[id]
+			te = te && iselem(te) && te.bound && te || null
 			if (on_bind && e[REF])
 				on_bind.call(e, e[REF], false)
 			e[REF] = te
@@ -1832,15 +1842,12 @@ e.prop = function(prop, opt) {
 			if (e[ID] != id0) return
 			e[ID] = id1
 		})
-		e.on_bind(function(on) {
-			id_bind(e[ID], on)
-		})
 		e.on_prop_changed(function(k, v1, v0, ev) {
-			id_bind(v0, false)
-			id_bind(v1, true)
+			if (k != ID) return
+			bind_id(v0, false)
+			bind_id(v1, true)
 		})
-		if (e.bound)
-			id_bind(e[ID], true)
+		bind_id(e[ID], true)
 	}
 
 	e.property(prop, get, set)
@@ -1848,7 +1855,6 @@ e.prop = function(prop, opt) {
 	opt.set = set
 
 	attr(e, 'props')[prop] = opt
-
 }
 
 e.alias = function(new_name, old_name) {
@@ -2293,8 +2299,8 @@ e.update = function(opt) {
 }
 
 e.cancel_update = function() {
-	update_set.delete(e)
-	position_set.delete(e)
+	update_set.delete(this)
+	position_set.delete(this)
 }
 
 e.on_update = function(f) {
@@ -2353,7 +2359,8 @@ let callers = on.callers
 
 let resize_observer = new ResizeObserver(function(entries) {
 	for (let entry of entries)
-		entry.target.fire('resize', entry.contentRect, entry)
+		if (entry.target.bound) // sometimes it comes in late
+			entry.target.fire('resize', entry.contentRect, entry)
 })
 installers.resize = function() {
 	if (this == window)
@@ -2750,7 +2757,7 @@ callers.keydown = function(ev, f) {
 	shift_pressed = ev.shiftKey
 	ctrl_pressed  = ev.ctrlKey
 	alt_pressed   = ev.altKey
-	return f.call(this, ev.key, ev.shiftKey, ev.ctrlKey, ev.altKey, ev)
+	return f.call(this, ev, ev.key, ev.shiftKey, ev.ctrlKey, ev.altKey)
 }
 callers.keyup    = callers.keydown
 callers.keypress = callers.keydown
@@ -2792,7 +2799,7 @@ override(Event, 'stopPropagation', function(inherited, ...args) {
 
 G.copied_elements = set() // {element}
 
-document.on('keydown', function(key, shift, ctrl, alt, ev) {
+document.on('keydown', function(ev, key, shift, ctrl, alt) {
 	if (alt || shift)
 		return
 	if (ctrl && key == 'c') {
@@ -3097,13 +3104,13 @@ method(HTMLElement, 'trim_inner_html', function() {
 	while (is_node_trimmable(node)) {
 		let node_to_remove = node
 		node = node.prev_node
-		node_to_remove.remove()
+		node_to_remove.del()
 	}
 	node = this.first_node
 	while (is_node_trimmable(node)) {
 		let node_to_remove = node
 		node = node.next_node
-		node_to_remove.remove()
+		node_to_remove.del()
 	}
 })
 
@@ -3539,7 +3546,7 @@ e.modal = function(on) {
 	on = on != false
 	if (!on && e.modal_overlay) {
 		e.class('modal', false)
-		e.modal_overlay.remove()
+		e.modal_overlay.del()
 		e.modal_overlay = null
 		document.body.disable(e, false)
 	} else if (on && !e.overlay) {
@@ -3554,7 +3561,7 @@ e.modal = function(on) {
 
 // keep Tab navigation inside the app, modals & popups -----------------------
 
-root.on('keydown', function(key, shift, ctrl, alt, ev) {
+root.on('keydown', function(ev, key, shift, ctrl, alt) {
 	if (key == 'Tab') {
 		let modal = ev.target.closest('.modal, .popup') || this
 		if (!modal)
@@ -4033,7 +4040,7 @@ e.add_popup = function(pe) {
 			body.add(pe)
 			pe.update({show: !e.parent.effectively_hidden})
 		} else {
-			pe.remove()
+			pe.del()
 		}
 	}
 	e.on_bind(bind)

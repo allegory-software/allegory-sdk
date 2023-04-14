@@ -27,12 +27,25 @@ BUGS
 
 * NAV revert bug (esp. tree)
 
+* CHARTS
+	- no split_cols? -> all_groups[0]
+	- no group_cols?
+	- BUG: order
+	- BUG: lifetime
+
 * Safari 16.3 dumbass browser
 	- will do more testing before release...
 
 
 NEW WIDGETS
 ------------------------------------------------------------------------------
+
+* MULTI-INPUT
+	- html content is one or multiple rows inside <record> tags
+	- <record duplicate=N> to duplicate a record. N can be 0.
+	- [+] button to duplicate record underneath
+	- [-] button to remove record
+	- min & max number of records
 
 * HTML-INPUT
 
@@ -49,24 +62,6 @@ NEW WIDGETS
 * MONTH CALENDAR variation
 
 * MONTH-INPUT
-
-* DATA-DRIVEN single-value input widget:
-	* col
-		* bool: checkbox / radio buttons
-		* text: input / tags-input / textarea / password
-		* number: num-input / slider
-		* date: date-input
-		* datetime: date-time-input
-		* time: time-input
-		* image: image-input
-		* enum: dropdown / select-button
-		* lookup: dropdown / grid / list
-	* col1 col2
-		* date range
-		* date-time range
-		* time range
-		* num: range-slider
-
 
 FEATURES
 ------------------------------------------------------------------------------

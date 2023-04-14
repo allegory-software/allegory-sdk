@@ -51,9 +51,9 @@ TEMPLATES
 
 */
 
-'use strict';
-{
-
+(function () {
+"use strict"
+let G = window
 let e = Element.prototype
 
 // config --------------------------------------------------------------------
@@ -61,7 +61,7 @@ let e = Element.prototype
 // some of the values come from the server (see config.js action).
 {
 let t = obj()
-var config = function(name, val) {
+G.config = function(name, val) {
 	if (val !== undefined && t[name] === undefined)
 		t[name] = val
 	if (t[name] === undefined)
@@ -71,9 +71,9 @@ var config = function(name, val) {
 
 // global S() for internationalizing strings.
 
-var S_texts = obj()
+G.S_texts = obj()
 
-var S = function(name, en_s, ...args) {
+G.S = function(name, en_s, ...args) {
 	let s = (S_texts[name] ?? en_s) || ''
 	if (args.length)
 		return s.subst(...args)
@@ -83,12 +83,12 @@ var S = function(name, en_s, ...args) {
 
 // actions -------------------------------------------------------------------
 
-let action_name = function(action) {
+function action_name(action) {
 	return action.replaceAll('-', '_')
 }
 
 // extract the action from a decoded url
-let url_action = function(t) {
+function url_action(t) {
 	if (t.segments[0] == '' && t.segments.length >= 2)
 		return action_name(t.segments[1])
 }
@@ -97,7 +97,7 @@ let url_action = function(t) {
 // replace its action name with a language-specific alias for a given
 // (or current) language if any, or add ?lang= if the given language
 // is not the default language.
-var href = function(url_s, target_lang) {
+G.href = function(url_s, target_lang) {
 	let t = url_parse(url_s)
 
 	// add impersonated user if any
@@ -127,10 +127,10 @@ var href = function(url_s, target_lang) {
 	return url_format(t)
 }
 
-var action = obj() // {name->handler}
+G.action = obj() // {name->handler}
 
 // given a url (in encoded form), find its action and return the handler.
-let action_handler = function(url) {
+function action_handler(url) {
 	let act = url_action(url)
 	if (act === undefined)
 		return
@@ -171,15 +171,15 @@ let action_handler = function(url) {
 let loading = true
 
 // check if the action was triggered by a page load or by exec()
-var page_loading = function() {
+G.page_loading = function() {
 	return loading
 }
 
 let ignore_url_changed
 
-var current_url = url_parse(location.pathname + location.search) // this is global
+G.current_url = url_parse(location.pathname + location.search) // this is global
 
-let url_changed = function(ev) {
+function url_changed(ev) {
 	if (ignore_url_changed)
 		return
 	current_url = url_parse(location.pathname + location.search)
@@ -200,7 +200,7 @@ window.on('action_not_found', function(opt) {
 	exec('/', {samepage: true})
 })
 
-function _save_scroll_state(top) {
+function save_scroll_state(top) {
 	let state = history.state
 	if (!state)
 		return
@@ -211,17 +211,17 @@ function _save_scroll_state(top) {
 
 let exec_aborted
 
-let abort_exec = function() {
+function abort_exec() {
 	exec_aborted = true
 }
 
-let check_exec = function() {
+function check_exec() {
 	exec_aborted = false
 	fire('before_exec', abort_exec)
 	return !exec_aborted
 }
 
-var exec = function(url, opt) {
+G.exec = function(url, opt) {
 	opt = opt || {}
 	if (opt.refresh) {
 		window.location = href(url, opt.lang)
@@ -229,7 +229,7 @@ var exec = function(url, opt) {
 	}
 	if (!check_exec())
 		return
-	_save_scroll_state(window.scrollY)
+	save_scroll_state(window.scrollY)
 	url = href(url, opt.lang)
 	if (opt.samepage) {
 		history.replaceState(null, null, url)
@@ -243,16 +243,16 @@ var exec = function(url, opt) {
 	window.fire(ev)
 }
 
-var back = function() {
+G.back = function() {
 	if (!check_exec())
 		return
 	history.back()
 }
 
 // set scroll back to where it was or reset it
-var setscroll = function(top) {
+G.setscroll = function(top) {
 	if (top !== undefined) {
-		_save_scroll_state(top)
+		save_scroll_state(top)
 	} else {
 		let state = history.state
 		if (!state)
@@ -303,7 +303,7 @@ component('a', '[href]', function(e) {
 	e.sethref()
 })
 
-var settitle = function(title) {
+G.settitle = function(title) {
 	title = title
 		|| $('h1').html()
 		|| url_parse(location.pathname).segments[1].replace(/[-_]/g, ' ')
@@ -311,19 +311,19 @@ var settitle = function(title) {
 		document.title = title + config('page_title_suffix')
 }
 
-var slug = function(id, s) {
+G.slug = function(id, s) {
 	return (s.upper()
 		.replace(/ /g,'-')
 		.replace(/[^\w-]+/g,'')
 	) + '-' + id
 }
 
-var id_arg = function(s) {
+G.id_arg = function(s) {
 	s = s && s.match(/\d+$/)
 	return s && num(s) || null
 }
 
-var opt_arg = function(s) {
+G.opt_arg = function(s) {
 	return s && ('/' + s) || null
 }
 
@@ -331,8 +331,8 @@ var opt_arg = function(s) {
 
 {
 let cur_cx
-var flap = obj()
-var setflaps = function(new_cx) {
+G.flap = obj()
+G.setflaps = function(new_cx) {
 	if (cur_cx == new_cx)
 		return
 	let cx0 = cur_cx && cur_cx.words().tokeys() || empty
@@ -354,23 +354,23 @@ var setflaps = function(new_cx) {
 
 // templates -----------------------------------------------------------------
 
-var template = function(name) {
+G.template = function(name) {
 	if (!name) return null
 	let e = window[name+'_template']
 	warn_if(!e, 'unknown template', name)
 	return e && (e.tag == 'script' || e.tag == 'xmp') ? e.html : null
 }
 
-var static_template = function(name) {
+G.static_template = function(name) {
 	let e = window[name+'_template']
 	return e && e.tag == 'template' ? e.html : null
 }
 
-var render_string = function(s, data) {
+G.render_string = function(s, data) {
 	return Mustache.render(s, data || obj(), template)
 }
 
-var render = function(template_name, data) {
+G.render = function(template_name, data) {
 	let s = template(template_name)
 	assert(s != null, 'template not found: {0}', template_name)
 	return render_string(s, data)
@@ -422,7 +422,7 @@ component('render', function(e) {
 
 // init ----------------------------------------------------------------------
 
-var init_action = function() {
+G.init_action = function() {
 	window.on('popstate', function(ev) {
 		loading = false
 		url_changed(ev)
@@ -431,4 +431,4 @@ var init_action = function() {
 		url_changed()
 }
 
-} // module scope.
+}()) // module function

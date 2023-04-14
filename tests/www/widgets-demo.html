@@ -15,6 +15,7 @@
 <script src="purify.js"></script>
 <script src="widgets.js"></script>
 <script src="nav.js"></script>
+<script src="nav-widgets.js"></script>
 <script src="grid.js"></script>
 <script src="charts.js"></script>
 <script src="xmodule.js"></script>
@@ -30,6 +31,7 @@ the browser's inspector/debugger.
 */
 @media (resolution: 120dpi) {
 	:root {
+		/* unfortunately this screws up mouse hit-testing so we disable it for now. */
 		/* zoom: 80%; */
 	}
 }
@@ -122,9 +124,9 @@ button[pressed] { background: var(--bg-button-active); }
 
 let hash = obj()
 function order_keys(t) {
-	return keys(t).sort().reduce((t1, k) => { t1[k] = t[k]; return t1}, obj())
+	return keys(t).sort().uniq_sorted().reduce((t1, k) => { t1[k] = t[k]; return t1}, obj())
 }
-for (let kv of window.location.hash.split(',')) {
+for (let kv of window.location.hash.replace(/^#/, '').split(',')) {
 	if (!kv) continue
 	let [k, v] = kv.split('=')
 	hash[k] = v
@@ -193,8 +195,7 @@ on_dom_load(function() {
 		let item = div({class: 'demo-list-item'}, name.replaceAll('_', '-'))
 		demo_list.add(item)
 		let i1 = i
-		item.on('click', function() {
-
+		item.click = function() {
 			ace_editor.getSession().setValue(s)
 			ace_editor.initial_script = s
 			run_script()
@@ -205,9 +206,14 @@ on_dom_load(function() {
 				item0.class('selected', false)
 			item.class('selected', true)
 			hash_save('selected_demo_index', i1)
-
-		})
+		}
 		i++
+	})
+	demo_list.make_list_items_focusable()
+	demo_list.make_focusable()
+	listen('focused_item_changed', function(e) {
+		if (e != demo_list) return
+		demo_list.focused_item.click()
 	})
 	}
 
@@ -241,9 +247,7 @@ on_dom_load(function() {
 
 	{
 	let i = hash_load('selected_demo_index')
-	let item = i != null && demo_list.at[i]
-	if (item)
-		item.click()
+	demo_list.focus_item(i)
 	let s = hash_load('script')
 	if (s) {
 		set_script(s)
@@ -528,9 +532,9 @@ win = dlg({
 	content: div({}, 'I\'m just here for the demo.', tag('br'), 'What do you think?'),
 	buttons_layout: 'some-button < yes no > apply:ok cancel',
 	buttons: {
-		yes: { icon: 'fa fa-thumbs-up' },
-		no: { icon: 'fa fa-thumbs-down' },
-		apply: { action: function() { win.close(); }, },
+		yes   : { icon: 'fa fa-thumbs-up' },
+		no    : { icon: 'fa fa-thumbs-down' },
+		apply : { closes: true, action: function() { win.close(); }, },
 	},
 })
 
@@ -868,10 +872,10 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 <!--------------------------------------------------------------------------->
 
 <xmp id=textarea_input_demo>
-<textarea-input class=small value="abc"></textarea-input>
+<textarea-input id=my_ta1 class=small value="abc" required max-len=4></textarea-input>
 <div>
-	<textarea-input required placeholder="Put stuff here" id=my_input></textarea-input>
-	<errors for=my_input></errors>
+	<textarea-input required placeholder="Put stuff here" id=my_ta2></textarea-input>
+	<errors for=my_ta2></errors>
 	<button>Submit</button>
 </div>
 </form>
@@ -883,7 +887,7 @@ xlarge  <span class="ro-collapse-h b-collapse-h xlarge  "><input class="ro-var" 
 <div class="xsmall  "><text-input value="abc"></text-input><button>OK</button></div>
 <div class="small   "><text-input value="abc"></text-input><button>OK</button></div>
 <div class="smaller "><text-input></text-input><button>OK</button></div>
-<div class="normal  "><text-input required placeholder="Put stuff here" id=my_input></text-input><button>OK</button></div>
+<div class="normal  "><text-input required max-len=3 placeholder="Put stuff here" id=my_input></text-input><button>OK</button></div>
 <errors for=my_input></errors>
 <div class="large   "><text-input value="abc" required id=my_input2></text-input><button>OK</button></div>
 <errors for=my_input2 type=rules></errors>
@@ -962,15 +966,6 @@ my_form.on('submit', function() {
 	return false
 })
 </script>
-</xmp>
-
-<!--------------------------------------------------------------------------->
-
-<xmp id=autocomplete_demo>
-<input id=my_input>
-<autocomplete id=my_auto for=my_input>
-	<div text="">Option 1</div>
-</autocomplete>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1284,15 +1279,15 @@ main.add(g)
 <!--------------------------------------------------------------------------->
 
 <xmp id=html_grid_demo>
-<grid>
+<grid id=my_html_grid>
 	<col-attrs for=id type=number></col-attrs>
 	<rowset pk=id can_change_rows=false>
 		<field name=id   ></field>
 		<field name=name ></field>
 		<field name=desc ></field>
-		<row id=1 name=Foo desc="Le Foo"></row>
-		<row id=2 name=Bar desc="Le Bar"></row>
-		<row id=3 name=Baz desc="Le Baz"></row>
+		<row :id=1 name=Foo desc="Le Foo"></row>
+		<row :id=2 name=Bar desc="Le Bar"></row>
+		<row :id=3 name=Baz desc="Le Baz"></row>
 	</rowset>
 </grid>
 </xmp>
@@ -1479,6 +1474,30 @@ listen('validate', function(e) {
 
 <!--------------------------------------------------------------------------->
 
+<xmp id=list_nav_demo>
+<list class="gap-y">
+	<script type="text/x-mustache">
+		<d class="b p gap-x g-2col">
+			<d class="label">ID:          </d><d class="bold">{{id}}</d>
+			<d class="label">Name:        </d><d class="bold">{{name}}</d>
+			<d class="label">Description: </d><d class="bold">{{desc}}</d>
+		</d>
+	</script>
+	<nav>
+		<rowset pk=id>
+			<field name=id   ></field>
+			<field name=name ></field>
+			<field name=desc ></field>
+			<row :id=1 name=Foo desc="Le Foo"></row>
+			<row :id=2 name=Bar desc="Le Bar"></row>
+			<row :id=3 name=Baz desc="Le Baz"></row>
+		</rowset>
+	</nav>
+</list>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
 <xmp id=grid_inputs_demo>
 <split>
 	<grid id=my_grid>
@@ -1486,9 +1505,9 @@ listen('validate', function(e) {
 			<field name=id   ></field>
 			<field name=name ></field>
 			<field name=desc ></field>
-			<row id=1 name=Foo desc="Le Foo"></row>
-			<row id=2 name=Bar desc="Le Bar"></row>
-			<row id=3 name=Baz desc="Le Baz"></row>
+			<row :id=1 name=Foo desc="Le Foo"></row>
+			<row :id=2 name=Bar desc="Le Bar"></row>
+			<row :id=3 name=Baz desc="Le Baz"></row>
 		</rowset>
 	</grid>
 	<div>

@@ -104,10 +104,9 @@ like `<if>`.
 Unlike `glue.js` you can't ignore this API if you want to manipulate any DOM
 in your application that contains widgets from this SDK. That is because all
 DOM manipulation must be done using this API, as standard DOM methods like
-`e.append()` do not call our lifecycle methods (except `e.remove()` which does).
+`e.append()` do not call our lifecycle methods.
 We might override all built-in DOM APIs in the future for a more seamless
-experience but since we don't use them (our API is better) the need hasn't
-come yet.
+experience but since we don't use them the need hasn't come out yet.
 
 ### Layer 3: Functional CSS library
 

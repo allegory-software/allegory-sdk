@@ -1720,7 +1720,7 @@ function editbox_widget(e, opt) {
 			})
 			if (!e.spicker)
 				return
-			e.spicker.popup()
+			e.spicker.make_popup()
 			e.spicker.popup_side = 'bottom'
 			e.spicker.popup_align = e.align == 'right' ? 'end' : 'start'
 			e.spicker.hide()
@@ -2005,7 +2005,7 @@ function editbox_widget(e, opt) {
 					col: e._col,
 					can_select_widget: false,
 				})
-				e.picker.popup()
+				e.picker.make_popup()
 				let dr
 				e.picker.on_measure(function() {
 					dr = this.parent.rect()

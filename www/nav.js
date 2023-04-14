@@ -3,14 +3,6 @@
 	Nav widget mixin.
 	Written by Cosmin Apreutesei. Public Domain.
 
-implements:
-	val_widget_mixin:
-		So any nav_widget (grid, listbox) also acts like a val_widget (editbox),
-		setting its cell value when navigating the rows. This is how dropdowns
-		work: the grid or listbox picker is bound to the same field as the
-		dropdown and it changes the dropdown's cell value by itself without
-		the need to coordinate with the dropdown.
-
 field types (see "field type definitions" at the end):
 	password
 	number
@@ -45,9 +37,9 @@ rowset:
 	publishes:
 		e.reset([ev])
 		e.ready
-	calls:
-		^ready()
-		^reset()
+	announces:
+		^^ready()
+		^^reset()
 
 rowset attributes:
 	fields     : [field1,...]
@@ -176,9 +168,8 @@ fields:
 		e.set_prop('col.ATTR', val)
 		e.get_col_attr(col, attr) -> val
 		e.set_col_attr(col, attr, val)
-	calls:
-		^col_attr_changed(col, attr, v)
-		^col_ATTR_changed_for_COL(col, attr, v)
+	announces:
+		^^col_attr_changed(col, attr, v)
 
 visible fields:
 	publishes:
@@ -269,9 +260,10 @@ focusing and selection:
 			opt.must_not_move_col
 		e.do_focus_row(row, row0)
 		e.do_focus_cell(row, field, row0, field0)
-		^focused_row_changed(row, row0, ev)
-		^focused_cell_changed(row, field, row0, field0, ev)
-		^selected_rows_changed()
+	announces:
+		^^focused_row_changed(row, row0, ev)
+		^^focused_cell_changed(row, field, row0, field0, ev)
+		^^selected_rows_changed()
 
 scrolling:
 	publishes:
@@ -318,9 +310,10 @@ row adding, removing, moving:
 		e.init_row(row, ri, ev)
 		e.free_row(row, ev)
 		e.rows_moved(from_ri, n, insert_ri, ev)
-		^rows_removed(rows)
-		^rows_added(rows)
-		^rows_changed()
+	announces:
+		^^rows_removed(rows)
+		^^rows_added(rows)
+		^^rows_changed()
 
 cell values & state:
 	publishes:
@@ -343,12 +336,11 @@ updating cells:
 		e.validate_cell()
 		e.do_update_cell_state(ri, fi, key, val, ev)
 		e.do_update_cell_editing(ri, [fi], editing)
-		^cell_state_changed(row, field, changes, ev)
-		^cell_state_changed_for_COL(row, field, changes, ev)
-		^row_state_changed(row, changes, ev)
-		^focused_row_cell_state_changed(row, field, changes, ev)
-		^focused_row_cell_state_changed_for_COL(row, field, changes, ev)
-		^focused_row_state_changed(row, changes, ev)
+	announces:
+		^^cell_state_changed(row, field, changes, ev)
+		^^row_state_changed(row, changes, ev)
+		^^focused_row_cell_state_changed(row, field, changes, ev)
+		^^focused_row_state_changed(row, changes, ev)
 
 row state:
 	publishes:
@@ -383,7 +375,6 @@ editing:
 		e.exit_row([{cancel: true}])
 	calls:
 		e.create_editor()
-		^exit_edit(ri, fi, cancel)
 		e.do_cell_click(ri, fi)
 
 loading from server:
@@ -399,9 +390,10 @@ loading from server:
 		e.do_update_load_slow()
 		e.do_update_load_fail()
 		e.load_overlay(on)
-		^load_progress(p, loaded, total)
-		^load_slow(on)
-		^load_fail(err, type, status, message, body, req)
+	announces:
+		^^load_progress(p, loaded, total)
+		^^load_slow(on)
+		^^load_fail(err, type, status, message, body, req)
 
 saving:
 	config:
@@ -439,9 +431,8 @@ display val & text val:
 		e.cell_display_val_for(row, field, v, display_val_to_update)
 		e.cell_display_val(row, field)
 		e.cell_text_val(row, field)
-	calls:
-		^display_vals_changed()
-		^display_vals_changed_for_COL()
+	announces:
+		^^display_vals_changed()
 
 picker:
 	publishes:
@@ -469,6 +460,7 @@ server-side properties:
 (function () {
 "use strict"
 let G = window
+let e = Element.prototype
 
 css('.nav-loading-overlay', 'p')
 css('.nav-loading-overlay.error', 'bg-smoke')
@@ -537,7 +529,7 @@ let gc = function() {
 			let nav = gclist.pop()
 
 			delete shared_navs[name]
-			nav.remove()
+			nav.del()
 
 			nav_count -= 1
 			row_count -= nav.all_rows.length
@@ -557,7 +549,7 @@ G.shared_nav = function(id, opt) {
 	if (!name) { // anonymous i.e. not shareable
 		let ln = bare_nav(opt)
 		ln.ref = function() { head.add(this) }
-		ln.unref = function() { this.remove() }
+		ln.unref = function() { this.del() }
 		return ln
 	}
 
@@ -571,7 +563,7 @@ G.shared_nav = function(id, opt) {
 		}
 		ln.rc = 0
 		ln.ref = function() {
-			if (!this.rc++)
+			if (!this.rc++) // jshint ignore:line
 				if (!this.parent) {
 					gc()
 					head.add(this)
@@ -676,8 +668,11 @@ G.nav_widget = function(e) {
 				warn('field name missing')
 			}
 		}
-		for (let row_tag of rowset_tag.$(':scope>row'))
-			row_text_vals.push(row_tag.attrs)
+		for (let row_tag of rowset_tag.$(':scope>row')) {
+			let t = row_tag.attrs
+			if (':id' in t) { t.id = t[':id']; delete t[':id']; }
+			row_text_vals.push(t)
+		}
 		rowset_tag.remove()
 	}
 
@@ -716,7 +711,7 @@ G.nav_widget = function(e) {
 			e.update_action_band()
 		} else {
 			e.ready = false
-			e.fire('ready_changed')
+			e.announce('ready', false)
 			abort_all_requests()
 			e.unfocus_focused_cell({cancel: true})
 			init_all()
@@ -919,7 +914,7 @@ G.nav_widget = function(e) {
 
 	function free_field(field) {
 		if (field.editor_instance)
-			field.editor_instance.remove()
+			field.editor_instance.del()
 		bind_lookup_nav(field, false)
 		free_field_own_lookup_nav(field)
 	}
@@ -1012,7 +1007,7 @@ G.nav_widget = function(e) {
 		init_rows()
 
 		if (e.ready)
-			e.fire('ready_changed')
+			e.announce('ready', true)
 	}
 
 	function init_tree_fields() {
@@ -1106,8 +1101,7 @@ G.nav_widget = function(e) {
 			e.update({fields: true})
 		}
 
-		e.fire('col_attr_changed', col, k, v)
-		e.fire('col_'+k+'_changed_for_'+col, col, k, v)
+		e.announce('col_attr_changed', col, k, v)
 
 		let attrs = field_prop_attrs[k]
 		if (e._xoff) {
@@ -1293,8 +1287,8 @@ G.nav_widget = function(e) {
 			return
 		e.param_vals = pv1
 		e.disable('no_param_vals', pv1 === false)
-		e.fire('label_changed')
-		e.fire('params_changed')
+		e.announce('label_changed')
+		e.announce('params_changed')
 		return true
 	}
 
@@ -1364,6 +1358,7 @@ G.nav_widget = function(e) {
 			return
 		nav.on('selected_rows_changed', params_changed, on)
 		for (let [col, param] of param_map(params)) {
+			// TODO:
 			nav.on('cell_state_changed_for_'+col, param_nav_cell_state_changed, on)
 		}
 		// TODO: refactor this: use ^row_state_changed, etc !
@@ -1588,8 +1583,8 @@ G.nav_widget = function(e) {
 		let start_fi = fi
 
 		// the default cell is the first or the last depending on direction.
-		ri ??= ri_inc * -1/0
-		fi ??= fi_inc * -1/0
+		ri ??= ri_inc * -1/0 // jshint ignore:line
+		fi ??= fi_inc * -1/0 // jshint ignore:line
 
 		// clamp out-of-bound row/col indices.
 		ri = clamp(ri, 0, e.rows.length-1)
@@ -1783,14 +1778,14 @@ G.nav_widget = function(e) {
 
 		if (row_changed) {
 			e.do_focus_row(row, row0)
-			e.fire('focused_row_changed', row, row0, ev)
+			e.announce('focused_row_changed', row, row0, ev)
 		}
 
 		if (row_changed || field_changed) {
 			let field  = e.fields[fi]
 			let field0 = e.fields[fi0]
 			e.do_focus_cell(row, field, row0, field0)
-			e.fire('focused_cell_changed', row, field, row0, field0, ev)
+			e.announce('focused_cell_changed', row, field, row0, field0, ev)
 		}
 
 		let sel_rows_changed = map_keys_different(old_selected_rows, e.selected_rows)
@@ -1871,7 +1866,7 @@ G.nav_widget = function(e) {
 	}
 
 	function selected_rows_changed() {
-		e.fire('selected_rows_changed')
+		e.announce('selected_rows_changed')
 	}
 
 	e.is_row_selected = function(row) {
@@ -2653,7 +2648,7 @@ G.nav_widget = function(e) {
 		let nav = field.exclude_vals_nav
 		if (!exclude_vals) {
 			if (nav) {
-				field.exclude_vals_nav.remove()
+				field.exclude_vals_nav.del()
 				field.exclude_vals_nav = null
 			}
 			return
@@ -2747,12 +2742,9 @@ G.nav_widget = function(e) {
 		for (let [field, changes] of csc) {
 			let fi = e.field_index(field)
 			e.do_update_cell_state(ri, fi, changes, ev)
-			e.fire('cell_state_changed', row, field, changes, ev)
-			e.fire('cell_state_changed_for_'+field.name, row, field, changes, ev)
-			if (row == e.focused_row) {
-				e.fire('focused_row_cell_state_changed', row, field, changes, ev)
-				e.fire('focused_row_cell_state_changed_for_'+field.name, row, field, changes, ev)
-			}
+			e.announce('cell_state_changed', row, field, changes, ev)
+			if (row == e.focused_row)
+				e.announce('focused_row_cell_state_changed', row, field, changes, ev)
 			if (changes.input_val)
 				vals_changed = true
 			if (changes.errors)
@@ -2761,9 +2753,9 @@ G.nav_widget = function(e) {
 		let row_state_changed = count_keys(rsc, 1)
 		if (row_state_changed) {
 			e.do_update_row_state(ri, rsc, ev)
-			e.fire('row_state_changed', row, rsc, ev)
+			e.announce('row_state_changed', row, rsc, ev)
 			if (row == e.focused_row)
-				e.fire('focused_row_state_changed', row, rsc, ev)
+				e.announce('focused_row_state_changed', row, rsc, ev)
 			if (rsc.errors)
 				errors_changed = true
 		}
@@ -3351,12 +3343,10 @@ G.nav_widget = function(e) {
 				field.lookup_fields = ln.flds(field.lookup_cols || ln.pk_fields)
 				field.display_field = ln.fld(field.display_col || ln.name_field)
 				field.align = field.display_field && field.display_field.align
-				e.fire('display_vals_changed')
-				e.fire('display_vals_changed_for_'+field.name)
+				e.announce('display_vals_changed', field.name)
 			}
 			field.lookup_nav_display_vals_changed = function() {
-				e.fire('display_vals_changed')
-				e.fire('display_vals_changed_for_'+field.name)
+				e.announce('display_vals_changed', field.name)
 			}
 			field.lookup_nav_cell_state_changed = function(row, col, changes) {
 				if (changes.val)
@@ -3594,8 +3584,8 @@ G.nav_widget = function(e) {
 			update_row_index()
 			if (ev.input)
 				update_pos_field() // TODO: tree
-			e.fire('rows_added', added_rows)
-			e.fire('rows_changed')
+			e.announce('rows_added', added_rows)
+			e.announce('rows_changed')
 		}
 
 		if (rows_added || rows_updated)
@@ -3722,7 +3712,7 @@ G.nav_widget = function(e) {
 			if (ev.input)
 				update_pos_field() // TODO: tree
 
-			e.fire('rows_removed', removed_rows)
+			e.announce('rows_removed', removed_rows)
 
 			if (top_row_index != null) {
 				if (!e.focus_cell(top_row_index, true, null, null, {input: e}))
@@ -3732,7 +3722,7 @@ G.nav_widget = function(e) {
 		}
 
 		if (removed_rows.size)
-			e.fire('rows_changed')
+			e.announce('rows_changed')
 
 		if (rows_changed || removed_rows.size)
 			e.update({state: rows_changed, rows: !!removed_rows.size})
@@ -4033,7 +4023,7 @@ G.nav_widget = function(e) {
 		e.update({fields: true, rows: true})
 		e.refocus(fs)
 
-		e.fire('reset', ev)
+		e.announce('reset', ev)
 
 	}
 
@@ -4133,7 +4123,7 @@ G.nav_widget = function(e) {
 		let link = tag('a', {href: rowset_url('xlsx'), style: 'display: none'})
 		document.body.add(link)
 		link.click()
-		link.remove()
+		link.del()
 	}
 
 	e.abort_loading = function() {
@@ -4145,12 +4135,12 @@ G.nav_widget = function(e) {
 
 	function load_progress(p, loaded, total) {
 		e.do_update_load_progress(p, loaded, total)
-		e.fire('load_progress', p, loaded, total)
+		e.announce('load_progress', p, loaded, total)
 	}
 
 	function load_slow(show) {
 		e.do_update_load_slow(show)
-		e.fire('load_slow', show)
+		e.announce('load_slow', show)
 	}
 
 	function load_done() {
@@ -4162,7 +4152,7 @@ G.nav_widget = function(e) {
 
 	function load_fail(err, type, status, message, body) {
 		e.do_update_load_fail(true, err, type, status, message, body)
-		return e.fire('load_fail', err, type, status, message, body, this)
+		return e.announce('nav_load_fail', err, type, status, message, body, this)
 	}
 
 	e.prop('focus_state', {slot: 'user'})
@@ -4324,7 +4314,7 @@ G.nav_widget = function(e) {
 		e.update({state: true})
 		add_request(req)
 		set_save_state(source_rows, req)
-		e.fire('saving', true)
+		e.announce('saving', true)
 		req.send()
 	}
 
@@ -4338,7 +4328,7 @@ G.nav_widget = function(e) {
 				save_to_row_states()
 			else
 				save_to_row_vals()
-			e.fire('saved')
+			e.announce('saved')
 		} else if (e.rowset_url) {
 			save_to_server(ev)
 		} else {
@@ -4347,18 +4337,18 @@ G.nav_widget = function(e) {
 	}
 
 	function save_slow(show) {
-		e.fire('saving_slow', show)
+		e.announce('saving_slow', show)
 	}
 
 	function save_done() {
 		requests.delete(this)
 		set_save_state(this.source_rows, null)
-		e.fire('saving', false)
+		e.announce('saving', false)
 	}
 
 	function save_success(result) {
 		apply_result(result, this.source_rows, this.ev)
-		e.fire('saved')
+		e.announce('saved')
 	}
 
 	function save_fail(type, status, message, body) {
@@ -4371,7 +4361,7 @@ G.nav_widget = function(e) {
 			err = S('error_save_timeout', 'Saving failed: timed out.')
 		if (err)
 			e.notify('error', err, body)
-		e.fire('save_fail', err, type, status, message, body)
+		e.announce('save_fail', err, type, status, message, body)
 	}
 
 	e.revert_changes = function() {
@@ -4483,7 +4473,7 @@ G.nav_widget = function(e) {
 	e.serialize_all_row_vals = function() {
 		let rows = []
 		for (let row of e.all_rows)
-			if (!row.removed && !row.nosave && row.errors.passed) {
+			if (!row.removed && !row.nosave && (!row.errors || row.errors.passed)) {
 				let vals = e.serialize_row_vals(row)
 				if (e.do_save_row(vals) !== 'skip')
 					rows.push(vals)
@@ -4562,7 +4552,7 @@ G.nav_widget = function(e) {
 
 	e.notify = function(type, message, ...args) {
 		notify(message, type)
-		e.fire('notify', type, message, ...args)
+		e.announce('notify', type, message, ...args)
 	}
 
 	e.do_update_loading = function(on) { // stub
@@ -4573,7 +4563,7 @@ G.nav_widget = function(e) {
 	function loading(on) {
 		e.class('loading', on)
 		e.do_update_loading(on)
-		e.fire('loading', on)
+		e.announce('loading', on)
 		e.do_update_load_progress(0)
 	}
 
@@ -4600,7 +4590,7 @@ G.nav_widget = function(e) {
 	let oe
 	e.load_overlay = function(on, cls, text, cancel_text, detail) {
 		if (oe) {
-			oe.remove()
+			oe.del()
 			oe = null
 		}
 		e.disable('loading', on)
@@ -4650,7 +4640,7 @@ G.nav_widget = function(e) {
 			oe.content.add(text, cancel)
 			focus_e = cancel
 		} else
-			oe.content.remove()
+			oe.content.del()
 		e.add(oe)
 		if(focus_e && e.has_focus)
 			focus_e.focus()
@@ -4980,9 +4970,8 @@ G.nav_widget = function(e) {
 
 }
 
-// ---------------------------------------------------------------------------
-// view-less nav
-// ---------------------------------------------------------------------------
+/* view-less nav -------------------------------------------------------------
+*/
 
 css('bare-nav', 'hidden')
 
@@ -5004,85 +4993,162 @@ G.global_val_nav = function() {
 			rows: [[]],
 		},
 	})
-	document.head.add(nav)
+	head.add(nav)
 	nav.focus_cell(true, false)
 	return nav
 }
 
 /* ---------------------------------------------------------------------------
-mixin: widget that has a nav as its data model. the nav can be either
-external, internal, or missing (in which case the widget is disabled).
 
-// ------------------------------------------------------------------------ */
+Widget that has a nav as its data model. The nav can be either external,
+internal, or missing (in which case the widget is disabled).
 
-G.data_nav_widget = function(e) {
+fires:
+	^bind_nav(on)
 
-	function update_data_nav() {
+*/
 
-		let internal0 = !!(e._data_nav && e._data_nav.parent == e)
-		let internal1 = !(e.rowset_name || e.rowset)
+e.make_nav_props = function() {
 
-		e.bind_data_nav(false)
+	let e = this
 
-		if (internal1 != internal0) {
-			if (internal0)
-				e._data_nav.remove()
-			if (internal1)
-				e._data_nav = bare_nav()
-		}
-
-		let internal = e.rowset_name || e.rowset
-		let data_nav = e.data_nav || e._data_nav_id_nav
-
-		e.bind_data_nav(true)
+	function bind_nav(on) {
+		if (!e._nav)
+			return
+		if (e._nav._internal)
+			if (on)
+				head.add(e._nav)
+			else
+				e._nav.del()
+		e.fire('bind_nav', on)
 	}
 
-	// external nav, statically bound
-	e.set_data_nav = update_data_nav
-	e.prop('data_nav', {private: true, type: 'nav'})
+	// NOTE: internal nav takes priority to external nav. This decision is
+	// arbitrary, but also more stable (external nav can go anytime).
+	function get_nav() {
+		if (!e.bound) return
+		if (e.rowset_name || e.rowset) { // internal
+			if (e._nav && e._nav._internal
+				&& ((e.rowset_name && e._nav.rowset_name == e.rowset_name) ||
+					(e.rowset && e._nav.rowset == e.rowset))) // same inernal
+				return e._nav
+			return bare_nav({
+				rowset_name : e.rowset_name,
+				rowset      : e.rowset,
+				_internal   : true,
+			})
+		}
+		return e.nav || e._html_nav // external
+	}
 
-	// external nav, dynamically bound
-	e.set__data_nav_id_nav = update_data_nav
-	e.prop('data_nav_id', {type: 'nav', attr: 'data_nav', bind_id: '_data_nav_id_nav'})
+	function update_nav() {
+		let nav0 = e._nav
+		let nav1 = get_nav()
+		if (nav0 == nav1)
+			return
+		bind_nav(false)
+		e._nav = nav1
+		bind_nav(true)
+	}
+
+	e.on_bind(update_nav)
+
+	// external nav: referenced directly or by id.
+	e.prop('nav', {private: true})
+	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
+	e.set_nav = update_nav
 
 	// internal nav: local rowset binding
-	e.set_rowset = update_data_nav
 	e.prop('rowset', {private: true, type: 'rowset'})
+	e.set_rowset = update_nav
 
 	// internal nav: remote rowset binding
 	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
+	e.set_rowset_name = update_nav
+
 }
 
-// ---------------------------------------------------------------------------
-// nav dropdown mixin
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
 
-G.nav_dropdown_widget = function(e) {
+Widget that has a nav cell as its data model.
 
-	editbox_widget(e, {input: false, picker: true})
+fires:
+	^bind_field(on)
 
-	e.set_val_col = function(v) {
-		if (!e.picker) return
-		e.picker.val_col = v
+*/
+
+e.make_nav_col_props = function() {
+
+	let e = this
+
+	e.can_actually_change_val = function(field) {
+		if (e.row)
+			return e._nav.can_change_val(e.row, field)
+		else if (!e._nav)
+			return false
+		else if (!e._nav.all_rows.length)
+			return e._nav.can_actually_add_rows()
+		else
+			return false
 	}
-	e.prop('val_col', {type: 'col'})
 
-	e.set_display_col = function(v) {
-		if (!e.picker) return
-		e.picker.display_col = v
+	function bind_field(on) {
+		if (on) {
+			assert(!e._field)
+			e._field = e._nav && e._nav.optfld(e.col) || null
+			if (!e._field)
+				return
+			e.fire('bind_field', true)
+		} else {
+			if (!e._field)
+				return
+			e.fire('bind_field', false)
+			e._field = null
+		}
 	}
-	e.prop('display_col', {type: 'col'})
 
-	e.set_rowset_name = function(v) {
-		if (!e.picker) return
-		e.picker.rowset_name = v
+	function update_field() {
+		bind_field(false)
+		bind_field(true)
 	}
-	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
 
-	e.on('opened', function() {
-		if (!e.picker) return
-		e.picker.scroll_to_focused_cell()
+	function update_nav() {
+		let nav1 = e.nav || e._nav_id_nav
+		if (e._nav == nav1)
+			return
+		bind_field(false)
+		e._nav = nav1
+		bind_field(true)
+	}
+
+	e.prop('col', {type: 'col'})
+	e.set_col = update_field
+
+	// external nav, statically bound
+	e.prop('nav', {private: true, type: 'nav'})
+	e.set_nav = update_nav
+
+	// external nav, dynamically bound
+	e.prop('nav_id', {type: 'nav', attr: 'nav'})
+	e.set_nav_id = update_nav
+
+	e.listen('bind', function(nav, on) {
+		if (e.nav_id && nav.id == e.nav_id) {
+			e._nav_id_nav = on ? nav : null
+			update_nav()
+		}
 	})
+
+	e.listen('reset', function() {
+		update_field()
+		e.update()
+	})
+
+	// e.listen('focused_row_changed', update)
+	// e.listen('focused_row_cell_state_changed', cell_state_changed)
+	// e.listen('display_vals_changed', update)
+	// e.listen('col_label_changed', update)
+	// e.listen('col_info_changed', update)
 
 }
 
@@ -5849,5 +5915,6 @@ let init_rowset_events = memoize(function() {
 				nav.reload({allow_diff_merge: true, update_ids: a, if_filter: filter})
 	}
 })
+
 
 }()) // module function
