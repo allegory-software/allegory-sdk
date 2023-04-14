@@ -3523,6 +3523,7 @@ css('.overlay', '', `
 	top: 0;
 	right: 0;
 	bottom: 0;
+	content: ''; /* because it's used in ::before and ::after */
 `)
 
 G.overlay = function(attrs, content) {

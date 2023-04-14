@@ -718,9 +718,9 @@ fires:
 */
 
 css_state('.list-accepts-items > *', 'rel ease z1')
-css_state('.list-drop-placeholder', 'abs b2 b-dashed no-ease', `
-	border-color: var(--fg-link);
-`)
+css_state('.list-drop-placeholder', 'abs b2 b-dashed')
+
+// b2 b-dashed no-ease
 
 e.make_list_drop_elements = function() {
 
@@ -885,7 +885,7 @@ e.make_list_items_movable = function(can_move) {
 	e.listen('drag_started', function(payload, add_drop_area, source_elem) {
 		if (source_elem != e)
 			return
-		add_drop_area(e, domrect(-1/0, -1/0, 1/0, 1/0))
+		add_drop_area(e, domrect(0, 0, 10e5, 10e5))
 		horiz = e.css('flexDirection') == 'row'
 		r = e.rect()
 	})
@@ -2038,7 +2038,6 @@ state:
 	selected_item_id
 appearance:
 	tabs_side          top bottom left right
-	header_width
 behavior:
 	auto_focus         true
 dynamic tabs:
@@ -2049,7 +2048,9 @@ dynamic tabs:
 
 */
 
-css('.tabs', 'S v flex')
+css('.tabs', 'S v flex', `
+	--w-tabs-header: 10em;
+`)
 
 css('tabs-header', 'h rel bg1')
 
@@ -2060,8 +2061,8 @@ css('tabs-fixed-header', 'S h-m')
 css('.tabs[tabs_side=left ]', 'h-l')
 css('.tabs[tabs_side=right]', 'h-r')
 
-css('.tabs[tabs_side=left ] > tabs-header', 'v')
-css('.tabs[tabs_side=right] > tabs-header', 'v')
+css('.tabs[tabs_side=left ] > tabs-header', 'v', `width: var(--w-tabs-header);`)
+css('.tabs[tabs_side=right] > tabs-header', 'v', `width: var(--w-tabs-header);`)
 css('.tabs[tabs_side=left ] > tabs-header > tabs-box', 'v')
 css('.tabs[tabs_side=right] > tabs-header > tabs-box', 'v')
 
@@ -2118,12 +2119,14 @@ css_state('.tabs.moving > tabs-header tabs-selection-bar', 'hidden')
 css_state('.tabs:not(.moving) > tabs-header tabs-selection-bar', '', `
 	transition: width .15s, height .15s, left .15s, top .15s;
 `)
+css_state('tabs-tab.dragging::before', 'overlay z-1 click-through bg1 b2', `
+	border-color: var(--fg-link);
+`)
 
 // tab renaming
 css_state('tabs-tab.renaming', 'bg0 fg', `min-width: 6em;`)
 css_state('tabs-tab.renaming tabs-title', 'no-outline nowrap')
 css_state('tabs-tab.renaming::before', 'overlay click-through', `
-	content: '';
 	border: 2px dashed var(--fg-link);
 `)
 
@@ -2144,8 +2147,6 @@ G.tabs = component('tabs', 'Containers', function(e) {
 			enum_values: 'top bottom left right', default: 'top', attr: true})
 
 	e.prop('auto_focus', {type: 'bool', default: true})
-
-	e.prop('header_width', {type: 'number'})
 
 	e.prop('selected_item_id', {type: 'id'})
 
@@ -2247,8 +2248,6 @@ G.tabs = component('tabs', 'Containers', function(e) {
 				}
 			}
 		}
-
-		e.header.w = e.header_width
 
 		e.content.set(selected_item)
 
@@ -3449,7 +3448,7 @@ events:
 
 */
 
-css('.pagenav', 'h-bl h-sb')
+css('.pagenav', 'h-bl h-sb flex')
 css('.pagenav-pages-box', 'h-bl')
 css('.pagenav-button', 'm-x-05')
 css('.pagenav-current', '')
@@ -4607,7 +4606,7 @@ function checkbox_widget(e, markbox, input_type) {
 	}
 	function user_toggle(ev) { e.user_set(!e.checked, ev) }
 	e.on('keydown', function(ev, key) {
-		if (key == ' ') { // same as for <button>
+		if (key == ' ' || key == 'Enter') {
 			user_toggle(ev)
 			return false
 		}
@@ -4866,6 +4865,9 @@ css('.slider-thumb-circle', 'S bg-link')
 css('.slider-thumb-circle', 'round', `
 	box-shadow: var(--shadow-thumb);
 `)
+
+css('.slider-thumb-circle:hover' , '', `background: var(--fg-link-hover);`)
+css('.slider-thumb-circle:active', '', `background: var(--fg-link-active);`)
 
 // toggling visibility on hover requires click-through for stable hovering!
 css('.slider-thumb .tooltip', 'click-through m-l-0')
@@ -5346,7 +5348,6 @@ css_role('.labelbox[overlaid]', 'rel ro-var', `
 css_role('.labelbox[overlaid] > .label-widget::before', 'overlay m-l bg-input', `
 	top: -1px;
 	left: -.25em;
-	content: '';
 	height: 1px;
 `)
 css_role('.labelbox[overlaid] > .label-widget', 'abs p-x smaller bold lh0', `

@@ -19,6 +19,20 @@ THINK
 BUGS
 ------------------------------------------------------------------------------
 
+* TOUCH SCREENS
+	- problem with pointer capturing? tab dragging doesn't work.
+
+* TOOLBOX
+	- fix dragging with trackpad (no buttons, just touch)
+
+* SLIDER
+	- range totally overlapped thumbs are hard to distinguish
+	- min_range & max_range constraints
+		- drag other thumb when dragging to satisfy
+
+* BUTTON
+	- Enter vs Space key (doesn't show :active on Enter wtf)
+
 * RANGE-DATE
 	- merge errors from inputs
 

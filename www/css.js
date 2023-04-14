@@ -24,11 +24,11 @@ CSS CLASSES
 	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
 	OVERFLOW      [v h]scroll[-auto] [no]clip[-x -y] scroll-thin scroll-smooth
-	POSITIONING   rel abs z{1-9} no-z overlay
+	POSITIONING   rel abs z{-1 0..9} no-z overlay
 	VISIBILITY    hidden skip click-through[-off]
 	FLAT BGs      bg[1 2 -alt -smoke -fg] no-bg
 	IMAGE BGs     bg-{cover contain center t r b l no-repeat repeat-{x y}}
-	FILTERS       [in]visible op[0 1 01-09] darken lighten no-filter
+	FILTERS       [in]visible op[0 1 01..09] darken lighten no-filter
 	SHADOWS       ring shadow-{tooltip thumb menu button pressed modal toolbox} no-shadow
 	TRANSFORMS    flip-{h v} rotate-{90 180 270}
 	TRANSITIONS   ease ease-{in out linear} ease-{01s 02s 05s 1s} no-ease
@@ -41,6 +41,7 @@ CSS CLASSES
 	BORDER ICONS  icon-chevron-{right left down up}
 	UNICODE ICONS icon-crossmark icon-{3-dots-{v h} 3-lines-h 9-dots}
 	SVG ICONS     svg_circle_x() svg_plus_sign()
+	DEBUGGING     bg-red b-red
 
 HTML SELECTORS
 
@@ -1020,7 +1021,7 @@ css('.abs'  , '', ` position: absolute; `)
 css('.fixed', '', ` position: fixed; `)
 
 /* example: menu = z4, picker = z3, tooltip = z2, toolbox = z1 */
-for (let i = 1; i < 9; i++)
+for (let i = -1; i < 9; i++)
 	css('.z'+i, '', `z-index: ${i};`)
 css('.no-z', '', ` z-index: auto; `)
 
@@ -1326,5 +1327,11 @@ G.svg_minus_sign = function(attrs) {
 
 css('d[h]', 'h')
 css('d[v]', 'v')
+
+/* debugging */
+
+css('.bg-red', '', `background: red;`)
+css('.b-red', 'b', `border-color: red;`)
+
 
 }()) // module function
