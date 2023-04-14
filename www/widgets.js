@@ -416,7 +416,7 @@ G.tooltip = component('tooltip', function(e) {
 	}
 
 	// clicking outside the tooltip or its anchor closes the tooltip.
-	e.on(document, 'pointerdown', function(ev) {
+	function document_pointerdown(ev) {
 		if (!e.autoclose)
 			return
 		if (e.parent && e.parent.contains(ev.target)) // clicked inside the anchor.
@@ -426,7 +426,9 @@ G.tooltip = component('tooltip', function(e) {
 		if (too_soon())
 			return
 		e.close(ev)
-	})
+	}
+
+	e.on(document, 'pointerdown', document_pointerdown)
 
 	// clicking outside the tooltip closes the tooltip, even if the click did something.
 	e.on(document, 'stopped_event', function(ev) {
