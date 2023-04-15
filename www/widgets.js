@@ -656,12 +656,16 @@ e.make_list_drag_elements = function(can_drag_elements) {
 			// fixate size so we can move it out of layout.
 			item.w = item._r0.w
 			item.h = item._r0.h
-			// note: this enlarge-on-cross-axis-only thing ony makes sense when
-			// moving elements between lists with same horiz.
-			if (horiz)
-				items_r.w += ox
-			else
-				items_r.h += oy
+
+			if (items.length > 1) {
+				// note: this enlarge-on-cross-axis-only thing ony makes sense when
+				// moving elements between lists with same horiz.
+				if (horiz)
+					items_r.w += ox
+				else
+					items_r.h += oy
+			}
+
 		}
 		// move the items out of layout so they don't get clipped.
 		for (let i = items.len-1; i >= 0; i--)
@@ -718,9 +722,9 @@ fires:
 */
 
 css_state('.list-accepts-items > *', 'rel ease z1')
-css_state('.list-drop-placeholder', 'abs b2 b-dashed')
-
-// b2 b-dashed no-ease
+css_state('.list-drop-placeholder', 'abs b2 b-dashed', `
+	border-color: var(--fg-link);
+`)
 
 e.make_list_drop_elements = function() {
 
@@ -876,26 +880,31 @@ e.make_list_items_movable = function(can_move) {
 	e.list_can_drag_elements = can_move != false
 	e.list_can_move_elements = can_move != false
 
-	let r, horiz
+	let r, lr, horiz
 
 	e.on('allow_drag', function() {
-		return !!e.list_can_move_elements
+		if (!e.list_can_move_elements)
+			return false
+		lr = e.at[e.list_len-1].rect()
 	})
 
 	e.listen('drag_started', function(payload, add_drop_area, source_elem) {
 		if (source_elem != e)
 			return
-		add_drop_area(e, domrect(0, 0, 10e5, 10e5))
+		add_drop_area(e, domrect(-1e5, -1e5, 2e5, 2e5))
 		horiz = e.css('flexDirection') == 'row'
 		r = e.rect()
 	})
 
 	e.on('dragging', function(ev, items, items_r) {
 		for (let item of items) {
-			if (horiz)
+			if (horiz) {
 				item.y = r.y
-			else
+				item.x = clamp(item.x, r.x, lr.x)
+			} else {
 				item.x = r.x
+				item.y = clamp(item.y, r.y, lr.y)
+			}
 		}
 	})
 
@@ -2119,6 +2128,7 @@ css_state('.tabs.moving > tabs-header tabs-selection-bar', 'hidden')
 css_state('.tabs:not(.moving) > tabs-header tabs-selection-bar', '', `
 	transition: width .15s, height .15s, left .15s, top .15s;
 `)
+css_role_state('tabs-box .list-drop-placeholder', 'b2 b-dashed')
 css_state('tabs-tab.dragging::before', 'overlay z-1 click-through bg1 b2', `
 	border-color: var(--fg-link);
 `)
