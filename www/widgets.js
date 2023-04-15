@@ -4936,10 +4936,12 @@ let slider_widget = function(e, range) {
 
 	e.prop('from'    , {type: 'number', default: 0})
 	e.prop('to'      , {type: 'number', default: 1})
-
 	e.prop('decimals', {type: 'number', default: 2})
-
 	e.prop('marked'  , {type: 'bool'  , default: true})
+	if (range) {
+		e.prop('min_range',  {type: 'number'})
+		e.prop('max_range',  {type: 'number'})
+	}
 
 	e.mark_w = e.css().prop('--slider-mark-w').num()
 

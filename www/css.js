@@ -17,8 +17,8 @@ CSS CLASSES
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
-	SIZING        nowrap shrinks[-h -v] expands
-	BORDERS       b[0] b-{l r t b}[-0] b-{dotted dashed invisible fg}
+	SIZING        nowrap shrinks[-h -v] expands resize[-x -y] w{1 2 4 8 16 32} h1
+	BORDERS       b[0] b-{l r t b}[-0] b-{dotted dashed invisible fg} frame unframe
 	CORNERS       ro ro0 ro-{05 075 0 2 var var-075} ro-{l r t b}-0 round ro-collapse-{h v}
 	PADDINGS      p p0 p-{025 05 075 2 4 8} p-{l r t b x y}-{0 05 2 4 8}
 	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
@@ -728,11 +728,6 @@ css('.nowrap-dots', '', `
 	text-overflow: ellipsis;
 `)
 
-css('.expands', '', `
-	min-width  : auto;
-	min-height : auto;
-`)
-
 css('.shrinks-h', '', `
 	/* prevents overflow in flexbox and css-grid containers. */
 	min-width  : 0;
@@ -749,6 +744,11 @@ css('.shrinks-v', '', `
 
 css('.shrinks', 'shrinks-v shrinks-h')
 
+css('.expands', '', `
+	min-width  : auto;
+	min-height : auto;
+`)
+
 css('.w1 ', '', ` width : 1.25em; min-width : 1.25em; max-width : 1.25em; `) /* mainly to keep changing icons fixated and aligned */
 css('.h1 ', '', ` height: 1.25em; min-height: 1.25em; max-height: 1.25em; `) /* to make icons square with w1 h1 */
 
@@ -757,6 +757,10 @@ css('.w4 ', '', ` width:    5em; min-width:    5em; max-width:    5em; `)
 css('.w8 ', '', ` width:   10em; min-width:   10em; max-width:   10em; `)
 css('.w16', '', ` width:   20em; min-width:   20em; max-width:   20em; `)
 css('.w32', '', ` width:   40em; min-width:   40em; max-width:   40em; `)
+
+css('.resize-x', '', ` resize: horizontal; `)
+css('.resize-y', '', ` resize: vertical; `)
+css('.resize'  , '', ` resize: both; `)
 
 /* BORDERS ---------------------------------------------------------------- */
 
@@ -973,18 +977,22 @@ css_state('.focus-ring:has(:focus-visible)::after', 'overlay', `
 
 /* NOTE: padding doesn't go well with scrolling so we're removing it to avoid bugs. */
 
-css('.scroll'      , 'p0'   , ` overflow  : scroll; `)
-css('.hscroll'     , 'p-x-0', ` overflow-x: scroll; `)
-css('.vscroll'     , 'p-y-0', ` overflow-y: scroll; `)
-css('.scroll-auto' , 'p0'   , ` overflow  : auto; `)
-css('.hscroll-auto', 'p-x-0', ` overflow-x: auto; `)
-css('.vscroll-auto', 'p-y-0', ` overflow-y: auto; `)
-css('.clip'        , '', ` overflow  : hidden; `)
-css('.clip-x'      , '', ` overflow-x: hidden; `)
-css('.clip-y'      , '', ` overflow-y: hidden; `)
-css('.noclip'      , '', ` overflow  : visible; `)
-css('.noclip-x'    , '', ` overflow-x: visible; `)
-css('.noclip-y'    , '', ` overflow-y: visible; `)
+css('.scroll'       , 'p0'   , ` overflow  : scroll; `)
+css('.scroll-x'     , 'p-x-0', ` overflow-x: scroll; `)
+css('.scroll-y'     , 'p-y-0', ` overflow-y: scroll; `)
+css('.hscroll'      , 'p-x-0', ` overflow-x: scroll; `) // synonim
+css('.vscroll'      , 'p-y-0', ` overflow-y: scroll; `) // synonim
+css('.scroll-auto'  , 'p0'   , ` overflow  : auto; `)
+css('.hscroll-auto' , 'p-x-0', ` overflow-x: auto; `) // synonim
+css('.vscroll-auto' , 'p-y-0', ` overflow-y: auto; `) // synonim
+css('.scroll-x-auto', 'p-x-0', ` overflow-x: auto; `)
+css('.scroll-y-auto', 'p-y-0', ` overflow-y: auto; `)
+css('.clip'         , '', ` overflow  : hidden; `)
+css('.clip-x'       , '', ` overflow-x: hidden; `)
+css('.clip-y'       , '', ` overflow-y: hidden; `)
+css('.noclip'       , '', ` overflow  : visible; `)
+css('.noclip-x'     , '', ` overflow-x: visible; `)
+css('.noclip-y'     , '', ` overflow-y: visible; `)
 
 css('.scroll-smooth', '', ` scroll-behavior: smooth; `)
 

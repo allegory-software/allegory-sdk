@@ -23,7 +23,6 @@
 <script src="ace/ace.js"></script>
 
 <style>
-
 /*
 On Chrome on a Windows with 125% scaling, 80% zoom gets us 1:1 real zoom
 so can test in ideal conditions. With a 1440p screen there's even room for
@@ -35,62 +34,30 @@ the browser's inspector/debugger.
 		/* zoom: 80%; */
 	}
 }
-
-#layout {
-	height: 100%;
-	display: flex;
-}
-
-#code_split {
-	flex: 1;
-	display: flex;
-	flex-flow: column;
-	border-left: 1px solid #333;
-}
-
-#result_split {
-	flex: 1;
-	display: flex;
-	flex-flow: column;
-	border-left: 1px solid #333;
-	min-width: 0;
-	min-height: 0;
-	overflow: auto;
-}
-
-#buttons, #result_buttons {
-	display: flex;
-	border-bottom: 1px solid #333;
-}
-
-#demo_list { overflow: hidden auto; padding-top: .5em; user-select: none; }
-#code      { flex: 1; }
-#result    { padding: 1em; overflow: auto; resize: horizontal; }
-#inspect   { flex: 1; border-top: 1px solid #333; }
-
-#code:focus {
-	outline: none;
-}
-
-.demo-list-item {
-	padding: 0.2em .5em;
-}
-
-.demo-list-item:hover { background: #ddd; }
-.theme-dark .demo-list-item:hover { background: #333; }
-.demo-list-item.selected { background: #ddf; }
-.theme-dark .demo-list-item.selected { background: #336; }
-
-button[pressed] { background: var(--bg-button-active); }
-
 </style>
 
 </head>
 
 <body>
 
+<script>
+
+css('#layout', 'h', `height: 100%; width: 100%;`)
+css('#code_split', 'S v b-l')
+css('#result_split', 'S v b-l shrinks scroll-auto')
+css('#buttons, #result_buttons', 'h b-b')
+css('#demo_list', 'clip-x scroll-y-auto p-t noselect')
+css('#code', 'S')
+css('#result', 'p-4 scroll-auto resize-x')
+css('#inspect', 'S b-t')
+css_state('#code:focus', 'no-outline')
+css('.demo-list-item', '', `padding: 0.2em .5em;`)
+css_state('button[pressed]', '', `background: var(--bg-button-active);`)
+
+</script>
+
 <div id=layout>
-	<div id=demo_list></div>
+	<div id=demo_list class="focusable-items"></div>
 	<div id=code_split>
 		<div id=buttons class="smaller gap-x-05 p-x-05">
 			<button id=run_button>Run</button>
@@ -261,6 +228,8 @@ on_dom_load(function() {
 })
 
 </script>
+
+<!--------------------------------------------------------------------------->
 
 <xmp id=intro_demo>
 To run this demo without a web server, you need allow JavaScript to see files
