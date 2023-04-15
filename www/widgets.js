@@ -140,6 +140,14 @@ css_state('.focusable-items:focus-within .item.focused.invalid', '', `
 	background : var(--bg-focused-error);
 `)
 
+css_state('.item.dragging.selected', '', `
+	background : var(--bg-selected);
+	color      : var(--fg-selected);
+`)
+css_state('.item.dragging.focused.selected', '', `
+	background: var(--bg-focused-selected);
+`)
+
 /* <tooltip> -----------------------------------------------------------------
 
 in props:
@@ -670,6 +678,7 @@ e.make_list_drag_elements = function(can_drag_elements) {
 		// move the items out of layout so they don't get clipped.
 		for (let i = items.len-1; i >= 0; i--)
 			root.add(items[i])
+		e.fire('items_removed', items)
 		e.fire('items_changed')
 
 		e.class('moving')
@@ -970,10 +979,9 @@ e.make_list_items_focusable = function(opt) {
 		e.update({state: true})
 	})
 
-	e.prop('focused_item_index')
+	e.prop('focused_item_index', {type: 'number', slot: 'state'})
 
 	e.set_focused_item_index = function(i, i0, ev) {
-		e.fire('focused_item_changed', ev)
 		e.announce('focused_item_changed', ev)
 		if (ev && ev instanceof UIEvent)
 			e.fire('input', ev)
@@ -1157,14 +1165,8 @@ e.make_list_items_focusable = function(opt) {
 	}
 
 	e.on('items_changed', function() {
-		if (e.focused_item)
-			if (e.focused_item.parent != e) { // removed
-				e.focused_item_index = null
-				e.update({state: true})
-			}
-		if (e.selected_item)
-			if (e.selected_item.parent != e) // removed
-				e.selected_item_index = null
+		e.focused_item_index = null
+		e.selected_item_index = null
 		for (let i = 0, n = e.list_len; i < n; i++) {
 			let item = e.at[i]
 			item.class('item')
@@ -2128,10 +2130,8 @@ css_state('.tabs.moving > tabs-header tabs-selection-bar', 'hidden')
 css_state('.tabs:not(.moving) > tabs-header tabs-selection-bar', '', `
 	transition: width .15s, height .15s, left .15s, top .15s;
 `)
-css_role_state('tabs-box .list-drop-placeholder', 'b2 b-dashed')
-css_state('tabs-tab.dragging::before', 'overlay z-1 click-through bg1 b2', `
-	border-color: var(--fg-link);
-`)
+css_role_state('tabs-box .list-drop-placeholder', 'b0')
+css_state('tabs-tab.dragging::before', 'overlay z-1 click-through b0 bg1-active')
 
 // tab renaming
 css_state('tabs-tab.renaming', 'bg0 fg', `min-width: 6em;`)

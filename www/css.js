@@ -86,6 +86,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg-active             : hsl(  0   0%  96% / 1.0); /* opaque */
 	--bg1                   : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
 	--bg1-hover             : hsl(  0   0%  93% / 1.0); /* sits on bg; opaque */
+	--bg1-active            : hsl(  0   0%  90% / 1.0); /* sits on bg; opaque */
 	--bg2                   : hsl(  0   0%  80% / 1.0); /* sits on bg1; opaque */
 	--bg2-hover             : hsl(  0   0%  85% / 1.0);
 	--bg3                   : hsl(  0   0%  70% / 1.0); /* sits on bg1; opaque */
@@ -190,6 +191,7 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--bg-active             : hsl(216  28%  14% / 1.0);
 	--bg1                   : hsl(216  28%  15% / 1.0);
 	--bg1-hover             : hsl(216  28%  19% / 1.0);
+	--bg1-active            : hsl(216  28%  22% / 1.0);
 	--bg2                   : hsl(216  28%  20% / 1.0);
 	--bg2-hover             : hsl(216  28%  23% / 1.0);
 	--bg3                   : hsl(216  28%  25% / 1.0);
@@ -1047,21 +1049,22 @@ css('.click-through-off', '', ` pointer-events: all; `)
 
 /* FLAT BACKGROUNDS ------------------------------------------------------- */
 
-css('.bg'        , '', ` background: var(--bg); `)
-css('.bg-hover'  , '', ` background: var(--bg-hover); `)
-css('.bg-active' , '', ` background: var(--bg-active); `)
-css('.bg0'       , '', ` background: var(--bg0); `)
-css('.bg1'       , '', ` background: var(--bg1); `)
-css('.bg1-hover' , '', ` background: var(--bg1-hover); `)
-css('.bg2'       , '', ` background: var(--bg2); `)
-css('.bg3'       , '', ` background: var(--bg3); `)
-css('.bg-alt'    , '', ` background: var(--bg-alt); `)
-css('.bg-smoke'  , '', ` background: var(--bg-smoke); `)
-css('.bg-fg'     , '', ` background: var(--fg); `) /* slider thumb, etc. */
-css('.bg-white'  , '', ` background: var(--fg-white); `)
-css('.bg-link'   , '', ` background: var(--fg-link); `) /* slider track */
-css('.no-bg'     , '', ` background: none; `)
-css('.bg-input'  , '', ` background: var(--bg-input); `)
+css('.bg'         , '', ` background: var(--bg); `)
+css('.bg-hover'   , '', ` background: var(--bg-hover); `)
+css('.bg-active'  , '', ` background: var(--bg-active); `)
+css('.bg0'        , '', ` background: var(--bg0); `)
+css('.bg1'        , '', ` background: var(--bg1); `)
+css('.bg1-hover'  , '', ` background: var(--bg1-hover); `)
+css('.bg1-active' , '', ` background: var(--bg1-active); `)
+css('.bg2'        , '', ` background: var(--bg2); `)
+css('.bg3'        , '', ` background: var(--bg3); `)
+css('.bg-alt'     , '', ` background: var(--bg-alt); `)
+css('.bg-smoke'   , '', ` background: var(--bg-smoke); `)
+css('.bg-fg'      , '', ` background: var(--fg); `) /* slider thumb, etc. */
+css('.bg-white'   , '', ` background: var(--fg-white); `)
+css('.bg-link'    , '', ` background: var(--fg-link); `) /* slider track */
+css('.no-bg'      , '', ` background: none; `)
+css('.bg-input'   , '', ` background: var(--bg-input); `)
 css('.bg-input-hover'  , '', ` background: var(--bg-input-hover); `)
 css('.bg-input-active' , '', ` background: var(--bg-input-active); `)
 css('.bg-search' , '', ` background: var(--bg-search); `)
