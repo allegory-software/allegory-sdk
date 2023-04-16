@@ -1997,9 +1997,15 @@ G.listener = function() {
 	}
 
 	// assigning the target, which adds/removes current event listeners.
+	let target_bound = false
 	function bind_target(on) {
 		if (!target)
 			return
+		if (on == target_bound)
+			return
+		if (on && !enabled)
+			return
+		target_bound = on
 		for (let event in all_handlers)
 			for (let handler of all_handlers[event])
 				target.on(event, handler, on)
@@ -2028,8 +2034,13 @@ G.listener = function() {
 		if (target_id != id0) return // not our id
 		e.target_id = id1
 	}
+	let target_id_bound = false
 	function bind_target_id(on) {
 		if (!target_id)
+			return
+		if (on == target_id_bound)
+			return
+		if (on && !enabled)
 			return
 		listen(target_id+'.bind', te_bind, on)
 		listen('id_changed', id_changed, on)

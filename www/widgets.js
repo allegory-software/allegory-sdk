@@ -6026,7 +6026,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 	function update_score() {
 		e.score = (G.zxcvbn && e.input_value != null) ?
 			zxcvbn(e.input_value).score : null
-		e.fire('score_changed', e.score)
+		e.fire('score_changed')
 	}
 
 	let zxcvbn_loaded
@@ -6114,7 +6114,7 @@ G.pass_score = component('pass-score', function(e) {
 	e.label = div({class: 'pass-score-label'})
 	e.add(e.bar, e.label)
 
-	e.prop('for', {slot: 'state'})
+	e.prop('for', {private: true})
 	e.prop('for_id', {type: 'id', attr: 'for', bind_id: 'for'})
 
 	function update_score() {
@@ -6297,9 +6297,10 @@ G.num_input = component('num-input', 'Input', function(e) {
 		let m = e.decimals ? 1 / 10 ** e.decimals : 1
 		v += m * increment * (ctrl ? 10 : 1)
 		v = snap(v, m)
-		if (e.try_validate(v))
-			e.set_prop('input_value', v, ev)
-		e.update({select_all: true})
+		if (!e.try_validate(v))
+			return
+		e.set_prop('input_value', v, ev)
+		e.update({value: true, select_all: true})
 	}
 
 	// controller

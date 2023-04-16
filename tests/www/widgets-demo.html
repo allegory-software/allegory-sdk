@@ -48,7 +48,7 @@ css('#result_split', 'S v b-l shrinks scroll-auto')
 css('#buttons, #result_buttons', 'h b-b')
 css('#demo_list', 'clip-x scroll-y-auto p-t noselect')
 css('#code', 'S')
-css('#result', 'p-4 scroll-auto resize-x')
+css('#result', 'm-4 scroll-x-auto resize-x')
 css('#inspect', 'S b-t')
 css_state('#code:focus', 'no-outline')
 css('.demo-list-item', '', `padding: 0.2em .5em;`)
@@ -703,7 +703,13 @@ add_validation_rule({
 <form id=my_form class=skip>
 	<slider name=s1 value=0.7 marked=false required></slider>
 	<slider name=s2 value=5 from=1 to=9 min=3 max=7 decimals=0></slider>
-	<range-slider name1=s31 name2=s32 value1=1800 value2=1200 from=1000 to=2000 min=1100 max=1900 decimals=0></range-slider>
+	<range-slider name1=s31 name2=s32
+		value1=1800 value2=1200
+		from=1000 to=2000
+		min=1100 max=1900
+		min-range=100 max-range=500
+		decimals=0
+	></range-slider>
 	<button>Submit</button>
 </form>
 <script run>
@@ -900,16 +906,16 @@ my_input2.validator.add_rule({
 <!--------------------------------------------------------------------------->
 
 <xmp id=num_input_demo>
-<div class="xsmall  "><num-input value=-1.51   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="small   "><num-input value=-1.52   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="smaller "><num-input value=-1.53   decimals=1 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="normal  "><num-input value=-1.54   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="large   "><num-input value=-1.55   decimals=2 buttons=up-down   ></num-input><button>OK</button></div>
-<div class="xsmall  "><num-input value=-1.51   decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="small   "><num-input value=-1.52   decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="smaller "><num-input value=123456  decimals=1 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="normal  "><num-input value= 1.54   decimals=0 buttons=plus-minus></num-input><button>OK</button></div>
-<div class="large   "><num-input value=abc     decimals=2 buttons=plus-minus></num-input><button>OK</button></div>
+<div class="xsmall  "><num-input value=-1.51   decimals=2 buttons=up-down    min=0></num-input><button>OK</button></div>
+<div class="small   "><num-input value=-1.52   decimals=2 buttons=up-down    min=0></num-input><button>OK</button></div>
+<div class="smaller "><num-input value=-1.53   decimals=1 buttons=up-down    min=0></num-input><button>OK</button></div>
+<div class="normal  "><num-input value=-1.54   decimals=2 buttons=up-down    min=0></num-input><button>OK</button></div>
+<div class="large   "><num-input value=-1.55   decimals=2 buttons=up-down    min=0></num-input><button>OK</button></div>
+<div class="xsmall  "><num-input value=-1.51   decimals=2 buttons=plus-minus min=0></num-input><button>OK</button></div>
+<div class="small   "><num-input value=-1.52   decimals=2 buttons=plus-minus min=0></num-input><button>OK</button></div>
+<div class="smaller "><num-input value=123456  decimals=1 buttons=plus-minus min=0></num-input><button>OK</button></div>
+<div class="normal  "><num-input value= 1.54   decimals=0 buttons=plus-minus min=0></num-input><button>OK</button></div>
+<div class="large   "><num-input value=abc     decimals=2 buttons=plus-minus min=0></num-input><button>OK</button></div>
 </xmp>
 
 <!--------------------------------------------------------------------------->
