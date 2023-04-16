@@ -7289,6 +7289,8 @@ function calendar_widget(e, mode) {
 		font_months   = num(css.fontSize) * dpr * num(css.prop('--fs-calendar-months')) + 'px ' + css.fontFamily
 		font_month    = num(css.fontSize) * dpr * num(css.prop('--fs-calendar-month')) + 'px ' + css.fontFamily
 
+		font_month = 'bold ' + font_month
+
 		let cx = ct.context
 		let m
 		cx.font = font_weekdays
