@@ -1685,7 +1685,7 @@ e.make_checklist = function() {
 
 	e.on('keydown', function(ev, key) {
 		let item_ct = e.focused_item
-		if (key == ' ' && item_ct) {
+		if ((key == ' ' || key == 'Enter') && item_ct) {
 			item_ct.item.checkbox.click()
 			return false
 		}
