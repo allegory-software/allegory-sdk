@@ -214,9 +214,16 @@ EVENTS
 	e.once (name|ev, f, [enable], [capture])
 	e.fire    (name, ...args)
 	e.fireup  (name, ...args)
+	on   ([id, ]name|ev, f, [enable], [capture])
 	ev.forward(e)
-	on.installers.EVENT = f() { ... }
-	on.callers.EVENT = f(ev, f) { return f.call(this, ...) }
+	listener() -> ls
+		ls.on(event, f, enable, capture)
+		ls.on_bind(f)
+		ls.target
+		ls.target_id
+		ls.enabled
+	event_installers.EVENT = f() { ... }
+	event_callers.EVENT = f(ev, f) { return f.call(this, ...) }
 	DEBUG_EVENTS = false
 	DEBUG_EVENTS_FIRE = false
 
@@ -1841,7 +1848,10 @@ let hidden_events = {prop_changed: 1, attr_changed: 1, stopped_event: 1}
 let on = function(name, f, enable, capture) {
 	assert(enable === undefined || typeof enable == 'boolean')
 	if (enable == false) {
-		this.off(name, f, capture)
+		let listener = f.listener || f
+		if (DEBUG_EVENTS)
+			log_remove_event(this, name, listener, capture)
+		this.removeEventListener(name, listener, capture)
 		return
 	}
 	let install = installers[name]
@@ -1882,10 +1892,7 @@ let on = function(name, f, enable, capture) {
 }
 
 let off = function(name, f, capture) {
-	let listener = f.listener || f
-	if (DEBUG_EVENTS)
-		log_remove_event(this, name, listener, capture)
-	this.removeEventListener(name, listener, capture)
+	return on.call(this, name, f, false, capture)
 }
 
 let once = function(name, f, enable, capture) {
@@ -1936,9 +1943,9 @@ method(EventTarget, 'once'   , once)
 method(EventTarget, 'fire'   , fire)
 method(EventTarget, 'fireup' , fireup)
 
-on.installers = installers
-on.callers = callers
-}
+G.event_callers = callers
+G.event_installers = installers
+} //scope
 
 Event.prototype.forward = function(e) {
 	let ev = new this.constructor(this.type, this)
@@ -1947,50 +1954,128 @@ Event.prototype.forward = function(e) {
 
 /* DOM events into dynamic targets -------------------------------------------
 
-A listener is a pseudo-event-target that can be used with `e.on(listener, ...)`
-and will register events on the listener's target. The nice thing about it is
-that you can change the target anytime and the event handlers will be removed
-from the old target and added back to the new target (also implies the ability
-to set the target after the events handlers are associated).
+A listener is an object that you can add event handlers to with on() just like
+you would on a real event target, and later on set its target property which
+will then add those handlers to the target. The target can be set/unset at any
+time and the event handlers will be reassigned to the new target. Moreover,
+you can set target_id instead of target, which will set/unset the target
+automatically when the element target with that id is bound/unbound.
+
+props:
+	target
+	target_id
+	enabled
+methods:
+	on(event, f, [on], [capture])
+	on_bind(f); f(ls, on)
 
 */
 
 G.listener = function() {
 	let e = this
 	let ls = {}
-	let target
-	let handlers = obj() // {event->[f1,...]}
+	let target, target_id
+	let enabled = true
+	let all_handlers = obj() // {event_name->[f1,...]}
 	let user_bind = noop
-	function bind(on) {
+
+	// add/remove event listeners, which also adds them to current target if any.
+	ls.on = function(event, f, enable, capture) {
+		if (enable != false) {
+			let handlers = attr(all_handlers, event, array)
+			assert(!handlers.includes(f), 'duplicate event handler for {0}', event)
+			handlers.push(f)
+		}
+		else {
+			let handlers = all_handlers[event]
+			let i = handlers.remove_value(f)
+			assert(i != -1, 'event handler not found for {0}', event)
+		}
+		if (target)
+			target.on(event, f, enable, capture)
+		return ls
+	}
+
+	// assigning the target, which adds/removes current event listeners.
+	function bind_target(on) {
 		if (!target)
 			return
-		for (let event in handlers)
-			for (let handler of handlers[event])
+		for (let event in all_handlers)
+			for (let handler of all_handlers[event])
 				target.on(event, handler, on)
-		user_bind(on)
+		user_bind(ls, on)
 	}
-	property(ls, 'target', () => target, function(te) {
-		bind(false)
-		target = te
-		bind(true)
+	function set_target(target1) {
+		if (target1 == target)
+			return
+		bind_target(false)
+		target = target1
+		bind_target(true)
+	}
+	property(ls, 'target', () => target, function(target) {
+		assert(!target_id, 'cannot set target while target_id is set')
+		set_target(target)
 	})
 	ls.on_bind = function(f) {
 		user_bind = do_after(user_bind, f)
 	}
-	ls.on = function(event, f, on) {
-		if (on) {
-			attr(handlers, event, array).push(f)
-			if (target)
-				target.on(event, f)
-		} else {
-			if (target)
-				target.off(event, f)
-			handlers[event] = null
-		}
-		return ls
+
+	// indirect target binding by id.
+	function te_bind(te, on) {
+		set_target(on ? te : null)
 	}
+	function id_changed(te, id1, id0) {
+		if (target_id != id0) return // not our id
+		e.target_id = id1
+	}
+	function bind_target_id(on) {
+		if (!target_id)
+			return
+		listen(target_id+'.bind', te_bind, on)
+		listen('id_changed', id_changed, on)
+		let te = on && window[target_id]
+		set_target(te && te.bound && te || null)
+	}
+	property(ls, 'target_id', () => target_id, function(target_id1) {
+		if (target_id1 == target)
+			return
+		bind_target_id(false)
+		target_id = target_id1
+		bind_target_id(true)
+	})
+	property(ls, 'enabled', () => enabled, function(enabled1) {
+		enabled = !!enabled
+		if (enabled1 == enabled)
+			return
+		enabled = enabled1
+		if (target_id)
+			bind_target_id(enabled)
+		else
+			bind_target(enabled)
+	})
+
 	return ls
 }
+
+// DOM events in elements based on id ----------------------------------------
+
+// NOTE: does not react to target id changes!
+
+function on_target(target_id, event, f, enable, capture) {
+	f.bind = f.bind || function(te, on) {
+		te.on(event, f, enable, capture)
+	}
+	listen(target_id+'.bind', f.bind, enable)
+	let te = window[target_id]
+	if (!te) return
+	if (on && !te.bound) return
+	f.bind(te, enable)
+}
+override(Window, 'on', function(inherited, target_id, event, f, enable, capture) {
+	if (!(isstr(target_id) && (isstr(event) || event instanceof Event)))
+		return inherited.call(this, target_id, event, f, enable)
+	return on_target(target_id, event, f, enable, capture)
+})
 
 /* fast global events --------------------------------------------------------
 
@@ -2006,10 +2091,11 @@ let all_handlers = obj() // {event_name->set(f)}
 G.listen = function(event, f, on) {
 	if (on != false) {
 		let handlers = attr(all_handlers, event, set)
-		assert(!handlers.has(f))
+		assert(!handlers.has(f), 'duplicate event handler for {0}', event)
 		handlers.add(f)
 	} else {
-		let handlers = assert(all_handlers[event])
+		let handlers = all_handlers[event]
+		assert(handlers && handlers.has(f), 'event handler not found for {0}', event)
 		handlers.delete(f)
 	}
 }
@@ -2020,7 +2106,6 @@ G.announce = function(event, ...args) {
 	for (let handler of handlers)
 		handler(...args)
 }
-
 }
 
 // inter-window events -------------------------------------------------------

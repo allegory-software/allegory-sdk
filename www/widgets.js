@@ -3878,7 +3878,7 @@ add_validation_rule({
 	applies  : (e,    field) => field.min != null,
 	validate : (e, v, field) => v >= field.min,
 	error    : (e, v, field) => S('validation_min_error',
-		'{0} is lower than {1}', field_name(field), field_value(field, field.min)),
+		'{0} is smaller than or equal to {1}', field_name(field), field_value(field, field.min)),
 	rule     : (e,    field) => S('validation_min_rule',
 		'{0} must be larger than or equal to {1}', field_name(field),
 			field_value(field, field.min)),
@@ -3892,7 +3892,7 @@ add_validation_rule({
 	applies  : (e,    field) => field.max != null,
 	validate : (e, v, field) => v <= field.max,
 	error    : (e, v, field) => S('validation_max_error',
-		'{0} is larger than {1}', field_name(field), field_value(field, field.max)),
+		'{0} is larger than or equal to {1}', field_name(field), field_value(field, field.max)),
 	rule     : (e,    field) => S('validation_max_rule',
 		'{0} must be smaller than or equal to {1}', field_name(field),
 			field_value(field, field.max)),
@@ -3926,6 +3926,28 @@ add_validation_rule({
 	validate : (e, v) => e.value1 == null || e.value2 == null || e.value1 <= e.value2,
 	error    : (e, v) => S('validation_positive_range_error', 'Range is negative'),
 	rule     : (e, v) => S('validation_positive_range_rule' , 'Range must be positive'),
+})
+
+add_validation_rule({
+	name     : 'min_range',
+	props    : 'min_range',
+	vprops   : 'value1 value2',
+	applies  : (e   ) => e.is_range && e.min_range != null,
+	validate : (e, v) => e.value1 == null || e.value2 == null || e.value2 - e.value1 >= e.min_range,
+	error    : (e, v) => S('validation_min_range_error', 'Range is too small'),
+	rule     : (e, v) => S('validation_min_range_rule' ,
+		'Range must be larger than or equal to {0}', field_value(e, e.min_range)),
+})
+
+add_validation_rule({
+	name     : 'max_range',
+	props    : 'max_range',
+	vprops   : 'value1 value2',
+	applies  : (e   ) => e.is_range && e.max_range != null,
+	validate : (e, v) => e.value1 == null || e.value2 == null || e.value2 - e.value1 <= e.max_range,
+	error    : (e, v) => S('validation_max_range_error', 'Range is too large'),
+	rule     : (e, v) => S('validation_max_range_rule' ,
+		'Range must be smaller than or equal to {0}', field_value(e, e.max_range)),
 })
 
 add_validation_rule({
@@ -4470,6 +4492,9 @@ e.make_range_input_widget = function(opt) {
 
 	e.prop('form', {type: 'id', store: false})
 
+	e.prop('min_range',  {type: 'number', default: 0})
+	e.prop('max_range',  {type: 'number', default: 1/0})
+
 	for (let ve of opt.value_input_widgets) {
 
 		let i = assert(ve.K)
@@ -4494,6 +4519,14 @@ e.make_range_input_widget = function(opt) {
 		ve.value_input.widget = e
 
 	}
+
+	e.prop('range', {slot: 'state'})
+	e.do_after('set_value1', function() {
+
+	})
+	e.do_after('set_value2', function() {
+
+	})
 
 	e.get_form = function() {
 		return opt.value_input_widgets[0].form
@@ -4849,7 +4882,7 @@ methods:
 
 css('.slider', 'S h t-m noclip rel', `
 	--slider-marked: 1;
-	--slider-mark-w: 40px; /* pixels only! */
+	--slider-mark-w: 50px; /* pixels only! */
 	min-width: 8em;
 	margin-left   : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-1));
 	margin-right  : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-1));
@@ -4938,10 +4971,6 @@ let slider_widget = function(e, range) {
 	e.prop('to'      , {type: 'number', default: 1})
 	e.prop('decimals', {type: 'number', default: 2})
 	e.prop('marked'  , {type: 'bool'  , default: true})
-	if (range) {
-		e.prop('min_range',  {type: 'number'})
-		e.prop('max_range',  {type: 'number'})
-	}
 
 	e.mark_w = e.css().prop('--slider-mark-w').num()
 
@@ -4985,6 +5014,7 @@ let slider_widget = function(e, range) {
 			value_input_widgets: e.thumbs,
 			errors_tooltip_target: false,
 		})
+		e.to_text = to_text
 	} else {
 		e.is_number = true
 		e.to_num = num
@@ -5011,19 +5041,22 @@ let slider_widget = function(e, range) {
 		return clamp(lerp(v, e.from, e.to, 0, 1), 0, 1)
 	}
 
-	e.set_progress_for = function(K, p, ev) {
-
-		let v = lerp(p, 0, 1, e.from, e.to)
+	e.set_input_value_for = function(K, v, ev) {
 
 		if (e.decimals != null)
 			v = floor(v / multiple() + .5) * multiple()
 
-		if (K == '1' && e.value2 != null) v = min(v, e.value2)
-		if (K == '2' && e.value1 != null) v = max(v, e.value1)
+		if (K == '1' && e.value2 != null) v = clamp(v, e.value2 - e.max_range, e.value2 - e.min_range)
+		if (K == '2' && e.value1 != null) v = clamp(v, e.value1 + e.min_range, e.value1 + e.max_range)
 
 		v = clamp(v, cmin(), cmax())
 
-			e.set_prop('input_value'+K, v, ev)
+		e.set_prop('input_value'+K, v, ev)
+	}
+
+	e.set_progress_for = function(K, p, ev) {
+		let v = lerp(p, 0, 1, e.from, e.to)
+		e.set_input_value_for(K, v, ev)
 	}
 
 	e.get_progress_for = function(K) {
@@ -5993,7 +6026,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 	function update_score() {
 		e.score = (G.zxcvbn && e.input_value != null) ?
 			zxcvbn(e.input_value).score : null
-		e.announce('pass_score_changed', e.score)
+		e.fire('score_changed', e.score)
 	}
 
 	let zxcvbn_loaded
@@ -6081,14 +6114,21 @@ G.pass_score = component('pass-score', function(e) {
 	e.label = div({class: 'pass-score-label'})
 	e.add(e.bar, e.label)
 
-	e.prop('for_id', {type: 'id', attr: 'for'})
+	e.prop('for', {slot: 'state'})
+	e.prop('for_id', {type: 'id', attr: 'for', bind_id: 'for'})
 
-	e.listen('pass_score_changed', function(pass_input, score) {
-		if (pass_input.id != e.for_id) return
+	function update_score() {
+		let score = e.for ? e.for.score : null
 		e.attr('score', score)
 		e.bar.w = score != null ? (((1 + score) / 5) * 100) + '%' : 0
 		e.label.set(score != null ? pass_score_rules[score] : '')
-	})
+	}
+	e.set_for = function(te1, te0) {
+		if (te0) te0.on('score_changed', update_score, false)
+		if (te1) te1.on('score_changed', update_score, true)
+		update_score()
+	}
+
 
 })
 
@@ -8287,6 +8327,7 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.is_range = true
 		e.picker = range_calendar()
 		e.calendar = e.picker
+		to_text = t => t.date()
 	} else {
 		if (has_date) {
 			if (has_time) {

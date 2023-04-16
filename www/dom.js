@@ -202,6 +202,11 @@ GLOBAL EVENTS
 	e.listen(event, f)
 	e.announce(event, ...args)
 
+EXTERNAL EVENTS
+
+	e.on(document|window|..., f, [on], [capture])
+	e.listener() -> ls
+
 MOUSE EVENTS
 
 	^hover              (ev, on, mx, my)
@@ -1186,20 +1191,23 @@ G.init_components = function() {
 // element events into external objects --------------------------------------
 
 override(Element, 'on', function(inherited, target, event, f, enable, capture) {
-	if (isstr(target)) {
-		return inherited.call(this, target, event, f, enable)
-	} else {
-		this.on_bind(function(on) {
-			target.on(event, f, enable, capture)
-		})
-		if (enable != false && this.bound)
-			target.on(event, f, enable, capture)
-	}
+	if (isstr(target))
+		return inherited.call(this, target, event, f, enable, capture)
+	this.on_bind(function(on) {
+		target.on(event, f, enable, capture)
+	})
+	if (enable != false && this.bound)
+		target.on(event, f, enable, capture)
+	else if (enable == false)
+		target.on(event, f, false, capture)
 })
 
 e.listener = function() {
 	let ls = listener()
-	//
+	this.on_bind(function(on) {
+		ls.enabled = on
+	})
+	ls.set_prop = function(k, v) { ls[k] = v }
 	return ls
 }
 
@@ -1814,40 +1822,51 @@ e.prop = function(prop, opt) {
 	// id-based dynamic binding of external elements to a prop.
 	if (opt.bind_id || opt.on_bind) {
 		assert(!priv)
+		assert(!e.bound)
 		let ID = prop
 		let DEBUG_ID = DEBUG_ELEMENT_BIND && '['+ID+']'
 		let REF = opt.bind_id || ID+'_ref'
 		let on_bind = opt.on_bind
-		let bind_id = function(id, on) {
-			if (!id) return
-			let te = on && window[id]
-			te = te && iselem(te) && te.bound && te || null
-			if (on_bind && e[REF])
-				on_bind.call(e, e[REF], false)
-			e[REF] = te
-			if (on_bind && te)
-				on_bind.call(e, te, true)
-			e.debug_if(DEBUG_ELEMENT_BIND, te ? '==' : '=/=', DEBUG_ID, id)
-		}
-		e.listen('bind', function(te, on) {
-			if (!e[ID] || e[ID] != te.id) return
-			if (on_bind && e[REF])
-				on_bind.call(e, e[REF], false)
+		let id = null
+		function te_bind(te, on) {
+			let te0 = e[REF]
+			if (te == te0)
+				return
+			if (on_bind && te0)
+				on_bind.call(e, te0, false)
 			e[REF] = on ? te : null
 			if (on_bind && on)
 				on_bind.call(e, te, true)
-			e.debug_if(DEBUG_ELEMENT_BIND, on ? '==' : '=/=', DEBUG_ID, te.id)
-		})
+			if (DEBUG_ELEMENT_BIND)
+				e.debug(on ? '==' : '=/=', DEBUG_ID, te.id)
+		}
+		let bound = false
+		function bind_id(on) {
+			if (on == bound)
+				return
+			if (!id)
+				return
+			listen(id+'.bind', te_bind, on)
+			if (on) {
+				let te = window[id]
+				if (te && te.bound)
+					te_bind(te, on)
+			} else {
+				te_bind(e[REF], false)
+			}
+			bound = on
+		}
 		e.listen('id_changed', function(te, id1, id0) {
-			if (e[ID] != id0) return
+			if (id != id0) return // not our id
 			e[ID] = id1
 		})
-		e.on_prop_changed(function(k, v1, v0, ev) {
+		e.on_prop_changed(function(k, id1, id0, ev) {
 			if (k != ID) return
-			bind_id(v0, false)
-			bind_id(v1, true)
+			bind_id(false)
+			id = id1
+			bind_id(true)
 		})
-		bind_id(e[ID], true)
+		e.on_bind(bind_id)
 	}
 
 	e.property(prop, get, set)
@@ -2352,8 +2371,8 @@ e.on_position = function(f) {
 
 // events & event wrappers ---------------------------------------------------
 
-let installers = on.installers
-let callers = on.callers
+let installers = event_installers
+let callers = event_callers
 
 // resize event --------------------------------------------------------------
 
