@@ -113,9 +113,10 @@ G.href = function(url_s, target_lang) {
 	let is_root = t.segments[1] == ''
 	if (is_root)
 		action = action_name(config('root_action'))
-	let at = config('aliases').to_lang[action]
+	let aliases = config('aliases')
+	let at = aliases && aliases.to_lang[action]
 	let lang_action = at && at[target_lang]
-	let default_lang = config('default_lang')
+	let default_lang = config('default_lang', 'en')
 	if (lang_action) {
 		if (!(is_root && target_lang == default_lang))
 			t.segments[1] = lang_action

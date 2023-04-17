@@ -169,7 +169,7 @@ fields:
 		e.get_col_attr(col, attr) -> val
 		e.set_col_attr(col, attr, val)
 	announces:
-		^^col_attr_changed(col, attr, v)
+		^^field_changed(col, attr, v)
 
 visible fields:
 	publishes:
@@ -599,12 +599,13 @@ let field_attr_convert = {
 	maxlen   : num,
 }
 
-let convert_text_attrs = function(t, convert) {
+function convert_text_attrs(t, convert) {
 	for (let k in t) {
-		let v = t[k]
-		if (k in convert)
-			v = convert[k](v)
-		t[k] = v
+		let uk = k.replace('-', '_')
+		let v = t[k] ?? t[uk]
+		if (uk in convert)
+			v = convert[uk](v)
+		t[uk] = v
 	}
 	return t
 }
@@ -613,8 +614,41 @@ function parse_field_tag(field_tag) {
 	return convert_text_attrs(field_tag.attrs, field_attr_convert)
 }
 
-let parse_rowset_tag = function(rowset_tag) {
-	return convert_text_attrs(rowset_tag.attrs, rowset_attr_convert)
+css('rowset', 'skip')
+
+component('rowset', function(e) {
+	let fields = []
+	let row_text_vals = []
+	e.rowset = convert_text_attrs(e.attrs, rowset_attr_convert)
+	e.rowset.fields = fields
+	e.rowset.row_text_vals = row_text_vals
+	let field_map = obj() // {name->index}
+	for (let field_tag of e.$(':scope>field')) {
+		let field = parse_field_tag(field_tag)
+		let field_index = fields.length
+		if (field.name) {
+			field_map[field.name] = field_index
+			fields.push(field)
+		} else {
+			warn('field name missing')
+		}
+	}
+	for (let row_tag of e.$(':scope>row')) {
+		let t = row_tag.attrs
+		if (':id' in t) { t.id = t[':id']; delete t[':id']; }
+		row_text_vals.push(t)
+	}
+	e.clear()
+})
+
+function nav_ajax(opt) {
+	let rowset_tag = window[opt.rowset_name]
+	if (rowset_tag) // html rowset
+		opt.xhr = {
+			wait: opt.wait,
+			response: rowset_tag.rowset,
+		}
+	return ajax(opt)
 }
 
 G.nav_widget = function(e) {
@@ -652,27 +686,8 @@ G.nav_widget = function(e) {
 
 	let rowset_tag = e.$1(':scope>rowset')
 	if (rowset_tag) {
-		let fields = []
-		let row_text_vals = []
-		e.rowset = parse_rowset_tag(rowset_tag)
-		e.rowset.fields = fields
-		e.rowset.row_text_vals = row_text_vals
-		let field_map = obj() // {name->index}
-		for (let field_tag of rowset_tag.$(':scope>field')) {
-			let field = parse_field_tag(field_tag)
-			let field_index = fields.length
-			if (field.name) {
-				field_map[field.name] = field_index
-				fields.push(field)
-			} else {
-				warn('field name missing')
-			}
-		}
-		for (let row_tag of rowset_tag.$(':scope>row')) {
-			let t = row_tag.attrs
-			if (':id' in t) { t.id = t[':id']; delete t[':id']; }
-			row_text_vals.push(t)
-		}
+		rowset_tag.init_component()
+		e.rowset = rowset_tag.rowset
 		rowset_tag.remove()
 	}
 
@@ -1101,7 +1116,7 @@ G.nav_widget = function(e) {
 			e.update({fields: true})
 		}
 
-		e.announce('col_attr_changed', col, k, v)
+		e.announce('field_changed', field, k, v)
 
 		let attrs = field_prop_attrs[k]
 		if (e._xoff) {
@@ -4101,7 +4116,9 @@ G.nav_widget = function(e) {
 
 		e.abort_loading()
 
-		let req = ajax(assign_opt({
+		let req = nav_ajax(assign_opt({
+			rowset_name: e.rowset_name,
+			wait: e.wait || num(e.attr('wait')),
 			url: rowset_url(),
 			progress: load_progress,
 			done: load_done,
@@ -4298,7 +4315,9 @@ G.nav_widget = function(e) {
 		}
 		let update_id = floor(random() * 2**52).base(36)
 		update_ids.add(update_id)
-		let req = ajax({
+		let req = nav_ajax({
+			rowset_name: e.rowset_name,
+			wait: e.wait || num(e.attr('wait')),
 			url: rowset_url(),
 			upload: {exec: 'save', changes: changes, update_id: update_id},
 			source_rows: source_rows,
@@ -5003,8 +5022,13 @@ G.global_val_nav = function() {
 Widget that has a nav as its data model. The nav can be either external,
 internal, or missing (in which case the widget is disabled).
 
+config props:
+	nav_id     nav
+	nav
+	rowset
+	rowset_name
 fires:
-	^bind_nav(on)
+	^bind_nav(nav, on)
 
 */
 
@@ -5012,15 +5036,19 @@ e.make_nav_props = function() {
 
 	let e = this
 
+	let nav
+
 	function bind_nav(on) {
-		if (!e._nav)
+		if (!nav)
 			return
-		if (e._nav._internal)
+
+		if (nav._internal)
 			if (on)
-				head.add(e._nav)
+				head.add(nav)
 			else
-				e._nav.del()
-		e.fire('bind_nav', on)
+				nav.del()
+
+		e.fire('bind_nav', nav, on)
 	}
 
 	// NOTE: internal nav takes priority to external nav. This decision is
@@ -5028,10 +5056,10 @@ e.make_nav_props = function() {
 	function get_nav() {
 		if (!e.bound) return
 		if (e.rowset_name || e.rowset) { // internal
-			if (e._nav && e._nav._internal
-				&& ((e.rowset_name && e._nav.rowset_name == e.rowset_name) ||
-					(e.rowset && e._nav.rowset == e.rowset))) // same inernal
-				return e._nav
+			if (nav && nav._internal
+				&& ((e.rowset_name && nav.rowset_name == e.rowset_name) ||
+					(e.rowset && nav.rowset == e.rowset))) // same inernal
+				return nav
 			return bare_nav({
 				rowset_name : e.rowset_name,
 				rowset      : e.rowset,
@@ -5042,12 +5070,11 @@ e.make_nav_props = function() {
 	}
 
 	function update_nav() {
-		let nav0 = e._nav
 		let nav1 = get_nav()
-		if (nav0 == nav1)
+		if (nav == nav1)
 			return
 		bind_nav(false)
-		e._nav = nav1
+		nav = nav1
 		bind_nav(true)
 	}
 
@@ -5072,8 +5099,14 @@ e.make_nav_props = function() {
 
 Widget that has a nav cell as its data model.
 
+config props:
+	nav
+	nav_id     nav
+	col
+state props:
+	ready
 fires:
-	^bind_field(on)
+	^bind_field(field, on)
 
 */
 
@@ -5081,30 +5114,31 @@ e.make_nav_col_props = function() {
 
 	let e = this
 
-	e.can_actually_change_val = function(field) {
-		if (e.row)
-			return e._nav.can_change_val(e.row, field)
-		else if (!e._nav)
-			return false
-		else if (!e._nav.all_rows.length)
-			return e._nav.can_actually_add_rows()
-		else
-			return false
-	}
+	// state: field
+
+	let nav, field
+	e.field_props = obj()
 
 	function bind_field(on) {
 		if (on) {
-			assert(!e._field)
-			e._field = e._nav && e._nav.optfld(e.col) || null
-			if (!e._field)
+			assert(!field)
+			field = nav && nav.optfld(e.col) || null
+			if (!field)
 				return
-			e.fire('bind_field', true)
+			e.xoff()
+			for (let k in e.field_props)
+				e.set_prop(k, field[k])
+			e.xon()
+			e.fire('bind_field', field, true)
+			e.input_value = get_input_val()
 		} else {
-			if (!e._field)
+			if (!field)
 				return
-			e.fire('bind_field', false)
-			e._field = null
+			e.fire('bind_field', field, false)
+			field = null
 		}
+		e.ready = !!field
+		e.update()
 	}
 
 	function update_field() {
@@ -5113,35 +5147,77 @@ e.make_nav_col_props = function() {
 	}
 
 	function update_nav() {
-		let nav1 = e.nav || e._nav_id_nav
-		if (e._nav == nav1)
+		let nav1 = e.nav
+		if (nav1 == nav)
 			return
 		bind_field(false)
-		e._nav = nav1
+		nav = nav1
 		bind_field(true)
 	}
 
 	e.prop('col', {type: 'col'})
 	e.set_col = update_field
 
-	// external nav, statically bound
 	e.prop('nav', {private: true, type: 'nav'})
+	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
 	e.set_nav = update_nav
 
-	// external nav, dynamically bound
-	e.prop('nav_id', {type: 'nav', attr: 'nav'})
-	e.set_nav_id = update_nav
-
-	e.listen('bind', function(nav, on) {
-		if (e.nav_id && nav.id == e.nav_id) {
-			e._nav_id_nav = on ? nav : null
-			update_nav()
-		}
+	e.listen('reset', function(te) {
+		if (te != nav) return
+		update_field()
 	})
 
-	e.listen('reset', function() {
-		update_field()
-		e.update()
+	e.listen('field_changed', function(te, field1, k, v) {
+		if (field1 != field) return
+		if (!e.field_props[k]) return
+		e.xoff()
+		e.set_prop(k, v)
+		e.xon()
+	})
+
+	// state: value
+
+	e.prop('ready', {type: 'bool', slot: 'state', default: true, updates: 'value'})
+
+	e.property('row', () => nav && nav.focused_row)
+
+	function get_val() {
+		let row = e.row
+		return row && field ? nav.cell_val(row, field) : null
+	}
+
+	function get_input_val() {
+		let row = e.row
+		return row && field ? nav.cell_input_val(row, field) : null
+	}
+
+	e.reset_cell_val = function(v, ev) {
+		v = e.to_val(v)
+		if (v === undefined)
+			v = null
+		if (e.row && field)
+			nav.reset_cell_val(e.row, field, v, ev)
+	}
+
+	e.set_cell_val = function(v, ev) {
+		if (v === undefined)
+			v = null
+		let was_set
+		if (field) {
+			if (!e.row)
+				if (nav && !nav.all_rows.length)
+					if (nav.can_actually_change_val())
+						nav.insert_rows(1, {focus_it: true})
+			if (e.row) {
+				nav.set_cell_val(e.row, field, v, ev)
+				was_set = true
+			}
+		}
+	}
+
+	e.listen('focused_row_cell_state_changed', function(te, row, field1, changes, ev) {
+		if (field1 != field) return
+		e.update({changes: changes, ev: ev})
 	})
 
 	// e.listen('focused_row_changed', update)

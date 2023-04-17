@@ -2228,7 +2228,29 @@ G.ajax = function(req) {
 
 	req = assign_opt(new EventTarget(), {slow_timeout: 4}, req)
 
-	let xhr = new XMLHttpRequest()
+	let xhr
+
+	if (req.xhr) { // mock xhr
+
+		xhr = assign_opt({}, req.xhr)
+		xhr.open = noop
+		xhr.setRequestHeader = noop
+		xhr.getResponseHeader = noop
+		xhr.abort = noop
+		xhr.upload = {}
+		xhr.send = function() {
+			runafter(xhr.wait || 0, function() {
+				xhr.status = 200
+				xhr.readyState = 4
+				xhr.onreadystatechange()
+			})
+		}
+
+	} else {
+
+		xhr = new XMLHttpRequest()
+
+	}
 
 	let method = req.method || (req.upload ? 'POST' : 'GET')
 	let async = req.async !== false // NOTE: this is deprecated but that's ok.

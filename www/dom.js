@@ -3548,7 +3548,8 @@ css('.overlay', '', `
 G.overlay = function(attrs, content) {
 	let e = div(attrs)
 	e.class('overlay')
-	e.set(content || div())
+	e.content = content || div()
+	e.set(e.content)
 	return e
 }
 

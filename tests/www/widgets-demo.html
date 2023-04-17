@@ -1057,7 +1057,7 @@ for (let cl of this.parent.$('checklist')) {
 	<i value=grass><i><span searchable>Grass</span></i>
 </dropdown>
 
-<dropdown>
+<dropdown align=right>
 	<list>
 		<script type="text/x-mustache">
 			{{#cat}}
@@ -1473,12 +1473,32 @@ listen('validate', function(e) {
 
 <!--------------------------------------------------------------------------->
 
+<xmp id=dropdown_list_nav_demo>
+<rowset id=my_rowset pk=id>
+	<field name=id      ></field>
+	<field name=name    ></field>
+	<field name=surname ></field>
+	<row :id=1 name=Foo surname="Le Foo"></row>
+	<row :id=2 name=Bar surname="Le Bar"></row>
+	<row :id=3 name=Baz surname="Le Baz"></row>
+</rowset>
+<dropdown value="2" value-key=id align=right>
+	<list>
+		<script type="text/x-mustache"><d searchable>{{name}} {{surname}}</d></script>
+		<nav rowset=my_rowset wait=1>
+		</nav>
+	</list>
+</dropdown>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
 <xmp id=grid_inputs_demo>
 <split>
 	<grid id=my_grid>
 		<rowset pk=id>
 			<field name=id   ></field>
-			<field name=name ></field>
+			<field name=name max-len=5 placeholder="Put Your Name Here"></field>
 			<field name=desc ></field>
 			<row :id=1 name=Foo desc="Le Foo"></row>
 			<row :id=2 name=Bar desc="Le Bar"></row>
@@ -1486,8 +1506,7 @@ listen('validate', function(e) {
 		</rowset>
 	</grid>
 	<div>
-		<nav-input nav=my_grid col=id></nav-input>
-		<nav-input nav=my_grid col=name></nav-input>
+		<text-input nav=my_grid col=name></text-input>
 	</div>
 </split>
 </xmp>

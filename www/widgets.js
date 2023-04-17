@@ -1491,7 +1491,7 @@ e.list_search_input = component('list-search-input', 'Input', function(e) {
 	e.input = tag('input', {class: 'list-search-input-input'})
 	e.add(e.input)
 
-	e.prop('for', {private: true})
+	e.prop('for', {slot: 'state'})
 	e.prop('for_id', {type: 'id', attr: 'for', bind_id: 'for'})
 	e.prop('value', {})
 
@@ -4173,7 +4173,7 @@ G.errors = component('errors', 'Input', function(e) {
 
 	e.class('errors')
 
-	e.prop('target'    , {private: true})
+	e.prop('target'    , {slot: 'state'})
 	e.prop('target_id' , {type: 'id', attr: 'for', bind_id: 'target'})
 	e.prop('type'      , {type: 'enum', enum_values: 'rules'})
 
@@ -5909,7 +5909,7 @@ G.textarea_input = component('textarea-input', 'Input', function(e) {
 	})
 
 	e.textarea.on('input', function(ev) {
-		e.set_prop('input_value', this.value, ev)
+		e.set_prop('input_value', repl(this.value, '', null), ev)
 	})
 
 })
@@ -5920,6 +5920,7 @@ inherits:
 	input_widget
 props:
 	max_len
+	placeholder
 update options:
 	select_all
 
@@ -5965,7 +5966,7 @@ G.text_input = component('text-input', 'Input', function(e) {
 	})
 
 	e.input.on('input', function(ev) {
-		e.set_prop('input_value', this.value, ev)
+		e.set_prop('input_value', repl(this.value, '', null), ev)
 		ev.forward(e)
 	})
 
@@ -6114,7 +6115,7 @@ G.pass_score = component('pass-score', function(e) {
 	e.label = div({class: 'pass-score-label'})
 	e.add(e.bar, e.label)
 
-	e.prop('for', {private: true})
+	e.prop('for', {slot: 'state'})
 	e.prop('for_id', {type: 'id', attr: 'for', bind_id: 'for'})
 
 	function update_score() {
@@ -6648,13 +6649,13 @@ css('.dropdown', 'skip')
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
 css('.dropdown-value', 'S shrinks h-m nowrap')
 css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition because we use gap-x.
-css('.dropdown-chevron', 'smaller ease')
+css('.dropdown-chevron', 'small ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
 css('.dropdown-xbutton', 'm0 p0 label smaller')
 css('.dropdown-xbutton::before', 'fa fa-times lh1')
 css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
-css('.dropdown[align=right] .dropdown-value'  , '', `order: 3;`)
+css('.dropdown[align=right] .dropdown-value'  , 'h-r', `order: 3;`)
 
 css('.dropdown-picker', 'scroll-auto b v p-y-input bg-input z3 arrow', `
 	margin-top: -1px; /* merge dropdown and picker outlines */
@@ -6701,13 +6702,17 @@ function dropdown_widget(e, is_checklist) {
 
 	e.to_form = v => e.format == 'words' ? v.join(' ') : json(v)
 
+	e.prop('ready', {type: 'bool', slot: 'state', default: true, updates: 'value'})
+
 	// model: value lookup
+
+	e.prop('value_key', {default: 'value'})
 
 	e.item_value = function(item_e) {
 		if (item_e.data != null) { // dynamic list with a data model
-			return item_e.data.value
+			return item_e.data[e.value_key]
 		} else { // static list, value kept in a prop or attr.
-			return strict_or(item_e.value, item_e.attr('value'))
+			return strict_or(item_e[e.value_key], item_e.attr(e.value_key))
 		}
 	}
 
@@ -6774,6 +6779,7 @@ function dropdown_widget(e, is_checklist) {
 		list.on('item_checked' , list_item_checked, on)
 		e.picker.on('attr_changed', picker_attr_changed, on)
 		e.update({value: true})
+		e.fire('bind_list', list, on)
 	}
 
 	e.set_list = function(list1, list0) {
@@ -6790,7 +6796,7 @@ function dropdown_widget(e, is_checklist) {
 
 	// view -------------------------------------------------------------------
 
-	e.value_box = div({class: 'dropdown-value'})
+	e.valuebox  = div({class: 'dropdown-value'})
 	e.chevron   = div({class: 'dropdown-chevron'})
 	e.xbutton   = button({
 		type: 'button', // no submit
@@ -6798,7 +6804,7 @@ function dropdown_widget(e, is_checklist) {
 		bare: true,
 		focusable: false,
 	})
-	e.inputbox.add(e.value_box, e.xbutton, e.chevron)
+	e.inputbox.add(e.valuebox, e.xbutton, e.chevron)
 
 	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
 
@@ -6832,6 +6838,12 @@ function dropdown_widget(e, is_checklist) {
 
 		if (opt.value) {
 
+			e.inputbox.disable('ready', !e.ready)
+			if (!e.ready) {
+				e.valuebox.set(S('loading', 'loading...'))
+				return
+			}
+
 			if (is_checklist) {
 
 				for (let i = 0, n = list.list_len; i < n; i++) {
@@ -6853,7 +6865,7 @@ function dropdown_widget(e, is_checklist) {
 						}
 					}
 				}
-				e.value_box.set(items)
+				e.valuebox.set(items)
 
 			} else {
 
@@ -6863,9 +6875,9 @@ function dropdown_widget(e, is_checklist) {
 					item_e.id = null // id would be duplicated.
 					item_e.selected = null
 					e.list.update_item_state(item_e)
-					e.value_box.set(item_e)
+					e.valuebox.set(item_e)
 				} else {
-					e.value_box.clear()
+					e.valuebox.clear()
 				}
 
 			}

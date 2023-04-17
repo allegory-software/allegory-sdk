@@ -2,7 +2,6 @@
 "use strict"
 let G = window
 
-// if (0)
 component.extend('list', 'before', function(e) {
 
 	let nav = e.$1(':scope>nav')
@@ -20,31 +19,79 @@ component.extend('list', 'before', function(e) {
 
 })
 
-// if (0)
 component.extend('list', function(e) {
 
 	e.make_nav_props()
 
+	let nav
+	e.on('bind_nav', function(nav1, on) {
+		nav = on ? nav1 : null
+		set_items()
+	})
+
 	function set_items() {
-		e.items = e._nav && e._nav.bound && e._nav.serialize_all_row_vals() || []
+		e.items = nav && nav.ready && nav.serialize_all_row_vals() || []
 	}
 
-	e.on('bind_nav', set_items)
-
-	e.listen('display_vals_changed', function(nav) {
-		if (nav != e._nav) return
+	e.listen('display_vals_changed', function(nav1) {
+		if (nav1 != nav) return
 		e.update_items()
 	})
 
-	e.listen('reset', function(nav) {
-		if (nav != e._nav) return
+	e.listen('reset', function(nav1) {
+		if (nav1 != nav) return
 		set_items()
 	})
 
-	e.listen('col_attr_changed', function(nav, col, k, v) {
-		if (nav != e._nav) return
+	e.listen('col_attr_changed', function(nav1, col, k, v) {
+		if (nav1 != nav) return
 		set_items()
 	})
+
+})
+
+component.extend('dropdown', function(e) {
+
+	let nav
+	function bind_list_nav(nav1, on) {
+		nav = on ? nav1 : null
+		e.ready = !nav || nav.ready
+	}
+
+	e.listen('ready', function(nav1) {
+		if (nav1 != nav) return
+		e.ready = nav.ready
+	})
+
+	e.on('bind_list', function(list, on) {
+		list.on('bind_nav', bind_list_nav, on)
+	})
+
+})
+
+component.extend('text-input', function(e) {
+
+	e.make_nav_col_props()
+	e.field_props = {max_len: true, placeholder: true}
+
+	let nav, field
+	e.on('bind_field', function(field1, on) {
+		field = on ? field1 : null
+		nav = field && field.nav
+	})
+
+	e.on('input', function(ev) {
+		e.set_cell_val(e.input_value, ev)
+	})
+
+
+	// e.do_after('set_input_val', function() {
+	//
+	// })
+
+	// e.property('val', get_val, e.set_val)
+	// e.property('input_val', get_input_val)
+
 
 })
 
@@ -120,34 +167,17 @@ function col_input(e, is_range) {
 
 	// nav dynamic binding ----------------------------------------------------
 
-
 	function cell_state_changed(row, field, changes, ev) {
 		e.update({changes: changes, ev: ev})
 		e.announce('input_state_changed', changes, ev)
 	}
 
-	e.set_col = nav_changed
 	e.prop('col', {type: 'col', col_nav: () => e._nav})
+	e.set_col = nav_changed
 
-	e.set_nav = nav_changed
 	e.prop('nav', {private: true})
-
-	e.set__nav_id_nav = nav_changed
-	e.prop('_nav_id_nav', {private: true})
-	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
-
-	// field options for standalone mode (own field in global nav).
-	e.set_field = nav_changed
-	e.prop('field', {private: true})
-
-	// TODO: this behaves differently with regards to overriding a validator
-	// when a field is already bound vs when it's not!
-	e.add_validator = function(name, t) {
-		if (e._field)
-			e._field.validators.push(t)
-		else
-			attr(e, 'field_attrs')['validator_'+name] = t
-	}
+	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: '_nav_id_nav'})
+	e.set_nav = nav_changed
 
 	// model ------------------------------------------------------------------
 
