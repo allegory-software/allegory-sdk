@@ -2180,7 +2180,7 @@ end
 
 --set one or more bits of a value without affecting other bits.
 function setbits(bits, mask, over)
-	return over and bor(bits, band(over, bnot(mask))) or bits
+	return bor(bits, band(over or 0, bnot(mask)))
 end
 
 --turn a table of boolean options into a bit mask.
