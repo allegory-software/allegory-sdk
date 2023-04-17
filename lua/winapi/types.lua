@@ -9,22 +9,7 @@
 local ffi = require'ffi'
 
 assert(ffi.abi'win', 'platform not Windows')
-
-if ffi.abi'64bit' then
-	ffi.cdef[[
-		typedef int32_t  __int1632;
-		typedef int64_t  __int3264;
-		typedef uint32_t __uint1632;
-		typedef uint64_t __uint3264;
-	]]
-else
-	ffi.cdef[[
-		typedef int16_t  __int1632;
-		typedef int32_t  __int3264;
-		typedef uint16_t __uint1632;
-		typedef uint32_t __uint3264;
-	]]
-end
+assert(ffi.abi'64bit', 'platform not 64bit')
 
 ffi.cdef[[
 // defining this for compat. with terra which doesn't grok `unsigned __int64`
@@ -79,14 +64,14 @@ typedef __uint64        UINT64, *PUINT64;
 typedef signed int      LONG32, *PLONG32;
 typedef unsigned int    ULONG32, *PULONG32;
 typedef unsigned int    DWORD32, *PDWORD32;
-typedef __int3264  INT_PTR, *PINT_PTR;
-typedef __uint3264 UINT_PTR, *PUINT_PTR;
-typedef __int3264  LONG_PTR, *PLONG_PTR;
-typedef __uint3264 ULONG_PTR, *PULONG_PTR;
-typedef __int1632  HALF_PTR, *PHALF_PTR;
-typedef __uint1632 UHALF_PTR, *PUHALF_PTR;
-typedef __int3264  SHANDLE_PTR;
-typedef __uint3264 HANDLE_PTR;
+typedef int64_t  INT_PTR, *PINT_PTR;
+typedef uint64_t UINT_PTR, *PUINT_PTR;
+typedef int64_t  LONG_PTR, *PLONG_PTR;
+typedef uint64_t ULONG_PTR, *PULONG_PTR;
+typedef int32_t  HALF_PTR, *PHALF_PTR;
+typedef uint32_t UHALF_PTR, *PUHALF_PTR;
+typedef int64_t  SHANDLE_PTR;
+typedef uint64_t HANDLE_PTR;
 typedef ULONG_PTR       SIZE_T, *PSIZE_T;
 typedef LONG_PTR        SSIZE_T, *PSSIZE_T;
 typedef ULONG_PTR       DWORD_PTR, *PDWORD_PTR;
@@ -224,7 +209,7 @@ typedef int (*NEARPROC)();
 typedef int (*PROC)();
 typedef void *HGDIOBJ;
 
-typedef LONG (__stdcall* WNDPROC)(HWND, UINT, WPARAM, LONG);
+typedef LONG (__stdcall* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 
 struct HACCEL__ { int unused; }; typedef struct HACCEL__ *HACCEL;
 struct HBITMAP__ { int unused; }; typedef struct HBITMAP__ *HBITMAP;

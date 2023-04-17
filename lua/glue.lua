@@ -107,7 +107,7 @@ STRINGS
 	rpad(s, n, [c]) -> s           right-pad string
 	pad(s, n, [c], dir) -> s       pad string left or right
 	esc(s [,mode]) -> pat          escape string to use in regex
-	tohex(s|n [,upper]) -> s       string or number to hex
+	[to]hex(s|n [,upper]) -> s     string or number to hex
 	fromhex(s[, isvalid]) -> s     hex to string
 	hexblock(s)                    string to hex block
 	starts(s, prefix) -> t|f       find if string starts with prefix
@@ -1182,7 +1182,9 @@ function tohex(s, upper)
 		end))
 	end
 end
+hex = tohex
 string.tohex = tohex
+string.hex = tohex
 
 --convert hex string to its binary representation. returns nil on invalid
 --input unless isvalid is given which makes it raise on invalid input.
