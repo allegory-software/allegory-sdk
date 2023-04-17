@@ -17,7 +17,6 @@ EVENT FACTS
 
   * events fire in the order in which they were added.
   * extra args passed to `fire()` are passed to each event handler.
-  * if the method `obj:on_EVENT(args...)` is found, it is called first.
   * returning a non-nil value from a handler interrupts the event handling
     call chain and the value is returned back by `fire()`.
   * the meta-event called `'event'` is fired on all events (the name of the
@@ -181,11 +180,6 @@ end
 
 --fire an event, i.e. call its handler method and all observers.
 function events:fire(ev, ...)
-	local fn = self['on_'..ev]
-	if fn then
-		local ret = fn(self, ...)
-		if ret ~= nil then return ret end
-	end
 	local t = self.__observers
 	local t = t and t[ev]
 	if t then
@@ -225,10 +219,10 @@ local function handler_func(order)
 	end
 end
 
+obj:on('testing'    , handler_func(1))
 obj:on('testing.ns1', handler_func(2))
 obj:on('testing.ns2', handler_func(3))
 obj:on('testing.ns3', handler_func(4))
-obj.on_testing = handler_func(1)
 
 obj:fire('testing', 3, 5)
 assert(#t == 4)
@@ -248,8 +242,7 @@ assert(t[3] == 4)
 t = {}
 obj:off'testing'
 obj:fire('testing', 3, 5)
-assert(#t == 1)
-assert(t[1] == 1)
+assert(#t == 0)
 
 end
 
