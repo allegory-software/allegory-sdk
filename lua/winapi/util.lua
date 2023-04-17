@@ -204,7 +204,7 @@ end
 
 --flags parser ---------------------------------------------------------------
 
-local band, bor, bnot, rshift = bit.band, bit.bor, bit.bnot, bit.rshift --cache
+local band, bor, bnot, shr = band, bor, bnot, shr --cache
 
 local flags_cache = setmetatable({}, {__mode = 'kv'})
 
@@ -233,7 +233,7 @@ end
 --TODO: make a platform-dependent splitlongptr() for splitting wParam and lParam.
 function splitlong(n)
 	n = tonumber(n) --because lParam is uint64 in x64 (which leaves 20 clean bits for the high part)
-	return band(n, 0xffff), rshift(n, 16)
+	return band(n, 0xffff), shr(n, 16)
 end
 
 --use this instead of splitlong to extract signed integers out of a signed long
@@ -241,7 +241,7 @@ end
 --TODO: make a platform-dependent splitsignedptr() for splitting wParam and lParam.
 function splitsigned(n)
 	n = tonumber(n) --because lParam is int64 in x64 (which leaves 20 clean bits for the high part)
-	local x, y = band(n, 0xffff), rshift(n, 16)
+	local x, y = band(n, 0xffff), shr(n, 16)
 	if x >= 0x8000 then x = x-0xffff end
 	if y >= 0x8000 then y = y-0xffff end
 	return x, y
