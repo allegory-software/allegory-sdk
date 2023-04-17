@@ -70,7 +70,7 @@ local function bits(who, what)
 end
 
 --set one or more bits of a value without affecting other bits.
-local function setbits(bits, mask, over)
+local function setbits(over, mask, bits)
 	return bor(bits, band(over, bnot(mask)))
 end
 
@@ -101,7 +101,7 @@ local function string_parser(s)
 		local bits1, mask1 = bits(who, what)
 		if how == '' or how == '=' then
 			push(t, function(mode, mask)
-				mode = setbits(bits1, mask1, mode)
+				mode = setbits(mode, mask1, bits1)
 				mask = bor(mask1, mask)
 				return mode, mask
 			end)

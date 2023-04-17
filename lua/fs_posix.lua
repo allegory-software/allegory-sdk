@@ -109,7 +109,7 @@ local FD_CLOEXEC = 1
 local function fcntl_set_flags_func(GET, SET)
 	return function(f, mask, bits)
 		local cur_bits = C.fcntl(f.fd, GET)
-		local bits = setbits(bits, mask, cur_bits)
+		local bits = setbits(cur_bits, mask, bits)
 		assert(check(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
 	end
 end

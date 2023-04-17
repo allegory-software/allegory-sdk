@@ -196,8 +196,8 @@ BITS
 	bor                          = bit.bor
 	xor                          = bit.bxor
 	getbit(x, mask) -> bit         get the value of a single bit from x
-	setbit(bits, mask, [x]) -> x   set the value of a single bit on x
-	setbits(bits, mask, [x]) -> x  set the value of multiple bits over x
+	setbit(x, mask, bits) -> x     set the value of a single bit on x
+	setbits(x, mask, bits) -> x    set the value of multiple bits over x
 	bitflags(flags, masks, [x], [strict]) -> mask    bor() flags over x
 FFI
 	ffi                          = require'ffi'
@@ -2173,14 +2173,14 @@ function getbit(from, mask)
 end
 
 --set a single bit of a value without affecting other bits.
-function setbit(yes, mask, over)
+function setbit(over, mask, yes)
 	if not over then return yes and mask or 0 end
 	return bor(yes and mask or 0, band(over, bnot(mask)))
 end
 
 --set one or more bits of a value without affecting other bits.
-function setbits(bits, mask, over)
-	return bor(bits, band(over or 0, bnot(mask)))
+function setbits(over, mask, bits)
+	return bor(bits, band(over, bnot(mask)))
 end
 
 --turn a table of boolean options into a bit mask.
@@ -2230,10 +2230,10 @@ end)
 function bitflags(arg, masks, cur_bits, strict)
 	if type(arg) == 'string' then
 		local bits, mask = unpack(string_flags(strict or false, masks, arg))
-		return setbits(bits, mask, cur_bits)
+		return setbits(cur_bits, mask, bits)
 	elseif type(arg) == 'table' then
 		local bits, mask = table_flags(arg, masks, strict)
-		return setbits(bits, mask, cur_bits)
+		return setbits(cur_bits, mask, bits)
 	elseif type(arg) == 'number' then
 		return arg
 	elseif arg == nil then
