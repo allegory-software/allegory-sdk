@@ -204,7 +204,7 @@ GLOBAL EVENTS
 
 EXTERNAL EVENTS
 
-	e.on(document|window|..., f, [on], [capture])
+	target.on(event, e, f, [on], [capture])
 	e.listener() -> ls
 
 MOUSE EVENTS
@@ -397,14 +397,14 @@ let e = Element.prototype
 
 // debugging -----------------------------------------------------------------
 
-G.DEBUG_INIT = false
-G.DEBUG_BIND = false
-G.DEBUG_ELEMENT_BIND = false
-G.PROFILE_BIND_TIME = true
-G.SLOW_BIND_TIME_MS = 10
-G.DEBUG_UPDATE = false
-G.DEBUG_CSS_USAGE = false
-G.DEBUG_CSS_SPECIFICITY = false
+DEBUG('DEBUG_INIT')
+DEBUG('DEBUG_BIND')
+DEBUG('DEBUG_ELEMENT_BIND')
+DEBUG('PROFILE_BIND_TIME', true)
+DEBUG('SLOW_BIND_TIME_MS', 10)
+DEBUG('DEBUG_UPDATE')
+DEBUG('DEBUG_CSS_USAGE')
+DEBUG('DEBUG_CSS_SPECIFICITY')
 
 let debug_indent = ''
 
@@ -1190,24 +1190,15 @@ G.init_components = function() {
 
 // element events into external objects --------------------------------------
 
-override(Element, 'on', function(inherited, target, event, f, enable, capture) {
-	if (isstr(target))
-		return inherited.call(this, target, event, f, enable, capture)
-	this.on_bind(function(on) {
-		target.on(event, f, enable, capture)
-	})
-	if (enable != false && this.bound)
-		target.on(event, f, enable, capture)
-	else if (enable == false)
-		target.on(event, f, false, capture)
-})
-
 e.listener = function() {
 	let ls = listener()
-	this.on_bind(function(on) {
+	function bind(on) {
 		ls.enabled = on
-	})
+	}
+	this.on_bind(on)
 	ls.set_prop = function(k, v) { ls[k] = v }
+	if (this.bound)
+		bind()
 	return ls
 }
 
@@ -2783,7 +2774,7 @@ callers.keypress = callers.keydown
 
 // making sure that *_pressed globals are set.
 document.on('keydown', noop)
-document.on('keyup', noop)
+document.on('keyup'  , noop)
 document.on('stopped_event', function(ev) {
 	if (ev.type == 'keydown' || ev.type == 'keyup') {
 		shift_pressed = ev.shiftKey

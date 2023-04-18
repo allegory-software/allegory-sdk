@@ -436,22 +436,22 @@ G.tooltip = component('tooltip', function(e) {
 		e.close(ev)
 	}
 
-	e.on(document, 'pointerdown', document_pointerdown)
+	document.on('pointerdown', e, document_pointerdown)
 
 	// clicking outside the tooltip closes the tooltip, even if the click did something.
-	e.on(document, 'stopped_event', function(ev) {
+	document.on('stopped_event', e, function(ev) {
 		if (!ev.type.ends('pointerdown'))
 			return
 		document_pointerdown(ev)
 	})
 
 	// focusing an element outside the tooltip or its anchor closes the tooltip.
-	e.on(document, 'focusin', function(ev) {
+	document.on('focusin', e, function(ev) {
 		document_pointerdown(ev)
 	})
 
 	// focusing out of the document (to the titlebar etc.) closes the tooltip.
-	e.on(document, 'focusout', function(ev) {
+	document.on('focusout', e, function(ev) {
 		if (!e.autoclose)
 			return
 		if (ev.relatedTarget)
@@ -1913,11 +1913,11 @@ G.menu = component('menu', function(e) {
 			return
 		e.close()
 	}
-	e.on(document, 'pointerdown', document_pointerdown)
-	e.on(document, 'rightpointerdown', document_pointerdown)
+	document.on('pointerdown'     , e, document_pointerdown)
+	document.on('rightpointerdown', e, document_pointerdown)
 
 	// clicking outside the menu closes the menu, even if the click did something.
-	e.on(document, 'stopped_event', function(ev) {
+	document.on('stopped_event', e, function(ev) {
 		if (e.contains(ev.target)) // clicked inside the menu.
 			return
 		if (ev.type.ends('pointerdown'))
@@ -3026,7 +3026,7 @@ G.dlg = component('dlg', function(e) {
 
 	})
 
-	e.on(document, 'keydown', function(ev, key) {
+	document.on('keydown', e, function(ev, key) {
 		if (key == 'Escape') {
 			if (e.cancelable && e.x_button) {
 				e.x_button.class('active', true)
@@ -3038,7 +3038,7 @@ G.dlg = component('dlg', function(e) {
 		}
 	})
 
-	e.on(document, 'keyup', function(ev, key) {
+	document.on('keyup', e, function(ev, key) {
 		if (key == 'Escape') {
 			if (e.cancelable && e.x_button && e.x_button.hasclass('active')) {
 				e.x_button.class('active', false)
@@ -3048,7 +3048,7 @@ G.dlg = component('dlg', function(e) {
 		}
 	})
 
-	e.on(document, 'pointerdown', function(ev) {
+	document.on('pointerdown', e, function(ev) {
 		if (e.contains(ev.target)) // clicked inside the dialog
 			return
 		e.cancel()

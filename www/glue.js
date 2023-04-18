@@ -209,7 +209,7 @@ URL DECODING, ENCODING AND UPDATING
 EVENTS
 
 	event(name|ev, [bubbles], ...args) -> ev
-	e.on   (name|ev, f, [enable], [capture])
+	e.on   (name|ev[, element], f, [enable], [capture])
 	e.off  (name|ev, f, [capture])
 	e.once (name|ev, f, [enable], [capture])
 	e.fire    (name, ...args)
@@ -262,9 +262,17 @@ JS LINTING
 "use strict"
 let G = window
 
-G.DEBUG_EVENTS = false
-G.DEBUG_EVENTS_FIRE = false
-G.DEBUG_AJAX = false
+G.DEBUG = function(k, dv) {
+	dv = dv ?? false
+	if (!(k in G))
+		G[k] = dv
+	if (G[k] !== dv)
+		console.log(k, G[k])
+}
+
+DEBUG('DEBUG_EVENTS')
+DEBUG('DEBUG_EVENTS_FIRE')
+DEBUG('DEBUG_AJAX')
 
 // browser detection ---------------------------------------------------------
 
@@ -1815,6 +1823,8 @@ let installers = obj()
 
 let etrack = DEBUG_EVENTS && new Map()
 
+G.stacktrace = () => (new Error()).stack
+
 let log_add_event = function(target, name, f, capture) {
 	if (target.initialized === null) // skip handlers added in the constructor.
 		return
@@ -1845,67 +1855,96 @@ let log_remove_event = function(target, name, f, capture) {
 
 let hidden_events = {prop_changed: 1, attr_changed: 1, stopped_event: 1}
 
-let on = function(name, f, enable, capture) {
+let on = function(ev, element, f, enable, capture) {
+
+	if (isfunc(element)) // shift arg
+		return on.call(this, ev, null, element, f, enable)
+
 	assert(enable === undefined || typeof enable == 'boolean')
+
+	let name = isstr(ev) ? ev : ev.type
+
+	let is_raw = name.starts('raw:')
+	if (is_raw)
+		name = name.slice(4)
+
+	let listener = is_raw ? f : f.listener
+
 	if (enable == false) {
-		let listener = f.listener || f
+
+		assert(!element) // on/off is automatic with elements
+		assert(listener, 'function not an event handler for {0}', name)
+
 		if (DEBUG_EVENTS)
 			log_remove_event(this, name, listener, capture)
-		this.removeEventListener(name, listener, capture)
+
+		this.removeEventListener(ev, listener, capture)
+
 		return
 	}
+
+	if (element) { // an element is hooking on us. unhook when it's unbound.
+		assert(iselem(element))
+		let target = this
+		function bind(on) {
+			target.on(ev, null, f, on, capture)
+		}
+		element.on_bind(bind)
+		if (element.bound)
+			bind(true)
+		return
+	}
+
 	let install = installers[name]
 	if (install && !(this.__installed && this.__installed[name])) {
 		install.call(this)
 		attr(this, '__installed')[name] = true
 	}
-	let listener
-	if (name.starts('raw:')) { // raw handler
-		name = name.slice(4)
-		listener = f
-	} else {
-		listener = f.listener
-		if (!listener) {
-			let caller = callers[name]
-			listener = function(ev) {
-				let ret
-				if (caller)
-					ret = caller.call(this, ev, f)
-				else if (ev.args) {
-					if (DEBUG_EVENTS_FIRE && !(ev.type in hidden_events))
-						debug(ev.type, ...ev.args)
-					ret = f.call(this, ...ev.args, ev)
-				} else
-					ret = f.call(this, ev)
-				if (ret === false) { // like jquery
-					ev.preventDefault()
-					ev.stopPropagation()
-					ev.stopImmediatePropagation()
-				}
+
+	if (!listener) {
+		assert(!is_raw)
+		listener = function(ev) {
+			let caller = callers[ev.type]
+			let ret
+			if (caller)
+				ret = caller.call(this, ev, f)
+			else if (ev.args) {
+				if (DEBUG_EVENTS_FIRE && !(ev.type in hidden_events))
+					debug(ev.type, ...ev.args)
+				ret = f.call(this, ...ev.args, ev)
+			} else
+				ret = f.call(this, ev)
+			if (ret === false) { // like jquery
+				ev.preventDefault()
+				ev.stopPropagation()
+				ev.stopImmediatePropagation()
 			}
-			f.listener = listener
 		}
+		f.listener = listener
 	}
+
 	if (DEBUG_EVENTS)
 		log_add_event(this, name, listener, capture)
-	this.addEventListener(name, listener, capture)
+
+	this.addEventListener(ev, listener, capture)
+
 }
 
-let off = function(name, f, capture) {
-	return on.call(this, name, f, false, capture)
+let off = function(ev, f, capture) {
+	return on.call(this, ev, null, f, false, capture)
 }
 
-let once = function(name, f, enable, capture) {
+let once = function(ev, f, enable, capture) {
 	if (enable == false) {
-		this.off(name, f, capture)
+		this.off(ev, f, capture)
 		return
 	}
 	let wrapper = function(...args) {
 		let ret = f(...args)
-		this.off(name, wrapper, capture)
+		this.off(ev, wrapper, capture)
 		return ret
 	}
-	this.on(name, wrapper, true, capture)
+	this.on(ev, wrapper, true, capture)
 	f.listener = wrapper.listener // so it can be off'ed.
 }
 
@@ -1920,20 +1959,21 @@ let log_fire = DEBUG_EVENTS && function(e) {
 	return e
 } || return_arg
 
-G.event = function(name, bubbles, ...args) {
-	if (!isstr(name)) return name
-	let ev = new CustomEvent(name, {cancelable: true, bubbles: bubbles})
+G.event = function(ev, bubbles, ...args) {
+	if (!isstr(ev))
+		return ev
+	ev = new CustomEvent(ev, {cancelable: true, bubbles: bubbles})
 	ev.args = args
 	return ev
 }
 
-let fire = function(name, ...args) {
-	let e = log_fire(event(name, false, ...args))
+let fire = function(ev, ...args) {
+	let e = log_fire(event(ev, false, ...args))
 	return this.dispatchEvent(e)
 }
 
-let fireup = function(name, ...args) {
-	let e = log_fire(event(name, true, ...args))
+let fireup = function(ev, ...args) {
+	let e = log_fire(event(ev, true, ...args))
 	return this.dispatchEvent(e)
 }
 
