@@ -5095,7 +5095,7 @@ let slider_widget = function(e, range) {
 	}
 
 	function update_tooltip(thumb, update_text) {
-		let show = thumb.matches(':is(:hover,:focus-within)')
+		let show = (thumb.hovered || thumb.at[0].focus_visible)
 			&& !thumb.getAnimations().length
 		if (!show && !thumb.tooltip) return
 		if (!thumb.tooltip) {
