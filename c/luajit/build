@@ -1,6 +1,9 @@
 #go@ plink d10 -t sh sdk/c/luajit/build
 #go@ sh build
 #!/bin/sh
+
+gcc --version | grep gcc
+
 cd "${0%build}" || exit 1
 
 set -e
@@ -16,7 +19,6 @@ build() {
 		-DLUA_PATH_DEFAULT='\"$LUA_PATH_DEFAULT\"' \
 		-DLUA_CPATH_DEFAULT='\"$LUA_CPATH_DEFAULT\"' \
 		-I. \
-		-DLUAMISC_API=LUA_API \
 		"
 
 	local B=../../../../bin/$P

@@ -2174,7 +2174,6 @@ end
 
 --set a single bit of a value without affecting other bits.
 function setbit(over, mask, yes)
-	if not over then return yes and mask or 0 end
 	return bor(yes and mask or 0, band(over, bnot(mask)))
 end
 
