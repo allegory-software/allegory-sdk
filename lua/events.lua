@@ -180,6 +180,10 @@ end
 
 --fire an event, i.e. call its handler method and all observers.
 function events:fire(ev, ...)
+	if self['on_'..ev] then
+		local ret = self['on_'..ev](self, ...)
+		if ret ~= nil then return ret end
+	end
 	local t = self.__observers
 	local t = t and t[ev]
 	if t then
