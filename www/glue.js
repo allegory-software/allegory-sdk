@@ -178,7 +178,6 @@ GEOMETRY
 	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, [out]) -> [x, y, w, h]
 	rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) -> t|f
 
-
 TIMERS
 
 	runafter(t, f) -> tid

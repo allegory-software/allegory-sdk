@@ -9,25 +9,25 @@ A good widget needs to satisfy many things:
 * work in different types of containers: inline, block, flex, grid.
 * be instantiable from both html and JavaScript with all the features.
 * allow any property changes while the widget is live.
-  * this alone increases complexity substantially, at least for DOM-based
-    widgets, less so for canvas-drawn widgets.
+  * this alone increases complexity and bug surface substantially, at least
+    for DOM-based widgets, a little less so for canvas-drawn widgets.
 * not leak event listeners when detached from DOM.
 * maintain hidden input elements to work in forms.
 * work at any inherited font size.
 * use only theme colors.
 * update itself when resized.
 * fire events on state changes.
-* be stylable with css classes describing its inner parts.
+* be stylable with css classes that describe its inner parts.
 * have stylable state by setting html attributes and/or css classes for state.
-* have reasonable min and max dimensions even if its a stretchable widget.
+* have reasonable min and max dimensions even if its a stretching widget.
 * be focusable (if interactive), and have good keyboard interaction.
 * allow it to be disabled (means no focus, no hover, faded-looking, etc.).
-* if it has text input, never "correct" what the user is typing in or pasting!
+* if it has text input, never "correct" what the user is typing in or pasting in!
   * IOW, validation should only warn, not slap the hand, that's bad experience.
   * this means having input value and output value as two separate things.
 * if it has an inner `<input>`, show the focus ring on the outer container when
 focusing the input.
-* if it's a dropdown, allow keyboard navigation on the picker while it's open.
+* for a dropdown, allow keyboard navigation on the picker while it's open.
 * if dragging is involved, start dragging after a threshold distance (5-10px).
   * you also need an event-based protocol for drag & drop between widgets.
 * show validation errors as a popup or have a separate linked widget for that.
@@ -53,10 +53,11 @@ either invent some syntax to pass the data in a html attribute, or invent html
 tags to pass the data as the inner html (doesn't need parsing but more verbose).
 
 Eg. a date range value is better put in an attribute with a syntax like
-`range="1/1/2000..1/2/2000"` instead of in the inner html with a syntax like
-`<from>1/1/2000</from><to>1/2/2000</to>` or whatever, even if that means
+`range="2000-01-01..2000-01-02"` instead of in the inner html with a syntax like
+`<from>2000-01-01</from><to>2000-01-02</to>` or whatever, even if that means
 parsing it. Also, when setting it from JS the `range` property should accept
-`'1/1/2000..1/2/2000'` but also `['1/1/2000', '1/1/2000']` and `[timestamp, timestamp]`.
+`'2000-01-01..2000-01-02'` but also `['2000-01-01', '2000-01-02']` and
+`[timestamp1, timestamp2]`.
 
 
 ## Updating the widget when properties change
@@ -168,16 +169,15 @@ DOM-based, there's a lot more to it than what's been talked about here.
 * `e.prop('foo')`                - declare properties
 * `e.set_foo = f(v, v0, ev)`     - implement property setters
 * `e.on_init(f)`                 - call a function after all properties are set
-* `e.on_bind(f)`                 - call a function when the element is attached and detached from DOM
+* `e.on_bind(f)`                 - call a function when the element is attached or detached from DOM
 * `e.on_update(f)`               - call `f(opt)` on the next update - update the DOM here
 * `e.on_measure(f)`              - call `f()` after all updates are done - measure the DOM here
-* `e.on_position(f)`             - call `f()` after all measurements are done - update the DOM that uses measurements here
+* `e.on_position(f)`             - call `f()` after all measurements are done - update the part of the DOM that uses measurements here
 * `e.make_disablable()`          - add disabled property and disable() method
 * `e.make_focusable()`           - add focusable and tabindex property
-* `e.popup()`                    - turn element into a popup
+* `e.make_popup()`               - turn element into a popup
 * `resizeable_canvas_container(redraw)`  - create a canvas that resizes itself automatically
   * `redraw(cx, w, h, pass)`     - called when properties change, widget is resized, etc.
-
 
 ## Similar APIs
 
@@ -199,3 +199,4 @@ and creating a getter for you, setting a mirror attribute for styling, etc.
 * `override(class, method, f)` vs `e.override(method, f)`. The first variant
 overrides built-in methods and works on any class. The element variant can't
 override built-in methods.
+

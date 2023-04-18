@@ -34,22 +34,23 @@ layouts, like tabs and split-views.
 
 All navigation widgets, as well as the single-value widgets are model-driven
 The **navigation widget** (be it a grid, a list or a headless nav) holds
-the data, and one or more value widgets are then bound to the nav widget so
-changes made on a cell by one widget are reflected instantly in other widgets.
-The nav widget then gathers the changes made to one or more rows/cells and
-can push them to a server.
+the data, and one or more value widgets are then bound to the nav so changes
+made on a cell by one widget are reflected instantly in other widgets.
+The nav then gathers the changes made to one or more rows/cells and
+pushes them to a server. The server generates SQL statements and the data
+finally reaches the database. Errors are reported back to the client and the
+grid shows them on their respective cells that failed to update. This whole
+server automation business is also part of the SDK but not discussed here.
+As far as the nav is concerned, any server that talks JSON would do.
 
 ## Docs & Demo
 
-As usual, docs are in the code but there's also a [demo (dev branch)] which
-serves as a showcase of all the available widgets and their features, a quick
-reference on how to instantiate the widgets and what the options are, and as
-a testbed for development and finding bugs.
+As usual, docs are in the code but there's also a [demo] (on the dev branch)
+which serves as a showcase of all the available widgets and their features,
+a quick reference on how to instantiate the widgets and what the options are,
+and as a testbed for development and finding bugs.
 
 I've also started working on a guide on [how to make widgets][making-widgets].
-
-[demo (dev branch)]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
-[making-widgets]: MAKING-WIDGETS.md
 
 ## Installation
 
@@ -96,23 +97,24 @@ This layer provides everything needed to manipulate the DOM as well as to make
 custom components with lifetime management, properties, deferred updating,
 events, etc. It also contains an API for composable CSS (but no actual styles)
 and provides utilities for making popups, modals, disabled elements,
-focusable elements, resizeable canvases, easing animation, drag & drop, etc.
+focusable elements, resizeable canvases, drag & drop, etc.
 
 This layer doesn't implement any actual widgets except a few very basic ones
 like `<if>`.
 
 Unlike `glue.js` you can't ignore this API if you want to manipulate any DOM
-in your application that contains widgets from this SDK. That is because all
-DOM manipulation must be done using this API, as standard DOM methods like
-`e.append()` do not call our lifecycle methods.
-We might override all built-in DOM APIs in the future for a more seamless
-experience but since we don't use them the need hasn't come out yet.
+in your application that contains widgets from this SDK. In fact, all DOM
+manipulation must be done through this API, as standard DOM methods do not
+call our lifecycle methods. So instead of calling `e.append()`, `e.remove()`,
+`e.replaceChild()`, `e.innerHTML = ...` you must call `e.add()`, `e.del()`,
+`e.replace()`, `e.html = ...` (or `e.unsafe_html = ...` if your html is not
+mixed with user input).
 
 ### Layer 3: Functional CSS library
 
 `css.js` is a small functional CSS library that widgets are styled with.
 It has a dark mode (and you can invert the mode on any inside div),
-and 3 size variations.
+and 3 size variations. All widgets are styled with it.
 
 ### Layer 4: Widgets
 
@@ -123,12 +125,12 @@ The `md` component uses `markdown-it.js` for parsing Markdown (optional).
 
 ### Layer 5: Data-driven widgets
 
-`nav.js`, `grid.js`, `charts.js` comprise the "other half" of the library,
-containing a data-driven grid, charts and input widgets.
+`nav.js`, `grid.js`, `charts.js` and `nav-widgets.js` comprise the "other half"
+of the library, containing a data-driven grid, charts and input widgets.
 
 ### Layer 2a: Component state persistence
 
-`module.js` is an optional module that provides persistence for component
+`xmodule.js` is an optional module that provides persistence for component
 properties into multiple property layers, eg. user properties like grid column
 widths are stored in the "user" prop layer which is different for each logged-in user,
 allowing each user to customize the grids in the application only for themselves.
@@ -144,8 +146,8 @@ Persistence only works on components with an id, since it's all id-based.
 Working on widgets is easier with a framework that doesn't have a build
 step and you don't even need a web server to run it. All you need is a code
 editor and a browser. Open `widgets-demo.html` in the browser. Open `glue.js`,
-`dom.js`, `css.js`, `widgets.js`, `widgets-demo.html` in the editor.
-Edit, save, swith-to-browser, refresh.
+`dom.js`, `css.js`, `widgets.js` and `widgets-demo.html` in the editor.
+Edit, save, switch-to-browser, refresh.
 
 To make a new widget, add a new js file for your widget code, and a new demo
 section in the demos file for showcasing your widget. Your demo will appear
@@ -153,3 +155,7 @@ in the nav bar automatically and refreshing the browser will keep context.
 
 So much for the dev-run cycle. Now you just need to know [how to write
 a good quality web component][making-widgets].
+
+
+[demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
+[making-widgets]: MAKING-WIDGETS.md
