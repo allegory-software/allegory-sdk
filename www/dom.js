@@ -35,9 +35,9 @@ CSS-IN-JS
 	css[_base _util _state _role _role_state _generic_state _light _dark][_chrome _firefox](selector, includes, rules)
 	load_css(file, [layer])
 
-DOM load event:
+DOM LOAD
 
-	on_dom_load(f)
+	on_dom_load(f); f()
 	dom_loaded -> t|f
 
 DEBUGGING
@@ -51,7 +51,7 @@ DEBUGGING
 	e.debug_name
 	e.debug_anon_name()
 
-ELEMENT ATTRS
+ELEMENT ATTRIBUTES
 
 	e.hasattr(k) -> t|f
 	e.attr(k[, v]) -> v
@@ -65,7 +65,7 @@ ELEMENT CSS CLASSES
 	e.hasclass(k)
 	e.class('k1 ...'[, enable])
 	e.switch_class(k1, k2, normal)
-	e.classess = 'k1 k2 ...'
+	e.classes = 'k1 k2 ...'
 
 ELEMENT COMPUTED STYLES
 
@@ -3458,6 +3458,8 @@ method(CanvasRenderingContext2D, 'device_to_user', function(x, y, out, scaled) {
 
 // pw & ph are size multiples for lowering the number of resizes.
 method(HTMLCanvasElement, 'resize', function(w, h, pw, ph) {
+	w = min(w, 4000)
+	h = min(h, 4000)
 	pw = pw || 100
 	ph = ph || 100
 	w = ceil(w / pw) * pw
