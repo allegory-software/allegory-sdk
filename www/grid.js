@@ -3,11 +3,13 @@
 	Model-driven tree-grid widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
+You must load first:
+
+	nav.js
+
 WIDGETS
 
-	grid
-	grid_dropdown
-	row-frm
+	<grid>
 
 */
 
@@ -15,14 +17,14 @@ WIDGETS
 "use strict"
 let G = window
 
-/* ---------------------------------------------------------------------------
-// grid widget
-// ---------------------------------------------------------------------------
-uses:
+/* <grid> --------------------------------------------------------------------
+
+	uses:
 	...
 implements:
 	nav widget protocol.
---------------------------------------------------------------------------- */
+
+*/
 
 // NOTE: Firefox won't set a line height lower than the font allows on <input>!
 css(':root', '', `
@@ -39,7 +41,10 @@ css_dark('', '', `
 	--bg-grid-editor        : #495560;
 `)
 
-css('.grid', 'S v clip arrow lh-input')
+css('.grid', 'S v shrinks b clip arrow lh-input', `
+	/* chrome only; just don't use a grid in an inline container. */
+	height: -webkit-fill-available;
+`)
 
 css_state('.grid:focus', 'no-outline')
 
@@ -76,10 +81,6 @@ css('.grid-cells', 'rel clip', `
 
 css('.grid-cells-canvas', 'abs') // keep at y=0 while scrolling
 
-// grid editing
-
-css('.grid-error', 'abs')
-
 // load/save progress bar
 
 css('.grid-progress-bar', 'abs click-through', `
@@ -92,7 +93,7 @@ css_state('.grid.loading > .grid-progress-bar', '', 'background-color: green;')
 
 // grid action band
 
-css('.grid-action-band', 'b-t bg')
+css('.grid-action-band', 'b-t bg', `flex: 0;`)
 css('.grid-action-band-reload-button', 'small label')
 css('.grid-action-band-reload-button > .btn-icon', 'p-t-05')
 css('.grid-action-band-info', 'h-m m-l small label pre')
@@ -133,7 +134,7 @@ css_role(`
 	box-shadow: inset 2px 2px 6px -2px rgba(0,0,0,0.75);
 `)
 
-/* grid as picker */
+// grid as picker
 
 css_role('.grid.picker', '', `
 	min-height: 40px;
@@ -171,18 +172,10 @@ css_role('.grid.picker > .grid-cells-view', 'vscroll')
 
 */
 
-/* grid widget editing */
-
-/* many edit modes, each marked in its own ways */
-css_role('.grid.widget-editing', 'no-outline')
-
-css_role('.grid-cells-view.editing > .grid-cells', 'hidden')
-
 G.grid = component('grid', 'Input', function(e) {
 
-	e.class('grid')
-	// val_widget(e, true)
-	nav_widget(e)
+	e.class('grid unframe')
+	e.make_nav_widget()
 	e.make_focusable()
 	e.ctrl_key_taken = true
 
@@ -287,10 +280,10 @@ G.grid = component('grid', 'Input', function(e) {
 	e.prop('can_change_filters_visibility' , {type: 'bool', default: true})
 	e.prop('can_change_fields_visibility'  , {type: 'bool', default: true})
 
-	let horiz = true
+	let horiz = 1
 	e.set_vertical = function(v) {
-		horiz = !v
-		e.class('hgrid',  horiz)
+		horiz = 1 - !!v
+		e.class('hgrid', !!horiz)
 		e.class('vgrid', !horiz)
 		e.must_be_flat = !horiz
 		theme_changed()
@@ -633,7 +626,7 @@ G.grid = component('grid', 'Input', function(e) {
 		let by = e.cell_border_h_width
 		let ri = e.row_index(row)
 		let [x, y, w, h] = row_rect(ri)
-		return clip_rect(x+bx, y+by, scroll_x, scroll_y, cells_view_w, cells_view_h)
+		return clip_rect(x+bx, y+by, w, h, scroll_x, scroll_y, cells_view_w, cells_view_h)
 	}
 
 	function cell_visible_rect(row, field) { // relative to cells
@@ -864,8 +857,7 @@ G.grid = component('grid', 'Input', function(e) {
 		let cell_focused = row_focused && (!e.can_focus_cells || field == e.focused_field)
 		let disabled = e.is_cell_disabled(row, field)
 		let is_new = row.is_new
-		let cell_errors = e.cell_errors(row, field)
-		let cell_invalid = !!(cell_errors && !cell_errors.passed)
+		let cell_invalid = e.cell_has_errors(row, field)
 		let modified = e.cell_modified(row, field)
 		let is_null = input_val == null
 		let is_empty = input_val === ''
@@ -913,10 +905,13 @@ G.grid = component('grid', 'Input', function(e) {
 
 		if (editing)
 			bg = e.row_bg_focused
-		else if (cell_focused)
-			if (cell_invalid)
+		else if (cell_invalid)
+			if (grid_focused && cell_focused)
 				bg = e.bg_focused_invalid
-			else if (selected)
+			else
+				bg = e.bg_error
+		else if (cell_focused)
+			if (selected)
 				if (grid_focused) {
 					bg = e.bg_focused_selected
 					fg = e.fg_selected
@@ -928,8 +923,6 @@ G.grid = component('grid', 'Input', function(e) {
 				bg = e.bg_focused
 			else
 				bg = e.bg_unselected
-		else if (cell_invalid)
-			bg = e.bg_error
 		else if (selected) {
 			if (grid_focused)
 				bg = e.bg_selected
@@ -1070,9 +1063,10 @@ G.grid = component('grid', 'Input', function(e) {
 	}
 
 	function draw_row_invalid_border(row, ri,x, y, w, h, draw_stage) {
+		cx.lineWidth = 1
 		cx.strokeStyle = e.bg_error
 		cx.beginPath()
-		cx.rect(x + .5, y + .5, w - 1, h)
+		cx.rect(x - .5, y -.5, w - horiz, h - (1 - horiz))
 		cx.stroke()
 	}
 
@@ -1142,8 +1136,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 		for (let ri = ri1; ri < ri2; ri++) {
 			let row = rows[ri]
-			let invalid = row.errors && !row.errors.passed
-			if (invalid) {
+			if (row.errors && row.errors.failed) {
 				let [rx, ry, rw, rh] = row_rect(ri, draw_stage)
 				draw_row_invalid_border(row, ri, rx, ry, rw, rh, draw_stage)
 			}
@@ -1249,77 +1242,86 @@ G.grid = component('grid', 'Input', function(e) {
 
 	// error tooltip ----------------------------------------------------------
 
-	let update_error_tooltip
-	let update_error_tooltip_position
+	let update_errors_tooltip
+	let update_errors_tooltip_position
 	{
 		let row, field
 
-		e.do_error_tooltip_check = function() {
-			if (!row) return false
-			if (e.editor && e.editor.do_error_tooltip_check()) return false
-			if (e.has_focus) return true
-			return false
-		}
-
-		update_error_tooltip_position = function() {
-			if (!e.error_tooltip) return
+		update_errors_tooltip_position = function() {
+			if (!e.errors_tooltip) return
 			if (!row) return
 			let r = field
 				? domrect(...cell_visible_rect(row, field))
 				: domrect(...row_visible_rect(row))
-			e.error_tooltip.target_rect = r
-			e.error_tooltip.side = horiz ? 'top' : 'right'
+			e.errors_tooltip.target_rect = r
+			e.errors_tooltip.side = !horiz == !field ? 'top' : 'right'
 		}
 
-		update_error_tooltip = function() {
+		update_errors_tooltip = function() {
+
+			let show_on_hover = false // too distracting...
+
 			row = null
 			field = null
-			if (hit_state == 'cell') {
+			if (show_on_hover && hit_state == 'cell') {
 				row = e.rows[hit_ri]
 				field = e.fields[hit_fi]
-			} else if (!hit_state) {
+			} else if (show_on_hover ? e.focus_visible : e.focused) {
 				row = e.focused_row
 				field = e.focused_field
 			}
-			if (!e.error_tooltip) {
-				if (!row)
-					return
-				e.error_tooltip = tooltip({
-					kind: 'error',
-					target: e.cells,
-					check: e.do_error_tooltip_check,
-					style: 'pointer-events: none',
-				})
-			}
+
 			let errors
 			if (row && field) {
 				errors = e.cell_errors(row, field)
-				if (!(errors && errors.passed == false)) {
+				if (!(errors && errors.failed)) {
 					errors = null
 					field = null
 				}
 			}
 			if (!errors && row) {
 				errors = e.row_errors(row)
-				if (!(errors && errors.passed == false)) {
+				if (!(errors && errors.failed)) {
 					errors = null
 					row = null
 					field = null
 				}
 			}
-			if (errors) {
-				e.error_tooltip.text = errors
-					.filter(e => !e.passed)
-					.map(e => e.message)
-					.ul({class: 'error-list'}, true)
-				update_error_tooltip_position()
-			} else {
-				e.error_tooltip.update()
+
+			errors = errors
+				&& (!(e.editor && !e.editor.show_errors_tooltip()))
+				&& ((show_on_hover ? e.focus_visible : e.focused)
+					|| (show_on_hover && hit_state == 'cell' && e.hovered))
+				&& errors || null
+
+			if (!errors) {
+				if (e.errors_tooltip)
+					e.errors_tooltip.update({show: false})
+				return
 			}
+
+			if (!e.errors_tooltip) {
+				e.errors_tooltip = tooltip({
+					kind: 'error',
+					target: e.cells,
+					classes: 'errors-tooltip',
+					hidden: true,
+				})
+				e.add(e.errors_tooltip)
+			}
+
+			e.errors_tooltip.text = errors
+				.filter(e => e.failed)
+				.map(e => e.error)
+				.ul({class: 'error-list'}, true)
+
+			e.errors_tooltip.update({show: true})
+			update_errors_tooltip_position()
+
 		}
 
 		e.do_focus_cell = function(row, field) {
-			update_error_tooltip()
+			update_errors_tooltip()
 		}
 
 	}
@@ -1444,10 +1446,10 @@ G.grid = component('grid', 'Input', function(e) {
 		trace_if(!e.bound, e.debug_name)
 		if (opt.fields || opt.rows) {
 			update_internal_sizes()
-			update_error_tooltip_position()
+			update_errors_tooltip_position()
 		}
 		if (opt.errors)
-			update_error_tooltip()
+			update_errors_tooltip()
 		update_view()
 		e.empty_rt.hidden = e.rows.length > 0
 		if (opt.enter_edit)
@@ -1649,11 +1651,11 @@ G.grid = component('grid', 'Input', function(e) {
 				hit_state = 'cell'
 				if (ev) {
 					e.update()
-					update_error_tooltip()
+					update_errors_tooltip()
 				}
 			}
 		if (!hit_state)
-			update_error_tooltip()
+			update_errors_tooltip()
 	}
 
 	function ht_col_test(mx, my) {
@@ -2130,137 +2132,6 @@ G.grid = component('grid', 'Input', function(e) {
 
 	e.prop('empty_text', {slot: 'lang'})
 
-	// widget editing protocol ------------------------------------------------
-
-	let editing_field, editing_sql
-
-	e.hit_test_widget_editing = function(ev, mx, my) {
-		if (!hit_state)
-			pointermove(ev, mx, my)
-		return hit_state == 'col' || hit_state == 'cell' || !hit_state
-	}
-
-	e.set_widget_editing = function(on) {
-		if (editing_field)
-			set_editing_field(on)
-		else if (editing_sql)
-			set_editing_sql(on)
-	}
-
-	e.on('pointerdown', function(ev, mx, my) {
-		if (!e.widget_editing)
-			return
-		if (!hit_state)
-			pointermove(ev, mx, my)
-
-		if (!(hit_state == 'col' || hit_state == 'cell') || !hit_state || !ev.ctrlKey) {
-			unselect_all_widgets()
-			return false
-		}
-
-		// editable_widget mixin's `pointerdown` handler must have ran before
-		// this handler and must have called unselect_all_widgets().
-		assert(!editing_field)
-		assert(!editing_sql)
-
-		if (hit_state == 'col') {
-
-			editing_field = e.fields[hit_fi]
-			if (editing_field) {
-				set_editing_field(true)
-				// for convenience: select-all text if clicking near it but not on it.
-				let hcell = e.header.at[editing_field.index]
-				let title_div = hcell.title_div
-				if (ev.target != title_div && hcell.contains(ev.target)) {
-					title_div.focus()
-					title_div.select_all()
-					return false
-				}
-			}
-
-		} else {
-
-			editing_sql = true
-			set_editing_sql(true)
-
-		}
-
-		// don't prevent default to let the caret land under the mouse.
-		ev.stopPropagation()
-	})
-
-	function prevent_bubbling(ev) {
-		ev.stopPropagation()
-	}
-
-	function exit_widget_editing() {
-		e.widget_editing = false
-	}
-
-	function editing_field_keydown(ev, key, shift, ctrl) {
-		if (key == 'Enter') {
-			if (ctrl) {
-				let hcell = e.header.at[editing_field.index]
-				let title_div = hcell.title_div
-				title_div.insert_at_caret('<br>')
-			} else {
-				e.widget_editing = false
-			}
-			return false
-		}
-	}
-
-	function set_editing_field(on) {
-		let hcell = e.header.at[editing_field.index]
-		let title_div = hcell.title_div
-		hcell.class('editing', on)
-		title_div.contenteditable = on
-		title_div.on('blur'        , exit_widget_editing, on)
-		title_div.on('raw:pointerdown' , prevent_bubbling, on)
-		title_div.on('raw:pointerup'   , prevent_bubbling, on)
-		title_div.on('raw:click'       , prevent_bubbling, on)
-		title_div.on('raw:contextmenu' , prevent_bubbling, on)
-		title_div.on('keydown'         , editing_field_keydown, on)
-		if (!on) {
-			let s = title_div.textContent
-			e.set_prop(`col.${editing_field.name}.label`, s)
-			editing_field = null
-			if (window.xmodule)
-				xmodule.save()
-		}
-	}
-
-	let sql_editor, sql_editor_ct
-
-	function set_editing_sql(on) {
-		e.cells_view.class('editing', on)
-		if (on) {
-			sql_editor_ct = div({class: 'grid-sql-editor'})
-			sql_editor = ace.edit(sql_editor_ct, {
-				mode: 'ace/mode/mysql',
-				highlightActiveLine: false,
-				printMargin: false,
-				displayIndentGuides: false,
-				tabSize: 3,
-				enableBasicAutocompletion: true,
-			})
-			sql_editor_ct.on('blur'            , exit_widget_editing, on)
-			sql_editor_ct.on('raw:pointerdown' , prevent_bubbling, on)
-			sql_editor_ct.on('raw:pointerup'   , prevent_bubbling, on)
-			sql_editor_ct.on('raw:click'       , prevent_bubbling, on)
-			sql_editor_ct.on('raw:contextmenu' , prevent_bubbling, on)
-			sql_editor.getSession().setValue(e.sql_select || '')
-			e.cells_view.add(sql_editor_ct)
-		} else {
-			e.sql_select = repl(sql_editor.getSession().getValue(), '', undefined)
-			sql_editor.destroy()
-			sql_editor = null
-			sql_editor_ct.del()
-			sql_editor_ct = null
-			editing_sql = null
-		}
-	}
-
 	// mouse bindings ---------------------------------------------------------
 
 	function pointermove(ev, mx, my, fix_hit_target) {
@@ -2272,10 +2143,6 @@ G.grid = component('grid', 'Input', function(e) {
 		hit_mx = mx
 		hit_my = my
 
-		if (e.widget_editing) {
-			ht_col(ev, mx, my)
-			return
-		}
 		ht_header_resize(ev, mx, my)
 		ht_col_resize(ev, mx, my)
 		ht_col(ev, mx, my)
@@ -2284,14 +2151,17 @@ G.grid = component('grid', 'Input', function(e) {
 			return false
 	}
 
+	e.on('pointerleave', function(ev) {
+		pointermove(ev, 1/0, 1/0)
+		e.update()
+	})
+
 	e.on('pointermove', function(ev, mx, my) {
 		if (!e.pointer_captured)
 			return pointermove(ev, mx, my)
 	})
 
 	e.on('pointerdown', function(ev, mx, my) {
-		if (e.widget_editing)
-			return
 		if (!hit_state)
 			pointermove(ev, mx, my)
 		e.focus()
@@ -2313,8 +2183,6 @@ G.grid = component('grid', 'Input', function(e) {
 
 	e.on('rightpointerdown', function(ev, mx, my) {
 
-		if (e.widget_editing)
-			return
 		if (!hit_state)
 			if (!pointermove(ev, mx, my))
 				return
@@ -2330,13 +2198,6 @@ G.grid = component('grid', 'Input', function(e) {
 			})
 
 		return false
-	})
-
-	e.cells_canvas.on('pointerleave', function(ev) {
-		if (hit_state != 'cell')
-			return
-		hit_state = null
-		e.update()
 	})
 
 	e.on('contextmenu', function(ev) {
@@ -2371,16 +2232,17 @@ G.grid = component('grid', 'Input', function(e) {
 			e.enter_edit('select_all')
 	})
 
-	function update_state() { e.update() }
+	// keyboard bindings ------------------------------------------------------
+
+	function update_state() {
+		update_errors_tooltip()
+		e.update()
+	}
+
 	e.on('blur' , update_state)
 	e.on('focus', update_state)
 
-	// keyboard bindings ------------------------------------------------------
-
 	e.on('keydown', function(ev, key, shift, ctrl) {
-
-		if (e.widget_editing)
-			return
 
 		let left_arrow  =  horiz ? 'ArrowLeft'  : 'ArrowUp'
 		let right_arrow =  horiz ? 'ArrowRight' : 'ArrowDown'
@@ -2582,8 +2444,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 			// ctrl_delete: set selected cells to null.
 			if (ctrl) {
-				if (e.can_change_val(row, field))
-					e.set_null_selected_cells({input: e})
+				e.set_null_selected_cells({input: e})
 				return false
 			}
 
@@ -2632,9 +2493,6 @@ G.grid = component('grid', 'Input', function(e) {
 
 	// printable characters: enter quick edit mode.
 	e.on('keypress', function(c) {
-
-		if (e.widget_editing)
-			return
 
 		if (e.quick_edit) {
 			if (!e.editor && e.focused_row && e.focused_field) {
@@ -2855,116 +2713,6 @@ G.grid = component('grid', 'Input', function(e) {
 
 })
 
-// ---------------------------------------------------------------------------
-// grid dropdown
-// ---------------------------------------------------------------------------
-
-G.grid_dropdown = component('grid-dropdown', function(e) {
-
-	e.class('grid-dropdown')
-	nav_dropdown_widget(e)
-
-	e.create_picker = function(opt) {
-		return element(assign_opt(opt, {
-			tag: 'grid',
-			id: e.id && e.id + '.dropdown',
-			val_col: e.val_col,
-			display_col: e.display_col,
-			rowset: e.rowset,
-			rowset_name: e.rowset_name,
-		}, e.grid))
-	}
-
-})
-
-// ---------------------------------------------------------------------------
-// row form
-// ---------------------------------------------------------------------------
-
-G.row_form = component('row-frm', function(e) {
-
-	e.class('row-form')
-	grid.props.vertical = {default: true}
-
-	e.construct('grid', null, false)
-
-	function bind_nav(nav, on) {
-		if (!e.bound)
-			return
-		if (!nav)
-			return
-		nav.on('reset'                          , reset, on)
-		nav.on('focused_row_changed'            , row_changed, on)
-		nav.on('display_vals_changed'           , display_vals_changed, on)
-		nav.on('focused_row_cell_state_changed' , focused_row_cell_state_changed, on)
-		nav.on('col_attr_changed'               , col_attr_changed, on)
-	}
-
-	e.on_bind(function(on) {
-		bind_nav(e._nav, on)
-	})
-
-	e.set_nav = function(nav1, nav0) {
-		assert(nav1 != e)
-		bind_nav(nav0, false)
-		bind_nav(nav1, true)
-		reset()
-	}
-
-	e.prop('nav'    , {private: true})
-	e.prop('nav_id' , {bind_id: 'nav', type: 'nav', attr: 'nav'})
-
-	function reset() {
-		e.rowset.fields = e._nav.all_fields_map
-		e.rowset.rows = [e._nav.focused_row]
-		e.reset()
-		e.row = e.all_rows[0]
-	}
-
-	function row_changed(nav_row) {
-		e.all_rows = [nav_row]
-		e.row = e.all_rows[0]
-		//for (let i = 0; i < e.all_fields.length; i++)
-
-	}
-
-	function display_vals_changed() {
-		e.update()
-	}
-
-	function focused_row_cell_state_changed(row, nav_field, changes) {
-		if (e.updating)
-			return
-		let field = e.all_fields[nav_field.val_index]
-		if (changes.val)
-			e.reset_cell_val(row, field, changes.val[0])
-		else if (changes.input_val)
-			e.set_cell_val(row, field, changes.input_val[0])
-	}
-
-	function col_attr_changed(col, attr, val) {
-		if (attr == 'text')
-			e.set_prop('col.'+col+'.'+attr, val)
-	}
-
-	e.on('cell_state_changed', function(row, field, changes) {
-		if (changes.input_val) {
-			let nav_row = e._nav.all_rows[e.row_index(row)]
-			let nav_field = e._nav.all_fields[e.field_index(field)]
-			e._nav.set_cell_val(nav_row, nav_field, changes.input_val[0])
-		}
-	})
-
-})
-
-// ---------------------------------------------------------------------------
-// grid profile
-// ---------------------------------------------------------------------------
-
-G.grid_profile = component('grid-profile', function(e) {
-
-	tabs_item_widget(e)
-
-})
 
 }()) // module function
+

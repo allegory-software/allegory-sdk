@@ -9,6 +9,7 @@
 <style src="fontawesome.css"></style>
 <script>
 DEBUG_EVENTS = true
+DEBUG_ELEMENT_BIND = true
 </script>
 <script src="glue.js"></script>
 <script src="dom.js"></script>
@@ -78,6 +79,7 @@ css_state('button[pressed]', '', `background: var(--bg-button-active);`)
 	</div>
 	<div id=result_split>
 		<div id=result_buttons class="smaller p-x-05 gap-x-05 h-r">
+			<button class="layout-btn" key=frame    layout-classes="frame h-s S shrinks">H-S + Frame</button>
 			<button class="layout-btn" key=inline   layout-classes="inline">Inline</button>
 			<button class="layout-btn" key=block    layout-classes="block ">Block</button>
 			<button class="layout-btn" key=flex-h-t layout-classes="h-t S shrinks  ">Flex H-T</button>
@@ -162,7 +164,7 @@ on_dom_load(function() {
 			return
 		let name = e.id.replace('_demo', '')
 		let s = window[name+'_demo'].html.trim()
-		let item = div({class: 'demo-list-item'}, name.replaceAll('_', '-'))
+		let item = div({class: 'demo-list-item'}, name.replaceAll('_', ' '))
 		demo_list.add(item)
 		let i1 = i
 		item.click = function() {
@@ -425,12 +427,12 @@ main.add(b)
 	<button onclick="mytabs.tabs_side='right';"  >tabs_side=right </button>
 </d>
 <tabs id=mytabs>
-	<div label="First Tab" class="p-4">
+	<div tabname="First Tab" class="p-4">
 		<h1>This is the first tab</h1>
 		<p>You can put anything in here.</p>
 		<p>Content is focused on click subject to auto_focus option. <input></input></p>
 	</div>
-	<div label="Second Tab">
+	<div tabname="Second Tab">
 		<h1>This is the second tab (no padding).</h1>
 		<p>You can put anything in here too.</p>
 	</div>
@@ -455,12 +457,12 @@ main.add(b)
 	can_add_items
 	can_move_items
 >
-	<div id=mytabs_t1 label="First Tab" id=first_tab>
+	<div id=mytabs_t1 tabname="First Tab" id=first_tab>
 		<h1>This is the first tab</h1>
 		<p>You can put anything in here.</p>
 		<p>Content is focused on click subject to auto_focus option. <input></input></p>
 	</div>
-	<div id=mytabs_t2 label="Second Tab" id=second_tab>
+	<div id=mytabs_t2 tabname="Second Tab" id=second_tab>
 		<h1>This is the second tab.</h1>
 		<p>You can put anything in here too.</p>
 	</div>
@@ -468,7 +470,7 @@ main.add(b)
 <script run>
 let n = 1
 mytabs.create_item = function() {
-	return div({label: 'New Tab '+n, class: 'p'}, 'Hello! ', input({value: n++}))
+	return div({tabname: 'New Tab '+n, class: 'p'}, 'Hello! ', input({value: n++}))
 }
 let items = mytabs.items.slice()
 for (let i = 0; i < 4; i++)
@@ -1160,13 +1162,13 @@ my_form.on('submit', function() {
 <!--------------------------------------------------------------------------->
 
 <xmp id=time_picker_demo>
-<time-picker value="0:59:12" with-seconds></time-picker>
+<time-picker value="0:59:12" has-seconds></time-picker>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
 <xmp id=datetime_picker_demo>
-<datetime-picker value="2345-7-6 00:34:59" with-seconds></datetime-picker>
+<datetime-picker value="2345-7-6 00:34:59" has-seconds></datetime-picker>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1176,10 +1178,10 @@ my_form.on('submit', function() {
 <div><date-input       name=d1 placeholder="Birth date"></date-input></div>
 <div><date-input       name=d2 value="1900-1-1" placeholder="Birth date"></date-input></div>
 <div><timeofday-input  name=d3                             input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
-<div><timeofday-input  name=d4 with-seconds                input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
-<div><timeofday-input  name=d5 with-seconds with-fractions input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
-<div><datetime-input   name=d6 with-seconds with-fractions input_value="1900-1-1 0:0:0.1" placeholder="Meet at"></datetime-input></div>
-<div><datetime-input   name=d7 with-seconds with-fractions input_value="2000-1-1 0:0:0.1" placeholder="Meet at" format=sql></datetime-input></div>
+<div><timeofday-input  name=d4 has-seconds                input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
+<div><timeofday-input  name=d5 has-seconds has-fractions input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
+<div><datetime-input   name=d6 has-seconds has-fractions input_value="1900-1-1 0:0:0.1" placeholder="Meet at"></datetime-input></div>
+<div><datetime-input   name=d7 has-seconds has-fractions input_value="2000-1-1 0:0:0.1" placeholder="Meet at" format=sql></datetime-input></div>
 <div><date-range-input name1=d8_1 name2=d8_2 value1="2022-1-18" value2="2022-2-3"></date-range-input></div>
 <button>Submit</button>
 </form>
@@ -1194,7 +1196,6 @@ my_form.on('submit', function() {
 <!--------------------------------------------------------------------------->
 
 <xmp id=grid_demo>
-<div id=main style="height: 100%; display: flex;"></div>
 <script run>
 
 let checked = () => html('<div class="fa fa-check"></div>')
@@ -1249,7 +1250,7 @@ g = grid({
 	//can_change_parent: false,
 })
 
-main.add(g)
+result.add(g)
 
 </script>
 </xmp>
@@ -1413,12 +1414,12 @@ main.add(g)
 	<d></d><timeofday-input
 		name=time1
 		input_value="00:00:00.2"
-		with-seconds placeholder="Meet at"
+		has-seconds placeholder="Meet at"
 	></timeofday-input>
 	<d></d><datetime-input
 		name=datetime1
 		input_value="2022-1-18 12:34:56"
-		with-seconds
+		has-seconds
 		placeholder="Meet at"
 	></datetime-input>
 	<d></d><date-range-input
@@ -1477,7 +1478,7 @@ listen('validate', function(e) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=dropdown_list_nav_demo>
-<rowset id=my_rowset pk=id>
+<rowset id=rowset_my_rowset pk=id>
 	<field name=id      ></field>
 	<field name=name    ></field>
 	<field name=surname ></field>
@@ -1497,19 +1498,70 @@ listen('validate', function(e) {
 <!--------------------------------------------------------------------------->
 
 <xmp id=grid_inputs_demo>
-<split>
+<split fixed-size=410>
 	<grid id=my_grid>
 		<rowset pk=id>
-			<field name=id   ></field>
-			<field name=name max-len=5 placeholder="Put Your Name Here"></field>
-			<field name=desc ></field>
-			<row :id=1 name=Foo desc="Le Foo"></row>
-			<row :id=2 name=Bar desc="Le Bar"></row>
-			<row :id=3 name=Baz desc="Le Baz"></row>
+			<field
+				name=id
+				label="The ID"
+				type=number
+			></field>
+			<field
+				name=name
+				label="The Name"
+				max-len=5
+				placeholder="Put Your Name Here"
+			></field>
+			<field
+				name=desc
+			></field>
+			<field
+				name=active
+				type=bool
+			></field>
+			<field
+				name=fruit
+				type=enum
+				enum_values="apple banana"
+			></field>
+			<row
+				:id=1
+				name="Too Long1"
+				desc="Le Foo"
+				fruit="apple"
+			></row>
+			<row
+				:id=1
+				name="Bar"
+				desc="Le Bar"
+				active=false
+				fruit="tomato"
+			></row>
+			<row
+				:id=3
+				name="Too Long2"
+				desc="Le Baz"
+				active
+			></row>
 		</rowset>
 	</grid>
-	<div>
-		<text-input nav=my_grid col=name></text-input>
+	<div class="m-l-2 g-t ga-m g-2col">
+		<label          nav=my_grid col=id></label>
+		<num-input      id=my_id   nav=my_grid col=id buttons=up-down></num-input>
+		<label          nav=my_grid col=name></label>
+		<text-input     id=my_name nav=my_grid col=name></text-input>
+		<label          nav=my_grid col=desc></label>
+		<textarea-input id=my_desc nav=my_grid col=desc></textarea-input>
+		<label          nav=my_grid col=active></label>
+		<checkbox       id=my_active nav=my_grid col=active></checkbox>
+		<d></d>
+		<toggle         id=my_active nav=my_grid col=active></toggle>
+		<radio          nav=my_grid id=my_fruit1 col=fruit checked-value=apple  ></radio>
+		<label for=my_fruit1>Pick an apple</label>
+		<radio          nav=my_grid id=my_fruit2 col=fruit checked-value=banana ></radio>
+		<label for=my_fruit2>Pick a banana</label>
+		<label nav=my_grid col=fruit></label>
+		<select-button  nav=my_grid col=fruit></select-button>
 	</div>
 </split>
 </xmp>

@@ -1,3 +1,19 @@
+/* ---------------------------------------------------------------------------
+
+	Nav-driven widgets.
+	Written by Cosmin Apreutesei. Public Domain.
+
+You must load first:
+
+	nav.js
+
+WIDGETS           PROPS
+
+	<list>         nav=
+	<dropdown>     <list nav=>
+
+*/
+
 (function () {
 "use strict"
 let G = window
@@ -21,7 +37,7 @@ component.extend('list', 'before', function(e) {
 
 component.extend('list', function(e) {
 
-	e.make_nav_props()
+	e.make_nav_data_widget()
 
 	let nav
 	e.on('bind_nav', function(nav1, on) {
@@ -69,28 +85,112 @@ component.extend('dropdown', function(e) {
 
 })
 
-component.extend('text-input', function(e) {
+component.extend('label', function(e) {
 
-	e.make_nav_col_props()
-	e.field_props = {max_len: true, placeholder: true}
+	e.make_nav_col_widget()
 
-	let nav, field
-	e.on('bind_field', function(field1, on) {
-		field = on ? field1 : null
-		nav = field && field.nav
+	e.on('bind_field', function(field, on) {
+		this.set(on ? field.label : '')
 	})
+
+})
+
+function input_widget(e, field_props) {
+
+	e.make_nav_input_widget(field_props)
 
 	e.on('input', function(ev) {
 		e.set_cell_val(e.input_value, ev)
 	})
 
+}
 
-	// e.do_after('set_input_val', function() {
-	//
-	// })
+component.extend('checkbox', function(e) {
+	input_widget(e, 'checked_value unchecked_value')
+})
 
-	// e.property('val', get_val, e.set_val)
-	// e.property('input_val', get_input_val)
+component.extend('toggle', function(e) {
+	input_widget(e, 'checked_value unchecked_value')
+})
+
+component.extend('radio', function(e) {
+	input_widget(e, '')
+	e.override('get_input_val_for', function(inherited, field) {
+		let v = inherited(field)
+		if (v == null)
+			return null
+		if (v != e.checked_value)
+			v = e.unchecked_value
+		return v
+	})
+})
+
+component.extend('select-button', function(e) {
+	input_widget(e, '')
+	e.on('bind_field', function(field, on) {
+		if (on) {
+			let items = []
+			for (let v of field.known_values)
+				items.push(div({value: v}, v))
+			e.items = items
+		} else {
+			e.items = null
+		}
+	})
+})
+
+component.extend('text-input', function(e) {
+	input_widget(e, 'max_len placeholder')
+})
+
+component.extend('textarea-input', function(e) {
+	input_widget(e, 'max_len placeholder')
+})
+
+component.extend('pass-input', function(e) {
+	input_widget(e, 'min_len conditions placeholder')
+})
+
+component.extend('num-input', function(e) {
+	input_widget(e, 'min max decimals buttons placeholder')
+})
+
+component.extend('slider', function(e) {
+	input_widget(e, 'min max from to decimals marked')
+})
+
+component.extend('tags-input', function(e) {
+	input_widget(e, 'valid_tags nowrap format')
+})
+
+component.extend('tags-input', function(e) {
+	input_widget(e, 'valid_tags nowrap format')
+})
+
+component.extend('date-input', function(e) {
+	input_widget(e, 'min max format')
+})
+
+component.extend('timeofday-input', function(e) {
+	input_widget(e, 'min max format')
+})
+
+component.extend('datetime-input', function(e) {
+	input_widget(e, 'min max format')
+})
+
+component.extend('range-slider', function(e) {
+	input_widget(e, 'min max decimals placeholder')
+})
+
+component.extend('date-range-input', function(e) {
+
+	e.make_nav_input_widget(field_props)
+
+	e.on('input', function(ev) {
+		e.set_cell_val(e.input_value1, ev)
+		e.set_cell_val(e.input_value2, ev)
+	})
 
 
 })
@@ -159,7 +259,7 @@ meh:
 
 function col_input(e, is_range) {
 
-	e.make_nav_col_props()
+	e.make_nav_input_widget()
 
 	e.bind_field = function(on) {
 

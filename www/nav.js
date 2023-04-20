@@ -3,45 +3,60 @@
 	Nav widget mixin.
 	Written by Cosmin Apreutesei. Public Domain.
 
-field types (see "field type definitions" at the end):
-	password
-	number
-	filesize
-	bool
-	enum
-	tags
-	color
-	percent
-	icon
-	button
-	place
-	url
-	phone
-	email
-	date
-	time
-	timeofday
-	timeofday_in_seconds
-	duration
-	col
-	secret_key
-	public_key
-	private_key
+You must load first:
 
-typing:
-	isnav: t
+	widgets.js
 
-rowset:
-	needs:
-		e.rowset
-	publishes:
-		e.reset([ev])
-		e.ready
-	announces:
-		^^ready()
-		^^reset()
+COMPONENTS
 
-rowset attributes:
+	<rowset>
+	<nav>
+
+A nav is an in-memory table with typed columns and rows. It can be populated
+from a rowset or manually. Once set up, rows can be sorted, filtered, grouped
+or form a tree, cells can be selected, values can be looked up, etc.
+A nav is the data model for our virtual grid but it can also be used standalone
+as a shared data model sourcing multiple widgets (think lookup tables).
+
+A rowset is a POD used to populate a nav. It contains field definitions and
+rows of values. It can come from a http server as JSON, defined in HTML with
+the <rowset> tag (inside <nav> or <grid> or standalone), or constructed in JS.
+
+Rowset structure:
+
+{
+	fields : [{name:, FIELD_ATTR: VAL}, ...],  // array of field definitions.
+	rows   : [[v1, v2, ...], ...],             // array of rows, values in field order.
+	ROWSET_ATTR: VAL,                          // rowset attributes, see below.
+}
+
+HTML rowsets:
+
+	<rowset pk=... ROWSET_ATTR=VAL ...>
+		<field name=COL ATTR=VAL ...></field>
+		<row COL=VAL ...></row>
+	</rowset>
+
+	NOTE: use `:id` for the `id` column!
+	NOTE: The rowset will be available as e.rowset.
+
+Loading a rowset into a nav:
+
+	e.rowset = {fields: ..., rows: ...}
+
+		Assign a rowset directly in code. Call reset() to (re)load it!
+
+	e.rowset_name = NAME
+
+		Loads the rowset from the server at /rowset.json/NAME.
+		If a HTML rowset with id=rowset_NAME is present, loads thats instead.
+
+	e.rowset_url = URL
+
+		Loads the rowset from the server at URL.
+
+Rowset attributes:
+
 	fields     : [field1,...]
 	rows       : [row1,...]
 	pk         : 'col1 ...'    : primary key for making changesets.
@@ -52,19 +67,22 @@ rowset attributes:
 	can_remove_rows
 	can_change_rows
 
-sources of field attributes, in order of precedence:
+Sources of field attributes, in precedence order:
 
-	e.set_prop('col.COL.ATTR', VAL)
-	<col-attrs for=COL ATTR=VAL>
-	e.col_attrs = {COL: {ATTR: VAL}}
-	window.rowset_col_attrs['ROWSET.COL'] = {ATTR: VAL}
-	e.rowset.fields = [{ATTR: VAL},...]
-	window.field_types[TYPE] = {ATTR: VAL}
-	window.all_field_types[ATTR] = VAL
+	SCOPE         METHOD
+	------------- -------------------------------------------------------------
+	nav           e.set_prop('col.COL.ATTR', VAL)
+	nav           <col-attrs for=COL ATTR=VAL>
+	nav           e.col_attrs = {COL: {ATTR: VAL}}
+	rowset        window.rowset_col_attrs['ROWSET.COL'] = {ATTR: VAL}
+	rowset        e.rowset.fields = [{ATTR: VAL},...]
+	field type    window.field_types[TYPE] = {ATTR: VAL}
+	global        window.all_field_types[ATTR] = VAL
 
-field attributes:
+Field attributes:
 
 	identification:
+
 		name           : field name (defaults to field's numeric index)
 		type           : for choosing a field preset.
 			number bool enum tags date timestamp timeofday duration
@@ -73,6 +91,7 @@ field attributes:
 			col
 
 	rendering:
+
 		label          : field name for display purposes (auto-generated default).
 		internal       : field cannot be made visible in a grid (false).
 		hidden         : field is hidden by default but can be made visible (false).
@@ -81,23 +100,25 @@ field attributes:
 		max_w          : field's maximum width, in pixels.
 
 	navigation:
+
 		focusable      : field can be focused (true).
 
 	editing:
+
 		client_default : default value/generator that new rows are initialized with.
 		default        : default value that the server sets for new rows.
 		readonly       : prevent editing.
 		editor         : f({nav:, col:, embedded: t|f}) -> editor instance
-		from_text      : f(s) -> v
-		to_text        : f(v) -> s
+		from_text      : f(s) -> v      convert from html attr value to js value
+		to_text        : f(v) -> s      convert from js value to plain text display value
 
 		enum_values    : enum type: 'v1 ...' | ['v1', ...]
 		enum_texts     : enum type: {v->text}
 		enum_info      : enum type: {v->info}
 
 	validation:
+
 		not_null       : don't allow null (false).
-		validator_*    : f(field) -> {validate: f(v) -> true|false, message: text}
 		convert        : f(v, field, row) -> v
 		maxlen         : max text length (256).
 
@@ -109,14 +130,15 @@ field attributes:
 		decimals       : max number of decimals (0).
 
 	formatting:
+
 		align          : 'left'|'right'|'center'
 		format         : f(v, row) -> s
 		attr           : custom value for html attribute `field`, for styling
-		null_text      : display value for null
-		empty_text     : display value for ''
+		null_{text|html}   : display value for null
+		empty_{text|html}  : display value for ''
 
-		true_text      : display value for boolean true
-		false_text     : display value for boolean false
+		true_{text|html}   : display value for boolean true
+		false_{text|html}  : display value for boolean false
 
 		filesize_magnitude : filesize type, see kbytes()
 		filesize_decimals  : filesize type, see kbytes()
@@ -130,6 +152,7 @@ field attributes:
 		button_options : button type: options to pass to button()
 
 	vlookup:
+
 		lookup_rowset[_name]|[_id][_url]: rowset to look up values of this field into.
 		lookup_nav     : nav to look up values of this field into.
 		lookup_nav_id  : nav id for creating lookup_nav.
@@ -137,17 +160,27 @@ field attributes:
 		display_col    : field in lookup_nav to use as display_val of this field.
 
 	sorting:
+
 		sortable       : allow sorting (true).
 		compare_types  : f(v1, v2) -> -1|0|1  (for sorting)
 		compare_vals   : f(v1, v2) -> -1|0|1  (for sorting)
 
-cell attributes:
+
+NAV API ----------------------------------------------------------------------
+
+Typing:
+
+	isnav: t
+
+Cell state:
+
 	row[i]             : cell value as last seen on the server (always valid).
 	row[input_val_i]   : modified cell value, valid or not.
-	row[errors_i]      : [err1,...]; .passed is true if input value is valid.
+	row[errors_i]      : [err1,...]; validation results.
 	row[#all_fields]   : row index.
 
-row attributes:
+Row state:
+
 	row.focusable      : row can be focused (true).
 	row.can_change     : allow changing (true).
 	row.can_remove     : allow removing (true).
@@ -155,10 +188,10 @@ row attributes:
 	row.is_new         : new row, not added on server yet.
 	row.modified       : one or more row cells were modified (valid or not).
 	row.removed        : row is marked for removal, not removed on server yet.
-	row.errors         : [err1,...] row-level errors. undefined if not validated yet.
-	row.errors.passed  : true if row is valid including all cells.
+	row.errors         : [err1,...] row-level validation results. undefined if not validated yet.
+	row.invalid        : row has cell and/or row errors.
 
-fields:
+Fields:
 	publishes:
 		e.all_fields_map[col] -> field
 		e.all_fields[fi] -> field
@@ -171,20 +204,20 @@ fields:
 	announces:
 		^^field_changed(col, attr, v)
 
-visible fields:
+Visible fields:
 	publishes:
 		e.fields[fi] -> field
 		e.field_index(field) -> fi
 		e.show_field(field, on, at_fi)
 		e.move_field(fi, over_fi)
 
-rows:
+Rows:
 	publishes:
 		e.all_rows[ri] -> row
 		e.rows[ri] -> row
 		e.row_index(row) -> ri
 
-indexing:
+Indexing:
 	publishes:
 		e.tree_index(cols, [range_defs], [rows]) -> ix
 		ix.tree() -> index_tree
@@ -192,13 +225,13 @@ indexing:
 		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
 		e.row_groups({col_groups:, [range_defs:], [rows:], [group_label_sep:]}) -> [row1, ...]
 
-master-detail:
+Master-detail:
 	needs:
 		e.params <- 'param1[=master_col1] ...'
 		e.param_nav
 		e.param_nav_id
 
-tree:
+Tree:
 	needs:
 		e.tree_col
 		e.name_col
@@ -207,7 +240,7 @@ tree:
 		e.row_and_each_child_row(row, f)
 		e.expanded_child_row_count(ri) -> n
 
-rendering:
+Rendering:
 	calls:
 		e.update({
 			fields:  fields changed
@@ -265,13 +298,13 @@ focusing and selection:
 		^^focused_cell_changed(row, field, row0, field0, ev)
 		^^selected_rows_changed()
 
-scrolling:
+Scrolling:
 	publishes:
 		e.scroll_to_focused_cell([fallback_to_first_cell])
 	calls:
 		e.scroll_to_cell(ri, [fi])
 
-sorting:
+Sorting:
 	config:
 		can_sort_rows
 	publishes:
@@ -282,22 +315,22 @@ sorting:
 		e.compare_types(v1, v2)
 		e.compare_vals(v1, v2)
 
-filtering:
+Filtering:
 	publishes:
 		e.expr_filter(expr) -> f
 		e.filter_rows(rows, expr) -> [row1,...]
 
-quicksearch:
+Quicksearch:
 	config:
 		e.quicksearch_col
 	publishes:
 		e.quicksearch()
 
-tree node collapsing:
+Tree node collapsing state:
 	e.set_collapsed()
 	e.toggle_collapsed()
 
-row adding, removing, moving:
+Row adding, removing, moving:
 	publishes:
 		e.remove_rows([row1, ...], ev)
 		e.remove_row(row, ev)
@@ -315,7 +348,7 @@ row adding, removing, moving:
 		^^rows_added(rows)
 		^^rows_changed()
 
-cell values & state:
+Cell values & state:
 	publishes:
 		e.cell_state(row, col, key, [default_val])
 		e.cell_val(row, col)
@@ -325,15 +358,14 @@ cell values & state:
 		e.cell_modified(row, col)
 		e.cell_vals(row, col)
 
-updating cells:
+Updating cells:
 	publishes:
 		e.set_cell_state(field, val, default_val)
 		e.set_cell_val()
 		e.reset_cell_val()
 		e.revert_cell()
 	calls:
-		e.validator_NAME(field) -> {validate: f(v) -> true|false, message: text}
-		e.validate_cell()
+		e.validate_cell(field, val)
 		e.do_update_cell_state(ri, fi, key, val, ev)
 		e.do_update_cell_editing(ri, [fi], editing)
 	announces:
@@ -342,25 +374,38 @@ updating cells:
 		^^focused_row_cell_state_changed(row, field, changes, ev)
 		^^focused_row_state_changed(row, changes, ev)
 
-row state:
+Row state:
 	publishes:
 		row.STATE
 		e.row_can_have_children()
 
-updating row state:
+Updating row state:
 	publishes:
+		e.begin_set_state(row)
+		e.end_set_state()
 		e.set_row_state(key, val, default_val)
 		e.revert_row()
 	calls:
 		e.do_update_row_state(ri, changes, ev)
+		e.validate_row(row)
 
-updating rowset:
+Rowset state:
+	needs:
+		e.rowset                  assign a rowset directly.
+	publishes:
+		e.reset([ev])             call it after setting the rowset.
+		e.ready                   true after reset
+	announces:
+		^^reset()                 fired when a new rowset was loaded.
+		^^ready()
+
+Updating the rowset:
 	publishes:
 		e.commit_changes()
 		e.revert_changes()
 		e.set_null_selected_cells()
 
-editing:
+Editing cells:
 	config:
 		can_add_rows
 		can_remove_rows
@@ -377,7 +422,7 @@ editing:
 		e.create_editor()
 		e.do_cell_click(ri, fi)
 
-loading from server:
+Loading from server:
 	needs:
 		e.rowset_name
 		e.rowset_url
@@ -395,7 +440,7 @@ loading from server:
 		^^load_slow(on)
 		^^load_fail(err, type, status, message, body, req)
 
-saving:
+Saving changes:
 	config:
 		e.save_on_add_row         false
 		e.save_on_remove_row      true
@@ -410,7 +455,7 @@ saving:
 		e.can_save_changes()
 		e.save([ev])
 
-loading & saving from/to memory:
+Loading & saving from/to memory:
 	config
 		e.save_row_states
 	needs:
@@ -420,13 +465,7 @@ loading & saving from/to memory:
 	cals
 		e.do_save_row(vals) -> true | 'skip'
 
-loading from html:
-	<rowset>
-		<field name=COL ATTR=VAL></field>
-		<row COL=VAL ...></row>
-	</rowset>
-
-display val & text val:
+Display val & text val:
 	publishes:
 		e.cell_display_val_for(row, field, v, display_val_to_update)
 		e.cell_display_val(row, field)
@@ -434,26 +473,11 @@ display val & text val:
 	announces:
 		^^display_vals_changed()
 
-picker:
+Picker:
 	publishes:
 		e.display_col
 		e.row_display_val()
 		e.pick_near_val()
-
-server-side properties:
-	publishes:
-		e.sql_select_all
-		e.sql_select
-		e.sql_select_one
-		e.sql_select_one_update
-		e.sql_pk
-		e.sql_insert_fields
-		e.sql_update_fields
-		e.sql_where
-		e.sql_where_row
-		e.sql_where_row_update
-		e.sql_schema
-		e.sql_db
 
 --------------------------------------------------------------------------- */
 
@@ -642,7 +666,7 @@ component('rowset', function(e) {
 })
 
 function nav_ajax(opt) {
-	let rowset_tag = window[opt.rowset_name]
+	let rowset_tag = window['rowset_'+opt.rowset_name]
 	if (rowset_tag) // html rowset
 		opt.xhr = {
 			wait: opt.wait,
@@ -651,8 +675,12 @@ function nav_ajax(opt) {
 	return ajax(opt)
 }
 
-G.nav_widget = function(e) {
+let errors_no_messages = []
+errors_no_messages.failed = true
+errors_no_messages.client_side = true
 
+e.make_nav_widget = function() {
+	let e = this
 	e.isnav = true
 	e.make_disablable()
 
@@ -712,15 +740,14 @@ G.nav_widget = function(e) {
 	function init_all() {
 		e.changed_rows = null // set(row)
 		rows_moved = false
-		init_all_fields()
 		init_row_validators()
+		init_all_fields()
 	}
 
 	e.on_bind(function nav_bind(on) {
 		bind_param_nav(on)
 		bind_rowset_name(e.rowset_name, on)
 		if (on) {
-			init_all()
 			init_param_vals()
 			e.reload()
 			e.update_action_band()
@@ -863,6 +890,9 @@ G.nav_widget = function(e) {
 		for (let k in convert_field_attr)
 			field[k] = convert_field_attr[k](field, field[k], f)
 
+		if (field.init)
+			field.init(field)
+
 	}
 
 	function set_field_attr(field, k, v) {
@@ -894,6 +924,14 @@ G.nav_widget = function(e) {
 			return
 		field[k] = v
 
+		// TODO: don't reinit the entire field
+		if (field.init)
+			field.init(field)
+
+	}
+
+	function e_announce(...args) {
+		e.announce(...args)
 	}
 
 	function init_field(f, fi) {
@@ -923,6 +961,8 @@ G.nav_widget = function(e) {
 
 		if (field.timeago)
 			e.bool_attr('has-timeago', true)
+
+		field.announce = e_announce
 
 		return field
 	}
@@ -1302,7 +1342,7 @@ G.nav_widget = function(e) {
 			return
 		e.param_vals = pv1
 		e.disable('no_param_vals', pv1 === false)
-		e.announce('label_changed')
+		e.announce('tabname_changed')
 		e.announce('params_changed')
 		return true
 	}
@@ -1413,25 +1453,25 @@ G.nav_widget = function(e) {
 		return m
 	}
 
-	// label ------------------------------------------------------------------
+	// tabname ----------------------------------------------------------------
 
-	let inh_get__label = e.get__label
-	e.get__label = function() {
-		let label = inh_get__label() || '{0}'
-		let view = e.param_vals && e.param_nav.selected_rows_label() || ''
-		return label.subst(view)
-	}
+	e.prop('tabname_template', {default: '{0}'})
 
-	e.row_label = function(row) {
+	e.property('tabname', function() {
+		let view = e.param_vals && e.param_nav.selected_rows_tabname() || ''
+		return tabname_.subst(view)
+	})
+
+	e.row_tabname = function(row) {
 		return e.row_display_val(row)
 	}
 
-	e.selected_rows_label = function() {
+	e.selected_rows_tabname = function() {
 		if (!e.selected_rows)
 			return S('no_rows_selected', 'No rows selected')
 		let caps = []
 		for (let [row, sel_fields] of e.selected_rows)
-			caps.push(e.row_label(row))
+			caps.push(e.row_tabname(row))
 		return caps.join(', ')
 	}
 
@@ -1444,6 +1484,31 @@ G.nav_widget = function(e) {
 		e.all_rows = null
 	}
 
+	// validate cells & rows silently and without making too much garbage
+	// and without getting the error messages, just the failed state.
+	function validate_all_rows() {
+		for (let row of e.all_rows) {
+			let cells_failed
+			for (let field of e.all_fields) {
+				if (field.readonly)
+					continue
+				if (field.validator) {
+					let val = e.cell_input_val(row, field)
+					let failed = !field.validator.validate(val, false)
+					if (failed) {
+						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
+						cells_failed = true
+					}
+				}
+			}
+			let row_failed = !e.row_validator.validate(row, false)
+			if (cells_failed || row_failed)
+				e.set_row_state_for(row, 'invalid', true)
+			if (row_failed)
+				e.set_row_state_for(row, 'errors', errors_no_messages)
+		}
+	}
+
 	function init_all_rows() {
 		free_all_rows()
 		e.do_update_load_fail(false)
@@ -1454,6 +1519,7 @@ G.nav_widget = function(e) {
 				|| e.deserialize_all_row_vals(e.rowset.row_text_vals, true)
 				|| e.rowset.rows
 			) || []
+		validate_all_rows()
 	}
 
 	// filtered and custom-sorted subset of all_rows --------------------------
@@ -2728,6 +2794,15 @@ G.nav_widget = function(e) {
 		return v !== undefined ? v : default_val
 	}
 
+	e.set_cell_state_for = function(row, field, key, val) {
+		let vi = cell_state_val_index(key, field, true)
+		row[vi] = val
+	}
+
+	e.set_row_state_for = function(row, key, val) {
+		row[key] = val
+	}
+
 	{
 	e.do_update_cell_state = noop
 	e.do_update_row_state = noop
@@ -2736,6 +2811,7 @@ G.nav_widget = function(e) {
 
 	e.begin_set_state = function(row1, ev1) {
 		if (depth) {
+			assert(row1 == row)
 			depth++
 			return
 		}
@@ -2815,8 +2891,23 @@ G.nav_widget = function(e) {
 
 	e.cell_val        = (row, col) => row[fld(col).val_index]
 	e.cell_input_val  = (row, col) => e.cell_state(row, fld(col), 'input_val', e.cell_val(row, col))
-	e.cell_errors     = (row, col) => e.cell_state(row, fld(col), 'errors')
-	e.cell_has_errors = (row, col) => { let err = e.cell_errors(row, col); return err && !err.passed; }
+
+	e.cell_errors     = (row, col, with_messages) => {
+		let field = fld(col)
+		let errors = e.cell_state(row, field, 'errors')
+		if (errors == errors_no_messages && with_messages != false) {
+			let val = e.cell_input_val(row, field)
+			errors = e.validate_cell(field, val)
+			e.set_cell_state_for(row, field, 'errors', errors)
+		}
+		return errors
+	}
+
+	e.cell_has_errors = (row, col) => {
+		let err = e.cell_errors(row, col, false)
+		return err && err.failed
+	}
+
 	e.cell_modified   = (row, col) => {
 		let field = e.fld(col)
 		let compare_vals = field.compare_vals || e.compare_vals
@@ -2842,62 +2933,45 @@ G.nav_widget = function(e) {
 	}
 
 	function init_field_validators(field) {
-		field.validators = []
 		if (field.readonly)
 			return
+		field.validator = create_validator(field)
 		for (let k in field) {
 			if (k.starts('validator_')) {
-				let v = field[k](field)
-				if (v && v.validate)
-					field.validators.push(v)
+				k = k.replace(/^validator_/, '')
+				let rule = field[k]
+				rule.name = k
+				field.validator.add_rule(rule)
 			}
 		}
 	}
 
 	function init_row_validators() {
-		e.row_validators = []
-		for (let k in e) {
-			if (k.starts('validator_')) {
-				let v = e[k]()
-				if (v && v.validate)
-					e.row_validators.push(v)
-			}
-		}
+		e.row_validator = create_validator(e)
 	}
 
-	e.validator_pk = function() {
-		return {
-			validate: e.pk && function(row) {
-				let rows = e.lookup(e.pk, e.cell_input_vals(row, e.pk)).filter(row1 => row1 != row)
-				return rows.length < 1
-			},
-			message: S('validation_unique', '{0} must be unique')
-				.subst(e.pk_fields && e.pk_fields.map(field => field.label).join(' + ') || ''),
-		}
+	function add_validation_errors(validator, errors) {
+		for (let result of validator.results)
+			errors.push(assign(obj(), result))
 	}
 
-	function add_validator_error(error, errors, validator) {
-		error = !isobject(error) ? {passed: !!error} : error
-		errors.push(error)
-		if (!error.message)
-			error.message = validator.message
-		if (!error.passed) {
-			errors.passed = false
-			errors.must_allow_exit_edit =
-				errors.must_allow_exit_edit ?? validator.must_allow_exit_edit
-		}
-	}
-
-	e.validate_cell = function(field, val, row, ev) {
+	e.validate_cell = function(field, val) {
 		let errors = []
-		errors.passed = true
+		errors.failed = false
 		errors.client_side = true
-		if (field.validators) {
-			for (let validator of field.validators) {
-				let error = validator.validate(val, row, field)
-				add_validator_error(error, errors, validator)
-			}
+		if (field.validator) {
+			errors.failed = !field.validator.validate(val)
+			add_validation_errors(field.validator, errors)
 		}
+		return errors
+	}
+
+	e.validate_row_only = function(row) {
+		let errors = []
+		errors.failed = false
+		errors.client_side = true
+		errors.failed = !e.row_validator.validate(row)
+		add_validation_errors(e.row_validator, errors)
 		return errors
 	}
 
@@ -2905,17 +2979,12 @@ G.nav_widget = function(e) {
 		return row.can_have_children != false
 	}
 
-	e.row_errors = function(row, include_cell_errors, a) {
-		a = a || []
-		for (let err of (row.errors || empty_array))
-			if (!err.passed && err.message)
-				a.push(err.message)
-		if (include_cell_errors)
-			for (let f of e.all_fields)
-				for (let err of (e.cell_errors(row, f) || empty_array))
-					if (!err.passed && err.message)
-						a.push(f.label + ': ' + err.message)
-		return a
+	e.row_errors = function(row) {
+		if (row.errors == errors_no_messages) {
+			let row_errors = e.validate_row_only(row)
+			e.set_row_state_for(row, 'errors', row_errors)
+		}
+		return row.errors
 	}
 
 	function notify_errors(ev) {
@@ -2924,8 +2993,15 @@ G.nav_widget = function(e) {
 		if (!e.changed_rows)
 			return
 		let errs = []
-		for (let row of e.changed_rows)
-			e.row_errors(row, true, errs)
+		for (let row of e.changed_rows) {
+			for (let err of (e.row_errors(row) || empty_array))
+				if (err.failed)
+					a.push(err.error)
+				for (let field of e.all_fields)
+					for (let err of (e.cell_errors(row, field) || empty_array))
+						if (err.failed)
+							a.push(field.label + ': ' + err.error)
+		}
 		if (!errs.length)
 			return
 		e.notify('error', errs.ul({class: 'error-list'}, true))
@@ -2934,41 +3010,36 @@ G.nav_widget = function(e) {
 	e.validate_row = function(row) {
 
 		if (row.errors && row.errors.client_side)
-			return row.errors.passed
-
-		let row_errors = []
-		row_errors.passed = true
-		row_errors.client_side = true
+			return !row.invalid
 
 		e.begin_set_state(row)
 
+		let invalid
 		for (let field of e.all_fields) {
 			if (field.readonly)
 				continue
 			if (!(row.is_new || e.cell_modified(row, field)))
 				continue
-			let errors = e.cell_errors(row, field)
+			let errors = e.cell_errors(row, field, false)
 			if (errors && !errors.client_side)
 				errors = null // server-side errors must be cleared.
 			if (!errors || row.is_new || e.cell_modified(row, field)) {
 				let val = e.cell_input_val(row, field)
-				errors = e.validate_cell(field, val, row)
+				let errors = e.validate_cell(field, val)
 				e.set_cell_state(field, 'errors', errors)
 			}
-			if (!errors.passed)
-				row_errors.passed = false
+			if (errors.failed)
+				invalid = true
 		}
 
-		for (let validator of e.row_validators) {
-			let error = validator.validate(row)
-			add_validator_error(error, row_errors, validator)
-		}
-
+		let row_errors = e.validate_row_only(row)
+		invalid = invalid || row_errors.failed
 		e.set_row_state('errors', row_errors)
+		e.set_row_state('invalid', invalid)
 
 		e.end_set_state()
 
-		return row_errors.passed
+		return !invalid
 	}
 
 	function cells_modified(row, exclude_field) {
@@ -3012,8 +3083,8 @@ G.nav_widget = function(e) {
 			return
 
 		let cur_val = e.cell_val(row, field)
-		let errors = e.validate_cell(field, val, row, ev)
-		let invalid = !errors.passed
+		let errors = e.validate_cell(field, val)
+		let invalid = errors.failed
 		let compare_vals = field.compare_vals || e.compare_vals
 		let cell_modified = compare_vals(val, cur_val, field) != 0
 		let row_modified = cell_modified || cells_modified(row, field)
@@ -3381,11 +3452,7 @@ G.nav_widget = function(e) {
 		}
 	}
 
-	function get_or_draw_null_display_val(row, field, cx) {
-		let s = field.null_text
-		assert(s != null)
-		if (!field.null_lookup_col)
-			return s
+	function get_or_draw_null_lookup_val(row, field, cx) {
 		let lf = e.all_fields_map[field.null_lookup_col]  ; if (!lf || !lf.lookup_cols) return s
 		let ln = lf.lookup_nav                            ; if (!ln) return s
 		let nfv = e.cell_val(row, lf)
@@ -3399,18 +3466,28 @@ G.nav_widget = function(e) {
 			return ln.cell_display_val(ln_row, df)
 		}
 	}
-	function draw_null_display_val(row, field, cx) {
-		let s = get_or_draw_null_display_val(row, field, cx)
-		if (s != null) // wasn't drawn but returned to be drawn.
-			field.draw(s, cx, row)
+	function get_null_display_val(row, field) {
+		if (field.null_lookup_col)
+			return get_or_draw_null_lookup_val(row, field)
+		else
+			return field.null_html ?? field.null_text
 	}
-	let get_null_display_val = get_or_draw_null_display_val
+	function draw_null_display_val(row, field, cx) {
+		if (field.null_lookup_col) {
+			get_or_draw_null_lookup_val(row, field, cx)
+			return true
+		}
+		if (field.null_text != null) {
+			field.draw(field.null_text, cx, row)
+			return true
+		}
+	}
 
 	e.cell_display_val_for = function(row, field, v, display_val_to_update) {
 		if (v == null)
 			return get_null_display_val(row, field)
 		if (v === '')
-			return field.empty_text
+			return field.empty_html ?? field.empty_text
 		let ln = field.lookup_nav
 		if (ln && field.lookup_fields && field.display_field) {
 			let row = ln.lookup(field.lookup_fields, [v])[0]
@@ -3421,14 +3498,14 @@ G.nav_widget = function(e) {
 	}
 
 	e.draw_cell_val = function(row, field, v, cx) {
-		if (v == null) {
-			draw_null_display_val(row, field, cx)
-			return
-		}
-		if (v === '') {
-			field.draw(field.empty_text, cx, row)
-			return
-		}
+		if (v == null)
+			if (draw_null_display_val(row, field, cx))
+				return
+		if (v === '')
+			if (field.empty_text != null) {
+				field.draw(field.empty_text, cx, row)
+				return
+			}
 		let ln = field.lookup_nav
 		if (ln && field.lookup_fields && field.display_field) {
 			let ln_row = ln.lookup(field.lookup_fields, [v])[0]
@@ -4264,7 +4341,7 @@ G.nav_widget = function(e) {
 				rows_to_remove.push(row)
 			} else {
 				let row_failed = rt.error || rt.field_errors
-				let errors = isstr(rt.error) ? [{message: rt.error, passed: false}] : undefined
+				let errors = isstr(rt.error) ? [{error: rt.error, failed: true}] : undefined
 
 				e.begin_set_state(row, ev)
 
@@ -4276,7 +4353,7 @@ G.nav_widget = function(e) {
 				if (rt.field_errors) {
 					for (let k in rt.field_errors) {
 						let err = rt.field_errors[k]
-						e.set_cell_state(fld(k), 'errors', [{message: err, passed: false}])
+						e.set_cell_state(fld(k), 'errors', [{error: err, failed: true}])
 					}
 				}
 				if (rt.values) {
@@ -4453,7 +4530,7 @@ G.nav_widget = function(e) {
 	e.serialize_all_rows = function(row) {
 		let rows = []
 		for (let row of e.all_rows)
-			if (!row.removed && !row.nosave && row.errors.passed) {
+			if (!row.removed && !row.nosave && !row.invalid) {
 				let drow = e.serialize_row(row)
 				rows.push(drow)
 			}
@@ -4482,7 +4559,7 @@ G.nav_widget = function(e) {
 		for (let fi = 0; fi < e.all_fields.length; fi++) {
 			let field = e.all_fields[fi]
 			let v = strict_or(vals[field.name], field.default)
-			if (from_text)
+			if (v != null && from_text)
 				v = field.from_text(v)
 			row[fi] = v
 		}
@@ -4492,7 +4569,7 @@ G.nav_widget = function(e) {
 	e.serialize_all_row_vals = function() {
 		let rows = []
 		for (let row of e.all_rows)
-			if (!row.removed && !row.nosave && (!row.errors || row.errors.passed)) {
+			if (!row.removed && !row.nosave && (!row.errors || !row.invalid)) {
 				let vals = e.serialize_row_vals(row)
 				if (e.do_save_row(vals) !== 'skip')
 					rows.push(vals)
@@ -4963,59 +5040,19 @@ G.nav_widget = function(e) {
 
 	init_all()
 
-	// server-side props ------------------------------------------------------
-
-	e.set_sql_db = function(v) {
-		if (!e.id)
-			return
-		e.rowset_url = v ? '/sql_rowset.json/' + e.id : null
-		e.reload()
-	}
-
-	e.set_sql_select = e.reload
-
-	e.prop('sql_select_all'        , {slot: 'server'})
-	e.prop('sql_select'            , {slot: 'server'})
-	e.prop('sql_select_one'        , {slot: 'server'})
-	e.prop('sql_select_one_update' , {slot: 'server'})
-	e.prop('sql_pk'                , {slot: 'server'})
-	e.prop('sql_insert_fields'     , {slot: 'server'})
-	e.prop('sql_update_fields'     , {slot: 'server'})
-	e.prop('sql_where'             , {slot: 'server'})
-	e.prop('sql_where_row'         , {slot: 'server'})
-	e.prop('sql_where_row_update'  , {slot: 'server'})
-	e.prop('sql_schema'            , {slot: 'server'})
-	e.prop('sql_db'                , {slot: 'server'})
-
 }
 
 /* view-less nav -------------------------------------------------------------
+
 */
 
 css('bare-nav', 'hidden')
 
 G.bare_nav = component('nav', function(e) {
 	e.class('bare-nav')
-	nav_widget(e)
+	e.make_nav_widget()
 	return {hidden: true}
 })
-
-// ---------------------------------------------------------------------------
-// global one-row nav for all standalone (i.e. not bound to a nav) widgets.
-// ---------------------------------------------------------------------------
-
-G.global_val_nav = function() {
-	global_val_nav = () => nav // memoize.
-	let nav = bare_nav({
-		rowset: {
-			fields: [],
-			rows: [[]],
-		},
-	})
-	head.add(nav)
-	nav.focus_cell(true, false)
-	return nav
-}
 
 /* ---------------------------------------------------------------------------
 
@@ -5032,7 +5069,7 @@ fires:
 
 */
 
-e.make_nav_props = function() {
+e.make_nav_data_widget = function() {
 
 	let e = this
 
@@ -5041,13 +5078,11 @@ e.make_nav_props = function() {
 	function bind_nav(on) {
 		if (!nav)
 			return
-
 		if (nav._internal)
 			if (on)
 				head.add(nav)
 			else
 				nav.del()
-
 		e.fire('bind_nav', nav, on)
 	}
 
@@ -5095,29 +5130,11 @@ e.make_nav_props = function() {
 
 }
 
-/* ---------------------------------------------------------------------------
-
-Widget that has a nav cell as its data model.
-
-config props:
-	nav
-	nav_id     nav
-	col
-state props:
-	ready
-fires:
-	^bind_field(field, on)
-
-*/
-
-e.make_nav_col_props = function() {
+e.make_nav_col_widget = function() {
 
 	let e = this
 
-	// state: field
-
 	let nav, field
-	e.field_props = obj()
 
 	function bind_field(on) {
 		if (on) {
@@ -5125,12 +5142,7 @@ e.make_nav_col_props = function() {
 			field = nav && nav.optfld(e.col) || null
 			if (!field)
 				return
-			e.xoff()
-			for (let k in e.field_props)
-				e.set_prop(k, field[k])
-			e.xon()
 			e.fire('bind_field', field, true)
-			e.input_value = get_input_val()
 		} else {
 			if (!field)
 				return
@@ -5139,6 +5151,7 @@ e.make_nav_col_props = function() {
 		}
 		e.ready = !!field
 		e.update()
+		return field
 	}
 
 	function update_field() {
@@ -5167,39 +5180,145 @@ e.make_nav_col_props = function() {
 		update_field()
 	})
 
-	e.listen('field_changed', function(te, field1, k, v) {
-		if (field1 != field) return
-		if (!e.field_props[k]) return
+	e.listen('field_changed', function(te, changed_field, k, v) {
+		if (te != nav) return
+		if (changed_field != field) return
+		update_field()
+	})
+
+	e.prop('ready', {type: 'bool', slot: 'state', default: true, updates: 'value'})
+
+}
+
+/* ---------------------------------------------------------------------------
+
+Widget that has a nav cell or a range of two nav cells as its data model.
+
+config props:
+	nav
+	nav_id     nav
+	col[1,2]
+state props:
+	ready
+	row
+fires:
+	^bind_field(field, on)
+
+*/
+
+e.make_nav_input_widget = function(field_props, range) {
+
+	let e = this
+
+	// state: field[1,2]
+
+	let nav, field, field1, field2
+
+	field_props = words(field_props).tokeys()
+
+	function bind_field(field, col, input_widget, INPUT_VALUE, on) {
+		if (on) {
+			assert(!field)
+			field = nav && nav.optfld(col) || null
+			if (!field)
+				return
+			e.xoff()
+			for (let k in field_props)
+				if (field[k] !== undefined)
+					input_widget.set_prop(k, field[k])
+			e.xon()
+			e.fire('bind_field', field, true)
+			e[INPUT_VALUE] = e.get_input_val_for(field)
+		} else {
+			if (!field)
+				return
+			e.fire('bind_field', field, false)
+			field = null
+		}
+		e.ready = range ? !!field1 && !!field2 : !!field
+		e.update()
+		return field
+	}
+
+	function bind_fields(on) {
+		if (range) {
+			field1 = bind_field(field1, e.col1, e.input_widgets[0], 'input_value1', on)
+			field2 = bind_field(field2, e.col2, e.input_widgets[1], 'input_value2', on)
+		} else {
+			field = bind_field(field, e.col, e, 'input_value', on)
+		}
+	}
+
+	function update_fields() {
+		bind_fields(false)
+		bind_fields(true)
+	}
+
+	function update_nav() {
+		let nav1 = e.nav
+		if (nav1 == nav)
+			return
+		bind_fields(false)
+		nav = nav1
+		bind_fields(true)
+	}
+
+	if (range) {
+		e.prop('col1', {type: 'col'})
+		e.prop('col2', {type: 'col'})
+		e.set_col1 = update_fields
+		e.set_col2 = update_fields
+	} else {
+		e.prop('col', {type: 'col'})
+		e.set_col = update_fields
+	}
+
+	e.prop('nav', {private: true, type: 'nav'})
+	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
+	e.set_nav = update_nav
+
+	e.listen('reset', function(te) {
+		if (te != nav) return
+		update_fields()
+	})
+
+	e.listen('field_changed', function(te, changed_field, k, v) {
+		if (te != nav) return
+		if (changed_field != field) return
+		if (!field_props[k]) return
 		e.xoff()
 		e.set_prop(k, v)
 		e.xon()
 	})
 
-	// state: value
+	// state: ready, row, input
 
 	e.prop('ready', {type: 'bool', slot: 'state', default: true, updates: 'value'})
 
 	e.property('row', () => nav && nav.focused_row)
 
-	function get_val() {
+	/*
+	function get_modified_for(field) {
 		let row = e.row
-		return row && field ? nav.cell_val(row, field) : null
+		return row && field ? nav.cell_modified(row, field) : false
 	}
+	*/
 
-	function get_input_val() {
+	e.get_input_val_for = function(field) {
 		let row = e.row
 		return row && field ? nav.cell_input_val(row, field) : null
 	}
 
-	e.reset_cell_val = function(v, ev) {
-		v = e.to_val(v)
-		if (v === undefined)
-			v = null
-		if (e.row && field)
-			nav.reset_cell_val(e.row, field, v, ev)
+	function set_input_values() {
+		if (range) {
+			e.input_value1 = e.get_input_val_for(field1)
+			e.input_value2 = e.get_input_val_for(field2)
+		} else {
+			e.input_value  = e.get_input_val_for(field)
+		}
 	}
 
-	e.set_cell_val = function(v, ev) {
+	function set_cell_val_for(field, v, ev) {
 		if (v === undefined)
 			v = null
 		let was_set
@@ -5215,22 +5334,78 @@ e.make_nav_col_props = function() {
 		}
 	}
 
-	e.listen('focused_row_cell_state_changed', function(te, row, field1, changes, ev) {
-		if (field1 != field) return
-		e.update({changes: changes, ev: ev})
+	if (range) {
+		e.set_cell_val1 = function(v, ev) { set_cell_val_for(field1, v, ev) }
+		e.set_cell_val2 = function(v, ev) { set_cell_val_for(field2, v, ev) }
+	} else {
+		e.set_cell_val  = function(v, ev) { set_cell_val_for(field , v, ev) }
+	}
+
+	e.listen('focused_row_cell_state_changed', function(te, row, f, changes, ev) {
+		if (te != nav) return
+		if (f != field && f != field1 && f != field2) return
+		if (changes.input_val && !(ev && ev.target == e))
+			set_input_values()
 	})
 
-	// e.listen('focused_row_changed', update)
-	// e.listen('focused_row_cell_state_changed', cell_state_changed)
+	e.listen('focused_row_changed', function(te, row) {
+		if (te != nav) return
+		set_input_values()
+	})
+
 	// e.listen('display_vals_changed', update)
-	// e.listen('col_label_changed', update)
+	// e.listen('field_changed', update)
 	// e.listen('col_info_changed', update)
 
 }
 
-/* ---------------------------------------------------------------------------
-// field type definitions
-// ------------------------------------------------------------------------ */
+
+// validation rules ----------------------------------------------------------
+
+function field_name(e) {
+	return (e.label || e.name || S('value', 'value')).display_name()
+}
+
+// NOTE: this must work with values that are unconverted and invalid!
+function field_value(e, v) {
+	if (v == null) return 'null'
+	if (isstr(v)) return v
+	if (e.to_text)
+		v = e.to_text(v)
+	return v+''
+}
+
+add_validation_rule({
+	name: 'pk',
+	props: 'pk',
+	applies  : (e) => e.pk,
+	validate : (e, row) => {
+		let rows = e.lookup(e.pk, e.cell_input_vals(row, e.pk)).filter(row1 => row1 != row)
+		return rows.length < 1
+	},
+	error    : (e, v) => S('validation_pk_message', '{0} is not unique',
+			e.pk_fields.map(field => field.label).join(' + ')),
+	rule     : (e) => S('validation_pk_rule', '{0} must be unique',
+			e.pk_fields.map(field => field.label).join(' + ')),
+})
+
+add_validation_rule({
+	name     : 'lookup',
+	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
+	vprops   : 'input_value',
+	applies  : (e) => e.lookup_nav,
+	validate : (e, v) => e.lookup_nav.ready
+			&& e.lookup_nav.lookup(e.lookup_cols, [v]).len > 0,
+	error    : (e, v) => S('validation_lookup_error',
+		'{0} unknown value {1}', field_name(e), field_value(e, v)),
+	rule     : (e) => S('validation_lookup_rule',
+		'{0} value unknown', field_name(e)),
+})
+
+/* field type definitions ----------------------------------------------------
+
+
+*/
 
 {
 
@@ -5248,36 +5423,11 @@ G.all_field_types = {
 	not_null: false,
 	sortable: true,
 	maxlen: 256,
-	null_text: S('null_text', ''),
+	null_text : S('null_text', ''),
 	empty_text: S('empty_text', 'empty text'),
 	to_num: v => num(v, null),
 	from_num: return_arg,
 }
-
-all_field_types.validator_not_null = field => (field.not_null && {
-	validate : v => v != null || field.default != null,
-	message  : S('validation_empty', 'Value cannot be empty'),
-})
-
-all_field_types.validator_min = field => (field.min != null && {
-	validate : v => v == null || field.to_num(v) >= field.min,
-	message  : S('validation_min_value', 'Value must be at least {0}',
-		field.from_num(field.min)),
-})
-
-all_field_types.validator_max = field => (field.max != null && {
-	validate : v => v == null || field.to_num(v) <= field.max,
-	message  : S('validation_max_value', 'Value must be at most {0}',
-		field.from_num(field.max)),
-})
-
-all_field_types.validator_lookup = field => (field.lookup_nav && {
-	validate : v => v == null
-		|| (field.lookup_nav.ready
-			&& field.lookup_nav.lookup(field.lookup_cols, [v]).length > 0),
-	message  : S('validation_lookup',
-		'Value must be in the list of allowed values.'),
-})
 
 all_field_types.to_text = function(v) {
 	return String(v)
@@ -5339,7 +5489,7 @@ all_field_types.editor = function(opt) {
 
 // passwords
 
-let pwd = obj()
+let pwd = {}
 field_types.password = pwd
 
 pwd.editor = function(opt) {
@@ -5348,18 +5498,8 @@ pwd.editor = function(opt) {
 
 // numbers
 
-let number = {align: 'right', min: 0, max: 1/0, decimals: 0}
+let number = {align: 'right', decimals: 0, is_number: true}
 field_types.number = number
-
-number.validator_number = field => ({
-	validate : v => v == null || (isnum(v) && v === v),
-	message  : S('validation_number', 'Value must be a number'),
-})
-
-number.validator_integer = field => (field.decimals == 0 && {
-	validate : v => v == null || (v % 1 == 0),
-	message  : S('validation_integer', 'Value must be an integer'),
-})
 
 number.editor = function(opt) {
 	return numedit(opt)
@@ -5379,7 +5519,7 @@ number.to_text = function(s) {
 
 // file sizes
 
-let filesize = assign(obj(), number)
+let filesize = assign({}, number)
 field_types.filesize = filesize
 
 // TODO: filesize.from_text!
@@ -5420,7 +5560,7 @@ filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
 
 // counts
 
-let count = assign(obj(), number)
+let count = assign({}, number)
 field_types.count = count
 
 count.to_text = function(s) {
@@ -5434,7 +5574,7 @@ count.to_text = function(s) {
 
 // dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
-let date = {align: 'right'}
+let date = {align: 'right', is_time: true}
 field_types.date = date
 
 date.to_time = function(s, validate) {
@@ -5485,14 +5625,9 @@ date.editor = function(opt) {
 	}, opt))
 }
 
-date.validator_date = field => ({
-	validate : (v, row, field) => v == null || field.to_time(v, true) != null,
-	message  : S('validation_date', 'Date must be valid'),
-})
-
 // timestamps
 
-let ts = {align: 'right'}
+let ts = {align: 'right', is_time: true}
 field_types.time = ts
 
 ts.has_time = true // for calendar
@@ -5529,11 +5664,6 @@ ts.format_text = function(t) {
 	return t.date(null, this.has_time, this.has_seconds)
 }
 
-ts.validator_date = field => ({
-	validate : v => v == null || (isnum(v) && v === v),
-	message  : S('validation_date', 'Date must be valid'),
-})
-
 // parsing of: h m | h m s | hhmm | hhmmss
 // TODO: move this to glue.js date_parser() and use that.
 let _tt_out = [0, 0, 0]
@@ -5568,7 +5698,7 @@ let parse_hms = function(s, has_seconds) {
 
 // MySQL time
 
-let td = {align: 'center'}
+let td = {align: 'center', is_timeofday: true}
 field_types.timeofday = td
 
 td.to_text = function(v) {
@@ -5587,20 +5717,13 @@ td.from_text = function(s, has_seconds) {
 		+ ':' + (this.has_seconds ? t[2].base(10, 2) : '00')
 }
 
-td.validator_time = field => ({
-	validate : v => v == null || parse_hms(v, field.has_seconds) != null,
-	message  : field.has_seconds
-		? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
-		: S('validate_time', 'Time must look like H:M or HHMM')
-})
-
 td.editor = function(opt) {
 	return timeofdayedit(opt)
 }
 
 // timeofday in seconds
 
-let tds = {align: 'center'}
+let tds = {align: 'center', is_timeofday: true}
 field_types.timeofday_in_seconds = tds
 
 tds.to_text = function(v) {
@@ -5620,20 +5743,13 @@ tds.from_text = function(s) {
 	return t[0] * 3600 + t[1] * 60 + t[2]
 }
 
-tds.validator_timeofday_in_seconds = field => ({
-	validate : v => v == null || tds_from_text(v, field.has_seconds),
-	message  : field.has_seconds
-		? S('validate_time_seconds', 'Time must look like H:M:S or HHMMSS')
-		: S('validate_time', 'Time must look like H:M or HHMM')
-})
-
 tds.editor = function(opt) {
 	return timeofdayedit(opt)
 }
 
 // duration
 
-let d = {align: 'right'}
+let d = {align: 'right', is_duration: true}
 field_types.duration = d
 
 d.to_text = function(v) {
@@ -5667,25 +5783,28 @@ d.from_text = function(s) {
 
 // booleans
 
-let bool = {align: 'center', min_w: 28}
+let bool = {align: 'center', min_w: 28, is_boolean: true}
 field_types.bool = bool
 
-bool.true_text = () => div({class: 'fa fa-check'})
+bool.from_text = function(s) {
+	return repl(repl(s, '', true), 'false', false)
+}
+
+bool.true_html = () => div({class: 'fa fa-check'})
+bool.true_text = null
 bool.false_text = ''
 
-bool.null_text = () => div({class: 'fa fa-square'})
-
-bool.validator_bool = field => ({
-	validate : v => v == null || isbool(v),
-	message  : S('validation_boolean', 'Value must be true or false'),
-})
+bool.null_html = () => div({class: 'fa fa-square'})
+bool.null_text = null
 
 bool.format = function(v) {
-	return v ? this.true_text : this.false_text
+	return v
+		? this.true_html  ?? this.true_text
+		: this.false_text ?? this.false_text
 }
 
 bool.format_text = function(v) {
-	return v ? '\uf00c' : ''
+	return v ? '\uf00c' : v == null ? '\uf0c8' : ''
 }
 
 bool.draw = function(v, cx) {
@@ -5703,15 +5822,17 @@ bool.editor = function(opt) {
 
 // enums
 
-let enm = obj()
+let enm = {}
 field_types.enum = enm
 
+enm.init = function() {
+	this.known_values = set(words(this.enum_values))
+}
+
 enm.editor = function(opt) {
-	return list_dropdown(assign_opt({
+	return dropdown(assign_opt({
 		items: words(this.enum_values),
-		format: enm.format,
-		mode: opt.embedded ? 'fixed' : null,
-		val_col: 0,
+		format_item: s => div({class: 'enum-item'}, s),
 	}, opt))
 }
 
@@ -5720,17 +5841,9 @@ enm.to_text = function(v) {
 	return s !== undefined ? s : v
 }
 
-enm.validator_enum = field => ({
-	validate : v => v == null
-		|| !field.enum_values
-		|| !!words(field.enum_values).tokeys()[v],
-	message  : S('validation_enum',
-		'Value must be in the list of allowed values.'),
-})
-
 // tag lists
 
-let tags = obj()
+let tags = {}
 field_types.tags = tags
 
 tags.tags_format = 'words' // words | array
@@ -5747,7 +5860,7 @@ tags.to_text = function(v) {
 
 // colors
 
-let color = obj()
+let color = {}
 field_types.color = color
 
 css('.item-color', '', `
@@ -5768,7 +5881,7 @@ color.editor = function(opt) {
 
 // percent
 
-let percent = obj()
+let percent = {is_number: true}
 field_types.percent = percent
 
 percent.to_text = function(p) {
@@ -5801,7 +5914,7 @@ percent.format = function(s) {
 
 // icons
 
-let icon = obj()
+let icon = {}
 field_types.icon = icon
 
 icon.format = function(icon) {
@@ -5826,14 +5939,14 @@ icon.editor = function(opt) {
 
 // columns
 
-let col = obj()
+let col = {}
 field_types.col = col
 
 col.convert = v => num(v) ?? v
 
 // google maps places
 
-let place = obj()
+let place = {}
 field_types.place = place
 
 place.format_pin = function() {
@@ -5889,7 +6002,7 @@ place.editor = function(opt) {
 
 // url
 
-let url = obj()
+let url = {}
 field_types.url = url
 
 url.format = function(v) {
@@ -5905,23 +6018,18 @@ url.cell_dblclick = function(cell) {
 
 // phone
 
-let phone = obj()
+let phone = {}
 field_types.phone = phone
-
-phone.validator_phone = function() {
-	// TODO
-}
 
 // email
 
-let email = obj()
+let email = {}
 field_types.email = email
 
-email.validator_email = function(field) {
-	return {
-		validate: function(val) { return val == null || val.includes('@') },
-		message: S('validation_email', 'This does not appear to be a valid email.'),
-	}
+email.validator_email = {
+	validate : (e, v) => v.includes('@'),
+	error    : (e, v) => S('validation_error_email', 'Not a valid email.'),
+	rule     : (e) => S('validation_rule_email', 'Email must be valid.'),
 }
 
 // button

@@ -3,7 +3,16 @@
 	Chart widgets.
 	Written by Cosmin Apreutesei. Public Domain.
 
+You must load first:
+
+	nav.js
+
+WIDGETS
+
+	<chart>
+
 SHAPES
+
 	stack
 	pie
 	line line_dots area area_dots stacks

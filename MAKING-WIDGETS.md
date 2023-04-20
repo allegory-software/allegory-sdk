@@ -179,6 +179,29 @@ DOM-based, there's a lot more to it than what's been talked about here.
 * `resizeable_canvas_container(redraw)`  - create a canvas that resizes itself automatically
   * `redraw(cx, w, h, pass)`     - called when properties change, widget is resized, etc.
 
+
+## Writting CSS rules
+
+### CSS reuse
+
+  Use var() for anything that is used in two places and is not a coincidence.
+  Use utils classes over specific styles when you can.
+
+### CSS and state
+
+  State classes are set only on the outermost element of a widget except
+  `:focus-visible` which is set to the innermost element (which has tabindex).
+  Use `.outer.state .inner` to style `.inner` on `.state`.
+  Use `.outer:has(.inner:focus-visible)` to style `.outer` on `:focus-visible`
+  but note that this doesn't work in Firefox in 2022 (but will work in 2023).
+
+### CSS descendant combinator
+
+  For container widgets like tabs and split you have to use the ">" combinator
+  instead of " " at least until you reach a header or something, otherwise
+  you will accidentally select child widgets of the same type as the container.
+
+
 ## Similar APIs
 
 Ideally, there should be only one way of doing something in an API.
