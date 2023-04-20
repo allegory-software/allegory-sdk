@@ -13,7 +13,7 @@ CSS CLASSES
 	TEXT COLORS   dim[-on-dark] white label link
 	ALIGN INLINE  inline block t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex[-no][-wrap] order-{1 2 last} no-shrink
-	ALIGN GRID    g-{l r c sb s t b m bl} g-{x y}{1-5} x..x y..y g
+	ALIGN GRID    g-{l r c t b m} g-{h v}-{s sa sb se} ga-{l r c t b m bl h-s v-s} g-{x y}{1-5} x..x y..y g
 	GAPS F,G      gap[-x- -y-][0 025 05 075 2 4 8]
 	ALIGN F,G     self-h-{t m b s} self-v-{l c r s}
 	ALIGN F,G,B,A self-h-{l r c} self-v-{t b m}
@@ -652,7 +652,7 @@ css('.no-shrink', '', ` flex-shrink: 0; `)
 
 /* ALIGN: GRID ------------------------------------------------------------ */
 
-css('.g-h', '', ` display: inline-grid; grid-auto-flow: row   ; `)
+css('.g-h', '', ` display: inline-grid; grid-auto-flow: row   ; `) /* default */
 css('.g-v', '', ` display: inline-grid; grid-auto-flow: column; `)
 
 css('.g-1col', '', ` display: inline-grid; grid-template-columns: repeat(1, auto); `)
@@ -662,15 +662,36 @@ css('.g-4col', '', ` display: inline-grid; grid-template-columns: repeat(4, auto
 css('.g-5col', '', ` display: inline-grid; grid-template-columns: repeat(5, auto); `)
 css('.g-6col', '', ` display: inline-grid; grid-template-columns: repeat(6, auto); `)
 
-css('.g-l' , '', ` display: inline-grid; justify-content: start   ; `)
-css('.g-r' , '', ` display: inline-grid; justify-content: end     ; `)
-css('.g-c' , '', ` display: inline-grid; justify-content: center  ; `)
-css('.g-sb', '', ` display: inline-grid; justify-content: space-between; `)
-css('.g-s' , '', ` display: inline-grid; align-items: stretch     ; `)
-css('.g-t' , '', ` display: inline-grid; align-items: start       ; `)
-css('.g-b' , '', ` display: inline-grid; align-items: end         ; `)
-css('.g-m' , '', ` display: inline-grid; align-items: center      ; `)
-css('.g-bl', '', ` display: inline-grid; align-items: baseline    ; `)
+/* horizontal placing of the grid cells within the grid element space */
+css('.g-l'   , '', ` display: inline-grid; justify-content: start ;  `)
+css('.g-r'   , '', ` display: inline-grid; justify-content: end   ;  `)
+css('.g-c'   , '', ` display: inline-grid; justify-content: center;  `)
+css('.g-h-s' , '', ` display: inline-grid; justify-content: stretch; `) /* default */
+css('.g-h-sa', '', ` display: inline-grid; justify-content: space-around ; `)
+css('.g-h-sb', '', ` display: inline-grid; justify-content: space-between; `)
+css('.g-h-se', '', ` display: inline-grid; justify-content: space-evenly ; `)
+
+/* vertical placing of the grid cells within the grid element space */
+css('.g-t'   , '', ` display: inline-grid; align-content: start ;  `)
+css('.g-b'   , '', ` display: inline-grid; align-content: end   ;  `)
+css('.g-m'   , '', ` display: inline-grid; align-content: center;  `)
+css('.g-v-s' , '', ` display: inline-grid; align-content: stretch; `) /* default */
+css('.g-v-sa', '', ` display: inline-grid; align-content: space-around ; `)
+css('.g-v-sb', '', ` display: inline-grid; align-content: space-between; `)
+css('.g-v-se', '', ` display: inline-grid; align-content: space-evenly ; `)
+
+/* horizontal align of grid items within their grid cell space */
+css('.ga-l'   , '', ` display: inline-grid; justify-items: start  ; `)
+css('.ga-r'   , '', ` display: inline-grid; justify-items: end    ; `)
+css('.ga-c'   , '', ` display: inline-grid; justify-items: center ; `)
+css('.ga-h-s' , '', ` display: inline-grid; justify-items: stretch; `) /* default */
+
+/* vertical align of grid items within their grid cell space */
+css('.ga-t'   , '', ` display: inline-grid; align-items: start   ; `)
+css('.ga-b'   , '', ` display: inline-grid; align-items: end     ; `)
+css('.ga-m'   , '', ` display: inline-grid; align-items: center  ; `)
+css('.ga-v-s' , '', ` display: inline-grid; align-items: stretch ; `) /* default */
+css('.ga-bl'  , '', ` display: inline-grid; align-items: baseline; `)
 
 css('.g', '', ` display: grid; `) /* opposed to the default inline-grid */
 
