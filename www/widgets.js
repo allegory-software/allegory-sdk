@@ -129,6 +129,15 @@ css_state('.item.dragging.focused.selected', '', `
 	background: var(--bg-focused-selected);
 `)
 
+function forward_event(e) {
+	return e.fire(this.type, this)
+}
+function input_event(target) {
+	let ev = {type: 'input', target: target}
+	ev.forward = forward_event
+	return ev
+}
+
 /* <tooltip> -----------------------------------------------------------------
 
 in props:
@@ -3533,12 +3542,13 @@ G.label = component('label', 'Input', function(e) {
 	e.alias('for_id', 'htmlFor')
 	e.props.for_id = {type: 'id', attr: 'for'}
 
-	e.property('target', function() {
+	e.prop('target', {private: true, store: false})
+	e.get_target = function() {
 		if (e.for) return e.for
 		if (e.for_id) return window[e.for_id]
 		let g = e.closest('.input-group')
 		return g && g.$1('.input')
-	})
+	}
 
 	e.on('pointerenter', function() {
 		let te = e.target
@@ -3817,7 +3827,7 @@ G.create_validator = function(e) {
 }
 
 function field_name(e) {
-	return (e.label || e.name || S('value', 'value')).display_name()
+	return (e.label || e.name || S('value', 'Value')).display_name()
 }
 
 // NOTE: this must work with values that are unconverted and invalid!
@@ -4429,7 +4439,7 @@ e.make_input_widget = function(opt) {
 		e.value_input.disabled = e.value == null
 	}
 	e.on_validate(function(ev) {
-		e.set_prop('value', e.validator.value, ev || {target: e})
+		e.set_prop('value', e.validator.value, ev || input_event(e))
 		e.update_value_input(ev)
 	})
 
@@ -4554,7 +4564,7 @@ css('.crbox', 'large t-m link h-c h-m round', `
 `)
 css('.crbox.focusable', '', `--w-crbox: 2em;`)
 
-css_state('.crbox[invalid]', 'fg-error bg-error')
+css_role_state('.crbox[invalid]', 'fg-error bg-error')
 
 // making the inner markbox transparent instead of the crbox because we
 // can't make the crbox transparent because that creates a stacking context
@@ -4629,7 +4639,7 @@ function checkbox_widget(e, markbox, input_type) {
 	}
 
 	e.user_set = function(v, ev) {
-		e.set_checked(v, e.checked, ev || {target: e})
+		e.set_checked(v, e.checked, ev || input_event(e))
 		e.fire('input', ev)
 	}
 	function user_toggle(ev) { e.user_set(!e.checked, ev) }
@@ -4833,8 +4843,9 @@ G.radio = component('radio', function(e) {
 		for (let re of e.group_elements())
 			if (re != e)
 				re.checked = false
-		e.set_prop('checked', v, ev || {target: e})
-		e.fire('input')
+		ev = ev || input_event(e)
+		e.set_prop('checked', v, ev)
+		e.fire('input', ev)
 	}
 
 	e.next_radio = function(inc) {
@@ -4870,12 +4881,12 @@ methods:
 
 */
 
-css('.slider', 'S h t-m noclip rel', `
+css('.slider', 'h t-m noclip rel p-y-2', `
 	--slider-marked: 1;
 	--slider-mark-w: 50px; /* pixels only! */
 	min-width: 8em;
-	margin-left   : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-1));
-	margin-right  : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-1));
+	margin-left   : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-2));
+	margin-right  : calc((var(--slider-marked) * var(--slider-mark-w) / 2) + var(--space-2));
 	margin-top    : calc(var(--space-1) + 1em);
 	margin-bottom : calc(var(--space-1) + 1em + var(--slider-marked) * 1em);
 	width: calc(var(--w-input) - margin-left - margin-right);
@@ -4903,8 +4914,12 @@ css('.slider-thumb-circle:hover' , '', `background: var(--fg-link-hover);`)
 css('.slider-thumb-circle:active', '', `background: var(--fg-link-active);`)
 
 // toggling visibility on hover requires click-through for stable hovering!
-css('.slider-thumb .tooltip', 'click-through m-l-0')
+css('.slider-tooltip', 'click-through m-l-0 ease', `
+	/* TODO: no matter what, the popup just doesn't wanna keep up with its target	*/
+	transition-duration: .02s;
+`)
 
+css('.slider-marks', 'abs click-through')
 css('.slider-mark', 'abs b-l t-c noselect', `
 	margin-left: -1px;
 	top: 3px;
@@ -5070,6 +5085,7 @@ let slider_widget = function(e, range) {
 
 	e.user_set_progress_for = function(K, p, ev) {
 		e.set_progress_for(K, p, ev)
+		e.fire('input', ev)
 	}
 
 	function update_thumb(thumb, p) {
@@ -5086,10 +5102,11 @@ let slider_widget = function(e, range) {
 
 	function update_tooltip(thumb, update_text) {
 		let show = (thumb.hovered || thumb.at[0].focus_visible)
-			&& !thumb.getAnimations().length
-		if (!show && !thumb.tooltip) return
+			// && !thumb.getAnimations().length
+		if (!show && !thumb.tooltip)
+			return
 		if (!thumb.tooltip) {
-			thumb.tooltip = tooltip({align: 'center'})
+			thumb.tooltip = tooltip({align: 'center', classes: 'slider-tooltip'})
 			thumb.add(thumb.tooltip)
 			update_text = true
 		}
@@ -5677,6 +5694,7 @@ css('.select-button-box', 'rel ro-var h-s gap-x-0 bg0 shadow-button', `
 	padding: var(--p-select-button, 3px);
 	--p-y-input-offset: calc(1px - var(--p-select-button, 3px));
 `)
+css_state('.select-button[invalid] .select-button-box', 'bg-error')
 
 css_util('.smaller', '', ` --p-select-button: 2px; `)
 css_util('.xsmall' , '', ` --p-select-button: 1px; `)
@@ -5962,7 +5980,7 @@ G.text_input = component('text-input', 'Input', function(e) {
 
 	e.input.on('input', function(ev) {
 		e.set_prop('input_value', repl(this.value, '', null), ev)
-		ev.forward(e)
+		return ev.forward(e)
 	})
 
 })
@@ -7189,7 +7207,7 @@ function calendar_widget(e, mode) {
 		} else if (mode == 'ranges') {
 			e.prop_changed('value', ranges, ranges0)
 		}
-		e.fire('input', ev || {target: e})
+		e.fire('input', ev || input_event(e))
 	}
 
 	function sort_ranges() {
@@ -8480,7 +8498,7 @@ function date_input_widget(e, has_date, has_time, range) {
 		input.on('input', function(ev) {
 			let v = from_input(input.value)
 			e.set_prop('input_value'+K, v ?? input.value, ev)
-			ev.forward(e)
+			return ev.forward(e)
 		})
 
 		input.on('wheel', function(ev, dy, is_trackpad) {
@@ -8493,7 +8511,7 @@ function date_input_widget(e, has_date, has_time, range) {
 					d = e.value2
 				else if (K == '2' && d < e.value1)
 					d = e.value1
-			e.set_prop('input_value'+K, d, {target: e})
+			e.set_prop('input_value'+K, d, input_event(e))
 		})
 
 		function digit_groups() {
@@ -8598,10 +8616,10 @@ function date_input_widget(e, has_date, has_time, range) {
 		if (range) {
 			e.set_prop('input_value1', this.value1, ev)
 			e.set_prop('input_value2', this.value2, ev)
-			ev.forward(e)
+			return ev.forward(e)
 		} else {
 			e.set_prop('input_value', this.value, ev)
-			ev.forward(e)
+			return ev.forward(e)
 		}
 	})
 

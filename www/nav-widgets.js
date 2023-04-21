@@ -89,15 +89,24 @@ component.extend('label', function(e) {
 
 	e.make_nav_col_widget()
 
-	e.on('bind_field', function(field, on) {
-		this.set(on ? field.label : '')
+	let field
+	e.on('bind_field', function(field1, on) {
+		field = on ? field1 : null
+		this.set(field && field.label || null)
+	})
+
+	e.override('get_target', function(inherited) {
+		let target = inherited.call(this)
+		if (!target && field)
+			target = e.announce('label_find_target', field)
+		return target
 	})
 
 })
 
-function input_widget(e, field_props) {
+function input_widget(e, field_props, range) {
 
-	e.make_nav_input_widget(field_props)
+	e.make_nav_input_widget(field_props, range)
 
 	e.on('input', function(ev) {
 		e.set_cell_val(e.input_value, ev)
@@ -126,7 +135,7 @@ component.extend('radio', function(e) {
 })
 
 component.extend('select-button', function(e) {
-	input_widget(e, '')
+	input_widget(e, 'label')
 	e.on('bind_field', function(field, on) {
 		if (on) {
 			let items = []
@@ -140,58 +149,60 @@ component.extend('select-button', function(e) {
 })
 
 component.extend('text-input', function(e) {
-	input_widget(e, 'max_len placeholder')
+	input_widget(e, 'label placeholder max_len')
 })
 
 component.extend('textarea-input', function(e) {
-	input_widget(e, 'max_len placeholder')
+	input_widget(e, 'label placeholder max_len')
 })
 
 component.extend('pass-input', function(e) {
-	input_widget(e, 'min_len conditions placeholder')
+	input_widget(e, 'label placeholder min_len conditions')
 })
 
 component.extend('num-input', function(e) {
-	input_widget(e, 'min max decimals buttons placeholder')
+	input_widget(e, 'label placeholder min max decimals buttons')
 })
 
 component.extend('slider', function(e) {
-	input_widget(e, 'min max from to decimals marked')
+	input_widget(e, 'label min max from to decimals marked')
 })
 
 component.extend('tags-input', function(e) {
-	input_widget(e, 'valid_tags nowrap format')
-})
-
-component.extend('tags-input', function(e) {
-	input_widget(e, 'valid_tags nowrap format')
+	input_widget(e, 'label valid_tags nowrap format')
 })
 
 component.extend('date-input', function(e) {
-	input_widget(e, 'min max format')
+	input_widget(e, 'label placeholder min max format')
 })
 
 component.extend('timeofday-input', function(e) {
-	input_widget(e, 'min max format')
+	input_widget(e, 'label placeholder min max format')
 })
 
 component.extend('datetime-input', function(e) {
-	input_widget(e, 'min max format')
+	input_widget(e, 'label placeholder min max format')
 })
 
 component.extend('range-slider', function(e) {
-	input_widget(e, 'min max decimals placeholder')
+
+	e.make_nav_input_widget('', true, 'label min max from to decimals')
+
+	e.on('input', function(ev) {
+		e.set_cell_val1(e.input_value1, ev)
+		e.set_cell_val2(e.input_value2, ev)
+	})
+
 })
 
 component.extend('date-range-input', function(e) {
 
-	e.make_nav_input_widget(field_props)
+	e.make_nav_input_widget('', true, 'label min max')
 
 	e.on('input', function(ev) {
-		e.set_cell_val(e.input_value1, ev)
-		e.set_cell_val(e.input_value2, ev)
+		e.set_cell_val1(e.input_value1, ev)
+		e.set_cell_val2(e.input_value2, ev)
 	})
-
 
 })
 

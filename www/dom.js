@@ -971,7 +971,7 @@ e.construct = function(tag, ...args) {
 }
 
 component.extend = function(tag, where, init) {
-	if (!init) { init = where; where = 'after'; }
+	if (!init) { init = where; where = 'after'; } // shift arg#2
 	let tagName = tag.upper()
 	let init0 = assert(component_init[tagName], 'component not registered: {0}', tag)
 	let combine = where == 'before' && do_before || where == 'after' && do_after
@@ -1222,7 +1222,7 @@ e.listen = function(event, f) {
 
 e.announce = function(event, ...args) {
 	if (!this.bound) return
-	announce(event, this, ...args)
+	return announce(event, this, ...args)
 }
 
 // DOM manipulation API ------------------------------------------------------
@@ -3283,6 +3283,9 @@ update_all = raf_wrap(update_all)
 
 // animation easing ----------------------------------------------------------
 
+// NOTE: with Web Animations API you don't get a callback for each frame,
+// hence why we still need a js easing API.
+
 G.easing = obj() // from easing.lua
 
 easing.reverse = (f, t, ...args) => 1 - f(1 - t, ...args)
@@ -3330,7 +3333,7 @@ easing.bounce = function(t) {
 }
 
 // restartable, abortable, callback-based transitions.
-// like the animation API but simpler.
+// like the animation API but simpler and with a per-frame callback.
 G.transition = function(f) {
 	let raf_id, t0
 	let dt, y0, y1, ease_f, ease_way, ease_args

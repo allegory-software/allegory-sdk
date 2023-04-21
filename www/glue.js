@@ -2153,8 +2153,11 @@ G.listen = function(event, f, on) {
 G.announce = function(event, ...args) {
 	let handlers = all_handlers[event]
 	if (!handlers) return
-	for (let handler of handlers)
-		handler(...args)
+	for (let handler of handlers) {
+		let ret = handler(...args)
+		if (ret !== undefined)
+			return ret
+	}
 }
 }
 

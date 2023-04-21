@@ -606,15 +606,25 @@ G.shared_nav = function(id, opt) {
 let bool = v => repl(repl(v, '', true), 'false', false)
 
 let rowset_attr_convert = {
+	pk : num,
 	can_add_rows    : bool,
 	can_remove_rows : bool,
 	can_change_rows : bool,
 }
 
 let field_attr_convert = {
+	name     : return_arg,
+	label    : return_arg,
+	type     : return_arg,
+	placeholder : return_arg,
+	enum_values : return_arg,
 	decimals : num,
 	min      : num,
 	max      : num,
+	max_len  : num,
+	min_len  : num,
+	from     : num,
+	to       : num,
 	w        : num,
 	min_w    : num,
 	max_w    : num,
@@ -627,8 +637,8 @@ function convert_text_attrs(t, convert) {
 	for (let k in t) {
 		let uk = k.replace('-', '_')
 		let v = t[k] ?? t[uk]
-		if (uk in convert)
-			v = convert[uk](v)
+		assert(uk in convert, 'html attr converter missing for {0}', uk)
+		v = convert[uk](v)
 		t[uk] = v
 	}
 	return t
@@ -5206,7 +5216,7 @@ fires:
 
 */
 
-e.make_nav_input_widget = function(field_props, range) {
+e.make_nav_input_widget = function(field_props, range, field_range_props) {
 
 	let e = this
 
@@ -5214,7 +5224,8 @@ e.make_nav_input_widget = function(field_props, range) {
 
 	let nav, field, field1, field2
 
-	field_props = words(field_props).tokeys()
+	field_props       = field_props       && words(field_props      ).tokeys()
+	field_range_props = field_range_props && words(field_range_props).tokeys()
 
 	function bind_field(field, col, input_widget, INPUT_VALUE, on) {
 		if (on) {
@@ -5223,9 +5234,14 @@ e.make_nav_input_widget = function(field_props, range) {
 			if (!field)
 				return
 			e.xoff()
-			for (let k in field_props)
-				if (field[k] !== undefined)
-					input_widget.set_prop(k, field[k])
+			if (field_props)
+				for (let k in field_props)
+					if (field[k] !== undefined)
+						input_widget.set_prop(k, field[k])
+			if (field_range_props)
+				for (let k in field_range_props)
+					if (field[k] !== undefined)
+						e.set_prop(k, field[k])
 			e.xon()
 			e.fire('bind_field', field, true)
 			e[INPUT_VALUE] = e.get_input_val_for(field)
@@ -5285,10 +5301,23 @@ e.make_nav_input_widget = function(field_props, range) {
 	e.listen('field_changed', function(te, changed_field, k, v) {
 		if (te != nav) return
 		if (changed_field != field) return
-		if (!field_props[k]) return
-		e.xoff()
-		e.set_prop(k, v)
-		e.xon()
+		if (field_props && field_props[k])
+			for (let input_widget of e.input_widgets) {
+				e.xoff()
+				input_widget.set_prop(k, v)
+				e.xon()
+			}
+		if (field_range_props && field_range_props[k]) {
+			e.xoff()
+			e.set_prop(k, v)
+			e.xon()
+		}
+	})
+
+	e.listen('label_find_target', function(label, f) {
+		if (f == field || f == field1 || f == field2) {
+			return e
+		}
 	})
 
 	// state: ready, row, input
@@ -5783,7 +5812,7 @@ d.from_text = function(s) {
 
 // booleans
 
-let bool = {align: 'center', min_w: 28, is_boolean: true}
+let bool = {align: 'center', min_w: 28, w: 40, is_boolean: true}
 field_types.bool = bool
 
 bool.from_text = function(s) {
