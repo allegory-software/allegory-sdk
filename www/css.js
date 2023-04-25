@@ -231,12 +231,12 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 
 	--ring                  : hsl(  0 100%   0% / .3);
 
-	--shadow-tooltip        :  2px  2px  9px      #00000044; /* todo */
-	--shadow-toolbox        :  1px  1px  4px      #000000aa; /* todo */
-	--shadow-menu           :  2px  2px  2px      #000000aa; /* todo */
+	--shadow-tooltip        :  2px  2px  9px      #00000044; /* TODO */
+	--shadow-toolbox        :  1px  1px  4px      #000000aa; /* TODO */
+	--shadow-menu           :  2px  2px  2px      #000000aa; /* TODO */
 	--shadow-button         :  0px  0px  2px  0px #000000ff;
 	--shadow-thumb          :  1px  1px  2px      #000000aa;
-	--shadow-modal          :  2px  5px 10px      #00000088; /* todo */
+	--shadow-modal          :  2px  5px 10px      #00000088; /* TODO */
 	--shadow-pressed        : inset 0 0.15em 0.5em hsl(228 32% 0%);
 	--shadow-picker         :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 
@@ -281,9 +281,6 @@ css(':root', 'arial', `
 	--fs-h1     : 2em;
 	--fs-h2     : 1.5em;
 	--fs-h3     : 1.3em;
-
-	/* TODO: remove this */
-	--font-baseline-adjust-ff: 0;
 
 	font-size   : var(--fs);
 	line-height : var(--lh);
@@ -1066,7 +1063,7 @@ css('.overlay', '', `
 
 /* VISIBILITY ------------------------------------------------------------- */
 
-css('.show'  , '', ` display: initial; `) /* TODO: this is flaky! */
+css('.show'  , '', ` display: initial; `) /* TODO: remove this! */
 css('.hidden', '', ` display: none; `)
 css('.skip'  , '', ` display: contents; `)
 
