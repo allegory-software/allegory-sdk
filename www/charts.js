@@ -107,16 +107,16 @@ G.chart = component('chart', 'Input', function(e) {
 
 	// config -----------------------------------------------------------------
 
-	e.prop('split_cols' , {type: 'col', col_nav: () => e._nav, attr: true})
-	e.prop('group_cols' , {type: 'col', col_nav: () => e._nav, attr: true})
-	e.prop('sum_cols'   , {type: 'col', col_nav: () => e._nav, attr: true})
-	e.prop('min_sum'    , {type: 'number', attr: true})
-	e.prop('max_sum'    , {type: 'number', attr: true})
-	e.prop('sum_step'   , {type: 'number', attr: true})
-	e.prop('min_val'    , {type: 'number', attr: true})
-	e.prop('max_val'    , {type: 'number', attr: true})
-	e.prop('other_threshold', {type: 'number', default: .05, decimals: null, attr: true})
-	e.prop('other_text' , {default: 'Other', slot: 'lang', attr: true})
+	e.prop('split_cols' , {type: 'col', col_nav: () => e._nav})
+	e.prop('group_cols' , {type: 'col', col_nav: () => e._nav})
+	e.prop('sum_cols'   , {type: 'col', col_nav: () => e._nav})
+	e.prop('min_sum'    , {type: 'number'})
+	e.prop('max_sum'    , {type: 'number'})
+	e.prop('sum_step'   , {type: 'number'})
+	e.prop('min_val'    , {type: 'number'})
+	e.prop('max_val'    , {type: 'number'})
+	e.prop('other_threshold', {type: 'number', default: .05, decimals: null})
+	e.prop('other_text' , {default: 'Other', slot: 'lang'})
 	e.prop('shape', {
 		type: 'enum',
 		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots', 'stacks',
@@ -124,7 +124,7 @@ G.chart = component('chart', 'Input', function(e) {
 		default: 'pie',
 	})
 	e.prop('nolegend', {type: 'bool', default: false})
-	e.prop('text', {attr: true, slot: 'lang'})
+	e.prop('text', {slot: 'lang'})
 
 	e.set_split_cols      = update_model
 	e.set_group_cols      = update_model

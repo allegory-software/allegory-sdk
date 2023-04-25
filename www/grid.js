@@ -237,10 +237,10 @@ G.grid = component('grid', 'Input', function(e) {
 		update_sizes()
 	}
 
-	e.prop('header_w', {type: 'number', default: 120, attr: true}) // vert-grid only
-	e.prop('cell_w', {type: 'number', default: 120, attr: true, slot: 'user'}) // vert-grid only
-	e.prop('auto_cols_w', {type: 'bool', default: false, attr: true}) // horiz-grid only
-	e.prop('auto_expand', {type: 'bool', default: false, attr: true})
+	e.prop('header_w', {type: 'number', default: 120}) // vert-grid only
+	e.prop('cell_w', {type: 'number', default: 120, slot: 'user'}) // vert-grid only
+	e.prop('auto_cols_w', {type: 'bool', default: false}) // horiz-grid only
+	e.prop('auto_expand', {type: 'bool', default: false, to_attr: true})
 
 	e.set_header_w = function() {
 		update_sizes()
@@ -288,7 +288,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.must_be_flat = !horiz
 		theme_changed()
 	}
-	e.prop('vertical', {type: 'bool', attr: true, slot: 'user', default: false})
+	e.prop('vertical', {type: 'bool', to_attr: true, slot: 'user', default: false})
 
 	e.header_canvas = tag('canvas', {class : 'grid-header-canvas', width: 0, height: 0})
 	e.header        = div({class: 'grid-header'}, e.header_canvas)
@@ -832,8 +832,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function measure_cell_width(row, field) {
 		cx.measure = true
-		let val = e.cell_input_val(row, field)
-		e.draw_cell_val(row, field, val, cx)
+		e.draw_cell(row, field, cx)
 		cx.measure = false
 		return cx.measured_width
 	}
@@ -998,7 +997,7 @@ G.grid = component('grid', 'Input', function(e) {
 			cx.translate(indent_x, 0)
 			cx.fg_text = fg
 			cx.quicksearch_len = cell_focused && e.quicksearch_text.length || 0
-			e.draw_cell_val(row, field, input_val, cx)
+			e.draw_val(row, field, input_val, cx)
 
 			cx.restore()
 		}
@@ -1311,7 +1310,7 @@ G.grid = component('grid', 'Input', function(e) {
 			}
 
 			e.errors_tooltip.text = errors
-				.filter(e => e.failed)
+				.filter(e => e.checked && e.failed)
 				.map(e => e.error)
 				.ul({class: 'error-list'}, true)
 
@@ -1328,7 +1327,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 	// header_visible & filters_visible live properties -----------------------
 
-	e.prop('header_visible', {type: 'bool', default: true, attr: true, slot: 'user'})
+	e.prop('header_visible', {type: 'bool', default: true, to_attr: true, slot: 'user'})
 
 	e.set_header_visible = function(v) {
 		v = !!v
@@ -1336,7 +1335,7 @@ G.grid = component('grid', 'Input', function(e) {
 		update_sizes()
 	}
 
-	e.prop('filters_visible', {type: 'bool', default: false, attr: true})
+	e.prop('filters_visible', {type: 'bool', default: false, to_attr: true})
 
 	e.set_filters_visible = function(v) {
 		e.header.class('with-filters', filters_visible)
@@ -1379,8 +1378,7 @@ G.grid = component('grid', 'Input', function(e) {
 		// set min inner width to cell's unclipped text width.
 		if (e.editor.set_text_min_w) {
 			cx.measure = true
-			let val = e.cell_input_val(row, field)
-			e.draw_cell_val(row, field, val, cx)
+			e.draw_cell(row, field, cx)
 			cx.measure = false
 			e.editor.set_text_min_w(max(20, cx.measured_width))
 		}

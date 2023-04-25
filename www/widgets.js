@@ -132,11 +132,6 @@ css_state('.item.dragging.focused.selected', '', `
 function forward_event(e) {
 	return e.fire(this.type, this)
 }
-function input_event(target) {
-	let ev = {type: 'input', target: target}
-	ev.forward = forward_event
-	return ev
-}
 
 /* <tooltip> -----------------------------------------------------------------
 
@@ -303,9 +298,9 @@ G.tooltip = component('tooltip', function(e) {
 	e.prop('icon_visible', {type: 'bool', default: false})
 	e.prop('kind'        , {type: 'enum',
 			enum_values: 'default search info warn error cursor',
-			default: 'default', attr: true})
+			default: 'default', to_attr: true})
 	e.prop('timeout'     , {type: 'number'})
-	e.prop('close_button', {type: 'bool'})
+	e.prop('close_button', {type: 'bool', default: false})
 
 	e.alias('target' , 'popup_target')
 	e.alias('side'   , 'popup_side')
@@ -389,10 +384,10 @@ G.tooltip = component('tooltip', function(e) {
 		}
 	})
 
+	// clicking on tooltip's empty space focuses the first focusable element.
 	function content_pointerdown(ev) {
 		if (ev.target != this)
 			return // clicked inside the tooltip.
-		// TODO: generalize this behavior of focusing an element by clicking on empty space.
 		this.focus_first()
 		return false
 	}
@@ -974,7 +969,7 @@ e.make_list_items_focusable = function(opt) {
 	e.set_focused_item_index = function(i, i0, ev) {
 		e.announce('focused_item_changed', ev)
 		if (ev && ev instanceof UIEvent)
-			e.fire('input', ev)
+			e.fireup('input', ev)
 	}
 
 	e.property('focused_item', function() {
@@ -1498,16 +1493,15 @@ e.list_search_input = component('list-search-input', 'Input', function(e) {
 	}
 
 	e.set_value = function(v, v0, ev) {
-		if (ev && ev instanceof InputEvent)
+		if (ev && ev.type == 'input')
 			return
 		e.input.value = v
 		update_target()
 	}
 
-	e.input.on('input', function(ev) {
+	e.on('input', function(ev) {
 		e.set_prop('value', e.input.value, ev)
 		update_target()
-		return ev.forward(e)
 	})
 
 })
@@ -1545,7 +1539,7 @@ G.list = component('list', function(e) {
 	if (ht) ht.remove()
 
 	let sc = e.$1(':scope>script')
-	e.prop_vals.items = sc && sc.run(e) || json_arg(e.attr('items')) || undefined
+	e.prop_vals.items = sc && sc.run(e) || try_json_arg(e.attr('items')) || undefined
 	if (sc) sc.remove()
 
 	if (!e.prop_vals.item_template && !e.prop_vals.items) { // static items
@@ -1690,8 +1684,6 @@ G.checklist = component('checklist', function(e) {
 })
 
 /* <menu> --------------------------------------------------------------------
-
--- TODO
 
 */
 
@@ -2143,8 +2135,8 @@ G.tabs = component('tabs', 'Containers', function(e) {
 
 	e.make_items_prop()
 
-	e.prop('tabs_side', {type: 'enum',
-			enum_values: 'top bottom left right', default: 'top', attr: true})
+	e.prop('tabs_side', {type: 'enum', enum_values: 'top bottom left right',
+		default: 'top', to_attr: true})
 
 	e.prop('auto_focus', {type: 'bool', default: true})
 
@@ -2682,8 +2674,8 @@ G.split = component('split', 'Containers', function(e) {
 	e.sizer = tag('split-sizer')
 	e.add(e.pane1, e.sizer, e.pane2)
 
-	e.prop('item1', {type: 'node', convert: element})
-	e.prop('item2', {type: 'node', convert: element})
+	e.prop('item1', {type: 'node', parse: element})
+	e.prop('item2', {type: 'node', parse: element})
 
 	let horiz, left
 
@@ -2721,10 +2713,10 @@ G.split = component('split', 'Containers', function(e) {
 		announce('layout_changed')
 	})
 
-	e.prop('orientation', {type: 'enum', enum_values: 'horizontal vertical', default: 'horizontal', attr: true})
-	e.prop('fixed_side' , {type: 'enum', enum_values: 'first second', default: 'first', attr: true})
-	e.prop('resizeable' , {type: 'bool', default: true, attr: true})
-	e.prop('fixed_size' , {type: 'number', default: 200, attr: true, slot: 'user'})
+	e.prop('orientation', {type: 'enum', enum_values: 'horizontal vertical', default: 'horizontal', to_attr: true})
+	e.prop('fixed_side' , {type: 'enum', enum_values: 'first second', default: 'first', to_attr: true})
+	e.prop('resizeable' , {type: 'bool', default: true, to_attr: true})
+	e.prop('fixed_size' , {type: 'number', default: 200, slot: 'user'})
 	e.prop('min_size'   , {type: 'number', default: 0})
 
 	// resizing ---------------------------------------------------------------
@@ -2961,8 +2953,8 @@ G.dlg = component('dlg', function(e) {
 	e.prop_vals.content = e.$1('content')
 	e.prop_vals.footer  = e.$1('footer' )
 
-	e.prop('heading'        , {attr: true}) // because title is taken
-	e.prop('cancelable'     , {type: 'bool', attr: true, default: true})
+	e.prop('heading'        , {}) // because title is taken
+	e.prop('cancelable'     , {type: 'bool', to_attr: true, default: true})
 	e.prop('buttons'        , {})
 	e.prop('buttons_layout' , {})
 
@@ -3171,7 +3163,7 @@ G.toolbox = component('toolbox', function(e) {
 	e.prop('py'    , {type: 'number', slot: 'user', default: 0})
 	e.prop('pw'    , {type: 'number', slot: 'user'})
 	e.prop('ph'    , {type: 'number', slot: 'user'})
-	e.prop('pinned', {type: 'bool'  , slot: 'user', default: true, attr: true})
+	e.prop('pinned', {type: 'bool'  , slot: 'user', default: true, to_attr: true})
 
 	e.set_px = (x) => e.popup_ox = x
 	e.set_py = (y) => e.popup_oy = y
@@ -3462,7 +3454,7 @@ G.pagenav = component('pagenav', function(e) {
 	e.prop('page'      , {type: 'number', default: 1})
 	e.prop('page_size' , {type: 'number', default: 100})
 	e.prop('item_count', {type: 'number'})
-	e.prop('bare'      , {type: 'bool', attr: true})
+	e.prop('bare'      , {type: 'bool', default: false, to_attr: true})
 
 	e.property('cur_page'   , () => clamp(e.page || 1, 1, e.page_count))
 	e.property('page_count' , () => ceil(e.item_count / e.page_size))
@@ -3615,7 +3607,7 @@ G.info = component('info', function(e) {
 
 	e.prop_vals.text = [...e.nodes]
 
-	e.prop('collapsed', {type: 'bool', attr: true})
+	e.prop('collapsed', {type: 'bool', default: true, to_attr: true})
 	e.prop('text', {type: 'nodes', slot: 'lang'})
 
 	e.set_collapsed = function(v) {
@@ -3640,7 +3632,9 @@ G.info = component('info', function(e) {
 		}
 	}
 
-	e.prop_vals.collapsed = e.collapsed ?? true
+	e.on_init(function() {
+		e.set_collapsed(true)
+	})
 
 })
 
@@ -3675,7 +3669,6 @@ methods:
 
 let global_rules = obj()
 G.validation_rules = global_rules
-G.INVALID = obj() // convert functions return this to distinguish from null.
 
 let global_rule_props = obj()
 
@@ -3700,8 +3693,15 @@ G.create_validator = function(e) {
 	let own_rules = []
 	let own_rule_props = obj()
 	let rule_vprops = obj()
+	let parse
 	let results = []
 	let checked = map()
+
+	let validator = {
+		results: results,
+		rules: rules,
+		triggered: false,
+	}
 
 	function add_rule(rule) {
 		assert(checked.get(rule) !== false, 'validation rule require cycle: {0}', rule.name)
@@ -3719,6 +3719,8 @@ G.create_validator = function(e) {
 		rules.push(rule)
 		assign(rule_vprops, rule.vprops)
 		checked.set(rule, true)
+		if (!parse)
+			parse = rule.parse
 		return true
 	}
 
@@ -3728,8 +3730,6 @@ G.create_validator = function(e) {
 			return
 		return add_rule(rule)
 	}
-
-	let validator = {results: results, rules: rules, triggered: false}
 
 	validator.invalidate = function() {
 		rules_invalid = true
@@ -3755,6 +3755,8 @@ G.create_validator = function(e) {
 	}
 
 	function update_rules() {
+		if (!rules_invalid)
+			return
 		for (let rule_name in global_rules)
 			add_global_rule(rule_name)
 		for (let rule of own_rules)
@@ -3762,16 +3764,20 @@ G.create_validator = function(e) {
 		rules_invalid = false
 	}
 
+	validator.parse = function(v) {
+		update_rules()
+		if (v == null) return null
+		return parse ? parse(e, v) : v
+	}
+
 	validator.validate = function(v, announce_results) {
 		announce_results = announce_results != false
-		if (rules_invalid)
-			update_rules()
-		v = repl(v, '', null)
-		let convert_failed
+		update_rules()
+		let parse_failed
 		for (let rule of rules) {
-			if (convert_failed) {
+			if (parse_failed) {
 				rule._failed = true
-				continue // if convert failed, subsequent rules cannot run!
+				continue // if parse failed, subsequent rules cannot run!
 			}
 			if (rule._failed)
 				continue
@@ -3785,13 +3791,13 @@ G.create_validator = function(e) {
 					continue
 				}
 			}
-			let convert = rule.convert
-			if (convert) {
-				v = convert(e, v)
-				convert_failed = v === INVALID
-				v = repl(v, INVALID, null)
+			let parse = rule.parse
+			if (parse) {
+				assert(parse_failed == null)
+				v = parse(e, v)
+				parse_failed = v === undefined
 			}
-			let failed = convert_failed || !rule.validate(e, v)
+			let failed = parse_failed || !rule.validate(e, v)
 			rule._checked = true
 			rule._failed = failed
 		}
@@ -3816,7 +3822,8 @@ G.create_validator = function(e) {
 			rule._checked = null
 			rule._failed  = null
 		}
-		this.value = this.failed ? null : repl(v, undefined, null)
+		this.value = repl(v, undefined, null)
+		this.parse_failed = parse_failed
 		if (announce_results)
 			e.announce('validate', this)
 		this.triggered = true
@@ -3830,13 +3837,13 @@ function field_name(e) {
 	return (e.label || e.name || S('value', 'Value')).display_name()
 }
 
-// NOTE: this must work with values that are unconverted and invalid!
+// NOTE: this must work with values that are unparsed and invalid!
 function field_value(e, v) {
-	if (v == null) return 'null'
-	if (isstr(v)) return v
-	if (e.to_text)
-		v = e.to_text(v)
-	return v+''
+	if (e.draw) return e.draw(v) ?? '' // field renders itself
+	if (v == null) return S('null', 'null')
+	if (isstr(v)) return v // string or failed to parse, show as is.
+	if (e.to_text) return e.to_text(v)
+	return str(v)
 }
 
 add_validation_rule({
@@ -3850,22 +3857,25 @@ add_validation_rule({
 	rule     : (e) => S('validation_empty_rule'    , '{0} cannot be empty', field_name(e)),
 })
 
+// NOTE: empty string converts to `true` even when setting the value from JS!
+// This is so that a html attr without value becomes `true`.
 add_validation_rule({
 	name     : 'bool',
 	vprops   : 'input_value',
-	applies  : (e) => e.is_boolean,
+	applies  : (e) => e.is_bool,
+	parse    : (e, v) => isbool(v) ? v : bool_attr(v),
 	validate : (e, v) => isbool(v),
-	error    : (e, v) => S('validation_num_error',
-		'{0} is not a number' , field_name(e)),
-	rule     : (e) => S('validation_num_rule' ,
-		'{0} must be a number', field_name(e)),
+	error    : (e, v) => S('validation_bool_error',
+		'{0} is not a boolean' , field_name(e)),
+	rule     : (e) => S('validation_bool_rule' ,
+		'{0} must be a boolean', field_name(e)),
 })
 
 add_validation_rule({
 	name     : 'number',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_number,
-	convert  : (e, v) => isstr(v) ? e.to_num(v) ?? INVALID : v,
+	parse    : (e, v) => isstr(v) ? num(v) : v,
 	validate : (e, v) => isnum(v),
 	error    : (e, v) => S('validation_num_error',
 		'{0} is not a number' , field_name(e)),
@@ -3873,31 +3883,37 @@ add_validation_rule({
 		'{0} must be a number', field_name(e)),
 })
 
-add_validation_rule({
-	name     : 'min',
-	requires : 'number',
-	props    : 'min',
-	vprops   : 'input_value',
-	applies  : (e) => e.min != null,
-	validate : (e, v) => v >= e.min,
-	error    : (e, v) => S('validation_min_error',
-		'{0} is smaller than or equal to {1}', field_name(e), field_value(e, e.min)),
-	rule     : (e) => S('validation_min_rule',
-		'{0} must be larger than or equal to {1}', field_name(e), field_value(e, e.min)),
-})
+function add_scalar_rules(type) {
 
-add_validation_rule({
-	name     : 'max',
-	requires : 'number',
-	props    : 'max',
-	vprops   : 'input_value',
-	applies  : (e) => e.max != null,
-	validate : (e, v) => v <= e.max,
-	error    : (e, v) => S('validation_max_error',
-		'{0} is larger than or equal to {1}', field_name(e), field_value(e, e.max)),
-	rule     : (e) => S('validation_max_rule',
-		'{0} must be smaller than or equal to {1}', field_name(e), field_value(e, e.max)),
-})
+	add_validation_rule({
+		name     : 'min_'+type,
+		requires : type,
+		props    : 'min',
+		vprops   : 'input_value',
+		applies  : (e) => e.min != null,
+		validate : (e, v) => v >= e.min,
+		error    : (e, v) => S('validation_min_error',
+			'{0} is smaller than {1}', field_name(e), field_value(e, e.min)),
+		rule     : (e) => S('validation_min_rule',
+			'{0} must be larger than or equal to {1}', field_name(e), field_value(e, e.min)),
+	})
+
+	add_validation_rule({
+		name     : 'max_'+type,
+		requires : type,
+		props    : 'max',
+		vprops   : 'input_value',
+		applies  : (e) => e.max != null,
+		validate : (e, v) => v <= e.max,
+		error    : (e, v) => S('validation_max_error',
+			'{0} is larger than {1}', field_name(e), field_value(e, e.max)),
+		rule     : (e) => S('validation_max_rule',
+			'{0} must be smaller than or equal to {1}', field_name(e), field_value(e, e.max)),
+	})
+
+}
+
+add_scalar_rules('number')
 
 add_validation_rule({
 	name     : 'checked_value',
@@ -3955,7 +3971,7 @@ add_validation_rule({
 	name     : 'min_len',
 	props    : 'min_len',
 	vprops   : 'input_value',
-	applies  : (e) => e.min_len,
+	applies  : (e) => e.min_len != null,
 	validate : (e, v) => v.len >= e.min_len,
 	error    : (e, v) => S('validation_min_len_error',
 		'{0} too short', field_name(e)),
@@ -4050,35 +4066,31 @@ add_validation_rule({
 		'{0} must be {1}', field_name(e), pass_score_rules[e.min_score]),
 })
 
-// NOTE: trying to be compliant with mySQL TIMESTAMP range.
-// NOTE: you only get 6-digit of fractional precision for years >= 1900
-// when making computations with timestamps, so we're not really fully
-// mySQL compliant.
-let min_time = time(1000, 1, 1, 0, 0, 0)
-let max_time = time(10000) - 1
 add_validation_rule({
 	name     : 'time',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_time,
-	convert  : (e, v) => parse_date(v, 'SQL', true,
-			e.has_time, e.has_seconds, e.has_fractions) ?? INVALID,
-	validate : (e, v) => v >= min_time && v <= max_time,
+	parse    : (e, v) => parse_date(v, 'SQL', true, e.precision),
+	validate : return_true,
 	error    : (e, v) => S('validation_time_error', '{0}: invalid date', field_name(e)),
 	rule     : (e) => S('validation_time_rule', '{0} must be a valid date'),
 })
+
+add_scalar_rules('time')
 
 add_validation_rule({
 	name     : 'timeofday',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_timeofday,
-	convert  : (e, v) => parse_timeofday(v, true,
-		e.has_seconds, e.has_fractions) ?? INVALID,
+	parse    : (e, v) => parse_timeofday(v, true, e.precision),
 	validate : return_true,
 	error    : (e, v) => S('validation_timeofday_error',
 		'{0}: invalid time of day', field_name(e)),
 	rule     : (e) => S('validation_timeofday_rule',
 		'{0} must be a valid time of day'),
 })
+
+add_scalar_rules('timeofday')
 
 add_validation_rule({
 	name     : 'value_known',
@@ -4096,8 +4108,8 @@ add_validation_rule({
 	name     : 'values',
 	vprops   : 'input_value',
 	applies  : (e) => e.is_values,
-	convert  : (e, v) => {
-		v = isstr(v) ? (v.trim().starts('[') ? json_arg(v) : v.words()) : v
+	parse    : (e, v) => {
+		v = isstr(v) ? (v.trim().starts('[') ? try_json_arg(v) : v.words()) : v
 		return v.sort().uniq_sorted()
 	},
 	validate : return_true,
@@ -4248,7 +4260,7 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 
 	let e = this
 
-	e.prop('invalid', {type: 'bool', attr: true, default: false, slot: 'state'})
+	e.prop('invalid', {type: 'bool', default: false, to_attr: true, slot: 'state'})
 
 	e.validator = create_validator(e)
 
@@ -4396,25 +4408,18 @@ e.make_input_widget = function(opt) {
 
 	opt = opt || empty_obj
 	let e = this
-	let vt = opt.value_type
 
 	e.prop('name', {store: false})
 	e.prop('form', {type: 'id', store: false})
 
 	// initial value and also the value from user input, valid or not, typed or text.
-	e.prop('input_value', assign({type: vt, attr: 'value', slot: 'state',
-		default: undefined}, opt.input_value_attrs))
+	e.prop('input_value', {attr: 'value', slot: 'state', default: undefined})
 
 	// typed, validated value, not user-changeable.
-	e.prop('value', assign({type: vt, slot: 'state'}, opt.value_attrs))
+	e.prop('value', {slot: 'state'})
 
-	e.prop('required', {type: 'bool', attr: true, default: false})
-	e.prop('readonly', {type: 'bool', attr: true, default: false})
-
-	if (vt == 'number' || vt == 'time') {
-		e.prop('min', {type: vt})
-		e.prop('max', {type: vt})
-	}
+	e.prop('required', {type: 'bool', default: false, to_attr: true})
+	e.prop('readonly', {type: 'bool', default: false, to_attr: true})
 
 	e.value_input = tag('input', {hidden : '', type: 'hidden'})
 	e.value_input.widget = e
@@ -4432,14 +4437,17 @@ e.make_input_widget = function(opt) {
 	e.make_validator(false, opt.errors_tooltip_target)
 
 	e.to_form = e.to_form || return_arg // stub
-	e.to_json = e.to_json || function(t) { if (e.name) t[e.name] = e.value }
+	e.to_json = e.to_json || function(t) {
+		if (e.name && e.value != null)
+			t[e.name] = e.value
+	}
 
 	e.update_value_input = function(ev) {
 		e.value_input.value = (e.value != null ? e.to_form(e.value) : null) ?? ''
 		e.value_input.disabled = e.value == null
 	}
 	e.on_validate(function(ev) {
-		e.set_prop('value', e.validator.value, ev || input_event(e))
+		e.set_prop('value', e.validator.value, ev || {target: e})
 		e.update_value_input(ev)
 	})
 
@@ -4498,12 +4506,6 @@ e.make_range_input_widget = function(opt) {
 		e.forward_prop('input_value'+i, ve, 'input_value', 'value'+i)
 		e.forward_prop('value'+i      , ve, 'value'      , null, 'bidi')
 		e.forward_prop('invalid'+i    , ve, 'invalid'    , null, 'backward')
-
-		let vt = ve.props.value.type
-		if (vt == 'number' || vt == 'time') {
-			e.forward_prop('min', ve, 'min')
-			e.forward_prop('max', ve, 'max')
-		}
 
 		e.do_after('set_form', function(s) {
 			ve.form = s
@@ -4597,9 +4599,8 @@ function checkbox_widget(e, markbox, input_type) {
 	markbox.class('markbox')
 	e.add(markbox)
 	e.make_disablable()
-	e.make_input_widget({
-		value_type: 'bool',
-	})
+	e.make_input_widget()
+	//e.is_bool = true
 	e.input_value_default = () => e.unchecked_value
 	e.make_focusable()
 	e.property('label_element', function() {
@@ -4639,8 +4640,8 @@ function checkbox_widget(e, markbox, input_type) {
 	}
 
 	e.user_set = function(v, ev) {
-		e.set_checked(v, e.checked, ev || input_event(e))
-		e.fire('input', ev)
+		e.set_checked(v, e.checked, ev || {target: e})
+		e.fireup('input', ev)
 	}
 	function user_toggle(ev) { e.user_set(!e.checked, ev) }
 	e.on('keydown', function(ev, key) {
@@ -4843,9 +4844,9 @@ G.radio = component('radio', function(e) {
 		for (let re of e.group_elements())
 			if (re != e)
 				re.checked = false
-		ev = ev || input_event(e)
+		ev = ev || {target: e}
 		e.set_prop('checked', v, ev)
-		e.fire('input', ev)
+		e.fireup('input', ev)
 	}
 
 	e.next_radio = function(inc) {
@@ -4990,7 +4991,6 @@ let slider_widget = function(e, range) {
 	e.marks = div({class: 'slider-marks'})
 
 	function to_text(v) {
-		if (!isnum(v)) return v
 		return e.decimals != null ? v.dec(e.decimals) : v
 	}
 
@@ -5006,13 +5006,15 @@ let slider_widget = function(e, range) {
 		thumb.K = K
 		if (range) {
 			thumb.is_number = true
-			thumb.to_num = num
 			thumb.to_text = to_text
 			thumb.to_form = to_text
 			thumb.make_input_widget({
-				value_type: 'number',
 				errors_tooltip_target: false,
 			})
+			thumb.prop('min', {type: 'number'})
+			thumb.prop('max', {type: 'number'})
+			e.forward_prop('min', thumb, 'min')
+			e.forward_prop('max', thumb, 'max')
 		}
 	}
 	if (range) {
@@ -5022,13 +5024,13 @@ let slider_widget = function(e, range) {
 		e.to_text = to_text
 	} else {
 		e.is_number = true
-		e.to_num = num
 		e.to_text = to_text
 		e.to_form = to_text
 		e.make_input_widget({
-			value_type: 'number',
 			errors_tooltip_target: false,
 		})
+		e.prop('min', {type: 'number'})
+		e.prop('max', {type: 'number'})
 	}
 
 	e.add(e.bg_fill, e.valid_fill, e.value_fill, e.marks, ...e.thumbs)
@@ -5085,7 +5087,7 @@ let slider_widget = function(e, range) {
 
 	e.user_set_progress_for = function(K, p, ev) {
 		e.set_progress_for(K, p, ev)
-		e.fire('input', ev)
+		e.fireup('input', ev)
 	}
 
 	function update_thumb(thumb, p) {
@@ -5115,7 +5117,7 @@ let slider_widget = function(e, range) {
 			let tfr = thumb.validator && thumb.validator.first_failed_result
 			let efr = e.validator && e.validator.first_failed_result
 			let v = e['input_value'+thumb.K]
-			let a = [to_text(v)+'']
+			let a = [field_value(thumb, v)]
 			if (tfr && tfr.error) a.push(tfr.error)
 			if (efr && efr.error) a.push(efr.error)
 			thumb.tooltip.text = a.join_nodes(tag('br'))
@@ -5392,7 +5394,7 @@ css_role('.labelbox > .input-group', 'gap-input')
 css_role('.labelbox *', 'no-bg')
 
 // overlaid labels: old is new again...
-// TOOD: finish this: `rel` obscures the focus outline of the parent!
+// TODO: finish this: `rel` obscures the focus outline of the parent!
 css_role('.labelbox[overlaid]', 'rel ro-var', `
 	--p-y-input-adjust: .1em;
 `)
@@ -5606,11 +5608,11 @@ G.button = component('button', 'Input', function(e) {
 		e.icon_box.hidden = !v
 	}
 	e.prop('icon', {type: 'icon'})
-	e.prop('load_spin', {attr: true})
+	e.prop('load_spin', {to_attr: true})
 
-	e.prop('primary'    , {type: 'bool', attr: true})
-	e.prop('bare'       , {type: 'bool', attr: true})
-	e.prop('danger'     , {type: 'bool', attr: true})
+	e.prop('primary'    , {type: 'bool', default: false, to_attr: true})
+	e.prop('bare'       , {type: 'bool', default: false, to_attr: true})
+	e.prop('danger'     , {type: 'bool', default: false, to_attr: true})
 	e.prop('confirm')
 	e.prop('action_name', {attr: 'action'})
 
@@ -5835,7 +5837,7 @@ G.select_button = component('select-button', function(e) {
 		} else {
 			e.selected_index = b.index
 		}
-		e.fire('input', ev)
+		e.fireup('input', ev)
 	}
 
 	e.inputbox.on('click', function(ev) {
@@ -5917,7 +5919,7 @@ G.textarea_input = component('textarea-input', 'Input', function(e) {
 	// controller
 
 	e.do_after('set_input_value', function(v, v0, ev) {
-		if (!(ev && ev.target == e.input))
+		if (!(ev && ev.target == e.textarea))
 			e.textarea.value = v
 	})
 
@@ -5980,7 +5982,6 @@ G.text_input = component('text-input', 'Input', function(e) {
 
 	e.input.on('input', function(ev) {
 		e.set_prop('input_value', repl(this.value, '', null), ev)
-		return ev.forward(e)
 	})
 
 })
@@ -6032,7 +6033,7 @@ G.pass_input = component('pass-input', 'Input', function(e) {
 
 	e.prop('min_len', {type: 'number', default: 6})
 	e.prop('min_score', {type: 'number', default: 3}) // 0..4, 3+ is safe.
-	e.prop('conditions', {type: 'array', element_type: 'string', convert: words,
+	e.prop('conditions', {type: 'array', element_type: 'string', parse: words,
 		// NOTE: remove `min-score` if you don't want to load the gigantic library,
 		// and replace with 'lower upper digit symbol', which is reasonable.
 		default: 'min-score',
@@ -6218,10 +6219,11 @@ G.num_input = component('num-input', 'Input', function(e) {
 
 	e.is_number = true
 	e.make_input_widget({
-		value_type: 'number',
 		errors_tooltip_target: e.input_group,
 	})
 
+	e.prop('min', {type: 'number'})
+	e.prop('max', {type: 'number'})
 	e.prop('decimals', {type: 'number', default: 0})
 
 	e.input = tag('input', {class: 'num-input-input'})
@@ -6231,7 +6233,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.forward_prop('placeholder', e.input)
 
 	e.prop('buttons', {type: 'enum', enum_values: 'none up-down plus-minus',
-		default: 'none', attr: true})
+		default: 'none', to_attr: true})
 
 	function update_buttons() {
 		for (let b of e.$('button'))
@@ -6279,10 +6281,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 		update_buttons()
 	}
 
-	e.to_num = num
-
 	e.to_text = function(v) {
-		if (!isnum(v)) return v
 		return e.decimals != null ? v.dec(e.decimals) : v
 	}
 	e.to_form = e.to_text
@@ -6304,9 +6303,11 @@ G.num_input = component('num-input', 'Input', function(e) {
 	})
 
 	e.on_update(function(opt) {
-		if (opt.value)
-			e.input.value = e.value != null ? to_input(e.value)
-				: isnum(e.input_value) ? to_input(e.input_value) : e.input_value
+		if (opt.value) {
+			let v = e.value
+			let iv = e.input_value
+			e.input.value = v != null ? to_input(v) : isnum(iv) ? to_input(iv) : iv
+		}
 		if (opt.select_all)
 			e.input.select_range(0, -1)
 	})
@@ -6321,8 +6322,8 @@ G.num_input = component('num-input', 'Input', function(e) {
 		if (!e.try_validate(v))
 			return
 		e.set_prop('input_value', v, ev)
-		e.fire('input')
 		e.update({value: true, select_all: true})
+		e.fireup('input', ev)
 	}
 
 	// controller
@@ -6335,7 +6336,7 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.input.on('input', function(ev) {
 		if (repl(repl(this.value, '-'), '.') == null)
 			return // just started typing, don't buzz.
-		e.set_prop('input_value', this.value, ev)
+		e.set_prop('input_value', repl(this.value, '', null), ev)
 	})
 
 	e.input.on('wheel', function(ev, dy) {
@@ -6412,8 +6413,8 @@ css_state('.tags-x:active', '', `
 	color : hsl(var(--tag-hue), 63%, calc(63% * var(--tag-lum)));
 `)
 
-function convert_tags(tags) {
-	tags = isstr(tags) ? (tags.trim().starts('[') ? json_arg(tags) : tags.words()) : tags
+function parse_tags(tags) {
+	tags = isstr(tags) ? (tags.trim().starts('[') ? try_json_arg(tags) : tags.words()) : tags
 	if (isarray(tags))
 		tags.sort().uniq_sorted()
 	return tags
@@ -6426,7 +6427,7 @@ G.tags_box = component('tags-box', function(e) {
 
 	// model
 
-	e.prop('tags', {type: 'array', element_type: 'string', convert: convert_tags})
+	e.prop('tags', {type: 'array', element_type: 'string', parse: parse_tags})
 
 	e.remove_tag = function(tag, ev) {
 		let t1 = e.tags.slice()
@@ -6476,18 +6477,18 @@ G.tags_box = component('tags-box', function(e) {
 
 	function tag_dblclick(ev) {
 		e.remove_tag(this.value, ev)
-		e.fire('input', ev)
+		e.fireup('input', ev)
 	}
 
 	function tag_x_click(ev) {
 		e.remove_tag(this.parent.value, ev)
-		e.fire('input', ev)
+		e.fireup('input', ev)
 	}
 
 	function tag_keydown(ev, key) {
 		if (key == 'Delete') {
 			let i = e.remove_tag(this.value, ev)
-			e.fire('input', ev)
+			e.fireup('input', ev)
 			let next_tag = e.at[i] || e.last
 			if (next_tag) {
 				next_tag.focus()
@@ -6550,12 +6551,10 @@ G.tags_input = component('tags-input', function(e) {
 
 	e.is_values = true
 	e.make_input_widget({
-		input_value_attrs : {type: 'array', element_type: 'string'},
-		value_attrs       : {type: 'array', element_type: 'string'},
 		errors_tooltip_target: e.input_group,
 	})
 
-	e.prop('valid_tags', {type: 'array', element_type: 'string', convert: convert_tags})
+	e.prop('valid_tags', {type: 'array', element_type: 'string', parse: parse_tags})
 
 	e.prop('known_values', {slot: 'state'})
 	e.set_valid_tags = function(tags) {
@@ -6565,13 +6564,14 @@ G.tags_input = component('tags-input', function(e) {
 		e.known_values = kv
 	}
 
-	e.prop('nowrap', {type: 'bool'})
+	e.prop('nowrap', {type: 'bool', default: false})
 	e.set_nowrap = (v) => e.tags_box.class('tags-box-nowrap', !!v)
 
 	e.user_set_tags = function(tags, ev) {
 		e.tags_box.x = null
 		e.set_prop('input_value', tags, ev)
-		e.fire('input', ev)
+		if (ev.type != 'input')
+			e.fireup('input', ev)
 	}
 
 	e.tags_box.on('input', function(ev) {
@@ -6725,7 +6725,7 @@ function dropdown_widget(e, is_checklist) {
 
 	e.to_form = v => e.format == 'words' ? v.join(' ') : json(v)
 
-	e.prop('ready', {type: 'bool', slot: 'state', default: true, updates: 'value'})
+	e.prop('ready', {type: 'bool', default: true, slot: 'state', updates: 'value'})
 
 	// model: value lookup
 
@@ -6829,9 +6829,9 @@ function dropdown_widget(e, is_checklist) {
 	})
 	e.inputbox.add(e.valuebox, e.xbutton, e.chevron)
 
-	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', attr: true})
+	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', to_attr: true})
 
-	e.format_item = function(i) {
+	e.render_item = function(i) {
 		let item_e = e.list.at[i]
 		item_e = is_checklist ? item_e.item : item_e
 		item_e = item_e.clone()
@@ -6846,7 +6846,9 @@ function dropdown_widget(e, is_checklist) {
 
 	function partially_valid_input_value(remove_invalid) {
 		let v = e.input_value
-		v = isstr(v) ? (v.trim().starts('[') ? json_arg(v) : v.words()) : isarray(v) ? v.slice() : v
+		v = isstr(v)
+			? (v.trim().starts('[') ? try_json_arg(v) : v.words())
+			: isarray(v) ? v.slice() : v
 		if (v) {
 			v.sort().uniq_sorted()
 			if (remove_invalid)
@@ -6881,7 +6883,7 @@ function dropdown_widget(e, is_checklist) {
 						let i = e.lookup(s)
 						if (i != null) {
 							e.list.at[i].item.checkbox.checked_state = true
-							let item_e = e.format_item(i)
+							let item_e = e.render_item(i)
 							items.push(item_e)
 						} else {
 							items.push(div({class: 'check-dropdown-item', invalid: ''}, s))
@@ -6894,7 +6896,7 @@ function dropdown_widget(e, is_checklist) {
 
 				let i = e.lookup(e.value)
 				if (i != null) {
-					let item_e = e.format_item(i)
+					let item_e = e.render_item(i)
 					item_e.id = null // id would be duplicated.
 					item_e.selected = null
 					e.list.update_item_state(item_e)
@@ -7096,8 +7098,8 @@ range state:
 	z-index              range z-index
 
 TODO:
-	* disabled range coloring
-	* anchor_direction missing (shift+arrows, dragging)
+	* disabled range coloring.
+	* anchor_direction missing (change direction on shift+arrows and dragging).
 
 */
 
@@ -7124,7 +7126,7 @@ function calendar_widget(e, mode) {
 	if (mode == 'ranges') {
 		e.prop_vals.value = []
 		for (let range of e.$('range')) {
-			let r = convert_range(range.textContent)
+			let r = parse_range(range.textContent)
 			if (r.len == 2) {
 				r.color       = range.attr('color')
 				r.focusable   = range.bool_attr('focusable')
@@ -7143,14 +7145,14 @@ function calendar_widget(e, mode) {
 
 	// model & state ----------------------------------------------------------
 
-	function convert_date(s) {
+	function parse_value(s) {
 		return day(parse_date(s, 'SQL'))
 	}
-	function convert_range(s) {
-		return assign((isstr(s) ? s.split(/\.\./) : s).map(convert_date), isstr(s) ? null : s)
+	function parse_range(s) {
+		return assign((isstr(s) ? s.split(/\.\./) : s).map(parse_value), isstr(s) ? null : s)
 	}
-	function convert_ranges(s) {
-		return words(s).map(convert_range)
+	function parse_ranges(s) {
+		return words(s).map(parse_range)
 	}
 
 	let ranges = [] // ranges in initial order.
@@ -7165,15 +7167,15 @@ function calendar_widget(e, mode) {
 		draw_ranges [0] = focused_range
 	}
 	if (mode == 'day') {
-		e.prop('value', {store: false, type: 'time', convert: convert_date})
+		e.prop('value', {store: false, type: 'time', parse: parse_value})
 		e.get_value = () => ranges[0][0]
 		e.set_value = function(d) {
 			ranges[0][0] = day(d)
 			ranges[0][1] = day(d)
 		}
 	} else if (mode == 'range') {
-		e.prop('value1', {store: false, type: 'time', convert: convert_date})
-		e.prop('value2', {store: false, type: 'time', convert: convert_date})
+		e.prop('value1', {store: false, type: 'time', parse: parse_value})
+		e.prop('value2', {store: false, type: 'time', parse: parse_value})
 		e.get_value1 = () => ranges[0][0]
 		e.get_value2 = () => ranges[0][1]
 		e.set_value1 = function(d) {
@@ -7184,7 +7186,7 @@ function calendar_widget(e, mode) {
 		}
 	} else if (mode == 'ranges') {
 		e.prop('value', {store: false, type: 'array', element_type: 'date_range',
-				convert: convert_ranges})
+				parse: parse_ranges})
 		e.get_value = () => ranges
 		e.set_value = function(ranges1) {
 			ranges = ranges1
@@ -7207,7 +7209,10 @@ function calendar_widget(e, mode) {
 		} else if (mode == 'ranges') {
 			e.prop_changed('value', ranges, ranges0)
 		}
-		e.fire('input', ev || input_event(e))
+		if (ev)
+			e.fireup('input', ev)
+		else
+			e.fireup('input')
 	}
 
 	function sort_ranges() {
@@ -7958,7 +7963,7 @@ function calendar_widget(e, mode) {
 			if (mode == 'day' && hit_day != null) {
 				e.value = hit_day
 				ev.picked = true
-				e.fire('input', ev)
+				e.fireup('input', ev)
 				return false
 			}
 
@@ -7980,12 +7985,12 @@ function calendar_widget(e, mode) {
 					}
 					e.value1 = d1
 					e.value2 = d2
-					e.fire('input', ev)
+					e.fireup('input', ev)
 				} else if (had_focus) {
 					anchor_day = hit_day
 					e.value1 = hit_day
 					e.value2 = hit_day
-					e.fire('input', ev)
+					e.fireup('input', ev)
 				}
 				return false
 			}
@@ -8044,7 +8049,7 @@ function calendar_widget(e, mode) {
 
 			if (mode == 'day') {
 				e.value = day(e.value ?? time(), ddays)
-				e.fire('input', ev)
+				e.fireup('input', ev)
 				e.scroll_to_view_range(e.value, e.value, 0)
 			} else {
 				let d = day(r[1], ddays)
@@ -8089,11 +8094,9 @@ G.ranges_calendar = component('ranges-calendar', 'Input', function(e) {
 
 state props:
 	value            timestamp from 1/1/1970 or 'HH:mm:ss.ms'
-html attrs:
+html attrs/props:
 	value            'HH:mm:ss.ms'
-	has-seconds      time contains seconds
-config props:
-	has_seconds     true: show seconds list
+	precision        's': show seconds list
 
 */
 
@@ -8139,13 +8142,13 @@ G.time_picker = component('time-picker', 'Input', function(e) {
 
 	e.make_disablable()
 
-	e.prop('has_seconds'  , {type: 'bool', default: false})
-	e.prop('has_fractions', {type: 'bool', default: false})
+	e.prop('precision', {type: 'enum', enum_values: 'm s ms', default: 'm'})
+	e.property('has_seconds', () => e.precision == 's')
 
 	e.seconds_list.parent.hide()
 
-	e.set_has_seconds = function(v) {
-		e.seconds_list.parent.show(!!v)
+	e.set_precision = function(p) {
+		e.seconds_list.parent.show(e.has_seconds)
 	}
 
 	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
@@ -8188,14 +8191,12 @@ G.time_picker = component('time-picker', 'Input', function(e) {
 	})
 
 	e.prop('value', {type: 'timeofday',
-		convert: s => parse_timeofday(s, false, true, true),
+		parse: s => parse_timeofday(s, false),
 	})
 
 	e.set_value = function(v, v0, ev) {
-		if (ev && e.contains(ev.target)) { // from input
-			this.fire('input', ev)
+		if (ev && e.contains(ev.target)) // from input
 			return
-		}
 		let opt = assign_opt({
 			target: ev && ev.target,
 			scroll_to_focused_item: true,
@@ -8234,9 +8235,8 @@ state props:
 	value          timestamp or date+time string
 html attrs:
 	value:         date+time string
-	has-seconds:   show seconds list
-config props:
-	has_seconds:   true: show seconds list
+config attrs/props:
+	precision:     's': show seconds list
 
 */
 
@@ -8259,13 +8259,12 @@ G.datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 	e.make_disablable()
 
-	e.forward_prop('has_seconds'  , e.time_picker)
-	e.forward_prop('has_fractions', e.time_picker)
+	e.forward_prop('precision', e.time_picker)
 
-	function convert_value(s) {
-		return parse_date(s, 'SQL', true, true, true, true)
+	function parse_value(s) {
+		return parse_date(s, 'SQL')
 	}
-	e.prop('value', {type: 'time', convert: convert_value})
+	e.prop('value', {type: 'time', parse: parse_value})
 
 	e.set_value = function(v, v0, ev) {
 		e.calendar   .set_prop('value', v, ev)
@@ -8274,12 +8273,10 @@ G.datetime_picker = component('datetime-picker', 'Input', function(e) {
 
 	e.calendar.on('input', function(ev) {
 		e.set_prop('value', this.value + e.time_picker.value, ev)
-		e.fire('input', ev)
 	})
 
 	e.time_picker.on('input', function(ev) {
 		e.set_prop('value', (e.calendar.value ?? time()) + this.value, ev)
-		e.fire('input', ev)
 	})
 
 	e.scroll_to_view_value = function(scroll_align, scroll_smooth) {
@@ -8341,6 +8338,13 @@ css('.date-range-input .date-input-picker-box', 'clip', `resize: vertical;`) // 
 css('.date-range-input .calendar', 'S')
 css('.date-input-close-button', 'allcaps')
 
+// NOTE: trying to be compliant with mySQL DATETIME range.
+// NOTE: you only get 6-digit of fractional precision for years >= 1900
+// when making computations with timestamps, so we're not really fully
+// mySQL compliant.
+let min_date = parse_date('1000-01-01 00:00:00', 'SQL')
+let max_date = parse_date('9999-12-31 23:59:59', 'SQL')
+
 function date_input_widget(e, has_date, has_time, range) {
 
 	e.clear()
@@ -8356,39 +8360,35 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.input_group = div({class: 'date-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
 
-	e.prop('format', {type: 'enum', enum_values: 'sql time', default: 'time'})
+	e.prop('format', {type: 'enum', enum_values: 'sql time', default: 'time', parse: lower})
 
 	let to_text, to_form
+	if (has_date) {
+		to_text = t => t.date(null, e.precision)
+		to_form = t => e.format == 'sql' ? t.date('SQL', e.precision) : t
+	} else {
+		to_text = t => t.timeofday(e.precision)
+		to_form = t => e.format == 'sql' ? t.timeofday(e.precision) : t
+	}
 
 	if (range) {
 		assert(!has_time, 'NYI')
 		e.is_range = true
 		e.picker = range_calendar()
 		e.calendar = e.picker
-		to_text = t => t.date()
 	} else {
 		if (has_date) {
 			if (has_time) {
 				e.picker = datetime_picker()
 				e.calendar = e.picker.calendar
-				to_text = t => t.date(null, true, e.has_seconds, e.has_fractions)
-				to_form = t => e.format == 'sql' ?
-					t.date('SQL', true, e.has_seconds, e.has_fractions) : t
 			} else {
 				e.picker = calendar()
 				e.calendar = e.picker
-				to_text = t => t.date()
-				to_form = t => e.format == 'sql' ? t.date('SQL') : t
-				e.has_time = true
 			}
 			e.is_time = true
 		} else {
 			e.picker = time_picker()
 			e.is_timeofday = true
-			to_text = t => t.timeofday(e.has_seconds, e.has_fractions)
-			to_form = t => e.format == 'sql'
-				? t.timeofday(e.has_seconds, e.has_fractions)
-				: t
 		}
 		e.to_text = to_text
 		e.to_form = to_form
@@ -8423,29 +8423,34 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.picker_box.min_w = `calc(max(var(--min-w-date-input), ${w}px))`
 	})
 
-	if (has_time) {
-		e.forward_prop('has_seconds'  , e.picker)
-		e.forward_prop('has_fractions', e.picker)
-	}
+	if (has_time)
+		e.forward_prop('precision', e.picker)
+	else
+		e.precision = 'd'
 
-	let to_input, from_input
+	let to_input, from_input, from_html
 	if (has_date) {
-		to_input = t => t.date(null, has_time, e.has_seconds, e.has_fractions)
-		from_input = s => parse_date(s, null, false, has_time, e.has_seconds, e.has_fractions)
+		to_input = t => t.date(null, e.precision)
+		from_input = s => parse_date(s, null, false, e.precision)
+		from_html = s => parse_date(s, 'SQL', true, has_time ? null : 'd')
 	} else {
-		to_input = t => t.timeofday(e.has_seconds, e.has_fractions)
-		from_input = s => parse_timeofday(s, false, e.has_seconds, e.has_fractions)
+		to_input = t => t.timeofday(e.precision)
+		from_input = s => parse_timeofday(s, false, e.precision)
+		from_html = s => parse_timeofday(s, true)
 	}
 
 	e.inputs = []
 	e.input_widgets = []
 
+	let type = has_date ? 'time' : 'timeofday'
+
 	if (!range) {
 		e.make_input_widget({
-			value_type: has_date ? 'time' : 'timeofday',
 			errors_tooltip_target: e.input_group,
 		})
 		e.to_json = to_json
+		e.prop('min', {type: type, parse: from_html, default: has_date ? min_date : null})
+		e.prop('max', {type: type, parse: from_html, default: has_date ? max_date : null})
 	}
 
 	for (let K of range ? ['1', '2'] : ['']) {
@@ -8465,15 +8470,21 @@ function date_input_widget(e, has_date, has_time, range) {
 			input_widget.K = K
 			e.input_widgets.push(input_widget)
 
+			input_widget.is_scalar = true
 			input_widget.is_time = true
 			input_widget.to_text = to_text
 			input_widget.to_form = to_form
 			input_widget.to_json = to_json
 
 			input_widget.make_input_widget({
-				value_type: 'time',
-				errors_tooltip_target: false,
+				errors_tooltip_target: input,
 			})
+
+			input_widget.prop('min', {type: type, parse: from_html, default: has_date ? min_date : null})
+			input_widget.prop('max', {type: type, parse: from_html, default: has_date ? max_date : null})
+
+			e.forward_prop('min', input_widget, 'min')
+			e.forward_prop('max', input_widget, 'max')
 
 		} else {
 
@@ -8487,7 +8498,7 @@ function date_input_widget(e, has_date, has_time, range) {
 				e.picker.set_prop('value'+K, e['value'+K], ev)
 			}
 
-			if (!(ev && ev.target == input && ev instanceof InputEvent)) {
+			if (!(ev && ev.target == input && ev.type == 'input')) {
 				let v = e['value'+K]
 				let iv = e['input_value'+K]
 				input.value = v != null ? to_input(v) : isnum(iv) ? to_input(iv) : iv
@@ -8496,9 +8507,9 @@ function date_input_widget(e, has_date, has_time, range) {
 		})
 
 		input.on('input', function(ev) {
-			let v = from_input(input.value)
-			e.set_prop('input_value'+K, v ?? input.value, ev)
-			return ev.forward(e)
+			let iv = repl(input.value, '', null)
+			let v = from_input(iv)
+			e.set_prop('input_value'+K, v ?? iv, ev)
 		})
 
 		input.on('wheel', function(ev, dy, is_trackpad) {
@@ -8511,7 +8522,7 @@ function date_input_widget(e, has_date, has_time, range) {
 					d = e.value2
 				else if (K == '2' && d < e.value1)
 					d = e.value1
-			e.set_prop('input_value'+K, d, input_event(e))
+			e.set_prop('input_value'+K, d, ev || {target: e})
 		})
 
 		function digit_groups() {
@@ -8575,12 +8586,10 @@ function date_input_widget(e, has_date, has_time, range) {
 					let s1 = s.slice(0, g.i) + ns + s.slice(g.j)
 					let t = from_input(s1)
 					if (t != null) {
-						if (e.try_validate(t)) {
-							e.set_prop('input_value'+K, t, ev)
-							g = digit_groups()[g.index] // re-locate digit group
-							if (g)
-								input.setSelectionRange(g.i, g.j)
-						}
+						e.set_prop('input_value'+K, t, ev)
+						g = digit_groups()[g.index] // re-locate digit group
+						if (g)
+							input.setSelectionRange(g.i, g.j)
 					}
 					return false
 				}
@@ -8616,10 +8625,8 @@ function date_input_widget(e, has_date, has_time, range) {
 		if (range) {
 			e.set_prop('input_value1', this.value1, ev)
 			e.set_prop('input_value2', this.value2, ev)
-			return ev.forward(e)
 		} else {
 			e.set_prop('input_value', this.value, ev)
-			return ev.forward(e)
 		}
 	})
 
