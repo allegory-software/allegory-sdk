@@ -7,12 +7,12 @@ a decent job. Let's see what that means first.
 A good widget needs to satisfy many things:
 
 * work in different types of containers: inline, block, flex, grid.
-* be instantiable from both html and JavaScript with all the features.
-* allow any property changes while the widget is live.
+* be instantiable from both HTML and JavaScript with all the features.
+  * HTML is untyped so it needs parsing.
+* allow property changes while the widget is live.
   * this alone increases complexity and bug surface substantially, at least
     for DOM-based widgets, a little less so for canvas-drawn widgets.
 * not leak event listeners when detached from DOM.
-* maintain hidden input elements to work in forms.
 * work at any inherited font size.
 * use only theme colors.
 * update itself when resized.
@@ -22,15 +22,21 @@ A good widget needs to satisfy many things:
 * have reasonable min and max dimensions even if its a stretching widget.
 * be focusable (if interactive), and have good keyboard interaction.
 * allow it to be disabled (means no focus, no hover, faded-looking, etc.).
-* if it has text input, never "correct" what the user is typing in or pasting in!
-  * IOW, validation should only warn, not slap the hand, that's bad experience.
-  * this means having input value and output value as two separate things.
-* if it has an inner `<input>`, show the focus ring on the outer container when
-focusing the input.
-* for a dropdown, allow keyboard navigation on the picker while it's open.
+* for dropdowns, allow keyboard navigation on the picker while it's open.
 * if dragging is involved, start dragging after a threshold distance (5-10px).
   * you also need an event-based protocol for drag & drop between widgets.
-* show validation errors as a popup or have a separate linked widget for that.
+* for input widgets:
+  * with text inputs, never "correct" what the user is typing in or pasting in!
+    * IOW, validation should not interfere with typing, that's bad experience.
+    * this means having input value and valid value as two separate things.
+  * if it has an inner `<input>`, show the focus ring on the outer container
+  when focusing the input.
+  * have plug-in validations.
+  * show validation errors as a built-in popup but also have a separate widget for that.
+  * maintain hidden input elements to work in forms.
+  * validate the initial value to account for the possibility that the db might
+  contain invalid values and the user must be given a chance to see them as invalid
+  and correct them.
 
 > Some resources on that as a warm-up:
 >
@@ -74,9 +80,9 @@ which I'll discuss next.
 
 ## The necessity to keep properties orthogonal
 
-When defining a property, you can give a convert function in which the
+When defining a property, you can give a parse function in which the
 property value can be parsed, clamped, or changed in any way before being set.
-This comes with a big caveat that is easy to forget: the convert function
+This comes with a big caveat that is easy to forget: the parse function
 *must not depend on the value of any other property* to do its job because
 the order in which properties are set when the component is initialized is
 undefined. IOW, it is necessary to keep properties orthogonal at all times.
@@ -85,10 +91,10 @@ state separately, either internally or exposed as read-only properties.
 
 For example, let's say a widget defines a "list of items" property and also
 a "selected item index" property. Notice how you can't clamp the index in its
-convert function based on the current list of items, because it might just
+parse function based on the current list of items, because it might just
 happen that the items were not yet set, and if you do that you lose the index.
 
-This can be counter-intuitive because it is very tempting to use the convert
+This can be counter-intuitive because it is very tempting to use the parse
 function as a sort of "firewall" that transforms or rejects invalid values
 in order to avoid putting the widget in an invalid state.
 

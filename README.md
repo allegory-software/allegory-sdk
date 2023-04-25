@@ -55,8 +55,8 @@ If, on the other hand, you're one of the increasingly rare types who
 thinks that procedural > functional > OOP, library > framework, SQL > ORM,
 JavaScript > TyoeScript, relational > nosql, less LOC > more LOC, and you get
 a rash whenever you hear the words "build system", "package manager",
-"folder structure", "container" or "dependency injection", then you might
-actually like this.
+"folder structure", "microservice", "container" or "dependency injection",
+then you might actually like this.
 
 # Status
 
