@@ -333,6 +333,7 @@ CANVAS
 	cx.clear()
 	e.resize(w, h, [pw], [ph])
 	resizeable_canvas_container() -> ct; ct.ctx, ct.canvas, ct.on_redraw(f)
+	is2dcx(cx) -> t|f
 
 MODALS & OVERLAYS
 
@@ -713,11 +714,11 @@ e.attr = function(k, v) {
 		this.setAttribute(k, v)
 }
 
-// NOTE: storing `false` explicitly allows setting the value `false` on
-// props whose default value is `true`.
+// NOTE: a bool attr has 3 possible values: `true`, `false` and `null`,
+// corresponding to html '', 'false', and missing attr.
 e.bool_attr = function(k, v) {
 	if (arguments.length < 2)
-		return repl(repl(this.getAttribute(k), '', true), 'false', false)
+		return bool_attr(this.getAttribute(k))
 	else if (v == null)
 		this.removeAttribute(k)
 	else
@@ -989,22 +990,22 @@ component.init_instance = function(e, prop_vals) { // stub, see xmodule.js.
 
 component.instance_tag = noop // stub, see xmodule.js.
 
-// TODO: e.property() props can't be set from html. Convert them
-// to e.prop() if you want them to be settable from html attrs!
+// NOTE: e.property() props can't be set from html. Make them e.prop() with
+// a type if you want them to be settable from html attrs!
 let attr_prop_vals = function(e) {
 	let prop_vals = obj()
 	let pmap = e.attr_prop_map
 	for (let attr of e.attributes) {
 		let k = attr.name
-		k = pmap && pmap[k] || k
 		let v = attr.value
-		let pa = e.get_prop_attrs(k)
-		if (!k.starts('on_')) {
-			if (!(pa && pa.from_attr))
+		if (!k.starts('on_')) { // not an event listener
+			k = pmap && pmap[k] || k
+			let pa = e.get_prop_attrs(k)
+			if (!pa) // not a prop
 				continue
-			v = pa.from_attr(v)
 			if (k in prop_vals)
-				continue
+				warn('duplicate attr', attr.name)
+			v = pa.from_attr(v)
 		}
 		prop_vals[k] = v
 	}
@@ -1306,7 +1307,7 @@ G.element = function(t, attrs, ...children) {
 		let id = t.id
 		let e0 = window[id]
 		if (e0)
-			return e0 // already created (called from a prop's `convert()`).
+			return e0 // already created (called from a prop's `parse()`).
 		let tag = t.tag || component.instance_tag(id)
 		if (!tag) {
 			warn('component id not found:', id)
@@ -1635,7 +1636,7 @@ e.make_items_prop = function(ITEMS, html_items) {
 	}
 
 	e.prop(ITEMS, {type: 'array', element_type: 'node',
-			serialize: serialize, convert: diff_element_list,
+			serialize: serialize, parse: diff_element_list,
 			default: empty_array, updates: ITEMS})
 
 	if (e.len) {
@@ -1687,20 +1688,21 @@ e.do_after = function(method, func) {
 /* component virtual properties ----------------------------------------------
 
 publishes:
-	e.property(name, get, [set])
-	e.prop(name, attrs)
-	e.<prop>
-	e.props: {prop->prop_attrs}
-		store: false          value is read by calling `e.get_<prop>()`.
-		attr: true|NAME       value is *also* stored into a html attribute.
+	e.property(PROP, get, [set])
+	e.prop(PROP, attrs)
+	e.PROP
+	e.props: {PROP->prop_attrs}
+		store: false          value is read by calling `e.get_PROP()`.
 		private               window is not notifed of prop value changes.
 		default               default value.
-		convert(v, v0) -> v   convert value when setting the property.
+		parse(v, v0) -> v     convert value when setting the property.
 		updates: 'opt1 ...'   options to pass to update() when the prop value changes
 		type                  for html attr val conversion and for object inspector.
-		from_attr(s) -> v     convert from html attr text representation.
-		to_attr(v) -> s       convert to html attr text representation.
-		serialize()
+		attr: NAME            value is read from html attr named NAME instead of PROP.
+		to_attr: true         value is also written to html attr when changed.
+		to_attr: f(v) -> s    formatter for the html attr value.
+		from_attr: f(s) -> v  parser for the html attr value.
+		serialize: f()
 		bind_id               the prop represents an element id to dynamically link to.
 calls:
 	e.get_<prop>() -> v
@@ -1731,20 +1733,12 @@ e.on_prop_changed = function(f) {
 	this.do_after('prop_changed', f)
 }
 
-let from_bool_attr = v => repl(repl(v, '', true), 'false', false)
-
-let from_attr_func = function(opt) {
-	if (opt.from_attr == false)
-		return false
-	return opt.from_attr
-			|| (opt.type == 'bool'   && from_bool_attr)
-			|| (opt.type == 'number' && num)
-			|| return_arg
-}
-
 let set_attr_func = function(e, k, opt) {
-	if (opt.to_attr)
-		return v => e.attr(k, v)
+	let to_attr = opt.to_attr
+	if (!to_attr)
+		return
+	if (isfunc(to_attr))
+		return v => e.attr(k, to_attr(v))
 	if (opt.type == 'bool')
 		return v => e.bool_attr(k, v || null)
 	return v => e.attr(k, v)
@@ -1757,16 +1751,18 @@ e.prop = function(prop, opt) {
 	let GET = 'get_'+prop
 	let SET = 'set_'+prop
 	opt.name = prop
-	let convert = opt.convert || return_arg
+	let parse = opt.parse
+		|| opt.type == 'bool'   && bool
+		|| opt.type == 'number' && num
 	let priv = opt.private
 	if (!e[SET])
 		e[SET] = noop
 	let dv = 'default' in opt ? opt.default : null
 	let update_opt = opt.updates && words(opt.updates).tokeys() || null
 
-	opt.from_attr = from_attr_func(opt)
+	opt.from_attr = opt.from_attr || opt.type == 'bool' && bool_attr || return_arg
 	let prop_attr = isstr(opt.attr) ? opt.attr : prop
-	let set_attr = opt.attr && set_attr_func(e, prop_attr, opt)
+	let set_attr = set_attr_func(e, prop_attr, opt)
 	if (prop_attr != prop)
 		attr(e, 'attr_prop_map')[prop_attr] = prop
 	if (prop_attr.includes('_')) // allow foo-bar in addition to foo_bar
@@ -1780,7 +1776,8 @@ e.prop = function(prop, opt) {
 		}
 		set = function(v1, ev) {
 			let v0 = v
-			v1 = convert(v1, v0)
+			if (parse)
+				v1 = parse(v1, v0)
 			if (v1 === v0)
 				return
 			v = v1
@@ -1800,7 +1797,8 @@ e.prop = function(prop, opt) {
 		}
 		set = function(v, ev) {
 			let v0 = e[GET]()
-			v = convert(v, v0)
+			if (parse)
+				v = parse(v, v0)
 			if (v === v0)
 				return
 			e[SET](v, v0, ev)
@@ -3431,6 +3429,8 @@ e.hit_test_sides = function(mx, my, d1, d2) {
 
 // canvas --------------------------------------------------------------------
 
+G.is2dcx = cx => cx instanceof CanvasRenderingContext2D
+
 method(CanvasRenderingContext2D, 'clear', function() {
 	this.clearRect(0, 0, this.canvas.width, this.canvas.height)
 })
@@ -4043,7 +4043,7 @@ e.make_popup = function(target, side, align) {
 	return e
 }
 
-// NOTE: not used yet. Righ tnow we add popups directly to their owner element
+// NOTE: not used yet. Right now we add popups directly to their owner element
 // but that's a pain because we can't add the popup directly to its target
 // element so we have to wrap the target to avoid messing up its box dimensions
 // and the CSS of its direct children (eg. border-collapse), and then there's
