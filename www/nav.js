@@ -109,8 +109,6 @@ Field attributes:
 		default        : default value that the server sets for new rows.
 		readonly       : prevent editing.
 		editor         : f({nav:, col:, embedded: t|f}) -> editor instance
-		from_text      : f(s) -> v      convert from html attr value to js value
-		to_text        : f(v) -> s      convert from js value to plain text display value
 
 		enum_values    : enum type: 'v1 ...' | ['v1', ...]
 		enum_texts     : enum type: {v->text}
@@ -119,37 +117,40 @@ Field attributes:
 	validation:
 
 		not_null       : don't allow null (false).
-		convert        : f(v, field, row) -> v
+		required       : don't allow null (false).
 		maxlen         : max text length (256).
 
 		min            : min value (0).
 		max            : max value (inf).
-		to_num(v)      : convert to number if possible (then min/max applies).
-		from_num(x)    : convert from number if possible (then min/max applies).
-
 		decimals       : max number of decimals (0).
 
 	formatting:
 
-		align          : 'left'|'right'|'center'
-		format         : f(v, row) -> s
-		attr           : custom value for html attribute `field`, for styling
-		null_{text|html}   : display value for null
-		empty_{text|html}  : display value for ''
+		draw           : f(v, cx, [row]) -> true  draw value on 2d canvas context.
+		draw           : f(v, pe, [row]) -> true  render value into parent element.
+		draw           : f(v    , [row]) -> s     return plain text display value.
 
-		true_{text|html}   : display value for boolean true
-		false_{text|html}  : display value for boolean false
+		draw_text      : f(s, [cx|pe], [row]) -> true|s   draw/render plain text.
+		draw_null      : f([cx|pe], [row]) -> true|s      draw/render plain text.
+
+		align          : 'left'|'right'|'center'
+		attr           : custom value for html attribute `field`, for styling
+		null_text      : plain text display value for null
+		empty_text     : plain text display value for ''
 
 		filesize_magnitude : filesize type, see kbytes()
 		filesize_decimals  : filesize type, see kbytes()
 		filesize_min       : filesize type, see kbytes()
 
-		has_time       : date type (false), time type (true)
-		has_seconds    : date type (false), timeofday type (false)
+		has_time       : date type (false); time type (true)
+		has_seconds    : date type (false); timeofday type (false)
+		has_fractions  : date type (false); timeofday type (false)
 
 		duration_format: see duration() in glue.js
 
 		button_options : button type: options to pass to button()
+
+		format         : value format when saving it as json (date/time types, etc.)
 
 	vlookup:
 
@@ -157,13 +158,14 @@ Field attributes:
 		lookup_nav     : nav to look up values of this field into.
 		lookup_nav_id  : nav id for creating lookup_nav.
 		lookup_cols    : field(s) in lookup_nav that matches this field.
-		display_col    : field in lookup_nav to use as display_val of this field.
+		display_col    : field in lookup_nav to use as display value of this field.
+		null_lookup_col: field in nav to use as default value for nulls in this field.
 
 	sorting:
 
 		sortable       : allow sorting (true).
 		compare_types  : f(v1, v2) -> -1|0|1  (for sorting)
-		compare_vals   : f(v1, v2) -> -1|0|1  (for sorting)
+		compare_vals   : f(v1, v2) -> -1|0|1  (for sorting and setting values)
 
 
 NAV API ----------------------------------------------------------------------
@@ -465,18 +467,17 @@ Loading & saving from/to memory:
 	cals
 		e.do_save_row(vals) -> true | 'skip'
 
-Display val & text val:
+Cell display val, text val and drawing:
 	publishes:
-		e.cell_display_val_for(row, field, v, display_val_to_update)
-		e.cell_display_val(row, field)
-		e.cell_text_val(row, field)
+		e.draw_val(row, field, v, [cx|pe]) -> true|s
+		e.draw_cell(row, field, [cx|pe]) -> true|s
 	announces:
 		^^display_vals_changed()
 
 Picker:
 	publishes:
 		e.display_col
-		e.row_display_val()
+		e.draw_row(row, [cx|pe]) -> true|s
 		e.pick_near_val()
 
 --------------------------------------------------------------------------- */
@@ -603,24 +604,22 @@ G.shared_nav = function(id, opt) {
 }
 } //shared nav scope
 
-let bool = v => repl(repl(v, '', true), 'false', false)
-
-let rowset_attr_convert = {
-	pk : num,
-	can_add_rows    : bool,
-	can_remove_rows : bool,
-	can_change_rows : bool,
+let rowset_attr_parse = {
+	pk              : return_arg,
+	can_add_rows    : bool_attr,
+	can_remove_rows : bool_attr,
+	can_change_rows : bool_attr,
 }
 
-let field_attr_convert = {
+let field_attr_parse = {
 	name     : return_arg,
 	label    : return_arg,
 	type     : return_arg,
 	placeholder : return_arg,
 	enum_values : return_arg,
 	decimals : num,
-	min      : num,
-	max      : num,
+	min      : return_arg, // parsing this depends on type
+	max      : return_arg, // parsing this depends on type
 	max_len  : num,
 	min_len  : num,
 	from     : num,
@@ -628,49 +627,61 @@ let field_attr_convert = {
 	w        : num,
 	min_w    : num,
 	max_w    : num,
-	not_null : bool,
-	sortable : bool,
+	not_null : bool_attr,
+	required : bool_attr,
+	sortable : bool_attr,
 	maxlen   : num,
 }
 
-function convert_text_attrs(t, convert) {
+function parse_text_attrs(t, parse) {
+	let dt = obj()
 	for (let k in t) {
 		let uk = k.replace('-', '_')
 		let v = t[k] ?? t[uk]
-		assert(uk in convert, 'html attr converter missing for {0}', uk)
-		v = convert[uk](v)
-		t[uk] = v
+		assert(uk in parse, 'html attr parser missing for {0}', uk)
+		v = parse[uk](v)
+		dt[uk] = v
 	}
-	return t
+	return dt
 }
 
-function parse_field_tag(field_tag) {
-	return convert_text_attrs(field_tag.attrs, field_attr_convert)
+function parse_field_attrs(field_attrs) {
+	return parse_text_attrs(field_attrs, field_attr_parse)
 }
 
 css('rowset', 'skip')
 
 component('rowset', function(e) {
 	let fields = []
-	let row_text_vals = []
-	e.rowset = convert_text_attrs(e.attrs, rowset_attr_convert)
+	let row_vals = []
+	e.rowset = parse_text_attrs(e.attrs, rowset_attr_parse)
 	e.rowset.fields = fields
-	e.rowset.row_text_vals = row_text_vals
-	let field_map = obj() // {name->index}
+	e.rowset.row_vals = row_vals
+	let cols = obj() // {name->true}
 	for (let field_tag of e.$(':scope>field')) {
-		let field = parse_field_tag(field_tag)
+		let field = parse_field_attrs(field_tag.attrs)
 		let field_index = fields.length
 		if (field.name) {
-			field_map[field.name] = field_index
+			cols[field.name] = true
 			fields.push(field)
 		} else {
-			warn('field name missing')
+			warn('<field name=?> missing')
 		}
 	}
 	for (let row_tag of e.$(':scope>row')) {
 		let t = row_tag.attrs
 		if (':id' in t) { t.id = t[':id']; delete t[':id']; }
-		row_text_vals.push(t)
+		for (let k in t)
+			warn_if(!cols[k], '<row> unknown field', k)
+		if (row_tag.len)
+			for (let val_tag of row_tag.$(':scope>val')) {
+				let col = val_tag.attr('for')
+				warn_if(!col, '<val for=?> missing')
+				warn_if(!cols[col], '<val> unknown field', col)
+				warn_if(col in t, '<val> overrides <row> value for', col)
+				t[col] = val_tag.html
+			}
+		row_vals.push(t)
 	}
 	e.clear()
 })
@@ -716,7 +727,7 @@ e.make_nav_widget = function() {
 
 	e.prop('exit_edit_on_lost_focus' , {type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
 	e.prop('save_row_states'         , {type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
-	e.prop('action_band_visible'     , {type: 'enum', enum_values: 'auto always no', default: 'auto', attr: true, slot: 'user'})
+	e.prop('action_band_visible'     , {type: 'enum', enum_values: 'auto always no', default: 'auto', to_attr: true, slot: 'user'})
 
 	e.debug_anon_name = () => catany('', e.tag, catall(':', e.rowset_name))
 
@@ -730,9 +741,9 @@ e.make_nav_widget = function() {
 	}
 
 	for (let field_tag of e.$(':scope>col-attrs')) {
-		let t = parse_field_tag(field_tag)
-		let col = t['for']
-		delete t['for']
+		let t = field_tag.attrs
+		let col = t['for']; delete t['for']
+		t = parse_field_attrs(t)
 		if (col)
 			attr(e, 'html_col_attrs')[col] = t
 		else
@@ -870,23 +881,33 @@ e.make_nav_widget = function() {
 
 	// fields array matching 1:1 to row contents ------------------------------
 
-	let convert_field_attr = obj()
+	let ifa = obj() // init-field-attr: {field->f(field, v)}
 
-	convert_field_attr.label = function(field, v, f) {
-		return v == null ? f.name && f.name.display_name() : v
+	ifa.label = function(field, v) {
+		if (v == null) {
+			let name = field.given_name || field.name
+			v = name && name.display_name()
+		}
+		field.label = v
 	}
 
-	convert_field_attr.w = function(field, v) {
-		return clamp(v, field.min_w, field.max_w)
-	}
-
-	convert_field_attr.exclude_vals = function(field, v) {
+	ifa.exclude_vals = function(field, v) {
+		if (v == null) return
 		set_exclude_filter(field, v)
-		return v
 	}
 
-	function init_field_attrs(field, f, name) {
+	ifa.enum_values = function(field, v) {
+		if (v == null) {
+			if (field.known_values)
+				field.known_values = null
+			return
+		}
+		field.known_values = set(words(v))
+	}
 
+	function init_field_attrs(field, f) {
+
+		let name = field.given_name || field.name
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
 		let ht = e.html_col_attrs && e.html_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
@@ -895,13 +916,10 @@ e.make_nav_widget = function() {
 		let tt = field_types[type]
 		let att = all_field_types
 
-		assign(field, att, tt, f, rt, ct, ht, pt)
+		assign_opt(field, att, tt, f, rt, ct, ht, pt)
 
-		for (let k in convert_field_attr)
-			field[k] = convert_field_attr[k](field, field[k], f)
-
-		if (field.init)
-			field.init(field)
+		for (let k in ifa)
+			ifa[k](field, field[k])
 
 	}
 
@@ -911,9 +929,10 @@ e.make_nav_widget = function() {
 
 		if (v === undefined) {
 
+			let name = field.given_name || field.name
 			let ht = e.html_col_attrs && e.html_col_attrs[name]
-			let ct = e.col_attrs && e.col_attrs[field.name]
-			let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+field.name]
+			let ct = e.col_attrs && e.col_attrs[name]
+			let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+name]
 			let type = f.type || (ct && ct.type) || (rt && rt.type)
 			let tt = type && field_types[type]
 			let att = all_field_types
@@ -926,17 +945,14 @@ e.make_nav_widget = function() {
 			v = strict_or(v, att[k])
 		}
 
-		let convert = convert_field_attr[k]
-		if (convert)
-			v = convert(field, v, f)
-
 		if (field[k] === v)
 			return
+
 		field[k] = v
 
-		// TODO: don't reinit the entire field
-		if (field.init)
-			field.init(field)
+		let init = ifa[k]
+		if (init)
+			init(field, v)
 
 	}
 
@@ -946,8 +962,11 @@ e.make_nav_widget = function() {
 
 	function init_field(f, fi) {
 
+		let field = obj()
+
 		// disambiguate field name.
-		let name = (f.name || 'f'+fi)
+		let given_name = (f.name || 'f'+fi)
+		let name = given_name
 		if (name in e.all_fields_map) {
 			let suffix = 2
 			while (name+suffix in e.all_fields_map)
@@ -955,13 +974,13 @@ e.make_nav_widget = function() {
 			name += suffix
 		}
 
-		let field = obj()
-
-		init_field_attrs(field, f, name)
-
+		if (given_name != name)
+			field.given_name = given_name
 		field.name = name
 		field.val_index = fi
 		field.nav = e
+
+		init_field_attrs(field, f)
 
 		e.all_fields[fi] = field
 		e.all_fields_map[name] = field
@@ -996,7 +1015,7 @@ e.make_nav_widget = function() {
 			for (let i = 2 * fn; i < row.length; i += fn)
 				row.splice(i, 0, null)
 		}
-		init_field_validators(field)
+		init_field_validator(field)
 		init_fields()
 		e.update({fields: true})
 		return field
@@ -1063,7 +1082,7 @@ e.make_nav_widget = function() {
 		init_tree_fields()
 
 		for (let field of e.all_fields)
-			init_field_validators(field)
+			init_field_validator(field)
 
 		init_all_rows()
 		init_tree()
@@ -1450,7 +1469,7 @@ e.make_nav_widget = function() {
 		if (init_param_vals())
 			e.reload()
 	}
-	e.prop('params', {attr: true})
+	e.prop('params')
 
 	function param_map(params) {
 		let m = map()
@@ -1473,7 +1492,7 @@ e.make_nav_widget = function() {
 	})
 
 	e.row_tabname = function(row) {
-		return e.row_display_val(row)
+		return e.draw_row(row, div())
 	}
 
 	e.selected_rows_tabname = function() {
@@ -1494,8 +1513,8 @@ e.make_nav_widget = function() {
 		e.all_rows = null
 	}
 
-	// validate cells & rows silently and without making too much garbage
-	// and without getting the error messages, just the failed state.
+	// parse & validate cells & rows silently and without making too much
+	// garbage and without getting the error messages, just the failed state.
 	function validate_all_rows() {
 		for (let row of e.all_rows) {
 			let cells_failed
@@ -1503,8 +1522,11 @@ e.make_nav_widget = function() {
 				if (field.readonly)
 					continue
 				if (field.validator) {
-					let val = e.cell_input_val(row, field)
-					let failed = !field.validator.validate(val, false)
+					let iv = e.cell_input_val(row, field)
+					let failed = !field.validator.validate(iv, false)
+					let v = field.validator.value
+					if (!field.validator.parse_failed)
+						row[field.val_index] = v
 					if (failed) {
 						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
 						cells_failed = true
@@ -1526,7 +1548,7 @@ e.make_nav_widget = function() {
 		e.all_rows = e.bound && e.rowset && (
 				   e.deserialize_all_row_states(e.row_states)
 				|| e.deserialize_all_row_vals(e.row_vals)
-				|| e.deserialize_all_row_vals(e.rowset.row_text_vals, true)
+				|| e.deserialize_all_row_vals(e.rowset.row_vals)
 				|| e.rowset.rows
 			) || []
 		validate_all_rows()
@@ -2077,7 +2099,7 @@ e.make_nav_widget = function() {
 
 			range_label = function(v, i, row) {
 				let f = range_label_funcs[cols_arr[i]]
-				return f ? f(v) : e.cell_display_val(row, fld(cols_arr[i]))
+				return f ? f(v) : e.draw_cell(row, fld(cols_arr[i]))
 			}
 
 		} else {
@@ -2085,7 +2107,7 @@ e.make_nav_widget = function() {
 			range_val = return_arg
 
 			range_label = function(v, i, row) {
-				return e.cell_display_val(row, fld(cols_arr[i]))
+				return e.draw_cell(row, fld(cols_arr[i]))
 			}
 
 		}
@@ -2745,14 +2767,14 @@ e.make_nav_widget = function() {
 			return
 		}
 		if (!nav) {
-			function format_row(row) {
-				return e.cell_display_val_for(row, field, null)
+			function draw_row(row, cx) {
+				return e.draw_cell(row, field, cx)
 			}
 			nav = e.create_exclude_vals_nav({
 					rowset: {
 						fields: [
 							{name: 'include', type: 'bool', default: true},
-							{name: 'row', format: format_row},
+							{name: 'row', draw: draw_row},
 						],
 					},
 				}, field)
@@ -2918,7 +2940,7 @@ e.make_nav_widget = function() {
 		return err && err.failed
 	}
 
-	e.cell_modified   = (row, col) => {
+	e.cell_modified = (row, col) => {
 		let field = e.fld(col)
 		let compare_vals = field.compare_vals || e.compare_vals
 		return compare_vals(e.cell_input_val(row, field), e.cell_val(row, field), field) != 0
@@ -2938,14 +2960,12 @@ e.make_nav_widget = function() {
 		return e.focused_row && e.cell_val(e.focused_row, col)
 	}
 
-	e.convert_val = function(field, val, row, ev) {
-		return field.convert ? field.convert.call(e, val, field, row) : val
-	}
-
-	function init_field_validators(field) {
+	function init_field_validator(field) {
 		if (field.readonly)
 			return
+
 		field.validator = create_validator(field)
+
 		for (let k in field) {
 			if (k.starts('validator_')) {
 				k = k.replace(/^validator_/, '')
@@ -2954,6 +2974,11 @@ e.make_nav_widget = function() {
 				field.validator.add_rule(rule)
 			}
 		}
+
+		// parsing these here after we have a parser as they depend on type.
+		if (field.min != null) field.min = field.validator.parse(field.min)
+		if (field.max != null) field.max = field.validator.parse(field.max)
+
 	}
 
 	function init_row_validators() {
@@ -3005,12 +3030,13 @@ e.make_nav_widget = function() {
 		let errs = []
 		for (let row of e.changed_rows) {
 			for (let err of (e.row_errors(row) || empty_array))
-				if (err.failed)
+				if (err.checked && err.failed)
 					a.push(err.error)
 				for (let field of e.all_fields)
-					for (let err of (e.cell_errors(row, field) || empty_array))
-						if (err.failed)
+					for (let err of (e.cell_errors(row, field) || empty_array)) {
+						if (err.checked && err.failed)
 							a.push(field.label + ': ' + err.error)
+					}
 		}
 		if (!errs.length)
 			return
@@ -3084,18 +3110,14 @@ e.make_nav_widget = function() {
 			return
 		}
 
-		if (val === undefined)
-			val = null
-		val = e.convert_val(field, val, row, ev)
-
-		let val0 = e.cell_input_val(row, field)
-		if (val === val0)
-			return
-
-		let cur_val = e.cell_val(row, field)
 		let errors = e.validate_cell(field, val)
-		let invalid = errors.failed
+		val = field.validator.value
 		let compare_vals = field.compare_vals || e.compare_vals
+		let old_val = e.cell_input_val(row, field)
+		if (!compare_vals(val, old_val))
+			return
+		let invalid = errors.failed
+		let cur_val = e.cell_val(row, field)
 		let cell_modified = compare_vals(val, cur_val, field) != 0
 		let row_modified = cell_modified || cells_modified(row, field)
 
@@ -3127,9 +3149,8 @@ e.make_nav_widget = function() {
 
 		let field = fld(col)
 
-		if (val === undefined)
-			val = null
-		val = e.convert_val(field, val, row, ev)
+		let errors = e.validate_cell(field, val)
+		val = field.validator.value
 
 		let old_val = e.cell_val(row, field)
 
@@ -3141,7 +3162,7 @@ e.make_nav_widget = function() {
 		} else {
 			e.set_cell_state(field, 'val', val)
 			e.set_cell_state(field, 'input_val', val, old_val)
-			e.set_cell_state(field, 'errors', undefined)
+			e.set_cell_state(field, 'errors', errors)
 			e.set_row_state('errors', undefined)
 		}
 		e.set_row_state('modified', cells_modified(row), false)
@@ -3211,19 +3232,6 @@ e.make_nav_widget = function() {
 		return false
 	}
 
-	function clicked_on_disabled(ev) {
-		if (ev.type != 'pointerdown')
-			return
-		if (!ev.target.effectively_disabled)
-			return
-		if (e.contains(ev.target))
-			return // disabled but inside self
-		if (e.action_band) {
-			e.action_band.buttons.save.draw_attention()
-			e.action_band.buttons.cancel.draw_attention()
-		}
-	}
-
 	let disabled_widgets
 	function disable_all(disabled) {
 		disabled = !!disabled
@@ -3283,8 +3291,22 @@ e.make_nav_widget = function() {
 			}
 		}
 
-		document.on('stopped_event', clicked_on_disabled, disabled)
 	}
+
+	document.on('stopped_event', e, function(ev) {
+		if (disabled_widgets == null)
+			return
+		if (ev.type != 'pointerdown')
+			return
+		if (!ev.target.effectively_disabled)
+			return
+		if (e.contains(ev.target))
+			return // disabled but inside self
+		if (e.action_band) {
+			e.action_band.buttons.save.draw_attention()
+			e.action_band.buttons.cancel.draw_attention()
+		}
+	})
 
 	e.enter_edit = function(editor_state, focus) {
 		let row = e.focused_row
@@ -3403,7 +3425,13 @@ e.make_nav_widget = function() {
 				e.set_cell_val(row, field, null, ev)
 	}
 
-	// get/set cell display val -----------------------------------------------
+	// cell lookup display val ------------------------------------------------
+
+	e.set_display_col = function() {
+		reset_quicksearch()
+		e.display_field = check_field('display_col', e.display_col) || e.name_field
+	}
+	e.prop('display_col', {type: 'col'})
 
 	function init_field_own_lookup_nav(field) {
 		if (field.lookup_nav) // linked lookup nav (not owned).
@@ -3462,91 +3490,62 @@ e.make_nav_widget = function() {
 		}
 	}
 
-	function get_or_draw_null_lookup_val(row, field, cx) {
-		let lf = e.all_fields_map[field.null_lookup_col]  ; if (!lf || !lf.lookup_cols) return s
-		let ln = lf.lookup_nav                            ; if (!ln) return s
-		let nfv = e.cell_val(row, lf)
-		let ln_row = ln.lookup(lf.lookup_cols, [nfv])[0]  ; if (!ln_row) return s
-		let dcol = field.null_display_col ?? field.name
-		let df = ln.all_fields_map[dcol]                  ; if (!df) return s
-		if (cx) {
-			let v = ln.cell_input_val(ln_row, df)
-			ln.draw_cell_val(ln_row, df, v, cx)
-		} else {
-			return ln.cell_display_val(ln_row, df)
-		}
-	}
-	function get_null_display_val(row, field) {
-		if (field.null_lookup_col)
-			return get_or_draw_null_lookup_val(row, field)
-		else
-			return field.null_html ?? field.null_text
-	}
-	function draw_null_display_val(row, field, cx) {
-		if (field.null_lookup_col) {
-			get_or_draw_null_lookup_val(row, field, cx)
-			return true
-		}
-		if (field.null_text != null) {
-			field.draw(field.null_text, cx, row)
-			return true
-		}
-	}
-
-	e.cell_display_val_for = function(row, field, v, display_val_to_update) {
-		if (v == null)
-			return get_null_display_val(row, field)
-		if (v === '')
-			return field.empty_html ?? field.empty_text
-		let ln = field.lookup_nav
-		if (ln && field.lookup_fields && field.display_field) {
-			let row = ln.lookup(field.lookup_fields, [v])[0]
-			if (row)
-				return ln.cell_display_val(row, field.display_field)
-		}
-		return field.format(v, row, display_val_to_update)
-	}
-
-	e.draw_cell_val = function(row, field, v, cx) {
-		if (v == null)
-			if (draw_null_display_val(row, field, cx))
-				return
-		if (v === '')
-			if (field.empty_text != null) {
-				field.draw(field.empty_text, cx, row)
-				return
-			}
-		let ln = field.lookup_nav
-		if (ln && field.lookup_fields && field.display_field) {
-			let ln_row = ln.lookup(field.lookup_fields, [v])[0]
-			if (ln_row) {
-				let df = field.display_field
-				let v = ln.cell_input_val(ln_row, df)
-				ln.draw_cell_val(ln_row, df, v, cx)
-				return
-			}
-		}
-		field.draw(v, cx, row)
-	}
-
-	e.cell_display_val = function(row, field) {
-		return e.cell_display_val_for(row, field, e.cell_input_val(row, field))
-	}
-
 	e.on('display_vals_changed', function() {
 		reset_quicksearch()
 		e.update({vals: true})
 	})
 
-	// get cell text val ------------------------------------------------------
+	// cell value multi-target rendering --------------------------------------
 
-	e.cell_text_val = function(row, field) {
-		let v = e.cell_display_val(row, field)
-		if (isnode(v))
-			return v.textContent
-		if (!isstr(v))
-			return ''
-		return v
+	// cx can be a 2d context to draw into, an element to render into,
+	// or nothing in which case returns a plain text representation.
+
+	function draw_null_lookup_val(row, field, cx) {
+		if (!field.null_lookup_col) return
+		let lf = e.all_fields_map[field.null_lookup_col]  ; if (!lf || !lf.lookup_cols) return
+		let ln = lf.lookup_nav                            ; if (!ln) return
+		let nfv = e.cell_val(row, lf)
+		let ln_row = ln.lookup(lf.lookup_cols, [nfv])[0]  ; if (!ln_row) return
+		let dcol = field.null_display_col ?? field.name
+		let df = ln.all_fields_map[dcol]                  ; if (!df) return
+		return ln.draw_cell(ln_row, df, cx)
+	}
+
+	e.draw_val = function(row, field, v, cx) {
+
+		if (v == null) {
+			let s = draw_null_lookup_val(row, field, cx)
+			if (s) return s
+
+			if (field.draw_null)
+				return field.draw_null(cx, row)
+
+			s = field.null_text
+			if (s) return field.draw_text(s, cx)
+
+			return
+		}
+
+		if (v === '') {
+			if (field.empty_text)
+				return field.draw_text(field.empty_text, cx)
+			return
+		}
+
+		let ln = field.lookup_nav
+		if (ln && field.lookup_fields && field.display_field) {
+			let ln_row = ln.lookup(field.lookup_fields, [v])[0]
+			if (ln_row) {
+				let df = field.display_field
+				return ln.draw_cell(ln_row, df, cx)
+			}
+		}
+
+		return field.draw(v, cx, row)
+	}
+
+	e.draw_cell = function(row, field, cx) {
+		return e.draw_val(row, field, e.cell_input_val(row, field), cx)
 	}
 
 	// row adding & removing --------------------------------------------------
@@ -4564,13 +4563,11 @@ e.make_nav_widget = function() {
 		return vals
 	}
 
-	e.deserialize_row_vals = function(vals, from_text) {
+	e.deserialize_row_vals = function(vals) {
 		let row = []
 		for (let fi = 0; fi < e.all_fields.length; fi++) {
 			let field = e.all_fields[fi]
 			let v = strict_or(vals[field.name], field.default)
-			if (v != null && from_text)
-				v = field.from_text(v)
 			row[fi] = v
 		}
 		return row
@@ -4587,12 +4584,12 @@ e.make_nav_widget = function() {
 		return rows
 	}
 
-	e.deserialize_all_row_vals = function(row_vals, from_text) {
+	e.deserialize_all_row_vals = function(row_vals) {
 		if (!row_vals)
 			return
 		let rows = []
 		for (let vals of row_vals) {
-			let row = e.deserialize_row_vals(vals, from_text)
+			let row = e.deserialize_row_vals(vals)
 			rows.push(row)
 		}
 		return rows
@@ -5015,25 +5012,29 @@ e.make_nav_widget = function() {
 	e.prop('row_display_val_template', {private: true})
 	e.prop('row_display_val_template_name', {attr: 'row_display_val_template'})
 
-	e.row_display_val = function(row) { // stub
-		if (window.template) { // have webb_spa.js
-			let ts = e.row_display_val_template
-			if (!ts) {
-				let tn = e.row_display_val_template_name
-				if (tn)
-					ts = template(tn)
-				else
-					ts = template(e.id + '_item') || template(e.type + '_item')
+	e.draw_row = function(row, cx) { // stub
+		if (isnode(cx)) {
+			if (window.template) { // have webb_spa.js
+				let ts = e.row_display_val_template
+				if (!ts) {
+					let tn = e.row_display_val_template_name
+					if (tn)
+						ts = template(tn)
+					else
+						ts = template(e.id + '_item') || template(e.type + '_item')
+				}
+				if (ts) {
+					pe.unsafe_html = render_string(ts, row && e.serialize_row_vals(row))
+					return true
+				}
 			}
-			if (ts)
-				return unsafe_html(render_string(ts, row && e.serialize_row_vals(row)))
 		}
 		if (!row)
 			return
 		let field = e.display_field
 		if (!field)
-			return 'no display field'
-		return e.cell_display_val(row, field)
+			return e.draw_text('no display field', cx)
+		return e.draw_cell(row, field, cx)
 	}
 
 	e.pick_near_val = function(delta, ev) {
@@ -5041,12 +5042,6 @@ e.make_nav_widget = function() {
 			if (!ev || ev.pick !== false)
 				e.fire('val_picked', ev)
 	}
-
-	e.set_display_col = function() {
-		reset_quicksearch()
-		e.display_field = check_field('display_col', e.display_col) || e.name_field
-	}
-	e.prop('display_col', {type: 'col'})
 
 	init_all()
 
@@ -5338,12 +5333,12 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 		return row && field ? nav.cell_input_val(row, field) : null
 	}
 
-	function set_input_values() {
+	function set_input_values(ev) {
 		if (range) {
-			e.input_value1 = e.get_input_val_for(field1)
-			e.input_value2 = e.get_input_val_for(field2)
+			e.set_prop('input_value1', e.get_input_val_for(field1), ev)
+			e.set_prop('input_value2', e.get_input_val_for(field2), ev)
 		} else {
-			e.input_value  = e.get_input_val_for(field)
+			e.set_prop('input_value', e.get_input_val_for(field), ev)
 		}
 	}
 
@@ -5374,12 +5369,12 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 		if (te != nav) return
 		if (f != field && f != field1 && f != field2) return
 		if (changes.input_val && !(ev && ev.target == e))
-			set_input_values()
+			set_input_values(ev)
 	})
 
-	e.listen('focused_row_changed', function(te, row) {
+	e.listen('focused_row_changed', function(te, row, row0, ev) {
 		if (te != nav) return
-		set_input_values()
+		set_input_values(ev)
 	})
 
 	// e.listen('display_vals_changed', update)
@@ -5395,13 +5390,13 @@ function field_name(e) {
 	return (e.label || e.name || S('value', 'value')).display_name()
 }
 
-// NOTE: this must work with values that are unconverted and invalid!
+// NOTE: this must work with values that are unparsed and invalid!
 function field_value(e, v) {
 	if (v == null) return 'null'
 	if (isstr(v)) return v
 	if (e.to_text)
 		v = e.to_text(v)
-	return v+''
+	return str(v)
 }
 
 add_validation_rule({
@@ -5450,39 +5445,30 @@ G.all_field_types = {
 	max_w: 2000,
 	align: 'left',
 	not_null: false,
+	required: false,
 	sortable: true,
 	maxlen: 256,
 	null_text : S('null_text', ''),
 	empty_text: S('empty_text', 'empty text'),
-	to_num: v => num(v, null),
-	from_num: return_arg,
 }
 
 all_field_types.to_text = function(v) {
 	return String(v)
 }
 
-all_field_types.from_text = function(s) {
-	s = s.trim()
-	return s !== '' ? s : null
-}
-
-all_field_types.format = function(s) {
-	return this.to_text(s)
-}
-
-all_field_types.format_text = function(s) {
-	return this.to_text(s)
-}
-
 all_field_types.fixed_width = 0
 
-all_field_types.draw = function(v, cx) {
-	let s = this.format_text(v)
+all_field_types.draw_text = function(s, cx) {
+	if (!cx)
+		return s
+	if (isnode(cx)) {
+		cx.set(s)
+		return true
+	}
 	cx.font = cx.text_font
 	if (cx.measure) {
 		cx.measured_width = cx.measureText(s).width + this.fixed_width
-		return
+		return true
 	}
 	let x
 	if (this.align == 'right')
@@ -5510,6 +5496,12 @@ all_field_types.draw = function(v, cx) {
 		cx.fillStyle = cx.fg_search
 		cx.fillText(s1, x, y)
 	}
+	return true
+}
+
+all_field_types.draw = function(v, cx) {
+	let s = this.to_text(v)
+	return this.draw_text(s, cx)
 }
 
 all_field_types.editor = function(opt) {
@@ -5522,7 +5514,7 @@ let pwd = {}
 field_types.password = pwd
 
 pwd.editor = function(opt) {
-	return passedit(opt)
+	return pass_input(opt)
 }
 
 // numbers
@@ -5530,20 +5522,13 @@ pwd.editor = function(opt) {
 let number = {align: 'right', decimals: 0, is_number: true}
 field_types.number = number
 
-number.editor = function(opt) {
-	return numedit(opt)
-}
-
-number.from_text = function(s) {
-	s = s.trim()
-	s = s !== '' ? s : null
-	let x = num(s)
-	return x != null ? x : s
-}
-
 number.to_text = function(s) {
 	let x = num(s)
 	return x != null ? x.dec(this.decimals) : s
+}
+
+number.editor = function(opt) {
+	return num_input(opt)
 }
 
 // file sizes
@@ -5551,10 +5536,7 @@ number.to_text = function(s) {
 let filesize = assign({}, number)
 field_types.filesize = filesize
 
-// TODO: filesize.from_text!
-
-filesize.is_small = function(s) {
-	let x = num(s)
+filesize.is_small = function(x) {
 	if (x == null)
 		return true
 	let min = this.filesize_min
@@ -5572,16 +5554,20 @@ filesize.to_text = function(s) {
 	return x.kbytes(dec, mag)
 }
 
-filesize.format = function(s) {
-	let small = this.is_small(s)
-	s = this.format_text(s)
-	return small ? span({class: 'dba-insignificant-size'}, s) : s
-}
-
-filesize.draw = function(s, cx) {
-	if (this.is_small(s))
-		cx.fg_text = cx.fg_disabled
-	all_field_types.draw.call(this, s, cx)
+filesize.draw = function(x, cx) {
+	let small = this.is_small(x)
+	let s = this.to_text(x)
+	if (isnode(cx)) {
+		cx.set(s)
+		cx.class('dba-insignificant-size', small)
+		return true
+	}
+	if (cx) {
+		if (small)
+			cx.fg_text = cx.fg_disabled
+		return this.draw_text(s, cx)
+	}
+	return s
 }
 
 filesize.scale_base = 1024
@@ -5603,52 +5589,45 @@ count.to_text = function(s) {
 
 // dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
 
-let date = {align: 'right', is_time: true}
+let date = {
+	align: 'right',
+	is_time: true,
+	has_time: false,
+	has_seconds: false,
+	has_fractions: false,
+	format: 'sql', // sql | time
+	min: parse_date('1000-01-01 00:00:00', 'SQL'),
+	max: parse_date('9999-12-31 23:59:59', 'SQL'),
+}
 field_types.date = date
 
-date.to_time = function(s, validate) {
-	if (s == null || s == '')
-		return null
-	return s.trim().parse_date('SQL', validate)
-}
-
-let a = []
-date.from_time = function(t) {
-	if (t == null)
-		return null
-	return t.date('SQL', this.has_time, this.has_seconds)
-}
-
-date.to_num   = date.to_time
-date.from_num = date.from_time
-
-date.to_text = function(s) {
-	let t = this.to_time(s, true)
-	if (t == null) return s // invalid
-	return t.date(null, this.has_time, this.has_seconds)
-}
-
-date.from_text = function(s) {
-	if (s == '') return null
-	let t = s.parse_date(null, true)
-	if (t == null) return s
-	return this.from_time(t)
-}
-
-date.format_text = function(s) {
-	let t = this.to_time(s, true)
-	if (t == null) return s // invalid
+date.to_text = function(v) {
+	if (!isnum(v)) // invalid
+		return str(v)
 	if (this.timeago)
-		return t.timeago()
-	return t.date(null, this.has_time, this.has_seconds)
+		return v.timeago()
+	return v.date(null, this.has_time, this.has_seconds, this.has_fractions)
 }
 
-// range of MySQL DATETIME type
-date.min = date.to_time('1000-01-01 00:00:00')
-date.max = date.to_time('9999-12-31 23:59:59')
+let inh_draw = all_field_types.draw
+date.draw = function(v, cx) {
+	if (isnode(cx)) {
+		cx.attr('timeago', !!this.timeago)
+		cx.time = t
+		cx.set(t.timeago())
+		return true
+	}
+	return inh_draw.call(this, v, cx)
+}
+
+date.to_json = function(t) {
+	if (this.format == 'sql')
+		return v.date('SQL', this.has_time, this.has_seconds, this.has_fractions)
+	return t
+}
 
 date.editor = function(opt) {
-	return dateedit(assign_opt({
+	return date_input(assign_opt({
 		align: 'right',
 		mode: opt.embedded ? 'fixed' : null,
 	}, opt))
@@ -5656,74 +5635,12 @@ date.editor = function(opt) {
 
 // timestamps
 
-let ts = {align: 'right', is_time: true}
+let ts = assign({}, date)
 field_types.time = ts
 
-ts.has_time = true // for calendar
-
-ts.to_time   = return_arg
-ts.from_time = return_arg
-
-ts.to_num   = return_arg
-ts.from_num = return_arg
-
-ts.to_text = function(v) {
-	if (isstr(v)) return v // invalid
-	return v.date('SQL', this.has_time, this.has_seconds)
-}
-
-ts.from_text = function(s) {
-	return s.trim().parse_date('SQL')
-}
-
+ts.has_time = true
 ts.min = 0
 ts.max = 2**32-1 // range of MySQL TIMESTAMP type
-
-ts.format = function(t) {
-	if (isstr(t)) return t // invalid
-	if (this.timeago)
-		return span({timeago: '', time: t}, t.timeago())
-	return t.date(null, this.has_time, this.has_seconds)
-}
-
-ts.format_text = function(t) {
-	if (isstr(t)) return t // invalid
-	if (this.timeago)
-		return t.timeago()
-	return t.date(null, this.has_time, this.has_seconds)
-}
-
-// parsing of: h m | h m s | hhmm | hhmmss
-// TODO: move this to glue.js date_parser() and use that.
-let _tt_out = [0, 0, 0]
-let parse_hms = function(s, has_seconds) {
-	let m = s.match(/\d+/g)
-	if (!m)
-		return
-	let H, M, S
-	if (m.length == 1) { // hhmm | hhmmss
-		if (m[0].length != 6 && m[0].length != 4)
-			return
-		H = num(m[0].slice(0, 2))
-		M = num(m[0].slice(2, 4))
-		S = num(m[0].slice(4, 6), 0)
-	} else { // h m | h m s
-		if (m.length != 3 && m.length != 2)
-			return
-		H = num(m[0])
-		M = num(m[1])
-		S = num(m[2], 0)
-	}
-	if (H > 23) return
-	if (M > 59) return
-	if (S > 59) return
-	if (!has_seconds && S)
-		return
-	_tt_out[0] = H
-	_tt_out[1] = M
-	_tt_out[2] = S
-	return _tt_out
-}
 
 // MySQL time
 
@@ -5737,13 +5654,6 @@ td.to_text = function(v) {
 	if (this.has_seconds)
 		s += ':' + t[2].base(10, 2)
 	return s
-}
-
-td.from_text = function(s, has_seconds) {
-	let t = parse_hms(s, this.has_seconds)
-	if (t == null) return // invalid
-	return t[0].base(10, 2) + ':' + t[1].base(10, 2)
-		+ ':' + (this.has_seconds ? t[2].base(10, 2) : '00')
 }
 
 td.editor = function(opt) {
@@ -5766,12 +5676,6 @@ tds.to_text = function(v) {
 	return s
 }
 
-tds.from_text = function(s) {
-	let t = parse_hms(s, this.has_seconds)
-	if (t == null) return s // invalid
-	return t[0] * 3600 + t[1] * 60 + t[2]
-}
-
 tds.editor = function(opt) {
 	return timeofdayedit(opt)
 }
@@ -5786,61 +5690,43 @@ d.to_text = function(v) {
 	return v.duration(this.duration_format)
 }
 
-// parse `N d[ays] N h[ours] N m[in] N s[ec]` in any order, spaces optional.
-let d_re = /(\d+)\s*([^\d\s])[^\d\s]*/g
-d.from_text = function(s) {
-	s = s.trim()
-	let m
-	let d = 0
-	d_re.lastIndex = 0 // reset regex state.
-	while ((m = d_re.exec(s)) != null) {
-		let x = num(m[1])
-		let t = m[2].lower()
-		if (t == 'd')
-			d += x * 3600 * 24
-		else if (t == 'h')
-			d += x * 3600
-		else if (t == 'm')
-			d += x * 60
-		else if (t == 's')
-			d += x
-		else
-			return s
-	}
-	return d
-}
-
 // booleans
 
-let bool = {align: 'center', min_w: 28, w: 40, is_boolean: true}
+let bool = {align: 'center', min_w: 28, w: 40, is_bool: true}
 field_types.bool = bool
 
-bool.from_text = function(s) {
-	return repl(repl(s, '', true), 'false', false)
-}
-
-bool.true_html = () => div({class: 'fa fa-check'})
-bool.true_text = null
-bool.false_text = ''
-
-bool.null_html = () => div({class: 'fa fa-square'})
-bool.null_text = null
-
-bool.format = function(v) {
-	return v
-		? this.true_html  ?? this.true_text
-		: this.false_text ?? this.false_text
-}
-
-bool.format_text = function(v) {
-	return v ? '\uf00c' : v == null ? '\uf0c8' : ''
+bool.draw_null = function(cx) {
+	if (isnode(cx)) {
+		cx.class('fa fa-square', true)
+		return true
+	}
+	if (cx) {
+		let text_font = cx.text_font
+		cx.text_font = cx.icon_font
+		all_field_types.draw.call(this, '\uf0c8', cx)
+		cx.text_font = text_font
+		return true
+	}
 }
 
 bool.draw = function(v, cx) {
-	let text_font = cx.text_font
-	cx.text_font = cx.icon_font
-	all_field_types.draw.call(this, v, cx)
-	cx.text_font = text_font
+	if (!isbool(v))
+		return bool.draw_null.call(this, cx)
+	if (isnode(cx)) {
+		cx.class('fa fa-check', v == true)
+		cx.class('fa-square', false)
+		return true
+	}
+	if (cx) {
+		if (!v)
+			return
+		let text_font = cx.text_font
+		cx.text_font = cx.icon_font
+		all_field_types.draw.call(this, '\uf00c', cx)
+		cx.text_font = text_font
+		return true
+	}
+	return v ? S('true', 'true') : S('false', 'false')
 }
 
 bool.editor = function(opt) {
@@ -5853,10 +5739,6 @@ bool.editor = function(opt) {
 
 let enm = {}
 field_types.enum = enm
-
-enm.init = function() {
-	this.known_values = set(words(this.enum_values))
-}
 
 enm.editor = function(opt) {
 	return dropdown(assign_opt({
@@ -5970,8 +5852,6 @@ icon.editor = function(opt) {
 
 let col = {}
 field_types.col = col
-
-col.convert = v => num(v) ?? v
 
 // google maps places
 
