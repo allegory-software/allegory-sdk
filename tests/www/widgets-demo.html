@@ -52,8 +52,8 @@ css('#result_split', 'S v b-l shrinks scroll-auto')
 css('#buttons, #result_buttons', 'h b-b')
 css('#demo_list', 'clip-x scroll-y-auto p-t noselect')
 css('#code', 'S')
-css('#result', 'm-4 scroll-x-auto resize-x')
-css('#inspect', 'S b-t')
+css('#result', 'm-4 scroll-x-auto resize-x', `flex: 3;`)
+css('#inspect', 'b-t', `flex: 1;`)
 css_state('#code:focus', 'no-outline')
 css('.demo-list-item', '', `padding: 0.2em .5em;`)
 css_state('button[pressed]', '', `background: var(--bg-button-active);`)
@@ -79,14 +79,14 @@ css_state('button[pressed]', '', `background: var(--bg-button-active);`)
 	</div>
 	<div id=result_split>
 		<div id=result_buttons class="smaller p-x-05 gap-x-05 h-r">
-			<button class="layout-btn" key=frame    layout-classes="frame h-s S shrinks">H-S + Frame</button>
+			<button class="layout-btn" key=frame    layout-classes="frame h-s shrinks">H-S + Frame</button>
 			<button class="layout-btn" key=inline   layout-classes="inline">Inline</button>
 			<button class="layout-btn" key=block    layout-classes="block ">Block</button>
-			<button class="layout-btn" key=flex-h-t layout-classes="h-t S shrinks  ">Flex H-T</button>
-			<button class="layout-btn" key=flex-h-s layout-classes="h-s S shrinks  ">Flex H-S</button>
-			<button class="layout-btn" key=flex-v-s layout-classes="v-s S shrinks  ">Flex V-S</button>
-			<button class="layout-btn" key=flex-v-l layout-classes="v-l S shrinks  ">Flex V-L</button>
-			<button class="layout-btn" key=grid     layout-classes="grid shrinks   ">Grid</button>
+			<button class="layout-btn" key=flex-h-t layout-classes="h-t shrinks  ">Flex H-T</button>
+			<button class="layout-btn" key=flex-h-s layout-classes="h-s shrinks  ">Flex H-S</button>
+			<button class="layout-btn" key=flex-v-s layout-classes="v-s shrinks  ">Flex V-S</button>
+			<button class="layout-btn" key=flex-v-l layout-classes="v-l shrinks  ">Flex V-L</button>
+			<button class="layout-btn" key=grid     layout-classes="grid shrinks ">Grid</button>
 		</div>
 		<div id=result></div>
 		<div id=inspect></div>
@@ -1162,13 +1162,19 @@ my_form.on('submit', function() {
 <!--------------------------------------------------------------------------->
 
 <xmp id=time_picker_demo>
-<time-picker value="0:59:12" has-seconds></time-picker>
+<time-picker id=my_tp value="0:59:12" precision=s></time-picker>
+<script run>
+my_tp.on('input', pr)
+</script>
 </xmp>
 
 <!--------------------------------------------------------------------------->
 
 <xmp id=datetime_picker_demo>
-<datetime-picker value="2345-7-6 00:34:59" has-seconds></datetime-picker>
+<datetime-picker id=my_dtp value="2345-7-6 00:34:59" precision=s></datetime-picker>
+<script run>
+my_dtp.on('input', pr)
+</script>
 </xmp>
 
 <!--------------------------------------------------------------------------->
@@ -1177,11 +1183,11 @@ my_form.on('submit', function() {
 <form id=my_form>
 <div><date-input       name=d1 placeholder="Birth date"></date-input></div>
 <div><date-input       name=d2 value="1900-1-1" placeholder="Birth date"></date-input></div>
-<div><timeofday-input  name=d3                             input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
-<div><timeofday-input  name=d4 has-seconds                input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
-<div><timeofday-input  name=d5 has-seconds has-fractions input_value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
-<div><datetime-input   name=d6 has-seconds has-fractions input_value="1900-1-1 0:0:0.1" placeholder="Meet at"></datetime-input></div>
-<div><datetime-input   name=d7 has-seconds has-fractions input_value="2000-1-1 0:0:0.1" placeholder="Meet at" format=sql></datetime-input></div>
+<div><timeofday-input  name=d3                           value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
+<div><timeofday-input  name=d4 precision=s               value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
+<div><timeofday-input  name=d5 precision=ms value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
+<div><datetime-input   name=d6 precision=ms value="1900-1-1 0:0:0.1" min="2000-1-1" placeholder="Meet at"></datetime-input></div>
+<div><datetime-input   name=d7 precision=ms value="2000-1-1 0:0:0.1" placeholder="Meet at" format=sql></datetime-input></div>
 <div><date-range-input name1=d8_1 name2=d8_2 value1="2022-1-18" value2="2022-2-3"></date-range-input></div>
 <button>Submit</button>
 </form>
@@ -1369,7 +1375,7 @@ result.add(g)
 <!--------------------------------------------------------------------------->
 
 <xmp id=form_demo>
-<form id=my_form class="g-h g-m g-2col gap-x" style="grid-template-columns: 5em auto">
+<form id=my_form class="g-h ga-m g-2col gap-x" style="grid-template-columns: 5em auto">
 	<checkbox name=check1 checked-value=c1 class="self-h-c" id=check1></checkbox><label for=check1>Check me baby</label>
 	<radio  name=radio1 checked-value=r1 class="self-h-c" id=radio1 group=g1></radio><label for=radio1>Pick me</label>
 	<radio  name=radio1 checked-value=r2 class="self-h-c" id=radio2 group=g1 checked></radio><label for=radio2>No, pick me!</label>
@@ -1395,7 +1401,7 @@ result.add(g)
 			width: var(--w-input);
 		}
 	</style>
-	<tags-input name=tags1 nowrap value="Apples Bananas Mangos" valid-tags="Apples Bananas"></tags-input>
+	<tags-input id=tags_input1 name=tags1 nowrap value="Apples Bananas Mangos" valid-tags="Apples Bananas"></tags-input>
 	<d></d><dropdown name=dd1 value=ban>
 		<d value=app searchable>Apples</d>
 		<d value=ban searchable>Bananas</d>
@@ -1413,13 +1419,13 @@ result.add(g)
 	></date-input>
 	<d></d><timeofday-input
 		name=time1
-		input_value="00:00:00.2"
-		has-seconds placeholder="Meet at"
+		value="00:00:00.2"
+		precision=s placeholder="Meet at"
 	></timeofday-input>
 	<d></d><datetime-input
 		name=datetime1
-		input_value="2022-1-18 12:34:56"
-		has-seconds
+		value="2022-1-18 12:34:56"
+		precision=s
 		placeholder="Meet at"
 	></datetime-input>
 	<d></d><date-range-input
@@ -1513,55 +1519,103 @@ listen('validate', function(e) {
 				placeholder="Put Your Name Here"
 			></field>
 			<field
-				name=desc
-			></field>
-			<field
 				name=active
 				type=bool
+			></field>
+			<field
+				name=min_price
+				type=number
+				min=10
+				max=90
+				from=0
+				to=100
+			></field>
+			<field
+				name=max_price
+				type=number
+				min=10
+				max=90
+				from=0
+				to=100
 			></field>
 			<field
 				name=fruit
 				type=enum
 				enum_values="apple banana"
 			></field>
+			<field
+				name=start_date
+				type=date
+				min="2020-01-01"
+				max="2021-01-01"
+			></field>
+			<field
+				name=end_date
+				type=date
+				min="2021-01-01"
+				max="2022-01-01"
+			></field>
+
+			<row></row>
 			<row
 				:id=1
-				name="Too Long1"
-				desc="Le Foo"
-				fruit="apple"
-			></row>
-			<row
-				:id=1
-				name="Bar"
-				desc="Le Bar"
-				active=false
+				name="Errors"
+				active=wrong
+				min_price=-10
+				max_price=200
 				fruit="tomato"
+				start_date="wrong"
+				end_date="1990-01-01"
 			></row>
 			<row
 				:id=3
-				name="Too Long2"
-				desc="Le Baz"
+				name="Good"
 				active
+				min_price=40
+				max_price=60
+				fruit="apple"
+				start_date="2021-01-01"
+				end_date="2021-02-01"
 			></row>
+
 		</rowset>
 	</grid>
-	<div class="m-l-2 g-t ga-m g-2col">
-		<label          nav=my_grid col=id></label>
-		<num-input      id=my_id   nav=my_grid col=id buttons=up-down></num-input>
-		<label          nav=my_grid col=name></label>
-		<text-input     id=my_name nav=my_grid col=name></text-input>
-		<label          nav=my_grid col=desc></label>
-		<textarea-input id=my_desc nav=my_grid col=desc></textarea-input>
-		<label          nav=my_grid col=active></label>
-		<checkbox       id=my_active nav=my_grid col=active></checkbox>
-		<d></d>
-		<toggle         id=my_active nav=my_grid col=active></toggle>
+	<div class="m-l-2 g-t ga-m g-2col gap-x">
+		<label          nav=my_grid col=id                  ></label>
+		<num-input      nav=my_grid col=id buttons=up-down  ></num-input>
+
+		<label          nav=my_grid col=name ></label>
+		<text-input     nav=my_grid col=name ></text-input>
+
+		<label          nav=my_grid col=name ></label>
+		<textarea-input nav=my_grid col=name ></textarea-input>
+
+		<label          nav=my_grid col=active ></label>
+		<checkbox       nav=my_grid col=active ></checkbox>
+		<label          nav=my_grid col=active ></label>
+		<toggle         nav=my_grid col=active ></toggle>
+
+		<label          nav=my_grid col=min_price ></label>
+		<slider         nav=my_grid col=min_price ></slider>
+		<label          nav=my_grid col=max_price ></label>
+		<slider         nav=my_grid col=max_price ></slider>
+		<label          for=my_dr1 >Price Range</label>
+		<range-slider   nav=my_grid col1=min_price col2=max_price id=my_pr1 ></range-slider>
+
 		<radio          nav=my_grid id=my_fruit1 col=fruit checked-value=apple  ></radio>
-		<label for=my_fruit1>Pick an apple</label>
+		<label          for=my_fruit1 >Pick an apple</label>
 		<radio          nav=my_grid id=my_fruit2 col=fruit checked-value=banana ></radio>
-		<label for=my_fruit2>Pick a banana</label>
-		<label nav=my_grid col=fruit></label>
+		<label          for=my_fruit2>Pick a banana</label>
+
+		<label          nav=my_grid col=fruit></label>
 		<select-button  nav=my_grid col=fruit></select-button>
+
+		<label          nav=my_grid col=start_date ></label>
+		<date-input     nav=my_grid col=start_date ></date-input>
+		<label          nav=my_grid col=end_date   ></label>
+		<datetime-input nav=my_grid col=end_date   ></datetime-input>
+		<label          for=my_dr1>Date Range</label>
+		<date-range-input nav=my_grid col1=start_date col2=end_date id=my_dr1 ></date-range-input>
 	</div>
 </split>
 </xmp>

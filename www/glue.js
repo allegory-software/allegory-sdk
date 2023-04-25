@@ -22,6 +22,14 @@ LOGIC
 	strict_or(x, z)
 	repl(x, v, z)
 
+TYPE CONVERSIONS
+
+	num(s[, z]) -> n | z
+	str(v) -> s
+	bool(s) -> b
+	null_bool(s) -> b | null
+	bool_attr(s[, z]) -> b | z
+
 MATH
 
 	inf
@@ -37,7 +45,6 @@ MATH
 	sign(x)
 	strict_sign(x)
 	lerp(x, x0, x1, y0, y1)
-	num(s[, z])
 	mod(a, b)
 	nextpow2(x)
 	x.dec([decimals])
@@ -78,8 +85,8 @@ STRINGS
 	s.subst('{0} {1}', a0, a1, ...)
 	s.starts(s)
 	s.ends(s)
-	s.upper()
-	s.lower()
+	s.upper()   upper(s)
+	s.lower()   lower(s)
 	s.len
 	s.num([z])
 	s.display_name()
@@ -144,25 +151,37 @@ TYPED ARRAYS
 		.grow_type(arr_type|max_index|[...]|arr, [preserve_contents=true])
 		.setlen(len)
 
-TIME & DATE
+DATE/TIME CALCULATIONS
 
 	time() -> ts
 	time(y, m, d, H, M, s, ms) -> ts
 	time(date_str) -> ts
 	[day|month|year|week](ts[, offset], [local]) -> ts
 	days(delta_ts) -> ds
-	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts, [local])
-	set_[year|month|month_day|hours|minutes|seconds](ts)
+	[year|month|week_day|month_day|hours|minutes|seconds]_of(ts, [local]) -> n
+	set_[year|month|month_day|hours|minutes|seconds](ts, n)
+	week_start_offset([country])
+
+DATE/TIME FORMATTING
+
 	locale()
+
 	weekday_name (ts, ['long'], [locale])
 	month_name   (ts, ['long'], [locale])
 	month_year   (ts, ['long'], [locale])
-	week_start_offset([country])
-	ds.duration(['approx[+s]'|'long']) -> s
-	ts.timeago() -> s
-	ts.date([locale], [with_time], [with_seconds], [with_fractions]) -> s
-	parse_date(s, [locale], [validate], [with_time], [with_seconds], [with_fractions]) -> ts
-	parse_timeofday(s, [validate], [with_seconds], [with_fractions]) -> ts
+
+	format_timeofday(ds, ['s|ms']) -> s
+	format_date(ts, [locale], ['d|s|ms']) -> s
+	format_duration(ds, ['approx[+s]'|'long']) -> s
+	format_timeago(ts) -> s
+
+DATE/TIME PARSING
+
+	parse_date(s, [locale], [validate], ['d|s|ms']) -> ts
+	parse_timeofday(s, [validate], ['s|ms']) -> ds
+	parse_duration(s) -> ds
+
+	date_placeholder_text([locale])
 
 FILE SIZE FORMATTING
 
@@ -188,7 +207,7 @@ TIMERS
 
 SERIALIZATION
 
-	json_arg(s) -> t
+	[try_]json_arg(s) -> t
 	json(t) -> s
 
 CLIPBOARD
@@ -309,6 +328,28 @@ G.strict_or = function(x, z) { return x !== undefined ? x : z }
 // single-value filter.
 G.repl = function(x, v, z) { return x === v ? z : x }
 
+// type conversion -----------------------------------------------------------
+
+// NOTE: returns z or undefined for failure.
+G.num = function(s, z) {
+	let x = parseFloat(s)
+	return x != x ? z : x
+}
+
+G.bool = b => !!b
+G.null_bool = b => b != null ? !!b : null
+
+// parse a bool html attr value.
+// NOTE: returns z or undefined for failure.
+G.bool_attr = function(s, z) {
+	if (s == 'false') return false
+	if (s == '') return true
+	if (s == 'true') return true
+	return z
+}
+
+G.str = String
+
 // math ----------------------------------------------------------------------
 
 G.inf = Infinity
@@ -340,11 +381,6 @@ G.strict_sign = function(x) {
 
 G.lerp = function(x, x0, x1, y0, y1) {
 	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
-}
-
-G.num = function(s, z) {
-	let x = parseFloat(s)
-	return x != x ? z : x
 }
 
 // % that works with negative numbers.
@@ -533,6 +569,9 @@ alias(String, 'starts', 'startsWith')
 alias(String, 'ends'  , 'endsWith')
 alias(String, 'upper' , 'toUpperCase')
 alias(String, 'lower' , 'toLowerCase')
+
+G.lower = s => s.lower()
+G.upper = s => s.upper()
 
 property(String, 'len', function() { return this.length })
 
@@ -1291,43 +1330,48 @@ G.week_start_offset = function(country1) {
 
 {
 
-// NOTE: the parsers accept negative numbers in time positions but not in dates.
-// The reason is to allow decrementing past zero, eg. `01:-1` => `00:59`.
+// NOTE: the parsers accept negative numbers in time positions to allow
+// decrementing past zero, eg. `01:-1` => `00:59`. We don't allow that in
+// dates because the date separator can be '-'.
 
 let time_re = /(\-?\d+)\s*:\s*(\-?\d+)\s*(?::\s*(\-?\d+))?\s*(?:[\:\.]\s*(\-?)(\d+))?/;
 let date_re = /(\d+)\s*[\-\/\.,\s]\s*(\d+)\s*[\-\/\.,\s]\s*(\d+)/;
 let timeonly_re = new RegExp('^\\s*' + time_re.source + '\\s*$')
 let datetime_re = new RegExp('^\\s*' + date_re.source + '(?:\\s+' + time_re.source + '\\s*)?$')
 
-// NOTE: validate=false accepts any timestamp including negative values but still clamps
-// the input to a [0..24h) interval.
-// NOTE: with_seconds=false ignores seconds, doesn't validate them, same with fractions.
-G.parse_timeofday = function(s, validate, with_seconds, with_fractions) {
+// NOTE: validate=false accepts any timestamp including negative values but still
+// mods the input to the [0..24h) interval.
+// NOTE: specifying less precision ignores precision parts, doesn't validate them.
+// NOTE: returns undefined for failure like num().
+G.parse_timeofday = function(s, validate, precision) {
 	let t = s
 	if (isstr(s)) {
 		let tm = timeonly_re.exec(s)
 		if (!tm)
-			return null
+			return
+		precision = precision || 'ms' // defaults to highest
+		let with_s  = precision == 's' || precision == 'ms'
+		let with_ms = precision == 'ms'
 		let H = num(tm[1])
 		let M = num(tm[2])
-		let S = with_seconds && num(tm[3]) || 0
-		let fs = with_fractions && tm[5] || ''
-		let f = with_fractions && (tm[4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
+		let S = with_s && num(tm[3]) || 0
+		let fs = with_ms && tm[5] || ''
+		let f = with_ms && (tm[4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
 		t = H * 3600 + M * 60 + S + f
 		if (validate)
-			if (hours_of(t) != H || minutes_of(t) != M || (with_seconds && seconds_of(t) != S))
-				return null
+			if (hours_of(t) != H || minutes_of(t) != M || (with_s && seconds_of(t) != S))
+				return
 	}
 	if (validate) {
 		if (t < 0 || t >= 3600 * 24)
-			return null
+			return
 	} else {
 		t = mod(t, 3600 * 24)
 	}
 	return t
 }
-method(String, 'parse_timeofday', function(validate, with_seconds, with_fractions) {
-	return parse_timeofday(this.valueOf(), validate, with_seconds, with_fractions)
+method(String, 'parse_timeofday', function(validate, precision) {
+	return parse_timeofday(this.valueOf(), validate, precision)
 })
 
 let date_parts = memoize(function(locale) {
@@ -1339,6 +1383,7 @@ let date_parts = memoize(function(locale) {
 	return dtf.formatToParts(0)
 })
 
+// NOTE: returns undefined for failure like num().
 let date_parser = memoize(function(locale) {
 	let yi, mi, di
 	let i = 1
@@ -1350,18 +1395,22 @@ let date_parser = memoize(function(locale) {
 	if (i != 4) { // failed? default to `m d y`
 		mi = 1; di = 2; yi = 3
 	}
-	return function(s, validate, with_time, with_seconds, with_fractions) {
+	return function(s, validate, precision) {
 		let dm = datetime_re.exec(s)
 		if (!dm)
-			return null
+			return
+		precision = precision || 'ms' // defaults to highest
+		let with_time = precision != 'd'
+		let with_s    = precision == 's' || precision == 'ms'
+		let with_ms   = precision == 'ms'
 		let y = num(dm[yi])
 		let m = num(dm[mi])
 		let d = num(dm[di])
 		let H = with_time && num(dm[3+1]) || 0
 		let M = with_time && num(dm[3+2]) || 0
-		let S = with_seconds && num(dm[3+3]) || 0
-		let fs = with_fractions && dm[3+5] || ''
-		let f = with_fractions && (dm[3+4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
+		let S = with_s && num(dm[3+3]) || 0
+		let fs = with_ms && dm[3+5] || ''
+		let f = with_ms && (dm[3+4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
 		let t = time(y, m, d, H, M, S) + f
 		if (validate)
 			if (
@@ -1370,17 +1419,17 @@ let date_parser = memoize(function(locale) {
 				|| month_day_of(t) != d
 				|| (with_time && hours_of(t) != H)
 				|| (with_time && minutes_of(t) != M)
-				|| (with_seconds && seconds_of(t) != S)
-			) return null
+				|| (with_s && seconds_of(t) != S)
+			) return
 		return t
 	}
 })
 
-G.parse_date = function(s, locale1, validate, with_time, with_seconds, with_fractions) {
-	return isstr(s) ? date_parser(locale1 || locale())(s, validate, with_time, with_seconds, with_fractions) : s
+G.parse_date = function(s, locale1, validate, precision) {
+	return isstr(s) ? date_parser(locale1 || locale())(s, validate, precision) : s
 }
-method(String, 'parse_date', function(locale1, validate, with_time, with_seconds, with_fractions) {
-	return date_parser(locale1 || locale())(this.valueOf(), validate, with_time, with_seconds, with_fractions)
+method(String, 'parse_date', function(locale1, validate, precision) {
+	return parse_date(this.valueOf(), locale1, validate, precision)
 })
 
 let a1 = [0, ':', 0, ':', 0]
@@ -1389,18 +1438,20 @@ let seconds_format = new Intl.NumberFormat('nu', {
 	minimumIntegerDigits: 2,
 	maximumFractionDigits: 6, // mySQL-compatible
 })
-G.format_timeofday = function(t, with_seconds, with_fractions) {
+G.format_timeofday = function(t, precision) {
+	let with_s  = precision == 's' || precision == 'ms'
+	let with_ms = precision == 'ms'
 	let H = floor(t / 3600)
 	let M = floor(t / 60) % 60
 	let Sf = t % 60
 	let S = floor(Sf)
-	if (with_seconds) {
+	if (with_s) {
 		if (H < 10) H = '0'+H
 		if (M < 10) M = '0'+M
 		if (S < 10) S = '0'+S
 		a1[0] = H
 		a1[2] = M
-		a1[4] = (with_fractions && Sf != S) ? seconds_format.format(Sf) : S
+		a1[4] = (with_ms && Sf != S) ? seconds_format.format(Sf) : S
 		return a1.join('')
 	} else {
 		if (H < 10) H = '0'+H
@@ -1410,8 +1461,8 @@ G.format_timeofday = function(t, with_seconds, with_fractions) {
 		return a2.join('')
 	}
 }
-method(Number, 'timeofday', function(with_seconds, with_fractions) {
-	return format_timeofday(this.valueOf(), with_seconds, with_fractions)
+method(Number, 'timeofday', function(precision) {
+	return format_timeofday(this.valueOf(), precision)
 })
 
 let date_formatter = memoize(function(locale) {
@@ -1431,7 +1482,10 @@ let date_formatter = memoize(function(locale) {
 	Mi = i++; a1[i++] = ':'
 	Si = i++;
 	let a2 = a1.slice(0, -2) // without seconds
-	return function(t, with_time, with_seconds, with_fractions) {
+	return function(t, precision) {
+		let with_time = precision != 'd'
+		let with_s    = precision == 's' || precision == 'ms'
+		let with_ms   = precision == 'ms'
 		// if this is slow, see
 		//   http://git.musl-libc.org/cgit/musl/tree/src/time/__secs_to_tm.c?h=v0.9.15
 		_d.setTime(t * 1000)
@@ -1444,7 +1498,7 @@ let date_formatter = memoize(function(locale) {
 		let Sf = S + t - floor(t)
 		if (m < 10 && md > 1) m = '0'+m
 		if (d < 10 && dd > 1) d = '0'+d
-		if (with_seconds) {
+		if (with_s) {
 			if (H < 10) H = '0'+H
 			if (M < 10) M = '0'+M
 			if (S < 10) S = '0'+S
@@ -1453,7 +1507,7 @@ let date_formatter = memoize(function(locale) {
 			a1[di] = d
 			a1[Hi] = H
 			a1[Mi] = M
-			a1[Si] = (with_fractions && Sf != S) ? seconds_format.format(Sf) : S
+			a1[Si] = (with_ms && Sf != S) ? seconds_format.format(Sf) : S
 			return a1.join('')
 		} else if (with_time) {
 			if (H < 10) H = '0'+H
@@ -1472,8 +1526,11 @@ let date_formatter = memoize(function(locale) {
 		}
 	}
 })
-method(Number, 'date', function(locale1, with_time, with_seconds, with_fractions) {
-	return date_formatter(locale1 || locale())(this.valueOf(), with_time, with_seconds, with_fractions)
+G.format_date = function(t, locale1, precision) {
+	return date_formatter(locale1 || locale())(t, precision)
+}
+method(Number, 'date', function(locale, precision) {
+	return format_date(this.valueOf(), locale, precision)
 })
 
 let _date_placeholder_text = memoize(function(locale) {
@@ -1492,13 +1549,42 @@ G.date_placeholder_text = function(locale1) {
 
 }
 
-// time formatting -----------------------------------------------------------
+// duration parsing & formatting ---------------------------------------------
+
+// parse `N d[ays] N h[ours] N m[in] N s[ec]` in any order, spaces optional.
+// NOTE: returns undefined for failure like num().
+// TODO: years and months!
+// TODO: multi-language.
+let d_re = /(\d+)\s*([^\d\s])[^\d\s]*/g
+G.parse_duration = function(s) {
+	s = s.trim()
+	let m
+	let d = 0
+	d_re.lastIndex = 0 // reset regex state.
+	while ((m = d_re.exec(s)) != null) {
+		let x = num(m[1])
+		let t = m[2].lower()
+		if (t == 'd')
+			d += x * 3600 * 24
+		else if (t == 'h')
+			d += x * 3600
+		else if (t == 'm')
+			d += x * 60
+		else if (t == 's')
+			d += x
+		else
+			return
+	}
+	return d
+}
+method(String, 'parse_duration', function() {
+	return parse_duration(this.valueOf())
+})
 
 {
 let a = []
-method(Number, 'duration', function(format) {  // approx[+s] | long | null
-	let ss = this.valueOf()
-	let s = abs(this)
+G.format_duration = function(ss, format) {  // approx[+s] | long | null
+	let s = abs(ss)
 	if (format == 'approx') {
 		if (s > 2 * 365 * 24 * 3600)
 			return S('n_years', '{0} years', ss / (365 * 24 * 3600).dec())
@@ -1539,13 +1625,19 @@ method(Number, 'duration', function(format) {  // approx[+s] | long | null
 			return (ss < 0 ? '-' : '') + a.join(' ')
 		}
 	}
-})
 }
+}
+method(Number, 'duration', function(format) {
+	return format_duration(this.valueOf(), format)
+})
 
-method(Number, 'timeago', function() {
-	let d = time() - this
+G.format_timeago = function(t) {
+	let d = time() - t
 	return (d > -1 ? S('time_ago', '{0} ago') : S('in_time', 'in {0}'))
 		.subst(abs(d).duration('approx'))
+}
+method(Number, 'timeago', function() {
+	return format_timeago(this.valueOf())
 })
 
 // file size formatting ------------------------------------------------------
@@ -1676,8 +1768,18 @@ G.timer = function(f) {
 
 // serialization -------------------------------------------------------------
 
-G.json_arg = (s) => isstr(s) ? JSON.parse(s) : s
+G.json_arg = s => isstr(s) ? JSON.parse(s) : s
 G.json = JSON.stringify
+
+G.try_json_arg = function(s) {
+	if (!isstr(s))
+		return s
+	try {
+		return JSON.parse(s)
+	} catch {
+		// let it return undefined
+	}
+}
 
 // clipboard -----------------------------------------------------------------
 
