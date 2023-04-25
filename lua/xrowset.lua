@@ -49,8 +49,7 @@
 		hour_step        : n             for the time picker
 		minute_step      : n             for the time picker
 		second_step      : n             for the time picker
-		has_time         : t             date type has time
-		has_seconds      : f             time has seconds
+		precision        : 'd|s|ms'      date type precision
 		timeago          : f             format as relative time (see timeago())
 		duration_format  :               format for duration type (see duration())
 		filesize_decimals: 0             decimals, for filesize type
@@ -109,7 +108,7 @@ local client_field_attrs = {
 	enum_values=1, enum_texts=1, not_null=1, min=1, max=1, decimals=1, maxlen=1,
 	lookup_rowset_name=1, lookup_cols=1, display_col=1, name_col=1,
 	w=1, min_w=1, max_w=1, display_width=1,
-	hour_step=1, minute_step=1, second_step=1, has_time=1, has_seconds=1,
+	hour_step=1, minute_step=1, second_step=1, precision=1,
 	timeago=1, duration_format=1,
 	filesize_decimals=1, filesize_magnitude=1, filesize_min=1,
 }
@@ -461,7 +460,8 @@ function virtual_rowset(init, ...)
 				w = field.hidden and 1 or w and min(32, w)
 				local fmt
 				if field.type == 'date' then
-					fmt = field.has_time and (field.has_seconds and dts or dt) or d
+					fmt = field.precision == 'd' and d
+						or field.precision == 's' and dts or dt
 				end
 				if w or fmt then
 					ws:set_column(i-1, i-1, w, fmt)

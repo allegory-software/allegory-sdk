@@ -25,7 +25,7 @@ DATE & TIME FORMATTING
 	date('*d[t][s]', [t], [country]) -> s      format date/time for (current) country
 	duration(s, ['approx[+s]'|'long']) -> s    format a duration in seconds
 	timeago([utc, ]t[, from_t]) -> s           format relative time
-	timeofday(seconds) -> s                    format time of day
+	timeofday(['s']) -> s                      format time of day
 	week_start([country]) -> n                 week start in country; 0=Sunday
 
 LANG/COUNTRY/CURRENCY DB SCHEMA
@@ -735,11 +735,11 @@ local
 	os_date, floor, format, now, type =
 	os.date, floor, format, now, type
 
-function timeofday(t, with_seconds)
+function timeofday(t, precision)
 	local h = floor(t / 3600) % 24
 	local m = floor(t / 60) % 60
 	local s = t % 60
-	return format(with_seconds and '%02d:%02d:%02d' or '%02d:%02d', h, m, s)
+	return format(precision == 's' and '%02d:%02d:%02d' or '%02d:%02d', h, m, s)
 end
 
 --extended os_date with '*d[t][s]' formatting based on current thread's country.

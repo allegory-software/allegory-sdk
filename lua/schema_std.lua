@@ -14,11 +14,11 @@ local
 	memoize, kbytes =
 	memoize, kbytes
 
-local glue_timeago   = timeago
-local glue_timeofday = timeofday
-local glue_duration  = duration
-local glue_date      = date
-local string_format  = format
+local format_timeago   = timeago
+local format_timeofday = timeofday
+local format_duration  = duration
+local format_date      = date
+local string_format    = format
 
 local datetime_to_timestamp = function(s) return mysql_datetime_to_timestamp(s) end
 local timestamp_to_datetime = function(t) return mysql_timestamp_to_datetime(t) end
@@ -120,44 +120,37 @@ return function()
 	types.timeofday = {type = 'timeofday', align = 'center', mysql_type = 'time', tarantool_type = 'number',
 		to_number   = time_to_seconds,
 		from_number = seconds_to_time,
-		has_seconds = false,
 	}
 	types.timeofday_s = {timeofday}
 
 	types.timeofday_in_seconds = {
 		type = 'timeofday_in_seconds',
 		align = 'center', mysql_type = 'double', tarantool_type = 'number',
-		has_seconds = false,
 	}
 	types.timeofday_in_seconds_s = {timeofday_in_seconds}
 
 	types.date      = {type = 'date', mysql_type = 'date', tarantool_type = 'number',
 		w = 80,
+		precision = 'd',
 		mysql_to_sql       = date_to_sql,
 		mysql_to_tarantool = datetime_to_timestamp,
 		to_number          = datetime_to_timestamp,
 		from_number        = timestamp_to_datetime,
-		has_time = false,
-		has_seconds = false,
 	}
-	types.datetime   = {date, mysql_type = 'datetime',
-		w = 140,
-		has_time = true,
-		has_seconds = false,
-	}
-	types.datetime_s = {datetime, has_seconds = true, w = 160}
+	types.datetime   = {date, mysql_type = 'datetime', w = 140}
+	types.datetime_s = {datetime, precision = 's', w = 160}
 	types.timeago    = {datetime_s, timeago = true}
 
 	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `datetime` instead,
 	--which works the same as `timestamp` as long as you set the server timezone to UTC.
-	--types.timestamp   = {date, mysql_type = 'timestamp', has_time = true, has_seconds = false}
-	--types.timestamp_s = {date, mysql_type = 'timestamp', has_time = true}
+	--types.timestamp   = {datetime, mysql_type = 'timestamp'}
+	--types.timestamp_s = {datetime, mysql_type = 'timestamp', precision = 's'}
 
 	--timestamp-based types to use in virtual rowsets (no parsing, holds time() values).
 	types.time_date    = {double, type = 'time', align = 'center', tarantool_type = 'number'}
-	types.time         = {time_date, has_time = true, has_seconds = false, has_ms = false, w = 80}
-	types.time_s       = {time, has_ms = false}
-	types.time_ms      = {time}
+	types.time         = {time_date, w = 80}
+	types.time_s       = {time, precision = 's'}
+	types.time_ms      = {time, precision = 'ms'}
 	types.time_timeago = {time_s, timeago = true}
 
 	types.duration   = {double, type = 'duration', align = 'right'}
@@ -219,24 +212,26 @@ return function()
 	end
 
 	function type_attrs.timeofday_in_seconds.to_text(s, f)
-		return glue_timeofday(s, f.has_seconds)
+		return format_timeofday(s, f.precision)
 	end
 
 	function type_attrs.timeago.to_text(d)
-		return glue_timeago(datetime_to_timestamp(d))
+		return format_timeago(datetime_to_timestamp(d))
 	end
 
 	function type_attrs.time.to_text(t, f)
 		if f.timeago then
-			return glue_timeago(t)
+			return format_timeago(t)
 		else
-			return glue_date(f.has_time and (f.has_seconds and '%Y-%m-%d %H:%M:%S'
-				or '%Y-%m-%d %H:%M') or '%Y-%m-%d', t)
+			return format_date(
+				f.precision == 's' and '%Y-%m-%d %H:%M:%S'
+				or f.precision == 'd' and '%Y-%m-%d'
+				or '%Y-%m-%d %H:%M', t)
 		end
 	end
 
 	function type_attrs.duration.to_text(n, f)
-		return glue_duration(n, f.duration_format)
+		return format_duration(n, f.duration_format)
 	end
 
 	function type_attrs.filesize.to_text(n, f)
