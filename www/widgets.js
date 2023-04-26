@@ -5167,7 +5167,7 @@ let slider_widget = function(e, range) {
 			let tfr = thumb.validator && thumb.validator.first_failed_result
 			let efr = e.validator && e.validator.first_failed_result
 			let v = e['input_value'+thumb.K]
-			let a = [field_value(thumb, v)]
+			let a = [field_value(range ? thumb : e, v)]
 			if (tfr && tfr.error) a.push(tfr.error)
 			if (efr && efr.error) a.push(efr.error)
 			thumb.tooltip.text = a.join_nodes(tag('br'))
@@ -6729,7 +6729,7 @@ css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition becau
 css('.dropdown-chevron', 'small ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
-css('.dropdown-xbutton', 'm0 p0 label smaller')
+css('.dropdown-xbutton', 'm0 p0 label smaller', `padding-top: 2px;`)
 css('.dropdown-xbutton::before', 'fa fa-times lh1')
 css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
 css('.dropdown[align=right] .dropdown-value'  , 'h-r', `order: 3;`)
