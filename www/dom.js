@@ -3896,6 +3896,7 @@ e.make_popup = function(target, side, align) {
 	e.do_position_popup = noop
 
 	e.on_position(function() {
+
 		if (e.hidden)
 			return
 
@@ -3959,22 +3960,6 @@ e.make_popup = function(target, side, align) {
 
 	})
 
-	e.property('target_rect',
-		function() {
-			return domrect(
-				e.popup_x1,
-				e.popup_y1,
-				e.popup_x2 - e.popup_x1,
-				e.popup_y2 - e.popup_y1
-			)
-		}, function(r) {
-			e.popup_x1 = r.x1
-			e.popup_y1 = r.y1
-			e.popup_x2 = r.x2
-			e.popup_y2 = r.y2
-		}
-	)
-
 	// controller -------------------------------------------------------------
 
 	e.prop('popup_target' , {private: true, default: target})
@@ -3990,13 +3975,29 @@ e.make_popup = function(target, side, align) {
 			enum_values: ['center', 'start', 'end'],
 			default: align || 'center'})
 
-	e.prop('popup_x1'     , {private: true, type: 'number'})
-	e.prop('popup_y1'     , {private: true, type: 'number'})
-	e.prop('popup_x2'     , {private: true, type: 'number'})
-	e.prop('popup_y2'     , {private: true, type: 'number'})
-	e.prop('popup_ox'     , {private: true, type: 'number', default: 0})
-	e.prop('popup_oy'     , {private: true, type: 'number', default: 0})
-	e.prop('popup_fixed'  , {private: true, type: 'bool', default: false})
+	e.prop('popup_x1'    , {private: true, type: 'number'})
+	e.prop('popup_y1'    , {private: true, type: 'number'})
+	e.prop('popup_x2'    , {private: true, type: 'number'})
+	e.prop('popup_y2'    , {private: true, type: 'number'})
+	e.prop('popup_ox'    , {private: true, type: 'number', default: 0})
+	e.prop('popup_oy'    , {private: true, type: 'number', default: 0})
+	e.prop('popup_fixed' , {private: true, type: 'bool', default: false})
+
+	e.property('popup_target_rect',
+		function() {
+			return domrect(
+				e.popup_x1,
+				e.popup_y1,
+				e.popup_x2 - e.popup_x1,
+				e.popup_y2 - e.popup_y1
+			)
+		}, function(r) {
+			e.popup_x1 = r.x1
+			e.popup_y1 = r.y1
+			e.popup_x2 = r.x2
+			e.popup_y2 = r.y2
+		}
+	)
 
 	function window_scroll(ev) {
 		if (ev.target.contains(e.parent))

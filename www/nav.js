@@ -500,8 +500,9 @@ css('.nav-loading-overlay-detail', 'mono m-y')
 
 css('.loading-error-icon', 'm-x fg-error')
 
-G.field_types = obj() // {TYPE->{k:v}}
-G.rowset_col_attrs = obj() // {ROWSET.COL->{k:v}}
+G.field_types = obj() // {TYPE->{K: V}}
+G.all_field_types = obj() // {K: V}
+G.rowset_col_attrs = obj() // {ROWSET.COL->{K:V}}
 
 function map_keys_different(m1, m2) {
 	if (m1.size != m2.size)
@@ -654,7 +655,8 @@ css('rowset', 'skip')
 component('rowset', function(e) {
 	let fields = []
 	let row_vals = []
-	e.rowset = parse_text_attrs(e.attrs, rowset_attr_parse)
+	let rt = e.attrs; delete rt.id
+	e.rowset = parse_text_attrs(rt, rowset_attr_parse)
 	e.rowset.fields = fields
 	e.rowset.row_vals = row_vals
 	let cols = obj() // {name->true}
@@ -1488,7 +1490,7 @@ e.make_nav_widget = function() {
 
 	e.property('tabname', function() {
 		let view = e.param_vals && e.param_nav.selected_rows_tabname() || ''
-		return tabname_.subst(view)
+		return e.tabname_template.subst(view)
 	})
 
 	e.row_tabname = function(row) {
@@ -5430,7 +5432,7 @@ G.field_prop_attrs = {
 	w     : {slot: 'user'},
 }
 
-G.all_field_types = {
+assign(all_field_types, {
 	default: null,
 	w: 100,
 	min_w: 22,
@@ -5442,7 +5444,7 @@ G.all_field_types = {
 	maxlen: 256,
 	null_text : S('null_text', ''),
 	empty_text: S('empty_text', 'empty text'),
-}
+})
 
 all_field_types.to_text = function(v) {
 	return String(v)
@@ -5631,8 +5633,8 @@ let ts = assign({}, date)
 field_types.time = ts
 
 ts.has_time = true
-ts.min = 0
-ts.max = 2**32-1 // range of MySQL TIMESTAMP type
+ts.min = parse_date('1970-01-01 00:00:01', 'SQL')
+ts.max = parse_date('2038-01-19 03:14:07', 'SQL') // range of MySQL TIMESTAMP type
 
 // timeofday (MySQL TIME type) -----------------------------------------------
 

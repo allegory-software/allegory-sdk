@@ -302,9 +302,10 @@ G.tooltip = component('tooltip', function(e) {
 	e.prop('timeout'     , {type: 'number'})
 	e.prop('close_button', {type: 'bool', default: false})
 
-	e.alias('target' , 'popup_target')
-	e.alias('side'   , 'popup_side')
-	e.alias('align'  , 'popup_align')
+	e.alias('target'      , 'popup_target')
+	e.alias('target_rect' , 'popup_target_rect')
+	e.alias('side'        , 'popup_side')
+	e.alias('align'       , 'popup_align')
 
 	// SUBTLE: fixate side so that the tooltip has the exact same dimensions
 	// when measured for the first time as when measured afterwards

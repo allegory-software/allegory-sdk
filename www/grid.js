@@ -1254,6 +1254,8 @@ G.grid = component('grid', 'Input', function(e) {
 				: domrect(...row_visible_rect(row))
 			e.errors_tooltip.target_rect = r
 			e.errors_tooltip.side = !horiz == !field ? 'top' : 'right'
+			// target scroll offset changed
+			e.errors_tooltip.position()
 		}
 
 		update_errors_tooltip = function() {
