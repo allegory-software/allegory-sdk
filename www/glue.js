@@ -1557,6 +1557,8 @@ G.date_placeholder_text = function(locale1) {
 // TODO: multi-language.
 let d_re = /(\d+)\s*([^\d\s])[^\d\s]*/g
 G.parse_duration = function(s) {
+	if (!isstr(s))
+		return s
 	s = s.trim()
 	let m
 	let d = 0

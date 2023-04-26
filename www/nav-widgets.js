@@ -186,7 +186,7 @@ component.extend('datetime-input', function(e) {
 
 component.extend('range-slider', function(e) {
 
-	e.make_nav_input_widget('', true, 'label min max from to decimals')
+	e.make_nav_input_widget('min max', true, 'label from to decimals')
 
 	e.on('input', function(ev) {
 		e.set_cell_val1(e.input_value1, ev)
@@ -197,7 +197,7 @@ component.extend('range-slider', function(e) {
 
 component.extend('date-range-input', function(e) {
 
-	e.make_nav_input_widget('', true, 'label min max')
+	e.make_nav_input_widget('min max', true, 'label')
 
 	e.on('input', function(ev) {
 		e.set_cell_val1(e.input_value1, ev)

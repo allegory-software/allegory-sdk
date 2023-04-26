@@ -10,6 +10,7 @@
 <script>
 DEBUG_EVENTS = true
 DEBUG_ELEMENT_BIND = true
+DEBUG_UPDATE = false
 </script>
 <script src="glue.js"></script>
 <script src="dom.js"></script>
@@ -1188,7 +1189,15 @@ my_dtp.on('input', pr)
 <div><timeofday-input  name=d5 precision=ms value="0:0:0.1" placeholder="Meet at"></timeofday-input></div>
 <div><datetime-input   name=d6 precision=ms value="1900-1-1 0:0:0.1" min="2000-1-1" placeholder="Meet at"></datetime-input></div>
 <div><datetime-input   name=d7 precision=ms value="2000-1-1 0:0:0.1" placeholder="Meet at" format=sql></datetime-input></div>
-<div><date-range-input name1=d8_1 name2=d8_2 value1="2022-1-18" value2="2022-2-3"></date-range-input></div>
+<div><date-range-input
+	id=dr1
+	name1=d8_1
+	name2=d8_2
+	value1="2022-1-18"
+	value2="2022-2-3"
+	min-range="3 days"
+	max-range="7 days"
+></date-range-input></div>
 <button>Submit</button>
 </form>
 <script run>

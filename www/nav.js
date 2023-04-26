@@ -1524,9 +1524,8 @@ e.make_nav_widget = function() {
 				if (field.validator) {
 					let iv = e.cell_input_val(row, field)
 					let failed = !field.validator.validate(iv, false)
-					let v = field.validator.value
 					if (!field.validator.parse_failed)
-						row[field.val_index] = v
+						row[field.val_index] = field.validator.value
 					if (failed) {
 						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
 						cells_failed = true
@@ -5321,13 +5320,6 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 
 	e.property('row', () => nav && nav.focused_row)
 
-	/*
-	function get_modified_for(field) {
-		let row = e.row
-		return row && field ? nav.cell_modified(row, field) : false
-	}
-	*/
-
 	e.get_input_val_for = function(field) {
 		let row = e.row
 		return row && field ? nav.cell_input_val(row, field) : null
@@ -5508,7 +5500,7 @@ all_field_types.editor = function(opt) {
 	return textedit(opt)
 }
 
-// passwords
+// passwords -----------------------------------------------------------------
 
 let pwd = {}
 field_types.password = pwd
@@ -5517,7 +5509,7 @@ pwd.editor = function(opt) {
 	return pass_input(opt)
 }
 
-// numbers
+// numbers -------------------------------------------------------------------
 
 let number = {align: 'right', decimals: 0, is_number: true}
 field_types.number = number
@@ -5531,7 +5523,7 @@ number.editor = function(opt) {
 	return num_input(opt)
 }
 
-// file sizes
+// file sizes ----------------------------------------------------------------
 
 let filesize = assign({}, number)
 field_types.filesize = filesize
@@ -5573,7 +5565,7 @@ filesize.draw = function(x, cx) {
 filesize.scale_base = 1024
 filesize.scales = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500]
 
-// counts
+// counts --------------------------------------------------------------------
 
 let count = assign({}, number)
 field_types.count = count
@@ -5587,7 +5579,7 @@ count.to_text = function(s) {
 	return x.kcount(dec, mag)
 }
 
-// dates in SQL standard format `YYYY-MM-DD hh:mm:ss`
+// dates ---------------------------------------------------------------------
 
 let date = {
 	align: 'right',
@@ -5633,7 +5625,7 @@ date.editor = function(opt) {
 	}, opt))
 }
 
-// timestamps
+// timestamps ----------------------------------------------------------------
 
 let ts = assign({}, date)
 field_types.time = ts
@@ -5642,7 +5634,7 @@ ts.has_time = true
 ts.min = 0
 ts.max = 2**32-1 // range of MySQL TIMESTAMP type
 
-// MySQL time
+// timeofday (MySQL TIME type) -----------------------------------------------
 
 let td = {align: 'center', is_timeofday: true}
 field_types.timeofday = td
@@ -5660,7 +5652,7 @@ td.editor = function(opt) {
 	return timeofdayedit(opt)
 }
 
-// timeofday in seconds
+// timeofday in seconds ------------------------------------------------------
 
 let tds = {align: 'center', is_timeofday: true}
 field_types.timeofday_in_seconds = tds
@@ -5680,7 +5672,7 @@ tds.editor = function(opt) {
 	return timeofdayedit(opt)
 }
 
-// duration
+// duration ------------------------------------------------------------------
 
 let d = {align: 'right', is_duration: true}
 field_types.duration = d
@@ -5690,7 +5682,7 @@ d.to_text = function(v) {
 	return v.duration(this.duration_format)
 }
 
-// booleans
+// booleans ------------------------------------------------------------------
 
 let bool = {align: 'center', min_w: 28, w: 40, is_bool: true}
 field_types.bool = bool
@@ -5735,7 +5727,7 @@ bool.editor = function(opt) {
 	}, opt))
 }
 
-// enums
+// enums ---------------------------------------------------------------------
 
 let enm = {}
 field_types.enum = enm
@@ -5752,7 +5744,7 @@ enm.to_text = function(v) {
 	return s !== undefined ? s : v
 }
 
-// tag lists
+// tag lists -----------------------------------------------------------------
 
 let tags = {}
 field_types.tags = tags
@@ -5769,7 +5761,7 @@ tags.to_text = function(v) {
 	return isarray(v) ? v.join(' ') : v
 }
 
-// colors
+// colors --------------------------------------------------------------------
 
 let color = {}
 field_types.color = color
@@ -5790,7 +5782,7 @@ color.editor = function(opt) {
 	}, opt))
 }
 
-// percent
+// percents ------------------------------------------------------------------
 
 let percent = {is_number: true}
 field_types.percent = percent
@@ -5823,7 +5815,7 @@ percent.format = function(s) {
 
 // TODO: percent.draw = function(s) {}
 
-// icons
+// icons ---------------------------------------------------------------------
 
 let icon = {}
 field_types.icon = icon
@@ -5848,12 +5840,12 @@ icon.editor = function(opt) {
 	}, opt))
 }
 
-// columns
+// columns -------------------------------------------------------------------
 
 let col = {}
 field_types.col = col
 
-// google maps places
+// google maps places --------------------------------------------------------
 
 let place = {}
 field_types.place = place
@@ -5909,7 +5901,7 @@ place.editor = function(opt) {
 	return placeedit(opt)
 }
 
-// url
+// URLs ----------------------------------------------------------------------
 
 let url = {}
 field_types.url = url
@@ -5925,12 +5917,12 @@ url.cell_dblclick = function(cell) {
 	return false // prevent enter edit
 }
 
-// phone
+// phone numbers -------------------------------------------------------------
 
 let phone = {}
 field_types.phone = phone
 
-// email
+// emails --------------------------------------------------------------------
 
 let email = {}
 field_types.email = email
@@ -5941,7 +5933,7 @@ email.validator_email = {
 	rule     : (e) => S('validation_rule_email', 'Email must be valid.'),
 }
 
-// button
+// buttons -------------------------------------------------------------------
 
 let btn = {align: 'center', readonly: true}
 field_types.button = btn
@@ -5965,7 +5957,7 @@ btn.click = function() {
 	// TODO
 }
 
-// public_key, secret_key, private_key
+// public_key, secret_key, private_key ---------------------------------------
 
 field_types.secret_key = {
 	editor: function(opt) {

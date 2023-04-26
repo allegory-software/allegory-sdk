@@ -1478,7 +1478,7 @@ e.list_search_input = component('list-search-input', 'Input', function(e) {
 
 	e.prop('for', {slot: 'state'})
 	e.prop('for_id', {type: 'id', attr: 'for', bind_id: 'for'})
-	e.prop('value', {})
+	e.prop('value', {slot: 'state'})
 
 	function update_target() {
 		if (!e.for) return
@@ -3542,6 +3542,13 @@ G.label = component('label', 'Input', function(e) {
 		return g && g.$1('.input')
 	}
 
+	e.on_bind(function(on) {
+		let te = e.target
+		if (!te) return
+		if (on && te.label == null)
+			te.label = e.textContent
+	})
+
 	e.on('pointerenter', function() {
 		let te = e.target
 		if (!te) return
@@ -3645,25 +3652,29 @@ We don't like abstractions around here but this one buys us many things:
   - validation rules are: reusable, composable, and easy to write logic for.
   - rules apply automatically, no need to specify which to apply where.
   - a validator can depend on, i.e. require that other rules pass first.
-  - a validator can convert the input value so that subsequent rules
-    operate on the converted value, thus only having to parse the value once.
+  - a validator can parse the input value so that subsequent rules operate
+    on the parsed value, thus only having to parse the value once.
   - null values are filtered automatically.
-  - result containing all messages with `failed` and `checked` status on each.
+  - result contains all the messages with `failed` and `checked` status on each.
   - it makes no garbage on re-validation so you can validate huge lists fast.
   - entire objects can be validated the same way simple values are, so it also
-    works for validating db records, applying inter-widget constraints, etc.
+    works for validating ranges, db records, etc. as a unit.
   - it's not that much code for all of that.
 
-props:
+input:
+	parent_validator
+output:
 	rules
 	triggered
 	results
 	value
 	failed
+	parse_failed
 	first_failed_result
 methods:
 	prop_changed(prop) -> needs_revalidation?
 	validate([ev]) -> valid?
+	effectively_failed()
 
 */
 
@@ -3822,19 +3833,26 @@ G.create_validator = function(e) {
 			rule._checked = null
 			rule._failed  = null
 		}
-		this.value = repl(v, undefined, null)
 		this.parse_failed = parse_failed
+		this.value = repl(v, undefined, null)
 		if (announce_results)
 			e.announce('validate', this)
 		this.triggered = true
 		return !this.failed
 	}
 
-	return validator
-}
+	property(validator, 'effectively_failed', function() {
+		let e = this
+		assert(e.triggered)
+		if (e.failed)
+			return true
+		e = e.parent_validator
+		if (!e)
+			return false
+		return e.effectively_failed
+	})
 
-function field_name(e) {
-	return (e.label || e.name || S('value', 'Value')).display_name()
+	return validator
 }
 
 // NOTE: this must work with values that are unparsed and invalid!
@@ -3853,8 +3871,8 @@ add_validation_rule({
 	vprops   : 'input_value',
 	applies  : (e) => e.not_null || e.required,
 	validate : (e, v) => v != null || e.default != null,
-	error    : (e, v) => S('validation_empty_error', '{0} is required', field_name(e)),
-	rule     : (e) => S('validation_empty_rule'    , '{0} cannot be empty', field_name(e)),
+	error    : (e, v) => S('validation_empty_error', '{0} is required', e.label),
+	rule     : (e) => S('validation_empty_rule'    , '{0} cannot be empty', e.label),
 })
 
 // NOTE: empty string converts to `true` even when setting the value from JS!
@@ -3866,9 +3884,9 @@ add_validation_rule({
 	parse    : (e, v) => isbool(v) ? v : bool_attr(v),
 	validate : (e, v) => isbool(v),
 	error    : (e, v) => S('validation_bool_error',
-		'{0} is not a boolean' , field_name(e)),
+		'{0} is not a boolean' , e.label),
 	rule     : (e) => S('validation_bool_rule' ,
-		'{0} must be a boolean', field_name(e)),
+		'{0} must be a boolean', e.label),
 })
 
 add_validation_rule({
@@ -3878,9 +3896,9 @@ add_validation_rule({
 	parse    : (e, v) => isstr(v) ? num(v) : v,
 	validate : (e, v) => isnum(v),
 	error    : (e, v) => S('validation_num_error',
-		'{0} is not a number' , field_name(e)),
+		'{0} is not a number' , e.label),
 	rule     : (e) => S('validation_num_rule' ,
-		'{0} must be a number', field_name(e)),
+		'{0} must be a number', e.label),
 })
 
 function add_scalar_rules(type) {
@@ -3893,9 +3911,9 @@ function add_scalar_rules(type) {
 		applies  : (e) => e.min != null,
 		validate : (e, v) => v >= e.min,
 		error    : (e, v) => S('validation_min_error',
-			'{0} is smaller than {1}', field_name(e), field_value(e, e.min)),
+			'{0} is smaller than {1}', e.label, field_value(e, e.min)),
 		rule     : (e) => S('validation_min_rule',
-			'{0} must be larger than or equal to {1}', field_name(e), field_value(e, e.min)),
+			'{0} must be larger than or equal to {1}', e.label, field_value(e, e.min)),
 	})
 
 	add_validation_rule({
@@ -3906,9 +3924,9 @@ function add_scalar_rules(type) {
 		applies  : (e) => e.max != null,
 		validate : (e, v) => v <= e.max,
 		error    : (e, v) => S('validation_max_error',
-			'{0} is larger than {1}', field_name(e), field_value(e, e.max)),
+			'{0} is larger than {1}', e.label, field_value(e, e.max)),
 		rule     : (e) => S('validation_max_rule',
-			'{0} must be smaller than or equal to {1}', field_name(e), field_value(e, e.max)),
+			'{0} must be smaller than or equal to {1}', e.label, field_value(e, e.max)),
 	})
 
 }
@@ -3922,9 +3940,9 @@ add_validation_rule({
 	applies  : (e) => e.checked_value !== undefined || e.unchecked_value !== undefined,
 	validate : (e, v) => v == e.checked_value || v == e.unchecked_value,
 	error    : (e, v) => S('validation_checked_value_error',
-		'{0} is not {1} or {2}' , field_name(e), e.checked_value, e.unchecked_value),
+		'{0} is not {1} or {2}' , e.label, e.checked_value, e.unchecked_value),
 	rule     : (e) => S('validation_checked_value_rule' ,
-		'{0} must be {1} or {2}', field_name(e), e.checked_value, e.unchecked_value),
+		'{0} must be {1} or {2}', e.label, e.checked_value, e.unchecked_value),
 })
 
 add_validation_rule({
@@ -3949,8 +3967,9 @@ add_validation_rule({
 	name     : 'min_range',
 	props    : 'min_range',
 	vprops   : 'value1 value2',
-	applies  : (e) => e.is_range && e.min_range != null,
-	validate : (e, v) => e.value1 == null || e.value2 == null || e.value2 - e.value1 >= e.min_range,
+	applies  : (e) => e.is_range && e.range_type == 'number' && e.min_range != null,
+	validate : (e, v) => e.value1 == null || e.value2 == null
+		|| e.value2 - e.value1 >= e.min_range,
 	error    : (e, v) => S('validation_min_range_error', 'Range is too small'),
 	rule     : (e) => S('validation_min_range_rule' ,
 		'Range must be larger than or equal to {0}', field_value(e, e.min_range)),
@@ -3960,8 +3979,9 @@ add_validation_rule({
 	name     : 'max_range',
 	props    : 'max_range',
 	vprops   : 'value1 value2',
-	applies  : (e) => e.is_range && e.max_range != null,
-	validate : (e, v) => e.value1 == null || e.value2 == null || e.value2 - e.value1 <= e.max_range,
+	applies  : (e) => e.is_range && e.range_type == 'number' && e.max_range != null,
+	validate : (e, v) => e.value1 == null || e.value2 == null
+		|| e.value2 - e.value1 <= e.max_range,
 	error    : (e, v) => S('validation_max_range_error', 'Range is too large'),
 	rule     : (e) => S('validation_max_range_rule' ,
 		'Range must be smaller than or equal to {0}', field_value(e, e.max_range)),
@@ -3974,9 +3994,9 @@ add_validation_rule({
 	applies  : (e) => e.min_len != null,
 	validate : (e, v) => v.len >= e.min_len,
 	error    : (e, v) => S('validation_min_len_error',
-		'{0} too short', field_name(e)),
+		'{0} too short', e.label),
 	rule     : (e) => S('validation_min_len_rule' ,
-		'{0} must be at least {1} characters', field_name(e), e.min_len),
+		'{0} must be at least {1} characters', e.label, e.min_len),
 })
 
 add_validation_rule({
@@ -3986,9 +4006,9 @@ add_validation_rule({
 	applies  : (e) => e.max_len != null,
 	validate : (e, v) => v.len <= e.max_len,
 	error    : (e, v) => S('validation_max_len_error',
-		'{0} is too long', field_name(e)),
+		'{0} is too long', e.label),
 	rule     : (e) => S('validation_min_len_rule' ,
-		'{0} must be at most {1} characters', field_name(e), e.max_len),
+		'{0} must be at most {1} characters', e.label, e.max_len),
 })
 
 add_validation_rule({
@@ -3998,9 +4018,9 @@ add_validation_rule({
 	applies  : (e) => e.conditions && e.conditions.includes('lower'),
 	validate : (e, v) => /[a-z]/.test(v),
 	error    : (e, v) => S('validation_lower_error',
-		'{0} does not contain a lowercase letter', field_name(e)),
+		'{0} does not contain a lowercase letter', e.label),
 	rule     : (e) => S('validation_lower_rule' ,
-		'{0} must contain at least one lowercase letter', field_name(e)),
+		'{0} must contain at least one lowercase letter', e.label),
 })
 
 add_validation_rule({
@@ -4010,9 +4030,9 @@ add_validation_rule({
 	applies  : (e) => e.conditions && e.conditions.includes('upper'),
 	validate : (e, v) => /[A-Z]/.test(v),
 	error    : (e, v) => S('validation_upper_error',
-		'{0} does not contain a uppercase letter', field_name(e)),
+		'{0} does not contain a uppercase letter', e.label),
 	rule     : (e) => S('validation_upper_rule' ,
-		'{0} must contain at least one uppercase letter', field_name(e)),
+		'{0} must contain at least one uppercase letter', e.label),
 })
 
 add_validation_rule({
@@ -4022,9 +4042,9 @@ add_validation_rule({
 	applies  : (e) => e.conditions && e.conditions.includes('digit'),
 	validate : (e, v) => /[0-9]/.test(v),
 	error    : (e, v) => S('validation_digit_error',
-		'{0} does not contain a digit', field_name(e)),
+		'{0} does not contain a digit', e.label),
 	rule     : (e) => S('validation_digit_rule' ,
-		'{0} must contain at least one digit', field_name(e)),
+		'{0} must contain at least one digit', e.label),
 })
 
 add_validation_rule({
@@ -4034,9 +4054,9 @@ add_validation_rule({
 	applies  : (e) => e.conditions && e.conditions.includes('symbol'),
 	validate : (e, v) => /[^A-Za-z0-9]/.test(v),
 	error    : (e, v) => S('validation_symbol_error',
-		'{0} does not contain a symbol', field_name(e)),
+		'{0} does not contain a symbol', e.label),
 	rule     : (e) => S('validation_symbol_rule' ,
-		'{0} must contain at least one symbol', field_name(e)),
+		'{0} must contain at least one symbol', e.label),
 })
 
 let pass_score_errors = [
@@ -4060,10 +4080,10 @@ add_validation_rule({
 		&& e.conditions && e.conditions.includes('min-score'),
 	validate : (e, v) => (e.score ?? 0) >= e.min_score,
 	error    : (e, v) => S('validation_min_score_error',
-		'{0} is {1}', field_name(e),
+		'{0} is {1}', e.label,
 			pass_score_errors[e.score] || S('password_score_unknwon', '... wait...')),
 	rule     : (e) => S('validation_min_score_rule' ,
-		'{0} must be {1}', field_name(e), pass_score_rules[e.min_score]),
+		'{0} must be {1}', e.label, pass_score_rules[e.min_score]),
 })
 
 add_validation_rule({
@@ -4072,7 +4092,7 @@ add_validation_rule({
 	applies  : (e) => e.is_time,
 	parse    : (e, v) => parse_date(v, 'SQL', true, e.precision),
 	validate : return_true,
-	error    : (e, v) => S('validation_time_error', '{0}: invalid date', field_name(e)),
+	error    : (e, v) => S('validation_time_error', '{0}: invalid date', e.label),
 	rule     : (e) => S('validation_time_rule', '{0} must be a valid date'),
 })
 
@@ -4085,12 +4105,36 @@ add_validation_rule({
 	parse    : (e, v) => parse_timeofday(v, true, e.precision),
 	validate : return_true,
 	error    : (e, v) => S('validation_timeofday_error',
-		'{0}: invalid time of day', field_name(e)),
+		'{0}: invalid time of day', e.label),
 	rule     : (e) => S('validation_timeofday_rule',
 		'{0} must be a valid time of day'),
 })
 
 add_scalar_rules('timeofday')
+
+add_validation_rule({
+	name     : 'date_min_range',
+	props    : 'date_min_range',
+	vprops   : 'value1 value2',
+	applies  : (e) => e.is_range && e.range_type == 'date' && e.min_range != null,
+	validate : (e, v) => e.value1 == null || e.value2 == null
+		|| e.value2 - e.value1 >= e.min_range - 24 * 3600,
+	error    : (e, v) => S('validation_date_min_range_error', 'Range is too small'),
+	rule     : (e) => S('validation_date_min_range_rule' ,
+		'Range must be larger than or equal to {0}', field_value(e, e.min_range)),
+})
+
+add_validation_rule({
+	name     : 'date_max_range',
+	props    : 'date_max_range',
+	vprops   : 'value1 value2',
+	applies  : (e) => e.is_range && e.range_type == 'date' && e.max_range != null,
+	validate : (e, v) => e.value1 == null || e.value2 == null
+		|| e.value2 - e.value1 <= e.max_range - 24 * 3600,
+	error    : (e, v) => S('validation_date_max_range_error', 'Range is too large'),
+	rule     : (e) => S('validation_date_max_range_rule' ,
+		'Range must be smaller than or equal to {0}', field_value(e, e.max_range)),
+})
 
 add_validation_rule({
 	name     : 'value_known',
@@ -4099,9 +4143,9 @@ add_validation_rule({
 	applies  : (e) => !e.is_values && e.known_values,
 	validate : (e, v) => e.known_values.has(v),
 	error    : (e, v) => S('validation_value_known_error',
-		'{0}: unknown value {1}', field_name(e), field_value(e, v)),
+		'{0}: unknown value {1}', e.label, field_value(e, v)),
 	rule     : (e) => S('validation_value_known_rule',
-		'{0} must be a known value', field_name(e)),
+		'{0} must be a known value', e.label),
 })
 
 add_validation_rule({
@@ -4114,9 +4158,9 @@ add_validation_rule({
 	},
 	validate : return_true,
 	error    : (e, v) => S('validation_values_error',
-		'{0}: invalid values list', field_name(e)),
+		'{0}: invalid values list', e.label),
 	rule     : (e) => S('validation_values_rule',
-		'{0} must be a valid values list', field_name(e)),
+		'{0} must be a valid values list', e.label),
 })
 
 function invalid_values(e, v) {
@@ -4141,9 +4185,9 @@ add_validation_rule({
 		return true
 	},
 	error    : (e, v) => S('validation_values_known_error',
-		'{0}: unknown values: {1}', field_name(e), invalid_values(e, v)),
+		'{0}: unknown values: {1}', e.label, invalid_values(e, v)),
 	rule     : (e) => S('validation_values_known_rule',
-		'{0} must contain only known values', field_name(e)),
+		'{0} must contain only known values', e.label),
 })
 
 /* <errors> ------------------------------------------------------------------
@@ -4273,9 +4317,9 @@ e.make_validator = function(validate_on_init, errors_tooltip_target) {
 	}
 
 	e.try_validate = function(v) {
-		let ok = e.validator.validate(v, false)
+		let valid = e.validator.validate(v, false)
 		e.validator.validate(e.input_value, false)
-		return ok
+		return valid
 	}
 
 	e.on_prop_changed(function(k, v, v0, ev) {
@@ -4357,21 +4401,23 @@ component('form', function(e) {
 
 	e.json = function() {
 		let t = obj()
-		for (let input of e.elements)
-			if (input.widget)
-				input.widget.to_json(t)
+		for (let input of e.elements) {
+			if (!input.widget)
+				continue
+			if (input.widget.validator.effectively_failed)
+				continue
+			input.widget.to_json(t)
+		}
 		return t
 	}
 
 	e.on('submit', function(ev) {
 		for (let input of e.elements) {
-			if (input.widget && input.widget.validator) {
-				if (!input.widget.validator.triggered)
-					input.widget.validate(ev)
-				if (input.widget.validator.failed) {
-					ev.preventDefault()
-					break
-				}
+			if (!input.widget)
+				continue
+			if (input.widget.validator.effectively_failed) {
+				ev.preventDefault()
+				break
 			}
 		}
 	})
@@ -4434,17 +4480,30 @@ e.make_input_widget = function(opt) {
 		assert(ev) // not user-writable
 	}
 
+	// label used in validation errors.
+	let label
+	e.prop('label', {store: false})
+	e.get_label = s => label || (e.name || S('value', 'Value')).display_name()
+	e.set_label = function(s) { label = s }
+
 	e.make_validator(false, opt.errors_tooltip_target)
 
 	e.to_form = e.to_form || return_arg // stub
-	e.to_json = e.to_json || function(t) {
-		if (e.name && e.value != null)
+
+	e.to_json = e.to_json || function(t) { // stub
+		ig (e.parent_validator)
+			if (e.parent_validator.failed)
+				return
+		if (e.name && !e.validator.failed)
 			t[e.name] = e.value
 	}
 
 	e.update_value_input = function(ev) {
-		e.value_input.value = (e.value != null ? e.to_form(e.value) : null) ?? ''
-		e.value_input.disabled = e.value == null
+		let v = e.value
+		if (e.parent_validator && e.parent_validator.failed)
+			v = null
+		e.value_input.value = (v != null ? e.to_form(v) : null) ?? ''
+		e.value_input.disabled = v == null
 	}
 	e.on_validate(function(ev) {
 		e.set_prop('value', e.validator.value, ev || {target: e})
@@ -4493,9 +4552,6 @@ e.make_range_input_widget = function(opt) {
 
 	e.prop('form', {type: 'id', store: false})
 
-	e.prop('min_range',  {type: 'number', default: 0})
-	e.prop('max_range',  {type: 'number', default: 1/0})
-
 	for (let ve of e.input_widgets) {
 
 		let i = assert(ve.K)
@@ -4511,25 +4567,14 @@ e.make_range_input_widget = function(opt) {
 			ve.form = s
 		})
 
-		ve.value_input.widget = e
+		ve.validator.parent_validator = e.validator
 
 	}
 
 	e.prop('range', {slot: 'state'})
-	e.do_after('set_value1', function() {
-
-	})
-	e.do_after('set_value2', function() {
-
-	})
 
 	e.get_form = function() {
 		return e.input_widgets[0].form
-	}
-
-	e.to_json = function(t) {
-		for (let ve of e.input_widgets)
-			ve.to_json(t)
 	}
 
 	e.property('input_value', () => e)
@@ -4972,6 +5017,7 @@ let slider_widget = function(e, range) {
 	e.class('range', !!range)
 	e.make_disablable()
 	e.is_range = range // for range validator
+	e.range_type = 'number'
 
 	e.prop('from'    , {type: 'number', default: 0})
 	e.prop('to'      , {type: 'number', default: 1})
@@ -5022,6 +5068,8 @@ let slider_widget = function(e, range) {
 			errors_tooltip_target: false,
 		})
 		e.to_text = to_text
+		e.prop('min_range', {type: 'number', default: 0})
+		e.prop('max_range', {type: 'number', default: 1/0})
 	} else {
 		e.is_number = true
 		e.to_text = to_text
@@ -5053,9 +5101,10 @@ let slider_widget = function(e, range) {
 		if (e.decimals != null)
 			v = floor(v / multiple() + .5) * multiple()
 
-		if (K == '1' && e.value2 != null) v = clamp(v, e.value2 - e.max_range, e.value2 - e.min_range)
-		if (K == '2' && e.value1 != null) v = clamp(v, e.value1 + e.min_range, e.value1 + e.max_range)
-
+		if (e.value1 != null && e.value2 != null) {
+			if (K == '1') v = clamp(v, e.value2 - e.max_range, e.value2 - e.min_range)
+			if (K == '2') v = clamp(v, e.value1 + e.min_range, e.value1 + e.max_range)
+		}
 		v = clamp(v, cmin(), cmax())
 
 		e.set_prop('input_value'+K, v, ev)
@@ -5538,17 +5587,20 @@ css_state('.button[danger]:active', '', `
 	background : var(--bg-button-danger-active);
 `)
 
-css      ('.button[bare][primary]', 'b-invisible ro0 no-bg no-shadow link')
-css_state('.button[bare][primary]:hover' , 'no-bg link-hover')
-css_state('.button[bare][primary]:active', 'no-bg link-active')
-
 css      ('.button[bare]', 'b-invisible ro0 no-bg no-shadow fg')
 css_state('.button[bare]:hover' , 'no-bg fg-hover')
 css_state('.button[bare]:active', 'no-bg fg-active')
 
+css      ('.button[bare][primary]', 'link')
+css_state('.button[bare][primary]:hover' , 'link-hover')
+css_state('.button[bare][primary]:active', 'link-active')
+
 css_state('.button[selected]', '', `
 	box-shadow: var(--shadow-pressed);
 `)
+
+css('.input-group > .button[bare]', 'b')
+css_state('.input-group[invalid] > .button[bare]', 'bg-error')
 
 // attention animation
 
@@ -6007,8 +6059,6 @@ css('.pass-input-group', 'w-input bg-input')
 css('.pass-input-input', 'S shrinks p-r-0')
 
 css('.pass-input-button', 'h-m h-c b p0 label', `width: 2.75em;`)
-css_state('.pass-input-button', 'bg-input')
-css_state('.pass-input[invalid] .pass-input-button', 'bg-error')
 css_generic_state('.pass-input-button[disabled]', 'op1 no-filter dim')
 
 let load_zxcvbn = memoize(function() {
@@ -6172,9 +6222,7 @@ css('.num-input-group', 'w-input bg-input')
 
 css('.num-input-input', 'S shrinks t-r')
 
-css('.num-input-button' , 'm0 p-y-0 p-x-075 h-m bg-input no-shadow')
-css_state('.num-input .num-input-button:hover' , 'bg-input-hover')
-css_state('.num-input .num-input-button:active', 'bg-input-active')
+css('.num-input-button' , 'm0 p-y-0 p-x-075 h-m')
 
 // up-down arrow buttons
 css('.num-input-updown-box', 'h', `padding: 1px;`)
@@ -6261,12 +6309,14 @@ G.num_input = component('num-input', 'Input', function(e) {
 			e.up_button   = button({
 				type: 'button', // no submit
 				classes: 'num-input-button num-input-button-plusminus num-input-button-plus',
+				bare: true,
 				focusable: false,
 				icon: svg_plus_sign(),
 			})
 			e.down_button = button({
 				type: 'button', // no submit
 				classes: 'num-input-button num-input-button-plusminus num-input-button-minus',
+				bare: true,
 				focusable: false,
 				icon: svg_minus_sign(),
 			})
@@ -6305,17 +6355,20 @@ G.num_input = component('num-input', 'Input', function(e) {
 	e.on_update(function(opt) {
 		if (opt.value) {
 			let v = e.value
-			let iv = e.input_value
-			e.input.value = v != null ? to_input(v) : isnum(iv) ? to_input(iv) : iv
+			e.input.value = v != null ? to_input(v) : e.input_value
 		}
 		if (opt.select_all)
 			e.input.select_range(0, -1)
 	})
 
 	e.increment_value = function(increment, ctrl, ev) {
-		let v = e.value
-		if (v == null) v = increment > 0 ? e.min : e.max
-		if (v == null) return
+		let v = e.validator.failed ? null : e.value
+		if (v == null) {
+			v = increment > 0 ? e.min ?? e.max : e.max ?? e.min
+			increment = 0
+		}
+		if (v == null)
+			return
 		let m = e.decimals ? 1 / 10 ** e.decimals : 1
 		v += m * increment * (ctrl ? 10 : 1)
 		v = snap(v, m)
@@ -7097,9 +7150,13 @@ range state:
 	color                range background color
 	z-index              range z-index
 
+BUGS:
+	* update_drag_range_end() fires ^input inside update() which is forbidden
+	because ^input calls update({validate: true}) which is ignored so the
+	errors popup doesn't update itself while dragging on the calendar.
+
 TODO:
 	* disabled range coloring.
-	* anchor_direction missing (change direction on shift+arrows and dragging).
 
 */
 
@@ -7109,6 +7166,7 @@ css(':root', '', `
 	--fs-calendar-months   : 1.25;
 	--fs-calendar-weekdays : 0.75;
 	--fs-calendar-month    : 0.65;
+	--p-x-calendar-days-em: .5;
 	--p-y-calendar-days-em: .4;
 	--fg-calendar-month: red;
 `)
@@ -7144,6 +7202,9 @@ function calendar_widget(e, mode) {
 	e.make_focusable()
 
 	// model & state ----------------------------------------------------------
+
+	e.prop('min_range', {type: 'duration', parse: parse_duration, default: 24 * 3600})
+	e.prop('max_range', {type: 'duration', parse: parse_duration, default: 1/0})
 
 	function parse_value(s) {
 		return day(parse_date(s, 'SQL'))
@@ -7295,7 +7356,7 @@ function calendar_widget(e, mode) {
 	// view config, computed styles and measurements
 
 	let view_x, view_y, view_w, view_h
-	let cell_w, cell_h, cell_py
+	let cell_w, cell_h
 	let font_weekdays, font_weekdays_ascent
 	let font_days, font_days_ascent
 	let font_months, font_months_ascent, font_months_h
@@ -7318,7 +7379,7 @@ function calendar_widget(e, mode) {
 			e.focus()
 	})
 
-	ct.on_measure(function() {
+	e.on_measure(function() {
 
 		let dpr = devicePixelRatio
 		let cr = ct.rect()
@@ -7348,8 +7409,10 @@ function calendar_widget(e, mode) {
 
 		let em   = num(css.fontSize)
 		let cell_lh = num(css.lineHeight)
+		let cell_py = num(css.prop('--p-y-calendar-days-em')) * em
+		let cell_px = num(css.prop('--p-x-calendar-days-em')) * em
 		cell_py  = num(css.prop('--p-y-calendar-days-em')) * em
-		cell_w   = snap(cell_lh + 2 * cell_py, 2)
+		cell_w   = snap(em + 2 * cell_px, 2)
 		cell_h   = snap(cell_lh + 2 * cell_py, 2)
 		fg       = css.prop('--fg')
 		fg_label = css.prop('--fg-label')
@@ -7401,7 +7464,7 @@ function calendar_widget(e, mode) {
 		}
 	})
 
-	ct.on_position(function() {
+	e.on_position(function() {
 		if (sy_dt != null) {
 			scroll_transition.restart(sy_dt, sy_now, sy_final)
 			sy_dt = null
@@ -7765,6 +7828,10 @@ function calendar_widget(e, mode) {
 
 		}
 
+		if (!pass)
+			if (update_drag_range_end())
+				ct.redraw_again('update_range_end')
+
 		// draw range-end grab handles on top of cells because they're in-between cells.
 		if (gh_set) {
 			cx.fillStyle = cx.strokeStyle
@@ -7776,12 +7843,9 @@ function calendar_widget(e, mode) {
 			}
 		}
 
-		if (update_drag_range_end()) {
-			assert(pass != 'update_range_end') // blow up fuse
-			ct.redraw_again('update_range_end')
-		}
-
-		ct.style.cursor = (down ? drag_range_end : hit_range_end) != null ? 'ew-resize'
+		let range_end = down ? drag_range_end : hit_range_end
+		ct.style.cursor = range_end ? 'ew-resize'
+			: range_end == 0 ? 'move'
 			: mode == 'range' && drag_scroll ? 'grabbing' : null
 
 		// draw month name overlays while drag-scrolling
@@ -7887,13 +7951,26 @@ function calendar_widget(e, mode) {
 		let r = drag_range
 		let d0_0 = r[0]
 		let d1_0 = r[1]
-		r[drag_range_end] = hit_day
-		if ((r[0] ?? -1/0) > (r[1] ?? 1/0)) // adjust a negative range.
-			r[drag_range_end] = r[1-drag_range_end]
-		let d0 = r[0]
-		let d1 = r[1]
+		let d0 = d0_0
+		let d1 = d1_0
+		if (drag_range_end) { // resize
+			d1 = hit_day
+		} else { // move
+			d1 = hit_day + (d1 != null && d0 != null ? d1 - d0 : 0)
+			d0 = hit_day
+		}
+		if (drag_range_end && d0 != null && d1 != null) {
+			let min_range = e.min_range - 24 * 3600
+			let max_range = e.max_range - 24 * 3600
+			if (d1 - d0 < min_range) // constrain a range too small.
+				d1 = d0 + min_range
+			if (d1 - d0 > max_range) // constrain a range too large.
+				d1 = d0 + max_range
+		}
 		if (d0 == d0_0 && d1 == d1_0)
 			return
+		r[0] = d0
+		r[1] = d1
 		ranges_changed()
 		return true
 	}
@@ -7920,8 +7997,9 @@ function calendar_widget(e, mode) {
 		let had_focus = e.has_focus
 
 		if (hit_range_end != null && e.can_change_range(hit_range)) {
-			drag_range     = hit_range
+			drag_range = hit_range
 			drag_range_end = hit_range_end
+
 			e.update()
 		}
 
@@ -7973,23 +8051,24 @@ function calendar_widget(e, mode) {
 			}
 
 			if (mode == 'range' && !was_drag_range && hit_day != null) {
+				let min_range = e.min_range - 24 * 3600
+				let max_range = e.max_range - 24 * 3600
 				if (ev.shift || ev.ctrl) {
 					if (anchor_day == null)
 						anchor_day = min(e.value1, e.value2)
-					let d1 = anchor_day
-					let d2 = hit_day
-					if (d1 > d2) {
-						let t = d1
-						d1 = d2
-						d2 = t
-					}
-					e.value1 = d1
-					e.value2 = d2
+					let d0 = min(anchor_day, hit_day)
+					let d1 = max(anchor_day, hit_day)
+					let days = clamp(d1 - d0, min_range, max_range)
+					e.value1 = d0
+					e.value2 = d0 + days
 					e.fireup('input', ev)
 				} else if (had_focus) {
 					anchor_day = hit_day
+					let v1 = e.value1
+					let v2 = e.value2
+					let days = clamp(v2 != null && v1 != null ? v2 - v1 : 0, min_range, max_range)
 					e.value1 = hit_day
-					e.value2 = hit_day
+					e.value2 = hit_day + days
 					e.fireup('input', ev)
 				}
 				return false
@@ -8052,17 +8131,23 @@ function calendar_widget(e, mode) {
 				e.fireup('input', ev)
 				e.scroll_to_view_range(e.value, e.value, 0)
 			} else {
-				let d = day(r[1], ddays)
-				if (!shift) {
-					r[0] = d
-					r[1] = d
-				} else {
-					d = max(d, r[0])
-					r[1] = d
+				let min_range = e.min_range - 24 * 3600
+				let max_range = e.max_range - 24 * 3600
+				let d0 = r[0]
+				let d1 = r[1]
+				let days = d1 - d0
+				if (!shift) { // move
+					d0 = day(d0, ddays)
+					d1 = d0 + days
+				} else { // resize
+					d1 = day(d1, ddays)
 				}
+				days = clamp(d1 - d0, min_range, max_range)
+				r[0] = d0
+				r[1] = d0 + days
 				ranges_changed(ev)
 				sort_ranges()
-				e.scroll_to_view_range(d, d, 0)
+				e.scroll_to_view_range(r[0], r[1], 0)
 			}
 			return false
 		}
@@ -8347,6 +8432,8 @@ let max_date = parse_date('9999-12-31 23:59:59', 'SQL')
 
 function date_input_widget(e, has_date, has_time, range) {
 
+	let type = has_date ? 'time' : 'timeofday'
+
 	e.clear()
 
 	e.class('date-input')
@@ -8372,8 +8459,9 @@ function date_input_widget(e, has_date, has_time, range) {
 	}
 
 	if (range) {
-		assert(!has_time, 'NYI')
+		assert(has_date && !has_time, 'NYI')
 		e.is_range = true
+		e.range_type = 'date'
 		e.picker = range_calendar()
 		e.calendar = e.picker
 	} else {
@@ -8395,7 +8483,7 @@ function date_input_widget(e, has_date, has_time, range) {
 	}
 
 	function to_json(t) {
-		if (this.name)
+		if (this.name && !this.validator.failed)
 			t[this.name] = this.to_form(this.value)
 	}
 
@@ -8442,8 +8530,6 @@ function date_input_widget(e, has_date, has_time, range) {
 	e.inputs = []
 	e.input_widgets = []
 
-	let type = has_date ? 'time' : 'timeofday'
-
 	if (!range) {
 		e.make_input_widget({
 			errors_tooltip_target: e.input_group,
@@ -8464,8 +8550,7 @@ function date_input_widget(e, has_date, has_time, range) {
 
 		if (range) {
 
-			// NOTE: only making these "input widgets" for validation purposes,
-			// no need to add them to the DOM. They have to be elements though.
+			// NOTE: only making these "input widgets" for validation purposes.
 			input_widget = div()
 			input_widget.K = K
 			e.input_widgets.push(input_widget)
@@ -8477,7 +8562,7 @@ function date_input_widget(e, has_date, has_time, range) {
 			input_widget.to_json = to_json
 
 			input_widget.make_input_widget({
-				errors_tooltip_target: input,
+				errors_tooltip_target: false,
 			})
 
 			input_widget.prop('min', {type: type, parse: from_html, default: has_date ? min_date : null})
@@ -8485,6 +8570,9 @@ function date_input_widget(e, has_date, has_time, range) {
 
 			e.forward_prop('min', input_widget, 'min')
 			e.forward_prop('max', input_widget, 'max')
+
+			input_widget.hide()
+			e.add(input_widget)
 
 		} else {
 
@@ -8494,14 +8582,14 @@ function date_input_widget(e, has_date, has_time, range) {
 
 		input_widget.on_validate(function(ev) {
 
+			let v = this.value
+
 			if (!(ev && ev.target == e.picker)) {
-				e.picker.set_prop('value'+K, e['value'+K], ev)
+				e.picker.set_prop('value'+K, v, ev)
 			}
 
 			if (!(ev && ev.target == input && ev.type == 'input')) {
-				let v = e['value'+K]
-				let iv = e['input_value'+K]
-				input.value = v != null ? to_input(v) : isnum(iv) ? to_input(iv) : iv
+				input.value = v != null ? to_input(v) : this.input_value
 			}
 
 		})
@@ -8618,6 +8706,9 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.make_range_input_widget({
 			errors_tooltip_target: e.input_group,
 		})
+
+		e.forward_prop('min_range', e.calendar)
+		e.forward_prop('max_range', e.calendar)
 
 	}
 
