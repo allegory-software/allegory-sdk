@@ -51,9 +51,9 @@ css('#layout', 'h', `height: 100%; width: 100%;`)
 css('#code_split', 'S v b-l')
 css('#result_split', 'S v b-l shrinks scroll-auto')
 css('#buttons, #result_buttons', 'h b-b')
-css('#demo_list', 'clip-x scroll-y-auto p-t noselect')
+css('#demo_list', 'clip-x-auto-y p-t noselect')
 css('#code', 'S')
-css('#result', 'm-4 scroll-x-auto resize-x', `flex: 3;`)
+css('#result', 'm-4 scroll-auto resize-x', `flex: 3;`)
 css('#inspect', 'b-t', `flex: 1;`)
 css_state('#code:focus', 'no-outline')
 css('.demo-list-item', '', `padding: 0.2em .5em;`)
@@ -1248,6 +1248,7 @@ for (let i = 0; i <= 10000; i++) {
 
 g = grid({
 	id: 'my_grid',
+	tabname: 'My Grid',
 	rowset: {
 		fields: fields,
 		rows: rows,
@@ -1292,93 +1293,77 @@ result.add(g)
 <xmp id=charts_demo>
 <vsplit>
 	<tabs>
-		<script run label=Grid>
-			let g = grid({
-				id: 'g',
-				_label: 'Grid',
-				rowset: {
-					fields: [
-						{name: 'date', type: 'time', has_time: false, w: 60},
-						{name: 'country', w: 60},
-						{name: 'sector', w: 70},
-						{name: 'output', type: 'number', w: 40},
-					],
-					rows: [
-						[year(time(), 0), 'Algeria', 'Energy'        ,  80],
-						[year(time(), 1), 'Algeria', 'Chickens'      , 100],
-						[year(time(), 2), 'Algeria', 'Chickens'      , 150],
-						[year(time(), 0), 'Canada' , 'Chickens'      ,  20],
-						[year(time(), 1), 'Canada' , 'Geese'         ,  10],
-						[year(time(), 1), 'Canada' , 'Geese'         , 120],
-						[year(time(), 2), 'Canada' , 'Geese'         ,  50],
-						[year(time(), 0), 'Croatia', 'Science'       , 100],
-						[year(time(), 0), 'Croatia', 'Chickens'      , 200],
-						[year(time(), 1), 'Croatia', 'Energy'        , 150],
-						[year(time(), 1), 'Croatia', 'Energy'        , 120],
-						[year(time(), 2), 'Croatia', 'Chickens'      , 180],
-						[year(time(), 2), 'Croatia', 'Energy'        ,  50],
-					],
-				},
-			})
-			this.parent.on_bind(function(on) {
-				if (on) {
-					this.items = [g]
-				}
-			})
-		</script>
-		<div label=Empty id=empty_div>This is empty to disconnect the grid.</div>
+		<grid id=g tabname=Output>
+			<rowset>
+				<field name=date    type=date    ></field>
+				<field name=country              ></field>
+				<field name=sector               ></field>
+				<field name=output  type=number  ></field>
+				<row  date="2020-01-01"  country=Algeria  sector=Energy    output=" 80" ></row>
+				<row  date="2021-01-01"  country=Algeria  sector=Chickens  output="100" ></row>
+				<row  date="2022-01-01"  country=Algeria  sector=Chickens  output="150" ></row>
+				<row  date="2020-01-01"  country=Canada   sector=Chickens  output=" 20" ></row>
+				<row  date="2021-01-01"  country=Canada   sector=Geese     output=" 10" ></row>
+				<row  date="2021-01-01"  country=Canada   sector=Geese     output="120" ></row>
+				<row  date="2022-01-01"  country=Canada   sector=Geese     output=" 50" ></row>
+				<row  date="2020-01-01"  country=Croatia  sector=Science   output="100" ></row>
+				<row  date="2020-01-01"  country=Croatia  sector=Chickens  output="200" ></row>
+				<row  date="2021-01-01"  country=Croatia  sector=Energy    output="150" ></row>
+				<row  date="2021-01-01"  country=Croatia  sector=Energy    output="120" ></row>
+				<row  date="2022-01-01"  country=Croatia  sector=Chickens  output="180" ></row>
+				<row  date="2022-01-01"  country=Croatia  sector=Energy    output=" 50" ></row>
+			</rowset>
+		</grid>
+		<div class="m-4" tabname="Empty">This is empty to disconnect the grid.</div>
 	</tabs>
-	<split fixed_side=second>
-		<tabs tabs_side=left>
-			<chart label=Pie nav=g
-				sum_cols=output
-				group_cols="country sector"
-			></chart>
-			<chart label="Areas" nav=g
-				shape=areas
-				sum_cols=output
-				split_cols=country
-				group_cols="date/0/month/1"
-			></chart>
-			<chart label="Areas+Dots" nav=g
-				shape=areas_dots
-				sum_cols=output
-				split_cols=country
-				group_cols="date/0/month/1"
-			></chart>
-			<chart label="Lines" nav=g
-				shape=lines
-				sum_cols=output
-				split_cols=country
-				group_cols="date/0/month/1"
-			></chart>
-			<chart label="Lines+Dots" nav=g
-				shape=lines_dots
-				sum_cols=output
-				split_cols=country
-				group_cols="date/0/month/1"
-			></chart>
-			<chart label=Columns nav=g
-				shape=columns
-				sum_cols=output
-				split_cols="country sector"
-				group_cols="date/0/month/1"
-			></chart>
-			<chart label=Bars nav=g
-				shape=bars
-				sum_cols=output
-				split_cols="country sector"
-				group_cols="date/0/month/1"
-			></chart>
-			<chart label=Stacks nav=g
-				shape=stacks
-				sum_cols=output
-				split_cols="country sector"
-				group_cols="date/0/month/1"
-			></chart>
-		</tabs>
-		<div></div>
-	</split>
+	<tabs tabs_side=left>
+		<chart tabname=Pie nav=g
+			sum_cols=output
+			group_cols="country sector"
+		></chart>
+		<chart tabname="Areas" nav=g
+			shape=areas
+			sum_cols=output
+			split_cols=country
+			group_cols="date/0/month/1"
+		></chart>
+		<chart tabname="Areas+Dots" nav=g
+			shape=areas_dots
+			sum_cols=output
+			split_cols=country
+			group_cols="date/0/month/1"
+		></chart>
+		<chart tabname="Lines" nav=g
+			shape=lines
+			sum_cols=output
+			split_cols=country
+			group_cols="date/0/month/1"
+		></chart>
+		<chart tabname="Lines+Dots" nav=g
+			shape=lines_dots
+			sum_cols=output
+			split_cols=country
+			group_cols="date/0/month/1"
+		></chart>
+		<chart tabname=Columns nav=g
+			shape=columns
+			sum_cols=output
+			split_cols="country sector"
+			group_cols="date/0/month/1"
+		></chart>
+		<chart tabname=Bars nav=g
+			shape=bars
+			sum_cols=output
+			split_cols="country sector"
+			group_cols="date/0/month/1"
+		></chart>
+		<chart tabname=Stacks nav=g
+			shape=stacks
+			sum_cols=output
+			split_cols="country sector"
+			group_cols="date/0/month/1"
+		></chart>
+	</tabs>
 </vsplit>
 </xmp>
 

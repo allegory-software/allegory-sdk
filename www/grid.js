@@ -67,10 +67,10 @@ css('.grid-header-canvas', 'abs')
 css('.grid-cells-view', 'S shrinks rel g-h scroll-auto')
 
 // avoid col resizing based on row count
-css('.grid[auto_cols_w] > .grid-cells-view', 'vscroll')
+css('.grid[auto_cols_w] > .grid-cells-view', 'clip-x-scroll-y')
 
 // grid grows to fit contents, so no need for scrollbars
-css('.grid[auto_h] > .grid-cells-view', 'clip-y')
+css('.grid[auto_h] > .grid-cells-view', 'auto-x-clip-y')
 
 // clip: hide surplus bottom rows
 // rel: activates `overflow: hidden` on abs. pos. child.
@@ -144,7 +144,7 @@ css_role('.grid.picker', '', `
 `)
 
 /* show vert-scrollbars always when grid is a picker */
-css_role('.grid.picker > .grid-cells-view', 'vscroll')
+css_role('.grid.picker > .grid-cells-view', 'clip-x-scroll-y')
 
 /* TODO: grid filter dropdowns
 
@@ -1182,7 +1182,7 @@ G.grid = component('grid', 'Input', function(e) {
 
 		e.ctx = cx
 
-		// WTF is going on with Safari??
+		// TODO: WTF is going on with Safari??
 		if (Safari) {
 			let ch = e.cells_canvas.height
 			e.cells_canvas.height = 0
@@ -1254,7 +1254,7 @@ G.grid = component('grid', 'Input', function(e) {
 				: domrect(...row_visible_rect(row))
 			e.errors_tooltip.target_rect = r
 			e.errors_tooltip.side = !horiz == !field ? 'top' : 'right'
-			// target scroll offset changed
+			// re-position the popup because target scroll offset changed.
 			e.errors_tooltip.position()
 		}
 

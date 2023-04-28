@@ -18,22 +18,7 @@ WIDGETS           PROPS
 "use strict"
 let G = window
 
-component.extend('list', 'before', function(e) {
-
-	let nav = e.$1(':scope>nav')
-	if (nav) {
-		nav.init_component()
-		nav.del()
-		e.on_bind(function(on) {
-			if (on)
-				head.add(nav)
-			else
-				nav.del()
-			e._html_nav = on ? nav : null
-		})
-	}
-
-})
+component.extend('list', 'before', make_nav_data_widget_extend_before)
 
 component.extend('list', function(e) {
 

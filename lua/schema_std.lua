@@ -137,18 +137,18 @@ return function()
 		to_number          = datetime_to_timestamp,
 		from_number        = timestamp_to_datetime,
 	}
-	types.datetime   = {date, mysql_type = 'datetime', w = 140}
+	types.datetime   = {date, precision = 'm', mysql_type = 'datetime', w = 140}
 	types.datetime_s = {datetime, precision = 's', w = 160}
 	types.timeago    = {datetime_s, timeago = true}
 
 	--NOTE: do not use `timestamp` as it's prone to Y2038 in MySQL, use `datetime` instead,
 	--which works the same as `timestamp` as long as you set the server timezone to UTC.
-	--types.timestamp   = {datetime, mysql_type = 'timestamp'}
+	--types.timestamp   = {datetime, mysql_type = 'timestamp', precision = 'm'}
 	--types.timestamp_s = {datetime, mysql_type = 'timestamp', precision = 's'}
 
 	--timestamp-based types to use in virtual rowsets (no parsing, holds time() values).
-	types.time_date    = {double, type = 'time', align = 'center', tarantool_type = 'number'}
-	types.time         = {time_date, w = 80}
+	types.time_date    = {double, type = 'time', precision = 'd', align = 'center', tarantool_type = 'number'}
+	types.time         = {time_date, w = 80, precision = 'm'}
 	types.time_s       = {time, precision = 's'}
 	types.time_ms      = {time, precision = 'ms'}
 	types.time_timeago = {time_s, timeago = true}

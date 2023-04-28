@@ -54,7 +54,7 @@ css('.chart-canvas', 'abs', `
 	left: 0;
 `)
 
-css('.tooltip.chart-tooltip', 'click-through')
+css('.chart-tooltip', 'click-through')
 
 css('.chart-tooltip > .tooltip-body', 'tight')
 
@@ -102,14 +102,43 @@ css('.chart-pie-label', 'abs white')
 
 G.chart = component('chart', 'Input', function(e) {
 
-	e.class('chart')
+	e.class('chart unframe')
 	e.make_disablable()
+
+	// data binding -----------------------------------------------------------
+
+	make_nav_data_widget_extend_before(e)
+	e.make_nav_data_widget()
+
+	let nav
+	e.on('bind_nav', function(nav1, on) {
+		nav = on ? nav1 : null
+		update_model()
+	})
+
+	function nav_changed(nav1) {
+		if (nav1 != nav) return
+		update_model()
+	}
+
+	e.listen('reset'                , nav_changed)
+	e.listen('rows_changed'         , nav_changed)
+	e.listen('cell_state_changed'   , nav_changed)
+	e.listen('display_vals_changed' , nav_changed)
+	e.listen('col_attr_changed'     , nav_changed)
+
+	function update_view() {
+		e.update()
+	}
+
+	e.listen('layout_changed', update_view)
+	e.on('resize', update_view)
 
 	// config -----------------------------------------------------------------
 
-	e.prop('split_cols' , {type: 'col', col_nav: () => e._nav})
-	e.prop('group_cols' , {type: 'col', col_nav: () => e._nav})
-	e.prop('sum_cols'   , {type: 'col', col_nav: () => e._nav})
+	e.prop('split_cols' , {type: 'col'})
+	e.prop('group_cols' , {type: 'col'})
+	e.prop('sum_cols'   , {type: 'col'})
 	e.prop('min_sum'    , {type: 'number'})
 	e.prop('max_sum'    , {type: 'number'})
 	e.prop('sum_step'   , {type: 'number'})
@@ -206,7 +235,7 @@ G.chart = component('chart', 'Input', function(e) {
 
 	function try_update_model() {
 
-		if (!e._nav) return
+		if (!nav) return
 		if (e.sum_cols == null) return
 		if (e.group_cols == null) return
 
@@ -218,7 +247,7 @@ G.chart = component('chart', 'Input', function(e) {
 			let tied = col.includes('..')
 			col = col.replace('..', '')
 			let agg = 'avg'; col.replace(/\/[^\/]+$/, k => { agg = k; return '' })
-			let fld = e._nav.optfld(col)
+			let fld = nav.optfld(col)
 			if (fld) // it's enough for one sum_col to be valid.
 				sum_defs.push({field: fld, tied: tied, tied_back: tied_back, agg: agg})
 			tied_back = fld ? tied : false
@@ -230,7 +259,7 @@ G.chart = component('chart', 'Input', function(e) {
 		if (!group_cols.length)
 			return
 
-		if (!e._nav.rows.length)
+		if (!nav.rows.length)
 			return true
 
 		// group rows and compute the sums on each group.
@@ -240,9 +269,9 @@ G.chart = component('chart', 'Input', function(e) {
 		all_split_groups = []
 		for (let sum_def of sum_defs) {
 
-			let split_groups = e._nav.row_groups({
+			let split_groups = nav.row_groups({
 				col_groups : catany('>', e.split_cols, e.group_cols),
-				rows       : e._nav.rows,
+				rows       : nav.rows,
 			})
 
 			if (!e.split_cols)
@@ -281,13 +310,13 @@ G.chart = component('chart', 'Input', function(e) {
 		let a = []
 		if (label)
 			a.push(label)
-		a.push(e._nav.cell_display_val_for(null, sum_fld, sum))
+		a.push(nav.draw_val(null, sum_fld, sum))
 		return a.join_nodes(tag('br'), cls && div({class: cls}))
 	}
 
 	function val_text(val) {
-		let val_fld = e._nav.fld(group_cols[0]) // TODO: only works for single-col groups!
-		let s = e._nav.cell_display_val_for(null, val_fld, val)
+		let val_fld = nav.fld(group_cols[0]) // TODO: only works for single-col groups!
+		let s = nav.draw_val(null, val_fld, val)
 		return isnode(s) ? s.textContent : s
 	}
 
@@ -330,7 +359,7 @@ G.chart = component('chart', 'Input', function(e) {
 		for (let slice of big_slices)
 			slice.percent = (slice.size * 100).dec(0) + '%'
 
-		big_slices.key_cols_label = e._nav.fldlabels(slices.key_cols).join_nodes(' / ')
+		big_slices.key_cols_label = nav.fldlabels(slices.key_cols).join_nodes(' / ')
 		big_slices.sum_field = groups.sum_def.field
 
 		return big_slices
@@ -347,15 +376,6 @@ G.chart = component('chart', 'Input', function(e) {
 		e.legend.hide(v)
 	}
 
-	let tt
-	function make_tooltip(opt) {
-		tt = tooltip(assign({
-			align   : 'center',
-			kind    : 'info',
-			classes : 'chart-tooltip',
-		}, opt))
-	}
-
 	// shape dispatcher
 
 	let renderer = obj() // {shape->cons()}
@@ -369,7 +389,7 @@ G.chart = component('chart', 'Input', function(e) {
 		e.header.set(e.text)
 		if (shape != e.shape) {
 			if (tt) {
-				tt.remove()
+				tt.del()
 				tt = null
 			}
 			pointermove = noop
@@ -502,6 +522,8 @@ G.chart = component('chart', 'Input', function(e) {
 
 	}
 
+	let tt
+
 	renderer.pie = function() {
 
 		let slices = pie_slices()
@@ -583,7 +605,13 @@ G.chart = component('chart', 'Input', function(e) {
 			if (opt.tooltip) {
 				if (hit_slice) {
 					if (!tt) {
-						make_tooltip({target: pie, side: 'inner-center'})
+						tt = tooltip({
+							target  : pie,
+							align   : 'center',
+							side    : 'inner-center',
+							kind    : 'info',
+							classes : 'chart-tooltip',
+						})
 						e.view.add(tt)
 						tt.key_cols_div = div()
 						tt.sum_cols_div = div()
@@ -595,7 +623,7 @@ G.chart = component('chart', 'Input', function(e) {
 						)
 					}
 
-					let s = e._nav.cell_display_val_for(null, slices.sum_field, hit_slice.sum)
+					let s = nav.draw_val(null, slices.sum_field, hit_slice.sum)
 
 					tt.key_cols_div.set(slices.key_cols_label)
 					tt.sum_cols_div.set(slices.sum_field.label)
@@ -658,14 +686,12 @@ G.chart = component('chart', 'Input', function(e) {
 
 	function renderer_line_or_columns(columns, rotate, dots, area, stacked) {
 
-		let canvas = tag('canvas', {
-			class : 'chart-canvas',
-			width : view_w,
-			height: view_h,
-		})
+		let ct = resizeable_canvas_container()
+		let cx = ct.context
+
+		e.view.set(ct)
+
 		e.attr('shape', 'lines')
-		e.view.set(canvas)
-		let cx = canvas.getContext('2d')
 
 		let line_h; {
 			let m = cx.measureText('M')
@@ -678,6 +704,7 @@ G.chart = component('chart', 'Input', function(e) {
 		let py1 = round(rotate ? line_h + 5 : 10)
 		let py2 = line_h * 1.5
 
+		let hit_mx, hit_my
 		let hit_cg, hit_xg
 		let hit_x, hit_y, hit_w, hit_h
 		let bar_rect
@@ -693,7 +720,7 @@ G.chart = component('chart', 'Input', function(e) {
 							hit_xg = xg
 							hit_x = x + w / 2
 							hit_y = y
-							hit_w = w
+							hit_w = 0
 							hit_h = h
 							legend_hit_cg = null
 							return true
@@ -732,25 +759,23 @@ G.chart = component('chart', 'Input', function(e) {
 		pointermove = function(ev, mx, my) {
 			if (!all_split_groups)
 				return
-			let r = canvas.rect()
-			mx -= r.x
-			my -= r.y
-			let cxm = cx.getTransform().translate(px1, py1)
-			let mp = new DOMPoint(mx, my).matrixTransform(cxm.invertSelf())
-			mx = mp.x
-			my = mp.y
+			let r = ct.rect()
+			mx -= r.x + px1
+			my -= r.y + py1
+			hit_mx = mx
+			hit_my = my
 			hit_cg = null
 			hit_xg = null
 			let hit = columns ? hit_test_columns(mx, my) : hit_test_dots(mx, my)
 			if (hit) {
-				let er = e.rect()
+
 				if (!tt) {
 					tt = tooltip({
 						align   : 'center',
 						kind    : 'info',
 						classes : 'chart-tooltip',
 					})
-					e.add(tt)
+					e.view.add(tt)
 					tt.spl_cols_div = div()
 					tt.key_cols_div = div()
 					tt.sum_cols_div = div()
@@ -765,13 +790,13 @@ G.chart = component('chart', 'Input', function(e) {
 				}
 				tt.side = rotate ? 'right' : 'top'
 
-				let spl_flds = e._nav.flds(hit_cg.key_cols)
-				let key_flds = e._nav.flds(hit_xg.key_cols)
+				let spl_flds = nav.flds(hit_cg.key_cols)
+				let key_flds = nav.flds(hit_xg.key_cols)
 				let spl_cols = spl_flds.map(f => f.label).join_nodes(' / ')
 				let key_cols = key_flds.map(f => f.label).join_nodes(' / ')
 
 				let sum_fld  = hit_cg.sum_def.field
-				let s = e._nav.cell_display_val_for(null, sum_fld, hit_xg.sum)
+				let s = nav.draw_val(null, sum_fld, hit_xg.sum)
 
 				tt.spl_cols_div.set(spl_cols)
 				tt.key_cols_div.set(key_cols)
@@ -780,21 +805,22 @@ G.chart = component('chart', 'Input', function(e) {
 				tt.sum_cols_div.set(sum_fld.label)
 				tt.sum_div.set(s)
 
-				let tm = cx.getTransform()
-					.translate(px1, py1)
-					.translate(r.x - er.x, r.y - er.y)
-				let p1 = new DOMPoint(hit_x        , hit_y        ).matrixTransform(tm)
-				let p2 = new DOMPoint(hit_x + hit_w, hit_y + hit_h).matrixTransform(tm)
-				let p3 = new DOMPoint(hit_x + hit_w, hit_y        ).matrixTransform(tm)
-				let p4 = new DOMPoint(hit_x        , hit_y + hit_h).matrixTransform(tm)
-				let x1 = min(p1.x, p2.x, p3.x, p4.x)
-				let y1 = min(p1.y, p2.y, p3.y, p4.y)
-				let x2 = max(p1.x, p2.x, p3.x, p4.x)
-				let y2 = max(p1.y, p2.y, p3.y, p4.y)
-				tt.popup_x1 = x1
-				tt.popup_y1 = y1
-				tt.popup_x2 = x2
-				tt.popup_y2 = y2
+				let p1x = hit_x
+				let p1y = hit_y
+				let p2x = hit_x + hit_w
+				let p2y = hit_y + hit_h
+				let p3x = hit_x + hit_w
+				let p3y = hit_y
+				let p4x = hit_x
+				let p4y = hit_y + hit_h
+				let x1 = min(p1x, p2x, p3x, p4x)
+				let y1 = min(p1y, p2y, p3y, p4y)
+				let x2 = max(p1x, p2x, p3x, p4x)
+				let y2 = max(p1y, p2y, p3y, p4y)
+				tt.popup_x1 = x1 + px1
+				tt.popup_y1 = y1 + py1
+				tt.popup_x2 = x2 + px1
+				tt.popup_y2 = y2 + py1
 				tt.update({show: true})
 			} else if (tt) {
 				tt.update({show: false})
@@ -805,9 +831,12 @@ G.chart = component('chart', 'Input', function(e) {
 		do_update = function(opt) {
 			if (opt.model)
 				update_legend_split_groups()
+			ct.update()
 		}
+		do_measure = null
+		do_position = null
 
-		do_position = function() {
+		ct.on_redraw(function(cx, view_w, view_h) {
 
 			cx.font = view_css['font-size'] + ' ' + view_css.font
 
@@ -816,20 +845,16 @@ G.chart = component('chart', 'Input', function(e) {
 			let w = view_w - (px1 + px2)
 			let h = view_h - (py1 + py2)
 
-			canvas.resize(view_w, view_h, 100, 100)
-			cx.clear()
-			cx.save()
-
 			cx.translate(px1, py1)
 
 			if (rotate) {
 				cx.translate(w, 0)
 				cx.rotate(rad * 90)
+				;[hit_mx, hit_my] = [hit_my, hit_mx]
 				;[w, h] = [h, w]
 			}
 
 			// compute vertical (sum) and horizontal (val) ranges.
-			// also compute a map of
 			let xgs = map() // {x_key -> xg}
 			let min_val  = 0
 			let max_val  = 1
@@ -848,8 +873,8 @@ G.chart = component('chart', 'Input', function(e) {
 				for (let cg of all_split_groups) {
 					for (let xg of cg) {
 						let sum = xg.sum
-						let key_flds = e._nav.flds(xg.key_cols)
-						let val = key_flds[0].to_num(xg.key_vals[0])
+						let key_flds = nav.flds(xg.key_cols)
+						let val = xg.key_vals[0]
 						min_sum = min(min_sum, sum)
 						max_sum = max(max_sum, sum)
 						min_val = min(min_val, val)
@@ -898,8 +923,8 @@ G.chart = component('chart', 'Input', function(e) {
 				for (let cg of all_split_groups) {
 					let xgi = 0
 					for (let xg of cg) {
-						let key_flds = e._nav.flds(xg.key_cols)
-						let val = key_flds[0].to_num(xg.key_vals[0])
+						let key_flds = nav.flds(xg.key_cols)
+						let val = xg.key_vals[0]
 						xg.x = round(lerp(val, min_val, max_val, 0, w))
 						xg.y = round(lerp(xg.sum, min_sum, max_sum, h - py2, 0))
 						if (xg.y != xg.y)
@@ -910,8 +935,8 @@ G.chart = component('chart', 'Input', function(e) {
 
 			// draw x-axis labels & reference lines.
 
-			let ref_line_color = view_css.prop('--x-border-light')
-			let label_color    = view_css.prop('--x-fg-label')
+			let ref_line_color = view_css.prop('--border-light')
+			let label_color    = view_css.prop('--fg-label')
 			cx.fillStyle   = label_color
 			cx.strokeStyle = ref_line_color
 
@@ -1041,6 +1066,9 @@ G.chart = component('chart', 'Input', function(e) {
 
 			if (all_split_groups) {
 
+				if (hit_mx < 0 || hit_mx > w)
+					hit_mx = null
+
 				cx.rect(0, 0, w, h)
 
 				let cgi = 0
@@ -1093,14 +1121,31 @@ G.chart = component('chart', 'Input', function(e) {
 						cx.strokeStyle = color
 						cx.stroke()
 
-						// draw a dot on each line cusp.
-						if (dots) {
-							cx.fillStyle = cx.strokeStyle
-							for (let xg of cg) {
+						cx.fillStyle = cx.strokeStyle
+						let xg_x0 = 0
+						let xg_y0 = 0
+						for (let xg of cg) {
+
+							// draw a dot on each line cusp.
+							if (dots) {
 								cx.beginPath()
 								cx.arc(xg.x, xg.y, 3, 0, 2*PI)
 								cx.fill()
 							}
+
+							// draw a dot where intersecting the extrapolator line.
+							if (hit_mx != null && !hit_cg) {
+								if (hit_mx >= xg_x0 && hit_mx <= xg.x) {
+									cx.fillStyle = cx.strokeStyle
+									cx.beginPath()
+									let y = lerp(hit_mx, xg_x0, xg.x, xg_y0, xg.y)
+									cx.arc(hit_mx, y, 3, 0, 2*PI)
+									cx.fill()
+								}
+								xg_x0 = xg.x
+								xg_y0 = xg.y
+							}
+
 						}
 
 					}
@@ -1108,12 +1153,20 @@ G.chart = component('chart', 'Input', function(e) {
 					cgi++
 				}
 
-				// draw the hit line.
-
 				if (hit_cg) {
+					// draw the hit line.
 					cx.beginPath()
 					cx.moveTo(hit_x + .5, .5)
 					cx.lineTo(hit_x + .5, h - py2 + 4.5)
+					cx.strokeStyle = label_color
+					cx.setLineDash([3, 2])
+					cx.stroke()
+					cx.setLineDash(empty_array)
+				} else if (hit_mx != null) {
+					// draw the extrapolator line.
+					cx.beginPath()
+					cx.moveTo(hit_mx + .5, .5)
+					cx.lineTo(hit_mx + .5, h - py2 + 4.5)
 					cx.strokeStyle = label_color
 					cx.setLineDash([3, 2])
 					cx.stroke()
@@ -1122,9 +1175,9 @@ G.chart = component('chart', 'Input', function(e) {
 
 			}
 
-			cx.restore()
+			// cx.restore()
 
-		}
+		})
 
 	}
 
@@ -1136,48 +1189,6 @@ G.chart = component('chart', 'Input', function(e) {
 	renderer.bars       = () => renderer_line_or_columns(true , true)
 	renderer.stacks     = () => renderer_line_or_columns(true , false, false, false, true)
 	renderer.hstacks    = () => renderer_line_or_columns(true , true , false, false, true)
-
-	// data binding -----------------------------------------------------------
-
-	function bind_nav(nav, on) {
-		if (!e.bound)
-			return
-		if (!nav)
-			return
-		nav.on('reset'               , update_model, on)
-		nav.on('rows_changed'        , update_model, on)
-		nav.on('cell_state_changed'  , update_model, on)
-		nav.on('display_vals_changed', update_model, on)
-		if (on)
-			update_model()
-	}
-
-	function update_view() {
-		e.update()
-	}
-
-	e.listen('layout_changed', update_view)
-	e.on('resize', update_view)
-
-	e.on_bind(function(on) {
-		bind_nav(e._nav, on)
-		if (!on && tt) {
-			tt.close()
-			tt = null
-		}
-	})
-
-	function nav_changed() {
-		bind_nav(e._nav, false)
-		e._nav = e.nav || e._nav_id_nav
-		bind_nav(e._nav, true)
-	}
-
-	e.set_nav = nav_changed
-	e.set__nav_id_nav = nav_changed
-	e.prop('nav', {private: true})
-	e.prop('_nav_id_nav', {private: true})
-	e.prop('nav_id', {bind_id: '_nav_id_nav', type: 'nav', attr: 'nav'})
 
 })
 

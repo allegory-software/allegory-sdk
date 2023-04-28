@@ -206,26 +206,30 @@ css('.tooltip-icon', 't-t m-t-05 m-l-2', `
 	line-height: inherit !important; /* override fontawesome's !important */
 `)
 
+// side & align combinations.
+
 css('.tooltip[side=left  ] > .tooltip-tip', '', ` border-left-color   : inherit; `)
 css('.tooltip[side=right ] > .tooltip-tip', '', ` border-right-color  : inherit; `)
 css('.tooltip[side=top   ] > .tooltip-tip', '', ` border-top-color    : inherit; `)
 css('.tooltip[side=bottom] > .tooltip-tip', '', ` border-bottom-color : inherit; `)
 
-// side & align combinations.
-
 // NOTE: tooltip must have the exact same total width and height for each
 // side and align combinations because side and/or align attrs can change
-// _after_ the popup is being positioned when it's too late to re-measure it!
+// _after_ the popup was positioned when it's too late to re-measure it!
 // This is why we put these paddings.
-css('.tooltip:is([side=top],[side=bottom])', '', `padding-left: .5em; padding-right : .5em; margin-left: -.5em; margin-right : -.5em;`)
-css('.tooltip:is([side=left],[side=right])', '', `padding-top : .5em; padding-bottom: .5em; margin-top : -.5em; margin-bottom: -.5em;`)
+css('.tooltip:is([side=top],[side=bottom])', '', ` padding-left: .5em; padding-right : .5em; `)
+css('.tooltip:is([side=left],[side=right])', '', ` padding-top : .5em; padding-bottom: .5em; `)
+// ... but now the tooltip is misaligned, so we need to adjust its position.
+css('.tooltip[align=start]:is([side=top],[side=bottom])', '', ` margin-left: -.5em; `)
+css('.tooltip[align=end  ]:is([side=top],[side=bottom])', '', ` margin-left: .5em; `)
+css('.tooltip[align=start]:is([side=left],[side=right])', '', ` margin-top: -.5em; `)
+css('.tooltip[align=end  ]:is([side=left],[side=right])', '', ` margin-top: .5em; `)
 
 css('.tooltip:is([side=top],[side=bottom])', '', `flex-flow: column;`)
 css('.tooltip[side=left   ]', '', `justify-content: flex-end;`)
 css('.tooltip[align=start ]', '', `align-items: flex-start; `)
 css('.tooltip[align=end   ]', '', `align-items: flex-end; `)
 css('.tooltip[align=center]', '', `align-items: center; `)
-
 css('.tooltip:is([side=right],[side=bottom]) > .tooltip-body', '', `order: 2;`)
 
 css('.tooltip[align=center]:is([side=top],[side=bottom]) .tooltip-content', '', `text-align: center; `)
@@ -2042,13 +2046,14 @@ dynamic tabs:
 
 */
 
-css('.tabs', 'S v flex', `
+css('.tabs', 'S shrinks v flex', `
 	--w-tabs-header: 10em;
 `)
 
 css('tabs-header', 'h rel bg1')
 
-css('tabs-box', 'S h rel shrinks clip')
+css('tabs-box', 'S h rel shrinks')
+css('.tabs:is([tabs_side=left],[tabs_side=right]) > tabs-header', 'clip-x-auto-y')
 
 css('tabs-fixed-header', 'S h-m')
 
@@ -2057,8 +2062,8 @@ css('.tabs[tabs_side=right]', 'h-r')
 
 css('.tabs[tabs_side=left ] > tabs-header', 'v', `width: var(--w-tabs-header);`)
 css('.tabs[tabs_side=right] > tabs-header', 'v', `width: var(--w-tabs-header);`)
-css('.tabs[tabs_side=left ] > tabs-header > tabs-box', 'v')
-css('.tabs[tabs_side=right] > tabs-header > tabs-box', 'v')
+css('.tabs[tabs_side=left ] > tabs-header tabs-box', 'v')
+css('.tabs[tabs_side=right] > tabs-header tabs-box', 'v')
 
 css('.tabs[tabs_side=bottom] > tabs-header', 'order-1')
 css('.tabs[tabs_side=right ] > tabs-header', 'order-1')
@@ -2070,7 +2075,9 @@ css('.tabs[tabs_side=right ] > tabs-header', 'b-l')
 
 css('tabs-content', 'S shrinks scroll-auto')
 
-css('tabs-tab', 'rel label arrow h shrinks')
+css('tabs-tab', 'rel label arrow h')
+css('.tabs:is([tabs_side=top],[tabs_side=bottom]) > tabs-header tabs-tab', 'shrinks')
+// css('.tabs:is([tabs_side=left],[tabs_side=right]) > tabs-header tabs-tab', 'clip-x')
 
 // reset focusable-items states.
 css_state('tabs-tab', 'no-bg')
@@ -2078,7 +2085,7 @@ css_state('tabs-tab.selected', 'fg')
 css_state('tabs-tab.tab-selected', 'fg')
 css_state('tabs-tab:is(:hover)', 'label-hover')
 
-css('tabs-title', 'noselect nowrap p-x-4', `
+css('tabs-title', 'noselect nowrap m-x-4', `
 	padding-top    : .6em;
 	padding-bottom : .4em;
 	max-width: 10em;
@@ -2171,10 +2178,11 @@ G.tabs = component('tabs', 'Containers', function(e) {
 		return item.tabname || item.attr('tabname')
 	}
 
-	function tabname_changed() {
-		if (!this._tab) return
-		update_tab_title(this._tab) // TODO: defer this
-	}
+	e.listen('tabname_changed', function(ce) {
+		if (!ce._tab) return
+		if (ce._tab.tabs != e) return
+		update_tab_title(ce._tab) // TODO: defer this
+	})
 
 	function update_tab_title(tab) {
 		let s = tabname(tab.item)
@@ -2206,7 +2214,6 @@ G.tabs = component('tabs', 'Containers', function(e) {
 			for (let tab of e.tabs_box.at) {
 				let item = tab.item
 				if (item && item._removed) {
-					item.on('tabname_changed', tabname_changed, false)
 					item._tab = null
 					item._tabs = null
 				}
@@ -2232,7 +2239,6 @@ G.tabs = component('tabs', 'Containers', function(e) {
 					tab.item = item
 					item._tab = tab
 					item._tabs = e
-					item.on('tabname_changed', tabname_changed)
 					update_tab_title(tab)
 					item._tab.x = null
 					e.tabs_box.add(tab)
@@ -2280,43 +2286,46 @@ G.tabs = component('tabs', 'Containers', function(e) {
 
 	// selection bar positioning
 
-	let tr, cr
+	let tr, cr, c_css
 
 	e.on_measure(function() {
 		tr = e.tabs_box.rect()
-		cr = selected_tab && selected_tab.at[0].rect()
+		let tab_title = selected_tab && selected_tab.at[0]
+		cr = tab_title.rect()
+		c_css = tab_title.css()
 	})
 
 	e.on_position(function() {
 		let b = e.selection_bar
-		if (e.tabs_side == 'left') {
-			b.x1 = null
-			b.x2 = 0
+		let mx1 = c_css ? num(c_css.marginLeft ) : 0
+		let mx2 = c_css ? num(c_css.marginRight) : 0
+		if (e.tabs_side == 'left' || e.tabs_side == 'right') {
 			b.y1 = cr ? cr.y - tr.y : 0
 			b.y2 = null
-			b.w  = null
 			b.h  = cr ? cr.h : 0
-		} else if (e.tabs_side == 'right') {
+			b.w  = null
+		}
+		if (e.tabs_side == 'left') {
 			b.x1 = 0
 			b.x2 = null
-			b.y1 = cr ? cr.y - tr.y : 0
-			b.y2 = null
-			b.w  = null
-			b.h  = cr ? cr.h : 0
-		} else if (e.tabs_side == 'top') {
-			b.x1 = cr ? cr.x - tr.x : 0
+		}
+		if (e.tabs_side == 'right') {
+			b.x1 = 0
 			b.x2 = null
+		}
+		if (e.tabs_side == 'top' || e.tabs_side == 'bottom') {
+			b.x1 = cr ? cr.x - tr.x - mx1 : 0
+			b.x2 = null
+			b.w  = cr ? cr.w + mx1 + mx2 : 0
+			b.h  = null
+		}
+		if (e.tabs_side == 'top') {
 			b.y1 = null
 			b.y2 = 0
-			b.w  = cr ? cr.w : 0
-			b.h  = null
-		} else if (e.tabs_side == 'bottom') {
-			b.x1 = cr ? cr.x - tr.x : 0
-			b.x2 = null
+		}
+		if (e.tabs_side == 'bottom') {
 			b.y1 = 0
 			b.y2 = null
-			b.w  = cr ? cr.w : 0
-			b.h  = null
 		}
 		b.hidden = !selected_tab
 	})
@@ -2610,7 +2619,7 @@ html attrs:
 
 */
 
-css('.split', 'S')
+css('.split', 'S shrinks')
 css('.split[orientation=horizontal]', 'h')
 css('.split[orientation=vertical  ]', 'v')
 
@@ -4945,20 +4954,19 @@ css('.slider-value-fill', 'bg-link')
 
 // wrapping the thumb circle because we can't attach a popup to a transparent
 // object because it creates a stacking context.
-css('.slider-thumb', 'abs h', `
+css('.slider-thumb', 'abs h ease', `
+	--w-slider-thumb: 1.2em;
 	/* center vertically relative to the fill */
-	margin-top : calc(-.6em + 1px);
-	margin-left: calc(-.6em);
-	width : 1.2em;
-	height: 1.2em;
+	margin-top : calc((0px - var(--w-slider-thumb)) / 2 + 1px);
+	margin-left: calc((0px - var(--w-slider-thumb)) / 2);
+	width  : var(--w-slider-thumb);
+	height : var(--w-slider-thumb);
+	transition-property: width, height, margin-top, margin-left;
 `)
 css('.slider-thumb-circle', 'S bg-link')
 css('.slider-thumb-circle', 'round', `
 	box-shadow: var(--shadow-thumb);
 `)
-
-css('.slider-thumb-circle:hover' , '', `background: var(--fg-link-hover);`)
-css('.slider-thumb-circle:active', '', `background: var(--fg-link-active);`)
 
 // toggling visibility on hover requires click-through for stable hovering!
 css('.slider-tooltip', 'click-through m-l-0 ease', `
@@ -4985,6 +4993,16 @@ css_state('.slider[null]    .slider-value-fill', 'op05')
 
 css_state('.slider.animate .slider-thumb       ', 'ease')
 css_state('.slider.animate .slider-value-fill'  , 'ease')
+
+css_state(`
+	.slider:not(.range):hover .slider-thumb,
+	.slider-thumb:hover
+`, 'ease', `
+	--w-slider-thumb: 1.4em;
+	transition-property: width, height, margin-top, margin-left;
+`)
+css_state('.slider-thumb-circle:hover' , '', `background-color: var(--fg-link-hover);`)
+css_state('.slider-thumb-circle:active', '', `background-color: var(--fg-link-active);`)
 
 let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, decimals) {
 	scale_base = scale_base || 10
@@ -5154,7 +5172,6 @@ let slider_widget = function(e, range) {
 
 	function update_tooltip(thumb, update_text) {
 		let show = (thumb.hovered || thumb.at[0].focus_visible)
-			// && !thumb.getAnimations().length
 		if (!show && !thumb.tooltip)
 			return
 		if (!thumb.tooltip) {
@@ -8193,7 +8210,7 @@ css('.time-picker', 'h-c', `
 	height: var(--h-time-picker);
 `)
 css('.time-picker-list-box', 'v')
-css('.time-picker-list-header', 'label h-c h-m b-b vscroll', `
+css('.time-picker-list-header', 'label h-c h-m b-b clip-x-scroll-y', `
 	font-size: calc(0.75 * var(--fs));
 	min-height: calc(var(--fs) * var(--lh) + 2 * var(--fs) * var(--p-y-calendar-days-em) - 1px);
 `)
@@ -8847,7 +8864,7 @@ css('.richtext', 'scroll-auto')
 css('.richtext:not(.richedit)', 'm0 block')
 css('.richtext:not(.richedit) > .focus-box', 'b0')
 
-css('.richtext-content', 'vscroll-auto no-outline p')
+css('.richtext-content', 'clip-x-auto-y no-outline p')
 
 G.richtext = component('richtext', function(e) {
 

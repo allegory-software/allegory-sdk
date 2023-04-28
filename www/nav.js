@@ -142,9 +142,7 @@ Field attributes:
 		filesize_decimals  : filesize type, see kbytes()
 		filesize_min       : filesize type, see kbytes()
 
-		has_time       : date type (false); time type (true)
-		has_seconds    : date type (false); timeofday type (false)
-		has_fractions  : date type (false); timeofday type (false)
+		precision      : date, datetime, time, timeofday types
 
 		duration_format: see duration() in glue.js
 
@@ -469,7 +467,7 @@ Loading & saving from/to memory:
 
 Cell display val, text val and drawing:
 	publishes:
-		e.draw_val(row, field, v, [cx|pe]) -> true|s
+		e.draw_val([row], field, v, [cx|pe]) -> true|s
 		e.draw_cell(row, field, [cx|pe]) -> true|s
 	announces:
 		^^display_vals_changed()
@@ -628,6 +626,7 @@ let field_attr_parse = {
 	w        : num,
 	min_w    : num,
 	max_w    : num,
+	precision: return_arg,
 	not_null : bool_attr,
 	required : bool_attr,
 	sortable : bool_attr,
@@ -1486,11 +1485,21 @@ e.make_nav_widget = function() {
 
 	// tabname ----------------------------------------------------------------
 
-	e.prop('tabname_template', {default: '{0}'})
+	e.prop('tabname_template', {slot: 'lang', default: '{0}'})
 
-	e.property('tabname', function() {
-		let view = e.param_vals && e.param_nav.selected_rows_tabname() || ''
+	let tabname
+	e.prop('tabname', {slot: 'lang'})
+
+	e.set_tabname(
+	function() {
+		if (tabname)
+			return tabname
+		let view = e.param_vals && e.param_nav.selected_rows_tabname()
+			|| e.rowset_name || 'Nav'
 		return e.tabname_template.subst(view)
+	}, function(s) {
+		tabname = s
+		e.announce('tabname_changed')
 	})
 
 	e.row_tabname = function(row) {
@@ -3502,7 +3511,7 @@ e.make_nav_widget = function() {
 	// or nothing in which case returns a plain text representation.
 
 	function draw_null_lookup_val(row, field, cx) {
-		if (!field.null_lookup_col) return
+		if (!row || !field.null_lookup_col) return
 		let lf = e.all_fields_map[field.null_lookup_col]  ; if (!lf || !lf.lookup_cols) return
 		let ln = lf.lookup_nav                            ; if (!ln) return
 		let nfv = e.cell_val(row, lf)
@@ -5022,10 +5031,10 @@ e.make_nav_widget = function() {
 					if (tn)
 						ts = template(tn)
 					else
-						ts = template(e.id + '_item') || template(e.type + '_item')
+						ts = template(e.id + '_item') || template(e.tag + '_item')
 				}
 				if (ts) {
-					pe.unsafe_html = render_string(ts, row && e.serialize_row_vals(row))
+					cx.unsafe_html = render_string(ts, row && e.serialize_row_vals(row))
 					return true
 				}
 			}
@@ -5057,7 +5066,6 @@ css('bare-nav', 'hidden')
 G.bare_nav = component('nav', function(e) {
 	e.class('bare-nav')
 	e.make_nav_widget()
-	return {hidden: true}
 })
 
 /* ---------------------------------------------------------------------------
@@ -5075,9 +5083,38 @@ fires:
 
 */
 
+// TODO: make interpreting the inner html a separate init step!
+
+G.make_nav_data_widget_extend_before = function(e) {
+
+	let nav
+	let rowset = e.$1(':scope>rowset')
+	if (rowset) {
+		nav = bare_nav({}, rowset)
+	} else {
+		nav = e.$1(':scope>nav')
+		if (nav) {
+			nav.init_component()
+			nav.del()
+		}
+	}
+	if (nav) {
+		e.on_bind(function(on) {
+			if (on)
+				head.add(nav)
+			else
+				nav.del()
+			e._html_nav = on ? nav : null
+		})
+	}
+
+}
+
 e.make_nav_data_widget = function() {
 
 	let e = this
+
+	// data binding -----------------------------------------------------------
 
 	let nav
 
@@ -5135,6 +5172,22 @@ e.make_nav_data_widget = function() {
 	e.set_rowset_name = update_nav
 
 }
+
+/* ---------------------------------------------------------------------------
+
+Widget that has sa nav and a col from the nav as its data model, but doesn't
+depend on the focused row (see next mixin for that).
+
+config props:
+	nav
+	nav_id     nav
+	col
+state props:
+	ready
+fires:
+	^bind_field(field, on)
+
+*/
 
 e.make_nav_col_widget = function() {
 
@@ -5586,9 +5639,8 @@ count.to_text = function(s) {
 let date = {
 	align: 'right',
 	is_time: true,
-	has_time: false,
-	has_seconds: false,
-	has_fractions: false,
+	w: 80,
+	precision: 'd',
 	format: 'sql', // sql | time
 	min: parse_date('1000-01-01 00:00:00', 'SQL'),
 	max: parse_date('9999-12-31 23:59:59', 'SQL'),
@@ -5600,7 +5652,7 @@ date.to_text = function(v) {
 		return str(v)
 	if (this.timeago)
 		return v.timeago()
-	return v.date(null, this.has_time, this.has_seconds, this.has_fractions)
+	return v.date(null, this.precision)
 }
 
 let inh_draw = all_field_types.draw
@@ -5616,7 +5668,7 @@ date.draw = function(v, cx) {
 
 date.to_json = function(t) {
 	if (this.format == 'sql')
-		return v.date('SQL', this.has_time, this.has_seconds, this.has_fractions)
+		return v.date('SQL', this.precision)
 	return t
 }
 
@@ -5626,6 +5678,9 @@ date.editor = function(opt) {
 		mode: opt.embedded ? 'fixed' : null,
 	}, opt))
 }
+
+let dt = assign({}, date, {precision: 'm', w: 140})
+field_types.datetime = dt
 
 // timestamps ----------------------------------------------------------------
 
@@ -5642,35 +5697,12 @@ let td = {align: 'center', is_timeofday: true}
 field_types.timeofday = td
 
 td.to_text = function(v) {
-	let t = parse_hms(v, this.has_seconds)
-	if (t == null) return v // invalid
-	let s = t[0].base(10, 2) + ':' + t[1].base(10, 2)
-	if (this.has_seconds)
-		s += ':' + t[2].base(10, 2)
-	return s
+	if (!isnum(v)) // invalid
+		return str(v)
+
 }
 
 td.editor = function(opt) {
-	return timeofdayedit(opt)
-}
-
-// timeofday in seconds ------------------------------------------------------
-
-let tds = {align: 'center', is_timeofday: true}
-field_types.timeofday_in_seconds = tds
-
-tds.to_text = function(v) {
-	if (isstr(v)) return v // invalid
-	let H = floor(v / 3600)
-	let M = floor(v / 60) % 60
-	let S = floor(v) % 60
-	let s = H.base(10, 2) + ':' + M.base(10, 2)
-	if (this.has_seconds)
-		s += ':' + S.base(10, 2)
-	return s
-}
-
-tds.editor = function(opt) {
 	return timeofdayedit(opt)
 }
 
