@@ -23,7 +23,7 @@ CSS CLASSES
 	PADDINGS      p p0 p-{025 05 075 2 4 8} p-{l r t b x y}-{0 05 2 4 8}
 	MARGINS       m m0 m-{05 2 4 8} m-{l r t b x y}-{0 05 2 4 8}', '', {ml mr mx}-auto
 	OUTLINE       outline-focus no-outline
-	OVERFLOW      [v h]scroll[-auto] [no]clip[-x -y] scroll-thin scroll-smooth
+	OVERFLOW      {scroll-x clip-x auto-x noclip-x}-{...same} scroll-thin scroll-smooth
 	POSITIONING   rel abs z{-1 0..9} no-z overlay
 	VISIBILITY    hidden skip click-through[-off]
 	FLAT BGs      bg[1 2 -alt -smoke -fg] no-bg
@@ -182,8 +182,8 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 	--fg-label-hover        : hsl(  0   0% 100% / 0.8);
 	--fg-label-active       : hsl(  0   0% 100% / 1.0);
 	--fg-link               : hsl( 26  88%  51% / 1.0);
-	--fg-link-hover         : hsl( 26  99%  56% / 1.0);
-	--fg-link-active        : hsl( 26  99%  65% / 1.0);
+	--fg-link-hover         : hsl( 26  99%  66% / 1.0);
+	--fg-link-active        : hsl( 26  99%  71% / 1.0);
 
 	--bg0                   : hsl(216  28%   8% / 1.0);
 	--bg                    : hsl(216  28%  10% / 1.0);
@@ -993,24 +993,22 @@ css_state('.focus-ring:has(:focus-visible)::after', 'overlay', `
 
 /* OVERFLOW --------------------------------------------------------------- */
 
-/* NOTE: padding doesn't go well with scrolling so we're removing it to avoid bugs. */
+/* WARNING: padding doesn't go well with scrolling so we're removing it to avoid bugs !!! */
 
-css('.scroll'       , 'p0'   , ` overflow  : scroll; `)
-css('.scroll-x'     , 'p-x-0', ` overflow-x: scroll; `)
-css('.scroll-y'     , 'p-y-0', ` overflow-y: scroll; `)
-css('.hscroll'      , 'p-x-0', ` overflow-x: scroll; `) // synonim
-css('.vscroll'      , 'p-y-0', ` overflow-y: scroll; `) // synonim
-css('.scroll-auto'  , 'p0'   , ` overflow  : auto; `)
-css('.hscroll-auto' , 'p-x-0', ` overflow-x: auto; `) // synonim
-css('.vscroll-auto' , 'p-y-0', ` overflow-y: auto; `) // synonim
-css('.scroll-x-auto', 'p-x-0', ` overflow-x: auto; `)
-css('.scroll-y-auto', 'p-y-0', ` overflow-y: auto; `)
-css('.clip'         , '', ` overflow  : hidden; `)
-css('.clip-x'       , '', ` overflow-x: hidden; `)
-css('.clip-y'       , '', ` overflow-y: hidden; `)
-css('.noclip'       , '', ` overflow  : visible; `)
-css('.noclip-x'     , '', ` overflow-x: visible; `)
-css('.noclip-y'     , '', ` overflow-y: visible; `)
+css('.scroll'       , 'p0', ` overflow  : scroll;  `)
+css('.scroll-auto'  , 'p0', ` overflow  : auto;    `)
+css('.clip'         , ''  , ` overflow  : hidden;  `)
+css('.noclip'       , ''  , ` overflow  : visible; `)
+
+/* WARNING : setting `overflow-x` alone changes the default for `overflow-y` as well !!!
+That's why we're having combination classes instead of per-axis classes like we'd want. */
+
+css('.scroll-x-clip-y' , 'p-x-0', ` overflow-x: scroll ; overflow-y: hidden; `)
+css('.clip-x-scroll-y' , 'p-y-0', ` overflow-y: scroll ; overflow-x: hidden; `)
+css('.auto-x-clip-y'   , 'p-x-0', ` overflow-x: auto   ; overflow-y: hidden; `)
+css('.clip-x-auto-y'   , 'p-y-0', ` overflow-y: auto   ; overflow-x: hidden; `)
+css('.noclip-x-clip-y' , ''     , ` overflow-x: visible; overflow-y: hidden; `)
+css('.clip-x-noclip-y' , ''     , ` overflow-y: visible; overflow-x: hidden; `)
 
 css('.scroll-smooth', '', ` scroll-behavior: smooth; `)
 
