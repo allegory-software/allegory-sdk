@@ -1318,8 +1318,14 @@ result.add(g)
 	</tabs>
 	<tabs tabs_side=left>
 		<chart tabname=Pie nav=g
+			shape=pie
 			sum_cols=output
 			group_cols="country sector"
+		></chart>
+		<chart tabname=Stack nav=g
+			shape=stack
+			sum_cols=output
+			group_cols="sector country"
 		></chart>
 		<chart tabname="Areas" nav=g
 			shape=areas
@@ -1353,12 +1359,6 @@ result.add(g)
 		></chart>
 		<chart tabname=Bars nav=g
 			shape=bars
-			sum_cols=output
-			split_cols="country sector"
-			group_cols="date/0/month/1"
-		></chart>
-		<chart tabname=Stacks nav=g
-			shape=stacks
 			sum_cols=output
 			split_cols="country sector"
 			group_cols="date/0/month/1"

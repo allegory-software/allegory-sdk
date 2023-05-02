@@ -15,7 +15,7 @@ SHAPES
 
 	stack
 	pie
-	line line_dots area area_dots stacks
+	line line_dots area area_dots
 	column
 	bar
 
@@ -63,8 +63,7 @@ css('.chart-tooltip-label', 'g-h gap-x-2', `
 	justify-items: start;
 `)
 
-css('.chart-stacks', 'S h')
-css('.chart-stack', 'v')
+css('.chart-stack', 'S v')
 css('.chart-stack-slice-ct', 'rel h')
 
 css('.chart-stack-slice', 'm-r', `
@@ -148,7 +147,7 @@ G.chart = component('chart', 'Input', function(e) {
 	e.prop('other_text' , {default: 'Other', slot: 'lang'})
 	e.prop('shape', {
 		type: 'enum',
-		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots', 'stacks',
+		enum_values: ['pie', 'stack', 'line', 'line_dots', 'area', 'area_dots',
 			'column', 'bar', 'stackbar', 'bubble', 'scatter'],
 		default: 'pie',
 	})
@@ -291,8 +290,7 @@ G.chart = component('chart', 'Input', function(e) {
 			all_split_groups.extend(split_groups)
 		}
 
-		// TODO: remove this
-		e.g = all_split_groups
+		e.g = all_split_groups // for inspecting the model
 
 		return true
 	}
@@ -316,8 +314,7 @@ G.chart = component('chart', 'Input', function(e) {
 
 	function val_text(val) {
 		let val_fld = nav.fld(group_cols[0]) // TODO: only works for single-col groups!
-		let s = nav.draw_val(null, val_fld, val)
-		return isnode(s) ? s.textContent : s
+		return nav.draw_val(null, val_fld, val)
 	}
 
 	function pie_slices() {
@@ -402,13 +399,14 @@ G.chart = component('chart', 'Input', function(e) {
 			do_update(opt)
 	})
 
-	let view_w, view_h, view_css
+	let view_w, view_h, view_css, font
 
 	e.on_measure(function() {
 		let r = e.view.rect()
 		view_w = floor(r.w)
 		view_h = floor(r.h)
 		view_css = e.view.css()
+		font = view_css['font-size'] + ' ' + view_css.font
 		if (do_measure)
 			do_measure()
 	})
@@ -489,33 +487,24 @@ G.chart = component('chart', 'Input', function(e) {
 		if (!slices)
 			return
 
-		let stacks = div({class: 'chart-stacks'})
-		let labels = div({class: 'chart-stack-labels'})
-		e.view.add(stacks)
+		let stack = div({class: 'chart-stack'})
+		e.view.add(stack)
 
 		do_update = function(opt) {
 			if (opt.model) {
-				stacks.clear()
+				stack.clear()
 				e.legend.clear()
 				if (!all_split_groups)
 					return
-				for (let cg of all_split_groups) {
-					let stack = div({class: 'chart-stack'})
-					stacks.add(stack)
-					let total = 0
-					for (let xg of cg)
-						total += xg.sum
-					for (let xg of cg) {
-						let i = 0
-						for (let slice of slices) {
-							let cdiv = div({class: 'chart-stack-slice'})
-							let sdiv = div({class: 'chart-stack-slice-ct'}, cdiv, slice.label)
-							sdiv.style.flex = slice.size
-							cdiv.style['background-color'] = split_color(i, slices.length)
-							stack.add(sdiv)
-							i++
-						}
-					}
+				let i = 0
+				for (let slice of slices) {
+					let cdiv = div({class: 'chart-stack-slice'})
+					let sdiv = div({class: 'chart-stack-slice-ct'}, cdiv,
+						slice.label, unsafe_html('&nbsp;-&nbsp;'), slice.percent)
+					sdiv.style.flex = slice.size
+					cdiv.style['background-color'] = split_color(i, slices.length)
+					stack.add(sdiv)
+					i++
 				}
 			}
 		}
@@ -684,7 +673,7 @@ G.chart = component('chart', 'Input', function(e) {
 		}
 	}
 
-	function renderer_line_or_columns(columns, rotate, dots, area, stacked) {
+	function renderer_line_or_columns(columns, rotate, dots, area) {
 
 		let ct = resizeable_canvas_container()
 		let cx = ct.context
@@ -704,10 +693,10 @@ G.chart = component('chart', 'Input', function(e) {
 		let py1 = round(rotate ? line_h + 5 : 10)
 		let py2 = line_h * 1.5
 
+		let bar_rect
 		let hit_mx, hit_my
 		let hit_cg, hit_xg
-		let hit_x, hit_y, hit_w, hit_h
-		let bar_rect
+		let hit_x, hit_y, hit_h
 
 		function hit_test_columns(mx, my) {
 			let cgi = 0
@@ -715,12 +704,11 @@ G.chart = component('chart', 'Input', function(e) {
 				for (let xg of cg) {
 					if (xg.visible) {
 						let [x, y, w, h] = bar_rect(cgi, xg)
-						if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+						if (mx >= x && mx <= x + w) {
 							hit_cg = cg
 							hit_xg = xg
 							hit_x = x + w / 2
 							hit_y = y
-							hit_w = 0
 							hit_h = h
 							legend_hit_cg = null
 							return true
@@ -746,7 +734,6 @@ G.chart = component('chart', 'Input', function(e) {
 							hit_xg = xg
 							hit_x = hit_xg.x
 							hit_y = hit_xg.y
-							hit_w = 0
 							hit_h = 0
 							legend_hit_cg = null
 						}
@@ -762,8 +749,12 @@ G.chart = component('chart', 'Input', function(e) {
 			let r = ct.rect()
 			mx -= r.x + px1
 			my -= r.y + py1
+			if (rotate)
+				[mx, my] = [my, mx]
 			hit_mx = mx
 			hit_my = my
+			hit_x = null
+			hit_y = null
 			hit_cg = null
 			hit_xg = null
 			let hit = columns ? hit_test_columns(mx, my) : hit_test_dots(mx, my)
@@ -807,9 +798,9 @@ G.chart = component('chart', 'Input', function(e) {
 
 				let p1x = hit_x
 				let p1y = hit_y
-				let p2x = hit_x + hit_w
+				let p2x = hit_x
 				let p2y = hit_y + hit_h
-				let p3x = hit_x + hit_w
+				let p3x = hit_x
 				let p3y = hit_y
 				let p4x = hit_x
 				let p4y = hit_y + hit_h
@@ -817,6 +808,13 @@ G.chart = component('chart', 'Input', function(e) {
 				let y1 = min(p1y, p2y, p3y, p4y)
 				let x2 = max(p1x, p2x, p3x, p4x)
 				let y2 = max(p1y, p2y, p3y, p4y)
+				if (rotate) {
+					;[x1, y1] = [y1, x1]
+					;[x2, y2] = [y2, x2]
+					;[x2, x1] = [x1, x2]
+					x1 = view_w - x1 - px1 - px2
+					x2 = view_w - x2 - px1 - px2
+				}
 				tt.popup_x1 = x1 + px1
 				tt.popup_y1 = y1 + py1
 				tt.popup_x2 = x2 + px1
@@ -836,9 +834,10 @@ G.chart = component('chart', 'Input', function(e) {
 		do_measure = null
 		do_position = null
 
+		let xgs = map()
 		ct.on_redraw(function(cx, view_w, view_h) {
 
-			cx.font = view_css['font-size'] + ' ' + view_css.font
+			cx.font = font
 
 			let discrete = columns || e.min_val == null || e.max_val == null
 
@@ -850,12 +849,12 @@ G.chart = component('chart', 'Input', function(e) {
 			if (rotate) {
 				cx.translate(w, 0)
 				cx.rotate(rad * 90)
-				;[hit_mx, hit_my] = [hit_my, hit_mx]
 				;[w, h] = [h, w]
 			}
 
 			// compute vertical (sum) and horizontal (val) ranges.
-			let xgs = map() // {x_key -> xg}
+			// also create a map of descrete x-values for drawing as x-axis labels.
+			xgs.clear() // {x_key -> xg}
 			let min_val  = 0
 			let max_val  = 1
 			let val_step
@@ -869,7 +868,6 @@ G.chart = component('chart', 'Input', function(e) {
 				max_sum = -1/0
 				let user_min_val = e.min_val ?? -1/0
 				let user_max_val = e.max_val ??  1/0
-				let val0
 				for (let cg of all_split_groups) {
 					for (let xg of cg) {
 						let sum = xg.sum
@@ -881,7 +879,6 @@ G.chart = component('chart', 'Input', function(e) {
 						max_val = max(max_val, val)
 						xg.visible = val >= user_min_val && val <= user_max_val
 						xgs.set(val, xg)
-						val0 = val
 					}
 				}
 			}
@@ -922,12 +919,13 @@ G.chart = component('chart', 'Input', function(e) {
 			if (all_split_groups)
 				for (let cg of all_split_groups) {
 					let xgi = 0
+					let y0 = h - py2
 					for (let xg of cg) {
 						let key_flds = nav.flds(xg.key_cols)
 						let val = xg.key_vals[0]
 						xg.x = round(lerp(val, min_val, max_val, 0, w))
 						xg.y = round(lerp(xg.sum, min_sum, max_sum, h - py2, 0))
-						if (xg.y != xg.y)
+						if (xg.y != xg.y) // NaN (x/0 from lerp)
 							xg.y = xg.sum
 						xgi++
 					}
@@ -1028,38 +1026,16 @@ G.chart = component('chart', 'Input', function(e) {
 			cx.lineTo(round(lerp(max_val, min_val, max_val, 0, w)) + .5, round(h - py2) - .5)
 			cx.stroke()
 
-			if (stacked) {
-
-				let bar_w = round(w / (xgs.size - 1) / 3)
-
-				bar_rect = function(cgi, xg) {
-
-					let x = xg.x
-					let y = xg.y
-					return [
-						x - bar_w / 2,
-						y,
-						bar_w,
-						h - py2 - y
-					]
-				}
-
-			} else if (columns) {
-
-				let cn = all_split_groups.length
-				let bar_w = round(w / (xgs.size - 1) / cn / 3)
-				let half_w = round((bar_w * cn + 2 * (cn - 1)) / 2)
-
-				bar_rect = function(cgi, xg) {
-					let x = xg.x
-					let y = xg.y
-					return [
-						x + cgi * (bar_w + 2) - half_w,
-						y,
-						bar_w,
-						h - py2 - y
-					]
-				}
+			let cn = all_split_groups.length
+			let bar_w = round(w / (xgs.size - 1) / cn / 3)
+			let half_w = round((bar_w * cn + 2 * (cn - 1)) / 2)
+			bar_rect = function(cgi, xg) {
+				return [
+					xg.x + cgi * (bar_w + 2) - half_w,
+					xg.y,
+					bar_w,
+					h - py2 - xg.y
+				]
 			}
 
 			// draw the chart lines or columns.
@@ -1157,7 +1133,7 @@ G.chart = component('chart', 'Input', function(e) {
 					// draw the hit line.
 					cx.beginPath()
 					cx.moveTo(hit_x + .5, .5)
-					cx.lineTo(hit_x + .5, h - py2 + 4.5)
+					cx.lineTo(hit_x + .5, h - py2)
 					cx.strokeStyle = label_color
 					cx.setLineDash([3, 2])
 					cx.stroke()
@@ -1166,7 +1142,7 @@ G.chart = component('chart', 'Input', function(e) {
 					// draw the extrapolator line.
 					cx.beginPath()
 					cx.moveTo(hit_mx + .5, .5)
-					cx.lineTo(hit_mx + .5, h - py2 + 4.5)
+					cx.lineTo(hit_mx + .5, h - py2)
 					cx.strokeStyle = label_color
 					cx.setLineDash([3, 2])
 					cx.stroke()
@@ -1174,8 +1150,6 @@ G.chart = component('chart', 'Input', function(e) {
 				}
 
 			}
-
-			// cx.restore()
 
 		})
 
@@ -1187,8 +1161,6 @@ G.chart = component('chart', 'Input', function(e) {
 	renderer.areas_dots = () => renderer_line_or_columns(false, false, true , true)
 	renderer.columns    = () => renderer_line_or_columns(true)
 	renderer.bars       = () => renderer_line_or_columns(true , true)
-	renderer.stacks     = () => renderer_line_or_columns(true , false, false, false, true)
-	renderer.hstacks    = () => renderer_line_or_columns(true , true , false, false, true)
 
 })
 

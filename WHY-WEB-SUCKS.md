@@ -228,3 +228,9 @@ functionality. And you can't fix this with JavaScript, unless you draw your
 entire web app on a giant canvas and do your own layouting and styling from
 scratch in JS (some people had done just that and they're probably happy).
 
+## Bad specs
+
+Check out this beauty (and the comments, and the votes on the comments):
+
+	https://stackoverflow.com/questions/6421966
+

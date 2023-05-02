@@ -2166,7 +2166,7 @@ G.tabs = component('tabs', 'Containers', function(e) {
 	e.tabs_box = tag('tabs-box')
 	e.tabs_box.make_list_items_focusable()
 	e.tabs_box.make_list_items_movable(false)
-	e.header = tag('tabs-header', 0,
+	e.header = tag('tabs-header', {class: 'scroll-thin'},
 		e.tabs_box, e.selection_bar, e.fixed_header, e.add_button)
 	e.content = tag('tabs-content', {class: 'frame'})
 	e.add(e.header, e.content)
@@ -4964,6 +4964,9 @@ css('.slider-thumb', 'abs h ease', `
 	transition-property: width, height, margin-top, margin-left;
 `)
 css('.slider-thumb-circle', 'S bg-link')
+css_state('.slider-thumb-circle', '', `
+	outline-offset: 3px;
+`)
 css('.slider-thumb-circle', 'round', `
 	box-shadow: var(--shadow-thumb);
 `)

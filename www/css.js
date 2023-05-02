@@ -1000,8 +1000,9 @@ css('.scroll-auto'  , 'p0', ` overflow  : auto;    `)
 css('.clip'         , ''  , ` overflow  : hidden;  `)
 css('.noclip'       , ''  , ` overflow  : visible; `)
 
-/* WARNING : setting `overflow-x` alone changes the default for `overflow-y` as well !!!
-That's why we're having combination classes instead of per-axis classes like we'd want. */
+/* WARNING : setting `overflow-x: auto` changes `overflow-y` to `auto` too if
+it was set to `visible` !!! That's why we're doing combination classes here
+instead of per-axis classes like we'd want. */
 
 css('.scroll-x-clip-y' , 'p-x-0', ` overflow-x: scroll ; overflow-y: hidden; `)
 css('.clip-x-scroll-y' , 'p-y-0', ` overflow-y: scroll ; overflow-x: hidden; `)
