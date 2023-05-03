@@ -36,16 +36,13 @@ BUGS
 * RANGE-DATE
 	- merge errors from inputs
 
+* CALENDAR
+	- updating state in redraw while dragging prevents tooltip from updating itself.
+
 * TOASTER
 	- weird spacing between messages when starting
 
 * NAV revert bug (esp. tree)
-
-* CHARTS
-	- no split_cols? -> all_groups[0]
-	- no group_cols?
-	- BUG: order
-	- BUG: lifetime
 
 * Safari 16.3 dumbass browser
 	- will do more testing before release...
@@ -67,8 +64,6 @@ NEW WIDGETS
 
 * SELECT-RADIO
 
-* CHECKLIST
-
 * GRID-DROPDOWN
 
 * PLACE-INPUT
@@ -76,6 +71,7 @@ NEW WIDGETS
 * MONTH CALENDAR variation
 
 * MONTH-INPUT
+
 
 FEATURES
 ------------------------------------------------------------------------------
@@ -102,11 +98,6 @@ FEATURES
 	- set null value
 	- new, modified, deleted state
 
-* NUM-INPUT
-	- up/down from invalid value goes to max/min value
-
-* LIST-SEARCH component working on near list.
-
 * INPUT-XBUTTON
 	- put near an <input> (inside an <input-group> usually) to clear the value.
 
@@ -116,6 +107,7 @@ FEATURES
 
 * SLIDER
 	- list of marker values with labels (<datalist> ?)
+	- current value num edit with <-> slide
 
 * IMAGE
 	- upload
