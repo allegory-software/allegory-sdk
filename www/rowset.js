@@ -1,26 +1,9 @@
-/* ---------------------------------------------------------------------------
 
-	Nav widget mixin.
-	Written by Cosmin Apreutesei. Public Domain.
+/* rowset --------------------------------------------------------------------
 
-You must load first:
-
-	widgets.js
-
-COMPONENTS
-
-	<rowset>
-	<nav>
-
-A nav is an in-memory table with typed columns and rows. It can be populated
-from a rowset or manually. Once set up, rows can be sorted, filtered, grouped
-or form a tree, cells can be selected, values can be looked up, etc.
-A nav is the data model for our virtual grid but it can also be used standalone
-as a shared data model sourcing multiple widgets (think lookup tables).
-
-A rowset is a POD used to populate a nav. It contains field definitions and
-rows of values. It can come from a http server as JSON, defined in HTML with
-the <rowset> tag (inside <nav> or <grid> or standalone), or constructed in JS.
+A rowset is an in-memory table with typed columns and rows. It can come from
+a http server as JSON, defined in HTML with the <rowset> tag, or constructed
+in JS.
 
 Rowset structure:
 
@@ -38,22 +21,6 @@ HTML rowsets:
 	</rowset>
 
 	NOTE: use `:id` for the `id` column!
-	NOTE: The rowset will be available as e.rowset.
-
-Loading a rowset into a nav:
-
-	e.rowset = {fields: ..., rows: ...}
-
-		Assign a rowset directly in code. Call reset() to (re)load it!
-
-	e.rowset_name = NAME
-
-		Loads the rowset from the server at /rowset.json/NAME.
-		If a HTML rowset with id=rowset_NAME is present, loads thats instead.
-
-	e.rowset_url = URL
-
-		Loads the rowset from the server at URL.
 
 Rowset attributes:
 
@@ -71,9 +38,6 @@ Sources of field attributes, in precedence order:
 
 	SCOPE         METHOD
 	------------- -------------------------------------------------------------
-	nav           e.set_prop('col.COL.ATTR', VAL)
-	nav           <col-attrs for=COL ATTR=VAL>
-	nav           e.col_attrs = {COL: {ATTR: VAL}}
 	rowset        window.rowset_col_attrs['ROWSET.COL'] = {ATTR: VAL}
 	rowset        e.rowset.fields = [{ATTR: VAL},...]
 	field type    window.field_types[TYPE] = {ATTR: VAL}
@@ -151,8 +115,7 @@ Field attributes:
 		lookup_rowset[_name|_url]: rowset to look up values of this field into.
 		lookup_nav     : nav to look up values of this field into.
 		lookup_nav_id  : nav id for creating lookup_nav.
-		lookup_cols    : field(s) in lookup_nav to look up values of local_cols into.
-		local_cols     : field(s) in this nav to get values from to lookup in lookup_nav.
+		lookup_cols    : field(s) in lookup_nav that matches this field.
 		display_col    : field in lookup_nav to use as display value of this field.
 		null_lookup_col: field in nav to use as default value for nulls in this field.
 
@@ -163,11 +126,23 @@ Field attributes:
 		compare_vals   : f(v1, v2) -> -1|0|1  (for sorting and setting values)
 
 
-NAV API ----------------------------------------------------------------------
+Rowset state:
 
-Typing:
+	e.fields_map[col] -> field
+	e.fields[fi] -> field
+	e.rows[ri] -> row
 
-	isnav: t
+Row state:
+
+	row.focusable      : row can be focused (true).
+	row.can_change     : allow changing (true).
+	row.can_remove     : allow removing (true).
+	row.nosave         : row is not to be saved.
+	row.is_new         : new row, not added on server yet.
+	row.modified       : one or more row cells were modified (valid or not).
+	row.removed        : row is marked for removal, not removed on server yet.
+	row.errors         : [err1,...] row-level validation results. undefined if not validated yet.
+	row.invalid        : row has cell and/or row errors.
 
 Cell state:
 
@@ -176,162 +151,55 @@ Cell state:
 	row[errors_i]      : [err1,...]; validation results.
 	row[#all_fields]   : row index.
 
-Row config:
-	row.focusable      : row can be focused (true).
-	row.can_change     : allow changing (true).
-	row.can_remove     : allow removing (true).
-	row.nosave         : row is not to be saved.
+Getting cell state:
 
-Row state:
-	row.is_new         : new row, not added on server yet.
-	row.modified       : one or more row cells were modified (valid or not).
-	row.removed        : row is marked for removal, not removed on server yet.
-	row.errors         : [err1,...] row-level validation results. undefined if not validated yet.
-	row.invalid        : row has cell and/or row errors.
+	e.cell_state(row, col, key, [default_val])
+	e.cell_val(row, col) -> v
+	e.cell_vals(row, cols) -> [v1,...]
+	e.cell_input_val(row, col) -> iv
+	e.cell_errors(row, col) -> [e1,...]
+	e.cell_has_errors(row, col) -> t|f
+	e.cell_modified(row, col) -> t|f
 
-Fields:
-	publishes:
-		e.all_fields_map[col] -> field
-		e.all_fields[fi] -> field
-		e.add_field(field)
-		e.remove_field(field)
-		e.get_prop('col.ATTR') -> val
-		e.set_prop('col.ATTR', val)
-		e.get_col_attr(col, attr) -> val
-		e.set_col_attr(col, attr, val)
+Setting row state:
+
+	e.begin_set_state(row)
+		e.set_cell_state(col, val, default_val)
+		e.set_cell_val(row, col, val)
+		e.reset_cell_val(row, col, val)
+		e.revert_cell(row, col)
+		e.set_row_state(key, val, default_val)
+	e.end_set_state()
+	e.revert_row()
+
+	calls:
+		e.do_update_row_state(ri, changes, ev)
+		e.do_update_cell_state(ri, fi, key, val, ev)
+		e.do_update_cell_editing(ri, [fi], editing)
+		e.validate_row(row)
+		e.validate_cell(field, val)
 	announces:
-		^^field_changed(col, attr, v)
-
-Visible fields:
-	publishes:
-		e.fields[fi] -> field
-		e.field_index(field) -> fi
-		e.show_field(field, on, at_fi)
-		e.move_field(fi, over_fi)
-
-Rows:
-	publishes:
-		e.all_rows[ri] -> row
-		e.rows[ri] -> row
-		e.row_index(row) -> ri
+		^^cell_state_changed(row, field, changes, ev)
+		^^row_state_changed(row, changes, ev)
+		^^focused_row_cell_state_changed(row, field, changes, ev)
+		^^focused_row_state_changed(row, changes, ev)
 
 Indexing:
-	publishes:
-		e.tree_index(cols, [range_defs], [rows]) -> ix
-		ix.tree() -> index_tree
-		ix.lookup(vals) -> [row1,...]
-		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
-		e.row_groups({col_groups:, [range_defs:], [rows:], [group_label_sep:]}) -> [row1, ...]
+
+	e.tree_index(cols, [range_defs], [rows]) -> ix
+	ix.tree() -> index_tree
+	ix.lookup(vals) -> [row1,...]
+	e.lookup(cols, vals, [range_defs]) -> [row1, ...]
+
+Grouping:
+
+	e.row_groups({col_groups:, [range_defs:], [rows:], [group_label_sep:]}) -> [row1, ...]
 
 Master-detail:
 	needs:
 		e.params <- 'param1[=master_col1] ...'
 		e.param_nav
 		e.param_nav_id
-
-Tree:
-	state:
-		e.child_rows -> [row1,...]
-		row.child_rows -> [row1,...]
-		row.parent_rows -> [row1,...]
-		row.parent_row -> row
-	needs:
-		e.tree_col
-		e.name_col
-	publishes:
-		e.each_child_row(row, f)
-		e.row_and_each_child_row(row, f)
-		e.expanded_child_row_count(ri) -> n
-
-Rendering:
-	calls:
-		e.update({
-			fields:  fields changed
-			rows:    row count changed
-			vals:    row values changed
-			state:   row/cell state changed
-			sort_order: sort order changed
-			scroll_to_focused_cell: scroll to focused cell
-			enter_edit: enter edit mode
-		})
-
-focusing and selection:
-	config:
-		can_focus_cells
-		auto_advance_row
-		can_select_multiple
-		can_select_non_siblings
-		auto_focus_first_cell
-	publishes:
-		e.focused_row, e.focused_field
-		e.selected_row, e.selected_field
-		e.last_focused_col
-		e.selected_rows: map(row -> true|Set(field))
-		e.focus_cell(ri|true|false|0, fi|col|true|false|0, rows, cols, ev)
-			ev.input
-			ev.cancel
-			ev.unfocus_if_not_found
-			ev.was_editing
-			ev.focus_editor
-			ev.enter_edit
-			ev.editable
-			ev.focus_non_editable_if_not_found
-			ev.expand_selection
-			ev.invert_selection
-			ev.quicksearch_text
-		e.focus_next_cell()
-		e.focus_find_cell()
-		e.select_all_cells()
-	calls:
-		e.can_change_val()
-		e.can_focus_cell()
-		e.is_cell_disabled()
-		e.can_select_cell()
-		e.is_row_selected(row)
-		e.is_last_row_focused()
-		e.first_focusable_cell(ri|true|0, fi|col|true|0, rows, cols, opt)
-			opt.editable
-			opt.must_move
-			opt.must_not_move_row
-			opt.must_not_move_col
-		e.do_focus_row(row, row0)
-		e.do_focus_cell(row, field, row0, field0)
-	announces:
-		^^focused_row_changed(row, row0, ev)
-		^^focused_cell_changed(row, field, row0, field0, ev)
-		^^selected_rows_changed()
-
-Scrolling:
-	publishes:
-		e.scroll_to_focused_cell([fallback_to_first_cell])
-	calls:
-		e.scroll_to_cell(ri, [fi])
-
-Sorting:
-	config:
-		can_sort_rows
-	publishes:
-		e.order_by <- 'col1[:desc] ...'
-		e.sort_rows([row1,...], order_by)
-	calls:
-		e.compare_rows(row1, row2)
-		e.compare_types(v1, v2)
-		e.compare_vals(v1, v2)
-
-Filtering:
-	publishes:
-		e.expr_filter(expr) -> f
-		e.filter_rows(rows, expr) -> [row1,...]
-
-Quicksearch:
-	config:
-		e.quicksearch_col
-	publishes:
-		e.quicksearch()
-
-Tree node collapsing state:
-	e.set_collapsed()
-	e.toggle_collapsed()
 
 Row adding, removing, moving:
 	publishes:
@@ -351,52 +219,8 @@ Row adding, removing, moving:
 		^^rows_added(rows)
 		^^rows_changed()
 
-Cell values & state:
-	publishes:
-		e.cell_state(row, col, key, [default_val])
-		e.cell_val(row, col)
-		e.cell_input_val(row, col)
-		e.cell_errors(row, col)
-		e.cell_has_errors(row, col)
-		e.cell_modified(row, col)
-		e.cell_vals(row, col)
-
-Updating cells:
-	publishes:
-		e.set_cell_state(field, val, default_val)
-		e.set_cell_val()
-		e.reset_cell_val()
-		e.revert_cell()
-	calls:
-		e.validate_cell(field, val)
-		e.do_update_cell_state(ri, fi, key, val, ev)
-		e.do_update_cell_editing(ri, [fi], editing)
-	announces:
-		^^cell_state_changed(row, field, changes, ev)
-		^^row_state_changed(row, changes, ev)
-		^^focused_row_cell_state_changed(row, field, changes, ev)
-		^^focused_row_state_changed(row, changes, ev)
-
-Row state:
-	publishes:
-		row.STATE
-		e.row_can_have_children()
-
-Updating row state:
-	publishes:
-		e.begin_set_state(row)
-		e.end_set_state()
-		e.set_row_state(key, val, default_val)
-		e.revert_row()
-	calls:
-		e.do_update_row_state(ri, changes, ev)
-		e.validate_row(row)
-
 Rowset state:
-	needs:
-		e.rowset                  assign a rowset directly.
 	publishes:
-		e.reset([ev])             call it after setting the rowset.
 		e.ready                   true after reset
 	announces:
 		^^reset()                 fired when a new rowset was loaded.
@@ -467,19 +291,6 @@ Loading & saving from/to memory:
 		e.row_states
 	cals
 		e.do_save_row(vals) -> true | 'skip'
-
-Cell display val, text val and drawing:
-	publishes:
-		e.draw_val([row], field, v, [cx|pe]) -> true|s
-		e.draw_cell(row, field, [cx|pe]) -> true|s
-	announces:
-		^^col_vals_changed(field)
-
-Picker:
-	publishes:
-		e.display_col
-		e.draw_row(row, [cx|pe]) -> true|s
-		e.pick_near_val()
 
 --------------------------------------------------------------------------- */
 
@@ -614,8 +425,7 @@ let rowset_attr_parse = {
 	can_add_rows    : bool_attr,
 	can_remove_rows : bool_attr,
 	can_change_rows : bool_attr,
-	name_col        : return_arg,
-	wait            : num,
+	name_col : return_arg,
 }
 
 let field_attr_parse = {
@@ -645,7 +455,6 @@ let field_attr_parse = {
 
 let field_attr_map = {
 	lookup_rowset : 'lookup_rowset_name',
-	lookup_nav    : 'lookup_nav_id',
 }
 
 function parse_text_attrs(t, parse) {
@@ -707,7 +516,7 @@ function nav_ajax(opt) {
 	let rowset_tag = window['rowset_'+opt.rowset_name]
 	if (rowset_tag) // html rowset
 		opt.xhr = {
-			wait: opt.wait ?? rowset_tag.rowset.wait,
+			wait: opt.wait,
 			response: rowset_tag.rowset,
 		}
 	return ajax(opt)
@@ -2064,6 +1873,7 @@ e.make_nav_widget = function() {
 	// cols        : 'col1 ...' | fi | field | [col1|field1,...]
 	// range_defs  : {col->{freq:, unit:, offset:}}
 	function create_index(cols, range_defs, rows) {
+		trace_if(!cols)
 
 		let idx = obj()
 
@@ -3485,15 +3295,13 @@ e.make_nav_widget = function() {
 	}
 
 	function col_vals_changed(field) {
-		e.announce('col_vals_changed', field)
+		e.announce('col_vals_changed', field.name)
 		reset_quicksearch()
 		e.update({vals: true})
 	}
 
-	function init_lookup_nav(field, ln) {
+	function setup_lookup_nav(field, ln) {
 		field.lookup_fields = ln.flds(field.lookup_cols || ln.pk_fields)
-		field.local_fields = field.lookup_fields.len == 1
-			? [field] : e.flds(field.local_cols || field.lookup_cols || ln.pk_fields)
 		field.display_field = ln.fld(field.display_col || ln.name_field)
 		field.align = field.display_field && field.display_field.align
 		col_vals_changed(field)
@@ -3505,14 +3313,14 @@ e.make_nav_widget = function() {
 			return
 		if (on) {
 			if (ln.ready)
-				init_lookup_nav(field, ln)
+				lookup_nav_reset(field, ln)
 		}
 	}
 
 	e.listen('reset', function(ln) {
 		for (let field of e.all_fields) {
 			if (ln == field.lookup_nav) {
-				init_lookup_nav(field, ln)
+				setup_lookup_nav(field, ln)
 			}
 		}
 	})
@@ -3555,27 +3363,13 @@ e.make_nav_widget = function() {
 
 	function draw_null_lookup_val(row, field, cx) {
 		if (!row || !field.null_lookup_col) return
-		let nf = e.all_fields_map[field.null_lookup_col]  ; if (!nf || !nf.lookup_cols) return
-		let ln = nf.lookup_nav                            ; if (!ln) return
-		let nv = e.cell_val(row, nf)
-		let ln_row = e.lookup_val(row, nf, nv)[0]         ; if (!ln_row) return
+		let lf = e.all_fields_map[field.null_lookup_col]  ; if (!lf || !lf.lookup_cols) return
+		let ln = lf.lookup_nav                            ; if (!ln) return
+		let nfv = e.cell_val(row, lf)
+		let ln_row = ln.lookup(lf.lookup_cols, [nfv])[0]  ; if (!ln_row) return
 		let dcol = field.null_display_col ?? field.name
 		let df = ln.all_fields_map[dcol]                  ; if (!df) return
 		return ln.draw_cell(ln_row, df, cx)
-	}
-
-	{
-	let vals = []
-	e.lookup_val = function(row, field, v) {
-		let lfs = field.lookup_fields; if (!lfs) return
-		let fs = field.local_fields; if (!fs) return
-		let df = field.display_field; if (!df) return
-		let n = lfs.len
-		vals.len = n
-		for (let i = 0; i < n; i++)
-			vals[i] = fs[i] == field ? v : e.cell_input_val(row, fs[i])
-		return field.lookup_nav.lookup(lfs, vals)[0]
-	}
 	}
 
 	e.draw_val = function(row, field, v, cx) {
@@ -3599,9 +3393,14 @@ e.make_nav_widget = function() {
 			return
 		}
 
-		let ln_row = e.lookup_val(row, field, v)
-		if (ln_row)
-			return field.lookup_nav.draw_cell(ln_row, field.display_field, cx)
+		let ln = field.lookup_nav
+		if (ln && field.lookup_fields && field.display_field) {
+			let ln_row = ln.lookup(field.lookup_fields, [v])[0]
+			if (ln_row) {
+				let df = field.display_field
+				return ln.draw_cell(ln_row, df, cx)
+			}
+		}
 
 		return field.draw(v, cx, row)
 	}
@@ -5166,20 +4965,19 @@ e.make_nav_data_widget = function() {
 
 	let e = this
 
+	// data binding -----------------------------------------------------------
+
 	let nav
 
 	function bind_nav(on) {
 		if (!nav)
 			return
-		if (nav._internal) {
-			if (on) {
+		if (nav._internal)
+			if (on)
 				head.add(nav)
-				e.fire('bind_nav', nav, true)
-			} else {
-				e.fire('bind_nav', nav, false)
+			else
 				nav.del()
-			}
-		}
+		e.fire('bind_nav', nav, on)
 	}
 
 	// NOTE: internal nav takes priority to external nav. This decision is
@@ -5189,7 +4987,7 @@ e.make_nav_data_widget = function() {
 		if (e.rowset_name || e.rowset) { // internal
 			if (nav && nav._internal
 				&& ((e.rowset_name && nav.rowset_name == e.rowset_name) ||
-					(e.rowset && nav.rowset == e.rowset))) // same internal
+					(e.rowset && nav.rowset == e.rowset))) // same inernal
 				return nav
 			return bare_nav({
 				rowset_name : e.rowset_name,
@@ -5202,12 +5000,11 @@ e.make_nav_data_widget = function() {
 
 	function update_nav() {
 		let nav1 = get_nav()
-		if (nav != nav1) {
-			bind_nav(false)
-			nav = nav1
-			bind_nav(true)
-		}
-		e.ready = !!(e.bound && (!e.nav_based || nav))
+		if (nav == nav1)
+			return
+		bind_nav(false)
+		nav = nav1
+		bind_nav(true)
 	}
 
 	e.on_bind(update_nav)
@@ -5225,10 +5022,6 @@ e.make_nav_data_widget = function() {
 	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
 	e.set_rowset_name = update_nav
 
-	e.property('nav_based', () => !!(e.nav_id || e.nav || e.rowset_name || e.rowset))
-
-	e.prop('ready', {type: 'bool', slot: 'state', default: false, updates: 'value'})
-
 }
 
 /* ---------------------------------------------------------------------------
@@ -5241,7 +5034,6 @@ config props:
 	nav_id     nav
 	col
 state props:
-	nav_based
 	ready
 fires:
 	^bind_field(field, on)
@@ -5267,21 +5059,23 @@ e.make_nav_col_widget = function() {
 			e.fire('bind_field', field, false)
 			field = null
 		}
+		e.ready = !!field
 		e.update()
-	}
-
-	function update_nav(force) {
-		let nav1 = e.nav
-		if (nav1 != nav || force) {
-			bind_field(false)
-			nav = nav1
-			bind_field(true)
-		}
-		e.ready = !!(e.bound && (!e.nav_based || field))
+		return field
 	}
 
 	function update_field() {
-		update_nav(true)
+		bind_field(false)
+		bind_field(true)
+	}
+
+	function update_nav() {
+		let nav1 = e.nav
+		if (nav1 == nav)
+			return
+		bind_field(false)
+		nav = nav1
+		bind_field(true)
 	}
 
 	e.prop('col', {type: 'col'})
@@ -5291,14 +5085,18 @@ e.make_nav_col_widget = function() {
 	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
 	e.set_nav = update_nav
 
-	e.listen('reset', function(reset_nav) {
-		if (reset_nav != nav) return
+	e.listen('reset', function(te) {
+		if (te != nav) return
 		update_field()
 	})
 
-	e.property('nav_based', () => !!((e.nav_id || e.nav) && e.col))
+	e.listen('field_changed', function(te, changed_field, k, v) {
+		if (te != nav) return
+		if (changed_field != field) return
+		update_field()
+	})
 
-	e.prop('ready', {type: 'bool', slot: 'state', default: false, updates: 'value'})
+	e.prop('ready', {type: 'bool', slot: 'state', default: true, updates: 'value'})
 
 }
 
@@ -5311,7 +5109,6 @@ config props:
 	nav_id     nav
 	col[1,2]
 state props:
-	nav_based
 	ready
 	row
 fires:
@@ -5319,20 +5116,11 @@ fires:
 
 */
 
-function field_ready(field) {
-	if (!field)
-		return false
-	if (field.lookup_nav_id || field.lookup_nav)
-		if (!field.lookup_fields)
-			return false
-	return true
-}
-
 e.make_nav_input_widget = function(field_props, range, field_range_props) {
 
 	let e = this
 
-	// nav binding ------------------------------------------------------------
+	// state: field[1,2]
 
 	let nav, field, field1, field2
 
@@ -5363,6 +5151,7 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 			e.fire('bind_field', field, false)
 			field = null
 		}
+		e.ready = range ? !!field1 && !!field2 : !!field
 		e.update()
 		return field
 	}
@@ -5376,25 +5165,18 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 		}
 	}
 
-	function update_ready() {
-		e.ready = !!(!e.nav_based || (nav && (range
-			? field_ready(field1) && field_ready(field2)
-			: field_ready(field))))
-		e.disable('not_ready', !e.ready)
-	}
-
-	function update_nav(force) {
-		let nav1 = e.nav
-		if (nav1 != nav || force) {
-			bind_fields(false)
-			nav = nav1
-			bind_fields(true)
-			update_ready()
-		}
-	}
-
 	function update_fields() {
-		update_nav(true)
+		bind_fields(false)
+		bind_fields(true)
+	}
+
+	function update_nav() {
+		let nav1 = e.nav
+		if (nav1 == nav)
+			return
+		bind_fields(false)
+		nav = nav1
+		bind_fields(true)
 	}
 
 	if (range) {
@@ -5411,28 +5193,14 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
 	e.set_nav = update_nav
 
-	e.property('nav_based', () => !!((e.nav_id || e.nav) && (range ? e.col1 && e.col2 : e.col)))
-
-	e.prop('ready', {type: 'bool', slot: 'state', default: false, updates: 'value'})
-
-	e.listen('reset', function(reset_nav) {
-		if (reset_nav != nav) return
+	e.listen('reset', function(te) {
+		if (te != nav) return
 		update_fields()
 	})
 
-	e.listen('col_vals_changed', function(changed_nav, changed_field) {
-		if (!range && changed_field != field)
-			return
-		if (range && changed_field != field1 && changed_field != field2)
-			return
-		update_fields()
-	})
-
-	e.listen('field_changed', function(changed_field, k, v) {
-		if (!range && changed_field != field)
-			return
-		if (range && changed_field != field1 && changed_field != field2)
-			return
+	e.listen('field_changed', function(te, changed_field, k, v) {
+		if (te != nav) return
+		if (changed_field != field) return
 		if (field_props && field_props[k])
 			for (let input_widget of e.input_widgets) {
 				e.xoff()
@@ -5452,7 +5220,9 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 		}
 	})
 
-	// state ------------------------------------------------------------------
+	// state: ready, row, input
+
+	e.prop('ready', {type: 'bool', slot: 'state', default: true, updates: 'value'})
 
 	e.property('row', () => nav && nav.focused_row)
 
@@ -5506,6 +5276,7 @@ e.make_nav_input_widget = function(field_props, range, field_range_props) {
 	})
 
 	// e.listen('col_vals_changed', update)
+	// e.listen('field_changed', update)
 	// e.listen('col_info_changed', update)
 
 }
@@ -5542,11 +5313,11 @@ add_validation_rule({
 
 add_validation_rule({
 	name     : 'lookup',
-	props    : 'lookup_nav lookup_cols local_cols', // TODO: lookup_nav.ready ??
+	props    : 'lookup_nav lookup_cols', // TODO: lookup_nav.ready ??
 	vprops   : 'input_value',
 	applies  : (e) => e.lookup_fields,
-	// TODO: multi-col lookup
-	validate : (e, v) => !!e.lookup_val(null, e, v),
+	validate : (e, v) => e.lookup_fields
+			&& e.lookup_nav.lookup(e.lookup_fields, [v]).len > 0,
 	error    : (e, v) => S('validation_lookup_error',
 		'{0} unknown value {1}', field_name(e), field_value(e, v)),
 	rule     : (e) => S('validation_lookup_rule',
@@ -6117,3 +5888,4 @@ let init_rowset_events = memoize(function() {
 
 
 }()) // module function
+

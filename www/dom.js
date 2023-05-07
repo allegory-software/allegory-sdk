@@ -2025,9 +2025,10 @@ css_generic_state('[disabled], [disabled] *', '', `
 	cursor: default !important;
 `)
 
-e.make_disablable = function() {
+e.make_disablable = function(de) {
 
 	let e = this
+	de = de || e
 	e.make_disablable = noop
 	e.disablable = true
 
@@ -2064,14 +2065,14 @@ e.make_disablable = function() {
 	})
 
 	function get_disabled() {
-		return this.hasattr('disabled')
+		return de.hasattr('disabled')
 	}
 	function set_disabled(disabled) {
 		disabled = !!disabled
-		let disabled0 = this.hasattr('disabled')
+		let disabled0 = de.hasattr('disabled')
 		if (disabled0 == disabled)
 			return
-		this.bool_attr('disabled', disabled || null)
+		de.bool_attr('disabled', disabled || null)
 		this.set_disabled(disabled, disabled0)
 	}
 	if (e.disabled == null) {
@@ -2948,11 +2949,6 @@ css_generic_state('[hidden]', '', `
 	display: none !important;
 `)
 
-function call_user_show(e, ev) {
-	e._user_show?.(!on, ev)
-	for (let ce of e.at)
-		call_user_show(ce, ev)
-}
 e.hide = function(on, ev) {
 	if (!arguments.length)
 		on = true
@@ -2961,7 +2957,7 @@ e.hide = function(on, ev) {
 	if (this.hidden == on)
 		return
 	this.hidden = on
-	call_user_show(this, {target: this})
+	this.announce('show', !on)
 	return this
 }
 e.show = function(on, ev) {
@@ -2969,9 +2965,6 @@ e.show = function(on, ev) {
 		on = true
 	this.hide(!on, ev)
 	return this
-}
-e.on_show = function(f) {
-	e.do_after('_user_show', f)
 }
 
 property(Element, 'hovered', function() {
@@ -4056,16 +4049,18 @@ e.add_popup = function(pe) {
 		if (on) {
 			pe.hide()
 			body.add(pe)
-			pe.update({show: !e.parent.effectively_hidden})
+			if (!e.effectively_hidden)
+				pe.update({show: true})
 		} else {
 			pe.del()
 		}
 	}
 	e.on_bind(bind)
-	e.on_show(function(on) {
-		pe.update({show: on && !e.parent.effectively_hidden})
+	e.listen('show', function(te, on) {
+		if (te.contains(e))
+			pe.update({show: on && !e.effectively_hidden})
 	})
-	if (e.bound)
+	if (!e.effectively_hidden)
 		bind(true)
 }
 

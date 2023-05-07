@@ -1,8 +1,8 @@
 # How to make widgets for the web
 
 Writing a good widget is hard on any platform. Writing one for the web is
-even harder. Luckily we have enough rope in `dom.js` and `css.js` to do
-a decent job. Let's see what that means first.
+[even harder](WHY-WEB-SUCKS.md). Luckily we have enough rope in `glue.js`,
+`dom.js` and `css.js` to do a decent job. Let's see what that means first.
 
 A good widget needs to satisfy many things:
 

@@ -41,7 +41,7 @@ runtime overhead, and not having to resort to silly offline preprocessors.
 CSS is many dumb things, but specificity takes the cake. Luckily, generating
 CSS also gives us the opportunity to completely disable this genius CSS feature
 (by wrapping all the rules in `:where()`) thus leaving source order and CSS
-layers as the way to specify rule order.
+layers as the only way to specify rule order.
 
 
 ## No global z-index

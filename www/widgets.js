@@ -3004,24 +3004,24 @@ G.dlg = component('dlg', function(e) {
 		if (e._content ) e._content .class('dlg-content')
 		if (e._footer  ) e._footer  .class('dlg-footer')
 
-		if (e.cancelable && !e.x_button) {
-			e.x_button = div({class: 'dlg-xbutton'})
-			e.x_button.on('click', function() {
+		if (e.cancelable && !e.xbutton) {
+			e.xbutton = div({class: 'dlg-xbutton'})
+			e.xbutton.on('click', function() {
 				e.cancel()
 			})
-			e.add(e.x_button)
+			e.add(e.xbutton)
 		}
-		if (e.x_button)
-			e.x_button.show(e.cancelable)
+		if (e.xbutton)
+			e.xbutton.show(e.cancelable)
 
-		e.add(e._header, e._content, e._footer, e.x_button)
+		e.add(e._header, e._content, e._footer, e.xbutton)
 
 	})
 
 	document.on('keydown', e, function(ev, key) {
 		if (key == 'Escape') {
-			if (e.cancelable && e.x_button) {
-				e.x_button.class('active', true)
+			if (e.cancelable && e.xbutton) {
+				e.xbutton.class('active', true)
 				return false
 			} else {
 				if (e.cancel())
@@ -3032,8 +3032,8 @@ G.dlg = component('dlg', function(e) {
 
 	document.on('keyup', e, function(ev, key) {
 		if (key == 'Escape') {
-			if (e.cancelable && e.x_button && e.x_button.hasclass('active')) {
-				e.x_button.class('active', false)
+			if (e.cancelable && e.xbutton && e.xbutton.hasclass('active')) {
+				e.xbutton.class('active', false)
 				if (e.cancel())
 					return false
 			}
@@ -3056,8 +3056,8 @@ G.dlg = component('dlg', function(e) {
 
 	e.close = function(ok) {
 		e.modal(false)
-		if (e.x_button)
-			e.x_button.class('active', false)
+		if (e.xbutton)
+			e.xbutton.class('active', false)
 		e.fire('close', ok != false)
 	}
 
@@ -5813,11 +5813,11 @@ G.select_button = component('select-button', function(e) {
 	e.make_items_prop()
 
 	e.class('select-button inputbox')
-	e.make_disablable()
 
 	e.inputbox = div({class: 'select-button-box inputbox'})
 	e.add(e.inputbox)
 
+	e.make_disablable(e.inputbox)
 	e.make_focusable(e.inputbox)
 
 	e.make_input_widget({
@@ -6609,7 +6609,7 @@ G.tags_input = component('tags-input', function(e) {
 	e.class('tags-input')
 	e.input_group = div({class: 'tags-input-group input-group'})
 	e.add(e.input_group)
-	e.make_disablable()
+	e.make_disablable(e.input_group)
 
 	e.tags_box = tags_box()
 	e.tag_input = tag('input', {class: 'tags-input-input', placeholder: 'Tag'})
@@ -6720,6 +6720,7 @@ G.tags_input = component('tags-input', function(e) {
 config props:
 	align: left | right
 	list:
+	value_key: 'value'
 html attrs:
 	align: left | right
 inner html:
@@ -6745,7 +6746,7 @@ update opts:
 css('.dropdown', 'skip')
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
 css('.dropdown-value', 'S shrinks h-m nowrap')
-css('.dropdown.empty .dropdown-value::before', 'zwsp') // .empty condition because we use gap-x.
+css('.dropdown-value:empty::before', 'zwsp')
 css('.dropdown-chevron', 'small ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
@@ -6781,7 +6782,6 @@ css_state('.check-dropdown .checklist-item.focused', 'bg1 fg')
 function dropdown_widget(e, is_checklist) {
 
 	e.class('dropdown')
-	e.make_disablable()
 	e.init_child_components()
 
 	e.prop_vals.list = is_checklist
@@ -6791,15 +6791,15 @@ function dropdown_widget(e, is_checklist) {
 	e.inputbox = div({class: 'inputbox dropdown-inputbox'})
 	e.add(e.inputbox)
 
+	e.make_disablable(e.inputbox)
 	e.make_focusable(e.inputbox)
 
 	e.make_input_widget({
 		errors_tooltip_target: e.inputbox,
 	})
 
+	e.to_text = str // stub
 	e.to_form = v => e.format == 'words' ? v.join(' ') : json(v)
-
-	e.prop('ready', {type: 'bool', default: true, slot: 'state', updates: 'value'})
 
 	// model: value lookup
 
@@ -6937,12 +6937,6 @@ function dropdown_widget(e, is_checklist) {
 
 		if (opt.value) {
 
-			e.inputbox.disable('ready', !e.ready)
-			if (!e.ready) {
-				e.valuebox.set(S('loading', 'loading...'))
-				return
-			}
-
 			if (is_checklist) {
 
 				for (let i = 0, n = list.list_len; i < n; i++) {
@@ -6976,7 +6970,7 @@ function dropdown_widget(e, is_checklist) {
 					e.list.update_item_state(item_e)
 					e.valuebox.set(item_e)
 				} else {
-					e.valuebox.clear()
+					e.valuebox.set(e.value != null ? e.to_text(e.value) : null)
 				}
 
 			}
@@ -7038,6 +7032,11 @@ function dropdown_widget(e, is_checklist) {
 	e.toggle = function(focus, ev) { e.set_open(!e.isopen, focus, ev) }
 
 	// controller -------------------------------------------------------------
+
+	e.user_set = function(v, ev) {
+		e.set_prop('input_value', v, ev)
+		e.fireup('input', ev)
+	}
 
 	e.inputbox.on('pointerdown', function(ev) {
 		e.toggle(false, ev)
@@ -7113,7 +7112,7 @@ function dropdown_widget(e, is_checklist) {
 			return false
 		}
 		if (key == 'Delete') {
-			e.set_prop('input_value', null, ev)
+			e.user_set(null, ev)
 			return false
 		}
 
@@ -7134,7 +7133,7 @@ function dropdown_widget(e, is_checklist) {
 	})
 
 	e.xbutton.on('pointerdown', function(ev) {
-		e.set_prop('input_value', null, ev)
+		e.user_set(null, ev)
 		return false
 	})
 
@@ -8463,10 +8462,11 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.class('time-only-input', !has_date)
 		e.class('datetime-input', has_date && has_time)
 	}
-	e.make_disablable()
 
 	e.input_group = div({class: 'date-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
+
+	e.make_disablable(e.input_group)
 
 	e.prop('format', {type: 'enum', enum_values: 'sql time', default: 'time', parse: lower})
 

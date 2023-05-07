@@ -546,8 +546,9 @@ css('.fg-search'     , '', ` color: var(--fg-search); `)
 
 /* ALIGN: INLINE ---------------------------------------------------------- */
 
-css('.inline', '', ` display: inline; `)
-css('.block' , '', ` display: block ; `)
+css('.inline'       , '', ` display: inline; `)
+css('.block'        , '', ` display: block ; `)
+css('.inline-block' , '', ` display: inline-block ; `)
 
 css('.t-l'  , '', ` text-align: start  ; `)
 css('.t-c'  , '', ` text-align: center ; `)

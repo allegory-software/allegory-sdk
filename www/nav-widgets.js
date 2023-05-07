@@ -7,10 +7,12 @@ You must load first:
 
 	nav.js
 
-WIDGETS           PROPS
+WIDGETS
 
-	<list>         nav=
+	<list          nav=      >
 	<dropdown>     <list nav=>
+	<label         nav= col= >
+	<dropdown      nav= col= >
 
 */
 
@@ -34,7 +36,7 @@ component.extend('list', function(e) {
 		e.items = nav && nav.ready && nav.serialize_all_row_vals() || []
 	}
 
-	e.listen('display_vals_changed', function(nav1) {
+	e.listen('col_vals_changed', function(nav1) {
 		if (nav1 != nav) return
 		e.update_items()
 	})
@@ -44,28 +46,9 @@ component.extend('list', function(e) {
 		set_items()
 	})
 
-	e.listen('col_attr_changed', function(nav1, col, k, v) {
+	e.listen('col_attr_changed', function(nav1, field, k, v) {
 		if (nav1 != nav) return
 		set_items()
-	})
-
-})
-
-component.extend('dropdown', function(e) {
-
-	let nav
-	function bind_list_nav(nav1, on) {
-		nav = on ? nav1 : null
-		e.ready = !nav || nav.ready
-	}
-
-	e.listen('ready', function(nav1) {
-		if (nav1 != nav) return
-		e.ready = nav.ready
-	})
-
-	e.on('bind_list', function(list, on) {
-		list.on('bind_nav', bind_list_nav, on)
 	})
 
 })
@@ -75,9 +58,14 @@ component.extend('label', function(e) {
 	e.make_nav_col_widget()
 
 	let field
+
+	function update_label() {
+		e.set(field && field.label || null)
+	}
+
 	e.on('bind_field', function(field1, on) {
 		field = on ? field1 : null
-		this.set(field && field.label || null)
+		update_label()
 	})
 
 	e.override('get_target', function(inherited) {
@@ -85,6 +73,13 @@ component.extend('label', function(e) {
 		if (!target && field)
 			target = e.announce('label_find_target', field)
 		return target
+	})
+
+	e.listen('field_changed', function(te, changed_field, k, v) {
+		if (te != (field && field.nav)) return
+		if (changed_field != field) return
+		if (k != 'label') return
+		update_label()
 	})
 
 })
@@ -187,6 +182,27 @@ component.extend('date-range-input', function(e) {
 	e.on('input', function(ev) {
 		e.set_cell_val1(e.input_value1, ev)
 		e.set_cell_val2(e.input_value2, ev)
+	})
+
+})
+
+component.extend('dropdown', function(e) {
+
+	input_widget(e)
+
+	e.on('bind_field', function(field, on) {
+		field = on ? field : null
+		e.list.clear()
+		let lookup_field = field && field.lookup_fields && field.lookup_fields[0]
+		if (lookup_field) {
+			for (let row of lookup_field.nav.all_rows) {
+				let item_e = div()
+				lookup_field.nav.draw_cell(row, field.display_field, item_e)
+				item_e.value = lookup_field.nav.cell_val(row, lookup_field)
+				e.list.add(item_e)
+			}
+			e.list.fire('items_changed')
+		}
 	})
 
 })

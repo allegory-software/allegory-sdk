@@ -1617,6 +1617,31 @@ listen('validate', function(e) {
 
 <!--------------------------------------------------------------------------->
 
+<xmp id=lookup_demo>
+<rowset id=rowset_lang pk=lang name_col=name wait=1>
+	<field name=lang></field>
+	<field name=name></field>
+	<row lang=en name=English></row>
+	<row lang=es name=Spanish></row>
+	<row lang=it name=Italian></row>
+</rowset>
+<grid id=my_grid>
+	<rowset>
+		<field name=user                       ></field>
+		<field name=lang1 lookup_rowset=lang   ></field>
+		<field name=lang2 lookup_rowset=lang   ></field>
+		<row user=Foo lang1=en ></row>
+		<row user=Bar lang1=it lang2=es></row>
+		<row user=Baz          lang2=en></row>
+		<row user=Wrong lang1=xx lang2=yy></row>
+	</rowset>
+</grid>
+<dropdown nav=my_grid col=lang1></dropdown>
+<dropdown nav=my_grid col=lang2></dropdown>
+</xmp>
+
+<!--------------------------------------------------------------------------->
+
 <xmp id=nodes_changed_demo>
 <d id=my></d>
 <script run>

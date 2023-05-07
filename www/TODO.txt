@@ -19,25 +19,32 @@ THINK
 BUGS
 ------------------------------------------------------------------------------
 
+* NAV
+	- params
+
+* NAV
+	- editing
+
 * TOUCH SCREENS
 	- problem with pointer capturing? tab dragging doesn't work.
 
 * TOOLBOX
 	- fix dragging with trackpad (no buttons, just touch)
 
-* SLIDER
-	- range totally overlapped thumbs are hard to distinguish
-	- min_range & max_range constraints
-		- drag other thumb when dragging to satisfy
-
-* BUTTON
-	- Enter vs Space key (doesn't show :active on Enter wtf)
+* CALENDAR
+	- updating state in redraw while dragging prevents:
+		- tooltip from updating itself.
+		- grid from updating itself.
 
 * RANGE-DATE
 	- merge errors from inputs
 
-* CALENDAR
-	- updating state in redraw while dragging prevents tooltip from updating itself.
+* BUTTON
+	- Enter vs Space key (doesn't show :active on Enter wtf)
+
+* SLIDER
+	- range totally overlapped thumbs are hard to distinguish
+		- min_range mitigates that when set.
 
 * TOASTER
 	- weird spacing between messages when starting
@@ -51,12 +58,20 @@ BUGS
 NEW WIDGETS
 ------------------------------------------------------------------------------
 
+* DROPDOWN with lookup field
+
 * MULTI-INPUT
 	- html content is one or multiple rows inside <record> tags
 	- <record duplicate=N> to duplicate a record. N can be 0.
 	- [+] button to duplicate record underneath
 	- [-] button to remove record
 	- min & max number of records
+
+* UPLOAD area/button with progress
+
+* IMAGE
+	- upload
+	- download
 
 * HTML-INPUT
 
@@ -71,7 +86,6 @@ NEW WIDGETS
 * MONTH CALENDAR variation
 
 * MONTH-INPUT
-
 
 FEATURES
 ------------------------------------------------------------------------------
@@ -109,12 +123,6 @@ FEATURES
 	- list of marker values with labels (<datalist> ?)
 	- current value num edit with <-> slide
 
-* IMAGE
-	- upload
-	- download
-
-* UPLOAD area/button with progress
-
 * BUTTON
 	- bring back the ^active event
 		- can we force :active so we don't have to set .active?
@@ -150,7 +158,6 @@ MOBILE
 
 * DEMO: make or adapt for mobile
 
-
 * LIST
 	- drag & drop
 		- test tabs too
@@ -171,16 +178,16 @@ LATERZ
 - NAV group-by aggregates
 - NAV group-by "others" group
 - NAV group-by % column
-- VAL_WIDGET html field opt
 - NAV send a "rowset closed" request to server when a grid is unbound
 - NAV rowset.server_order_by (shown in grid header grayed)
-- NAV multi-col luookup (i.e. val_col -> val_cols)
+- NAV multi-col lookup
+	- validation
+	- lookup-list & dropdown
 - BUTTON with menu or list dropdown
 * INPUT save on typing with delay: field attr "save_on_input" true or false
 - TABS pop-out button
 - SPLIT context menu: vertical/horizontal, %/fixed
 - CHART pie use % column and "others" group from nav
-- CHART bars, columns
 - CHART bar-stacks
 - CHART area-stack (for a % column)
 - CHART log scale

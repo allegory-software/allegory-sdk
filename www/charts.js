@@ -123,7 +123,7 @@ G.chart = component('chart', 'Input', function(e) {
 	e.listen('reset'                , nav_changed)
 	e.listen('rows_changed'         , nav_changed)
 	e.listen('cell_state_changed'   , nav_changed)
-	e.listen('display_vals_changed' , nav_changed)
+	e.listen('col_vals_changed'     , nav_changed)
 	e.listen('col_attr_changed'     , nav_changed)
 
 	function update_view() {
