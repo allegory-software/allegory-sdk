@@ -2275,6 +2275,8 @@ let update_all = function() {
 		e.do_position()
 	}
 
+	//
+
 	update_set.clear()
 	position_set.clear()
 
@@ -3886,8 +3888,6 @@ e.make_popup = function(target, side, align) {
 		return [x, y]
 	}
 
-	e.do_position_popup = noop
-
 	e.on_position(function() {
 
 		if (e.hidden)
@@ -3949,7 +3949,7 @@ e.make_popup = function(target, side, align) {
 		e.x = x + e.popup_ox + (e.popup_fixed ? sx : 0) - spx
 		e.y = y + e.popup_oy + (e.popup_fixed ? sy : 0) - spy
 
-		e.do_position_popup(side, align)
+		e.fire('popup_position', side, align)
 
 	})
 

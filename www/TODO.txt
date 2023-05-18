@@ -46,9 +46,6 @@ BUGS
 	- range totally overlapped thumbs are hard to distinguish
 		- min_range mitigates that when set.
 
-* TOASTER
-	- weird spacing between messages when starting
-
 * NAV revert bug (esp. tree)
 
 * Safari 16.3 dumbass browser

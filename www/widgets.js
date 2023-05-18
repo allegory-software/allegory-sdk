@@ -195,8 +195,7 @@ css_state('.tooltip-xbutton:not(.active):hover', '', `
 	color: inherit;
 `)
 
-css('.tooltip-tip', 'z1', `
-	display: block;
+css('.tooltip-tip', 'z1 hidden', `
 	border: .5em solid transparent; /* border-based triangle shape */
 	color: var(--bg-tooltip);
 `)
@@ -208,10 +207,10 @@ css('.tooltip-icon', 't-t m-t-05 m-l-2', `
 
 // side & align combinations.
 
-css('.tooltip[side=left  ] > .tooltip-tip', '', ` border-left-color   : inherit; `)
-css('.tooltip[side=right ] > .tooltip-tip', '', ` border-right-color  : inherit; `)
-css('.tooltip[side=top   ] > .tooltip-tip', '', ` border-top-color    : inherit; `)
-css('.tooltip[side=bottom] > .tooltip-tip', '', ` border-bottom-color : inherit; `)
+css('.tooltip[side=left  ] > .tooltip-tip', 'block', ` border-left-color   : inherit; `)
+css('.tooltip[side=right ] > .tooltip-tip', 'block', ` border-right-color  : inherit; `)
+css('.tooltip[side=top   ] > .tooltip-tip', 'block', ` border-top-color    : inherit; `)
+css('.tooltip[side=bottom] > .tooltip-tip', 'block', ` border-bottom-color : inherit; `)
 
 // NOTE: tooltip must have the exact same total width and height for each
 // side and align combinations because side and/or align attrs can change
@@ -303,7 +302,7 @@ G.tooltip = component('tooltip', function(e) {
 	e.prop('kind'        , {type: 'enum',
 			enum_values: 'default search info warn error cursor',
 			default: 'default', to_attr: true})
-	e.prop('timeout'     , {type: 'number'})
+	e.prop('timeout') // number | 'auto'
 	e.prop('close_button', {type: 'bool', default: false})
 
 	e.alias('target'      , 'popup_target')
@@ -311,23 +310,30 @@ G.tooltip = component('tooltip', function(e) {
 	e.alias('side'        , 'popup_side')
 	e.alias('align'       , 'popup_align')
 
-	// SUBTLE: fixate side so that the tooltip has the exact same dimensions
-	// when measured for the first time as when measured afterwards
-	// after the side changes due to popup relayouting.
-	e.attr('side', e.side)
+	e.on_init(function() {
+		// SUBTLE: fixate side so that the tooltip has the exact same dimensions
+		// when measured for the first time as when measured afterwards
+		// after the side changes due to popup relayouting.
+		e.attr('side', e.side)
+	})
 
-	e.do_position_popup = function(side, align) {
+	e.on('popup_position', function(side, align) {
 		// slide-in + fade-in with css.
 		e.attr('side' , side)
 		e.attr('align', align)
-	}
+	})
 
 	e.close = function(ev) {
-		if (e.fire('close', ev)) {
+		if (!e.fire('close', ev))
+			return false
+		e.animate(
+			[{opacity: 0}],
+			{duration: 100, easing: 'ease-out'}
+		).onfinish = function() {
+			e.fire('closed', ev)
 			e.del()
-			return true
 		}
-		return false
+		return true
 	}
 
 	function close(ev) { e.close(ev) }
@@ -339,8 +345,8 @@ G.tooltip = component('tooltip', function(e) {
 			e.content = div({class: 'tooltip-content'})
 			e.icon_box = div()
 			e.body = div({class: 'tooltip-body'}, e.icon_box, e.content)
-			e.pin = div({class: 'tooltip-tip'})
-			e.add(e.body, e.pin)
+			e.tip = div({class: 'tooltip-tip'})
+			e.add(e.body, e.tip)
 			e.content.on('pointerdown', content_pointerdown)
 		}
 		if (e.close_button && !e.xbutton) {
@@ -467,18 +473,16 @@ tooltip.icon_classes = {
 
 methods:
 	post(text, [kind], [timeout])
-	close_all()
 
 */
 
-css('.toaster', 'hidden') // don't mess up the layout
+css('.toaster', 'skip') // don't mess up the layout
 
-css('.toaster-message', 'op1 ease')
+css('.toaster-message', 'op1', `left: 0;`)
 
 G.toaster = component('toaster', function(e) {
 
 	e.class('toaster')
-	e.tooltips = set()
 
 	e.side = 'inner-top'
 	e.align = 'center'
@@ -487,27 +491,26 @@ G.toaster = component('toaster', function(e) {
 
 	e.on_measure(function() {
 		let y = e.spacing
-		for (let t of e.tooltips) {
+		for (let t of e.at) {
 			t._y = y
 			y += t.rect().h + e.spacing
 		}
 	})
 
 	e.on_position(function() {
-		for (let t of e.tooltips) {
+		for (let t of e.at) {
 			t.popup_y1 = t._y
-			t.do_measure()
-			t.do_position() // it being our child it's ok to force it.
+			runafter(0, function() { t.update() })
 		}
 	})
 
-	function close() {
-		e.tooltips.delete(this)
+	function tooltip_closed() {
 		e.update()
 	}
 
 	e.post = function(text, kind, timeout) {
 		let t = tooltip({
+			target: e.parent,
 			classes: 'toaster-message',
 			kind: kind,
 			icon_visible: true,
@@ -518,22 +521,11 @@ G.toaster = component('toaster', function(e) {
 			close_button: true,
 			zIndex: 1000, // TODO: show over modals.
 		})
-		t.on('close', close)
-		e.tooltips.add(t)
-		e.parent.add(t)
+		t.on('closed', tooltip_closed)
+		e.add(t)
 		e.update()
 		return t
 	}
-
-	e.close_all = function() {
-		for (let t of e.tooltips)
-			t.close()
-	}
-
-	e.on_bind(function(on) {
-		if (!on)
-			e.close_all()
-	})
 
 })
 
