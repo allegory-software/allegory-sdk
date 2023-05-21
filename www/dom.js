@@ -1587,7 +1587,7 @@ property(Element, 'index', {
 let cur_set = set()
 let cur_by_id = map()
 G.diff_element_list = function(t, cur_elems) {
-	t = isstr(t) ? t.words() : t
+	t = words(t) ?? empty_array
 	if (t.equals(cur_elems))
 		return cur_elems
 	// map current items by identity and by id.
@@ -1818,14 +1818,10 @@ e.prop = function(prop, opt) {
 		let on_bind = opt.on_bind
 		let id = null
 		function te_bind(te, on) {
-			let te0 = e[REF]
-			if (te == te0)
-				return
-			if (on_bind && te0)
-				on_bind.call(e, te0, false)
+			assert(on == !e[REF])
 			e[REF] = on ? te : null
-			if (on_bind && on)
-				on_bind.call(e, te, true)
+			if (on_bind)
+				on_bind.call(e, te, on)
 			if (DEBUG_ELEMENT_BIND)
 				e.debug(on ? '==' : '=/=', DEBUG_ID, te.id)
 		}
@@ -1839,9 +1835,11 @@ e.prop = function(prop, opt) {
 			if (on) {
 				let te = window[id]
 				if (te && te.bound)
-					te_bind(te, on)
+					te_bind(te, true)
 			} else {
-				te_bind(e[REF], false)
+				let te = e[REF]
+				if (te)
+					te_bind(te, false)
 			}
 			bound = on
 		}

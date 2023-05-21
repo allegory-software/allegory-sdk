@@ -3602,12 +3602,12 @@ css('.info-button', 'h-c h-m b round mono extrabold dim w1 h1 m', `
 `)
 css('.info-button::before', '', ` content: 'i'; `)
 
-css('.info', '', ` display: inline-block; `)
-
+css('.info', 'inline-block')
 css('.info:not([collapsed])', 'smaller label h-bl gap-x')
 
 // toggling visibility on hover requires click-through for stable hovering!
-css('.info .tooltip:not([hidden])', 'click-through')
+css('.info .tooltip', 'click-through')
+css('.info .tooltip .tooltip-content', 't-l')
 
 G.info = component('info', function(e) {
 
@@ -3623,7 +3623,7 @@ G.info = component('info', function(e) {
 		if (v) {
 			e.btn = e.btn || div({class: 'info-button'})
 			if (!e.tooltip) {
-				e.tooltip = tooltip({kind: 'info', align: 'left', popup_ox: -4, target: e.btn})
+				e.tooltip = tooltip({kind: 'info', align: 'center', target: e.btn})
 				e.add(e.tooltip)
 				e.tooltip.update({show: false})
 				e.btn.on('hover', function(ev, on) {

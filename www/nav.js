@@ -1542,6 +1542,22 @@ e.make_nav_widget = function() {
 
 	// parse & validate cells & rows silently and without making too much
 	// garbage and without getting the error messages, just the failed state.
+	function validate_all_rows_of(field) {
+		if (field.readonly)
+			return
+		if (!field.validator)
+			return
+		for (let row of e.all_rows) {
+			let iv = e.cell_input_val(row, field)
+			let failed = !field.validator.validate(iv, false)
+			if (!field.validator.parse_failed)
+				row[field.val_index] = field.validator.value
+			if (failed) {
+				e.set_cell_state_for(row, field, 'errors', errors_no_messages)
+				e.set_row_state_for(row, 'invalid', true)
+			}
+		}
+	}
 	function validate_all_rows() {
 		for (let row of e.all_rows) {
 			let cells_failed
@@ -3496,23 +3512,21 @@ e.make_nav_widget = function() {
 			? [field] : e.flds(field.local_cols || field.lookup_cols || ln.pk_fields)
 		field.display_field = ln.fld(field.display_col || ln.name_field)
 		field.align = field.display_field && field.display_field.align
-		col_vals_changed(field)
 	}
 
 	function bind_lookup_nav(field, on) {
 		let ln = field.lookup_nav
-		if (!ln)
-			return
-		if (on) {
-			if (ln.ready)
-				init_lookup_nav(field, ln)
-		}
+		if (on && ln && ln.ready)
+			init_lookup_nav(field, ln)
 	}
 
 	e.listen('reset', function(ln) {
 		for (let field of e.all_fields) {
 			if (ln == field.lookup_nav) {
 				init_lookup_nav(field, ln)
+				field.validator.invalidate()
+				validate_all_rows_of(field)
+				col_vals_changed(field)
 			}
 		}
 	})
@@ -5542,15 +5556,15 @@ add_validation_rule({
 
 add_validation_rule({
 	name     : 'lookup',
-	props    : 'lookup_nav lookup_cols local_cols', // TODO: lookup_nav.ready ??
+	props    : 'lookup_nav lookup_cols local_cols',
 	vprops   : 'input_value',
-	applies  : (e) => e.lookup_fields,
+	applies  : (field) => field.lookup_fields,
 	// TODO: multi-col lookup
-	validate : (e, v) => !!e.lookup_val(null, e, v),
-	error    : (e, v) => S('validation_lookup_error',
-		'{0} unknown value {1}', field_name(e), field_value(e, v)),
-	rule     : (e) => S('validation_lookup_rule',
-		'{0} value unknown', field_name(e)),
+	validate : (field, v) => !!field.nav.lookup_val(null, field, v),
+	error    : (field, v) => S('validation_lookup_error',
+		'{0} unknown value {1}', field_name(field), field_value(field, v)),
+	rule     : (field) => S('validation_lookup_rule',
+		'{0} value unknown', field_name(field)),
 })
 
 /* field type definitions ----------------------------------------------------
