@@ -24,7 +24,7 @@ LOGIC
 
 TYPE CONVERSIONS
 
-	num(s[, z]) -> n | z
+	num(s) -> n
 	str(v) -> s
 	bool(s) -> b
 	null_bool(s) -> b | null
@@ -88,7 +88,7 @@ STRINGS
 	s.upper()   upper(s)
 	s.lower()   lower(s)
 	s.len
-	s.num([z])
+	s.num()
 	s.display_name()
 	s.lower_ai_ci()
 	s.find_ai_ci(s)
@@ -330,10 +330,9 @@ G.repl = function(x, v, z) { return x === v ? z : x }
 
 // type conversion -----------------------------------------------------------
 
-// NOTE: returns z or undefined for failure.
-G.num = function(s, z) {
+G.num = function(s) {
 	let x = parseFloat(s)
-	return x != x ? z : x
+	return x != x ? undefined : x
 }
 
 G.bool = b => !!b
@@ -575,9 +574,7 @@ G.upper = s => s.upper()
 
 property(String, 'len', function() { return this.length })
 
-String.prototype.num = function(z) {
-	return num(this, z)
-}
+String.prototype.num = num
 
 {
 let upper = function(s) {
@@ -1356,7 +1353,7 @@ G.parse_timeofday = function(s, validate, precision) {
 		let M = num(tm[2])
 		let S = with_s && num(tm[3]) || 0
 		let fs = with_ms && tm[5] || ''
-		let f = with_ms && (tm[4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
+		let f = with_ms && (tm[4] ? -1 : 1) * (num(fs) ?? 0) / 10**fs.len || 0
 		t = H * 3600 + M * 60 + S + f
 		if (validate)
 			if (hours_of(t) != H || minutes_of(t) != M || (with_s && seconds_of(t) != S))
@@ -1410,7 +1407,7 @@ let date_parser = memoize(function(locale) {
 		let M = with_time && num(dm[3+2]) || 0
 		let S = with_s && num(dm[3+3]) || 0
 		let fs = with_ms && dm[3+5] || ''
-		let f = with_ms && (dm[3+4] ? -1 : 1) * num(fs, 0) / 10**fs.len || 0
+		let f = with_ms && (dm[3+4] ? -1 : 1) * (num(fs) ?? 0) / 10**fs.len || 0
 		let t = time(y, m, d, H, M, S) + f
 		if (validate)
 			if (

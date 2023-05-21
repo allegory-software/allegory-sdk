@@ -55,8 +55,6 @@ BUGS
 NEW WIDGETS
 ------------------------------------------------------------------------------
 
-* DROPDOWN with lookup field
-
 * MULTI-INPUT
 	- html content is one or multiple rows inside <record> tags
 	- <record duplicate=N> to duplicate a record. N can be 0.
@@ -84,11 +82,12 @@ NEW WIDGETS
 
 * MONTH-INPUT
 
+
 FEATURES
 ------------------------------------------------------------------------------
 
 * DROPDOWN
-	- placeholder
+	- set height to any one of the values in the list.
 
 * TEXTAREA
 	- max-len validator to show "X chars remaining" on a textarea.
@@ -111,10 +110,6 @@ FEATURES
 
 * INPUT-XBUTTON
 	- put near an <input> (inside an <input-group> usually) to clear the value.
-
-* DROPDOWN
-	- use placeholder attr for null value.
-	- set height to any one of the values in the list.
 
 * SLIDER
 	- list of marker values with labels (<datalist> ?)

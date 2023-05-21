@@ -1326,7 +1326,7 @@ NOTE: Makes list items be focusable if not already.
 
 */
 
-css('.dropdown-search', 'fg-search bg-search')
+css('.list-search', 'fg-search bg-search')
 
 e.make_list_items_searchable = function() {
 
@@ -1398,7 +1398,7 @@ e.make_list_items_searchable = function() {
 				let suffix = tape[i++]
 				val_e.clear()
 				val_e.add(prefix)
-				val_e.add(span({class: 'dropdown-search'}, search))
+				val_e.add(span({class: 'list-search'}, search))
 				val_e.add(suffix)
 				item_e.show()
 			} else if (cmd == 'show') {
@@ -6739,6 +6739,7 @@ css('.dropdown', 'skip')
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
 css('.dropdown-value', 'S shrinks h-m nowrap')
 css('.dropdown-value:empty::before', 'zwsp')
+css('.dropdown-value.null', 'label')
 css('.dropdown-chevron', 'small ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
@@ -6897,6 +6898,8 @@ function dropdown_widget(e, is_checklist) {
 
 	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', to_attr: true})
 
+	e.prop('placeholder')
+
 	e.render_item = function(i) {
 		let item_e = e.list.at[i]
 		item_e = is_checklist ? item_e.item : item_e
@@ -6910,6 +6913,7 @@ function dropdown_widget(e, is_checklist) {
 		return item_e
 	}
 
+	// a checklist can have some invalid values but not all.
 	function partially_valid_input_value(remove_invalid) {
 		let v = e.input_value
 		v = isstr(v)
@@ -6962,12 +6966,12 @@ function dropdown_widget(e, is_checklist) {
 					e.list.update_item_state(item_e)
 					e.valuebox.set(item_e)
 				} else {
-					e.valuebox.set(e.value != null ? e.to_text(e.value) : null)
+					e.valuebox.set(e.value != null ? e.to_text(e.value) : e.placeholder)
 				}
 
 			}
 
-			e.class('empty', e.value == null)
+			e.valuebox.class('null', e.value == null)
 			e.xbutton.show(e.value != null && !e.required)
 		}
 	})
