@@ -9,10 +9,24 @@ You must load first:
 
 WIDGETS
 
-	<list          nav=      >
-	<dropdown>     <list nav=>
-	<label         nav= col= >
-	<dropdown      nav= col= >
+	<list               nav=      >
+	<label              nav= col= >
+	<checkbox           nav= col= >
+	<toggle             nav= col= >
+	<radio              nav= col= >
+	<select-button      nav= col= >
+	<text-input         nav= col= >
+	<textarea-input     nav= col= >
+	<pass-input         nav= col= >
+	<num-input          nav= col= >
+	<slider             nav= col= >
+	<tags-input         nav= col= >
+	<date-input         nav= col= >
+	<timeofday-input    nav= col= >
+	<datetime-input     nav= col= >
+	<range-slider       nav= col1= col2= >
+	<date-range-input   nav= col1= col2= >
+	<dropdown           nav= col= >
 
 */
 

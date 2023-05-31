@@ -97,7 +97,7 @@ css('.chart-pie-percents', 'abs click-through', `
 	left: 0;
 `)
 
-css('.chart-pie-label', 'abs white')
+css('.chart-pie-label', 'abs on-dark')
 
 G.chart = component('chart', 'Input', function(e) {
 

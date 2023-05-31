@@ -89,26 +89,23 @@ css_state('.item.modified'    , '', ` background: var(--bg-modified);     `)
 css_state('.item.new.modified', '', ` background: var(--bg-new-modified); `)
 css_state('.item.removed'     , 'strike')
 
-css_state('.item.selected', '', ` background-color: var(--bg-unselected); `)
-css_state('.item.focused' , '', ` background-color: var(--bg-unfocused);  `)
+css_state('.item.selected', 'on-dark', ` background-color: var(--bg-unselected); `)
+css_state('.item.focused' , 'on-dark', ` background-color: var(--bg-unfocused);  `)
 
 // this does the opposite of .focus-ring/.focus-outside classes.
 css_state('.focusable-items:focus-visible', 'no-outline')
 css_state('.focusable-items:focus-visible .item.focused', 'outline-focus')
 
-css_state('.focusable-items:focus-within .item.selected', '', `
+css_state('.focusable-items:focus-within .item.selected', 'on-dark', `
 	background : var(--bg-selected);
-	color      : var(--fg-selected);
 `)
 
-css_state('.focusable-items:focus-within .item.focused', '', `
+css_state('.focusable-items:focus-within .item.focused', 'on-dark', `
 	background : var(--bg-focused);
-	color      : var(--fg-focused);
 `)
 
-css_state('.focusable-items .item.focused.selected', '', `
+css_state('.focusable-items .item.focused.selected', 'on-dark', `
 	background : var(--bg-unfocused-selected);
-	color      : var(--fg-unfocused-selected);
 `)
 
 css_state('.focusable-items:focus-within .item.focused.selected', '', `
@@ -121,9 +118,8 @@ css_state('.focusable-items:focus-within .item.focused.invalid', '', `
 	background : var(--bg-focused-error);
 `)
 
-css_state('.item.dragging.selected', '', `
+css_state('.item.dragging.selected', 'on-dark', `
 	background : var(--bg-selected);
-	color      : var(--fg-selected);
 `)
 css_state('.item.dragging.focused.selected', '', `
 	background: var(--bg-focused-selected);
@@ -146,17 +142,15 @@ in props:
 */
 
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.tooltip', 'z2 h-l h-t noclip noselect', `
+css('.tooltip', 'z2 h-l h-t noclip noselect on-light', `
 	max-width: 400px;  /* max. width of the message bubble before wrapping */
 	--bg-tooltip: var(--bg1);
-	--fg-tooltip: var(--fg);
 	--fg-tooltip-xbutton: var(--fg-dim);
 	--border-tooltip-xbutton: var(--border-light);
 `)
 
 css('.tooltip-body', 'h-bl p-y tight ro', `
 	background: var(--bg-tooltip);
-	color: var(--fg-tooltip);
 	box-shadow: var(--shadow-tooltip);
 `)
 
@@ -244,21 +238,18 @@ css('.tooltip[side=bottom]', '', `margin-top    : -.25em; `)
 
 // coloring based on kind attr.
 
-css('.tooltip[kind=search]', '', `
+css('.tooltip[kind=search]', 'on-light', `
 	--bg-tooltip: var(--bg-search);
-	--fg-tooltip: #000;
 `)
 
-css('.tooltip[kind=info]', '', `
+css('.tooltip[kind=info]', 'on-dark', `
 	--bg-tooltip: var(--bg-info);
-	--fg-tooltip: var(--fg-info);
 	--fg-tooltip-xbutton    : var(--fg-dim-on-dark);
 	--border-tooltip-xbutton: var(--border-light-on-dark);
 `)
 
-css('.tooltip[kind=error]', '', `
+css('.tooltip[kind=error]', 'on-dark', `
 	--bg-tooltip: var(--bg-error);
-	--fg-tooltip: var(--fg-error);
 	--fg-tooltip-xbutton    : var(--fg-dim-on-dark);
 	--border-tooltip-xbutton: var(--border-light-on-dark);
 `)
@@ -1326,7 +1317,7 @@ NOTE: Makes list items be focusable if not already.
 
 */
 
-css('.list-search', 'fg-search bg-search')
+css('.list-search', 'bg-search')
 
 e.make_list_items_searchable = function() {
 
@@ -1448,6 +1439,10 @@ e.make_list_items_searchable = function() {
 	e.on('keydown', function(ev, key, shift, ctrl, alt) {
 		if (key == 'Backspace' && search_string) {
 			e.search(search_string.slice(0, -1), ev)
+			return false
+		}
+		if (key == 'Enter' && search_string) {
+			e.search('')
 			return false
 		}
 		if (!ctrl && !alt && (key.len == 1 || /[^a-zA-Z0-9]/.test(key))) {
@@ -1711,12 +1706,7 @@ css('.menu-title-td', 'p0 p-y p-l-0 clip nowrap', `width: 100%;`)
 css_state('.menu:focus-visible', 'no-outline')
 
 css_state('.menu-tr.focused > :not(.menu)', '', `
-	background : var(--bg-unfocused-selected);
-	color      : var(--fg-unfocused-selected);
-`)
-
-css_state('.menu:focus-within .menu-tr.focused > :not(.menu)', '', `
-	background : var(--bg-focused-selected);
+	background : var(--bg2);
 `)
 
 css('.menu-check-div', 'p-x')
@@ -1770,7 +1760,7 @@ G.menu = component('menu', function(e) {
 		let sub_box   = div({class: 'menu-sub-div'})
 		let sub_td    = tag('td', {class: 'menu-sub-td'}, sub_box)
 		sub_box.style.visibility = item.items ? null : 'hidden'
-		let tr = tag('tr', {class: 'item menu-tr'}, check_td, title_td, key_td, sub_td)
+		let tr = tag('tr', {class: 'menu-tr'}, check_td, title_td, key_td, sub_td)
 		tr.icon_box = icon_box
 		tr.class('disabled', disabled || item.disabled)
 		tr.item = item
@@ -1802,6 +1792,7 @@ G.menu = component('menu', function(e) {
 	function create_menu(table, items, is_submenu, disabled) {
 		table = table || tag('table', {cellspacing: 0, cellpadding: 0})
 		table.classes = 'widget menu'
+		table.class('submenu', is_submenu)
 		table.attr('tabindex', 0)
 		for (let i = 0; i < items.len; i++) {
 			let item = items[i]
@@ -2073,8 +2064,8 @@ css('.tabs:is([tabs_side=top],[tabs_side=bottom]) > tabs-header tabs-tab', 'shri
 
 // reset focusable-items states.
 css_state('tabs-tab', 'no-bg')
-css_state('tabs-tab.selected', 'fg')
-css_state('tabs-tab.tab-selected', 'fg')
+css_state('tabs-tab.selected', 'text')
+css_state('tabs-tab.tab-selected', 'text')
 css_state('tabs-tab:is(:hover)', 'label-hover')
 
 css('tabs-title', 'noselect nowrap m-x-4', `
@@ -2928,7 +2919,6 @@ css('.dlg-xbutton', 'abs ro-var b b-t-0 h-c h-m', `
 	top: 0px;
 	width: 52px;
 	height: 18px;
-	color: var(--fg-button);
 	-webkit-text-stroke: 1px var(--stroke-dialog-xbutton);
 `)
 css('.dlg-xbutton::before', 'fa fa-times')
@@ -3099,25 +3089,24 @@ css('.toolbox', 'z1 v scroll-auto b0 bg1 ro shadow-toolbox op02 ease ease-05s')
 
 css_state('.toolbox[pinned], .toolbox:hover', 'op1 no-ease')
 
-css('.toolbox-titlebar', 'h-m bold p-x-2 p-y-05 gap-2 noselect', `
+css('.toolbox-titlebar', 'h-m bold p-x-2 p-y-05 gap-2 noselect on-dark', `
 	background : var(--bg-unfocused-selected);
-	color      : var(--fg-unfocused-selected);
 	cursor: move;
 `)
 
 css_state('.toolbox:focus-within > .toolbox-titlebar', '', `
 	background : var(--bg-focused-selected);
-	color      : var(--fg-focused-selected);
 `)
 
 css('.toolbox-title', 'S shrinks nowrap-dots click-through')
 
-css('.toolbox-btn', 'dim-on-dark arrow')
+css('.toolbox-btn', 'arrow')
 css('.toolbox-btn-pin', 'small rotate-45')
 css('.toolbox-btn-pin::before', 'fa fa-thumbtack')
 css('.toolbox-btn-close::before', 'fa fa-times')
 css_state('.toolbox[pinned] > .toolbox-titlebar > .toolbox-btn-pin', 'label-on-dark rotate-0')
-css_state('.toolbox-btn:hover', 'white')
+css_state('.toolbox-btn:hover' , 'fg-hover')
+css_state('.toolbox-btn:active', 'fg-active')
 
 css('.toolbox-content', 'h shrinks scroll-auto')
 
@@ -3176,15 +3165,9 @@ G.toolbox = component('toolbox', function(e) {
 
 	e.prop('text', {slot: 'lang'})
 
-	function focus() {
-		e.index = 1/0 // move to top
-		e.focus()
+	function move_to_top() {
+		e.index = 1/0
 	}
-
-	e.on('focusin', function(ev) {
-		e.index = 1/0 // move to top
-		ev.target.focus() // because changing index stops the focusing.
-	})
 
 	e.on_update(function(opt) {
 		e.title_box.set(e.text)
@@ -3215,7 +3198,8 @@ G.toolbox = component('toolbox', function(e) {
 		let mx0 = mx
 		let my0 = my
 
-		focus()
+		move_to_top()
+		unfocus()
 
 		let px0 = e.px
 		let py0 = e.py
@@ -3252,7 +3236,8 @@ G.toolbox = component('toolbox', function(e) {
 
 		down = true
 
-		focus()
+		move_to_top()
+		unfocus()
 
 		let px0 = e.px
 		let py0 = e.py
@@ -3263,9 +3248,7 @@ G.toolbox = component('toolbox', function(e) {
 			e.py = py0 + my - my0
 		}, function(ev, mx, my) {
 			down = false
-			let first_focusable = e.content_box.focusables()[0]
-			if (first_focusable)
-				first_focusable.focus()
+			e.content_box.focus_first()
 			hit_test(mx, my)
 		})
 
@@ -3284,6 +3267,14 @@ G.toolbox = component('toolbox', function(e) {
 
 	e.on('resize', function() {
 		announce('layout_changed')
+	})
+
+	// uncaptured bubbled-up pointerdown brings toolbox to top.
+	e.on('pointerdown', function() {
+		move_to_top()
+		unfocus()
+		e.content_box.focus_first()
+		return false
 	})
 
 })
@@ -4621,7 +4612,7 @@ css_role_state('.crbox[invalid]', 'fg-error bg-error')
 css_state('.crbox[null] .markbox', 'op06')
 
 css_state('.crbox:is(:hover,.hover)', '', `
-	--fg-check: var(--fg-link-hover);
+	--fg-check: var(--fg-hover);
 `)
 
 css_state('.crbox:focus-visible', '', `
@@ -4955,12 +4946,11 @@ css('.slider-thumb', 'abs h ease', `
 	height : var(--w-slider-thumb);
 	transition-property: width, height, margin-top, margin-left;
 `)
-css('.slider-thumb-circle', 'S bg-link')
+css('.slider-thumb-circle', 'S link bg-link round', `
+	box-shadow: var(--shadow-thumb);
+`)
 css_state('.slider-thumb-circle', '', `
 	outline-offset: 3px;
-`)
-css('.slider-thumb-circle', 'round', `
-	box-shadow: var(--shadow-thumb);
 `)
 
 // toggling visibility on hover requires click-through for stable hovering!
@@ -4996,8 +4986,8 @@ css_state(`
 	--w-slider-thumb: 1.4em;
 	transition-property: width, height, margin-top, margin-left;
 `)
-css_state('.slider-thumb-circle:hover' , '', `background-color: var(--fg-link-hover);`)
-css_state('.slider-thumb-circle:active', '', `background-color: var(--fg-link-active);`)
+css_state('.slider-thumb-circle:hover' , '', `background-color: var(--fg-hover);`)
+css_state('.slider-thumb-circle:active', '', `background-color: var(--fg-active);`)
 
 let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, decimals) {
 	scale_base = scale_base || 10
@@ -5231,8 +5221,12 @@ let slider_widget = function(e, range) {
 		let l = div({class: 'slider-mark-label', style: 'max-width:'+e.mark_w+'px'})
 		let m = div({class: 'slider-mark'}, l)
 		e.marks.add(m)
-		m.x = lerp(v, e.from, e.to, 0, w)
+		m.v = v
 		l.set(to_text(v))
+	}
+	function position_marks() {
+		for (let m of e.marks.at)
+			m.x = lerp(m.v, e.from, e.to, 0, w)
 	}
 	function update_marks() {
 		e.marks.clear()
@@ -5247,10 +5241,14 @@ let slider_widget = function(e, range) {
 		for (let v = min; v <= max; v += step)
 			add_mark(v)
 		add_mark(e.to)
+
+		position_marks()
 	}
 
 	e.on_position(function() {
-		update_marks()
+		if (!e.marks.len)
+			update_marks()
+		position_marks()
 	})
 
 	// controller
@@ -5379,10 +5377,6 @@ css_util('.gap-y-input', '', ` row-gap   : var(--p-y-input); `)
 css_util('.gap-input', 'gap-x-input gap-y-input')
 
 css('.inputbox', 'm-y-05 b p-input t-m h-m gap-x-input lh-input')
-
-css_state('.inputbox[invalid]', '', `
-	border-color: var(bg-invalid);
-`)
 
 css_util('.xsmall' , '', `--p-y-input-adjust: var(--p-y-input-adjust-xsmall , 0px);`)
 css_util('.small'  , '', `--p-y-input-adjust: var(--p-y-input-adjust-small  , 0px);`)
@@ -5515,6 +5509,8 @@ css('.textarea', 'm-y-05 S shrinks p-input h flex b p bg-input w-input', `
 	overflow-x: overlay; /* Chrome only */
 `)
 
+css('.textarea[invalid]::placeholder', 'bg-error op05')
+
 G.textarea = component('textarea', 'Input', function(e) {
 
 	e.class('textarea unframe')
@@ -5555,10 +5551,7 @@ css_util('.p-x-button', '', `
 	padding-right : var(--p-x-button, var(--space-2));
 `)
 
-css('.button', 'h-c h-m p-x-button semibold nowrap noselect ro-var', `
-	background  : var(--bg-button);
-	color       : var(--fg-button);
-	box-shadow  : var(--shadow-button);
+css('.button', 'h-c h-m p-x-button semibold nowrap noselect', `
 	font-family : inherit;
 	font-size   : var(--fs);
 `)
@@ -5570,45 +5563,44 @@ css('.button.text-empty > .button-text', 'hidden')
 
 css('.button-icon', 'w1 h-c')
 
-css_state('.button:hover', '', `
+css('.button:not([bare])', 'ro-var', `
+	background: var(--bg-button);
+	box-shadow: var(--shadow-button);
+`)
+css_state('.button:not([bare]):hover', '', `
 	background: var(--bg-button-hover);
 `)
-css_state('.button:active', '', `
+css_state('.button:not([bare]):active', '', `
 	background: var(--bg-button-active);
 	box-shadow: var(--shadow-button-active);
 `)
 
-css('.button[primary]', 'b-invisible', `
-	background : var(--bg-button-primary);
-	color      : var(--fg-button-primary);
+css('.button[primary]:not([bare])', 'b-invisible on-dark', `
+	background: var(--bg-button-primary);
 `)
-css_state('.button[primary]:hover', '', `
-	background : var(--bg-button-primary-hover);
+css_state('.button[primary]:not([bare]):hover', '', `
+	background: var(--bg-button-primary-hover);
 `)
-css_state('.button[primary]:active', '', `
-	background : var(--bg-button-primary-active);
-`)
-
-css('.button[danger]', '', `
-	background : var(--bg-button-danger);
-	color      : var(--fg-button-danger);
-`)
-css_state('.button[danger]:hover', '', `
-	background : var(--bg-button-danger-hover);
-`)
-css_state('.button[danger]:active', '', `
-	background : var(--bg-button-danger-active);
+css_state('.button[primary]:not([bare]):active', '', `
+	background: var(--bg-button-primary-active);
 `)
 
-css      ('.button[bare]', 'b-invisible ro0 no-bg no-shadow fg')
-css_state('.button[bare]:hover' , 'no-bg fg-hover')
-css_state('.button[bare]:active', 'no-bg fg-active')
+css('.button[danger]:not([bare])', '', `
+	background: var(--bg-button-danger);
+`)
+css_state('.button[danger]:not([bare]):hover', '', `
+	background: var(--bg-button-danger-hover);
+`)
+css_state('.button[danger]:not([bare]):active', '', `
+	background: var(--bg-button-danger-active);
+`)
 
-css      ('.button[bare][primary]', 'link')
-css_state('.button[bare][primary]:hover' , 'link-hover')
-css_state('.button[bare][primary]:active', 'link-active')
+css('.button[bare]', 'no-bg b0 no-shadow')
+css('.button[bare][primary]', 'link')
+css_state('.button[bare]:hover' , 'fg-hover')
+css_state('.button[bare]:active', 'fg-active')
 
-css_state('.button[selected]', '', `
+css_state('.button[selected]:not([bare])', '', `
 	box-shadow: var(--shadow-pressed);
 `)
 
@@ -6010,7 +6002,18 @@ update options:
 // so that we can add popups to the widget without messing up the CSS.
 css('.text-input', 'skip')
 css('.text-input-group', 'w-input bg-input')
-css('.text-input-input', 'S shrinks p-r-0')
+css('.text-input-group[invalid] .input::placeholder', 'bg-error op05')
+css('.text-input-input', 'S shrinks')
+css('.text-input[align=left ] .text-input-input', 't-l p-r-0')
+css('.text-input[align=right] .text-input-input', 't-r p-l-0')
+
+css('.text-input', 'skip')
+
+css('.text-input-clear-button', 'small label m0')
+css('.text-input[align=left]  .text-input-clear-button .button-icon', '', `margin-left: -1em;`)
+css('.text-input[align=right] .text-input-clear-button .button-icon', '', `margin-right: -1em;`)
+css_state('.text-input .text-input-clear-button .button-icon', 'op0')
+css_state('.text-input:not(.empty):hover .text-input-clear-button .button-icon', 'op1')
 
 G.text_input = component('text-input', 'Input', function(e) {
 
@@ -6019,7 +6022,37 @@ G.text_input = component('text-input', 'Input', function(e) {
 	e.input_group = div({class: 'text-input-group input-group b-collapse-h ro-collapse-h'})
 	e.add(e.input_group)
 
+	e.prop('align', {type: 'enum', enum_values: 'left right', default: 'left', to_attr: true})
+	e.prop('with_clear_button', {type: 'bool', default: false, to_attr: true})
 	e.prop('max_len', {type: 'number'})
+
+	function add_clear_button() {
+		let b = e.clear_button
+		if (!b) return
+		e.input_group.insert(e.align == 'right' ? 0 : 1, b)
+	}
+
+	e.set_with_clear_button = function(v) {
+		if (v && !e.clear_button) {
+			e.clear_button = button({
+				classes: 'text-input-clear-button',
+				bare: true,
+				focusable: false,
+				icon: 'fa fa-times',
+				action: function(ev) {
+					e.input_value = null
+					e.fireup('input', ev)
+				},
+			})
+			add_clear_button()
+		}
+		if (e.clear_button)
+			e.clear_button.show(v)
+	}
+
+	e.set_align = function(v) {
+		add_clear_button()
+	}
 
 	e.make_input_widget({
 		errors_tooltip_target: e.input_group,
@@ -6043,6 +6076,7 @@ G.text_input = component('text-input', 'Input', function(e) {
 	e.do_after('set_input_value', function(v, v0, ev) {
 		if (!(ev && ev.target == e.input))
 			e.input.value = v
+		e.class('empty', v == null)
 	})
 
 	e.input.on('input', function(ev) {
@@ -6073,6 +6107,7 @@ css('.pass-input-input', 'S shrinks p-r-0')
 
 css('.pass-input-button', 'h-m h-c b p0 label', `width: 2.75em;`)
 css_generic_state('.pass-input-button[disabled]', 'op1 no-filter dim')
+css_generic_state('.pass-input[invalid] .pass-input-button', 'bg-error') // TODO: hack
 
 let load_zxcvbn = memoize(function() {
 	let script = tag('script')
@@ -6896,8 +6931,7 @@ function dropdown_widget(e, is_checklist) {
 	})
 	e.inputbox.add(e.valuebox, e.xbutton, e.chevron)
 
-	e.prop('align', {type: 'enum', enum_values: 'left right', defualt: 'left', to_attr: true})
-
+	e.prop('align', {type: 'enum', enum_values: 'left right', default: 'left', to_attr: true})
 	e.prop('placeholder')
 
 	e.render_item = function(i) {

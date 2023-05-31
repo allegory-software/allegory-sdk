@@ -126,7 +126,10 @@ The `md` component uses `markdown-it.js` for parsing Markdown (optional).
 ### Layer 5: Data-driven widgets
 
 `nav.js`, `grid.js`, `charts.js` and `nav-widgets.js` comprise the "other half"
-of the library, containing a data-driven grid, charts and input widgets.
+of the library, containing a data-driven grid, charts and input widgets. This
+layer has a learning curve but it helps developing CRUD apps at a fraction of
+the cost compared to using other popular web frameworks, and results in
+out-of-the-box desktop-like performance that is not seen on the web.
 
 ### Layer 2a: Component state persistence
 

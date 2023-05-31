@@ -55,12 +55,32 @@ css('.vgrid .grid-cells-view', 'S', 'width: 0;') // CSS people are hopeless
 
 // grid header
 
-// rel makes header cols movable for scrolling horizontally
-css('.grid-header', 'rel b b0')
+// `width: 0` prevents the overflowing canvas from expanding the grid in inline contexts.
+css('.grid-header', 'rel b b0 noclip', `width: 0;`)
 
 css('.grid:not(.vgrid) > .grid-header', 'b-b')
 
-css('.grid-header-canvas', 'abs')
+css('.grid-filters-bar', 'abs b-b', `width: 10000px;`)
+css('.grid-filters-bar .input-group', 'abs m0')
+css('.grid-filters-bar .inputbox', 'b-t-0')
+
+// temporary class for measuring height of the filters bar
+css('.grid-filters-bar.measure', '', `height: auto !important;`)
+css('.grid-filters-bar.measure .input-group', 'rel')
+
+// filter inputs overlap which clips the focus ring of the focused one.
+css('.grid-filter-input', '', `--outline-focus: var(--fg-link);`)
+css('.grid-filter-input input', 'link')
+css('.grid-filter-input input::placeholder', 'link op05')
+css_state('.grid-filter-input:focus-within .input-group', 'z1')
+
+css('.grid-filter-input .button', 'm0 link')
+css('.grid-filter-button', 'small op0')
+css('.grid-filter-input:hover .grid-filter-button', 'op1')
+css('.grid-filter-input[align=right] .text-input-clear-button', 'p-l-0')
+css('.grid-filter-input[align=left ] .text-input-clear-button', 'p-r-0')
+css('.grid-filter-input[align=right] .grid-filter-button', 'p-r-0')
+css('.grid-filter-input[align=left ] .grid-filter-button', 'p-l-0')
 
 /* grid cells: grid > view > ct > (cells, editor) > cell */
 
@@ -146,32 +166,6 @@ css_role('.grid.picker', '', `
 /* show vert-scrollbars always when grid is a picker */
 css_role('.grid.picker > .grid-cells-view', 'clip-x-scroll-y')
 
-/* TODO: grid filter dropdowns
-
-.grid-filter-dropdown {
-	font-size: 85%;
-	bottom: 0;
-	left: 0;
-
-	position: absolute;
-	min-width: 0;
-	border: 0;
-	margin: 0;
-	border-radius: 0;
-
-	color: #36f;
-`)
-
-.dropdown.grid-filter-dropdown.open {
-	box-shadow: none;
-`)
-
-.grid-filter-dropdown-grid {
-	font-size: 90%;
-`)
-
-*/
-
 G.grid = component('grid', 'Input', function(e) {
 
 	e.class('grid unframe')
@@ -179,9 +173,7 @@ G.grid = component('grid', 'Input', function(e) {
 	e.make_focusable()
 	e.ctrl_key_taken = true
 
-	function theme_changed() {
-
-		let css = e.css()
+	function update_theme(css) {
 
 		// css geometry
 		e.text_font_family = css['font-family']
@@ -196,7 +188,7 @@ G.grid = component('grid', 'Input', function(e) {
 		// css colors
 		e.cell_border_v_width    = 1
 		e.cell_border_h_width    = 1
-		e.hcell_border_v_color   = css.prop('--border-dark')
+		e.hcell_border_v_color   = css.prop('--border-light')
 		e.hcell_border_h_color   = css.prop('--border-light')
 		e.cell_border_v_color    = null // css.prop('--border-light')
 		e.cell_border_h_color    = css.prop('--border-light')
@@ -208,6 +200,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.fg_dim                 = css.prop('--fg-dim')
 		e.fg_search              = css.prop('--fg-search')
 		e.bg_search              = css.prop('--bg-search')
+		e.fg_error               = css.prop('--fg-error')
 		e.bg_error               = css.prop('--bg-error')
 		e.bg_unfocused           = css.prop('--bg-unfocused')
 		e.bg_focused             = css.prop('--bg-focused')
@@ -234,29 +227,12 @@ G.grid = component('grid', 'Input', function(e) {
 		update_cx(cx)
 		update_cx(hcx)
 
-		update_sizes()
 	}
 
-	e.prop('header_w', {type: 'number', default: 120}) // vert-grid only
-	e.prop('cell_w', {type: 'number', default: 120, slot: 'user'}) // vert-grid only
-	e.prop('auto_cols_w', {type: 'bool', default: false}) // horiz-grid only
-	e.prop('auto_expand', {type: 'bool', default: false, to_attr: true})
-
-	e.set_header_w = function() {
-		update_sizes()
-	}
-
-	e.set_cell_w = function(v) {
-		update_sizes()
-	}
-
-	e.set_auto_cols_w = function() {
-		update_sizes()
-	}
-
-	e.set_auto_expand = function() {
-		update_sizes()
-	}
+	e.prop('header_w', {type: 'number', default: 120, updates: 'sizes'}) // vert-grid only
+	e.prop('cell_w', {type: 'number', default: 120, slot: 'user', updates: 'sizes'}) // vert-grid only
+	e.prop('auto_cols_w', {type: 'bool', default: false, updates: 'sizes'}) // horiz-grid only
+	e.prop('auto_expand', {type: 'bool', default: false, to_attr: true, updates: 'sizes'})
 
 	// keyboard behavior
 	e.auto_jump_cells = true    // jump to next/prev cell on caret limits with Ctrl.
@@ -286,12 +262,13 @@ G.grid = component('grid', 'Input', function(e) {
 		e.class('hgrid', !!horiz)
 		e.class('vgrid', !horiz)
 		e.must_be_flat = !horiz
-		theme_changed()
+		e.update({theme: true})
 	}
 	e.prop('vertical', {type: 'bool', to_attr: true, slot: 'user', default: false})
 
+	e.filters_bar   = div({class: 'grid-filters-bar'})
 	e.header_canvas = tag('canvas', {class : 'grid-header-canvas', width: 0, height: 0})
-	e.header        = div({class: 'grid-header'}, e.header_canvas)
+	e.header        = div({class: 'grid-header'}, e.header_canvas, e.filters_bar)
 	e.cells_canvas  = tag('canvas', {class : 'grid-cells-canvas', width: 0, height: 0})
 	e.cells         = div({class: 'grid-cells'}, e.cells_canvas)
 	e.cells_view    = div({class: 'grid-cells-view'}, e.cells)
@@ -301,11 +278,9 @@ G.grid = component('grid', 'Input', function(e) {
 	let cx  = e.cells_canvas.getContext('2d')
 	let hcx = e.header_canvas.getContext('2d')
 
-	e.listen('layout_changed', layout_changed)
-
 	e.on_bind(function(on) {
 		if (on)
-			theme_changed()
+			e.update({theme: true})
 	})
 
 	// view-size-derived state ------------------------------------------------
@@ -314,10 +289,34 @@ G.grid = component('grid', 'Input', function(e) {
 	let grid_w, grid_h // grid dimensions.
 	let cells_view_w, cells_view_h // cell viewport dimensions inside scrollbars.
 	let cells_view_overflow_x, cells_view_overflow_y // cells viewport overflow setting.
-	let header_w, header_h // header viewport dimensions.
+	let header_w, header_h, filters_h // header viewport dimensions.
 	let hcell_h // header cell height.
 	let vrn // how many rows are fully or partially in the viewport.
 	let page_row_count // how many rows in a page for pgup/pgdown navigation.
+
+	function measure_sizes() {
+		if (!e.bound) {
+			grid_w = null
+			grid_h = null
+			scroll_x = null
+			scroll_y = null
+		} else {
+			e.filters_bar.class('measure', true)
+			filters_h = e.filters_bar.ch
+			e.filters_bar.class('measure', false)
+			if (e.auto_expand) {
+				grid_w = 0
+				grid_h = 0
+				scroll_x = 0
+				scroll_y = 0
+			} else {
+				grid_w = e.cw
+				grid_h = e.ch
+				scroll_x = e.cells_view.scrollLeft
+				scroll_y = e.cells_view.scrollTop
+			}
+		}
+	}
 
 	// NOTE: keep this raf-friendly, i.e. don't measure the DOM in here!
 	function update_internal_sizes() {
@@ -363,7 +362,7 @@ G.grid = component('grid', 'Input', function(e) {
 				cells_view_h = cells_h
 			} else {
 				cells_view_w = grid_w // before vscrollbar.
-				cells_view_h = grid_h - header_h // before hscrollbar.
+				cells_view_h = grid_h - header_h - filters_h // before hscrollbar.
 			}
 
 			header_w = cells_view_w // before vscrollbar
@@ -463,28 +462,6 @@ G.grid = component('grid', 'Input', function(e) {
 		vrn = min(vrn, e.rows.length)
 
 		update_scroll(scroll_x, scroll_y)
-	}
-
-	function update_sizes() {
-		if (!e.bound) {
-			grid_w = null
-			grid_h = null
-			scroll_x = null
-			scroll_y = null
-		} else {
-			if (e.auto_expand) {
-				grid_w = 0
-				grid_h = 0
-				scroll_x = 0
-				scroll_y = 0
-			} else {
-				grid_w = e.cw
-				grid_h = e.ch
-				scroll_x = e.cells_view.scrollLeft
-				scroll_y = e.cells_view.scrollTop
-			}
-			e.update({fields: true})
-		}
 	}
 
 	// view-scroll-derived state ----------------------------------------------
@@ -639,51 +616,6 @@ G.grid = component('grid', 'Input', function(e) {
 	}
 
 	// rendering --------------------------------------------------------------
-
-	function create_filter(field) {
-		if (!(horiz && e.filters_visible && field.filter_by))
-			return
-		let rs = e.filter_rowset(field)
-		let dd = grid_dropdown({
-			lookup_rowset : e.rowset,
-			lookup_cols   : 1,
-			classes       : 'grid-filter-dropdown',
-			mode          : 'fixed',
-			grid: {
-				cell_h: 22,
-				classes: 'grid-filter-dropdown-grid',
-			},
-		})
-
-		let f0 = rs.all_fields[0]
-		let f1 = rs.all_fields[1]
-
-		dd.display_val = function() {
-			if (!rs.filtered_count)
-				return () => div({class: 'item disabled'}, S('all', 'all'))
-			else
-				return () => span({}, div({class: 'grid-filter fa fa-filter'}), rs.filtered_count+'')
-		}
-
-		dd.on('opened', function() {
-			rs.load()
-		})
-
-		dd.picker.pick_val = function() {
-			let checked = !rs.val(this.focused_row, f0)
-			rs.set_val(this.focused_row, f0, checked)
-			rs.filtered_count = (rs.filtered_count || 0) + (checked ? -1 : 1)
-			dd.do_update_val()
-		}
-
-		dd.picker.on('keydown', function(key) {
-			if (key == ' ')
-				this.pick_val()
-		})
-
-		field.filter_dropdown = dd
-		e.add(dd)
-	}
 
 	function update_cx(cx) {
 		cx.font_size   = e.font_size
@@ -905,10 +837,13 @@ G.grid = component('grid', 'Input', function(e) {
 		if (editing)
 			bg = e.row_bg_focused
 		else if (cell_invalid)
-			if (grid_focused && cell_focused)
+			if (grid_focused && cell_focused) {
 				bg = e.bg_focused_invalid
-			else
+				fg = e.fg_error
+			} else {
 				bg = e.bg_error
+				fg = e.fg_error
+			}
 		else if (cell_focused)
 			if (selected)
 				if (grid_focused) {
@@ -1168,15 +1103,20 @@ G.grid = component('grid', 'Input', function(e) {
 		e.cells_canvas.x = scroll_x
 		e.cells_canvas.y = scroll_y
 
+		e.header.show(e.header_visible)
+
 		e.header.w = horiz ? null : header_w
-		e.header.h = header_h
+		e.header.h = header_h + filters_h
+
+		e.filters_bar.x = -scroll_x
+		e.filters_bar.y = header_h
+		e.filters_bar.h = filters_h
 
 		e.cells_canvas .resize(cells_view_w, cells_view_h, 200, 200)
 		e.header_canvas.resize(header_w, header_h, 200, horiz ? 1 : 200)
 
 		for (let field of e.fields)
-			if (field.filter_dropdown)
-				field.filter_dropdown.w = field._w
+			update_filter_input(field)
 
 		// canvas drawing
 
@@ -1200,7 +1140,6 @@ G.grid = component('grid', 'Input', function(e) {
 
 		cx .scale(devicePixelRatio, devicePixelRatio)
 		hcx.scale(devicePixelRatio, devicePixelRatio)
-
 
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
@@ -1327,22 +1266,9 @@ G.grid = component('grid', 'Input', function(e) {
 
 	}
 
-	// header_visible & filters_visible live properties -----------------------
+	// header_visible property ------------------------------------------------
 
-	e.prop('header_visible', {type: 'bool', default: true, to_attr: true, slot: 'user'})
-
-	e.set_header_visible = function(v) {
-		v = !!v
-		e.header.hidden = !v
-		update_sizes()
-	}
-
-	e.prop('filters_visible', {type: 'bool', default: false, to_attr: true})
-
-	e.set_filters_visible = function(v) {
-		e.header.class('with-filters', filters_visible)
-		update_sizes()
-	}
+	e.prop('header_visible', {type: 'bool', default: true, to_attr: true, slot: 'user', updates: 'sizes'})
 
 	// inline editing ---------------------------------------------------------
 
@@ -1419,32 +1345,101 @@ G.grid = component('grid', 'Input', function(e) {
 		}
 	}
 
+	// filters bar ------------------------------------------------------------
+
+	e.prop('filters_visible', {type: 'bool', default: false, to_attr: true, updates: 'sizes'})
+
+	e.set_filters_visible = update_filters_bar
+
+	function update_filters_bar() {
+		if (e.filters_visible)
+			for (let field of e.fields)
+				create_filter_input(field)
+		e.filters_bar.show(e.filters_visible)
+	}
+
+	function create_filter_input(field) {
+		if (!(horiz && e.filters_visible && field.filter_by != false))
+			return
+		if (field.filter_input)
+			return
+
+		let input = text_input({
+			classes: 'grid-filter-input',
+			placeholder: S('filter_placeholder', 'Filter'),
+			align: field.align,
+			with_clear_button: true,
+			on_input: function(ev) {
+				e.set_col_attr(field.name, 'filter', this.value)
+			},
+		})
+
+		let filter_button = button({
+			classes: 'grid-filter-button',
+			bare: true,
+			focusable: false,
+			icon: 'fa fa-filter',
+			action: function(ev) {
+				//
+			},
+		})
+		input.on_update(function() {
+			if (input.filter_button)
+				return
+			input.input_group.insert(field.align == 'right' ? 0 : 1/0, filter_button)
+			input.filter_button = filter_button
+		})
+
+		field.filter_input = input
+		e.filters_bar.add(input)
+	}
+
+	e.on_free_field(function(field) {
+		if (field.filter_input) {
+			field.filter_input.del()
+			field.filter_input = null
+		}
+	})
+
+	function update_filter_input(field) {
+		let inp = field.filter_input
+		if (!inp) return
+		if (inp.input_group)
+			inp = inp.input_group
+		inp.x = field._x
+		let w = field._w + e.cell_border_v_width
+		inp.min_w = w
+		inp.max_w = w
+	}
+
 	// responding to layout changes -------------------------------------------
 
-	let w0, h0
-	function layout_changed(what) {
-		assert(e.bound)
-		if (what) {
-			theme_changed()
-			return
-		}
-		let r = e.rect()
-		let w1 = r.w
-		let h1 = r.h
-		if (w1 == 0 && h1 == 0)
-			return // hidden
-		if (h1 !== h0 || w1 !== w0)
-			update_sizes()
-		w0 = w1
-		h0 = h1
-	}
-	e.on('resize', layout_changed)
+	e.on('resize', function() {
+		e.update({sizes: true})
+	})
+
+	e.listen('layout_changed', function(what) {
+		e.update({theme: !!what, sizes: !what})
+	})
 
 	// responding to rowset changes -------------------------------------------
 
-	e.on_update(function(opt) {
-		trace_if(!e.bound, e.debug_name)
-		if (opt.fields || opt.rows) {
+	let css
+	e.on_measure(function(opt) {
+		if (opt.theme) {
+			css = e.css()
+			opt.sizes = true
+		}
+		if (opt.sizes)
+			measure_sizes()
+	})
+
+	e.on_position(function(opt) {
+		if (opt.theme)
+			update_theme(css)
+		if (opt.fields)
+			update_filters_bar()
+		if (opt.sizes || opt.fields || opt.rows) {
 			update_internal_sizes()
 			update_errors_tooltip_position()
 		}
@@ -1506,9 +1501,9 @@ G.grid = component('grid', 'Input', function(e) {
 
 	function mu_header_resize(ev, mx, my) {
 		e.class('header-resizing', false)
-		update_sizes()
 		hit_state = null
 		e.xsave()
+		update({sizes: true})
 		return false
 	}
 
@@ -1583,7 +1578,7 @@ G.grid = component('grid', 'Input', function(e) {
 				let field = e.fields[hit_fi]
 				field.w = clamp(w, field.min_w, field.max_w)
 				field._w = field.w
-				update_sizes()
+				e.update({sizes: true})
 			}
 
 		} else {
@@ -1601,7 +1596,7 @@ G.grid = component('grid', 'Input', function(e) {
 			if (horiz)
 				e.set_prop(`col.${field.name}.w`, field.w)
 			e.xsave()
-			update_sizes()
+			e.update({sizes: true})
 			return false
 		}
 
@@ -1680,7 +1675,7 @@ G.grid = component('grid', 'Input', function(e) {
 			if (ht_col_test(mx, my))
 				hit_state = 'col'
 		e.class('col-move', hit_state == 'col')
-		e.header.title = hit_state == 'col' && e.fields[hit_fi].info || ''
+		e.header.title = hit_state == 'col' ? e.fields[hit_fi].info || e.fields[hit_fi].label : ''
 	}
 
 	function mm_row_drag(ev, mx, my) {
@@ -1799,7 +1794,7 @@ G.grid = component('grid', 'Input', function(e) {
 		mx -= hit_dx
 		my -= hit_dy
 		col_mover.move_element_update(horiz ? mx : my)
-		update_sizes()
+		e.update({sizes: true})
 		e.scroll_to_cell(hit_ri, hit_fi)
 	}
 
@@ -1811,6 +1806,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.move_field(hit_fi, over_fi)
 		hit_state = null
 		e.xsave()
+		e.update({sizes: true})
 	}
 
 	// row moving -------------------------------------------------------------
@@ -2244,6 +2240,9 @@ G.grid = component('grid', 'Input', function(e) {
 
 	e.on('keydown', function(ev, key, shift, ctrl) {
 
+		if (ev.target != e)
+			return
+
 		let left_arrow  =  horiz ? 'ArrowLeft'  : 'ArrowUp'
 		let right_arrow =  horiz ? 'ArrowRight' : 'ArrowDown'
 		let up_arrow    = !horiz ? 'ArrowLeft'  : 'ArrowUp'
@@ -2492,8 +2491,9 @@ G.grid = component('grid', 'Input', function(e) {
 	})
 
 	// printable characters: enter quick edit mode.
-	e.on('keypress', function(c) {
-
+	e.on('keypress', function(ev, c) {
+		if (ev.target != e)
+			return
 		if (e.quick_edit) {
 			if (!e.editor && e.focused_row && e.focused_field) {
 				e.enter_edit('select_all')

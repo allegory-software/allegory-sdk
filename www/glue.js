@@ -141,6 +141,7 @@ HASH MAPS
 	attr(t, k[, cons])              t[k] = t[k] || cons(); cons defaults to obj
 	memoize(f)
 	count_keys(t, [max_n]) -> n     count keys in t up-to max_n
+	first_key(t) -> k
 
 TYPED ARRAYS
 
@@ -574,7 +575,9 @@ G.upper = s => s.upper()
 
 property(String, 'len', function() { return this.length })
 
-String.prototype.num = num
+String.prototype.num = function() {
+	return num(this)
+}
 
 {
 let upper = function(s) {
@@ -891,12 +894,21 @@ G.memoize = function(f) {
 
 G.count_keys = function(t, max_n) {
 	let n = 0
-	for (let i in t) {
+	for (let k in t) {
+		if (!t.hasOwnProperty(k))
+			continue
 		if (n === max_n)
 			break
 		n++
 	}
 	return n
+}
+
+
+G.first_key = function(t) {
+	for (let k in t)
+		if (t.hasOwnProperty(k))
+			return k
 }
 
 // typed arrays --------------------------------------------------------------

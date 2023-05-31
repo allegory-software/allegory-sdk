@@ -2193,6 +2193,11 @@ G.focused_focusable = function(e) {
 	return e && e.focusable && e || (e.parent && e.parent != e && focused_focusable(e.parent))
 }
 
+G.unfocus = function() {
+	if (document.activeElement)
+		document.activeElement.blur()
+}
+
 /* deferred DOM updating -----------------------------------------------------
 
 Rationale: some widgets need to measure the DOM in order to position
@@ -2238,9 +2243,9 @@ let position_with_parents = function(e) {
 	if (position_set.has(e)) {
 		position_with_parents(e.parent)
 		e.debug_if(DEBUG_UPDATE, 'M')
-		e.do_measure()
+		e.do_measure(e._update_opt)
 		e.debug_if(DEBUG_UPDATE, 'P')
-		e.do_position()
+		e.do_position(e._update_opt)
 		position_set.delete(e)
 	}
 }
@@ -2266,14 +2271,15 @@ let update_all = function() {
 	// then position all.
 	for (let e of position_set) {
 		e.debug_if(DEBUG_UPDATE, 'M')
-		e.do_measure()
+		e.do_measure(e._update_opt)
 	}
 	for (let e of position_set) {
 		e.debug_if(DEBUG_UPDATE, 'P')
-		e.do_position()
+		e.do_position(e._update_opt)
 	}
 
-	//
+	for (let e of update_set)
+		e._update_opt = null
 
 	update_set.clear()
 	position_set.clear()
@@ -2327,7 +2333,6 @@ e.on_first_update = function(f) {
 
 e._do_update = function() {
 	let opt = this._update_opt
-	this._update_opt = null
 	this.debug_open_if(DEBUG_UPDATE, 'U', Object.keys(opt).join(','))
 	if (opt.show != null)
 		this.show(opt.show)

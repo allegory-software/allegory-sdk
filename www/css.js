@@ -10,7 +10,7 @@ You must load first:
 CSS CLASSES
 
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
-	TEXT COLORS   dim[-on-dark] white label link
+	TEXT COLOR    dim text link label on-light on-dark fg-hover fg-active fg-error
 	ALIGN INLINE  inline block t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex[-no][-wrap] order-{1 2 last} no-shrink
 	ALIGN GRID    g-{l r c t b m} g-{h v}-{s sa sb se} ga-{l r c t b m bl h-s v-s} g-{x y}{1-5} x..x y..y g
@@ -63,27 +63,68 @@ let css_chrome = css_base_chrome
 
 /* COLORS ----------------------------------------------------------------- */
 
-css(':root, .theme-light, .theme-dark .theme-inverted', '', `
+// disable css property inheritance on key properties so we can have css var
+// overriding, since we can't have both.
+css(`
+* {
 
-	--fg                    : hsl(  0   0%   0% / 1.0);
-	--fg-hover              : hsl(  0   0%   0% / 0.8);
-	--fg-active             : hsl(  0   0%   0% / 0.6);
-	--fg-white              : hsl(  0   0% 100% / 1.0);
-	--fg-black              : hsl(  0   0%   0% / 1.0);
-	--fg-dim                : hsl(  0   0%   0% / 0.5); /* faded (not gray!) text but clearly legible (disabled, info boxes) */
-	--fg-dim-on-dark        : hsl(  0   0% 100% / 0.5); /* same but on dark or colored bg */
-	--fg-label              : hsl(  0   0%   0% / 0.6); /* between fg and dim (edit labels, chart labels) */
-	--fg-label-hover        : hsl(  0   0%   0% / 0.5); /* between fg and dim (edit labels, chart labels) */
-	--fg-label-active       : hsl(  0   0%   0% / 0.4); /* between fg and dim (edit labels, chart labels) */
-	--fg-label-on-dark      : hsl(  0   0% 100% / 0.8); /* same but on dark or colored bg */
-	--fg-link               : hsl(222 100%  40% / 1.0); /* anything clickable inside text: links, bare buttons, checkboxes */
-	--fg-link-hover         : hsl(222 100%  50% / 1.0);
-	--fg-link-active        : hsl(222 100%  60% / 1.0);
+	--fg: hsl(var(--fg-h, 0) var(--fg-s, 0%) var(--fg-l) / var(--fg-op, 1));
+
+	color: var(--fg);
+
+	/* link color is used as border and checkmark, so compose it here */
+	--fg-link: hsl(var(--fg-link-h) var(--fg-link-s) var(--fg-link-l) / 1.0);
+
+}
+`)
+
+css(':root', '', `
+
+	--fg-text-l-on-light        :   0%;
+	--fg-text-l-on-light-hover  :  50%;
+	--fg-text-l-on-light-active :  60%;
+
+	--fg-text-l-on-dark         :  95%;
+	--fg-text-l-on-dark-hover   :  90%;
+	--fg-text-l-on-dark-active  : 100%;
+
+	--fg-link-l-on-light        : 40%;
+	--fg-link-l-on-light-hover  : 60%;
+	--fg-link-l-on-light-active : 70%;
+
+	--fg-link-l-on-dark         : 51%;
+	--fg-link-l-on-dark-hover   : 66%;
+	--fg-link-l-on-dark-active  : 71%;
+
+	--fg-label-op-on-light        : 0.6;
+	--fg-label-op-on-light-hover  : 0.5;
+	--fg-label-op-on-light-active : 0.4;
+
+	--fg-label-op-on-dark         : 0.8;
+	--fg-label-op-on-dark-hover   : 0.9;
+	--fg-label-op-on-dark-active  : 1.0;
+
+	--fg-op-dim: 0.5;
+`)
+
+css(':root, .theme-light, .theme-dark .theme-inverted', 'on-light', `
+
+	--fg-link-h: 222;
+	--fg-link-s: 100%;
+
+	/* invalid inputs and error bubbles */
+	--bg-error-h: 0;
+	--bg-error-s: 54%;
+	--bg-error-l: 43%;
+	--bg-error: hsl(var(--bg-error-h) var(--bg-error-s) var(--bg-error-l) / 1.0);
+
+	/* error on error bg (tags-input) */
+	--bg-error2-l: 38%;
 
 	--bg0                   : hsl(  0   0% 100% / 1.0); /* opaque */
 	--bg                    : hsl(  0   0%  98% / 1.0); /* opaque */
-	--bg-hover              : hsl(  0   0%  97% / 1.0); /* opaque */
-	--bg-active             : hsl(  0   0%  96% / 1.0); /* opaque */
+	--bg-hover              : hsl(  0   0%  95% / 1.0); /* opaque */
+	--bg-active             : hsl(  0   0%  93% / 1.0); /* opaque */
 	--bg1                   : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
 	--bg1-hover             : hsl(  0   0%  93% / 1.0); /* sits on bg; opaque */
 	--bg1-active            : hsl(  0   0%  90% / 1.0); /* sits on bg; opaque */
@@ -108,31 +149,28 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--outline-focus         : hsl(  0 100%   0% / 1.0);
 	--outline-focus-offset  : -2px;
 
-	--fg-button                 : var(--fg);
 	--bg-button                 : var(--bg);
 	--bg-button-hover           : var(--bg-hover);
 	--bg-button-active          : var(--bg-active);
 
-	--fg-button-primary         : var(--fg-white);
 	--bg-button-primary         : var(--fg-link);
 	--bg-button-primary-hover   : var(--fg-link-hover);
 	--bg-button-primary-active  : var(--fg-link-active);
 
-	--fg-button-danger          : hsl(  0  54%  43% / 1.0); /* red fg */
+	--fg-link-hover : hsl(var(--fg-link-h) var(--fg-link-s) var(--fg-link-l-hover ) / 1.0);
+	--fg-link-active: hsl(var(--fg-link-h) var(--fg-link-s) var(--fg-link-l-active) / 1.0);
+
+	--fg-button-danger-s: 54%;
+	--fg-button-danger-l: 43%;
+
 	--bg-button-danger          : var(--bg-button);
 	--bg-button-danger-hover    : var(--bg-button-hover);
 	--bg-button-danger-active   : var(--bg-button-active);
 
-	--fg-search             : var(--fg-black); /* quicksearch text over quicksearch bg */
 	--bg-search             : #ff9;  /* quicksearch text bg */
 	--bg-info               : #069;  /* info bubbles */
-	--fg-info               : var(--fg-white);
-	--bg-error              : hsl(  0   54%  43% / 1.0); /* invalid inputs and error bubbles */
-	--bg-error2             : hsl(  0   54%  38% / 1.0); /* error on error bg (tags-input) */
 	--bg-focused-invalid    : #f33;
-	--fg-error              : var(--fg-white);
 	--bg-warn               : #ffa500; /* warning bubbles */
-	--fg-warn               : var(--fg);
 
 	/* input value states */
 	--bg-new                : #eeeeff;
@@ -143,14 +181,10 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--bg-unfocused          : #999;
 	--bg-focused            : #ddd;
 	--bg-unfocused-selected : #333;
-	--fg-unfocused-selected : var(--fg-white);
 	--bg-focused-selected   : #258;
-	--fg-focused-selected   : var(--fg-white);
 	--bg-focused-error      : #f33;
 	--bg-unselected         : #888;
 	--bg-selected           : #69c;
-	--fg-selected           : var(--fg-white);
-	--fg-focused            : var(--fg-white);
 	--bg-row-focused        : #ddd;
 
 	--ring                  : hsl(  0 100%   0% / .3);
@@ -164,26 +198,22 @@ css(':root, .theme-light, .theme-dark .theme-inverted', '', `
 	--shadow-pressed        : inset 0 0.15em 0.3em hsl(210 13% 12% / .5);
 	--shadow-picker         :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
 
-	--fg-text-selection     : var(--bg-focused-selected);
-	--bg-text-selection     : var(--fg-focused-selected);
-
-	color                   : var(--fg);
 	background-color        : var(--bg);
 
 `)
 
-css('.theme-dark, .theme-light .theme-inverted', '', `
+//	--fg-normal-active      : hsl(  0   0% 100% / 1.0);
 
-	--fg                    : hsl(  0   0%  95% / 1.0);
-	--fg-hover              : hsl(  0   0%  90% / 1.0);
-	--fg-active             : hsl(  0   0% 100% / 1.0);
-	--fg-dim                : var(--fg-dim-on-dark);
-	--fg-label              : hsl(  0   0% 100% / 0.6);
-	--fg-label-hover        : hsl(  0   0% 100% / 0.8);
-	--fg-label-active       : hsl(  0   0% 100% / 1.0);
-	--fg-link               : hsl( 26  88%  51% / 1.0);
-	--fg-link-hover         : hsl( 26  99%  66% / 1.0);
-	--fg-link-active        : hsl( 26  99%  71% / 1.0);
+//	--fg-label              : hsl(  0   0% 100% / 0.6);
+//	--fg-label-hover        : hsl(  0   0% 100% / 0.8);
+//	--fg-label-active       : hsl(  0   0% 100% / 1.0);
+
+css('.theme-dark, .theme-light .theme-inverted', 'on-dark', `
+
+	--fg-link-h: 26;
+	--fg-link-s: 88%;
+	--fg-link-s-hover  : 99%;
+	--fg-link-s-active : 99%;
 
 	--bg0                   : hsl(216  28%   8% / 1.0);
 	--bg                    : hsl(216  28%  10% / 1.0);
@@ -242,9 +272,73 @@ css('.theme-dark, .theme-light .theme-inverted', '', `
 
 	color-scheme: dark; /* make default scrollbars dark */
 
-	color                   : var(--fg);
 	background-color        : var(--bg);
 
+`)
+
+/* TEXT COLOR ------------------------------------------------------------- */
+
+css(['.dim', '[dim]'], '', `
+	--fg-op: var(--fg-op-dim);
+`)
+
+css('.text', '', `
+	--fg-h: var(--fg-text-h);
+	--fg-s: var(--fg-text-s);
+	--fg-l: var(--fg-text-l);
+	--fg-l-hover : var(--fg-text-l-hover );
+	--fg-l-active: var(--fg-text-l-active);
+`)
+
+// NOTE: `on-light` and `on-dark modifiers reset color to `text` !
+
+css('.on-light', 'text', `
+	--fg-text-l          : var(--fg-text-l-on-light);
+	--fg-text-l-hover    : var(--fg-text-l-on-light-hover);
+	--fg-text-l-active   : var(--fg-text-l-on-light-active);
+	--fg-link-l          : var(--fg-link-l-on-light);
+	--fg-link-l-hover    : var(--fg-link-l-on-light-hover);
+	--fg-link-l-active   : var(--fg-link-l-on-light-active);
+	--fg-label-op        : var(--fg-label-op-on-light);
+	--fg-label-op-hover  : var(--fg-label-op-on-light-hover);
+	--fg-label-op-active : var(--fg-label-op-on-light-active);
+`)
+
+css('.on-dark' , 'text', `
+	--fg-text-l          : var(--fg-text-l-on-dark);
+	--fg-text-l-hover    : var(--fg-text-l-on-dark-hover);
+	--fg-text-l-active   : var(--fg-text-l-on-dark-active);
+	--fg-link-l          : var(--fg-link-l-on-dark);
+	--fg-link-l-hover    : var(--fg-link-l-on-dark-hover);
+	--fg-link-l-active   : var(--fg-link-l-on-dark-active);
+	--fg-label-op        : var(--fg-label-op-on-dark);
+	--fg-label-op-hover  : var(--fg-label-op-on-dark-hover);
+	--fg-label-op-active : var(--fg-label-op-on-dark-active);
+`)
+
+css('.on-theme', 'text', `
+	--fg-text-l:
+`)
+
+css('.link', '', `
+	--fg-h: var(--fg-link-h, --fg-text-h);
+	--fg-s: var(--fg-link-s, --fg-text-s);
+	--fg-l: var(--fg-link-l, --fg-text-l);
+	--fg-l-hover : var(--fg-link-l-hover );
+	--fg-l-active: var(--fg-link-l-active);
+`)
+
+css('.label', '', `
+	--fg-op: var(--fg-label-op, 1);
+`)
+
+css('.fg-hover' , '', ` --fg-l: var(--fg-l-hover ); --fg-op: var(--fg-op-hover ); `)
+css('.fg-active', '', ` --fg-l: var(--fg-l-active); --fg-op: var(--fg-op-active); `)
+
+css('.fg-error', '', `
+	--fg-h: var(--bg-error-h);
+	--fg-s: var(--bg-error-s);
+	--fg-l: var(--bg-error-l);
 `)
 
 /* SPACINGS --------------------------------------------------------------- */
@@ -256,6 +350,12 @@ css(':root', '', `
 	--lh-input  : 1.25; /* 1.25 is the minimum that <input> supports! */
 	--w-input   : 16em; /* to sync <input> with <dropdown> */
 	--fs        : var(--fs-normal);
+
+`)
+
+// disable inheritance for font-size and line-height so we can have inherited
+// --fs and --lh instead.
+css('*', '', `
 
 	font-size   : var(--fs);
 	line-height : var(--lh);
@@ -281,9 +381,6 @@ css(':root', 'arial', `
 	--fs-h1     : 2em;
 	--fs-h2     : 1.5em;
 	--fs-h3     : 1.3em;
-
-	font-size   : var(--fs);
-	line-height : var(--lh);
 
 `)
 
@@ -343,24 +440,19 @@ css('hr', '', `
 	color: var(--border-light);
 `)
 
-css('a', '', ` color: var(--fg-link); `)
+css('a', 'link')
+css_state('a:hover' , 'fg-hover')
+css_state('a:active', 'fg-active')
+css_state('a:visited', 'link')
 
-css_state('a:visited', '', ` color: var(--fg-link); `)
+css('p', 'op09')
 
-css('p', '', ` opacity: .9; `)
-
-css('h1', '', ` --fs: var(--fs-h1); font-size: var(--fs); `)
-css('h2', '', ` --fs: var(--fs-h2); font-size: var(--fs); `)
-css('h3', '', ` --fs: var(--fs-h3); font-size: var(--fs); `)
+css('h1', '', ` --fs: var(--fs-h1); `)
+css('h2', '', ` --fs: var(--fs-h2); `)
+css('h3', '', ` --fs: var(--fs-h3); `)
 
 /* input placeholders */
 css(['::placeholder', '::-ms-input-placeholder'], 'label op1')
-
-/* text selection */
-css('::selection', '', `
-	background : var(--bg-text-selection);
-	color      : var(--fg-text-selection);
-`)
 
 /* invertable images */
 css(':is(.theme-dark, .theme-light .theme-inverted) img[invertable]', '', `
@@ -489,15 +581,15 @@ css('.mi', 'mi-round')
 
 css('.pre'       , '', ` white-space: pre; `)
 css('.pre-line'  , '', ` white-space: pre-line; `)
-css('.xsmall'    , '', ` --fs: var(--fs-xsmall ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
-css('.small'     , '', ` --fs: var(--fs-small  ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
-css('.smaller'   , '', ` --fs: var(--fs-smaller); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
-css('.normal'    , '', ` --fs: var(--fs-normal ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
-css('.large'     , '', ` --fs: var(--fs-large  ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
-css('.xlarge'    , '', ` --fs: var(--fs-xlarge ); --lh: 1.5; font-size: var(--fs); line-height: var(--lh); `)
-css('.tight'     , '', ` --lh: 1.2; line-height: var(--lh); `)
-css('.lh1'       , '', ` --lh:   1; line-height: var(--lh); `)
-css('.lh0'       , '', ` --lh:   0; line-height: var(--lh); `)
+css('.xsmall'    , '', ` --fs: var(--fs-xsmall ); --lh: 1.5; `)
+css('.small'     , '', ` --fs: var(--fs-small  ); --lh: 1.5; `)
+css('.smaller'   , '', ` --fs: var(--fs-smaller); --lh: 1.5; `)
+css('.normal'    , '', ` --fs: var(--fs-normal ); --lh: 1.5; `)
+css('.large'     , '', ` --fs: var(--fs-large  ); --lh: 1.5; `)
+css('.xlarge'    , '', ` --fs: var(--fs-xlarge ); --lh: 1.5; `)
+css('.tight'     , '', ` --lh: 1.2; `)
+css('.lh1'       , '', ` --lh:   1; `)
+css('.lh0'       , '', ` --lh:   0; `)
 css('.littlebold', '', ` font-weight: 500; `)
 css('.semibold'  , '', ` font-weight: 600; `)
 css('.bold'      , '', ` font-weight: bold; `)
@@ -525,24 +617,6 @@ css_chrome('.arial', '', `
 
 /* use with ::before; inserts ZWSP to force line height on empty text */
 css('.zwsp', '', ` content: "\\200b"; `)
-
-css('[dim]'          , '', ` color: var(--fg-dim); `)
-css('.dim'           , '', ` color: var(--fg-dim); `)
-css('.dim-on-dark'   , '', ` color: var(--fg-dim-on-dark); `)
-css('.white'         , '', ` color: var(--fg-white); `)
-css('.black'         , '', ` color: var(--fg-black); `)
-css('.label'         , '', ` color: var(--fg-label); `)
-css('.label-hover'   , '', ` color: var(--fg-label-hover); `)
-css('.label-active'  , '', ` color: var(--fg-label-active); `)
-css('.label-on-dark' , '', ` color: var(--fg-label-on-dark); `)
-css('.link'          , '', ` color: var(--fg-link); `)
-css('.link-hover'    , '', ` color: var(--fg-link-hover); `)
-css('.link-active'   , '', ` color: var(--fg-link-active); `)
-css('.fg'            , '', ` color: var(--fg); `)
-css('.fg-hover'      , '', ` color: var(--fg-hover); `)
-css('.fg-active'     , '', ` color: var(--fg-active); `)
-css('.fg-error'      , '', ` color: var(--bg-error); `)
-css('.fg-search'     , '', ` color: var(--fg-search); `)
 
 /* ALIGN: INLINE ---------------------------------------------------------- */
 
@@ -1093,21 +1167,18 @@ css('.no-bg'      , '', ` background: none; `)
 css('.bg-input'   , '', ` background: var(--bg-input); `)
 css('.bg-input-hover'  , '', ` background: var(--bg-input-hover); `)
 css('.bg-input-active' , '', ` background: var(--bg-input-active); `)
-css('.bg-search' , '', ` background: var(--bg-search); `)
+css('.bg-search' , 'on-light', ` background: var(--bg-search); `)
 
-css('.bg-error', '', `
+css('.bg-error', 'on-dark', `
 	background : var(--bg-error);
-	color      : var(--fg-error);
 `)
 
-css('.bg-error2', '', `
+css('.bg-error2', 'on-dark', `
 	background : var(--bg-error2);
-	color      : var(--fg-error);
 `)
 
-css('.bg-warn', '', `
+css('.bg-warn', 'on-light', `
 	background : var(--bg-warn);
-	color      : var(--fg-warn);
 `)
 
 /* IMAGE BACKGROUNDS ------------------------------------------------------ */

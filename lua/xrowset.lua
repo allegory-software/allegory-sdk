@@ -17,7 +17,7 @@
 		parent_col       : 'col'         parent column for tree-building
 		name_col         : 'col'         default display_col in lookup rowsets
 		tree_col         : 'col'         tree column (the one with [+] icons)
-		params           : 'par1 ...'    detail param names for master-detail
+		params           : 'par1 ...'    param names for server-side filtering
 		can_add_rows     : f             allow adding new rows
 		can_remove_rows  : f             allow removing rows
 		can_change_rows  : f             allow editing existing rows
@@ -62,7 +62,7 @@
 		name_col         :               default display col when used as lookup rowset
 
 	Methods to implement:
-		load_rows(result, params)
+		load_rows(result, param_vals)
 		insert_row(vals)
 		update_row(vals)
 		delete_row(vals)
@@ -225,9 +225,9 @@ function virtual_rowset(init, ...)
 
 	local repl = repl
 
-	function rs:load(param_values)
+	function rs:load(param_vals)
 		local res = {}
-		rs:load_rows(res, param_values)
+		rs:load_rows(res, param_vals)
 		assert(res.rows[1] == nil or istab(res.rows[1]),
 			'first row not a table')
 		if update_computed_fields then
@@ -496,7 +496,7 @@ function virtual_rowset(init, ...)
 		end
 		local filter = json_decode(args'filter', null) or {}
 		local params = {}
-		--params are prefixed so that they can be used in col_maps.
+		--params are prefixed so that they can be used in col maps.
 		--:old variants are added too for update where sql.
 		for k,v in pairs{
 			['param:lang'        ] = lang(),

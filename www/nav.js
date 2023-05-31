@@ -193,8 +193,6 @@ Fields:
 	publishes:
 		e.all_fields_map[col] -> field
 		e.all_fields[fi] -> field
-		e.add_field(field)
-		e.remove_field(field)
 		e.get_prop('col.ATTR') -> val
 		e.set_prop('col.ATTR', val)
 		e.get_col_attr(col, attr) -> val
@@ -225,9 +223,7 @@ Indexing:
 
 Master-detail:
 	needs:
-		e.params <- 'param1[=master_col1] ...'
-		e.param_nav
-		e.param_nav_id
+		e.params <- 'NAV_ID.[COL1=]PARAM1,[COL2=]PARAM2 WIDGET_ID=PARAM ...'
 
 Tree:
 	state:
@@ -783,10 +779,9 @@ e.make_nav_widget = function() {
 	}
 
 	e.on_bind(function nav_bind(on) {
-		bind_param_nav(on)
 		bind_rowset_name(e.rowset_name, on)
 		if (on) {
-			init_param_vals()
+			update_param_vals()
 			e.reload()
 			e.update_action_band()
 		} else {
@@ -909,8 +904,13 @@ e.make_nav_widget = function() {
 	}
 
 	ifa.exclude_vals = function(field, v) {
-		if (v == null) return
-		set_exclude_filter(field, v)
+		if (e.ready)
+			reinit_rows()
+	}
+
+	ifa.filter = function(field, s) {
+		if (e.ready)
+			reinit_rows()
 	}
 
 	ifa.enum_values = function(field, v) {
@@ -1008,53 +1008,29 @@ e.make_nav_widget = function() {
 		if (field.timeago)
 			e.bool_attr('has-timeago', true)
 
-		field.announce = e_announce
+		field.announce = e_announce // for validator
+
+		if (e.init_field)
+			e.init_field(field)
 
 		return field
 	}
 
+	e.on_init_field = function(f) {
+		e.do_after('init_field', f)
+	}
+
 	function free_field(field) {
+		if (e.free_field)
+			e.free_field(field)
 		if (field.editor_instance)
 			field.editor_instance.del()
 		bind_lookup_nav(field, false)
 		free_field_own_lookup_nav(field)
 	}
 
-	e.add_field = function(f) {
-		let fn = e.all_fields.length
-		let field = init_field(f, fn)
-		for (let ri = 0; ri < e.all_rows.length; ri++) {
-			let row = e.all_rows[ri]
-			// append a val slot to the row.
-			row.splice(fn, 0, null)
-			// append a slot into all cell_state sub-arrays of the row.
-			fn++
-			for (let i = 2 * fn; i < row.length; i += fn)
-				row.splice(i, 0, null)
-		}
-		init_field_validator(field)
-		init_fields()
-		e.update({fields: true})
-		return field
-	}
-
-	e.remove_field = function(field) {
-		free_field(field)
-		let fi = field.val_index
-		e.all_fields.remove(fi)
-		delete e.all_fields_map[field.name]
-		for (let i = fi; i < e.all_fields.length; i++)
-			e.all_fields[i].val_index = i
-		let fn = e.all_fields.length
-		for (let row of e.all_rows) {
-			// remove the val slot of the row.
-			row.splice(fi, 1)
-			// remove all cell_state slots of the row for this field.
-			for (let i = fn + 1 + fi; i < row.length; i += fn)
-				row.splice(i, 1)
-		}
-		init_fields()
-		e.update({fields: true})
+	e.on_free_field = function(f) {
+		e.do_after('free_field', f)
 	}
 
 	function check_field(which, col) {
@@ -1358,33 +1334,96 @@ e.make_nav_widget = function() {
 		e.update({fields: true}) // in case cols haven't changed.
 	}
 
-	// param nav --------------------------------------------------------------
+	/* params -----------------------------------------------------------------
 
-	function init_param_vals() {
-		let pv0 = e.param_vals
-		let pv1
-		if (!e.params) {
-			pv1 = null
-		} else if (!(e.param_nav && e.param_nav.focused_row && !e.param_nav.focused_row.is_new)) {
-			pv1 = false
-		} else {
-			pv1 = []
-			let pmap = param_map(e.params)
-			for (let [row] of e.param_nav.selected_rows) {
-				let vals = obj()
-				for (let [col, param] of pmap) {
-					let field = e.param_nav.all_fields_map[col]
-					if (!field)
-						warn('param nav is missing col', col)
-					let v = field && row ? e.param_nav.cell_val(row, field) : null
-					vals[param] = v
+	- supports server-side filtering for server-based navs.
+	- supports client-side filtering for client-side navs.
+	- supports multiple param navs and multiple params per param nav.
+	- new rows get assigned current param values on matching fields.
+	- cascade-updates foreign keys when master rows are updated.
+	- cascade-removes rows when master rows are removed.
+
+	*/
+
+	e.prop('params', {parse: parse_params}) // "ID1.[COL1=]PARAM1,[COL2=]PARAM2,... ..."
+	e.set_params = params_changed
+
+	function parse_params(params_s) {
+		if (!params_s)
+			return null
+		let pm = map() // {[nav_id|nav]->{col->param}}
+		for (let param_s of words(params_s)) {
+			let p = param_s.split('.')
+			let id = p[0]
+			let maps_s = p[1]
+			let m = map() // {col->param}
+			for (let map_s of maps_s.split(',')) {
+				let p = map_s.split('=')
+				let col = p[0] || map_s
+				let param = p[1] || col
+				m.set(col, param)
+			}
+			pm.set(id, m)
+		}
+		return pm
+	}
+
+	function collect_param_vals() {
+		if (!e.params)
+			return null
+		let pv
+		for (let [param_nav, pmap] of e.params) {
+			let te = isstr(param_nav) ? window[param_nav] : param_nav
+			if (!te || !te.bound)
+				return false
+			let pv1 = []
+			if (te.isnav) {
+				if (!te.ready)
+					return false
+				if (!te.selected_rows.size)
+					return false
+				for (let [row] of te.selected_rows) {
+					let vals = obj()
+					for (let [col, param] of pmap) {
+						let field = te.fld(col)
+						if (!field) {
+							warn('param nav is missing col', col)
+							return false
+						}
+						let v = te.cell_val(row, field)
+						vals[param] = v
+					}
+					pv1.push(vals)
 				}
-				pv1.push(vals)
+			} else {
+				warn('param widget is not a nav', te.debug_name)
+				return false
+			}
+			if (!pv) {
+				pv = pv1
+			} else {
+				// cross-join the param val set from a secondary master nav
+				// with the current param val set, eg. given two param val sets
+				// `pv = v1 || v2` and `pv1 = v3 || v4`, then `pv && pv1` expands to
+				// `(v1 && v3) || (v1 && v4) || (v2 && v3) || (v2 && v4)`.
+				let pv0 = pv
+				pv = []
+				for (let vals1 of pv1)
+					for (let vals0 of pv0) {
+						pv.push(assign(obj(), vals0, vals1))
+					}
 			}
 		}
+
+		return pv
+	}
+
+	function update_param_vals() {
+		let pv0 = e.param_vals
+		let pv1 = collect_param_vals()
 		// check if new param vals are the same as the old ones to avoid
 		// reloading the rowset if the params didn't really change.
-		if (pv1 === pv0 || isarray(pv1) && isarray(pv0) && json(pv1) == json(pv0))
+		if (pv1 === pv0 || json(pv1) == json(pv0))
 			return
 		e.param_vals = pv1
 		e.disable('no_param_vals', pv1 === false)
@@ -1394,14 +1433,13 @@ e.make_nav_widget = function() {
 	}
 
 	// A client_nav doesn't have a rowset binding. Instead, changes are saved
-	// to either row_vals or row_states. Also, if it's a detail nav, it filters
-	// itself based on param_vals since there's no server to ask for filtered rows.
+	// to either row_vals or row_states. Also, it filters itself based on params.
 	function is_client_nav() {
 		return !e.rowset_url && (e.row_vals || e.row_states)
 	}
 
 	function params_changed() {
-		if (!init_param_vals())
+		if (!update_param_vals())
 			return
 		if (!e.rowset_url) { // re-filter and re-focus.
 			e.unfocus_focused_cell({cancel: true})
@@ -1413,20 +1451,38 @@ e.make_nav_widget = function() {
 		}
 	}
 
-	function param_nav_cell_state_changed(master_row, master_field, changes) {
+	function is_param_nav(te) {
+		return e.params.has(te) || (te.id && e.params.has(te.id))
+	}
+
+	e.listen('selected_rows_changed', function(te) {
+		if (!e.params)
+			return
+		if (!is_param_nav(te))
+			return
+		params_changed()
+	})
+
+	e.listen('cell_state_changed', function(te, row, field, changes) {
 		if (!('val' in changes))
 			return
-
+		if (!is_param_nav(te))
+			return
+		if (!update_param_vals())
+			return
 		if (is_client_nav()) { // cascade-update foreign keys.
-			let field = fld(param_map(e.params).get(master_field.name))
+			let pmap = e.params.get(te) || e.params.get(te.id)
+			let col = pmap.get(field.name)
+			if (!col)
+				return
+			let our_field = fld(col)
 			for (let row of e.all_rows)
 				if (e.cell_val(row, field) === old_val)
 					e.set_cell_val(row, field, val)
 		} else {
-			if (init_param_vals())
-				e.reload()
+			e.reload()
 		}
-	}
+	})
 
 	function param_vals_match(master_nav, e, params, master_row, row) {
 		for (let [master_col, col] of params) {
@@ -1439,8 +1495,9 @@ e.make_nav_widget = function() {
 		}
 		return true
 	}
-
-	function param_nav_row_removed_changed(master_row, removed) {
+	e.listen('row_state_changed', function(te, master_row, removed) {
+		if (!is_param_nav(te))
+			return
 		if (is_client_nav()) { // cascade-remove detail rows.
 			let params = param_map(e.params)
 			for (let row of e.all_rows)
@@ -1450,54 +1507,7 @@ e.make_nav_widget = function() {
 					e.end_set_state()
 				}
 		}
-	}
-
-	function bind_param_nav_cols(nav, params, on) {
-		if (on && !e.bound)
-			return
-		if (!(nav && params))
-			return
-		nav.on('selected_rows_changed', params_changed, on)
-		for (let [col, param] of param_map(params)) {
-			// TODO:
-			nav.on('cell_state_changed_for_'+col, param_nav_cell_state_changed, on)
-		}
-		// TODO: refactor this: use ^row_state_changed, etc !
-		nav.on('row_removed_changed', param_nav_row_removed_changed, on)
-	}
-
-	function bind_param_nav(on) {
-		bind_param_nav_cols(e.param_nav, e.params, on)
-	}
-
-	e.set_param_nav = function(nav1, nav0) {
-		bind_param_nav_cols(nav0, e.params, false)
-		bind_param_nav_cols(nav1, e.params, true)
-		if (init_param_vals())
-			e.reload()
-	}
-	e.prop('param_nav', {private: true})
-	e.prop('param_nav_id', {bind_id: 'param_nav', type: 'nav',
-			text: 'Param Nav', attr: 'param_nav'})
-
-	e.set_params = function(params1, params0) {
-		bind_param_nav_cols(e.param_nav, params0, false)
-		bind_param_nav_cols(e.param_nav, params1, true)
-		if (init_param_vals())
-			e.reload()
-	}
-	e.prop('params')
-
-	function param_map(params) {
-		let m = map()
-		for (let s of params.words()) {
-			let p = s.split('=')
-			let param = p && p[0] || s
-			let col = p && (p[1] || p[0]) || param
-			m.set(col, param)
-		}
-		return m
-	}
+	})
 
 	// tabname ----------------------------------------------------------------
 
@@ -1510,8 +1520,8 @@ e.make_nav_widget = function() {
 	function() {
 		if (tabname)
 			return tabname
-		let view = e.param_vals && e.param_nav.selected_rows_tabname()
-			|| e.rowset_name || 'Nav'
+		// TODO: use param nav's selected_rows_tabname()
+		let view = e.rowset_name || 'Nav'
 		return e.tabname_template.subst(view)
 	}, function(s) {
 		tabname = s
@@ -2713,7 +2723,7 @@ e.make_nav_widget = function() {
 
 	// filtering --------------------------------------------------------------
 
-	// expr: [bin_oper, expr1, ...] | [un_oper, expr] | [col, oper, val]
+	// expr: [bin_oper, expr1, ...] | [un_oper, expr] | [bin_oper, col, val]
 	e.expr_filter = function(expr) {
 		let expr_bin_ops = {'&&': 1, '||': 1}
 		let expr_un_ops = {'!': 1}
@@ -2744,16 +2754,136 @@ e.make_nav_widget = function() {
 		return eval(s)
 	}
 
+	function val_filter_simple(field, expr) {
+
+		let f = field.parse_filter?.(expr)
+		if (f)
+			return f
+
+		if (field.type == 'number' || field.is_time) {
+
+			let from_input = field.from_input
+
+			// range: n1..n2
+			{
+				let [v1, v2] = expr.captures(/^(.*?)\.\.(.*?)$/)
+				if (v1 != null) {
+					v1 = from_input(v1)
+					v2 = from_input(v2)
+					if (v1 == null || v2 == null) {
+						field.filter_error = S('invalid_filter_value', 'Invalid filter value')
+						return
+					}
+					return v => v >= v1 && v <= v2
+				}
+			}
+
+			// inequality: >= n, <= n, > n, < n
+			{
+				let [op, n] = expr.captures(/^(>=|<=|>|<)(.*)/)
+				if (op != null) {
+					n = from_input(n)
+					if (n == null) {
+						field.filter_error = S('invalid_filter_value', 'Invalid filter value')
+						return
+					}
+					if (op == '>=')
+						return v => v >= n
+					else if (op == '<=')
+						return v => v <= n
+					else if (op == '>')
+						return v => v > n
+					else if (op == '<')
+						return v => v < n
+					else {
+						field.filter_error = S('invalid_filter_operator', 'Invalid filter operator')
+						return
+					}
+				}
+			}
+
+			// exact match: n
+			{
+				let n = from_input(expr)
+				if (n == null) {
+					field.filter_error = S('invalid_filter_value', 'Invalid filter value')
+					return return_false
+				}
+				return v => v === n
+			}
+
+		} else if (!field.type) {
+
+			// exact match: =s
+			if (expr.starts('=')) {
+				let s = expr.slice(1)
+				if (s == '') s = null
+				return v => v === s
+			}
+
+			// starts with: ^s
+			if (expr.starts('^')) {
+				let s = expr.slice(1)
+				return v => v.starts(s)
+			}
+
+			// ends with: s$
+			if (expr.ends('$')) {
+				let s = expr.slice(0, -1)
+				return v => v.ends(s)
+			}
+
+			// includes: [~]s
+			if (expr.starts('~')) // prefix to avoid having to escape ^, $ etc.
+				expr = expr.slice(1)
+			return v => v.includes(expr)
+
+		}
+
+		return v => str(v).includes(expr)
+
+	}
+
+	function val_filter(field, expr) {
+
+		field.filter_error = null
+
+		// negation: !expr
+		if (expr.starts('!')) {
+			expr = expr.slice(1)
+			let filter = val_filter_simple(field, expr)
+			return v => !filter(v)
+		}
+
+		return val_filter_simple(field, expr)
+
+	}
+
 	let is_row_visible
+	function add_filter(is) {
+		let is0 = is_row_visible
+		if (is0 == return_true) {
+			is_row_visible = is
+		} else {
+			is_row_visible = function(row) {
+				if (!is0(row))
+					return false
+				return is(row)
+			}
+		}
+		e.is_filtered = true
+	}
 	function init_filters() {
+		is_row_visible = return_true
 		e.is_filtered = false
 		if (e.param_vals === false) {
 			is_row_visible = return_false
 			return
 		}
-		let expr = ['&&']
 		if (e.param_vals && !e.rowset_url && e.all_fields.length) {
+			let expr = ['&&']
 			// this is a detail nav that must filter itself based on param_vals.
+			// TODO: switch to dynamic lookup if reaching JS expression size limits.
 			if (e.param_vals.length == 1) {
 				for (let k in e.param_vals[0])
 					expr.push(['===', k, e.param_vals[0][k]])
@@ -2767,75 +2897,36 @@ e.make_nav_widget = function() {
 				}
 				expr.push(or_expr)
 			}
+			if (expr.length > 1)
+				add_filter(e.expr_filter(expr))
 		}
-		for (let field of e.all_fields)
-			if (field.exclude_vals)
-				for (let v of field.exclude_vals) {
-					expr.push(['!==', field.name, v])
-					e.is_filtered = true
+		for (let field of e.all_fields) {
+			if (field.filter) {
+				let filter = val_filter(field, field.filter)
+				if (filter) {
+					add_filter(function(row) {
+						let v = row[field.val_index]
+						return filter(v)
+					})
 				}
-		is_row_visible = expr.length > 1 ? e.expr_filter(expr) : return_true
+			}
+			if (field.exclude_vals) {
+				add_filter(function(row) {
+					let v = row[field.val_index]
+					return !field.exclude_vals.has(v)
+				})
+			}
+		}
 	}
 
 	e.is_row_visible = function(row) {
-		return !(e.is_tree && row.parent_collapsed) && is_row_visible(row)
-	}
-
-	e.and_expr = function(cols, vals) {
-		let expr = ['&&']
-		let i = 0
-		for (let col of cols.words())
-			expr.push(['===', col, vals[i++]])
-		return expr
+		if (e.is_tree && row.parent_collapsed)
+			return false
+		return is_row_visible(row)
 	}
 
 	e.filter_rows = function(rows, expr) {
 		return rows.filter(e.expr_filter(expr))
-	}
-
-	// exclude filter UI ------------------------------------------------------
-
-	e.create_exclude_vals_nav = function(opt, field) { // stub
-		return bare_nav(opt)
-	}
-
-	function set_exclude_filter(field, exclude_vals) {
-		let nav = field.exclude_vals_nav
-		if (!exclude_vals) {
-			if (nav) {
-				field.exclude_vals_nav.del()
-				field.exclude_vals_nav = null
-			}
-			return
-		}
-		if (!nav) {
-			function draw_row(row, cx) {
-				return e.draw_cell(row, field, cx)
-			}
-			nav = e.create_exclude_vals_nav({
-					rowset: {
-						fields: [
-							{name: 'include', type: 'bool', default: true},
-							{name: 'row', draw: draw_row},
-						],
-					},
-				}, field)
-			field.exclude_vals_nav = nav
-		}
-		let exclude_set = set(exclude_vals)
-		let rows = []
-		let val_set = set()
-		for (let row of e.all_rows) {
-			let v = e.cell_val(row, field)
-			if (!val_set.has(v)) {
-				rows.push([!exclude_set.has(v), row])
-				val_set.add(v)
-			}
-		}
-		nav.rowset.rows = rows
-		nav.reset()
-
-		reinit_rows()
 	}
 
 	// get/set cell & row state (storage api) ---------------------------------
@@ -3624,6 +3715,8 @@ e.make_nav_widget = function() {
 		return e.draw_val(row, field, e.cell_input_val(row, field), cx)
 	}
 
+	e.cell_text_val = e.draw_cell
+
 	// row adding & removing --------------------------------------------------
 
 	e.insert_rows = function(arg1, ev) {
@@ -4208,11 +4301,8 @@ e.make_nav_widget = function() {
 	function param_vals_filter() {
 		if (!e.param_vals)
 			return
-		let cols = []
-		for (let [col, param] of param_map(e.params))
-			cols.push(col)
-		if (cols.length == 1) {
-			let col = cols[0]
+		if (e.params.size == 1) {
+			let col = e.params.get(e.params.first_key)[0]
 			return json(e.param_vals.map(vals => vals[col]))
 		} else {
 			return json(e.param_vals)
@@ -5646,7 +5736,7 @@ all_field_types.draw = function(v, cx) {
 }
 
 all_field_types.editor = function(opt) {
-	return textedit(opt)
+	return text_input(opt)
 }
 
 // passwords -----------------------------------------------------------------
@@ -5660,7 +5750,7 @@ pwd.editor = function(opt) {
 
 // numbers -------------------------------------------------------------------
 
-let number = {align: 'right', decimals: 0, is_number: true}
+let number = {align: 'right', decimals: 0, is_number: true, from_input: num}
 field_types.number = number
 
 number.to_text = function(s) {
@@ -5738,6 +5828,7 @@ let date = {
 	format: 'sql', // sql | time
 	min: parse_date('1000-01-01 00:00:00', 'SQL'),
 	max: parse_date('9999-12-31 23:59:59', 'SQL'),
+	from_input: s => parse_date(s, null, false, e.precision),
 }
 field_types.date = date
 
@@ -5787,13 +5878,16 @@ ts.max = parse_date('2038-01-19 03:14:07', 'SQL') // range of MySQL TIMESTAMP ty
 
 // timeofday (MySQL TIME type) -----------------------------------------------
 
-let td = {align: 'center', is_timeofday: true}
+let td = {
+	align: 'center',
+	is_timeofday: true,
+	from_input: s => parse_timeofday(s, false, e.precision),
+}
 field_types.timeofday = td
 
 td.to_text = function(v) {
 	if (!isnum(v)) // invalid
 		return str(v)
-
 }
 
 td.editor = function(opt) {
