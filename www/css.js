@@ -65,17 +65,15 @@ let css_chrome = css_base_chrome
 
 // disable css property inheritance on key properties so we can have css var
 // overriding, since we can't have both.
-css(`
-* {
+css(['*', '::placeholder', '::-ms-input-placeholder'], '', `
 
 	--fg: hsl(var(--fg-h, 0) var(--fg-s, 0%) var(--fg-l) / var(--fg-op, 1));
 
 	color: var(--fg);
 
-	/* link color is used as border and checkmark, so compose it here */
+	/* link color is used as border and checkmark, so we compute it here */
 	--fg-link: hsl(var(--fg-link-h) var(--fg-link-s) var(--fg-link-l) / 1.0);
 
-}
 `)
 
 css(':root', '', `
@@ -89,25 +87,32 @@ css(':root', '', `
 	--fg-text-l-on-dark-active  : 100%;
 
 	--fg-link-l-on-light        : 40%;
-	--fg-link-l-on-light-hover  : 60%;
-	--fg-link-l-on-light-active : 70%;
+	--fg-link-l-on-light-hover  : 70%;
+	--fg-link-l-on-light-active : 80%;
 
 	--fg-link-l-on-dark         : 51%;
 	--fg-link-l-on-dark-hover   : 66%;
 	--fg-link-l-on-dark-active  : 71%;
 
 	--fg-label-op-on-light        : 0.6;
-	--fg-label-op-on-light-hover  : 0.5;
-	--fg-label-op-on-light-active : 0.4;
+	--fg-label-op-on-light-hover  : 0.9;
 
-	--fg-label-op-on-dark         : 0.8;
+	--fg-label-op-on-dark         : 0.7;
 	--fg-label-op-on-dark-hover   : 0.9;
-	--fg-label-op-on-dark-active  : 1.0;
 
 	--fg-op-dim: 0.5;
 `)
 
-css(':root, .theme-light, .theme-dark .theme-inverted', 'on-light', `
+css(':root, .theme-light, .theme-dark .theme-inverted', 'on-theme', `
+
+	--fg-text-l-on-theme          : var(--fg-text-l-on-light);
+	--fg-text-l-on-theme-hover    : var(--fg-text-l-on-light-hover);
+	--fg-text-l-on-theme-active   : var(--fg-text-l-on-light-active);
+	--fg-link-l-on-theme          : var(--fg-link-l-on-light);
+	--fg-link-l-on-theme-hover    : var(--fg-link-l-on-light-hover);
+	--fg-link-l-on-theme-active   : var(--fg-link-l-on-light-active);
+	--fg-label-op-on-theme        : var(--fg-label-op-on-light);
+	--fg-label-op-on-theme-hover  : var(--fg-label-op-on-light-hover);
 
 	--fg-link-h: 222;
 	--fg-link-s: 100%;
@@ -121,8 +126,8 @@ css(':root, .theme-light, .theme-dark .theme-inverted', 'on-light', `
 	/* error on error bg (tags-input) */
 	--bg-error2-l: 38%;
 
-	--bg0                   : hsl(  0   0% 100% / 1.0); /* opaque */
-	--bg                    : hsl(  0   0%  98% / 1.0); /* opaque */
+	--bg0                   : hsl(  0   0%  50% / 1.0); /* opaque */
+	--bg                    : hsl(  0   0% 100% / 1.0); /* opaque */
 	--bg-hover              : hsl(  0   0%  95% / 1.0); /* opaque */
 	--bg-active             : hsl(  0   0%  93% / 1.0); /* opaque */
 	--bg1                   : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
@@ -202,13 +207,16 @@ css(':root, .theme-light, .theme-dark .theme-inverted', 'on-light', `
 
 `)
 
-//	--fg-normal-active      : hsl(  0   0% 100% / 1.0);
+css('.theme-dark, .theme-light .theme-inverted', 'on-theme', `
 
-//	--fg-label              : hsl(  0   0% 100% / 0.6);
-//	--fg-label-hover        : hsl(  0   0% 100% / 0.8);
-//	--fg-label-active       : hsl(  0   0% 100% / 1.0);
-
-css('.theme-dark, .theme-light .theme-inverted', 'on-dark', `
+	--fg-text-l-on-theme          : var(--fg-text-l-on-dark);
+	--fg-text-l-on-theme-hover    : var(--fg-text-l-on-dark-hover);
+	--fg-text-l-on-theme-active   : var(--fg-text-l-on-dark-active);
+	--fg-link-l-on-theme          : var(--fg-link-l-on-dark);
+	--fg-link-l-on-theme-hover    : var(--fg-link-l-on-dark-hover);
+	--fg-link-l-on-theme-active   : var(--fg-link-l-on-dark-active);
+	--fg-label-op-on-theme        : var(--fg-label-op-on-dark);
+	--fg-label-op-on-theme-hover  : var(--fg-label-op-on-dark-hover);
 
 	--fg-link-h: 26;
 	--fg-link-s: 88%;
@@ -268,7 +276,7 @@ css('.theme-dark, .theme-light .theme-inverted', 'on-dark', `
 	--shadow-thumb          :  1px  1px  2px      #000000aa;
 	--shadow-modal          :  2px  5px 10px      #00000088; /* TODO */
 	--shadow-pressed        : inset 0 0.15em 0.5em hsl(228 32% 0%);
-	--shadow-picker         :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
+	--shadow-picker         :  0px  5px 10px  1px #000000aa; /* large fuzzy shadow */
 
 	color-scheme: dark; /* make default scrollbars dark */
 
@@ -286,11 +294,13 @@ css('.text', '', `
 	--fg-h: var(--fg-text-h);
 	--fg-s: var(--fg-text-s);
 	--fg-l: var(--fg-text-l);
+	--fg-op: 1;
 	--fg-l-hover : var(--fg-text-l-hover );
 	--fg-l-active: var(--fg-text-l-active);
 `)
 
-// NOTE: `on-light` and `on-dark modifiers reset color to `text` !
+// NOTE: these modifiers reset color to `.text`! If they weren't, inherited
+// `--fg-l` from `.link` etc. wouldn't be recomputed anyway.
 
 css('.on-light', 'text', `
 	--fg-text-l          : var(--fg-text-l-on-light);
@@ -301,7 +311,6 @@ css('.on-light', 'text', `
 	--fg-link-l-active   : var(--fg-link-l-on-light-active);
 	--fg-label-op        : var(--fg-label-op-on-light);
 	--fg-label-op-hover  : var(--fg-label-op-on-light-hover);
-	--fg-label-op-active : var(--fg-label-op-on-light-active);
 `)
 
 css('.on-dark' , 'text', `
@@ -313,11 +322,17 @@ css('.on-dark' , 'text', `
 	--fg-link-l-active   : var(--fg-link-l-on-dark-active);
 	--fg-label-op        : var(--fg-label-op-on-dark);
 	--fg-label-op-hover  : var(--fg-label-op-on-dark-hover);
-	--fg-label-op-active : var(--fg-label-op-on-dark-active);
 `)
 
 css('.on-theme', 'text', `
-	--fg-text-l:
+	--fg-text-l          : var(--fg-text-l-on-theme);
+	--fg-text-l-hover    : var(--fg-text-l-on-theme-hover);
+	--fg-text-l-active   : var(--fg-text-l-on-theme-active);
+	--fg-link-l          : var(--fg-link-l-on-theme);
+	--fg-link-l-hover    : var(--fg-link-l-on-theme-hover);
+	--fg-link-l-active   : var(--fg-link-l-on-theme-active);
+	--fg-label-op        : var(--fg-label-op-on-theme);
+	--fg-label-op-hover  : var(--fg-label-op-on-theme-hover);
 `)
 
 css('.link', '', `
@@ -329,7 +344,10 @@ css('.link', '', `
 `)
 
 css('.label', '', `
-	--fg-op: var(--fg-label-op, 1);
+	--fg-op         : var(--fg-label-op);
+	--fg-l-hover    : var(--fg-text-l);
+	--fg-l-active   : var(--fg-text-l);
+	--fg-op-hover   : var(--fg-label-op-hover);
 `)
 
 css('.fg-hover' , '', ` --fg-l: var(--fg-l-hover ); --fg-op: var(--fg-op-hover ); `)
@@ -452,7 +470,7 @@ css('h2', '', ` --fs: var(--fs-h2); `)
 css('h3', '', ` --fs: var(--fs-h3); `)
 
 /* input placeholders */
-css(['::placeholder', '::-ms-input-placeholder'], 'label op1')
+css(['::placeholder', '::-ms-input-placeholder'], 'dim')
 
 /* invertable images */
 css(':is(.theme-dark, .theme-light .theme-inverted) img[invertable]', '', `
@@ -1161,7 +1179,6 @@ css('.bg3'        , '', ` background: var(--bg3); `)
 css('.bg-alt'     , '', ` background: var(--bg-alt); `)
 css('.bg-smoke'   , '', ` background: var(--bg-smoke); `)
 css('.bg-fg'      , '', ` background: var(--fg); `) /* slider thumb, etc. */
-css('.bg-white'   , '', ` background: var(--fg-white); `)
 css('.bg-link'    , '', ` background: var(--fg-link); `) /* slider track */
 css('.no-bg'      , '', ` background: none; `)
 css('.bg-input'   , '', ` background: var(--bg-input); `)
@@ -1219,6 +1236,7 @@ css('.shadow-menu   ', '', ` box-shadow: var(--shadow-menu); `)
 css('.shadow-button ', '', ` box-shadow: var(--shadow-button); `)
 css('.shadow-pressed', '', ` box-shadow: var(--shadow-pressed); `)
 css('.shadow-modal  ', '', ` box-shadow: var(--shadow-modal); `)
+css('.shadow-picker ', '', ` box-shadow: var(--shadow-picker); `)
 css('.shadow-toolbox', '', ` box-shadow: var(--shadow-toolbox); `)
 
 css('.no-shadow     ', '', ` box-shadow: none; `)

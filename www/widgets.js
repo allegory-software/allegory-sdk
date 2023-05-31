@@ -142,7 +142,7 @@ in props:
 */
 
 // z: menu = 4, picker = 3, tooltip = 2, toolbox = 1
-css('.tooltip', 'z2 h-l h-t noclip noselect on-light', `
+css('.tooltip', 'z2 h-l h-t noclip noselect on-theme', `
 	max-width: 400px;  /* max. width of the message bubble before wrapping */
 	--bg-tooltip: var(--bg1);
 	--fg-tooltip-xbutton: var(--fg-dim);
@@ -1682,7 +1682,7 @@ G.checklist = component('checklist', function(e) {
 // z4: menu = 4, picker = 3, tooltip = 2, toolbox = 1
 // noclip: submenus are outside clipping area.
 // fg: prevent inheritance by the .focused rule below.
-css('.menu', 'm0 p0 b arial t-l abs z4 noclip bg1 fg shadow-menu noselect', `
+css('.menu', 'm0 p0 b arial t-l abs z4 noclip bg1 on-theme no-bold shadow-menu noselect', `
 	min-width: 200px;
 	width: min-content; /* why the fuck is width:0 not working here? */
 	display: table;
@@ -2062,11 +2062,11 @@ css('tabs-tab', 'rel label arrow h')
 css('.tabs:is([tabs_side=top],[tabs_side=bottom]) > tabs-header tabs-tab', 'shrinks')
 // css('.tabs:is([tabs_side=left],[tabs_side=right]) > tabs-header tabs-tab', 'clip-x')
 
+css_state('tabs-tab.selected', 'on-theme text')
+
 // reset focusable-items states.
 css_state('tabs-tab', 'no-bg')
-css_state('tabs-tab.selected', 'text')
-css_state('tabs-tab.tab-selected', 'text')
-css_state('tabs-tab:is(:hover)', 'label-hover')
+css_state('tabs-tab:is(:hover)', 'fg-hover')
 
 css('tabs-title', 'noselect nowrap m-x-4', `
 	padding-top    : .6em;
@@ -2090,7 +2090,7 @@ css('tabs-xbutton', 'abs dim arrow small w1 invisible', `
 `)
 css('tabs-xbutton::before', 'fa fa-times')
 css_state('tabs-tab:hover tabs-xbutton', 'visible')
-css_state('tabs-xbutton:hover', 'fg')
+css_state('tabs-xbutton:hover', 'fg-hover')
 
 // selection bar
 css('tabs-selection-bar', 'abs bg-link', `
@@ -2107,7 +2107,7 @@ css_role_state('tabs-box .list-drop-placeholder', 'b0')
 css_state('tabs-tab.dragging::before', 'overlay z-1 click-through b0 bg1-active')
 
 // tab renaming
-css_state('tabs-tab.renaming', 'bg0 fg', `min-width: 6em;`)
+css_state('tabs-tab.renaming', 'bg0', `min-width: 6em;`)
 css_state('tabs-tab.renaming tabs-title', 'no-outline nowrap')
 css_state('tabs-tab.renaming::before', 'overlay click-through', `
 	border: 2px dashed var(--fg-link);
@@ -2179,7 +2179,6 @@ G.tabs = component('tabs', 'Containers', function(e) {
 		let tab = selected_tab
 		if (!tab) return
 		tab.xbutton.hidden = !e.can_remove_items
-		tab.class('tab-selected', !!selected)
 	}
 
 	function update_renaming_tab_state(on) {
@@ -2900,10 +2899,11 @@ methods:
 
 */
 
-css('.dlg', 'rel v p-4 fg b0 ro bg1', `
+css('.dlg', 'rel v p-4 b0 ro bg on-theme', `
 	margin: 20px;
 	box-shadow: var(--shadow-modal);
 `)
+css_dark(' .dlg', 'bg1')
 
 css('.dlg-header' , 'm-b-2')
 css('.dlg-footer' , 'm-t-2')
@@ -3104,7 +3104,7 @@ css('.toolbox-btn', 'arrow')
 css('.toolbox-btn-pin', 'small rotate-45')
 css('.toolbox-btn-pin::before', 'fa fa-thumbtack')
 css('.toolbox-btn-close::before', 'fa fa-times')
-css_state('.toolbox[pinned] > .toolbox-titlebar > .toolbox-btn-pin', 'label-on-dark rotate-0')
+css_state('.toolbox[pinned] > .toolbox-titlebar > .toolbox-btn-pin', 'label rotate-0')
 css_state('.toolbox-btn:hover' , 'fg-hover')
 css_state('.toolbox-btn:active', 'fg-active')
 
@@ -3517,7 +3517,7 @@ fires:
 // NOTE: doesn't work as implicit label with an <input> inside because of `noselect`.
 // using `label-widget` because `label` is a utility class...
 css('.label-widget', 'label noselect')
-css_state('.label-widget:is(:hover,.hover)', 'label-hover')
+css_state('.label-widget:is(:hover,.hover)', 'fg-hover')
 
 G.label = component('label', 'Input', function(e) {
 
@@ -4602,25 +4602,20 @@ css('.crbox', 'large t-m link h-c h-m round', `
 	max-height : var(--w-crbox);
 	--fg-check : var(--fg-link);
 `)
-css('.crbox.focusable', '', `--w-crbox: 2em;`)
+css('.crbox.focusable', '', ` --w-crbox: 2em; `)
 
-css_role_state('.crbox[invalid]', 'fg-error bg-error')
+css_state('.crbox:focus-visible', '', ` --fg-check: white; `)
+
+css_role_state('.crbox[invalid]', 'bg-error')
 
 // making the inner markbox transparent instead of the crbox because we
 // can't make the crbox transparent because that creates a stacking context
 // and we can't attach popups to that. that's web dev for ya, like it?
 css_state('.crbox[null] .markbox', 'op06')
 
-css_state('.crbox:is(:hover,.hover)', '', `
-	--fg-check: var(--fg-hover);
-`)
-
-css_state('.crbox:focus-visible', '', `
-	--fg-check: var(--fg-white);
-`)
-
-css('.crbox-focus-circle', '', ` r: 0; fill: var(--bg-focused-selected); `)
-css_state('.crbox:focus-visible .crbox-focus-circle', '', ` r: 10px; `)
+css('.crbox-focus-circle', '', ` r: 10px; fill: none; `)
+css_state('.crbox:focus-visible     .crbox-focus-circle', '', ` fill: var(--bg-focused-selected); `)
+css_state('.crbox:is(:hover,.hover) .crbox-focus-circle', '', ` fill: var(--bg1); `)
 
 function checked_state_prop(e) {
 	e.property('checked_state', function() {
@@ -4795,22 +4790,17 @@ css('.toggle', 'm t-m p-05 round bg1 h-m ease ring rel', `
 `)
 
 /* TODO: pixel snapping makes this look wrong sometimes, redo it with svg. */
-css('.toggle-thumb', 'round bg-white ring ease abs', `
+css('.toggle-thumb', 'round ring ease abs', `
 	min-width  : 1em;
 	min-height : 1em;
 	left: .2em;
+	background: white;
 `)
 css_state('.toggle[checked]', '', `
 	background: var(--bg-button-primary);
 `)
 css_state('.toggle[checked] .toggle-thumb', 'ease', `
 	transform: translateX(100%);
-`)
-css_state('.toggle:is(:hover,.hover)', '', `
-	background: var(--bg1-hover);
-`)
-css_state('.toggle[checked]:is(:hover,.hover)', '', `
-	background: var(--bg-button-primary-hover);
 `)
 css_state('.toggle-thumb:focus-visible', 'outline-focus')
 
@@ -4946,7 +4936,7 @@ css('.slider-thumb', 'abs h ease', `
 	height : var(--w-slider-thumb);
 	transition-property: width, height, margin-top, margin-left;
 `)
-css('.slider-thumb-circle', 'S link bg-link round', `
+css('.slider-thumb-circle', 'S bg-link round', `
 	box-shadow: var(--shadow-thumb);
 `)
 css_state('.slider-thumb-circle', '', `
@@ -4986,8 +4976,6 @@ css_state(`
 	--w-slider-thumb: 1.4em;
 	transition-property: width, height, margin-top, margin-left;
 `)
-css_state('.slider-thumb-circle:hover' , '', `background-color: var(--fg-hover);`)
-css_state('.slider-thumb-circle:active', '', `background-color: var(--fg-active);`)
 
 let compute_step_and_range = function(wanted_n, min, max, scale_base, scales, decimals) {
 	scale_base = scale_base || 10
@@ -5509,8 +5497,6 @@ css('.textarea', 'm-y-05 S shrinks p-input h flex b p bg-input w-input', `
 	overflow-x: overlay; /* Chrome only */
 `)
 
-css('.textarea[invalid]::placeholder', 'bg-error op05')
-
 G.textarea = component('textarea', 'Input', function(e) {
 
 	e.class('textarea unframe')
@@ -5749,7 +5735,7 @@ state props:
 // NOTE: we use 'skip' on the root element and create an <input-group> inside
 // so that we can add popups to the widget without messing up the CSS.
 css('.select-button', 'skip')
-css('.select-button-box', 'rel ro-var h-s gap-x-0 bg0 shadow-button', `
+css('.select-button-box', 'rel ro-var h-s gap-x-0 bg-input shadow-button', `
 	padding: var(--p-select-button, 3px);
 	--p-y-input-offset: calc(1px - var(--p-select-button, 3px));
 `)
@@ -5763,34 +5749,18 @@ css('.select-button-box > :not(.select-button-plate)',
 	'S h-m h-c p-y-input p-x-button gap-x nowrap-dots noselect dim z1', `
 	flex-basis: fit-content;
 `)
-css('.select-button-box > :not(.select-button-plate):not(.selected):hover', 'fg')
-css('.select-button-box > :not(.select-button-plate).selected', '', `
-	color: var(--fg-select-button-plate);
-`)
+css('.select-button-box > :not(.select-button-plate):not(.selected):hover', 'fg-hover')
+css('.select-button-box > :not(.select-button-plate).selected', 'on-dark')
 
 css('.select-button-plate', 'abs ease shadow-button', `
 	transition-property: left, width;
 	border-radius: calc(var(--border-radius, var(--space-075)) * 0.7);
-	background: var(--bg-select-button-plate);
+	background: var(--bg-button-primary);
 `)
 
 // not sure about this one...
 css_state('.select-button-box:focus-visible', 'no-outline')
 css_state('.select-button-box:focus-visible .select-button-plate', 'outline-focus')
-
-css_state('.select-button-plate:hover', '', `
-	background: var(--bg-select-button-plate-hover);
-`)
-
-css(':root', '', `
-	--bg-select-button-plate: var(--bg-button-primary);
-	--fg-select-button-plate: var(--fg-button-primary);
-`)
-
-css('.select-button[secondary]', '', `
-	--bg-select-button-plate: var(--bg-unfocused-selected);
-	--fg-select-button-plate: var(--fg-unfocused-selected);
-`)
 
 G.select_button = component('select-button', function(e) {
 
@@ -6107,7 +6077,6 @@ css('.pass-input-input', 'S shrinks p-r-0')
 
 css('.pass-input-button', 'h-m h-c b p0 label', `width: 2.75em;`)
 css_generic_state('.pass-input-button[disabled]', 'op1 no-filter dim')
-css_generic_state('.pass-input[invalid] .pass-input-button', 'bg-error') // TODO: hack
 
 let load_zxcvbn = memoize(function() {
 	let script = tag('script')
@@ -6502,17 +6471,15 @@ css_role_state('.tags-tag:focus-visible', '', `
 	background  : hsl(var(--tag-hue), 32%, calc(38% * var(--tag-lum)));
 `)
 
-css('.tags-x', 'round fg h-m h-c small bold', `
+css('.tags-x', 'round h-m h-c small bold', `
 	width : 1.1em;
 	height: 1.1em;
-	color : hsl(var(--tag-hue), 63%, calc(43% * var(--tag-lum)));
+	--fg-h: var(--tag-hue);
+	--fg-s: 63%;
+	--fg-l: calc(var(--tag-lum-f, 43%) * var(--tag-lum));
 `)
-css_state('.tags-x:hover', '', `
-	color : hsl(var(--tag-hue), 63%, calc(53% * var(--tag-lum)));
-`)
-css_state('.tags-x:active', '', `
-	color : hsl(var(--tag-hue), 63%, calc(63% * var(--tag-lum)));
-`)
+css_state('.tags-x:hover' , '', ` --tag-lum-f: 53%; `)
+css_state('.tags-x:active', '', ` --tag-lum-f: 63%; `)
 
 function parse_tags(tags) {
 	tags = isstr(tags) ? (tags.trim().starts('[') ? try_json_arg(tags) : tags.words()) : tags
@@ -6773,13 +6740,14 @@ update opts:
 css('.dropdown', 'skip')
 css('.dropdown-inputbox', 'gap-x arrow h-sb bg-input w-input')
 css('.dropdown-value', 'S shrinks h-m nowrap')
-css('.dropdown-value:empty::before', 'zwsp')
+css('.dropdown-value:empty::before', 'zwsp', `content: 'Bananas';`)
 css('.dropdown-value.null', 'label')
 css('.dropdown-chevron', 'small ease')
 css('.dropdown.open .dropdown-chevron::before', 'icon-chevron-up ease')
+css_state('.dropdown.open :is(.dropdown-inputbox, .dropdown-picker)', 'shadow-picker')
 css('.dropdown:not(.open) .dropdown-chevron::before', 'icon-chevron-down ease')
-css('.dropdown-xbutton', 'm0 p0 label smaller', `padding-top: 2px;`)
-css('.dropdown-xbutton::before', 'fa fa-times lh1')
+css('.dropdown-xbutton', 'm0 p0 label smaller lh1', `padding-top: 2px;`)
+css('.dropdown-xbutton::before', 'fa fa-times')
 css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
 css('.dropdown[align=right] .dropdown-value'  , 'h-r', `order: 3;`)
 
@@ -6805,7 +6773,7 @@ css('.check-dropdown .dropdown-value', 'gap-x')
 css('.check-dropdown-item', 'shrinks clip nowrap')
 css('.check-dropdown-item[invalid]', 'bg-error2')
 
-css_state('.check-dropdown .checklist-item.focused', 'bg1 fg')
+css_state('.check-dropdown .checklist-item.focused', 'bg1 on-theme')
 
 function dropdown_widget(e, is_checklist) {
 
@@ -7211,7 +7179,7 @@ TODO:
 */
 
 css(':root', '', `
-	--min-w-calendar: 16em; /* more than 16em is too wide as a picker */
+	--min-w-calendar: 15.5em; /* more than 16em is too wide as a picker */
 	--min-h-calendar: 20em;
 	--fs-calendar-months   : 1.25;
 	--fs-calendar-weekdays : 0.75;
@@ -7470,9 +7438,9 @@ function calendar_widget(e, mode) {
 		bg_smoke = css.prop('--bg-smoke')
 		fg_month = css.prop('--fg-calendar-month')
 		border_light = css.prop('--border-light')
-		fg_focused_selected   = css.prop('--fg-focused-selected')
+		fg_focused_selected   = 'white'
 		bg_focused_selected   = css.prop('--bg-focused-selected')
-		fg_unfocused_selected = css.prop('--fg-unfocused-selected')
+		fg_unfocused_selected = 'white'
 		bg_unfocused_selected = css.prop('--bg-unfocused-selected')
 		outline_focus         = css.prop('--outline-focus')
 
@@ -8472,6 +8440,7 @@ css('.date-only-input .calendar', 'S b bg-input clip', `resize: vertical;`) // N
 css('.date-range-input .date-input-picker-box', 'clip', `resize: vertical;`) // NOTE: resize needs clip!
 css('.date-range-input .calendar', 'S')
 css('.date-input-close-button', 'allcaps')
+css('.date-input.open :is(.date-input-group, .date-input-picker)', 'shadow-picker')
 
 // NOTE: trying to be compliant with mySQL DATETIME range.
 // NOTE: you only get 6-digit of fractional precision for years >= 1900
