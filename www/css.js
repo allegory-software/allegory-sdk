@@ -10,7 +10,7 @@ You must load first:
 CSS CLASSES
 
 	TEXT          pre[-line] [x]small[er] [x]large tight lh[0 1] [no-]bold italic underline strike allcaps noselect zwsp
-	TEXT COLOR    dim text link label on-light on-dark fg-hover fg-active fg-error
+	TEXT COLOR    dim text link label on-{light dark theme} fg-{hover active error}
 	ALIGN INLINE  inline block t-{l r c j m t b bas sub sup} float-{l r}
 	ALIGN FLEX    h-{l r c sb sa se s t b m bl} v-{t b m sb sa se s l r c} S[1-5] flex[-no][-wrap] order-{1 2 last} no-shrink
 	ALIGN GRID    g-{l r c t b m} g-{h v}-{s sa sb se} ga-{l r c t b m bl h-s v-s} g-{x y}{1-5} x..x y..y g
@@ -63,16 +63,17 @@ let css_chrome = css_base_chrome
 
 /* COLORS ----------------------------------------------------------------- */
 
-// disable css property inheritance on key properties so we can have css var
-// overriding, since we can't have both.
+// disable inheritance for `color` (by setting it to all elements) so we can
+// have inheritance with overriding for `--fg-*`, since we can't have both.
 css(['*', '::placeholder', '::-ms-input-placeholder'], '', `
 
 	--fg: hsl(var(--fg-h, 0) var(--fg-s, 0%) var(--fg-l) / var(--fg-op, 1));
 
 	color: var(--fg);
 
-	/* link color is used as border and checkmark, so we compute it here */
-	--fg-link: hsl(var(--fg-link-h) var(--fg-link-s) var(--fg-link-l) / 1.0);
+	/* colors used as border, checkmark, etc. so we compute them here */
+	--fg-link  : hsl(var(--fg-link-h, 0) var(--fg-link-s, 0%) var(--fg-link-l) / 1.0);
+	--fg-label : hsl(var(--fg-text-h, 0) var(--fg-text-s, 0%) var(--fg-text-l) / var(--fg-label-op));
 
 `)
 
@@ -201,7 +202,7 @@ css(':root, .theme-light, .theme-dark .theme-inverted', 'on-theme', `
 	--shadow-thumb          :  0px  0px  2px  0px #000000bb;
 	--shadow-modal          :  2px  5px 10px      #00000088;
 	--shadow-pressed        : inset 0 0.15em 0.3em hsl(210 13% 12% / .5);
-	--shadow-picker         :  0px  5px 10px  1px #00000044; /* large fuzzy shadow */
+	--shadow-picker         :  0px  5px 10px  1px #00000022; /* large fuzzy shadow */
 
 	background-color        : var(--bg);
 

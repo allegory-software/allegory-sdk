@@ -4484,7 +4484,7 @@ e.make_input_widget = function(opt) {
 	e.to_form = e.to_form || return_arg // stub
 
 	e.to_json = e.to_json || function(t) { // stub
-		ig (e.parent_validator)
+		if (e.parent_validator)
 			if (e.parent_validator.failed)
 				return
 		if (e.name && !e.validator.failed)
@@ -6752,7 +6752,8 @@ css('.dropdown[align=right] .dropdown-xbutton', '', `order: 2;`)
 css('.dropdown[align=right] .dropdown-value'  , 'h-r', `order: 3;`)
 
 css('.dropdown-picker', 'scroll-auto b v p-y-input bg-input z3 arrow', `
-	margin-top: -1px; /* merge dropdown and picker outlines */
+	margin-top   : 2px;
+	margin-bottom: 2px;
 	resize: both;
 	max-height: 16em;
 `)
@@ -8435,7 +8436,10 @@ css('.time-only-input', '', `
 	--min-w-calendar: 0px; /* has natural min-w; calendar's can be too wide */
 `)
 css('.date-input-picker', 'bg-input z3')
-css('.date-input-picker-box', 'b v')
+css('.date-input-picker', 'b v', `
+	margin-top   : 2px;
+	margin-bottom: 2px;
+`)
 css('.date-only-input .calendar', 'S b bg-input clip', `resize: vertical;`) // NOTE: resize needs clip!
 css('.date-range-input .date-input-picker-box', 'clip', `resize: vertical;`) // NOTE: resize needs clip!
 css('.date-range-input .calendar', 'S')
@@ -8778,7 +8782,6 @@ function date_input_widget(e, has_date, has_time, range) {
 		e.class('open', open)
 		if (open) {
 			e.picker_box.make_popup(e.input_group, 'bottom', 'start')
-			e.picker_box.popup_oy = -1 // make top border overlap with editbox
 			e.add(e.picker_box)
 			e.picker_box.update({show: true})
 			e.picker.scroll_to_view_value('center', false)
