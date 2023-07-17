@@ -2534,7 +2534,6 @@ method(EventTarget, 'capture_pointer', function(ev, move, up) {
 	up   = up   ?? noop
 	let mx0 = ev.clientX
 	let my0 = ev.clientY
-	let cursor_style
 	function wrap_move(ev, mx, my) {
 		return move.call(this, ev, mx, my, mx0, my0)
 	}

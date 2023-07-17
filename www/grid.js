@@ -17,6 +17,188 @@ WIDGETS
 "use strict"
 let G = window
 
+// grid filter input ---------------------------------------------------------
+
+// filter inputs overlap which clips the focus ring of the focused one.
+css('.grid-filter-input', '', `--outline-focus: var(--fg-link);`)
+css('.grid-filter-input input', 'link')
+css('.grid-filter-input input::placeholder', 'link op05')
+css_state('.grid-filter-input:focus-within .input-group', 'z1')
+
+css('.grid-filter-input > .input-group > .input', 'no-bg')
+css('.grid-filter-input > .input-group > .button', 'm0 link')
+css('.grid-filter-button', 'small lh1')
+css('.grid-filter-button .button-icon', 'op03')
+css_state('.grid-filter-button:hover .button-icon', 'op1')
+css_state('.grid-filter-input:hover .grid-filter-button', 'op1')
+css('.grid-filter-input[align=right] .text-input-clear-button', 'p-l-0')
+css('.grid-filter-input[align=left ] .text-input-clear-button', 'p-r-0')
+css('.grid-filter-input[align=right] .grid-filter-button', 'p-r-0')
+css('.grid-filter-input[align=left ] .grid-filter-button', 'p-l-0')
+css_state('.grid-filter-input.open :is(.grid-filter-input .input-group, .grid-filter-picker)', 'shadow-picker')
+css('.grid-filter-picker', 'S p-y-input b v bg-input z3 arrow resize clip smaller', `
+	--lh: 2;
+	margin-top   : 1px;
+	margin-bottom: 1px;
+	resize: both;
+	max-height: 16em;
+`)
+css('.grid-filter-checklist', 'scroll-auto v', `
+
+`)
+
+css('.grid-filter-checklist .checklist-item', 'p-05', `
+	padding-top   : .15em;
+	padding-bottom: .15em;
+`)
+
+css('.grid-filter-close-button', 'allcaps')
+
+function grid_filter_input(grid, field) {
+
+	let e = text_input({
+		classes: 'grid-filter-input',
+		placeholder: S('filter_placeholder', 'Filter'),
+		align: field.align,
+		with_clear_button: true,
+		on_input: function(ev) {
+			grid.set_col_attr(field.name, 'filter', this.value)
+		},
+	})
+
+	e.property('isopen',
+		function() {
+			return e.hasclass('open')
+		},
+		function(open) {
+			e.set_open(open, true)
+		}
+	)
+
+	e.set_open = function(open, focus, ev) {
+		if (e.isopen != open) {
+			e.class('open', open)
+
+			if (open && !e.picker) {
+
+				let items = []
+				for (let i = 1; i <= 30; i++)
+					items[i] = div({class: 'grid-filter-item', searchable: ''}, 'Item '+i)
+
+				e.all_checkbox = checkbox({classes: 'grid-filter-all-checkbox'})
+				e.all_label = label({for: e.all_checkbox}, S('select_all', 'Select All'))
+
+				e.list = checklist({classes: 'grid-filter-checklist scroll-thin', items: items})
+
+				e.list.make_focusable()
+				e.list.make_list_items_focusable()
+				e.list.make_list_items_searchable()
+
+				e.close_button = button({
+					classes: 'grid-filter-close-button',
+					bare: true,
+					text: S('close', 'Close'),
+					action: function() {
+						e.close()
+					},
+				})
+				e.close_button.style = 'margin-top: .5em;'
+
+				e.picker = div({class: 'grid-filter-picker'},
+					div({class: 'h-m'}, e.all_checkbox, e.all_label),
+					e.list,
+					e.close_button)
+
+				e.picker.make_popup(e.input_group, 'bottom', 'start')
+
+				// hack to make resizer work...
+				e.picker.on('attr_changed', function(k, v) {
+					if (k == 'style' && this.style.height)
+						this.style['max-height'] = 'none'
+				})
+
+				e.list.on('keydown', function(ev, key) {
+					//
+				})
+
+				e.on('focusout', function(ev) {
+					ev.preventDefault()
+					if (e.contains(ev.target))
+						return
+					e.close()
+				})
+
+				e.picker.on('pointerdown', function(ev) {
+					// if (ev.target == this)
+					// 	return // let resizer work
+					// // prevent ^blur event in inputbox that would close the dropdown.
+					// ev.preventDefault()
+				})
+
+				e.add(e.picker)
+				e.position()
+			}
+
+			if (open) {
+				e.picker.update({show: true})
+				e.list.focus_item(0, 0, {
+					make_visible: true,
+					must_not_move: true,
+					event: ev,
+				})
+				e.input.disabled = true
+				e.focus()
+				e.list.focus()
+			} else {
+				e.picker.hide(true, ev)
+				//e.picker.search('')
+				e.input.disabled = false
+				grid.focus()
+			}
+
+		}
+		if (focus)
+			e.focus()
+	}
+
+	e.open   = function(focus, ev) { e.set_open(true     , focus, ev) }
+	e.close  = function(focus, ev) { e.set_open(false    , focus, ev) }
+	e.toggle = function(focus, ev) { e.set_open(!e.isopen, focus, ev) }
+
+	e.filter_button = button({
+		classes: 'grid-filter-button',
+		bare: true,
+		focusable: false,
+		icon: 'fa fa-filter',
+		on_pointerdown: function(ev) {
+			e.set_open(!e.isopen, false, ev)
+			return false // prevent unfocusing the filter input
+		},
+		on_pointerup: function(ev) {
+			return false
+		},
+		action: function(ev) {
+		},
+	})
+
+	e.input_group.insert(field.align == 'right' ? 0 : 1/0, e.filter_button)
+
+	e.on_measure(noop)
+
+	e.on_position(function() {
+		let g = e.input_group
+		let x = field._x - grid.cell_border_v_width - 1
+		let w = field._w + grid.cell_border_v_width + 2
+		g.x = x
+		g.min_w = w
+		g.max_w = w
+		if (e.picker)
+			e.picker.min_w = w
+	})
+
+	return e
+}
+
 /* <grid> --------------------------------------------------------------------
 
 	uses:
@@ -44,6 +226,13 @@ css_dark('', '', `
 css('.grid', 'S v shrinks b clip arrow lh-input', `
 	/* chrome only; just don't use a grid in an inline container. */
 	height: -webkit-fill-available;
+
+	--fg-dim    : hsl(var(--fg-text-h, 0) var(--fg-text-s, 0%) var(--fg-text-l) / var(--fg-dim-op));
+	--fg-search : black;
+	--fg-error  : white;
+	--fg-unfocused-selected: var(--fg);
+	--fg-selected: var(--fg);
+
 `)
 
 css_state('.grid:focus', 'no-outline')
@@ -60,29 +249,17 @@ css('.grid-header', 'rel b b0 noclip', `width: 0;`)
 
 css('.grid:not(.vgrid) > .grid-header', 'b-b')
 
+// filter bar
+
 css('.grid-filters-bar', 'abs b-b', `width: 10000px;`)
-css('.grid-filters-bar .input-group', 'abs m0')
-css('.grid-filters-bar .inputbox', 'b-t-0')
+css('.grid-filters-bar > .text-input > .input-group', 'abs m0')
+css('.grid-filters-bar > .text-input > .input-group > .inputbox', 'b-t-0')
 
 // temporary class for measuring height of the filters bar
 css('.grid-filters-bar.measure', '', `height: auto !important;`)
 css('.grid-filters-bar.measure .input-group', 'rel')
 
-// filter inputs overlap which clips the focus ring of the focused one.
-css('.grid-filter-input', '', `--outline-focus: var(--fg-link);`)
-css('.grid-filter-input input', 'link')
-css('.grid-filter-input input::placeholder', 'link op05')
-css_state('.grid-filter-input:focus-within .input-group', 'z1')
-
-css('.grid-filter-input .button', 'm0 link')
-css('.grid-filter-button', 'small op0')
-css('.grid-filter-input:hover .grid-filter-button', 'op1')
-css('.grid-filter-input[align=right] .text-input-clear-button', 'p-l-0')
-css('.grid-filter-input[align=left ] .text-input-clear-button', 'p-r-0')
-css('.grid-filter-input[align=right] .grid-filter-button', 'p-r-0')
-css('.grid-filter-input[align=left ] .grid-filter-button', 'p-l-0')
-
-/* grid cells: grid > view > ct > (cells, editor) > cell */
+// grid cells: grid > view > ct > (cells, editor) > cell
 
 css('.grid-cells-view', 'S shrinks rel g-h scroll-auto')
 
@@ -186,11 +363,11 @@ G.grid = component('grid', 'Input', function(e) {
 		e.header_h  = num(css.prop('--grid-header-h'))
 
 		// css colors
-		e.cell_border_v_width    = 1
+		e.cell_border_v_width    = 0
 		e.cell_border_h_width    = 1
 		e.hcell_border_v_color   = css.prop('--border-light')
 		e.hcell_border_h_color   = css.prop('--border-light')
-		e.cell_border_v_color    = null // css.prop('--border-light')
+		e.cell_border_v_color    = css.prop('--border-light')
 		e.cell_border_h_color    = css.prop('--border-light')
 		e.bg                     = css.prop('--bg')
 		e.bg_alt                 = css.prop('--bg-alt')
@@ -212,6 +389,7 @@ G.grid = component('grid', 'Input', function(e) {
 		e.bg_selected            = css.prop('--bg-selected')
 		e.fg_selected            = css.prop('--fg-selected')
 		e.row_bg_focused         = css.prop('--bg-row-focused')
+		e.row_bg_unfocused       = css.prop('--bg-row-unfocused')
 		e.bg_new                 = css.prop('--bg-new')
 		e.bg_modified            = css.prop('--bg-modified')
 		e.bg_new_modified        = css.prop('--bg-new-modified')
@@ -835,7 +1013,7 @@ G.grid = component('grid', 'Input', function(e) {
 		let fg = e.fg
 
 		if (editing)
-			bg = e.row_bg_focused
+			bg = grid_focused ? e.row_bg_focused : e.row_bg_unfocused
 		else if (cell_invalid)
 			if (grid_focused && cell_focused) {
 				bg = e.bg_focused_invalid
@@ -871,7 +1049,10 @@ G.grid = component('grid', 'Input', function(e) {
 		else if (modified)
 			bg = e.bg_modified
 		else if (row_focused)
-			bg = e.row_bg_focused
+			if (grid_focused)
+				bg = e.row_bg_focused
+			else
+				bg = e.row_bg_unfocused
 
 		if (!bg)
 			if ((ri & 1) == 0)
@@ -896,8 +1077,6 @@ G.grid = component('grid', 'Input', function(e) {
 		}
 
 		// border
-		cx.lineWidth = bx || by
-		cx.strokeStyle = e.cell_border_color
 		draw_cell_border(cx, w, h, bx, by,
 			e.cell_border_v_color,
 			e.cell_border_h_color,
@@ -1116,7 +1295,8 @@ G.grid = component('grid', 'Input', function(e) {
 		e.header_canvas.resize(header_w, header_h, 200, horiz ? 1 : 200)
 
 		for (let field of e.fields)
-			update_filter_input(field)
+			if (field.filter_input)
+				field.filter_input.position()
 
 		// canvas drawing
 
@@ -1363,35 +1543,8 @@ G.grid = component('grid', 'Input', function(e) {
 			return
 		if (field.filter_input)
 			return
-
-		let input = text_input({
-			classes: 'grid-filter-input',
-			placeholder: S('filter_placeholder', 'Filter'),
-			align: field.align,
-			with_clear_button: true,
-			on_input: function(ev) {
-				e.set_col_attr(field.name, 'filter', this.value)
-			},
-		})
-
-		let filter_button = button({
-			classes: 'grid-filter-button',
-			bare: true,
-			focusable: false,
-			icon: 'fa fa-filter',
-			action: function(ev) {
-				//
-			},
-		})
-		input.on_update(function() {
-			if (input.filter_button)
-				return
-			input.input_group.insert(field.align == 'right' ? 0 : 1/0, filter_button)
-			input.filter_button = filter_button
-		})
-
-		field.filter_input = input
-		e.filters_bar.add(input)
+		field.filter_input = grid_filter_input(e, field)
+		e.filters_bar.add(field.filter_input)
 	}
 
 	e.on_free_field(function(field) {
@@ -1400,17 +1553,6 @@ G.grid = component('grid', 'Input', function(e) {
 			field.filter_input = null
 		}
 	})
-
-	function update_filter_input(field) {
-		let inp = field.filter_input
-		if (!inp) return
-		if (inp.input_group)
-			inp = inp.input_group
-		inp.x = field._x
-		let w = field._w + e.cell_border_v_width
-		inp.min_w = w
-		inp.max_w = w
-	}
 
 	// responding to layout changes -------------------------------------------
 

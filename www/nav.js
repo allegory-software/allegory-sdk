@@ -5932,8 +5932,11 @@ bool.draw = function(v, cx) {
 		return true
 	}
 	if (cx) {
-		if (!v)
+		if (!v) {
+			if (cx.measure)
+				cx.measured_width = 0
 			return
+		}
 		let text_font = cx.text_font
 		cx.text_font = cx.icon_font
 		all_field_types.draw.call(this, '\uf00c', cx)

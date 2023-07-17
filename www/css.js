@@ -87,24 +87,24 @@ css(':root', '', `
 	--fg-text-l-on-dark-hover   :  90%;
 	--fg-text-l-on-dark-active  : 100%;
 
-	--fg-link-l-on-light        : 40%;
-	--fg-link-l-on-light-hover  : 70%;
-	--fg-link-l-on-light-active : 80%;
-
-	--fg-link-l-on-dark         : 51%;
-	--fg-link-l-on-dark-hover   : 66%;
-	--fg-link-l-on-dark-active  : 71%;
-
 	--fg-label-op-on-light        : 0.6;
 	--fg-label-op-on-light-hover  : 0.9;
 
 	--fg-label-op-on-dark         : 0.7;
 	--fg-label-op-on-dark-hover   : 0.9;
 
-	--fg-op-dim: 0.5;
+	--fg-dim-op: 0.5;
 `)
 
 css(':root, .theme-light, .theme-dark .theme-inverted', 'on-theme', `
+
+	--fg-link-l-on-light        : 50%;
+	--fg-link-l-on-light-hover  : 70%;
+	--fg-link-l-on-light-active : 80%;
+
+	--fg-link-l-on-dark         :  75%;
+	--fg-link-l-on-dark-hover   :  85%;
+	--fg-link-l-on-dark-active  :  95%;
 
 	--fg-text-l-on-theme          : var(--fg-text-l-on-light);
 	--fg-text-l-on-theme-hover    : var(--fg-text-l-on-light-hover);
@@ -134,11 +134,11 @@ css(':root, .theme-light, .theme-dark .theme-inverted', 'on-theme', `
 	--bg1                   : hsl(  0   0%  95% / 1.0); /* sits on bg; opaque */
 	--bg1-hover             : hsl(  0   0%  93% / 1.0); /* sits on bg; opaque */
 	--bg1-active            : hsl(  0   0%  90% / 1.0); /* sits on bg; opaque */
-	--bg2                   : hsl(  0   0%  80% / 1.0); /* sits on bg1; opaque */
-	--bg2-hover             : hsl(  0   0%  85% / 1.0);
+	--bg2                   : hsl(  0   0%  85% / 1.0); /* sits on bg1; opaque */
+	--bg2-hover             : hsl(  0   0%  82% / 1.0);
 	--bg3                   : hsl(  0   0%  70% / 1.0); /* sits on bg1; opaque */
 	--bg3-hover             : hsl(  0   0%  75% / 1.0);
-	--bg-alt                : hsl(  0   0%  95% / 1.0); /* alternating bg for grid rows; lighter than bg1 */
+	--bg-alt                : hsl(  0   0% 108% / 1.0); /* alternating bg for grid rows; lighter than bg1 */
 	--bg-smoke              : hsl(  0   0% 100% / 0.8); /* overlays bg */
 	--bg-input              : hsl(  0   0%  98% / 1.0);
 	--bg-input-hover        : hsl(  0   0%  94% / 1.0);
@@ -184,14 +184,15 @@ css(':root, .theme-light, .theme-dark .theme-inverted', 'on-theme', `
 	--bg-new-modified       : #ccf0f0;
 
 	/* item interaction states. these need to be opaque! */
-	--bg-unfocused          : #999;
+	--bg-unfocused          : #e8e8e8;
 	--bg-focused            : #ddd;
-	--bg-unfocused-selected : #333;
-	--bg-focused-selected   : #258;
+	--bg-unfocused-selected : #ddd;
+	--bg-focused-selected   : hsl(calc(139 / 239 * 360deg) calc(141 / 240 * 100%) calc(206 / 240 * 100%));
 	--bg-focused-error      : #f33;
-	--bg-unselected         : #888;
-	--bg-selected           : #69c;
-	--bg-row-focused        : #ddd;
+	--bg-unselected         : #eee;
+	--bg-selected           : hsl(calc(139 / 239 * 360deg) calc(150 / 240 * 100%) calc(217 / 240 * 100%));
+	--bg-row-focused        : hsl(calc(139 / 239 * 360deg) calc(150 / 240 * 100%) calc(231 / 240 * 100%));
+	--bg-row-unfocused      : hsl(calc(139 / 239 * 360deg) calc(  0 / 240 * 100%) calc(231 / 240 * 100%));
 
 	--ring                  : hsl(  0 100%   0% / .3);
 
@@ -209,6 +210,14 @@ css(':root, .theme-light, .theme-dark .theme-inverted', 'on-theme', `
 `)
 
 css('.theme-dark, .theme-light .theme-inverted', 'on-theme', `
+
+	--fg-link-l-on-light        : 40%;
+	--fg-link-l-on-light-hover  : 70%;
+	--fg-link-l-on-light-active : 80%;
+
+	--fg-link-l-on-dark         : 60%;
+	--fg-link-l-on-dark-hover   : 70%;
+	--fg-link-l-on-dark-active  : 80%;
 
 	--fg-text-l-on-theme          : var(--fg-text-l-on-dark);
 	--fg-text-l-on-theme-hover    : var(--fg-text-l-on-dark-hover);
@@ -231,11 +240,11 @@ css('.theme-dark, .theme-light .theme-inverted', 'on-theme', `
 	--bg1                   : hsl(216  28%  15% / 1.0);
 	--bg1-hover             : hsl(216  28%  19% / 1.0);
 	--bg1-active            : hsl(216  28%  22% / 1.0);
-	--bg2                   : hsl(216  28%  20% / 1.0);
-	--bg2-hover             : hsl(216  28%  23% / 1.0);
+	--bg2                   : hsl(216  28%  22% / 1.0);
+	--bg2-hover             : hsl(216  28%  25% / 1.0);
 	--bg3                   : hsl(216  28%  25% / 1.0);
 	--bg3-hover             : hsl(216  28%  27% / 1.0);
-	--bg-alt                : hsl(260  28%  14% / 1.0);
+	--bg-alt                : hsl(260  28%  11% / 1.0);
 	--bg-smoke              : hsl(  0   0%   0% / 0.7);
 	--bg-input              : hsl(216  28%  17% / 1.0);
 	--bg-input-hover        : hsl(216  28%  21% / 1.0);
@@ -262,11 +271,14 @@ css('.theme-dark, .theme-light .theme-inverted', 'on-theme', `
 	--bg-new-modified       : #293b34;
 
 	/* grid cell interaction states. these need to be opaque! */
-	--bg-unfocused-selected : #4c545d;
+	--bg-unfocused          : #333;
+	--bg-unfocused-selected : #343b41;
+	--bg-focused-selected   : #173c63;
 	--bg-unfocused          : #2e3033;
 	--bg-unselected         : #1d2021;
 	--bg-selected           : #122f4d;
-	--bg-row-focused        : #222326;
+	--bg-row-focused        : #0d2035;
+	--bg-row-unfocused      : #212121;
 
 	--ring                  : hsl(  0 100%   0% / .3);
 
@@ -288,7 +300,7 @@ css('.theme-dark, .theme-light .theme-inverted', 'on-theme', `
 /* TEXT COLOR ------------------------------------------------------------- */
 
 css(['.dim', '[dim]'], '', `
-	--fg-op: var(--fg-op-dim);
+	--fg-op: var(--fg-dim-op);
 `)
 
 css('.text', '', `
@@ -364,7 +376,7 @@ css('.fg-error', '', `
 
 css(':root', '', `
 
-	--fs-normal : 14px;
+	--fs-normal : 13.5px;
 	--lh        : 1.25; /* only unitless allowed! */
 	--lh-input  : 1.25; /* 1.25 is the minimum that <input> supports! */
 	--w-input   : 16em; /* to sync <input> with <dropdown> */
@@ -843,14 +855,14 @@ css('.nowrap-dots', '', `
 css('.shrinks-h', '', `
 	/* prevents overflow in flexbox and css-grid containers. */
 	min-width  : 0;
-	/* prevens overflow in inline and block containers */
+	/* prevents overflow in inline and block containers */
 	max-width: 100%;
 `)
 
 css('.shrinks-v', '', `
 	/* prevents overflow in flexbox and css-grid containers. */
 	min-height : 0;
-	/* prevens overflow in horizontal flex containers */
+	/* prevents overflow in horizontal flex containers */
 	max-height: 100%;
 `)
 
@@ -870,6 +882,7 @@ css('.w8 ', '', ` width:   10em; min-width:   10em; max-width:   10em; `)
 css('.w16', '', ` width:   20em; min-width:   20em; max-width:   20em; `)
 css('.w32', '', ` width:   40em; min-width:   40em; max-width:   40em; `)
 
+// NOTE: needs `overflow: auto|clip` or it doesn't work!
 css('.resize-x', '', ` resize: horizontal; `)
 css('.resize-y', '', ` resize: vertical; `)
 css('.resize'  , '', ` resize: both; `)

@@ -89,22 +89,22 @@ css_state('.item.modified'    , '', ` background: var(--bg-modified);     `)
 css_state('.item.new.modified', '', ` background: var(--bg-new-modified); `)
 css_state('.item.removed'     , 'strike')
 
-css_state('.item.selected', 'on-dark', ` background-color: var(--bg-unselected); `)
-css_state('.item.focused' , 'on-dark', ` background-color: var(--bg-unfocused);  `)
+css_state('.item.selected', '', ` background-color: var(--bg-unselected); `)
+css_state('.item.focused' , '', ` background-color: var(--bg-unfocused);  `)
 
 // this does the opposite of .focus-ring/.focus-outside classes.
 css_state('.focusable-items:focus-visible', 'no-outline')
 css_state('.focusable-items:focus-visible .item.focused', 'outline-focus')
 
-css_state('.focusable-items:focus-within .item.selected', 'on-dark', `
+css_state('.focusable-items:focus-within .item.selected', '', `
 	background : var(--bg-selected);
 `)
 
-css_state('.focusable-items:focus-within .item.focused', 'on-dark', `
+css_state('.focusable-items:focus-within .item.focused', '', `
 	background : var(--bg-focused);
 `)
 
-css_state('.focusable-items .item.focused.selected', 'on-dark', `
+css_state('.focusable-items .item.focused.selected', '', `
 	background : var(--bg-unfocused-selected);
 `)
 
@@ -5537,7 +5537,7 @@ css_util('.p-x-button', '', `
 	padding-right : var(--p-x-button, var(--space-2));
 `)
 
-css('.button', 'h-c h-m p-x-button semibold nowrap noselect', `
+css('.button', 'h-c h-m p-x-button semibold nowrap noselect no-shrink', `
 	font-family : inherit;
 	font-size   : var(--fs);
 `)
@@ -7439,9 +7439,9 @@ function calendar_widget(e, mode) {
 		bg_smoke = css.prop('--bg-smoke')
 		fg_month = css.prop('--fg-calendar-month')
 		border_light = css.prop('--border-light')
-		fg_focused_selected   = 'white'
+		fg_focused_selected   = css.prop('--fg')
 		bg_focused_selected   = css.prop('--bg-focused-selected')
-		fg_unfocused_selected = 'white'
+		fg_unfocused_selected = css.prop('--fg')
 		bg_unfocused_selected = css.prop('--bg-unfocused-selected')
 		outline_focus         = css.prop('--outline-focus')
 
