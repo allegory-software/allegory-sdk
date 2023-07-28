@@ -2229,10 +2229,10 @@ end)
 function bitflags(arg, masks, cur_bits, strict)
 	if type(arg) == 'string' then
 		local bits, mask = unpack(string_flags(strict or false, masks, arg))
-		return setbits(cur_bits, mask, bits)
+		return setbits(cur_bits or 0, mask, bits)
 	elseif type(arg) == 'table' then
 		local bits, mask = table_flags(arg, masks, strict)
-		return setbits(cur_bits, mask, bits)
+		return setbits(cur_bits or 0, mask, bits)
 	elseif type(arg) == 'number' then
 		return arg
 	elseif arg == nil then
