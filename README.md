@@ -221,20 +221,11 @@ and non-opinionated. The opinionated part comes next.
 
 [widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
 
-# Contributing
+# Working on the SDK
 
-The SDK is open to contributions for fixing bugs and improving the existing
-modules. We also accept new modules but we take the liberty to choose what to
-include if we are to take responsibility for maintaining them. Most likely
-though, you will do your own thing and we'll copy from each other as long as
-the software remains free.
-
-Before issuing a pull request, it might be helpful to read our
-[Programming Guide](PROGRAMMING.md) which contains:
-
- * The Lua coding style guide,
- * Notes on programming for LuaJIT,
- * Notes on Lua API design.
+If you want to contribute to the SDK, we patched together a
+[Programming Guide](PROGRAMMING.md) to help you understand the code
+a little better and keep with the style and conventions that we use.
 
 # License
 

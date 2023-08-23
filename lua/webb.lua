@@ -46,6 +46,7 @@ ARG PARSING
 
 	id_arg(s) -> n | nil                    validate int arg with slug
 	str_arg(s) -> s | nil                   validate/trim non-empty string arg
+	json_str_arg(s) -> s | nil              validate string arg
 	enum_arg(s, values...) -> s | nil       validate enum arg
 	list_arg(s[, arg_f]) -> t               validate comma-separated list arg
 	checkbox_arg(s) -> 'checked' | nil      validate checkbox value from html form
@@ -374,6 +375,7 @@ local function checkfunc(code, default_err)
 			content = ct == mime_types.json
 				and json_encode{error = err} or tostring(err),
 			message = err, --for tostring()
+			status_message = err,
 		}
 	end
 end

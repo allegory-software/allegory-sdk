@@ -124,7 +124,7 @@ end
 
 function daemon(...)
 
-	local app = {}
+	local app = {before = before, after = after}
 
 	local cmd_action, cmd_opt, cmd_args, cmd_run = cmdaction(...) --process cmdline options.
 

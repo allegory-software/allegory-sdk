@@ -35,6 +35,7 @@ TODO
 ]==]
 
 require'webb'
+require'lang'
 
 --multi-language actions & links ---------------------------------------------
 
