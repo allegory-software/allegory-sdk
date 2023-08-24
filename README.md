@@ -19,20 +19,9 @@ The **server-side stack** is written entirely in Lua and contains:
  * a database schema DSL with automatic schema synchronization.
  * ...and more, see full list of modules below.
 
-On the **client-side** we use [canvas-ui], a canvas-drawn IMGUI library
-written in JavaScript with no dependencies, which implements:
-
-* a virtual editable tree-grid widget that can handle 100K records @ 60 fps.
-* a collection of data-bound widgets for data entry, navigation and reporting.
-* layouting widgets for split-pane layouts common in data-dense business applications.
-* efficient native p2p screen-sharing, consuming only 2 Mbps @ 60 fps.
-* UI designer for making apps RAD-style like it's 1995.
-* pluggable layouting algorithms.
-* built-in flex layouting.
-* built-in popup positioning and z-layering.
-* styling system for colors and spacing better than CSS.
-* animations better than CSS.
-* IMGUI, so stateless, no DOM updating or diff'ing because there is no ODM.
+On the **client-side** we use [canvas-ui], an IMGUI library written in
+JavaScript with no dependencies, featuring an editable virtual grid,
+built-in screen sharing, and a UI designer.
 
 [canvas-ui]: https://github.com/allegory-software/canvas-ui
 
