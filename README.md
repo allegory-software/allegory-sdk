@@ -43,7 +43,7 @@ we'd definitely own the browser. Another way of saying this is that accidental
 complexity builds up at the boundary between the software that you control
 and the software that you don't control. When you can't fix a bad or incomplete
 API that you nevertheless have to build on, all you get is hacks and bugs.
-As a middleware, the Allegory SDK is in the worst position in this regard,
+As a middleware, the Allegory SDK is in the worst position in that regard,
 it can never cover everything for everybody, so you'll have to tailor it
 to suit your needs. Treating it as a black box will only bring you sadness.
 
@@ -169,7 +169,7 @@ scripts for new libraries without using a build system.
   * [pillow](lua/pillow.lua)           - Fast image resizing (based on [Pillow-SIMD](https://github.com/uploadcare/pillow-simd#pillow-simd))
   * [resize_image](lua/resize_image.lua) - Image resizing and format conversion
 * __Templating__
-  * [mustache](lua/mustache.lua)       - Logic-less [templates](https://mustache.github.io/) on server-side
+  * [mustache](lua/mustache.lua)       - [Logic-less templates](https://mustache.github.io/) rendered on the server
 * __Data Structures__
   * [heap](lua/heap.lua)               - Priority Queue
   * [queue](lua/queue.lua)             - Ring Buffer
@@ -190,19 +190,21 @@ and non-opinionated. The opinionated part comes next.
 
 ## Web Framework
 
-* __Webb Web Framework__
+* __The Webb Web Framework__
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
   * [webb_spa](lua/webb_spa.lua)       - Single-page app support
-* __Webb Web Framework / Client-side__
+* __The Webb Web Framework / Client-side__
   * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
+  * [mustache.js](www/mustache.js)     - [Logic-less templates](https://mustache.github.io/) rendered on the client
+  * [glue.js](www/glue.js)             - Utilities on the client side (part of [canvas-ui]).
 * __Support Libs__
   * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
 
 ## Client Modules
 
-[widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
+Client-side modules are part of [canvas-ui].
 
 # Working on the SDK
 
