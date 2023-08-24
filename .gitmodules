@@ -52,3 +52,6 @@
 [submodule "c/bcrypt/src"]
 	path = c/bcrypt/src
 	url = ../allegory-sdk-bcrypt.git
+[submodule "canvas-ui"]
+	path = canvas-ui
+	url = git@github.com:allegory-software/canvas-ui.git
