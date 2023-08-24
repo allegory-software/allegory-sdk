@@ -19,17 +19,20 @@ The **server-side stack** is written entirely in Lua and contains:
  * a database schema DSL with automatic schema synchronization.
  * ...and more, see full list of modules below.
 
-The **client-side stack** is written from scratch in JavaScript and contains:
+On the **client-side** we use [canvas-ui], a canvas-drawn IMGUI library
+written in JavaScript with no dependencies, which implements:
 
-* a virtual editable tree-grid widget that can handle 100K records at 60 fps.
+* a virtual editable tree-grid widget that can handle 100K records @ 60 fps.
 * a collection of data-bound widgets for data entry, navigation and reporting.
 * layouting widgets for split-pane layouts common in data-dense business applications.
-* a mechanism for web components better than the native one.
-
-> If you're only interested in some good quality web components but don't care
-at all for the server-side stack then good news, you can use the widgets library
-with any server technology you like (in fact our widgets demo doesn't even
-require a web server to run at all so no real coupling there).
+* efficient native p2p screen-sharing, consuming only 2 Mbps @ 60 fps.
+* UI designer for making apps RAD-style like it's 1995.
+* pluggable layouting algorithms.
+* built-in flex layouting.
+* built-in popup positioning and z-layering.
+* styling system for colors and spacing better than CSS.
+* animations better than CSS.
+* IMGUI, so stateless, no DOM updating or diff'ing because there is no ODM.
 
 # Who is this for?
 
@@ -37,26 +40,38 @@ This is for people who could write the whole thing themselves if they wanted
 to but just don't have the time and could use a head start of about 2-5 years
 depending on experience. You will have to read the code while you're using it
 and gradually start to _own it_ so that in time you gain the ability and the
-freedom to work on it like you wrote it yourself.
+freedom to work on it like you wrote it yourself. The code is simplified and
+organized to facilitate that (there are no dark corners).
 
 This is a very different proposition than the black-box approach of most
 frameworks that don't encourage looking under the hood. Our approach comes
 from the observation that in order to keep things simple, you have to solve
-your problems at the right level of abstraction, and you can only do that
-if you own the entire stack. We'd own the OS if we could, we'd definitely own
-the browser, it's only a matter of scope and user expectations that we don't.
+problems at the right level of abstraction, and you can only do that if you
+own as much of the stack as you possibly can. We'd own the OS if we could,
+we'd definitely own the browser. Another way of saying this is that accidental
+complexity builds up at the boundary between the software that you control
+and the software that you don't control. When you can't fix a bad or incomplete
+API that you nevertheless have to build on, all you get is hacks and bugs.
+As a middleware, the Allegory SDK is in the worst position in this regard,
+it can never cover everything for everybody, so you'll have to tailor it
+to suit your needs. Treating it as a black box will only bring you sadness.
+
+We understand that this approach might seem alien to some, that it comes with
+a learning curve, that it's probably not suited for beginners or people who
+just want to get something done quickly and move on, but as someone who
+blocked me on Twitter once said: "In the beginning all you want is results.
+In the end, all you want is control."
 
 So even though this is more-less a web-framework-with-a-server type of deal,
 if you think you're too far away from making your own full stack from scratch,
-server and all, or you prefer the black-box approach, then this is probably
-not for you.
+server and all, or you prefer the black-box approach, then you will probably
+not be happy using this.
 
-If, on the other hand, you're one of the increasingly rare types who
-thinks that procedural > functional > OOP, library > framework, SQL > ORM,
-JavaScript > TyoeScript, relational > nosql, less LOC > more LOC, and you get
-a rash whenever you hear the words "build system", "package manager",
-"folder structure", "microservice", "container" or "dependency injection",
-then you might actually like this.
+If, on the other hand, you're one who thinks that procedural > functional > OOP,
+library > framework, SQL > ORM, JavaScript > TyoeScript, relational > nosql,
+less LOC > more LOC, and you get a rash whenever you hear the words "build system",
+"package manager", "folder structure", "microservice", "container"
+or "dependency injection", then you might actually like this.
 
 # Status
 
@@ -177,7 +192,7 @@ scripts for new libraries without using a build system.
 * __Dev Tools__
   * [debugger](lua/debugger.lua)       - Lua command-line debugger
 
-> The runtime and the modules up to here can be used as a base to build any kind
+The runtime and the modules up to here can be used as a base to build any kind
 of app including desktop apps (just add your favorite UI toolkit). You can also
 use it as a base for your own web framework, since this part is mostly mechanical
 and non-opinionated. The opinionated part comes next.
@@ -195,29 +210,6 @@ and non-opinionated. The opinionated part comes next.
   * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
 
 ## Client Modules
-
-* __Widgets Docs & Demo__
-  * [Widgets Docs](WIDGETS.md)         - Overview of the web components suite
-  * [Widgets Demo][widgets-demo]       - Widgets Demo (dev branch; http server not required to run it!)
-* __JavaScript Standard Library__
-  * [glue.js](www/glue.js)             - JavaScript "assorted lenghs of wire" library
-  * [dom.js](www/dom.js)               - DOM API and web components mechanism
-  * [css.js](www/css.js)               - Functional CSS library & reset
-* __Widgets Library__
-  * [widgets.js](www/widgets.js)       - Web components
-  * [module.js](www/module.js)         - Layered persistence for UI components
-* __Data-Driven Widgets__
-  * [nav.js](www/nav.js)               - Model mixin for data-driven widgets
-  * [grid.js](www/grid.js)             - Nav-based virtual tree-grid widget
-  * [charts.js](www/charts.js)         - Nav-based graphs & charts
-* __Support libs & resources__
-  * [mustache.js](www/mustache.js)         - Logic-less templates ([Mustache](https://mustache.github.io/))
-  * [purify.js](www/purify.js)             - HTML sanitizer       ([DOMPurify](https://github.com/cure53/DOMPurify))
-  * [markdown-it.js](www/markdown-it.js)   - Markdown parser      ([Markdown-it](https://github.com/markdown-it/markdown-it); 6 KLOC but extensible and does tables)
-  * [ace/ace.js](www/ace/ace.js)           - Code editor          ([ACE](https://ace.c9.io/); huge, only load when needed)
-  * [jshint.js](www/jshint.js)             - JavaScript Linter    ([JSHint](https://jshint.com/); huge, loaded on-demand)
-  * icon fonts: fontawesome, material icons (woff2, fixed-width)
-  * sans serif fonts: inter, opensans (woff2, variable-width)
 
 [widgets-demo]: https://raw.githack.com/allegory-software/allegory-sdk/dev/tests/www/widgets-demo.html
 
