@@ -34,6 +34,8 @@ written in JavaScript with no dependencies, which implements:
 * animations better than CSS.
 * IMGUI, so stateless, no DOM updating or diff'ing because there is no ODM.
 
+[canvas-ui]: https://github.com/allegory-software/canvas-ui
+
 # Who is this for?
 
 This is for people who could write the whole thing themselves if they wanted
