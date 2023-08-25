@@ -58,11 +58,11 @@ if you think you're too far away from making your own full stack from scratch,
 server and all, or you prefer the black-box approach, then you will probably
 not be happy using this.
 
-If, on the other hand, you're one who thinks that procedural > functional > OOP,
-library > framework, SQL > ORM, JavaScript > TyoeScript, relational > nosql,
+If, on the other hand, you're of the mind that procedural > functional > OOP,
+library > framework, SQL > ORM, JavaScript > TypeScript, relational > nosql,
 less LOC > more LOC, and you get a rash whenever you hear the words "build system",
 "package manager", "folder structure", "microservice", "container"
-or "dependency injection", then you might actually like this.
+or "dependency injection", then you might actually enjoy this.
 
 # Status
 

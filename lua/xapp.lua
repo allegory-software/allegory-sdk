@@ -1,6 +1,6 @@
 --[==[
 
-	Widgets-based Application Server
+	Canvas-UI-based Application Server.
 	Written by Cosmin Apreutesei. Public Domain.
 
 LOADS
@@ -26,41 +26,22 @@ USES
 require'daemon'
 require'webb_spa'
 require'xrowset'
-require'xmodule'
 require'schema'
-
-function load_opensans()
-	fontfile'opensans-regular.woff2'
-	fontfile'opensans-600.woff2'
-	fontfile'opensanscondensed-light.woff2'
-	fontfile'opensanscondensed-bold.woff2'
-end
 
 js[[
 on_dom_load(function init_all() {
-	init_xmodule({layers: []})
-	init_components()
-	init_root_widget()
-	init_auth()
 	init_action()
 })
 ]]
 
-cssfile[[
-fontawesome.css
-]]
-
 jsfile[[
-markdown-it.js
-markdown-it-easy-tables.js
-widgets.js
-nav.js
-grid.js
-charts.js
-xmodule.js
+ui.js
+ui_validation.js
+ui_nav.js
+ui_grid.js
+adapter.js
+webrtc.js
 ]]
-
-fontfile('fa-solid-900.woff2')
 
 require'xauth'
 
@@ -98,8 +79,6 @@ local function xapp(...)
 	config('main_module', function()
 		checkfound(action(unpack(args())))
 	end)
-
-	config('body_classes', 'x-container')
 
 	app.schema = schema()
 

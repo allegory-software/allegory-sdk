@@ -1,6 +1,6 @@
 --[==[
 
-	webb | x-module.js persistence
+	webb | xmodule persistence
 
 ROWSETS
 

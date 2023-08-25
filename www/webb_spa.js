@@ -4,9 +4,10 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 You must load first:
-	glue.js
+	glue.js        from canvas-ui
+	mustache.js    1if using templates
 
-You must call on DOM load:
+You must call on DOM load (if you use client-side actions):
 	init_action()
 
 CONFIG API
@@ -56,6 +57,15 @@ TEMPLATES
 let G = window
 let e = Element.prototype
 
+// utils ---------------------------------------------------------------------
+
+const {
+	isobject, isarray,
+	obj,
+	warn,
+	listen, announce,
+} = glue
+
 // config --------------------------------------------------------------------
 
 // some of the values come from the server (see config.js action).
@@ -76,7 +86,7 @@ G.S_texts = obj()
 G.S = function(name, en_s, ...args) {
 	let s = (S_texts[name] ?? en_s) || ''
 	if (args.length)
-		return s.subst(...args)
+		return subst(s, ...args)
 	else
 		return s
 }
@@ -185,15 +195,15 @@ function url_changed(ev) {
 		return
 	current_url = url_parse(location.pathname + location.search)
 	let opt = ev && ev.detail || empty
-	fire('url_changed', opt)
+	announce('url_changed', opt)
 	let handler = action_handler(current_url)
 	if (handler)
 		handler(opt)
 	else
-		fire('action_not_found', opt)
+		announce('action_not_found', opt)
 }
 
-window.on('action_not_found', function(opt) {
+on(window, 'action_not_found', function(opt) {
 	if (location.pathname == '/') {
 		setflaps('action_not_found')
 		return // no home action
@@ -218,7 +228,7 @@ function abort_exec() {
 
 function check_exec() {
 	exec_aborted = false
-	fire('before_exec', abort_exec)
+	announce('before_exec', abort_exec)
 	return !exec_aborted
 }
 
@@ -241,7 +251,7 @@ G.exec = function(url, opt) {
 	}
 	let ev = new PopStateEvent('popstate')
 	ev.detail = opt
-	window.fire(ev)
+	window.dispatchEvent(ev)
 }
 
 G.back = function() {
@@ -283,7 +293,7 @@ e.sethref = function(url, opt) {
 	let handler = action_handler(url_parse(url))
 	if (!handler)
 		return
-	this.on('click', function(ev) {
+	on(this, 'click', function(ev) {
 		// shit/ctrl+click passes through to open in new window or tab.
 		if (ev.shiftKey || ev.ctrlKey)
 			return
@@ -379,7 +389,7 @@ G.render = function(template_name, data) {
 
 e.render_string = function(s, data, ev) {
 	this.unsafe_html = render_string(s, data)
-	this.fire('render', data, ev)
+	announce('render', this, data, ev)
 	return this
 }
 
@@ -424,7 +434,7 @@ component('render', function(e) {
 // init ----------------------------------------------------------------------
 
 G.init_action = function() {
-	window.on('popstate', function(ev) {
+	on(window, 'popstate', function(ev) {
 		loading = false
 		url_changed(ev)
 	})

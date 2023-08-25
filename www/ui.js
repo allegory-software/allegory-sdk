@@ -1,1 +1,1 @@
-../canvas-ui/ui.js
+../canvas-ui/www/ui.js

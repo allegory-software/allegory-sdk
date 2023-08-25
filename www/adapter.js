@@ -1,0 +1,1 @@
+../canvas-ui/www/adapter.js

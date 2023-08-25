@@ -1,6 +1,6 @@
 --[==[
 
-	webb | xapp language/country/currency setting UI
+	webb | language/country/currency rowsets
 	Written by Cosmin Apreutesei. Public Domain.
 
 API
@@ -18,7 +18,6 @@ ROWSETS
 ]==]
 
 require'lang'
-require'webb_spa'
 require'xrowset_sql'
 
 local text_in_english          = Sf('text_in_english', 'Text in English')

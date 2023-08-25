@@ -1,6 +1,6 @@
 --[==[
 
-	webb | xapp authentication UI
+	webb | authentication rowsets
 	Written by Cosmin Apreutesei. Public Domain.
 
 TEMPLATES
@@ -23,29 +23,8 @@ CONFIG
 
 ]==]
 
-require'webb_spa'
 require'webb_auth'
 require'xrowset_sql'
-
-jsfile'x-auth.js'
-cssfile'x-auth.css'
-
-wwwfile['x-auth.css'] = [[
-
-.breadcrumbs {
-	margin: 1em 0;
-}
-
-
-.x-usr-button {
-
-}
-
-.x-usr-button > .x-button-icon {
-	font-size: 1.2em;
-}
-
-]]
 
 template.sign_in_email_text = [[
 

@@ -28,7 +28,7 @@ ACTIONS
 
 LOADS
 
-	glue, divs, webb_spa, purify, mustache
+	glue, webb_spa, mustache
 
 CONFIG
 
@@ -43,10 +43,6 @@ CONFIG
 	favicon_href                     favicon url
 	client_action       true         enable client routing.
 	aliases                          aliases for client-side routing; defined in webb_action.
-
-	facebook_app_id                  for webb.auth.facebook.js
-	google_client_id                 for webb.auth.google.js
-	analytics_ua                     for webb.analytics.js
 
 ]==]
 
@@ -166,13 +162,10 @@ wwwfile['_inline.html'] = function()
 end
 
 jsfile[[
-glue.js
-dom.js
-css.js
+glue.js      // from canvas-ui, webb_spa.js uses it.
 webb_spa.js
-config.js   // dynamic config
-strings.js  // strings in current language
-purify.js
+config.js    // config passed along from server
+strings.js   // strings in current language to use with S()
 mustache.js
 ]]
 
@@ -223,7 +216,7 @@ end
 
 local spa_template = [[
 <!DOCTYPE html>
-<html lang={{lang}} country={{country}}>
+<html lang={{lang}} country={{country}} {{#theme}}theme={{theme}}{{/theme}}>
 <head>
 	<meta charset=utf-8>
 	<title>{{title}}{{title_suffix}}</title>
@@ -237,7 +230,7 @@ local spa_template = [[
 		var client_action = {{client_action}}
 	</{{undefined}}script>
 </head>
-<body {{#theme}}theme={{theme}}{{/theme}} {{body_attrs}} class="{{body_classes}}">
+<body {{body_attrs}} class="{{body_classes}}">
 {{{body}}}
 </body>
 </html>
