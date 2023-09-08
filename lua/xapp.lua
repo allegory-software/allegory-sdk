@@ -21,6 +21,12 @@ USES
 
 	function myapp:install() end
 
+CONFIG
+
+	ignore_interrupts
+	host
+	dev_email
+
 ]==]
 
 require'daemon'

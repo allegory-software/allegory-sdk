@@ -44,7 +44,7 @@ It is assumed that action names are always in English even if they actually
 request a page in the default language which can configured to be different
 than English. Action name translation is done automatically provided that
 1) all links are passed through href(), 2) routing is done by calling
-action(req, unpack(args())) which calls find_action() and 3) action names are
+action(unpack(args())) which calls find_action() and 3) action names are
 translated in different languages with alias(). Using action aliases is
 the key to avoiding the appending of ?lang=xx to links. Aliases for the
 root action ('en') are also allowed in order to avoid the ?lang param.

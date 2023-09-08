@@ -17,7 +17,9 @@ config('main_module', function()
 end)
 
 action['404.html'] = function()
-	outfile(wwwpath'ui/ui_demo.html')
+	local s = load(indir(exedir(), '..', '..', 'canvas-ui', 'demo.html'))
+	s = s:gsub('<base href="(.-)">', '/')
+	out(s)
 end
 
 --NOTE: a session is a browser tab.
@@ -56,8 +58,8 @@ action['rtc_signal.events'] = function()
 	http_request().http.f:onclose(close)
 	assert(not out_buffering())
 	out('data: '..json_encode{sid = sid}..'\n\n')
-	while true do
 		local signal = remove(signals, 1)
+	while true do
 		if signal then
 			pr('->> signal')
 			out('data: '..json_encode(signal)..'\n\n')

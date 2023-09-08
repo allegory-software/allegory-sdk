@@ -21,7 +21,7 @@ The **server-side stack** is written entirely in Lua and contains:
 
 On the **client-side** we use [canvas-ui], an IMGUI library written in
 JavaScript with no dependencies, featuring an editable virtual grid,
-built-in screen sharing, and a UI designer.
+built-in screen sharing, a UI builder, and more.
 
 [canvas-ui]: https://github.com/allegory-software/canvas-ui
 
@@ -53,12 +53,10 @@ just want to get something done quickly and move on, but as someone who
 blocked me on Twitter once said: "In the beginning all you want is results.
 In the end, all you want is control."
 
-So even though this is more-less a web-framework-with-a-server type of deal,
-if you think you're too far away from making your own full stack from scratch,
+So if you think you're too far away from making your own full stack from scratch,
 server and all, or you prefer the black-box approach, then you will probably
-not be happy using this.
-
-If, on the other hand, you're of the mind that procedural > functional > OOP,
+not be happy using this. If, on the other hand, you're comfortable reading other
+people's code, and you're of the mind that procedural > functional > OOP,
 library > framework, SQL > ORM, JavaScript > TypeScript, relational > nosql,
 less LOC > more LOC, and you get a rash whenever you hear the words "build system",
 "package manager", "folder structure", "microservice", "container"
@@ -194,17 +192,18 @@ and non-opinionated. The opinionated part comes next.
   * [webb](lua/webb.lua)               - Procedural web framework
   * [webb_action](lua/webb_action.lua) - Action-based routing with multi-language URL support
   * [webb_auth](lua/webb_auth.lua)     - Session-based authentication
-  * [webb_spa](lua/webb_spa.lua)       - Single-page app support
+  * [webb_spa](lua/webb_spa.lua)       - Single-page app scaffolding
+  * [xapp](lua/xapp.lua)               - App server for canvas-ui-based apps
 * __The Webb Web Framework / Client-side__
-  * [webb_spa.js](www/webb_spa.js)     - SPA client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
+  * [webb_spa.js](www/webb_spa.js)     - client-side counterpart of [webb_spa.lua](lua/webb_spa.lua)
   * [mustache.js](www/mustache.js)     - [Logic-less templates](https://mustache.github.io/) rendered on the client
   * [glue.js](www/glue.js)             - Utilities on the client side (part of [canvas-ui]).
 * __Support Libs__
   * [jsmin](c/jsmin/jsmin.txt)         - JavaScript minification
 
-## Client Modules
+## UI Widgets
 
-Client-side modules are part of [canvas-ui].
+Widgets are provided by [canvas-ui].
 
 # Working on the SDK
 
@@ -226,7 +225,7 @@ Because Lua is like modern JavaScript, except
 and it didn't keep the baggage while doing so. That said, we're all
 engineers here, we don't have language affectations. We're just happy to use
 a language with stackful coroutines, real closures with full lexical scoping,
-hash maps, a garbage collector, a better ffi than we could ever ask for,
+hash maps, a garbage collector, a better C ffi than we could ever ask for,
 and an overall non-opinionated design that doesn't pretend to know better
 than its user.
 
