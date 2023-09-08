@@ -58,10 +58,10 @@ action['rtc_signal.events'] = function()
 	http_request().http.f:onclose(close)
 	assert(not out_buffering())
 	out('data: '..json_encode{sid = sid}..'\n\n')
-		local signal = remove(signals, 1)
 	while true do
+		local signal = remove(signals, 1)
 		if signal then
-			pr('->> signal')
+			pr('->> signal', signal)
 			out('data: '..json_encode(signal)..'\n\n')
 		else
 			state.waiting_thread = currentthread()
