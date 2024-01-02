@@ -18,7 +18,7 @@ end)
 
 action['404.html'] = function()
 	local s = load(indir(exedir(), '..', '..', 'canvas-ui', 'demo.html'))
-	s = s:gsub('<base href="(.-)">', '/')
+	s = s:gsub('<base href="(.-)">', '<base href="/">')
 	out(s)
 end
 
@@ -42,7 +42,8 @@ action['rtc_signal.events'] = function()
 	setheader('cache-control', 'no-cache')
 	setconnectionclose()
 	setcompress(false)
-	local sid = format('%15d', random(10^14, 10^15-1))
+	local digits = 4
+	local sid = tostring(random(10^(digits-1), 10^digits-1))
 	local signals = {}
 	local state = {signals = signals}
 	session_state[sid] = state
