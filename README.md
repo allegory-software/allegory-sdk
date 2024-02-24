@@ -8,7 +8,7 @@ environment for developing web-based **database-driven business apps** in
 The **server-side stack** is written entirely in Lua and contains:
 
  * a coroutine-based scheduler for epoll and IOCP multiplexing.
- * a programmable web-server-as-a-library.
+ * a programmable web-server-as-a-library (like golang).
  * a fully-featured http client and async DNS resolver.
  * OS threads with synchronized queues.
  * async process execution with pipes and shared memory.
@@ -19,9 +19,12 @@ The **server-side stack** is written entirely in Lua and contains:
  * a database schema DSL with automatic schema synchronization.
  * ...and more, see full list of modules below.
 
-On the **client-side** we use [canvas-ui], an IMGUI library written in
+On the **frontend** we use [canvas-ui], an IMGUI library written in
 JavaScript with no dependencies, featuring an editable virtual grid,
 built-in screen sharing, a UI builder, and more.
+
+> canvas-ui is independent of the SDK and included as a git submodule
+so you can use your own frontend tech instead.
 
 [canvas-ui]: https://github.com/allegory-software/canvas-ui
 
@@ -49,9 +52,8 @@ to suit your needs. Treating it as a black box will only bring you sadness.
 
 We understand that this approach might seem alien to some, that it comes with
 a learning curve, that it's probably not suited for beginners or people who
-just want to get something done quickly and move on, but as someone who
-blocked me on Twitter once said: "In the beginning all you want is results.
-In the end, all you want is control."
+just want to get something done quickly and move on, but as someone once said:
+"In the beginning all you want is results. In the end, all you want is control."
 
 So if you think you're too far away from making your own full stack from scratch,
 server and all, or you prefer the black-box approach, then you will probably
@@ -72,7 +74,8 @@ to see what's missing, broken or wanted.
 
 # Where it's used
 
-  * [Many Machines - the independent man's SAAS provisioning tool](https://github.com/allegory-software/many-machines)
+  * [Many Machines - the independent man's SAAS provisioning tool (in development)](https://github.com/allegory-software/many-machines)
+  * [Home Designer - a 3D modeller and BIM for residential construction (in development)](https://github.com/allegory-software/home-designer)
 
 # Compatibility
 
@@ -216,7 +219,7 @@ a little better and keep with the style and conventions that we use.
 The Allegory SDK is MIT Licensed.
 3rd-party libraries have various non-viral free licenses.
 
-# FAQ
+# Questions you might have
 
 ### Why Lua (for web apps)?
 
@@ -237,6 +240,9 @@ large, not nearly as hackable as our pure-Lua server, it wants to control
 the main loop and manage threads all by itself, and its configuration
 directives are inescapably byzantine and undebuggable by trying to do
 declaratively what is sometimes better done procedurally in a web server.
+We also don't like inversion-of-control in general. The industry is also
+waking up to this in recent years by moving from scriptable web servers like
+apache and nginx to more flexible build-your-own kits like golang and node.
 
 ------------------------------------------------------------------------------
-<sup>Allegory SDK (c) 2020 Allegory Software SRL</sup>
+<sup>Allegory SDK (c) 2020-2024 Allegory Software</sup>
