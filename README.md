@@ -21,10 +21,8 @@ The **server-side stack** is written entirely in Lua and contains:
 
 On the **frontend** we use [canvas-ui], an IMGUI library written in
 JavaScript with no dependencies, featuring an editable virtual grid,
-built-in screen sharing, a UI builder, and more.
-
-> canvas-ui is independent of the SDK and included as a git submodule
-so you can use your own frontend tech instead.
+built-in screen sharing, a UI builder, and more. It is included as a git
+submodule so you can use your own frontend tech instead.
 
 [canvas-ui]: https://github.com/allegory-software/canvas-ui
 
