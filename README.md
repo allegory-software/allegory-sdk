@@ -238,9 +238,16 @@ large, not nearly as hackable as our pure-Lua server, it wants to control
 the main loop and manage threads all by itself, and its configuration
 directives are inescapably byzantine and undebuggable by trying to do
 declaratively what is sometimes better done procedurally in a web server.
+
 We also don't like inversion-of-control in general. The industry is also
 waking up to this in recent years by moving from scriptable web servers like
-apache and nginx to more flexible build-your-own kits like golang and node.
+apache and nginx to more flexible build-your-own kits like golang or node.
+
+### Why not Golang or Node?
+
+It's the same answer: hackability. Golang and Node have their networking guts
+written in C while ours is Lua all the way down to OS APIs with a few
+exceptions (libtls).
 
 ------------------------------------------------------------------------------
 <sup>Allegory SDK (c) 2020-2024 Allegory Software</sup>
