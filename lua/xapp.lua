@@ -35,7 +35,7 @@ require'xrowset'
 require'schema'
 
 js[[
-on_dom_load(function init_all() {
+document.addEventListener('DOMContentLoaded', function init_all() {
 	init_action()
 })
 ]]

@@ -12,7 +12,7 @@ FEATURES
   * standalone operation without a web server for debugging and offline scripts
   * output buffering stack
   * file serving with cache control
-  * rendering with mustache templates, php-like templates and Lua scripts
+  * dynamic html with mustache templates, php-like templates and Lua scripts
   * multi-language html with server-side language filtering
   * online js and css bundling and minification
 
@@ -85,7 +85,7 @@ RESPONSE
 
 FILESYSTEM
 
-	wwwdir(), libwwwdir()                   www paths
+	wwwdirs() -> {dir1,...}                 www dirs
 	wwwpath(file, [type]) -> path           get www subpath (and check if exists)
 	wwwfile(file, [default]) -> s           get www file contents
 	wwwfile.filename <- s|f(filename)       set virtual www file contents
@@ -626,15 +626,23 @@ end
 
 --filesystem API -------------------------------------------------------------
 
-function wwwdir()
-	return config'www_dir'
-		or config('www_dir', indir(scriptdir(), 'www'))
+function wwwdirs()
+	local t = {}
+	local paths = config'www_dirs'
+	if paths then
+		for s in paths:gmatch'[^;]+' do
+			if not path_isabs(s) then
+				s = path_normalize(indir(scriptdir(), s))
+			end
+			add(t, s)
+		end
+	end
+	if #t == 0 then
+		add(t, indir(scriptdir(), 'www'))
+	end
+	return t
 end
-
-function libwwwdir()
-	return config'libwww_dir'
-		or config('libwww_dir', indir(exedir(), '..', '..', 'www'))
-end
+wwwdirs = memoize(wwwdirs)
 
 function tmppath(patt, t)
 	assert(not patt:find'[\\/]') --no subdirs
@@ -647,13 +655,14 @@ end
 
 function wwwpath(file, type)
 	assert(file)
-	if file:find('..', 1, true) then return end --TODO: use path module for this
-	--look into www dir
-	local abs_path = indir(wwwdir(), file)
-	if file_is(abs_path, type) then return abs_path end
-	--look into the "lib" www dir
-	local abs_path = libwwwdir() and indir(libwwwdir(), file)
-	if abs_path and file_is(abs_path, type) then return abs_path end
+	for _,dir in ipairs(wwwdirs()) do
+		local abs_path = indir(dir, file)
+		if path_commonpath(dir, abs_path) then --prevent .. from escaping dir
+			if file_is(abs_path, type) then
+				return abs_path
+			end
+		end
+	end
 	return nil, file..' not found'
 end
 
@@ -690,20 +699,14 @@ function wwwfiles(filter)
 			t[name] = true
 		end
 	end
-	for name, d in ls(wwwdir()) do
-		if not name then
-			break
-		end
-		if not t[name] and d:is'file' and filter(name) then
-			t[name] = true
-		end
-	end
-	for name, d in ls(libwwwdir()) do
-		if not name then
-			break
-		end
-		if not t[name] and d:is'file' and filter(name) then
-			t[name] = true
+	for _,dir in ipairs(wwwdirs()) do
+		for name, d in ls(dir) do
+			if not name then
+				break
+			end
+			if not t[name] and d:is'file' and filter(name) then
+				t[name] = true
+			end
 		end
 	end
 	return t
