@@ -20,11 +20,11 @@ ACTIONS
 	strings.js       load strings.<lang>.js
 	all.js           output of jsfile() calls
 	all.css          output of cssfile() calls
-	_all.html        output of htmlfile() calls
+	_all.html        output of htmlfiles() calls
 	inline.js        output of js() calls
 	inline.css       output of css() calls
 	_inline.html     output of html() calls
-	404.html         SPA response
+	<root-action>    spa_response
 
 LOADS
 
@@ -124,7 +124,7 @@ wwwfile['all.js.cat'] = function()
 	return jsfile() .. ' inline.js' --append inline code at the end
 end
 
-htmlfile = sepbuffer('\n', function(files)
+htmlfiles = sepbuffer('\n', function(files)
 	for _,file in ipairs(catlist_files(files)) do
 		if not action[file] then --won't run actions for this.
 			S_ids_add_html(file, wwwfile(file))
@@ -132,7 +132,7 @@ htmlfile = sepbuffer('\n', function(files)
 	end
 end)
 wwwfile['_all.html.cat'] = function()
-	return htmlfile() .. ' _inline.html'
+	return htmlfiles() .. '\n_inline.html'
 end
 
 local fontfiles = {}
@@ -172,16 +172,17 @@ mustache.js
 --format js and css refs as separate refs or as a single ref based on a .cat action.
 --NOTE: with `embed` mode, urls in css files must be absolute paths!
 
-local function jslist(cataction, mode)
+local function jslist(cataction, mode, attrs)
+	attrs = attrs or ''
 	if mode == 'bundle' then
-		out(format('	<script src="%s"></script>', href('/'..cataction)))
+		out(format('	<script src="%s" %s></script>', href('/'..cataction), attrs))
 	elseif mode == 'embed' then
-		out'<script>'
+		out('<script %s>', attrs)
 		outcatlist(cataction..'.cat')
 		out'</script>\n'
 	elseif mode == 'separate' then
 		for i,file in ipairs(catlist_files(wwwfile(cataction..'.cat'))) do
-			out(format('	<script src="%s"></script>\n', href('/'..file)))
+			out(format('	<script src="%s" %s></script>\n', href('/'..file), attrs))
 		end
 	else
 		assert(false)
@@ -242,8 +243,7 @@ local function page_title(infer, body)
 		or (args(1) or ''):gsub('[-_]', ' ')
 end
 
-function spa_action(opt)
-	opt = opt or empty
+function spa_action()
 	local t = {}
 	if _G.login then
 		if try_login() then --sets lang from user profile.
@@ -252,7 +252,13 @@ function spa_action(opt)
 	end
 	t.lang = lang()
 	t.country = country()
-	local html = opt.html or record(outcatlist, '_all.html.cat')
+	local html = record(outcatlist, '_all.html.cat')
+
+	--remove static resource loading used for working without a server.
+	html = html:gsub('<base .->', '')
+	html = html:gsub('<link rel="preload".->', '')
+	html = html:gsub('<script src=.->.-</script>', '')
+
 	t.body = html_filter_lang(html, lang())
 	t.body_classes = call(config'body_classes')
 	t.body_attrs = call(config'body_attrs')
@@ -261,7 +267,7 @@ function spa_action(opt)
 	t.title_suffix = config('page_title_suffix', ' - '..host())
 	t.favicon_href = call(config'favicon_href')
 	t.client_action = config('client_action', true)
-	t.all_js  = record(jslist , 'all.js' , config('js_mode' , 'separate'))
+	t.all_js  = record(jslist , 'all.js' , config('js_mode' , 'separate'), 'glue-global glue-extend 3d-global')
 	t.all_css = record(csslist, 'all.css', config('css_mode', 'separate'))
 	t.preload = record(preloadlist)
 	local buf = stringbuffer()
@@ -269,8 +275,8 @@ function spa_action(opt)
 		buf(mustache_wrap(template(name), name))
 	end
 	t.templates = buf()
-	update(t, opt)
-	out(render_string(opt.spa_template or spa_template, t))
+	out(render_string(spa_template, t))
 end
 
-action['404.html'] = function() spa_action() end
+action[config('root_action', 'en')] = spa_action
+
