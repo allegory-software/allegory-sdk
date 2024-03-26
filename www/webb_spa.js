@@ -5,7 +5,7 @@
 
 You must load first:
 	glue.js        from canvas-ui
-	mustache.js    1if using templates
+	mustache.js    if using templates
 
 You must call on DOM load (if you use client-side actions):
 	init_action()
@@ -29,17 +29,12 @@ ACTIONS
 	back()                                 go back to last URL in history
 	setscroll([top])                       set scroll to last position or reset
 	settitle([title])                      set title to <h1> contents or arg
-	^url_changed                           url changed event
-	^action_not_found                      action not found event
+	^^url_changed                          url changed event
+	^^action_not_found                     action not found event
 	action: {action: handler}
 	id_arg(s)
 	opt_arg(s)
 	slug(id, s)
-
-PAGE FLAPS
-
-	flap.NAME = function(on) { ... }
-	setflaps('NAME1 ...')
 
 TEMPLATES
 
@@ -48,7 +43,6 @@ TEMPLATES
 	render(name, [data]) -> s              render a template
 	e.render_string(s, data)               render template string into e
 	e.render([data])                       render e.template into e
-	^bind(on, [data])                      fired before & after render
 
 */
 
@@ -203,11 +197,9 @@ function url_changed(ev) {
 		announce('action_not_found', opt)
 }
 
-on(window, 'action_not_found', function(opt) {
-	if (location.pathname == '/') {
-		setflaps('action_not_found')
+window.addEventListener('action_not_found', function(opt) {
+	if (location.pathname == '/')
 		return // no home action
-	}
 	exec('/', {samepage: true})
 })
 
@@ -276,24 +268,26 @@ G.setscroll = function(top) {
 e.sethref = function(url, opt) {
 	if (this._hooked)
 		return
-	if (this.attr('target'))
+	if (this.getAttribute('target'))
 		return
-	if (this.attr('href') == '')
-		this.attr('href', null)
-	url = url || this.attr('href')
+	if (this.getAttribute('href') == '')
+		this.getAttribute('href', null)
+	url = url || this.getAttribute('href')
 	if (!url)
 		return
-	if (this.bool_attr('samepage') || this.bool_attr('sameplace')) {
+	let samepage  = repl(repl(this.getAttribute('samepage' ), '', true), 'false', false)
+	let sameplace = repl(repl(this.getAttribute('sameplace'), '', true), 'false', false)
+	if (samepage || sameplace) {
 		opt = opt || {}
-		opt.samepage = this.bool_attr('samepage')
-		opt.sameplace = this.bool_attr('sameplace')
+		opt.samepage  = samepage
+		opt.sameplace = sameplace
 	}
 	url = href(url)
-	this.attr('href', url)
+	this.getAttribute('href', url)
 	let handler = action_handler(url_parse(url))
 	if (!handler)
 		return
-	on(this, 'click', function(ev) {
+	this.addEventListener('click', function(ev) {
 		// shit/ctrl+click passes through to open in new window or tab.
 		if (ev.shiftKey || ev.ctrlKey)
 			return
@@ -305,18 +299,14 @@ e.sethref = function(url, opt) {
 }
 
 e.sethrefs = function(selector) {
-	for (let ce of this.$(selector || 'a[href]'))
+	for (let ce of this.querySelectorAll(selector || 'a[href]'))
 		ce.sethref()
 	return this
 }
 
-component('a', '[href]', function(e) {
-	e.sethref()
-})
-
 G.settitle = function(title) {
 	title = title
-		|| $('h1').html()
+		|| document.querySelector('h1').innerHTML
 		|| url_parse(location.pathname).segments[1].replace(/[-_]/g, ' ')
 	if (title)
 		document.title = title + config('page_title_suffix')
@@ -338,43 +328,18 @@ G.opt_arg = function(s) {
 	return s && ('/' + s) || null
 }
 
-// page flaps ----------------------------------------------------------------
-
-{
-let cur_cx
-G.flap = obj()
-G.setflaps = function(new_cx) {
-	if (cur_cx == new_cx)
-		return
-	let cx0 = cur_cx && cur_cx.words().tokeys() || empty
-	let cx1 = new_cx && new_cx.words().tokeys() || empty
-	for (let cx in cx0)
-		if (!cx1[cx]) {
-			let handler = flap[cx]
-			if (handler)
-				handler(false)
-		}
-	for (let cx in cx1)
-		if (!cx0[cx]) {
-			let handler = flap[cx]
-			if (handler)
-				handler(true)
-		}
-	cur_cx = new_cx
-}}
-
 // templates -----------------------------------------------------------------
 
 G.template = function(name) {
 	if (!name) return null
 	let e = window[name+'_template']
-	warn_if(!e, 'unknown template', name)
-	return e && (e.tag == 'script' || e.tag == 'xmp') ? e.html : null
+	if (!e) warn('unknown template', name)
+	return e && (e.tagName == 'SCRIPT' || e.tagName == 'XMP') ? e.innerHTML : null
 }
 
 G.static_template = function(name) {
 	let e = window[name+'_template']
-	return e && e.tag == 'template' ? e.html : null
+	return e && e.tagName == 'TEMPLATE' ? e.innerHTML : null
 }
 
 G.render_string = function(s, data) {
@@ -388,53 +353,21 @@ G.render = function(template_name, data) {
 }
 
 e.render_string = function(s, data, ev) {
-	this.unsafe_html = render_string(s, data)
+	this.innerHTML = render_string(s, data)
 	announce('render', this, data, ev)
 	return this
 }
 
 e.render = function(data, ev) {
 	let s = this.template_string
-		|| template(this.template || this.attr('template') || this.id || this.tag)
+		|| template(this.template || this.getAttribute('template') || this.id || this.tagName)
 	return this.render_string(s, data, ev)
 }
-
-/* <render> ------------------------------------------------------------------
-
-attrs:
-	template
-inner html:
-	<template>
-	<script>
-
-*/
-
-component('render', function(e) {
-
-	let t = e.$1(':scope>template')
-	let ts = t && t.html
-	let tn = e.attr('template')
-
-	let get_data
-	let script = e.$1(':scope>script')
-	get_data = script && new Function('', script.text)
-
-	e.clear()
-
-	e.on_update(function() {
-		let data = get_data.call(e)
-		if (ts)
-			e.render_string(ts, data)
-		else if (tn)
-			e.render(tn, data)
-	})
-
-})
 
 // init ----------------------------------------------------------------------
 
 G.init_action = function() {
-	on(window, 'popstate', function(ev) {
+	window.addEventListener('popstate', function(ev) {
 		loading = false
 		url_changed(ev)
 	})
