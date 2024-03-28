@@ -7,6 +7,7 @@
 		- select          : select without where clause.
 		- where_all       : where clause for all rows (without the word "where").
 		- order_by        : order-by clause.
+		- limit           : limit clause.
 		- pk              : 'foo bar ...', required as it can't be inferred reliably.
 		- db              : optional, connection alias to query on.
 
