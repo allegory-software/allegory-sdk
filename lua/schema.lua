@@ -879,7 +879,7 @@ function diff:pp(opt)
 	end
 end
 
-function schema:resolve_type(t) --{attr = val, flag1, ...}
+function schema:resolve_type(t, opt) --{attr = val, flag1, ...}
 
 	resolve_type(self, t, t, 1, #t, empty, true, true)
 	update_type(self, t)
@@ -895,15 +895,19 @@ function schema:resolve_type(t) --{attr = val, flag1, ...}
 				or S(_('%s:%s.%s.%s', attr, name, tbl, tbl_type))
 				or call(t[en_attr])
 		end
+		if opt and opt.translate then
+			t[attr] = t[attr]()
+		end
 	end
 
 	return t
 end
 
-function schema:resolve_types(fields, tbl_name, check_duplicates) --{field1, ...}
+function schema:resolve_types(fields, opt) --{field1, ...}
 	for i,f in ipairs(fields) do
-		local f = self:resolve_type(f)
-		if check_duplicates then
+		local f = self:resolve_type(f, opt)
+		if opt and opt.check_duplicates then
+			local tbl_name = opt.table_name
 			assertf(isstr(f.name), 'field name not a string: %s: %s', tbl_name, type(f.name))
 			assertf(not fields[f.name], 'duplicate field name: %s.%s', tbl_name, f.name)
 		end
