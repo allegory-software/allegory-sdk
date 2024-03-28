@@ -2,10 +2,6 @@
 
 	webb | xmodule persistence
 
-ROWSETS
-
-	rowset.rowsets
-
 ACTIONS
 
 	xmodule_next_id
@@ -22,21 +18,6 @@ CALLS
 require'xrowset'
 require'webb_action'
 require'fs'
-
---rowsets --------------------------------------------------------------------
-
-rowset.rowsets = virtual_rowset(function(rs)
-	rs.fields = {
-		{name = 'name'}
-	}
-	rs.pk = 'name'
-	function rs:load_rows(res, params)
-		res.rows = {}
-		for name, rs in sortedpairs(rowset) do
-			add(res.rows, {name})
-		end
-	end
-end)
 
 --xmodule --------------------------------------------------------------------
 

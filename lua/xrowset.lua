@@ -131,7 +131,10 @@ function virtual_rowset(init, ...)
 
 		local schema = config'db_schema'
 		if schema then
-			schema:resolve_types(rs.fields, rs.name, check_duplicates)
+			schema:resolve_types(rs.fields, {
+				table_name = rs.name,
+				check_duplicates = check_duplicates,
+			})
 		end
 
 		local hide_cols = index(collect(words(rs.hide_cols) or empty))
@@ -358,7 +361,8 @@ function virtual_rowset(init, ...)
 
 	function rs:apply_changes(changes, update_id)
 
-		local res = {rows = {}}
+		update_client_fields()
+		local res = {rows = {}, fields = rs.client_fields}
 		local self = object(rs)
 		self.changed_rowsets = {}
 		local rowset_changed = true
@@ -542,6 +546,19 @@ function virtual_rowset(init, ...)
 
 	return rs
 end
+
+rowset.rowsets = virtual_rowset(function(rs) --rowset reflection
+	rs.fields = {
+		{name = 'name'}
+	}
+	rs.pk = 'name'
+	function rs:load_rows(res, params)
+		res.rows = {}
+		for name, rs in sortedpairs(rowset) do
+			add(res.rows, {name})
+		end
+	end
+end)
 
 --reload push-notifications --------------------------------------------------
 
