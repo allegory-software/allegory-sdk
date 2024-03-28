@@ -6,9 +6,10 @@
 API
 
 	client_config(name, [default])         make config value available on client-side
-	cssfile(file)                          add one or more css files to all.css
-	jsfile(file)                           add one or more js files to all.js
-	fontfile(file)                         add one or more font files to the preload list
+	cssfile(files)                         add one or more css files to all.css
+	jsfile(files)                          add one or more js files to all.js
+	fontfile(files)                        add one or more font files to the preload list
+	htmlfile(files)                        add one or more html files to _all.html
 	css(s)                                 add css code to inline.css
 	js(s)                                  add js code to inline.js
 	html(s)                                add inline html code to the SPA body
@@ -20,7 +21,7 @@ ACTIONS
 	strings.js       load strings.<lang>.js
 	all.js           output of jsfile() calls
 	all.css          output of cssfile() calls
-	_all.html        output of htmlfiles() calls
+	_all.html        output of htmlfile() calls
 	inline.js        output of js() calls
 	inline.css       output of css() calls
 	_inline.html     output of html() calls
@@ -124,7 +125,7 @@ wwwfile['all.js.cat'] = function()
 	return jsfile() .. ' inline.js' --append inline code at the end
 end
 
-htmlfiles = sepbuffer('\n', function(files)
+htmlfile = sepbuffer('\n', function(files)
 	for _,file in ipairs(catlist_files(files)) do
 		if not action[file] then --won't run actions for this.
 			S_ids_add_html(file, wwwfile(file))
@@ -132,7 +133,7 @@ htmlfiles = sepbuffer('\n', function(files)
 	end
 end)
 wwwfile['_all.html.cat'] = function()
-	return htmlfiles() .. '\n_inline.html'
+	return htmlfile() .. '\n_inline.html'
 end
 
 local fontfiles = {}
