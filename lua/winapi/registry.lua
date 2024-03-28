@@ -189,8 +189,9 @@ KEY_WOW64_64KEY = 0x0100
 
 function RegDeleteKey(hk, subkey, access)
 	access = access or KEY_WOW64_64KEY
-	checkrz(C.RegDeleteKeyExW(hkey(hk), wcs(subkey), access, 0))
-	return hk
+	local ret = C.RegDeleteKeyExW(hkey(hk), wcs(subkey), access, 0)
+	if ret == 0 then return true end
+	return nil, get_error_message(ret)
 end
 
 local dwbuf = ffi.new'DWORD[1]'
