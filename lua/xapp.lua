@@ -5,7 +5,7 @@
 
 LOADS
 
-	widgets, fontawesome, markdown-it, xauth
+	canvas-ui
 
 USAGE
 
