@@ -1349,7 +1349,6 @@ do
 	local function io_done(job, n)
 		return n
 	end
-
 	local function socket_send(self, buf, len)
 		wsabuf.buf = isstr(buf) and cast(u8p, buf) or buf
 		wsabuf.len = len

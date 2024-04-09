@@ -83,6 +83,8 @@ return function()
 
 	current_timestamp = current_timestamp_symbol
 
+	flags.hidden     = {hidden = true}
+
 	flags.not_null   = {not_null = true}
 	flags.autoinc    = {auto_increment = true, readonly = true}
 	flags.ascii_ci   = {charset = ascii, collation = 'ascii_ci'  , mysql_collation = 'ascii_general_ci'  , tarantool_collation = 'unicode_ci'}

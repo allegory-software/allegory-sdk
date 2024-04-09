@@ -907,9 +907,8 @@ function schema:resolve_types(fields, opt) --{field1, ...}
 	for i,f in ipairs(fields) do
 		local f = self:resolve_type(f, opt)
 		if opt and opt.check_duplicates then
-			local tbl_name = opt.table_name
-			assertf(isstr(f.name), 'field name not a string: %s: %s', tbl_name, type(f.name))
-			assertf(not fields[f.name], 'duplicate field name: %s.%s', tbl_name, f.name)
+			assertf(isstr(f.name), 'field name not a string: %s: %s', opt.table_name, type(f.name))
+			assertf(not fields[f.name], 'duplicate field name: %s.%s', opt.table_name, f.name)
 		end
 		fields[i] = f
 		fields[f.name] = f

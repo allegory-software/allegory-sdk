@@ -279,7 +279,9 @@ local function sortedpairs(t, parents)
 	local i = 0
 	return function()
 		i = i + 1
-		return keys[i], t[keys[i]]
+		local k = keys[i]
+		if k == nil then return nil end
+		return k, t[k]
 	end
 end
 

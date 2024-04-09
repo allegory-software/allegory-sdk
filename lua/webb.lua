@@ -628,7 +628,7 @@ end
 
 function wwwdirs()
 	local t = {}
-	local paths = config'www_dirs'
+	local paths = config('www_dirs', 'www;sdk/www')
 	if paths then
 		for s in paths:gmatch'[^;]+' do
 			if not path_isabs(s) then

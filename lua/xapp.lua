@@ -29,6 +29,10 @@ CONFIG
 
 ]==]
 
+--NOTE: www_dirs must be set before any jsfile(), cssfile(), htmlfile() calls!
+require'glue'
+config('www_dirs', 'www;sdk/www;sdk/canvas-ui/www')
+
 require'daemon'
 require'webb_spa'
 require'xrowset'

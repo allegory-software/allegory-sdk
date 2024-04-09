@@ -123,6 +123,15 @@ function mysql_print_result(opt)
 	local showcols = opt.showcols and index(collect(words(opt.showcols)))
 	local colmap   = opt.colmap
 
+	if not (hidecols or showcols) then
+		hidecols = {}
+		for i,field in ipairs(fields) do
+			if field.hidden then
+				hidecols[field.name] = true
+			end
+		end
+	end
+
 	if showcols then
 		local colmap1
 		for s in pairs(showcols) do
