@@ -55,3 +55,9 @@
 [submodule "canvas-ui"]
 	path = canvas-ui
 	url = git@github.com:allegory-software/canvas-ui.git
+[submodule "bin/linux"]
+	path = bin/linux
+	url = git@github.com:allegory-software/allegory-sdk-bin-debian10
+[submodule "bin/windows"]
+	path = bin/windows
+	url = git@github.com:allegory-software/allegory-sdk-bin-windows
