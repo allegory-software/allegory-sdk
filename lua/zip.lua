@@ -63,7 +63,7 @@ BROWSING
 		e.linkname -> s              - sym-link filename
 		e.zip64 -> t|f               - zip64 extension mode
 		e.aes_version -> n           - winzip aes extension if not 0
-		e.aes_encryption_mode -> n   - winzip aes encryption mode
+		e.aes_strength -> n          - winzip aes encryption strength
 	rz.pattern = s                  filter listing entries
 	rz.ci_pattern = s               filter listing entries (case insensitive)
 	rz|wz.password = s              set password for decryption/encryption
@@ -154,12 +154,12 @@ function entry_get:compression_method()
 end
 
 local aes_bits = {
-	[C.MZ_AES_ENCRYPTION_MODE_128] = 128,
-	[C.MZ_AES_ENCRYPTION_MODE_192] = 192,
-	[C.MZ_AES_ENCRYPTION_MODE_256] = 256,
+	[C.MZ_AES_STRENGTH_128] = 128,
+	[C.MZ_AES_STRENGTH_192] = 192,
+	[C.MZ_AES_STRENGTH_256] = 256,
 }
 function entry_get:aes_bits()
-	return aes_bits[self.aes_encryption_mode]
+	return aes_bits[self.aes_strength]
 end
 
 function entry_get:mtime() return tonumber(self.mtime_t) end
@@ -258,7 +258,8 @@ local function checklen(err)
 end
 
 local function open_reader(t)
-	assert(C.mz_zip_reader_create(vbuf) ~= nil)
+	vbuf[0] = C.mz_zip_reader_create()
+	assert(vbuf[0] ~= nil)
 	local z = cast(reader_ptr_ct, vbuf[0])
 	init_properties(z, t, reader_set)
 	local err
@@ -282,7 +283,8 @@ local function open_reader(t)
 end
 
 local function open_writer(t)
-	assert(C.mz_zip_writer_create(vbuf) ~= nil)
+	vbuf[0] = C.mz_zip_writer_create()
+	assert(vbuf[0] ~= nil)
 	local z = cast(writer_ptr_ct, vbuf[0])
 	init_properties(z, t, writer_set)
 	local err
@@ -468,10 +470,6 @@ end
 
 function reader_set:sign_required(req)
 	C.mz_zip_reader_set_sign_required(self, req and true or false)
-end
-
-function reader_get:file_has_sign()
-	return assert_checkexist(C.mz_zip_reader_entry_has_sign(self))
 end
 
 function reader:file_verify_sign()

@@ -29,8 +29,8 @@ build() {
 }
 
 if [ "$OSTYPE" = "msys" ]; then
-	C="src/mz_os_win32.c src/mz_strm_os_win32.c src/mz_crypt_win32.c
-	-D_WIN32_WINNT=0x601 -DWINVER=0x601" P=windows L="-s -static-libgcc -lcrypt32" \
+	C="src/mz_os_win32.c src/mz_strm_os_win32.c src/mz_crypt_winvista.c src/mz_crypt_winxp.c
+	-D_WIN32_WINNT=0x601 -DWINVER=0x601" P=windows L="-s -static-libgcc -lcrypt32 -lbcrypt -lncrypt" \
 	D=minizip2.dll A=minizip2.a build
 elif [ "${OSTYPE#darwin}" != "$OSTYPE" ]; then
 	P=osx C="-arch x86_64 src/mz_crypt_apple.c src/mz_strm_os_posix.c src/mz_os_posix.c" \

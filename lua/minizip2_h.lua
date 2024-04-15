@@ -1,5 +1,5 @@
---mz.h & mz_zip.h 3.0.4 Zip manipulation
---NOTE: Upgraded from 2.9.1 based on changelog only (no changes)!
+--mz.h & mz_zip.h 4.0.5 Zip manipulation
+--NOTE: Upgraded from 2.9.1 to 3.0.4 based on changelog only (no changes)!
 local ffi = require'ffi'
 ffi.cdef[[
 enum {
@@ -84,9 +84,12 @@ enum {
 	MZ_PKCRYPT_HEADER_SIZE          = 12,
 
 	MZ_AES_VERSION                  = 1,
-	MZ_AES_ENCRYPTION_MODE_128      = 0x01,
-	MZ_AES_ENCRYPTION_MODE_192      = 0x02,
-	MZ_AES_ENCRYPTION_MODE_256      = 0x03,
+	MZ_AES_MODE_ECB                 = 0,
+	MZ_AES_MODE_CBC                 = 1,
+	MZ_AES_MODE_GCM                 = 2,
+	MZ_AES_STRENGTH_128             = 1,
+	MZ_AES_STRENGTH_192             = 2,
+	MZ_AES_STRENGTH_256             = 3,
 	MZ_AES_KEY_LENGTH_MAX           = 32,
 	MZ_AES_BLOCK_SIZE               = 16,
 	MZ_AES_FOOTER_SIZE              = 10,
@@ -95,8 +98,14 @@ enum {
 	MZ_HASH_MD5_SIZE                = 16,
 	MZ_HASH_SHA1                    = 20,
 	MZ_HASH_SHA1_SIZE               = 20,
+	MZ_HASH_SHA224                  = 22,
+	MZ_HASH_SHA224_SIZE             = 28,
 	MZ_HASH_SHA256                  = 23,
 	MZ_HASH_SHA256_SIZE             = 32,
+	MZ_HASH_SHA384                  = 24,
+	MZ_HASH_SHA384_SIZE             = 48,
+	MZ_HASH_SHA512                  = 25,
+	MZ_HASH_SHA512_SIZE             = 64,
 	MZ_HASH_MAX_SIZE                = 256,
 
 	MZ_ENCODING_CODEPAGE_437        = 437,
@@ -137,7 +146,7 @@ typedef struct mz_zip_file_s
 
 	uint16_t zip64_u16;                 /* zip64 extension mode */
 	uint16_t aes_version;               /* winzip aes extension if not 0 */
-	uint8_t  aes_encryption_mode;       /* winzip aes encryption mode */
+	uint8_t  aes_strength;              /* winzip aes encryption strength */
 
 } mz_zip_file, mz_zip_entry;
 
@@ -147,7 +156,7 @@ typedef int32_t (*mz_zip_locate_entry_cb)(void *handle, void *userdata, mz_zip_f
 
 /***************************************************************************/
 
-void *  mz_zip_create(void **handle);
+void *  mz_zip_create(void);
 void    mz_zip_delete(void **handle);
 int32_t mz_zip_open(void *handle, void *stream, int32_t mode);
 int32_t mz_zip_close(void *handle);
@@ -169,20 +178,18 @@ int32_t mz_zip_entry_read_close(void *handle, uint32_t *crc32, int64_t *compress
 int32_t mz_zip_entry_write_open(void *handle, const mz_zip_file *file_info, int16_t compress_level, uint8_t raw, const char *password);
 int32_t mz_zip_entry_write(void *handle, const void *buf, int32_t len);
 int32_t mz_zip_entry_write_close(void *handle, uint32_t crc32, int64_t compressed_size, int64_t uncompressed_size);
-int32_t mz_zip_entry_is_dir(void *handle);
-int32_t mz_zip_entry_is_symlink(void *handle);
-int32_t mz_zip_entry_get_info(void *handle, mz_zip_file **file_info);
-int32_t mz_zip_entry_get_local_info(void *handle, mz_zip_file **local_file_info);
-int32_t mz_zip_entry_set_extrafield(void *handle, const uint8_t *extrafield, uint16_t extrafield_size);
+int32_t mz_zip_entry_seek_local_header(void *handle);
+int32_t mz_zip_entry_get_compress_stream(void *handle, void **compress_stream);
 int32_t mz_zip_entry_close_raw(void *handle, int64_t uncompressed_size, uint32_t crc32);
 int32_t mz_zip_entry_close(void *handle);
 
 /***************************************************************************/
 
-int32_t mz_zip_set_number_entry(void *handle, uint64_t number_entry);
-int32_t mz_zip_get_number_entry(void *handle, uint64_t *number_entry);
-int32_t mz_zip_set_disk_number_with_cd(void *handle, uint32_t disk_number_with_cd);
-int32_t mz_zip_get_disk_number_with_cd(void *handle, uint32_t *disk_number_with_cd);
+int32_t mz_zip_entry_is_dir(void *handle);
+int32_t mz_zip_entry_is_symlink(void *handle);
+int32_t mz_zip_entry_get_info(void *handle, mz_zip_file **file_info);
+int32_t mz_zip_entry_get_local_info(void *handle, mz_zip_file **local_file_info);
+int32_t mz_zip_entry_set_extrafield(void *handle, const uint8_t *extrafield, uint16_t extrafield_size);
 int64_t mz_zip_get_entry(void *handle);
 int32_t mz_zip_goto_entry(void *handle, int64_t cd_pos);
 int32_t mz_zip_goto_first_entry(void *handle);
@@ -190,6 +197,13 @@ int32_t mz_zip_goto_next_entry(void *handle);
 int32_t mz_zip_locate_entry(void *handle, const char *filename, uint8_t ignore_case);
 int32_t mz_zip_locate_first_entry(void *handle, void *userdata, mz_zip_locate_entry_cb cb);
 int32_t mz_zip_locate_next_entry(void *handle, void *userdata, mz_zip_locate_entry_cb cb);
+
+/***************************************************************************/
+
+int32_t mz_zip_set_number_entry(void *handle, uint64_t number_entry);
+int32_t mz_zip_get_number_entry(void *handle, uint64_t *number_entry);
+int32_t mz_zip_set_disk_number_with_cd(void *handle, uint32_t disk_number_with_cd);
+int32_t mz_zip_get_disk_number_with_cd(void *handle, uint32_t *disk_number_with_cd);
 
 /***************************************************************************/
 

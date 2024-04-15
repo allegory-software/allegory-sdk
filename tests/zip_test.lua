@@ -2,18 +2,14 @@ require'glue'
 require'zip'
 require'fs'
 
---TODO: test certificate-based signing.
-
 local function dump(z)
 	print('dir', 'comp', 'mtime', 'atime', 'btime', 'crc',
 		'usize', 'csize', 'disknum', 'diskoff', 'ifa', 'efa', 'zip64', 'zipcd',
 		'aesver', 'aesbits', 'md5', 'sha1', 'sha256',
-		'byte1', 'sign', 'verif', 'filename', 'comm', 'link')
+		'byte1', 'filename', 'comm', 'link')
 	for e in z:entries() do
 		local zip_cd = z.zip_cd
 		assert(z:open_entry())
-		local has_sign = not z.entry_is_dir and z.file_has_sign
-		local verify_sign = not z.entry_is_dir and z:file_verify_sign()
 		local buf = ffi.new'char[1]'
 		z:read(buf, 1)
 		z:close_entry() --TODO: gives crc error, why??
@@ -38,8 +34,6 @@ local function dump(z)
 			tohex(z:entry_hash'sha1' or ''):sub(1, 7),
 			tohex(z:entry_hash'sha256' or ''):sub(1, 7),
 			tohex(char(buf[0])),
-			has_sign,
-			verify_sign,
 			e.filename,
 			e.comment,
 			e.linkname
@@ -57,21 +51,16 @@ end
 local z = assert(zip_open{
 	file = 'zip_test/test-aes.zip',
 	password = '123',
-	--sign_required = true, --TODO: test signing
 })
 dump(z)
 assert(z:find'test/a/x/test1.txt')
 assert(z.entry_is_dir == false)
 
 z:open_entry()
-assert(z.file_has_sign == false)
-assert(z:file_verify_sign() == false)
 
 assert(z:find'test/a/')
 assert(z.entry_is_dir == true)
 z:open_entry()
---directories cannot have signature
-assert(pcall(function() return z:entry_has_sign() end) == false)
 
 assert(z:extract_all'tmp/minizip-test')
 

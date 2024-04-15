@@ -1,5 +1,5 @@
---mz_zip_rw.h 3.0.4 Zip reader/writer
---NOTE: Upgraded from 2.9.1 based on changelog only!
+--mz_zip_rw.h 4.0.5 Zip reader/writer
+--NOTE: Upgraded from 2.9.1 to 3.0.4 based on changelog only!
 --They say only `mz_zip_writer_open` changed.
 require'minizip2_h'
 require'minizip2_strm_h'
@@ -33,8 +33,6 @@ int32_t mz_zip_reader_locate_entry(void *handle, const char *filename, uint8_t i
 int32_t mz_zip_reader_entry_open(void *handle);
 int32_t mz_zip_reader_entry_close(void *handle);
 int32_t mz_zip_reader_entry_read(void *handle, void *buf, int32_t len);
-int32_t mz_zip_reader_entry_has_sign(void *handle);
-int32_t mz_zip_reader_entry_sign_verify(void *handle);
 int32_t mz_zip_reader_entry_get_hash(void *handle, uint16_t algorithm, uint8_t *digest, int32_t digest_size);
 int32_t mz_zip_reader_entry_get_first_hash(void *handle, uint16_t *algorithm, uint16_t *digest_size);
 int32_t mz_zip_reader_entry_get_info(void *handle, mz_zip_file **file_info);
@@ -58,14 +56,13 @@ int32_t mz_zip_reader_get_raw(void *handle, uint8_t *raw);
 int32_t mz_zip_reader_get_zip_cd(void *handle, uint8_t *zip_cd);
 int32_t mz_zip_reader_get_comment(void *handle, const char **comment);
 void    mz_zip_reader_set_encoding(void *handle, int32_t encoding);
-void    mz_zip_reader_set_sign_required(void *handle, uint8_t sign_required);
 void    mz_zip_reader_set_overwrite_cb(void *handle, void *userdata, mz_zip_reader_overwrite_cb cb);
 void    mz_zip_reader_set_password_cb(void *handle, void *userdata, mz_zip_reader_password_cb cb);
 void    mz_zip_reader_set_progress_cb(void *handle, void *userdata, mz_zip_reader_progress_cb cb);
 void    mz_zip_reader_set_progress_interval(void *handle, uint32_t milliseconds);
 void    mz_zip_reader_set_entry_cb(void *handle, void *userdata, mz_zip_reader_entry_cb cb);
 int32_t mz_zip_reader_get_zip_handle(void *handle, void **zip_handle);
-void*   mz_zip_reader_create(void **handle);
+void*   mz_zip_reader_create(void);
 void    mz_zip_reader_delete(void **handle);
 
 /***************************************************************************/
@@ -123,7 +120,7 @@ void    mz_zip_writer_set_progress_cb(void *handle, void *userdata, mz_zip_write
 void    mz_zip_writer_set_progress_interval(void *handle, uint32_t milliseconds);
 void    mz_zip_writer_set_entry_cb(void *handle, void *userdata, mz_zip_writer_entry_cb cb);
 int32_t mz_zip_writer_get_zip_handle(void *handle, void **zip_handle);
-void*   mz_zip_writer_create(void **handle);
+void*   mz_zip_writer_create(void);
 void    mz_zip_writer_delete(void **handle);
 
 /***************************************************************************/
