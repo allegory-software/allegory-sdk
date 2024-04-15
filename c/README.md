@@ -45,9 +45,9 @@ and it's the only supported way to build it. To install the toolchain, type:
 	sudo apt-get install libssl-dev
 
 Note that Linux binaries are not very backwards compatible because of glibc's
-"versioned symbols". If you need backwards-compatible binaries you'll have to
-build them on the _oldest_ Linux that you care to support, but using the
-_newest_ GCC that you can install on that system. Good luck!
+"versioned symbols", and because of OpenSSL. If you need backwards-compatible
+binaries you'll have to build them on the _oldest_ Linux that you care to support,
+but using the _newest_ GCC that you can install on that system. Good luck!
 
 ## Binary facts
 
