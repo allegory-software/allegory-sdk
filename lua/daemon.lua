@@ -109,6 +109,7 @@ end)
 cmd_server('restart', 'Restart the server', function()
 	if cmd_server.stop.fn() == 0 then
 		cmd_server.start.fn()
+		cmd_server.status.fn()
 	end
 end)
 
