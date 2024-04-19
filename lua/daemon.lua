@@ -46,6 +46,12 @@ cmd_server('running', 'Check if the server is running', function()
 	return running() and 0 or 1
 end)
 
+cmd_server('pid', 'Get server PID', function()
+	local is_running, pid = running()
+	if is_running then say(pid) end
+	return is_running and 0 or 1
+end)
+
 cmd_server('status', 'Show server status', function()
 	local is_running, pid = running()
 	if is_running then
