@@ -351,7 +351,7 @@ local function save_session(sess)
 				insert into sess
 					(token, expires, usr)
 				values
-					(?, from_unixtime(?), ?)
+					(?, ?, ?)
 				]],
 				sess.id,
 				sess.expires,
@@ -361,7 +361,7 @@ local function save_session(sess)
 			query([[
 				update sess set
 					usr = ?,
-					expires = from_unixtime(?)
+					expires = ?
 				where
 					token = ?
 				]], sess.usr, sess.expires, sess.id)
@@ -637,7 +637,7 @@ local function register_token(usr, token, validates, token_lifetime, token_maxco
 		insert into usrtoken
 			(token, usr, expires, validates, ctime)
 		values
-			(?, ?, from_unixtime(?), ?, from_unixtime(?))
+			(?, ?, ?, ?, ?)
 		]], secret_hash(token), usr, expires, validates, now)
 
 	return true

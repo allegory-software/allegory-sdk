@@ -32,7 +32,7 @@ if Linux then
 cmd_server = cmdsection'SERVER CONTROL'
 
 local function findpid(pid, cmd)
-	local s = load(_('/proc/%s/cmdline', pid), false, true)
+	local s = try_load(_('/proc/%s/cmdline', pid), false, true)
 	return s and s:find(cmd, 1, true) and true or false
 end
 
