@@ -26,6 +26,7 @@ SOCKETS
 	tcp([opt], [family], [protocol]) -> tcp         make a TCP socket
 	udp([opt], [family], [protocol]) -> udp         make a UDP socket
 	rawsocket([opt], [family], [protocol]) -> raw   make a raw socket
+	unixsocket([opt]) -> unix                       make a unix domain socket
 	[try_]connect([tcp, ]host, port, [timeout]) -> tcp   (create tcp socket and) connect
 	listen([tcp, ]host, port, ...) -> tcp           (create tcp socket and) listen
 	s:socktype() -> s                               socket type: 'tcp', ...
@@ -35,6 +36,7 @@ SOCKETS
 	s:closed() -> t|f                               check if the socket is closed
 	s:onclose(fn)                                   exec fn after the socket is closed
 	s:[try_]bind([host], [port], [af])              bind socket to an address
+	unix:[try_]bind(path)                           bind socket to a unix socket
 	s:[try_]setopt(opt, val)                        set socket option (`'so_*'` or `'tcp_*'`)
 	s:[try_]getopt(opt) -> val                      get socket option
 	tcp|udp:[try_]connect(host, port, [af], ...)    connect to an address
@@ -487,6 +489,11 @@ struct sockaddr_in6 {
 	unsigned long   scope_id;
 };
 
+struct sockaddr_un {
+	short family_num;
+	char  path[108];
+};
+
 typedef struct sockaddr {
 	union {
 		struct {
@@ -495,6 +502,7 @@ typedef struct sockaddr {
 		};
 		struct sockaddr_in  addr_in;
 		struct sockaddr_in6 addr_in6;
+		struct sockaddr_un  addr_un;
 	};
 } sockaddr;
 ]]
@@ -648,21 +656,29 @@ do
 
 	local sa = {}
 
-	function sa:family () return family_map[self.family_num] end
-	function sa:port   () return self.port_bytes[0] * 0x100 + self.port_bytes[1] end
-
 	local AF_INET  = families.inet
 	local AF_INET6 = families.inet6
 	local AF_UNIX  = families.unix
 
+	function sa:family() return family_map[self.family_num] end
+
+	function sa:port()
+		if self.family_num == AF_INET or self.family_num == AF_INET6 then
+			return self.port_bytes[0] * 0x100 + self.port_bytes[1]
+		else
+			return 0
+		end
+	end
+
 	function sa:addr()
 		return self.family_num == AF_INET  and self.addr_in
 			 or self.family_num == AF_INET6 and self.addr_in6
+			 or self.family_num == AF_UNIX  and self.addr_un
 			 or error'NYI'
 	end
 
 	function sa:tostring()
-		return self.addr_in:tostring()..(self:port() ~= 0 and ':'..self:port() or '')
+		return self:addr():tostring()..(self:port() ~= 0 and ':'..self:port() or '')
 	end
 
 	metatype('struct sockaddr', {__index = sa})
@@ -704,6 +720,14 @@ do
 	function socket:addr(host, port, flags)
 		return getaddrinfo(host, port, self._st, self._af, self._pr, addr_flags)
 	end
+
+	local sa_un = {}
+
+	function sa_un:tostring()
+		return str(self.path)
+	end
+
+	metatype('struct sockaddr_un', {__index = sa_un})
 
 end
 
@@ -1463,8 +1487,6 @@ ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 ]]
 
---error handling.
-
 --[[local]] check = check_errno
 
 local SOCK_NONBLOCK  = OSX and 0x000004 or 0x000800 --async I/O
@@ -1744,6 +1766,18 @@ function _file_async_read(f, buf, len)
 	return file_read(f, buf, len)
 end
 
+--unix sockets ---------------------------------------------------------------
+
+local AF_UNIX = 1
+
+local function unix_sockaddr(path)
+	local sa = sockaddr_ct()
+	sa.family = AF_UNIX
+	assert(path < sizeof(sa.path))
+	copy(sa.path, path)
+	return sa
+end
+
 --epoll ----------------------------------------------------------------------
 
 if Linux then
@@ -1954,21 +1988,38 @@ int bind(SOCKET s, const sockaddr*, int namelen);
 
 function socket:try_bind(host, port, addr_flags)
 	assert(not self.bound_addr)
-	local ai, ext_ai = self:addr(host or '*', port or 0, addr_flags)
-	if not ai then return nil, ext_ai end
-	local ok, err = check(C.bind(self.s, ai.addr, ai.addrlen) == 0)
-	local ba = ok and ai.addr:addr():tostring()
-	local bp = ok and ai.addr:port()
-	if not ext_ai then ai:free() end
-	if not ok then return false, err end
-	self.bound_addr = ba
-	self.bound_port = bp
+	if isctype(sockaddr_ct, host) then
+		local sa = host
+		local ok, err = check(C.bind(self.s, sa, sizeof(sa)) == 0)
+		if not ok then return false, err end
+		self.bound_addr = sa:tostring()
+	else
+		local ai, ext_ai = self:addr(host or '*', port or 0, addr_flags)
+		if not ai then return nil, ext_ai end
+		local ok, err = check(C.bind(self.s, ai.addr, ai.addrlen) == 0)
+		local ba = ok and ai.addr:addr():tostring()
+		local bp = ok and ai.addr:port()
+		if not ext_ai then ai:free() end
+		if not ok then return false, err end
+		self.bound_addr = ba
+		self.bound_port = bp
+	end
 	if Linux then
 		--epoll_ctl() must be called after bind() for some reason.
 		return _sock_register(self)
 	else
 		return true
 	end
+end
+
+function unix:try_bind(path)
+	assert(not self.bound_addr)
+	local sa = unix_sockaddr(path)
+	local ok, err = check(C.bind(self.s, sa, sizeof(sa)) == 0)
+	if not ok then return false, err end
+	self.bound_addr = sa:tostring()
+	--epoll_ctl() must be called after bind() for some reason.
+	return _sock_register(self)
 end
 
 --listen() -------------------------------------------------------------------
@@ -2567,9 +2618,10 @@ end
 	log('', 'sock', 'create', '%-4s', s)
 	return s
 end
-function _G.tcp       (opt, ...) return create_socket(opt, tcp, 'tcp', ...) end
-function _G.udp       (opt, ...) return create_socket(opt, udp, 'udp', ...) end
-function _G.rawsocket (opt, ...) return create_socket(opt, raw, 'raw', ...) end
+function _G.tcp        (opt, ...)  return create_socket(opt, tcp , 'tcp' , ...) end
+function _G.udp        (opt, ...)  return create_socket(opt, udp , 'udp' , ...) end
+function _G.rawsocket  (opt, ...)  return create_socket(opt, raw , 'raw' , ...) end
+function _G.unixsocket (opt)       return create_socket(opt, unix, 'unix', 'unix', 0) end
 
 update(tcp, socket)
 update(udp, socket)
