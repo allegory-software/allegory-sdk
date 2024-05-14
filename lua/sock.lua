@@ -26,7 +26,6 @@ SOCKETS
 	tcp([opt], [family], [protocol]) -> tcp         make a TCP socket
 	udp([opt], [family], [protocol]) -> udp         make a UDP socket
 	rawsocket([opt], [family], [protocol]) -> raw   make a raw socket
-	unixsocket([opt]) -> unix                       make a unix domain socket
 	[try_]connect([tcp, ]host, port, [timeout]) -> tcp   (create tcp socket and) connect
 	listen([tcp, ]host, port, ...) -> tcp           (create tcp socket and) listen
 	s:socktype() -> s                               socket type: 'tcp', ...
@@ -36,7 +35,6 @@ SOCKETS
 	s:closed() -> t|f                               check if the socket is closed
 	s:onclose(fn)                                   exec fn after the socket is closed
 	s:[try_]bind([host], [port], [af])              bind socket to an address
-	unix:[try_]bind(path)                           bind socket to a unix socket
 	s:[try_]setopt(opt, val)                        set socket option (`'so_*'` or `'tcp_*'`)
 	s:[try_]getopt(opt) -> val                      get socket option
 	tcp|udp:[try_]connect(host, port, [af], ...)    connect to an address
@@ -611,7 +609,19 @@ do
 
 	function try_getaddrinfo(host, port, socket_type, family, protocol, flags)
 		if host == '*' then host = '0.0.0.0' end --all.
-		if isctype(addrinfo_ct, host) then
+		if host:starts'unix:' then
+			local path = host:sub(6)
+			local sa = sockaddr_ct()
+			sa.family = AF_UNIX
+			assert(path < sizeof(sa.path))
+			copy(sa.path, path)
+			local ai = addrinfo_ct()
+			ai.socktype_num = socket_types[socket_type] or socket_type or 0
+			ai.family_num = AF_UNIX
+			ai.addrlen = sizeof(sa)
+			ai.addr = sa
+			return ai, true --second retval is to prevent calling free() on it
+		elseif isctype(addrinfo_ct, host) then
 			return host, true --pass-through and return "not owned" flag
 		elseif istab(host) then
 			local t = host
@@ -1766,18 +1776,6 @@ function _file_async_read(f, buf, len)
 	return file_read(f, buf, len)
 end
 
---unix sockets ---------------------------------------------------------------
-
-local AF_UNIX = 1
-
-local function unix_sockaddr(path)
-	local sa = sockaddr_ct()
-	sa.family = AF_UNIX
-	assert(path < sizeof(sa.path))
-	copy(sa.path, path)
-	return sa
-end
-
 --epoll ----------------------------------------------------------------------
 
 if Linux then
@@ -2621,7 +2619,6 @@ end
 function _G.tcp        (opt, ...)  return create_socket(opt, tcp , 'tcp' , ...) end
 function _G.udp        (opt, ...)  return create_socket(opt, udp , 'udp' , ...) end
 function _G.rawsocket  (opt, ...)  return create_socket(opt, raw , 'raw' , ...) end
-function _G.unixsocket (opt)       return create_socket(opt, unix, 'unix', 'unix', 0) end
 
 update(tcp, socket)
 update(udp, socket)
