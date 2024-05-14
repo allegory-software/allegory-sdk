@@ -116,22 +116,25 @@ getaddrinfo(...) -> ai
 
 	Look-up a hostname. Returns an "address info" object which is a OS-allocated
 	linked list of one or more addresses resolved with the system's `getaddrinfo()`.
-	The args can be either an existing `ai` object which is passed through, or:
+	The args can be either:
 
-	* `host, port, [socket_type], [family], [protocol], [af]`
+	* an existing `ai` object which is passed through, or
+	* `host, port, [socket_type], [family], [protocol], [af]`, or
+	* `'unix:path', [socket_type]
 
-	where
+	where:
 
-  * `host` can be a hostname, ip address or `'*'` which means "all interfaces".
-  * `port` can be a port number, a service name or `0` which means "any available port".
-  * `socket_type` can be `'tcp'`, `'udp'`, `'raw'` or `0` (the default, meaning "all").
-  * `family` can be `'inet'`, `'inet6'` or `'unix'` or `0` (the default, meaning "all").
-  * `protocol` can be `'ip'`, `'ipv6'`, `'tcp'`, `'udp'`, `'raw'`, `'icmp'`,
-  `'igmp'` or `'icmpv6'` or `0` (the default is either `'tcp'`, `'udp'`
-  or `'raw'`, based on socket type).
-  * `af` are a `bor()` list of `passive`, `cannonname`,
-    `numerichost`, `numericserv`, `all`, `v4mapped`, `addrconfig`
-    which map to `getaddrinfo()` flags.
+	* `host` can be a hostname, ip address or `'*'` which means "all interfaces".
+	* `port` can be a port number, a service name or `0` which means "any available port".
+	* `'unix:path'` creates an object representing a unix domain socket.
+	* `socket_type` can be `'tcp'`, `'udp'`, `'raw'` or `0` (the default, meaning "all").
+	* `family` can be `'inet'`, `'inet6'` or `'unix'` or `0` (the default, meaning "all").
+	* `protocol` can be `'ip'`, `'ipv6'`, `'tcp'`, `'udp'`, `'raw'`, `'icmp'`,
+	`'igmp'` or `'icmpv6'` or `0` (the default is either `'tcp'`, `'udp'`
+	or `'raw'`, based on socket type).
+	* `af` are a `bor()` list of `passive`, `cannonname`,
+	`numerichost`, `numericserv`, `all`, `v4mapped`, `addrconfig`
+	which map to `getaddrinfo()` flags.
 
 NOTE: `getaddrinfo()` is blocking! Use resolve() to resolve hostnames first!
 
