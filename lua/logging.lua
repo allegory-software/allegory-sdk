@@ -439,7 +439,7 @@ local function log(self, severity, module, event, fmt, ...)
 	end
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
 		local entry = (self.logtofile or not self.quiet)
-			and _('%s %s %s %-6s %-8s %-4s %s\n',
+			and _('%s %s %-1s %-6s %-8s %-4s %s\n',
 				env, date('%Y-%m-%d %H:%M:%S', time),
 				severity_symbol[severity] or severity,
 				module or '', (event or ''):sub(1, 8),

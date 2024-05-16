@@ -34,19 +34,21 @@ SOCKETS
 	s:[try_]close()                                 send FIN and/or RST and free socket
 	s:closed() -> t|f                               check if the socket is closed
 	s:onclose(fn)                                   exec fn after the socket is closed
-	s:[try_]bind([host], [port], [af])              bind socket to an address
+	s:[try_]bind([host], [port], [aflags])          bind socket to an address
+	s:[try_]bind(sa)                                bind socket to an address
+	s:[try_]bind('unix:FILE')                       bind socket to a unix domain socket
 	s:[try_]setopt(opt, val)                        set socket option (`'so_*'` or `'tcp_*'`)
 	s:[try_]getopt(opt) -> val                      get socket option
-	tcp|udp:[try_]connect(host, port, [af], ...)    connect to an address
+	tcp|udp:[try_]connect(host, port, [aflags], ...)    connect to an address
 	tcp:[try_]send(s|buf, [len]) -> true            send bytes to connected address
 	udp:[try_]send(s|buf, [len]) -> len             send bytes to connected address
 	tcp|udp:[try_]recv(buf, maxlen) -> len          receive bytes
-	tcp:[try_]listen([backlog, ]host, port, [onaccept], [af])   put socket in listening mode
+	tcp:[try_]listen([backlog, ]host, port, [onaccept], [aflags])   put socket in listening mode
 	tcp:[try_]accept() -> ctcp | nil,err,[retry]    accept a client connection
 	tcp:[try_]recvn(buf, n) -> buf, n               receive n bytes
 	tcp:[try_]recvall() -> buf, len                 receive until closed
 	tcp:[try_]recvall_read() -> read                make a buffered read function
-	udp:[try_]sendto(host, port, s|buf, [len], [af]) -> len    send a datagram to an address
+	udp:[try_]sendto(host, port, s|buf, [len], [aflags]) -> len    send a datagram to an address
 	udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa        receive the next datagram
 	tcp:[try_]shutdown(['r'|'w'|'rw'])         send FIN
 	s:debug([protocol])                        enable debugging
@@ -119,20 +121,20 @@ getaddrinfo(...) -> ai
 	The args can be either:
 
 	* an existing `ai` object which is passed through, or
-	* `host, port, [socket_type], [family], [protocol], [af]`, or
-	* `'unix:path', [socket_type]
+	* `host, port, [socket_type], [family], [protocol], [aflags]`, or
+	* `'unix:PATH', [socket_type]
 
 	where:
 
 	* `host` can be a hostname, ip address or `'*'` which means "all interfaces".
 	* `port` can be a port number, a service name or `0` which means "any available port".
-	* `'unix:path'` creates an object representing a unix domain socket.
+	* `'unix:PATH'` creates an object representing a unix domain socket.
 	* `socket_type` can be `'tcp'`, `'udp'`, `'raw'` or `0` (the default, meaning "all").
 	* `family` can be `'inet'`, `'inet6'` or `'unix'` or `0` (the default, meaning "all").
 	* `protocol` can be `'ip'`, `'ipv6'`, `'tcp'`, `'udp'`, `'raw'`, `'icmp'`,
 	`'igmp'` or `'icmpv6'` or `0` (the default is either `'tcp'`, `'udp'`
 	or `'raw'`, based on socket type).
-	* `af` are a `bor()` list of `passive`, `cannonname`,
+	* `aflags` are a `bor()` list of `passive`, `cannonname`,
 	`numerichost`, `numericserv`, `all`, `v4mapped`, `addrconfig`
 	which map to `getaddrinfo()` flags.
 
@@ -161,6 +163,7 @@ s:[try_]close()
 	then a TCP RST packet is sent to the client, otherwise a FIN is sent.
 
 s:[try_]bind([host], [port], [af])
+s:[try_]bind('unix:FILE')
 
 	Bind socket to an interface/port (which default to '*' and 0 respectively
 	meaning all interfaces and a random port).
@@ -508,6 +511,8 @@ typedef struct sockaddr {
 } sockaddr;
 ]]
 
+local sockaddr_ct = ctype'sockaddr'
+
 -- working around ABI blindness of C programmers...
 if Windows then
 	cdef[[
@@ -520,6 +525,7 @@ if Windows then
 		char            *name_ptr;
 		struct sockaddr *addr;
 		struct addrinfo *next_ptr;
+		struct sockaddr addrs[?];
 	};
 	]]
 else
@@ -533,6 +539,7 @@ else
 		struct sockaddr *addr;
 		char            *name_ptr;
 		struct addrinfo *next_ptr;
+		struct sockaddr addrs[?];
 	};
 	]]
 end
@@ -551,6 +558,10 @@ do
 		unix  = Linux and 1,
 	}
 	local family_map = index(families)
+
+	local AF_INET  = families.inet
+	local AF_INET6 = families.inet6
+	local AF_UNIX  = families.unix
 
 	local socket_types = {
 		tcp = Windows and 1 or Linux and 1,
@@ -590,11 +601,12 @@ do
 	function socketargs(socket_type, family, protocol)
 		local st = socket_types[socket_type] or socket_type or 0
 		local af = families[family] or family or 0
-		local pr = protocols[protocol] or protocol or default_protocols[st] or 0
+		local pr = protocols[protocol] or protocol
+			or (af ~= AF_UNIX and default_protocols[st]) or 0
 		return st, af, pr
 	end
 
-	local hints = new'struct addrinfo'
+	local hints = new('struct addrinfo', 0)
 	local addrs = new'struct addrinfo*[1]'
 	local addrinfo_ct = ctype'struct addrinfo'
 
@@ -613,15 +625,15 @@ do
 	function try_getaddrinfo(host, port, socket_type, family, protocol, flags)
 		if host == '*' then host = '0.0.0.0' end --all.
 		if host:starts'unix:' then
+			local ai = addrinfo_ct(1)
+			local sa = ai.addrs[0]
 			local path = host:sub(6)
-			local sa = sockaddr_ct()
-			sa.family = AF_UNIX
-			assert(path < sizeof(sa.path))
-			copy(sa.path, path)
-			local ai = addrinfo_ct()
+			sa.family_num = AF_UNIX
+			assert(#path < sizeof(sa.addr_un.path))
+			copy(sa.addr_un.path, path)
 			ai.socktype_num = socket_types[socket_type] or socket_type or 0
 			ai.family_num = AF_UNIX
-			ai.addrlen = sizeof(sa)
+			ai.addrlen = sizeof(hints)
 			ai.addr = sa
 			return ai, true --second retval is to prevent calling free() on it
 		elseif isctype(addrinfo_ct, host) then
@@ -668,10 +680,6 @@ do
 	function ai:tostring () return self.addr:tostring() end
 
 	local sa = {}
-
-	local AF_INET  = families.inet
-	local AF_INET6 = families.inet6
-	local AF_UNIX  = families.unix
 
 	function sa:family() return family_map[self.family_num] end
 
@@ -731,7 +739,7 @@ do
 	function socket:protocol () return protocol_map   [self._pr] end
 
 	function socket:addr(host, port, flags)
-		return getaddrinfo(host, port, self._st, self._af, self._pr, addr_flags)
+		return getaddrinfo(host, port, self._st, self._af, self._pr, flags)
 	end
 
 	local sa_un = {}
@@ -743,8 +751,6 @@ do
 	metatype('struct sockaddr_un', {__index = sa_un})
 
 end
-
-local sockaddr_ct = ctype'sockaddr'
 
 --Winsock2 & IOCP ------------------------------------------------------------
 
@@ -2013,16 +2019,6 @@ function socket:try_bind(host, port, addr_flags)
 	end
 end
 
-function unix:try_bind(path)
-	assert(not self.bound_addr)
-	local sa = unix_sockaddr(path)
-	local ok, err = check(C.bind(self.s, sa, sizeof(sa)) == 0)
-	if not ok then return false, err end
-	self.bound_addr = sa:tostring()
-	--epoll_ctl() must be called after bind() for some reason.
-	return _sock_register(self)
-end
-
 --listen() -------------------------------------------------------------------
 
 cdef[[
@@ -2654,6 +2650,8 @@ function listen(self, ...)
 	if not issocket(self) then
 		return listen(create_tcp(), self, ...)
 	end
+	--NOTE: reuseaddr doesn't work with unix sockets,
+	--you must remove the socket file first!
 	self:setopt('reuseaddr', true)
 	return self:listen(...)
 end
