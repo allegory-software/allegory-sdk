@@ -34,19 +34,21 @@ SOCKETS
 	s:[try_]close()                                 send FIN and/or RST and free socket
 	s:closed() -> t|f                               check if the socket is closed
 	s:onclose(fn)                                   exec fn after the socket is closed
-	s:[try_]bind([host], [port], [af])              bind socket to an address
+	s:[try_]bind([host], [port], [aflags])          bind socket to an address
+	s:[try_]bind(sa)                                bind socket to an address
+	s:[try_]bind('unix:FILE')                       bind socket to a unix domain socket
 	s:[try_]setopt(opt, val)                        set socket option (`'so_*'` or `'tcp_*'`)
 	s:[try_]getopt(opt) -> val                      get socket option
-	tcp|udp:[try_]connect(host, port, [af], ...)    connect to an address
+	tcp|udp:[try_]connect(host, port, [aflags], ...)    connect to an address
 	tcp:[try_]send(s|buf, [len]) -> true            send bytes to connected address
 	udp:[try_]send(s|buf, [len]) -> len             send bytes to connected address
 	tcp|udp:[try_]recv(buf, maxlen) -> len          receive bytes
-	tcp:[try_]listen([backlog, ]host, port, [onaccept], [af])   put socket in listening mode
+	tcp:[try_]listen([backlog, ]host, port, [onaccept], [aflags])   put socket in listening mode
 	tcp:[try_]accept() -> ctcp | nil,err,[retry]    accept a client connection
 	tcp:[try_]recvn(buf, n) -> buf, n               receive n bytes
 	tcp:[try_]recvall() -> buf, len                 receive until closed
 	tcp:[try_]recvall_read() -> read                make a buffered read function
-	udp:[try_]sendto(host, port, s|buf, [len], [af]) -> len    send a datagram to an address
+	udp:[try_]sendto(host, port, s|buf, [len], [aflags]) -> len    send a datagram to an address
 	udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa        receive the next datagram
 	tcp:[try_]shutdown(['r'|'w'|'rw'])         send FIN
 	s:debug([protocol])                        enable debugging
@@ -116,22 +118,25 @@ getaddrinfo(...) -> ai
 
 	Look-up a hostname. Returns an "address info" object which is a OS-allocated
 	linked list of one or more addresses resolved with the system's `getaddrinfo()`.
-	The args can be either an existing `ai` object which is passed through, or:
+	The args can be either:
 
-	* `host, port, [socket_type], [family], [protocol], [af]`
+	* an existing `ai` object which is passed through, or
+	* `host, port, [socket_type], [family], [protocol], [aflags]`, or
+	* `'unix:PATH', [socket_type]
 
-	where
+	where:
 
-  * `host` can be a hostname, ip address or `'*'` which means "all interfaces".
-  * `port` can be a port number, a service name or `0` which means "any available port".
-  * `socket_type` can be `'tcp'`, `'udp'`, `'raw'` or `0` (the default, meaning "all").
-  * `family` can be `'inet'`, `'inet6'` or `'unix'` or `0` (the default, meaning "all").
-  * `protocol` can be `'ip'`, `'ipv6'`, `'tcp'`, `'udp'`, `'raw'`, `'icmp'`,
-  `'igmp'` or `'icmpv6'` or `0` (the default is either `'tcp'`, `'udp'`
-  or `'raw'`, based on socket type).
-  * `af` are a `bor()` list of `passive`, `cannonname`,
-    `numerichost`, `numericserv`, `all`, `v4mapped`, `addrconfig`
-    which map to `getaddrinfo()` flags.
+	* `host` can be a hostname, ip address or `'*'` which means "all interfaces".
+	* `port` can be a port number, a service name or `0` which means "any available port".
+	* `'unix:PATH'` creates an object representing a unix domain socket.
+	* `socket_type` can be `'tcp'`, `'udp'`, `'raw'` or `0` (the default, meaning "all").
+	* `family` can be `'inet'`, `'inet6'` or `'unix'` or `0` (the default, meaning "all").
+	* `protocol` can be `'ip'`, `'ipv6'`, `'tcp'`, `'udp'`, `'raw'`, `'icmp'`,
+	`'igmp'` or `'icmpv6'` or `0` (the default is either `'tcp'`, `'udp'`
+	or `'raw'`, based on socket type).
+	* `aflags` are a `bor()` list of `passive`, `cannonname`,
+	`numerichost`, `numericserv`, `all`, `v4mapped`, `addrconfig`
+	which map to `getaddrinfo()` flags.
 
 NOTE: `getaddrinfo()` is blocking! Use resolve() to resolve hostnames first!
 
@@ -158,6 +163,7 @@ s:[try_]close()
 	then a TCP RST packet is sent to the client, otherwise a FIN is sent.
 
 s:[try_]bind([host], [port], [af])
+s:[try_]bind('unix:FILE')
 
 	Bind socket to an interface/port (which default to '*' and 0 respectively
 	meaning all interfaces and a random port).
@@ -487,6 +493,11 @@ struct sockaddr_in6 {
 	unsigned long   scope_id;
 };
 
+struct sockaddr_un {
+	short family_num;
+	char  path[108];
+};
+
 typedef struct sockaddr {
 	union {
 		struct {
@@ -495,9 +506,12 @@ typedef struct sockaddr {
 		};
 		struct sockaddr_in  addr_in;
 		struct sockaddr_in6 addr_in6;
+		struct sockaddr_un  addr_un;
 	};
 } sockaddr;
 ]]
+
+local sockaddr_ct = ctype'sockaddr'
 
 -- working around ABI blindness of C programmers...
 if Windows then
@@ -511,6 +525,7 @@ if Windows then
 		char            *name_ptr;
 		struct sockaddr *addr;
 		struct addrinfo *next_ptr;
+		struct sockaddr addrs[?];
 	};
 	]]
 else
@@ -524,6 +539,7 @@ else
 		struct sockaddr *addr;
 		char            *name_ptr;
 		struct addrinfo *next_ptr;
+		struct sockaddr addrs[?];
 	};
 	]]
 end
@@ -542,6 +558,10 @@ do
 		unix  = Linux and 1,
 	}
 	local family_map = index(families)
+
+	local AF_INET  = families.inet
+	local AF_INET6 = families.inet6
+	local AF_UNIX  = families.unix
 
 	local socket_types = {
 		tcp = Windows and 1 or Linux and 1,
@@ -581,11 +601,12 @@ do
 	function socketargs(socket_type, family, protocol)
 		local st = socket_types[socket_type] or socket_type or 0
 		local af = families[family] or family or 0
-		local pr = protocols[protocol] or protocol or default_protocols[st] or 0
+		local pr = protocols[protocol] or protocol
+			or (af ~= AF_UNIX and default_protocols[st]) or 0
 		return st, af, pr
 	end
 
-	local hints = new'struct addrinfo'
+	local hints = new('struct addrinfo', 0)
 	local addrs = new'struct addrinfo*[1]'
 	local addrinfo_ct = ctype'struct addrinfo'
 
@@ -603,7 +624,19 @@ do
 
 	function try_getaddrinfo(host, port, socket_type, family, protocol, flags)
 		if host == '*' then host = '0.0.0.0' end --all.
-		if isctype(addrinfo_ct, host) then
+		if host:starts'unix:' then
+			local ai = addrinfo_ct(1)
+			local sa = ai.addrs[0]
+			local path = host:sub(6)
+			sa.family_num = AF_UNIX
+			assert(#path < sizeof(sa.addr_un.path))
+			copy(sa.addr_un.path, path)
+			ai.socktype_num = socket_types[socket_type] or socket_type or 0
+			ai.family_num = AF_UNIX
+			ai.addrlen = sizeof(hints)
+			ai.addr = sa
+			return ai, true --second retval is to prevent calling free() on it
+		elseif isctype(addrinfo_ct, host) then
 			return host, true --pass-through and return "not owned" flag
 		elseif istab(host) then
 			local t = host
@@ -648,21 +681,25 @@ do
 
 	local sa = {}
 
-	function sa:family () return family_map[self.family_num] end
-	function sa:port   () return self.port_bytes[0] * 0x100 + self.port_bytes[1] end
+	function sa:family() return family_map[self.family_num] end
 
-	local AF_INET  = families.inet
-	local AF_INET6 = families.inet6
-	local AF_UNIX  = families.unix
+	function sa:port()
+		if self.family_num == AF_INET or self.family_num == AF_INET6 then
+			return self.port_bytes[0] * 0x100 + self.port_bytes[1]
+		else
+			return 0
+		end
+	end
 
 	function sa:addr()
 		return self.family_num == AF_INET  and self.addr_in
 			 or self.family_num == AF_INET6 and self.addr_in6
+			 or self.family_num == AF_UNIX  and self.addr_un
 			 or error'NYI'
 	end
 
 	function sa:tostring()
-		return self.addr_in:tostring()..(self:port() ~= 0 and ':'..self:port() or '')
+		return self:addr():tostring()..(self:port() ~= 0 and ':'..self:port() or '')
 	end
 
 	metatype('struct sockaddr', {__index = sa})
@@ -702,12 +739,18 @@ do
 	function socket:protocol () return protocol_map   [self._pr] end
 
 	function socket:addr(host, port, flags)
-		return getaddrinfo(host, port, self._st, self._af, self._pr, addr_flags)
+		return getaddrinfo(host, port, self._st, self._af, self._pr, flags)
 	end
 
-end
+	local sa_un = {}
 
-local sockaddr_ct = ctype'sockaddr'
+	function sa_un:tostring()
+		return str(self.path)
+	end
+
+	metatype('struct sockaddr_un', {__index = sa_un})
+
+end
 
 --Winsock2 & IOCP ------------------------------------------------------------
 
@@ -1463,8 +1506,6 @@ ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 ]]
 
---error handling.
-
 --[[local]] check = check_errno
 
 local SOCK_NONBLOCK  = OSX and 0x000004 or 0x000800 --async I/O
@@ -1954,15 +1995,22 @@ int bind(SOCKET s, const sockaddr*, int namelen);
 
 function socket:try_bind(host, port, addr_flags)
 	assert(not self.bound_addr)
-	local ai, ext_ai = self:addr(host or '*', port or 0, addr_flags)
-	if not ai then return nil, ext_ai end
-	local ok, err = check(C.bind(self.s, ai.addr, ai.addrlen) == 0)
-	local ba = ok and ai.addr:addr():tostring()
-	local bp = ok and ai.addr:port()
-	if not ext_ai then ai:free() end
-	if not ok then return false, err end
-	self.bound_addr = ba
-	self.bound_port = bp
+	if isctype(sockaddr_ct, host) then
+		local sa = host
+		local ok, err = check(C.bind(self.s, sa, sizeof(sa)) == 0)
+		if not ok then return false, err end
+		self.bound_addr = sa:tostring()
+	else
+		local ai, ext_ai = self:addr(host or '*', port or 0, addr_flags)
+		if not ai then return nil, ext_ai end
+		local ok, err = check(C.bind(self.s, ai.addr, ai.addrlen) == 0)
+		local ba = ok and ai.addr:addr():tostring()
+		local bp = ok and ai.addr:port()
+		if not ext_ai then ai:free() end
+		if not ok then return false, err end
+		self.bound_addr = ba
+		self.bound_port = bp
+	end
 	if Linux then
 		--epoll_ctl() must be called after bind() for some reason.
 		return _sock_register(self)
@@ -2567,9 +2615,9 @@ end
 	log('', 'sock', 'create', '%-4s', s)
 	return s
 end
-function _G.tcp       (opt, ...) return create_socket(opt, tcp, 'tcp', ...) end
-function _G.udp       (opt, ...) return create_socket(opt, udp, 'udp', ...) end
-function _G.rawsocket (opt, ...) return create_socket(opt, raw, 'raw', ...) end
+function _G.tcp        (opt, ...)  return create_socket(opt, tcp , 'tcp' , ...) end
+function _G.udp        (opt, ...)  return create_socket(opt, udp , 'udp' , ...) end
+function _G.rawsocket  (opt, ...)  return create_socket(opt, raw , 'raw' , ...) end
 
 update(tcp, socket)
 update(udp, socket)
@@ -2602,6 +2650,8 @@ function listen(self, ...)
 	if not issocket(self) then
 		return listen(create_tcp(), self, ...)
 	end
+	--NOTE: reuseaddr doesn't work with unix sockets,
+	--you must remove the socket file first!
 	self:setopt('reuseaddr', true)
 	return self:listen(...)
 end

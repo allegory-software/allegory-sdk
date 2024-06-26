@@ -61,7 +61,7 @@ DIRECTORY LISTING
 	  sc:depth([n]) -> n (from 1)
 FILE ATTRIBUTES
 	[try_]file_attr(path, [attr, ][deref]) -> t|val     get/set file attribute(s)
-	file_is(path, [type], [deref]) -> t|f         check if file exists or is of a certain type
+	file_is(path, [type], [deref]) -> t|f,['not_found'] check if file exists or is of a certain type
 	exists                                      = file_is
 	checkexists(path, [type], [deref])            assert that file exists
 	[try_]mtime(path, [deref]) -> ts              get file's modification time
@@ -432,7 +432,7 @@ File attributes --------------------------------------------------------------
 
 	Get/set a file's attribute(s) given its path in utf8.
 
-file_is(path, [type], [deref]) -> true|false
+file_is(path, [type], [deref]) -> true|false, ['not_found']
 
 	Check if file exists or if it is of a certain type.
 
@@ -1274,8 +1274,8 @@ function file_is(path, type, deref)
 		deref = false
 	end
 	local ftype, err = try_file_attr(path, 'type', deref)
-	if not type and not ftype and err == 'not_found' then
-		return false
+	if not ftype and err == 'not_found' then
+		return false, 'not_found'
 	elseif not type and ftype then
 		return true
 	elseif not ftype then

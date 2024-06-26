@@ -82,6 +82,7 @@ function http_server(...)
 			host = host,
 			addr = http_addr,
 			port = config'http_port',
+			unix_socket = config'http_unix_socket',
 		})
 	end
 
@@ -102,6 +103,7 @@ function http_server(...)
 			host = host,
 			addr = https_addr,
 			port = config'https_port',
+			unix_socket = config'https_unix_socket',
 			tls = true,
 			tls_options = {
 				cert_file = crt_file,
@@ -215,10 +217,18 @@ function http_server(...)
 			goto continue
 		end
 
-		local tcp = tcp()
+		local tcp = tcp(nil, listen_opt.unix_socket and 'unix')
 		tcp:setopt('reuseaddr', true)
-		local addr = listen_opt.addr or '*'
-		local port = listen_opt.port or (listen_opt.tls and 443 or 80)
+		local addr =
+			listen_opt.unix_socket and 'unix:'..listen_opt.unix_socket
+			or listen_opt.addr or '*'
+		local port =
+			listen_opt.unix_socket and 0
+			or listen_opt.port or (listen_opt.tls and 443 or 80)
+
+		if listen_opt.unix_socket and file_is(listen_opt.unix_socket, 'socket') then
+			try_rmfile(listen_opt.unix_socket)
+		end
 
 		tcp:listen(addr, port)
 
