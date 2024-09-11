@@ -111,6 +111,7 @@ scripts for new libraries without using a build system.
   * [cmdline](lua/cmdline.lua)         - Command-line arg processing
   * [pbuffer](lua/pbuffer.lua)         - Dynamic binary buffer for decoding and encoding
   * [lang](lua/lang.lua)               - Multi-language, country and currency support
+  * [reflect](lua/reflect.lua)         - FFI reflection library
 * __Platform APIs__
   * [fs](lua/fs.lua)                   - Files, directories, symlinks, pipes, memory mapping
   * [proc](lua/proc.lua)               - Async process execution with I/O redirection
@@ -226,7 +227,7 @@ Because Lua is like modern JavaScript, except
 and it didn't keep the baggage while doing so. That said, we're all
 engineers here, we don't have language affectations. We're just happy to use
 a language with stackful coroutines, real closures with full lexical scoping,
-hash maps, a garbage collector, a better C ffi than we could ever ask for,
+hash maps, a garbage collector, a better C FFI than we could ever ask for,
 and an overall non-opinionated design that doesn't pretend to know better
 than its user.
 
