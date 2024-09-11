@@ -2436,7 +2436,7 @@ end
 function tcp:try_recvn(buf, sz)
 	local buf0, sz0 = buf, sz
 	while sz > 0 do
-		local len, err = self:recv(buf, sz)
+		local len, err = self:try_recv(buf, sz)
 		if not len then --short read
 			return nil, err, sz0 - sz
 		elseif len == 0 then --closed
