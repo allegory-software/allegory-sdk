@@ -1,6 +1,6 @@
 --[=[
 
-	POSIX threads binding for Linux (glibc only!), OSX and Windows (winpthreads).
+	POSIX threads binding for Linux (glibc only!)
 	Written by Cosmin Apreutesei. Public Domain.
 
 THREADS
@@ -81,10 +81,6 @@ POSIX is a standard indifferent to binary compatibility, resulting in each
 implementation having a different ABI. Moreso, different implementations
 only cover a subset of the API.
 
-Only functionality that is common _to all_ supported platforms is available.
-Winpthreads dumbs down the API the most (no process-shared objects,
-no real-time extensions, etc.), but OSX too (no timed waits, no semaphores,
-no barriers, etc.) and even Linux (setting priority levels needs root access).
 Functions that don't make sense with Lua (pthread_once) or are stubs
 in one or more implementations (pthread_setconcurrency) or are unsafe
 to use with Lua states (killing, cancelation) were also dropped. All in all
@@ -103,17 +99,6 @@ and compare them:
 
 		c/syms /lib/libpthread.so.0 | \
 			grep '^pthread' > pthread_syms_linux.txt
-
-	On OSX:
-
-		(c/syms /usr/lib/libpthread.dylib
-		c/syms /usr/lib/system/libsystem_pthread.dylib) | \
-			grep '^pthread' > pthread_syms_osx.txt
-
-	On Windows:
-
-		c/syms bin\mingw64\libwinpthread-1.dll | \
-			grep ^^pthread > pthread_syms_mingw.txt
 
 	Compare the results (the first column tells the number of platforms
 	that a symbol was found on):
@@ -137,225 +122,94 @@ is really implemented (and how).
 if not ... then return require'pthread_test' end
 
 local ffi = require'ffi'
-local lib = ffi.os == 'Windows' and 'libwinpthread-1' or 'pthread'
+local lib = 'pthread'
 local C = ffi.load(lib)
 local H = {} --header namespace
 assert(ffi.abi'64bit')
 
-if ffi.os == 'Linux' then
+ffi.cdef[[
+typedef long int time_t;
 
-	ffi.cdef[[
-	typedef long int time_t;
+enum {
+	PTHREAD_CREATE_DETACHED = 1,
+	PTHREAD_CANCEL_ENABLE = 0,
+	PTHREAD_CANCEL_DISABLE = 1,
+	PTHREAD_CANCEL_DEFERRED = 0,
+	PTHREAD_CANCEL_ASYNCHRONOUS = 1,
+	PTHREAD_CANCELED = -1,
+	PTHREAD_EXPLICIT_SCHED = 1,
+	PTHREAD_PROCESS_PRIVATE = 0,
+	PTHREAD_MUTEX_NORMAL = 0,
+	PTHREAD_MUTEX_ERRORCHECK = 2,
+	PTHREAD_MUTEX_RECURSIVE = 1,
+	SCHED_OTHER = 0,
+	PTHREAD_STACK_MIN = 16384,
+};
 
-	enum {
-		PTHREAD_CREATE_DETACHED = 1,
-		PTHREAD_CANCEL_ENABLE = 0,
-		PTHREAD_CANCEL_DISABLE = 1,
-		PTHREAD_CANCEL_DEFERRED = 0,
-		PTHREAD_CANCEL_ASYNCHRONOUS = 1,
-		PTHREAD_CANCELED = -1,
-		PTHREAD_EXPLICIT_SCHED = 1,
-		PTHREAD_PROCESS_PRIVATE = 0,
-		PTHREAD_MUTEX_NORMAL = 0,
-		PTHREAD_MUTEX_ERRORCHECK = 2,
-		PTHREAD_MUTEX_RECURSIVE = 1,
-		SCHED_OTHER = 0,
-		PTHREAD_STACK_MIN = 16384,
+typedef unsigned long int real_pthread_t;
+typedef struct { real_pthread_t _; } pthread_t;
+
+typedef struct pthread_attr_t {
+	union {
+		char __size[56];
+		long int __align;
 	};
+} pthread_attr_t;
 
-	typedef unsigned long int real_pthread_t;
-	typedef struct { real_pthread_t _; } pthread_t;
-
-	typedef struct pthread_attr_t {
-		union {
-			char __size[56];
-			long int __align;
-		};
-	} pthread_attr_t;
-
-	typedef struct pthread_mutex_t {
-		union {
-			char __size[40];
-			long int __align;
-		};
-	} pthread_mutex_t;
-
-	typedef struct pthread_cond_t {
-		union {
-			char __size[48];
-			long long int __align;
-		};
-	} pthread_cond_t;
-
-	typedef struct pthread_rwlock_t {
-		union {
-			char __size[56];
-			long int __align;
-		};
-	} pthread_rwlock_t;
-
-	typedef struct pthread_mutexattr_t {
-		union {
-			char __size[4];
-			int __align;
-		};
-	} pthread_mutexattr_t;
-
-	typedef struct pthread_condattr_t {
-		union {
-			char __size[4];
-			int __align;
-		};
-	} pthread_condattr_t;
-
-	typedef struct pthread_rwlockattr_t {
-		union {
-			char __size[8];
-			long int __align;
-		};
-	} pthread_rwlockattr_t;
-
-	struct sched_param {
-		int sched_priority;
+typedef struct pthread_mutex_t {
+	union {
+		char __size[40];
+		long int __align;
 	};
-	]]
+} pthread_mutex_t;
 
-	H.EBUSY     = 16
-	H.ETIMEDOUT = 110
-
-	local function nop(t) end
-	H.PTHREAD_MUTEX_INITIALIZER  = nop
-	H.PTHREAD_RWLOCK_INITIALIZER = nop
-	H.PTHREAD_COND_INITIALIZER   = nop
-
-elseif ffi.os == 'OSX' then
-
-	ffi.cdef[[
-	typedef long time_t;
-
-	enum {
-		PTHREAD_CREATE_DETACHED = 2,
-		PTHREAD_CANCEL_ENABLE = 0x01,
-		PTHREAD_CANCEL_DISABLE = 0x00,
-		PTHREAD_CANCEL_DEFERRED = 0x02,
-		PTHREAD_CANCEL_ASYNCHRONOUS = 0x00,
-		PTHREAD_CANCELED = 1,
-		PTHREAD_EXPLICIT_SCHED = 2,
-		PTHREAD_PROCESS_PRIVATE = 2,
-		PTHREAD_MUTEX_NORMAL = 0,
-		PTHREAD_MUTEX_ERRORCHECK = 1,
-		PTHREAD_MUTEX_RECURSIVE = 2,
-		SCHED_OTHER = 1,
-		PTHREAD_STACK_MIN = 8192,
+typedef struct pthread_cond_t {
+	union {
+		char __size[48];
+		long long int __align;
 	};
+} pthread_cond_t;
 
-	typedef void *real_pthread_t;
-	typedef struct { real_pthread_t _; } pthread_t;
-
-	typedef struct pthread_attr_t {
-		long __sig;
-		char __opaque[56];
-	} pthread_attr_t;
-
-	typedef struct pthread_mutex_t {
-		long __sig;
-		char __opaque[56];
-	} pthread_mutex_t;
-
-	typedef struct pthread_cond_t {
-		long __sig;
-		char __opaque[40];
-	} pthread_cond_t;
-
-	typedef struct pthread_rwlock_t {
-		long __sig;
-		char __opaque[192];
-	} pthread_rwlock_t;
-
-	typedef struct pthread_mutexattr_t {
-		long __sig;
-		char __opaque[8];
-	} pthread_mutexattr_t;
-
-	typedef struct pthread_condattr_t {
-		long __sig;
-		char __opaque[8];
-	} pthread_condattr_t;
-
-	typedef struct pthread_rwlockattr_t {
-		long __sig;
-		char __opaque[16];
-	} pthread_rwlockattr_t;
-
-	struct sched_param {
-		int sched_priority;
-		char __opaque[4];
+typedef struct pthread_rwlock_t {
+	union {
+		char __size[56];
+		long int __align;
 	};
-	]]
+} pthread_rwlock_t;
 
-	local _PTHREAD_MUTEX_SIG_init  = 0x32AAABA7
-	local _PTHREAD_COND_SIG_init   = 0x3CB0B1BB
-	local _PTHREAD_RWLOCK_SIG_init = 0x2DA8B3B4
-
-	H.EBUSY     = 16
-	H.ETIMEDOUT = 60
-
-	function H.PTHREAD_RWLOCK_INITIALIZER(t) t.__sig = _PTHREAD_RWLOCK_SIG_init end
-	function H.PTHREAD_MUTEX_INITIALIZER(t)  t.__sig = _PTHREAD_MUTEX_SIG_init end
-	function H.PTHREAD_COND_INITIALIZER(t)   t.__sig = _PTHREAD_COND_SIG_init end
-
-elseif ffi.os == 'Windows' then
-
-	ffi.cdef'typedef int64_t time_t;'
-
-	ffi.cdef[[
-	enum {
-		PTHREAD_CREATE_DETACHED = 0x04,
-		PTHREAD_CANCEL_ENABLE = 0x01,
-		PTHREAD_CANCEL_DISABLE = 0,
-		PTHREAD_CANCEL_DEFERRED = 0,
-		PTHREAD_CANCEL_ASYNCHRONOUS = 0x02,
-		PTHREAD_CANCELED = 0xDEADBEEF,
-		PTHREAD_EXPLICIT_SCHED = 0,
-		PTHREAD_PROCESS_PRIVATE = 0,
-		PTHREAD_MUTEX_NORMAL = 0,
-		PTHREAD_MUTEX_ERRORCHECK = 1,
-		PTHREAD_MUTEX_RECURSIVE = 2,
-		SCHED_OTHER = 0,
-		PTHREAD_STACK_MIN = 8192,
+typedef struct pthread_mutexattr_t {
+	union {
+		char __size[4];
+		int __align;
 	};
+} pthread_mutexattr_t;
 
-	typedef uintptr_t real_pthread_t;
-	typedef struct { real_pthread_t _; } pthread_t;
-
-	struct sched_param {
-	  int sched_priority;
+typedef struct pthread_condattr_t {
+	union {
+		char __size[4];
+		int __align;
 	};
-	typedef struct pthread_attr_t {
-		 unsigned p_state;
-		 void *stack;
-		 size_t s_size;
-		 struct sched_param param;
-	} pthread_attr_t;
-	typedef struct pthread_mutex_t { void *_; } pthread_mutex_t;
-	typedef struct pthread_cond_t { void *_; } pthread_cond_t;
-	typedef struct pthread_rwlock_t { void *_; } pthread_rwlock_t;
-	typedef struct pthread_mutexattr_t { unsigned _; } pthread_mutexattr_t;
-	typedef struct { int _; } pthread_condattr_t;
-	typedef struct { int _; } pthread_rwlockattr_t;
-	]]
+} pthread_condattr_t;
 
-	H.EBUSY     = 16
-	H.ETIMEDOUT = 138
+typedef struct pthread_rwlockattr_t {
+	union {
+		char __size[8];
+		long int __align;
+	};
+} pthread_rwlockattr_t;
 
-	local GENERIC_INITIALIZER = ffi.cast('void*', -1)
-	function H.PTHREAD_MUTEX_INITIALIZER(t)  t._ = GENERIC_INITIALIZER end
-	function H.PTHREAD_COND_INITIALIZER(t)   t._ = GENERIC_INITIALIZER end
-	function H.PTHREAD_RWLOCK_INITIALIZER(t) t._ = GENERIC_INITIALIZER end
+struct sched_param {
+	int sched_priority;
+};
+]]
 
-else
-	error('platform not supported')
-end
+H.EBUSY     = 16
+H.ETIMEDOUT = 110
+
+local function nop(t) end
+H.PTHREAD_MUTEX_INITIALIZER  = nop
+H.PTHREAD_RWLOCK_INITIALIZER = nop
+H.PTHREAD_COND_INITIALIZER   = nop
 
 ffi.cdef[[
 typedef struct {
@@ -669,7 +523,7 @@ end
 
 ffi.metatype('pthread_rwlock_t', {__index = rwlock})
 
-local SC = ffi.os == 'Windows' and C or ffi.C
+local SC = ffi.C
 function pthread_yield()
 	checkz(SC.sched_yield())
 end

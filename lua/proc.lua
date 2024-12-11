@@ -1,6 +1,6 @@
 --[=[
 
-	Process & IPC API for Windows & Linux.
+	Process & IPC API for Linux.
 	Written by Cosmin Apreutesei. Public Domain.
 
 	Missing features: named mutexes, semaphores and events.
@@ -57,7 +57,7 @@
 proc_info([pid]) -> t
 proc:info() -> t
 
-	Get process info. On Linux, it parses `/proc/PID/stat`. Windows is NYI.
+	Get process info. On Linux, it parses `/proc/PID/stat`.
 
 os_info() -> t
 
@@ -73,20 +73,14 @@ daemonized -> true | false
 #### Env vars
 
 Only use uppercase env. var names because like file names, env. vars
-are case-sensitive on POSIX, but case-insensitive on Windows.
+are case-sensitive on POSIX.
 
 Only use `env()` to read variables instead of `os.getenv()` because
 the latter won't see the changes made to variables.
 
 #### Exit codes
 
-Only use exit status codes in the 0..255 range because Windows exit
-codes are int32 but POSIX codes are limited to a byte.
-
-In Windows, if you kill a process from Task Manager, `exit_code()` returns `1`
-instead of `nil, 'killed'`, and `status()` returns `'finished'` instead
-of `'killed'`. You only get `'killed'` when you kill the process yourself
-by calling `kill()`.
+Only use exit status codes in the 0..255 range because POSIX codes are limited to a byte.
 
 #### Standard I/O redirection
 
@@ -112,9 +106,6 @@ In Linux, if you start your autokilled process from a thread other than
 the main thread, the process is killed when the thread finishes, IOW
 autokill is only portable if you start processes from the main thread.
 
-In Windows, the autokill behavior is by default inherited by the child
-processes. In Linux it isn't. IOW autkill inheritance is not portable.
-
 ]=]
 
 if not ... then require'proc_test'; return end
@@ -123,21 +114,8 @@ require'glue'
 require'fs'
 require'sock'
 
-local current_platform = win and 'win' or 'unix'
-require('proc_'..(win and 'win' or 'posix'))
-
---see https://docs.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way
---You will lose precious IQ points if you read that. Lose enough of them
---and you might get a job at Microsoft!
-function cmdline_escape_win(s) --escape for putting inside double-quoted string
-	s = tostring(s)
-	if not s:find'[\\"]' then
-		return s
-	end
-	s = s:gsub('(\\*)"', function(s) return s:rep(2)..'\\"' end)
-	s = s:gsub('\\+$', function(s) return s:rep(2) end)
-	return s
-end
+local current_platform = 'unix'
+require'proc_posix'
 
 function cmdline_escape_unix(s) --escape for putting inside double-quoted string
 	return tostring(s):gsub('[$`\\!]', '\\%1')
@@ -145,27 +123,9 @@ end
 
 function cmdline_escape(s, platform)
 	platform = platform or current_platform
-	local esc =
-		   platform == 'win'  and cmdline_esc_win
-		or platform == 'unix' and cmdline_esc_unix
+	local esc = cmdline_esc_unix
 	assert(esc, 'invalid platform')
 	return esc(s)
-end
-
-function cmdline_quote_path_win(s)
-	if s:find'%s' then
-		s = '"'..s..'"'
-	end
-	return s
-end
-
-function cmdline_quote_arg_win(s)
-	s = tostring(s)
-	if not s:find'[ \t\n\v"^&<>|]' then
-		return s
-	else
-		return '"'..cmdline_escape_win(s)..'"'
-	end
 end
 
 function cmdline_quote_arg_unix(s)
@@ -179,9 +139,7 @@ end
 
 function cmdline_quote_arg(s, platform)
 	platform = platform or current_platform
-	local quote_arg =
-		   platform == 'win'  and cmdline_quote_arg_win
-		or platform == 'unix' and cmdline_quote_arg_unix
+	local quote_arg = cmdline_quote_arg_unix
 	assert(quote_arg, 'invalid platform')
 	return quote_arg(s)
 end
@@ -204,7 +162,6 @@ function cmdline_quote_args(platform, ...)
 	end
 	return table.concat(t, ' ')
 end
-function cmdline_quote_args_win (...) return cmdline_quote_args('win', ...) end
 function cmdline_quote_args_unix(...) return cmdline_quote_args('unix', ...) end
 
 function cmdline_quote_cmd(platform, cmd)
@@ -213,7 +170,7 @@ function cmdline_quote_cmd(platform, cmd)
 	end
 	local t = {}
 	platform = platform or current_platform
-	t[1] = platform == 'win' and cmdline_quote_path_win(cmd[1]) or cmd[1]
+	t[1] = cmd[1]
 	for i = 2, cmd.n or #cmd do
 		if cmd[i] then --nil and false args are skipped. pass '' to inject empt args.
 			t[#t+1] = cmdline_quote_arg(cmd[i], platform)
@@ -221,7 +178,6 @@ function cmdline_quote_cmd(platform, cmd)
 	end
 	return concat(t, ' ')
 end
-function cmdline_quote_cmd_win (...) return cmdline_quote_cmd('win', ...) end
 function cmdline_quote_cmd_unix(...) return cmdline_quote_cmd('unix', ...) end
 
 --cmd|{cmd,arg1,...}, env, ...

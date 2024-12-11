@@ -1,6 +1,6 @@
 --[=[
 
-	Wall clock, monotonic clock, and sleep function (Windows, Linux and OSX).
+	Wall clock, monotonic clock, and sleep function (Linux).
 	Written by Cosmin Apreutesei. Public Domain.
 
 	now() -> ts          current time with ~100us precision
@@ -34,132 +34,56 @@
 local ffi = require'ffi'
 local C = ffi.C
 
-if ffi.os == 'Windows' then
+ffi.cdef[[
+typedef struct {
+	long s;
+	long ns;
+} time_timespec;
 
-	ffi.cdef[[
-	void time_GetSystemTimeAsFileTime(uint64_t*) asm("GetSystemTimeAsFileTime");
-	int  time_QueryPerformanceCounter(int64_t*) asm("QueryPerformanceCounter");
-	int  time_QueryPerformanceFrequency(int64_t*) asm("QueryPerformanceFrequency");
-	void time_Sleep(uint32_t ms) asm("Sleep");
-	]]
+int time_nanosleep(time_timespec*, time_timespec *) asm("nanosleep");
+]]
 
-	local t = ffi.new'uint64_t[1]'
-	local DELTA_EPOCH_IN_100NS = 116444736000000000ULL
+local EINTR = 4
 
-	function now()
-		C.time_GetSystemTimeAsFileTime(t)
-		return tonumber(t[0] - DELTA_EPOCH_IN_100NS) * 1e-7
+local t = ffi.new'time_timespec'
+
+function sleep(s)
+	local int, frac = math.modf(s)
+	t.s = int
+	t.ns = frac * 1e9
+	local ret = C.time_nanosleep(t, t)
+	while ret == -1 and ffi.errno() == EINTR do --interrupted
+		ret = C.time_nanosleep(t, t)
 	end
+	assert(ret == 0)
+end
 
-	assert(C.time_QueryPerformanceFrequency(t) ~= 0)
-	local inv_qpf = 1 / tonumber(t[0]) --precision loss in e-10
+ffi.cdef[[
+int time_clock_gettime(int clock_id, time_timespec *tp) asm("clock_gettime");
+]]
 
-	local t0 = 0
-	function clock()
-		assert(C.time_QueryPerformanceCounter(t) ~= 0)
-		return tonumber(t[0]) * inv_qpf - t0
-	end
-	t0 = clock()
-	startclock = t0
+local CLOCK_REALTIME = 0
+local CLOCK_MONOTONIC = 1
 
-	function sleep(s)
-		C.time_Sleep(s * 1000)
-	end
+local ok, rt_C = pcall(ffi.load, 'rt')
+local clock_gettime = (ok and rt_C or C).time_clock_gettime
 
-elseif ffi.os == 'Linux' or ffi.os == 'OSX' then
+local function tos(t)
+	return tonumber(t.s) + tonumber(t.ns) / 1e9
+end
 
-	ffi.cdef[[
-	typedef struct {
-		long s;
-		long ns;
-	} time_timespec;
+function now()
+	assert(clock_gettime(CLOCK_REALTIME, t) == 0)
+	return tos(t)
+end
 
-	int time_nanosleep(time_timespec*, time_timespec *) asm("nanosleep");
-	]]
-
-	local EINTR = 4
-
-	local t = ffi.new'time_timespec'
-
-	function sleep(s)
-		local int, frac = math.modf(s)
-		t.s = int
-		t.ns = frac * 1e9
-		local ret = C.time_nanosleep(t, t)
-		while ret == -1 and ffi.errno() == EINTR do --interrupted
-			ret = C.time_nanosleep(t, t)
-		end
-		assert(ret == 0)
-	end
-
-	if ffi.os == 'Linux' then
-
-		ffi.cdef[[
-		int time_clock_gettime(int clock_id, time_timespec *tp) asm("clock_gettime");
-		]]
-
-		local CLOCK_REALTIME = 0
-		local CLOCK_MONOTONIC = 1
-
-		local ok, rt_C = pcall(ffi.load, 'rt')
-		local clock_gettime = (ok and rt_C or C).time_clock_gettime
-
-		local function tos(t)
-			return tonumber(t.s) + tonumber(t.ns) / 1e9
-		end
-
-		function now()
-			assert(clock_gettime(CLOCK_REALTIME, t) == 0)
-			return tos(t)
-		end
-
-		local t0 = 0
-		function clock()
-			assert(clock_gettime(CLOCK_MONOTONIC, t) == 0)
-			return tos(t) - t0
-		end
-		t0 = clock()
-		startclock = t0
-
-	elseif ffi.os == 'OSX' then
-
-		ffi.cdef[[
-		typedef struct {
-			long    s;
-			int32_t us;
-		} time_timeval;
-
-		typedef struct {
-			uint32_t numer;
-			uint32_t denom;
-		} time_mach_timebase_info_data_t;
-
-		int      time_gettimeofday(time_timeval*, void*) asm("gettimeofday");
-		int      time_mach_timebase_info(time_mach_timebase_info_data_t* info) asm("mach_timebase_info");
-		uint64_t time_mach_absolute_time(void) asm("mach_absolute_time");
-		]]
-
-		local t = ffi.new'time_timeval'
-
-		function now()
-			assert(C.time_gettimeofday(t, nil) == 0)
-			return tonumber(t.s) + tonumber(t.us) * 1e-6
-		end
-
-		--NOTE: this appears to be pointless on Intel Macs. The timebase fraction
-		--is always 1/1 and mach_absolute_time() does dynamic scaling internally.
-		local timebase = ffi.new'time_mach_timebase_info_data_t'
-		assert(C.time_mach_timebase_info(timebase) == 0)
-		local scale = tonumber(timebase.numer) / tonumber(timebase.denom) / 1e9
-		local t0
-		function clock()
-			return tonumber(C.time_mach_absolute_time()) * scale - t0
-		end
-		t0 = clock()
-
-	end --OSX
-
-end --Linux or OSX
+local t0 = 0
+function clock()
+	assert(clock_gettime(CLOCK_MONOTONIC, t) == 0)
+	return tos(t) - t0
+end
+t0 = clock()
+startclock = t0
 
 --demo -----------------------------------------------------------------------
 

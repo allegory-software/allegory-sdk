@@ -8,7 +8,7 @@ Webb is a procedural web framework for http_server.
 FEATURES
 
   * implicit request context but single shared Lua state for all requests
-  * filesystem decoupling with virtual files and actions (single-file webb apps)
+  * filesystem decoupling with virtual files and actions (single-file web apps)
   * standalone operation without a web server for debugging and offline scripts
   * output buffering stack
   * file serving with cache control

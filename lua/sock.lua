@@ -1,6 +1,6 @@
 --[=[
 
-	Portable async socket API for Windows (IOCP) and Linux (epoll).
+	Portable async socket API Linux (epoll).
 	Written by Cosmin Apreutesei. Public Domain.
 	TLS support in sock_libtls.lua.
 
@@ -96,8 +96,7 @@ THREAD SETS
 	  ts:join() -> {{ok=,ret=,thread=},...}
 
 MULTI-THREADING (WITH OS THREADS)
-	iocp([iocp_h]) -> iocp_h    get/set IOCP handle (Windows)
-	epoll_fd([epfd]) -> epfd    get/set epoll fd (Linux)
+	epoll_fd([epfd]) -> epfd    get/set epoll fd
 
 ------------------------------------------------------------------------------
 
@@ -316,21 +315,9 @@ wait_job() -> sj
 
 MULTI-THREADING --------------------------------------------------------------
 
-iocp([iocp_handle]) -> iocp_handle
-
-	Get/set the global IOCP handle (Windows).
-
-	IOCPs can be shared between OS threads and having a single IOCP for all
-	threads (as opposed to having one IOCP per thread/Lua state) enables the
-	kernel to better distribute the completion events between threads.
-
-	To share the IOCP with another Lua state running on a different thread,
-	get the IOCP handle with `iocp()`, copy it over to the other state,
-	then set it with `iocp(copied_iocp)`.
-
 epoll_fd([epfd]) -> epfd
 
-	Get/set the global epoll fd (Linux).
+	Get/set the global epoll fd.
 
 	Epoll fds can be shared between OS threads and having a single epfd for all
 	threads is more efficient for the kernel than having one epfd per thread.
@@ -357,6 +344,8 @@ local coro_create   = coro.create
 local coro_safewrap = coro.safewrap
 local coro_transfer = coro.transfer
 local coro_finish   = coro.finish
+
+assert(Linux, 'unsupported platform')
 
 do
 	local debug_getinfo = debug.getinfo
@@ -423,9 +412,7 @@ do
 	end
 end
 
-assert(Windows or Linux or OSX, 'unsupported platform')
-
-local C = Windows and ffi.load'ws2_32' or C
+local C = C
 
 local socket = {debug_prefix = 'S'} --common socket methods
 local tcp = {type = 'tcp_socket'}
@@ -513,36 +500,19 @@ typedef struct sockaddr {
 
 local sockaddr_ct = ctype'sockaddr'
 
--- working around ABI blindness of C programmers...
-if Windows then
-	cdef[[
-	struct addrinfo {
-		int              flags;
-		int              family_num;
-		int              socktype_num;
-		int              protocol_num;
-		size_t           addrlen;
-		char            *name_ptr;
-		struct sockaddr *addr;
-		struct addrinfo *next_ptr;
-		struct sockaddr addrs[?];
-	};
-	]]
-else
-	cdef[[
-	struct addrinfo {
-		int              flags;
-		int              family_num;
-		int              socktype_num;
-		int              protocol_num;
-		size_t           addrlen;
-		struct sockaddr *addr;
-		char            *name_ptr;
-		struct addrinfo *next_ptr;
-		struct sockaddr addrs[?];
-	};
-	]]
-end
+cdef[[
+struct addrinfo {
+	int              flags;
+	int              family_num;
+	int              socktype_num;
+	int              protocol_num;
+	size_t           addrlen;
+	struct sockaddr *addr;
+	char            *name_ptr;
+	struct addrinfo *next_ptr;
+	struct sockaddr addrs[?];
+};
+]]
 
 cdef[[
 int getaddrinfo(const char *node, const char *service,
@@ -553,9 +523,9 @@ void freeaddrinfo(struct addrinfo *);
 local socketargs
 do
 	local families = {
-		inet  = Windows and  2 or Linux and  2,
-		inet6 = Windows and 23 or Linux and 10,
-		unix  = Linux and 1,
+		inet  = 2,
+		inet6 = 10,
+		unix  = 1,
 	}
 	local family_map = index(families)
 
@@ -564,32 +534,32 @@ do
 	local AF_UNIX  = families.unix
 
 	local socket_types = {
-		tcp = Windows and 1 or Linux and 1,
-		udp = Windows and 2 or Linux and 2,
-		raw = Windows and 3 or Linux and 3,
+		tcp = 1,
+		udp = 2,
+		raw = 3,
 	}
 	local socket_type_map = index(socket_types)
 
 	local protocols = {
-		ip     = Windows and   0 or Linux and   0,
-		icmp   = Windows and   1 or Linux and   1,
-		igmp   = Windows and   2 or Linux and   2,
-		tcp    = Windows and   6 or Linux and   6,
-		udp    = Windows and  17 or Linux and  17,
-		raw    = Windows and 255 or Linux and 255,
-		ipv6   = Windows and  41 or Linux and  41,
-		icmpv6 = Windows and  58 or Linux and  58,
+		ip     =   0,
+		icmp   =   1,
+		igmp   =   2,
+		tcp    =   6,
+		udp    =  17,
+		raw    = 255,
+		ipv6   =  41,
+		icmpv6 =  58,
 	}
 	local protocol_map = index(protocols)
 
 	local flag_bits = {
-		passive     = Windows and 0x00000001 or 0x0001,
-		cannonname  = Windows and 0x00000002 or 0x0002,
-		numerichost = Windows and 0x00000004 or 0x0004,
-		numericserv = Windows and 0x00000008 or 0x0400,
-		all         = Windows and 0x00000100 or 0x0010,
-		v4mapped    = Windows and 0x00000800 or 0x0008,
-		addrconfig  = Windows and 0x00000400 or 0x0020,
+		passive     = 0x0001,
+		cannonname  = 0x0002,
+		numerichost = 0x0004,
+		numericserv = 0x0400,
+		all         = 0x0010,
+		v4mapped    = 0x0008,
+		addrconfig  = 0x0020,
 	}
 
 	local default_protocols = {
@@ -611,15 +581,9 @@ do
 	local addrinfo_ct = ctype'struct addrinfo'
 
 	local getaddrinfo_error
-	if Windows then
-		function getaddrinfo_error()
-			return check()
-		end
-	else
-		cdef'const char *gai_strerror(int ecode);'
-		function getaddrinfo_error(err)
-			return nil, str(C.gai_strerror(err))
-		end
+	cdef'const char *gai_strerror(int ecode);'
+	function getaddrinfo_error(err)
+		return nil, str(C.gai_strerror(err))
 	end
 
 	function try_getaddrinfo(host, port, socket_type, family, protocol, flags)
@@ -752,740 +716,7 @@ do
 
 end
 
---Winsock2 & IOCP ------------------------------------------------------------
-
-if Windows then
-
-cdef[[
-
-// required types from `winapi.types` ----------------------------------------
-
-typedef unsigned long   ULONG;
-typedef unsigned long   DWORD;
-typedef int             BOOL;
-typedef unsigned short  WORD;
-typedef BOOL            *LPBOOL;
-typedef int             *LPINT;
-typedef DWORD           *LPDWORD;
-typedef void            VOID;
-typedef VOID            *LPVOID;
-typedef const VOID      *LPCVOID;
-typedef uint64_t ULONG_PTR, *PULONG_PTR;
-typedef VOID            *PVOID;
-typedef char            CHAR;
-typedef CHAR            *LPSTR;
-typedef VOID            *HANDLE;
-typedef struct {
-    unsigned long  Data1;
-    unsigned short Data2;
-    unsigned short Data3;
-    unsigned char  Data4[8];
-} GUID, *LPGUID;
-
-// IOCP ----------------------------------------------------------------------
-
-typedef struct _OVERLAPPED {
-	ULONG_PTR Internal;
-	ULONG_PTR InternalHigh;
-	PVOID Pointer;
-	HANDLE    hEvent;
-} OVERLAPPED, *LPOVERLAPPED;
-
-HANDLE CreateIoCompletionPort(
-	HANDLE    FileHandle,
-	HANDLE    ExistingCompletionPort,
-	ULONG_PTR CompletionKey,
-	DWORD     NumberOfConcurrentThreads
-);
-
-BOOL GetQueuedCompletionStatus(
-	HANDLE       CompletionPort,
-	LPDWORD      lpNumberOfBytesTransferred,
-	PULONG_PTR   lpCompletionKey,
-	LPOVERLAPPED *lpOverlapped,
-	DWORD        dwMilliseconds
-);
-
-BOOL CancelIoEx(
-	HANDLE       hFile,
-	LPOVERLAPPED lpOverlapped
-);
-
-// Sockets -------------------------------------------------------------------
-
-typedef uintptr_t SOCKET;
-typedef HANDLE WSAEVENT;
-typedef unsigned int GROUP;
-
-typedef struct _WSAPROTOCOL_INFOW WSAPROTOCOL_INFOW, *LPWSAPROTOCOL_INFOW;
-
-SOCKET WSASocketW(
-	int                 af,
-	int                 type,
-	int                 protocol,
-	LPWSAPROTOCOL_INFOW lpProtocolInfo,
-	GROUP               g,
-	DWORD               dwFlags
-);
-int closesocket(SOCKET s);
-
-typedef struct WSAData {
-	WORD wVersion;
-	WORD wHighVersion;
-	char szDescription[257];
-	char szSystemStatus[129];
-	unsigned short iMaxSockets; // to be ignored
-	unsigned short iMaxUdpDg;   // to be ignored
-	char *lpVendorInfo;         // to be ignored
-} WSADATA, *LPWSADATA;
-
-int WSAStartup(WORD wVersionRequested, LPWSADATA lpWSAData);
-int WSACleanup(void);
-int WSAGetLastError();
-
-int getsockopt(
-	SOCKET s,
-	int    level,
-	int    optname,
-	char   *optval,
-	int    *optlen
-);
-
-int setsockopt(
-	SOCKET     s,
-	int        level,
-	int        optname,
-	const char *optval,
-	int        optlen
-);
-
-typedef struct _WSABUF {
-	ULONG len;
-	CHAR  *buf;
-} WSABUF, *LPWSABUF;
-
-int WSAIoctl(
-	SOCKET        s,
-	DWORD         dwIoControlCode,
-	LPVOID        lpvInBuffer,
-	DWORD         cbInBuffer,
-	LPVOID        lpvOutBuffer,
-	DWORD         cbOutBuffer,
-	LPDWORD       lpcbBytesReturned,
-	LPOVERLAPPED  lpOverlapped,
-	void*         lpCompletionRoutine
-);
-
-typedef BOOL (*LPFN_CONNECTEX) (
-	SOCKET s,
-	const sockaddr* name,
-	int namelen,
-	PVOID lpSendBuffer,
-	DWORD dwSendDataLength,
-	LPDWORD lpdwBytesSent,
-	LPOVERLAPPED lpOverlapped
-);
-
-typedef BOOL (*LPFN_ACCEPTEX) (
-	SOCKET sListenSocket,
-	SOCKET sAcceptSocket,
-	PVOID lpOutputBuffer,
-	DWORD dwReceiveDataLength,
-	DWORD dwLocalAddressLength,
-	DWORD dwRemoteAddressLength,
-	LPDWORD lpdwBytesReceived,
-	LPOVERLAPPED lpOverlapped
-);
-
-int connect(
-	SOCKET         s,
-	const sockaddr *name,
-	int            namelen
-);
-
-int WSASend(
-	SOCKET       s,
-	LPWSABUF     lpBuffers,
-	DWORD        dwBufferCount,
-	LPDWORD      lpNumberOfBytesSent,
-	DWORD        dwFlags,
-	LPOVERLAPPED lpOverlapped,
-	void*        lpCompletionRoutine
-);
-
-int WSARecv(
-	SOCKET       s,
-	LPWSABUF     lpBuffers,
-	DWORD        dwBufferCount,
-	LPDWORD      lpNumberOfBytesRecvd,
-	LPDWORD      lpFlags,
-	LPOVERLAPPED lpOverlapped,
-	void*        lpCompletionRoutine
-);
-
-int WSASendTo(
-	SOCKET          s,
-	LPWSABUF        lpBuffers,
-	DWORD           dwBufferCount,
-	LPDWORD         lpNumberOfBytesSent,
-	DWORD           dwFlags,
-	const sockaddr  *lpTo,
-	int             iTolen,
-	LPOVERLAPPED    lpOverlapped,
-	void*           lpCompletionRoutine
-);
-
-int WSARecvFrom(
-	SOCKET       s,
-	LPWSABUF     lpBuffers,
-	DWORD        dwBufferCount,
-	LPDWORD      lpNumberOfBytesRecvd,
-	LPDWORD      lpFlags,
-	sockaddr*    lpFrom,
-	LPINT        lpFromlen,
-	LPOVERLAPPED lpOverlapped,
-	void*        lpCompletionRoutine
-);
-
-void GetAcceptExSockaddrs(
-	PVOID      lpOutputBuffer,
-	DWORD      dwReceiveDataLength,
-	DWORD      dwLocalAddressLength,
-	DWORD      dwRemoteAddressLength,
-	sockaddr** LocalSockaddr,
-	LPINT      LocalSockaddrLength,
-	sockaddr** RemoteSockaddr,
-	LPINT      RemoteSockaddrLength
-);
-
-]]
-
-local WSAGetLastError = C.WSAGetLastError
-
-local nbuf = new'DWORD[1]' --global buffer shared between many calls.
-
---error handling
-do
-	cdef[[
-	DWORD FormatMessageA(
-		DWORD dwFlags,
-		LPCVOID lpSource,
-		DWORD dwMessageId,
-		DWORD dwLanguageId,
-		LPSTR lpBuffer,
-		DWORD nSize,
-		va_list *Arguments
-	);
-	]]
-
-	local FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000
-
-	local error_msgs = {
-		[10013] = 'access_denied', --WSAEACCES
-		[10048] = 'address_already_in_use', --WSAEADDRINUSE
-		[10053] = 'connection_aborted', --WSAECONNABORTED
-		[10054] = 'connection_reset', --WSAECONNRESET
-		[10061] = 'connection_refused', --WSAECONNREFUSED
-		[ 1225] = 'connection_refused', --ERROR_CONNECTION_REFUSED
-		[  109] = 'eof', --ERROR_BROKEN_PIPE, ReadFile (masked)
-	}
-
-	local buf
-	function check(ret, err)
-		if ret then return ret end
-		local err = err or WSAGetLastError()
-		local msg = error_msgs[err]
-		if not msg then
-			buf = buf or new('char[?]', 256)
-			local sz = ffi.C.FormatMessageA(
-				FORMAT_MESSAGE_FROM_SYSTEM, nil, err, 0, buf, 256, nil)
-			msg = sz > 0 and str(buf, sz):gsub('[\r\n]+$', '') or 'Error '..err
-		end
-		return ret, msg, err
-	end
-end
-
---init winsock library.
-do
-	local WSADATA = new'WSADATA'
-	assert(check(C.WSAStartup(0x101, WSADATA) == 0))
-	assert(WSADATA.wVersion == 0x101)
-end
-
---dynamic binding of winsock functions.
-local bind_winsock_func
-do
-	local IOC_OUT = 0x40000000
-	local IOC_IN  = 0x80000000
-	local IOC_WS2 = 0x08000000
-	local SIO_GET_EXTENSION_FUNCTION_POINTER = bor(IOC_IN, IOC_OUT, IOC_WS2, 6)
-
-	function bind_winsock_func(socket, func_ct, func_guid)
-		local cbuf = new(ctype('$[1]', ctype(func_ct)))
-		assert(check(C.WSAIoctl(
-			socket, SIO_GET_EXTENSION_FUNCTION_POINTER,
-			func_guid, sizeof(func_guid),
-			cbuf, sizeof(cbuf),
-			nbuf, nil, nil
-		)) == 0)
-		assert(cbuf[0] ~= nil)
-		return cbuf[0]
-	end
-end
-
---Binding ConnectEx() because WSAConnect() doesn't do IOCP.
-local function ConnectEx(s, ...)
-	ConnectEx = bind_winsock_func(s, 'LPFN_CONNECTEX', new('GUID',
-		0x25a207b9,0xddf3,0x4660,{0x8e,0xe9,0x76,0xe5,0x8c,0x74,0x06,0x3e}))
-	return ConnectEx(s, ...)
-end
-
-local function AcceptEx(s, ...)
-	AcceptEx = bind_winsock_func(s, 'LPFN_ACCEPTEX', new('GUID',
-		{0xb5367df1,0xcbac,0x11cf,{0x95,0xca,0x00,0x80,0x5f,0x48,0xa1,0x92}}))
-	return AcceptEx(s, ...)
-end
-
-do
-	local iocp
-	function _G.iocp(shared_iocp)
-		if shared_iocp then
-			iocp = shared_iocp
-		elseif not iocp then
-			local INVALID_HANDLE_VALUE = cast('HANDLE', -1)
-			iocp = ffi.C.CreateIoCompletionPort(INVALID_HANDLE_VALUE, nil, 0, 0)
-			assert(check(iocp ~= nil))
-		end
-		return iocp
-	end
-end
-
-do
-	local WSA_FLAG_OVERLAPPED = 0x01
-	local INVALID_SOCKET = cast('SOCKET', -1)
-
-	function _sock_register(socket)
-		local iocp = iocp()
-		local h = cast('HANDLE', socket.s)
-		if ffi.C.CreateIoCompletionPort(h, iocp, 0, 0) ~= iocp then
-			return check()
-		end
-		return true
-	end
-
-	_sock_unregister = noop --no need.
-
-	--[[local]] function create_socket(opt, class, socktype, family, protocol)
-
-		local st, af, pr = socketargs(socktype, family or 'inet', protocol)
-		assert(st ~= 0, 'socket type required')
-		local flags = WSA_FLAG_OVERLAPPED
-
-		local s = C.WSASocketW(af, st, pr, nil, 0, flags)
-		assert(check(s ~= INVALID_SOCKET))
-
-		local s = wrap_socket(opt, class, s, st, af, pr)
-		live(s, socktype)
-
-		local ok, err = _sock_register(s)
-		if not ok then
-			s:try_close()
-			error(err)
-		end
-
-		return s
-	end
-end
-
---NOTE: it is unsafe to close a socket twice no matter the error.
-function socket:_close()
-	local s = self.s; self.s = nil
-	return check(C.closesocket(s) == 0)
-end
-
-local expires_heap = heap{
-	cmp = function(job1, job2)
-		return job1.expires < job2.expires
-	end,
-	index_key = 'index', --enable O(log n) removal.
-}
-
-do
-local function wait_until(job, expires)
-	job.thread = currentthread()
-	job.expires = expires
-	expires_heap:push(job)
-	return wait_io(job)
-end
-local function wait(job, timeout)
-	return wait_until(job, clock() + timeout)
-end
-local function job_resume(job, ...)
-	local thread = job.thread
-	assert(waiting[thread] == job, 'thread not waiting (on this wait job)')
-	assert(expires_heap:remove(job))
-	waiting[thread] = nil
-	resume(thread, ...)
-	return true
-end
-local CANCEL = {}
-local function cancel(job)
-	job_resume(job, CANCEL)
-end
-function wait_job()
-	local self = object(wait_job_class, {
-		wait = wait, wait_until = wait_until, resume = job_resume,
-		cancel = cancel, CANCEL = CANCEL,
-	})
-	--log('', 'sock', 'wait-job', '%s', self)
-	return self
-end
-end
-
-local overlapped, free_overlapped
-do
-	local jobs = {} --{job1, ...}
-	local freed = {} --{job_index1, ...}
-
-	local overlapped_ct = ctype[[
-		struct {
-			OVERLAPPED overlapped;
-			int job_index;
-		}
-	]]
-	local overlapped_ptr_ct = ctype('$*', overlapped_ct)
-
-	local OVERLAPPED = ctype'OVERLAPPED'
-	local LPOVERLAPPED = ctype'LPOVERLAPPED'
-
-	function overlapped(socket, done, expires)
-		if #freed > 0 then
-			local job_index = pop(freed)
-			local job = jobs[job_index]
-			job.socket = socket --socket or file object from fs.pipe()
-			job.done = done
-			job.expires = expires
-			local o = cast(LPOVERLAPPED, job.overlapped)
-			fill(o, sizeof(OVERLAPPED))
-			return o, job
-		else
-			local job = {socket = socket, done = done, expires = expires}
-			local o = overlapped_ct()
-			job.overlapped = o
-			push(jobs, job)
-			o.job_index = #jobs
-			return cast(LPOVERLAPPED, o), job
-		end
-	end
-
-	function free_overlapped(o)
-		local o = cast(overlapped_ptr_ct, o)
-		push(freed, o.job_index)
-		return jobs[o.job_index]
-	end
-
-end
-
-do
-	local keybuf = new'ULONG_PTR[1]'
-	local obuf = new'LPOVERLAPPED[1]'
-
-	local WAIT_TIMEOUT = 258
-	local ERROR_OPERATION_ABORTED = 995
-	local ERROR_NOT_FOUND = 1168
-	local INFINITE = 0xffffffff
-
-	local voidp = voidp
-	local GetQueuedCompletionStatus = ffi.C.GetQueuedCompletionStatus
-	local CancelIoEx = ffi.C.CancelIoEx
-
-	--[[local]] function _poll()
-
-		local job = expires_heap:peek()
-		local timeout = job and max(0, job.expires - clock()) or 1/0
-
-		local timeout_ms = max(timeout * 1000, 100)
-		--we're going infinite after 0x7fffffff for compat. with Linux.
-		if timeout_ms > 0x7fffffff then timeout_ms = INFINITE end
-
-		local ok = GetQueuedCompletionStatus(
-			iocp(), nbuf, keybuf, obuf, timeout_ms) ~= 0
-
-		local o = obuf[0]
-
-		if o == nil then
-			assert(not ok)
-			local err = WSAGetLastError()
-			if err == WAIT_TIMEOUT then
-				--cancel all timed-out jobs.
-				local t = clock()
-				while true do
-					local job = expires_heap:peek()
-					if not job then
-						break
-					end
-					if job.expires - t <= .05 then --arbitrary threshold.
-						expires_heap:pop()
-						job.expires = nil
-						if job.socket then
-							local s = job.socket.s --pipe or socket
-							local o = job.overlapped.overlapped
-							local ok = CancelIoEx(cast(voidp, s), o) ~= 0
-							if not ok then
-								local err = WSAGetLastError()
-								if err == ERROR_NOT_FOUND then --too late, already gone
-									--TODO: https://learn.microsoft.com/en-us/answers/questions/116109/
-									free_overlapped(o)
-									coro_transfer(job.thread, nil, 'timeout')
-								else
-									assert(check(ok, err))
-								end
-							end
-						else --wait()
-							coro_transfer(job.thread)
-						end
-					else
-						--jobs are popped in expire-order so no point looking beyond this.
-						break
-					end
-				end
-				--even if we canceled them all, we still have to wait for the OS
-				--to abort them. until then we can't recycle the OVERLAPPED structures.
-				return true
-			else
-				return check(nil, err)
-			end
-		else
-			local n = nbuf[0]
-			local job = free_overlapped(o)
-			if ok then
-				if job.expires then
-					assert(expires_heap:remove(job))
-				end
-				coro_transfer(job.thread, job:done(n))
-			else
-				local err = WSAGetLastError()
-				if err == ERROR_OPERATION_ABORTED then --canceled
-					coro_transfer(job.thread, nil, job.socket.s and 'timeout' or 'closed')
-				else
-					if job.expires then
-						assert(expires_heap:remove(job))
-					end
-					coro_transfer(job.thread, check(nil, err))
-				end
-			end
-			return true
-		end
-	end
-end
-
-do
-	local WSA_IO_PENDING = 997 --alias to ERROR_IO_PENDING
-
-	local function check_pending(ok, job)
-		if ok or WSAGetLastError() == WSA_IO_PENDING then
-			if job.expires then
-				expires_heap:push(job)
-			end
-			job.thread = currentthread()
-			return wait_io()
-		end
-		return check()
-	end
-
-	local function return_true()
-		return true
-	end
-
-	function tcp:try_connect(host, port, addr_flags, ...)
-		log('', 'sock', 'connect?', '%-4s %s:%s', self, host, port)
-		if not self.bound_addr then
-			--ConnectEx requires binding first.
-			local ok, err = self:try_bind(...)
-			if not ok then return false, err end
-		end
-		local ai, ext_ai = self:addr(host, port, addr_flags)
-		if not ai then return nil, ext_ai end
-		local o, job = overlapped(self, return_true, self.recv_expires)
-		local ok = ConnectEx(self.s, ai.addr, ai.addrlen, nil, 0, nil, o) == 1
-		local ok, err = check_pending(ok, job)
-		self.remote_addr = ok and ai.addr:addr():tostring() or nil
-		self.remote_port = ok and ai.addr:port() or nil
-		if not ext_ai then ai:free() end
-		if not ok then return false, err end
-		log('', 'sock', 'connectd', '%-4s %s:%s',
-			self, self.remote_addr, self.remote_port)
-		live(self, 'connected %s:%s', self.remote_addr, self.remote_port)
-		return true
-	end
-
-	function udp:try_connect(host, port, addr_flags)
-		local ai, ext_ai = self:addr(host, port, addr_flags)
-		if not ai then return nil, ext_ai end
-		local ok = C.connect(self.s, ai.addr, ai.addrlen) == 0
-		self.remote_addr = ok and ai.addr:addr():tostring() or nil
-		self.remote_port = ok and ai.addr:port() or nil
-		if not ext_ai then ai:free() end
-		if not ok then return check(ok) end
-		log('', 'sock', 'connectd', '%-4s %s:%s',
-			self, self.remote_addr, self.remote_port)
-		live(self, 'connected %s', self.remote_addr)
-		return true
-	end
-
-	local WSAEACCES     = 10013
-	local WSAECONNRESET = 10054
-	local WSAENETDOWN   = 10050
-	local WSAEMFILE     = 10024
-	local WSAENOBUFS    = 10055
-	local WSATRY_AGAIN  = 11002
-
-	local accept_buf_ct = ctype[[
-		struct {
-			struct sockaddr local_addr;
-			char reserved[16];
-			struct sockaddr remote_addr;
-			char reserved[16];
-		}
-	]]
-	local accept_buf = accept_buf_ct()
-	local sa_len = sizeof(accept_buf) / 2
-	function tcp:try_accept(opt)
-		local s = create_socket(opt, tcp, 'tcp', self._af, self._pr)
-		live(s, 'wait-accept %s', self) --only shows in Windows.
-		local o, job = overlapped(self, return_true, self.recv_expires)
-		local ok = AcceptEx(self.s, s.s, accept_buf, 0, sa_len, sa_len, nil, o) == 1
-		local ok, msg, err = check_pending(ok, job)
-		if not ok then
-			s:try_close()
-			local retry =
-				   err == WSAEACCES
-				or err == WSAECONNRESET
-				or err == WSAENETDOWN
-				or err == WSAEMFILE
-				or err == WSAENOBUFS
-				or err == WSATRY_AGAIN
-			return nil, msg, retry
-		end
-		local ra = accept_buf.remote_addr:addr():tostring()
-		local rp = accept_buf.remote_addr:port()
-		local la = accept_buf. local_addr:addr():tostring()
-		local lp = accept_buf. local_addr:port()
-		self.n = self.n + 1
-		self.sockets[s] = true
-		self.next_i = (self.next_i or 0) + 1
-		s.i = self.next_i
-		log('', 'sock', 'accepted', '%-4s %s.%d %s:%s <- %s:%s live:%d',
-			s, self, s.i, la, lp, ra, rp, self.n)
-		live(s, 'accepted %s.%d %s:%s <- %s:%s', self, s.i, la, lp, ra, rp)
-		s.remote_addr = ra
-		s.remote_port = rp
-		s. local_addr = la
-		s. local_port = lp
-		s.listen_socket = self
-		return s
-	end
-
-	local wsabuf = new'WSABUF'
-	local flagsbuf = new'DWORD[1]'
-
-	local function io_done(job, n)
-		return n
-	end
-	local function socket_send(self, buf, len)
-		wsabuf.buf = isstr(buf) and cast(u8p, buf) or buf
-		wsabuf.len = len
-		local o, job = overlapped(self, io_done, self.send_expires)
-		local ok = C.WSASend(self.s, wsabuf, 1, nil, 0, o, nil) == 0
-		local n, err = check_pending(ok, job)
-		if not n then return nil, err end
-		self.w = self.w + n
-		return n
-	end
-
-	function udp:try_send(buf, len)
-		return socket_send(self, buf, len or #buf)
-	end
-
-	function tcp:_send(buf, len)
-		if not self.s then return nil, 'closed' end
-		len = len or #buf
-		if len == 0 then return 0 end --mask-out null-writes
-		return socket_send(self, buf, len)
-	end
-
-	function socket:try_recv(buf, len)
-		if not self.s then return nil, 'closed' end
-		assert(len > 0)
-		wsabuf.buf = buf
-		wsabuf.len = len
-		local o, job = overlapped(self, io_done, self.recv_expires)
-		flagsbuf[0] = 0
-		local ok = C.WSARecv(self.s, wsabuf, 1, nil, flagsbuf, o, nil) == 0
-		local r, err = check_pending(ok, job)
-		if not r then return nil, err end
-		self.r = self.r + r
-		return r
-	end
-
-	function udp:try_sendto(host, port, buf, len, flags, addr_flags)
-		len = len or #buf
-		local ai, ext_ai = self:addr(host, port, addr_flags)
-		if not ai then return nil, ext_ai end
-		wsabuf.buf = isstr(buf) and cast(u8p, buf) or buf
-		wsabuf.len = len
-		local o, job = overlapped(self, io_done, self.send_expires)
-		local ok = C.WSASendTo(self.s, wsabuf, 1, nil, flags or 0, ai.addr, ai.addrlen, o, nil) == 0
-		if not ext_ai then ai:free() end
-		local n, err = check_pending(ok, job)
-		if not n then return nil, err end
-		self.w = self.w + n
-		return n
-	end
-
-	local int_buf_ct = ctype'int[1]'
-	local sa_buf_len = sizeof(sockaddr_ct)
-
-	function udp:try_recvnext(buf, len, flags)
-		assert(len > 0)
-		wsabuf.buf = buf
-		wsabuf.len = len
-		local o, job = overlapped(self, io_done, self.recv_expires)
-		flagsbuf[0] = flags or 0
-		if not job.sa then job.sa = sockaddr_ct() end
-		if not job.sa_len_buf then job.sa_len_buf = int_buf_ct() end
-		job.sa_len_buf[0] = sa_buf_len
-		local ok = C.WSARecvFrom(self.s, wsabuf, 1, nil, flagsbuf, job.sa, job.sa_len_buf, o, nil) == 0
-		local n, err = check_pending(ok, job)
-		if not n then return nil, err end
-		assert(job.sa_len_buf[0] <= sa_buf_len) --not truncated
-		self.r = self.r + n
-		return n, job.sa
-	end
-
-	function _file_async_read(f, read_overlapped, buf, sz)
-		local o, job = overlapped(f, io_done, f.recv_expires)
-		local ok = read_overlapped(f, o, buf, sz)
-		local n, err = check_pending(ok, job)
-		if not n then return nil, err end
-		return n
-	end
-
-	function _file_async_write(f, write_overlapped, buf, sz)
-		local o, job = overlapped(f, io_done, f.send_expires)
-		local ok = write_overlapped(f, o, buf, sz)
-		local n, err = check_pending(ok, job)
-		if not n then return nil, err end
-		return n
-	end
-
-end
-
-end --if Windows
-
 --POSIX sockets --------------------------------------------------------------
-
-if Linux or OSX then
 
 cdef[[
 typedef int SOCKET;
@@ -1508,8 +739,8 @@ ssize_t write(int fd, const void *buf, size_t count);
 
 --[[local]] check = check_errno
 
-local SOCK_NONBLOCK  = OSX and 0x000004 or 0x000800 --async I/O
-local SOCK_CLOEXEC   = OSX and     2^24 or 0x080000 --close-on-exec
+local SOCK_NONBLOCK  = 0x000800 --async I/O
+local SOCK_CLOEXEC   = 0x080000 --close-on-exec
 
 --[[local]] function create_socket(opt, class, socktype, family, protocol)
 	local st, af, pr = socketargs(socktype, family or 'inet', protocol)
@@ -1710,7 +941,7 @@ do
 	end
 end
 
-local MSG_NOSIGNAL = Linux and 0x4000 or nil
+local MSG_NOSIGNAL = 0x4000
 
 local socket_send = make_async(true, true, function(self, buf, len, flags)
 	return C.send(self.s, buf, len, flags or MSG_NOSIGNAL)
@@ -1786,8 +1017,6 @@ function _file_async_read(f, buf, len)
 end
 
 --epoll ----------------------------------------------------------------------
-
-if Linux then
 
 cdef[[
 typedef union epoll_data {
@@ -1955,24 +1184,6 @@ do
 	end
 end
 
-end --if Linux
-
---kqueue ---------------------------------------------------------------------
-
-if OSX then
-
-cdef[[
-int kqueue(void);
-int kevent(int kq, const struct kevent *changelist, int nchanges,
-	struct kevent *eventlist, int nevents,
-	const struct timespec *timeout);
-// EV_SET(&kev, ident, filter, flags, fflags, data, udata);
-]]
-
-end --if OSX
-
-end --if Linux or OSX
-
 --shutodnw() -----------------------------------------------------------------
 
 cdef[[
@@ -2011,12 +1222,8 @@ function socket:try_bind(host, port, addr_flags)
 		self.bound_addr = ba
 		self.bound_port = bp
 	end
-	if Linux then
-		--epoll_ctl() must be called after bind() for some reason.
-		return _sock_register(self)
-	else
-		return true
-	end
+	--epoll_ctl() must be called after bind() for some reason.
+	return _sock_register(self)
 end
 
 --listen() -------------------------------------------------------------------
@@ -2116,106 +1323,6 @@ local set_linger = nyi
 local get_csaddr_info = nyi
 
 local OPT, get_opt, set_opt
-
-if Windows then
-
-OPT = { --Windows 7 options only
-	acceptconn         = 0x0002, -- socket has had listen()
-	broadcast          = 0x0020, -- permit sending of broadcast msgs
-	bsp_state          = 0x1009, -- get socket 5-tuple state
-	conditional_accept = 0x3002, -- enable true conditional accept (see msdn)
-	connect_time       = 0x700C, -- number of seconds a socket has been connected
-	dontlinger         = bnot(0x0080),
-	dontroute          = 0x0010, -- just use interface addresses
-	error              = 0x1007, -- get error status and clear
-	exclusiveaddruse   = bnot(0x0004), -- disallow local address reuse
-	keepalive          = 0x0008, -- keep connections alive
-	linger             = 0x0080, -- linger on close if data present
-	max_msg_size       = 0x2003, -- maximum message size for UDP
-	maxdg              = 0x7009,
-	maxpathdg          = 0x700a,
-	oobinline          = 0x0100, -- leave received oob data in line
-	pause_accept       = 0x3003, -- pause accepting new connections
-	port_scalability   = 0x3006, -- enable port scalability
-	protocol_info      = 0x2005, -- wsaprotocol_infow structure
-	randomize_port     = 0x3005, -- randomize assignment of wildcard ports
-	rcvbuf             = 0x1002, -- receive buffer size
-	rcvlowat           = 0x1004, -- receive low-water mark
-	reuseaddr          = 0x0004, -- allow local address reuse
-	sndbuf             = 0x1001, -- send buffer size
-	sndlowat           = 0x1003, -- send low-water mark
-	type               = 0x1008, -- get socket type
-	update_accept_context  = 0x700b,
-	update_connect_context = 0x7010,
-	useloopback        = 0x0040, -- bypass hardware when possible
-	tcp_bsdurgent      = 0x7000,
-	tcp_expedited_1122 = 0x0002,
-	tcp_maxrt          =      5,
-	tcp_nodelay        = 0x0001,
-	tcp_timestamps     =     10,
-}
-
-get_opt = {
-	acceptconn         = get_bool,
-	broadcast          = get_bool,
-	bsp_state          = get_csaddr_info,
-	conditional_accept = get_bool,
-	connect_time       = get_uint,
-	dontlinger         = get_bool,
-	dontroute          = get_bool,
-	error              = get_error,
-	exclusiveaddruse   = get_bool,
-	keepalive          = get_bool,
-	linger             = get_linger,
-	max_msg_size       = get_uint,
-	maxdg              = get_uint,
-	maxpathdg          = get_uint,
-	oobinline          = get_bool,
-	pause_accept       = get_bool,
-	port_scalability   = get_bool,
-	protocol_info      = get_protocol_info,
-	randomize_port     = get_uint16,
-	rcvbuf             = get_uint,
-	rcvlowat           = get_uint,
-	reuseaddr          = get_bool,
-	sndbuf             = get_uint,
-	sndlowat           = get_uint,
-	type               = get_uint,
-	tcp_bsdurgent      = get_bool,
-	tcp_expedited_1122 = get_bool,
-	tcp_maxrt          = get_uint,
-	tcp_nodelay        = get_bool,
-	tcp_timestamps     = get_bool,
-}
-
-set_opt = {
-	broadcast          = set_bool,
-	conditional_accept = set_bool,
-	dontlinger         = set_bool,
-	dontroute          = set_bool,
-	exclusiveaddruse   = set_bool,
-	keepalive          = set_bool,
-	linger             = set_linger,
-	max_msg_size       = set_uint,
-	oobinline          = set_bool,
-	pause_accept       = set_bool,
-	port_scalability   = set_bool,
-	randomize_port     = set_uint16,
-	rcvbuf             = set_uint,
-	rcvlowat           = set_uint,
-	reuseaddr          = set_bool,
-	sndbuf             = set_uint,
-	sndlowat           = set_uint,
-	update_accept_context  = set_bool,
-	update_connect_context = set_bool,
-	tcp_bsdurgent      = set_bool,
-	tcp_expedited_1122 = set_bool,
-	tcp_maxrt          = set_uint,
-	tcp_nodelay        = set_bool,
-	tcp_timestamps     = set_bool,
-}
-
-elseif Linux then
 
 OPT = {
 	debug             = 1,
@@ -2365,30 +1472,11 @@ set_opt = {
 	keepalive         = set_bool,
 }
 
-elseif OSX then --TODO
-
-OPT = {
-
-}
-
-get_opt = {
-
-}
-
-set_opt = {
-
-}
-
-end
-
 local function parse_opt(k)
 	local opt = assertf(OPT[k], 'invalid socket option: %s', k)
 	local level =
 		(k:find('tcp_', 1, true) and 6) --TCP protocol number
-		or (
-			(Windows and 0xffff)
-			or (Linux and 1) --SOL_SOCKET
-		)
+		or 1 --SOL_SOCKET
 	return opt, level
 end
 
