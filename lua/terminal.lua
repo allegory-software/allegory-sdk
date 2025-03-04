@@ -5,6 +5,8 @@
 --  Revision   -    oct 2019
 
 require'glue'
+require'fs'
+require'sock'
 
 local function ESC(s) return '\x1b'..s end
 
@@ -172,3 +174,9 @@ end
 function resetcolors()
 	printf(ESC"001b"..ESC"[0m")
 end
+
+thread(function()
+	stdin:read()
+
+end)
+start()

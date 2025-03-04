@@ -84,6 +84,7 @@ TABLES
 CACHING
 	memoize[_multiret](f,opt...) -> mf,cache   memoize pattern
 	tuples(opt...) -> tuple(...) -> t          create a tuple space
+	istuple(t)                     is t a tuple
 	poison                         poision value to clear cache on memoized func
 STRINGS
 	format                       = string.format
