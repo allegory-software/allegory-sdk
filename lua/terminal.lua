@@ -8,6 +8,8 @@ require'glue'
 require'fs'
 require'sock'
 
+function o(str) return tonumber(str, 8) end
+
 local function ESC(s) return '\x1b'..s end
 
 local function printf(s, ...)
@@ -175,8 +177,31 @@ function resetcolors()
 	printf(ESC"001b"..ESC"[0m")
 end
 
-thread(function()
-	stdin:read()
-
-end)
-start()
+if 1 then
+	require'termios'
+	stdin  = stdin  or file_wrap_fd(0, null, true, 'pipe', '<stdin>'  )
+	stdout = stdout or file_wrap_fd(1, null, true, 'pipe', '<stdout>' )
+	stderr = stderr or file_wrap_fd(2, null, true, 'pipe', '<stderr>' )
+	local b = new'char[1]'
+	set_raw_mode(0)
+	assert(get_raw_mode(0))
+	sayn'\27[31mHello\27[0m\r\n'
+	resume(thread(function()
+		while 1 do
+			assert(stdin:read(b, 1) == 1)
+			local c = b[0]
+			clrscr()
+			flush_terminal(0, 2)
+			flush_terminal(1, 2)
+			flush_terminal(2, 2)
+			sayn('%s\r\n', c)
+			if c == 27 then --Esc
+				break
+			end
+		end
+	end))
+	start()
+	sayn'resetting terminal\r\n'
+	reset_terminal(0)
+	sayn'terminal was reset\r\n'
+end
