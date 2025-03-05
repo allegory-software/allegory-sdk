@@ -2937,3 +2937,94 @@ if file_wrap_fd then
 	stdout = file_wrap_fd(1, null, true, 'pipe', '<stdout>')
 	stderr = file_wrap_fd(2, null, true, 'pipe', '<stderr>')
 end
+
+--signals --------------------------------------------------------------------
+
+cdef[[
+typedef struct {
+	unsigned long int __val[(1024 / (8 * sizeof(unsigned long int)))];
+} sigset_t;
+struct signalfd_siginfo {
+	uint32_t ssi_signo;
+	 int32_t ssi_errno;
+	 int32_t ssi_code;
+	uint32_t ssi_pid;
+	uint32_t ssi_uid;
+	 int32_t ssi_fd;
+	uint32_t ssi_tid;
+	uint32_t ssi_band;
+	uint32_t ssi_overrun;
+	uint32_t ssi_trapno;
+	 int32_t ssi_status;
+	 int32_t ssi_int;
+	uint64_t ssi_ptr;
+	uint64_t ssi_utime;
+	uint64_t ssi_stime;
+	uint64_t ssi_addr;
+	uint16_t ssi_addr_lsb;
+	uint16_t __pad2;
+	 int32_t ssi_syscall;
+	uint64_t ssi_call_addr;
+	uint32_t ssi_arch;
+	/* Pad strcture to 128 bytes. */
+	uint8_t __pad[28];
+};
+int sigemptyset (sigset_t*);
+int sigaddset   (sigset_t*, int);
+int signalfd    (int fd, const sigset_t *mask, int flags);
+]]
+
+local signums = {
+	SIGHUP         =  1,
+	SIGINT         =  2,
+	SIGQUIT        =  3,
+	SIGILL         =  4,
+	SIGTRAP        =  5,
+	SIGABRT        =  6,
+	SIGIOT         =  6,
+	SIGBUS         =  7,
+	SIGFPE         =  8,
+	SIGKILL        =  9,
+	SIGUSR1        = 10,
+	SIGSEGV        = 11,
+	SIGUSR2        = 12,
+	SIGPIPE        = 13,
+	SIGALRM        = 14,
+	SIGTERM        = 15,
+	SIGSTKFLT      = 16,
+	SIGCHLD        = 17,
+	SIGCONT        = 18,
+	SIGSTOP        = 19,
+	SIGTSTP        = 20,
+	SIGTTIN        = 21,
+	SIGTTOU        = 22,
+	SIGURG         = 23,
+	SIGXCPU        = 24,
+	SIGXFSZ        = 25,
+	SIGVTALRM      = 26,
+	SIGPROF        = 27,
+	SIGWINCH       = 28,
+	SIGIO          = 29,
+	SIGPOLL        = 29,
+	SIGLOST        = 29,
+	SIGPWR         = 30,
+	SIGSYS         = 31,
+	SIGUNUSED      = 31,
+}
+
+function signal_file(signals, flags, name)
+	local ss = new'sigset_t'
+	C.sigemptyset(ss)
+	for signal in words(signals) do
+		C.sigaddset(ss, assertf(signums[signal], 'unknown signal %s', signal))
+	end
+	local fd = C.signalfd(-1, ss, flags or 0)
+	assert(check_errno(fd ~= 1))
+	local f = file_wrap_fd(fd, null, true, 'pipe', name)
+	local si = new'struct signalfd_siginfo'
+	f.read_signal = function(f)
+		f:readn(si, sizeof(si))
+		return si
+	end
+	return f
+end
