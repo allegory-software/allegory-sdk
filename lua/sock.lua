@@ -1064,12 +1064,14 @@ do
 	local WSA_FLAG_OVERLAPPED = 0x01
 	local INVALID_SOCKET = cast('SOCKET', -1)
 
-	function _sock_register(socket)
+	function _sock_register(sf) --socket or file
 		local iocp = iocp()
-		local h = cast('HANDLE', socket.s)
+		local h = cast('HANDLE', sf.s)
 		if ffi.C.CreateIoCompletionPort(h, iocp, 0, 0) ~= iocp then
 			return check()
 		end
+		sf.setexpires = socket.setexpires
+		sf.settimeout = socket.settimeout
 		return true
 	end
 
@@ -1840,13 +1842,17 @@ do
 
 	local e = new'struct epoll_event'
 
-	function _sock_register(s)
+	function _sock_register(sf) --socket or file
 		local i = pop(free_indices) or #sockets + 1
-		s._i = i
-		sockets[i] = s
+		sf._i = i
+		sockets[i] = sf
 		e.data.u32 = i
 		e.events = EPOLLIN + EPOLLOUT + EPOLLET
-		return check(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, s.s, e) == 0)
+		local ok, err = check(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, sf.s, e) == 0)
+		if not ok then return nil, err end
+		sf.setexpires = socket.setexpires
+		sf.settimeout = socket.settimeout
+		return true
 	end
 
 	local ENOENT = 2
@@ -2924,3 +2930,10 @@ function chan() --golang-like unbuffered channels (untested)
 	return c
 end
 
+--init stdin/out/err as async pipes ------------------------------------------
+
+if file_wrap_fd then
+	stdin  = file_wrap_fd(0, null, true, 'pipe', '<stdin>' )
+	stdout = file_wrap_fd(1, null, true, 'pipe', '<stdout>')
+	stderr = file_wrap_fd(2, null, true, 'pipe', '<stderr>')
+end

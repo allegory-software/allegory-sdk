@@ -116,13 +116,6 @@ end
 local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
 local fcntl_set_fd_flags = fcntl_set_flags_func(F_GETFD, F_SETFD)
 
-local function make_async(f)
-	fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
-	local ok, err = _sock_register(f)
-	if not ok then return nil, err end
-	return true
-end
-
 function file_wrap_fd(fd, opt, async, file_type, path, quiet)
 
 	file_type = file_type or 'file'
@@ -147,7 +140,8 @@ function file_wrap_fd(fd, opt, async, file_type, path, quiet)
 	live(f, f.path or '')
 
 	if f.async then
-		local ok, err = make_async(f)
+		fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
+		local ok, err = _sock_register(f)
 		if not ok then
 			assert(f:close())
 			return nil, err

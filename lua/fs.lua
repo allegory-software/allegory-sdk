@@ -1928,7 +1928,10 @@ file.skip     = unprotect_io(file.try_skip)
 metatype(stream_ct, stream)
 metatype(dir_ct, dir)
 
--- init fds 0,1,2 as async (needs sock)
--- stdin  = file_wrap_fd(0, null, true, 'pipe', '<stdin>' )
--- stdout = file_wrap_fd(1, null, true, 'pipe', '<stdout>')
--- stderr = file_wrap_fd(2, null, true, 'pipe', '<stderr>')
+--init stdin/out/err as async pipes ------------------------------------------
+
+if _sock_register then
+	stdin  = file_wrap_fd(0, null, true, 'pipe', '<stdin>' )
+	stdout = file_wrap_fd(1, null, true, 'pipe', '<stdout>')
+	stderr = file_wrap_fd(2, null, true, 'pipe', '<stderr>')
+end
