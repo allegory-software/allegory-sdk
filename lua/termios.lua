@@ -210,6 +210,22 @@ function send_break(fd, duration)
 	assert(check_errno(C.tcsendbreak(fd, duration) ~= -1))
 end
 
+cdef[[
+struct winsize {
+	unsigned short ws_row;
+	unsigned short ws_col;
+	unsigned short ws_xpixel;
+	unsigned short ws_ypixel;
+};
+]]
+
+local TIOCGWINSZ = 0x5413
+
+local ws = new'struct winsize'
+function get_window_size()
+	assert(check_errno(C.ioctl(1, TIOCGWINSZ, cast('void*', ws)) == 0))
+	return ws.ws_row, ws.ws_col
+end
 
 if not ... then
 	require'fs'

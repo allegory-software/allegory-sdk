@@ -41,11 +41,6 @@ local BAR             = 6
 local TRUE  = 1
 local FALSE = 0
 
---struct termsize {
---    int cols
---    int rows
---end
-
 local bg_color   = BLACK
 local font_color = WHITE
 local font_bold  = FALSE
@@ -158,6 +153,16 @@ end
 
 if 1 then
 	require'termios'
+	local w, h = get_window_size()
+	local sigf = signal_file('SIGWINCH')
+	resume(thread(function()
+		while false do
+			local si = sigf:read_signal()
+			pr(si)
+			w, h = get_window_size()
+			wrf('window size: %d,%d\r\n', w, h)
+		end
+	end))
 	set_raw_mode(0)
 	assert(get_raw_mode(0))
 	wr'\027[?1000h' --enable mouse tracking
