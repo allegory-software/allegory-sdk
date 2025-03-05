@@ -1,17 +1,21 @@
---go@ ssh -tt cosmin@192.168.56.101 -i c:\users\cosmin_apreutesei\.ssh\id_rsa "/mnt/c/sdk/bin/debian12/luajit -lterminal -e return"
---go@ ssh -tt root@10.0.0.8 -i c:\users\cosmin\.ssh\id_rsa "/mnt/x/sdk/bin/linux/luajit -ltermios -e return"
 --[=[
 
 	termios binding.
 	Written by Cosmin Apreutesei. Public Domain.
 
+	https://www.man7.org/linux/man-pages/man3/termios.3.html
+
 ]=]
 
 local ffi = require'ffi'
-local new  = ffi.new
-local band = bit.band
-local bor  = bit.bor
-local C    = ffi.C
+
+local new   = ffi.new
+local band  = bit.band
+local bor   = bit.bor
+local C     = ffi.C
+local Linux = ffi.os == 'Linux'
+
+assert(Linux, 'not on Linux')
 
 function o(str) return tonumber(str, 8) end
 

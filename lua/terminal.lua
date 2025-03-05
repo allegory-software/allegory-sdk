@@ -8,12 +8,18 @@ require'glue'
 require'fs'
 require'sock'
 
+assert(Linux, 'not on Linux')
+
 function o(str) return tonumber(str, 8) end
 
 local function ESC(s) return '\x1b'..s end
 
-local function printf(s, ...)
-	return io.write(s:format(...))
+function wr(s)
+	return stdout:write(s)
+end
+
+local function wrf(s, ...)
+	return stdout:write(s:format(...))
 end
 
 local BLACK   = 0
@@ -44,31 +50,27 @@ local bg_color   = BLACK
 local font_color = WHITE
 local font_bold  = FALSE
 
-function wait()
-	while fgetc(stdin) ~= '\n' do end
-end
-
 function clrscr()
-	printf(ESC"[2J"..ESC"[?6h")
+	wrf(ESC'[2J'..ESC'[?6h')
 end
 
 function gotoxy(x, y)
-	printf(ESC"[%d%dH", y, x)
+	wrf(ESC'[%d%dH', y, x)
 end
 
 function setfontcolor(color)
-	printf(ESC"[3%dm", color)
+	wrf(ESC'[3%dm', color)
 	font_color = color
 end
 
 function setbgrcolor(color)
-	printf(ESC"[4%dm", color)
+	wrf(ESC'[4%dm', color)
 	bg_color = color
 end
 
 
 function setfontbold(status)
-	printf(ESC"[%dm", status)
+	wrf(ESC'[%dm', status)
 	font_bold = status
 	setfontcolor(font_color)
 	setbgrcolor(bg_color)
@@ -76,7 +78,7 @@ end
 
 function setunderline(status)
 	if status then status = 4 end
-	printf(ESC"[%dm", status)
+	wrf(ESC'[%dm', status)
 	setfontcolor(font_color)
 	setbgrcolor(bg_color)
 	setfontbold(font_bold)
@@ -84,124 +86,181 @@ end
 
 function setblink(status)
 	if status then status = 5 end
-	printf(ESC"[%dm", status)
+	wrf(ESC'[%dm', status)
 	setfontcolor(font_color)
 	setbgrcolor(bg_color)
 	setfontbold(font_bold)
 end
 
 function settitle(title)
-	printf(ESC"]0%s\x07", title)
+	wrf(ESC']0%s\x07', title)
 end
 
 function setcurshape(shape)
 	-- vt520/xterm-style linux terminal uses ESC[?123c, not implemented
-	printf(ESC"[%d q", shape)
-end
-
-function gettermsize()
-	local size
-	if Windows then
-		--CONSOLE_SCREEN_BUFFER_INFO csbi
-		--GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)
-		--size.cols = csbi.srWindow.Right - csbi.srWindow.Left + 1
-		--size.rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1
-	elseif Linux then
-		--struct winsize win
-		--ioctl(STDOUT_FILENO, TIOCGWINSZ, &win)
-		--size.cols = win.ws_col
-		--size.rows = win.ws_row
-	else
-		size.cols = 0
-		size.rows = 0
-	end
-	return size
-end
-
-function getch()
-	if Windows then
-		--HANDLE input = GetStdHandle(STD_INPUT_HANDLE)
-		--if (h == NULL) return EOF
-
-		--DWORD oldmode
-		--GetConsoleMode(input, &oldmode)
-		--DWORD newmode = oldmode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT)
-		--SetConsoleMode(input, newmode)
-	elseif Linux then
-		--struct termios oldattr, newattr
-		--tcgetattr(STDIN_FILENO, &oldattr)
-		--
-		--newattr = oldattr
-		--newattr.c_lflag &= ~(ICANON | ECHO)
-		--tcsetattr(STDIN_FILENO, TCSANOW, &newattr)
-	end
-	local ch = getc(stdin)
-	if Windows then
-		--SetConsoleMode(input, oldmode)
-	elseif Linux then
-		tcsetattr(STDIN_FILENO, TCSANOW, oldattr)
-	end
-	return ch
-end
-
-function getche()
-	if Windows then
-		--HANDLE input = GetStdHandle(STD_INPUT_HANDLE)
-		--if (h == NULL) return EOF
-		--
-		--DWORD oldmode
-		--GetConsoleMode(input, &oldmode)
-		--DWORD newmode = oldmode & ~ENABLE_LINE_INPUT
-		--SetConsoleMode(input, newmode)
-	elseif Linux then
-		--struct termios oldattr, newattr
-		--tcgetattr(STDIN_FILENO, &oldattr)
-		--newattr = oldattr
-		--newattr.c_lflag &= ~ICANON
-		--tcsetattr(STDIN_FILENO, TCSANOW, &newattr)
-	end
-	local ch = getc(stdin)
-	if Windows then
-		--SetConsoleMode(input, oldmode)
-	elseif Linux then
-		tcsetattr(STDIN_FILENO, TCSANOW, oldattr)
-	end
-	return ch
+	wrf(ESC'[%d q', shape)
 end
 
 function clrline()
-	printf(ESC"[2K"..ESC"E")
+	wrf(ESC'[2K'..ESC'E')
 end
 
 function resetcolors()
-	printf(ESC"001b"..ESC"[0m")
+	wrf(ESC'001b'..ESC'[0m')
+end
+
+DEBUG = false
+dbgf = DEBUG and wrf or noop
+
+local b = new'char[128]'
+function getc()
+	stdin:readn(b, 1)
+	if DEBUG then dbgf(' getc %s %s\r\n', b[0], char(b[0])) end
+	return b[0]
+end
+
+function readto(c1, c2)
+	c1 = byte(c1)
+	c2 = byte(c2)
+	local z = 128
+	local b0 = b
+	local n = 0
+	while z > 0 do
+		local len, err = stdin:read(b, z)
+		if DEBUG then dbgf('  readto %s or %s: %d "%s" %s\r\n', char(c1), char(c2), len, str(b, len), err or '') end
+		assert(len, err)
+		assert(len > 0, 'eof')
+		n = n + len
+		for i = 0,len-1 do
+			if b[i] == c1 or b[i] == c2 then
+				return str(b0, n)
+			end
+		end
+		b = b + len
+		z = z - len
+	end
+	assert(false)
+end
+
+function wait_getc(timeout)
+	stdin:settimeout(0.1)
+	local len, err = stdin:try_read(b, 1)
+	stdin:settimeout(nil)
+	if not len and err == 'timeout' then
+		if DEBUG then dbgf(' %s\r\n', 'timeout') end
+		return nil
+	else
+		assert(len == 1)
+	end
+	if DEBUG then dbgf(' wait_getc %s %s\r\n', b[0], char(b[0])) end
+	return b[0]
 end
 
 if 1 then
 	require'termios'
-	stdin  = stdin  or file_wrap_fd(0, null, true, 'pipe', '<stdin>'  )
-	stdout = stdout or file_wrap_fd(1, null, true, 'pipe', '<stdout>' )
-	stderr = stderr or file_wrap_fd(2, null, true, 'pipe', '<stderr>' )
-	local b = new'char[1]'
 	set_raw_mode(0)
 	assert(get_raw_mode(0))
-	sayn'\27[31mHello\27[0m\r\n'
+	wr'\027[?1000h' --enable mouse tracking
+	wr'\027[?1006h' --enable SGR mouse tracking
+	wr'\27[31mHello\27[0m\r\n'
 	resume(thread(function()
 		while 1 do
-			assert(stdin:read(b, 1) == 1)
-			local c = b[0]
-			clrscr()
-			flush_terminal(0, 2)
-			flush_terminal(1, 2)
-			flush_terminal(2, 2)
-			sayn('%s\r\n', c)
-			if c == 27 then --Esc
+			local key
+			local mx, my, mstate, scroll, ldown, lup, rdown, rup, mdown, mup
+			local c = getc()
+			if c == 27 then --\033
+				c = wait_getc(100)
+				if not c then
+					key = 'esc'
+				elseif c == 91 then --[
+					c = getc()
+					if     c == 65 then
+						key = 'up'
+					elseif c == 66 then
+						key = 'down'
+					elseif c == 67 then
+						key = 'right'
+					elseif c == 68 then
+						key = 'left'
+					elseif c == 49 then
+						c = getc()
+						if     c == 49 then if getc() == 126 then key = 'f1' end
+						elseif c == 50 then if getc() == 126 then key = 'f2' end
+						elseif c == 51 then if getc() == 126 then key = 'f3' end
+						elseif c == 52 then if getc() == 126 then key = 'f4' end
+						elseif c == 53 then if getc() == 126 then key = 'f5' end
+						elseif c == 55 then if getc() == 126 then key = 'f6' end
+						elseif c == 56 then if getc() == 126 then key = 'f7' end
+						elseif c == 57 then if getc() == 126 then key = 'f8' end
+						elseif c == 126 then key = 'home'
+						end
+					elseif c == 50 then
+						c = getc()
+						if     c == 48 then if getc() == 126 then key = 'f9' end
+						elseif c == 49 then if getc() == 126 then key = 'f10' end
+						elseif c == 51 then if getc() == 126 then key = 'f11' end
+						elseif c == 52 then if getc() == 126 then key = 'f12' end
+						elseif c == 126 then key = 'insert'
+						end
+					elseif c == 51 then if getc() == 126 then key = 'delete' end
+					elseif c == 52 then if getc() == 126 then key = 'end' end
+					elseif c == 53 then if getc() == 126 then key = 'pageup' end
+					elseif c == 54 then if getc() == 126 then key = 'pagedown' end
+					elseif c == 60 then --<
+						local s = readto('M', 'm')
+						if DEBUG then dbgf('   "%s"\r\n', s) end
+						local b, smx, smy, st = assert(s:match'^(%d+);(%d+);(%d+)([Mm])$')
+						mx = num(smx)
+						my = num(smy)
+						if b == '0' then
+							ldown = st == 'M'
+							lup   = st == 'm'
+							mstate = b..st
+						elseif b == '2' then
+							rdown = st == 'M'
+							ldown = st == 'm'
+							mstate = b..st
+						elseif b == '1' then
+							mdown = st == 'M'
+							mup   = st == 'm'
+							mstate = b..st
+						elseif b == '64' then
+							scroll = -1
+						elseif b == '65' then
+							scroll = 1
+						end
+						if DEBUG then dbgf('%d %d %s %s\r\n', mx, my, b, st) end
+					end
+				end
+			elseif c == 127 then
+				key = 'backspace'
+			elseif c >= 32 and c <= 126 then
+				key = char(c)
+			elseif c == 13 then
+				key = 'enter'
+			else
+				key = c
+			end
+			--clrscr()
+			--flush_terminal(0, 2)
+			--flush_terminal(1, 2)
+			--flush_terminal(2, 2)
+			if key then
+				wrf('key: %s\r\n', key)
+			elseif mx then
+				wrf('mouse: %d,%d %s\r\n', mx, my,
+					scroll == -1 and 'scroll-up' or scroll == 1 and 'scroll-down'
+					or mstate)
+			end
+			if key == 'esc' then --Esc
 				break
 			end
 		end
 	end))
 	start()
 	sayn'resetting terminal\r\n'
+	wr'\027[?1006l' --stop SGR mouse events
+	wr'\027[?1000l' --stop mouse events
 	reset_terminal(0)
 	sayn'terminal was reset\r\n'
 end
