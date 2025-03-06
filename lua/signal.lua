@@ -2,9 +2,9 @@
 
 	Async polling of unix signals.
 
-	SIG*  signal numbers
+	SIG* ...  signal numbers
 
-	signal_file('SIGHUP ...'|{SIGHUP, ...}, async, bor(SFD_*, ...), [debug_name]) -> sf
+	signal_file(signals, async, bor(SFD_*, ...), [debug_name]) -> sf
 	sf:try_read_signal() -> signal | nil,err
 	sf:read_signal() -> signalfd_siginfo
 
@@ -12,6 +12,8 @@
 	signal_unblock   (signals)
 	signal_blockonly (signals)
 	signal_ignore    (signals)
+
+	signals arg: 'SIGHUP ...' | {SIGHUP, ...}
 
 ]]
 
@@ -55,39 +57,32 @@ int signalfd    (int fd, const sigset_t* mask, int flags);
 
 SIGHUP    =  1 --controlling terminal was lost
 SIGINT    =  2 --Ctrl+C
-SIGQUIT   =  3
+SIGQUIT   =  3 --Ctrl+\
 SIGILL    =  4 --illegal instruction
-SIGTRAP   =  5
+SIGTRAP   =  5 --trace/breakpoint
 SIGABRT   =  6 --abort()
-SIGIOT    =  6
 SIGBUS    =  7 --bad memory access
-SIGFPE    =  8
-SIGKILL   =  9 --kill (can't catch it)
-SIGUSR1   = 10
+SIGFPE    =  8 --division by zero, NaN in strict mode
+SIGKILL   =  9 --kill (can't be caught)
+SIGUSR1   = 10 --used-defined #1
 SIGSEGV   = 11 --seg fault
-SIGUSR2   = 12
-SIGPIPE   = 13
+SIGUSR2   = 12 --used-defined #2
+SIGPIPE   = 13 --broken pipe
 SIGALRM   = 14 --alarm()
 SIGTERM   = 15 --terminate gracefully
-SIGSTKFLT = 16
 SIGCHLD   = 17 --child terminated
 SIGCONT   = 18 --resume paused process
-SIGSTOP   = 19 --Ctrl+Z (can't catch it)
-SIGTSTP   = 20
-SIGTTIN   = 21
-SIGTTOU   = 22
-SIGURG    = 23
-SIGXCPU   = 24
-SIGXFSZ   = 25
-SIGVTALRM = 26
-SIGPROF   = 27
-SIGWINCH  = 28
-SIGIO     = 29
-SIGPOLL   = 29
-SIGLOST   = 29
-SIGPWR    = 30
-SIGSYS    = 31
-SIGUNUSED = 31
+SIGSTOP   = 19 --pause process (can't be caught)
+SIGTSTP   = 20 --Ctrl+Z
+SIGTTIN   = 21 --bg process tries to read from terminal
+SIGTTOU   = 22 --bg process tries to write to terminal
+SIGURG    = 23 --out-of-band data received on a socket
+SIGXCPU   = 24 --CPU RLIMIT exceeded
+SIGXFSZ   = 25 --file size limit exceeded
+SIGVTALRM = 26 --fd is ready for I/O (fcntl() with F_SETOWN and O_ASYNC)
+SIGPROF   = 27 --profiling timer
+SIGWINCH  = 28 --terminal window was resized
+SIGIO     = 29 --async I/O is complete (fcnt() with O_ASYNC)
 
 SFD_CLOEXEC  = 0x80000
 SFD_NONBLOCK = 0x00800 --not needed since file_wrap_fd() calls ioctl().
