@@ -5,15 +5,18 @@
 
 	https://www.man7.org/linux/man-pages/man3/termios.3.html
 
+	isatty(fd) -> t|f             check if a fd is a tty
+	tc_set_raw_mode([fd])         put terminal in raw mode
+	tc_get_raw_mode([fd]) -> t|f  check if in raw mode
+	tc_reset([fd])                reset to default mode
+	tc_reset([fd])
+	tc_flush([fd], 0|1|2)         discard all data in input or output buffers
+	tc_drain([fd])                wait for data to be transmitted
+
 ]=]
 
-local ffi = require'ffi'
-
-local new   = ffi.new
-local band  = bit.band
-local bor   = bit.bor
-local C     = ffi.C
-local Linux = ffi.os == 'Linux'
+require'fs'
+require'glue'
 
 assert(Linux, 'not on Linux')
 
@@ -123,7 +126,7 @@ local VWERASE  = 14
 local VLNEXT   = 15
 local VEOL2    = 16
 
-ffi.cdef[[
+cdef[[
 int isatty(int fd);
 
 struct termios {
@@ -155,14 +158,14 @@ end
 local term = new'struct termios'
 
 local function tcgetattr(fd)
-	assert(check_errno(C.tcgetattr(fd, term) ~= -1))
+	assert(check_errno(C.tcgetattr(fd or 0, term) ~= -1))
 end
 
 local function tcsetattr(fd)
-	assert(check_errno(C.tcsetattr(fd, TCSANOW, term) ~= -1))
+	assert(check_errno(C.tcsetattr(fd or 0, TCSANOW, term) ~= -1))
 end
 
-function set_raw_mode(fd)
+function tc_set_raw_mode(fd)
 	tcgetattr(fd)
 
 	-- disable canonical mode (input line buffering) and echo
@@ -179,13 +182,13 @@ function set_raw_mode(fd)
 	tcsetattr(fd)
 end
 
-function get_raw_mode(fd)
+function tc_get_raw_mode(fd)
 	tcgetattr(fd)
 	return band(term.c_lflag, ICANON) == 0
 end
 
--- Function to reset terminal to original state
-function reset_terminal(fd)
+-- reset terminal to original state
+function tc_reset(fd)
 	tcgetattr(fd)
 
 	term.c_lflag = bor(term.c_lflag, ICANON)
@@ -198,16 +201,12 @@ function reset_terminal(fd)
 	tcsetattr(fd)
 end
 
-function flush_terminal(fd, queue)
-	assert(check_errno(C.tcflush(fd, queue) ~= -1))
+function tc_flush(fd, queue)
+	assert(check_errno(C.tcflush(fd or 0, queue or 2) ~= -1))
 end
 
-function drain_terminal(fd)
-	assert(check_errno(C.tcdrain(fd) ~= -1))
-end
-
-function send_break(fd, duration)
-	assert(check_errno(C.tcsendbreak(fd, duration) ~= -1))
+function tc_drain(fd)
+	assert(check_errno(C.tcdrain(fd or 0) ~= -1))
 end
 
 cdef[[
@@ -222,29 +221,18 @@ struct winsize {
 local TIOCGWINSZ = 0x5413
 
 local ws = new'struct winsize'
-function get_window_size()
+function tc_get_window_size()
 	assert(check_errno(C.ioctl(1, TIOCGWINSZ, cast('void*', ws)) == 0))
 	return ws.ws_row, ws.ws_col
 end
 
-if not ... then
-	require'fs'
 
-	local fd = 0
-	assertf(isatty(fd), 'fd %d is not a tty', fd)
+if not ... then --self-test
 
-	print'\27[31mHello\27[0m'
-	set_raw_mode(fd)
-	reset_terminal(fd)
+	assertf(isatty(0), 'fd 0 is not a tty')
+	tc_set_raw_mode()
+	assert(tc_get_raw_mode())
+	print'\27[31mHello\27[0m\r\n'
+	tc_reset()
 
-	-- Flush terminal input and output buffers
-	-- flush_terminal(fd, 0)  -- 0 for input buffer
-	-- flush_terminal(fd, 1)  -- 1 for output buffer
-	-- flush_terminal(fd, 2)  -- 2 for both
-
-	-- Drain terminal output buffer
-	-- drain_terminal(fd)
-
-	-- Send break signal (duration in microseconds)
-	-- send_break(fd, 0)  -- No break
 end

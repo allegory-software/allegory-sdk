@@ -163,14 +163,14 @@ end
 --self-test ------------------------------------------------------------------
 
 if 1 then
-	local w, h = get_window_size()
+	local w, h = tc_get_window_size()
 	signal_block'SIGWINCH SIGINT'
 	local sigf = signal_file('SIGWINCH SIGINT', true)
 	resume(thread(function()
 		while true do
 			local si = sigf:read_signal()
 			if si.signo == SIGWINCH then
-				w, h = get_window_size()
+				w, h = tc_get_window_size()
 				wrf('window size: %d,%d\r\n', w, h)
 			elseif si.signo == SIGINT then
 				stop()
@@ -178,8 +178,8 @@ if 1 then
 			end
 		end
 	end))
-	set_raw_mode(0)
-	assert(get_raw_mode(0))
+	tc_set_raw_mode()
+	assert(tc_get_raw_mode())
 	wr'\027[?1000h' --enable mouse tracking
 	wr'\027[?1006h' --enable SGR mouse tracking
 	wr'\27[31mHello\27[0m\r\n'
@@ -189,7 +189,7 @@ if 1 then
 			local mx, my, mstate, scroll, ldown, lup, rdown, rup, mdown, mup
 			local c = getc()
 			if c == 27 then --\033
-				c = wait_getc(.1)
+				c = wait_getc(.01)
 				if not c then
 					key = 'esc'
 				elseif c == 91 then --[
@@ -272,14 +272,10 @@ if 1 then
 					scroll == -1 and 'scroll-up' or scroll == 1 and 'scroll-down'
 					or mstate)
 			end
-			if key == 'esc' then --Esc
-				stop()
-				break
-			end
 		end
 	end))
 	start()
 	wr'\027[?1006l' --stop SGR mouse events
 	wr'\027[?1000l' --stop mouse events
-	reset_terminal(0)
+	tc_reset()
 end
