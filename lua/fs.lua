@@ -837,6 +837,7 @@ end
 
 function file:try_readn(buf, sz)
 	local buf0, sz0 = buf, sz
+	local buf = cast(u8p, buf)
 	while sz > 0 do
 		local len, err = self:read(buf, sz)
 		if not len then --short read

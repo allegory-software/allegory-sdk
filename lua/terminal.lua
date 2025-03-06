@@ -7,10 +7,14 @@
 require'glue'
 require'fs'
 require'sock'
+require'signal'
+require'termios'
 
 assert(Linux, 'not on Linux')
 
 function o(str) return tonumber(str, 8) end
+
+--writing and encoding -------------------------------------------------------
 
 local function ESC(s) return '\x1b'..s end
 
@@ -22,6 +26,7 @@ local function wrf(s, ...)
 	return stdout:write(s:format(...))
 end
 
+--[[
 local BLACK   = 0
 local RED     = 1
 local GREEN   = 2
@@ -104,17 +109,21 @@ function resetcolors()
 	wrf(ESC'001b'..ESC'[0m')
 end
 
-DEBUG = false
-dbgf = DEBUG and wrf or noop
+]]
+
+local DEBUG = false
+local dbgf = DEBUG and wrf or noop
+
+--reading and decoding -------------------------------------------------------
 
 local b = new'char[128]'
-function getc()
+local function getc()
 	stdin:readn(b, 1)
 	if DEBUG then dbgf(' getc %s %s\r\n', b[0], char(b[0])) end
 	return b[0]
 end
 
-function readto(c1, c2)
+local function readto(c1, c2)
 	c1 = byte(c1)
 	c2 = byte(c2)
 	local z = 128
@@ -137,8 +146,8 @@ function readto(c1, c2)
 	assert(false)
 end
 
-function wait_getc(timeout)
-	stdin:settimeout(0.1)
+local function wait_getc(timeout)
+	stdin:settimeout(timeout)
 	local len, err = stdin:try_read(b, 1)
 	stdin:settimeout(nil)
 	if not len and err == 'timeout' then
@@ -151,20 +160,22 @@ function wait_getc(timeout)
 	return b[0]
 end
 
+--self-test ------------------------------------------------------------------
+
 if 1 then
-	require'signal'
-	require'termios'
 	local w, h = get_window_size()
-	signal_block('SIGWINCH')
-	local sigf = signal_file('SIGWINCH', true)-- SIGHUP SIGINT SIGQUIT SIGILL SIGTRAP SIGABRT')
-	local B = false
+	signal_block'SIGWINCH SIGINT'
+	local sigf = signal_file('SIGWINCH SIGINT', true)
 	resume(thread(function()
-		while B do
-			--sigf:settimeout(1)
+		while true do
 			local si = sigf:read_signal()
-			pr(si)
-			w, h = get_window_size()
-			wrf('window size: %d,%d\r\n', w, h)
+			if si.signo == SIGWINCH then
+				w, h = get_window_size()
+				wrf('window size: %d,%d\r\n', w, h)
+			elseif si.signo == SIGINT then
+				stop()
+				break
+			end
 		end
 	end))
 	set_raw_mode(0)
@@ -178,7 +189,7 @@ if 1 then
 			local mx, my, mstate, scroll, ldown, lup, rdown, rup, mdown, mup
 			local c = getc()
 			if c == 27 then --\033
-				c = wait_getc(100)
+				c = wait_getc(.1)
 				if not c then
 					key = 'esc'
 				elseif c == 91 then --[
@@ -262,14 +273,13 @@ if 1 then
 					or mstate)
 			end
 			if key == 'esc' then --Esc
+				stop()
 				break
 			end
 		end
 	end))
 	start()
-	sayn'resetting terminal\r\n'
 	wr'\027[?1006l' --stop SGR mouse events
 	wr'\027[?1000l' --stop mouse events
 	reset_terminal(0)
-	sayn'terminal was reset\r\n'
 end
