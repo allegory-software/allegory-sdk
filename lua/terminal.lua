@@ -152,11 +152,15 @@ function wait_getc(timeout)
 end
 
 if 1 then
+	require'signal'
 	require'termios'
 	local w, h = get_window_size()
-	local sigf = signal_file('SIGWINCH')
+	signal_block('SIGWINCH')
+	local sigf = signal_file('SIGWINCH', true)-- SIGHUP SIGINT SIGQUIT SIGILL SIGTRAP SIGABRT')
+	local B = false
 	resume(thread(function()
-		while false do
+		while B do
+			--sigf:settimeout(1)
 			local si = sigf:read_signal()
 			pr(si)
 			w, h = get_window_size()
