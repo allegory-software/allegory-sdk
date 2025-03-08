@@ -32,7 +32,17 @@ local function wrf(s, ...)
 	return stdout:write(s:format(...))
 end
 
-local dbgf = DEBUG and wrf or noop
+local function text(s)
+	return s:gsub('\27', 'ESC')
+end
+
+local function textf(s, ...)
+	return text(s:format(...))
+end
+
+local dbgfl = DEBUG and function(s, ...)
+	wr(s:format(...)); wr'\r\n'
+end or noop
 
 --hsl is in (0..360, 0..1, 0..1); rgb is (0..1, 0..1, 0..1)
 local function h2rgb(m1, m2, h)
@@ -134,24 +144,22 @@ end
 local b = new'char[128]'
 local function rd()
 	stdin:readn(b, 1)
-	if DEBUG then dbgf(' rd %s %s\r\n', b[0], char(b[0])) end
+	if DEBUG then dbgfl(' rd %s %s', b[0], text(char(b[0]))) end
 	return b[0]
 end
 
-local function readto(c1, c2)
+local function readto(c1, c2, err)
 	c1 = byte(c1)
 	c2 = byte(c2)
 	for i = 0,127 do
-		local len, err = stdin:read(b+i, 1)
-		assert(len, err)
-		assert(len > 0, 'eof')
+		stdin:readn(b+i, 1)
 		if b[i] == c1 or b[i] == c2 then
-			if DEBUG then dbgf('  readto %s or %s: %d "%s" %s\r\n',
-				char(c1), char(c2), i, str(b, i+1):gsub('\\', '\\\\'), err or '') end
+			if DEBUG then dbgfl('  readto %s or %s: %d "%s" %s',
+				char(c1), char(c2), i, text(str(b, i+1)), err or '') end
 			return str(b, i+1)
 		end
 	end
-	assert(false)
+	assertf(false, '%s: "%s"', err or 'invalid sequence', text(s))
 end
 
 local function wait_rd(timeout)
@@ -159,12 +167,12 @@ local function wait_rd(timeout)
 	local len, err = stdin:try_read(b, 1)
 	stdin:settimeout(nil)
 	if not len and err == 'timeout' then
-		if DEBUG then dbgf(' %s\r\n', 'timeout') end
+		if DEBUG then dbgfl(' %s', 'timeout') end
 		return nil
 	else
-		assert(len == 1)
+		assert(len == 1, 'eof')
 	end
-	if DEBUG then dbgf(' wait_rd %s %s\r\n', b[0], char(b[0])) end
+	if DEBUG then dbgfl(' wait_rd %s %s', b[0], char(b[0])) end
 	return b[0]
 end
 
@@ -217,9 +225,10 @@ local function read_input() --read keyboard and mouse input in raw mode
 			elseif c == 54 then if rd() == 126 then key = 'pagedown' end
 			elseif c == 60 then --<
 				local s = readto('M', 'm')
-				if DEBUG then dbgf('   "%s"\r\n', s:gsub('\\', '\\\\')) end
 				local b, smx, smy, st = s:match'^(%d+);(%d+);(%d+)([Mm])$'
-				assertf(b, 'invalid mouse event: "%s"', s:gsub('\\', '\\\\'))
+				if not b then
+					assertf(false, 'invalid mouse event sequence: "%s"', text(s))
+				end
 				mx = num(smx)
 				my = num(smy)
 				if b == '0' then
@@ -239,7 +248,7 @@ local function read_input() --read keyboard and mouse input in raw mode
 				elseif b == '65' then
 					scroll = 1
 				end
-				if DEBUG then dbgf('mouse %d %d %s %s\r\n', mx, my, b, st) end
+				if DEBUG then dbgfl('mouse %d %d %s %s', mx, my, b, st) end
 			end
 		end
 	elseif c == 127 then
@@ -251,7 +260,7 @@ local function read_input() --read keyboard and mouse input in raw mode
 	else
 		key = c
 	end
-	if DEBUG and key then dbgf('key %s\r\n', key) end
+	if DEBUG and key then dbgfl('key %s', key) end
 end
 
 ------------------------------------------------------------------------------
@@ -758,17 +767,6 @@ local function redraw()
 
 	bg_color, bg_bright = hsl_to_color(0, 0, 0)
 	fg_color, fg_bright = hsl_to_color(0, 0, 1)
-
-	--[[
-	if key then
-		wrf('key: %s\r\n', key)
-	elseif scroll or mstate then
-		if mx then gotoxy(mx, my) end
-		wrf('mouse: %d,%d %s\r\n', mx, my,
-			scroll == -1 and 'scroll-up' or scroll == 1 and 'scroll-down'
-			or mstate)
-	end
-	]]
 
 	local relayout_count = 0
 	while 1 do
