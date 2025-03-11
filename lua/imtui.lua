@@ -269,31 +269,32 @@ end
 
 -- themes --------------------------------------------------------------------
 
-function array_of_objs(n) {
-	let a = []
-	for (let i = 0; i < n; i++)
-		a.push({})
+function array_of_objs(n)
+	local a = {}
+	for i = 1,n do
+		a[i] = {}
+	end
 	return a
-}
+end
 
-function theme_make(name, is_dark) {
+function theme_make(name, is_dark)
 	themes[name] = {
-		is_dark : is_dark,
-		name    : name,
+		is_dark = is_dark,
+		name    = name,
 		-- TODO: 255 seems excessive, though it's probably still faster
 		-- than a hashmap access, dunno...
-		fg     : array_of_objs(255),
-		border : array_of_objs(255),
-		bg     : array_of_objs(255),
+		fg      = array_of_objs(255),
+		border  = array_of_objs(255),
+		bg      = array_of_objs(255),
 	}
-}
+end
 local themes = {}
 ui.themes = themes
 
 theme_make('light', false)
 theme_make('dark' , true)
 
---colors and themes ----------------------------------------------------------
+--color states ---------------------------------------------------------------
 
 local STATE_HOVER         =   1
 local STATE_ACTIVE        =   2
@@ -304,64 +305,65 @@ local STATE_ITEM_ERROR    =  32
 local STATE_NEW           =  64
 local STATE_MODIFIED      = 128
 
-let parse_state_combis = memoize(function(s) {
+local parse_state_combis = memoize(function(s)
 	s = ' '+s
-	let b = 0
-	if (s.includes(' hover'        )) b |= STATE_HOVER
-	if (s.includes(' active'       )) b |= STATE_ACTIVE
-	if (s.includes(' focused'      )) b |= STATE_FOCUSED
-	if (s.includes(' item-selected')) b |= STATE_ITEM_SELECTED
-	if (s.includes(' item-focused' )) b |= STATE_ITEM_FOCUSED
-	if (s.includes(' item-error'   )) b |= STATE_ITEM_ERROR
-	if (s.includes(' new'          )) b |= STATE_NEW
-	if (s.includes(' modified'     )) b |= STATE_MODIFIED
+	local b = 0
+	if s:find(' hover'        ) then b = bor(b, STATE_HOVER        ) end
+	if s:find(' active'       ) then b = bor(b, STATE_ACTIVE       ) end
+	if s:find(' focused'      ) then b = bor(b, STATE_FOCUSED      ) end
+	if s:find(' item-selected') then b = bor(b, STATE_ITEM_SELECTED) end
+	if s:find(' item-focused' ) then b = bor(b, STATE_ITEM_FOCUSED ) end
+	if s:find(' item-error'   ) then b = bor(b, STATE_ITEM_ERROR   ) end
+	if s:find(' new'          ) then b = bor(b, STATE_NEW          ) end
+	if s:find(' modified'     ) then b = bor(b, STATE_MODIFIED     ) end
 	return b
-})
-function parse_state(s) {
-	if (!s) return 0
-	if (isnum(s)) return s
-	if (s == 'normal') return 0
-	if (s == 'hover' ) return STATE_HOVER
-	if (s == 'active') return STATE_ACTIVE
+end)
+function parse_state(s)
+	if not s then return 0 end
+	if isnum(s) then return s end
+	if s == 'normal' then return 0 end
+	if s == 'hover'  then return STATE_HOVER end
+	if s == 'active' then return STATE_ACTIVE end
 	return parse_state_combis(s)
-}
+end
 
-// styling colors ------------------------------------------------------------
+-- styling colors ------------------------------------------------------------
 
-// Colors are defined in HSL so they can be adjusted if needed. Colors are
-// specified by (theme, name, state) with state 0 (normal) as fallback.
-// Concrete colors can also be specified by prefixing them with a `:` (for
-// light colors) or `*` (for dark colors), eg. `:#fff`, `*red`, etc. but that
-// throws away the ability to HSL-adjust the color.
+-- Colors are defined in HSL so they can be adjusted if needed. Colors are
+-- specified by (theme, name, state) with state 0 (normal) as fallback.
+-- Concrete colors can also be specified by prefixing them with a `:` (for
+-- light colors) or `*` (for dark colors), eg. `:#fff`, `*red`, etc. but that
+-- throws away the ability to HSL-adjust the color.
 
-function def_color_func(k) {
-	function def_color(theme, name, state, h, s, L, a, is_dark) {
-		if (theme == '*') { // define color for all themes
-			for (let theme_name in themes)
+function def_color_func(k)
+	function def_color(theme, name, state, h, s, L, a, is_dark)
+		if theme == '*' then -- define color for all themes
+			for theme_name in pairs(themes)
 				def_color(theme_name, name, state, h, s, L, a, is_dark)
 			return
-		}
-		let states = themes[theme][k]
-		if (state == '*') { // copy all states of a color
+		end
+		local states = themes[theme][k]
+		if state == '*' then -- copy all states of a color
 			assert(isstr(h), 'expected color name to copy for all states')
-			for (let state_i = 0; state_i < states.length; state_i++) {
-				let color = states[state_i][h]
-				if (color != null)
+			for state_i = 1, #states do
+				local color = states[state_i][h]
+				if color then
 					states[state_i][name] = color
-			}
+				end
+			end
 			return
-		}
-		let state_i = parse_state(state)
+		end
+		local state_i = parse_state(state)
 		states[state_i][name] = isnum(h)
-			? [hsl(h, s, L, a), h, s, L, a, is_dark]
-			: isarray(h) ? h : ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme)
-	}
+			and {hsl_to_color(h, s, L, a), h, s, L, a, is_dark}
+			or (isarray(h) and h or ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme))
+	end
 	return def_color
-}
+end
 
-let theme
-ui.get_theme = () => theme.name
-ui.dark = () => theme.is_dark
+local theme
+function ui.get_theme() return theme.name end
+function ui.dark() return theme.is_dark end
 
 function lookup_color_hsl_func(k) {
 	return function(name, state, theme1) {
@@ -375,12 +377,12 @@ function lookup_color_hsl_func(k) {
 	}
 }
 
-let CC_COLON = ':'.charCodeAt(0) // prefix for light colors
-let CC_STAR  = '*'.charCodeAt(0) // prefix for dark colors
+local CC_COLON = byte(':') -- prefix for light colors
+local CC_STAR  = byte('*') -- prefix for dark colors
 
 function lookup_color_func(hsl_color) {
 	return function(name, state, theme) {
-		if (name.charCodeAt(0) == CC_COLON) { // custom color
+		if (byte(name) == CC_COLON) { // custom color
 			return name.slice(1)
 		}
 		return hsl_color(name, state, theme)[0]
@@ -417,7 +419,7 @@ function set_bg_color(color, state) {
 	cx.fillStyle = color
 }
 
-// text colors ---------------------------------------------------------------
+-- text colors ---------------------------------------------------------------
 
 ui.fg_style = def_color_func('fg')
 let fg_color_hsl = lookup_color_hsl_func('fg')
@@ -427,8 +429,8 @@ ui.fg_color = fg_color
 ui.fg_color_rgb  = lookup_color_rgb_int_func(fg_color_hsl)
 ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 
-//           theme    name     state       h     s     L    a
-// ---------------------------------------------------------------------------
+--           theme    name     state       h     s     L    a
+------------------------------------------------------------------------------
 ui.fg_style('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
 ui.fg_style('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
 ui.fg_style('light', 'text'   , 'active' ,   0, 0.00, 0.40)
@@ -461,7 +463,7 @@ ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.fg_style('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
 ui.fg_style('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 
-// border colors -------------------------------------------------------------
+-- border colors -------------------------------------------------------------
 
 ui.border_style = def_color_func('border')
 let border_color_hsl = lookup_color_hsl_func('border')
@@ -473,8 +475,8 @@ ui.border_color = border_color
 ui.border_color_rgb  = lookup_color_rgb_int_func(border_color_hsl)
 ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
 
-//               theme    name        state       h     s     L     a
-// ---------------------------------------------------------------------------
+--               theme    name        state       h     s     L     a
+------------------------------------------------------------------------------
 ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
 ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
 ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
@@ -489,7 +491,7 @@ ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
 ui.border_style('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
 ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
-// background colors ---------------------------------------------------------
+-- background colors ---------------------------------------------------------
 
 ui.bg_style = def_color_func('bg')
 let bg_color_hsl = lookup_color_hsl_func('bg')
@@ -505,8 +507,8 @@ function bg_is_dark(bg_color) {
 }
 ui.bg_is_dark = bg_is_dark
 
-//           theme    name      state       h     s     L     a
-// -------------------------------------------------------------
+--           theme    name      state       h     s     L     a
+------------------------------------------------------------------------------
 ui.bg_style('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
 ui.bg_style('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
@@ -543,7 +545,7 @@ ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
 ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
 ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
-// TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
+-- TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
 for (let theme of ['light', 'dark']) {
 	for (let state of ['normal', 'hover', 'active'])
 		for (let fg of ['text', 'link', 'marker'])
@@ -601,8 +603,6 @@ ui.bg_style('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0
 ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
 ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
 ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
-
-
 
 -- command state -------------------------------------------------------------
 
