@@ -49,6 +49,7 @@ VARARGS
 ARRAYS
 	insert                       = table.insert
 	remove                       = table.remove
+	del                          = table.remove
 	pop                          = remove
 	sort(t,[cmp]) -> t           = table.sort
 	add(t, v)                      insert(t, v)
@@ -404,6 +405,7 @@ _G.cat    = concat
 _G.insert = insert
 _G.remove = remove
 _G.pop    = remove
+_G.del    = remove
 
 function add(t, v)
 	insert(t, v)

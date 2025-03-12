@@ -65,6 +65,11 @@ logging = {
 	},
 }
 
+function logging:tostderr(entry)
+	io.stderr:write(entry)
+	io.stderr:flush()
+end
+
 function logging:tofile(logfile, max_size, queue_size)
 
 	require'fs'
@@ -455,8 +460,7 @@ local function log(self, severity, module, event, fmt, ...)
 			}
 		end
 		if not self.quiet then
-			io.stderr:write(entry)
-			io.stderr:flush()
+			self:tostderr(entry)
 		end
 	end
 end

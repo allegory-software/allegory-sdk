@@ -147,7 +147,7 @@ local callers = setmetatable({}, {__mode = 'k'}) --{thread -> caller_thread}
 local main, is_main = coroutine.running()
 assert(is_main, 'coro must be loaded from the main thread')
 local current = main
-local coro = {main = main, pcall = pcall}
+coro = {main = main, pcall = pcall}
 
 function coro.live() end --stub
 
