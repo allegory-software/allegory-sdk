@@ -6,12 +6,11 @@
 ]]
 
 require'glue'
+assert(Linux, 'not on Linux')
 require'fs'
 require'sock'
 require'signal'
 require'termios'
-
-assert(Linux, 'not on Linux')
 
 local DEBUG = true
 
@@ -20,9 +19,12 @@ ui = {}
 -- encoding and writing terminal output --------------------------------------
 
 local TERM = env'TERM'
-local is_256_color =
+local term_is_256_color =
 	TERM == 'xterm-256color' or
 	TERM == 'screen-256color'
+
+local term_is_dark = true --assume dark if detection fails
+local term_bg_changed = noop
 
 local function wr(s)
 	return stdout:write(s)
@@ -43,6 +45,30 @@ end
 local dbgfl = DEBUG and function(s, ...)
 	wr(s:format(...)); wr'\r\n'
 end or noop
+
+local wr_bg; do
+local bg_color, bg_bright
+local function wr_bg(color, bright)
+	if bg_color == color and bg_bright == bright then return end
+	wrf(term_is_256_color and '\27[48;5;%dm' or '\27[%d%dm', bright and '10' or '4', color)
+	bg_color, bg_bright = color, bright
+end
+end
+
+local wr_fg; do
+local fg_color, fg_bright
+function wr_fg(color, bright)
+	if fg_color == color and fg_bright == bright then return end
+	wrf(term_is_256_color and '\27[38;5;%dm' or '\27[%d%dm', bright and '9' or '3', color)
+	fg_color, fg_bright = color, bright
+end
+end
+
+local function gotoxy(x, y)
+	wrf('\27[%d;%dH', y, x)
+end
+
+-- hsl to ansi color conversion ----------------------------------------------
 
 --hsl is in (0..360, 0..1, 0..1); rgb is (0..1, 0..1, 0..1)
 local function h2rgb(m1, m2, h)
@@ -111,32 +137,11 @@ local function hsl_to_256_color(h, s, l)
 	end
 end
 local function hsl_to_color(h, s, l)
-	if is_256_color then
+	if term_is_256_color then
 		return hsl_to_256_color(h, s, l)
 	else
 		return hsl_to_ansi_color(h, s, l)
 	end
-end
-
-local bg_color, bg_bright
-local fg_color, fg_bright
-
-local function wr_bg(h, s, l)
-	local color, bright = hsl_to_color(h, s, l)
-	if bg_color == color and bg_bright == bright then return end
-	wrf(is_256_color and '\27[48;5;%dm' or '\27[%d%dm', bright and '10' or '4', color)
-	bg_color, bg_bright = color, bright
-end
-
-local function wr_fg(h, s, l)
-	local color, bright = hsl_to_color(h, s, l)
-	if fg_color == color and fg_bright == bright then return end
-	wrf(is_256_color and '\27[38;5;%dm' or '\27[%d%dm', bright and '9' or '3', color)
-	fg_color, fg_bright = color, bright
-end
-
-local function gotoxy(x, y)
-	wrf('\27[%d;%dH', y, x)
 end
 
 -- reading and decoding terminal input ---------------------------------------
@@ -148,13 +153,13 @@ local function rd()
 	return b[0]
 end
 
-local function readto(c1, c2, err)
+local function rd_to(c1, c2, err)
 	c1 = byte(c1)
 	c2 = byte(c2)
 	for i = 0,127 do
 		stdin:readn(b+i, 1)
 		if b[i] == c1 or b[i] == c2 then
-			if DEBUG then dbgfl('  readto %s or %s: %d "%s" %s',
+			if DEBUG then dbgfl('  rd_to %s or %s: %d "%s" %s',
 				char(c1), char(c2), i, text(str(b, i+1)), err or '') end
 			return str(b, i+1)
 		end
@@ -224,7 +229,7 @@ local function read_input() --read keyboard and mouse input in raw mode
 			elseif c == 53 then if rd() == 126 then key = 'pageup' end
 			elseif c == 54 then if rd() == 126 then key = 'pagedown' end
 			elseif c == 60 then --<
-				local s = readto('M', 'm')
+				local s = rd_to('M', 'm')
 				local b, smx, smy, st = s:match'^(%d+);(%d+);(%d+)([Mm])$'
 				if not b then
 					assertf(false, 'invalid mouse event sequence: "%s"', text(s))
@@ -250,6 +255,15 @@ local function read_input() --read keyboard and mouse input in raw mode
 				end
 				if DEBUG then dbgfl('mouse %d %d %s %s', mx, my, b, st) end
 			end
+		elseif c == 93 then --]
+			local s = rd_to('\7', '\7') --report terminal bg color
+			local r, g, b = s:match'^11;rgb:(.-)/(.-)/(.-)\7$'
+			r = assert(tonumber(r, 16)) / 0xffff
+			g = assert(tonumber(g, 16)) / 0xffff
+			b = assert(tonumber(b, 16)) / 0xffff
+			local L = 0.2126 * r + 0.7152 * g + 0.0722 * b
+			term_is_dark = L < .5
+			term_bg_changed()
 		end
 	elseif c == 127 then
 		key = 'backspace'
@@ -263,29 +277,15 @@ local function read_input() --read keyboard and mouse input in raw mode
 	if DEBUG and key then dbgfl('key %s', key) end
 end
 
-------------------------------------------------------------------------------
--- imgui ---------------------------------------------------------------------
-------------------------------------------------------------------------------
-
--- themes --------------------------------------------------------------------
-
-function array_of_objs(n)
-	local a = {}
-	for i = 1,n do
-		a[i] = {}
-	end
-	return a
-end
+-- imgui themes and colors ---------------------------------------------------
 
 function theme_make(name, is_dark)
 	themes[name] = {
 		is_dark = is_dark,
 		name    = name,
-		-- TODO: 255 seems excessive, though it's probably still faster
-		-- than a hashmap access, dunno...
-		fg      = array_of_objs(255),
-		border  = array_of_objs(255),
-		bg      = array_of_objs(255),
+		fg      = {}, --{state->color_def}
+		border  = {}, --{state->color_def}
+		bg      = {}, --{state->color_def}
 	}
 end
 local themes = {}
@@ -294,148 +294,75 @@ ui.themes = themes
 theme_make('light', false)
 theme_make('dark' , true)
 
---color states ---------------------------------------------------------------
-
-local STATE_HOVER         =   1
-local STATE_ACTIVE        =   2
-local STATE_FOCUSED       =   4
-local STATE_ITEM_SELECTED =   8
-local STATE_ITEM_FOCUSED  =  16
-local STATE_ITEM_ERROR    =  32
-local STATE_NEW           =  64
-local STATE_MODIFIED      = 128
+local theme
+function ui.get_theme() return theme.name end
+function ui.dark() return theme.is_dark end
+ui.default_theme = 'dark'
 
 local parse_state_combis = memoize(function(s)
-	s = ' '+s
-	local b = 0
-	if s:find(' hover'        ) then b = bor(b, STATE_HOVER        ) end
-	if s:find(' active'       ) then b = bor(b, STATE_ACTIVE       ) end
-	if s:find(' focused'      ) then b = bor(b, STATE_FOCUSED      ) end
-	if s:find(' item-selected') then b = bor(b, STATE_ITEM_SELECTED) end
-	if s:find(' item-focused' ) then b = bor(b, STATE_ITEM_FOCUSED ) end
-	if s:find(' item-error'   ) then b = bor(b, STATE_ITEM_ERROR   ) end
-	if s:find(' new'          ) then b = bor(b, STATE_NEW          ) end
-	if s:find(' modified'     ) then b = bor(b, STATE_MODIFIED     ) end
-	return b
+	return cat(sort(words(trim(s))), ' ') --normalize state combinations
 end)
 function parse_state(s)
-	if not s then return 0 end
-	if isnum(s) then return s end
-	if s == 'normal' then return 0 end
-	if s == 'hover'  then return STATE_HOVER end
-	if s == 'active' then return STATE_ACTIVE end
+	if not s then return 'normal' end
+	if s == 'normal' then return 'normal' end
+	if s == 'hover'  then return 'hover'  end
+	if s == 'active' then return 'active' end
 	return parse_state_combis(s)
 end
 
--- styling colors ------------------------------------------------------------
-
--- Colors are defined in HSL so they can be adjusted if needed. Colors are
--- specified by (theme, name, state) with state 0 (normal) as fallback.
--- Concrete colors can also be specified by prefixing them with a `:` (for
--- light colors) or `*` (for dark colors), eg. `:#fff`, `*red`, etc. but that
--- throws away the ability to HSL-adjust the color.
-
+--colors are specified by (theme, name, state) with 'normal' state as fallback.
 function def_color_func(k)
-	function def_color(theme, name, state, h, s, L, a, is_dark)
+	return function(theme, name, state, h, s, L, is_dark)
 		if theme == '*' then -- define color for all themes
-			for theme_name in pairs(themes)
-				def_color(theme_name, name, state, h, s, L, a, is_dark)
+			for theme_name in pairs(themes) do
+				def_color(theme_name, name, state, h, s, L, is_dark)
+			end
 			return
 		end
 		local states = themes[theme][k]
 		if state == '*' then -- copy all states of a color
+			local src_name = h
 			assert(isstr(h), 'expected color name to copy for all states')
-			for state_i = 1, #states do
-				local color = states[state_i][h]
-				if color then
-					states[state_i][name] = color
-				end
+			for state, colors in pairs(states) do
+				colors[name] = colors[src_name]
 			end
 			return
 		end
-		local state_i = parse_state(state)
-		states[state_i][name] = isnum(h)
-			and {hsl_to_color(h, s, L, a), h, s, L, a, is_dark}
-			or (isarray(h) and h or ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme))
+		local state = parse_state(state)
+		if istab(h) then --color def to copy
+			states[state][name] = h
+		else
+			local ansi_color, bright = hsl_to_color(h, s, L)
+			states[state][name] = {ansi_color, bright, is_dark or L < .5}
+		end
 	end
-	return def_color
 end
 
-local theme
-function ui.get_theme() return theme.name end
-function ui.dark() return theme.is_dark end
-
-function lookup_color_hsl_func(k) {
-	return function(name, state, theme1) {
-		let state_i = parse_state(state)
-		theme1 = theme1 ? themes[theme1] : theme
-		let c = theme1[k][state_i][name] ?? theme[k][0][name]
-		if (!c)
-			assert(false, 'no ', k, ' for (', name, ', ',
-				repl(state, 0, 'normal'), ', ', theme1.name, ')')
+function lookup_color_func(k)
+	return function(name, state, theme1)
+		state = parse_state(state)
+		theme1 = theme1 and themes[theme1] or theme
+		local c = theme1[k][state][name] or theme[k].normal[name]
+		if not c then
+			assert(false, 'no ' .. k .. ' for (' .. name .. ', ' ..
+				state .. ', ' .. theme1.name .. ')')
+		end
 		return c
-	}
-}
-
-local CC_COLON = byte(':') -- prefix for light colors
-local CC_STAR  = byte('*') -- prefix for dark colors
-
-function lookup_color_func(hsl_color) {
-	return function(name, state, theme) {
-		if (byte(name) == CC_COLON) { // custom color
-			return name.slice(1)
-		}
-		return hsl_color(name, state, theme)[0]
-	}
-}
-
-function lookup_color_rgb_int_func(hsl_color) {
-	return function(name, state, theme) {
-		let c = hsl_color(name, state, theme)
-		return hsl_to_rgb_int(c[1], c[2], c[3])
-	}
-}
-
-function lookup_color_rgba_int_func(hsl_color) {
-	return function(name, state, theme) {
-		let c = hsl_color(name, state, theme)
-		return hsl_to_rgba_int(c[1], c[2], c[3], c[4])
-	}
-}
-
-function set_bg_color(color, state) {
-	let dark
-	assert(isstr(color))
-	let c = color.charCodeAt(0)
-	if (c == CC_COLON || c == CC_STAR) { // custom color: '*...' or ':...'
-		dark = c == CC_STAR
-		color = color.slice(1)
-	} else {
-		let c = bg_color_hsl(color, state)
-		dark = c[5] ?? c[3] < .5
-		color = c[0]
-	}
-	theme = dark ? themes.dark : themes.light
-	cx.fillStyle = color
-}
+	end
+end
 
 -- text colors ---------------------------------------------------------------
 
-ui.fg_style = def_color_func('fg')
-let fg_color_hsl = lookup_color_hsl_func('fg')
-let fg_color = lookup_color_func(fg_color_hsl)
-ui.fg_color_hsl = fg_color_hsl
-ui.fg_color = fg_color
-ui.fg_color_rgb  = lookup_color_rgb_int_func(fg_color_hsl)
-ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
+ui.fg_style = def_color_func'fg'
+ui.fg_color = lookup_color_func'fg'
 
---           theme    name     state       h     s     L    a
+--           theme    name     state       h     s     L
 ------------------------------------------------------------------------------
 ui.fg_style('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
 ui.fg_style('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
 ui.fg_style('light', 'text'   , 'active' ,   0, 0.00, 0.40)
 ui.fg_style('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
-ui.fg_style('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
+ui.fg_style('light', 'label'  , 'hover'  ,   0, 0.00, 0.00)
 ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
 ui.fg_style('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
 ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
@@ -443,19 +370,19 @@ ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
 ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
 ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
 ui.fg_style('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
-ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
+ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95)
+ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90)
 ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
 ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
 ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
 
-ui.fg_style('light', 'marker' , 'normal' ,   0, 0.00, 0.5) // TODO
-ui.fg_style('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) // TODO
-ui.fg_style('light', 'marker' , 'active' ,   0, 0.00, 0.5) // TODO
+ui.fg_style('light', 'marker' , 'normal' ,   0, 0.00, 0.5) -- TODO
+ui.fg_style('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) -- TODO
+ui.fg_style('light', 'marker' , 'active' ,   0, 0.00, 0.5) -- TODO
 
 ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
-ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) // TODO
-ui.fg_style('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) // TODO
+ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) -- TODO
+ui.fg_style('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) -- TODO
 
 ui.fg_style('light', 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
@@ -465,49 +392,39 @@ ui.fg_style('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 
 -- border colors -------------------------------------------------------------
 
-ui.border_style = def_color_func('border')
-let border_color_hsl = lookup_color_hsl_func('border')
-let border_color = lookup_color_func(border_color_hsl)
-let border_color_int = lookup_color_rgb_int_func(fg_color_hsl)
-let ui_border_color = border_color
-ui.border_color_hsl = border_color_hsl
-ui.border_color = border_color
-ui.border_color_rgb  = lookup_color_rgb_int_func(border_color_hsl)
-ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
+ui.border_style = def_color_func'border'
+ui.border_color = lookup_color_func'border'
 
---               theme    name        state       h     s     L     a
+--               theme    name        state       h     s     L
 ------------------------------------------------------------------------------
-ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
-ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
-ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
-ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
-ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
-ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00) // TODO
+ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0)
+ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0)
+ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0)
+ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0)
+ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0)
+ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57) -- TODO
 
-ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
-ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
-ui.border_style('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
-ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
-ui.border_style('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
-ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
+ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1)
+ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1)
+ui.border_style('dark' , 'intense' , 'normal' ,   0,    0,    1)
+ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0,    1)
+ui.border_style('dark' , 'max'     , 'normal' ,   0,    0,    1)
+ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57)
 
 -- background colors ---------------------------------------------------------
 
-ui.bg_style = def_color_func('bg')
-let bg_color_hsl = lookup_color_hsl_func('bg')
-let bg_color = lookup_color_func(bg_color_hsl)
-let ui_bg_color = bg_color
-ui.bg_color = bg_color
-ui.bg_color_hsl = bg_color_hsl
-ui.bg_color_rgb  = lookup_color_rgb_int_func(bg_color_hsl)
-ui.bg_color_rgba = lookup_color_rgba_int_func(bg_color_hsl)
+ui.bg_style = def_color_func'bg'
+ui.bg_color = lookup_color_func'bg'
 
-function bg_is_dark(bg_color) {
-	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
-}
-ui.bg_is_dark = bg_is_dark
+function set_bg_color(color, state)
+	assert(isstr(color))
+	local c = bg_color(color, state)
+	local is_dark = c[3]
+	theme = is_dark and themes.dark or themes.light
+	wr_bg(c[1], c[2])
+end
 
---           theme    name      state       h     s     L     a
+--           theme    name      state       h     s     L
 ------------------------------------------------------------------------------
 ui.bg_style('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
@@ -521,7 +438,7 @@ ui.bg_style('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
 ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
 ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
 ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) // bg alternate for grid cells
+ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) -- bg alternate for grid cells
 ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
 ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
@@ -540,17 +457,19 @@ ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
 ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
 ui.bg_style('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
 ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
-ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
+ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00)
 ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
 ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
 ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
 -- TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
-for (let theme of ['light', 'dark']) {
-	for (let state of ['normal', 'hover', 'active'])
-		for (let fg of ['text', 'link', 'marker'])
-			ui.bg_style(theme, fg, state, fg_color_hsl(fg, state, theme))
-}
+for _,theme in ipairs{'light', 'dark'} do
+	for _,state in ipairs{'normal', 'hover', 'active'} do
+		for _,fg in ipairs{'text', 'link', 'marker'} do
+			ui.bg_style(theme, fg, state, fg_color(fg, state, theme))
+		end
+	end
+end
 
 ui.bg_style('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
 ui.bg_style('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
@@ -563,21 +482,21 @@ ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 ui.bg_style('*', 'button'        , '*' , 'bg')
 ui.bg_style('*', 'button-primary', '*' , 'link')
 
-ui.bg_style('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
-ui.bg_style('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
-ui.bg_style('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
-ui.bg_style('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
+ui.bg_style('*', 'search' , 'normal',  60,  1.00, 0.80) -- quicksearch text bg
+ui.bg_style('*', 'info'   , 'normal', 200,  1.00, 0.30) -- info bubbles
+ui.bg_style('*', 'warn'   , 'normal',  39,  1.00, 0.50) -- warning bubbles
+ui.bg_style('*', 'error'  , 'normal',   0,  0.54, 0.43) -- error bubbles
 
-// input value states
+-- input value states
 ui.bg_style('light', 'item', 'new'           , 240, 1.00, 0.97)
 ui.bg_style('light', 'item', 'modified'      , 120, 1.00, 0.93)
 ui.bg_style('light', 'item', 'new modified'  , 180, 0.55, 0.87)
-															,
+
 ui.bg_style('dark' , 'item', 'new'           , 240, 0.35, 0.27)
 ui.bg_style('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
 ui.bg_style('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
 
-// grid cell & row states. these need to be opaque!
+-- grid cell & row states. these need to be opaque!
 ui.bg_style('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
 ui.bg_style('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
 ui.bg_style('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
@@ -1151,9 +1070,10 @@ end
 tc_set_raw_mode()
 assert(tc_get_raw_mode(), 'could not put terminal in raw mode')
 
-wr'\027[?1000h' --enable mouse tracking
-wr'\027[?1003h' --enable mouse move tracking
-wr'\027[?1006h' --enable SGR mouse tracking
+wr'\27]11;?\7' --get terminal background color
+wr'\27[?1000h' --enable mouse tracking
+wr'\27[?1003h' --enable mouse move tracking
+wr'\27[?1006h' --enable SGR mouse tracking
 wr'\27[?25l' --hide cursor
 
 screen_w, screen_h = tc_get_window_size()
@@ -1186,9 +1106,9 @@ end))
 
 start() --start the epoll loop (stopped by ctrl+C or a call to stop()).
 
-wr'\027[?1006l' --stop SGR mouse events
-wr'\027[?1003l' --stop mouse move events
-wr'\027[?1000l' --stop mouse events
+wr'\27[?1006l' --stop SGR mouse events
+wr'\27[?1003l' --stop mouse move events
+wr'\27[?1000l' --stop mouse events
 wr'\27[?25h' --show cursor
 
 tc_reset() --reset terminal
