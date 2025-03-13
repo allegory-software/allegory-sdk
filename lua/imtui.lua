@@ -1829,8 +1829,8 @@ local B_V  = '\u{2502}'  -- │
 
 ui.box_ct_widget('box', {
 	ID = BOX_ID,
-	create = function(cmd, id, title, sides)
-		return ui.cmd_box_ct(cmd, 1, 's', 's', 2, 2,
+	create = function(cmd, id, fr, align, valign, min_w, min_h, title, sides)
+		return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 			id or false,
 			title or false,
 			sides or false
@@ -2609,14 +2609,14 @@ end
 
 ui.main = function()
 	ui.v()
-		ui.box()
+		ui.box('', 1)
 			ui.text('', 'Hello, world!', 0, 'c', 'c')
 		ui.end_box()
-		ui.h()
-			ui.box()
+		ui.h(2)
+			ui.box('', 2)
 				ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c')
 			ui.end_box()
-			ui.box()
+			ui.box('', 1)
 				ui.text('', 'Goodbye, again!', 0, 'c', 'c')
 			ui.end_box()
 		ui.end_h()
