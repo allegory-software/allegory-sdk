@@ -228,9 +228,10 @@ FFI ALLOCATION
 	  alloc(len) -> buf,len        alloc len and get a buffer
 	dynarray([ct][,cap]) -> alloc
 		alloc(len)->buf,len         alloc len and get a buffer, contents preserved
-	dynarray_pump([dynarray]) -> write, collect
+	dynarray_pump([dynarray]) -> write, collect, reset
 	  write(buf,len)               append to internal buffer
 	  collect() -> buf,len         get internal buffer
+	  reset()                      start again
 	dynarray_loader([dynarray]) -> get, commit, collect
 	  get(len) -> buf,len          get a buffer of len to write to
 	  commit(len)                  commit len
@@ -1476,10 +1477,14 @@ local function install(self, combine, method_name, hook)
 	rawset(self, method_name, combine(self[method_name], hook))
 end
 function do_before(method, hook)
-	if repl(method, noop) and repl(hook, noop) then
-		return function(self, ...)
-			hook(self, ...)
-			return method(self, ...)
+	if repl(method, noop) then
+		if repl(hook, noop) then
+			return function(self, ...)
+				hook(self, ...)
+				return method(self, ...)
+			end
+		else
+			return method
 		end
 	else
 		return hook
@@ -1489,10 +1494,14 @@ function before(self, method_name, hook)
 	install(self, do_before, method_name, hook)
 end
 function do_after(method, hook)
-	if repl(method, noop) and repl(hook, noop) then
-		return function(self, ...)
-			method(self, ...)
-			return hook(self, ...)
+	if repl(method, noop) then
+		if repl(hook, noop) then
+			return function(self, ...)
+				method(self, ...)
+				return hook(self, ...)
+			end
+		else
+			return method
 		end
 	else
 		return hook
@@ -2455,15 +2464,19 @@ function dynarray_pump(dynarr)
 	local i = 0
 	local function write(src, len)
 		if src == nil then return end --eof
+		len = len or #src
 		local dst = dynarr(i + len)
-		copy(dst + i, src, len or #src)
+		copy(dst + i, src, len)
 		i = i + len
 		return len
 	end
 	local function collect()
 		return dynarr(i)
 	end
-	return write, collect
+	local function reset()
+		i = 0
+	end
+	return write, collect, reset
 end
 
 --unlike a pump which copies the user's buffer, a loader provides a buffer
