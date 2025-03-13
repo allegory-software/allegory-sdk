@@ -40,19 +40,19 @@ require'sock'
 require'signal'
 require'termios'
 
-local DEBUG = false
-
 ui = {}
+
+local DEBUG = false
 
 -- encoding and writing terminal output --------------------------------------
 
-local TERM = env'TERM'
-local term_is_256_color =
+TERM = env'TERM'
+term_is_256_color =
 	TERM == 'xterm-256color' or
 	TERM == 'screen-256color'
 
-local term_is_dark = true --assume dark if detection fails
-local term_bg_changed = noop
+term_is_dark = true --assume dark if detection fails
+term_bg_changed = noop
 
 local function wr(s)
 	return stdout:write(s)
@@ -86,26 +86,34 @@ function logging:logtostderr(line)
 	pr(line)
 end
 
-local wr_bg; do
-local bg_color, bg_bright
-local function wr_bg(color, bright)
-	if bg_color == color and bg_bright == bright then return end
-	wrf(term_is_256_color and '\27[48;5;%dm' or '\27[%d%dm', bright and '10' or '4', color)
-	bg_color, bg_bright = color, bright
-end
+local term_bg
+local wr_set_bg
+if term_is_256_color then
+	local function wr_set_bg(color)
+		if term_bg == color then return end
+		wrf('\27[48;5;%dm', color)
+		term_bg = color
+	end
+else
+	error'NYI'
+	--'\27[%d%dm', bright and '10' or '4', color
 end
 
-local wr_fg; do
-local fg_color, fg_bright
-function wr_fg(color, bright)
-	if fg_color == color and fg_bright == bright then return end
-	wrf(term_is_256_color and '\27[38;5;%dm' or '\27[%d%dm', bright and '9' or '3', color)
-	fg_color, fg_bright = color, bright
-end
+local term_fg
+local wr_set_fg
+if term_is_256_color then
+	function wr_set_fg(color)
+		if term_fg == color then return end
+		wrf('\27[38;5;%dm', color)
+		term_fg = color
+	end
+else
+	error'NYI'
+	--'\27[%d%dm', bright and '9' or '3', color
 end
 
 local function gotoxy(x, y)
-	wrf('\27[%d;%dH', y, x)
+	wrf('\27[%d;%dH', y+1, x+1)
 end
 
 -- hsl to ansi color conversion ----------------------------------------------
@@ -155,9 +163,9 @@ local function hsl_to_ansi_color(h, s, L)
 		local c = hue_to_ansi_color(h)
 		return c, l > .5
 	elseif L > .5 then --grayscale
-		return 7, L > .75 --white
+		return 7, L > .75 --white   97 107
 	else
-		return 0, L > .25 --black
+		return 0, L > .25 --black   30 40
 	end
 end
 local function hsl_to_256_color(h, s, L)
@@ -207,7 +215,7 @@ local function rd_to(c1, c2, err)
 	assertf(false, '%s: "%s"', err or 'invalid sequence', text(s))
 end
 
-local function wait_rd(timeout)
+local function rd_wait(timeout)
 	stdin:settimeout(timeout)
 	local len, err = stdin:try_read(b, 1)
 	stdin:settimeout(nil)
@@ -217,7 +225,7 @@ local function wait_rd(timeout)
 	else
 		assert(len == 1, 'eof')
 	end
-	if DEBUG then dbgfl(' wait_rd %s %s', b[0], char(b[0])) end
+	if DEBUG then dbgfl(' rd_wait %s %s', b[0], char(b[0])) end
 	return b[0]
 end
 
@@ -226,12 +234,12 @@ scroll = nil
 mx, my = nil
 mstate, ldown, lup, rdown, rup, mdown, mup = nil
 
-local function read_input() --read keyboard and mouse input in raw mode
+local function rd_input() --read keyboard and mouse input in raw mode
 	key = nil
 	scroll = nil
 	local c = rd()
 	if c == 27 then --\033
-		c = wait_rd(.01)
+		c = rd_wait(.01)
 		if not c then
 			key = 'esc'
 		elseif c == 91 then --[
@@ -317,12 +325,112 @@ local function read_input() --read keyboard and mouse input in raw mode
 	if DEBUG and key then dbgfl('key %s', key) end
 end
 
+-- screen buffer -------------------------------------------------------------
+
+local cell_ct = ctype[[
+	struct {
+		uint8_t text[4];
+		uint8_t fg_color;
+		uint8_t bg_color;
+	}
+]]
+local cell_arr_ct = ctype('$[?]', cell_ct)
+local screen
+
+local dx1, dx2, dy1, dy2 = -1
+local function scr_wr(x, y, s)
+	if x < 0 then return end
+	if y < 0 then return end
+	if y >= screen_h then return end
+	local w = min(#s, screen_w - x)
+	if w == 0 then return end
+	if dx1 == -1 then
+		dx1, dy1 = x, y
+		dx2, dy2 = x + w, y + 1
+	else
+		dx1 = min(dx1, x)
+		dy1 = min(dy1, y)
+		dx2 = max(dx2, x + w)
+		dy2 = max(dy2, y + 1)
+	end
+	for i=1,w do
+		local cell = screen[y * screen_w + x + i - 1]
+		cell.text[0] = byte(s, i)
+		cell.text[1] = 0
+		cell.text[2] = 0
+		cell.text[3] = 0
+	end
+end
+
+local function scr_wrc(x, y, c) --set single cell
+	if x < 0 or x >= screen_w then return end
+	if y < 0 or y >= screen_h then return end
+	local cell = screen[y * screen_w + x]
+	for i=0,3 do
+		cell.text[i] = byte(c, i+1) or 0
+	end
+	if dx1 == -1 then
+		dx1, dy1 = x, y
+		dx2, dy2 = x + 1, y + 1
+	else
+		dx1 = min(dx1, x)
+		dy1 = min(dy1, y)
+		dx2 = max(dx2, x + 1)
+		dy2 = max(dy2, y + 1)
+	end
+end
+
+local function scr_fill(x, y, w, h, bg_color, fg_color, text)
+	local x1 = clamp(x  , 0, screen_w)
+	local y1 = clamp(y  , 0, screen_h)
+	local x2 = clamp(x+w, x, screen_w)
+	local y2 = clamp(y+h, y, screen_h)
+	local n = text and #text or 0
+	for y = y1, y2-1 do
+		for x = x1, x2-1 do
+			local cell = screen[y * screen_w + x]
+			if bg_color then cell.bg_color = bg_color end
+			if fg_color then cell.fg_color = fg_color end
+			for i=0,3 do
+				cell.text[i] = byte(text, i+1) or 0
+			end
+		end
+	end
+end
+
+local function screen_flush()
+	dx1 = 0
+	dy1 = 0
+	dx2 = screen_w
+	dy2 = screen_h
+	if dx1 == -1 then return end
+	for y = dy1, dy2-1 do
+		for x = dx1, dx2-1 do
+			local cell = screen[y * screen_w + x]
+			gotoxy(x, y)
+			for i=0,3 do
+				local b = cell.text[i]
+				if b == 0 then break end
+				wr(char(b))
+			end
+		end
+	end
+	dx1 = -1
+end
+
+function screen_update_size()
+	screen_w, screen_h = tc_get_window_size()
+	screen = new(cell_arr_ct, screen_w * screen_h)
+	local bg_color
+	local fg_color
+	scr_fill(0, 0, screen_w, screen_h, bg_color, fg_color, ' ')
+end
+
 -- imgui themes and colors ---------------------------------------------------
 
 local themes = {}
-ui.themes = themes
 
-function theme_make(name, is_dark)
+local function theme_make(name, is_dark)
 	themes[name] = {
 		is_dark = is_dark,
 		name    = name,
@@ -335,15 +443,13 @@ end
 theme_make('light', false)
 theme_make('dark' , true)
 
-local theme
-function ui.get_theme() return theme.name end
-function ui.dark() return theme.is_dark end
-ui.default_theme = 'dark'
+local theme --current theme, dynamic, part of command state, based on set_bg().
+ui.app_theme = nil --app theme, set by the user.
 
 local parse_state_combis = memoize(function(s)
 	return cat(sort(collect(words(trim(s)))), ' ') --normalize state combinations
 end)
-function parse_state(s)
+local function parse_state(s)
 	if not s then return 'normal' end
 	if s == 'normal' then return 'normal' end
 	if s == 'hover'  then return 'hover'  end
@@ -352,7 +458,7 @@ function parse_state(s)
 end
 
 --colors are specified by (theme, name, state) with 'normal' state as fallback.
-function def_color_func(k)
+local function def_color_func(k)
 	local function def_color(theme, name, state, h, s, L, is_dark)
 		if theme == '*' then -- define color for all themes
 			for theme_name in pairs(themes) do
@@ -373,14 +479,14 @@ function def_color_func(k)
 		if istab(h) then --color def to copy
 			states[state][name] = h
 		else
-			local ansi_color, bright = hsl_to_color(h, s, L)
-			attr(states, state)[name] = {ansi_color, bright, is_dark or L < .5}
+			local ansi_color = hsl_to_color(h, s, L)
+			attr(states, state)[name] = {ansi_color, is_dark or L < .5}
 		end
 	end
 	return def_color
 end
 
-function lookup_color_func(k)
+local function lookup_color_func(k)
 	return function(name, state, theme1)
 		state = parse_state(state)
 		theme1 = theme1 and themes[theme1] or theme
@@ -458,12 +564,11 @@ ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57)
 ui.bg_style = def_color_func'bg'
 ui.bg_color = lookup_color_func'bg'
 
-function set_bg_color(color, state)
+local function set_bg(color, state)
 	assert(isstr(color))
-	local c = bg_color(color, state)
-	local is_dark = c[3]
+	local c = ui.bg_color(color, state)
+	local is_dark = c[2]
 	theme = is_dark and themes.dark or themes.light
-	wr_bg(c[1], c[2])
 end
 
 --           theme    name      state       h     s     L
@@ -583,38 +688,23 @@ local id_state_maps  = {} -- {id->map}
 local id_current_set = {} -- {id->true}
 local id_remove_set  = {} -- {id->true}
 
-ui._id_state_maps = id_state_maps
+ui.id_state_maps = id_state_maps
 
-function keepalive(id, update_f)
+function ui.keepalive(id, update_f)
 	assert(id, 'id required')
 	id_current_set[id] = true
 	id_remove_set[id] = nil
-
 	if update_f then
-		local m = ui.state(id)
-		m.update = update_f
+		ui.state(id).update = update_f
 	end
-end
-ui.keepalive = keepalive
-
-function state_update(id, m)
-	local update_f = m.update
-	if not update_f then
-		return
-	end
-	update_f(id, m)
-	m.update = nil
 end
 
 ui.state = function(id, k)
 	if not id then return end
-	if ss_id and id ~= ss_id then return end
-	local m = id_state_maps[id]
-	if not m then
-		m = {}
-		id_state_maps[id] = m
-	else
-		state_update(id, m)
+	local m = attr(id_state_maps, id)
+	if m.update then
+		m.update(id, m)
+		m.update = nil
 	end
 	if k then return m[k] end
 	return m
@@ -626,7 +716,7 @@ ui.state_init = function(id, k, v)
 	s[k] = v
 end
 
-function id_state_gc()
+local function id_state_gc()
 	for id in pairs(id_remove_set) do
 		local m = id_state_maps[id]
 		if m then
@@ -638,25 +728,17 @@ function id_state_gc()
 		end
 		id_remove_set[id] = nil
 	end
-	local empty = id_remove_set
-	id_remove_set = id_current_set
-	id_current_set = empty
+	id_remove_set, id_current_set = id_current_set, id_remove_set
 end
 
 ui.on_free = function(id, free1)
-	local s = ui.state(id)
-	s.free = after(s.free, free1)
+	ui.state(id).free = after(s.free, free1)
 end
 
 -- command state -------------------------------------------------------------
 
-function reset_canvas()
-	theme = themes[ui.default_theme]
-	bg_color, bg_bright = hsl_to_color(0, 0, 0)
-	fg_color, fg_bright = hsl_to_color(0, 0, 1)
-	--scope_set('fg_color', fg_color)
-	--scope_set('bg_color', bg_color)
-	--scope_set('theme', theme)
+function reset_cmd_state()
+	theme = themes[ui.app_theme or (is_term_dark and 'dark' or 'light')]
 end
 
 -- current command recording -------------------------------------------------
@@ -702,8 +784,6 @@ function ui.cmd(cmd, ...)
 	add(a, prev_i)
 	return i
 end
-
-local function C(a, i) return a[i-1].name end
 
 -- print recording
 ui.disas = function(a)
@@ -772,8 +852,8 @@ local function begin_rec()
 	local a0 = a
 	a = rec()
 	ui.a = a
-	rec_i = #recs
 	add(recs, a)
+	rec_i = #recs
 	return a0
 end
 
@@ -825,13 +905,13 @@ local function clear_layers()
 end
 
 local layer_base =
-ui.layer('base'   , 0)
-ui.layer('window' , 1) -- modals
+ui.layer('base'   , 1)
+ui.layer('window' , 2) -- modals
 -- all these below must be temporary to work with modals!
-ui.layer('overlay', 2) -- temporary overlays that must show behind the dragged object.
-ui.layer('tooltip', 3)
-ui.layer('open'   , 4) -- dropdowns, must cover tooltips
-ui.layer('handle' , 5) -- dragged object
+ui.layer('overlay', 3) -- temporary overlays that must show behind the dragged object.
+ui.layer('tooltip', 4)
+ui.layer('open'   , 5) -- dropdowns, must cover tooltips
+ui.layer('handle' , 6) -- dragged object
 
 local layer_stack = {} -- {layer1_i, ...}
 local current_layer    -- set while building
@@ -878,7 +958,7 @@ function ui.rel_ct_i() return ui.ct_i() - #a + 2 end
 function ct_stack_check(a)
 	if #ct_stack > 0 then
 		for _,i in ipairs(ct_stack) do
-			warnfl('%s not closed', C(a, i))
+			warnfl('%s not closed', a[i-1].name)
 		end
 		assert(false)
 	end
@@ -965,7 +1045,7 @@ function draw_layer(layer_i, indexes, recs)
 	local prev_layer_i = current_layer_i
 	--[[global]] current_layer_i = layer_i
 	for k = 1, #indexes, 3 do
-		reset_canvas()
+		reset_cmd_state()
 		local rec_i = indexes[k]
 		local i     = indexes[k+1]
 		local a = recs[rec_i]
@@ -983,13 +1063,12 @@ end
 function draw_frame(recs, layers)
 	local theme_stack_length0 = #theme_stack
 	add(theme_stack, theme)
-	theme = themes[ui.default_theme]
 
 	draw_layers(layers, recs)
 	assert(current_layer_i == nil)
 
 	theme = del(theme_stack)
-	assert(#theme_stack == theme_stack_length0)
+	assertf(#theme_stack == theme_stack_length0, 'theme stack not empty: %d', #theme_stack)
 end
 
 -- hit-testing phase ---------------------------------------------------------
@@ -1039,7 +1118,7 @@ function hit_layer(layer, recs)
 	--iterate layer's cointainers in reverse order.
 	local indexes = layer.indexes
 	for k = #indexes-3, 1, -3 do
-		reset_canvas()
+		reset_cmd_state()
 		local rec_i = indexes[k]
 		local i     = indexes[k+1]
 		local a = recs[rec_i]
@@ -1087,7 +1166,7 @@ ui.relayout = function()
 end
 
 function layout_rec(a, x, y, w, h)
-	reset_canvas()
+	reset_cmd_state()
 
 	-- x-axis
 	measure_rec(a, 0)
@@ -1142,12 +1221,13 @@ local function redraw()
 
 		t0 = clock()
 
-		reset_canvas()
+		reset_cmd_state()
 
 		begin_rec()
-		local i = ui.stack()
+		ui.stack()
+			local i = cmd_last_i(a)
 			begin_layer(layer_base, i)
-			assert(rec_i == 0)
+			assert(rec_i == 1)
 			ui.main()
 		ui.end_stack()
 		end_layer()
@@ -1161,14 +1241,14 @@ local function redraw()
 		if not want_relayout then
 			t0 = clock()
 
-			wr'\27[2J' --clear screen
+			--wr'\27[2J' --clear screen
 
 			draw_frame(recs, layers)
 
 			ui.frame_changed()
 		end
 
-		reset_canvas()
+		reset_cmd_state()
 
 		if ui.clickup then
 			ui.captured_id = nil
@@ -1187,7 +1267,12 @@ local function redraw()
 			break
 		end
 	end
+	screen_flush()
 
+end
+
+function term_bg_changed()
+	redraw()
 end
 
 -- widgets -------------------------------------------------------------------
@@ -1207,6 +1292,7 @@ ui.widget = function(cmd, t)
 		function wrapper(...)
 			return create(cmd, ...)
 		end
+		assertf(not ui[cmd], 'command %s already defined', cmd)
 		ui[cmd] = wrapper
 		local setstate = t.setstate
 		if t.setstate then
@@ -1215,10 +1301,8 @@ ui.widget = function(cmd, t)
 			end
 			ui[cmd+'_state'] = wrapper
 		end
-		return wrapper
-	else
-		return class
 	end
+	return class
 end
 
 -- set_layer command ---------------------------------------------------------
@@ -1265,7 +1349,7 @@ ui.widget('set_layer', {
 ui.widget('draw_layer', {
 
 	create = function(_, layer)
-		layer = ui_layer(layer)
+		layer = ui.layer(layer)
 		ui.cmd('draw_layer', layer.i, layer.indexes)
 	end,
 
@@ -1279,8 +1363,9 @@ ui.widget('draw_layer', {
 
 -- box widgets ---------------------------------------------------------------
 
-local FR    =  4 -- all `is_flex_child` widgets: fraction from main-axis size.
-local ALIGN =  5 -- vert. align at ALIGN+1
+local FR    = 4 -- all `is_flex_child` widgets: fraction from main-axis size.
+local ALIGN = 5 -- vert. align at ALIGN+1
+local BOX_S = 7 -- first index after the ui.cmd_box header.
 
 function ui.cmd_box(cmd, fr, align, valign, min_w, min_h, ...)
 	return ui.cmd(cmd,
@@ -1330,7 +1415,7 @@ end
 
 function align_w(a, i, axis, sw)
 	local align = a[i+ALIGN+axis]
-	if align == 'stretch' then
+	if align == 's' then
 		return sw
 	end
 	return a[i+2+axis] -- min_w
@@ -1338,10 +1423,10 @@ end
 
 function align_x(a, i, axis, sx, sw)
 	local align = a[i+ALIGN+axis]
-	if align == 'end' then
+	if align == ']' then
 		local min_w = a[i+2+axis]
 		return sx + sw - min_w
-	elseif align == ALIGN_CENTER then
+	elseif align == 'c' then
 		local min_w = a[i+2+axis]
 		return sx + round((sw - min_w) / 2)
 	else
@@ -1380,31 +1465,30 @@ ui.hit_box = hit_box
 
 ui.box_widget = function(cmd, t)
 	local ID = t.ID
-	function box_hit(a, i)
+	local box_hit = ID and function(a, i)
 		local x = a[i+0]
 		local y = a[i+1]
 		local w = a[i+2]
 		local h = a[i+3]
 		local id = a[i+ID]
 		if hit_rect(x, y, w, h) then
-			hover(id)
+			if id then hover(id) end
 			return true
 		end
 	end
-	return ui.widget(cmd, {
-		measure   = after(before(box_measure   , t.before_measure  ), t.after_measure  ),
-		position  = after(before(box_position  , t.before_position ), t.after_position ),
-		translate = after(before(box_translate , t.before_translate), t.after_translate),
-		hit       = ID ~= null and box_hit,
+	return ui.widget(cmd, update({
+		measure   = do_after(do_before(box_measure   , t.before_measure  ), t.after_measure  ),
+		position  = do_after(do_before(box_position  , t.before_position ), t.after_position ),
+		translate = do_after(do_before(box_translate , t.before_translate), t.after_translate),
+		hit       = box_hit,
 		is_flex_child = true,
-		unpack(t)
-	})
+	}, t))
 end
 
--- container-box widgets -----------------------------------------------------
+-- box container widgets -----------------------------------------------------
 
-local NEXT_EXT_I =  7 -- all container-boxes: next command after this one's 'end' command.
-local S          =  8 -- first index after the ui.cmd_box_ct header.
+local NEXT_EXT_I = BOX_S+0 -- all container-boxes: next command after this one's 'end' command.
+local BOX_CT_S   = BOX_S+1 -- first index after the ui.cmd_box_ct header.
 
 function cmd_next_ext_i(a, i)
 	local cmd = a[i-1]
@@ -1425,18 +1509,16 @@ function ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...)
 	return i
 end
 
-function ui.box_ct_widget(cmd, t)
-	return ui.box_widget(cmd, t, true)
-end
-
 ui.widget('end', {
+
+	is_end = true,
 
 	create = function(_, cmd)
 		cmd = ui.cmds[cmd]
 		--end_scope()
 		local i = assert(del(ct_stack), 'end command outside container')
 		if cmd and a[i-1] ~= cmd then
-			assertf(false, 'closing %s instead of %s', cmd.name, C(a, i))
+			assertf(false, 'closing %s instead of %s', cmd.name, a[i-1].name)
 		end
 		local end_i = ui.cmd('end', i)
 		a[end_i+0] = a[end_i+0] - end_i -- make relative
@@ -1468,7 +1550,7 @@ ui.widget('end', {
 
 	draw = function(a, end_i)
 		local i = end_i + a[end_i]
-		local draw_end_f = draw_end[a[i-1]]
+		local draw_end_f = a[i-1].draw_end
 		if draw_end_f then
 			draw_end_f(a, i)
 		end
@@ -1484,13 +1566,12 @@ local function position_children_stacked(a, ct_i, axis, sx, sw)
 	local i = cmd_next_i(a, ct_i)
 	while 1 do
 		local cmd = a[i-1]
-		if cmd.name ~= 'end' then break end
+		if cmd.name == 'end' then break end
 		local position_f = cmd.position
 		if position_f then
 			-- position item's children recursively.
 			position_f(a, i, axis, sx, sw)
 		end
-
 		i = cmd_next_ext_i(a, i)
 	end
 end
@@ -1538,9 +1619,17 @@ local function hit_children(a, i, recs)
 	end
 end
 
+ui.box_ct_widget = function(cmd, t)
+	return ui.box_widget(cmd, update({
+		is_ct = true,
+		measure = ct_stack_push,
+		translate = translate_ct,
+	}, t))
+end
+
 -- flex ----------------------------------------------------------------------
 
-local FLEX_GAP = S+0
+local FLEX_GAP = BOX_CT_S+0
 
 local function position_flex(a, i, axis, sx, sw)
 
@@ -1653,36 +1742,20 @@ local function position_flex(a, i, axis, sx, sw)
 
 end
 
-local function hit_flex(a, i, recs)
-	if hit_children(a, i, recs) then
-		return true
-	end
-	if hit_box(a, i) then
-		hit_template(a, i)
-	end
-end
-
 function flex(hv)
-	return ui.widget(hv, {
-
+	return ui.box_ct_widget(hv, {
 		main_axis = hv == 'h' and 0 or 1,
-
 		create = function(cmd, fr, gap, align, valign, min_w, min_h)
 			return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 				gap or 0
 			)
 		end,
-
-		measure = ct_stack_push,
-
 		position = position_flex,
-
-		is_flex_child = true,
-
-		translate = translate_ct,
-
-		hittest = hit_flex,
-
+		hittest = function(a, i, recs)
+			if hit_children(a, i, recs) then
+				return true
+			end
+		end
 	})
 end
 ui.h = flex'h'
@@ -1690,20 +1763,13 @@ ui.v = flex'v'
 
 -- stack ---------------------------------------------------------------------
 
-local STACK_ID = S+0
+local STACK_ID = BOX_CT_S+0
 
-ui.widget('stack', {
-
-	is_ct = true,
-	is_flex_child = true,
-
-	create = function(_, id, fr, align, valign, min_w, min_h)
-		return ui.cmd_box_ct('stack', fr, align, valign, min_w, min_h,
+ui.box_ct_widget('stack', {
+	create = function(cmd, id, fr, align, valign, min_w, min_h)
+		return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 			id or '')
 	end,
-
-	measure = ct_stack_push,
-
 	position = function(a, i, axis, sx, sw)
 		local x = align_x(a, i, axis, sx, sw)
 		local w = align_w(a, i, axis, sw)
@@ -1711,9 +1777,6 @@ ui.widget('stack', {
 		a[i+2+axis] = w
 		position_children_stacked(a, i, axis, x, w)
 	end,
-
-	translate = translate_ct,
-
 	hittest = function(a, i, recs)
 		if hit_children(a, i, recs) then
 			hover(a[i+STACK_ID])
@@ -1721,21 +1784,113 @@ ui.widget('stack', {
 		end
 		if hit_box(a, i) then
 			hover(a[i+STACK_ID])
-			hit_template(a, i)
 		end
 	end,
+})
 
+-- box -----------------------------------------------------------------------
+
+local BOX_ID = BOX_CT_S+0
+
+local B_TL = '\u{250C}'  -- ┌
+local B_TR = '\u{2510}'  -- ┐
+local B_BL = '\u{2514}'  -- └
+local B_BR = '\u{2518}'  -- ┘
+local B_H  = '\u{2500}'  -- ─
+local B_V  = '\u{2502}'  -- │
+
+ui.box_ct_widget('box', {
+	create = function(cmd, id, title, sides)
+		return ui.cmd_box_ct(cmd, 1, 's', 's', 2, 2,
+			id or false,
+			title or false,
+			sides or false
+		)
+	end,
+	position = function(a, i, axis, sx, sw)
+		local x = align_x(a, i, axis, sx, sw)
+		local w = align_w(a, i, axis, sw)
+		a[i+0+axis] = x
+		a[i+2+axis] = w
+		position_children_stacked(a, i, axis, x + 1, w - 2)
+	end,
+	hittest = function(a, i, recs)
+		if hit_children(a, i, recs) then
+			hover(a[i+STACK_ID])
+			return true
+		end
+		if hit_box(a, i) then
+			hover(a[i+STACK_ID])
+		end
+	end,
+	draw = function(a, i)
+		local x = a[i+0]
+		local y = a[i+1]
+		local w = a[i+2]
+		local h = a[i+3]
+
+		scr_wrc(x    , y    , B_TL)
+		scr_wrc(x+w-1, y    , B_TR)
+		scr_wrc(x    , y+h-1, B_BL)
+		scr_wrc(x+w-1, y+h-1, B_BR)
+		for i=1,w-2 do
+			scr_wrc(x+i, y    , B_H)
+			scr_wrc(x+i, y+h-1, B_H)
+		end
+		for i=1,h-2 do
+			scr_wrc(x    , y+i, B_V)
+			scr_wrc(x+w-1, y+i, B_V)
+		end
+	end,
+})
+
+--text -----------------------------------------------------------------------
+
+local TEXT_ID = BOX_S+0
+local TEXT_S  = BOX_S+1
+
+ui.box_widget('text', {
+	create = function(cmd, id, s, fr, align, valign, max_min_w, min_w, min_h)
+		return ui.cmd_box(cmd, fr, align or 's', valign or 's', min_w, min_h,
+			id or false,
+			s or ''
+		)
+	end,
+	measure = function(a, i, axis)
+		local min_w = a[i+0+axis]
+		if axis == 0 then
+			local s = a[i+TEXT_S]
+			min_w = max(min_w, #s)
+		else
+			min_w = max(min_w, 1)
+		end
+		a[i+0+axis] = min_w
+		add_ct_min_wh(a, axis, min_w)
+	end,
+	hittest = function(a, i, recs)
+		if hit_box(a, i) then
+			hover(a[i+TEXT_ID])
+		end
+	end,
+	draw = function(a, i)
+		local x = a[i+0]
+		local y = a[i+1]
+		local w = a[i+2]
+		local h = a[i+3]
+		local s = a[i+TEXT_S]
+		scr_wr(x, y, s)
+	end,
 })
 
 --[==[
 
 -- scrollbox -----------------------------------------------------------------
 
-local SB_OVERFLOW = S+0 -- overflow x,y
-local SB_CW       = S+2 -- content w,h
-local SB_ID       = S+4
-local SB_SX       = S+5 -- scroll x,y
-local SB_STATE    = S+7
+local SB_OVERFLOW = BOX_CT_S+0 -- overflow x,y
+local SB_CW       = BOX_CT_S+2 -- content w,h
+local SB_ID       = BOX_CT_S+4
+local SB_SX       = BOX_CT_S+5 -- scroll x,y
+local SB_STATE    = BOX_CT_S+7
 
 local SB_OVERFLOW_AUTO     = 0
 local SB_OVERFLOW_HIDE     = 1
@@ -2069,8 +2224,6 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs)
 
 	hover(id)
 
-	hit_template(a, i)
-
 	-- test the scrollbars
 	for (local axis = 0; axis < 2; axis++)
 		local [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, 'hover')
@@ -2159,10 +2312,10 @@ end
 local POPUP_ID        = FR      -- because fr is not used
 local POPUP_SIDE      = ALIGN   -- because align is not used
 local POPUP_ALIGN     = ALIGN+1 -- because valign is not used
-local POPUP_LAYER_I   = S+0
-local POPUP_TARGET_I  = S+1
-local POPUP_FLAGS     = S+2
-local POPUP_SIDE_REAL = S+3
+local POPUP_LAYER_I   = BOX_CT_S+0
+local POPUP_TARGET_I  = BOX_CT_S+1
+local POPUP_FLAGS     = BOX_CT_S+2
+local POPUP_SIDE_REAL = BOX_CT_S+3
 
 local CMD_POPUP = cmd_ct('popup')
 
@@ -2180,7 +2333,7 @@ ui.popup = function(id, layer, target, side, align, min_w, min_h, flags, z_index
 		null, -- align -> side
 		null, -- valign -> align
 		min_w, min_h,
-		-- S+0
+		-- BOX_CT_S+0
 		layer.i, target_i, flags,
 		side, -- side_real
 	)
@@ -2424,7 +2577,9 @@ end
 --demo -----------------------------------------------------------------------
 
 ui.main = function()
-
+	ui.box()
+		ui.text('', random() > .5 and 'Hello, world!' or 'Goodbye, cruel world!', 0, 'c', 'c')
+	ui.end_box()
 end
 
 --main -----------------------------------------------------------------------
@@ -2432,13 +2587,14 @@ end
 tc_set_raw_mode()
 assert(tc_get_raw_mode(), 'could not put terminal in raw mode')
 
+wr'\27[?1049h' --enter alternate screen
 wr'\27]11;?\7' --get terminal background color
 wr'\27[?1000h' --enable mouse tracking
 wr'\27[?1003h' --enable mouse move tracking
 wr'\27[?1006h' --enable SGR mouse tracking
-wr'\27[?25l' --hide cursor
+wr'\27[?25l'   --hide cursor
 
-screen_w, screen_h = tc_get_window_size()
+screen_update_size()
 
 --signals thread to capture Ctrl+C and terminal window resize events.
 resume(thread(function()
@@ -2447,7 +2603,7 @@ resume(thread(function()
 	while 1 do
 		local si = sigf:read_signal()
 		if si.signo == SIGWINCH then
-			screen_w, screen_h = tc_get_window_size()
+			screen_update_size()
 			redraw()
 		elseif si.signo == SIGINT then
 			stop()
@@ -2462,7 +2618,7 @@ resume(thread(function()
 		redraw()
 		key = nil
 		scroll = nil
-		read_input()
+		rd_input()
 	end
 end))
 
@@ -2471,6 +2627,7 @@ start() --start the epoll loop (stopped by ctrl+C or a call to stop()).
 wr'\27[?1006l' --stop SGR mouse events
 wr'\27[?1003l' --stop mouse move events
 wr'\27[?1000l' --stop mouse events
-wr'\27[?25h' --show cursor
+wr'\27[?25h'   --show cursor
+wr'\27[?1049l' --exit alternate screen
 
 tc_reset() --reset terminal

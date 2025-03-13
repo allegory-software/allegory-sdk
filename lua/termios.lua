@@ -8,6 +8,7 @@
 	isatty(fd) -> t|f             check if a fd is a tty
 	tc_set_raw_mode([fd])         put terminal in raw mode
 	tc_get_raw_mode([fd]) -> t|f  check if in raw mode
+	tc_get_window_size() -> w,h   get terminal window size in character cells
 	tc_reset([fd])                reset to default mode
 	tc_reset([fd])
 	tc_flush([fd], 0|1|2)         discard all data in input or output buffers
@@ -223,7 +224,7 @@ local TIOCGWINSZ = 0x5413
 local ws = new'struct winsize'
 function tc_get_window_size()
 	assert(check_errno(C.ioctl(1, TIOCGWINSZ, cast('void*', ws)) == 0))
-	return ws.ws_row, ws.ws_col
+	return ws.ws_col, ws.ws_row
 end
 
 

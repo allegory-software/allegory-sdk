@@ -130,6 +130,8 @@ CALLBACKS
 	pass(...) -> ...               does nothing, returns back all arguments
 	noop(...)                      does nothing, returns nothing
 	call(f, ...)                   calls f if f is a func, otherwise returns args
+	do_before(f, do_f) -> f        wrap f so as to call do_f first
+	do_after(f, do_f) -> f         wrap f so as to call do_f last
 OBJECTS
 	object([super], [t], ...) -> t    create a class or object
 	before(class, method_name, f)     call f at the beginning of a method
@@ -1473,8 +1475,8 @@ or:
 local function install(self, combine, method_name, hook)
 	rawset(self, method_name, combine(self[method_name], hook))
 end
-local function _before(method, hook)
-	if repl(method, noop) then
+function do_before(method, hook)
+	if repl(method, noop) and repl(hook, noop) then
 		return function(self, ...)
 			hook(self, ...)
 			return method(self, ...)
@@ -1484,10 +1486,10 @@ local function _before(method, hook)
 	end
 end
 function before(self, method_name, hook)
-	install(self, _before, method_name, hook)
+	install(self, do_before, method_name, hook)
 end
-local function _after(method, hook)
-	if repl(method, noop) then
+function do_after(method, hook)
+	if repl(method, noop) and repl(hook, noop) then
 		return function(self, ...)
 			method(self, ...)
 			return hook(self, ...)
@@ -1497,16 +1499,16 @@ local function _after(method, hook)
 	end
 end
 function after(self, method_name, hook)
-	install(self, _after, method_name, hook)
+	install(self, do_after, method_name, hook)
 end
-local function _override(method, hook)
+local function do_override(method, hook)
 	local method = method or noop
 	return function(...)
 		return hook(method, ...)
 	end
 end
 function override(self, method_name, hook)
-	install(self, _override, method_name, hook)
+	install(self, do_override, method_name, hook)
 end
 
 --Return a metatable that supports virtual properties with getters and setters.
