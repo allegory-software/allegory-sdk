@@ -795,6 +795,7 @@ local function cmd_next_i(a, i) return i+a[i-2] end --index of next cmd
 local function cmd_prev_i(a, i) return i+a[i-3] end --index of prev cmd
 local function cmd_last_i(a) return cmd_prev_i(a, #a+3) end --index of last command in a
 local function cmd_arg_end_i(a, i) return cmd_next_i(a, i)-3 end --index after the last arg
+local cmd_next_ext_i --fwd. decl.
 
 function ui.cmd(cmd, ...)
 	cmd = assertf(ui.cmds[cmd], 'unknown command: %s', cmd)
@@ -819,7 +820,7 @@ ui.disas = function(a)
 		local cmd = a[i-1]
 		local i1 = cmd_arg_end_i(a, i)
 		local args = slice(a, i, i1)
-		if cmd.name == 'end' then
+		if cmd.is_end then
 			tabs = tabs - 1
 		end
 		pr(('  '):rep(tabs) .. cmd.name)
@@ -1514,13 +1515,13 @@ end
 
 -- box container widgets -----------------------------------------------------
 
-local NEXT_EXT_I = BOX_S+0 -- all container-boxes: next command after this one's 'end' command.
-local BOX_CT_S   = BOX_S+1 -- first index after the ui.cmd_box_ct header.
+local BOX_CT_NEXT_EXT_I = BOX_S+0 -- all box containers: next command after this one's 'end' command.
+local BOX_CT_S          = BOX_S+1 -- first index after the ui.cmd_box_ct header.
 
 function cmd_next_ext_i(a, i)
 	local cmd = a[i-1]
 	if cmd.is_ct then --container
-		return i+a[i+NEXT_EXT_I]
+		return i+a[i+BOX_CT_NEXT_EXT_I]
 	end
 	return cmd_next_i(a, i)
 end
@@ -1550,8 +1551,8 @@ ui.widget('end', {
 		local end_i = ui.cmd('end', i)
 		a[end_i+0] = a[end_i+0] - end_i -- make relative
 		local next_i = cmd_next_i(a, end_i)
-		a[i+NEXT_EXT_I] = next_i-i -- next_i but relative to the ct cmd at i
-		if a[i-1] == 'popup' then --TOOD: make this non-specific
+		a[i+BOX_CT_NEXT_EXT_I] = next_i-i -- next_i but relative to the ct cmd at i
+		if a[i-1].name == 'popup' then --TOOD: make this non-specific
 			end_layer()
 		end
 	end,
@@ -1593,7 +1594,7 @@ local function position_children_stacked(a, ct_i, axis, sx, sw)
 	local i = cmd_next_i(a, ct_i)
 	while 1 do
 		local cmd = a[i-1]
-		if cmd.name == 'end' then break end
+		if cmd.is_end then break end
 		local position_f = cmd.position
 		if position_f then
 			-- position item's children recursively.
@@ -1610,7 +1611,7 @@ local function translate_children(a, i, dx, dy)
 	i = cmd_next_i(a, i)
 	while 1 do
 		local cmd = a[i-1]
-		if cmd.name == 'end' then break end
+		if cmd.is_end then break end
 		local next_ext_i = cmd_next_ext_i(a, i)
 		local translate_f = cmd.translate
 		if translate_f then
@@ -1620,7 +1621,7 @@ local function translate_children(a, i, dx, dy)
 	end
 end
 
-local function translate_ct(a, i, dx, dy)
+local function box_ct_translate(a, i, dx, dy)
 	a[i+0] = a[i+0] + dx
 	a[i+1] = a[i+1] + dy
 	translate_children(a, i, dx, dy)
@@ -1635,7 +1636,7 @@ local function hit_children(a, i, recs)
 	local end_i = cmd_prev_i(a, next_ext_i)
 	i = cmd_prev_i(a, end_i)
 	while i > ct_i do
-		if a[i-1].name == 'end' then
+		if a[i-1].is_end then
 			i = i+a[i+0] -- start_i
 		end
 		local hit_f = hittest[a[i-1]]
@@ -1650,7 +1651,33 @@ ui.box_ct_widget = function(cmd, t)
 	return ui.box_widget(cmd, update({
 		is_ct = true,
 		measure = ct_stack_push,
-		translate = translate_ct,
+		translate = box_ct_translate,
+	}, t))
+end
+
+-- non-box container widgets -------------------------------------------------
+
+local CT_NEXT_EXT_I
+
+-- NOTE: `ct` is short for container, which must end with ui.end().
+function ui.cmd_ct(cmd, ...)
+	local i = ui.cmd(cmd,
+		0, --next_ext_i
+		...
+	)
+	add(ct_stack, i)
+	return i
+end
+
+function ct_translate(a, i, dx, dy)
+
+end
+
+ui.ct_widget = function(cmd, t)
+	return ui.widget(cmd, update({
+		is_ct = true,
+		measure = ct_stack_push,
+		translate = ct_translate,
 	}, t))
 end
 
@@ -1679,7 +1706,7 @@ local function position_flex(a, i, axis, sx, sw)
 		local gap_w = 0
 		local n = 0
 		i = next_i
-		while a[i-1].name ~= 'end' do
+		while not a[i-1].is_end do
 			if a[i-1].is_flex_child then
 				total_fr = total_fr + a[i+FR]
 				n = n + 1
@@ -1698,7 +1725,7 @@ local function position_flex(a, i, axis, sx, sw)
 		local total_overflow_w = 0
 		local total_free_w     = 0
 		i = next_i
-		while a[i-1].name ~= 'end' do
+		while not a[i-1].is_end do
 			if a[i-1].is_flex_child then
 
 				local min_w = a[i+2+axis]
@@ -1720,7 +1747,7 @@ local function position_flex(a, i, axis, sx, sw)
 		i = next_i
 		local ct_sx = sx
 		local ct_sw = sw
-		while a[i-1].name ~= 'end' do
+		while not a[i-1].is_end do
 			if a[i-1].is_flex_child then
 
 				local min_w = a[i+2+axis]
@@ -1829,7 +1856,7 @@ local B_V  = '\u{2502}'  -- │
 
 ui.box_ct_widget('box', {
 	ID = BOX_ID,
-	create = function(cmd, id, fr, align, valign, min_w, min_h, title, sides)
+	create = function(cmd, id, title, sides)
 		return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 			id or false,
 			title or false,
@@ -2613,9 +2640,11 @@ ui.main = function()
 			ui.text('', 'Hello, world!', 0, 'c', 'c')
 		ui.end_box()
 		ui.h(2)
-			ui.box('', 2)
-				ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c')
-			ui.end_box()
+			ui.stack('', 2)
+				ui.box()
+					ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c')
+				ui.end_box()
+			ui.end_stack()
 			ui.box('', 1)
 				ui.text('', 'Goodbye, again!', 0, 'c', 'c')
 			ui.end_box()
