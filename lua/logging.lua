@@ -9,7 +9,7 @@ LOGGING
 	logging.live(e, [fmt, ...] | nil)
 UTILS
 	logging.arg(v) -> s
-	logging.print(v) -> s
+	logging.printlive(v) -> s
 	logging.args(...) -> ...
 CONFIG
 	logging.deploy            app deployment name (logged to server)
@@ -24,6 +24,7 @@ CONFIG
 	logging.timeout           timeout (5)
 	logging.filter.NAME = true    filter out debug messages of specific module/event
 	logging.censor.name <- f(severity, module, ev, msg)  |set a function for censoring secrets in logs
+	logging:logtostderr(line)
 INIT
 	logging:tofile(logfile, max_disk_size)
 	logging:toserver(host, port, queue_size, timeout)
@@ -65,7 +66,7 @@ logging = {
 	},
 }
 
-function logging:tostderr(entry)
+function logging:logtostderr(entry)
 	io.stderr:write(entry)
 	io.stderr:flush()
 end
@@ -460,7 +461,7 @@ local function log(self, severity, module, event, fmt, ...)
 			}
 		end
 		if not self.quiet then
-			self:tostderr(entry)
+			self:logtostderr(entry)
 		end
 	end
 end

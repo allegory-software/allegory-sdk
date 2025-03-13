@@ -119,7 +119,7 @@ STRINGS
 	html_escape(s) -> s            escape HTML string
 	kbytes(x [,decimals]) -> s     format byte size in k/M/G/T-bytes
 STDOUT & STDERR
-	print_function(write[, format]) -> f  create a print()-like function
+	print_function(write, [format], [newline]) -> f  create a print()-like function
 	printf(fmt, ...)               print with string formatting
 	say([fmt, ...])                print to stderr
 	sayn(fmt, ...])                print to stderr without newline
@@ -1334,7 +1334,8 @@ end
 
 --virtualize the print function, eg. print_function(io.write, tostring)
 --gets you standard print().
-function print_function(out, format)
+function print_function(out, format, newline)
+	newline = newline or '\n'
 	format = format or tostring
 	return function(...)
 		local n = select('#', ...)
@@ -1344,7 +1345,7 @@ function print_function(out, format)
 				out'\t'
 			end
 		end
-		out'\n'
+		out(newline)
 	end
 end
 

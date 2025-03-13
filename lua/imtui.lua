@@ -3,6 +3,34 @@
 	Immediate Mode Text User Interface library for Linux terminals.
 	Written by Cosmin Apreutesei. Public Domain.
 
+	TODO:
+		- scrollbox
+		- box: sides, style, title, color
+		- bg
+		- shadow
+		- popup
+		- split
+		- text
+			- word-wrapped
+			- multi-line
+			- editable
+			- highlighted
+		- list
+		- tree
+		- menu-bar
+		- menu
+		- tab-list
+		- checkbox
+		- checklist
+		- radio-group
+		- dropdown
+		- button
+		- slider
+		- grid
+		- chart
+		- progress-bar
+		- modal
+
 ]]
 
 require'glue'
@@ -30,6 +58,10 @@ local function wr(s)
 	return stdout:write(s)
 end
 
+local function wr_err(s)
+	return stderr:write(s)
+end
+
 local function wrf(s, ...)
 	stdout:write(s:format(...))
 end
@@ -43,25 +75,15 @@ local function textf(s, ...)
 end
 
 local function warnfl(s, ...)
-	wr(text(s:format(...))); wr'\r\n'
+	wr_err(text(s:format(...))); wr'\r\n'
 end
 
 local dbgfl = DEBUG and warnfl or noop
 
-local pr = function(...)
-	local n = select('#',...)
-	for i=1,n do
-		local v = select(i,...)
-		wr(text(v))
-		if i < n then
-			wr'\t'
-		end
-	end
-	wr'\r\n'
-end
+local pr = print_function(wr_err, text, '\r\n')
 
-function logging:tostderr(entry)
-	warnfl('%s', entry)
+function logging:logtostderr(line)
+	pr(line)
 end
 
 local wr_bg; do
@@ -459,7 +481,7 @@ ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
 ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
 ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
 ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) -- bg alternate for grid cells
-ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
+ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00)
 ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
 ui.bg_style('light', 'input' , 'active' ,   0, 0.00, 0.90)
@@ -542,6 +564,89 @@ ui.bg_style('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0
 ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
 ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
 ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
+
+--[[ state maps --------------------------------------------------------------
+
+Persistence between frames is kept in per-id state maps. Widgets need to
+call keepalive(id) otherwise their state map is garbage-collected at the end
+of the frame. Widgets can also register a `free` callback to be called if
+the widget doesn't appear again on a future frame. State updates should be
+done inside an update callback registered with keepalive() so that the widget
+state can be updated in advance of the widget appearing in the frame in case
+the widget state is queried from outside before the widget appears in the frame.
+The update callback will be called once per frame, either due to a state access
+or when the widget is created in the frame.
+
+]]
+
+local id_state_maps  = {} -- {id->map}
+local id_current_set = {} -- {id->true}
+local id_remove_set  = {} -- {id->true}
+
+ui._id_state_maps = id_state_maps
+
+function keepalive(id, update_f)
+	assert(id, 'id required')
+	id_current_set[id] = true
+	id_remove_set[id] = nil
+
+	if update_f then
+		local m = ui.state(id)
+		m.update = update_f
+	end
+end
+ui.keepalive = keepalive
+
+function state_update(id, m)
+	local update_f = m.update
+	if not update_f then
+		return
+	end
+	update_f(id, m)
+	m.update = nil
+end
+
+ui.state = function(id, k)
+	if not id then return end
+	if ss_id and id ~= ss_id then return end
+	local m = id_state_maps[id]
+	if not m then
+		m = {}
+		id_state_maps[id] = m
+	else
+		state_update(id, m)
+	end
+	if k then return m[k] end
+	return m
+end
+
+ui.state_init = function(id, k, v)
+	local s = ui.state(id)
+	if s[k] ~= nil then return end
+	s[k] = v
+end
+
+function id_state_gc()
+	for id in pairs(id_remove_set) do
+		local m = id_state_maps[id]
+		if m then
+			assert(ui.captured_id ~= id, 'id removed while captured')
+			if m.free then
+				m.free(m, id)
+			end
+			id_state_maps[id] = nil
+		end
+		id_remove_set[id] = nil
+	end
+	local empty = id_remove_set
+	id_remove_set = id_current_set
+	id_current_set = empty
+end
+
+ui.on_free = function(id, free1)
+	local s = ui.state(id)
+	s.free = after(s.free, free1)
+end
 
 -- command state -------------------------------------------------------------
 
@@ -705,7 +810,7 @@ function ui.layer(name, index)
 		end
 		layer_map[name] = layer
 		add(layer_arr, layer)
-		layer.i = layer_arr.length
+		layer.i = #layer_arr
 		if not layer.indexes then
 			layer.indexes = {} -- [rec1_i, ct1_i, z_index1, rec2_i, ct2_i, z_index2, ...]
 		end
@@ -786,7 +891,6 @@ end
 -- measure_end callback to do the work.
 
 function measure_rec(a, axis)
-	ui.disas(a)
 	local i, n = 3, #a
 	while i < n do
 		local cmd = a[i-1]
@@ -860,7 +964,7 @@ end
 function draw_layer(layer_i, indexes, recs)
 	local prev_layer_i = current_layer_i
 	--[[global]] current_layer_i = layer_i
-	for k = 0, #indexes, 3 do
+	for k = 1, #indexes, 3 do
 		reset_canvas()
 		local rec_i = indexes[k]
 		local i     = indexes[k+1]
@@ -1071,8 +1175,6 @@ local function redraw()
 			capture_state = {}
 		end
 
-		reset_pointer_state()
-
 		key = nil
 		focusing_id = nil
 
@@ -1144,12 +1246,13 @@ ui.widget('set_layer', {
 		local ct_i  = i+a[i+1]
 		local z_index = a[i+2]
 		local layer = layer_arr[layer_i]
-		if z_index == 0 and layer.indexes[#layer.indexes] == 0 then -- common path, z-index not used
+		local za = layer.indexes
+		if z_index == 0 and (#za == 0 or za[#za] == 0) then -- common path, z-index not used
 			add(layer.indexes, rec_i)
 			add(layer.indexes, ct_i)
 			add(layer.indexes, z_index)
 		else
-			local insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
+			local insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 1, #layer.indexes / 3) * 3
 			assert(false, 'NYI')
 			--layer.indexes.splice(insert_i, 0, rec_i, ct_i, z_index)
 		end
@@ -1176,10 +1279,8 @@ ui.widget('draw_layer', {
 
 -- box widgets ---------------------------------------------------------------
 
-local FR         =  5 -- all `is_flex_child` widgets: fraction from main-axis size.
-local ALIGN      =  6 -- vert. align at ALIGN+1
-local NEXT_EXT_I =  8 -- all container-boxes: next command after this one's 'end' command.
-local S          =  9 -- first index after the ui.cmd_box_ct header.
+local FR    =  4 -- all `is_flex_child` widgets: fraction from main-axis size.
+local ALIGN =  5 -- vert. align at ALIGN+1
 
 function ui.cmd_box(cmd, fr, align, valign, min_w, min_h, ...)
 	return ui.cmd(cmd,
@@ -1202,7 +1303,7 @@ local function add_ct_min_wh(a, axis, w)
 		return
 	end
 	local cmd = a[i-1]
-	local main_axis = is_main_axis(cmd, axis)
+	local main_axis = cmd.main_axis == axis
 	local min_w = a[i+2+axis]
 	if main_axis then
 		local gap = a[i+FLEX_GAP]
@@ -1248,25 +1349,15 @@ function align_x(a, i, axis, sx, sw)
 	end
 end
 
--- outer-box (ct_x, ct_w) -> inner-box (x, w).
-function inner_x(a, i, axis, ct_x)
-	return ct_x + a[i+MX1+axis] + a[i+PX1+axis]
-end
-function inner_w(a, i, axis, ct_w)
-	return ct_w - spacings(a, i, axis)
-end
-
 ui.align_x = align_x
 ui.align_w = align_w
-ui.inner_x = inner_x
-ui.inner_w = inner_w
 
 -- calculate a[i+0]=x, a[i+2]=w (for axis=0) or a[i+1]=y, a[i+3]=h (for axis=1).
 -- the resulting box at a[i+0..3] is the inner box which excludes margins and paddings.
 -- NOTE: scrolling and popup positioning is done in the translation phase.
 function box_position(a, i, axis, sx, sw)
-	a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-	a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
+	a[i+0+axis] = align_x(a, i, axis, sx, sw)
+	a[i+2+axis] = align_w(a, i, axis, sw)
 end
 
 -- box translate phase
@@ -1279,14 +1370,10 @@ end
 -- box hit phase
 
 function hit_box(a, i)
-	local px1 = a[i+PX1+0]
-	local py1 = a[i+PX1+1]
-	local px2 = a[i+PX2+0]
-	local py2 = a[i+PX2+1]
-	local x = a[i+0] - px1
-	local y = a[i+1] - py1
-	local w = a[i+2] + px1 + px2
-	local h = a[i+3] + py1 + py2
+	local x = a[i+0]
+	local y = a[i+1]
+	local w = a[i+2]
+	local h = a[i+3]
 	return hit_rect(x, y, w, h)
 end
 ui.hit_box = hit_box
@@ -1315,6 +1402,9 @@ ui.box_widget = function(cmd, t)
 end
 
 -- container-box widgets -----------------------------------------------------
+
+local NEXT_EXT_I =  7 -- all container-boxes: next command after this one's 'end' command.
+local S          =  8 -- first index after the ui.cmd_box_ct header.
 
 function cmd_next_ext_i(a, i)
 	local cmd = a[i-1]
@@ -1349,7 +1439,6 @@ ui.widget('end', {
 			assertf(false, 'closing %s instead of %s', cmd.name, C(a, i))
 		end
 		local end_i = ui.cmd('end', i)
-		pr('end', end_i, i, a[i-1].name, #ct_stack)
 		a[end_i+0] = a[end_i+0] - end_i -- make relative
 		local next_i = cmd_next_i(a, end_i)
 		a[i+NEXT_EXT_I] = next_i-i -- next_i but relative to the ct cmd at i
@@ -1361,12 +1450,11 @@ ui.widget('end', {
 	measure = function(a, _, axis)
 		local i = assert(del(ct_stack), 'end command outside a container')
 		local cmd = a[i-1]
-		pr('ME', i, cmd.name)
 		local measure_end_f = cmd.measure_end
 		if measure_end_f then
 			measure_end_f(a, i, axis)
 		else
-			local main_axis = is_main_axis(cmd, axis)
+			local main_axis = cmd.main_axis == axis
 			local own_min_w = a[i+0+axis]
 			local min_w     = a[i+2+axis]
 			if main_axis then
@@ -1394,9 +1482,9 @@ ui.end_cmd = ui['end']
 local function position_children_stacked(a, ct_i, axis, sx, sw)
 
 	local i = cmd_next_i(a, ct_i)
-	while a[i-1] ~= 'end' do
-
+	while 1 do
 		local cmd = a[i-1]
+		if cmd.name ~= 'end' then break end
 		local position_f = cmd.position
 		if position_f then
 			-- position item's children recursively.
@@ -1412,10 +1500,11 @@ end
 local function translate_children(a, i, dx, dy)
 	local ct_i = i
 	i = cmd_next_i(a, i)
-	while a[i-1] ~= 'end' do
+	while 1 do
 		local cmd = a[i-1]
+		if cmd.name == 'end' then break end
 		local next_ext_i = cmd_next_ext_i(a, i)
-		local translate_f = translate[cmd]
+		local translate_f = cmd.translate
 		if translate_f then
 			translate_f(a, i, dx, dy, ct_i)
 		end
@@ -1438,7 +1527,7 @@ local function hit_children(a, i, recs)
 	local end_i = cmd_prev_i(a, next_ext_i)
 	i = cmd_prev_i(a, end_i)
 	while i > ct_i do
-		if a[i-1] == 'end' then
+		if a[i-1].name == 'end' then
 			i = i+a[i+0] -- start_i
 		end
 		local hit_f = hittest[a[i-1]]
@@ -1453,23 +1542,16 @@ end
 
 local FLEX_GAP = S+0
 
-local function is_main_axis(cmd, axis)
-	return (
-		(cmd == 'v' and 1 or 2) == axis or
-		(cmd == 'h' and 0 or 2) == axis
-	)
-end
-
 local function position_flex(a, i, axis, sx, sw)
 
-	sx = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-	sw = inner_w(a, i, axis, align_w(a, i, axis, sw))
+	sx = align_x(a, i, axis, sx, sw)
+	sw = align_w(a, i, axis, sw)
 
 	a[i+0+axis] = sx
 	a[i+2+axis] = sw
 
 	local ct_i = i
-	if is_main_axis(a[i-1], axis) then
+	if a[i-1].main_axis == axis then
 
 		local i = ct_i
 
@@ -1481,8 +1563,8 @@ local function position_flex(a, i, axis, sx, sw)
 		local gap_w = 0
 		local n = 0
 		i = next_i
-		while a[i-1] ~= 'end' do
-			if is_flex_child[a[i-1]] then
+		while a[i-1].name ~= 'end' do
+			if a[i-1].is_flex_child then
 				total_fr = total_fr + a[i+FR]
 				n = n + 1
 			end
@@ -1500,8 +1582,8 @@ local function position_flex(a, i, axis, sx, sw)
 		local total_overflow_w = 0
 		local total_free_w     = 0
 		i = next_i
-		while a[i-1] ~= 'end' do
-			if is_flex_child[a[i-1]] then
+		while a[i-1].name ~= 'end' do
+			if a[i-1].is_flex_child then
 
 				local min_w = a[i+2+axis]
 				local fr    = a[i+FR]
@@ -1522,8 +1604,8 @@ local function position_flex(a, i, axis, sx, sw)
 		i = next_i
 		local ct_sx = sx
 		local ct_sw = sw
-		while a[i-1] ~= 'end' do
-			if is_flex_child[a[i-1]] then
+		while a[i-1].name ~= 'end' do
+			if a[i-1].is_flex_child then
 
 				local min_w = a[i+2+axis]
 				local fr    = a[i+FR]
@@ -1580,30 +1662,31 @@ local function hit_flex(a, i, recs)
 	end
 end
 
-ui.widget('hv', {
+function flex(hv)
+	return ui.widget(hv, {
 
-	create = function(cmd, fr, gap, align, valign, min_w, min_h)
-		local cmd = assert(hv == 'h' or hv == 'v')
-		return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
-			gap or 0
-		)
-	end,
+		main_axis = hv == 'h' and 0 or 1,
 
-	measure = ct_stack_push,
+		create = function(cmd, fr, gap, align, valign, min_w, min_h)
+			return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
+				gap or 0
+			)
+		end,
 
-	position = position_flex,
+		measure = ct_stack_push,
 
-	is_flex_child = true,
+		position = position_flex,
 
-	translate = translate_ct,
+		is_flex_child = true,
 
-	hittest = hit_flex,
+		translate = translate_ct,
 
-})
-ui.h = function(...) return ui.hv('h', ...) end
-ui.v = function(...) return ui.hv('v', ...) end
-ui.end_h = function() ui.end_cmd('h') end
-ui.end_v = function() ui.end_cmd('v') end
+		hittest = hit_flex,
+
+	})
+end
+ui.h = flex'h'
+ui.v = flex'v'
 
 -- stack ---------------------------------------------------------------------
 
@@ -1622,8 +1705,8 @@ ui.widget('stack', {
 	measure = ct_stack_push,
 
 	position = function(a, i, axis, sx, sw)
-		local x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-		local w = inner_w(a, i, axis, align_w(a, i, axis, sw))
+		local x = align_x(a, i, axis, sx, sw)
+		local w = align_w(a, i, axis, sw)
 		a[i+0+axis] = x
 		a[i+2+axis] = w
 		position_children_stacked(a, i, axis, x, w)
@@ -1719,8 +1802,8 @@ end
 
 -- NOTE: scrolling is done later in the translation phase.
 position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw)
-	local x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-	local w = inner_w(a, i, axis, align_w(a, i, axis, sw))
+	local x = align_x(a, i, axis, sx, sw)
+	local w = align_w(a, i, axis, sw)
 	a[i+0+axis] = x
 	a[i+2+axis] = w
 	local content_w = a[i+SB_CW+axis]
@@ -2376,10 +2459,10 @@ end))
 --input thread
 resume(thread(function()
 	while 1 do
-		read_input()
 		redraw()
 		key = nil
 		scroll = nil
+		read_input()
 	end
 end))
 
