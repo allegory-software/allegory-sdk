@@ -1393,6 +1393,8 @@ local FR    = 4 -- all `is_flex_child` widgets: fraction from main-axis size.
 local ALIGN = 5 -- vert. align at ALIGN+1
 local BOX_S = 7 -- first index after the ui.cmd_box header.
 
+local FLEX_GAP --fw. decl.
+
 function ui.cmd_box(cmd, fr, align, valign, min_w, min_h, ...)
 	return ui.cmd(cmd,
 		min_w or 0, -- min_w in measuring phase; x in positioning phase
@@ -1654,7 +1656,7 @@ end
 
 -- flex ----------------------------------------------------------------------
 
-local FLEX_GAP = BOX_CT_S+0
+FLEX_GAP = BOX_CT_S+0
 
 local function position_flex(a, i, axis, sx, sw)
 
@@ -1783,8 +1785,8 @@ function flex(hv)
 		end
 	})
 end
-ui.h = flex'h'
-ui.v = flex'v'
+flex'h'
+flex'v'
 
 -- stack ---------------------------------------------------------------------
 
@@ -2606,9 +2608,19 @@ end
 --demo -----------------------------------------------------------------------
 
 ui.main = function()
-	ui.box()
-		ui.text('', random() > .5 and 'Hello, world!' or 'Goodbye, cruel world!', 0, 'c', 'c')
-	ui.end_box()
+	ui.v()
+		ui.box()
+			ui.text('', 'Hello, world!', 0, 'c', 'c')
+		ui.end_box()
+		ui.h()
+			ui.box()
+				ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c')
+			ui.end_box()
+			ui.box()
+				ui.text('', 'Goodbye, again!', 0, 'c', 'c')
+			ui.end_box()
+		ui.end_h()
+	ui.end_v()
 end
 
 --main -----------------------------------------------------------------------
