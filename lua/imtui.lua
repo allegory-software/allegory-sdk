@@ -42,7 +42,15 @@ require'termios'
 
 ui = {}
 
-local DEBUG = false
+--print debugging via `tail -f imtui.log` ------------------------------------
+
+local DEBUG = true
+local imtui_log
+local function warnf(s, ...)
+	imtui_log = imtui_log or open('imtui.log', 'a')
+	imtui_log:write(s:format(...):gsub('\27', '\\ESC')..'\n')
+end
+local dbgf = DEBUG and warnf or noop
 
 -- encoding and writing terminal output --------------------------------------
 
@@ -52,33 +60,34 @@ term_is_256_color =
 	TERM == 'screen-256color'
 
 term_is_dark = true --assume dark if detection fails
-term_bg_changed = noop
+term_bg_changed = noop --defined below in the tui section
 
-local function wr(s)
-	return stdout:write(s)
+--buffered, async write to stdout
+local wr, wr_flush; do
+	local write, collect, reset = dynarray_pump()
+	wr = write
+	function wr_flush()
+		local buf, len = collect()
+		stdout:write(buf, len)
+		reset()
+	end
 end
 
-local function wr_err(s)
+local function wr_err(s) --unbuffered async write to stderr
 	return stderr:write(s)
 end
 
 local function wrf(s, ...)
-	stdout:write(s:format(...))
+	wr(s:format(...))
 end
 
 local function text(s)
-	return tostring(s):gsub('\27', 'ESC'):gsub('\n', '\r\n')
+	return tostring(s):gsub('\27', '\\ESC'):gsub('\n', '\r\n')
 end
 
 local function textf(s, ...)
 	return text(s:format(...))
 end
-
-local function warnfl(s, ...)
-	wr_err(text(s:format(...))); wr'\r\n'
-end
-
-local dbgfl = DEBUG and warnfl or noop
 
 local pr = print_function(wr_err, text, '\r\n')
 
@@ -197,7 +206,7 @@ end
 local b = new'char[128]'
 local function rd()
 	stdin:readn(b, 1)
-	if DEBUG then dbgfl(' rd %s %s', b[0], char(b[0])) end
+	if DEBUG then dbgf(' rd %s %s', b[0], char(b[0])) end
 	return b[0]
 end
 
@@ -207,7 +216,7 @@ local function rd_to(c1, c2, err)
 	for i = 0,127 do
 		stdin:readn(b+i, 1)
 		if b[i] == c1 or b[i] == c2 then
-			if DEBUG then dbgfl('  rd_to %s or %s: %d "%s" %s',
+			if DEBUG then dbgf('  rd_to %s or %s: %d "%s" %s',
 				char(c1), char(c2), i, str(b, i+1), err or '') end
 			return str(b, i+1)
 		end
@@ -220,12 +229,12 @@ local function rd_wait(timeout)
 	local len, err = stdin:try_read(b, 1)
 	stdin:settimeout(nil)
 	if not len and err == 'timeout' then
-		if DEBUG then dbgfl(' %s', 'timeout') end
+		if DEBUG then dbgf(' %s', 'timeout') end
 		return nil
 	else
 		assert(len == 1, 'eof')
 	end
-	if DEBUG then dbgfl(' rd_wait %s %s', b[0], char(b[0])) end
+	if DEBUG then dbgf(' rd_wait %s %s', b[0], char(b[0])) end
 	return b[0]
 end
 
@@ -301,7 +310,7 @@ local function rd_input() --read keyboard and mouse input in raw mode
 				elseif b == '65' then
 					scroll = 1
 				end
-				if DEBUG then dbgfl('mouse %d %d %s %s', mx, my, b, st) end
+				if DEBUG then dbgf('mouse %d %d %s %s', mx, my, b, st) end
 			end
 		elseif c == 93 then --]
 			local s = rd_to('\7', '\7') --report terminal bg color
@@ -322,39 +331,55 @@ local function rd_input() --read keyboard and mouse input in raw mode
 	else
 		key = c
 	end
-	if DEBUG and key then dbgfl('key %s', key) end
+	if DEBUG and key then dbgf('key %s', key) end
 end
 
--- screen buffer -------------------------------------------------------------
+-- screen double-buffer ------------------------------------------------------
 
 local cell_ct = ctype[[
+union {
+	uint64_t data;
 	struct {
-		uint8_t text[4];
-		uint8_t fg_color;
-		uint8_t bg_color;
-	}
+		union {
+			uint32_t codepoint;
+			uint8_t  text[4];
+		};
+		uint8_t  fg_color;
+		uint8_t  bg_color;
+		uint16_t flags;
+	};
+}
 ]]
+assert(sizeof(cell_ct) == 8)
 local cell_arr_ct = ctype('$[?]', cell_ct)
-local screen
 
-local dx1, dx2, dy1, dy2 = -1
+local screen1, screen2, screen2_dirty
+
+local dx1, dx2, dy1, dy2 = -1 --damage box
+local function add_damage(x, y, w, h)
+	if dx1 == -1 then
+		dx1, dy1 = x, y
+		dx2, dy2 = x + w, y + h
+	else
+		dx1 = min(dx1, x)
+		dy1 = min(dy1, y)
+		dx2 = max(dx2, x + w)
+		dy2 = max(dy2, y + h)
+	end
+end
+
 local function scr_wr(x, y, s)
 	if x < 0 then return end
 	if y < 0 then return end
 	if y >= screen_h then return end
 	local w = min(#s, screen_w - x)
 	if w == 0 then return end
-	if dx1 == -1 then
-		dx1, dy1 = x, y
-		dx2, dy2 = x + w, y + 1
-	else
-		dx1 = min(dx1, x)
-		dy1 = min(dy1, y)
-		dx2 = max(dx2, x + w)
-		dy2 = max(dy2, y + 1)
-	end
+	add_damage(x, y, w, 1)
+	--TODO: split text codepoints
+	--TODO: splitting on graphemes would be even better.
+	--TODO: support 2-cell-wide graphemes.
 	for i=1,w do
-		local cell = screen[y * screen_w + x + i - 1]
+		local cell = screen1[y * screen_w + x + i - 1]
 		cell.text[0] = byte(s, i)
 		cell.text[1] = 0
 		cell.text[2] = 0
@@ -365,65 +390,66 @@ end
 local function scr_wrc(x, y, c) --set single cell
 	if x < 0 or x >= screen_w then return end
 	if y < 0 or y >= screen_h then return end
-	local cell = screen[y * screen_w + x]
-	for i=0,3 do
-		cell.text[i] = byte(c, i+1) or 0
-	end
-	if dx1 == -1 then
-		dx1, dy1 = x, y
-		dx2, dy2 = x + 1, y + 1
-	else
-		dx1 = min(dx1, x)
-		dy1 = min(dy1, y)
-		dx2 = max(dx2, x + 1)
-		dy2 = max(dy2, y + 1)
-	end
+	assert(#c <= 4)
+	add_damage(x, y, 1, 1)
+	local cell = screen1[y * screen_w + x]
+	copy(cell.text, c, #c)
 end
 
-local function scr_fill(x, y, w, h, bg_color, fg_color, text)
+local cell = cell_ct()
+local function scr_fill(x, y, w, h, bg_color, fg_color, text, screen)
+	screen = screen or screen1
+
+	--fit rect to screen
 	local x1 = clamp(x  , 0, screen_w)
 	local y1 = clamp(y  , 0, screen_h)
 	local x2 = clamp(x+w, x, screen_w)
 	local y2 = clamp(y+h, y, screen_h)
-	local n = text and #text or 0
+
+	--set stamp cell
+	cell.data = 0
+	if bg_color then cell.bg_color = bg_color end
+	if fg_color then cell.fg_color = fg_color end
+	if text and #text > 0 then
+		assert(#text <= 4)
+		copy(cell.text, text, #text)
+	end
+
+	--stamp it
 	for y = y1, y2-1 do
 		for x = x1, x2-1 do
-			local cell = screen[y * screen_w + x]
-			if bg_color then cell.bg_color = bg_color end
-			if fg_color then cell.fg_color = fg_color end
-			for i=0,3 do
-				cell.text[i] = byte(text, i+1) or 0
-			end
+			screen1[y * screen_w + x] = cell
 		end
 	end
 end
 
 local function screen_flush()
-	dx1 = 0
-	dy1 = 0
-	dx2 = screen_w
-	dy2 = screen_h
 	if dx1 == -1 then return end
 	for y = dy1, dy2-1 do
+		--TODO: find change ranges and output the text on those only,
+		--changing the colors as needed inside the range.
 		for x = dx1, dx2-1 do
-			local cell = screen[y * screen_w + x]
-			gotoxy(x, y)
-			for i=0,3 do
-				local b = cell.text[i]
-				if b == 0 then break end
-				wr(char(b))
+			local cell1 = screen1[y * screen_w + x]
+			local cell2 = screen2[y * screen_w + x]
+			if screen2_dirty or cell1.data ~= cell2.data then
+				gotoxy(x, y)
+				wr(cell1.text, 4)
 			end
 		end
 	end
-	dx1 = -1
+	wr_flush()
+	dx1 = -1 --reset the damage box
+	screen1, screen2 = screen2, screen1 --swap the screens
+	screen2_dirty = false
+	scr_fill(0, 0, screen_w, screen_h, bg_color, fg_color, ' ')
 end
 
 function screen_update_size()
 	screen_w, screen_h = tc_get_window_size()
-	screen = new(cell_arr_ct, screen_w * screen_h)
-	local bg_color
-	local fg_color
-	scr_fill(0, 0, screen_w, screen_h, bg_color, fg_color, ' ')
+	screen1 = new(cell_arr_ct, screen_w * screen_h)
+	screen2 = new(cell_arr_ct, screen_w * screen_h)
+	screen2_dirty = true
+	dx1 = -1 --reset the damage box
 end
 
 -- imgui themes and colors ---------------------------------------------------
@@ -939,7 +965,7 @@ end
 function layer_stack_check()
 	if #layer_stack > 0 then
 		for _,layer in ipairs(layer_stack) do
-			warnfl('layer %s not closed', layer.name)
+			warnf('layer %s not closed', layer.name)
 		end
 		assert(false)
 	end
@@ -958,7 +984,7 @@ function ui.rel_ct_i() return ui.ct_i() - #a + 2 end
 function ct_stack_check(a)
 	if #ct_stack > 0 then
 		for _,i in ipairs(ct_stack) do
-			warnfl('%s not closed', a[i-1].name)
+			warnf('%s not closed', a[i-1].name)
 		end
 		assert(false)
 	end
@@ -1404,11 +1430,10 @@ local function ct_stack_push(a, i)
 end
 
 -- calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1).
--- the minimum dimensions include margins and paddings.
 local function box_measure(a, i, axis)
 	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) -- apply own min_w|h
-	local min_w = a[i+2+axis]
-	add_ct_min_wh(a, axis, min_w)
+	local min_wh = a[i+2+axis]
+	add_ct_min_wh(a, axis, min_wh)
 end
 
 -- box position phase
@@ -1465,7 +1490,7 @@ ui.hit_box = hit_box
 
 ui.box_widget = function(cmd, t)
 	local ID = t.ID
-	local box_hit = ID and function(a, i)
+	local box_hit = t.hit or ID and function(a, i)
 		local x = a[i+0]
 		local y = a[i+1]
 		local w = a[i+2]
@@ -1477,9 +1502,9 @@ ui.box_widget = function(cmd, t)
 		end
 	end
 	return ui.widget(cmd, update({
-		measure   = do_after(do_before(box_measure   , t.before_measure  ), t.after_measure  ),
-		position  = do_after(do_before(box_position  , t.before_position ), t.after_position ),
-		translate = do_after(do_before(box_translate , t.before_translate), t.after_translate),
+		measure   = t.measure   or do_after(do_before(box_measure   , t.before_measure  ), t.after_measure  ),
+		position  = t.position  or do_after(do_before(box_position  , t.before_position ), t.after_position ),
+		translate = t.translate or do_after(do_before(box_translate , t.before_translate), t.after_translate),
 		hit       = box_hit,
 		is_flex_child = true,
 	}, t))
@@ -1766,6 +1791,7 @@ ui.v = flex'v'
 local STACK_ID = BOX_CT_S+0
 
 ui.box_ct_widget('stack', {
+	ID = STACK_ID,
 	create = function(cmd, id, fr, align, valign, min_w, min_h)
 		return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 			id or '')
@@ -1800,6 +1826,7 @@ local B_H  = '\u{2500}'  -- ─
 local B_V  = '\u{2502}'  -- │
 
 ui.box_ct_widget('box', {
+	ID = BOX_ID,
 	create = function(cmd, id, title, sides)
 		return ui.cmd_box_ct(cmd, 1, 's', 's', 2, 2,
 			id or false,
@@ -1850,6 +1877,7 @@ local TEXT_ID = BOX_S+0
 local TEXT_S  = BOX_S+1
 
 ui.box_widget('text', {
+	ID = TEXT_ID,
 	create = function(cmd, id, s, fr, align, valign, max_min_w, min_w, min_h)
 		return ui.cmd_box(cmd, fr, align or 's', valign or 's', min_w, min_h,
 			id or false,
@@ -1857,16 +1885,17 @@ ui.box_widget('text', {
 		)
 	end,
 	measure = function(a, i, axis)
-		local min_w = a[i+0+axis]
+		local min_wh = a[i+0+axis]
 		if axis == 0 then
 			local s = a[i+TEXT_S]
-			min_w = max(min_w, #s)
+			min_wh = max(min_wh, #s)
 		else
-			min_w = max(min_w, 1)
+			min_wh = max(min_wh, 1)
 		end
-		a[i+0+axis] = min_w
-		add_ct_min_wh(a, axis, min_w)
+		a[i+0+axis] = min_wh
+		box_measure(a, i, axis)
 	end,
+	--position
 	hittest = function(a, i, recs)
 		if hit_box(a, i) then
 			hover(a[i+TEXT_ID])
@@ -2593,6 +2622,7 @@ wr'\27[?1000h' --enable mouse tracking
 wr'\27[?1003h' --enable mouse move tracking
 wr'\27[?1006h' --enable SGR mouse tracking
 wr'\27[?25l'   --hide cursor
+wr_flush()
 
 screen_update_size()
 
@@ -2622,6 +2652,8 @@ resume(thread(function()
 	end
 end))
 
+dbgf'starting'
+
 start() --start the epoll loop (stopped by ctrl+C or a call to stop()).
 
 wr'\27[?1006l' --stop SGR mouse events
@@ -2629,5 +2661,6 @@ wr'\27[?1003l' --stop mouse move events
 wr'\27[?1000l' --stop mouse events
 wr'\27[?25h'   --show cursor
 wr'\27[?1049l' --exit alternate screen
+wr_flush()
 
 tc_reset() --reset terminal
