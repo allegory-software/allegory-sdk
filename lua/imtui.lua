@@ -1394,7 +1394,7 @@ local FR    = 4 -- all `is_flex_child` widgets: fraction from main-axis size.
 local ALIGN = 5 -- vert. align at ALIGN+1
 local BOX_S = 7 -- first index after the ui.cmd_box header.
 
-local FLEX_GAP --fw. decl.
+local FLEX_GAP --fwd. decl.
 
 function ui.cmd_box(cmd, fr, align, valign, min_w, min_h, ...)
 	return ui.cmd(cmd,
@@ -1518,10 +1518,14 @@ end
 local BOX_CT_NEXT_EXT_I = BOX_S+0 -- all box containers: next command after this one's 'end' command.
 local BOX_CT_S          = BOX_S+1 -- first index after the ui.cmd_box_ct header.
 
-function cmd_next_ext_i(a, i)
+local CT_NEXT_EXT_I --fwd. decl.
+
+--[[local]] function cmd_next_ext_i(a, i)
 	local cmd = a[i-1]
-	if cmd.is_ct then --container
+	if cmd.is_box_ct then --box container
 		return i+a[i+BOX_CT_NEXT_EXT_I]
+	elseif cmd.is_ct then --non-box container
+		return i+a[i+CT_NEXT_EXT_I]
 	end
 	return cmd_next_i(a, i)
 end
@@ -1650,6 +1654,7 @@ end
 ui.box_ct_widget = function(cmd, t)
 	return ui.box_widget(cmd, update({
 		is_ct = true,
+		is_box_ct = true,
 		measure = ct_stack_push,
 		translate = box_ct_translate,
 	}, t))
@@ -1657,7 +1662,7 @@ end
 
 -- non-box container widgets -------------------------------------------------
 
-local CT_NEXT_EXT_I
+--[[local]] CT_NEXT_EXT_I = 1
 
 -- NOTE: `ct` is short for container, which must end with ui.end().
 function ui.cmd_ct(cmd, ...)
@@ -1683,7 +1688,7 @@ end
 
 -- flex ----------------------------------------------------------------------
 
-FLEX_GAP = BOX_CT_S+0
+--[[local]] FLEX_GAP = BOX_CT_S+0
 
 local function position_flex(a, i, axis, sx, sw)
 
