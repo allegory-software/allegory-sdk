@@ -50,10 +50,10 @@ ARRAYS
 	insert                       = table.insert
 	remove                       = table.remove
 	del                          = table.remove
-	pop                          = remove
-	sort(t,[cmp]) -> t           = table.sort
 	add(t, v)                      insert(t, v)
-	push(t, v)                   = add
+	push(t, v)                     insert(t, v)
+	pop(t, v)                      remove(t, v)
+	sort(t, [cmp]) -> t          = table.sort
 	extend(dt, t1, ...) -> dt      extend an array with contents of other arrays
 	append(dt, v1, ...) -> dt      append non-nil values to an array
 	shift(t, i, n) -> t            shift array elements
@@ -114,6 +114,7 @@ STRINGS
 	hexblock(s)                    string to hex block
 	starts(s, prefix) -> t|f       find if string starts with prefix
 	ends(s, suffix) -> t|f         find if string ends with suffix
+	s:has(substring) -> t|f        s:find(1, true)
 	subst(s, t) -> s               string interpolation pattern
 	capitalize(s) -> s             capitalize words
 	html_escape(s) -> s            escape HTML string
@@ -407,13 +408,16 @@ _G.concat = concat
 _G.cat    = concat
 _G.insert = insert
 _G.remove = remove
-_G.pop    = remove
 _G.del    = remove
 
 function add(t, v)
 	insert(t, v)
 end
 push = add
+
+function pop(t, v)
+	return remove(t, v)
+end
 
 --scan list for value. works with ffi arrays too given i and j.
 --Works on ffi arrays too if i and j are provided.
@@ -1234,6 +1238,10 @@ function ends(s, p)
 	return p == '' or s:sub(-#p) == p
 end
 string.ends = ends
+
+function string:has(p)
+	return self:find(p, 1, true)
+end
 
 function subst(s, t, get_missing) --subst('{foo} {bar}', {foo=1, bar=2}) -> '1 2'
 	if get_missing then
