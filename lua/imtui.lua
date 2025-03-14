@@ -5,10 +5,10 @@
 
 	TODO:
 		- scrollbox
+		- popup
 		- box: sides, style, title, color
 		- bg
 		- shadow
-		- popup
 		- split
 		- text
 			- word-wrapped
@@ -39,6 +39,7 @@ require'fs'
 require'sock'
 require'signal'
 require'termios'
+require'rect'
 
 ui = {}
 
@@ -46,11 +47,17 @@ ui = {}
 
 local DEBUG = true
 local imtui_log
+local function warnn(s)
+	imtui_log = imtui_log or open('imtui.log', 'w')
+	s = s:gsub('\27', '\\ESC')
+	imtui_log:write(s)
+end
 local function warnf(s, ...)
-	imtui_log = imtui_log or open('imtui.log', 'a')
-	imtui_log:write(s:format(...):gsub('\27', '\\ESC')..'\n')
+	warnn(s:format(...)..'\n')
 end
 local dbgf = DEBUG and warnf or noop
+
+local pr = print_function(warnn, text)
 
 -- encoding and writing terminal output --------------------------------------
 
@@ -88,8 +95,6 @@ end
 local function textf(s, ...)
 	return text(s:format(...))
 end
-
-local pr = print_function(wr_err, text, '\r\n')
 
 function logging:logtostderr(line)
 	pr(line)
@@ -334,7 +339,36 @@ local function rd_input() --read keyboard and mouse input in raw mode
 	if DEBUG and key then dbgf('key %s', key) end
 end
 
--- screen double-buffer ------------------------------------------------------
+-- screen cell double-buffer -------------------------------------------------
+
+--screen clip rect and stack
+
+local scr_x1, scr_y1, scr_x2, scr_y2 --current clip rect (x2,y2 is outside!)
+local scr_clip_rect_stack = {} --{x1, y1, x2, y2; ...}
+
+local function scr_clip(x, y, w, h)
+	append(scr_clip_rect_stack, scr_x1, scr_y1, scr_x2, scr_y2)
+	local x, y, w, h = rect_clip(x, y, w, h,
+		scr_x1,
+		scr_y1,
+		scr_x2 - scr_x1,
+		scr_y2 - scr_y1
+	)
+	scr_x1 = x
+	scr_y1 = y
+	scr_x2 = x+w
+	scr_y2 = y+h
+end
+
+local function scr_clip_end()
+	assert(#scr_clip_rect_stack >= 4)
+	scr_y2 = pop(scr_clip_rect_stack)
+	scr_x2 = pop(scr_clip_rect_stack)
+	scr_y1 = pop(scr_clip_rect_stack)
+	scr_x1 = pop(scr_clip_rect_stack)
+end
+
+--screen cell buffers
 
 local cell_ct = ctype[[
 union {
@@ -355,30 +389,16 @@ local cell_arr_ct = ctype('$[?]', cell_ct)
 
 local screen1, screen2, screen2_dirty
 
-local dx1, dx2, dy1, dy2 = -1 --damage box
-local function add_damage(x, y, w, h)
-	if dx1 == -1 then
-		dx1, dy1 = x, y
-		dx2, dy2 = x + w, y + h
-	else
-		dx1 = min(dx1, x)
-		dy1 = min(dy1, y)
-		dx2 = max(dx2, x + w)
-		dy2 = max(dy2, y + h)
-	end
-end
+screen_w = 0
+screen_h = 0
 
 local function scr_wr(x, y, s)
-	if x < 0 then return end
-	if y < 0 then return end
-	if y >= screen_h then return end
-	local w = min(#s, screen_w - x)
-	if w == 0 then return end
-	add_damage(x, y, w, 1)
-	--TODO: split text codepoints
+	local i1 = max( 1, scr_x1 - x + 1)
+	local i2 = min(#s, scr_x2 - x)
+	--TODO: split text by codepoints.
 	--TODO: splitting on graphemes would be even better.
 	--TODO: support 2-cell-wide graphemes.
-	for i=1,w do
+	for i = i1, i2 do
 		local cell = screen1[y * screen_w + x + i - 1]
 		cell.text[0] = byte(s, i)
 		cell.text[1] = 0
@@ -388,25 +408,34 @@ local function scr_wr(x, y, s)
 end
 
 local function scr_wrc(x, y, c) --set single cell
-	if x < 0 or x >= screen_w then return end
-	if y < 0 or y >= screen_h then return end
+	if x < scr_x1 or x >= scr_x2 then return end
+	if y < scr_y1 or y >= scr_y2 then return end
 	assert(#c <= 4)
-	add_damage(x, y, 1, 1)
 	local cell = screen1[y * screen_w + x]
 	copy(cell.text, c, #c)
 end
 
+local function scr_each_cell(x, y, w, h, f, ...)
+	local x, y, w, h = rect_clip(x, y, w, h,
+		scr_x1,
+		scr_y1,
+		scr_x2 - scr_x1,
+		scr_y2 - scr_y1
+	)
+	for y = y, y+h-1 do
+		for x = x, x+w-1 do
+			f(y * screen_w + x, ...)
+		end
+	end
+end
+
 local cell = cell_ct()
+
+local function scr_copy_cell(i, screen, cell)
+	screen[i] = cell
+end
 local function scr_fill(x, y, w, h, bg_color, fg_color, text, screen)
-	screen = screen or screen1
-
-	--fit rect to screen
-	local x1 = clamp(x  , 0, screen_w)
-	local y1 = clamp(y  , 0, screen_h)
-	local x2 = clamp(x+w, x, screen_w)
-	local y2 = clamp(y+h, y, screen_h)
-
-	--set stamp cell
+	--set cell to fill with
 	cell.data = 0
 	if bg_color then cell.bg_color = bg_color end
 	if fg_color then cell.fg_color = fg_color end
@@ -414,21 +443,15 @@ local function scr_fill(x, y, w, h, bg_color, fg_color, text, screen)
 		assert(#text <= 4)
 		copy(cell.text, text, #text)
 	end
-
-	--stamp it
-	for y = y1, y2-1 do
-		for x = x1, x2-1 do
-			screen1[y * screen_w + x] = cell
-		end
-	end
+	--copy it over each cell
+	scr_each_cell(x, y, w, h, scr_copy_cell, screen or screen1, cell)
 end
 
 local function screen_flush()
-	if dx1 == -1 then return end
-	for y = dy1, dy2-1 do
+	for y = 0, screen_h-1 do
 		--TODO: find change ranges and output the text on those only,
 		--changing the colors as needed inside the range.
-		for x = dx1, dx2-1 do
+		for x = 0, screen_w-1 do
 			local cell1 = screen1[y * screen_w + x]
 			local cell2 = screen2[y * screen_w + x]
 			if screen2_dirty or cell1.data ~= cell2.data then
@@ -438,18 +461,23 @@ local function screen_flush()
 		end
 	end
 	wr_flush()
-	dx1 = -1 --reset the damage box
 	screen1, screen2 = screen2, screen1 --swap the screens
 	screen2_dirty = false
 	scr_fill(0, 0, screen_w, screen_h, bg_color, fg_color, ' ')
 end
 
-function screen_update_size()
+local function screen_update_size()
 	screen_w, screen_h = tc_get_window_size()
 	screen1 = new(cell_arr_ct, screen_w * screen_h)
 	screen2 = new(cell_arr_ct, screen_w * screen_h)
 	screen2_dirty = true
-	dx1 = -1 --reset the damage box
+	while #scr_clip_rect_stack > 0 do
+		pop(scr_clip_rect_stack)
+	end
+	scr_x1 = 0
+	scr_y1 = 0
+	scr_x2 = screen_w
+	scr_y2 = screen_h
 end
 
 -- imgui themes and colors ---------------------------------------------------
@@ -1394,8 +1422,6 @@ local FR    = 4 -- all `is_flex_child` widgets: fraction from main-axis size.
 local ALIGN = 5 -- vert. align at ALIGN+1
 local BOX_S = 7 -- first index after the ui.cmd_box header.
 
-local FLEX_GAP --fwd. decl.
-
 function ui.cmd_box(cmd, fr, align, valign, min_w, min_h, ...)
 	return ui.cmd(cmd,
 		min_w or 0, -- min_w in measuring phase; x in positioning phase
@@ -1420,8 +1446,7 @@ local function add_ct_min_wh(a, axis, w)
 	local main_axis = cmd.main_axis == axis
 	local min_w = a[i+2+axis]
 	if main_axis then
-		local gap = a[i+FLEX_GAP]
-		a[i+2+axis] = min_w + w + gap
+		a[i+2+axis] = min_w + w
 	else
 		a[i+2+axis] = max(min_w, w)
 	end
@@ -1500,7 +1525,7 @@ ui.box_widget = function(cmd, t)
 		local h = a[i+3]
 		local id = a[i+ID]
 		if hit_rect(x, y, w, h) then
-			if id then hover(id) end
+			if id ~= '' then hover(id) end
 			return true
 		end
 	end
@@ -1568,12 +1593,8 @@ ui.widget('end', {
 		if measure_end_f then
 			measure_end_f(a, i, axis)
 		else
-			local main_axis = cmd.main_axis == axis
 			local own_min_w = a[i+0+axis]
 			local min_w     = a[i+2+axis]
-			if main_axis then
-				min_w = max(0, min_w - a[i+FLEX_GAP]) --remove last element's gap
-			end
 			min_w = max(min_w, own_min_w)
 			a[i+2+axis] = min_w
 			add_ct_min_wh(a, axis, min_w)
@@ -1688,7 +1709,13 @@ end
 
 -- flex ----------------------------------------------------------------------
 
---[[local]] FLEX_GAP = BOX_CT_S+0
+local function is_last_flex_child(a, i)
+	while 1 do
+		i = cmd_next_ext_i(a, i)
+		if a[i-1].is_flex_child then return false end
+		if a[i-1].is_end then return true end
+	end
+end
 
 local function position_flex(a, i, axis, sx, sw)
 
@@ -1704,11 +1731,9 @@ local function position_flex(a, i, axis, sx, sw)
 		local i = ct_i
 
 		local next_i = cmd_next_i(a, i)
-		local gap    = a[i+FLEX_GAP]
 
-		-- compute total gap and total fr.
+		-- compute total fr.
 		local total_fr = 0
-		local gap_w = 0
 		local n = 0
 		i = next_i
 		while not a[i-1].is_end do
@@ -1718,13 +1743,12 @@ local function position_flex(a, i, axis, sx, sw)
 			end
 			i = cmd_next_ext_i(a, i)
 		end
-		gap_w = max(0, (n - 1) * gap)
 
 		if total_fr == 0 then
 			total_fr	= 1
 		end
 
-		local total_w = sw - gap_w
+		local total_w = sw
 
 		-- compute total overflow width and total free width.
 		local total_overflow_w = 0
@@ -1773,17 +1797,18 @@ local function position_flex(a, i, axis, sx, sw)
 					sw = floor(flex_w - shrink_w)
 				end
 
-				-- TODO: check if this is the last element and if it is,
-				-- set `sw = total_w - sx` so that it eats up all rounding errors.
+				-- let the last child eat up any rounding errors.
+				if is_last_flex_child(a, i) then
+					sw = total_w - sx
+				end
 
 				-- position item's children recursively.
 				local position_f = a[i-1].position
 				position_f(a, i, axis, sx, sw)
 
-				sx = sx + sw + gap
+				sx = sx + sw
 
 			else
-
 				local position_f = a[i-1].position
 				if position_f then
 					position_f(a, i, axis, ct_sx, ct_sw)
@@ -1804,10 +1829,8 @@ end
 function flex(hv)
 	return ui.box_ct_widget(hv, {
 		main_axis = hv == 'h' and 0 or 1,
-		create = function(cmd, fr, gap, align, valign, min_w, min_h)
-			return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
-				gap or 0
-			)
+		create = function(cmd, fr, align, valign, min_w, min_h)
+			return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h)
 		end,
 		position = position_flex,
 		hittest = function(a, i, recs)
@@ -1850,7 +1873,8 @@ ui.box_ct_widget('stack', {
 
 -- box -----------------------------------------------------------------------
 
-local BOX_ID = BOX_CT_S+0
+local BOX_ID    = BOX_CT_S+0
+local BOX_TITLE = BOX_CT_S+1
 
 local B_TL = '\u{250C}'  -- ┌
 local B_TR = '\u{2510}'  -- ┐
@@ -1860,30 +1884,40 @@ local B_H  = '\u{2500}'  -- ─
 local B_V  = '\u{2502}'  -- │
 
 ui.box_ct_widget('box', {
+
 	ID = BOX_ID,
-	create = function(cmd, id, title, sides)
-		return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
-			id or false,
-			title or false,
-			sides or false
+
+	create = function(cmd, id, title, align, valign, min_w, min_h)
+		return ui.cmd_box_ct(cmd, fr or 1, align, valign, min_w, min_h,
+			id or '',
+			title or ''
 		)
 	end,
+
+	measure_end = function(a, i, axis)
+		a[i+2+axis] = max(a[i+2+axis], a[i+0+axis], 2) -- apply own min_w|h
+	end,
+
 	position = function(a, i, axis, sx, sw)
+
 		local x = align_x(a, i, axis, sx, sw)
 		local w = align_w(a, i, axis, sw)
 		a[i+0+axis] = x
 		a[i+2+axis] = w
+
 		position_children_stacked(a, i, axis, x + 1, w - 2)
 	end,
+
 	hittest = function(a, i, recs)
 		if hit_children(a, i, recs) then
-			hover(a[i+STACK_ID])
+			hover(a[i+BOX_ID])
 			return true
 		end
 		if hit_box(a, i) then
-			hover(a[i+STACK_ID])
+			hover(a[i+BOX_ID])
 		end
 	end,
+
 	draw = function(a, i)
 		local x = a[i+0]
 		local y = a[i+1]
@@ -1914,7 +1948,7 @@ ui.box_widget('text', {
 	ID = TEXT_ID,
 	create = function(cmd, id, s, fr, align, valign, max_min_w, min_w, min_h)
 		return ui.cmd_box(cmd, fr, align or 's', valign or 's', min_w, min_h,
-			id or false,
+			id or '',
 			s or ''
 		)
 	end,
@@ -1945,15 +1979,13 @@ ui.box_widget('text', {
 	end,
 })
 
---[==[
-
 -- scrollbox -----------------------------------------------------------------
 
 local SB_OVERFLOW = BOX_CT_S+0 -- overflow x,y
 local SB_CW       = BOX_CT_S+2 -- content w,h
 local SB_ID       = BOX_CT_S+4
 local SB_SX       = BOX_CT_S+5 -- scroll x,y
-local SB_STATE    = BOX_CT_S+7
+local SB_STATE    = BOX_CT_S+7 -- hit state x,y
 
 local SB_OVERFLOW_AUTO     = 0
 local SB_OVERFLOW_HIDE     = 1
@@ -1962,193 +1994,302 @@ local SB_OVERFLOW_CONTAIN  = 3 -- expand to fit content, like a stack.
 local SB_OVERFLOW_INFINITE = 4 -- special mode for the infinite calendar.
 
 function parse_sb_overflow(s)
-	if s == null   || s == 'auto'    ) return SB_OVERFLOW_AUTO
-	if s === false || s == 'hide'    ) return SB_OVERFLOW_HIDE
-	if s === true  || s == 'scroll'  ) return SB_OVERFLOW_SCROLL
-	if                s == 'contain' ) return SB_OVERFLOW_CONTAIN
-	if                s == 'infinite') return SB_OVERFLOW_INFINITE
+	if s == null   or s == 'auto'     then return SB_OVERFLOW_AUTO end
+	if s == false  or s == 'hide'     then return SB_OVERFLOW_HIDE end
+	if s == true   or s == 'scroll'   then return SB_OVERFLOW_SCROLL end
+	if                s == 'contain'  then return SB_OVERFLOW_CONTAIN end
+	if                s == 'infinite' then return SB_OVERFLOW_INFINITE end
 	assert(false, 'invalid overflow ', s)
 end
 
-ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy)
-
-	overflow_x = parse_sb_overflow(overflow_x)
-	overflow_y = parse_sb_overflow(overflow_y)
-
-	assert(id, 'id required for scrollbox')
-
-	keepalive(id)
-	local ss = ui.state(id)
-	sx ??= ss.get('scroll_x') ?? 0
-	sy ??= ss.get('scroll_y') ?? 0
-
-	local i = ui.cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, min_w, min_h,
-		overflow_x,
-		overflow_y,
-		0, 0, -- content w, h
-		id,
-		sx, -- scroll x
-		sy, -- scroll y
-		0, -- state
-	)
-	if sx) ss.set('scroll_x', sx)
-	if sy) ss.set('scroll_y', sy)
-
-	return i
-end
-ui.sb = ui.scrollbox
-
-ui.scroll_xy = function(a, i, axis)
+function ui.scroll_xy(a, i, axis)
 	return a[i+SB_SX+axis]
 end
 
-ui.end_scrollbox = function()  ui.end(CMD_SCROLLBOX) end
-ui.end_sb = ui.end_scrollbox
-
-measure[CMD_SCROLLBOX] = ct_stack_push
-
-measure_end[CMD_SCROLLBOX] = function(a, i, axis)
-	local own_min_w = a[i+0+axis]
-	local co_min_w  = a[i+2+axis] -- content min_w
-	local overflow = a[i+SB_OVERFLOW+axis]
-	local contain = overflow == SB_OVERFLOW_CONTAIN
-	local sb_min_w = max(contain ? co_min_w : 0, own_min_w) -- scrollbox min_w
-	a[i+SB_CW+axis] = co_min_w
-	a[i+2+axis] = sb_min_w
-	add_ct_min_wh(a, axis, sb_min_w)
-end
-
--- NOTE: scrolling is done later in the translation phase.
-position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw)
-	local x = align_x(a, i, axis, sx, sw)
-	local w = align_w(a, i, axis, sw)
-	a[i+0+axis] = x
-	a[i+2+axis] = w
-	local content_w = a[i+SB_CW+axis]
-	local overflow = a[i+SB_OVERFLOW+axis]
-	position_children_stacked(a, i, axis, x, max(content_w, w))
-end
-is_flex_child[CMD_SCROLLBOX] = true
-
--- box scroll-to-view box. from box2d.lua.
-function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
+-- box scroll-to-view box.
+--TODO: replace with the one from rect.lua
+local function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
 	local min_sx = -x
 	local min_sy = -y
 	local max_sx = -(x + w - pw)
 	local max_sy = -(y + h - ph)
-	return [
+	return
 		-clamp(-sx, min_sx, max_sx),
 		-clamp(-sy, min_sy, max_sy)
-	]
 end
 
-translate[CMD_SCROLLBOX] = function(a, i, dx, dy)
-
-	local x  = a[i+0] + dx
-	local y  = a[i+1] + dy
+local function scrollbar_rect(a, i, axis, state)
+	local x  = a[i+0]
+	local y  = a[i+1]
 	local w  = a[i+2]
 	local h  = a[i+3]
 	local cw = a[i+SB_CW+0]
 	local ch = a[i+SB_CW+1]
 	local sx = a[i+SB_SX+0]
 	local sy = a[i+SB_SX+1]
-
-	local infinite_x = a[i+SB_OVERFLOW+0] == SB_OVERFLOW_INFINITE
-	local infinite_y = a[i+SB_OVERFLOW+1] == SB_OVERFLOW_INFINITE
-
-	if infinite_x)
-		cw = w * 4
-		a[i+SB_CW+0] = cw
-	end
-	if infinite_y)
-		ch = h * 4
-		a[i+SB_CW+1] = ch
-	end
-
-	a[i+0] = x
-	a[i+1] = y
-
-	if !infinite_x) sx = max(0, min(sx, cw - w))
-	if !infinite_y) sy = max(0, min(sy, ch - h))
-
+	local overflow_x = a[i+SB_OVERFLOW+0]
+	local overflow_y = a[i+SB_OVERFLOW+1]
+	if overflow_x == SB_OVERFLOW_INFINITE then sx = (cw - w) / 2 end
+	if overflow_y == SB_OVERFLOW_INFINITE then sy = (ch - h) / 2 end
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
 	local psx = sx / (cw - w)
 	local psy = sy / (ch - h)
+	local pw = w / cw
+	local ph = h / ch
+	local h_visible = overflow_x ~= SB_OVERFLOW_HIDE and pw < 1
+	local v_visible = overflow_y ~= SB_OVERFLOW_HIDE and ph < 1
+	local both_visible = h_visible and v_visible and 1 or 0
+	local bar_min_len = 1
+	local visible, tx, ty, tw, th
+	if axis == 0 then
+		visible = h_visible
+		if visible then
+			local bw = w - both_visible
+			tw = max(min(bar_min_len, bw), pw * bw)
+			th = 1
+			tx = psx * (bw - tw)
+			ty = h - th
+		end
+	else
+		visible = v_visible
+		if visible then
+			local bh = h - both_visible
+			th = max(min(bar_min_len, bh), ph * bh)
+			tw = 1
+			ty = psy * (bh - th)
+			tx = w - tw
+		end
+	end
+	if visible then
+		tx = x + tx
+		ty = y + ty
+	end
+	return visible, tx, ty, tw, th
+end
 
-	local id = a[i+SB_ID]
-	if id)
-		local hit_state = 0
-		for (local axis = 0; axis < 2; axis++)
+ui.box_ct_widget('scrollbox', {
 
-			local [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-			if !visible)
-				continue
+	create = function(cmd, id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy)
 
-			-- scroll to view an inner box
-			local box = ui.state(id, 'scroll_to_view')
-			if box)
-				local [bx, by, bw, bh] = box
-				;[sx, sy] = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
-				a[i+SB_SX+0] = sx
-				a[i+SB_SX+1] = sy
-				local s = ui.state(id)
-				s.set('scroll_x', sx)
-				s.set('scroll_y', sy)
-				s.delete('scroll_to_view')
-			end
+		overflow_x = parse_sb_overflow(overflow_x)
+		overflow_y = parse_sb_overflow(overflow_y)
 
-			-- wheel scrolling
-			if axis && ui.wheel_dy && hit(id))
-				local sy0 = ui.state(id, 'scroll_y')
-				sy = sy - ui.wheel_dy
-				if !infinite_y)
-					sy = clamp(sy, 0, ch - h)
-				ui.state(id).set('scroll_y', sy)
-				a[i+SB_SX+1] = sy
-			end
+		assert(id, 'id required for scrollbox')
 
-			-- drag-scrolling
-			local sbar_id = id+'.scrollbar'+axis
-			local cs = captured(sbar_id)
-			local hs
-			if cs)
-				if !axis)
-					local psx0 = cs.get('psx0')
-					local dpsx = (ui.mx - ui.mx0) / (w - tw)
-					sx = round((psx0 + dpsx) * (cw - w))
-					if !infinite_x)
-						sx = clamp(sx, 0, cw - w)
-					ui.state(id).set('scroll_x', sx)
+		ui.keepalive(id)
+		local ss = ui.state(id)
+		sx = sx or ss.scroll_x or 0
+		sy = sy or ss.scroll_y or 0
+
+		local i = ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
+			overflow_x,
+			overflow_y,
+			0, 0, -- content w, h
+			id,
+			sx, -- scroll x
+			sy, -- scroll y
+			0 -- state
+		)
+		if sx ~= 0 then ss.scroll_x = sx end
+		if sy ~= 0 then ss.scroll_y = sy end
+
+		return i
+	end,
+
+	measure_end = function(a, i, axis)
+		local own_min_w = a[i+0+axis]
+		local co_min_w  = a[i+2+axis] -- content min_w
+		local overflow = a[i+SB_OVERFLOW+axis]
+		local contain = overflow == SB_OVERFLOW_CONTAIN
+		local sb_min_w = max(contain and co_min_w or 0, own_min_w) -- scrollbox min_w
+		a[i+SB_CW+axis] = co_min_w
+		a[i+2+axis] = sb_min_w
+		add_ct_min_wh(a, axis, sb_min_w)
+	end,
+
+	-- NOTE: scrolling is done later in the translation phase.
+	position = function(a, i, axis, sx, sw)
+		local x = align_x(a, i, axis, sx, sw)
+		local w = align_w(a, i, axis, sw)
+		a[i+0+axis] = x
+		a[i+2+axis] = w
+		local content_w = a[i+SB_CW+axis]
+		local overflow = a[i+SB_OVERFLOW+axis]
+		position_children_stacked(a, i, axis, x, max(content_w, w))
+	end,
+
+	translate = function(a, i, dx, dy)
+
+		local x  = a[i+0] + dx
+		local y  = a[i+1] + dy
+		local w  = a[i+2]
+		local h  = a[i+3]
+		local cw = a[i+SB_CW+0]
+		local ch = a[i+SB_CW+1]
+		local sx = a[i+SB_SX+0]
+		local sy = a[i+SB_SX+1]
+
+		local infinite_x = a[i+SB_OVERFLOW+0] == SB_OVERFLOW_INFINITE
+		local infinite_y = a[i+SB_OVERFLOW+1] == SB_OVERFLOW_INFINITE
+
+		if infinite_x then
+			cw = w * 4
+			a[i+SB_CW+0] = cw
+		end
+		if infinite_y then
+			ch = h * 4
+			a[i+SB_CW+1] = ch
+		end
+
+		a[i+0] = x
+		a[i+1] = y
+
+		if infinite_x then sx = max(0, min(sx, cw - w)) end
+		if infinite_y then sy = max(0, min(sy, ch - h)) end
+
+		local psx = sx / (cw - w)
+		local psy = sy / (ch - h)
+
+		local id = a[i+SB_ID]
+		if id ~= '' then
+			local hit_state = 0
+			for axis = 0,1 do
+
+				local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
+				if not visible then goto cont end
+
+				-- scroll to view an inner box
+				local box = ui.state(id, 'scroll_to_view')
+				if box then
+					local bx, by, bw, bh = unpack(box)
+					sx, sy = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
 					a[i+SB_SX+0] = sx
-				end else
-					local psy0 = cs.get('psy0')
-					local dpsy = (ui.my - ui.my0) / (h - th)
-					sy = round((psy0 + dpsy) * (ch - h))
-					if !infinite_y)
+					a[i+SB_SX+1] = sy
+					local s = ui.state(id)
+					s.scroll_x = sx
+					s.scroll_y = sy
+					s.scroll_to_view = nil
+				end
+
+				-- wheel scrolling
+				if axis == 1 and ui.wheel_dy ~= 0 and hit(id) then
+					local sy0 = ui.state(id, 'scroll_y')
+					sy = sy - ui.wheel_dy
+					if not infinite_y then
 						sy = clamp(sy, 0, ch - h)
-					ui.state(id).set('scroll_y', sy)
+					end
+					ui.state(id).scroll_y = sy
 					a[i+SB_SX+1] = sy
 				end
-			end else
-				hs = hit(sbar_id)
-				if !hs)
-					continue
-				local cs = ui.capture(sbar_id)
-				if cs)
-					if !axis)
-						cs.set('psx0', psx)
+
+				-- drag-scrolling
+				local sbar_id = id+'.scrollbar'+axis
+				local cs = captured(sbar_id)
+				local hs
+				if cs then
+					if axis == 0 then
+						local psx0 = cs.psx0
+						local dpsx = (ui.mx - ui.mx0) / (w - tw)
+						sx = round((psx0 + dpsx) * (cw - w))
+						if not infinite_x then
+							sx = clamp(sx, 0, cw - w)
+						end
+						ui.state(id).scroll_x = sx
+						a[i+SB_SX+0] = sx
 					else
-						cs.set('psy0', psy)
+						local psy0 = cs.psy0
+						local dpsy = (ui.my - ui.my0) / (h - th)
+						sy = round((psy0 + dpsy) * (ch - h))
+						if not infinite_y then
+							sy = clamp(sy, 0, ch - h)
+						end
+						ui.state(id).scroll_y = sy
+						a[i+SB_SX+1] = sy
+					end
+				else
+					hs = hit(sbar_id)
+					if not hs then
+						goto cont
+					end
+					local cs = ui.capture(sbar_id)
+					if cs then
+						if axis == 0 then
+							cs.psx0 = psx
+						else
+							cs.psy0 = psy
+						end
+					end
+				end
+
+				-- bits 0..1 = horiz state; bits 2..3 = vert. state.
+				hit_state = bor(hit_state, shl((cs and 2 or (hs and 1 or 0)), 2 * axis))
+
+				::cont::
 			end
-
-			-- bits 0..1 = horiz state; bits 2..3 = vert. state.
-			hit_state |= (cs ? 2 : hs ? 1 : 0) << (2 * axis)
+			a[i+SB_STATE] = hit_state
 		end
-		a[i+SB_STATE] = hit_state
-	end
 
-	translate_children(a, i, dx - sx, dy - sy)
+		translate_children(a, i, dx - sx, dy - sy)
 
-end
+	end,
+
+	draw = function(a, i)
+
+		local x = a[i+0]
+		local y = a[i+1]
+		local w = a[i+2]
+		local h = a[i+3]
+
+		scr_clip(x, y, w, h)
+	end,
+
+	draw_end = function(a, i)
+
+		scr_clip_end()
+
+		for axis = 0,1 do
+
+			local state = band(shr(a[i+SB_STATE], (2 * axis)), 3)
+			state = state == 2 and 'active' or state ~= 0 and 'hover' or nil
+
+			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis, state)
+
+			if visible then
+
+				local bg = ui.bg_color('scrollbar', state)
+				scr_bg(bg, tx, ty, tw, th)
+
+			end
+		end
+	end,
+
+	hittest = function(a, i, recs)
+		local id = a[i+SB_ID]
+
+		-- fast-test the outer box since we're clipping the contents.
+		if not hit_box(a, i) then
+			return
+		end
+
+		hover(id)
+
+		-- test the scrollbars
+		for axis = 0,1 do
+			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis, 'hover')
+			if visible and hit_rect(tx, ty, tw, th) then
+				hover(id+'.scrollbar'+axis)
+				return true
+			end
+		end
+
+		-- test the children
+		hit_children(a, i, recs)
+
+		return true
+	end,
+
+})
 
 -- can be used inside the translate phase of a widget to re-scroll a scrollbox
 -- that might have already been scrolled.
@@ -2171,7 +2312,7 @@ ui.force_scroll = function(a, i, sx, sy)
 
 	-- make it persistent
 	local id = a[i+SB_ID]
-	if id)
+	if id ~= '' then
 		local s = ui.state(id)
 		s.set('scroll_x', sx)
 		s.set('scroll_y', sy)
@@ -2181,129 +2322,10 @@ ui.force_scroll = function(a, i, sx, sy)
 end
 
 ui.scroll_to_view = function(id, x, y, w, h)
-	ui.state(id).set('scroll_to_view', [x, y, w, h])
+	ui.state(id).scroll_to_view = {x, y, w, h}
 end
 
-draw[CMD_SCROLLBOX] = function(a, i)
-
-	local x = a[i+0]
-	local y = a[i+1]
-	local w = a[i+2]
-	local h = a[i+3]
-
-	cx.save()
-	cx.beginPath()
-	cx.rect(x, y, w, h)
-	cx.clip()
-end
-
-ui.scrollbar_thickness = 6
-ui.scrollbar_thickness_active = 12
-
-local scrollbar_rect;
-local r = [false, 0, 0, 0, 0]
-scrollbar_rect = function(a, i, axis, state)
-	local x  = a[i+0]
-	local y  = a[i+1]
-	local w  = a[i+2]
-	local h  = a[i+3]
-	local cw = a[i+SB_CW+0]
-	local ch = a[i+SB_CW+1]
-	local sx = a[i+SB_SX+0]
-	local sy = a[i+SB_SX+1]
-	local overflow_x = a[i+SB_OVERFLOW+0]
-	local overflow_y = a[i+SB_OVERFLOW+1]
-	if overflow_x == SB_OVERFLOW_INFINITE) sx = (cw - w) / 2
-	if overflow_y == SB_OVERFLOW_INFINITE) sy = (ch - h) / 2
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
-	local psx = sx / (cw - w)
-	local psy = sy / (ch - h)
-	local pw = w / cw
-	local ph = h / ch
-	local thickness = ui.scrollbar_thickness
-	local thickness_active = state ? ui.scrollbar_thickness_active : thickness
-	local visible, tx, ty, tw, th
-	local h_visible = overflow_x ~= SB_OVERFLOW_HIDE && pw < 1
-	local v_visible = overflow_y ~= SB_OVERFLOW_HIDE && ph < 1
-	local both_visible = h_visible && v_visible && 1 || 0
-	local bar_min_len = round(2 * ui.font_size_normal)
-	if !axis)
-		visible = h_visible
-		if visible)
-			local bw = w - both_visible * thickness
-			tw = max(min(bar_min_len, bw), pw * bw)
-			th = thickness_active
-			tx = psx * (bw - tw)
-			ty = h - th
-		end
-	end else
-		visible = v_visible
-		if visible)
-			local bh = h - both_visible * thickness
-			th = max(min(bar_min_len, bh), ph * bh)
-			tw = thickness_active
-			ty = psy * (bh - th)
-			tx = w - tw
-		end
-	end
-	r[0] = visible
-	r[1] = x + tx
-	r[2] = y + ty
-	r[3] = tw
-	r[4] = th
-	return r
-end
-end
-
-draw_end[CMD_SCROLLBOX] = function(a, i)
-
-	cx.restore()
-
-	for (local axis = 0; axis < 2; axis++)
-
-		local state = (a[i+SB_STATE] >> (2 * axis)) & 3
-		state = state == 2 && 'active' || state && 'hover' || null
-
-		local [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, state)
-
-		if !visible)
-			continue
-
-		cx.beginPath()
-		cx.rect(tx, ty, tw, th)
-		cx.fillStyle = bg_color('scrollbar', state)
-		cx.fill()
-
-	end
-end
-
-hittest[CMD_SCROLLBOX] = function(a, i, recs)
-	local id = a[i+SB_ID]
-
-	-- fast-test the outer box since we're clipping the contents.
-	if !hit_box(a, i))
-		return
-
-	hover(id)
-
-	-- test the scrollbars
-	for (local axis = 0; axis < 2; axis++)
-		local [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, 'hover')
-		if !visible)
-			continue
-		if !hit_rect(tx, ty, tw, th))
-			continue
-		hover(id+'.scrollbar'+axis)
-		return true
-	end
-
-	-- test the children
-	hit_children(a, i, recs)
-
-	return true
-end
-
+--[==[
 -- popup ---------------------------------------------------------------------
 
 local POPUP_SIDE_CENTER       = 0 -- only POPUP_SIDE_INNER_CENTER is valid!
@@ -2641,16 +2663,18 @@ end
 
 ui.main = function()
 	ui.v()
-		ui.box('', 1)
+		ui.box()
 			ui.text('', 'Hello, world!', 0, 'c', 'c')
 		ui.end_box()
 		ui.h(2)
 			ui.stack('', 2)
 				ui.box()
-					ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c')
+					ui.scrollbox('sb1')
+						ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c')
+					ui.end_scrollbox()
 				ui.end_box()
 			ui.end_stack()
-			ui.box('', 1)
+			ui.box()
 				ui.text('', 'Goodbye, again!', 0, 'c', 'c')
 			ui.end_box()
 		ui.end_h()
