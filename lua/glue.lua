@@ -19,7 +19,8 @@ TYPES
 MATH
 	floor                        = math.floor
 	ceil                         = math.ceil
-	round(x[, p]) -> y             round x to nearest multiple of p=1 half-up
+	round(x) -> y                  math.floor(x + 0.5)
+	snap(x[, p]) -> y              round x to nearest multiple of p=1 half-up
 	snap                         = round
 	min                          = math.min
 	max                          = math.max
@@ -326,16 +327,19 @@ local
 	min, max, floor, ceil, ln, random =
 	min, max, floor, ceil, ln, random
 
---Round a number towards nearest integer or multiple of p.
---Rounds half-up (i.e. it returns -1 for -1.5).
---Works with numbers up to +/-2^52.
---It's not dead accurate as it returns eg. 1 instead of 0 for
+function round(x)
+	return floor(x + .5)
+end
+
+--round a number towards nearest integer or multiple of p.
+--rounds half-up (i.e. it returns -1 for -1.5).
+--works with numbers up to +/-2^52.
+--it's not dead accurate as it returns eg. 1 instead of 0 for
 --   0.49999999999999997 (the number right before 0.5) which is < 0.5.
-function round(x, p)
+function snap(x, p)
 	p = p or 1
 	return floor(x / p + .5) * p
 end
-snap = round
 
 --clamp a value in range. If max < min, the result is max.
 function clamp(x, x0, x1)
