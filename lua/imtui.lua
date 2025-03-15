@@ -45,7 +45,7 @@ ui = {}
 
 --print debugging via `tail -f imtui.log` ------------------------------------
 
-local DEBUG = true
+local DEBUG = false
 local imtui_log
 local function warnn(s)
 	imtui_log = imtui_log or open('imtui.log', 'w')
@@ -61,13 +61,13 @@ local pr = print_function(warnn, text)
 
 -- encoding and writing terminal output --------------------------------------
 
-TERM = env'TERM'
-term_is_256_color =
+local TERM = env'TERM'
+local term_is_256_color =
 	TERM == 'xterm-256color' or
 	TERM == 'screen-256color'
 
-term_is_dark = true --assume dark if detection fails
-term_bg_changed = noop --defined below in the tui section
+local term_is_dark = true --assume dark if detection fails
+local term_bg_changed = noop --defined below in the tui section
 
 --buffered, async write to stdout
 local wr, wr_flush; do
@@ -105,7 +105,7 @@ local wr_set_bg
 if term_is_256_color then
 	function wr_set_bg(color)
 		if term_bg == color then return end
-		pr('bg', color)
+		--dbgf('bg', color)
 		wrf('\27[48;5;%dm', color)
 		term_bg = color
 	end
@@ -119,7 +119,7 @@ local wr_set_fg
 if term_is_256_color then
 	function wr_set_fg(color)
 		if term_fg == color then return end
-		pr('fg', color)
+		--dbgf('fg', color)
 		wrf('\27[38;5;%dm', color)
 		term_fg = color
 	end
@@ -251,84 +251,164 @@ local function rd_wait(timeout)
 	return b[0]
 end
 
-key = nil
-scroll = nil
-mx, my = nil
-mstate, ldown, lup, rdown, rup, mdown, mup = nil
+-- updating mouse, keyboard and screen state ---------------------------------
 
 local capture_state = {}
 function ui.captured(id)
 	return id ~= '' and ui.captured_id == id and capture_state or nil
 end
 
+ui.capture = function(id)
+	if id == '' then return end
+	if ui.captured_id then
+		return ui.captured_id == id and capture_state or nil
+	end
+	if not ui.click then return end
+	local hs = ui.hovers(id)
+	if not hs then return end
+	ui.captured_id = id
+	update(capture_state, hs)
+	ui.mx0 = ui.mx
+	ui.my0 = ui.my
+	return capture_state
+end
+
+function ui.drag(id, axis)
+	local move_x = not axis or axis == 'x' or axis == 'xy'
+	local move_y = not axis or axis == 'y' or axis == 'xy'
+	local cs = ui.captured(id)
+	local state = nil
+	local dx = 0
+	local dy = 0
+	if cs then
+		if move_x then dx = ui.mx - ui.mx0 end
+		if move_y then dy = ui.my - ui.my0 end
+		state = ui.clickup and 'drop' or 'dragging'
+		cs.drag_state = state
+	else
+		cs = ui.hit(id)
+		if cs then
+			if ui.click then
+				cs = ui.capture(id)
+				if cs then
+					state = 'drag'
+				end
+			else
+				state = 'hover'
+			end
+		end
+	end
+	return state, dx, dy, cs
+end
+
+ui.pressed = false
+ui.term_focused = true --TODO: asume focused?
+
+local function reset_input_state()
+	if ui.clickup then
+		ui.captured_id = nil
+		capture_state = {}
+	end
+	ui.key = nil
+	ui.focusing_id = nil
+	ui.click = false
+	ui.clickup = false
+	ui.right_click = false
+	ui.right_clickup = false
+	ui.middle_click = false
+	ui.middle_clickup = false
+	ui.dblclick = false --TODO: detect with delay and suppress click
+	ui.right_dblclick = false
+	ui.middle_dblclick = false
+	ui.wheel_dy = 0
+	ui.term_focus_changed = false
+end
+reset_input_state()
+
 local function rd_input() --read keyboard and mouse input in raw mode
-	key = nil
-	scroll = nil
 	local c = rd()
 	if c == 27 then --\033
 		c = rd_wait(.01)
 		if not c then
-			key = 'esc'
+			ui.key = 'esc'
 		elseif c == 91 then --[
 			c = rd()
 			if     c == 65 then
-				key = 'up'
+				ui.key = 'up'
 			elseif c == 66 then
-				key = 'down'
+				ui.key = 'down'
 			elseif c == 67 then
-				key = 'right'
+				ui.key = 'right'
 			elseif c == 68 then
-				key = 'left'
+				ui.key = 'left'
 			elseif c == 49 then
 				c = rd()
-				if     c == 49 then if rd() == 126 then key = 'f1' end
-				elseif c == 50 then if rd() == 126 then key = 'f2' end
-				elseif c == 51 then if rd() == 126 then key = 'f3' end
-				elseif c == 52 then if rd() == 126 then key = 'f4' end
-				elseif c == 53 then if rd() == 126 then key = 'f5' end
-				elseif c == 55 then if rd() == 126 then key = 'f6' end
-				elseif c == 56 then if rd() == 126 then key = 'f7' end
-				elseif c == 57 then if rd() == 126 then key = 'f8' end
-				elseif c == 126 then key = 'home'
+				if     c == 49 then if rd() == 126 then ui.key = 'f1' end
+				elseif c == 50 then if rd() == 126 then ui.key = 'f2' end
+				elseif c == 51 then if rd() == 126 then ui.key = 'f3' end
+				elseif c == 52 then if rd() == 126 then ui.key = 'f4' end
+				elseif c == 53 then if rd() == 126 then ui.key = 'f5' end
+				elseif c == 55 then if rd() == 126 then ui.key = 'f6' end
+				elseif c == 56 then if rd() == 126 then ui.key = 'f7' end
+				elseif c == 57 then if rd() == 126 then ui.key = 'f8' end
+				elseif c == 126 then ui.key = 'home'
 				end
 			elseif c == 50 then
 				c = rd()
-				if     c == 48 then if rd() == 126 then key = 'f9' end
-				elseif c == 49 then if rd() == 126 then key = 'f10' end
-				elseif c == 51 then if rd() == 126 then key = 'f11' end
-				elseif c == 52 then if rd() == 126 then key = 'f12' end
-				elseif c == 126 then key = 'insert'
+				if     c == 48 then if rd() == 126 then ui.key = 'f9' end
+				elseif c == 49 then if rd() == 126 then ui.key = 'f10' end
+				elseif c == 51 then if rd() == 126 then ui.key = 'f11' end
+				elseif c == 52 then if rd() == 126 then ui.key = 'f12' end
+				elseif c == 126 then ui.key = 'insert'
 				end
-			elseif c == 51 then if rd() == 126 then key = 'delete' end
-			elseif c == 52 then if rd() == 126 then key = 'end' end
-			elseif c == 53 then if rd() == 126 then key = 'pageup' end
-			elseif c == 54 then if rd() == 126 then key = 'pagedown' end
+			elseif c == 51 then if rd() == 126 then ui.key = 'delete' end
+			elseif c == 52 then if rd() == 126 then ui.key = 'end' end
+			elseif c == 53 then if rd() == 126 then ui.key = 'pageup' end
+			elseif c == 54 then if rd() == 126 then ui.key = 'pagedown' end
 			elseif c == 60 then --<
 				local s = rd_to('M', 'm')
 				local b, smx, smy, st = s:match'^(%d+);(%d+);(%d+)([Mm])$'
 				if not b then
 					assertf(false, 'invalid mouse event sequence: "%s"', text(s))
 				end
-				mx = num(smx)
-				my = num(smy)
-				if b == '0' then
-					ldown = st == 'M'
-					lup   = st == 'm'
-					mstate = b..st
-				elseif b == '2' then
-					rdown = st == 'M'
-					ldown = st == 'm'
-					mstate = b..st
-				elseif b == '1' then
-					mdown = st == 'M'
-					mup   = st == 'm'
-					mstate = b..st
+				ui.mx = num(smx)
+				ui.my = num(smy)
+				if b == '0' then --left button
+					if st == 'M' then
+						ui.click = true
+						ui.pressed = true
+					elseif st == 'm' then
+						ui.clickup = true
+						ui.pressed = false
+					end
+				elseif b == '2' then --right button
+					if st == 'M' then
+						ui.right_click = true
+						ui.right_pressed = true
+					elseif st == 'm' then
+						ui.right_clickup = true
+						ui.right_pressed = false
+					end
+				elseif b == '1' then --middle button
+					if st == 'M' then
+						ui.middle_click = true
+						ui.middle_pressed = true
+					elseif st == 'm' then
+						ui.middle_clickup = true
+						ui.middle_pressed = false
+					end
 				elseif b == '64' then
-					scroll = -1
+					ui.wheel_dy = -1
 				elseif b == '65' then
-					scroll = 1
+					ui.wheel_dy = 1
 				end
 				if DEBUG then dbgf('mouse %d %d %s %s', mx, my, b, st) end
+			elseif c == 73 then --I
+				ui.term_focus_changed = true
+				ui.term_focused = true
+			elseif c == 79 then --O
+				ui.term_focus_changed = true
+				ui.term_focused = false
 			end
 		elseif c == 93 then --]
 			local s = rd_to('\7', '\7') --report terminal bg color
@@ -341,15 +421,15 @@ local function rd_input() --read keyboard and mouse input in raw mode
 			term_bg_changed()
 		end
 	elseif c == 127 then
-		key = 'backspace'
+		ui.key = 'backspace'
 	elseif c >= 32 and c <= 126 then
-		key = char(c)
+		ui.key = char(c)
 	elseif c == 13 then
-		key = 'enter'
+		ui.key = 'enter'
 	else
-		key = c
+		ui.key = c
 	end
-	if DEBUG and key then dbgf('key %s', key) end
+	if DEBUG and ui.key then dbgf('ui.key %s', ui.key) end
 end
 
 -- screen cell double-buffer -------------------------------------------------
@@ -490,19 +570,27 @@ local B_BR = '\u{2518}'  -- ┘
 local B_H  = '\u{2500}'  -- ─
 local B_V  = '\u{2502}'  -- │
 
+local function scr_draw_hline(x, y, w)
+	for i=0,w-1 do
+		scr_wrc(x+i, y, B_H)
+	end
+end
+
+local function scr_draw_vline(x, y, h)
+	for i=0,h-1 do
+		scr_wrc(x, y+i, B_V)
+	end
+end
+
 local function scr_draw_box(x, y, w, h)
 	scr_wrc(x    , y    , B_TL)
 	scr_wrc(x+w-1, y    , B_TR)
 	scr_wrc(x    , y+h-1, B_BL)
 	scr_wrc(x+w-1, y+h-1, B_BR)
-	for i=1,w-2 do
-		scr_wrc(x+i, y    , B_H)
-		scr_wrc(x+i, y+h-1, B_H)
-	end
-	for i=1,h-2 do
-		scr_wrc(x    , y+i, B_V)
-		scr_wrc(x+w-1, y+i, B_V)
-	end
+	scr_draw_hline(x+1  , y    , w-2)
+	scr_draw_hline(x+1  , y+h-1, w-2)
+	scr_draw_vline(x    , y+1  , h-2)
+	scr_draw_vline(x+w-1, y+1  , h-2)
 end
 
 local function scr_flush()
@@ -744,8 +832,8 @@ ui.bg_style('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
 ui.bg_style('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
 
 ui.bg_style('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
-ui.bg_style('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
-ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
+ui.bg_style('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.41, 0.8)
+ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.45, 0.8)
 
 ui.bg_style('*', 'button'        , '*' , 'bg')
 ui.bg_style('*', 'button-primary', '*' , 'link')
@@ -1229,13 +1317,13 @@ local function hit_layer(layer, recs)
 	--[[global]] current_layer = layer
 	--iterate layer's cointainers in reverse order.
 	local indexes = layer.indexes
-	for k = #indexes-3, 1, -3 do
+	for k = #indexes-2, 1, -3 do
 		reset_cmd_state()
 		local rec_i = indexes[k]
 		local i     = indexes[k+1]
 		local a = recs[rec_i]
-		local hit_f = hittest[a[i-1]]
-		if hit_f and not a.nohit_set[i] and hit_f(a, i, recs) then
+		local hit_f = a[i-1].hittest
+		if hit_f and not (a.nohit_set and a.nohit_set[i]) and hit_f(a, i, recs) then
 			return true
 		end
 	end
@@ -1245,11 +1333,6 @@ local function hit_layers(layers, recs)
 	--iterate layers in reverse order.
 	for j = #layers, 1, -1 do
 		local layer = layers[j]
-		if layer.layers and #layer.layers > 0 then
-			if hit_layers(layer.layers, recs) then
-				return true
-			end
-		end
 		if hit_layer(layer, recs) then
 			return true
 		end
@@ -1260,9 +1343,7 @@ local function hit_frame(recs, layers)
 
 	hit_state_maps = {}
 
-	if not ui.mx then
-		return
-	end
+	if not ui.mx then return end
 
 	hit_layers(layers, recs)
 	current_layer = nil
@@ -1321,7 +1402,7 @@ local function redraw()
 
 		hit_frame(recs, layers)
 
-		if key == 'tab' then
+		if ui.key == 'tab' then
 			local i = indexof(ui.focusables, ui.focused_id)
 			if i then
 				--TODO
@@ -1367,14 +1448,7 @@ local function redraw()
 		end
 
 		reset_cmd_state()
-
-		if ui.clickup then
-			ui.captured_id = nil
-			capture_state = {}
-		end
-
-		key = nil
-		focusing_id = nil
+		reset_input_state()
 
 		if not want_relayout then
 			break
@@ -1572,6 +1646,10 @@ end
 
 -- box hit phase
 
+local function hit_rect(x, y, w, h)
+	return rect_hit(ui.mx, ui.my, x, y, w, h)
+end
+
 function hit_box(a, i)
 	local x = a[i+0]
 	local y = a[i+1]
@@ -1584,12 +1662,8 @@ ui.hit_box = hit_box
 ui.box_widget = function(cmd, t)
 	local ID = t.ID
 	local box_hit = t.hit or ID and function(a, i)
-		local x = a[i+0]
-		local y = a[i+1]
-		local w = a[i+2]
-		local h = a[i+3]
 		local id = a[i+ID]
-		if hit_rect(x, y, w, h) then
+		if hit_box(a, i) then
 			if id ~= '' then ui.hover(id) end
 			return true
 		end
@@ -1675,7 +1749,7 @@ ui.widget('end', {
 	end,
 
 })
-ui.end_cmd = ui['end']
+ui.end_cmd = ui['end'] --we can't use ui.end() in Lua.
 
 -- position phase utils
 
@@ -1724,13 +1798,13 @@ local function hit_children(a, i, recs)
 	local ct_i = i
 	local next_ext_i = cmd_next_ext_i(a, i)
 	local end_i = cmd_prev_i(a, next_ext_i)
-	i = cmd_prev_i(a, end_i)
+	local i = cmd_prev_i(a, end_i)
 	while i > ct_i do
 		if a[i-1].is_end then
 			i = i+a[i+0] -- start_i
 		end
-		local hit_f = hittest[a[i-1]]
-		if hit_f and (a.nohit_set and not a.nohit_set[i]) and hit_f(a, i, recs) then
+		local hit_f = a[i-1].hittest
+		if hit_f and not (a.nohit_set and a.nohit_set[i]) and hit_f(a, i, recs) then
 			return true
 		end
 		i = cmd_prev_i(a, i)
@@ -2027,11 +2101,12 @@ ui.box_widget('text', {
 
 -- scrollbox -----------------------------------------------------------------
 
-local SB_OVERFLOW = BOX_CT_S+0 -- overflow x,y
-local SB_CW       = BOX_CT_S+2 -- content w,h
-local SB_ID       = BOX_CT_S+4
-local SB_SX       = BOX_CT_S+5 -- scroll x,y
-local SB_STATE    = BOX_CT_S+7 -- hit state x,y
+local SB_BOXED    = BOX_CT_S+0
+local SB_OVERFLOW = BOX_CT_S+1 -- overflow x,y
+local SB_CW       = BOX_CT_S+3 -- content w,h
+local SB_ID       = BOX_CT_S+5
+local SB_SX       = BOX_CT_S+6 -- scroll x,y
+local SB_STATE    = BOX_CT_S+8 -- hit state x,y
 
 function parse_sb_overflow(s)
 	if s == nil    or s == 'auto'   then return 'auto'   end
@@ -2058,59 +2133,70 @@ local function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
 		-clamp(-sy, min_sy, max_sy)
 end
 
-local function scrollbar_rect(a, i, axis, state)
+local function scrollbox_view_rect(a, i) --returns h_visible, v_visible, ...clip_rect
 	local x  = a[i+0]
 	local y  = a[i+1]
 	local w  = a[i+2]
 	local h  = a[i+3]
 	local cw = a[i+SB_CW+0]
 	local ch = a[i+SB_CW+1]
+	local boxed = a[i+SB_BOXED]
+	local overflow_x = repl(a[i+SB_OVERFLOW+0], 'infinite', 'scroll')
+	local overflow_y = repl(a[i+SB_OVERFLOW+1], 'infinite', 'scroll')
+	if boxed then
+		local h_visible = overflow_x == 'scroll' or overflow_x == 'auto' and ((w - 2) / cw) < 1
+		local v_visible = overflow_y == 'scroll' or overflow_y == 'auto' and ((h - 2) / ch) < 1
+		return h_visible, v_visible, x+1, y+1, w-2, h-2
+	end
+	local h_visible = overflow_x == 'scroll' or overflow_x == 'auto' and (w / cw) < 1
+	local v_visible = overflow_y == 'scroll' or overflow_y == 'auto' and (h / ch) < 1
+	if h_visible and not v_visible and overflow_y == 'auto' then
+		--if h-scrollbar needs shown, it alone can make the v-scrollbar appear
+		--because the view height shrinks by 1 to accomodate the h-scrollbar.
+		v_visible = (h - 1) / ch < 1
+	elseif v_visible and not h_visible and overflow_x == 'auto' then --same here
+		h_visible = (w - 1) / cw < 1
+	end
+	if h_visible then h = h - 1 end
+	if v_visible then w = w - 1 end
+	return h_visible, v_visible, x, y, w, h
+end
+
+local function scrollbar_rect(a, i, axis)
+	local cw = a[i+SB_CW+0]
+	local ch = a[i+SB_CW+1]
 	local sx = a[i+SB_SX+0]
 	local sy = a[i+SB_SX+1]
-	local overflow_x = a[i+SB_OVERFLOW+0]
-	local overflow_y = a[i+SB_OVERFLOW+1]
-	if overflow_x == 'infinite' then sx = (cw - w) / 2 end
-	if overflow_y == 'infinite' then sy = (ch - h) / 2 end
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
-	local psx = sx / (cw - w)
-	local psy = sy / (ch - h)
-	local pw = w / cw
-	local ph = h / ch
-	local h_visible = overflow_x ~= 'hide' and pw < 1
-	local v_visible = overflow_y ~= 'hide' and ph < 1
-	local both_visible = h_visible and v_visible and 1 or 0
-	local bar_min_len = 1
-	local visible, tx, ty, tw, th
+	local boxed = a[i+SB_BOXED]
+	local h_visible, v_visible, x, y, w, h = scrollbox_view_rect(a, i)
 	if axis == 0 then
-		visible = h_visible
-		if visible then
-			local bw = w - both_visible
-			tw = max(min(bar_min_len, bw), pw * bw)
-			th = 1
-			tx = psx * (bw - tw)
-			ty = h - th
+		if h_visible then
+			local pw = w / cw
+			local psx = clamp(sx / (cw - w), 0, 1)
+			local bar_min_len = 2
+			local tw = max(min(bar_min_len, w), round(pw * w))
+			local th = 1
+			local tx = x + round(psx * (w - tw))
+			local ty = y + h
+			return true, tx, ty, tw, th, x, y, w, h
 		end
 	else
-		visible = v_visible
-		if visible then
-			local bh = h - both_visible
-			th = max(min(bar_min_len, bh), ph * bh)
-			tw = 1
-			ty = psy * (bh - th)
-			tx = w - tw
+		if v_visible then
+			local ph = h / ch
+			local psy = clamp(sy / (ch - h), 0, 1)
+			local bar_min_len = 1
+			local th = max(min(bar_min_len, h), round(ph * h))
+			local tw = 1
+			local ty = y + round(psy * (h - th))
+			local tx = x + w
+			return true, tx, ty, tw, th, x, y, w, h
 		end
 	end
-	if visible then
-		tx = x + tx
-		ty = y + ty
-	end
-	return visible, tx, ty, tw, th
 end
 
 ui.box_ct_widget('scrollbox', {
 
-	create = function(cmd, id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy)
+	create = function(cmd, id, fr, overflow_x, overflow_y, boxed, align, valign, min_w, min_h, sx, sy)
 
 		overflow_x = parse_sb_overflow(overflow_x)
 		overflow_y = parse_sb_overflow(overflow_y)
@@ -2123,6 +2209,7 @@ ui.box_ct_widget('scrollbox', {
 		sy = sy or ss.scroll_y or 0
 
 		local i = ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
+			boxed and true or false,
 			overflow_x,
 			overflow_y,
 			0, 0, -- content w, h
@@ -2196,7 +2283,7 @@ ui.box_ct_widget('scrollbox', {
 			local hit_state = 0
 			for axis = 0,1 do
 
-				local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
+				local visible, tx, ty, tw, th, x, y, w, h = scrollbar_rect(a, i, axis)
 				if not visible then goto continue end
 
 				-- scroll to view an inner box
@@ -2252,7 +2339,7 @@ ui.box_ct_widget('scrollbox', {
 					if not hs then
 						goto continue
 					end
-					local cs = ui.capture(sbar_id)
+					cs = ui.capture(sbar_id)
 					if cs then
 						if axis == 0 then
 							cs.psx0 = psx
@@ -2281,9 +2368,13 @@ ui.box_ct_widget('scrollbox', {
 		local w = a[i+2]
 		local h = a[i+3]
 
-		scr_draw_box(x, y, w, h)
+		if a[i+SB_BOXED] then
+			scr_draw_box(x, y, w, h)
+		end
 
-		scr_clip(x+1, y+1, w-2, h-2)
+		local _, _, x, y, w, h = scrollbox_view_rect(a, i)
+
+		scr_clip(x, y, w, h)
 
 	end,
 
@@ -2296,10 +2387,8 @@ ui.box_ct_widget('scrollbox', {
 			local state = band(shr(a[i+SB_STATE], (2 * axis)), 3)
 			state = state == 2 and 'active' or state ~= 0 and 'hover' or nil
 
-			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis, state)
-
+			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
 			if visible then
-
 				local bg = ui.bg_color('scrollbar', state)
 				scr_fill(tx, ty, tw, th, bg[1], 0, axis == 0 and ' ' or ' ')
 			end
@@ -2318,7 +2407,7 @@ ui.box_ct_widget('scrollbox', {
 
 		-- test the scrollbars
 		for axis = 0,1 do
-			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis, 'hover')
+			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
 			if visible and hit_rect(tx, ty, tw, th) then
 				ui.hover(id..'.scrollbar'..axis)
 				return true
@@ -2710,8 +2799,8 @@ ui.main = function()
 		ui.end_box()
 		ui.h(2)
 			ui.stack('', 2)
-				ui.scrollbox('sb1')
-					ui.stack('', 0, 'l', 't', 120, 40)
+				ui.scrollbox('sb1', 1, 'auto', 'auto', true)
+					ui.stack('', 0, 'l', 't', 120, 50)
 						ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c') --, nil, 100, 100)
 					ui.end_stack()
 				ui.end_scrollbox()
@@ -2729,11 +2818,12 @@ tc_set_raw_mode()
 assert(tc_get_raw_mode(), 'could not put terminal in raw mode')
 
 wr'\27[?1049h' --enter alternate screen
-wr'\27]11;?\7' --get terminal background color
+wr'\27[?1004l'  --enable window focus events
 wr'\27[?1000h' --enable mouse tracking
 wr'\27[?1003h' --enable mouse move tracking
 wr'\27[?1006h' --enable SGR mouse tracking
 wr'\27[?25l'   --hide cursor
+wr'\27]11;?\7' --get terminal background color
 wr_flush()
 
 scr_resize()
@@ -2758,8 +2848,6 @@ end))
 resume(thread(function()
 	while 1 do
 		redraw()
-		key = nil
-		scroll = nil
 		rd_input()
 	end
 end))
@@ -2768,9 +2856,10 @@ dbgf'starting'
 
 start() --start the epoll loop (stopped by ctrl+C or a call to stop()).
 
-wr'\27[?1006l' --stop SGR mouse events
-wr'\27[?1003l' --stop mouse move events
+wr'\27[?1004l'  --stop window focus events
 wr'\27[?1000l' --stop mouse events
+wr'\27[?1003l' --stop mouse move events
+wr'\27[?1006l' --stop SGR mouse events
 wr'\27[?25h'   --show cursor
 wr'\27[?1049l' --exit alternate screen
 wr_flush()
