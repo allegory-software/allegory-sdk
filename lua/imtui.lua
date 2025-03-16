@@ -432,9 +432,7 @@ local function rd_input() --read keyboard and mouse input in raw mode
 	if DEBUG and ui.key then dbgf('ui.key %s', ui.key) end
 end
 
--- screen cell double-buffer -------------------------------------------------
-
---screen clip rect and stack
+--screen clip rect and stack -------------------------------------------------
 
 local scr_x1, scr_y1, scr_x2, scr_y2 --current clip rect (x2,y2 is outside!)
 local scr_clip_rect_stack = {} --{x1, y1, x2, y2; ...}
@@ -471,7 +469,7 @@ local function scr_reset_clip_rect()
 	scr_y2 = screen_h
 end
 
---screen cell buffers
+-- screen cell double-buffer -------------------------------------------------
 
 local cell_ct = ctype[[
 union {
@@ -555,6 +553,7 @@ local function scr_fill(x, y, w, h, bg_color, fg_color, text, scr)
 	scr_each_cell(x, y, w, h, scr_copy_cell, scr or scr1, cell)
 end
 
+--[[
 local function scr_set_bg_color_cell(i, bg_color)
 	assert(i >= 0 and i < screen_w * screen_h)
 	scr1[i].bg_color = bg_color
@@ -562,6 +561,7 @@ end
 local function scr_set_bg_color(bg_color, x, y, w, h)
 	scr_each_cell(x, y, w, h, scr_set_bg_color_cell, bg_color)
 end
+]]
 
 local B_TL = '\u{250C}'  -- ┌
 local B_TR = '\u{2510}'  -- ┐
@@ -602,7 +602,7 @@ local function scr_flush()
 			assert(i >= 0 and i < screen_w * screen_h)
 			local cell1 = scr1[i]
 			local cell2 = scr2[i]
-			local diff = true --scr2_dirty or cell1.data ~= cell2.data
+			local diff = scr2_dirty or cell1.data ~= cell2.data
 			if not x1 and diff then x1 = x end
 			if x1 then
 				local x2 = not diff and x or x == screen_w-1 and x+1 or nil
@@ -1173,7 +1173,7 @@ local function ct_stack_check(a)
 	end
 end
 
--- measuring phase (per-axis) ------------------------------------------------
+-- measuring phases (per-axis) -----------------------------------------------
 
 -- walk the element tree bottom-up and call the measure function for each
 -- element that has it. uses ct_stack for recursion and containers'
@@ -1191,7 +1191,7 @@ local function measure_rec(a, axis)
 	end
 end
 
--- positioning phase (per-axis) ----------------------------------------------
+-- positioning phases (per-axis) ---------------------------------------------
 
 -- walk the element tree top-down, and call the position function for each
 -- element that has it. recursive, uses call stack to pass ct_i and ct_w.
@@ -1212,6 +1212,8 @@ end
 -- translation phase ---------------------------------------------------------
 
 -- do scrolling and popup positioning and offset all boxes (top-down, recursive).
+-- this can't be done in the positioning phases which are per-axis for those
+-- special widgets so we need a separate phase.
 
 local function translate_rec(a, x, y)
 	local i, n = 3, #a
@@ -1474,11 +1476,6 @@ ui.cmds = {} --{cmd_name->cmd_class}
 ui.widget = function(cmd, t)
 	local class = update({name = cmd}, t)
 	ui.cmds[cmd] = class
-	if t.is_ct then
-		ui['end_'..cmd] = function()
-			ui.end_cmd(cmd)
-		end
-	end
 	local create = t.create
 	if create then
 		function wrapper(...)
@@ -1555,9 +1552,13 @@ ui.widget('draw_layer', {
 
 -- box widgets ---------------------------------------------------------------
 
-local FR    = 4 -- all `is_flex_child` widgets: fraction from main-axis size.
+local FR    = 4 -- all widgets with a fr() method: fraction from main-axis size.
 local ALIGN = 5 -- vert. align at ALIGN+1
 local BOX_S = 7 -- first index after the ui.cmd_box header.
+
+local function box_fr(a, i)
+	return a[i+FR]
+end
 
 function ui.cmd_box(cmd, fr, halign, valign, min_w, min_h, ...)
 	assert(not halign or halign == 'c' or halign == 'l' or halign == 'r' or halign == 's' or halign == ']' or halign == '[')
@@ -1578,9 +1579,20 @@ end
 
 local function add_ct_min_wh(a, axis, w)
 	local i = ct_stack[#ct_stack]
-	if not i then -- root ct
-		return
+	if not i then return end -- root ct
+	local cmd = a[i-1]
+	local main_axis = cmd.main_axis == axis
+	local min_w = a[i+2+axis]
+	if main_axis then
+		a[i+2+axis] = min_w + w
+	else
+		a[i+2+axis] = max(min_w, w)
 	end
+end
+
+local function add_ct_min_wh(a, axis, w)
+	local i = ct_stack[#ct_stack]
+	if not i then return end -- root ct
 	local cmd = a[i-1]
 	local main_axis = cmd.main_axis == axis
 	local min_w = a[i+2+axis]
@@ -1646,16 +1658,12 @@ end
 
 -- box hit phase
 
-local function hit_rect(x, y, w, h)
-	return rect_hit(ui.mx, ui.my, x, y, w, h)
-end
-
 function hit_box(a, i)
 	local x = a[i+0]
 	local y = a[i+1]
 	local w = a[i+2]
 	local h = a[i+3]
-	return hit_rect(x, y, w, h)
+	return rect_hit(ui.mx, ui.my, x, y, w, h)
 end
 ui.hit_box = hit_box
 
@@ -1673,7 +1681,7 @@ ui.box_widget = function(cmd, t)
 		position  = t.position  or do_after(do_before(box_position  , t.before_position ), t.after_position ),
 		translate = t.translate or do_after(do_before(box_translate , t.before_translate), t.after_translate),
 		hit       = box_hit,
-		is_flex_child = true,
+		fr        = box_fr,
 	}, t))
 end
 
@@ -1682,19 +1690,15 @@ end
 local BOX_CT_NEXT_EXT_I = BOX_S+0 -- all box containers: next command after this one's 'end' command.
 local BOX_CT_S          = BOX_S+1 -- first index after the ui.cmd_box_ct header.
 
-local CT_NEXT_EXT_I --fwd. decl.
-
 --[[local]] function cmd_next_ext_i(a, i)
 	local cmd = a[i-1]
 	if cmd.is_box_ct then --box container
 		return i+a[i+BOX_CT_NEXT_EXT_I]
-	elseif cmd.is_ct then --non-box container
-		return i+a[i+CT_NEXT_EXT_I]
 	end
 	return cmd_next_i(a, i)
 end
 
--- NOTE: `ct` is short for container, which must end with ui.end().
+-- NOTE: `ct` is short for container, which must end with ui.end_CMD().
 function ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...)
 	--begin_scope()
 	local i = ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
@@ -1705,56 +1709,56 @@ function ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...)
 	return i
 end
 
-ui.widget('end', {
+local function box_ct_end_measure(a, _, axis)
+	local i = assert(del(ct_stack), 'end command outside a container')
+	local cmd = a[i-1]
+	local measure_end_f = cmd.measure_end
+	if measure_end_f then
+		measure_end_f(a, i, axis)
+	else
+		local own_min_w = a[i+0+axis]
+		local min_w     = a[i+2+axis]
+		min_w = max(min_w, own_min_w)
+		a[i+2+axis] = min_w
+		add_ct_min_wh(a, axis, min_w)
+	end
+end
 
-	is_end = true,
+local function box_ct_end_draw(a, i)
+	local ct_i = i+a[i+0]
+	local draw_end_f = a[ct_i-1].draw_end
+	if draw_end_f then
+		draw_end_f(a, ct_i)
+	end
+end
 
-	create = function(_, cmd)
-		cmd = ui.cmds[cmd]
-		--end_scope()
-		local i = assert(del(ct_stack), 'end command outside container')
-		if cmd and a[i-1] ~= cmd then
-			assertf(false, 'closing %s instead of %s', cmd.name, a[i-1].name)
-		end
-		local end_i = ui.cmd('end', i)
-		a[end_i+0] = a[end_i+0] - end_i -- make relative
-		local next_i = cmd_next_i(a, end_i)
-		a[i+BOX_CT_NEXT_EXT_I] = next_i-i -- next_i but relative to the ct cmd at i
-		if a[i-1].name == 'popup' then --TOOD: make this non-specific
-			end_layer()
-		end
-	end,
+local function box_ct_widget_end(cmd, t)
+	return ui.widget('end_'..cmd, {
 
-	measure = function(a, _, axis)
-		local i = assert(del(ct_stack), 'end command outside a container')
-		local cmd = a[i-1]
-		local measure_end_f = cmd.measure_end
-		if measure_end_f then
-			measure_end_f(a, i, axis)
-		else
-			local own_min_w = a[i+0+axis]
-			local min_w     = a[i+2+axis]
-			min_w = max(min_w, own_min_w)
-			a[i+2+axis] = min_w
-			add_ct_min_wh(a, axis, min_w)
-		end
-	end,
+		is_end = true,
 
-	draw = function(a, end_i)
-		local i = end_i + a[end_i]
-		local draw_end_f = a[i-1].draw_end
-		if draw_end_f then
-			draw_end_f(a, i)
-		end
-	end,
+		create = function(end_cmd)
+			--end_scope()
+			local ct_i = assert(del(ct_stack), 'end command outside container')
+			local end_i = ui.cmd(end_cmd, ct_i)
+			a[end_i+0] = a[end_i+0] - end_i -- make relative
+			local next_i = cmd_next_i(a, end_i)
+			a[ct_i+BOX_CT_NEXT_EXT_I] = next_i - ct_i -- next_i but relative to the ct cmd at ct_i
+			if a[ct_i-1].name == 'popup' then --TOOD: make this non-specific
+				end_layer()
+			end
+		end,
 
-})
-ui.end_cmd = ui['end'] --we can't use ui.end() in Lua.
+		measure = box_ct_end_measure,
+
+		draw = box_ct_end_draw,
+
+	})
+end
 
 -- position phase utils
 
 local function position_children_stacked(a, ct_i, axis, sx, sw)
-
 	local i = cmd_next_i(a, ct_i)
 	while 1 do
 		local cmd = a[i-1]
@@ -1771,17 +1775,15 @@ end
 -- translate phase utils
 
 local function translate_children(a, i, dx, dy)
-	local ct_i = i
 	i = cmd_next_i(a, i)
 	while 1 do
 		local cmd = a[i-1]
 		if cmd.is_end then break end
-		local next_ext_i = cmd_next_ext_i(a, i)
 		local translate_f = cmd.translate
 		if translate_f then
-			translate_f(a, i, dx, dy, ct_i)
+			translate_f(a, i, dx, dy)
 		end
-		i = next_ext_i
+		i = cmd_next_ext_i(a, i)
 	end
 end
 
@@ -1812,6 +1814,7 @@ local function hit_children(a, i, recs)
 end
 
 ui.box_ct_widget = function(cmd, t)
+	box_ct_widget_end(cmd)
 	return ui.box_widget(cmd, update({
 		is_ct = true,
 		is_box_ct = true,
@@ -1820,38 +1823,12 @@ ui.box_ct_widget = function(cmd, t)
 	}, t))
 end
 
--- non-box container widgets -------------------------------------------------
-
---[[local]] CT_NEXT_EXT_I = 1
-
--- NOTE: `ct` is short for container, which must end with ui.end().
-function ui.cmd_ct(cmd, ...)
-	local i = ui.cmd(cmd,
-		0, --next_ext_i
-		...
-	)
-	add(ct_stack, i)
-	return i
-end
-
-function ct_translate(a, i, dx, dy)
-
-end
-
-ui.ct_widget = function(cmd, t)
-	return ui.widget(cmd, update({
-		is_ct = true,
-		measure = ct_stack_push,
-		translate = ct_translate,
-	}, t))
-end
-
 -- flex ----------------------------------------------------------------------
 
 local function is_last_flex_child(a, i)
 	while 1 do
 		i = cmd_next_ext_i(a, i)
-		if a[i-1].is_flex_child then return false end
+		if a[i-1].fr then return false end
 		if a[i-1].is_end then return true end
 	end
 end
@@ -1875,9 +1852,11 @@ local function position_flex(a, i, axis, sx, sw)
 		local total_fr = 0
 		local n = 0
 		i = next_i
-		while not a[i-1].is_end do
-			if a[i-1].is_flex_child then
-				total_fr = total_fr + a[i+FR]
+		while 1 do
+			local cmd = a[i-1]
+			if cmd.is_end then break end
+			if cmd.fr then
+				total_fr = total_fr + cmd.fr(a, i)
 				n = n + 1
 			end
 			i = cmd_next_ext_i(a, i)
@@ -1893,11 +1872,13 @@ local function position_flex(a, i, axis, sx, sw)
 		local total_overflow_w = 0
 		local total_free_w     = 0
 		i = next_i
-		while not a[i-1].is_end do
-			if a[i-1].is_flex_child then
+		while 1 do
+			local cmd = a[i-1]
+			if cmd.is_end then break end
+			if cmd.fr then
 
 				local min_w = a[i+2+axis]
-				local fr    = a[i+FR]
+				local fr    = cmd.fr(a, i)
 
 				local flex_w = total_w * fr / total_fr
 				local overflow_w = max(0, min_w - flex_w)
@@ -1915,11 +1896,13 @@ local function position_flex(a, i, axis, sx, sw)
 		i = next_i
 		local ct_sx = sx
 		local ct_sw = sw
-		while not a[i-1].is_end do
-			if a[i-1].is_flex_child then
+		while 1 do
+			local cmd = a[i-1]
+			if cmd.is_end then break end
+			if cmd.fr then
 
 				local min_w = a[i+2+axis]
-				local fr    = a[i+FR]
+				local fr    = cmd.fr(a, i)
 
 				-- compute item's stretched width.
 				local flex_w = total_w * fr / total_fr
@@ -2031,12 +2014,10 @@ ui.box_ct_widget('box', {
 	end,
 
 	position = function(a, i, axis, sx, sw)
-
 		local x = align_x(a, i, axis, sx, sw)
 		local w = align_w(a, i, axis, sw)
 		a[i+0+axis] = x
 		a[i+2+axis] = w
-
 		position_children_stacked(a, i, axis, x + 1, w - 2)
 	end,
 
@@ -2133,64 +2114,91 @@ local function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy)
 		-clamp(-sy, min_sy, max_sy)
 end
 
-local function scrollbox_view_rect(a, i) --returns h_visible, v_visible, ...clip_rect
+local function scrollbox_geometry(a, i)
 	local x  = a[i+0]
 	local y  = a[i+1]
 	local w  = a[i+2]
 	local h  = a[i+3]
 	local cw = a[i+SB_CW+0]
 	local ch = a[i+SB_CW+1]
-	local boxed = a[i+SB_BOXED]
-	local overflow_x = repl(a[i+SB_OVERFLOW+0], 'infinite', 'scroll')
-	local overflow_y = repl(a[i+SB_OVERFLOW+1], 'infinite', 'scroll')
-	if boxed then
-		local h_visible = overflow_x == 'scroll' or overflow_x == 'auto' and ((w - 2) / cw) < 1
-		local v_visible = overflow_y == 'scroll' or overflow_y == 'auto' and ((h - 2) / ch) < 1
-		return h_visible, v_visible, x+1, y+1, w-2, h-2
-	end
-	local h_visible = overflow_x == 'scroll' or overflow_x == 'auto' and (w / cw) < 1
-	local v_visible = overflow_y == 'scroll' or overflow_y == 'auto' and (h / ch) < 1
-	if h_visible and not v_visible and overflow_y == 'auto' then
-		--if h-scrollbar needs shown, it alone can make the v-scrollbar appear
-		--because the view height shrinks by 1 to accomodate the h-scrollbar.
-		v_visible = (h - 1) / ch < 1
-	elseif v_visible and not h_visible and overflow_x == 'auto' then --same here
-		h_visible = (w - 1) / cw < 1
-	end
-	if h_visible then h = h - 1 end
-	if v_visible then w = w - 1 end
-	return h_visible, v_visible, x, y, w, h
-end
-
-local function scrollbar_rect(a, i, axis)
-	local cw = a[i+SB_CW+0]
-	local ch = a[i+SB_CW+1]
 	local sx = a[i+SB_SX+0]
 	local sy = a[i+SB_SX+1]
 	local boxed = a[i+SB_BOXED]
-	local h_visible, v_visible, x, y, w, h = scrollbox_view_rect(a, i)
-	if axis == 0 then
-		if h_visible then
-			local pw = w / cw
-			local psx = clamp(sx / (cw - w), 0, 1)
-			local bar_min_len = 2
-			local tw = max(min(bar_min_len, w), round(pw * w))
-			local th = 1
-			local tx = x + round(psx * (w - tw))
-			local ty = y + h
-			return true, tx, ty, tw, th, x, y, w, h
-		end
+	local overflow_x = a[i+SB_OVERFLOW+0]
+	local overflow_y = a[i+SB_OVERFLOW+1]
+	if overflow_x == 'infinite' then
+		cw = w * 4
+		a[i+SB_CW+0] = cw
+		overflow_x = 'scroll'
+	end
+	if overflow_y == 'infinite' then
+		ch = h * 4
+		a[i+SB_CW+1] = ch
+		overflow_y = 'scroll'
+	end
+
+	--compute scrollbar visibility and resulting view (clip) rect
+	local h_visible, v_visible
+	if boxed then
+		h_visible = overflow_x == 'scroll' or overflow_x == 'auto' and ((w - 2) / cw) < 1
+		v_visible = overflow_y == 'scroll' or overflow_y == 'auto' and ((h - 2) / ch) < 1
+		x = x + 1
+		y = y + 1
+		w = w - 2
+		h = h - 2
 	else
-		if v_visible then
-			local ph = h / ch
-			local psy = clamp(sy / (ch - h), 0, 1)
-			local bar_min_len = 1
-			local th = max(min(bar_min_len, h), round(ph * h))
-			local tw = 1
-			local ty = y + round(psy * (h - th))
-			local tx = x + w
-			return true, tx, ty, tw, th, x, y, w, h
+		h_visible = overflow_x == 'scroll' or overflow_x == 'auto' and (w / cw) < 1
+		v_visible = overflow_y == 'scroll' or overflow_y == 'auto' and (h / ch) < 1
+		if h_visible and not v_visible and overflow_y == 'auto' then
+			--if h-scrollbar needs shown, it alone can make the v-scrollbar appear
+			--because the view height shrinks by 1 to accomodate the h-scrollbar.
+			v_visible = (h - 1) / ch < 1
+		elseif v_visible and not h_visible and overflow_x == 'auto' then --same here
+			h_visible = (w - 1) / cw < 1
 		end
+		if h_visible then h = h - 1 end
+		if v_visible then w = w - 1 end
+	end
+
+	if overflow_x == 'infinite' then sx = max(0, min(sx, cw - w)) end
+	if overflow_y == 'infinite' then sy = max(0, min(sy, ch - h)) end
+
+	--compute scroll bar thumb rectangles based also on sx,sy
+	local h_tx, h_ty, h_tw, h_th
+	if h_visible then
+		local pw = w / cw
+		local psx = clamp(sx / (cw - w), 0, 1)
+		local bar_min_len = 2
+		h_tw = max(min(bar_min_len, w), round(pw * w))
+		h_th = 1
+		h_tx = x + round(psx * (w - h_tw))
+		h_ty = y + h
+	end
+
+	local v_tx, v_ty, v_tw, v_th
+	if v_visible then
+		local ph = h / ch
+		local psy = clamp(sy / (ch - h), 0, 1)
+		local bar_min_len = 1
+		v_th = max(min(bar_min_len, h), round(ph * h))
+		v_tw = 1
+		v_ty = y + round(psy * (h - v_th))
+		v_tx = x + w
+	end
+
+	return x, y, w, h, --view (clip) rect
+		h_visible, h_tx, h_ty, h_tw, h_th, --h scroll bar thumb rect
+		v_visible, v_tx, v_ty, v_tw, v_th  --v scroll bar thumb rect
+end
+
+function scrollbar_rect(a, i, axis)
+	local x, y, w, h,
+		h_visible, h_tx, h_ty, h_tw, h_th,
+		v_visible, v_tx, v_ty, v_tw, v_th = scrollbox_geometry(a, i)
+	if axis == 0 then
+		return h_visible, h_tx, h_ty, h_tw, h_th
+	else
+		return v_visible, v_tx, v_ty, v_tw, v_th
 	end
 end
 
@@ -2226,7 +2234,7 @@ ui.box_ct_widget('scrollbox', {
 
 	measure_end = function(a, i, axis)
 		local own_min_w = a[i+0+axis]
-		local co_min_w  = a[i+2+axis] -- content min_w
+		local co_min_w  = a[i+2+axis] -- measured content min_w
 		local overflow = a[i+SB_OVERFLOW+axis]
 		local contain = overflow == 'contain'
 		local sb_min_w = max(contain and co_min_w or 0, own_min_w) -- scrollbox min_w
@@ -2248,29 +2256,22 @@ ui.box_ct_widget('scrollbox', {
 
 	translate = function(a, i, dx, dy)
 
-		local x  = a[i+0] + dx
-		local y  = a[i+1] + dy
-		local w  = a[i+2]
-		local h  = a[i+3]
+		a[i+0] = a[i+0] + dx
+		a[i+1] = a[i+1] + dy
+
+		local x, y, w, h,
+			h_visible, h_tx, h_ty, h_tw, h_th,
+			v_visible, v_tx, v_ty, v_tw, v_th = scrollbox_geometry(a, i)
+
 		local cw = a[i+SB_CW+0]
 		local ch = a[i+SB_CW+1]
 		local sx = a[i+SB_SX+0]
 		local sy = a[i+SB_SX+1]
+		local overflow_x = a[i+SB_OVERFLOW+0]
+		local overflow_y = a[i+SB_OVERFLOW+1]
 
-		local infinite_x = a[i+SB_OVERFLOW+0] == 'infinite'
-		local infinite_y = a[i+SB_OVERFLOW+1] == 'infinite'
-
-		if infinite_x then
-			cw = w * 4
-			a[i+SB_CW+0] = cw
-		end
-		if infinite_y then
-			ch = h * 4
-			a[i+SB_CW+1] = ch
-		end
-
-		a[i+0] = x
-		a[i+1] = y
+		local infinite_x = overflow_x == 'infinite'
+		local infinite_y = overflow_y == 'infinite'
 
 		if infinite_x then sx = max(0, min(sx, cw - w)) end
 		if infinite_y then sy = max(0, min(sy, ch - h)) end
@@ -2279,83 +2280,84 @@ ui.box_ct_widget('scrollbox', {
 		local psy = sy / (ch - h)
 
 		local id = a[i+SB_ID]
-		if id ~= '' then
-			local hit_state = 0
-			for axis = 0,1 do
 
-				local visible, tx, ty, tw, th, x, y, w, h = scrollbar_rect(a, i, axis)
-				if not visible then goto continue end
+		-- scroll to view an inner box
+		local box = ui.state(id).scroll_to_view
+		if box then
+			local bx, by, bw, bh = unpack(box)
+			sx, sy = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
+			a[i+SB_SX+0] = sx
+			a[i+SB_SX+1] = sy
+			local s = ui.state(id)
+			s.scroll_x = sx
+			s.scroll_y = sy
+			s.scroll_to_view = nil
+		end
 
-				-- scroll to view an inner box
-				local box = ui.state(id).scroll_to_view
-				if box then
-					local bx, by, bw, bh = unpack(box)
-					sx, sy = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
-					a[i+SB_SX+0] = sx
-					a[i+SB_SX+1] = sy
-					local s = ui.state(id)
-					s.scroll_x = sx
-					s.scroll_y = sy
-					s.scroll_to_view = nil
+		-- wheel scrolling
+		if ui.wheel_dy ~= 0 and ui.hit(id) then
+			local sy0 = ui.state(id).scroll_y
+			sy = sy - ui.wheel_dy
+			if not infinite_y then
+				sy = clamp(sy, 0, ch - h)
+			end
+			ui.state(id).scroll_y = sy
+			a[i+SB_SX+1] = sy
+		end
+
+		-- drag-scrolling
+		local hit_state = 0
+		if h_visible then
+			local sbar_id = id..'.hscrollbar'
+			local cs = ui.captured(sbar_id)
+			local hs
+			if cs then
+				local psx0 = cs.psx0
+				local dpsx = (ui.mx - ui.mx0) / (w - h_tw)
+				sx = round((psx0 + dpsx) * (cw - w))
+				if not infinite_x then
+					sx = clamp(sx, 0, cw - w)
 				end
-
-				-- wheel scrolling
-				if axis == 1 and ui.wheel_dy ~= 0 and ui.hit(id) then
-					local sy0 = ui.state(id).scroll_y
-					sy = sy - ui.wheel_dy
-					if not infinite_y then
-						sy = clamp(sy, 0, ch - h)
-					end
-					ui.state(id).scroll_y = sy
-					a[i+SB_SX+1] = sy
-				end
-
-				-- drag-scrolling
-				local sbar_id = id..'.scrollbar'..axis
-				local cs = ui.captured(sbar_id)
-				local hs
-				if cs then
-					if axis == 0 then
-						local psx0 = cs.psx0
-						local dpsx = (ui.mx - ui.mx0) / (w - tw)
-						sx = round((psx0 + dpsx) * (cw - w))
-						if not infinite_x then
-							sx = clamp(sx, 0, cw - w)
-						end
-						ui.state(id).scroll_x = sx
-						a[i+SB_SX+0] = sx
-					else
-						local psy0 = cs.psy0
-						local dpsy = (ui.my - ui.my0) / (h - th)
-						sy = round((psy0 + dpsy) * (ch - h))
-						if not infinite_y then
-							sy = clamp(sy, 0, ch - h)
-						end
-						ui.state(id).scroll_y = sy
-						a[i+SB_SX+1] = sy
-					end
-				else
-					hs = ui.hit(sbar_id)
-					if not hs then
-						goto continue
-					end
+				ui.state(id).scroll_x = sx
+				a[i+SB_SX+0] = sx
+			else
+				hs = ui.hit(sbar_id)
+				if hs then
 					cs = ui.capture(sbar_id)
 					if cs then
-						if axis == 0 then
-							cs.psx0 = psx
-						else
-							cs.psy0 = psy
-						end
+						cs.psx0 = psx
 					end
 				end
-
-				-- bits 0..1 = horiz state; bits 2..3 = vert. state.
-				hit_state = bor(hit_state, shl((cs and 2 or (hs and 1 or 0)), 2 * axis))
-
-				::continue::
 			end
-			a[i+SB_STATE] = hit_state
+			hit_state = bor(hit_state, shl((cs and 2 or (hs and 1 or 0)), 2 * 0))
 		end
+		if v_visible then
+			local sbar_id = id..'.vscrollbar'
+			local cs = ui.captured(sbar_id)
+			local hs
+			if cs then
+				local psy0 = cs.psy0
+				local dpsy = (ui.my - ui.my0) / (h - v_th)
+				sy = round((psy0 + dpsy) * (ch - h))
+				if not infinite_y then
+					sy = clamp(sy, 0, ch - h)
+				end
+				ui.state(id).scroll_y = sy
+				a[i+SB_SX+1] = sy
+			else
+				hs = ui.hit(sbar_id)
+				if hs then
+					cs = ui.capture(sbar_id)
+					if cs then
+						cs.psy0 = psy
+					end
+				end
+			end
+			hit_state = bor(hit_state, shl((cs and 2 or (hs and 1 or 0)), 2 * 1))
+		end
+
+		-- bits 0..1 = horiz state; bits 2..3 = vert. state.
+		a[i+SB_STATE] = hit_state
 
 		translate_children(a, i, dx - sx, dy - sy)
 
@@ -2372,7 +2374,7 @@ ui.box_ct_widget('scrollbox', {
 			scr_draw_box(x, y, w, h)
 		end
 
-		local _, _, x, y, w, h = scrollbox_view_rect(a, i)
+		local x, y, w, h = scrollbox_geometry(a, i)
 
 		scr_clip(x, y, w, h)
 
@@ -2408,8 +2410,8 @@ ui.box_ct_widget('scrollbox', {
 		-- test the scrollbars
 		for axis = 0,1 do
 			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
-			if visible and hit_rect(tx, ty, tw, th) then
-				ui.hover(id..'.scrollbar'..axis)
+			if visible and rect_hit(ui.mx, ui.my, tx, ty, tw, th) then
+				ui.hover(id..'.'..(axis == 0 and 'h' or 'v')..'scrollbar')
 				return true
 			end
 		end
