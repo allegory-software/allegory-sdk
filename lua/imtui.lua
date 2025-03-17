@@ -88,12 +88,15 @@ local function wrf(s, ...)
 	wr(s:format(...))
 end
 
-local function text(s)
-	return tostring(s):gsub('\27', '\\ESC'):gsub('\n', '\r\n')
+local function esc_control_code(c)
+	return '\\' .. format('%d', byte(c))
+end
+local function term_esc(s)
+	return tostring(s):gsub('[%z-\031\127\155-\159]', esc_control_code)
 end
 
-local function textf(s, ...)
-	return text(s:format(...))
+local function sanitize(s)
+	return tostring(s):gsub('[%z-\008\011\012\014-\031\127\155-\159]', '')
 end
 
 function logging:logtostderr(line)
@@ -234,7 +237,7 @@ local function rd_to(c1, c2, err)
 			return str(b, i+1)
 		end
 	end
-	assertf(false, '%s: "%s"', err or 'invalid sequence', text(s))
+	assertf(false, '%s: "%s"', err or 'invalid sequence', term_esc(s))
 end
 
 local function rd_wait(timeout)
@@ -369,7 +372,7 @@ local function rd_input() --read keyboard and mouse input in raw mode
 				local s = rd_to('M', 'm')
 				local b, smx, smy, st = s:match'^(%d+);(%d+);(%d+)([Mm])$'
 				if not b then
-					assertf(false, 'invalid mouse event sequence: "%s"', text(s))
+					assertf(false, 'invalid mouse event sequence: "%s"', term_esc(s))
 				end
 				ui.mx = num(smx)
 				ui.my = num(smy)
@@ -940,7 +943,8 @@ local function id_state_gc()
 end
 
 ui.on_free = function(id, free1)
-	ui.state(id).free = after(s.free, free1)
+	local s = ui.state(id)
+	after(s, 'free', free1)
 end
 
 -- command state -------------------------------------------------------------
@@ -1677,11 +1681,8 @@ ui.box_widget = function(cmd, t)
 		end
 	end
 	return ui.widget(cmd, update({
-		measure   = t.measure   or do_after(do_before(box_measure   , t.before_measure  ), t.after_measure  ),
-		position  = t.position  or do_after(do_before(box_position  , t.before_position ), t.after_position ),
-		translate = t.translate or do_after(do_before(box_translate , t.before_translate), t.after_translate),
-		hit       = box_hit,
-		fr        = box_fr,
+		hit = box_hit,
+		fr  = box_fr,
 	}, t))
 end
 
@@ -2057,11 +2058,10 @@ local ww_alloc, ww_free = freelist(function()
 	local words  = {} -- [word1,...]
 	local widths = {} -- [w1,...]
 	local lines  = {} -- [line1_i,line1_w,...]
-	local sp_w        -- width of a single space character.
 	local ww = {lines = lines, words = words, widths = widths}
 
 	ww.set_text = function(s1)
-		s1 = s1:trim()
+		s1 = sanitize(s1):trim()
 		if s1 == s then return end
 		ww:clear()
 		s = s1
@@ -2070,12 +2070,12 @@ local ww_alloc, ww_free = freelist(function()
 	-- skip spaces, advancing i1 to the first non-space char and i2
 	-- to first space char after that, or to 1/0 if no space char was found.
 	local i1
-	function skip_spaces(s)
+	local function skip_spaces(s)
 		::again::
-		local i3 = s:find(' ' , i1, true); if i3 == i1 then i1 = i1+1; goto again end
-		local i4 = s:find('\n', i1, true); if i4 == i1 then i1 = i1+1; goto again end
-		local i5 = s:find('\r', i1, true); if i5 == i1 then i1 = i1+1; goto again end
-		local i6 = s:find('\t', i1, true); if i6 == i1 then i1 = i1+1; goto again end
+		local i3 = s:find(' ' , i1, true) or -1; if i3 == i1 then i1 = i1+1; goto again end
+		local i4 = s:find('\n', i1, true) or -1; if i4 == i1 then i1 = i1+1; goto again end
+		local i5 = s:find('\r', i1, true) or -1; if i5 == i1 then i1 = i1+1; goto again end
+		local i6 = s:find('\t', i1, true) or -1; if i6 == i1 then i1 = i1+1; goto again end
 		return min(
 			i3 == -1 and 1/0 or i3,
 			i4 == -1 and 1/0 or i4,
@@ -2084,8 +2084,6 @@ local ww_alloc, ww_free = freelist(function()
 		)
 	end
 	ww.measure = function()
-		sp_w = measure_text' '
-		ww.sp_w = sp_w
 		if not s then
 			ww.w = 0
 			ww.h = 1
@@ -2114,7 +2112,7 @@ local ww_alloc, ww_free = freelist(function()
 		array_clear(lines)
 		local line_w = 0
 		local max_line_w = 0
-		local line_i = 0
+		local line_i = 1
 		local sep_w = 0
 		local n = #widths
 		for i = 1, n do
@@ -2129,7 +2127,7 @@ local ww_alloc, ww_free = freelist(function()
 				line_i = i
 			end
 			line_w = line_w + sep_w + w
-			sep_w = sp_w
+			sep_w = 1
 		end
 		local line_count = #lines / 2
 		ww.w = ceil(max_line_w)
@@ -2138,9 +2136,9 @@ local ww_alloc, ww_free = freelist(function()
 
 	ww.clear = function()
 		s = nil
-		clear_array(words )
-		clear_array(widths)
-		clear_array(lines )
+		array_clear(words )
+		array_clear(widths)
+		array_clear(lines )
 		last_ct_w = nil
 	end
 
@@ -2163,29 +2161,133 @@ function word_wrapper(id, text)
 	return s.ww
 end
 
-local TEXT_ID = BOX_S+0
-local TEXT_S  = BOX_S+1
+local TEXT_X        = BOX_S+0
+local TEXT_W        = BOX_S+1
+local TEXT_H        = BOX_S+2
+local TEXT_ID       = BOX_S+3
+local TEXT_S        = BOX_S+4
+local TEXT_WRAP     = BOX_S+5
+local TEXT_EDITABLE = BOX_S+6
 
 ui.box_widget('text', {
 	ID = TEXT_ID,
-	create = function(cmd, id, s, fr, align, valign, max_min_w, min_w, min_h)
-		return ui.cmd_box(cmd, fr, align or 's', valign or 's', min_w, min_h,
+	create = function(cmd, id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable)
+		-- NOTE: min_w and min_h are by default measured, not given.
+		s = s or ''
+		wrap = wrap or 'none'
+		if wrap == 'line' then
+			s = sanitize(s)
+			if s:has'\n' or s:has'\r' then
+				local text = s
+				s = {}
+				for line in text:lines'*l' do
+					add(s, line)
+				end
+			end
+		elseif wrap == 'word' then
+			ui.keepalive(id)
+			s = word_wrapper(id, s)
+		else
+			s = sanitize(s):gsub('[\n\r\t ]+', ' '):trim()
+			assert(wrap == 'none')
+		end
+		if editable then
+			ui.keepalive(id)
+			s = ui.state(id).text or s
+		end
+		return ui.cmd_box(cmd, fr or 1, align or 'l', valign or 'c',
+			min_w or -1, -- -1=auto
+			min_h or -1, -- -1=auto
+			0, --text_x
+			max_min_w or -1, -- -1=inf
+			0, --text_h
 			id or '',
-			s or ''
+			s or '',
+			wrap,
+			editable or false
 		)
 	end,
 	measure = function(a, i, axis)
-		local min_wh = a[i+0+axis]
-		if axis == 0 then
+		local wrap = a[i+TEXT_WRAP]
+		if wrap == 'word' then
+			-- word-wrapping is the reason for splitting the layouting algorithm
+			-- into interlaced per-axis measuring and positioning phases.
+			local id = a[i+TEXT_ID]
+			local ww = a[i+TEXT_S]
+			if axis == 0 then
+				ww.measure()
+				local min_w = a[i+2]
+				local max_min_w = a[i+TEXT_W]
+				if min_w == -1 then
+					min_w = ww.min_w
+				end
+				if max_min_w ~= -1 then
+					min_w = min(max_min_w, min_w)
+				end
+				a[i+2] = min_w
+			else
+				local min_h = a[i+3]
+				if min_h == -1 then
+					min_h = ww.h
+				end
+				a[i+3] = min_h
+			end
+		elseif axis == 0 then
+			-- measure everything once on the x-axis phase.
 			local s = a[i+TEXT_S]
-			min_wh = max(min_wh, #s)
-		else
-			min_wh = max(min_wh, 1)
+			local text_w
+			local text_h
+			if isstr(s) then -- single-line
+				text_w = measure_text( s)
+				text_h = 1
+			else -- multi-line, pre-wrapped
+				text_w = 0
+				text_h = 0
+				for _,ss in ipairs(s) do
+					local w = measure_text(ss)
+					text_w = max(text_w, w)
+					text_h = text_h + 1
+				end
+			end
+			local min_w = a[i+0]
+			local min_h = a[i+1]
+			local max_min_w = a[i+TEXT_W]
+			if min_h == -1 then min_h = text_h end
+			if min_w == -1 then min_w = text_w end
+			if max_min_w ~= -1 then
+				min_w = min(max_min_w, min_w)
+			end
+			a[i+2] = min_w
+			a[i+3] = min_h
+			a[i+TEXT_W] = text_w
+			a[i+TEXT_H] = text_h
 		end
-		a[i+0+axis] = min_wh
-		box_measure(a, i, axis)
+		local min_w = a[i+2+axis]
+		add_ct_min_wh(a, axis, min_w)
 	end,
-	--position
+	position = function(a, i, axis, sx, sw)
+		if axis == 0 then
+			local wrap = a[i+TEXT_WRAP]
+			if wrap == 'word' then
+				local ww = a[i+TEXT_S]
+				ww.wrap(sw)
+				a[i+2] = ww.w
+			else
+				a[i+2] = a[i+TEXT_W] -- we're positioning text_w, not min_w!
+			end
+			-- store the segment we might have to clip the text to.
+			a[i+TEXT_X] = sx
+			a[i+TEXT_W] = sw
+		else
+			a[i+3] = a[i+TEXT_H] --we're positioning text_h, not min_h!
+		end
+		a[i+0+axis] = align_x(a, i, axis, sx, sw)
+		a[i+2+axis] = align_w(a, i, axis, sw)
+	end,
+	translate = function(a, i, dx, dy)
+		a[i+TEXT_X] = a[i+TEXT_X] + dx
+		box_translate(a, i, dx, dy)
+	end,
 	hittest = function(a, i, recs)
 		if hit_box(a, i) then
 			ui.hover(a[i+TEXT_ID])
@@ -2195,11 +2297,86 @@ ui.box_widget('text', {
 		local x = a[i+0]
 		local y = a[i+1]
 		local w = a[i+2]
-		local h = a[i+3]
-		local s = a[i+TEXT_S]
-		scr_wr(x, y, s)
+		local s  = a[i+TEXT_S]
+		local sx = a[i+TEXT_X]
+		local sw = a[i+TEXT_W]
+		local id = a[i+TEXT_ID]
+		local wrap = a[i+TEXT_WRAP]
+		local editable = a[i+TEXT_EDITABLE]
+
+		local col = ui.fg_color('text') --TODO: color, color_state)
+
+		if editable then
+			local input = ui.state(id).input
+			input.value = s
+		end
+
+		local clip = w > sw
+
+		if clip then
+			local h = a[i+3]
+			scr_clip(sx, y, sw, h)
+		end
+
+		--TODO: cx.textAlign = 'left'
+
+		if isstr(s) then
+
+			scr_wr(x, y, s)
+
+		elseif wrap == 'line' then
+
+			for _,ss in ipairs(s) do
+				scr_wr(x, y, ss)
+				y = y + 1
+			end
+
+		elseif wrap == 'word' then
+
+			local align = a[i+ALIGN]
+			local x0 = x
+			local ww = s
+
+			for k = 1, #ww.lines, 2 do
+
+				local i1     = ww.lines[k]
+				local line_w = ww.lines[k+1]
+				local i2     = ww.lines[k+2] or #ww.words
+
+				local x
+				if align == ']' or align == 'r' then
+					x = x0 + w - line_w
+				elseif align == 'c' then
+					x = x0 + round((w - line_w) / 2)
+				else
+					x = x0
+				end
+
+				for i = i1, i2-1 do
+					local s1 = ww.words [i]
+					local w1 = ww.widths[i]
+					--scr_wr(x, y, s1)
+					x = x + w1 + 1
+				end
+				y = y + 1
+			end
+		end
+
+		if clip then
+			scr_clip_end()
+		end
 	end,
 })
+
+ui.input = function(id, s, fr, align, valign, max_min_w, min_w, min_h)
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, nil, true)
+end
+ui.text_lines = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'line', editable)
+end
+ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
+end
 
 -- scrollbox -----------------------------------------------------------------
 
@@ -2512,9 +2689,14 @@ ui.box_ct_widget('scrollbox', {
 
 			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
 			if visible then
-				local bg = ui.bg_color('bg')
-				local fg = ui.bg_color('scrollbar', state)
-				scr_fill(tx, ty, tw, th, bg[1], fg[1], axis == 0 and '\u{2587}' or '\u{2588}')
+				if axis == 0 then
+					local bg = ui.bg_color('bg')
+					local fg = ui.bg_color('scrollbar', state)
+					scr_fill(tx, ty, tw, th, bg[1], fg[1], '\u{2587}')
+				else
+					local fg = ui.bg_color('scrollbar', state)
+					scr_fill(tx, ty, tw, th, fg[1], 0, ' ')
+				end
 			end
 		end
 	end,
@@ -2919,7 +3101,7 @@ end
 ui.main = function()
 	ui.v()
 		ui.box()
-			ui.text('', 'Hello, world!', 0, 'c', 'c')
+			ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
 		ui.end_box()
 		ui.h(2)
 			ui.stack('', 2)
@@ -2930,7 +3112,11 @@ ui.main = function()
 				ui.end_scrollbox()
 			ui.end_stack()
 			ui.box()
-				ui.text('', 'Goodbye, again!', 0, 'c', 'c')
+				ui.text_wrapped('t1', [[
+Lorem ipsum is a dummy or placeholder text commonly used in graphic design, publishing, and web development. Its purpose is to permit a page layout to be designed, independently of the copy that will subsequently populate it, or to demonstrate various fonts of a typeface without meaningful text that could be distracting.
+
+Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a 1st-century BC text by the Roman statesman and philosopher Cicero, with words altered, added, and removed to make it nonsensical and improper Latin. The first two words themselves are a truncation of dolorem ipsum ("pain itself").
+]], 0, 'c', 'c')
 			ui.end_box()
 		ui.end_h()
 	ui.end_v()
