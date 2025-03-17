@@ -2040,7 +2040,128 @@ ui.box_ct_widget('box', {
 	end,
 })
 
---text -----------------------------------------------------------------------
+--text box -------------------------------------------------------------------
+
+local function measure_text(s)
+	--TODO: break by graphemes
+	return #s
+end
+
+local function array_clear(a)
+	while #a > 0 do del(a) end
+end
+
+local ww_alloc, ww_free = freelist(function()
+
+	local s
+	local words  = {} -- [word1,...]
+	local widths = {} -- [w1,...]
+	local lines  = {} -- [line1_i,line1_w,...]
+	local sp_w        -- width of a single space character.
+	local ww = {lines = lines, words = words, widths = widths}
+
+	ww.set_text = function(s1)
+		s1 = s1:trim()
+		if s1 == s then return end
+		ww:clear()
+		s = s1
+	end
+
+	-- skip spaces, advancing i1 to the first non-space char and i2
+	-- to first space char after that, or to 1/0 if no space char was found.
+	local i1
+	function skip_spaces(s)
+		::again::
+		local i3 = s:find(' ' , i1, true); if i3 == i1 then i1 = i1+1; goto again end
+		local i4 = s:find('\n', i1, true); if i4 == i1 then i1 = i1+1; goto again end
+		local i5 = s:find('\r', i1, true); if i5 == i1 then i1 = i1+1; goto again end
+		local i6 = s:find('\t', i1, true); if i6 == i1 then i1 = i1+1; goto again end
+		return min(
+			i3 == -1 and 1/0 or i3,
+			i4 == -1 and 1/0 or i4,
+			i5 == -1 and 1/0 or i5,
+			i6 == -1 and 1/0 or i6
+		)
+	end
+	ww.measure = function()
+		sp_w = measure_text' '
+		ww.sp_w = sp_w
+		if not s then
+			ww.w = 0
+			ww.h = 1
+			return
+		end
+		i1 = 0
+		while i1 < 1/0 do
+			local i2 = skip_spaces(s)
+			local word = s:sub(i1, i2)
+			add(words, word)
+			i1 = i2
+		end
+		ww.min_w = 0
+		for _,s in ipairs(words) do
+			local w = measure_text(s)
+			add(widths, w)
+			ww.min_w = max(ww.min_w, w)
+		end
+	end
+
+	local last_ct_w
+	ww.wrap = function(ct_w, align)
+		if not s then return end
+		if ct_w == last_ct_w then return end
+		last_ct_w = ct_w
+		array_clear(lines)
+		local line_w = 0
+		local max_line_w = 0
+		local line_i = 0
+		local sep_w = 0
+		local n = #widths
+		for i = 1, n do
+			local w = i < n and widths[i] or 0
+			if i == n or ceil(line_w + sep_w + w) > ct_w then
+				line_w = ceil(line_w)
+				max_line_w = max(max_line_w, line_w)
+				add(lines, line_i)
+				add(lines, line_w)
+				line_w = 0
+				sep_w = 0
+				line_i = i
+			end
+			line_w = line_w + sep_w + w
+			sep_w = sp_w
+		end
+		local line_count = #lines / 2
+		ww.w = ceil(max_line_w)
+		ww.h = line_count
+	end
+
+	ww.clear = function()
+		s = nil
+		clear_array(words )
+		clear_array(widths)
+		clear_array(lines )
+		last_ct_w = nil
+	end
+
+	return ww
+
+end, function(ww)
+	ww:clear()
+end)
+
+function free_word_wrapper(s)
+	ww_free(s.ww)
+end
+function word_wrapper(id, text)
+	local s = ui.state(id)
+	if not s.ww then
+		s.ww = ww_alloc()
+		ui.on_free(id, free_word_wrapper)
+	end
+	s.ww.set_text(text)
+	return s.ww
+end
 
 local TEXT_ID = BOX_S+0
 local TEXT_S  = BOX_S+1
@@ -2391,8 +2512,9 @@ ui.box_ct_widget('scrollbox', {
 
 			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
 			if visible then
-				local bg = ui.bg_color('scrollbar', state)
-				scr_fill(tx, ty, tw, th, bg[1], 0, axis == 0 and ' ' or ' ')
+				local bg = ui.bg_color('bg')
+				local fg = ui.bg_color('scrollbar', state)
+				scr_fill(tx, ty, tw, th, bg[1], fg[1], axis == 0 and '\u{2587}' or '\u{2588}')
 			end
 		end
 	end,

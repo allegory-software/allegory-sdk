@@ -115,7 +115,7 @@ STRINGS
 	hexblock(s)                    string to hex block
 	starts(s, prefix) -> t|f       find if string starts with prefix
 	ends(s, suffix) -> t|f         find if string ends with suffix
-	s:has(substring) -> t|f        s:find(1, true)
+	s:has(substring[, i]) -> t|f   s:find(i, true)
 	subst(s, t) -> s               string interpolation pattern
 	capitalize(s) -> s             capitalize words
 	html_escape(s) -> s            escape HTML string
@@ -1243,8 +1243,8 @@ function ends(s, p)
 end
 string.ends = ends
 
-function string:has(p)
-	return self:find(p, 1, true)
+function string:has(p, i)
+	return self:find(p, i or 1, true)
 end
 
 function subst(s, t, get_missing) --subst('{foo} {bar}', {foo=1, bar=2}) -> '1 2'
