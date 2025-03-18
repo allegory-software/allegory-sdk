@@ -1628,7 +1628,7 @@ function align_x(a, i, axis, sx, sw)
 		return sx + sw - min_w
 	elseif align == 'c' then
 		local min_w = a[i+2+axis]
-		return sx + round((sw - min_w) / 2)
+		return sx + max(0, round((sw - min_w) / 2))
 	else
 		return sx
 	end
@@ -2005,7 +2005,7 @@ ui.box_ct_widget('box', {
 	measure_end = function(a, i, axis)
 		local user_min_wh     = a[i+0+axis]
 		local children_min_wh = a[i+2+axis]
-		local min_wh = max(user_min_wh, children_min_wh, 2)
+		local min_wh = max(user_min_wh, children_min_wh) + 2
 		add_ct_min_wh(a, axis, min_wh)
 	end,
 
@@ -2047,17 +2047,21 @@ local function array_clear(a)
 	while #a > 0 do del(a) end
 end
 
-local ww_alloc, ww_free = freelist(function()
+local function word_wrapper()
 
 	local s
 	local words  = {} -- [word1,...]
 	local widths = {} -- [w1,...]
 	local lines  = {} -- [line1_i,line1_w,...]
 	local ww = {lines = lines, words = words, widths = widths}
+	local last_ct_w
 
 	ww.set_text = function(s1)
 		if s1 == s then return end
-		ww:clear()
+		array_clear(words )
+		array_clear(widths)
+		array_clear(lines )
+		last_ct_w = nil
 		s = sanitize(s1):trim()
 	end
 
@@ -2066,16 +2070,16 @@ local ww_alloc, ww_free = freelist(function()
 	local i1
 	local function skip_spaces(s)
 		::again::
-		local i3 = s:find(' ' , i1, true) or -1; if i3 == i1 then i1 = i1+1; goto again end
-		local i4 = s:find('\n', i1, true) or -1; if i4 == i1 then i1 = i1+1; goto again end
-		local i5 = s:find('\r', i1, true) or -1; if i5 == i1 then i1 = i1+1; goto again end
-		local i6 = s:find('\t', i1, true) or -1; if i6 == i1 then i1 = i1+1; goto again end
-		return min(
-			i3 == -1 and 1/0 or i3,
-			i4 == -1 and 1/0 or i4,
-			i5 == -1 and 1/0 or i5,
-			i6 == -1 and 1/0 or i6
-		)
+		local i3 = s:find(' ' , i1, true); if i3 == i1 then i1 = i1+1; goto again end
+		local i4 = s:find('\n', i1, true); if i4 == i1 then i1 = i1+1; goto again end
+		local i5 = s:find('\r', i1, true); if i5 == i1 then i1 = i1+1; goto again end
+		local i6 = s:find('\t', i1, true); if i6 == i1 then i1 = i1+1; goto again end
+		return repl(min(
+			(i3 or 1/0)-1,
+			(i4 or 1/0)-1,
+			(i5 or 1/0)-1,
+			(i6 or 1/0)-1
+		), 1/0)
 	end
 	ww.measure = function()
 		if not s then
@@ -2083,12 +2087,13 @@ local ww_alloc, ww_free = freelist(function()
 			ww.h = 1
 			return
 		end
-		i1 = 0
-		while i1 < 1/0 do
+		i1 = 1
+		while 1 do
 			local i2 = skip_spaces(s)
 			local word = s:sub(i1, i2)
 			add(words, word)
-			i1 = i2
+			if not i2 then break end
+			i1 = i2 + 1
 		end
 		ww.min_w = 0
 		for _,s in ipairs(words) do
@@ -2098,7 +2103,6 @@ local ww_alloc, ww_free = freelist(function()
 		end
 	end
 
-	local last_ct_w
 	ww.wrap = function(ct_w, align)
 		if not s then return end
 		if ct_w == last_ct_w then return end
@@ -2109,9 +2113,9 @@ local ww_alloc, ww_free = freelist(function()
 		local line_i = 1
 		local sep_w = 0
 		local n = #widths
-		for i = 1, n do
-			local w = i < n and widths[i] or 0
-			if i == n or ceil(line_w + sep_w + w) > ct_w then
+		for i = 1, n+1 do
+			local w = i <= n and widths[i] or 0
+			if i == n+1 or ceil(line_w + sep_w + w) > ct_w then
 				line_w = ceil(line_w)
 				max_line_w = max(max_line_w, line_w)
 				add(lines, line_i)
@@ -2128,31 +2132,7 @@ local ww_alloc, ww_free = freelist(function()
 		ww.h = line_count
 	end
 
-	ww.clear = function()
-		s = nil
-		array_clear(words )
-		array_clear(widths)
-		array_clear(lines )
-		last_ct_w = nil
-	end
-
 	return ww
-
-end, function(ww)
-	ww:clear()
-end)
-
-function free_word_wrapper(s)
-	ww_free(s.ww)
-end
-function word_wrapper(id, text)
-	local s = ui.state(id)
-	if not s.ww then
-		s.ww = ww_alloc()
-		ui.on_free(id, free_word_wrapper)
-	end
-	s.ww.set_text(text)
-	return s.ww
 end
 
 local TEXT_X        = BOX_S+0
@@ -2180,7 +2160,10 @@ ui.box_widget('text', {
 			end
 		elseif wrap == 'word' then
 			ui.keepalive(id)
-			s = word_wrapper(id, s)
+			local t = ui.state(id)
+			t.ww = t.ww or word_wrapper()
+			t.ww.set_text(s)
+			s = t.ww
 		else
 			s = sanitize(s):gsub('[\n\r\t ]+', ' '):trim()
 			assert(wrap == 'none')
@@ -2217,7 +2200,6 @@ ui.box_widget('text', {
 				end
 				min_w = min(max_min_w, min_w)
 				a[i+2] = min_w
-				add_ct_min_wh(a, axis, min_w)
 			else
 				local min_h = a[i+1]
 				if min_h == -1 then
@@ -2225,7 +2207,6 @@ ui.box_widget('text', {
 				end
 				a[i+3] = min_h
 				a[i+TEXT_H] = ww.h
-				add_ct_min_wh(a, axis, ww.h)
 			end
 		elseif axis == 0 then
 			-- measure everything once on the x-axis phase.
@@ -2255,8 +2236,8 @@ ui.box_widget('text', {
 			a[i+TEXT_W] = text_w
 			a[i+TEXT_H] = text_h
 		end
-		local min_w = a[i+2+axis]
-		add_ct_min_wh(a, axis, min_w)
+		local min_wh = a[i+2+axis]
+		add_ct_min_wh(a, axis, min_wh)
 	end,
 	position = function(a, i, axis, sx, sw)
 		if axis == 0 then
@@ -2334,7 +2315,7 @@ ui.box_widget('text', {
 
 				local i1     = ww.lines[k]
 				local line_w = ww.lines[k+1]
-				local i2     = ww.lines[k+2] or #ww.words
+				local i2     = ww.lines[k+2] or #ww.words+1
 
 				local x
 				if halign == 'r' then
@@ -2588,7 +2569,7 @@ ui.box_ct_widget('scrollbox', {
 		-- wheel scrolling
 		if ui.wheel_dy ~= 0 and ui.hit(id) then
 			local sy0 = ui.state(id).scroll_y
-			sy = sy - ui.wheel_dy
+			sy = sy - ui.wheel_dy * 2
 			if not infinite_y then
 				sy = clamp(sy, 0, ch - h)
 			end
@@ -3097,7 +3078,7 @@ ui.main = function()
 			ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
 		ui.end_box()
 		ui.h(2)
-			ui.stack('', 2)
+			ui.stack('', .5)
 				ui.scrollbox('sb1', 1, 'auto', 'auto', true)
 					ui.stack('', 0, 'l', 't', 120, 50)
 						ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c') --, nil, 100, 100)
