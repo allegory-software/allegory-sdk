@@ -1603,9 +1603,9 @@ end
 --[=[
 -- calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1).
 local function box_measure(a, i, axis)
-	local own_min_wh = a[i+0+axis]
+	local user_min_wh = a[i+0+axis]
 	local computed_min_wh = a[i+2+axis]
-	local min_wh = max(computed_min_wh, own_min_wh)
+	local min_wh = max(computed_min_wh, user_min_wh)
 	a[i+2+axis] = min_wh
 	add_ct_min_wh(a, axis, min_wh)
 end
@@ -1709,9 +1709,9 @@ local function box_ct_end_measure(a, _, axis)
 	if measure_end_f then
 		measure_end_f(a, i, axis)
 	else
-		local own_min_w = a[i+0+axis]
-		local min_w     = a[i+2+axis]
-		min_w = max(min_w, own_min_w)
+		local user_min_w = a[i+0+axis]
+		local min_w      = a[i+2+axis]
+		min_w = max(min_w, user_min_w)
 		a[i+2+axis] = min_w
 		add_ct_min_wh(a, axis, min_w)
 	end
@@ -2003,9 +2003,9 @@ ui.box_ct_widget('box', {
 	end,
 
 	measure_end = function(a, i, axis)
-		local own_min_wh      = a[i+0+axis]
+		local user_min_wh     = a[i+0+axis]
 		local children_min_wh = a[i+2+axis]
-		local min_wh = max(own_min_wh, children_min_wh, 2)
+		local min_wh = max(user_min_wh, children_min_wh, 2)
 		add_ct_min_wh(a, axis, min_wh)
 	end,
 
@@ -2524,11 +2524,11 @@ ui.box_ct_widget('scrollbox', {
 	end,
 
 	measure_end = function(a, i, axis)
-		local own_min_w = a[i+0+axis]
-		local co_min_w  = a[i+2+axis] -- measured content min_w
+		local user_min_w = a[i+0+axis]
+		local co_min_w   = a[i+2+axis] -- measured content min_w
 		local overflow = a[i+SB_OVERFLOW+axis]
 		local contain = overflow == 'contain'
-		local sb_min_w = max(contain and co_min_w or 0, own_min_w) -- scrollbox min_w
+		local sb_min_w = max(contain and co_min_w or 0, user_min_w) -- scrollbox min_w
 		a[i+SB_CW+axis] = co_min_w
 		a[i+2+axis] = sb_min_w
 		add_ct_min_wh(a, axis, sb_min_w)
