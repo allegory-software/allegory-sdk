@@ -401,9 +401,9 @@ local function rd_input() --read keyboard and mouse input in raw mode
 						ui.middle_pressed = false
 					end
 				elseif b == '64' then
-					ui.wheel_dy = -1
-				elseif b == '65' then
 					ui.wheel_dy = 1
+				elseif b == '65' then
+					ui.wheel_dy = -1
 				end
 				if DEBUG then dbgf('mouse %d %d %s %s', mx, my, b, st) end
 			elseif c == 73 then --I
@@ -1200,14 +1200,14 @@ end
 -- walk the element tree top-down, and call the position function for each
 -- element that has it. recursive, uses call stack to pass ct_i and ct_w.
 
-local function position_rec(a, axis, ct_w)
+local function position_rec(a, axis, ct_wh)
 	local i, n = 3, #a
 	while i < n do
 		local cmd = a[i-1]
 		local position_f = cmd.position
 		if position_f then
-			local min_w = a[i+2+axis]
-			position_f(a, i, axis, 0, max(min_w, ct_w))
+			local min_wh = a[i+2+axis]
+			position_f(a, i, axis, 0, max(min_wh, ct_wh))
 		end
 		i = cmd_next_ext_i(a, i)
 	end
@@ -1565,13 +1565,14 @@ local function box_fr(a, i)
 end
 
 function ui.cmd_box(cmd, fr, halign, valign, min_w, min_h, ...)
-	assert(not halign or halign == 'c' or halign == 'l' or halign == 'r' or halign == 's' or halign == ']' or halign == '[')
-	assert(not valign or valign == 'c' or valign == 't' or valign == 'b' or valign == 's' or valign == ']' or halign == '[')
+	halign = repl(repl(halign, ']', 'r'), '[', 'l')
+	assert(not halign or halign == 'c' or halign == 'l' or halign == 'r' or halign == 's')
+	assert(not valign or valign == 'c' or valign == 't' or valign == 'b' or valign == 's')
 	return ui.cmd(cmd,
-		min_w or 0, -- min_w in measuring phase; x in positioning phase
-		min_h or 0, -- min_h in measuring phase; y in positioning phase
-		0, --children's min_w in measuring phase; w in positioning phase
-		0, --children's min_h in measuring phase; h in positioning phase
+		min_w or 0, -- user min_w in measuring phase; x in positioning phase
+		min_h or 0, -- user min_h in measuring phase; y in positioning phase
+		0, --children's min_w -> min_w in measuring phase; w in positioning phase
+		0, --children's min_h -> min_h in measuring phase; h in positioning phase
 		max(0, fr or 1),
 		halign or 's',
 		valign or 's',
@@ -1581,29 +1582,16 @@ end
 
 -- box measure phase
 
-local function add_ct_min_wh(a, axis, w)
-	local i = ct_stack[#ct_stack]
-	if not i then return end -- root ct
-	local cmd = a[i-1]
+local function add_ct_min_wh(a, axis, child_min_wh)
+	local ct_i = ct_stack[#ct_stack]
+	if not ct_i then return end -- root ct
+	local cmd = a[ct_i-1]
 	local main_axis = cmd.main_axis == axis
-	local min_w = a[i+2+axis]
+	local ct_min_wh = a[ct_i+2+axis]
 	if main_axis then
-		a[i+2+axis] = min_w + w
+		a[ct_i+2+axis] = ct_min_wh + child_min_wh
 	else
-		a[i+2+axis] = max(min_w, w)
-	end
-end
-
-local function add_ct_min_wh(a, axis, w)
-	local i = ct_stack[#ct_stack]
-	if not i then return end -- root ct
-	local cmd = a[i-1]
-	local main_axis = cmd.main_axis == axis
-	local min_w = a[i+2+axis]
-	if main_axis then
-		a[i+2+axis] = min_w + w
-	else
-		a[i+2+axis] = max(min_w, w)
+		a[ct_i+2+axis] = max(ct_min_wh, child_min_wh)
 	end
 end
 ui.add_ct_min_wh = add_ct_min_wh
@@ -1612,12 +1600,16 @@ local function ct_stack_push(a, i)
 	add(ct_stack, i)
 end
 
+--[=[
 -- calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1).
 local function box_measure(a, i, axis)
-	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) -- apply own min_w|h
-	local min_wh = a[i+2+axis]
+	local own_min_wh = a[i+0+axis]
+	local computed_min_wh = a[i+2+axis]
+	local min_wh = max(computed_min_wh, own_min_wh)
+	a[i+2+axis] = min_wh
 	add_ct_min_wh(a, axis, min_wh)
 end
+]=]
 
 -- box position phase
 
@@ -1631,7 +1623,7 @@ end
 
 function align_x(a, i, axis, sx, sw)
 	local align = a[i+ALIGN+axis]
-	if align == 'r' or align == ']' or align == 'b' then
+	if align == 'r' or align == 'b' then
 		local min_w = a[i+2+axis]
 		return sx + sw - min_w
 	elseif align == 'c' then
@@ -2011,7 +2003,10 @@ ui.box_ct_widget('box', {
 	end,
 
 	measure_end = function(a, i, axis)
-		a[i+2+axis] = max(a[i+2+axis], a[i+0+axis], 2) -- apply own min_w|h
+		local own_min_wh      = a[i+0+axis]
+		local children_min_wh = a[i+2+axis]
+		local min_wh = max(own_min_wh, children_min_wh, 2)
+		add_ct_min_wh(a, axis, min_wh)
 	end,
 
 	position = function(a, i, axis, sx, sw)
@@ -2061,10 +2056,9 @@ local ww_alloc, ww_free = freelist(function()
 	local ww = {lines = lines, words = words, widths = widths}
 
 	ww.set_text = function(s1)
-		s1 = sanitize(s1):trim()
 		if s1 == s then return end
 		ww:clear()
-		s = s1
+		s = sanitize(s1):trim()
 	end
 
 	-- skip spaces, advancing i1 to the first non-space char and i2
@@ -2162,7 +2156,7 @@ function word_wrapper(id, text)
 end
 
 local TEXT_X        = BOX_S+0
-local TEXT_W        = BOX_S+1
+local TEXT_W        = BOX_S+1 --input MAX_MIN_W, output TEXT_W
 local TEXT_H        = BOX_S+2
 local TEXT_ID       = BOX_S+3
 local TEXT_S        = BOX_S+4
@@ -2171,7 +2165,7 @@ local TEXT_EDITABLE = BOX_S+6
 
 ui.box_widget('text', {
 	ID = TEXT_ID,
-	create = function(cmd, id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable)
+	create = function(cmd, id, s, fr, halign, valign, max_min_w, min_w, min_h, wrap, editable)
 		-- NOTE: min_w and min_h are by default measured, not given.
 		s = s or ''
 		wrap = wrap or 'none'
@@ -2195,11 +2189,11 @@ ui.box_widget('text', {
 			ui.keepalive(id)
 			s = ui.state(id).text or s
 		end
-		return ui.cmd_box(cmd, fr or 1, align or 'l', valign or 'c',
+		return ui.cmd_box(cmd, fr or 1, halign or 'l', valign or 'c',
 			min_w or -1, -- -1=auto
 			min_h or -1, -- -1=auto
 			0, --text_x
-			max_min_w or -1, -- -1=inf
+			max_min_w or 1/0,
 			0, --text_h
 			id or '',
 			s or '',
@@ -2216,21 +2210,22 @@ ui.box_widget('text', {
 			local ww = a[i+TEXT_S]
 			if axis == 0 then
 				ww.measure()
-				local min_w = a[i+2]
+				local min_w = a[i+0]
 				local max_min_w = a[i+TEXT_W]
 				if min_w == -1 then
 					min_w = ww.min_w
 				end
-				if max_min_w ~= -1 then
-					min_w = min(max_min_w, min_w)
-				end
+				min_w = min(max_min_w, min_w)
 				a[i+2] = min_w
+				add_ct_min_wh(a, axis, min_w)
 			else
-				local min_h = a[i+3]
+				local min_h = a[i+1]
 				if min_h == -1 then
 					min_h = ww.h
 				end
 				a[i+3] = min_h
+				a[i+TEXT_H] = ww.h
+				add_ct_min_wh(a, axis, ww.h)
 			end
 		elseif axis == 0 then
 			-- measure everything once on the x-axis phase.
@@ -2254,9 +2249,7 @@ ui.box_widget('text', {
 			local max_min_w = a[i+TEXT_W]
 			if min_h == -1 then min_h = text_h end
 			if min_w == -1 then min_w = text_w end
-			if max_min_w ~= -1 then
-				min_w = min(max_min_w, min_w)
-			end
+			min_w = min(max_min_w, min_w)
 			a[i+2] = min_w
 			a[i+3] = min_h
 			a[i+TEXT_W] = text_w
@@ -2333,7 +2326,7 @@ ui.box_widget('text', {
 
 		elseif wrap == 'word' then
 
-			local align = a[i+ALIGN]
+			local halign = a[i+ALIGN]
 			local x0 = x
 			local ww = s
 
@@ -2344,9 +2337,9 @@ ui.box_widget('text', {
 				local i2     = ww.lines[k+2] or #ww.words
 
 				local x
-				if align == ']' or align == 'r' then
+				if halign == 'r' then
 					x = x0 + w - line_w
-				elseif align == 'c' then
+				elseif halign == 'c' then
 					x = x0 + round((w - line_w) / 2)
 				else
 					x = x0
@@ -2355,7 +2348,7 @@ ui.box_widget('text', {
 				for i = i1, i2-1 do
 					local s1 = ww.words [i]
 					local w1 = ww.widths[i]
-					--scr_wr(x, y, s1)
+					scr_wr(x, y, s1)
 					x = x + w1 + 1
 				end
 				y = y + 1
@@ -2368,14 +2361,14 @@ ui.box_widget('text', {
 	end,
 })
 
-ui.input = function(id, s, fr, align, valign, max_min_w, min_w, min_h)
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, nil, true)
+ui.input = function(id, s, fr, halign, valign, max_min_w, min_w, min_h)
+	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, nil, true)
 end
-ui.text_lines = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'line', editable)
+ui.text_lines = function(id, s, fr, halign, valign, max_min_w, min_w, min_h, editable)
+	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, 'line', editable)
 end
-ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
+ui.text_wrapped = function(id, s, fr, halign, valign, max_min_w, min_w, min_h, editable)
+	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, 'word', editable)
 end
 
 -- scrollbox -----------------------------------------------------------------
@@ -2502,7 +2495,7 @@ end
 
 ui.box_ct_widget('scrollbox', {
 
-	create = function(cmd, id, fr, overflow_x, overflow_y, boxed, align, valign, min_w, min_h, sx, sy)
+	create = function(cmd, id, fr, overflow_x, overflow_y, boxed, halign, valign, min_w, min_h, sx, sy)
 
 		overflow_x = parse_sb_overflow(overflow_x)
 		overflow_y = parse_sb_overflow(overflow_y)
@@ -2514,7 +2507,7 @@ ui.box_ct_widget('scrollbox', {
 		sx = sx or ss.scroll_x or 0
 		sy = sy or ss.scroll_y or 0
 
-		local i = ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
+		local i = ui.cmd_box_ct(cmd, fr, halign, valign, min_w, min_h,
 			boxed and true or false,
 			overflow_x,
 			overflow_y,
@@ -3112,12 +3105,16 @@ ui.main = function()
 				ui.end_scrollbox()
 			ui.end_stack()
 			ui.box()
+			--ui.scrollbox('st1')
+				if 1==1 then
 				ui.text_wrapped('t1', [[
 Lorem ipsum is a dummy or placeholder text commonly used in graphic design, publishing, and web development. Its purpose is to permit a page layout to be designed, independently of the copy that will subsequently populate it, or to demonstrate various fonts of a typeface without meaningful text that could be distracting.
 
 Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a 1st-century BC text by the Roman statesman and philosopher Cicero, with words altered, added, and removed to make it nonsensical and improper Latin. The first two words themselves are a truncation of dolorem ipsum ("pain itself").
 ]], 0, 'c', 'c')
+				end
 			ui.end_box()
+			--ui.end_scrollbox()
 		ui.end_h()
 	ui.end_v()
 end
