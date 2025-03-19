@@ -162,6 +162,7 @@ TIME & DATES
 	year   ([utc, ][t], [plus_years]) -> ts    time at year's beginning from t
 ERRORS
 	assertf(v[,fmt,...]) -> v      assert with error message formatting
+	errorf(,fmt,...)               raise with string formatting
 	fpcall(f, ...) -> ok,...       pcall with finally/onerror
 	fcall(f, ...) -> ...           same but re-raises errors
 	errortype([classname], [super]) -> E    create/get an error class
@@ -1677,6 +1678,10 @@ function assertf(v, err, ...)
 		err = format(err, ...)
 	end
 	error(err, 2)
+end
+
+function errorf(err, fmt, ...)
+	error(fmt:format(...))
 end
 
 local function unprotect(ok, result, ...)
