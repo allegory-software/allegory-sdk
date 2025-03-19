@@ -204,7 +204,7 @@ local function hsl_to_256_color(h, s, L)
 	elseif L == 0 then --grayscale (24 gray levels) + 0 (black) + 15 (white)
 		return 0 --black
 	elseif L == 1 then
-		return 7, true -- white
+		return 15 --white
 	else --gray
 		return floor(232 + L * 23)
 	end
@@ -258,6 +258,7 @@ end
 
 local capture_state = {}
 function ui.captured(id)
+	assert(id)
 	return id ~= '' and ui.captured_id == id and capture_state or nil
 end
 
@@ -435,44 +436,7 @@ local function rd_input() --read keyboard and mouse input in raw mode
 	if DEBUG and ui.key then dbgf('ui.key %s', ui.key) end
 end
 
---screen clip rect and stack -------------------------------------------------
-
-local scr_x1, scr_y1, scr_x2, scr_y2 --current clip rect (x2,y2 is outside!)
-local scr_clip_rect_stack = {} --{x1, y1, x2, y2; ...}
-
-local function scr_clip(x, y, w, h)
-	append(scr_clip_rect_stack, scr_x1, scr_y1, scr_x2, scr_y2)
-	local x, y, w, h = rect_clip(x, y, w, h,
-		scr_x1,
-		scr_y1,
-		scr_x2 - scr_x1,
-		scr_y2 - scr_y1
-	)
-	scr_x1 = x
-	scr_y1 = y
-	scr_x2 = x+w
-	scr_y2 = y+h
-end
-
-local function scr_clip_end()
-	assert(#scr_clip_rect_stack >= 4)
-	scr_y2 = pop(scr_clip_rect_stack)
-	scr_x2 = pop(scr_clip_rect_stack)
-	scr_y1 = pop(scr_clip_rect_stack)
-	scr_x1 = pop(scr_clip_rect_stack)
-end
-
-local function scr_reset_clip_rect()
-	while #scr_clip_rect_stack > 0 do
-		pop(scr_clip_rect_stack)
-	end
-	scr_x1 = 0
-	scr_y1 = 0
-	scr_x2 = screen_w
-	scr_y2 = screen_h
-end
-
--- screen cell double-buffer -------------------------------------------------
+-- cell screen double-buffer -------------------------------------------------
 
 local cell_ct = ctype[[
 union {
@@ -496,105 +460,6 @@ local scr1, scr2, scr2_dirty
 
 screen_w = 0
 screen_h = 0
-
-local function scr_wr(x, y, s)
-	if not (y >= scr_y1 and y < scr_y2) then return end
-	local i1 = max( 1, scr_x1 - x + 1)
-	local i2 = min(#s, scr_x2 - x)
-	--TODO: split text by codepoints.
-	--TODO: splitting on graphemes would be even better.
-	--TODO: support 2-cell-wide graphemes.
-	for si = i1, i2 do
-		local i = y * screen_w + x + si - 1
-		assert(i >= 0 and i < screen_w * screen_h)
-		local cell = scr1[i]
-		cell.codepoint = 0
-		cell.text[0] = byte(s, si)
-		cell.text_len = 1
-	end
-end
-
-local function scr_wrc(x, y, c) --set single cell
-	if x < scr_x1 or x >= scr_x2 then return end
-	if y < scr_y1 or y >= scr_y2 then return end
-	assert(#c <= 4)
-	local i = y * screen_w + x
-	assert(i >= 0 and i < screen_w * screen_h)
-	local cell = scr1[i]
-	cell.codepoint = 0
-	copy(cell.text, c, #c)
-	cell.text_len = #c
-end
-
-local function scr_each_cell(x, y, w, h, f, ...)
-	local x, y, w, h = rect_clip(x, y, w, h,
-		scr_x1,
-		scr_y1,
-		scr_x2 - scr_x1,
-		scr_y2 - scr_y1
-	)
-	for y = y, y+h-1 do
-		for x = x, x+w-1 do
-			f(y * screen_w + x, ...)
-		end
-	end
-end
-
-local cell = cell_ct()
-
-local function scr_copy_cell(i, scr, cell)
-	assert(i >= 0 and i < screen_w * screen_h)
-	scr[i] = cell
-end
-local function scr_fill(x, y, w, h, bg_color, fg_color, text, scr)
-	assert(#text > 0 and #text <= 4)
-	cell.data = 0
-	cell.bg_color = bg_color
-	cell.fg_color = fg_color
-	copy(cell.text, text, #text)
-	cell.text_len = #text
-	scr_each_cell(x, y, w, h, scr_copy_cell, scr or scr1, cell)
-end
-
---[[
-local function scr_set_bg_color_cell(i, bg_color)
-	assert(i >= 0 and i < screen_w * screen_h)
-	scr1[i].bg_color = bg_color
-end
-local function scr_set_bg_color(bg_color, x, y, w, h)
-	scr_each_cell(x, y, w, h, scr_set_bg_color_cell, bg_color)
-end
-]]
-
-local B_TL = '\u{250C}'  -- ┌
-local B_TR = '\u{2510}'  -- ┐
-local B_BL = '\u{2514}'  -- └
-local B_BR = '\u{2518}'  -- ┘
-local B_H  = '\u{2500}'  -- ─
-local B_V  = '\u{2502}'  -- │
-
-local function scr_draw_hline(x, y, w)
-	for i=0,w-1 do
-		scr_wrc(x+i, y, B_H)
-	end
-end
-
-local function scr_draw_vline(x, y, h)
-	for i=0,h-1 do
-		scr_wrc(x, y+i, B_V)
-	end
-end
-
-local function scr_draw_box(x, y, w, h)
-	scr_wrc(x    , y    , B_TL)
-	scr_wrc(x+w-1, y    , B_TR)
-	scr_wrc(x    , y+h-1, B_BL)
-	scr_wrc(x+w-1, y+h-1, B_BR)
-	scr_draw_hline(x+1  , y    , w-2)
-	scr_draw_hline(x+1  , y+h-1, w-2)
-	scr_draw_vline(x    , y+1  , h-2)
-	scr_draw_vline(x+w-1, y+1  , h-2)
-end
 
 local function scr_flush()
 	for y = 0, screen_h-1 do
@@ -637,6 +502,202 @@ local function scr_resize()
 	scr2 = new(cell_arr_ct, screen_w * screen_h)
 	scr2_dirty = true
 end
+
+-- screen clip rect and stack ------------------------------------------------
+
+local scr_x1, scr_y1, scr_x2, scr_y2 --current clip rect (x2,y2 is outside!)
+local scr_clip_rect_stack = {} --{x1, y1, x2, y2; ...}
+
+local function scr_clip(x, y, w, h)
+	append(scr_clip_rect_stack, scr_x1, scr_y1, scr_x2, scr_y2)
+	local x, y, w, h = rect_clip(x, y, w, h,
+		scr_x1,
+		scr_y1,
+		scr_x2 - scr_x1,
+		scr_y2 - scr_y1
+	)
+	scr_x1 = x
+	scr_y1 = y
+	scr_x2 = x+w
+	scr_y2 = y+h
+end
+
+local function scr_clip_end()
+	assert(#scr_clip_rect_stack >= 4)
+	scr_x1, scr_y1, scr_x2, scr_y2 = popn(scr_clip_rect_stack, 4)
+end
+
+local function scr_reset_clip_rect()
+	while #scr_clip_rect_stack > 0 do
+		pop(scr_clip_rect_stack)
+	end
+	scr_x1 = 0
+	scr_y1 = 0
+	scr_x2 = screen_w
+	scr_y2 = screen_h
+end
+
+-- writing to cell screen ----------------------------------------------------
+
+local fg_color
+local bg_color
+
+local function scr_wr(x, y, s)
+	if not (y >= scr_y1 and y < scr_y2) then return end
+	local i1 = max( 1, scr_x1 - x + 1)
+	local i2 = min(#s, scr_x2 - x)
+	--TODO: split text by codepoints.
+	--TODO: splitting on graphemes would be even better.
+	--TODO: support 2-cell-wide graphemes.
+	for si = i1, i2 do
+		local i = y * screen_w + x + si - 1
+		assert(i >= 0 and i < screen_w * screen_h)
+		local cell = scr1[i]
+		cell.codepoint = 0
+		cell.text[0] = byte(s, si)
+		cell.text_len = 1
+		cell.fg_color = fg_color[1]
+		cell.bg_color = bg_color[1]
+	end
+end
+
+local function scr_wrc(x, y, c) --set single cell
+	if x < scr_x1 or x >= scr_x2 then return end
+	if y < scr_y1 or y >= scr_y2 then return end
+	assert(#c <= 4)
+	local i = y * screen_w + x
+	assert(i >= 0 and i < screen_w * screen_h)
+	local cell = scr1[i]
+	cell.codepoint = 0
+	copy(cell.text, c, #c)
+	cell.text_len = #c
+	cell.fg_color = fg_color[1]
+	cell.bg_color = bg_color[1]
+end
+
+local function scr_each_cell(x, y, w, h, f, ...)
+	local x, y, w, h = rect_clip(x, y, w, h,
+		scr_x1,
+		scr_y1,
+		scr_x2 - scr_x1,
+		scr_y2 - scr_y1
+	)
+	for y = y, y+h-1 do
+		for x = x, x+w-1 do
+			f(y * screen_w + x, ...)
+		end
+	end
+end
+
+local cell = cell_ct()
+
+local function scr_copy_cell(i, scr, cell)
+	assert(i >= 0 and i < screen_w * screen_h)
+	scr[i] = cell
+end
+local function scr_fill(x, y, w, h, text, scr)
+	assert(#text > 0 and #text <= 4)
+	cell.data = 0
+	copy(cell.text, text, #text)
+	cell.text_len = #text
+	cell.fg_color = fg_color[1]
+	cell.bg_color = bg_color[1]
+	scr_each_cell(x, y, w, h, scr_copy_cell, scr or scr1, cell)
+end
+
+--[[
+local function scr_set_bg_color_cell(i, bg_color)
+	assert(i >= 0 and i < screen_w * screen_h)
+	scr1[i].bg_color = bg_color
+end
+local function scr_set_bg_color(bg_color, x, y, w, h)
+	scr_each_cell(x, y, w, h, scr_set_bg_color_cell, bg_color)
+end
+]]
+
+-- writing lines and boxes to cell screen ------------------------------------
+
+local BS_TL = {} --top-left corners
+local BS_TR = {} --top-right corners
+local BS_BL = {} --bottom-left corners
+local BS_BR = {} --bottom-left corners
+BS_TL.straight = '\u{250C}' -- ┌
+BS_TR.straight = '\u{2510}' -- ┐
+BS_BL.straight = '\u{2514}' -- └
+BS_BR.straight = '\u{2518}' -- ┘
+BS_TL.round    = '\u{256D}' -- ╭
+BS_TR.round    = '\u{256E}' -- ╮
+BS_BL.round    = '\u{2570}' -- ╰
+BS_BR.round    = '\u{256F}' -- ╯
+
+local B_TL = BS_TL.straight
+local B_TR = BS_TR.straight
+local B_BL = BS_BL.straight
+local B_BR = BS_BR.straight
+local corner_style_stack = {}
+function ui.corner_style(s)
+	append(corner_style_stack, B_TL, B_TR, B_BL, B_BR)
+	B_TL = assertf(BS_TL[s], 'invalid corner style: %s', s)
+	B_TR = assertf(BS_TR[s], 'invalid corner style: %s', s)
+	B_BL = assertf(BS_BL[s], 'invalid corner style: %s', s)
+	B_BR = assertf(BS_BR[s], 'invalid corner style: %s', s)
+end
+function ui.end_corner_style(s)
+	B_TL, B_TR, B_BL, B_BR = popn(corner_style_stack, 4)
+end
+
+local BS_H = {} --horizontal lines
+local BS_V = {} --vertical lines
+BS_H.solid  = '\u{2500}' -- ─
+BS_V.solid  = '\u{2502}' -- │
+BS_H.dotted = '\u{2508}' -- ┈
+BS_V.dotted = '\u{250A}' -- ┊
+BS_H.dashed = '\u{2504}' -- ┄
+BS_V.dashed = '\u{2506}' -- ┆
+BS_H.double = '\u{2550}' -- ═
+BS_V.double = '\u{2551}' -- ║
+
+local B_H = BS_H.solid
+local B_V = BS_V.solid
+local line_style_stack = {}
+function ui.line_style(s)
+	append(line_style_stack, B_H, B_V)
+	B_H = assertf(BS_H[s], 'invalid line style: %s', s)
+	B_V = assertf(BS_V[s], 'invalid line style: %s', s)
+end
+function ui.end_line_style()
+	B_H, B_V = popn(line_style_stack, 2)
+end
+
+local function scr_draw_hline(x, y, w)
+	for i=0,w-1 do
+		scr_wrc(x+i, y, B_H)
+	end
+end
+
+local function scr_draw_vline(x, y, h)
+	for i=0,h-1 do
+		scr_wrc(x, y+i, B_V)
+	end
+end
+
+local function scr_draw_box(x, y, w, h)
+	scr_wrc(x    , y    , B_TL)
+	scr_wrc(x+w-1, y    , B_TR)
+	scr_wrc(x    , y+h-1, B_BL)
+	scr_wrc(x+w-1, y+h-1, B_BR)
+	scr_draw_hline(x+1  , y    , w-2)
+	scr_draw_hline(x+1  , y+h-1, w-2)
+	scr_draw_vline(x    , y+1  , h-2)
+	scr_draw_vline(x+w-1, y+1  , h-2)
+end
+
+--"T" connectors
+local T_HL = '\u{251C}' -- ├
+local T_HR = '\u{2524}' -- ┤
+local T_VL = '\u{2534}' -- ┴
+local T_VR = '\u{252C}' -- ┬
+local T_X  = '\u{253c}' -- ┼
 
 -- imgui themes and colors ---------------------------------------------------
 
@@ -1168,12 +1229,33 @@ ui.ct_stack = ct_stack
 function ui.ct_i() return assert(ct_stack[#ct_stack], 'no container') end
 function ui.rel_ct_i() return ui.ct_i() - #a + 2 end
 
-local function ct_stack_check(a)
+local function ct_stack_check()
 	if #ct_stack > 0 then
 		for _,i in ipairs(ct_stack) do
 			warnf('%s not closed', a[i-1].name)
 		end
-		assert(false)
+		assert(false, 'not all containers were closed')
+	end
+end
+
+-- fg stack ------------------------------------------------------------------
+
+local fg_stack = {} --{fg1, ...}
+function ui.fg(...)
+	add(fg_stack, assert(fg_color))
+	fg_color = ui.fg_color(...)
+end
+
+function ui.end_fg()
+	fg_color = assert(pop(fg_stack))
+end
+
+local function fg_stack_check()
+	if #fg_stack > 0 then
+		for _,fg in ipairs(fg_stack) do
+			warnf('fg not closed: %s', fg)
+		end
+		assert(false, 'fg_end() missing')
 	end
 end
 
@@ -1369,7 +1451,7 @@ local function layout_rec(a, x, y, w, h)
 
 	-- x-axis
 	measure_rec(a, 0)
-	ct_stack_check(a)
+	ct_stack_check()
 	position_rec(a, 0, w)
 
 	-- y-axis
@@ -1397,9 +1479,9 @@ local function redraw()
 	scr_reset_clip_rect()
 
 	reset_cmd_state()
-	local bg_color = ui.bg_color('bg'  )[1]
-	local fg_color = ui.fg_color('text')[1]
-	scr_fill(0, 0, screen_w, screen_h, bg_color, fg_color, ' ')
+	bg_color = ui.bg_color'bg'
+	fg_color = ui.fg_color'text'
+	scr_fill(0, 0, screen_w, screen_h, ' ')
 
 	local relayout_count = 0
 	while 1 do
@@ -1434,6 +1516,7 @@ local function redraw()
 			begin_layer(layer_base, i)
 			assert(rec_i == 1)
 			ui.main()
+			fg_stack_check()
 		ui.end_stack()
 		end_layer()
 		frame_end_check()
@@ -1673,8 +1756,9 @@ ui.box_widget = function(cmd, t)
 		end
 	end
 	return ui.widget(cmd, update({
-		hit = box_hit,
+		hittest = box_hit,
 		fr  = box_fr,
+		position = box_position,
 	}, t))
 end
 
@@ -1988,8 +2072,8 @@ ui.box_ct_widget('stack', {
 
 -- box -----------------------------------------------------------------------
 
-local BOX_ID    = BOX_CT_S+0
-local BOX_TITLE = BOX_CT_S+1
+local BOX_ID         = BOX_CT_S+0
+local BOX_TITLE      = BOX_CT_S+1
 
 ui.box_ct_widget('box', {
 
@@ -2663,14 +2747,16 @@ ui.box_ct_widget('scrollbox', {
 
 			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
 			if visible then
+				local fg0, bg0 = fg_color, bg_color
 				if axis == 0 then
-					local bg = ui.bg_color('bg')
-					local fg = ui.bg_color('scrollbar', state)
-					scr_fill(tx, ty, tw, th, bg[1], fg[1], '\u{2587}')
+					fg_color = ui.bg_color('scrollbar', state)
+					scr_fill(tx, ty, tw, th, '\u{2587}')
 				else
-					local fg = ui.bg_color('scrollbar', state)
-					scr_fill(tx, ty, tw, th, fg[1], 0, ' ')
+					fg_color = ui.bg_color('scrollbar')
+					bg_color = ui.bg_color('scrollbar', state)
+					scr_fill(tx, ty, tw, th, ' ')
 				end
+				fg_color, bg_color = fg0, bg0
 			end
 		end
 	end,
@@ -2742,7 +2828,7 @@ end
 
 local split_stack = {}
 
-local function split(hv, id, size, unit, fixed_side,
+local function hvsplit(hv, id, size, unit, fixed_side,
 	split_fr, gap, align, valign, min_w, min_h
 )
 
@@ -2755,7 +2841,7 @@ local function split(hv, id, size, unit, fixed_side,
 	ui.keepalive(id)
 	local s = ui.state(id)
 	local cs = ui.captured(id)
-	local max_size = (cs[W] or s[W] or 1/0) - splitter_w
+	local max_size = (cs and cs[W] or s[W] or 1/0) - splitter_w
 	assert(not unit or unit == 'px' or unit == '%')
 	local fixed = unit == 'px'
 	size = s.size or size
@@ -2800,67 +2886,57 @@ local function split(hv, id, size, unit, fixed_side,
 
 	append(split_stack, hv, id, collapsed, fixed and 1 or 1 - fr)
 
-	ui.sb(id+'.scrollbox1', fr, null, null, null, null, min_size)
+	ui.sb(id..'.scrollbox1', fr, nil, nil, nil, nil, nil, min_size)
 
 	return size
 end
+ui.hsplit = function(...) return hvsplit('h', ...) end
+ui.vsplit = function(...) return hvsplit('v', ...) end
 
-ui.box_widget('splitbar', function()
+ui.box_widget('splitbar_bar', {
 
-	create = function(cmd)
+	ID = BOX_S+1,
 
+	create = function(cmd, hv, id, collapsed, fr2)
+		local st = ui.hit(id) and 'hover' or nil
+		return ui.cmd_box(cmd, 0, 's', 's', 1, 1, hv, id)
+	end,
+
+	measure = function(a, i, axis)
+		local min_wh = 1
+		a[i+2+axis] = min_wh
+		add_ct_min_wh(a, axis, min_wh)
+	end,
+
+	draw = function(a, i)
+		local x = a[i+0]
+		local y = a[i+1]
+		local w = a[i+2]
+		local h = a[i+3]
+		local hv = a[i+BOX_S+0]
+		local id = a[i+BOX_S+1]
+		local fg0 = fg_color
+		local state = ui.hit(id) and 'hover' or nil
+		fg_color = ui.fg_color('text', state)
+		if hv == 'h' then
+			--if x > 0 then add(scr_pairs, x-1, y, '|', '|-') end
+			scr_draw_hline(x, y, w, 'solid')
+		else
+			--if x > 0 then add(scr_pairs, x-1, y, '|', 1, 0, '') end
+			scr_draw_vline(x, y, h, 'solid')
+		end
+		fg_color = fg0
 	end,
 
 })
 
-ui.splitbar = function() {
-
-	ui.end_sb()
-
-	local hit_distance = 10
-
-	local hv, id, collapsed, fr2 = unpack(scope_stack, #scope_stack-3)
-
-	local st = ui.hit(id) and 'hover' or nil
-
-	if hv == 'h' then
-		ui.stack('', 0, 'l', 's', 1, 0)
-			ui.popup('', null, null, 'it', '[]')
-				ui.ml(-hit_distance / 2)
-				ui.stack(id, 0, 'l', 's', hit_distance)
-					ui.stack('', 1, 'c', 's')
-						ui.border('l', 'intense', st)
-					ui.end_stack()
-					if (collapsed) {
-						ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
-							ui.border('lr', 'intense', st)
-						ui.end_stack()
-					}
-				ui.end_stack()
-			ui.end_popup()
-		ui.end_stack()
-	else
-		ui.stack('', 0, 's', 't', 0, 1)
-			ui.popup('', null, null, 'it', '[]')
-				ui.mt(-hit_distance / 2)
-				ui.stack(id, 0, 's', 't', 0, hit_distance)
-					ui.stack('', 1, 's', 'c')
-						ui.border('t', 'intense', st)
-					ui.end_stack()
-					if collapsed then
-						ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 5)
-							ui.border('tb', 'intense', st)
-						ui.end_stack()
-					end
-				ui.end_stack()
-			ui.end_popup()
-		ui.end_stack()
-	end
-
-	ui.sb(id+'.scrollbox2', fr2)
+ui.splitter = function()
+	local hv, id, collapsed, fr2 = unpack(split_stack, #split_stack-3)
+	ui.splitbar_bar(hv, id, collapsed, fr2)
+	ui.sb(id..'.scrollbox2', fr2)
 end
 
-local function end_split(hv)
+local function end_hvsplit(hv)
 	ui.end_sb()
 	if hv == 'h' then
 		ui.end_h()
@@ -2869,12 +2945,8 @@ local function end_split(hv)
 	end
 	popn(split_stack, 4)
 end
-
-ui.hsplit = function(...args) { return split('h', ...args) }
-ui.vsplit = function(...args) { return split('v', ...args) }
-
-ui.end_hsplit = function() { end_split('h') }
-ui.end_vsplit = function() { end_split('v') }
+ui.end_hsplit = function() end_hvsplit('h') end
+ui.end_vsplit = function() end_hvsplit('v') end
 
 --[==[
 -- popup ---------------------------------------------------------------------
@@ -3214,15 +3286,17 @@ end
 
 ui.main = function()
 	ui.v()
-		ui.hsplit()
+		ui.h()
+		--ui.hsplit('hs1')
 			ui.box()
 				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
 			ui.end_box()
-			ui.splitter()
+			ui.splitbar_bar('v', 'sbv1', false, 1)
 			ui.box()
 				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
 			ui.end_box()
-		ui.end_hsplit()
+		ui.end_h()
+		--ui.end_hsplit()
 		ui.h(2)
 			ui.stack('', .5)
 				ui.scrollbox('sb1', 1, 'auto', 'auto', true)
