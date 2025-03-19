@@ -370,12 +370,13 @@ local function rd_input() --read keyboard and mouse input in raw mode
 			elseif c == 54 then if rd() == 126 then ui.key = 'pagedown' end
 			elseif c == 60 then --<
 				local s = rd_to('M', 'm')
-				local b, smx, smy, st = s:match'^(%d+);(%d+);(%d+)([Mm])$'
+				local b, mx, my, st = s:match'^(%d+);(%d+);(%d+)([Mm])$'
 				if not b then
 					assertf(false, 'invalid mouse event sequence: "%s"', term_esc(s))
 				end
-				ui.mx = num(smx)
-				ui.my = num(smy)
+				if DEBUG then dbgf('mouse %d %d %s %s', mx, my, b, st) end
+				ui.mx = num(mx)-1
+				ui.my = num(my)-1
 				if b == '0' then --left button
 					if st == 'M' then
 						ui.click = true
@@ -405,7 +406,6 @@ local function rd_input() --read keyboard and mouse input in raw mode
 				elseif b == '65' then
 					ui.wheel_dy = -1
 				end
-				if DEBUG then dbgf('mouse %d %d %s %s', mx, my, b, st) end
 			elseif c == 73 then --I
 				ui.term_focus_changed = true
 				ui.term_focused = true
@@ -2569,7 +2569,7 @@ ui.box_ct_widget('scrollbox', {
 		-- wheel scrolling
 		if ui.wheel_dy ~= 0 and ui.hit(id) then
 			local sy0 = ui.state(id).scroll_y
-			sy = sy - ui.wheel_dy * 2
+			sy = sy - ui.wheel_dy * 3
 			if not infinite_y then
 				sy = clamp(sy, 0, ch - h)
 			end
@@ -2701,6 +2701,8 @@ ui.box_ct_widget('scrollbox', {
 	end,
 
 })
+ui.sb = ui.scrollbox
+ui.end_sb = ui.end_scrollbox
 
 -- can be used inside the translate phase of a widget to re-scroll a scrollbox
 -- that might have already been scrolled.
@@ -2735,6 +2737,144 @@ end
 ui.scroll_to_view = function(id, x, y, w, h)
 	ui.state(id).scroll_to_view = {x, y, w, h}
 end
+
+-- split ---------------------------------------------------------------------
+
+local split_stack = {}
+
+local function split(hv, id, size, unit, fixed_side,
+	split_fr, gap, align, valign, min_w, min_h
+)
+
+	local snap_px = 50
+	local splitter_w = 1
+
+	local horiz = hv == 'h'
+	local W = horiz and 'w' or 'h'
+	local state, dx, dy = ui.drag(id)
+	ui.keepalive(id)
+	local s = ui.state(id)
+	local cs = ui.captured(id)
+	local max_size = (cs[W] or s[W] or 1/0) - splitter_w
+	assert(not unit or unit == 'px' or unit == '%')
+	local fixed = unit == 'px'
+	size = s.size or size
+	local fr = fixed and 0 or (size or 0.5)
+	local min_size = fixed and size or 0
+	if state and state ~= 'hover' then
+		if state == 'drag' then
+			cs[W] = s[W]
+		end
+		local size_px = fixed and min_size or round(fr * max_size)
+		size_px = size_ps + (horiz and dx or dy)
+		if size_px < snap_px then
+			size_px = 0
+		elseif size_px > max_size - snap_px then
+			size_px = max_size
+		end
+		size_px = min(size_px, max_size)
+		if fixed then
+			min_size = size_px
+		else
+			fr = size_px / max_size
+		end
+		if state == 'drop' then
+			s.size = fixed and min_size or fr
+		end
+	end
+
+	ui[hv](split_fr, gap, align, valign, min_w, min_h)
+
+	if state then
+		ui.measure(id)
+	end
+
+	-- TODO: because max_size is not available on the first frame,
+	-- the `collapsed` state can be wrong on the first frame! find a way...
+	local collapsed
+	if fixed then
+		collapsed = min_size == 0 or (max_size and min_size == max_size)
+	else
+		collapsed = fr == 0 or fr == 1
+	end
+
+	append(split_stack, hv, id, collapsed, fixed and 1 or 1 - fr)
+
+	ui.sb(id+'.scrollbox1', fr, null, null, null, null, min_size)
+
+	return size
+end
+
+ui.box_widget('splitbar', function()
+
+	create = function(cmd)
+
+	end,
+
+})
+
+ui.splitbar = function() {
+
+	ui.end_sb()
+
+	local hit_distance = 10
+
+	local hv, id, collapsed, fr2 = unpack(scope_stack, #scope_stack-3)
+
+	local st = ui.hit(id) and 'hover' or nil
+
+	if hv == 'h' then
+		ui.stack('', 0, 'l', 's', 1, 0)
+			ui.popup('', null, null, 'it', '[]')
+				ui.ml(-hit_distance / 2)
+				ui.stack(id, 0, 'l', 's', hit_distance)
+					ui.stack('', 1, 'c', 's')
+						ui.border('l', 'intense', st)
+					ui.end_stack()
+					if (collapsed) {
+						ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
+							ui.border('lr', 'intense', st)
+						ui.end_stack()
+					}
+				ui.end_stack()
+			ui.end_popup()
+		ui.end_stack()
+	else
+		ui.stack('', 0, 's', 't', 0, 1)
+			ui.popup('', null, null, 'it', '[]')
+				ui.mt(-hit_distance / 2)
+				ui.stack(id, 0, 's', 't', 0, hit_distance)
+					ui.stack('', 1, 's', 'c')
+						ui.border('t', 'intense', st)
+					ui.end_stack()
+					if collapsed then
+						ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 5)
+							ui.border('tb', 'intense', st)
+						ui.end_stack()
+					end
+				ui.end_stack()
+			ui.end_popup()
+		ui.end_stack()
+	end
+
+	ui.sb(id+'.scrollbox2', fr2)
+end
+
+local function end_split(hv)
+	ui.end_sb()
+	if hv == 'h' then
+		ui.end_h()
+	else
+		ui.end_v()
+	end
+	popn(split_stack, 4)
+end
+
+ui.hsplit = function(...args) { return split('h', ...args) }
+ui.vsplit = function(...args) { return split('v', ...args) }
+
+ui.end_hsplit = function() { end_split('h') }
+ui.end_vsplit = function() { end_split('v') }
 
 --[==[
 -- popup ---------------------------------------------------------------------
@@ -3074,9 +3214,15 @@ end
 
 ui.main = function()
 	ui.v()
-		ui.box()
-			ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
-		ui.end_box()
+		ui.hsplit()
+			ui.box()
+				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
+			ui.end_box()
+			ui.splitter()
+			ui.box()
+				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
+			ui.end_box()
+		ui.end_hsplit()
 		ui.h(2)
 			ui.stack('', .5)
 				ui.scrollbox('sb1', 1, 'auto', 'auto', true)
