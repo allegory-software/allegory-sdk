@@ -57,6 +57,7 @@ ARRAYS
 	sort(t, [cmp]) -> t          = table.sort
 	extend(dt, t1, ...) -> dt      extend an array with contents of other arrays
 	append(dt, v1, ...) -> dt      append non-nil values to an array
+	popn(dt, n) -> v1, ...         remove n values from the end and return them
 	shift(t, i, n) -> t            shift array elements
 	slice(t, [i], [j]) -> t        slice an array
 	imap(t, field|f,...) -> t      map f over ipairs of t or pluck field
@@ -904,18 +905,13 @@ local function remove_n(t, i, n)
 	end
 end
 
-local clamp = clamp
-function slice(t, i, j) --TODO: not used. use it or scrape it.
-	local n = t.n or #t
-	i = i or 1
-	j = j or n
-	if i < 0 then i = n - i + 1 end
-	if j < 0 then j = n - i + 1 end
-	i = clamp(i, 1, n)
-	j = clamp(j, 1, n)
-	local dt = {}
-	for i=i,j do dt[i] = t[i] end
-	return dt
+local function _popn(t, n, ...)
+	remove_n(t, #t-n+1, n)
+	return ...
+end
+function popn(t, n)
+	n = min(n, #t)
+	return _popn(t, n, unpack(t, #t-n+1))
 end
 
 --shift all the elements on the right of i (i inclusive), n positions to the
@@ -928,6 +924,20 @@ function shift(t, i, n)
 		remove_n(t, i, -n)
 	end
 	return t
+end
+
+local clamp = clamp
+function slice(t, i, j) --TODO: not used. use it or scrape it.
+	local n = t.n or #t
+	i = i or 1
+	j = j or n
+	if i < 0 then i = n - i + 1 end
+	if j < 0 then j = n - i + 1 end
+	i = clamp(i, 1, n)
+	j = clamp(j, 1, n)
+	local dt = {}
+	for i=i,j do dt[i] = t[i] end
+	return dt
 end
 
 --map `f(k, v, ...) -> v1` over t or extract a column from a list of records.

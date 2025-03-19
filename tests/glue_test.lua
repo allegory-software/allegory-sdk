@@ -122,6 +122,9 @@ test(remove({'a','b','c','d'}, 4, 2), {'a', 'b', 'c'}) --too many
 test(remove({'a','b','c','d'}, 5, 5), {'a', 'b', 'c', 'd'}) --from too far
 test(remove({}, 5, 5), {}) --from too far
 
+test({popn({'a','b','c','d'}, 8)}, {'a','b','c','d'})
+test({popn({'a','b','c','d'}, 2)}, {'c','d'})
+
 test(reverse({}), {})
 test(reverse({5}), {5})
 test(reverse({5, 2}), {2, 5})
