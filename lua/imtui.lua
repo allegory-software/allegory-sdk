@@ -43,6 +43,10 @@ require'rect'
 
 ui = {}
 
+local function array_clear(a)
+	while #a > 0 do del(a) end
+end
+
 --print debugging via `tail -f imtui.log` ------------------------------------
 
 local DEBUG = false
@@ -503,13 +507,40 @@ local function scr_resize()
 	scr2_dirty = true
 end
 
+-- variable stack ------------------------------------------------------------
+
+local varstack = {}
+
+local function varstack_push(varname, ...)
+	append(varstack, varname, ...)
+	push(varstack, select('#', ...))
+end
+
+local function _varstack_pop(want_varname, varname, ...)
+	assertf(want_varname == varname, 'closing %s before %s', want_varname, varname)
+	return ...
+end
+local function varstack_pop(varname)
+	local argn = assertf(pop(varstack), 'closing %s when not open', varname)
+	return _varstack_pop(varname, popn(varstack, argn+1))
+end
+
+local function varstack_check()
+	local failed = #varstack > 0
+	while #varstack > 0 do
+		local argn = pop(varstack)
+		local varname = popn(varstack, argn+1)
+		warnf('%s not closed', varname)
+	end
+	if failed then error'not all vars were closed' end
+end
+
 -- screen clip rect and stack ------------------------------------------------
 
 local scr_x1, scr_y1, scr_x2, scr_y2 --current clip rect (x2,y2 is outside!)
-local scr_clip_rect_stack = {} --{x1, y1, x2, y2; ...}
 
 local function scr_clip(x, y, w, h)
-	append(scr_clip_rect_stack, scr_x1, scr_y1, scr_x2, scr_y2)
+	varstack_push('clip_rect', scr_x1, scr_y1, scr_x2, scr_y2)
 	local x, y, w, h = rect_clip(x, y, w, h,
 		scr_x1,
 		scr_y1,
@@ -523,14 +554,10 @@ local function scr_clip(x, y, w, h)
 end
 
 local function scr_clip_end()
-	assert(#scr_clip_rect_stack >= 4)
-	scr_x1, scr_y1, scr_x2, scr_y2 = popn(scr_clip_rect_stack, 4)
+	scr_x1, scr_y1, scr_x2, scr_y2 = varstack_pop'clip_rect'
 end
 
-local function scr_reset_clip_rect()
-	while #scr_clip_rect_stack > 0 do
-		pop(scr_clip_rect_stack)
-	end
+local function scr_clip_reset()
 	scr_x1 = 0
 	scr_y1 = 0
 	scr_x2 = screen_w
@@ -539,10 +566,10 @@ end
 
 -- writing to cell screen ----------------------------------------------------
 
-local fg_color
-local bg_color
+local scr_fg
+local scr_bg
 
-local function scr_wr(x, y, s)
+local function scr_wr(x, y, s, fg, bg)
 	if not (y >= scr_y1 and y < scr_y2) then return end
 	local i1 = max( 1, scr_x1 - x + 1)
 	local i2 = min(#s, scr_x2 - x)
@@ -556,12 +583,12 @@ local function scr_wr(x, y, s)
 		cell.codepoint = 0
 		cell.text[0] = byte(s, si)
 		cell.text_len = 1
-		cell.fg_color = fg_color[1]
-		cell.bg_color = bg_color[1]
+		cell.fg_color = fg or scr_fg
+		cell.bg_color = bg or scr_bg
 	end
 end
 
-local function scr_wrc(x, y, c) --set single cell
+local function scr_wrc(x, y, c, fg, bg) --set single cell
 	if x < scr_x1 or x >= scr_x2 then return end
 	if y < scr_y1 or y >= scr_y2 then return end
 	assert(#c <= 4)
@@ -571,8 +598,8 @@ local function scr_wrc(x, y, c) --set single cell
 	cell.codepoint = 0
 	copy(cell.text, c, #c)
 	cell.text_len = #c
-	cell.fg_color = fg_color[1]
-	cell.bg_color = bg_color[1]
+	cell.fg_color = fg or scr_fg
+	cell.bg_color = bg or scr_bg
 end
 
 local function scr_each_cell(x, y, w, h, f, ...)
@@ -595,14 +622,14 @@ local function scr_copy_cell(i, scr, cell)
 	assert(i >= 0 and i < screen_w * screen_h)
 	scr[i] = cell
 end
-local function scr_fill(x, y, w, h, text, scr)
+local function scr_fill(x, y, w, h, text, fg, bg)
 	assert(#text > 0 and #text <= 4)
 	cell.data = 0
 	copy(cell.text, text, #text)
 	cell.text_len = #text
-	cell.fg_color = fg_color[1]
-	cell.bg_color = bg_color[1]
-	scr_each_cell(x, y, w, h, scr_copy_cell, scr or scr1, cell)
+	cell.fg_color = fg or scr_fg
+	cell.bg_color = bg or scr_bg
+	scr_each_cell(x, y, w, h, scr_copy_cell, scr1, cell)
 end
 
 --[[
@@ -617,87 +644,77 @@ end
 
 -- writing lines and boxes to cell screen ------------------------------------
 
-local BS_TL = {} --top-left corners
-local BS_TR = {} --top-right corners
-local BS_BL = {} --bottom-left corners
-local BS_BR = {} --bottom-left corners
-BS_TL.straight = '\u{250C}' -- ┌
-BS_TR.straight = '\u{2510}' -- ┐
-BS_BL.straight = '\u{2514}' -- └
-BS_BR.straight = '\u{2518}' -- ┘
-BS_TL.round    = '\u{256D}' -- ╭
-BS_TR.round    = '\u{256E}' -- ╮
-BS_BL.round    = '\u{2570}' -- ╰
-BS_BR.round    = '\u{256F}' -- ╯
+local CCS_TL = {} --top-left corner chars
+local CCS_TR = {} --top-right corner chars
+local CCS_BL = {} --bottom-left corner chars
+local CCS_BR = {} --bottom-left corner chars
+CCS_TL.straight = '┌'
+CCS_TR.straight = '┐'
+CCS_BL.straight = '└'
+CCS_BR.straight = '┘'
+CCS_TL.round    = '╭'
+CCS_TR.round    = '╮'
+CCS_BL.round    = '╰'
+CCS_BR.round    = '╯'
+CCS_TL.double   = '╔'
+CCS_TR.double   = '╗'
+CCS_BL.double   = '╚'
+CCS_BR.double   = '╝'
 
-local B_TL = BS_TL.straight
-local B_TR = BS_TR.straight
-local B_BL = BS_BL.straight
-local B_BR = BS_BR.straight
-local corner_style_stack = {}
-function ui.corner_style(s)
-	append(corner_style_stack, B_TL, B_TR, B_BL, B_BR)
-	B_TL = assertf(BS_TL[s], 'invalid corner style: %s', s)
-	B_TR = assertf(BS_TR[s], 'invalid corner style: %s', s)
-	B_BL = assertf(BS_BL[s], 'invalid corner style: %s', s)
-	B_BR = assertf(BS_BR[s], 'invalid corner style: %s', s)
-end
-function ui.end_corner_style(s)
-	B_TL, B_TR, B_BL, B_BR = popn(corner_style_stack, 4)
+local CC_TL, CC_TR, CC_BL, CC_BR
+function scr_set_corner_style(s)
+	CC_TL = CCS_TL[s]
+	CC_TR = CCS_TR[s]
+	CC_BL = CCS_BL[s]
+	CC_BR = CCS_BR[s]
 end
 
-local BS_H = {} --horizontal lines
-local BS_V = {} --vertical lines
-BS_H.solid  = '\u{2500}' -- ─
-BS_V.solid  = '\u{2502}' -- │
-BS_H.dotted = '\u{2508}' -- ┈
-BS_V.dotted = '\u{250A}' -- ┊
-BS_H.dashed = '\u{2504}' -- ┄
-BS_V.dashed = '\u{2506}' -- ┆
-BS_H.double = '\u{2550}' -- ═
-BS_V.double = '\u{2551}' -- ║
+local LCS_H = {} --horizontal line chars
+local LCS_V = {} --vertical line chars
+LCS_H.solid  = '─'
+LCS_V.solid  = '│'
+LCS_H.dotted = '┈'
+LCS_V.dotted = '┊'
+LCS_H.dashed = '┄'
+LCS_V.dashed = '┆'
+LCS_H.double = '═'
+LCS_V.double = '║'
 
-local B_H = BS_H.solid
-local B_V = BS_V.solid
-local line_style_stack = {}
-function ui.line_style(s)
-	append(line_style_stack, B_H, B_V)
-	B_H = assertf(BS_H[s], 'invalid line style: %s', s)
-	B_V = assertf(BS_V[s], 'invalid line style: %s', s)
-end
-function ui.end_line_style()
-	B_H, B_V = popn(line_style_stack, 2)
+local LC_H, LC_V
+function scr_set_line_style(s)
+	LC_H = LCS_H[s]
+	LC_V = LCS_V[s]
 end
 
-local function scr_draw_hline(x, y, w)
+local function scr_draw_hline(x, y, w, fg, bg)
 	for i=0,w-1 do
-		scr_wrc(x+i, y, B_H)
+		scr_wrc(x+i, y, LC_H, fg, bg)
 	end
 end
 
-local function scr_draw_vline(x, y, h)
+local function scr_draw_vline(x, y, h, fg, bg)
 	for i=0,h-1 do
-		scr_wrc(x, y+i, B_V)
+		scr_wrc(x, y+i, LC_V, fg, bg)
 	end
 end
 
-local function scr_draw_box(x, y, w, h)
-	scr_wrc(x    , y    , B_TL)
-	scr_wrc(x+w-1, y    , B_TR)
-	scr_wrc(x    , y+h-1, B_BL)
-	scr_wrc(x+w-1, y+h-1, B_BR)
-	scr_draw_hline(x+1  , y    , w-2)
-	scr_draw_hline(x+1  , y+h-1, w-2)
-	scr_draw_vline(x    , y+1  , h-2)
-	scr_draw_vline(x+w-1, y+1  , h-2)
+local function scr_draw_box(x, y, w, h, fg, bg)
+	scr_wrc(x    , y    , CC_TL, fg, bg)
+	scr_wrc(x+w-1, y    , CC_TR, fg, bg)
+	scr_wrc(x    , y+h-1, CC_BL, fg, bg)
+	scr_wrc(x+w-1, y+h-1, CC_BR, fg, bg)
+	scr_draw_hline(x+1  , y    , w-2, fg, bg)
+	scr_draw_hline(x+1  , y+h-1, w-2, fg, bg)
+	scr_draw_vline(x    , y+1  , h-2, fg, bg)
+	scr_draw_vline(x+w-1, y+1  , h-2, fg, bg)
 end
 
 --"T" connectors
-local T_HL = '\u{251C}' -- ├
-local T_HR = '\u{2524}' -- ┤
-local T_VL = '\u{2534}' -- ┴
-local T_VR = '\u{252C}' -- ┬
-local T_X  = '\u{253c}' -- ┼
+local T_HL = '├'
+local T_HR = '┤'
+local T_VL = '┴'
+local T_VR = '┬'
+local T_X  = '┼'
 
 -- imgui themes and colors ---------------------------------------------------
 
@@ -1094,27 +1111,21 @@ function free_rec(a)
 	--rec_freelist.free(a)
 end
 
-local rec_stack = {}
-
 ui.start_recording = function()
 	local a1 = rec()
-	add(rec_stack, a)
+	varstack_push('rec', a)
 	a = a1
 end
 
 ui.end_recording = function()
 	local a1 = a
-	a = del(rec_stack)
+	a = varstack_pop'rec'
 	return a1
 end
 
 ui.play_recording = function(a1)
 	extend(a, a1)
 	--free_rec(a1)
-end
-
-function rec_stack_check()
-	assert(#rec_stack == 0, 'recordings left unplayed')
 end
 
 -- secondary command recordings ----------------------------------------------
@@ -1187,12 +1198,11 @@ ui.layer('tooltip', 4)
 ui.layer('open'   , 5) -- dropdowns, must cover tooltips
 ui.layer('handle' , 6) -- dragged object
 
-local layer_stack = {} -- {layer1_i, ...}
 local current_layer    -- set while building
 local current_layer_i  -- set while drawing
 
 local function begin_layer(layer, ct_i, z_index)
-	add(layer_stack, current_layer)
+	varstack_push('layer', current_layer)
 	-- NOTE: only adding the cmd to the layer if the current layer actually
 	-- changes otherwise it will be drawn twice!
 	-- TODO: because of the condition below, start_recording on a layer and
@@ -1207,16 +1217,7 @@ local function begin_layer(layer, ct_i, z_index)
 end
 
 local function end_layer()
-	current_layer = del(layer_stack)
-end
-
-local function layer_stack_check()
-	if #layer_stack > 0 then
-		for _,layer in ipairs(layer_stack) do
-			warnf('layer %s not closed', layer.name)
-		end
-		assert(false)
-	end
+	current_layer = varstack_pop'layer'
 end
 
 -- container stack -----------------------------------------------------------
@@ -1230,33 +1231,12 @@ function ui.ct_i() return assert(ct_stack[#ct_stack], 'no container') end
 function ui.rel_ct_i() return ui.ct_i() - #a + 2 end
 
 local function ct_stack_check()
-	if #ct_stack > 0 then
-		for _,i in ipairs(ct_stack) do
-			warnf('%s not closed', a[i-1].name)
-		end
-		assert(false, 'not all containers were closed')
+	local failed = #ct_stack > 0
+	while #ct_stack > 0 do
+		local i = pop(ct_stack)
+		warnf('%s not closed', a[i-1].name)
 	end
-end
-
--- fg stack ------------------------------------------------------------------
-
-local fg_stack = {} --{fg1, ...}
-function ui.fg(...)
-	add(fg_stack, assert(fg_color))
-	fg_color = ui.fg_color(...)
-end
-
-function ui.end_fg()
-	fg_color = assert(pop(fg_stack))
-end
-
-local function fg_stack_check()
-	if #fg_stack > 0 then
-		for _,fg in ipairs(fg_stack) do
-			warnf('fg not closed: %s', fg)
-		end
-		assert(false, 'fg_end() missing')
-	end
+	if failed then error'not all containers were closed' end
 end
 
 -- measuring phases (per-axis) -----------------------------------------------
@@ -1357,17 +1337,6 @@ local function draw_layers(layers, recs)
 	end
 end
 
-local function draw_frame(recs, layers)
-	local theme_stack_length0 = #theme_stack
-	add(theme_stack, theme)
-
-	draw_layers(layers, recs)
-	assert(current_layer_i == nil)
-
-	theme = del(theme_stack)
-	assertf(#theme_stack == theme_stack_length0, 'theme stack not empty: %d', #theme_stack)
-end
-
 -- hit-testing phase ---------------------------------------------------------
 
 --local hit_state_map_freelist = map_freelist()
@@ -1438,6 +1407,29 @@ local function hit_frame(recs, layers)
 
 end
 
+-- measuring requests --------------------------------------------------------
+
+local measure_req = {}
+
+ui.measure = function(dest)
+	local i = ui.ct_i()
+	append(measure_req, dest, a, i)
+end
+
+function measure_req_all()
+	for k = 1, #measure_req, 3 do
+		local dest = measure_req[k+0]
+		local a    = measure_req[k+1]
+		local i    = measure_req[k+2]
+		local s = isstr(dest) and ui.state(dest) or dest
+		s.x = a[i+0]
+		s.y = a[i+1]
+		s.w = a[i+2]
+		s.h = a[i+3]
+	end
+	array_clear(measure_req)
+end
+
 --imgui loop -----------------------------------------------------------------
 
 local want_relayout
@@ -1462,13 +1454,6 @@ local function layout_rec(a, x, y, w, h)
 	translate_rec(a, x, y)
 end
 
-local function frame_end_check()
-	ct_stack_check(a)
-	layer_stack_check()
-	--scope_stack_check()
-	rec_stack_check()
-end
-
 ui.frame_changed = noop
 
 ui.focusables = {}
@@ -1476,12 +1461,8 @@ ui.focusables = {}
 local function redraw()
 
 	--term_reset_styles()
-	scr_reset_clip_rect()
 
 	reset_cmd_state()
-	bg_color = ui.bg_color'bg'
-	fg_color = ui.fg_color'text'
-	scr_fill(0, 0, screen_w, screen_h, ' ')
 
 	local relayout_count = 0
 	while 1 do
@@ -1501,7 +1482,7 @@ local function redraw()
 		end
 		ui.focusables = {}
 
-		--measure_req_all()
+		measure_req_all()
 
 		clear_layers()
 		free_recs()
@@ -1516,10 +1497,10 @@ local function redraw()
 			begin_layer(layer_base, i)
 			assert(rec_i == 1)
 			ui.main()
-			fg_stack_check()
 		ui.end_stack()
 		end_layer()
-		frame_end_check()
+		varstack_check()
+		ct_stack_check()
 
 		local a = end_rec()
 		layout_rec(a, 0, 0, screen_w, screen_h)
@@ -1531,7 +1512,23 @@ local function redraw()
 
 			--wr'\27[2J' --clear screen
 
-			draw_frame(recs, layers)
+			local theme_stack_length0 = #theme_stack
+			add(theme_stack, theme)
+
+			scr_set_line_style'solid'
+			scr_set_corner_style'straight'
+
+			scf_fg = ui.fg_color('text')[1]
+			scr_bg = ui.bg_color('bg')[1]
+
+			scr_fill(0, 0, screen_w, screen_h, ' ')
+
+			draw_layers(layers, recs)
+			assert(current_layer_i == nil)
+
+			theme = del(theme_stack)
+			assertf(#theme_stack == theme_stack_length0,
+				'theme stack not empty: %d', #theme_stack)
 
 			ui.frame_changed()
 		end
@@ -1581,6 +1578,60 @@ ui.widget = function(cmd, t)
 	return class
 end
 
+-- state pseudo-widgets ------------------------------------------------------
+
+ui.widget('set_corner_style', {
+	create = function(cmd, s) return ui.cmd(cmd, s) end,
+	draw = function(a, i) scr_set_corner_style(a[i+0]) end,
+})
+
+local corner_style = 'straight'
+function ui.corner_style(s)
+	if corner_style == s then return end
+	assertf(CCS_TL[s], 'invalid corner style %s', s)
+	varstack_push('corner_style', corner_style)
+	ui.set_corner_style(s)
+end
+function ui.end_corner_style(s)
+	corner_style = varstack_pop'corner_style'
+end
+
+ui.widget('set_line_style', {
+	create = function(cmd, s) return ui.cmd(cmd, s) end,
+	draw = function(a, i) scr_set_line_style(a[i+0]) end,
+})
+
+local line_style = 'solid'
+function ui.line_style(s)
+	if line_style == s then return end
+	assertf(LCS_H[s], 'invalid line style %s', s)
+	varstack_push('line_style', line_style)
+	line_style = s
+	ui.set_line_style(s)
+end
+function ui.end_line_style()
+	line_style = varstack_pop'line_style'
+end
+
+ui.widget('set_fg', {
+	create = function(cmd, s) return ui.cmd(cmd, s) end,
+	draw = function(a, i) scr_fg = a[i+0] end,
+})
+
+local fg
+function ui.fg(...)
+	local fg1 = ui.fg_color(...)[1]
+	if fg == fg1 then return end
+	assert(fg1)
+	varstack_push('fg', fg)
+	fg = fg1
+	ui.set_fg(fg)
+end
+
+function ui.end_fg()
+	fg = varstack_pop'fg'
+end
+
 -- set_layer command ---------------------------------------------------------
 
 local SET_LAYER_Z_INDEX = 2
@@ -1594,9 +1645,9 @@ ui.widget('set_layer', {
 	-- puts a cmd on a layer. the reason for generating a set_layer command
 	-- instead of just doing the work here is because we might be in a command
 	-- recording and thus we don't know the final ct_i after the recording is played.
-	create = function(_, layer, ct_i, z_index)
+	create = function(cmd, layer, ct_i, z_index)
 		ct_i = ct_i or ui.ct_i()
-		local i = ui.cmd('set_layer', layer.i, ct_i, z_index or 0)
+		local i = ui.cmd(cmd, layer.i, ct_i, z_index or 0)
 		a[i+1] = a[i+1] - i -- make ct_i relative
 	end,
 
@@ -2074,6 +2125,7 @@ ui.box_ct_widget('stack', {
 
 local BOX_ID         = BOX_CT_S+0
 local BOX_TITLE      = BOX_CT_S+1
+local BOX_LINE_STYLE = BOX_CT_S+2
 
 ui.box_ct_widget('box', {
 
@@ -2082,7 +2134,8 @@ ui.box_ct_widget('box', {
 	create = function(cmd, id, title, align, valign, min_w, min_h)
 		return ui.cmd_box_ct(cmd, fr or 1, align, valign, min_w, min_h,
 			id or '',
-			title or ''
+			title or '',
+			line_style
 		)
 	end,
 
@@ -2116,6 +2169,7 @@ ui.box_ct_widget('box', {
 		local y = a[i+1]
 		local w = a[i+2]
 		local h = a[i+3]
+		scr_set_line_style(a[i+BOX_LINE_STYLE])
 		scr_draw_box(x, y, w, h)
 	end,
 })
@@ -2125,10 +2179,6 @@ ui.box_ct_widget('box', {
 local function measure_text(s)
 	--TODO: break by graphemes
 	return #s
-end
-
-local function array_clear(a)
-	while #a > 0 do del(a) end
 end
 
 local function word_wrapper()
@@ -2362,8 +2412,6 @@ ui.box_widget('text', {
 		local wrap = a[i+TEXT_WRAP]
 		local editable = a[i+TEXT_EDITABLE]
 
-		local col = ui.fg_color('text') --TODO: color, color_state)
-
 		if editable then
 			local input = ui.state(id).input
 			input.value = s
@@ -2438,12 +2486,13 @@ end
 
 -- scrollbox -----------------------------------------------------------------
 
-local SB_BOXED    = BOX_CT_S+0
-local SB_OVERFLOW = BOX_CT_S+1 -- overflow x,y
-local SB_CW       = BOX_CT_S+3 -- content w,h
-local SB_ID       = BOX_CT_S+5
-local SB_SX       = BOX_CT_S+6 -- scroll x,y
-local SB_STATE    = BOX_CT_S+8 -- hit state x,y
+local SB_BOXED      = BOX_CT_S+0
+local SB_OVERFLOW   = BOX_CT_S+1 -- overflow x,y
+local SB_CW         = BOX_CT_S+3 -- content w,h
+local SB_ID         = BOX_CT_S+5
+local SB_SX         = BOX_CT_S+6 -- scroll x,y
+local SB_STATE      = BOX_CT_S+8 -- hit state x,y
+local SB_LINE_STYLE = BOX_CT_S+9
 
 function parse_sb_overflow(s)
 	if s == nil    or s == 'auto'   then return 'auto'   end
@@ -2580,7 +2629,8 @@ ui.box_ct_widget('scrollbox', {
 			id,
 			sx, -- scroll x
 			sy, -- scroll y
-			0 -- state
+			0, -- state
+			line_style
 		)
 		if sx ~= 0 then ss.scroll_x = sx end
 		if sy ~= 0 then ss.scroll_y = sy end
@@ -2727,7 +2777,8 @@ ui.box_ct_widget('scrollbox', {
 		local h = a[i+3]
 
 		if a[i+SB_BOXED] then
-			scr_draw_box(x, y, w, h)
+			scr_set_line_style(a[i+SB_LINE_STYLE])
+			scr_draw_box(x, y, w, h, line_char_h, line_char_v)
 		end
 
 		local x, y, w, h = scrollbox_geometry(a, i)
@@ -2747,16 +2798,14 @@ ui.box_ct_widget('scrollbox', {
 
 			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
 			if visible then
-				local fg0, bg0 = fg_color, bg_color
 				if axis == 0 then
-					fg_color = ui.bg_color('scrollbar', state)
-					scr_fill(tx, ty, tw, th, '\u{2587}')
+					local fg = ui.bg_color('scrollbar', state)[1]
+					scr_fill(tx, ty, tw, th, '\u{2587}', fg)
 				else
-					fg_color = ui.bg_color('scrollbar')
-					bg_color = ui.bg_color('scrollbar', state)
-					scr_fill(tx, ty, tw, th, ' ')
+					local fg = ui.bg_color('scrollbar')[1]
+					local bg = ui.bg_color('scrollbar', state)[1]
+					scr_fill(tx, ty, tw, th, ' ', fg, bg)
 				end
-				fg_color, bg_color = fg0, bg0
 			end
 		end
 	end,
@@ -2917,13 +2966,13 @@ ui.box_widget('splitbar_bar', {
 		local id = a[i+BOX_S+1]
 		local fg0 = fg_color
 		local state = ui.hit(id) and 'hover' or nil
-		fg_color = ui.fg_color('text', state)
+		local fg = ui.fg_color('text', state)[1]
 		if hv == 'h' then
 			--if x > 0 then add(scr_pairs, x-1, y, '|', '|-') end
-			scr_draw_hline(x, y, w, 'solid')
+			scr_draw_hline(x, y, w)
 		else
 			--if x > 0 then add(scr_pairs, x-1, y, '|', 1, 0, '') end
-			scr_draw_vline(x, y, h, 'solid')
+			scr_draw_vline(x, y, h)
 		end
 		fg_color = fg0
 	end,
@@ -2931,8 +2980,9 @@ ui.box_widget('splitbar_bar', {
 })
 
 ui.splitter = function()
+	ui.end_sb()
 	local hv, id, collapsed, fr2 = unpack(split_stack, #split_stack-3)
-	ui.splitbar_bar(hv, id, collapsed, fr2)
+	ui.splitbar_bar(hv == 'v' and 'h' or 'v', id, collapsed, fr2)
 	ui.sb(id..'.scrollbox2', fr2)
 end
 
@@ -3285,18 +3335,20 @@ end
 --demo -----------------------------------------------------------------------
 
 ui.main = function()
+	ui.line_style'dashed'
+	ui.corner_style'round'
 	ui.v()
 		ui.h()
-		--ui.hsplit('hs1')
+		ui.hsplit('hs1')
 			ui.box()
 				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
 			ui.end_box()
-			ui.splitbar_bar('v', 'sbv1', false, 1)
+			ui.splitter() --'v', 'sbv1', false, 1)
 			ui.box()
 				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
 			ui.end_box()
 		ui.end_h()
-		--ui.end_hsplit()
+		ui.end_hsplit()
 		ui.h(2)
 			ui.stack('', .5)
 				ui.scrollbox('sb1', 1, 'auto', 'auto', true)
@@ -3318,6 +3370,8 @@ Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a
 			--ui.end_scrollbox()
 		ui.end_h()
 	ui.end_v()
+	ui.end_corner_style()
+	ui.end_line_style()
 end
 
 --main -----------------------------------------------------------------------
@@ -3335,6 +3389,7 @@ wr'\27]11;?\7' --get terminal background color
 wr_flush()
 
 scr_resize()
+scr_clip_reset()
 
 --signals thread to capture Ctrl+C and terminal window resize events.
 resume(thread(function()
@@ -3344,6 +3399,7 @@ resume(thread(function()
 		local si = sigf:read_signal()
 		if si.signo == SIGWINCH then
 			scr_resize()
+			scr_clip_reset()
 			redraw()
 		elseif si.signo == SIGINT then
 			stop()
