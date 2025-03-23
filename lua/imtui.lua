@@ -1,3 +1,4 @@
+--go@ ssh root@10.0.0.8 -ic:\users\cosmin\.ssh\id_rsa tail -f imtui.log
 --[[
 
 	Immediate Mode Text User Interface library for Linux terminals.
@@ -451,8 +452,8 @@ union {
 			uint8_t  text[4];
 		};
 		uint8_t text_len;
-		uint8_t fg_color;
-		uint8_t bg_color;
+		uint8_t fg;
+		uint8_t bg;
 		uint8_t flags;
 	};
 }
@@ -484,8 +485,8 @@ local function scr_flush()
 						local i = y * screen_w + x
 						assert(i >= 0 and i < screen_w * screen_h)
 						local cell1 = scr1[i]
-						wr_set_bg(cell1.bg_color)
-						wr_set_fg(cell1.fg_color)
+						wr_set_bg(cell1.bg)
+						wr_set_fg(cell1.fg)
 						assert(cell1.text_len > 0)
 						wr(cell1.text, cell1.text_len)
 					end
@@ -526,13 +527,13 @@ local function varstack_pop(varname)
 end
 
 local function varstack_check()
-	local failed = #varstack > 0
+	local ok = #varstack == 0
 	while #varstack > 0 do
 		local argn = pop(varstack)
 		local varname = popn(varstack, argn+1)
 		warnf('%s not closed', varname)
 	end
-	if failed then error'not all vars were closed' end
+	return ok
 end
 
 -- screen clip rect and stack ------------------------------------------------
@@ -564,13 +565,10 @@ local function scr_clip_reset()
 	scr_y2 = screen_h
 end
 
--- writing to cell screen ----------------------------------------------------
+-- writing into the cell screen ----------------------------------------------
 
-local scr_fg
-local scr_bg
-
-local function scr_wr(x, y, s, fg, bg)
-	if not (y >= scr_y1 and y < scr_y2) then return end
+local function scr_wr(x, y, s, fg, bg) --set text
+	if y < scr_y1 or y >= scr_y2 then return end
 	local i1 = max( 1, scr_x1 - x + 1)
 	local i2 = min(#s, scr_x2 - x)
 	--TODO: split text by codepoints.
@@ -583,8 +581,8 @@ local function scr_wr(x, y, s, fg, bg)
 		cell.codepoint = 0
 		cell.text[0] = byte(s, si)
 		cell.text_len = 1
-		cell.fg_color = fg or scr_fg
-		cell.bg_color = bg or scr_bg
+		if fg then cell.fg = fg end
+		if bg then cell.bg = bg end
 	end
 end
 
@@ -598,8 +596,8 @@ local function scr_wrc(x, y, c, fg, bg) --set single cell
 	cell.codepoint = 0
 	copy(cell.text, c, #c)
 	cell.text_len = #c
-	cell.fg_color = fg or scr_fg
-	cell.bg_color = bg or scr_bg
+	if fg then cell.fg = fg end
+	if bg then cell.bg = bg end
 end
 
 local function scr_each_cell(x, y, w, h, f, ...)
@@ -609,40 +607,45 @@ local function scr_each_cell(x, y, w, h, f, ...)
 		scr_x2 - scr_x1,
 		scr_y2 - scr_y1
 	)
+	if w == 0 or h == 0 then return end
+	assert(x >= 0 and y >= 0 and x+w-1 < screen_w and y+h-1 < screen_h)
 	for y = y, y+h-1 do
 		for x = x, x+w-1 do
-			f(y * screen_w + x, ...)
+			local i = y * screen_w + x
+			f(i, ...)
 		end
 	end
 end
 
 local cell = cell_ct()
+local function scr_copy_cell(i, cell)
+	scr1[i] = cell
+end
+local function scr_set_cell(i, text, fg, bg)
+	if text then
+		assert(#text > 0 and #text <= 4)
+		scr1[i].codepoint = 0
+		copy(scr1[i].text, text, #text)
+		scr1[i].text_len = #text
+	end
+	if fg then scr1[i].fg = fg end
+	if bg then scr1[i].bg = bg end
+end
+local function scr_fill(x, y, w, h, text, fg, bg) --fill a box of cells
+	if text and fg and bg then
+		assert(#text > 0 and #text <= 4)
+		cell.data = 0
+		copy(cell.text, text, #text)
+		cell.text_len = #text
+		cell.fg = fg
+		cell.bg = bg
+		scr_each_cell(x, y, w, h, scr_copy_cell, cell)
+	else
+		scr_each_cell(x, y, w, h, scr_set_cell, text, fg, bg)
+	end
+end
 
-local function scr_copy_cell(i, scr, cell)
-	assert(i >= 0 and i < screen_w * screen_h)
-	scr[i] = cell
-end
-local function scr_fill(x, y, w, h, text, fg, bg)
-	assert(#text > 0 and #text <= 4)
-	cell.data = 0
-	copy(cell.text, text, #text)
-	cell.text_len = #text
-	cell.fg_color = fg or scr_fg
-	cell.bg_color = bg or scr_bg
-	scr_each_cell(x, y, w, h, scr_copy_cell, scr1, cell)
-end
-
---[[
-local function scr_set_bg_color_cell(i, bg_color)
-	assert(i >= 0 and i < screen_w * screen_h)
-	scr1[i].bg_color = bg_color
-end
-local function scr_set_bg_color(bg_color, x, y, w, h)
-	scr_each_cell(x, y, w, h, scr_set_bg_color_cell, bg_color)
-end
-]]
-
--- writing lines and boxes to cell screen ------------------------------------
+-- writing lines and boxes into the cell screen ------------------------------
 
 local CCS_TL = {} --top-left corner chars
 local CCS_TR = {} --top-right corner chars
@@ -662,11 +665,16 @@ CCS_BL.double   = '╚'
 CCS_BR.double   = '╝'
 
 local CC_TL, CC_TR, CC_BL, CC_BR
+local scr_corner_style
 function scr_set_corner_style(s)
+	local s0 = scr_corner_style
+	if s == s0 then return s0 end
 	CC_TL = CCS_TL[s]
 	CC_TR = CCS_TR[s]
 	CC_BL = CCS_BL[s]
 	CC_BR = CCS_BR[s]
+	scr_corner_style = s
+	return s0
 end
 
 local LCS_H = {} --horizontal line chars
@@ -681,9 +689,14 @@ LCS_H.double = '═'
 LCS_V.double = '║'
 
 local LC_H, LC_V
+local scr_line_style
 function scr_set_line_style(s)
+	local s0 = scr_line_style
+	if s == s0 then return s0 end
 	LC_H = LCS_H[s]
 	LC_V = LCS_V[s]
+	scr_line_style = s
+	return s0
 end
 
 local function scr_draw_hline(x, y, w, fg, bg)
@@ -716,7 +729,7 @@ local T_VL = '┴'
 local T_VR = '┬'
 local T_X  = '┼'
 
--- imgui themes and colors ---------------------------------------------------
+-- themes and colors ---------------------------------------------------------
 
 local themes = {}
 
@@ -735,6 +748,10 @@ theme_make('dark' , true)
 
 local theme --current theme, dynamic, part of command state, based on set_bg().
 ui.app_theme = nil --app theme, set by the user.
+
+local function reset_theme()
+	theme = themes[ui.app_theme or (term_is_dark and 'dark' or 'light')]
+end
 
 local parse_state_combis = memoize(function(s)
 	return cat(sort(collect(words(trim(s)))), ' ') --normalize state combinations
@@ -766,8 +783,8 @@ local function def_color_func(k)
 			return
 		end
 		local state = parse_state(state)
-		if istab(h) then --color def to copy
-			states[state][name] = h
+		if istab(L) then --color def to copy
+			states[state][name] = L
 		else
 			local ansi_color = hsl_to_color(h, s, L)
 			attr(states, state)[name] = {ansi_color, is_dark or L < .5}
@@ -785,7 +802,7 @@ local function lookup_color_func(k)
 			assert(false, 'no ' .. k .. ' for (' .. name .. ', ' ..
 				state .. ', ' .. theme1.name .. ')')
 		end
-		return c
+		return c[1], c[2], c
 	end
 end
 
@@ -805,11 +822,15 @@ ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
 ui.fg_style('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
 ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
 
+ui.fg_style('dark' , 'title'  , 'normal' ,   0, 0.00, 0.90)
+ui.fg_style('dark' , 'title'  , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_style('dark' , 'title'  , 'active' ,   0, 0.00, 1.00)
 ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
 ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
 ui.fg_style('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95)
-ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90)
+ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.80)
+ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_style('dark' , 'label'  , 'active' ,   0, 0.00, 1.00)
 ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
 ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
 ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
@@ -842,24 +863,17 @@ ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0)
 ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0)
 ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57) -- TODO
 
-ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1)
-ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1)
-ui.border_style('dark' , 'intense' , 'normal' ,   0,    0,    1)
-ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0,    1)
-ui.border_style('dark' , 'max'     , 'normal' ,   0,    0,    1)
+ui.border_style('dark' , 'light'   , 'normal' ,   0,    0, 0.35)
+ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0, 0.03)
+ui.border_style('dark' , 'intense' , 'normal' ,   0,    0, 0.20)
+ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0, 0.40)
+ui.border_style('dark' , 'max'     , 'normal' ,   0,    0, 1.00)
 ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57)
 
 -- background colors ---------------------------------------------------------
 
 ui.bg_style = def_color_func'bg'
 ui.bg_color = lookup_color_func'bg'
-
-local function set_bg(color, state)
-	assert(isstr(color))
-	local c = ui.bg_color(color, state)
-	local is_dark = c[2]
-	theme = is_dark and themes.dark or themes.light
-end
 
 --           theme    name      state       h     s     L
 ------------------------------------------------------------------------------
@@ -882,9 +896,9 @@ ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
 ui.bg_style('light', 'input' , 'active' ,   0, 0.00, 0.90)
 
 ui.bg_style('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
-ui.bg_style('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
-ui.bg_style('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
-ui.bg_style('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
+ui.bg_style('dark' , 'bg'    , 'normal' , 216, 0.00, 0.10)
+ui.bg_style('dark' , 'bg'    , 'hover'  , 216, 0.00, 0.25)
+ui.bg_style('dark' , 'bg'    , 'active' , 216, 0.00, 0.14)
 ui.bg_style('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
 ui.bg_style('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
 ui.bg_style('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
@@ -960,11 +974,11 @@ ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0
 ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
 ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
---[[ state maps --------------------------------------------------------------
+--[[ widget state ------------------------------------------------------------
 
 Persistence between frames is kept in per-id state maps. Widgets need to
-call keepalive(id) otherwise their state map is garbage-collected at the end
-of the frame. Widgets can also register a `free` callback to be called if
+call ui.keepalive(id) otherwise their state map is garbage-collected at the
+end of the frame. Widgets can also register a `free` callback to be called if
 the widget doesn't appear again on a future frame. State updates should be
 done inside an update callback registered with keepalive() so that the widget
 state can be updated in advance of the widget appearing in the frame in case
@@ -1023,12 +1037,6 @@ end
 ui.on_free = function(id, free1)
 	local s = ui.state(id)
 	after(s, 'free', free1)
-end
-
--- command state -------------------------------------------------------------
-
-local function reset_cmd_state()
-	theme = themes[ui.app_theme or (term_is_dark and 'dark' or 'light')]
 end
 
 -- current command recording -------------------------------------------------
@@ -1097,18 +1105,8 @@ end
 
 -- command recordings --------------------------------------------------------
 
---local rec_freelist = array_freelist()
-
 function rec()
-	local a = {} --rec_freelist.alloc()
-	return a
-end
-
-function free_rec(a)
-	--a.length = 0
-	--if (a.nohit_set)
-	--	a.nohit_set.clear()
-	--rec_freelist.free(a)
+	return {}
 end
 
 ui.start_recording = function()
@@ -1125,7 +1123,6 @@ end
 
 ui.play_recording = function(a1)
 	extend(a, a1)
-	--free_rec(a1)
 end
 
 -- secondary command recordings ----------------------------------------------
@@ -1148,10 +1145,7 @@ local function end_rec(a0)
 	return a1
 end
 
-local function free_recs()
-	--for _,a in ipairs(recs) do
-	--	free_rec(a)
-	--recs.length = 0
+local function clear_recs()
 	recs = {}
 end
 
@@ -1231,12 +1225,12 @@ function ui.ct_i() return assert(ct_stack[#ct_stack], 'no container') end
 function ui.rel_ct_i() return ui.ct_i() - #a + 2 end
 
 local function ct_stack_check()
-	local failed = #ct_stack > 0
+	local ok = #ct_stack == 0
 	while #ct_stack > 0 do
 		local i = pop(ct_stack)
 		warnf('%s not closed', a[i-1].name)
 	end
-	if failed then error'not all containers were closed' end
+	return ok
 end
 
 -- measuring phases (per-axis) -----------------------------------------------
@@ -1295,23 +1289,13 @@ end
 
 -- drawing phase -------------------------------------------------------------
 
-local theme_stack = {}
-
 local function draw_cmd(a, i, recs)
 	local next_ext_i = cmd_next_ext_i(a, i)
 	while i < next_ext_i do
 		local cmd = a[i-1]
-		if cmd.is_ct then
-			add(theme_stack, theme)
-		elseif cmd.is_end then
-			theme = del(theme_stack)
-		end
 		local draw_f = cmd.draw
 		if draw_f and draw_f(a, i, recs) then
 			i = cmd_next_ext_i(a, i)
-			if cmd.is_ct then
-				theme = del(theme_stack)
-			end
 		else
 			i = i + a[i-2] --next_i
 		end
@@ -1322,7 +1306,6 @@ local function draw_layer(layer_i, indexes, recs)
 	local prev_layer_i = current_layer_i
 	--[[global]] current_layer_i = layer_i
 	for k = 1, #indexes, 3 do
-		reset_cmd_state()
 		local rec_i = indexes[k]
 		local i     = indexes[k+1]
 		local a = recs[rec_i]
@@ -1363,6 +1346,7 @@ function ui.hit_match(prefix)
 			return id:sub(#prefix+1)
 		end
 	end
+	return nil
 end
 
 function ui.hover(id)
@@ -1375,7 +1359,6 @@ local function hit_layer(layer, recs)
 	--iterate layer's cointainers in reverse order.
 	local indexes = layer.indexes
 	for k = #indexes-2, 1, -3 do
-		reset_cmd_state()
 		local rec_i = indexes[k]
 		local i     = indexes[k+1]
 		local a = recs[rec_i]
@@ -1430,7 +1413,7 @@ function measure_req_all()
 	array_clear(measure_req)
 end
 
---imgui loop -----------------------------------------------------------------
+-- input-render loop ---------------------------------------------------------
 
 local want_relayout
 
@@ -1439,7 +1422,6 @@ ui.relayout = function()
 end
 
 local function layout_rec(a, x, y, w, h)
-	reset_cmd_state()
 
 	-- x-axis
 	measure_rec(a, 0)
@@ -1454,15 +1436,11 @@ local function layout_rec(a, x, y, w, h)
 	translate_rec(a, x, y)
 end
 
-ui.frame_changed = noop
-
 ui.focusables = {}
 
 local function redraw()
 
 	--term_reset_styles()
-
-	reset_cmd_state()
 
 	local relayout_count = 0
 	while 1 do
@@ -1485,18 +1463,21 @@ local function redraw()
 		measure_req_all()
 
 		clear_layers()
-		free_recs()
+		reset_theme()
+		clear_recs()
 
 		t0 = clock()
-
-		reset_cmd_state()
 
 		begin_rec()
 		ui.stack()
 			local i = cmd_last_i(a)
 			begin_layer(layer_base, i)
 			assert(rec_i == 1)
-			ui.main()
+			local ok, err = xpcall(ui.main, traceback)
+			if not ok then
+				warnf('%s', err)
+				break
+			end
 		ui.end_stack()
 		end_layer()
 		varstack_check()
@@ -1510,30 +1491,18 @@ local function redraw()
 		if not want_relayout then
 			t0 = clock()
 
-			--wr'\27[2J' --clear screen
-
-			local theme_stack_length0 = #theme_stack
-			add(theme_stack, theme)
-
 			scr_set_line_style'solid'
 			scr_set_corner_style'straight'
 
-			scf_fg = ui.fg_color('text')[1]
-			scr_bg = ui.bg_color('bg')[1]
-
-			scr_fill(0, 0, screen_w, screen_h, ' ')
+			local fg = ui.fg_color'text'
+			local bg = ui.bg_color'bg'
+			scr_fill(0, 0, screen_w, screen_h, ' ', fg, bg)
 
 			draw_layers(layers, recs)
 			assert(current_layer_i == nil)
 
-			theme = del(theme_stack)
-			assertf(#theme_stack == theme_stack_length0,
-				'theme stack not empty: %d', #theme_stack)
-
-			ui.frame_changed()
 		end
 
-		reset_cmd_state()
 		reset_input_state()
 
 		if not want_relayout then
@@ -1580,6 +1549,7 @@ end
 
 -- state pseudo-widgets ------------------------------------------------------
 
+--[[
 ui.widget('set_corner_style', {
 	create = function(cmd, s) return ui.cmd(cmd, s) end,
 	draw = function(a, i) scr_set_corner_style(a[i+0]) end,
@@ -1587,7 +1557,6 @@ ui.widget('set_corner_style', {
 
 local corner_style = 'straight'
 function ui.corner_style(s)
-	if corner_style == s then return end
 	assertf(CCS_TL[s], 'invalid corner style %s', s)
 	varstack_push('corner_style', corner_style)
 	ui.set_corner_style(s)
@@ -1603,7 +1572,6 @@ ui.widget('set_line_style', {
 
 local line_style = 'solid'
 function ui.line_style(s)
-	if line_style == s then return end
 	assertf(LCS_H[s], 'invalid line style %s', s)
 	varstack_push('line_style', line_style)
 	line_style = s
@@ -1612,25 +1580,7 @@ end
 function ui.end_line_style()
 	line_style = varstack_pop'line_style'
 end
-
-ui.widget('set_fg', {
-	create = function(cmd, s) return ui.cmd(cmd, s) end,
-	draw = function(a, i) scr_fg = a[i+0] end,
-})
-
-local fg
-function ui.fg(...)
-	local fg1 = ui.fg_color(...)[1]
-	if fg == fg1 then return end
-	assert(fg1)
-	varstack_push('fg', fg)
-	fg = fg1
-	ui.set_fg(fg)
-end
-
-function ui.end_fg()
-	fg = varstack_pop'fg'
-end
+]]
 
 -- set_layer command ---------------------------------------------------------
 
@@ -1734,7 +1684,6 @@ local function ct_stack_push(a, i)
 	add(ct_stack, i)
 end
 
---[=[
 -- calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1).
 local function box_measure(a, i, axis)
 	local user_min_wh = a[i+0+axis]
@@ -1743,7 +1692,6 @@ local function box_measure(a, i, axis)
 	a[i+2+axis] = min_wh
 	add_ct_min_wh(a, axis, min_wh)
 end
-]=]
 
 -- box position phase
 
@@ -1809,6 +1757,7 @@ ui.box_widget = function(cmd, t)
 	return ui.widget(cmd, update({
 		hittest = box_hit,
 		fr  = box_fr,
+		measure = box_measure,
 		position = box_position,
 	}, t))
 end
@@ -1827,9 +1776,9 @@ local BOX_CT_S          = BOX_S+1 -- first index after the ui.cmd_box_ct header.
 end
 
 -- NOTE: `ct` is short for container, which must end with ui.end_CMD().
-function ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...)
+function ui.cmd_box_ct(cmd, fr, halign, valign, min_w, min_h, ...)
 	--begin_scope()
-	local i = ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
+	local i = ui.cmd_box(cmd, fr, halign, valign, min_w, min_h,
 		0, --next_ext_i
 		...
 	)
@@ -2076,11 +2025,11 @@ local function position_flex(a, i, axis, sx, sw)
 
 end
 
-function flex(hv)
+local function flex(hv)
 	return ui.box_ct_widget(hv, {
 		main_axis = hv == 'h' and 0 or 1,
-		create = function(cmd, fr, align, valign, min_w, min_h)
-			return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h)
+		create = function(cmd, fr, halign, valign, min_w, min_h)
+			return ui.cmd_box_ct(cmd, fr, halign, valign, min_w, min_h)
 		end,
 		position = position_flex,
 		hittest = function(a, i, recs)
@@ -2099,9 +2048,9 @@ local STACK_ID = BOX_CT_S+0
 
 ui.box_ct_widget('stack', {
 	ID = STACK_ID,
-	create = function(cmd, id, fr, align, valign, min_w, min_h)
-		return ui.cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
-			id or '')
+	create = function(cmd, id, fr, halign, valign, min_w, min_h, bg)
+		return ui.cmd_box_ct(cmd, fr, halign, valign, min_w, min_h,
+			id or '', bg or false)
 	end,
 	position = function(a, i, axis, sx, sw)
 		local x = align_x(a, i, axis, sx, sw)
@@ -2119,23 +2068,29 @@ ui.box_ct_widget('stack', {
 			ui.hover(a[i+STACK_ID])
 		end
 	end,
+	draw = function(a, i)
+		local bg = a[i+BOX_CT_S+1]
+		if bg then
+			local x  = a[i+0]
+			local y  = a[i+1]
+			local w  = a[i+2]
+			local h  = a[i+3]
+			scr_fill(x, y, w, h, nil, nil, bg)
+		end
+	end,
 })
 
 -- box -----------------------------------------------------------------------
 
-local BOX_ID         = BOX_CT_S+0
-local BOX_TITLE      = BOX_CT_S+1
-local BOX_LINE_STYLE = BOX_CT_S+2
-
 ui.box_ct_widget('box', {
 
-	ID = BOX_ID,
-
-	create = function(cmd, id, title, align, valign, min_w, min_h)
-		return ui.cmd_box_ct(cmd, fr or 1, align, valign, min_w, min_h,
-			id or '',
+	create = function(cmd, title, fr, halign, valign, min_w, min_h, fg, bg, title_fg, title_bg)
+		return ui.cmd_box_ct(cmd, fr or 1, halign, valign, min_w, min_h,
 			title or '',
-			line_style
+			fg or ui.border_color'light',
+			bg or false,
+			title_fg or ui.fg_color'title',
+			title_bg or false
 		)
 	end,
 
@@ -2156,21 +2111,23 @@ ui.box_ct_widget('box', {
 
 	hittest = function(a, i, recs)
 		if hit_children(a, i, recs) then
-			ui.hover(a[i+BOX_ID])
 			return true
 		end
 		if hit_box(a, i) then
-			ui.hover(a[i+BOX_ID])
+			return true
 		end
 	end,
 
 	draw = function(a, i)
-		local x = a[i+0]
-		local y = a[i+1]
-		local w = a[i+2]
-		local h = a[i+3]
-		scr_set_line_style(a[i+BOX_LINE_STYLE])
-		scr_draw_box(x, y, w, h)
+		local x  = a[i+0]
+		local y  = a[i+1]
+		local w  = a[i+2]
+		local h  = a[i+3]
+		local title, fg, bg, title_fg, title_bg = unpack(a, i+BOX_CT_S+0, i+BOX_CT_S+2)
+		scr_draw_box(x, y, w, h, fg, bg)
+		if title ~= '' then
+			scr_wr(x, y, title, title_fg, title_bg)
+		end
 	end,
 })
 
@@ -2276,10 +2233,12 @@ local TEXT_ID       = BOX_S+3
 local TEXT_S        = BOX_S+4
 local TEXT_WRAP     = BOX_S+5
 local TEXT_EDITABLE = BOX_S+6
+local TEXT_FG       = BOX_S+7
+local TEXT_BG       = BOX_S+8
 
 ui.box_widget('text', {
 	ID = TEXT_ID,
-	create = function(cmd, id, s, fr, halign, valign, max_min_w, min_w, min_h, wrap, editable)
+	create = function(cmd, id, s, fr, halign, valign, max_min_w, min_w, min_h, wrap, editable, fg, bg)
 		-- NOTE: min_w and min_h are by default measured, not given.
 		s = s or ''
 		wrap = wrap or 'none'
@@ -2315,7 +2274,9 @@ ui.box_widget('text', {
 			id or '',
 			s or '',
 			wrap,
-			editable or false
+			editable or false,
+			fg or ui.fg_color'text',
+			bg or false
 		)
 	end,
 	measure = function(a, i, axis)
@@ -2411,7 +2372,8 @@ ui.box_widget('text', {
 		local id = a[i+TEXT_ID]
 		local wrap = a[i+TEXT_WRAP]
 		local editable = a[i+TEXT_EDITABLE]
-
+		local fg = a[i+TEXT_FG]
+		local bg = a[i+TEXT_BG]
 		if editable then
 			local input = ui.state(id).input
 			input.value = s
@@ -2428,12 +2390,12 @@ ui.box_widget('text', {
 
 		if isstr(s) then
 
-			scr_wr(x, y, s)
+			scr_wr(x, y, s, fg, bg)
 
 		elseif wrap == 'line' then
 
 			for _,ss in ipairs(s) do
-				scr_wr(x, y, ss)
+				scr_wr(x, y, ss, fg, bg)
 				y = y + 1
 			end
 
@@ -2461,7 +2423,7 @@ ui.box_widget('text', {
 				for i = i1, i2-1 do
 					local s1 = ww.words [i]
 					local w1 = ww.widths[i]
-					scr_wr(x, y, s1)
+					scr_wr(x, y, s1, fg, bg)
 					x = x + w1 + 1
 				end
 				y = y + 1
@@ -2474,25 +2436,28 @@ ui.box_widget('text', {
 	end,
 })
 
-ui.input = function(id, s, fr, halign, valign, max_min_w, min_w, min_h)
-	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, nil, true)
+ui.input = function(id, s, fr, halign, valign, max_min_w, min_w, min_h, fg, bg)
+	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, nil, true, fg, bg)
 end
-ui.text_lines = function(id, s, fr, halign, valign, max_min_w, min_w, min_h, editable)
-	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, 'line', editable)
+ui.text_lines = function(id, s, fr, halign, valign, max_min_w, min_w, min_h, editable, fg, bg)
+	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, 'line', editable, fg, bg)
 end
-ui.text_wrapped = function(id, s, fr, halign, valign, max_min_w, min_w, min_h, editable)
-	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, 'word', editable)
+ui.text_wrapped = function(id, s, fr, halign, valign, max_min_w, min_w, min_h, editable, fg, bg)
+	return ui.text(id, s, fr, halign, valign, max_min_w, min_w, min_h, 'word', editable, fg, bg)
 end
 
 -- scrollbox -----------------------------------------------------------------
 
-local SB_BOXED      = BOX_CT_S+0
+local SB_TITLE      = BOX_CT_S+0
 local SB_OVERFLOW   = BOX_CT_S+1 -- overflow x,y
 local SB_CW         = BOX_CT_S+3 -- content w,h
 local SB_ID         = BOX_CT_S+5
 local SB_SX         = BOX_CT_S+6 -- scroll x,y
 local SB_STATE      = BOX_CT_S+8 -- hit state x,y
-local SB_LINE_STYLE = BOX_CT_S+9
+local SB_BOX_FG     = BOX_CT_S+9
+local SB_BOX_BG     = BOX_CT_S+10
+local SB_TITLE_FG   = BOX_CT_S+11
+local SB_TITLE_BG   = BOX_CT_S+12
 
 function parse_sb_overflow(s)
 	if s == nil    or s == 'auto'   then return 'auto'   end
@@ -2528,7 +2493,7 @@ local function scrollbox_geometry(a, i)
 	local ch = a[i+SB_CW+1]
 	local sx = a[i+SB_SX+0]
 	local sy = a[i+SB_SX+1]
-	local boxed = a[i+SB_BOXED]
+	local boxed = a[i+SB_TITLE]
 	local overflow_x = a[i+SB_OVERFLOW+0]
 	local overflow_y = a[i+SB_OVERFLOW+1]
 	if overflow_x == 'infinite' then
@@ -2558,7 +2523,8 @@ local function scrollbox_geometry(a, i)
 			--if h-scrollbar needs shown, it alone can make the v-scrollbar appear
 			--because the view height shrinks by 1 to accomodate the h-scrollbar.
 			v_visible = (h - 1) / ch < 1
-		elseif v_visible and not h_visible and overflow_x == 'auto' then --same here
+		elseif v_visible and not h_visible and overflow_x == 'auto' then
+			--same here with the v-scrollbar
 			h_visible = (w - 1) / cw < 1
 		end
 		if h_visible then h = h - 1 end
@@ -2607,9 +2573,14 @@ function scrollbar_rect(a, i, axis)
 	end
 end
 
-ui.box_ct_widget('scrollbox', {
+ui.box_ct_widget('scrollboxorstack', {
 
-	create = function(cmd, id, fr, overflow_x, overflow_y, boxed, halign, valign, min_w, min_h, sx, sy)
+	create = function(cmd, id, title, fr,
+		overflow_x, overflow_y,
+		halign, valign, min_w, min_h,
+		sx, sy,
+		box_fg, box_bg,
+		title_fg, title_bg)
 
 		overflow_x = parse_sb_overflow(overflow_x)
 		overflow_y = parse_sb_overflow(overflow_y)
@@ -2622,7 +2593,7 @@ ui.box_ct_widget('scrollbox', {
 		sy = sy or ss.scroll_y or 0
 
 		local i = ui.cmd_box_ct(cmd, fr, halign, valign, min_w, min_h,
-			boxed and true or false,
+			title or false,
 			overflow_x,
 			overflow_y,
 			0, 0, -- content w, h
@@ -2630,7 +2601,10 @@ ui.box_ct_widget('scrollbox', {
 			sx, -- scroll x
 			sy, -- scroll y
 			0, -- state
-			line_style
+			box_fg or ui.border_color'light',
+			box_bg or false,
+			title_fg or ui.fg_color'title',
+			fitle_bg or false
 		)
 		if sx ~= 0 then ss.scroll_x = sx end
 		if sy ~= 0 then ss.scroll_y = sy end
@@ -2657,6 +2631,10 @@ ui.box_ct_widget('scrollbox', {
 		a[i+2+axis] = w
 		local content_w = a[i+SB_CW+axis]
 		local overflow = a[i+SB_OVERFLOW+axis]
+
+		local x, y, w, h = scrollbox_geometry(a, i)
+		x = axis == 0 and x or y
+		w = axis == 0 and w or h
 		position_children_stacked(a, i, axis, x, max(content_w, w))
 	end,
 
@@ -2705,7 +2683,7 @@ ui.box_ct_widget('scrollbox', {
 			local sy0 = ui.state(id).scroll_y
 			sy = sy - ui.wheel_dy * 3
 			if not infinite_y then
-				sy = clamp(sy, 0, ch - h)
+				sy = clamp(sy, 0, max(0, ch - h))
 			end
 			ui.state(id).scroll_y = sy
 			a[i+SB_SX+1] = sy
@@ -2746,7 +2724,7 @@ ui.box_ct_widget('scrollbox', {
 				local dpsy = (ui.my - ui.my0) / (h - v_th)
 				sy = round((psy0 + dpsy) * (ch - h))
 				if not infinite_y then
-					sy = clamp(sy, 0, ch - h)
+					sy = clamp(sy, 0, max(0, ch - h))
 				end
 				ui.state(id).scroll_y = sy
 				a[i+SB_SX+1] = sy
@@ -2775,10 +2753,15 @@ ui.box_ct_widget('scrollbox', {
 		local y = a[i+1]
 		local w = a[i+2]
 		local h = a[i+3]
+		local title = a[i+SB_TITLE]
+		if title then
+			local fg = a[i+SB_BOX_FG]
+			local bg = a[i+SB_BOX_BG]
+			scr_draw_box(x, y, w, h, fg, bg)
 
-		if a[i+SB_BOXED] then
-			scr_set_line_style(a[i+SB_LINE_STYLE])
-			scr_draw_box(x, y, w, h, line_char_h, line_char_v)
+			local fg = a[i+SB_TITLE_FG]
+			local bg = a[i+SB_TITLE_BG]
+			scr_wr(x + 2, y, title, fg, bg)
 		end
 
 		local x, y, w, h = scrollbox_geometry(a, i)
@@ -2799,11 +2782,11 @@ ui.box_ct_widget('scrollbox', {
 			local visible, tx, ty, tw, th = scrollbar_rect(a, i, axis)
 			if visible then
 				if axis == 0 then
-					local fg = ui.bg_color('scrollbar', state)[1]
+					local fg = ui.bg_color('scrollbar', state)
 					scr_fill(tx, ty, tw, th, '\u{2587}', fg)
 				else
-					local fg = ui.bg_color('scrollbar')[1]
-					local bg = ui.bg_color('scrollbar', state)[1]
+					local fg = ui.bg_color('scrollbar')
+					local bg = ui.bg_color('scrollbar', state)
 					scr_fill(tx, ty, tw, th, ' ', fg, bg)
 				end
 			end
@@ -2836,8 +2819,6 @@ ui.box_ct_widget('scrollbox', {
 	end,
 
 })
-ui.sb = ui.scrollbox
-ui.end_sb = ui.end_scrollbox
 
 -- can be used inside the translate phase of a widget to re-scroll a scrollbox
 -- that might have already been scrolled.
@@ -2873,16 +2854,53 @@ ui.scroll_to_view = function(id, x, y, w, h)
 	ui.state(id).scroll_to_view = {x, y, w, h}
 end
 
+ui.scrollbox = ui.scrollboxorstack
+function ui.scrollstack(id, ...)
+	return ui.scrollboxorstack(id, false, ...)
+end
+ui.end_scrollbox   = ui.end_scrollboxorstack
+ui.end_scrollstack = ui.end_scrollboxorstack
+ui.sb = ui.scrollbox
+ui.end_sb = ui.end_scrollbox
+
+ui.end_scrollstack = ui.end_sb
+
+-- line ----------------------------------------------------------------------
+
+ui.box_widget('line', {
+	create = function(cmd, fg, bg)
+		return ui.cmd_box(cmd, 0, 's', 's', 1, 1,
+			fg or ui.border_color'light',
+			bg or false
+			)
+	end,
+	draw = function(a, i)
+		local x = a[i+0]
+		local y = a[i+1]
+		local w = a[i+2]
+		local h = a[i+3]
+		local fg = a[i+BOX_S+0]
+		local bg = a[i+BOX_S+1]
+		if w > h then
+			--if x > 0 then add(scr_pairs, x-1, y, '|', '|-') end
+			scr_draw_hline(x, y, w, fg, bg)
+		else
+			--if x > 0 then add(scr_pairs, x-1, y, '|', 1, 0, '') end
+			scr_draw_vline(x, y, h, fg, bg)
+		end
+	end,
+})
+
 -- split ---------------------------------------------------------------------
 
 local split_stack = {}
 
 local function hvsplit(hv, id, size, unit, fixed_side,
-	split_fr, gap, align, valign, min_w, min_h
+	split_fr, halign, valign, min_w, min_h
 )
 
-	local snap_px = 50
-	local splitter_w = 1
+	local snap_px = 5
+	local splitbar_w = 1
 
 	local horiz = hv == 'h'
 	local W = horiz and 'w' or 'h'
@@ -2890,7 +2908,7 @@ local function hvsplit(hv, id, size, unit, fixed_side,
 	ui.keepalive(id)
 	local s = ui.state(id)
 	local cs = ui.captured(id)
-	local max_size = (cs and cs[W] or s[W] or 1/0) - splitter_w
+	local max_size = (cs and cs[W] or s[W] or 1/0) - splitbar_w
 	assert(not unit or unit == 'px' or unit == '%')
 	local fixed = unit == 'px'
 	size = s.size or size
@@ -2901,7 +2919,7 @@ local function hvsplit(hv, id, size, unit, fixed_side,
 			cs[W] = s[W]
 		end
 		local size_px = fixed and min_size or round(fr * max_size)
-		size_px = size_ps + (horiz and dx or dy)
+		size_px = size_px + (horiz and dx or dy)
 		if size_px < snap_px then
 			size_px = 0
 		elseif size_px > max_size - snap_px then
@@ -2918,7 +2936,7 @@ local function hvsplit(hv, id, size, unit, fixed_side,
 		end
 	end
 
-	ui[hv](split_fr, gap, align, valign, min_w, min_h)
+	ui[hv](split_fr, halign, valign, min_w, min_h)
 
 	if state then
 		ui.measure(id)
@@ -2935,7 +2953,7 @@ local function hvsplit(hv, id, size, unit, fixed_side,
 
 	append(split_stack, hv, id, collapsed, fixed and 1 or 1 - fr)
 
-	ui.sb(id..'.scrollbox1', fr, nil, nil, nil, nil, nil, min_size)
+	ui.scrollstack(id..'.scrollbox1', fr, nil, nil, nil, nil, nil, min_size)
 
 	return size
 end
@@ -2965,14 +2983,24 @@ ui.box_widget('splitbar_bar', {
 		local hv = a[i+BOX_S+0]
 		local id = a[i+BOX_S+1]
 		local fg0 = fg_color
-		local state = ui.hit(id) and 'hover' or nil
-		local fg = ui.fg_color('text', state)[1]
+		local state = ui.hit(id) and 'hover' or ui.captured(id) and 'active' or nil
+		local fg = ui.fg_color('label', state)
 		if hv == 'h' then
 			--if x > 0 then add(scr_pairs, x-1, y, '|', '|-') end
-			scr_draw_hline(x, y, w)
+			scr_draw_hline(x, y, w, fg)
+			--draw handle
+			local ls0 = scr_set_line_style'double'
+			scr_draw_hline(x + 10, y, w - 20, fg)
+			scr_set_line_style(ls0)
 		else
 			--if x > 0 then add(scr_pairs, x-1, y, '|', 1, 0, '') end
-			scr_draw_vline(x, y, h)
+			scr_draw_vline(x, y, h, fg)
+			--draw handle
+			local ls0 = scr_set_line_style'double'
+			local hh = min(h, 2)
+			local y = y + round((h - hh) / 2)
+			scr_draw_vline(x, y, hh, fg)
+			scr_set_line_style(ls0)
 		end
 		fg_color = fg0
 	end,
@@ -2980,14 +3008,14 @@ ui.box_widget('splitbar_bar', {
 })
 
 ui.splitter = function()
-	ui.end_sb()
+	ui.end_scrollstack()
 	local hv, id, collapsed, fr2 = unpack(split_stack, #split_stack-3)
 	ui.splitbar_bar(hv == 'v' and 'h' or 'v', id, collapsed, fr2)
-	ui.sb(id..'.scrollbox2', fr2)
+	ui.scrollstack(id..'.scrollbox2', fr2)
 end
 
 local function end_hvsplit(hv)
-	ui.end_sb()
+	ui.end_scrollstack()
 	if hv == 'h' then
 		ui.end_h()
 	else
@@ -2998,74 +3026,7 @@ end
 ui.end_hsplit = function() end_hvsplit('h') end
 ui.end_vsplit = function() end_hvsplit('v') end
 
---[==[
 -- popup ---------------------------------------------------------------------
-
-local POPUP_SIDE_CENTER       = 0 -- only POPUP_SIDE_INNER_CENTER is valid!
-local POPUP_SIDE_LR           = 2
-local POPUP_SIDE_TB           = 4
-local POPUP_SIDE_INNER        = 8
-local POPUP_SIDE_LEFT         = POPUP_SIDE_LR + 0
-local POPUP_SIDE_RIGHT        = POPUP_SIDE_LR + 1
-local POPUP_SIDE_TOP          = POPUP_SIDE_TB + 0
-local POPUP_SIDE_BOTTOM       = POPUP_SIDE_TB + 1
-local POPUP_SIDE_INNER_CENTER = POPUP_SIDE_INNER + POPUP_SIDE_CENTER
-local POPUP_SIDE_INNER_LEFT   = POPUP_SIDE_INNER + POPUP_SIDE_LEFT
-local POPUP_SIDE_INNER_RIGHT  = POPUP_SIDE_INNER + POPUP_SIDE_RIGHT
-local POPUP_SIDE_INNER_TOP    = POPUP_SIDE_INNER + POPUP_SIDE_TOP
-local POPUP_SIDE_INNER_BOTTOM = POPUP_SIDE_INNER + POPUP_SIDE_BOTTOM
-
-local POPUP_ALIGN_CENTER  = 0
-local POPUP_ALIGN_START   = 1
-local POPUP_ALIGN_END     = 2
-local POPUP_ALIGN_STRETCH = 3
-
-function popup_parse_side(s)
-	if s == '['           ) return POPUP_SIDE_LEFT
-	if s == ']'           ) return POPUP_SIDE_RIGHT
-	if s == 'l'           ) return POPUP_SIDE_LEFT
-	if s == 'r'           ) return POPUP_SIDE_RIGHT
-	if s == 't'           ) return POPUP_SIDE_TOP
-	if s == 'b'           ) return POPUP_SIDE_BOTTOM
-	if s == 'ic'          ) return POPUP_SIDE_INNER_CENTER
-	if s == 'il'          ) return POPUP_SIDE_INNER_LEFT
-	if s == 'ir'          ) return POPUP_SIDE_INNER_RIGHT
-	if s == 'it'          ) return POPUP_SIDE_INNER_TOP
-	if s == 'ib'          ) return POPUP_SIDE_INNER_BOTTOM
-	if s == 'left'        ) return POPUP_SIDE_LEFT
-	if s == 'right'       ) return POPUP_SIDE_RIGHT
-	if s == 'top'         ) return POPUP_SIDE_TOP
-	if s == 'bottom'      ) return POPUP_SIDE_BOTTOM
-	if s == 'inner-center') return POPUP_SIDE_INNER_CENTER
-	if s == 'inner-left'  ) return POPUP_SIDE_INNER_LEFT
-	if s == 'inner-right' ) return POPUP_SIDE_INNER_RIGHT
-	if s == 'inner-top'   ) return POPUP_SIDE_INNER_TOP
-	if s == 'inner-bottom') return POPUP_SIDE_INNER_BOTTOM
-	assert(false, 'invalid popup side ', s)
-end
-
-function popup_parse_align(s)
-	if s == 'c'      ) return POPUP_ALIGN_CENTER
-	if s == '['      ) return POPUP_ALIGN_START
-	if s == ']'      ) return POPUP_ALIGN_END
-	if s == '[]'     ) return POPUP_ALIGN_STRETCH
-	if s == 's'      ) return POPUP_ALIGN_STRETCH
-	if s == 'center' ) return POPUP_ALIGN_CENTER
-	if s == 'start'  ) return POPUP_ALIGN_START
-	if s == 'end'    ) return POPUP_ALIGN_END
-	if s == 'stretch') return POPUP_ALIGN_STRETCH
-	assert(false, 'invalid align ', s)
-end
-
-local POPUP_FIT_CHANGE_SIDE = 1
-local POPUP_FIT_CONSTRAIN   = 2
-
-function popup_parse_flags(s)
-	return (
-		(s.includes('change_side') ? POPUP_FIT_CHANGE_SIDE : 0) |
-		(s.includes('constrain'  ) ? POPUP_FIT_CONSTRAIN   : 0)
-	)
-end
 
 local POPUP_ID        = FR      -- because fr is not used
 local POPUP_SIDE      = ALIGN   -- because align is not used
@@ -3075,38 +3036,6 @@ local POPUP_TARGET_I  = BOX_CT_S+1
 local POPUP_FLAGS     = BOX_CT_S+2
 local POPUP_SIDE_REAL = BOX_CT_S+3
 
-local CMD_POPUP = cmd_ct('popup')
-
-ui.popup = function(id, layer, target, side, align, min_w, min_h, flags, z_index)
-	layer = ui_layer(layer)
-	local target_i = target == 'screen' ? 0
-		: !target || target == 'container' ? ui.ct_i()
-		: assert(num(target), 'invalid target ', target)
-	side  = popup_parse_side  (side  ?? 't')
-	align = popup_parse_align (align ?? 'c')
-	flags = popup_parse_flags (flags ?? '')
-
-	local i = ui.cmd_box_ct(CMD_POPUP,
-		nil, -- fr -> id
-		nil, -- align -> side
-		nil, -- valign -> align
-		min_w, min_h,
-		-- BOX_CT_S+0
-		layer.i, target_i, flags,
-		side, -- side_real
-	)
-	if target_i)
-		a[i+POPUP_TARGET_I] -= i -- make relative
-	a[i+POPUP_ID   ] = id
-	a[i+POPUP_SIDE ] = side
-	a[i+POPUP_ALIGN] = align
-	if begin_layer(layer, i, z_index))
-		force_scope_vars()
-	return i
-end
-
-ui.end_popup = function()  ui.end(CMD_POPUP) end
-
 function set_z_index(a, i, z_index)
 	assert(a[i-1] == CMD_POPUP)
 	i = cmd_next_i(a, i)
@@ -3115,47 +3044,14 @@ function set_z_index(a, i, z_index)
 end
 ui.set_z_index = set_z_index
 
-measure[CMD_POPUP] = ct_stack_push
-
-measure_end[CMD_POPUP] = function(a, i, axis)
-	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) -- apply own min_w|h
-	-- popups don't affect their target's layout so no add_ct_min_wh() call.
-end
-
--- NOTE: popup positioning is done later in the translation phase.
--- NOTE: sw is always 0 because popups have fr=0, so we don't use it.
-position[CMD_POPUP] = function(a, i, axis, sx, sw)
-
-	-- stretched popups stretch to the dimensions of their target.
-	local target_i = a[i+POPUP_TARGET_I]
-	local side     = a[i+POPUP_SIDE]
-	local align    = a[i+POPUP_ALIGN]
-	if side && align == POPUP_ALIGN_STRETCH)
-		if !target_i)
-			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
-		end else
-			-- TODO: align border rects here!
-			target_i += i -- make absolute
-			local ct_w = a[target_i+2+axis]
-			a[i+2+axis] = max(a[i+2+axis], ct_w)
-		end
-	end
-
-	local w = inner_w(a, i, axis, a[i+2+axis])
-	a[i+2+axis] = w
-	position_children_stacked(a, i, axis, 0, w)
-end
-
-
-local tx1, ty1, tx2, ty2
-local screen_margin = 10
-
 -- a popup's target rect is the target's border rect.
-function get_popup_target_rect(a, i)
+local screen_margin = 10
+function ui.popup_target_rect(a, i)
 
+	local tx1, ty1, tx2, ty2
 	local ct_i = a[i+POPUP_TARGET_I]
 
-	if !ct_i)
+	if not ct_i then
 
 		local d = screen_margin
 		tx1 = d
@@ -3163,9 +3059,9 @@ function get_popup_target_rect(a, i)
 		tx2 = screen_w - d
 		ty2 = screen_h - d
 
-	end else
+	else
 
-		ct_i += i -- make absolute
+		ct_i = ct_i + i -- make absolute
 
 		local px1 = a[ct_i+PX1+0]
 		local py1 = a[ct_i+PX1+1]
@@ -3181,197 +3077,375 @@ function get_popup_target_rect(a, i)
 
 end
 
-local x, y
 function position_popup(w, h, side, align)
 
+	local x, y
 	local tw = tx2 - tx1
 	local th = ty2 - ty1
 
-	if side == POPUP_SIDE_RIGHT)
+	if side == 'r' then
 		x = tx2
 		y = ty1
-	end else if side == POPUP_SIDE_LEFT)
+	elseif side == 'l' then
 		x = tx1 - w
 		y = ty1
-	end else if side == POPUP_SIDE_TOP)
+	elseif side == 't' then
 		x = tx1
 		y = ty1 - h
-	end else if side == POPUP_SIDE_BOTTOM)
+	elseif side == 'b' then
 		x = tx1
 		y = ty2
-	end else if side == POPUP_SIDE_INNER_RIGHT)
+	elseif side == 'ir' then
 		x = tx2 - w
 		y = ty1
-	end else if side == POPUP_SIDE_INNER_LEFT)
+	elseif side == 'il' then
 		x = tx1
 		y = ty1
-	end else if side == POPUP_SIDE_INNER_TOP)
+	elseif side == 'it' then
 		x = tx1
 		y = ty1
-	end else if side == POPUP_SIDE_INNER_BOTTOM)
+	elseif side == 'ib' then
 		x = tx1
 		y = ty2 - h
-	end else if side == POPUP_SIDE_INNER_CENTER)
+	elseif side == 'ic' then
 		x = tx1 + round((tw - w) / 2)
 		y = ty1 + round((th - h) / 2)
-	end else
+	else
 		assert(false)
 	end
 
-	local sdx = side & POPUP_SIDE_LR
-	local sdy = side & POPUP_SIDE_TB
+	local sdx = side == 'l' or side == 'r'
+	local sdy = side == 't' or side == 'b'
 
-	if align == POPUP_ALIGN_CENTER && sdy)
-		x += round((tw - w) / 2)
-	else if align == POPUP_ALIGN_CENTER && sdx)
-		y += round((th - h) / 2)
-	else if align == POPUP_ALIGN_END && sdy)
-		x += tw - w
-	else if align == POPUP_ALIGN_END && sdx)
-		y += th - h
+	if align == 'c' and sdy ~= 0 then
+		x = x + round((tw - w) / 2)
+	elseif align == 'c' and sdx then
+		y = y + round((th - h) / 2)
+	elseif align == ']' and sdy then
+		x = x + tw - w
+	elseif align == ']' and sdx then
+		y = y + th - h
+	end
 
+	return x, y
 end
 
-translate[CMD_POPUP] = function(a, i)
+ui.box_ct_widget('popup', {
 
-	local bw = screen_w
-	local bh = screen_h
+	create = function(cmd, id, layer, target, side, align, min_w, min_h, flags, z_index)
+		layer = ui_layer(layer)
+		local target_i = target == 'screen' and 0
+			or (not target or target == 'container' and ui.ct_i())
+			or assert(num(target), 'invalid target ', target)
+		side  = side or 't'
+		align = align or 'c'
+		flags = flags or ''
 
-	get_popup_target_rect(a, i)
+		local i = ui.cmd_box_ct(CMD_POPUP,
+			nil, -- fr -> id
+			nil, -- halign -> side
+			nil, -- valign -> align
+			min_w, min_h,
+			-- BOX_CT_S+0
+			layer.i,
+			target_i,
+			flags,
+			side -- side_real
+		)
+		if target_i then
+			a[i+POPUP_TARGET_I] = a[i+POPUP_TARGET_I] - i -- make relative
+		end
+		a[i+POPUP_ID   ] = id
+		a[i+POPUP_SIDE ] = side
+		a[i+POPUP_ALIGN] = align
+		begin_layer(layer, i, z_index)
+		return i
+	end,
 
-	local w     = a[i+2+0]
-	local h     = a[i+2+1]
-	local side  = a[i+POPUP_SIDE]
-	local align = a[i+POPUP_ALIGN]
-	local flags = a[i+POPUP_FLAGS]
+	measure_end = function(a, i, axis)
+		a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) -- apply own min_w|h
+		-- popups don't affect their target's layout so no add_ct_min_wh() call.
+	end,
 
-	position_popup(w, h, side, align)
+	-- NOTE: popup positioning is done later in the translation phase.
+	-- NOTE: sw is always 0 because popups have fr=0, so we don't use it.
+	position = function(a, i, axis, sx, sw)
 
-	if flags & POPUP_FIT_CHANGE_SIDE)
-
-		-- if popup doesn't fit the screen, first try to change its side
-		-- or alignment and relayout, and if that doesn't work, its offset.
-
-		local d = screen_margin
-		local out_x1 = x < d
-		local out_y1 = y < d
-		local out_x2 = x + w > (bw - d)
-		local out_y2 = y + h > (bh - d)
-
-		local side0 = side
-		if side == POPUP_SIDE_BOTTOM && out_y2)
-			side = POPUP_SIDE_TOP
-		 else if side == POPUP_SIDE_TOP && out_y1)
-			side = POPUP_SIDE_BOTTOM
-		 else if side == POPUP_SIDE_RIGHT && out_x2)
-			side = POPUP_SIDE_LEFT
-		 else if side == POPUP_SIDE_LEFT && out_x1)
-			side = POPUP_SIDE_RIGHT
-
-		if side ~= side0)
-			position_popup(w, h, side, align)
-			a[i+POPUP_SIDE_REAL] = side
+		-- stretched popups stretch to the dimensions of their target.
+		local target_i = a[i+POPUP_TARGET_I]
+		local side     = a[i+POPUP_SIDE]
+		local align    = a[i+POPUP_ALIGN]
+		if side ~= 'c' and align == 's' then
+			if not target_i then
+				a[i+2+axis] = (axis == 0 and screen_w or screen_h) - 2*screen_margin
+			else
+				-- TODO: align border rects here!
+				target_i = target_i + i -- make absolute
+				local ct_w = a[target_i+2+axis]
+				a[i+2+axis] = max(a[i+2+axis], ct_w)
+			end
 		end
 
+		local w = inner_w(a, i, axis, a[i+2+axis])
+		a[i+2+axis] = w
+		position_children_stacked(a, i, axis, 0, w)
+	end,
+
+	translate = function(a, i)
+
+		local bw = screen_w
+		local bh = screen_h
+
+		get_popup_target_rect(a, i)
+
+		local w     = a[i+2+0]
+		local h     = a[i+2+1]
+		local side  = a[i+POPUP_SIDE]
+		local align = a[i+POPUP_ALIGN]
+		local flags = a[i+POPUP_FLAGS]
+
+		local x, y = position_popup(w, h, side, align)
+
+		if flags:has'change_side' then
+
+			-- if popup doesn't fit the screen, first try to change its side
+			-- or alignment and relayout, and if that doesn't work, its offset.
+
+			local d = screen_margin
+			local out_x1 = x < d
+			local out_y1 = y < d
+			local out_x2 = x + w > (bw - d)
+			local out_y2 = y + h > (bh - d)
+
+			local side0 = side
+			if side == 'b' and out_y2 then
+				side = 't'
+			 elseif side == 't' and out_y1 then
+				side = 'b'
+			 elseif side == 'r' and out_x2 then
+				side = 'l'
+			 elseif side == 'l' and out_x1 then
+				side = 'r'
+			end
+
+			if side ~= side0 then
+				x, y = position_popup(w, h, side, align)
+				a[i+POPUP_SIDE_REAL] = side
+			end
+
+		end
+
+		-- if nothing else works, adjust the offset to fit the screen.
+		-- TODO: actually we should adjust the offset to fit the current viewport
+		-- computed from all parent scrollboxes.
+		if flags:has'constrain' then
+			local d = screen_margin
+			local ox1 = min(0, x - d)
+			local oy1 = min(0, y - d)
+			local ox2 = max(0, x + w - (bw - d))
+			local oy2 = max(0, y + h - (bh - d))
+			x = x - (ox1 ~= 0 and ox1 or ox2)
+			y = y - (oy1 ~= 0 and oy1 or oy2)
+		end
+
+		a[i+0] = x
+		a[i+1] = y
+		a[i+2] = w
+		a[i+3] = h
+
+		translate_children(a, i, x, y)
+
+	end,
+
+	draw = function(a, i)
+		local popup_layer_i = a[i+POPUP_LAYER_I]
+		if popup_layer_i ~= current_layer_i then
+			return true -- not our layer, skip
+		end
+	end,
+
+	hittest = function(a, i, recs)
+		local popup_layer_i = a[i+POPUP_LAYER_I]
+		local popup_layer = layer_arr[popup_layer_i]
+		if popup_layer ~= current_layer then
+			return -- not our layer, skip
+		end
+		if hit_children(a, i, recs) then
+			ui.hover(a[i+POPUP_ID])
+			return true
+		end
+	end,
+
+})
+
+-- frame widget --------------------------------------------------------------
+
+local FRAME_ON_MEASURE = BOX_S+0
+local FRAME_ON_FRAME   = BOX_S+1
+local FRAME_CT_I       = BOX_S+2
+local FRAME_REC_I      = BOX_S+3
+local FRAME_LAYER_I    = BOX_S+4
+local FRAME_ARGS_I     = BOX_S+5
+
+ui.FRAME_ARGS_I = FRAME_ARGS_I
+
+ui.box_widget('frame', {
+
+	create = function(cmd, on_measure, on_frame,
+		fr, align, valign, min_w, min_h, ...)
+
+		local ct_i = ui.ct_i()
+		local rel_ct_i = ui.rel_ct_i()
+		assert(a[ct_i-1].name == 'scrollbox', 'frame is not inside a scrollbox')
+
+		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
+			on_measure, on_frame,
+			rel_ct_i,
+			0, --rec_i
+			current_layer.i,
+			...
+		)
+	end,
+
+	measure = function(a, i, axis)
+		local on_measure = a[i+FRAME_ON_MEASURE]
+		local min_w = on_measure(axis)
+		if min_w ~= nil then
+			add_ct_min_wh(a, axis, min_w)
+		end
+		box_measure(a, i, axis)
+	end,
+
+	translate = function(a, i, dx, dy)
+
+		box_translate(a, i, dx, dy)
+
+		local x = a[i+0]
+		local y = a[i+1]
+		local w = a[i+2]
+		local h = a[i+3]
+
+		local ct_i = i+a[i+FRAME_CT_I]
+		local cx = a[ct_i+0]
+		local cy = a[ct_i+1]
+		local cw = a[ct_i+2]
+		local ch = a[ct_i+3]
+
+		local on_frame = a[i+FRAME_ON_FRAME]
+		local a0 = begin_rec()
+			a[i+FRAME_REC_I] = rec_i
+			local prev_layer = current_layer
+			local layer_i = a[i+FRAME_LAYER_I]
+			current_layer = layer_arr[layer_i]
+			ui.stack()
+				on_frame(a, i, x, y, w, h, cx, cy, cw, ch)
+			ui.end_stack()
+			current_layer = prev_layer
+			ct_stack_check()
+		local a1 = end_rec(a0)
+		layout_rec(a1, x, y, w, h)
+	end,
+
+	draw = function(a, i, recs)
+		local layer_i = a[i+FRAME_LAYER_I]
+		--[[global]] current_layer_i = layer_i
+		local rec_i = a[i+FRAME_REC_I]
+		local a1 = recs[rec_i]
+		draw_cmd(a1, 2, recs)
+	end,
+
+	hit = function(a, i, recs)
+		local layer_i = a[i+FRAME_LAYER_I]
+		--[[global]] current_layer = layer_arr[layer_i]
+		local rec_i = a[i+FRAME_REC_I]
+		local a1 = recs[rec_i]
+		local hit_f = hittest[a1[1]]
+		return hit_f and not (a.nohit_set and a.nohit_set[i]) and hit_f(a1, 2, recs)
+	end,
+
+})
+
+--list widget ----------------------------------------------------------------
+
+function ui.list(id, items, fr, halign, valign, min_w, min_h)
+	ui.v(fr or 0, halign or 'l', valign or 't', min_w, min_h)
+	local hit_i = num(ui.hit_match(id..'.item'))
+	local sel_i = ui.state(id).selected_i
+	if hit_i and ui.click then
+		sel_i = hit_i
+		ui.state(id).selected_i = hit_i
 	end
-
-	-- if nothing else works, adjust the offset to fit the screen.
-	-- TODO: actually we should adjust the offset to fit the current viewport
-	-- computed from all parent scrollboxes.
-	if flags & POPUP_FIT_CONSTRAIN)
-		local d = screen_margin
-		local ox1 = min(0, x - d)
-		local oy1 = min(0, y - d)
-		local ox2 = max(0, x + w - (bw - d))
-		local oy2 = max(0, y + h - (bh - d))
-		x -= ox1 ? ox1 : ox2
-		y -= oy1 ? oy1 : oy2
+	for i,s in ipairs(items) do
+		local item_id = id..'.item'..i
+		local hit = hit_i == i
+		local sel = sel_i == i
+		local fg
+		local bg =
+			sel and ui.bg_color('item', 'item-focused item-selected focused')
+			or ui.bg_color('bg', hit and 'hover' or nil)
+		ui.stack(item_id, 0, 's', 't', 0, 0, bg)
+			ui.text('', s)
+		ui.end_stack()
 	end
-
-	-- TODO: constrain should include these too (see toolbox constrain not working)!
-	x += a[i+MX1+0] + a[i+PX1+0]
-	y += a[i+MX1+1] + a[i+PX1+1]
-
-	a[i+0] = x
-	a[i+1] = y
-	a[i+2] = w
-	a[i+3] = h
-
-	translate_children(a, i, x, y)
-
+	ui.end_v()
 end
-
-local out = [0, 0, 0, 0]
-ui.popup_target_rect = function(a, i)
-	get_popup_target_rect(a, i)
-	out[0] = tx1
-	out[1] = ty1
-	out[2] = tx2
-	out[3] = ty2
-	return out
-end
-
-end
-
-draw[CMD_POPUP] = function(a, i)
-	local popup_layer_i = a[i+POPUP_LAYER_I]
-	if popup_layer_i ~= current_layer_i)
-		return true -- not our layer, skip
-end
-
-hittest[CMD_POPUP] = function(a, i, recs)
-	local popup_layer_i = a[i+POPUP_LAYER_I]
-	local popup_layer = layer_arr[popup_layer_i]
-	if popup_layer ~= current_layer)
-		return -- not our layer, skip
-	if hit_children(a, i, recs))
-		ui.hover(a[i+POPUP_ID])
-		return true
-	end
-end
-
-]==]
 
 --demo -----------------------------------------------------------------------
 
-ui.main = function()
-	ui.line_style'dashed'
-	ui.corner_style'round'
-	ui.v()
-		ui.h()
-		ui.hsplit('hs1')
-			ui.box()
-				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
-			ui.end_box()
-			ui.splitter() --'v', 'sbv1', false, 1)
-			ui.box()
-				ui.text_lines('', 'Hello, world!\nThis is a new line.', 0, 'c', 'c')
-			ui.end_box()
-		ui.end_h()
-		ui.end_hsplit()
-		ui.h(2)
-			ui.stack('', .5)
-				ui.scrollbox('sb1', 1, 'auto', 'auto', true)
-					ui.stack('', 0, 'l', 't', 120, 50)
-						ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c') --, nil, 100, 100)
-					ui.end_stack()
-				ui.end_scrollbox()
-			ui.end_stack()
-			ui.box()
-			--ui.scrollbox('st1')
-				if 1==1 then
-				ui.text_wrapped('t1', [[
-Lorem ipsum is a dummy or placeholder text commonly used in graphic design, publishing, and web development. Its purpose is to permit a page layout to be designed, independently of the copy that will subsequently populate it, or to demonstrate various fonts of a typeface without meaningful text that could be distracting.
+local demos = {
+	'flexbox',
+	'box',
+	'scrollbox',
+	'scrollstack',
+	'text',
+	'popup',
+	'frame',
+}
 
-Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a 1st-century BC text by the Roman statesman and philosopher Cicero, with words altered, added, and removed to make it nonsensical and improper Latin. The first two words themselves are a truncation of dolorem ipsum ("pain itself").
-]], 0, 'c', 'c')
-				end
-			ui.end_box()
-			--ui.end_scrollbox()
-		ui.end_h()
-	ui.end_v()
-	ui.end_corner_style()
-	ui.end_line_style()
+ui.main = function()
+	ui.h(1)
+		ui.scrollstack('demos_sb', 0, 'contain', 'scroll')
+			ui.list('demos', demos)
+		ui.end_scrollstack()
+		ui.line()
+		--ui.line_style'dashed'
+		--ui.corner_style'round'
+		ui.v(1)
+			ui.h()
+			ui.hsplit('hs1')
+				ui.box()
+					ui.text_lines('', 'Hello, world 1!\nThis is a new line.', 0, 'c', 'c')
+				ui.end_box()
+				ui.splitter() --'v', 'sbv1', false, 1)
+				ui.box()
+					ui.text_lines('', 'Hello, world 2!\nThis is a new line.', 0, 'c', 'c')
+				ui.end_box()
+			ui.end_h()
+			ui.end_hsplit()
+			ui.h(2)
+				ui.stack('', .5)
+					ui.scrollbox('sb1', 'Goodbye!', 1, 'auto', 'auto')
+						ui.stack('', 0, 'l', 't', 120, 50)
+							ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c') --, nil, 100, 100)
+						ui.end_stack()
+					ui.end_scrollbox()
+				ui.end_stack()
+				ui.box()
+				--ui.scrollbox('st1')
+					if 1==1 then
+					ui.text_wrapped('t1', [[
+	Lorem ipsum is a dummy or placeholder text commonly used in graphic design, publishing, and web development. Its purpose is to permit a page layout to be designed, independently of the copy that will subsequently populate it, or to demonstrate various fonts of a typeface without meaningful text that could be distracting.
+
+	Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a 1st-century BC text by the Roman statesman and philosopher Cicero, with words altered, added, and removed to make it nonsensical and improper Latin. The first two words themselves are a truncation of dolorem ipsum ("pain itself").
+	]], 0, 'c', 'c')
+					end
+				ui.end_box()
+				--ui.end_scrollbox()
+			ui.end_h()
+		ui.end_v()
+		--ui.end_corner_style()
+		--ui.end_line_style()
+	ui.end_h()
 end
 
 --main -----------------------------------------------------------------------
@@ -3380,7 +3454,8 @@ tc_set_raw_mode()
 assert(tc_get_raw_mode(), 'could not put terminal in raw mode')
 
 wr'\27[?1049h' --enter alternate screen
-wr'\27[?1004l'  --enable window focus events
+wr'\27[?7l'    --disable line wrapping
+wr'\27[?1004l' --enable window focus events
 wr'\27[?1000h' --enable mouse tracking
 wr'\27[?1003h' --enable mouse move tracking
 wr'\27[?1006h' --enable SGR mouse tracking
@@ -3397,6 +3472,7 @@ resume(thread(function()
 	local sigf = signal_file('SIGWINCH SIGINT', true)
 	while 1 do
 		local si = sigf:read_signal()
+		pr(si.signo)
 		if si.signo == SIGWINCH then
 			scr_resize()
 			scr_clip_reset()
@@ -3420,11 +3496,12 @@ dbgf'starting'
 
 start() --start the epoll loop (stopped by ctrl+C or a call to stop()).
 
-wr'\27[?1004l'  --stop window focus events
+wr'\27[?1004l' --stop window focus events
 wr'\27[?1000l' --stop mouse events
 wr'\27[?1003l' --stop mouse move events
 wr'\27[?1006l' --stop SGR mouse events
 wr'\27[?25h'   --show cursor
+wr'\27[?7h'    --enable line wrapping
 wr'\27[?1049l' --exit alternate screen
 wr_flush()
 
