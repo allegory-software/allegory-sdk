@@ -461,7 +461,13 @@ union {
 assert(sizeof(cell_ct) == 8)
 local cell_arr_ct = ctype('$[?]', cell_ct)
 
-local scr1, scr2, scr2_dirty
+local scr, scr2, scr2_dirty
+
+local function scr_cell_i(x, y)
+	local i = y * screen_w + x
+	assert(i >= 0 and i < screen_h * screen_w)
+	return i
+end
 
 screen_w = 0
 screen_h = 0
@@ -471,9 +477,8 @@ local function scr_flush()
 		local x1
 		local x = 0
 		while x < screen_w do
-			local i = y * screen_w + x
-			assert(i >= 0 and i < screen_w * screen_h)
-			local cell1 = scr1[i]
+			local i = scr_cell_i(x, y)
+			local cell1 = scr [i]
 			local cell2 = scr2[i]
 			local diff = scr2_dirty or cell1.data ~= cell2.data
 			if not x1 and diff then x1 = x end
@@ -482,9 +487,8 @@ local function scr_flush()
 				if x2 then
 					gotoxy(x1, y)
 					for x = x1, x2-1 do
-						local i = y * screen_w + x
-						assert(i >= 0 and i < screen_w * screen_h)
-						local cell1 = scr1[i]
+						local i = scr_cell_i(x, y)
+						local cell1 = scr[i]
 						wr_set_bg(cell1.bg)
 						wr_set_fg(cell1.fg)
 						assert(cell1.text_len > 0)
@@ -497,13 +501,13 @@ local function scr_flush()
 		end
 	end
 	wr_flush()
-	scr1, scr2 = scr2, scr1 --swap the screen buffers
+	scr, scr2 = scr2, scr --swap the screen buffers
 	scr2_dirty = false
 end
 
 local function scr_resize()
 	screen_w, screen_h = tc_get_window_size()
-	scr1 = new(cell_arr_ct, screen_w * screen_h)
+	scr  = new(cell_arr_ct, screen_w * screen_h)
 	scr2 = new(cell_arr_ct, screen_w * screen_h)
 	scr2_dirty = true
 end
@@ -540,14 +544,18 @@ end
 
 local scr_x1, scr_y1, scr_x2, scr_y2 --current clip rect (x2,y2 is outside!)
 
-local function scr_clip(x, y, w, h)
-	varstack_push('clip_rect', scr_x1, scr_y1, scr_x2, scr_y2)
-	local x, y, w, h = rect_clip(x, y, w, h,
+local function scr_rect_clip(x, y, w, h)
+	return rect_clip(x, y, w, h,
 		scr_x1,
 		scr_y1,
 		scr_x2 - scr_x1,
 		scr_y2 - scr_y1
 	)
+end
+
+local function scr_clip(x, y, w, h)
+	varstack_push('clip_rect', scr_x1, scr_y1, scr_x2, scr_y2)
+	local x, y, w, h = scr_rect_clip(x, y, w, h)
 	scr_x1 = x
 	scr_y1 = y
 	scr_x2 = x+w
@@ -575,9 +583,8 @@ local function scr_wr(x, y, s, fg, bg) --set text
 	--TODO: splitting on graphemes would be even better.
 	--TODO: support 2-cell-wide graphemes.
 	for si = i1, i2 do
-		local i = y * screen_w + x + si - 1
-		assert(i >= 0 and i < screen_w * screen_h)
-		local cell = scr1[i]
+		local i = scr_cell_i(x + si - 1, y)
+		local cell = scr[i]
 		cell.codepoint = 0
 		cell.text[0] = byte(s, si)
 		cell.text_len = 1
@@ -590,9 +597,8 @@ local function scr_wrc(x, y, c, fg, bg) --set single cell
 	if x < scr_x1 or x >= scr_x2 then return end
 	if y < scr_y1 or y >= scr_y2 then return end
 	assert(#c <= 4)
-	local i = y * screen_w + x
-	assert(i >= 0 and i < screen_w * screen_h)
-	local cell = scr1[i]
+	local i = scr_cell_i(x, y)
+	local cell = scr[i]
 	cell.codepoint = 0
 	copy(cell.text, c, #c)
 	cell.text_len = #c
@@ -601,17 +607,12 @@ local function scr_wrc(x, y, c, fg, bg) --set single cell
 end
 
 local function scr_each_cell(x, y, w, h, f, ...)
-	local x, y, w, h = rect_clip(x, y, w, h,
-		scr_x1,
-		scr_y1,
-		scr_x2 - scr_x1,
-		scr_y2 - scr_y1
-	)
+	local x, y, w, h = scr_rect_clip(x, y, w, h)
 	if w == 0 or h == 0 then return end
-	assert(x >= 0 and y >= 0 and x+w-1 < screen_w and y+h-1 < screen_h)
+	--assert(x >= 0 and y >= 0 and x+w-1 < screen_w and y+h-1 < screen_h)
 	for y = y, y+h-1 do
 		for x = x, x+w-1 do
-			local i = y * screen_w + x
+			local i = scr_cell_i(x, y)
 			f(i, ...)
 		end
 	end
@@ -619,17 +620,17 @@ end
 
 local cell = cell_ct()
 local function scr_copy_cell(i, cell)
-	scr1[i] = cell
+	scr[i] = cell
 end
 local function scr_set_cell(i, text, fg, bg)
 	if text then
 		assert(#text > 0 and #text <= 4)
-		scr1[i].codepoint = 0
-		copy(scr1[i].text, text, #text)
-		scr1[i].text_len = #text
+		scr[i].codepoint = 0
+		copy(scr[i].text, text, #text)
+		scr[i].text_len = #text
 	end
-	if fg then scr1[i].fg = fg end
-	if bg then scr1[i].bg = bg end
+	if fg then scr[i].fg = fg end
+	if bg then scr[i].bg = bg end
 end
 local function scr_fill(x, y, w, h, text, fg, bg) --fill a box of cells
 	if text and fg and bg then
@@ -647,87 +648,168 @@ end
 
 -- writing lines and boxes into the cell screen ------------------------------
 
-local CCS_TL = {} --top-left corner chars
-local CCS_TR = {} --top-right corner chars
-local CCS_BL = {} --bottom-left corner chars
-local CCS_BR = {} --bottom-left corner chars
-CCS_TL.straight = '┌'
-CCS_TR.straight = '┐'
-CCS_BL.straight = '└'
-CCS_BR.straight = '┘'
-CCS_TL.round    = '╭'
-CCS_TR.round    = '╮'
-CCS_BL.round    = '╰'
-CCS_BR.round    = '╯'
-CCS_TL.double   = '╔'
-CCS_TR.double   = '╗'
-CCS_BL.double   = '╚'
-CCS_BR.double   = '╝'
+local scr_set_line_style
+local scr_draw_vline
+local scr_draw_hline
+local scr_fix_line_ends
+do
+	local LCS_H = {} --horizontal line chars
+	local LCS_V = {} --vertical line chars
+	LCS_H.solid  = '─'
+	LCS_V.solid  = '│'
+	LCS_H.dotted = '┈'
+	LCS_V.dotted = '┊'
+	LCS_H.dashed = '┄'
+	LCS_V.dashed = '┆'
+	LCS_H.double = '═'
+	LCS_V.double = '║'
 
-local CC_TL, CC_TR, CC_BL, CC_BR
-local scr_corner_style
-function scr_set_corner_style(s)
-	local s0 = scr_corner_style
-	if s == s0 then return s0 end
-	CC_TL = CCS_TL[s]
-	CC_TR = CCS_TR[s]
-	CC_BL = CCS_BL[s]
-	CC_BR = CCS_BR[s]
-	scr_corner_style = s
-	return s0
-end
+	local LC_H, LD_H, hs
+	local function set_hs(s)
+		if s == hs then return hs end
+		LC_H = LCS_H[s]
+		LD_H = s == 'double'
+		local hs0 = hs; hs = s
+		return hs0
+	end
 
-local LCS_H = {} --horizontal line chars
-local LCS_V = {} --vertical line chars
-LCS_H.solid  = '─'
-LCS_V.solid  = '│'
-LCS_H.dotted = '┈'
-LCS_V.dotted = '┊'
-LCS_H.dashed = '┄'
-LCS_V.dashed = '┆'
-LCS_H.double = '═'
-LCS_V.double = '║'
+	local LC_V, LD_V, vs
+	local function set_vs(s)
+		if s == vs then return vs end
+		LC_V = LCS_V[s]
+		LD_V = s == 'double'
+		local vs0 = vs; vs = s
+		return vs0
+	end
 
-local LC_H, LC_V
-local scr_line_style
-function scr_set_line_style(s)
-	local s0 = scr_line_style
-	if s == s0 then return s0 end
-	LC_H = LCS_H[s]
-	LC_V = LCS_V[s]
-	scr_line_style = s
-	return s0
-end
+	function scr_set_line_style(hs1, vs1)
+		return
+			set_hs(hs1 or vs),
+			set_vs(vs1 or hs)
+	end
 
-local function scr_draw_hline(x, y, w, fg, bg)
-	for i=0,w-1 do
-		scr_wrc(x+i, y, LC_H, fg, bg)
+	--"T" connectors between perpendicular lines.
+	--H=horiz, V=vert, L=left, R=right, T=top, B=bottom, s=single, d=double.
+
+	local T_HL_ss = '├'
+	local T_HL_ds = '╟'
+	local T_HL_sd = '╞'
+	local T_HL_dd = '╠'
+
+	local T_HR_ss = '┤'
+	local T_HR_ds = '╢'
+	local T_HR_sd = '╡'
+	local T_HR_dd = '╣'
+
+	local T_VT_ss = '┬'
+	local T_VT_ds = '╤'
+	local T_VT_sd = '╥'
+	local T_VT_dd = '╦'
+
+	local T_VB_ss = '┴'
+	local T_VB_ds = '╧'
+	local T_VB_sd = '╨'
+	local T_VB_dd = '╩'
+
+	local T_XX_ss = '┼'
+	local T_XX_ds = '╫'
+	local T_XX_sd = '╪'
+	local T_XX_dd = '╬'
+
+	local scr_line_ends = {} --describe points on screen where perpendiculars can form.
+
+	local function cell_cmp(x, y, s)
+		local i = scr_cell_i(x, y)
+		return str(scr[i].text, scr[i].text_len) == s
+	end
+
+	--bind perpendiculars with "T" connectors.
+	function scr_fix_line_ends()
+		for i = 1, #scr_line_ends, 7 do
+			local x, y, s1, ox, oy, s2, tc = unpack(scr_line_ends, i, i+6)
+			if cell_cmp(x, y, s1) and cell_cmp(x+ox, y+oy, s2) then
+				scr_wrc(x, y, tc)
+			end
+		end
+	end
+
+	function scr_draw_hline(x, y, w, fg, bg)
+		local x, y, w, h = scr_rect_clip(x, y, w, 1)
+		if w == 0 or h == 0 then return end
+		for x = x, x+w-1 do
+			scr_wrc(x, y, LC_H, fg, bg)
+		end
+		if x > 0 then
+			append(scr_line_ends, x-1, y, LCS_V.solid ,  1, 0, LC_H, LD_H and T_HL_sd or T_HL_ss)
+			append(scr_line_ends, x-1, y, LCS_V.double,  1, 0, LC_H, LD_H and T_HL_dd or T_HL_ds)
+		end
+		if x+w < screen_w then
+			append(scr_line_ends, x+w, y, LCS_V.solid , -1, 0, LC_H, LD_H and T_HR_sd or T_HR_ss)
+			append(scr_line_ends, x+w, y, LCS_V.double, -1, 0, LC_H, LD_H and T_HR_dd or T_HR_ds)
+		end
+	end
+
+	function scr_draw_vline(x, y, h, fg, bg)
+		local x, y, w, h = scr_rect_clip(x, y, 1, h)
+		if w == 0 or h == 0 then return end
+		for y = y, y+h-1 do
+			scr_wrc(x, y, LC_V, fg, bg)
+		end
+		if y > 0 then
+			append(scr_line_ends, x, y-1, LCS_H.solid , 0,  1, LC_V, LD_V and T_VT_sd or T_VT_ss)
+			append(scr_line_ends, x, y-1, LCS_H.double, 0,  1, LC_V, LD_V and T_VT_dd or T_VT_ds)
+		end
+		if y+h < screen_h then
+			append(scr_line_ends, x, y+h, LCS_H.solid , 0, -1, LC_V, LD_V and T_VB_sd or T_VB_ss)
+			append(scr_line_ends, x, y+h, LCS_H.double, 0, -1, LC_V, LD_V and T_VB_dd or T_VB_ds)
+		end
 	end
 end
 
-local function scr_draw_vline(x, y, h, fg, bg)
-	for i=0,h-1 do
-		scr_wrc(x, y+i, LC_V, fg, bg)
+local scr_set_corner_style
+local scr_draw_box
+do
+	local CCS_TL = {} --top-left corner chars
+	local CCS_TR = {} --top-right corner chars
+	local CCS_BL = {} --bottom-left corner chars
+	local CCS_BR = {} --bottom-left corner chars
+	CCS_TL.straight = '┌'
+	CCS_TR.straight = '┐'
+	CCS_BL.straight = '└'
+	CCS_BR.straight = '┘'
+	CCS_TL.round    = '╭'
+	CCS_TR.round    = '╮'
+	CCS_BL.round    = '╰'
+	CCS_BR.round    = '╯'
+	CCS_TL.double   = '╔'
+	CCS_TR.double   = '╗'
+	CCS_BL.double   = '╚'
+	CCS_BR.double   = '╝'
+
+	local CC_TL, CC_TR, CC_BL, CC_BR
+	local scr_corner_style
+	function scr_set_corner_style(s)
+		local s0 = scr_corner_style
+		if s == s0 then return s0 end
+		CC_TL = CCS_TL[s]
+		CC_TR = CCS_TR[s]
+		CC_BL = CCS_BL[s]
+		CC_BR = CCS_BR[s]
+		scr_corner_style = s
+		return s0
+	end
+
+	function scr_draw_box(x, y, w, h, fg, bg)
+		scr_wrc(x    , y    , CC_TL, fg, bg)
+		scr_wrc(x+w-1, y    , CC_TR, fg, bg)
+		scr_wrc(x    , y+h-1, CC_BL, fg, bg)
+		scr_wrc(x+w-1, y+h-1, CC_BR, fg, bg)
+		scr_draw_hline(x+1  , y    , w-2, fg, bg)
+		scr_draw_hline(x+1  , y+h-1, w-2, fg, bg)
+		scr_draw_vline(x    , y+1  , h-2, fg, bg)
+		scr_draw_vline(x+w-1, y+1  , h-2, fg, bg)
 	end
 end
-
-local function scr_draw_box(x, y, w, h, fg, bg)
-	scr_wrc(x    , y    , CC_TL, fg, bg)
-	scr_wrc(x+w-1, y    , CC_TR, fg, bg)
-	scr_wrc(x    , y+h-1, CC_BL, fg, bg)
-	scr_wrc(x+w-1, y+h-1, CC_BR, fg, bg)
-	scr_draw_hline(x+1  , y    , w-2, fg, bg)
-	scr_draw_hline(x+1  , y+h-1, w-2, fg, bg)
-	scr_draw_vline(x    , y+1  , h-2, fg, bg)
-	scr_draw_vline(x+w-1, y+1  , h-2, fg, bg)
-end
-
---"T" connectors
-local T_HL = '├'
-local T_HR = '┤'
-local T_VL = '┴'
-local T_VR = '┬'
-local T_X  = '┼'
 
 -- themes and colors ---------------------------------------------------------
 
@@ -765,6 +847,7 @@ local function parse_state(s)
 end
 
 --colors are specified by (theme, name, state) with 'normal' state as fallback.
+--when defining a color for `hover`, `active` gets the same color if not defined.
 local function def_color_func(k)
 	local function def_color(theme, name, state, h, s, L, is_dark)
 		if theme == '*' then -- define color for all themes
@@ -787,7 +870,11 @@ local function def_color_func(k)
 			states[state][name] = L
 		else
 			local ansi_color = hsl_to_color(h, s, L)
-			attr(states, state)[name] = {ansi_color, is_dark or L < .5}
+			local color = {ansi_color, is_dark or L < .5}
+			attr(states, state)[name] = color
+			if state == 'hover' and not attr(states, 'active')[name] then
+				states.active[name] = color
+			end
 		end
 	end
 	return def_color
@@ -797,7 +884,9 @@ local function lookup_color_func(k)
 	return function(name, state, theme1)
 		state = parse_state(state)
 		theme1 = theme1 and themes[theme1] or theme
-		local c = theme1[k][state][name] or theme[k].normal[name]
+		local t = theme1[k]
+		local tc = t[state]
+		local c = tc and tc[name] or t.normal[name]
 		if not c then
 			assert(false, 'no ' .. k .. ' for (' .. name .. ', ' ..
 				state .. ', ' .. theme1.name .. ')')
@@ -864,7 +953,8 @@ ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0)
 ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57) -- TODO
 
 ui.border_style('dark' , 'light'   , 'normal' ,   0,    0, 0.35)
-ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0, 0.03)
+ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0, 0.55)
+ui.border_style('dark' , 'light'   , 'active' ,   0,    0, 0.75)
 ui.border_style('dark' , 'intense' , 'normal' ,   0,    0, 0.20)
 ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0, 0.40)
 ui.border_style('dark' , 'max'     , 'normal' ,   0,    0, 1.00)
@@ -1491,7 +1581,7 @@ local function redraw()
 		if not want_relayout then
 			t0 = clock()
 
-			scr_set_line_style'solid'
+			scr_set_line_style('solid', 'solid')
 			scr_set_corner_style'straight'
 
 			local fg = ui.fg_color'text'
@@ -1500,6 +1590,8 @@ local function redraw()
 
 			draw_layers(layers, recs)
 			assert(current_layer_i == nil)
+
+			scr_fix_line_ends()
 
 		end
 
@@ -1644,10 +1736,6 @@ local FR    = 4 -- all widgets with a fr() method: fraction from main-axis size.
 local ALIGN = 5 -- vert. align at ALIGN+1
 local BOX_S = 7 -- first index after the ui.cmd_box header.
 
-local function box_fr(a, i)
-	return a[i+FR]
-end
-
 function ui.cmd_box(cmd, fr, halign, valign, min_w, min_h, ...)
 	halign = repl(repl(halign, ']', 'r'), '[', 'l')
 	assert(not halign or halign == 'c' or halign == 'l' or halign == 'r' or halign == 's')
@@ -1755,8 +1843,8 @@ ui.box_widget = function(cmd, t)
 		end
 	end
 	return ui.widget(cmd, update({
+		is_box = true,
 		hittest = box_hit,
-		fr  = box_fr,
 		measure = box_measure,
 		position = box_position,
 	}, t))
@@ -1769,7 +1857,7 @@ local BOX_CT_S          = BOX_S+1 -- first index after the ui.cmd_box_ct header.
 
 --[[local]] function cmd_next_ext_i(a, i)
 	local cmd = a[i-1]
-	if cmd.is_box_ct then --box container
+	if cmd.is_ct then --box container
 		return i+a[i+BOX_CT_NEXT_EXT_I]
 	end
 	return cmd_next_i(a, i)
@@ -1894,7 +1982,6 @@ ui.box_ct_widget = function(cmd, t)
 	box_ct_widget_end(cmd)
 	return ui.box_widget(cmd, update({
 		is_ct = true,
-		is_box_ct = true,
 		measure = ct_stack_push,
 		translate = box_ct_translate,
 	}, t))
@@ -1905,7 +1992,7 @@ end
 local function is_last_flex_child(a, i)
 	while 1 do
 		i = cmd_next_ext_i(a, i)
-		if a[i-1].fr then return false end
+		if a[i-1].is_box then return false end
 		if a[i-1].is_end then return true end
 	end
 end
@@ -1932,8 +2019,8 @@ local function position_flex(a, i, axis, sx, sw)
 		while 1 do
 			local cmd = a[i-1]
 			if cmd.is_end then break end
-			if cmd.fr then
-				total_fr = total_fr + cmd.fr(a, i)
+			if cmd.is_box then
+				total_fr = total_fr + a[i+FR]
 				n = n + 1
 			end
 			i = cmd_next_ext_i(a, i)
@@ -1943,19 +2030,18 @@ local function position_flex(a, i, axis, sx, sw)
 			total_fr	= 1
 		end
 
-		local total_w = sw
-
 		-- compute total overflow width and total free width.
+		local total_w = sw
 		local total_overflow_w = 0
 		local total_free_w     = 0
 		i = next_i
 		while 1 do
 			local cmd = a[i-1]
 			if cmd.is_end then break end
-			if cmd.fr then
+			if cmd.is_box then
 
 				local min_w = a[i+2+axis]
-				local fr    = cmd.fr(a, i)
+				local fr    = a[i+FR]
 
 				local flex_w = total_w * fr / total_fr
 				local overflow_w = max(0, min_w - flex_w)
@@ -1976,10 +2062,10 @@ local function position_flex(a, i, axis, sx, sw)
 		while 1 do
 			local cmd = a[i-1]
 			if cmd.is_end then break end
-			if cmd.fr then
+			if cmd.is_box then
 
 				local min_w = a[i+2+axis]
-				local fr    = cmd.fr(a, i)
+				local fr    = a[i+FR]
 
 				-- compute item's stretched width.
 				local flex_w = total_w * fr / total_fr
@@ -1998,7 +2084,7 @@ local function position_flex(a, i, axis, sx, sw)
 
 				-- let the last child eat up any rounding errors.
 				if is_last_flex_child(a, i) then
-					sw = total_w - sx
+					sw = ct_sw - (sx - ct_sx)
 				end
 
 				-- position item's children recursively.
@@ -2882,10 +2968,8 @@ ui.box_widget('line', {
 		local fg = a[i+BOX_S+0]
 		local bg = a[i+BOX_S+1]
 		if w > h then
-			--if x > 0 then add(scr_pairs, x-1, y, '|', '|-') end
 			scr_draw_hline(x, y, w, fg, bg)
 		else
-			--if x > 0 then add(scr_pairs, x-1, y, '|', 1, 0, '') end
 			scr_draw_vline(x, y, h, fg, bg)
 		end
 	end,
@@ -2984,23 +3068,21 @@ ui.box_widget('splitbar_bar', {
 		local id = a[i+BOX_S+1]
 		local fg0 = fg_color
 		local state = ui.hit(id) and 'hover' or ui.captured(id) and 'active' or nil
-		local fg = ui.fg_color('label', state)
+		local fg = ui.border_color('light', state)
 		if hv == 'h' then
-			--if x > 0 then add(scr_pairs, x-1, y, '|', '|-') end
 			scr_draw_hline(x, y, w, fg)
 			--draw handle
-			local ls0 = scr_set_line_style'double'
+			local hls0, vls0 = scr_set_line_style'double'
 			scr_draw_hline(x + 10, y, w - 20, fg)
-			scr_set_line_style(ls0)
+			scr_set_line_style(hls0, vls0)
 		else
-			--if x > 0 then add(scr_pairs, x-1, y, '|', 1, 0, '') end
 			scr_draw_vline(x, y, h, fg)
 			--draw handle
-			local ls0 = scr_set_line_style'double'
+			local hls0, vls0 = scr_set_line_style'double'
 			local hh = min(h, 2)
 			local y = y + round((h - hh) / 2)
 			scr_draw_vline(x, y, hh, fg)
-			scr_set_line_style(ls0)
+			scr_set_line_style(hls0, vls0)
 		end
 		fg_color = fg0
 	end,
@@ -3403,49 +3485,51 @@ local demos = {
 }
 
 ui.main = function()
-	ui.h(1)
-		ui.scrollstack('demos_sb', 0, 'contain', 'scroll')
-			ui.list('demos', demos)
-		ui.end_scrollstack()
-		ui.line()
-		--ui.line_style'dashed'
-		--ui.corner_style'round'
-		ui.v(1)
-			ui.h()
-			ui.hsplit('hs1')
-				ui.box()
-					ui.text_lines('', 'Hello, world 1!\nThis is a new line.', 0, 'c', 'c')
-				ui.end_box()
-				ui.splitter() --'v', 'sbv1', false, 1)
-				ui.box()
-					ui.text_lines('', 'Hello, world 2!\nThis is a new line.', 0, 'c', 'c')
-				ui.end_box()
-			ui.end_h()
-			ui.end_hsplit()
-			ui.h(2)
-				ui.stack('', .5)
-					ui.scrollbox('sb1', 'Goodbye!', 1, 'auto', 'auto')
-						ui.stack('', 0, 'l', 't', 120, 50)
-							ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c') --, nil, 100, 100)
-						ui.end_stack()
-					ui.end_scrollbox()
-				ui.end_stack()
-				ui.box()
-				--ui.scrollbox('st1')
-					if 1==1 then
-					ui.text_wrapped('t1', [[
-	Lorem ipsum is a dummy or placeholder text commonly used in graphic design, publishing, and web development. Its purpose is to permit a page layout to be designed, independently of the copy that will subsequently populate it, or to demonstrate various fonts of a typeface without meaningful text that could be distracting.
+	ui.box()
+		ui.h(1)
+			ui.scrollstack('demos_sb', 0, 'contain', 'scroll')
+				ui.list('demos', demos)
+			ui.end_scrollstack()
+			ui.line()
+			--ui.line_style'dashed'
+			--ui.corner_style'round'
+			ui.v(1)
+				ui.h()
+				ui.hsplit('hs1')
+					ui.box()
+						ui.text_lines('', 'Hello, world 1!\nThis is a new line.', 0, 'c', 'c')
+					ui.end_box()
+					ui.splitter() --'v', 'sbv1', false, 1)
+					ui.box()
+						ui.text_lines('', 'Hello, world 2!\nThis is a new line.', 0, 'c', 'c')
+					ui.end_box()
+				ui.end_h()
+				ui.end_hsplit()
+				ui.h(2)
+					ui.stack('', .5)
+						ui.scrollbox('sb1', 'Goodbye!', 1, 'auto', 'auto')
+							ui.stack('', 0, 'l', 't', 120, 50)
+								ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c') --, nil, 100, 100)
+							ui.end_stack()
+						ui.end_scrollbox()
+					ui.end_stack()
+					ui.box()
+					--ui.scrollbox('st1')
+						if 1==1 then
+						ui.text_wrapped('t1', [[
+		Lorem ipsum is a dummy or placeholder text commonly used in graphic design, publishing, and web development. Its purpose is to permit a page layout to be designed, independently of the copy that will subsequently populate it, or to demonstrate various fonts of a typeface without meaningful text that could be distracting.
 
-	Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a 1st-century BC text by the Roman statesman and philosopher Cicero, with words altered, added, and removed to make it nonsensical and improper Latin. The first two words themselves are a truncation of dolorem ipsum ("pain itself").
-	]], 0, 'c', 'c')
-					end
-				ui.end_box()
-				--ui.end_scrollbox()
-			ui.end_h()
-		ui.end_v()
-		--ui.end_corner_style()
-		--ui.end_line_style()
-	ui.end_h()
+		Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a 1st-century BC text by the Roman statesman and philosopher Cicero, with words altered, added, and removed to make it nonsensical and improper Latin. The first two words themselves are a truncation of dolorem ipsum ("pain itself").
+		]], 0, 'c', 'c')
+						end
+					ui.end_box()
+					--ui.end_scrollbox()
+				ui.end_h()
+			ui.end_v()
+			--ui.end_corner_style()
+			--ui.end_line_style()
+		ui.end_h()
+	ui.end_box()
 end
 
 --main -----------------------------------------------------------------------
@@ -3472,7 +3556,6 @@ resume(thread(function()
 	local sigf = signal_file('SIGWINCH SIGINT', true)
 	while 1 do
 		local si = sigf:read_signal()
-		pr(si.signo)
 		if si.signo == SIGWINCH then
 			scr_resize()
 			scr_clip_reset()
