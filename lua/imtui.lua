@@ -3472,120 +3472,64 @@ function ui.list(id, items, fr, halign, valign, min_w, min_h)
 	ui.end_v()
 end
 
---demo -----------------------------------------------------------------------
-
-local demos = {
-	'flexbox',
-	'box',
-	'scrollbox',
-	'scrollstack',
-	'text',
-	'popup',
-	'frame',
-}
-
-ui.main = function()
-	ui.box()
-		ui.h(1)
-			ui.scrollstack('demos_sb', 0, 'contain', 'scroll')
-				ui.list('demos', demos)
-			ui.end_scrollstack()
-			ui.line()
-			--ui.line_style'dashed'
-			--ui.corner_style'round'
-			ui.v(1)
-				ui.h()
-				ui.hsplit('hs1')
-					ui.box()
-						ui.text_lines('', 'Hello, world 1!\nThis is a new line.', 0, 'c', 'c')
-					ui.end_box()
-					ui.splitter() --'v', 'sbv1', false, 1)
-					ui.box()
-						ui.text_lines('', 'Hello, world 2!\nThis is a new line.', 0, 'c', 'c')
-					ui.end_box()
-				ui.end_h()
-				ui.end_hsplit()
-				ui.h(2)
-					ui.stack('', .5)
-						ui.scrollbox('sb1', 'Goodbye!', 1, 'auto', 'auto')
-							ui.stack('', 0, 'l', 't', 120, 50)
-								ui.text('', 'Goodbye, cruel world!', 0, 'c', 'c') --, nil, 100, 100)
-							ui.end_stack()
-						ui.end_scrollbox()
-					ui.end_stack()
-					ui.box()
-					--ui.scrollbox('st1')
-						if 1==1 then
-						ui.text_wrapped('t1', [[
-		Lorem ipsum is a dummy or placeholder text commonly used in graphic design, publishing, and web development. Its purpose is to permit a page layout to be designed, independently of the copy that will subsequently populate it, or to demonstrate various fonts of a typeface without meaningful text that could be distracting.
-
-		Lorem ipsum is typically a corrupted version of De finibus bonorum et malorum, a 1st-century BC text by the Roman statesman and philosopher Cicero, with words altered, added, and removed to make it nonsensical and improper Latin. The first two words themselves are a truncation of dolorem ipsum ("pain itself").
-		]], 0, 'c', 'c')
-						end
-					ui.end_box()
-					--ui.end_scrollbox()
-				ui.end_h()
-			ui.end_v()
-			--ui.end_corner_style()
-			--ui.end_line_style()
-		ui.end_h()
-	ui.end_box()
-end
-
 --main -----------------------------------------------------------------------
 
-tc_set_raw_mode()
-assert(tc_get_raw_mode(), 'could not put terminal in raw mode')
+function ui.start()
 
-wr'\27[?1049h' --enter alternate screen
-wr'\27[?7l'    --disable line wrapping
-wr'\27[?1004l' --enable window focus events
-wr'\27[?1000h' --enable mouse tracking
-wr'\27[?1003h' --enable mouse move tracking
-wr'\27[?1006h' --enable SGR mouse tracking
-wr'\27[?25l'   --hide cursor
-wr'\27]11;?\7' --get terminal background color
-wr_flush()
+	tc_set_raw_mode()
+	assert(tc_get_raw_mode(), 'could not put terminal in raw mode')
 
-scr_resize()
-scr_clip_reset()
+	wr'\27[?1049h' --enter alternate screen
+	wr'\27[?7l'    --disable line wrapping
+	wr'\27[?1004l' --enable window focus events
+	wr'\27[?1000h' --enable mouse tracking
+	wr'\27[?1003h' --enable mouse move tracking
+	wr'\27[?1006h' --enable SGR mouse tracking
+	wr'\27[?25l'   --hide cursor
+	wr'\27]11;?\7' --get terminal background color
+	wr_flush()
 
---signals thread to capture Ctrl+C and terminal window resize events.
-resume(thread(function()
-	signal_block'SIGWINCH SIGINT'
-	local sigf = signal_file('SIGWINCH SIGINT', true)
-	while 1 do
-		local si = sigf:read_signal()
-		if si.signo == SIGWINCH then
-			scr_resize()
-			scr_clip_reset()
-			redraw()
-		elseif si.signo == SIGINT then
-			stop()
-			break
+	scr_resize()
+	scr_clip_reset()
+
+	--signals thread to capture Ctrl+C and terminal window resize events.
+	resume(thread(function()
+		signal_block'SIGWINCH SIGINT'
+		local sigf = signal_file('SIGWINCH SIGINT', true)
+		while 1 do
+			local si = sigf:read_signal()
+			if si.signo == SIGWINCH then
+				scr_resize()
+				scr_clip_reset()
+				redraw()
+			elseif si.signo == SIGINT then
+				stop()
+				break
+			end
 		end
-	end
-end))
+	end))
 
---input thread
-resume(thread(function()
-	while 1 do
-		redraw()
-		rd_input()
-	end
-end))
+	--input thread
+	resume(thread(function()
+		while 1 do
+			redraw()
+			rd_input()
+		end
+	end))
 
-dbgf'starting'
+	dbgf'starting'
 
-start() --start the epoll loop (stopped by ctrl+C or a call to stop()).
+	start() --start the epoll loop (stopped by ctrl+C or a call to stop()).
 
-wr'\27[?1004l' --stop window focus events
-wr'\27[?1000l' --stop mouse events
-wr'\27[?1003l' --stop mouse move events
-wr'\27[?1006l' --stop SGR mouse events
-wr'\27[?25h'   --show cursor
-wr'\27[?7h'    --enable line wrapping
-wr'\27[?1049l' --exit alternate screen
-wr_flush()
+	wr'\27[?1004l' --stop window focus events
+	wr'\27[?1000l' --stop mouse events
+	wr'\27[?1003l' --stop mouse move events
+	wr'\27[?1006l' --stop SGR mouse events
+	wr'\27[?25h'   --show cursor
+	wr'\27[?7h'    --enable line wrapping
+	wr'\27[?1049l' --exit alternate screen
+	wr_flush()
 
-tc_reset() --reset terminal
+	tc_reset() --reset terminal
+
+end
