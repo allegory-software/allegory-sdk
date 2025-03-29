@@ -83,7 +83,7 @@ function http_server(...)
 			addr = http_addr,
 			port = config'http_port',
 			unix_socket = config'http_unix_socket',
-			unix_socket_perms = config'http_unix_perms',
+			unix_socket_perms = config'http_unix_socket_perms',
 		})
 	end
 
