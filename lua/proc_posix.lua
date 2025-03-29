@@ -1,4 +1,6 @@
 
+require'signal'
+
 assert(package.loaded.proc)
 assert(Linux or OSX, 'platform not Linux or OSX')
 
@@ -561,7 +563,8 @@ function daemonize()
 			log('note', 'proc', 'daemonize', 'fd closed: %d', fd)
 		end
 	end
-	--2. no need to reset all signal handlers as LuaJIT doesn't set them.
+	--2. reset all signal handlers.
+	signal_ignore'SIGHUP SIGTERM SIGINT SIGQUIT'
 	--3. no need to call sigprocmask() as LuaJIT doesn't change them.
 	--4. no need to sanitize the environment block.
 	--5. call fork.
@@ -582,6 +585,7 @@ function daemonize()
 	end
 	--child process
 	--9. redirect stdin/out/err to /dev/null.
+	io.stdin:close()
 	io.stdout:close()
 	io.stderr:close()
 	close_fd(0)
