@@ -2085,7 +2085,7 @@ function autoload(t, k, v)
 end
 
 --portable way to get script's directory, based on arg[0].
---NOTE: the path is not absolute, but relative to the current directory!
+--NOTE: the path is not absolute, but relative to the starting current directory!
 --NOTE: for bundled executables, this returns the executable's directory.
 local arg0 = rawget(_G, 'arg') and arg[0]
 local dir = arg0 and arg0:gsub('[/\\]?[^/\\]+$', '') or '' --remove file name
@@ -2467,7 +2467,7 @@ local errno_msgs = {
 	[111] = 'connection_refused'     , --ECONNREFUSED
 	--mmap
 	[ 12] = 'out_of_mem'              , --ENOMEM
-	[ 22] = 'file_too_short'          , --EINVAL
+	[ 22] = 'invalid_argument'        , --EINVAL
 	[ 27] = 'disk_full'               , --EFBIG
 	[OSX and 69 or 122] = 'disk_full' , --EDQUOT
 }

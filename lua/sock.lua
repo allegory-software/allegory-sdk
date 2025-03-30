@@ -1844,12 +1844,15 @@ do
 
 	function _sock_register(sf) --socket or file
 		local i = pop(free_indices) or #sockets + 1
-		sf._i = i
-		sockets[i] = sf
 		e.data.u32 = i
 		e.events = EPOLLIN + EPOLLOUT + EPOLLET
 		local ok, err = check(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, sf.s, e) == 0)
-		if not ok then return nil, err end
+		if not ok then
+			push(free_indices, i)
+			return nil, err
+		end
+		sf._i = i
+		sockets[i] = sf
 		sf.setexpires = socket.setexpires
 		sf.settimeout = socket.settimeout
 		return true
@@ -1859,7 +1862,7 @@ do
 
 	function _sock_unregister(s)
 		local i = s._i
-		if not i then return end --closing before bind() was called.
+		if not i then return end --closing before _sock_register() was called.
 		e.data.u32 = i
 		e.events = EPOLLIN + EPOLLOUT + EPOLLET
 		assert(check(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, s.s, e) == 0))

@@ -67,7 +67,7 @@ logging = {
 }
 
 function logging:logtostderr(entry)
-	io.stderr:write(entry)
+	io.stderr:write(entry:sub(17))
 	io.stderr:flush()
 end
 
@@ -160,8 +160,8 @@ function logging:tofile(logfile, max_size, queue_size)
 
 	function self:tofile_stop()
 		if not self.logtofile then return end
-		self.logtofile = nil
 		self:tofile_flush()
+		self.logtofile = nil
 		try_close_file()
 		if save_wait_job then
 			save_wait_job:resume()

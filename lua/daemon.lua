@@ -21,6 +21,7 @@ require'glue'
 require'proc'
 require'fs'
 require'cmdline'
+require'path'
 
 --daemonize (Linux only) -----------------------------------------------------
 
@@ -31,15 +32,17 @@ if Linux then
 
 cmd_server = cmdsection'SERVER CONTROL'
 
-local function findpid(pid, cmd)
-	local s = try_load(_('/proc/%s/cmdline', pid), false, true)
-	return s and s:find(cmd, 1, true) and true or false
+--NOTE: this check is by necessity loosey goosey arbitrary.
+local function findpid(pid)
+	local cmdline = try_load(_('/proc/%s/cmdline', pid), false, true)
+	return cmdline and cmdline:has(basename(arg[-1]))
+		and cmdline:has(basename(arg[0]))
 end
 
 local function running()
 	local pid = tonumber((load(pidfile, false)))
 	if not pid then return false end
-	return findpid(pid, arg[0]), pid
+	return findpid(pid), pid
 end
 
 cmd_server('running', 'Check if the server is running', function()
@@ -79,7 +82,10 @@ cmd_server('start', 'Start the server', function()
 	local pid = daemonize()
 	--12. save pid to pidfile.
 	save(pidfile, tostring(pid))
-	local ok = pcall(run_server)
+	local ok, err = xpcall(run_server, traceback)
+	if not ok then
+		log('ERROR', 'daemon', 'start', '%s', err)
+	end
 	logging:tofile_stop()
 	rm(pidfile)
 	exit(ok and 0 or 1)

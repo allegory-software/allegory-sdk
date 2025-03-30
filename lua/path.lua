@@ -22,10 +22,10 @@
 	path_endsep(s, [pl], [sep], [dsep]) -> s, ok        get/add/remove the ending separator
 	path_sep(s, [pl], [sep], ...) -> s                  detect/set the path separator
 	path_long(s, [pl], [long]) -> s|nil                 get/set a Windows long absolute path
-	path_file(s, [pl]) -> s                             get the last component of a path
+	path_file|basename(s, [pl]) -> s                    get the last component of a path
 	path_nameext(s, [pl]) -> name, ext                  split `path_file(s)` into name and extension
 	path_ext(s, [pl]) -> s                              return only the extension from `nameext(s)`
-	path_dir(s, [pl]) -> s|nil                          get the path without the last component
+	path_dir|dirname(s, [pl]) -> s|nil                  get the path without the last component
 	path_split(s, [pl], [full]) ->iter() -> s, sep      iterate over path's components
 	path_normalize(s, [pl], [opt]) -> s                 normalize a path in various ways
 	path_commonpath(s1, s2, [pl]) -> s|nil              get the common prefix of two paths
@@ -327,6 +327,7 @@ function path_file(s, pl)
 	local _, p = path_parse(s, pl)
 	return p:match(win(pl) and '[^\\/]*$' or '[^/]*$')
 end
+basename = path_file
 
 --[[
 Split a path's last component into the name and extension parts like so:
@@ -369,6 +370,7 @@ function path_dir(s, pl)
 	local s = path_format(type, p:sub(1, i-1), drive, pl)
 	return s == '' and '.' or s --fix '' as '.'
 end
+dirname = path_dir
 
 --[[
 Iterate over a path's components (that is excluding prefixes like `\\server`

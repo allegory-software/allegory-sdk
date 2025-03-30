@@ -1,6 +1,4 @@
 
-require'signal'
-
 assert(package.loaded.proc)
 assert(Linux or OSX, 'platform not Linux or OSX')
 
@@ -557,14 +555,9 @@ end
 
 --https://www.freedesktop.org/software/systemd/man/daemon.html#SysV%20Daemons
 function daemonize()
-	--1. close all fds above 0, 1, 2 (there shouldn't be any).
-	for fd = 3, 256 do
-		if close_fd(fd) then
-			log('note', 'proc', 'daemonize', 'fd closed: %d', fd)
-		end
-	end
-	--2. reset all signal handlers.
-	signal_ignore'SIGHUP SIGTERM SIGINT SIGQUIT'
+	--1. close all fds above 0, 1, 2: can't do that.
+	--2. reset all signal handlers: can't do that.
+	--signal_ignore'SIGHUP SIGTERM SIGINT SIGQUIT'
 	--3. no need to call sigprocmask() as LuaJIT doesn't change them.
 	--4. no need to sanitize the environment block.
 	--5. call fork.
@@ -574,7 +567,7 @@ function daemonize()
 		C._exit(0)
 	end
 	--child process
-	--6. etach from any terminal and create an independent session.
+	--6. detach from any terminal and create an independent session.
 	assert(C.setsid() >= 0)
 	--7. call fork() again so that the daemon can never re-acquire a terminal.
 	local pid = C.fork()
@@ -585,18 +578,13 @@ function daemonize()
 	end
 	--child process
 	--9. redirect stdin/out/err to /dev/null.
-	io.stdin:close()
-	io.stdout:close()
-	io.stderr:close()
-	close_fd(0)
-	close_fd(1)
-	close_fd(2)
-	assert(C.open('/dev/null', 0, 0) == 0)
-	assert(C.open('/dev/null', 1, 0) == 1)
-	assert(C.open('/dev/null', 1, 0) == 2)
 	logging.quiet = true --no point logging to /dev/null.
-	--10. reset the umask to 0.
+	local null_fd = C.open('/dev/null', 1, 0)
+	assert(C.dup2(null_fd, 0) == 0)
+	assert(C.dup2(null_fd, 1) == 1)
+	assert(C.dup2(null_fd, 2) == 2)
 	C.umask(0)
+	--10. reset the umask to 0.
 	--11. no need to chdir to `/`.
 	daemonized = true
 	return C.getpid()

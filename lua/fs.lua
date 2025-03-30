@@ -1261,7 +1261,7 @@ end
 function try_chmod(path, perms, quiet)
 	local ok, err = try_file_attr(path, {perms = perms})
 	if not ok then return false, err end
-	log(quiet and '' or 'note', 'fs', 'chmod', '%s', file)
+	log(quiet and '' or 'note', 'fs', 'chmod', '%s', path)
 	return path
 end
 function chmod(path, perms, quiet)
