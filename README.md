@@ -81,8 +81,8 @@ to see what's missing, broken or wanted.
 Binaries are included in separate repos for each supported platform and are
 versioned to follow the main repo.
 
-  $ git submodule update --init bin/debian12
-  > git submodule update --init bin/windows
+  git submodule update --init bin/debian12
+  git submodule update --init bin/windows
 
 # Building
 
