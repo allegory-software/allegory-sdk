@@ -70,11 +70,6 @@ to see what's cooking for the next release.<br>
 Look at the [issues](https://github.com/allegory-software/allegory-sdk/issues)
 to see what's missing, broken or wanted.
 
-# Where it's used
-
-  * [Many Machines - the independent man's SAAS provisioning tool (in development)](https://github.com/allegory-software/many-machines)
-  * [Home Designer - a 3D modeller and BIM for residential construction (in development)](https://github.com/allegory-software/home-designer)
-
 # Compatibility
 
  * Operating Systems: **Debian 10+**, **Windows 10**
@@ -86,8 +81,8 @@ to see what's missing, broken or wanted.
 Binaries are included in separate repos for each supported platform and are
 versioned to follow the main repo.
 
-	$  git clone git@github.com:allegory-software/allegory-sdk-bin-debian10  bin/linux
-	>  git clone git@github.com:allegory-software/allegory-sdk-bin-windows   bin/windows
+  $ git submodule update --init bin/debian12
+  > git submodule update --init bin/windows
 
 # Building
 
