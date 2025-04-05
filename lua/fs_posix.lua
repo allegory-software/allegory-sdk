@@ -814,12 +814,12 @@ struct passwd *getpwnam(const char *name);
 struct group *getgrnam(const char *name);
 ]]
 local function get_uid(s)
-	if not s or isnum(s) return s end
+	if not s or isnum(s) then return s end
 	local p = ptr(C.getpwnam(s))
 	return p and p.pw_uid
 end
 local function get_gid(s)
-	if not s or isnum(s) return s end
+	if not s or isnum(s) then return s end
 	local p = ptr(C.getgrnam(s))
 	return p and p.gr_gid
 end
