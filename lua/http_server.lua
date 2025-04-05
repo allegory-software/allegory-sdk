@@ -84,6 +84,8 @@ function http_server(...)
 			port = config'http_port',
 			unix_socket = config'http_unix_socket',
 			unix_socket_perms = config'http_unix_socket_perms',
+			unix_socket_user  = config'http_unix_socket_user',
+			unix_socket_group = config'http_unix_socket_group',
 		})
 	end
 
@@ -106,6 +108,8 @@ function http_server(...)
 			port = config'https_port',
 			unix_socket = config'https_unix_socket',
 			unix_socket_perms = config'https_unix_socket_perms',
+			unix_socket_user  = config'https_unix_socket_user',
+			unix_socket_group = config'https_unix_socket_group',
 			tls = true,
 			tls_options = {
 				cert_file = crt_file,
@@ -233,8 +237,17 @@ function http_server(...)
 		end
 
 		tcp:listen(addr, port)
-		if listen_opt.unix_socket and listen_opt.unix_socket_perms then
-			chmod(listen_opt.unix_socket, listen_opt.unix_socket_perms)
+		if listen_opt.unix_socket then
+			if listen_opt.unix_socket_perms or
+				listen_opt.unix_socket_user  or
+				listen_opt.unix_socket_group
+			then
+				file_attr(listen_opt.unix_socket, {
+					perms = listen_opt.unix_socket_perms,
+					uid   = listen_opt.unix_socket_user,
+					gid   = listen_opt.unix_socket_group,
+				})
+			end
 		end
 
 		local tls = listen_opt.tls

@@ -792,9 +792,41 @@ int  chown(const char *path, uid_t owner, gid_t group);
 int lchown(const char *path, uid_t owner, gid_t group);
 ]]
 
+cdef[[
+typedef unsigned int uid_t;
+typedef unsigned int gid_t;
+struct passwd {
+    char   *pw_name;    // Username
+    char   *pw_passwd;  // User password (usually "x" or "*")
+    uid_t   pw_uid;     // User ID
+    gid_t   pw_gid;     // Group ID
+    char   *pw_gecos;   // Real name or comment field
+    char   *pw_dir;     // Home directory
+    char   *pw_shell;   // Login shell
+};
+struct group {
+    char   *gr_name;    // Group name
+    char   *gr_passwd;  // Group password (usually "x" or "*")
+    gid_t   gr_gid;     // Group ID
+    char  **gr_mem;     // Null-terminated list of group members
+};
+struct passwd *getpwnam(const char *name);
+struct group *getgrnam(const char *name);
+]]
+local function get_uid(s)
+	if not s or isnum(s) return s end
+	local p = ptr(C.getpwnam(s))
+	return p and p.pw_uid
+end
+local function get_gid(s)
+	if not s or isnum(s) return s end
+	local p = ptr(C.getgrnam(s))
+	return p and p.gr_gid
+end
+
 local function wrap(chown_func)
 	return function(arg, uid, gid)
-		return chown_func(arg, uid or -1, gid or -1) == 0
+		return chown_func(arg, get_uid(uid) or -1, get_gid(gid) or -1) == 0
 	end
 end
 local fchown = wrap(function(f, uid, gid) return C.fchown(f.fd, uid, gid) end)

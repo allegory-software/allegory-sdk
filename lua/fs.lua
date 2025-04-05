@@ -143,8 +143,8 @@ FILE ATTRIBUTES
  compressed    | r      |        |          | file is compressed
  encrypted     | r      |        |          | file is encrypted
  perms         |        | rw     | rw       | permissions
- uid           |        | rw     | rw       | user id
- gid           |        | rw     | rw       | group id
+ uid           |        | rw     | rw       | user id or name
+ gid           |        | rw     | rw       | group id or name
  dev           |        | r      | r        | device id containing the file
  inode         |        | r      | r        | inode number (int64_t)
  volume        | r      |        |          | volume serial number
