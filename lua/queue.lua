@@ -16,7 +16,8 @@
 	q:size()                       get queue capacity
 	q:full() -> t|f                check if the queue is full
 
-	NOTE: A linkedlist can be used as an unbounded queue with O(1) remove.
+	NOTE: A linkedlist can be used as an unbounded queue with O(1) remove,
+	but it only supports Lua tables as values.
 
 ]=]
 

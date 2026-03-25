@@ -6,7 +6,7 @@
 	In this implementation items must be Lua tables for which fields `_prev`
 	and `_next` are reserved for linking.
 
-	linkedlist() -> list                    create a new linked list
+	linkedlist() -> list                    create a linked list
 	list.first -> t, list:peek() -> t       first item
 	list.last -> t                          last item
 	list.length -> n, list:count() -> n     number of items
@@ -24,7 +24,7 @@
 	list:copy() -> new_list                 copy the list
 	list:empty() -> true|false              length == 0
 
-	NOTE: A linkedlist can be used as a drop-in repelacement for a queue.
+	NOTE: A linkedlist can be used as a drop-in replacement for a queue.
 
 ]=]
 
