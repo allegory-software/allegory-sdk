@@ -7,22 +7,24 @@
 	and `_next` are reserved for linking.
 
 	linkedlist() -> list                    create a new linked list
-	list.first -> t                         first item
+	list.first -> t, list:peek() -> t       first item
 	list.last -> t                          last item
-	list.length -> n                        number of items
+	list.length -> n, list:count() -> n     number of items
 	list:clear()                            clear the list
 	list:insert_first(t)                    add an item at beginning of the list
-	list:insert_last(t)                     add an item at the end of the list
+	list:insert_last(t), list:push(t)       add an item at the end of the list
 	list:insert_after([anchor, ]t)          add an item after another item (or at the end)
 	list:insert_before([anchor, ]t)         add an item before another item (or at the beginning)
-	list:remove(t) -> t                     remove a specific item (and return it)
-	list:remove_last() -> t                 remove and return the last item, if any
-	list:remove_first() -> t                remove and return the first item, if any
+	list:remove(t) -> t|nil                 remove a specific item (nil if not found)
+	list:pull() -> t                        remove and return the first item, if any
 	list:next([current]) -> t               next item after some item (or first item)
 	list:prev([current]) -> t               previous item after some item (or last item)
 	list:items() -> iterator<item>          iterate items
 	list:reverse_items() -> iterator<item>  iterate items in reverse
 	list:copy() -> new_list                 copy the list
+	list:empty() -> true|false              length == 0
+
+	NOTE: A linkedlist can be used as a drop-in repelacement for a queue.
 
 ]=]
 
@@ -93,39 +95,34 @@ function linkedlist:insert_before(anchor, t)
 end
 
 function linkedlist:remove(t)
-	assert(t)
+	if not t then return nil end
 	if t._next then
 		if t._prev then
 			t._next._prev = t._prev
 			t._prev._next = t._next
-		else
-			assert(t == self.first)
+		elseif t == self.first then
 			t._next._prev = nil
 			self.first = t._next
+		else
+			return nil --not in this list
 		end
 	elseif t._prev then
-		assert(t == self.last)
-		t._prev._next = nil
-		self.last = t._prev
-	else
-		assert(t == self.first and t == self.last)
+		if t == self.last then
+			t._prev._next = nil
+			self.last = t._prev
+		else
+			return nil --not in this list
+		end
+	elseif t == self.first then
 		self.first = nil
 		self.last = nil
+	else
+		return nil --not in this list
 	end
 	t._next = nil
 	t._prev = nil
 	self.length = self.length - 1
 	return t
-end
-
-function linkedlist:remove_last()
-	if not self.last then return end
-	return self:remove(self.last)
-end
-
-function linkedlist:remove_first()
-	if not self.first then return end
-	return self:remove(self.first)
 end
 
 --iterating
@@ -163,3 +160,11 @@ function linkedlist:copy()
 	end
 	return list
 end
+
+--queue API
+
+linkedlist.push = linkedlist.insert_last
+function linkedlist:pull() return self:remove(self.first) end
+function linkedlist:peek() return self.first end
+function linkedlist:count() return self.length end
+function linkedlist:empty() return self.length == 0 end

@@ -3,24 +3,20 @@
 	Circular buffer (aka fixed-sized FIFO queue) of Lua values.
 	Written by Cosmin Apreutesei. Public domain.
 
-	* Allows removing a value at any position from the queue.
 	* Implemented as an array, not a linked list, so remove(v) is O(n).
-	* INDEX is a special key that if given will make find() be O(1).
 
 	queue(size) -> q               create a queue
-	q:size()                       get queue capacity                     O(1)
-	q:count()                      get queue item count                   O(1)
-	q:full() -> t|f                check if the queue is full             O(1)
-	q:empty() -> t|f               check if the queue is empty            O(1)
 	q:push(v)                      add a value to the end of the queue    O(1)
 	q:pull() -> v|nil              remove the first value from the queue  O(1)
-	q:peek() -> v|nil              get the first value without popping    O(1)
-	q:exists(v) -> true|false      check if value exists                  O(n) or O(1)
-	q:first() -> v|nil             get the first value without popping    O(1)
-	q:last() -> v|nil              get the last value without popping     O(1)
-	q:items() -> iter() -> v       iterate values                         O(n)
-	q:item_at(i) -> v|nil          get item at index i in 1..q:count()    O(1)
-	q:remove(v) -> t|f             remove value (return `true` if found)  O(n)
+	q:remove(v) -> v|nil           remove value                           O(n)
+	q:peek() -> v|nil              get the first value without removing
+	q:items() -> iter() -> v       iterate values
+	q:count() -> n                 get queue item count
+	q:empty() -> t|f               check if the queue is empty
+	q:size()                       get queue capacity
+	q:full() -> t|f                check if the queue is full
+
+	NOTE: A linkedlist can be used as an unbounded queue with O(1) remove.
 
 ]=]
 
@@ -28,7 +24,7 @@ if not ... then require'queue_test'; return end
 
 local assert = assert
 
-function queue(size, INDEX)
+function queue(size)
 
 	local head = size -- push position
 	local tail = 1 -- pull position
@@ -52,7 +48,6 @@ function queue(size, INDEX)
 		head = (head % size) + 1
 		t[head] = v
 		n = n + 1
-		if INDEX ~= nil then v[INDEX] = head end
 		return true
 	end
 
@@ -64,7 +59,6 @@ function queue(size, INDEX)
 		t[tail] = false
 		tail = (tail % size) + 1
 		n = n - 1
-		if INDEX ~= nil then v[INDEX] = nil end
 		return v
 	end
 
@@ -73,14 +67,6 @@ function queue(size, INDEX)
 			return nil
 		end
 		return t[tail]
-	end
-	q.first = q.peek
-
-	function q:last()
-		if n == 0 then
-			return nil
-		end
-		return t[head]
 	end
 
 	function q:items()
@@ -92,11 +78,6 @@ function queue(size, INDEX)
 			i = i + 1
 			return t[mi(tail + i - 1)]
 		end
-	end
-
-	function q:item_at(i)
-		if not (i >= 1 and i <= n) then return nil end
-		return t[mi(tail + i - 1)]
 	end
 
 	local function remove_at(i)
@@ -111,43 +92,30 @@ function queue(size, INDEX)
 			from_head = false
 		end
 		if from_head then --move right of i to left.
-			if INDEX ~= nil then t[i][INDEX] = nil end
-			for i = i, head-1 do t[i] = t[i+1]; if INDEX then t[i][INDEX] = i end end
+			for i = i, head-1 do t[i] = t[i+1] end
 			t[head] = false
 			head = mi(head - 1)
 		else --move left of i to right.
-			if INDEX ~= nil then t[i][INDEX] = nil end
-			for i = i-1, tail, -1 do t[i+1] = t[i]; if INDEX then t[i+1][INDEX] = i+1 end end
+			for i = i-1, tail, -1 do t[i+1] = t[i] end
 			t[tail] = false
 			tail = mi(tail + 1)
 		end
 		n = n - 1
 	end
 
-	local find
-	if INDEX ~= nil then
-		function find(v)
-			return v[INDEX]
-		end
-	else
-		function find(v)
-			for i = 1, n do
-				local mi = mi(tail + i - 1)
-				if t[mi] == v then
-					return mi
-				end
+	local function find(v)
+		for i = 1, n do
+			local mi = mi(tail + i - 1)
+			if t[mi] == v then
+				return mi
 			end
 		end
 	end
-	function q:exists(v)
-		return find(v) and true or false
-	end
-
 	function q:remove(v)
 		local mi = find(v)
-		if not mi then return false end
+		if not mi then return nil end
 		remove_at(mi)
-		return true
+		return v
 	end
 
 	return q

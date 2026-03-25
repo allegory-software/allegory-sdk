@@ -1,7 +1,7 @@
 require'queue'
 
-for i=1,2 do
-	local q = queue(4, i==2 and '_index' or nil)
+do
+	local q = queue(4)
 	local function test(s)
 		local t = {}
 		for s in q:items() do t[#t+1] = s.s end
@@ -25,11 +25,11 @@ for i=1,2 do
 	assert(q:pull())
 	assert(q:push(f))
 	test'cdef'
-	assert(q:remove(d))
+	assert(q:remove(d) == d)
 	test'cef'
-	assert(q:remove(e))
+	assert(q:remove(e) == e)
 	test'cf'
-	assert(q:remove(c))
+	assert(q:remove(c) == c)
 	test'f'
 	q:remove(f)
 	test''; assert(q:empty())
@@ -42,8 +42,5 @@ for i=1,2 do
 	assert(q:push(e))
 	assert(q:push(f))
 	test'cdef'
-	assert(q:exists(c))
-	assert(q:exists(d))
-	assert(q:exists(e))
-	assert(q:exists(f))
+	print'queue ok'
 end

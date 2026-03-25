@@ -86,7 +86,7 @@ function resource_pool(opt)
 			dbg'notime'
 			return nil, 'timeout'
 		end
-		q = q or queue(waitlist_limit, 'queue_index')
+		q = q or queue(waitlist_limit)
 		if q:full() then
 			dbg'q-full'
 			return nil, 'timeout'

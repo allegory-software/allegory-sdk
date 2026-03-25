@@ -23,13 +23,13 @@ list:insert_last({'a'}); test{'a'}
 list:insert_last({'b'}); test{'a','b'}
 list:insert_first({'0'}); test{'0','a','b'}
 list:insert_after(list:next(), {'1'}); test{'0','1','a','b'}
-assert(list:remove_last()[1] == 'b'); test{'0','1','a'}
-assert(list:remove_first()[1] == '0'); test{'1','a'}
+assert(list:remove(list.last)[1] == 'b'); test{'0','1','a'}
+assert(list:remove(list.first)[1] == '0'); test{'1','a'}
 assert(list:remove(list:next())[1] == '1'); test{'a'}
 assert(list:remove(list:prev())[1] == 'a'); test{}
 
 list:clear(); test{}
-assert(list:remove_last() == nil)
+assert(list:remove(list.last) == nil)
 
 list:clear(); list:insert_first({'a'}); test{'a'}
 list:clear(); list:insert_first({'a'}); test{'a'}
