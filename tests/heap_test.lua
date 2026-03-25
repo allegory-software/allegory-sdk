@@ -1,4 +1,3 @@
-require'glue'
 require'heap'
 
 local function test_order()
@@ -14,31 +13,7 @@ local function test_order()
 	end
 end
 
-local function test_example1()
-	local h = cdataheap{
-		ctype = [[
-			struct {
-				int priority;
-				int order;
-			}
-		]],
-		cmp = function(a, b)
-			if a.priority == b.priority then
-				return a.order > b.order
-			end
-			return a.priority < b.priority
-		end}
-	h:push{priority = 20, order = 1}
-	h:push{priority = 10, order = 2}
-	h:push{priority = 10, order = 3}
-	h:push{priority = 20, order = 4}
-	assert(h:pop().order == 3)
-	assert(h:pop().order == 2)
-	assert(h:pop().order == 4)
-	assert(h:pop().order == 1)
-end
-
-local function test_example2()
+local function test_example()
 	local h = heap{cmp = function(a, b)
 	      return a.priority < b.priority
 	   end}
@@ -70,19 +45,19 @@ end
 
 local function bench(type, h, size, valgen)
 	local cmp = h.cmp or function(a, b) return a < b end
-	local t0 = clock()
+	local t0 = os.clock()
 	for i=1,size do
 	    h:push(valgen(h))
 	end
-	print(string.format('push speed: %-14s: %6d Ke/s', type, size / 10^3 / (clock() - t0)))
-	t0 = clock()
+	print(string.format('push speed: %-14s: %6d Ke/s', type, size / 10^3 / (os.clock() - t0)))
+	t0 = os.clock()
 	local v0 = h:pop()
 	for i=2,size do
 		local v = h:pop()
 		assert(not cmp(v, v0))
 		v0 = v
 	end
-	print(string.format('pop  speed: %-14s: %6d Ke/s', type, size / 10^3 / (clock() - t0)))
+	print(string.format('pop  speed: %-14s: %6d Ke/s', type, size / 10^3 / (os.clock() - t0)))
 end
 
 local function benchmark()
@@ -94,17 +69,10 @@ local function benchmark()
 	local function cmp(a, b) return a.n < b.n end
 	bench('Lua tables'  , heap{cmp = cmp                 }, size, tgen)
 	bench('Lua tables/i', heap{cmp = cmp, index_key = 'i'}, size, tgen)
-	bench('int32',        cdataheap{ctype = 'int32_t'}, size, ngen)
-	local v3t = ffi.typeof'struct { double x, y, z; }'
-	local v3 = v3t()
-	local function vgen(h) v3.x = ngen(h); return v3 end
-	local function vcmp(v1, v2) return v1.x < v2.x end
-	bench('vector3', cdataheap{ctype = v3t, size = size+1, cmp = vcmp}, size, vgen)
 end
 
 test_order()
-test_example1()
-test_example2()
+test_example()
 test_remove()
 test_replace()
 if os.getenv'AUTO' then return end

@@ -11,7 +11,6 @@
 	removal O(log n) too.
 
 	virtualheap(...) -> push, pop   create a heap API from a stack API
-	cdataheap(h) -> h               create a fixed-capacity cdata-based heap
 	heap([h]) -> h                  create a heap for Lua values
 	h:push(val) -> i                push a value                          O(log n)
 	h:pop([i][, dst]) -> val        pop value (root value at default i=1) O(log n)
@@ -42,47 +41,6 @@ virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance
 	The heap can be a min-heap or max-heap depending on the comparison
 	function. If `cmp(i, j)` returns `a[i] < a[j]` then it's a min-heap.
 	Stack indices are assumed to be consecutive.
-
-cdataheap(h) -> h
-
-	Create a cdata heap over table `h` which must contain:
-
-	  * `ctype`: element type (required).
-	  * `min_capacity`: heap starting capacity (optional, defaults to 0).
-	  * `cmp`: a comparison function (optional).
-	  * `index_key`: enables O(1) `h:find(v)` and thus O(log n) `h:remove(v)`
-	  at the price of setting `e[index_key]` on all elements of the heap,
-	  otherwise `h:find(v)` is O(n) and `h:remove(v)` is O(n).
-	  * `dynarray`: alternative `dynarray` implementation (optional).
-
-	NOTE: `cdata` heaps are 1-indexed just like value heaps.
-
-	EXAMPLE
-
-		local h = cdataheap{
-			ctype = [[
-				struct {
-					int priority;
-					int order;
-				}
-			]],
-			cmp = function(a, b)
-				if a.priority == b.priority then
-					return a.order > b.order
-				end
-				return a.priority < b.priority
-			end}
-		h:push{priority = 20, order = 1}
-		h:push{priority = 10, order = 2}
-		h:push{priority = 10, order = 3}
-		h:push{priority = 20, order = 4}
-		assert(h:pop().order == 3)
-		assert(h:pop().order == 2)
-		assert(h:pop().order == 4)
-		assert(h:pop().order == 1)
-
-	Note: the `order` field in this example is used to stabilize
-	the order in which elements with the same priority are popped.
 
 heap([h]) -> h
 
@@ -167,132 +125,6 @@ function virtualheap(add, remove, swap, length, cmp)
 	return push, pop, rebalance
 end
 
---common methods for both cdata and value heaps.
-
-function heap_mixin(h, INDEX)
-
-	function h:find(v)
-		for i,v1 in ipairs(self) do
-			if v1 == v then
-				return i
-			end
-		end
-		return nil
-	end
-
-	if INDEX ~= nil then
-		function h:find(v) --O(1..logN)
-			return v[INDEX]
-		end
-	else
-		function h:find(v) --O(n)
-			for i,v1 in ipairs(self) do
-				if v1 == v then
-					return i
-				end
-			end
-			return nil
-		end
-	end
-
-end
-
---cdata heap working over a cdata dynamic array.
-
-function cdataheap(h)
-
-	require'glue'
-
-	local ct = ctype(h.ctype)
-	local arr = h.dynarray
-	if not arr then
-		arr = dynarray(ctype('$[?]', ct), h.min_capacity)
-	end
-	local t, n = nil, 0
-
-	local add, rem, swap
-	local INDEX = h.index_key
-	if INDEX ~= nil then --for O(n) removal.
-		function add(v)
-			n = n + 1
-			t = arr(n + 1) --elem 0 is temp space for swapping.
-			t[n] = v
-			t[n][INDEX] = n
-		end
-		function rem()
-			t[n][INDEX] = 0
-			n = n - 1
-		end
-		function swap(i, j)
-			t[0]=t[i]; t[i]=t[j]; t[j]=t[0]
-			t[i][INDEX] = i
-			t[j][INDEX] = j
-		end
-	else
-		function add(v)
-			n = n + 1
-			t = arr(n + 1) --elem 0 is temp space for swapping.
-			t[n] = v
-		end
-		function rem()
-			n = n - 1
-		end
-		function swap(i, j)
-			t[0]=t[i]; t[i]=t[j]; t[j]=t[0]
-		end
-	end
-	local function length()
-		return n
-	end
-	local cmp = h.cmp
-		and function(i, j) return h.cmp(t[i], t[j]) end
-		or  function(i, j) return t[i] < t[j] end
-
-	local push, pop, rebalance = virtualheap(add, rem, swap, length, cmp)
-
-	heap_mixin(h, INDEX)
-
-	local function get(i, box)
-		if not (i >= 1 and i <= n) then
-			return nil
-		end
-		if box then
-			box[0] = t[i]
-		else
-			return ct(t[i])
-		end
-	end
-	function h:push(v)
-		push(v)
-	end
-	function h:pop(i, box)
-		assert(n > 0, 'buffer underflow')
-		local v = get(i or 1, box)
-		pop(i or 1)
-		return v
-	end
-	function h:peek(i, box)
-		return get(i or 1, box)
-	end
-	function h:replace(i, v)
-		assert(i >= 1 and i <= n, 'invalid index')
-		t[i] = v
-		rebalance(i)
-	end
-	h.length = length
-	function h:remove(v)
-		local i = self:find(v)
-		if i then
-			self:pop(i)
-			return true
-		else
-			return false
-		end
-	end
-
-	return h
-end
-
 --value heap working over a Lua table
 
 function heap(h)
@@ -319,8 +151,28 @@ function heap(h)
 		or  function(i, j) return t[i] < t[j] end
 	local push, pop, rebalance = virtualheap(add, rem, swap, length, cmp)
 
-	heap_mixin(h, INDEX)
-
+	function h:find(v)
+		for i,v1 in ipairs(self) do
+			if v1 == v then
+				return i
+			end
+		end
+		return nil
+	end
+	if INDEX ~= nil then
+		function h:find(v) --O(1..logN)
+			return v[INDEX]
+		end
+	else
+		function h:find(v) --O(n)
+			for i,v1 in ipairs(self) do
+				if v1 == v then
+					return i
+				end
+			end
+			return nil
+		end
+	end
 	function h:push(v)
 		assert(v ~= nil, 'invalid value')
 		push(v)
