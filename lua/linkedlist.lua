@@ -7,6 +7,9 @@
 	and `_next` are reserved for linking.
 
 	linkedlist() -> list                    create a new linked list
+	list.first -> t                         first item
+	list.last -> t                          last item
+	list.length -> n                        number of items
 	list:clear()                            clear the list
 	list:insert_first(t)                    add an item at beginning of the list
 	list:insert_last(t)                     add an item at the end of the list
