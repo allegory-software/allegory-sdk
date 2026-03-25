@@ -8,14 +8,13 @@ in order to 1) avoid creating too many of those resouces in total and 2) avoid
 creating and destroying resources on every use assuming these operations are
 slow, like connections to external services.
 
-resource_pool([opt]) -> pool
-	* max_resources       :  max resources to accept in the pool (100)
-	* max_waiting_threads :  max threads to queue up (1000)
-
-pool:get([expires]) -> res   get a free resource from the pool
-pool:put(res)                put a resource in the pool in busy state
-pool:reuse(res)              mark resource as free to be reused
-pool:pull(res)               pull a dead resource out of the pool
+	resource_pool([opt]) -> pool   create a resource pool
+	  max_resources                max resources to accept in the pool (100)
+	  max_waiting_threads          max threads to queue up (1000)
+	pool:get([expires]) -> res     get a free resource from the pool
+	pool:put(res)                  put a resource in the pool in busy state
+	pool:reuse(res)                mark resource as free to be reused
+	pool:pull(res)                 pull a dead resource out of the pool
 
 pool:get(key, [expires]) -> res
 	Get a free resource from the pool. The optional `expires` arg is a clock()
