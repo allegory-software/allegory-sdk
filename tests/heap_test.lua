@@ -71,8 +71,30 @@ local function benchmark()
 	bench('Lua tables/i', heap{cmp = cmp, index_key = 'i'}, size, tgen)
 end
 
+local function test_heapify()
+	--reverse-sorted input forces heapify to do real work
+	local h = heap{50, 40, 30, 20, 10}
+	local prev = -1/0
+	while h:length() > 0 do
+		local v = h:pop()
+		assert(v >= prev)
+		prev = v
+	end
+	--random input
+	local t = {}
+	for i = 1, 1000 do t[i] = math.random() end
+	local h = heap(t)
+	prev = -1/0
+	while h:length() > 0 do
+		local v = h:pop()
+		assert(v >= prev)
+		prev = v
+	end
+end
+
 test_order()
 test_example()
+test_heapify()
 test_remove()
 test_replace()
 if os.getenv'AUTO' then return end

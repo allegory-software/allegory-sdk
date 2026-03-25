@@ -22,13 +22,14 @@
 
 	Values that compare equally are popped in random order.
 
-virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance
+virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance, heapify
 
 	Create a heap API:
 
 		push(v) -> i         drop a value into the heap and return its index
 		pop(i)               remove the value at index i (root is at index 1)
 		rebalance(i)         rebalance the heap after the value at i has been changed
+		heapify()            establish heap order on the underlying array   O(n)
 
 	from a stack API:
 
@@ -50,7 +51,7 @@ heap([h]) -> h
 	  * `index_key`: enables O(1) `h:find(v)` and thus O(log n) `h:remove(v)`
 	  at the price of setting `e[index_key]` on all elements of the heap,
 	  otherwise `h:find(v)` is O(n) and `h:remove(v)` is O(n).
-	  * a pre-allocated heap in the array part of the table (optional).
+	  * initial values in the array part of the table (optional; heapified automatically).
 
 	NOTE: trying to push `nil` into a value heap raises an error.
 
@@ -63,10 +64,6 @@ heap([h]) -> h
 		h:push{priority = 10, etc = 'foo'}
 		assert(h:pop().priority == 10)
 		assert(h:pop().priority == 20)
-
-TODO
-  * heapifying the initial array
-  * merge(h), meld(h)
 
 ]=]
 
@@ -122,7 +119,13 @@ function virtualheap(add, remove, swap, length, cmp)
 		end
 	end
 
-	return push, pop, rebalance
+	local function heapify()
+		for i = floor(length() / 2), 1, -1 do
+			movedown(i)
+		end
+	end
+
+	return push, pop, rebalance, heapify
 end
 
 --value heap working over a Lua table
@@ -149,7 +152,13 @@ function heap(h)
 	local cmp = h.cmp
 		and function(i, j) return h.cmp(t[i], t[j]) end
 		or  function(i, j) return t[i] < t[j] end
-	local push, pop, rebalance = virtualheap(add, rem, swap, length, cmp)
+	local push, pop, rebalance, heapify = virtualheap(add, rem, swap, length, cmp)
+	if n > 0 then
+		if INDEX ~= nil then
+			for i = 1, n do t[i][INDEX] = i end
+		end
+		heapify()
+	end
 
 	function h:find(v)
 		for i,v1 in ipairs(self) do
