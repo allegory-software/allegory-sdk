@@ -3,19 +3,17 @@
 	Async http(s) downloader.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	Features https, gzip compression, persistent connections,
-	multiple client IPs, resource limits, auto-redirects, auto-retries,
-	cookie jars, multi-level debugging, caching, cdata-buffer-based I/O.
+	Features https, gzip compression, connection pool, multiple client IPs,
+	auto-redirects, auto-retries, cookie jars, caching.
 
 CLIENT
 	http_client(opt1,...) -> client   create a client object, merging options tables
-	  max_conn                        total connections
-	  max_conn_per_target             max connections per target
+	  max_conn_per_target <- n        max connections per target
 	  client_ips <- {ip1,...}         a list of client IPs to assign to requests
-	  max_retries                     number of retries before giving up
-	  max_redirects                   number of redirects before giving up
+	  max_retries                     number of retries before giving up (0)
+	  max_redirects                   number of redirects before giving up (8)
 	  tls_options                     options to pass to sock_bearssl
-	  compress <- false               disable compression
+	  compress <- true|false          allow compression (true)
 	  debug <- flags                  debug flags: 'protocol tracebacks stream sched'
 	client:send_request_headers(opt) -> req   make a HTTP request and send headers
 	  connect_timeout                 connect timeout (set on target)
@@ -23,8 +21,8 @@ CLIENT
 	  response_timeout                timeout for the response part
 	  client_ip                       client ip to bind to
 	  max_conn                        connections limit (set on target)
-	  max_redirects                   redirects limit (set on target)
-	  compress <- false               disable compression
+	  max_redirects                   redirects limit
+	  compress <- true|false          allow compression
 	  tls_options                     options to pass to sock_bearssl
 	req:flush_send_buffer() -> left   flush req.wb
 	req:send_request_body_chunk(chunk[,len]) -> left  upload body chunk
@@ -33,7 +31,9 @@ CLIENT
 	client:fetch(opt | url) -> s, ht  make a request and get response body and headers
 	client:close_all()                close all connections
 CONFIG
-	http_debug                        nil (set to true to enable)
+	fetch_max_conn_per_target
+	fetch_client_ips
+	http_debug
 FETCH
 	fetch(opt | url, [body]) -> content, req
 
@@ -48,7 +48,7 @@ NOTES
 
 ]=]
 
-if not ... then require'http_client_test'; return end
+--if not ... then require'http_client_test'; return end
 
 require'glue'
 require'json'
@@ -82,7 +82,8 @@ local function http_conn(opt)
 end
 
 function http:send_request_headers(req)
-	assert(req.headers['host'], 'host missing') --required by http
+	local tcp = self.tcp
+	req.headers['host'] = tcp:checknp(req.host, 'host missing') --required by http
 	if req.close then
 		req.headers['connection'] = 'close'
 	end
@@ -93,10 +94,8 @@ function http:send_request_headers(req)
 	if istab(cookies) then
 		local t = {}
 		for k,v in sortedpairs(cookies) do
-			assert(not k:has'=')
-			assert(not k:has';')
-			assert(not v:has'=')
-			assert(not v:has';')
+			tcp:checknp(not (k:has'=' or k:has';' or v:has'=' or v:has';'),
+				'invalid cookie value')
 			append(t, k, '=', v)
 		end
 		req.headers['cookie'] = cat(t, ';')
@@ -107,7 +106,7 @@ function http:send_request_headers(req)
 	end
 	req.wb = self.wb
 
-	self.tcp:settimeout(req.request_timeout, 'w')
+	tcp:settimeout(req.request_timeout, 'w')
 	local wb = self.wb
 
 	--send request line
@@ -139,7 +138,7 @@ function http:flush_send_buffer(req)
 	local n = req.upload_unsent_size
 	assert(n, 'request not sent')
 	local len = #self.wb
-	self.tcp:checkp(n >= len, 'upload size mismatch')
+	self.tcp:checknp(n >= len, 'upload size mismatch')
 	self.wb:flush()
 	n = n - len
 	req.upload_unsent_size = n
@@ -150,14 +149,14 @@ function http:send_request_body_chunk(req, chunk, len)
 	local n = req.upload_unsent_size
 	assert(n, 'request not sent')
 	len = len or #chunk
-	self.tcp:checkp(n >= len, 'upload size mismatch')
+	self.tcp:checknp(n >= len, 'upload size mismatch')
 	self.tcp:send(chunk, len)
 	n = n - len
 	req.upload_unsent_size = n
 	return n
 end
 
-function http:read_response_headers(req)
+function http:recv_response_headers(req)
 	local tcp = self.tcp
 	local rb = self.rb
 	tcp:settimeout(req.response_timeout, 'r')
@@ -165,15 +164,12 @@ function http:read_response_headers(req)
 	--read status line
 	local line, err = rb:needline()
 	if not line then return nil, err end
-	local http_version, status, status_message
-		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
-	req:dp('<=', '%s %s %s', status, status_message, http_version)
+	local http_version, status = line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)'
 	status = tonumber(status)
-	tcp:checkp(http_version and status, 'invalid status line: %s', line)
-	tcp:checkp(http_version == '1.1', 'invalid http version: %s', http_version)
-	tcp:checkp(status >= 200 and status <= 999, 'invalid status: %d', status)
+	tcp:checkp(http_version == '1.1' and status >= 200 and status <= 999,
+		'invalid status line: %s', line)
 	req.status = status
-	req.status_message = status_message
+	req:dp('<=', '%s', status)
 
 	--read response headers
 	req.response_headers = {}
@@ -187,9 +183,9 @@ function http:read_response_headers(req)
 		value = value:trim()
 		req:dp('<-', '%-17s %s', name, value)
 		local prev_value = req.response_headers[name]
-		if name == 'set-cookie' then --this header is not safe to combine.
+		if name == 'set-cookie' or name == 'www-authenticate' then --can't combine
 			add(attr(req.response_headers, name), value)
-		elseif prev_value then --duplicate header: append value.
+		elseif prev_value then --duplicate header: combine with prev value
 			req.response_headers[name] = prev_value .. ',' .. value
 		else
 			req.response_headers[name] = value
@@ -206,7 +202,8 @@ function http:read_response_headers(req)
 		status == 308
 	if redirect then
 		local location = req.response_headers['location']
-		req.redirect_location = tcp:checkp(location, 'no location')
+		tcp:checkp(location, 'location missing for status %d', status)
+		req.redirect_location = location
 	end
 
 	--prepare req for reading the body
@@ -219,21 +216,46 @@ function http:read_response_headers(req)
 	tcp:checkp(not len or len >= 0)
 	req.chunked = te == 'chunked'
 	req.gzip = ce == 'gzip'
-	req.len = len
-	req.unread_len = len
-	req.finished = len ~= 0
+	req.body_len = len
+	req.body_unread_len = len
+	req.finished = len == 0
 	if req.gzip then
-
+		if not self.gz then
+			self.gz = gzip_state{op = 'decompress'}
+			tcp:onclose(function()
+				self.gz:free()
+			end)
+		else
+			self.gz:reset()
+		end
 	end
 end
 
+function http:decompress(req, buf, len)
+	if req.gzip then
+		pr('GZIP PUSH', buf, len)
+		local ok, err = self.gz:try_push(buf, len)
+		self.tcp:checkp(ok, 'gzip error: %s', err)
+		self.gzb_needs_reset = true
+		local p, len = self.gz.b:ref()
+		return p, len
+	else
+		return buf, len
+	end
+end
 function http:recv_response_body_chunk(req)
+	local rb = self.rb
+	local tcp = self.tcp
 	if req.finished then
 		return nil, 'eof'
 	end
-	if req.rb_needs_reset then
+	if self.rb_needs_reset then
 		rb:reset()
-		req.rb_needs_reset = false
+		self.rb_needs_reset = false
+	end
+	if self.gzb_needs_reset then
+		self.gz.b:reset()
+		self.gzb_needs_reset = false
 	end
 	if req.chunked then
 		local line = rb:needline()
@@ -241,76 +263,48 @@ function http:recv_response_body_chunk(req)
 		tcp:checkp(len, 'invalid chunk size')
 		req:dp('<<', '%7d bytes', len)
 		if len > 0 then
-			rb:reset()
+			local p = rb:ref()
 			rb:need(len)
 			self.rb_needs_reset = true
 			rb:needline()
-			return rb:ref(), len
+			return self:decompress(req, p, len)
 		else --last chunk
 			rb:needline()
 			req.finshed = true
-			return nil, 'eof'
+			return self:decompress(req, nil, 'eof')
 		end
 	elseif req.body_len then
-		if req.body_unread_len == 0 then
-			return nil, 'eof'
-		end
 		rb:need(1)
 		self.rb_needs_reset = true
 		local buf, len = rb:ref()
 		req:dp('<<', '%7d bytes', len)
 		req.body_unread_len = req.body_unread_len - len
-		return buf, len
+		tcp:checkp(req.body_unread_len >= 0, 'length mismatch')
+		if req.body_unread_len == 0 then
+			req.finished = true
+		end
+		return self:decompress(req, buf, len)
 	else --read till EOF
 		if rb:have(1) then
 			self.rb_needs_reset = true
 			local buf, len = rb:ref()
 			req:dp('<<', '%7d bytes', len)
-			return buf, len
+			return self:decompress(req, buf, len)
 		else
 			req.finished = true
-			return nil, 'eof'
+			return self:decompress(req, nil, 'eof')
 		end
 	end
-end
-
-function http:cookie_domain_matches_request_host(domain, host)
-	return not domain or domain == host
-		or (host:ends('.'..domain) and not (is_ipv4(host) or is_ipv6(host)))
-end
-
-function http:cookie_default_path(uri)
-	return '/' --TODO
-end
-
---cookie path matches request path exactly, or
---cookie path ends in `/` and is a prefix of the request path, or
---cookie path is a prefix of the request path, and the first
---character of the request path that is not included in the cookie path is `/`.
-function http:cookie_path_matches_request_path(cpath, path)
-	if cpath == rpath then
-		return true
-	elseif cpath == rpath:sub(1, #cpath) then
-		if cpath:sub(-1, -1) == '/' then
-			return true
-		elseif rpath:sub(#cpath + 1, #cpath + 1) == '/' then
-			return true
-		end
-	end
-	return false
 end
 
 --http client object ---------------------------------------------------------
 
 local client = {
 	type = 'http_client',
-	max_conn = 50,
-	max_conn_per_target = 20,
+	max_conn_per_target = 6,
 	client_ips = {},
-	max_redirects = 20,
-	max_cookie_length = 8192,
-	max_cookies = 1e6,
-	max_cookies_per_host = 1000,
+	max_retries = 0,
+	max_redirects = 8,
 }
 
 function client:dp(target, event, fmt, ...)
@@ -357,7 +351,6 @@ end
 --to be reused for future requests.
 function client:target(req)
 	local host = assert(req.host, 'host missing'):lower()
-	local https = req.https and true or false
 	local client_ip = req.client_ip or self:assign_client_ip(host)
 	local target_key = host .. (client_ip and ' '..client_ip or '')
 	local target = attr(self.targets, target_key)
@@ -365,206 +358,46 @@ function client:target(req)
 		target.type = 'http_target'
 		target.debug_prefix = '@'
 		target.host = host
+		target.https = req.https
 		target.client_ip = client_ip
 		target.ready = {} --ready conn FIFO
 		target.conn_count = 0
 		--NOTE: these are set once so we assume they are static per target.
 		target.connect_timeout = req.connect_timeout
 		target.max_conn = req.max_conn
-		target.max_redirects = req.max_redirects
-		target.tls_options = req.tls_options or self.tls_options
+		target.tls_options = req.tls_options
 	end
 	return target
 end
 
-function client:adjust_conn_count(target, n)
-	self.conn_count = self.conn_count + n
-	target.conn_count = target.conn_count + n
-	self:dp(target, (n > 0 and '+' or '-')..'CO', '=%d, total=%d',
-		target.conn_count, self.conn_count)
-end
-
-function client:can_connect_now(target)
-	local can = self.conn_count < self.max_conn
-	if can and target then
-		can = target.conn_count < (target.max_conn or self.max_conn_per_target)
-	end
-	self:dp(target, '?CAN_CO', '%s', can)
-	return can
-end
-
-local function _connect(target, tls_opt)
+local function _connect(self, target)
 	local tcp = connect(target.host,
 		target.https and 443 or 80,
 		target.connect_timeout,
 		target.client_ip
 	)
-	if target.debug.stream then
+	if self.debug.stream then
 		tcp:debug'http'
 	end
 	if target.https then
-		tcp = client_stcp(tcp, target.host, target.tls_options)
+		tcp = client_stcp(tcp, target.host, target.tls_options or self.tls_options)
 	end
 	return tcp
 end
-function client:try_connect()
-	self:adjust_conn_count(target, 1)
-	local ok, tcp, err = catch('io protocol', _connect, target)
+function client:try_connect(target)
+	local ok, tcp, err = catch('io protocol', _connect, self, target)
 	if not ok then
-		self:adjust_conn_count(target, -1)
 		return nil, err
 	else
 		tcp:onclose(function(tcp)
-			self:adjust_conn_count(target, -1)
-			self:resume_next_wait_conn_thread()
+		--	self:resume_next_wait_conn_thread()
 		end)
 		return tcp
 	end
 end
 
 function client:get_conn(target)
-	local http = remove(target.ready, 1)
-	if http then
-		self:dp(target, '-READY', '%s', http)
-		return http
-	else
-		if not self:can_connect_now(target) then
-			add(self.wait_conn_queue, currentthread())
-			add(self.wait_conn_queue, target)
-			self:dp(target, '+WAIT_CO', '%s Q: %d', thread, #self.wait_conn_queue / 2)
-			assert(suspend() == 'connect')
-			self:dp(target, '+WAIT_CO', '%s Q: %d', thread, #self.wait_conn_queue / 2)
-		end
-
-		if not ok then return nil, err end
-	end
-end
-
-function client:resume_next_wait_conn_thread()
-	local target = remove(self.wait_conn_queue, 1)
-	local thread = remove(self.wait_conn_queue, 1)
-	if not target then return end
-	resume(thread, 'connect')
-end
-
---redirects ------------------------------------------------------------------
-
-function client:redirect_request_args(t, req, res)
-	local location = assert(req.redirect_location, 'no location')
-	local loc = url_parse(location)
-	local uri = url_format{
-		path = loc.path,
-		query = loc.query,
-		fragment = loc.fragment,
-	}
-	local https = loc.scheme == 'https' or nil
-	local port = loc.port or (not loc.host and t.port) or nil
-	local host = loc.host or t.host
-	if port then host = host..':'..port end
-	return {
-		method = 'GET',
-		close = t.close,
-		host = host,
-		https = https,
-		uri = uri,
-		compress = t.compress,
-		headers = merge({['content-type'] = false}, t.headers),
-		redirect_count = (t.redirect_count or 0) + 1,
-		connect_timeout = t.connect_timeout,
-		request_timeout = t.request_timeout,
-		respone_timeout = t.response_timeout,
-		debug = t.debug or self.debug,
-	}
-end
-
---cookie management ----------------------------------------------------------
-
-function client:accept_cookie(cookie, host, http)
-	return http:cookie_domain_matches_request_host(cookie.domain, host)
-end
-
-function client:cookie_jar(ip)
-	return attr(attr(self, 'cookies'), ip or '*')
-end
-
-function client:remove_cookie(jar, domain, path, name)
-	--
-end
-
-function client:clear_cookies(client_ip, host)
-	--
-end
-
-function client:store_cookies(target, req, res)
-	local cookies = req.response_headers['set-cookie']
-	if not cookies then return end
-	local time = time()
-	local client_jar = self:cookie_jar(target.client_ip)
-	local host = target.host
-	for _,cookie in ipairs(cookies) do
-		if self:accept_cookie(cookie, host, req.http) then
-			local expires
-			if cookie.expires then
-				expires = cookie.expires
-			elseif cookie['max-age'] then
-				expires = time + cookie['max-age']
-			end
-			local domain = cookie.domain or host
-			local path = cookie.path or http:cookie_default_path(req.uri)
-			if expires and expires < time then --expired: remove from jar.
-				self:remove_cookie(client_jar, domain, path, cookie.name)
-			else
-				local sc = attr(attr(attr(client_jar, domain), path), cookie.name)
-				sc.wildcard = cookie.domain and true or false
-				sc.secure = cookie.secure
-				sc.expires = expires
-				sc.value = cookie.value
-			end
-		end
-	end
-end
-
-function client:get_cookies(client_ip, host, uri, https)
-	local client_jar = self:cookie_jar(client_ip)
-	if not client_jar then return end
-	local path = uri:match'^[^%?#]+'
-	local time = time()
-	local cookies = {}
-	local names = {}
-	for s in host:gmatch'[^%.]+' do
-		add(names, s)
-	end
-	local domain = names[#names]
-	for i = #names-1, 1, -1 do
-		domain = names[i] .. '.' .. domain
-		local domain_jar = client_jar[domain]
-		if domain_jar then
-			for cpath, path_jar in pairs(domain_jar) do
-				if http:cookie_path_matches_request_path(cpath, path) then
-					for name, sc in pairs(path_jar) do
-						if sc.expires and sc.expires < time then --expired: auto-clean.
-							self:remove_cookie(client_jar, domain, cpath, sc.name)
-						elseif https or not sc.secure then --allow
-							cookies[name] = sc.value
-						end
-					end
-				end
-			end
-		end
-	end
-	return cookies
-end
-
-function client:save_cookies(file)
-	return save(file, pp(self.cookies))
-end
-
-function client:load_cookies(file)
-	local s, err = try_load(file)
-	if not s then return nil, err end
-	local t, err = try_eval(s)
-	if not t then return nil, err end
-	self.cookies = t
+	return self:try_connect(target)
 end
 
 --request call ---------------------------------------------------------------
@@ -576,11 +409,9 @@ local function req_dp(req, event, fmt, ...)
 	log('', 'htcl', event, '%-4s %4dms %s', req.tcp, dt * 1000, s)
 end
 
-function client:try_send_request_headers(opt)
+function client:send_request_headers(opt)
 
 	local target = self:target(opt)
-
-	self:dp(target, '+RQ')
 
 	local tcp, err = self:get_conn(target)
 	if not tcp then return nil, err end
@@ -588,6 +419,7 @@ function client:try_send_request_headers(opt)
 	local http = http_conn({tcp = tcp, compress = self.compress})
 
 	local req = update({
+		client = self,
 		http = http,
 		host = target.host,
 		method = 'GET',
@@ -596,34 +428,33 @@ function client:try_send_request_headers(opt)
 		dp = self.debug.protocol and req_dp or noop,
 	}, opt)
 
-	local cookies = self:get_cookies(target.client_ip, target.host,
-		req.uri, target.https)
+	--local cookies = self:get_cookies(target.client_ip, target.host,
+	--	req.uri, target.https)
 
-	local ok, err = http:try_send_request_headers(req, cookies)
-	if not ok then return nil, err end
+	http:send_request_headers(req, cookies)
 
-	function req:try_send_request_body_chunk()
-		http:try_send_request_body_chunk(self)
+	function req:send_request_body_chunk()
+		http:send_request_body_chunk(self)
 	end
 
-	function req:try_recv_response_headers()
+	function req:recv_response_headers()
 		http:recv_response_headers(req)
-		self:store_cookies(target, req)
-		if req.redirect_location then
-			local t = self:redirect_request_args(t, req)
-			local max_redirects = target.max_redirects or self.max_redirects
-			if t.redirect_count >= max_redirects then
-				return nil, 'too many redirects', req
-			end
-			self:try_recv_request_body()
-			local ok, err = self:try_send_request_headers(t)
-			return self:try_recv_response_headers()
-		end
+		--self:store_cookies(target, req)
+		--if req.redirect_location then
+		--	local t = self:redirect_request_args(t, req)
+		--	local max_redirects = self.max_redirects or self.client.max_redirects
+		--	if t.redirect_count >= max_redirects then
+		--		return nil, 'too many redirects', req
+		--	end
+		--	self:try_recv_request_body()
+		--	local ok, err = self:try_send_request_headers(t)
+		--	return self:try_recv_response_headers()
+		--end
 	end
 
-	function req:try_recv_response_body_chunk()
-
-		local chunk, len, left = http:try_recv_response_body_chunk(self)
+	function req:recv_response_body_chunk()
+		return http:recv_response_body_chunk(req)
+	end
 
 	function req:finish(close)
 		if http.tcp:closed() then return end
@@ -641,70 +472,36 @@ function client:try_send_request_headers(opt)
 	return req
 end
 
---hi-level API: fetch --------------------------------------------------------
-
---opt | url,[body]
-function client:fetch(arg1, body)
-
-	local opt = istab(arg1) and arg1 or empty
-	body = body or opt.body
-
-	local headers = {}
-
-	if body ~= nil and not isstr(body) then
-		body = json_encode(body)
-		headers['content-type'] = 'application/json'
-	end
-	if body then
-		headers['content-length'] = #body
-	end
-
-	local url = isstr(arg1) and arg1 or opt.url
-	local u = url and url_parse(url)
-
-	local opt = update({
-		host = u and u.host,
-		uri = u and u.path,
-		https = u and u.scheme == 'https' or not u and opt.https ~= false,
-		method = body and 'POST',
-		body = body,
-	}, opt)
-	opt.headers = update(headers, opt.headers)
-
-	local req, err = self:try_send_request_headers(opt)
-	if not req then return nil, err end
-
-	if body then
-		local ok, err = req:try_send_request_body(body)
-		if not ok then return nil, err end
-	end
-
-	local ok, err = req:try_recv_response_headers()
-	if not ok then return nil, err end
-
-	local ok, err = req:try_recv_response_body()
-	if not ok then return nil, err end
-
-	local ct = req.response_headers['content-type']
-	if ct and ct.media_type == 'application/json' then
-		req.response = json_decode(req.response)
-		--if the entire resonse is the json value "null", then return null
-		--because nil is for errors.
-		req.response = repl(req.response, nil, null)
-	end
-
-	return req.response, req
-end
-
 --global fetch ---------------------------------------------------------------
 
 local cl
 function fetch(...)
 	cl = cl or http_client{
-		max_conn            = config'fetch_max_conn',
 		max_conn_per_target = config'fetch_max_conn_per_target',
 		client_ips          = config'fetch_client_ips',
 		max_redirects       = config'fetch_max_redirects',
 	}
 	return cl:fetch(...)
+end
+
+if not ... then
+
+local client = http_client()
+run(function()
+	local req = client:send_request_headers{
+		host = 'echo.websocket.org', https = true, uri = '/', compress = true,
+	}
+	req:recv_response_headers()
+	pr(req.status, req.response_headers)
+	while 1 do
+		local chunk, len, left = req:recv_response_body_chunk()
+		pr('!!!', chunk, len, left)
+		if not chunk then break end
+		if len > 0 then
+			pr(len)
+			pr(str(chunk, len))
+		end
+	end
+end)
+
 end
