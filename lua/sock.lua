@@ -630,16 +630,14 @@ local send_expires_heap = heap{
 	index_key = 'index', --enable O(log n) removal.
 }
 
-do --timers
+do --blocking (thread-based) timers
 local function wait_until(job, expires)
 	job.recv_thread = currentthread()
 	job.recv_expires = expires
 	recv_expires_heap:push(job)
 	return wait_io(job)
 end
-local function wait(job, timeout)
-	return wait_until(job, clock() + timeout)
-end
+
 local function job_resume(job, ...)
 	local thread = job.recv_thread
 	assert(waiting[thread] == job, 'thread not waiting (on this wait job)')
@@ -661,7 +659,101 @@ function wait_job()
 	--log('', 'sock', 'wait-job', '%s', self)
 	return self
 end
+
+function wait_until(expires)
+	return wait_job():wait_until(expires)
 end
+
+function wait(timeout)
+	return wait_job():wait(timeout)
+end
+
+--lightweight (function-based) timers that run in the main thread.
+function runat(expires, f, name)
+	local job = {
+		recv_thread = f,
+		recv_expires = expires,
+		name = name, --for logging/debugging
+	}
+	recv_expires_heap:push(job)
+	return job
+end
+
+function runafter(timeout, f, ...)
+	return runat(clock() + timeout, f, ...)
+end
+
+local function _runevery(now_too, interval, f, ...)
+	if now_too then
+		if f() == false then
+			return
+		end
+	end
+	local job
+	local function runagain()
+		if f() == false then
+			return
+		end
+		job = runafter(interval, runagain)
+	end
+	job = runafter(interval, runagain)
+	return job
+end
+function runevery      (...) return _runevery(false, ...) end
+function runagainevery (...) return _runevery(true , ...) end
+
+--[[
+function runat(expires, f, ...)
+	local job = wait_job()
+	resume(thread(function()
+		if job:wait_until(expires) == CANCEL then
+			return
+		end
+		f()
+	end, ...))
+	return job
+end
+
+local function _runevery(now_too, interval, f, ...)
+	local job = wait_job()
+	resume(thread(function()
+		if now_too then
+			if f() == false then
+				return
+			end
+		end
+		while true do
+			if job:wait(interval) == CANCEL then
+				return
+			end
+			if f() == false then
+				return
+			end
+		end
+	end, ...))
+	return job
+end
+function runevery      (...) return _runevery(false, ...) end
+function runagainevery (...) return _runevery(true , ...) end
+
+]]
+
+function socket:wait_job()
+	local job = wait_job()
+	self:onclose(function()
+		job:cancel()
+	end)
+	return job
+end
+
+function socket:wait_until(expires)
+	return self:wait_job():wait_until(expires)
+end
+
+function socket:wait(timeout)
+	return self:wait_job():wait(timeout)
+end
+end --timers scope
 
 local function check_errno_wait_write(wait_errno)
 	local errno = errno()
@@ -1005,7 +1097,7 @@ do
 
 	local function check_heap(heap, EXPIRES, THREAD, t)
 		while true do
-			local socket = heap:peek() --gets a socket or wait job
+			local socket = heap:peek() --gets a socket, wait job, or timer
 			if not socket then
 				break
 			end
@@ -1015,9 +1107,13 @@ do
 			if socket[EXPIRES] - t <= 0.01 then
 				assert(heap:pop())
 				socket[EXPIRES] = nil
-				local thread = socket[THREAD]
+				local thread = socket[THREAD] --thread or function
 				socket[THREAD] = nil
-				coro_transfer(thread, nil, 'timeout')
+				if isthread(thread) then
+					coro_transfer(thread, nil, 'timeout')
+				else --timer
+					thread('timeout')
+				end
 			else
 				--socket are popped in expire-order so no point looking beyond this.
 				break
@@ -1423,69 +1519,6 @@ function tcp:try_recvall()
 	end
 end
 tcp.recvall = unprotect_io(tcp.try_recvall)
-
---sleeping & timers ----------------------------------------------------------
-
-function wait_until(expires)
-	return wait_job():wait_until(expires)
-end
-
-function wait(timeout)
-	return wait_job():wait(timeout)
-end
-
-function runat(t, f, ...)
-	local job = wait_job()
-	resume(thread(function()
-		if job:wait_until(t) == job.CANCEL then
-			return
-		end
-		f()
-	end, ...))
-	return job
-end
-
-function runafter(timeout, f, ...)
-	return runat(clock() + timeout, f, ...)
-end
-
-local function _runevery(now_too, interval, f, ...)
-	local job = wait_job()
-	resume(thread(function()
-		if now_too then
-			if f() == false then
-				return
-			end
-		end
-		while true do
-			if job:wait(interval) == job.CANCEL then
-				return
-			end
-			if f() == false then
-				return
-			end
-		end
-	end, ...))
-	return job
-end
-function runevery      (...) return _runevery(false, ...) end
-function runagainevery (...) return _runevery(true , ...) end
-
-function socket:wait_job()
-	local job = wait_job()
-	self:onclose(function()
-		job:cancel()
-	end)
-	return job
-end
-
-function socket:wait_until(expires)
-	return self:wait_job():wait_until(expires)
-end
-
-function socket:wait(timeout)
-	return self:wait_job():wait(timeout)
-end
 
 --debug API ------------------------------------------------------------------
 
