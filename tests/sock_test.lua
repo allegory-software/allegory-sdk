@@ -554,7 +554,7 @@ function test.wait_and_cancel()
 		end, 'waiter'))
 		-- job is now set, waiter is blocked
 		job:cancel()
-		assert(result == job.CANCEL)
+		assert(result == CANCEL)
 	end)
 end
 
@@ -605,7 +605,7 @@ function test.socket_wait_job_autocancel()
 		end, 'waiter'))
 		-- waiter is now blocked; close the socket to trigger auto-cancel
 		s:close()
-		assert(result == sj.CANCEL)
+		assert(result == CANCEL)
 	end)
 end
 
@@ -625,7 +625,6 @@ end
 function test.socket_wait_cancel_on_close()
 	checked_run(function()
 		local s = tcp()
-		local CANCEL = wait_job().CANCEL
 		local result
 		resume(sthread(function()
 			result = s:wait(10)

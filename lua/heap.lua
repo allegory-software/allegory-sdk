@@ -12,6 +12,8 @@
 
 	virtualheap(...) -> push, pop   create a heap API from a stack API
 	heap([h]) -> h                  create a heap for Lua values
+		h.cmp                        provide a comparison function (optional)
+		h.index_key                  make h:find(v) be O(1) and h:remove(v) be O(log n)
 	h:push(val) -> i                push a value                          O(log n)
 	h:pop([i][, dst]) -> val        pop value (root value at default i=1) O(log n)
 	h:replace(i, val)               replace value at index                O(log n)
@@ -40,20 +42,20 @@ virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance, heapify
 		cmp(i, j) -> bool    compare elements
 
 	The heap can be a min-heap or max-heap depending on the comparison
-	function. If `cmp(i, j)` returns `a[i] < a[j]` then it's a min-heap.
+	function. If cmp(i, j) returns `a[i] < a[j]` then it's a min-heap.
 	Stack indices are assumed to be consecutive.
 
 heap([h]) -> h
 
-	Create a value heap from table `h`, which can contain:
+	Create a value heap from table h, which can contain:
 
-	  * `cmp`: a comparison function (optional).
-	  * `index_key`: enables O(1) `h:find(v)` and thus O(log n) `h:remove(v)`
-	  at the price of setting `e[index_key]` on all elements of the heap,
-	  otherwise `h:find(v)` is O(n) and `h:remove(v)` is O(n).
+	  * cmp: a comparison function (optional).
+	  * index_key: enables O(1) h:find(v) and thus O(log n) h:remove(v).
+	  at the price of setting e[index_key] on all elements of the heap,
+	  otherwise h:find(v) is O(n) and h:remove(v) is O(n).
 	  * initial values in the array part of the table (optional; heapified automatically).
 
-	NOTE: trying to push `nil` into a value heap raises an error.
+	NOTE: trying to push nil into a value heap raises an error.
 
 	Example:
 
@@ -137,7 +139,7 @@ function heap(h)
 	local INDEX = h.index_key
 	if INDEX ~= nil then --for O(log n) removal.
 		function add(v) n=n+1; t[n]=v; v[INDEX] = n end
-		function rem() t[n][INDEX] = nil; t[n]=nil; n=n-1 end
+		function rem() t[n][INDEX] = -1; t[n]=nil; n=n-1 end
 		function swap(i, j)
 			t[i], t[j] = t[j], t[i]
 			t[i][INDEX] = i

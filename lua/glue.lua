@@ -146,6 +146,7 @@ CALLBACKS
 	call(f, ...)                   calls f if f is a func, otherwise returns args
 	do_before(f, do_f) -> f        wrap f so as to call do_f first
 	do_after(f, do_f) -> f         wrap f so as to call do_f last
+	CANCEL                         generic "cancel" command to pass to callbacks
 OBJECTS
 	object([super], [t], ...) -> t    create a class or object
 	before(class, method_name, f)     call f at the beginning of a method
@@ -1555,6 +1556,8 @@ function gettersandsetters(getters, setters, super)
 	end
 	return {__index = get, __newindex = set}
 end
+
+CANCEL = {} --generic "cancel" command to pass to callbacks.
 
 --process control ------------------------------------------------------------
 

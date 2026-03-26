@@ -772,7 +772,7 @@ int fsync(int fd);
 int64_t lseek(int fd, int64_t offset, int whence) asm("lseek64");
 ]]
 
---NOTE: always ask for more than 0 bytes from a pipe or you'll not see EOF.
+--NOTE: to read many small pieces use a pbuffer instead, this will crawl!
 function file.try_read(f, buf, sz)
 	if f.fd == -1 then return nil, 'closed' end
 	if sz == 0 then return 0 end --mask out null reads
@@ -819,6 +819,7 @@ function file.try_seek(f, whence, offset)
 end
 file.seek = unprotect_io(file.try_seek)
 
+--NOTE: to write many small pieces use a pbuffer instead, this will crawl!
 function file.try_write(f, buf, sz)
 	if f.fd == -1 then return nil, 'closed' end
 	sz = sz or #buf
@@ -853,6 +854,7 @@ function file.try_write(f, buf, sz)
 end
 file.write = unprotect_io(file.try_write)
 
+--NOTE: to read many small pieces use a pbuffer instead, this will crawl!
 function file.try_readn(f, buf, sz)
 	local sz0 = sz
 	local buf = cast(u8p, buf)
@@ -1922,8 +1924,6 @@ function scandir(arg, dive)
 end
 
 --hi-level APIs --------------------------------------------------------------
-
-ABORT = {} --error signal to pass to save()'s reader function.
 
 function try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
 	local f, err = try_open(file)
