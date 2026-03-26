@@ -1,8 +1,5 @@
 SIMPLIFY / REVIEW
 ------------------------------------------------------------------------------
-* httplite
-	- gzip encoder
-
 * log is incomplete and hard to read:
 	- live() must take module and action
 	- show +N -N on separate column
@@ -16,9 +13,9 @@ SIMPLIFY / REVIEW
 
 * fs: atomic save()/saver() rethinking?
 
-* http server + client hitting different parts
+* http server + client protocol testing (gzip, chunked, length, eof, uploads, etc.)
 
-* http server smoke test to look for memory leaks
+* http server smoke test to look for memory leaks and DoS limits
 
 * mdbx test
 * mdbx_schema test
@@ -27,6 +24,7 @@ SIMPLIFY / REVIEW
 * csv.lua uses io.open
 * xml.lua uses io.open
 
+* fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
 
 LEVERAGE AI
 ------------------------------------------------------------------------------
