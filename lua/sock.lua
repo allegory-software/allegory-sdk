@@ -21,6 +21,7 @@ SOCKETS
 	s:[try_]setopt(opt, val)               set socket option ('so_*', 'tcp_*', etc.)
 	s:[try_]getopt(opt) -> val             get socket option
 	s:debug_stream([protocol_name])        log recv/send data
+	s:cancel[_recv|_send]()                cancel currently waiting I/O ops
 TCP
 	tcp([family='ip'], [opt]) -> tcp                     make a SOCK_STREAM socket
 	[try_]connect(addr, [port], [timeout], [client_ip]) -> tcp  create tcp socket and connect
@@ -59,22 +60,28 @@ SCHEDULER
 	start([ignore_interrupts])             keep polling until all threads finish
 	stop()                                 stop polling
 	run(f, ...) -> ...                     run a function inside a thread
-TIMERS
+WAIT JOBS
 	wait_job() -> sj            make an interruptible async wait job
-	  sj:wait_until(t) -> ...   wait until clock()
-	  sj:wait(s) -> ...         wait for s seconds
-	  sj:resume(...)            resume the waiting thread
-	  sj:cancel()               calls sj:resume(sj.CANCEL)
-	  sj.CANCEL                 magic arg that can cancel runat()
+	sj:wait_until(t) -> ...     wait until clock()
+	sj:wait(s) -> ...           wait for s seconds
+	sj:resume(...)              resume the waiting thread
+	sj:cancel()                 calls sj:resume(CANCEL)
 	wait_until(t) -> ...        wait until clock() value
 	wait(s) -> ...              wait for s seconds
+	s:wait_job() -> sj          wait job that is auto-canceled on socket close
+	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job
+	s:wait(s) -> ...            wait() on auto-canceled wait job
+TIMERS
+	timer(f, [name]) -> tm      create a timer that runs f
+	tm:setexpires(t)            run f at clock t
+	tm:settimeout(s)            run f after s seconds
+	tm:setinterval(s)           run f every s seconds
+	tm:cancel()                 remove timer from queue (can be added back)
+	tm:run()                    run f now
 	runat(t, f) -> sj           run f at clock t
 	runafter(s, f) -> sj        run f after s seconds
 	runevery(s, f) -> sj        run f every s seconds
 	runagainevery(s, f) -> sj   run f now and every s seconds afterwards
-	s:wait_job() -> sj          wait job that is auto-canceled on socket close
-	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job
-	s:wait(s) -> ...            wait() on auto-canceled wait job
 THREAD SETS
 	threadset() -> ts
 	  ts:thread(f, [fmt, ...]) -> co
@@ -230,6 +237,8 @@ stop()
 
 	Tell the loop to stop dequeuing and return.
 
+TIMERS -----------------------------------------------------------------------
+
 wait_until(t)
 
 	Wait until a clock() value without blocking other threads.
@@ -243,7 +252,7 @@ wait_job() -> sj
 	Make an interruptible waiting job. Put the current thread to sleep using
 	sj:wait() or sj:wait_until() and then from another thread call
 	sj:resume() to resume the waiting thread. Any arguments passed to
-	sj:resume() will be returned by wait().
+	sj:resume() will be returned by sj:wait().
 
 MULTI-THREADING --------------------------------------------------------------
 
@@ -284,21 +293,6 @@ local coro_transfer = coro.transfer
 local coro_finish   = coro.finish
 
 local C = C
-
-local socket = {
-	debug_prefix = 'S',
-	check_io = check_io,
-	checkp = checkp,
-	protect = protect,
-} --common socket methods
-local tcp = {type = 'tcp_socket', socktype = 'tcp'}
-local udp = {type = 'udp_socket', socktype = 'udp'}
-local wait_job_class = {type = 'wait_job', debug_prefix = 'W'}
-
-function issocket(s)
-	local mt = getmetatable(s)
-	return istab(mt) and rawget(mt, 'issocket') or false
-end
 
 --sockaddr -------------------------------------------------------------------
 
@@ -534,8 +528,20 @@ int sendto(int s, const char *buf, int len, int flags, const struct sockaddr *to
 int getsockname(int sockfd, struct sockaddr *restrict addr, int *restrict addrlen);
 ]]
 
---forward declarations
-local wait_io, cancel_wait_io, waiting
+local socket = {
+	debug_prefix = 'S',
+	check_io = check_io,
+	checkp = checkp,
+	checknp = checknp,
+	protect = protect,
+} --common socket methods
+local tcp = {type = 'tcp_socket', socktype = 'tcp'} --all SOCK_STREAM really
+local udp = {type = 'udp_socket', socktype = 'udp'} --all SOCK_DGRAM really
+
+function issocket(s)
+	local mt = getmetatable(s)
+	return istab(mt) and rawget(mt, 'issocket') or false
+end
 
 local SOCK_NONBLOCK  = 0x000800 --async I/O
 local SOCK_CLOEXEC   = 0x080000 --close-on-exec (non-inheritable on exec())
@@ -572,7 +578,7 @@ function socket:try_close()
 	local fd = self.fd; self.fd = nil --make closed() true.
 	--NOTE: it is unsafe to close a socket twice no matter the error.
 	local ok, err = check_errno(C.close(fd) == 0)
-	cancel_wait_io(self)
+	self:cancel()
 	local ps = self.listen_socket
 	if ps then
 		ps._sockets_n = ps._sockets_n - 1
@@ -602,6 +608,8 @@ function socket:onclose(fn)
 	after(self, '_after_close', fn)
 end
 
+--r/w expire heaps -----------------------------------------------------------
+
 function socket:setexpires(expires, rw)
 	local r = rw == 'r' or not rw
 	local w = rw == 'w' or not rw
@@ -612,131 +620,61 @@ function socket:settimeout(s, rw)
 	self:setexpires(s and clock() + s, rw)
 end
 
-local EAGAIN      = 11
-local EWOULDBLOCK = 11
-local EINPROGRESS = 115
-
 local recv_expires_heap = heap{
 	cmp = function(s1, s2)
 		return s1.recv_expires < s2.recv_expires
 	end,
-	index_key = 'index', --enable O(log n) removal.
+	index_key = 'recv_heap_index', --enable O(log n) removal.
 }
 
 local send_expires_heap = heap{
 	cmp = function(s1, s2)
 		return s1.send_expires < s2.send_expires
 	end,
-	index_key = 'index', --enable O(log n) removal.
+	index_key = 'send_heap_index', --enable O(log n) removal.
 }
 
-do --blocking (thread-based) timers
-local function wait_until(job, expires)
-	job.recv_thread = currentthread()
-	job.recv_expires = expires
-	recv_expires_heap:push(job)
-	return wait_io(job)
-end
+--wait jobs ------------------------------------------------------------------
 
-local function job_resume(job, ...)
-	local thread = job.recv_thread
-	assert(waiting[thread] == job, 'thread not waiting (on this wait job)')
-	assert(recv_expires_heap:remove(job))
+--forward declarations
+local wait_io, waiting
+
+local wj = {
+	type = 'wait_job',
+	debug_prefix = 'W',
+}
+function wait_job()
+	local self = object(wj)
+	--log('', 'sock', 'wait-job', '%s', self)
+	return self
+end
+function wj:wait_until(expires)
+	self.recv_thread = currentthread()
+	self.recv_expires = expires
+	recv_expires_heap:push(self)
+	return wait_io(self)
+end
+function wj:wait(timeout)
+	return self:wait_until(clock() + timeout)
+end
+function wj:resume(...)
+	local thread = self.recv_thread
+	assert(waiting[thread] == self, 'thread not waiting (on this wait job)')
+	assert(recv_expires_heap:remove(self))
 	waiting[thread] = nil
 	resume(thread, ...)
 	return true
 end
-local CANCEL = {}
-local function cancel(job)
-	if not job.recv_thread then return end
-	job_resume(job, CANCEL)
+function wj:cancel()
+	if not self.recv_thread then return end
+	self:resume(CANCEL)
 end
-function wait_job()
-	local self = object(wait_job_class, {
-		wait = wait, wait_until = wait_until, resume = job_resume,
-		cancel = cancel, CANCEL = CANCEL,
-	})
-	--log('', 'sock', 'wait-job', '%s', self)
-	return self
-end
-
 function wait_until(expires)
 	return wait_job():wait_until(expires)
 end
-
 function wait(timeout)
 	return wait_job():wait(timeout)
 end
-
---lightweight (function-based) timers that run in the main thread.
-function runat(expires, f, name)
-	local job = {
-		recv_thread = f,
-		recv_expires = expires,
-		name = name, --for logging/debugging
-	}
-	recv_expires_heap:push(job)
-	return job
-end
-
-function runafter(timeout, f, ...)
-	return runat(clock() + timeout, f, ...)
-end
-
-local function _runevery(now_too, interval, f, ...)
-	if now_too then
-		if f() == false then
-			return
-		end
-	end
-	local job
-	local function runagain()
-		if f() == false then
-			return
-		end
-		job = runafter(interval, runagain)
-	end
-	job = runafter(interval, runagain)
-	return job
-end
-function runevery      (...) return _runevery(false, ...) end
-function runagainevery (...) return _runevery(true , ...) end
-
---[[
-function runat(expires, f, ...)
-	local job = wait_job()
-	resume(thread(function()
-		if job:wait_until(expires) == CANCEL then
-			return
-		end
-		f()
-	end, ...))
-	return job
-end
-
-local function _runevery(now_too, interval, f, ...)
-	local job = wait_job()
-	resume(thread(function()
-		if now_too then
-			if f() == false then
-				return
-			end
-		end
-		while true do
-			if job:wait(interval) == CANCEL then
-				return
-			end
-			if f() == false then
-				return
-			end
-		end
-	end, ...))
-	return job
-end
-function runevery      (...) return _runevery(false, ...) end
-function runagainevery (...) return _runevery(true , ...) end
-
-]]
 
 function socket:wait_job()
 	local job = wait_job()
@@ -745,81 +683,113 @@ function socket:wait_job()
 	end)
 	return job
 end
-
 function socket:wait_until(expires)
 	return self:wait_job():wait_until(expires)
 end
-
 function socket:wait(timeout)
 	return self:wait_job():wait(timeout)
 end
-end --timers scope
 
-local function check_errno_wait_write(wait_errno)
-	local errno = errno()
-	if errno == wait_errno then
-		if self.send_expires then
-			send_expires_heap:push(self)
-		end
-		self.send_thread = currentthread()
-		local ok, err = wait_io()
-		if not ok then return nil, err end
+--lightweight timers that run in the main thread -----------------------------
+
+local tm = {type = 'timer', debug_prefix = 'R'}
+function timer(f, name)
+	if name == 'debug' then
+		local i = debug.getinfo(f, 'nS')
+		name = _('%s (%s:%s)', i.name or '?', i.short_src, i.linedefined)
+	end
+	return object(tm, {
+		recv_thread = assert(f),
+		name = name,
+		recv_heap_index = -1,
+	})
+end
+function tm:cancel()
+	if self.recv_heap_index == -1 then return end
+	assert(recv_expires_heap:remove(self))
+	return self
+end
+function tm:setexpires(expires)
+	self.recv_expires = expires
+	if self.recv_heap_index ~= -1 then
+		recv_expires_heap:replace(self.recv_heap_index, self)
 	else
-		local ok, err = check_errno(nil, errno)
-		return ok, err, errno
+		recv_expires_heap:push(self)
+	end
+	return self
+end
+function tm:settimeout(timeout)
+	self:setexpires(clock() + timeout)
+	return self
+end
+function tm:setinterval(interval)
+	--avoid infinite loop in check_heap().
+	assertf(interval >= 0.02, 'timer interval too short: %.2f', interval)
+	self.interval = interval
+	self:settimeout(interval)
+	return self
+end
+function tm:run()
+	local ok, err = pcall(self.recv_thread)
+	if not ok then --nowhere to raise errors to, so we just log them.
+		log('ERROR', 'sock', 'timer', '%s%s', err, catall('\n', self.name) or '')
+	end
+	if self.interval and err ~= CANCEL then
+		self:settimeout(self.interval)
+	else
+		self:cancel()
 	end
 end
-
-local function check_errno_wait_read(wait_errno)
-	local errno = errno()
-	if errno == wait_errno then
-		if self.recv_expires then
-			recv_expires_heap:push(self)
-		end
-		self.recv_thread = currentthread()
-		local ok, err = wait_io()
-		if not ok then return nil, err end
-	else
-		local ok, err = check_errno(nil, errno)
-		return ok, err, errno
-	end
+function runat(expires, f, name)
+	return timer(f, name):setexpires(expires)
 end
+function runafter(timeout, f, name)
+	return timer(f, name):settimeout(timeout)
+end
+function runevery(interval, f, name)
+	return timer(f, name):setinterval(interval)
+end
+function runagainevery(interval, f, name)
+	local tm = timer(f, name):setinterval(interval)
+	tm:run()
+	return tm
+end
+
+--async sock functions -------------------------------------------------------
+
+local EAGAIN      = 11
+local EWOULDBLOCK = 11
+local EINPROGRESS = 115
 
 local function make_async(for_writing, returns_n, func, wait_errno)
+	local heap = for_writing and send_expires_heap or recv_expires_heap
+	local EXPIRES = for_writing and 'send_expires' or 'recv_expires'
+	local THREAD = for_writing and 'send_thread' or 'recv_thread'
+	local RW = for_writing and 'w' or 'r'
 	return function(self, ...)
-		while 1 do
-			local ret = func(self, ...)
-			if ret >= 0 then
-				if returns_n then
-					if for_writing then
-						self.w = self.w + ret
-					else
-						self.r = self.r + ret
-					end
-				end
-				return ret
+		::again::
+		local ret = func(self, ...)
+		if ret >= 0 then
+			if returns_n then
+				self[RW] = self[RW] + ret
 			end
-			local errno = errno()
-			if errno == wait_errno then
-				if for_writing then
-					if self.send_expires then
-						send_expires_heap:push(self)
-					end
-					self.send_thread = currentthread()
-				else
-					if self.recv_expires then
-						recv_expires_heap:push(self)
-					end
-					self.recv_thread = currentthread()
-				end
-				local ok, err = wait_io()
-				if not ok then
-					return nil, err
-				end
+			return ret
+		end
+		local errno = errno()
+		if errno == wait_errno then
+			if self[EXPIRES] then
+				heap:push(self)
+			end
+			self[THREAD] = currentthread()
+			local ok, err = wait_io()
+			if not ok then
+				return nil, err
 			else
-				local ok, err = check_errno(nil, errno)
-				return ok, err, errno
+				goto again
 			end
+		else
+			local ok, err = check_errno(nil, errno)
+			return ok, err, errno
 		end
 	end
 end
@@ -927,6 +897,7 @@ local socket_recv = make_async(false, true, function(self, buf, sz, flags)
 	return C.recv(self.fd, buf, sz, flags or 0)
 end, EWOULDBLOCK)
 
+--NOTE: to read many small pieces, use a pbuffer instead, this will crawl!
 function socket:try_recv(buf, sz, flags)
 	if not self.fd then return nil, 'closed' end
 	if sz == 0 then return 0 end --mask out null reads
@@ -1105,17 +1076,17 @@ do
 			--than 20ms to complete, so might as well expire some jobs now
 			--because the next loop might just be a bit too late for them.
 			if socket[EXPIRES] - t <= 0.01 then
-				assert(heap:pop())
 				socket[EXPIRES] = nil
-				local thread = socket[THREAD] --thread or function
-				socket[THREAD] = nil
-				if isthread(thread) then
+				local thread = socket[THREAD] --thread or timer function
+				if isthread(thread) then --socket or wait job
+					socket[THREAD] = nil
+					assert(heap:pop())
 					coro_transfer(thread, nil, 'timeout')
-				else --timer
-					thread('timeout')
+				else --timer: run it, which removes it from the heap or moves it.
+					socket:run()
 				end
 			else
-				--socket are popped in expire-order so no point looking beyond this.
+				--items are popped in expire-order so no point looking beyond this.
 				break
 			end
 		end
@@ -1461,10 +1432,11 @@ function socket:try_setopt(k, v)
 end
 socket.setopt = unprotect_io(socket.try_setopt)
 
-end --do
+end --getopt/setopt decl. scope
 
 --tcp repeat I/O -------------------------------------------------------------
 
+--NOTE: to send many small pieces use a pbuffer instead, this will crawl!
 function tcp:try_send(buf, sz, flags)
 	if not self.fd then return nil, 'closed' end
 	sz = sz or #buf
@@ -1490,6 +1462,7 @@ tcp.send = unprotect_io(tcp.try_send)
 tcp.try_write = tcp.try_send
 tcp.write = tcp.send
 
+--NOTE: to read many small pieces use a pbuffer instead, this will crawl!
 function tcp:try_recvn(buf, sz)
 	local sz0 = sz
 	local buf = cast(u8p, buf)
@@ -1507,7 +1480,8 @@ tcp.recvn = unprotect_io(tcp.try_recvn)
 tcp.try_readn = tcp.try_recvn
 tcp.readn = tcp.recvn
 
-function tcp:try_recvall()
+function tcp:try_recvall(max_size)
+	max_size = max_size or 64 * 1024^2 --arbitrary, adjust to use case.
 	local readahead_size = 16 * 1024
 	local b = string_buffer(readahead_size)
 	while true do
@@ -1516,6 +1490,7 @@ function tcp:try_recvall()
 		if not len then return nil, err, b:ref() end
 		if err == 'eof' then return b:ref() end
 		b:commit(len)
+		if #b > max_size then return nil, 'max_size' end
 	end
 end
 tcp.recvall = unprotect_io(tcp.try_recvall)
@@ -1558,16 +1533,6 @@ function socket:debug_stream(protocol_name)
 end
 
 --hi-level APIs --------------------------------------------------------------
-
-update(tcp, socket)
-update(udp, socket)
-
-udp_class = udp
-tcp_class = tcp
-
-_G.socket = create_socket
-_G.tcp    = create_tcp
-_G.udp    = create_udp
 
 function try_connect(addr, port, timeout, client_ip)
 	local sas, err = try_sockaddrs(addr, port, timeout)
@@ -1638,21 +1603,28 @@ end
 --closing a socket doesn't trigger an epoll event, instead the socket is
 --silently removed from the epoll list, thus we have to wake up any waiting
 --threads manually when the socket is closed from another thread.
---[[local]] function cancel_wait_io(self)
+function socket:cancel_recv()
 	local thread = self.recv_thread
-	if thread then
-		waiting[thread] = nil
-		self.recv_thread = nil
-		resume(thread, nil, 'closed')
-	end
-	local thread = self.send_thread
-	if thread then
-		waiting[thread] = nil
-		self.send_thread = nil
-		resume(thread, nil, 'closed')
-	end
+	if not thread then return end
+	waiting[thread] = nil
+	self.recv_thread = nil
+	resume(thread, nil, 'closed')
 end
-_sock_cancel_wait_io = cancel_wait_io
+function socket:cancel_send()
+	local thread = self.send_thread
+	if not thread then return end
+	waiting[thread] = nil
+	self.send_thread = nil
+	resume(thread, nil, 'closed')
+end
+function socket:cancel()
+	self:cancel_recv()
+	self:cancel_send()
+end
+function _sock_cancel_wait_io(f)
+	socket.cancel_recv(f)
+	socket.cancel_send(f)
+end
 
 local term_sig_f
 
@@ -1884,3 +1856,15 @@ do --scheduler loop
 	end
 
 end
+
+--wrap-up --------------------------------------------------------------------
+
+update(tcp, socket)
+update(udp, socket)
+
+udp_class = udp
+tcp_class = tcp
+
+_G.socket = create_socket
+_G.tcp    = create_tcp
+_G.udp    = create_udp
