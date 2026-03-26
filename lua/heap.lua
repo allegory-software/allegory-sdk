@@ -55,7 +55,8 @@ heap([h]) -> h
 	  otherwise h:find(v) is O(n) and h:remove(v) is O(n).
 	  * initial values in the array part of the table (optional; heapified automatically).
 
-	NOTE: trying to push nil into a value heap raises an error.
+	NOTE: Trying to push nil into a value heap raises an error.
+	NOTE: Removing a value from the heap sets v[index_key] = -1.
 
 	Example:
 
