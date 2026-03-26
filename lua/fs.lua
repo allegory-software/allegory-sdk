@@ -562,9 +562,9 @@ function file_wrap_fd(fd, opt)
 	}, opt)
 
 	if f.async then
-		assert(rawget(_G, '_sock_register'), 'sock module required for async')
+		assert(rawget(_G, 'epoll_add'), 'sock module required for async')
 		fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
-		local ok, err = _sock_register(f)
+		local ok, err = epoll_add(f)
 		if not ok then
 			f:close()
 			return nil, err
@@ -588,7 +588,7 @@ end
 function file.try_close(f)
 	if f:closed() then return true end
 	if f.async then
-		_sock_unregister(f)
+		epoll_remove(f)
 	end
 	local ok, err = check_errno(C.close(f.fd) == 0)
 	f.fd = -1 --fd is gone no matter the error.
@@ -596,7 +596,7 @@ function file.try_close(f)
 		f:_after_close()
 	end
 	if f.async then
-		_sock_cancel_wait_io(f)
+		epoll_cancel(f, 'closed')
 	end
 	if not ok then return ok, err end
 	--liveadd(f, 'r:%d w:%d', f.r, f.w)

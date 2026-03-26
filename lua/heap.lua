@@ -139,8 +139,13 @@ function heap(h)
 	local add, rem, swap
 	local INDEX = h.index_key
 	if INDEX ~= nil then --for O(log n) removal.
-		function add(v) n=n+1; t[n]=v; v[INDEX] = n end
-		function rem() t[n][INDEX] = -1; t[n]=nil; n=n-1 end
+		function add(v)
+			assert(v[INDEX] == nil or v[INDEX] == -1, 'duplicate')
+			n=n+1; t[n]=v; v[INDEX] = n
+		end
+		function rem()
+			t[n][INDEX] = -1; t[n]=nil; n=n-1
+		end
 		function swap(i, j)
 			t[i], t[j] = t[j], t[i]
 			t[i][INDEX] = i
