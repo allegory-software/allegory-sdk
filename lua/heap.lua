@@ -18,7 +18,7 @@
 	h:peek([i][, dst]) -> val       get value without popping it          O(1)
 	h:find(v) -> i                  find value and return its index       O(n) or O(1)
 	h:remove(v) -> t|f              find value and remove it              O(n) or O(log n)
-	h:length() -> n                 number of elements in heap            O(1)
+	h:count() -> n                  number of elements in heap            O(1)
 
 	Values that compare equally are popped in random order.
 
@@ -36,7 +36,7 @@ virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance, heapify
 		push(v)              add a value to the top of the stack
 		pop()                remove the value at the top of the stack
 		swap(i, j)           swap two values (indices start at 1)
-		len() -> n           number of elements in stack
+		count() -> n         number of elements in stack
 		cmp(i, j) -> bool    compare elements
 
 	The heap can be a min-heap or max-heap depending on the comparison
@@ -75,12 +75,12 @@ local
 
 --heap algorithm working over abstract API that counts from one.
 
-function virtualheap(add, remove, swap, length, cmp)
+function virtualheap(stack_push, stack_pop, stack_swap, count, cmp)
 
 	local function moveup(child)
 		local parent = floor(child / 2)
 		while child > 1 and cmp(child, parent) do
-			swap(child, parent)
+			stack_swap(child, parent)
 			child = parent
 			parent = floor(child / 2)
 		end
@@ -88,14 +88,14 @@ function virtualheap(add, remove, swap, length, cmp)
 	end
 
 	local function movedown(parent)
-		local last = length()
+		local last = count()
 		local child = parent * 2
 		while child <= last do
 			if child + 1 <= last and cmp(child + 1, child) then
 				child = child + 1 --sibling is smaller
 			end
 			if not cmp(child, parent) then break end
-			swap(parent, child)
+			stack_swap(parent, child)
 			parent = child
 			child = parent * 2
 		end
@@ -103,13 +103,13 @@ function virtualheap(add, remove, swap, length, cmp)
 	end
 
 	local function push(v)
-		add(v)
-		return moveup(length())
+		stack_push(v)
+		return moveup(count())
 	end
 
 	local function pop(i)
-		swap(i, length())
-		remove()
+		stack_swap(i, count())
+		stack_pop()
 		movedown(i)
 	end
 
@@ -120,7 +120,7 @@ function virtualheap(add, remove, swap, length, cmp)
 	end
 
 	local function heapify()
-		for i = floor(length() / 2), 1, -1 do
+		for i = floor(count() / 2), 1, -1 do
 			movedown(i)
 		end
 	end
@@ -148,25 +148,16 @@ function heap(h)
 		function rem() t[n]=nil; n=n-1 end
 		function swap(i, j) t[i], t[j] = t[j], t[i] end
 	end
-	local function length() return n end
+	local function count() return n end
 	local cmp = h.cmp
 		and function(i, j) return h.cmp(t[i], t[j]) end
 		or  function(i, j) return t[i] < t[j] end
-	local push, pop, rebalance, heapify = virtualheap(add, rem, swap, length, cmp)
+	local push, pop, rebalance, heapify = virtualheap(add, rem, swap, count, cmp)
 	if n > 0 then
 		if INDEX ~= nil then
 			for i = 1, n do t[i][INDEX] = i end
 		end
 		heapify()
-	end
-
-	function h:find(v)
-		for i,v1 in ipairs(self) do
-			if v1 == v then
-				return i
-			end
-		end
-		return nil
 	end
 	if INDEX ~= nil then
 		function h:find(v) --O(1..logN)
@@ -200,7 +191,7 @@ function heap(h)
 		t[i] = v
 		rebalance(i)
 	end
-	h.length = length
+	h.count = count
 	function h:remove(v)
 		local i = self:find(v)
 		if i then

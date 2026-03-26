@@ -6,7 +6,7 @@ local function test_order()
 		h:push(math.random())
 	end
 	local n = -1/0
-	while h:length() > 0 do
+	while h:count() > 0 do
 		local n0 = n
 		n = h:pop()
 		assert(n >= n0)
@@ -75,7 +75,7 @@ local function test_heapify()
 	--reverse-sorted input forces heapify to do real work
 	local h = heap{50, 40, 30, 20, 10}
 	local prev = -1/0
-	while h:length() > 0 do
+	while h:count() > 0 do
 		local v = h:pop()
 		assert(v >= prev)
 		prev = v
@@ -85,7 +85,7 @@ local function test_heapify()
 	for i = 1, 1000 do t[i] = math.random() end
 	local h = heap(t)
 	prev = -1/0
-	while h:length() > 0 do
+	while h:count() > 0 do
 		local v = h:pop()
 		assert(v >= prev)
 		prev = v
