@@ -60,7 +60,7 @@ function smtp_connect(t)
 		self.f.tracebacks = true
 	end
 	if self.debug and self.debug.stream then
-		self.f:debug'smtp'
+		self.f:debug_stream'smtp'
 	end
 
 	--I/O

@@ -377,7 +377,7 @@ local function _connect(self, target)
 		target.client_ip
 	)
 	if self.debug.stream then
-		tcp:debug'http'
+		tcp:debug_stream'http'
 	end
 	if target.https then
 		tcp = client_stcp(tcp, target.host, target.tls_options or self.tls_options)

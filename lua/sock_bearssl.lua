@@ -1152,8 +1152,8 @@ function stcp:bound_addr()
 	return self.tcp:bound_addr()
 end
 
-function stcp:debug(protocol)
-	return tcp_class.debug(self, protocol or 'tls')
+function stcp:debug_stream(protocol_name)
+	return tcp_class.debug(self, protocol_name or 'ssock')
 end
 
 -- Client sockets (connected TLS socket, both sides) -------------------------

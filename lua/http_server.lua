@@ -407,7 +407,7 @@ function http_server(...)
 			tcp.tracebacks = true --for check_io()
 		end
 		if self.debug.stream then
-			tcp:debug'http'
+			tcp:debug_stream'http'
 		end
 
 		push(self.sockets, tcp)
@@ -430,7 +430,7 @@ function http_server(...)
 				ctcp.tracebacks = true --for check_io()
 			end
 			if self.debug.stream then
-				ctcp:debug'http'
+				ctcp:debug_stream'http'
 			end
 			local recv_buffer_size = ctcp:getopt'so_rcvbuf' --usually 128k
 			resume(thread(function()

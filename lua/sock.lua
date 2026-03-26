@@ -20,7 +20,7 @@ SOCKETS
 	s:bound_addr() -> sa                   get bound sockaddr
 	s:[try_]setopt(opt, val)               set socket option ('so_*', 'tcp_*', etc.)
 	s:[try_]getopt(opt) -> val             get socket option
-	s:debug([protocol])                    enable debugging
+	s:debug_stream([protocol_name])        log recv/send data
 TCP
 	tcp([family='ip'], [opt]) -> tcp                     make a SOCK_STREAM socket
 	[try_]connect(addr, [port], [timeout], [client_ip]) -> tcp  create tcp socket and connect
@@ -1522,10 +1522,10 @@ tcp.recvall = unprotect_io(tcp.try_recvall)
 
 --debug API ------------------------------------------------------------------
 
-function socket:debug(protocol)
+function socket:debug_stream(protocol_name)
 
 	local function ds(event, s)
-		log('', protocol or 'sock', event, '%-4s %5s %s',
+		log('', protocol_name or 'sock', event, '%-4s %5s %s',
 			self, s and #s or '', s or '')
 	end
 
