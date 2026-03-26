@@ -1097,6 +1097,7 @@ local stcp = {
 	debug_prefix = 'X',
 	check_io     = check_io,
 	checkp       = checkp,
+	checknp      = checknp,
 	protect      = protect,
 }
 
