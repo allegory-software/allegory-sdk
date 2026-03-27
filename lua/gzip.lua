@@ -21,7 +21,7 @@ gzip_state(gz) -> gz
 	API
 		gz:[try_]push(s | buf,len | nil,'eof') -> true,'more'|'eof' | nil,err
 		gz:[try_]finish() -> true,'eof' | nil,err
-		gz:reset()
+		gz:reset()   reset for reuse with same parameters. gz.write can be replaced.
 		gz:free()
 		gz.b         string buffer with all the data if gz.write is not given.
 
