@@ -88,7 +88,7 @@ end
 
 local function req_dp(req, event, fmt, ...)
 	if logging.filter[''] then return end
-	local dt = clock() - req.start_time
+	local dt = clock() - req.start_clock
 	local s = fmt and _(fmt, logargs(...)) or ''
 	log('', 'htsrv', event, '%-4s %4dms %s', req.tcp, dt * 1000, s)
 end
@@ -101,6 +101,8 @@ errortype'http_response'.__tostring = function(self)
 	end
 	return s
 end
+
+local req_class = {type = 'http_request', debug_prefix = 'R'}
 
 function http_server(...)
 
@@ -155,30 +157,30 @@ function http_server(...)
 
 	local next_request_id = 1
 
-	local function handle_request(ctcp, rb, wb)
+	local function handle_request(ctcp)
+		local rb = ctcp.rb
+		local wb = ctcp.wb
 
 		--read/parse next request line, if any
 		local line = rb:haveline()
 		if not line then ctcp:close(); return end
 		local method, uri, http_version = line:match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
 		ctcp:checkp(http_version == '1.1', 'invalid http version')
-		ctcp:checkp(method == method:upper(), 'invalid http method')
 
-		local req = {
+		local req = object(req_class, {
 			tcp = ctcp,
 			server = self,
 			method = method,
 			uri = uri,
 			headers = {},
-			start_time = clock(),
+			start_clock = clock(),
 			thread = currentthread(),
 			request_id = next_request_id,
 			status = 200,
 			response_headers = {}, --put them in lowercase!
 			compress = self.compress,
-			log = req_log,
 			dp = self.debug.protocol and req_dp or noop,
-		}
+		})
 
 		req:dp('<=', '%s %s HTTP/%s', method, uri, http_version)
 
@@ -203,6 +205,13 @@ function http_server(...)
 			end
 		end
 
+		--prevent browsers from waiting for 1s on large uploads.
+		local expect = req.headers['expect']
+		if expect and expect:has'100' then
+			wb:put'HTTP/1.1 100 Continue\r\n\r\n'
+			wb:flush()
+		end
+
 		--parse relevant request headers into req fields.
 		req.body_size = tonumber(req.headers['content-length']) or 0
 		local cc = req.headers['connection']
@@ -225,21 +234,24 @@ function http_server(...)
 				rb:reset()
 				rb_needs_reset = false
 			end
-			rb:need(1)
+			rb:need(1) --can read into the next request if pipelined
 			local buf, len = rb:ref()
+			len = min(len, body_unread_len)
 			body_unread_len = body_unread_len - len
 			rb_needs_reset = true
 			return buf, len, body_unread_len
 		end
 
 		function req.read_body(req)
-			rb:need(body_unread_len)
+			rb:need(body_unread_len) --can read into the next request if pipelined
+			local buf = rb:ref()
+			local len = body_unread_len
 			body_unread_len = 0
-			return rb:ref()
+			return buf, len
 		end
 
 		local send_body_chunk
-		local headers_sent, gz
+		local headers_sent
 
 		function req.send_headers(req)
 			assert(not headers_sent)
@@ -253,10 +265,14 @@ function http_server(...)
 				req.response_headers['transfer-encoding'] = 'chunked'
 			end
 			local mime_type = req.response_headers['content-type']
-			req.compress = req.compress
-				and not (mime_type and req.compressed_mime_types[mime_type])
+			local accept_enc = req.headers['accept-encoding']
+			req.compress = req.compress and accept_enc and accept_enc:has'gzip'
+				and not (mime_type and self.compressed_mime_types[mime_type])
 			if req.compress then
+				req.response_headers['transfer-encoding'] = 'chunked'
 				req.response_headers['content-encoding'] = 'gzip'
+				req.response_headers['vary'] = 'accept-encoding'
+				req.response_headers['content-length'] = nil --must be the compressed size
 			end
 
 			--send status line
@@ -273,7 +289,10 @@ function http_server(...)
 			for k,v in sortedpairs(req.response_headers) do
 				if not istab(v) then t[1] = v; v = t end
 				for _,v in ipairs(v) do
-					assert(not v:has'\n' and not v:has'\r')
+					ctcp:checknp(not (k:has'\n' or k:has'\r' or k:has':' or k:starts' '),
+						'invalid header name: %s', k)
+					ctcp:checknp(not v:has'\n' and not v:has'\r',
+						'invalid header value for: %s', k)
 					req:dp('->', '%-17s %s', k, v)
 					wb:putf('%s: %s\r\n', k, v)
 				end
@@ -282,9 +301,11 @@ function http_server(...)
 			wb:flush()
 
 			if req.compress then
-				gz = gzip_state{op = 'compress', write = send_body_chunk}
-				function req:onfinish() --called on errors too.
-					gz:free()
+				if not ctcp.gz then
+					ctcp.gz = gzip_state{op = 'compress', write = send_body_chunk}
+				else
+					ctcp.gz:reset()
+					ctcp.gz.write = send_body_chunk
 				end
 			end
 
@@ -319,7 +340,7 @@ function http_server(...)
 
 		function req.send_body_chunk(req, chunk, len)
 			if req.compress then
-				gz:push(chunk, len)
+				ctcp.gz:push(chunk, len)
 			else
 				send_body_chunk(chunk, len)
 			end
@@ -359,16 +380,18 @@ function http_server(...)
 		--the request must be entirely read before we can read the next request
 		--or before we can close the connection.
 		while req:read_body_chunk() do end
+		rb:reset()
 
 		if req.close then
+			req:dp('>>', 'close')
 			ctcp:close() --send FIN
 		end
 
 	end --handle_request()
 
-	local function handle_connection(ctcp, rb, wb)
+	local function handle_connection(ctcp)
 		repeat
-			handle_request(ctcp, rb, wb)
+			handle_request(ctcp)
 		until ctcp:closed()
 	end
 
@@ -434,19 +457,22 @@ function http_server(...)
 			end
 			local recv_buffer_size = ctcp:getopt'so_rcvbuf' --usually 128k
 			resume(thread(function()
-				local rb = pbuffer{
+				ctcp.rb = pbuffer{
 					f = ctcp,
 					readahead = recv_buffer_size,
 					lineterm = '\r\n',
 					linesize = 8192,
 				} --read buffer
-				local wb = pbuffer{
+				ctcp.wb = pbuffer{
 					f = ctcp,
 				} --write buffer
-				local ok, err = pcall(handle_connection, ctcp, rb, wb)
+				local ok, err = pcall(handle_connection, ctcp)
+				if ctcp.gz then
+					ctcp.gz:free()
+				end
 				ctcp:try_close()
-				rb:free()
-				wb:free()
+				ctcp.rb:free()
+				ctcp.wb:free()
 				if not ok and not iserror(err, 'io') then
 					logerror(ctcp, 'handler', '%s', err)
 				end
@@ -465,8 +491,8 @@ function http_server(...)
 end
 
 function server:stop()
-	log('note', 'htsrv', 'kill-all', '%-4s %s', tcp,
-		cat(sort(imap(keys(self.sockets), logarg)), ' '))
+	log('note', 'htsrv', 'kill-all', '%s',
+		cat(sort(imap(self.sockets, logarg)), ' '))
 	for _,s in ipairs(self.sockets) do
 		s:close()
 	end
