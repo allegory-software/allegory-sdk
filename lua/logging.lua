@@ -500,7 +500,7 @@ local function live(self, o, fmt, ...)
 	elseif was_live then
 		ids.live_count = ids.live_count - 1
 		event = '- ' .. ids.live_count
-		if ... then live_s = live_s .. ' ' .. fmtargs(self, ...) end
+		live_s = ... and fmtargs(self, ...) or ''
 	end
 	self.log('', 'log', event, '%-4s %s', o, s or live_s)
 	ids.live[o] = s
