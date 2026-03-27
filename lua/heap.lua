@@ -24,7 +24,7 @@
 
 	Values that compare equally are popped in random order.
 
-virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance, heapify
+virtualheap(add, rem, swap, count, cmp) -> push, pop, rebalance, heapify
 
 	Create a heap API:
 
@@ -35,8 +35,8 @@ virtualheap(push, pop, swap, len, cmp) -> push, pop, rebalance, heapify
 
 	from a stack API:
 
-		push(v)              add a value to the top of the stack
-		pop()                remove the value at the top of the stack
+		add(v)               add a value to the top of the stack
+		rem()                remove the value at the top of the stack
 		swap(i, j)           swap two values (indices start at 1)
 		count() -> n         number of elements in stack
 		cmp(i, j) -> bool    compare elements
@@ -78,12 +78,12 @@ local
 
 --heap algorithm working over abstract API that counts from one.
 
-function virtualheap(stack_push, stack_pop, stack_swap, count, cmp)
+function virtualheap(add, rem, swap, count, cmp)
 
 	local function moveup(child)
 		local parent = floor(child / 2)
 		while child > 1 and cmp(child, parent) do
-			stack_swap(child, parent)
+			swap(child, parent)
 			child = parent
 			parent = floor(child / 2)
 		end
@@ -98,7 +98,7 @@ function virtualheap(stack_push, stack_pop, stack_swap, count, cmp)
 				child = child + 1 --sibling is smaller
 			end
 			if not cmp(child, parent) then break end
-			stack_swap(parent, child)
+			swap(parent, child)
 			parent = child
 			child = parent * 2
 		end
@@ -106,13 +106,14 @@ function virtualheap(stack_push, stack_pop, stack_swap, count, cmp)
 	end
 
 	local function push(v)
-		stack_push(v)
+		add(v)
 		return moveup(count())
 	end
 
+	--TODO: use Floyd's "bottom-up sift" optimization for 2x faster pop().
 	local function pop(i)
-		stack_swap(i, count())
-		stack_pop()
+		swap(i, count())
+		rem()
 		movedown(i)
 	end
 
@@ -160,7 +161,9 @@ function heap(h)
 	local cmp = h.cmp
 		and function(i, j) return h.cmp(t[i], t[j]) end
 		or  function(i, j) return t[i] < t[j] end
+
 	local push, pop, rebalance, heapify = virtualheap(add, rem, swap, count, cmp)
+
 	if n > 0 then
 		if INDEX ~= nil then
 			for i = 1, n do t[i][INDEX] = i end

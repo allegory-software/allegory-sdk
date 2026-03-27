@@ -58,6 +58,23 @@ local function bench(type, h, size, valgen)
 		v0 = v
 	end
 	print(string.format('pop  speed: %-14s: %6d Ke/s', type, size / 10^3 / (os.clock() - t0)))
+	--benchmark remove-by-value (O(n) without index_key, O(log n) with it)
+	if not h.index_key then return end
+	local vals = {}
+	for i = 1, size do
+		local v = valgen(h)
+		h:push(v)
+		vals[i] = v
+	end
+	for i = size, 2, -1 do --shuffle removal order
+		local j = math.random(1, i)
+		vals[i], vals[j] = vals[j], vals[i]
+	end
+	t0 = os.clock()
+	for i = 1, size do
+		h:remove(vals[i])
+	end
+	print(string.format('rem  speed: %-14s: %6d Ke/s', type, size / 10^3 / (os.clock() - t0)))
 end
 
 local function benchmark()
