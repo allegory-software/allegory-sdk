@@ -730,12 +730,11 @@ function try_jpeg_open(opt)
 	local buf  = opt.read_buffer or u8a(sz)
 	local bytes_to_skip = 0
 
-	--create a skip buffer if the reader doesn't support seeking.
+	--create a skip buffer.
+	--TODO: give user the option to provide skip(n) or read(nil, len).
 	local skip_buf_sz, skip_buf = 1/0
-	if opt.skip_buffer ~= false then
-		skip_buf_sz = opt.skip_buffer_size or 64 * 1024
-		skip_buf    = opt.skip_buffer or u8a(skip_buf_sz)
-	end
+	skip_buf_sz = opt.skip_buffer_size or 64 * 1024
+	skip_buf    = opt.skip_buffer or u8a(skip_buf_sz)
 
 	local function fill_input_buffer()
 		while bytes_to_skip > 0 do

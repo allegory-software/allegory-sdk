@@ -9,10 +9,10 @@ API
 RATIONALE
 
 This is an error-handling discipline to use when writing TCP-based protocols
-as well as file decoders and encoders. Instead of using standard `assert()`
-and `pcall()`, use `check_io()`, `checkp()` and `checknp()` to raise errors
-inside protocol/decoder/encoder methods and then wrap those methods in
-`protect()` to convert them into `nil, err`-returning methods.
+or file decoders and encoders. Instead of using standard assert() and pcall(),
+use check_io(), checkp() and checknp() to raise errors inside protocol methods
+and then wrap those methods in protect_io() to create nil,err-returning
+variants (i.e. try_*() variants) of those methods.
 
 You should distinguish between multiple types of errors:
 
@@ -43,12 +43,21 @@ Your object must have a try_close() method which will be called by check_io()
 and checkp() (but not by checknp()) on failure.
 
 Note that protect_io() only catches errors raised by check*(), other Lua
-errors pass through and the connection isn't closed either.
+errors pass through and the file/connection isn't closed either.
+
+You can also implement protocols the opposite way, i.e. the golang-way, i.e.
+in the protocol implementation only call nil,err-returning I/O methods
+(so try_*() only) and early-exit on errors with nil,err. Then create raising
+variants of your methods with unprotect_io(). That half-defeats the purpose
+of this, but there's no hidden control flow in the protocol implementation
+and you have more control on how to handle each failure case.
 
 TODO: Currently try_*() methods on sock and fs modules do not break on usage
 errors coming from the OS except for EINVAL and EBADF, so some errors might
-come up as potentially retriable which is not correct. This must be fixed
-case-by-case in fs and sock. See try_accept() for how to fix it.
+come up as potentially retriable which is not correct. The correct behavior
+is to raise on usage errors because these are usually bugs. This must be
+thought through and fixed on case-by-case in fs and sock. See try_accept()
+for how to fix it.
 ]=]
 
 if not ... then require'errors_test'; return end

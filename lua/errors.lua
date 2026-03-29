@@ -24,7 +24,7 @@ RATIONALE
 
 Structured exceptions are an enhancement over plain string errors by adding
 selective catching and providing a context for the failure to help with
-recovery or logging. They're most useful in network protocols.
+freeing resources, recovery or logging. They're most useful in network protocols.
 
 In the API `classes` can be given as either 'classname1 ...' or {class1->true}.
 When given in table form, you must include all the superclasses in the table
@@ -38,12 +38,21 @@ Any following table args are merged with this object. Any following args
 after that are passed to string.format() and the result is placed in
 err_obj.message (if `message` was not already set). All args are optional.
 
-A note on tracebacks: with string errors, when catching an error temporarily
-to free resources and then re-raising it, the original stack trace is lost.
-Catching errors with the pcall() that's reimplemented here instead of with
-the standard pcall() adds a traceback to all plain string errors. Structured
-errors are usually raised inside protected functions so they don't get a
-traceback by default unless they ask for it.
+TRACEBACKS ON STRING ERRORS
+
+Normally in Lua, when catching an error temporarily to free up resources and
+then re-raising it, the original stack trace is lost. Catching errors with the
+pcall() that's reimplemented here instead of with the standard Lua pcall()
+adds a traceback to all string errors, which is useful when pcalling Lua code
+in order to get visibility on bugs. But raising errors with a stack trace is
+expensive so when a stack trace is not needed, use lua_pcall() instead.
+
+TRACEBACKS ON STRUCTURED ERRORS
+
+Structured errors are different: since they are raised on I/O errors and not
+on bugs, they don't get a traceback by default unless you ask for it by setting
+addtraceback=true in the error object. Note that normal errors still pass
+through io-protected functions, so bugs inside io-protected code still get a traceback from the
 
 ]=]
 
