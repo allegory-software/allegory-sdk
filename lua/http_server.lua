@@ -328,7 +328,7 @@ function http_server(...)
 			assert(not body_sent)
 			if not (chunk == nil and len == 'eof') then
 				len = len or #chunk
-				if len == 0 then return end --can't send 0-writes chunked
+				if len == 0 then return end --can't send empty chunks chunked
 				req:dp('>>', '%7d bytes', len)
 				if req.response_headers['content-length'] then
 					wb:putdata(chunk, len)
