@@ -17,9 +17,6 @@ SERVER
 	- - unix_socket_group          set group on socket file after bind()
 	- compress                     gzip-compress responses (true)
 	- max_body_size                upload size limit (overridable per request)
-	- TODO min_request_time        request grace period (seconds)
-	- TODO max_request_time        max. request + reply time (seconds)
-	- TODO min_request_speed       min. request + reply speed (KB/s)
 	- respond <- fn(req)           request handler
 	- debug <- flags               debug flags: 'protocol tracebacks stream'
 	http_server_class              http_server class for overriding defaults
@@ -56,6 +53,13 @@ CONFIG
 	http_server_compress           set to false to disable
 	http_server_debug              nil (set to true to enable)
 
+TODO
+	DoS protection (that nginx or netfilter can't do): track/close parasitic
+	(idle/slow) connections when global max_conn limit reached, which prioritizes
+	requests that do work over parasitic ones (slowloris) and only activates under
+	attack conditions (no false positives).
+	NOTE: This only prevents slow DoS, floods must be rate-limited.
+
 ]=]
 
 if not ... then require'http_server_test'; return end
@@ -72,11 +76,6 @@ require'http_date'
 local server = {
 	compress = true,
 	max_body_size = 64 * 1024^2,
-	--TODO: implement these protections.
-	--Make them overridable per request after headers are read.
-	min_request_time = 5, -- > 5s allowed for each request + reply
-	max_request_time = 5 * 60, -- ~ 15 MB @ 50 KB/s
-	min_request_speed = 50, -- ~ 3G speed
 }
 http_server_class = server --for overriding defaults
 
@@ -222,6 +221,8 @@ function http_server(...)
 				req.headers[name] = value
 			end
 		end
+		--remove the 5s timeout from accept (crude measure against slowloris)
+		ctcp:settimeout(nil)
 
 		--prevent browsers from waiting for 1s on large uploads.
 		local expect = req.headers['expect']
@@ -457,7 +458,7 @@ function http_server(...)
 		push(self.listen_sockets, tcp)
 
 		local function accept_connection()
-			local ctcp, err, retry = tcp:try_accept()
+			local ctcp, err, retry = tcp:try_accept(nil, 5)
 			if not ctcp then
 				if err == 'closed' then return end --stop() called
 				logerror(tcp, 'accept', '%s', err)
