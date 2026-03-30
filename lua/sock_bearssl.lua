@@ -6,7 +6,7 @@
 API
 	[try_]client_stcp(tcp, host, opt) -> cstcp   create a secure client socket
 	[try_]server_stcp(tcp, opt) -> sstcp         create a secure server socket
-		sstcp:[try_]accept() -> cstcp             accept a TLS client connection
+		sstcp:[try_]accept([opt], [timeout]) -> cstcp   accept a TLS client connection
 		  cstcp:[try_]recv(buf, sz) -> n          receive decrypted bytes
 		  cstcp:[try_]send(buf, sz) -> true       send bytes (encrypted)
 		  cstcp:[try_]close()                     close with SSL shutdown
@@ -1328,9 +1328,9 @@ function server_stcp:try_close()
 end
 server_stcp.close = unprotect_io(server_stcp.try_close)
 
-function server_stcp:try_accept()
+function server_stcp:try_accept(opt, timeout)
 	if not self.tcp.fd then return nil, 'closed' end
-	local ctcp, err, retry = self.tcp:try_accept()
+	local ctcp, err, retry = self.tcp:try_accept(opt, timeout)
 	if not ctcp then return nil, err, retry end
 
 	local sc, eng, keepalive = make_server_ctx(

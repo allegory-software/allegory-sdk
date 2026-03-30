@@ -29,8 +29,8 @@ TCP
 	tcp:[try_]connect(addr, [port])                 connect to an address
 	tcp:[try_]send(s|buf, [len], [flags]) -> true   send bytes to connected address
 	tcp:[try_]recv(buf, maxlen) -> len              receive bytes
-	tcp:[try_]listen(addr, [port], [backlog], [onaccept])   put socket in listening mode
-	tcp:[try_]accept() -> ctcp | nil,err,[retry]    accept a client connection
+	tcp:[try_]listen(addr, [port], [backlog], [onaccept])         put socket in listening mode
+	tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err,[retry]  accept a client connection
 	tcp:[try_]recvn(buf, n)                         receive n bytes
 	tcp:[try_]recvall() -> buf, len                 receive until closed
 	tcp:remote_addr() -> sa                         get connected/accepted sockaddr
@@ -152,9 +152,9 @@ tcp:[try_]listen(addr, [port], [backlog], [onaccept])
 	(in which case addr is ignored). The backlog defaults
 	to 1/0 which means "use the maximum allowed".
 
-tcp:[try_]accept() -> ctcp | nil,err,[retry]
+tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err,[retry]
 
-	Accept a client connection.
+	Accept a client connection. Timeout is to limit TLS handshake for sock_bearssl.
 
 	A third return value indicates that the error is a network error and thus
 	the call can be retried.
@@ -1283,7 +1283,7 @@ do
 		return r
 	end, EWOULDBLOCK)
 
-	function tcp:try_accept(opt)
+	function tcp:try_accept(opt, timeout)
 		if not self.fd then return nil, 'closed' end
 		local accept_sa = sockaddr_ct()
 		local s, err, errno = socket_accept(self, accept_sa)
@@ -1313,10 +1313,13 @@ do
 			self, s.i, accept_sa:tostring(), s.fd, self._sockets_n)
 		s._remote_addr = accept_sa
 		s.listen_socket = self
+		if timeout then
+			s:settimeout(timeout)
+		end
 		return s
 	end
-	function tcp:accept()
-		local s, err, retry = self:try_accept()
+	function tcp:accept(...)
+		local s, err, retry = self:try_accept(...)
 		if s then return s end
 		self:check_io(retry, err)
 		return nil, err, true
