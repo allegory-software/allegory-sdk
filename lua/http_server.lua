@@ -16,14 +16,18 @@ SERVER
 	- - unix_socket_user           set user  on socket file after bind()
 	- - unix_socket_group          set group on socket file after bind()
 	- compress                     gzip-compress responses (true)
-	- max_body_size                body size limit
+	- max_body_size                upload size limit (overridable per request)
+	- TODO min_request_time        request grace period (seconds)
+	- TODO max_request_time        max. request + reply time (seconds)
+	- TODO min_request_speed       min. request + reply speed (KB/s)
 	- respond <- fn(req)           request handler
 	- debug <- flags               debug flags: 'protocol tracebacks stream'
+	http_server_class              http_server class for overriding defaults
 REQUEST
 	req.headers -> {k=v}           request headers (in lowercase)
 	req.body_size -> n             request upload size in bytes
-	req:read_body() -> buf,size    read whole body in a buffer
-	req:read_body_chunk() -> buf,size,size_left  read body in chunks
+	req:read_body([max_size]) -> buf,size         read whole body in a buffer
+	req:read_body_chunk() -> buf,size,size_left   read body in chunks
 	req:onfinish(fn)               run fn when request finishes, even if it raises
 	req.thread                     the thread that handled the request
 RESPONSE
@@ -33,7 +37,7 @@ RESPONSE
 		content-length <- n         set body size otherwise it's chunked transfer
 		content-type <- mime        set content-type
 	req.compress <- true|false     gzip-compress response (also see compressed_mime_types)
-	req.max_body_size <- n         body size limit
+	req.max_body_size <- n         upload size limit
 	req:send_headers() -> req      send status line and headers
 	req:send_body_chunk(s | buf,len | nil,'eof') -> req    send body chunk
 	req:finish() -> req            finish response
@@ -67,8 +71,14 @@ require'http_date'
 
 local server = {
 	compress = true,
-	max_body_size = 64*1024^2,
+	max_body_size = 64 * 1024^2,
+	--TODO: implement these protections.
+	--Make them overridable per request after headers are read.
+	min_request_time = 5, -- > 5s allowed for each request + reply
+	max_request_time = 5 * 60, -- ~ 15 MB @ 50 KB/s
+	min_request_speed = 50, -- ~ 3G speed
 }
+http_server_class = server --for overriding defaults
 
 server.compressed_mime_types = index{
 	'image/gif',
@@ -406,7 +416,7 @@ function http_server(...)
 		until ctcp:closed()
 	end
 
-	self.sockets = {}
+	self.listen_sockets = {}
 
 	for _,listen_opt in ipairs(self.listen) do
 
@@ -444,7 +454,7 @@ function http_server(...)
 			tcp:debug_stream'http'
 		end
 
-		push(self.sockets, tcp)
+		push(self.listen_sockets, tcp)
 
 		local function accept_connection()
 			local ctcp, err, retry = tcp:try_accept()
@@ -503,8 +513,8 @@ end
 
 function server:stop()
 	log('note', 'htsrv', 'kill-all', '%s',
-		cat(sort(imap(self.sockets, logarg)), ' '))
-	for _,s in ipairs(self.sockets) do
+		cat(sort(imap(self.listen_sockets, logarg)), ' '))
+	for _,s in ipairs(self.listen_sockets) do
 		s:close()
 	end
 end
