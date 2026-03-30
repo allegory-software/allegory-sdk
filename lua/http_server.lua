@@ -15,7 +15,8 @@ SERVER
 	- - unix_socket_perms          set perms on socket file after bind()
 	- - unix_socket_user           set user  on socket file after bind()
 	- - unix_socket_group          set group on socket file after bind()
-	- compress <- true|false       gzip-compress responses (true)
+	- compress                     gzip-compress responses (true)
+	- max_body_size                body size limit
 	- respond <- fn(req)           request handler
 	- debug <- flags               debug flags: 'protocol tracebacks stream'
 REQUEST
@@ -32,6 +33,7 @@ RESPONSE
 		content-length <- n         set body size otherwise it's chunked transfer
 		content-type <- mime        set content-type
 	req.compress <- true|false     gzip-compress response (also see compressed_mime_types)
+	req.max_body_size <- n         body size limit
 	req:send_headers() -> req      send status line and headers
 	req:send_body_chunk(s | buf,len | nil,'eof') -> req    send body chunk
 	req:finish() -> req            finish response
@@ -47,8 +49,8 @@ CONFIG
 	https_port                     443
 	https_crt_file                 var/HOST.crt or ../tests/localhost.crt
 	https_key_file                 var/HOST.key or ../tests/localhost.key
-	http_compress                  nil, means enabled (set to false to disable)
-	http_debug                     nil (set to true to enable)
+	http_server_compress           set to false to disable
+	http_server_debug              nil (set to true to enable)
 
 ]=]
 
@@ -63,7 +65,10 @@ require'http_date'
 
 --http server ----------------------------------------------------------------
 
-local server = {}
+local server = {
+	compress = true,
+	max_body_size = 64*1024^2,
+}
 
 server.compressed_mime_types = index{
 	'image/gif',
@@ -102,11 +107,15 @@ errortype'http_response'.__tostring = function(self)
 	return s
 end
 
-local req_class = {type = 'http_request', debug_prefix = 'R'}
+local req = {
+	type = 'http_request', debug_prefix = 'R',
+}
 
 function http_server(...)
 
-	local self = object(server, {}, ...)
+	local self = object(server, {
+		compress = config'http_server_compress',
+	}, ...)
 
 	if not self.listen then
 		self.listen = {}
@@ -148,9 +157,7 @@ function http_server(...)
 	end
 	assert(self.listen and #self.listen > 0, 'listen option is missing or empty')
 
-	self.compress = repl(self.compress, nil, config('http_compress', true))
-
-	self.debug = self.debug or config'http_debug' or ''
+	self.debug = self.debug or config'http_server_debug' or ''
 	if isstr(self.debug) then
 		self.debug = index(collect(words(self.debug)))
 	end
@@ -167,7 +174,7 @@ function http_server(...)
 		local method, uri, http_version = line:match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
 		ctcp:checkp(http_version == '1.1', 'invalid http version')
 
-		local req = object(req_class, {
+		local req = object(req, {
 			tcp = ctcp,
 			server = self,
 			method = method,
@@ -179,6 +186,7 @@ function http_server(...)
 			status = 200,
 			response_headers = {}, --put them in lowercase!
 			compress = self.compress,
+			max_body_size = self.max_body_size,
 			dp = self.debug.protocol and req_dp or noop,
 		})
 
@@ -242,7 +250,9 @@ function http_server(...)
 			return buf, len, body_unread_len
 		end
 
-		function req.read_body(req)
+		function req.read_body(req, max_body_size)
+			max_body_size = max_body_size or req.max_body_size
+			ctcp:checkp(body_unread_len <= max_body_size, 'body too long')
 			rb:need(body_unread_len) --can read into the next request if pipelined
 			local buf = rb:ref()
 			local len = body_unread_len
@@ -318,6 +328,7 @@ function http_server(...)
 			assert(not body_sent)
 			if not (chunk == nil and len == 'eof') then
 				len = len or #chunk
+				if len == 0 then return end --can't send 0-writes chunked
 				req:dp('>>', '%7d bytes', len)
 				if req.response_headers['content-length'] then
 					wb:putdata(chunk, len)
