@@ -1883,12 +1883,12 @@ local arg0 = arg and arg[0]
 
 --get script's directory, based on arg[0].
 --NOTE: the path is not absolute, but relative to the starting current directory!
-local dir = arg0:gsub('[/\\]?[^/\\]+$', '') --remove file name
+local dir = arg0 and arg0:gsub('[/\\]?[^/\\]+$', '') --remove file name
 rel_scriptdir = dir == '' and '.' or dir
 
 --get script's name without Lua file extension, based on arg[0].
 --NOTE: for bundled executables, this returns the executable's name.
-scriptname = arg0:gsub('%.lua$', ''):match'[^/\\]+$'
+scriptname = arg0 and arg0:gsub('%.lua$', ''):match'[^/\\]+$' or '?'
 end
 
 function add_searchpath(searchpath, path, index, ext, init, prefix)
