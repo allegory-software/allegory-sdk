@@ -6,24 +6,22 @@
 
 DEFLATE ----------------------------------------------------------------------
 
-gzip_state(gz) -> gz
-	OPTIONS
-		gz.write(buf, sz) -> [false,err]
-			* optional. if not used, data is accumulated in string_buffer gz.b
-			* allowed to yield.
-			* called with (nil, 'eof') on finish.
-			* signals abort by returning `false,err`.
-			* errors are not caught.
-		* bufsize: output buffer size (64K).
-		* format: 'gzip' (default), 'zlib' or 'raw'.
-		* level: compression level (0-9 from none to best).
-		* windowBits (8..15), memLevel, strategy: see zlib manual.
-	API
-		gz:[try_]push(s | buf,len | nil,'eof') -> true,'more'|'eof' | nil,err
-		gz:[try_]finish() -> true,'eof' | nil,err
-		gz:reset()   reset for reuse with same parameters. gz.write can be replaced.
-		gz:free()
-		gz.b         string buffer with all the data if gz.write is not given.
+	gzip_state(gz) -> gz
+	- gz.write(buf, sz) -> [false,err]
+	- - optional. if not used, data is accumulated in string_buffer gz.b
+	- - allowed to yield.
+	- - called with (nil, 'eof') on finish.
+	- - signals abort by returning `false,err`.
+	- - errors are not caught.
+	- bufsize: output buffer size (64K).
+	- format: 'gzip' (default), 'zlib' or 'raw'.
+	- level: compression level (0-9 from none to best).
+	- windowBits (8..15), memLevel, strategy: see zlib manual.
+	gz:[try_]push(s | buf,len | nil,'eof') -> true,'more'|'eof' | nil,err
+	gz:[try_]finish() -> true,'eof' | nil,err
+	gz:reset()   reset for reuse with same parameters. gz.write can be replaced.
+	gz:free()
+	gz.b         string buffer with all the data if gz.write is not given.
 
 gzip   (s | buf,len) -> string_buffer
 gunzip (s | buf,len) -> string_buffer

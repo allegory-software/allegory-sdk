@@ -9,8 +9,8 @@
 
 CREATE
 	pbuffer(pb) -> pb
-		pb.f                             opened file or socket
-		pb.readahead                     min. read-ahead size (64K)
+		pb.f                             file or socket for readahead and flush
+		pb.readahead                     min. read ahead size (64K)
 		pb.linesize                      max. line size for haveline() (8K)
 		pb.lineterm                      line terminator (nil)
 		pb.dict, pb.metatable            see string.buffer doc
@@ -18,15 +18,15 @@ ALLOC/FREE
 	pb:set(str)                          use a string as the underlying buffer
 	pb:set(cdata, size)                  use a cdata as the underlying buffer
 	pb:reserve(size) -> p, size          allocate memory for writing
-	pb:free()                            free buffer memory immediately
+	pb:free()                            free buffer memory now (not on gc)
 PUSH
 	pb:commit(size)                      commit written memory got with reserve()
 	pb:put([str|num|obj], ...)           push values to buffer
 	pb:putf(format, ...)                 push printf message
 	pb:putcdata(cdata, size)             push cdata value
-	pb:putdata(s | cdata, size)          push string or cdata buffer
-	pb:put_{u8,i8,...}(x)                push binary integer
-	pb:encode(o)                         push serialized Lua object
+	pb:putdata(s | cdata,size)           push string or cdata value
+	pb:put_{u8,i8,...}(x)                push (u)int8/16/32/64 LE/BE, float32/64
+	pb:encode(o)                         push Lua value (binary serialization)
 	pb:fill(n, [c])                      push repeat bytes
 DIRECT ACCESS
 	#pb                                  buffer written (commited) size
@@ -34,30 +34,27 @@ DIRECT ACCESS
 	pb:get_{u8,i8,...}_at(x, offset)     read binary integer at offset
 	pb:set_{u8,i8,...}_at(x, offset)     write binary integer at offset
 	pb:tostring() -> s                   convert buffer to string
-	pb:find(s, [i], [j]) -> i            find string (of 1 or 2 chars max.)
 PULL
-	pb:get([n]) -> s                     pull string of length n bytes
+	pb:get([n]) -> s                     pull n bytes (or all) to string
 	pb:get_{u8,i8,...}(x)                pull binary integer
-	pb:decode() -> t                     pull and deserialize Lua value
-	pb:getto(term, [i], [j]) -> s        pull terminated string
-	pb:skip(size)                        skip bytes
-	pb:reset()                           empty the buffer (memory is kept)
-READ
-	pb:skip(size, true)                  skip bytes from buffer incl. from file
-BUFFERED I/O
-	pb.f                                 underlying file or socket for direct I/O
-	pb:[try_]have(n) -> true | false,err read n bytes up-to eof
-	pb:need(n) -> pb                     read n bytes, break on eof
-	pb:flush()                           write buffer and reset it
-	pb:[try_]haveline() -> s | nil,err   read line if there is one
-	pb:needline() -> s                   read line
-	pb:readn_to(n, write)                read n bytes calling write on each read
-	pb:readall_to(write)                 read to eof calling write on each read
+	pb:decode() -> t                     pull Lua value (pushed with encode())
+	pb:getto(term, [i], [j]) -> s|nil    pull terminated string (term between i,j)
+	pb:reset()                           pb:skip(#pb)
+READAHEAD
+	pb:[try_]have(n) -> true | false,err fill buffer to n bytes or more, up-to eof
+	pb:need(n) -> pb                     fill buffer to n bytes or more, break on eof
+READAHEAD & PULL
+	pb:[try_]skip(size)                  skip bytes (read more as needed)
+	pb:[try_]haveline([i]) -> s          fill buffer until a line is found and pull it
+	pb:needline([i]) -> s                like haveline() but break on error/not found
 	pb:reader() -> read                  get a buffered read function
-		read(buf, size) -> read_size
+		read(buf, size) -> read_size | 0,'eof' | nil,err
+WRITE
+	pb:[try_]flush()                     write buffer and reset it.
+
+NOTE: string.buffer semantics altered for :get(), :skip(),
 
 NOTE: raised I/O errors leave the buffer in a partially read/written state.
-Use the try_*() variants if recovery/retry is required.
 
 ]]
 
@@ -81,6 +78,17 @@ function pbuffer(self)
 		and {dict = self.dict, metatable = self.metatable}
 	pb.b = string_buffer(sb_opt)
 	return pb
+end
+
+function pb:try_close() --for self:check*()
+	if not self.f then return true end
+	self:free()
+	return self.f:try_close()
+end
+function pb:close()
+	if not self.f then return end
+	self:free()
+	self.f:close()
 end
 
 --string.buffer method forwarding
@@ -107,8 +115,8 @@ function pb:putdata(data, len)
 	return self
 end
 
+pb.checkp = checkp
 pb.check_io = check_io
-pb.checkp   = checkp
 
 local t = {
 	 'u8'   ,  u8p, 1, false,
@@ -180,7 +188,7 @@ function pb:fill(n, c)
 	return self:commit(n)
 end
 
-function pb:find(s, i, j)
+function findterm(self, s, i, j)
 	assert(#s >= 1 and #s <= 2)
 	local b1, b2 = byte(s, 1, 2)
 	local p, len = self:ref()
@@ -201,26 +209,12 @@ function pb:find(s, i, j)
 	end
 	return nil
 end
-
 function pb:getto(term, i, j)
-	local i = self:find(term, i, j)
+	local i = findterm(self, term, i, j)
 	if not i then return nil end
 	local s = self:get(i)
 	self.b:skip(#term)
 	return s
-end
-
---unbuffered I/O
-
-function pb:try_close() --for self:check*()
-	if not self.f then return end
-	self:free()
-	return self.f:try_close()
-end
-function pb:close()
-	if not self.f then return end
-	self:free()
-	self.f:close()
 end
 
 --buffered I/O
@@ -247,7 +241,6 @@ function pb:have(ask)
 	if not have and err == 'eof' then return false end --eof is not an error
 	return self:check_io(have, err)
 end
-
 function pb:need(n)
 	local have, err = self:try_have(n)
 	if not have then
@@ -258,6 +251,75 @@ function pb:need(n)
 		end
 	end
 	return self
+end
+
+function pb:skip(n)
+	local k = min(n, #self.b)
+	self.b:skip(k)
+	n = n - k
+	if n == 0 then return end
+	if self.f.seek then
+		local file_size = self.f:size()
+		local file_pos  = self.f:seek()
+		self:checkp(file_pos + n <= file_size, 'eof')
+		self.f:seek(n)
+	else
+		while n > 0 do
+			self:need(1)
+			local k = min(n, #self.b)
+			self.b:skip(k)
+			n = n - k
+		end
+	end
+end
+pb.try_skip = protect_io(pb.skip)
+
+pb.linesize = 8192
+pb.lineterm = nil
+function pb:try_haveline(i) --for line-based protocols like http.
+	local lineterm = assert(self.lineterm, 'lineterm not set')
+	i = i or 0
+	while true do
+		local s = self:getto(lineterm, i, self.linesize)
+		if s then return s end
+		i = #self.b
+		self:checkp(i < self.linesize, 'line too long')
+		if i > 0 then --line already started, need to end it
+			self:need(i + 1)
+		elseif not self:have(1) then
+			return false, 'eof'
+		end
+	end
+end
+function pb:haveline(i)
+	local s, err = self:try_haveline(i)
+	if not s and err == 'eof' then return false end --eof is not an error
+	return self:checkp(s, err)
+end
+function pb:needline(i)
+	local s, err = self:try_haveline(i)
+	if not s then
+		if err == 'eof' then
+			self:checkp(false, err) --eof is a protocol error, not an i/o error
+		else
+			self:check_io(false, err)
+		end
+	end
+	return s
+end
+
+--Returns a read function which reads ahead from file in order to lower the
+--number of syscalls: read(buf, size) -> read_size | 0,'eof' | nil,err
+function pb:reader()
+	return function(dst, dsz)
+		local have, err = self:try_have(1)
+		if not have then return err == 'eof' and 0 or nil, err end
+		local src, ssz = self:ref()
+		local sz = min(dsz, ssz)
+		copy(dst, src, sz)
+		self.b:skip(sz)
+		return sz
+	end
 end
 
 function pb:try_flush()
@@ -275,80 +337,4 @@ function pb:flush()
 	local p, len = self:ref()
 	self.f:write(p, len)
 	self:reset()
-end
-
-function pb:skip(n, past_buffer)
-	local buf_n = min(n, #self.b)
-	self.b:skip(buf_n)
-	n = n - buf_n
-	if n <= 0 then return end
-	self:checkp(past_buffer, 'eof')
-	if self.f.seek then
-		local file_size = self.f:size()
-		local file_pos  = self.f:seek()
-		self:checkp(file_pos + n <= file_size, 'eof')
-		self.f:seek(n)
-	else
-		while n > 0 do
-			self:need(1)
-			local k = min(n, #self.b)
-			self.b:skip(k)
-			n = n - k
-		end
-	end
-end
-
-pb.linesize = 8192
-pb.lineterm = nil
-function pb:haveline() --for line-based protocols like http.
-	local lineterm = assert(self.lineterm, 'lineterm not set')
-	local i = 0
-	while true do
-		local s = self:getto(lineterm, i, self.linesize)
-		if s then return s end
-		i = #self.b
-		self:checkp(i < self.linesize, 'line too long')
-		if i > 0 then --line already started, need to end it
-			self:need(i + 1)
-		elseif not self:have(1) then
-			return false, 'eof'
-		end
-	end
-end
-
-function pb:needline()
-	return self:check_io(self:haveline())
-end
-
-function pb:readn_to(n, write)
-	while n > 0 do
-		self:need(1)
-		local p, n1 = self:ref()
-		n1 = min(n1, n)
-		write(p, n1)
-		self.b:skip(n1)
-		n = n - n1
-	end
-end
-
-function pb:readall_to(write)
-	while self:have(1) do
-		local p, n = self:ref()
-		write(p, n)
-		self:reset()
-	end
-end
-
---Returns a `read(buf, size) -> read_size | nil,err` function which reads ahead
---from file in order to lower the number of syscalls.
-function pb:reader()
-	return function(dst, dsz)
-		local have, err = self:try_have(1)
-		if not have then return err == 'eof' and 0 or nil, err end
-		local src, ssz = self:ref()
-		local sz = min(dsz, ssz)
-		copy(dst, src, sz)
-		self.b:skip(sz)
-		return sz
-	end
 end

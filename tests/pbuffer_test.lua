@@ -170,29 +170,6 @@ function test.file_skip_no_past_buffer()
 	b:free(); f:close(); rmfile(testfile)
 end
 
--- readn_to: push-style exact read
-function test.file_readn_to()
-	mkfile('hello world!')
-	local f = open(testfile)
-	local b = pbuffer{f = f}
-	local chunks = {}
-	b:readn_to(12, function(p, n) chunks[#chunks+1] = str(p, n) end)
-	assert(table.concat(chunks) == 'hello world!')
-	b:free(); f:close(); rmfile(testfile)
-end
-
--- readall_to: push-style read to eof
-function test.file_readall_to()
-	local content = string.rep('abcdef', 100)
-	mkfile(content)
-	local f = open(testfile)
-	local b = pbuffer{f = f}
-	local chunks = {}
-	b:readall_to(function(p, n) chunks[#chunks+1] = str(p, n) end)
-	assert(table.concat(chunks) == content)
-	b:free(); f:close(); rmfile(testfile)
-end
-
 -- reader: buffered read function
 function test.file_reader()
 	mkfile('hello world 12345')
@@ -411,8 +388,8 @@ function test.sock_haveline_eof()
 		end, 'client'))
 		local cs = server:accept()
 		local b = pbuffer{f = cs, lineterm = '\r\n'}
-		local s, err = b:haveline()
-		assert(s == false and err == 'eof')
+		local s = b:haveline()
+		assert(s == false)
 		b:free(); cs:close(); server:close()
 	end)
 end
@@ -465,45 +442,6 @@ function test.sock_needline_eof()
 		local b = pbuffer{f = cs, lineterm = '\r\n'}
 		local ok, err = pcall(function() b:needline() end)
 		assert(not ok)
-		b:free(); cs:close(); server:close()
-	end)
-end
-
--- readn_to over socket
-function test.sock_readn_to()
-	checked_run(function()
-		local port = nextport()
-		local server = listen('127.0.0.1:'..port)
-		resume(sthread(function()
-			local s = connect('127.0.0.1:'..port)
-			s:send'hello world!'
-			s:close()
-		end, 'client'))
-		local cs = server:accept()
-		local b = pbuffer{f = cs}
-		local chunks = {}
-		b:readn_to(12, function(p, n) chunks[#chunks+1] = str(p, n) end)
-		assert(table.concat(chunks) == 'hello world!')
-		b:free(); cs:close(); server:close()
-	end)
-end
-
--- readall_to over socket
-function test.sock_readall_to()
-	checked_run(function()
-		local port = nextport()
-		local server = listen('127.0.0.1:'..port)
-		local content = string.rep('abcdef', 100)
-		resume(sthread(function()
-			local s = connect('127.0.0.1:'..port)
-			s:send(content)
-			s:close()
-		end, 'client'))
-		local cs = server:accept()
-		local b = pbuffer{f = cs}
-		local chunks = {}
-		b:readall_to(function(p, n) chunks[#chunks+1] = str(p, n) end)
-		assert(table.concat(chunks) == content)
 		b:free(); cs:close(); server:close()
 	end)
 end

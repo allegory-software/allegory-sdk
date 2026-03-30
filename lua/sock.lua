@@ -824,9 +824,9 @@ local function wait_io(job)
 	return wait_io_cont(thread, coro_transfer(poll_thread))
 end
 
---closing a socket doesn't trigger an epoll event, instead the socket is
+--closing an epollable doesn't trigger an epoll event, instead the fd is
 --silently removed from the epoll list, thus we have to wake up any waiting
---threads manually when the socket is closed from another thread.
+--threads manually when the epollable is closed from another thread.
 function socket:cancel_recv(reason)
 	local thread = self.recv_thread
 	if not thread then return end
@@ -853,10 +853,7 @@ function socket:cancel(reason)
 	self:cancel_recv(reason)
 	self:cancel_send(reason)
 end
-function epoll_cancel(f, reason)
-	socket.cancel_recv(f, reason)
-	socket.cancel_send(f, reason)
-end
+epoll_cancel = socket.cancel
 
 local term_sig_f
 
@@ -910,9 +907,6 @@ local function make_async(for_writing, returns_n, func, wait_errno)
 		end
 	end
 end
-
---------------------
-
 
 local threadfinish = setmetatable({}, weak_keys)
 function onthreadfinish(thread, f)
@@ -1080,24 +1074,25 @@ function try_start(ignore_interrupts)
 	end
 
 	poll_thread = currentthread()
+	_running = true
+	local ret, err = true
 	repeat
-		_running = true
-		local ret, err = poll(ignore_interrupts)
+		ret, err = poll(ignore_interrupts)
 		if not ret then
 			stop()
 			if err == 'interrupted' then
-				return true, err
-			end
-			if err ~= 'empty' then
-				_running = false
-				_stop = false
-				return ret, err
+				ret = true
+				break
+			elseif err ~= 'empty' then
+				break
+			else
+				ret, err = true
 			end
 		end
 	until _stop
 	_running = false
 	_stop = false
-	return true
+	return ret, err
 end
 function start(...)
 	assert(try_start(...))
@@ -1110,10 +1105,6 @@ function run(f, ...)
 		local ret
 		local function wrapper(...)
 			ret = pack(f(...))
-			if term_sig_f then
-				term_sig_f:close()
-				term_sig_f = nil
-			end
 		end
 		resume(thread(wrapper, 'sock-run'), ...)
 		start()
@@ -1145,8 +1136,8 @@ function wj:resume(...)
 	local thread = self.recv_thread
 	assert(waiting[thread] == self, 'thread not waiting (on this wait job)')
 	assert(recv_expires_heap:remove(self))
-	waiting[thread] = nil
-	resume(thread, ...)
+	waiting[thread] = nil --can't resume() a waiting thread
+	resume(thread, ...) --to wait_io_cont()
 	return true
 end
 function wj:cancel()

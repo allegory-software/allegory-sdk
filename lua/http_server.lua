@@ -5,19 +5,19 @@
 
 SERVER
 	http_server(opt1,...) -> server   Create a http server (opt tables are merged)
-	  listen                       {{addr=,...}, {addr=,...}}
-	    host                       Host header match
-	    addr                       IP address to listen to
-	    port                       TCP port to listen to
-	    tls                        use TLS on this socket
-	    tls_options                TLS options, see sock_bearssl.lua
-	    unix_socket                unix socket file to listen to
-	    unix_socket_perms          set perms on socket file after bind()
-	    unix_socket_user           set user  on socket file after bind()
-	    unix_socket_group          set group on socket file after bind()
-	  compress <- true|false       gzip-compress responses (true)
-	  respond <- fn(req)           request handler
-	  debug <- flags               debug flags: 'protocol tracebacks stream'
+	- listen                       {{addr=,...}, {addr=,...}}
+	- - host                       Host header match
+	- - addr                       IP address to listen to
+	- - port                       TCP port to listen to
+	- - tls                        use TLS on this socket
+	- - tls_options                TLS options, see sock_bearssl.lua
+	- - unix_socket                unix socket file to listen to
+	- - unix_socket_perms          set perms on socket file after bind()
+	- - unix_socket_user           set user  on socket file after bind()
+	- - unix_socket_group          set group on socket file after bind()
+	- compress <- true|false       gzip-compress responses (true)
+	- respond <- fn(req)           request handler
+	- debug <- flags               debug flags: 'protocol tracebacks stream'
 REQUEST
 	req.headers -> {k=v}           request headers (in lowercase)
 	req.body_size -> n             request upload size in bytes

@@ -1184,7 +1184,6 @@ function _G.try_client_stcp(tcp, host, opt)
 	live(s, 'tcp=%s', tcp)
 	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
 	if not ok then
-		s:try_close()
 		return nil, err
 	end
 	return s

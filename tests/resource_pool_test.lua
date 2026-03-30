@@ -1,5 +1,5 @@
 require'sock'
-require'respool'
+require'resource_pool'
 
 --logging.debug = true
 

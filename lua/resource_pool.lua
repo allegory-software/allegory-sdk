@@ -9,8 +9,8 @@ creating and destroying resources on every use assuming these operations are
 slow, like connections to external services.
 
 	resource_pool([opt]) -> pool   create a resource pool
-	  max_resources                max resources to accept in the pool (100)
-	  max_waiting_threads          max threads to queue up (1000)
+	- max_resources                max resources to accept in the pool (100)
+	- max_waiting_threads          max threads to queue up (1000)
 	pool:get([expires]) -> res     get a free resource from the pool
 	pool:put(res)                  put a resource in the pool in busy state
 	pool:reuse(res)                mark resource as free to be reused
@@ -52,7 +52,7 @@ arbitrary positions and 2) sock's interruptible timers.
 
 ]=]
 
-if not ... then require'respool_test'; return end
+if not ... then require'resource_pool_test'; return end
 
 require'glue'
 require'sock'
@@ -75,8 +75,10 @@ function resource_pool(opt)
 	local reserved = 0 --number of resources reserved for creation
 
 	local function dbg(event, res, ufmt, ...)
-		log('', 'rpool', event, '%-4s %-4s n=%d free=%d reserved=%d %s',
-			currentthread(), res or '', n, #free, reserved, ufmt and _(ufmt, ...) or '')
+		if logging.filter[''] then return end
+		log('', 'rpool', event, '%-4s%s n=%d free=%d reserved=%d %s',
+			currentthread(), res and _(' %-4s', logarg(res)) or '',
+			n, #free, reserved, ufmt and _(ufmt, ...) or '')
 	end
 
 	local q
@@ -129,7 +131,7 @@ function resource_pool(opt)
 				return nil, 'timeout'
 			end
 		end
-		dbg'create'
+		dbg'reserve'
 		--reserve a slot for the new resource.
 		--reserving the slot now prevents race conditions if res creation yields.
 		--the complication is that if res creation fails you must call cancel().
@@ -142,6 +144,7 @@ function resource_pool(opt)
 		assert(reserved > 0)
 		n = n - 1
 		reserved = reserved - 1
+		dbg'cancel'
 		check_waitlist()
 	end
 
