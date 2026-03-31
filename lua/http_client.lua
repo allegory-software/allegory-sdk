@@ -13,16 +13,17 @@ CLIENT
 	client:send_request_headers(opt) -> req   make a HTTP request and send headers
 	- max_conn                        connections limit (per target)
 	- max_waiting_threads             waiting thread limit (per target)
+	- wait_timeout                    conn pool wait timeout (per target)
 	- tls_options                     options to pass to sock_bearssl (per target)
-	- conn_pool_wait_timeout          connection pool wait timeout
 	- connect_timeout                 connect timeout
 	- headers_timeout                 timeout for sending/receiving headers
-	- client_ip                       client ip to bind to
 	- max_retries                     retry limit for retriable network errors
 	- max_redirects                   redirects limit
+	- client_ip                       client ip to bind to
 	- compress                        allow compression (true)
 	- user_agent                      user-agent header to use for requests
-	req:flush_send_buffer() -> left   flush req.wb afer writing to it
+	req:send_buffer() -> pb           get a pbuffer to put upload data in
+	req:flush_send_buffer() -> left   flush the send bufer afer adding to it
 	req:send_request_body_chunk(s | chunk,len) -> left   upload body chunk
 	req:recv_response_headers()       receive response headers
 	req:recv_response_body_chunk() -> chunk, len, [left]    receive response body chunk
@@ -56,35 +57,94 @@ require'resolver'
 require'http_date'
 require'resource_pool'
 
---http connection state ------------------------------------------------------
+--http connection and request ------------------------------------------------
 
 local http = {
 	type = 'http_connection',
 	debug_prefix = 'H',
 }
 
-local function http_conn(opt)
+local function http_conn(tcp)
 	local rb = pbuffer{
-		f = opt.tcp,
+		f = tcp,
 		readahead = recv_buffer_size,
 		lineterm = '\r\n',
 		linesize = 8192,
-	} --read buffer
+	}
 	local wb = pbuffer{
-		f = opt.tcp,
-	} --write buffer
+		f = tcp,
+	}
 	return object(http, {
-		rb = rb, rb_skip = 0, ready = true,
-		wb = wb,
-	}, opt)
+		tcp = tcp,
+		rb = rb, --read pbuffer
+		wb = wb, --write pbuffer
+		rb_skip = 0, --bytes to skip in rb before next read
+		ready = true, --ready to send next request
+		gz = nil, --created on first request with req.gzip
+		gzb_needs_reset = nil, --gz.b needs reset before next read
+	})
 end
 
-function http:send_request_headers(req)
-	assert(self.ready, 'finish() not called on previous fetch')
-	if self.gz then
-		self.gz:reset()
+local req = {
+	max_conn = 6,
+	max_waiting_threads = 600,
+	wait_timeout = 60,
+	connect_timeout = 10,
+	headers_timeout = 5,
+	max_retries = 0,
+	max_redirects = 8,
+	method = 'GET',
+	uri = '/',
+	user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+	compress = true,
+}
+http_client_request_class = req --for overriding defaults
+
+local function http_req(client, target, opt)
+	local req = object(req, {
+		client = client,
+		target = target,
+		host = target.host,
+		start_clock = clock(),
+		dp = not client.debug.protocol and noop or nil,
+	}, opt)
+	req.headers = update({}, req.headers)
+	return req
+end
+
+function req:dp(event, fmt, ...)
+	local req = self
+	if logging.filter[''] then return end
+	local dt = clock() - req.start_clock
+	local s = fmt and _(fmt, logargs(...)) or ''
+	log('', 'htcl', event, '%-4s %4dms %s', req.http.tcp, dt * 1000, s)
+end
+
+function req:finish(close)
+	local req = self
+	local http = req.http
+	local tcp = req.http.tcp
+
+	if tcp:closed() then return end
+	while not http.ready do --read entire body
+		req:recv_response_body_chunk()
 	end
-	local tcp = self.tcp
+	if close then
+		tcp:close()
+	else
+		req.target.conn_pool:reuse(http)
+	end
+end
+
+function req:send_request_headers()
+	local req = self
+	local http = req.http
+	local tcp = http.tcp
+
+	assert(http.ready, 'finish() not called on previous fetch')
+	if http.gz then
+		http.gz:reset()
+	end
 	req.headers['host'] = tcp:checknp(req.host, 'host missing') --required by http
 	if not req.headers['user-agent'] then
 		req.headers['user-agent'] = req.user_agent
@@ -108,11 +168,10 @@ function http:send_request_headers(req)
 	end
 	req.upload_unsent_size = req.upload_size or 0
 	req.headers['content-length'] = tostring(req.upload_size or 0)
-	req.wb = self.wb
-
-	local wb = self.wb
+	req.wb = http.wb
 
 	tcp:settimeout(req.headers_timeout, 'w')
+	local wb = http.wb
 
 	--send request line
 	assert(req.method and req.method == req.method:upper())
@@ -144,31 +203,38 @@ end
 -- 1. put data into req.wb and then call flush_send_buffer()
 -- 2. call send_request_body_chunk() for larger chunks (saves a memcopy).
 
-function http:flush_send_buffer(req)
+function req:flush_send_buffer()
+	local req = self
+	local http = req.http
+
 	local n = req.upload_unsent_size
 	assert(n, 'request not sent')
-	local len = #self.wb
-	self.tcp:checknp(n >= len, 'upload size mismatch')
-	self.wb:flush()
+	local len = #http.wb
+	http.tcp:checknp(n >= len, 'upload size mismatch')
+	http.wb:flush()
 	n = n - len
 	req.upload_unsent_size = n
 	return n
 end
 
-function http:send_request_body_chunk(req, chunk, len)
+function req:send_request_body_chunk(chunk, len)
+	local req = self
+	local tcp = req.http.tcp
 	local n = req.upload_unsent_size
 	assert(n, 'request not sent')
 	len = len or #chunk
-	self.tcp:checknp(n >= len, 'upload size mismatch')
-	self.tcp:send(chunk, len)
+	tcp:checknp(n >= len, 'upload size mismatch')
+	tcp:send(chunk, len)
 	n = n - len
 	req.upload_unsent_size = n
 	return n
 end
 
-function http:recv_response_headers(req)
-	local tcp = self.tcp
-	local rb = self.rb
+function req:recv_response_headers()
+	local req = self
+	local http = req.http
+	local tcp = http.tcp
+	local rb = http.rb
 
 	tcp:settimeout(req.headers_timeout, 'r')
 
@@ -230,6 +296,18 @@ function http:recv_response_headers(req)
 		req.redirect_location = location
 	end
 
+	--self:store_cookies(target, req)
+	--if req.redirect_location then
+	--	local t = self:redirect_request_args(t, req)
+	--	local max_redirects = self.max_redirects or self.client.max_redirects
+	--	if t.redirect_count >= max_redirects then
+	--		return nil, 'too many redirects', req
+	--	end
+	--	self:try_recv_request_body()
+	--	local ok, err = self:try_send_request_headers(t)
+	--	return self:try_recv_response_headers()
+	--end
+
 	--prepare req for reading the body
 	local te = req.response_headers['transfer-encoding']
 	local ce = req.response_headers['content-encoding']
@@ -243,38 +321,41 @@ function http:recv_response_headers(req)
 	req.body_len = len
 	req.body_unread_len = len
 
-	self.ready = len == 0
+	http.ready = len == 0
 end
 
-local function decompress(self, req, buf, len)
+local function decompress(http, req, buf, len)
 	if not req.gzip then
 		return buf, len
 	end
-	local ok, err = self.gz:try_push(buf, len)
-	self.tcp:checkp(ok, 'gzip error: %s', err)
-	self.gzb_needs_reset = true
-	local p, len = self.gz.b:ref()
+	local ok, err = http.gz:try_push(buf, len)
+	http.tcp:checkp(ok, 'gzip error: %s', err)
+	http.gzb_needs_reset = true
+	local p, len = http.gz.b:ref()
 	if len == 0 and err == 'eof' then
-		self.tcp:checkp(self.ready, 'premature gzip eof')
+		http.tcp:checkp(http.ready, 'premature gzip eof')
 		return nil, 'eof'
 	end
 	return p, len
 end
-function http:recv_response_body_chunk(req)
-	local rb = self.rb
-	local tcp = self.tcp
-	rb:skip(self.rb_skip)
-	if self.ready then
+function req:recv_response_body_chunk()
+	local req = self
+	local http = req.http
+	local tcp = http.tcp
+	local rb = http.rb
+
+	rb:skip(http.rb_skip)
+	if http.ready then
 		return nil, 'eof'
 	end
-	if req.gzip and not self.gz then
-		self.gz = gzip_state{op = 'decompress'}
+	if req.gzip and not http.gz then
+		http.gz = gzip_state{op = 'decompress'}
 		tcp:onclose(function()
-			self.gz:free()
+			http.gz:free()
 		end)
-	elseif self.gzb_needs_reset then
-		self.gz.b:reset()
-		self.gzb_needs_reset = false
+	elseif http.gzb_needs_reset then
+		http.gz.b:reset()
+		http.gzb_needs_reset = false
 	end
 	if req.chunked then
 		local line = rb:needline()
@@ -283,41 +364,41 @@ function http:recv_response_body_chunk(req)
 		req:dp('<<', '%7d bytes (chunk)', len)
 		if len > 0 then
 			local p = rb:need(len + 2):ref() --ends in \r\n
-			self.rb_skip = len + 2
-			return decompress(self, req, p, len)
+			http.rb_skip = len + 2
+			return decompress(http, req, p, len)
 		else --last chunk
 			rb:need(2):skip(2)
 			req:dp('<<', '%7d bytes (chunk end)', 0)
-			self.ready = true
-			self.rb_skip = 0
-			return decompress(self, req, nil, 'eof')
+			http.ready = true
+			http.rb_skip = 0
+			return decompress(http, req, nil, 'eof')
 		end
 	elseif req.body_len then
 		local buf, len = rb:need(1):ref()
 		req.body_unread_len = req.body_unread_len - len
 		tcp:checkp(req.body_unread_len >= 0, 'body length mismatch')
 		if req.body_unread_len == 0 then
-			self.ready = true
+			http.ready = true
 		end
-		self.rb_skip = len
+		http.rb_skip = len
 		req:dp('<<', '%7d bytes (full)', len)
-		return decompress(self, req, buf, len)
+		return decompress(http, req, buf, len)
 	else --read till EOF
 		if rb:have(1) then
 			local buf, len = rb:ref()
-			self.rb_skip = len
+			http.rb_skip = len
 			req:dp('<<', '%7d bytes (not eof)', len)
-			return decompress(self, req, buf, len)
+			return decompress(http, req, buf, len)
 		else
 			req:dp('<<', '%7d bytes (eof)', 0)
-			self.ready = true
-			self.rb_skip = 0
-			return decompress(self, req, nil, 'eof')
+			http.ready = true
+			http.rb_skip = 0
+			return decompress(http, req, nil, 'eof')
 		end
 	end
 end
 
---http client state ----------------------------------------------------------
+--http client ----------------------------------------------------------------
 
 local client = {
 	type = 'http_client',
@@ -332,21 +413,21 @@ end
 
 function http_client(...)
 
-	local self = object(client, {}, ...)
+	local client = object(client, {}, ...)
 
-	local debug = self.debug or config'http_client_debug' or ''
+	local debug = client.debug or config'http_client_debug' or ''
 	if isstr(debug) then
-		self.debug = index(collect(words(debug)))
+		client.debug = index(collect(words(debug)))
 	end
-	if not self.debug.sched then
-		self.dp = noop
+	if not client.debug.sched then
+		client.dp = noop
 	end
 
-	self.targets = {} -- 'HOST[ CLIENT_IP]' -> target
-	self.last_client_ip_index = {} -- host -> index
-	self.cookies = {}
+	client.targets = {} -- 'HOST[ CLIENT_IP]' -> target
+	client.last_client_ip_index = {} -- host -> index
+	client.cookies = {}
 
-	return self
+	return client
 end
 
 --connection pool ------------------------------------------------------------
@@ -360,10 +441,9 @@ function client:assign_client_ip(host)
 	return self.client_ips[i]
 end
 
---A target is a combination of (vhost, client_ip) on which one or more
+--A target is a combination of (vhost, client_ip, https) on which one or more
 --HTTP connections can be created subject to per-target limits.
---Connections are added to the target's ready FIFO after each request
---to be reused for future requests.
+--Connections are reused using the target's connection pool.
 local http_target = {
 	type = 'http_target',
 	debug_prefix = '@',
@@ -391,7 +471,7 @@ end
 
 function client:get_conn(req)
 	local target = req.target
-	local http, err = target.conn_pool:get(req.start_clock + req.conn_pool_wait_timeout)
+	local http, err = target.conn_pool:get(req.start_clock + req.wait_timeout)
 	if not http and err == 'create' then
 		local tcp, err = try_connect(target.host,
 			target.https and 443 or 80,
@@ -414,7 +494,7 @@ function client:get_conn(req)
 			end
 			tcp = stcp
 		end
-		http = http_conn({tcp = tcp, target = target, client = self})
+		http = http_conn(tcp)
 		target.conn_pool:put(http)
 		tcp:onclose(function()
 			target.conn_pool:pull(http)
@@ -425,85 +505,15 @@ end
 
 --request call ---------------------------------------------------------------
 
-local req = {
-	max_conn = 6,
-	max_waiting_threads = 600,
-	max_retries = 0,
-	max_redirects = 8,
-	conn_pool_wait_timeout = 60,
-	connect_timeout = 10,
-	headers_timeout = 5,
-	method = 'GET',
-	uri = '/',
-	user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-	compress = true,
-}
-http_client_request_class = req --for overriding defaults
-
-function req:dp(event, fmt, ...)
-	if logging.filter[''] then return end
-	local dt = clock() - self.start_clock
-	local s = fmt and _(fmt, logargs(...)) or ''
-	log('', 'htcl', event, '%-4s %4dms %s', self.http.tcp, dt * 1000, s)
-end
-
-function client:send_request_headers(opt)
-
-	local target = self:target(opt)
-
-	local req = object(req, {
-		client = self,
-		target = target,
-		host = target.host,
-		headers = {},
-		start_clock = clock(),
-		dp = not self.debug.protocol and noop or nil,
-	}, opt)
-
+function client:send_request_headers(req_opt)
+	local target = self:target(req_opt)
+	local req = http_req(self, target, req_opt)
 	local http, err = self:get_conn(req)
 	if not http then return nil, err end
 	req.http = http
-
-	--local cookies = self:get_cookies(target.client_ip, target.host,
+	--req.cookies = self:get_cookies(target.client_ip, target.host,
 	--	req.uri, target.https)
-
-	http:send_request_headers(req, cookies)
-
-	function req:send_request_body_chunk(...)
-		http:send_request_body_chunk(self, ...)
-	end
-
-	function req:recv_response_headers()
-		http:recv_response_headers(req)
-		--self:store_cookies(target, req)
-		--if req.redirect_location then
-		--	local t = self:redirect_request_args(t, req)
-		--	local max_redirects = self.max_redirects or self.client.max_redirects
-		--	if t.redirect_count >= max_redirects then
-		--		return nil, 'too many redirects', req
-		--	end
-		--	self:try_recv_request_body()
-		--	local ok, err = self:try_send_request_headers(t)
-		--	return self:try_recv_response_headers()
-		--end
-	end
-
-	function req:recv_response_body_chunk()
-		return http:recv_response_body_chunk(req)
-	end
-
-	function req:finish(close)
-		if http.tcp:closed() then return end
-		while not http.ready do --read entire body
-			self:recv_response_body_chunk()
-		end
-		if close then
-			http.tcp:close()
-		else
-			target.conn_pool:reuse(http)
-		end
-	end
-
+	req:send_request_headers()
 	return req
 end
 

@@ -1,7 +1,7 @@
 
 # :candy: The Allegory SDK
 
-A self-contained programming environment for developing web-based 
+A self-contained programming environment for developing web-based
 **database-driven business apps** in **LuaJIT** and **JavaScript**.
 
 The **server-side** is written in Lua and contains:
@@ -180,8 +180,8 @@ The Allegory SDK is MIT Licensed.
 
 ### Why LuaJIT (for web apps)?
 
-Any language with closures, lexical scoping, coroutines and a good FFI
-would do. Even today, only LuaJIT fits this bill.
+Any language with closures, lexical scoping, coroutines, a good FFI and zero
+compile time would do. Even today, only LuaJIT fits the bill.
 
 Plus Lua has non-opinionated semantics (they call that "mechanism, not policy"),
 which is something very rare these days.
