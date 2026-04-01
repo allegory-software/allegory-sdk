@@ -92,22 +92,6 @@ end
 
 --cookie management ----------------------------------------------------------
 
-function client:accept_cookie(cookie, host, http)
-	return http:cookie_domain_matches_request_host(cookie.domain, host)
-end
-
-function client:cookie_jar(ip)
-	return attr(attr(self, 'cookies'), ip or '*')
-end
-
-function client:remove_cookie(jar, domain, path, name)
-	--
-end
-
-function client:clear_cookies(client_ip, host)
-	--
-end
-
 function client:store_cookies(target, req, res)
 	local cookies = req.response_headers['set-cookie']
 	if not cookies then return end

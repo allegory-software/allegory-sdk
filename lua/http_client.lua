@@ -11,6 +11,12 @@ CLIENT
 	- client_ips <- {ip1,...}         a list of client IPs to assign to requests
 	- debug <- flags                  debug flags: 'protocol tracebacks stream sched'
 	client:send_request_headers(opt) -> req   make a HTTP request and send headers
+	- url                             full url, parsed into (host, uri, https), or:
+	- host                            host[:port]
+	- uri                             uri ('/')
+	- https                           use TLS (true)
+	- upload_size                     size of upload body (0; required for uploads)
+	- upload_type                     upload content-type
 	- max_conn                        connections limit (per target)
 	- max_waiting_threads             waiting thread limit (per target)
 	- wait_timeout                    conn pool wait timeout (per target)
@@ -95,6 +101,7 @@ local req = {
 	max_redirects = 8,
 	method = 'GET',
 	uri = '/',
+	https = true,
 	user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
 	compress = true,
 }
@@ -146,9 +153,7 @@ function req:send_request_headers()
 		http.gz:reset()
 	end
 	req.headers['host'] = tcp:checknp(req.host, 'host missing') --required by http
-	if not req.headers['user-agent'] then
-		req.headers['user-agent'] = req.user_agent
-	end
+	req.headers['user-agent'] = req.user_agent
 	if req.close then
 		req.headers['connection'] = 'close'
 	end
@@ -168,6 +173,7 @@ function req:send_request_headers()
 	end
 	req.upload_unsent_size = req.upload_size or 0
 	req.headers['content-length'] = tostring(req.upload_size or 0)
+	req.headers['content-type'] = req.upload_type
 	req.wb = http.wb
 
 	tcp:settimeout(req.headers_timeout, 'w')
@@ -296,7 +302,8 @@ function req:recv_response_headers()
 		req.redirect_location = location
 	end
 
-	--self:store_cookies(target, req)
+	req.client:store_cookies(req)
+
 	--if req.redirect_location then
 	--	local t = self:redirect_request_args(t, req)
 	--	local max_redirects = self.max_redirects or self.client.max_redirects
@@ -304,7 +311,7 @@ function req:recv_response_headers()
 	--		return nil, 'too many redirects', req
 	--	end
 	--	self:try_recv_request_body()
-	--	local ok, err = self:try_send_request_headers(t)
+	--	local ok, err = self:send_request_headers(t)
 	--	return self:try_recv_response_headers()
 	--end
 
@@ -402,7 +409,6 @@ end
 
 local client = {
 	type = 'http_client',
-	client_ips = {},
 }
 
 function client:dp(target, event, fmt, ...)
@@ -414,6 +420,7 @@ end
 function http_client(...)
 
 	local client = object(client, {}, ...)
+	attr(client, 'client_ips')
 
 	local debug = client.debug or config'http_client_debug' or ''
 	if isstr(debug) then
@@ -503,18 +510,187 @@ function client:get_conn(req)
 	return http, err
 end
 
+--cookie storage -------------------------------------------------------------
+
+local function parse_set_cookie(s)
+	local nv, attrs = s:match'^([^;]+)(.*)'
+	if not nv then return end
+	local name, value = nv:match'^%s*([^=]+)=(.*)'
+	if not name then return end
+	local c = {name = name:trim(), value = value:trim()}
+	for k,v in attrs:gmatch';%s*([^=;]+)=?([^;]*)' do
+		k = k:trim():lower()
+		v = v:trim()
+		if k == 'expires' then
+			c.expires = http_date_parse(v)
+		elseif k == 'max-age' then
+			c['max-age'] = tonumber(v)
+		elseif k == 'domain' then
+			c.domain = v:gsub('^%.', ''):lower()
+		elseif k == 'path' then
+			c.path = v
+		elseif k == 'secure' then
+			c.secure = true
+		elseif k == 'httponly' then
+			c.httponly = true
+		end
+	end
+	return c
+end
+
+local function accept_cookie(domain, host)
+	return not domain or domain == host
+		or (domain:find'%.' and host:ends('.'..domain)
+			and not (is_ipv4(host) or is_ipv6(host)))
+end
+
+local function cookie_default_path(uri)
+	local path = uri:match'^([^?#]*)'
+	if not (path and path:starts'/' and path:find('/', 2, true)) then
+		return '/'
+	end
+	return path:match'^(.*/)[^/]*$'
+end
+
+function client:store_cookies(req)
+	local cookies = req.response_headers['set-cookie']
+	if not cookies then return end
+	local cookie_jar = attr(self.cookies, req.target.client_ip or '*')
+	local host = req.target.host
+	for i,s in ipairs(cookies) do
+		local cookie = parse_set_cookie(s)
+		if cookie and accept_cookie(cookie.domain, host) then
+			local time = time()
+			local expires
+			if cookie.expires then
+				expires = cookie.expires
+			elseif cookie['max-age'] then
+				expires = time + cookie['max-age']
+			end
+			local domain = cookie.domain or host
+			local path = cookie.path or cookie_default_path(req.uri)
+			if expires and expires < time then --expired: remove from jar.
+				attrs_clear(cookie_jar, domain, path, cookie.name)
+			else
+				local sc = attrs(cookie_jar, domain, path, cookie.name)
+				sc.wildcard = cookie.domain and true or false
+				sc.secure = cookie.secure
+				sc.expires = expires
+				sc.value = cookie.value
+			end
+		end
+	end
+end
+
+--cookie path matches request path exactly, or
+--cookie path ends in `/` and is a prefix of the request path, or
+--cookie path is a prefix of the request path, and the first
+--character of the request path that is not included in the cookie path is `/`.
+local function cookie_path_matches_request_path(cpath, rpath)
+	if cpath == rpath then
+		return true
+	elseif cpath == rpath:sub(1, #cpath) then
+		if cpath:sub(-1, -1) == '/' then
+			return true
+		elseif rpath:sub(#cpath + 1, #cpath + 1) == '/' then
+			return true
+		end
+	end
+	return false
+end
+
+function client:get_cookies(req)
+	local target = req.target
+	local cookie_jar = attr(self.cookies, req.target.client_ip or '*')
+	if not cookie_jar then return end
+	local path = req.uri:match'^[^%?#]+'
+	local time = time()
+	local cookies = {}
+	local names = {}
+	for s in req.target.host:gmatch'[^%.]+' do
+		add(names, s)
+	end
+	local domain = names[#names]
+	local host = target.host
+	for i = #names-1, 1, -1 do
+		domain = names[i] .. '.' .. domain
+		local domain_jar = cookie_jar[domain]
+		if domain_jar then
+			for cpath, path_jar in pairs(domain_jar) do
+				if cookie_path_matches_request_path(cpath, path) then
+					for name, sc in pairs(path_jar) do
+						if sc.expires and sc.expires < time then --expired: auto-clean.
+							attrs_clear(cookie_jar, domain, cpath, name)
+						elseif not sc.wildcard and domain ~= host then
+							--skip: exact-host cookie, not our host.
+						elseif req.https or not sc.secure then
+							cookies[name] = sc.value
+						end
+					end
+				end
+			end
+		end
+	end
+	return cookies
+end
+
 --request call ---------------------------------------------------------------
 
-function client:send_request_headers(req_opt)
-	local target = self:target(req_opt)
-	local req = http_req(self, target, req_opt)
+function client:send_request_headers(req)
+	if req.url then
+		assert(not req.host) --mutually exclusive
+		local u = url_parse(req.url)
+		req.host = u.host
+		req.uri = u.path
+		req.https = u.scheme == 'https' or (not u.scheme and opt.https)
+	end
+	local target = self:target(req)
+	local req = http_req(self, target, req)
 	local http, err = self:get_conn(req)
 	if not http then return nil, err end
 	req.http = http
-	--req.cookies = self:get_cookies(target.client_ip, target.host,
-	--	req.uri, target.https)
+	req.cookies = self:get_cookies(req)
 	req:send_request_headers()
 	return req
+end
+
+function client:fetch(arg1, body) --opt | url,body
+	local req = istab(arg1) and update({}, arg1) or {url = arg1}
+	local body = body or req.body
+	req.headers = {}
+	if body ~= nil and not isstr(body) then
+		body = json_encode(body)
+		req.upload_type = 'application/json'
+	end
+	if body then
+		req.method = 'POST'
+		req.upload_size = #body
+	end
+	req.headers = update(headers, opt.headers)
+
+	local req, err = self:send_request_headers(req)
+	if not req then return nil, err end
+
+	if body then
+		local ok, err = req:try_send_request_body(body)
+		if not ok then return nil, err end
+	end
+
+	local ok, err = req:try_recv_response_headers()
+	if not ok then return nil, err end
+
+	local ok, err = req:try_recv_response_body()
+	if not ok then return nil, err end
+
+	local ct = req.response_headers['content-type']
+	if ct and ct.media_type == 'application/json' then
+		req.response = json_decode(req.response)
+		--if the entire resonse is the json value "null", then return null
+		--because nil is for errors.
+		req.response = repl(req.response, nil, null)
+	end
+
+	return req.response, req
 end
 
 --global fetch ---------------------------------------------------------------
