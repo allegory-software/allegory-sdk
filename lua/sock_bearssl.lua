@@ -1184,6 +1184,7 @@ function _G.try_client_stcp(tcp, host, opt)
 	live(s, 'tcp=%s', tcp)
 	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
 	if not ok then
+		live(s, nil)
 		return nil, err
 	end
 	return s
@@ -1191,9 +1192,12 @@ end
 _G.client_stcp = unprotect_io(_G.try_client_stcp)
 
 function client_stcp:try_close()
-	if not self.tcp.fd then return true end
-	C.br_ssl_engine_close(self.eng)
+	if not self.tcp.fd then
+		--BearSSL doesn't malloc, so no cleanup needed if the fd is lost.
+		return true
+	end
 	-- best-effort TLS close_notify
+	C.br_ssl_engine_close(self.eng)
 	while true do
 		local state = tonumber(C.br_ssl_engine_current_state(self.eng))
 		if band(state, BR_SSL_CLOSED) ~= 0 then break end
