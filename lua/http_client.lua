@@ -26,15 +26,27 @@ CLIENT
 	- max_retries                     retry limit for retriable network errors
 	- max_redirects                   redirects limit
 	- client_ip                       local ip to bind to
-	- compress                        allow compression (true)
+	- compress                        allow response compression (true)
 	- user_agent                      user-agent header to use for requests
 	req:send_buffer() -> pb           get a pbuffer to put upload data in
 	req:flush_send_buffer() -> left   flush the send bufer afer adding to it
 	req:send_body_chunk(s | chunk,len) -> left   upload body chunk
 	req:recv_headers()                receive status and headers
-	req:redirect()                    redirect if status/headers ask for it
-	req:recv_body_chunk() -> chunk, len    receive response body chunk
-	client:fetch(opt | url) -> s, ht  make a request and get response body and headers
+	- status -> n                     response status code
+	- response_headers -> {k->v}      response headers
+	- redirect_location -> url_s      redirect location, if need to redirect
+	- chunked -> true                 response comes chunked
+	- gzip -> true                    response is compressed
+	- response_body_size -> n         (compressed) body length, if known
+	- response_body_unread_size -> n  body length left to read, if length known
+	- eof -> true                     body was read or there is no body
+	req:redirect_request() -> req     create redirect request from redirect_location
+	- body_size -> n | 0              require resending the body or not
+	req:recv_body_chunk() -> chunk,len | nil,'eof'  receive next response body chunk
+	req:finish()                      finish request and release connection (required!)
+	- finished -> true                request is finished
+	client:fetch(opt | url) -> s,req  make request and get response body
+	- req.response_body -> s          response body
 	http_client_request_class         req class with defaults to override
 CONFIG
 	http_client_debug                 see debug flags for http_client above
@@ -86,7 +98,6 @@ local function http_conn(tcp)
 		rb = rb, --read pbuffer
 		wb = wb, --write pbuffer
 		rb_skip = 0, --bytes to skip in rb before next read
-		ready = true, --ready to send next request
 		gz = nil, --created on first request with req.gzip
 		gzb_needs_reset = nil, --gz.b needs reset before next read
 	})
@@ -114,6 +125,7 @@ local function http_req(client, target, opt)
 		target = target,
 		host = target.host,
 		start_clock = clock(),
+		finished = false, --connection released
 		dp = not client.debug.protocol and noop or nil,
 	}, opt)
 	req.headers = update({}, req.headers)
@@ -128,19 +140,16 @@ function req:dp(event, fmt, ...)
 	log('', 'htcl', event, '%-4s %4dms %s', req.http.tcp, dt * 1000, s)
 end
 
-function req:finish(close)
+function req:finish()
 	local req = self
-	local http = req.http
-	local tcp = req.http.tcp
-
-	if tcp:closed() then return end
-	while not http.ready do --read entire body
-		req:recv_body_chunk()
-	end
-	if close then
-		tcp:close()
+	if req.finished then return end
+	while req:recv_body_chunk() do end --read entire body
+	assert(req.eof)
+	req.finished = true
+	if req.close then
+		req.http.tcp:close()
 	else
-		req.target.conn_pool:reuse(http)
+		req.target.conn_pool:reuse(req.http)
 	end
 end
 
@@ -149,7 +158,7 @@ function req:send_headers()
 	local http = req.http
 	local tcp = http.tcp
 
-	assert(http.ready, 'finish() not called on previous fetch')
+	assert(not req.finished, 'request finished')
 	if http.gz then
 		http.gz:reset()
 	end
@@ -173,7 +182,7 @@ function req:send_headers()
 		req.headers['cookie'] = cat(t)
 	end
 	req.body_size = req.body_size or 0
-	assert(req.body_size >= 0)
+	tcp:checkp(req.body_size >= 0, 'invalid body_size')
 	req.body_unsent_size = req.body_size
 	req.headers['content-length'] = tostring(req.body_size)
 	req.headers['content-type'] = req.body_type
@@ -183,8 +192,7 @@ function req:send_headers()
 	local wb = http.wb
 
 	--send request line
-	assert(req.method and req.method == req.method:upper())
-	assert(req.uri)
+	tcp:checkp(req.method == req.method:upper(), 'invalid method')
 	req:dp('=>', '%s %s HTTP/1.1', req.method, req.uri)
 	wb:putf('%s %s HTTP/1.1\r\n', req.method, req.uri)
 
@@ -216,10 +224,11 @@ function req:flush_send_buffer()
 	local req = self
 	local http = req.http
 
+	assert(not req.finished, 'request finished')
 	local n = req.body_unsent_size
 	assert(n, 'request not sent')
 	local len = #http.wb
-	http.tcp:checknp(n >= len, 'client body size mismatch')
+	http.tcp:checknp(n >= len, 'request body size mismatch')
 	http.wb:flush()
 	n = n - len
 	req.body_unsent_size = n
@@ -229,10 +238,12 @@ end
 function req:send_body_chunk(chunk, len)
 	local req = self
 	local tcp = req.http.tcp
+
+	assert(not req.finished, 'request finished')
 	local n = req.body_unsent_size
 	assert(n, 'request not sent')
 	len = len or #chunk
-	tcp:checknp(n >= len, 'client body size mismatch')
+	tcp:checknp(n >= len, 'request body size mismatch')
 	tcp:send(chunk, len)
 	n = n - len
 	req.body_unsent_size = n
@@ -244,6 +255,10 @@ function req:recv_headers()
 	local http = req.http
 	local tcp = http.tcp
 	local rb = http.rb
+
+	assert(not req.finished, 'request finished')
+	assert(req.body_unsent_size == 0, 'body not sent')
+	assert(not req.response_headers, 'headers already received')
 
 	tcp:settimeout(req.headers_timeout, 'r')
 
@@ -306,6 +321,11 @@ function req:recv_headers()
 
 	req.client:store_cookies(req)
 
+	if req.method == 'HEAD' or status == 204 or status == 304 then
+		req.eof = true --no body allowed
+		return
+	end
+
 	--prepare req for reading the body
 	local te = req.response_headers['transfer-encoding']
 	local ce = req.response_headers['content-encoding']
@@ -313,16 +333,16 @@ function req:recv_headers()
 	if te then len = nil end --chunked takes precedence
 	tcp:checkp(not te or te == 'chunked')
 	tcp:checkp(not ce or ce == 'gzip')
+	tcp:checkp(req.compress or not ce)
 	tcp:checkp(not len or len >= 0)
 	req.chunked = te == 'chunked'
 	req.gzip = ce == 'gzip'
-	req.body_len = len
-	req.body_unread_len = len
-
-	http.ready = len == 0
+	req.response_body_size = len
+	req.response_body_unread_size = len
+	req.eof = len == 0
 end
 
-function req:url()
+function req:format_url()
 	local req = self
 	local u = url_parse(req.uri)
 	local host, port, addr_type = addr_parse(req.host)
@@ -338,12 +358,15 @@ function req:redirect_request()
 	local tcp = req.http.tcp
 	assert(req.redirect_location, 'no redirect_location')
 	tcp:checkp((req.redirect_count or 0) < req.max_redirects, 'too many redirects')
-	local req_url = req:url()
+	local req_url = req:format_url()
 	local re_url = url_resolve(req_url, req.redirect_location)
 	tcp:checkp(re_url.scheme == 'http' or re_url.scheme == 'https', 'url scheme not http(s)')
 	local resend_body = req.status == 307 or req.status == 308
 	local headers = update({}, req.headers)
-	if re_url.host ~= req_url.host or re_url.port ~= req_url.port then
+	local cross_origin = re_url.host ~= req_url.host
+		or re_url.port ~= req_url.port
+		or re_url.scheme ~= req_url.scheme
+	if cross_origin then
 		headers.authorization = nil
 		headers.cookie = nil
 		headers.host = nil
@@ -379,10 +402,13 @@ local function decompress(http, req, buf, len)
 	http.gzb_needs_reset = true
 	local p, len = http.gz.b:ref()
 	if len == 0 and err == 'eof' then
-		http.tcp:checkp(http.ready, 'premature gzip eof')
+		http.tcp:checkp(req.eof, 'premature gzip stream end marker')
 		return nil, 'eof'
+	else
+		http.tcp:checkp(err == 'eof' or not req.eof,
+			'gzip stream without end marker')
+		return p, len
 	end
-	return p, len
 end
 function req:recv_body_chunk()
 	local req = self
@@ -390,8 +416,12 @@ function req:recv_body_chunk()
 	local tcp = http.tcp
 	local rb = http.rb
 
+	assert(not req.finished, 'request finished')
+	assert(req.response_headers, 'response headers not received')
+
 	rb:skip(http.rb_skip)
-	if http.ready then
+	http.rb_skip = 0
+	if req.eof then
 		return nil, 'eof'
 	end
 	if req.gzip and not http.gz then
@@ -414,31 +444,28 @@ function req:recv_body_chunk()
 			return decompress(http, req, p, len)
 		else --last chunk
 			rb:need(2):skip(2)
-			req:dp('<<', '%7d bytes (chunk end)', 0)
-			http.ready = true
 			http.rb_skip = 0
+			req.eof = true
 			return decompress(http, req, nil, 'eof')
 		end
-	elseif req.body_len then
+	elseif req.response_body_size then
 		local buf, len = rb:need(1):ref()
-		req.body_unread_len = req.body_unread_len - len
-		tcp:checkp(req.body_unread_len >= 0, 'body length mismatch')
-		if req.body_unread_len == 0 then
-			http.ready = true
-		end
-		http.rb_skip = len
+		req.response_body_unread_size = req.response_body_unread_size - len
+		tcp:checkp(req.response_body_unread_size >= 0, 'response body size mismatch')
 		req:dp('<<', '%7d bytes (full)', len)
+		http.rb_skip = len
+		req.eof = req.response_body_unread_size == 0
 		return decompress(http, req, buf, len)
 	else --read till EOF
 		if rb:have(1) then
 			local buf, len = rb:ref()
-			http.rb_skip = len
 			req:dp('<<', '%7d bytes (not eof)', len)
+			http.rb_skip = len
 			return decompress(http, req, buf, len)
 		else
 			req:dp('<<', '%7d bytes (eof)', 0)
-			http.ready = true
 			http.rb_skip = 0
+			req.eof = true
 			return decompress(http, req, nil, 'eof')
 		end
 	end
@@ -599,19 +626,17 @@ function client:store_cookies(req)
 	for i,s in ipairs(cookies) do
 		local cookie = parse_set_cookie(s)
 		if cookie and accept_cookie(cookie.domain, host) then
-			local time = time()
-			local expires
-			if cookie.expires then
-				expires = cookie.expires
-			elseif cookie['max-age'] then
-				expires = time + cookie['max-age']
+			local expires = cookie.expires and time(cookie.expires)
+			local cur_time = now()
+			if not expires and cookie['max-age'] then
+				expires = cur_time + cookie['max-age']
 			end
 			local domain = cookie.domain or host
 			local path = cookie.path or cookie_default_path(req.uri)
-			if expires and expires < time then --expired: remove from jar.
+			if expires and expires < cur_time then --expired: remove from jar.
 				attrs_clear(cookie_jar, domain, path, cookie.name)
 			else
-				local sc = attrs(cookie_jar, domain, path, cookie.name)
+				local sc = attr(attr(attr(cookie_jar, domain), path), cookie.name)
 				sc.wildcard = cookie.domain and true or false
 				sc.secure = cookie.secure
 				sc.expires = expires
@@ -634,6 +659,8 @@ local function cookie_path_matches_request_path(cpath, rpath)
 		elseif rpath:sub(#cpath + 1, #cpath + 1) == '/' then
 			return true
 		end
+	elseif cpath == rpath..'/' then --curl-like: /cookies matches /cookies/
+		return true
 	end
 	return false
 end
@@ -684,7 +711,10 @@ function client:send_headers(req)
 		req.host = u.host .. (u.port and ':'..u.port or '')
 		req.uri = url_format{path = u.path, query = u.query}
 		req.secure = u.scheme == 'https'
+		req.url = nil --call :format_url() to recreate
 	end
+	assert(req.host, 'host required')
+	assert(req.uri, 'uri required')
 	local target = self:target(req)
 	local req = http_req(self, target, req)
 	local http, err = self:get_conn(req)
@@ -719,21 +749,26 @@ function client:fetch(arg1, body) --opt | url,body
 		req = req:redirect_request()
 		goto again
 	end
-	local bb = string_buffer()
-	while not req.http.ready do
-		local chunk, len = req:recv_body_chunk()
-		if not chunk then break end
-		bb:putcdata(chunk, len)
-	end
-	req.response_body = bb:tostring()
+	if not req.eof then --there's a body
+		local bb = string_buffer()
+		while 1 do
+			local chunk, len = req:recv_body_chunk()
+			if not chunk then break end --eof
+			bb:putcdata(chunk, len)
+		end
+		req.response_body = bb:tostring()
 
-	local ct = req.response_headers['content-type']
-	if ct and ct:starts'application/json' then
-		req.response_body = json_decode(req.response_body)
-		--if the entire resonse is the json value "null", then return null
-		--because nil is for errors.
-		req.response_body = repl(req.response_body, nil, null)
+		local ct = req.response_headers['content-type']
+		if ct and ct:starts'application/json' then
+			req.response_body = json_decode(req.response_body)
+			--if the entire resonse is the json value "null", then return null
+			--because nil is for errors.
+			req.response_body = repl(req.response_body, nil, null)
+		end
+	else
+		req.response_body = '' --because nil is for errors
 	end
+	req:finish()
 
 	return req.response_body, req
 end
