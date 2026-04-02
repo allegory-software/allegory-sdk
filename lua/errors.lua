@@ -49,10 +49,9 @@ expensive so when a stack trace is not needed, use lua_pcall() instead.
 
 TRACEBACKS ON STRUCTURED ERRORS
 
-Structured errors are different: since they are raised on I/O errors and not
-on bugs, they don't get a traceback by default unless you ask for it by setting
-addtraceback=true in the error object. Note that normal errors still pass
-through io-protected functions, so bugs inside io-protected code still get a traceback from the
+Structured errors are different: they don't get a traceback by default unless
+you ask for it by setting addtraceback=true in the error object. See the
+errors_io module for how that is used.
 
 ]=]
 

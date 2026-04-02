@@ -5,6 +5,8 @@
 API
 
 	check{_io|p|np}(self, val, format, format_args...) -> val
+	protect_io(raising_f) -> try_f
+	unprotect_io(try_f) -> raising_f
 
 RATIONALE
 
@@ -45,14 +47,16 @@ and checkp() (but not by checknp()) on failure.
 Note that protect_io() only catches errors raised by check*(), other Lua
 errors pass through and the file/connection isn't closed either.
 
-You can also implement protocols the opposite way, i.e. the golang-way, i.e.
-in the protocol implementation only call nil,err-returning I/O methods
-(so try_*() only) and early-exit on errors with nil,err. Then create raising
-variants of your methods with unprotect_io(). That half-defeats the purpose
-of this, but there's no hidden control flow in the protocol implementation
-and you have more control on how to handle each failure case.
+TODO:
+You can also implement protocols the opposite way i.e. the golang-way i.e.
+only call non-raising I/O methods, so try_*() only, and early-exit on errors
+with nil,err and then create rasing variants of your protocol functions with
+unprotect_io(). Doing it this way is noisy and error-prone, plus unprotect_io()
+converts _all_ errors into retriable I/O errors including bugs which is wrong
+but since all errors come as strings there's no way to tell them apart.
 
-TODO: Currently try_*() methods on sock and fs modules do not break on usage
+TODO:
+Currently try_*() methods on sock and fs modules do not break on usage
 errors coming from the OS except for EINVAL and EBADF, so some errors might
 come up as potentially retriable which is not correct. The correct behavior
 is to raise on usage errors because these are usually bugs. This must be
