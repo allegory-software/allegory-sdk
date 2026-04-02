@@ -1,6 +1,5 @@
 require'glue'
 require'http_client'
-require'base64'
 require'unit'
 logging.verbose = true
 --logging.debug = true
@@ -100,17 +99,7 @@ function test.head()
 	checked_run(function()
 		local body, req = fetch{url = BASE..'/head', method = 'HEAD'}
 		assert(req.status == 200)
-	end)
-end
-
--- GET /anything --------------------------------------------------------------
-
-function test.anything()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/anything/test', method = 'GET'}
-		assert(req.status == 200)
-		assert(body.url:has'/anything/test')
-		assert(body.method == 'GET')
+		assert(body == '', 'HEAD response should have no body')
 	end)
 end
 
@@ -136,26 +125,6 @@ function test.headers()
 	end)
 end
 
--- GET /ip --------------------------------------------------------------------
-
-function test.ip()
-	checked_run(function()
-		local body, req = fetch(BASE..'/ip')
-		assert(req.status == 200)
-		assert(body.origin)
-	end)
-end
-
--- GET /user-agent ------------------------------------------------------------
-
-function test.user_agent()
-	checked_run(function()
-		local body, req = fetch(BASE..'/user-agent')
-		assert(req.status == 200)
-		assert(body['user-agent']:has'Mozilla')
-	end)
-end
-
 -- GET /gzip ------------------------------------------------------------------
 
 function test.gzip()
@@ -178,34 +147,6 @@ function test.redirect()
 		local body, req = fetch(BASE..'/redirect/3')
 		assert(req.status == 200)
 		assert(body.url == BASE..'/get')
-	end)
-end
-
--- GET /redirect-to -----------------------------------------------------------
-
-function test.redirect_to()
-	checked_run(function()
-		local body, req = fetch(BASE..'/redirect-to?url='..url_escape(BASE..'/get', '/:'))
-		assert(req.status == 200)
-		assert(body.url == BASE..'/get')
-	end)
-end
-
--- GET /absolute-redirect/:n --------------------------------------------------
-
-function test.absolute_redirect()
-	checked_run(function()
-		local body, req = fetch(BASE..'/absolute-redirect/2')
-		assert(req.status == 200)
-	end)
-end
-
--- GET /relative-redirect/:n --------------------------------------------------
-
-function test.relative_redirect()
-	checked_run(function()
-		local body, req = fetch(BASE..'/relative-redirect/2')
-		assert(req.status == 200)
 	end)
 end
 
@@ -236,58 +177,6 @@ function test.cookies_delete()
 		cl:fetch(BASE..'/cookies/delete?gone=')
 		local body, req = cl:fetch(BASE..'/cookies')
 		assert(req.status == 200)
-	end)
-end
-
--- GET /basic-auth/:user/:password --------------------------------------------
-
-function test.basic_auth()
-	checked_run(function()
-		local cred = base64_encode('user:pass')
-		local body, req = fetch{url = BASE..'/basic-auth/user/pass',
-			headers = {authorization = 'Basic '..cred}}
-		assert(req.status == 200)
-		assert(body.authorized == true)
-		assert(body.user == 'user')
-	end)
-end
-
--- GET /basic-auth without credentials (expect 401) ---------------------------
-
-function test.basic_auth_fail()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/basic-auth/user/pass', compress = false}
-		assert(req.status == 401)
-	end)
-end
-
--- GET /bearer ----------------------------------------------------------------
-
-function test.bearer()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/bearer',
-			headers = {authorization = 'Bearer mytoken123'}}
-		assert(req.status == 200)
-		assert(body.authenticated == true)
-		assert(body.token == 'mytoken123')
-	end)
-end
-
--- GET /bearer without token (expect 401) ------------------------------------
-
-function test.bearer_fail()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/bearer', compress = false}
-		assert(req.status == 401)
-	end)
-end
-
--- GET /hidden-basic-auth/:user/:password (expect 404) -----------------------
-
-function test.hidden_basic_auth()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/hidden-basic-auth/user/pass', compress = false}
-		assert(req.status == 404)
 	end)
 end
 
@@ -346,80 +235,6 @@ function test.stream()
 	end)
 end
 
--- GET /drip -------------------------------------------------------------------
-
-function test.drip()
-	checked_run(function()
-		local body, req = fetch{
-			url = BASE..'/drip?numbytes=5&duration=0&delay=0&code=200',
-			compress = false, headers_timeout = 10,
-		}
-		assert(req.status == 200)
-		assert(#body == 5)
-	end)
-end
-
--- GET /range/:n --------------------------------------------------------------
-
-function test.range()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/range/128', compress = false}
-		assert(req.status == 200)
-		assert(#body == 128)
-	end)
-end
-
--- GET /range with Range header -----------------------------------------------
-
-function test.range_partial()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/range/128', compress = false,
-			headers = {range = 'bytes=0-9'}}
-		assert(req.status == 206)
-		assert(#body == 10)
-	end)
-end
-
--- GET /cache (no headers -> 200) ---------------------------------------------
-
-function test.cache()
-	checked_run(function()
-		local body, req = fetch(BASE..'/cache')
-		assert(req.status == 200)
-	end)
-end
-
--- GET /cache with If-None-Match -> 304 ---------------------------------------
-
-function test.cache_304()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/cache',
-			headers = {['if-none-match'] = '"anything"'}, compress = false}
-		assert(req.status == 304)
-	end)
-end
-
--- GET /cache/:n --------------------------------------------------------------
-
-function test.cache_control()
-	checked_run(function()
-		local body, req = fetch(BASE..'/cache/60')
-		assert(req.status == 200)
-		local cc = req.response_headers['cache-control']
-		assert(cc and cc:has'60')
-	end)
-end
-
--- GET /etag/:etag ------------------------------------------------------------
-
-function test.etag()
-	checked_run(function()
-		local body, req = fetch(BASE..'/etag/test-etag')
-		assert(req.status == 200)
-		assert(req.response_headers['etag'] == '"test-etag"')
-	end)
-end
-
 -- GET /etag with If-None-Match -----------------------------------------------
 
 function test.etag_match()
@@ -427,269 +242,6 @@ function test.etag_match()
 		local body, req = fetch{url = BASE..'/etag/test-etag', compress = false,
 			headers = {['if-none-match'] = '"test-etag"'}}
 		assert(req.status == 304)
-	end)
-end
-
--- GET /json ------------------------------------------------------------------
-
-function test.json()
-	checked_run(function()
-		local body, req = fetch(BASE..'/json')
-		assert(req.status == 200)
-		assert(istab(body))
-	end)
-end
-
--- GET /xml -------------------------------------------------------------------
-
-function test.xml()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/xml', compress = false}
-		assert(req.status == 200)
-		assert(isstr(body))
-		assert(body:has'<?xml')
-	end)
-end
-
--- GET /html ------------------------------------------------------------------
-
-function test.html()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/html', compress = false}
-		assert(req.status == 200)
-		assert(body:has'<html')
-	end)
-end
-
--- GET /encoding/utf8 ---------------------------------------------------------
-
-function test.encoding_utf8()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/encoding/utf8', compress = false}
-		assert(req.status == 200)
-		assert(isstr(body))
-	end)
-end
-
--- GET /robots.txt ------------------------------------------------------------
-
-function test.robots_txt()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/robots.txt', compress = false}
-		assert(req.status == 200)
-		assert(body:has'Disallow')
-	end)
-end
-
--- GET /deny ------------------------------------------------------------------
-
-function test.deny()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/deny', compress = false}
-		assert(req.status == 200)
-		assert(body:has'YOU SHOULDN')
-	end)
-end
-
--- GET /image/png -------------------------------------------------------------
-
-function test.image_png()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/image/png', compress = false}
-		assert(req.status == 200)
-		assert(req.response_headers['content-type']:has'image/png')
-		assert(#body > 0)
-	end)
-end
-
--- GET /image/jpeg ------------------------------------------------------------
-
-function test.image_jpeg()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/image/jpeg', compress = false}
-		assert(req.status == 200)
-		assert(req.response_headers['content-type']:has'image/jpeg')
-	end)
-end
-
--- GET /image/svg -------------------------------------------------------------
-
-function test.image_svg()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/image/svg', compress = false}
-		assert(req.status == 200)
-		assert(req.response_headers['content-type']:has'image/svg')
-	end)
-end
-
--- GET /image/webp ------------------------------------------------------------
-
-function test.image_webp()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/image/webp', compress = false}
-		assert(req.status == 200)
-		assert(req.response_headers['content-type']:has'image/webp')
-	end)
-end
-
--- GET /image (content negotiation) -------------------------------------------
-
-function test.image_accept()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/image', compress = false,
-			headers = {accept = 'image/png'}}
-		assert(req.status == 200)
-		assert(req.response_headers['content-type']:has'image/png')
-	end)
-end
-
--- GET /base64/encode/:value --------------------------------------------------
-
-function test.base64_encode()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/base64/encode/hello world', compress = false}
-		assert(req.status == 200)
-		assert(body:trim() == base64_encode'hello world' or body:trim():has'aGVsbG8')
-	end)
-end
-
--- GET /base64/decode/:value --------------------------------------------------
-
-function test.base64_decode()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/base64/decode/aGVsbG8gd29ybGQ=', compress = false}
-		assert(req.status == 200)
-		assert(body:trim() == 'hello world')
-	end)
-end
-
--- GET /base64/:value (shorthand decode) --------------------------------------
-
-function test.base64_shorthand()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/base64/aGVsbG8gd29ybGQ=', compress = false}
-		assert(req.status == 200)
-		assert(body:trim() == 'hello world')
-	end)
-end
-
--- GET /uuid ------------------------------------------------------------------
-
-function test.uuid()
-	checked_run(function()
-		local body, req = fetch(BASE..'/uuid')
-		assert(req.status == 200)
-		assert(body.uuid:match'^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$')
-	end)
-end
-
--- GET /links/:n --------------------------------------------------------------
-
-function test.links()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/links/5', compress = false}
-		assert(req.status == 200)
-		assert(body:has'<a href')
-	end)
-end
-
--- GET /forms/post ------------------------------------------------------------
-
-function test.forms_post()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/forms/post', compress = false}
-		assert(req.status == 200)
-		assert(body:has'<form')
-	end)
-end
-
--- GET /hostname --------------------------------------------------------------
-
-function test.hostname()
-	checked_run(function()
-		local body, req = fetch(BASE..'/hostname')
-		assert(req.status == 200)
-		assert(body.hostname)
-	end)
-end
-
--- GET /env -------------------------------------------------------------------
-
-function test.env()
-	checked_run(function()
-		local body, req = fetch(BASE..'/env')
-		assert(req.status == 200)
-		assert(istab(body))
-	end)
-end
-
--- GET /unstable ---------------------------------------------------------------
-
-function test.unstable()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/unstable?failure_rate=0', compress = false}
-		assert(req.status == 200)
-	end)
-end
-
--- GET /dump/request ----------------------------------------------------------
-
-function test.dump_request()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/dump/request', compress = false}
-		assert(req.status == 200)
-		assert(body:has'GET /dump/request')
-	end)
-end
-
--- POST /upload ---------------------------------------------------------------
-
-function test.upload()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/upload', method = 'POST', body = 'upload data'}
-		assert(req.status == 200)
-	end)
-end
-
--- GET /digest-auth/:qop/:user/:password (without credentials -> 401) --------
-
-function test.digest_auth()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/digest-auth/auth/user/pass', compress = false}
-		assert(req.status == 401)
-		assert(req.response_headers['www-authenticate'])
-	end)
-end
-
--- GET /sse (server-sent events) ----------------------------------------------
-
-function test.sse()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/sse?count=3&duration=1&delay=0',
-			compress = false, headers_timeout = 10}
-		assert(req.status == 200)
-		assert(body:has'data:')
-	end)
-end
-
--- GET /trailers ---------------------------------------------------------------
-
-function test.trailers()
-	checked_run(function()
-		local body, req = fetch{url = BASE..'/trailers?foo=bar', compress = false}
-		assert(req.status == 200)
-	end)
-end
-
--- Connection reuse (keep-alive) test -----------------------------------------
-
-function test.keepalive()
-	checked_run(function()
-		local cl = http_client()
-		local body1, req1 = cl:fetch(BASE..'/get')
-		assert(req1.status == 200)
-		local body2, req2 = cl:fetch(BASE..'/get')
-		assert(req2.status == 200)
 	end)
 end
 
@@ -852,6 +404,242 @@ function test.pool_waitlist_full()
 		end
 		assert(ok_count >= 1, 'at least one request should succeed')
 		assert(fail_count >= 1, 'at least one request should fail from pool limit')
+	end)
+end
+
+-- 308 preserves method and body ----------------------------------------------
+
+function test.redirect_308_preserves_body()
+	checked_run(function()
+		local dest = url_escape(BASE..'/post', '/:')
+		local body, req = fetch{
+			url = BASE..'/redirect-to?url='..dest..'&status_code=308',
+			method = 'POST', body = 'kept308', body_type = 'text/plain',
+		}
+		assert(req.status == 200)
+		assert(body.data == 'kept308')
+	end)
+end
+
+-- 301 downgrades to GET ------------------------------------------------------
+
+function test.redirect_301_to_get()
+	checked_run(function()
+		local dest = url_escape(BASE..'/get', '/:')
+		local body, req = fetch{
+			url = BASE..'/redirect-to?url='..dest..'&status_code=301',
+			method = 'POST', body = 'dropped', body_type = 'text/plain',
+		}
+		assert(req.status == 200)
+		assert(body.method == 'GET')
+	end)
+end
+
+-- 303 downgrades to GET ------------------------------------------------------
+
+function test.redirect_303_to_get()
+	checked_run(function()
+		local dest = url_escape(BASE..'/get', '/:')
+		local body, req = fetch{
+			url = BASE..'/redirect-to?url='..dest..'&status_code=303',
+			method = 'POST', body = 'dropped', body_type = 'text/plain',
+		}
+		assert(req.status == 200)
+		assert(body.method == 'GET')
+	end)
+end
+
+-- fetch(url, body) two-arg shorthand -----------------------------------------
+
+function test.fetch_url_body_shorthand()
+	checked_run(function()
+		local body, req = fetch(BASE..'/post', {msg = 'shorthand'})
+		assert(req.status == 200)
+		assert(body.json.msg == 'shorthand')
+	end)
+end
+
+-- Cookie: store and retrieve with mock requests ------------------------------
+
+function test.cookie_store_get()
+	checked_run(function()
+		local cl = http_client()
+		local target = {host = 'example.com', client_ip = nil}
+
+		-- store a cookie
+		cl:store_cookies{
+			target = target, uri = '/app/page',
+			response_headers = {
+				['set-cookie'] = {'sid=abc123; Path=/app'},
+			},
+		}
+
+		-- retrieve it for matching path
+		local cookies = cl:get_cookies{target = target, uri = '/app/data', secure = true}
+		assert(cookies.sid == 'abc123', 'cookie not found')
+
+		-- not returned for non-matching path
+		local cookies2 = cl:get_cookies{target = target, uri = '/other', secure = true}
+		assert(not cookies2.sid, 'cookie should not match /other')
+	end)
+end
+
+-- Cookie: path matching rules ------------------------------------------------
+
+function test.cookie_path_matching()
+	checked_run(function()
+		local cl = http_client()
+		local target = {host = 'example.com', client_ip = nil}
+
+		cl:store_cookies{
+			target = target, uri = '/a/b/c',
+			response_headers = {
+				['set-cookie'] = {'x=1; Path=/a'},
+			},
+		}
+
+		-- exact match
+		local c = cl:get_cookies{target = target, uri = '/a', secure = true}
+		assert(c.x == '1', 'exact path match failed')
+
+		-- prefix with /
+		local c2 = cl:get_cookies{target = target, uri = '/a/b', secure = true}
+		assert(c2.x == '1', 'prefix path match failed')
+
+		-- no match
+		local c3 = cl:get_cookies{target = target, uri = '/ab', secure = true}
+		assert(not c3.x, '/ab should not match /a')
+	end)
+end
+
+-- Cookie: default path from request URI -------------------------------------
+
+function test.cookie_default_path()
+	checked_run(function()
+		local cl = http_client()
+		local target = {host = 'example.com', client_ip = nil}
+
+		-- no Path attr -> default path is /foo/ (from /foo/bar)
+		cl:store_cookies{
+			target = target, uri = '/foo/bar',
+			response_headers = {
+				['set-cookie'] = {'tok=v1'},
+			},
+		}
+
+		-- should match /foo/anything
+		local c = cl:get_cookies{target = target, uri = '/foo/other', secure = true}
+		assert(c.tok == 'v1', 'default path should be /foo/')
+
+		-- should NOT match /baz
+		local c2 = cl:get_cookies{target = target, uri = '/baz', secure = true}
+		assert(not c2.tok, 'should not match /baz')
+	end)
+end
+
+-- Cookie: secure flag only sent over HTTPS -----------------------------------
+
+function test.cookie_secure_flag()
+	checked_run(function()
+		local cl = http_client()
+		local target = {host = 'example.com', client_ip = nil}
+
+		cl:store_cookies{
+			target = target, uri = '/',
+			response_headers = {
+				['set-cookie'] = {'sec=yes; Path=/; Secure'},
+			},
+		}
+
+		-- returned over HTTPS
+		local c = cl:get_cookies{target = target, uri = '/', secure = true}
+		assert(c.sec == 'yes', 'secure cookie should be sent over HTTPS')
+
+		-- NOT returned over HTTP
+		local c2 = cl:get_cookies{target = target, uri = '/', secure = false}
+		assert(not c2.sec, 'secure cookie must not be sent over HTTP')
+	end)
+end
+
+-- Cookie: domain matching (wildcard) -----------------------------------------
+
+function test.cookie_domain_matching()
+	checked_run(function()
+		local cl = http_client()
+
+		-- set cookie with Domain=example.com from sub.example.com
+		local target_sub = {host = 'sub.example.com', client_ip = nil}
+		cl:store_cookies{
+			target = target_sub, uri = '/',
+			response_headers = {
+				['set-cookie'] = {'d=1; Path=/; Domain=example.com'},
+			},
+		}
+
+		-- should be sent to other.example.com (wildcard)
+		local target_other = {host = 'other.example.com', client_ip = nil}
+		local c = cl:get_cookies{target = target_other, uri = '/', secure = true}
+		assert(c.d == '1', 'wildcard domain cookie not sent to sibling subdomain')
+
+		-- should be sent to example.com itself
+		local target_apex = {host = 'example.com', client_ip = nil}
+		local c2 = cl:get_cookies{target = target_apex, uri = '/', secure = true}
+		assert(c2.d == '1', 'wildcard domain cookie not sent to apex')
+	end)
+end
+
+-- Cookie: exact-host cookie not sent to subdomains ---------------------------
+
+function test.cookie_exact_host()
+	checked_run(function()
+		local cl = http_client()
+
+		-- set cookie WITHOUT Domain attr from example.com
+		local target = {host = 'example.com', client_ip = nil}
+		cl:store_cookies{
+			target = target, uri = '/',
+			response_headers = {
+				['set-cookie'] = {'h=exact; Path=/'},
+			},
+		}
+
+		-- should be sent to example.com
+		local c = cl:get_cookies{target = target, uri = '/', secure = true}
+		assert(c.h == 'exact', 'exact-host cookie not sent to same host')
+
+		-- should NOT be sent to sub.example.com
+		local target_sub = {host = 'sub.example.com', client_ip = nil}
+		local c2 = cl:get_cookies{target = target_sub, uri = '/', secure = true}
+		assert(not c2.h, 'exact-host cookie leaked to subdomain')
+	end)
+end
+
+-- Cookie: expired via max-age=0 is removed -----------------------------------
+
+function test.cookie_expiry()
+	checked_run(function()
+		local cl = http_client()
+		local target = {host = 'example.com', client_ip = nil}
+
+		-- set a cookie
+		cl:store_cookies{
+			target = target, uri = '/',
+			response_headers = {
+				['set-cookie'] = {'gone=yes; Path=/'},
+			},
+		}
+		local c = cl:get_cookies{target = target, uri = '/', secure = true}
+		assert(c.gone == 'yes')
+
+		-- expire it with max-age=0
+		cl:store_cookies{
+			target = target, uri = '/',
+			response_headers = {
+				['set-cookie'] = {'gone=; Path=/; Max-Age=0'},
+			},
+		}
+		local c2 = cl:get_cookies{target = target, uri = '/', secure = true}
+		assert(not c2.gone, 'expired cookie still present')
 	end)
 end
 

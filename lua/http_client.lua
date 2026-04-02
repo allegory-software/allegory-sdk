@@ -45,13 +45,13 @@ CLIENT
 	req:recv_body_chunk() -> chunk,len | nil,'eof'  receive next response body chunk
 	req:finish()                      finish request and release connection (required!)
 	- finished -> true                request is finished
-	client:fetch(opt | url) -> s,req  make request and get response body
+	client:[try_]fetch(opt | url) -> s,req  make request and get response body
 	- req.response_body -> s          response body
 	http_client_request_class         req class with defaults to override
 CONFIG
 	http_client_debug                 see debug flags for http_client above
 FETCH
-	fetch(req | url, [body]) -> content, req
+	[try_]fetch(req | url, [body]) -> content, req
 
 NOTES
 
@@ -119,13 +119,13 @@ local req = {
 }
 http_client_request_class = req --for overriding defaults
 
-local function http_req(client, target, opt)
+local function http_req(client, opt)
 	local req = object(req, {
 		client = client,
-		target = target,
-		host = target.host,
 		start_clock = clock(),
 		finished = false, --connection released
+		eof = false, --response body fully read
+		redirect_count = 0,
 		dp = not client.debug.protocol and noop or nil,
 	}, opt)
 	req.headers = update({}, req.headers)
@@ -357,7 +357,7 @@ function req:redirect_request()
 	local client = req.client
 	local tcp = req.http.tcp
 	assert(req.redirect_location, 'no redirect_location')
-	tcp:checkp((req.redirect_count or 0) < req.max_redirects, 'too many redirects')
+	tcp:checkp(req.redirect_count < req.max_redirects, 'too many redirects')
 	local req_url = req:format_url()
 	local re_url = url_resolve(req_url, req.redirect_location)
 	tcp:checkp(re_url.scheme == 'http' or re_url.scheme == 'https', 'url scheme not http(s)')
@@ -374,7 +374,7 @@ function req:redirect_request()
 	return {
 		method = resend_body and req.method or 'GET',
 		url = re_url,
-		redirect_count = (req.redirect_count or 0) + 1,
+		redirect_count = req.redirect_count + 1,
 		headers = headers,
 		body_size = resend_body and req.body_size or 0,
 		body_type = resend_body and req.body_type or nil,
@@ -471,6 +471,11 @@ function req:recv_body_chunk()
 	end
 end
 
+function req:cancel()
+	if not req.http then return end
+	req.http.tcp:close()
+end
+
 --http client ----------------------------------------------------------------
 
 local client = {
@@ -553,7 +558,7 @@ function client:get_conn(req)
 		)
 		if not tcp then
 			target.conn_pool:cancel()
-			return nil, err
+			check_io(nil, nil, err)
 		end
 		if self.debug.stream then
 			tcp:debug_stream'http'
@@ -561,19 +566,20 @@ function client:get_conn(req)
 		if target.secure then
 			local stcp, err = try_client_stcp(tcp, target.host, req.tls_options)
 			if not stcp then
-				tcp:try_close()
 				target.conn_pool:cancel()
-				return nil, err
+				tcp:try_close()
+				check_io(nil, nil, err)
+			else
+				tcp = stcp
 			end
-			tcp = stcp
 		end
 		http = http_conn(tcp)
 		target.conn_pool:put(http)
-		tcp:onclose(function()
+		http.tcp:onclose(function()
 			target.conn_pool:pull(http)
 		end)
 	end
-	return http, err
+	return assert(http, err)
 end
 
 --cookie storage -------------------------------------------------------------
@@ -703,6 +709,7 @@ end
 --request call ---------------------------------------------------------------
 
 function client:send_headers(req)
+	local req = http_req(self, req)
 	if req.url then
 		assert(req.host == nil) --mutually exclusive
 		local u = url_parse(req.url)
@@ -715,30 +722,15 @@ function client:send_headers(req)
 	end
 	assert(req.host, 'host required')
 	assert(req.uri, 'uri required')
-	local target = self:target(req)
-	local req = http_req(self, target, req)
-	local http, err = self:get_conn(req)
-	if not http then return nil, err end
+	req.target = self:target(req)
+	local http = self:get_conn(req)
 	req.http = http
 	req.cookies = self:get_cookies(req)
 	req:send_headers()
 	return req
 end
 
-function client:fetch(arg1, body) --opt | url,body
-	local req = istab(arg1) and update({}, arg1) or {url = arg1}
-	local body = body or req.body
-	req.headers = update({}, req.headers)
-	if body ~= nil and not isstr(body) then
-		body = json_encode(body)
-		req.body_type = 'application/json'
-	end
-	if body then
-		req.method = req.method or 'POST'
-		req.body_size = #body
-	end
-
-	::again::
+function client:_fetch(req, body)
 	req = self:send_headers(req)
 	if req.body_size > 0 then --redirect can require resending the body, or not.
 		req:send_body_chunk(body)
@@ -747,7 +739,7 @@ function client:fetch(arg1, body) --opt | url,body
 	if req.redirect_location then
 		req:finish()
 		req = req:redirect_request()
-		goto again
+		return self:_fetch(req, body)
 	end
 	if not req.eof then --there's a body
 		local bb = string_buffer()
@@ -760,18 +752,48 @@ function client:fetch(arg1, body) --opt | url,body
 
 		local ct = req.response_headers['content-type']
 		if ct and ct:starts'application/json' then
-			req.response_body = json_decode(req.response_body)
+			local json, err = try_json_decode(req.response_body)
+			req.http.tcp:checkp(json, err)
 			--if the entire resonse is the json value "null", then return null
 			--because nil is for errors.
-			req.response_body = repl(req.response_body, nil, null)
+			json = repl(json, nil, null)
+			req.response_body = json
 		end
 	else
 		req.response_body = '' --because nil is for errors
 	end
 	req:finish()
-
-	return req.response_body, req
+	return req
 end
+client._try_fetch = protect('io', client._fetch)
+function client:fetch(arg1, body) --opt | url,body
+	local default_max_retries = req.max_retries
+	local req = istab(arg1) and update({}, arg1) or {url = arg1}
+	local body = body or req.body
+	req.headers = update({}, req.headers)
+	if body ~= nil and not isstr(body) then
+		body = json_encode(body)
+		req.body_type = 'application/json'
+	end
+	if body then
+		req.method = req.method or 'POST'
+		req.body_size = #body
+	end
+	local retries = 0
+	local max_retries = req.max_retries or default_max_retries
+	local req_opt = req
+	while 1 do
+		local req, err = self:_try_fetch(req_opt, body)
+		if req then
+			return req.response_body, req
+		end
+		retries = retries + 1
+		if retries >= max_retries then
+			error(err)
+		end
+	end
+end
+client.try_fetch = protect_io(client.fetch)
 
 --global fetch ---------------------------------------------------------------
 
@@ -779,4 +801,8 @@ local cl
 function fetch(...)
 	cl = cl or http_client()
 	return cl:fetch(...)
+end
+function try_fetch(...)
+	cl = cl or http_client()
+	return cl:try_fetch(...)
 end
