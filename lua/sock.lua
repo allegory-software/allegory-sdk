@@ -384,7 +384,7 @@ local function sockaddr_from_ipv6(s, port) --s is in binary!
 	return sa
 end
 
-local function addr_parse(s, default_port) -- returns: host, [port], 'ip|ip6|hostname'
+function addr_parse(s, default_port) -- returns: host, [port], 'ip|ip6|hostname'
 	local ip6, port, host
 	if s:starts'[' then --[ip6]:port or [ip6] (RFC 3986)
 		ip6, port = s:match'^%[(.+)%]:(%d+)$'
