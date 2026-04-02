@@ -12,6 +12,7 @@
 	url_format_args(t) -> s             format the URL query part
 	url_parse_path(s) -> t              parse the URL path part
 	url_format_path(t) -> s             format the URL path part
+	url_resolve(base, ref) -> t         resolve a relative URL against a base URL
 
 url_format(t) -> s
 
@@ -169,6 +170,7 @@ end
 --NOTE: t.path is unusable if the path segments contain `/`.
 --NOTE: the `is_local` flag is because the URL `//` is ambiguous.
 function url_parse(s, t, is_local)
+	if istab(s) then return s end --pass-through parsed url
 	t = t or {}
 	s = not is_local and s:gsub('^([a-zA-Z%+%-%.]*):', function(s)
 		t.scheme = unesc(s)
@@ -207,6 +209,75 @@ function url_parse(s, t, is_local)
 	if s ~= '' then
 		t.segments = url_parse_path(s)
 		t.path = unesc(s)
+	end
+	return t
+end
+
+--resolving ------------------------------------------------------------------
+
+--RFC 3986 Section 5.2.4: remove `.` and `..` segments from a path.
+local function remove_dot_segments(path)
+	local segs = {}
+	for seg in split(path, '/') do
+		segs[#segs+1] = seg
+	end
+	local t = {}
+	for i = 1, #segs do
+		local seg = segs[i]
+		if seg == '.' then
+			if i == #segs then t[#t+1] = '' end --trailing slash
+		elseif seg == '..' then
+			if #t > 1 then --keep leading empty segment (leading `/`)
+				t[#t] = nil
+			end
+			if i == #segs then t[#t+1] = '' end --trailing slash
+		else
+			t[#t+1] = seg
+		end
+	end
+	return concat(t, '/')
+end
+
+--RFC 3986 Section 5.2.3: merge a relative path with a base path.
+local function merge_paths(base, rel_path)
+	if base.host and (not base.path or base.path == '') then
+		return '/' .. rel_path
+	end
+	return base.path and base.path:gsub('[^/]*$', '') .. rel_path or rel_path
+end
+
+--RFC 3986 Section 5.2.2: resolve a relative URL reference against a base URL.
+--Both `base` and `ref` can be strings or parsed URL tables.
+--Returns a new parsed URL table.
+function url_resolve(base, ref)
+	base = url_parse(base)
+	ref  = url_parse(ref)
+	local t = {}
+	if ref.scheme then -- scheme://host/path
+		update(t, ref)
+		t.path = remove_dot_segments(t.path or '')
+	elseif ref.host then -- //host/path
+		update(t, ref)
+		t.scheme = base.scheme
+		t.path = remove_dot_segments(t.path or '')
+	elseif not ref.path or ref.path == '' then -- ?query#fragment
+		update(t, base)
+		if ref.query then
+			t.query = ref.query
+			t.args  = ref.args
+		end
+		t.fragment = ref.fragment
+	else -- relpath?query#fragment
+		update(t, base)
+		t.path = ref.path:sub(1, 1) == '/'
+			and remove_dot_segments(ref.path)
+			or  remove_dot_segments(merge_paths(base, ref.path))
+		t.query    = ref.query
+		t.args     = ref.args
+		t.fragment = ref.fragment
+	end
+	if t.path then
+		t.segments = url_parse_path(t.path)
 	end
 	return t
 end

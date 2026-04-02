@@ -3,20 +3,20 @@
 	Async http(s) downloader.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	Features https, gzip compression, connection pool, multiple client IPs,
+	Features TLS, gzip compression, connection pool, multiple client IPs,
 	auto-redirects, auto-retries, cookie jars, caching.
 
 CLIENT
 	http_client(opt1,...) -> client   create a client object, merging options tables
-	- client_ips <- {ip1,...}         a list of client IPs to assign to requests
+	- client_ips <- {ip1,...}         a list of local IPs to assign to requests
 	- debug <- flags                  debug flags: 'protocol tracebacks stream sched'
-	client:send_request_headers(opt) -> req   make a HTTP request and send headers
+	client:send_headers(opt) -> req   connect and send request line and headers
 	- url                             full url, parsed into (host, uri, https), or:
 	- host                            host[:port]
 	- uri                             uri ('/')
-	- https                           use TLS (true)
-	- upload_size                     size of upload body (0; required for uploads)
-	- upload_type                     upload content-type
+	- secure                          use TLS (true)
+	- body_size                       size of upload body (0; required for uploads)
+	- body_type                       upload body content-type
 	- max_conn                        connections limit (per target)
 	- max_waiting_threads             waiting thread limit (per target)
 	- wait_timeout                    conn pool wait timeout (per target)
@@ -25,31 +25,32 @@ CLIENT
 	- headers_timeout                 timeout for sending/receiving headers
 	- max_retries                     retry limit for retriable network errors
 	- max_redirects                   redirects limit
-	- client_ip                       client ip to bind to
+	- client_ip                       local ip to bind to
 	- compress                        allow compression (true)
 	- user_agent                      user-agent header to use for requests
 	req:send_buffer() -> pb           get a pbuffer to put upload data in
 	req:flush_send_buffer() -> left   flush the send bufer afer adding to it
-	req:send_request_body_chunk(s | chunk,len) -> left   upload body chunk
-	req:recv_response_headers()       receive response headers
-	req:recv_response_body_chunk() -> chunk, len, [left]    receive response body chunk
+	req:send_body_chunk(s | chunk,len) -> left   upload body chunk
+	req:recv_headers()                receive status and headers
+	req:redirect()                    redirect if status/headers ask for it
+	req:recv_body_chunk() -> chunk, len    receive response body chunk
 	client:fetch(opt | url) -> s, ht  make a request and get response body and headers
 	http_client_request_class         req class with defaults to override
 CONFIG
 	http_client_debug                 see debug flags for http_client above
 FETCH
-	fetch(opt | url, [body]) -> content, req
+	fetch(req | url, [body]) -> content, req
 
 NOTES
 
-	A target is a combination of (vhost, client_ip, https) on which
+	A target is a combination of (vhost, client_ip, secure) on which
 	one or more HTTP connections can be created subject to per-target limits.
 
 	client:request() must be called from a scheduled socket thread.
 
 ]=]
 
---if not ... then require'http_client_test'; return end
+if not ... then require'http_client_test'; return end
 
 require'glue'
 require'json'
@@ -101,8 +102,8 @@ local req = {
 	max_redirects = 8,
 	method = 'GET',
 	uri = '/',
-	https = true,
 	user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+	secure = true,
 	compress = true,
 }
 http_client_request_class = req --for overriding defaults
@@ -134,7 +135,7 @@ function req:finish(close)
 
 	if tcp:closed() then return end
 	while not http.ready do --read entire body
-		req:recv_response_body_chunk()
+		req:recv_body_chunk()
 	end
 	if close then
 		tcp:close()
@@ -143,7 +144,7 @@ function req:finish(close)
 	end
 end
 
-function req:send_request_headers()
+function req:send_headers()
 	local req = self
 	local http = req.http
 	local tcp = http.tcp
@@ -171,9 +172,11 @@ function req:send_request_headers()
 		pop(t) --last ';'
 		req.headers['cookie'] = cat(t)
 	end
-	req.upload_unsent_size = req.upload_size or 0
-	req.headers['content-length'] = tostring(req.upload_size or 0)
-	req.headers['content-type'] = req.upload_type
+	req.body_size = req.body_size or 0
+	assert(req.body_size >= 0)
+	req.body_unsent_size = req.body_size
+	req.headers['content-length'] = tostring(req.body_size)
+	req.headers['content-type'] = req.body_type
 	req.wb = http.wb
 
 	tcp:settimeout(req.headers_timeout, 'w')
@@ -207,36 +210,36 @@ end
 
 --two ways to send the body:
 -- 1. put data into req.wb and then call flush_send_buffer()
--- 2. call send_request_body_chunk() for larger chunks (saves a memcopy).
+-- 2. call send_body_chunk() for larger chunks (saves a memcopy).
 
 function req:flush_send_buffer()
 	local req = self
 	local http = req.http
 
-	local n = req.upload_unsent_size
+	local n = req.body_unsent_size
 	assert(n, 'request not sent')
 	local len = #http.wb
-	http.tcp:checknp(n >= len, 'upload size mismatch')
+	http.tcp:checknp(n >= len, 'client body size mismatch')
 	http.wb:flush()
 	n = n - len
-	req.upload_unsent_size = n
+	req.body_unsent_size = n
 	return n
 end
 
-function req:send_request_body_chunk(chunk, len)
+function req:send_body_chunk(chunk, len)
 	local req = self
 	local tcp = req.http.tcp
-	local n = req.upload_unsent_size
+	local n = req.body_unsent_size
 	assert(n, 'request not sent')
 	len = len or #chunk
-	tcp:checknp(n >= len, 'upload size mismatch')
+	tcp:checknp(n >= len, 'client body size mismatch')
 	tcp:send(chunk, len)
 	n = n - len
-	req.upload_unsent_size = n
+	req.body_unsent_size = n
 	return n
 end
 
-function req:recv_response_headers()
+function req:recv_headers()
 	local req = self
 	local http = req.http
 	local tcp = http.tcp
@@ -247,8 +250,7 @@ function req:recv_response_headers()
 	--read status line
 	local skipped = 0 --number of 1xx replies skipped
 	::again::
-	local line, err = rb:needline()
-	if not line then return nil, err end
+	local line = rb:needline()
 	local http_version, status = line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)'
 	status = tonumber(status)
 	tcp:checkp(http_version == '1.1' and status >= 100, 'invalid status line: %s', line)
@@ -304,17 +306,6 @@ function req:recv_response_headers()
 
 	req.client:store_cookies(req)
 
-	--if req.redirect_location then
-	--	local t = self:redirect_request_args(t, req)
-	--	local max_redirects = self.max_redirects or self.client.max_redirects
-	--	if t.redirect_count >= max_redirects then
-	--		return nil, 'too many redirects', req
-	--	end
-	--	self:try_recv_request_body()
-	--	local ok, err = self:send_request_headers(t)
-	--	return self:try_recv_response_headers()
-	--end
-
 	--prepare req for reading the body
 	local te = req.response_headers['transfer-encoding']
 	local ce = req.response_headers['content-encoding']
@@ -331,6 +322,54 @@ function req:recv_response_headers()
 	http.ready = len == 0
 end
 
+function req:url()
+	local req = self
+	local u = url_parse(req.uri)
+	local host, port, addr_type = addr_parse(req.host)
+	u.scheme = req.secure and 'https' or 'http'
+	u.host = host
+	u.port = port
+	return u
+end
+
+function req:redirect_request()
+	local req = self
+	local client = req.client
+	local tcp = req.http.tcp
+	assert(req.redirect_location, 'no redirect_location')
+	tcp:checkp((req.redirect_count or 0) < req.max_redirects, 'too many redirects')
+	local req_url = req:url()
+	local re_url = url_resolve(req_url, req.redirect_location)
+	tcp:checkp(re_url.scheme == 'http' or re_url.scheme == 'https', 'url scheme not http(s)')
+	local resend_body = req.status == 307 or req.status == 308
+	local headers = update({}, req.headers)
+	if re_url.host ~= req_url.host or re_url.port ~= req_url.port then
+		headers.authorization = nil
+		headers.cookie = nil
+		headers.host = nil
+	end
+	return {
+		method = resend_body and req.method or 'GET',
+		url = re_url,
+		redirect_count = (req.redirect_count or 0) + 1,
+		headers = headers,
+		body_size = resend_body and req.body_size or 0,
+		body_type = resend_body and req.body_type or nil,
+		--carry-over fetching options
+		max_conn = req.max_conn,
+		max_waiting_threads = req.max_waiting_threads,
+		wait_timeout = req.wait_timeout,
+		tls_options = req.tls_options, --these can only be generic or same server
+		connect_timeout = req.connect_timeout,
+		headers_timeout = req.headers_timeout,
+		max_retries = req.max_retries,
+		max_redirects = req.max_redirects,
+		client_ip = req.client_ip,
+		compress = req.compress,
+		user_agent = req.user_agent,
+	}
+end
+
 local function decompress(http, req, buf, len)
 	if not req.gzip then
 		return buf, len
@@ -345,7 +384,7 @@ local function decompress(http, req, buf, len)
 	end
 	return p, len
 end
-function req:recv_response_body_chunk()
+function req:recv_body_chunk()
 	local req = self
 	local http = req.http
 	local tcp = http.tcp
@@ -448,7 +487,7 @@ function client:assign_client_ip(host)
 	return self.client_ips[i]
 end
 
---A target is a combination of (vhost, client_ip, https) on which one or more
+--A target is a combination of (vhost, client_ip, secure) on which one or more
 --HTTP connections can be created subject to per-target limits.
 --Connections are reused using the target's connection pool.
 local http_target = {
@@ -460,12 +499,12 @@ function client:target(req)
 	local client_ip = req.client_ip or self:assign_client_ip(host)
 	local target_key = host
 		.. (client_ip and ' '..client_ip or '')
-		.. (req.https and ' S' or '')
+		.. (req.secure and ' S' or '')
 	local target = attr(self.targets, target_key)
 	if not target.type then --just created
 		object(http_target, target)
 		target.host = host
-		target.https = req.https
+		target.secure = req.secure
 		target.client_ip = client_ip
 		target.conn_pool = resource_pool{
 			max_resources = req.max_conn,
@@ -481,7 +520,7 @@ function client:get_conn(req)
 	local http, err = target.conn_pool:get(req.start_clock + req.wait_timeout)
 	if not http and err == 'create' then
 		local tcp, err = try_connect(target.host,
-			target.https and 443 or 80,
+			target.secure and 443 or 80,
 			req.connect_timeout,
 			target.client_ip
 		)
@@ -492,7 +531,7 @@ function client:get_conn(req)
 		if self.debug.stream then
 			tcp:debug_stream'http'
 		end
-		if target.https then
+		if target.secure then
 			local stcp, err = try_client_stcp(tcp, target.host, req.tls_options)
 			if not stcp then
 				tcp:try_close()
@@ -623,7 +662,7 @@ function client:get_cookies(req)
 							attrs_clear(cookie_jar, domain, cpath, name)
 						elseif not sc.wildcard and domain ~= host then
 							--skip: exact-host cookie, not our host.
-						elseif req.https or not sc.secure then
+						elseif req.secure or not sc.secure then
 							cookies[name] = sc.value
 						end
 					end
@@ -636,13 +675,15 @@ end
 
 --request call ---------------------------------------------------------------
 
-function client:send_request_headers(req)
+function client:send_headers(req)
 	if req.url then
-		assert(not req.host) --mutually exclusive
+		assert(req.host == nil) --mutually exclusive
 		local u = url_parse(req.url)
-		req.host = u.host
-		req.uri = u.path
-		req.https = u.scheme == 'https' or (not u.scheme and opt.https)
+		u.scheme = u.scheme or (req.secure and 'https' or 'http')
+		checkp(nil, u.scheme == 'http' or u.scheme == 'https', 'url scheme not http(s)')
+		req.host = u.host .. (u.port and ':'..u.port or '')
+		req.uri = url_format{path = u.path, query = u.query}
+		req.secure = u.scheme == 'https'
 	end
 	local target = self:target(req)
 	local req = http_req(self, target, req)
@@ -650,47 +691,51 @@ function client:send_request_headers(req)
 	if not http then return nil, err end
 	req.http = http
 	req.cookies = self:get_cookies(req)
-	req:send_request_headers()
+	req:send_headers()
 	return req
 end
 
 function client:fetch(arg1, body) --opt | url,body
 	local req = istab(arg1) and update({}, arg1) or {url = arg1}
 	local body = body or req.body
-	req.headers = {}
+	req.headers = update({}, req.headers)
 	if body ~= nil and not isstr(body) then
 		body = json_encode(body)
-		req.upload_type = 'application/json'
+		req.body_type = 'application/json'
 	end
 	if body then
-		req.method = 'POST'
-		req.upload_size = #body
-	end
-	req.headers = update(headers, opt.headers)
-
-	local req, err = self:send_request_headers(req)
-	if not req then return nil, err end
-
-	if body then
-		local ok, err = req:try_send_request_body(body)
-		if not ok then return nil, err end
+		req.method = req.method or 'POST'
+		req.body_size = #body
 	end
 
-	local ok, err = req:try_recv_response_headers()
-	if not ok then return nil, err end
-
-	local ok, err = req:try_recv_response_body()
-	if not ok then return nil, err end
+	::again::
+	req = self:send_headers(req)
+	if req.body_size > 0 then --redirect can require resending the body, or not.
+		req:send_body_chunk(body)
+	end
+	req:recv_headers()
+	if req.redirect_location then
+		req:finish()
+		req = req:redirect_request()
+		goto again
+	end
+	local bb = string_buffer()
+	while not req.http.ready do
+		local chunk, len = req:recv_body_chunk()
+		if not chunk then break end
+		bb:putcdata(chunk, len)
+	end
+	req.response_body = bb:tostring()
 
 	local ct = req.response_headers['content-type']
-	if ct and ct.media_type == 'application/json' then
-		req.response = json_decode(req.response)
+	if ct and ct:starts'application/json' then
+		req.response_body = json_decode(req.response_body)
 		--if the entire resonse is the json value "null", then return null
 		--because nil is for errors.
-		req.response = repl(req.response, nil, null)
+		req.response_body = repl(req.response_body, nil, null)
 	end
 
-	return req.response, req
+	return req.response_body, req
 end
 
 --global fetch ---------------------------------------------------------------
@@ -699,31 +744,4 @@ local cl
 function fetch(...)
 	cl = cl or http_client()
 	return cl:fetch(...)
-end
-
-if not ... then
-
-logging.verbose = true
-logging.debug = true
-config('http_client_debug', 'protocol')
-
-local client = http_client()
-run(function()
-	for i=1,2 do
-		local req = client:send_request_headers{
-			host = 'echo.websocket.org', https = true, uri = '/', compress = true,
-		}
-		req:recv_response_headers()
-		while not req.http.ready do
-			local chunk, len, left = req:recv_response_body_chunk()
-			if not chunk then break end
-			if len > 0 then
-				pr('CHUNK: ', len)
-				pr(str(chunk, len))
-			end
-		end
-		req:finish()
-	end
-end)
-
 end

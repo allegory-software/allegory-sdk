@@ -11,6 +11,7 @@ ADDRESSES
 	sa:port() -> port|nil                  port (for ip/ip6 family)
 	sa:tostring() -> ip|ip6|path           string representation
 	is_ipv4(s) -> true|false               check if s looks like an IPv4 adress
+	addr_parse(s[, default_port]) ->  host, [port], 'ip|ip6|hostname'
 SOCKETS
 	issocket(s) -> t|f                     check if s is a socket
 	s:[try_]close()                        close connection and free socket
@@ -383,7 +384,7 @@ local function sockaddr_from_ipv6(s, port) --s is in binary!
 	return sa
 end
 
-local function parse_addr(s, default_port) -- returns: host, [port], 'ip|ip6|hostname'
+local function addr_parse(s, default_port) -- returns: host, [port], 'ip|ip6|hostname'
 	local ip6, port, host
 	if s:starts'[' then --[ip6]:port or [ip6] (RFC 3986)
 		ip6, port = s:match'^%[(.+)%]:(%d+)$'
@@ -418,7 +419,7 @@ local function _try_sockaddrs(s, default_port, timeout) --returns sockaddr or {s
 	if s:starts'unix:' then
 		return sockaddr_from_unix_path(s:sub(6))
 	end
-	local addr, port, addr_type = parse_addr(s, default_port)
+	local addr, port, addr_type = addr_parse(s, default_port)
 	if not addr then
 		return nil
 	elseif addr_type == 'ip6' then
