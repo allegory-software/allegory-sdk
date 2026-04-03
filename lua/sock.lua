@@ -90,7 +90,7 @@ THREAD SETS
 MULTI-THREADING (WITH OS THREADS)
 	epoll_fd([epfd]) -> epfd    get/set epoll fd
 
-------------------------------------------------------------------------------
+PROGRAMMING NOTES ------------------------------------------------------------
 
 The addr arg is either a sockaddr (sa) or a string of form:
 
@@ -100,6 +100,8 @@ Some error messages are normalized across platforms, like 'access_denied'
 and 'address_already_in_use' so they can be used in conditionals.
 
 I/O functions only work inside threads created with thread().
+
+Raising methods close the socket on errors, but the try_*() variants do not!
 
 SOCKETS ----------------------------------------------------------------------
 

@@ -63,7 +63,7 @@ local
     type, xpcall =
     type, xpcall
 
-local lua_error = error
+local error = error
 local lua_pcall = pcall
 
 local classes = {} --{name -> class}
@@ -128,9 +128,9 @@ end
 
 local function raise(level, ...)
 	if type(level) == 'number' then
-		lua_error(newerror(...), level)
+		error(newerror(...), level)
 	else
-		lua_error((newerror(level, ...)))
+		error(newerror(level, ...), 2)
 	end
 end
 
@@ -155,7 +155,7 @@ local function cont(classes, ok, ...)
 	if not classes or iserror(e, classes) then
 		return false, e
 	end
-	lua_error(e, 3)
+	error(e, 3)
 end
 local function onerror(e)
 	if iserror(e) then

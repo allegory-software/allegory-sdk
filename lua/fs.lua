@@ -108,15 +108,10 @@ HI-LEVEL APIs
 		-> try_write(v | buf,len | nil,0) -> ok, err
 	[try_]touch(file, [mtime])                    create file or update mtime
 	gen_id(name, [start=1]) -> id                 persistent atomic, concurrent autoincrement
-
-The deref arg is true by default, meaning that by default, symlinks are
-followed recursively and transparently where this option is available.
-
 CONFIG
-
 	vardir        default: scriptdir()..'/var'
 
-FILE ATTRIBUTES
+FILE ATTRIBUTES --------------------------------------------------------------
 
  attr     | R/W | Description
  ---------+-----+--------------------------------
@@ -143,7 +138,7 @@ f:attr(), file_attr() and d:attr().
 NOTE: File sizes and offsets are Lua numbers not 64bit ints, so they can hold
 at most 8KTB.
 
-FILE TYPES
+FILE TYPES -------------------------------------------------------------------
 
  name      | description
  ----------+---------------------------------
@@ -156,7 +151,7 @@ FILE TYPES
  socket    | file is a socket
  unknown   | file type unknown
 
-NORMALIZED ERROR MESSAGES
+NORMALIZED ERROR MESSAGES ----------------------------------------------------
 
 	not_found          file/dir/path not found
 	access_denied      access denied
@@ -166,7 +161,7 @@ NORMALIZED ERROR MESSAGES
 	io_error           I/O error
 	disk_full          no space left on device
 
-File Objects -----------------------------------------------------------------
+FILE OBJECTS -----------------------------------------------------------------
 
 [try_]open(opt | path,[mode]) -> f
 
@@ -194,7 +189,7 @@ mode:
  inheritable | sub-processes inherit the fd         | false
  quiet       | quiet logging                        | false
 
-Pipes ------------------------------------------------------------------------
+PIPES ------------------------------------------------------------------------
 
 [try_]pipe([opt]) -> rf, wf
 
@@ -209,7 +204,7 @@ Pipes ------------------------------------------------------------------------
 
 	Create a named pipe.
 
-File I/O ---------------------------------------------------------------------
+FILE I/O ---------------------------------------------------------------------
 
 f:[try_]read(buf, len) -> readlen | 0,'eof'
 
@@ -266,7 +261,7 @@ f:[try_]truncate(size, [opt])
 	Btw, seeking past EOF and writing something there will also create a
 	sparse file, so there's no easy way out of this complexity.
 
-Open file attributes ---------------------------------------------------------
+OPEN FILE ATTRIBUTES ---------------------------------------------------------
 
 f:[try_]attr([attr]) -> val|t
 
@@ -275,7 +270,7 @@ f:[try_]attr([attr]) -> val|t
 	* string: get the value of a single attribute.
 	* table: set one or more attributes.
 
-Directory listing ------------------------------------------------------------
+DIRECTORY LISTING ------------------------------------------------------------
 
 ls([dir], [opt]) -> d, next
 
@@ -357,7 +352,7 @@ scandir(path|{path1,...}, [dive]) -> iter() -> sc
 	sc:[try_]attr([attr, ][deref]) -> t|val
 	sc:depth([n]) -> n (from 1)
 
-File attributes --------------------------------------------------------------
+FILE ATTRIBUTES --------------------------------------------------------------
 
 [try_]file_attr(path, [attr, ][deref]) -> t|val
 
@@ -367,7 +362,7 @@ File attributes --------------------------------------------------------------
 
 	Check if file exists or if it is of a certain type.
 
-Filesystem operations --------------------------------------------------------
+FILESYSTEM OPERATIONS --------------------------------------------------------
 
 mkdir(path, [recursive], [perms])
 
@@ -388,7 +383,7 @@ rename(path, new_path, [opt])
 
 	This operation is atomic.
 
-Symlinks & Hardlinks ---------------------------------------------------------
+SYMLINKS & HARDLINKS ---------------------------------------------------------
 
 [try_]symlink(symlink, path, [replace='replace'])
 
@@ -404,13 +399,22 @@ Symlinks & Hardlinks ---------------------------------------------------------
 	Dereference a symlink recursively. The result can be an absolute or
 	relative path which can be valid or not.
 
-Async I/O --------------------------------------------------------------------
+PROGRAMMING NOTES ------------------------------------------------------------
+
+### Raising vs non-raising (try_*()) methods
+
+Raising methods close the file on errors, but the try_*() variants do not!
+
+### Async I/O
 
 Pipes are opened in async mode by default, which uses the sock scheduler
 to multiplex the I/O which means that all I/O must be performed inside
 sock threads.
 
-Programming Notes ------------------------------------------------------------
+### The deref arg
+
+The deref arg is true by default, meaning that by default, symlinks are
+followed recursively and transparently where this option is available.
 
 ### Filesystem operations are non-atomic
 
@@ -585,7 +589,7 @@ function file.closed(f)
 	return f.fd == -1
 end
 
-function file.try_close(f)
+function file.close(f)
 	if f:closed() then return true end
 	if f.async then
 		epoll_remove(f)
@@ -598,13 +602,13 @@ function file.try_close(f)
 	if f.async then
 		epoll_cancel(f, 'closed')
 	end
-	if not ok then return ok, err end
 	--liveadd(f, 'r:%d w:%d', f.r, f.w)
 	--f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil, 'r:%d w:%d', f.r, f.w)
+	check_io(nil, ok, err)
 	return true
 end
-file.close = unprotect_io(file.try_close)
+file.try_close = protect_io(file.close)
 
 function file.onclose(f, fn)
 	after(f, '_after_close', fn)
