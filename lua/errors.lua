@@ -90,11 +90,9 @@ local function errortype(classname, super, default_error_message)
 end
 
 local function newerror(arg, ...)
-	if type(arg) == 'string' then
-		local class = classes[arg] or errortype(arg)
-		return class(...)
-	end
-	return arg
+	if type(arg) ~= 'string' then return arg end --pass-through error objects
+	local class = classes[arg] or errortype(arg)
+	return class(...)
 end
 
 local function class_table(s)
