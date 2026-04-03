@@ -174,5 +174,11 @@ function resource_pool(opt)
 		check_waitlist() -- because n < limit now
 	end
 
+	function pool:close_all(close)
+		while #free > 0 do
+			close(pop(free))
+		end
+	end
+
 	return pool
 end

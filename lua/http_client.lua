@@ -142,9 +142,18 @@ end
 
 function req:finish()
 	local req = self
+	local http = req.http
+	local rb = http.rb
 	if req.finished then return end
-	while req:recv_body_chunk() do end --read entire body
-	assert(req.eof)
+	--need to read until req.eof, not until recv_body_chunk() returns nil
+	--because there can be more bytes to read after a gzip stream ends.
+	while not req.eof do req:recv_body_chunk() end --read entire body
+	rb:skip(http.rb_skip)
+	http.rb_skip = 0
+	if http.gzb_needs_reset then
+		http.gz.b:reset()
+		http.gzb_needs_reset = false
+	end
 	req.finished = true
 	if req.close then
 		req.http.tcp:close()
@@ -321,11 +330,6 @@ function req:recv_headers()
 
 	req.client:store_cookies(req)
 
-	if req.method == 'HEAD' or status == 204 or status == 304 then
-		req.eof = true --no body allowed
-		return
-	end
-
 	--prepare req for reading the body
 	local te = req.response_headers['transfer-encoding']
 	local ce = req.response_headers['content-encoding']
@@ -339,7 +343,13 @@ function req:recv_headers()
 	req.gzip = ce == 'gzip'
 	req.response_body_size = len
 	req.response_body_unread_size = len
-	req.eof = len == 0
+	if (req.method == 'HEAD' or status == 204 or status == 304)
+		and not te and not len
+	then
+		req.eof = true --no body and no framing to drain
+	else
+		req.eof = len == 0
+	end
 end
 
 function req:format_url()
@@ -394,22 +404,17 @@ function req:redirect_request()
 	}
 end
 
-local function decompress(http, req, buf, len)
+local function decompress(http, req, buf, len, eof)
 	if not req.gzip then
 		return buf, len
 	end
-	local ok, err = http.gz:try_push(buf, len)
+	local ok, err = http.gz:try_push(buf, len, eof)
 	http.tcp:checkp(ok, 'gzip error: %s', err)
 	http.gzb_needs_reset = true
 	local p, len = http.gz.b:ref()
-	if len == 0 and err == 'eof' then
-		http.tcp:checkp(req.eof, 'premature gzip stream end marker')
-		return nil, 'eof'
-	else
-		http.tcp:checkp(err == 'eof' or not req.eof,
-			'gzip stream without end marker')
-		return p, len
-	end
+	if len == 0 and err == 'eof' then return nil, 'eof' end
+	if len == 0 then return req:recv_body_chunk() end --gzip buffering, need more input
+	return p, len
 end
 function req:recv_body_chunk()
 	local req = self
@@ -420,11 +425,11 @@ function req:recv_body_chunk()
 	assert(not req.finished, 'request finished')
 	assert(req.response_headers, 'response headers not received')
 
-	rb:skip(http.rb_skip)
-	http.rb_skip = 0
 	if req.eof then
 		return nil, 'eof'
 	end
+	rb:skip(http.rb_skip)
+	http.rb_skip = 0
 	if req.gzip and not http.gz then
 		http.gz = gzip_state{op = 'decompress'}
 		tcp:onclose(function()
@@ -437,7 +442,7 @@ function req:recv_body_chunk()
 	if req.chunked then
 		local line = rb:needline()
 		local len = tonumber(line:gsub(';.*', ''), 16) --len[; extension]
-		tcp:checkp(len, 'invalid chunk size')
+		tcp:checkp(len and len >= 0, 'invalid chunk size')
 		req:dp('<<', '%7d bytes (chunk)', len)
 		if len > 0 then
 			local p = rb:need(len + 2):ref() --ends in \r\n
@@ -452,11 +457,12 @@ function req:recv_body_chunk()
 	elseif req.response_body_size then
 		local buf, len = rb:need(1):ref()
 		req.response_body_unread_size = req.response_body_unread_size - len
-		tcp:checkp(req.response_body_unread_size >= 0, 'response body size mismatch')
+		tcp:checkp(req.response_body_unread_size >= 0,
+			'response body size mismatch')
 		req:dp('<<', '%7d bytes (full)', len)
 		http.rb_skip = len
 		req.eof = req.response_body_unread_size == 0
-		return decompress(http, req, buf, len)
+		return decompress(http, req, buf, len, req.eof)
 	else --read till EOF
 		if rb:have(1) then
 			local buf, len = rb:ref()
@@ -507,6 +513,14 @@ function http_client(...)
 	client.cookies = {}
 
 	return client
+end
+
+function client:close()
+	for _, target in pairs(self.targets) do
+		target.conn_pool:close_all(function(http)
+			http.tcp:close()
+		end)
+	end
 end
 
 --connection pool ------------------------------------------------------------
@@ -565,7 +579,8 @@ function client:get_conn(req)
 			tcp:debug_stream'http'
 		end
 		if target.secure then
-			local stcp, err = try_client_stcp(tcp, target.host, req.tls_options)
+			local tls_host = addr_parse(target.host) --strip port for SNI
+			local stcp, err = try_client_stcp(tcp, tls_host, req.tls_options)
 			if not stcp then
 				target.conn_pool:cancel()
 				tcp:try_close()

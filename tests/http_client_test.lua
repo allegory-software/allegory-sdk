@@ -1,7 +1,7 @@
 require'glue'
 require'http_client'
 require'unit'
-logging.verbose = true
+--logging.verbose = true
 --logging.debug = true
 --config('http_client_debug', 'protocol')
 
