@@ -17,7 +17,7 @@ DEFLATE ----------------------------------------------------------------------
 	- format: 'gzip' (default), 'zlib' or 'raw'.
 	- level: compression level (0-9 from none to best).
 	- windowBits (8..15), memLevel, strategy: see zlib manual.
-	gz:[try_]push(s | buf,len | nil,'eof') -> true,'more'|'eof' | nil,err
+	gz:[try_]push(s | buf,len | nil,'eof' [, eof]) -> true[,'eof'] | nil,err
 	gz:[try_]finish() -> true,'eof' | nil,err
 	gz:reset()   reset for reuse with same parameters. gz.write can be replaced.
 	gz:free()
@@ -128,8 +128,8 @@ function gzip_state(gz)
 	strm.next_out, strm.avail_out = buf, bufsize
 	strm.next_in, strm.avail_in = nil, 0
 
-	function gz:try_push(data, size)
-		local eof = data == nil and size == 'eof'
+	function gz:try_push(data, size, eof)
+		eof = eof or (data == nil and size == 'eof')
 		if not strm and eof then return true, 'eof' end --pass-through eof
 		assert(strm, 'closed')
 		local flush = eof and C.Z_FINISH or C.Z_NO_FLUSH
@@ -165,15 +165,15 @@ function gzip_state(gz)
 			end
 			if strm.avail_in == 0 then break end
 		end
-		return true, 'more'
+		return true
 	end
-	function gz:push(data, size)
-		local ok, msg = self:try_push(data, size)
+	function gz:push(...)
+		local ok, err = self:try_push(...)
 		if not ok then
 			free()
-			error(msg)
+			error(err)
 		end
-		return msg
+		return err or 'more'
 	end
 	function gz:try_finish()
 		return self:try_push(nil, 'eof')

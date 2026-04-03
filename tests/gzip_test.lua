@@ -46,6 +46,31 @@ for _,size in ipairs{0, 1, 13, 2049, 100000} do
 		#src/1024, #compressed / math.max(#src, 1) * 100))
 end
 
+--decompress truncated stream errors on eof
+do
+	local src = gen(100)
+	local compressed = gzip(src):get()
+	local truncated = compressed:sub(1, math.floor(#compressed / 2))
+	local gz = gzip_state{op = 'decompress'}
+	local ok, err = gz:try_push(truncated, nil, true)
+	test(ok, nil)
+	test(err, 'buffer error')
+	print('truncated stream detected: ok')
+end
+
+--decompress stream with trailing data after end marker
+do
+	local src = gen(100)
+	local compressed = gzip(src):get()
+	local padded = compressed .. 'trailing garbage data'
+	local gz = gzip_state{op = 'decompress'}
+	local status = gz:push(padded)
+	test(status, 'eof')
+	local dst = gz.b:get()
+	test(dst, src)
+	print('trailing bytes ignored: ok')
+end
+
 test(tohex(adler32'The game done changed.'), '587507ba')
 test(tohex(crc32'Game\'s the same, just got more fierce.'), '2c40120a')
 
