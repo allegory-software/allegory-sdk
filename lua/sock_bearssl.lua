@@ -219,6 +219,15 @@ typedef struct {
 typedef struct { unsigned char *data; size_t len; } br_x500_name;
 typedef struct { br_x500_name dn; unsigned flags; br_x509_pkey pkey; } br_x509_trust_anchor;
 typedef struct br_x509_class_ br_x509_class;
+struct br_x509_class_ {
+	size_t context_size;
+	void (*start_chain)(const br_x509_class **ctx, const char *server_name);
+	void (*start_cert)(const br_x509_class **ctx, uint32_t length);
+	void (*append)(const br_x509_class **ctx, const unsigned char *buf, size_t len);
+	void (*end_cert)(const br_x509_class **ctx);
+	unsigned (*end_chain)(const br_x509_class **ctx);
+	const br_x509_pkey *(*get_pkey)(const br_x509_class **ctx, unsigned *usages);
+};
 typedef struct { const unsigned char *oid; char *buf; size_t len; int status; } br_name_element;
 typedef struct {
 	const br_x509_class *vtable;
@@ -955,8 +964,26 @@ local BR_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384         = 0xC030
 local BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256       = 0xC02B
 local BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256         = 0xC02F
 
+--noverify x509: clone x509_minimal vtable, override end_chain to suppress
+--BR_ERR_X509_NOT_TRUSTED, following BearSSL's own x509_noanchor pattern.
+local noverify_vt --created on first use from x509_minimal's vtable.
+local function noverify_x509(xc)
+	if not noverify_vt then
+		local orig_vt = xc.vtable
+		noverify_vt = new('br_x509_class')
+		copy(noverify_vt, orig_vt, ffi.sizeof('br_x509_class'))
+		local orig_end_chain = orig_vt.end_chain
+		noverify_vt.end_chain = cast('unsigned (*)(const br_x509_class **)', function(ctx)
+			local r = orig_end_chain(ctx)
+			return r == 62 and 0 or r --62 = BR_ERR_X509_NOT_TRUSTED
+		end)
+	else
+		assert(xc.vtable.start_chain == noverify_vt.start_chain) --same static vtable from bearssl
+	end
+	xc.vtable = noverify_vt
+end
+
 -- Returns (sc, eng_ptr, keepalive) or (nil, err).
--- eng_ptr is br_ssl_engine_context* (== sc cast, since eng is first field).
 local function make_client_ctx(opt)
 	local keepalive = {}
 	local sc  = new('br_ssl_client_context')
@@ -975,6 +1002,7 @@ local function make_client_ctx(opt)
 		C.br_ssl_client_init_full(sc, xc, ta, ta_n)
 	else
 		C.br_ssl_client_init_full(sc, xc, nil, 0)
+		noverify_x509(xc)
 	end
 
 	-- enforce RSA key size floor for server cert chains (default 2048).
