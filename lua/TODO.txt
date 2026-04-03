@@ -5,15 +5,26 @@ SIMPLIFY / REVIEW
 	- show +N -N on separate column
 	- add object type in front of debug prefix
 
+* structured errors are complicated:
+	- go back to string errors with a prefix for selective catching and
+	decision to retry and/or close the file/socket?
+
+* raising and non-raising functions are inconsistent:
+	* try_*() functions return plain strings and don't close the file/socket.
+	* unprotect_io() converts all string errors to i/o errors.
+		* result: raise tbl_err but return nil,str_err, but then protect_io()
+		returns nil,tbl_err. also now it's tostring(err) == 'access_denied'
+		cuz we don't know if it's str_err or tbl_err.
+
 * error reporting lacking context:
 	- unprotect_io() lacks the context that functions with check() have.
 	- sometimes even check() lacks context because it's inside try_() code.
-
 * check() from errors.lua is ungreppable because of all local check() flavors.
+* check_errno() is not raising like all other check*() functions.
+
+* fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
 
 * fs: atomic save()/saver() rethinking?
-
-* http server + client protocol testing (gzip, chunked, length, eof, uploads, etc.)
 
 * http server smoke test to look for memory leaks and DoS limits
 
@@ -23,8 +34,6 @@ SIMPLIFY / REVIEW
 
 * csv.lua uses io.open
 * xml.lua uses io.open
-
-* fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
 
 LEVERAGE AI
 ------------------------------------------------------------------------------

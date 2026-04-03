@@ -361,6 +361,7 @@ function req:redirect_request()
 	local req_url = req:format_url()
 	local re_url = url_resolve(req_url, req.redirect_location)
 	tcp:checkp(re_url.scheme == 'http' or re_url.scheme == 'https', 'url scheme not http(s)')
+	tcp:checkp(re_url.host, 'redirect location has no host')
 	local resend_body = req.status == 307 or req.status == 308
 	local headers = update({}, req.headers)
 	local cross_origin = re_url.host ~= req_url.host
@@ -579,7 +580,7 @@ function client:get_conn(req)
 			target.conn_pool:pull(http)
 		end)
 	end
-	return assert(http, err)
+	return check_io(nil, http, err)
 end
 
 --cookie storage -------------------------------------------------------------

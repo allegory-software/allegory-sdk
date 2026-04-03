@@ -56,7 +56,7 @@ RATIONALE for TRY-FIRST
 You can also implement things the opposite way i.e. the golang/C way i.e.
 only call non-raising I/O methods inside so try_*() only, and early-exit on
 errors with nil,err (with explicit clean-up) and then create rasing variants
-of your protocol functions with unprotect_io(). Doing it this way is noisy
+of your protocol methods with unprotect_io(). Doing it this way is noisy
 and error-prone and you must turn nil,str_err into nil,protocol_error(str_err)
 as needed because unprotect_io() turns all nil,str_err into I/O errors.
 But this also has advantages: there's no hidden control flow so you get more
