@@ -1295,5 +1295,6 @@ end
 --structured exceptions ------------------------------------------------------
 
 require'errors_test'
+require'errors_io_test'
 
 print'glue ok'
