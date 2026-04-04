@@ -215,14 +215,14 @@ These compile only under specific conditions. The rest aborts.
 * `select()` -- only with a __constant__ positive first arg.
 * `tonumber()` -- only base 10.
 * `tostring()` -- only for strings, numbers, booleans, nil and `__tostring`.
-* `ffi.new()` / `ffi.cast()` -- not for VLA/VLS, not for >8 byte alignment,
+* `new()` / `cast()` -- not for VLA/VLS, not for >8 byte alignment,
   not for >128 bytes or >16 array elements.
-* `ffi.errno()` -- only when reading, not when setting a new value.
-* `ffi.typeof()` -- only for cdata args, not for cdecl strings.
-* `ffi.sizeof()` -- not for VLA/VLS types.
-* `table.insert()` -- only when pushing (appending at the end).
-* `string.find()` -- only plain string search. Patterns = stitch.
-* `string.format()` -- not `%p`, not non-string `%s`.
+* `errno()` -- only when reading, not when setting a new value.
+* `ctype()` (`ffi.typeof()`) -- only for cdata args, not for cdecl strings.
+* `sizeof()` -- not for VLA/VLS types.
+* `insert()` -- only when pushing (appending at the end).
+* `s:find()` -- only plain string search. Patterns = stitch.
+* `s:format()` -- not `%p`, not non-string `%s`.
 * `...` (VARG bytecode) -- only with `select()` and constant positive index.
 * implicit string-to-number coercion. Use `tonumber()` before the loop.
 
@@ -231,9 +231,9 @@ These compile only under specific conditions. The rest aborts.
 These don't abort but exit to the interpreter and back.
 Fine outside hot loops, avoid in tight inner loops.
 
-* `unpack()`, `table.sort()`, `table.pack()`
-* `string.match()`, `string.gmatch()`, `string.gsub()`
-* `math.fmod()`, `math.frexp()`, `math.randomseed()`
+* `unpack()`, `sort()`, `pack()`
+* `s:match()`, `s:gmatch()`, `s:gsub()`
+* `math.fmod()`, `math.frexp()`, `randomseed()`
 * `collectgarbage()`
 * coroutine ops, `io.*`, `os.*`
 
@@ -241,8 +241,8 @@ Fine outside hot loops, avoid in tight inner loops.
 
 * all `bit.*` ops.
 * all `math.*` except `fmod`, `frexp`, `randomseed`.
-* `s:byte()`, `#s`, `s:sub()`, `s:rep()`, `string.char()`, `s:lower()`, `s:upper()`.
-* `table.concat()`, `table.remove()`, `table.move()`.
+* `s:byte()`, `#s`, `s:sub()`, `s:rep()`, `char()`, `s:lower()`, `s:upper()`.
+* `concat()`, `remove()`, `table.move()`.
 * `ffi.copy()`, `ffi.fill()`, `ffi.string()`, `ffi.istype()`,
   `ffi.alignof()`, `ffi.offsetof()`, `ffi.abi()`, `ffi.gc()`.
 * `type()`, `rawget()`, `rawset()`, `rawequal()`, `rawlen()`.
