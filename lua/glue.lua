@@ -317,6 +317,8 @@ local
 	min, max, floor, ceil, ln, random =
 	min, max, floor, ceil, ln, random
 
+--CAVEAT: for negative half-integers like -0.5 it returns 0, so it rounds
+--toward +inf, not -1.
 function round(x)
 	return floor(x + .5)
 end
