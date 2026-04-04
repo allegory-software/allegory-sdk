@@ -103,6 +103,8 @@ I/O functions only work inside threads created with thread().
 
 Raising methods close the socket on errors, but the try_*() variants do not!
 
+Never abandon threads in suspended state, it will cause leaks!
+
 SOCKETS ----------------------------------------------------------------------
 
 s:[try_]close()
@@ -920,8 +922,12 @@ currentthread = coro.running
 threadstatus = coro.status
 cofinish = coro.finish
 
-local threadenvs    = setmetatable({}, weak_keys)
-local ownthreadenvs = setmetatable({}, weak_keys)
+--NOTE: NOT weak-keyed! LuaJIT has no ephemerons, so if a value in a weak-key
+--table transitively references its key, the entry is never collected.
+--User code routinely stores back-refs (e.g. ownthreadenv().req.thread = thread).
+--Explicit cleanup in thread_onfinish avoids the problem entirely.
+local threadenvs    = {}
+local ownthreadenvs = {}
 
 function threadenv(thread)
 	return threadenvs[thread or currentthread()]
@@ -948,6 +954,8 @@ local function thread_onfinish(thread, ok, ...)
 	if finish then
 		finish(thread, ok, ...)
 	end
+	threadenvs[thread] = nil
+	ownthreadenvs[thread] = nil
 	--poll threads don't have a caller thread to re-raise their errors into,
 	--and we don't want them to break the main thread either as coro thereads
 	--do by default, so errors are just logged and the thread finishes in the
