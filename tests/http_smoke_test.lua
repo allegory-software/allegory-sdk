@@ -5,8 +5,6 @@
 -- Prints memory usage every second -- if it climbs steadily, there's a leak.
 --
 
-jit.off()
-
 require'glue'
 require'http_server'
 require'http_client'
@@ -222,8 +220,7 @@ run(function()
 
 	while true do
 		round = round + 1
-		--for _, name in ipairs(test_names) do
-		for _, name in ipairs{'get'} do
+		for _, name in ipairs(test_names) do
 			local ok, err = pcall(tests[name])
 			if not ok then
 				printf('FAIL %s: %s\n', name, err)
@@ -232,17 +229,13 @@ run(function()
 			end
 		end
 
-		wait(0) --yield to let server threads finish cleanup
 		collectgarbage()
 		collectgarbage()
 		local now = clock()
 		if now - last_report >= 1 then
 			local mem = collectgarbage'count'
-			local f = io.open('/proc/self/status')
-			local rss = f and f:read'*a':match('VmRSS:%s+(%d+ kB)') or '?'
-			if f then f:close() end
-			printf('round %4d | gc %6.1f KB | rss %s | elapsed %.0fs\n',
-				round, mem, rss, now - t0)
+			printf('round %4d | %6.1f KB | elapsed %.0fs\n',
+				round, mem, now - t0)
 			last_report = now
 		end
 	end
