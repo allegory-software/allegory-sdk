@@ -76,7 +76,7 @@ Use Lua's naming conventions `foo_bar` and `foobar` instead of `FooBar` or `fooB
   * `buf, sz` is a (buffer, size) pair
   * `p` is for pointers
   * `x, y, w, h` is for rectangles
-  * `t0`, `t1` is for timestamps
+  * `t0`, `t1` is for timestamps or clock values
   * `err` is for errors
   * `t0`, `i0`, etc. is for "previous value of"
 
@@ -134,8 +134,8 @@ casual code reader. It's ok and even encouraged to use these instead of
 making library functions for them. More complicated patterns belong
 to the [glue](lua/glue.lua) library.
 
-| Idiom | Description |
-| :---  | :---       |
+| Idiom                                       | Description |
+| :---                                        | :---        |
 | __logic__                                   |
 | `not a == not b`                            | both or none
 | __numbers__                                 |
@@ -143,16 +143,16 @@ to the [glue](lua/glue.lua) library.
 | `x ~= x`                                    | number is NaN
 | `1/0`                                       | inf
 | `-1/0`                                      | -inf
-| `floor(x+.5)`                               | round
+| `floor(x+.5)`                               | round half-up
 | `(x >= 0 and 1 or -1)`                      | sign
 | __tables__                                  |
 | `next(t) == nil`                            | table is empty
+| `t.n or #t`                                 | length of possibly sparse array
 | __strings__                                 |
+| `s:has('plain')`                            | contains
 | `s:match'^something'`                       | starts with
 | `s:match'something$'`                       | ends with
 | `s:match'(["\'])(.-)%1'`                    | match pairs of single or double quotes
-| __i/o__                                     |
-| `f:read(4096, '*l')`                        | read lines efficiently
 
 ------------------------------------------------------------------------------
 
@@ -161,18 +161,18 @@ to the [glue](lua/glue.lua) library.
 ## LuaJIT assumptions
 
 * LuaJIT hoists table accesses with constant keys out of loops, so caching
-module functions in locals is no longer needed, except if the JIT bails out.
+module functions in locals is not needed, except if the JIT bails out.
 * LuaJIT hoists constant branches out of loops so it's ok to specialize
 loop kernels with `if/else` or with `and/or` inside the loops.
-* LuaJIT inlines functions (except when using `...` and `select()` with
-non-constant indices), so it's ok to specialize loop kernels with function
-composition.
+* LuaJIT inlines functions, so it's ok to specialize loop kernels with
+function composition.
 * multiplications and additions are cheaper than memory access, so storing
 the results of these operations in temporary variables might actually harm
 performance (more register spills).
 * there's no difference between using `if/else` statements and using
 `and/or` expressions -- they generate the same branchy code, so avoid
-expressions with non-constant `and/or` operators in tight loops.
+expressions with non-constant `and/or` operators in tight loops if you can.
+LuaJIT still generates traces for those but the branches must be predictable.
 * divisions are 4x slower than multiplications on x86, so when dividing by
 a constant, it helps turning `x / c` into `x * (1 / c)` since the constant
 expression is folded -- LuaJIT does this already for power-of-2 constants
@@ -189,6 +189,73 @@ allocation sinking, but that requires a small and predictable code path
 between pointer creation and usage so it's not a general solution.
 So APIs that need to be fast should work with (base-pointer, offset) pairs
 instead of just pointers.
+* string comparison is O(1) but string creation is O(n) with a hash table
+lookup. avoid creating temporary strings in hot paths, use buffers instead.
+
+## LuaJIT ops that cause trace aborts
+
+When LuaJIT's trace compiler hits an operation it can't compile, it either
+**aborts** (gives up on the trace) or **stitches** (exits the trace, runs the
+op in the interpreter, then starts a new trace). The value of stitching is
+that it doesn't kill the rest of the trace, so it's better than aborting but
+still has overhead from the trace exit/entry -- don't rely on it in hot loops.
+
+Source: https://github.com/tarantool/tarantool/wiki/LuaJIT-Not-Yet-Implemented
+
+### Never compiled (always abort)
+
+* `error()`.
+* creating closures (FNEW bytecode).
+* closing upvalues (UCLO bytecode).
+
+### Partially compiled (some usage patterns abort)
+
+These compile only under specific conditions. The rest aborts.
+
+* `select()` -- only with a __constant__ positive first arg.
+* `tonumber()` -- only base 10.
+* `tostring()` -- only for strings, numbers, booleans, nil and `__tostring`.
+* `ffi.new()` / `ffi.cast()` -- not for VLA/VLS, not for >8 byte alignment,
+  not for >128 bytes or >16 array elements.
+* `ffi.errno()` -- only when reading, not when setting a new value.
+* `ffi.typeof()` -- only for cdata args, not for cdecl strings.
+* `ffi.sizeof()` -- not for VLA/VLS types.
+* `table.insert()` -- only when pushing (appending at the end).
+* `string.find()` -- only plain string search. Patterns = stitch.
+* `string.format()` -- not `%p`, not non-string `%s`.
+* `...` (VARG bytecode) -- only with `select()` and constant positive index.
+* implicit string-to-number coercion. Use `tonumber()` before the loop.
+
+### Compiled via stitching (overhead from trace exit/entry)
+
+These don't abort but exit to the interpreter and back.
+Fine outside hot loops, avoid in tight inner loops.
+
+* `unpack()`, `table.sort()`, `table.pack()`
+* `string.match()`, `string.gmatch()`, `string.gsub()`
+* `math.fmod()`, `math.frexp()`, `math.randomseed()`
+* `collectgarbage()`
+* coroutine ops, `io.*`, `os.*`
+
+### Fully compiled (safe for hot loops)
+
+* all `bit.*` ops.
+* all `math.*` except `fmod`, `frexp`, `randomseed`.
+* `s:byte()`, `#s`, `s:sub()`, `s:rep()`, `string.char()`, `s:lower()`, `s:upper()`.
+* `table.concat()`, `table.remove()`, `table.move()`.
+* `ffi.copy()`, `ffi.fill()`, `ffi.string()`, `ffi.istype()`,
+  `ffi.alignof()`, `ffi.offsetof()`, `ffi.abi()`, `ffi.gc()`.
+* `type()`, `rawget()`, `rawset()`, `rawequal()`, `rawlen()`.
+* `setmetatable()`, `getmetatable()`.
+* `pairs()`, `ipairs()`, `next()`.
+* `pcall()`, `xpcall()`, `assert()`.
+
+## Lua gotchas
+
+### Sparse arrays
+
+Don't do it, it breaks `#t`. If you have to do it, track the array length
+in the `n` key.
 
 ## LuaJIT gotchas
 
@@ -264,6 +331,12 @@ in finalizers unless you can ensure that they're still alive by other means.
 
 There is no way to fix this with the current garbage collector.
 
+### Resurrection in finalizers
+
+If a finalizer stores the cdata object somewhere reachable, the object is
+"resurrected" but its finalizer won't run again. This can cause resource
+leaks if not handled carefully.
+
 ### Floating point numbers from outside
 
 In places where an arbitrary bit pattern can be injected in place of a double
@@ -287,6 +360,17 @@ local function double_isnan(p)
 	        bor(q.lo, band(q.hi, 0xfffff)) ~= 0
 end
 ```
+
+### Weak tables
+
+In LuaJIT, `weak_key_table[obj] = value_referencing_obj` is a permanent leak.
+PUC Lua 5.2+ handles this with ephemerons; LuaJIT doesn't. When you have
+leaks that you can't find, look at weak tables for this problem.
+
+### Using cdata as table keys
+
+Don't do it, it doesn't work.
+If you have to do it, use `ptr_serialize()` and `ptr_deserialize()`.
 
 ## LuaJIT tricks
 
@@ -416,8 +500,7 @@ Lua's philosophy of "mechanism not policy" that you don't even have a clear
 The Lua standard library is also hostile to virtualization, typechecking
 arguments and refusing to check hooks all over the place. If still
 not convinced, search the Lua mailing list for "`__next`". I don't know why
-they even bothered with `__pairs` and `__ipairs`. This clearly isn't going
-anywhere.
+they even bothered with `__ipairs`. This clearly isn't going anywhere.
 
 That being said, there may be patterns of virtualization that you might want
 to care for. In particular, callable tables and userdata are common enough
