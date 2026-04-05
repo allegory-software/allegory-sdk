@@ -1374,12 +1374,16 @@ function server_stcp:try_accept(opt, timeout)
 	end
 
 	local s = wrap_client_stcp(ctcp, eng, keepalive)
+	s.listen_socket = self
 	live(s, 'accepted %s.%d tcp=%s clients:%d', self, ctcp.i, ctcp, self.tcp._sockets_n)
 	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
 	if not ok then
 		s:try_close()
 		return nil, err, true --retriable
 	end
+
+	local sn = sc.eng.server_name
+	s.server_name = sn[0] ~= 0 and str(sn) or nil
 
 	return s
 end
