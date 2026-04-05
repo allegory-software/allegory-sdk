@@ -9,22 +9,20 @@ FEATURES
 
   * implicit request context but single shared Lua state for all requests
   * filesystem decoupling with virtual files and actions (single-file web apps)
-  * standalone operation without a web server for debugging and offline scripts
   * output buffering stack
-  * file serving with cache control
+  * static file serving with cache control
   * dynamic html with mustache templates, php-like templates and Lua scripts
   * multi-language html with server-side language filtering
   * online js and css bundling and minification
 
   * webb_action : action-based routing module with multi-language URLs
-  * webb_spa    : SPA module with client-side action-based routing
-  * webb_auth   : Session-based authentication module
+  * webb_auth   : authentication and cookie-based sessions module
 
 REQUEST CONTEXT
 
-	req.fake -> t|f                         context is fake (we're on cmdline)
 	http_once_per_request(f, ...)           memoize for current request
 	http_once_per_connection(f, ...)        memoize for current connection
+	http_request_env(sub_env) -> env        per request shared global environment
 
 REQUEST
 
@@ -54,6 +52,9 @@ ARG PARSING
 
 OUTPUT
 
+	http_error(status[, content])           raise a http response error
+	http_error{status=,content=,content_type=,headers=,message=}
+	http_redirect(url[, status])            redirect (default 303)
 	setcontentsize(sz)                      set content size to avoid chunked encoding
 	outall(s[, sz])                         output a single value
 	out(s[, sz])                            output one more non-nil value
@@ -144,22 +145,24 @@ require'resolver'
 --http server wiring ---------------------------------------------------------
 
 --http thread context for all context-free APIs below.
-local req = http_request
-
-local function respond(req)
-	req.res = {headers = {}}
-	http_log('', 'webb', 'request', '%s %s', req.method, url_unescape(req.uri))
-	local main = config('main_module', scriptname)
-	local main = isstr(main) and require(main) or main
-	if istab(main) then
-		main = main.respond
-	end
-	main()
+local function req()
+	return threadenv().http_request
 end
-function webb_http_server(opt)
-	return http_server({
-		respond = respond,
-	}, opt)
+
+function http_error(status, content) --status,[content] | {status=,content=,content_type=,headers=,...}
+	local err
+	if isnum(status) then
+		err = {status = status, content = content}
+	elseif istab(status) then
+		err = status
+	else
+		assert(false)
+	end
+	raise('http_response', err)
+end
+
+function http_redirect(url, status)
+	http_error{status = status or 303, headers = {location = url}}
 end
 
 --context-free utils ---------------------------------------------------------
@@ -181,10 +184,10 @@ end
 function http_once_per_connection(f)
 	return function(...)
 		local req = req()
-		local mf = req.http[f]
+		local mf = req.tcp[f]
 		if not mf then
 			mf = memoize(f)
-			req.http[f] = mf
+			req.tcp[f] = mf
 		end
 		return mf(...)
 	end
@@ -209,10 +212,6 @@ function http_request_env(t)
 	end
 end
 
-function http_log(...)
-	req().http:log(...)
-end
-
 --request breakdown ----------------------------------------------------------
 
 function method(which)
@@ -234,7 +233,7 @@ function headers(h)
 end
 
 function cookie(name)
-	local t = req().headers.cookie
+	local t = req().cookies
 	return t and t[name]
 end
 
@@ -274,15 +273,16 @@ function post(v)
 	local req = req()
 	local s = req.post
 	if s == nil then
-		s = req:read_body'string'
-		if s == '' then
+		local buf, len = req:read_body()
+		if len == 0 then
 			s = nil
 		else
+			s = str(buf, len)
 			local ct = req.headers['content-type']
 			if ct then
-				if ct.media_type == 'application/x-www-form-urlencoded' then
+				if ct:has'application/x-www-form-urlencoded' then
 					s = url_parse_args(s)
-				elseif ct.media_type == 'application/json' then --prevent ENCTYPE CORS
+				elseif ct:has'application/json' then --prevent ENCTYPE CORS
 					s = json_decode(s, null)
 				end
 			end
@@ -297,16 +297,12 @@ function post(v)
 end
 
 function upload(file)
-	return fcall(function(finally, except)
-		http_log('note', 'webb', 'upload', '%s', file)
-		local write_protected = assert(file_saver(file))
-		except(function() write_protected(ABORT) end)
-		local function write(buf, sz)
-			assert(write_protected(buf, sz))
-		end
-		req():read_body(write)
-		return file
+	save(file, function()
+		local buf, len = req():read_body_chunk()
+		if not buf then return nil, 0 end --eof
+		return buf, len
 	end)
+	return file
 end
 
 function scheme(s)
@@ -314,25 +310,34 @@ function scheme(s)
 		return scheme() == s
 	end
 	return headers'x-forwarded-proto'
-		or (req().http.f.istlssocket and 'https' or 'http')
+		or (req().tcp.istlssocket and 'https' or 'http')
 end
 
+local function _host()
+	local h
+		=  config'host'
+		or req().tcp.server_name --TLS SNI (cert-validated)
+		or headers'x-forwarded-host'
+		or headers'host'
+	if h then
+		h = addr_parse(h) --strip port, handle ipv6 brackets
+	end
+	return h or req().tcp.listen_socket:bound_addr():ip()
+end
+_host = http_once_per_request(_host)
 function host(s)
 	if s then
-		return host() == s
+		return _host() == s
 	end
-	return headers'x-forwarded-host'
-		or (headers'host' and headers'host'.host)
-		or config'host'
-		or req().http.f.local_addr
+	return _host()
 end
 
 function port(p)
 	if p then
 		return port() == tonumber(p)
 	end
-	return headers'x-forwarded-port'
-		or req().http.f.local_port
+	return tonumber(headers'x-forwarded-port')
+		or req().tcp.listen_socket:bound_addr():port()
 end
 
 function email(user)
@@ -341,7 +346,10 @@ end
 
 function client_ip()
 	local xff = headers'x-forwarded-for'
-	return xff and xff[1] or req().http.f.remote_addr
+	if xff then
+		return xff:match'[^,]+' --first entry is the original client
+	end
+	return req().tcp:remote_addr():ip()
 end
 
 function isgooglebot()
@@ -364,18 +372,17 @@ local function checkfunc(code, default_err)
 		if not req then --not in a request
 			check('webb', action, ret, '%s', err)
 		end
-		local ct = req.res.content_type
+		local ct = req.response_headers['content-type']
 		http_error{
 			status = code,
 			content_type = ct,
 			headers = {
 				--allow logout() to remove cookie while raising 403.
-				['set-cookie'] = req.res.headers['set-cookie'],
+				['set-cookie'] = req.response_headers['set-cookie'],
 			},
 			content = ct == mime_types.json
 				and json_encode{error = err} or tostring(err),
-			message = err, --for tostring()
-			status_message = err,
+			message = err,
 		}
 	end
 end
@@ -389,12 +396,8 @@ function check_etag(s)
 	if out_buffering() then return s end
 	local etag = xxhash128(s):hex()
 	local etags = headers'if-none-match'
-	if etags and istab(etags) then
-		for _,t in ipairs(etags) do
-			if t.etag == etag then
-				http_error(304)
-			end
-		end
+	if etags and etags:has(etag) then
+		http_error(304)
 	end
 	--send etag to client as weak etag so that gzip filter still apply.
 	setheader('etag', 'W/'..etag)
@@ -402,7 +405,7 @@ function check_etag(s)
 end
 
 function setconnectionclose()
-	req().res.close = true
+	req().close = true
 end
 
 mime_types = {
@@ -434,15 +437,15 @@ mime_types = {
 }
 
 function setmime(ext)
-	req().res.content_type = checkfound(mime_types[ext])
+	req().response_headers['content-type'] = checkfound(mime_types[ext])
 end
 
 function setcompress(on)
-	req().res.compress = on
+	req().compress = on
 end
 
 function setcontentsize(sz)
-	req().res.content_size = sz
+	req().response_headers['content-length'] = sz
 end
 
 --output API -----------------------------------------------------------------
@@ -452,15 +455,14 @@ function base64_image_src(s)
 end
 
 function outall(s, sz)
-	if req().http_out or out_buffering() then
+	local req = req()
+	if req.headers_sent or out_buffering() then
 		out(s, sz)
 	else
 		s = s == nil and '' or iscdata(s) and s or tostring(s)
-		local req = req()
-		req.res.content = s
-		req.res.content_size = sz
-		req.respond_called = true
-		req:respond(req.res)
+		sz = sz or #s
+		req.response_headers['content-length'] = sz
+		req:send_headers():send_body_chunk(s, sz):finish()
 	end
 end
 
@@ -473,13 +475,11 @@ local function default_outfunc(s, sz)
 		return
 	end
 	local req = req()
-	if not req.http_out then
-		req.res.want_out_function = true
-		req.respond_called = true
-		req.http_out = req:respond(req.res)
+	if not req.headers_sent then
+		req:send_headers()
 	end
 	s = not iscdata(s) and tostring(s) or s
-	req.http_out(s, sz)
+	req:send_body_chunk(s, sz)
 end
 
 function stringbuffer(t)
@@ -598,7 +598,7 @@ function outfile(...)
 end
 
 function setheader(name, val)
-	req().res.headers[name] = val
+	req().response_headers[name:lower()] = val
 end
 
 local _print = print_function(out)
