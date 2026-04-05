@@ -28,7 +28,7 @@ url_format(t) -> s
 	`true` formats the key without `=`; value `false` skips the key entirely;
 	`args` take priority over `query`.
 
-url_parse(s) -> t
+url_parse(s, [t], [is_local]) -> t
 
 	Parse a URL of form:
 
