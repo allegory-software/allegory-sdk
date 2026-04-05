@@ -93,6 +93,7 @@ local server = http_server{
 -- test cases ------------------------------------------------------------------
 
 local tests = {}
+local test_reqs = {} --tests that do more than 1 request
 
 function tests.get()
 	local body, req = fetch(BASE..'/echo')
@@ -140,12 +141,12 @@ end
 function tests.redirect()
 	local body, req = fetch(BASE..'/redirect')
 	assert(req.status == 200)
-end
+end; test_reqs.redirect = 2
 
 function tests.redirect_chain()
 	local body, req = fetch(BASE..'/redirect-chain')
 	assert(req.status == 200)
-end
+end; test_reqs.redirect_chain = 3
 
 function tests.https_get()
 	local body, req = fetch{url = SBAS..'/echo', tls_options = {insecure_noverifycert = true}}
@@ -159,6 +160,7 @@ function tests.https_post()
 	assert(body == 'secure')
 end
 
+test_reqs.cookies = 2
 function tests.cookies()
 	local cl = http_client()
 	cl:fetch(BASE..'/set-cookie')
@@ -172,6 +174,7 @@ function tests.connection_close()
 	assert(req.status == 200)
 end
 
+test_reqs.concurrent = 10
 function tests.concurrent()
 	local ts = threadset()
 	for i = 1, 10 do
@@ -190,6 +193,7 @@ function tests.concurrent()
 	end
 end
 
+test_reqs.pool_reuse = 2
 function tests.pool_reuse()
 	local cl = http_client()
 	local body1, req1 = cl:fetch{url = BASE..'/echo', max_conn = 1}
@@ -215,8 +219,10 @@ run(function()
 	wait(.1)
 
 	local round = 0
+	local reqs = 0
 	local t0 = clock()
 	local last_report = t0
+	local last_reqs = 0
 
 	while true do
 		round = round + 1
@@ -227,15 +233,18 @@ run(function()
 				server:stop()
 				os.exit(1)
 			end
+			reqs = reqs + (test_reqs[name] or 1)
 		end
 
 		collectgarbage()
 		collectgarbage()
 		local now = clock()
 		if now - last_report >= 1 then
+			local dt = now - last_report
 			local mem = collectgarbage'count'
-			printf('round %4d | %6.1f KB | elapsed %.0fs\n',
-				round, mem, now - t0)
+			printf('round %4d | %5d req/s | %6.1f KB | elapsed %.0fs\n',
+				round, (reqs - last_reqs) / dt, mem, now - t0)
+			last_reqs = reqs
 			last_report = now
 		end
 	end
