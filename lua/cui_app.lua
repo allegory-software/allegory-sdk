@@ -37,11 +37,6 @@ end)
 --configure webb_action static file loading.
 wwwdir'www'
 
---glue webb to webb_action.
-config('main_module', function()
-	checkfound(action(unpack(args())))
-end)
-
 local fontfiles = {}
 function fontfile(name, path)
 	add(fontfiles, {name, path})
@@ -190,7 +185,11 @@ local function cui_app(...)
 	end
 
 	function app:run_server()
-		app.server = webb_http_server()
+		app.server = http_server{
+			respond = function(req)
+				checkfound(action(unpack(args())))
+			end,
+		}
 		start(config('ignore_interrupts', true))
 	end
 
