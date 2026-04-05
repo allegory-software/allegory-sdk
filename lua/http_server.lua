@@ -22,6 +22,7 @@ SERVER
 	http_server_class              http_server class for overriding defaults
 REQUEST
 	req.headers -> {k=v}           request headers (in lowercase)
+	req.cookies -> {k=v}|nil       parsed cookies from Cookie header
 	req.body_size -> n             request upload size in bytes
 	req:read_body([max_size]) -> buf,size         read whole body in a buffer
 	req:read_body_chunk() -> buf,size,size_left   read body in chunks
@@ -38,6 +39,7 @@ RESPONSE
 	req:send_headers() -> req      send status line and headers
 	req:send_body_chunk(s | buf,len | nil,'eof') -> req    send body chunk
 	req:finish() -> req            finish response
+	req.headers_sent -> true       true if headers were sent
 CONFIG
 	host                           'localhost'
 	http_addr                      '0.0.0.0'
@@ -235,6 +237,14 @@ function http_server(...)
 		req.body_size = tonumber(req.headers['content-length']) or 0
 		local cc = req.headers['connection']
 		req.close = cc and cc:has'close'
+		local cookies = req.headers.cookie
+		if cookies then
+			local t = {}
+			for k, v in cookies:gmatch'([^;=]+)=([^;]*)' do
+				t[k:trim()] = v:trim()
+			end
+			req.cookies = t
+		end
 
 		--make req methods for reading the request body and for responding.
 
@@ -272,11 +282,9 @@ function http_server(...)
 		end
 
 		local send_body_chunk
-		local headers_sent
-
 		function req.send_headers(req)
-			assert(not headers_sent)
-			headers_sent = true
+			assert(not req.headers_sent)
+			req.headers_sent = true
 
 			req.response_headers['date'] = http_date_format(time())
 			if req.close then
@@ -323,7 +331,7 @@ function http_server(...)
 
 			if req.compress then
 				if not ctcp.gz then
-					ctcp.gz = gzip_state{op = 'compress', write = send_body_chunk}
+					ctcp.gz = gzip_state{op = 'compress', level = 1, write = send_body_chunk}
 				else
 					ctcp.gz:reset()
 					ctcp.gz.write = send_body_chunk
@@ -334,14 +342,19 @@ function http_server(...)
 		end --req:send_headers()
 
 		local body_sent
+		local body_sent_len = 0
 		function send_body_chunk(chunk, len)
-			assert(headers_sent)
+			assert(req.headers_sent)
 			assert(not body_sent)
+			local content_length = req.response_headers['content-length']
 			if not (chunk == nil and len == 'eof') then
 				len = len or #chunk
 				if len == 0 then return end --can't send empty chunks chunked
+				body_sent_len = body_sent_len + len
+				ctcp:checkp(not content_length or body_sent_len <= content_length,
+					'body exceeds content-length')
 				req:dp('>>', '%7d bytes', len)
-				if req.response_headers['content-length'] then
+				if content_length then
 					wb:putdata(chunk, len)
 					wb:flush()
 				else --chunked
@@ -352,8 +365,10 @@ function http_server(...)
 				end
 			else
 				body_sent = true
+				ctcp:checkp(not content_length or body_sent_len == content_length,
+					'body size %d ~= content-length %d', body_sent_len, content_length or 0)
 				req:dp('>>', '%7d end', 0)
-				if not req.response_headers['content-length'] then
+				if not content_length then
 					wb:put'0\r\n\r\n'
 					wb:flush()
 				end
@@ -370,6 +385,7 @@ function http_server(...)
 		end
 
 		function req.finish(req)
+			if body_sent then return req end
 			req:send_body_chunk(nil, 'eof')
 			return req
 		end
@@ -382,10 +398,20 @@ function http_server(...)
 		end
 
 		if not ok then
-			if not headers_sent then
+			if not req.headers_sent then
 				if iserror(err, 'http_response') then
 					req.status = err.status
-					req:send_headers():send_body_chunk(tostring(err)):finish()
+					if err.content_type then
+						req.response_headers['content-type'] = err.content_type
+					end
+					if err.headers then
+						update(req.response_headers, err.headers)
+					end
+					req:send_headers()
+					if err.content then
+						req:send_body_chunk(err.content)
+					end
+					req:finish()
 				else
 					logerror(ctcp, 'respond', '%s', err)
 					req.status = 500
@@ -394,9 +420,11 @@ function http_server(...)
 			else --status line already sent, too late to send HTTP 500.
 				error(err)
 			end
-		elseif not headers_sent then
+		elseif not req.headers_sent then
 			req.status = 404
 			req:send_headers():finish()
+		elseif not body_sent then
+			req:finish()
 		end
 
 		--the request must be entirely read before we can read the next request
