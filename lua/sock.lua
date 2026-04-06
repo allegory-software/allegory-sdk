@@ -638,7 +638,7 @@ local EPOLLOUT   = 0x0004
 local EPOLLERR   = 0x0008
 local EPOLLHUP   = 0x0010
 local EPOLLRDHUP = 0x2000
-local EPOLLET    = 2^31
+local EPOLLET    = 2^31 --edge-triggered
 
 local EPOLL_CTL_ADD = 1
 local EPOLL_CTL_DEL = 2
