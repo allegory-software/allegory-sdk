@@ -33,17 +33,20 @@ LOADS
 
 CONFIG
 
+	app_name            scriptname   app name (exposed to client)
+	multilang                        enable multi-language support
+	default_lang        'en'         default language
+	page_title_suffix   ' - '..host() title suffix, both client-side & server-side
+	session_cookie_name 'session'    session cookie name
+	client_action       true         enable client routing
 	js_mode             'separate'   'bundle' | 'ref' | 'separate'
 	css_mode            'separate'   'bundle' | 'ref' | 'separate'
-
-	body_classes                     css classes for <body>
-	body_attrs                       attributes for <body>
+	script_attrs        '...'        HTML attributes for script tags
+	body_classes                     css classes for <body> (string or function)
+	body_attrs                       attributes for <body> (string or function)
 	head                             content for <head>
-	page_title_suffix                title suffix, both client-side & server-side
 	infer_page_title                 server-side page title inferring f(body) -> s
-	favicon_href                     favicon url
-	client_action       true         enable client routing.
-	aliases                          aliases for client-side routing; defined in webb_action.
+	favicon_href                     favicon url (string or function)
 
 ]==]
 

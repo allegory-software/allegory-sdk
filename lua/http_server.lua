@@ -41,6 +41,7 @@ RESPONSE
 	req:finish() -> req            finish response
 	req.headers_sent -> true       true if headers were sent
 	req.finished -> true           true if req:finish() was called
+	raise('http_response', {status=,headers=,content=})  respond by raising an error
 CONFIG
 	host
 	http_addr                      '0.0.0.0'
@@ -439,9 +440,6 @@ function http_server(...)
 			if not req.headers_sent then
 				if iserror(err, 'http_response') then
 					req.status = err.status
-					if err.content_type then
-						req.response_headers['content-type'] = err.content_type
-					end
 					if err.headers then
 						update(req.response_headers, err.headers)
 					end

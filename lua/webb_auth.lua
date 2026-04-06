@@ -22,16 +22,14 @@ SCHEMA
 
 CONFIG
 
-	auth_storage                 'sql'|'fs'
-
-	secret                       auto-gen    secret to encrypt sessions and passwords
-	auto_create_user             true        auto-create anonymous users
-	allow_create_user            true        allow create new users on auth
-
-	auth_token_lifetime          3600        forgot-password token lifetime
-	auth_token_maxcount          2           max unexpired tokens allowed
-	auth_code_lifetime           300         one-time auth code lifetime
-	auth_code_maxcount           6           max unexpired auth codes allowed
+	auth_storage        'fs'           auth backend: 'fs' or 'sql'
+	secret                             app-wide secret for signing
+	allow_create_user   true           allow creating new users on auth
+	auto_create_user    true           auto-create anonymous users
+	auth_token_lifetime 3600           forgot-password token lifetime (seconds)
+	auth_token_maxcount 2              max unexpired tokens allowed
+	auth_code_lifetime  300            one-time auth code lifetime (seconds)
+	auth_code_maxcount  6              max unexpired auth codes allowed
 
 API DOC
 

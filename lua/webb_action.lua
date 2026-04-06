@@ -18,14 +18,12 @@ ACTIONS
 
 CONFIG
 
-	config('root_action', 'en')           name of the '/' (root) action
-	config('404_html_action', '404.html') 404 action for text/html
-	config('404_png_action' , '404.png' ) 404 action for image/png
-	config('404_jpeg_action', '404.jpg' ) 404 action for image/jpeg
-
-DEFINES
-
-	config'aliases'                       used by webb_spa.lua
+	root_action       'en'              name of the '/' (root) action
+	404_html_action   '404.html'        404 action for text/html
+	404_png_action    '404.png'         404 action for image/png
+	404_jpeg_action   '404.jpg'         404 action for image/jpeg
+	aliases                             action alias map (used by webb_spa)
+	minify_js                           enable JS minification in catlist output
 
 TODO
 
