@@ -1339,15 +1339,47 @@ end
 
 local MSG_NOSIGNAL = 0x4000
 
-local socket_send = make_async(true, true, function(self, buf, len, flags)
-	return C.send(self.fd, buf, len, flags or MSG_NOSIGNAL)
-end, EWOULDBLOCK)
-
-function udp:try_send(buf, len, flags)
+--NOTE: to send many small pieces use a pbuffer instead, this will crawl!
+function socket:try_send(buf, sz, flags)
 	if not self.fd then return nil, 'closed' end
-	return socket_send(self, buf, len or #buf, flags)
+	sz = sz or #buf
+	if sz == 0 then return true end --mask-out null-writes
+	local left = sz
+	::again::
+	local n = C.send(self.fd, buf, left, flags or MSG_NOSIGNAL)
+	if n > 0 then
+		self.w = self.w + n
+		left = left - n
+		if left == 0 then return true end
+		if isstr(buf) then --only make pointer on the rare second pass.
+			buf = cast(u8p, buf)
+		end
+		buf = buf + n
+		goto again
+	elseif n == 0 then --can't happen but just in case
+		return nil, 'eof'
+	else
+		local errno = errno()
+		if errno == EWOULDBLOCK then
+			if self.send_expires then
+				send_expires_heap:push(self)
+			end
+			self.send_thread = currentthread()
+			local ok, err = wait_io()
+			if not ok then
+				return nil, err
+			else
+				goto again
+			end
+		else
+			local ok, err = check_errno(nil, errno)
+			return ok, err, errno
+		end
+	end
 end
-udp.send = unprotect_io(udp.try_send)
+socket.send = unprotect_io(socket.try_send)
+socket.try_write = socket.try_send
+socket.write = socket.send
 
 local socket_recv = make_async(false, true, function(self, buf, sz, flags)
 	return C.recv(self.fd, buf, sz, flags or 0)
@@ -1717,32 +1749,6 @@ socket.setopt = unprotect_io(socket.try_setopt)
 end --getopt/setopt decl. scope
 
 --tcp repeat I/O -------------------------------------------------------------
-
---NOTE: to send many small pieces use a pbuffer instead, this will crawl!
-function tcp:try_send(buf, sz, flags)
-	if not self.fd then return nil, 'closed' end
-	sz = sz or #buf
-	if sz == 0 then return true end --mask-out null-writes
-	local sz0 = sz
-	while true do
-		local len, err = socket_send(self, buf, sz, flags)
-		if len == sz then
-			break
-		elseif not len then --short write
-			return nil, err
-		end
-		assert(len > 0)
-		if isstr(buf) then --only make pointer on the rare second pass.
-			buf = cast(u8p, buf)
-		end
-		buf = buf + len
-		sz  = sz  - len
-	end
-	return true
-end
-tcp.send = unprotect_io(tcp.try_send)
-tcp.try_write = tcp.try_send
-tcp.write = tcp.send
 
 --NOTE: to read many small pieces use a pbuffer instead, this will crawl!
 function tcp:try_recvn(buf, sz)
