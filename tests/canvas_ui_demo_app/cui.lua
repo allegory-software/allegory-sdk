@@ -1,23 +1,17 @@
 --go @ sdk\bin\windows\luajit.exe cui.lua run
-require'daemon'
-require'webb'
-require'webb_action'
 
-local app = daemon(...)
+logging.verbose = 1
+logging.debug = 1
+config('http_server_debug', 'protocol')
+require'cui_app'('run')--(...)
+
+app.main_file = 'cui_demo.js'
+wwwdir'../../canvas-ui/www'
 
 logging.verbose = config'verbose'
 
-function app:run_server()
-	app.server = webb_http_server()
-	start(config('ignore_interrupts', true))
-end
-
-config('main_module', function()
-	checkfound(action(unpack(args())))
-end)
-
 action['404.html'] = function()
-	local s = load(indir(exedir(), '..', '..', 'canvas-ui', 'demo.html'))
+	local s = load(indir(exedir(), '../../canvas-ui/demo.html'))
 	s = s:gsub('<base href="(.-)">', '<base href="/">')
 	out(s)
 end
@@ -75,4 +69,4 @@ action['rtc_signal.events'] = function()
 	end
 end
 
-exit(app:run(...))
+exit(app:run())

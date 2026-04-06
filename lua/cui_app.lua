@@ -222,4 +222,3 @@ local function cui_app(...)
 end
 
 return cui_app
-
