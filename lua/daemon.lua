@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 	daemon(cmdline_args...) -> app
-	exit(app:run(...))    run the daemon app with cmdline args
+	exit(app:run())     run the daemon app with cmdline args
 
 CMDLINE
 

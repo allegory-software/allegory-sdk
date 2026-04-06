@@ -277,6 +277,7 @@ function http_server(...)
 			return buf, len
 		end
 
+		local allow_send_body
 		local send_body_chunk
 		function req.send_headers(req)
 			--client might not recv() before all its last send() call return,
@@ -292,12 +293,18 @@ function http_server(...)
 			if req.close then
 				req.response_headers['connection'] = 'close'
 			end
-			if not req.response_headers['content-length'] then
+			allow_send_body = req.status ~= 204 and req.status ~= 304
+			local len = tonumber(req.response_headers['content-length'])
+			if len then
+				assert(allow_send_body, 'not allowed to send body')
+			elseif allow_send_body then
 				req.response_headers['transfer-encoding'] = 'chunked'
 			end
 			local mime_type = req.response_headers['content-type']
 			local accept_enc = req.headers['accept-encoding']
-			req.compress = req.compress and accept_enc and accept_enc:has'gzip'
+			req.compress = allow_send_body and req.compress
+				and (not len or len > 1000)
+				and accept_enc and accept_enc:has'gzip'
 				and not (mime_type and self.compressed_mime_types[mime_type])
 			if req.compress then
 				req.response_headers['transfer-encoding'] = 'chunked'
@@ -347,6 +354,7 @@ function http_server(...)
 		local body_sent_len = 0
 		function send_body_chunk(chunk, len)
 			assert(req.headers_sent, 'headers not sent')
+			assert(allow_send_body, 'not allowed to send body')
 			assert(not body_sent, 'body already sent')
 			local content_length = tonumber(req.response_headers['content-length'])
 			if not (chunk == nil and len == 'eof') then
@@ -398,7 +406,7 @@ function http_server(...)
 			if not req.headers_sent then
 				req:send_headers()
 			end
-			if not body_sent then
+			if not body_sent and allow_send_body then
 				req:send_body_chunk(nil, 'eof')
 				assert(body_sent)
 			end
@@ -443,9 +451,9 @@ function http_server(...)
 					if err.headers then
 						update(req.response_headers, err.headers)
 					end
-					req:send_headers()
 					if err.content then
-						req:send_body_chunk(err.content)
+						req.response_headers['content-length'] = tostring(#err.content)
+						req:send_headers():send_body_chunk(err.content)
 					end
 				else
 					logerror(ctcp, 'respond', '%s', err)
