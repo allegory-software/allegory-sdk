@@ -967,16 +967,18 @@ local BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256         = 0xC02F
 --noverify x509: clone x509_minimal vtable, override end_chain to suppress
 --BR_ERR_X509_NOT_TRUSTED, following BearSSL's own x509_noanchor pattern.
 local noverify_vt --created on first use from x509_minimal's vtable.
+local noverify_end_chain_cb --prevent GC of FFI callback
 local function noverify_x509(xc)
 	if not noverify_vt then
 		local orig_vt = xc.vtable
 		noverify_vt = new('br_x509_class')
 		copy(noverify_vt, orig_vt, ffi.sizeof('br_x509_class'))
 		local orig_end_chain = orig_vt.end_chain
-		noverify_vt.end_chain = cast('unsigned (*)(const br_x509_class **)', function(ctx)
+		noverify_end_chain_cb = cast('unsigned (*)(const br_x509_class **)', function(ctx)
 			local r = orig_end_chain(ctx)
 			return r == 62 and 0 or r --62 = BR_ERR_X509_NOT_TRUSTED
 		end)
+		noverify_vt.end_chain = noverify_end_chain_cb
 	else
 		assert(xc.vtable.start_chain == noverify_vt.start_chain) --same static vtable from bearssl
 	end
