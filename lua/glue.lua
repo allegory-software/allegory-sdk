@@ -1377,7 +1377,7 @@ function print_function(out, format, newline)
 end
 
 function printf(...)
-	return print(format(...))
+	return io.stdout:write(format(...))
 end
 
 local function fmtargs(fmt, ...)
