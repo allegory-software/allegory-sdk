@@ -6,7 +6,7 @@
 SERVER
 	http_server(opt1,...) -> server   Create a http server (opt tables are merged)
 	- listen                       {{addr=,...}, {addr=,...}}
-	- - host                       Host header match
+	- - host                       Host header match ('*' to match all)
 	- - addr                       IP address to listen to
 	- - port                       TCP port to listen to
 	- - tls                        use TLS on this socket
@@ -40,8 +40,9 @@ RESPONSE
 	req:send_body_chunk(s | buf,len | nil,'eof') -> req    send body chunk
 	req:finish() -> req            finish response
 	req.headers_sent -> true       true if headers were sent
+	req.finished -> true           true if req:finish() was called
 CONFIG
-	host                           'localhost'
+	host                           default: repl(http_addr, '0.0.0.0', 'localhost')
 	http_addr                      '0.0.0.0'
 	http_port                      80
 	http_unix_socket
@@ -130,7 +131,7 @@ function http_server(...)
 
 	if not self.listen then
 		self.listen = {}
-		local host = config('host', 'localhost')
+		local host = config'host'
 		if config'http_addr' ~= false then
 			add(self.listen, {
 				host = host,
@@ -143,8 +144,8 @@ function http_server(...)
 			})
 		end
 		if config'https_addr' ~= false then
-			local crt_file = config'https_crt_file' or varpath(host..'.crt')
-			local key_file = config'https_key_file' or varpath(host..'.key')
+			local crt_file = config'https_crt_file' or host and varpath(host..'.crt')
+			local key_file = config'https_key_file' or host and varpath(host..'.key')
 			if host == 'localhost'
 				and not config'https_crt_file'
 				and not config'https_key_file'
@@ -226,13 +227,6 @@ function http_server(...)
 		--remove the 5s timeout from accept (crude measure against slowloris)
 		ctcp:settimeout(nil)
 
-		--prevent browsers from waiting for 1s on large uploads.
-		local expect = req.headers['expect']
-		if expect and expect:has'100' then
-			wb:put'HTTP/1.1 100 Continue\r\n\r\n'
-			wb:flush()
-		end
-
 		--parse relevant request headers into req fields.
 		req.body_size = tonumber(req.headers['content-length']) or 0
 		local cc = req.headers['connection']
@@ -248,42 +242,49 @@ function http_server(...)
 
 		--make req methods for reading the request body and for responding.
 
-		local finish
+		local finish_handlers
 		function req.onfinish(req, fn)
-			finish = do_after(finish, fn)
+			finish_handlers = do_after(finish_handlers, fn)
 		end
 
-		local rb_needs_reset
+		local rb_skip = 0
 		local body_unread_len = req.body_size
 		function req.read_body_chunk(req)
+			rb:skip(rb_skip)
+			rb_skip = 0
 			if body_unread_len == 0 then
 				return nil, 'eof', 0
-			end
-			if rb_needs_reset then
-				rb:reset()
-				rb_needs_reset = false
 			end
 			rb:need(1) --can read into the next request if pipelined
 			local buf, len = rb:ref()
 			len = min(len, body_unread_len)
 			body_unread_len = body_unread_len - len
-			rb_needs_reset = true
+			rb_skip = len
 			return buf, len, body_unread_len
 		end
 
 		function req.read_body(req, max_body_size)
+			rb:skip(rb_skip)
+			rb_skip = 0
 			max_body_size = max_body_size or req.max_body_size
 			ctcp:checkp(body_unread_len <= max_body_size, 'body too long')
 			rb:need(body_unread_len) --can read into the next request if pipelined
 			local buf = rb:ref()
 			local len = body_unread_len
 			body_unread_len = 0
+			rb_skip = len
 			return buf, len
 		end
 
 		local send_body_chunk
 		function req.send_headers(req)
-			assert(not req.headers_sent)
+			--client might not recv() before all its last send() call return,
+			--so if we don't consume the body first, we might deadlock.
+			--OTOH we can't reject a large upload with 413 too large before
+			--consuming the body because of this assert if the client doesn't
+			--send expect: 100-continue.
+			assert(body_unread_len == 0, 'client body not read')
+			assert(not req.headers_sent, 'headers already sent')
 			req.headers_sent = true
 
 			req.response_headers['date'] = http_date_format(time())
@@ -344,9 +345,9 @@ function http_server(...)
 		local body_sent
 		local body_sent_len = 0
 		function send_body_chunk(chunk, len)
-			assert(req.headers_sent)
-			assert(not body_sent)
-			local content_length = req.response_headers['content-length']
+			assert(req.headers_sent, 'headers not sent')
+			assert(not body_sent, 'body already sent')
+			local content_length = tonumber(req.response_headers['content-length'])
 			if not (chunk == nil and len == 'eof') then
 				len = len or #chunk
 				if len == 0 then return end --can't send empty chunks chunked
@@ -356,22 +357,20 @@ function http_server(...)
 				req:dp('>>', '%7d bytes', len)
 				if content_length then
 					wb:putdata(chunk, len)
-					wb:flush()
 				else --chunked
 					wb:putf('%X\r\n', len)
 					wb:putdata(chunk, len)
 					wb:put'\r\n'
-					wb:flush()
 				end
 			else
 				body_sent = true
 				ctcp:checkp(not content_length or body_sent_len == content_length,
 					'body size %d ~= content-length %d', body_sent_len, content_length or 0)
-				req:dp('>>', '%7d end', 0)
+				req:dp('>>', 'end. total: %d bytes', body_sent_len)
 				if not content_length then
 					wb:put'0\r\n\r\n'
-					wb:flush()
 				end
+				wb:flush()
 			end
 		end
 
@@ -384,19 +383,58 @@ function http_server(...)
 			return req
 		end
 
+		function req:flush()
+			wb:flush()
+		end
+
 		function req.finish(req)
-			if body_sent then return req end
-			req:send_body_chunk(nil, 'eof')
+			if req.finished then return req end
+			req.finished = true
+			--the request must be entirely read before we can read the next request
+			--or before we can close the connection, and also possibly before we can
+			--send the reply, depending on client.
+			while req:read_body_chunk() do end
+			if not req.headers_sent then
+				req:send_headers()
+			end
+			if not body_sent then
+				req:send_body_chunk(nil, 'eof')
+				assert(body_sent)
+			end
+			if req.close then
+				req:dp('>>', 'close')
+				ctcp:close() --send FIN
+			end
 			return req
 		end
 
-		--self.respond(req) needs to call req:respond(opt) or it's a 404.
-		local ok, err = pcall(self.respond, req)
-
-		if finish then
-			finish(req, ok, err)
+		--match Host
+		local host = ctcp.listen_socket.host
+		if host ~= '*' and req.headers['host'] ~= host then
+			req.status = 400
+			req:finish()
+			return
 		end
 
+		--prevent browsers from waiting for 1s on large uploads.
+		local expect = req.headers['expect']
+		if expect and expect:has'100' then
+			if req.body_size > req.max_body_size then
+				req.status = 413
+				req.close = true
+				body_unread_len = 0
+				req:finish()
+				return
+			else
+				wb:put'HTTP/1.1 100 Continue\r\n\r\n'
+				wb:flush()
+			end
+		end
+
+		local ok, err = pcall(self.respond, req)
+		if finish_handlers then
+			finish_handlers(req, ok, err)
+		end
 		if not ok then
 			if not req.headers_sent then
 				if iserror(err, 'http_response') then
@@ -411,31 +449,17 @@ function http_server(...)
 					if err.content then
 						req:send_body_chunk(err.content)
 					end
-					req:finish()
 				else
 					logerror(ctcp, 'respond', '%s', err)
 					req.status = 500
-					req:send_headers():finish()
 				end
 			else --status line already sent, too late to send HTTP 500.
 				error(err)
 			end
 		elseif not req.headers_sent then
 			req.status = 404
-			req:send_headers():finish()
-		elseif not body_sent then
-			req:finish()
 		end
-
-		--the request must be entirely read before we can read the next request
-		--or before we can close the connection.
-		while req:read_body_chunk() do end
-		rb:reset()
-
-		if req.close then
-			req:dp('>>', 'close')
-			ctcp:close() --send FIN
-		end
+		req:finish()
 
 	end --handle_request()
 
@@ -481,6 +505,17 @@ function http_server(...)
 		end
 		if self.debug.stream then
 			tcp:debug_stream'http'
+		end
+
+		tcp.host = listen_opt.host
+		if not tcp.host then --deduce host from addr if we can
+			local sa = tcp:bound_addr()
+			assert(sa:ip() ~= '0.0.0.0', 'host required when listening on 0.0.0.0')
+			local ip = sa:ip()
+			local port = sa:port()
+			port = (port ~= 80 and not tcp.istlssocket and port)
+				or (port ~= 443 and tcp.istlssocket and port)
+			tcp.host = ip .. (port and ':'..port or '')
 		end
 
 		push(self.listen_sockets, tcp)
