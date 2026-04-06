@@ -6,7 +6,6 @@
 Webb is a procedural web framework for http_server.
 
 FEATURES
-
   * implicit request context but single shared Lua state for all requests
   * filesystem decoupling with virtual files and actions (single-file web apps)
   * output buffering stack
@@ -15,17 +14,15 @@ FEATURES
   * multi-language html with server-side language filtering
   * online js and css bundling and minification
 
+SUBMODULES
   * webb_action : action-based routing module with multi-language URLs
   * webb_auth   : authentication and cookie-based sessions module
 
 REQUEST CONTEXT
-
 	http_once_per_request(f, ...)           memoize for current request
 	http_once_per_connection(f, ...)        memoize for current connection
 	http_request_env(sub_env) -> env        per request shared global environment
-
 REQUEST
-
 	headers([name]) -> s|t                  get header or all
 	cookie(name) -> s | nil                 get cookie value
 	method([method]) -> s|b                 get/check http method
@@ -39,9 +36,7 @@ REQUEST
 	client_ip() -> s                        get client's ip address
 	isgooglebot() -> t|f                    check if UA is the google bot
 	ismobile() -> t|F                       check if UA is a mobile browser
-
 ARG PARSING
-
 	id_arg(s) -> n | nil                    validate int arg with slug
 	str_arg(s) -> s | nil                   validate/trim non-empty string arg
 	json_str_arg(s) -> s | nil              validate string arg
@@ -49,43 +44,36 @@ ARG PARSING
 	list_arg(s[, arg_f]) -> t               validate comma-separated list arg
 	checkbox_arg(s) -> 'checked' | nil      validate checkbox value from html form
 	url_arg(s) -> t                         decode url
-
 OUTPUT
-
 	http_error(status[, content])           raise a http response error
 	http_error{status=,content=,content_type=,headers=,message=}
 	http_redirect(url[, status])            redirect (default 303)
-	setcontentsize(sz)                      set content size to avoid chunked encoding
+	setheader(name, val)                    set a header (unless we're buffering)
+	setmime(ext)                            set content-type based on file extension
+	setcompress(on)                         enable or disable compression
+	setheader('content-length', sz)         set content size to avoid chunked encoding
 	outall(s[, sz])                         output a single value
 	out(s[, sz])                            output one more non-nil value
+	out_flush()                             flush output
 	push_out([f])                           push output function or buffer
 	pop_out() -> s                          pop output function and flush it
 	stringbuffer([t]) -> f(s1,...)/f()->s   create a string buffer
 	record(f) -> s                          run f and collect out() calls
 	out_buffering() -> t | f                check if we're buffering output
-	setheader(name, val)                    set a header (unless we're buffering)
-	setmime(ext)                            set content-type based on file extension
-	setcompress(on)                         enable or disable compression
 	outprint(...)                           like Lua's print but uses out()
 	outfile(file, [parse])                  output a file's contents
 	outfile_function(file) -> f()|nil       return an outfile function if the file exists
-
 URL ENCODING
-
 	absurl([path]) -> s                     get the absolute url for a local url
 	slug(id, s) -> s                        encode id and s to `s-id`
-
 RESPONSE
-
 	checkfound(ret, err) -> ret             exit with "404 Not found"
 	checkarg(ret, err) -> ret               exit with "400 Bad request"
 	check500(ret, err) -> ret               exit with "500 Server error"
 	allow(ret, err) -> ret                  exit with "403 Forbidden"
 	check_etag(s)                           exit with "304 Not modified"
 	setconnectionclose()                    close the connection after this request.
-
 FILESYSTEM
-
 	wwwdir(path)                            register a www search path
 	wwwdirs() -> {dir1,...}                 www dirs
 	wwwpath(file, [type]) -> path           get www subpath (and check if exists)
@@ -93,39 +81,30 @@ FILESYSTEM
 	wwwfile.filename <- s|f(filename)       set virtual www file contents
 	wwwfiles([filter]) -> {name->true}      list www files
 	tmppath([pattern], [t]) -> path         make a tmp file path
-
 MUSTACHE TEMPLATES
-
 	render_string(s, [env], [part]) -> s    render a template from a string
 	render_file(file, [env], [part]) -> s   render a template from a file
 	mustache_wrap(s, name) -> s             wrap a template in <script> tag
 	template(name) -> s                     get template contents
 	template.name <- s|f(name)              set template contents or handler
 	render(name[, env]) -> s                render template
-
 LUAPAGES TEMPLATES
-
 	include_string(s, [env], [name], ...)   run LuaPages script
 	include(file, [env], ...)               run LuaPages script
-
 LUA SCRIPTS
-
 	run_lua_string(s, [env], args...) -> ret    run Lua script from string
 	run_lua_file(file, [env], args...) -> ret   run Lua script from file
-
 HTML FILTERS
-
 	html_filter_lang(s, lang) -> s          filter <t> tags and foo:lang attrs
 	html_filter_comments(s) -> s            filter <!-- --> comments
-
 FILE CONCATENATION LISTS
-
 	catlist_files(s) -> {file1,...}         parse a .cat file
 	outcatlist(file, args...)               output a .cat file
-
 IMAGE PROCESSING
-
 	base64_image_src(s)
+CONFIG
+	base_url                            base URL for absurl() (overrides scheme+host+port)
+	lang_filter       false             language filter mode; 'explicit' for explicit filtering
 
 ]==]
 
@@ -314,9 +293,9 @@ function scheme(s)
 end
 
 local function _host()
-	local h
-		=  config'host'
-		or req().tcp.server_name --TLS SNI (cert-validated)
+	local tcp = req().tcp
+	local h = tc.listen_socket.host
+		or tcp.server_name --TLS SNI (cert-validated)
 		or headers'x-forwarded-host'
 		or headers'host'
 	if h then
@@ -444,10 +423,6 @@ function setcompress(on)
 	req().compress = on
 end
 
-function setcontentsize(sz)
-	req().response_headers['content-length'] = sz
-end
-
 --output API -----------------------------------------------------------------
 
 function base64_image_src(s)
@@ -480,6 +455,10 @@ local function default_outfunc(s, sz)
 	end
 	s = not iscdata(s) and tostring(s) or s
 	req:send_body_chunk(s, sz)
+end
+
+function out_flush()
+	req():flush()
 end
 
 function stringbuffer(t)
@@ -571,7 +550,7 @@ function outfile_function(path, offset, len)
 	end
 
 	return function()
-		setcontentsize(len)
+		setheader('content-length', sz)
 		local filebuf_size = min(len, 64 * 1024)
 		local filebuf = u8a(filebuf_size)
 		while true do
@@ -603,7 +582,7 @@ end
 
 local _print = print_function(out)
 function outprint(...)
-	if req() then setmime'txt' end
+	setheader('content-type', 'text/plain')
 	_print(...)
 end
 
