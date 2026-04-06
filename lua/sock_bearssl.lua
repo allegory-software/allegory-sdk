@@ -775,6 +775,7 @@ local function parse_pem(s)
 	end
 	return objs
 end
+jit.off(parse_pem) --calls back into Lua through br_pem_decoder_push.
 
 --Key struct helpers ---------------------------------------------------------
 
@@ -871,6 +872,7 @@ local function load_trust_anchors(ca_pem)
 
 	return ta_array, n, keepalive
 end
+jit.off(load_trust_anchors) --calls back into Lua through br_x509_decoder_push.
 
 --Certificate chain ----------------------------------------------------------
 
@@ -1117,6 +1119,7 @@ local function engine_run(self, target)
 		end
 	end
 end
+jit.off(engine_run) --can call back into Lua through x509 noverify_end_chain_cb.
 
 --Sockets --------------------------------------------------------------------
 
