@@ -36,7 +36,7 @@ REQUEST
 	client_ip() -> s                        get client's ip address
 	isgooglebot() -> t|f                    check if UA is the google bot
 	ismobile() -> t|F                       check if UA is a mobile browser
-ARG PARSING
+ARGS
 	id_arg(s) -> n | nil                    validate int arg with slug
 	str_arg(s) -> s | nil                   validate/trim non-empty string arg
 	json_str_arg(s) -> s | nil              validate string arg
@@ -46,7 +46,7 @@ ARG PARSING
 	url_arg(s) -> t                         decode url
 OUTPUT
 	http_error(status[, content])           raise a http response error
-	http_error{status=,content=,content_type=,headers=,message=}
+	http_error{status=,content=,headers=}
 	http_redirect(url[, status])            redirect (default 303)
 	setheader(name, val)                    set a header (unless we're buffering)
 	setmime(ext)                            set content-type based on file extension
@@ -63,7 +63,7 @@ OUTPUT
 	outprint(...)                           like Lua's print but uses out()
 	outfile(file, [parse])                  output a file's contents
 	outfile_function(file) -> f()|nil       return an outfile function if the file exists
-URL ENCODING
+URLS
 	absurl([path]) -> s                     get the absolute url for a local url
 	slug(id, s) -> s                        encode id and s to `s-id`
 RESPONSE
@@ -128,7 +128,7 @@ local function req()
 	return threadenv().http_request
 end
 
-function http_error(status, content) --status,[content] | {status=,content=,content_type=,headers=,...}
+function http_error(status, content) --status,[content] | {status=,content=,headers=}
 	local err
 	if isnum(status) then
 		err = {status = status, content = content}
@@ -342,23 +342,13 @@ end
 --response API ---------------------------------------------------------------
 
 --responding with a http status message by raising an error.
-local function checkfunc(code, default_err)
-	local action = 'ck'..code
+local function checkfunc(status, default_err)
 	return function(ret, err, ...)
 		if ret then return ret end
 		err = err and format(err, ...) or default_err
 		local req = req()
-		if not req then --not in a request
-			check('webb', action, ret, '%s', err)
-		end
-		local ct = req.response_headers['content-type']
 		http_error{
-			status = code,
-			content_type = ct,
-			headers = {
-				--allow logout() to remove cookie while raising 403.
-				['set-cookie'] = req.response_headers['set-cookie'],
-			},
+			status = status,
 			content = ct == mime_types.json
 				and json_encode{error = err} or tostring(err),
 			message = err,
@@ -622,7 +612,7 @@ function tmppath(patt, t)
 	assert(not patt:find'[\\/]') --no subdirs
 	mkdir(tmpdir(), true)
 	t = t or {}
-	t.request_id = req() and req().request_id or 0
+	t.request_id = req().request_id or 0
 	local file = subst(patt, t)
 	return indir(tmpdir(), file)
 end
