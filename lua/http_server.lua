@@ -42,7 +42,7 @@ RESPONSE
 	req.headers_sent -> true       true if headers were sent
 	req.finished -> true           true if req:finish() was called
 CONFIG
-	host                           default: repl(http_addr, '0.0.0.0', 'localhost')
+	host
 	http_addr                      '0.0.0.0'
 	http_port                      80
 	http_unix_socket
@@ -473,6 +473,8 @@ function http_server(...)
 
 	for _,listen_opt in ipairs(self.listen) do
 
+		local host = assert(listen_opt.host, 'host required')
+
 		local addr =
 			listen_opt.unix_socket and 'unix:'..listen_opt.unix_socket
 			or listen_opt.addr or '0.0.0.0'
@@ -500,22 +502,13 @@ function http_server(...)
 			tcp = stcp
 		end
 
+		tcp.host = host
+
 		if self.debug.tracebacks then
 			tcp.tracebacks = true --for check_io()
 		end
 		if self.debug.stream then
 			tcp:debug_stream'http'
-		end
-
-		tcp.host = listen_opt.host
-		if not tcp.host then --deduce host from addr if we can
-			local sa = tcp:bound_addr()
-			assert(sa:ip() ~= '0.0.0.0', 'host required when listening on 0.0.0.0')
-			local ip = sa:ip()
-			local port = sa:port()
-			port = (port ~= 80 and not tcp.istlssocket and port)
-				or (port ~= 443 and tcp.istlssocket and port)
-			tcp.host = ip .. (port and ':'..port or '')
 		end
 
 		push(self.listen_sockets, tcp)
