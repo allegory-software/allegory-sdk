@@ -300,7 +300,7 @@ local function run_action(fallback, action, handler, ext, ...)
 		}
 		local nf_action = not_found_actions[mime]
 		if not nf_action then
-			http_log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
+			log('note', 'webb', '404', '%s', concat({action, ...}, '/'))
 			return false
 		end
 		local handler, ext = action_handler(nf_action, ...)
@@ -313,9 +313,7 @@ local function run_action(fallback, action, handler, ext, ...)
 	else
 		handler(...)
 	end
-	if not http_request().respond_called then
-		outall'' --avoid 404 if out() or outall() was not called in the action handler.
-	end
+	threadenv().http_request:finish()
 	return true
 end
 

@@ -292,23 +292,12 @@ function scheme(s)
 		or (req().tcp.istlssocket and 'https' or 'http')
 end
 
-local function _host()
-	local tcp = req().tcp
-	local h = tc.listen_socket.host
-		or tcp.server_name --TLS SNI (cert-validated)
-		or headers'x-forwarded-host'
-		or headers'host'
-	if h then
-		h = addr_parse(h) --strip port, handle ipv6 brackets
-	end
-	return h or req().tcp.listen_socket:bound_addr():ip()
-end
-_host = http_once_per_request(_host)
 function host(s)
+	local h = req().tcp.listen_socket.host
 	if s then
-		return _host() == s
+		return h == s
 	end
-	return _host()
+	return h
 end
 
 function port(p)
@@ -426,7 +415,7 @@ function outall(s, sz)
 	else
 		s = s == nil and '' or iscdata(s) and s or tostring(s)
 		sz = sz or #s
-		req.response_headers['content-length'] = sz
+		req.response_headers['content-length'] = tostring(sz)
 		req:send_headers():send_body_chunk(s, sz):finish()
 	end
 end
@@ -540,7 +529,7 @@ function outfile_function(path, offset, len)
 	end
 
 	return function()
-		setheader('content-length', sz)
+		setheader('content-length', tostring(len))
 		local filebuf_size = min(len, 64 * 1024)
 		local filebuf = u8a(filebuf_size)
 		while true do
