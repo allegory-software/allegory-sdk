@@ -5,16 +5,19 @@ logging.debug = true
 
 if os.getenv'AUTO' then return end
 
+local HOST = '*'
+local ADDR = nil -- '127.0.0.1'
+
 local server = http_server{
 	listen = {
 		{
-			host = 'localhost',
-			--addr = '127.0.0.1',
+			host = HOST,
+			addr = ADDR,
 			port = 80,
 		},
 		{
-			host = 'localhost',
-			--addr = '127.0.0.1',
+			host = HOST,
+			addr = ADDR,
 			port = 443,
 			tls = true,
 			tls_options = {

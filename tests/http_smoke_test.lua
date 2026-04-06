@@ -15,7 +15,7 @@ require'http_client'
 
 local PORT = 18080
 local SPORT = 18443
-local BASE  = 'http://127.0.0.1:'..PORT
+local BASE  = 'http://localhost:'..PORT
 local SBAS  = 'https://localhost:'..SPORT
 
 local crt_file = exedir()..'/../tests/localhost.crt'
@@ -25,8 +25,8 @@ local key_file = exedir()..'/../tests/localhost.key'
 
 local server = http_server{
 	listen = {
-		{addr = '127.0.0.1', port = PORT},
-		{addr = '127.0.0.1', port = SPORT, tls = true, tls_options = {
+		{host = '*', addr = '127.0.0.1', port = PORT},
+		{host = '*', addr = '127.0.0.1', port = SPORT, tls = true, tls_options = {
 			cert_file = crt_file,
 			key_file  = key_file,
 		}},

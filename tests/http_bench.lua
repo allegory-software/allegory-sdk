@@ -47,8 +47,8 @@ local server_compress -- set per benchmark run
 local server = http_server{
 	compress = false, --we control this per-request below
 	listen = {
-		{addr = '127.0.0.1', port = PORT},
-		{addr = '127.0.0.1', port = SPORT, tls = true, tls_options = {
+		{host = '*', addr = '127.0.0.1', port = PORT},
+		{host = '*', addr = '127.0.0.1', port = SPORT, tls = true, tls_options = {
 			cert_file = crt_file,
 			key_file  = key_file,
 		}},
