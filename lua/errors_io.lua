@@ -70,6 +70,11 @@ come up as potentially retriable which is not correct. The correct behavior
 is to raise on usage errors because these are usually bugs. This must be
 thought through and fixed on case-by-case in fs and sock. See try_accept()
 for how to fix it.
+Also, these try methods don't close the file/socket on error and return string
+errors instead of structured I/O errors. This allows for `err == 'not_found'`
+checks but it's inconsistent with protocol try methods.
+Also, file:try_close() is made with protect_io() so it returns I/O errors!
+Also, pbuffer's try methods are all over the place (eg. see try_skip()).
 ]=]
 
 if not ... then require'errors_io_test'; return end
