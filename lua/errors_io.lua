@@ -62,19 +62,6 @@ as needed because unprotect_io() turns all nil,str_err into I/O errors.
 But this also has advantages: there's no hidden control flow so you get more
 control and legibility at each failure point and no re-raising on bugs
 (which is necessary with protect_io() since pcall can't do selective catch).
-
-TODO:
-Currently try_*() methods on sock and fs modules do not break on usage
-errors coming from the OS except for EINVAL and EBADF, so some errors might
-come up as potentially retriable which is not correct. The correct behavior
-is to raise on usage errors because these are usually bugs. This must be
-thought through and fixed on case-by-case in fs and sock. See try_accept()
-for how to fix it.
-Also, these try methods don't close the file/socket on error and return string
-errors instead of structured I/O errors. This allows for `err == 'not_found'`
-checks but it's inconsistent with protocol try methods.
-Also, file:try_close() is made with protect_io() so it returns I/O errors!
-Also, pbuffer's try methods are all over the place (eg. see try_skip()).
 ]=]
 
 if not ... then require'errors_io_test'; return end

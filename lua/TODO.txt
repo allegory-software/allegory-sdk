@@ -1,9 +1,17 @@
-SIMPLIFY / REVIEW
+ERROR REPORTING
 ------------------------------------------------------------------------------
-* log is incomplete and hard to read:
-	- live() must take module and action
-	- show +N -N on separate column
-	- add object type in front of debug prefix
+* fs/sock try methods do not break on usage errors other than EINVAL and EBADF
+so usage errors come up as I/O errors (retriable).
+
+* fs/sock try methods don't close the file/socket on error.
+
+* f/sock try methods return string errors (can do `err == 'not_found'` though!).
+
+* file:try_close() is made with protect_io() so it returns I/O errors!
+
+* pbuffer:try_skip() is made with protect_io() so it returns I/O and protocol errors!
+
+* pbuffer:try_have() etc. is considered I/O so it returns string errors.
 
 * structured errors are complicated:
 	- go back to string errors with a prefix for selective catching and
@@ -22,18 +30,27 @@ SIMPLIFY / REVIEW
 * check() from errors.lua is ungreppable because of all local check() flavors.
 * check_errno() is not raising like all other check*() functions.
 
+
+SIMPLIFY / REVIEW
+------------------------------------------------------------------------------
+* log is incomplete and hard to read:
+	- live() must take module and action
+	- show +N -N on separate column
+	- add object type in front of debug prefix
+
 * fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
 
 * fs: atomic save()/saver() rethinking?
 
-* http server smoke test to look for memory leaks and DoS limits
+* webb_action: dir/file.ext action/arg.json vs action.json/arg
 
-* mdbx test
-* mdbx_schema test
-* schema test?
 
-* csv.lua uses io.open
-* xml.lua uses io.open
+MDBX
+------------------------------------------------------------------------------
+* finish DDL
+* unit tests
+* mdbx_copy incremental + restore (trivial page-block diff, no rolling window.)
+
 
 LEVERAGE AI
 ------------------------------------------------------------------------------
@@ -49,20 +66,20 @@ LEVERAGE AI
 		Where are hidden allocations?
 		Where can reentrancy explode?
 		What violates my invariants?
-	* gen unit tests
-	* gen fuzz testing (esp. for http)
 * doc quality
 	* fix doc inconsistencies
 	* write release notes
 	* write commit messages
 
 
+LEFTOVERS
+------------------------------------------------------------------------------
+* csv.lua uses io.open
+* xml.lua uses io.open
+
+
 BUGS
 ------------------------------------------------------------------------------
-* WEBB_ACTION dir/file.ext action/arg.json vs action.json/arg
-- SCHEMA SYNC make more robust
-	* FKs steal indexes (shared indexes)
-* CONNPOOL: retry
 * ROWSET filter push notifications on session
 
 
@@ -71,8 +88,6 @@ FEATURES
 - SCHEMA SYNC insert-or-update rows over existing table
 - ROWSET map error messages to fields on check constraint violations.
 - glue.lua subst() with varargs like js version
-- HTTP CLIENT cookie_default_path() extract fom URI
-- TARANTOOL finish extracting metadata
 - HTTP ranges on file serving
 - HTTP web sockets
 - XLS(X) parsing
@@ -116,20 +131,3 @@ SECURITY
 	* add role to each restricted table in schema and check that in
 	rowset_sql on select -- we could even cut out columns from the result
 	set based on that or maybe that's too much
-
-
-QA
-------------------------------------------------------------------------------
-- Lua: use a linter
-- CI server
-	1. protocol for running unit tests: how to run them, how to isolate them,
-		and how to interpret the results in a standardized way (need a list
-		of test cases and pass/fail status for each).
-	2. test machine
-	3. use mm for running tests? use github's CI ?
-- HTTP stress test
-	- continuous random stress testing to find:
-	- memory leaks in app code
-	- burst stress testing to reach DoS limits and test recovery from DoS
-	- discard cookies to test session garbage collection
-- Lua: integrate strict.lua
