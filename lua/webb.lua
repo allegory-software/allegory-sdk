@@ -293,7 +293,7 @@ function scheme(s)
 end
 
 function host(s)
-	local h = req().tcp.listen_socket.host
+	local h = req().headers['host']
 	if s then
 		return h == s
 	end
@@ -556,7 +556,14 @@ function outfile(...)
 end
 
 function setheader(name, val)
-	req().response_headers[name:lower()] = val
+	local rh = req().response_headers
+	name = name:lower()
+	assert(isstr(val))
+	if name == 'set-cookie' then
+		add(attr(rh, name), val)
+	else
+		rh[name] = val
+	end
 end
 
 local _print = print_function(out)

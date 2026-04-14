@@ -48,6 +48,7 @@ function action.en()
 	if _G.login then
 		if try_login() then --sets lang from user profile.
 			vars.theme = usr'theme'
+			vars.user_id = usr()
 		end
 	end
 	vars.title = (args(1) or ''):gsub('[-_]', ' ')
@@ -73,7 +74,7 @@ function action.en()
 	vars.preloads = cat(vars.preloads, '\n')
 	vars.css = cat(vars.css, '\n')
 	out((([[
-<html lang={{lang}} country={{country}} theme="{{theme}}"><head>
+<html lang={{lang}} country={{country}} theme="{{theme}}" user_id={{user_id}}><head>
 	<meta charset="utf-8">
 	<title>{{title}}</title>
 {{preloads}}
@@ -99,6 +100,8 @@ function action.en()
 ]]):gsub('{{(.-)}}', function(k) return vars[k] or '' end)))
 end
 
+action['404.html'] = action.en
+
 local function cui_app(...)
 
 	local app = {}
@@ -113,6 +116,10 @@ local function cui_app(...)
 	chdir(scriptdir())
 	function chdir(dir)
 		error'chdir() not allowed'
+	end
+	local rel_vardir = relpath(vardir(), scriptdir())
+	function vardir()
+		return rel_vardir
 	end
 
 	--non-configurable, convention-based things.

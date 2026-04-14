@@ -1,7 +1,9 @@
 --go @ sdk\bin\windows\luajit.exe cui.lua run
 
+require'webb_auth'
+
 logging.verbose = 1
-logging.debug = 1
+--logging.debug = 1
 config('http_server_debug', 'protocol')
 require'cui_app'('run')--(...)
 
@@ -9,12 +11,6 @@ app.main_file = 'cui_demo.js'
 wwwdir'../../canvas-ui/www'
 
 logging.verbose = config'verbose'
-
-action['404.html'] = function()
-	local s = load(indir(exedir(), '../../canvas-ui/demo.html'))
-	s = s:gsub('<base href="(.-)">', '<base href="/">')
-	out(s)
-end
 
 --NOTE: a session is a browser tab.
 local session_state = {} --{sid->{signals=, waiting_thread=}}

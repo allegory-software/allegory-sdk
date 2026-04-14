@@ -142,6 +142,7 @@ require'glue'
 require'schema'
 require'blake3'
 require'bcrypt'
+require'http_date'
 
 local function fullname(firstname, lastname)
 	return (catany('', firstname, lastname) or ''):trim()
@@ -316,8 +317,9 @@ local function session_cache_update(sid, usr, expires)
 end
 
 local function load_session()
-	local cookies = headers('cookie'); if not cookies then return end
-	local s = cookies.session; if not s then return end
+	local s = headers('cookie'); if not s then return end
+	local s = s:match'^session=([^;]*)' or s:match'; *session=([^;]*)'
+	if not s then return end
 	local ver, s = s:match'^(%d)|(.*)$'; if not ver then return end
 	ver = tonumber(ver); if not ver then return end
 	if ver == 1 then
@@ -398,18 +400,14 @@ local function save_session(sess)
 		end
 		session_cache_update(sess.id, sess.usr, sess.expires)
 		local sig = secret_hash(sess.id)
-		setheader('set-cookie', {
-			session = {
-				value = '1|'..sess.id..'|'..sig,
-				attrs = {
-					Path = '/',
-					Expires = sess.expires,
-					Secure = secure_flag or nil, --prevent MITM
-					HttpOnly = true, --prevent JS access
-					SameSite = secure_flag and 'strict' or 'lax',  --prevent BREACH (but also img tracking)
-				},
-			},
-		})
+		setheader('set-cookie',
+			'session=1|'..sess.id..'|'..sig
+			..'; Path=/'
+			..'; Expires='..http_date_format(sess.expires)
+			..(secure_flag and '; Secure' or '') --prevent MITM
+			..'; HttpOnly' --prevent JS access
+			..'; SameSite='..(secure_flag and 'strict' or 'lax') --prevent BREACH (but also img tracking)
+		)
 	elseif sess.id then --logout
 		if use_sql() then
 			query('delete from sess where token = ?', sess.id)
@@ -418,18 +416,14 @@ local function save_session(sess)
 		end
 		session_cache_update(sess.id)
 		sess.id = nil
-		setheader('set-cookie', {
-			session = {
-				value = '0',
-				attrs = {
-					Path = '/',
-					Expires = 0,
-					Secure = secure_flag,
-					HttpOnly = true,
-					SameSite = 'strict',
-				},
-			},
-		})
+		setheader('set-cookie',
+			'session=0'
+			..'; Path=/'
+			..'; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
+			..(secure_flag and '; Secure' or '')
+			..'; HttpOnly'
+			..'; SameSite=strict'
+		)
 	end
 end
 
@@ -450,13 +444,13 @@ local function authenticate(a)
 	if not auth then
 		return nil, 'invalid argument'
 	end
-	http_log('', 'auth', 'auth', '%s', a)
+	log('', 'auth', 'auth', '%s', a)
 	local usr, err = auth(a)
 	if usr then
-		http_log('', 'auth', 'auth-ok', 'usr=%d', usr)
+		log('', 'auth', 'auth-ok', 'usr=%d', usr)
 		return usr
 	else
-		http_log('', 'auth', 'auth-fail', '%s', err)
+		log('', 'auth', 'auth-fail', '%s', err)
 		return nil, err
 	end
 end
@@ -721,7 +715,7 @@ function gen_auth_token(email)
 
 	local token = secret_hash(random_string(32))
 	local ok, err = register_token(usr, token, 'email', token_lifetime, token_maxcount)
-	http_log('note', 'auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
+	log('note', 'auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
 	return ok and token or nil, err
 end
 
@@ -752,7 +746,7 @@ function gen_auth_code(validates, s)
 	local code = secret_hash(random_string(64)):gsub('[a-f]', ''):sub(1, 6)
 	assert(#code == 6)
 	local ok, err = register_token(usr, code, validates, code_lifetime, code_maxcount)
-	http_log('note', 'auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
+	log('note', 'auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
 		usr, code, validates, err)
 	return ok and code or nil, err
 end
