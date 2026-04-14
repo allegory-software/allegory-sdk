@@ -31,17 +31,22 @@ so usage errors come up as I/O errors (retriable).
 * check_errno() is not raising like all other check*() functions.
 
 
-SIMPLIFY / REVIEW
+LOGGING
 ------------------------------------------------------------------------------
 * log is incomplete and hard to read:
 	- live() must take module and action
 	- show +N -N on separate column
 	- add object type in front of debug prefix
 
-* fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
 
+I/O: FS & SOCK
+------------------------------------------------------------------------------
+* fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
 * fs: atomic save()/saver() rethinking?
 
+
+WEBB
+---------------------------------------------------------------------------
 * webb_action: dir/file.ext action/arg.json vs action.json/arg
 
 
