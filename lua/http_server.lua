@@ -521,7 +521,6 @@ function http_server(...)
 
 		local function accept_connection()
 			local ctcp, err, retry = tcp:try_accept(nil, 5)
-			ctcp:setopt('tcp_nodelay', true)
 			if not ctcp then
 				if err == 'closed' then return end --stop() called
 				logerror(tcp, 'accept', '%s', err)
@@ -534,6 +533,7 @@ function http_server(...)
 				end
 				return
 			end
+			ctcp:setopt('tcp_nodelay', true)
 			if self.debug.tracebacks then
 				ctcp.tracebacks = true --for check_io()
 			end

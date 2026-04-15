@@ -127,6 +127,7 @@ require'resolver'
 local function req()
 	return threadenv().http_request
 end
+http_request = req
 
 function http_error(status, content) --status,[content] | {status=,content=,headers=}
 	local err

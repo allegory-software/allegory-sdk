@@ -313,7 +313,7 @@ local function run_action(fallback, action, handler, ext, ...)
 	else
 		handler(...)
 	end
-	threadenv().http_request:finish()
+	http_request():finish()
 	return true
 end
 
