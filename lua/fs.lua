@@ -1947,8 +1947,8 @@ function try_load_tobuffer(file, default_buf, default_len, ignore_file_size)
 	return buf, len
 end
 
-function try_load(file, default, ignore_file_size)
-	local buf, len = try_load_tobuffer(file, default, nil, ignore_file_size)
+function try_load(file, ignore_file_size)
+	local buf, len = try_load_tobuffer(file, nil, nil, ignore_file_size)
 	if not buf then return nil, len end
 	return str(buf, len)
 end
@@ -1959,9 +1959,12 @@ function load_tobuffer(file, default_buf, default_len, ignore_file_size)
 	return buf, len
 end
 
-function load(file, default, ignore_file_size) --load a file into a string.
-	local buf, len = load_tobuffer(file, default, nil, ignore_file_size)
-	if buf == default then return default end
+function load(file, ignore_file_size) --load a file into a string, nil if not found.
+	local buf, len = try_load_tobuffer(file, nil, nil, ignore_file_size)
+	if buf == nil then
+		if len == 'not_found' then return nil end
+		check('fs', 'load', false, '%s: %s', file, len)
+	end
 	return str(buf, len)
 end
 

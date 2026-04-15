@@ -635,7 +635,7 @@ local function file_object(findfile) --{filename -> content | handler(filename)}
 			else
 				local file, err = findfile(file)
 				if file then
-					return load(file, default)
+					return load(file) or default
 				else
 					assert(default ~= nil, err)
 					return default

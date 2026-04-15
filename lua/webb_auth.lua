@@ -223,7 +223,7 @@ end
 local webb_secret = memoize(function()
 	local secret = config'secret'
 	if not secret then
-		secret = try_load(varpath'secret')
+		secret = load(varpath'secret')
 		if not secret then
 			secret = tohex(random_string(16))
 			save(varpath'secret', secret)
@@ -253,7 +253,7 @@ local function phone_path(phone)
 end
 
 local function fs_load_usr(usr)
-	local s = try_load(varpath('usr', usr, 'data'))
+	local s = load(varpath('usr', usr, 'data'))
 	if not s then return nil end
 	local t = eval(s)
 	t.usr = usr
@@ -285,12 +285,12 @@ local function fs_update_usr(usr, updates)
 end
 
 local function fs_email_usr(email)
-	local s = try_load(email_path(email))
+	local s = load(email_path(email))
 	return s and tonumber(s:trim())
 end
 
 local function fs_phone_usr(phone)
-	local s = try_load(phone_path(phone))
+	local s = load(phone_path(phone))
 	return s and tonumber(s:trim())
 end
 
@@ -312,7 +312,7 @@ local function fs_token_gc_and_count(usr, validates)
 		if d:is'file' and name:starts(prefix) then
 			local token_hash = name:sub(#prefix + 1)
 			local marker_path = indir(dir_path, name)
-			local expires = tonumber(try_load(marker_path))
+			local expires = tonumber(load(marker_path))
 			if not expires or expires <= now then
 				rmfile(marker_path)
 				rmfile(fs_token_path(token_hash))
@@ -325,7 +325,7 @@ local function fs_token_gc_and_count(usr, validates)
 end
 
 local function fs_delete_token(token_hash)
-	local s = try_load(fs_token_path(token_hash))
+	local s = load(fs_token_path(token_hash))
 	if not s then return end
 	local t = eval(s)
 	if t then
@@ -353,7 +353,7 @@ local function load_session()
 				from sess where token = ? and expires > ?
 				]], sid, now)
 		else
-			local s = try_load(varpath('sess', sid))
+			local s = load(varpath('sess', sid))
 			if s then
 				local t = eval(s)
 				usr, expires = t.usr, t.expires
@@ -497,7 +497,7 @@ local userinfo = http_once_per_request(function(usr)
 					active = 1 and usr = ?
 				]], usr)
 		else
-			local s = try_load(varpath('usr', usr, 'data'))
+			local s = load(varpath('usr', usr, 'data'))
 			t = s and eval(s)
 			if t then
 				t.usr = usr
@@ -900,7 +900,7 @@ local function token_usr(token)
 		return t.usr, t.validates
 	else
 		local token_hash = secret_hash(token)
-		local s = try_load(fs_token_path(token_hash))
+		local s = load(fs_token_path(token_hash))
 		if not s then return end
 		local t = eval(s)
 		if not t or t.expires <= time() then return end

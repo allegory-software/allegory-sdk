@@ -34,13 +34,13 @@ cmd_server = cmdsection'SERVER CONTROL'
 
 --NOTE: this check is by necessity loosey goosey arbitrary.
 local function findpid(pid)
-	local cmdline = try_load(_('/proc/%s/cmdline', pid), false, true)
+	local cmdline = load(_('/proc/%s/cmdline', pid), true)
 	return cmdline and cmdline:has(basename(arg[-1]))
 		and cmdline:has(basename(arg[0]))
 end
 
 local function running()
-	local pid = tonumber((load(pidfile, false)))
+	local pid = tonumber(load(pidfile))
 	if not pid then return false end
 	return findpid(pid), pid
 end

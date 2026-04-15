@@ -884,9 +884,9 @@ function test.load_not_found()
 	assert(err == 'not_found')
 end
 
-function test.load_default()
-	local s = load('fs_test_nonexistent_file', 'default_val')
-	assert(s == 'default_val')
+function test.load_not_found_returns_nil()
+	local s = load('fs_test_nonexistent_file')
+	assert(s == nil)
 end
 
 function test.save_buffer()

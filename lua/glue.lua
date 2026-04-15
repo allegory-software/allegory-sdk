@@ -2371,7 +2371,7 @@ do
 
 	function load_config_file(file)
 		require'fs'
-		local s = load(file, false)
+		local s = load(file)
 		return s and load_config_string(s)
 	end
 end
