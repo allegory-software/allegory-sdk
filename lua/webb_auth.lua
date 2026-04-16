@@ -262,12 +262,12 @@ end
 
 local function fs_email_usr(email)
 	local s = load(email_path(email))
-	return s and tonumber(s:trim())
+	return s and tonumber(s)
 end
 
 local function fs_phone_usr(phone)
 	local s = load(phone_path(phone))
-	return s and tonumber(s:trim())
+	return s and tonumber(s)
 end
 
 local function fs_token_path(token_hash)
@@ -525,7 +525,7 @@ local function create_user()
 			session().usr = usr
 		end)
 	else
-		local tenant = check500(load(varpath('tenant', host())),
+		local tenant = check500(tonumber(load(varpath('tenant', host()))),
 			'no tenant for host %s', host())
 
 		usr = gen_id('usr')
