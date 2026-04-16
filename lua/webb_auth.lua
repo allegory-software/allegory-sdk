@@ -229,8 +229,9 @@ end
 
 local function fs_load_usr(usr)
 	local s = load(varpath('usr', usr, 'data'))
-	if not s then return nil end
+	if s == nil then return nil end
 	local t = eval(s)
+	assert(istab(t))
 	t.usr = usr
 	return t
 end
@@ -469,6 +470,7 @@ local userinfo = http_once_per_request(function(usr)
 			if t then
 				t.usr = usr
 				t.haspass = t.pass and 1 or 0
+				t.pass = nil --prevent leaking it
 				t.atime = file_attr(varpath('usr', usr, 'data'), 'atime')
 				if not t.active then t = nil end
 			end
@@ -523,7 +525,7 @@ local function create_user()
 			session().usr = usr
 		end)
 	else
-		local tenant = check500(exists(varpath('tenant', host())),
+		local tenant = check500(load(varpath('tenant', host())),
 			'no tenant for host %s', host())
 
 		usr = gen_id('usr')
@@ -779,13 +781,13 @@ local function register_token(usr, token, validates, token_lifetime, token_maxco
 				'too_many_tokens'
 		end
 
+		save(fs_usr_token_path(usr, validates, token), tostring(expires))
 		save(fs_token_path(token), pp({
 			usr       = usr,
 			expires   = expires,
 			validates = validates,
 			ctime     = now,
 		}))
-		save(fs_usr_token_path(usr, validates, token), tostring(expires))
 	end
 
 	return true
