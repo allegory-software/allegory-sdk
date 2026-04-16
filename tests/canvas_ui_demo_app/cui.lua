@@ -4,6 +4,9 @@ require'webb_auth'
 
 logging.verbose = 1
 --logging.debug = 1
+config('host', '*')
+config('http_port', 8888)
+config('https_addr', false)
 config('http_server_debug', 'protocol')
 require'cui_app'('run')--(...)
 
