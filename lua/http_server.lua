@@ -448,6 +448,7 @@ function http_server(...)
 			if not req.headers_sent then
 				if iserror(err, 'http_response') then
 					req.status = err.status
+					req.status_message = err.status_message
 					if err.headers then
 						update(req.response_headers, err.headers)
 					end
