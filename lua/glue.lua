@@ -758,9 +758,13 @@ local NOARG = {} --special arg for zero-arg functions or calls.
 --with fixarg functions we store the memoized value in the leaf node directly.
 local function memoize_fixarg(f, n, cache)
 	cache = cache or {}
-	if n == 0 then
+	if n == 0 then --TODO: optimize this case (attrs uses select(i,...))
 		return function()
 			return attrs(cache, 1, f, NOARG)
+		end, cache
+	elseif n == 1 then --TODO: optimize this case (attrs uses select(i,...))
+		return function(arg)
+			return attrs(cache, 1, f, arg)
 		end, cache
 	else
 		return function(...)
