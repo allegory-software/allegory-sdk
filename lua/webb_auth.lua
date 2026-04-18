@@ -3,36 +3,39 @@
 	webb | session-based authentication
 	Written by Cosmin Apreutesei. Public Domain.
 
-API
-	[try_]login([auth][, switch_user]) -> realusr   login and set lang (if not set)
-	usr([field|'*']) -> val | t | usr         login and get current user field(s) or id
-	tenant()                                  get current tenant
-	touch_usr([usr])                          update (current) user's atime
-	gen_auth_token(email) -> token            generate a one-time long-lived auth token
-	gen_auth_code('email', email) -> code     generate a one-time short-lived auth code
-	gen_auth_code('phone', phone) -> code     generate a one-time short-lived auth code
-	usr_[create|update|create_or_update]({k->v}) -> usr    create and/or update a user
-	usr_delete(usr)                           delete a user
+AUTH API
+	[try_]login([params][, switch_user]) -> real_uid   login and set lang (if not set)
+	usr([field|'*']) -> val | t | uid         login and get current user field(s) or id
+	usr_touch([uid])                          update (current) user's atime
+	tenant() -> tenant                        get current tenant
+ADMIN API
+	usr_list() -> {uid1,...}                  list users
+	usr_save({k->v}) -> uid                   create and/or update a user
+	usr_delete(uid)                           delete a user
 
 SCHEMA
 	auth_schema                              auth schema
 
 CONFIG
-	auth_storage        'fs'           auth backend: 'fs' or 'sql'
-	allow_create_user   true           allow creating new users on auth
-	auto_create_user    true           auto-create anonymous users
-	auth_token_lifetime 3600           forgot-password token lifetime (seconds)
-	auth_token_maxcount 2              max unexpired tokens allowed
-	auth_code_lifetime  300            one-time auth code lifetime (seconds)
-	auth_code_maxcount  6              max unexpired auth codes allowed
+	auth_store          'fs'           user/session storage: 'fs' or 'mdbx'
+	auto_create_user    true           auto-create anonymous users for current session
+	allow_create_user   true           allow creating new users at all
+	auth_code_lifetime  600            one-time auth code lifetime (seconds)
+	auth_code_maxtry    5              max failed attempts before code is invalidated
+	auth_code_cooldown  30             auth code min resend interval in seconds
+	session_lifetime    2 years        session lifetime in seconds
+	auth_allow_nopass   false          allow auth without a password (for dev env)
+
+TODO:
+	- update docs to reflect current API.
 
 API --------------------------------------------------------------------------
 
-	[try_]login([auth][, switch_user]) -> usr
+	[try_]login([params][, switch_user]) -> uid
 
-	Login using an auth object (see below).
+	Login using a specific method and and parameters (see below).
 
-[real]usr() -> usr
+[real]usr() -> uid
 
 	Get the current user id. Same as calling `login()` without args.
 
@@ -44,37 +47,28 @@ API --------------------------------------------------------------------------
 
 	Get full user info.
 
-touch_usr()
+touch_usr([uid])
 
 	Update user's access time. Call it on every request as a way of tracking
 	user activity, eg. for knowing when to send those annoying "forgot items
 	in your cart" emails.
 
-gen_auth_token(email) -> token
+usr_update({email = , phone = , pass = , name = })
 
-	Generate a long-lived authentication token to be put in a link and sent
-	in a forgot-password email, and used once with 'token' auth type.
-	Using it also validates the email that it was generated for.
-	Errors:
-		'email_not_found' - no account with this email.
-		'too_many_tokens' - auth_token_maxcount limit reached.
+	Update the info of the currently logged-in user.
+	errors:
+		'email_taken' - email already used on another account.
+		'phone_taken' - phone already used on another account.
 
-gen_auth_code('email', email) -> code
-gen_auth_code('phone', phone) -> code
 
-	Generate a 6-digit short-lived authentication code to be sent via
-	email or phone and be used back once with 'code' auth type.
-	If there's no user account with that email/phone, a new one is created.
-	Using it also validates the phone or email that it was generated for.
-	Errors:
-		'too_many_tokens' - auth_code_maxcount limit reached.
-
-AUTH OBJECT
+AUTH PARAMETERS
 
 {type = 'session'}
 
 	login using session cookie (default). if there's no session cookie
-	or it's invalid, an anonymous user is created subject to auto_create_user.
+	or it's invalid, an anonymous user is created subject to auto_create_user,
+	errors:
+		'invalid_session' - session is invalid or expired, login a different way.
 
 {type = 'logout'}
 
@@ -85,49 +79,45 @@ AUTH OBJECT
 	login using session cookie but logout and create an anonymous user
 	if the logged in user is not anonymous.
 
-{type = 'pass', action = 'login', email = , pass = }
+{type = 'pass', email = , phone = , pass = }
 
-	login to an existing user using its email and password.
+	login to an existing user using its email or phone and password.
 	errors:
-		'user_pass' - the email or password is wrong.
+		'invalid_credentials' - email/phone/password is wrong.
 
-{type = 'pass', action = 'create', email = , pass = }
+{type = 'code', email = , phone = , code = }
 
-	create a user with a password and login to it.
+	login using a one-time 6-digit code.
+	email or phone must match what the code was generated for.
 	errors:
-		'email_taken' - email already used on another account.
+		'invalid_code'   - code was not found, expired, or wrong.
+		'too_many_tries' - auth_code_maxtry limit reached; code invalidated.
 
-{type = 'nopass', email = }
+{type = 'register_code', email = | phone = }
 
-	login using only user.
+	Find a user or create one and generate a 6-digit code to be sent via email
+	or phone and be used with type = 'code' authentication.
+	Generating a new code invalidates any previous code.
+	errors:
+		'too_many_tries' - auth_code_cooldown limit reached.
 
-{type = 'update', email = , phone = , pass = , name = }
+{type = 'register_pass', email = , phone = , pass = }
 
-	update the info of the currently logged in user.
+	Create a user with a password and login to it.
 	errors:
 		'email_taken' - email already used on another account.
 		'phone_taken' - phone already used on another account.
 
-{type = 'token', token = }
+{type = 'nopass', email = , phone = }
 
-	login using a temporary token that was generated by a remember password
-	form. a token can be used only once.
-	errors:
-		'invalid_token'` - token was not found or expired.
-
-{type = 'code', code = }
-
-	login using a temporary 6-digit code that was generated by a sign-in form.
-	a sign-in code can be used only once.
-	errors:
-		'invalid_code' - code was not found or expired.
+	Login without a password or code (for debugging only).
 
 USER SWITCHING
 
 Regardless of how the user is authenticated, the session cookie is
 updated and it will be sent with the reply. If there was already a user
 logged in before and it was a different user, the callback
-`switch_user(new_usr, old_usr)` is called. If that previous user was
+`switch_user(new_uid, old_uid)` is called. If that previous user was
 anonymous then that user is also deleted afterwards.
 
 ]==]
@@ -138,9 +128,10 @@ require'schema'
 require'bcrypt'
 require'http_date'
 
-local function use_sql()
-	return config('auth_storage', 'fs') == 'sql'
-end
+local _store = {}
+local store = memoize(function()
+	return _store[config'auth_store' or 'fs']
+end)
 
 --schema ---------------------------------------------------------------------
 
@@ -151,7 +142,7 @@ function auth_schema()
 	tables.tenant = {
 		tenant      , idpk,
 		name        , name,
-		host        , name,
+		host        , name, uk,
 		active      , bool1,
 		ctime       , ctime,
 	}
@@ -174,6 +165,10 @@ function auth_schema()
 		roles       , text    ,
 		note        , text    ,
 		theme       , strid   ,
+		auth_code   , strid   ,
+		auth_code_created  , time ,
+		auth_code_trycount , int  ,
+		auth_code_validates, enum'email phone',
 		clientip    , strid   , --when it was created
 		atime       , atime   , --last access time
 		ctime       , ctime   , --creation time
@@ -181,18 +176,9 @@ function auth_schema()
 	}
 
 	tables.sess = {
-		token       , hash   , not_null, pk,
+		sess        , hash   , not_null, pk,
 		usr         , id     , not_null, child_fk,
-		expires     , time   , not_null,
 		clientip    , strid  , --when it was created
-		ctime       , ctime  ,
-	}
-
-	tables.usrtoken = {
-		token       , hash   , not_null, pk,
-		usr         , id     , not_null, child_fk,
-		expires     , time   , not_null,
-		validates   , enum'email phone', not_null,
 		ctime       , ctime  ,
 	}
 
@@ -209,869 +195,584 @@ function auth_schema()
 
 end
 
+--mdbx storage ---------------------------------------------------------------
+
+local mdbx = {}; _store.mdbx = mdbx
+
+--TODO:
+
 --fs storage -----------------------------------------------------------------
 
-local function check_path_safe(s)
-	assert(not s:find'[/\\%z]', 'invalid chars')
-	assert(s ~= '.' and s ~= '..', 'invalid path')
+local fs = {}
+_store.fs = fs
+
+local function valid_path(s)
+	if not s or s == '' or s == '.' or s == '..' or #s > 200 or s:find'[/\\%z]' then
+		return
+	end
+	return s
 end
 
-local function email_path(email)
-	email = email:lower()
-	check_path_safe(email)
-	return varpath('email', email)
+function fs.valid_host(host)
+	return file_is(varpath('hosts', assert(valid_path(host))), 'dir') and host or nil
 end
 
-local function phone_path(phone)
-	check_path_safe(phone)
-	return varpath('phone', phone)
+local function uid_by_path(index_name, host, val)
+	local path = assert(valid_path(val:lower():trim()))
+	return varpath('hosts', host, index_name, path)
 end
 
-local function fs_load_usr(usr)
-	local s = load(varpath('usr', usr, 'data'))
+local function user_data_path(host, uid)
+	assert(isint(uid))
+	return varpath('hosts', host, 'users', tostring(uid), 'data')
+end
+
+function fs.load_user(host, uid)
+	local path = user_data_path(host, uid)
+	local s = load(path)
 	if s == nil then return nil end
 	local t = eval(s)
 	assert(istab(t))
-	t.usr = usr
+	t.id = uid
+	t.host = host
+	t.atime = file_attr(path, 'atime')
+	t.roles = t.roles or {}
 	return t
 end
 
-local function fs_update_usr(usr, updates)
-	local old = fs_load_usr(usr) or {}
-	local new = update({}, old, updates)
-	if old.email ~= new.email then
-		if old.email and new.email then
-			rename(email_path(old.email), email_path(new.email))
-		elseif old.email then
-			rmfile(email_path(old.email))
-		else
-			save(email_path(new.email), tostring(usr))
-		end
+function fs.save_user(t, old)
+	local uid = t.id
+	local old = old or empty
+	local new = update({}, old, t)
+	local host = new.host
+
+	--check if update is possible before starting because once we start,
+	--we can't afford errors since we don't have transactions.
+	assert(not old.host or host == old.host) --bug, not moving users here.
+	if not old.host and not fs.valid_host(host) then
+		return nil,
+			S('invalid_host', 'Invalid host: %s', host),
+			'invalid_host'
 	end
-	if old.phone ~= new.phone then
-		if old.phone and new.phone then
-			rename(phone_path(old.phone), phone_path(new.phone))
-		elseif old.phone then
-			rmfile(phone_path(old.phone))
-		else
-			save(phone_path(new.phone), tostring(usr))
-		end
+	if new.email and new.email ~= old.email
+		and fs.uid_by('email', host, new.email)
+	then
+		return nil,
+			S('email_taken', 'Email already registered'),
+			'email_taken'
 	end
-	save(varpath('usr', usr, 'data'), pp(new))
-end
+	if new.phone and new.phone ~= old.phone
+		and fs.uid_by('phone', host, new.phone)
+	then
+		return nil,
+			S('phone_taken', 'Phone already registered'),
+			'phone_taken'
+	end
 
-local function fs_email_usr(email)
-	local s = load(email_path(email))
-	return s and tonumber(s)
-end
+ 	--user ids are global in case we need to move them between hosts.
+	uid = uid or gen_id'user_id'
 
-local function fs_phone_usr(phone)
-	local s = load(phone_path(phone))
-	return s and tonumber(s)
-end
-
-local function fs_token_path(token_hash)
-	return varpath('usrtoken', token_hash)
-end
-
-local function fs_usr_token_path(usr, validates, token_hash)
-	return varpath('usr', usr, 'token_'..validates..'_'..token_hash)
-end
-
-local function fs_token_gc_and_count(usr, validates)
-	local now = time()
-	local dir_path = varpath('usr', usr)
-	local prefix = 'token_'..validates..'_'
-	local count = 0
-	for name, d in ls(dir_path) do
-		if not name then break end
-		if d:is'file' and name:starts(prefix) then
-			local token_hash = name:sub(#prefix + 1)
-			local marker_path = indir(dir_path, name)
-			local expires = tonumber(load(marker_path))
-			if not expires or expires <= now then
-				rmfile(marker_path)
-				rmfile(fs_token_path(token_hash))
+	--insert/delete/update indexes into user. we do this first so if save(data)
+	--fails, indexes are left orphan and uid_by() returns nil, no harm done.
+	for _,F in ipairs{'email', 'phone'} do
+		local old = old[F]
+		local new = new[F]
+		if old ~= new then
+			--TODO: call uid_by_path() in check section because it asserts.
+			local old_path = old and uid_by_path(F, host, old)
+			local new_path = new and uid_by_path(F, host, new)
+			if old and new then
+				rename(old_path, new_path)
+			elseif old then
+				rmfile(old_path)
 			else
-				count = count + 1
+				save(new_path, tostring(uid))
 			end
 		end
 	end
-	return count
-end
 
-local function fs_delete_token(token_hash)
-	local s = load(fs_token_path(token_hash))
-	if not s then return end
-	local t = eval(s)
-	if t then
-		rmfile(fs_usr_token_path(t.usr, t.validates, token_hash))
+	--finally save the user data.
+	new.id = nil --not saving uid, it's in the user's path.
+	new.host = nil --not saving host, it's in the user's path.
+	for k,v in pairs(new) do --check if asked to also remove some fields
+		if v == POISON then new[k] = nil end
 	end
-	rmfile(fs_token_path(token_hash))
-end
-
---session cookie -------------------------------------------------------------
-
-local function load_session()
-	local s = headers('cookie'); if not s then return end
-	local sid = s:match'^session=([^;]*)' or s:match'; *session=([^;]*)'
-	if not sid or sid == '' then return end
-	if sid:find'[^%x]' then return end --hex chars only
-	local now = time()
-	local usr
-	if use_sql() then
-		usr = first_row_vals([[
-			select usr
-			from sess where token = ? and expires > ?
-			]], sid, now)
-	else
-		local s = load(varpath('sess', sid))
-		local t = s and eval(s)
-		usr = t and t.expires > now and t.usr
+	local atime = new.atime
+	new.atime = nil --atime is kept in file's atime.
+	local data_path = user_data_path(host, uid)
+	save(data_path, pp(new))
+	if atime then
+		file_attr(data_path, {atime = atime})
 	end
-	if not usr then return end
-	return {id = sid, usr = usr}
+
+	return uid
 end
-local session = http_once_per_request(function()
-	return load_session() or {}
+
+function fs.delete_user(host, uid)
+	local u = fs.load_user(host, uid)
+	if not u then return end
+	rm_rf(varpath('hosts', host, 'users', assert(tostring(uid))))
+	--we remove indexes after the data is removed, same idea as on update.
+	for _,F in ipairs{'email', 'phone'} do
+		if u[F] then rmfile(uid_by_path(F, host, u[F])) end
+	end
+end
+
+function fs.touch_user(host, uid)
+	file_attr(user_data_path(host, uid), {atime = now()})
+end
+
+function fs.uid_by(F, host, s)
+	local path = uid_by_path(F, host, s)
+	return tonumber((load(path)))
+end
+
+local function session_path(host, sid)
+	return varpath('sessions', host, sid)
+end
+
+function fs.load_session(host, sid)
+	local path = session_path(host, sid)
+	local uid = tonumber(load(path))
+	if not uid then return end
+	local mtime = file_attr(path, 'mtime')
+	local lifetime = config('session_lifetime', 2 * 365 * 24 * 3600)
+	if mtime + lifetime < now() then --expired
+		fs.delete_session(host, sid)
+		return
+	end
+	return {id = sid, uid = uid}
+end
+
+function fs.save_session(host, sess)
+	save(session_path(host, sess.id), assert(sess.uid))
+end
+
+function fs.delete_session(host, sid)
+	rmfile(session_path(host, sid))
+end
+
+function fs.load_tenant(host)
+	local path = valid_path(host)
+	return path and tonumber(load(varpath('hosts', path, 'tenant')))
+end
+
+function fs.create_tenant(host)
+	local path = assert(valid_path(host))
+	local tid = gen_id'tenant_id'
+	save(varpath('hosts', path, 'tenant'), tid)
+end
+
+function fs.rename_host(old_host, new_host)
+	local old_path = varpath('hosts', assert(valid_path(old_host)))
+	local new_path = varpath('hosts', assert(valid_path(new_host)))
+	rename(old_path, new_path)
+end
+
+--current host ---------------------------------------------------------------
+
+local chost = http_once_per_request(function()
+	return allow(store().valid_host(host()), 'invalid host: %s', host())
 end)
 
-local function session_usr()
-	return session().usr
-end
+--session objects ------------------------------------------------------------
 
-local function save_session(sess)
-	local secure_flag = scheme'https'
-	sess.expires = sess.expires or time() + 2 * 365 * 24 * 3600 --2 years
-	if sess.usr then --login
-		if not sess.id then
-			sess.id = tohex(random_string(16))
-			if use_sql() then
-				query([[
-					insert into sess
-						(token, expires, usr)
-					values
-						(?, ?, ?)
-					]],
-					sess.id,
-					sess.expires,
-					sess.usr
-				)
-			else
-				save(varpath('sess', sess.id), pp({
-					expires = sess.expires,
-					usr = sess.usr,
-				}))
-			end
-		else
-			if use_sql() then
-				query([[
-					update sess set
-						usr = ?,
-						expires = ?
-					where
-						token = ?
-					]], sess.usr, sess.expires, sess.id)
-			else
-				save(varpath('sess', sess.id), pp({
-					expires = sess.expires,
-					usr = sess.usr,
-				}))
-			end
-		end
-		setheader('set-cookie',
-			'session='..sess.id
-			..'; Path=/'
-			..'; Expires='..http_date_format(sess.expires)
-			..(secure_flag and '; Secure' or '') --prevent MITM
-			..'; HttpOnly' --prevent JS access
-			..'; SameSite='..(secure_flag and 'strict' or 'lax') --prevent BREACH (but also img tracking)
-		)
-	elseif sess.id then --logout
-		if use_sql() then
-			query('delete from sess where token = ?', sess.id)
-		else
-			rmfile(varpath('sess', sess.id))
-		end
-		sess.id = nil
-		setheader('set-cookie',
-			'session=0'
-			..'; Path=/'
-			..'; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
-			..(secure_flag and '; Secure' or '')
-			..'; HttpOnly'
-			..'; SameSite=strict'
-		)
-	end
-end
+local session = http_once_per_request(function()
+	local s = headers('cookie'); if not s then return end
+	local sid = s:match'^session=([^;]*)' or s:match'; *session=([^;]*)'
+	if not sid or #sid ~= 32 or sid:find'[^%x]' then return {} end
+	return store().load_session(chost(), sid) or {}
+end)
 
-local function save_usr(usr)
+local function update_session(uid)
 	local sess = session()
-	if not sess.id or sess.usr ~= usr then
-		sess.usr = usr
-		save_session(sess)
+	sess.uid = uid
+	local secure_flag = scheme'https'
+	if sess.uid then --login
+		sess.id = sess.id or tohex(random_string(16))
+		store().save_session(chost(), sess)
+	elseif sess.id then --logout
+		store().delete_session(chost(), sess.id)
+		sess.id = nil
+	end
+	setheader('set-cookie',
+		'session='..(sess.id or 0)
+		..'; Path=/'
+		..'; Max-Age='..(sess.id and 9999999999 or 0)
+		..(secure_flag and '; Secure' or '') --prevent MITM
+		..'; HttpOnly' --prevent JS access
+		..'; SameSite='..(secure_flag and 'strict' or 'lax') --prevent BREACH (but also img tracking)
+	)
+end
+
+--user objects (cached) ------------------------------------------------------
+
+local user = http_once_per_request(function(uid)
+	return store().load_user(chost(), uid)
+end)
+
+local function valid_pass(pass)
+	return pass and #pass >= 1 and #pass <= 72 and pass or nil
+end
+
+local function save_user(t)
+	--validate fields
+	t = t or {}
+	allow(not t.email or (#t.email >= 1 and #t.email <= 200))
+	allow(not t.phone or (#t.phone >= 1 and #t.phone <=  15))
+	allow(not t.name  or (#t.name  >= 1 and #t.name  <= 200))
+	allow(not t.pass or valid_pass(t.pass))
+	t.pass = t.pass and bcrypt_hash(t.pass)
+	if not t.id then --uid not given, assume current user.
+		local suid = session().uid
+		local u = suid and user(suid)
+		if u --same user, just de-anonymizing it
+			and u.anonymous --but: don't hijack a real user's account
+			and u.active --and also: don't resurrect a deactivated account
+		then
+			t.id = suid
+		end
+	end
+	if not t.id then --create user
+		allow(config('allow_create_user', true))
+		wait(0.2) --make flooding up the table a bit slower
+		merge(t, { --apply defaults
+			clientip = client_ip(),
+			lang = multilang() and lang(),
+			active = true,
+			anonymous = true,
+		})
+	end
+	t.host = chost()
+	local old_u = t.id and user(t.id)
+	local uid, err, errcode = store().save_user(t, old_u)
+	if not uid then return nil, err, errcode end
+	user(POISON)
+	return uid
+end
+
+local function delete_user(uid)
+	store().delete_user(chost(), uid)
+	user(POISON)
+end
+
+local function uid_by(which, s)
+	return store().uid_by(which, chost(), s)
+end
+
+--authentication methods -----------------------------------------------------
+
+local auth = {} --auth.<type>(params) -> uid | nil, err, err_code
+
+--login using session cookie
+function auth.session()
+	local uid = session().uid
+	if not (uid and (user(uid) or empty).active) then
+		if not config('auto_create_user', true) then
+			return nil,
+				S('invalid_session', 'Invalid session'),
+				'invalid_session'
+		end
+		return save_user()
+	end
+	return uid
+end
+
+--logout and re-login with an anonymous user or not.
+function auth.logout()
+	update_session(nil)
+	return auth.session()
+end
+
+--login using session cookie but logout and create an anonymous user
+--if the logged in user is not anonymous.
+function auth.anonymous()
+	return save_user()
+end
+
+--no-password authentication (for dev env).
+local function _auth_nopass(a)
+	local email = json_str_arg(a.email)
+	local phone = json_str_arg(a.phone)
+	local uid =
+		email and uid_by('email', email) or
+		phone and uid_by('phone', phone)
+	if not uid then
+		return nil,
+			S('invalid_credentials', 'Invalid credentials'),
+			'invalid_credentials'
+	end
+	return uid
+end
+function auth.nopass(a)
+	allow(config('auth_allow_nopass'))
+	return _auth_nopass(a)
+end
+
+--login with an username and password.
+function auth.pass(a)
+	local uid, err, errcode = _auth_nopass(a)
+	if not uid then return nil, err, errcode end
+	local u = user(uid)
+	local ok = u and u.active and u.pass and valid_pass(a.pass)
+		and bcrypt_verify(a.pass, u.pass)
+	if not ok then
+		return nil,
+			S('invalid_credentials', 'Invalid credentials'),
+			'invalid_credentials'
+	end
+	return uid
+end
+
+--register a new user with a password.
+function auth.register_pass(a)
+	local email = json_str_arg(a.email)
+	local phone = json_str_arg(a.phone)
+	local pass  = json_str_arg(a.pass)
+	allow(email or phone)
+	allow(pass)
+	return save_user{
+		anonymous = false,
+		email     = email,
+		phone     = phone,
+		pass      = pass,
+	}
+end
+
+--find user or create a new one and generate a one-time code for it.
+function auth.register_code(a)
+	local email = json_str_arg(a.email)
+	local phone = json_str_arg(a.phone)
+	allow(email or phone)
+	allow(not (email and phone))
+	local uid_email = email and uid_by('email', email)
+	local uid_phone = phone and uid_by('phone', phone)
+	local uid = uid_email or uid_phone
+	local code = ('%06d'):format(random(0, 999999))
+	if uid then
+		local u = allow(user(uid))
+		allow(u.active)
+		local cooldown = config('auth_code_cooldown', 30)
+		if u.auth_code and u.auth_code_created + cooldown > now() then
+      	return nil,
+				S('too_many_tries',
+					'Too many attempts. Please wait before requesting a new code.'),
+				'too_many_tries'
+		end
+	end
+	return save_user{
+		id = uid,
+		email = not uid and email or nil,
+		phone = not uid and phone or nil,
+		auth_code           = code,
+		auth_code_created   = now(),
+		auth_code_trycount  = 0,
+		auth_code_validates = email and 'email' or 'phone',
+	}
+end
+
+--login with one-time code generated by auth.register_code().
+function auth.code(a)
+	local email = json_str_arg(a.email)
+	local phone = json_str_arg(a.phone)
+	local code  = json_str_arg(a.code)
+	allow(email or phone)
+	allow(code and #code == 6)
+	local uid_email = email and uid_by('email', email)
+	local uid_phone = phone and uid_by('phone', phone)
+	local uid = allow(uid_email or uid_phone)
+	local u = allow(user(uid))
+	allow(u.active)
+	if not u.auth_code then
+		return nil,
+			S('invalid_code', 'Invalid or expired code'),
+			'invalid_code'
+	end
+	local code_lifetime = config('auth_code_lifetime', 10 * 60)
+	local expired = u.auth_code_created + code_lifetime < now()
+	if expired then
+		assert(save_user{
+			id = uid,
+			--delete code
+			auth_code = POISON,
+			auth_code_created = POISON,
+			auth_code_validates = POISON,
+			auth_code_trycount = POISON,
+		})
+		return nil,
+			S('invalid_code', 'Invalid or expired code'),
+			'invalid_code'
+	end
+	if code == u.auth_code then
+		return save_user{
+			id = uid,
+			--delete code
+			auth_code = POISON,
+			auth_code_created = POISON,
+			auth_code_validates = POISON,
+			auth_code_trycount = POISON,
+			--validate email or phone depending on where the code was sent.
+			emailvalid = u.auth_code_validates == 'email' and true or nil,
+			phonevalid = u.auth_code_validates == 'phone' and true or nil,
+			anonymous = false,
+		}
+	end
+	local maxtry = config('auth_code_maxtry', 5)
+	local trycount = (u.auth_code_trycount or 0) + 1
+	if trycount >= maxtry then
+		assert(save_user{
+			id = uid,
+			--delete code
+			auth_code = POISON,
+			auth_code_created = POISON,
+			auth_code_validates = POISON,
+			auth_code_trycount = POISON,
+		})
+		return nil,
+			S('too_many_tries', 'Too many attempts. Please request a new code.'),
+			'too_many_tries'
+	else
+		assert(save_user{
+			id = uid,
+			auth_code_trycount = trycount,
+		})
+		return nil,
+			S('invalid_code', 'Invalid or expired code'),
+			'invalid_code'
 	end
 end
 
 --authentication frontend ----------------------------------------------------
 
-local auth = {} --auth.<type>(auth) -> usr, can_create
-
-local function authenticate(a)
-	local auth = auth[a and istab(a) and a.type or 'session']
-	if not auth then
-		return nil, 'invalid argument'
-	end
-	log('', 'auth', 'auth', '%s', a)
-	local usr, err = auth(a)
-	if usr then
-		log('', 'auth', 'auth-ok', 'usr=%d', usr)
-		return usr
-	else
-		log('', 'auth', 'auth-fail', '%s', err)
-		return nil, err
-	end
-end
-
-local weak_vals_mt = {__mode = 'v'}
-
-local userinfo = http_once_per_request(function(usr)
-	local t
-	if usr then
-		if use_sql() then
-			t = first_row([[
-				select
-					usr,
-					tenant,
-					anonymous,
-					email,
-					emailvalid,
-					if(pass is not null, 1, 0) as haspass,
-					roles,
-					name,
-					phone,
-					phonevalid,
-					#if multilang()
-					lang,
-					country,
-					#endif
-					theme,
-					atime,
-					ctime,
-					mtime
-				from
-					usr
-				where
-					active = 1 and usr = ?
-				]], usr)
-		else
-			local s = load(varpath('usr', usr, 'data'))
-			t = s and eval(s)
-			if t then
-				t.usr = usr
-				t.haspass = t.pass and 1 or 0
-				t.pass = nil --prevent leaking it
-				t.atime = file_attr(varpath('usr', usr, 'data'), 'atime')
-				if not t.active then t = nil end
-			end
-		end
-	end
-	if not t then
-		return {roles = {}}
-	end
-	t.haspass = tonumber(t.haspass) == 1
-	t.roles = index(collect(words(t.roles or {})))
-	t.admin = t.roles.admin
-	t.sessions = setmetatable({}, weak_vals_mt)
-	return t
-end)
-
---session-cookie authentication ----------------------------------------------
-
-local function valid_usr(usr)
-	return userinfo(usr).usr
-end
-
-local function anonymous_usr(usr)
-	return userinfo(usr).anonymous and usr
-end
-
-local function create_user()
-	allow(config('allow_create_user', true))
-	wait(0.2) --make flooding up the table a bit slower
-	local usr
-	if use_sql() then
-		atomic(function()
-			local tenant = check500(first_row([[
-				select tenant from tenant where host = ?
-			]], host()), 'no tenant for host %s', host())
-
-			usr = query([[
-				insert into usr set
-					tenant = :tenant,
-					clientip = :clientip,
-					#if multilang()
-					lang = :lang,
-					#endif
-					atime = now(),
-					ctime = now(),
-					mtime = now()
-			]], {
-				tenant = tenant,
-				clientip = client_ip(),
-				lang = lang(),
-			}).insert_id
-
-			session().usr = usr
-		end)
-	else
-		local tenant = check500(tonumber(load(varpath('tenant', host()))),
-			'no tenant for host %s', host())
-
-		usr = gen_id('usr')
-		save(varpath('usr', usr, 'data'), pp({
-			tenant = tenant,
-			clientip = client_ip(),
-			lang = multilang() and lang(),
-			active = true,
-			anonymous = true,
-		}))
-		session().usr = usr
-	end
-
-	return usr
-end
-
-function auth.session()
-	local usr = valid_usr(session_usr())
-	if not usr then
-		if not config('auto_create_user', true) then
-			return nil, 'session auth failed'
-		end
-		return create_user()
-	end
-	return usr
-end
-
-function auth.logout()
-	save_usr(nil)
-	return auth.session()
-end
-
---anonymous authentication ---------------------------------------------------
-
-function auth.anonymous()
-	return anonymous_usr(session_usr()) or create_user()
-end
-
---password authentication ----------------------------------------------------
-
-local function email_pass_usr(email, pass)
-	if use_sql() then
-		local u = first_row([[
-			select u.usr, u.pass
-			from usr u
-			left join tenant t on t.tenant = u.tenant
-			where
-				u.active = 1
-				and coalesce(t.active, 1) = 1
-				and u.email = ?
-			]], email)
-		return u and u.pass and bcrypt_verify(pass, u.pass) and u.usr or nil
-	else
-		local usr = fs_email_usr(email)
-		if not usr then return nil end
-		local t = fs_load_usr(usr)
-		if not t or not t.active then return nil end
-		return t.pass and bcrypt_verify(pass, t.pass) and usr or nil
-	end
-end
-
-local function email_usr(email)
-	if use_sql() then
-		return first_row([[
-			select usr from usr where
-				email = ?
-			]], email)
-	else
-		return fs_email_usr(email)
-	end
-end
-
-local function phone_usr(phone)
-	if use_sql() then
-		return first_row([[
-			select usr from usr where
-				phone = ?
-			]], phone)
-	else
-		return fs_phone_usr(phone)
-	end
-end
-
-local function delete_user(usr)
-	if use_sql() then
-		query('delete from usr where usr = ?', usr)
-	else
-		local dir_path = varpath('usr', usr)
-		for name, d in ls(dir_path) do
-			if not name then break end
-			if d:is'file' and name:starts'token_' then
-				local token_hash = name:match'^token_[^_]+_(.+)$'
-				if token_hash then rmfile(fs_token_path(token_hash)) end
-			end
-		end
-		local t = fs_load_usr(usr)
-		if t then
-			if t.email then rmfile(email_path(t.email)) end
-			if t.phone then rmfile(phone_path(t.phone)) end
-		end
-		rm_rf(dir_path)
-	end
-end
-
-function usr_delete(usr_to_delete)
-	if http_request() then
-		local roles = usr'roles'
-		allow(roles.dev or roles.admin, 'only devs and admins can remove users')
-		allow(roles.dev or userinfo(usr_to_delete).tenant == tenant(), 'only devs can remove users of other tenants')
-	end
-	delete_user(usr_to_delete)
-end
-
-local function fs_usr_upsert(t)
-	local usr = t.usr or gen_id('usr')
-	t.active = t.active ~= nil and t.active or true
-	fs_update_usr(usr, t)
-	return usr
-end
-
---RULE: 'admin' roles can only create and update users with the same tenant as them.
---RULE: 'dev' roles can create and update users with any tenant.
---RULE: 'admin' roles cannot create or update 'dev' roles.
-local function usr_insert_or_update_args(t, dt)
-	t = update(dt or {}, t)
-	t.roles = isstr(t.roles) and index(collect(words(t.roles))) or t.roles
-	if http_request() then
-		local roles = usr'roles'
-		t.tenant = t.tenant or tenant()
-		allow(roles.admin or roles.dev, 'must be admin or dev to create or update user')
-		allow(roles.dev or not t.roles.dev, 'only devs can create or update devs')
-		allow(roles.dev or t.tenant == tenant(), 'only devs can create/move users of/to other tenants')
-	end
-	t.roles = t.roles ~= nil and cat(keys(t.roles, true), ' ') or nil
-	return t
-end
-
-function usr_create(t)
-	t = usr_insert_or_update_args(t, {anonymous = false})
-	if use_sql() then return insert_row('usr', t) end
-	return fs_usr_upsert(t)
-end
-
-function usr_update(t)
-	t = usr_insert_or_update_args(t)
-	if use_sql() then update_row('usr', t) return end
-	assert(t.usr, 'usr required for update')
-	fs_update_usr(t.usr, t)
-end
-
-function usr_create_or_update(t)
-	t = usr_insert_or_update_args(t, {anonymous = false})
-	if use_sql() then
-		t.usr = insert_or_update_row('usr', t)
-		return t.usr
-	end
-	return fs_usr_upsert(t)
-end
-
---no-password authentication: enable only for debugging!
-function auth.nopass(auth)
-	if false then
-		return first_row([[
-			select u.usr
-			from usr u
-			left join tenant t on t.tenant = u.tenant
-			where
-				u.active = 1
-				and coalesce(t.active, 1) = 1
-				and email = ?
-			]], auth.email)
-	end
-end
-
-function auth.pass(auth)
-	if auth.action == 'login' then
-		local usr = email_pass_usr(auth.email, auth.pass)
-		if not usr then
-			return nil,
-				S('invalid_email_or_pass', 'Invalid email or password'),
-				'email_pass'
-		else
-			return usr
-		end
-	elseif auth.action == 'create' then
-		local email = assert(json_str_arg(auth.email))
-		assert(#email >= 1)
-		local pass = assert(auth.pass)
-		assert(isstr(pass) and #pass >= 1)
-		if email_usr(email) then
-			return nil,
-				S('email_taken', 'Email already registered'),
-				'email_taken'
-		end
-		local usr = anonymous_usr(session_usr()) or create_user()
-		if use_sql() then
-			query([[
-				update usr set
-					anonymous = 0,
-					emailvalid = 0,
-					email = ?,
-					pass = ?
-				where
-					usr = ?
-				]], email, bcrypt_hash(pass), usr)
-		else
-			fs_update_usr(usr, {
-				anonymous  = false,
-				emailvalid = false,
-				email      = email,
-				pass       = bcrypt_hash(pass),
-			})
-		end
-		return usr
-	end
-end
-
---one-time token or code authentication --------------------------------------
-
-local function register_token(usr, token, validates, token_lifetime, token_maxcount)
-
-	local now = time()
-	local expires = now + token_lifetime
-
-	if use_sql() then
-		--now it's a good time to garbage-collect expired tokens
-		query('delete from usrtoken where expires <= from_unixtime(?)', now)
-
-		--check if too many tokens were requested
-		local n = first_row([[
-			select count(1) from usrtoken where
-				usr = ? and validates = ? and expires > from_unixtime(?)
-			]], usr, validates, now)
-		if tonumber(n) >= token_maxcount then
-			return nil,
-				S('too_many_tokens', 'Too many requests. Try again later.'),
-				'too_many_tokens'
-		end
-
-		--add the token to db (break on collisions)
-		query([[
-			insert into usrtoken
-				(token, usr, expires, validates, ctime)
-			values
-				(?, ?, ?, ?, ?)
-			]], token, usr, expires, validates, now)
-	else
-		--gc expired tokens and count valid ones
-		local n = fs_token_gc_and_count(usr, validates)
-		if n >= token_maxcount then
-			return nil,
-				S('too_many_tokens', 'Too many requests. Try again later.'),
-				'too_many_tokens'
-		end
-
-		save(fs_usr_token_path(usr, validates, token), tostring(expires))
-		save(fs_token_path(token), pp({
-			usr       = usr,
-			expires   = expires,
-			validates = validates,
-			ctime     = now,
-		}))
-	end
-
-	return true
-end
-
-function gen_auth_token(email)
-
-	local token_lifetime = config('auth_token_lifetime', 60 * 60)
-	local token_maxcount = config('auth_token_maxcount', 2)
-
-	--find the user with this email
-	local usr = email_usr(email)
-	if not usr then
-		return nil,
-			S('email_not_found', 'Email not registered'),
-			'email_not_found'
-	end
-
-	local token = tohex(random_string(32))
-	local ok, err = register_token(usr, token, 'email', token_lifetime, token_maxcount)
-	log('note', 'auth', 'gen-token', 'usr=%s token=%s'..(ok and '' or ' error=%s'), usr, token, err)
-	return ok and token or nil, err
-end
-
-function gen_auth_code(validates, s)
-
-	local code_lifetime = config('auth_code_lifetime', 10 * 60)
-	local code_maxcount = config('auth_code_maxcount', 6)
-
-	local usr
-	if validates == 'email' then
-		usr = email_usr(s)
-		if not usr then
-			usr = anonymous_usr(session_usr()) or create_user() --grab a new one
-			if use_sql() then
-				query('update usr set email = ? where usr = ?', s, usr)
-			else
-				fs_update_usr(usr, {email = s})
-			end
-		end
-	elseif validates == 'phone' then
-		usr = phone_usr(s)
-		if not usr then
-			usr = anonymous_usr(session_usr()) or create_user() --grab a new one
-			if use_sql() then
-				query('update usr set phone = ? where usr = ?', s, usr)
-			else
-				fs_update_usr(usr, {phone = s})
-			end
-		end
-	else
-		assert(false)
-	end
-
-	local code = ('%06d'):format(random(0, 999999))
-	local ok, err = register_token(usr, code, validates, code_lifetime, code_maxcount)
-	log('note', 'auth', 'gen-code', 'usr=%s code=%s validates=%s'..(ok and '' or ' error=%s'),
-		usr, code, validates, err)
-	return ok and code or nil, err
-end
-
-local function token_usr(token)
-	if not token then return end
-	wait(0.2) --slow down brute-forcing
-	if use_sql() then
-		local t = first_row([[
-			select ut.usr, ut.validates from
-				usrtoken ut
-				inner join usr u on u.usr = ut.usr
-				left join tenant t on t.tenant = u.tenant
-			where
-				u.active = 1
-				and coalesce(t.active, 1) = 1
-				and ut.expires > now()
-				and ut.token = ?
-			]], token)
-		if not t then return end
-		return t.usr, t.validates
-	else
-		local s = load(fs_token_path(token))
-		if not s then return end
-		local t = eval(s)
-		if not t or t.expires <= time() then return end
-		local u = fs_load_usr(t.usr)
-		if not u or not u.active then return end
-		return t.usr, t.validates
-	end
-end
-
---one-time short code authentication -----------------------------------------
-
-local function auth_token(token, auth)
-	--find the user
-	local usr, validates = token_usr(token)
-	if not usr then
-		return nil,
-			S('invalid_token', 'Invalid token'),
-			'invalid_token'
-	end
-
-	if use_sql() then
-		if validates == 'email' then
-			query('update usr set emailvalid = 1, anonymous = 0 where usr = ?', usr)
-		elseif validates == 'phone' then
-			query('update usr set phonevalid = 1, anonymous = 0 where usr = ?', usr)
-		end
-		--remove the token because it's single use, and also to allow
-		--the user to keep forgetting his password as much as he wants.
-		query('delete from usrtoken where token = ?', token)
-	else
-		if validates == 'email' then
-			fs_update_usr(usr, {emailvalid = true, anonymous = false})
-		elseif validates == 'phone' then
-			fs_update_usr(usr, {phonevalid = true, anonymous = false})
-		end
-		fs_delete_token(token)
-	end
-
-	return usr
-end
-
-function auth.token(auth)
-	return auth_token(json_str_arg(auth.token))
-end
-
-function auth.code(auth)
-	return auth_token(json_str_arg(auth.code))
-end
-
---authentication logic -------------------------------------------------------
-
-function try_login(auth, switch_user)
+function try_login(a, switch_user)
 	switch_user = switch_user or pass
-	local usr, err = authenticate(auth)
-	if usr then
-		local susr = valid_usr(session_usr())
-		if susr and usr ~= susr then
-			switch_user(usr, susr)
-			if anonymous_usr(susr) then
-				delete_user(susr)
-				session().id = nil
-				session().usr = nil
-			end
-		end
-		save_usr(usr)
-		local ui = userinfo(usr)
-		setlang(ui.lang) --user lang has priority over action lang.
-		setcountry(ui.country)
+	local authenticate = allow(auth[a and istab(a) and a.type or 'session'])
+	chost()
+	log('', 'auth', 'auth', '%s', a)
+	local uid, err, errcode = authenticate(a)
+	if not uid then
+		log('', 'auth', 'auth-fail', '%s', err)
+		return nil, err, errcode
 	end
-	return usr, err
+	log('', 'auth', 'auth-ok', 'uid=%d', uid)
+	local suid = session().uid
+	if suid and uid ~= suid then
+		switch_user(uid, suid)
+		local su = user(suid)
+		if su and su.anonymous then
+			delete_user(suid)
+			session().id = nil
+			session().uid = nil
+		end
+	end
+	local u = user(uid)
+	setlang(u.lang) --user lang has priority over action lang.
+	setcountry(u.country)
+	update_session(uid)
+	return uid
 end
 function login(...)
 	return allow(try_login(...))
 end
 
 function realusr(attr)
-	local usr = login()
-	local t = userinfo(usr)
-	if attr == '*' then
-		return t
-	elseif attr then
-		return t[attr]
-	else
-		return usr
-	end
-end
-
-function usr(attr)
-	local realusr = login()
-	local usr = args'usr' --impersonated user
-	usr = usr and checkarg(id_arg(usr)) or realusr
-	local u  = userinfo(usr)
-	local ru = userinfo(realusr)
-	if usr ~= realusr then
-		allow(ru.roles.dev or (ru.roles.admin and ru.tenant == u.tenant),
-			'user impersonation denied')
-	end
-	u.realusr = realusr
-	u.realusr_roles = ru.roles
+	local uid = login()
+	local u = user(uid)
 	if attr == '*' then
 		return u
 	elseif attr then
 		return u[attr]
 	else
-		return usr
+		return uid
 	end
 end
 
-function tenant()
-	return usr'tenant'
+function usr(attr)
+	local real_uid = login()
+	local uid = args'uid' --impersonated user
+	uid = uid and checkarg(id_arg(uid)) or real_uid
+	local u  = allow(user(uid))
+	local ru = user(real_uid)
+	if uid ~= real_uid then
+		allow(ru.roles.dev or ru.roles.admin, 'user impersonation denied')
+	end
+	u.real_uid = real_uid
+	u.real_uid_roles = ru.roles
+	if attr == '*' then
+		return u
+	elseif attr then
+		return u[attr]
+	else
+		return uid
+	end
 end
 
-function touch_usr(usr)
+function usr_touch(uid)
 	--only touch usr on page requests
+	--TODO: change this test after ui_action refactor.
 	if args(1) and args(1):find'%.' and not args(1):find'%.html$' then
 		return
 	end
-	usr = usr or session_usr()
-	if not usr then return end
-	if use_sql() then
-		query([[
-			update usr set
-				atime = now(), mtime = mtime
-			where usr = ?
-		]], usr)
-	else
-		file_attr(varpath('usr', usr, 'data'), {atime = time()})
+	uid = uid or session().uid
+	if not uid then return end
+	store().touch_user(chost(), uid)
+end
+
+--update current user profile.
+function usr_update(a)
+	local email = json_str_arg(a.email)
+	local phone = json_str_arg(a.phone)
+	local pass  = json_str_arg(a.pass)
+	local name  = json_str_arg(a.name)
+	local uid = session().uid
+	local u = allow(uid and user(uid))
+	allow(u.active)
+	return save_user{
+		id = uid,
+		email = email,
+		phone = phone,
+		pass = pass,
+		name = name,
+		emailvalid = email and email ~= u.email and false or nil,
+		phonevalid = phone and phone ~= u.phone and false or nil,
+	}
+end
+
+function usr_list()
+	if http_request() then
+		--
 	end
 end
 
---update info (not really auth, but related) ---------------------------------
-
-function auth.update(auth)
-
-	local usr = allow(session_usr())
-	local u   = userinfo(usr)
-	allow(u.usr)
-
-	local email = json_str_arg(auth.email)
-	local phone = json_str_arg(auth.phone)
-	local pass  = json_str_arg(auth.pass)
-	local name  = json_str_arg(auth.name)
-
-	if email then
-		local eusr = email_usr(email)
-		if eusr and eusr ~= usr then
-			return nil,
-				S('email_taken', 'Email already registered'),
-				'email_taken'
-		end
+function usr_save(t)
+	if http_request() then
+		local u = t.id and user(t.id)
+		local r = usr'roles'
+		allow(r.admin or r.dev,
+			'must be admin or dev to create or update user')
+		allow(r.dev or not (u and u.roles.dev),
+			'only devs can create or update devs')
+		allow(r.dev or t.host == chost(),
+			'only devs can create/move users of/to other hosts')
+		allow(r.dev or not (t.roles and t.roles.dev),
+			'non-devs cannot make devs')
+		allow(r.dev or r.admin or not (t.roles and t.roles.admin),
+			'non-admins cannot make admins')
 	end
-
-	if phone then
-		local pusr = phone_usr(phone)
-		if pusr and pusr ~= usr then
-			return nil,
-				S('phone_taken', 'Phone already registered'),
-				'phone_taken'
-		end
-	end
-
-	pass = pass and bcrypt_hash(pass)
-
-	if use_sql() then
-		query([[
-			update usr set
-				#if auth.email then
-					email = :email,
-					emailvalid = if(email <=> :email, 0, emailvalid),
-				#endif
-				#if auth.phone then
-					phone = :phone,
-					phonevalid = if(phone <=> :phone, 0, phonevalid),
-				#endif
-				#if auth.pass then
-					pass = :pass,
-				#endif
-				#if auth.name ~= nil then
-					name = :name,
-				#endif
-				usr = usr
-			where
-				usr = :usr
-			]], {
-				auth = auth,
-				email = email, phone = phone, pass = pass, name = name,
-				usr = usr,
-			})
-	else
-		local updates = {}
-		if email then
-			updates.email = email
-			updates.emailvalid = (u.email == email) and u.emailvalid or false
-		end
-		if phone then
-			updates.phone = phone
-			updates.phonevalid = (u.phone == phone) and u.phonevalid or false
-		end
-		if pass then updates.pass = pass end
-		if auth.name ~= nil then updates.name = name end
-		fs_update_usr(usr, updates)
-	end
-
-	return usr
+	return save_user(t)
 end
 
-return auth_schema --so you can call schema:import'webb_auth'
+function usr_delete(uid)
+	if http_request() then
+		allow(usr() ~= uid, 'cannot delete your own user')
+		local u = allow(user(uid))
+		local r = usr'roles'
+		allow(r.dev or r.admin, 'only devs and admins can remove users')
+		allow(r.dev or u.host == chost(),
+			'only devs can remove users of other hosts')
+	end
+	delete_user(uid)
+end
+
+--return schema so you can call schema:import'webb_auth'
+return auth_schema
