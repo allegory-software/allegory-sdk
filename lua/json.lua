@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 	[try_]json_decode(s[, null_val]) -> v   decode JSON
-	json_encode(v[, indent]) -> s       encode JSON
+	json[_encode](v[, indent]) -> s     encode JSON
 	null                                value to encode/decode json `null`
 	json_asarray(t) -> t                mark t to be encoded as a json array
 	json_pack(...) -> t                 like pack() but nils become null
@@ -152,7 +152,7 @@ function json_encode(v, indent)
 		return s
 	end
 end
-
+json = json_encode
 
 if not ... then --self-test
 
