@@ -83,7 +83,7 @@ FILESYSTEM OPS
 	[try_]rmdir(path) -> path                     remove empty directory
 	[try_]rm_rf(path) -> path                     like `rm -rf`
 	[try_]mkdirs(file, [perms]) -> file           make file's dir
-	[try_]rename(old_path, new_path, [dst_dirs_perms]) -> path rename/move file or dir on the same filesystem
+	[try_]rename(old_path, new_path, [dst_dirs_perms])   rename/move file or dir on the same filesystem
 SYMLINKS & HARDLINKS
 	[try_]symlink(symlink, path, [replace])       create a symbolic link for a file or dir
 	[try_]hardlink(hardlink, path)                create a hard link for a file
@@ -377,7 +377,7 @@ rm_rf(path)
 
 	Remove files and directories.
 
-rename(path, new_path, [opt])
+[try_]rename(path, new_path, [opt])
 
 	Rename/move a file on the same filesystem.
 
@@ -1080,13 +1080,6 @@ function rm_rf(path)
 	check('fs', 'rm_rf', ok, '%s: %s', path, err)
 end
 
-function rename(old_path, new_path, perms)
-	local ok, err = try_rename(old_path, new_path, perms)
-	if ok then return new_path, err end
-	check('fs', 'mv', ok, 'old: %s\nnew: %s\nerror: %s',
-		old_path, new_path, err)
-end
-
 local function try_rmdir_recursive(dir)
 	for file, d in ls(dir) do
 		if not file then
@@ -1130,6 +1123,12 @@ function try_rename(old_path, new_path, dst_dirs_perms)
 	if not ok then return false, err end
 	log('note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
 	return true
+end
+function rename(old_path, new_path, perms)
+	local ok = try_rename(old_path, new_path, perms)
+	if ok then return ok end
+	check('fs', 'mv', ok, 'old: %s\nnew: %s\nerror: %s',
+		old_path, new_path, err)
 end
 
 function try_symlink(link_path, target_path, replace)
