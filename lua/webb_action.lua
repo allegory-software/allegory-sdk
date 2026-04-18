@@ -228,7 +228,7 @@ local function action_handler(action, ...)
 			if not handler then
 				local path = wwwpath(file)
 				if path then
-					if not method'get' then
+					if not method'GET' then
 						http_error(405)
 					end
 					handler = assert(outfile_function(path))

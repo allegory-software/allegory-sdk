@@ -23,15 +23,17 @@ REQUEST CONTEXT
 	http_once_per_connection(f, ...)        memoize for current connection
 	http_request_env(sub_env) -> env        per request shared global environment
 REQUEST
-	headers([name]) -> s|t                  get header or all
+	headers([name]) -> s|t                  get header or all (name must be lowercase)
 	cookie(name) -> s | nil                 get cookie value
-	method([method]) -> s|b                 get/check http method
+	method() -> s                           get http method
+	method(s) -> t|f                        method() == s (s must be uppercase)
 	post([name]) -> s | t | nil             get POST arg or all
 	upload(file) -> true | nil              upload POST data to a file
 	args([n|name]) -> s | t | nil           get path element or GET arg or all
-	scheme([s]) -> s | t|f                  get/check request scheme
-	host([s]) -> s | t|f                    get/check request host
-	port([p]) -> p | t|f                    get/check server port
+	scheme() -> s                           get request scheme
+	scheme(s) -> t|f                        scheme() == s
+	host() -> s                             get request host
+	port() -> p                             get server port
 	email(user) -> s                        get email address of user
 	client_ip() -> s                        get client's ip address
 	isgooglebot() -> t|f                    check if UA is the google bot
@@ -151,6 +153,9 @@ end
 function http_once_per_request(f)
 	return function(...)
 		local req = req()
+		if not req then --no memoization when called outside a request context!
+			return f(...)
+		end
 		local mf = req[f]
 		if not mf then
 			mf = memoize(f)
@@ -164,6 +169,9 @@ end
 function http_once_per_connection(f)
 	return function(...)
 		local req = req()
+		if not req then --no memoization when called outside a request context!
+			return f(...)
+		end
 		local mf = req.tcp[f]
 		if not mf then
 			mf = memoize(f)
@@ -194,22 +202,16 @@ end
 
 --request breakdown ----------------------------------------------------------
 
-function method(which)
-	local m = req().method:lower()
-	if which then
-		return m == which:lower()
-	else
-		return m
-	end
+function method(s)
+	local m = req().method
+	if s then return m == s end
+	return m
 end
 
 function headers(h)
 	local ht = req().headers
-	if h then
-		return ht[h]
-	else
-		return ht
-	end
+	if h then return ht[h] end
+	return ht
 end
 
 function cookie(name)
@@ -247,7 +249,7 @@ function args(v)
 end
 
 function post(v)
-	if not method'post' then
+	if not method'POST' then
 		return
 	end
 	local req = req()
@@ -286,25 +288,16 @@ function upload(file)
 end
 
 function scheme(s)
-	if s then
-		return scheme() == s
-	end
+	if s ~= nil then return scheme() == s end
 	return headers'x-forwarded-proto'
 		or (req().tcp.istlssocket and 'https' or 'http')
 end
 
-function host(s)
-	local h = req().headers['host']
-	if s then
-		return h == s
-	end
-	return h
+function host()
+	return req().headers['host']
 end
 
-function port(p)
-	if p then
-		return port() == tonumber(p)
-	end
+function port()
 	return tonumber(headers'x-forwarded-port')
 		or req().tcp.listen_socket:bound_addr():port()
 end
@@ -336,22 +329,22 @@ local function checkfunc(status, default_err)
 	return function(ret, err, ...)
 		if ret then return ret end
 		err = err and format(err, ...) or default_err
-		local req = req()
+		local ct = req().headers['content-type']
 		http_error{
 			status = status,
 			content = ct == mime_types.json
 				and json_encode{error = err} or tostring(err),
-			message = err,
+			status_message = default_err,
 		}
 	end
 end
-checkfound = checkfunc(404, 'not found')
-checkarg   = checkfunc(400, 'invalid argument')
-allow      = checkfunc(403, 'not allowed')
-check500   = checkfunc(500, 'internal error')
+checkfound = checkfunc(404, 'Not found')
+checkarg   = checkfunc(400, 'Invalid argument')
+allow      = checkfunc(403, 'Not allowed')
+check500   = checkfunc(500, 'Internal error')
 
 function check_etag(s)
-	if not method'get' then return s end
+	if not method'GET' then return s end
 	if out_buffering() then return s end
 	local etag = xxhash128(s):hex()
 	local etags = headers'if-none-match'
@@ -577,7 +570,9 @@ end
 
 function absurl(path)
 	path = path or ''
-	local port = (scheme'https' and port(443) or scheme'http' and port(80))
+	local port = (
+		scheme() == 'https' and port() == 443 or
+		scheme() == 'http'  and port() == 80)
 		and '' or ':'..port()
 	return (config'base_url' or scheme()..'://'..host()..port)..path
 end
