@@ -42,14 +42,21 @@ function fontfile(name, path)
 	add(fontfiles, {name, path})
 end
 
+local function usr_json()
+	return {
+		anonymous = usr'anonymous',
+		email = usr'email',
+		phone = usr'phone',
+	}
+end
+
 --tie webb to cui
 function action.en()
 	local vars = {}
 	if _G.login then
-		if try_login() then --sets lang from user profile.
-			vars.theme = usr'theme'
-			vars.user_id = usr()
-		end
+		login() --sets lang from user profile.
+		vars.theme = usr'theme'
+		vars.user_id = usr()
 	end
 	vars.title = (args(1) or ''):gsub('[-_]', ' ')
 	vars.lang = lang()
@@ -73,8 +80,9 @@ function action.en()
 	vars.main = load(app.main_file)
 	vars.preloads = cat(vars.preloads, '\n')
 	vars.css = cat(vars.css, '\n')
+	vars.usr = json(usr_json())
 	out((([[
-<html lang={{lang}} country={{country}} theme="{{theme}}" user_id={{user_id}}><head>
+<html lang={{lang}} country={{country}} theme="{{theme}}"><head>
 	<meta charset="utf-8">
 	<title>{{title}}</title>
 {{preloads}}
@@ -82,7 +90,7 @@ function action.en()
 {{css}}
 	</style>
 	<script src="/glue.js" global></script>
-	<script src="/ui.js" ></script>
+	<script src="/ui.js" global></script>
 	<script src="/ui_validation.js" ></script>
 	<script src="/ui_nav.js" ></script>
 	<script src="/ui_grid.js" ></script>
@@ -91,6 +99,7 @@ function action.en()
 	<script src="/adapter.js" ></script>
 	<script src="/webrtc.js" ></script>
 	<script>
+usr = {{usr}}
 {{main}}
 	</script>
 </head><style></style>
@@ -101,6 +110,21 @@ function action.en()
 end
 
 action['404.html'] = action.en
+
+action['gen_auth_code.json'] = function()
+	checkarg(method'POST')
+	local email = checkarg(str_arg(post'email'))
+	local code = gen_auth_code{email = email}
+	return {email = email, code = code}
+end
+
+action['login.json'] = function()
+	checkarg(method'POST')
+	local email = checkarg(str_arg(post'email'))
+	local code = checkarg(str_arg(post'code'))
+	login{type = 'code', email = email, code = code}
+	return usr_json()
+end
 
 local function cui_app(...)
 
