@@ -51,6 +51,11 @@ logged in before and it was a different user, the callback
 `switch_user(new_uid, old_uid)` is called. If the previous user was
 anonymous then that user is also deleted afterwards.
 
+TODO
+	- option to look-up user in other hosts to allow for sharing a user across hosts.
+		- sessions are still per-host but 2 sessions can go to the same user.
+	- implement email/phone validations and put all validators together.
+
 ]==]
 
 if not ... then require'webb_auth_test'; return end
@@ -158,7 +163,7 @@ end
 
 local function user_data_path(host, uid)
 	assert(isint(uid))
-	return varpath('hosts', host, 'users', tostring(uid), 'profile')
+	return varpath('users', tostring(uid), 'profile')
 end
 
 function fs.list_hosts() --return {host = tenant_id}
@@ -174,7 +179,7 @@ end
 
 function fs.list_users(host) --return {uid1,...}
 	local t = {}
-	for name, d in ls(varpath('hosts', host, 'users')) do
+	for name, d in ls(varpath('users')) do
 		if not name then break end
 		if d:is'dir' then
 			local uid = tonumber(name)
@@ -260,7 +265,7 @@ function fs.save_user(t, old)
 end
 
 function fs.delete_user(u)
-	rm_rf(varpath('hosts', u.host, 'users', assert(tostring(u.id))))
+	rm_rf(varpath('users', assert(tostring(u.id))))
 	--we remove indexes after the data is removed, same idea as on update.
 	for _,F in ipairs{'email', 'phone'} do
 		if u[F] then rmfile(uid_by_path(F, u.host, u[F])) end
