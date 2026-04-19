@@ -288,6 +288,7 @@ function execaction(action, ...)
 end
 
 local function run_action(fallback, action, handler, ext, ...)
+	setmime(ext)
 	local mime = mime_types[ext]
 	if not handler then
 		if not fallback then
@@ -306,7 +307,6 @@ local function run_action(fallback, action, handler, ext, ...)
 		local handler, ext = action_handler(nf_action, ...)
 		return run_action(false, nf_action, handler, ext, action, ...)
 	end
-	setmime(ext)
 	local filter = mime_type_filters[mime]
 	if filter then
 		filter(handler, ...)
