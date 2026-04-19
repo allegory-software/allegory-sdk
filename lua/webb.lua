@@ -329,11 +329,13 @@ local function checkfunc(status, default_err)
 	return function(ret, err, ...)
 		if ret then return ret end
 		err = err and format(err, ...) or default_err
-		local ct = req().headers['content-type']
+		local ct = req().response_headers['content-type']
+		if ct == mime_types.json then
+			err = json_encode{error = err}
+		end
 		http_error{
 			status = status,
-			content = ct == mime_types.json
-				and json_encode{error = err} or tostring(err),
+			content = err,
 			status_message = default_err,
 		}
 	end
