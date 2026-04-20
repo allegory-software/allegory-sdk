@@ -104,11 +104,11 @@ local function logerror(tcp, action, ...)
 	log('ERROR', 'htsrv', action, '%-4s %s', tcp, _(...))
 end
 
-local function req_debug(req, event, fmt, ...)
-	if logging.filter[''] then return end
+local function req_log(req, severity, module, event, fmt, ...)
+	if severity == '' and logging.filter[''] then return end
 	local dt = clock() - req.start_clock
 	local s = fmt and _(fmt, logargs(...)) or ''
-	log('', 'htsrv', event, '%-4s %-4s %4dms %s', req, req.tcp, dt * 1000, s)
+	log('', module, event, '%-4s %-4s %4dms %s', req, req.tcp, dt * 1000, s)
 end
 
 --responding by raising an error.
@@ -200,11 +200,11 @@ function http_server(...)
 			response_headers = {}, --put them in lowercase!
 			compress = self.compress,
 			max_body_size = self.max_body_size,
-			debugp = self.debug.protocol and req_debug or noop,
-			debug = req_debug,
+			logp = self.debug.protocol and req_log or noop,
+			log = req_log,
 		})
 
-		req:debugp('<=', '%s %s HTTP/%s', method, uri, http_version)
+		req:logp('', 'htsrv', '<=', '%s %s HTTP/%s', method, uri, http_version)
 
 		ownthreadenv().http_request = req
 		next_request_id = next_request_id + 1
@@ -218,7 +218,7 @@ function http_server(...)
 			ctcp:checkp(name, 'invalid header')
 			name = name:lower() --header names are case-insensitive
 			value = value:trim()
-			req:debugp('<-', '%-17s %s', name, value)
+			req:logp('', 'htsrv', '<-', '%-17s %s', name, value)
 			local prev_value = req.headers[name]
 			if prev_value then --duplicate header: append value.
 				req.headers[name] = prev_value .. ',' .. value
@@ -316,7 +316,7 @@ function http_server(...)
 
 			--send status line
 			assert(req.status >= 100 and req.status <= 999, 'invalid status code')
-			req:debugp('=>', '%s', req.status)
+			req:logp('', 'htsrv', '=>', '%s', req.status)
 			wb:putf('HTTP/1.1 %d%s%s\r\n', req.status,
 				req.status_message and ' ' or '', req.status_message or '')
 
@@ -332,7 +332,7 @@ function http_server(...)
 						'invalid header name: %s', k)
 					ctcp:checknp(not v:has'\n' and not v:has'\r',
 						'invalid header value for: %s', k)
-					req:debugp('->', '%-17s %s', k, v)
+					req:logp('', 'htsrv', '->', '%-17s %s', k, v)
 					wb:putf('%s: %s\r\n', k, v)
 				end
 			end
@@ -364,7 +364,7 @@ function http_server(...)
 				body_sent_len = body_sent_len + len
 				ctcp:checkp(not content_length or body_sent_len <= content_length,
 					'body exceeds content-length')
-				req:debugp('>>', '%7d bytes', len)
+				req:logp('', 'htsrv', '>>', '%7d bytes', len)
 				if content_length then
 					wb:putdata(chunk, len)
 				else --chunked
@@ -376,7 +376,7 @@ function http_server(...)
 				body_sent = true
 				ctcp:checkp(not content_length or body_sent_len == content_length,
 					'body size %d ~= content-length %d', body_sent_len, content_length or 0)
-				req:debugp('>>', '%7d bytes, end. total: %d bytes', 0, body_sent_len)
+				req:logp('', 'htsrv', '>>', '%7d bytes, end. total: %d bytes', 0, body_sent_len)
 				if not content_length then
 					wb:put'0\r\n\r\n'
 				end
@@ -412,7 +412,7 @@ function http_server(...)
 				assert(body_sent)
 			end
 			if req.close then
-				req:debugp('>>', 'close')
+				req:logp('', 'htsrv', '>>', 'close')
 				ctcp:close() --send FIN
 			end
 			return req
@@ -458,7 +458,7 @@ function http_server(...)
 						req:send_headers():send_body_chunk(err.content)
 					end
 					if err.traceback then --dev wants to debug allow() etc.
-						req:debug('req', '%s', err)
+						req:log('ERROR', 'htsrv', 'req', '%s', err)
 					end
 				else
 					logerror(ctcp, 'respond', '%s', err)
@@ -474,7 +474,7 @@ function http_server(...)
 		req:finish()
 
 		if self.debug.requests then
-			req:debug('req', '%03d %-5s %s', req.status, method, uri)
+			req:log('', 'htsrv', 'req', '%03d %-5s %s', req.status, method, uri)
 		end
 
 	end --handle_request()
