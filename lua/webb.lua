@@ -147,6 +147,10 @@ function http_redirect(url, status)
 	http_error{status = status or 303, headers = {location = url}}
 end
 
+function wlog(...)
+	req():log(...)
+end
+
 --context-free utils ---------------------------------------------------------
 
 --per-request memoization.
