@@ -451,7 +451,7 @@ end
 function test.readlink_dir()
 	local d1 = 'fs_test_readlink_dir'
 	local d2 = 'fs_test_readlink_dir_target'
-	rmdir(d1)
+	rmfile(d1)
 	rmdir(d2..'/test_dir')
 	rmdir(d2)
 	rmdir(d2)
@@ -461,14 +461,14 @@ function test.readlink_dir()
 	if ok then
 		assert(file_is(d1, 'symlink'))
 		local t = {}
-		for d in ls(d1) do
+		for d in try_ls(d1) do
 			t[#t+1] = d
 		end
 		assert(#t == 1)
 		assert(t[1] == 'test_dir')
 		rmdir(d1..'/test_dir')
 		assert(readlink(d1) == d2)
-		rmdir(d1)
+		rmfile(d1)
 		rmdir(d2)
 	else
 		rmdir(d2, true)
@@ -662,7 +662,7 @@ function test.ls_empty()
 	rm_rf'fs_test_dir_empty/'
 	mkdir(d, true)
 	local found
-	for name in ls(d) do
+	for name in try_ls(d) do
 		found = true
 	end
 	assert(not found)
@@ -675,7 +675,7 @@ function test.ls()
 	mkdir('fs_test_ls/d', true)
 	open('fs_test_ls/f', 'w'):close()
 	local files = {}
-	for file, d in ls'fs_test_ls' do
+	for file, d in try_ls'fs_test_ls' do
 		local t = {}
 		files[file] = t
 		t.type  = assert(d:attr('type' , false))
@@ -715,7 +715,7 @@ end
 function test.ls_not_found()
 	local n = 0
 	local err
-	for file, err1 in ls'nonexistent_dir' do
+	for file, err1 in try_ls'nonexistent_dir' do
 		if not file then
 			err = err1
 			break
@@ -731,7 +731,7 @@ end
 function test.ls_is_file()
 	local n = 0
 	local err
-	for file, err1 in ls(fs_test_lua) do
+	for file, err1 in try_ls(fs_test_lua) do
 		if not file then
 			err = err1
 			break
@@ -741,7 +741,7 @@ function test.ls_is_file()
 	end
 	assert(n == 0)
 	assert(#err > 0)
-	assert(err == 'not_found')
+	assert(err == 'not_dir')
 end
 
 --readall, readn, skip -------------------------------------------------------
@@ -1111,7 +1111,7 @@ function test.ls_dotdirs()
 	rmdir(d)
 	mkdir(d)
 	local found_dot, found_dotdot = false, false
-	for name, dir in ls(d, '..') do
+	for name, dir in try_ls(d, '..') do
 		if not name then break end
 		if name == '.' then found_dot = true end
 		if name == '..' then found_dotdot = true end
