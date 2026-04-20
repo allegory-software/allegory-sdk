@@ -78,12 +78,13 @@ FILESYSTEM OPS
 	abspath(path[, cwd]) -> path                  convert path to absolute path
 	startcwd() -> path                            get the cwd that process started with
 	[try_]chdir(path)                             set current working directory
-	[try_]mkdir(dir, [recursive], [perms]) -> dir make directory
+	[try_]mkdir(dir, [recursive], [perms], [sync]) -> dir   make directory
 	[try_]rmfile(path) -> path                    remove file
 	[try_]rmdir(path) -> path                     remove empty directory
 	[try_]rm_rf(path) -> path                     like `rm -rf`
 	[try_]mkdirs(file, [perms]) -> file           make file's dir
 	[try_]rename(old_path, new_path, [dst_dirs_perms])   rename/move file or dir on the same filesystem
+	[try_]sync_dir(dir)                           make fs changes inside dir durable
 SYMLINKS & HARDLINKS
 	[try_]symlink(symlink, path, [replace])       create a symbolic link for a file or dir
 	[try_]hardlink(hardlink, path)                create a hard link for a file
@@ -994,7 +995,7 @@ local function _try_mkdir(path, perms)
 	return true
 end
 
-function try_mkdir(dir, recursive, perms)
+function try_mkdir(dir, recursive, perms, sync)
 	if recursive then
 		dir = path_normalize(dir, true, true) --avoid creating dir in dir/.. sequences
 		if not dir or dir == '.' then
@@ -1017,30 +1018,40 @@ function try_mkdir(dir, recursive, perms)
 			local dir = pop(t)
 			local ok, err = _try_mkdir(dir, perms)
 			if not ok then return ok, err end
+			if sync ~= false and err ~= 'already_exists' then
+				local ok, err = try_sync_dir(dirname(dir))
+				if not ok then return ok, err end
+			end
 		end
 		return true
 	else
-		return _try_mkdir(dir, perms)
+		local ok, err = _try_mkdir(dir, perms)
+		if not ok then return ok, err end
+		if sync ~= false and err ~= 'already_exists' then
+			local sok, serr = try_sync_dir(dirname(dir))
+			if not sok then return sok, serr end
+		end
+		return ok, err
 	end
 end
-function mkdir(dir, recursive, perms)
-	local ok, err = try_mkdir(dir, recursive, perms)
+function mkdir(dir, recursive, perms, sync)
+	local ok, err = try_mkdir(dir, recursive, perms, sync)
 	if ok then return dir, err end
 	check('fs', 'mkdir', ok, '%s%s%s: %s', dir, perms and ' ' or '', perms or '', err)
 end
 
-function try_mkdirs(filepath, perms)
+function try_mkdirs(filepath, perms, sync)
 	local dir = dirname(filepath)
 	if dir and dir ~= '.' and dir ~= '/' then
-		local ok, err = try_mkdir(dir, true, perms)
+		local ok, err = try_mkdir(dir, true, perms, sync)
 		if not ok then return nil, err end
 	end
 	return filepath
 end
-function mkdirs(filepath, perms)
+function mkdirs(filepath, perms, sync)
 	local dir = dirname(filepath)
 	if dir then
-		mkdir(dir, true, perms)
+		mkdir(dir, true, perms, sync)
 	end
 	return filepath
 end
@@ -1127,8 +1138,24 @@ end
 function rename(old_path, new_path, perms)
 	local ok, err = try_rename(old_path, new_path, perms)
 	if ok then return ok end
-	check('fs', 'mv', ok, 'old: %s\nnew: %s\nerror: %s',
+	check('fs', 'mv', false, 'old: %s\nnew: %s\nerror: %s',
 		old_path, new_path, err)
+end
+
+function try_sync_dir(dir, quiet)
+	local f, err = try_open{path = dir, flags = 'rdonly directory', quiet = quiet}
+	if not f then return nil, err end
+	local ok, err = f:try_sync()
+	if not ok then
+		f:try_close()
+		return nil, err
+	end
+	return f:try_close()
+end
+function sync_dir(dir, quiet)
+	local ok, err = try_sync_dir(dir, quiet)
+	if ok then return ok end
+	check('fs', 'sync_dir', false, '%s: %s', dir, err)
 end
 
 function try_symlink(link_path, target_path, replace)
@@ -1999,13 +2026,7 @@ function file_saver(file, file_perms, dir_perms)
 			f:sync()
 			f:close()
 			rename(tmpfile, file)
-			local df = open{
-				path = dirname(file),
-				flags = 'rdonly directory',
-				quiet = true,
-			}
-			df:sync()
-			df:close()
+			sync_dir(dirname(file))
 			log('note', 'fs', 'save', '%s (%s)', file, kbytes(n))
 		end
 	end
