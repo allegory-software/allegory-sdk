@@ -47,8 +47,8 @@ FILE LOCKING
 	f:[try_]lock(['sh'|'ex'], [nonblock])
 	f:[try_]unlock([nonblock])
 DIRECTORY LISTING
-	ls(dir, [opt]) -> iter() -> name,d | false,err   contents iterator
-	  d:next() -> name,d | false,err              call the iterator explicitly
+	[try_]ls(dir, [opt]) -> iter() -> name,d | false,err   contents iterator
+	  d:[try_]next() -> name,d                    call the iterator explicitly
 	  d:[try_]close()                             close iterator
 	  d:closed() -> true|false                    check if iterator is closed
 	  d:name() -> s                               dir entry's name
@@ -272,7 +272,7 @@ f:[try_]attr([attr]) -> val|t
 
 DIRECTORY LISTING ------------------------------------------------------------
 
-ls([dir], [opt]) -> d, next
+[try_]ls([dir], [opt]) -> d, next
 
 	Directory contents iterator. dir defaults to '.'.
 	opt is a string that can include:
@@ -280,7 +280,7 @@ ls([dir], [opt]) -> d, next
 
 	USAGE
 
-		for name, d in ls() do
+		for name, d in try_ls() do
 			if not name then
 				print('error: ', d)
 				break
@@ -294,7 +294,7 @@ ls([dir], [opt]) -> d, next
 	ls() (eg. 'not_found') are passed to the iterator also, so the
 	iterator must be called at least once to see them.
 
-	d:next() -> name,d | false,err | nil
+	d:[try_]next() -> name,d | false,err | nil
 
 		Call the iterator explicitly.
 
@@ -1081,7 +1081,7 @@ function rm_rf(path)
 end
 
 local function try_rmdir_recursive(dir)
-	for file, d in ls(dir) do
+	for file, d in try_ls(dir) do
 		if not file then
 			if d == 'not_found' then return true, d end
 			return file, d
@@ -1125,7 +1125,7 @@ function try_rename(old_path, new_path, dst_dirs_perms)
 	return true
 end
 function rename(old_path, new_path, perms)
-	local ok = try_rename(old_path, new_path, perms)
+	local ok, err = try_rename(old_path, new_path, perms)
 	if ok then return ok end
 	check('fs', 'mv', ok, 'old: %s\nnew: %s\nerror: %s',
 		old_path, new_path, err)
@@ -1719,7 +1719,12 @@ function dir.try_next(dir)
 		return check_errno(false, errno)
 	end
 end
-dir.next = unprotect_io(dir.try_next)
+function dir.next(dir)
+	local name, d = dir:try_next()
+	if name == nil then return nil end --eof
+	check_io(nil, name, d) --name, d | false, err
+	return name, d
+end
 
 --dirent.d_type consts
 local DT_UNKNOWN = 0
@@ -1777,7 +1782,7 @@ local function dir_check(dir)
 	assert(dir._dentry ~= nil, 'dir not ready') --must call next() at least once.
 end
 
-function ls(p, opt)
+function try_ls(p, opt)
 	local skip_dot_dirs = not (opt and opt:find('..', 1, true))
 	p = p or '.'
 	local dir = dir_ct(#p)
@@ -1789,6 +1794,10 @@ function ls(p, opt)
 		dir._errno = errno()
 	end
 	return dir.try_next, dir
+end
+function ls(...)
+	local _, dir = try_ls(...)
+	return dir.next, dir
 end
 
 function dir.path(dir)
@@ -1844,7 +1853,7 @@ end
 
 local function scandir1(path, dive)
 	local ds = {}
-	local next, d = ls(path)
+	local next, d = try_ls(path)
 	local name, err
 	local sc = {}
 	setmetatable(sc, sc)
@@ -1884,7 +1893,7 @@ local function scandir1(path, dive)
 		if not d then return nil end --closed
 		if name and d:is('dir', false) then
 			if not dive or dive(d) then
-				local next1, d1 = ls(d:path())
+				local next1, d1 = try_ls(d:path())
 				assert(next1 == next) --because we reuse next()
 				push(ds, d)
 				d = d1
