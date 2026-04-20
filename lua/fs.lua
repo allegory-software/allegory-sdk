@@ -10,6 +10,7 @@ FEATURES
 	* cdata buffer-based I/O
 
 TODO
+	* sync option on rename(), rmfile(), rmdir(), symlink(), hardlink()
 	* cp() via copy_file_range() (sync only)
 	* realpath() instead of recursive readlink() (faster, more accurate?)
 	* get/set btime via statx() (ext4+)
@@ -82,7 +83,7 @@ FILESYSTEM OPS
 	[try_]rmfile(path) -> path                    remove file
 	[try_]rmdir(path) -> path                     remove empty directory
 	[try_]rm_rf(path) -> path                     like `rm -rf`
-	[try_]mkdirs(file, [perms]) -> file           make file's dir
+	[try_]mkdirs(file, [perms], [sync]) -> file   make file's dir
 	[try_]rename(old_path, new_path, [dst_dirs_perms])   rename/move file or dir on the same filesystem
 	[try_]sync_dir(dir)                           make fs changes inside dir durable
 SYMLINKS & HARDLINKS
@@ -104,11 +105,11 @@ FILESYSTEM INFO
 	fs_info(path) -> {size=, free=}               get free/total disk space for a path
 HI-LEVEL APIs
 	[try_]load[_tobuffer](path, [default], [ignore_fsize]) -> buf,len  read file to string or buffer
-	[try_]save(path, v | buf,len | read, [file_perms], [dir_perms])    atomic save value/buffer/reader
+	[try_]save(path, v | buf,len | read, [file_perms], [dir_perms], [sync]) atomic save value/buffer/reader
 	file_saver(path, [file_perms], [dir_perms])
 		-> try_write(v | buf,len | nil,0) -> ok, err
 	[try_]touch(file, [mtime])                    create file or update mtime
-	gen_id(name, [start=1]) -> id                 persistent atomic, concurrent autoincrement
+	gen_id(name, [start=1]) -> id                 durable, atomic, concurrent autoincrement
 CONFIG
 	vardir        default: scriptdir()..'/var'
 
@@ -995,6 +996,8 @@ local function _try_mkdir(path, perms)
 	return true
 end
 
+--NOTE: sync defaults to true unlike most standard libraries.
+--Set it to false only if you notice slowness or for cache dirs, etc.
 function try_mkdir(dir, recursive, perms, sync)
 	if recursive then
 		dir = path_normalize(dir, true, true) --avoid creating dir in dir/.. sequences
@@ -1142,6 +1145,7 @@ function rename(old_path, new_path, perms)
 		old_path, new_path, err)
 end
 
+--if using `mount -o dirsync` this is reduntant.
 function try_sync_dir(dir, quiet)
 	local f, err = try_open{path = dir, flags = 'rdonly directory', quiet = quiet}
 	if not f then return nil, err end
@@ -1666,13 +1670,13 @@ function file.try_lock(f, op, nonblock)
 	return ok, err
 end
 function file.lock(f, op, nonblock)
-	return check_io(f, f:try_lock(op, nonblock))
+	return f:check_io(f:try_lock(op, nonblock))
 end
 function file.try_unlock(f, nonblock)
 	return f:try_lock('un', nonblock)
 end
 function file.unlock(f, nonblock)
-	return check_io(f, f:try_unlock(nonblock))
+	return f:check_io(f:try_unlock(nonblock))
 end
 
 --directory listing ----------------------------------------------------------
@@ -2005,13 +2009,14 @@ end
 
 --return a try_write(v | buf,len) -> true | false,err function
 --that doesn't yield, so you can use it in ffi write callbacks.
-function file_saver(file, file_perms, dir_perms)
+function file_saver(file, file_perms, dir_perms, sync)
 	require'proc'
+	sync = sync ~= false
 	local tmpfile = file..'~'..getpid()
 	local f, n
 	local function _write(buf, sz)
 		if not f then
-			mkdirs(tmpfile, dir_perms)
+			mkdirs(tmpfile, dir_perms, sync)
 			f = open{path = tmpfile, mode = 'w', perms = file_perms, quiet = true}
 			n = 0
 		end
@@ -2023,10 +2028,10 @@ function file_saver(file, file_perms, dir_perms)
 			f:write(buf, sz)
 			n = n + sz
 		else --eof
-			f:sync()
+			if sync then f:sync() end
 			f:close()
 			rename(tmpfile, file)
-			sync_dir(dirname(file))
+			if sync then sync_dir(dirname(file)) end
 			log('note', 'fs', 'save', '%s (%s)', file, kbytes(n))
 		end
 	end
@@ -2054,8 +2059,8 @@ end
 
 --write a Lua value or read()->buf,sz to a file
 --atomically and durably (on drives with PLP).
-function try_save(file, arg, sz, file_perms, dir_perms)
-	local write = file_saver(file, file_perms, dir_perms)
+function try_save(file, arg, sz, file_perms, dir_perms, sync)
+	local write = file_saver(file, file_perms, dir_perms, sync)
 	if isfunc(arg) then --reader
 		local read = arg
 		while true do
@@ -2097,17 +2102,22 @@ function touch(file, mtime)
 	return check('fs', 'touch', ok and file, '%s: %s', file, err)
 end
 
+--8 syscalls to increment a number safely, maybe you need a DB :)
 function gen_id(name, start)
 	local next_id_file = varpath('next_'..name)
 	local f = open(next_id_file, 'rw')
 	f:lock'ex'
 	local s = str(f:readall())
-	local n = tonumber(s) or start or 1
-	check_io(f, n and n >= 0 and floor(n) == n, '%s invalid: %s', next_id_file, s)
+	local n = tonumber(s)
+	local need_sync_dir = not n --most likely file was created now
+	n = n or start or 1
+	f:check_io(n and n >= 0 and floor(n) == n, '%s invalid: %s', next_id_file, s)
 	f:truncate(0)
 	f:write(tostring(n + 1))
+	f:sync()
 	f:unlock()
 	f:close()
+	if need_sync_dir then sync_dir(varpath()) end
 	log('note', 'fs', 'gen_id', '%s: %d', name, n)
 	return n
 end
