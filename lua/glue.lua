@@ -98,7 +98,7 @@ CACHING
 	memoize[_multiret](f,opt...) -> mf,cache   memoize pattern
 	tuples(opt...) -> tuple(...) -> t          create a tuple space
 	istuple(t)                     is t a tuple
-	POISON                         poison value to clear cache on memoized func
+	CLEAR                          poison value to clear cache on memoized func
 STRINGS
 	format                       = string.format
 	fmt                          = string.format
@@ -795,8 +795,8 @@ end
 
 --special value to use as arg#1 on a memoized function to clear the cache
 --on a prefix of arguments.
-POISON = {}
-local POISON = POISON
+CLEAR = {}
+local CLEAR = CLEAR
 local debug_getinfo = debug.getinfo
 function memoize(f, cache, minarg, maxarg)
 	if not minarg then
@@ -812,7 +812,7 @@ function memoize(f, cache, minarg, maxarg)
 		and memoize_vararg(f, minarg, maxarg, cache)
 		 or memoize_fixarg(f, minarg, cache)
 	return function(...)
-		if ... == POISON then
+		if ... == CLEAR then
 			attrs_clear(cache, select(2, ...))
 		else
 			return mf(...)
