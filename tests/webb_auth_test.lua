@@ -13,6 +13,7 @@ local function newreq()
 		uri = '/',
 		headers = {host = 'test'},
 		response_headers = {},
+		log = noop,
 	}
 end
 local _time = 0

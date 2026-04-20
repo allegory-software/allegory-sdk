@@ -2,18 +2,20 @@
 
 require'webb_auth'
 
-logging.verbose = 1
---logging.debug = 1
 config('host', '*')
 config('http_port', 8888)
 config('https_addr', false)
-config('http_server_debug', 'protocol')
+config('http_server_debug', 'requests')
 require'cui_app'('run')--(...)
+
+logging.debug = true
+logging.verbose = config('verbose', true)
+logging.filter.log = true
+logging.filter.open = true
+errortype'http_response'.addtraceback = true
 
 app.main_file = 'cui_demo.js'
 wwwdir'../../canvas-ui/www'
-
-logging.verbose = config'verbose'
 
 --NOTE: a session is a browser tab.
 local session_state = {} --{sid->{signals=, waiting_thread=}}
