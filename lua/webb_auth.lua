@@ -213,7 +213,13 @@ end
 
 function fs.uid_by(ix_name, host, ix_val)
 	local path = varpath('hosts', host, 'uid_by_'..ix_name, check_filename(ix_val))
-	return tonumber((load(path)))
+	local f, err = try_open(path, 'r')
+	if not f then return nil end
+	f:lock'sh' --wait for any in-progress write
+	local s = str(f:readall())
+	f:unlock()
+	f:close()
+	return tonumber(s)
 end
 
 --create/update/delete email/phone->uid index, also checking for clashes.
