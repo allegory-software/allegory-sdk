@@ -153,6 +153,7 @@ local fs = {}
 _store.fs = fs
 
 local function check_filename(s)
+	s = s:trim():lower()
 	return checkarg(s and s ~= '' and s ~= '.' and s ~= '..' and #s <= 200
 		and not s:find'[/\\%z]' and s)
 end
@@ -166,12 +167,11 @@ function fs.check_host(host)
 end
 
 function fs.add_tenant(host)
-	local path = check_filename(host)
+	host = check_filename(host)
 	local tid = gen_id'tenant_id'
 	save(hostpath(host, 'tenant'), tid)
 	mkdir(hostpath(host, 'uid_by_email'))
 	mkdir(hostpath(host, 'uid_by_phone'))
-	sync_dir(hostpath(host)) --make uid_by dirs durable
 	return tid
 end
 
@@ -211,46 +211,51 @@ function fs.user_ids() --return {uid1,...}
 	return t
 end
 
---exclusive atomic (for small files!) save. durable if you call sync_dir().
-local function try_excl_save(path, s)
-	local f, err = try_open{path = path, flags = 'creat excl wronly'}
-	if not f and err == 'already_exists' then return false end
-	check_io(nil, f, err)
-	f:write(s)
-	f:sync()
-	f:close()
-	return true
+function fs.uid_by(ix_name, host, ix_val)
+	local path = varpath('hosts', host, 'uid_by_'..ix_name, check_filename(ix_val))
+	return tonumber((load(path)))
 end
 
 --create/update/delete email/phone->uid index, also checking for clashes.
---try_excl_save prevents TOCTOU on concurrent updates.
---sync_dir() prevents user from reappearing after an OS crash.
-local function fs_update_user_uniq_ix(host, ix_name, ix_val, uid)
-	ix_val = check_path(ix_val:lower():trim())
+--flock serializes concurrent access; creat+rdwr allows idempotent retries.
+--sync_dir() makes creates/removes durable across power loss.
+local function fs_link_unlink_user_unique_index(host, ix_name, ix_val, uid)
+	ix_val = check_filename(ix_val)
 	local ix_dir = varpath('hosts', host, 'uid_by_'..ix_name)
 	local ix_file = indir(ix_dir, ix_val)
 	if uid then
 		assert(isint(uid))
-		allow(try_excl_save(ix_file, tostring(uid)),
-			S(ix_name..'_taken', ix_name..' already registered'))
+		local uid_s = tostring(uid)
+		local f = open{path = ix_file, flags = 'creat rdwr'}
+		f:lock'ex'
+		local s = str(f:readall())
+		if s and #s > 0 then
+			f:unlock()
+			f:close()
+			allow(s == uid_s, S(ix_name..'_taken', ix_name..' already registered'))
+		else
+			f:write(uid_s)
+			f:sync()
+			f:unlock()
+			f:close()
+		end
 	else
 		rmfile(ix_file)
 	end
-	sync_dir(ix_dir)
+	sync_dir(ix_dir) --make create/remove durable
 end
-
-local function fs_link_unlink_host(host, u, op)
-	local uid = op == 'link' and u.id or nil
-	if u.email then fs_update_user_uniq_ix(host, 'email', u.email, uid) end
-	if u.phone then fs_update_user_uniq_ix(host, 'phone', u.phone, uid) end
+local function fs_link_host_user(host, uid, u)
+	if u.email then fs_link_unlink_user_unique_index(host, 'email', u.email, uid) end
+	if u.phone then fs_link_unlink_user_unique_index(host, 'phone', u.phone, uid) end
 end
-function fs.link_host(host, uid)
-	local u = load_user_file(uid)
-	fs_link_unlink_host(host, u, 'link')
+local function fs_unlink_host_user(host, uid, u)
+	if u.email then fs_link_unlink_user_unique_index(host, 'email', u.email, nil) end
+	if u.phone then fs_link_unlink_user_unique_index(host, 'phone', u.phone, nil) end
 end
-function fs.unlink_host(host, uid)
-	local u = load_user_file(uid)
-	fs_link_unlink_host(host, u, 'unlink')
+local function fs_update_user_unique_index(host, ix_name, uid, old_val, new_val)
+	if old_val == new_val then return end
+	if new_val then fs_link_unlink_user_unique_index(host, ix_name, new_val, uid) end
+	if old_val then fs_link_unlink_user_unique_index(host, ix_name, old_val, nil) end
 end
 
 local function load_user_profile(uid)
@@ -265,44 +270,43 @@ local function save_user_profile(uid, u)
 	save(user_path(uid, 'profile'), pp(u))
 end
 
---user ids are global so a user can be in multiple hosts.
-function fs.add_user(init_values)
-	local uid = gen_id'user_id'
-	local defaults = {anonymous = true, active = true, roles = {}}
-	local u = update(defaults, init_values)
-	save_user_profile(uid, u)
-end
-
 local function with_locked_user(uid, fn)
 	local lf = open(user_path(uid, 'lock'), 'a')
 	lf:lock'ex'
 	local ok, err = pcall(function()
-		local u = load_user_profile(uid)
-		if fn(u) == 'save' then
-			save_user_profile(uid, u)
-		end
+		local u = assert(load_user_profile(uid))
+		fn(uid, u)
 	end)
 	lf:unlock()
 	lf:close()
 	if not ok then error(err, 2) end
 end
 
+--user ids are global so a user can be in multiple hosts.
+function fs.add_user(init_values)
+	local uid = gen_id'user_id'
+	local defaults = {anonymous = true, active = true, roles = {}}
+	local u = update(defaults, init_values)
+	save_user_profile(uid, u)
+	return uid
+end
+
 function fs.load_user(uid)
-	local u = load_user_profile(uid)
+	local u = assert(load_user_profile(uid))
 	u.id = uid
-	u.atime = file_attr(path, 'atime')
+	u.atime = file_attr(user_path(uid, 'profile'), 'atime')
 	return u
 end
 
 function fs.delete_user(uid)
-	with_locked_user(uid, function(u)
-		local u = load_user_file(uid)
-		if u.email or u.phone then
-			--if these fail user becomes unreachable but delete_user() can be
-			--re-attempted (user is still listed) to finish the job after fs fix.
-			for _,host in ipairs(fs.hosts()) do
-				fs_link_unlink_host(host, u, 'unlink')
-			end
+	with_locked_user(uid, function(uid, u)
+		--removing indexes before the user dir for two reasons:
+		--1) if removal fails the user becomes unreachable but delete_user()
+		--can be re-attempted (user is still listed) to finish the job.
+		--2) leaving orphaned indexes would lock in the email/phone which
+		--would block creating the user again.
+		for _,host in ipairs(fs.hosts()) do
+			fs_unlink_host_user(host, uid, u)
 		end
 		rm_rf(user_path(uid))
 		sync_dir(varpath('users')) --make it durable
@@ -310,44 +314,27 @@ function fs.delete_user(uid)
 end
 
 function fs.update_user(uid, updates)
-	local u = load_user_file(uid)
-	for k,v in pairs(updates) do
-		if k == 'atime' then
-			file_attr(data_path, {atime = v})
-		else
+	with_locked_user(uid, function(uid, u)
+		local old_email = u.email
+		local old_phone = u.phone
+		for k,v in pairs(updates) do
 			u[k] = repl(v, CLEAR, nil)
 		end
-	end
-	save_user_file(uid, u)
-	--update indexes: if these fail, user is left unreachable by new email/phone.
-	for _,host in ipairs(fs.hosts()) do
-		if u.email ~= old_email then
-			if old_email then fs_update_user_ix(host, 'email', old_email, nil) end
-			if u.email then fs_update_user_ix(host, 'email', u.email, uid) end
+		--update indexes: if these fail, user is left unreachable by new email/phone.
+		for _,host in ipairs(fs.hosts()) do
+			fs_update_user_unique_index(host, 'email', uid, old_email, u.email)
+			fs_update_user_unique_index(host, 'phone', uid, old_phone, u.phone)
 		end
-		if u.phone ~= old_phone then
-			if old_phone then fs_update_user_ix(host, 'email', old_email, nil) end
-			if u.email then fs_update_user_ix(host, 'email', u.email, uid) end
-		end
-	end
+		save_user_profile(uid, u)
+	end)
 end
 
 function fs.touch_user(uid)
 	file_attr(user_path(uid, 'profile'), {atime = now()})
 end
 
-function fs.uid_by(ix_name, host, ix_val)
-	local path = uid_by_path(ix_name, host, ix_val)
-	local uid = tonumber((load(path)))
-	if uid and not exists(user_path(uid, 'profile')) then --orphan index, remove
-		rmfile(path)
-		uid = nil
-	end
-	return uid
-end
-
 local function session_path(host, sid)
-	return varpath('hosts', host, 'sessions', sid)
+	return varpath('hosts', host, 'sessions', check_filename(sid))
 end
 
 function fs.load_session(host, sid)
@@ -369,6 +356,7 @@ end
 
 function fs.delete_session(host, sid)
 	rmfile(session_path(host, sid))
+	sync_dir(varpath('hosts', host, 'sessions')) --make it durable
 end
 
 --session cookie -------------------------------------------------------------
@@ -422,6 +410,9 @@ end
 local function auth_session()
 	local sid, uid = load_session()
 	local u = uid and load_user(uid)
+	if not u then --user deleted
+		store().delete_session(host(), sid)
+	end
 	if u and u.active then
 		set_req_session(sid, uid)
 	elseif config('auto_create_user', true) then
@@ -439,7 +430,7 @@ local function auth_logout()
 	set_req_session(nil, nil)
 	local u = uid and load_user(uid)
 	if u and u.anonymous then --can't get it back
-		store().delete_user(u)
+		store().delete_user(uid)
 	end
 	if config('auto_create_user', true) then
 		local uid = create_user()
@@ -475,8 +466,6 @@ local function auth_pass(a)
 	del_session()
 	set_session(uid)
 end
-
-local function
 
 --request state --------------------------------------------------------------
 
@@ -537,7 +526,7 @@ end
 
 local function delete_user(uid)
 	local u = assert(user(uid))
-	store().delete_user(u)
+	store().delete_user(uid)
 	user(CLEAR)
 end
 
@@ -550,29 +539,6 @@ local function parse_session_cookie()
 	local sid = s:match'^session=([^;]*)' or s:match'; *session=([^;]*)'
 	if not sid or #sid ~= 32 or sid:find'[^%x]' then return end
 	return sid
-end
-
-local function update_session(uid)
-	local req = http_request()
-	local sid = req.session_id
-	local secure_flag = scheme'https'
-	if uid then --update session and cookie
-		sid = sid or tohex(random_string(16))
-		store().save_session(host(), sid, uid)
-	elseif sid then --remove session and cookie
-		store().delete_session(host(), sid)
-		sid = nil
-	end
-	req.session_id = sid
-	req.session_uid = uid
-	setheader('set-cookie',
-		'session='..(sid or 0)
-		..'; Path=/'
-		..'; Max-Age='..(sid and 9999999999 or 0)
-		..(secure_flag and '; Secure' or '') --prevent MITM
-		..'; HttpOnly' --prevent JS access
-		..'; SameSite='..(secure_flag and 'strict' or 'lax') --prevent BREACH (but also img tracking)
-	)
 end
 
 local function create_or_upgrade_user(t)
@@ -720,7 +686,7 @@ function auth.code(a)
 	local code_lifetime = config('auth_code_lifetime', 10 * 60)
 	local expired = u.auth_code_created + code_lifetime < now()
 	if expired then
-		delete_auth_code()
+		delete_auth_code(uid)
 		return invalid_code()
 	end
 	if code == u.auth_code then
