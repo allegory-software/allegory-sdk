@@ -170,14 +170,12 @@ function fs.add_tenant(host)
 	host = check_filename(host)
 	local tid = gen_id'tenant_id'
 	save(hostpath(host, 'tenant'), tid)
-	mkdir(hostpath(host, 'uid_by_email'))
-	mkdir(hostpath(host, 'uid_by_phone'))
 	return tid
 end
 
 function fs.delete_tenant(host)
 	rm_rf(hostpath(host))
-	sync_dir(varpath('hosts')) --make it durable
+	sync_dir(varpath('hosts')) --make rm of host dir durable
 end
 
 function fs.rename_host(old_host, new_host)
@@ -186,7 +184,7 @@ function fs.rename_host(old_host, new_host)
 	local ok, err = try_rename(old_path, new_path)
 	check_io(nil, ok or err == 'not_empty', err)
 	allow(ok, S('host_already_exists', 'Host already exists: %s', new_host))
-	sync_dir(varpath('hosts')) --make the rename durable
+	sync_dir(varpath('hosts')) --make rename durable
 end
 
 local function user_path(uid, ...)
@@ -231,6 +229,7 @@ local function fs_link_unlink_user_unique_index(host, ix_name, ix_val, uid)
 	local ix_file = indir(ix_dir, ix_val)
 	if uid then
 		assert(isint(uid))
+		mkdir(ix_dir)
 		local uid_s = tostring(uid)
 		local f = open{path = ix_file, flags = 'creat rdwr'}
 		f:lock'ex'
@@ -315,7 +314,7 @@ function fs.delete_user(uid)
 			fs_unlink_host_user(host, uid, u)
 		end
 		rm_rf(user_path(uid))
-		sync_dir(varpath('users')) --make it durable
+		sync_dir(varpath('users')) --make rm of user dir durable
 	end)
 end
 
@@ -362,7 +361,7 @@ end
 
 function fs.delete_session(host, sid)
 	rmfile(session_path(host, sid))
-	sync_dir(varpath('hosts', host, 'sessions')) --make it durable
+	sync_dir(varpath('hosts', host, 'sessions')) --make rm of session file durable
 end
 
 --session cookie -------------------------------------------------------------
