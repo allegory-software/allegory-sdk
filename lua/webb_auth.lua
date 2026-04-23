@@ -144,8 +144,8 @@ local mdbx = {}; _store.mdbx = mdbx
 --fs storage -----------------------------------------------------------------
 
 --OBJECTIVES:
--- 1. a process crash leaves the store in a recoverable state.
--- 2. a hard poweroff leaves the store in a recoverable state (with PLP drives!).
+-- 1. a process crash leaves the store in a consistent state (hard!).
+-- 2. a hard poweroff leaves the store in a consistent state (with PLP drives!).
 -- 3. multi-process access is synchronized or otherwise accounted for.
 -- 4. no path injection.
 
@@ -166,82 +166,89 @@ function fs.check_host(host)
 	return checkarg(file_is(hostpath(host), 'dir') and host, 'invalid host: %s', host)
 end
 
-function fs.add_tenant(host)
+local function unlock(lf, ok, ...)
+	lf:unlock()
+	lf:close()
+	if not ok then error(..., 2) end
+	return ...
+end
+local function locked(lock_type, fn)
+	return function(...)
+		local lf = open(varpath('auth_lock'), 'a')
+		lf:lock(lock_type)
+		return unlock(lf, pcall(fn, ...))
+	end
+end
+local function read_locked(fn) return locked('sh', fn) end
+local function write_locked(fn) return locked('ex', fn) end
+
+fs.hosts = read_locked(function() --return {host1, ...}
+	local t = {}
+	for name, d in ls(varpath('hosts')) do
+		if d:is'dir' then t[#t+1] = name end
+	end
+	return t
+end)
+
+fs.add_tenant = write_locked(function(host)
 	host = check_filename(host)
 	local tid = gen_id'tenant_id'
 	save(hostpath(host, 'tenant'), tid)
 	return tid
-end
+end)
 
-function fs.delete_tenant(host)
+fs.delete_tenant = write_locked(function(host)
 	rm_rf(hostpath(host))
-	sync_dir(varpath('hosts')) --make rm of host dir durable
-end
+end)
 
-function fs.rename_host(old_host, new_host)
+fs.rename_host = write_locked(function(old_host, new_host)
 	local old_path = hostpath(old_host)
 	local new_path = hostpath(new_host)
 	local ok, err = try_rename(old_path, new_path)
 	check_io(nil, ok or err == 'not_empty', err)
 	allow(ok, S('host_already_exists', 'Host already exists: %s', new_host))
 	sync_dir(varpath('hosts')) --make rename durable
-end
+end)
 
 local function user_path(uid, ...)
 	assert(isint(uid))
 	return varpath('users', tostring(uid), ...)
 end
 
-function fs.hosts() --return {host1, ...}
-	local t = {}
-	for name, d in ls(varpath('hosts')) do
-		if d:is'dir' then t[#t+1] = name end
-	end
-	return t
-end
-
-function fs.user_ids() --return {uid1,...}
+fs.user_ids = read_locked(function() --return {uid1,...}
 	local t = {}
 	for uid, d in ls(varpath('users')) do
 		local uid = tonumber(uid)
 		if uid then t[#t+1] = uid end
 	end
 	return t
-end
+end)
 
-function fs.uid_by(ix_name, host, ix_val)
+fs.uid_by = read_locked(function(ix_name, host, ix_val)
 	local path = varpath('hosts', host, 'uid_by_'..ix_name, check_filename(ix_val))
-	local f, err = try_open(path, 'r')
-	if not f then return nil end
-	f:lock'sh' --wait for any in-progress write
-	local s = str(f:readall())
-	f:unlock()
-	f:close()
-	return tonumber(s)
-end
+	return tonumber(load(path))
+end)
 
---create/update/delete email/phone->uid index, also checking for clashes.
---flock serializes concurrent access; creat+rdwr allows idempotent retries.
+--create/update/delete host+email/phone->uid index, also checking for clashes.
+--creat+rdwr allows idempotent retries.
 --sync_dir() makes creates/removes durable across power loss.
-local function fs_link_unlink_user_unique_index(host, ix_name, ix_val, uid)
+local function fs_link_unlink_host_user(host, ix_name, ix_val, uid)
 	ix_val = check_filename(ix_val)
 	local ix_dir = varpath('hosts', host, 'uid_by_'..ix_name)
 	local ix_file = indir(ix_dir, ix_val)
 	if uid then
 		assert(isint(uid))
 		mkdir(ix_dir)
-		local uid_s = tostring(uid)
 		local f = open{path = ix_file, flags = 'creat rdwr'}
-		f:lock'ex'
-		local s = str(f:readall())
-		if s and #s > 0 then
-			f:unlock()
+		local old_uid = tonumber(str(f:readall()))
+		load_user()
+		if old_uid then
 			f:close()
-			allow(s == uid_s, S(ix_name..'_taken', ix_name..' already registered'))
+			allow(uid == old_uid, S(ix_name..'_taken', ix_name..' already registered'))
 		else
-			f:write(uid_s)
+			f:seek('set', 0)
+			f:write(tostring(uid))
 			f:sync()
-			f:unlock()
 			f:close()
 		end
 	else
@@ -250,17 +257,17 @@ local function fs_link_unlink_user_unique_index(host, ix_name, ix_val, uid)
 	sync_dir(ix_dir) --make create/remove durable
 end
 local function fs_link_host_user(host, uid, u)
-	if u.email then fs_link_unlink_user_unique_index(host, 'email', u.email, uid) end
-	if u.phone then fs_link_unlink_user_unique_index(host, 'phone', u.phone, uid) end
+	if u.email then fs_link_unlink_host_user(host, 'email', u.email, uid) end
+	if u.phone then fs_link_unlink_host_user(host, 'phone', u.phone, uid) end
 end
 local function fs_unlink_host_user(host, uid, u)
-	if u.email then fs_link_unlink_user_unique_index(host, 'email', u.email, nil) end
-	if u.phone then fs_link_unlink_user_unique_index(host, 'phone', u.phone, nil) end
+	if u.email then fs_link_unlink_host_user(host, 'email', u.email, nil) end
+	if u.phone then fs_link_unlink_host_user(host, 'phone', u.phone, nil) end
 end
-local function fs_update_user_unique_index(host, ix_name, uid, old_val, new_val)
+local function fs_relink_host_user(host, ix_name, uid, old_val, new_val)
 	if old_val == new_val then return end
-	if new_val then fs_link_unlink_user_unique_index(host, ix_name, new_val, uid) end
-	if old_val then fs_link_unlink_user_unique_index(host, ix_name, old_val, nil) end
+	if new_val then fs_link_unlink_host_user(host, ix_name, new_val, uid) end
+	if old_val then fs_link_unlink_host_user(host, ix_name, old_val, nil) end
 end
 
 local function load_user_profile(uid)
@@ -275,38 +282,27 @@ local function save_user_profile(uid, u)
 	save(user_path(uid, 'profile'), pp(u))
 end
 
-local function with_locked_user(uid, fn)
-	local lf = open(user_path(uid, 'lock'), 'a')
-	lf:lock'ex'
-	local ok, err = pcall(function()
-		local u = assert(load_user_profile(uid))
-		fn(uid, u)
-	end)
-	lf:unlock()
-	lf:close()
-	if not ok then error(err, 2) end
-end
-
 --user ids are global so a user can be in multiple hosts.
-function fs.add_user(init_values)
+fs.add_user = write_locked(function(init_values)
 	local uid = gen_id'user_id'
 	local defaults = {anonymous = true, active = true, roles = {}}
 	local u = update(defaults, init_values)
+	fs_link_host_user(host, uid, u)
 	save_user_profile(uid, u)
 	return uid
-end
+end)
 
-function fs.load_user(uid)
+fs.load_user = read_locked(function(uid)
 	local u = assert(load_user_profile(uid))
 	u.id = uid
 	u.atime = file_attr(user_path(uid, 'profile'), 'atime')
 	return u
-end
+end)
 
-function fs.delete_user(uid)
+fs.delete_user = write_locked(function(uid)
 	with_locked_user(uid, function(uid, u)
 		--removing indexes before the user dir for two reasons:
-		--1) if removal fails the user becomes unreachable but delete_user()
+		--1) if index removal fails the user becomes unreachable but delete_user()
 		--can be re-attempted (user is still listed) to finish the job.
 		--2) leaving orphaned indexes would lock in the email/phone which
 		--would block creating the user again.
@@ -314,11 +310,10 @@ function fs.delete_user(uid)
 			fs_unlink_host_user(host, uid, u)
 		end
 		rm_rf(user_path(uid))
-		sync_dir(varpath('users')) --make rm of user dir durable
 	end)
-end
+end)
 
-function fs.update_user(uid, updates)
+fs.update_user = write_locked(function(uid, updates)
 	with_locked_user(uid, function(uid, u)
 		local old_email = u.email
 		local old_phone = u.phone
@@ -327,12 +322,12 @@ function fs.update_user(uid, updates)
 		end
 		--update indexes: if these fail, user is left unreachable by new email/phone.
 		for _,host in ipairs(fs.hosts()) do
-			fs_update_user_unique_index(host, 'email', uid, old_email, u.email)
-			fs_update_user_unique_index(host, 'phone', uid, old_phone, u.phone)
+			fs_relink_host_user(host, 'email', uid, old_email, u.email)
+			fs_relink_host_user(host, 'phone', uid, old_phone, u.phone)
 		end
 		save_user_profile(uid, u)
 	end)
-end
+end)
 
 function fs.touch_user(uid)
 	file_attr(user_path(uid, 'profile'), {atime = now()})
@@ -361,7 +356,6 @@ end
 
 function fs.delete_session(host, sid)
 	rmfile(session_path(host, sid))
-	sync_dir(varpath('hosts', host, 'sessions')) --make rm of session file durable
 end
 
 --session cookie -------------------------------------------------------------
