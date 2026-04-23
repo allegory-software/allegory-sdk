@@ -10,7 +10,7 @@ FEATURES
 	* cdata buffer-based I/O
 
 TODO
-	* sync option on rename(), rmfile(), rmdir(), symlink(), hardlink()
+	* sync option on rename(), symlink(), hardlink()
 	* cp() via copy_file_range() (sync only)
 	* realpath() instead of recursive readlink() (faster, more accurate?)
 	* get/set btime via statx() (ext4+)
@@ -1059,42 +1059,50 @@ function mkdirs(filepath, perms, sync)
 	return filepath
 end
 
-function try_rmdir(dir)
+function try_rmdir(dir, sync)
 	local ok, err = check_errno(C.rmdir(dir) == 0)
 	if not ok then
 		return err == 'not_found', err
 	end
+	if sync ~= false then
+		local ok, err = try_sync_dir(dirname(dir))
+		if not ok then return false, err end
+	end
 	log('note', 'fs', 'rmdir', '%s', dir)
 	return true
 end
-function rmdir(dir)
-	local ok, err = try_rmdir(dir)
+function rmdir(dir, sync)
+	local ok, err = try_rmdir(dir, sync)
 	if ok then return dir, err end
 	check('fs', 'rmdir', ok, '%s: %s', dir, err)
 end
 
-function try_rmfile(file)
+function try_rmfile(file, sync)
 	local ok, err = check_errno(C.unlink(file) == 0)
 	if not ok then
 		if err == 'not_found' then return true, err end
 		return false, err
 	end
+	if sync ~= false then
+		local ok, err = try_sync_dir(dirname(file))
+		if not ok then return false, err end
+	end
 	log('note', 'fs', 'rmfile', '%s', file)
 	return ok, err
 end
-function rmfile(path)
-	local ok, err = try_rmfile(path)
+function rmfile(path, sync)
+	local ok, err = try_rmfile(path, sync)
 	if ok then return path, err end
 	check('fs', 'rmfile', ok, '%s: %s', path, err)
 end
 
-function rm_rf(path)
-	local ok, err = try_rm_rf(path)
+function rm_rf(path, sync)
+	local ok, err = try_rm_rf(path, sync)
 	if ok then return path, err end
 	check('fs', 'rm_rf', ok, '%s: %s', path, err)
 end
 
-local function try_rmdir_recursive(dir)
+local function try_rmdir_recursive(dir, sync)
 	for file, d in try_ls(dir) do
 		if not file then
 			if d == 'not_found' then return true, d end
@@ -1104,16 +1112,16 @@ local function try_rmdir_recursive(dir)
 		local filetype, err = d:try_attr('type', false)
 		if not filetype then d:try_close(); return nil, err end
 		if filetype == 'dir' then
-			local ok, err = try_rmdir_recursive(filepath)
+			local ok, err = try_rmdir_recursive(filepath, false)
 			if not ok then d:try_close(); return ok, err end
 		elseif filetype then
-			local ok, err = try_rmfile(filepath)
+			local ok, err = try_rmfile(filepath, false)
 			if not ok then d:try_close(); return ok, err end
 		end
 	end
-	return try_rmdir(dir)
+	return try_rmdir(dir, sync)
 end
-function try_rm_rf(path)
+function try_rm_rf(path, sync)
 	--not recursing if the dir is a symlink, unless it has an endsep!
 	if not path:ends'/' then
 		local type, err = try_file_attr(path, 'type', false)
@@ -1122,10 +1130,10 @@ function try_rm_rf(path)
 			return nil, err
 		end
 		if type == 'symlink' then
-			return try_rmfile(path)
+			return try_rmfile(path, sync)
 		end
 	end
-	return try_rmdir_recursive(path)
+	return try_rmdir_recursive(path, sync)
 end
 
 function try_rename(old_path, new_path, dst_dirs_perms)
@@ -1148,11 +1156,11 @@ end
 --if using `mount -o dirsync` this is reduntant.
 function try_sync_dir(dir, quiet)
 	local f, err = try_open{path = dir, flags = 'rdonly directory', quiet = quiet}
-	if not f then return nil, err end
+	if not f then return false, err end
 	local ok, err = f:try_sync()
 	if not ok then
 		f:try_close()
-		return nil, err
+		return false, err
 	end
 	return f:try_close()
 end
