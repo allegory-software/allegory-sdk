@@ -59,9 +59,11 @@ test('/aa', '/')
 test('a'  , '.')
 test('aa' , '.')
 
---dir of empty filename
-test('a/', 'a')
-test('./', '.')
+--trailing slashes are stripped before computing
+test('a/' , '.')
+test('./' , nil)
+test('/a/', '/')
+test('a/b/', 'a')
 
 --dir of non-empty filename
 test('a/b'  , 'a')

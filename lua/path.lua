@@ -76,14 +76,16 @@ function path_normalize(s, rm_double_dots, rm_add_endsep)
 	return s
 end
 
---Get a path without the last component and slash.
+--Get the parent directory of a path.
 --Returns nil for '', '/' and '.'; returns '.' for simple filenames.
+--Trailing slashes are stripped first so 'a/' -> '.' (not 'a').
 --Semantics chosen so that recursive dirname() always ends in nil.
 --NOTE: paths with '.' components circumvent the semantics of "going up"
 --so remove those before computing dirname.
 function dirname(s, levels)
 	levels = levels or 1
 	while levels > 0 do
+		s = s:match'^(.-)/*$' --strip trailing slashes
 		if s == '' or s == '/' or s == '.' then return nil end
 		s = s:match'^(.*)/' or '.' -- /a/b/c -> /a/b; /a -> ''; a -> .
 		if s == '' then return '/' end -- /a -> /
