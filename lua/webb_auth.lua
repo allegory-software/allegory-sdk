@@ -144,8 +144,8 @@ local mdbx = {}; _store.mdbx = mdbx
 --fs storage -----------------------------------------------------------------
 
 --OBJECTIVES:
--- 1. a process crash leaves the store in a consistent state (hard!).
--- 2. a hard poweroff leaves the store in a consistent state (with PLP drives!).
+-- 1. a process crash leaves the store in a recoverable state.
+-- 2. a hard poweroff doesn't undo the changed state (with PLP drives!).
 -- 3. multi-process access is synchronized or otherwise accounted for.
 -- 4. no path injection.
 
@@ -231,7 +231,6 @@ end)
 
 --create/update/delete host+email/phone->uid index, also checking for clashes.
 --creat+rdwr allows idempotent retries.
---sync_dir() makes creates/removes durable across power loss.
 local function fs_link_unlink_host_user(host, ix_name, ix_val, uid)
 	ix_val = check_filename(ix_val)
 	local ix_dir = varpath('hosts', host, 'uid_by_'..ix_name)
@@ -241,20 +240,19 @@ local function fs_link_unlink_host_user(host, ix_name, ix_val, uid)
 		mkdir(ix_dir)
 		local f = open{path = ix_file, flags = 'creat rdwr'}
 		local old_uid = tonumber(str(f:readall()))
-		load_user()
 		if old_uid then
 			f:close()
 			allow(uid == old_uid, S(ix_name..'_taken', ix_name..' already registered'))
 		else
-			f:seek('set', 0)
+			f:truncate()
 			f:write(tostring(uid))
 			f:sync()
 			f:close()
+			sync_dir(ix_dir) --make create durable
 		end
 	else
 		rmfile(ix_file)
 	end
-	sync_dir(ix_dir) --make create/remove durable
 end
 local function fs_link_host_user(host, uid, u)
 	if u.email then fs_link_unlink_host_user(host, 'email', u.email, uid) end
