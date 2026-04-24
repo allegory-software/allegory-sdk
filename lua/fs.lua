@@ -1257,6 +1257,7 @@ function try_readlink(link, maxdepth)
 end
 function readlink(link, maxdepth)
 	local target, err = try_readlink(link, maxdepth)
+	if not ok and err == 'not_found' then return nil, err end
 	return check('fs', 'readlink', target, '%s: %s', link, err)
 end
 
