@@ -483,6 +483,7 @@ int fcntl(int fd, int cmd, ...); // fallocate, set_inheritable
 long syscall(int number, ...); // stat, fstat, lstat
 ]]
 
+local ENOENT =  2
 local EINVAL = 22
 
 local cbuf = new'char[4096]'
@@ -1216,49 +1217,47 @@ function hardlink(link_path, target_path)
 	check('fs', 'mkhlink', ok, '%s -> %s: %s', link_path, target_path, err)
 end
 
-function try_readlink(link, maxdepth)
-	maxdepth = maxdepth or 32
-	local is, err = try_file_is(link, 'symlink')
-	if is == nil then
-		return nil, err
-	end
-	if not is then
-		return link
-	end
-	if maxdepth == 0 then
-		return nil, 'not_found'
-	end
+local function _try_readlink(link, maxdepth, recurse)
 	local len = C.readlink(link, cbuf, 4096)
 	if len == -1 then
-		if errno() == EINVAL then --make it legit: no symlink, no target
-			return nil
+		local errno = errno()
+		if errno == EINVAL then --not a symlink
+			if maxdepth == 'raw' then
+				return nil, 'not_symlink'
+			else
+				return link
+			end
+		elseif recurse and errno == ENOENT then --target not found
+			return link
 		end
 		return check_errno()
 	end
 	if len >= 4096 then --max len is 4095 for ext4 and btrfs
-		return nil, 'path too long'
+		return nil, 'path_too_long'
+	end
+	if maxdepth == 0 then
+		return nil, 'too_many_symlinks'
 	end
 	local target = str(cbuf, len)
-	if target:starts'/' then
-		link = target
-	else --relative symlinks are relative to their own dir
-		local link_dir = dirname(link)
-		if not link_dir then
-			return nil, 'not_found'
-		elseif link_dir == '.' then
-			link = target
-		else
-			link = indir(link_dir, target)
+	if maxdepth == 'raw' then
+		return target
+	end
+	if not target:starts'/' then --relative symlinks are relative to their own dir
+		local target_dir = dirname(link)
+		if target_dir and target_dir ~= '.' then
+			target = indir(target_dir, target)
 		end
 	end
-	return try_readlink(link, maxdepth - 1)
+	return _try_readlink(target, maxdepth - 1, true)
+end
+function try_readlink(link, maxdepth)
+	maxdepth = maxdepth or 32
+	assert(maxdepth == 'raw' or (maxdepth > 0 and maxdepth <= 32))
+	return _try_readlink(link, maxdepth)
 end
 function readlink(link, maxdepth)
 	local target, err = try_readlink(link, maxdepth)
-	local ok = target ~= nil or err == 'not_found'
-	check('fs', 'readlink', ok, '%s: %s', link, err)
-	if target == nil then return target, err end
-	return target
+	return check('fs', 'readlink', target, '%s: %s', link, err)
 end
 
 --common paths ---------------------------------------------------------------
