@@ -1089,11 +1089,17 @@ function try_rmfile(file, sync)
 		if not ok then return false, err end
 	end
 	log('note', 'fs', 'rmfile', '%s', file)
-	return ok, err
+	return true
 end
 function rmfile(path, sync)
 	local ok, err = try_rmfile(path, sync)
 	if ok then return path, err end
+	check('fs', 'rmfile', ok, '%s: %s', path, err)
+end
+function must_rmfile(path, sync)
+	local ok, err = try_rmfile(path, sync)
+	if err == 'not_found' then ok = false end
+	if ok then return path end
 	check('fs', 'rmfile', ok, '%s: %s', path, err)
 end
 
@@ -1156,6 +1162,7 @@ end
 
 --if using `mount -o dirsync` this is reduntant.
 function try_sync_dir(dir, quiet)
+	assert(dir, 'sync_dir(): dir required') --because dirname(file) can return nil
 	local f, err = try_open{path = dir, flags = 'rdonly directory', quiet = quiet}
 	if not f then return false, err end
 	local ok, err = f:try_sync()
@@ -2093,22 +2100,16 @@ function save(file, arg, sz, file_perms, dir_perms)
 	check('fs', 'save', ok, '%s: %s', file, err)
 end
 
-function try_touch(file, mtime) --create file or update its mtime.
-	local f, err = try_open(file, 'a')
-	if not f then return false, err end
+function touch(file, mtime, sync) --create file or update its mtime.
+	local f = open(file, 'a')
 	mtime = mtime or now()
-	local ok, err = futimes(f, mtime, mtime)
-	if not ok then f:try_close(); return false, err end
-	local ok, err = f:try_close()
-	if not ok then return false, err end
+	check_io(f, futimes(f, mtime, mtime))
+	if sync ~= false then f:sync() end
+	f:close()
+	if sync ~= false then sync_dir(dirname(file)) end
 	log('note', 'fs', 'touch', '%s to %s', file, date('%d-%m-%Y %H:%M', mtime))
-	return true
 end
-
-function touch(file, mtime)
-	local ok, err = try_touch(file, mtime)
-	return check('fs', 'touch', ok and file, '%s: %s', file, err)
-end
+try_touch = protect_io(touch)
 
 --8 syscalls to increment a number safely, maybe you need a DB :)
 function gen_id(name, start)
