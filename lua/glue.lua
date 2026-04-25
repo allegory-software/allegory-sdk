@@ -46,6 +46,7 @@ MATH
 	random                       = math.random
 	randomseed                   = math.randomseed
 	random_string(n) -> s          generate random string of length n
+	secure_random_string(n) -> s   generate CSPRNG of length n
 	uuid() -> s                    generate random UUID v4
 	lerp(x, x0, x1, y0, y1) -> y   project x in x0..x1 over y0..y1
 	nextpow2(x) -> y               next power-of-2 number
@@ -2123,7 +2124,7 @@ typedef uint8_t  bool8;
 ]]
 
 cdef[[
-int   memcmp  (const void * ptr1, const void * ptr2, size_t num);
+int memcmp(const void * ptr1, const void * ptr2, size_t num);
 ]]
 
 memcmp = C.memcmp
@@ -2146,6 +2147,17 @@ end
 
 function ptr(p)
 	return p ~= nil and p or nil
+end
+
+cdef[[
+int getrandom(void *buf, size_t buflen, unsigned int flags);
+]]
+
+local function secure_random_string(n)
+	local buf = u8a(n)
+	local ret = C.getrandom(buf, n, 0)
+	assert(ret == n, 'getrandom() failed')
+	return ffi_string(buf, n)
 end
 
 --allocation -----------------------------------------------------------------
