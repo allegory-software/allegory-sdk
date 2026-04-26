@@ -2282,6 +2282,7 @@ local errno_msgs = {
 	[ 20] = 'not_dir', --ENOTDIR, opendir()
 	[ 21] = 'is_dir', --EISDIR, unlink()
 	[ 39] = 'not_empty', --ENOTEMPTY, rmdir()
+	[ 40] = 'too_many_symlinks', --ELOOP, open() with O_NOFOLLOW on a symlink
 	[ 28] = 'disk_full', --ENOSPC: fallocate()
 	[ 95] = 'not_supported', --EOPNOTSUPP: fallocate()
 	[ 32] = 'eof', --EPIPE: write()

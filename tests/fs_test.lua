@@ -573,7 +573,7 @@ function test.times_set()
 	local ctime = t - 2800 - frac
 	local atime = t - 1800 - frac
 
-	f:attr{mtime = mtime, ctime = ctime, atime = atime}
+	f:set_attr{mtime = mtime, ctime = ctime, atime = atime}
 	local mtime1 = f:attr'mtime'
 	local ctime1 = f:attr'ctime'
 	local atime1 = f:attr'atime'
@@ -582,7 +582,7 @@ function test.times_set()
 
 	--change only mtime, should not affect atime
 	mtime = mtime + 100
-	f:attr{mtime = mtime}
+	f:set_attr{mtime = mtime}
 	local mtime1 = f:attr().mtime
 	local atime1 = f:attr().atime
 	assert(mtime == mtime1)
@@ -590,7 +590,7 @@ function test.times_set()
 
 	--change only atime, should not affect mtime
 	atime = atime + 100
-	f:attr{atime = atime}
+	f:set_attr{atime = atime}
 	local mtime1 = f:attr'mtime'
 	local atime1 = f:attr'atime'
 	assert(mtime == mtime1)
@@ -643,14 +643,25 @@ function test.attr_set()
 	local f = open(testfile, 'w')
 	f:write('hello')
 	f:close()
-	--set perms via file_attr
-	try_file_attr(testfile, {perms = tonumber('600', 8)})
+	--set perms via set_file_attr
+	try_set_file_attr(testfile, {perms = tonumber('600', 8)})
 	local p = file_attr(testfile, 'perms', false)
 	assert(p == tonumber('600', 8))
-	--set mtime via file_attr
+	--set mtime via set_file_attr
 	local t = math.floor(os.time()) - 3600
-	try_file_attr(testfile, {mtime = t})
+	try_set_file_attr(testfile, {mtime = t})
 	local m = file_attr(testfile, 'mtime', false)
+	assert(math.abs(m - t) < 1)
+	--set mtime via dir:set_attr
+	t = t - 60
+	for name, d in ls('.') do
+		if name == testfile then
+			d:set_attr({mtime = t}, false)
+			d:close()
+			break
+		end
+	end
+	m = file_attr(testfile, 'mtime', false)
 	assert(math.abs(m - t) < 1)
 	rmfile(testfile)
 end

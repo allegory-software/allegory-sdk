@@ -10,6 +10,7 @@ FEATURES
 	* cdata buffer-based I/O
 
 TODO
+	* API to flip sync-by-default temporarily or even per dir?
 	* cp() via copy_file_range() (sync only)
 	* realpath() instead of recursive readlink() (faster, more accurate?)
 	* get/set btime via statx() (ext4+)
@@ -40,7 +41,8 @@ FILE I/O
 	f:[try_]skip(n) -> actual_n                   skip bytes
 	f:[try_]truncate(size, [opt])                 truncate file and set pointer to end
 OPEN FILE ATTRIBUTES
-	f:[try_]attr([attr]) -> val|t                 get/set attribute(s) of open file
+	f:[try_]attr([attr]) -> val|t                 get attribute(s) of open file
+	f:[try_]set_attr(attr) -> ok                  set attribute(s) of open file
 	f:[try_]size() -> n                           get file size
 	f:set_inheritable(true|false)                 change O_CLOEXEC flag
 FILE LOCKING
@@ -54,8 +56,10 @@ DIRECTORY LISTING
 	  d:name() -> s                               dir entry's name
 	  d:dir() -> s                                dir that was passed to ls()
 	  d:path() -> s                               full path of the dir entry
-	  d:[try_]attr([attr, ][deref]) -> t|val      get/set dir entry attribute(s)
+	  d:[try_]attr([attr, ][deref]) -> t|val      get dir entry attribute(s)
+	  d:[try_]set_attr(attr, [deref]) -> ok       set dir entry attribute(s)
 	  d:is(type, [deref]) -> t|f                  check if dir entry is of type
+	  d:[try_]sync()                              sync directory to disk
 	scandir(path|{path1,...}, [dive]) -> iter() -> sc     recursive dir iterator
 	  sc:close()
 	  sc:closed() -> true|false
@@ -64,9 +68,11 @@ DIRECTORY LISTING
 	  sc:path([depth]) -> s
 	  sc:relpath([depth]) -> s
 	  sc:[try_]attr([attr, ][deref]) -> t|val
+	  sc:[try_]set_attr(attr, [deref]) -> ok
 	  sc:depth([n]) -> n (from 1)
 FILE ATTRIBUTES
-	[try_]file_attr(path, [attr, ][deref]) -> t|val     get/set file attribute(s)
+	[try_]file_attr(path, [attr, ][deref]) -> t|val     get file attribute(s)
+	[try_]set_file_attr(path, attr, [deref], [sync]) -> ok  set file attribute(s)
 	[try_]file_is(path, [type], [deref]) -> t|f,['not_found'] check if file exists or is of a certain type
 	exists                                      = file_is
 	checkexists(path, [type], [deref])            assert that file exists
@@ -133,8 +139,9 @@ FILE ATTRIBUTES --------------------------------------------------------------
  blocks   | r   | number of 512B blocks allocated
 
 On the table above, `r` means that the attribute is read/only and `rw` means
-that the attribute can be changed. Attributes can be queried and changed via
-f:attr(), file_attr() and d:attr().
+that the attribute can be changed. Attributes can be queried via
+f:attr(), file_attr() and d:attr(), and changed via
+f:set_attr(), set_file_attr() and d:set_attr().
 
 NOTE: File sizes and offsets are Lua numbers not 64bit ints, so they can hold
 at most 8KTB.
@@ -264,12 +271,16 @@ f:[try_]truncate(size, [opt])
 
 OPEN FILE ATTRIBUTES ---------------------------------------------------------
 
-f:[try_]attr([attr]) -> val|t
+	f:[try_]attr([attr]) -> val|t
+	f:[try_]set_attr(attr) -> ok
 
-	Get/set attribute(s) of open file. attr can be:
+		Get attribute(s) of open file. attr can be:
 	* nothing/nil: get the values of all attributes in a table.
 	* string: get the value of a single attribute.
-	* table: set one or more attributes.
+
+		f:[try_]set_attr(attr)
+
+		Set one or more attributes from a table.
 
 DIRECTORY LISTING ------------------------------------------------------------
 
@@ -322,7 +333,7 @@ DIRECTORY LISTING ------------------------------------------------------------
 
 	d:[try_]attr([attr, ][deref]) -> t|val
 
-		Get/set dir entry attribute(s).
+		Get dir entry attribute(s).
 
 		deref means return the attribute(s) of the symlink's target if the file is
 		a symlink (deref defaults to true!). When deref=true, even the 'type'
@@ -331,6 +342,10 @@ DIRECTORY LISTING ------------------------------------------------------------
 		Some attributes for directory entries are free to get (but not for symlinks
 		when deref=true) meaning that they don't require a system call for each
 		file, notably type and inode.
+
+	d:[try_]set_attr(attr, [deref]) -> ok
+
+		Set dir entry attribute(s).
 
 	d:is(type, [deref]) -> true|false
 
@@ -351,13 +366,18 @@ scandir(path|{path1,...}, [dive]) -> iter() -> sc
 	sc:path([depth]) -> s
 	sc:relpath([depth]) -> s
 	sc:[try_]attr([attr, ][deref]) -> t|val
+	sc:[try_]set_attr(attr, [deref]) -> ok
 	sc:depth([n]) -> n (from 1)
 
 FILE ATTRIBUTES --------------------------------------------------------------
 
 [try_]file_attr(path, [attr, ][deref]) -> t|val
 
-	Get/set a file's attribute(s) given its path in utf8.
+	Get a file's attribute(s) given its path in utf8.
+
+[try_]set_file_attr(path, attr, [deref], [sync]) -> ok
+
+	Set a file's attribute(s) given its path in utf8.
 
 [try_]file_is(path, [type], [deref]) -> true|false, ['not_found']
 
@@ -1479,7 +1499,6 @@ end
 cdef[[
 int fchmod(int fd,           mode_t mode);
 int  chmod(const char *path, mode_t mode);
-int lchmod(const char *path, mode_t mode);
 ]]
 
 local function wrap(chmod_func, stat_func)
@@ -1496,7 +1515,7 @@ local function wrap(chmod_func, stat_func)
 end
 local fchmod = wrap(function(f, mode) return C.fchmod(f.fd, mode) end, fstat)
 local chmod = wrap(C.chmod, stat)
-local lchmod = wrap(C.lchmod, lstat)
+local lchmod = function() return nil, 'nyi' end --kernel rejects fchmodat(AT_SYMLINK_NOFOLLOW)
 
 cdef[[
 int fchown(int fd,           uid_t owner, gid_t group);
@@ -1569,17 +1588,32 @@ local function fs_attr_set(path, t, deref)
 end
 
 function file.try_attr(f, attr)
-	if f.fd == -1 then return nil, 'closed' end
 	if istab(attr) then
-		return file_attr_set(f, attr)
-	else
-		return fstat(f, attr)
+		return f:try_set_attr(attr)
 	end
+	if f.fd == -1 then return nil, 'closed' end
+	return fstat(f, attr)
 end
 function file.attr(f, attr)
+	if istab(attr) then
+		return f:set_attr(attr)
+	end
 	local ret, err = f:try_attr(attr)
 	local ok = ret ~= nil or err == nil or err == 'not_found'
 	check('fs', 'attr', ok, '%s: %s', f.path, err)
+	if err ~= nil then return ret, err end
+	return ret
+end
+
+function file.try_set_attr(f, attr)
+	if f.fd == -1 then return nil, 'closed' end
+	assertf(istab(attr), 'table expected, got: %s', type(attr))
+	return file_attr_set(f, attr)
+end
+function file.set_attr(f, attr)
+	local ret, err = f:try_set_attr(attr)
+	local ok = ret ~= nil or err == nil or err == 'not_found'
+	check('fs', 'set_attr', ok, '%s: %s', f.path, err)
 	if err ~= nil then return ret, err end
 	return ret
 end
@@ -1599,18 +1633,58 @@ local function attr_args(attr, deref)
 	return attr, deref
 end
 
+local function set_attr_args(attr, deref)
+	assertf(istab(attr), 'table expected, got: %s', type(attr))
+	if deref == nil then
+		deref = true --deref by default
+	end
+	return attr, deref
+end
+
+function try_set_file_attr(path, attr, deref, sync)
+	attr, deref = set_attr_args(attr, deref)
+	if sync ~= false then
+		local flags = deref and 'rdonly' or 'rdonly nofollow'
+		local f, err = try_open{path = path, flags = flags, quiet = true}
+		if f then
+			local ok, err = file_attr_set(f, attr)
+			if not ok then f:try_close(); return false, err end
+			local ok, err = f:try_sync()
+			if not ok then f:try_close(); return false, err end
+			return f:try_close()
+		elseif err ~= 'too_many_symlinks' then
+			return false, err
+		else
+			--symlink with deref=false: can't sync inode on Linux,
+			--fallback to unsync'ed fs_attr_set().
+		end
+	end
+	return fs_attr_set(path, attr, deref)
+end
+function set_file_attr(path, attr, deref, sync)
+	local ret, err = try_set_file_attr(path, attr, deref, sync)
+	local ok = ret ~= nil or err == nil or err == 'not_found'
+	check('fs', 'set_attr', ok, '%s: %s', path, err)
+	if err ~= nil then return ret, err end
+	return ret
+end
+
 function try_file_attr(path, ...)
 	local attr, deref = attr_args(...)
 	if attr == 'target' then
 		return try_readlink(path)
 	end
 	if istab(attr) then
-		return fs_attr_set(path, attr, deref)
+		return try_set_file_attr(path, attr, deref)
 	else
 		return fs_attr_get(path, attr, deref)
 	end
 end
 function file_attr(path, ...)
+	local attr = ...
+	if istab(attr) then
+		return set_file_attr(path, ...)
+	end
 	local ret, err = try_file_attr(path, ...)
 	local ok = ret ~= nil or err == nil or err == 'not_found'
 	check('fs', 'attr', ok, '%s: %s', path, err)
@@ -1626,7 +1700,7 @@ function mtime(file, deref)
 end
 
 function try_chmod(path, perms)
-	local ok, err = try_file_attr(path, {perms = perms})
+	local ok, err = try_set_file_attr(path, {perms = perms})
 	if not ok then return false, err end
 	log('note', 'fs', 'chmod', '%s %s', path, perms)
 	return path
@@ -1637,7 +1711,7 @@ function chmod(path, perms)
 	return path
 end
 function try_chown(path, uid, gid)
-	local ok, err = try_file_attr(path, {uid = uid, gid = gid})
+	local ok, err = try_set_file_attr(path, {uid = uid, gid = gid})
 	if not ok then return false, err end
 	log('note', 'fs', 'chown', '%s%s%s', path,
 		uid and ' uid='..uid or '',
@@ -1726,6 +1800,7 @@ typedef struct DIR DIR;
 DIR *opendir(const char *name);
 struct dirent *readdir(DIR *dirp) asm("readdir64");
 int closedir(DIR *dirp);
+int dirfd(DIR *dirp);
 ]]
 
 dir_ct = ctype[[
@@ -1752,6 +1827,12 @@ dir.close = unprotect_io(dir.try_close)
 function dir.closed(dir)
 	return dir._dirp == nil
 end
+
+function dir.try_sync(dir)
+	if dir:closed() then return nil, 'closed' end
+	return check_errno(C.fsync(C.dirfd(dir._dirp)) == 0)
+end
+dir.sync = unprotect_io(dir.try_sync)
 
 function dir.dir(dir)
 	return str(dir._dir, dir._dirlen)
@@ -1889,7 +1970,7 @@ function dir.try_attr(dir, ...)
 		end
 	end
 	if istab(attr) then
-		return fs_attr_set(dir:path(), attr, deref)
+		return dir:try_set_attr(attr, deref)
 	elseif not attr or (deref and dir_is_symlink(dir)) then
 		return fs_attr_get(dir:path(), attr, deref)
 	else
@@ -1902,6 +1983,13 @@ function dir.try_attr(dir, ...)
 	end
 end
 dir.attr = unprotect_io(dir.try_attr)
+
+function dir.try_set_attr(dir, attr, deref)
+	dir_check(dir)
+	attr, deref = set_attr_args(attr, deref)
+	return fs_attr_set(dir:path(), attr, deref)
+end
+dir.set_attr = unprotect_io(dir.try_set_attr)
 
 function dir.try_size(dir)
 	return dir:try_attr'size'
@@ -2143,7 +2231,7 @@ function gen_id(name, start)
 	f:sync()
 	f:unlock()
 	f:close()
-	if need_sync_dir then sync_dir(varpath()) end
+	if need_sync_dir then sync_dir(vardir()) end
 	log('note', 'fs', 'gen_id', '%s: %d', name, n)
 	return n
 end

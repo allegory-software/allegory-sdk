@@ -241,7 +241,7 @@ function http_server(...)
 				listen_opt.unix_socket_user  or
 				listen_opt.unix_socket_group
 			then
-				file_attr(listen_opt.unix_socket, {
+				set_file_attr(listen_opt.unix_socket, {
 					perms = listen_opt.unix_socket_perms,
 					uid   = listen_opt.unix_socket_user,
 					gid   = listen_opt.unix_socket_group,
