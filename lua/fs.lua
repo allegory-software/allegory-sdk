@@ -46,7 +46,7 @@ OPEN FILE ATTRIBUTES
 	f:[try_]size() -> n                           get file size
 	f:set_inheritable(true|false)                 change O_CLOEXEC flag
 FILE LOCKING
-	f:[try_]lock(['sh'|'ex'], [nonblock])
+	f:[try_]lock(['r'|'w'], [nonblock])
 	f:[try_]unlock([nonblock])
 DIRECTORY LISTING
 	[try_]ls(dir, [opt]) -> iter() -> name,d | false,err   contents iterator
@@ -1758,18 +1758,18 @@ end
 
 cdef'int flock(int fd, int operation);'
 
-local LOCK_SH = 1
-local LOCK_EX = 2
-local LOCK_NB = 4
-local LOCK_UN = 8
+local LOCK_SH = 1 --shared
+local LOCK_EX = 2 --exclusive
+local LOCK_NB = 4 --non-blocking
+local LOCK_UN = 8 --unlock
 
-local lock_ops = {sh = LOCK_SH, ex = LOCK_EX, un = LOCK_UN}
+local lock_ops = {r = LOCK_SH, w = LOCK_EX, un = LOCK_UN}
 
 --NOTE: returns true, 'again' if nonblock is passed but lock not acquired,
 --as opposed to nil, err for genuine errors.
 function file.try_lock(f, op, nonblock)
 	if f.fd == -1 then return nil, 'closed' end
-	local flags = assertf(lock_ops[op or 'ex'], 'invalid lock op: %s', op)
+	local flags = assertf(lock_ops[op or 'w'], 'invalid lock op: %s', op)
 	if nonblock then flags = bor(flags, LOCK_NB) end
 	local ok, err = check_errno(C.flock(f.fd, flags) == 0)
 	if ok then return true end
@@ -2220,7 +2220,7 @@ try_touch = protect_io(touch)
 function gen_id(name, start)
 	local next_id_file = varpath('next_'..name)
 	local f = open(next_id_file, 'rw')
-	f:lock'ex'
+	f:lock'w'
 	local s = str(f:readall())
 	local n = tonumber(s)
 	local need_sync_dir = not n --most likely file was created now

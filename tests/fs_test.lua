@@ -974,17 +974,17 @@ function test.lock_unlock()
 	local f = open(testfile, 'w')
 	f:write('data')
 	--exclusive lock
-	f:lock('ex')
+	f:lock'w'
 	f:unlock()
 	--shared lock
-	f:lock('sh')
+	f:lock'r'
 	f:unlock()
 	--nonblocking lock
-	local ok, err = f:try_lock('ex', true)
+	local ok, err = f:try_lock('w', 'nonblock')
 	assert(ok)
 	assert(not err)
 	--nonblocking: already locked, same process (flock allows re-locking)
-	local ok2, err2 = f:try_lock('ex', true)
+	local ok2, err2 = f:try_lock('w', 'nonblock')
 	assert(ok2)
 	f:unlock()
 	f:close()
