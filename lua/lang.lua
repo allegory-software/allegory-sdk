@@ -705,20 +705,20 @@ function S_texts_save()
 	end
 end
 
-function S_for(ext, id, en_s)
+function S_for(ext, id, ...)
 	return
 		S_texts(lang(), ext)[id]
 		or S_texts(default_lang(), ext)[id]
-		or en_s
+		or _(...)
 end
 
-function S(id, en_s)
-	return S_for('lua', id, en_s)
+function S(id, ...)
+	return S_for('lua', id, ...)
 end
 
-function Sf(id, en_s)
+function Sf(id, ...)
 	return function()
-		return S_for('lua', id, en_s)
+		return S_for('lua', id, ...)
 	end
 end
 
