@@ -10,7 +10,6 @@ FEATURES
 	* cdata buffer-based I/O
 
 TODO
-	* sync option on rename(), symlink(), hardlink()
 	* cp() via copy_file_range() (sync only)
 	* realpath() instead of recursive readlink() (faster, more accurate?)
 	* get/set btime via statx() (ext4+)
@@ -84,11 +83,11 @@ FILESYSTEM OPS
 	[try_]rmdir(path) -> path                     remove empty directory
 	[try_]rm_rf(path) -> path                     like `rm -rf`
 	[try_]mkdirs(file, [perms], [sync]) -> file   make file's dir
-	[try_]rename(old_path, new_path, [dst_dirs_perms])   rename/move file or dir on the same filesystem
+	[try_]rename(old_path, new_path, [dst_dirs_perms], [sync])   rename/move file or dir on the same filesystem
 	[try_]sync_dir(dir)                           make fs changes inside dir durable
 SYMLINKS & HARDLINKS
-	[try_]symlink(symlink, path, [replace])       create a symbolic link for a file or dir
-	[try_]hardlink(hardlink, path)                create a hard link for a file
+	[try_]symlink(symlink, path, [replace], [sync])  create a symbolic link for a file or dir
+	[try_]hardlink(hardlink, path, [sync])        create a hard link for a file
 	[try_]readlink(path, [maxdepth]) -> path      dereference a symlink recursively
 COMMON PATHS
 	homedir() -> path                             get current user's home directory
@@ -379,7 +378,7 @@ rm_rf(path)
 
 	Remove files and directories.
 
-[try_]rename(path, new_path, [opt])
+[try_]rename(path, new_path, [sync])
 
 	Rename/move a file on the same filesystem.
 
@@ -387,7 +386,7 @@ rm_rf(path)
 
 SYMLINKS & HARDLINKS ---------------------------------------------------------
 
-[try_]symlink(symlink, path, [replace='replace'])
+[try_]symlink(symlink, path, [replace='replace'], [sync])
 
 	Create a symbolic link for a file or dir. Pass replace='replace'
 	to replace the target if the symlink already exists.
@@ -1143,13 +1142,23 @@ function try_rm_rf(path, sync)
 	return try_rmdir_recursive(path, sync)
 end
 
-function try_rename(old_path, new_path, dst_dirs_perms)
+function try_rename(old_path, new_path, dst_dirs_perms, sync)
 	if dst_dirs_perms ~= false then
-		local ok, err = try_mkdirs(new_path, dst_dirs_perms)
+		local ok, err = try_mkdirs(new_path, dst_dirs_perms, sync)
 		if not ok then return false, err end
 	end
 	local ok, err = check_errno(C.rename(old_path, new_path) == 0)
 	if not ok then return false, err end
+	if sync ~= false then
+		local d1 = dirname(old_path)
+		local d2 = dirname(new_path)
+		local ok, err = try_sync_dir(d1)
+		if not ok then return ok, err end
+		if d2 ~= d1 then
+			local ok, err = try_sync_dir(d2)
+			if not ok then return ok, err end
+		end
+	end
 	log('note', 'fs', 'mv', 'old: %s\nnew: %s', old_path, new_path)
 	return true
 end
@@ -1178,7 +1187,7 @@ function sync_dir(dir, quiet)
 	check('fs', 'sync_dir', false, '%s: %s', dir, err)
 end
 
-function try_symlink(link_path, target_path, replace)
+function try_symlink(link_path, target_path, replace, sync)
 	local ok, err = check_errno(C.symlink(target_path, link_path) == 0)
 	if not ok and err == 'already_exists' and replace
 		and try_file_attr(link_path, 'type', false) == 'symlink'
@@ -1187,27 +1196,32 @@ function try_symlink(link_path, target_path, replace)
 		if try_readlink(link_path) == target_path then
 			return true, err
 		end
-		local ok1, err1 = try_rmfile(link_path)
+		local tmp = link_path..'~'..getpid()
+		local ok1, err1 = check_errno(C.symlink(target_path, tmp) == 0)
 		if not ok1 then return false, err1 end
-		local ok1, err1 = check_errno(C.symlink(target_path, link_path) == 0)
-		if not ok1 then return false, err1 end
+		local ok2, err2 = check_errno(C.rename(tmp, link_path) == 0)
+		if not ok2 then try_rmfile(tmp); return false, err2 end
 		ok, err = true, 'replaced'
 	end
 	if ok then
+		if sync ~= false then
+			local ok, err = try_sync_dir(dirname(link_path))
+			if not ok then return ok, err end
+		end
 		log('note', 'fs', 'symlink', 'link:   %s\ntarget:  %s',
 			link_path, target_path)
 	end
 	return ok, err
 end
-function symlink(link_path, target_path, replace)
-	local ok, err = try_symlink(link_path, target_path, replace)
+function symlink(link_path, target_path, replace, sync)
+	local ok, err = try_symlink(link_path, target_path, replace, sync)
 	check('fs', 'symlink', ok, '%s -> %s: %s', link_path, target_path, err)
 end
 
-function try_hardlink(link_path, target_path)
+function try_hardlink(link_path, target_path, sync)
 	local ok, err = check_errno(C.link(target_path, link_path) == 0)
 	if not ok then
-		if err == 'already_exists' then
+		if err == 'already_exists' then --check if the target is the same
 			local i1 = try_file_attr(target_path, 'inode', false)
 			if not i1 then return false, err end
 			local i2 = try_file_attr(link_path, 'inode', false)
@@ -1215,6 +1229,10 @@ function try_hardlink(link_path, target_path)
 			if i1 == i2 then return true, err end
 		end
 		return ok, err
+	end
+	if sync ~= false then
+		local ok, err = try_sync_dir(dirname(link_path))
+		if not ok then return ok, err end
 	end
 	log('note', 'fs', 'mkhlink', 'link:   %s\ntarget:  %s', link_path, target_path)
 	return true
@@ -2025,7 +2043,6 @@ end
 --return a try_write(v | buf,len) -> true | false,err function
 --that doesn't yield, so you can use it in ffi write callbacks.
 function file_saver(file, file_perms, dir_perms, sync)
-	require'proc'
 	sync = sync ~= false
 	local tmpfile = file..'~'..getpid()
 	local f, n
