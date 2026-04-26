@@ -11,7 +11,10 @@ function now()
 end
 
 local store = auth_stores.fs
+
 store.init()
+
+store.with_lock('w', function()
 
 local function tenants_by_host()
 	local t = {}
@@ -123,3 +126,5 @@ assert(not pcall(store.tenant_by_host, 'api.example'))
 print'ok del_tenant'
 
 rm_rf(testdir)
+
+end) --with_lock

@@ -67,32 +67,24 @@ end
 
 --global lock ----------------------------------------------------------------
 
-local lf, locked
+local lf, locked, locked_w
 local function end_sync_op(lf, ok, ...)
 	locked = false
+	locked_w = false
 	lf:unlock()
 	if not ok then error(..., 2) end
 	return ...
 end
-local function with_lock(lock_type, fn, ...)
-	if locked then
-		assert(locked == 'ex' or lock_type == locked)
-		return fn(...)
-	end
+function fs.with_lock(lock_type, fn, ...)
+	assert(not locked)
 	if not lf or lf:closed() then
 		lf = open(varpath('auth_lock'), 'a')
 	end
 	lf:lock(lock_type)
-	locked = lock_type
+	locked = true
+	locked_w = lock_type == 'w'
 	return end_sync_op(lf, pcall(fn, ...))
 end
-local function sync_op(lock_type, op, fn)
-	fs[op] = function(...)
-		return with_lock(lock_type, fn, ...)
-	end
-end
-local function read_op  (op, fn) sync_op('sh', op, fn) end
-local function write_op (op, fn) sync_op('ex', op, fn) end
 
 --hosts and tenants ----------------------------------------------------------
 
@@ -105,7 +97,8 @@ local function tenant_by_host(host)
 end
 fs.tenant_by_host = tenant_by_host
 
-read_op('tenants', function()
+function fs.tenants()
+	assert(locked)
 	local t = {}
 	for host in ls(varpath('hosts')) do
 		t[#t+1] = {
@@ -114,9 +107,10 @@ read_op('tenants', function()
 		}
 	end
 	return t
-end)
+end
 
-write_op('add_tenant', function(host)
+function fs.add_tenant(host)
+	assert(locked_w)
 	local hlpath = hostlinkpath(host)
 	checknotexists('host', try_tenant_by_host(host) and host)
 	local tid = gen_id'tenant_id'
@@ -126,28 +120,31 @@ write_op('add_tenant', function(host)
 	mkdir(tpath(tid, 'uid_by_phone'))
 	symlink(hlpath, '../tenants/'..tid) --commit
 	return tid
-end)
+end
 
-write_op('del_tenant', function(host)
+function fs.del_tenant(host)
+	assert(locked_w)
 	local tid = tenant_by_host(host)
 	rmfile(hostlinkpath(host)) --commit
 	fs.repair()
-end)
+end
 
-write_op('rename_host', function(old_host, new_host)
+function fs.rename_host(old_host, new_host)
+	assert(locked_w)
 	checknotexists('host', try_tenant_by_host(new_host) and new_host)
 	rename(hostlinkpath(old_host), hostlinkpath(new_host)) --commit
-end)
+end
 
 --sessions -------------------------------------------------------------------
 
-write_op('add_session', function(tid, sid, uid)
+function fs.add_session(tid, sid, uid)
+	assert(locked_w)
 	assert(isint(uid))
 	check_tenant(tid)
 	check_user(uid)
 	symlink(sessionpath(tid, sid), '../../../users/'..uid..'/profile') --commit
 	symlink(usersessionpath(uid, sid), '../../../tenants/'..tid..'/sessions/'..sid)
-end)
+end
 
 local function read_session(tid, sid) --atomic
 	local file = sessionpath(tid, sid)
@@ -155,13 +152,13 @@ local function read_session(tid, sid) --atomic
 	return s and tonumber(s:match'/(%d+)/profile')
 end
 
-local function del_session(tid, sid)
+function fs.del_session(tid, sid)
+	assert(locked_w)
 	local uid = read_session(tid, sid)
 	if not uid then return end --session removed async
 	rmfile(sessionpath(tid, sid)) --commit
 	rmfile(usersessionpath(uid, sid))
 end
-write_op('del_session', del_session)
 
 function fs.touch_session(tid, sid) --non-durable, non-locked for speed
 	try_set_file_attr(sessionpath(tid, sid), {mtime = now()}, false)
@@ -190,41 +187,44 @@ local function try_load_user_profile(uid)
 	assert(not u or u.id == uid)
 	return u
 end
-function load_user_profile(uid)
+function load_user_profile(uid) --already atomic
 	return checkfound(try_load_user_profile(uid),
 		S('user_not_found', 'User not found'))
 end
-fs.user = load_user_profile --already atomic
+fs.user = load_user_profile
 
-read_op('users', function() --return {u1,...}
+function fs.users() --return {u1,...}
+	assert(locked)
 	local t = {}
 	for uid, d in ls(varpath('users')) do
 		local uid = assert(tonumber(uid))
 		t[#t+1] = load_user_profile(uid)
 	end
 	return t
-end)
+end
 
 local function save_user_profile(u)
+	assert(locked_w)
 	save(userpath(u.id, 'profile'), pp(u))
 end
 
 --read-locked because session->uid and profile/index updates are not
 --committed atomically across files.
-read_op('load_session_user', function(tid, sid)
+function fs.load_session_user(tid, sid)
+	assert(locked)
 	local uid = check_session(tid, sid)
 	return uid and try_load_user_profile(uid)
-end)
+end
 
-local function uid_by(KEY, tid, key)
+function fs.uid_by(KEY, tid, key)
+	assert(locked)
 	local path = uidbypath(KEY, tid, key)
 	local s = readlink(path, 'raw')
 	return s and tonumber(s:match'/(%d+)/profile')
 end
-read_op('uid_by', uid_by)
 
 local function check_uid_by(KEY, tid, key)
-	allow(not uid_by(KEY, tid, key), S(KEY..'_taken', KEY..' already registered'))
+	allow(not fs.uid_by(KEY, tid, key), S(KEY..'_taken', KEY..' already registered'))
 end
 
 local function add_uid_by(KEY, tid, key, uid)
@@ -238,7 +238,8 @@ local function del_uid_by(KEY, tid, key)
 end
 
 --user ids are global so a user can be in multiple tenants.
-write_op('add_user', function(tid, u)
+function fs.add_user(tid, u)
+	assert(locked_w)
 	check_tenant(tid)
 	local uid = gen_id'user_id'
 	--check email and/or phone before committing.
@@ -252,9 +253,10 @@ write_op('add_user', function(tid, u)
 	if u.phone then add_uid_by('phone', tid, u.phone, uid) end
 	mkdir(userpath(uid, 'sessions'))
 	return u
-end)
+end
 
-write_op('del_user', function(uid)
+function fs.del_user(uid)
+	assert(locked_w)
 	local u = load_user_profile(uid)
 	rmfile(userpath(uid, 'profile')) --commit
 	for _,tid in ipairs(u.tenants) do
@@ -268,9 +270,10 @@ write_op('del_user', function(uid)
 		rmfile(usersessionpath(uid, sid))
 	end
 	rm_rf(userpath(uid))
-end)
+end
 
-write_op('update_user', function(uid, update_fields)
+function fs.update_user(uid, update_fields)
+	assert(locked_w)
 	local u = load_user_profile(uid)
 	local old = {email = u.email, phone = u.phone, tenants = u.tenants}
 	local old_tenants = cat(old.tenants, ' ')
@@ -297,9 +300,10 @@ write_op('update_user', function(uid, update_fields)
 		end
 	end
 	return new
-end)
+end
 
-write_op('user_add_tenant', function(uid, tid)
+function fs.user_add_tenant(uid, tid)
+	assert(locked_w)
 	check_tenant(tid)
 	local u = load_user_profile(uid)
 	assert(not indexof(tid, u.tenants))
@@ -310,9 +314,10 @@ write_op('user_add_tenant', function(uid, tid)
 			add_uid_by(KEY, tid, u[KEY], uid)
 		end
 	end
-end)
+end
 
-write_op('user_del_tenant', function(uid, tid)
+function fs.user_del_tenant(uid, tid)
+	assert(locked_w)
 	local u = load_user_profile(uid)
 	assert(remove_value(u.tenants, tid))
 	save_user_profile(u) --commit
@@ -322,13 +327,14 @@ write_op('user_del_tenant', function(uid, tid)
 		end
 	end
 	for sid in ls(userpath(uid, 'sessions')) do
-		del_session(tid, sid)
+		fs.del_session(tid, sid)
 	end
-end)
+end
 
 --repair ---------------------------------------------------------------------
 
-write_op('repair', function()
+function fs.repair()
+	assert(locked_w)
 	mkdir(varpath('hosts'))
 	mkdir(varpath('tenants'))
 	mkdir(varpath('users'))
@@ -345,7 +351,7 @@ write_op('repair', function()
 	local users = {}
 	for uid in ls(varpath('users')) do
 		uid = assert(tonumber(uid))
-		local u = load_user_profile(uid)
+		local u = try_load_user_profile(uid)
 		if not u then --interrupted del_user
 			rm_rf(userpath(uid))
 		else
@@ -366,12 +372,12 @@ write_op('repair', function()
 				--expired sessions are GC'd here so the request read path stays read-only.
 				local uid = check_session(tid, sid) --check expired
 				if not uid then
-					del_session(tid, sid)
+					fs.del_session(tid, sid)
 				end
 			local u = uid and users[uid]
 			if uid and (not u or not indexof(tid, u.tenants)) then
 				--^^dangling session from interrupted del_user or user_del_tenant
-				del_session(tid, sid)
+				fs.del_session(tid, sid)
 				uid = nil
 			end
 			if uid and not exists(usersessionpath(uid, sid)) then
@@ -392,7 +398,7 @@ write_op('repair', function()
 			local key = u[KEY]
 			if key then
 				for _,tid in ipairs(u.tenants) do
-					local ix_uid = uid_by(KEY, tid, key)
+					local ix_uid = fs.uid_by(KEY, tid, key)
 					if ix_uid and ix_uid ~= uid then --dangling from update_user
 						del_uid_by(KEY, tid, key)
 						ix_uid = nil
@@ -407,7 +413,7 @@ write_op('repair', function()
 	for _,KEY in ipairs{'email', 'phone'} do
 		for tid in pairs(tids) do
 			for key in ls(tpath(tid, 'uid_by_'..KEY)) do
-				local uid = assert(uid_by(KEY, tid, key))
+				local uid = assert(fs.uid_by(KEY, tid, key))
 				local u = users[uid]
 				if not u or u[KEY] ~= key or not indexof(tid, u.tenants) then
 					--^^dangling index from add_user, update_user, del_user, user_del_tenant
@@ -416,6 +422,8 @@ write_op('repair', function()
 			end
 		end
 	end
-end)
+end
 
-fs.init = fs.repair
+function fs.init()
+	fs.with_lock('w', fs.repair)
+end
