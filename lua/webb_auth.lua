@@ -3,9 +3,6 @@
 	webb | session-based authentication
 	Written by Cosmin Apreutesei. Public Domain.
 
-	IMPORTANT: call randomseed(clock()) prior to using this module or you'll
-	get the same session ids and auth codes on every run!
-
 AUTH API
 	gen_auth_code({email=|phone=}) -> code,uid   find/create user and gen auth code
 	login([params][, switch_user]) -> real_uid   login with params:
@@ -28,6 +25,7 @@ USER ADMIN API
 	usr_update({k->v}) -> uid                 update user
 	usr_delete(uid)                           delete user
 AUTH STORAGE API
+	auth_init([store_name])                   init auth module
 	auth_store() -> as                        get storage object (see code)
 
 SCHEMA
@@ -50,310 +48,85 @@ and it will be sent with the reply. If a prev. anon. user was logged in, the
 callback `switch_user(new_uid, old_uid)` is called before deleting it to
 allow for moving data like a shopping cart etc. to the new user.
 
-TODO
-	- implement email/phone validations and put all validators together.
-
 ]==]
 
 if not ... then require'webb_auth_test'; return end
 
 require'webb'
 require'glue'
-require'schema'
 require'bcrypt'
 require'http_date'
 
-local _store = {}
-local store = memoize(function()
-	return _store[config'auth_store' or 'fs']
-end)
-auth_store = store
+--validators -----------------------------------------------------------------
 
---schema ---------------------------------------------------------------------
-
-function auth_schema()
-
-	import'schema_std'
-
-	tables.tenant = {
-		tenant      , idpk,
-		name        , name,
-		host        , name, uk,
-		active      , bool1,
-		ctime       , ctime,
-	}
-
-	tables.usr = {
-		usr         , idpk    ,
-		anonymous   , bool1   ,
-		email       , email   , uk,
-		emailvalid  , bool0   ,
-		pass        , hash    ,
-		active      , bool1   ,
-		title       , name    ,
-		name        , name    ,
-		phone       , strid   ,
-		phonevalid  , bool0   ,
-		sex         , enum'M F O',
-		birthday    , date    ,
-		newsletter  , bool0   ,
-		roles       , text    ,
-		note        , text    ,
-		theme       , strid   ,
-		auth_code   , strid   ,
-		auth_code_created  , time ,
-		auth_code_trycount , int  ,
-		auth_code_validates, enum'email phone',
-		clientip    , strid   , --when it was created
-		atime       , atime   , --last access time
-		ctime       , ctime   , --creation time
-		mtime       , mtime   , --last modification time
-	}
-
-	tables.usr_tenant = {
-		usr         , id, not_null, child_fk,
-		tenant      , id, not_null, chilk_fk, pk(usr, tenant),
-	}
-
-	tables.sess = {
-		sess        , hash   , not_null, pk,
-		usr         , id     , not_null, child_fk,
-		clientip    , strid  , --when it was created
-		ctime       , ctime  ,
-	}
-
-	if _G.multilang() then
-
-		import'lang'
-
-		add_cols('usr after note', {
-			lang        , lang    , weak_fk,
-			country     , country , weak_fk,
-		})
-
-	end
-
+function valid_email(email)
+	checkarg(not email or (#email >= 1 and #email <= 200))
 end
 
---mdbx storage ---------------------------------------------------------------
-
-local mdbx = {}; _store.mdbx = mdbx
-
---TODO:
-
---fs storage -----------------------------------------------------------------
-
---OBJECTIVES:
--- 1. a process crash leaves the store in a recoverable state.
--- 2. a hard poweroff doesn't undo the changed state (with PLP drives!).
--- 3. multi-process access is synchronized or otherwise accounted for.
--- 4. no path injection.
-
-local fs = {}
-_store.fs = fs
-
-local function check_filename(s)
-	s = s:trim():lower()
-	return checkarg(s and s ~= '' and s ~= '.' and s ~= '..' and #s <= 200
-		and not s:find'[/\\%z]' and s)
+function valid_phone(phone)
+	checkarg(not phone or (#phone >= 1 and #phone <=  15))
 end
 
-local function hostpath(host, ...)
-	return varpath('hosts', check_filename(host), ...)
+function valid_name(name)
+	checkarg(not name  or (#name  >= 1 and #name  <= 200))
 end
 
-function fs.check_host(host)
-	return checkarg(file_is(hostpath(host), 'dir') and host, 'invalid host: %s', host)
+function valid_pass(pass)
+	return pass and #pass >= 1 and #pass <= 72 and pass or nil
 end
 
-local function unlock(lf, ok, ...)
-	lf:unlock()
-	lf:close()
-	if not ok then error(..., 2) end
-	return ...
+local function check_field(NAME, validate, u)
+	if not u then return end
+	checkarg(not u or validate(u[NAME]), S('invalid_'..NAME, 'Invalid %s', NAME))
 end
-local function locked(lock_type, fn)
-	return function(...)
-		local lf = open(varpath('auth_lock'), 'a')
-		lf:lock(lock_type)
-		return unlock(lf, pcall(fn, ...))
-	end
-end
-local function read_locked(fn) return locked('sh', fn) end
-local function write_locked(fn) return locked('ex', fn) end
-
-fs.hosts = read_locked(function() --return {host1, ...}
-	local t = {}
-	for name, d in ls(varpath('hosts')) do
-		if d:is'dir' then t[#t+1] = name end
-	end
-	return t
-end)
-
-fs.add_tenant = write_locked(function(host)
-	host = check_filename(host)
-	local tid = gen_id'tenant_id'
-	save(hostpath(host, 'tenant'), tid)
-	return tid
-end)
-
-fs.delete_tenant = write_locked(function(host)
-	rm_rf(hostpath(host))
-end)
-
-fs.rename_host = write_locked(function(old_host, new_host)
-	local old_path = hostpath(old_host)
-	local new_path = hostpath(new_host)
-	local ok, err = try_rename(old_path, new_path)
-	check_io(nil, ok or err == 'not_empty', err)
-	allow(ok, S('host_already_exists', 'Host already exists: %s', new_host))
-	sync_dir(varpath('hosts')) --make rename durable
-end)
-
-local function user_path(uid, ...)
-	assert(isint(uid))
-	return varpath('users', tostring(uid), ...)
+local function check_user_fields(u)
+	check_field('email', valid_email, u)
+	check_field('phone', valid_phone, u)
+	check_field('name' , valid_name , u)
+	check_field('pass' , valid_pass , u)
+ 	if u.pass then u.pass = bcrypt_hash(u.pass) end
 end
 
-fs.user_ids = read_locked(function() --return {uid1,...}
-	local t = {}
-	for uid, d in ls(varpath('users')) do
-		local uid = tonumber(uid)
-		if uid then t[#t+1] = uid end
-	end
-	return t
-end)
+--store API ------------------------------------------------------------------
 
-fs.uid_by = read_locked(function(ix_name, host, ix_val)
-	local path = varpath('hosts', host, 'uid_by_'..ix_name, check_filename(ix_val))
-	return tonumber(load(path))
-end)
+auth_stores = {}
 
---create/update/delete host+email/phone->uid index, also checking for clashes.
---creat+rdwr allows idempotent retries.
-local function fs_link_unlink_host_user(host, ix_name, ix_val, uid)
-	ix_val = check_filename(ix_val)
-	local ix_dir = varpath('hosts', host, 'uid_by_'..ix_name)
-	local ix_file = indir(ix_dir, ix_val)
-	if uid then
-		assert(isint(uid))
-		mkdir(ix_dir)
-		local f = open{path = ix_file, flags = 'creat rdwr'}
-		local old_uid = tonumber(str(f:readall()))
-		if old_uid then
-			f:close()
-			allow(uid == old_uid, S(ix_name..'_taken', ix_name..' already registered'))
+local store
+
+function auth_init(store_name)
+	store = assert(auth_stores[config'auth_store' or store_name or 'fs'])
+	if store.init then store.init() end
+end
+
+function auth_store()
+	return store
+end
+
+local function add_user(tid, init_values)
+	local u = update({
+		anonymous = true,
+		active = true,
+	}, init_values)
+	check_user_fields(u)
+	return store.add_user(tid, u)
+end
+
+local function update_user(tid, updates)
+	store.update_user(tid, function(u)
+		local new = u
+		if isfunc(updates) then
+			local old_tenants = cat(old.tenants, ' ')
+			updates(new)
+			assert(cat(new.tenants, ' ') == old_tenants)
 		else
-			f:truncate()
-			f:write(tostring(uid))
-			f:sync()
-			f:close()
-			sync_dir(ix_dir) --make create durable
+			assert(istab(updates))
+			assert(not updates.tenants)
+			for k,v in pairs(updates) do
+				new[k] = repl(v, CLEAR, nil)
+			end
 		end
-	else
-		rmfile(ix_file)
-	end
-end
-local function fs_link_host_user(host, uid, u)
-	if u.email then fs_link_unlink_host_user(host, 'email', u.email, uid) end
-	if u.phone then fs_link_unlink_host_user(host, 'phone', u.phone, uid) end
-end
-local function fs_unlink_host_user(host, uid, u)
-	if u.email then fs_link_unlink_host_user(host, 'email', u.email, nil) end
-	if u.phone then fs_link_unlink_host_user(host, 'phone', u.phone, nil) end
-end
-local function fs_relink_host_user(host, ix_name, uid, old_val, new_val)
-	if old_val == new_val then return end
-	if new_val then fs_link_unlink_host_user(host, ix_name, new_val, uid) end
-	if old_val then fs_link_unlink_host_user(host, ix_name, old_val, nil) end
-end
-
-local function load_user_profile(uid)
-	local s = load(user_path(uid, 'profile'))
-	if not s then return end
-	local u = eval(s)
-	assert(istab(u))
-	return u
-end
-
-local function save_user_profile(uid, u)
-	save(user_path(uid, 'profile'), pp(u))
-end
-
---user ids are global so a user can be in multiple hosts.
-fs.add_user = write_locked(function(init_values)
-	local uid = gen_id'user_id'
-	local defaults = {anonymous = true, active = true, roles = {}}
-	local u = update(defaults, init_values)
-	fs_link_host_user(host, uid, u)
-	save_user_profile(uid, u)
-	return uid
-end)
-
-fs.load_user = read_locked(function(uid)
-	local u = assert(load_user_profile(uid))
-	u.id = uid
-	u.atime = file_attr(user_path(uid, 'profile'), 'atime')
-	return u
-end)
-
-fs.delete_user = write_locked(function(uid)
-	with_locked_user(uid, function(uid, u)
-		--removing indexes before the user dir for two reasons:
-		--1) if index removal fails the user becomes unreachable but delete_user()
-		--can be re-attempted (user is still listed) to finish the job.
-		--2) leaving orphaned indexes would lock in the email/phone which
-		--would block creating the user again.
-		for _,host in ipairs(fs.hosts()) do
-			fs_unlink_host_user(host, uid, u)
-		end
-		rm_rf(user_path(uid))
+		check_user_fields(new)
 	end)
-end)
-
-fs.update_user = write_locked(function(uid, updates)
-	with_locked_user(uid, function(uid, u)
-		local old_email = u.email
-		local old_phone = u.phone
-		for k,v in pairs(updates) do
-			u[k] = repl(v, CLEAR, nil)
-		end
-		--update indexes: if these fail, user is left unreachable by new email/phone.
-		for _,host in ipairs(fs.hosts()) do
-			fs_relink_host_user(host, 'email', uid, old_email, u.email)
-			fs_relink_host_user(host, 'phone', uid, old_phone, u.phone)
-		end
-		save_user_profile(uid, u)
-	end)
-end)
-
-function fs.touch_user(uid)
-	file_attr(user_path(uid, 'profile'), {atime = now()})
-end
-
-local function session_path(host, sid)
-	return varpath('hosts', host, 'sessions', check_filename(sid))
-end
-
-function fs.load_session(host, sid)
-	local path = session_path(host, sid)
-	local uid = tonumber(load(path))
-	if not uid then return nil end
-	local mtime = file_attr(path, 'mtime')
-	local lifetime = config('session_lifetime', 2 * 365 * 24 * 3600)
-	if mtime + lifetime < now() then --expired
-		fs.delete_session(host, sid) --cleanup
-		return
-	end
-	return uid
-end
-
-function fs.save_session(host, sid, uid)
-	save(session_path(host, sid), assert(uid))
-end
-
-function fs.delete_session(host, sid)
-	rmfile(session_path(host, sid))
 end
 
 --session cookie -------------------------------------------------------------
@@ -379,43 +152,69 @@ end
 
 --auth flows -----------------------------------------------------------------
 
+local _host = host
+tenant = http_once_per_request(function()
+	return store.tenant_by_host(_host())
+end)
+function host() --override to validated version to prevent host injection
+	tenant()
+	return _host()
+end
+
+local function create_or_update_user(t, upgrade_uid)
+	t = t or {}
+	if not t.id then --create user
+		allow(config('allow_create_user', true))
+		wait(0.2) --make flooding up the table a bit slower
+		merge(t, { --apply defaults
+			clientip = client_ip(),
+			lang = multilang() and lang() or nil,
+			active = true,
+			anonymous = true,
+		})
+	end
+	local old_u = t.id and user(t.id)
+	local uid = store.save_user(t, old_u)
+	return uid
+end
+local function create_user(t, upgrade_uid)
+	assert(not t or not t.id)
+	return create_or_update_user(t, upgrade_uid)
+end
+local function update_user(t)
+	assert(t and t.id)
+	return create_or_update_user(t)
+end
+
 local function set_req_session(sid, uid)
 	local req = http_request()
 	req.session_id = sid
 	req.user_id = uid
 end
 
-local function set_session(uid)
-	local sid = tohex(random_string(16))
-	store().save_session(host(), sid, uid)
+local function create_session(uid)
+	local sid = tohex(secure_random_string(16))
+	store.add_session(tenant(), sid, uid)
 	set_session_cookie(sid)
 	set_req_session(sid, uid)
 end
 
-local function load_session()
+local function load_session_user()
 	local sid = parse_session_cookie()
-	local uid = sid and store().load_session(host(), sid)
-	if not uid then sid = nil end --prevent sid injection
-	return sid, uid
-end
-
-local function load_user(uid)
-	return store().load_user(uid)
+	if not sid then return end
+	local uid, u = store.load_session_user(tenant(), sid)
+	if not uid then return end
+	return sid, uid, u
 end
 
 --login based on session cookie.
 local function auth_session()
-	local sid, uid = load_session()
-	local u = uid and load_user(uid)
-	if not u then --user deleted
-		store().delete_session(host(), sid)
-	end
+	local sid, uid, u = load_session_user()
 	if u and u.active then
 		set_req_session(sid, uid)
 	elseif config('auto_create_user', true) then
 		local uid = create_user()
-		set_session(uid)
-		if sid then store().delete_session(host(), sid) end --can't get it back
+		create_session(uid)
 	end
 end
 
@@ -423,15 +222,15 @@ end
 local function auth_logout()
 	local sid, uid = load_session()
 	set_session_cookie(nil)
-	if uid then store().delete_session(host(), sid) end --can't get it back
+	if uid then store.delete_session(tenant(), sid) end
 	set_req_session(nil, nil)
 	local u = uid and load_user(uid)
 	if u and u.anonymous then --can't get it back
-		store().delete_user(uid)
+		store.delete_user(uid)
 	end
 	if config('auto_create_user', true) then
 		local uid = create_user()
-		set_session(uid)
+		create_session(uid)
 	end
 end
 
@@ -444,7 +243,7 @@ local function _auth_nopass(a)
 		phone and uid_by('phone', phone)
 	allow(uid, S('invalid_credentials', 'Invalid credentials'))
 	local sid, uid = load_session()
-	set_session(uid)
+	create_session(uid)
 	return uid
 end
 local function auth_nopass(a)
@@ -455,80 +254,33 @@ end
 --login with an username and password.
 local function auth_pass(a)
 	_auth_nopass(a)
-	if http_request().user_id
+	--if http_request().user_id
 	local u = user(uid)
 	local valid = u and u.active and u.pass and valid_pass(a.pass)
 		and bcrypt_verify(a.pass, u.pass)
 	allow(valid, S('invalid_credentials', 'Invalid credentials'))
 	del_session()
-	set_session(uid)
+	create_session(uid)
 end
 
 --request state --------------------------------------------------------------
 
---override host() to validate it before use to avoid host injection.
-local _host = host
-host = http_once_per_request(function()
-	local h = _host()
-	return store().check_host(h)
-end)
-
 local user = http_once_per_request(function(uid)
-	local u = store().load_user(host(), uid)
+	local u = store.load_user(tenant(), uid)
 	if not u then return nil end
 	u.real_id = u.id
 	u.real_roles = u.roles
 	return u
 end)
 
-local function valid_pass(pass)
-	return pass and #pass >= 1 and #pass <= 72 and pass or nil
-end
-
-local function create_or_update_user(t, upgrade_uid)
-
-	--validate and transform fields
-	t = t or {}
-	checkarg(not t.email or (#t.email >= 1 and #t.email <= 200))
-	checkarg(not t.phone or (#t.phone >= 1 and #t.phone <=  15))
-	checkarg(not t.name  or (#t.name  >= 1 and #t.name  <= 200))
-	checkarg(not t.pass or valid_pass(t.pass))
-	t.pass = t.pass and bcrypt_hash(t.pass)
-
-	if not t.id then --create user
-		allow(config('allow_create_user', true))
-		wait(0.2) --make flooding up the table a bit slower
-		merge(t, { --apply defaults
-			clientip = client_ip(),
-			lang = multilang() and lang() or nil,
-			active = true,
-			anonymous = true,
-		})
-	end
-
-	t.host = host()
-	local old_u = t.id and user(t.id)
-	local uid = store().save_user(t, old_u)
-	user(CLEAR)
-	return uid
-end
-local function create_user(t, upgrade_uid)
-	assert(not t or not t.id)
-	return create_or_update_user(t, upgrade_uid)
-end
-local function update_user(t)
-	assert(t and t.id)
-	return create_or_update_user(t)
-end
-
 local function delete_user(uid)
 	local u = assert(user(uid))
-	store().delete_user(uid)
+	store.delete_user(uid)
 	user(CLEAR)
 end
 
 local function uid_by(which, s)
-	return store().uid_by(which, host(), s)
+	return store.uid_by(which, tenant(), s)
 end
 
 local function parse_session_cookie()
@@ -563,8 +315,8 @@ local auth = {} --auth.<type>(params) -> uid
 function auth.session()
 	local req = http_request()
 	local sid = parse_session_cookie()
-	local uid = sid and store().load_session(host(), sid)
-	local u = uid and store().load_user(uid)
+	local uid = sid and store.load_session(tenant(), sid)
+	local u = uid and store.load_user(uid)
 	return u and u.active and uid or nil
 end
 
@@ -782,7 +534,7 @@ function usr_touch()
 	end
 	local uid = suid()
 	if not uid then return end
-	store().touch_user(host(), uid)
+	store.touch_user(tenant(), uid)
 end
 
 --update current user profile.
@@ -810,7 +562,7 @@ end
 function usr_list()
 	local r = usr'roles'
 	allow(r.admin or r.dev)
-	return store().user_ids()
+	return store.user_ids()
 end
 
 function usr_get(uid)
