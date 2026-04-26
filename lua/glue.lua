@@ -181,6 +181,7 @@ STRUCTURED EXCEPTIONS
 	see errors.lua
 	see errors_io.lua
 MODULES
+	require'glue'.with'module1 ...'  require syntax sugar
 	module([name, ][parent]) -> M  create a module
 	autoload(t, submodules) -> M   autoload table keys from submodules
 	autoload(t, key, module|loader) -> t       autoload table key from module
@@ -253,6 +254,8 @@ DEBUGGING
 	pr(...)                        print to stderr with logargs
 LOGGING
 	see logging.lua
+LANG
+	S(id, en_s, ...) -> s          get Lua string in current language
 
 ]=]
 
@@ -1733,6 +1736,13 @@ end
 
 --modules --------------------------------------------------------------------
 
+--require shorthand: require'glue'.with'module1 ...'
+package.loaded.glue = {with = function(s)
+	for s in words(s) do
+		require(s)
+	end
+end}
+
 --[[
 Create a module with a public and private namespace and set the environment
 of the calling function (not the global one!) to the module's private
@@ -2416,11 +2426,9 @@ function pr(...)
 	return ...
 end
 
-package.loaded.glue = {with = function(s)
-	for s in words(s) do
-		require(s)
-	end
-end}
+function S(id, ...)
+	return format(...)
+end
 
 require'errors'
 require'errors_io'
