@@ -158,9 +158,10 @@ PLATFORM
 	Windows                        true if platform is Windows
 	Linux                          true if platform is Linux
 	OSX                            true if platform is OSX
-PROCESS CONTROL
+PROCESS
 	sleep(s)                       suspend process i.e. blocking sleep
 	exit                         = os.exit
+	getpid() -> pid                get current process PID
 TIME & DATES
 	now() -> ts                    os.time() but more accurate
 	clock() -> x                   os.clock() but more accurate
@@ -2123,10 +2124,7 @@ typedef double   f64;
 typedef uint8_t  bool8;
 ]]
 
-cdef[[
-int memcmp(const void * ptr1, const void * ptr2, size_t num);
-]]
-
+cdef'int memcmp(const void * ptr1, const void * ptr2, size_t num);'
 memcmp = C.memcmp
 
 local ffi_string = ffi.string
@@ -2149,16 +2147,19 @@ function ptr(p)
 	return p ~= nil and p or nil
 end
 
-cdef[[
-int getrandom(void *buf, size_t buflen, unsigned int flags);
-]]
-
+cdef'int getrandom(void *buf, size_t buflen, unsigned int flags);'
 local function secure_random_string(n)
 	local buf = u8a(n)
 	local ret = C.getrandom(buf, n, 0)
 	assert(ret == n, 'getrandom() failed')
 	return ffi_string(buf, n)
 end
+
+cdef[[
+typedef int pid_t;
+pid_t getpid(void);
+]]
+getpid = C.getpid
 
 --allocation -----------------------------------------------------------------
 
