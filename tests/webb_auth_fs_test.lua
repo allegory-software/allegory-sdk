@@ -13,14 +13,6 @@ end
 local store = auth_stores.fs
 store.init()
 
-local function user_by_id(uid)
-	for _,u in ipairs(store.users()) do
-		if u.id == uid then
-			return u
-		end
-	end
-end
-
 local function tenants_by_host()
 	local t = {}
 	for _,tenant in ipairs(store.tenants()) do
@@ -44,17 +36,18 @@ assert(store.tenant_by_host('api.example') == tid1)
 assert(not pcall(store.tenant_by_host, 'shop.example'))
 print'ok tenants'
 
-local uid = store.add_user(tid1, {
+local u = store.add_user(tid1, {
 	active = true,
 	anonymous = false,
 	email = 'foo@test.com',
 	phone = '123456',
 	name = 'Alice',
 })
+local uid = u.id
 assert(store.uid_by('email', tid1, 'foo@test.com') == uid)
 assert(store.uid_by('phone', tid1, '123456') == uid)
 
-local u = assert(user_by_id(uid))
+local u = assert(store.user(uid))
 assert(u.email == 'foo@test.com')
 assert(u.phone == '123456')
 assert(u.name == 'Alice')
@@ -63,17 +56,17 @@ assert(u.anonymous == false)
 assert(#u.tenants == 1 and u.tenants[1] == tid1)
 print'ok add_user'
 
-store.update_user(uid, {
-	email = 'bar@test.com',
-	phone = '654321',
-	name = 'Alice Updated',
-})
+store.update_user(uid, function(u)
+	u.email = 'bar@test.com'
+	u.phone = '654321'
+	u.name = 'Alice Updated'
+end)
 assert(store.uid_by('email', tid1, 'foo@test.com') == nil)
 assert(store.uid_by('phone', tid1, '123456') == nil)
 assert(store.uid_by('email', tid1, 'bar@test.com') == uid)
 assert(store.uid_by('phone', tid1, '654321') == uid)
 
-u = assert(user_by_id(uid))
+u = assert(store.user(uid))
 assert(u.email == 'bar@test.com')
 assert(u.phone == '654321')
 assert(u.name == 'Alice Updated')
@@ -83,7 +76,7 @@ store.user_add_tenant(uid, tid2)
 assert(store.uid_by('email', tid2, 'bar@test.com') == uid)
 assert(store.uid_by('phone', tid2, '654321') == uid)
 
-u = assert(user_by_id(uid))
+u = assert(store.user(uid))
 assert(indexof(tid2, u.tenants))
 print'ok user_add_tenant'
 
@@ -92,12 +85,12 @@ local sid2 = ('b'):rep(32)
 store.add_session(tid1, sid1, uid)
 store.add_session(tid2, sid2, uid)
 
-local suid, su = store.load_session_user(tid1, sid1)
-assert(suid == uid)
+local su = store.load_session_user(tid1, sid1)
+assert(su.id == uid)
 assert(su and su.email == 'bar@test.com')
 
-local suid2, su2 = store.load_session_user(tid2, sid2)
-assert(suid2 == uid)
+local su2 = store.load_session_user(tid2, sid2)
+assert(su.id == uid)
 assert(su2 and su2.phone == '654321')
 print'ok add_session'
 
@@ -110,13 +103,13 @@ assert(store.uid_by('email', tid2, 'bar@test.com') == nil)
 assert(store.uid_by('phone', tid2, '654321') == nil)
 assert(store.load_session_user(tid2, sid2) == nil)
 
-u = assert(user_by_id(uid))
+u = assert(store.user(uid))
 assert(not indexof(tid2, u.tenants))
 assert(#u.tenants == 1 and u.tenants[1] == tid1)
 print'ok user_del_tenant'
 
 store.del_user(uid)
-assert(user_by_id(uid) == nil)
+assert(not pcall(store.user, uid))
 assert(store.uid_by('email', tid1, 'bar@test.com') == nil)
 assert(store.uid_by('phone', tid1, '654321') == nil)
 assert(store.load_session_user(tid1, sid1) == nil)

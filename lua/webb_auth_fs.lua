@@ -15,6 +15,8 @@ the user profile file as point of truth because it is saved first.
 
 ]]
 
+if not ... then require'webb_auth_fs_test'; return end
+
 require'webb_auth'
 require'fs'
 
@@ -53,6 +55,16 @@ local function usersessionpath(uid, sid)
 	return userpath(uid, 'sessions', check_filename(sid))
 end
 
+local function check_tenant(tid)
+	return checkfound(file_is(tpath(tid), 'dir') and tid,
+		S('invalid_tenant', 'Invalid tenant'))
+end
+
+local function check_user(uid)
+	return checkfound(file_is(userpath(uid), 'dir') and uid,
+		S('invalid_user', 'Invalid user'))
+end
+
 --global lock ----------------------------------------------------------------
 
 local lf, locked
@@ -89,7 +101,7 @@ local function try_tenant_by_host(host)
 	return s and assert(tonumber(s:match'/(%d+)$'))
 end
 local function tenant_by_host(host)
-	return checkfound(try_tenant_by_host(host), 'Invalid host: %s', host)
+	return checkfound(try_tenant_by_host(host), S('invalid_host', 'Invalid host'))
 end
 fs.tenant_by_host = tenant_by_host
 
@@ -131,6 +143,8 @@ end)
 
 write_op('add_session', function(tid, sid, uid)
 	assert(isint(uid))
+	check_tenant(tid)
+	check_user(uid)
 	symlink(sessionpath(tid, sid), '../../../users/'..uid..'/profile') --commit
 	symlink(usersessionpath(uid, sid), '../../../tenants/'..tid..'/sessions/'..sid)
 end)
@@ -164,39 +178,42 @@ end
 
 --users ----------------------------------------------------------------------
 
-local function load_user_profile_by(file)
+local function try_load_user_profile_by(file)
 	local s = load(file)
 	if not s then return end
 	local u = eval(s)
 	assert(istab(u))
 	return u
 end
-local function load_user_profile(uid)
-	return load_user_profile_by(userpath(uid, 'profile'))
+local function try_load_user_profile(uid)
+	local u = try_load_user_profile_by(userpath(uid, 'profile'))
+	assert(not u or u.id == uid)
+	return u
 end
+function load_user_profile(uid)
+	return checkfound(try_load_user_profile(uid),
+		S('user_not_found', 'User not found'))
+end
+fs.user = load_user_profile --already atomic
 
 read_op('users', function() --return {u1,...}
 	local t = {}
 	for uid, d in ls(varpath('users')) do
 		local uid = assert(tonumber(uid))
-		local u = load_user_profile(uid)
-		u.id = uid
-		t[#t+1] = u
+		t[#t+1] = load_user_profile(uid)
 	end
 	return t
 end)
 
-local function save_user_profile(uid, u)
-	save(userpath(uid, 'profile'), pp(u))
+local function save_user_profile(u)
+	save(userpath(u.id, 'profile'), pp(u))
 end
 
 --read-locked because session->uid and profile/index updates are not
 --committed atomically across files.
 read_op('load_session_user', function(tid, sid)
 	local uid = check_session(tid, sid)
-	local u = uid and load_user_profile(uid)
-	if not (u and u.active) then return end
-	return uid, u
+	return uid and try_load_user_profile(uid)
 end)
 
 local function uid_by(KEY, tid, key)
@@ -222,21 +239,23 @@ end
 
 --user ids are global so a user can be in multiple tenants.
 write_op('add_user', function(tid, u)
+	check_tenant(tid)
 	local uid = gen_id'user_id'
 	--check email and/or phone before committing.
 	if u.email then check_uid_by('email', tid, u.email) end
 	if u.phone then check_uid_by('phone', tid, u.phone) end
 	u.tenants = {tid}
 	u.roles = {}
-	save_user_profile(uid, u) --commit
+	u.id = uid
+	save_user_profile(u) --commit
 	if u.email then add_uid_by('email', tid, u.email, uid) end
 	if u.phone then add_uid_by('phone', tid, u.phone, uid) end
 	mkdir(userpath(uid, 'sessions'))
-	return uid
+	return u
 end)
 
 write_op('del_user', function(uid)
-	local u = checkfound(load_user_profile(uid))
+	local u = load_user_profile(uid)
 	rmfile(userpath(uid, 'profile')) --commit
 	for _,tid in ipairs(u.tenants) do
 		if u.email then del_uid_by('email', tid, u.email) end
@@ -251,10 +270,15 @@ write_op('del_user', function(uid)
 	rm_rf(userpath(uid))
 end)
 
-write_op('update_user', function(uid, updates)
-	local u = checkfound(load_user_profile(uid))
+write_op('update_user', function(uid, update_fields)
+	local u = load_user_profile(uid)
 	local old = {email = u.email, phone = u.phone, tenants = u.tenants}
-	local new = update(u, updates)
+	local old_tenants = cat(old.tenants, ' ')
+	local new = u
+	update_fields(new)
+	assert(new.id == uid)
+	assert(cat(new.tenants, ' ') == old_tenants)
+	assert(istab(new.roles))
 	--check if new email and/or phone is available on the tenants before committing.
 	for _,KEY in ipairs{'email', 'phone'} do
 		if new[KEY] and new[KEY] ~= old[KEY] then
@@ -263,7 +287,7 @@ write_op('update_user', function(uid, updates)
 			end
 		end
 	end
-	save_user_profile(uid, new) --commit
+	save_user_profile(new) --commit
 	for _,KEY in ipairs{'email', 'phone'} do
 		if new[KEY] ~= old[KEY] then
 			for _,tid in ipairs(old.tenants) do
@@ -272,13 +296,15 @@ write_op('update_user', function(uid, updates)
 			end
 		end
 	end
+	return new
 end)
 
 write_op('user_add_tenant', function(uid, tid)
-	local u = checkfound(load_user_profile(uid))
+	check_tenant(tid)
+	local u = load_user_profile(uid)
 	assert(not indexof(tid, u.tenants))
 	add(u.tenants, tid)
-	save_user_profile(uid, u) --commit
+	save_user_profile(u) --commit
 	for _,KEY in ipairs{'email', 'phone'} do
 		if u[KEY] then
 			add_uid_by(KEY, tid, u[KEY], uid)
@@ -287,9 +313,9 @@ write_op('user_add_tenant', function(uid, tid)
 end)
 
 write_op('user_del_tenant', function(uid, tid)
-	local u = checkfound(load_user_profile(uid))
+	local u = load_user_profile(uid)
 	assert(remove_value(u.tenants, tid))
-	save_user_profile(uid, u) --commit
+	save_user_profile(u) --commit
 	for _,KEY in ipairs{'email', 'phone'} do
 		if u[KEY] then
 			del_uid_by(KEY, tid, u[KEY])
@@ -329,7 +355,7 @@ write_op('repair', function()
 				local tid = u.tenants[i]
 				if not tids[tid] then --del_tenant
 					remove_value(u.tenants, tid)
-					save_user_profile(uid, u)
+					save_user_profile(u)
 				end
 			end
 		end
