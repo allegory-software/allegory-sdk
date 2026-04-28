@@ -107,6 +107,7 @@ IMAGE PROCESSING
 CONFIG
 	base_url                            base URL for absurl() (overrides scheme+host+port)
 	lang_filter       false             language filter mode; 'explicit' for explicit filtering
+	x_forwarded_headers                 if set, trust and use x-forwarded-* headers
 
 ]==]
 
@@ -293,16 +294,17 @@ end
 
 function scheme(s)
 	if s ~= nil then return scheme() == s end
-	return headers'x-forwarded-proto'
+	return config'x_forwarded_headers' and assert(headers'x-forwarded-proto')
 		or (req().tcp.istlssocket and 'https' or 'http')
 end
 
 function host()
-	return req().headers['host']
+	return config'x_forwarded_headers' and assert(headers'x-forwarded-host')
+		or req().headers['host']
 end
 
 function port()
-	return tonumber(headers'x-forwarded-port')
+	return config'x_forwarded_headers' and assert(tonumber(headers'x-forwarded-port'))
 		or req().tcp.listen_socket:bound_addr():port()
 end
 
@@ -311,11 +313,8 @@ function email(user)
 end
 
 function client_ip()
-	local xff = headers'x-forwarded-for'
-	if xff then
-		return xff:match'[^,]+' --first entry is the original client
-	end
-	return req().tcp:remote_addr():ip()
+	return config'x_forwarded_headers' and assert(headers'x-forwarded-for')
+		or req().tcp:remote_addr():ip()
 end
 
 function isgooglebot()
