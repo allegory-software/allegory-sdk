@@ -43,7 +43,7 @@ RESPONSE
 	req.finished -> true           true if req:finish() was called
 	raise('http_response', {status=,headers=,content=})  respond by raising an error
 CONFIG
-	host
+	http_host                      required, set to '*' to match all
 	http_addr                      '0.0.0.0'
 	http_port                      80
 	http_unix_socket
@@ -113,11 +113,8 @@ end
 
 --responding by raising an error.
 errortype'http_response'.__tostring = function(self)
-	local s = self.traceback or self.message or ''
-	if self.status then
-		s = self.status .. ' ' .. s
-	end
-	return s
+	return catany(' ', self.status, self.status_message,
+		':', self.content, self.traceback)
 end
 
 local req = {
@@ -132,7 +129,7 @@ function http_server(...)
 
 	if not self.listen then
 		self.listen = {}
-		local host = config'host'
+		local host = config'http_host'
 		if config'http_addr' ~= false then
 			add(self.listen, {
 				host = host,
