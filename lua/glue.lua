@@ -2158,7 +2158,7 @@ function ptr(p)
 end
 
 cdef'int getrandom(void *buf, size_t buflen, unsigned int flags);'
-local function secure_random_string(n)
+function secure_random_string(n)
 	local buf = u8a(n)
 	local ret = C.getrandom(buf, n, 0)
 	assert(ret == n, 'getrandom() failed')
