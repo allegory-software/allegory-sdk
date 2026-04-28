@@ -21,7 +21,6 @@ require'webb_auth'
 require'fs'
 
 local fs = {}
-auth_stores.fs = fs
 
 local function checknotexists(NAME, val)
 	allow(not val, S(NAME..'_already_exists', NAME..' already exists: %s', val))
@@ -93,7 +92,8 @@ local function try_tenant_by_host(host)
 	return s and assert(tonumber(s:match'/(%d+)$'))
 end
 local function tenant_by_host(host)
-	return checkfound(try_tenant_by_host(host), S('invalid_host', 'Invalid host'))
+	return checkfound(try_tenant_by_host(host),
+		S('invalid_host', 'Invalid host: %s', host))
 end
 fs.tenant_by_host = tenant_by_host
 
@@ -103,22 +103,29 @@ function fs.tenants()
 	for host in ls(varpath('hosts')) do
 		t[#t+1] = {
 			host = host,
-			tenant = try_tenant_by_host(host),
+			tenant = tenant_by_host(host),
 		}
 	end
 	return t
 end
 
-function fs.add_tenant(host)
+function fs.try_add_tenant(host)
 	assert(locked_w)
 	local hlpath = hostlinkpath(host)
-	checknotexists('host', try_tenant_by_host(host) and host)
+	if try_tenant_by_host(host) then
+		return nil, 'already_exists'
+	end
 	local tid = gen_id'tenant_id'
 	mkdir(tpath(tid))
 	mkdir(tpath(tid, 'sessions'))
 	mkdir(tpath(tid, 'uid_by_email'))
 	mkdir(tpath(tid, 'uid_by_phone'))
 	symlink(hlpath, '../tenants/'..tid) --commit
+	return tid
+end
+function fs.add_tenant(host)
+	local tid, err = fs.try_add_tenant(host)
+	checknotexists('host', err == 'already_exists' and host)
 	return tid
 end
 
@@ -164,26 +171,23 @@ function fs.touch_session(tid, sid) --non-durable, non-locked for speed
 	try_set_file_attr(sessionpath(tid, sid), {mtime = now()}, false)
 end
 
-local function check_session(tid, sid)
+function fs.load_session(tid, sid, lifetime)
+	assert(locked)
 	local file = sessionpath(tid, sid)
 	local mtime = file_attr(file, 'mtime', false)
-	if not mtime then return end --session removed async
-	local lifetime = config('session_lifetime', 2 * 365 * 24 * 3600)
-	if mtime + lifetime < now() then return end --expired
+	if not mtime then return nil end --session removed async
+	if mtime + lifetime < now() then return nil, 'expired' end
 	return read_session(tid, sid) --returns nil if session removed async
 end
 
 --users ----------------------------------------------------------------------
 
-local function try_load_user_profile_by(file)
-	local s = load(file)
+local function try_load_user_profile(uid)
+	assert(locked)
+	local s = load(userpath(uid, 'profile'))
 	if not s then return end
 	local u = eval(s)
 	assert(istab(u))
-	return u
-end
-local function try_load_user_profile(uid)
-	local u = try_load_user_profile_by(userpath(uid, 'profile'))
 	assert(not u or u.id == uid)
 	return u
 end
@@ -191,7 +195,8 @@ function load_user_profile(uid) --already atomic
 	return checkfound(try_load_user_profile(uid),
 		S('user_not_found', 'User not found'))
 end
-fs.user = load_user_profile
+fs.try_load_user = try_load_user_profile
+fs.load_user = load_user_profile
 
 function fs.users() --return {u1,...}
 	assert(locked)
@@ -206,14 +211,6 @@ end
 local function save_user_profile(u)
 	assert(locked_w)
 	save(userpath(u.id, 'profile'), pp(u))
-end
-
---read-locked because session->uid and profile/index updates are not
---committed atomically across files.
-function fs.load_session_user(tid, sid)
-	assert(locked)
-	local uid = check_session(tid, sid)
-	return uid and try_load_user_profile(uid)
 end
 
 function fs.uid_by(KEY, tid, key)
@@ -255,10 +252,13 @@ function fs.add_user(tid, u)
 	return u
 end
 
-function fs.del_user(uid)
+function fs.try_del_user(uid)
 	assert(locked_w)
-	local u = load_user_profile(uid)
-	rmfile(userpath(uid, 'profile')) --commit
+	local u = try_load_user_profile(uid)
+	if not u then
+		return false
+	end
+	local path, err = rmfile(userpath(uid, 'profile')) --commit
 	for _,tid in ipairs(u.tenants) do
 		if u.email then del_uid_by('email', tid, u.email) end
 		if u.phone then del_uid_by('phone', tid, u.phone) end
@@ -270,17 +270,18 @@ function fs.del_user(uid)
 		rmfile(usersessionpath(uid, sid))
 	end
 	rm_rf(userpath(uid))
+	return true
 end
 
 function fs.update_user(uid, update_fields)
 	assert(locked_w)
 	local u = load_user_profile(uid)
 	local old = {email = u.email, phone = u.phone, tenants = u.tenants}
-	local old_tenants = cat(old.tenants, ' ')
+	local cat_old_tenants = cat(old.tenants, ' ')
 	local new = u
 	update_fields(new)
 	assert(new.id == uid)
-	assert(cat(new.tenants, ' ') == old_tenants)
+	assert(cat(new.tenants, ' ') == cat_old_tenants)
 	assert(istab(new.roles))
 	--check if new email and/or phone is available on the tenants before committing.
 	for _,KEY in ipairs{'email', 'phone'} do
@@ -329,6 +330,10 @@ function fs.user_del_tenant(uid, tid)
 	for sid in ls(userpath(uid, 'sessions')) do
 		fs.del_session(tid, sid)
 	end
+end
+
+function fs.touch_user(uid) --non-durable, non-locked for speed
+	try_set_file_attr(userpath(uid, 'profile'), {mtime = now()}, false)
 end
 
 --repair ---------------------------------------------------------------------
@@ -427,3 +432,5 @@ end
 function fs.init()
 	fs.with_lock('w', fs.repair)
 end
+
+return fs

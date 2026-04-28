@@ -4,29 +4,33 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 AUTH API
-	gen_auth_code({email=|phone=}) -> code,uid   find/create user and gen auth code
-	login([params][, switch_user]) -> real_uid   login with params:
+	auth_gen_code{email=|phone=} -> code,uid  find/create user and gen auth code
+	login{type=,...}                          login with params:
 	- {type='session'}                        login with session cookie (default)
 	- {type='logout'}                         logout and create/login an anon user
-	- {type='pass', email=, phone=, pass=}    login with email/phone and password
-	- {type='code', email=|phone=, code=}     login with code from gen_auth_code()
-	- {type='register_pass', email=, phone=, pass=}  create a user with a password
-	- {type='nopass', email=, phone=}         login without pw if auth_allow_nopass
+	- {type='pass',email=,phone=,pass=}       login with email/phone and password
+	- {type='code',email=|phone=,code=}       login with code from gen_auth_code()
+	- {type='register_pass',email=,phone=,pass=} create a user with a password
 	host() -> host                            get host, raises if no matching tenant
 	tenant() -> tid                           get tenant id for host()
+	user([field]|'*') -> val|u                login with session cookie and get user
 USER PROFILE API
-	[real]usr([field|'*']) -> val|t|uid       session-login and get user field(s)
-	usr_touch()                               update current user's atime
-	usr_update_profile({k->v}) -> uid         update current user's profile data
+	[real_]user([field|'*']) -> val|t|uid      session-login and get user field(s)
+	user_update_profile({k->v}) -> uid         update current user's profile data
 USER ADMIN API
-	usr_list() -> {uid1,...}                  list users on current host
-	usr_get(uid) -> u                         get user profile
-	usr_create({k->v}) -> uid                 create user
-	usr_update({k->v}) -> uid                 update user
-	usr_delete(uid)                           delete user
-AUTH STORAGE API
+	user_list() -> {uid1,...}                 list users on current host
+	user_create(tid, {k->v}) -> u             create user
+	user_update(uid, {k->v}) -> u             update user
+	user_delete(uid)                          delete user
+AUTH STORE API
 	auth_init([store_name])                   init auth module
-	auth_store() -> as                        get storage object (see code)
+	auth_store() -> as                        get store object (see code)
+TO OVERRIDE
+	{email|phone|name|pass}_is_valid(s)       field validators
+	auth_switch_user(new_u, old_u)            callback when login from anonymous login
+
+REQUEST ARGS
+	uid        user id, for impersonation
 
 SCHEMA
 	auth_schema                              auth schema
@@ -39,13 +43,13 @@ CONFIG
 	auth_code_maxtry    5         max failed attempts before code is invalidated
 	auth_code_cooldown  30        auth code min resend interval in seconds
 	session_lifetime    2 years   session lifetime in seconds
-	auth_allow_nopass   false     allow auth without a password (for dev env)
+	auth_nopass_ip                allow auth without a password from IP (for dev env)
 
 USER SWITCHING
 
 Regardless of how the user is authenticated, the session cookie is updated
 and it will be sent with the reply. If a prev. anon. user was logged in, the
-callback `switch_user(new_uid, old_uid)` is called before deleting it to
+callback `auth_switch_user(new_uid, old_uid)` is called before deleting it to
 allow for moving data like a shopping cart etc. to the new user.
 
 ]==]
@@ -57,84 +61,105 @@ require'glue'
 require'bcrypt'
 require'http_date'
 
---validators -----------------------------------------------------------------
-
-function valid_email(email)
-	checkarg(not email or (#email >= 1 and #email <= 200))
-end
-
-function valid_phone(phone)
-	checkarg(not phone or (#phone >= 1 and #phone <=  15))
-end
-
-function valid_name(name)
-	checkarg(not name  or (#name  >= 1 and #name  <= 200))
-end
-
-function valid_pass(pass)
-	return pass and #pass >= 1 and #pass <= 72 and pass or nil
-end
-
-local function check_field(NAME, validate, u)
-	if not u then return end
-	checkarg(not u or validate(u[NAME]), S('invalid_'..NAME, 'Invalid %s', NAME))
-end
-local function check_user_fields(u)
-	check_field('email', valid_email, u)
-	check_field('phone', valid_phone, u)
-	check_field('name' , valid_name , u)
-	check_field('pass' , valid_pass , u)
- 	if u.pass then u.pass = bcrypt_hash(u.pass) end
-end
-
---store API ------------------------------------------------------------------
-
-auth_stores = {}
+--storage backend ----------------------------------------------------------------
 
 local store
-
-function auth_init(store_name)
-	store = assert(auth_stores[config'auth_store' or store_name or 'fs'])
-	if store.init then store.init() end
-end
-
 function auth_store()
 	return store
 end
-
-local function add_user(tid, init_values)
-	local u = update({
-		anonymous = true,
-		active = true,
-	}, init_values)
-	check_user_fields(u)
-	return store.add_user(tid, u)
+function auth_init(store_name)
+	local s = config'auth_store' or store_name or 'fs'
+	store = require('webb_auth_'..s)
+	if store.init then store.init() end
 end
 
-local function update_user(tid, updates)
-	store.update_user(tid, function(u)
-		local new = u
-		if isfunc(updates) then
-			local old_tenants = cat(old.tenants, ' ')
-			updates(new)
-			assert(cat(new.tenants, ' ') == old_tenants)
-		else
-			assert(istab(updates))
-			assert(not updates.tenants)
-			for k,v in pairs(updates) do
-				new[k] = repl(v, CLEAR, nil)
-			end
+--request host and tenant --------------------------------------------------------
+
+local _host = host
+
+tenant = http_once_per_request(function()
+	return store.tenant_by_host(_host())
+end)
+
+function host() --override to validated version to prevent host injection
+	tenant()
+	return _host()
+end
+
+--create/update/load user --------------------------------------------------------
+
+function email_is_valid(s)
+	return #s >= 1 and #s <= 200
+end
+function phone_is_valid(s)
+	return #s >= 1 and #s <=  15
+end
+function name_is_valid(s)
+	return #s >= 1 and #s <= 200
+end
+function pass_is_valid(s)
+	return #s >= 1 and #s <= 72
+end
+function code_is_valid(s)
+	return #s == 6 and not s:find'[^%d]'
+end
+
+local function check_field(NAME, is_valid, u)
+	if not (u and u[NAME] ~= nil) then return end
+	checkarg(is_valid(u[NAME]), NAME)
+end
+local function check_fields(u)
+	check_field('email', email_is_valid, u)
+	check_field('phone', phone_is_valid, u)
+	check_field('name' ,  name_is_valid, u)
+	check_field('pass' ,  pass_is_valid, u)
+	check_field('code' ,  code_is_valid, u)
+end
+
+local function create_user(u)
+	allow(config('allow_create_user', true))
+	u = update({
+		anonymous = true,
+		active = true,
+		clientip = client_ip(),
+		lang = multilang() and lang() or nil,
+	}, u)
+	check_fields(u)
+	u.pass = u.pass and bcrypt_hash(u.pass)
+	return store.add_user(tenant(), u)
+end
+
+local function update_user(uid, updates)
+	return store.update_user(uid, function(u)
+		assert(istab(updates))
+		for k,v in pairs(updates) do
+			v = repl(v, CLEAR, nil)
+			updates[k] = v
+			u[k] = v
 		end
-		check_user_fields(new)
+		check_fields(updates)
+		u.pass = updates.pass and bcrypt_hash(updates.pass)
 	end)
 end
 
---session cookie -------------------------------------------------------------
+local function try_load_user(uid)
+	local u = uid and store.try_load_user(uid)
+	if not u then return end
+	if not u.active then return end
+	if u.roles.dev then return u end --devs can access any tenant
+	if not indexof(tenant(), u.tenants) then return end
+	return u
+end
+
+--session management -------------------------------------------------------------
 
 local function parse_session_cookie()
+	local sid = http_request().session_id
+	if sid then return sid end --set-cookie in the same request
 	local s = headers('cookie'); if not s then return end
 	local sid = s:match'^session=([^;]*)' or s:match'; *session=([^;]*)'
 	if not sid or #sid ~= 32 or sid:find'[^%x]' then return end
+	http_request().session_id = sid
 	return sid
 end
 
@@ -148,455 +173,334 @@ local function set_session_cookie(sid)
 		..'; HttpOnly' --prevent JS access
 		..'; SameSite='..(secure_flag and 'strict' or 'lax') --prevent BREACH (but also img tracking)
 	)
+	http_request().session_id = sid
 end
 
---auth flows -----------------------------------------------------------------
-
-local _host = host
-tenant = http_once_per_request(function()
-	return store.tenant_by_host(_host())
-end)
-function host() --override to validated version to prevent host injection
-	tenant()
-	return _host()
-end
-
-local function create_or_update_user(t, upgrade_uid)
-	t = t or {}
-	if not t.id then --create user
-		allow(config('allow_create_user', true))
-		wait(0.2) --make flooding up the table a bit slower
-		merge(t, { --apply defaults
-			clientip = client_ip(),
-			lang = multilang() and lang() or nil,
-			active = true,
-			anonymous = true,
-		})
-	end
-	local old_u = t.id and user(t.id)
-	local uid = store.save_user(t, old_u)
-	return uid
-end
-local function create_user(t, upgrade_uid)
-	assert(not t or not t.id)
-	return create_or_update_user(t, upgrade_uid)
-end
-local function update_user(t)
-	assert(t and t.id)
-	return create_or_update_user(t)
-end
-
-local function set_req_session(sid, uid)
-	local req = http_request()
-	req.session_id = sid
-	req.user_id = uid
-end
-
-local function create_session(uid)
+local function create_session(u)
 	local sid = tohex(secure_random_string(16))
-	store.add_session(tenant(), sid, uid)
-	set_session_cookie(sid)
-	set_req_session(sid, uid)
-end
-
-local function load_session_user()
-	local sid = parse_session_cookie()
-	if not sid then return end
-	local uid, u = store.load_session_user(tenant(), sid)
-	if not uid then return end
-	return sid, uid, u
-end
-
---login based on session cookie.
-local function auth_session()
-	local sid, uid, u = load_session_user()
-	if u and u.active then
-		set_req_session(sid, uid)
-	elseif config('auto_create_user', true) then
-		local uid = create_user()
-		create_session(uid)
-	end
-end
-
---logout and re-login with an anonymous user or not.
-local function auth_logout()
-	local sid, uid = load_session()
-	set_session_cookie(nil)
-	if uid then store.delete_session(tenant(), sid) end
-	set_req_session(nil, nil)
-	local u = uid and load_user(uid)
-	if u and u.anonymous then --can't get it back
-		store.delete_user(uid)
-	end
-	if config('auto_create_user', true) then
-		local uid = create_user()
-		create_session(uid)
-	end
-end
-
---no-password authentication (for dev env).
-local function _auth_nopass(a)
-	local email = json_str_arg(a.email)
-	local phone = json_str_arg(a.phone)
-	local uid =
-		email and uid_by('email', email) or
-		phone and uid_by('phone', phone)
-	allow(uid, S('invalid_credentials', 'Invalid credentials'))
-	local sid, uid = load_session()
-	create_session(uid)
-	return uid
-end
-local function auth_nopass(a)
-	allow(config('auth_allow_nopass'))
-	return _auth_nopass(a)
-end
-
---login with an username and password.
-local function auth_pass(a)
-	_auth_nopass(a)
-	--if http_request().user_id
-	local u = user(uid)
-	local valid = u and u.active and u.pass and valid_pass(a.pass)
-		and bcrypt_verify(a.pass, u.pass)
-	allow(valid, S('invalid_credentials', 'Invalid credentials'))
-	del_session()
-	create_session(uid)
-end
-
---request state --------------------------------------------------------------
-
-local user = http_once_per_request(function(uid)
-	local u = store.load_user(tenant(), uid)
-	if not u then return nil end
-	u.real_id = u.id
-	u.real_roles = u.roles
-	return u
-end)
-
-local function delete_user(uid)
-	local u = assert(user(uid))
-	store.delete_user(uid)
-	user(CLEAR)
-end
-
-local function uid_by(which, s)
-	return store.uid_by(which, tenant(), s)
-end
-
-local function parse_session_cookie()
-	local s = headers('cookie'); if not s then return end
-	local sid = s:match'^session=([^;]*)' or s:match'; *session=([^;]*)'
-	if not sid or #sid ~= 32 or sid:find'[^%x]' then return end
+	store.add_session(tenant(), sid, u.id)
 	return sid
 end
 
-local function create_or_upgrade_user(t)
-	local uid = session_uid()
-	if uid then
-		local u = user(upgrade_uid)
-		assert(u.anonymous) --don't hijack a real user's account
-		assert(u.active) --don't resurrect a deactivated account
-		t.id = suid
-	else
-
-	end
-end
-
-function auto_anon_uid()
-	if not config('auto_create_user', true) then return end
-	return create_user()
-end
-
---authentication methods -----------------------------------------------------
-
-local auth = {} --auth.<type>(params) -> uid
-
---login using session cookie (default method).
-function auth.session()
-	local req = http_request()
+local function try_load_session()
 	local sid = parse_session_cookie()
-	local uid = sid and store.load_session(tenant(), sid)
-	local u = uid and store.load_user(uid)
-	return u and u.active and uid or nil
+	if not sid then return end
+	local lifetime = config('session_lifetime', 2 * 365 * 24 * 3600)
+	return store.load_session(tenant(), sid, lifetime)
 end
 
---logout and re-login with an anonymous user or not.
-function auth.logout()
-	update_session(nil)
-	return auth.session()
-end
-
---no-password authentication (for dev env).
-local function _auth_nopass(a)
-	local email = json_str_arg(a.email)
-	local phone = json_str_arg(a.phone)
-	local uid =
-		email and uid_by('email', email) or
-		phone and uid_by('phone', phone)
-	allow(uid, S('invalid_credentials', 'Invalid credentials'))
-	return uid
-end
-function auth.nopass(a)
-	allow(config('auth_allow_nopass'))
-	return _auth_nopass(a)
-end
-
---login with an username and password.
-function auth.pass(a)
-	local uid = _auth_nopass(a)
-	local u = user(uid)
-	local valid = u and u.active and u.pass and valid_pass(a.pass)
-		and bcrypt_verify(a.pass, u.pass)
-	allow(valid, S('invalid_credentials', 'Invalid credentials'))
-	return uid
-end
-
---register a new user with a password.
-function auth.register_pass(a)
-	local email = json_str_arg(a.email)
-	local phone = json_str_arg(a.phone)
-	local pass  = json_str_arg(a.pass)
-	checkarg(email or phone)
-	checkarg(pass)
-	return create_or_upgrade_user{
-		anonymous = false,
-		email     = email,
-		phone     = phone,
-		pass      = pass,
-	}
-end
-
---find user or create a new one and generate a one-time code for it.
---return the code and the uid.
-function gen_auth_code(a)
-	local email = json_str_arg(a.email)
-	local phone = json_str_arg(a.phone)
-	checkarg(email or phone)
-	checkarg(not (email and phone))
-	local uid_email = email and uid_by('email', email)
-	local uid_phone = phone and uid_by('phone', phone)
-	local uid = uid_email or uid_phone
-	local code = ('%06d'):format(random(0, 999999))
-	if uid then
-		local u = allow(user(uid))
-		allow(u.active)
-		local cooldown = config('auth_code_cooldown', 30)
-		allow(not u.auth_code or u.auth_code_created + cooldown <= now(),
-			S('too_many_tries',
-				'Too many attempts. Please wait before requesting a new code.'))
-		update_user{
-			id = uid,
-			auth_code           = code,
-			auth_code_created   = now(),
-			auth_code_trycount  = 0,
-			auth_code_validates = email and 'email' or 'phone',
-		}
-	else
-		uid = create_or_upgrade_user{
-			anonymous = false,
-			email = email,
-			phone = phone,
-			auth_code           = code,
-			auth_code_created   = now(),
-			auth_code_trycount  = 0,
-			auth_code_validates = email and 'email' or 'phone',
-		}
-	end
-	return code, uid
-end
-
---login with one-time code generated by gen_auth_code().
-local function invalid_code()
-	allow(nil, S('invalid_code', 'Invalid or expired code'))
-end
-local function delete_auth_code(uid)
-	update_user{
-		id = uid,
-		auth_code = CLEAR,
-		auth_code_created = CLEAR,
-		auth_code_validates = CLEAR,
-		auth_code_trycount = CLEAR,
-	}
-end
-function auth.code(a)
-	local email = json_str_arg(a.email)
-	local phone = json_str_arg(a.phone)
-	local code  = json_str_arg(a.code)
-	checkarg(email or phone)
-	checkarg(code and #code == 6)
-	local uid_email = email and uid_by('email', email)
-	local uid_phone = phone and uid_by('phone', phone)
-	local uid = allow(uid_email or uid_phone)
-	local u = allow(user(uid))
-	allow(u.active)
-	if not u.auth_code then
-		return invalid_code()
-	end
-	local code_lifetime = config('auth_code_lifetime', 10 * 60)
-	local expired = u.auth_code_created + code_lifetime < now()
-	if expired then
-		delete_auth_code(uid)
-		return invalid_code()
-	end
-	if code == u.auth_code then
-		return update_user{
-			id = uid,
-			--delete code
-			auth_code = CLEAR,
-			auth_code_created = CLEAR,
-			auth_code_validates = CLEAR,
-			auth_code_trycount = CLEAR,
-			--validate email or phone depending on where the code was sent.
-			emailvalid = u.auth_code_validates == 'email' and true or nil,
-			phonevalid = u.auth_code_validates == 'phone' and true or nil,
-			anonymous = false,
-		}
-	end
-	local maxtry = config('auth_code_maxtry', 5)
-	local trycount = (u.auth_code_trycount or 0) + 1
-	if trycount >= maxtry then
-		delete_auth_code()
-		allow(nil, S('too_many_tries',
-			'Too many attempts. Please request a new code.'))
-	else
-		update_user{
-			id = uid,
-			auth_code_trycount = trycount,
-		}
-		return invalid_code()
-	end
-end
-
---authentication frontend ----------------------------------------------------
-
-function login(a, switch_user)
-	switch_user = switch_user or pass
-	local authenticate = checkarg(auth[a and istab(a) and a.type or 'session'])
-	host() --break for invalid host early
-	wlog('', 'auth', 'auth', '%s', a or '')
-	local uid = authenticate(a)
-	local suid = session_uid()
-	if suid and uid ~= suid then
-		switch_user(uid, suid)
-		local su = user(suid)
-		if su and su.anonymous then
-			delete_user(suid)
+local function set_req_user(ru)
+	local u = ru
+	local req = http_request()
+	req.real_user = ru
+	req.user = u
+	if not u then return end
+	--impersonate other user if asked
+	local iuid = args'uid'
+	if ru and iuid then
+		iuid = checkarg(id_arg(iuid), 'uid')
+		if iuid ~= ru.id then
+			allow(ru.roles.admin, 'user impersonation denied')
+			u = allow(try_load_user(iuid))
+			req.user = u
 		end
 	end
-	local u = user(uid)
 	if multilang() then
 		setlang(u.lang) --user lang has priority over action lang.
 		setcountry(u.country)
 	end
-	update_session(uid)
-	wlog('', 'auth', 'auth-ok', 'uid=%d', uid)
-	return uid
+	wlog('', 'auth', 'auth-ok', 'uid=%d%s%s', u.id,
+		ru and ru ~= u and ' ruid=' or '',
+		ru and ru ~= u and ru.id or '')
 end
 
---user profile web API -------------------------------------------------------
+--auth flows ---------------------------------------------------------------------
 
-function realusr(attr)
-	local u = user(session_uid())
+local auth = {}
+
+--logout and re-login with an anonymous user or not.
+function auth.logout()
+	set_session_cookie(nil)
+	set_req_user(nil)
+end
+
+local function allow_creds(ret)
+	return allow(ret, S('invalid_credentials', 'Invalid credentials'))
+end
+
+local function try_find_user(a)
+	return (
+		a.email and store.uid_by('email', tenant(), a.email) or
+		a.phone and store.uid_by('phone', tenant(), a.phone)
+	)
+end
+
+auth_switch_user = noop --stub
+
+--login with an username and password.
+function auth.pass(a)
+	wait(0.2) --bcrypt has delay but it's CPU bound.
+	check_fields(a)
+	checkarg(a.email or a.phone, 'email or phone')
+	local u = store.with_lock('r', function()
+		return allow_creds(try_load_user(try_find_user(a)))
+	end)
+	local nopass_ip = config'auth_nopass_ip'
+	local nopass = nopass_ip and client_ip() == nopass_ip
+	local u_pass = u.pass
+	--check pass without keeping the store locked because it can be slow.
+	allow_creds(nopass or u_pass)
+	allow_creds(nopass or bcrypt_verify(a.pass, u_pass))
+	store.with_lock('w', function()
+		--recheck user/pass in transaction to avoid TOCTOU.
+		local u = allow_creds(try_load_user(try_find_user(a)))
+		allow_creds(nopass or u.pass == u_pass)
+		--^^password already verified, just checking that it hasn't changed.
+		local sid = create_session(u)
+		set_session_cookie(sid)
+		set_req_user(u)
+	end)
+end
+
+--register a new user with a password.
+function auth.register_pass(a)
+	check_fields(a)
+	checkarg(a.email or a.phone, 'email or phone')
+	checkarg(a.pass, 'pass')
+	store.with_lock('w', function()
+		local updates = {
+			anonymous = false,
+			email = a.email,
+			phone = a.phone,
+			pass  = a.pass,
+		}
+		local u = try_load_user(try_load_session())
+		if u and u.anonymous then
+			u = update_user(u.id, updates)
+			set_req_user(u)
+		else
+			u = create_user(updates)
+			local sid = create_session(u)
+			set_session_cookie(sid)
+			set_req_user(u)
+		end
+	end)
+end
+
+local function six_digit_code()
+	local s = secure_random_string(20)
+	local n = 0
+	for i = 1, #s do
+		n = (n * 256 + s:byte(i)) % 1000000
+	end
+	return _('%06d', n)
+end
+
+local function allow_code(ret)
+	return allow(ret, S('invalid_code', 'Invalid or expired code'))
+end
+
+--find user or create a new one and generate a one-time code for it.
+--return the code and the uid.
+function auth_gen_code(a)
+	check_fields(a)
+	checkarg(a.email or a.phone, 'email or phone')
+	checkarg(not (a.email and a.phone), 'email OR phone')
+	return store.with_lock('w', function()
+		local u = try_load_user(try_find_user(a))
+		local code = six_digit_code()
+		if u then
+			local uid = u.id
+			local cooldown = config('auth_code_cooldown', 30)
+			allow(not u.auth_code or u.auth_code_created + cooldown <= now(),
+				S('too_many_tries',
+					'Too many attempts. Please wait before requesting a new code.'))
+			update_user(uid, {
+				auth_code           = code,
+				auth_code_created   = now(),
+				auth_code_trycount  = 0,
+				auth_code_validates = a.email and 'email' or 'phone',
+			})
+		else
+			local updates = {
+				anonymous = false,
+				email = a.email,
+				phone = a.phone,
+				auth_code           = code,
+				auth_code_created   = now(),
+				auth_code_trycount  = 0,
+				auth_code_validates = a.email and 'email' or 'phone',
+			}
+			u = try_load_user(try_load_session())
+			if u and u.anonymous then
+				update_user(u.id, updates)
+			else
+				u = create_user(updates)
+			end
+		end
+		return code, u.id
+	end)
+end
+
+--login with one-time code generated by gen_auth_code().
+local function delete_auth_code(uid)
+	update_user(uid, {
+		auth_code = CLEAR,
+		auth_code_created = CLEAR,
+		auth_code_validates = CLEAR,
+		auth_code_trycount = CLEAR,
+	})
+end
+function auth.code(a)
+	check_fields(a)
+	checkarg(a.email or a.phone, 'email or phone')
+	store.with_lock('w', function()
+		local u = allow(try_load_user(try_find_user(a)))
+		local uid = u.id
+		allow_code(u.auth_code)
+		local code_lifetime = config('auth_code_lifetime', 10 * 60)
+		local expired = u.auth_code_created + code_lifetime < now()
+		if expired then
+			delete_auth_code(uid)
+			allow_code(false)
+		end
+		if a.code == u.auth_code then
+			u = update_user(uid, {
+				--delete code
+				auth_code = CLEAR,
+				auth_code_created = CLEAR,
+				auth_code_validates = CLEAR,
+				auth_code_trycount = CLEAR,
+				--validate email or phone depending on where the code was sent.
+				emailvalid = u.auth_code_validates == 'email' and true or nil,
+				phonevalid = u.auth_code_validates == 'phone' and true or nil,
+				anonymous = false,
+			})
+			local sid = create_session(u)
+			set_session_cookie(sid)
+			set_req_user(u)
+		else
+			local maxtry = config('auth_code_maxtry', 5)
+			local trycount = (u.auth_code_trycount or 0) + 1
+			if trycount >= maxtry then
+				delete_auth_code(uid)
+				allow(false, S('too_many_tries',
+					'Too many attempts. Please request a new code.'))
+			else
+				update_user(uid, {
+					auth_code_trycount = trycount,
+				})
+				allow_code(false)
+			end
+		end
+	end)
+end
+
+function auth.session()
+	local req = http_request()
+	if req.session_loaded then return end
+	req.session_loaded = true
+	store.with_lock('r', function()
+		local u = try_load_user(try_load_session())
+		set_req_user(u)
+	end)
+end
+
+function login(a)
+	local a_type = a and a.type or 'session'
+	if a_type ~= 'session' then
+		auth.session()
+	end
+	local req = http_request()
+	local su = req.real_user
+	checkarg(auth[a_type], 'login type')(a)
+	local u = req.real_user
+	if su and su.anonymous then
+		store.with_lock('w', function()
+			local su = store.try_load_user(su.id)
+			if not su then return end --deleted async
+			if u and u.id ~= su.id then
+				auth_switch_user(u, su)
+			end
+			store.try_del_user(su.id)
+		end)
+	end
+	local u = req.real_user
+	if not u and config('auto_create_user', true) then
+		--doing this outside auth's transaction is ok, there's no race condition
+		--when creating a new user + session.
+		store.with_lock('w', function()
+			local u = create_user()
+			local sid = create_session(u)
+			set_session_cookie(sid)
+			set_req_user(u)
+		end)
+	end
+	return req.user
+end
+
+--user profile web API -----------------------------------------------------------
+
+local function _user(USER, attr)
+	login()
+	local u = http_request()[USER]
 	if attr == '*' then
 		return u
 	elseif attr then
-		return u[attr]
+		return u and u[attr]
 	else
-		return u.id
+		return u and u.id
 	end
 end
-
-function usr(attr)
-	local uid = args'uid' --impersonated user
-	if not uid then return realusr(attr) end
-	uid = uid and checkarg(id_arg(uid))
-	local u  = uid and allow(user(uid))
-	local ru = user()
-	if uid ~= real_uid then
-		allow(ru.roles.dev or ru.roles.admin, 'user impersonation denied')
-	end
-	u.real_uid = real_uid
-	u.real_uid_roles = ru.roles
-	if attr == '*' then
-		return u
-	elseif attr then
-		return u[attr]
-	else
-		return uid
-	end
-end
-
-function usr_touch()
-	--only touch usr on page requests
-	--TODO: change this test after ui_action refactor.
-	if args(1) and args(1):find'%.' and not args(1):find'%.html$' then
-		return
-	end
-	local uid = suid()
-	if not uid then return end
-	store.touch_user(tenant(), uid)
-end
+function real_user(attr) return _user('real_user', attr) end
+function user(attr) return _user('user', attr) end
 
 --update current user profile.
-function usr_update_profile(a)
-	local email = json_str_arg(a.email)
-	local phone = json_str_arg(a.phone)
-	local pass  = json_str_arg(a.pass)
-	local name  = json_str_arg(a.name)
-	local uid = suid()
-	local u = allow(uid and user(uid))
-	allow(u.active)
-	return update_user{
-		id = uid,
-		email = email,
-		phone = phone,
-		pass = pass,
-		name = name,
-		emailvalid = email and email ~= u.email and false or nil,
-		phonevalid = phone and phone ~= u.phone and false or nil,
-	}
+function user_update_profile(a)
+	check_fields(a)
+	local u = login()
+	update_user(u.id, {
+		email = a.email,
+		phone = a.phone,
+		pass = a.pass,
+		name = a.name,
+		emailvalid = a.email and a.email ~= u.email and false or nil,
+		phonevalid = a.phone and a.phone ~= u.phone and false or nil,
+	})
 end
 
---user admin web API ---------------------------------------------------------
+--user admin web API -------------------------------------------------------------
 
-function usr_list()
-	local r = usr'roles'
-	allow(r.admin or r.dev)
-	return store.user_ids()
+function user_list()
+	allow(user'roles'.admin, 'only admins can see users')
+	return store.users()
 end
 
-function usr_get(uid)
-	local r = usr'roles'
-	allow(r.admin or r.dev)
-	return checkfound(user(uid))
+local function check_rights(u)
+	local r = user'roles'
+	allow(r.admin, 'only admins can change users')
+	allow(r.dev or not (u and u.roles.dev), 'only devs can change devs')
 end
 
-local function _usr_save(t, save_user)
-	local u = t.id and user(t.id)
-	local r = usr'roles'
-	allow(r.admin or r.dev,
-		'must be admin or dev to create or update user')
-	allow(r.dev or not (u and u.roles.dev),
-		'only devs can create or update devs')
-	allow(r.dev or t.host == host(),
-		'only devs can create/move users of/to other hosts')
-	allow(r.dev or not (t.roles and t.roles.dev),
-		'non-devs cannot make devs')
-	allow(r.dev or r.admin or not (t.roles and t.roles.admin),
-		'non-admins cannot make admins')
-	return save_user(t)
+function user_create(tid, u)
+	check_fields(u)
+	check_rights(u)
+	u.pass = u.pass and bcrypt_hash(u.pass)
+	return store.add_user(tid, u)
 end
-function usr_create(t) return _usr_save(t, create_user) end
-function usr_update(t) return _usr_save(t, update_user) end
+
+function user_update(uid, u)
+	local u = store.load_user(uid)
+	check_rights(u)
+	check_fields(u)
+	u.pass = u.pass and bcrypt_hash(u.pass)
+	return store.update_user(uid, u)
+end
 
 function usr_delete(uid)
-	allow(usr() ~= uid, 'cannot delete your own user')
-	local u = allow(user(uid))
-	local r = usr'roles'
-	allow(r.dev or r.admin, 'only devs and admins can remove users')
-	allow(r.dev or u.host == host(),
-		'only devs can remove users of other hosts')
-	delete_user(uid)
+	local u = store.load_user(uid)
+	check_rights(u)
+	store.try_del_user(u.id)
 end
 
 --return schema so you can call schema:import'webb_auth'
