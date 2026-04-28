@@ -705,20 +705,21 @@ function S_texts_save()
 	end
 end
 
-function S_for(ext, id, ...)
-	return
+function S_for(ext, id, fmt, ...)
+	local fmt =
 		S_texts(lang(), ext)[id]
 		or S_texts(default_lang(), ext)[id]
-		or _(...)
+		or fmt
+	return _(fmt, ...)
 end
 
 function S(id, ...)
 	return S_for('lua', id, ...)
 end
 
-function Sf(id, ...)
-	return function()
-		return S_for('lua', id, ...)
+function Sf(id, en_fmt)
+	return function(...)
+		return S_for('lua', id, en_fmt, ...)
 	end
 end
 
