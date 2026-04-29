@@ -38,8 +38,8 @@ function gen_auth_code_error(e) {
 	alert(e)
 }
 
-function login_ok(new_usr) {
-	usr = new_usr
+function login_ok(new_user) {
+	user = new_user
 	auth_code_email = null
 }
 
@@ -149,7 +149,7 @@ main = function() {
 			mt(sp())
 			popup('profile_popup', 'open', button_stack_i, 'b', '[', 200, 300, 'constrain change_side')
 				bb_tooltip('bg1', 0, 'light', 0, sp())
-				if (usr.anonymous) {
+				if (user.anonymous) {
 
 				} else {
 					if (button('sign_out_button', 'Sign out')) {
@@ -160,7 +160,7 @@ main = function() {
 		}
 	end_h()
 
-	if (usr.anonymous) {
+	if (user.anonymous) {
 		popup('login_window', 'window', 'screen',
 			'ic', 'c', 400, 500, 'constrain'
 		)

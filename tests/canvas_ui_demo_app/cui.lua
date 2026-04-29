@@ -2,9 +2,21 @@
 
 require'webb_auth'
 
-config('host', '*')
+config('http_host', '*')
 config('http_port', 8888)
-config('https_addr', false)
+config('https_port', 4443)
+--config('https_addr', false)
+
+auth_init()
+local st = auth_store()
+st.with_lock('w', function()
+	if not st.tenant_exists(1) then
+		assert(st.add_tenant() == 1)
+		assert(st.try_add_host('localhost:8888', 1))
+		assert(st.try_add_host('localhost:4443', 1))
+	end
+end)
+
 config('http_server_debug', 'requests')
 require'cui_app'('run')--(...)
 
@@ -12,10 +24,12 @@ logging.debug = true
 logging.verbose = config('verbose', true)
 logging.filter.log = true
 logging.filter.open = true
-errortype'http_response'.addtraceback = true
+--errortype'http_response'.addtraceback = true
 
 app.main_file = 'cui_demo.js'
 wwwdir'../../canvas-ui/www'
+
+action.error = error
 
 --NOTE: a session is a browser tab.
 local session_state = {} --{sid->{signals=, waiting_thread=}}
