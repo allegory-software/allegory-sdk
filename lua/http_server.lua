@@ -108,7 +108,7 @@ local function req_log(req, severity, module, event, fmt, ...)
 	if severity == '' and logging.filter[''] then return end
 	local dt = clock() - req.start_clock
 	local s = fmt and _(fmt, logargs(...)) or ''
-	log('', module, event, '%-4s %-4s %4dms %s', req, req.tcp, dt * 1000, s)
+	log('', module, event, '%-4s %-4s %4dms %s', req.tcp, req, dt * 1000, s)
 end
 
 --responding by raising an error.
@@ -144,8 +144,7 @@ function http_server(...)
 		if config'https_addr' ~= false then
 			local crt_file = config'https_crt_file' or host and varpath(host..'.crt')
 			local key_file = config'https_key_file' or host and varpath(host..'.key')
-			if host == 'localhost'
-				and not config'https_crt_file'
+			if     not config'https_crt_file'
 				and not config'https_key_file'
 				and not exists(crt_file)
 				and not exists(key_file)
@@ -417,7 +416,7 @@ function http_server(...)
 
 		--match Host
 		local host = ctcp.listen_socket.host
-		if host ~= '*' and req.headers['host'] ~= host then
+		if host and req.headers['host'] ~= host then
 			req.status = 400
 			req:finish()
 			return
@@ -486,7 +485,7 @@ function http_server(...)
 
 	for _,listen_opt in ipairs(self.listen) do
 
-		local host = assert(listen_opt.host, 'host required')
+		local host = repl(assert(listen_opt.host, 'host required'), '*', nil)
 
 		local addr =
 			listen_opt.unix_socket and 'unix:'..listen_opt.unix_socket
