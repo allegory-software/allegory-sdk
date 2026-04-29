@@ -68,7 +68,6 @@ init_CTState = function()
       uint32_t sizetab;
       void *L;
       void *g;
-      void *finalizer;
       void *miscmap;
     } CTState;
   ]]
