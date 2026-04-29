@@ -47,6 +47,7 @@ LOGGING API
 ]]
 
 require'glue'
+local reflect = require'reflect'
 
 local
 	type, istab, rawget =
@@ -311,8 +312,15 @@ do
 	end
 end
 
+local function getmetatable_ex(v)
+	if type(v) == 'cdata' then
+		return reflect.getmetatable(v)
+	end
+	return getmetatable(v)
+end
+
 local function debug_type(v)
-	local mt = getmetatable(v)
+	local mt = getmetatable_ex(v)
 	return istab(mt) and mt.type or type(v)
 end
 
@@ -323,7 +331,7 @@ local prefixes = {
 }
 
 local function debug_prefix(v)
-	local mt = getmetatable(v)
+	local mt = getmetatable_ex(v)
 	local prefix = istab(mt) and mt.debug_prefix
 	if prefix then return prefix end
 	local type = debug_type(v)
@@ -384,7 +392,7 @@ local function logarg(v)
 	if type(v) == 'number' then return v end
 	local name = names[v]
 	if name then return name end
-	local mt = getmetatable(v)
+	local mt = getmetatable_ex(v)
 	if istab(mt) and mt.__tostring then
 		v = tostring(v)
 	elseif istab(v) and not (mt and (mt.type or mt.debug_prefix)) then
