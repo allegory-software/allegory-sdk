@@ -15,8 +15,8 @@ USAGE
 
 CONFIG
 
-	ignore_interrupts
-	host
+	log_host
+	log_port
 
 ]==]
 
@@ -173,8 +173,7 @@ local function cui_app(...)
 		--^^avoid having os.date() stat /etc/localtime.
 		logging:tofile(logfile)
 		logging.autoflush = logging.debug
-		local logtoserver = config'log_host' and config'log_port'
-		if logtoserver then
+		if config'log_host' then
 			require'sock'
 			local start_heartbeat, stop_heartbeat do
 				local stop, sleeper
@@ -233,13 +232,6 @@ local function cui_app(...)
 	function app:run_cmd(cmd_name, cmd_run, cmd_opt, ...)
 		local exit_code
 		if cmd_name == 'run' then --run server in main thread
-			if config'http_host' == '*' then
-				local auth_host = assert(config'auth_host')
-				auth_init()
-				auth_store().with_lock('w', function()
-					auth_store().try_add_tenant(auth_host)
-				end)
-			end
 			exit_code = cmd_run(cmd_name, cmd_opt, ...)
 		else
 			exit_code = run(function(...)
