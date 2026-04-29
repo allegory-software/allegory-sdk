@@ -2274,28 +2274,44 @@ local errno_msgs = {
 	[  2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
 	                     --rmdir(), opendir(), rename(), unlink()
 	[  4] = 'interrupted', --EINTR, epoll_wait()
-	[  5] = 'io_error', --EIO, readlink(), read()
+	[  5] = 'io_error', --EIO, read(), write(), fsync()
 	[  9] = 'bad_file', --EBADF
-	[ 11] = 'again', --EAGAIN, EWOULDBLOCK
-	[ 13] = 'access_denied', --EACCESS, mkdir() etc.
+	[ 11] = 'again', --EAGAIN, EWOULDBLOCK (handled in scheduler)
+	[ 13] = 'access_denied', --EACCES, open(), mkdir(), unlink(), rmdir()
 	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo(), rename()
-	[ 20] = 'not_dir', --ENOTDIR, opendir()
-	[ 21] = 'is_dir', --EISDIR, unlink()
+	[ 18] = 'cross_device', --EXDEV, rename()
+	[ 19] = 'no_device', --ENODEV, block device disappeared (fatal)
+	[ 20] = 'not_dir', --ENOTDIR, open(), opendir()
+	[ 21] = 'is_dir', --EISDIR, open(), unlink()
+	[ 23] = 'too_many_open_files', --ENFILE, open()
+	[ 24] = 'too_many_fds', --EMFILE, open() (fatal: fd leak)
+	[ 28] = 'disk_full', --ENOSPC, write(), fallocate(), mkdir(), rename() (fatal)
+	[ 29] = 'invalid_seek', --ESPIPE, lseek() on pipe/socket (fatal: programming error)
+	[ 30] = 'read_only', --EROFS, open(), mkdir(), unlink(), rename() (fatal)
+	[ 32] = 'eof', --EPIPE, write()
+	[ 36] = 'name_too_long', --ENAMETOOLONG, open(), rename(), mkdir()
+	[ 38] = 'not_implemented', --ENOSYS, syscall not implemented (fatal: wrong kernel)
 	[ 39] = 'not_empty', --ENOTEMPTY, rmdir()
-	[ 40] = 'too_many_symlinks', --ELOOP, open() with O_NOFOLLOW on a symlink
-	[ 28] = 'disk_full', --ENOSPC: fallocate()
-	[ 95] = 'not_supported', --EOPNOTSUPP: fallocate()
-	[ 32] = 'eof', --EPIPE: write()
+	[ 40] = 'too_many_symlinks', --ELOOP, open(), stat() (too many symlinks in path)
+	[ 95] = 'not_supported', --EOPNOTSUPP, fallocate()
 	--sock
-	[ 98] = 'address_already_in_use' , --EADDRINUSE
-	[103] = 'connection_aborted'     , --ECONNABORTED
-	[104] = 'connection_reset'       , --ECONNRESET
-	[111] = 'connection_refused'     , --ECONNREFUSED
+	[ 98] = 'address_already_in_use', --EADDRINUSE, bind()
+	[ 99] = 'address_not_available', --EADDRNOTAVAIL, bind(), connect()
+	[100] = 'network_down', --ENETDOWN, connect(), send()
+	[101] = 'network_unreachable', --ENETUNREACH, connect(), send()
+	[103] = 'connection_aborted', --ECONNABORTED, accept()
+	[104] = 'connection_reset', --ECONNRESET, recv(), send()
+	[107] = 'not_connected', --ENOTCONN, send(), recv() (fatal)
+	[110] = 'timed_out', --ETIMEDOUT, connect()
+	[111] = 'connection_refused', --ECONNREFUSED, connect()
+	[113] = 'host_unreachable', --EHOSTUNREACH, connect(), send()
+	[114] = 'already_in_progress', --EALREADY, connect() (fatal)
+	[115] = 'in_progress', --EINPROGRESS, connect() (handled in scheduler)
 	--mmap
-	[ 12] = 'out_of_mem'              , --ENOMEM
-	[ 22] = 'invalid_argument'        , --EINVAL
-	[ 27] = 'disk_full'               , --EFBIG
-	[122] = 'disk_full' , --EDQUOT
+	[ 12] = 'out_of_mem', --ENOMEM, mmap()
+	[ 22] = 'invalid_argument', --EINVAL, mmap()
+	[ 27] = 'file_too_big', --EFBIG, write(), fallocate(), truncate()
+	[122] = 'disk_quota', --EDQUOT, write(), open(), mkdir()
 }
 
 function check_errno(ret, err)
@@ -2305,6 +2321,13 @@ function check_errno(ret, err)
 	local s = errno_msgs[err]
 	assert(s ~= 'invalid_argument', s)
 	assert(s ~= 'bad_file', s)
+	assert(s ~= 'invalid_seek', s)
+	assert(s ~= 'no_device', s)
+	assert(s ~= 'too_many_fds', s)
+	assert(s ~= 'read_only', s)
+	assert(s ~= 'not_implemented', s)
+	assert(s ~= 'not_connected', s)
+	assert(s ~= 'already_in_progress', s)
 	if s then return ret, s end
 	local s = C.strerror(err)
 	local s = str(s) or 'Error '..err
