@@ -70,6 +70,7 @@ end
 function auth_init(store_name)
 	local s = config'auth_store' or store_name or 'fs'
 	store = require('webb_auth_'..s)
+	store.session_lifetime = config('session_lifetime', 2 * 365 * 24 * 3600)
 	if store.init then store.init() end
 end
 
@@ -185,8 +186,7 @@ end
 local function try_load_session()
 	local sid = parse_session_cookie()
 	if not sid then return end
-	local lifetime = config('session_lifetime', 2 * 365 * 24 * 3600)
-	return store.load_session(tenant(), sid, lifetime)
+	return store.load_session(tenant(), sid)
 end
 
 local function set_req_user(ru)
@@ -407,22 +407,22 @@ function auth.session()
 end
 
 function login(a)
-	local a_type = a and a.type or 'session'
-	if a_type ~= 'session' then
-		auth.session()
-	end
+	auth.session()
 	local req = http_request()
 	local su = req.real_user
+	local a_type = a and a.type or 'session'
 	checkarg(auth[a_type], 'login type')(a)
 	local u = req.real_user
-	if su and su.anonymous then
+	if su and su.anonymous and (not u or u.id ~= su.id) then
 		store.with_lock('w', function()
+			local u  = store.try_load_user(u.id)
 			local su = store.try_load_user(su.id)
-			if not su then return end --deleted async
-			if u and u.id ~= su.id then
+			if su and su.anonymous and u and u.id ~= su.id then
 				auth_switch_user(u, su)
 			end
-			store.try_del_user(su.id)
+			if su and su.anonymous and (not u or u.id ~= su.id) then
+				store.try_del_user(su.id)
+			end
 		end)
 	end
 	local u = req.real_user

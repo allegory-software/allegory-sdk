@@ -3,17 +3,25 @@ require'lang'
 
 rm_rf'/tmp/webb_auth_test'
 config('vardir', '/tmp/webb_auth_test')
+mkdir('/tmp/webb_auth_test', true)
 
---init storage
-save(varpath'hosts/test/tenant', '1')
+local ok, err = pcall(function()
+
+auth_init'fs'
 
 --mock webb, time, etc.
 local function newreq()
+	local te = threadenv()
+	local req = te and te.http_request
+	local rh = req and req.response_headers
+	local sc = rh and rh['set-cookie']
+	local sid = sc and sc[1]:match'session=(.-);'
 	ownthreadenv().http_request = {
 		uri = '/',
 		headers = {host = 'test'},
 		response_headers = {},
 		log = noop,
+		cookie = sid and 'session='..sid,
 	}
 end
 local _time = 0
@@ -33,14 +41,25 @@ config{
 	auth_code_cooldown = 30,
 }
 
+newreq()
+
+auth_store().with_lock('w', function()
+	auth_store().add_tenant'test'
+end)
+
 local function wrong_code(code)
 	return ('%06d'):format((tonumber(code) + 1) % 1000000)
 end
 
 --try_login: pcall login, return uid on success or nil+err on failure.
+local _login = login
+local function login(a)
+	local u = _login(a)
+	return u and u.id
+end
 local function try_login(a)
 	local ok, ret = pcall(login, a)
-	if ok then return ret end
+	if ok then return ret and ret.id end
 	return nil, ret --ret is the error message
 end
 local function assert_err(err, substring)
@@ -49,35 +68,35 @@ local function assert_err(err, substring)
 		'expected "'..substring..'" in: '..(err or 'nil'))
 end
 
---test gen_auth_code / login round-trip (successful)
+--test auth_gen_code / login round-trip (successful)
 newreq()
-local code, uid = gen_auth_code{phone = '123456'}
+local code, uid = auth_gen_code{phone = '123456'}
 assert(uid == 1)
 local uid = login{type = 'code', phone = '123456', code = code}
 assert(uid == 1)
-print'ok gen_auth_code'
+print'ok auth_gen_code'
 
 --test wrong code returns invalid_code
 newreq()
-local code3, uid3 = gen_auth_code{phone = '333333'}
+local code3, uid3 = auth_gen_code{phone = '333333'}
 local uid, err = try_login{type = 'code', phone = '333333', code = wrong_code(code3)}
 assert(not uid); assert_err(err, 'expired code')
-print'ok gen_auth_code / invalid code'
+print'ok auth_gen_code / invalid code'
 
---test gen_auth_code cooldown
+--test auth_gen_code cooldown
 newreq()
-local code2, uid2 = gen_auth_code{phone = '222222'}
-local ok, err = pcall(gen_auth_code, {phone = '222222'})
+local code2, uid2 = auth_gen_code{phone = '222222'}
+local ok, err = pcall(auth_gen_code, {phone = '222222'})
 assert(not ok); assert_err(err, 'too many')
 passtime(30)
 newreq()
-local code2b, uid2b = gen_auth_code{phone = '222222'}
+local code2b, uid2b = auth_gen_code{phone = '222222'}
 assert(uid2b == uid2) --same user, new code
-print'ok gen_auth_code / too many tries'
+print'ok auth_gen_code / too many tries'
 
 --test code expiry
 newreq()
-local code7, uid7 = gen_auth_code{phone = '777777'}
+local code7, uid7 = auth_gen_code{phone = '777777'}
 passtime(601)
 newreq()
 local uid, err = try_login{type = 'code', phone = '777777', code = code7}
@@ -86,7 +105,7 @@ print'ok code / expired'
 
 --test too many tries invalidates the code
 newreq()
-local code4, uid4 = gen_auth_code{phone = '444444'}
+local code4, uid4 = auth_gen_code{phone = '444444'}
 for i = 1, 4 do
 	local uid, err = try_login{type = 'code', phone = '444444', code = wrong_code(code4)}
 	assert_err(err, 'expired code')
@@ -126,7 +145,7 @@ newreq()
 local uid6 = login{type = 'pass', email = 'foo@test.com', pass = 'secret'}
 local uid6b = login{type = 'logout'}
 assert(uid6b ~= uid6) --new anonymous user
-assert(usr'anonymous')
+assert(user'anonymous')
 newreq()
 local uid6c = login{type = 'session'} --session cookie gone, new anon user
 assert(uid6c ~= uid6b)
@@ -135,10 +154,12 @@ print'ok logout'
 --test switch_user deletes old anonymous user
 newreq()
 local anon_uid8 = login{type = 'session'} --creates anonymous user
-assert(usr'anonymous')
+assert(user'anonymous')
 local uid8 = login{type = 'pass', email = 'foo@test.com', pass = 'secret'} --different user logs in
 assert(uid8 ~= anon_uid8) --switched to real user
-assert(not auth_store().load_user(host(), anon_uid8)) --old anon was deleted
+auth_store().with_lock('r', function()
+	assert(not auth_store().try_load_user(anon_uid8)) --old anon was deleted
+end)
 print'ok switch_user / anon cleanup'
 
 --test anonymous user upgrade (de-anonymization)
@@ -146,8 +167,15 @@ newreq()
 local anon_uid = login{type = 'session'} --creates anonymous user
 local real_uid = login{type = 'register_pass', email = 'bar@test.com', pass = 'secret'}
 assert(real_uid == anon_uid) --same uid, upgraded in place
-assert(not usr'anonymous') --no longer anonymous
+assert(not user'anonymous') --no longer anonymous
 print'ok anon / upgrade'
 
 --clean-up
 rm_rf'/tmp/webb_auth_test'
+
+end) --pcall
+
+if not ok then
+	err = tostring(err):gsub('/home/cosmin/sdk/bin/..', 'sdk')
+	pr(err)
+end

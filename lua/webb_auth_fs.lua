@@ -171,12 +171,12 @@ function fs.touch_session(tid, sid) --non-durable, non-locked for speed
 	try_set_file_attr(sessionpath(tid, sid), {mtime = now()}, false)
 end
 
-function fs.load_session(tid, sid, lifetime)
+function fs.load_session(tid, sid)
 	assert(locked)
 	local file = sessionpath(tid, sid)
 	local mtime = file_attr(file, 'mtime', false)
 	if not mtime then return nil end --session removed async
-	if mtime + lifetime < now() then return nil, 'expired' end
+	if mtime + fs.session_lifetime < now() then return nil, 'expired' end
 	return read_session(tid, sid) --returns nil if session removed async
 end
 
@@ -375,7 +375,7 @@ function fs.repair()
 		for tid in pairs(tids) do
 			for sid in ls(tpath(tid, 'sessions')) do
 				--expired sessions are GC'd here so the request read path stays read-only.
-				local uid = check_session(tid, sid) --check expired
+				local uid = fs.load_session(tid, sid) --check expired
 				if not uid then
 					fs.del_session(tid, sid)
 				end
@@ -430,7 +430,12 @@ function fs.repair()
 end
 
 function fs.init()
+	mkdir(vardir())
 	fs.with_lock('w', fs.repair)
+end
+
+function fs.close()
+	if lf then lf:close() end
 end
 
 return fs
