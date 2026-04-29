@@ -13,12 +13,12 @@ local server = http_server{
 		{
 			host = HOST,
 			addr = ADDR,
-			port = 80,
+			port = 8888,
 		},
 		{
 			host = HOST,
 			addr = ADDR,
-			port = 443,
+			port = 4443,
 			tls = true,
 			tls_options = {
 				cert_file = exedir()..'/../tests/localhost.crt',
