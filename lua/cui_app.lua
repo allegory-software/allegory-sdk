@@ -25,6 +25,7 @@ require'glue'
 require'cmdline'
 require'webb'
 require'webb_action'
+require'webb_auth'
 require'xrowset'
 
 local run_server --fw. decl.
@@ -42,11 +43,11 @@ function fontfile(name, path)
 	add(fontfiles, {name, path})
 end
 
-local function usr_json()
+local function user_json()
 	return {
-		anonymous = usr'anonymous',
-		email = usr'email',
-		phone = usr'phone',
+		anonymous = user'anonymous',
+		email = user'email',
+		phone = user'phone',
 	}
 end
 
@@ -55,8 +56,8 @@ function action.en()
 	local vars = {}
 	if _G.login then
 		login() --sets lang from user profile.
-		vars.theme = usr'theme'
-		vars.user_id = usr()
+		vars.theme = user'theme'
+		vars.user_id = user()
 	end
 	vars.title = (args(1) or ''):gsub('[-_]', ' ')
 	vars.lang = lang()
@@ -80,7 +81,7 @@ function action.en()
 	vars.main = load(app.main_file)
 	vars.preloads = cat(vars.preloads, '\n')
 	vars.css = cat(vars.css, '\n')
-	vars.usr = json(usr_json())
+	vars.user = json(user_json())
 	out((([[
 <html lang={{lang}} country={{country}} theme="{{theme}}"><head>
 	<meta charset="utf-8">
@@ -99,7 +100,7 @@ function action.en()
 	<script src="/adapter.js" ></script>
 	<script src="/webrtc.js" ></script>
 	<script>
-usr = {{usr}}
+user = {{user}}
 {{main}}
 	</script>
 </head><style></style>
@@ -114,7 +115,7 @@ action['404.html'] = action.en
 action['gen_auth_code.json'] = function()
 	checkarg(method'POST')
 	local email = checkarg(str_arg(post'email'))
-	local code = gen_auth_code{email = email}
+	local code = auth_gen_code{email = email}
 	return {email = email, code = code}
 end
 
@@ -123,7 +124,7 @@ action['login.json'] = function()
 	local email = checkarg(str_arg(post'email'))
 	local code = checkarg(str_arg(post'code'))
 	login{type = 'code', email = email, code = code}
-	return usr_json()
+	return user_json()
 end
 
 local function cui_app(...)
@@ -204,10 +205,6 @@ local function cui_app(...)
 		logging:tofile_stop()
 	end
 
-	function app:run_cmd(cmd_action, cmd_run, cmd_opt, ...) --stub
-		return cmd_run(cmd_action, cmd_opt, ...)
-	end
-
 	function app:run()
 		if cmd_action == scriptname then --caller module loaded with require()
 			return app
@@ -221,7 +218,11 @@ local function cui_app(...)
 				checkfound(action(unpack(args())))
 			end,
 		}
-		start(config('ignore_interrupts', true))
+		function interrupt()
+			app.server:stop()
+		end
+		start()
+		auth_store().close()
 	end
 
 	function logging.rpc:close_all_sockets()
@@ -232,6 +233,13 @@ local function cui_app(...)
 	function app:run_cmd(cmd_name, cmd_run, cmd_opt, ...)
 		local exit_code
 		if cmd_name == 'run' then --run server in main thread
+			if config'http_host' == '*' then
+				local auth_host = assert(config'auth_host')
+				auth_init()
+				auth_store().with_lock('w', function()
+					auth_store().try_add_tenant(auth_host)
+				end)
+			end
 			exit_code = cmd_run(cmd_name, cmd_opt, ...)
 		else
 			exit_code = run(function(...)
