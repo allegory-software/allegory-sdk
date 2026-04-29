@@ -105,6 +105,7 @@ function logging:tofile(logfile, max_size, queue_size)
 		rotate_logfile(#s + 1)
 		size = size + #s + 1
 		f:write(s)
+		if self.autoflush then f:sync() end
 		return true
 	end
 
@@ -138,9 +139,6 @@ function logging:tofile(logfile, max_size, queue_size)
 					save_wait_job = nil
 				end
 			else
-				if f and self.autoflush then
-					f:flush()
-				end
 				save_wait_job = wait_job()
 				save_wait_job:wait(.2)
 				save_wait_job = nil
@@ -154,9 +152,6 @@ function logging:tofile(logfile, max_size, queue_size)
 			local s = queue:pull()
 			if not s then break end
 			if not try_save_message(s) then break end
-			if f and self.autoflush then
-				f:flush()
-			end
 		end
 	end
 
@@ -453,6 +448,7 @@ local function log(self, severity, module, event, fmt, ...)
 		if not arg1_multiline then
 			msg = '\n\n'..msg..'\n'
 		end
+		msg:match('../')
 	end
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
 		local entry = (self.logtofile or not self.quiet)
