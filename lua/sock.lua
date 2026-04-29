@@ -513,7 +513,7 @@ function sa:tostring()
 	return self:ip()..(self:port() and ':'..self:port() or '')
 end
 
-metatype('struct sockaddr', {__index = sa})
+metatype('struct sockaddr', {__index = sa, type = 'sockaddr'})
 
 --POSIX sockets --------------------------------------------------------------
 
@@ -871,6 +871,9 @@ function poll(ignore_interrupts)
 	local ok, err = epoll_wait()
 	if ok then return true end
 	if err == 'interrupted' then
+		if ignore_interrupts == nil then
+			ignore_interrupts = config('ignore_interrupts', true)
+		end
 		log('note', 'sock', 'poll', 'interrupted: %s.',
 			ignore_interrupts and 'ignoring' or 'breaking')
 		if ignore_interrupts then
@@ -1066,6 +1069,7 @@ function stop()
 		term_sig_f = nil
 	end
 end
+interrupt = stop --overridable
 
 function try_start(ignore_interrupts)
 	if _running then
@@ -1079,7 +1083,7 @@ function try_start(ignore_interrupts)
 	if wait_count > 0 then
 		--signals thread to stop loop on SIGINT (Ctrl+C) and SIGTERM (kill) events.
 		term_sig_f = on_signal('SIGINT SIGTERM', function()
-			stop()
+			interrupt()
 			return 'stop'
 		end)
 	end
@@ -1091,10 +1095,8 @@ function try_start(ignore_interrupts)
 		ret, err = poll(ignore_interrupts)
 		if not ret then
 			stop()
-			if err == 'interrupted' then
+			if err == 'interrupted' or err == 'empty' then
 				ret = true
-				break
-			elseif err ~= 'empty' then
 				break
 			else
 				ret, err = true
