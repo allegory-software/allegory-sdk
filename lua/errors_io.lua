@@ -41,6 +41,9 @@ You should distinguish between multiple types of errors:
   must be distinguishable from other types of errors. Use `check_io()` for
   those. On the call side then check the error class for implementing retries.
 
+- I/O errors on stable storage, i.e. disk failures which you might want to
+  kill the whole app on.
+
 Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
 confusion about when to raise and when not to or forgetting to handle an error).
