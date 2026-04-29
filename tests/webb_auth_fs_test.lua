@@ -23,8 +23,10 @@ local function tenants_by_host()
 	return t
 end
 
-local tid1 = store.add_tenant('Shop.Example')
-local tid2 = store.add_tenant('admin.example')
+local tid1 = store.add_tenant()
+store.try_add_host('Shop.Example', tid1)
+local tid2 = store.add_tenant()
+store.try_add_host('admin.example', tid2)
 assert(tid2 ~= tid1)
 assert(store.tenant_by_host('shop.example') == tid1)
 assert(store.tenant_by_host('ADMIN.EXAMPLE') == tid2)
@@ -111,14 +113,14 @@ assert(#u.tenants == 1 and u.tenants[1] == tid1)
 print'ok user_del_tenant'
 
 store.try_del_user(uid)
-assert(not pcall(store.user, uid))
+assert(not pcall(store.load_user, uid))
 assert(store.uid_by('email', tid1, 'bar@test.com') == nil)
 assert(store.uid_by('phone', tid1, '654321') == nil)
 assert(store.load_session(tid1, sid1) == nil)
 print'ok del_user'
 
-store.del_tenant('admin.example')
-store.del_tenant('api.example')
+store.del_tenant(tid2)
+store.del_tenant(tid1)
 assert(#store.tenants() == 0)
 assert(not pcall(store.tenant_by_host, 'admin.example'))
 assert(not pcall(store.tenant_by_host, 'api.example'))

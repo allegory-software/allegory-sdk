@@ -10,8 +10,8 @@ OBJECTIVES
 	4. no path injection.
 
 Since we don't have transactions, process crashes can leave the store in an
-inconsistent state. A scan+repair is thus performed on startup, which uses
-the user profile file as point of truth because it is saved first.
+inconsistent state. A scan+repair is thus performed on startup, using certain
+specific atomic ops as commit points to decide what to do.
 
 ]]
 
@@ -95,6 +95,7 @@ local function tenant_by_host(host)
 	return checkfound(try_tenant_by_host(host),
 		S('invalid_host', 'Invalid host: %s', host))
 end
+fs.try_tenant_by_host = try_tenant_by_host
 fs.tenant_by_host = tenant_by_host
 
 function fs.tenants()
@@ -109,30 +110,30 @@ function fs.tenants()
 	return t
 end
 
-function fs.try_add_tenant(host)
+function fs.add_tenant()
 	assert(locked_w)
-	local hlpath = hostlinkpath(host)
-	if try_tenant_by_host(host) then
-		return nil, 'already_exists'
-	end
 	local tid = gen_id'tenant_id'
 	mkdir(tpath(tid))
-	mkdir(tpath(tid, 'sessions'))
-	mkdir(tpath(tid, 'uid_by_email'))
-	mkdir(tpath(tid, 'uid_by_phone'))
-	symlink(hlpath, '../tenants/'..tid) --commit
-	return tid
-end
-function fs.add_tenant(host)
-	local tid, err = fs.try_add_tenant(host)
-	checknotexists('host', err == 'already_exists' and host)
+	fs.repair()
 	return tid
 end
 
-function fs.del_tenant(host)
+function fs.try_add_host(host, tid)
+	check_tenant(tid)
+	local ok, err = try_symlink(hostlinkpath(host), '../tenants/'..tid)
+	check_io(nil, ok or err == 'already_exists', err)
+	return ok, err
+end
+
+function fs.try_del_host(host)
+	return rmfile(hostlinkpath(host))
+end
+
+function fs.del_tenant(tid)
 	assert(locked_w)
-	local tid = tenant_by_host(host)
-	rmfile(hostlinkpath(host)) --commit
+	local tmp_path = tpath(tid)..'.removed'
+	rename(tpath(tid), tmp_path)
+	rm_rf(tmp_path)
 	fs.repair()
 end
 
@@ -140,6 +141,10 @@ function fs.rename_host(old_host, new_host)
 	assert(locked_w)
 	checknotexists('host', try_tenant_by_host(new_host) and new_host)
 	rename(hostlinkpath(old_host), hostlinkpath(new_host)) --commit
+end
+
+function fs.tenant_exists(tid)
+	return file_is(tpath(tid), 'dir')
 end
 
 --sessions -------------------------------------------------------------------
@@ -258,7 +263,7 @@ function fs.try_del_user(uid)
 	if not u then
 		return false
 	end
-	local path, err = rmfile(userpath(uid, 'profile')) --commit
+	rmfile(userpath(uid, 'profile')) --commit
 	for _,tid in ipairs(u.tenants) do
 		if u.email then del_uid_by('email', tid, u.email) end
 		if u.phone then del_uid_by('phone', tid, u.phone) end
@@ -343,14 +348,22 @@ function fs.repair()
 	mkdir(varpath('hosts'))
 	mkdir(varpath('tenants'))
 	mkdir(varpath('users'))
-	local tids = {} --live tids, taken from host links
-	for host in ls(varpath('hosts')) do
-		tids[tenant_by_host(host)] = true
-	end
+	local tids = {}
 	for tid in ls(varpath('tenants')) do
-		tid = assert(tonumber(tid))
-		if not tids[tid] then --del_tenant or interrupted add_tenant
-			rm_rf(tpath(tid))
+		if tid:has'removed' then --interrupted del_tenant
+			rm_rf(varpath('tenants', tid))
+		else
+			tid = assert(tonumber(tid))
+			tids[tid] = true
+			--interrupted add_tenant
+			mkdir(tpath(tid, 'sessions'))
+			mkdir(tpath(tid, 'uid_by_email'))
+			mkdir(tpath(tid, 'uid_by_phone'))
+		end
+	end
+	for host in ls(varpath('hosts')) do
+		if not tids[tenant_by_host(host)] then --del_tenant
+			rmfile(hostlinkpath(host))
 		end
 	end
 	local users = {}
