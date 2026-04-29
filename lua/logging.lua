@@ -344,7 +344,6 @@ local function debug_id(v)
 	local ids = ids_db[ty]
 	if not ids then
 		ids = setmetatable({
-			live_count = 0,
 			live = setmetatable({}, mode_k)
 			-- ^^ this table is weak because threads can be abandoned
 			-- in suspended state so live(nil) never gets called on them.
@@ -502,7 +501,7 @@ local function live(self, o, fmt, ...)
 	if fmt ~= nil then
 		s = fmtargs(self, fmt, ...)
 		if not was_live then
-			ids.live_count = ids.live_count + 1
+			ids.live_count = (ids.live_count or 0) + 1
 			event = '+ ' .. ids.live_count
 		end
 	elseif was_live then
@@ -613,7 +612,9 @@ function logging.printlive(out)
 	for _,ty in ipairs(types) do
 		local ids = ids_db[ty]
 		local live = ids.live
-		out(('%-12s: %d\n'):format(ty, ids.live_count))
+		if ids.live_count then
+			out(('%-12s: %d\n'):format(ty, ids.live_count))
+		end
 		local ids, ss = {}, {}
 		for o in pairs(live) do
 			local id = logarg(o)
