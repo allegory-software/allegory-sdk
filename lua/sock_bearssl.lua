@@ -1351,13 +1351,11 @@ _G.server_stcp = unprotect_io(_G.try_server_stcp)
 
 function server_stcp:try_close()
 	if not self.tcp.fd then return true end
-	for s in pairs(self.tcp._sockets) do --close all accepted tls sockets if any.
-		if s.stcp then
-			s.stcp:try_close()
-		end
-	end
-	assert(self.tcp._sockets_n == 0)
 	live(self, nil)
+	--NOTE: normally we should iterate tcp._sockets[s] and call s.stcp:close() on
+	--each which sends TLS close_notify, but that calls send() and recv() and
+	--we want to be able to call this from a different thread precisely so we can
+	--interrupt all the threads waiting on these sockets. so we force-close instead.
 	local ok, err = self.tcp:try_close()
 	self.eng = nil
 	self._keepalive = nil
