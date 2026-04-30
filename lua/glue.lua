@@ -161,6 +161,7 @@ PLATFORM
 PROCESS
 	sleep(s)                       suspend process i.e. blocking sleep
 	exit                         = os.exit
+	check_fatal(ret, [fmt,...])    print error and exit process if ret is falsy
 	getpid() -> pid                get current process PID
 TIME & DATES
 	now() -> ts                    os.time() but more accurate
@@ -1573,6 +1574,17 @@ CANCEL = {} --generic "cancel" command to pass to callbacks.
 --process control ------------------------------------------------------------
 
 exit = os.exit
+
+function check_fatal(ret, ...)
+	if ret then return ret end
+	if ... then
+		--print error so that it appears on systemd log.
+		io.stderr:write('FATAL ERROR: ')
+		io.stderr:write(_(...))
+		io.stderr:flush()
+	end
+	os.exit(1)
+end
 
 --dates & timestamps ---------------------------------------------------------
 
