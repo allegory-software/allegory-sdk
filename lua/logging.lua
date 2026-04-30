@@ -444,11 +444,19 @@ local function log(self, severity, module, event, fmt, ...)
 	end
 	if msg:find('\n', 1, true) then --multiline
 		local arg1_multiline = msg:find'^\n\n'
-		msg = outdent(msg, '\t')
+		msg = outdent(msg, '  ')
 		if not arg1_multiline then
 			msg = '\n\n'..msg..'\n'
 		end
-		msg:match('../')
+		--shorten stacktrace paths to paths relative to project_dir.
+		local project_dir = config'project_dir'
+		if project_dir then
+			msg = msg:gsub('([^%s<]*%.lua):', function(path)
+				path = relpath(path, project_dir) or path
+				path = path_normalize(path, true) --no symlinks in code
+				return path .. ':'
+			end)
+		end
 	end
 	if (severity ~= '' or self.debug) and (severity ~= 'note' or self.verbose) then
 		local entry = (self.logtofile or not self.quiet)
