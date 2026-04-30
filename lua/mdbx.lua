@@ -125,13 +125,27 @@ end
 
 -- UNMANAGED API -------------------------------------------------------------
 
-local function try_checkz(rc)
+local function try_checkz(env, rc)
 	if rc == 0 then return true end
-	return false, str(C.mdbx_strerror(rc))
+	local err = str(C.mdbx_strerror(rc))
+	if env then C.mdbx_env_close_ex(env, 1) end
+	return false, err
 end
-local function checkz(rc)
-	local ok, err = try_checkz(rc)
+local function checkz(env, rc)
+	local ok, err = try_checkz(env, rc)
 	if not ok then error(err, 3) end
+end
+local function checkz_txn(txn, rc)
+	if rc == 0 then return end
+	local err = str(C.mdbx_strerror(rc))
+	C.mdbx_env_close_ex(C.mdbx_txn_env(txn), 1)
+	error(err, 3)
+end
+local function checkz_cur(cur, rc)
+	if rc == 0 then return end
+	local err = str(C.mdbx_strerror(rc))
+	C.mdbx_env_close_ex(C.mdbx_txn_env(C.mdbx_cursor_txn(cur)), 1)
+	error(err, 3)
 end
 
 --databases
@@ -146,34 +160,36 @@ local function mdbx_env_open(file, opt)
 		if not ok then return nil, err end
 	end
 
-	checkz(C.mdbx_env_create(envp))
+	checkz(nil, C.mdbx_env_create(envp))
 	local env = envp[0]
 
 	local size = 1024e4
-	checkz(C.mdbx_env_set_geometry(env, size, size, size, -1, -1, -1))
-	checkz(C.mdbx_env_set_option(env, C.MDBX_opt_max_readers, opt.max_readers or 64))
-	checkz(C.mdbx_env_set_option(env, C.MDBX_opt_max_db, opt.max_tables or 4096))
+	checkz(env, C.mdbx_env_set_geometry(env, size, size, size, -1, -1, -1))
+	checkz(env, C.mdbx_env_set_option(env, C.MDBX_opt_max_readers, opt.max_readers or 64))
+	checkz(env, C.mdbx_env_set_option(env, C.MDBX_opt_max_db, opt.max_tables or 4096))
 
-	local ok, err = try_checkz(C.mdbx_env_open(env, file,
+	local ok, err = try_checkz(env, C.mdbx_env_open(env, file,
 		bor(C.MDBX_NOSUBDIR, opt.readonly and C.MDBX_RDONLY or 0, opt.flags or 0),
 		(unixperms_parse(opt.file_mode or '0660'))
 	))
 	if not ok then
-		checkz(C.mdbx_env_close_ex(env, 0))
 		return nil, err
 	end
-
 	return env
 end
 
+local function mdbx_env_try_close(env)
+	return try_checkz(nil, C.mdbx_env_close_ex(env, 0))
+end
+
 local function mdbx_env_close(env)
-	checkz(C.mdbx_env_close_ex(env, 0))
+	checkz(nil, C.mdbx_env_close_ex(env, 0))
 end
 
 local function mdbx_env_delete(file, flags)
 	local rc = C.mdbx_env_delete(file, flags or 0)
 	if rc == C.MDBX_RESULT_TRUE then return nil, 'not_found' end
-	checkz(rc)
+	checkz(nil, rc)
 	return true
 end
 
@@ -190,24 +206,25 @@ local function mdbx_txn_begin(env, mode, parent_txn, flags)
 	mode = mode or 'r'
 	assert(mode == 'r' or mode == 'w')
 	flags = bor(mode == 'r' and C.MDBX_RDONLY or 0, flags or 0)
-	checkz(C.mdbx_txn_begin_ex(env, parent_txn, flags, txnp, nil))
+	checkz(env, C.mdbx_txn_begin_ex(env, parent_txn, flags, txnp, nil))
 	return txnp[0]
 end
 
+
 local function mdbx_txn_commit(txn)
-	checkz(C.mdbx_txn_commit_ex(txn, nil))
+	checkz_txn(txn, C.mdbx_txn_commit_ex(txn, nil))
 end
 
 local function mdbx_txn_abort(txn)
-	checkz(C.mdbx_txn_abort(txn))
+	checkz_txn(txn, C.mdbx_txn_abort(txn))
 end
 
 local function mdbx_txn_reset(txn) --for r/o txn: abort but keep txn for renew
-	checkz(C.mdbx_txn_reset(txn))
+	checkz_txn(txn, C.mdbx_txn_reset(txn))
 end
 
 local function mdbx_txn_renew(txn) --for r/o txn: begin on a reset txn
-	checkz(C.mdbx_txn_renew(txn))
+	checkz_txn(txn, C.mdbx_txn_renew(txn))
 end
 
 --tables
@@ -220,41 +237,41 @@ local function mdbx_dbi_open(txn, name, create, flags)
 	if rc == C.MDBX_NOTFOUND then
 		if create then
 			flags = bor(flags, C.MDBX_CREATE)
-			checkz(C.mdbx_dbi_open(txn, name or nil, flags, dbip))
+			checkz_txn(txn, C.mdbx_dbi_open(txn, name or nil, flags, dbip))
 			local dbi = dbip[0]
 			return dbi, true
 		else
 			return nil, 'not_found'
 		end
 	else
-		checkz(rc)
+		checkz_txn(txn, rc)
 		local dbi = dbip[0]
 		return dbi, false
 	end
 end
 
 local function mdbx_dbi_close(env, dbi)
-	checkz(C.mdbx_dbi_close(env, dbi))
+	checkz(env, C.mdbx_dbi_close(env, dbi))
 end
 
 local function mdbx_dbi_rename(txn, dbi, new_table_name)
 	local rc = C.mdbx_dbi_rename(txn, dbi, new_table_name)
 	if rc == C.MDBX_KEYEXIST then return nil, 'exists' end
-	checkz(rc)
+	checkz_txn(txn, rc)
 	return true
 end
 
 local function mdbx_dbi_drop(txn, dbi, del)
 	local rc = C.mdbx_drop(txn, dbi, del)
 	if rc == C.MDBX_NOTFOUND then return nil, 'not_found' end
-	checkz(rc)
+	checkz_txn(txn, rc)
 	return true
 end
 
 local stat = new'MDBX_stat'
 local stat_sz = sizeof(stat)
 local function mdbx_dbi_stat(txn, dbi)
-	checkz(C.mdbx_dbi_stat(txn, dbi, stat, stat_sz))
+	checkz_txn(txn, C.mdbx_dbi_stat(txn, dbi, stat, stat_sz))
 	return stat
 end
 
@@ -269,7 +286,7 @@ local function mdbx_get(txn, dbi, k, k_sz, v, v_sz)
 	local rc = C.mdbx_get(txn, dbi, key, val)
 	if rc == 0 then return val.data, num(val.size) end
 	if rc == C.MDBX_NOTFOUND then return nil, 'not_found' end
-	checkz(rc) --always throws
+	checkz_txn(txn, rc) --always throws
 end
 
 local function mdbx_put(txn, dbi, k, k_sz, v, v_sz, flags)
@@ -280,7 +297,7 @@ local function mdbx_put(txn, dbi, k, k_sz, v, v_sz, flags)
 	local rc = C.mdbx_put(txn, dbi, key, val, flags or 0)
 	if rc == C.MDBX_KEYEXIST then return nil, 'exists', val.data, num(val.size) end
 	if rc == C.MDBX_NOTFOUND then return nil, 'not_found' end
-	checkz(rc)
+	checkz_txn(txn, rc)
 	return true
 end
 
@@ -296,35 +313,36 @@ local function mdbx_del(txn, dbi, k, k_sz, v, v_sz)
 	end
 	local rc = C.mdbx_del(txn, dbi, key, val)
 	if rc == C.MDBX_NOTFOUND then return nil, 'not_found' end
-	checkz(rc)
+	checkz_txn(txn, rc)
 	return true
 end
 
 local seqbuf = u64a(1)
 local function mdbx_dbi_sequence(txn, dbi, inc)
-	checkz(C.mdbx_dbi_sequence(txn, dbi, seqbuf, inc or 1))
+	checkz_txn(txn, C.mdbx_dbi_sequence(txn, dbi, seqbuf, inc or 1))
 	return num(seqbuf[0])
 end
 
 --cursors
 
 local curp = new'MDBX_cursor*[1]'
+
 local function mdbx_cursor_open(txn, dbi)
-	checkz(C.mdbx_cursor_open(txn, dbi, curp))
+	checkz_txn(txn, C.mdbx_cursor_open(txn, dbi, curp))
 	return curp[0]
 end
 
 local function mdbx_cursor_bind(cur, txn, dbi)
-	checkz(C.mdbx_cursor_bind(txn, cur, dbi))
+	checkz_txn(txn, C.mdbx_cursor_bind(txn, cur, dbi))
 	return cur
 end
 
 local function mdbx_cursor_unbind(cur)
-	checkz(C.mdbx_cursor_unbind(cur))
+	checkz_cur(cur, C.mdbx_cursor_unbind(cur))
 end
 
 local function mdbx_cursor_close(cur)
-	checkz(C.mdbx_cursor_close2(cur))
+	checkz_cur(cur, C.mdbx_cursor_close2(cur))
 end
 
 local reflect = require'reflect'
@@ -338,7 +356,7 @@ local function mdbx_cursor_get(cur, flags)
 	if rc == C.MDBX_NOTFOUND then
 		return nil, 0, nil, 0
 	end
-	checkz(rc) --always throws
+	checkz_cur(cur, rc) --always throws
 end
 
 local function mdbx_cursor_first   (cur) return mdbx_cursor_get(cur, C.MDBX_FIRST) end
@@ -379,18 +397,18 @@ local function mdbx_cursor_put(cur, k, k_sz, v, v_sz, flags)
 	key.size = k_sz
 	val.data = v
 	val.size = v_sz
-	checkz(C.mdbx_cursor_put(cur, key, val, flags or 0))
+	checkz_cur(cur, C.mdbx_cursor_put(cur, key, val, flags or 0))
 end
 
 local function mdbx_cursor_set(cur, v, v_sz)
-	checkz(C.mdbx_cursor_get(cur, key, val, C.MDBX_GET_CURRENT))
+	checkz_cur(cur, C.mdbx_cursor_get(cur, key, val, C.MDBX_GET_CURRENT))
 	val.data = v
 	val.size = v_sz
-	checkz(C.mdbx_cursor_put(cur, key, val, C.MDBX_CURRENT))
+	checkz_cur(cur, C.mdbx_cursor_put(cur, key, val, C.MDBX_CURRENT))
 end
 
 local function mdbx_cursor_del(cur, flags)
-	checkz(C.mdbx_cursor_del(cur, flags))
+	checkz_cur(cur, C.mdbx_cursor_del(cur, flags))
 end
 
 --publish
@@ -399,6 +417,7 @@ _G.mdbx_env_open   = mdbx_env_open
 _G.mdbx_env_delete = mdbx_env_delete
 
 metatype('MDBX_env', {__index = {
+	try_close = mdbx_env_try_close,
 	close = mdbx_env_close,
 	max_key_size = mdbx_env_get_maxkeysize,
 	txn = mdbx_txn_begin,
