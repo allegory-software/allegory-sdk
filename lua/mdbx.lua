@@ -327,7 +327,6 @@ local function mdbx_cursor_close(cur)
 	checkz(C.mdbx_cursor_close2(cur))
 end
 
-local reflect = require'reflect'
 local function mdbx_cursor_get(cur, flags)
 	local rc = C.mdbx_cursor_get(cur, key, val, flags)
 	if rc == 0 then
@@ -681,6 +680,7 @@ function Db:try_rename_table(tab, new_table_name)
 	local dbis = local_dbis(self)
 	dbis[old_table_name] = false
 	dbis[dbi] = new_table_name
+	dbis[new_table_name] = dbi
 	log('note', 'db', 't_rename', '%s -> %s', old_table_name, new_table_name)
 	return true, nil, old_table_name
 end
@@ -694,7 +694,7 @@ function Db:try_drop_table(tab)
 	assert(tab)
 	local dbi = isnum(tab) and tab or self:dbi(tab)
 	if not dbi then return nil, 'not_found' end
-	local ok, err = self.txn:drop(dbi)
+	assert(self.txn:drop(dbi))
 	local name = assert(self.dbis[dbi])
 	self.dbis[dbi]  = nil
 	self.dbis[name] = nil
