@@ -42,7 +42,7 @@ You should distinguish between multiple types of errors:
   those. On the call side then check the error class for implementing retries.
 
 - I/O errors on stable storage, i.e. disk failures which you might want to
-  kill the whole app on. Use `check_io_fatal()` for those.
+  kill the whole app on. Use `check_fatal()` for those.
 
 Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
@@ -99,7 +99,6 @@ local function targeted_error(error_classname)
 	end
 	local new_error_close   = new_error_with('close', true)
 	local new_error_noclose = new_error_with('close', false)
-	local new_error_fatal   = new_error_with('fatal', true)
 	local function check_close(self, v, ...)
 		if v then return v, ... end
 		error(new_error_close(self, ...))
@@ -108,21 +107,17 @@ local function targeted_error(error_classname)
 		if v then return v, ... end
 		error(new_error_noclose(self, ...))
 	end
-	local function check_fatal(self, v, ...)
-		if v then return v, ... end
-		error(new_error_fatal(self, ...))
-	end
-	return new_error_close, new_error_noclose, new_error_fatal,
-		check_close, check_noclose, check_fatal
+	return new_error_close, new_error_noclose,
+		check_close, check_noclose
 end
-io_error, io_error_noclose, io_error_fatal,
-	check_io, check_io_noclose, check_io_fatal = targeted_error'io'
+io_error, io_error_noclose,
+	check_io, check_io_noclose = targeted_error'io'
 
-protocol_error, protocol_error_noclose, protocol_error_fatal,
-	checkp, checkp_noclose, checkp_fatal = targeted_error'protocol'
+protocol_error, protocol_error_noclose,
+	checkp, checkp_noclose = targeted_error'protocol'
 
-content_error_close, content_error, content_error_fatal,
-	checknp_close, checknp, checknp_fatal = targeted_error'content'
+content_error_close, content_error,
+	checknp_close, checknp = targeted_error'content'
 
 function protect_io(f, oncaught)
 	return protect('io protocol content', f, oncaught)
