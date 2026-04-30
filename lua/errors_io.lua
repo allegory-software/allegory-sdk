@@ -42,7 +42,7 @@ You should distinguish between multiple types of errors:
   those. On the call side then check the error class for implementing retries.
 
 - I/O errors on stable storage, i.e. disk failures which you might want to
-  kill the whole app on.
+  kill the whole app on. Use `check_io_fatal()` for those.
 
 Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
@@ -76,7 +76,7 @@ local
 	error, iserror
 
 local function targeted_error_init(self)
-	if self.target and not self.noclose and self.target.try_close then
+	if self.target and self.close and self.target.try_close then
 		local ok, err = self.target:try_close()
 		if not ok then
 			self.message = self.message..'\nclose() also failed: '..err
@@ -86,41 +86,43 @@ end
 local function targeted_error(error_classname)
 	local errorclass = errortype(error_classname)
 	errorclass.init = targeted_error_init
-	local function newerror(self, arg1, ...)
-		if iserror(arg1) then return arg1 end --pass-through structured errors
-		if not self then return errorclass(arg1, ...) end --no target
-		return errorclass({
-			target = self,
-			addtraceback = self.tracebacks,
-		}, arg1, ...)
+	local function new_error_with(OPT, val)
+		return function(self, arg1, ...)
+			if iserror(arg1) then return arg1 end --pass-through structured errors
+			if not self then return errorclass(arg1, ...) end --no target
+			return errorclass({
+				target = self,
+				addtraceback = self.tracebacks,
+				[OPT] = val,
+			}, arg1, ...)
+		end
 	end
-	local function newerror_noclose(self, arg1, ...)
-		if iserror(arg1) then return arg1 end --pass-through structured errors
-		if not self then return errorclass(arg1, ...) end --no target
-		return errorclass({
-			target = self,
-			addtraceback = self.tracebacks,
-			noclose = true,
-		}, arg1, ...)
-	end
-	local function check(self, v, ...)
+	local new_error_close   = new_error_with('close', true)
+	local new_error_noclose = new_error_with('close', false)
+	local new_error_fatal   = new_error_with('fatal', true)
+	local function check_close(self, v, ...)
 		if v then return v, ... end
-		error(newerror(self, ...))
+		error(new_error_close(self, ...))
 	end
 	local function check_noclose(self, v, ...)
 		if v then return v, ... end
-		error(newerror_noclose(self, ...))
+		error(new_error_noclose(self, ...))
 	end
-	return newerror, newerror_noclose, check, check_noclose
+	local function check_fatal(self, v, ...)
+		if v then return v, ... end
+		error(new_error_fatal(self, ...))
+	end
+	return new_error_close, new_error_noclose, new_error_fatal,
+		check_close, check_noclose, check_fatal
 end
-io_error, io_error_noclose,
-	check_io, check_io_noclose = targeted_error'io'
+io_error, io_error_noclose, io_error_fatal,
+	check_io, check_io_noclose, check_io_fatal = targeted_error'io'
 
-protocol_error, protocol_error_noclose,
-	checkp, checkp_noclose = targeted_error'protocol'
+protocol_error, protocol_error_noclose, protocol_error_fatal,
+	checkp, checkp_noclose, checkp_fatal = targeted_error'protocol'
 
-content_error_close, content_error,
-	checknp_close, checknp = targeted_error'content'
+content_error_close, content_error, content_error_fatal,
+	checknp_close, checknp, checknp_fatal = targeted_error'content'
 
 function protect_io(f, oncaught)
 	return protect('io protocol content', f, oncaught)
