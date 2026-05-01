@@ -159,16 +159,6 @@ FILE TYPES -------------------------------------------------------------------
  socket    | file is a socket
  unknown   | file type unknown
 
-NORMALIZED ERROR MESSAGES ----------------------------------------------------
-
-	not_found          file/dir/path not found
-	access_denied      access denied
-	already_exists     file/dir already exists
-	is_dir             trying this on a directory
-	not_empty          dir not empty (for remove())
-	io_error           I/O error
-	disk_full          no space left on device
-
 FILE OBJECTS -----------------------------------------------------------------
 
 [try_]open(opt | path,[mode]) -> f
@@ -473,6 +463,7 @@ if not ... then require'fs_test'; return end
 require'glue'
 require'path'
 require'unixperms'
+require'epoll'
 
 --POSIX does not define an ABI and platfoms have different cdefs thus we have
 --to limit support to the platforms and architectures we actually tested for.
@@ -588,7 +579,6 @@ function file_wrap_fd(fd, opt)
 	}, opt)
 
 	if f.async then
-		assert(rawget(_G, 'epoll_add'), 'sock module required for async')
 		fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
 		local ok, err = epoll_add(f)
 		if not ok then
@@ -694,6 +684,12 @@ function file.try_skip(f, n)
 end
 file.skip = unprotect_io(file.try_skip)
 
+file.setexpires  = epoll_setexpires
+file.settimeout  = epoll_settimeout
+file.cancel_recv = epoll_cancel_recv
+file.cancel_send = epoll_cancel_send
+file.cancel      = epoll_cancel
+
 --pipes ----------------------------------------------------------------------
 
 cdef[[
@@ -798,12 +794,21 @@ int fsync(int fd);
 int64_t lseek(int fd, int64_t offset, int whence) asm("lseek64");
 ]]
 
+
+local file_async_read = make_async(false, true, function(self, buf, len)
+	return tonumber(C.read(self.fd, buf, len))
+end, EAGAIN)
+
+local file_async_write = make_async(true, true, function(self, buf, len)
+	return tonumber(C.write(self.fd, buf, len))
+end, EAGAIN)
+
 --NOTE: to read many small pieces use a pbuffer instead, this will crawl!
 function file.try_read(f, buf, sz)
 	if f.fd == -1 then return nil, 'closed' end
 	if sz == 0 then return 0 end --mask out null reads
 	if f.async then
-		local n, err = _file_async_read(f, buf, sz)
+		local n, err = file_async_read(f, buf, sz)
 		if not n then return nil, err end
 		if n == 0 then return 0, 'eof' end
 		return n
@@ -854,7 +859,7 @@ function file.try_write(f, buf, sz)
 	while true do
 		local len, err
 		if f.async then
-			len, err = _file_async_write(f, buf, sz)
+			len, err = file_async_write(f, buf, sz)
 		else
 			len = C.write(f.fd, buf, sz)
 			if len == -1 then

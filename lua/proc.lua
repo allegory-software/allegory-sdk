@@ -78,7 +78,7 @@ POSIX codes are limited to 0..255.
 
 The only way to safely redirect both stdin and stdout of child processes
 without potentially causing deadlocks is to use async pipes and perform
-the writes and the reads in separate sock threads.
+the writes and the reads in separate epoll threads.
 
 Don't forget to close the stdin file when you're done with it to signal
 end-of-input to the child process.
@@ -103,7 +103,6 @@ if not ... then require'proc_test'; return end
 
 require'glue'
 require'fs'
-require'sock'
 require'signal'
 local re = require'relabel'
 

@@ -1148,43 +1148,20 @@ function stcp:try_shutdown(mode)
 end
 stcp.shutdown = unprotect_io(stcp.try_shutdown)
 
-function stcp:try_getopt(k)
-	return self.tcp:try_getopt(k)
-end
-function stcp:getopt(k)
-	return self.tcp:getopt(k)
-end
-function stcp:try_setopt(k, v)
-	return self.tcp:try_setopt(k, v)
-end
-function stcp:setopt(k, v)
-	return self.tcp:setopt(k, v)
-end
-
-function stcp:setexpires(expires, rw)
-	self.tcp:setexpires(expires, rw)
-end
-function stcp:settimeout(s, rw)
-	self.tcp:settimeout(s, rw)
-end
-
-function stcp:wait_job()
-	return self.tcp:wait_job()
-end
-function stcp:wait_until(expires)
-	return self.tcp:wait_until(expires)
-end
-function stcp:wait(timeout)
-	return self.tcp:wait(timeout)
-end
-
-function stcp:remote_addr()
-	return self.tcp:remote_addr()
-end
-
-function stcp:bound_addr()
-	return self.tcp:bound_addr()
-end
+function stcp:try_getopt (...) return self.tcp:try_getopt (...) end
+function stcp:getopt     (...) return self.tcp:getopt     (...) end
+function stcp:try_setopt (...) return self.tcp:try_setopt (...) end
+function stcp:setopt     (...) return self.tcp:setopt     (...) end
+function stcp:setexpires (...) return self.tcp:setexpires (...) end
+function stcp:settimeout (...) return self.tcp:settimeout (...) end
+function stcp:cancel_recv(...) return self.tcp:cancel_recv(...) end
+function stcp:cancel_send(...) return self.tcp:cancel_send(...) end
+function stcp:cancel     (...) return self.tcp:cancel     (...) end
+function stcp:wait_job   (...) return self.tcp:wait_job   (...) end
+function stcp:wait_until (...) return self.tcp:wait_until (...) end
+function stcp:wait       (...) return self.tcp:wait       (...) end
+function stcp:remote_addr(...) return self.tcp:remote_addr(...) end
+function stcp:bound_addr (...) return self.tcp:bound_addr (...) end
 
 function stcp:debug_stream(protocol_name)
 	return tcp_class.debug(self, protocol_name or 'ssock')

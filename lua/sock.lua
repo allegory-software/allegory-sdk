@@ -1,6 +1,6 @@
 --[=[
 
-	Async sockets and coroutine scheduler (epoll-based).
+	Async sockets.
 	Written by Cosmin Apreutesei. Public Domain.
 	TLS support in sock_bearssl.lua.
 
@@ -23,6 +23,10 @@ SOCKETS
 	s:[try_]getopt(opt) -> val             get socket option
 	s:debug_stream([protocol_name])        log recv/send data
 	s:cancel[_recv|_send]()                cancel currently waiting I/O ops
+WAIT JOBS
+	s:wait_job() -> sj          wait job that is auto-canceled on socket close
+	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job
+	s:wait(s) -> ...            wait() on auto-canceled wait job
 TCP
 	tcp([family='ip'], [opt]) -> tcp                     make a SOCK_STREAM socket
 	[try_]connect(addr, [port], [timeout], [client_ip]) -> tcp  create tcp socket and connect
@@ -43,52 +47,6 @@ UDP
 	udp:[try_]sendto(addr, [port], s|buf, [len]) -> len     send a datagram to an address
 	udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa     receive the next datagram
 	tcp:[try_]shutdown(['r'|'w'|'rw'])         send FIN
-THREADS
-	thread(func[, fmt, ...]) -> co         create a coroutine for async I/O
-	resume(thread, ...)                    resume thread
-	yield(...) -> ...                      safe yield (see coro.lua)
-	suspend() -> ...                       suspend thread
-	cowrap(f) -> wrapper                   see coro.safewrap()
-	currentthread() -> co, is_main         current coroutine and whether it's the main one
-	threadstatus(co) -> s                  coroutine.status()
-	transfer(co, ...) -> ...               see coro.transfer()
-	cofinish(co, ...) -> ...               see coro.finish()
-	threadenv([co]) -> t                   get (current) thread's own environment
-	ownthreadenv([co], [create]) -> t      get/create (current) thread's own environment
-	onthreadfinish(co, f)                  run f(thread) when thread finishes
-SCHEDULER
-	poll([ignore_interrupts])              poll for I/O
-	start([ignore_interrupts])             keep polling until all threads finish
-	stop()                                 stop polling
-	run(f, ...) -> ...                     run a function inside a thread
-WAIT JOBS
-	wait_job() -> sj            make an interruptible async wait job
-	sj:wait_until(t) -> ...     wait until clock()
-	sj:wait(s) -> ...           wait for s seconds
-	sj:resume(...)              resume the waiting thread
-	sj:cancel()                 calls sj:resume(CANCEL)
-	wait_until(t) -> ...        wait until clock() value
-	wait(s) -> ...              wait for s seconds
-	s:wait_job() -> sj          wait job that is auto-canceled on socket close
-	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job
-	s:wait(s) -> ...            wait() on auto-canceled wait job
-TIMERS
-	timer(f, [name]) -> tm      create a timer that runs f
-	tm:setexpires(t)            run f at clock t
-	tm:settimeout(s)            run f after s seconds
-	tm:setinterval(s)           run f every s seconds
-	tm:cancel()                 remove timer from queue (can be added back)
-	tm:run()                    run f now
-	runat(t, f) -> sj           run f at clock t
-	runafter(s, f) -> sj        run f after s seconds
-	runevery(s, f) -> sj        run f every s seconds
-	runagainevery(s, f) -> sj   run f now and every s seconds afterwards
-THREAD SETS
-	threadset() -> ts
-	  ts:thread(f, [fmt, ...]) -> co
-	  ts:join() -> {{ok=,ret=,thread=},...}
-MULTI-THREADING (WITH OS THREADS)
-	epoll_fd([epfd]) -> epfd    get/set epoll fd
 
 PROGRAMMING NOTES ------------------------------------------------------------
 
@@ -205,83 +163,13 @@ tcp:[try_]shutdown(['r'|'w'|'rw'])
 	to the FIN from the server) and only then it can close the connection without
 	messing up the client.
 
-SCHEDULING -------------------------------------------------------------------
-
-	Scheduling is based on synchronous coroutines provided by coro.lua which
-	allows coroutine-based iterators that perform socket I/O to be written.
-
-thread(func[, fmt, ...]) -> co
-
-	Create a coroutine for performing async I/O. The coroutine must be resumed
-	to start. When the coroutine finishes, the control is transfered to
-	the I/O thread (the thread that called start()).
-
-	Full-duplex I/O on a socket can be achieved by performing reads in one thread
-	and writes in another.
-
-resume(thread, ...)
-
-	Resume a thread, which means transfer control to it, but also temporarily
-	change the I/O thread to be this thread so that the first suspending call
-	(send, recv, wait, suspend, etc.) gives control back to this thread.
-	_This_ is the trick to starting multiple threads before starting polling.
-
-suspend() -> ...
-
-	Suspend current thread, transfering to the polling thread (but see resume()).
-
-poll([ignore_interrupts]) -> true | false,'empty'
-
-	Poll for the next I/O event and resume the coroutine that waits for it.
-
-start([ignore_interrupts])
-
-	Start polling. Stops when no more I/O or stop() was called.
-
-stop()
-
-	Tell the loop to stop dequeuing and return.
-
-TIMERS -----------------------------------------------------------------------
-
-wait_until(t)
-
-	Wait until a clock() value without blocking other threads.
-
-wait(s) -> ...
-
-	Wait s seconds without blocking other threads.
-
-wait_job() -> sj
-
-	Make an interruptible waiting job. Put the current thread to sleep using
-	sj:wait() or sj:wait_until() and then from another thread call
-	sj:resume() to resume the waiting thread. Any arguments passed to
-	sj:resume() will be returned by sj:wait().
-
-MULTI-THREADING --------------------------------------------------------------
-
-epoll_fd([epfd]) -> epfd
-
-	Get/set the global epoll fd.
-
-	Epoll fds can be shared between OS threads and having a single epfd for all
-	threads is more efficient for the kernel than having one epfd per thread.
-
-	To share the epfd with another Lua state running on a different thread,
-	get the epfd with epoll_fd(), copy it over to the other state,
-	then set it with epoll_fd(copied_epfd).
-
 ]=]
 
 if not ... then require'sock_test'; return end
 
 require'glue'
-require'heap'
 require'ipv6'
-local coro = require'coro'
-coro.live  = live
-coro.pcall = pcall
+require'epoll'
 
 assert(Linux, 'platform not Linux')
 
@@ -291,11 +179,6 @@ local
 local
 	band, bor, shr, cast, u8p, fill, str =
 	band, bor, shr, cast, u8p, fill, str
-
-local coro_create   = coro.create
-local coro_safewrap = coro.safewrap
-local coro_transfer = coro.transfer
-local coro_finish   = coro.finish
 
 local C = C
 
@@ -613,555 +496,14 @@ function socket:onclose(fn)
 	after(self, '_after_close', fn)
 end
 
---epoll ----------------------------------------------------------------------
+socket.setexpires  = epoll_setexpires
+socket.settimeout  = epoll_settimeout
+socket.cancel_recv = epoll_cancel_recv
+socket.cancel_send = epoll_cancel_send
+socket.cancel      = epoll_cancel
 
-cdef[[
-typedef union epoll_data {
-	void *ptr;
-	int fd;
-	uint32_t u32;
-	uint64_t u64;
-} epoll_data_t;
-
-struct epoll_event {
-	uint32_t events;
-	epoll_data_t data;
-} __attribute__((packed));
-
-int epoll_create1(int flags);
-int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
-int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
-]]
-
-local EPOLLIN    = 0x0001
-local EPOLLOUT   = 0x0004
-local EPOLLERR   = 0x0008
-local EPOLLHUP   = 0x0010
-local EPOLLRDHUP = 0x2000
-local EPOLLET    = 2^31 --edge-triggered
-
-local EPOLL_CTL_ADD = 1
-local EPOLL_CTL_DEL = 2
-
-local EPOLL_CLOEXEC = 0x80000
-
-local _epoll_fd
-function epoll_fd(shared_epoll_fd, flags)
-	if shared_epoll_fd then
-		_epoll_fd = shared_epoll_fd
-	elseif not _epoll_fd then
-		flags = flags or EPOLL_CLOEXEC
-		_epoll_fd = C.epoll_create1(flags)
-		assert(check_errno(_epoll_fd >= 0))
-	end
-	return _epoll_fd
-end
-
-local epolled = {} --{epollable_object1, ...}
-local free_slots = {} --{i1, ...}; indexes of free slots in epolled array.
-
-local epoll_ev = new'struct epoll_event'
-
---o is an epollable object (socket, file, etc.), with fields:
---		fd, _i, send_expires, recv_expires, send_thread, recv_thread.
-function epoll_add(eo)
-	local i = pop(free_slots) or #epolled + 1
-	epoll_ev.data.u32 = i
-	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	local ok, err = check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, eo.fd, epoll_ev) == 0)
-	if not ok then
-		push(free_slots, i)
-		return nil, err
-	end
-	eo._i = i
-	epolled[i] = eo
-	--TODO: this is hacky, and only non-sockets need it.
-	eo.setexpires = socket.setexpires
-	eo.settimeout = socket.settimeout
-	eo.cancel_recv = socket.cancel_recv
-	eo.cancel_send = socket.cancel_send
-	eo.cancel = socket.cancel
-	return true
-end
-
-function epoll_remove(eo)
-	local i = eo._i
-	if not i then return end --epoll_add() was not called on this object.
-	epoll_ev.data.u32 = i
-	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0))
-	epolled[i] = false
-	push(free_slots, i)
-end
-
-function socket:setexpires(expires, rw)
-	local r = rw == 'r' or not rw
-	local w = rw == 'w' or not rw
-	if r then self.recv_expires = expires end
-	if w then self.send_expires = expires end
-end
-function socket:settimeout(s, rw)
-	self:setexpires(s and clock() + s, rw)
-end
-
---used for EPOLLIN events but also for wait jobs and timers.
-local recv_expires_heap = heap{
-	cmp = function(s1, s2)
-		return s1.recv_expires < s2.recv_expires
-	end,
-	index_key = 'recv_heap_index', --enable O(log n) removal.
-}
-
---used for EPOLLOUT events only. we use two heaps for full-duplex send/recv.
-local send_expires_heap = heap{
-	cmp = function(s1, s2)
-		return s1.send_expires < s2.send_expires
-	end,
-	index_key = 'send_heap_index', --enable O(log n) removal.
-}
-
-local function wake(eo, for_writing, has_err)
-	local thread
-	if for_writing then
-		thread = eo.send_thread
-	else
-		thread = eo.recv_thread
-	end
-	if not thread then --misfire or bug
-		return
-	end
-	if for_writing then
-		if eo.send_expires then
-			assert(send_expires_heap:remove(eo))
-		end
-		eo.send_thread = nil
-	else
-		if eo.recv_expires then
-			assert(recv_expires_heap:remove(eo))
-		end
-		eo.recv_thread = nil
-	end
-	if has_err then
-		local err = issocket(eo) and eo:try_getopt'so_error' --NOTE: this clears the error!
-		coro_transfer(thread, nil, err or 'error')
-	else
-		coro_transfer(thread, true)
-	end
-end
-
-local function check_heap(heap, EXPIRES, THREAD, t)
-	while true do
-		local xo = heap:peek() --xo = expirable object: epollable, wait_job, timer.
-		if not xo then break end --heap is empty
-		if xo[EXPIRES] - t > 0.01 then break end --not expired, and neither is the rest.
-		--^^ the threshold of 0.01 assumes that the current loop will take more
-		--than 20ms to complete, so might as well expire some jobs now
-		--because the next loop might just be a bit too late for them.
-		xo[EXPIRES] = nil
-		local thread = xo[THREAD] --thread (epollable, wait_job) or timer function.
-		if isthread(thread) then --epollable, wait_job
-			xo[THREAD] = nil
-			assert(heap:pop())
-			coro_transfer(thread, nil, 'timeout')
-		else --timer: run it, which removes it from the heap or moves it (if repeating).
-			xo:run()
-		end
-	end
-end
-
-local maxevents = 64 --arbitrary default to minimize syscalls.
-local events = new('struct epoll_event[?]', maxevents)
-local RECV_MASK = EPOLLIN  + EPOLLERR + EPOLLHUP + EPOLLRDHUP
-local SEND_MASK = EPOLLOUT + EPOLLERR + EPOLLHUP + EPOLLRDHUP
-
-local function epoll_wait()
-	local ss = send_expires_heap:peek()
-	local rs = recv_expires_heap:peek()
-	local sx = ss and ss.send_expires
-	local rx = rs and rs.recv_expires
-	local expires = min(sx or 1/0, rx or 1/0)
-	local timeout = expires < 1/0 and max(0, expires - clock()) or 1/0
-
-	local timeout_ms = max(timeout * 1000, 0)
-	if timeout_ms > 0x7fffffff then timeout_ms = -1 end --infinite
-
-	local n = C.epoll_wait(epoll_fd(), events, maxevents, timeout_ms)
-	if n == -1 then return check_errno() end
-	--handle ready ops.
-	for i = 0, n-1 do
-		local ev = events[i].events
-		local si = events[i].data.u32
-		local eo = epolled[si]
-		--When EPOLL{HUP|RDHUP|ERR} arrives, we need to wake up all waiting
-		--threads because EPOLL{IN|OUT} might never follow, which is why
-		--we check {RECV|SEND}_MASK instead of EPOLL{IN|OUT} alone.
-		local has_err = band(ev, EPOLLERR) ~= 0
-		if band(ev, RECV_MASK) ~= 0 then wake(eo, false, has_err) end
-		if band(ev, SEND_MASK) ~= 0 then wake(eo, true , has_err) end
-	end
-	--handle timed-out ops.
-	local t = clock()
-	check_heap(send_expires_heap, 'send_expires', 'send_thread', t)
-	check_heap(recv_expires_heap, 'recv_expires', 'recv_thread', t)
-	return true
-end
-
---coroutine-based scheduler --------------------------------------------------
-
-local weak_keys = {__mode = 'k'}
-
-local poll_thread
-
-local wait_count = 0
-local waiting = setmetatable({}, weak_keys) --{thread -> true}
-
-local function wait_io_cont(thread, ...)
-	wait_count = wait_count - 1
-	waiting[thread] = nil
-	return ...
-end
-local function wait_io(job)
-	local thread, is_main = currentthread()
-	assert(poll_thread, 'poll loop not started')
-	assert(not is_main, 'trying to perform I/O from the main thread')
-	wait_count = wait_count + 1
-	waiting[thread] = job or true
-	return wait_io_cont(thread, coro_transfer(poll_thread))
-end
-
---closing an epollable doesn't trigger an epoll event, instead the fd is
---silently removed from the epoll list, thus we have to wake up any waiting
---threads manually when the epollable is closed from another thread.
-function socket:cancel_recv(reason)
-	local thread = self.recv_thread
-	if not thread then return end
-	waiting[thread] = nil
-	self.recv_thread = nil
-	if self.recv_expires then
-		recv_expires_heap:remove(self)
-		self.recv_expires = nil
-	end
-	resume(thread, nil, reason or 'canceled')
-end
-function socket:cancel_send(reason)
-	local thread = self.send_thread
-	if not thread then return end
-	waiting[thread] = nil
-	self.send_thread = nil
-	if self.send_expires then
-		send_expires_heap:remove(self)
-		self.send_expires = nil
-	end
-	resume(thread, nil, reason or 'canceled')
-end
-function socket:cancel(reason)
-	self:cancel_recv(reason)
-	self:cancel_send(reason)
-end
-epoll_cancel = socket.cancel
-
-local term_sig_f
-
-function poll(ignore_interrupts)
-	if wait_count == 0 then
-		return nil, 'empty'
-	elseif wait_count == 1 and term_sig_f then --nobody left to kill this guy
-		return nil, 'empty'
-	end
-	local ok, err = epoll_wait()
-	if ok then return true end
-	if err == 'interrupted' then
-		if ignore_interrupts == nil then
-			ignore_interrupts = config('ignore_interrupts', true)
-		end
-		log('note', 'sock', 'poll', 'interrupted: %s.',
-			ignore_interrupts and 'ignoring' or 'breaking')
-		if ignore_interrupts then
-			return true, err
-		end
-	end
-	return false, err
-end
-
-local function make_async(for_writing, returns_n, func, wait_errno)
-	local heap = for_writing and send_expires_heap or recv_expires_heap
-	local EXPIRES = for_writing and 'send_expires' or 'recv_expires'
-	local THREAD = for_writing and 'send_thread' or 'recv_thread'
-	local RW = for_writing and 'w' or 'r'
-	return function(self, ...)
-		::again::
-		local ret = func(self, ...)
-		if ret >= 0 then
-			if returns_n then
-				self[RW] = self[RW] + ret
-			end
-			return ret
-		end
-		local errno = errno()
-		if errno == wait_errno then
-			if self[EXPIRES] then
-				heap:push(self)
-			end
-			self[THREAD] = currentthread()
-			local ok, err = wait_io()
-			if not ok then
-				return nil, err
-			else
-				goto again
-			end
-		else
-			local ok, err = check_errno(nil, errno)
-			return ok, err, errno
-		end
-	end
-end
-
-local threadfinish = setmetatable({}, weak_keys)
-function onthreadfinish(thread, f)
-	after(threadfinish, thread, f)
-end
-
-currentthread = coro.running
-threadstatus = coro.status
-cofinish = coro.finish
-
---NOTE: NOT weak-keyed! LuaJIT has no ephemerons, so if a value in a weak-key
---table transitively references its key, the entry is never collected.
---User code routinely stores back-refs (e.g. ownthreadenv().req.thread = thread).
---Explicit cleanup in thread_onfinish avoids the problem entirely.
-local threadenvs    = {}
-local ownthreadenvs = {}
-
-function threadenv(thread)
-	return threadenvs[thread or currentthread()]
-end
-
-function ownthreadenv(thread, create)
-	thread = thread or currentthread()
-	local t = ownthreadenvs[thread]
-	if not t and create ~= false then
-		t = {}
-		local pt = threadenvs[thread]
-		if pt then --inherit parent env, if any.
-			t.__index = pt
-			setmetatable(t, t)
-		end
-		ownthreadenvs[thread] = t
-		threadenvs[thread] = t
-	end
-	return t
-end
-
-local function thread_onfinish(thread, ok, ...)
-	local finish = threadfinish[thread]
-	if finish then
-		finish(thread, ok, ...)
-	end
-	threadenvs[thread] = nil
-	ownthreadenvs[thread] = nil
-	--poll threads don't have a caller thread to re-raise their errors into,
-	--and we don't want them to break the main thread either as coro thereads
-	--do by default, so errors are just logged and the thread finishes in the
-	--current poll_thread (which is the caller thread when using resume()).
-	if not ok then
-		log('ERROR', 'sock', 'thread', '%s', ...)
-	end
-	return true, coro_finish(poll_thread)
-end
-function thread(f, ...)
-	local thread = coro_create(f, thread_onfinish, ...)
-	threadenvs[thread] = threadenvs[currentthread()] --inherit threadenv.
-	return thread
-end
-
-local function cowrap_onfinish(thread, ok, ...)
-	local finish = threadfinish[thread]
-	if finish then
-		finish(thread, ok, ...)
-	end
-	--cowrap threads re-raise their errors in their caller thread (they always
-	--have one) so no need to log them. finalizers are still available for them.
-	return ok, ...
-end
-function cowrap(f, ...)
-	local wrapped, thread = coro_safewrap(f, cowrap_onfinish, ...)
-	threadenvs[thread] = threadenvs[currentthread()] --inherit threadenv.
-	return wrapped, thread
-end
-
-function transfer(thread, ...)
-	assert(not waiting[thread], 'attempt to resume a waiting thread')
-	return coro_transfer(thread, ...)
-end
-
-function suspend()
-	assert(poll_thread, 'poll loop not started')
-	return coro_transfer(poll_thread)
-end
-
-function resume(thread, ...)
-	assert(not waiting[thread], 'attempt to resume a waiting thread')
-	local real_poll_thread = poll_thread
-	--change poll_thread temporarily so that we get back here
-	--from the first call to suspend() or wait_io().
-	poll_thread = currentthread()
-	coro_transfer(thread, ...)
-	poll_thread = real_poll_thread
-end
-
-yield = coro.yield
-
-local function rets_tostring(rets)
-	local t = {}
-	for i,ret in ipairs(rets) do
-		local args = concat(imap(ret, logarg), ', ')
-		t[i] = logarg(ret.thread) .. ': '..args
-	end
-	return concat(t, '\n')
-end
-local rets_mt = {__tostring = rets_tostring}
-
-function threadset()
-	local ts = {}
-	local n = 0
-	local all_ok = true
-	local rets = {}
-	setmetatable(rets, rets_mt)
-	local wait_thread = currentthread()
-	local function pass(ret, ok, ...)
-		local n = select('#',...)
-		for i=1,n do
-			ret[i] = select(i,...)
-		end
-		ret.ok = ok
-		ret.n = n
-		rets[#rets+1] = ret
-		if not ok then all_ok = false end
-	end
-	function ts:thread(f, ...)
-		return thread(function(...)
-			n = n + 1
-			local ret = {thread = currentthread()}
-			pass(ret, pcall(f, ...))
-			n = n - 1
-			if n == 0 then
-				transfer(wait_thread)
-			end
-		end, ...)
-	end
-	function ts:join()
-		if n ~= 0 then
-			wait_thread = currentthread()
-			suspend()
-		end
-		return all_ok, rets
-	end
-	return ts
-end
-
-local _stop = false
-local _running = false
-
-function stop()
-	_stop = true
-	if term_sig_f then
-		term_sig_f:close()
-		term_sig_f = nil
-	end
-end
-interrupt = stop --overridable
-
-function try_start(ignore_interrupts)
-	if _running then
-		return
-	end
-
-	require'signal'
-
-	--NOTE: not creating the signal-catching thread if there are no waiting I/O
-	--threads otherwise there will not be no opportunity to ever close it.
-	if wait_count > 0 then
-		--signals thread to stop loop on SIGINT (Ctrl+C) and SIGTERM (kill) events.
-		term_sig_f = on_signal('SIGINT SIGTERM', function()
-			interrupt()
-			return 'stop'
-		end)
-	end
-
-	poll_thread = currentthread()
-	_running = true
-	local ret, err = true
-	repeat
-		ret, err = poll(ignore_interrupts)
-		if not ret then
-			stop()
-			if err == 'interrupted' or err == 'empty' then
-				ret = true
-				break
-			else
-				ret, err = true
-			end
-		end
-	until _stop
-	_running = false
-	_stop = false
-	return ret, err
-end
-function start(...)
-	assert(try_start(...))
-end
-
-function run(f, ...)
-	if _running then
-		return f(...)
-	else
-		local ret
-		local function wrapper(...)
-			ret = pack(f(...))
-		end
-		resume(thread(wrapper, 'sock-run'), ...)
-		start()
-		return ret and unpack(ret)
-	end
-end
-
---wait jobs ------------------------------------------------------------------
-
-local wj = {
-	type = 'wait_job',
-	debug_prefix = 'W',
-}
-function wait_job()
-	local self = object(wj)
-	--log('', 'sock', 'wait-job', '%s', self)
-	return self
-end
-function wj:wait_until(expires)
-	self.recv_thread = currentthread()
-	self.recv_expires = expires
-	recv_expires_heap:push(self)
-	return wait_io(self)
-end
-function wj:wait(timeout)
-	return self:wait_until(clock() + timeout)
-end
-function wj:resume(...)
-	local thread = self.recv_thread
-	assert(waiting[thread] == self, 'thread not waiting (on this wait job)')
-	assert(recv_expires_heap:remove(self))
-	waiting[thread] = nil --can't resume() a waiting thread
-	resume(thread, ...) --to wait_io_cont()
-	return true
-end
-function wj:cancel()
-	if not self.recv_thread then return end
-	self:resume(CANCEL)
-end
-function wait_until(expires)
-	return wait_job():wait_until(expires)
-end
-function wait(timeout)
-	return wait_job():wait(timeout)
+function socket:epoll_error()
+	return self:try_getopt'so_error' --NOTE: this clears the error!
 end
 
 function socket:wait_job()
@@ -1176,71 +518,6 @@ function socket:wait_until(expires)
 end
 function socket:wait(timeout)
 	return self:wait_job():wait(timeout)
-end
-
---lightweight timers that run in the main thread -----------------------------
-
-local tm = {type = 'timer', debug_prefix = 'R'}
-function timer(f, name)
-	if name == 'debug' then
-		local i = debug.getinfo(f, 'nS')
-		name = _('%s (%s:%s)', i.name or '?', i.short_src, i.linedefined)
-	end
-	return object(tm, {
-		recv_thread = assert(f),
-		name = name,
-		recv_heap_index = -1,
-	})
-end
-function tm:cancel()
-	if self.recv_heap_index == -1 then return end
-	assert(recv_expires_heap:remove(self))
-	return self
-end
-function tm:setexpires(expires)
-	self.recv_expires = expires
-	if self.recv_heap_index ~= -1 then
-		recv_expires_heap:replace(self.recv_heap_index, self)
-	else
-		recv_expires_heap:push(self)
-	end
-	return self
-end
-function tm:settimeout(timeout)
-	self:setexpires(clock() + timeout)
-	return self
-end
-function tm:setinterval(interval)
-	--avoid infinite loop in check_heap().
-	assertf(interval >= 0.02, 'timer interval too short: %.2f', interval)
-	self.interval = interval
-	self:settimeout(interval)
-	return self
-end
-function tm:run()
-	local ok, err = pcall(self.recv_thread)
-	if not ok then --nowhere to raise errors to, so we just log them.
-		log('ERROR', 'sock', 'timer', '%s%s', err, catall('\n', self.name) or '')
-	end
-	if self.interval and err ~= CANCEL then
-		self:settimeout(self.interval)
-	else
-		self:cancel()
-	end
-end
-function runat(expires, f, name)
-	return timer(f, name):setexpires(expires)
-end
-function runafter(timeout, f, name)
-	return timer(f, name):settimeout(timeout)
-end
-function runevery(interval, f, name)
-	return timer(f, name):setinterval(interval)
-end
-function runagainevery(interval, f, name)
-	local tm = timer(f, name):setinterval(interval)
-	tm:run()
-	return tm
 end
 
 --async sock functions -------------------------------------------------------
@@ -1342,41 +619,24 @@ end
 local MSG_NOSIGNAL = 0x4000
 
 --NOTE: to send many small pieces use a pbuffer instead, this will crawl!
+local socket_send = make_async(true, true, function(self, buf, sz, flags)
+	return C.send(self.fd, buf, sz, flags or MSG_NOSIGNAL)
+end, EWOULDBLOCK)
 function socket:try_send(buf, sz, flags)
 	if not self.fd then return nil, 'closed' end
 	sz = sz or #buf
 	if sz == 0 then return true end --mask-out null-writes
 	local left = sz
-	::again::
-	local n = C.send(self.fd, buf, left, flags or MSG_NOSIGNAL)
-	if n > 0 then
-		self.w = self.w + n
+	while true do
+		local n, err = socket_send(self, buf, left, flags)
+		if not n then return nil, err end
+		if n == 0 then return nil, 'eof' end --shouldn't be possible
 		left = left - n
 		if left == 0 then return true end
-		if isstr(buf) then --only make pointer on the rare second pass.
+		if isstr(buf) then --only creating a buffer on a rare second pass.
 			buf = cast(u8p, buf)
 		end
 		buf = buf + n
-		goto again
-	elseif n == 0 then --can't happen but just in case
-		return nil, 'eof'
-	else
-		local errno = errno()
-		if errno == EWOULDBLOCK then
-			if self.send_expires then
-				send_expires_heap:push(self)
-			end
-			self.send_thread = currentthread()
-			local ok, err = wait_io()
-			if not ok then
-				return nil, err
-			else
-				goto again
-			end
-		else
-			local ok, err = check_errno(nil, errno)
-			return ok, err, errno
-		end
 	end
 end
 socket.send = unprotect_io(socket.try_send)
@@ -1436,16 +696,6 @@ do
 	end
 end
 udp.recvnext = unprotect_io(udp.try_recvnext)
-
---making pipes async.
-
-_file_async_write = make_async(true, true, function(self, buf, len)
-	return tonumber(C.write(self.fd, buf, len))
-end, EAGAIN)
-
-_file_async_read = make_async(false, true, function(self, buf, len)
-	return tonumber(C.read(self.fd, buf, len))
-end, EAGAIN)
 
 --shutdown() -----------------------------------------------------------------
 

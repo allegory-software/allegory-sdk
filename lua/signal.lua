@@ -19,7 +19,6 @@
 
 ]]
 
-require'sock'
 require'fs'
 
 assert(Linux, 'platform not Linux')
