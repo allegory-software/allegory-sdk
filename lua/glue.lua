@@ -2288,7 +2288,6 @@ local errno_msgs = {
 	[  4] = 'interrupted', --EINTR, epoll_wait()
 	[  5] = 'io_error', --EIO, read(), write(), fsync()
 	[  9] = 'bad_file', --EBADF
-	[ 11] = 'again', --EAGAIN, EWOULDBLOCK (handled in scheduler)
 	[ 13] = 'access_denied', --EACCES, open(), mkdir(), unlink(), rmdir()
 	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo(), rename()
 	[ 18] = 'cross_device', --EXDEV, rename()

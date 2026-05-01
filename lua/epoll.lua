@@ -6,7 +6,7 @@
 EPOLLABLE OBJECT INTEGRATION
 	epoll_add(eo)
 	epoll_remove(eo)
-	make_async(for_writing, returns_n, func, wait_errno) -> func(self, ...)
+	make_async(for_writing, returns_n, func) -> func(self, ...)
 	epoll_setexpires(eo, expires, ['r|w'])
 	epoll_settimeout(eo, timeout, ['r|w'])
 	epoll_cancel[_read|_write](eo)
@@ -60,7 +60,7 @@ EPOLLABLE OBJECTS ------------------------------------------------------------
 Epollable Objects (EO) are Lua objects with a `fd` field that represents an
 epollable open fd. To make async, call epoll_add() on constructor and
 epoll_remove() on destructor. Create async I/O methods with make_async() which
-wraps a syscall that returns EWOULDBLOCK or EINPROGRESS and returns an async
+wraps a syscall that returns EWOULDBLOCK (or EINPROGRESS) and returns an async
 method. epoll_setexpires, etc. can be used directly as methods.
 
 SCHEDULING -------------------------------------------------------------------
@@ -135,6 +135,8 @@ epoll_fd([epfd]) -> epfd
 require'coro'
 require'glue'
 require'heap'
+
+assert(Linux, 'platform not Linux')
 
 coro.live  = live
 coro.pcall = pcall
@@ -365,7 +367,10 @@ function epoll_cancel(self, reason)
 	self:cancel_send(reason)
 end
 
-function make_async(for_writing, returns_n, func, wait_errno)
+local EWOULDBLOCK = 11
+local EINPROGRESS = 115
+
+function make_async(for_writing, returns_n, func)
 	local heap = for_writing and send_expires_heap or recv_expires_heap
 	local EXPIRES = for_writing and 'send_expires' or 'recv_expires'
 	local THREAD = for_writing and 'send_thread' or 'recv_thread'
@@ -380,7 +385,7 @@ function make_async(for_writing, returns_n, func, wait_errno)
 			return ret
 		end
 		local errno = errno()
-		if errno == wait_errno then
+		if errno == EWOULDBLOCK or errno == EINPROGRESS then
 			if self[EXPIRES] then
 				heap:push(self)
 			end

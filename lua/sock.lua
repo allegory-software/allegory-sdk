@@ -522,13 +522,9 @@ end
 
 --async sock functions -------------------------------------------------------
 
-local EAGAIN      = 11
-local EWOULDBLOCK = 11
-local EINPROGRESS = 115
-
 local socket_connect = make_async(true, false, function(self, sa)
 	return C.connect(self.fd, sa, sa:size())
-end, EINPROGRESS)
+end)
 
 function tcp:try_connect(addr, port)
 	if not self.fd then return nil, 'closed' end
@@ -571,7 +567,7 @@ do
 		nbuf[0] = sizeof(sockaddr_ct)
 		local r = C.accept4(self.fd, accept_sa, nbuf, bor(SOCK_NONBLOCK, SOCK_CLOEXEC))
 		return r
-	end, EWOULDBLOCK)
+	end)
 
 	function tcp:try_accept(opt, timeout)
 		if not self.fd then return nil, 'closed' end
@@ -621,7 +617,7 @@ local MSG_NOSIGNAL = 0x4000
 --NOTE: to send many small pieces use a pbuffer instead, this will crawl!
 local socket_send = make_async(true, true, function(self, buf, sz, flags)
 	return C.send(self.fd, buf, sz, flags or MSG_NOSIGNAL)
-end, EWOULDBLOCK)
+end)
 function socket:try_send(buf, sz, flags)
 	if not self.fd then return nil, 'closed' end
 	sz = sz or #buf
@@ -645,7 +641,7 @@ socket.write = socket.send
 
 local socket_recv = make_async(false, true, function(self, buf, sz, flags)
 	return C.recv(self.fd, buf, sz, flags or 0)
-end, EWOULDBLOCK)
+end)
 
 --NOTE: to read many small pieces, use a pbuffer instead, this will crawl!
 function socket:try_recv(buf, sz, flags)
@@ -662,7 +658,7 @@ socket.read = socket.recv
 
 local udp_sendto = make_async(true, true, function(self, sa, buf, len, flags)
 	return C.sendto(self.fd, buf, len, flags or 0, sa, sa:size())
-end, EWOULDBLOCK)
+end)
 
 function udp:try_sendto(addr, port, buf, len, flags)
 	if not self.fd then return nil, 'closed' end
@@ -684,7 +680,7 @@ do
 	local udp_recvnext = make_async(false, true, function(self, buf, len, flags)
 		src_len_buf[0] = src_buf_len
 		return C.recvfrom(self.fd, buf, len, flags or 0, src_buf, src_len_buf)
-	end, EWOULDBLOCK)
+	end)
 
 	function udp:try_recvnext(buf, len, flags)
 		if not self.fd then return nil, 'closed' end
