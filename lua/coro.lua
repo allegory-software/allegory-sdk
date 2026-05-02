@@ -74,6 +74,10 @@ return coro.finish_with(thread, ok, ...)
 	Finish the coroutine by transferring control to another thread, possibly
 	raising an error in that thread analogous to transfer_with.
 
+coro.finish_target(ok, ...) -> thread | nil
+
+	To be called inside a finalizer to detect a coro.finish() redirect.
+
 coro.yield(...) -> ...
 
 	Behaves like standard coroutine.yield(). A coroutine that was transferred
@@ -157,15 +161,17 @@ local function unprotect(ok, ...)
 	return ...
 end
 
-local FIN = {}
+local FIN = {'FIN'}
 function coro.finish_with(thread, ok, ...)
 	return FIN, thread, ok, ...
 end
 function coro.finish(thread, ...)
 	return FIN, thread, true, ...
 end
-
---the coroutine ends by transferring control to the caller (or finish) thread,
+function coro.finish_target(fin, thread)
+	return fin == FIN and thread or nil
+end
+--the coroutine ends by transferring control to the caller (or finish) thread.
 local function finish(thread, ok, ...)
 	if ... == FIN then --called coro.[p]finish()
 		callers[thread] = (select(2, ...))
