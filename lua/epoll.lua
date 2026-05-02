@@ -51,7 +51,7 @@ TIMERS
 THREAD SETS
 	threadset() -> ts
 	  ts:thread(f, [fmt, ...]) -> co
-	  ts:join() -> {{ok=,ret=,thread=},...}
+	  ts:join() -> all_ok, first_err
 MULTI-THREADING (WITH OS THREADS)
 	epoll_fd([epfd]) -> epfd    get/set epoll fd
 
@@ -700,38 +700,20 @@ function setcurrentowner(owner, thread)
 	currowner[thread] = owner and make_owner(owner) or nil
 end
 
-local function rets_tostring(rets)
-	local t = {}
-	for i,ret in ipairs(rets) do
-		local args = concat(imap(ret, logarg), ', ')
-		t[i] = logarg(ret.thread) .. ': '..args
-	end
-	return concat(t, '\n')
-end
-local rets_mt = {__tostring = rets_tostring}
-
 function threadset()
 	local ts = {}
 	local n = 0
 	local all_ok = true
-	local rets = {}
-	setmetatable(rets, rets_mt)
+	local first_err
 	local wait_thread = currentthread()
-	local function pass(ret, ok, ...)
-		local n = select('#',...)
-		for i=1,n do
-			ret[i] = select(i,...)
-		end
-		ret.ok = ok
-		ret.n = n
-		rets[#rets+1] = ret
-		if not ok then all_ok = false end
-	end
 	function ts:thread(f, ...)
 		return thread(function(...)
 			n = n + 1
-			local ret = {thread = currentthread()}
-			pass(ret, pcall(f, ...))
+			local ok, err = pcall(f, ...)
+			if not ok and all_ok then
+				all_ok = false
+				first_err = err
+			end
 			n = n - 1
 			if n == 0 then
 				return cofinish(wait_thread)
@@ -743,7 +725,7 @@ function threadset()
 			wait_thread = currentthread()
 			suspend()
 		end
-		return all_ok, rets
+		return all_ok, first_err
 	end
 	return ts
 end
