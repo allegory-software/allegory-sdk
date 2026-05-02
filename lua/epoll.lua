@@ -575,6 +575,7 @@ local function thread_finish(thread, ok, ...)
 	ownthreadenvs[thread] = nil
 	currowner[thread] = nil
 end
+local coro_finish_target = coro.finish_target
 local function thread_onfinish(thread, ok, ...)
 	thread_finish(thread, ok, ...)
 	--poll threads don't have a caller thread to re-raise their errors into,
@@ -584,7 +585,7 @@ local function thread_onfinish(thread, ok, ...)
 	if not ok then
 		log('ERROR', 'thread', 'finish', '%s', ...)
 	end
-	if coro.finish_target(...) then --make cofinish() work.
+	if coro_finish_target(...) then --make cofinish() work.
 		return ok, ...
 	else
 		return true, coro_finish(poll_thread)
