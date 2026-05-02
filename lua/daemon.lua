@@ -147,8 +147,8 @@ function daemon(...)
 	package.loaded[scriptname] = app
 
 	--make require() see Lua modules from the script dir.
-	luapath(scriptdir())
-	sopath(indir(scriptdir(), 'bin/linux'))
+	package.path = package.path..';'..scriptdir()..'/?.lua'
+	sopath(scriptdir()..'/bin')
 
 	--cd to scriptdir so that we can use relative paths for everything if we want to.
 	chdir(scriptdir())

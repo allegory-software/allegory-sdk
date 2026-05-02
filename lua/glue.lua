@@ -188,9 +188,6 @@ MODULES
 	autoload(t, key, module|loader) -> t       autoload table key from module
 	rel_scriptdir                  get the script's directory
 	scriptname                     get the script's name
-	add_searchpath(searchpath, path, [index], [extension], [init], [prefix]) -> searchpath
-	luapath(path [,index [,ext]])  insert a path in package.path
-	luacpath(path [,index])        insert a path in package.cpath
 	sopath(path)                   add a search path for ffi.load()
 EVAL
 	[try_]eval(s) -> ...         = loadstring('return '..s)
@@ -1913,7 +1910,7 @@ local arg0 = arg and arg[0]
 
 --get script's directory, based on arg[0].
 --NOTE: the path is not absolute, but relative to the starting current directory!
-local dir = arg0 and arg0:gsub('[/\\]?[^/\\]+$', '') --remove file name
+local dir = arg0 and arg0:gsub('[/]?[^/]+$', '') --remove file name
 rel_scriptdir = dir == '' and '.' or dir
 
 --get script's name without Lua file extension, based on arg[0].
@@ -1921,39 +1918,9 @@ rel_scriptdir = dir == '' and '.' or dir
 scriptname = arg0 and arg0:gsub('%.lua$', ''):match'[^/\\]+$' or '?'
 end
 
-function add_searchpath(searchpath, path, index, ext, init, prefix)
-	index = index or 1
-	local psep = package.config:sub(1,1) --'/'
-	local tsep = package.config:sub(3,3) --';'
-	local wild = package.config:sub(5,5) --'?'
-	local ext = ext or searchpath:match('%.([%a]+)%'..tsep..'?')
-	local prefix = prefix or ''
-	local paths = searchpath and collect(split(searchpath, tsep, nil, true)) or {}
-	local path = path:gsub('[/\\]', psep) --normalize slashes
-	if index == 'after' then index = 0 end
-	if index < 1 then index = #paths + 1 + index end
-	insert(paths, index, path..psep..prefix..wild..'.'..ext)
-	if init then insert(paths, path..psep..prefix..wild..psep..'init.'..ext) end
-	return concat(paths, tsep)
-end
-
---add more paths to package.path, at any place in the list.
---negative indices count from the end of the list like string.sub().
---index 'after' means 0. `ext` specifies the file extension to use.
-function luapath(path, index, ext)
-	package.path = add_searchpath(package.path, path, index, ext or 'lua', true)
-end
-
---add more paths to package.cpath, at any place in the list.
---negative indices count from the end of the list like string.sub().
---index 'after' means 0.
-function luacpath(path, index)
-	package.cpath = add_searchpath(package.cpath, path, index)
-end
-
 function sopath(path)
 	require'proc'
-	env('LD_LIBRARY_PATH', (env('LD_LIBRARY_PATH') or '')..':'..path)
+	env('LD_LIBRARY_PATH', catany(':', env'LD_LIBRARY_PATH', path))
 end
 
 --interpreter ----------------------------------------------------------------

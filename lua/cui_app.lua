@@ -157,8 +157,8 @@ local function cui_app(...)
 	package.loaded[scriptname] = app
 
 	--make require() and ffi.load() see app dependencies.
-	luapath(scriptdir())
-	sopath(indir(scriptdir(), 'bin', win and 'windows' or 'linux'))
+	package.path = package.path..';'..scriptdir()..'/?.lua'
+	sopath(scriptdir()..'/bin')
 
 	--load an optional config file.
 	load_config_file(conffile)
@@ -245,6 +245,12 @@ local function cui_app(...)
 		end
 		if logging.debug then --show any leaks.
 			logging.printlive()
+			local function out_stderr(s)
+				io.stderr:write(s)
+				io.stderr:flush()
+			end
+			out(('%-12s: %d\n'):format('wait_io'     , wait_io_count())
+			out(('%-12s: %d\n'):format('suspended_io', suspended_count())
 		end
 		return exit_code
 	end
