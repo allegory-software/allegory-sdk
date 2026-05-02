@@ -6,20 +6,20 @@
 API
 	[try_]client_stcp(tcp, host, opt) -> cstcp   create a secure client socket
 	[try_]server_stcp(tcp, opt) -> sstcp         create a secure server socket
-		sstcp:[try_]accept([opt], [timeout]) -> cstcp   accept a TLS client connection
-		  cstcp:[try_]recv(buf, sz) -> n          receive decrypted bytes
-		  cstcp:[try_]send(buf, sz) -> true       send bytes (encrypted)
-		  cstcp:[try_]close()                     close with SSL shutdown
-		  cstcp:[try_]shutdown('r'|'w'|'rw')      shutdown underlying TCP
+	- sstcp:[try_]accept([opt], [timeout]) -> cstcp   accept a TLS client connection
+	- - cstcp:[try_]recv(buf, sz) -> n           receive decrypted bytes
+	- - cstcp:[try_]send(buf, sz) -> true        send bytes (encrypted)
+	- - cstcp:[try_]close()                      close with SSL shutdown
+	- - cstcp:[try_]shutdown('r'|'w'|'rw')       shutdown underlying TCP
 	opt table:
-		cert[_file]            certificate PEM data or file (for server or mutual TLS)
-		key[_file]             private key PEM data or file (for server or mutual TLS)
-		cert_issuer_rsa        hint: server EC cert was issued by RSA CA (default: EC)
-		min_rsa_size           minimum RSA key size for server cert chains (default: 2048)
-		session_cache_entries  number of TLS session cache entries (default: 1024)
+	- cert[_file]            certificate PEM data or file (for server or mutual TLS)
+	- key[_file]             private key PEM data or file (for server or mutual TLS)
+	- cert_issuer_rsa        hint: server EC cert was issued by RSA CA (default: EC)
+	- min_rsa_size           minimum RSA key size for server cert chains (default: 2048)
+	- session_cache_entries  number of TLS session cache entries (default: 1024)
 	opt table / client only:
-		ca[_file]              CA certificate PEM data or file
-		insecure_noverifycert  skip server certificate verification
+	- ca[_file]              CA certificate PEM data or file
+	- insecure_noverifycert  skip server certificate verification
 CONFIG
 	ca_file                path to CA file. autodetected. client only.
 

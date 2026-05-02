@@ -1,15 +1,15 @@
 --[[
 
-	epoll-based coroutine scheduler.
+	Epoll-based coroutine scheduler.
 	Written by Cosmin Apreutesei. Public Domain.
 
 EPOLLABLE OBJECT INTEGRATION
 	epoll_add(eo)
 	epoll_remove(eo)
-	make_async(for_writing, returns_n, func) -> func(self, ...)
+	make_async('r|w', returns_n, func) -> func(self, ...)
 	epoll_setexpires(eo, expires, ['r|w'])
 	epoll_settimeout(eo, timeout, ['r|w'])
-	epoll_cancel[_read|_write](eo)
+	epoll_cancel[_read|_write](eo)         must call after close()!
 	eo:epoll_error() -> err
 THREADS
 	thread(func[, fmt, ...]) -> co         create a coroutine for async I/O
@@ -30,11 +30,11 @@ SCHEDULER
 	stop()                                 stop polling
 	run(f, ...) -> ...                     run a function inside a thread
 WAIT JOBS
-	wait_job() -> sj            make an interruptible async wait job
-	sj:wait_until(t) -> ...     wait until clock()
-	sj:wait(s) -> ...           wait for s seconds
-	sj:resume(...)              resume the waiting thread
-	sj:cancel()                 calls sj:resume(CANCEL)
+	wait_job() -> wj            make an interruptible async wait job
+	wj:wait_until(t) -> ...     wait until clock()
+	wj:wait(s) -> ...           wait for s seconds
+	wj:[try_]resume(...)        resume the waiting thread
+	wj:cancel()                 calls wj:resume(CANCEL)
 	wait_until(t) -> ...        wait until clock() value
 	wait(s) -> ...              wait for s seconds
 TIMERS
@@ -44,10 +44,10 @@ TIMERS
 	tm:setinterval(s)           run f every s seconds
 	tm:cancel()                 remove timer from queue (can be added back)
 	tm:run()                    run f now
-	runat(t, f) -> sj           run f at clock t
-	runafter(s, f) -> sj        run f after s seconds
-	runevery(s, f) -> sj        run f every s seconds
-	runagainevery(s, f) -> sj   run f now and every s seconds afterwards
+	runat(t, f) -> wj           run f at clock t
+	runafter(s, f) -> wj        run f after s seconds
+	runevery(s, f) -> wj        run f every s seconds
+	runagainevery(s, f) -> wj   run f now and every s seconds afterwards
 THREAD SETS
 	threadset() -> ts
 	  ts:thread(f, [fmt, ...]) -> co
@@ -110,12 +110,12 @@ wait(s) -> ...
 
 	Wait s seconds without blocking other threads.
 
-wait_job() -> sj
+wait_job() -> wj
 
 	Make an interruptible waiting job. Put the current thread to sleep using
-	sj:wait() or sj:wait_until() and then from another thread call
-	sj:resume() to resume the waiting thread. Any arguments passed to
-	sj:resume() will be returned by sj:wait().
+	wj:wait() or wj:wait_until() and then from another thread call
+	wj:resume() to resume the waiting thread. Any arguments passed to
+	wj:resume() will be returned by wj:wait().
 
 MULTI-THREADING --------------------------------------------------------------
 
@@ -132,6 +132,8 @@ epoll_fd([epfd]) -> epfd
 
 ]]
 
+if not ... then require'epoll_test'; return end
+
 require'coro'
 require'glue'
 require'heap'
@@ -145,6 +147,11 @@ local coro_create   = coro.create
 local coro_safewrap = coro.safewrap
 local coro_transfer = coro.transfer
 local coro_finish   = coro.finish
+
+--fw. decl.
+local _resume
+local wait_io
+local waiting
 
 --epoll ----------------------------------------------------------------------
 
@@ -247,31 +254,30 @@ local send_expires_heap = heap{
 	index_key = 'send_heap_index', --enable O(log n) removal.
 }
 
-local function wake(eo, for_writing, err)
-	local thread
-	if for_writing then
-		thread = eo.send_thread
-	else
-		thread = eo.recv_thread
+local function wake_r(eo, err, transfer)
+	local thread = eo.recv_thread
+	if not thread then return end --wasn't waiting on recv
+	if eo.recv_expires then
+		assert(recv_expires_heap:remove(eo))
 	end
-	if not thread then --misfire or bug
-		return
-	end
-	if for_writing then
-		if eo.send_expires then
-			assert(send_expires_heap:remove(eo))
-		end
-		eo.send_thread = nil
-	else
-		if eo.recv_expires then
-			assert(recv_expires_heap:remove(eo))
-		end
-		eo.recv_thread = nil
-	end
+	eo.recv_thread = nil
 	if err then
-		coro_transfer(thread, nil, err)
+		transfer(thread, nil, err)
 	else
-		coro_transfer(thread, true)
+		transfer(thread, true)
+	end
+end
+local function wake_w(eo, err, transfer)
+	local thread = eo.send_thread
+	if not thread then return end --wasn't waiting on send
+	if eo.send_expires then
+		assert(send_expires_heap:remove(eo))
+	end
+	eo.send_thread = nil
+	if err then
+		transfer(thread, nil, err)
+	else
+		transfer(thread, true)
 	end
 end
 
@@ -325,8 +331,8 @@ local function epoll_wait()
 		if band(ev, EPOLLERR) ~= 0 then
 			err = eo.epoll_error and eo.epoll_error(eo) or 'error'
 		end
-		if band(ev, RECV_MASK) ~= 0 then wake(eo, false, err) end
-		if band(ev, SEND_MASK) ~= 0 then wake(eo, true , err) end
+		if band(ev, RECV_MASK) ~= 0 then wake_r(eo, err, coro_transfer) end
+		if band(ev, SEND_MASK) ~= 0 then wake_w(eo, err, coro_transfer) end
 	end
 	--handle timed-out ops.
 	local t = clock()
@@ -335,32 +341,14 @@ local function epoll_wait()
 	return true
 end
 
---coroutine-based scheduler --------------------------------------------------
-
 --closing an epollable doesn't trigger an epoll event, instead the fd is
 --silently removed from the epoll list, thus we have to wake up any waiting
 --threads manually when the epollable is closed from another thread.
 function epoll_cancel_recv(self, reason)
-	local thread = self.recv_thread
-	if not thread then return end
-	wait_io_cancel(thread)
-	self.recv_thread = nil
-	if self.recv_expires then
-		recv_expires_heap:remove(self)
-		self.recv_expires = nil
-	end
-	resume(thread, nil, reason or 'canceled')
+	wake_r(self, reason or 'canceled', _resume)
 end
 function epoll_cancel_send(self, reason)
-	local thread = self.send_thread
-	if not thread then return end
-	wait_io_cancel(thread)
-	self.send_thread = nil
-	if self.send_expires then
-		send_expires_heap:remove(self)
-		self.send_expires = nil
-	end
-	resume(thread, nil, reason or 'canceled')
+	wake_w(self, reason or 'canceled', _resume)
 end
 function epoll_cancel(self, reason)
 	self:cancel_recv(reason)
@@ -370,11 +358,10 @@ end
 local EWOULDBLOCK = 11
 local EINPROGRESS = 115
 
-function make_async(for_writing, returns_n, func)
-	local heap = for_writing and send_expires_heap or recv_expires_heap
-	local EXPIRES = for_writing and 'send_expires' or 'recv_expires'
-	local THREAD = for_writing and 'send_thread' or 'recv_thread'
-	local RW = for_writing and 'w' or 'r'
+function make_async(RW, returns_n, func)
+	local heap = RW == 'w' and send_expires_heap or recv_expires_heap
+	local EXPIRES = RW == 'w' and 'send_expires' or 'recv_expires'
+	local THREAD = RW == 'w' and 'send_thread' or 'recv_thread'
 	return function(self, ...)
 		::again::
 		local ret = func(self, ...)
@@ -423,13 +410,18 @@ end
 function wj:wait(timeout)
 	return self:wait_until(clock() + timeout)
 end
-function wj:resume(...)
+function wj:try_resume(...)
 	local thread = self.recv_thread
-	assert(wait_io_check(thread) == self, 'thread not waiting (on this wait job)')
+	if waiting[thread] ~= self then
+		return nil, 'thread not waiting on this job'
+	end
+	self.recv_thread = nil
 	assert(recv_expires_heap:remove(self))
-	wait_io_cancel(thread) --can't resume() a waiting thread
-	resume(thread, ...) --to wait_io_cont()
+	_resume(thread, ...) --to wait_io_cont()
 	return true
+end
+function wj:resume(...)
+	assert(self:try_resume(...))
 end
 function wj:cancel()
 	if not self.recv_thread then return end
@@ -507,7 +499,7 @@ function runagainevery(interval, f, name)
 	return tm
 end
 
---scheduler ------------------------------------------------------------------
+--threads and poll loop ------------------------------------------------------
 
 local poll_thread
 
@@ -517,35 +509,21 @@ end
 
 local _wait_io_count = 0
 local _suspended_count = 0
-local wait_io_key = {}
+--[[local]] waiting = {} --{thread->wait_job|true on I/O}
 
 function wait_io_count() return _wait_io_count end
 function suspended_count() return _suspended_count end
 
-local function wait_io_job(thread)
-	local env = thread and ownthreadenv(thread, false)
-	return env and env[wait_io_key]
-end
-function wait_io_cancel(thread)
-	local env = thread and ownthreadenv(thread, false)
-	if env then
-		env[wait_io_key] = nil
-	end
-end
-function wait_io_check(thread)
-	return wait_io_job(thread)
-end
-
 local function wait_io_cont(thread, ...)
 	_wait_io_count = _wait_io_count - 1
-	wait_io_cancel(thread)
+	waiting[thread] = nil
 	return ...
 end
-function wait_io(job)
+--[[local]] function wait_io(job)
 	local thread, is_main = currentthread()
 	assert(poll_thread, 'poll loop not started')
 	assert(not is_main, 'trying to perform I/O from the main thread')
-	ownthreadenv(thread)[wait_io_key] = job or true
+	waiting[thread] = job or true
 	_wait_io_count = _wait_io_count + 1
 	return wait_io_cont(thread, coro_transfer(poll_thread))
 end
@@ -559,12 +537,12 @@ currentthread = coro.running
 threadstatus = coro.status
 cofinish = coro.finish
 
---NOTE: NOT weak-keyed! LuaJIT has no ephemerons, so if a value in a weak-key
---table transitively references its key, the entry is never collected.
---User code routinely stores back-refs (e.g. ownthreadenv().req.thread = thread).
---Explicit cleanup in thread_onfinish avoids the problem entirely.
+--NOTE: these thread maps are not weak-keyed! LuaJIT has no ephemerons,
+--so a cycle like `ownthreadenv().req.thread = thread` is never collected!
+--It's one of the reasons why threads must always finish.
 local threadenvs    = {}
 local ownthreadenvs = {}
+local currowner     = {}
 
 function threadenv(thread)
 	return threadenvs[thread or currentthread()]
@@ -586,14 +564,19 @@ function ownthreadenv(thread, create)
 	return t
 end
 
-local function thread_onfinish(thread, ok, ...)
+local function thread_finish(thread, ok, ...)
 	local finish = threadfinish[thread]
 	if finish then
 		threadfinish[thread] = nil
 		finish(thread, ok, ...)
 	end
+	assert(not waiting[thread])
 	threadenvs[thread] = nil
 	ownthreadenvs[thread] = nil
+	currowner[thread] = nil
+end
+local function thread_onfinish(thread, ok, ...)
+	thread_finish(thread, ok, ...)
 	--poll threads don't have a caller thread to re-raise their errors into,
 	--and we don't want them to break the main thread either as coro thereads
 	--do by default, so errors are just logged and the thread finishes in the
@@ -601,7 +584,11 @@ local function thread_onfinish(thread, ok, ...)
 	if not ok then
 		log('ERROR', 'thread', 'finish', '%s', ...)
 	end
-	return true, coro_finish(poll_thread)
+	if coro.finish_target(...) then --make cofinish() work.
+		return ok, ...
+	else
+		return true, coro_finish(poll_thread)
+	end
 end
 function thread(f, ...)
 	local thread = coro_create(f, thread_onfinish, ...)
@@ -610,11 +597,7 @@ function thread(f, ...)
 end
 
 local function cowrap_onfinish(thread, ok, ...)
-	local finish = threadfinish[thread]
-	if finish then
-		threadfinish[thread] = nil
-		finish(thread, ok, ...)
-	end
+	thread_finish(thread, ok, ...)
 	--cowrap threads re-raise their errors in their caller thread (they always
 	--have one) so no need to log them. finalizers are still available for them.
 	return ok, ...
@@ -630,28 +613,92 @@ local function transfer_cont(...)
 	return ...
 end
 function transfer(thread, ...)
-	assert(not wait_io_job(thread), 'attempt to resume a thread waiting for I/O')
+	assert(not waiting[thread], 'transfer: thread waiting on I/O')
 	_suspended_count = _suspended_count + 1
 	return transfer_cont(coro_transfer(thread, ...))
 end
-
 function suspend()
-	assert(poll_thread, 'poll loop not started')
+	assert(poll_thread, 'suspend: poll loop not started')
 	_suspended_count = _suspended_count + 1
 	return transfer_cont(coro_transfer(poll_thread))
 end
 
-function resume(thread, ...)
-	assert(not wait_io_job(thread), 'attempt to resume a thread waiting for I/O')
-	local real_poll_thread = poll_thread
+--[[local]] function _resume(thread, ...)
 	--change poll_thread temporarily so that we get back here
 	--from the first call to suspend(), wait_io() or thread finishing.
+	local real_poll_thread = poll_thread
 	poll_thread = currentthread()
 	coro_transfer(thread, ...)
 	poll_thread = real_poll_thread
 end
+function resume(thread, ...)
+	assert(not waiting[thread], 'resume: thread waiting on I/O')
+	_resume(thread, ...)
+end
 
 yield = coro.yield
+
+local owner = {isowner = true}
+
+function owner:try_close_owned()
+	assert(not self.threads or next(self.threads) == nil,
+		'owner closed with live threads')
+	for i = #self.owns, 1, -1 do
+		local o = self.owns[i]
+		o:try_close()
+		o.owner = nil
+	end
+	self.owns = nil --don't allow further owning.
+end
+
+function owner:thread(f, ...)
+	local parent = self
+	local th = thread(function(...)
+		setcurrentowner(parent)
+		return f(...)
+	end, ...)
+	attr(parent, 'threads')[th] = true
+	onthreadfinish(th, function()
+		parent.threads[th] = nil
+	end)
+	return th
+end
+
+function make_owner(o)
+	local th
+	if isthread(o) then
+		th = o
+		o = ownthreadenv(o)
+	end
+	if o.isowner then return o end
+	update(o, owner)
+	o.owns = {}
+	if th then
+		onthreadfinish(th, function()
+			o:try_close_owned()
+		end)
+	elseif o.onclose then
+		o:onclose(function()
+			o:try_close_owned()
+		end)
+	end
+	return o
+end
+
+function currentowner(create)
+	local thread = currentthread()
+	local owner = currowner[thread]
+	if not owner and create ~= false then
+		owner = make_owner(thread)
+		currowner[thread] = owner
+	end
+	return owner
+end
+
+function setcurrentowner(owner, thread)
+	thread = thread or currentthread()
+	currowner[thread] = owner and make_owner(owner) or nil
+end
 
 local function rets_tostring(rets)
 	local t = {}
@@ -687,7 +734,7 @@ function threadset()
 			pass(ret, pcall(f, ...))
 			n = n - 1
 			if n == 0 then
-				transfer(wait_thread)
+				return cofinish(wait_thread)
 			end
 		end, ...)
 	end
@@ -699,28 +746,6 @@ function threadset()
 		return all_ok, rets
 	end
 	return ts
-end
-
-function ownthread_resource_group()
-	local env = ownthreadenv()
-	local rg = env.resource_group
-	if not rg then
-		rg = {}
-		env.resource_group = rg
-		onthreadfinish()
-	end
-	return rg
-end
-
-function thread_resource_group()
-	return assert(threadenv().resource_group, 'no resource group')
-end
-
-function own(res, rg)
-	(rg or thread_resource_group())[res] = true
-end
-function disown(res, rg)
-	(rg or thread_resource_group())[res] = nil
 end
 
 local term_sig_f

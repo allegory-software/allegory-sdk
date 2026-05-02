@@ -19,6 +19,7 @@ FILE OBJECTS
 	[try_]open(opt | path,[mode]) -> f            open file
 	f:[try_]close()                               close file
 	f:closed() -> true|false                      check if file is closed
+	f:onclose(fn)                                 exec fn after the file is closed
 	isfile(f [,type]) -> true|false               check if f is a file or pipe
 	f.fd -> fd                                    POSIX file descriptor
 PIPES
@@ -795,11 +796,11 @@ int64_t lseek(int fd, int64_t offset, int whence) asm("lseek64");
 ]]
 
 
-local file_async_read = make_async(false, true, function(self, buf, len)
+local file_async_read = make_async('r', true, function(self, buf, len)
 	return tonumber(C.read(self.fd, buf, len))
 end)
 
-local file_async_write = make_async(true, true, function(self, buf, len)
+local file_async_write = make_async('w', true, function(self, buf, len)
 	return tonumber(C.write(self.fd, buf, len))
 end)
 

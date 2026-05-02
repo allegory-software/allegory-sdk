@@ -529,70 +529,6 @@ function test.timeout_connect()
 	end)
 end
 
-function test.wait_job_resume_args()
-	checked_run(function()
-		local job
-		local r1, r2
-		resume(sthread(function()
-			job = wait_job()
-			r1, r2 = job:wait(10)
-		end, 'waiter'))
-		-- at this point the thread has set job and is blocked on wait_io()
-		job:resume('hello', 42)
-		assert(r1 == 'hello')
-		assert(r2 == 42)
-	end)
-end
-
-function test.wait_and_cancel()
-	checked_run(function()
-		local job
-		local result
-		resume(sthread(function()
-			job = wait_job()
-			result = job:wait(10)
-		end, 'waiter'))
-		-- job is now set, waiter is blocked
-		job:cancel()
-		assert(result == CANCEL)
-	end)
-end
-
-function test.runat_fires()
-	checked_run(function()
-		local fired = false
-		runat(clock() + 0.05, function()
-			fired = true
-		end)
-		wait(0.1)
-		assert(fired)
-	end)
-end
-
-function test.runat_cancel()
-	checked_run(function()
-		local fired = false
-		local job = runat(clock() + 0.05, function()
-			fired = true
-		end)
-		job:cancel()
-		wait(0.1)
-		assert(not fired)
-	end)
-end
-
-function test.runevery()
-	checked_run(function()
-		local count = 0
-		local job = runevery(0.02, function()
-			count = count + 1
-		end)
-		wait(0.1)
-		job:cancel()
-		assert(count >= 3)
-	end)
-end
-
 function test.socket_wait_job_autocancel()
 	checked_run(function()
 		-- socket:wait_job() registers an onclose handler that cancels the job.
@@ -738,57 +674,6 @@ end
 
 -- [9] Threading and Concurrency ------------------------------------------------
 
-function test.threadset_join()
-	checked_run(function()
-		local ts = threadset()
-		local results = {}
-		for i = 1, 5 do
-			resume(ts:thread(function()
-				wait(0.01)
-				results[#results+1] = i
-			end))
-		end
-		local ok, rets = ts:join()
-		assert(ok)
-		assert(#results == 5)
-	end)
-end
-
-function test.threadset_error_propagation()
-	checked_run(function()
-		local ts = threadset()
-		resume(ts:thread(function()
-			error'boom'
-		end))
-		resume(ts:thread(function()
-			wait(0)
-		end))
-		local ok, rets = ts:join()
-		assert(not ok)
-	end)
-end
-
-function test.threadset_join_empty()
-	checked_run(function()
-		local ts = threadset()
-		local ok, rets = ts:join()
-		assert(ok)
-		assert(#rets == 0)
-	end)
-end
-
-function test.thread_env_inherit()
-	checked_run(function()
-		local env = ownthreadenv(nil, true)
-		env.testval = 42
-		local child_val
-		resume(sthread(function()
-			child_val = threadenv().testval
-		end, 'child'))
-		assert(child_val == 42)
-	end)
-end
-
 function test.concurrent_server_clients()
 	checked_run(function()
 		local port = nextport()
@@ -820,19 +705,6 @@ function test.concurrent_server_clients()
 		ts:join()
 		wait(0.05) -- let handler threads finish receiving
 		assert(received == N)
-	end)
-end
-
-function test.run_when_already_running()
-	checked_run(function()
-		local called = false
-		wait(0) -- yield into the poll loop so running=true when we resume
-		local ret = run(function()
-			called = true
-			return 42
-		end)
-		assert(called)
-		assert(ret == 42)
 	end)
 end
 

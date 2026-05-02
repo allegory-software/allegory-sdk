@@ -1,6 +1,6 @@
 --[=[
 
-	Async sockets.
+	Sockets API for Linux.
 	Written by Cosmin Apreutesei. Public Domain.
 	TLS support in sock_bearssl.lua.
 
@@ -13,10 +13,11 @@ ADDRESSES
 	is_ipv4(s) -> true|false               check if s looks like an IPv4 adress
 	addr_parse(s[, default_port]) ->  host, [port], 'ip|ip6|hostname'
 SOCKETS
-	issocket(s) -> t|f                     check if s is a socket
 	s:[try_]close()                        close connection and free socket
 	s:closed() -> t|f                      check if the socket is closed
 	s:onclose(fn)                          exec fn after the socket is closed
+	issocket(s) -> t|f                     check if s is a socket
+	s.fd -> fd                             POSIX file descriptor
 	s:[try_]bind(addr, [port])             bind socket to an address
 	s:bound_addr() -> sa                   get bound sockaddr
 	s:[try_]setopt(opt, val)               set socket option ('so_*', 'tcp_*', etc.)
@@ -28,7 +29,7 @@ WAIT JOBS
 	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job
 	s:wait(s) -> ...            wait() on auto-canceled wait job
 TCP
-	tcp([family='ip'], [opt]) -> tcp                     make a SOCK_STREAM socket
+	tcp([family='ip'], [opt]) -> tcp                make a SOCK_STREAM socket
 	[try_]connect(addr, [port], [timeout], [client_ip]) -> tcp  create tcp socket and connect
 	listen(addr, [port], [backlog], [onaccept]) -> tcp          create tcp socket and listen
 	tcp:[try_]connect(addr, [port])                 connect to an address
@@ -522,7 +523,7 @@ end
 
 --async sock functions -------------------------------------------------------
 
-local socket_connect = make_async(true, false, function(self, sa)
+local socket_connect = make_async('w', false, function(self, sa)
 	return C.connect(self.fd, sa, sa:size())
 end)
 
@@ -563,7 +564,7 @@ do
 	local ENETUNREACH   = 101
 
 	local nbuf = new'int[1]'
-	local socket_accept = make_async(false, false, function(self, accept_sa)
+	local socket_accept = make_async('r', false, function(self, accept_sa)
 		nbuf[0] = sizeof(sockaddr_ct)
 		local r = C.accept4(self.fd, accept_sa, nbuf, bor(SOCK_NONBLOCK, SOCK_CLOEXEC))
 		return r
@@ -615,7 +616,7 @@ end
 local MSG_NOSIGNAL = 0x4000
 
 --NOTE: to send many small pieces use a pbuffer instead, this will crawl!
-local socket_send = make_async(true, true, function(self, buf, sz, flags)
+local socket_send = make_async('w', true, function(self, buf, sz, flags)
 	return C.send(self.fd, buf, sz, flags or MSG_NOSIGNAL)
 end)
 function socket:try_send(buf, sz, flags)
@@ -639,7 +640,7 @@ socket.send = unprotect_io(socket.try_send)
 socket.try_write = socket.try_send
 socket.write = socket.send
 
-local socket_recv = make_async(false, true, function(self, buf, sz, flags)
+local socket_recv = make_async('r', true, function(self, buf, sz, flags)
 	return C.recv(self.fd, buf, sz, flags or 0)
 end)
 
@@ -656,7 +657,7 @@ socket.recv = unprotect_io(socket.try_recv)
 socket.try_read = socket.try_recv
 socket.read = socket.recv
 
-local udp_sendto = make_async(true, true, function(self, sa, buf, len, flags)
+local udp_sendto = make_async('w', true, function(self, sa, buf, len, flags)
 	return C.sendto(self.fd, buf, len, flags or 0, sa, sa:size())
 end)
 
@@ -677,7 +678,7 @@ do
 	local src_buf_len = sizeof(src_buf)
 	local src_len_buf = new'int[1]'
 
-	local udp_recvnext = make_async(false, true, function(self, buf, len, flags)
+	local udp_recvnext = make_async('r', true, function(self, buf, len, flags)
 		src_len_buf[0] = src_buf_len
 		return C.recvfrom(self.fd, buf, len, flags or 0, src_buf, src_len_buf)
 	end)
