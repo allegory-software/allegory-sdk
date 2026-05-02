@@ -367,8 +367,8 @@ function test.pool_wait()
 				assert(req.status == 200)
 			end, 'pool-wait-'..i))
 		end
-		local all_ok, rets = ts:join()
-		assert(all_ok, tostring(rets))
+		local all_ok, err = ts:join()
+		assert(all_ok, tostring(err))
 		local elapsed = clock() - t0
 		-- with max_conn=1, requests run sequentially: ~2s, not ~1s
 		assert(elapsed >= 1.5, 'expected sequential execution, got '..elapsed..'s')
@@ -396,11 +396,9 @@ function test.pool_waitlist_full()
 				ok_count = ok_count + 1
 			end, 'pool-full-'..i))
 		end
-		local all_ok, rets = ts:join()
-		for _,ret in ipairs(rets) do
-			if not ret.ok then
-				fail_count = fail_count + 1
-			end
+		local all_ok, err = ts:join()
+		if not all_ok then
+			fail_count = 1
 		end
 		assert(ok_count >= 1, 'at least one request should succeed')
 		assert(fail_count >= 1, 'at least one request should fail from pool limit')

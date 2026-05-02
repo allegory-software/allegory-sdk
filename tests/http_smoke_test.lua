@@ -185,11 +185,9 @@ function tests.concurrent()
 			assert(body == s, _('expected %q, got %q', s, body))
 		end, 'conc-'..i))
 	end
-	local all_ok, rets = ts:join()
+	local all_ok, err = ts:join()
 	if not all_ok then
-		for _,ret in ipairs(rets) do
-			if not ret.ok then error(ret[1]) end
-		end
+		error(err)
 	end
 end
 

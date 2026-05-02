@@ -106,13 +106,9 @@ local function bench(label, opt)
 			end
 		end, 'bench-'..i))
 	end
-	local all_ok, rets = ts:join()
+	local all_ok, first_err = ts:join()
 	cl:close()
 	if not all_ok then
-		local first_err
-		for _,ret in ipairs(rets) do
-			if not ret.ok then first_err = ret[1]; break end
-		end
 		if first_err and reqs == 0 then
 			printf('%-30s ERROR: %s\n', label, first_err)
 			return
