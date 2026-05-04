@@ -175,8 +175,8 @@ require'epoll'
 assert(Linux, 'platform not Linux')
 
 local
-	assert, isstr, clock, max, abs, min, errno =
-	assert, isstr, clock, max, abs, min, errno
+	assert, isstr, clock, max, abs, min =
+	assert, isstr, clock, max, abs, min
 local
 	band, bor, shr, cast, u8p, fill, str =
 	band, bor, shr, cast, u8p, fill, str
@@ -523,7 +523,7 @@ end
 
 --async sock functions -------------------------------------------------------
 
-local socket_connect = make_async('w', false, function(self, sa)
+local socket_connect = make_async_connect(function(self, sa)
 	return C.connect(self.fd, sa, sa:size())
 end)
 
@@ -537,8 +537,7 @@ function tcp:try_connect(addr, port)
 		local ok, err = self:try_bind()
 		if not ok then return false, err end
 	end
-	local ret, err = socket_connect(self, sa)
-	local ok = ret == 0
+	local ok, err = socket_connect(self, sa)
 	if not ok then return false, err end
 	self._remote_addr = sa
 	live(self, 'connected %s', sa:tostring())
@@ -553,16 +552,6 @@ function tcp:remote_addr()
 end
 
 do
-	--see man accept(2); get error codes with `sh c/precompile errno.h`.
-	local ENETDOWN      = 100
-	local EPROTO        =  71
-	local ENOPROTOOPT   =  92
-	local EHOSTDOWN     = 112
-	local ENONET        =  64
-	local EHOSTUNREACH  = 113
-	local EOPNOTSUPP    =  95
-	local ENETUNREACH   = 101
-
 	local nbuf = new'int[1]'
 	local socket_accept = make_async('r', false, function(self, accept_sa)
 		nbuf[0] = sizeof(sockaddr_ct)
@@ -573,16 +562,18 @@ do
 	function tcp:try_accept(opt, timeout)
 		if not self.fd then return nil, 'closed' end
 		local accept_sa = sockaddr_ct()
-		local s, err, errno = socket_accept(self, accept_sa)
+		local s, err = socket_accept(self, accept_sa)
+		--See man accept(2): Linux can return these pending connection errors.
 		local retry =
-			   errno == ENETDOWN
-			or errno == EPROTO
-			or errno == ENOPROTOOPT
-			or errno == EHOSTDOWN
-			or errno == ENONET
-			or errno == EHOSTUNREACH
-			or errno == EOPNOTSUPP
-			or errno == ENETUNREACH
+			   err == 'network_down'
+			or err == 'protocol_error'
+			or err == 'protocol_not_available'
+			or err == 'host_down'
+			or err == 'network_missing'
+			or err == 'host_unreachable'
+			or err == 'not_supported'
+			or err == 'network_unreachable'
+			or err == 'connection_aborted'
 		if not s then
 			return nil, err, retry
 		end
@@ -803,6 +794,7 @@ local function get_uint   (buf) return buf.u end
 local function get_uint16 (buf) return buf.u16 end
 
 local function get_error(buf)
+	if buf.i == 0 then return nil end
 	local _, s = check_errno(nil, buf.i)
 	return s
 end
