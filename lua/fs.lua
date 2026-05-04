@@ -478,7 +478,7 @@ local
 	cast, bor, band, bnot, shl, check, check_errno =
 	cast, bor, band, bnot, shl, check, check_errno
 
-local file = {}; file.__index = file --file object methods
+local file = {} --file object methods
 local dir = {}; dir.__index = dir --dir listing object methods
 
 --types, consts, utils -------------------------------------------------------
