@@ -33,17 +33,17 @@ RATIONALE
 	  with an error or not) and can change the outcome of the coroutine (error
 	  or success), its return values, and the transfer coroutine.
 	* `coro.pcall` can be replaced to add tracebacks.
-	* `coro.live` can be replaced for live-tracking threads.
+	* `coro.live` can be replaced for live-tracking coroutines.
 
-coro.create(f, [onfinish], [fmt, ...]) -> thread
+coro.create(f, [onfinish], [fmt, ...]) -> co
 
 	Create a coroutine which can be started with either `coro.resume()` or
 	with `coro.transfer()`.
 
-	`onfinish` is a finalizer function `f(thread, ok, ...) -> ok, ...` that is
-	called from inside the thread when the thread finishes.
+	`onfinish` is a finalizer function `f(co, ok, ...) -> ok, ...` that is
+	called from inside the coroutine when the coroutine finishes.
 
-coro.transfer(thread[, ...]) -> ...
+coro.transfer(co[, ...]) -> ...
 
 	Transfer control (and optionally any values) to a coroutine, suspending
 	execution. The target coroutine either hasn't started yet, in which case it
@@ -54,27 +54,27 @@ coro.transfer(thread[, ...]) -> ...
 	is called again with it as target.
 
 	Errors raised inside a coroutine which was transferred into are re-raised
-	into the main thread, unless the thread's `onfinish` handler changes that.
+	into the main coroutine, unless the co's `onfinish` handler changes that.
 
 	A coroutine which was transferred into (as opposed to one which was
 	resumed into) must finish by transferring control to another coroutine
-	(or to the main thread) otherwise an error is raised.
+	(or to the main coroutine) otherwise an error is raised.
 
-coro.transfer_with(thread[, ok, ...]) -> ok, ... | nil, err
+coro.transfer_with(co[, ok, ...]) -> ok, ... | nil, err
 
 	Protected transfer: a low-level variant of `coro.transfer()` that doesn't
-	raise, and which can raise an error into the waiting target thread.
+	raise, and which can raise an error into the waiting target coroutine.
 
-return coro.finish(thread, ...)
+return coro.finish(co, ...)
 
-	Finish the coroutine by transferring control to another thread.
+	Finish the coroutine by transferring control to another coroutine.
 
-return coro.finish_with(thread, ok, ...)
+return coro.finish_with(co, ok, ...)
 
-	Finish the coroutine by transferring control to another thread, possibly
-	raising an error in that thread analogous to transfer_with.
+	Finish the coroutine by transferring control to another coroutine, possibly
+	raising an error in that coroutine analogous to transfer_with.
 
-coro.finish_target(ok, ...) -> thread | nil
+coro.finish_target(ok, ...) -> co | nil
 
 	To be called inside a finalizer to detect a coro.finish() redirect.
 
@@ -83,39 +83,39 @@ coro.yield(...) -> ...
 	Behaves like standard coroutine.yield(). A coroutine that was transferred
 	into via coro.transfer() cannot yield (an error is raised if attempted).
 
-coro.resume(thread, ...) -> true, ... | false, err
+coro.resume(co, ...) -> true, ... | false, err
 
 	Behaves like standard coroutine.resume().
 
-coro.resume_with(thread, ok, ...) -> true, ... | false, err
+coro.resume_with(co, ok, ...) -> true, ... | false, err
 
-	Like resume() but can resume the target thread by raising an error in it.
+	Like resume() but can resume the target coroutine by raising an error in it.
 
-coro.running() -> thread, is_main
+coro.running() -> co, is_main
 
 	Behaves like standard coroutine.running() (from Lua 5.2 / LuaJIT 2).
 
-coro.main -> thread
+coro.main -> co
 
-	Returns the main thread.
+	Returns the main coroutine.
 
-coro.status(thread) -> status
+coro.status(co) -> status
 
 	Behaves like standard coroutine.status()
 
-NOTE: In this implementation `type(thread) == 'thread'`.
+NOTE: In this implementation `type(co) == 'thread'`.
 
 coro.wrap(f, [onfinish], [fmt, ...]) -> wrapper
 
 	Behaves like standard coroutine.wrap()
 
-coro.safewrap(f, [onfinish], [fmt, ...]) -> wrapped, thread
+coro.safewrap(f, [onfinish], [fmt, ...]) -> wrapped, co
 
 	Behaves like coroutine.wrap() except that the wrapped function receives
 	a custom `yield` function as its first argument which always yields back
-	to the calling thread even when called from a different thread. This allows
-	cross-yielding i.e. yielding past multiple levels of nested coroutines
-	which enables unrestricted inversion-of-control.
+	to the calling coroutine even when called from a different coroutine. This
+	allows cross-yielding i.e. yielding past multiple levels of nested
+	coroutines which enables unrestricted inversion-of-control.
 
 	With this you can turn any callback-based library into a sequential library,
 	even if said library uses coroutines itself and wouldn't normally allow
@@ -123,10 +123,10 @@ coro.safewrap(f, [onfinish], [fmt, ...]) -> wrapped, thread
 
 WHY IT WORKS
 
-	This works because calling resume() from a thread is a lie: instead of
-	resuming the thread it actually suspends the calling thread giving back
-	control to the main thread which does the resuming. Since the calling
-	thread is now suspended, it can later be resumed from any other thread.
+	This works because calling resume() from a coroutine is a lie: instead of
+	resuming the coroutine it actually suspends the calling coroutine giving
+	back control to the main coroutine which does the resuming. Since the calling
+	coroutine is now suspended, it can later be resumed from any other coroutine.
 
 ]=]
 
@@ -144,11 +144,11 @@ local yield     = coroutine.yield
 local cocreate  = coroutine.create
 local status    = coroutine.status
 
-local function onfinish_pass(thread, ...) return ... end
+local function onfinish_pass(co, ...) return ... end
 
-local callers = setmetatable({}, {__mode = 'k'}) --{thread -> caller_thread}
+local callers = setmetatable({}, {__mode = 'k'}) --{co -> caller_co}
 local main, is_main = coroutine.running()
-assert(is_main, 'coro must be loaded from the main thread')
+assert(is_main, 'coro must be loaded from the main coroutine')
 local current = main
 coro = {main = main, pcall = pcall}
 
@@ -162,31 +162,31 @@ local function unprotect(ok, ...)
 end
 
 local FIN = {'FIN'}
-function coro.finish_with(thread, ok, ...)
-	return FIN, thread, ok, ...
+function coro.finish_with(co, ok, ...)
+	return FIN, co, ok, ...
 end
-function coro.finish(thread, ...)
-	return FIN, thread, true, ...
+function coro.finish(co, ...)
+	return FIN, co, true, ...
 end
-function coro.finish_target(fin, thread)
-	return fin == FIN and thread or nil
+function coro.finish_target(fin, co)
+	return fin == FIN and co or nil
 end
---the coroutine ends by transferring control to the caller (or finish) thread.
-local function finish(thread, ok, ...)
+--the coroutine ends by transferring control to the caller (or finish) coroutine.
+local function finish(co, ok, ...)
 	if ... == FIN then --called coro.[p]finish()
-		callers[thread] = (select(2, ...))
-		return finish(thread, select(3, ...))
+		callers[co] = (select(2, ...))
+		return finish(co, select(3, ...))
 	end
-	coro.live(thread, nil)
-	local caller = callers[thread]
-	callers[thread] = nil
+	coro.live(co, nil)
+	local caller = callers[co]
+	callers[co] = nil
 	if not caller then
 		if ok then
 			return main, false, 'coroutine ended without transferring control'
 		else
 			caller = main
 		end
-	elseif caller == thread then
+	elseif caller == co then
 		return main, false, 'coroutine ended by transferring control to itself'
 	elseif caller ~= main and status(caller) == 'dead' then
 		return main, false, 'coroutine ended by transferring control to a dead coroutine'
@@ -195,19 +195,19 @@ local function finish(thread, ok, ...)
 end
 function coro.create(f, onfinish, fmt, ...)
 	onfinish = onfinish or onfinish_pass
-	local thread
-	thread = cocreate(function(ok, ...)
+	local co
+	co = cocreate(function(ok, ...)
 		if not ok then --transferred into with an error.
-			return finish(thread, onfinish(thread, false, ...))
+			return finish(co, onfinish(co, false, ...))
 		end
-		return finish(thread, onfinish(thread, coro.pcall(f, ...)))
+		return finish(co, onfinish(co, coro.pcall(f, ...)))
 	end)
 	if fmt then
-		coro.live(thread, fmt, ...)
+		coro.live(co, fmt, ...)
 	else
-		coro.live(thread, '%s', traceback'unnamed thread')
+		coro.live(co, '%s', traceback'unnamed coroutine')
 	end
-	return thread
+	return co
 end
 
 function coro.running()
@@ -216,67 +216,67 @@ end
 
 coro.status = status
 
-local function go(thread, ok, ...)
-	current = thread
-	if thread == main then --transfer to the main thread: stop the scheduler.
+local function go(co, ok, ...)
+	current = co
+	if co == main then --transfer to the main coroutine: stop the scheduler.
 		return ok, ...
 	end
 	--transfer to a coroutine: resume it and do the next transfer on come back.
 	--since the coroutine handler is pcalled, we assume that resume() can't fail.
-	return go(select(2, resume(thread, ok, ...))) --tail call
+	return go(select(2, resume(co, ok, ...))) --tail call
 end
 
-local function transfer_with(thread, ok, ...)
-	assert(status(thread) ~= 'dead', 'cannot transfer to a dead coroutine')
-	assert(thread ~= current, 'trying to transfer to the running thread')
+local function transfer_with(co, ok, ...)
+	assert(status(co) ~= 'dead', 'cannot transfer to a dead coroutine')
+	assert(co ~= current, 'trying to transfer to the running coroutine')
 	if current ~= main then
 		--we're inside a coroutine: signal the transfer request by yielding.
-		return yield(thread, ok, ...)
+		return yield(co, ok, ...)
 	else
-		--we're in the main thread: start the scheduler.
-		return go(thread, ok, ...) --tail call
+		--we're in the main coroutine: start the scheduler.
+		return go(co, ok, ...) --tail call
 	end
 end
 
-local function transfer(thread, ...)
-	return unprotect(transfer_with(thread, true, ...))
+local function transfer(co, ...)
+	return unprotect(transfer_with(co, true, ...))
 end
 
 coro.transfer_with = transfer_with
 coro.transfer = transfer
 
-local function remove_caller(thread, ...)
-	callers[thread] = nil
+local function remove_caller(co, ...)
+	callers[co] = nil
 	return ...
 end
-local function resume_with(thread, ok, ...)
-	assert(thread ~= current, 'trying to resume the running thread')
-	assert(thread ~= main, 'trying to resume the main thread')
-	callers[thread] = current
-	return remove_caller(thread, transfer_with(thread, ok, ...))
+local function resume_with(co, ok, ...)
+	assert(co ~= current, 'trying to resume the running coroutine')
+	assert(co ~= main, 'trying to resume the main coroutine')
+	callers[co] = current
+	return remove_caller(co, transfer_with(co, ok, ...))
 end
 coro.resume_with = resume_with
-function coro.resume(thread, ...)
-	return resume_with(thread, true, ...)
+function coro.resume(co, ...)
+	return resume_with(co, true, ...)
 end
 
 function coro.yield(...)
-	assert(current ~= main, 'yielding from the main thread')
+	assert(current ~= main, 'yielding from the main coroutine')
 	local caller = callers[current]
-	assert(caller, 'yielding from a non-resumed thread')
+	assert(caller, 'yielding from a non-resumed coroutine')
 	return transfer(caller, ...)
 end
 
 function coro.wrap(f, ...)
-	local thread = coro.create(f, ...)
+	local co = coro.create(f, ...)
 	return function(...)
-		return unprotect(coro.resume(thread, ...))
+		return unprotect(coro.resume(co, ...))
 	end
 end
 
 function coro.safewrap(f, onfinish, fmt, ...)
-	local ct --calling thread
-	local yt --yielding thread
+	local ct --calling coroutine
+	local yt --yielding coroutine
 	local function yield(...)
 		yt = current
 		return transfer(ct, ...)
@@ -296,7 +296,7 @@ function coro.safewrap(f, onfinish, fmt, ...)
 	if fmt then
 		coro.live(yt, fmt, ...)
 	else
-		coro.live(yt, '%s', traceback'unnamed thread')
+		coro.live(yt, '%s', traceback'unnamed coroutine')
 	end
 	return function(...)
 		assert(yt, 'cannot resume dead coroutine')
