@@ -358,6 +358,28 @@ end
 local EWOULDBLOCK = 11
 local EINPROGRESS = 115
 
+function make_async_connect(func)
+	return function(self, ...)
+		local ret = func(self, ...)
+		if ret >= 0 then return true end
+		local errno = errno()
+		if errno == EINPROGRESS then
+			if self.send_expires then
+				send_expires_heap:push(self)
+			end
+			self.send_thread = currentthread()
+			local ok, err = wait_io()
+			if ok then
+				err = self:epoll_error()
+				if err then ok = false end
+			end
+			return ok, err
+		else
+			return check_errno(false, errno)
+		end
+	end
+end
+
 function make_async(RW, returns_n, func)
 	local heap = RW == 'w' and send_expires_heap or recv_expires_heap
 	local EXPIRES = RW == 'w' and 'send_expires' or 'recv_expires'
