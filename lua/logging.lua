@@ -320,7 +320,7 @@ local function debug_type(v)
 end
 
 local prefixes = {
-	thread = 'T',
+	thread = 't', --wrapped thread is T
 	['function'] = 'f',
 	cdata = 'c',
 }

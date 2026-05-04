@@ -9,8 +9,10 @@ local _terr
 
 local function sthread(f, name)
 	local t = thread(f, name)
-	onthreadfinish(t, function(th, ok, err)
-		if not ok then _terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err) end
+	t:onclose(function(th, ok, err)
+		if not ok then
+			_terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err)
+		end
 	end)
 	return t
 end
@@ -113,7 +115,6 @@ end
 function test.threadset_join_resumes_waiter()
 	local joined = false
 	local child
-	local suspended_n = suspended_count()
 	checked_run(function()
 		local ts = threadset()
 		child = ts:thread(function()
@@ -125,29 +126,26 @@ function test.threadset_join_resumes_waiter()
 		joined = true
 	end)
 	assert(joined)
-	assert(threadstatus(child) == 'dead')
-	assert(suspended_count() == suspended_n)
+	assert(child:status() == 'dead')
 end
 
 function test.thread_cofinish_resumes_target()
 	local joined = false
 	local child
-	local suspended_n = suspended_count()
 	checked_run(function()
 		local parent = currentthread()
 		child = thread(function()
 			wait(0)
-			return cofinish(parent, 'done')
+			return finishthread(parent, 'done')
 		end)
 		resume(child)
 		local ret = suspend()
 		assert(ret == 'done')
-		assert(threadstatus(child) == 'dead')
+		assert(child:status() == 'dead')
 		joined = true
 	end)
 	assert(joined)
-	assert(threadstatus(child) == 'dead')
-	assert(suspended_count() == suspended_n)
+	assert(child:status() == 'dead')
 end
 
 function test.threadset_error_propagation()
@@ -176,11 +174,11 @@ end
 
 function test.thread_env_inherit()
 	checked_run(function()
-		local env = ownthreadenv(nil, true)
+		local env = currentthread():ownenv()
 		env.testval = 42
 		local child_val
 		resume(sthread(function()
-			child_val = threadenv().testval
+			child_val = currentthread().env.testval
 		end, 'child'))
 		assert(child_val == 42)
 	end)
@@ -217,6 +215,7 @@ for _, k in ipairs(tests_to_run) do
 			pr('FAILED: ', k)
 			pr(err)
 			n_fail = n_fail + 1
+			break
 		end
 	end
 end

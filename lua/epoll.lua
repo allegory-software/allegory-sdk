@@ -6,83 +6,89 @@
 EPOLLABLE OBJECT INTEGRATION
 	epoll_add(eo)
 	epoll_remove(eo)
-	make_async('r|w', returns_n, func) -> func(self, ...)
+	make_async('r|w', returns_n, fn) -> fn(self, ...)
+	make_async_connect(fn) -> fn(self, ...)
 	epoll_setexpires(eo, expires, ['r|w'])
 	epoll_settimeout(eo, timeout, ['r|w'])
 	epoll_cancel[_read|_write](eo)         must call after close()!
 	eo:epoll_error() -> err
 THREADS
-	thread(func[, fmt, ...]) -> co         create a coroutine for async I/O
-	resume(thread, ...)                    resume thread
+	thread(fn[, fmt, ...]) -> th           create a thread for async I/O
+	th:resume(...) or resume(th, ...)      start or resume thread
 	yield(...) -> ...                      safe yield (see coro.lua)
-	suspend() -> ...                       suspend thread
-	cowrap(f) -> wrapper                   see coro.safewrap()
-	currentthread() -> co, is_main         current coroutine and whether it's the main one
-	threadstatus(co) -> s                  coroutine.status()
-	transfer(co, ...) -> ...               see coro.transfer()
-	cofinish(co, ...) -> ...               see coro.finish()
-	threadenv([co]) -> t                   get (current) thread's own environment
-	ownthreadenv([co], [create]) -> t      get/create (current) thread's own environment
-	onthreadfinish(co, f)                  run f(thread) when thread finishes
+	suspend() -> ...                       suspend current thread
+	transfer(th, ...) -> ...               see coro.transfer()
+	cowrap(fn) -> wrapper, th              see coro.safewrap()
+	currentthread() -> th                  current thread
+	mainthread() -> th                     main thread
+	th.ismain                              is main thread
+	th:status() -> s                       coroutine.status(th.co)
+	finishthread(in_thread, ...) -> ...    see coro.finish()
+	th.env -> t                            get thread's inherited or own environment
+	th:ownenv() -> t                       get/create thread's own environment
+	th:onclose(fn)                         run fn(thread) when thread finishes
 SCHEDULER
 	poll([ignore_interrupts])              poll for I/O
 	start([ignore_interrupts])             keep polling until all threads finish
 	stop()                                 stop polling
-	run(f, ...) -> ...                     run a function inside a thread
+	run(fn, ...) -> ...                    run a function inside a thread
 WAIT JOBS
 	wait_job() -> wj            make an interruptible async wait job
-	wj:wait_until(t) -> ...     wait until clock()
-	wj:wait(s) -> ...           wait for s seconds
-	wj:[try_]resume(...)        resume the waiting thread
-	wj:cancel()                 calls wj:resume(CANCEL)
+	- wj:wait_until(t) -> ...   wait until clock()
+	- wj:wait(s) -> ...         wait for s seconds
+	- wj:[try_]resume(...)      resume the waiting thread
+	- wj:cancel()               calls wj:resume(CANCEL)
 	wait_until(t) -> ...        wait until clock() value
 	wait(s) -> ...              wait for s seconds
 TIMERS
-	timer(f, [name]) -> tm      create a timer that runs f
-	tm:setexpires(t)            run f at clock t
-	tm:settimeout(s)            run f after s seconds
-	tm:setinterval(s)           run f every s seconds
-	tm:cancel()                 remove timer from queue (can be added back)
-	tm:run()                    run f now
-	runat(t, f) -> wj           run f at clock t
-	runafter(s, f) -> wj        run f after s seconds
-	runevery(s, f) -> wj        run f every s seconds
-	runagainevery(s, f) -> wj   run f now and every s seconds afterwards
+	timer(fn, [name]) -> tm     create a timer that runs fn
+	- tm:setexpires(t)          run timer fn at clock t
+	- tm:settimeout(s)          run timer fn after s seconds
+	- tm:setinterval(s)         run timer fn every s seconds
+	- tm:cancel()               remove timer from queue (can be added back)
+	- tm:run()                  run timer fn now
+	runat(t, fn) -> wj          run fn at clock t
+	runafter(s, fn) -> wj       run fn after s seconds
+	runevery(s, fn) -> wj       run fn every s seconds
+	runagainevery(s, fn) -> wj  run fn now and every s seconds afterwards
 THREAD SETS
 	threadset() -> ts
-	  ts:thread(f, [fmt, ...]) -> co
-	  ts:join() -> all_ok, first_err
-MULTI-THREADING (WITH OS THREADS)
+	- ts:thread(fn, [fmt, ...]) -> th
+	- ts:join() -> all_ok, first_err
+MULTI-THREADING
 	epoll_fd([epfd]) -> epfd    get/set epoll fd
 
 EPOLLABLE OBJECTS ------------------------------------------------------------
 
 Epollable Objects (EO) are Lua objects with a `fd` field that represents an
-epollable open fd. To make async, call epoll_add() on constructor and
+epollable open fd. To make those async, call epoll_add() on constructor and
 epoll_remove() on destructor. Create async I/O methods with make_async() which
 wraps a syscall that returns EWOULDBLOCK (or EINPROGRESS) and returns an async
 method. epoll_setexpires, etc. can be used directly as methods.
 
 SCHEDULING -------------------------------------------------------------------
 
-	Scheduling is based on synchronous coroutines provided by coro.lua which
-	allows coroutine-based iterators that perform socket I/O to be written.
+Scheduling is based on symmetric coroutines provided by coro.lua which allows
+doing I/O inside coroutine-based iterators. The coroutines are wrapped in
+tables and we call those threads, mainly because threads have their own
+semantics different than plain coroutines, and also because coroutines don't
+have a fenv or metatable slot and threads need to hold state.
 
-thread(func[, fmt, ...]) -> co
+thread(func[, fmt, ...]) -> th
 
-	Create a coroutine for performing async I/O. The coroutine must be resumed
-	to start. When the coroutine finishes, the control is transfered to
-	the I/O thread (the thread that called start()).
+	Create and wrap coroutine for performing async I/O. The thread must be
+	resumed to start. When the thread finishes, the control is transfered to
+	the I/O thread (which is currenthread() when start() was called).
 
-	Full-duplex I/O on a socket can be achieved by performing reads in one thread
-	and writes in another.
+	Full-duplex I/O on a socket or pipe can be achieved by performing reads
+	in one thread and writes in another.
 
-resume(thread, ...)
+resume(th, ...)
 
 	Resume a thread, which means transfer control to it, but also temporarily
-	change the I/O thread to be this thread so that the first suspending call
+	change the I/O thead to be this thread so that the first suspending call
 	(send, recv, wait, suspend, etc.) gives control back to this thread.
-	_This_ is the trick to starting multiple threads before starting polling.
+	_This_ is the trick to starting multiple theads before starting polling.
 
 suspend() -> ...
 
@@ -90,7 +96,7 @@ suspend() -> ...
 
 poll([ignore_interrupts]) -> true | false,'empty'
 
-	Poll for the next I/O event and resume the coroutine that waits for it.
+	Poll for the next I/O event and resume the thread that waits for it.
 
 start([ignore_interrupts])
 
@@ -113,9 +119,9 @@ wait(s) -> ...
 wait_job() -> wj
 
 	Make an interruptible waiting job. Put the current thread to sleep using
-	wj:wait() or wj:wait_until() and then from another thread call
-	wj:resume() to resume the waiting thread. Any arguments passed to
-	wj:resume() will be returned by wj:wait().
+	wj:wait() or wj:wait_until() and then from another thread call wj:resume()
+	to resume the waiting thread. Any arguments passed to wj:resume() will be
+	returned by wj:wait().
 
 MULTI-THREADING --------------------------------------------------------------
 
@@ -143,13 +149,11 @@ assert(Linux, 'platform not Linux')
 coro.live  = live
 coro.pcall = pcall
 
-local coro_create   = coro.create
-local coro_safewrap = coro.safewrap
 local coro_transfer = coro.transfer
-local coro_finish   = coro.finish
 
 --fw. decl.
 local _resume
+local _transfer
 local wait_io
 local waiting
 
@@ -294,7 +298,7 @@ local function check_heap(heap, EXPIRES, THREAD, t)
 		if isthread(thread) then --epollable, wait_job
 			xo[THREAD] = nil
 			assert(heap:pop())
-			coro_transfer(thread, nil, 'timeout')
+			_transfer(thread, nil, 'timeout')
 		else --timer: run it, which removes it from the heap or moves it (if repeating).
 			xo:run()
 		end
@@ -331,8 +335,8 @@ local function epoll_wait()
 		if band(ev, EPOLLERR) ~= 0 then
 			err = eo.epoll_error and eo.epoll_error(eo) or 'error'
 		end
-		if band(ev, RECV_MASK) ~= 0 then wake_r(eo, err, coro_transfer) end
-		if band(ev, SEND_MASK) ~= 0 then wake_w(eo, err, coro_transfer) end
+		if band(ev, RECV_MASK) ~= 0 then wake_r(eo, err, _transfer) end
+		if band(ev, SEND_MASK) ~= 0 then wake_w(eo, err, _transfer) end
 	end
 	--handle timed-out ops.
 	local t = clock()
@@ -368,7 +372,7 @@ function make_async_connect(func)
 				send_expires_heap:push(self)
 			end
 			self.send_thread = currentthread()
-			local ok, err = wait_io()
+			local ok, err = wait_io(self)
 			if ok then
 				err = self:epoll_error()
 				if err then ok = false end
@@ -399,15 +403,14 @@ function make_async(RW, returns_n, func)
 				heap:push(self)
 			end
 			self[THREAD] = currentthread()
-			local ok, err = wait_io()
+			local ok, err = wait_io(self)
 			if not ok then
 				return nil, err
 			else
 				goto again
 			end
 		else
-			local ok, err = check_errno(nil, errno)
-			return ok, err, errno
+			return check_errno(nil, errno)
 		end
 	end
 end
@@ -434,8 +437,8 @@ function wj:wait(timeout)
 end
 function wj:try_resume(...)
 	local thread = self.recv_thread
-	if waiting[thread] ~= self then
-		return nil, 'thread not waiting on this job'
+	if not (thread and thread.waiting == self) then
+		return nil, 'thread not waiting (on this job)'
 	end
 	self.recv_thread = nil
 	assert(recv_expires_heap:remove(self))
@@ -498,7 +501,7 @@ end
 function tm:run()
 	local ok, err = pcall(self.recv_thread)
 	if not ok then --nowhere to raise errors to, so we just log them.
-		log('ERROR', 'sock', 'timer', '%s%s', err, catall('\n', self.name) or '')
+		log('ERROR', 'epoll', 'timer', '%s%s', err, catall('\n', self.name) or '')
 	end
 	if self.interval and err ~= CANCEL then
 		self:settimeout(self.interval)
@@ -523,127 +526,124 @@ end
 
 --threads and poll loop ------------------------------------------------------
 
+local Thread = {type = 'thread'}
+
+function isthread(s)
+	local mt = getmetatable(s)
+	return istab(mt) and rawget(s, 'isthread')
+end
+
+local threads = {} --{co->thread}
 local poll_thread
-
-function set_poll_thread(thread)
-	poll_thread = thread
-end
-
 local _wait_io_count = 0
-local _suspended_count = 0
---[[local]] waiting = {} --{thread->wait_job|true on I/O}
 
-function wait_io_count() return _wait_io_count end
-function suspended_count() return _suspended_count end
-
-local function wait_io_cont(thread, ...)
-	_wait_io_count = _wait_io_count - 1
-	waiting[thread] = nil
-	return ...
-end
---[[local]] function wait_io(job)
-	local thread, is_main = currentthread()
-	assert(poll_thread, 'poll loop not started')
-	assert(not is_main, 'trying to perform I/O from the main thread')
-	waiting[thread] = job or true
-	_wait_io_count = _wait_io_count + 1
-	return wait_io_cont(thread, coro_transfer(poll_thread))
+local coro_running = coro.running
+function currentthread()
+	return assert(threads[coro_running()])
 end
 
-local threadfinish = {}
-function onthreadfinish(thread, f)
-	after(threadfinish, thread, f)
-end
-
-currentthread = coro.running
-threadstatus = coro.status
-cofinish = coro.finish
-
---NOTE: these thread maps are not weak-keyed! LuaJIT has no ephemerons,
---so a cycle like `ownthreadenv().req.thread = thread` is never collected!
---It's one of the reasons why threads must always finish.
-local threadenvs    = {}
-local ownthreadenvs = {}
-local currowner     = {}
-
-function threadenv(thread)
-	return threadenvs[thread or currentthread()]
-end
-
-function ownthreadenv(thread, create)
-	thread = thread or currentthread()
-	local t = ownthreadenvs[thread]
-	if not t and create ~= false then
-		t = {}
-		local pt = threadenvs[thread]
-		if pt then --inherit parent env, if any.
-			t.__index = pt
-			setmetatable(t, t)
-		end
-		ownthreadenvs[thread] = t
-		threadenvs[thread] = t
-	end
-	return t
-end
-
-local function thread_finish(thread, ok, ...)
-	local finish = threadfinish[thread]
-	if finish then
-		threadfinish[thread] = nil
-		finish(thread, ok, ...)
-	end
-	assert(not waiting[thread])
-	threadenvs[thread] = nil
-	ownthreadenvs[thread] = nil
-	currowner[thread] = nil
+local coro_finish = coro.finish
+function finishthread(th, ...)
+	return coro_finish(th.co, ...)
 end
 local coro_finish_target = coro.finish_target
-local function thread_onfinish(thread, ok, ...)
-	thread_finish(thread, ok, ...)
-	--poll threads don't have a caller thread to re-raise their errors into,
-	--and we don't want them to break the main thread either as coro thereads
+local function coro_onfinish(co, ok, ...)
+	local self = threads[co]
+	assert(not self.waiting)
+	self.finished = true --status is 'dead' from here
+	self:try_close(ok, ...)
+	--threads don't have a caller thread to re-raise their errors into, and we
+	--don't want them to break the main coroutine either as coro coroutines
 	--do by default, so errors are just logged and the thread finishes in the
 	--current poll_thread (which is the caller thread when using resume()).
 	if not ok then
 		log('ERROR', 'thread', 'finish', '%s', ...)
 	end
-	if coro_finish_target(...) then --make cofinish() work.
+	if coro_finish_target(...) then --make finishthread() work.
 		return ok, ...
 	else
-		return true, coro_finish(poll_thread)
+		return true, coro_finish((poll_thread or mainthread()).co)
 	end
 end
-function thread(f, ...)
-	local thread = coro_create(f, thread_onfinish, ...)
-	threadenvs[thread] = threadenvs[currentthread()] --inherit threadenv.
+local function wrap_thread(co)
+	local thread = object(Thread, {
+		co = co,
+		env = currentthread().env, --inherit env
+		isthread = true, --rawsetting so that isthread() can rawget()
+		waiting = true, --true | wait_job | socket
+		finished = false,
+	})
+	threads[co] = thread
 	return thread
 end
+local coro_create = coro.create
+function thread(fn, ...)
+	return wrap_thread(coro_create(fn, coro_onfinish, ...))
+end
 
-local function cowrap_onfinish(thread, ok, ...)
-	thread_finish(thread, ok, ...)
-	--cowrap threads re-raise their errors in their caller thread (they always
+local _mainthread = object(Thread, {
+	co = coro.main,
+	env = {},
+	isthread = true,
+	waiting = false,
+	finished = false,
+	ismain = true,
+})
+threads[_mainthread.co] = _mainthread
+function mainthread()
+	return _mainthread
+end
+
+function Thread:try_close(ok, ...)
+	local co = self.co
+	if not co then return end
+	assert(self.finished, 'trying to close a live thread')
+	self.co = nil --mark closed
+	if self._after_close then
+		self:_after_close(ok, ...)
+	end
+	threads[co] = nil
+end
+
+function Thread:closed()
+	return not self.co
+end
+
+function Thread:onclose(fn)
+	after(self, '_after_close', fn)
+end
+
+local function cowrap_onfinish(co, ok, ...)
+	local self = threads[co]
+	self.finished = true
+	self:try_close(ok, ...)
+	--cowrap coroutines re-raise errors in their caller thread (they always
 	--have one) so no need to log them. finalizers are still available for them.
 	return ok, ...
 end
-function cowrap(f, ...)
-	local wrapped, thread = coro_safewrap(f, cowrap_onfinish, ...)
-	threadenvs[thread] = threadenvs[currentthread()] --inherit threadenv.
-	return wrapped, thread
+local coro_safewrap = coro.safewrap
+function cowrap(fn, ...)
+	local wrapped, co = coro_safewrap(fn, cowrap_onfinish, ...)
+	return wrapped, wrap_thread(co)
 end
 
-local function transfer_cont(...)
-	_suspended_count = _suspended_count - 1
+--[[local]] function _transfer(thread, ...)
+	return coro_transfer(thread.co, ...)
+end
+local function transfer_back(...)
+	currentthread().waiting = false
 	return ...
 end
 function transfer(thread, ...)
-	assert(not waiting[thread], 'transfer: thread waiting on I/O')
-	_suspended_count = _suspended_count + 1
-	return transfer_cont(coro_transfer(thread, ...))
+	assert(thread.waiting == true, 'transfer: thread not suspended')
+	currentthread().waiting = true
+	thread.waiting = false
+	return transfer_back(coro_transfer(thread.co, ...))
 end
 function suspend()
 	assert(poll_thread, 'suspend: poll loop not started')
-	_suspended_count = _suspended_count + 1
-	return transfer_cont(coro_transfer(poll_thread))
+	currentthread().waiting = true
+	return transfer_back(coro_transfer(poll_thread.co))
 end
 
 --[[local]] function _resume(thread, ...)
@@ -651,15 +651,50 @@ end
 	--from the first call to suspend(), wait_io() or thread finishing.
 	local real_poll_thread = poll_thread
 	poll_thread = currentthread()
-	coro_transfer(thread, ...)
+	coro_transfer(thread.co, ...)
 	poll_thread = real_poll_thread
 end
 function resume(thread, ...)
-	assert(not waiting[thread], 'resume: thread waiting on I/O')
+	assert(thread.waiting == true, 'resume: thread not suspended')
+	thread.waiting = false
 	_resume(thread, ...)
 end
+Thread.resume = resume
 
 yield = coro.yield
+
+function Thread:status()
+	return self.co and coro.status(self.co) or 'dead'
+end
+
+function Thread:ownenv(create)
+	local t = self._ownenv
+	if not t and create ~= false then
+		t = {}
+		local pt = self.env
+		if pt then --inherit parent env, if any.
+			t.__index = pt
+			setmetatable(t, t)
+		end
+		self._ownenv = t
+		self.env = t
+	end
+	return t
+end
+
+local function wait_io_cont(thread, ...)
+	thread.waiting = false
+	_wait_io_count = _wait_io_count - 1
+	return ...
+end
+--[[local]] function wait_io(waitable)
+	local thread = currentthread()
+	assert(poll_thread, 'poll loop not started')
+	assert(not thread.ismain, 'trying to perform I/O from the main thread')
+	thread.waiting = assert(waitable)
+	_wait_io_count = _wait_io_count + 1
+	return wait_io_cont(thread, _transfer(poll_thread))
+end
 
 local owner = {isowner = true}
 
@@ -668,7 +703,7 @@ function owner:try_close_owned()
 		'owner closed with live threads')
 	for i = #self.owns, 1, -1 do
 		local o = self.owns[i]
-		o:try_close()
+		o:try_close(nil, 'canceled')
 		o.owner = nil
 	end
 	self.owns = nil --don't allow further owning.
@@ -676,31 +711,38 @@ end
 
 function owner:thread(f, ...)
 	local parent = self
-	local th = thread(function(...)
+	local thread = thread(function(...)
 		setcurrentowner(parent)
 		return f(...)
 	end, ...)
-	attr(parent, 'threads')[th] = true
-	onthreadfinish(th, function()
-		parent.threads[th] = nil
+	attr(parent, 'threads')[thread] = true
+	thread:onclose(function(self)
+		parent.threads[self] = nil
 	end)
-	return th
+	return thread
 end
 
-function make_owner(o)
+local function _own(self, res)
+	add(self.owns, res)
+	res.owner = self
+end
+function owner:own(res)
+	assert(not res.owner)
+	_own(self, res)
+end
+
+function owner:disown(res)
+	assert(res.owner == self, 'not owned by me')
+	assert(remove_value(self.owns, res))
+	res.owner = nil
+end
+
+function makeowner(o)
 	local th
-	if isthread(o) then
-		th = o
-		o = ownthreadenv(o)
-	end
 	if o.isowner then return o end
 	update(o, owner)
 	o.owns = {}
-	if th then
-		onthreadfinish(th, function()
-			o:try_close_owned()
-		end)
-	elseif o.onclose then
+	if o.onclose then
 		o:onclose(function()
 			o:try_close_owned()
 		end)
@@ -708,19 +750,44 @@ function make_owner(o)
 	return o
 end
 
+function initowner(self) --self=res
+	local owner = self.owner
+	if owner == nil then
+		if self.default_owner == 'current' then
+			owner = currentowner(true)
+		elseif self.default_owner == 'main' then
+			owner = mainthread()
+		end
+	elseif owner == false then
+		self.owner = nil
+	end
+	if owner then _own(makeowner(owner), self) end
+	return self
+end
+
+function setowner(self, owner) --self=res
+	if self.owner == owner then return end
+	if self.owner then
+		self.owner:disown(self)
+	end
+	if owner then
+		owner:own(self)
+	end
+end
+
 function currentowner(create)
 	local thread = currentthread()
-	local owner = currowner[thread]
+	local owner = thread.currentowner
 	if not owner and create ~= false then
-		owner = make_owner(thread)
-		currowner[thread] = owner
+		owner = makeowner(thread)
+		thread.currentowner = owner
 	end
 	return owner
 end
 
 function setcurrentowner(owner, thread)
 	thread = thread or currentthread()
-	currowner[thread] = owner and make_owner(owner) or nil
+	thread.currentowner = owner and makeowner(owner) or nil
 end
 
 function threadset()
@@ -739,7 +806,7 @@ function threadset()
 			end
 			n = n - 1
 			if n == 0 then
-				return cofinish(wait_thread)
+				return finishthread(wait_thread)
 			end
 		end, ...)
 	end
@@ -756,9 +823,9 @@ end
 local term_sig_f
 
 function poll(ignore_interrupts)
-	if wait_io_count() == 0 then
+	if _wait_io_count == 0 then
 		return nil, 'empty'
-	elseif wait_io_count() == 1 and term_sig_f then --nobody left to kill this guy
+	elseif _wait_io_count == 1 and term_sig_f then --nobody left to kill this guy
 		return nil, 'empty'
 	end
 	local ok, err = epoll_wait()
@@ -767,7 +834,7 @@ function poll(ignore_interrupts)
 		if ignore_interrupts == nil then
 			ignore_interrupts = config('ignore_interrupts', true)
 		end
-		log('note', 'sock', 'poll', 'interrupted: %s.',
+		log('note', 'epoll', 'poll', 'interrupted: %s.',
 			ignore_interrupts and 'ignoring' or 'breaking')
 		if ignore_interrupts then
 			return true, err
@@ -790,18 +857,18 @@ interrupt = stop --overridable
 
 function try_start(ignore_interrupts)
 	if _running then return true end
-	if wait_io_count() == 0 then return true end
+	if _wait_io_count == 0 then return true end
 
 	require'signal'
 
-	--signals thread to stop loop on SIGINT (Ctrl+C) and SIGTERM (kill) events.
+	--signal thread to stop loop on SIGINT (Ctrl+C) and SIGTERM (kill) events.
 	assert(not term_sig_f)
 	term_sig_f = on_signal('SIGINT SIGTERM', function()
 		interrupt()
 		return 'stop'
 	end)
 
-	set_poll_thread(currentthread())
+	poll_thread = currentthread()
 	_running = true
 	local ret, err = true
 	repeat
@@ -834,6 +901,6 @@ function run(f, ...)
 		end
 		resume(thread(wrapper, 'sock-run'), ...)
 		start()
-		return ret and unpack(ret)
+		if ret then return unpack(ret) end
 	end
 end
