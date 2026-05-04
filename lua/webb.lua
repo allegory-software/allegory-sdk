@@ -112,17 +112,16 @@ CONFIG
 ]==]
 
 require'glue'
-require'url'
 require'sock'
+require'fs'
+require'http_server'
+require'resolver'
+require'smtp'
+require'url'
 require'json'
 require'base64'
-require'fs'
-require'rect'
-require'mustache'
 require'xxhash'
-require'http_server'
-require'smtp'
-require'resolver'
+require'mustache'
 
 --http server wiring ---------------------------------------------------------
 
