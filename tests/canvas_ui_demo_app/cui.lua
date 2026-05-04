@@ -6,6 +6,7 @@ config('http_host', '*')
 config('http_port', 8888)
 config('https_port', 4443)
 --config('https_addr', false)
+config('project_dir', homedir())
 
 auth_init()
 local st = auth_store()
