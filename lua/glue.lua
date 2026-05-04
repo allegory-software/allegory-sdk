@@ -17,7 +17,7 @@ TYPES
 	isempty(v)                     is v a table and is it empty
 	isfunc(v)                      is v a function
 	iscdata(v)                     is v a cdata
-	isthread(v)                    is v a Lua thread
+	iscoro(v)                      is v a Lua coroutine
 	isctype(ct, v)               = ffi.istype
 	iserror(v[, classes])          is v a structured error
 	inherits(v, class)             is v an object that inherits from class
@@ -294,7 +294,7 @@ isbool   = function(v) return v == true or v == false end
 isempty  = function(v) return next(v) == nil end
 isfunc   = function(v) return type(v) == 'function' end
 iscdata  = function(v) return type(v) == 'cdata'  end
-isthread = function(v) return type(v) == 'thread' end
+iscoro   = function(v) return type(v) == 'thread' end
 
 --math -----------------------------------------------------------------------
 
