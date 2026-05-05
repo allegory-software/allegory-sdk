@@ -55,7 +55,7 @@ TODO:
 ]==]
 
 require'glue'
-require'sock'   --[own]threadenv()
+require'epoll'  --currentthread()
 require'fs'     --load(), save()
 require'schema' --lang_schema()
 
@@ -583,7 +583,7 @@ local function mkapi(name, names, rows, cols, default_val)
 	end
 	local private_name = '_'..name
 	local function get(k)
-		local te = threadenv()
+		local te = currentthread().env
 		local v = te and te[private_name] or default()
 		if not k then return v end
 		local t = assert(t[v])
@@ -593,7 +593,7 @@ local function mkapi(name, names, rows, cols, default_val)
 	end
 	local function set(v)
 		if not v or not t[v] then return end --missing or invalid value: ignore.
-		ownthreadenv()[private_name] = v
+		currentthread():ownenv()[private_name] = v
 	end
 	_G[names] = t
 	_G[name] = get

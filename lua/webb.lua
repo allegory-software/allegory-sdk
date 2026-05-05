@@ -127,7 +127,7 @@ require'mustache'
 
 --http thread context for all context-free APIs below.
 local function req()
-	return threadenv().http_request
+	return currentthread().env.http_request
 end
 http_request = req
 

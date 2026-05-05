@@ -272,13 +272,13 @@ end
 --current thread's terminal --------------------------------------------------
 
 function current_terminal(thread)
-	local env = threadenv(thread)
+	local env = (thread or currentthread()).env
 	return env and env.terminal
 end
 local current_terminal = current_terminal
 
 function set_current_terminal(term, thread)
-	local env = ownthreadenv(thread)
+	local env = (thread or currentthread()):ownenv()
 	local term0 = env.terminal
 	env.terminal = term
 	return term0
