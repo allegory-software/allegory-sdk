@@ -121,6 +121,10 @@ coro.safewrap(f, [onfinish], [fmt, ...]) -> wrapped, co
 	even if said library uses coroutines itself and wouldn't normally allow
 	the callbacks to yield.
 
+coro.env(co) -> t
+
+	Create/get a coroutine's environment table. Coro coroutines
+
 WHY IT WORKS
 
 	This works because calling resume() from a coroutine is a lie: instead of
@@ -143,16 +147,28 @@ local resume    = coroutine.resume
 local yield     = coroutine.yield
 local cocreate  = coroutine.create
 local status    = coroutine.status
+local gettenv   = debug.getfenv
+local settenv   = debug.setfenv
 
 local function onfinish_pass(co, ...) return ... end
 
-local callers = setmetatable({}, {__mode = 'k'}) --{co -> caller_co}
 local main, is_main = coroutine.running()
 assert(is_main, 'coro must be loaded from the main coroutine')
 local current = main
 coro = {main = main, pcall = pcall}
 
 function coro.live() end --stub
+
+local _G = _G
+local function env(co)
+	local env = gettenv(co)
+	if env == _G then --co env not created
+		env = {}
+		settenv(co, env)
+	end
+	return env
+end
+coro.env = env
 
 local function unprotect(ok, ...)
 	if not ok then
@@ -174,12 +190,12 @@ end
 --the coroutine ends by transferring control to the caller (or finish) coroutine.
 local function finish(co, ok, ...)
 	if ... == FIN then --called coro.[p]finish()
-		callers[co] = (select(2, ...))
+		env(co).caller = (select(2, ...))
 		return finish(co, select(3, ...))
 	end
 	coro.live(co, nil)
-	local caller = callers[co]
-	callers[co] = nil
+	local caller = env(co).caller
+	env(co).caller = nil
 	if not caller then
 		if ok then
 			return main, false, 'coroutine ended without transferring control'
@@ -202,6 +218,8 @@ function coro.create(f, onfinish, fmt, ...)
 		end
 		return finish(co, onfinish(co, coro.pcall(f, ...)))
 	end)
+	--co inherits the env of the current coroutine so we must set it back to _G.
+	settenv(co, _G)
 	if fmt then
 		coro.live(co, fmt, ...)
 	else
@@ -246,13 +264,13 @@ coro.transfer_with = transfer_with
 coro.transfer = transfer
 
 local function remove_caller(co, ...)
-	callers[co] = nil
+	env(co).caller = nil
 	return ...
 end
 local function resume_with(co, ok, ...)
 	assert(co ~= current, 'trying to resume the running coroutine')
 	assert(co ~= main, 'trying to resume the main coroutine')
-	callers[co] = current
+	env(co).caller = current
 	return remove_caller(co, transfer_with(co, ok, ...))
 end
 coro.resume_with = resume_with
@@ -262,7 +280,7 @@ end
 
 function coro.yield(...)
 	assert(current ~= main, 'yielding from the main coroutine')
-	local caller = callers[current]
+	local caller = env(current).caller
 	assert(caller, 'yielding from a non-resumed coroutine')
 	return transfer(caller, ...)
 end
@@ -293,6 +311,8 @@ function coro.safewrap(f, onfinish, fmt, ...)
 		return finish(onfinish(current, coro.pcall(f, yield, ...)))
 	end
 	yt = cocreate(wrapper)
+	--co inherits the env of the current coroutine so we must set it back to _G.
+	settenv(yt, _G)
 	if fmt then
 		coro.live(yt, fmt, ...)
 	else
