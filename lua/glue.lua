@@ -1925,7 +1925,16 @@ end
 
 --interpreter ----------------------------------------------------------------
 
+local lua_loadstring = loadstring
+function loadstring(...)
+	local f, err = lua_loadstring(...)
+	if not f then return nil, err end
+	setfenv(f, getfenv(1)) --because getfenv(0) is used for thread's state.
+	return f
+end
+
 local loadstring = loadstring
+local setfenv = setfenv
 function try_eval(s, ...)
 	local f, err = loadstring('return '..s)
 	if not f then return false, err end
