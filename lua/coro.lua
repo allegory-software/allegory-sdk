@@ -42,6 +42,7 @@ coro.create(f, [onfinish], [fmt, ...]) -> co
 
 	`onfinish` is a finalizer function `f(co, ok, ...) -> ok, ...` that is
 	called from inside the coroutine when the coroutine finishes.
+	It should not raise or transfer back into the coroutine!
 
 coro.transfer(co[, ...]) -> ...
 
@@ -58,25 +59,25 @@ coro.transfer(co[, ...]) -> ...
 
 	A coroutine which was transferred into (as opposed to one which was
 	resumed into) must finish by transferring control to another coroutine
-	(or to the main coroutine) otherwise an error is raised.
+	(or to the main coroutine) via coro.finish_into() otherwise an error is raised.
 
 coro.transfer_with(co[, ok, ...]) -> ok, ... | nil, err
 
 	Protected transfer: a low-level variant of `coro.transfer()` that doesn't
 	raise, and which can raise an error into the waiting target coroutine.
 
-return coro.finish(co, ...)
+return coro.finish_into(co, ...)
 
 	Finish the coroutine by transferring control to another coroutine.
 
-return coro.finish_with(co, ok, ...)
+return coro.finish_into_with(co, ok, ...)
 
 	Finish the coroutine by transferring control to another coroutine, possibly
 	raising an error in that coroutine analogous to transfer_with.
 
 coro.finish_target(ok, ...) -> co | nil
 
-	To be called inside a finalizer to detect a coro.finish() redirect.
+	To be called inside a finalizer to detect a coro.finish_into() redirect.
 
 coro.yield(...) -> ...
 
@@ -103,7 +104,7 @@ coro.status(co) -> status
 
 	Behaves like standard coroutine.status()
 
-NOTE: In this implementation `type(co) == 'thread'`.
+	NOTE: In this implementation `type(co) == 'thread'`.
 
 coro.wrap(f, [onfinish], [fmt, ...]) -> wrapper
 
@@ -121,9 +122,10 @@ coro.safewrap(f, [onfinish], [fmt, ...]) -> wrapped, co
 	even if said library uses coroutines itself and wouldn't normally allow
 	the callbacks to yield.
 
-coro.env(co) -> t
+coro.env(co[, create]) -> t|nil
 
-	Create/get a coroutine's environment table. Coro coroutines
+	Create/get a coroutine's environment table.
+	NOTE: loadstring() is patched in glue.lua to support this.
 
 WHY IT WORKS
 
@@ -160,9 +162,10 @@ coro = {main = main, pcall = pcall}
 function coro.live() end --stub
 
 local _G = _G
-local function env(co)
+local function env(co, create)
 	local env = gettenv(co)
-	if env == _G then --co env not created
+	if env == _G then --env not created yet
+		if not create then return nil end
 		env = {}
 		settenv(co, env)
 	end
@@ -171,41 +174,45 @@ end
 coro.env = env
 
 local function unprotect(ok, ...)
-	if not ok then
-		error(..., 2)
-	end
-	return ...
+	if ok then return ... end
+	error(..., 2)
 end
 
 local FIN = {'FIN'}
-function coro.finish_with(co, ok, ...)
+function coro.finish_into_with(co, ok, ...)
 	return FIN, co, ok, ...
 end
-function coro.finish(co, ...)
+function coro.finish_into(co, ...)
 	return FIN, co, true, ...
 end
 function coro.finish_target(fin, co)
 	return fin == FIN and co or nil
 end
 --the coroutine ends by transferring control to the caller (or finish) coroutine.
-local function finish(co, ok, ...)
-	if ... == FIN then --called coro.[p]finish()
-		env(co).caller = (select(2, ...))
-		return finish(co, select(3, ...))
+local function finish(co, new_caller, ok, ...)
+	local env = env(co)
+	local old_caller = env and env.caller
+	local caller = new_caller or old_caller
+	if ... == FIN then -- (...) is (FIN, new_caller, ok, ...)
+		local new_caller = select(2, ...)
+		local old_caller = caller
+		if old_caller and new_caller ~= old_caller then
+			return main, false, 'resumed coroutine finished with a transfer'
+		end
+		return finish(co, select(2, ...)) --tail call
 	end
 	coro.live(co, nil)
-	local caller = env(co).caller
-	env(co).caller = nil
+	if old_caller then env.caller = nil end
 	if not caller then
 		if ok then
-			return main, false, 'coroutine ended without transferring control'
+			return main, false, 'coroutine finished without transferring control'
 		else
 			caller = main
 		end
 	elseif caller == co then
-		return main, false, 'coroutine ended by transferring control to itself'
+		return main, false, 'coroutine finished by transferring control to itself'
 	elseif caller ~= main and status(caller) == 'dead' then
-		return main, false, 'coroutine ended by transferring control to a dead coroutine'
+		return main, false, 'coroutine finished by transferring control to a dead coroutine'
 	end
 	return caller, ok, ...
 end
@@ -214,11 +221,11 @@ function coro.create(f, onfinish, fmt, ...)
 	local co
 	co = cocreate(function(ok, ...)
 		if not ok then --transferred into with an error.
-			return finish(co, onfinish(co, false, ...))
+			return finish(co, nil, onfinish(co, false, ...))
 		end
-		return finish(co, onfinish(co, coro.pcall(f, ...)))
+		return finish(co, nil, onfinish(co, coro.pcall(f, ...)))
 	end)
-	--co inherits the env of the current coroutine so we must set it back to _G.
+	--co inherits the env of the current coroutine so we must reset it.
 	settenv(co, _G)
 	if fmt then
 		coro.live(co, fmt, ...)
@@ -270,7 +277,7 @@ end
 local function resume_with(co, ok, ...)
 	assert(co ~= current, 'trying to resume the running coroutine')
 	assert(co ~= main, 'trying to resume the main coroutine')
-	env(co).caller = current
+	env(co, true).caller = current
 	return remove_caller(co, transfer_with(co, ok, ...))
 end
 coro.resume_with = resume_with
@@ -280,7 +287,8 @@ end
 
 function coro.yield(...)
 	assert(current ~= main, 'yielding from the main coroutine')
-	local caller = env(current).caller
+	local env = env(current)
+	local caller = env and env.caller
 	assert(caller, 'yielding from a non-resumed coroutine')
 	return transfer(caller, ...)
 end
@@ -311,7 +319,7 @@ function coro.safewrap(f, onfinish, fmt, ...)
 		return finish(onfinish(current, coro.pcall(f, yield, ...)))
 	end
 	yt = cocreate(wrapper)
-	--co inherits the env of the current coroutine so we must set it back to _G.
+	--co inherits the env of the current coroutine so we must reset it.
 	settenv(yt, _G)
 	if fmt then
 		coro.live(yt, fmt, ...)

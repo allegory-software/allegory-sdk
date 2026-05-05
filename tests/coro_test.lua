@@ -40,7 +40,7 @@ end)
 
 test('finish() transfers to target coroutine', function()
 	local co = coroutine.create(function()
-		return coroutine.finish(main, 'ret1', false, nil)
+		return coroutine.finish_into(main, 'ret1', false, nil)
 	end)
 	local ret1, ret2, ret3 = narg(3, coroutine.transfer(co))
 	assert(ret1 == 'ret1')
@@ -51,12 +51,27 @@ end)
 
 test('finish_with() transfers error to target coroutine', function()
 	local co = coroutine.create(function()
-		return coroutine.finish_with(main, false, '!err!')
+		return coroutine.finish_into_with(main, false, '!err!')
 	end)
 	local ok, err = coroutine.transfer_with(co, true)
 	assert(ok == false)
 	assert(err == '!err!')
 	assert(coroutine.status(co) == 'dead')
+end)
+
+test('resumed coroutine cannot finish with a transfer', function()
+	local child
+	local parent = coroutine.create(function()
+		child = coroutine.create(function()
+			return coroutine.finish_into(main)
+		end)
+		coroutine.resume(child)
+		assert(false) --resume breaks in main coroutine, not reaching here
+	end)
+	local ok, err = pcall(coroutine.transfer, parent)
+	assert(ok == false)
+	assert(err:find'resumed coroutine finished with a transfer')
+	assert(coroutine.status(child) == 'dead')
 end)
 
 test('first resume() args are passed as function args', function()
@@ -99,6 +114,27 @@ test('yield() args are passed to the caller coroutine', function()
 	assert(c == 'c')
 	assert(d == false)
 	assert(e == nil)
+end)
+
+test('resumed coroutine can yield repeatedly', function()
+	local co = coroutine.create(function()
+		assert(coroutine.yield(1) == 10)
+		assert(coroutine.yield(2) == 20)
+		assert(coroutine.yield(3) == 30)
+		return 4
+	end)
+	local ok, v = narg(2, coroutine.resume(co))
+	assert(ok == true)
+	assert(v == 1)
+	local ok, v = narg(2, coroutine.resume(co, 10))
+	assert(ok == true)
+	assert(v == 2)
+	local ok, v = narg(2, coroutine.resume(co, 20))
+	assert(ok == true)
+	assert(v == 3)
+	local ok, v = narg(2, coroutine.resume(co, 30))
+	assert(ok == true)
+	assert(v == 4)
 end)
 
 test('first resume() args are passed as function args to wrapped coroutine',
@@ -455,6 +491,30 @@ test('suspended coroutines are garbage-collected', function()
 	collectgarbage(); assert(not next(t))
 end)
 
+test('abandoned resumed transfer cycle is garbage-collected', function()
+	local t = setmetatable({}, {__mode = 'k'})
+	do
+		local parent
+		parent = coroutine.create(function()
+			local child = coroutine.create(function()
+				coroutine.transfer(main)
+				print'unreachable code'
+			end)
+			t[child] = true
+			coroutine.resume(child)
+			print'unreachable code'
+		end)
+		t[parent] = true
+		coroutine.transfer(parent)
+		parent = nil
+	end
+	collectgarbage()
+	collectgarbage()
+	assert(not next(t))
+end)
+
 if n_fail > 0 then
 	pr('FAILED: '..n_fail)
+else
+	print'ALL OK'
 end
