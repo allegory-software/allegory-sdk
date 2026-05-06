@@ -207,23 +207,20 @@ end
 
 local epolled = {} --{epollable_object1, ...}
 local free_slots = {} --{i1, ...}; indexes of free slots in epolled array.
+local in_epoll_wait = false --freelist consumption barrier
 
 local epoll_ev = new'struct epoll_event'
 
 --o is an epollable object (socket, file, etc.), with fields:
 --		fd, _i, send_expires, recv_expires, send_thread, recv_thread.
 function epoll_add(eo)
-	local i = pop(free_slots) or #epolled + 1
+	assert(not eo._i)
+	local i = not in_epoll_wait and pop(free_slots) or #epolled + 1
 	epoll_ev.data.u32 = i
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	local ok, err = check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, eo.fd, epoll_ev) == 0)
-	if not ok then
-		push(free_slots, i)
-		return nil, err
-	end
+	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, eo.fd, epoll_ev) == 0))
 	eo._i = i
 	epolled[i] = eo
-	return true
 end
 
 function epoll_remove(eo)
@@ -233,6 +230,7 @@ function epoll_remove(eo)
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
 	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0))
 	epolled[i] = false
+	eo._i = nil --prevent double-remove
 	push(free_slots, i)
 end
 
@@ -328,20 +326,24 @@ local function epoll_wait()
 	local n = C.epoll_wait(epoll_fd(), events, maxevents, timeout_ms)
 	if n == -1 then return check_errno() end
 	--handle ready ops.
+	in_epoll_wait = true --don't allow slot reuse while iterating epolled!
 	for i = 0, n-1 do
 		local ev = events[i].events
 		local si = events[i].data.u32
 		local eo = epolled[si]
-		--When EPOLL{HUP|RDHUP|ERR} arrives, we need to wake up all waiting
-		--threads because EPOLL{IN|OUT} might never follow, which is why
-		--we check {RECV|SEND}_MASK instead of EPOLL{IN|OUT} alone.
-		local err
-		if band(ev, EPOLLERR) ~= 0 then
-			err = eo.epoll_error and eo.epoll_error(eo) or 'error'
+		if eo then --because it could've been removed inside earlier wake_*()
+			--When EPOLL{HUP|RDHUP|ERR} arrives, we need to wake up all waiting
+			--threads because EPOLL{IN|OUT} might never follow, which is why
+			--we check {RECV|SEND}_MASK instead of EPOLL{IN|OUT} alone.
+			local err
+			if band(ev, EPOLLERR) ~= 0 then
+				err = eo.epoll_error and eo.epoll_error(eo) or 'error'
+			end
+			if band(ev, RECV_MASK) ~= 0 then wake_r(eo, err, _transfer) end
+			if band(ev, SEND_MASK) ~= 0 then wake_w(eo, err, _transfer) end
 		end
-		if band(ev, RECV_MASK) ~= 0 then wake_r(eo, err, _transfer) end
-		if band(ev, SEND_MASK) ~= 0 then wake_w(eo, err, _transfer) end
 	end
+	in_epoll_wait = false
 	--handle timed-out ops.
 	local t = clock()
 	check_heap(send_expires_heap, 'send_expires', 'send_thread', t)

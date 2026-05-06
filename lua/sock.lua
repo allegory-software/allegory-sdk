@@ -578,11 +578,7 @@ do
 			return nil, err, retry
 		end
 		local s = wrap_socket(opt, tcp, s, self.family)
-		local ok, err = epoll_add(s)
-		if not ok then
-			s:try_close()
-			return nil, err
-		end
+		epoll_add(s)
 		self._sockets_n = self._sockets_n + 1
 		self._sockets[s] = true
 		self.next_i = (self.next_i or 0) + 1
@@ -717,8 +713,8 @@ function socket:try_bind(addr, port)
 	local ok, err = check_errno(C.bind(self.fd, sa, sa:size()) == 0)
 	if not ok then return false, err end
 	self._bound_addr = sa
-	--epoll_ctl() must be called after bind() for some reason.
-	return epoll_add(self)
+	epoll_add(self) --epoll_ctl() must be called after bind() for some reason.
+	return true
 end
 socket.bind = unprotect_io(socket.try_bind)
 

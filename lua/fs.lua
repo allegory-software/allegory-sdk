@@ -581,11 +581,7 @@ function file_wrap_fd(fd, opt)
 
 	if f.async then
 		fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
-		local ok, err = epoll_add(f)
-		if not ok then
-			f:close()
-			return nil, err
-		end
+		epoll_add(f)
 	end
 
 	live(f, f.path or f.name or f.type or '')
