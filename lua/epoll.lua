@@ -193,6 +193,9 @@ local EPOLL_CLOEXEC = 0x80000
 local _epoll_fd
 function epoll_fd(shared_epoll_fd, flags)
 	if shared_epoll_fd then
+		--must put thread number in epoll_event and ignore events of foreign
+		--threads since all events from all threads are seen by every thread.
+		error'NYI'
 		_epoll_fd = shared_epoll_fd
 	elseif not _epoll_fd then
 		flags = flags or EPOLL_CLOEXEC
