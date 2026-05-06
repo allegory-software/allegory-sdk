@@ -335,15 +335,15 @@ end
 
 local ids_db = {} --{type->{last_id=,live=,[obj]->id}}
 local function debug_id(v)
-	local ty = debug_type(v)
-	local ids = ids_db[ty]
+	local P = debug_prefix(v)
+	local ids = ids_db[P]
 	if not ids then
 		ids = setmetatable({
 			live = setmetatable({}, mode_k)
 			-- ^^ this table is weak because threads can be abandoned
 			-- in suspended state so live(nil) never gets called on them.
 		}, mode_k)
-		ids_db[ty] = ids
+		ids_db[P] = ids
 	end
 	local id = ids[v]
 	if not id then
@@ -354,7 +354,7 @@ local function debug_id(v)
 		end
 		ids[v] = id
 	end
-	return debug_prefix(v)..id, ids
+	return P..id, ids
 end
 
 local pp_skip = {
