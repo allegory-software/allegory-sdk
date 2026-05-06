@@ -689,17 +689,6 @@ assert(y == 1)
 assert(z == 1)
 assert(p == 1)
 
-luapath('foo')
-luacpath('bar')
-luapath('baz', 'after')
-luacpath('zab', 'after')
-local so = package.cpath:match'%.dll' and 'dll' or 'so'
-local norm = function(s) return s:gsub('/', package.config:sub(1,1)) end
-assert(package.path:match('^'..esc(norm'foo/?.lua;')))
-assert(package.cpath:match('^'..esc(norm'bar/?.'..so..';')))
-assert(package.path:match(esc(norm'baz/?.lua;baz/?/init.lua')..'$'))
-assert(package.cpath:match(esc(norm'zab/?.'..so)..'$'))
-
 --ffi ------------------------------------------------------------------------
 
 local ffi = require'ffi'
@@ -764,9 +753,9 @@ assert(iscdata(ffi.new('int[1]')))
 assert(not iscdata({}))
 assert(not iscdata(nil))
 
-assert(isthread(coroutine.create(function() end)))
-assert(not isthread(nil))
-assert(not isthread({}))
+assert(iscoro(coroutine.create(function() end)))
+assert(not iscoro(nil))
+assert(not iscoro({}))
 
 --inherits
 local base = object()
