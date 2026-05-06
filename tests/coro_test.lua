@@ -1,13 +1,15 @@
 local coroutine = require'coro'
 local main = coroutine.running()
 
-local n_fail = 0
+local n_ok, n_fail = 0, 0
 local function test(descr, f)
 	local ok, err = xpcall(f, debug.traceback)
 	print((ok and 'ok:   ' or 'fail: ') .. descr)
 	if not ok then
-		print(err)
+		io.stderr:write(err..'\n')
 		n_fail = n_fail + 1
+	else
+		n_ok = n_ok + 1
 	end
 	assert(coroutine.running() == main)
 end
@@ -59,6 +61,37 @@ test('finish_with() transfers error to target coroutine', function()
 	assert(coroutine.status(co) == 'dead')
 end)
 
+test('onfinish can finish into target coroutine', function()
+	local target = coroutine.create(function(v)
+		coroutine.transfer(main, 'target', v)
+	end)
+	local co = coroutine.create(function()
+		return 'body-ret'
+	end, function(co, ok, ...)
+		assert(ok == true)
+		assert((...) == 'body-ret')
+		return true, coroutine.finish_into(target, 'fin-ret')
+	end)
+	local a, b = narg(2, coroutine.transfer(co))
+	assert(a == 'target')
+	assert(b == 'fin-ret')
+	assert(coroutine.status(co) == 'dead')
+end)
+
+test('onfinish can finish_with() error into target coroutine', function()
+	local co = coroutine.create(function()
+		return 'body-ret'
+	end, function(co, ok, ...)
+		assert(ok == true)
+		assert((...) == 'body-ret')
+		return true, coroutine.finish_into_with(main, false, '!finerr!')
+	end)
+	local ok, err = coroutine.transfer_with(co, true)
+	assert(ok == false)
+	assert(err == '!finerr!')
+	assert(coroutine.status(co) == 'dead')
+end)
+
 test('resumed coroutine cannot finish with a transfer', function()
 	local child
 	local parent = coroutine.create(function()
@@ -72,6 +105,30 @@ test('resumed coroutine cannot finish with a transfer', function()
 	assert(ok == false)
 	assert(err:find'resumed coroutine finished with a transfer')
 	assert(coroutine.status(child) == 'dead')
+end)
+
+test('caller() is set for resumed coroutines only', function()
+	assert(coroutine.caller() == nil)
+	local co = coroutine.create(function()
+		assert(coroutine.caller() == main)
+		coroutine.yield('yielded')
+		assert(coroutine.caller() == main)
+		return 'done'
+	end)
+	local ok, ret = narg(2, coroutine.resume(co))
+	assert(ok == true)
+	assert(ret == 'yielded')
+	assert(coroutine.caller(co) == nil)
+	local ok, ret = narg(2, coroutine.resume(co))
+	assert(ok == true)
+	assert(ret == 'done')
+	assert(coroutine.caller(co) == nil)
+
+	local transferred = coroutine.create(function()
+		assert(coroutine.caller() == nil)
+		coroutine.transfer(main)
+	end)
+	coroutine.transfer(transferred)
 end)
 
 test('first resume() args are passed as function args', function()
@@ -222,6 +279,59 @@ test('error() in coroutine is reported to the parent', function()
 	assert(err:find'!err!')
 end)
 
+test('onfinish error in resumed coroutine is reported to caller', function()
+	local parent = coroutine.create(function()
+		local child = coroutine.create(function()
+			return 'body-ret'
+		end, function()
+			error'!finerr!'
+		end)
+		local ok, err = coroutine.resume(child)
+		assert(ok == false)
+		assert(err:find'!finerr!')
+		assert(coroutine.status(child) == 'dead')
+		coroutine.transfer(main)
+	end)
+	coroutine.transfer(parent)
+end)
+
+test('onfinish error in transferred coroutine is reported to main', function()
+	local co = coroutine.create(function()
+		return 'body-ret'
+	end, function()
+		error'!finerr!'
+	end)
+	local ok, err = pcall(coroutine.transfer, co)
+	assert(ok == false)
+	assert(err:find'!finerr!')
+	assert(coroutine.status(co) == 'dead')
+end)
+
+test('onfinish error takes precedence over coroutine error', function()
+	local co = coroutine.create(function()
+		error'!bodyerr!'
+	end, function()
+		error'!finerr!'
+	end)
+	local ok, err = pcall(coroutine.transfer, co)
+	assert(ok == false)
+	assert(err:find'!finerr!')
+	assert(not err:find'!bodyerr!', 1, true)
+	assert(coroutine.status(co) == 'dead')
+end)
+
+test('onfinish error preserves non-string error values', function()
+	local co = coroutine.create(function()
+		return 'body-ret'
+	end, function()
+		error(false)
+	end)
+	local ok, err = pcall(coroutine.transfer, co)
+	assert(ok == false)
+	assert(err == false)
+	assert(coroutine.status(co) == 'dead')
+end)
+
 test('error() in safewrap coroutine is reported to the caller coroutine', function()
 	local ok, err = coroutine.resume(coroutine.create(function()
 		local f = coroutine.safewrap(function(yield)
@@ -253,6 +363,17 @@ test('error() in safewrap coroutine is reported to the caller coroutine', functi
 	assert(was_here)
 	assert(ok == false)
 	assert(err:find'!err!')
+end)
+
+test('error() in safewrap onfinish is reported to caller coroutine', function()
+	local f = coroutine.safewrap(function(yield)
+		return 'body-ret'
+	end, function()
+		error'!finerr!'
+	end)
+	local ok, err = pcall(f)
+	assert(ok == false)
+	assert(err:find'!finerr!')
 end)
 
 test('error() in sub-coroutine is reported to the parent coroutine', function()
@@ -308,6 +429,20 @@ test('trying to resume main', function()
 		assert(err:find'main')
 	end)
 	co()
+end)
+
+test('trying to resume a dead coroutine returns protected error', function()
+	local co = coroutine.create(function()
+		return 'ret'
+	end)
+	local ok, ret = narg(2, coroutine.resume(co))
+	assert(ok == true)
+	assert(ret == 'ret')
+	local protected, ok, err = pcall(coroutine.resume, co)
+	assert(protected == true)
+	assert(not ok)
+	assert(err:find'dead')
+	assert(coroutine.caller(co) == nil)
 end)
 
 test('nested wrap()-based iterators', function()
@@ -513,8 +648,4 @@ test('abandoned resumed transfer cycle is garbage-collected', function()
 	assert(not next(t))
 end)
 
-if n_fail > 0 then
-	pr('FAILED: '..n_fail)
-else
-	print'ALL OK'
-end
+print(('ok: %d, failed: %d'):format(n_ok, n_fail))
