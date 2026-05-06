@@ -35,6 +35,13 @@ RATIONALE
 	* `coro.pcall` can be replaced to add tracebacks.
 	* `coro.live` can be replaced for live-tracking coroutines.
 
+WHY IT WORKS
+
+	This works because calling resume() from a coroutine is a lie: instead of
+	resuming the coroutine it actually suspends the calling coroutine giving
+	back control to the main coroutine which does the resuming. Since the calling
+	coroutine is now suspended, it can later be resumed from any other coroutine.
+
 coro.create(f, [onfinish], [fmt, ...]) -> co
 
 	Create a coroutine which can be started with either `coro.resume()` or
@@ -44,6 +51,8 @@ coro.create(f, [onfinish], [fmt, ...]) -> co
 	pcalled from inside the coroutine when the coroutine finishes.
 
 	Raising inside the finalizer is like raising inside the coroutine.
+
+	Abandoned coroutines in suspended state do not get to run their finalizer.
 
 coro.try_transfer_with(co[, ok, ...]) -> ok, ... | nil, err
 coro.try_transfer(co[, ...]) -> ok, ... | nil, err
@@ -70,13 +79,10 @@ coro.transfer(co[, ...]) -> ...
 	The try_ variants allow catching errors raised back into the coroutine.
 
 return coro.finish_into(co, ...)
-
-	Finish the coroutine by transferring control to another coroutine.
-
 return coro.finish_into_with(co, ok, ...)
 
-	Finish the coroutine by transferring control to another coroutine, possibly
-	raising an error in that coroutine analogous to transfer_with.
+	Finish the coroutine by transferring control to another coroutine.
+	The _with variant allows raising an error in the target coroutine.
 
 coro.finish_target(ok, ...) -> co | nil
 
@@ -125,13 +131,6 @@ coro.safewrap(f, [onfinish], [fmt, ...]) -> wrapped, co
 	With this you can turn any callback-based library into a sequential library,
 	even if said library uses coroutines itself and wouldn't normally allow
 	the callbacks to yield.
-
-WHY IT WORKS
-
-	This works because calling resume() from a coroutine is a lie: instead of
-	resuming the coroutine it actually suspends the calling coroutine giving
-	back control to the main coroutine which does the resuming. Since the calling
-	coroutine is now suspended, it can later be resumed from any other coroutine.
 
 ]=]
 
