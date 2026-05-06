@@ -150,7 +150,7 @@ coro.live  = live
 coro.pcall = pcall
 
 local coro_transfer = coro.transfer
-local coro_transfer_with = coro.transfer_with
+local coro_try_transfer_with = coro.try_transfer_with
 
 --fw. decl.
 local _resume
@@ -552,12 +552,12 @@ function currentthread()
 end
 
 --there's no finishthread_with() because we can't raise into a resume() call.
-local coro_finish = coro.finish
+local coro_finish_into = coro.finish_into
 function finishthread(th, ...)
-	return coro_finish(th.co, ...)
+	return coro_finish_into(th.co, ...)
 end
 local coro_finish_target = coro.finish_target
-local function coro_onfinish(co, ok, ...)  --not allowed to raise or re-enter!
+local function coro_onfinish(co, ok, ...) --not allowed to raise or re-enter!
 	local self = threads[co]
 	assert(not self.waiting)
 	self.finished = true --status is 'dead' from here
@@ -574,7 +574,7 @@ local function coro_onfinish(co, ok, ...)  --not allowed to raise or re-enter!
 		--returns ok=true so there's no way to raise into the poll_thread.
 		return true, ...
 	else
-		return true, coro_finish((poll_thread or mainthread()).co)
+		return true, coro_finish_into((poll_thread or mainthread()).co)
 	end
 end
 local function wrap_thread(co)
@@ -645,6 +645,7 @@ end
 --[[local]] function _transfer(thread, ...)
 	return coro_transfer(thread.co, ...)
 end
+
 local function transfer_back(...)
 	currentthread().waiting = false
 	return ...
@@ -652,19 +653,18 @@ end
 function transfer_with(thread, ...)
 	assert(isthread(thread), 'resume: thread expected')
 	assert(thread.waiting == true, 'transfer: thread not suspended')
-	--^^ these asserts mask all asserts from coro.
+	--^^ these asserts mask all asserts from coro to make sure that
+	--coro_transfer_with() can't break so that transfer_back() is called.
 	currentthread().waiting = true
 	thread.waiting = false
-	return transfer_back(coro_transfer_with(thread.co, ...))
+	return transfer_back(coro_try_transfer_with(thread.co, ...))
 end
 local function unprotect(ok, ...)
-	if not ok then
-		error(..., 2)
-	end
-	return ...
+	if ok then return ... end
+	error(..., 2)
 end
 function transfer(thread, ...)
-	return unprotect(transfer_with(thread, ok, ...))
+	return unprotect(transfer_with(thread, true, ...))
 end
 function suspend()
 	assert(poll_thread, 'suspend: poll loop not started')
@@ -672,24 +672,22 @@ function suspend()
 	return transfer_back(coro_transfer(poll_thread.co))
 end
 
---[[local]] function _resume_with(thread, ...)
+--[[local]] function _resume(thread, ...)
 	--change poll_thread temporarily so that we get back here
 	--from the first call to suspend(), wait_io() or thread finishing.
 	local real_poll_thread = poll_thread
 	poll_thread = currentthread()
-	local ok, err = coro_transfer_with(thread.co, ...)
+	currentthread().waiting = true
+	thread.waiting = false
+	local ok, err = transfer_back(coro_try_transfer_with(thread.co, true, ...))
 	poll_thread = real_poll_thread
 	if not ok then error(err, 2) end
-end
-function resume_with(thread, ...)
-
 end
 function resume(thread, ...)
 	assert(isthread(thread), 'resume: thread expected')
 	assert(thread.waiting == true, 'resume: thread not suspended')
 	--^^ this masks all coro assertions.
 	assert(thread ~= currentthread(), 'trying to resume the running thread')
-	thread.waiting = false
 	_resume(thread, ...)
 end
 Thread.resume = resume
@@ -784,6 +782,7 @@ function makeowner(o)
 end
 
 function initowner(self) --self=res
+	do return self end
 	local owner = self.owner
 	if owner == nil then
 		if self.default_owner == 'current' then
@@ -852,6 +851,8 @@ function threadset()
 	end
 	return ts
 end
+
+--poll loop ------------------------------------------------------------------
 
 local term_sig_f
 
