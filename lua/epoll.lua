@@ -36,7 +36,7 @@ THREADS
 SCHEDULER
 	[try_]start([ignore_interrupts])       keep polling until all threads finish
 	stop()                                 stop polling
-	run(fn, ...) -> ...                    run a function inside a thread
+	[try_]run(fn, ...) -> ...              run a function inside a thread
 WAIT JOBS
 	wait_job() -> wj            make an interruptible async wait job
 	- wj:wait_until(t) -> ...   wait until clock()
@@ -55,10 +55,10 @@ TIMERS
 	- tm:run()                  run timer fn now
 	- error(CANCEL) in fn       cancel timer
 	- return CANCEL in fn       cancel timer
-	runat(t, fn) -> wj          run fn at clock t
-	runafter(s, fn) -> wj       run fn after s seconds
-	runevery(s, fn) -> wj       run fn every s seconds
-	runagainevery(s, fn) -> wj  run fn now and every s seconds afterwards
+	runat(t, fn) -> tm          run fn at clock t
+	runafter(s, fn) -> tm       run fn after s seconds
+	runevery(s, fn) -> tm       run fn every s seconds
+	runagainevery(s, fn) -> tm  run fn now and every s seconds afterwards
 THREAD SETS
 	threadset() -> ts
 	- ts:thread(fn, [fmt, ...]) -> th
@@ -267,7 +267,6 @@ end
 function epoll_remove(eo)
 	local i = eo._epoll_i
 	if not i then return end --epoll_add() was not called on this object.
-	epoll_ev.data.u32 = i
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
 	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0))
 	epolled[i] = false
@@ -278,8 +277,8 @@ end
 function epoll_setexpires(self, expires, rw)
 	local r = rw == 'r' or not rw
 	local w = rw == 'w' or not rw
-	if r then self.recv_expires = expires end
-	if w then self.send_expires = expires end
+	if r then assert(not repl(self.recv_heap_index, -1)); self.recv_expires = expires end
+	if w then assert(not repl(self.send_heap_index, -1)); self.send_expires = expires end
 end
 function epoll_settimeout(self, s, rw)
 	self:setexpires(s and clock() + s, rw)
@@ -448,8 +447,10 @@ function make_async(RW, returns_n, func)
 	local EXPIRES = RW == 'w' and 'send_expires' or 'recv_expires'
 	local THREAD = RW == 'w' and 'send_thread' or 'recv_thread'
 	return function(self, ...)
+		if self[THREAD] then
+			return nil, 'already waiting'
+		end
 		::again::
-		assert(not self[THREAD], 'already waiting')
 		local ret = func(self, ...)
 		if ret >= 0 then
 			if returns_n then
@@ -652,6 +653,10 @@ function finish_in_with(in_thread, with_ok, ...)
 	assert(in_thread.waiting == true
 		or (in_thread.waiting == 'resume' and in_thread == poll_thread),
 		'thread finish into a non-suspended thread')
+	if in_thread.waiting == 'resume' then
+		assert(with_ok == false or select('#', ...) == 0,
+         'cannot transfer values into a thread waiting on resume()')
+	end
 	return FIN, in_thread, with_ok, ...
 end
 function finish_with(with_ok, ...)
@@ -673,12 +678,12 @@ local function thread_finish(self, fin, in_thread, ok, ...)
 	end
 	free_thread(self)
 	in_thread = in_thread or poll_thread or mainthread()
-	if fin then --allow raising into caller
+	if fin then --allow raising into suspend/transfer/resume caller
 		return in_thread.co, ok, ...
 	elseif ok then --pass return values
 		return in_thread.co, true, ...
-	else --mute error, return success
-		return in_thread.co, true
+	else --return success, and `nil,err`, mostly just for run()
+		return in_thread.co, true, nil, ...
 	end
 end
 local coro_create = coro.create
@@ -1046,16 +1051,21 @@ function start(...)
 	assert(try_start(...))
 end
 
-function run(f, ...)
+--NOTE: `return finish_with()` from f is not supported right now.
+function try_run(f, ...)
 	if _running then
-		return f(...)
+		return pcall(f, ...)
 	else
 		local ret
 		local function wrapper(...)
-			ret = pack(f(...))
+			ret = pack(pcall(f, ...))
 		end
 		resume(thread(wrapper, 'sock-run'), ...)
 		start()
-		if ret then return unpack(ret) end
+		assert(ret, 'run function did not run')
+		return unpack(ret)
 	end
+end
+function run(f, ...)
+	return unprotect(try_run(f, ...))
 end

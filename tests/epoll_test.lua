@@ -415,40 +415,25 @@ function test.cancel_non_waiting_thread_returns_error()
 	end)
 end
 
-function test.cancel_resume_waiter_returns_to_canceler()
+--resume() launches threads, it doesn't transfer data. delivering values into
+--a thread blocked in resume() is therefore rejected at the call site.
+function test.finish_in_resume_waiter_with_values_is_rejected()
 	checked_run(function()
 		local parent = currentthread()
-		local child
-		local parent_ok, parent_err
-		local cancel_ok, cancel_err
-		local from_child
-		local from_canceler
-
-		local canceler = thread(function()
-			cancel_ok, cancel_err = lua_pcall(function()
-				parent:cancel()
+		local ok, err
+		local child = thread(function()
+			ok, err = pcall(function()
+				return finish_in(parent, 'cant-deliver')
 			end)
-			from_child = transfer(child, 'back')
-			return finish_in(parent, 'canceler-done')
+			--exit cleanly with no payload (allowed for a resume-waiter).
+			return finish_in(parent)
 		end)
 
-		child = thread(function()
-			local ret = transfer(canceler)
-			return finish_in(canceler, ret)
-		end)
+		resume(child)
 
-		parent_ok, parent_err = lua_pcall(function()
-			resume(child)
-		end)
-		from_canceler = suspend()
-
-		assert_cancel(parent_ok, parent_err)
-		assert(cancel_ok == true)
-		assert(cancel_err == nil)
-		assert(from_child == 'back')
-		assert(from_canceler == 'canceler-done')
+		assert(ok == false)
+		assert(tostring(err):find('waiting on resume', 1, true))
 		assert(child:status() == 'dead')
-		assert(canceler:status() == 'dead')
 	end)
 end
 
