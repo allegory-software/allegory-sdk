@@ -82,7 +82,7 @@ cmd_server('start', 'Start the server', function()
 	local pid = daemonize()
 	--12. save pid to pidfile.
 	save(pidfile, tostring(pid))
-	local ok, err = xpcall(run_server, traceback)
+	local ok, err = pcall(run_server)
 	if not ok then
 		log('ERROR', 'daemon', 'start', '%s', err)
 	end

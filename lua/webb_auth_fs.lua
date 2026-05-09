@@ -71,7 +71,7 @@ local function end_sync_op(lf, ok, ...)
 	locked = false
 	locked_w = false
 	lf:unlock()
-	if not ok then error(..., 2) end
+	if not ok then error(..., 0) end
 	return ...
 end
 function fs.with_lock(lock_type, fn, ...)

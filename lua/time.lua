@@ -62,21 +62,18 @@ end
 local CLOCK_REALTIME = 0
 local CLOCK_MONOTONIC = 1
 
-local ok, rt_C = pcall(ffi.load, 'rt')
-local clock_gettime = (ok and rt_C or C).clock_gettime
-
 local function tos(t)
 	return tonumber(t.s) + tonumber(t.ns) / 1e9
 end
 
 function now()
-	assert(clock_gettime(CLOCK_REALTIME, t) == 0)
+	assert(C.clock_gettime(CLOCK_REALTIME, t) == 0)
 	return tos(t)
 end
 
 local t0 = 0
 function clock()
-	assert(clock_gettime(CLOCK_MONOTONIC, t) == 0)
+	assert(C.clock_gettime(CLOCK_MONOTONIC, t) == 0)
 	return tos(t) - t0
 end
 t0 = clock()

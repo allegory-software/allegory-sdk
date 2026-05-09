@@ -202,7 +202,7 @@ function Db:layout_table_schema(schema)
 		schema.fields[f.col] = f
 		f.col_pos = i
 		local elem_ct = col_ct[f.mdbx_type] or f.mdbx_type
-		local ok, elem_ct = pcall(ctype, elem_ct)
+		local ok, elem_ct = lua_pcall(ctype, elem_ct)
 		assertf(ok, 'unknown type: %s for field: %s.%s', f.mdbx_type, table_name, f.col)
 		f.elem_size = sizeof(elem_ct)
 		assertf(f.elem_size < 2^8) --must fit 8 bit (see sort below)
