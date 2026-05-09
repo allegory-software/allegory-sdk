@@ -659,7 +659,7 @@ function merge(dt,...)
 	return dt
 end
 
-local NIL = {}
+local NIL = {'NIL'}
 
 --`attr(t, k1)[k2] = v` is like `t[k1][k2] = v` with auto-creating `t[k1]`.
 function attr(t, k, cons, ...)
@@ -756,7 +756,7 @@ end
 
 local attrs, attrs_clear = attrs, attrs_clear
 
-local NOARG = {} --special arg for zero-arg functions or calls.
+local NOARG = {'NOARG'} --special arg for zero-arg functions or calls.
 
 --with fixarg functions we store the memoized value in the leaf node directly.
 local function memoize_fixarg(f, n, cache)
@@ -778,7 +778,7 @@ end
 
 --with vararg functions we can't just store the memoized value in the
 --leaf node because any leaf node can become a key node on future calls.
-local VAL = {} --special key to store the memoized value in the leaf node.
+local VAL = {'VAL'} --special key to store the memoized value in the leaf node.
 local function memoize_vararg(f, minarg, maxarg, cache)
 	cache = cache or {}
 	return function(...)
@@ -798,7 +798,7 @@ end
 
 --special value to use as arg#1 on a memoized function to clear the cache
 --on a prefix of arguments.
-CLEAR = {}
+CLEAR = {'CLEAR'}
 local CLEAR = CLEAR
 local debug_getinfo = debug.getinfo
 function memoize(f, cache, minarg, maxarg)
@@ -1566,7 +1566,7 @@ function gettersandsetters(getters, setters, super)
 	return {__index = get, __newindex = set}
 end
 
-CANCEL = {} --generic "cancel" command to pass to callbacks.
+CANCEL = {'CANCEL'} --generic "cancel" command to pass to callbacks.
 
 --process control ------------------------------------------------------------
 
@@ -1695,12 +1695,6 @@ function assertf(v, err, ...)
 	error(err, 2)
 end
 
-local function unprotect(ok, result, ...)
-	if not ok then return nil, result, ... end
-	if result == nil then result = true end --to distinguish from error.
-	return result, ...
-end
-
 --[[
 pcall with finally and except "clauses":
 
@@ -1720,7 +1714,7 @@ local function _fpcall(f,...)
 	local function err(e)
 		for i=#errt,1,-1 do errt[i](e) end
 		for i=#fint,1,-1 do fint[i]() end
-		return debug.traceback(e)
+		return traceback(e)
 	end
 	local function cont(ok,...)
 		if ok then
@@ -1730,13 +1724,18 @@ local function _fpcall(f,...)
 	end
 	return cont(xpcall(f, err, finally, onerror, ...))
 end
+local function unprotect_fpcall(ok, result, ...)
+	if not ok then return nil, result, ... end
+	if result == nil then result = true end --to distinguish from error.
+	return result, ...
+end
 function fpcall(...)
-	return unprotect(_fpcall(...))
+	return unprotect_fpcall(_fpcall(...))
 end
 
 --fcall is like fpcall() but without the protection (i.e. raises errors).
 local function assert_fpcall(ok, ...)
-	if not ok then error(..., 2) end
+	if not ok then error(..., 0) end
 	return ...
 end
 function fcall(...)
