@@ -23,7 +23,6 @@ SOCKETS
 	s:[try_]setopt(opt, val)               set socket option ('so_*', 'tcp_*', etc.)
 	s:[try_]getopt(opt) -> val             get socket option
 	s:debug_stream([protocol_name])        log recv/send data
-	s:cancel[_recv|_send]()                cancel currently waiting I/O ops
 WAIT JOBS
 	s:wait_job() -> sj          wait job that is auto-canceled on socket close
 	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job

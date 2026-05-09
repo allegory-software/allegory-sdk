@@ -683,9 +683,6 @@ file.skip = unprotect_io(file.try_skip)
 
 file.setexpires  = epoll_setexpires
 file.settimeout  = epoll_settimeout
-file.cancel_recv = epoll_cancel_recv
-file.cancel_send = epoll_cancel_send
-file.cancel      = epoll_cancel
 
 --pipes ----------------------------------------------------------------------
 
