@@ -12,7 +12,7 @@ EPOLLABLE OBJECT INTEGRATION
 	make_async_connect(fn) -> fn(self, ...)
 	epoll_setexpires(eo, expires, ['r|w'])
 	epoll_settimeout(eo, timeout, ['r|w'])
-	eo:epoll_error() -> err
+	eo:epoll_error() -> err                (cannot raise)
 THREADS
 	thread(fn[, fmt, ...]) -> th           create a thread for async I/O
 	[try_]resume(th, ...)                  run thread until it blocks/finishes
@@ -32,6 +32,7 @@ THREADS
 	th:ownenv() -> t                       get/create thread's own environment
 	th:onfinish(fn)                        run fn(thread) when thread finishes
 	th:cancel()                            cancel what the thread is waiting on
+	error(CANCEL)                          cancel current thread
 SCHEDULER
 	[try_]start([ignore_interrupts])       keep polling until all threads finish
 	stop()                                 stop polling
@@ -52,6 +53,8 @@ TIMERS
 	- tm:setinterval(s)         run timer fn every s seconds
 	- tm:cancel()               remove timer from queue (can be added back)
 	- tm:run()                  run timer fn now
+	- error(CANCEL) in fn       cancel timer
+	- return CANCEL in fn       cancel timer
 	runat(t, fn) -> wj          run fn at clock t
 	runafter(s, fn) -> wj       run fn after s seconds
 	runevery(s, fn) -> wj       run fn every s seconds
@@ -188,6 +191,13 @@ local function unprotect(ok, ...)
 	error(..., 0)
 end
 
+local function log_error(ok, ...)
+	if not ok and ... ~= CANCEL then
+		log('ERROR', 'epoll', 'thread', '%s', ...)
+	end
+	return ok, ...
+end
+
 --epoll ----------------------------------------------------------------------
 
 cdef[[
@@ -317,9 +327,9 @@ end
 --threads manually when the epollable is closed from another thread.
 local function epoll_cancel_resume(thread, cancel_thread)
 	if thread == cancel_thread then
-		try_resume_until_blocked_with(thread, false, CANCEL)
+		log_error(try_resume_until_blocked_with(thread, false, CANCEL))
 	else
-		try_resume_until_blocked_with(thread, true, nil, 'closed')
+		log_error(try_resume_until_blocked_with(thread, true, nil, 'closed'))
 	end
 end
 function epoll_cancel(eo, cancel_thread)
@@ -347,7 +357,7 @@ local function check_heap(heap, EXPIRES, THREAD, t)
 			assert(thread.waiting == xo)
 			xo[THREAD] = nil
 			assert(heap:pop())
-			coro_transfer(thread.co, true, nil, 'timeout') --into wait_io_cont()
+			log_error(coro_transfer(thread.co, true, nil, 'timeout')) --into wait_io_cont()
 		else --timer: run it, which removes it from the heap or moves it (if repeating).
 			xo:run()
 		end
@@ -389,13 +399,13 @@ local function epoll_wait()
 			if band(ev, RECV_MASK) ~= 0 then
 				local thread = clear_recv_thread(eo)
 				if thread then --was waiting on recv
-					coro_transfer(thread.co, true, ok, err) --to wait_io_cont()
+					log_error(coro_transfer(thread.co, true, ok, err)) --to wait_io_cont()
 				end
 			end
 			if band(ev, SEND_MASK) ~= 0 then
 				local thread = clear_send_thread(eo)
 				if thread then --was waiting on send
-					coro_transfer(thread.co, true, ok, err) --to wait_io_cont()
+					log_error(coro_transfer(thread.co, true, ok, err)) --to wait_io_cont()
 				end
 			end
 		end
@@ -423,7 +433,7 @@ function make_async_connect(func)
 			self.send_thread = currentthread()
 			local ok, err = wait_io(self)
 			if ok then
-				err = self:epoll_error()
+				err = self:epoll_error() --cannot raise
 				if err then ok = false end
 			end
 			return ok, err
@@ -439,6 +449,7 @@ function make_async(RW, returns_n, func)
 	local THREAD = RW == 'w' and 'send_thread' or 'recv_thread'
 	return function(self, ...)
 		::again::
+		assert(not self[THREAD], 'already waiting')
 		local ret = func(self, ...)
 		if ret >= 0 then
 			if returns_n then
@@ -557,8 +568,10 @@ function tm:setinterval(interval)
 	return self
 end
 function tm:run()
+	--return CANCEL or error(CANCEL) from fn has the same effect.
 	local ok, err = pcall(self.recv_thread)
-	if not ok then --nowhere to raise errors to, so we just log them.
+	if not ok and err ~= CANCEL then
+		--nowhere to raise timer errors into, so we just log them.
 		log('ERROR', 'epoll', 'timer', '%s%s', err, catall('\n', self.name) or '')
 	end
 	if self.interval and err ~= CANCEL then
@@ -651,16 +664,12 @@ local function thread_finish(self, fin, in_thread, ok, ...)
 	if ... == FIN then --allow overriding (in_thread, ok)
 		return thread_finish(self, ...)
 	end
-	if not fin and not ok and ... ~= CANCEL then
+	if not fin and not ok then
 		--nowhere to transfer thread errors into, so log the error and move on.
-		log('ERROR', 'epoll', 'thread', '%s', ...)
+		log_error(ok, ...)
 	end
 	if self._on_finish then
-		local ok, err = pcall(self._on_finish, self)
-		if not ok then
-			--same for thread finalizer errors.
-			log('ERROR', 'epoll', 'thread', '%s', err)
-		end
+		log_error(pcall(self._on_finish, self))
 	end
 	free_thread(self)
 	in_thread = in_thread or poll_thread or mainthread()
@@ -826,9 +835,8 @@ function threadset()
 	function ts:thread(f, ...)
 		return thread(function(...)
 			n = n + 1
-			local ok, err = pcall(f, ...)
+			local ok, err = log_error(pcall(f, ...))
 			if not ok then
-				log('ERROR', 'epoll', 'thread', '%s', err)
 				if all_ok then
 					all_ok = false
 					first_err = err
@@ -1042,23 +1050,12 @@ function run(f, ...)
 	if _running then
 		return f(...)
 	else
-		local ret, run_failed, run_err
-		local function done(ok, ...)
-			if ok then
-				ret = pack(...)
-			else
-				run_failed = true
-				run_err = ...
-				if _running then stop() end
-			end
-		end
+		local ret
 		local function wrapper(...)
-			return done(pcall(f, ...))
+			ret = pack(f(...))
 		end
 		resume(thread(wrapper, 'sock-run'), ...)
-		if run_failed then error(run_err, 0) end
 		start()
-		if run_failed then error(run_err, 0) end
 		if ret then return unpack(ret) end
 	end
 end

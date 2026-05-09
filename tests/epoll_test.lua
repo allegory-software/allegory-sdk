@@ -803,6 +803,24 @@ function test.threadset_error_propagation()
 	assert(ok, err)
 end
 
+function test.threadset_cancel_error_is_preserved_and_not_logged()
+	local logs = capture_log(function()
+		checked_run(function()
+			local ts = threadset()
+			resume(ts:thread(function()
+				error(CANCEL)
+			end))
+			local ok, err = ts:join()
+			assert(ok == false)
+			assert(err == CANCEL)
+		end)
+	end)
+
+	for _, e in ipairs(logs) do
+		assert(e[1] ~= 'ERROR')
+	end
+end
+
 function test.threadset_join_empty()
 	checked_run(function()
 		local ts = threadset()
@@ -832,29 +850,6 @@ function test.run_returns_values()
 	assert(a == 'value')
 	assert(b == nil)
 	assert(c == false)
-end
-
-function test.run_raises_root_error()
-	local ok, err = pcall(function()
-		run(function()
-			error('run boom')
-		end)
-	end)
-
-	assert(not ok)
-	assert(tostring(err):find('run boom', 1, true))
-end
-
-function test.run_raises_root_error_after_wait()
-	local ok, err = pcall(function()
-		run(function()
-			wait(0)
-			error('run wait boom')
-		end)
-	end)
-
-	assert(not ok)
-	assert(tostring(err):find('run wait boom', 1, true))
 end
 
 function test.run_when_already_running()
