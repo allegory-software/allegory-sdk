@@ -125,10 +125,31 @@ function test.runat_fires()
 	end)
 end
 
+function test.timer_keeps_scheduler_running()
+	local fired = false
+	run(function()
+		runafter(0.02, function()
+			fired = true
+		end)
+	end)
+	assert(fired)
+end
+
+function test.canceled_timer_does_not_keep_scheduler_running()
+	local fired = false
+	run(function()
+		local tm = runafter(10, function()
+			fired = true
+		end)
+		tm:cancel()
+	end)
+	assert(not fired)
+end
+
 function test.runat_cancel()
 	checked_run(function()
-		local fired = false
-		local job = runat(clock() + 0.05, function()
+	local fired = false
+	local job = runat(clock() + 0.05, function()
 			fired = true
 		end)
 		job:cancel()
@@ -811,6 +832,29 @@ function test.run_returns_values()
 	assert(a == 'value')
 	assert(b == nil)
 	assert(c == false)
+end
+
+function test.run_raises_root_error()
+	local ok, err = pcall(function()
+		run(function()
+			error('run boom')
+		end)
+	end)
+
+	assert(not ok)
+	assert(tostring(err):find('run boom', 1, true))
+end
+
+function test.run_raises_root_error_after_wait()
+	local ok, err = pcall(function()
+		run(function()
+			wait(0)
+			error('run wait boom')
+		end)
+	end)
+
+	assert(not ok)
+	assert(tostring(err):find('run wait boom', 1, true))
 end
 
 function test.run_when_already_running()

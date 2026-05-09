@@ -128,7 +128,7 @@ suspend() -> ...
 
 [try_]start([ignore_interrupts])
 
-	Start polling. Stops when no more I/O or stop() was called.
+	Start polling. Stops when no active waits/timers or stop() was called.
 
 stop()
 
@@ -238,6 +238,7 @@ end
 local epolled = {} --{epollable_object1, ...}
 local free_slots = {} --{i1, ...}; indexes of free slots in epolled array.
 local in_epoll_wait = false --freelist consumption barrier
+local wait_count = 0
 
 local epoll_ev = new'struct epoll_event'
 
@@ -488,8 +489,8 @@ function wj:try_resume_with(...)
 	if not (thread and thread.waiting == self) then
 		return nil, 'thread not waiting (on this job)'
 	end
-	self.recv_thread = nil
 	assert(recv_expires_heap:remove(self))
+	self.recv_thread = nil
 	return try_resume_until_blocked_with(thread, ...) --to wait_io_cont()
 end
 function wj:try_resume(...)
@@ -531,6 +532,7 @@ end
 function tm:cancel()
 	if self.recv_heap_index == -1 then return end
 	assert(recv_expires_heap:remove(self))
+	wait_count = wait_count - 1
 	return self
 end
 function tm:setexpires(expires)
@@ -539,6 +541,7 @@ function tm:setexpires(expires)
 		recv_expires_heap:replace(self.recv_heap_index, self)
 	else
 		recv_expires_heap:push(self)
+		wait_count = wait_count + 1
 	end
 	return self
 end
@@ -593,7 +596,6 @@ end
 
 local threads = {} --{co->thread}
 local poll_thread
-local _wait_io_count = 0
 
 local coro_running = coro.running
 function currentthread()
@@ -777,7 +779,7 @@ Thread.resume = resume
 
 local function wait_io_cont(currentthread, ...)
 	currentthread.waiting = false --block all transfers into
-	_wait_io_count = _wait_io_count - 1
+	wait_count = wait_count - 1
 	return unprotect(...)
 end
 --[[local]] function wait_io(waitable)
@@ -785,7 +787,7 @@ end
 	assert(poll_thread, 'poll loop not started')
 	assert(not thread.ismain, 'trying to perform I/O from the main thread')
 	thread.waiting = assert(waitable) --allow wake_*(), block all else
-	_wait_io_count = _wait_io_count + 1
+	wait_count = wait_count + 1
 	return wait_io_cont(thread, coro_transfer(poll_thread.co, true))
 end
 
@@ -840,9 +842,11 @@ function threadset()
 	end
 	function ts:join()
 		if n ~= 0 then
+			assert(not join_thread, 'threadset already joining')
 			join_thread = currentthread()
-			suspend()
+			local ok, err = try_suspend()
 			join_thread = nil
+			if not ok then error(err, 0) end
 		end
 		return all_ok, first_err
 	end
@@ -968,9 +972,9 @@ end
 local term_sig_f
 
 local function poll(ignore_interrupts)
-	if _wait_io_count == 0 then
+	if wait_count == 0 then
 		return nil, 'empty'
-	elseif _wait_io_count == 1 and term_sig_f then --nobody left to kill this guy
+	elseif wait_count == 1 and term_sig_f then --nobody left to kill this guy
 		return nil, 'empty'
 	end
 	local ok, err = epoll_wait()
@@ -1002,7 +1006,7 @@ interrupt = stop --overridable
 
 function try_start(ignore_interrupts)
 	if _running then return true end
-	if _wait_io_count == 0 then return true end
+	if wait_count == 0 then return true end
 
 	require'signal'
 
@@ -1038,12 +1042,23 @@ function run(f, ...)
 	if _running then
 		return f(...)
 	else
-		local ret
+		local ret, run_failed, run_err
+		local function done(ok, ...)
+			if ok then
+				ret = pack(...)
+			else
+				run_failed = true
+				run_err = ...
+				if _running then stop() end
+			end
+		end
 		local function wrapper(...)
-			ret = pack(f(...))
+			return done(pcall(f, ...))
 		end
 		resume(thread(wrapper, 'sock-run'), ...)
+		if run_failed then error(run_err, 0) end
 		start()
+		if run_failed then error(run_err, 0) end
 		if ret then return unpack(ret) end
 	end
 end
