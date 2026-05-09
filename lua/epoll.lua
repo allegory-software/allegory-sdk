@@ -198,6 +198,52 @@ local function log_error(ok, ...)
 	return ok, ...
 end
 
+--expires heaps --------------------------------------------------------------
+--xo = expirable object: epollable, wait_job, timer.
+
+--used for EPOLLIN events but also for wait jobs and timers.
+local recv_expires_heap = heap{
+	cmp = function(xo1, xo2)
+		return xo1.recv_expires < xo2.recv_expires
+	end,
+	index_key = 'recv_heap_index', --enable O(log n) removal.
+}
+
+--used for EPOLLOUT events only. we use two heaps for full-duplex send/recv.
+local send_expires_heap = heap{
+	cmp = function(xo1, xo2)
+		return xo1.send_expires < xo2.send_expires
+	end,
+	index_key = 'send_heap_index', --enable O(log n) removal.
+}
+
+local function set_recv_expires(xo, expires)
+	local in_heap = repl(xo.recv_heap_index, -1)
+	xo.recv_expires = expires
+	if not expires and in_heap then
+		assert(recv_expires_heap:remove(xo))
+		return 'removed'
+	elseif expires and in_heap then
+		recv_expires_heap:replace(xo.recv_heap_index, xo)
+	elseif expires and not in_heap then
+		recv_expires_heap:push(xo)
+		return 'added'
+	end
+end
+local function set_send_expires(xo, expires)
+	local in_heap = repl(xo.send_heap_index, -1)
+	xo.send_expires = expires
+	if not expires and in_heap then
+		assert(send_expires_heap:remove(xo))
+		return 'removed'
+	elseif expires and in_heap then
+		send_expires_heap:replace(xo.send_heap_index, xo)
+	elseif expires and not in_heap then
+		send_expires_heap:push(xo)
+		return 'added'
+	end
+end
+
 --epoll ----------------------------------------------------------------------
 
 cdef[[
@@ -252,61 +298,44 @@ local wait_count = 0
 
 local epoll_ev = new'struct epoll_event'
 
---eo is an epollable object (socket, file, etc.), with fields:
---		fd, _epoll_i, send_expires, recv_expires, send_thread, recv_thread.
+--eo = epollable object: socket or file, with fields:
+--		fd, epoll_i, send_expires, recv_expires, send_thread, recv_thread.
 function epoll_add(eo)
-	assert(not eo._epoll_i)
+	assert(not eo.epoll_i)
 	local i = not in_epoll_wait and pop(free_slots) or #epolled + 1
 	epoll_ev.data.u32 = i
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
 	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, eo.fd, epoll_ev) == 0))
-	eo._epoll_i = i
+	eo.epoll_i = i
 	epolled[i] = eo
 end
 
 function epoll_remove(eo)
-	local i = eo._epoll_i
+	local i = eo.epoll_i
 	if not i then return end --epoll_add() was not called on this object.
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
 	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0))
+	set_recv_expires(eo, nil)
+	set_send_expires(eo, nil)
 	epolled[i] = false
-	eo._epoll_i = nil --prevent double-remove
+	eo.epoll_i = nil --prevent double-remove
 	push(free_slots, i)
 end
 
-function epoll_setexpires(self, expires, rw)
+function epoll_setexpires(eo, expires, rw)
 	local r = rw == 'r' or not rw
 	local w = rw == 'w' or not rw
-	if r then assert(not repl(self.recv_heap_index, -1)); self.recv_expires = expires end
-	if w then assert(not repl(self.send_heap_index, -1)); self.send_expires = expires end
+	if r then set_recv_expires(eo, expires) end
+	if w then set_send_expires(eo, expires) end
 end
-function epoll_settimeout(self, s, rw)
-	self:setexpires(s and clock() + s, rw)
+function epoll_settimeout(eo, s, rw)
+	eo:setexpires(s and clock() + s, rw)
 end
-
---used for EPOLLIN events but also for wait jobs and timers.
-local recv_expires_heap = heap{
-	cmp = function(s1, s2)
-		return s1.recv_expires < s2.recv_expires
-	end,
-	index_key = 'recv_heap_index', --enable O(log n) removal.
-}
-
---used for EPOLLOUT events only. we use two heaps for full-duplex send/recv.
-local send_expires_heap = heap{
-	cmp = function(s1, s2)
-		return s1.send_expires < s2.send_expires
-	end,
-	index_key = 'send_heap_index', --enable O(log n) removal.
-}
 
 local function clear_recv_thread(eo)
 	local thread = eo.recv_thread
 	if not thread then return end
 	assert(thread.waiting == eo)
-	if eo.recv_expires then
-		assert(recv_expires_heap:remove(eo))
-	end
 	eo.recv_thread = nil
 	return thread
 end
@@ -314,9 +343,6 @@ local function clear_send_thread(eo)
 	local thread = eo.send_thread
 	if not thread then return end
 	assert(thread.waiting == eo)
-	if eo.send_expires then
-		assert(send_expires_heap:remove(eo))
-	end
 	eo.send_thread = nil
 	return thread
 end
@@ -350,13 +376,16 @@ local function check_heap(heap, EXPIRES, THREAD, t)
 		--^^ the threshold of 0.01 assumes that the current loop will take more
 		--than 20ms to complete, so might as well expire some jobs now
 		--because the next loop might just be a bit too late for them.
-		xo[EXPIRES] = nil
 		local thread = xo[THREAD] --thread (epollable, wait_job) or timer function.
 		if isthread(thread) then --epollable, wait_job
+			xo[EXPIRES] = nil
 			assert(thread.waiting == xo)
 			xo[THREAD] = nil
 			assert(heap:pop())
 			log_error(coro_transfer(thread.co, true, nil, 'timeout')) --into wait_io_cont()
+		elseif thread == nil then --epollable: timeout fired with no I/O in progress
+			xo[EXPIRES] = nil
+			assert(heap:pop())
 		else --timer: run it, which removes it from the heap or moves it (if repeating).
 			xo:run()
 		end
@@ -421,18 +450,15 @@ local EWOULDBLOCK = 11
 local EINPROGRESS = 115
 
 function make_async_connect(func)
-	return function(self, ...)
-		local ret = func(self, ...)
+	return function(eo, ...)
+		local ret = func(eo, ...)
 		if ret >= 0 then return true end
 		local errno = errno()
 		if errno == EINPROGRESS then
-			if self.send_expires then
-				send_expires_heap:push(self)
-			end
-			self.send_thread = currentthread()
-			local ok, err = wait_io(self)
+			eo.send_thread = currentthread()
+			local ok, err = wait_io(eo)
 			if ok then
-				err = self:epoll_error() --cannot raise
+				err = eo:epoll_error() --cannot raise
 				if err then ok = false end
 			end
 			return ok, err
@@ -443,28 +469,23 @@ function make_async_connect(func)
 end
 
 function make_async(RW, returns_n, func)
-	local heap = RW == 'w' and send_expires_heap or recv_expires_heap
-	local EXPIRES = RW == 'w' and 'send_expires' or 'recv_expires'
 	local THREAD = RW == 'w' and 'send_thread' or 'recv_thread'
-	return function(self, ...)
-		if self[THREAD] then
+	return function(eo, ...)
+		if eo[THREAD] then
 			return nil, 'already waiting'
 		end
 		::again::
-		local ret = func(self, ...)
+		local ret = func(eo, ...)
 		if ret >= 0 then
 			if returns_n then
-				self[RW] = self[RW] + ret
+				eo[RW] = eo[RW] + ret
 			end
 			return ret
 		end
 		local errno = errno()
 		if errno == EWOULDBLOCK or errno == EINPROGRESS then
-			if self[EXPIRES] then
-				heap:push(self)
-			end
-			self[THREAD] = currentthread()
-			local ok, err = wait_io(self)
+			eo[THREAD] = currentthread()
+			local ok, err = wait_io(eo)
 			if not ok then
 				return nil, err
 			else
@@ -489,8 +510,7 @@ function wait_job()
 end
 function wj:wait_until(expires)
 	self.recv_thread = currentthread()
-	self.recv_expires = expires
-	recv_expires_heap:push(self)
+	set_recv_expires(self, expires)
 	return wait_io(self)
 end
 function wj:wait(timeout)
@@ -501,7 +521,7 @@ function wj:try_resume_with(...)
 	if not (thread and thread.waiting == self) then
 		return nil, 'thread not waiting (on this job)'
 	end
-	assert(recv_expires_heap:remove(self))
+	set_recv_expires(self, nil)
 	self.recv_thread = nil
 	return try_resume_until_blocked_with(thread, ...) --to wait_io_cont()
 end
@@ -542,17 +562,13 @@ function timer(f, name)
 	})
 end
 function tm:cancel()
-	if self.recv_heap_index == -1 then return end
-	assert(recv_expires_heap:remove(self))
-	wait_count = wait_count - 1
+	if set_recv_expires(self, nil) == 'removed' then
+		wait_count = wait_count - 1
+	end
 	return self
 end
 function tm:setexpires(expires)
-	self.recv_expires = expires
-	if self.recv_heap_index ~= -1 then
-		recv_expires_heap:replace(self.recv_heap_index, self)
-	else
-		recv_expires_heap:push(self)
+	if set_recv_expires(self, expires) == 'added' then
 		wait_count = wait_count + 1
 	end
 	return self
@@ -682,8 +698,8 @@ local function thread_finish(self, fin, in_thread, ok, ...)
 		return in_thread.co, ok, ...
 	elseif ok then --pass return values
 		return in_thread.co, true, ...
-	else --return success, and `nil,err`, mostly just for run()
-		return in_thread.co, true, nil, ...
+	else --return success, don't pass on the error (already logged)
+		return in_thread.co, true
 	end
 end
 local coro_create = coro.create
@@ -796,11 +812,11 @@ local function wait_io_cont(currentthread, ...)
 	wait_count = wait_count - 1
 	return unprotect(...)
 end
---[[local]] function wait_io(waitable)
+--[[local]] function wait_io(wo) --wo = wait-object: epollable or wait_job
 	local thread = currentthread()
 	assert(poll_thread, 'poll loop not started')
 	assert(not thread.ismain, 'trying to perform I/O from the main thread')
-	thread.waiting = assert(waitable) --allow wake_*(), block all else
+	thread.waiting = assert(wo) --allow wake_*(), block all else
 	wait_count = wait_count + 1
 	return wait_io_cont(thread, coro_transfer(poll_thread.co, true))
 end

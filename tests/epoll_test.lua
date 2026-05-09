@@ -224,6 +224,59 @@ function test.make_async_success_and_timeout_paths()
 	end)
 end
 
+function test.expires_heap_entry_persists_across_successful_io()
+	checked_run(function()
+		local eo = {setexpires = epoll_setexpires, r = 0}
+		epoll_settimeout(eo, 1, 'r')
+		local hi = eo.recv_heap_index
+		assert(hi and hi ~= -1) --in heap after setexpires
+		--successful I/O must NOT touch the heap
+		local async_read = make_async('r', true, function() return 3 end)
+		assert(async_read(eo) == 3)
+		assert(eo.recv_heap_index == hi) --unchanged
+		assert(eo.recv_expires) --field preserved
+		--cleanup
+		epoll_setexpires(eo, nil, 'r')
+		assert(eo.recv_heap_index == -1)
+	end)
+end
+
+function test.expires_fires_with_no_thread_waiting()
+	checked_run(function()
+		local eo = {setexpires = epoll_setexpires}
+		epoll_settimeout(eo, 0.01, 'r')
+		assert(eo.recv_heap_index and eo.recv_heap_index ~= -1)
+		--drive the loop; check_heap should silently pop the entry
+		wait(0.03)
+		assert(eo.recv_heap_index == -1)
+		assert(eo.recv_expires == nil)
+	end)
+end
+
+function test.setexpires_twice_replaces_not_duplicates()
+	checked_run(function()
+		local eo = {setexpires = epoll_setexpires}
+		epoll_settimeout(eo, 10, 'r')
+		--would crash with 'duplicate' from heap:push if not the replace path
+		epoll_settimeout(eo, 5, 'r')
+		assert(eo.recv_heap_index and eo.recv_heap_index ~= -1)
+		--cleanup
+		epoll_setexpires(eo, nil, 'r')
+		assert(eo.recv_heap_index == -1)
+	end)
+end
+
+function test.setexpires_nil_removes_from_heap()
+	checked_run(function()
+		local eo = {setexpires = epoll_setexpires}
+		epoll_settimeout(eo, 1, 'r')
+		assert(eo.recv_heap_index and eo.recv_heap_index ~= -1)
+		epoll_setexpires(eo, nil, 'r')
+		assert(eo.recv_heap_index == -1)
+		assert(eo.recv_expires == nil)
+	end)
+end
+
 -- Threads -------------------------------------------------------------------
 
 function test.currentthread_and_mainthread()
