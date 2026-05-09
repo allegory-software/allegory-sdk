@@ -542,7 +542,7 @@ function outfile_function(path, offset, len)
 			local ok, err = pcall(out, filebuf, len)
 			if not ok then
 				f:close()
-				error(err)
+				error(err, 0)
 			end
 		end
 		assert(f:closed())

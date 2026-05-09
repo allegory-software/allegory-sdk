@@ -1560,7 +1560,7 @@ local function redraw()
 			local i = cmd_last_i(a)
 			begin_layer(layer_base, i)
 			assert(rec_i == 1)
-			local ok, err = xpcall(ui.main, traceback)
+			local ok, err = pcall(ui.main)
 			if not ok then
 				warnf('%s', err)
 				break

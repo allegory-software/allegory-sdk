@@ -461,7 +461,7 @@ function http_server(...)
 					req.status = 500
 				end
 			else --status line already sent, too late to send HTTP 500.
-				error(err)
+				error(err, 0)
 			end
 		elseif not req.headers_sent then
 			req.status = 404
