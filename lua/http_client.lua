@@ -550,6 +550,7 @@ function client:target(req)
 	local target = attr(self.targets, target_key)
 	if not target.type then --just created
 		object(http_target, target)
+		makeowner(target)
 		target.host = host
 		target.secure = req.secure
 		target.client_ip = client_ip
@@ -590,6 +591,7 @@ function client:get_conn(req)
 			end
 		end
 		http = http_conn(tcp)
+		tcp:setowner(target)
 		target.conn_pool:put(http)
 		http.tcp:onclose(function()
 			target.conn_pool:pull(http)

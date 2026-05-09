@@ -6,7 +6,8 @@
 EPOLLABLE OBJECT INTEGRATION
 	epoll_add(eo)
 	epoll_remove(eo)
-	epoll_cancel(eo)
+	epoll_cancel(eo, [cancel_thread])
+	eo:try_cancel_io(thread) -> true|nil,err
 	make_async('r|w', returns_n, fn) -> fn(self, ...)
 	make_async_connect(fn) -> fn(self, ...)
 	epoll_setexpires(eo, expires, ['r|w'])
@@ -69,6 +70,10 @@ epollable open fd. To make those async, call epoll_add() on constructor and
 epoll_remove() on destructor. Create async I/O methods with make_async() which
 wraps a syscall that returns EWOULDBLOCK (or EINPROGRESS) and returns an async
 method. epoll_setexpires, etc. can be used directly as methods.
+
+Thread cancellation of an epollable waiter calls eo:try_cancel_io(thread),
+which must close eo and call epoll_cancel(eo, thread). The canceled thread gets
+CANCEL; other waiters on the same eo get `nil, 'closed'`.
 
 SCHEDULING -------------------------------------------------------------------
 
@@ -285,25 +290,46 @@ local send_expires_heap = heap{
 	index_key = 'send_heap_index', --enable O(log n) removal.
 }
 
-local function wake_r(eo, ok, err)
+local function clear_recv_thread(eo)
 	local thread = eo.recv_thread
-	if not thread then return end --wasn't waiting on recv
+	if not thread then return end
 	assert(thread.waiting == eo)
 	if eo.recv_expires then
 		assert(recv_expires_heap:remove(eo))
 	end
 	eo.recv_thread = nil
-	coro_transfer(thread.co, true, ok, err) --into wait_io_cont()
+	return thread
 end
-local function wake_w(eo, ok, err)
+local function clear_send_thread(eo)
 	local thread = eo.send_thread
-	if not thread then return end --wasn't waiting on send
+	if not thread then return end
 	assert(thread.waiting == eo)
 	if eo.send_expires then
 		assert(send_expires_heap:remove(eo))
 	end
 	eo.send_thread = nil
-	coro_transfer(thread.co, true, ok, err) --into wait_io_cont()
+	return thread
+end
+
+--closing an epollable doesn't trigger an epoll event, instead the fd is
+--silently removed from the epoll list, thus we have to wake up any waiting
+--threads manually when the epollable is closed from another thread.
+local function epoll_cancel_resume(thread, cancel_thread)
+	if thread == cancel_thread then
+		try_resume_until_blocked_with(thread, false, CANCEL)
+	else
+		try_resume_until_blocked_with(thread, true, nil, 'closed')
+	end
+end
+function epoll_cancel(eo, cancel_thread)
+	local thread = clear_recv_thread(eo)
+	if thread then
+		epoll_cancel_resume(thread, cancel_thread) --to wait_io_cont()
+	end
+	local thread = clear_send_thread(eo)
+	if thread then
+		epoll_cancel_resume(thread, cancel_thread) --to wait_io_cont()
+	end
 end
 
 local function check_heap(heap, EXPIRES, THREAD, t)
@@ -359,8 +385,18 @@ local function epoll_wait()
 			if band(ev, EPOLLERR) ~= 0 then
 				ok, err = nil, eo.epoll_error and eo.epoll_error(eo) or 'error'
 			end
-			if band(ev, RECV_MASK) ~= 0 then wake_r(eo, ok, err) end
-			if band(ev, SEND_MASK) ~= 0 then wake_w(eo, ok, err) end
+			if band(ev, RECV_MASK) ~= 0 then
+				local thread = clear_recv_thread(eo)
+				if thread then --was waiting on recv
+					coro_transfer(thread.co, true, ok, err) --to wait_io_cont()
+				end
+			end
+			if band(ev, SEND_MASK) ~= 0 then
+				local thread = clear_send_thread(eo)
+				if thread then --was waiting on send
+					coro_transfer(thread.co, true, ok, err) --to wait_io_cont()
+				end
+			end
 		end
 	end
 	in_epoll_wait = false
@@ -369,30 +405,6 @@ local function epoll_wait()
 	check_heap(send_expires_heap, 'send_expires', 'send_thread', t)
 	check_heap(recv_expires_heap, 'recv_expires', 'recv_thread', t)
 	return true
-end
-
---closing an epollable doesn't trigger an epoll event, instead the fd is
---silently removed from the epoll list, thus we have to wake up any waiting
---threads manually when the epollable is closed from another thread.
-function epoll_cancel(eo)
-	local thread = eo.recv_thread
-	if thread then
-		assert(thread.waiting == eo)
-		if eo.recv_expires then
-			assert(recv_expires_heap:remove(eo))
-		end
-		eo.recv_thread = nil
-		try_resume_until_blocked_with(thread, true, nil, 'closed') --to wait_io_cont()
-	end
-	local thread = eo.send_thread
-	if thread then
-		assert(thread.waiting == eo)
-		if eo.send_expires then
-			assert(send_expires_heap:remove(eo))
-		end
-		eo.send_thread = nil
-		try_resume_until_blocked_with(thread, true, nil, 'closed') --to wait_io_cont()
-	end
 end
 
 local EWOULDBLOCK = 11
@@ -788,8 +800,8 @@ function Thread:try_cancel()
 	elseif self.waiting == 'resume' then
 		self.cancelled = true --mark-and-wait
 		return true
-	elseif istab(self.waiting) and self.waiting._epoll_i then --epollable
-		return self.waiting:try_close()
+	elseif istab(self.waiting) and self.waiting.try_cancel_io then --epollable
+		return self.waiting:try_cancel_io(self)
 	elseif istab(self.waiting) and self.waiting.type == 'wait_job' then
 		self.waiting:cancel()
 		return true

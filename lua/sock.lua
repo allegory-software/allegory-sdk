@@ -435,11 +435,15 @@ local SOCK_NONBLOCK  = 0x000800 --async I/O
 local SOCK_CLOEXEC   = 0x080000 --close-on-exec (non-inheritable on exec())
 
 local function wrap_socket(opt, class, fd, family)
-	return object(class, {
+	return initowner(object(class, {
 		fd = assert(fd), family = family, issocket = true,
 		r = 0, w = 0,
-	}, opt)
+	}, opt))
 end
+
+socket.default_owner = 'current'
+socket.setowner = setowner
+
 local function create_socket(st, family, class, opt)
 	local af =
 		family == 'ip'   and AF_INET  or
@@ -460,13 +464,16 @@ local function create_udp(family, opt)
 end
 
 --NOTE: close() returns false on error but it should be ignored.
-function socket:try_close()
+local function socket_try_close(self, cancel_thread)
 	if not self.fd then return true end
 	epoll_remove(self)
 	local fd = self.fd; self.fd = nil --make closed() true.
+	epoll_cancel(self, cancel_thread) --wake waiting I/O threads
+	if self.owner then
+		self.owner:disown(self)
+	end
 	--NOTE: it is unsafe to close a socket twice no matter the error.
 	local ok, err = check_errno(C.close(fd) == 0)
-	self:cancel('closed')
 	local ps = self.listen_socket
 	if ps then
 		ps._sockets_n = ps._sockets_n - 1
@@ -486,6 +493,13 @@ function socket:try_close()
 	if not ok then return false, err end
 	return true
 end
+function socket:try_close()
+	return socket_try_close(self)
+end
+function socket:try_cancel_io(cancel_thread)
+	if not self.fd then return nil, 'thread not waiting' end
+	return socket_try_close(self, cancel_thread)
+end
 socket.close = unprotect_io(socket.try_close)
 
 function socket:closed()
@@ -498,9 +512,6 @@ end
 
 socket.setexpires  = epoll_setexpires
 socket.settimeout  = epoll_settimeout
-socket.cancel_recv = epoll_cancel_recv
-socket.cancel_send = epoll_cancel_send
-socket.cancel      = epoll_cancel
 
 function socket:epoll_error()
 	return self:try_getopt'so_error' --NOTE: this clears the error!

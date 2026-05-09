@@ -202,7 +202,7 @@ function http_server(...)
 
 		req:logp('', 'htsrv', '<=', '%s %s HTTP/%s', method, uri, http_version)
 
-		ownthreadenv().http_request = req
+		currentthread():ownenv().http_request = req
 		next_request_id = next_request_id + 1
 
 		--read request headers

@@ -343,6 +343,45 @@ function test.cancel_wait_job_raises_cancel()
 	end)
 end
 
+function test.cancel_epollable_reentrant_sibling_cancel_returns_not_waiting()
+	checked_run(function()
+		local fake = {_epoll_i = 1}
+		function fake:try_cancel_io(cancel_thread)
+			if not self._epoll_i then return nil, 'thread not waiting' end
+			self._epoll_i = nil --try_cancel_io() closes the epollable first.
+			epoll_cancel(self, cancel_thread)
+			return true
+		end
+
+		local send_val, send_err
+		local recv_ok, recv_err, sibling_cancel_ok, sibling_cancel_err
+		local send_th = thread(function()
+			send_val, send_err = suspend()
+		end)
+		local recv_th = thread(function()
+			recv_ok, recv_err = lua_pcall(suspend)
+			sibling_cancel_ok, sibling_cancel_err = send_th:try_cancel()
+		end)
+
+		resume(send_th)
+		resume(recv_th)
+		fake.recv_thread = recv_th
+		fake.send_thread = send_th
+		recv_th.waiting = fake
+		send_th.waiting = fake
+
+		assert(recv_th:try_cancel())
+
+		assert_cancel(recv_ok, recv_err)
+		assert(sibling_cancel_ok == nil)
+		assert(tostring(sibling_cancel_err):find('thread not waiting', 1, true))
+		assert(send_val == nil)
+		assert(send_err == 'closed')
+		assert(recv_th:status() == 'dead')
+		assert(send_th:status() == 'dead')
+	end)
+end
+
 function test.cancel_non_waiting_thread_returns_error()
 	checked_run(function()
 		local th = thread(function()

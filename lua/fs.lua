@@ -584,10 +584,14 @@ function file_wrap_fd(fd, opt)
 		epoll_add(f)
 	end
 
+	initowner(f)
 	live(f, f.path or f.name or f.type or '')
 
 	return f
 end
+
+file.default_owner = 'current'
+file.setowner = setowner
 
 function isfile(f, type)
 	local mt = getmetatable(f)
@@ -598,18 +602,22 @@ function file.closed(f)
 	return f.fd == -1
 end
 
-function file.close(f)
+local function file_close(f, cancel_thread)
 	if f:closed() then return true end
 	if f.async then
 		epoll_remove(f)
 	end
-	local ok, err = check_errno(C.close(f.fd) == 0)
-	f.fd = -1 --fd is gone no matter the error.
+	local fd = f.fd
+	f.fd = -1 --make closed() true before waking waiting I/O threads.
+	if f.async then
+		epoll_cancel(f, cancel_thread) --wake waiting I/O threads
+	end
+	if f.owner then
+		f.owner:disown(f)
+	end
+	local ok, err = check_errno(C.close(fd) == 0)
 	if f._after_close then
 		f:_after_close()
-	end
-	if f.async then
-		epoll_cancel(f, 'closed')
 	end
 	--liveadd(f, 'r:%d w:%d', f.r, f.w)
 	--f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
@@ -617,7 +625,14 @@ function file.close(f)
 	check_io(nil, ok, err)
 	return true
 end
+function file.close(f)
+	return file_close(f)
+end
 file.try_close = protect_io(file.close)
+file.try_cancel_io = protect_io(function(f, cancel_thread)
+	if f:closed() then return nil, 'thread not waiting' end
+	return file_close(f, cancel_thread)
+end)
 
 function file.onclose(f, fn)
 	after(f, '_after_close', fn)

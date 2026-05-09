@@ -28,11 +28,10 @@ local BUF = new'char[65536]'
 local _terr
 
 local function sthread(f, name)
-	local t = thread(f, name)
-	onthreadfinish(t, function(th, ok, err)
+	return thread(function(...)
+		local ok, err = pcall(f, ...)
 		if not ok then _terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err) end
-	end)
-	return t
+	end, name)
 end
 
 local function checked_run(f)
@@ -537,13 +536,16 @@ function test.socket_wait_job_autocancel()
 		-- Closing the socket while the wait is active must unblock the waiter.
 		local s = tcp()
 		local sj = s:wait_job()
-		local result
+		local ok, err
 		resume(sthread(function()
-			result = sj:wait(10)
+			ok, err = lua_pcall(function()
+				sj:wait(10)
+			end)
 		end, 'waiter'))
 		-- waiter is now blocked; close the socket to trigger auto-cancel
 		s:close()
-		assert(result == CANCEL)
+		assert(ok == false)
+		assert(err == CANCEL)
 	end)
 end
 
@@ -563,13 +565,45 @@ end
 function test.socket_wait_cancel_on_close()
 	checked_run(function()
 		local s = tcp()
-		local result
+		local ok, err
 		resume(sthread(function()
-			result = s:wait(10)
+			ok, err = lua_pcall(function()
+				s:wait(10)
+			end)
 		end, 'waiter'))
 		wait(0.02)
 		s:close()
-		assert(result == CANCEL)
+		assert(ok == false)
+		assert(err == CANCEL)
+	end)
+end
+
+function test.socket_thread_cancel_recv_closes_socket()
+	checked_run(function()
+		local port = nextport()
+		local server = mkserver(port)
+		local cs
+		local recv_ok, recv_err
+		local th = thread(function()
+			cs = server:accept()
+			recv_ok, recv_err = lua_pcall(function()
+				cs:try_recv(BUF, 64)
+			end)
+		end, 'recv waiter')
+		resume(th)
+		local s = mkclient(port)
+		wait(0.02)
+		assert(cs)
+		assert(th:try_cancel())
+		assert(recv_ok == false)
+		assert(recv_err == CANCEL)
+
+		assert(cs:closed())
+		local n, err = cs:try_recv(BUF, 64)
+		assert(n == nil)
+		assert(err == 'closed')
+		s:close()
+		server:close()
 	end)
 end
 

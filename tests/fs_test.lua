@@ -15,6 +15,19 @@ local test = setmetatable({}, {__newindex = function(t, k, v)
 	rawset(t, #t+1, k)
 end})
 
+local _terr
+
+local function checked_run(f)
+	_terr = nil
+	run(function(...)
+		local ok, err = pcall(f, ...)
+		if not ok then
+			_terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err)
+		end
+	end)
+	if _terr then error(_terr, 2) end
+end
+
 --open/close -----------------------------------------------------------------
 
 function test.open_close()
@@ -79,6 +92,49 @@ function test.pipe() --I/O test in proc_test.lua
 	local rf, wf = pipe{async = false}
 	rf:close()
 	wf:close()
+end
+
+function test.async_pipe_close_wakes_waiter_before_onclose()
+	checked_run(function()
+		local rf, wf = pipe{async = true}
+		local th, read_n, read_err, cancel_ok, cancel_err
+		th = thread(function()
+			read_n, read_err = rf:try_read(u8a(1), 1)
+		end, 'pipe reader')
+		rf:onclose(function()
+			cancel_ok, cancel_err = th:try_cancel()
+		end)
+		resume(th)
+		rf:close()
+		wf:close()
+		assert(read_n == nil)
+		assert(read_err == 'closed')
+		assert(cancel_ok == nil)
+		assert(cancel_err == 'thread not waiting')
+	end)
+end
+
+function test.async_pipe_thread_cancel_read_closes_pipe()
+	checked_run(function()
+		local rf, wf = pipe{async = true}
+		local buf = u8a(1)
+		local read_ok, read_err
+		local th = thread(function()
+			read_ok, read_err = lua_pcall(function()
+				rf:try_read(buf, 1)
+			end)
+		end, 'pipe reader')
+		resume(th)
+		assert(th:try_cancel())
+		assert(read_ok == false)
+		assert(read_err == CANCEL)
+
+		assert(rf:closed())
+		local n, err = rf:try_read(buf, 1)
+		assert(n == nil)
+		assert(err == 'closed')
+		wf:close()
+	end)
 end
 
 --NOTE: I/O tests in proc_test.lua!

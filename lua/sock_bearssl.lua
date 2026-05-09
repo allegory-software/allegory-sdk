@@ -1132,6 +1132,8 @@ local stcp = {
 	checkp       = checkp,
 	checknp      = checknp,
 	protect      = protect,
+	default_owner = 'current',
+	setowner     = setowner,
 }
 
 function stcp:onclose(fn)
@@ -1197,6 +1199,8 @@ function _G.try_client_stcp(tcp, host, opt)
 		live(s, nil)
 		return nil, err
 	end
+	initowner(s)
+	tcp:setowner(nil) --stcp owns it now
 	return s
 end
 _G.client_stcp = unprotect_io(_G.try_client_stcp)
@@ -1225,6 +1229,9 @@ function client_stcp:try_close()
 		else
 			break
 		end
+	end
+	if self.owner then
+		self.owner:disown(self)
 	end
 	live(self, nil)
 	local ok, err = self.tcp:try_close()
@@ -1321,6 +1328,8 @@ function _G.try_server_stcp(tcp, opt)
 		_keepalive = keepalive,
 	})
 	tcp.stcp = s --cross-ref for client socket tracking
+	initowner(s)
+	tcp:setowner(nil) --stcp owns it now
 	live(s, 'tcp=%s', tcp)
 	return s
 end
@@ -1328,6 +1337,9 @@ _G.server_stcp = unprotect_io(_G.try_server_stcp)
 
 function server_stcp:try_close()
 	if not self.tcp.fd then return true end
+	if self.owner then
+		self.owner:disown(self)
+	end
 	live(self, nil)
 	--NOTE: normally we should iterate tcp._sockets[s] and call s.stcp:close() on
 	--each which sends TLS close_notify, but that calls send() and recv() and
@@ -1355,12 +1367,16 @@ function server_stcp:try_accept(opt, timeout)
 
 	local s = wrap_client_stcp(ctcp, eng, keepalive)
 	s.listen_socket = self
-	live(s, 'accepted %s.%d tcp=%s clients:%d', self, ctcp.i, ctcp, self.tcp._sockets_n)
 	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
 	if not ok then
 		s:try_close()
 		return nil, err, true --retriable
 	end
+
+	live(s, 'accepted %s.%d tcp=%s clients:%d',
+		self, ctcp.i, ctcp, self.tcp._sockets_n)
+	initowner(s)
+	ctcp:setowner(nil) --stcp owns it now
 
 	local sn = sc.eng.server_name
 	s.server_name = sn[0] ~= 0 and str(sn) or nil
