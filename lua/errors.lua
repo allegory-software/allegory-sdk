@@ -160,8 +160,8 @@ local function onerror(e)
 		if e.addtraceback and not e.traceback then
 			e.traceback = fix_traceback(traceback(e.message or '', 2))
 		end
-	else
-		return fix_traceback(traceback(tostring(e), 2))
+	elseif isstr(e) then
+		return fix_traceback(traceback(e, 2))
 	end
 	return e
 end

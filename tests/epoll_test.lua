@@ -8,13 +8,12 @@ end})
 local _terr
 
 local function sthread(f, name)
-	local t = thread(f, name)
-	t:onclose(function(th, ok, err)
+	return thread(function(...)
+		local ok, err = pcall(f, ...)
 		if not ok then
 			_terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err)
 		end
-	end)
-	return t
+	end, name)
 end
 
 local function checked_run(f)
@@ -26,6 +25,34 @@ local function checked_run(f)
 		end
 	end)
 	if _terr then error(_terr, 2) end
+end
+
+local function capture_log(f)
+	local logs = {}
+	local old_log = log
+	log = function(...)
+		logs[#logs+1] = {...}
+	end
+	local ok, err = xpcall(function() f(logs) end, debug.traceback)
+	log = old_log
+	assert(ok, err)
+	return logs
+end
+
+local function logs_contain(logs, s)
+	for _, e in ipairs(logs) do
+		for i = 1, #e do
+			if tostring(e[i]):find(s, 1, true) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function assert_cancel(ok, err)
+	assert(ok == false)
+	assert(err == CANCEL)
 end
 
 -- Wait jobs -----------------------------------------------------------------
@@ -47,13 +74,41 @@ end
 function test.wait_and_cancel()
 	checked_run(function()
 		local job
-		local result
+		local ok, err
 		resume(sthread(function()
 			job = wait_job()
-			result = job:wait(10)
+			ok, err = lua_pcall(function()
+				job:wait(10)
+			end)
 		end, 'waiter'))
 		job:cancel()
-		assert(result == CANCEL)
+		assert(ok == false)
+		assert(err == CANCEL)
+	end)
+end
+
+function test.wait_job_try_resume_misuse()
+	checked_run(function()
+		local job = wait_job()
+		local ok, err = job:try_resume('unused')
+		assert(ok == nil)
+		assert(tostring(err):find('not waiting', 1, true))
+
+		ok, err = pcall(function()
+			job:resume('unused')
+		end)
+		assert(not ok)
+		assert(tostring(err):find('not waiting', 1, true))
+
+		job:cancel()
+	end)
+end
+
+function test.wait_timeout_returns_timeout()
+	checked_run(function()
+		local ok, err = wait(0)
+		assert(ok == nil)
+		assert(err == 'timeout')
 	end)
 end
 
@@ -94,7 +149,454 @@ function test.runevery()
 	end)
 end
 
+function test.runafter_and_runagainevery()
+	checked_run(function()
+		local after_fired = false
+		local again_count = 0
+
+		runafter(0.02, function()
+			after_fired = true
+		end)
+
+		local job = runagainevery(0.02, function()
+			again_count = again_count + 1
+		end)
+
+		wait(0.07)
+		job:cancel()
+
+		assert(after_fired)
+		assert(again_count >= 2)
+	end)
+end
+
+-- Epollable objects ---------------------------------------------------------
+
+function test.make_async_success_and_timeout_paths()
+	checked_run(function()
+		local eo = {r = 0}
+		local async_read = make_async('r', true, function()
+			return 3
+		end)
+		assert(async_read(eo) == 3)
+		assert(eo.r == 3)
+
+		local timeout_eo = {setexpires = epoll_setexpires}
+		epoll_settimeout(timeout_eo, 0, 'r')
+		local async_timeout = make_async('r', false, function()
+			errno(11) --EWOULDBLOCK
+			return -1
+		end)
+		local ok, err = async_timeout(timeout_eo)
+		assert(ok == nil)
+		assert(err == 'timeout')
+
+		local connect_eo = {setexpires = epoll_setexpires}
+		epoll_settimeout(connect_eo, 0, 'w')
+		local async_connect = make_async_connect(function()
+			errno(115) --EINPROGRESS
+			return -1
+		end)
+		ok, err = async_connect(connect_eo)
+		assert(ok == nil)
+		assert(err == 'timeout')
+	end)
+end
+
 -- Threads -------------------------------------------------------------------
+
+function test.currentthread_and_mainthread()
+	local mt = mainthread()
+	assert(currentthread() == mt)
+	assert(mt.ismain)
+
+	checked_run(function()
+		assert(currentthread() ~= mainthread())
+		assert(not currentthread().ismain)
+	end)
+end
+
+function test.thread_lifecycle_status_and_onfinish()
+	local finished = 0
+	local ran = false
+
+	checked_run(function()
+		local th
+		th = thread(function(a, b)
+			assert(currentthread() == th)
+			assert(a == 'hello')
+			assert(b == 42)
+			ran = true
+		end)
+
+		assert(th:status() == 'suspended')
+		assert(th:status() ~= 'dead')
+
+		th:onfinish(function(self)
+			assert(self == th)
+			finished = finished + 1
+		end)
+
+		resume(th, 'hello', 42)
+
+		assert(ran)
+		assert(th:status() == 'dead')
+		assert(finished == 1)
+	end)
+end
+
+function test.resume_suspend_roundtrip_args()
+	local seen = {}
+
+	checked_run(function()
+		local th = thread(function(a, b)
+			seen.start_a = a
+			seen.start_b = b
+			local c, d = suspend()
+			seen.resume_c = c
+			seen.resume_d = d
+		end)
+
+		resume(th, 'start-a', 'start-b')
+		assert(th.waiting == true)
+		assert(th:status() ~= 'dead')
+
+		resume(th, 'resume-c', 'resume-d')
+
+		assert(seen.start_a == 'start-a')
+		assert(seen.start_b == 'start-b')
+		assert(seen.resume_c == 'resume-c')
+		assert(seen.resume_d == 'resume-d')
+		assert(th:status() == 'dead')
+	end)
+end
+
+function test.cancel_suspend_raises_cancel()
+	checked_run(function()
+		local ok, err
+		local th = thread(function()
+			ok, err = lua_pcall(suspend)
+		end)
+
+		resume(th)
+		assert(th:try_cancel())
+
+		assert_cancel(ok, err)
+		assert(th:status() == 'dead')
+	end)
+end
+
+function test.transfer_and_finish_in_roundtrip_args()
+	checked_run(function()
+		local parent = currentthread()
+		local child = thread(function(start_arg)
+			assert(start_arg == 'start')
+			local back_arg = transfer(parent, 'yielded')
+			assert(back_arg == 'back')
+			return finish_in(parent, 'done', false, nil)
+		end)
+
+		local yielded = transfer(child, 'start')
+		assert(yielded == 'yielded')
+
+		local a, b, c = transfer(child, 'back')
+		assert(a == 'done')
+		assert(b == false)
+		assert(c == nil)
+		assert(child:status() == 'dead')
+	end)
+end
+
+function test.cancel_transfer_raises_cancel()
+	checked_run(function()
+		local parent = currentthread()
+		local ok, err
+		local th = thread(function()
+			ok, err = lua_pcall(function()
+				transfer(parent, 'ready')
+			end)
+		end)
+
+		assert(transfer(th) == 'ready')
+		assert(th:try_cancel())
+
+		assert_cancel(ok, err)
+		assert(th:status() == 'dead')
+	end)
+end
+
+function test.cancel_wait_job_raises_cancel()
+	checked_run(function()
+		local ok, err
+		local th = thread(function()
+			local job = wait_job()
+			ok, err = lua_pcall(function()
+				job:wait(10)
+			end)
+		end)
+
+		resume(th)
+		assert(th:try_cancel())
+
+		assert_cancel(ok, err)
+		assert(th:status() == 'dead')
+	end)
+end
+
+function test.cancel_non_waiting_thread_returns_error()
+	checked_run(function()
+		local th = thread(function()
+		end)
+		resume(th)
+
+		local ok, err = th:try_cancel()
+		assert(ok == nil)
+		assert(tostring(err):find('thread not waiting', 1, true))
+	end)
+end
+
+function test.cancel_resume_waiter_returns_to_canceler()
+	checked_run(function()
+		local parent = currentthread()
+		local child
+		local parent_ok, parent_err
+		local cancel_ok, cancel_err
+		local from_child
+		local from_canceler
+
+		local canceler = thread(function()
+			cancel_ok, cancel_err = lua_pcall(function()
+				parent:cancel()
+			end)
+			from_child = transfer(child, 'back')
+			return finish_in(parent, 'canceler-done')
+		end)
+
+		child = thread(function()
+			local ret = transfer(canceler)
+			return finish_in(canceler, ret)
+		end)
+
+		parent_ok, parent_err = lua_pcall(function()
+			resume(child)
+		end)
+		from_canceler = suspend()
+
+		assert_cancel(parent_ok, parent_err)
+		assert(cancel_ok == true)
+		assert(cancel_err == nil)
+		assert(from_child == 'back')
+		assert(from_canceler == 'canceler-done')
+		assert(child:status() == 'dead')
+		assert(canceler:status() == 'dead')
+	end)
+end
+
+function test.finish_in_current_resume_waiter_raises_in_resume()
+	checked_run(function()
+		local parent = currentthread()
+		local child = thread(function()
+			return finish_in_with(parent, false, 'finish-error')
+		end)
+
+		local ok, err = lua_pcall(function()
+			resume(child)
+		end)
+
+		assert(ok == false)
+		assert(err == 'finish-error')
+		assert(child:status() == 'dead')
+	end)
+end
+
+function test.finish_in_outer_resume_waiter_is_rejected()
+	checked_run(function()
+		local parent = currentthread()
+		local a, b
+		local ok, err
+
+		a = thread(function()
+			b = thread(function()
+				ok, err = pcall(function()
+					return finish_in(parent, 'skip-a')
+				end)
+				return finish_in(a)
+			end)
+			resume(b)
+			return finish_in(parent)
+		end)
+
+		resume(a)
+
+		assert(ok == false)
+		assert(tostring(err):find('non%-suspended'))
+		assert(a:status() == 'dead')
+		assert(b:status() == 'dead')
+	end)
+end
+
+function test.transfer_into_resume_waiter_is_rejected()
+	checked_run(function()
+		local parent = currentthread()
+		local ok, err
+		local child = thread(function()
+			ok, err = pcall(function()
+				transfer(parent, 'bad')
+			end)
+			return finish_in(parent)
+		end)
+
+		resume(child)
+
+		assert(ok == false)
+		assert(tostring(err):find('not suspended', 1, true))
+		assert(child:status() == 'dead')
+	end)
+end
+
+function test.cancel_resume_waiter_canceler_can_wait_after_cancel()
+	checked_run(function()
+		local parent = currentthread()
+		local child
+		local parent_ok, parent_err
+		local wait_ok, wait_err
+
+		local canceler = thread(function()
+			parent:cancel()
+			wait_ok, wait_err = wait(0)
+			return finish_in(parent, 'done')
+		end)
+
+		child = thread(function()
+			transfer(canceler)
+			return finish_in(canceler, 'child-done')
+		end)
+
+		parent_ok, parent_err = lua_pcall(function()
+			resume(child)
+		end)
+		local ret = suspend()
+
+		assert_cancel(parent_ok, parent_err)
+		assert(wait_ok == nil)
+		assert(wait_err == 'timeout')
+		assert(ret == 'done')
+		assert(child:try_cancel())
+		assert(child:status() == 'dead')
+		assert(canceler:status() == 'dead')
+	end)
+end
+
+function test.cancel_resume_waiter_cancel_takes_precedence()
+	checked_run(function()
+		local parent = currentthread()
+		local child
+		local canceler = thread(function()
+			parent:cancel()
+			return finish_in(child, 'go')
+		end)
+
+		child = thread(function()
+			transfer(canceler)
+			return finish_in_with(parent, false, 'child-error')
+		end)
+
+		local ok, err = lua_pcall(function()
+			resume(child)
+		end)
+
+		assert_cancel(ok, err)
+		assert(child:status() == 'dead')
+		assert(canceler:status() == 'dead')
+	end)
+end
+
+function test.finish_with_raises_in_resume_waiter()
+	checked_run(function()
+		local child = thread(function()
+			return finish_with(false, 'finish-with-error')
+		end)
+
+		local ok, err = lua_pcall(function()
+			resume(child)
+		end)
+
+		assert(ok == false)
+		assert(err == 'finish-with-error')
+		assert(child:status() == 'dead')
+	end)
+end
+
+function test.nested_resume_restores_poll_thread()
+	checked_run(function()
+		local grandchild
+		local child = thread(function()
+			grandchild = thread(function()
+				suspend()
+			end)
+			resume(grandchild)
+		end)
+
+		resume(child)
+
+		local ok, err = wait(0)
+		assert(ok == nil)
+		assert(err == 'timeout')
+
+		assert(grandchild:try_cancel())
+	end)
+end
+
+function test.uncaught_cancel_does_not_log_thread_error()
+	local logs = capture_log(function()
+		checked_run(function()
+			local th = thread(function()
+				suspend()
+			end)
+			resume(th)
+			assert(th:try_cancel())
+			assert(th:status() == 'dead')
+		end)
+	end)
+
+	for _, e in ipairs(logs) do
+		assert(e[1] ~= 'ERROR')
+	end
+end
+
+function test.invalid_thread_operations_raise()
+	checked_run(function()
+		local self = currentthread()
+		local ok, err = pcall(resume, self)
+		assert(not ok)
+		assert(tostring(err):find('not suspended', 1, true))
+
+		ok, err = pcall(transfer, self)
+		assert(not ok)
+		assert(tostring(err):find('not suspended', 1, true))
+
+		ok, err = pcall(finish_in, self)
+		assert(not ok)
+		assert(tostring(err):find('non-suspended', 1, true))
+
+		local dead = thread(function()
+		end)
+		resume(dead)
+		assert(dead:status() == 'dead')
+
+		ok, err = pcall(resume, dead)
+		assert(not ok)
+		assert(tostring(err):find('not suspended', 1, true))
+
+		ok, err = pcall(transfer, dead)
+		assert(not ok)
+		assert(tostring(err):find('not suspended', 1, true))
+
+		ok, err = pcall(resume, {})
+		assert(not ok)
+		assert(tostring(err):find('thread expected', 1, true))
+	end)
+end
 
 function test.threadset_join()
 	checked_run(function()
@@ -129,14 +631,58 @@ function test.threadset_join_resumes_waiter()
 	assert(child:status() == 'dead')
 end
 
-function test.thread_cofinish_resumes_target()
+function test.threadset_child_finishes_before_join()
+	local logs = capture_log(function()
+		checked_run(function()
+			local ts = threadset()
+			resume(ts:thread(function()
+				wait(0)
+			end))
+			wait(0.02) --let the child finish before join() starts waiting.
+			assert(ts:join())
+		end)
+	end)
+	for _, e in ipairs(logs) do
+		local severity = e[1]
+		local err = e[5]
+		assert(not (
+			severity == 'ERROR'
+			and tostring(err):find('non%-suspended')
+		))
+	end
+end
+
+function test.thread_error_is_logged_and_scheduler_continues()
+	local logs = capture_log(function()
+		checked_run(function()
+			local continued = false
+
+			resume(thread(function()
+				wait(0)
+				error'thread-boom'
+			end))
+
+			resume(sthread(function()
+				wait(0)
+				continued = true
+			end))
+
+			wait(0.02)
+			assert(continued)
+		end)
+	end)
+
+	assert(logs_contain(logs, 'thread-boom'))
+end
+
+function test.thread_finish_in_resumes_target()
 	local joined = false
 	local child
 	checked_run(function()
 		local parent = currentthread()
 		child = thread(function()
 			wait(0)
-			return finishthread(parent, 'done')
+			return finish_in(parent, 'done')
 		end)
 		resume(child)
 		local ret = suspend()
@@ -148,19 +694,53 @@ function test.thread_cofinish_resumes_target()
 	assert(child:status() == 'dead')
 end
 
-function test.threadset_error_propagation()
+function test.cowrap_success_and_error()
 	checked_run(function()
-		local ts = threadset()
-		resume(ts:thread(function()
-			error'boom'
-		end))
-		resume(ts:thread(function()
-			wait(0)
-		end))
-		local ok, err = ts:join()
+		local wrapped, th
+		wrapped, th = cowrap(function(yield, arg)
+			assert(currentthread() == th)
+			assert(arg == 'start')
+			local resumed = yield('yielded')
+			assert(resumed == 'back')
+			return 'done'
+		end)
+
+		assert(wrapped('start') == 'yielded')
+		assert(th:status() ~= 'dead')
+		local ret = wrapped('back')
+		assert(ret == 'done')
+		assert(th:status() == 'dead')
+
+		local bad, bad_th = cowrap(function()
+			error'cowrap-boom'
+		end)
+
+		local ok, err = pcall(bad)
 		assert(not ok)
-		assert(tostring(err):find'boom')
+		assert(tostring(err):find('cowrap-boom', 1, true))
+		assert(bad_th:status() == 'dead')
 	end)
+end
+
+function test.threadset_error_propagation()
+	local old_log = log
+	log = noop
+	local ok, err = xpcall(function()
+		checked_run(function()
+			local ts = threadset()
+			resume(ts:thread(function()
+				error'boom'
+			end))
+			resume(ts:thread(function()
+				wait(0)
+			end))
+			local ok, err = ts:join()
+			assert(not ok)
+			assert(tostring(err):find'boom')
+		end)
+	end, debug.traceback)
+	log = old_log
+	assert(ok, err)
 end
 
 function test.threadset_join_empty()
@@ -182,6 +762,16 @@ function test.thread_env_inherit()
 		end, 'child'))
 		assert(child_val == 42)
 	end)
+end
+
+function test.run_returns_values()
+	local a, b, c = run(function(arg)
+		return arg, nil, false
+	end, 'value')
+
+	assert(a == 'value')
+	assert(b == nil)
+	assert(c == false)
 end
 
 function test.run_when_already_running()

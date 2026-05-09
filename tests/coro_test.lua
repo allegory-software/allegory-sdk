@@ -6,7 +6,7 @@ local function test(descr, f)
 	local ok, err = xpcall(f, debug.traceback)
 	print((ok and 'ok:   ' or 'fail: ') .. descr)
 	if not ok then
-		io.stderr:write(err..'\n')
+		io.stderr:write(tostring(err)..'\n')
 		n_fail = n_fail + 1
 	else
 		n_ok = n_ok + 1
@@ -23,27 +23,34 @@ test('first transfer() args are passed as function args', function()
 	local co = coroutine.create(function(...)
 		local ret1, ret2, ret3 = narg(3, ...)
 		assert(ret1 == 'ret1')
-		assert(ret2 == 'ret2')
-		assert(ret3 == 'ret3')
-		coroutine.transfer(main)
+		assert(ret2 == false)
+		assert(ret3 == nil)
+		return main
 	end)
-	coroutine.transfer(co, 'ret1', 'ret2', 'ret3')
+
+	coroutine.transfer(co, 'ret1', false, nil)
+	assert(coroutine.status(co) == 'dead')
 end)
 
-test('transfer() args are passed to the other coroutine', function()
+test('transfer() args are passed to suspended coroutine', function()
 	local co = coroutine.create(function()
-		coroutine.transfer(main, 'ret1', 'ret2', 'ret3')
+		local ret1, ret2, ret3 = narg(3, coroutine.transfer(main, 'ready'))
+		assert(ret1 == 'ret1')
+		assert(ret2 == false)
+		assert(ret3 == nil)
+		return main, 'done'
 	end)
-	local ret1, ret2, ret3 = narg(3, coroutine.transfer(co))
-	assert(ret1 == 'ret1')
-	assert(ret2 == 'ret2')
-	assert(ret3 == 'ret3')
+
+	assert(coroutine.transfer(co) == 'ready')
+	assert(coroutine.transfer(co, 'ret1', false, nil) == 'done')
+	assert(coroutine.status(co) == 'dead')
 end)
 
-test('finish() transfers to target coroutine', function()
+test('coroutine return target transfers values', function()
 	local co = coroutine.create(function()
-		return coroutine.finish_into(main, 'ret1', false, nil)
+		return main, 'ret1', false, nil
 	end)
+
 	local ret1, ret2, ret3 = narg(3, coroutine.transfer(co))
 	assert(ret1 == 'ret1')
 	assert(ret2 == false)
@@ -51,503 +58,266 @@ test('finish() transfers to target coroutine', function()
 	assert(coroutine.status(co) == 'dead')
 end)
 
-test('finish_with() transfers error to target coroutine', function()
+test('empty and nil target returns transfer to main', function()
+	local empty = coroutine.create(function()
+	end)
+	narg(0, coroutine.transfer(empty))
+	assert(coroutine.status(empty) == 'dead')
+
+	local nil_target = coroutine.create(function()
+		return nil, 'ret'
+	end)
+	assert(coroutine.transfer(nil_target) == 'ret')
+	assert(coroutine.status(nil_target) == 'dead')
+end)
+
+test('false finish target raises error', function()
 	local co = coroutine.create(function()
-		return coroutine.finish_into_with(main, false, '!err!')
+		return false, 'ret'
 	end)
-	local ok, err = coroutine.try_transfer_with(co, true)
-	assert(ok == false)
-	assert(err == '!err!')
-	assert(coroutine.status(co) == 'dead')
-end)
 
-test('onfinish can finish into target coroutine', function()
-	local target = coroutine.create(function(v)
-		coroutine.transfer(main, 'target', v)
-	end)
-	local co = coroutine.create(function()
-		return 'body-ret'
-	end, function(co, ok, ...)
-		assert(ok == true)
-		assert((...) == 'body-ret')
-		return true, coroutine.finish_into(target, 'fin-ret')
-	end)
-	local a, b = narg(2, coroutine.transfer(co))
-	assert(a == 'target')
-	assert(b == 'fin-ret')
-	assert(coroutine.status(co) == 'dead')
-end)
-
-test('onfinish can finish_with() error into target coroutine', function()
-	local co = coroutine.create(function()
-		return 'body-ret'
-	end, function(co, ok, ...)
-		assert(ok == true)
-		assert((...) == 'body-ret')
-		return true, coroutine.finish_into_with(main, false, '!finerr!')
-	end)
-	local ok, err = coroutine.try_transfer_with(co, true)
-	assert(ok == false)
-	assert(err == '!finerr!')
-	assert(coroutine.status(co) == 'dead')
-end)
-
-test('resumed coroutine cannot finish with a transfer', function()
-	local child
-	local parent = coroutine.create(function()
-		child = coroutine.create(function()
-			return coroutine.finish_into(main)
-		end)
-		coroutine.resume(child)
-		assert(false) --resume breaks in main coroutine, not reaching here
-	end)
-	local ok, err = pcall(coroutine.transfer, parent)
-	assert(ok == false)
-	assert(err:find'resumed coroutine finished with a transfer')
-	assert(coroutine.status(child) == 'dead')
-end)
-
-test('transfer() clears pending resume caller while target runs', function()
-	local co
-	co = coroutine.create(function()
-		local target = coroutine.create(function()
-			local ok, err = pcall(coroutine.yield, 'bad-yield')
-			assert(ok == false)
-			assert(err:find'yielding from a non')
-			coroutine.transfer(co, 'from-target')
-		end)
-		assert(coroutine.transfer(target) == 'from-target')
-		assert(coroutine.yield('from-resumed') == 'back-to-resumed')
-		return 'done'
-	end)
-	local ok, ret = narg(2, coroutine.resume(co))
-	assert(ok == true, tostring(ret))
-	assert(ret == 'from-resumed')
-	local ok, ret = narg(2, coroutine.resume(co, 'back-to-resumed'))
-	assert(ok == true, tostring(ret))
-	assert(ret == 'done')
-end)
-
-test('transfer() restores pending resume caller after target returns', function()
-	local co
-	co = coroutine.create(function()
-		local target = coroutine.create(function()
-			coroutine.transfer(co, 'from-target')
-		end)
-		assert(coroutine.transfer(target) == 'from-target')
-		assert(coroutine.yield('from-resumed') == 'back-to-resumed')
-		return 'done'
-	end)
-	local ok, ret = narg(2, coroutine.resume(co))
-	assert(ok == true, tostring(ret))
-	assert(ret == 'from-resumed')
-	local ok, ret = narg(2, coroutine.resume(co, 'back-to-resumed'))
-	assert(ok == true, tostring(ret))
-	assert(ret == 'done')
-end)
-
-test('nested resume restores outer caller after child yield', function()
-	local parent = coroutine.create(function()
-		local child = coroutine.create(function()
-			assert(coroutine.yield('from-child') == 'back-to-child')
-			return 'child-done'
-		end)
-		local ok, ret = narg(2, coroutine.resume(child))
-		assert(ok == true)
-		assert(ret == 'from-child')
-		assert(coroutine.yield('from-parent') == 'back-to-parent')
-		local ok, ret = narg(2, coroutine.resume(child, 'back-to-child'))
-		assert(ok == true)
-		assert(ret == 'child-done')
-		return 'parent-done'
-	end)
-	local ok, ret = narg(2, coroutine.resume(parent))
-	assert(ok == true)
-	assert(ret == 'from-parent')
-	local ok, ret = narg(2, coroutine.resume(parent, 'back-to-parent'))
-	assert(ok == true)
-	assert(ret == 'parent-done')
-end)
-
-test('first resume() args are passed as function args', function()
-	local co = coroutine.create(function(...)
-		assert(select('#', ...) == 3)
-		local a, b, c = ...
-		assert(a == 5)
-		assert(b == 7)
-		assert(c == 9)
-	end)
-	local ok = narg(1, coroutine.resume(co, 5, 7, 9))
-	assert(ok == true)
-end)
-
-test('coroutine\'s return values are passed to the caller coroutine', function()
-	local co = coroutine.create(function(...)
-		return 5, 7, 9
-	end)
-	local ok, a, b, c = narg(4, coroutine.resume(co, 5, 7, 9))
-	assert(ok == true)
-	assert(a == 5)
-	assert(b == 7)
-	assert(c == 9)
-end)
-
-test('yield() args are passed to the caller coroutine', function()
-	local co = coroutine.create(function()
-		coroutine.yield(3, 2, 1)
-		coroutine.yield('a', nil, 'c', false, nil)
-	end)
-	local ok, a, b, c = narg(4, coroutine.resume(co))
-	assert(ok == true)
-	assert(a == 3)
-	assert(b == 2)
-	assert(c == 1)
-	local ok, a, b, c, d, e = narg(6, coroutine.resume(co))
-	assert(ok == true)
-	assert(a == 'a')
-	assert(b == nil)
-	assert(c == 'c')
-	assert(d == false)
-	assert(e == nil)
-end)
-
-test('resumed coroutine can yield repeatedly', function()
-	local co = coroutine.create(function()
-		assert(coroutine.yield(1) == 10)
-		assert(coroutine.yield(2) == 20)
-		assert(coroutine.yield(3) == 30)
-		return 4
-	end)
-	local ok, v = narg(2, coroutine.resume(co))
-	assert(ok == true)
-	assert(v == 1)
-	local ok, v = narg(2, coroutine.resume(co, 10))
-	assert(ok == true)
-	assert(v == 2)
-	local ok, v = narg(2, coroutine.resume(co, 20))
-	assert(ok == true)
-	assert(v == 3)
-	local ok, v = narg(2, coroutine.resume(co, 30))
-	assert(ok == true)
-	assert(v == 4)
-end)
-
-test('first resume() args are passed as function args to wrapped coroutine',
-function()
-	local co = coroutine.wrap(function(...)
-		local a, b, c = narg(3, ...)
-		assert(a == 5)
-		assert(b == 7)
-		assert(c == 9)
-	end)
-	co(5, 7, 9)
-end)
-
-test('return values of wrapped coroutine are passed to the caller coroutine',
-function()
-	local co = coroutine.wrap(function()
-		return 5, 7, 9
-	end)
-	local a, b, c = narg(3, co())
-	assert(a == 5)
-	assert(b == 7)
-	assert(c == 9)
-end)
-
-test('yield() args in wrapped coroutine are passed to the caller coroutine',
-function()
-	local co = coroutine.wrap(function()
-		coroutine.yield(5, 7, 9)
-		coroutine.yield('a', nil, 'c', nil)
-	end)
-	local a, b, c = narg(3, co())
-	assert(a == 5)
-	assert(b == 7)
-	assert(c == 9)
-	local a, b, c, d = narg(4, co())
-	assert(a == 'a')
-	assert(b == nil)
-	assert(c == 'c')
-	assert(d == nil)
-	narg(0, co())
-end)
-
-test('yield() from the main coroutine raises error in main', function()
-	local ok, err = pcall(coroutine.yield)
-	assert(ok == false)
-	assert(err:find'yielding from the main')
-end)
-
-test('yield() from a non-resumed coroutine raises error in coroutine', function()
-	local co = coroutine.create(function()
-		local ok, err = pcall(coroutine.yield)
-		assert(ok == false)
-		assert(err:find'yielding from a non')
-		coroutine.transfer(main)
-	end)
-	coroutine.transfer(co)
-end)
-
-test('coroutine ending without transferring control raises error in main',
-function()
-	local co = coroutine.create(function() end)
 	local ok, err = pcall(coroutine.transfer, co)
 	assert(ok == false)
-	assert(err:find'without transferring')
+	assert(tostring(err):find('thread expected', 1, true))
+	assert(coroutine.status(co) == 'dead')
 end)
 
-test('coroutine ending without transferring control raises error in main (2)',
-function()
-	local co = coroutine.create(function()
-		local co2 = coroutine.create(function() end)
-		pcall(coroutine.transfer, co2)
-		assert(false) --transfer breaks in main coroutine, not reaching here
+test('finish to self raises error', function()
+	local co
+	co = coroutine.create(function()
+		return co, 'ret'
 	end)
+
 	local ok, err = pcall(coroutine.transfer, co)
 	assert(ok == false)
-	assert(err:find'without transferring')
+	assert(tostring(err):find('finish to self', 1, true))
+	assert(coroutine.status(co) == 'dead')
 end)
 
-test('error() in coroutine is reported to the parent', function()
+test('finish to dead coroutine raises error', function()
+	local target = coroutine.create(function()
+		return main, 'target-done'
+	end)
+	assert(coroutine.transfer(target) == 'target-done')
+	assert(coroutine.status(target) == 'dead')
+
+	local co = coroutine.create(function()
+		return target, 'ret'
+	end)
+
+	local ok, err = pcall(coroutine.transfer, co)
+	assert(ok == false)
+	assert(tostring(err):find('finish to a dead coroutine', 1, true))
+	assert(coroutine.status(co) == 'dead')
+end)
+
+test('try_transfer() validates target before transfer', function()
+	local ok, err = coroutine.try_transfer({})
+	assert(ok == nil)
+	assert(err:find('thread expected', 1, true))
+
+	local co = coroutine.create(function()
+		return main
+	end)
+	assert(coroutine.transfer(co) == nil)
+	assert(coroutine.status(co) == 'dead')
+
+	ok, err = coroutine.try_transfer(co)
+	assert(ok == nil)
+	assert(err:find('dead', 1, true))
+end)
+
+test('transfer() to invalid target raises error', function()
+	local ok, err = pcall(coroutine.transfer, {})
+	assert(ok == false)
+	assert(tostring(err):find('thread expected', 1, true))
+end)
+
+test('transfer() to self is rejected', function()
+	local co
+	co = coroutine.create(function()
+		local ok, err = coroutine.try_transfer(co)
+		assert(ok == nil)
+		assert(err:find('self', 1, true))
+		return main, 'done'
+	end)
+
+	assert(coroutine.transfer(co) == 'done')
+end)
+
+test('coroutine errors are raised in main and current is restored', function()
 	local co = coroutine.create(function()
 		error'!err!'
 	end)
-	local ok, err = coroutine.resume(co)
-	assert(ok == false)
-	assert(err:find'!err!')
-end)
 
-test('onfinish error in resumed coroutine is reported to caller', function()
-	local parent = coroutine.create(function()
-		local child = coroutine.create(function()
-			return 'body-ret'
-		end, function()
-			error'!finerr!'
-		end)
-		local ok, err = coroutine.resume(child)
-		assert(ok == false)
-		assert(err:find'!finerr!')
-		assert(coroutine.status(child) == 'dead')
-		coroutine.transfer(main)
-	end)
-	coroutine.transfer(parent)
-end)
-
-test('onfinish error in transferred coroutine is reported to main', function()
-	local co = coroutine.create(function()
-		return 'body-ret'
-	end, function()
-		error'!finerr!'
-	end)
 	local ok, err = pcall(coroutine.transfer, co)
 	assert(ok == false)
-	assert(err:find'!finerr!')
+	assert(tostring(err):find('!err!', 1, true))
 	assert(coroutine.status(co) == 'dead')
-end)
+	assert(coroutine.running() == main)
 
-test('onfinish error takes precedence over coroutine error', function()
-	local co = coroutine.create(function()
-		error'!bodyerr!'
-	end, function()
-		error'!finerr!'
+	local next_co = coroutine.create(function()
+		return main, 'next'
 	end)
-	local ok, err = pcall(coroutine.transfer, co)
-	assert(ok == false)
-	assert(err:find'!finerr!')
-	assert(not err:find'!bodyerr!', 1, true)
-	assert(coroutine.status(co) == 'dead')
+	assert(coroutine.transfer(next_co) == 'next')
 end)
 
-test('onfinish error preserves non-string error values', function()
+test('coroutine errors preserve non-string error values', function()
 	local co = coroutine.create(function()
-		return 'body-ret'
-	end, function()
 		error(false)
 	end)
+
 	local ok, err = pcall(coroutine.transfer, co)
 	assert(ok == false)
 	assert(err == false)
 	assert(coroutine.status(co) == 'dead')
 end)
 
-test('error() in safewrap coroutine is reported to the caller coroutine', function()
-	local ok, err = coroutine.resume(coroutine.create(function()
-		local f = coroutine.safewrap(function(yield)
-			error'!err!'
-		end)
-		local ok,err = pcall(f)
-		assert(ok == false)
-		assert(err:find'!err!')
-		assert(ok, err)
-	end))
-	assert(ok == false)
-	assert(err:find'!err!')
-end)
-
-test('error() in safewrap coroutine is reported to the caller coroutine', function()
-	local was_here
-	local ok, err = coroutine.resume(coroutine.create(function()
-		local f = coroutine.safewrap(function(yield)
-			yield'first'
-			error'!err!'
-		end)
-		assert(f() == 'first')
-		local ok,err = pcall(f)
-		assert(ok == false)
-		assert(err:find'!err!')
-		was_here = true
-		assert(ok, err)
-	end))
-	assert(was_here)
-	assert(ok == false)
-	assert(err:find'!err!')
-end)
-
-test('error() in safewrap onfinish is reported to caller coroutine', function()
-	local f = coroutine.safewrap(function(yield)
-		return 'body-ret'
-	end, function()
-		error'!finerr!'
+test('transfer() is not stack bound', function()
+	local i = 0
+	local max = 100000
+	local function more() i = i + 1; return i < max end
+	local t1, t2, t3
+	t1 = coroutine.create(function()
+		while more() do coroutine.transfer(t2) end
+		return main
 	end)
-	local ok, err = pcall(f)
-	assert(ok == false)
-	assert(err:find'!finerr!')
+	t2 = coroutine.create(function()
+		while more() do coroutine.transfer(t3) end
+		return main
+	end)
+	t3 = coroutine.create(function()
+		while more() do coroutine.transfer(t1) end
+		return main
+	end)
+	coroutine.transfer(t1)
+	assert(i == max)
 end)
 
-test('safewrap() body does not inherit resume caller', function()
-	local parent = coroutine.create(function()
-		local f = coroutine.safewrap(function(yield)
-			local ok, err = pcall(coroutine.yield, 'bad-yield')
-			assert(ok == false)
-			assert(err:find'yielding from a non')
-			return yield('safe-yield')
+test('transfer() chains and coroutine.running()', function()
+	local t = {}
+	local co = coroutine.create(function()
+		local parent = coroutine.running()
+		local sub = coroutine.create(function()
+			table.insert(t, 'sub')
+			coroutine.transfer(parent)
+			return main
 		end)
-		assert(f() == 'safe-yield')
-		assert(coroutine.yield('parent-yield') == 'back-to-parent')
+		coroutine.transfer(sub)
+		table.insert(t, 'back')
+		return main
+	end)
+
+	coroutine.transfer(co)
+	assert(coroutine.running() == main)
+	assert(#t == 2)
+	assert(t[1] == 'sub')
+	assert(t[2] == 'back')
+end)
+
+test('wrap() returns plain values', function()
+	local f, co = coroutine.wrap(function(yield, ...)
+		local a, b, c = narg(3, ...)
+		assert(a == 'arg1')
+		assert(b == false)
+		assert(c == nil)
+		return 'ret1', false, nil
+	end)
+
+	local ret1, ret2, ret3 = narg(3, f('arg1', false, nil))
+	assert(ret1 == 'ret1')
+	assert(ret2 == false)
+	assert(ret3 == nil)
+	assert(coroutine.status(co) == 'dead')
+end)
+
+test('wrap() yield returns plain values', function()
+	local f, co = coroutine.wrap(function(yield)
+		local a, b, c = narg(3, yield('yield1', false, nil))
+		assert(a == 'back1')
+		assert(b == false)
+		assert(c == nil)
+		return 'done', a, b, c
+	end)
+
+	local a, b, c = narg(3, f())
+	assert(a == 'yield1')
+	assert(b == false)
+	assert(c == nil)
+
+	local r, a1, b1, c1 = narg(4, f('back1', false, nil))
+	assert(r == 'done')
+	assert(a1 == 'back1')
+	assert(b1 == false)
+	assert(c1 == nil)
+	assert(coroutine.status(co) == 'dead')
+end)
+
+test('wrap() false yield value does not raise', function()
+	local f = coroutine.wrap(function(yield)
+		yield(false, 'value')
 		return 'done'
 	end)
-	local ok, ret = narg(2, coroutine.resume(parent))
-	assert(ok == true)
-	assert(ret == 'parent-yield')
-	local ok, ret = narg(2, coroutine.resume(parent, 'back-to-parent'))
-	assert(ok == true)
-	assert(ret == 'done')
+
+	local a, b = narg(2, f())
+	assert(a == false)
+	assert(b == 'value')
+	assert(f() == 'done')
 end)
 
-test('error() in sub-coroutine is reported to the parent coroutine', function()
-	local co = coroutine.create(function()
-		local sub = coroutine.create(function()
-			error'!sub!'
-		end)
-		local ok, err = coroutine.resume(sub)
-		coroutine.yield(ok, err)
+test('wrap() errors are raised in caller', function()
+	local f, co = coroutine.wrap(function()
+		error'!err!'
 	end)
-	local ok_co, ok, err = coroutine.resume(co)
-	assert(ok_co == true)
+
+	local ok, err = pcall(f)
 	assert(ok == false)
-	assert(err:find'!sub!')
+	assert(tostring(err):find('!err!', 1, true))
+	assert(coroutine.status(co) == 'dead')
 end)
 
-test('error() in wrapped sub-coroutine is raised in the parent coroutine',
-function()
-	local co = coroutine.create(function()
-		local sub = coroutine.wrap(function()
+test('wrap() errors after yield are raised in caller', function()
+	local f, co = coroutine.wrap(function(yield)
+		yield'first'
+		error(false)
+	end)
+
+	assert(f() == 'first')
+	local ok, err = pcall(f)
+	assert(ok == false)
+	assert(err == false)
+	assert(coroutine.status(co) == 'dead')
+end)
+
+test('wrap() errors are catchable from coroutine caller', function()
+	local parent = coroutine.create(function()
+		local f = coroutine.wrap(function()
 			error'!err!'
 		end)
-		sub()
-		error'here' --not reaching here, sub() re-raises the error
+		local ok, err = pcall(f)
+		return main, ok, tostring(err):find('!err!', 1, true) ~= nil
 	end)
-	local ok, err = coroutine.resume(co)
+
+	local ok, found = narg(2, coroutine.transfer(parent))
 	assert(ok == false)
-	assert(err:find'!err!')
-end)
-
-test('error() in transferred coroutine is raised in main', function()
-	local ok, err, traceback = coroutine.try_transfer_with(coroutine.create(function()
-		local co = coroutine.create(function()
-			error'here'
-		end)
-		coroutine.transfer(co)
-		assert(false) --not reaching here, transfer() didn't set a caller.
-	end), true)
-	assert(not ok)
-	assert(err:find'here')
-end)
-
-test('transferred coroutine errors in main while resume caller waits', function()
-	local parent = coroutine.create(function()
-		local child = coroutine.create(function()
-			local target = coroutine.create(function()
-				error'!target!'
-			end)
-			coroutine.transfer(target)
-			assert(false) --transfer breaks in main coroutine, not reaching here
-		end)
-		coroutine.resume(child)
-		assert(false) --target error breaks in main coroutine, not reaching here
-	end)
-	local ok, err = pcall(coroutine.transfer, parent)
-	assert(ok == false)
-	assert(err:find'!target!')
-end)
-
-test('transferred coroutine can finish into main while resume caller waits',
-function()
-	local parent = coroutine.create(function()
-		local child = coroutine.create(function()
-			local target = coroutine.create(function()
-				return coroutine.finish_into(main, 'target-finished')
-			end)
-			coroutine.transfer(target)
-			assert(false) --transfer breaks in main coroutine, not reaching here
-		end)
-		coroutine.resume(child)
-		assert(false) --finish_into() breaks in main coroutine, not reaching here
-	end)
-	assert(coroutine.transfer(parent) == 'target-finished')
-end)
-
-test('trying to resume the current coroutine', function()
-	local ok, err = pcall(coroutine.resume, coroutine.running())
-	assert(ok == false)
-	assert(err:find'resume the running coroutine')
-end)
-
-test('trying to resume main', function()
-	local co = coroutine.wrap(function()
-		local ok, err = pcall(coroutine.resume, main, 5, 6, 7)
-		assert(ok == false)
-		assert(err:find'main')
-	end)
-	co()
-end)
-
-test('trying to resume a dead coroutine returns protected error', function()
-	local co = coroutine.create(function()
-		return 'ret'
-	end)
-	local ok, ret = narg(2, coroutine.resume(co))
-	assert(ok == true)
-	assert(ret == 'ret')
-	local protected, ok, err = pcall(coroutine.resume, co)
-	assert(protected == true)
-	assert(not ok)
-	assert(err:find'dead')
+	assert(found == true)
+	assert(coroutine.status(parent) == 'dead')
 end)
 
 test('nested wrap()-based iterators', function()
-	local iter1 = coroutine.wrap(function()
-		local iter2 = coroutine.wrap(function()
-			coroutine.yield('k1', 'v1')
-			coroutine.yield('k2', 'v2')
-			coroutine.yield('k3', 'v3')
+	local iter1 = coroutine.wrap(function(yield1)
+		local iter2 = coroutine.wrap(function(yield2)
+			yield2('k1', 'v1')
+			yield2('k2', 'v2')
+			yield2('k3', 'v3')
 		end)
-		for k,v in iter2 do
-			coroutine.yield(v, k)
+		for k, v in iter2 do
+			yield1(v, k)
 		end
 	end)
+
 	local t = {}
-	for v,k in iter1 do
+	for v, k in iter1 do
 		t[#t+1] = k..v
 	end
 	assert(#t == 3)
@@ -556,7 +326,7 @@ test('nested wrap()-based iterators', function()
 	assert(t[3] == 'k3v3')
 end)
 
-test('transfer() inside wrap()/yield()-based iterator', function()
+test('transfer() inside wrap()-based iterator', function()
 	local i = 0
 	local function nextval()
 		if i == 10 then
@@ -573,27 +343,27 @@ test('transfer() inside wrap()/yield()-based iterator', function()
 	end)
 
 	local function read()
-		return coroutine.transfer(scheduler, (coroutine.running()))
+		return coroutine.transfer(scheduler, coroutine.running())
 	end
 
-	local co = coroutine.wrap(function(...)
-
-		local p,a1,a2 = narg(3,...)
+	local f = coroutine.wrap(function(yield, ...)
+		local p, a1, a2 = narg(3, ...)
 		assert(p == 'passed')
 		assert(a1 == 'arg1')
 		assert(a2 == 'arg2')
 
-		local iter = coroutine.wrap(function()
+		local iter = coroutine.wrap(function(yield_iter)
 			local i = 0
 			while true do
 				i = i + 1
 				local v1 = read()
 				local v2 = read()
-				coroutine.yield('step'..i, v1, v2)
+				yield_iter('step'..i, v1, v2)
 				if v2 == 10 then break end
 				if not v1 or not v2 then break end
 			end
 		end)
+
 		local t = {}
 		for step, v1, v2 in iter do
 			t[#t+1] = {step, v1, v2}
@@ -608,83 +378,27 @@ test('transfer() inside wrap()/yield()-based iterator', function()
 
 		return 'returned', 'ret1', 'ret2'
 	end)
-	local r,r1,r2 = narg(3, co('passed', 'arg1', 'arg2'))
+
+	local r, r1, r2 = narg(3, f('passed', 'arg1', 'arg2'))
 	assert(r == 'returned')
 	assert(r1 == 'ret1')
 	assert(r2 == 'ret2')
 end)
 
-test('transfer() is not stack bound', function()
-	local i = 0
-	local max = 100000
-	local function more() i = i + 1; return i < max end
-	local t1, t2, t3
-	t1 = coroutine.create(function()
-		while more() do coroutine.transfer(t2) end
-		coroutine.transfer(main)
-	end)
-	t2 = coroutine.create(function()
-		while more() do coroutine.transfer(t3) end
-		coroutine.transfer(main)
-	end)
-	t3 = coroutine.create(function()
-		while more() do coroutine.transfer(t1) end
-		coroutine.transfer(main)
-	end)
-	coroutine.transfer(t1)
-	assert(i == max)
-end)
-
-test('transfer() chains and coroutine.running()', function()
-	local t = {}
-	coroutine.transfer(coroutine.create(function()
-		local parent = coroutine.running()
-		local co = coroutine.create(function()
-			table.insert(t, 'sub')
-			coroutine.transfer(parent)
+test('wrap() cross-yielding', function()
+	local f1 = coroutine.wrap(function(yield1, a)
+		assert(a == 1)
+		local f2 = coroutine.wrap(function(yield2, a)
+			assert(coroutine.transfer(main, coroutine.running(), 'go') == 'back')
+			assert(a == 11)
+			assert(yield1(1) == 2)
+			assert(yield2(22) == 33)
+			return 44
 		end)
-		coroutine.transfer(co)
-		table.insert(t, 'back')
-		coroutine.transfer(main)
-	end))
-	assert(coroutine.running() == main)
-	assert(#t == 2)
-	assert(t[1] == 'sub')
-	assert(t[2] == 'back')
-
-	local t = {}
-	coroutine.transfer(coroutine.create(function()
-		local parent = coroutine.running()
-		local co = coroutine.wrap(function()
-			for i=1,1000 do
-				coroutine.transfer(parent, i * i)
-			end
-		end)
-		for s in co do
-			table.insert(t, s)
-		end
-		coroutine.transfer(main)
-	end))
-	assert(coroutine.running() == main)
-	assert(#t == 1000)
-	for i=1,1000 do assert(t[i] == i * i) end
-end)
-
-test('safewrap() cross-yielding', function()
-
-	local f1 = coroutine.safewrap(function(yield1, a)
-			assert(a == 1)
-			local f2 = coroutine.safewrap(function(yield2, a)
-				assert(coroutine.transfer(main, coroutine.running(), 'go') == 'back')
-				assert(a == 11)
-				assert(yield1(1) == 2)
-				assert(yield2(22) == 33)
-				return 44
-			end)
-			assert(f2(11) == 22)
-			assert(f2(33) == 44)
-			assert(yield1(3) == 4)
-			return 5
+		assert(f2(11) == 22)
+		assert(f2(33) == 44)
+		assert(yield1(3) == 4)
+		return 5
 	end)
 
 	local co = coroutine.create(function()
@@ -692,13 +406,12 @@ test('safewrap() cross-yielding', function()
 		assert(f1(2) == 3)
 		assert(f1(4) == 5)
 		assert(select(2, pcall(f1)):find('dead'))
-		coroutine.transfer(main, 'over')
+		return main, 'over'
 	end)
 
-	local co, val = coroutine.transfer(co)
+	local co1, val = coroutine.transfer(co)
 	assert(val == 'go')
-	assert(coroutine.transfer(co or main, 'back') == 'over')
-
+	assert(coroutine.transfer(co1, 'back') == 'over')
 end)
 
 test('suspended coroutines are garbage-collected', function()
@@ -716,22 +429,18 @@ test('suspended coroutines are garbage-collected', function()
 	collectgarbage(); assert(not next(t))
 end)
 
-test('abandoned resumed transfer cycle is garbage-collected', function()
+test('abandoned suspended wrap() coroutine is garbage-collected', function()
 	local t = setmetatable({}, {__mode = 'k'})
 	do
-		local parent
-		parent = coroutine.create(function()
-			local child = coroutine.create(function()
-				coroutine.transfer(main)
-				print'unreachable code'
-			end)
-			t[child] = true
-			coroutine.resume(child)
+		local f, co = coroutine.wrap(function(yield)
+			yield('paused')
 			print'unreachable code'
 		end)
-		t[parent] = true
-		coroutine.transfer(parent)
-		parent = nil
+		t[co] = true
+		assert(f() == 'paused')
+		collectgarbage(); assert(next(t))
+		f = nil
+		co = nil
 	end
 	collectgarbage()
 	collectgarbage()
