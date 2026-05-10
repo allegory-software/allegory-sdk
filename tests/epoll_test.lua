@@ -579,32 +579,30 @@ function test.cancel_resume_waiter_canceler_can_wait_after_cancel()
 		assert(wait_ok == nil)
 		assert(wait_err == 'timeout')
 		assert(ret == 'done')
-		assert(child:try_cancel())
 		assert(child:status() == 'dead')
 		assert(canceler:status() == 'dead')
 	end)
 end
 
-function test.cancel_resume_waiter_cancel_takes_precedence()
+function test.cancel_cascades_down_resume_chain()
 	checked_run(function()
 		local parent = currentthread()
-		local child
+		local a, b
 		local canceler = thread(function()
 			parent:cancel()
-			return finish_in(child, 'go')
 		end)
-
-		child = thread(function()
+		b = thread(function()
 			transfer(canceler)
-			return finish_in_with(parent, false, 'child-error')
 		end)
-
+		a = thread(function()
+			resume(b)
+		end)
 		local ok, err = lua_pcall(function()
-			resume(child)
+			resume(a)
 		end)
-
 		assert_cancel(ok, err)
-		assert(child:status() == 'dead')
+		assert(a:status() == 'dead')
+		assert(b:status() == 'dead')
 		assert(canceler:status() == 'dead')
 	end)
 end

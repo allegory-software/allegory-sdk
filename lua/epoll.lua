@@ -787,11 +787,18 @@ end
 	if not ok then return false, err end
 	return true
 end
+local function reset_resuming(self, ...)
+	self.resuming = nil
+	return ...
+end
 function try_resume_with(thread, ...)
 	assert(isthread(thread), 'resume: thread expected')
 	assert(thread.waiting == true, 'resume: thread not suspended')
-	currentthread().waiting = 'resume' --allow finish into, block all else
-	return reset_waiting(try_resume_until_blocked_with(thread, ...))
+	local self = currentthread()
+	self.waiting = 'resume' --allow finish into, block all else
+	self.resuming = thread
+	return reset_waiting(reset_resuming(self,
+		try_resume_until_blocked_with(thread, ...)))
 end
 function try_resume(thread, ...)
 	return try_resume_with(thread, true, ...)
@@ -831,6 +838,9 @@ function Thread:try_cancel()
 		return true
 	elseif self.waiting == 'resume' then
 		self.cancelled = true --mark-and-wait
+		if self.resuming then
+			self.resuming:try_cancel()
+		end
 		return true
 	elseif istab(self.waiting) and self.waiting.try_cancel_io then --epollable
 		return self.waiting:try_cancel_io(self)
