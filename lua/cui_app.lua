@@ -142,15 +142,16 @@ local function cui_app(...)
 	function chdir(dir)
 		error'chdir() not allowed'
 	end
+	--overwrite vardir() so we can see only short rel paths in logs.
 	local rel_vardir = relpath(vardir(), scriptdir())
 	function vardir()
 		return rel_vardir
 	end
 
 	--non-configurable, convention-based things.
-	local pidfile  = scriptname..'.pid'
-	local logfile  = scriptname..'.log'
-	local conffile = scriptname..'.conf'
+	local pidfile  = varpath(scriptname..'.pid')
+	local logfile  = varpath(scriptname..'.log')
+	local conffile = varpath(scriptname..'.conf')
 
 	--consider this module loaded so that other app submodules that
 	--require it at runtime don't try to load it again.

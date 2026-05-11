@@ -1,8 +1,5 @@
 ERROR REPORTING
 ------------------------------------------------------------------------------
-* fs/sock try methods do not break on usage errors other than EINVAL and EBADF
-so usage errors come up as I/O errors (retriable).
-
 * fs/sock try methods don't close the file/socket on error.
 
 * f/sock try methods return string errors (can do `err == 'not_found'` though!).
@@ -27,8 +24,12 @@ so usage errors come up as I/O errors (retriable).
 * error reporting lacking context:
 	- unprotect_io() lacks the context that functions with check() have.
 	- sometimes even check() lacks context because it's inside try_() code.
+
 * check() from errors.lua is ungreppable because of all local check() flavors.
+	->
+
 * check_errno() is not raising like all other check*() functions.
+	-> try_errno()
 
 
 LOGGING
@@ -42,7 +43,6 @@ LOGGING
 I/O: FS & SOCK
 ------------------------------------------------------------------------------
 * fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
-* fs: atomic save()/saver() rethinking?
 
 
 WEBB
@@ -136,3 +136,13 @@ SECURITY
 	* add role to each restricted table in schema and check that in
 	rowset_sql on select -- we could even cut out columns from the result
 	set based on that or maybe that's too much
+
+- ASAN dev builds. Build LuaJIT with -fsanitize=address -fno-omit-frame-pointer,
+un test suite + a fuzz harness on parser entry points. Won't catch everything
+(JIT'd traces aren't instrumented; only the C side and interpreter are),
+but catches heap-side overflows reliably. Run before each release if the parsers
+change.
+
+- Length cap as a first-class concept. Every external length field should pass
+through a single bounded(claimed, max) helper that errors out on overflow.
+check str() usage, recv(), send(), pbuffer, etc.
