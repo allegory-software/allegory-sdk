@@ -170,6 +170,7 @@ if not ... then require'sock_test'; return end
 require'glue'
 require'ipv6'
 require'epoll'
+require'owner'
 
 assert(Linux, 'platform not Linux')
 
@@ -435,7 +436,7 @@ local SOCK_NONBLOCK  = 0x000800 --async I/O
 local SOCK_CLOEXEC   = 0x080000 --close-on-exec (non-inheritable on exec())
 
 local function wrap_socket(opt, class, fd, family)
-	return initowner(object(class, {
+	return _initowner(object(class, {
 		fd = assert(fd), family = family, issocket = true,
 		r = 0, w = 0,
 	}, opt))
@@ -451,7 +452,7 @@ local function create_socket(st, family, class, opt)
 		family == 'unix' and AF_UNIX  or
 		assert(false)
 	local fd = C.socket(af, bor(st, SOCK_NONBLOCK, SOCK_CLOEXEC), 0)
-	assert(check_errno(fd ~= -1))
+	assert(try_errno(fd ~= -1))
 	local s = wrap_socket(opt, class, fd, family)
 	live(s, '%s/%s fd=%d', s.socktype, family, fd)
 	return s
@@ -465,15 +466,17 @@ end
 
 --NOTE: close() returns false on error but it should be ignored.
 local function socket_try_close(self, cancel_thread)
-	if not self.fd then return true end
-	epoll_remove(self)
-	local fd = self.fd; self.fd = nil --make closed() true.
-	epoll_cancel(self, cancel_thread) --wake waiting I/O threads
-	if self.owner then
-		self.owner:disown(self)
+	if self.fd == -1 then return true end
+	local fd = self.fd; self.fd = -1 --set barrier for entire API incl. close().
+	_epoll_remove(self, fd) --close() not called yet so fd is still valid.
+	--NOTE: close() failing doesn't mean failed to close, the fd is still gone.
+	--close only reports pending I/O errors.
+	local close_ok, close_err = try_errno(C.close(fd) == 0)
+	if self._onclose then
+		--disown before waking thread owners which will try to disown and fail.
+		self:_onclose()
 	end
-	--NOTE: it is unsafe to close a socket twice no matter the error.
-	local ok, err = check_errno(C.close(fd) == 0)
+	_epoll_cancel(self, cancel_thread) --raise into waiting I/O threads.
 	local ps = self.listen_socket
 	if ps then
 		ps._sockets_n = ps._sockets_n - 1
@@ -485,35 +488,32 @@ local function socket_try_close(self, cancel_thread)
 		end
 		assert(self._sockets_n == 0)
 	end
-	if self._after_close then
-		self:_after_close()
-	end
 	live(self, nil, 'r:%d w:%d%s', self.r, self.w,
 		self._sockets and ' clients:'..self._sockets_n or '')
-	if not ok then return false, err end
+	if not close_ok then return false, close_err end
 	return true
 end
 function socket:try_close()
 	return socket_try_close(self)
 end
-function socket:try_cancel_io(cancel_thread)
-	if not self.fd then return nil, 'thread not waiting' end
+function socket:_try_cancel_io(cancel_thread)
+	if self.fd == -1 then return nil, 'thread not waiting' end
 	return socket_try_close(self, cancel_thread)
 end
 socket.close = unprotect_io(socket.try_close)
 
 function socket:closed()
-	return not self.fd
+	return self.fd == -1
 end
 
 function socket:onclose(fn)
-	after(self, '_after_close', fn)
+	after(self, '_onclose', fn)
 end
 
-socket.setexpires  = epoll_setexpires
-socket.settimeout  = epoll_settimeout
+socket.setexpires  = _epoll_setexpires
+socket.settimeout  = _epoll_settimeout
 
-function socket:epoll_error()
+function socket:_epoll_error()
 	return self:try_getopt'so_error' --NOTE: this clears the error!
 end
 
@@ -533,12 +533,12 @@ end
 
 --async sock functions -------------------------------------------------------
 
-local socket_connect = make_async_connect(function(self, sa)
+local socket_connect = _make_async_connect(function(self, sa)
 	return C.connect(self.fd, sa, sa:size())
 end)
 
 function tcp:try_connect(addr, port)
-	if not self.fd then return nil, 'closed' end
+	if self.fd == -1 then return nil, 'closed' end
 	local resolve_timeout = self.send_expires and self.send_expires - clock()
 	local sa, err = try_sockaddr(addr, port, resolve_timeout)
 	if not sa then return nil, err end
@@ -563,16 +563,16 @@ end
 
 do
 	local nbuf = new'int[1]'
-	local socket_accept = make_async('r', false, function(self, accept_sa)
+	local socket_accept = _make_async('r', false, function(self, accept_sa)
 		nbuf[0] = sizeof(sockaddr_ct)
 		local r = C.accept4(self.fd, accept_sa, nbuf, bor(SOCK_NONBLOCK, SOCK_CLOEXEC))
 		return r
 	end)
 
 	function tcp:try_accept(opt, timeout)
-		if not self.fd then return nil, 'closed' end
+		if self.fd == -1 then return nil, 'closed' end
 		local accept_sa = sockaddr_ct()
-		local s, err = socket_accept(self, accept_sa)
+		local fd, err = socket_accept(self, accept_sa)
 		--See man accept(2): Linux can return these pending connection errors.
 		local retry =
 			   err == 'network_down'
@@ -584,11 +584,11 @@ do
 			or err == 'not_supported'
 			or err == 'network_unreachable'
 			or err == 'connection_aborted'
-		if not s then
+		if not fd then
 			return nil, err, retry
 		end
-		local s = wrap_socket(opt, tcp, s, self.family)
-		epoll_add(s)
+		local s = wrap_socket(opt, tcp, fd, self.family)
+		_epoll_add(s, fd)
 		self._sockets_n = self._sockets_n + 1
 		self._sockets[s] = true
 		self.next_i = (self.next_i or 0) + 1
@@ -613,11 +613,11 @@ end
 local MSG_NOSIGNAL = 0x4000
 
 --NOTE: to send many small pieces use a pbuffer instead, this will crawl!
-local socket_send = make_async('w', true, function(self, buf, sz, flags)
+local socket_send = _make_async('w', true, function(self, buf, sz, flags)
 	return C.send(self.fd, buf, sz, flags or MSG_NOSIGNAL)
 end)
 function socket:try_send(buf, sz, flags)
-	if not self.fd then return nil, 'closed' end
+	if self.fd == -1 then return nil, 'closed' end
 	sz = sz or #buf
 	if sz == 0 then return true end --mask-out null-writes
 	local left = sz
@@ -637,13 +637,13 @@ socket.send = unprotect_io(socket.try_send)
 socket.try_write = socket.try_send
 socket.write = socket.send
 
-local socket_recv = make_async('r', true, function(self, buf, sz, flags)
+local socket_recv = _make_async('r', true, function(self, buf, sz, flags)
 	return C.recv(self.fd, buf, sz, flags or 0)
 end)
 
 --NOTE: to read many small pieces, use a pbuffer instead, this will crawl!
 function socket:try_recv(buf, sz, flags)
-	if not self.fd then return nil, 'closed' end
+	if self.fd == -1 then return nil, 'closed' end
 	if sz == 0 then return 0 end --mask out null reads
 	local n, err = socket_recv(self, buf, sz, flags)
 	if not n then return nil, err end
@@ -654,12 +654,12 @@ socket.recv = unprotect_io(socket.try_recv)
 socket.try_read = socket.try_recv
 socket.read = socket.recv
 
-local udp_sendto = make_async('w', true, function(self, sa, buf, len, flags)
+local udp_sendto = _make_async('w', true, function(self, sa, buf, len, flags)
 	return C.sendto(self.fd, buf, len, flags or 0, sa, sa:size())
 end)
 
 function udp:try_sendto(addr, port, buf, len, flags)
-	if not self.fd then return nil, 'closed' end
+	if self.fd == -1 then return nil, 'closed' end
 	len = len or #buf
 	local resolve_timeout = self.send_expires and self.send_expires - clock()
 	local sa, err = try_sockaddr(addr, port, resolve_timeout)
@@ -675,13 +675,13 @@ do
 	local src_buf_len = sizeof(src_buf)
 	local src_len_buf = new'int[1]'
 
-	local udp_recvnext = make_async('r', true, function(self, buf, len, flags)
+	local udp_recvnext = _make_async('r', true, function(self, buf, len, flags)
 		src_len_buf[0] = src_buf_len
 		return C.recvfrom(self.fd, buf, len, flags or 0, src_buf, src_len_buf)
 	end)
 
 	function udp:try_recvnext(buf, len, flags)
-		if not self.fd then return nil, 'closed' end
+		if self.fd == -1 then return nil, 'closed' end
 		assert(len > 0)
 		local len, err = udp_recvnext(self, buf, len, flags)
 		if not len then return nil, err end
@@ -698,8 +698,8 @@ int shutdown(SOCKET s, int how);
 ]]
 
 function tcp:try_shutdown(which)
-	if not self.fd then return nil, 'closed' end
-	return check_errno(C.shutdown(self.fd,
+	if self.fd == -1 then return nil, 'closed' end
+	return try_errno(C.shutdown(self.fd,
 		   which == 'r' and 0
 		or which == 'w' and 1
 		or (not which or which == 'rw') and 2) == 0)
@@ -720,10 +720,10 @@ function socket:try_bind(addr, port)
 		or nil
 	local sa, err = try_sockaddr(addr, port)
 	if not sa then return nil, err end
-	local ok, err = check_errno(C.bind(self.fd, sa, sa:size()) == 0)
+	local ok, err = try_errno(C.bind(self.fd, sa, sa:size()) == 0)
 	if not ok then return false, err end
 	self._bound_addr = sa
-	epoll_add(self) --epoll_ctl() must be called after bind() for some reason.
+	_epoll_add(self, self.fd)
 	return true
 end
 socket.bind = unprotect_io(socket.try_bind)
@@ -733,7 +733,7 @@ function socket:bound_addr()
 	if not sa then
 		sa = sockaddr_ct()
 		local nbuf = new('int[1]', sizeof(sa))
-		self:check_io(check_errno(C.getsockname(self.fd, sa, nbuf) == 0))
+		self:check_io(try_errno(C.getsockname(self.fd, sa, nbuf) == 0))
 		self._bound_addr = sa
 	end
 	return sa
@@ -754,7 +754,7 @@ function tcp:try_listen(addr, port, backlog, onaccept)
 	if not ok then return nil, err end
 	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
 	local ok = C.listen(self.fd, backlog) == 0
-	if not ok then return check_errno() end
+	if not ok then return try_errno() end
 	liveadd(self, 'listen=%s', self._bound_addr)
 	self._sockets = {} --live client connections: {socket->true}
 	self._sockets_n = 0 --live client connection count
@@ -801,7 +801,7 @@ local function get_uint16 (buf) return buf.u16 end
 
 local function get_error(buf)
 	if buf.i == 0 then return nil end
-	local _, s = check_errno(nil, buf.i)
+	local _, s = try_errno(nil, buf.i)
 	return s
 end
 
@@ -975,7 +975,7 @@ local szbuf = i32a(1, 4)
 function socket:try_getopt(k)
 	local opt, level = parse_opt(k)
 	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
-	local ok, err = check_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0)
+	local ok, err = try_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0)
 	if not ok then return nil, err end
 	return get(buf, szbuf[0])
 end
@@ -989,7 +989,7 @@ function socket:try_setopt(k, v)
 	local opt, level = parse_opt(k)
 	local set = assertf(set_opt[k], 'read-only socket option: %s', k)
 	local buf, sz = set(v)
-	return check_errno(C.setsockopt(self.fd, level, opt, buf, sz) == 0)
+	return try_errno(C.setsockopt(self.fd, level, opt, buf, sz) == 0)
 end
 socket.setopt = unprotect_io(socket.try_setopt)
 

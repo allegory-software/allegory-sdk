@@ -465,6 +465,7 @@ require'glue'
 require'path'
 require'unixperms'
 require'epoll'
+require'owner'
 
 --POSIX does not define an ABI and platfoms have different cdefs thus we have
 --to limit support to the platforms and architectures we actually tested for.
@@ -475,8 +476,8 @@ local
 	C, min, max, floor, ceil, ln, push, pop, istab, isstr
 
 local
-	cast, bor, band, bnot, shl, check, check_errno =
-	cast, bor, band, bnot, shl, check, check_errno
+	cast, bor, band, bnot, shl, check, try_errno =
+	cast, bor, band, bnot, shl, check, try_errno
 
 local file = {} --file object methods
 local dir = {}; dir.__index = dir --dir listing object methods
@@ -562,9 +563,9 @@ local FD_CLOEXEC = 1
 local function fcntl_set_flags_func(GET, SET)
 	return function(f, mask, bits)
 		local cur_bits = C.fcntl(f.fd, GET)
-		assert(check_errno(cur_bits ~= -1))
+		assert(try_errno(cur_bits ~= -1))
 		local bits = setbits(cur_bits, mask, bits)
-		assert(check_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
+		assert(try_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
 	end
 end
 local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
@@ -572,19 +573,18 @@ local fcntl_set_fd_flags = fcntl_set_flags_func(F_GETFD, F_SETFD)
 
 function file_wrap_fd(fd, opt)
 
-	local f = object(file, {
+	local f = _initowner(object(file, {
 		fd = assert(fd),
 		seek = repl(opt.type == 'file' and not opt.async, true, nil),
 		debug_prefix = opt.debug_prefix,
 		w = 0, r = 0,
-	}, opt)
+	}, opt))
 
 	if f.async then
 		fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
-		epoll_add(f)
+		_epoll_add(f, fd)
 	end
 
-	initowner(f)
 	live(f, f.path or f.name or f.type or '')
 
 	return f
@@ -604,38 +604,36 @@ end
 
 local function file_close(f, cancel_thread)
 	if f:closed() then return true end
+	local fd = f.fd; f.fd = -1 --set barrier for entire API incl. close().
 	if f.async then
-		epoll_remove(f)
+		_epoll_remove(f, fd) --close() not called yet so fd is still valid.
 	end
-	local fd = f.fd
-	f.fd = -1 --make closed() true before waking waiting I/O threads.
-	if f.async then
-		epoll_cancel(f, cancel_thread) --wake waiting I/O threads
+	--NOTE: close() failing doesn't mean failed to close, the fd is still gone.
+	--close only reports pending I/O errors.
+	local close_ok, close_err = try_errno(C.close(fd) == 0)
+	if f._onclose then
+		--disown before waking thread owners which will try to disown and fail.
+		f:_onclose()
 	end
-	if f.owner then
-		f.owner:disown(f)
-	end
-	local ok, err = check_errno(C.close(fd) == 0)
-	if f._after_close then
-		f:_after_close()
-	end
-	--liveadd(f, 'r:%d w:%d', f.r, f.w)
 	--f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil, 'r:%d w:%d', f.r, f.w)
-	check_io(nil, ok, err)
+	if f.async then
+		_epoll_cancel(f, cancel_thread) --raise into waiting I/O threads.
+	end
+	check_io(nil, close_ok, close_err)
 	return true
 end
 function file.close(f)
 	return file_close(f)
 end
 file.try_close = protect_io(file.close)
-file.try_cancel_io = protect_io(function(f, cancel_thread)
+file._try_cancel_io = protect_io(function(f, cancel_thread)
 	if f:closed() then return nil, 'thread not waiting' end
 	return file_close(f, cancel_thread)
 end)
 
 function file.onclose(f, fn)
-	after(f, '_after_close', fn)
+	after(f, '_onclose', fn)
 end
 
 function file.set_inheritable(f, inheritable)
@@ -666,10 +664,9 @@ function try_open(path, mode)
 		'open(): conflicting flags: wronly + rdwr')
 	if opt.quiet == nil then opt.quiet = not (wo or rw) end
 	local perms = parse_perms(opt.perms) or default_file_perms
-	local c_open = opt.open or C.open
-	local fd = c_open(opt.path, flags, perms)
+	local fd = C.open(opt.path, flags, perms)
 	if fd == -1 then
-		return check_errno()
+		return try_errno()
 	end
 	local f, err = file_wrap_fd(fd, opt)
 	if not f then
@@ -696,8 +693,8 @@ function file.try_skip(f, n)
 end
 file.skip = unprotect_io(file.try_skip)
 
-file.setexpires  = epoll_setexpires
-file.settimeout  = epoll_settimeout
+file.setexpires  = _epoll_setexpires
+file.settimeout  = _epoll_settimeout
 
 --pipes ----------------------------------------------------------------------
 
@@ -708,7 +705,7 @@ int mkfifo(const char *pathname, mode_t mode);
 
 function try_mkfifo(path, perms)
 	perms = parse_perms(perms) or default_file_perms
-	local ok, err = check_errno(C.mkfifo(path, perms) == 0)
+	local ok, err = try_errno(C.mkfifo(path, perms) == 0)
 	if not ok and err ~= 'already_exists' then return nil, err, perms end
 	log('note', 'fs', 'mkfifo', '%s %o', path, perms)
 	if err == 'already_exists' then return true, err, perms end
@@ -726,7 +723,7 @@ function try_pipe(opt) --unnamed pipe
 	local fds = new'int[2]'
 	local flags = not opt.inheritable and O_CLOEXEC or 0
 	local ok = C.pipe2(fds, flags) == 0
-	if not ok then return check_errno() end
+	if not ok then return try_errno() end
 	local async = repl(opt.async, nil, true)
 	local r_async = repl(opt.async_read , nil, async)
 	local w_async = repl(opt.async_write, nil, async)
@@ -753,9 +750,9 @@ function pipe(opt)
 	return rf, wf
 end
 
-stdin_async_pipe  = memoize(function() return file_wrap_fd(0, {type = 'pipe', async = true, debug_prefix = '<stdin>' }) end)
-stdout_async_pipe = memoize(function() return file_wrap_fd(1, {type = 'pipe', async = true, debug_prefix = '<stdout>'}) end)
-stderr_async_pipe = memoize(function() return file_wrap_fd(2, {type = 'pipe', async = true, debug_prefix = '<stderr>'}) end)
+stdin_async_pipe  = memoize(function() return file_wrap_fd(0, {type = 'pipe', async = true, debug_prefix = '<stdin>' , owner = 'main'}) end)
+stdout_async_pipe = memoize(function() return file_wrap_fd(1, {type = 'pipe', async = true, debug_prefix = '<stdout>', owner = 'main'}) end)
+stderr_async_pipe = memoize(function() return file_wrap_fd(2, {type = 'pipe', async = true, debug_prefix = '<stderr>', owner = 'main'}) end)
 
 --eventfd --------------------------------------------------------------------
 
@@ -765,7 +762,7 @@ EFD_SEMAPHORE = 1
 
 local function try_eventfd(initval, flags)
 	local fd = C.eventfd(initval or 0, bor(O_CLOEXEC, flags or 0))
-	if fd == -1 then return check_errno() end
+	if fd == -1 then return try_errno() end
 	local f, err = file_wrap_fd(fd, {
 		type = 'eventfd', async = true, debug_prefix = 'E', quiet = true,
 	})
@@ -804,11 +801,11 @@ int64_t lseek(int fd, int64_t offset, int whence) asm("lseek64");
 ]]
 
 
-local file_async_read = make_async('r', true, function(self, buf, len)
+local file_async_read = _make_async('r', true, function(self, buf, len)
 	return tonumber(C.read(self.fd, buf, len))
 end)
 
-local file_async_write = make_async('w', true, function(self, buf, len)
+local file_async_write = _make_async('w', true, function(self, buf, len)
 	return tonumber(C.write(self.fd, buf, len))
 end)
 
@@ -824,7 +821,7 @@ function file.try_read(f, buf, sz)
 	else
 		local n = C.read(f.fd, buf, sz)
 		if n == 0 then return 0, 'eof' end
-		if n == -1 then return check_errno() end
+		if n == -1 then return try_errno() end
 		n = tonumber(n)
 		f.r = f.r + n
 		return n
@@ -836,7 +833,7 @@ function file.try_sync(f)
 	if f.fd == -1 then return nil, 'closed' end
 	local ok = C.fsync(f.fd) == 0
 	if not ok and errno() == EINVAL then return true end --vboxfs
-	return check_errno(ok)
+	return try_errno(ok)
 end
 file.sync = unprotect_io(file.try_sync)
 
@@ -854,7 +851,7 @@ function file.try_seek(f, whence, offset)
 	offset = tonumber(offset or 0)
 	whence = assertf(whences[whence], 'invalid whence: "%s"', whence)
 	local offs = C.lseek(f.fd, offset, whence)
-	if offs == -1 then return check_errno() end
+	if offs == -1 then return try_errno() end
 	return tonumber(offs)
 end
 file.seek = unprotect_io(file.try_seek)
@@ -872,7 +869,7 @@ function file.try_write(f, buf, sz)
 		else
 			len = C.write(f.fd, buf, sz)
 			if len == -1 then
-				len, err = check_errno()
+				len, err = try_errno()
 			else
 				len = tonumber(len)
 				f.w = f.w + len
@@ -949,9 +946,9 @@ local function fallocate(f, size)
 	local cursize, err = f:try_attr'size'
 	if not cursize then return nil, err end
 	if size <= cursize then return true end
-	local ok, err = check_errno(C.fallocate64(f.fd, 0, 0, size) == 0)
+	local ok, err = try_errno(C.fallocate64(f.fd, 0, 0, size) == 0)
 	if ok then return true end
-	if err == 'disk_full' then
+	if err == 'no_space' then
 		--when fallocate() fails because disk is full, a file is still
 		--created filling up the entire disk, so shrink back the file
 		--to its original size. this is courtesy: we don't check to see
@@ -975,7 +972,7 @@ function file.try_truncate(f, size, opt)
 			end
 		end
 	end
-	local ok, err = check_errno(C.ftruncate(f.fd, size) == 0)
+	local ok, err = try_errno(C.ftruncate(f.fd, size) == 0)
 	if not ok then return nil, err end
 	if not f.shm then
 		return f:try_seek('set', size)
@@ -999,7 +996,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize);
 ]]
 
 function cwd()
-	local ok, err = check_errno(C.getcwd(cbuf, 4096) ~= nil)
+	local ok, err = try_errno(C.getcwd(cbuf, 4096) ~= nil)
 	check('fs', 'cwd', ok, 'cwd: %s', err)
 	return str(cbuf)
 end
@@ -1007,7 +1004,7 @@ startcwd = memoize(cwd)
 
 function try_chdir(dir)
 	startcwd()
-	local ok, err = check_errno(C.chdir(dir) == 0)
+	local ok, err = try_errno(C.chdir(dir) == 0)
 	if not ok then return false, err end
 	log('', 'fs', 'chdir', '%s', dir)
 	return true
@@ -1020,7 +1017,7 @@ end
 
 local function _try_mkdir(path, perms)
 	perms = perms and parse_perms(perms) or default_dir_perms
-	local ok, err = check_errno(C.mkdir(path, perms) == 0)
+	local ok, err = try_errno(C.mkdir(path, perms) == 0)
 	if not ok then
 		if err == 'already_exists' then return true, err end
 		return false, err
@@ -1094,7 +1091,7 @@ function mkdirs(filepath, perms, sync)
 end
 
 function try_rmdir(dir, sync)
-	local ok, err = check_errno(C.rmdir(dir) == 0)
+	local ok, err = try_errno(C.rmdir(dir) == 0)
 	if not ok then
 		return err == 'not_found', err
 	end
@@ -1112,7 +1109,7 @@ function rmdir(dir, sync)
 end
 
 function try_rmfile(file, sync)
-	local ok, err = check_errno(C.unlink(file) == 0)
+	local ok, err = try_errno(C.unlink(file) == 0)
 	if not ok then
 		if err == 'not_found' then return true, err end
 		return false, err
@@ -1181,7 +1178,7 @@ function try_rename(old_path, new_path, dst_dirs_perms, sync)
 		local ok, err = try_mkdirs(new_path, dst_dirs_perms, sync)
 		if not ok then return false, err end
 	end
-	local ok, err = check_errno(C.rename(old_path, new_path) == 0)
+	local ok, err = try_errno(C.rename(old_path, new_path) == 0)
 	if not ok then return false, err end
 	if sync ~= false then
 		local d1 = dirname(old_path)
@@ -1222,7 +1219,7 @@ function sync_dir(dir, quiet)
 end
 
 function try_symlink(link_path, target_path, replace, sync)
-	local ok, err = check_errno(C.symlink(target_path, link_path) == 0)
+	local ok, err = try_errno(C.symlink(target_path, link_path) == 0)
 	if not ok and err == 'already_exists' and replace
 		and try_file_attr(link_path, 'type', false) == 'symlink'
 	then
@@ -1231,9 +1228,9 @@ function try_symlink(link_path, target_path, replace, sync)
 			return true, err
 		end
 		local tmp = link_path..'~'..getpid()
-		local ok1, err1 = check_errno(C.symlink(target_path, tmp) == 0)
+		local ok1, err1 = try_errno(C.symlink(target_path, tmp) == 0)
 		if not ok1 then return false, err1 end
-		local ok2, err2 = check_errno(C.rename(tmp, link_path) == 0)
+		local ok2, err2 = try_errno(C.rename(tmp, link_path) == 0)
 		if not ok2 then try_rmfile(tmp); return false, err2 end
 		ok, err = true, 'replaced'
 	end
@@ -1253,7 +1250,7 @@ function symlink(link_path, target_path, replace, sync)
 end
 
 function try_hardlink(link_path, target_path, sync)
-	local ok, err = check_errno(C.link(target_path, link_path) == 0)
+	local ok, err = try_errno(C.link(target_path, link_path) == 0)
 	if not ok then
 		if err == 'already_exists' then --check if the target is the same
 			local i1 = try_file_attr(target_path, 'inode', false)
@@ -1289,7 +1286,7 @@ local function _try_readlink(link, maxdepth, recurse)
 		elseif recurse and errno == ENOENT then --target not found
 			return link
 		end
-		return check_errno()
+		return try_errno()
 	end
 	if len >= 4096 then --max len is 4095 for ext4 and btrfs
 		return nil, 'path_too_long'
@@ -1433,7 +1430,7 @@ local st = stat_ct()
 local function wrap(stat_func)
 	return function(arg, attr)
 		local ok = stat_func(arg, st) == 0
-		if not ok then return check_errno() end
+		if not ok then return try_errno() end
 		if attr then
 			local get = stat_getters[attr]
 			assertf(get, 'unknown file attr: %s', attr)
@@ -1493,13 +1490,13 @@ local ts = ts_ct()
 local function futimes(f, atime, mtime)
 	set_timespec(atime, ts[0])
 	set_timespec(mtime, ts[1])
-	return check_errno(C.futimens(f.fd, ts) == 0)
+	return try_errno(C.futimens(f.fd, ts) == 0)
 end
 
 local function utimes(path, atime, mtime)
 	set_timespec(atime, ts[0])
 	set_timespec(mtime, ts[1])
-	return check_errno(C.utimensat(AT_FDCWD, path, ts, 0) == 0)
+	return try_errno(C.utimensat(AT_FDCWD, path, ts, 0) == 0)
 end
 
 local AT_SYMLINK_NOFOLLOW = 0x100
@@ -1507,7 +1504,7 @@ local AT_SYMLINK_NOFOLLOW = 0x100
 local function lutimes(path, atime, mtime)
 	set_timespec(atime, ts[0])
 	set_timespec(mtime, ts[1])
-	return check_errno(C.utimensat(AT_FDCWD, path, ts, AT_SYMLINK_NOFOLLOW) == 0)
+	return try_errno(C.utimensat(AT_FDCWD, path, ts, AT_SYMLINK_NOFOLLOW) == 0)
 end
 
 cdef[[
@@ -1524,7 +1521,7 @@ local function wrap(chmod_func, stat_func)
 			if not cur_perms then return nil, err end
 			perms = parse_perms(perms, cur_perms)
 		end
-		return check_errno(chmod_func(f, perms) == 0)
+		return try_errno(chmod_func(f, perms) == 0)
 	end
 end
 local fchmod = wrap(function(f, mode) return C.fchmod(f.fd, mode) end, fstat)
@@ -1565,13 +1562,13 @@ local function get_gid(s)
 end
 
 local function fchown(f, uid, gid)
-	return check_errno(C.fchown(f.fd, get_uid(uid) or -1, get_gid(gid) or -1) == 0)
+	return try_errno(C.fchown(f.fd, get_uid(uid) or -1, get_gid(gid) or -1) == 0)
 end
 local function chown(path, uid, gid)
-	return check_errno(C.chown(path, get_uid(uid) or -1, get_gid(gid) or -1) == 0)
+	return try_errno(C.chown(path, get_uid(uid) or -1, get_gid(gid) or -1) == 0)
 end
 local function lchown(path, uid, gid)
-	return check_errno(C.lchown(path, get_uid(uid) or -1, get_gid(gid) or -1) == 0)
+	return try_errno(C.lchown(path, get_uid(uid) or -1, get_gid(gid) or -1) == 0)
 end
 
 local function wrap(chmod_func, chown_func, utimes_func)
@@ -1785,7 +1782,7 @@ function file.try_lock(f, op, nonblock)
 	if f.fd == -1 then return nil, 'closed' end
 	local flags = assertf(lock_ops[op or 'w'], 'invalid lock op: %s', op)
 	if nonblock then flags = bor(flags, LOCK_NB) end
-	local ok, err = check_errno(C.flock(f.fd, flags) == 0)
+	local ok, err = try_errno(C.flock(f.fd, flags) == 0)
 	if ok then return true end
 	if err == 'again' then return true, 'again' end
 	return ok, err
@@ -1832,7 +1829,7 @@ dir_ct = ctype[[
 function dir.try_close(dir)
 	if dir:closed() then return true end
 	local ok = C.closedir(dir._dirp) == 0
-	if not ok then return check_errno(false) end
+	if not ok then return try_errno(false) end
 	dir._dirp = nil
 	return true
 end
@@ -1844,7 +1841,7 @@ end
 
 function dir.try_sync(dir)
 	if dir:closed() then return nil, 'closed' end
-	return check_errno(C.fsync(C.dirfd(dir._dirp)) == 0)
+	return try_errno(C.fsync(C.dirfd(dir._dirp)) == 0)
 end
 dir.sync = unprotect_io(dir.try_sync)
 
@@ -1857,7 +1854,7 @@ function dir.try_next(dir)
 		if dir._errno ~= 0 then
 			local errno = dir._errno
 			dir._errno = 0
-			return check_errno(false, errno)
+			return try_errno(false, errno)
 		end
 		return nil
 	end
@@ -1875,7 +1872,7 @@ function dir.try_next(dir)
 		if errno == 0 then
 			return nil
 		end
-		return check_errno(false, errno)
+		return try_errno(false, errno)
 	end
 end
 function dir.next(dir)
@@ -2277,7 +2274,7 @@ local statfs_ct = ctype'struct statfs'
 local statfs_buf
 local function statfs(path)
 	statfs_buf = statfs_buf or statfs_ct()
-	local ok, err = check_errno(C.statfs(path, statfs_buf) == 0)
+	local ok, err = try_errno(C.statfs(path, statfs_buf) == 0)
 	if not ok then return nil, err end
 	return statfs_buf
 end
@@ -2303,7 +2300,7 @@ function pidfd_open(pid, opt)
 	local flags = opt.async and PIDFD_NONBLOCK or 0
 	local fd = C.syscall(434, pid, flags)
 	if fd == -1 then
-		return check_errno()
+		return try_errno()
 	end
 	return file_wrap_fd(fd, opt)
 end

@@ -1141,11 +1141,11 @@ function stcp:onclose(fn)
 end
 
 function stcp:closed()
-	return not self.tcp.fd
+	return self.tcp.fd == -1
 end
 
 function stcp:try_shutdown(mode)
-	if not self.tcp.fd then return nil, 'closed' end
+	if self.tcp.fd == -1 then return nil, 'closed' end
 	return self.tcp:try_shutdown(mode)
 end
 stcp.shutdown = unprotect_io(stcp.try_shutdown)
@@ -1206,7 +1206,7 @@ end
 _G.client_stcp = unprotect_io(_G.try_client_stcp)
 
 function client_stcp:try_close()
-	if not self.tcp.fd then
+	if self.tcp.fd == -1 then
 		--BearSSL doesn't malloc, so no cleanup needed if the fd is lost.
 		return true
 	end
@@ -1241,7 +1241,7 @@ function client_stcp:try_close()
 end
 
 function client_stcp:try_recv(buf, sz)
-	if not self.tcp.fd then return nil, 'closed' end
+	if self.tcp.fd == -1 then return nil, 'closed' end
 	local ok, err = engine_run(self, BR_SSL_RECVAPP)
 	if not ok then return err == 'eof' and 0 or nil, err end
 	local app_buf = C.br_ssl_engine_recvapp_buf(self.eng, _szp)
@@ -1252,7 +1252,7 @@ function client_stcp:try_recv(buf, sz)
 end
 
 function client_stcp:try_send(buf, sz)
-	if not self.tcp.fd then return nil, 'closed' end
+	if self.tcp.fd == -1 then return nil, 'closed' end
 	sz = sz or #buf
 	if sz == 0 then return true end --mask-out null-writes
 	local bp = cast(u8p, buf)
@@ -1336,7 +1336,7 @@ end
 _G.server_stcp = unprotect_io(_G.try_server_stcp)
 
 function server_stcp:try_close()
-	if not self.tcp.fd then return true end
+	if self.tcp.fd == -1 then return true end
 	if self.owner then
 		self.owner:disown(self)
 	end
@@ -1353,7 +1353,7 @@ end
 server_stcp.close = unprotect_io(server_stcp.try_close)
 
 function server_stcp:try_accept(opt, timeout)
-	if not self.tcp.fd then return nil, 'closed' end
+	if self.tcp.fd == -1 then return nil, 'closed' end
 	local ctcp, err, retry = self.tcp:try_accept(opt, timeout)
 	if not ctcp then return nil, err, retry end
 

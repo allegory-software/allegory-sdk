@@ -196,15 +196,15 @@ end
 function test.make_async_success_and_timeout_paths()
 	checked_run(function()
 		local eo = {r = 0}
-		local async_read = make_async('r', true, function()
+		local async_read = _make_async('r', true, function()
 			return 3
 		end)
 		assert(async_read(eo) == 3)
 		assert(eo.r == 3)
 
-		local timeout_eo = {setexpires = epoll_setexpires}
-		epoll_settimeout(timeout_eo, 0, 'r')
-		local async_timeout = make_async('r', false, function()
+		local timeout_eo = {setexpires = _epoll_setexpires}
+		_epoll_settimeout(timeout_eo, 0, 'r')
+		local async_timeout = _make_async('r', false, function()
 			errno(11) --EWOULDBLOCK
 			return -1
 		end)
@@ -212,9 +212,9 @@ function test.make_async_success_and_timeout_paths()
 		assert(ok == nil)
 		assert(err == 'timeout')
 
-		local connect_eo = {setexpires = epoll_setexpires}
-		epoll_settimeout(connect_eo, 0, 'w')
-		local async_connect = make_async_connect(function()
+		local connect_eo = {setexpires = _epoll_setexpires}
+		_epoll_settimeout(connect_eo, 0, 'w')
+		local async_connect = _make_async_connect(function()
 			errno(115) --EINPROGRESS
 			return -1
 		end)
@@ -226,25 +226,25 @@ end
 
 function test.expires_heap_entry_persists_across_successful_io()
 	checked_run(function()
-		local eo = {setexpires = epoll_setexpires, r = 0}
-		epoll_settimeout(eo, 1, 'r')
+		local eo = {setexpires = _epoll_setexpires, r = 0}
+		_epoll_settimeout(eo, 1, 'r')
 		local hi = eo.recv_heap_index
 		assert(hi and hi ~= -1) --in heap after setexpires
 		--successful I/O must NOT touch the heap
-		local async_read = make_async('r', true, function() return 3 end)
+		local async_read = _make_async('r', true, function() return 3 end)
 		assert(async_read(eo) == 3)
 		assert(eo.recv_heap_index == hi) --unchanged
 		assert(eo.recv_expires) --field preserved
 		--cleanup
-		epoll_setexpires(eo, nil, 'r')
+		_epoll_setexpires(eo, nil, 'r')
 		assert(eo.recv_heap_index == -1)
 	end)
 end
 
 function test.expires_fires_with_no_thread_waiting()
 	checked_run(function()
-		local eo = {setexpires = epoll_setexpires}
-		epoll_settimeout(eo, 0.01, 'r')
+		local eo = {setexpires = _epoll_setexpires}
+		_epoll_settimeout(eo, 0.01, 'r')
 		assert(eo.recv_heap_index and eo.recv_heap_index ~= -1)
 		--drive the loop; check_heap should silently pop the entry
 		wait(0.03)
@@ -255,23 +255,23 @@ end
 
 function test.setexpires_twice_replaces_not_duplicates()
 	checked_run(function()
-		local eo = {setexpires = epoll_setexpires}
-		epoll_settimeout(eo, 10, 'r')
+		local eo = {setexpires = _epoll_setexpires}
+		_epoll_settimeout(eo, 10, 'r')
 		--would crash with 'duplicate' from heap:push if not the replace path
-		epoll_settimeout(eo, 5, 'r')
+		_epoll_settimeout(eo, 5, 'r')
 		assert(eo.recv_heap_index and eo.recv_heap_index ~= -1)
 		--cleanup
-		epoll_setexpires(eo, nil, 'r')
+		_epoll_setexpires(eo, nil, 'r')
 		assert(eo.recv_heap_index == -1)
 	end)
 end
 
 function test.setexpires_nil_removes_from_heap()
 	checked_run(function()
-		local eo = {setexpires = epoll_setexpires}
-		epoll_settimeout(eo, 1, 'r')
+		local eo = {setexpires = _epoll_setexpires}
+		_epoll_settimeout(eo, 1, 'r')
 		assert(eo.recv_heap_index and eo.recv_heap_index ~= -1)
-		epoll_setexpires(eo, nil, 'r')
+		_epoll_setexpires(eo, nil, 'r')
 		assert(eo.recv_heap_index == -1)
 		assert(eo.recv_expires == nil)
 	end)
@@ -420,10 +420,10 @@ end
 function test.cancel_epollable_reentrant_sibling_cancel_returns_not_waiting()
 	checked_run(function()
 		local fake = {_epoll_i = 1}
-		function fake:try_cancel_io(cancel_thread)
+		function fake:_try_cancel_io(cancel_thread)
 			if not self._epoll_i then return nil, 'thread not waiting' end
-			self._epoll_i = nil --try_cancel_io() closes the epollable first.
-			epoll_cancel(self, cancel_thread)
+			self._epoll_i = nil --_try_cancel_io() closes the epollable first.
+			_epoll_cancel(self, cancel_thread)
 			return true
 		end
 

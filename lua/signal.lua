@@ -109,7 +109,7 @@ end
 function signal_file(signals, flags, name)
 	local ss = sigset(signals)
 	local fd = C.signalfd(-1, ss, bor(SFD_NONBLOCK, flags or 0))
-	assert(check_errno(fd ~= -1))
+	assert(try_errno(fd ~= -1))
 	local f = file_wrap_fd(fd, {
 		async = true, type = 'signalfd',
 		name = name or _("signalfd('%s')", signals),
@@ -132,7 +132,7 @@ local SIG_UNBLOCK = 1
 local SIG_SETMASK = 2
 local function signal_set(op, signals)
 	local ss = sigset(signals)
-	assert(check_errno(C.sigprocmask(op, ss, nil) == 0))
+	assert(try_errno(C.sigprocmask(op, ss, nil) == 0))
 end
 function signal_block     (signals) signal_set(SIG_BLOCK  , signals) end
 function signal_unblock   (signals) signal_set(SIG_UNBLOCK, signals) end
@@ -144,7 +144,7 @@ local SIG_ERR = -1
 function signal_ignore (signals)
 	for signal in words(signals) do
 		signal = check_signal(signal)
-		assert(check_errno(C.signal(signal, SIG_IGN) ~= SIG_ERR))
+		assert(try_errno(C.signal(signal, SIG_IGN) ~= SIG_ERR))
 	end
 end
 

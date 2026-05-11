@@ -442,7 +442,7 @@ function http_server(...)
 			finish_handlers(req, ok, err)
 		end
 		if not ok then
-			if not req.headers_sent then
+			if not req.headers_sent and not req.tcp:closed() then
 				if iserror(err, 'http_response') then
 					req.status = err.status
 					req.status_message = err.status_message

@@ -4,15 +4,15 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 EPOLLABLE OBJECT INTEGRATION
-	epoll_add(eo)
-	epoll_remove(eo)
-	epoll_cancel(eo, [cancel_thread])
-	eo:try_cancel_io(thread) -> true|nil,err
-	make_async('r|w', returns_n, fn) -> fn(self, ...)
-	make_async_connect(fn) -> fn(self, ...)
-	epoll_setexpires(eo, expires, ['r|w'])
-	epoll_settimeout(eo, timeout, ['r|w'])
-	eo:epoll_error() -> err                (cannot raise)
+	_epoll_add(eo, fd)
+	_epoll_remove(eo, fd)
+	_epoll_cancel(eo, [cancel_thread])
+	eo:_try_cancel_io(thread) -> true|nil,err
+	_make_async('r|w', returns_n, fn) -> fn(self, ...)
+	_make_async_connect(fn) -> fn(self, ...)
+	_epoll_setexpires(eo, expires, ['r|w'])
+	_epoll_settimeout(eo, timeout, ['r|w'])
+	eo:_epoll_error() -> err                (cannot raise)
 THREADS
 	thread(fn[, fmt, ...]) -> th           create a thread for async I/O
 	[try_]resume(th, ...)                  run thread until it blocks/finishes
@@ -33,6 +33,13 @@ THREADS
 	th:onfinish(fn)                        run fn(thread) when thread finishes
 	th:cancel()                            cancel what the thread is waiting on
 	error(CANCEL)                          cancel current thread
+CURRENT OWNER
+	currentowner([thread]) -> owner        get (current) thread's current owner
+	setcurrentowner(owner, [thread])       set (current) thread's current owner
+THREAD SETS
+	threadset() -> ts
+	- ts:thread(fn, [fmt, ...]) -> th
+	- ts:join() -> all_ok, first_err
 SCHEDULER
 	[try_]start([ignore_interrupts])       keep polling until all threads finish
 	stop()                                 stop polling
@@ -59,10 +66,6 @@ TIMERS
 	runafter(s, fn) -> tm       run fn after s seconds
 	runevery(s, fn) -> tm       run fn every s seconds
 	runagainevery(s, fn) -> tm  run fn now and every s seconds afterwards
-THREAD SETS
-	threadset() -> ts
-	- ts:thread(fn, [fmt, ...]) -> th
-	- ts:join() -> all_ok, first_err
 MULTI-THREADING
 	epoll_fd([epfd]) -> epfd    get/set epoll fd
 
@@ -70,12 +73,12 @@ EPOLLABLE OBJECTS ------------------------------------------------------------
 
 Epollable Objects (EO) are Lua objects with a `fd` field that represents an
 epollable open fd. To make those async, call epoll_add() on constructor and
-epoll_remove() on destructor. Create async I/O methods with make_async() which
+epoll_remove() on destructor. Create async I/O methods with _make_async() which
 wraps a syscall that returns EWOULDBLOCK (or EINPROGRESS) and returns an async
 method. epoll_setexpires, etc. can be used directly as methods.
 
 Thread cancellation of an epollable waiter calls eo:try_cancel_io(thread),
-which must close eo and call epoll_cancel(eo, thread). The canceled thread gets
+which must close eo and call _epoll_cancel(eo, thread). The canceled thread gets
 CANCEL; other waiters on the same eo get `nil, 'closed'`.
 
 SCHEDULING -------------------------------------------------------------------
@@ -174,6 +177,7 @@ if not ... then require'epoll_test'; return end
 require'coro'
 require'glue'
 require'heap'
+require'owner'
 
 assert(Linux, 'platform not Linux')
 
@@ -286,7 +290,7 @@ function epoll_fd(shared_epoll_fd, flags)
 	elseif not _epoll_fd then
 		flags = flags or EPOLL_CLOEXEC
 		_epoll_fd = C.epoll_create1(flags)
-		assert(check_errno(_epoll_fd >= 0))
+		assert(try_errno(_epoll_fd >= 0))
 	end
 	return _epoll_fd
 end
@@ -298,23 +302,23 @@ local wait_count = 0
 
 local epoll_ev = new'struct epoll_event'
 
---eo = epollable object: socket or file, with fields:
---		fd, epoll_i, send_expires, recv_expires, send_thread, recv_thread.
-function epoll_add(eo)
+--eo = epollable object: socket or file, where epoll owns the fields:
+--		epoll_i, send_expires, recv_expires, send_thread, recv_thread.
+function _epoll_add(eo, fd)
 	assert(not eo.epoll_i)
 	local i = not in_epoll_wait and pop(free_slots) or #epolled + 1
 	epoll_ev.data.u32 = i
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, eo.fd, epoll_ev) == 0))
+	must(try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, fd, epoll_ev) == 0))
 	eo.epoll_i = i
 	epolled[i] = eo
 end
 
-function epoll_remove(eo)
+function _epoll_remove(eo, fd)
 	local i = eo.epoll_i
 	if not i then return end --epoll_add() was not called on this object.
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	assert(check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0))
+	must(try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, fd, epoll_ev) == 0))
 	set_recv_expires(eo, nil)
 	set_send_expires(eo, nil)
 	epolled[i] = false
@@ -322,13 +326,13 @@ function epoll_remove(eo)
 	push(free_slots, i)
 end
 
-function epoll_setexpires(eo, expires, rw)
+function _epoll_setexpires(eo, expires, rw)
 	local r = rw == 'r' or not rw
 	local w = rw == 'w' or not rw
 	if r then set_recv_expires(eo, expires) end
 	if w then set_send_expires(eo, expires) end
 end
-function epoll_settimeout(eo, s, rw)
+function _epoll_settimeout(eo, s, rw)
 	eo:setexpires(s and clock() + s, rw)
 end
 
@@ -357,7 +361,7 @@ local function epoll_cancel_resume(thread, cancel_thread)
 		log_error(try_resume_until_blocked_with(thread, true, nil, 'closed'))
 	end
 end
-function epoll_cancel(eo, cancel_thread)
+function _epoll_cancel(eo, cancel_thread)
 	local thread = clear_recv_thread(eo)
 	if thread then
 		epoll_cancel_resume(thread, cancel_thread) --to wait_io_cont()
@@ -409,7 +413,7 @@ local function epoll_wait()
 	if timeout_ms > 0x7fffffff then timeout_ms = -1 end --infinite
 
 	local n = C.epoll_wait(epoll_fd(), events, maxevents, timeout_ms)
-	if n == -1 then return check_errno() end
+	if n == -1 then return try_errno() end
 	--handle ready ops.
 	in_epoll_wait = true --don't allow slot reuse while iterating epolled!
 	for i = 0, n-1 do
@@ -422,7 +426,7 @@ local function epoll_wait()
 			--we check {RECV|SEND}_MASK instead of EPOLL{IN|OUT} alone.
 			local ok, err = true
 			if band(ev, EPOLLERR) ~= 0 then
-				ok, err = nil, eo.epoll_error and eo.epoll_error(eo) or 'error'
+				ok, err = nil, eo._epoll_error and eo._epoll_error(eo) or 'error'
 			end
 			if band(ev, RECV_MASK) ~= 0 then
 				local thread = clear_recv_thread(eo)
@@ -449,7 +453,7 @@ end
 local EWOULDBLOCK = 11
 local EINPROGRESS = 115
 
-function make_async_connect(func)
+function _make_async_connect(func)
 	return function(eo, ...)
 		local ret = func(eo, ...)
 		if ret >= 0 then return true end
@@ -458,17 +462,17 @@ function make_async_connect(func)
 			eo.send_thread = currentthread()
 			local ok, err = wait_io(eo)
 			if ok then
-				err = eo:epoll_error() --cannot raise
+				err = eo:_epoll_error() --cannot raise
 				if err then ok = false end
 			end
 			return ok, err
 		else
-			return check_errno(false, errno)
+			return try_errno(false, errno)
 		end
 	end
 end
 
-function make_async(RW, returns_n, func)
+function _make_async(RW, returns_n, func)
 	local THREAD = RW == 'w' and 'send_thread' or 'recv_thread'
 	return function(eo, ...)
 		if eo[THREAD] then
@@ -492,7 +496,7 @@ function make_async(RW, returns_n, func)
 				goto again
 			end
 		else
-			return check_errno(nil, errno)
+			return try_errno(nil, errno)
 		end
 	end
 end
@@ -842,8 +846,8 @@ function Thread:try_cancel()
 			self.resuming:try_cancel()
 		end
 		return true
-	elseif istab(self.waiting) and self.waiting.try_cancel_io then --epollable
-		return self.waiting:try_cancel_io(self)
+	elseif istab(self.waiting) and self.waiting._try_cancel_io then --epollable
+		return self.waiting:_try_cancel_io(self)
 	elseif istab(self.waiting) and self.waiting.type == 'wait_job' then
 		self.waiting:cancel()
 		return true
@@ -856,6 +860,25 @@ end
 function Thread:cancel()
 	return unprotect(self:try_cancel())
 end
+
+function Thread:ownenv(create)
+	local t = self._ownenv
+	if not t and create ~= false then
+		t = {}
+		local pt = self.env
+		if pt then --inherit parent env, if any.
+			t.__index = pt
+			setmetatable(t, t)
+		end
+		self._ownenv = t
+		self.env = t
+	end
+	return t
+end
+
+--threads as owners
+Thread.onclose = Thread.onfinish
+Thread.try_close = Thread.try_cancel
 
 function threadset()
 	local ts = {}
@@ -892,121 +915,19 @@ function threadset()
 	return ts
 end
 
---ownership ------------------------------------------------------------------
+--current owner -------------------------------------------------------------
 
-function Thread:ownenv(create)
-	local t = self._ownenv
-	if not t and create ~= false then
-		t = {}
-		local pt = self.env
-		if pt then --inherit parent env, if any.
-			t.__index = pt
-			setmetatable(t, t)
-		end
-		self._ownenv = t
-		self.env = t
-	end
-	return t
-end
-
-local owner = {isowner = true}
-
-function owner:try_close_owned()
-	assert(not self.threads or next(self.threads) == nil,
-		'owner closed with live threads')
-	local owns = self.owns
-	self.owns = nil --don't allow try_close() to acquire more resources.
-	for i = #owns, 1, -1 do
-		local o = owns[i]
-		o:try_close()
-		o.owner = nil
-	end
-end
-
-function owner:thread(f, ...)
-	local parent = self
-	local thread = thread(function(...)
-		setcurrentowner(parent)
-		return f(...)
-	end, ...)
-	attr(parent, 'threads')[thread] = true
-	thread:onfinish(function(self)
-		parent.threads[self] = nil
-	end)
-	return thread
-end
-
-local function _own(self, res)
-	assert(self.owns, 'owner closed')
-	add(self.owns, res)
-	res.owner = self
-end
-function owner:own(res)
-	assert(not res.owner)
-	_own(self, res)
-end
-
-function owner:disown(res)
-	assert(res.owner == self, 'not owned by me')
-	assert(remove_value(self.owns, res))
-	res.owner = nil
-end
-
-function makeowner(o)
-	local th
-	if o.isowner then return o end
-	update(o, owner)
-	o.owns = {}
-	if o.onclose then
-		o:onclose(function()
-			o:try_close_owned()
-		end)
-	end
-	return o
-end
-
-function initowner(self) --self=res
-	do return self end
-	local owner = self.owner
-	if owner == nil then
-		if self.default_owner == 'current' then
-			owner = currentowner(true)
-		elseif self.default_owner == 'main' then
-			owner = mainthread()
-		end
-	elseif owner == false then
-		self.owner = nil
-	end
-	if owner then _own(makeowner(owner), self) end
-	return self
-end
-
-function setowner(self, owner) --self=res
-	if self.owner == owner then return end
-	if self.owner then
-		self.owner:disown(self)
-	end
-	if owner then
-		owner:own(self)
-	end
-end
-
-function currentowner(create)
-	local thread = currentthread()
-	local owner = thread.currentowner
-	if not owner and create ~= false then
-		owner = makeowner(thread)
-		thread.currentowner = owner
-	end
-	return owner
+function currentowner(thread)
+	thread = thread or currentthread()
+	return thread.currentowner or thread
 end
 
 function setcurrentowner(owner, thread)
 	thread = thread or currentthread()
-	thread.currentowner = owner and makeowner(owner) or nil
+	thread.currentowner = assert(owner)
 end
 
---poll loop ------------------------------------------------------------------
+--poll loop -----------------------------------------------------------------
 
 local term_sig_f
 

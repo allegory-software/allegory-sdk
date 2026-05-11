@@ -19,7 +19,6 @@ TYPES
 	iscdata(v)                     is v a cdata
 	iscoro(v)                      is v a Lua coroutine
 	isctype(ct, v)               = ffi.istype
-	iserror(v[, classes])          is v a structured error
 	inherits(v, class)             is v an object that inherits from class
 MATH
 	floor                        = math.floor
@@ -161,7 +160,6 @@ PLATFORM
 PROCESS
 	sleep(s)                       suspend process i.e. blocking sleep
 	exit                         = os.exit
-	check_fatal(ret, [fmt,...])    print error and exit process if ret is falsy
 	getpid() -> pid                get current process PID
 TIME & DATES
 	now() -> ts                    os.time() but more accurate
@@ -175,9 +173,11 @@ TIME & DATES
 	month  ([utc, ][t], [plus_months]) -> ts   time at month's beginning from t
 	year   ([utc, ][t], [plus_years]) -> ts    time at year's beginning from t
 ERRORS
-	assertf(v[,fmt,...]) -> v      assert with error message formatting
-	fpcall(f, ...) -> ok,...       pcall with finally/onerror
+	assertf(v[, fmt,...]) -> v     assert with error message formatting
+	fpcall(f, ...) -> ok, ...      pcall with finally/onerror
 	fcall(f, ...) -> ...           same but re-raises errors
+	die(fmt,...)                   exit with code 1 and message
+	must(...) -> ...               die with traceback if not arg#1
 STRUCTURED EXCEPTIONS
 	see errors.lua
 	see errors_io.lua
@@ -219,7 +219,7 @@ FFI
 	metatype                     = ffi.metatype
 	isctype                      = ffi.istype
 	errno                        = ffi.errno
-	check_errno(v[, err]) -> v | nil, err
+	try_errno(v[, err]) -> v | nil, err
 	str(buf, len)                = ffi.string(buf, len) if buf is not null
 	strlen(buf[, maxlen]) -> len|nil  = strnlen, stops at 64k by default
 	ptr(p)                       = p ~= nil and p  or nil
@@ -1400,11 +1400,18 @@ end
 function sayn(fmt, ...)
 	if logging.quiet then return end
 	io_stderr:write(fmtargs(fmt, ...))
+	io_stderr:flush()
 end
 
 function die(fmt, ...)
+	logging.quiet = false --let's see it in systemd log
 	say(fmt and 'ABORT: '..fmt or 'ABORT', ...)
-	os.exit(1)
+	exit(1)
+end
+
+function must(...)
+	if ... then return ... end
+	die(traceback())
 end
 
 --iterators ------------------------------------------------------------------
@@ -1572,17 +1579,6 @@ CANCEL = {'CANCEL'} --generic "cancel" command to pass to callbacks.
 
 exit = os.exit
 
-function check_fatal(ret, ...)
-	if ret then return ret end
-	if ... then
-		--print error so that it appears on systemd log.
-		io.stderr:write('FATAL ERROR: ')
-		io.stderr:write(_(...))
-		io.stderr:flush()
-	end
-	os.exit(1)
-end
-
 --dates & timestamps ---------------------------------------------------------
 
 local now = now
@@ -1740,6 +1736,11 @@ local function assert_fpcall(ok, ...)
 end
 function fcall(...)
 	return assert_fpcall(_fpcall(...))
+end
+
+function die(...)
+	io.stderr:
+	exit(1)
 end
 
 --modules --------------------------------------------------------------------
@@ -2266,7 +2267,7 @@ local errno_msgs = {
 	[ 23] = 'too_many_open_files', --ENFILE, open()
 	[ 24] = 'too_many_fds', --EMFILE, open() (fatal: fd leak)
 	[ 27] = 'file_too_big', --EFBIG, write(), fallocate(), truncate()
-	[ 28] = 'disk_full', --ENOSPC, write(), fallocate(), mkdir(), rename() (fatal)
+	[ 28] = 'no_space', --ENOSPC, write(), fallocate(), mkdir(), rename(), epoll_add() (fatal)
 	[ 29] = 'invalid_seek', --ESPIPE, lseek() on pipe/socket (fatal: programming error)
 	[ 30] = 'read_only', --EROFS, open(), mkdir(), unlink(), rename() (fatal)
 	[ 32] = 'eof', --EPIPE, write()
@@ -2295,7 +2296,7 @@ local errno_msgs = {
 	[115] = 'in_progress', --EINPROGRESS, connect() (handled in scheduler)
 }
 
-function check_errno(ret, err)
+function try_errno(ret, err)
 	if ret then return ret end
 	if isstr(err) then return ret, err end
 	err = err or errno()
