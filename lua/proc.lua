@@ -286,7 +286,7 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill)
 	local function check(ret, err)
 
 		if ret then return ret end
-		local ret, err = check_errno(ret, err)
+		local ret, err = try_errno(ret, err)
 
 		if self.stdin then
 			inp_rf:close()
@@ -301,8 +301,8 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill)
 			err_wf:close()
 		end
 
-		if errno_r_fd then assert(check_errno(close_fd(errno_r_fd))) end
-		if errno_w_fd then assert(check_errno(close_fd(errno_w_fd))) end
+		if errno_r_fd then assert(try_errno(close_fd(errno_r_fd))) end
+		if errno_w_fd then assert(try_errno(close_fd(errno_w_fd))) end
 
 		return ret, err
 	end
@@ -448,7 +448,7 @@ function proc:forget()
 end
 
 function try_kill(pid, sig)
-	return check_errno(C.kill(pid, sig or SIGTERM) == 0)
+	return try_errno(C.kill(pid, sig or SIGTERM) == 0)
 end
 function kill(pid, sig)
 	sig = sig or SIGTERM
@@ -485,7 +485,7 @@ function proc:exit_code()
 	local status = u32a(1)
 	local pid = C.waitpid(self.pid, status, WNOHANG)
 	if pid < 0 then
-		return check_errno()
+		return try_errno()
 	end
 	if pid == 0 then
 		return nil, 'active'

@@ -8,10 +8,6 @@ THREADS
 	th:equal(other_th) -> true | false            check if two threads are equal
 	th:join() -> status                           wait for a thread to finish
 	th:detach()                                   detach a thread
-	th:priority(new_priority)                     set thread priority
-	th:priority() -> priority                     get thread priority
-	pthread_min_priority() -> priority            get min. priority
-	pthread_max_priority() -> priority            get max. priority
 	pthread_yield()                               relinquish control to the scheduler
 MUTEXES
 	mutex([mattrs]) -> mutex                      create a mutex
@@ -64,8 +60,6 @@ pthread(func_ptr[, attrs]) -> th
 	The optional attrs table can have the fields:
 
   * `detached = true` - start detached (not very useful with Lua states)
-  * `priority = n` - thread priority; must be between pthread.min_priority()
-  and pthread.max_priority() -- in Linux these are both 0.
   * `stackaddr = n` - stack address.
   * `stacksize = n` - stack size in bytes (OS restrictions apply).
 
@@ -202,10 +196,6 @@ typedef struct {
 	unsigned long int __bits[16];
 } cpu_set_t;
 
-struct sched_param {
-	int sched_priority;
-};
-
 int pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*func)(void *), void *arg);
 real_pthread_t pthread_self(void);
 int pthread_equal(pthread_t th1, pthread_t th2);
@@ -249,8 +239,6 @@ int pthread_rwlock_tryrdlock(pthread_rwlock_t *l);
 int pthread_rwlock_unlock(pthread_rwlock_t *l);
 
 int sched_yield(void);
-int sched_get_priority_min(int pol);
-int sched_get_priority_max(int pol);
 
 int sem_init(sem_t *sem, int pshared, unsigned int value);
 int sem_destroy(sem_t *sem);
@@ -277,39 +265,43 @@ local EAGAIN    = 11
 
 --helpers
 
+local function check_errno(...)
+	assert(try_errno(...))
+end
+
 --return-value checker for '0 means OK' functions
 local function checkz(ret)
-	assert(check_errno(ret == 0, ret))
+	check_errno(ret == 0, ret)
 end
 
 --return-value checker for 'try' functions
 local function checkbusy(ret)
-	assert(check_errno(ret == 0 or ret == EBUSY, ret))
+	check_errno(ret == 0 or ret == EBUSY, ret)
 	return ret == 0
 end
 
 --return-value checker for 'timedwait' functions
 local function checktimeout(ret)
-	assert(check_errno(ret == 0 or ret == ETIMEDOUT, ret))
+	check_errno(ret == 0 or ret == ETIMEDOUT, ret)
 	return ret == 0
 end
 
 --errno-based checkers for sem_* functions which set errno().
 local function checkz_sem(ret)
-	assert(check_errno(ret == 0))
+	check_errno(ret == 0)
 end
 
 local function checkbusy_sem(ret)
 	if ret == 0 then return true end
 	local err = errno()
-	assert(check_errno(err == EAGAIN, err))
+	check_errno(err == EAGAIN, err)
 	return false
 end
 
 local function checktimeout_sem(ret)
 	if ret == 0 then return true end
 	local err = errno()
-	assert(check_errno(err == ETIMEDOUT, err))
+	check_errno(err == ETIMEDOUT, err)
 	return false
 end
 
@@ -334,12 +326,6 @@ function pthread(func_cb, attrs, ud)
 		C.pthread_attr_init(attr)
 		if attrs.detached then --not very useful, see pthread:detach()
 			checkz(C.pthread_attr_setdetachstate(attr, C.PTHREAD_CREATE_DETACHED))
-		end
-		if attrs.priority then --useless on Linux for non-root users
-			checkz(C.pthread_attr_setinheritsched(attr, C.PTHREAD_EXPLICIT_SCHED))
-			local param = ffi.new'struct sched_param'
-			param.sched_priority = attrs.priority
-			checkz(C.pthread_attr_setschedparam(attr, param))
 		end
 		if attrs.stackaddr then
 			checkz(C.pthread_attr_setstackaddr(attr, attrs.stackaddr))
@@ -384,30 +370,6 @@ local function pthread_detach(thread)
 	checkz(C.pthread_detach(thread))
 end
 
---set thread priority: level is between min_priority() and max_priority().
---NOTE: on Linux, min_priority() == max_priority() == 0 for SCHED_OTHER
---(which is the only cross-platform SCHED_* value), and SCHED_RR needs root
---which is a major usability hit, so it's not included.
-local function pthread_priority(thread, level)
-	local param = ffi.new'struct sched_param'
-	if level then
-		param.sched_priority = level
-		checkz(C.pthread_setschedparam(thread, C.SCHED_OTHER, param))
-	else
-		local pol = ffi.new'int[1]'
-		checkz(C.pthread_getschedparam(thread, pol, param))
-		return param.sched_priority
-	end
-end
-function pthread_min_priority(sched)
-	assert(not sched or sched == 'other')
-	return C.sched_get_priority_min(C.SCHED_OTHER)
-end
-function pthread_max_priority(sched)
-	assert(not sched or sched == 'other')
-	return C.sched_get_priority_max(C.SCHED_OTHER)
-end
-
 local function pthread_name(thread, name)
 	if name then
 		checkz(C.pthread_setname_np(thread, name))
@@ -445,7 +407,6 @@ ffi.metatype('pthread_t', {
 			equal    = pthread_equal,
 			join     = pthread_join,
 			detach   = pthread_detach,
-			priority = pthread_priority,
 			name     = pthread_name,
 			affinity = pthread_affinity,
 		},
@@ -649,7 +610,7 @@ end
 
 function barrier.wait(b)
 	local ret = C.pthread_barrier_wait(b)
-	assert(check_errno(ret == 0 or ret == C.PTHREAD_BARRIER_SERIAL_THREAD, ret))
+	check_errno(ret == 0 or ret == C.PTHREAD_BARRIER_SERIAL_THREAD, ret)
 	return ret == C.PTHREAD_BARRIER_SERIAL_THREAD
 end
 

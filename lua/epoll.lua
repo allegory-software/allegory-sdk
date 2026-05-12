@@ -303,13 +303,18 @@ local wait_count = 0
 local epoll_ev = new'struct epoll_event'
 
 --eo = epollable object: socket or file, where epoll owns the fields:
---		epoll_i, send_expires, recv_expires, send_thread, recv_thread.
+--		fd, epoll_i, send_expires, recv_expires, send_thread, recv_thread.
 function _epoll_add(eo, fd)
 	assert(not eo.epoll_i)
-	local i = not in_epoll_wait and pop(free_slots) or #epolled + 1
+	local free_i = not in_epoll_wait and pop(free_slots)
+	local i = free_i or #epolled + 1
 	epoll_ev.data.u32 = i
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	must(try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, fd, epoll_ev) == 0))
+	local ok, err = try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, fd, epoll_ev) == 0)
+	if not ok then
+		if free_i then push(free_slots, free_i) end
+		check_io(eo, nil, err)
+	end
 	eo.epoll_i = i
 	epolled[i] = eo
 end

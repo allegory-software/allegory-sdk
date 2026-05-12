@@ -106,7 +106,7 @@ COMMON PATHS
 	vardir() -> path                              get script's private r/w directory
 	varpath(...) -> path                          get vardir-relative path
 LOW LEVEL
-	file_wrap_fd(fd, opt) -> f                    wrap opened file descriptor
+	_wrap_fd(fd, opt) -> f                        wrap file descriptor into file object
 FILESYSTEM INFO
 	fs_info(path) -> {size=, free=}               get free/total disk space for a path
 HI-LEVEL APIs
@@ -563,15 +563,15 @@ local FD_CLOEXEC = 1
 local function fcntl_set_flags_func(GET, SET)
 	return function(f, mask, bits)
 		local cur_bits = C.fcntl(f.fd, GET)
-		assert(try_errno(cur_bits ~= -1))
+		check_io(f, try_errno(cur_bits ~= -1))
 		local bits = setbits(cur_bits, mask, bits)
-		assert(try_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
+		check_io(f, try_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
 	end
 end
 local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
 local fcntl_set_fd_flags = fcntl_set_flags_func(F_GETFD, F_SETFD)
 
-function file_wrap_fd(fd, opt)
+function _wrap_fd(fd, opt)
 
 	local f = _initowner(object(file, {
 		fd = assert(fd),
@@ -665,12 +665,11 @@ function try_open(path, mode)
 	if opt.quiet == nil then opt.quiet = not (wo or rw) end
 	local perms = parse_perms(opt.perms) or default_file_perms
 	local fd = C.open(opt.path, flags, perms)
-	if fd == -1 then
-		return try_errno()
-	end
-	local f, err = file_wrap_fd(fd, opt)
-	if not f then
-		return nil, err
+	if fd == -1 then return try_errno() end
+	local ok, f = pcall(_wrap_fd, fd, opt)
+	if not ok then
+		C.close(fd)
+		error(f, 0)
 	end
 	log(f.quiet and '' or 'note', 'fs', 'open',
 		'%-4s %s %s fd=%d', f, wo and 'wo' or rw and 'rw' or 'r', opt.path, fd)
@@ -727,12 +726,14 @@ function try_pipe(opt) --unnamed pipe
 	local async = repl(opt.async, nil, true)
 	local r_async = repl(opt.async_read , nil, async)
 	local w_async = repl(opt.async_write, nil, async)
-	local rf, err1 = file_wrap_fd(fds[0], merge({type = 'pipe', async = r_async, debug_prefix = 'pipe.r'}, opt))
-	local wf, err2 = file_wrap_fd(fds[1], merge({type = 'pipe', async = w_async, debug_prefix = 'pipe.w'}, opt))
-	if not (rf and wf) then
-		if rf then rf:try_close() end
-		if wf then wf:try_close() end
-		return nil, err1 or err2
+	local r_fd = fds[0]
+	local w_fd = fds[1]
+	local r_ok, rf = pcall(_wrap_fd, r_fd, merge({type = 'pipe', async = r_async, debug_prefix = 'pipe.r'}, opt))
+	local w_ok, wf = pcall(_wrap_fd, w_fd, merge({type = 'pipe', async = w_async, debug_prefix = 'pipe.w'}, opt))
+	if not (r_ok and w_ok) then
+		if r_ok then rf:try_close() else C.close(r_fd) end
+		if w_ok then wf:try_close() else C.close(w_fd) end
+		error(rf or wf, 0)
 	end
 	if not opt.inheritable then
 		if opt. read_inheritable then rf:set_inheritable(true) end
@@ -750,9 +751,9 @@ function pipe(opt)
 	return rf, wf
 end
 
-stdin_async_pipe  = memoize(function() return file_wrap_fd(0, {type = 'pipe', async = true, debug_prefix = '<stdin>' , owner = 'main'}) end)
-stdout_async_pipe = memoize(function() return file_wrap_fd(1, {type = 'pipe', async = true, debug_prefix = '<stdout>', owner = 'main'}) end)
-stderr_async_pipe = memoize(function() return file_wrap_fd(2, {type = 'pipe', async = true, debug_prefix = '<stderr>', owner = 'main'}) end)
+stdin_async_pipe  = memoize(function() return _wrap_fd(0, {type = 'pipe', async = true, debug_prefix = '<stdin>' , owner = 'main'}) end)
+stdout_async_pipe = memoize(function() return _wrap_fd(1, {type = 'pipe', async = true, debug_prefix = '<stdout>', owner = 'main'}) end)
+stderr_async_pipe = memoize(function() return _wrap_fd(2, {type = 'pipe', async = true, debug_prefix = '<stderr>', owner = 'main'}) end)
 
 --eventfd --------------------------------------------------------------------
 
@@ -763,12 +764,12 @@ EFD_SEMAPHORE = 1
 local function try_eventfd(initval, flags)
 	local fd = C.eventfd(initval or 0, bor(O_CLOEXEC, flags or 0))
 	if fd == -1 then return try_errno() end
-	local f, err = file_wrap_fd(fd, {
+	local ok, f = pcall(_wrap_fd, fd, {
 		type = 'eventfd', async = true, debug_prefix = 'E', quiet = true,
 	})
-	if not f then
+	if not ok then
 		C.close(fd)
-		return nil, err
+		error(f, 0)
 	end
 	local rbuf = new'uint64_t[1]'
 	local wbuf = new'uint64_t[1]'
@@ -2299,10 +2300,10 @@ function pidfd_open(pid, opt)
 	opt = update({type = 'pidfd', async = true, debug_prefix = 'p'}, opt)
 	local flags = opt.async and PIDFD_NONBLOCK or 0
 	local fd = C.syscall(434, pid, flags)
-	if fd == -1 then
-		return try_errno()
-	end
-	return file_wrap_fd(fd, opt)
+	if fd == -1 then return check_io(nil, try_errno()) end
+	local ok, f = pcall(_wrap_fd, fd, opt)
+	if not ok then C.close(fd); error(f, 0) end
+	return f
 end
 
 metatype(dir_ct, dir)

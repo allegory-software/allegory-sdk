@@ -436,10 +436,13 @@ local SOCK_NONBLOCK  = 0x000800 --async I/O
 local SOCK_CLOEXEC   = 0x080000 --close-on-exec (non-inheritable on exec())
 
 local function wrap_socket(opt, class, fd, family)
-	return _initowner(object(class, {
+	local s = object(class, {
 		fd = assert(fd), family = family, issocket = true,
 		r = 0, w = 0,
-	}, opt))
+	}, opt)
+	_initowner(s)
+	_epoll_add(s, fd)
+	return s
 end
 
 socket.default_owner = 'current'
@@ -453,7 +456,8 @@ local function create_socket(st, family, class, opt)
 		assert(false)
 	local fd = C.socket(af, bor(st, SOCK_NONBLOCK, SOCK_CLOEXEC), 0)
 	assert(try_errno(fd ~= -1))
-	local s = wrap_socket(opt, class, fd, family)
+	local ok, s = pcall(wrap_socket, opt, class, fd, family)
+	if not ok then C.close(fd); error(s, 0) end
 	live(s, '%s/%s fd=%d', s.socktype, family, fd)
 	return s
 end
@@ -587,8 +591,11 @@ do
 		if not fd then
 			return nil, err, retry
 		end
-		local s = wrap_socket(opt, tcp, fd, self.family)
-		_epoll_add(s, fd)
+		local ok, s = pcall(wrap_socket, opt, tcp, fd, self.family)
+		if not ok then
+			C.close(fd)
+			error(s, 0)
+		end
 		self._sockets_n = self._sockets_n + 1
 		self._sockets[s] = true
 		self.next_i = (self.next_i or 0) + 1
@@ -723,7 +730,6 @@ function socket:try_bind(addr, port)
 	local ok, err = try_errno(C.bind(self.fd, sa, sa:size()) == 0)
 	if not ok then return false, err end
 	self._bound_addr = sa
-	_epoll_add(self, self.fd)
 	return true
 end
 socket.bind = unprotect_io(socket.try_bind)
