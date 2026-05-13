@@ -2244,7 +2244,7 @@ function ptr_deserialize(ct, addr)
 end
 
 --errno unified messages -----------------------------------------------------
---only list here errors that are recoverable at least in some contexts.
+--only list here user errors and recoverable errors.
 
 cdef'char *strerror(int errnum);'
 
@@ -2312,7 +2312,7 @@ function try_errno(ret, err)
 	assert(s ~= 'already_in_progress', s)
 	if s then return ret, s end
 	local s = C.strerror(err)
-	local s = str(s) or 'Error '..err
+	local s = str(s) or 'errno '..err
 	return ret, s
 end
 
@@ -2413,12 +2413,6 @@ end
 
 traceback = debug.traceback
 
-function trace()
-	io_stderr:write(traceback())
-	io_stderr:write'\n'
-	io_stderr:flush()
-end
-
 function pr(...)
 	local n = select('#',...)
 	for i=1,n do
@@ -2430,6 +2424,15 @@ function pr(...)
 	io_stderr:write'\n'
 	io_stderr:flush()
 	return ...
+end
+
+function trace(...)
+	if select('#',...) > 0 then pr(...) end
+	pr(traceback())
+end
+function traceif(cond, ...)
+	if not cond then return end
+	trace(...)
 end
 
 function S(id, ...)
