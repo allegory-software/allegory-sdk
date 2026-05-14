@@ -684,6 +684,8 @@ end
 
 local function free_thread(self)
 	assert(not self.waiting)
+	_close_owned(self)
+	_disown(self)
 	threads[self.co] = nil --free it
 	self.co = nil --make it unusable
 end
@@ -899,7 +901,7 @@ function Thread:ownenv(create)
 end
 
 --threads as owners
-Thread.try_close = try_cancel
+Thread.try_close = Thread.try_cancel
 Thread.setowner = setowner
 
 function threadset()

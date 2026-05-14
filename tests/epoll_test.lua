@@ -1,5 +1,6 @@
 require'glue'
 require'epoll'
+require'fs'
 
 local test = setmetatable({}, {__newindex = function(t, k, v)
 	rawset(t, k, v); rawset(t, #t+1, k)
@@ -319,6 +320,26 @@ function test.thread_lifecycle_status_and_onfinish()
 	end)
 end
 
+function test.thread_error_closes_owned_resources()
+	local rf, wf
+	local logs = capture_log(function()
+		checked_run(function()
+			local th = thread(function()
+				rf, wf = pipe{quiet = true}
+				error'thread-owned-resource-error'
+			end)
+			resume(th)
+			assert(th:status() == 'dead')
+			assert(th.owner == nil)
+			assert(th.owns == false)
+		end)
+	end)
+
+	assert(logs_contain(logs, 'thread-owned-resource-error'))
+	assert(rf:closed())
+	assert(wf:closed())
+end
+
 function test.resume_suspend_roundtrip_args()
 	local seen = {}
 
@@ -357,6 +378,27 @@ function test.cancel_suspend_raises_cancel()
 
 		assert_cancel(ok, err)
 		assert(th:status() == 'dead')
+	end)
+end
+
+function test.owner_close_cancels_owned_suspended_thread()
+	checked_run(function()
+		local owner = _init_owner(mainthread(), {})
+		local ok, err
+		local th = thread(function()
+			ok, err = lua_pcall(suspend)
+		end):setowner(owner)
+
+		resume(th)
+		assert(th.owner == owner)
+		assert(th.waiting == true)
+
+		assert(owner:try_close())
+
+		assert_cancel(ok, err)
+		assert(th.owner == nil)
+		assert(th:status() == 'dead')
+		assert(th.co == nil)
 	end)
 end
 
