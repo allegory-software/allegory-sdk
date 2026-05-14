@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 EPOLLABLE OBJECT INTEGRATION
-	_epoll_add(eo, fd)
+	_epoll_add(eo)
 	_epoll_remove(eo, fd)
 	_epoll_cancel(eo, [cancel_thread])
 	eo:_try_cancel_io(thread) -> true|nil,err
@@ -20,7 +20,10 @@ THREADS
 	[try_]suspend() -> ...                 suspend current thread
 	[try_]transfer(th, ...) -> ...         transfer to suspended thread
 	[try_]transfer_with(th, ok,...) -> ... transfer with value/error
-	cowrap(fn) -> wrapper, th              see coro.wrap()
+	iterator(fn) -> th                     create an iterator with a yield function
+	- fn(yield, n1,...) -> y1,...
+	- yield(y1,...) -> n1,...
+	- th.next(n1,...) -> y1,...
 	currentthread() -> th                  current thread
 	mainthread() -> th                     main thread
 	th.ismain                              is main thread
@@ -33,9 +36,6 @@ THREADS
 	th:onfinish(fn)                        run fn(thread) when thread finishes
 	th:cancel()                            cancel what the thread is waiting on
 	error(CANCEL)                          cancel current thread
-CURRENT OWNER
-	currentowner([thread]) -> owner        get (current) thread's current owner
-	setcurrentowner(owner, [thread])       set (current) thread's current owner
 THREAD SETS
 	threadset() -> ts
 	- ts:thread(fn, [fmt, ...]) -> th
@@ -304,31 +304,31 @@ local epoll_ev = new'struct epoll_event'
 
 --eo = epollable object: socket or file, where epoll owns the fields:
 --		fd, epoll_i, send_expires, recv_expires, send_thread, recv_thread.
-function _epoll_add(eo, fd)
+function _epoll_add(eo)
 	assert(not eo.epoll_i)
 	local free_i = not in_epoll_wait and pop(free_slots)
 	local i = free_i or #epolled + 1
 	epoll_ev.data.u32 = i
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	local ok, err = try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, fd, epoll_ev) == 0)
-	if not ok then
+	local ok = C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, eo.fd, epoll_ev) == 0
+	if not ok then --ENOSPC is the only maybe-but-not-really recoverable error.
 		if free_i then push(free_slots, free_i) end
-		check_io(eo, nil, err)
+		assert(try_errno())
 	end
 	eo.epoll_i = i
 	epolled[i] = eo
 end
 
-function _epoll_remove(eo, fd)
+function _epoll_remove(eo)
 	local i = eo.epoll_i
-	if not i then return end --epoll_add() was not called on this object.
-	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	must(try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, fd, epoll_ev) == 0))
+	if not i then return end
+	eo.epoll_i = nil --_epoll_remove() barrier
+	epolled[i] = false
+	push(free_slots, i)
 	set_recv_expires(eo, nil)
 	set_send_expires(eo, nil)
-	epolled[i] = false
-	eo.epoll_i = nil --prevent double-remove
-	push(free_slots, i)
+	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
+	assert(try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0))
 end
 
 function _epoll_setexpires(eo, expires, rw)
@@ -455,11 +455,13 @@ local function epoll_wait()
 	return true
 end
 
+local EINTR = 4
 local EWOULDBLOCK = 11
 local EINPROGRESS = 115
 
 function _make_async_connect(func)
 	return function(eo, ...)
+		::again::
 		local ret = func(eo, ...)
 		if ret >= 0 then return true end
 		local errno = errno()
@@ -471,6 +473,8 @@ function _make_async_connect(func)
 				if err then ok = false end
 			end
 			return ok, err
+		elseif errno == EINTR then
+			goto again
 		else
 			return try_errno(false, errno)
 		end
@@ -500,10 +504,21 @@ function _make_async(RW, returns_n, func)
 			else
 				goto again
 			end
+		elseif errno == EINTR then
+			goto again
 		else
 			return try_errno(nil, errno)
 		end
 	end
+end
+
+function _epoll_try_wait(eo, rw)
+	local THREAD = rw == 'w' and 'send_thread' or 'recv_thread'
+	if eo[THREAD] then
+		return nil, 'already waiting'
+	end
+	eo[THREAD] = currentthread()
+	return wait_io(eo)
 end
 
 --wait jobs ------------------------------------------------------------------
@@ -642,14 +657,15 @@ function currentthread()
 end
 
 local function wrap_thread(co, fmt, ...)
-	local thread = object(Thread, {
+	local owner = _check_owner()
+	local thread = _init_owner(owner, object(Thread, {
 		co = co,
 		env = currentthread().env, --start with parent env
 		isthread = true, --rawsetting so that isthread() can rawget()
 		waiting = true, --true | wait_job | socket
 		finished = false,
 		name = fmt and _(fmt, ...),
-	})
+	}))
 	threads[co] = thread
 	return thread
 end
@@ -729,7 +745,7 @@ function Thread:onfinish(fn)
 	after(self, '_on_finish', fn)
 end
 
-local function cowrap_finish(self, ok, ...)
+local function iterator_finish(self, ok, ...)
 	local fin_ok, fin_err = true
 	if self._on_finish then
 		fin_ok, fin_err = pcall(self._on_finish, self)
@@ -740,14 +756,15 @@ local function cowrap_finish(self, ok, ...)
 	return ...
 end
 local coro_wrap = coro.wrap
-function cowrap(fn, ...)
+function iterator(fn, ...)
 	local wrapped, co, th
 	wrapped, co = coro_wrap(function(...)
 		th.waiting = false --block all transfers into
-		return cowrap_finish(th, pcall(fn, ...))
+		return iterator_finish(th, pcall(fn, ...))
 	end)
 	th = wrap_thread(co, ...)
-	return wrapped, th
+	th.next = wrapped
+	return th
 end
 
 --NOTE: for clarity, threads should only set their own `waiting` barrier!
@@ -882,8 +899,8 @@ function Thread:ownenv(create)
 end
 
 --threads as owners
-Thread.onclose = Thread.onfinish
-Thread.try_close = Thread.try_cancel
+Thread.try_close = try_cancel
+Thread.setowner = setowner
 
 function threadset()
 	local ts = {}
@@ -918,18 +935,6 @@ function threadset()
 		return all_ok, first_err
 	end
 	return ts
-end
-
---current owner -------------------------------------------------------------
-
-function currentowner(thread)
-	thread = thread or currentthread()
-	return thread.currentowner or thread
-end
-
-function setcurrentowner(owner, thread)
-	thread = thread or currentthread()
-	thread.currentowner = assert(owner)
 end
 
 --poll loop -----------------------------------------------------------------

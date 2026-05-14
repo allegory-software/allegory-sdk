@@ -1738,11 +1738,6 @@ function fcall(...)
 	return assert_fpcall(_fpcall(...))
 end
 
-function die(...)
-	io.stderr:
-	exit(1)
-end
-
 --modules --------------------------------------------------------------------
 
 --require shorthand: require'glue'.with'module1 ...'

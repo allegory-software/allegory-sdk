@@ -107,18 +107,15 @@ local function sigset(signals)
 end
 
 function signal_file(signals, flags, name)
+	local owner = _check_owner()
 	local ss = sigset(signals)
 	local fd = C.signalfd(-1, ss, bor(SFD_NONBLOCK, flags or 0))
-	check_io(nil, try_errno(fd ~= -1))
-	local ok, f = pcall(_wrap_fd, fd, {
+	assert(try_errno(fd ~= -1))
+	local f = _init_file(_make_file(owner, fd, {
 		async = true, type = 'signalfd',
 		name = name or _("signalfd('%s')", signals),
 		debug_prefix = 's',
-	})
-	if not ok then
-		C.close(fd)
-		error(f, 0)
-	end
+	}))
 	local si = new'struct signalfd_siginfo'
 	must(sizeof(si) == 128)
 	local psi = cast(u8p, si)

@@ -1132,12 +1132,11 @@ local stcp = {
 	checkp       = checkp,
 	checknp      = checknp,
 	protect      = protect,
-	default_owner = 'current',
 	setowner     = setowner,
 }
 
 function stcp:onclose(fn)
-	after(self.tcp, '_after_close', fn)
+	after(self, '_onclose', fn)
 end
 
 function stcp:closed()
@@ -1185,6 +1184,7 @@ end
 
 function _G.try_client_stcp(tcp, host, opt)
 	opt = opt or empty
+	local owner = _check_owner(opt.owner)
 	local sc, eng, keepalive = make_client_ctx(opt)
 	if not sc then return nil, eng end
 
@@ -1199,8 +1199,8 @@ function _G.try_client_stcp(tcp, host, opt)
 		live(s, nil)
 		return nil, err
 	end
-	initowner(s)
-	tcp:setowner(nil) --stcp owns it now
+	_init_owner(owner, s)
+	tcp:setowner(s)
 	return s
 end
 _G.client_stcp = unprotect_io(_G.try_client_stcp)
@@ -1230,13 +1230,13 @@ function client_stcp:try_close()
 			break
 		end
 	end
-	if self.owner then
-		self.owner:disown(self)
-	end
 	live(self, nil)
 	local ok, err = self.tcp:try_close()
 	self.eng = nil
 	self._keepalive = nil
+	if self._onclose then
+		self:_onclose()
+	end
 	return ok, err
 end
 
@@ -1293,6 +1293,7 @@ local server_stcp = merge({type = 'server_tls_socket'}, stcp)
 
 function _G.try_server_stcp(tcp, opt)
 	opt = opt or empty
+	local owner = _check_owner(opt.owner)
 	local cert, key = cert_key_opt(opt, true)
 	local keepalive = {}
 	local chain, chain_n, chain_kp = load_cert_chain(cert)
@@ -1320,16 +1321,15 @@ function _G.try_server_stcp(tcp, opt)
 		add(keepalive, cache_buf)
 	end
 	local issuer_kt = opt.cert_issuer_rsa and BR_KEYTYPE_RSA or BR_KEYTYPE_EC
-	local s = object(server_stcp, {
+	local s = _init_owner(owner, object(server_stcp, {
 		tcp = tcp,
 		_chain = chain, _chain_n = chain_n,
 		_sk = sk, _kt = kt, _issuer_kt = issuer_kt,
 		_cache = cache,
 		_keepalive = keepalive,
-	})
+	}))
 	tcp.stcp = s --cross-ref for client socket tracking
-	initowner(s)
-	tcp:setowner(nil) --stcp owns it now
+	tcp:setowner(s) --stcp owns it now
 	live(s, 'tcp=%s', tcp)
 	return s
 end
@@ -1337,17 +1337,17 @@ _G.server_stcp = unprotect_io(_G.try_server_stcp)
 
 function server_stcp:try_close()
 	if self.tcp.fd == -1 then return true end
-	if self.owner then
-		self.owner:disown(self)
-	end
 	live(self, nil)
-	--NOTE: normally we should iterate tcp._sockets[s] and call s.stcp:close() on
-	--each which sends TLS close_notify, but that calls send() and recv() and
+	--NOTE: normally we should iterate tcp._sockets[s] and call s.stcp:try_close()
+	--on each which sends TLS close_notify, but that calls send() and recv() and
 	--we want to be able to call this from a different thread precisely so we can
 	--interrupt all the threads waiting on these sockets. so we force-close instead.
 	local ok, err = self.tcp:try_close()
 	self.eng = nil
 	self._keepalive = nil
+	if self._onclose then
+		self:_onclose()
+	end
 	return ok, err
 end
 server_stcp.close = unprotect_io(server_stcp.try_close)
@@ -1373,10 +1373,11 @@ function server_stcp:try_accept(opt, timeout)
 		return nil, err, true --retriable
 	end
 
+	_init_owner(self, s)
+	ctcp:setowner(s)
+
 	live(s, 'accepted %s.%d tcp=%s clients:%d',
 		self, ctcp.i, ctcp, self.tcp._sockets_n)
-	initowner(s)
-	ctcp:setowner(nil) --stcp owns it now
 
 	local sn = sc.eng.server_name
 	s.server_name = sn[0] ~= 0 and str(sn) or nil

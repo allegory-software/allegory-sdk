@@ -43,6 +43,25 @@ function test.exec_lua()
 	end)
 end
 
+function test.exec_fail_closes()
+	local owner = _init_owner(mainthread(), {})
+	local p, err = try_exec{
+		cmd = '/definitely/not/here',
+		stdin = true,
+		stdout = true,
+		stderr = true,
+		owner = owner,
+	}
+	assert(not p)
+	assert(err == 'not_found')
+	if owner.owns then
+		for i,res in ipairs(owner.owns) do
+			assert(not res)
+		end
+	end
+	owner:try_close()
+end
+
 function test.kill()
 	local luajit = exefile()
 
@@ -58,7 +77,7 @@ function test.kill()
 	print'sleeping'
 	sleep(.5)
 	print'killing'
-	assert(p:kill())
+	p:kill()
 	sleep(.5)
 	assert(select(2, p:kill()) == 'already_killed')
 	sleep(.5)

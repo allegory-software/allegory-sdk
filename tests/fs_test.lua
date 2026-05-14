@@ -53,7 +53,6 @@ function test.open_already_exists_file()
 	f:close()
 	local f, err = try_open({
 			path = testfile,
-			mode = false,
 			flags = 'creat excl'
 		})
 	assert(not f)
@@ -68,7 +67,6 @@ function test.open_already_exists_dir()
 	local f, err = try_open({
 			path = testfile,
 			flags = 'creat excl',
-			mode = false,
 		})
 	assert(not f)
 	assert(err == 'already_exists')
@@ -92,6 +90,20 @@ function test.pipe() --I/O test in proc_test.lua
 	local rf, wf = pipe{async = false}
 	rf:close()
 	wf:close()
+end
+
+function test.pidfd_open()
+	local f = pidfd_open(getpid(), {async = false})
+	assert(isfile(f, 'pidfd'))
+	assert(not f.async)
+	f:close()
+
+	local f = pidfd_open{pid = getpid()}
+	assert(isfile(f, 'pidfd'))
+	assert(f.async)
+	assert(f.epoll_i)
+	f:close()
+	assert(not f.epoll_i)
 end
 
 function test.async_pipe_close_wakes_waiter_before_onclose()
@@ -205,7 +217,7 @@ function test.open_modes()
 	end
 
 	--excl flag: already_exists error path
-	local f, err = try_open{path = testfile, flags = 'creat excl', mode = false}
+	local f, err = try_open{path = testfile, flags = 'creat excl'}
 	assert(not f)
 	assert(err == 'already_exists')
 

@@ -4,18 +4,26 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 EXEC/KILL/PROCESS INFO
-	[try_]exec(opt | cmd,...) -> p                   spawn a child process in background
-	[try_]exec_luafile(opt | script_file,...) -> p   spawn a process running a Lua script
-	[try_]exec_lua(opt | script_code, ...)           spawn a process running Lua code
-		p.pid                                        process ID
-		p:kill([signal=SIGTERM])                     kill process
-		p:status() -> status                         active, finished, killed, forgotten
-		p:wait([expires]) -> status                  wait for a process to finish
-		p:exit_code() -> code | nil,status           get process exit code
-		p:forget()                                   close process handles
-		p:info() -> t                                parse /proc/PID/stat
-	[try_]kill(pid, [signal=SIGTERM])                kill a process
-	proc_info([pid]) -> t                            parse /proc/PID/stat
+	[try_]exec(opt | cmd,[env],[dir],...) -> p
+	- cmd       {cmd, arg1, ... } | 'cmd arg1 ...'  command and args
+	- env       {VAR=VAL}                           env vars
+	- dir       s                                   child process working directory
+	- stdin,stdout,stderr   true|pipe               stdin/stdout/stderr redirection
+	- autokill  t|f                                 kill child when parent dies
+	- owner                                         owner (defaults to currentowner())
+	[try_]exec_luafile(opt | script_file,...) -> p  spawn a process running a Lua script
+	[try_]exec_lua(opt | script_code, ...)          spawn a process running Lua code
+	p.pid                                           process ID
+	p:[try_]kill([signal=SIGTERM])                  kill process
+	p:status() -> status                            active, finished, killed, forgotten
+	p:wait_until([expires]) -> status               wait for a process to finish
+	p:wait([timeout]) -> status                     wait for a process to finish
+	p:exit_code() -> code | nil,status              get process exit code
+	p:forget()                                      close process handles
+	p:try_close()                                   kill(9) and forget
+	p:info() -> t                                   parse /proc/PID/stat
+	[try_]kill(pid, [signal=SIGTERM])               kill a process
+	proc_info([pid]) -> t                           parse /proc/PID/stat
 ENV VARS
 	env(k) -> v                                get env. var
 	env(k, v)                                  set env. var
@@ -36,7 +44,7 @@ DAEMONIZE
 
 ------------------------------------------------------------------------------
 
-[try_]exec(opt | cmd, [env], [cur_dir], [stdin], [stdout], [stderr], [autokill]) -> p
+[try_]exec(opt | cmd, [env], [dir], [stdin], [stdout], [stderr], [autokill]) -> p
 
 	Spawn a child process and return a process object to query and control the
 	process. Options can be given as separate args or in a table.
@@ -47,7 +55,7 @@ DAEMONIZE
 		env
 			a table of environment variables (if not given, the current
 			environment is inherited).
-		cur_dir
+		dir
 			the directory to start the process in
 		stdin, stdout, stderr
 			pipe ends created with pipe() to redirect the standard input,
@@ -146,10 +154,7 @@ unsigned int umask(unsigned int mask);
 local PR_SET_PDEATHSIG = 1
 
 local WNOHANG = 1
-
-local EAGAIN = 11
-local EINTR  = 4
-local ERANGE = 34
+local EINTR = 4
 
 function env(k, v)
 	if k then
@@ -204,7 +209,9 @@ function cmdline_split_args(s) --parse a shell-like command string into cmd, arg
 	return t[1], args
 end
 
-local function _exec(t, env, dir, stdin, stdout, stderr, autokill)
+local function _exec(t, env, dir, stdin, stdout, stderr, autokill, owner)
+
+	owner = _check_owner(owner)
 
 	local cmd, args
 	if istab(t) then
@@ -276,103 +283,78 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill)
 	end
 
 	local self = setmetatable({cmd = cmd, args = args}, proc)
-
-	local errno_r_fd, errno_w_fd
+	_init_owner(owner, self)
 
 	local inp_rf, inp_wf
 	local out_rf, out_wf
 	local err_rf, err_wf
+	local errno_rf, errno_wf
 
 	local function check(ret, err)
-
 		if ret then return ret end
 		local ret, err = try_errno(ret, err)
-
-		if self.stdin then
-			inp_rf:close()
-			inp_wf:close()
-		end
-		if self.stdout then
-			out_rf:close()
-			out_wf:close()
-		end
-		if self.stderr then
-			err_rf:close()
-			err_wf:close()
-		end
-
-		if errno_r_fd then assert(try_errno(close_fd(errno_r_fd))) end
-		if errno_w_fd then assert(try_errno(close_fd(errno_w_fd))) end
-
+		self:try_close()
 		return ret, err
 	end
 
 	--see https://stackoverflow.com/questions/1584956/how-to-handle-execvp-errors-after-fork
-	local pipefds = u32a(2)
-	local O_CLOEXEC = 0x080000 --close-on-exec
-	if C.pipe2(pipefds, O_CLOEXEC) ~= 0 then
-		return check()
-	end
-	errno_r_fd = pipefds[0]
-	errno_w_fd = pipefds[1]
+	local errno_rf, errno_wf = pipe{
+		async = false,
+		quiet = true,
+		owner = self,
+	}
 
 	if stdin == true then
-		inp_rf, inp_wf = try_pipe{
+		inp_rf, inp_wf = pipe{
 			async_read = false,
 			read_inheritable = true,
+			owner = self,
 		}
-		if not inp_rf then
-			local err = inp_wf; inp_wf = nil
-			return check(nil, err)
-		end
 		self.stdin = inp_wf
 	elseif stdin then
 		inp_rf = stdin
 	end
 
 	if stdout == true then
-		out_rf, out_wf = try_pipe{
+		out_rf, out_wf = pipe{
 			async_write = false,
 			write_inheritable = true,
+			owner = self,
 		}
-		if not out_rf then
-			local err = out_wf; out_wf = nil
-			return check(nil, err)
-		end
 		self.stdout = out_rf
-	else
+	elseif stdout then
 		out_wf = stdout
 	end
 
 	if stderr == true then
-		err_rf, err_wf = try_pipe{
+		err_rf, err_wf = pipe{
 			async_write = false,
 			write_inheritable = true,
+			owner = self,
 		}
-		if not err_rf then
-			local err = err_wf; err_wf = nil
-			return check(nil, err)
-		end
 		self.stderr = err_rf
-	else
+	elseif stderr then
 		err_wf = stderr
 	end
 
 	local ppid_before_fork = autokill and C.getpid()
 	local pid = C.fork()
 
-	if pid == -1 then --in parent process
+	if pid == -1 then --in parent process, error
 
 		return check()
 
 	elseif pid == 0 then --in child process
 
+		--we're doing raw syscalls in here because if anything were to fail
+		--in this setup part we won't see a stack trace anywhere.
+
 		--put errno on the errno pipe and exit.
 		local function check(ret, err)
 			if ret then return ret end
 			local err = u32a(1, err or errno())
-			C.write(errno_w_fd, err, sizeof(err))
-				--^^ this can fail but it should not block.
+			while C.write(errno_wf.fd, err, sizeof(err)) == -1 and errno() == EINTR do end
+			--^^ this can fail but it should not block.
 			C._exit(0)
 		end
 
@@ -387,38 +369,40 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill)
 			end
 		end
 
-		check(close_fd(errno_r_fd))
+		check(close_fd(errno_rf.fd))
 
 		check(not dir or C.chdir(dir) == 0)
 
-		if inp_wf then check(close_fd(inp_wf.fd)) end
-		if out_rf then check(close_fd(out_rf.fd)) end
-		if err_rf then check(close_fd(err_rf.fd)) end
-
-		if inp_rf then check(C.dup2(inp_rf.fd, 0) == 0) end
-		if out_wf then check(C.dup2(out_wf.fd, 1) == 1) end
-		if err_wf then check(C.dup2(err_wf.fd, 2) == 2) end
+		local function close_dup(close_f, dup_f, fd)
+			if close_f then check(close_fd(close_f.fd)) end
+			if dup_f then
+				check(C.dup2(dup_f.fd, fd) == fd)
+				if dup_f.fd ~= fd then check(close_fd(dup_f.fd)) end
+			end
+		end
+		close_dup(inp_wf, inp_rf, 0)
+		close_dup(out_rf, out_wf, 1)
+		close_dup(err_rf, err_wf, 2)
 
 		C.execvpe(cmd, arg_ptr, env_ptr or C.environ)
 
 		--if we got here then exec failed.
 		check()
 
-	else --in parent process
+	else --in parent process, success
+
+		--set pid first so try_close() can clean up a partially initialized object.
+		self.pid = pid
 
 		--check if exec failed by reading from the errno pipe.
-		assert(check(close_fd(errno_w_fd)))
-		errno_w_fd = nil
+		errno_wf:close()
 		local err = u32a(1)
-		local n
-		repeat
-			n = C.read(errno_r_fd, err, sizeof(err))
-		until not (n == -1 and (errno() == EAGAIN or errno() == EINTR))
-		assert(check(close_fd(errno_r_fd)))
-		errno_r_fd = nil
-		if n > 0 then
+		local ok, read_err = errno_rf:try_readn(err, sizeof(err))
+		assert(ok or read_err == 'eof')
+		if ok then
 			return check(nil, err[0])
 		end
+		errno_rf:close()
 
 		--Let the child process have the only handles to their pipe ends,
 		--otherwise when the child process exits, the pipes will stay open on
@@ -426,8 +410,6 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill)
 		if inp_rf then inp_rf:close() end
 		if out_wf then out_wf:close() end
 		if err_wf then err_wf:close() end
-
-		self.pid = pid
 
 		local s = cmdline_quote_args(cmd, unpack(args or empty))
 		log('', 'proc', 'exec', '%s %s', self, s)
@@ -438,13 +420,12 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill)
 end
 
 function proc:forget()
-	if self.pid then
-		live(self, nil)
-	end
-	if self.stdin  then self.stdin :close() end
-	if self.stdout then self.stdout:close() end
-	if self.stderr then self.stderr:close() end
+	local pid = self.pid
+	if not pid then return end --forget barrier
 	self.pid = false
+	_close_owned(self)
+	_disown(self)
+	if pid then live(self, nil) end
 end
 
 function try_kill(pid, sig)
@@ -473,6 +454,11 @@ function proc:kill(sig)
 	return ok, err
 end
 
+function proc:try_close()
+	self:try_kill(9)
+	self:forget()
+end
+
 function proc:exit_code()
 	if self._exit_code then
 		return self._exit_code
@@ -483,7 +469,10 @@ function proc:exit_code()
 		return nil, 'forgotten'
 	end
 	local status = u32a(1)
-	local pid = C.waitpid(self.pid, status, WNOHANG)
+	local pid
+	repeat
+		pid = C.waitpid(self.pid, status, WNOHANG)
+	until not (pid < 0 and errno() == EINTR)
 	if pid < 0 then
 		return try_errno()
 	end
@@ -493,26 +482,32 @@ function proc:exit_code()
 	--save the exit status so we can forget the process.
 	if band(status[0], 0x7f) == 0 then --exited with exit code
 		self._exit_code = shr(band(status[0], 0xff00), 8)
+		return self._exit_code
 	else
 		self._killed = true
+		return nil, 'killed'
 	end
-	return self:exit_code()
 end
 
-function proc:wait(expires, poll_interval)
+function proc:wait_until(expires)
 	if not self.pid then
 		return nil, 'forgotten'
 	end
-	--TODO: use pidfd_open() instead.
-	while self:status() == 'active' and clock() < (expires or 1/0) do
-		wait(poll_interval or .1)
-	end
 	local exit_code, err = self:exit_code()
-	if exit_code then
-		return exit_code
-	else
-		return nil, err
+	if exit_code or err ~= 'active' then
+		return exit_code, err
 	end
+	local pidf = pidfd_open{pid = self.pid, owner = self}
+	pidf:setexpires(expires)
+	local ok, err = pidf:try_wait()
+	pidf:close()
+	if not ok then
+		return nil, err == 'timeout' and 'active' or err
+	end
+	return self:exit_code()
+end
+function proc:wait(timeout)
+	return self:wait_until(timeout and clock() + timeout)
 end
 
 function proc:status() --finished | killed | active | forgotten
@@ -596,6 +591,7 @@ function proc_info(pid)
 end
 
 function proc:info()
+	if not self.pid then return nil, 'forgotten' end
 	return proc_info(self.pid)
 end
 
@@ -719,7 +715,7 @@ end
 --{cmd=cmd|{cmd,arg1,...}, env=, ...}
 function try_exec(t, ...)
 	if istab(t) and t.cmd then
-		return _exec(t.cmd, t.env, t.dir, t.stdin, t.stdout, t.stderr, t.autokill)
+		return _exec(t.cmd, t.env, t.dir, t.stdin, t.stdout, t.stderr, t.autokill, t.owner)
 	else
 		return _exec(t, ...)
 	end
@@ -747,7 +743,7 @@ function try_exec_lua(arg, ...)
 	local script = isstr(arg) and arg or arg.script
 	local t = {cmd = {exefile(), '-'}, stdin = true}
 	if isstr(arg) then
-		t.env, t.dir, t.stdout, t.stderr, t.autokill, t.inherit_handles = ...
+		t.env, t.dir, t.stdout, t.stderr, t.autokill, t.owner = ...
 	else
 		for k,v in pairs(arg) do
 			if k ~= 'script' and t[k] == nil then

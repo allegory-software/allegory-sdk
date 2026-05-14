@@ -435,20 +435,21 @@ end
 local SOCK_NONBLOCK  = 0x000800 --async I/O
 local SOCK_CLOEXEC   = 0x080000 --close-on-exec (non-inheritable on exec())
 
-local function wrap_socket(opt, class, fd, family)
-	local s = object(class, {
-		fd = assert(fd), family = family, issocket = true,
+local function _make_socket(owner, fd, class, family, opt)
+	local s = _init_owner(owner, object(class, {
+		family = family, issocket = true,
+		fd = fd,
 		r = 0, w = 0,
-	}, opt)
-	_initowner(s)
-	_epoll_add(s, fd)
+	}, opt))
+	_epoll_add(s)
+	live(s, '%s/%s fd=%d', s.socktype, family, s.fd)
 	return s
 end
 
-socket.default_owner = 'current'
 socket.setowner = setowner
 
 local function create_socket(st, family, class, opt)
+	local owner = _check_owner(opt and opt.owner)
 	local af =
 		family == 'ip'   and AF_INET  or
 		family == 'ip6'  and AF_INET6 or
@@ -456,10 +457,7 @@ local function create_socket(st, family, class, opt)
 		assert(false)
 	local fd = C.socket(af, bor(st, SOCK_NONBLOCK, SOCK_CLOEXEC), 0)
 	assert(try_errno(fd ~= -1))
-	local ok, s = pcall(wrap_socket, opt, class, fd, family)
-	if not ok then C.close(fd); error(s, 0) end
-	live(s, '%s/%s fd=%d', s.socktype, family, fd)
-	return s
+	return _make_socket(owner, fd, class, family, opt)
 end
 local function create_tcp(family, opt)
 	return create_socket(SOCK_STREAM, family or 'ip', tcp, opt)
@@ -471,16 +469,13 @@ end
 --NOTE: close() returns false on error but it should be ignored.
 local function socket_try_close(self, cancel_thread)
 	if self.fd == -1 then return true end
-	local fd = self.fd; self.fd = -1 --set barrier for entire API incl. close().
-	_epoll_remove(self, fd) --close() not called yet so fd is still valid.
+	_epoll_remove(self)
+	local fd = self.fd; self.fd = -1 --double-close barrier
 	--NOTE: close() failing doesn't mean failed to close, the fd is still gone.
-	--close only reports pending I/O errors.
+	--close failing only means there are pending I/O errors to report.
 	local close_ok, close_err = try_errno(C.close(fd) == 0)
-	if self._onclose then
-		--disown before waking thread owners which will try to disown and fail.
-		self:_onclose()
-	end
-	_epoll_cancel(self, cancel_thread) --raise into waiting I/O threads.
+	_close_owned(self)
+	_disown(self)
 	local ps = self.listen_socket
 	if ps then
 		ps._sockets_n = ps._sockets_n - 1
@@ -494,8 +489,11 @@ local function socket_try_close(self, cancel_thread)
 	end
 	live(self, nil, 'r:%d w:%d%s', self.r, self.w,
 		self._sockets and ' clients:'..self._sockets_n or '')
-	if not close_ok then return false, close_err end
-	return true
+	_epoll_cancel(self, cancel_thread) --raise into waiting I/O threads.
+	if self._onclose then
+		self:_onclose()
+	end
+	return close_ok, close_err
 end
 function socket:try_close()
 	return socket_try_close(self)
@@ -504,7 +502,9 @@ function socket:_try_cancel_io(cancel_thread)
 	if self.fd == -1 then return nil, 'thread not waiting' end
 	return socket_try_close(self, cancel_thread)
 end
-socket.close = unprotect_io(socket.try_close)
+function socket:close()
+	assert(self:try_close())
+end
 
 function socket:closed()
 	return self.fd == -1
@@ -591,11 +591,10 @@ do
 		if not fd then
 			return nil, err, retry
 		end
-		local ok, s = pcall(wrap_socket, opt, tcp, fd, self.family)
-		if not ok then
-			C.close(fd)
-			error(s, 0)
-		end
+		--must check owner after socket_accept() returns because it's async.
+		local ok, owner_or_err = pcall(_check_owner, opt and opt.owner)
+		if not ok then C.close(fd); error(owner_or_err, 0) end
+		local s = _make_socket(owner_or_err, fd, tcp, self.family, opt)
 		self._sockets_n = self._sockets_n + 1
 		self._sockets[s] = true
 		self.next_i = (self.next_i or 0) + 1

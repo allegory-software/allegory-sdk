@@ -23,7 +23,7 @@ FILE OBJECTS
 	isfile(f [,type]) -> true|false               check if f is a file or pipe
 	f.fd -> fd                                    POSIX file descriptor
 PIPES
-	[try_]pipe([opt]) -> rf, wf                   create an anonymous pipe
+	pipe([opt]) -> rf, wf                         create an anonymous pipe
 	[try_]mkfifo(path|{path=,...}) -> true        create a named pipe
 STDIN/OUT/ERR ASYNC PIPES
 	std{in|out|err}_async_pipe() -> pipe          get stdin/out/err as async pipes
@@ -106,7 +106,8 @@ COMMON PATHS
 	vardir() -> path                              get script's private r/w directory
 	varpath(...) -> path                          get vardir-relative path
 LOW LEVEL
-	_wrap_fd(fd, opt) -> f                        wrap file descriptor into file object
+	_make_file(fd, opt) -> f                      create file object from file descriptor
+	_init_file(f) -> f                            init file object
 FILESYSTEM INFO
 	fs_info(path) -> {size=, free=}               get free/total disk space for a path
 HI-LEVEL APIs
@@ -541,14 +542,14 @@ local o_bits = {
 	tmpfile   = 0x410000, --create anon temp file (Linux 3.11+)
 }
 
-local open_mode_opt = {
-	['r' ] = {flags = 'rdonly'},
-	['r+'] = {flags = 'rdwr'},
-	['w' ] = {flags = 'creat wronly trunc'},
-	['w+'] = {flags = 'creat rdwr trunc'},
-	['a' ] = {flags = 'creat wronly append'},
-	['a+'] = {flags = 'creat rdwr append'},
-	['rw'] = {flags = 'creat rdwr'}, --non-standard but useful for updating
+local open_mode_flags = {
+	['r' ] = 'rdonly',
+	['r+'] = 'rdwr',
+	['w' ] = 'creat wronly trunc',
+	['w+'] = 'creat rdwr trunc',
+	['a' ] = 'creat wronly append',
+	['a+'] = 'creat rdwr append',
+	['rw'] = 'creat rdwr', --non-standard but useful for updating
 }
 
 local F_GETFL     = 3
@@ -563,34 +564,30 @@ local FD_CLOEXEC = 1
 local function fcntl_set_flags_func(GET, SET)
 	return function(f, mask, bits)
 		local cur_bits = C.fcntl(f.fd, GET)
-		check_io(f, try_errno(cur_bits ~= -1))
+		assert(try_errno(cur_bits ~= -1))
 		local bits = setbits(cur_bits, mask, bits)
-		check_io(f, try_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
+		assert(try_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
 	end
 end
 local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
 local fcntl_set_fd_flags = fcntl_set_flags_func(F_GETFD, F_SETFD)
 
-function _wrap_fd(fd, opt)
-
-	local f = _initowner(object(file, {
-		fd = assert(fd),
+function _make_file(owner, fd, opt)
+	return _init_owner(owner, object(file, {
+		fd = fd,
 		seek = repl(opt.type == 'file' and not opt.async, true, nil),
-		debug_prefix = opt.debug_prefix,
 		w = 0, r = 0,
 	}, opt))
-
+end
+function _init_file(f)
 	if f.async then
 		fcntl_set_fl_flags(f, O_NONBLOCK, O_NONBLOCK)
-		_epoll_add(f, fd)
+		_epoll_add(f)
 	end
-
 	live(f, f.path or f.name or f.type or '')
-
 	return f
 end
 
-file.default_owner = 'current'
 file.setowner = setowner
 
 function isfile(f, type)
@@ -602,35 +599,37 @@ function file.closed(f)
 	return f.fd == -1
 end
 
-local function file_close(f, cancel_thread)
-	if f:closed() then return true end
-	local fd = f.fd; f.fd = -1 --set barrier for entire API incl. close().
+local function try_file_close(f, cancel_thread)
+	if f.fd == -1 then return true end
 	if f.async then
-		_epoll_remove(f, fd) --close() not called yet so fd is still valid.
+		_epoll_remove(f)
 	end
+	local fd = f.fd; f.fd = -1 --close barrier
 	--NOTE: close() failing doesn't mean failed to close, the fd is still gone.
-	--close only reports pending I/O errors.
-	local close_ok, close_err = try_errno(C.close(fd) == 0)
-	if f._onclose then
-		--disown before waking thread owners which will try to disown and fail.
-		f:_onclose()
-	end
+	--close failing only means there are pending I/O errors to report.
+	local ok, err = try_errno(C.close(fd) == 0)
+	_close_owned(f)
+	_disown(f)
 	--f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil, 'r:%d w:%d', f.r, f.w)
 	if f.async then
 		_epoll_cancel(f, cancel_thread) --raise into waiting I/O threads.
 	end
-	check_io(nil, close_ok, close_err)
-	return true
+	if f._onclose then
+		f:_onclose()
+	end
+	return ok, err
 end
-function file.close(f)
-	return file_close(f)
+function file.try_close(f)
+	return try_file_close(f)
 end
-file.try_close = protect_io(file.close)
-file._try_cancel_io = protect_io(function(f, cancel_thread)
-	if f:closed() then return nil, 'thread not waiting' end
-	return file_close(f, cancel_thread)
-end)
+function file:close()
+	assert(self:try_close())
+end
+function file._try_cancel_io(f, cancel_thread)
+	if f.fd == -1 then return nil, 'thread not waiting' end
+	return try_file_close(f, cancel_thread)
+end
 
 function file.onclose(f, fn)
 	after(f, '_onclose', fn)
@@ -644,33 +643,27 @@ end
 function try_open(path, mode)
 	local opt = istab(path) and update({}, path) or {path = path, mode = mode}
 	opt.type = opt.type or 'file'
-	opt.debug_prefix = 'f'
 	assert(isstr(opt.path), 'path required')
-	if opt.mode then
-		local mode_opt = assertf(open_mode_opt[opt.mode],
-			'invalid open mode: %s', opt.mode)
-		merge(opt, mode_opt)
-	end
+	local mode_flags = opt.mode and assertf(open_mode_flags[opt.mode],
+		'invalid open mode: %s', opt.mode)
 	assert(not (opt.async and opt.type == 'file'),
 		'open(): files cannot be opened async')
-	local flags = bitflags(opt.flags or 'rdonly', o_bits)
-	flags = bor(flags, opt.async and O_NONBLOCK or 0)
-	if not opt.inheritable then
-		flags = bor(flags, O_CLOEXEC)
-	end
+	local flags = bor(
+		bitflags(opt.flags, o_bits),
+		bitflags(mode_flags, o_bits),
+		opt.async and O_NONBLOCK or 0,
+		not opt.inheritable and O_CLOEXEC or 0
+	)
 	local wo = getbit(flags, o_bits.wronly)
 	local rw = getbit(flags, o_bits.rdwr)
 	assert(not (wo and rw),
 		'open(): conflicting flags: wronly + rdwr')
 	if opt.quiet == nil then opt.quiet = not (wo or rw) end
 	local perms = parse_perms(opt.perms) or default_file_perms
+	local owner = _check_owner(opt.owner)
 	local fd = C.open(opt.path, flags, perms)
 	if fd == -1 then return try_errno() end
-	local ok, f = pcall(_wrap_fd, fd, opt)
-	if not ok then
-		C.close(fd)
-		error(f, 0)
-	end
+	local f = _init_file(_make_file(owner, fd, opt))
 	log(f.quiet and '' or 'note', 'fs', 'open',
 		'%-4s %s %s fd=%d', f, wo and 'wo' or rw and 'rw' or 'r', opt.path, fd)
 	return f
@@ -717,24 +710,21 @@ function mkfifo(path, perms)
 	return ok, err
 end
 
-function try_pipe(opt) --unnamed pipe
+local pipe_fds = new'int[2]'
+function pipe(opt) --unnamed pipe
 	opt = opt or empty
-	local fds = new'int[2]'
+	local owner = _check_owner(opt.owner)
+	local r_async = repl(opt.async_read , nil, repl(opt.async, nil, true))
+	local w_async = repl(opt.async_write, nil, repl(opt.async, nil, true))
+	local r_opt = merge({async = r_async, type = 'pipe', debug_prefix = 'pipe.r'}, opt)
+	local w_opt = merge({async = w_async, type = 'pipe', debug_prefix = 'pipe.w'}, opt)
 	local flags = not opt.inheritable and O_CLOEXEC or 0
-	local ok = C.pipe2(fds, flags) == 0
-	if not ok then return try_errno() end
-	local async = repl(opt.async, nil, true)
-	local r_async = repl(opt.async_read , nil, async)
-	local w_async = repl(opt.async_write, nil, async)
-	local r_fd = fds[0]
-	local w_fd = fds[1]
-	local r_ok, rf = pcall(_wrap_fd, r_fd, merge({type = 'pipe', async = r_async, debug_prefix = 'pipe.r'}, opt))
-	local w_ok, wf = pcall(_wrap_fd, w_fd, merge({type = 'pipe', async = w_async, debug_prefix = 'pipe.w'}, opt))
-	if not (r_ok and w_ok) then
-		if r_ok then rf:try_close() else C.close(r_fd) end
-		if w_ok then wf:try_close() else C.close(w_fd) end
-		error(rf or wf, 0)
-	end
+	assert(try_errno(C.pipe2(pipe_fds, flags) == 0))
+	local rf = _make_file(owner, pipe_fds[0], r_opt)
+	local wf = _make_file(owner, pipe_fds[1], w_opt)
+	--both files are owned now so any _init_file() call can fail without leaking.
+	_init_file(rf)
+	_init_file(wf)
 	if not opt.inheritable then
 		if opt. read_inheritable then rf:set_inheritable(true) end
 		if opt.write_inheritable then wf:set_inheritable(true) end
@@ -745,15 +735,16 @@ function try_pipe(opt) --unnamed pipe
 		wf, wf.async and '' or ',blocking', rf.fd, wf.fd)
 	return rf, wf
 end
-function pipe(opt)
-	local rf, wf = try_pipe(opt)
-	check('fs', 'pipe', rf, '%s', wf)
-	return rf, wf
-end
 
-stdin_async_pipe  = memoize(function() return _wrap_fd(0, {type = 'pipe', async = true, debug_prefix = '<stdin>' , owner = 'main'}) end)
-stdout_async_pipe = memoize(function() return _wrap_fd(1, {type = 'pipe', async = true, debug_prefix = '<stdout>', owner = 'main'}) end)
-stderr_async_pipe = memoize(function() return _wrap_fd(2, {type = 'pipe', async = true, debug_prefix = '<stderr>', owner = 'main'}) end)
+local function make_stdpipe(fd, debug_prefix)
+	return memoize(function()
+		local opt = {type = 'pipe', async = true, debug_prefix = debug_prefix}
+		return _init_file(_make_file(mainthread(), fd, opt))
+	end)
+end
+stdin_async_pipe  = make_stdpipe(0, '<stdin>' )
+stdout_async_pipe = make_stdpipe(1, '<stdout>')
+stderr_async_pipe = make_stdpipe(2, '<stderr>')
 
 --eventfd --------------------------------------------------------------------
 
@@ -761,16 +752,13 @@ cdef'int eventfd(unsigned int initval, int flags);'
 
 EFD_SEMAPHORE = 1
 
-local function try_eventfd(initval, flags)
+function eventfd(initval, flags)
+	local owner = _check_owner()
 	local fd = C.eventfd(initval or 0, bor(O_CLOEXEC, flags or 0))
-	if fd == -1 then return try_errno() end
-	local ok, f = pcall(_wrap_fd, fd, {
+	assert(try_errno(fd ~= -1))
+	local f = _init_file(_make_file(owner, fd, {
 		type = 'eventfd', async = true, debug_prefix = 'E', quiet = true,
-	})
-	if not ok then
-		C.close(fd)
-		error(f, 0)
-	end
+	}))
 	local rbuf = new'uint64_t[1]'
 	local wbuf = new'uint64_t[1]'
 	f.try_read_value = function(f)
@@ -787,9 +775,6 @@ local function try_eventfd(initval, flags)
 	end
 	f.write_value = unprotect_io(f.try_write_value)
 	return f
-end
-function eventfd(...)
-	return assert(try_eventfd(...))
 end
 
 --i/o ------------------------------------------------------------------------
@@ -863,32 +848,32 @@ function file.try_write(f, buf, sz)
 	sz = sz or #buf
 	if sz == 0 then return true end --mask out null writes
 	local sz0 = sz
-	while true do
-		local len, err
-		if f.async then
-			len, err = file_async_write(f, buf, sz)
+	::again::
+	local len, err
+	if f.async then
+		len, err = file_async_write(f, buf, sz)
+	else
+		len = C.write(f.fd, buf, sz)
+		if len == -1 then
+			len, err = try_errno()
 		else
-			len = C.write(f.fd, buf, sz)
-			if len == -1 then
-				len, err = try_errno()
-			else
-				len = tonumber(len)
-				f.w = f.w + len
-			end
+			len = tonumber(len)
+			f.w = f.w + len
 		end
-		if len == sz then
-			break
-		elseif not len then --short write
-			return nil, err, sz0 - sz
-		end
-		assert(len > 0)
-		if isstr(buf) then --only make pointer on the rare second iteration.
-			buf = cast(u8p, buf)
-		end
-		buf = buf + len
-		sz  = sz  - len
 	end
-	return true
+	if len == sz then
+		return true
+	elseif not len then --short write
+		if err == 'interrupted' then goto again end
+		return nil, err, sz0 - sz
+	end
+	assert(len > 0)
+	if isstr(buf) then --only make pointer on the rare second iteration.
+		buf = cast(u8p, buf)
+	end
+	buf = buf + len
+	sz  = sz  - len
+	goto again
 end
 file.write = unprotect_io(file.try_write)
 
@@ -896,15 +881,16 @@ file.write = unprotect_io(file.try_write)
 function file.try_readn(f, buf, sz)
 	local sz0 = sz
 	local buf = cast(u8p, buf)
-	while sz > 0 do
-		local len, err = f:try_read(buf, sz)
-		if not len or err == 'eof' then --short read
-			return nil, err, sz0 - sz
-		end
-		buf = buf + len
-		sz  = sz  - len
+	::again::
+	local len, err = f:try_read(buf, sz)
+	if err == 'interrupted' then goto again end
+	if not len or err == 'eof' then --short read
+		return nil, err, sz0 - sz
 	end
-	return true
+	if sz == len then return true end
+	buf = buf + len
+	sz  = sz  - len
+	goto again
 end
 file.readn = unprotect_io(file.try_readn)
 
@@ -2296,14 +2282,27 @@ end
 
 local PIDFD_NONBLOCK = 0x000800
 
-function pidfd_open(pid, opt)
-	opt = update({type = 'pidfd', async = true, debug_prefix = 'p'}, opt)
+local function pidfd_try_wait(f)
+	return _epoll_try_wait(f, 'r')
+end
+local pidfd_wait = unprotect_io(pidfd_try_wait)
+
+local pidfd_opt = {
+	type = 'pidfd', async = true, debug_prefix = 'p',
+	try_wait = pidfd_try_wait,
+	wait = pidfd_wait,
+}
+function try_pidfd_open(pid, opt)
+	opt = istab(pid) and update({}, pidfd_opt, pid)
+		or update({pid = pid}, pidfd_opt, opt)
+	local owner = _check_owner(opt.owner)
 	local flags = opt.async and PIDFD_NONBLOCK or 0
-	local fd = C.syscall(434, pid, flags)
-	if fd == -1 then return check_io(nil, try_errno()) end
-	local ok, f = pcall(_wrap_fd, fd, opt)
-	if not ok then C.close(fd); error(f, 0) end
-	return f
+	local fd = C.syscall(434, cast('int', opt.pid), cast('unsigned int', flags))
+	if fd == -1 then return try_errno() end
+	return _init_file(_make_file(owner, fd, opt))
+end
+function pidfd_open(...)
+	return assert(try_pidfd_open(...))
 end
 
 metatype(dir_ct, dir)

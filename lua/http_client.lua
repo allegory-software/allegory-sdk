@@ -498,6 +498,7 @@ end
 function http_client(...)
 
 	local client = object(client, {}, ...)
+	_init_owner(_check_owner(client.owner), client)
 	attr(client, 'client_ips')
 
 	local debug = client.debug or config'http_client_debug' or ''
@@ -550,7 +551,6 @@ function client:target(req)
 	local target = attr(self.targets, target_key)
 	if not target.type then --just created
 		object(http_target, target)
-		makeowner(target)
 		target.host = host
 		target.secure = req.secure
 		target.client_ip = client_ip
@@ -559,6 +559,7 @@ function client:target(req)
 			max_waiting_threads = req.max_waiting_threads,
 		}
 		target.tls_options = req.tls_options
+		_init_owner(self, target)
 	end
 	return target
 end
@@ -817,10 +818,10 @@ client.try_fetch = protect_io(client.fetch)
 
 local cl
 function fetch(...)
-	cl = cl or http_client()
+	cl = cl or http_client{owner = mainthread()}
 	return cl:fetch(...)
 end
 function try_fetch(...)
-	cl = cl or http_client()
+	cl = cl or http_client{owner = mainthread()}
 	return cl:try_fetch(...)
 end

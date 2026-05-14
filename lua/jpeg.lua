@@ -31,7 +31,8 @@
 	  pixels of early progression stages for progressive JPEGs.
 	jpg.partial                       JPEG file is truncated (see after loading)
 	jpg:free()                        free the image
-	jpeg_decoder() -> decode()        create a push-style decode function.
+	jpeg_decoder() -> thread          create a push-style decoder
+	- thread.decode(buf, len) -> nil,'more' | bmp    call repeatedly to decode chunks
 	[try_]jpeg_save(opt)              compress a bitmap into a JPEG image
 
 jpeg_open(opt | read) -> jpg
@@ -912,24 +913,25 @@ function try_jpeg_open(opt)
 end
 jpeg_open = protect('jpeg', try_jpeg_open)
 
---returns a `decode(buf, len) -> nil,'more' | bmp` function to be called
---repeatedly while `nil,'more'` is returned and then a bitmap is returned.
+--returns a thread with a `decode(buf, len) -> nil,'more' | bmp` function
+--to be called repeatedly while `nil,'more'` is returned and then a bitmap
+--is returned.
 function jpeg_decoder()
 	require'sock'
-	local decode = cowrap(function(yield)
+	local thread = iterator(function(yield)
 		local jp, err = try_jpeg_open(yield)
 		if not jp then return nil, err end
 		local bmp = jp:load()
 		jp:free()
 		return true, bmp
 	end)
-	local buf, sz = decode()
+	local buf, sz = thread.next()
 	if not buf then return nil, sz end
-	return function(p, len)
+	function thread.decode(p, len)
 		while len > 0 do
 			local n = min(len, sz)
 			copy(buf, p, n)
-			buf, sz = decode(n)
+			buf, sz = thread.next(n)
 			if buf == true then return sz end --return bmp
 			if not buf then return nil, sz end --error
 			len = len - n
@@ -937,6 +939,7 @@ function jpeg_decoder()
 		end
 		return nil, 'more' --signal "need more data"
 	end
+	return thread
 end
 
 function try_jpeg_save(opt)

@@ -31,7 +31,7 @@ local function sthread(f, name)
 	return thread(function(...)
 		local ok, err = pcall(f, ...)
 		if not ok then _terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err) end
-	end, name)
+	end, name):setowner()
 end
 
 local function checked_run(f)
@@ -836,6 +836,7 @@ for _, k in ipairs(tests_to_run) do
 			pr('FAILED: ', k)
 			pr(err)
 			n_fail = n_fail + 1
+			break
 		end
 	end
 end

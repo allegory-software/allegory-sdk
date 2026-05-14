@@ -4,22 +4,38 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 API
-	makeownernode(o) -> o       turn a plain object into what can be owned or owner
-	setowner(res, owner)        set owner of res (owner=nil means mainthread())
-	_initowner(res)             init res.owner if any (call in res' constructor)
+	setowner(res, [owner])             set owner of res (nil for mainthread())
+	currentowner([thread]) -> owner    get (current) thread's current owner
+	setcurrentowner(owner, [thread])   set (current) thread's current owner
 
-makeownernode(o) -> o
+INTEGRATION API
+	_check_owner(owner) -> owner  check/get owner before creating res (raises!)
+	_init_owner(owner, res)       init checked owner of res: call in res constructor
+	_close_owned(owner)           call on res:try_close()
+	_disown(res)                  call on res:try_close()
 
-	To be an owner, `res` must have `onclose` and `try_close` that honors `onclose`
-	hooks and`owner` must have `onclose`. makeownernode() creates stubs for both.
+RATIONALE
+
+	Scarce external resources that need deterministic freeing must be put in
+	the owner tree (whose root is mainthread()) by calling _init_owner() in
+	their constructor which ties their lifetime to the lifetime of their owner.
+
+	The default owner for a new resource is currentowner() which by default
+	is currentthread(), so for a resource (that doesn't specify an owner)
+	to survive the thread in which it was created, setowner() must be called.
+
+	Threads free up their owned objects when the thread finishes, including
+	when an error is raised inside the thread which is the primary motivation
+	for having an ownership model. With automatic cleanup, errors can now be
+	raised freely in user code without worrying about leaks.
 
 ]]
 
-local function owner_try_close_owned(owner)
+function _close_owned(owner)
 	local owns = owner.owns
-	owner.owns = false
-	--^^ don't allow try_close() to acquire more resources.
-	--^^ false instead of nil is a makeowner() barrier.
+	if owns == false then return end
+	owner.owns = false --_own() and _close_owned() barrier
+	if not owns then return end
 	for i = #owns, 1, -1 do
 		local res = owns[i]
 		if res then
@@ -30,24 +46,20 @@ local function owner_try_close_owned(owner)
 	end
 end
 
-local owner_disown --fw. decl.
-
-local function res_disown(res)
-	if not res.owner then return end
-	owner_disown(res.owner, res)
+function _disown(res)
+	local owner = res.owner
+	if not owner then return end
+	if owner.owns then --not inside _close_owned()
+		add(owner.owns.free_slots, res.owner_index)
+		owner.owns[res.owner_index] = false
+	end
+	res.owner = nil --_disown() barrier
+	res.owner_index = -1
 end
 
-local function owner_own(owner, res)
-	assert(owner.owns, 'own: owner closed')
-	local o = owner
-	while o do
-		assert(o ~= res, 'own: cycle')
-		o = o.owner
-	end
-	if res.owner_index == nil then --makeowned
-		assert(res.onclose, 'makeowned: resource has no onclose method')
-		assert(res.try_close, 'makeowned: resource has no try_close method')
-		res:onclose(res_disown)
+local function _own(owner, res)
+	if owner.owns == nil then
+		owner.owns = {free_slots = {}}
 	end
 	local i = pop(owner.owns.free_slots) or #owner.owns + 1
 	owner.owns[i] = res
@@ -55,68 +67,49 @@ local function owner_own(owner, res)
 	res.owner_index = i
 end
 
---[[local]] function owner_disown(owner, res)
-	assert(res.owner == owner)
-	if owner.owns then --not inside owner_try_close_owned()
-		add(owner.owns.free_slots, res.owner_index)
-		owner.owns[res.owner_index] = false
-	end
-	res.owner = nil
-	res.owner_index = -1 -- -1 instead of not nil is a makeowned barrier.
-end
-
-local function node_try_close(o)
-	if not o._onclose then return end
-	o:_onclose()
-	return true
-end
-local function node_close(o)
-	assert(o:try_close())
-end
-function makeownernode(o)
-	if o.onclose then return o end --already made
-	assert(not o.close)
-	assert(not o.try_close)
-	function o:onclose(fn)
-		after(self, '_onclose', fn)
-	end
-	o.try_close = node_try_close
-	o.close = node_close
-	return o
-end
-
-local function makeowner(owner)
-	if owner.owns ~= nil then return owner end
-	assert(owner.onclose, 'makeowner: no onclose method')
-	owner.owns = {free_slots = {}}
-	owner:onclose(owner_try_close_owned)
+function _check_owner(owner)
+	owner = owner or currentowner()
+	assert(istab(owner), 'invalid owner')
+	assertf(owner.owner or owner == mainthread(), 'owner is not owned')
+	assert(owner.owns ~= false, 'owner closed')
 	return owner
 end
 
 function setowner(res, owner)
 	owner = owner or mainthread()
 	if res.owner == owner then return end
-	if res.owner then
-		owner_disown(res.owner, res)
+	assert(res.try_close, 'resource has no try_close method')
+	_check_owner(owner)
+	local o = owner
+	while o do
+		assert(o ~= res, 'owner is owned by the resource')
+		o = o.owner
 	end
-	owner_own(makeowner(owner), res)
+	_disown(res)
+	_own(owner, res)
 	return res
 end
 
-function _initowner(res)
-	makeownernode(res)
-	local owner = res.owner
-	if not owner then
-		if res.default_owner == 'main' then
-			owner = mainthread()
-		elseif res.default_owner == 'current' then
-			owner = currentowner()
-		elseif istab(res.default_owner) then
-			owner = res.default_owner
-		else
-			assert(false, 'invalid default_owner')
-		end
+local function res_try_close(res)
+	_close_owned(res)
+	_disown(res)
+	return true
+end
+
+function _init_owner(owner, res)
+	if not res.try_close then --plain object, make ownable
+		res.try_close = res_try_close
 	end
-	owner_own(makeowner(owner), res)
+	_own(owner, res)
 	return res
+end
+
+function currentowner(thread)
+	thread = thread or currentthread()
+	return thread.currentowner or thread
+end
+
+function setcurrentowner(owner, thread)
+	thread = thread or currentthread()
+	thread.currentowner = assert(owner)
 end

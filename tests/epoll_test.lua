@@ -629,7 +629,7 @@ function test.nested_resume_restores_poll_thread()
 		local child = thread(function()
 			grandchild = thread(function()
 				suspend()
-			end)
+			end):setowner()
 			resume(grandchild)
 		end)
 
@@ -790,10 +790,10 @@ function test.thread_finish_in_resumes_target()
 	assert(child:status() == 'dead')
 end
 
-function test.cowrap_success_and_error()
+function test.iterator_success_and_error()
 	checked_run(function()
-		local wrapped, th
-		wrapped, th = cowrap(function(yield, arg)
+		local th
+		th = iterator(function(yield, arg)
 			assert(currentthread() == th)
 			assert(arg == 'start')
 			local resumed = yield('yielded')
@@ -801,19 +801,19 @@ function test.cowrap_success_and_error()
 			return 'done'
 		end)
 
-		assert(wrapped('start') == 'yielded')
+		assert(th.next('start') == 'yielded')
 		assert(th:status() ~= 'dead')
-		local ret = wrapped('back')
+		local ret = th.next('back')
 		assert(ret == 'done')
 		assert(th:status() == 'dead')
 
-		local bad, bad_th = cowrap(function()
-			error'cowrap-boom'
+		local bad_th = iterator(function()
+			error'iterator-boom'
 		end)
 
-		local ok, err = pcall(bad)
+		local ok, err = pcall(bad_th.next)
 		assert(not ok)
-		assert(tostring(err):find('cowrap-boom', 1, true))
+		assert(tostring(err):find('iterator-boom', 1, true))
 		assert(bad_th:status() == 'dead')
 	end)
 end
