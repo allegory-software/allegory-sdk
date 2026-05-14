@@ -11,8 +11,8 @@ API
 INTEGRATION API
 	_check_owner(owner) -> owner  check/get owner before creating res (raises!)
 	_init_owner(owner, res)       init checked owner of res: call in res constructor
-	_close_owned(owner)           call on res:try_close()
-	_disown(res)                  call on res:try_close()
+	_close_owned(owner)           call it on your try_close() method
+	_disown(res)                  call it on your try_close() method
 
 RATIONALE
 
@@ -28,6 +28,20 @@ RATIONALE
 	when an error is raised inside the thread which is the primary motivation
 	for having an ownership model. With automatic cleanup, errors can now be
 	raised freely in user code without worrying about leaks.
+
+CONSTRAINTS
+
+	try_close() must follow this exact protocol:
+
+	1. claim close barrier -- prevents re-entry into try_close()
+	2. free external resources without raising!
+	4. call _close_owned(res) --owned resources see a closed owner.
+	4. call _disown(res) --do not disown before resources are freed!
+	5. call onclose callbacks --callbacks see a closed owner.
+
+	Also, on step 2, be careful not to call into things that might try to
+	close the owner, otherwise _close_owned(owner) will raise. Yielding
+	increases that risk greatly, so just don't yield before _disown()!
 
 ]]
 

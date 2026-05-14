@@ -617,6 +617,7 @@ local function try_file_close(f, cancel_thread)
 	end
 	if f._onclose then
 		f:_onclose()
+		f._onclose = nil
 	end
 	return ok, err
 end

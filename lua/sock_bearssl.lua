@@ -1109,12 +1109,13 @@ local function engine_run(self, target)
 			if not ok then return nil, err end
 			C.br_ssl_engine_sendrec_ack(eng, n)
 		elseif band(state, BR_SSL_RECVREC) ~= 0 then
-			local buf = C.br_ssl_engine_recvrec_buf(eng, _szp)
-			local n = tonumber(_szp[0])
-			local len, err = tcp:try_recv(buf, n)
-			if not len or err == 'eof' then return nil, err end
-			C.br_ssl_engine_recvrec_ack(eng, len)
-		else
+				local buf = C.br_ssl_engine_recvrec_buf(eng, _szp)
+				local n = tonumber(_szp[0])
+				local len, err = tcp:try_recv(buf, n)
+				if not len then return nil, err end
+				if err == 'eof' then return nil, 'ssl_unexpected_eof' end
+				C.br_ssl_engine_recvrec_ack(eng, len)
+			else
 			return nil, 'ssl_stall'
 		end
 	end
@@ -1139,12 +1140,8 @@ function stcp:onclose(fn)
 	after(self, '_onclose', fn)
 end
 
-function stcp:closed()
-	return self.tcp.fd == -1
-end
-
 function stcp:try_shutdown(mode)
-	if self.tcp.fd == -1 then return nil, 'closed' end
+	if self._closed then return nil, 'closed' end
 	return self.tcp:try_shutdown(mode)
 end
 stcp.shutdown = unprotect_io(stcp.try_shutdown)
@@ -1168,6 +1165,30 @@ function stcp:debug_stream(protocol_name)
 	return tcp_class.debug(self, protocol_name or 'ssock')
 end
 
+function stcp:try_close()
+	if self._closed then return true end
+	self._closed = true --close barrier
+	local ok, err = self.tcp:try_close()
+	_close_owned(self)
+	_disown(self)
+	self._keepalive = nil
+	live(self, nil)
+	if self._onclose then
+		self:_onclose()
+		self._onclose = nil
+	end
+	return ok, err
+end
+stcp.close = unprotect_io(stcp.try_close)
+
+function stcp:closed()
+	return self._closed
+end
+
+function stcp:_try_cancel_io(cancel_thread)
+	return self.tcp:_try_cancel_io(cancel_thread)
+end
+
 -- Client sockets (connected TLS socket, both sides) -------------------------
 
 local client_stcp = merge({type = 'client_tls_socket'}, stcp)
@@ -1187,11 +1208,9 @@ function _G.try_client_stcp(tcp, host, opt)
 	local owner = _check_owner(opt.owner)
 	local sc, eng, keepalive = make_client_ctx(opt)
 	if not sc then return nil, eng end
-
 	if C.br_ssl_client_reset(sc, host, 0) == 0 then
 		return nil, 'ssl_client_reset_failed'
 	end
-
 	local s = wrap_client_stcp(tcp, eng, keepalive)
 	live(s, 'tcp=%s', tcp)
 	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
@@ -1205,43 +1224,35 @@ function _G.try_client_stcp(tcp, host, opt)
 end
 _G.client_stcp = unprotect_io(_G.try_client_stcp)
 
-function client_stcp:try_close()
-	if self.tcp.fd == -1 then
-		--BearSSL doesn't malloc, so no cleanup needed if the fd is lost.
-		return true
-	end
-	-- best-effort TLS close_notify
-	C.br_ssl_engine_close(self.eng)
+function client_stcp:try_send_close_notify()
+	if not self.eng then return true end
+	local eng = self.eng
+	self.eng = nil --API barrier; only close() allowed after this.
+	C.br_ssl_engine_close(eng)
 	while true do
-		local state = tonumber(C.br_ssl_engine_current_state(self.eng))
-		if band(state, BR_SSL_CLOSED) ~= 0 then break end
+		local state = tonumber(C.br_ssl_engine_current_state(eng))
 		if band(state, BR_SSL_SENDREC) ~= 0 then
-			local buf = C.br_ssl_engine_sendrec_buf(self.eng, _szp)
+			local buf = C.br_ssl_engine_sendrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
-			if not self.tcp:try_send(buf, n) then break end
-			C.br_ssl_engine_sendrec_ack(self.eng, n)
+			local ok, err = self.tcp:try_send(buf, n)
+			if not ok then return nil, err end
+			C.br_ssl_engine_sendrec_ack(eng, n)
 		elseif band(state, BR_SSL_RECVREC) ~= 0 then
-			local buf = C.br_ssl_engine_recvrec_buf(self.eng, _szp)
+			local buf = C.br_ssl_engine_recvrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
 			local len, err = self.tcp:try_recv(buf, n)
-			if not len or err == 'eof' then break end
-			C.br_ssl_engine_recvrec_ack(self.eng, len)
+			if not len or err == 'eof' then return nil, err end
+			C.br_ssl_engine_recvrec_ack(eng, len)
+		elseif band(state, BR_SSL_CLOSED) ~= 0 then
+			return true
 		else
-			break
+			return nil, 'ssl_stall'
 		end
 	end
-	live(self, nil)
-	local ok, err = self.tcp:try_close()
-	self.eng = nil
-	self._keepalive = nil
-	if self._onclose then
-		self:_onclose()
-	end
-	return ok, err
 end
 
 function client_stcp:try_recv(buf, sz)
-	if self.tcp.fd == -1 then return nil, 'closed' end
+	if self._closed then return nil, 'closed' end
 	local ok, err = engine_run(self, BR_SSL_RECVAPP)
 	if not ok then return err == 'eof' and 0 or nil, err end
 	local app_buf = C.br_ssl_engine_recvapp_buf(self.eng, _szp)
@@ -1252,7 +1263,7 @@ function client_stcp:try_recv(buf, sz)
 end
 
 function client_stcp:try_send(buf, sz)
-	if self.tcp.fd == -1 then return nil, 'closed' end
+	if self._closed then return nil, 'closed' end
 	sz = sz or #buf
 	if sz == 0 then return true end --mask-out null-writes
 	local bp = cast(u8p, buf)
@@ -1335,25 +1346,8 @@ function _G.try_server_stcp(tcp, opt)
 end
 _G.server_stcp = unprotect_io(_G.try_server_stcp)
 
-function server_stcp:try_close()
-	if self.tcp.fd == -1 then return true end
-	live(self, nil)
-	--NOTE: normally we should iterate tcp._sockets[s] and call s.stcp:try_close()
-	--on each which sends TLS close_notify, but that calls send() and recv() and
-	--we want to be able to call this from a different thread precisely so we can
-	--interrupt all the threads waiting on these sockets. so we force-close instead.
-	local ok, err = self.tcp:try_close()
-	self.eng = nil
-	self._keepalive = nil
-	if self._onclose then
-		self:_onclose()
-	end
-	return ok, err
-end
-server_stcp.close = unprotect_io(server_stcp.try_close)
-
 function server_stcp:try_accept(opt, timeout)
-	if self.tcp.fd == -1 then return nil, 'closed' end
+	if self:closed() then return nil, 'closed' end
 	local ctcp, err, retry = self.tcp:try_accept(opt, timeout)
 	if not ctcp then return nil, err, retry end
 

@@ -517,11 +517,7 @@ function http_client(...)
 end
 
 function client:close()
-	for _, target in pairs(self.targets) do
-		target.conn_pool:close_all(function(http)
-			http.tcp:close()
-		end)
-	end
+	assert(self:try_close())
 end
 
 --connection pool ------------------------------------------------------------

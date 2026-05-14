@@ -492,6 +492,7 @@ local function socket_try_close(self, cancel_thread)
 	_epoll_cancel(self, cancel_thread) --raise into waiting I/O threads.
 	if self._onclose then
 		self:_onclose()
+		self._onclose = nil
 	end
 	return close_ok, close_err
 end

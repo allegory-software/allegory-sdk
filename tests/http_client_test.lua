@@ -30,13 +30,39 @@ local function checked_run(f)
 	if _terr then error(_terr, 2) end
 end
 
+local function collect_owned(res, t)
+	t = t or {}
+	add(t, res)
+	local owns = res.owns
+	if owns and owns ~= false then
+		for i = 1, #owns do
+			if owns[i] then
+				collect_owned(owns[i], t)
+			end
+		end
+	end
+	return t
+end
+
+local function close_client(cl)
+	local owned = collect_owned(cl)
+	cl:close()
+	for _, res in ipairs(owned) do
+		assert(res.owner == nil)
+		assert(res.owner_index == -1)
+	end
+end
+
 local BASE = 'https://httpbingo.org'
+local POOL_BASE = 'https://httpbingo.org:443'
+local POOL_FULL_BASE = 'https://httpbingo.org:0443'
+local cl = http_client{owner = mainthread()}
 
 -- GET /get -------------------------------------------------------------------
 
 function test.get()
 	checked_run(function()
-		local body, req = fetch(BASE..'/get')
+		local body, req = cl:fetch(BASE..'/get')
 		assert(req.status == 200)
 		assert(istab(body))
 		assert(body.url == BASE..'/get')
@@ -47,7 +73,7 @@ end
 
 function test.post()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/post', body = 'hello', body_type = 'text/plain'}
+		local body, req = cl:fetch{url = BASE..'/post', body = 'hello', body_type = 'text/plain'}
 		assert(req.status == 200)
 		assert(body.data == 'hello')
 	end)
@@ -57,7 +83,7 @@ end
 
 function test.post_json()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/post', body = {foo = 'bar'}}
+		local body, req = cl:fetch{url = BASE..'/post', body = {foo = 'bar'}}
 		assert(req.status == 200)
 		assert(body.json.foo == 'bar')
 	end)
@@ -67,7 +93,7 @@ end
 
 function test.put()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/put', method = 'PUT', body = 'data', body_type = 'text/plain'}
+		local body, req = cl:fetch{url = BASE..'/put', method = 'PUT', body = 'data', body_type = 'text/plain'}
 		assert(req.status == 200)
 		assert(body.data == 'data')
 	end)
@@ -77,7 +103,7 @@ end
 
 function test.patch()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/patch', method = 'PATCH', body = 'pdata', body_type = 'text/plain'}
+		local body, req = cl:fetch{url = BASE..'/patch', method = 'PATCH', body = 'pdata', body_type = 'text/plain'}
 		assert(req.status == 200)
 		assert(body.data == 'pdata')
 	end)
@@ -87,7 +113,7 @@ end
 
 function test.delete()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/delete', method = 'DELETE'}
+		local body, req = cl:fetch{url = BASE..'/delete', method = 'DELETE'}
 		assert(req.status == 200)
 		assert(istab(body))
 	end)
@@ -97,7 +123,7 @@ end
 
 function test.head()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/head', method = 'HEAD'}
+		local body, req = cl:fetch{url = BASE..'/head', method = 'HEAD'}
 		assert(req.status == 200)
 		assert(body == '', 'HEAD response should have no body')
 	end)
@@ -108,7 +134,7 @@ end
 function test.status_codes()
 	checked_run(function()
 		for _,code in ipairs{200, 201, 204, 400, 404, 500} do
-			local body, req = fetch{url = BASE..'/status/'..code, compress = false}
+			local body, req = cl:fetch{url = BASE..'/status/'..code, compress = false}
 			assert(req.status == code, 'expected '..code..' got '..req.status)
 		end
 	end)
@@ -118,7 +144,7 @@ end
 
 function test.headers()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/headers',
+		local body, req = cl:fetch{url = BASE..'/headers',
 			headers = {['x-custom-header'] = 'testvalue'}}
 		assert(req.status == 200)
 		assert(body.headers['X-Custom-Header'] and body.headers['X-Custom-Header'][1] == 'testvalue')
@@ -129,7 +155,7 @@ end
 
 function test.gzip()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/gzip', compress = true}
+		local body, req = cl:fetch{url = BASE..'/gzip', compress = true}
 		assert(req.status == 200)
 		assert(body.gzipped == true)
 	end)
@@ -144,7 +170,7 @@ end
 
 function test.redirect()
 	checked_run(function()
-		local body, req = fetch(BASE..'/redirect/3')
+		local body, req = cl:fetch(BASE..'/redirect/3')
 		assert(req.status == 200)
 		assert(body.url == BASE..'/get')
 	end)
@@ -154,7 +180,6 @@ end
 
 function test.cookies()
 	checked_run(function()
-		local cl = http_client()
 		-- set cookies via redirect to /cookies
 		local body, req = cl:fetch(BASE..'/cookies/set?name=value&foo=bar')
 		assert(req.status == 200)
@@ -172,7 +197,6 @@ end
 
 function test.cookies_delete()
 	checked_run(function()
-		local cl = http_client()
 		cl:fetch(BASE..'/cookies/set?gone=here')
 		cl:fetch(BASE..'/cookies/delete?gone=')
 		local body, req = cl:fetch(BASE..'/cookies')
@@ -184,7 +208,7 @@ end
 
 function test.response_headers()
 	checked_run(function()
-		local body, req = fetch(BASE..'/response-headers?x-test=hello')
+		local body, req = cl:fetch(BASE..'/response-headers?x-test=hello')
 		assert(req.status == 200)
 		assert(req.response_headers['x-test'] == 'hello')
 	end)
@@ -195,7 +219,7 @@ end
 function test.delay()
 	checked_run(function()
 		local t0 = clock()
-		local body, req = fetch{url = BASE..'/delay/1', headers_timeout = 10}
+		local body, req = cl:fetch{url = BASE..'/delay/1', headers_timeout = 10}
 		assert(req.status == 200)
 		assert(clock() - t0 >= 0.5)
 	end)
@@ -205,7 +229,7 @@ end
 
 function test.bytes()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/bytes/1024', compress = false}
+		local body, req = cl:fetch{url = BASE..'/bytes/1024', compress = false}
 		assert(req.status == 200)
 		assert(#body == 1024)
 	end)
@@ -215,7 +239,7 @@ end
 
 function test.stream_bytes()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/stream-bytes/512', compress = false}
+		local body, req = cl:fetch{url = BASE..'/stream-bytes/512', compress = false}
 		assert(req.status == 200)
 		assert(#body == 512)
 	end)
@@ -225,7 +249,7 @@ end
 
 function test.stream()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/stream/5', compress = false}
+		local body, req = cl:fetch{url = BASE..'/stream/5', compress = false}
 		assert(req.status == 200)
 		assert(isstr(body))
 		-- each line is a JSON object
@@ -239,7 +263,7 @@ end
 
 function test.etag_match()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/etag/test-etag', compress = false,
+		local body, req = cl:fetch{url = BASE..'/etag/test-etag', compress = false,
 			headers = {['if-none-match'] = '"test-etag"'}}
 		assert(req.status == 304)
 	end)
@@ -249,7 +273,7 @@ end
 
 function test.custom_user_agent()
 	checked_run(function()
-		local body, req = fetch{url = BASE..'/user-agent', user_agent = 'TestBot/1.0'}
+		local body, req = cl:fetch{url = BASE..'/user-agent', user_agent = 'TestBot/1.0'}
 		assert(req.status == 200)
 		assert(body['user-agent'] == 'TestBot/1.0')
 	end)
@@ -259,7 +283,9 @@ end
 
 function test.max_redirects()
 	checked_run(function()
-		local ok, err = pcall(fetch, {url = BASE..'/redirect/5', max_redirects = 2})
+		local ok, err = pcall(function()
+			cl:fetch{url = BASE..'/redirect/5', max_redirects = 2}
+		end)
 		assert(not ok)
 		assert(tostring(err):has'too many redirects')
 	end)
@@ -270,7 +296,7 @@ end
 function test.redirect_307_preserves_body()
 	checked_run(function()
 		local dest = url_escape(BASE..'/post', '/:')
-		local body, req = fetch{
+		local body, req = cl:fetch{
 			url = BASE..'/redirect-to?url='..dest..'&status_code=307',
 			method = 'POST', body = 'kept', body_type = 'text/plain',
 		}
@@ -284,7 +310,7 @@ end
 function test.redirect_302_drops_body()
 	checked_run(function()
 		local dest = url_escape(BASE..'/get', '/:')
-		local body, req = fetch{
+		local body, req = cl:fetch{
 			url = BASE..'/redirect-to?url='..dest..'&status_code=302',
 			method = 'POST', body = 'dropped', body_type = 'text/plain',
 		}
@@ -298,7 +324,7 @@ end
 function test.redirect_same_origin_keeps_auth()
 	checked_run(function()
 		local dest = url_escape(BASE..'/headers', '/:')
-		local body, req = fetch{
+		local body, req = cl:fetch{
 			url = BASE..'/redirect-to?url='..dest,
 			headers = {authorization = 'Bearer secret'},
 		}
@@ -313,7 +339,7 @@ function test.redirect_cross_origin_strips_auth()
 	checked_run(function()
 		-- redirect to http:// (port 80) vs https:// (port 443) = different port
 		local dest = url_escape('http://httpbingo.org/headers', '/:')
-		local body, req = fetch{
+		local body, req = cl:fetch{
 			url = BASE..'/redirect-to?url='..dest,
 			headers = {authorization = 'Bearer secret'},
 		}
@@ -327,7 +353,6 @@ end
 
 function test.connection_close()
 	checked_run(function()
-		local cl = http_client()
 		local body, req = cl:fetch{url = BASE..'/get', close = true}
 		assert(req.status == 200)
 		assert(req.http.tcp:closed())
@@ -338,11 +363,10 @@ end
 
 function test.pool_reuse()
 	checked_run(function()
-		local cl = http_client()
-		local body1, req1 = cl:fetch{url = BASE..'/get', max_conn = 1}
+		local body1, req1 = cl:fetch{url = POOL_BASE..'/get', max_conn = 1}
 		assert(req1.status == 200)
 		local tcp1 = req1.http.tcp
-		local body2, req2 = cl:fetch{url = BASE..'/get', max_conn = 1}
+		local body2, req2 = cl:fetch{url = POOL_BASE..'/get', max_conn = 1}
 		assert(req2.status == 200)
 		local tcp2 = req2.http.tcp
 		assert(tcp1 == tcp2, 'connection was not reused')
@@ -353,13 +377,12 @@ end
 
 function test.pool_wait()
 	checked_run(function()
-		local cl = http_client()
 		local ts = threadset()
 		local t0 = clock()
 		for i = 1, 2 do
 			resume(ts:thread(function()
-				local body, req = cl:fetch{
-					url = BASE..'/delay/1',
+					local body, req = cl:fetch{
+						url = POOL_BASE..'/delay/1',
 					max_conn = 1,
 					headers_timeout = 10,
 					wait_timeout = 30,
@@ -379,15 +402,14 @@ end
 
 function test.pool_waitlist_full()
 	checked_run(function()
-		local cl = http_client()
 		local ts = threadset()
 		local ok_count = 0
 		local fail_count = 0
 		-- 1 connection allowed, 0 waiters allowed, 3 concurrent requests
 		for i = 1, 3 do
 			resume(ts:thread(function()
-				local body, req = cl:fetch{
-					url = BASE..'/delay/1',
+					local body, req = cl:fetch{
+						url = POOL_FULL_BASE..'/delay/1',
 					max_conn = 1,
 					max_waiting_threads = 0,
 					headers_timeout = 10,
@@ -410,7 +432,7 @@ end
 function test.redirect_308_preserves_body()
 	checked_run(function()
 		local dest = url_escape(BASE..'/post', '/:')
-		local body, req = fetch{
+		local body, req = cl:fetch{
 			url = BASE..'/redirect-to?url='..dest..'&status_code=308',
 			method = 'POST', body = 'kept308', body_type = 'text/plain',
 		}
@@ -424,7 +446,7 @@ end
 function test.redirect_301_to_get()
 	checked_run(function()
 		local dest = url_escape(BASE..'/get', '/:')
-		local body, req = fetch{
+		local body, req = cl:fetch{
 			url = BASE..'/redirect-to?url='..dest..'&status_code=301',
 			method = 'POST', body = 'dropped', body_type = 'text/plain',
 		}
@@ -438,7 +460,7 @@ end
 function test.redirect_303_to_get()
 	checked_run(function()
 		local dest = url_escape(BASE..'/get', '/:')
-		local body, req = fetch{
+		local body, req = cl:fetch{
 			url = BASE..'/redirect-to?url='..dest..'&status_code=303',
 			method = 'POST', body = 'dropped', body_type = 'text/plain',
 		}
@@ -451,7 +473,7 @@ end
 
 function test.fetch_url_body_shorthand()
 	checked_run(function()
-		local body, req = fetch(BASE..'/post', {msg = 'shorthand'})
+		local body, req = cl:fetch(BASE..'/post', {msg = 'shorthand'})
 		assert(req.status == 200)
 		assert(body.json.msg == 'shorthand')
 	end)
@@ -461,7 +483,6 @@ end
 
 function test.cookie_store_get()
 	checked_run(function()
-		local cl = http_client()
 		local target = {host = 'example.com', client_ip = nil}
 
 		-- store a cookie
@@ -486,7 +507,6 @@ end
 
 function test.cookie_path_matching()
 	checked_run(function()
-		local cl = http_client()
 		local target = {host = 'example.com', client_ip = nil}
 
 		cl:store_cookies{
@@ -514,7 +534,6 @@ end
 
 function test.cookie_default_path()
 	checked_run(function()
-		local cl = http_client()
 		local target = {host = 'example.com', client_ip = nil}
 
 		-- no Path attr -> default path is /foo/ (from /foo/bar)
@@ -539,7 +558,6 @@ end
 
 function test.cookie_secure_flag()
 	checked_run(function()
-		local cl = http_client()
 		local target = {host = 'example.com', client_ip = nil}
 
 		cl:store_cookies{
@@ -563,8 +581,6 @@ end
 
 function test.cookie_domain_matching()
 	checked_run(function()
-		local cl = http_client()
-
 		-- set cookie with Domain=example.com from sub.example.com
 		local target_sub = {host = 'sub.example.com', client_ip = nil}
 		cl:store_cookies{
@@ -590,8 +606,6 @@ end
 
 function test.cookie_exact_host()
 	checked_run(function()
-		local cl = http_client()
-
 		-- set cookie WITHOUT Domain attr from example.com
 		local target = {host = 'example.com', client_ip = nil}
 		cl:store_cookies{
@@ -616,7 +630,6 @@ end
 
 function test.cookie_expiry()
 	checked_run(function()
-		local cl = http_client()
 		local target = {host = 'example.com', client_ip = nil}
 
 		-- set a cookie
@@ -662,5 +675,15 @@ for _, k in ipairs(tests_to_run) do
 			break
 		end
 	end
+end
+local close_ok, close_err = xpcall(function()
+	checked_run(function()
+		close_client(cl)
+	end)
+end, debug.traceback)
+if not close_ok then
+	pr('FAILED: ', 'close_client')
+	pr(close_err)
+	n_fail = n_fail + 1
 end
 print(('ok: %d, failed: %d'):format(n_ok, n_fail))
