@@ -225,6 +225,97 @@ function test.make_async_success_and_timeout_paths()
 	end)
 end
 
+function test.epollet_reads_ready_data_before_wait()
+	checked_run(function()
+		local rf, wf = pipe{async = true, quiet = true}
+		local buf = new'char[3]'
+		local n, err
+
+		assert(wf:write'abc')
+		local th = thread(function()
+			n, err = rf:try_read(buf, 3)
+		end)
+		resume(th)
+
+		assert(th:status() == 'dead')
+		assert(n == 3)
+		assert(err == nil)
+		assert(str(buf, 3) == 'abc')
+
+		rf:close()
+		wf:close()
+	end)
+end
+
+function test.epollet_partial_drain_reads_remaining_data()
+	checked_run(function()
+		local rf, wf = pipe{async = true, quiet = true}
+		local buf = new'char[3]'
+
+		assert(wf:write'abcdef')
+		assert(rf:read(buf, 3) == 3)
+		assert(str(buf, 3) == 'abc')
+		assert(rf:read(buf, 3) == 3)
+		assert(str(buf, 3) == 'def')
+
+		rf:close()
+		wf:close()
+	end)
+end
+
+function test.epollet_wakes_after_drain_and_next_write()
+	checked_run(function()
+		local rf, wf = pipe{async = true, quiet = true}
+		local buf = new'char[3]'
+		local n, err
+
+		assert(wf:write'abc')
+		assert(rf:read(buf, 3) == 3)
+		assert(str(buf, 3) == 'abc')
+
+		local th = thread(function()
+			n, err = rf:try_read(buf, 3)
+		end)
+		resume(th)
+		assert(th.waiting == rf)
+		assert(n == nil)
+
+		assert(wf:write'def')
+		wait(0.05)
+
+		assert(th:status() == 'dead')
+		assert(n == 3)
+		assert(err == nil)
+		assert(str(buf, 3) == 'def')
+
+		rf:close()
+		wf:close()
+	end)
+end
+
+function test.epollet_hup_wakes_blocked_reader()
+	checked_run(function()
+		local rf, wf = pipe{async = true, quiet = true}
+		local buf = new'char[3]'
+		local n, err
+
+		local th = thread(function()
+			n, err = rf:try_read(buf, 3)
+		end)
+		resume(th)
+		assert(th.waiting == rf)
+
+		wf:close()
+		wait(0.05)
+
+		assert(th:status() == 'dead')
+		assert(n == 0)
+		assert(err == 'eof')
+
+		rf:close()
+	end)
+end
+
 function test.expires_heap_entry_persists_across_successful_io()
 	checked_run(function()
 		local eo = {setexpires = _epoll_setexpires, r = 0}
@@ -496,6 +587,28 @@ function test.cancel_epollable_reentrant_sibling_cancel_returns_not_waiting()
 		assert(recv_th:status() == 'dead')
 		assert(send_th:status() == 'dead')
 	end)
+end
+
+function test.owner_close_current_resume_caller_is_logged()
+	local logs = capture_log(function()
+		run(function()
+			local wake_parent = wait_job()
+			local wake_child = wait_job()
+
+			local child = thread(function()
+				wake_child:wait(10)
+				wake_parent:resume()
+			end)
+			resume(child)
+
+			runafter(0, function()
+				wake_child:resume()
+			end)
+			wake_parent:wait(10)
+		end)
+	end)
+
+	assert(logs_contain(logs, 'closing current resume caller'))
 end
 
 function test.cancel_non_waiting_thread_returns_error()

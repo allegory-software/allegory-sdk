@@ -150,10 +150,6 @@ int tcsendbreak(int fd, int duration);
 int ioctl(int fd, unsigned long, ...);
 ]]
 
-local function check_errno(ret)
-	assert(try_errno(ret))
-end
-
 function isatty(fd)
 	local is = C.isatty(fd)
 	check_errno(is ~= -1)

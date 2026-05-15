@@ -220,6 +220,7 @@ FFI
 	isctype                      = ffi.istype
 	errno                        = ffi.errno
 	try_errno(v[, err]) -> v | nil, err
+	check_errno(v[, err]) -> v
 	str(buf, len)                = ffi.string(buf, len) if buf is not null
 	strlen(buf[, maxlen]) -> len|nil  = strnlen, stops at 64k by default
 	ptr(p)                       = p ~= nil and p  or nil
@@ -2281,7 +2282,7 @@ local errno_msgs = {
 	[101] = 'network_unreachable', --ENETUNREACH, connect(), send()
 	[103] = 'connection_aborted', --ECONNABORTED, accept()
 	[104] = 'connection_reset', --ECONNRESET, recv(), send()
-	[107] = 'not_connected', --ENOTCONN, send(), recv() (fatal)
+	[107] = 'not_connected', --ENOTCONN, send(), recv(), shutdown() (fatal)
 	[110] = 'timed_out', --ETIMEDOUT, connect()
 	[111] = 'connection_refused', --ECONNREFUSED, connect()
 	[112] = 'host_down', --EHOSTDOWN, accept()
@@ -2308,6 +2309,9 @@ function try_errno(ret, err)
 	local s = C.strerror(err)
 	local s = str(s) or 'errno '..err
 	return ret, s
+end
+function check_errno(ret)
+	assert(try_errno(ret))
 end
 
 --buffers --------------------------------------------------------------------

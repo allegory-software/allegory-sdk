@@ -101,11 +101,19 @@ NOTES ------------------------------------------------------------------------
 Creating hi-level threads is slow because Lua modules must be loaded
 every time for each thread. For best results, use a thread pool.
 
+TODO -------------------------------------------------------------------------
+
+- when using epoll in a thread, use a synchronized queue and send
+mainthread():close() on try_close() and maybe use it for other things too.
+- think about who should own resources shared with the thread (maybe a
+"refcount" control-owner?).
+
 ]=]
 
 if not ... then require'os_thread_test'; return end
 
 require'glue'
+require'owner'
 require'pthread'
 require'luastate'
 
@@ -403,6 +411,7 @@ local thread = {type = 'os_thread', debug_prefix = '!'}
 thread.__index = thread
 
 function os_thread(func, ...)
+	local owner = _check_owner()
 	local state = luastate()
 
 	state:openlibs()
@@ -438,26 +447,42 @@ function os_thread(func, ...)
 	local worker_cb_ptr = ptr_deserialize(state:call(func, serialized_args))
 	local pthread = pthread(worker_cb_ptr)
 
-	return setmetatable({
+	return _own(owner, setmetatable({
 			pthread = pthread,
 			state = state,
 			args = args, --keep args to avoid shareables from being collected
-		}, thread)
+		}, thread))
 end
 
-function thread:join()
+function thread:try_join()
+	if self._closed then return nil, 'closed' end
+	self._closed = true
 	self.pthread:join()
 	self.args = nil --release args
 	--get the return values of worker function
 	self.state:getglobal'__ret'
 	local retvals = self.state:get()
 	self.state:close()
-	--propagate the error.
 	retvals = _os_thread_deserialize_args(retvals)
-	if not retvals[1] then
-		error(retvals[2], 2)
-	end
-	return unpack(retvals, 2)
+	_disown(self)
+	return unpack(retvals)
+end
+local function unprotect(ok, ...)
+	if not ok then error(..., 0) end
+	return ...
+end
+function thread:join()
+	return unprotect(self:try_join())
+end
+function thread:try_close()
+	if self._closed then return true end
+	return self:try_join()
+end
+function thread:close()
+	return unprotect(self:try_close())
+end
+function thread:closed()
+	return self._closed
 end
 
 --threads / shareable interface

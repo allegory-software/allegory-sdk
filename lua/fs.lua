@@ -279,8 +279,9 @@ DIRECTORY LISTING ------------------------------------------------------------
 [try_]ls([dir], [opt]) -> d, next
 
 	Directory contents iterator. dir defaults to '.'.
-	opt is a string that can include:
-		".."   :  include . and .. dir entries (excluded by default).
+	opt can include:
+		dot_dirs: include . and .. dir entries (excluded by default).
+		owner: specify an owner.
 
 	USAGE
 
@@ -564,9 +565,9 @@ local FD_CLOEXEC = 1
 local function fcntl_set_flags_func(GET, SET)
 	return function(f, mask, bits)
 		local cur_bits = C.fcntl(f.fd, GET)
-		assert(try_errno(cur_bits ~= -1))
+		check_errno(cur_bits ~= -1)
 		local bits = setbits(cur_bits, mask, bits)
-		assert(try_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0))
+		check_errno(C.fcntl(f.fd, SET, cast('int', bits)) == 0)
 	end
 end
 local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
@@ -719,7 +720,7 @@ function pipe(opt) --unnamed pipe
 	local r_opt = merge({async = r_async, type = 'pipe', debug_prefix = 'pipe.r'}, opt)
 	local w_opt = merge({async = w_async, type = 'pipe', debug_prefix = 'pipe.w'}, opt)
 	local flags = not opt.inheritable and O_CLOEXEC or 0
-	assert(try_errno(C.pipe2(pipe_fds, flags) == 0))
+	check_errno(C.pipe2(pipe_fds, flags) == 0)
 	local rf = _make_file(owner, pipe_fds[0], r_opt)
 	local wf = _make_file(owner, pipe_fds[1], w_opt)
 	--both files are owned now so any _init_file() call can fail without leaking.
@@ -755,7 +756,7 @@ EFD_SEMAPHORE = 1
 function eventfd(initval, flags)
 	local owner = _check_owner()
 	local fd = C.eventfd(initval or 0, bor(O_CLOEXEC, flags or 0))
-	assert(try_errno(fd ~= -1))
+	check_errno(fd ~= -1)
 	local f = _init_file(_make_file(owner, fd, {
 		type = 'eventfd', async = true, debug_prefix = 'E', quiet = true,
 	}))
@@ -1801,69 +1802,58 @@ int closedir(DIR *dirp);
 int dirfd(DIR *dirp);
 ]]
 
-dir_ct = ctype[[
-	struct {
-		DIR *_dirp;
-		struct dirent* _dentry;
-		int  _errno;
-		int  _dirlen;
-		char _skip_dot_dirs;
-		bool tracebacks;
-		char _dir[?];
-	}
-]]
-
-function dir.try_close(dir)
-	if dir:closed() then return true end
-	local ok = C.closedir(dir._dirp) == 0
-	if not ok then return try_errno(false) end
-	dir._dirp = nil
+function dir.try_close(d)
+	if d:closed() then return true end
+	local _dirp = d._dirp
+	d._dirp = nil --close barrier
+	check_errno(C.closedir(_dirp) == 0)
+	_disown(d)
 	return true
 end
 dir.close = unprotect_io(dir.try_close)
 
-function dir.closed(dir)
-	return dir._dirp == nil
+function dir.closed(d)
+	return d._dirp == nil
 end
 
-function dir.try_sync(dir)
-	if dir:closed() then return nil, 'closed' end
-	return try_errno(C.fsync(C.dirfd(dir._dirp)) == 0)
+function dir.try_sync(d)
+	if d:closed() then return nil, 'closed' end
+	return try_errno(C.fsync(C.dirfd(d._dirp)) == 0)
 end
 dir.sync = unprotect_io(dir.try_sync)
 
-function dir.dir(dir)
-	return str(dir._dir, dir._dirlen)
+function dir.dir(d)
+	return d._dir
 end
 
-function dir.try_next(dir)
-	if dir:closed() then
-		if dir._errno ~= 0 then
-			local errno = dir._errno
-			dir._errno = 0
+function dir.try_next(d)
+	if d:closed() then
+		if d._errno ~= 0 then
+			local errno = d._errno
+			d._errno = 0
 			return try_errno(false, errno)
 		end
 		return nil
 	end
 	errno(0)
-	dir._dentry = C.readdir(dir._dirp)
-	if dir._dentry ~= nil then
-		local name = dir:name()
-		if dir._skip_dot_dirs == 1 and (name == '.' or name == '..') then
-			return dir:try_next()
+	d._dentry = C.readdir(d._dirp)
+	if d._dentry ~= nil then
+		local name = d:name()
+		if not d.dot_dirs and (name == '.' or name == '..') then
+			return d:try_next()
 		end
-		return name, dir
+		return name, d
 	else
 		local errno = errno()
-		dir:close()
+		d:close()
 		if errno == 0 then
 			return nil
 		end
 		return try_errno(false, errno)
 	end
 end
-function dir.next(dir)
-	local name, d = dir:try_next()
+function dir.next(d)
+	local name, d = d:try_next()
 	if name == nil then return nil end --eof
 	check_io(nil, name, d) --name, d | false, err
 	return name, d
@@ -1901,80 +1891,84 @@ local dt_names = {
 	[DT_UNKNOWN] = 'unknown',
 }
 
-local function dir_attr_get(dir, attr)
-	if attr == 'type' and dir._dentry.d_type == DT_UNKNOWN then
+local function dir_attr_get(d, attr)
+	if attr == 'type' and d._dentry.d_type == DT_UNKNOWN then
 		--some filesystems (eg. VFAT) require this extra call to get the type.
-		local type, err = lstat(dir:path(), 'type')
+		local type, err = lstat(d:path(), 'type')
 		if not type then
 			return false, nil, err
 		end
 		local dt = dt_types[type]
-		dir._dentry.d_type = dt --cache it
+		d._dentry.d_type = dt --cache it
 	end
 	if attr == 'type' then
-		return dt_names[dir._dentry.d_type]
+		return dt_names[d._dentry.d_type]
 	elseif attr == 'inode' then
-		return dir._dentry.d_ino
+		return d._dentry.d_ino
 	else
 		return nil, false
 	end
 end
 
-local function dir_check(dir)
-	assert(not dir:closed(), 'dir closed')
-	assert(dir._dentry ~= nil, 'dir not ready') --must call next() at least once.
+local function dir_check(d)
+	assert(not d:closed(), 'dir closed')
+	assert(d._dentry ~= nil, 'dir not ready') --must call next() at least once.
 end
 
 function try_ls(p, opt)
-	local skip_dot_dirs = not (opt and opt:find('..', 1, true))
+	local owner = _check_owner(opt and opt.owner)
 	p = p or '.'
-	local dir = dir_ct(#p)
-	dir._dirlen = #p
-	copy(dir._dir, p, #p)
-	dir._skip_dot_dirs = skip_dot_dirs and 1 or 0
-	dir._dirp = C.opendir(p)
-	if dir._dirp == nil then
-		dir._errno = errno()
+	local d = object(dir, {
+		_dirp = C.opendir(p),
+		_dentry = nil,
+		_errno = 0,
+		_dir = p,
+		dot_dirs = opt and opt.dot_dirs,
+	})
+	if d._dirp == nil then
+		d._errno = errno()
+	else
+		_own(owner, d)
 	end
-	return dir.try_next, dir
+	return dir.try_next, d
 end
 function ls(...)
-	local _, dir = try_ls(...)
-	return dir.next, dir
+	local _, d = try_ls(...)
+	return d.next, d
 end
 
-function dir.path(dir)
-	return indir(dir:dir(), dir:name())
+function dir.path(d)
+	return indir(d:dir(), d:name())
 end
 
-function dir.name(dir)
-	dir_check(dir)
-	return str(dir._dentry.d_name)
+function dir.name(d)
+	dir_check(d)
+	return str(d._dentry.d_name)
 end
 
-local function dir_is_symlink(dir)
-	return dir_attr_get(dir, 'type') == 'symlink'
+local function dir_is_symlink(d)
+	return dir_attr_get(d, 'type') == 'symlink'
 end
 
-function dir.try_attr(dir, ...)
-	dir_check(dir)
+function dir.try_attr(d, ...)
+	dir_check(d)
 	local attr, deref = attr_args(...)
 	if attr == 'target' then
-		if dir_is_symlink(dir) then
-			local path = dir:path()
+		if dir_is_symlink(d) then
+			local path = d:path()
 			return try_readlink(path)
 		else
 			return nil --no error for non-symlink files
 		end
 	end
 	if istab(attr) then
-		return dir:try_set_attr(attr, deref)
-	elseif not attr or (deref and dir_is_symlink(dir)) then
-		return fs_attr_get(dir:path(), attr, deref)
+		return d:try_set_attr(attr, deref)
+	elseif not attr or (deref and dir_is_symlink(d)) then
+		return fs_attr_get(d:path(), attr, deref)
 	else
-		local val, found = dir_attr_get(dir, attr)
+		local val, found = dir_attr_get(d, attr)
 		if found == false then --attr not found in state
-			return fs_attr_get(dir:path(), attr)
+			return fs_attr_get(d:path(), attr)
 		else
 			return val
 		end
@@ -1982,23 +1976,23 @@ function dir.try_attr(dir, ...)
 end
 dir.attr = unprotect_io(dir.try_attr)
 
-function dir.try_set_attr(dir, attr, deref)
-	dir_check(dir)
+function dir.try_set_attr(d, attr, deref)
+	dir_check(d)
 	attr, deref = set_attr_args(attr, deref)
-	return fs_attr_set(dir:path(), attr, deref)
+	return fs_attr_set(d:path(), attr, deref)
 end
 dir.set_attr = unprotect_io(dir.try_set_attr)
 
-function dir.try_size(dir)
-	return dir:try_attr'size'
+function dir.try_size(d)
+	return d:try_attr'size'
 end
 dir.size = unprotect_io(dir.try_size)
 
-function dir.is(dir, type, deref)
+function dir.is(d, type, deref)
 	if type == 'symlink' then
 		deref = false
 	end
-	return dir:try_attr('type', deref) == type
+	return d:try_attr('type', deref) == type
 end
 
 local function scandir1(path, dive)
@@ -2304,5 +2298,3 @@ end
 function pidfd_open(...)
 	return assert(try_pidfd_open(...))
 end
-
-metatype(dir_ct, dir)

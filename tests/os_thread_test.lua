@@ -108,6 +108,64 @@ local function test_thread_creation()
 	printtime('threads', n, dt)
 end
 
+local function test_thread_ownership()
+	local th = os_thread(function()
+		return 42, nil, false, 'x'
+	end)
+	local a, b, c, d = th:join()
+	assert(a == 42)
+	assert(b == nil)
+	assert(c == false)
+	assert(d == 'x')
+	assert(th:closed())
+	assert(th.owner == nil)
+	assert(th:try_close())
+
+	th = os_thread(function()
+		error('os_thread test error', 0)
+	end)
+	local ok, err = pcall(function()
+		th:join()
+	end)
+	assert(not ok)
+	assert(err:find('os_thread test error', 1, true))
+	assert(th:closed())
+	assert(th.owner == nil)
+
+	th = os_thread(function()
+		return 'closed'
+	end)
+	ok, err = th:try_close()
+	assert(ok == true)
+	assert(err == 'closed')
+	assert(th:closed())
+	assert(th.owner == nil)
+
+	th = os_thread(function() end)
+	local child_closed
+	local child = {
+		try_close = function(self)
+			child_closed = true
+			_disown(self)
+			return true
+		end,
+	}
+	setowner(child, th)
+	th:join()
+	assert(child_closed)
+	assert(child.owner == nil)
+
+	local root = _own(mainthread(), {})
+	th = os_thread(function() end)
+	setowner(th, root)
+	root:try_close()
+	assert(root.owner == nil)
+	assert(th:closed())
+	assert(th.owner == nil)
+
+	print 'os_thread ownership ok'
+end
+
 --pn/pm/cn/cm: producer/consumer threads/messages
 local function test_queue(qsize, pn, pm, cn, cm, msg)
 
@@ -164,6 +222,7 @@ test_events()
 test_pthread_creation()
 test_luastate_creation()
 test_thread_creation()
+test_thread_ownership()
 test_queue(N, 10,    N, 10,    N)
 test_queue(N,  1, 10*N,  1, 10*N)
 test_queue(N,  1, 10*N, 10,    N)

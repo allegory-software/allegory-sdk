@@ -151,3 +151,9 @@ function setcurrentowner(owner, thread)
 	thread = thread or currentthread()
 	thread.currentowner = assert(owner)
 end
+
+--stubs if not using epoll.lua
+local _dummy = {}
+function mainthread() return _dummy end
+function currentthread() return _dummy end
+function isthread(x) return x == _dummy end

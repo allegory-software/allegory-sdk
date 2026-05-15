@@ -456,7 +456,7 @@ local function create_socket(st, family, class, opt)
 		family == 'unix' and AF_UNIX  or
 		assert(false)
 	local fd = C.socket(af, bor(st, SOCK_NONBLOCK, SOCK_CLOEXEC), 0)
-	assert(try_errno(fd ~= -1))
+	check_errno(fd ~= -1)
 	return _make_socket(owner, fd, class, family, opt)
 end
 local function create_tcp(family, opt)
@@ -703,12 +703,16 @@ cdef[[
 int shutdown(SOCKET s, int how);
 ]]
 
+local ENOTCONN = 107
 function tcp:try_shutdown(which)
 	if self.fd == -1 then return nil, 'closed' end
-	return try_errno(C.shutdown(self.fd,
+	local ok = C.shutdown(self.fd,
 		   which == 'r' and 0
 		or which == 'w' and 1
-		or (not which or which == 'rw') and 2) == 0)
+		or (not which or which == 'rw') and 2) == 0
+	if ok then return true end
+	if errno() == ENOTCONN then return true end --peer closed first.
+	return try_errno(ok, errno())
 end
 tcp.shutdown = unprotect_io(tcp.try_shutdown)
 

@@ -777,6 +777,70 @@ function test.ls()
 	assert(files.f.mtime >= t0 - 1 and files.f.mtime <= t0 + 5)
 end
 
+function test.ls_dir_close_disowns()
+	local root = 'fs_test_ls_dir_close_disowns'
+	rm_rf(root)
+	mkdir(root)
+	local next, d = try_ls(root)
+	assert(d.owner == mainthread())
+	assert(not d:closed())
+	d:try_close()
+	assert(d:closed())
+	assert(d.owner == nil)
+	rm_rf(root)
+end
+
+function test.ls_failed_open_is_unowned()
+	local root = 'fs_test_ls_failed_open_is_unowned'
+	rm_rf(root)
+	local next, d = try_ls(root)
+	assert(d:closed())
+	assert(d.owner == nil)
+	local name, err = next(d)
+	assert(name == false)
+	assert(err == 'not_found')
+	assert(d.owner == nil)
+end
+
+function test.ls_eof_disowns()
+	local root = 'fs_test_ls_eof_disowns'
+	rm_rf(root)
+	mkdir(root)
+	local next, d = try_ls(root)
+	assert(d.owner == mainthread())
+	assert(not d:closed())
+	assert(next(d) == nil)
+	assert(d:closed())
+	assert(d.owner == nil)
+	rm_rf(root)
+end
+
+function test.ls_owner_closes_dir()
+	local root = 'fs_test_ls_owner_closes_dir'
+	rm_rf(root)
+	mkdir(root)
+	local owner = _own(mainthread(), {})
+	local next, d = try_ls(root, {owner = owner})
+	assert(d.owner == owner)
+	assert(not d:closed())
+	assert(owner:try_close())
+	assert(d:closed())
+	assert(d.owner == nil)
+	assert(owner.owner == nil)
+	rm_rf(root)
+end
+
+function test.ls_dir_returns_original_path()
+	local root = 'fs_test_ls_dir_returns_original_path'
+	local path = root..'/a'
+	rm_rf(root)
+	mkdir(path, true)
+	local next, d = try_ls(path)
+	assert(d:dir() == path)
+	d:close()
+	rm_rf(root)
+end
+
 function test.scandir()
 	cdef'int getpid(void);'
 	local pid = C.getpid()
@@ -1190,7 +1254,7 @@ function test.ls_dotdirs()
 	rmdir(d)
 	mkdir(d)
 	local found_dot, found_dotdot = false, false
-	for name, dir in try_ls(d, '..') do
+	for name, dir in try_ls(d, {dot_dirs = true}) do
 		if not name then break end
 		if name == '.' then found_dot = true end
 		if name == '..' then found_dotdot = true end

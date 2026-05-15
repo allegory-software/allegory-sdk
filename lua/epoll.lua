@@ -305,7 +305,7 @@ function epoll_fd(shared_epoll_fd, flags)
 	elseif not _epoll_fd then
 		flags = flags or EPOLL_CLOEXEC
 		_epoll_fd = C.epoll_create1(flags)
-		assert(try_errno(_epoll_fd >= 0))
+		check_errno(_epoll_fd >= 0)
 	end
 	return _epoll_fd
 end
@@ -328,7 +328,7 @@ function _epoll_add(eo)
 	local ok = C.epoll_ctl(epoll_fd(), EPOLL_CTL_ADD, eo.fd, epoll_ev) == 0
 	if not ok then --ENOSPC is the only maybe-but-not-really recoverable error.
 		if free_i then push(free_slots, free_i) end
-		assert(try_errno())
+		check_errno()
 	end
 	eo.epoll_i = i
 	epolled[i] = eo
@@ -343,7 +343,7 @@ function _epoll_remove(eo)
 	set_recv_expires(eo, nil)
 	set_send_expires(eo, nil)
 	epoll_ev.events = EPOLLIN + EPOLLOUT + EPOLLET
-	assert(try_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0))
+	check_errno(C.epoll_ctl(epoll_fd(), EPOLL_CTL_DEL, eo.fd, epoll_ev) == 0)
 end
 
 function _epoll_setexpires(eo, expires, rw)
