@@ -595,10 +595,10 @@ local function mkapi(name, names, rows, cols, default_val)
 		if not v or not t[v] then return end --missing or invalid value: ignore.
 		currentthread():ownenv()[private_name] = v
 	end
-	_G[names] = t
-	_G[name] = get
-	_G['set'..name] = set
-	_G['default_'..name] = default
+	rawset(_G, names, t)
+	rawset(_G, name, get)
+	rawset(_G, 'set'..name, set)
+	rawset(_G, 'default_'..name, default)
 end
 mkapi('lang'     , 'langs'      , lang_rows     , lang_cols     , 'en' )
 mkapi('currency' , 'currencies' , currency_rows , currency_cols , 'USD')

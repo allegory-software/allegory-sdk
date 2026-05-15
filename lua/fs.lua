@@ -573,7 +573,7 @@ local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
 local fcntl_set_fd_flags = fcntl_set_flags_func(F_GETFD, F_SETFD)
 
 function _make_file(owner, fd, opt)
-	return _init_owner(owner, object(file, {
+	return _own(owner, object(file, {
 		fd = fd,
 		seek = repl(opt.type == 'file' and not opt.async, true, nil),
 		w = 0, r = 0,
@@ -608,7 +608,6 @@ local function try_file_close(f, cancel_thread)
 	--NOTE: close() failing doesn't mean failed to close, the fd is still gone.
 	--close failing only means there are pending I/O errors to report.
 	local ok, err = try_errno(C.close(fd) == 0)
-	_close_owned(f)
 	_disown(f)
 	--f.quiet and '' or 'note', 'fs', 'closed', '%-4s r:%d w:%d', f, f.r, f.w)
 	live(f, nil, 'r:%d w:%d', f.r, f.w)
@@ -1301,7 +1300,7 @@ function try_readlink(link, maxdepth)
 end
 function readlink(link, maxdepth)
 	local target, err = try_readlink(link, maxdepth)
-	if not ok and err == 'not_found' then return nil, err end
+	if not target and err == 'not_found' then return nil, err end
 	return check('fs', 'readlink', target, '%s: %s', link, err)
 end
 

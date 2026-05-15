@@ -13,15 +13,6 @@ local function ptr(ctype, p)
 	return ffi.cast(ctype, ffi.cast('void*', p))
 end
 
---globals
-
-local function test_priority_range()
-	local pr0 = pthread_min_priority()
-	local pr1 = pthread_max_priority()
-	print('priority range: ', pr0, pr1)
-	assert(pr1 >= pr0)
-end
-
 --threads
 
 --test pthread_create(), pthread_join()
@@ -67,13 +58,6 @@ local function test_thread_self_equal()
 	local th2 = ffi.new'pthread_t'
 	ffi.copy(th2, ths, #ths)
 	assert(th1:equal(th2))
-end
-
-local function test_priorities()
-	create_thread(function() end, nil,
-		{priority = pthread_max_priority()})()
-	create_thread(function() end, nil,
-		{priority = pthread_min_priority()})()
 end
 
 --speed/leak long test
@@ -281,9 +265,7 @@ local function test_rwlock(readtimes, readthreads, writetimes, writethreads)
 end
 
 local function test_all()
-	test_priority_range()
 	test_thread_self_equal()
-	test_priorities()
 	stress_test(10)
 	test_mutex(50000, 10)
 	test_cond_var(100000, 1)

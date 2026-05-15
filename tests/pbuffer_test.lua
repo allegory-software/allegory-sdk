@@ -14,8 +14,10 @@ local _terr
 
 local function sthread(f, name)
 	local t = thread(f, name)
-	onthreadfinish(t, function(th, ok, err)
-		if not ok then _terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err) end
+	t:onfinish(function(th, ok, err)
+		if not ok then
+			_terr = _terr and (_terr..'\n'..tostring(err)) or tostring(err)
+		end
 	end)
 	return t
 end
@@ -495,11 +497,14 @@ function test.sock_close()
 	checked_run(function()
 		local port = nextport()
 		local server = listen('127.0.0.1:'..port)
-		resume(sthread(function()
+		local ts = threadset()
+		local client = ts:thread(function()
 			local s = connect('127.0.0.1:'..port)
 			s:close()
-		end, 'client'))
+		end, 'client')
+		resume(client)
 		local cs = server:accept()
+		assert(ts:join())
 		local b = pbuffer{f = cs}
 		b:close()
 		--close again: should be no-op (f is closed, but close checks self.f)

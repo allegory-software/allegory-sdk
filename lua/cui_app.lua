@@ -244,14 +244,15 @@ local function cui_app(...)
 				return err --exit_code
 			end, ...)
 		end
+		mainthread():close()
 		if logging.debug then --show any leaks.
 			logging.printlive()
 			local function out_stderr(s)
 				io.stderr:write(s)
 				io.stderr:flush()
 			end
-			out(('%-12s: %d\n'):format('wait_io'     , wait_io_count())
-			out(('%-12s: %d\n'):format('suspended_io', suspended_count())
+			out(('%-12s: %d\n'):format('wait_io'     , wait_io_count()))
+			out(('%-12s: %d\n'):format('suspended_io', suspended_count()))
 		end
 		return exit_code
 	end

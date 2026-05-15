@@ -498,7 +498,7 @@ end
 function http_client(...)
 
 	local client = object(client, {}, ...)
-	_init_owner(_check_owner(client.owner), client)
+	_own(_check_owner(client.owner), client)
 	attr(client, 'client_ips')
 
 	local debug = client.debug or config'http_client_debug' or ''
@@ -555,7 +555,7 @@ function client:target(req)
 			max_waiting_threads = req.max_waiting_threads,
 		}
 		target.tls_options = req.tls_options
-		_init_owner(self, target)
+		_own(self, target)
 	end
 	return target
 end

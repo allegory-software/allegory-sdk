@@ -687,3 +687,5 @@ if not close_ok then
 	n_fail = n_fail + 1
 end
 print(('ok: %d, failed: %d'):format(n_ok, n_fail))
+mainthread():close()
+logging.printlive()

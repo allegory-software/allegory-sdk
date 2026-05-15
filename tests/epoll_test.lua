@@ -383,7 +383,7 @@ end
 
 function test.owner_close_cancels_owned_suspended_thread()
 	checked_run(function()
-		local owner = _init_owner(mainthread(), {})
+		local owner = _own(mainthread(), {})
 		local ok, err
 		local th = thread(function()
 			ok, err = lua_pcall(suspend)

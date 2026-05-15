@@ -1169,7 +1169,6 @@ function stcp:try_close()
 	if self._closed then return true end
 	self._closed = true --close barrier
 	local ok, err = self.tcp:try_close()
-	_close_owned(self)
 	_disown(self)
 	self._keepalive = nil
 	live(self, nil)
@@ -1218,7 +1217,7 @@ function _G.try_client_stcp(tcp, host, opt)
 		live(s, nil)
 		return nil, err
 	end
-	_init_owner(owner, s)
+	_own(owner, s)
 	tcp:setowner(s)
 	return s
 end
@@ -1332,7 +1331,7 @@ function _G.try_server_stcp(tcp, opt)
 		add(keepalive, cache_buf)
 	end
 	local issuer_kt = opt.cert_issuer_rsa and BR_KEYTYPE_RSA or BR_KEYTYPE_EC
-	local s = _init_owner(owner, object(server_stcp, {
+	local s = _own(owner, object(server_stcp, {
 		tcp = tcp,
 		_chain = chain, _chain_n = chain_n,
 		_sk = sk, _kt = kt, _issuer_kt = issuer_kt,
@@ -1367,7 +1366,7 @@ function server_stcp:try_accept(opt, timeout)
 		return nil, err, true --retriable
 	end
 
-	_init_owner(self, s)
+	_own(self, s)
 	ctcp:setowner(s)
 
 	live(s, 'accepted %s.%d tcp=%s clients:%d',

@@ -44,7 +44,7 @@ function test.exec_lua()
 end
 
 function test.exec_fail_closes()
-	local owner = _init_owner(mainthread(), {})
+	local owner = _own(mainthread(), {})
 	local p, err = try_exec{
 		cmd = '/definitely/not/here',
 		stdin = true,

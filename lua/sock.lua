@@ -436,7 +436,7 @@ local SOCK_NONBLOCK  = 0x000800 --async I/O
 local SOCK_CLOEXEC   = 0x080000 --close-on-exec (non-inheritable on exec())
 
 local function _make_socket(owner, fd, class, family, opt)
-	local s = _init_owner(owner, object(class, {
+	local s = _own(owner, object(class, {
 		family = family, issocket = true,
 		fd = fd,
 		r = 0, w = 0,
@@ -474,7 +474,6 @@ local function socket_try_close(self, cancel_thread)
 	--NOTE: close() failing doesn't mean failed to close, the fd is still gone.
 	--close failing only means there are pending I/O errors to report.
 	local close_ok, close_err = try_errno(C.close(fd) == 0)
-	_close_owned(self)
 	_disown(self)
 	local ps = self.listen_socket
 	if ps then

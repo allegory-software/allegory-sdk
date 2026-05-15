@@ -33,7 +33,7 @@ THREADS
 	return finish_with(ok, ...)            finish with value/error into caller
 	th.env -> t                            get thread's inherited or own environment
 	th:ownenv() -> t                       get/create thread's own environment
-	th:onfinish(fn)                        run fn(thread) when thread finishes
+	th:onfinish(fn)                        run fn(thread, ok, ...) when thread finishes
 	th:[try_]cancel()                      cancel what the thread is waiting on
 	error(CANCEL)                          cancel current thread
 	try(f, ...) -> ok, ...                 pcall that re-raises CANCEL
@@ -73,22 +73,21 @@ MULTI-THREADING
 EPOLLABLE OBJECTS ------------------------------------------------------------
 
 Epollable Objects (EO) are Lua objects with a `fd` field that represents an
-epollable open fd. To make those async, call epoll_add() on constructor and
-epoll_remove() on destructor. Create async I/O methods with _make_async() which
+epollable open fd. To make those async, call _epoll_add() in constructor and
+_epoll_remove() in destructor. Create async I/O methods with _make_async() which
 wraps a syscall that returns EWOULDBLOCK (or EINPROGRESS) and returns an async
-method. epoll_setexpires, etc. can be used directly as methods.
+method. _epoll_setexpires, etc. can be used directly as methods.
 
-Thread cancellation of an epollable waiter calls eo:try_cancel_io(thread),
-which must close eo and call _epoll_cancel(eo, thread). The canceled thread gets
-CANCEL; other waiters on the same eo get `nil, 'closed'`.
+Thread cancellation of an epollable waiter calls eo:_try_cancel_io(thread),
+which must close eo and call _epoll_cancel(eo, thread). The canceled thread
+gets CANCEL; other waiters on the same eo get `nil, 'closed'`.
 
 SCHEDULING -------------------------------------------------------------------
 
 Scheduling is based on symmetric coroutines provided by coro.lua which allows
 doing I/O inside coroutine-based iterators. The coroutines are wrapped in
-tables and we call those threads, mainly because threads have their own
-semantics different than plain coroutines, and also because coroutines don't
-have a fenv or metatable slot and threads need to hold state.
+tables and we call those threads as distinguished from coroutines because
+threads have their own behavior and API different than coroutines.
 
 thread(func[, fmt, ...]) -> th
 
@@ -157,6 +156,21 @@ wait_job() -> wj
 	wj:wait() or wj:wait_until() and then from another thread call wj:resume()
 	to resume the waiting thread. Any arguments passed to wj:resume() will be
 	returned by wj:wait(). wj:cancel() raises CANCEL in the waiting thread.
+
+THREAD OWNERSHIP AND CANCELATION ---------------------------------------------
+
+	Threads are owned by currentowner() which by default is currentthread().
+
+	Thread cancellation is synchronous and definitive or the owner raises.
+
+	A thread is not allowed to directly or indirectly (by eg. closing a socket
+	that the owner thread owns) resume a direct/indirect owner thread. If the
+	resumed owner finishes, it will try to close the caller that is waiting
+	for the resume to return, which raises "closing current resume caller".
+
+	So you can't for instance close the listening socket of a server from one
+	of its client threads, unless the client thread and the listener thread
+	are both owned by a common owner.
 
 MULTI-THREADING --------------------------------------------------------------
 
@@ -659,7 +673,7 @@ end
 
 local function wrap_thread(co, fmt, ...)
 	local owner = _check_owner()
-	local thread = _init_owner(owner, object(Thread, {
+	local thread = _own(owner, object(Thread, {
 		co = co,
 		env = currentthread().env, --start with parent env
 		isthread = true, --rawsetting so that isthread() can rawget()
@@ -684,7 +698,6 @@ end
 
 local function free_thread(self)
 	assert(not self.waiting)
-	_close_owned(self)
 	_disown(self)
 	threads[self.co] = nil --free it
 	self.co = nil --make it unusable
@@ -718,7 +731,7 @@ local function thread_finish(self, fin, in_thread, ok, ...)
 		log_error(ok, ...)
 	end
 	if self._onfinish then
-		log_error(pcall(self._onfinish, self))
+		log_error(pcall(self._onfinish, self, ok, ...))
 		self._onfinish = nil
 	end
 	free_thread(self)
@@ -890,6 +903,7 @@ end
 
 function Thread:try_close()
 	if self._closed then return true end
+	assert(self ~= poll_thread, 'closing current resume caller')
 	if self.ismain then --can't close it from another thread.
 		assert(self == currentthread(),
 			'trying to close the main thread from another thread')

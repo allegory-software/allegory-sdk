@@ -11,12 +11,12 @@ auth_init'fs'
 
 --mock webb, time, etc.
 local function newreq()
-	local te = threadenv()
+	local te = currentthread().env
 	local req = te and te.http_request
 	local rh = req and req.response_headers
 	local sc = rh and rh['set-cookie']
 	local sid = sc and sc[1]:match'session=(.-);'
-	ownthreadenv().http_request = {
+	currentthread():ownenv().http_request = {
 		uri = '/',
 		headers = {host = 'test'},
 		response_headers = {},

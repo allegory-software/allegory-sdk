@@ -9,16 +9,16 @@ API
 	setcurrentowner(owner, [thread])   set (current) thread's current owner
 
 INTEGRATION API
-	_check_owner(owner) -> owner  check/get owner before creating res (raises!)
-	_init_owner(owner, res)       init checked owner of res: call in res constructor
-	_close_owned(owner)           call it on your try_close() method
-	_disown(res)                  call it on your try_close() method
+	_check_owner(owner) -> vowner  check/get owner before creating res (raises!)
+	_own(vowner, res)              call it in constructor after resource is created.
+	_disown(res)                   call it in try_close() after resource is freed.
 
 RATIONALE
 
 	Scarce external resources that need deterministic freeing must be put in
-	the owner tree (whose root is mainthread()) by calling _init_owner() in
-	their constructor which ties their lifetime to the lifetime of their owner.
+	the owner tree (whose root is mainthread()) by calling _own() in their
+	constructor and _disown() in their destructor, which ties their lifetime
+	to the lifetime of their owner.
 
 	The default owner for a new resource is currentowner() which by default
 	is currentthread(), so for a resource (that doesn't specify an owner)
@@ -31,13 +31,22 @@ RATIONALE
 
 CONSTRAINTS
 
-	try_close() must follow this exact protocol:
+ * resource constructors must follow this protocol:
+
+	1. valid_owner = _check_owner(owner) -- raises on invalid owner.
+	2. create the resource -- no yielding or valid_owner might not stay valid.
+	3. call _own(valid_owner, res)
+	4. init the resource -- safe to raise now, rely on owner to free the resource.
+
+	If step 4 inovolves multiple steps that can raise, make sure try_close()
+	can deal with a partially initialized object.
+
+ * try_close() must follow this protocol:
 
 	1. claim close barrier -- prevents re-entry into try_close()
 	2. free external resources without raising!
-	4. call _close_owned(res) --owned resources see a closed owner.
-	4. call _disown(res) --do not disown before resources are freed!
-	5. call onclose callbacks --callbacks see a closed owner.
+	3. call _disown(res) --do not disown before resources are freed!
+	4. call onclose callbacks --callbacks see a closed owner.
 
 	Also, on step 2, be careful not to call into things that might try to
 	close the owner, otherwise _close_owned(owner) will raise. Yielding
@@ -45,7 +54,7 @@ CONSTRAINTS
 
 ]]
 
-function _close_owned(owner)
+local function _do_close_owned(owner)
 	local owns = owner.owns
 	if owns == false then return end
 	owner.owns = false --prevent further owning and re-entry.
@@ -70,10 +79,10 @@ function _close_owned(owner)
 	end
 end
 
-function _disown(res)
+local function _do_disown(res)
 	local owner = res.owner
 	if not owner then return end
-	if owner.owns then --not inside _close_owned()
+	if owner.owns then --not inside _do_close_owned()
 		add(owner.owns.free_slots, res.owner_index)
 		owner.owns[res.owner_index] = false
 	end
@@ -81,14 +90,9 @@ function _disown(res)
 	res.owner_index = -1
 end
 
-local function _own(owner, res)
-	if owner.owns == nil then
-		owner.owns = {free_slots = {}}
-	end
-	local i = pop(owner.owns.free_slots) or #owner.owns + 1
-	owner.owns[i] = res
-	res.owner = owner
-	res.owner_index = i
+function _disown(res)
+	 _do_close_owned(res)
+	 _do_disown(res)
 end
 
 function _check_owner(owner)
@@ -97,6 +101,16 @@ function _check_owner(owner)
 	assertf(owner.owner or owner == mainthread(), 'owner is not owned')
 	assert(owner.owns ~= false, 'owner closed')
 	return owner
+end
+
+local function _do_own(owner, res)
+	if owner.owns == nil then
+		owner.owns = {free_slots = {}}
+	end
+	local i = pop(owner.owns.free_slots) or #owner.owns + 1
+	owner.owns[i] = res
+	res.owner = owner
+	res.owner_index = i
 end
 
 function setowner(res, owner)
@@ -109,22 +123,22 @@ function setowner(res, owner)
 		assert(o ~= res, 'owner is owned by the resource')
 		o = o.owner
 	end
-	_disown(res)
-	_own(owner, res)
+	_do_disown(res)
+	_do_own(owner, res)
 	return res
 end
 
 local function res_try_close(res)
-	_close_owned(res)
-	_disown(res)
+	_do_close_owned(res)
+	_do_disown(res)
 	return true
 end
 
-function _init_owner(owner, res)
+function _own(owner, res)
 	if not res.try_close then --plain object, make ownable
 		res.try_close = res_try_close
 	end
-	_own(owner, res)
+	_do_own(owner, res)
 	return res
 end
 

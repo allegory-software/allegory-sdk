@@ -140,7 +140,7 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 			end, server_name..'-accepted %s', ctcp))
 			::skip::
 		end
-	end, server_name..'-listen %s', s))
+	end, server_name..'-listen %s', tcp))
 
 	return server
 end
@@ -190,7 +190,13 @@ if not ... then
 			self:send(msg)
 		end)
 		chan:close()
-		self:stop()
+		--can't stop the server from inside a client thread, that would
+		--finish the listening thread which would try to close this thread
+		--and fail because this would be the resuming thread. so we defer
+		--the stopping with a timer.
+		runafter(0, function()
+			self:stop()
+		end)
 	end)
 
 	resume(thread(function()

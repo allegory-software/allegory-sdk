@@ -150,20 +150,24 @@ int tcsendbreak(int fd, int duration);
 int ioctl(int fd, unsigned long, ...);
 ]]
 
+local function check_errno(ret)
+	assert(try_errno(ret))
+end
+
 function isatty(fd)
 	local is = C.isatty(fd)
-	assert(check_errno(is ~= -1))
+	check_errno(is ~= -1)
 	return is == 1
 end
 
 local term = new'struct termios'
 
 local function tcgetattr(fd)
-	assert(check_errno(C.tcgetattr(fd or 0, term) ~= -1))
+	check_errno(C.tcgetattr(fd or 0, term) ~= -1)
 end
 
 local function tcsetattr(fd)
-	assert(check_errno(C.tcsetattr(fd or 0, TCSANOW, term) ~= -1))
+	check_errno(C.tcsetattr(fd or 0, TCSANOW, term) ~= -1)
 end
 
 function tc_set_raw_mode(fd)
@@ -203,11 +207,11 @@ function tc_reset(fd)
 end
 
 function tc_flush(fd, queue)
-	assert(check_errno(C.tcflush(fd or 0, queue or 2) ~= -1))
+	check_errno(C.tcflush(fd or 0, queue or 2) ~= -1)
 end
 
 function tc_drain(fd)
-	assert(check_errno(C.tcdrain(fd or 0) ~= -1))
+	check_errno(C.tcdrain(fd or 0) ~= -1)
 end
 
 cdef[[
@@ -223,18 +227,18 @@ local TIOCGWINSZ = 0x5413
 
 local ws = new'struct winsize'
 function tc_get_window_size()
-	assert(check_errno(C.ioctl(1, TIOCGWINSZ, cast('void*', ws)) == 0))
+	check_errno(C.ioctl(1, TIOCGWINSZ, cast('void*', ws)) == 0)
 	return ws.ws_col, ws.ws_row
 end
 
 
 if not ... then --self-test
 
-	if not isatty(0) then 
+	if not isatty(0) then
 		print'fd 0 is not a tty. skipping tests.'
 		return
 	end
-	
+
 	tc_set_raw_mode()
 	assert(tc_get_raw_mode())
 	print'\27[31mHello\27[0m\r\n'

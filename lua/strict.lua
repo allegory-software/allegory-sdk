@@ -24,7 +24,7 @@ mt.__newindex = function (t, n, v)
   if not mt.__declared[n] then
     local info = debug_getinfo(2, "S")
     if info and info.linedefined > 0 then
-      error("assign to undeclared variable '"..n.."'", 2)
+      error("assign to undeclared global '"..n.."'", 2)
     end
     mt.__declared[n] = true
   end
@@ -35,7 +35,7 @@ mt.__index = function (t, n)
   if not mt.__declared[n] then
     local info = debug_getinfo(2, "S")
     if info and info.linedefined > 0 then
-      error("variable '"..n.."' is not declared", 2)
+      error("global '"..n.."' is not declared", 2)
     end
   end
   return rawget(t, n)

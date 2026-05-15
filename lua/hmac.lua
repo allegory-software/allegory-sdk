@@ -3,7 +3,6 @@
 	HMAC authentication (RFC 2104)
 	Written by Cosmin Apreutesei. Public Domain.
 
-	hmac_sha1   (message, key) -> HMAC-SHA1
 	hmac_sha256 (message, key) -> HMAC-SHA256
 	hmac_sha384 (message, key) -> HMAC-SHA384
 	hmac_sha512 (message, key) -> HMAC-SHA512
@@ -45,7 +44,6 @@ local function mk(module_name, hash_name, blocksize)
 		return hmac(key, message, hash, blocksize)
 	end
 end
-hmac_sha1   = mk('sha1', 'sha1'  ,  64)
 hmac_sha256 = mk('sha2', 'sha256',  64)
 hmac_sha384 = mk('sha2', 'sha384', 128)
 hmac_sha512 = mk('sha2', 'sha512', 128)

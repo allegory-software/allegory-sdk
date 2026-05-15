@@ -641,7 +641,7 @@ function rs.try_query(rs, qname, qtype, timeout)
 				rs:dbgr(ns, q, lt, '{...}')
 				resume(lt, res)
 			end
-		end, _('resolver query %d: %s', i, ns.addr)))
+		end, _('resolver query %d: %s', i, ns.addr)):setowner(lookup_thread.owner))
 	end
 	rs:dbgs()
 	return suspend() -- the first thread to finish will resume us.
@@ -768,11 +768,11 @@ if not ... then
 		local answers, err = r:try_query(q)
 
 		if not answers then
-			printf('%s: %s', s, err)
+			printf('%s: %s\n', s, err)
 		else
 			for i, ans in ipairs(answers) do
 
-				printf('L %d: %-36s %-36s %-8s  ttl: %6d',
+				printf('L %d: %-36s %-36s %-8s  ttl: %6d\n',
 					i,
 					ans.name,
 					ans.a or ans.aaaa or ans.cname,
@@ -782,10 +782,10 @@ if not ... then
 				if ans.a then
 					local names, err = r:try_reverse_lookup(ans.a)
 					if not names then
-						printf('R E: %-36s (%s)', isstr(q) and q or q.name, err)
+						printf('R E: %-36s (%s)\n', isstr(q) and q or q.name, err)
 					else
 						for i,name in ipairs(names) do
-							printf('R %d: %-36s %s', i, ans.a, name)
+							printf('R %d: %-36s %s\n', i, ans.a, name)
 						end
 					end
 				end

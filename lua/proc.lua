@@ -283,7 +283,7 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill, owner)
 	end
 
 	local self = setmetatable({cmd = cmd, args = args}, proc)
-	_init_owner(owner, self)
+	_own(owner, self)
 
 	local inp_rf, inp_wf
 	local out_rf, out_wf
@@ -423,7 +423,6 @@ function proc:forget()
 	local pid = self.pid
 	if not pid then return end --forget barrier
 	self.pid = false
-	_close_owned(self)
 	_disown(self)
 	if pid then live(self, nil) end
 end
