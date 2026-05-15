@@ -84,6 +84,7 @@ local http = {
 }
 
 local function http_conn(tcp)
+	local recv_buffer_size = tcp:getopt'so_rcvbuf' --usually 128k
 	local rb = pbuffer{
 		f = tcp,
 		readahead = recv_buffer_size,

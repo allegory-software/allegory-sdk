@@ -1041,6 +1041,7 @@ function try_start()
 			break
 		end
 	until _stop
+	poll_thread = nil
 	_running = false
 	_stop = false
 	return ret, err

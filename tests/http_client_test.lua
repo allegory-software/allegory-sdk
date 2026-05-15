@@ -672,7 +672,6 @@ for _, k in ipairs(tests_to_run) do
 			pr('FAILED: ', k)
 			pr(err)
 			n_fail = n_fail + 1
-			break
 		end
 	end
 end
