@@ -48,14 +48,24 @@ CONSTRAINTS
 function _close_owned(owner)
 	local owns = owner.owns
 	if owns == false then return end
-	owner.owns = false --_own() and _close_owned() barrier
+	owner.owns = false --prevent further owning and re-entry.
 	if not owns then return end
+	--phase 1: close owned threads, which forces them to finish synchronously
+	--and close their owned threads and their resources and so on.
 	for i = #owns, 1, -1 do
 		local res = owns[i]
-		if res then
+		if isthread(res) then
 			assert(res.owner == owner)
 			res:try_close()
-			assert(res.owner == nil) --disowned
+		end
+	end
+	--phase 2: close all remaining owned resources.
+	for i = #owns, 1, -1 do
+		local res = owns[i]
+		if res and res.owner then
+			assert(res.owner == owner)
+			res:try_close()
+			assert(res.owner == nil) --try_close() called _disown()
 		end
 	end
 end

@@ -211,10 +211,7 @@ sort(test_names)
 
 -- runner ----------------------------------------------------------------------
 
-run(function()
-
-	-- let server sockets start accepting
-	wait(.1)
+resume(thread(function()
 
 	local round = 0
 	local reqs = 0
@@ -225,11 +222,10 @@ run(function()
 	while true do
 		round = round + 1
 		for _, name in ipairs(test_names) do
-			local ok, err = pcall(tests[name])
+			local ok, err = try(tests[name])
 			if not ok then
-				printf('FAIL %s: %s\n', name, err)
-				server:stop()
-				os.exit(1)
+				pr('FAIL: ', name, err)
+				break
 			end
 			reqs = reqs + (test_reqs[name] or 1)
 		end
@@ -246,6 +242,7 @@ run(function()
 			last_report = now
 		end
 	end
-end)
-
-server:stop()
+	server:stop()
+end))
+start()
+mainthread():close()

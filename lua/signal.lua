@@ -117,7 +117,7 @@ function signal_file(signals, flags, name)
 		debug_prefix = 's',
 	}))
 	local si = new'struct signalfd_siginfo'
-	must(sizeof(si) == 128)
+	assert(sizeof(si) == 128)
 	local psi = cast(u8p, si)
 	f.try_read_signal = function(f)
 		local ok, err = f:try_readn(psi, 128)

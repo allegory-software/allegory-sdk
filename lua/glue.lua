@@ -1684,10 +1684,7 @@ local xpcall = xpcall
 --use it with functions returning multiple values if you want those values.
 function assertf(v, err, ...)
 	if v then return v end
-	err = err or 'assertion failed!'
-	if select('#',...) > 0 then
-		err = format(err, ...)
-	end
+	err = err and format(err, logargs(...)) or 'assertion failed!'
 	error(err, 2)
 end
 

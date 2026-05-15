@@ -34,16 +34,17 @@ THREADS
 	th.env -> t                            get thread's inherited or own environment
 	th:ownenv() -> t                       get/create thread's own environment
 	th:onfinish(fn)                        run fn(thread) when thread finishes
-	th:cancel()                            cancel what the thread is waiting on
+	th:[try_]cancel()                      cancel what the thread is waiting on
 	error(CANCEL)                          cancel current thread
+	try(f, ...) -> ok, ...                 pcall that re-raises CANCEL
 THREAD SETS
 	threadset() -> ts
 	- ts:thread(fn, [fmt, ...]) -> th
 	- ts:join() -> all_ok, first_err
 SCHEDULER
-	[try_]start([ignore_interrupts])       keep polling until all threads finish
-	stop()                                 stop polling
-	[try_]run(fn, ...) -> ...              run a function inside a thread
+	[try_]start()               keep polling until all threads finish
+	stop()                      stop polling
+	[try_]run(fn, ...) -> ...   run a function inside a thread
 WAIT JOBS
 	wait_job() -> wj            make an interruptible async wait job
 	- wj:wait_until(t) -> ...   wait until clock()
@@ -132,7 +133,7 @@ suspend() -> ...
 	Suspend current thread, transferring to the polling thread (but see
 	resume()).
 
-[try_]start([ignore_interrupts])
+[try_]start()
 
 	Start polling. Stops when no active waits/timers or stop() was called.
 
@@ -653,7 +654,7 @@ local poll_thread
 
 local coro_running = coro.running
 function currentthread()
-	return assert(threads[coro_running()], 'not inside a thread')
+	return (assert(threads[coro_running()], 'not inside a thread'))
 end
 
 local function wrap_thread(co, fmt, ...)
@@ -663,7 +664,6 @@ local function wrap_thread(co, fmt, ...)
 		env = currentthread().env, --start with parent env
 		isthread = true, --rawsetting so that isthread() can rawget()
 		waiting = true, --true | wait_job | socket
-		finished = false,
 		name = fmt and _(fmt, ...),
 	}))
 	threads[co] = thread
@@ -712,12 +712,14 @@ local function thread_finish(self, fin, in_thread, ok, ...)
 	if ... == FIN then --allow overriding (in_thread, ok)
 		return thread_finish(self, ...)
 	end
+	self._closed = true --close barrier
 	if not fin and not ok then
 		--nowhere to transfer thread errors into, so log the error and move on.
 		log_error(ok, ...)
 	end
-	if self._on_finish then
-		log_error(pcall(self._on_finish, self))
+	if self._onfinish then
+		log_error(pcall(self._onfinish, self))
+		self._onfinish = nil
 	end
 	free_thread(self)
 	in_thread = in_thread or poll_thread or mainthread()
@@ -744,13 +746,14 @@ function thread(fn, ...)
 end
 
 function Thread:onfinish(fn)
-	after(self, '_on_finish', fn)
+	after(self, '_onfinish', fn)
 end
 
 local function iterator_finish(self, ok, ...)
 	local fin_ok, fin_err = true
-	if self._on_finish then
-		fin_ok, fin_err = pcall(self._on_finish, self)
+	if self._onfinish then
+		fin_ok, fin_err = pcall(self._onfinish, self)
+		self._onfinish = nil
 	end
 	free_thread(self)
 	if not ok then error(..., 0) end --re-raised in the caller thread.
@@ -865,7 +868,7 @@ function Thread:try_cancel()
 		self:resume_with(false, CANCEL)
 		return true
 	elseif self.waiting == 'resume' then
-		self.cancelled = true --mark-and-wait
+		self.cancelled = true
 		if self.resuming then
 			self.resuming:try_cancel()
 		end
@@ -885,6 +888,41 @@ function Thread:cancel()
 	return unprotect(self:try_cancel())
 end
 
+function Thread:try_close()
+	if self._closed then return true end
+	if self.ismain then --can't close it from another thread.
+		assert(self == currentthread(),
+			'trying to close the main thread from another thread')
+		self._closed = true
+		free_thread(self)
+	else
+		assert(self ~= currentthread(), 'trying to close the current thread')
+		self._closed = true
+		local ok, err = self:try_cancel()
+		assertf(self:status() == 'dead', 'thread cancelation failed for: %s', self)
+	end
+	assertf(not self.owner)
+	return true
+end
+function Thread:close()
+	assert(self:try_close())
+end
+function Thread:closed()
+	return self._closed
+end
+
+Thread.setowner = setowner
+
+local function cont_try(ok, ...)
+	if not ok and ... == CANCEL then
+		error(CANCEL, 0)
+	end
+	return ok, ...
+end
+function try(f, ...)
+	return cont_try(pcall(f, ...))
+end
+
 function Thread:ownenv(create)
 	local t = self._ownenv
 	if not t and create ~= false then
@@ -899,10 +937,6 @@ function Thread:ownenv(create)
 	end
 	return t
 end
-
---threads as owners
-Thread.try_close = Thread.try_cancel
-Thread.setowner = setowner
 
 function threadset()
 	local ts = {}
@@ -943,24 +977,14 @@ end
 
 local term_sig_f
 
-local function poll(ignore_interrupts)
+local function poll()
 	if wait_count == 0 then
 		return nil, 'empty'
 	elseif wait_count == 1 and term_sig_f then --nobody left to kill this guy
 		return nil, 'empty'
 	end
 	local ok, err = epoll_wait()
-	if ok then return true end
-	if err == 'interrupted' then
-		if ignore_interrupts == nil then
-			ignore_interrupts = config('ignore_interrupts', true)
-		end
-		log('note', 'epoll', 'poll', 'interrupted: %s.',
-			ignore_interrupts and 'ignoring' or 'breaking')
-		if ignore_interrupts then
-			return true, err
-		end
-	end
+	if ok or err == 'interrupted' then return true end
 	return false, err
 end
 
@@ -974,9 +998,10 @@ function stop()
 		term_sig_f = nil
 	end
 end
-interrupt = stop --overridable
 
-function try_start(ignore_interrupts)
+terminate = stop --overwritable
+
+function try_start()
 	if _running then return true end
 	if wait_count == 0 then return true end
 
@@ -985,7 +1010,7 @@ function try_start(ignore_interrupts)
 	--signal thread to stop loop on SIGINT (Ctrl+C) and SIGTERM (kill) events.
 	assert(not term_sig_f)
 	term_sig_f = on_signal('SIGINT SIGTERM', function()
-		interrupt()
+		terminate()
 		return 'stop'
 	end)
 
@@ -993,10 +1018,10 @@ function try_start(ignore_interrupts)
 	_running = true
 	local ret, err = true
 	repeat
-		ret, err = poll(ignore_interrupts)
+		ret, err = poll()
 		if not ret then
 			stop()
-			if err == 'interrupted' or err == 'empty' then
+			if err == 'empty' then
 				ret = true
 			end
 			break
@@ -1019,9 +1044,9 @@ function try_run(f, ...)
 		local function wrapper(...)
 			ret = pack(pcall(f, ...))
 		end
-		resume(thread(wrapper, 'sock-run'), ...)
+		resume(thread(wrapper, 'run'), ...)
 		start()
-		assert(ret, 'run function did not run')
+		if not ret then return nil, 'run function did not finish' end
 		return unpack(ret)
 	end
 end

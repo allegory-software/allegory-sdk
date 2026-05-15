@@ -122,9 +122,7 @@ end
 
 -- main ------------------------------------------------------------------------
 
-run(function()
-	wait(.1) --let server start
-
+resume(thread(function()
 	local min_size, max_size = 1/0, 0
 	for i = 1, N_PAYLOADS do
 		min_size = min(min_size, #payloads[i])
@@ -141,6 +139,6 @@ run(function()
 
 	printf('\ndone.\n')
 	server:stop()
-end)
-
-server:stop()
+end))
+start()
+mainthread():close()
