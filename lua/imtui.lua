@@ -1620,7 +1620,7 @@ ui.widget = function(cmd, t)
 	ui.cmds[cmd] = class
 	local create = t.create
 	if create then
-		function wrapper(...)
+		local function wrapper(...)
 			return create(cmd, ...)
 		end
 		assertf(not ui[cmd], 'command %s already defined', cmd)

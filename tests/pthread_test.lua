@@ -26,7 +26,7 @@ local function create_thread(worker, args, attrs)
 	state:push(function(worker, args)
 		local ffi = require'ffi'
 		local function pass(...)
-			_G.retvals = {n = select('#', ...), ...}
+			rawset(_G, 'retvals', {n = select('#', ...), ...})
 		end
 		local function wrapper()
 			pass(worker(args))

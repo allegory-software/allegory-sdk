@@ -3,7 +3,7 @@ require'path'
 --basename -------------------------------------------------------------------
 
 local function test(s, s2)
-	local s1 = basename(s, pl)
+	local s1 = basename(s)
 	print('basename', s, '->', s1)
 	assert(s1 == s2)
 end
@@ -20,7 +20,7 @@ test('a/b/', '')
 --nameext --------------------------------------------------------------------
 
 local function test(s, name2, ext2)
-	local name1, ext1 = path_nameext(s, pl)
+	local name1, ext1 = path_nameext(s)
 	print('nameext', s, '->', name1, ext1)
 	assert(name1 == name2)
 	assert(ext1 == ext2)
@@ -37,7 +37,7 @@ test('/a/b/.bashrc', '.bashrc', nil)
 --dirname --------------------------------------------------------------------
 
 local function test(s, s2)
-	local s1 = dirname(s, pl)
+	local s1 = dirname(s)
 	print('dirname', s, '->', s1)
 	assert(s1 == s2)
 end
@@ -74,7 +74,7 @@ test('a/b'  , 'a')
 
 local function test(name, input, dd, endsep, expected)
 	local got = path_normalize(input, dd, endsep)
-	printf('path_normalize %-20s %-6s, %-6s -> %-10s', input, dd, endsep, got)
+	printf('path_normalize %-20s %-6s, %-6s -> %-10s\n', input, dd, endsep, got)
 	assert(got == expected)
 end
 

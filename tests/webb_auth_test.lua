@@ -10,6 +10,7 @@ local ok, err = pcall(function()
 auth_init'fs'
 
 --mock webb, time, etc.
+local passtime --strict
 local function newreq()
 	local te = currentthread().env
 	local req = te and te.http_request

@@ -262,6 +262,7 @@ if not ... then require'glue_test'; return end
 ffi = require'ffi'
 bit = require'bit'
 require'table.clear'
+require'strict'
 require'time'
 require'pp'
 
@@ -1772,6 +1773,7 @@ by calling foo:module'bar' or require'foo':module'bar'.
 All this functionality is packed into just 27 LOC, less than it takes to
 explain it, so read the code to get to another level of understanding.
 ]]
+_M = nil --strict
 function module(name, parent)
 	if type(name) ~= 'string' then
 		name, parent = parent, name
