@@ -1,4 +1,3 @@
---#!../bin/luajit
 require'glue'
 require'fs'
 require'logging'
