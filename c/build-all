@@ -35,5 +35,4 @@ md5/build
 mdbx_schema/build
 minizip2/build
 pillow_simd/build
-sha2/build
 utf8proc/build
