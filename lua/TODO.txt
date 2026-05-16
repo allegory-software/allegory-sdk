@@ -47,7 +47,7 @@ MDBX
 
 MISSING MODULES
 ------------------------------------------------------------------------------
-* AES-GCM, HKDF, ChaCha20-Poly1305  -- expose from bearssl
+* AES-GCM, ChaCha20-Poly1305  -- expose from bearssl
 * Ed25519 / X25519  -- bind monocypher
 
 
