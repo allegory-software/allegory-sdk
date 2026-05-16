@@ -28,6 +28,7 @@ CONFIG
 require'glue'
 require'sock'
 require'fs'
+require'bearssl_crypto'
 
 local C = ffi.load'bearssl'
 
@@ -56,114 +57,6 @@ void br_pem_decoder_init(br_pem_decoder_context *ctx);
 size_t br_pem_decoder_push(br_pem_decoder_context *ctx,
 	const void *data, size_t len);
 int br_pem_decoder_event(br_pem_decoder_context *ctx);
-
-/* hash */
-typedef struct br_hash_class_ br_hash_class;
-typedef struct { const br_hash_class *vtable; unsigned char buf[64];  uint64_t count; uint32_t val[4]; } br_md5_context;
-typedef struct { const br_hash_class *vtable; unsigned char buf[64];  uint64_t count; uint32_t val[5]; } br_sha1_context;
-typedef struct { const br_hash_class *vtable; unsigned char buf[64];  uint64_t count; uint32_t val[8]; } br_sha224_context;
-typedef br_sha224_context br_sha256_context;
-typedef struct { const br_hash_class *vtable; unsigned char buf[128]; uint64_t count; uint64_t val[8]; } br_sha384_context;
-typedef br_sha384_context br_sha512_context;
-typedef struct { const br_hash_class *vtable; unsigned char buf[64];  uint64_t count; uint32_t val_md5[4]; uint32_t val_sha1[5]; } br_md5sha1_context;
-typedef union {
-	const br_hash_class *vtable;
-	br_md5_context md5; br_sha1_context sha1;
-	br_sha224_context sha224; br_sha256_context sha256;
-	br_sha384_context sha384; br_sha512_context sha512;
-	br_md5sha1_context md5sha1;
-} br_hash_compat_context;
-typedef struct {
-	unsigned char buf[128]; uint64_t count;
-	uint32_t val_32[25]; uint64_t val_64[16];
-	const br_hash_class *impl[6];
-} br_multihash_context;
-typedef void (*br_ghash)(void *y, const void *h, const void *data, size_t len);
-
-/* block */
-typedef struct br_block_cbcenc_class_ br_block_cbcenc_class;
-typedef struct br_block_cbcdec_class_ br_block_cbcdec_class;
-typedef struct br_block_ctr_class_    br_block_ctr_class;
-typedef struct br_block_ctrcbc_class_ br_block_ctrcbc_class;
-typedef struct { const br_block_cbcenc_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_big_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_big_cbcdec_keys;
-typedef struct { const br_block_ctr_class    *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_big_ctr_keys;
-typedef struct { const br_block_ctrcbc_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_big_ctrcbc_keys;
-typedef struct { const br_block_cbcenc_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_small_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_small_cbcdec_keys;
-typedef struct { const br_block_ctr_class    *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_small_ctr_keys;
-typedef struct { const br_block_ctrcbc_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_small_ctrcbc_keys;
-typedef struct { const br_block_cbcenc_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_ct_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_ct_cbcdec_keys;
-typedef struct { const br_block_ctr_class    *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_ct_ctr_keys;
-typedef struct { const br_block_ctrcbc_class *vtable; uint32_t skey[60]; unsigned num_rounds; } br_aes_ct_ctrcbc_keys;
-typedef struct { const br_block_cbcenc_class *vtable; uint64_t skey[30]; unsigned num_rounds; } br_aes_ct64_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; uint64_t skey[30]; unsigned num_rounds; } br_aes_ct64_cbcdec_keys;
-typedef struct { const br_block_ctr_class    *vtable; uint64_t skey[30]; unsigned num_rounds; } br_aes_ct64_ctr_keys;
-typedef struct { const br_block_ctrcbc_class *vtable; uint64_t skey[30]; unsigned num_rounds; } br_aes_ct64_ctrcbc_keys;
-typedef struct { const br_block_cbcenc_class *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_x86ni_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_x86ni_cbcdec_keys;
-typedef struct { const br_block_ctr_class    *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_x86ni_ctr_keys;
-typedef struct { const br_block_ctrcbc_class *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_x86ni_ctrcbc_keys;
-typedef struct { const br_block_cbcenc_class *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_pwr8_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_pwr8_cbcdec_keys;
-typedef struct { const br_block_ctr_class    *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_pwr8_ctr_keys;
-typedef struct { const br_block_ctrcbc_class *vtable; union { unsigned char skni[240]; } skey; unsigned num_rounds; } br_aes_pwr8_ctrcbc_keys;
-typedef union {
-	const br_block_cbcenc_class *vtable;
-	br_aes_big_cbcenc_keys c_big; br_aes_small_cbcenc_keys c_small;
-	br_aes_ct_cbcenc_keys c_ct;   br_aes_ct64_cbcenc_keys c_ct64;
-	br_aes_x86ni_cbcenc_keys c_x86ni; br_aes_pwr8_cbcenc_keys c_pwr8;
-} br_aes_gen_cbcenc_keys;
-typedef union {
-	const br_block_cbcdec_class *vtable;
-	br_aes_big_cbcdec_keys c_big; br_aes_small_cbcdec_keys c_small;
-	br_aes_ct_cbcdec_keys c_ct;   br_aes_ct64_cbcdec_keys c_ct64;
-	br_aes_x86ni_cbcdec_keys c_x86ni; br_aes_pwr8_cbcdec_keys c_pwr8;
-} br_aes_gen_cbcdec_keys;
-typedef union {
-	const br_block_ctr_class *vtable;
-	br_aes_big_ctr_keys c_big; br_aes_small_ctr_keys c_small;
-	br_aes_ct_ctr_keys c_ct;   br_aes_ct64_ctr_keys c_ct64;
-	br_aes_x86ni_ctr_keys c_x86ni; br_aes_pwr8_ctr_keys c_pwr8;
-} br_aes_gen_ctr_keys;
-typedef union {
-	const br_block_ctrcbc_class *vtable;
-	br_aes_big_ctrcbc_keys c_big; br_aes_small_ctrcbc_keys c_small;
-	br_aes_ct_ctrcbc_keys c_ct;   br_aes_ct64_ctrcbc_keys c_ct64;
-	br_aes_x86ni_ctrcbc_keys c_x86ni; br_aes_pwr8_ctrcbc_keys c_pwr8;
-} br_aes_gen_ctrcbc_keys;
-typedef struct { const br_block_cbcenc_class *vtable; uint32_t skey[96]; unsigned num_rounds; } br_des_tab_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; uint32_t skey[96]; unsigned num_rounds; } br_des_tab_cbcdec_keys;
-typedef struct { const br_block_cbcenc_class *vtable; uint32_t skey[96]; unsigned num_rounds; } br_des_ct_cbcenc_keys;
-typedef struct { const br_block_cbcdec_class *vtable; uint32_t skey[96]; unsigned num_rounds; } br_des_ct_cbcdec_keys;
-typedef union {
-	const br_block_cbcenc_class *vtable;
-	br_des_tab_cbcenc_keys tab; br_des_ct_cbcenc_keys ct;
-} br_des_gen_cbcenc_keys;
-typedef union {
-	const br_block_cbcdec_class *vtable;
-	br_des_tab_cbcdec_keys c_tab; br_des_ct_cbcdec_keys c_ct;
-} br_des_gen_cbcdec_keys;
-typedef uint32_t (*br_chacha20_run)(const void *key,
-	const void *iv, uint32_t cc, void *data, size_t len);
-typedef void (*br_poly1305_run)(const void *key, const void *iv,
-	void *data, size_t len, const void *aad, size_t aad_len,
-	void *tag, br_chacha20_run ichacha, int encrypt);
-
-/* rand */
-typedef struct br_prng_class_ br_prng_class;
-typedef struct {
-	const br_prng_class *vtable;
-	unsigned char K[64]; unsigned char V[64];
-	const br_hash_class *digest_class;
-} br_hmac_drbg_context;
-
-/* hmac */
-typedef struct {
-	const br_hash_class *dig_vtable;
-	unsigned char ksi[64], kso[64];
-} br_hmac_key_context;
 
 /* prf */
 typedef struct { const void *data; size_t len; } br_tls_prf_seed_chunk;

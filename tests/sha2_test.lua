@@ -1,4 +1,3 @@
---go @ plink d10 sdk/bin/linux/luajit sdk/tests/sha2_test.lua
 require'glue'
 require'sha2'
 
@@ -44,4 +43,3 @@ for file in io.popen('ls sha2_test/*.dat'):lines() do
 	end
 end
 print'sha2 ok'
-

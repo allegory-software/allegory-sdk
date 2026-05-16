@@ -73,4 +73,4 @@ assert(sha256(message) == sha) --so our sha256 is good
 
 assert(hmac256(message, key) == mac) --so our hmac is good
 assert(base64_encode((hmac256(message, key))) == b64_mac) --so our hmac is good
-
+print'sha2_hmac ok'

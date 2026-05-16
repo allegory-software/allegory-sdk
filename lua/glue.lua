@@ -2134,6 +2134,7 @@ end
 
 cdef'int getrandom(void *buf, size_t buflen, unsigned int flags);'
 function secure_random_string(n)
+	assert(n <= 256) -- can return EINTR over 256
 	local buf = u8a(n)
 	local ret = C.getrandom(buf, n, 0)
 	assert(ret == n, 'getrandom() failed')
