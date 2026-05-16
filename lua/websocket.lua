@@ -60,40 +60,13 @@ require'sock'
 require'sock_bearssl'
 require'base64'
 require'url'
+require'sha1'
 
 local C_bs = ffi.load'bearssl'
 
 local
 	byte, char, concat, band, str, cast =
 	byte, char, concat, band, str, cast
-
-cdef[[
-void br_sha1_init(br_sha1_context *ctx);
-void br_sha1_update(br_sha1_context *ctx, const void *data, size_t len);
-void br_sha1_out(const br_sha1_context *ctx, void *out);
-]]
-local sha1_ctx = new'br_sha1_context'
-local sha1_out = new'uint8_t[20]'
-local function sha1(s)
-	C_bs.br_sha1_init(sha1_ctx)
-	C_bs.br_sha1_update(sha1_ctx, s, #s)
-	C_bs.br_sha1_out(sha1_ctx, sha1_out)
-	return str(sha1_out, 20)
-end
-
-local function sha1_digest()
-	local ctx = new'br_sha1_context'
-	local out = new'uint8_t[20]'
-	C_bs.br_sha1_init(ctx)
-	return function(p, sz)
-		if p then
-			C_bs.br_sha1_update(ctx, p, sz or #p)
-		else
-			C_bs.br_sha1_out(ctx, out)
-			return str(sha1_out, 20)
-		end
-	end
-end
 
 local WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 

@@ -185,7 +185,7 @@ typedef uint32_t (*br_ecdsa_vrfy)(const br_ec_impl *impl,
 br_ecdsa_vrfy br_ecdsa_vrfy_raw_get_default(void);
 ]]
 
-local sha1_out = u8a(20)
+local hash_out = u8a(64)
 metatype('br_sha1_context', {__index = {
 	init = function(self)
 		C.br_sha1_init(self)
@@ -196,8 +196,8 @@ metatype('br_sha1_context', {__index = {
 		return self
 	end,
 	out = function(self)
-		C.br_sha1_out(self, sha1_out)
-		return str(sha1_out, 20)
+		C.br_sha1_out(self, hash_out)
+		return str(hash_out, 20)
 	end,
 }})
 sha1_digest = ctype'br_sha1_context'
@@ -206,7 +206,6 @@ function sha1(s)
 	return sha1_d:init():update(s):out()
 end
 
-local sha256_out = u8a(32)
 metatype('br_sha256_context', {__index = {
 	init = function(self)
 		C.br_sha256_init(self)
@@ -217,8 +216,8 @@ metatype('br_sha256_context', {__index = {
 		return self
 	end,
 	out = function(self)
-		C.br_sha256_out(self, sha256_out)
-		return str(sha256_out, 32)
+		C.br_sha256_out(self, hash_out)
+		return str(hash_out, 32)
 	end,
 }})
 sha256_digest = ctype'br_sha256_context'
@@ -227,7 +226,6 @@ function sha256(s)
 	return sha256_d:init():update(s):out()
 end
 
-local sha384_out = u8a(48)
 metatype('br_sha384_context', {__index = {
 	init = function(self)
 		C.br_sha384_init(self)
@@ -238,8 +236,8 @@ metatype('br_sha384_context', {__index = {
 		return self
 	end,
 	out = function(self)
-		C.br_sha384_out(self, sha384_out)
-		return str(sha384_out, 48)
+		C.br_sha384_out(self, hash_out)
+		return str(hash_out, 48)
 	end,
 }})
 sha384_digest = ctype'br_sha384_context'
@@ -248,7 +246,6 @@ function sha384(s)
 	return sha384_d:init():update(s):out()
 end
 
-local sha512_out = u8a(64)
 metatype('br_sha512_context', {__index = {
 	init = function(self)
 		C.br_sha512_init(self)
@@ -259,8 +256,8 @@ metatype('br_sha512_context', {__index = {
 		return self
 	end,
 	out = function(self)
-		C.br_sha512_out(self, sha512_out)
-		return str(sha512_out, 64)
+		C.br_sha512_out(self, hash_out)
+		return str(hash_out, 64)
 	end,
 }})
 sha512_digest = ctype'br_sha512_context'
@@ -297,12 +294,12 @@ function rsa_public_key(n, e)
 	return {_pk = pk, _n = n, _e = e}
 end
 
-local hash_buf = u8a(64)
 local function rsa_verify(oid, hlen, hash_fn, msg, sig, pk)
-	if rsa_vrfy(sig, #sig, oid, hlen, pk._pk, hash_buf) == 0 then
+	local h = hash_fn(msg)
+	if rsa_vrfy(sig, #sig, oid, hlen, pk._pk, hash_out) == 0 then
 		return false
 	end
-	return const_time_eq(hash_fn(msg), str(hash_buf, hlen))
+	return const_time_eq(h, str(hash_out, hlen))
 end
 function rsa_sha1_verify  (m, s, p) return rsa_verify(oid_sha1,   20, sha1,   m, s, p) end
 function rsa_sha256_verify(m, s, p) return rsa_verify(oid_sha256, 32, sha256, m, s, p) end
