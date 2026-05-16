@@ -16,6 +16,7 @@ if [[ $file ]]; then
 else
 	fail=
 	for file in $(cd ../lua; ls -1 *.lua); do
+		touch test-stdout
 		AUTO=1 run_test $file >test-stdout || fail="$fail $file"
 		grep -q ok test-stdout && echo "OK $file" || echo "   $file"
 	done

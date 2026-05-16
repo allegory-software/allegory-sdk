@@ -205,11 +205,6 @@ local try_resume_until_blocked_with
 local wait_io
 local waiting
 
-local function unprotect(ok, ...)
-	if ok then return ... end
-	error(..., 0)
-end
-
 local function log_error(ok, ...)
 	if not ok and ... ~= CANCEL then
 		log('ERROR', 'epoll', 'thread', '%s', ...)

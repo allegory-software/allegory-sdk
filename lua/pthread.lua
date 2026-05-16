@@ -265,10 +265,6 @@ local EAGAIN    = 11
 
 --helpers
 
-local function check_errno(...)
-	assert(try_errno(...))
-end
-
 --return-value checker for '0 means OK' functions
 local function checkz(ret)
 	check_errno(ret == 0, ret)

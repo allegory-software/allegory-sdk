@@ -173,6 +173,7 @@ TIME & DATES
 	month  ([utc, ][t], [plus_months]) -> ts   time at month's beginning from t
 	year   ([utc, ][t], [plus_years]) -> ts    time at year's beginning from t
 ERRORS
+	unprotect(ok, ...) -> ...      raise if not ok or return rest of the args
 	assertf(v[, fmt,...]) -> v     assert with error message formatting
 	fpcall(f, ...) -> ok, ...      pcall with finally/onerror
 	fcall(f, ...) -> ...           same but re-raises errors
@@ -1676,6 +1677,11 @@ function year(utc, t, offset)
 end
 
 --error handling -------------------------------------------------------------
+
+function unprotect(ok, ...)
+	if ok then return ... end
+	error(..., 0)
+end
 
 local xpcall = xpcall
 

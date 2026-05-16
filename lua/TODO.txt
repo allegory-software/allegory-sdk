@@ -1,9 +1,8 @@
 ERROR REPORTING
 ------------------------------------------------------------------------------
 * ownership integration:
-	- os_thread: thread, queue, event
-	- luastate
-	- pthread
+	- os_thread: synchronized_queue, os_thread_event.
+	- luastate, pthread
 	- zip
 	- mdbx
 * after ownership, refactor fs/sock/signal/proc/pbuffer to:

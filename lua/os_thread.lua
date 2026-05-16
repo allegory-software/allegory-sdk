@@ -105,8 +105,10 @@ TODO -------------------------------------------------------------------------
 
 - when using epoll in a thread, use a synchronized queue and send
 mainthread():close() on try_close() and maybe use it for other things too.
-- think about who should own resources shared with the thread (maybe a
-"refcount" control-owner?).
+
+- os_thread_event and synchronized_queue are NOT owned.
+	- os_thread_event is a cdata so it can't have an owner pointer.
+	- think about who should own resources shared with the thread.
 
 ]=]
 
@@ -466,10 +468,6 @@ function thread:try_join()
 	retvals = _os_thread_deserialize_args(retvals)
 	_disown(self)
 	return unpack(retvals)
-end
-local function unprotect(ok, ...)
-	if not ok then error(..., 0) end
-	return ...
 end
 function thread:join()
 	return unprotect(self:try_join())

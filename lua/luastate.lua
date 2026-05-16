@@ -151,7 +151,7 @@ local C = ffi.C
 local cast = ffi.cast
 
 --lua.h lauxlib.h lualib.h from Lua 5.1.5 (defines made enums, macros removed)
-ffi.cdef[[
+ffi.cdef([[
 enum {
 /* option for multiple returns in `lua_pcall' and `lua_call' */
 	LUA_MULTRET = (-1),
@@ -454,10 +454,10 @@ int (luaopen_package) (lua_State *L);
 
 /* open all previous libraries */
 void (luaL_openlibs) (lua_State *L);
-]]
+]])
 
 --luajit.h extensions from lualib.h from luajit 2.0
-ffi.cdef[[
+ffi.cdef([[
 enum {
 /* More external and GCobj tags for internal objects. */
 	LUA_TPROTO = (LUA_TTHREAD+1),
@@ -467,7 +467,7 @@ enum {
 int (luaopen_bit) (lua_State *L);
 int (luaopen_ffi) (lua_State *L);
 int (luaopen_jit) (lua_State *L);
-]]
+]])
 
 local function not_implemented()
 	error('Not implemented', 3)
