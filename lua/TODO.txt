@@ -1,35 +1,28 @@
 ERROR REPORTING
 ------------------------------------------------------------------------------
-* fs/sock try methods don't close the file/socket on error.
-
-* f/sock try methods return string errors (can do `err == 'not_found'` though!).
-
-* file:try_close() is made with protect_io() so it returns I/O errors!
-
-* pbuffer:try_skip() is made with protect_io() so it returns I/O and protocol errors!
-
-* pbuffer:try_have() etc. is considered I/O so it returns string errors.
-
-* structured errors are complicated:
-	- go back to string errors with a prefix for selective catching and
-	decision to retry and/or close the file/socket?
-
-* raising and non-raising functions are inconsistent:
-	* try_*() functions return plain strings and don't close the file/socket.
-	* unprotect_io() converts all string errors to i/o errors.
-		* result: raise tbl_err but return nil,str_err, but then protect_io()
-		returns nil,tbl_err. also now it's tostring(err) == 'access_denied'
-		cuz we don't know if it's str_err or tbl_err.
-
+* ownership integration:
+	- os_thread: thread, queue, event
+	- luastate
+	- pthread
+	- zip
+	- mdbx
+* after ownership, refactor fs/sock/signal/proc/pbuffer to:
+	- not close on error: let owner close it
+	- return/raise string errors
+		- retry only on specific i/o errors
+		- pbuffer:try_skip(), pbuffer:try_have() return/raise string errors
+	- rethink try_*() vs raising variants:
+		- try(connect, host) looks weird vs try_connect()
+			- try(s.connect, s, host) looks even weirder
+		- conn = assert(connect()) is meh...
+		- s:try_recv(), s:try_send(), f:try_read() etc. don't make sense...
+	- remove fcall, fpcall
+	- remove usage of unbuffered read, readn and send (only use buffers).
 * error reporting lacking context:
 	- unprotect_io() lacks the context that functions with check() have.
 	- sometimes even check() lacks context because it's inside try_() code.
-
 * check() from errors.lua is ungreppable because of all local check() flavors.
-	->
-
-* check_errno() is not raising like all other check*() functions.
-	-> try_errno()
+	-> OTOH I'd avoid assert() because it returns the error message on success!
 
 
 LOGGING
@@ -38,11 +31,6 @@ LOGGING
 	- live() must take module and action
 	- show +N -N on separate column
 	- add object type in front of debug prefix
-
-
-I/O: FS & SOCK
-------------------------------------------------------------------------------
-* fs and sock: remove usage of unbuffered read, readn and send (only use buffers).
 
 
 WEBB
@@ -57,24 +45,34 @@ MDBX
 * mdbx_copy incremental + restore (trivial page-block diff, no rolling window.)
 
 
+MISSING MODULES
+------------------------------------------------------------------------------
+* AES-GCM, HKDF, ChaCha20-Poly1305  -- expose from bearssl
+* Ed25519 / X25519  -- bind monocypher
+
+
 LEVERAGE AI
 ------------------------------------------------------------------------------
-* API quality
-	* find ways to make API more regular and consistent
-	* find ways to decrease API surface but keep it composable
-	* find better and more consistent names, args lists, etc.!
-	* remove unused code, find functions used only once and inline
-	* simplify complicated code
-	* find allocations that could be easily prevented, hoisted, etc.
-* code quality
-	* find obvious bugs
-		Where are hidden allocations?
-		Where can reentrancy explode?
-		What violates my invariants?
-* doc quality
-	* fix doc inconsistencies
-	* write release notes
-	* write commit messages
+* documenting
+	* find and document hidden constraints, contracts, rules, invariants.
+	* find and document surprising behavior.
+	* check/fix API doc inconsistencies, omissions, misleading or wrong phrases.
+* debugging
+	* check where args are mutated on public APIs
+	* check where raising errors can leak resources
+	* check where invariants are violated
+* refactoring
+	* find footguns and surprising behavior
+	* find over-abstraction that could be simplified
+	* find tri-state variables or variables doing multiple jobs
+	* find functions with too many or unrelated responsibilities
+	* find functions with complex or confusing signatures
+		* find functions of type f(foo, opt) instead of f{foo=, other options}
+	* find code paths that are too complex or re-entrant
+	* suggest better names for functions, args, fields
+	* suggest better API shapes
+	* find allocations that could be easily prevented or hoisted
+	* remove unused code
 
 
 LEFTOVERS
@@ -94,7 +92,6 @@ FEATURES
 - ROWSET map error messages to fields on check constraint violations.
 - glue.lua subst() with varargs like js version
 - HTTP ranges on file serving
-- HTTP web sockets
 - XLS(X) parsing
 	- ithub.com/jjensen/lua-xlsx/blob/master/xlsx.lua
 	- https://github.com/jjensen/lua-xls
