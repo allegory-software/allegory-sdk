@@ -42,7 +42,7 @@ You should distinguish between multiple types of errors:
   those. On the call side then check the error class for implementing retries.
 
 - I/O errors on stable storage, i.e. disk failures which you might want to
-  kill the whole app on. Use `check_fatal()` for those.
+  kill the whole app on.
 
 Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
