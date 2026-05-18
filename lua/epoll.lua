@@ -212,6 +212,11 @@ local function log_error(ok, ...)
 	return ok, ...
 end
 
+local function unprotect(ok, ...)
+	if ok then return ... end
+	error(..., 0)
+end
+
 --expires heaps --------------------------------------------------------------
 --xo = expirable object: epollable, wait_job, timer.
 

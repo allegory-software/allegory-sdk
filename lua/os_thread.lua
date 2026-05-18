@@ -467,17 +467,17 @@ function thread:try_join()
 	self.state:close()
 	retvals = _os_thread_deserialize_args(retvals)
 	_disown(self)
-	return unpack(retvals)
+	return true, unpack(retvals)
 end
 function thread:join()
-	return unprotect(self:try_join())
+	return select(2, assert(self:try_join()))
 end
 function thread:try_close()
 	if self._closed then return true end
 	return self:try_join()
 end
 function thread:close()
-	return unprotect(self:try_close())
+	return select(2, assert(self:try_close()))
 end
 function thread:closed()
 	return self._closed

@@ -173,7 +173,6 @@ TIME & DATES
 	month  ([utc, ][t], [plus_months]) -> ts   time at month's beginning from t
 	year   ([utc, ][t], [plus_years]) -> ts    time at year's beginning from t
 ERRORS
-	unprotect(ok, ...) -> ...      raise if not ok or return rest of the args
 	assertf(v[, fmt,...]) -> v     assert with error message formatting
 	fpcall(f, ...) -> ok, ...      pcall with finally/onerror
 	fcall(f, ...) -> ...           same but re-raises errors
@@ -1678,11 +1677,6 @@ end
 
 --error handling -------------------------------------------------------------
 
-function unprotect(ok, ...)
-	if ok then return ... end
-	error(..., 0)
-end
-
 local xpcall = xpcall
 
 --like standard assert() but with error message formatting via string.format()
@@ -1725,22 +1719,22 @@ local function _fpcall(f,...)
 	end
 	return cont(xpcall(f, err, finally, onerror, ...))
 end
-local function unprotect_fpcall(ok, result, ...)
+local function cont_fpcall(ok, result, ...)
 	if not ok then return nil, result, ... end
 	if result == nil then result = true end --to distinguish from error.
 	return result, ...
 end
 function fpcall(...)
-	return unprotect_fpcall(_fpcall(...))
+	return cont_fpcall(_fpcall(...))
 end
 
 --fcall is like fpcall() but without the protection (i.e. raises errors).
-local function assert_fpcall(ok, ...)
-	if not ok then error(..., 0) end
-	return ...
+local function unprotect(ok, ...)
+	if ok then return ... end
+	error(..., 0)
 end
 function fcall(...)
-	return assert_fpcall(_fpcall(...))
+	return unprotect(_fpcall(...))
 end
 
 --modules --------------------------------------------------------------------
