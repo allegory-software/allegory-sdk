@@ -12,19 +12,22 @@ API
 	newerror(classname,... | e) -> e        create/wrap/pass-through an error object
 	  e.message                             formatted error message
 	  e.traceback                           traceback at error site
-	iserror(v[, classes]) -> true|false     check an error object type
+	iserror(v,[classes],[message]) -> true|false     match an error
 	raise([level, ]classname,... | e)       (create and) raise an error
 	check(errorclass, event, v, ...)        assert with structured errors and logging
 	catch([classes], f, ...) -> true,... | false,e    pcall `f` and catch errors
+	try(f, ...)                             alias of catch
+	CANCEL                                  error that try/catch cannot catch
+	protect([classes, ]f, [oncaught]) -> f  turn raising f into nil,err-returning
 	pcall(f, ...) -> ok,...                 pcall that stores traceback in `e.traceback`
 	lua_pcall(f, ...) -> ok,...             Lua's pcall renamed (no tracebacks)
-	protect([classes, ]f, [oncaught]) -> f  turn raising f into nil,err-returning
 
 RATIONALE
 
 Structured exceptions are an enhancement over plain string errors by adding
 selective catching and providing a context for the failure to help with
-freeing resources, recovery or logging. They're most useful in network protocols.
+freeing resources, recovery or logging. They're most useful in network
+protocols and file decoders (see errors_io.lua).
 
 In the API `classes` can be given as either 'classname1 ...' or {class1->true}.
 When given in table form, you must include all the superclasses in the table
@@ -50,8 +53,7 @@ expensive so when a stack trace is not needed, use lua_pcall() instead.
 TRACEBACKS ON STRUCTURED ERRORS
 
 Structured errors are different: they don't get a traceback by default unless
-you ask for it by setting addtraceback=true in the error object. See the
-errors_io module for how that is used.
+you ask for it by setting addtraceback=true in the error object or class.
 
 ]=]
 
@@ -60,8 +62,8 @@ if not ... then require'errors_test'; return end
 require'glue'
 
 local
-    type, xpcall =
-    type, xpcall
+    type, xpcall, getmetatable, rawget =
+    type, xpcall, getmetatable, rawget
 
 local error = error
 local lua_pcall = pcall
@@ -116,12 +118,15 @@ local function class_table(s)
 	end
 end
 
-local function iserror(e, classes)
+local function iserror(e, classes, message)
 	local mt = getmetatable(e)
 	if type(mt) ~= 'table' then return false end
 	if not rawget(mt, 'iserror') then return false end
 	if not classes then return true end
-	return class_table(classes)[e.__index] or false
+	if not class_table(classes)[e.__index] then return false end
+	if not message then return true end
+	if not e.message == message then return false end
+	return true
 end
 
 local function raise(level, ...)
@@ -144,13 +149,15 @@ local function check(errorclass, event, v, ...)
 	raise(e)
 end
 
+local CANCEL --fw. decl.
+
 local function fix_traceback(s)
 	return s:gsub('(.-:%d+: )([^\n])', '%1\n%2')
 end
 local function cont(classes, ok, ...)
 	if ok then return true, ... end
 	local e = ...
-	if not classes or iserror(e, classes) then
+	if (not classes or iserror(e, classes)) and e ~= CANCEL then
 		return false, e
 	end
 	error(e, 3)
@@ -171,6 +178,7 @@ end
 local function catch(classes, f, ...)
 	return cont(classes, pcall(f, ...))
 end
+local try = catch --sounds weird but use try(f) and catch('class1 ...', f)
 
 local function cont(oncaught, ok, ...)
 	if ok then return ... end
@@ -188,7 +196,7 @@ end
 
 --base error class that all error types inherit from.
 
-Error = errortype()
+--[[local]] Error = errortype()
 
 --identify, serialize and deserialize are for passing errors between
 --OS threads via Lua states.
@@ -230,12 +238,11 @@ function Error:__call(arg1, ...)
 end
 
 function Error:__tostring()
-	local s = self.traceback or self.message or self.default_error_message
-	if self.errorcode then
-		s = s .. ' ['..self.errorcode..']'
-	end
-	return s
+	return self.traceback or self.message or self.default_error_message
 end
+
+--raise CANCEL to cancel any waiting thread. try() / catch() won't catch it.
+--[[local]] CANCEL = newerror'cancel'
 
 _G.errortype = errortype
 _G.newerror = newerror
@@ -243,7 +250,9 @@ _G.iserror = iserror
 _G.raise = raise
 _G.check = check
 _G.catch = catch
+_G.try = try
 _G.pcall = pcall
 _G.lua_pcall = lua_pcall
 _G.protect = protect
 _G.Error = Error
+_G.CANCEL = CANCEL

@@ -6,17 +6,15 @@ ERROR REPORTING
 	- zip
 	- mdbx
 * after ownership, refactor fs/sock/signal/proc/pbuffer to:
-	- not close on error: let owner close it
-	- return/raise string errors
-		- retry only on specific i/o errors
-		- pbuffer:try_skip(), pbuffer:try_have() return/raise string errors
 	- rethink try_*() vs raising variants:
 		- try(connect, host) looks weird vs try_connect()
 			- try(s.connect, s, host) looks even weirder
 		- conn = assert(connect()) is meh...
 		- s:try_recv(), s:try_send(), f:try_read() etc. don't make sense...
 	- remove fcall, fpcall
+	- review use of pcall vs lua_pcall vs xpcall
 	- remove usage of unbuffered read, readn and send (only use buffers).
+	- assert try_read(n > 0) so return 0 for EOF and remove 'eof'.
 * error reporting lacking context:
 	- unprotect_io() lacks the context that functions with check() have.
 	- sometimes even check() lacks context because it's inside try_() code.

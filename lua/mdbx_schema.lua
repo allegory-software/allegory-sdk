@@ -1425,7 +1425,7 @@ local db_try_cursor = Db.try_cursor
 function Db:try_cursor(tab, mode)
 	local cur, err = db_try_cursor(self, tab, mode)
 	if not cur then return nil, err end
-	cur.schema = self.dbim[cur.c:dbi()]
+	cur.schema = self.dbim[cur:dbi()]
 	return cur
 end
 

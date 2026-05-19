@@ -36,7 +36,6 @@ THREADS
 	th:onfinish(fn)                        run fn(thread, ok, ...) when thread finishes
 	th:[try_]cancel()                      cancel what the thread is waiting on
 	error(CANCEL)                          cancel current thread
-	try(f, ...) -> ok, ...                 pcall that re-raises CANCEL
 THREAD SETS
 	threadset() -> ts
 	- ts:thread(fn, [fmt, ...]) -> th
@@ -926,16 +925,6 @@ function Thread:closed()
 end
 
 Thread.setowner = setowner
-
-local function cont_try(ok, ...)
-	if not ok and ... == CANCEL then
-		error(CANCEL, 0)
-	end
-	return ok, ...
-end
-function try(f, ...)
-	return cont_try(pcall(f, ...))
-end
 
 function Thread:ownenv(create)
 	local t = self._ownenv

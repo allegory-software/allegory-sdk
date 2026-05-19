@@ -146,7 +146,6 @@ CALLBACKS
 	call(f, ...)                   calls f if f is a func, otherwise returns args
 	do_before(f, do_f) -> f        wrap f so as to call do_f first
 	do_after(f, do_f) -> f         wrap f so as to call do_f last
-	CANCEL                         generic "cancel" command to pass to callbacks
 OBJECTS
 	object([super], [t], ...) -> t    create a class or object
 	before(class, method_name, f)     call f at the beginning of a method
@@ -219,8 +218,6 @@ FFI
 	metatype                     = ffi.metatype
 	isctype                      = ffi.istype
 	errno                        = ffi.errno
-	try_errno(v[, err]) -> v | nil, err
-	check_errno(v[, err]) -> v
 	str(buf, len)                = ffi.string(buf, len) if buf is not null
 	strlen(buf[, maxlen]) -> len|nil  = strnlen, stops at 64k by default
 	ptr(p)                       = p ~= nil and p  or nil
@@ -1575,8 +1572,6 @@ function gettersandsetters(getters, setters, super)
 	return {__index = get, __newindex = set}
 end
 
-CANCEL = {'CANCEL'} --generic "cancel" command to pass to callbacks.
-
 --process control ------------------------------------------------------------
 
 exit = os.exit
@@ -2239,82 +2234,6 @@ function ptr_deserialize(ct, addr)
 	end
 end
 
---errno unified messages -----------------------------------------------------
---only list here user errors and recoverable errors.
-
-cdef'char *strerror(int errnum);'
-
-local errno_msgs = {
-	--fs & proc
-	[  1] = 'access_denied', --EPERM
-	[  2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
-	                     --rmdir(), opendir(), rename(), unlink()
-	[  4] = 'interrupted', --EINTR, epoll_wait()
-	[  5] = 'io_error', --EIO, read(), write(), fsync()
-	[  9] = 'bad_file', --EBADF
-	[ 12] = 'out_of_mem', --ENOMEM, mmap()
-	[ 13] = 'access_denied', --EACCES, open(), mkdir(), unlink(), rmdir()
-	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo(), rename()
-	[ 18] = 'cross_device', --EXDEV, rename()
-	[ 19] = 'no_device', --ENODEV, block device disappeared (fatal)
-	[ 20] = 'not_dir', --ENOTDIR, open(), opendir()
-	[ 21] = 'is_dir', --EISDIR, open(), unlink()
-	[ 22] = 'invalid_argument', --EINVAL, mmap()
-	[ 23] = 'too_many_open_files', --ENFILE, open()
-	[ 24] = 'too_many_fds', --EMFILE, open() (fatal: fd leak)
-	[ 27] = 'file_too_big', --EFBIG, write(), fallocate(), truncate()
-	[ 28] = 'no_space', --ENOSPC, write(), fallocate(), mkdir(), rename(), epoll_add() (fatal)
-	[ 29] = 'invalid_seek', --ESPIPE, lseek() on pipe/socket (fatal: programming error)
-	[ 30] = 'read_only', --EROFS, open(), mkdir(), unlink(), rename() (fatal)
-	[ 32] = 'eof', --EPIPE, write()
-	[ 36] = 'name_too_long', --ENAMETOOLONG, open(), rename(), mkdir()
-	[ 38] = 'not_implemented', --ENOSYS, syscall not implemented (fatal: wrong kernel)
-	[ 39] = 'not_empty', --ENOTEMPTY, rmdir()
-	[ 40] = 'too_many_symlinks', --ELOOP, open(), stat() (too many symlinks in path)
-	[ 95] = 'not_supported', --EOPNOTSUPP, fallocate()
-	[122] = 'disk_quota', --EDQUOT, write(), open(), mkdir()
-	--sock
-	[ 64] = 'network_missing', --ENONET, accept()
-	[ 71] = 'protocol_error', --EPROTO, accept()
-	[ 92] = 'protocol_not_available', --ENOPROTOOPT, accept()
-	[ 98] = 'address_already_in_use', --EADDRINUSE, bind()
-	[ 99] = 'address_not_available', --EADDRNOTAVAIL, bind(), connect()
-	[100] = 'network_down', --ENETDOWN, connect(), send()
-	[101] = 'network_unreachable', --ENETUNREACH, connect(), send()
-	[103] = 'connection_aborted', --ECONNABORTED, accept()
-	[104] = 'connection_reset', --ECONNRESET, recv(), send()
-	[107] = 'not_connected', --ENOTCONN, send(), recv(), shutdown() (fatal)
-	[110] = 'timed_out', --ETIMEDOUT, connect()
-	[111] = 'connection_refused', --ECONNREFUSED, connect()
-	[112] = 'host_down', --EHOSTDOWN, accept()
-	[113] = 'host_unreachable', --EHOSTUNREACH, connect(), send()
-	[114] = 'already_in_progress', --EALREADY, connect() (fatal)
-	[115] = 'in_progress', --EINPROGRESS, connect() (handled in scheduler)
-}
-
-function try_errno(ret, err)
-	if ret then return ret end
-	if isstr(err) then return ret, err end
-	err = err or errno()
-	local s = errno_msgs[err]
-	assert(s ~= 'invalid_argument', s)
-	assert(s ~= 'bad_file', s)
-	assert(s ~= 'invalid_seek', s)
-	assert(s ~= 'no_device', s)
-	assert(s ~= 'too_many_fds', s)
-	assert(s ~= 'read_only', s)
-	assert(s ~= 'not_implemented', s)
-	assert(s ~= 'not_connected', s)
-	assert(s ~= 'already_in_progress', s)
-	if s then return ret, s end
-	local s = C.strerror(err)
-	local s = str(s) or 'errno '..err
-	return ret, s
-end
-function check_errno(ret)
-	assert(try_errno(ret))
-end
-
 --buffers --------------------------------------------------------------------
 
 --like buffer() but preserves data on reallocations.
@@ -2438,6 +2357,6 @@ function S(id, ...)
 	return format(...)
 end
 
-require'errors'
+--require'errors'
 require'errors_io'
 require'logging'

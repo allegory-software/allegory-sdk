@@ -44,9 +44,9 @@ READAHEAD
 	pb:[try_]have(n) -> true | false,err fill buffer to n bytes or more, up-to eof
 	pb:need(n) -> pb                     fill buffer to n bytes or more, break on eof
 READAHEAD & PULL
-	pb:[try_]skip(size)                  skip bytes (read more as needed)
-	pb:[try_]haveline([i]) -> s          fill buffer until a line is found and pull it
-	pb:needline([i]) -> s                like haveline() but break on error/not found
+	pb:skip(size)                        skip bytes (read more as needed)
+	pb:haveline([i]) -> s|nil            fill buffer until a line is found and pull it
+	pb:needline([i]) -> s                like haveline() but break on eof
 	pb:reader() -> read                  get a buffered read function
 		read(buf, size) -> read_size | 0,'eof' | nil,err
 WRITE
@@ -227,8 +227,8 @@ function pb:try_have(ask)
 	local space = max(ask, self.readahead - have)
 	local p, space = self:reserve(space) --could reserve even more space
 	while ask > 0 do
-		local read, err = self.f:try_read(p, space)
-		if not read or err == 'eof' then return false, err end
+		local read, err = self.f:read(p, space)
+		if err == 'eof' then return false, err end
 		self:commit(read)
 		space = space - read
 		ask = ask - read
@@ -239,7 +239,7 @@ end
 function pb:have(ask)
 	local have, err = self:try_have(ask)
 	if not have and err == 'eof' then return false end --eof is not an error
-	return self:check_io(have, err)
+	return assert(have, err)
 end
 function pb:need(n)
 	local have, err = self:try_have(n)
@@ -247,7 +247,7 @@ function pb:need(n)
 		if err == 'eof' then
 			self:checkp(false, err) --eof is a protocol error, not an i/o error
 		else
-			self:check_io(false, err)
+			error(err) --i/o error from read() or bug
 		end
 	end
 	return self
@@ -272,11 +272,10 @@ function pb:skip(n)
 		end
 	end
 end
-pb.try_skip = protect_io(pb.skip)
 
 pb.linesize = 8192
 pb.lineterm = nil
-function pb:try_haveline(i) --for line-based protocols like http.
+function pb:haveline(i) --for line-based protocols like http.
 	local lineterm = assert(self.lineterm, 'lineterm not set')
 	i = i or 0
 	while true do
@@ -287,25 +286,12 @@ function pb:try_haveline(i) --for line-based protocols like http.
 		if i > 0 then --line already started, need to end it
 			self:need(i + 1)
 		elseif not self:have(1) then
-			return false, 'eof'
+			return false
 		end
 	end
-end
-function pb:haveline(i)
-	local s, err = self:try_haveline(i)
-	if not s and err == 'eof' then return false end --eof is not an error
-	return self:checkp(s, err)
 end
 function pb:needline(i)
-	local s, err = self:try_haveline(i)
-	if not s then
-		if err == 'eof' then
-			self:checkp(false, err) --eof is a protocol error, not an i/o error
-		else
-			self:check_io(false, err)
-		end
-	end
-	return s
+	return self:checkp(self:haveline(i), 'eof')
 end
 
 --Returns a read function which reads ahead from file in order to lower the
