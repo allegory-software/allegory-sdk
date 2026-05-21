@@ -7,7 +7,8 @@ API
 	setowner(res, [owner])             set owner of res (nil for mainthread())
 	currentowner([thread]) -> owner    get (current) thread's current owner
 	setcurrentowner(owner, [thread])   set (current) thread's current owner
-	with_owner(f)                      run f within a scope owner
+	try_with_owner(f, ...) -> ok, ...  run f within a scope owner
+	with_owner(f, ...) -> ...          run f within a scope owner (re-raises errors)
 
 INTEGRATION API
 	_check_owner(owner) -> vowner  check/get owner before creating res (raises!)
