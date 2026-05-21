@@ -242,7 +242,7 @@ function check_errno(...)
 end
 
 function check_for(target, errtype, ret, s, ...)
-	if ret then return ret end
+	if ret then return ret, s, ... end
 	if iserror(s) then error(s) end
 	return error(error_for(target, errtype, s, ...))
 end
