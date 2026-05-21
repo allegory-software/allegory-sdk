@@ -80,7 +80,7 @@ local
 --error handling -------------------------------------------------------------
 
 local function check_len(q, i, n, len)
-	return checkp(q, n >= i+len, 'response too short')
+	checkp(q, n >= i+len, 'response too short')
 end
 
 --build request --------------------------------------------------------------
@@ -259,6 +259,11 @@ local function parse_qid(q, p, n)
 	return u16(q, p, 0, n)
 end
 
+local function is_truncated(q, p, n)
+	local flags = u16(q, p, 2, n)
+	return band(flags, 0x0200) ~= 0
+end
+
 local function parse_response(q, p, n)
 
 	-- header layout: qid(2) flags(2) n1(2) n2(2) n3(2) n4(2)
@@ -269,9 +274,7 @@ local function parse_response(q, p, n)
 	local n3    , i = u16(q, p, i, n) --number of authority entries
 	local n4    , i = u16(q, p, i, n) --number of additional entries
 
-	if band(flags, 0x200) ~= 0 then
-		return nil, 'truncated'
-	end
+	checkp(q, band(flags, 0x0200) == 0, 'truncated')
 	checkp(q, band(flags, 0x8000) ~= 0, 'bad QR flag')
 
 	--skip question section: (qname qtype(2) qclass(2)) ...
@@ -391,7 +394,6 @@ q.authority_section = false
 q.additional_section = false
 q.tracebacks = false
 q.tcp_only = false
-q.try_close = function() return true end --stub, for check_io()
 
 --NOTE: DNS servers don't support request pipelining so we use one-shot sockets.
 local function tcp_query(rs, ns, q)
@@ -477,15 +479,11 @@ local function ns_query(rs, ns, q)
 		buf, len = check_io(q, suspend())
 	end
 
-	local answers, err = parse_response(q, buf, len)
-
-	if not answers and err == 'truncated' then
-		answers, err = tcp_query(rs, ns, q)
+	if is_truncated(q, buf, len) then
+		return tcp_query(rs, ns, q)
 	end
-
-	return answers, err
+	return parse_response(q, buf, len)
 end
-local try_ns_query = protect_io(ns_query)
 
 local function schedule(rs, ns)
 	local sz = 4096
@@ -616,7 +614,10 @@ function rs.try_query(rs, qname, qtype, timeout)
 		resume(thread(function()
 			local t = update({name = qname, type = qtype, timeout = timeout}, t)
 			local q = object(q, t)
-			local res, err = try_ns_query(rs, ns, q) --suspends inside the first send().
+			--suspends inside the first send().
+			local ok, res_or_err = catch('io protocol', ns_query, rs, ns, q)
+			local res = ok and res_or_err or nil
+			local err = not ok and res_or_err or nil
 			queries_left = queries_left - 1
 			if not lookup_thread then
 				rs:dbg(ns, q, 'DISCARD (late)')
