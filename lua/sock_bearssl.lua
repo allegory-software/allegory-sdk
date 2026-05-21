@@ -25,6 +25,8 @@ CONFIG
 
 ]=]
 
+if not ... then require'sock_bearssl_test'; return end
+
 require'glue'
 require'sock'
 require'fs'
@@ -830,12 +832,16 @@ local function os_ca_file(path)
 		or P'/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem' --CentOS/RHEL 7
 		or P'/etc/ssl/cert.pem'                                 --Alpine Linux
 end
-local ca, ca_clock
-local function load_ca(ca_file)
-	if not ca or clock() - ca_clock > 3600 * 24 then
-		ca_file = assert(ca_file or config'ca_file' or os_ca_file(), 'ca file not found')
-		ca = load(ca_file)
-		ca_clock = clock()
+local _load_ca = memoize_multiret(function(ca_file)
+	return load(ca_file), clock()
+end)
+function load_ca(ca_file)
+	ca_file = assert(ca_file or config'ca_file' or os_ca_file(),
+		'ca file not found')
+	local ca, ca_clock = _load_ca(ca_file)
+	if clock() - ca_clock > 3600 * 24 then
+		_load_ca(CLEAR)
+		ca, ca_clock = _load_ca(ca_file)
 	end
 	return ca
 end
@@ -1037,7 +1043,7 @@ function stcp:try_shutdown(mode)
 	if self._closed then return nil, 'closed' end
 	return self.tcp:try_shutdown(mode)
 end
-stcp.shutdown = unprotect_io(stcp.try_shutdown)
+stcp.shutdown = make_raising('protocol', stcp.try_shutdown)
 
 function stcp:try_getopt (...) return self.tcp:try_getopt (...) end
 function stcp:getopt     (...) return self.tcp:getopt     (...) end
@@ -1045,9 +1051,6 @@ function stcp:try_setopt (...) return self.tcp:try_setopt (...) end
 function stcp:setopt     (...) return self.tcp:setopt     (...) end
 function stcp:setexpires (...) return self.tcp:setexpires (...) end
 function stcp:settimeout (...) return self.tcp:settimeout (...) end
-function stcp:cancel_recv(...) return self.tcp:cancel_recv(...) end
-function stcp:cancel_send(...) return self.tcp:cancel_send(...) end
-function stcp:cancel     (...) return self.tcp:cancel     (...) end
 function stcp:wait_job   (...) return self.tcp:wait_job   (...) end
 function stcp:wait_until (...) return self.tcp:wait_until (...) end
 function stcp:wait       (...) return self.tcp:wait       (...) end
@@ -1055,7 +1058,7 @@ function stcp:remote_addr(...) return self.tcp:remote_addr(...) end
 function stcp:bound_addr (...) return self.tcp:bound_addr (...) end
 
 function stcp:debug_stream(protocol_name)
-	return tcp_class.debug(self, protocol_name or 'ssock')
+	return tcp_class.debug_stream(self, protocol_name or 'ssock')
 end
 
 function stcp:try_close()
@@ -1071,7 +1074,7 @@ function stcp:try_close()
 	end
 	return ok, err
 end
-stcp.close = unprotect_io(stcp.try_close)
+stcp.close = make_raising('protocol', stcp.try_close)
 
 function stcp:closed()
 	return self._closed
@@ -1114,7 +1117,7 @@ function _G.try_client_stcp(tcp, host, opt)
 	tcp:setowner(s)
 	return s
 end
-_G.client_stcp = unprotect_io(_G.try_client_stcp)
+_G.client_stcp = make_raising('protocol', _G.try_client_stcp)
 
 function client_stcp:try_send_close_notify()
 	if not self.eng then return true end
@@ -1145,6 +1148,7 @@ end
 
 function client_stcp:try_recv(buf, sz)
 	if self._closed then return nil, 'closed' end
+	if sz == 0 then return 0 end --mask out null reads
 	local ok, err = engine_run(self, BR_SSL_RECVAPP)
 	if not ok then return err == 'eof' and 0 or nil, err end
 	local app_buf = C.br_ssl_engine_recvapp_buf(self.eng, _szp)
@@ -1178,11 +1182,11 @@ end
 
 client_stcp.try_recvn   = tcp_class.try_recvn
 client_stcp.try_recvall = tcp_class.try_recvall
-client_stcp.close       = unprotect_io(client_stcp.try_close)
-client_stcp.recv        = unprotect_io(client_stcp.try_recv)
-client_stcp.send        = unprotect_io(client_stcp.try_send)
-client_stcp.recvn       = unprotect_io(client_stcp.try_recvn)
-client_stcp.recvall     = unprotect_io(client_stcp.try_recvall)
+client_stcp.close       = make_raising('protocol', client_stcp.try_close)
+client_stcp.recv        = make_raising('protocol', client_stcp.try_recv)
+client_stcp.send        = make_raising('protocol', client_stcp.try_send)
+client_stcp.recvn       = make_raising('protocol', client_stcp.try_recvn)
+client_stcp.recvall     = make_raising('protocol', client_stcp.try_recvall)
 client_stcp.try_readn   = client_stcp.try_recvn
 client_stcp.readn       = client_stcp.recvn
 client_stcp.try_read    = client_stcp.try_recv
@@ -1236,7 +1240,7 @@ function _G.try_server_stcp(tcp, opt)
 	live(s, 'tcp=%s', tcp)
 	return s
 end
-_G.server_stcp = unprotect_io(_G.try_server_stcp)
+_G.server_stcp = make_raising('protocol', _G.try_server_stcp)
 
 function server_stcp:try_accept(opt, timeout)
 	if self:closed() then return nil, 'closed' end
@@ -1270,4 +1274,4 @@ function server_stcp:try_accept(opt, timeout)
 
 	return s
 end
-server_stcp.accept = unprotect_io(server_stcp.try_accept)
+server_stcp.accept = make_raising('protocol', server_stcp.try_accept)
