@@ -146,7 +146,7 @@ end
 
 local function return_raising(target, errtype, ret, err, ...)
 	if ret then return ret, err, ... end
-	if iserror(err) then error(err) end
+	if iserror(err) then error(err) end --pass-through structured errors
 	error(error_for(target, errtype, err, ...))
 end
 function make_raising(errtype, f)
