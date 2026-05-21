@@ -16,8 +16,7 @@ ERROR REPORTING
 	- remove usage of unbuffered read, readn and send (only use buffers).
 	- assert try_read(n > 0) so return 0 for EOF and remove 'eof'.
 * error reporting lacking context:
-	- unprotect_io() lacks the context that functions with check() have.
-	- sometimes even check() lacks context because it's inside try_() code.
+	- check() lacks context because it's inside try_() code.
 * check() from errors.lua is ungreppable because of all local check() flavors.
 	-> OTOH I'd avoid assert() because it returns the error message on success!
 

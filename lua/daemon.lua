@@ -169,7 +169,7 @@ function daemon(...)
 		env('TZ', ':/etc/localtime')
 		--^^avoid having os.date() stat /etc/localtime.
 		logging:tofile(logfile)
-		logging.autoflush = logging.debug
+		logging.autosync = logging.debug
 		local logtoserver = config'log_host' and config'log_port'
 		if logtoserver then
 			require'sock'

@@ -49,7 +49,7 @@ local function close_client(cl)
 	cl:close()
 	for _, res in ipairs(owned) do
 		assert(res.owner == nil)
-		assert(res.owner_index == -1)
+		assert(res.owner_i == -1)
 	end
 end
 

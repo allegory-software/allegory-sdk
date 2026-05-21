@@ -7,10 +7,11 @@ API
 	setowner(res, [owner])             set owner of res (nil for mainthread())
 	currentowner([thread]) -> owner    get (current) thread's current owner
 	setcurrentowner(owner, [thread])   set (current) thread's current owner
+	with_owner(f)                      run f within a scope owner
 
 INTEGRATION API
 	_check_owner(owner) -> vowner  check/get owner before creating res (raises!)
-	_own(vowner, res)              call it in constructor after resource is created.
+	_own(owner, res)               call it in constructor after resource is created.
 	_disown(res)                   call it in try_close() after resource is freed.
 
 RATIONALE
@@ -54,10 +55,17 @@ CONSTRAINTS
 
 ]]
 
+if not ... then require'owner_test'; return end
+
+local
+	assert =
+	assert
+
 local function _do_close_owned(owner)
 	local owns = owner.owns
 	if owns == false then return end
 	owner.owns = false --prevent further owning and re-entry.
+	owner.owns_free_slots = false
 	if not owns then return end
 	--phase 1: close owned threads, which forces them to finish synchronously
 	--and close their owned threads and their resources and so on.
@@ -83,11 +91,11 @@ local function _do_disown(res)
 	local owner = res.owner
 	if not owner then return end
 	if owner.owns then --not inside _do_close_owned()
-		add(owner.owns.free_slots, res.owner_index)
-		owner.owns[res.owner_index] = false
+		add(owner.owns_free_slots, res.owner_i)
+		owner.owns[res.owner_i] = false
 	end
 	res.owner = nil --_disown() barrier
-	res.owner_index = -1
+	res.owner_i = -1
 end
 
 function _disown(res)
@@ -98,19 +106,20 @@ end
 function _check_owner(owner)
 	owner = owner or currentowner()
 	assert(istab(owner), 'invalid owner')
-	assertf(owner.owner or owner == mainthread(), 'owner is not owned')
+	assert(owner.owner or owner == mainthread(), 'owner is not owned')
 	assert(owner.owns ~= false, 'owner closed')
 	return owner
 end
 
 local function _do_own(owner, res)
 	if owner.owns == nil then
-		owner.owns = {free_slots = {}}
+		owner.owns = {}
+		owner.owns_free_slots = {}
 	end
-	local i = pop(owner.owns.free_slots) or #owner.owns + 1
+	local i = pop(owner.owns_free_slots) or #owner.owns + 1
 	owner.owns[i] = res
 	res.owner = owner
-	res.owner_index = i
+	res.owner_i = i
 end
 
 function setowner(res, owner)
@@ -150,6 +159,32 @@ end
 function setcurrentowner(owner, thread)
 	thread = thread or currentthread()
 	thread.currentowner = assert(owner)
+end
+
+local function scope_try_close(scope)
+	local prev_owner = scope.owner
+	setcurrentowner(prev_owner)
+	_disown(scope)
+end
+local function return_try_with_owner(scope, ok, ...)
+	if ... == CANCEL then
+		setcurrentowner(scope.owner)
+		error(..., 0) --let scope's owner close it
+	else
+		scope:try_close()
+		return ok, ...
+	end
+end
+function try_with_owner(f, ...)
+	local prev_owner = currentowner()
+	local scope = _own(_check_owner(prev_owner), {
+		try_close = scope_try_close,
+	})
+	setcurrentowner(scope)
+	return return_try_with_owner(scope, pcall(f, ...))
+end
+function with_owner(f, ...)
+	return unpcall(try_with_owner(f, ...))
 end
 
 --stubs if not using epoll.lua

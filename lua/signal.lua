@@ -124,7 +124,7 @@ function signal_file(signals, flags, name)
 		if not ok then return nil, err end
 		return si --also pins it
 	end
-	f.read_signal = unprotect_io(f.try_read_signal)
+	f.read_signal = make_raising('io', f.try_read_signal)
 	return f
 end
 

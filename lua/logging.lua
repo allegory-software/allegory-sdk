@@ -105,7 +105,7 @@ function logging:tofile(logfile, max_size, queue_size)
 		rotate_logfile(#s + 1)
 		size = size + #s + 1
 		f:write(s)
-		if self.autoflush then f:sync() end
+		if self.autosync then f:sync() end
 		return true
 	end
 

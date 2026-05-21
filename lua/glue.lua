@@ -137,7 +137,9 @@ STDOUT/ERR
 	printf(fmt, ...)               print with string formatting
 	say([fmt, ...])                print to stderr
 	sayn([fmt, ...])               print to stderr without newline
+PROCESS CONTROL
 	die([fmt, ...])                exit with abort message and exit code 1
+	must(...) -> ...               die with traceback if not arg#1
 ITERATORS
 	collect([i,] iter) -> t        collect iterated values into an array
 CALLBACKS
@@ -172,14 +174,14 @@ TIME & DATES
 	month  ([utc, ][t], [plus_months]) -> ts   time at month's beginning from t
 	year   ([utc, ][t], [plus_years]) -> ts    time at year's beginning from t
 ERRORS
+	pcall(f, ...) -> ok,...        pcall overwritten to add a traceback
+	lua_pcall(f, ...) -> ok,...    standard pcall renamed (no tracebacks)
+	unpcall(ok, ...) -> ...        raise if not ok, otherwise return ...
 	assertf(v[, fmt,...]) -> v     assert with error message formatting
 	fpcall(f, ...) -> ok, ...      pcall with finally/onerror
 	fcall(f, ...) -> ...           same but re-raises errors
-	die(fmt,...)                   exit with code 1 and message
-	must(...) -> ...               die with traceback if not arg#1
-STRUCTURED EXCEPTIONS
+STRUCTURED ERRORS
 	see errors.lua
-	see errors_io.lua
 MODULES
 	require'glue'.with'module1 ...'  require syntax sugar
 	module([name, ][parent]) -> M  create a module
@@ -1672,17 +1674,42 @@ end
 
 --error handling -------------------------------------------------------------
 
+--[[
+Normally in Lua, when catching an error temporarily to free up resources and
+then re-raising it, the original stack trace is lost. Catching errors with the
+pcall() that's reimplemented here instead of with the standard Lua pcall()
+adds a traceback to all string errors. Standard pcall is available as
+lua_pcall() for when a stack trace is not desired.
+]]
+
 local xpcall = xpcall
 
---like standard assert() but with error message formatting via string.format()
---and doesn't allocate memory unless the assertion fails.
---NOTE: unlike standard assert(), this only returns the first argument
---to avoid returning the error message and it's args along with it so don't
---use it with functions returning multiple values if you want those values.
+local function fix_traceback(s)
+	return s --TODO: s:gsub('(.-:%d+: )([^\n])', '%1\n%2')
+end
+local function xpcall_onerror(e)
+	if type(e) == 'table' and e.addtraceback then
+		e.traceback = catany('\n', e.traceback,
+			fix_traceback(traceback(e.message or '', 2)))
+	elseif type(e) == 'string' then
+		return fix_traceback(traceback(e, 2))
+	end
+	return e
+end
+local function traceback_pcall(f, ...)
+	return xpcall(f, xpcall_onerror, ...)
+end
+lua_pcall, pcall = pcall, traceback_pcall
+
+function unpcall(ok, ...)
+	if ok then return ... end
+	error(..., 0)
+end
+
+--like standard assert() but with error message formatting with logargs().
 function assertf(v, err, ...)
 	if v then return v end
-	err = err and format(err, logargs(...)) or 'assertion failed!'
-	error(err, 2)
+	error(format(err, logargs(...)), 2)
 end
 
 --[[
@@ -1724,12 +1751,8 @@ function fpcall(...)
 end
 
 --fcall is like fpcall() but without the protection (i.e. raises errors).
-local function unprotect(ok, ...)
-	if ok then return ... end
-	error(..., 0)
-end
 function fcall(...)
-	return unprotect(_fpcall(...))
+	return unpcall(_fpcall(...))
 end
 
 --modules --------------------------------------------------------------------
@@ -2357,6 +2380,5 @@ function S(id, ...)
 	return format(...)
 end
 
---require'errors'
-require'errors_io'
+require'errors'
 require'logging'

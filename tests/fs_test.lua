@@ -309,6 +309,56 @@ function test.mkdir_recursive()
 	rmdir'fs_test_dir'
 end
 
+local function with_try_sync_dir_spy(f)
+	local try_sync_dir0 = try_sync_dir
+	local synced = {}
+	try_sync_dir = function(dir)
+		synced[#synced+1] = dir
+		return true
+	end
+	local ok, err = pcall(f, synced)
+	try_sync_dir = try_sync_dir0
+	if not ok then error(err, 2) end
+	return synced
+end
+
+function test.mkdir_syncs_created_dir()
+	local dir = 'fs_test_mkdir_sync'
+	rmdir(dir, false)
+	local synced = with_try_sync_dir_spy(function()
+		assert(try_mkdir(dir))
+	end)
+	assert(#synced == 1)
+	assert(synced[1] == '.')
+	rmdir(dir, false)
+end
+
+function test.mkdir_recursive_syncs_created_dirs()
+	local root = 'fs_test_mkdir_recursive_sync'
+	rm_rf(root)
+	local synced = with_try_sync_dir_spy(function()
+		assert(try_mkdir(root..'/a/b', true))
+	end)
+	assert(#synced == 3)
+	assert(synced[1] == '.')
+	assert(synced[2] == root)
+	assert(synced[3] == root..'/a')
+	rm_rf(root)
+end
+
+function test.mkdir_recursive_syncs_only_missing_dirs()
+	local root = 'fs_test_mkdir_recursive_sync_existing'
+	rm_rf(root)
+	mkdir(root, false, nil, false)
+	local synced = with_try_sync_dir_spy(function()
+		assert(try_mkdir(root..'/a/b', true))
+	end)
+	assert(#synced == 2)
+	assert(synced[1] == root)
+	assert(synced[2] == root..'/a')
+	rm_rf(root)
+end
+
 function test.rm_rf()
 	local rootdir = 'fs_test_rmdir_rec/'
 	rm_rf(rootdir)
@@ -733,6 +783,47 @@ function test.attr_set()
 	rmfile(testfile)
 end
 
+function test.attr_set_absolute_perms_string()
+	local testfile = 'fs_test_attr_abs_perms'
+	rmfile(testfile)
+	local f = open(testfile, 'w')
+	f:close()
+	local ok, ret, err = pcall(try_chmod, testfile, 'rw')
+	local perms = ok and file_attr(testfile, 'perms', false)
+	rmfile(testfile)
+	assert(ok)
+	assert(ret == testfile)
+	assert(err == nil)
+	assert(perms == tonumber('666', 8))
+end
+
+function test.chmod_unreadable_file()
+	local testfile = 'fs_test_chmod_unreadable'
+	rmfile(testfile)
+	local f = open(testfile, 'w')
+	f:close()
+	try_set_file_attr(testfile, {perms = tonumber('000', 8)}, true)
+	local ok, err = try_chmod(testfile, tonumber('600', 8))
+	try_set_file_attr(testfile, {perms = tonumber('600', 8)}, true)
+	rmfile(testfile)
+	assert(ok == testfile)
+	assert(err == nil)
+end
+
+function test.chown_unknown_user_group()
+	local testfile = 'fs_test_chown_unknown'
+	rmfile(testfile)
+	local f = open(testfile, 'w')
+	f:close()
+	local ok_user, err_user = try_chown(testfile, '__sdk_fs_no_such_user__')
+	local ok_group, err_group = try_chown(testfile, nil, '__sdk_fs_no_such_group__')
+	rmfile(testfile)
+	assert(not ok_user)
+	assert(err_user)
+	assert(not ok_group)
+	assert(err_group)
+end
+
 --directory listing ----------------------------------------------------------
 
 function test.ls_empty()
@@ -1041,6 +1132,19 @@ function test.save_buffer()
 	rmfile(testfile)
 end
 
+function test.save_sync_false_does_not_sync_dir()
+	local testfile = 'fs_test_save_no_sync'
+	rmfile(testfile)
+	local synced = with_try_sync_dir_spy(function()
+		local ok, err = try_save(testfile, 'hello', nil, nil, nil, false)
+		assert(ok, err)
+	end)
+	local s = load(testfile)
+	rmfile(testfile, false)
+	assert(s == 'hello')
+	assert(#synced == 0)
+end
+
 --touch ----------------------------------------------------------------------
 
 function test.touch()
@@ -1325,6 +1429,41 @@ function test.scandir_depth_relpath()
 	end
 	assert(found, 'f not found in scandir')
 	rm_rf(root)
+end
+
+function test.scandir_close_marks_closed()
+	local root = 'fs_test_scandir_close/'
+	rm_rf(root)
+	mkdir(root)
+	local f = open(root..'f', 'w')
+	f:close()
+	local iter = scandir(root)
+	local sc = iter()
+	assert(sc)
+	assert(not sc:closed())
+	sc:close()
+	local closed, err = sc:closed()
+	rm_rf(root)
+	assert(closed == true)
+	assert(err == nil)
+end
+
+function test.scandir_close_after_eof()
+	local root = 'fs_test_scandir_close_eof/'
+	rm_rf(root)
+	mkdir(root)
+	local f = open(root..'f', 'w')
+	f:close()
+	local iter = scandir(root)
+	local sc = iter()
+	assert(sc)
+	assert(iter() == nil)
+	local ok, err = pcall(function()
+		sc:close()
+	end)
+	rm_rf(root)
+	assert(ok, err)
+	assert(sc:closed())
 end
 
 --test cmdline ---------------------------------------------------------------

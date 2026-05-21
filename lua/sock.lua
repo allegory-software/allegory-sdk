@@ -234,7 +234,7 @@ local IPPROTO_IPV6 = 41
 
 local unix_path_maxlen = sizeof(sockaddr_ct().addr_un.path)
 local function sockaddr_from_unix_path(path)
-	if path == '' or #path + 1 >= unix_path_maxlen then return nil end
+	if path == '' or #path >= unix_path_maxlen then return nil end
 	local sa = sockaddr_ct()
 	sa.family_num = AF_UNIX
 	copy(sa.addr_un.path, path)
@@ -394,7 +394,12 @@ function sa:ip()
 	end
 end
 function sa:tostring()
-	return self:ip()..(self:port() and ':'..self:port() or '')
+	local ip = self:ip()
+	local port = self:port()
+	if self.family_num == AF_INET6 and port then
+		return '['..ip..']:'..port
+	end
+	return ip..(port and ':'..port or '')
 end
 
 metatype('struct sockaddr', {__index = sa, type = 'sockaddr'})
@@ -557,9 +562,9 @@ function tcp:try_connect(addr, port)
 	live(self, 'connected %s', sa:tostring())
 	return true
 end
-tcp.connect = unprotect_io(tcp.try_connect)
+tcp.connect = make_raising('io', tcp.try_connect)
 udp.try_connect = tcp.try_connect
-udp.connect = unprotect_io(udp.try_connect)
+udp.connect = make_raising('io', udp.try_connect)
 
 function tcp:remote_addr()
 	return self._remote_addr
@@ -639,9 +644,20 @@ function socket:try_send(buf, sz, flags)
 		buf = buf + n
 	end
 end
-socket.send = unprotect_io(socket.try_send)
+socket.send = make_raising('io', socket.try_send)
 socket.try_write = socket.try_send
 socket.write = socket.send
+
+function udp:try_send(buf, sz, flags)
+	if self.fd == -1 then return nil, 'closed' end
+	sz = sz or #buf
+	local n, err = socket_send(self, buf, sz, flags)
+	if not n then return nil, err end
+	return n
+end
+udp.send = make_raising('io', udp.try_send)
+udp.try_write = udp.try_send
+udp.write = udp.send
 
 local socket_recv = _make_async('r', true, function(self, buf, sz, flags)
 	return C.recv(self.fd, buf, sz, flags or 0)
@@ -656,9 +672,19 @@ function socket:try_recv(buf, sz, flags)
 	if n == 0 then return 0, 'eof' end
 	return n
 end
-socket.recv = unprotect_io(socket.try_recv)
+socket.recv = make_raising('io', socket.try_recv)
 socket.try_read = socket.try_recv
 socket.read = socket.recv
+
+function udp:try_recv(buf, sz, flags)
+	if self.fd == -1 then return nil, 'closed' end
+	local n, err = socket_recv(self, buf, sz, flags)
+	if not n then return nil, err end
+	return n
+end
+udp.recv = make_raising('io', udp.try_recv)
+udp.try_read = udp.try_recv
+udp.read = udp.recv
 
 local udp_sendto = _make_async('w', true, function(self, sa, buf, len, flags)
 	return C.sendto(self.fd, buf, len, flags or 0, sa, sa:size())
@@ -674,7 +700,7 @@ function udp:try_sendto(addr, port, buf, len, flags)
 	if not len then return nil, err end
 	return len
 end
-udp.sendto = unprotect_io(udp.try_sendto)
+udp.sendto = make_raising('io', udp.try_sendto)
 
 do
 	local src_buf = sockaddr_ct()
@@ -695,7 +721,7 @@ do
 		return len, src_buf
 	end
 end
-udp.recvnext = unprotect_io(udp.try_recvnext)
+udp.recvnext = make_raising('io', udp.try_recvnext)
 
 --shutdown() -----------------------------------------------------------------
 
@@ -714,7 +740,7 @@ function tcp:try_shutdown(which)
 	if errno() == ENOTCONN then return true end --peer closed first.
 	return try_errno(ok, errno())
 end
-tcp.shutdown = unprotect_io(tcp.try_shutdown)
+tcp.shutdown = make_raising('io', tcp.try_shutdown)
 
 --bind() ---------------------------------------------------------------------
 
@@ -723,6 +749,7 @@ int bind(SOCKET s, const sockaddr*, int namelen);
 ]]
 
 function socket:try_bind(addr, port)
+	if self.fd == -1 then return nil, 'closed' end
 	if self._bound_addr then return nil, 'already_bound' end
 	addr = addr or
 		self.family == 'ip'  and '0.0.0.0:'..(port or 0) or
@@ -735,7 +762,7 @@ function socket:try_bind(addr, port)
 	self._bound_addr = sa
 	return true
 end
-socket.bind = unprotect_io(socket.try_bind)
+socket.bind = make_raising('io', socket.try_bind)
 
 function socket:bound_addr()
 	local sa = self._bound_addr
@@ -781,7 +808,8 @@ function tcp:try_listen(addr, port, backlog, onaccept)
 				resume(thread(function()
 					local ok, err = pcall(onaccept, self, ctcp)
 					ctcp:close()
-					ctcp:checkp(ok or iserror(err, 'io'), '%s', err)
+					ctcp:checkp(ok or type(err) == 'table' and err.type == 'io',
+						'%s', err)
 				end, 'accept %s %s', self, ctcp))
 			end
 		until self:closed()
@@ -789,7 +817,7 @@ function tcp:try_listen(addr, port, backlog, onaccept)
 
 	return self
 end
-tcp.listen = unprotect_io(tcp.try_listen)
+tcp.listen = make_raising('io', tcp.try_listen)
 
 do --getopt() & setopt() -----------------------------------------------------
 
@@ -982,25 +1010,27 @@ end
 
 local szbuf = i32a(1, 4)
 function socket:try_getopt(k)
+	if self.fd == -1 then return nil, 'closed' end
 	local opt, level = parse_opt(k)
 	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
 	local ok, err = try_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0)
 	if not ok then return nil, err end
 	return get(buf, szbuf[0])
 end
-function socket:getopt(k) --can't wrap with unprotect_io because it returns false
+function socket:getopt(k) --can't wrap with make_raising because it returns false
 	local v, err = self:try_getopt(k)
 	self:check_io(not (v == nil and err), err)
 	return v
 end
 
 function socket:try_setopt(k, v)
+	if self.fd == -1 then return nil, 'closed' end
 	local opt, level = parse_opt(k)
 	local set = assertf(set_opt[k], 'read-only socket option: %s', k)
 	local buf, sz = set(v)
 	return try_errno(C.setsockopt(self.fd, level, opt, buf, sz) == 0)
 end
-socket.setopt = unprotect_io(socket.try_setopt)
+socket.setopt = make_raising('io', socket.try_setopt)
 
 end --getopt/setopt decl. scope
 
@@ -1020,7 +1050,7 @@ function tcp:try_recvn(buf, sz)
 	end
 	return true
 end
-tcp.recvn = unprotect_io(tcp.try_recvn)
+tcp.recvn = make_raising('io', tcp.try_recvn)
 tcp.try_readn = tcp.try_recvn
 tcp.readn = tcp.recvn
 
@@ -1037,7 +1067,7 @@ function tcp:try_recvall(max_size)
 		if #b > max_size then return nil, 'max_size' end
 	end
 end
-tcp.recvall = unprotect_io(tcp.try_recvall)
+tcp.recvall = make_raising('io', tcp.try_recvall)
 
 --debug API ------------------------------------------------------------------
 
@@ -1053,7 +1083,7 @@ function socket:debug_stream(protocol_name)
 		if not err then ds('<', str(buf, sz)); return sz end
 		return sz, err
 	end)
-	self.recv = unprotect_io(self.try_recv)
+	self.recv = make_raising('io', self.try_recv)
 	self.try_read = self.try_recv
 	self.read = self.recv
 
@@ -1063,7 +1093,7 @@ function socket:debug_stream(protocol_name)
 		ds('>', str(buf, sz or #buf))
 		return ok
 	end)
-	self.send = unprotect_io(self.try_send)
+	self.send = make_raising('io', self.try_send)
 	self.try_write = self.try_send
 	self.write = self.send
 
@@ -1123,8 +1153,8 @@ end
 
 --wrap-up --------------------------------------------------------------------
 
-update(tcp, socket)
-update(udp, socket)
+merge(tcp, socket)
+merge(udp, socket)
 
 udp_class = udp
 tcp_class = tcp

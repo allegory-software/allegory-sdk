@@ -1,73 +1,166 @@
 require'glue'
 
-local caught
-local function test_errors()
-	local e1 = errortype'e1'
-	local e2 = errortype('e2', 'e1')
-	local e3 = errortype'e3'
-	local ok, e = catch('e2 e3', function()
-		local ok, e = catch('e1', function()
-			raise('e2', 'imma e2')
-		end)
-		print'should not get here'
-	end)
-	if not ok then
-		caught = e
-	end
-	raise(e)
-end
-assert(not pcall(test_errors))
-assert(caught.errortype == 'e2')
-assert(caught.message == 'imma e2')
-
 --newerror / iserror
-local e = newerror('io', 'test error')
-assert(iserror(e))
-assert(iserror(e, 'io'))
-assert(not iserror(e, 'protocol'))
-assert(not iserror('string'))
-assert(not iserror(nil))
-assert(not iserror(42))
-
---protect
-local f = protect(function() raise('io', 'fail') end)
-local v, e = f()
-assert(v == nil)
-assert(iserror(e, 'io'))
-
-local f = protect(function() return 42 end)
-assert(f() == 42)
-do --protect with oncaught callback
-	local caught_err
-	local f = protect(function() raise('io', 'boom') end, function(e) caught_err = e end)
-	local v, e = f()
-	assert(v == nil)
-	assert(iserror(caught_err, 'io'))
-end
-do --protect with class filter
-	local f = protect('io', function() raise('io', 'io fail') end)
-	local v, e = f()
-	assert(v == nil)
+do
+	local e = newerror{type = 'io', message = 'test'}
+	assert(iserror(e))
 	assert(iserror(e, 'io'))
+	assert(iserror(e, 'io', 'test'))
+	assert(not iserror(e, 'protocol'))
+	assert(not iserror(e, 'io', 'wrong'))
+	assert(not iserror('string'))
+	assert(not iserror(nil))
 end
-do --catch: class filter lets unmatched errors through
-	local ok, err = pcall(function()
-		catch('protocol', function() raise('io', 'io error') end)
+
+--catch: matched type returns false,e
+do
+	local ok, e = catch('io', function()
+		error(newerror{type = 'io', message = 'fail'})
+	end)
+	assert(ok == false)
+	assert(iserror(e, 'io', 'fail'))
+end
+
+--catch: multiple types in errtypes
+do
+	local ok, e = catch('io protocol', function()
+		error(newerror{type = 'protocol', message = 'bad'})
+	end)
+	assert(ok == false)
+	assert(iserror(e, 'protocol'))
+end
+
+--catch: unmatched type re-raises
+do
+	local ok = pcall(function()
+		catch('protocol', function()
+			error(newerror{type = 'io', message = 'x'})
+		end)
 	end)
 	assert(not ok)
 end
-do --newerror: pass-through for existing error object
-	local e = newerror('io', 'test')
-	assert(newerror(e) == e)
+
+--catch: string errors cannot be caught
+do
+	local ok = pcall(function()
+		catch(nil, function() error'plain' end)
+	end)
+	assert(not ok)
 end
-do --errortype: get same class twice returns same object
-	local e1 = errortype'_test_et'
-	assert(errortype'_test_et' == e1)
+
+--catch: CANCEL cannot be caught
+do
+	local ok, e = pcall(function()
+		catch(nil, function() error(CANCEL) end)
+	end)
+	assert(not ok)
+	assert(e == CANCEL)
 end
-do --errortype: inheritance
-	local base = errortype'_test_base'
-	local child = errortype('_test_child', '_test_base')
-	local e = newerror('_test_child', 'msg')
-	assert(iserror(e, '_test_child'))
+
+--make_raising: nil,err becomes a raised error
+do
+	local target = {}
+	local raising = make_raising('io', function(self)
+		assert(self == target)
+		return nil, 'boom'
+	end)
+	local ok, e = pcall(raising, target)
+	assert(not ok)
+	assert(iserror(e, 'io', 'boom'))
+	assert(e.target == target)
 end
+
+--make_raising: structured errors are re-raised verbatim
+do
+	local orig = newerror{type = 'protocol', message = 'bad frame', ctx = {}}
+	local raising = make_raising('io', function()
+		return nil, orig
+	end)
+	local ok, e = pcall(raising)
+	assert(not ok)
+	assert(e == orig)
+end
+
+--raise: typed error with formatted message
+do
+	local ok, e = pcall(raise, nil, 'io', '%s:%d', 'host', 80)
+	assert(not ok)
+	assert(iserror(e, 'io', 'host:80'))
+end
+
+--io_error / perror / nperror: typed error constructors
+do
+	local t = {}
+	local e = io_error(t, '%s:%d', 'host', 80)
+	assert(iserror(e, 'io', 'host:80'))
+	assert(e.target == t)
+	assert(iserror(perror(nil, 'bad'), 'protocol', 'bad'))
+	assert(iserror(nperror(nil, 'invalid'), 'content', 'invalid'))
+end
+
+--check_io: raises 'io' typed error with formatted message
+do
+	local ok, e = pcall(check_io, nil, nil, '%s:%d', 'host', 80)
+	assert(not ok)
+	assert(iserror(e, 'io', 'host:80'))
+end
+
+--check_io: target attached to error
+do
+	local t = {}
+	local ok, e = pcall(check_io, t, nil, 'fail')
+	assert(not ok)
+	assert(e.target == t)
+end
+
+--check_io: structured error passes through unchanged
+do
+	local orig = newerror{type = 'protocol', message = 'bad frame'}
+	local ok, e = pcall(check_io, nil, nil, orig)
+	assert(not ok)
+	assert(e == orig)
+	assert(iserror(e, 'protocol'))
+end
+
+--checkp: raises 'protocol' typed error
+do
+	local ok, e = pcall(checkp, nil, nil, 'bad handshake')
+	assert(not ok)
+	assert(iserror(e, 'protocol', 'bad handshake'))
+end
+
+--checknp: raises 'content' typed error
+do
+	local ok, e = pcall(checknp, nil, nil, 'invalid input')
+	assert(not ok)
+	assert(iserror(e, 'content', 'invalid input'))
+end
+
+--try_errno: string err passes through unchanged
+do
+	local v, e = try_errno(nil, 'oops')
+	assert(v == nil)
+	assert(e == 'oops')
+end
+
+--try_errno: known errno mapped to string error
+do
+	local v, e = try_errno(nil, 2) --ENOENT
+	assert(v == nil)
+	assert(e == 'not_found')
+end
+
+--try_errno: old-form calls raise instead of silently discarding args
+do
+	local ok = pcall(try_errno, nil, 'io', nil, 2)
+	assert(not ok)
+end
+
+--check_errno: known errno raises a string error
+do
+	local ok, e = pcall(check_errno, nil, 2)
+	assert(not ok)
+	assert(e == 'not_found')
+end
+
 print'errors ok'

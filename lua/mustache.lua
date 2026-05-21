@@ -78,7 +78,7 @@ local function raise(s, i, err, ...)
 	else
 		err = _('error: %s', err)
 	end
-	error(newerror('mustache', '%s', err), 2)
+	error(newerror{type = 'mustache', message = err})
 end
 
 --calls parse(i, j, token_type, ...) for each token in s. i and j are such

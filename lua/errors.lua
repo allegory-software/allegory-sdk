@@ -1,258 +1,259 @@
 --[=[
 
-	Structured Exceptions
+	Structured errors for network protocols and file decoders.
 
-API
-
-	errortype([classname], [super]) -> E    create/get an error class
-	  E(...) -> e                           create an error object
-	  E:__call(...) -> e                    error class constructor
-	  E:__tostring() -> s                   to make `error(e)` work
-	  E.addtraceback                        add a traceback to errors
-	newerror(classname,... | e) -> e        create/wrap/pass-through an error object
-	  e.message                             formatted error message
-	  e.traceback                           traceback at error site
-	iserror(v,[classes],[message]) -> true|false     match an error
-	raise([level, ]classname,... | e)       (create and) raise an error
-	check(errorclass, event, v, ...)        assert with structured errors and logging
-	catch([classes], f, ...) -> true,... | false,e    pcall `f` and catch errors
-	try(f, ...)                             alias of catch
-	CANCEL                                  error that try/catch cannot catch
-	protect([classes, ]f, [oncaught]) -> f  turn raising f into nil,err-returning
-	pcall(f, ...) -> ok,...                 pcall that stores traceback in `e.traceback`
-	lua_pcall(f, ...) -> ok,...             Lua's pcall renamed (no tracebacks)
+CREATING ERRORS
+	newerror(e) -> e                              make an error object
+	error_for(target, errtype, fmt, ...) -> e     make a typed structured error
+	CANCEL                                        static error that try/catch can't catch
+	io_error  (target, fmt, ...) -> e             error_for with 'io' errtype
+	perror    (target, fmt, ...) -> e             error_for with 'protocol' errtype
+	nperror   (target, fmt, ...) -> e             error_for with 'content' errtype
+RAISING ERRORS
+	raise(target, errtype, fmt, ...)              raise a typed structured error
+	check_for(target, errtype, ret, fmt, ...) -> ret  raise typed error if not ret
+	check(errtype, event, v, ...) -> v            assert + log + raise structured error
+	check_io  (target, ret, fmt, ...) -> ret      check_for with 'io' errtype
+	checkp    (target, ret, fmt, ...) -> ret      check_for with 'protocol' errtype
+	checknp   (target, ret, fmt, ...) -> ret      check_for with 'content' errtype
+	try_errno(ret, err) -> ret | nil,err          map errno and raise on usage errors
+	check_errno(ret, err) -> ret                  assert(try_errno(ret, err))
+	make_raising(errtype, f) -> f                 turn nil,err-returning f into raising
+CATCHING ERRORS
+	catch([errtypes], f, ...) -> true,... | false,e   pcall and catch table errors
+	catch_all(f, ...) -> true,... | false,e       catch all table errors
+	iserror(e, [type], [message]) -> t|f          check if e is an error object
 
 RATIONALE
 
-Structured exceptions are an enhancement over plain string errors by adding
-selective catching and providing a context for the failure to help with
-freeing resources, recovery or logging. They're most useful in network
-protocols and file decoders (see errors_io.lua).
+Structured errors are an enhancement over plain string errors by adding
+selective catching while bugs still raise, and providing a context for
+the failure to help with freeing resources, recovery or logging. They're
+most useful in network protocols and file decoders.
 
-In the API `classes` can be given as either 'classname1 ...' or {class1->true}.
-When given in table form, you must include all the superclasses in the table
-since they are not added automatically!
+I/O AND PROTOCOL ERRORS
 
-raise() passes its varargs to newerror() which passes them to
-eclass() which passes them to eclass:__call() which interprets them
-as follows: `[err_obj, err_obj_options..., ][format, format_args...]`.
-So if the first arg is a table it is converted to the final error object.
-Any following table args are merged with this object. Any following args
-after that are passed to string.format() and the result is placed in
-err_obj.message (if `message` was not already set). All args are optional.
+I/O errors, protocol errors, file format errors, data errors, etc. must not
+raise into the app like normal bugs. Instead they must be contained at
+connection / file decoder boundary to allow the app to close the connection
+or file and deal with the error without breaking with a stack trace. At the
+same time, bugs should pass through that boundary and raise normally. Hence
+the need to distingish I/O errors from normal programming errors.
 
-TRACEBACKS ON STRING ERRORS
+You should distinguish between multiple types of errors:
 
-Normally in Lua, when catching an error temporarily to free up resources and
-then re-raising it, the original stack trace is lost. Catching errors with the
-pcall() that's reimplemented here instead of with the standard Lua pcall()
-adds a traceback to all string errors, which is useful when pcalling Lua code
-in order to get visibility on bugs. But raising errors with a stack trace is
-expensive so when a stack trace is not needed, use lua_pcall() instead.
+- Invalid API usage, i.e. bugs on this side, which should raise outside
+  connection scope (but shouldn't happen in production). Use assert()
+  and error() normally for those.
 
-TRACEBACKS ON STRUCTURED ERRORS
+- Response/format validation errors, i.e. bugs on the other side or corrupt
+  data which shouldn't raise outside connection scope. Use checkp() short
+  for "check protocol" for those. For internal protocols that are part of
+  the same application and don't run on the Internet you can skip these
+  checks and let bugs from the remote side surface as bugs on the local side.
 
-Structured errors are different: they don't get a traceback by default unless
-you ask for it by setting addtraceback=true in the error object or class.
+- Request or response content validation errors, which can be retried without
+  reconnecting, so they must not raise outside connection scope and must only
+  be raised before advancing connection state. Use checknp() short for
+  "check non-protocol" for those.
+
+- I/O errors, i.e. network/pipe failures, some of which can be temporary and
+  thus make the request retriable (in a new connection, this one must be
+  closed), so they must not raise outside connection scope. Use check_io()
+  for those. At the call site then check the error object for deciding
+  when to retry.
+
+- I/O errors on stable storage, i.e. disk failures which you might want to
+  kill the whole app on.
+
+- CANCEL: a static error that cannot be caught by catch() so it can
+be used to break an epoll thread and it won't be logged as an error.
+
+Following this protocol should easily cut your network code in half, increase
+its readability (no more error-handling noise) and its reliability (no more
+confusion about when to raise and when not to or forgetting to handle an error).
+
+You can also implement things the opposite way i.e. the golang/C way i.e.
+only call non-raising I/O methods inside so try_*() only, and early-exit on
+errors with nil,err and then use make_raising() to create raising variants
+for protocol methods. Doing it this way is more noisy and error-prone, but
+it also has advantages: there's no hidden control flow so you get more
+control and legibility at each failure point.
+
+TRACEBACKS
+
+Structured errors don't get a traceback by default unless asked by setting
+addtraceback=true in the error object. An uncaught structured error will
+still get a traceback but it will be the traceback at the last catch site
+which is usually not that useful.
 
 ]=]
 
 if not ... then require'errors_test'; return end
 
-require'glue'
+assert(update) --glue loaded
 
 local
-    type, xpcall, getmetatable, rawget =
-    type, xpcall, getmetatable, rawget
+    type, pcall, error, assert =
+    type, pcall, error, assert
 
-local error = error
-local lua_pcall = pcall
-
-local classes = {} --{name -> class}
-local class_sets = {} --{'name1 name2 ...' -> {class->true}}
-
-local Error --fw. decl.
-
-local function errortype(classname, super, default_error_message)
-	local class = classname and classes[classname]
-	if not class then
-		super = type(super) == 'string' and assert(classes[super]) or super or Error
-		class = object(super, {
-			type = classname and classname..'_error' or 'error',
-			errortype = classname, iserror = true,
-			default_error_message = default_error_message
-				or (classname and classname..' error') or 'error',
-		})
-		if classname then
-			classes[classname] = class
-			class_sets = {} --clear class_sets cache
-		end
-	end
-	return class
+local error_mt = {
+	--this is for Lua's uncaught handler that expects tostring(e) -> s.
+	__tostring = function(e) return e.traceback or e.message or e.type end,
+}
+function newerror(e, ...)
+	return setmetatable(e, error_mt)
+end
+function iserror(e, errtype, message)
+	return getmetatable(e) == error_mt
+		and (not errtype or e.type == errtype)
+		and (not message or e.message == message)
 end
 
-local function newerror(arg, ...)
-	if type(arg) ~= 'string' then return arg end --pass-through error objects
-	local class = classes[arg] or errortype(arg)
-	return class(...)
-end
+--raise CANCEL to cancel any waiting thread. catch() won't catch it.
+CANCEL = newerror{type = 'CANCEL'}
 
-local function class_table(s)
-	if type(s) == 'string' then
-		local t = class_sets[s]
-		if not t then
-			t = {}
-			class_sets[s] = t
-			for s in words(s) do
-				local class = classes[s]
-				while class do
-					t[class] = true
-					class = class.__index
-				end
-			end
-		end
-		return t
-	else
-		assert(type(s) == 'table')
-		return s --if given as table, must contain superclasses too!
-	end
-end
-
-local function iserror(e, classes, message)
-	local mt = getmetatable(e)
-	if type(mt) ~= 'table' then return false end
-	if not rawget(mt, 'iserror') then return false end
-	if not classes then return true end
-	if not class_table(classes)[e.__index] then return false end
-	if not message then return true end
-	if not e.message == message then return false end
-	return true
-end
-
-local function raise(level, ...)
-	if type(level) == 'number' then
-		error(newerror(...), level)
-	else
-		error(newerror(level, ...), 2)
-	end
-end
-
-local function check(errorclass, event, v, ...)
-	if v then return v end
-	assert(type(errorclass) == 'string' or iserror(errorclass))
-	assert(type(event) == 'string')
-	local e = newerror(errorclass, ...)
-	if not e.logged then
-		log('ERROR', e.errortype, event, '%s', e.message)
-		e.logged = true
-	end
-	raise(e)
-end
-
-local CANCEL --fw. decl.
-
-local function fix_traceback(s)
-	return s:gsub('(.-:%d+: )([^\n])', '%1\n%2')
-end
-local function cont(classes, ok, ...)
+local errtypes_table = memoize(function(errtypes)
+	return index(collect(words(errtypes)))
+end)
+local function return_catch(errtypes, ok, ...)
 	if ok then return true, ... end
 	local e = ...
-	if (not classes or iserror(e, classes)) and e ~= CANCEL then
-		return false, e
+	if e == CANCEL or type(e) == 'string' then --can't catch these
+		error(e, 2)
 	end
-	error(e, 3)
-end
-local function onerror(e)
-	if iserror(e) then
-		if e.addtraceback and not e.traceback then
-			e.traceback = fix_traceback(traceback(e.message or '', 2))
-		end
-	elseif isstr(e) then
-		return fix_traceback(traceback(e, 2))
+	if iserror(e) and (not errtypes or errtypes_table(errtypes)[e.type]) then
+		return false, e --caught
 	end
-	return e
-end
-local function pcall(f, ...)
-	return xpcall(f, onerror, ...)
-end
-local function catch(classes, f, ...)
-	return cont(classes, pcall(f, ...))
-end
-local try = catch --sounds weird but use try(f) and catch('class1 ...', f)
-
-local function cont(oncaught, ok, ...)
-	if ok then return ... end
-	if oncaught then oncaught(...) end
-	return nil, ...
-end
-local function protect(classes, f, oncaught)
-	if type(classes) == 'function' then
-		return protect(nil, classes, f)
-	end
-	return function(...)
-		return cont(oncaught, catch(classes, f, ...))
-	end
+	error(e)
 end
 
---base error class that all error types inherit from.
-
---[[local]] Error = errortype()
-
---identify, serialize and deserialize are for passing errors between
---OS threads via Lua states.
-
-function Error.identify(e)
-	return iserror(e)
+function catch(errtypes, f, ...)
+	return return_catch(errtypes, pcall(f, ...))
 end
 
-function Error:serialize()
-	return {errortype = self.errortype, message = tostring(self)}
+local catch = catch
+function catch_all(f, ...)
+	return catch(nil, f, ...)
 end
 
-function Error.deserialize(t)
-	return newerror(t.errortype, t)
+function error_for(target, errtype, s, ...)
+	assert(type(errtype) == 'string')
+	s = ... ~= nil and _(s, ...) or s
+	return newerror{type = errtype, target = target, message = s,
+		addtraceback = target and target.tracebacks}
 end
 
-local function merge_option_tables(e, arg1, ...)
-	if type(arg1) == 'table' then
-		for k,v in pairs(arg1) do e[k] = v end
-		return merge_option_tables(e, ...)
-	else
-		e.message = e.message or (arg1 and format(arg1, logargs(...)) or nil)
-		return e
+local function return_raising(target, errtype, ret, err, ...)
+	if ret then return ret, err, ... end
+	if iserror(err) then error(err) end
+	error(error_for(target, errtype, err, ...))
+end
+function make_raising(errtype, f)
+	assert(type(errtype) == 'string')
+	assert(type(f) == 'function')
+	return function(target, ...)
+		return return_raising(target, errtype, f(target, ...))
 	end
 end
-function Error:__call(arg1, ...)
-	local e
-	if type(arg1) == 'table' then
-		e = merge_option_tables(object(self, arg1), ...)
-	else
-		e = object(self, {message = arg1 and format(arg1, logargs(...)) or nil})
-	end
-	e.iserror = true
-	e.__tostring = self.__tostring
-	if e.init then
-		e:init()
-	end
-	return e
+
+function check(errtype, event, v, ...)
+	if v then return v end
+	assert(type(errtype) == 'string')
+	assert(type(event) == 'string')
+	local e = error_for(nil, errtype, ...)
+	log('ERROR', e.type, event, '%s', e.message)
+	e.logged = true
+	error(e)
 end
 
-function Error:__tostring()
-	return self.traceback or self.message or self.default_error_message
+--errno unified messages -----------------------------------------------------
+--only list here user errors and recoverable errors.
+
+cdef'char *strerror(int errnum);'
+
+local errno_msgs = {
+	--fs & proc
+	[  1] = 'access_denied', --EPERM
+	[  2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
+	                     --rmdir(), opendir(), rename(), unlink()
+	[  4] = 'interrupted', --EINTR, epoll_wait()
+	[  5] = 'io_error', --EIO, read(), write(), fsync()
+	[  9] = 'bad_file', --EBADF
+	[ 11] = 'again', --EAGAIN/EWOULDBLOCK, flock() with LOCK_NB
+	[ 12] = 'out_of_mem', --ENOMEM, mmap()
+	[ 13] = 'access_denied', --EACCES, open(), mkdir(), unlink(), rmdir()
+	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo(), rename()
+	[ 18] = 'cross_device', --EXDEV, rename()
+	[ 19] = 'no_device', --ENODEV, block device disappeared (fatal)
+	[ 20] = 'not_dir', --ENOTDIR, open(), opendir()
+	[ 21] = 'is_dir', --EISDIR, open(), unlink()
+	[ 22] = 'invalid_argument', --EINVAL, mmap()
+	[ 23] = 'too_many_open_files', --ENFILE, open()
+	[ 24] = 'too_many_fds', --EMFILE, open() (fatal: fd leak)
+	[ 27] = 'file_too_big', --EFBIG, write(), fallocate(), truncate()
+	[ 28] = 'no_space', --ENOSPC, write(), fallocate(), mkdir(), rename(), epoll_add() (fatal)
+	[ 29] = 'invalid_seek', --ESPIPE, lseek() on pipe/socket (fatal: programming error)
+	[ 30] = 'read_only', --EROFS, open(), mkdir(), unlink(), rename() (fatal)
+	[ 32] = 'peer_closed', --EPIPE, write(); peer sent FIN
+	[ 36] = 'name_too_long', --ENAMETOOLONG, open(), rename(), mkdir()
+	[ 38] = 'not_implemented', --ENOSYS, syscall not implemented (fatal: wrong kernel)
+	[ 39] = 'not_empty', --ENOTEMPTY, rmdir()
+	[ 40] = 'too_many_symlinks', --ELOOP, open(), stat() (too many symlinks in path)
+	[ 95] = 'not_supported', --EOPNOTSUPP, fallocate()
+	[122] = 'disk_quota', --EDQUOT, write(), open(), mkdir()
+	--sock
+	[ 64] = 'network_missing', --ENONET, accept()
+	[ 71] = 'protocol_error', --EPROTO, accept()
+	[ 92] = 'protocol_not_available', --ENOPROTOOPT, accept()
+	[ 98] = 'address_already_in_use', --EADDRINUSE, bind()
+	[ 99] = 'address_not_available', --EADDRNOTAVAIL, bind(), connect()
+	[100] = 'network_down', --ENETDOWN, connect(), send()
+	[101] = 'network_unreachable', --ENETUNREACH, connect(), send()
+	[103] = 'connection_aborted', --ECONNABORTED, accept()
+	[104] = 'connection_reset', --ECONNRESET, recv(), send(); peer sent RST
+	[107] = 'not_connected', --ENOTCONN, send(), recv(), shutdown() (fatal)
+	[110] = 'timeout', --ETIMEDOUT, connect(), recv(); peer is unresponsive
+	[111] = 'connection_refused', --ECONNREFUSED, connect()
+	[112] = 'host_down', --EHOSTDOWN, accept()
+	[113] = 'host_unreachable', --EHOSTUNREACH, connect(), send()
+	[114] = 'already_in_progress', --EALREADY, connect() (fatal)
+	[115] = 'in_progress', --EINPROGRESS, connect() (handled in scheduler)
+}
+
+function try_errno(ret, err, ...)
+	if ret then return ret end
+	if type(err) == 'string' then return ret, err end
+	err = err or errno()
+	local s = errno_msgs[err]
+	assert(s ~= 'invalid_argument', s)
+	assert(s ~= 'bad_file', s)
+	assert(s ~= 'invalid_seek', s)
+	assert(s ~= 'no_device', s)
+	assert(s ~= 'too_many_fds', s)
+	assert(s ~= 'read_only', s)
+	assert(s ~= 'not_implemented', s)
+	assert(s ~= 'not_connected', s)
+	assert(s ~= 'already_in_progress', s)
+	return ret, s or str(C.strerror(err)) or 'errno#'..err
+end
+function check_errno(...)
+	return assert(try_errno(...))
 end
 
---raise CANCEL to cancel any waiting thread. try() / catch() won't catch it.
---[[local]] CANCEL = newerror'cancel'
+function check_for(target, errtype, ret, s, ...)
+	if ret then return ret end
+	if iserror(s) then error(s) end
+	return error(error_for(target, errtype, s, ...))
+end
+function io_error (target, ...) return error_for(target, 'io'      , ...) end
+function perror   (target, ...) return error_for(target, 'protocol', ...) end
+function nperror  (target, ...) return error_for(target, 'content' , ...) end
+function check_io (target, ...) return check_for(target, 'io'      , ...) end
+function checkp   (target, ...) return check_for(target, 'protocol', ...) end
+function checknp  (target, ...) return check_for(target, 'content' , ...) end
 
-_G.errortype = errortype
-_G.newerror = newerror
-_G.iserror = iserror
-_G.raise = raise
-_G.check = check
-_G.catch = catch
-_G.try = try
-_G.pcall = pcall
-_G.lua_pcall = lua_pcall
-_G.protect = protect
-_G.Error = Error
-_G.CANCEL = CANCEL
+function raise(target, errtype, s, ...)
+	if iserror(s) then error(s) end
+	return error(error_for(target, errtype, s, ...))
+end
