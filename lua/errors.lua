@@ -177,6 +177,7 @@ local errno_msgs = {
 	[  1] = 'access_denied', --EPERM
 	[  2] = 'not_found', --ENOENT, _open_osfhandle(), _fdopen(), open(), mkdir(),
 	                     --rmdir(), opendir(), rename(), unlink()
+	[  3] = 'no_such_process', --ESRCH, pidfd_open(), kill()
 	[  4] = 'interrupted', --EINTR, epoll_wait()
 	[  5] = 'io_error', --EIO, read(), write(), fsync()
 	[  9] = 'bad_file', --EBADF

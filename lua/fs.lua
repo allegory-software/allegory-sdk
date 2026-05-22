@@ -415,10 +415,6 @@ SYMLINKS & HARDLINKS ---------------------------------------------------------
 
 PROGRAMMING NOTES ------------------------------------------------------------
 
-### Raising vs non-raising (try_*()) methods
-
-Raising methods close the file on errors, but the try_*() variants do not!
-
 ### Async I/O
 
 Pipes are opened in async mode by default, which uses the sock scheduler
