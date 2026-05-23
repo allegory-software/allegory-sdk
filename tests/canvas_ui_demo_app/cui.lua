@@ -13,8 +13,8 @@ local st = auth_store()
 st.with_lock('w', function()
 	if not st.tenant_exists(1) then
 		assert(st.add_tenant() == 1)
-		assert(st.try_add_host('localhost:8888', 1))
-		assert(st.try_add_host('localhost:4443', 1))
+		st.add_host('localhost:8888', 1)
+		st.add_host('localhost:4443', 1)
 	end
 end)
 

@@ -46,7 +46,7 @@ newreq()
 
 auth_store().with_lock('w', function()
 	local tid = auth_store().add_tenant()
-	auth_store().try_add_host('test', tid)
+	auth_store().add_host('test', tid)
 end)
 
 local function wrong_code(code)

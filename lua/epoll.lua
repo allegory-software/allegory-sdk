@@ -134,6 +134,7 @@ suspend() -> ...
 [try_]start()
 
 	Start polling. Stops when no active waits/timers or stop() was called.
+	While polling, SIGINT and SIGTERM stop the loop.
 
 stop()
 
@@ -978,12 +979,12 @@ end
 
 --poll loop -----------------------------------------------------------------
 
-local term_sig_f
+local term_sig_thread
 
 local function poll()
 	if wait_count == 0 then
 		return nil, 'empty'
-	elseif wait_count == 1 and term_sig_f then --nobody left to kill this guy
+	elseif wait_count == 1 and term_sig_thread then --nobody left to kill this guy
 		return nil, 'empty'
 	end
 	local ok, err = epoll_wait()
@@ -996,10 +997,6 @@ local _running = false
 
 function stop()
 	_stop = true
-	if term_sig_f then
-		term_sig_f:close()
-		term_sig_f = nil
-	end
 end
 
 terminate = stop --overwritable
@@ -1011,9 +1008,9 @@ function try_start()
 	require'signal'
 
 	--signal thread to stop loop on SIGINT (Ctrl+C) and SIGTERM (kill) events.
-	assert(not term_sig_f)
-	term_sig_f = on_signal('SIGINT SIGTERM', function()
-		terminate()
+	assert(not term_sig_thread)
+	term_sig_thread = on_signal('SIGINT SIGTERM', function()
+		stop()
 		return 'stop'
 	end)
 
@@ -1030,6 +1027,10 @@ function try_start()
 			break
 		end
 	until _stop
+	if term_sig_thread then
+		term_sig_thread:close()
+		term_sig_thread = nil
+	end
 	poll_thread = nil
 	_running = false
 	_stop = false

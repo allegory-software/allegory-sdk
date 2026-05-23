@@ -34,7 +34,7 @@ cmd_server = cmdsection'SERVER CONTROL'
 
 --NOTE: this check is by necessity loosey goosey arbitrary.
 local function findpid(pid)
-	local cmdline = load(_('/proc/%s/cmdline', pid), true)
+	local cmdline = load(_('/proc/%s/cmdline', pid))
 	return cmdline and cmdline:has(basename(arg[-1]))
 		and cmdline:has(basename(arg[0]))
 end

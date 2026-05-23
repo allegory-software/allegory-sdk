@@ -41,18 +41,22 @@ PULL
 	pb:getto(term, [i], [j]) -> s|nil    pull terminated string (term between i,j)
 	pb:reset()                           pb:skip(#pb)
 READAHEAD
-	pb:[try_]have(n) -> true | false,err fill buffer to n bytes or more, up-to eof
-	pb:need(n) -> pb                     fill buffer to n bytes or more, break on eof
+	pb:have(n) -> true | false           fill buffer to n bytes or more, up to eof
+	pb:load(n) -> pb                     fill buffer to n bytes or more, up to eof
+	pb:need(n) -> pb                     fill buffer to n bytes or more, raise on eof
+	pb:readall([maxlen]) -> pb           read until EOF, raise if maxlen exceeded
 READAHEAD & PULL
 	pb:skip(size)                        skip bytes (read more as needed)
 	pb:haveline([i]) -> s|nil            fill buffer until a line is found and pull it
-	pb:needline([i]) -> s                like haveline() but break on eof
+	pb:needline([i]) -> s                like haveline() but raise on eof
 	pb:reader() -> read                  get a buffered read function
-		read(buf, size) -> read_size | 0,'eof' | nil,err
+		read(buf, size) -> read_size | 0     size must be > 0
 WRITE
-	pb:[try_]flush()                     write buffer and reset it.
+	pb:flush()                           write buffer and reset it.
 
 NOTE: string.buffer semantics altered for :get(), :skip(),
+
+NOTE: readall() maxlen defaults to 16 MB.
 
 NOTE: raised I/O errors leave the buffer in a partially read/written state.
 
@@ -66,7 +70,7 @@ local
 	assert, cast, bswap, bswap16, bor, band, shl, shr =
 	assert, cast, bswap, bswap16, bor, band, shl, shr
 
-local pb = {}
+local pb = {type = 'pbuffer', debug_prefix = 'b'}
 
 function pbuffer(self)
 	local pb = object(pb, self)
@@ -115,8 +119,9 @@ function pb:putdata(data, len)
 	return self
 end
 
-pb.checkp = checkp
-pb.check_io = check_io
+function pb:checkp(...)
+	return checkp(self.f or self, ...)
+end
 
 local t = {
 	 'u8'   ,  u8p, 1, false,
@@ -220,15 +225,15 @@ end
 --buffered I/O
 
 pb.readahead = 64 * 1024
-function pb:try_have(ask)
+function pb:have(ask)
 	local have = #self.b
 	ask = ask - have
 	if ask <= 0 then return true end
 	local space = max(ask, self.readahead - have)
 	local p, space = self:reserve(space) --could reserve even more space
 	while ask > 0 do
-		local read, err = self.f:read(p, space)
-		if err == 'eof' then return false, err end
+		local read = self.f:read(p, space)
+		if read == 0 then return false end
 		self:commit(read)
 		space = space - read
 		ask = ask - read
@@ -236,21 +241,25 @@ function pb:try_have(ask)
 	end
 	return true
 end
-function pb:have(ask)
-	local have, err = self:try_have(ask)
-	if not have and err == 'eof' then return false end --eof is not an error
-	return assert(have, err)
+function pb:load(n)
+	self:have(n)
+	return self
 end
 function pb:need(n)
-	local have, err = self:try_have(n)
-	if not have then
-		if err == 'eof' then
-			self:checkp(false, err) --eof is a protocol error, not an i/o error
-		else
-			error(err) --i/o error from read() or bug
-		end
-	end
+	self:checkp(self:have(n), 'eof')
 	return self
+end
+
+function pb:readall(maxlen)
+	maxlen = (maxlen or 16 * 1024^2) + 1 --16 MB
+	local have = #self.b
+	while maxlen > have do
+		if not self:have(have + min(maxlen - have, self.readahead)) then
+			return self
+		end
+		have = #self.b
+	end
+	self:checkp(false, 'file_too_big')
 end
 
 function pb:skip(n)
@@ -295,11 +304,13 @@ function pb:needline(i)
 end
 
 --Returns a read function which reads ahead from file in order to lower the
---number of syscalls: read(buf, size) -> read_size | 0,'eof' | nil,err
+--number of syscalls: read(buf, size) -> read_size | 0
 function pb:reader()
 	return function(dst, dsz)
-		local have, err = self:try_have(1)
-		if not have then return err == 'eof' and 0 or nil, err end
+		assert(dsz and dsz > 0, 'read size must be > 0')
+		if not self:have(1) then
+			return 0
+		end
 		local src, ssz = self:ref()
 		local sz = min(dsz, ssz)
 		copy(dst, src, sz)
@@ -308,17 +319,6 @@ function pb:reader()
 	end
 end
 
-function pb:try_flush()
-	local p, len = self:ref()
-	local ok, err, wr_n = self.f:try_write(p, len)
-	if not ok then
-		self.b:skip(wr_n or 0)
-		return nil, err, wr_n
-	else
-		self:reset()
-		return true
-	end
-end
 function pb:flush()
 	local p, len = self:ref()
 	self.f:write(p, len)

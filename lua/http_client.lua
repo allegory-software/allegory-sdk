@@ -781,7 +781,7 @@ function client:_fetch(req, body)
 	req:finish()
 	return req
 end
-client._try_fetch = protect('io', client._fetch)
+client._try_fetch = make_try('io', client._fetch)
 function client:fetch(arg1, body) --opt | url,body
 	local default_max_retries = req.max_retries
 	local req = istab(arg1) and update({}, arg1) or {url = arg1}
@@ -809,7 +809,7 @@ function client:fetch(arg1, body) --opt | url,body
 		end
 	end
 end
-client.try_fetch = protect_io(client.fetch)
+client.try_fetch = make_try('io protocol content', client.fetch)
 
 --global fetch ---------------------------------------------------------------
 

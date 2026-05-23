@@ -523,7 +523,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 
 		if p.stdin then
 			resume(thread(function()
-				local ok, err = p.stdin:try_write(self.stdin)
+				local ok, err = catch('io', p.stdin.write, p.stdin, self.stdin)
 				if not ok then
 					notify_error('stdin:write(): %s', err)
 				end
@@ -537,7 +537,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 				while true do
 					local len, err = p.stdout:try_read(buf, sz)
 					if not len then notify_error('stdout:read(): %s', err); break end
-					if err == 'eof' then break end
+					if len == 0 then break end
 					local s = str(buf, len)
 					out_stdout(s)
 				end
@@ -551,7 +551,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 				while true do
 					local len, err = p.stderr:try_read(buf, sz)
 					if not len then notify_error('stderr:read(): %s', err); break end
-					if err == 'eof' then break end
+					if len == 0 then break end
 					local s = str(buf, len)
 					out_stderr(s)
 				end

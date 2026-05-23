@@ -24,9 +24,9 @@ local function tenants_by_host()
 end
 
 local tid1 = store.add_tenant()
-store.try_add_host('Shop.Example', tid1)
+store.add_host('Shop.Example', tid1)
 local tid2 = store.add_tenant()
-store.try_add_host('admin.example', tid2)
+store.add_host('admin.example', tid2)
 assert(tid2 ~= tid1)
 assert(store.tenant_by_host('shop.example') == tid1)
 assert(store.tenant_by_host('ADMIN.EXAMPLE') == tid2)

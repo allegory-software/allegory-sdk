@@ -6,9 +6,6 @@ CREATING ERRORS
 	newerror(e) -> e                              make an error object
 	error_for(target, errtype, fmt, ...) -> e     make a typed structured error
 	CANCEL                                        static error that try/catch can't catch
-	io_error  (target, fmt, ...) -> e             error_for with 'io' errtype
-	perror    (target, fmt, ...) -> e             error_for with 'protocol' errtype
-	nperror   (target, fmt, ...) -> e             error_for with 'content' errtype
 RAISING ERRORS
 	raise(target, errtype, fmt, ...)              raise a typed structured error
 	check_for(target, errtype, ret, fmt, ...) -> ret  raise typed error if not ret
@@ -21,7 +18,7 @@ RAISING ERRORS
 	make_raising(errtype, f) -> f                 turn nil,err-returning f into raising
 CATCHING ERRORS
 	catch([errtypes], f, ...) -> true,... | false,e   pcall and catch table errors
-	catch_all(f, ...) -> true,... | false,e       catch all table errors
+	try(f, ...) -> true,... | false,e             catch all table errors
 	iserror(e, [type], [message]) -> t|f          check if e is an error object
 
 RATIONALE
@@ -38,7 +35,7 @@ raise into the app like normal bugs. Instead they must be contained at
 connection / file decoder boundary to allow the app to close the connection
 or file and deal with the error without breaking with a stack trace. At the
 same time, bugs should pass through that boundary and raise normally. Hence
-the need to distingish I/O errors from normal programming errors.
+the need to distinguish I/O errors from normal programming errors.
 
 You should distinguish between multiple types of errors:
 
@@ -67,18 +64,16 @@ You should distinguish between multiple types of errors:
   kill the whole app on.
 
 - CANCEL: a static error that cannot be caught by catch() so it can
-be used to break an epoll thread and it won't be logged as an error.
+  be used to break an epoll thread and it won't be logged as an error.
 
 Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
 confusion about when to raise and when not to or forgetting to handle an error).
 
-You can also implement things the opposite way i.e. the golang/C way i.e.
-only call non-raising I/O methods inside so try_*() only, and early-exit on
-errors with nil,err and then use make_raising() to create raising variants
-for protocol methods. Doing it this way is more noisy and error-prone, but
-it also has advantages: there's no hidden control flow so you get more
-control and legibility at each failure point.
+Expose try_* APIs only when the caller has a meaningful failure path and can
+continue using the same owner/resource. For straight-line library code, prefer
+raising APIs and let the owner tree handle cleanup; don't add try_* variants
+just to avoid stack unwinding.
 
 TRACEBACKS
 
@@ -99,7 +94,10 @@ local
 
 local error_mt = {
 	--this is for Lua's uncaught handler that expects tostring(e) -> s.
-	__tostring = function(e) return e.traceback or e.message or e.type end,
+	__tostring = function(e)
+		return catany(' ', e.target and logarg(e.target)..':',
+			e.traceback or e.message or e.type)
+	end,
 }
 function newerror(e, ...)
 	return setmetatable(e, error_mt)
@@ -133,7 +131,7 @@ function catch(errtypes, f, ...)
 end
 
 local catch = catch
-function catch_all(f, ...)
+function try(f, ...)
 	return catch(nil, f, ...)
 end
 
@@ -247,9 +245,6 @@ function check_for(target, errtype, ret, s, ...)
 	if iserror(s) then error(s) end
 	return error(error_for(target, errtype, s, ...))
 end
-function io_error (target, ...) return error_for(target, 'io'      , ...) end
-function perror   (target, ...) return error_for(target, 'protocol', ...) end
-function nperror  (target, ...) return error_for(target, 'content' , ...) end
 function check_io (target, ...) return check_for(target, 'io'      , ...) end
 function checkp   (target, ...) return check_for(target, 'protocol', ...) end
 function checknp  (target, ...) return check_for(target, 'content' , ...) end

@@ -41,16 +41,22 @@ end
 
 function test.open_not_found()
 	local nonexistent = 'this_file_should_not_exist'
-	local f, err = try_open(nonexistent)
+	local f, err = open(nonexistent)
 	assert(not f)
 	assert(err == 'not_found')
 end
 
+function test.open_write_not_found_raises()
+	local ok, err = pcall(open, 'fs_test_nonexistent/nonexistent', 'w')
+	assert(not ok)
+	assert(tostring(err):find'not_found')
+end
+
 function test.open_already_exists_file()
 	local testfile = 'fs_testfile'
-	local f = try_open(testfile, 'w')
+	local f = open(testfile, 'w')
 	f:close()
-	local f, err = try_open({
+	local f, err = open({
 			path = testfile,
 			flags = 'creat excl'
 		})
@@ -63,7 +69,7 @@ function test.open_already_exists_dir()
 	local testfile = 'fs_test_dir_already_exists'
 	rmdir(testfile)
 	mkdir(testfile)
-	local f, err = try_open({
+	local f, err = open({
 			path = testfile,
 			flags = 'creat excl',
 		})
@@ -77,7 +83,7 @@ function test.open_dir()
 	local using_backup_semantics = true
 	rmdir(testfile)
 	mkdir(testfile)
-	local f, err = try_open(testfile)
+	local f, err = open(testfile)
 	assert(f)
 	f:close()
 	rmdir(testfile)
@@ -89,6 +95,13 @@ function test.pipe() --I/O test in proc_test.lua
 	local rf, wf = pipe{async = false}
 	rf:close()
 	wf:close()
+end
+
+function test.eventfd_read_write_value()
+	local f = eventfd()
+	f:write_value(2)
+	assert(f:read_value() == 2)
+	f:close()
 end
 
 function test.pidfd_open()
@@ -184,8 +197,12 @@ function test.read_write()
 	local f = open(testfile)
 	local t = {}
 	while true do
-		local readsz = f:read(buf, sz)
-		if readsz == 0 then break end
+		local readsz, err = f:try_read(buf, sz)
+		if readsz == 0 then
+			assert(err == nil)
+			break
+		end
+		assert(readsz, err)
 		t[#t+1] = ffi.string(buf, readsz)
 	end
 	f:close()
@@ -210,13 +227,13 @@ function test.open_modes()
 
 	--mode string dispatch: all mode strings produce valid files
 	for _, mode in ipairs{'r', 'r+', 'w', 'w+', 'a', 'a+', 'rw'} do
-		local f, err = try_open(testfile, mode)
+		local f, err = open(testfile, mode)
 		assert(f, mode..': '..tostring(err))
 		f:close()
 	end
 
 	--excl flag: already_exists error path
-	local f, err = try_open{path = testfile, flags = 'creat excl'}
+	local f, err = open{path = testfile, flags = 'creat excl'}
 	assert(not f)
 	assert(err == 'already_exists')
 
@@ -309,15 +326,14 @@ function test.mkdir_recursive()
 	rmdir'fs_test_dir'
 end
 
-local function with_try_sync_dir_spy(f)
-	local try_sync_dir0 = try_sync_dir
+local function with_sync_dir_spy(f)
+	local sync_dir0 = sync_dir
 	local synced = {}
-	try_sync_dir = function(dir)
+	sync_dir = function(dir)
 		synced[#synced+1] = dir
-		return true
 	end
 	local ok, err = pcall(f, synced)
-	try_sync_dir = try_sync_dir0
+	sync_dir = sync_dir0
 	if not ok then error(err, 2) end
 	return synced
 end
@@ -325,8 +341,8 @@ end
 function test.mkdir_syncs_created_dir()
 	local dir = 'fs_test_mkdir_sync'
 	rmdir(dir, false)
-	local synced = with_try_sync_dir_spy(function()
-		assert(try_mkdir(dir))
+	local synced = with_sync_dir_spy(function()
+		assert(mkdir(dir))
 	end)
 	assert(#synced == 1)
 	assert(synced[1] == '.')
@@ -336,8 +352,8 @@ end
 function test.mkdir_recursive_syncs_created_dirs()
 	local root = 'fs_test_mkdir_recursive_sync'
 	rm_rf(root)
-	local synced = with_try_sync_dir_spy(function()
-		assert(try_mkdir(root..'/a/b', true))
+	local synced = with_sync_dir_spy(function()
+		assert(mkdir(root..'/a/b', true))
 	end)
 	assert(#synced == 3)
 	assert(synced[1] == '.')
@@ -350,8 +366,8 @@ function test.mkdir_recursive_syncs_only_missing_dirs()
 	local root = 'fs_test_mkdir_recursive_sync_existing'
 	rm_rf(root)
 	mkdir(root, false, nil, false)
-	local synced = with_try_sync_dir_spy(function()
-		assert(try_mkdir(root..'/a/b', true))
+	local synced = with_sync_dir_spy(function()
+		assert(mkdir(root..'/a/b', true))
 	end)
 	assert(#synced == 2)
 	assert(synced[1] == root)
@@ -384,7 +400,7 @@ end
 
 function test.mkdir_already_exists_dir()
 	mkdir'fs_test_dir'
-	local ok, err = try_mkdir'fs_test_dir'
+	local ok, err = mkdir'fs_test_dir'
 	assert(ok)
 	assert(err == 'already_exists')
 	rmdir'fs_test_dir'
@@ -394,16 +410,16 @@ function test.mkdir_already_exists_file()
 	local testfile = 'fs_test_dir_already_exists_file'
 	local f = open(testfile, 'w')
 	f:close()
-	local ok, err = try_mkdir(testfile)
+	local ok, err = mkdir(testfile)
 	assert(ok)
 	assert(err == 'already_exists')
 	rmfile(testfile)
 end
 
 function test.mkdir_not_found()
-	local ok, err = try_mkdir'fs_test_nonexistent/nonexistent'
+	local ok, err = pcall(mkdir, 'fs_test_nonexistent/nonexistent')
 	assert(not ok)
-	assert(err == 'not_found')
+	assert(tostring(err):find'not_found')
 end
 
 function test.remove_dir_not_found()
@@ -421,9 +437,9 @@ function test.remove_not_empty()
 	rmdir(dir1)
 	mkdir(dir1)
 	mkdir(dir2)
-	local ok, err = try_rmdir(dir1)
+	local ok, err = pcall(rmdir, dir1)
 	assert(not ok)
-	assert(err == 'not_empty')
+	assert(tostring(err):find'not_empty')
 	rmdir(dir2)
 	rmdir(dir1)
 end
@@ -437,9 +453,9 @@ function test.remove_file()
 end
 
 function test.cd_not_found()
-	local ok, err = try_chdir'fs_test_nonexistent/nonexistent'
+	local ok, err = pcall(chdir, 'fs_test_nonexistent/nonexistent')
 	assert(not ok)
-	assert(err == 'not_found')
+	assert(tostring(err):find'not_found')
 end
 
 function test.remove()
@@ -447,12 +463,12 @@ function test.remove()
 	local f = open(testfile, 'w')
 	f:close()
 	rmfile(testfile)
-	assert(not try_open(testfile))
+	assert(not open(testfile))
 end
 
 function test.remove_file_not_found()
 	local testfile = 'fs_test_remove'
-	local ok, err = try_rmfile(testfile)
+	local ok, err = rmfile(testfile)
 	assert(ok)
 	assert(err == 'not_found')
 end
@@ -464,13 +480,13 @@ function test.move()
 	f:close()
 	rename(f1, f2)
 	rmfile(f2)
-	assert(select(2, try_rmfile(f1)) == 'not_found')
+	assert(select(2, rmfile(f1)) == 'not_found')
 end
 
 function test.move_not_found()
-	local ok, err = try_rename('fs_nonexistent_file', 'fs_nonexistent2')
+	local ok, err = pcall(rename, 'fs_nonexistent_file', 'fs_nonexistent2')
 	assert(not ok)
-	assert(err == 'not_found')
+	assert(tostring(err):find'not_found')
 end
 
 function test.move_replace()
@@ -513,18 +529,12 @@ local function symlink_file(f1, f2)
 
 	sleep(0.1)
 
-	local ok, err = try_symlink(f1, f2)
-	if ok then
-		assert(file_is(f1, 'symlink'))
-		local f = open(f1)
-		f:read(buf, 1)
-		assert(buf[0] == ('X'):byte(1))
-		f:close()
-	else
-		rmfile(f1)
-		rmfile(f2)
-		assert(ok, err)
-	end
+	symlink(f1, f2)
+	assert(file_is(f1, 'symlink'))
+	local f = open(f1)
+	f:read(buf, 1)
+	assert(buf[0] == ('X'):byte(1))
+	f:close()
 end
 
 function test.symlink_file()
@@ -544,16 +554,11 @@ function test.symlink_dir()
 	rmdir(dir)
 	mkdir(dir)
 	mkdir(dir..'/test_dir')
-	local ok,err = try_symlink(link, dir, 'replace')
-	if ok then
-		assert(file_is(link..'/test_dir', 'dir'))
-		rmdir(link..'/test_dir')
-		rmfile(link)
-		rmdir(dir)
-	else
-		rm_rf(dir)
-	end
-	assert(ok,err)
+	symlink(link, dir, 'replace')
+	assert(file_is(link..'/test_dir', 'dir'))
+	rmdir(link..'/test_dir')
+	rmfile(link)
+	rmdir(dir)
 end
 
 function test.readlink_file()
@@ -574,23 +579,18 @@ function test.readlink_dir()
 	rmdir(d2)
 	mkdir(d2)
 	mkdir(d2..'/test_dir')
-	local ok,err = try_symlink(d1, d2, 'replace')
-	if ok then
-		assert(file_is(d1, 'symlink'))
-		local t = {}
-		for d in try_ls(d1) do
-			t[#t+1] = d
-		end
-		assert(#t == 1)
-		assert(t[1] == 'test_dir')
-		rmdir(d1..'/test_dir')
-		assert(readlink(d1) == d2)
-		rmfile(d1)
-		rmdir(d2)
-	else
-		rmdir(d2, true)
+	symlink(d1, d2, 'replace')
+	assert(file_is(d1, 'symlink'))
+	local t = {}
+	for d in ls(d1) do
+		t[#t+1] = d
 	end
-	assert(ok,err)
+	assert(#t == 1)
+	assert(t[1] == 'test_dir')
+	rmdir(d1..'/test_dir')
+	assert(readlink(d1) == d2)
+	rmfile(d1)
+	rmdir(d2)
 end
 
 --TODO: readlink() with relative symlink chain
@@ -605,11 +605,7 @@ function test.attr_deref()
 	local f = open(f2, 'w')
 	f:write('hello')
 	f:close()
-	local ok, err = try_symlink(f1, f2)
-	if not ok then
-		rmfile(f2)
-		assert(ok, err)
-	end
+	symlink(f1, f2)
 	--deref=true (default): get target attrs
 	local t = file_attr(f1)
 	assert(t.type == 'file')
@@ -761,12 +757,12 @@ function test.attr_set()
 	f:write('hello')
 	f:close()
 	--set perms via set_file_attr
-	try_set_file_attr(testfile, {perms = tonumber('600', 8)})
+	set_file_attr(testfile, {perms = tonumber('600', 8)})
 	local p = file_attr(testfile, 'perms', false)
 	assert(p == tonumber('600', 8))
 	--set mtime via set_file_attr
 	local t = math.floor(os.time()) - 3600
-	try_set_file_attr(testfile, {mtime = t})
+	set_file_attr(testfile, {mtime = t})
 	local m = file_attr(testfile, 'mtime', false)
 	assert(math.abs(m - t) < 1)
 	--set mtime via dir:set_attr
@@ -788,7 +784,7 @@ function test.attr_set_absolute_perms_string()
 	rmfile(testfile)
 	local f = open(testfile, 'w')
 	f:close()
-	local ok, ret, err = pcall(try_chmod, testfile, 'rw')
+	local ok, ret, err = pcall(chmod, testfile, 'rw')
 	local perms = ok and file_attr(testfile, 'perms', false)
 	rmfile(testfile)
 	assert(ok)
@@ -802,9 +798,9 @@ function test.chmod_unreadable_file()
 	rmfile(testfile)
 	local f = open(testfile, 'w')
 	f:close()
-	try_set_file_attr(testfile, {perms = tonumber('000', 8)}, true)
-	local ok, err = try_chmod(testfile, tonumber('600', 8))
-	try_set_file_attr(testfile, {perms = tonumber('600', 8)}, true)
+	set_file_attr(testfile, {perms = tonumber('000', 8)}, true)
+	local ok, err = chmod(testfile, tonumber('600', 8))
+	set_file_attr(testfile, {perms = tonumber('600', 8)}, true)
 	rmfile(testfile)
 	assert(ok == testfile)
 	assert(err == nil)
@@ -815,13 +811,13 @@ function test.chown_unknown_user_group()
 	rmfile(testfile)
 	local f = open(testfile, 'w')
 	f:close()
-	local ok_user, err_user = try_chown(testfile, '__sdk_fs_no_such_user__')
-	local ok_group, err_group = try_chown(testfile, nil, '__sdk_fs_no_such_group__')
+	local ok_user, err_user = pcall(chown, testfile, '__sdk_fs_no_such_user__')
+	local ok_group, err_group = pcall(chown, testfile, nil, '__sdk_fs_no_such_group__')
 	rmfile(testfile)
 	assert(not ok_user)
-	assert(err_user)
+	assert(tostring(err_user):find'user_not_found')
 	assert(not ok_group)
-	assert(err_group)
+	assert(tostring(err_group):find'group_not_found')
 end
 
 --directory listing ----------------------------------------------------------
@@ -831,7 +827,7 @@ function test.ls_empty()
 	rm_rf'fs_test_dir_empty/'
 	mkdir(d, true)
 	local found
-	for name in try_ls(d) do
+	for name in ls(d) do
 		found = true
 	end
 	assert(not found)
@@ -844,7 +840,7 @@ function test.ls()
 	mkdir('fs_test_ls/d', true)
 	open('fs_test_ls/f', 'w'):close()
 	local files = {}
-	for file, d in try_ls'fs_test_ls' do
+	for file, d in ls'fs_test_ls' do
 		local t = {}
 		files[file] = t
 		t.type  = assert(d:attr('type' , false))
@@ -853,7 +849,7 @@ function test.ls()
 		t.atime = assert(d:attr('atime', false))
 		t.size  = assert(d:attr('size' , false))
 		t._all_attrs = assert(d:attr(false))
-		local ok, err = pcall(function() return d:try_attr('non_existent_attr', false) end)
+		local ok, err = pcall(function() return d:attr('non_existent_attr', false) end)
 		assert(not ok)
 		assert(err:find'non_existent_attr')
 	end
@@ -871,7 +867,7 @@ function test.ls_dir_close_disowns()
 	local root = 'fs_test_ls_dir_close_disowns'
 	rm_rf(root)
 	mkdir(root)
-	local next, d = try_ls(root)
+	local next, d = ls(root)
 	assert(d.owner == mainthread())
 	assert(not d:closed())
 	d:try_close()
@@ -880,23 +876,21 @@ function test.ls_dir_close_disowns()
 	rm_rf(root)
 end
 
-function test.ls_failed_open_is_unowned()
-	local root = 'fs_test_ls_failed_open_is_unowned'
+function test.try_ls_not_found_is_empty()
+	local root = 'fs_test_try_ls_not_found'
 	rm_rf(root)
-	local next, d = try_ls(root)
-	assert(d:closed())
-	assert(d.owner == nil)
-	local name, err = next(d)
-	assert(name == false)
-	assert(err == 'not_found')
-	assert(d.owner == nil)
+	local found
+	for name in try_ls(root) do
+		found = true
+	end
+	assert(not found)
 end
 
 function test.ls_eof_disowns()
 	local root = 'fs_test_ls_eof_disowns'
 	rm_rf(root)
 	mkdir(root)
-	local next, d = try_ls(root)
+	local next, d = ls(root)
 	assert(d.owner == mainthread())
 	assert(not d:closed())
 	assert(next(d) == nil)
@@ -910,7 +904,7 @@ function test.ls_owner_closes_dir()
 	rm_rf(root)
 	mkdir(root)
 	local owner = _own(mainthread(), {})
-	local next, d = try_ls(root, {owner = owner})
+	local next, d = ls(root, {owner = owner})
 	assert(d.owner == owner)
 	assert(not d:closed())
 	assert(owner:try_close())
@@ -925,7 +919,7 @@ function test.ls_dir_returns_original_path()
 	local path = root..'/a'
 	rm_rf(root)
 	mkdir(path, true)
-	local next, d = try_ls(path)
+	local next, d = ls(path)
 	assert(d:dir() == path)
 	d:close()
 	rm_rf(root)
@@ -946,35 +940,36 @@ function test.scandir()
 end
 
 function test.ls_not_found()
-	local n = 0
-	local err
-	for file, err1 in try_ls'nonexistent_dir' do
-		if not file then
-			err = err1
-			break
-		else
-			n = n + 1
+	local ok, err = pcall(function()
+		for file in ls'nonexistent_dir' do
+			assert(file)
 		end
+	end)
+	assert(not ok)
+	assert(tostring(err):find'not_found')
+end
+
+function test.ls_if_exists_not_found()
+	rm_rf'fs_test_ls_if_exists_not_found'
+	local found
+	for name in ls('fs_test_ls_if_exists_not_found', 'if_exists') do
+		found = true
 	end
-	assert(n == 0)
-	assert(#err > 0)
-	assert(err == 'not_found')
+	assert(not found)
+	for name in ls('fs_test_ls_if_exists_not_found', {if_exists = true}) do
+		found = true
+	end
+	assert(not found)
 end
 
 function test.ls_is_file()
-	local n = 0
-	local err
-	for file, err1 in try_ls(fs_test_lua) do
-		if not file then
-			err = err1
-			break
-		else
-			n = n + 1
+	local ok, err = pcall(function()
+		for file in ls(fs_test_lua) do
+			assert(file)
 		end
-	end
-	assert(n == 0)
-	assert(#err > 0)
-	assert(err == 'not_dir')
+	end)
+	assert(not ok)
+	assert(tostring(err):find'not_dir')
 end
 
 --readall, readn, skip -------------------------------------------------------
@@ -1013,22 +1008,41 @@ function test.readall_empty()
 	rmfile(testfile)
 end
 
+function test.readall_maxlen_exact()
+	local testfile = 'fs_test_readall_maxlen_exact'
+	save(testfile, 'abc')
+	local f = open(testfile)
+	local buf, len = f:readall(3)
+	assert(len == 3)
+	assert(str(buf, len) == 'abc')
+	f:close()
+	save(testfile, 'abcd')
+	local f = open(testfile)
+	local ok, err = pcall(function()
+		f:readall(3)
+	end)
+	f:close()
+	rmfile(testfile)
+	assert(not ok)
+	assert(tostring(err):find'file_too_big')
+end
+
 function test.readn()
 	local testfile = 'fs_test_readn'
 	local f = open(testfile, 'w')
 	f:write('abcdefghij') --10 bytes
 	f:close()
 	local f = open(testfile)
-	local buf = u8a(10)
+	local buf = u8a(20)
 	local ok = f:readn(buf, 10)
 	assert(ok)
 	assert(str(buf, 10) == 'abcdefghij')
 	--readn past EOF
 	f:seek('set', 0)
-	local ok, err, n = f:try_readn(buf, 20)
+	local ok, err = pcall(f.readn, f, buf, 20)
 	assert(not ok)
-	assert(err == 'eof')
-	assert(n == 10)
+	assert(tostring(err):find'eof')
+	assert(str(buf, 10) == 'abcdefghij')
 	f:close()
 	rmfile(testfile)
 end
@@ -1112,14 +1126,30 @@ function test.load_save()
 end
 
 function test.load_not_found()
-	local ok, err = try_load('fs_test_nonexistent_file')
-	assert(not ok)
+	local s, err = load('fs_test_nonexistent_file')
+	assert(s == nil)
 	assert(err == 'not_found')
 end
 
-function test.load_not_found_returns_nil()
-	local s = load('fs_test_nonexistent_file')
-	assert(s == nil)
+function test.load_tobuffer_not_found()
+	local buf, err = load_tobuffer('fs_test_nonexistent_file')
+	assert(buf == nil)
+	assert(err == 'not_found')
+end
+
+function test.gen_id()
+	local var_dir = 'fs_test_gen_id_var'
+	rm_rf(var_dir)
+	mkdir(var_dir)
+	with_config({vardir = var_dir}, function()
+		vardir(CLEAR)
+		assert(gen_id('test', 42) == 42)
+		assert(gen_id('test', 99) == 43)
+		assert(gen_id('test') == 44)
+		assert(load(varpath('next_test')) == '45')
+	end)
+	vardir(CLEAR)
+	rm_rf(var_dir)
 end
 
 function test.save_buffer()
@@ -1135,14 +1165,30 @@ end
 function test.save_sync_false_does_not_sync_dir()
 	local testfile = 'fs_test_save_no_sync'
 	rmfile(testfile)
-	local synced = with_try_sync_dir_spy(function()
-		local ok, err = try_save(testfile, 'hello', nil, nil, nil, false)
-		assert(ok, err)
+	local synced = with_sync_dir_spy(function()
+		save(testfile, 'hello', nil, nil, nil, false)
 	end)
 	local s = load(testfile)
 	rmfile(testfile, false)
 	assert(s == 'hello')
 	assert(#synced == 0)
+end
+
+function test.save_reader_error_is_not_save_error()
+	local testfile = 'fs_test_save_reader_error'
+	rmfile(testfile)
+	local i = 0
+	local ok, err = pcall(function()
+		save(testfile, function()
+			i = i + 1
+			if i == 1 then return 'hello' end
+			error('reader_error', 0)
+		end, nil, nil, nil, false)
+	end)
+	assert(not ok)
+	assert(tostring(err):find'reader_error')
+	assert(not exists(testfile))
+	assert(not exists(testfile..'~'..getpid()))
 end
 
 --touch ----------------------------------------------------------------------
@@ -1170,7 +1216,7 @@ function test.file_is()
 	rmdir(testdir)
 
 	--non-existent
-	local is, err = try_file_is(testfile)
+	local is, err = file_is(testfile)
 	assert(is == false)
 	assert(err == 'not_found')
 	assert(not exists(testfile))
@@ -1215,11 +1261,11 @@ function test.lock_unlock()
 	f:lock'r'
 	f:unlock()
 	--nonblocking lock
-	local ok, err = f:try_lock('w', 'nonblock')
+	local ok, err = f:lock('w', 'nonblock')
 	assert(ok)
 	assert(not err)
 	--nonblocking: already locked, same process (flock allows re-locking)
-	local ok2, err2 = f:try_lock('w', 'nonblock')
+	local ok2, err2 = f:lock('w', 'nonblock')
 	assert(ok2)
 	f:unlock()
 	f:close()
@@ -1256,18 +1302,34 @@ function test.symlink_replace()
 	--create symlink
 	symlink(link, t1)
 	assert(readlink(link) == t1)
-	--replace symlink
-	local ok, err = try_symlink(link, t2, 'replace')
+	--replace symlink by default
+	local ok, err = symlink(link, t2)
 	assert(ok)
 	assert(err == 'replaced')
 	assert(readlink(link) == t2)
 	--replace with same target: no-op
-	local ok, err = try_symlink(link, t2, 'replace')
+	local ok, err = symlink(link, t2)
 	assert(ok)
 	assert(err == 'already_exists')
+	local ok, err = pcall(symlink, link, t1, false)
+	assert(not ok)
+	assert(tostring(err):find'already_exists')
 	rmfile(link)
 	rmfile(t1)
 	rmfile(t2)
+end
+
+function test.symlink_replace_raw_same_relative_target()
+	local dir = 'fs_test_symlink_replace_rel'
+	rm_rf(dir..'/')
+	mkdir(dir)
+	local f = open(dir..'/target', 'w'); f:close()
+	symlink(dir..'/link', 'target')
+	local ok, err = symlink(dir..'/link', 'target')
+	assert(ok == dir..'/link')
+	assert(err == 'already_exists')
+	assert(readlink(dir..'/link', 'raw') == 'target')
+	rm_rf(dir..'/')
 end
 
 --readlink branches ----------------------------------------------------------
@@ -1307,7 +1369,7 @@ function test.hardlink_already_exists()
 	local f = open(f2, 'w'); f:write('x'); f:close()
 	hardlink(f1, f2)
 	--hardlink again: same inode, should return true, 'already_exists'
-	local ok, err = try_hardlink(f1, f2)
+	local ok, err = hardlink(f1, f2)
 	assert(ok)
 	assert(err == 'already_exists')
 	rmfile(f1)
@@ -1317,7 +1379,7 @@ end
 --rm_rf edge cases -----------------------------------------------------------
 
 function test.rm_rf_nonexistent()
-	local ok, err = try_rm_rf('fs_test_rm_rf_nonexistent')
+	local ok, err = rm_rf('fs_test_rm_rf_nonexistent')
 	assert(ok)
 	assert(err == 'not_found')
 end
@@ -1330,13 +1392,11 @@ function test.rm_rf_symlink()
 	rm_rf(dir..'/')
 	mkdir(dir)
 	local f = open(dir..'/file', 'w'); f:close()
-	local ok, err = try_symlink(link, dir)
-	if ok then
-		rm_rf(link) --should remove the symlink, not recurse into dir
-		assert(not exists(link))
-		assert(exists(dir, 'dir')) --dir should still exist
-		assert(exists(dir..'/file'))
-	end
+	symlink(link, dir)
+	rm_rf(link) --should remove the symlink, not recurse into dir
+	assert(not exists(link))
+	assert(exists(dir, 'dir')) --dir should still exist
+	assert(exists(dir..'/file'))
 	rm_rf(dir..'/')
 end
 
@@ -1357,7 +1417,7 @@ function test.ls_dotdirs()
 	rmdir(d)
 	mkdir(d)
 	local found_dot, found_dotdot = false, false
-	for name, dir in try_ls(d, {dot_dirs = true}) do
+	for name, dir in ls(d, {dot_dirs = true}) do
 		if not name then break end
 		if name == '.' then found_dot = true end
 		if name == '..' then found_dotdot = true end

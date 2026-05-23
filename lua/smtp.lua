@@ -94,16 +94,6 @@ function smtp_connect(t)
 		check_reply'2..'
 	end
 
-	local function mprotect(method)
-		local oncaught
-		if self.debug and self.debug.errors then
-			function oncaught(err)
-				log('ERROR', 'smtp', method, '%s', err)
-			end
-		end
-		self['try_'..method] = protect_io(self[method], oncaught)
-	end
-
 	function self:sendmail(req)
 		log('note', 'smtp', 'sendmail', '%s from=%s to=%s subj="%s" msg#=%s',
 			self.f, req.from, req.to, req.headers and req.headers.subject,
@@ -136,7 +126,6 @@ function smtp_connect(t)
 		check_reply'2..'
 		return true
 	end
-	mprotect'sendmail'
 
 	function self:close()
 		if self.f:closed() then
@@ -148,11 +137,9 @@ function smtp_connect(t)
 		self.f:close()
 		return true
 	end
-	mprotect'close'
 
 	return self
 end
-try_smtp_connect = protect_io(smtp_connect)
 
 local function strip_name(email)
 	return email:match'<(.-)>' or email

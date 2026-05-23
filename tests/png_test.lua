@@ -12,7 +12,7 @@ local function png_save(bmp, file)
 	_png_save{
 		bitmap = bmp,
 		write = function(buf, sz)
-			return f:try_write(buf, sz)
+			return catch('io', f.write, f, buf, sz)
 		end,
 	}
 	f:close()

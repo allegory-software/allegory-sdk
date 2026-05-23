@@ -173,7 +173,7 @@ local function cui_app(...)
 		server_running = true
 		--^^avoid having os.date() stat /etc/localtime.
 		logging:tofile(logfile)
-		logging.autoflush = logging.debug
+		logging.autosync = logging.debug
 		if config'log_host' then
 			require'sock'
 			local start_heartbeat, stop_heartbeat do

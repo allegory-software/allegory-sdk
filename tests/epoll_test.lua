@@ -1,6 +1,7 @@
 require'glue'
 require'epoll'
 require'fs'
+require'proc'
 
 local test = setmetatable({}, {__newindex = function(t, k, v)
 	rawset(t, k, v); rawset(t, #t+1, k)
@@ -192,6 +193,37 @@ function test.runafter_and_runagainevery()
 	end)
 end
 
+local function assert_start_stops_on_signal(sig)
+	local sent = false
+	local expired = false
+	local long_timer
+	local ok, err = pcall(function()
+		run(function()
+			long_timer = runafter(10, function()
+				expired = true
+			end)
+			runafter(0.01, function()
+				sent = true
+				kill(getpid(), sig)
+			end)
+		end)
+	end)
+	if long_timer then
+		long_timer:cancel()
+	end
+	assert(ok, err)
+	assert(sent)
+	assert(not expired)
+end
+
+function test.start_stops_on_sigint()
+	assert_start_stops_on_signal(SIGINT)
+end
+
+function test.start_stops_on_sigterm()
+	assert_start_stops_on_signal(SIGTERM)
+end
+
 -- Epollable objects ---------------------------------------------------------
 
 function test.make_async_success_and_timeout_paths()
@@ -231,7 +263,7 @@ function test.epollet_reads_ready_data_before_wait()
 		local buf = new'char[3]'
 		local n, err
 
-		assert(wf:write'abc')
+		wf:write'abc'
 		local th = thread(function()
 			n, err = rf:try_read(buf, 3)
 		end)
@@ -252,7 +284,7 @@ function test.epollet_partial_drain_reads_remaining_data()
 		local rf, wf = pipe{async = true, quiet = true}
 		local buf = new'char[3]'
 
-		assert(wf:write'abcdef')
+		wf:write'abcdef'
 		assert(rf:read(buf, 3) == 3)
 		assert(str(buf, 3) == 'abc')
 		assert(rf:read(buf, 3) == 3)
@@ -269,7 +301,7 @@ function test.epollet_wakes_after_drain_and_next_write()
 		local buf = new'char[3]'
 		local n, err
 
-		assert(wf:write'abc')
+		wf:write'abc'
 		assert(rf:read(buf, 3) == 3)
 		assert(str(buf, 3) == 'abc')
 
@@ -280,7 +312,7 @@ function test.epollet_wakes_after_drain_and_next_write()
 		assert(th.waiting == rf)
 		assert(n == nil)
 
-		assert(wf:write'def')
+		wf:write'def'
 		wait(0.05)
 
 		assert(th:status() == 'dead')
@@ -310,7 +342,7 @@ function test.epollet_hup_wakes_blocked_reader()
 
 		assert(th:status() == 'dead')
 		assert(n == 0)
-		assert(err == 'eof')
+		assert(err == nil)
 
 		rf:close()
 	end)

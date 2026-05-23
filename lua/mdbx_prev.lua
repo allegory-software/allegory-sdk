@@ -167,8 +167,7 @@ local function mdbx_env_open(file, opt)
 	opt = opt or empty
 	local perms = unixperms_parse(opt.file_mode or '0660')
 	if not opt.readonly then
-		local ok, err = try_mkdirs(file)
-		if not ok then return nil, err end
+		mkdirs(file)
 	end
 	assert(mdbx_check(C.mdbx_env_create(envp)))
 	local env = envp[0]

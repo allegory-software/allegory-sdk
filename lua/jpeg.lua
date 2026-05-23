@@ -71,7 +71,7 @@ NOTE: the number of bits per channel in the output bitmap is always 8.
 	the source bitmap and an output write function, and possibly other options:
 
 	* bitmap       : a [bitmap] in an accepted format.
-	* write        : write function write(buf, size) -> true | nil,err.
+	* write        : write function write(buf, size) -> true/nil | nil,err.
 	* finish       : optional function to be called after all the data is written.
 	* format       : output format (see list of supported formats above).
 	* quality      : you know what that is (0..100).
@@ -87,6 +87,7 @@ NOTE: the number of bits per channel in the output bitmap is always 8.
 if not ... then require'jpeg_test'; return end
 
 require'glue'
+
 local C = ffi.load'jpeg'
 
 --result of `cpp jpeglib.h` from libjpeg-turbo 1.2.1 with JPEG_LIB_VERSION = 62.
@@ -675,18 +676,22 @@ local function jpeg_finish_decompress(cinfo)
 end
 jit.off(jpeg_finish_decompress)
 
-function try_jpeg_open(opt)
+function jpeg_open(opt)
 
 	--normalize args
 	if isfunc(opt) then
 		opt = {read = opt}
 	end
 	local read = assert(opt.read, 'read expected')
+	local owner = _check_owner(opt.owner)
+
+	local img = {}
 
 	--create a global free function and finalizer accumulator
 	local free_t = {} --{free1, ...}
 	local function free()
 		if not free_t then return end
+		_disown(img)
 		for i = #free_t, 1, -1 do
 			free_t[i]()
 		end
@@ -696,11 +701,13 @@ function try_jpeg_open(opt)
 		add(free_t, func)
 	end
 
-	--create the state object and output image
-	local cinfo = new'jpeg_decompress_struct'
-	local img = {}
-
 	img.free = free
+	img.try_close = free
+
+	_own(owner, img)
+
+	--create the state object
+	local cinfo = new'jpeg_decompress_struct'
 
 	--setup error handling
 	local jerr, jerr_free = jpeg_err(opt)
@@ -717,12 +724,8 @@ function try_jpeg_open(opt)
 		cinfo = nil
 	end)
 
-	gc(cinfo, free)
-
 	local function check(ret, err)
-		if ret then return ret end
-		free()
-		raise('jpeg', '%s', err)
+		return checkp(img, ret, err)
 	end
 
 	--create the buffer filling function for suspended I/O
@@ -740,7 +743,7 @@ function try_jpeg_open(opt)
 	local function fill_input_buffer()
 		while bytes_to_skip > 0 do
 			local sz = min(skip_buf_sz, bytes_to_skip)
-			local readsz = check(read(skip_buf, sz))
+			local readsz = read(skip_buf, sz)
 			check(readsz > 0, 'eof')
 			bytes_to_skip = bytes_to_skip - readsz
 		end
@@ -791,36 +794,24 @@ function try_jpeg_open(opt)
 	cinfo.src.bytes_in_buffer = 0
 	cinfo.src.next_input_byte = nil
 
-	local function load_header()
-
-		while jpeg_read_header(cinfo, 1) == C.JPEG_SUSPENDED do
-			fill_input_buffer()
-		end
-
-		img.w = cinfo.image_width
-		img.h = cinfo.image_height
-		img.format = formats[tonumber(cinfo.jpeg_color_space)]
-		img.progressive = C.jpeg_has_multiple_scans(cinfo) ~= 0
-
-		img.jfif = cinfo.saw_JFIF_marker == 1 and {
-			maj_ver = cinfo.JFIF_major_version,
-			min_ver = cinfo.JFIF_minor_version,
-			density_unit = cinfo.density_unit,
-			x_density = cinfo.X_density,
-			y_density = cinfo.Y_density,
-		} or nil
-
-		img.adobe = cinfo.saw_Adobe_marker == 1 and {
-			transform = cinfo.Adobe_transform,
-		} or nil
+	--load header
+	while jpeg_read_header(cinfo, 1) == C.JPEG_SUSPENDED do
+		fill_input_buffer()
 	end
-
-	local ok, err = pcall(load_header)
-	if not ok then
-		free()
-		assert(iserror(err, 'jpeg'), err)
-		return nil, err
-	end
+	img.w = cinfo.image_width
+	img.h = cinfo.image_height
+	img.format = formats[tonumber(cinfo.jpeg_color_space)]
+	img.progressive = C.jpeg_has_multiple_scans(cinfo) ~= 0
+	img.jfif = cinfo.saw_JFIF_marker == 1 and {
+		maj_ver = cinfo.JFIF_major_version,
+		min_ver = cinfo.JFIF_minor_version,
+		density_unit = cinfo.density_unit,
+		x_density = cinfo.X_density,
+		y_density = cinfo.Y_density,
+	} or nil
+	img.adobe = cinfo.saw_Adobe_marker == 1 and {
+		transform = cinfo.Adobe_transform,
+	} or nil
 
 	function img.load(img, opt)
 		opt = opt or empty
@@ -907,33 +898,27 @@ function try_jpeg_open(opt)
 
 		return bmp
 	end
-	img.try_load = protect('jpeg', img.load)
-
 	return img
 end
-jpeg_open = protect('jpeg', try_jpeg_open)
 
 --returns a thread with a `decode(buf, len) -> nil,'more' | bmp` function
 --to be called repeatedly while `nil,'more'` is returned and then a bitmap
 --is returned.
 function jpeg_decoder()
-	require'sock'
+	require'epoll'
 	local thread = iterator(function(yield)
-		local jp, err = try_jpeg_open(yield)
-		if not jp then return nil, err end
+		local jp = jpeg_open(yield)
 		local bmp = jp:load()
 		jp:free()
 		return true, bmp
 	end)
 	local buf, sz = thread.next()
-	if not buf then return nil, sz end
 	function thread.decode(p, len)
 		while len > 0 do
 			local n = min(len, sz)
 			copy(buf, p, n)
 			buf, sz = thread.next(n)
 			if buf == true then return sz end --return bmp
-			if not buf then return nil, sz end --error
 			len = len - n
 			p = p + n
 		end
@@ -978,12 +963,16 @@ function try_jpeg_save(opt)
 		end
 
 		function cb.term_destination(cinfo)
-			assert(write(buf, sz - tonumber(cinfo.dest.free_in_buffer)))
+			local ok, err = write(buf, sz - tonumber(cinfo.dest.free_in_buffer))
+			assert(ok ~= false, err)
+			if err ~= nil then error(err) end
 			finish()
 		end
 
 		function cb.empty_output_buffer(cinfo)
-			assert(write(buf, sz))
+			local ok, err = write(buf, sz)
+			assert(ok ~= false, err)
+			if err ~= nil then error(err) end
 			cb.init_destination(cinfo)
 			return true
 		end

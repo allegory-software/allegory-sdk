@@ -16,8 +16,8 @@ EXEC/KILL/PROCESS INFO
 	p.pid                                           process ID
 	p:[try_]kill([signal=SIGTERM])                  kill process
 	p:status() -> status                            active, finished, killed, forgotten
-	p:wait_until([expires]) -> status               wait for a process to finish
-	p:wait([timeout]) -> status                     wait for a process to finish
+	p:wait_until([expires]) -> code | nil,status    wait for a process to finish
+	p:wait([timeout]) -> code | nil,status          wait for a process to finish
 	p:exit_code() -> code | nil,status              get process exit code
 	p:forget()                                      close process handles
 	p:try_close()                                   kill(9) and forget
@@ -91,7 +91,7 @@ the writes and the reads in separate epoll threads.
 Don't forget to close the stdin file when you're done with it to signal
 end-of-input to the child process.
 
-Don't forget to check for a zero-length read which can happen any time
+Don't forget to check for read() returning 0, which can happen any time
 and signals that the child process closed its end of the pipe.
 
 #### Cleaning up
@@ -111,6 +111,7 @@ if not ... then require'proc_test'; return end
 
 require'glue'
 require'fs'
+require'pbuffer'
 require'signal'
 local re = require'relabel'
 
@@ -396,11 +397,10 @@ local function _exec(t, env, dir, stdin, stdout, stderr, autokill, owner)
 
 		--check if exec failed by reading from the errno pipe.
 		errno_wf:close()
-		local err = u32a(1)
-		local ok, read_err = errno_rf:try_readn(err, sizeof(err))
-		assert(ok or read_err == 'eof')
-		if ok then
-			return check(nil, err[0])
+		local buf, len = pbuffer{f = errno_rf}:load(4):ref()
+		assert(len == 0 or len == 4)
+		if len == 4 then
+			return check(nil, cast(u32p, buf)[0])
 		end
 		errno_rf:close()
 
@@ -496,7 +496,10 @@ function proc:wait_until(expires)
 	if exit_code or err ~= 'active' then
 		return exit_code, err
 	end
-	local pidf = pidfd_open{pid = self.pid, owner = self}
+	local pidf, err = pidfd_open{pid = self.pid, owner = self}
+	if not pidf then
+		return nil, err
+	end
 	pidf:setexpires(expires)
 	local ok, err = pidf:try_wait()
 	pidf:close()
@@ -516,7 +519,7 @@ end
 
 --process state --------------------------------------------------------------
 
-local load_proc = try_load
+local load_proc = load
 
 local USER_HZ do
 	cdef'long int sysconf(int name);'

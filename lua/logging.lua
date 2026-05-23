@@ -115,7 +115,11 @@ function logging:tofile(logfile, max_size, queue_size)
 		f, size = nil
 	end
 
-	local try_save_message = protect_io(save_message, try_close_file)
+	local function try_save_message(s)
+		local ok, err = catch('io protocol', save_message, s)
+		if not ok then try_close_file() end
+		return ok
+	end
 
 	local queue_size = queue_size or logging.queue_size
 	local queue = queue(queue_size or 1/0)
@@ -252,18 +256,20 @@ function logging:toserver(host, port, queue_size, timeout)
 
 	resume(thread(function()
 		while not stop do
-			local msg = queue:peek()
-			if msg then
-				if connect() and chan then
-					if check_io(chan:try_send(msg)) then
+			try_with_owner(function()
+				connect()
+				while not stop do
+					local msg = queue:peek()
+					if msg then
+						chan:send(msg)
 						queue:pull()
+					else
+						send_wait_job = wait_job()
+						send_wait_job:wait(.2)
+						send_wait_job = nil
 					end
 				end
-			else
-				send_wait_job = wait_job()
-				send_wait_job:wait(.2)
-				send_wait_job = nil
-			end
+			end)
 		end
 		self.logtoserver = nil
 	end, 'logging-send'))

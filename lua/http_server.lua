@@ -41,7 +41,7 @@ RESPONSE
 	req:finish() -> req            finish response
 	req.headers_sent -> true       true if headers were sent
 	req.finished -> true           true if req:finish() was called
-	raise('http_response', {status=,headers=,content=})  respond by raising an error
+	error{type='http_response',status=,headers=,content=}) respond by raising
 CONFIG
 	http_host                      required, set to '*' to match all
 	http_addr                      '0.0.0.0'
@@ -109,12 +109,6 @@ local function req_log(req, severity, module, event, fmt, ...)
 	local dt = clock() - req.start_clock
 	local s = fmt and _(fmt, logargs(...)) or ''
 	log('', module, event, '%-4s %-4s %4dms %s', req.tcp, req, dt * 1000, s)
-end
-
---responding by raising an error.
-errortype'http_response'.__tostring = function(self)
-	return catany(' ', self.status, self.status_message,
-		':', self.content, self.traceback)
 end
 
 local req = {
@@ -443,7 +437,7 @@ function http_server(...)
 		end
 		if not ok then
 			if not req.headers_sent and not req.tcp:closed() then
-				if iserror(err, 'http_response') then
+				if type(err) == 'table' and err.type == 'http_response' then
 					req.status = err.status
 					req.status_message = err.status_message
 					if err.headers then
@@ -564,7 +558,7 @@ function http_server(...)
 				ctcp:try_close()
 				ctcp.rb:free()
 				ctcp.wb:free()
-				if not ok and not iserror(err, 'io') then
+				if not ok and not type(err) == 'table' and err.type == 'io' then
 					logerror(ctcp, 'handler', '%s', err)
 				end
 			end, 'http-accept %s', ctcp))

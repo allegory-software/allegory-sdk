@@ -47,7 +47,7 @@ ARGS
 	checkbox_arg(s) -> 'checked' | nil      validate checkbox value from html form
 	url_arg(s) -> t                         decode url
 OUTPUT
-	http_error(status[, content])           raise a http response error
+	http_error(status[, content])           raise a http_response error
 	http_error{status=,content=,headers=}
 	http_redirect(url[, status])            redirect (default 303)
 	setheader(name, val)                    set a header (unless we're buffering)
@@ -63,8 +63,9 @@ OUTPUT
 	record(f) -> s                          run f and collect out() calls
 	out_buffering() -> t | f                check if we're buffering output
 	outprint(...)                           like Lua's print but uses out()
-	outfile(file, [parse])                  output a file's contents
-	outfile_function(file) -> f()|nil       return an outfile function if the file exists
+	outfile(file, [offset], [len])          output a file's contents
+	outfile_function(file, [offset], [len]) -> f()|nil
+	                                        return an outfile function if the file exists
 URLS
 	absurl([path]) -> s                     get the absolute url for a local url
 	slug(id, s) -> s                        encode id and s to `s-id`
@@ -132,15 +133,15 @@ end
 http_request = req
 
 function http_error(status, content) --status,[content] | {status=,content=,headers=}
-	local err
 	if isnum(status) then
-		err = {status = status, content = content}
-	elseif istab(status) then
-		err = status
+		error(newerror{type = 'http_response', status = status, content = content})
+	elseif istab(status) then --error object or init table
+		local e = newerror(status)
+		e.type = 'http_response'
+		error(e)
 	else
 		assert(false)
 	end
-	raise('http_response', err)
 end
 
 function http_redirect(url, status)
@@ -528,24 +529,16 @@ function outfile_function(path, offset, len)
 
 	return function()
 		setheader('content-length', tostring(len))
-		local filebuf_size = min(len, 64 * 1024)
-		local filebuf = u8a(filebuf_size)
-		while true do
-			local len, err = f:try_read(filebuf, filebuf_size)
-			if not len then
-				f:close()
-				error(err)
-			elseif err == 'eof' then
-				f:close()
-				break
-			end
-			local ok, err = pcall(out, filebuf, len)
-			if not ok then
-				f:close()
-				error(err, 0)
-			end
+		local pb = pbuffer{f = f}
+		while len > 0 do
+			pb:need(1)
+			local buf, n = pb:ref()
+			n = min(n, len)
+			out(buf, n)
+			pb:skip(n)
+			len = len - n
 		end
-		assert(f:closed())
+		f:close()
 	end
 end
 

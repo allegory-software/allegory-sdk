@@ -4,7 +4,7 @@
 	Written by Cosmin Apreutesei. Public Domain.
 
 	[try_]png_open(opt|read) -> png    open a PNG image for decoding
-	  read(buf, len) -> len|0|nil  the read function (can't yield)
+	  read(buf, len) -> len|0|nil,err  the read function (can't yield)
 	png.format, png.w, png.h       PNG file native format and dimensions
 	png.interlaced                 PNG file is interlaced
 	png.indexed                    PNG file is palette-based
@@ -25,9 +25,10 @@
 [try_]png_open(opt) -> png
 
 	Open a PNG image and read its header. The supplied read function cannot
-	yield and must signal I/O errors by returning `nil`. It will only be asked
-	to read a positive number of bytes and it can return less bytes than asked,
-	including zero which signals EOF.
+	yield and must signal I/O errors by returning `nil,err` or raising a
+	structured I/O error. It will only be asked to read a positive number of
+	bytes and it can return less bytes than asked, including zero which
+	signals EOF.
 
 png:[try_]load(opt) -> bmp
 
@@ -51,7 +52,7 @@ png:[try_]load(opt) -> bmp
 	bitmap  : a bitmap in an accepted format:
 		'g1', 'g2', 'g4', 'g8', 'g16', 'ga8', 'ga16',
 		'rgb8', 'rgba8', 'bgra8', 'rgba16', 'i1', 'i2', 'i4', 'i8'`.
-	write   : write data to a sink of form `write(buf, len) -> true | nil,err`
+	write   : write data to a sink of form `write(buf, len) -> true/nil | nil,err`
 	(cannot yield).
 	chunks  : list of PNG chunks to encode.
 
@@ -594,7 +595,8 @@ function try_png_open(opt)
 	local function spng_read(ctx, _, buf, len)
 		len = tonumber(len)
 		::again::
-		local sz, err = read(buf, len)
+		local ok, sz, err = catch('io', read, buf, len)
+		if not ok then read_err = sz; return -2 end --SPNG_IO_ERROR
 		if not sz then read_err = err; return -2 end --SPNG_IO_ERROR
 		if sz == 0 then return -1 end -- SPNG_IO_EOF
 		if sz < len then --partial read
@@ -800,8 +802,9 @@ function try_png_save(opt)
 	local write_err
 	local function spng_write(ctx, _, buf, len)
 		len = tonumber(len)
-		local ok, err = write(buf, len)
-		if not ok then write_err = err; return -2 end --SPNG_IO_ERROR
+		local caught, ok, err = catch('io', write, buf, len)
+		if not caught then write_err = ok; return -2 end --SPNG_IO_ERROR
+		if ok == false or err ~= nil then write_err = err; return -2 end --SPNG_IO_ERROR
 		return 0
 	end
 
@@ -858,7 +861,7 @@ end
 
 function try_png_load(file)
 	require'pbuffer'
-	local f, err = try_open(file)
+	local f, err = open(file)
 	if not f then return nil, err end
 	local img, err = try_png_open{read = pbuffer{f = f}:reader()}
 	if not img then return nil, err end
@@ -880,16 +883,15 @@ end
 	[try_]png_save(bmp, file)           encode a bitmap into a PNG image
 
 function try_png_save(bmp, file)
-	local f, err = try_open(file, 'w')
-	if not f then return nil, err end
+	local f = open(file, 'w')
 	local ok, err = try_png_save{
 		bitmap = bmp,
 		write = function(buf, sz)
-			return f:try_write(buf, sz)
+			return catch('io', f.write, f, buf, sz)
 		end,
 	}
 	if not ok then f:try_close(); return nil, err end
-	local ok, err = f:try_sync(); if not ok then f:try_close(); return nil, err end
+	local ok, err = catch('io', f.sync, f); if not ok then f:try_close(); return nil, err end
 	local ok, err = f:try_close(); if not ok then return nil, err end
 	return true
 end

@@ -41,44 +41,33 @@ end
 
 -- == SEEKABLE (file-backed) tests ==========================================
 
--- try_have: already buffered (ask <= have branch)
-function test.file_try_have_already_buffered()
+-- have: already buffered (ask <= have branch)
+function test.file_have_already_buffered()
 	mkfile('hello world')
 	local f = open(testfile)
 	local b = pbuffer{f = f}
-	assert(b:try_have(5))
-	assert(b:try_have(3))  --ask <= have, no read
+	assert(b:have(5))
+	assert(b:have(3))  --ask <= have, no read
 	assert(#b >= 5)
 	b:free(); f:close(); rmfile(testfile)
 end
 
--- try_have: read fills buffer exactly
-function test.file_try_have_exact()
+-- have: read fills buffer exactly
+function test.file_have_exact()
 	mkfile('abcdef')
 	local f = open(testfile)
 	local b = pbuffer{f = f}
-	assert(b:try_have(6))
+	assert(b:have(6))
 	assert(b:get(6) == 'abcdef')
 	b:free(); f:close(); rmfile(testfile)
 end
 
--- try_have: empty file -> eof on first read
-function test.file_try_have_eof_empty()
-	mkfile('')
-	local f = open(testfile)
-	local b = pbuffer{f = f}
-	local ok, err = b:try_have(1)
-	assert(not ok and err == 'eof')
-	b:free(); f:close(); rmfile(testfile)
-end
-
--- try_have: ask more than file size -> partial data then eof
-function test.file_try_have_partial_eof()
+-- have: ask more than file size -> partial data then false
+function test.file_have_partial_eof()
 	mkfile('abc')
 	local f = open(testfile)
 	local b = pbuffer{f = f}
-	local ok, err = b:try_have(10)
-	assert(not ok and err == 'eof')
+	assert(b:have(10) == false)
 	assert(#b == 3) --partial data kept
 	assert(b:get(3) == 'abc')
 	b:free(); f:close(); rmfile(testfile)
@@ -110,6 +99,19 @@ function test.file_need_returns_self()
 	local f = open(testfile)
 	local b = pbuffer{f = f}
 	assert(b:need(5) == b)
+	b:free(); f:close(); rmfile(testfile)
+end
+
+-- readall: reads to EOF across multiple chunks
+function test.file_readall()
+	local content = string.rep('abcdef0123456789', 16)
+	mkfile(content)
+	local f = open(testfile)
+	local b = pbuffer{f = f, readahead = 17}
+	assert(b:readall() == b)
+	local p, len = b:ref()
+	assert(len == #content)
+	assert(str(p, len) == content)
 	b:free(); f:close(); rmfile(testfile)
 end
 
@@ -196,7 +198,9 @@ function test.file_reader_eof()
 	local b = pbuffer{f = f}
 	local read = b:reader()
 	local buf = new'char[16]'
-	assert(read(buf, 16) == 0)
+	local n, err = read(buf, 16)
+	assert(n == 0)
+	assert(err == nil)
 	b:free(); f:close(); rmfile(testfile)
 end
 
@@ -231,8 +235,8 @@ end
 
 -- == NON-SEEKABLE (socket-backed) tests ====================================
 
--- try_have over socket
-function test.sock_try_have()
+-- have over socket
+function test.sock_have()
 	checked_run(function()
 		local port = nextport()
 		local server = listen('127.0.0.1:'..port)
@@ -243,25 +247,8 @@ function test.sock_try_have()
 		end, 'client'))
 		local cs = server:accept()
 		local b = pbuffer{f = cs}
-		assert(b:try_have(5))
+		assert(b:have(5))
 		assert(b:get(5) == 'hello')
-		b:free(); cs:close(); server:close()
-	end)
-end
-
--- try_have: socket eof
-function test.sock_try_have_eof()
-	checked_run(function()
-		local port = nextport()
-		local server = listen('127.0.0.1:'..port)
-		resume(sthread(function()
-			local s = connect('127.0.0.1:'..port)
-			s:close()
-		end, 'client'))
-		local cs = server:accept()
-		local b = pbuffer{f = cs}
-		local ok, err = b:try_have(1)
-		assert(not ok and err == 'eof')
 		b:free(); cs:close(); server:close()
 	end)
 end

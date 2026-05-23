@@ -5,7 +5,6 @@
 	SIG* ...  signal numbers
 
 	signal_file(signals, bor(SFD_*, ...), [debug_name]) -> sf
-	sf:try_read_signal() -> signal | nil,err
 	sf:read_signal() -> signalfd_siginfo
 
 	signal_block     (signals)
@@ -15,7 +14,8 @@
 
 	signals arg: 'SIGHUP ...' | {SIGHUP, ...}
 
-	on_signal(signals, fn) => fn(signal) -> 'stop'
+	on_signal(signals, fn) -> th
+		fn(signal) -> 'stop'
 
 ]]
 
@@ -119,12 +119,10 @@ function signal_file(signals, flags, name)
 	local si = new'struct signalfd_siginfo'
 	assert(sizeof(si) == 128)
 	local psi = cast(u8p, si)
-	f.try_read_signal = function(f)
-		local ok, err = f:try_readn(psi, 128)
-		if not ok then return nil, err end
+	function f.read_signal(f)
+		f:readn(psi, 128)
 		return si --also pins it
 	end
-	f.read_signal = make_raising('io', f.try_read_signal)
 	return f
 end
 
@@ -149,25 +147,24 @@ function signal_ignore (signals)
 	end
 end
 
---NOTE: before stop() make sure to close the signal file or this thread
---will never exit and the sock loop will never stop.
+--NOTE: close the returned thread to stop monitoring without a signal.
 function on_signal(sigs, fn)
-	local f
-	resume(thread(function()
+	local th = thread(function()
 		signal_block(sigs)
-		f = signal_file(sigs)
+		local f = signal_file(sigs)
 		f:onclose(function()
 			signal_unblock(sigs)
 		end)
 		while 1 do
-			local si, err = f:try_read_signal()
-			if not si or fn(si.signo) == 'stop' then
+			local si = f:read_signal()
+			if fn(si.signo) == 'stop' then
 				break
 			end
 		end
 		f:close()
-	end, 'on_signal %s', sigs))
-	return f
+	end, 'on_signal %s', sigs)
+	resume(th)
+	return th
 end
 
 if not ... then --self-test

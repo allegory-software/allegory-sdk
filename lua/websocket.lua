@@ -405,12 +405,12 @@ function ws:close(code, reason)
 	end
 end
 
-ws.try_send       = protect_io(ws.send)
-ws.try_recv       = protect_io(ws.recv)
-ws.try_send_chunk = protect_io(ws.send_chunk)
-ws.try_recv_chunk = protect_io(ws.recv_chunk)
-ws.try_ping       = protect_io(ws.ping)
-ws.try_close      = protect_io(ws.close)
+ws.try_send       = make_try('io protocol content',ws.send)
+ws.try_recv       = make_try('io protocol content',ws.recv)
+ws.try_send_chunk = make_try('io protocol content',ws.send_chunk)
+ws.try_recv_chunk = make_try('io protocol content',ws.recv_chunk)
+ws.try_ping       = make_try('io protocol content',ws.ping)
+ws.try_close      = make_try('io protocol content',ws.close)
 
 --server-side upgrade --------------------------------------------------------
 
@@ -418,19 +418,19 @@ function websocket_upgrade(req, opt)
 	opt = opt or empty
 	local h = req.headers
 	if not (h.upgrade and h.upgrade:lower() == 'websocket') then
-		raise('http_response', {status = 400, content = 'Expected Upgrade: websocket\n'})
+		error{type = 'http_response', status = 400, content = 'Expected Upgrade: websocket\n'}
 	end
 	if not (h.connection and h.connection:lower():find('upgrade', 1, true)) then
-		raise('http_response', {status = 400, content = 'Expected Connection: Upgrade\n'})
+		error{type = 'http_response', status = 400, content = 'Expected Connection: Upgrade\n'}
 	end
 	if h['sec-websocket-version'] ~= '13' then
-		raise('http_response', {status = 426,
+		error{type = 'http_response', status = 426,
 			headers = {['sec-websocket-version'] = '13'},
-			content = 'Unsupported WebSocket version\n'})
+			content = 'Unsupported WebSocket version\n'}
 	end
 	local key = h['sec-websocket-key']
 	if not key then
-		raise('http_response', {status = 400, content = 'Missing Sec-WebSocket-Key\n'})
+		error{type = 'http_response', status = 400, content = 'Missing Sec-WebSocket-Key\n'}
 	end
 	--subprotocol negotiation: server picks first offered protocol that's also in opt.subprotocols
 	local chosen

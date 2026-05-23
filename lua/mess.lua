@@ -69,7 +69,6 @@ function mess_protocol(tcp)
 		tcp:send(p, len, exp)
 		return true
 	end
-	chan.try_send = protect_io(chan.send)
 
 	local buf = string_buffer()
 	tcp:onclose(function()
@@ -88,7 +87,6 @@ function mess_protocol(tcp)
 		buf:commit(len)
 		return buf:decode()
 	end
-	chan.try_recv = protect_io(chan.recv)
 
 	return chan
 end
@@ -145,11 +143,12 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 	return server
 end
 
-function mess_connect(host, port, timeout)
-	local tcp = connect(host, port, timeout)
+function try_mess_connect(host, port, timeout)
+	local tcp, err = try_connect(host, port, timeout)
+	if not tcp then return nil, err end
 	return mess_protocol(tcp)
 end
-try_mess_connect = protect_io(mess_connect)
+mess_connect = make_raising('io', mess_connect)
 
 function channel:try_close   ()        return self.tcp:try_close() end
 function channel:close       ()        return self.tcp:close() end
@@ -164,7 +163,7 @@ function channel:try_recvall(onmessage, onerror)
 	while not self:closed() do
 		local msg, err = self:try_recv()
 		if not msg and err then
-			if iserror(err, 'io') and err.message == 'eof' then
+			if type(err) == 'table' and err.message == 'eof' then
 				break
 			else
 				return nil, err

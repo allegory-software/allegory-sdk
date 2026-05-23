@@ -20,8 +20,8 @@ SOCKETS
 	s.fd -> fd                             POSIX file descriptor
 	s:[try_]bind(addr, [port])             bind socket to an address
 	s:bound_addr() -> sa                   get bound sockaddr
-	s:[try_]setopt(opt, val)               set socket option ('so_*', 'tcp_*', etc.)
-	s:[try_]getopt(opt) -> val             get socket option
+	s:setopt(opt, val)                     set socket option ('so_*', 'tcp_*', etc.)
+	s:getopt(opt) -> val                   get socket option
 	s:debug_stream([protocol_name])        log recv/send data
 WAIT JOBS
 	s:wait_job() -> sj          wait job that is auto-canceled on socket close
@@ -33,20 +33,20 @@ TCP
 	listen(addr, [port], [backlog], [onaccept]) -> tcp          create tcp socket and listen
 	tcp:[try_]connect(addr, [port])                 connect to an address
 	tcp:[try_]send(s|buf, [len], [flags]) -> true   send bytes to connected address
-	tcp:[try_]recv(buf, maxlen) -> len              receive bytes
+	tcp:[try_]recv(buf, maxlen) -> len|0            receive bytes
 	tcp:[try_]listen(addr, [port], [backlog], [onaccept])         put socket in listening mode
 	tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err,[retry]  accept a client connection
-	tcp:[try_]recvn(buf, n)                         receive n bytes
-	tcp:[try_]recvall() -> buf, len                 receive until closed
+	tcp:recvn(buf, n) -> true                       receive n bytes
+	tcp:recvall([maxlen]) -> buf, len               receive until closed
 	tcp:remote_addr() -> sa                         get connected/accepted sockaddr
 UDP
 	udp([family='ip'], [opt]) -> udp                make a SOCK_DGRAM socket
 	udp:[try_]connect(addr, [port])                 connect to an address
 	udp:[try_]send(s|buf, [len], [flags]) -> len    send bytes to connected address
-	udp:[try_]recv(buf, maxlen) -> len              receive bytes
+	udp:[try_]recv(buf, maxlen) -> len              receive datagram
 	udp:[try_]sendto(addr, [port], s|buf, [len]) -> len     send a datagram to an address
 	udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa     receive the next datagram
-	tcp:[try_]shutdown(['r'|'w'|'rw'])         send FIN
+	tcp:shutdown(['r'|'w'|'rw'])                    send FIN
 
 PROGRAMMING NOTES ------------------------------------------------------------
 
@@ -59,7 +59,8 @@ and 'address_already_in_use' so they can be used in conditionals.
 
 I/O functions only work inside threads created with thread().
 
-Raising methods close the socket on errors, but the try_*() variants do not!
+Socket cleanup is owner-based. Raising I/O methods do not close the socket;
+the owner is responsible for cleanup.
 
 Never abandon threads in suspended state, it will cause leaks!
 
@@ -104,10 +105,14 @@ udp:[try_]send(s|buf, [len], [flags]) -> len
 	Send bytes to the connected address.
 	Empty packets (zero bytes) are allowed.
 
-tcp|udp:[try_]recv(buf, maxlen, [flags]) -> len | 0,'eof'
+tcp:[try_]recv(buf, maxlen, [flags]) -> len | 0
 
-	Receive bytes from the connected address.
-	Returns (and keeps returning) 0,'eof' if the socket was closed on the other side.
+	Receive bytes from the connected address. maxlen must be > 0.
+	Returns (and keeps returning) 0 if the socket was closed on the other side.
+
+udp:[try_]recv(buf, maxlen, [flags]) -> len
+
+	Receive a datagram. Zero-length datagrams are allowed.
 
 tcp:[try_]listen(addr, [port], [backlog], [onaccept])
 
@@ -122,14 +127,15 @@ tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err,[retry]
 	A third return value indicates that the error is a network error and thus
 	the call can be retried.
 
-tcp:[try_]recvn(buf, len) -> true
+tcp:recvn(buf, len) -> true
 
 	Repeat recv until len bytes are received.
-	Partial reads are signaled with nil,err,readlen.
+	Raises on EOF or I/O error.
 
-tcp:[try_]recvall() -> buf,len | nil,err,buf,len
+tcp:recvall([maxlen]) -> buf,len
 
 	Receive until closed into an accumulating buffer.
+	Raises if maxlen is exceeded (default: 16 MB).
 
 udp:[try_]sendto(addr, [port], s|buf, [maxlen], [flags]) -> len
 
@@ -141,7 +147,7 @@ udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa
 	Receive the next incoming datagram, wherever it came from, along with the
 	source address. If the socket is connected, packets are still filtered though.
 
-tcp:[try_]shutdown(['r'|'w'|'rw'])
+tcp:shutdown(['r'|'w'|'rw'])
 
 	Shutdown the socket for receiving, sending or both (default). Does not block.
 
@@ -171,6 +177,7 @@ require'glue'
 require'ipv6'
 require'epoll'
 require'owner'
+require'pbuffer'
 
 assert(Linux, 'platform not Linux')
 
@@ -507,9 +514,7 @@ function socket:_try_cancel_io(cancel_thread)
 	if self.fd == -1 then return nil, 'thread not waiting' end
 	return socket_try_close(self, cancel_thread)
 end
-function socket:close()
-	assert(self:try_close())
-end
+socket.close = make_raising('io', socket.try_close)
 
 function socket:closed()
 	return self.fd == -1
@@ -523,7 +528,7 @@ socket.setexpires  = _epoll_setexpires
 socket.settimeout  = _epoll_settimeout
 
 function socket:_epoll_error()
-	return self:try_getopt'so_error' --NOTE: this clears the error!
+	return self:getopt'so_error' --NOTE: this clears the error!
 end
 
 function socket:wait_job()
@@ -665,12 +670,9 @@ end)
 
 --NOTE: to read many small pieces, use a pbuffer instead, this will crawl!
 function socket:try_recv(buf, sz, flags)
+	assert(sz and sz > 0, 'recv size must be > 0')
 	if self.fd == -1 then return nil, 'closed' end
-	if sz == 0 then return 0 end --mask out null reads
-	local n, err = socket_recv(self, buf, sz, flags)
-	if not n then return nil, err end
-	if n == 0 then return 0, 'eof' end
-	return n
+	return socket_recv(self, buf, sz, flags)
 end
 socket.recv = make_raising('io', socket.try_recv)
 socket.try_read = socket.try_recv
@@ -678,9 +680,7 @@ socket.read = socket.recv
 
 function udp:try_recv(buf, sz, flags)
 	if self.fd == -1 then return nil, 'closed' end
-	local n, err = socket_recv(self, buf, sz, flags)
-	if not n then return nil, err end
-	return n
+	return socket_recv(self, buf, sz, flags)
 end
 udp.recv = make_raising('io', udp.try_recv)
 udp.try_read = udp.try_recv
@@ -730,17 +730,16 @@ int shutdown(SOCKET s, int how);
 ]]
 
 local ENOTCONN = 107
-function tcp:try_shutdown(which)
-	if self.fd == -1 then return nil, 'closed' end
+function tcp:shutdown(which)
+	self:check_io(self.fd ~= -1, 'closed')
 	local ok = C.shutdown(self.fd,
 		   which == 'r' and 0
 		or which == 'w' and 1
 		or (not which or which == 'rw') and 2) == 0
 	if ok then return true end
 	if errno() == ENOTCONN then return true end --peer closed first.
-	return try_errno(ok, errno())
+	check_errno(ok, errno())
 end
-tcp.shutdown = make_raising('io', tcp.try_shutdown)
 
 --bind() ---------------------------------------------------------------------
 
@@ -1009,65 +1008,45 @@ local function parse_opt(k)
 end
 
 local szbuf = i32a(1, 4)
-function socket:try_getopt(k)
-	if self.fd == -1 then return nil, 'closed' end
+function socket:getopt(k) --can't wrap with make_raising because it returns false
+	self:check_io(self.fd ~= -1, 'closed')
 	local opt, level = parse_opt(k)
 	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
-	local ok, err = try_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0)
-	if not ok then return nil, err end
+	self:check_io(try_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0))
 	return get(buf, szbuf[0])
 end
-function socket:getopt(k) --can't wrap with make_raising because it returns false
-	local v, err = self:try_getopt(k)
-	self:check_io(not (v == nil and err), err)
-	return v
-end
 
-function socket:try_setopt(k, v)
-	if self.fd == -1 then return nil, 'closed' end
+function socket:setopt(k, v)
+	self:check_io(self.fd ~= -1, 'closed')
 	local opt, level = parse_opt(k)
 	local set = assertf(set_opt[k], 'read-only socket option: %s', k)
 	local buf, sz = set(v)
-	return try_errno(C.setsockopt(self.fd, level, opt, buf, sz) == 0)
+	check_errno(C.setsockopt(self.fd, level, opt, buf, sz) == 0)
 end
-socket.setopt = make_raising('io', socket.try_setopt)
 
 end --getopt/setopt decl. scope
 
 --tcp repeat I/O -------------------------------------------------------------
 
 --NOTE: to read many small pieces use a pbuffer instead, this will crawl!
-function tcp:try_recvn(buf, sz)
-	local sz0 = sz
+function tcp:recvn(buf, sz)
+	if sz == 0 then return true end
 	local buf = cast(u8p, buf)
 	while sz > 0 do
 		local len, err = self:try_recv(buf, sz)
-		if not len or err == 'eof' then --short read
-			return nil, err, sz0 - sz
+		if not len or len == 0 then --short read
+			self:check_io(false, err or 'eof')
 		end
 		buf = buf + len
 		sz  = sz  - len
 	end
 	return true
 end
-tcp.recvn = make_raising('io', tcp.try_recvn)
-tcp.try_readn = tcp.try_recvn
 tcp.readn = tcp.recvn
 
-function tcp:try_recvall(max_size)
-	max_size = max_size or 64 * 1024^2 --arbitrary, adjust to use case.
-	local readahead_size = 16 * 1024
-	local b = string_buffer(readahead_size)
-	while true do
-		local buf, sz = b:reserve(readahead_size)
-		local len, err = self:try_recv(buf, sz)
-		if not len then return nil, err, b:ref() end
-		if err == 'eof' then return b:ref() end
-		b:commit(len)
-		if #b > max_size then return nil, 'max_size' end
-	end
+function tcp:recvall(maxlen)
+	return pbuffer{f = self}:readall(maxlen):ref()
 end
-tcp.recvall = make_raising('io', tcp.try_recvall)
 
 --debug API ------------------------------------------------------------------
 
@@ -1087,14 +1066,11 @@ function socket:debug_stream(protocol_name)
 	self.try_read = self.try_recv
 	self.read = self.recv
 
-	override(self, 'try_send', function(inherited, self, buf, sz, ...)
-		local ok, err = inherited(self, buf, sz, ...)
-		if not ok then return nil, err end
+	override(self, 'send', function(inherited, self, buf, sz, ...)
+		local ok = inherited(self, buf, sz, ...)
 		ds('>', str(buf, sz or #buf))
 		return ok
 	end)
-	self.send = make_raising('io', self.try_send)
-	self.try_write = self.try_send
 	self.write = self.send
 
 	override(self, 'try_close', function(inherited, self, ...)
@@ -1143,7 +1119,7 @@ function listen(addr, port, backlog, onaccept)
 		--remove the socket file to emulate reuseaddr.
 		local socket_path = sa:tostring()
 		if file_is(socket_path, 'socket') then
-			try_rmfile(socket_path)
+			rmfile(socket_path)
 		end
 	else
 		self:setopt('so_reuseaddr', true)

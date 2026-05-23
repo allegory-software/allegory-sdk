@@ -162,8 +162,7 @@ function try_mdbx_open(file, opt)
 	local create = not opt.readonly and not exists(file)
 	local perms = unixperms_parse(opt.file_mode or '0660')
 	if not opt.readonly then
-		local ok, err = try_mkdirs(file)
-		if not ok then return nil, err, create end
+		mkdirs(file)
 	end
 	assert(mdbx_check(C.mdbx_env_create(envp)))
 	local env = envp[0]

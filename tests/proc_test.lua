@@ -133,7 +133,7 @@ os.exit(123)
 		if p.stdin then
 			resume(thread(function()
 				local s = '1234\n'
-				assert(p.stdin:write(s))
+				p.stdin:write(s)
 				p.stdin:close()
 			end))
 		end

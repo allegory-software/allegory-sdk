@@ -118,15 +118,13 @@ function fs.add_tenant()
 	return tid
 end
 
-function fs.try_add_host(host, tid)
+function fs.add_host(host, tid)
 	check_tenant(tid)
-	local ok, err = try_symlink(hostlinkpath(host), '../tenants/'..tid)
-	check_io(nil, ok or err == 'already_exists', err)
-	return ok, err
+	symlink(hostlinkpath(host), '../tenants/'..tid, false)
 end
 
-function fs.try_del_host(host)
-	return rmfile(hostlinkpath(host))
+function fs.del_host(host)
+	rmfile(hostlinkpath(host))
 end
 
 function fs.del_tenant(tid)
@@ -154,8 +152,8 @@ function fs.add_session(tid, sid, uid)
 	assert(isint(uid))
 	check_tenant(tid)
 	check_user(uid)
-	symlink(sessionpath(tid, sid), '../../../users/'..uid..'/profile') --commit
-	symlink(usersessionpath(uid, sid), '../../../tenants/'..tid..'/sessions/'..sid)
+	symlink(sessionpath(tid, sid), '../../../users/'..uid..'/profile', false) --commit
+	symlink(usersessionpath(uid, sid), '../../../tenants/'..tid..'/sessions/'..sid, false)
 end
 
 local function read_session(tid, sid) --atomic
@@ -173,7 +171,7 @@ function fs.del_session(tid, sid)
 end
 
 function fs.touch_session(tid, sid) --non-durable, non-locked for speed
-	try_set_file_attr(sessionpath(tid, sid), {mtime = now()}, false)
+	set_file_attr(sessionpath(tid, sid), {mtime = now()}, false)
 end
 
 function fs.load_session(tid, sid)
@@ -232,7 +230,7 @@ end
 local function add_uid_by(KEY, tid, key, uid)
 	assert(isint(uid))
 	local path = uidbypath(KEY, tid, key)
-	symlink(path, '../../../users/'..uid..'/profile')
+	symlink(path, '../../../users/'..uid..'/profile', false)
 end
 
 local function del_uid_by(KEY, tid, key)
@@ -338,7 +336,7 @@ function fs.user_del_tenant(uid, tid)
 end
 
 function fs.touch_user(uid) --non-durable, non-locked for speed
-	try_set_file_attr(userpath(uid, 'profile'), {mtime = now()}, false)
+	set_file_attr(userpath(uid, 'profile'), {mtime = now()}, false)
 end
 
 --repair ---------------------------------------------------------------------
@@ -401,7 +399,7 @@ function fs.repair()
 			if uid and not exists(usersessionpath(uid, sid)) then
 				--^^missing from interrupted add_session
 				symlink(usersessionpath(uid, sid),
-					'../../../tenants/'..tid..'/sessions/'..sid)
+					'../../../tenants/'..tid..'/sessions/'..sid, false)
 			end
 			sidmap[sid] = uid
 		end
