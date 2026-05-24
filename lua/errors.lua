@@ -1,21 +1,21 @@
 --[=[
 
-	Structured errors for network protocols and file decoders.
+	Structured errors for protocol, decoder and I/O boundaries.
 
 CREATING ERRORS
 	newerror(e) -> e                              make an error object
-	error_for(target, errtype, fmt, ...) -> e     make a typed structured error
 	CANCEL                                        static error that try/catch can't catch
+	CLOSED                                        static error for "self is closed"
 RAISING ERRORS
-	raise(target, errtype, fmt, ...)              raise a typed structured error
-	check_for(target, errtype, ret, fmt, ...) -> ret  raise typed error if not ret
-	check(errtype, event, v, ...) -> v            assert + log + raise structured error
-	check_io  (target, ret, fmt, ...) -> ret      check_for with 'io' errtype
+	check_for (errtype, target, ret, fmt, ...) -> ret  raise typed error if not ret
+	check_fs  (target, ret, fmt, ...) -> ret      check_for with 'fs' errtype
+	check_net (target, ret, fmt, ...) -> ret      check_for with 'net' errtype
 	checkp    (target, ret, fmt, ...) -> ret      check_for with 'protocol' errtype
-	checknp   (target, ret, fmt, ...) -> ret      check_for with 'content' errtype
+	checknp   (target, ret, fmt, ...) -> ret      check_for with 'data' errtype
+	check(errtype, event, v, fmt, ...) -> v       assert + log + raise structured error
 	try_errno(ret, err) -> ret | nil,err          map errno and raise on usage errors
 	check_errno(ret, err) -> ret                  assert(try_errno(ret, err))
-	make_raising(errtype, f) -> f                 turn nil,err-returning f into raising
+	make_raising([errtype], f) -> f               turn nil,err-returning f into raising
 CATCHING ERRORS
 	catch([errtypes], f, ...) -> true,... | false,e   pcall and catch table errors
 	try(f, ...) -> true,... | false,e             catch all table errors
@@ -26,7 +26,7 @@ RATIONALE
 Structured errors are an enhancement over plain string errors by adding
 selective catching while bugs still raise, and providing a context for
 the failure to help with freeing resources, recovery or logging. They're
-most useful in network protocols and file decoders.
+most useful at network, protocol, file and decoder boundaries.
 
 I/O AND PROTOCOL ERRORS
 
@@ -41,7 +41,7 @@ You should distinguish between multiple types of errors:
 
 - Invalid API usage, i.e. bugs on this side, which should raise outside
   connection scope (but shouldn't happen in production). Use assert()
-  and error() normally for those.
+  and error() with string errors for those.
 
 - Response/format validation errors, i.e. bugs on the other side or corrupt
   data which shouldn't raise outside connection scope. Use checkp() short
@@ -49,22 +49,27 @@ You should distinguish between multiple types of errors:
   the same application and don't run on the Internet you can skip these
   checks and let bugs from the remote side surface as bugs on the local side.
 
-- Request or response content validation errors, which can be retried without
+- Request or response data validation errors, which can be retried without
   reconnecting, so they must not raise outside connection scope and must only
   be raised before advancing connection state. Use checknp() short for
   "check non-protocol" for those.
 
-- I/O errors, i.e. network/pipe failures, some of which can be temporary and
-  thus make the request retriable (in a new connection, this one must be
-  closed), so they must not raise outside connection scope. Use check_io()
-  for those. At the call site then check the error object for deciding
-  when to retry.
+- Network and pipe I/O errors, some of which can be temporary and thus make
+  the request retriable (in a new connection, this one must be closed), so
+  they must not raise outside connection scope. Use check_net() for network
+  errors and check_for('pipe', ...) for pipe errors. At the call site then
+  check the error object for deciding when to retry, if to log the error or
+  not, etc.
 
 - I/O errors on stable storage, i.e. disk failures which you might want to
-  kill the whole app on.
+  kill the whole app on. Use check_fs() for those.
 
 - CANCEL: a static error that cannot be caught by catch() so it can
   be used to break an epoll thread and it won't be logged as an error.
+
+- CLOSED: a static error for trying to use a closed file. This can be a user
+  error but also the result of thread cancellation, so you may want to log
+  a trace for it or not.
 
 Following this protocol should easily cut your network code in half, increase
 its readability (no more error-handling noise) and its reliability (no more
@@ -75,12 +80,16 @@ continue using the same owner/resource. For straight-line library code, prefer
 raising APIs and let the owner tree handle cleanup; don't add try_* variants
 just to avoid stack unwinding.
 
+make_raising(f) uses target.error_type for the raised error type. Pass an
+explicit errtype only when the error type is a property of the operation
+instead of the target object.
+
 TRACEBACKS
 
 Structured errors don't get a traceback by default unless asked by setting
-addtraceback=true in the error object. An uncaught structured error will
-still get a traceback but it will be the traceback at the last catch site
-which is usually not that useful.
+addtraceback=true in the error object or by setting tracebacks=true in the
+target object. This is useful because the uncaught error handler only adds
+a traceback for the last raising site, the traces inside pcall are be lost.
 
 ]=]
 
@@ -109,7 +118,8 @@ function iserror(e, errtype, message)
 end
 
 --raise CANCEL to cancel any waiting thread. catch() won't catch it.
-CANCEL = newerror{type = 'CANCEL'}
+CANCEL = newerror{type = 'cancel'}
+CLOSED = newerror{type = 'closed'}
 
 local errtypes_table = memoize(function(errtypes)
 	return index(collect(words(errtypes)))
@@ -135,7 +145,8 @@ function try(f, ...)
 	return catch(nil, f, ...)
 end
 
-function error_for(target, errtype, s, ...)
+local function error_for(errtype, target, s, ...)
+	errtype = errtype or (target and target.error_type)
 	assert(type(errtype) == 'string')
 	s = ... ~= nil and _(s, ...) or s
 	return newerror{type = errtype, target = target, message = s,
@@ -145,10 +156,15 @@ end
 local function return_raising(target, errtype, ret, err, ...)
 	if ret then return ret, err, ... end
 	if iserror(err) then error(err) end --pass-through structured errors
-	error(error_for(target, errtype, err, ...))
+	if err == 'closed' then error(CLOSED) end --convert 'closed' to CLOSED error
+	local e = error_for(errtype, target, err, ...)
+	e.actionable = true --nil,err errors are actionable, so flag them as such.
+	error(e)
 end
 function make_raising(errtype, f)
-	assert(type(errtype) == 'string')
+	if type(errtype) == 'function' then --make_raising(f)
+		errtype, f = nil, errtype
+	end
 	assert(type(f) == 'function')
 	return function(target, ...)
 		return return_raising(target, errtype, f(target, ...))
@@ -159,7 +175,7 @@ function check(errtype, event, v, ...)
 	if v then return v end
 	assert(type(errtype) == 'string')
 	assert(type(event) == 'string')
-	local e = error_for(nil, errtype, ...)
+	local e = error_for(errtype, nil, ...)
 	log('ERROR', e.type, event, '%s', e.message)
 	e.logged = true
 	error(e)
@@ -182,6 +198,7 @@ local errno_msgs = {
 	[ 11] = 'again', --EAGAIN/EWOULDBLOCK, flock() with LOCK_NB
 	[ 12] = 'out_of_mem', --ENOMEM, mmap()
 	[ 13] = 'access_denied', --EACCES, open(), mkdir(), unlink(), rmdir()
+	[ 14] = 'bad_address', --EFAULT, syscall got an invalid pointer (fatal)
 	[ 17] = 'already_exists', --EEXIST, open(), mkdir(), mkfifo(), rename()
 	[ 18] = 'cross_device', --EXDEV, rename()
 	[ 19] = 'no_device', --ENODEV, block device disappeared (fatal)
@@ -199,11 +216,13 @@ local errno_msgs = {
 	[ 38] = 'not_implemented', --ENOSYS, syscall not implemented (fatal: wrong kernel)
 	[ 39] = 'not_empty', --ENOTEMPTY, rmdir()
 	[ 40] = 'too_many_symlinks', --ELOOP, open(), stat() (too many symlinks in path)
-	[ 95] = 'not_supported', --EOPNOTSUPP, fallocate()
+	[ 95] = 'not_supported', --EOPNOTSUPP, fallocate(), accept()
 	[122] = 'disk_quota', --EDQUOT, write(), open(), mkdir()
 	--sock
 	[ 64] = 'network_missing', --ENONET, accept()
 	[ 71] = 'protocol_error', --EPROTO, accept()
+	[ 88] = 'not_socket', --ENOTSOCK, socket operation on non-socket (fatal)
+	[ 90] = 'message_too_long', --EMSGSIZE, send(), sendto(); datagram exceeds PMTU
 	[ 92] = 'protocol_not_available', --ENOPROTOOPT, accept()
 	[ 98] = 'address_already_in_use', --EADDRINUSE, bind()
 	[ 99] = 'address_not_available', --EADDRNOTAVAIL, bind(), connect()
@@ -211,6 +230,7 @@ local errno_msgs = {
 	[101] = 'network_unreachable', --ENETUNREACH, connect(), send()
 	[103] = 'connection_aborted', --ECONNABORTED, accept()
 	[104] = 'connection_reset', --ECONNRESET, recv(), send(); peer sent RST
+	[105] = 'no_buffer_space', --ENOBUFS, send(), sendto()
 	[107] = 'not_connected', --ENOTCONN, send(), recv(), shutdown() (fatal)
 	[110] = 'timeout', --ETIMEDOUT, connect(), recv(); peer is unresponsive
 	[111] = 'connection_refused', --ECONNREFUSED, connect()
@@ -226,7 +246,9 @@ function try_errno(ret, err, ...)
 	err = err or errno()
 	local s = errno_msgs[err]
 	assert(s ~= 'invalid_argument', s)
+	assert(s ~= 'bad_address', s)
 	assert(s ~= 'bad_file', s)
+	assert(s ~= 'not_socket', s)
 	assert(s ~= 'invalid_seek', s)
 	assert(s ~= 'no_device', s)
 	assert(s ~= 'too_many_fds', s)
@@ -240,16 +262,12 @@ function check_errno(...)
 	return assert(try_errno(...))
 end
 
-function check_for(target, errtype, ret, s, ...)
+function check_for(errtype, target, ret, s, ...)
 	if ret then return ret, s, ... end
 	if iserror(s) then error(s) end
-	return error(error_for(target, errtype, s, ...))
+	return error(error_for(errtype, target, s, ...))
 end
-function check_io (target, ...) return check_for(target, 'io'      , ...) end
-function checkp   (target, ...) return check_for(target, 'protocol', ...) end
-function checknp  (target, ...) return check_for(target, 'content' , ...) end
-
-function raise(target, errtype, s, ...)
-	if iserror(s) then error(s) end
-	return error(error_for(target, errtype, s, ...))
-end
+function check_fs  (target, ...) return check_for('fs'      , target, ...) end
+function check_net (target, ...) return check_for('net'     , target, ...) end
+function checkp    (target, ...) return check_for('protocol', target, ...) end
+function checknp   (target, ...) return check_for('data'    , target, ...) end

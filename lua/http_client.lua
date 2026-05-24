@@ -572,7 +572,7 @@ function client:get_conn(req)
 		)
 		if not tcp then
 			target.conn_pool:cancel()
-			check_io(nil, nil, err)
+			check_net(nil, nil, err)
 		end
 		if self.debug.stream then
 			tcp:debug_stream'http'
@@ -583,7 +583,7 @@ function client:get_conn(req)
 			if not stcp then
 				target.conn_pool:cancel()
 				tcp:try_close()
-				check_io(nil, nil, err)
+				check_net(nil, nil, err)
 			else
 				tcp = stcp
 			end
@@ -595,7 +595,7 @@ function client:get_conn(req)
 			target.conn_pool:pull(http)
 		end)
 	end
-	return check_io(nil, http, err)
+	return check_net(nil, http, err)
 end
 
 --cookie storage -------------------------------------------------------------
@@ -781,7 +781,6 @@ function client:_fetch(req, body)
 	req:finish()
 	return req
 end
-client._try_fetch = make_try('io', client._fetch)
 function client:fetch(arg1, body) --opt | url,body
 	local default_max_retries = req.max_retries
 	local req = istab(arg1) and update({}, arg1) or {url = arg1}
@@ -799,7 +798,7 @@ function client:fetch(arg1, body) --opt | url,body
 	local max_retries = req.max_retries or default_max_retries
 	local req_opt = req
 	while 1 do
-		local req, err = self:_try_fetch(req_opt, body)
+		local req, err = catch('net', client._fetch, client, req_opt, body)
 		if req then
 			return req.response_body, req
 		end

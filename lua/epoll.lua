@@ -79,7 +79,7 @@ method. _epoll_setexpires, etc. can be used directly as methods.
 
 Thread cancellation of an epollable waiter calls eo:_try_cancel_io(thread),
 which must close eo and call _epoll_cancel(eo, thread). The canceled thread
-gets CANCEL; other waiters on the same eo get `nil, 'closed'`.
+gets CANCEL; other waiters on the same eo get CLOSED.
 
 SCHEDULING -------------------------------------------------------------------
 
@@ -375,11 +375,8 @@ end
 --silently removed from the epoll list, thus we have to wake up any waiting
 --threads manually when the epollable is closed from another thread.
 local function epoll_cancel_resume(thread, cancel_thread)
-	if thread == cancel_thread then
-		log_error(try_resume_until_blocked_with(thread, false, CANCEL))
-	else
-		log_error(try_resume_until_blocked_with(thread, true, nil, 'closed'))
-	end
+	local err = thread == cancel_thread and CANCEL or CLOSED
+	log_error(try_resume_until_blocked_with(thread, false, err))
 end
 function _epoll_cancel(eo, cancel_thread)
 	local thread = clear_recv_thread(eo)
@@ -392,7 +389,7 @@ function _epoll_cancel(eo, cancel_thread)
 	end
 end
 
-local function check_heap(heap, EXPIRES, THREAD, t)
+local function drain_heap(heap, EXPIRES, THREAD, t)
 	while true do
 		local xo = heap:peek() --xo = expirable object: epollable, wait_job, timer.
 		if not xo then break end --heap is empty
@@ -465,8 +462,8 @@ local function epoll_wait()
 	in_epoll_wait = false
 	--handle timed-out ops.
 	local t = clock()
-	check_heap(send_expires_heap, 'send_expires', 'send_thread', t)
-	check_heap(recv_expires_heap, 'recv_expires', 'recv_thread', t)
+	drain_heap(send_expires_heap, 'send_expires', 'send_thread', t)
+	drain_heap(recv_expires_heap, 'recv_expires', 'recv_thread', t)
 	return true
 end
 
@@ -499,9 +496,7 @@ end
 function _make_async(RW, returns_n, func)
 	local THREAD = RW == 'w' and 'send_thread' or 'recv_thread'
 	return function(eo, ...)
-		if eo[THREAD] then
-			return nil, 'already waiting'
-		end
+		assert(not eo[THREAD], 'already waiting')
 		::again::
 		local ret = func(eo, ...)
 		if ret >= 0 then
@@ -529,9 +524,7 @@ end
 
 function _epoll_try_wait(eo, rw)
 	local THREAD = rw == 'w' and 'send_thread' or 'recv_thread'
-	if eo[THREAD] then
-		return nil, 'already waiting'
-	end
+	assert(not eo[THREAD], 'already waiting')
 	eo[THREAD] = currentthread()
 	return wait_io(eo)
 end
@@ -573,6 +566,7 @@ end
 function wj:resume(...)
 	return unprotect(self:try_resume_with(true, ...))
 end
+--NOTE: the job can be re-armed after cancel, and it's still owned!
 function wj:cancel()
 	local thread = self.recv_thread
 	if not (thread and thread.waiting == self) then return end
@@ -617,7 +611,7 @@ function tm:settimeout(timeout)
 	return self
 end
 function tm:setinterval(interval)
-	--avoid infinite loop in check_heap().
+	--avoid infinite loop in drain_heap().
 	assertf(interval >= 0.02, 'timer interval too short: %.2f', interval)
 	self.interval = interval
 	self:settimeout(interval)
@@ -922,7 +916,7 @@ function Thread:close()
 	assert(self:try_close())
 end
 function Thread:closed()
-	return self._closed
+	return self._closed or false
 end
 
 Thread.setowner = setowner

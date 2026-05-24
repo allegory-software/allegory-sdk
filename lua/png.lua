@@ -595,7 +595,7 @@ function try_png_open(opt)
 	local function spng_read(ctx, _, buf, len)
 		len = tonumber(len)
 		::again::
-		local ok, sz, err = catch('io', read, buf, len)
+		local ok, sz, err = catch('fs pipe net', read, buf, len)
 		if not ok then read_err = sz; return -2 end --SPNG_IO_ERROR
 		if not sz then read_err = err; return -2 end --SPNG_IO_ERROR
 		if sz == 0 then return -1 end -- SPNG_IO_EOF
@@ -802,7 +802,7 @@ function try_png_save(opt)
 	local write_err
 	local function spng_write(ctx, _, buf, len)
 		len = tonumber(len)
-		local caught, ok, err = catch('io', write, buf, len)
+		local caught, ok, err = catch('fs pipe net', write, buf, len)
 		if not caught then write_err = ok; return -2 end --SPNG_IO_ERROR
 		if ok == false or err ~= nil then write_err = err; return -2 end --SPNG_IO_ERROR
 		return 0
@@ -891,7 +891,7 @@ function try_png_save(bmp, file)
 		end,
 	}
 	if not ok then f:try_close(); return nil, err end
-	local ok, err = catch('io', f.sync, f); if not ok then f:try_close(); return nil, err end
+	local ok, err = catch('fs pipe net', f.sync, f); if not ok then f:try_close(); return nil, err end
 	local ok, err = f:try_close(); if not ok then return nil, err end
 	return true
 end

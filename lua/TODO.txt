@@ -20,7 +20,6 @@ ERROR REPORTING & OWNERSHIP
 
 - remove usage of unbuffered read, readn and send (only use buffers).
 
-
 LOGGING
 ------------------------------------------------------------------------------
 * log is incomplete and hard to read:

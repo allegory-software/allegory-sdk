@@ -305,7 +305,7 @@ end
 
 function port()
 	return config'x_forwarded_headers' and assert(tonumber(headers'x-forwarded-port'))
-		or req().tcp.listen_socket:bound_addr():port()
+		or req().tcp.listen_socket:local_addr():port()
 end
 
 function email(user)

@@ -504,7 +504,7 @@ function http_server(...)
 		if tls then
 			local opt = update({}, self.tls_options, listen_opt.tls_options)
 			local stcp = server_stcp(tcp, opt)
-			liveadd(stcp, 'listen=%s', tcp:bound_addr())
+			liveadd(stcp, 'listen=%s', tcp:local_addr())
 			tcp = stcp
 		end
 
@@ -520,22 +520,13 @@ function http_server(...)
 		push(self.listen_sockets, tcp)
 
 		local function accept_connection()
-			local ctcp, err, retry = tcp:try_accept(nil, 5)
-			if not ctcp then
-				if err == 'closed' then return end --stop() called
+			local ctcp, err = tcp:try_accept(nil, 5)
+			if not ctcp then --transient error
 				logerror(tcp, 'accept', '%s', err)
-				if retry then
-					--temporary network error. let it retry but pause a little
-					--to avoid killing the CPU while the error persists.
-					wait(.2)
-				else
-					self:stop()
-				end
-				return
 			end
 			ctcp:setopt('tcp_nodelay', true)
 			if self.debug.tracebacks then
-				ctcp.tracebacks = true --for check_io()
+				ctcp.tracebacks = true
 			end
 			if self.debug.stream then
 				ctcp:debug_stream'http'

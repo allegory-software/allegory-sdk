@@ -116,7 +116,7 @@ function logging:tofile(logfile, max_size, queue_size)
 	end
 
 	local function try_save_message(s)
-		local ok, err = catch('io protocol', save_message, s)
+		local ok, err = catch('fs', save_message, s)
 		if not ok then try_close_file() end
 		return ok
 	end
@@ -220,9 +220,7 @@ function logging:toserver(host, port, queue_size, timeout)
 
 				--send current var states.
 				for k,v in pairs(self.vars) do
-					if not check_io(chan:try_send(logvar_message(self, k, v))) then
-						break
-					end
+					chan:send(logvar_message(self, k, v))
 				end
 
 				--create RPC thread/loop

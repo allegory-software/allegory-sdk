@@ -523,7 +523,7 @@ exec_task:override('init', function(inherited, self, cmd, opt)
 
 		if p.stdin then
 			resume(thread(function()
-				local ok, err = catch('io', p.stdin.write, p.stdin, self.stdin)
+				local ok, err = catch('pipe', p.stdin.write, p.stdin, self.stdin)
 				if not ok then
 					notify_error('stdin:write(): %s', err)
 				end

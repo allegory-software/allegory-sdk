@@ -11,7 +11,7 @@ API
 	- - cstcp:recvn(buf, sz) -> true            receive exactly sz decrypted bytes
 	- - cstcp:recvall([maxlen]) -> buf, len     receive until close_notify
 	- - cstcp:send(buf, [sz]) -> true            send bytes (encrypted)
-	- - cstcp:try_send_close_notify() -> true|nil,err
+	- - cstcp:send_close_notify()
 	- - cstcp:[try_]close()                      close with SSL shutdown
 	- - cstcp:shutdown('r'|'w'|'rw')             shutdown underlying TCP
 	opt table:
@@ -609,6 +609,20 @@ local function ssl_br_error(err)
 	return 'ssl_error_'..(br_err_name[err] or err)
 end
 
+local ssl_engine_bug_errors = {
+	[1]  = true, --bad_param
+	[2]  = true, --bad_state
+	[8]  = true, --no_random: no initial entropy obtainable from the OS
+	[31] = true, --io: not used by this callback-less driver
+	[32] = true, --x509_ok: impossible as a TLS engine failure
+}
+
+local function ssl_engine_error(e)
+	if e == 0 then return 'eof' end
+	if ssl_engine_bug_errors[e] then error(ssl_br_error(e)) end
+	return ssl_alert_error(e) or ssl_br_error(e)
+end
+
 --PEM parsing ----------------------------------------------------------------
 
 local _pem_acc     -- uint8_t* write head
@@ -903,7 +917,7 @@ local function make_client_ctx(opt)
 	if not opt.insecure_noverifycert then
 		local ca = opt.ca or load_ca(opt.ca_file)
 		local ta, ta_n, ta_kp = load_trust_anchors(ca)
-		if not ta then return nil, ta_n end
+		assert(ta, ta_n)
 		append(keepalive, ta_kp)
 		C.br_ssl_client_init_full(sc, xc, ta, ta_n)
 	else
@@ -933,11 +947,11 @@ local function make_client_ctx(opt)
 	local cert, key = cert_key_opt(opt)
 	if cert then
 		local chain, chain_n, chain_kp = load_cert_chain(cert)
-		if not chain then return nil, chain_n end
+		assert(chain, chain_n)
 		append(keepalive, chain_kp)
 
 		local skdc, kt, key_kp = load_private_key(key)
-		if not skdc then return nil, kt end
+		assert(skdc, kt)
 		append(keepalive, key_kp)
 
 		if kt == BR_KEYTYPE_RSA then
@@ -949,6 +963,8 @@ local function make_client_ctx(opt)
 			C.br_ssl_client_set_single_ec(sc, chain, chain_n,
 				sk, bor(BR_KEYTYPE_KEYX, BR_KEYTYPE_SIGN), 0,
 				C.br_ec_get_default(), C.br_ecdsa_sign_asn1_get_default())
+		else
+			error('unsupported_key_type_'..kt)
 		end
 	end
 
@@ -1002,7 +1018,7 @@ local function engine_run(self, target)
 		end
 		if band(state, BR_SSL_CLOSED) ~= 0 then
 			local e = tonumber(eng.err)
-			return nil, e == 0 and 'eof' or ssl_alert_error(e) or ssl_br_error(e)
+			return nil, ssl_engine_error(e)
 		end
 		if band(state, BR_SSL_SENDREC) ~= 0 then
 			local buf = C.br_ssl_engine_sendrec_buf(eng, _szp)
@@ -1018,7 +1034,7 @@ local function engine_run(self, target)
 			if len == 0 then return nil, 'ssl_unexpected_eof' end
 			C.br_ssl_engine_recvrec_ack(eng, len)
 		else
-			return nil, 'ssl_stall'
+			error'ssl_stall'
 		end
 	end
 end
@@ -1031,7 +1047,8 @@ local stcp = {
 	istlssocket  = true,
 	socktype     = 'tcp',
 	debug_prefix = 'X',
-	check_io     = check_io,
+	error_type   = 'net',
+	check_net    = check_net,
 	checkp       = checkp,
 	checknp      = checknp,
 	protect      = protect,
@@ -1042,8 +1059,13 @@ function stcp:onclose(fn)
 	after(self, '_onclose', fn)
 end
 
+function stcp:check_closed()
+	if not self._closed then return end
+	error(CLOSED)
+end
+
 function stcp:shutdown(mode)
-	self:checkp(not self._closed, 'closed')
+	self:check_closed()
 	return self.tcp:shutdown(mode)
 end
 
@@ -1051,11 +1073,8 @@ function stcp:getopt     (...) return self.tcp:getopt     (...) end
 function stcp:setopt     (...) return self.tcp:setopt     (...) end
 function stcp:setexpires (...) return self.tcp:setexpires (...) end
 function stcp:settimeout (...) return self.tcp:settimeout (...) end
-function stcp:wait_job   (...) return self.tcp:wait_job   (...) end
-function stcp:wait_until (...) return self.tcp:wait_until (...) end
-function stcp:wait       (...) return self.tcp:wait       (...) end
 function stcp:remote_addr(...) return self.tcp:remote_addr(...) end
-function stcp:bound_addr (...) return self.tcp:bound_addr (...) end
+function stcp:local_addr (...) return self.tcp:local_addr (...) end
 
 function stcp:debug_stream(protocol_name)
 	return tcp_class.debug_stream(self, protocol_name or 'ssock')
@@ -1074,7 +1093,7 @@ function stcp:try_close()
 	end
 	return ok, err
 end
-stcp.close = make_raising('protocol', stcp.try_close)
+stcp.close = make_raising(stcp.try_close)
 
 function stcp:closed()
 	return self._closed
@@ -1102,10 +1121,7 @@ function _G.try_client_stcp(tcp, host, opt)
 	opt = opt or empty
 	local owner = _check_owner(opt.owner)
 	local sc, eng, keepalive = make_client_ctx(opt)
-	if not sc then return nil, eng end
-	if C.br_ssl_client_reset(sc, host, 0) == 0 then
-		return nil, 'ssl_client_reset_failed'
-	end
+	assert(C.br_ssl_client_reset(sc, host, 0) ~= 0, 'ssl_client_reset_failed')
 	local s = wrap_client_stcp(tcp, eng, keepalive)
 	live(s, 'tcp=%s', tcp)
 	local ok, err = engine_run(s, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
@@ -1117,10 +1133,10 @@ function _G.try_client_stcp(tcp, host, opt)
 	tcp:setowner(s)
 	return s
 end
-_G.client_stcp = make_raising('protocol', _G.try_client_stcp)
+_G.client_stcp = make_raising(_G.try_client_stcp)
 
-function client_stcp:try_send_close_notify()
-	if not self.eng then return true end
+function client_stcp:send_close_notify()
+	if not self.eng then return end
 	local eng = self.eng
 	self.eng = nil --API barrier; only close() allowed after this.
 	C.br_ssl_engine_close(eng)
@@ -1129,26 +1145,25 @@ function client_stcp:try_send_close_notify()
 		if band(state, BR_SSL_SENDREC) ~= 0 then
 			local buf = C.br_ssl_engine_sendrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
-			local ok, err = self.tcp:try_send(buf, n)
-			if not ok then return nil, err end
+			self.tcp:send(buf, n)
 			C.br_ssl_engine_sendrec_ack(eng, n)
 		elseif band(state, BR_SSL_RECVREC) ~= 0 then
 			local buf = C.br_ssl_engine_recvrec_buf(eng, _szp)
 			local n = tonumber(_szp[0])
-			local len, err = self.tcp:try_recv(buf, n)
-			if not len or len == 0 then return nil, err or 'eof' end
+			local len = self.tcp:recv(buf, n)
+			self:check_net(len > 0, 'ssl_unexpected_eof')
 			C.br_ssl_engine_recvrec_ack(eng, len)
 		elseif band(state, BR_SSL_CLOSED) ~= 0 then
-			return true
+			return
 		else
-			return nil, 'ssl_stall'
+			error'ssl_stall'
 		end
 	end
 end
 
 function client_stcp:try_recv(buf, sz)
 	assert(sz and sz > 0, 'recv size must be > 0')
-	if self._closed then return nil, 'closed' end
+	self:check_closed()
 	local ok, err = engine_run(self, BR_SSL_RECVAPP)
 	if not ok then
 		if err == 'eof' then return 0 end
@@ -1162,14 +1177,13 @@ function client_stcp:try_recv(buf, sz)
 end
 
 function client_stcp:send(buf, sz)
-	self:checkp(not self._closed, 'closed')
+	self:check_closed()
 	sz = sz or #buf
 	if sz == 0 then return true end --mask-out null-writes
 	local bp = cast(u8p, buf)
 	local sent = 0
 	while sent < sz do
-		local ok, err = engine_run(self, BR_SSL_SENDAPP)
-		if not ok then self:checkp(false, err) end
+		self:check_net(engine_run(self, BR_SSL_SENDAPP))
 		local app_buf = C.br_ssl_engine_sendapp_buf(self.eng, _szp)
 		local n = min(sz - sent, tonumber(_szp[0]))
 		copy(app_buf, bp + sent, n)
@@ -1178,13 +1192,12 @@ function client_stcp:send(buf, sz)
 		sent = sent + n
 	end
 	-- drain encrypted output to TCP; ignore EOF (data already accepted)
-	local ok, err = engine_run(self, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP))
-	if not ok then self:checkp(false, err) end
+	self:check_net(engine_run(self, bor(BR_SSL_SENDAPP, BR_SSL_RECVAPP)))
 	return true
 end
 
-client_stcp.close       = make_raising('protocol', client_stcp.try_close)
-client_stcp.recv        = make_raising('protocol', client_stcp.try_recv)
+client_stcp.close       = make_raising(client_stcp.try_close)
+client_stcp.recv        = make_raising(client_stcp.try_recv)
 client_stcp.recvall     = tcp_class.recvall
 client_stcp.recvn       = tcp_class.recvn
 client_stcp.readn       = client_stcp.recvn
@@ -1238,20 +1251,16 @@ function _G.try_server_stcp(tcp, opt)
 	live(s, 'tcp=%s', tcp)
 	return s
 end
-_G.server_stcp = make_raising('protocol', _G.try_server_stcp)
+_G.server_stcp = make_raising(_G.try_server_stcp)
 
 function server_stcp:try_accept(opt, timeout)
-	if self:closed() then return nil, 'closed' end
+	self:check_closed()
 	local ctcp, err, retry = self.tcp:try_accept(opt, timeout)
 	if not ctcp then return nil, err, retry end
 
 	local sc, eng, keepalive = make_server_ctx(
 		self._chain, self._chain_n, self._sk, self._kt, self._issuer_kt, self._cache)
-
-	if C.br_ssl_server_reset(sc) == 0 then
-		ctcp:try_close()
-		return nil, 'ssl_server_reset_failed'
-	end
+	assert(C.br_ssl_server_reset(sc) ~= 0, 'ssl_server_reset_failed')
 
 	local s = wrap_client_stcp(ctcp, eng, keepalive)
 	s.listen_socket = self
@@ -1272,4 +1281,4 @@ function server_stcp:try_accept(opt, timeout)
 
 	return s
 end
-server_stcp.accept = make_raising('protocol', server_stcp.try_accept)
+server_stcp.accept = make_raising(server_stcp.try_accept)

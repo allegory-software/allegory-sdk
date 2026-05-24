@@ -19,23 +19,21 @@ SOCKETS
 	issocket(s) -> t|f                     check if s is a socket
 	s.fd -> fd                             POSIX file descriptor
 	s:[try_]bind(addr, [port])             bind socket to an address
-	s:bound_addr() -> sa                   get bound sockaddr
+	s:local_addr() -> sa                   get local sockaddr
 	s:setopt(opt, val)                     set socket option ('so_*', 'tcp_*', etc.)
 	s:getopt(opt) -> val                   get socket option
 	s:debug_stream([protocol_name])        log recv/send data
-WAIT JOBS
-	s:wait_job() -> sj          wait job that is auto-canceled on socket close
-	s:wait_until(t) -> ...      wait_until() on auto-canceled wait job
-	s:wait(s) -> ...            wait() on auto-canceled wait job
-TCP
+	TCP
 	tcp([family='ip'], [opt]) -> tcp                make a SOCK_STREAM socket
-	[try_]connect(addr, [port], [timeout], [client_ip]) -> tcp  create tcp socket and connect
-	listen(addr, [port], [backlog], [onaccept]) -> tcp          create tcp socket and listen
-	tcp:[try_]connect(addr, [port])                 connect to an address
-	tcp:[try_]send(s|buf, [len], [flags]) -> true   send bytes to connected address
+	try_connect(addr, [port], [timeout], [client_ip]) -> tcp | nil,err
+	connect(addr, [port], [timeout], [client_ip]) -> tcp
+	[try_]listen(addr, [port], [backlog], [onaccept]) -> tcp    create tcp socket and listen
+	tcp:try_connect(addr, [port]) -> true | false,err
+	tcp:connect(addr, [port]) -> true
+	tcp:send(s|buf, [len], [flags])                 send bytes to connected address
 	tcp:[try_]recv(buf, maxlen) -> len|0            receive bytes
-	tcp:[try_]listen(addr, [port], [backlog], [onaccept])         put socket in listening mode
-	tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err,[retry]  accept a client connection
+	tcp:[try_]listen(addr, [port], [backlog], [onaccept])        put socket in listening mode
+	tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err         accept a client connection
 	tcp:recvn(buf, n) -> true                       receive n bytes
 	tcp:recvall([maxlen]) -> buf, len               receive until closed
 	tcp:remote_addr() -> sa                         get connected/accepted sockaddr
@@ -74,7 +72,8 @@ s:[try_]close()
 	returned 0 yet), or 2) so_linger socket option was set with a zero timeout,
 	then a TCP RST packet is sent to the client, otherwise a FIN is sent.
 
-s:[try_]bind(addr, [port])
+s:try_bind(addr, [port]) -> true | false, err
+s:bind(addr, [port]) -> s
 
 	Bind socket to an interface/port (which defaults to '0.0.0.0:0' / ':::0'
 	meaning all interfaces and a random port).
@@ -89,21 +88,25 @@ s:settimeout(seconds|nil, ['r'|'w'])
 tcp|udp:[try_]connect(addr, ...)
 
 	Connect to an address.
+	For TCP sockets, a failed connection attempt consumes the socket: close it
+	and create a new one before retrying. tcp:try_connect() returns false,err
+	for normal connection-attempt outcomes; global try_connect() closes the
+	failed socket and returns nil,err. Other failures raise.
 
 	For UDP sockets, this has the effect of filtering incoming packets so that
 	only those coming from the connected address get through the socket. Also,
-	you can call connect() multiple times (use ('0.0.0.0', 0) to switch back to
-	unfiltered mode).
+	you can call connect() multiple times to change the default peer.
 
-tcp:[try_]send(s|buf, [len], [flags]) -> true
+tcp:send(s|buf, [len], [flags]) -> true
 
-	Send bytes to the connected address.
-	Trying to send zero bytes is allowed but it's a no-op (doesn't go to the OS).
+	Send bytes to the connected address. len = 0 is a no-op.
 
 udp:[try_]send(s|buf, [len], [flags]) -> len
 
 	Send bytes to the connected address.
 	Empty packets (zero bytes) are allowed.
+	try_send() returns nil,err only for actionable UDP errors like timeout,
+	ICMP status, message_too_long and no_buffer_space; other errors raise.
 
 tcp:[try_]recv(buf, maxlen, [flags]) -> len | 0
 
@@ -112,15 +115,18 @@ tcp:[try_]recv(buf, maxlen, [flags]) -> len | 0
 
 udp:[try_]recv(buf, maxlen, [flags]) -> len
 
-	Receive a datagram. Zero-length datagrams are allowed.
+	Receive a datagram. maxlen must be > 0. Zero-length datagrams are allowed.
+	Returns nil,'message_too_long' if the datagram was truncated.
+	Other non-actionable receive errors raise.
 
-tcp:[try_]listen(addr, [port], [backlog], [onaccept])
+tcp:try_listen(addr, [port], [backlog], [onaccept]) -> true | false, err
+tcp:listen(addr, [port], [backlog], [onaccept]) -> tcp
 
-	Put the socket in listening mode, binding the socket if not bound already
-	(in which case addr is ignored). The backlog defaults
-	to 1/0 which means "use the maximum allowed".
+	Put the socket in listening mode, binding the socket to addr first.
+	The socket must not already be bound. The backlog defaults to 1/0
+	which means "use the maximum allowed".
 
-tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err,[retry]
+tcp:[try_]accept([opt], [timeout]) -> ctcp | nil,err
 
 	Accept a client connection. Timeout is to limit TLS handshake for sock_bearssl.
 
@@ -141,11 +147,16 @@ udp:[try_]sendto(addr, [port], s|buf, [maxlen], [flags]) -> len
 
 	Send a datagram to a specific destination, regardless of whether the socket
 	is connected or not.
+	try_sendto() has the same error policy as try_send().
 
 udp:[try_]recvnext(buf, maxlen, [flags]) -> len, sa
 
 	Receive the next incoming datagram, wherever it came from, along with the
 	source address. If the socket is connected, packets are still filtered though.
+	maxlen must be > 0. Returns nil,'message_too_long' if the datagram was
+	truncated. Other non-actionable receive errors raise.
+
+	WARNING: `sa` is a global, use it before yielding or calling recvnext() again!
 
 tcp:shutdown(['r'|'w'|'rw'])
 
@@ -355,11 +366,11 @@ function try_sockaddr(...)
 end
 function sockaddrs(s, ...)
 	local sas, err = try_sockaddrs(s, ...)
-	return check_io(nil, sas, '%s: %s', err or 'invalid address', s)
+	return check_net(s, sas, '%s: %s', err or 'invalid address', s)
 end
 function sockaddr(s, ...)
 	local sa, err = try_sockaddr(s, ...)
-	return check_io(nil, sa, '%s: %s', err or 'invalid address', s)
+	return check_net(s, sa, '%s: %s', err or 'invalid address', s)
 end
 
 local sa = {}
@@ -423,21 +434,36 @@ int ioctl(int s, long cmd, unsigned long *argp, ...);
 int getsockopt(int sockfd, int level, int optname, char *optval, unsigned int *optlen);
 int setsockopt(int sockfd, int level, int optname, const char *optval, unsigned int optlen);
 int recv(int s, char *buf, int len, int flags);
-int recvfrom(int s, char *buf, int len, int flags, struct sockaddr *from, int *fromlen);
 int send(int s, const char *buf, int len, int flags);
 int sendto(int s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen);
 int getsockname(int sockfd, struct sockaddr *restrict addr, int *restrict addrlen);
+typedef unsigned int socklen_t;
+typedef long ssize_t;
+struct iovec {
+	void *iov_base;
+	size_t iov_len;
+};
+struct msghdr {
+	void *msg_name;
+	socklen_t msg_namelen;
+	struct iovec *msg_iov;
+	size_t msg_iovlen;
+	void *msg_control;
+	size_t msg_controllen;
+	int msg_flags;
+};
+ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags);
 ]]
 
 local socket = {
-	debug_prefix = 'S',
-	check_io = check_io,
+	error_type = 'net',
+	check_net = check_net,
 	checkp = checkp,
 	checknp = checknp,
-	protect = protect,
+	debug_prefix = 'S',
 } --common socket methods
-local tcp = {type = 'tcp_socket', socktype = 'tcp'} --all SOCK_STREAM really
-local udp = {type = 'udp_socket', socktype = 'udp'} --all SOCK_DGRAM really
+local tcp = {type = 'tcp'} --all SOCK_STREAM really
+local udp = {type = 'udp'} --all SOCK_DGRAM really
 
 function issocket(s)
 	local mt = getmetatable(s)
@@ -454,7 +480,7 @@ local function _make_socket(owner, fd, class, family, opt)
 		r = 0, w = 0,
 	}, opt))
 	_epoll_add(s)
-	live(s, '%s/%s fd=%d', s.socktype, family, s.fd)
+	live(s, '%s/%s fd=%d', s.type, family, s.fd)
 	return s
 end
 
@@ -514,10 +540,14 @@ function socket:_try_cancel_io(cancel_thread)
 	if self.fd == -1 then return nil, 'thread not waiting' end
 	return socket_try_close(self, cancel_thread)
 end
-socket.close = make_raising('io', socket.try_close)
+socket.close = make_raising(socket.try_close)
 
 function socket:closed()
 	return self.fd == -1
+end
+function socket:check_closed()
+	if self.fd ~= -1 then return end
+	error(CLOSED)
 end
 
 function socket:onclose(fn)
@@ -531,136 +561,111 @@ function socket:_epoll_error()
 	return self:getopt'so_error' --NOTE: this clears the error!
 end
 
-function socket:wait_job()
-	local job = wait_job()
-	self:onclose(function()
-		job:cancel()
-	end)
-	return job
-end
-function socket:wait_until(expires)
-	return self:wait_job():wait_until(expires)
-end
-function socket:wait(timeout)
-	return self:wait_job():wait(timeout)
-end
-
---async sock functions -------------------------------------------------------
-
-local socket_connect = _make_async_connect(function(self, sa)
-	return C.connect(self.fd, sa, sa:size())
-end)
-
-function tcp:try_connect(addr, port)
-	if self.fd == -1 then return nil, 'closed' end
-	local resolve_timeout = self.send_expires and self.send_expires - clock()
-	local sa, err = try_sockaddr(addr, port, resolve_timeout)
-	if not sa then return nil, err end
-	log('', 'sock', 'connect', '%-4s %s', self, sa:tostring())
-	if not self._bound_addr and self.family ~= 'unix' then
-		local ok, err = self:try_bind()
-		if not ok then return false, err end
-	end
-	local ok, err = socket_connect(self, sa)
-	if not ok then return false, err end
-	self._remote_addr = sa
-	live(self, 'connected %s', sa:tostring())
-	return true
-end
-tcp.connect = make_raising('io', tcp.try_connect)
-udp.try_connect = tcp.try_connect
-udp.connect = make_raising('io', udp.try_connect)
-
 function tcp:remote_addr()
 	return self._remote_addr
 end
 
-do
-	local nbuf = new'int[1]'
-	local socket_accept = _make_async('r', false, function(self, accept_sa)
-		nbuf[0] = sizeof(sockaddr_ct)
-		local r = C.accept4(self.fd, accept_sa, nbuf, bor(SOCK_NONBLOCK, SOCK_CLOEXEC))
-		return r
-	end)
+--accept(), recv(), send() ---------------------------------------------------
 
-	function tcp:try_accept(opt, timeout)
-		if self.fd == -1 then return nil, 'closed' end
-		local accept_sa = sockaddr_ct()
-		local fd, err = socket_accept(self, accept_sa)
-		--See man accept(2): Linux can return these pending connection errors.
-		local retry =
-			   err == 'network_down'
-			or err == 'protocol_error'
-			or err == 'protocol_not_available'
-			or err == 'host_down'
-			or err == 'network_missing'
-			or err == 'host_unreachable'
-			or err == 'not_supported'
-			or err == 'network_unreachable'
-			or err == 'connection_aborted'
-		if not fd then
-			return nil, err, retry
-		end
-		--must check owner after socket_accept() returns because it's async.
-		local ok, owner_or_err = pcall(_check_owner, opt and opt.owner)
-		if not ok then C.close(fd); error(owner_or_err, 0) end
-		local s = _make_socket(owner_or_err, fd, tcp, self.family, opt)
-		self._sockets_n = self._sockets_n + 1
-		self._sockets[s] = true
-		self.next_i = (self.next_i or 0) + 1
-		s.i = self.next_i
-		live(s, 'accepted %s.%d %s fd=%d clients:%d',
-			self, s.i, accept_sa:tostring(), s.fd, self._sockets_n)
-		s._remote_addr = accept_sa
-		s.listen_socket = self
-		if timeout then
-			s:settimeout(timeout)
-		end
-		return s
+do
+local nbuf = new'int[1]'
+local socket_accept = _make_async('r', false, function(self, accept_sa)
+	nbuf[0] = sizeof(sockaddr_ct)
+	local r = C.accept4(self.fd, accept_sa, nbuf, bor(SOCK_NONBLOCK, SOCK_CLOEXEC))
+	return r
+end)
+
+function tcp:try_accept(opt, timeout)
+	self:check_closed()
+	local accept_sa = sockaddr_ct()
+	local fd, err = socket_accept(self, accept_sa)
+	--See man accept(2): Linux can return these pending connection errors.
+	local retriable =
+		err == 'timeout'
+		or err == 'network_down' --eth cable pulled?
+		or err == 'protocol_error' --bad packet
+		or err == 'protocol_not_available' --bad protocol option in packet
+		or err == 'host_down' --host down during handshake
+		or err == 'network_missing' --eth cable pulled?
+		or err == 'host_unreachable' --routing changed?
+		or err == 'network_unreachable' --routing changed?
+		or err == 'connection_aborted' --client disconnected before accept completed
+	if not fd then
+		self:check_net(retriable, err)
+		return nil, err
 	end
-	function tcp:accept(...)
-		local s, err, retry = self:try_accept(...)
-		if s then return s end
-		self:check_io(retry, err)
-		return nil, err, true
+	--must check owner after socket_accept() returns because it's async.
+	local ok, owner_or_err = pcall(_check_owner, opt and opt.owner)
+	if not ok then C.close(fd); error(owner_or_err, 0) end
+	local s = _make_socket(owner_or_err, fd, tcp, self.family, opt)
+	self._sockets_n = self._sockets_n + 1
+	self._sockets[s] = true
+	self.next_i = (self.next_i or 0) + 1
+	s.i = self.next_i
+	live(s, 'accepted %s.%d %s fd=%d clients:%d',
+		self, s.i, accept_sa:tostring(), s.fd, self._sockets_n)
+	s._remote_addr = accept_sa
+	s.listen_socket = self
+	if timeout then
+		s:settimeout(timeout)
 	end
+	return s
 end
+tcp.accept = make_raising(tcp.try_accept)
+end --accept scope
 
 local MSG_NOSIGNAL = 0x4000
 
---NOTE: to send many small pieces use a pbuffer instead, this will crawl!
 local socket_send = _make_async('w', true, function(self, buf, sz, flags)
 	return C.send(self.fd, buf, sz, flags or MSG_NOSIGNAL)
 end)
-function socket:try_send(buf, sz, flags)
-	if self.fd == -1 then return nil, 'closed' end
+
+--NOTE: to send many small pieces use a pbuffer instead, this will crawl!
+function tcp:send(buf, sz, flags)
+	self:check_closed()
 	sz = sz or #buf
 	if sz == 0 then return true end --mask-out null-writes
 	local left = sz
 	while true do
 		local n, err = socket_send(self, buf, left, flags)
-		if not n then return nil, err end
-		if n == 0 then return nil, 'eof' end --shouldn't be possible
+		self:check_net(n, err)
 		left = left - n
-		if left == 0 then return true end
+		if left == 0 then return end
 		if isstr(buf) then --only creating a buffer on a rare second pass.
 			buf = cast(u8p, buf)
 		end
 		buf = buf + n
 	end
 end
-socket.send = make_raising('io', socket.try_send)
-socket.try_write = socket.try_send
-socket.write = socket.send
+tcp.write = tcp.send
+
+local udp_actionable_errors = {
+	timeout = true,
+	connection_refused = true, --ICMP port unreachable for a connected UDP peer
+	network_unreachable = true, --no route to destination network
+	host_unreachable = true, --no route to destination host
+	network_down = true, --local network interface/link is down
+	host_down = true, --destination host reported down/unreachable
+	network_missing = true, --destination network disappeared/unavailable
+	protocol_error = true, --ICMP protocol error reported for a datagram
+	protocol_not_available = true, --ICMP protocol unreachable for a datagram
+	message_too_long = true, --recv buffer too small
+	no_buffer_space = true, --send buffer full
+}
+
+local function udp_error(self, err)
+	if udp_actionable_errors[err] then return nil, err end
+	self:check_net(false, err)
+end
 
 function udp:try_send(buf, sz, flags)
-	if self.fd == -1 then return nil, 'closed' end
+	self:check_closed()
 	sz = sz or #buf
-	local n, err = socket_send(self, buf, sz, flags)
-	if not n then return nil, err end
-	return n
+	local len, err = socket_send(self, buf, sz, flags)
+	if not len then return udp_error(self, err) end
+	return len
 end
-udp.send = make_raising('io', udp.try_send)
+udp.send = make_raising(udp.try_send)
 udp.try_write = udp.try_send
 udp.write = udp.send
 
@@ -669,59 +674,219 @@ local socket_recv = _make_async('r', true, function(self, buf, sz, flags)
 end)
 
 --NOTE: to read many small pieces, use a pbuffer instead, this will crawl!
-function socket:try_recv(buf, sz, flags)
+function tcp:try_recv(buf, sz, flags)
 	assert(sz and sz > 0, 'recv size must be > 0')
-	if self.fd == -1 then return nil, 'closed' end
-	return socket_recv(self, buf, sz, flags)
+	self:check_closed()
+	local n, err = socket_recv(self, buf, sz, flags)
+	self:check_net(n, err)
+	return n
 end
-socket.recv = make_raising('io', socket.try_recv)
-socket.try_read = socket.try_recv
-socket.read = socket.recv
+tcp.recv = make_raising(tcp.try_recv)
+tcp.try_read = tcp.try_recv
+tcp.read = tcp.recv
 
-function udp:try_recv(buf, sz, flags)
-	if self.fd == -1 then return nil, 'closed' end
-	return socket_recv(self, buf, sz, flags)
-end
-udp.recv = make_raising('io', udp.try_recv)
-udp.try_read = udp.try_recv
-udp.read = udp.recv
-
-local udp_sendto = _make_async('w', true, function(self, sa, buf, len, flags)
+local socket_sendto = _make_async('w', true, function(self, sa, buf, len, flags)
 	return C.sendto(self.fd, buf, len, flags or 0, sa, sa:size())
 end)
 
 function udp:try_sendto(addr, port, buf, len, flags)
-	if self.fd == -1 then return nil, 'closed' end
+	self:check_closed()
 	len = len or #buf
 	local resolve_timeout = self.send_expires and self.send_expires - clock()
 	local sa, err = try_sockaddr(addr, port, resolve_timeout)
 	if not sa then return nil, err end
-	local len, err = udp_sendto(self, sa, buf, len, flags)
-	if not len then return nil, err end
+	local len, err = socket_sendto(self, sa, buf, len, flags)
+	if not len then return udp_error(self, err) end
 	return len
 end
-udp.sendto = make_raising('io', udp.try_sendto)
+udp.sendto = make_raising(udp.try_sendto)
 
 do
-	local src_buf = sockaddr_ct()
-	local src_buf_len = sizeof(src_buf)
-	local src_len_buf = new'int[1]'
-
-	local udp_recvnext = _make_async('r', true, function(self, buf, len, flags)
-		src_len_buf[0] = src_buf_len
-		return C.recvfrom(self.fd, buf, len, flags or 0, src_buf, src_len_buf)
-	end)
-
-	function udp:try_recvnext(buf, len, flags)
-		if self.fd == -1 then return nil, 'closed' end
-		assert(len > 0)
-		local len, err = udp_recvnext(self, buf, len, flags)
-		if not len then return nil, err end
-		assert(src_len_buf[0] <= src_buf_len) --not truncated
-		return len, src_buf
-	end
+local MSG_TRUNC = 0x20
+local recv_iov = new'struct iovec[1]'
+local recv_msg = new'struct msghdr'
+local src_buf = sockaddr_ct()
+local src_buf_len = sizeof(src_buf)
+local function recvmsg_raw(self, buf, len, flags, src)
+	recv_iov[0].iov_base = buf
+	recv_iov[0].iov_len = len
+	recv_msg.msg_name = src
+	recv_msg.msg_namelen = src and src_buf_len or 0
+	recv_msg.msg_iov = recv_iov
+	recv_msg.msg_iovlen = 1
+	recv_msg.msg_control = nil
+	recv_msg.msg_controllen = 0
+	recv_msg.msg_flags = 0
+	return tonumber(C.recvmsg(self.fd, recv_msg, flags or 0))
 end
-udp.recvnext = make_raising('io', udp.try_recvnext)
+local function recvmsg_truncated()
+	return band(recv_msg.msg_flags, MSG_TRUNC) ~= 0
+end
+local socket_recvmsg = _make_async('r', true, function(self, buf, len, flags)
+	return recvmsg_raw(self, buf, len, flags)
+end)
+local socket_recvmsgfrom = _make_async('r', true, function(self, buf, len, flags)
+	return recvmsg_raw(self, buf, len, flags, src_buf)
+end)
+function udp:try_recv(buf, sz, flags)
+	self:check_closed()
+	assert(sz and sz > 0, 'recv size must be > 0')
+	local len, err = socket_recvmsg(self, buf, sz, flags)
+	if not len then return udp_error(self, err) end
+	if recvmsg_truncated() then return nil, 'message_too_long' end
+	return len
+end
+function udp:try_recvnext(buf, len, flags)
+	self:check_closed()
+	assert(len and len > 0, 'recv size must be > 0')
+	local len, err = socket_recvmsgfrom(self, buf, len, flags)
+	if not len then return udp_error(self, err) end
+	if recvmsg_truncated() then return nil, 'message_too_long' end
+	assert(recv_msg.msg_namelen <= src_buf_len) --source address not truncated
+	return len, src_buf
+end
+end --try_recvnext scope
+udp.recv = make_raising(udp.try_recv)
+udp.try_read = udp.try_recv
+udp.read = udp.recv
+udp.recvnext = make_raising(udp.try_recvnext)
+
+--bind() ---------------------------------------------------------------------
+
+cdef[[
+int bind(SOCKET s, const sockaddr*, int namelen);
+]]
+
+function socket:try_bind(addr, port)
+	self:check_closed()
+	addr = addr or
+		self.family == 'ip'  and '0.0.0.0:'..(port or 0) or
+		self.family == 'ip6' and '[::]:'..(port or 0)
+		or nil
+	local sa, err = try_sockaddr(addr, port)
+	self:check_net(sa, err or 'invalid address')
+	local ok, err = try_errno(C.bind(self.fd, sa, sa:size()) == 0)
+	if not ok and err == 'address_already_in_use' then return false, err end
+	self:check_net(ok, err)
+	return true
+end
+function socket:bind(addr, port)
+	self:check_net(self:try_bind(addr, port))
+	return self
+end
+
+function socket:local_addr()
+	self:check_closed()
+	local sa = sockaddr_ct()
+	local nbuf = new('int[1]', sizeof(sa))
+	self:check_net(try_errno(C.getsockname(self.fd, sa, nbuf) == 0))
+	return sa
+end
+
+--connect() ------------------------------------------------------------------
+
+local socket_connect = _make_async_connect(function(self, sa)
+	return C.connect(self.fd, sa, sa:size())
+end)
+
+local connect_actionable_errors = {
+	timeout = true,
+	connection_refused = true, --destination actively refused the connection
+	network_unreachable = true, --no route to destination network
+	host_unreachable = true, --no route to destination host
+	network_down = true, --local network interface/link is down
+	host_down = true, --destination host reported down/unreachable
+	network_missing = true, --destination network disappeared/unavailable
+	address_not_available = true, --local/source address is not usable
+}
+
+local udp_connect_actionable_errors = {
+	timeout = true,
+	network_unreachable = true, --no route to destination network
+	host_unreachable = true, --no route to destination host
+	network_down = true, --local network interface/link is down
+	host_down = true, --destination host reported down/unreachable
+	network_missing = true, --destination network disappeared/unavailable
+	address_not_available = true, --local/source address is not usable
+}
+
+function tcp:try_connect(addr, port)
+	self:check_closed()
+	local resolve_timeout = self.send_expires and self.send_expires - clock()
+	local sa, err = try_sockaddr(addr, port, resolve_timeout)
+	if not sa then return nil, err end
+	log('', 'sock', 'connect', '%-4s %s', self, sa:tostring())
+	local ok, err = socket_connect(self, sa)
+	if not ok then
+		if connect_actionable_errors[err] then return false, err end
+		self:check_net(false, err)
+	end
+	self._remote_addr = sa
+	live(self, 'connected %s', sa:tostring())
+	return true
+end
+tcp.connect = make_raising(tcp.try_connect)
+
+function udp:try_connect(addr, port)
+	self:check_closed()
+	local resolve_timeout = self.send_expires and self.send_expires - clock()
+	local sa, err = try_sockaddr(addr, port, resolve_timeout)
+	if not sa then return nil, err end
+	log('', 'sock', 'connect', '%-4s %s', self, sa:tostring())
+	local ok, err = try_errno(C.connect(self.fd, sa, sa:size()) == 0)
+	if not ok then
+		if udp_connect_actionable_errors[err] then return false, err end
+		self:check_net(false, err)
+	end
+	self._remote_addr = sa
+	live(self, 'connected %s', sa:tostring())
+	return true
+end
+udp.connect = make_raising(udp.try_connect)
+
+--listen() -------------------------------------------------------------------
+
+cdef[[
+int listen(SOCKET s, int backlog);
+]]
+
+function tcp:try_listen(addr, port, backlog, onaccept)
+	local ok, err = self:try_bind(addr, port)
+	if not ok then return false, err end
+	local local_addr = self:local_addr()
+	log('', 'sock', 'listen?', '%-4s %s', self, local_addr)
+	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
+	self:check_net(try_errno(C.listen(self.fd, backlog) == 0))
+	liveadd(self, 'listen=%s', local_addr)
+	self._sockets = {} --live client connections: {socket->true}
+	self._sockets_n = 0 --live client connection count
+
+	if onaccept then
+		local logged
+		repeat
+			local ctcp, err = self:try_accept()
+			if not ctcp then
+				--transient error. log it but just once until it succeeds again.
+				if not logged then
+					logged = true
+					log('ERROR', 'sock', 'accept', '%s: %s', self, err)
+				end
+			else
+				logged = false
+				resume(thread(function()
+					ctcp:setowner(currentthread())
+					onaccept(self, ctcp)
+				end, 'accept %s %s', self, ctcp))
+			end
+		until self:closed()
+	end
+
+	return true
+end
+function tcp:listen(...)
+	self:check_net(self:try_listen(...))
+	return self
+end
 
 --shutdown() -----------------------------------------------------------------
 
@@ -731,7 +896,7 @@ int shutdown(SOCKET s, int how);
 
 local ENOTCONN = 107
 function tcp:shutdown(which)
-	self:check_io(self.fd ~= -1, 'closed')
+	self:check_closed()
 	local ok = C.shutdown(self.fd,
 		   which == 'r' and 0
 		or which == 'w' and 1
@@ -740,83 +905,6 @@ function tcp:shutdown(which)
 	if errno() == ENOTCONN then return true end --peer closed first.
 	check_errno(ok, errno())
 end
-
---bind() ---------------------------------------------------------------------
-
-cdef[[
-int bind(SOCKET s, const sockaddr*, int namelen);
-]]
-
-function socket:try_bind(addr, port)
-	if self.fd == -1 then return nil, 'closed' end
-	if self._bound_addr then return nil, 'already_bound' end
-	addr = addr or
-		self.family == 'ip'  and '0.0.0.0:'..(port or 0) or
-		self.family == 'ip6' and '[::]:'..(port or 0)
-		or nil
-	local sa, err = try_sockaddr(addr, port)
-	if not sa then return nil, err end
-	local ok, err = try_errno(C.bind(self.fd, sa, sa:size()) == 0)
-	if not ok then return false, err end
-	self._bound_addr = sa
-	return true
-end
-socket.bind = make_raising('io', socket.try_bind)
-
-function socket:bound_addr()
-	local sa = self._bound_addr
-	if not sa then
-		sa = sockaddr_ct()
-		local nbuf = new('int[1]', sizeof(sa))
-		self:check_io(try_errno(C.getsockname(self.fd, sa, nbuf) == 0))
-		self._bound_addr = sa
-	end
-	return sa
-end
-
---listen() -------------------------------------------------------------------
-
-cdef[[
-int listen(SOCKET s, int backlog);
-]]
-
-function tcp:try_listen(addr, port, backlog, onaccept)
-	if self._bound_addr then return nil, 'already_bound' end
-	local sa, err = try_sockaddr(addr, port)
-	if not sa then return nil, err end
-	log('', 'sock', 'listen?', '%-4s %s', self, sa:tostring())
-	local ok, err = self:try_bind(sa)
-	if not ok then return nil, err end
-	backlog = clamp(backlog or 1/0, 0, 0x7fffffff)
-	local ok = C.listen(self.fd, backlog) == 0
-	if not ok then return try_errno() end
-	liveadd(self, 'listen=%s', self._bound_addr)
-	self._sockets = {} --live client connections: {socket->true}
-	self._sockets_n = 0 --live client connection count
-
-	if onaccept then
-		repeat
-			local ctcp, err = self:try_accept()
-			if not ctcp then
-				if not self:closed() then
-					--transient error. let it retry but pause a little
-					--to avoid killing the CPU while the error persists.
-					wait(.2)
-				end
-			else
-				resume(thread(function()
-					local ok, err = pcall(onaccept, self, ctcp)
-					ctcp:close()
-					ctcp:checkp(ok or type(err) == 'table' and err.type == 'io',
-						'%s', err)
-				end, 'accept %s %s', self, ctcp))
-			end
-		until self:closed()
-	end
-
-	return self
-end
-tcp.listen = make_raising('io', tcp.try_listen)
 
 do --getopt() & setopt() -----------------------------------------------------
 
@@ -1009,15 +1097,15 @@ end
 
 local szbuf = i32a(1, 4)
 function socket:getopt(k) --can't wrap with make_raising because it returns false
-	self:check_io(self.fd ~= -1, 'closed')
+	self:check_closed()
 	local opt, level = parse_opt(k)
 	local get = assertf(get_opt[k], 'write-only socket option: %s', k)
-	self:check_io(try_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0))
+	check_errno(C.getsockopt(self.fd, level, opt, buf.c, szbuf) == 0)
 	return get(buf, szbuf[0])
 end
 
 function socket:setopt(k, v)
-	self:check_io(self.fd ~= -1, 'closed')
+	self:check_closed()
 	local opt, level = parse_opt(k)
 	local set = assertf(set_opt[k], 'read-only socket option: %s', k)
 	local buf, sz = set(v)
@@ -1035,7 +1123,7 @@ function tcp:recvn(buf, sz)
 	while sz > 0 do
 		local len, err = self:try_recv(buf, sz)
 		if not len or len == 0 then --short read
-			self:check_io(false, err or 'eof')
+			self:check_net(false, err or 'eof')
 		end
 		buf = buf + len
 		sz  = sz  - len
@@ -1062,7 +1150,7 @@ function socket:debug_stream(protocol_name)
 		if not err then ds('<', str(buf, sz)); return sz end
 		return sz, err
 	end)
-	self.recv = make_raising('io', self.try_recv)
+	self.recv = make_raising(self.try_recv)
 	self.try_read = self.try_recv
 	self.read = self.recv
 
@@ -1094,11 +1182,7 @@ function try_connect(addr, port, timeout, client_ip)
 	local self = create_tcp(sa:family())
 	self:settimeout(timeout)
 	if client_ip then
-		local ok, err = self:try_bind(client_ip)
-		if not ok then
-			self:try_close()
-			return nil, err
-		end
+		self:bind(client_ip)
 	end
 	local ok, err = self:try_connect(sa)
 	if not ok then
@@ -1109,7 +1193,7 @@ function try_connect(addr, port, timeout, client_ip)
 	return self
 end
 function connect(...)
-	return check_io(nil, try_connect(...))
+	return check_net(nil, try_connect(...))
 end
 
 function listen(addr, port, backlog, onaccept)
@@ -1124,7 +1208,7 @@ function listen(addr, port, backlog, onaccept)
 	else
 		self:setopt('so_reuseaddr', true)
 	end
-	return self:listen(sa, backlog, onaccept)
+	return self:listen(sa, nil, backlog, onaccept)
 end
 
 --wrap-up --------------------------------------------------------------------

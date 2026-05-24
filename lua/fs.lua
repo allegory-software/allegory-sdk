@@ -71,8 +71,8 @@ FILE ATTRIBUTES
 	set_file_attr(path, attr, [deref]) -> ok|nil,'not_found' set file attribute(s)
 	file_is(path, [type], [deref]) -> t|f,['not_found'] check if file exists or is of a certain type
 	exists                                      = file_is
-	check_exists(path, [type], [deref])           check_io that file exists
-	mtime(path, [deref]) -> ts|nil,'not_found'   get file's modification time
+	check_exists(path, [type], [deref])           raise if file does not exist
+	mtime(path, [deref]) -> ts|nil,'not_found'    get file's modification time
 	chmod(path, perms) -> path[, 'not_found']     change a file or dir's permissions
 	chown(path, [uid], [gid]) -> path[, 'not_found'] change a file or dir's owner/group
 FILESYSTEM OPS
@@ -101,7 +101,7 @@ COMMON PATHS
 	vardir() -> path                              get script's private r/w directory
 	varpath(...) -> path                          get vardir-relative path
 LOW LEVEL
-	_make_file(fd, f) -> f                        create file object from file descriptor
+	_make_file(owner, fd, f) -> f                 create file object from file descriptor
 	_init_file(f) -> f                            init file object
 FILESYSTEM INFO
 	fs_info(path) -> {size=, free=}               get free/total disk space for a path
@@ -189,7 +189,7 @@ mode:
 
 PIPES ------------------------------------------------------------------------
 
-[try_]pipe([opt]) -> rf, wf
+pipe([opt]) -> rf, wf
 
 	Create an anonymous (unnamed) pipe. Return two files corresponding to the
 	read and write ends of the pipe.
@@ -468,9 +468,6 @@ local
 	cast, bor, band, bnot, shl, check, try_errno =
 	cast, bor, band, bnot, shl, check, try_errno
 
-local file = {type = 'file', debug_prefix = 'f'} --file object methods
-local dir = {}; dir.__index = dir --dir listing object methods
-
 --types, consts, utils -------------------------------------------------------
 
 cdef[[
@@ -560,6 +557,8 @@ end
 local fcntl_set_fl_flags = fcntl_set_flags_func(F_GETFL, F_SETFL)
 local fcntl_set_fd_flags = fcntl_set_flags_func(F_GETFD, F_SETFD)
 
+local file = {type = 'file', error_type = 'fs', debug_prefix = 'f'}
+
 function _make_file(owner, fd, f)
 	local f = _own(owner, object(file, f))
 	f.fd = fd
@@ -614,7 +613,7 @@ end
 function file.try_close(f)
 	return try_file_close(f)
 end
-file.close = make_raising('io', file.try_close)
+file.close = make_raising(file.try_close)
 
 function file._try_cancel_io(f, cancel_thread)
 	if f.fd == -1 then return nil, 'thread not waiting' end
@@ -626,7 +625,7 @@ function file.onclose(f, fn)
 end
 
 function file.set_inheritable(f, inheritable)
-	if f.fd == -1 then return nil, 'closed' end
+	f:check_closed()
 	fcntl_set_fd_flags(f, FD_CLOEXEC, inheritable and 0 or FD_CLOEXEC)
 end
 
@@ -661,7 +660,7 @@ function open(path_or_opt, mode)
 			local claim = getbit(flags, o_bits.creat) and getbit(flags, o_bits.excl)
 			if claim then return nil, err end
 		end
-		check_io(f.path, false, err)
+		check_fs(f.path, false, err)
 	end
 	local f = _init_file(_make_file(owner, fd, f))
 	log(f.quiet and '' or 'note', 'fs', 'open',
@@ -671,11 +670,17 @@ end
 
 function must_open(path_or_opt, mode)
 	local path = istab(path_or_opt) and path_or_opt.path or path_or_opt
-	return check_io(path, open(path_or_opt, mode))
+	return check_fs(path, open(path_or_opt, mode))
 end
 
-file.check_io = check_io
-file.checkp   = checkp
+function file:check_io(...)
+	return check_for(nil, self, ...)
+end
+function file:check_closed()
+	if self.fd ~= -1 then return end
+	error(CLOSED)
+end
+file.checkp = checkp
 
 function file.skip(f, n)
 	local i = f:seek('cur', 0)
@@ -696,7 +701,7 @@ int mkfifo(const char *pathname, mode_t mode);
 function mkfifo(path, perms)
 	perms = parse_perms(perms) or default_file_perms
 	local ok, err = try_errno(C.mkfifo(path, perms) == 0)
-	check_io(path, ok or err == 'already_exists', err)
+	check_fs(path, ok or err == 'already_exists', err)
 	log('note', 'fs', 'mkfifo', '%s %o', path, perms)
 	return true, err
 end
@@ -707,8 +712,8 @@ function pipe(opt) --unnamed pipe
 	local owner = _check_owner(opt.owner)
 	local r_async = repl(opt.async_read , nil, repl(opt.async, nil, true))
 	local w_async = repl(opt.async_write, nil, repl(opt.async, nil, true))
-	local rf = merge({async = r_async, type = 'pipe', debug_prefix = 'pipe.r'}, opt)
-	local wf = merge({async = w_async, type = 'pipe', debug_prefix = 'pipe.w'}, opt)
+	local rf = merge({async = r_async, type = 'pipe', error_type = 'pipe', debug_prefix = 'pipe.r'}, opt)
+	local wf = merge({async = w_async, type = 'pipe', error_type = 'pipe', debug_prefix = 'pipe.w'}, opt)
 	local flags = not opt.inheritable and O_CLOEXEC or 0
 	check_errno(C.pipe2(pipe_fds, flags) == 0)
 	local rf = _make_file(owner, pipe_fds[0], rf)
@@ -729,7 +734,10 @@ end
 
 local function make_stdpipe(fd, debug_prefix)
 	return memoize(function()
-		local f = {type = 'pipe', async = true, debug_prefix = debug_prefix}
+		local f = {
+			type = 'pipe', error_type= 'pipe', async = true,
+			debug_prefix = debug_prefix,
+		}
 		return _init_file(_make_file(mainthread(), fd, f))
 	end)
 end
@@ -748,7 +756,8 @@ function eventfd(initval, flags)
 	local fd = C.eventfd(initval or 0, bor(O_CLOEXEC, flags or 0))
 	check_errno(fd ~= -1)
 	local f = _init_file(_make_file(owner, fd, {
-		type = 'eventfd', async = true, debug_prefix = 'E', quiet = true,
+		type = 'eventfd', debug_prefix = 'E',
+		async = true, quiet = true,
 	}))
 	local rbuf = new'uint64_t[1]'
 	local wbuf = new'uint64_t[1]'
@@ -784,7 +793,7 @@ end)
 --NOTE: to read many small pieces use a pbuffer instead, this will crawl!
 function file.try_read(f, buf, sz)
 	assert(sz and sz > 0, 'read size must be > 0')
-	if f.fd == -1 then return nil, 'closed' end
+	f:check_closed()
 	if f.async then
 		return file_async_read(f, buf, sz)
 	else
@@ -795,10 +804,10 @@ function file.try_read(f, buf, sz)
 		return n
 	end
 end
-file.read = make_raising('io', file.try_read)
+file.read = make_raising(file.try_read)
 
 function file.sync(f)
-	f:check_io(f.fd ~= -1, 'closed')
+	f:check_closed()
 	local ok = C.fsync(f.fd) == 0
 	if not ok and errno() == EINVAL then return true end --vboxfs
 	return f:check_io(try_errno(ok))
@@ -809,7 +818,7 @@ file.flush = file.sync
 
 local whences = {set = 0, cur = 1, ['end'] = 2} --FILE_*
 function file.seek(f, whence, offset)
-	f:check_io(f.fd ~= -1, 'closed')
+	f:check_closed()
 	if tonumber(whence) and not offset then --middle arg missing
 		whence, offset = 'cur', tonumber(whence)
 	end
@@ -823,7 +832,7 @@ end
 
 --NOTE: to write many small pieces use a pbuffer instead, this will crawl!
 function file.write(f, buf, sz)
-	f:check_io(f.fd ~= -1, 'closed')
+	f:check_closed()
 	sz = sz or #buf
 	if sz == 0 then return end --mask out null writes
 	::again::
@@ -900,7 +909,7 @@ end
 --for a size arg. The seek() behavior is just for compat with Windows.
 function file.truncate(f, size, opt)
 	assert(isnum(size), 'size expected')
-	f:check_io(f.fd ~= -1, 'closed')
+	f:check_closed()
 	opt = opt or 'fallocate fail' --avoid creating a sparse file
 	if not f.shm then
 		if opt:find'fallocate' then
@@ -933,7 +942,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize);
 
 function cwd()
 	local ok, err = try_errno(C.getcwd(cbuf, 4096) ~= nil)
-	check_io('cwd', ok, err)
+	check_fs('cwd', ok, err)
 	return str(cbuf)
 end
 startcwd = memoize(cwd)
@@ -941,7 +950,7 @@ startcwd = memoize(cwd)
 function chdir(dir)
 	startcwd()
 	local ok, err = try_errno(C.chdir(dir) == 0)
-	check_io(dir, ok, err)
+	check_fs(dir, ok, err)
 	log('', 'fs', 'chdir', '%s', dir)
 	return dir
 end
@@ -974,16 +983,16 @@ function mkdir(dir, recursive, perms, sync)
 				break
 			end
 			if err ~= 'not_found' then
-				check_io(d, false, err)
+				check_fs(d, false, err)
 			end
 			push(t, d)
 			d = dirname(d)
-			check_io(dir, d and d ~= '.' and d ~= '/', 'not_found')
+			check_fs(dir, d and d ~= '.' and d ~= '/', 'not_found')
 		end
 		while #t > 0 do
 			local p = pop(t)
 			local ok, err = _try_mkdir(p, perms)
-			check_io(p, ok, err)
+			check_fs(p, ok, err)
 			if sync ~= false and err ~= 'already_exists' then
 				sync_dir(dirname(p))
 			end
@@ -991,7 +1000,7 @@ function mkdir(dir, recursive, perms, sync)
 		return dir
 	else
 		local ok, err = _try_mkdir(dir, perms)
-		check_io(dir, ok, err)
+		check_fs(dir, ok, err)
 		if sync ~= false and err ~= 'already_exists' then
 			sync_dir(dirname(dir))
 		end
@@ -1009,7 +1018,7 @@ end
 
 function rmdir(dir, sync)
 	local ok, err = try_errno(C.rmdir(dir) == 0)
-	check_io(dir, ok or err == 'not_found', err)
+	check_fs(dir, ok or err == 'not_found', err)
 	if ok then
 		if sync ~= false then sync_dir(dirname(dir)) end
 		log('note', 'fs', 'rmdir', '%s', dir)
@@ -1019,7 +1028,7 @@ end
 
 function rmfile(path, sync)
 	local ok, err = try_errno(C.unlink(path) == 0)
-	check_io(path, ok or err == 'not_found', err)
+	check_fs(path, ok or err == 'not_found', err)
 	if ok then
 		if sync ~= false then sync_dir(dirname(path)) end
 		log('note', 'fs', 'rmfile', '%s', path)
@@ -1058,7 +1067,7 @@ function rename(old_path, new_path, dst_dirs_perms, sync)
 		mkdirs(new_path, dst_dirs_perms, sync)
 	end
 	local ok, err = try_errno(C.rename(old_path, new_path) == 0)
-	if not ok then check_io(old_path..' -> '..new_path, false, err) end
+	if not ok then check_fs(old_path..' -> '..new_path, false, err) end
 	if sync ~= false then
 		local d1 = dirname(old_path)
 		local d2 = dirname(new_path)
@@ -1073,10 +1082,10 @@ end
 function sync_dir(dir, quiet)
 	assert(dir, 'sync_dir: dir required') --because dirname(file) can return nil
 	local f, err = open{path = dir, flags = 'rdonly directory', quiet = quiet}
-	check_io(dir, f, err)
+	check_fs(dir, f, err)
 	f:sync()
 	local ok, err = f:try_close()
-	check_io(dir, ok, err)
+	check_fs(dir, ok, err)
 end
 
 function symlink(link_path, target_path, replace, sync)
@@ -1091,15 +1100,15 @@ function symlink(link_path, target_path, replace, sync)
 		end
 		local tmp = link_path..'~'..getpid()
 		local ok1, err1 = try_errno(C.symlink(target_path, tmp) == 0)
-		check_io(tmp, ok1, 'symlink to %s: %s', target_path, err1)
+		check_fs(tmp, ok1, 'symlink to %s: %s', target_path, err1)
 		local ok2, err2 = try_errno(C.rename(tmp, link_path) == 0)
 		if not ok2 then
 			rmfile(tmp)
-			check_io(tmp, false, 'rename to %s: %s', link_path, err2)
+			check_fs(tmp, false, 'rename to %s: %s', link_path, err2)
 		end
 		ok, err = true, 'replaced'
 	end
-	check_io(link_path, ok, 'symlink to %s: %s', target_path, err)
+	check_fs(link_path, ok, 'symlink to %s: %s', target_path, err)
 	if sync ~= false then
 		sync_dir(dirname(link_path))
 	end
@@ -1116,7 +1125,7 @@ function hardlink(link_path, target_path, sync)
 			return link_path, 'already_exists'
 		end
 	end
-	check_io(link_path, ok, 'hardlink to %s: %s', target_path, err)
+	check_fs(link_path, ok, 'hardlink to %s: %s', target_path, err)
 	if sync ~= false then
 		sync_dir(dirname(link_path))
 	end
@@ -1162,7 +1171,7 @@ function readlink(link, maxdepth)
 	assert(maxdepth == 'raw' or (maxdepth > 0 and maxdepth <= 32))
 	local target, err = _try_readlink(link, maxdepth)
 	if not target and err == 'not_found' then return nil, err end
-	return check_io(link, target, err)
+	return check_fs(link, target, err)
 end
 
 --common paths ---------------------------------------------------------------
@@ -1463,14 +1472,14 @@ function file.attr(f, attr)
 	if istab(attr) then
 		return f:set_attr(attr)
 	end
-	f:check_io(f.fd ~= -1, 'closed')
+	f:check_closed()
 	local ret, err = fstat(f, attr)
 	if err then f:check_io(false, err) end
 	return ret
 end
 
 function file.set_attr(f, attr)
-	f:check_io(f.fd ~= -1, 'closed')
+	f:check_closed()
 	assertf(istab(attr), 'table expected, got: %s', type(attr))
 	local ret, err = file_attr_set(f, attr)
 	if err then f:check_io(false, err) end
@@ -1503,7 +1512,7 @@ function set_file_attr(path, attr, deref)
 	attr, deref = set_attr_args(attr, deref)
 	local ret, err = fs_attr_set(path, attr, deref)
 	local ok = ret ~= nil or err == nil or err == 'not_found'
-	check_io(path, ok, err)
+	check_fs(path, ok, err)
 	return ret, err
 end
 
@@ -1517,7 +1526,7 @@ function file_attr(path, ...)
 	end
 	local ret, err = fs_attr_get(path, attr, deref)
 	local ok = ret ~= nil or err == nil or err == 'not_found'
-	check_io(path, ok, err)
+	check_fs(path, ok, err)
 	return ret, err
 end
 
@@ -1551,8 +1560,8 @@ function file_is(path, type, deref)
 end
 exists = file_is
 
-function check_exists(file, type, deref)
-	check_io(file, exists(file, type, deref), 'not_found')
+function check_exists(path, type, deref)
+	check_fs(path, exists(path, type, deref), 'not_found')
 end
 
 --file locking ---------------------------------------------------------------
@@ -1568,7 +1577,7 @@ local lock_ops = {r = LOCK_SH, w = LOCK_EX, un = LOCK_UN}
 
 --NOTE: returns true, 'again' if nonblock is passed but lock not acquired.
 function file.lock(f, op, nonblock)
-	f:check_io(f.fd ~= -1, 'closed')
+	f:check_closed()
 	local flags = assertf(lock_ops[op or 'w'], 'invalid lock op: %s', op)
 	if nonblock then flags = bor(flags, LOCK_NB) end
 	local ok, err = try_errno(C.flock(f.fd, flags) == 0)
@@ -1597,6 +1606,8 @@ int closedir(DIR *dirp);
 int dirfd(DIR *dirp);
 ]]
 
+local dir = {type = 'dir', error_type = 'fs', debug_prefix = 'd'}
+
 function dir.try_close(d)
 	if d:closed() then return true end
 	local _dirp = d._dirp
@@ -1605,15 +1616,19 @@ function dir.try_close(d)
 	_disown(d)
 	return true
 end
-dir.close = make_raising('io', dir.try_close)
+dir.close = make_raising(dir.try_close)
 
 function dir.closed(d)
 	return d._dirp == nil
 end
+function dir:check_closed()
+	if self._dirp ~= nil then return end
+	error(CLOSED)
+end
 
 function dir.sync(d)
-	check_io(d, not d:closed(), 'closed')
-	return check_io(d, try_errno(C.fsync(C.dirfd(d._dirp)) == 0))
+	d:check_closed()
+	return check_fs(d, try_errno(C.fsync(C.dirfd(d._dirp)) == 0))
 end
 
 function dir.dir(d)
@@ -1639,7 +1654,7 @@ function dir.next(d)
 			return nil
 		end
 		local _, err = try_errno(false, errno)
-		check_io(d:dir(), false, err)
+		check_fs(d, false, err)
 	end
 end
 
@@ -1695,7 +1710,7 @@ local function dir_attr_get(d, attr)
 end
 
 local function check_dir(d)
-	assert(not d:closed(), 'dir closed')
+	d:check_closed()
 	assert(d._dentry ~= nil, 'dir not ready') --must call next() at least once.
 end
 
@@ -1732,7 +1747,7 @@ function ls(p, opt, if_exists)
 	local d, err = open_dir(p, opt)
 	if not d then
 		if if_exists and err == 'not_found' then return noop end
-		check_io(p, false, err)
+		check_fs(p, false, err)
 	end
 	return dir.next, d
 end
@@ -1779,7 +1794,7 @@ function dir.attr(d, ...)
 			return ret
 		end
 	end
-	if err and err ~= 'not_found' then check_io(d, false, err) end
+	if err and err ~= 'not_found' then check_fs(d, false, err) end
 	return ret, err
 end
 
@@ -1787,7 +1802,7 @@ function dir.set_attr(d, attr, deref)
 	check_dir(d)
 	attr, deref = set_attr_args(attr, deref)
 	local ret, err = fs_attr_set(d:path(), attr, deref)
-	if err and err ~= 'not_found' then check_io(d, false, err) end
+	if err and err ~= 'not_found' then check_fs(d, false, err) end
 	return ret, err
 end
 
@@ -1937,14 +1952,14 @@ function file_saver(file, file_perms, dir_perms, sync)
 		if buf == nil and sz ~= 0 then --caller wants to abort with error
 			ok, err = buf, sz
 		else
-			ok, err = catch('io', _write, buf, sz)
+			ok, err = catch('fs', _write, buf, sz)
 		end
 		if ok then
 			return true, f:closed() and 'closed' or nil
 		else
 			if f then
 				f:try_close()
-				catch('io', rmfile, tmpfile) --best-effort
+				catch('fs', rmfile, tmpfile) --best-effort
 			end
 			return false, err
 		end
@@ -1965,15 +1980,15 @@ function save(file, arg, sz, file_perms, dir_perms, sync)
 				error(buf, 0) --user-code error, not a save error.
 			end
 			local ok, err = write(buf, len)
-			check_io(file, ok, err)
+			check_fs(file, ok, err)
 			if err == 'closed' then break end --eof
 		end
 	else --buffer or stringable
 		local ok, err = write(arg, sz)
-		check_io(file, ok, err)
+		check_fs(file, ok, err)
 		if not err then
 			local ok, err = write(nil, 0) --eof
-			check_io(file, ok, err)
+			check_fs(file, ok, err)
 		end
 	end
 end
@@ -1982,7 +1997,7 @@ function touch(file, mtime, sync) --create file or update its mtime.
 	local f = open(file, 'a')
 	mtime = mtime or now()
 	local ok, err = futimes(f, mtime, mtime)
-	check_io(file, ok, err)
+	check_fs(file, ok, err)
 	if sync ~= false then
 		f:sync()
 	end
@@ -2062,7 +2077,7 @@ local PIDFD_NONBLOCK = 0x000800
 local function pidfd_try_wait(f)
 	return _epoll_try_wait(f, 'r')
 end
-local pidfd_wait = make_raising('io', pidfd_try_wait)
+local pidfd_wait = make_raising(pidfd_try_wait)
 
 local pidfd_opt = {
 	type = 'pidfd', async = true, debug_prefix = 'p',
@@ -2079,7 +2094,7 @@ function pidfd_open(pid_or_opt, opt)
 	if fd == -1 then
 		local _, err = try_errno()
 		if err == 'no_such_process' then return nil, err end
-		return check_io('pid '..f.pid, false, err)
+		return check_fs('pid#'..f.pid, false, err)
 	end
 	return _init_file(_make_file(owner, fd, f))
 end

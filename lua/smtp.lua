@@ -47,7 +47,7 @@ function smtp_connect(t)
 	self.f:settimeout(self.connect_timeout)
 	self.f:connect(self.host..':'..(self.port or self.tls and 465 or 587))
 	if self.tls then
-		self.f = self.f:check_io(client_stcp(self.f, self.host, self.tls_options))
+		self.f = client_stcp(self.f, self.host, self.tls_options)
 	end
 	self.b = pbuffer{f = self.f, lineterm = '\r\n'}
 	self.f:onclose(function()

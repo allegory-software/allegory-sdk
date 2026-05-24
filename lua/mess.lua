@@ -31,11 +31,7 @@ CHANNEL
 	channel:closed()
 	channel:onclose(fn)
 
-	channel:wait_job()
-	channel:wait_until(expires)
-	channel:wait(timeout)
-
-PROTOCOL
+	PROTOCOL
 	mess_protocol(tcp) -> channel
 
 ]]
@@ -125,7 +121,7 @@ function mess_listen(host, port, onaccept, onerror, server_name)
 				if tcp:closed() then --stop() called.
 					break
 				end
-				tcp:check_io(retry, err)
+				tcp:check_net(retry, err)
 				--temporary network error. retry without killing the CPU.
 				wait(0.2)
 				goto skip
@@ -148,29 +144,18 @@ function try_mess_connect(host, port, timeout)
 	if not tcp then return nil, err end
 	return mess_protocol(tcp)
 end
-mess_connect = make_raising('io', mess_connect)
+mess_connect = make_raising('net', try_mess_connect)
 
 function channel:try_close   ()        return self.tcp:try_close() end
 function channel:close       ()        return self.tcp:close() end
 function channel:onclose     (fn)      return self.tcp:onclose(fn) end
 function channel:closed      ()        return self.tcp:closed() end
-function channel:wait_job    ()        return self.tcp:wait_job() end
-function channel:wait_until  (expires) return self.tcp:wait_until(expires) end
-function channel:wait        (timeout) return self.tcp:wait(timeout) end
 
 function channel:try_recvall(onmessage, onerror)
 	local onmessage = wrapfn('recvall', onmessage, onerror, self)
 	while not self:closed() do
-		local msg, err = self:try_recv()
-		if not msg and err then
-			if type(err) == 'table' and err.message == 'eof' then
-				break
-			else
-				return nil, err
-			end
-		else
-			onmessage(self, msg)
-		end
+		local msg = self:recv()
+		onmessage(self, msg)
 	end
 	return true
 end

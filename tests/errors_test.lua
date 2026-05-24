@@ -18,11 +18,12 @@ end
 -- tostring() gives enough context for logs and uncaught errors.
 do
 	local target = {type = 'conn', debug_prefix = 'C'}
-	local e = error_for(target, 'io', '%s:%d', 'host', 80)
+	local e = newerror{target = target, type = 'net', message = _('%s:%d', 'host', 80)}
 
-	assert(iserror(e, 'io', 'host:80'))
+	assert(iserror(e, 'net', 'host:80'))
+	assert(not iserror(e, 'io'))
 	assert(not iserror(e, 'protocol'))
-	assert(not iserror({type = 'io', message = 'host:80'}))
+	assert(not iserror({type = 'net', message = 'host:80'}))
 	assert(e.target == target)
 
 	local s = tostring(e)
@@ -30,30 +31,36 @@ do
 	assert_contains(s, 'conn')
 	assert_contains(s, ':')
 
-	local e = newerror{type = 'content', message = 'bad', traceback = 'trace'}
+	local e = newerror{type = 'data', message = 'bad', traceback = 'trace'}
 	assert(tostring(e) == 'trace')
 end
 
 -- catch()/try() are protocol boundaries: they catch selected structured
 -- errors, and they must not swallow bugs, unrelated error types or CANCEL.
 do
-	local io_err = newerror{type = 'io', message = 'down'}
+	local net_err = newerror{type = 'net', message = 'down'}
 
-	local ok, e = catch('io protocol', function()
-		error(io_err)
+	local ok, e = catch('net fs protocol data', function()
+		error(net_err)
 	end)
 	assert(ok == false)
-	assert(e == io_err)
+	assert(e == net_err)
 
 	local ok, e = try(function()
-		error(newerror{type = 'content', message = 'invalid'})
+		error(newerror{type = 'data', message = 'invalid'})
 	end)
 	assert(ok == false)
-	assert(iserror(e, 'content', 'invalid'))
+	assert(iserror(e, 'data', 'invalid'))
 
-	raises_same(io_err, function()
-		catch('protocol', function()
-			error(io_err)
+	raises_same(net_err, function()
+		catch('fs protocol data', function()
+			error(net_err)
+		end)
+	end)
+
+	raises_same(net_err, function()
+		catch('io', function()
+			error(net_err)
 		end)
 	end)
 
@@ -74,9 +81,9 @@ end
 -- Raising adapters and check helpers attach the right error type/target, keep
 -- successful return values untouched, and pass structured errors through.
 do
-	local target = {type = 'file', debug_prefix = 'f'}
+	local target = {type = 'file', error_type = 'fs', debug_prefix = 'f'}
 
-	local f = make_raising('io', function(self, x)
+	local f = make_raising(function(self, x)
 		assert(self == target)
 		return true, 'kept', x
 	end)
@@ -86,30 +93,37 @@ do
 	assert(b == 'arg')
 
 	local e = raises(function()
-		make_raising('io', function()
+		make_raising(function()
 			return nil, 'boom'
 		end)(target)
 	end)
-	assert(iserror(e, 'io', 'boom'))
+	assert(iserror(e, 'fs', 'boom'))
 	assert(e.target == target)
 
 	local orig = newerror{type = 'protocol', message = 'bad frame'}
 	raises_same(orig, function()
-		make_raising('io', function()
+		make_raising('net', function()
 			return nil, orig
 		end)(target)
 	end)
 	raises_same(orig, function()
-		check_io(target, false, orig)
+		check_fs(target, false, orig)
 	end)
 	raises_same(orig, function()
-		raise(target, 'io', orig)
+		check_for('net', target, false, orig)
+	end)
+
+	raises_same(CLOSED, function()
+		make_raising('net', function()
+			return nil, 'closed'
+		end)(target)
 	end)
 
 	local checks = {
-		{check_io, 'io'},
+		{check_fs, 'fs'},
+		{check_net, 'net'},
 		{checkp, 'protocol'},
-		{checknp, 'content'},
+		{checknp, 'data'},
 	}
 	for _, t in ipairs(checks) do
 		local check, errtype = t[1], t[2]
